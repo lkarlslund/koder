@@ -548,22 +548,38 @@ func (m *Model) renderTranscriptMessage(msg domain.Message) string {
 	stamp := timestamp(msg.CreatedAt, m.cfg.UI.ShowTimestamps)
 	switch msg.Role {
 	case domain.MessageRoleUser:
-		return m.renderUserMessage(body, stamp)
+		return m.renderUserMessage(m.renderUserMessageParts(m.parts[msg.ID]), stamp)
 	default:
 		return m.renderAssistantMessage(body, stamp)
 	}
 }
 
 func (m *Model) renderUserMessage(body, stamp string) string {
-	parts := []string{strings.TrimSpace(body)}
-	if stamp != "" {
-		parts = append(parts, lipgloss.NewStyle().Foreground(lipgloss.Color("251")).Render(stamp))
-	}
-	return lipgloss.NewStyle().
+	style := lipgloss.NewStyle().
 		Background(lipgloss.Color("238")).
 		Foreground(lipgloss.Color("255")).
-		Padding(0, 1).
-		Render(strings.Join(parts, "\n"))
+		Padding(0, 1)
+	timestampStyle := style.Foreground(lipgloss.Color("251"))
+
+	lines := []string{""}
+	content := strings.TrimSpace(body)
+	if content != "" {
+		lines = append(lines, strings.Split(content, "\n")...)
+	}
+	if stamp != "" {
+		lines = append(lines, stamp)
+	}
+	lines = append(lines, "")
+
+	rendered := make([]string, 0, len(lines))
+	for idx, line := range lines {
+		if stamp != "" && idx == len(lines)-2 {
+			rendered = append(rendered, timestampStyle.Render(line))
+			continue
+		}
+		rendered = append(rendered, style.Render(line))
+	}
+	return strings.Join(rendered, "\n")
 }
 
 func (m *Model) renderAssistantMessage(body, stamp string) string {
@@ -621,6 +637,35 @@ func (m *Model) renderMessageParts(parts []domain.Part) string {
 
 	blocks = append(blocks, reasoningBlocks...)
 	blocks = append(blocks, textBlocks...)
+
+	return strings.TrimSpace(strings.Join(blocks, "\n"))
+}
+
+func (m *Model) renderUserMessageParts(parts []domain.Part) string {
+	var blocks []string
+	var textBuf strings.Builder
+
+	flushText := func() {
+		if textBuf.Len() == 0 {
+			return
+		}
+		blocks = append(blocks, strings.TrimSpace(textBuf.String()))
+		textBuf.Reset()
+	}
+
+	for _, part := range parts {
+		switch part.Kind {
+		case domain.PartKindText:
+			textBuf.WriteString(part.Body)
+		default:
+			flushText()
+			if body := strings.TrimSpace(part.Body); body != "" {
+				blocks = append(blocks, body)
+			}
+		}
+	}
+
+	flushText()
 
 	return strings.TrimSpace(strings.Join(blocks, "\n"))
 }

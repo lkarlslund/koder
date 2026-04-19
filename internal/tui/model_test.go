@@ -460,6 +460,33 @@ func TestRenderTranscriptMessageUsesUserStyleWithoutRoleLabel(t *testing.T) {
 	}
 }
 
+func TestRenderTranscriptMessageUserBubbleHasBlankPaddingLines(t *testing.T) {
+	m := Model{
+		parts: map[int64][]domain.Part{
+			1: {{Kind: domain.PartKindText, Body: "hello world"}},
+		},
+	}
+
+	got := m.renderTranscriptMessage(domain.Message{
+		ID:   1,
+		Role: domain.MessageRoleUser,
+	})
+
+	lines := strings.Split(got, "\n")
+	if len(lines) < 3 {
+		t.Fatalf("expected padded user bubble, got %q", got)
+	}
+	if strings.TrimSpace(lines[0]) != "" {
+		t.Fatalf("expected blank top line, got %q", lines[0])
+	}
+	if strings.TrimSpace(lines[1]) != "hello world" {
+		t.Fatalf("expected padded body line, got %q", lines[1])
+	}
+	if strings.TrimSpace(lines[len(lines)-1]) != "" {
+		t.Fatalf("expected blank bottom line, got %q", lines[len(lines)-1])
+	}
+}
+
 func TestRenderTranscriptMessageUsesAssistantStyleWithoutRoleLabel(t *testing.T) {
 	m := Model{
 		parts: map[int64][]domain.Part{
