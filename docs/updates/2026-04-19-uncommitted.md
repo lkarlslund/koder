@@ -35,6 +35,7 @@ Create the first working implementation of `koder` from the approved plan.
 - Removed the header status line, moved status into the sidebar, and rendered the working spinner as a transcript-tail activity line so active turns are visible where the conversation is happening.
 - Changed user prompt bubble rendering to bypass markdown styling, add blank top and bottom padding lines, and keep the prompt text on the bubble background instead of falling back to black.
 - Removed the remaining top header line entirely, moved session and provider metadata into the sidebar, and changed the transcript-tail activity indicator to a more visible animated working bar.
+- Replaced Glamour with a native `internal/markdown` renderer for headings, lists, blockquotes, fenced code, and inline emphasis/code so transcript styling is controlled locally.
 
 ## Tests run
 

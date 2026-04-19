@@ -28,6 +28,7 @@
 - Moved transient status out of the header into the sidebar and added a visible end-of-transcript working spinner so activity appears in the chat flow.
 - Changed user prompt bubbles to render with explicit blank top and bottom padding lines, and kept user text on the same bubble background instead of inheriting markdown resets.
 - Removed the top header line entirely, moved session/provider details into the sidebar, and made the transcript-tail working spinner more visible.
+- Replaced the external Glamour markdown renderer with an internal renderer so transcript styling stays under local control and no longer fights background resets.
 - Verified `go test ./...`, `go vet ./...`, `staticcheck ./...`, and `golangci-lint run`.
 
 ## Current gaps
