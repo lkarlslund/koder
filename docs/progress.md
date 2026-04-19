@@ -17,6 +17,7 @@
 - Changed new-session behavior so draft sessions are kept in memory and only saved after the first real prompt.
 - Changed approved model tool calls to resume the same LLM turn so tool output is fed back into the conversation automatically.
 - Added a live animated working indicator in the TUI header while the remote model is active.
+- Added mouse-wheel scrolling for the transcript viewport so previous chat history can be browsed directly in the TUI.
 - Verified `go test ./...`, `go vet ./...`, `staticcheck ./...`, and `golangci-lint run`.
 
 ## Current gaps

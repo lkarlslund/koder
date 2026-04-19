@@ -24,6 +24,7 @@ Create the first working implementation of `koder` from the approved plan.
 - Changed `/new` and fresh startup sessions to remain unsaved until the first prompt is actually sent.
 - Changed approval handling so once a gated tool is approved and executed, the tool result is sent back into the model automatically.
 - Added a live animated working indicator in the TUI header while the model is processing.
+- Added mouse-wheel scrolling support for the transcript viewport.
 
 ## Tests run
 

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/bubbles/textarea"
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/lkarlslund/koder/internal/domain"
@@ -213,5 +214,33 @@ func TestRenderReasoningBlockStartsWithBlankStyledLine(t *testing.T) {
 	}
 	if !strings.Contains(lines[1], "thinking first") {
 		t.Fatalf("expected reasoning text on second line, got %q", got)
+	}
+}
+
+func TestMouseWheelScrollsViewport(t *testing.T) {
+	m := Model{
+		viewport: viewport.New(40, 4),
+	}
+	m.viewport.SetContent(strings.Join([]string{
+		"line 1",
+		"line 2",
+		"line 3",
+		"line 4",
+		"line 5",
+		"line 6",
+		"line 7",
+		"line 8",
+	}, "\n"))
+
+	updated, cmd := m.Update(tea.MouseMsg{
+		Action: tea.MouseActionPress,
+		Button: tea.MouseButtonWheelDown,
+	})
+	next := updated.(Model)
+	if cmd != nil {
+		t.Fatal("expected no command from mouse wheel scroll")
+	}
+	if next.viewport.YOffset == 0 {
+		t.Fatalf("expected viewport to scroll, got y offset %d", next.viewport.YOffset)
 	}
 }

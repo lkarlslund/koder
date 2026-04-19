@@ -204,6 +204,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.loading = false
 		m.status = "Select a session to resume"
 		return m, nil
+	case tea.MouseMsg:
+		if m.pickerVisible || m.hasApprovalPrompt() {
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.viewport, cmd = m.viewport.Update(msg)
+		return m, cmd
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 	}
