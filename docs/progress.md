@@ -39,6 +39,7 @@
 - Persisted backend/model-turn failures as a single assistant error message in session history, and showed immediate pre-stream prompt errors directly in the draft transcript instead of only in sidebar status.
 - Fixed user chat bubble rendering so blank padding lines, explicit multi-line input, and wrapped long lines all keep a consistent full-width background span like Codex.
 - Centralized busy and spinner handling into a dedicated TUI state model so transcript/sidebar spinners are driven by one source of truth, which fixes stalled animation during `/compact` and other status-driven busy flows.
+- Fixed transcript rendering so `system_notice` metadata like stored `usage` no longer leaks into visible chat messages.
 - Verified `go test ./...`, `go vet ./...`, `staticcheck ./...`, and `golangci-lint run`.
 
 ## Current gaps

@@ -46,6 +46,7 @@ Create the first working implementation of `koder` from the approved plan.
 - Changed backend and model-turn request failures to produce a single assistant-visible error message in the chat transcript, and fixed draft-session rendering so immediate first-prompt connection errors are visible too.
 - Fixed user message bubble rendering so top and bottom padding lines match the full bubble width, and multi-line or wrapped user input keeps one continuous background span across each rendered line.
 - Refactored TUI busy handling around a centralized busy/spinner state model so spinner rendering no longer depends on scattered `loading` vs `modelWorking` flags, and `/compact` now keeps animating while status events arrive.
+- Fixed the transcript renderer to ignore `system_notice` parts, which removes spurious `usage` text from the chat window while keeping usage metadata available for sidebar/context accounting.
 
 ## Tests run
 

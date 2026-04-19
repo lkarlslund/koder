@@ -498,6 +498,22 @@ func TestRenderMessagePartsShowsReasoningBeforeText(t *testing.T) {
 	}
 }
 
+func TestRenderMessagePartsSkipsSystemNotice(t *testing.T) {
+	m := Model{}
+
+	got := m.renderMessageParts([]domain.Part{
+		{Kind: domain.PartKindText, Body: "final answer"},
+		{Kind: domain.PartKindSystemNotice, Body: "usage", MetaJSON: `{"PromptTokens":1}`},
+	})
+
+	if !strings.Contains(got, "final answer") {
+		t.Fatalf("expected text to remain visible, got %q", got)
+	}
+	if strings.Contains(got, "usage") || strings.Contains(got, "PromptTokens") {
+		t.Fatalf("expected system notice to stay hidden, got %q", got)
+	}
+}
+
 func TestRenderReasoningBlockStartsWithBlankStyledLine(t *testing.T) {
 	m := Model{}
 

@@ -747,6 +747,10 @@ func (m *Model) renderMessageParts(parts []domain.Part) string {
 		case domain.PartKindReasoning:
 			flushText()
 			reasoningBuf.WriteString(part.Body)
+		case domain.PartKindSystemNotice:
+			flushText()
+			flushReasoning()
+			continue
 		default:
 			flushText()
 			flushReasoning()
