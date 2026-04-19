@@ -36,6 +36,7 @@ Create the first working implementation of `koder` from the approved plan.
 - Changed user prompt bubble rendering to bypass markdown styling, add blank top and bottom padding lines, and keep the prompt text on the bubble background instead of falling back to black.
 - Removed the remaining top header line entirely, moved session and provider metadata into the sidebar, and changed the transcript-tail activity indicator to a more visible animated working bar.
 - Replaced Glamour with a native `internal/markdown` renderer for headings, lists, blockquotes, fenced code, and inline emphasis/code so transcript styling is controlled locally.
+- Tightened native markdown list rendering so adjacent bullet and numbered list items stay compact instead of being separated by blank lines.
 
 ## Tests run
 

@@ -29,6 +29,7 @@
 - Changed user prompt bubbles to render with explicit blank top and bottom padding lines, and kept user text on the same bubble background instead of inheriting markdown resets.
 - Removed the top header line entirely, moved session/provider details into the sidebar, and made the transcript-tail working spinner more visible.
 - Replaced the external Glamour markdown renderer with an internal renderer so transcript styling stays under local control and no longer fights background resets.
+- Tightened internal markdown list rendering so consecutive bullet and numbered items no longer get blank lines between them.
 - Verified `go test ./...`, `go vet ./...`, `staticcheck ./...`, and `golangci-lint run`.
 
 ## Current gaps

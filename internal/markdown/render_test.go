@@ -24,6 +24,38 @@ func TestRenderFormatsHeadingsAndLists(t *testing.T) {
 	}
 }
 
+func TestRenderKeepsConsecutiveBulletItemsTight(t *testing.T) {
+	renderer, err := New()
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	got := renderer.Render("- first\n- second\n- third")
+
+	if strings.Contains(got, "\n\n") {
+		t.Fatalf("expected no blank lines between bullet items, got %q", got)
+	}
+	if !strings.Contains(got, "• first\n") || !strings.Contains(got, "\n• second\n") || !strings.Contains(got, "\n• third") {
+		t.Fatalf("expected consecutive bullet items, got %q", got)
+	}
+}
+
+func TestRenderKeepsConsecutiveOrderedItemsTight(t *testing.T) {
+	renderer, err := New()
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	got := renderer.Render("1. first\n2. second\n3. third")
+
+	if strings.Contains(got, "\n\n") {
+		t.Fatalf("expected no blank lines between ordered items, got %q", got)
+	}
+	if !strings.Contains(got, "1. first\n") || !strings.Contains(got, "\n2. second\n") || !strings.Contains(got, "\n3. third") {
+		t.Fatalf("expected consecutive ordered items, got %q", got)
+	}
+}
+
 func TestRenderFormatsFencedCodeBlock(t *testing.T) {
 	renderer, err := New()
 	if err != nil {

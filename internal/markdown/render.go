@@ -32,6 +32,8 @@ func (r *Renderer) Render(input string) string {
 
 	var blocks []string
 	var paragraph []string
+	var listItems []string
+	listKind := ""
 	inCode := false
 	codeLang := ""
 	var codeLines []string
@@ -43,6 +45,14 @@ func (r *Renderer) Render(input string) string {
 		text := strings.Join(paragraph, " ")
 		blocks = append(blocks, r.renderParagraph(text))
 		paragraph = nil
+	}
+	flushList := func() {
+		if len(listItems) == 0 {
+			return
+		}
+		blocks = append(blocks, strings.Join(listItems, "\n"))
+		listItems = nil
+		listKind = ""
 	}
 	flushCode := func() {
 		blocks = append(blocks, r.renderCodeBlock(codeLang, codeLines))
@@ -56,6 +66,7 @@ func (r *Renderer) Render(input string) string {
 
 		if strings.HasPrefix(trimmed, "```") {
 			flushParagraph()
+			flushList()
 			if inCode {
 				flushCode()
 			} else {
@@ -70,18 +81,40 @@ func (r *Renderer) Render(input string) string {
 		}
 		if trimmed == "" {
 			flushParagraph()
+			flushList()
+			continue
+		}
+		if isBullet(trimmed) {
+			flushParagraph()
+			if listKind != "" && listKind != "bullet" {
+				flushList()
+			}
+			listItems = append(listItems, r.renderBullet(trimmed))
+			listKind = "bullet"
+			continue
+		}
+		if isOrderedItem(trimmed) {
+			flushParagraph()
+			if listKind != "" && listKind != "ordered" {
+				flushList()
+			}
+			listItems = append(listItems, r.renderOrderedItem(trimmed))
+			listKind = "ordered"
 			continue
 		}
 
 		if rendered, ok := r.renderBlock(trimmed); ok {
 			flushParagraph()
+			flushList()
 			blocks = append(blocks, rendered)
 			continue
 		}
+		flushList()
 		paragraph = append(paragraph, trimmed)
 	}
 
 	flushParagraph()
+	flushList()
 	if inCode {
 		flushCode()
 	}
