@@ -421,8 +421,8 @@ func (m *Model) renderHeader() string {
 		model = "(unset)"
 	}
 	return style.Render(fmt.Sprintf(
-		"koder%s  session:%d  profile:%s  mouse:%s  provider:%s  model:%s  status:%s",
-		m.workingIndicator(), m.currentSession.ID, m.permissionProfile(), m.mouseStatus(), m.currentSession.ProviderID, model, m.status,
+		"koder  session:%d  profile:%s  mouse:%s  provider:%s  model:%s",
+		m.currentSession.ID, m.permissionProfile(), m.mouseStatus(), m.currentSession.ProviderID, model,
 	))
 }
 
@@ -451,6 +451,9 @@ func (m *Model) renderFooter() string {
 
 func (m *Model) renderSidebar() string {
 	var lines []string
+	lines = append(lines, "Status")
+	lines = append(lines, fmt.Sprintf("  %s %s", m.workingIndicator(), truncate(strings.TrimSpace(m.status), 24)))
+	lines = append(lines, "")
 	lines = append(lines, "Workspace")
 	lines = append(lines, truncate(m.workdir, 28))
 	lines = append(lines, "")
@@ -519,11 +522,25 @@ func (m *Model) refreshViewport() {
 	for _, msg := range m.messages {
 		blocks = append(blocks, m.renderTranscriptMessage(msg))
 	}
+	if indicator := m.renderTranscriptActivity(); indicator != "" {
+		blocks = append(blocks, indicator)
+	}
 	if len(blocks) == 0 {
 		blocks = append(blocks, "Start by asking a question or type / for commands.")
 	}
 	m.viewport.SetContent(strings.Join(blocks, "\n\n"))
 	m.viewport.GotoBottom()
+}
+
+func (m *Model) renderTranscriptActivity() string {
+	if !m.isWorking() {
+		return ""
+	}
+	line := fmt.Sprintf("%s %s", m.workingIndicator(), strings.TrimSpace(m.status))
+	return lipgloss.NewStyle().
+		Foreground(lipgloss.Color("246")).
+		Italic(true).
+		Render(strings.TrimSpace(line))
 }
 
 func (m *Model) renderTranscriptMessage(msg domain.Message) string {
@@ -971,7 +988,7 @@ func (m *Model) workingIndicator() string {
 	if !m.isWorking() {
 		return ""
 	}
-	frames := []string{" [·  ]", " [·· ]", " [···]", " [ ··]", " [  ·]"}
+	frames := []string{"•", "◦", "•", "◦"}
 	return frames[m.spinnerFrame%len(frames)]
 }
 

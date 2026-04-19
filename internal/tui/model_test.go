@@ -269,6 +269,47 @@ func TestWorkingIndicatorShownWhenLoading(t *testing.T) {
 	}
 }
 
+func TestRenderHeaderOmitsStatus(t *testing.T) {
+	m := Model{
+		currentSession: domain.Session{ID: 2, ProviderID: "test", ModelID: "model"},
+		status:         "Waiting for model…",
+	}
+
+	got := m.renderHeader()
+	if strings.Contains(got, "status:") || strings.Contains(got, "Waiting for model") {
+		t.Fatalf("expected header to omit status, got %q", got)
+	}
+}
+
+func TestRenderSidebarShowsStatus(t *testing.T) {
+	m := Model{
+		status:  "Waiting for model…",
+		loading: true,
+		workdir: "/tmp/project",
+	}
+
+	got := m.renderSidebar()
+	if !strings.Contains(got, "Status") || !strings.Contains(got, "Waiting for model") {
+		t.Fatalf("expected sidebar to include status, got %q", got)
+	}
+}
+
+func TestRefreshViewportAppendsWorkingLine(t *testing.T) {
+	m := Model{
+		currentSession: domain.Session{ID: 1},
+		loading:        true,
+		status:         "Waiting for model…",
+		parts:          map[int64][]domain.Part{},
+		viewport:       viewport.New(40, 6),
+	}
+
+	m.refreshViewport()
+	got := m.viewport.View()
+	if !strings.Contains(got, "Waiting for model") {
+		t.Fatalf("expected transcript activity line, got %q", got)
+	}
+}
+
 func TestRenderMessagePartsShowsReasoningBeforeText(t *testing.T) {
 	m := Model{
 		showReasoning: true,

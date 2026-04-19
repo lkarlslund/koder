@@ -32,6 +32,7 @@ Create the first working implementation of `koder` from the approved plan.
 - Removed the shared slash-command execution path so internal commands like `/perm`, `/approve`, and `/deny` are handled explicitly by the runtime instead of reusing tool-style slash dispatch.
 - Fixed startup mouse initialization so configured mouse capture is enabled again at launch instead of only after a manual `/mouse on`.
 - Cleaned up conversation serialization for the model: `system_notice` no longer leaks back into prompts, approval decorations stay out of model context, and tool calls are normalized from metadata before being re-sent.
+- Removed the header status line, moved status into the sidebar, and rendered the working spinner as a transcript-tail activity line so active turns are visible where the conversation is happening.
 
 ## Tests run
 

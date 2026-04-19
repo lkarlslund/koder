@@ -25,6 +25,7 @@
 - Separated internal slash commands from tool invocation so slash input is handled by the runtime, while model tool use stays on the dedicated tool contract.
 - Fixed startup mouse handling so `ui.mouse` is respected again and mouse scrolling works on launch when enabled in config.
 - Cleaned up model conversation rebuilding so `system_notice` stays out of prompt history and tool calls are fed back as structured semantics instead of UI wrapper text.
+- Moved transient status out of the header into the sidebar and added a visible end-of-transcript working spinner so activity appears in the chat flow.
 - Verified `go test ./...`, `go vet ./...`, `staticcheck ./...`, and `golangci-lint run`.
 
 ## Current gaps
