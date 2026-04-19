@@ -45,6 +45,7 @@ Create the first working implementation of `koder` from the approved plan.
 - Added a named theme palette for TUI and markdown colors, inserted a blank spacer line between the transcript and composer, and styled the input box with the same background as user chat bubbles.
 - Changed backend and model-turn request failures to produce a single assistant-visible error message in the chat transcript, and fixed draft-session rendering so immediate first-prompt connection errors are visible too.
 - Fixed user message bubble rendering so top and bottom padding lines match the full bubble width, and multi-line or wrapped user input keeps one continuous background span across each rendered line.
+- Refactored TUI busy handling around a centralized busy/spinner state model so spinner rendering no longer depends on scattered `loading` vs `modelWorking` flags, and `/compact` now keeps animating while status events arrive.
 
 ## Tests run
 

@@ -31,6 +31,77 @@ type promptDoneMsg struct {
 
 type spinnerTickMsg struct{}
 
+type busyScope int
+
+const (
+	busyScopeNone busyScope = iota
+	busyScopeSidebar
+	busyScopeTranscript
+)
+
+type spinnerModel struct {
+	active bool
+	frame  int
+}
+
+func (s spinnerModel) view() string {
+	frames := []string{"[=   ]", "[==  ]", "[=== ]", "[ ===]", "[  ==]", "[   =]"}
+	return frames[s.frame%len(frames)]
+}
+
+func (s *spinnerModel) start() {
+	s.active = true
+}
+
+func (s *spinnerModel) stop() {
+	s.active = false
+	s.frame = 0
+}
+
+func (s *spinnerModel) tick() {
+	if !s.active {
+		return
+	}
+	s.frame++
+}
+
+type busyModel struct {
+	active  bool
+	scope   busyScope
+	status  string
+	spinner spinnerModel
+}
+
+func (b *busyModel) start(scope busyScope, status string) {
+	b.active = true
+	b.scope = scope
+	b.status = status
+	if scope == busyScopeNone {
+		b.spinner.stop()
+		return
+	}
+	b.spinner.start()
+}
+
+func (b *busyModel) updateStatus(status string) {
+	b.status = status
+}
+
+func (b *busyModel) stop() {
+	b.active = false
+	b.scope = busyScopeNone
+	b.status = ""
+	b.spinner.stop()
+}
+
+func (b busyModel) transcriptActive() bool {
+	return b.active && b.scope == busyScopeTranscript && b.spinner.active
+}
+
+func (b busyModel) sidebarActive() bool {
+	return b.active && b.scope != busyScopeNone
+}
+
 type eventMsg struct {
 	event  domain.Event
 	events <-chan domain.Event
@@ -88,7 +159,7 @@ type Model struct {
 	height         int
 	status         string
 	loading        bool
-	modelWorking   bool
+	busy           busyModel
 	showSidebar    bool
 	showReasoning  bool
 	slashMatches   []slashCommand
@@ -99,7 +170,6 @@ type Model struct {
 	startupMode    StartupMode
 	pickerVisible  bool
 	pickerIndex    int
-	spinnerFrame   int
 	pendingPartID  int64
 	mouseEnabled   bool
 }
@@ -165,44 +235,37 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.isWorking() {
 			return m, nil
 		}
-		m.spinnerFrame++
+		m.busy.spinner.tick()
 		m.refreshViewport()
 		return m, spinnerTickCmd()
 	case promptDoneMsg:
 		if msg.err != nil {
 			m.status = msg.err.Error()
-			m.loading = false
+			m.stopBusy()
 			return m, nil
 		}
-		m.loading = true
-		m.modelWorking = true
-		m.status = "Working ..."
-		return m, tea.Batch(nextEventCmd(msg.events), spinnerTickCmd())
+		m.startBusy(m.busy.scopeOrDefault(busyScopeTranscript), m.busy.statusOrDefault("Working ..."))
+		return m, tea.Batch(nextEventCmd(msg.events), m.spinnerCmdIfNeeded())
 	case runPromptMsg:
 		if msg.err != nil {
 			m.status = msg.err.Error()
 			m.appendLocalAssistantError(msg.err)
-			m.loading = false
+			m.stopBusy()
 			return m, nil
 		}
 		m.currentSession = msg.session
-		m.loading = true
-		m.modelWorking = true
-		m.status = "Working ..."
-		return m, tea.Batch(nextEventCmd(msg.events), spinnerTickCmd())
+		m.startBusy(m.busy.scopeOrDefault(busyScopeTranscript), "Working ...")
+		return m, tea.Batch(nextEventCmd(msg.events), m.spinnerCmdIfNeeded())
 	case eventMsg:
 		m.applyEvent(msg.event)
 		if msg.events != nil {
 			return m, tea.Batch(m.reloadDetailsCmd(), nextEventCmd(msg.events))
 		}
-		m.loading = false
-		m.modelWorking = false
+		m.stopBusy()
 		return m, m.reloadDetailsCmd()
 	case loadMsg:
 		m = m.UpdateLoad(msg)
-		m.loading = false
-		m.modelWorking = false
-		m.status = "Ready"
+		m.stopBusyWithStatus("Ready")
 		return m, nil
 	case newSessionMsg:
 		m.sessions = msg.sessions
@@ -223,9 +286,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.sessions = msg.sessions
 		m.pickerVisible = true
 		m.pickerIndex = 0
-		m.loading = false
-		m.modelWorking = false
-		m.status = "Select a session to resume"
+		m.stopBusyWithStatus("Select a session to resume")
 		return m, nil
 	case tea.MouseMsg:
 		if m.pickerVisible || m.hasApprovalPrompt() {
@@ -272,17 +333,14 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "enter":
 			if len(m.sessions) == 0 {
-				m.loading = true
-				m.status = "Creating session…"
-				return m, m.newSessionCmd()
+				m.startBusy(busyScopeSidebar, "Creating session…")
+				return m, tea.Batch(m.newSessionCmd(), m.spinnerCmdIfNeeded())
 			}
-			m.loading = true
-			m.status = fmt.Sprintf("Resuming session %d…", m.sessions[m.pickerIndex].ID)
-			return m, m.loadSessionCmd(m.sessions[m.pickerIndex].ID)
+			m.startBusy(busyScopeSidebar, fmt.Sprintf("Resuming session %d…", m.sessions[m.pickerIndex].ID))
+			return m, tea.Batch(m.loadSessionCmd(m.sessions[m.pickerIndex].ID), m.spinnerCmdIfNeeded())
 		case "esc":
-			m.loading = true
-			m.status = "Creating session…"
-			return m, m.newSessionCmd()
+			m.startBusy(busyScopeSidebar, "Creating session…")
+			return m, tea.Batch(m.newSessionCmd(), m.spinnerCmdIfNeeded())
 		case "ctrl+c":
 			return m.quit()
 		}
@@ -327,9 +385,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "enter":
 			prompt := strings.TrimSpace(m.composer.Value())
 			if prompt == "/new" {
-				m.loading = true
-				m.status = "Creating session…"
-				return m, m.newSessionCmd()
+				m.startBusy(busyScopeSidebar, "Creating session…")
+				return m, tea.Batch(m.newSessionCmd(), m.spinnerCmdIfNeeded())
 			}
 			if len(m.slashMatches) == 1 && m.slashMatches[0].Name == prompt {
 				break
@@ -369,10 +426,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.composer.Reset()
 		m.updateSlashMenu()
 		m.appendLocalUserPrompt(prompt)
-		m.loading = true
-		m.modelWorking = false
-		m.status = "Running…"
-		return m, m.promptCmd(prompt)
+		m.startBusy(busyScopeTranscript, "Running…")
+		return m, tea.Batch(m.promptCmd(prompt), m.spinnerCmdIfNeeded())
 	}
 
 	var cmd tea.Cmd
@@ -384,17 +439,14 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m *Model) applyEvent(evt domain.Event) {
 	switch evt.Kind {
 	case domain.EventKindMessageDelta:
-		m.modelWorking = true
-		m.status = "Working ..."
+		m.startBusy(busyScopeTranscript, "Working ...")
 	case domain.EventKindReasoning:
-		m.modelWorking = true
-		m.status = "Working ..."
+		m.startBusy(busyScopeTranscript, "Working ...")
 	case domain.EventKindToolResult:
-		m.modelWorking = true
-		m.status = fmt.Sprintf("Tool %s finished", evt.Tool)
+		m.startBusy(busyScopeTranscript, fmt.Sprintf("Tool %s finished", evt.Tool))
 	case domain.EventKindApprovalAsk:
-		m.modelWorking = false
 		m.status = evt.Text
+		m.stopBusy()
 	case domain.EventKindApprovalReply:
 		m.status = evt.Text
 	case domain.EventKindTaskUpdate:
@@ -404,18 +456,20 @@ func (m *Model) applyEvent(evt domain.Event) {
 	case domain.EventKindStatus:
 		if evt.Text != "" {
 			m.status = evt.Text
+			if m.busy.active {
+				m.busy.updateStatus(evt.Text)
+			}
 		}
 		if profile := strings.TrimSpace(evt.Meta["permission_profile"]); profile != "" {
 			m.currentSession.PermissionProfile = profile
 		}
 	case domain.EventKindError:
-		m.modelWorking = false
 		if evt.Err != nil {
 			m.status = evt.Err.Error()
 		}
+		m.stopBusy()
 	case domain.EventKindMessageDone:
-		m.modelWorking = false
-		m.status = "Ready"
+		m.stopBusyWithStatus("Ready")
 	}
 }
 
@@ -486,7 +540,7 @@ func (m *Model) renderSidebar() string {
 	if status == "" {
 		status = "Ready"
 	}
-	if m.isWorking() {
+	if m.busy.sidebarActive() {
 		lines = append(lines, fmt.Sprintf("  %s %s", m.workingIndicator(), truncate(status, 22)))
 	} else {
 		lines = append(lines, fmt.Sprintf("  %s", truncate(status, 24)))
@@ -587,7 +641,7 @@ func (m *Model) refreshViewport() {
 }
 
 func (m *Model) renderTranscriptActivity() string {
-	if !m.isWorking() {
+	if !m.busy.transcriptActive() {
 		return ""
 	}
 	line := fmt.Sprintf("%s  Working ...", m.workingIndicator())
@@ -989,9 +1043,8 @@ func (m *Model) handleLocalCommand(prompt string) (tea.Model, tea.Cmd, bool) {
 	case trimmed == "/new":
 		m.composer.Reset()
 		m.updateSlashMenu()
-		m.loading = true
-		m.status = "Creating session…"
-		return m, m.newSessionCmd(), true
+		m.startBusy(busyScopeSidebar, "Creating session…")
+		return m, tea.Batch(m.newSessionCmd(), m.spinnerCmdIfNeeded()), true
 	case trimmed == "/quit":
 		m.composer.Reset()
 		m.updateSlashMenu()
@@ -1013,15 +1066,13 @@ func (m *Model) handleLocalCommand(prompt string) (tea.Model, tea.Cmd, bool) {
 		profile := strings.TrimSpace(strings.TrimPrefix(trimmed, "/perm"))
 		m.composer.Reset()
 		m.updateSlashMenu()
-		m.loading = true
-		m.status = fmt.Sprintf("Setting permission profile to %s…", profile)
-		return m, m.permissionProfileCmd(profile), true
+		m.startBusy(busyScopeSidebar, fmt.Sprintf("Setting permission profile to %s…", profile))
+		return m, tea.Batch(m.permissionProfileCmd(profile), m.spinnerCmdIfNeeded()), true
 	case trimmed == "/compact":
 		m.composer.Reset()
 		m.updateSlashMenu()
-		m.loading = true
-		m.status = "Compacting session..."
-		return m, m.compactCmd(), true
+		m.startBusy(busyScopeTranscript, "Compacting session...")
+		return m, tea.Batch(m.compactCmd(), m.spinnerCmdIfNeeded()), true
 	case strings.HasPrefix(trimmed, "/approve "):
 		id, err := strconv.ParseInt(strings.TrimSpace(strings.TrimPrefix(trimmed, "/approve")), 10, 64)
 		if err != nil {
@@ -1030,9 +1081,8 @@ func (m *Model) handleLocalCommand(prompt string) (tea.Model, tea.Cmd, bool) {
 		}
 		m.composer.Reset()
 		m.updateSlashMenu()
-		m.loading = true
-		m.status = fmt.Sprintf("Approving approval %d…", id)
-		return m, m.approveCmd(id), true
+		m.startBusy(busyScopeTranscript, fmt.Sprintf("Approving approval %d…", id))
+		return m, tea.Batch(m.approveCmd(id), m.spinnerCmdIfNeeded()), true
 	case strings.HasPrefix(trimmed, "/deny "):
 		id, err := strconv.ParseInt(strings.TrimSpace(strings.TrimPrefix(trimmed, "/deny")), 10, 64)
 		if err != nil {
@@ -1041,9 +1091,8 @@ func (m *Model) handleLocalCommand(prompt string) (tea.Model, tea.Cmd, bool) {
 		}
 		m.composer.Reset()
 		m.updateSlashMenu()
-		m.loading = true
-		m.status = fmt.Sprintf("Denying approval %d…", id)
-		return m, m.denyCmd(id), true
+		m.startBusy(busyScopeSidebar, fmt.Sprintf("Denying approval %d…", id))
+		return m, tea.Batch(m.denyCmd(id), m.spinnerCmdIfNeeded()), true
 	case strings.HasPrefix(trimmed, "/"):
 		m.status = fmt.Sprintf("unknown command: %s", trimmed)
 		return m, nil, true
@@ -1081,8 +1130,7 @@ func (m Model) denyCmd(approvalID int64) tea.Cmd {
 }
 
 func (m *Model) quit() (tea.Model, tea.Cmd) {
-	m.loading = false
-	m.status = "Quitting"
+	m.stopBusyWithStatus("Quitting")
 	return m, tea.Quit
 }
 
@@ -1144,16 +1192,52 @@ func (m *Model) nextPendingID() int64 {
 	return m.pendingPartID
 }
 
+func (m *Model) startBusy(scope busyScope, status string) {
+	m.loading = true
+	m.status = status
+	m.busy.start(scope, status)
+}
+
+func (m *Model) stopBusy() {
+	m.loading = false
+	m.busy.stop()
+}
+
+func (m *Model) stopBusyWithStatus(status string) {
+	m.stopBusy()
+	m.status = status
+}
+
+func (m *Model) spinnerCmdIfNeeded() tea.Cmd {
+	if !m.busy.spinner.active {
+		return nil
+	}
+	return spinnerTickCmd()
+}
+
+func (b busyModel) scopeOrDefault(fallback busyScope) busyScope {
+	if b.scope != busyScopeNone {
+		return b.scope
+	}
+	return fallback
+}
+
+func (b busyModel) statusOrDefault(fallback string) string {
+	if strings.TrimSpace(b.status) != "" {
+		return b.status
+	}
+	return fallback
+}
+
 func (m *Model) isWorking() bool {
-	return m.modelWorking
+	return m.busy.transcriptActive()
 }
 
 func (m *Model) workingIndicator() string {
-	if !m.isWorking() {
+	if !m.busy.spinner.active {
 		return ""
 	}
-	frames := []string{"[=   ]", "[==  ]", "[=== ]", "[ ===]", "[  ==]", "[   =]"}
-	return frames[m.spinnerFrame%len(frames)]
+	return m.busy.spinner.view()
 }
 
 func (m Model) draftSession() domain.Session {
@@ -1294,13 +1378,12 @@ func (m *Model) submitApprovalChoice(approve bool) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	id := m.approvals[0].ID
-	m.loading = true
 	if approve {
-		m.status = fmt.Sprintf("Approving approval %d…", id)
-		return m, m.approveCmd(id)
+		m.startBusy(busyScopeTranscript, fmt.Sprintf("Approving approval %d…", id))
+		return m, tea.Batch(m.approveCmd(id), m.spinnerCmdIfNeeded())
 	}
-	m.status = fmt.Sprintf("Denying approval %d…", id)
-	return m, m.denyCmd(id)
+	m.startBusy(busyScopeSidebar, fmt.Sprintf("Denying approval %d…", id))
+	return m, tea.Batch(m.denyCmd(id), m.spinnerCmdIfNeeded())
 }
 
 func (m *Model) renderApprovalPrompt() string {

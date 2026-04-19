@@ -296,7 +296,13 @@ func TestUpdateLoadHidesSessionPicker(t *testing.T) {
 
 func TestWorkingIndicatorShownWhenModelWorking(t *testing.T) {
 	m := Model{
-		modelWorking: true,
+		busy: busyModel{
+			active: true,
+			scope:  busyScopeTranscript,
+			spinner: spinnerModel{
+				active: true,
+			},
+		},
 	}
 
 	got := m.workingIndicator()
@@ -321,8 +327,14 @@ func TestRenderSidebarShowsStatusAndSessionInfo(t *testing.T) {
 	m := Model{
 		currentSession: domain.Session{ID: 2, ProviderID: "test", ModelID: "model", PermissionProfile: "default"},
 		status:         "Working ...",
-		modelWorking:   true,
-		workdir:        "/tmp/project",
+		busy: busyModel{
+			active: true,
+			scope:  busyScopeTranscript,
+			spinner: spinnerModel{
+				active: true,
+			},
+		},
+		workdir: "/tmp/project",
 		cfg: config.Config{
 			Providers: map[string]config.Provider{
 				"test": {ContextWindow: 32768},
@@ -352,10 +364,16 @@ func TestRenderSidebarShowsStatusAndSessionInfo(t *testing.T) {
 func TestRefreshViewportAppendsWorkingLine(t *testing.T) {
 	m := Model{
 		currentSession: domain.Session{ID: 1},
-		modelWorking:   true,
 		status:         "Working ...",
 		parts:          map[int64][]domain.Part{},
 		viewport:       viewport.New(40, 6),
+		busy: busyModel{
+			active: true,
+			scope:  busyScopeTranscript,
+			spinner: spinnerModel{
+				active: true,
+			},
+		},
 	}
 
 	m.refreshViewport()
@@ -402,6 +420,13 @@ func TestRefreshViewportOmitsWorkingLineForGenericLoading(t *testing.T) {
 		status:         "Resuming session 2…",
 		parts:          map[int64][]domain.Part{},
 		viewport:       viewport.New(40, 6),
+		busy: busyModel{
+			active: true,
+			scope:  busyScopeSidebar,
+			spinner: spinnerModel{
+				active: true,
+			},
+		},
 	}
 
 	m.refreshViewport()
@@ -414,10 +439,16 @@ func TestRefreshViewportOmitsWorkingLineForGenericLoading(t *testing.T) {
 func TestSpinnerTickRefreshesTranscriptActivity(t *testing.T) {
 	m := Model{
 		currentSession: domain.Session{ID: 1},
-		modelWorking:   true,
 		status:         "Working ...",
 		parts:          map[int64][]domain.Part{},
 		viewport:       viewport.New(40, 6),
+		busy: busyModel{
+			active: true,
+			scope:  busyScopeTranscript,
+			spinner: spinnerModel{
+				active: true,
+			},
+		},
 	}
 
 	m.refreshViewport()
@@ -432,6 +463,20 @@ func TestSpinnerTickRefreshesTranscriptActivity(t *testing.T) {
 	}
 	if cmd == nil {
 		t.Fatal("expected follow-up spinner tick command")
+	}
+}
+
+func TestStatusEventKeepsTranscriptSpinnerActive(t *testing.T) {
+	m := Model{}
+	m.startBusy(busyScopeTranscript, "Compacting session...")
+
+	m.applyEvent(domain.Event{Kind: domain.EventKindStatus, Text: "Compacting session..."})
+
+	if !m.busy.transcriptActive() {
+		t.Fatal("expected transcript spinner to remain active for status updates during busy work")
+	}
+	if got := m.renderTranscriptActivity(); !strings.Contains(got, "Working ...") || !strings.Contains(got, "[=") {
+		t.Fatalf("expected transcript activity to still render, got %q", got)
 	}
 }
 
