@@ -135,6 +135,32 @@ type sessionPickerMsg struct {
 	sessions []domain.Session
 }
 
+type pickerMode int
+
+const (
+	pickerModeNone pickerMode = iota
+	pickerModeSession
+	pickerModeTheme
+)
+
+type pickerItem struct {
+	Title       string
+	Description string
+	Value       string
+}
+
+type pickerModel struct {
+	visible      bool
+	mode         pickerMode
+	title        string
+	hint         string
+	query        string
+	index        int
+	items        []pickerItem
+	matches      []pickerItem
+	initialValue string
+}
+
 type runPromptMsg struct {
 	session domain.Session
 	events  <-chan domain.Event
@@ -168,8 +194,7 @@ type Model struct {
 	workdir        string
 	workspace      workspace.Status
 	startupMode    StartupMode
-	pickerVisible  bool
-	pickerIndex    int
+	picker         pickerModel
 	pendingPartID  int64
 	mouseEnabled   bool
 }
@@ -276,20 +301,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.tasks = msg.tasks
 		m.workspace = msg.workspace
 		m.composer.Reset()
-		m.pickerVisible = false
-		m.pickerIndex = 0
+		m.closePicker()
 		m.status = fmt.Sprintf("Started session %d", msg.session.ID)
 		m.updateSlashMenu()
 		m.refreshViewport()
 		return m, nil
 	case sessionPickerMsg:
 		m.sessions = msg.sessions
-		m.pickerVisible = true
-		m.pickerIndex = 0
+		m.openSessionPicker()
 		m.stopBusyWithStatus("Select a session to resume")
 		return m, nil
 	case tea.MouseMsg:
-		if m.pickerVisible || m.hasApprovalPrompt() {
+		if m.hasPicker() || m.hasApprovalPrompt() {
 			return m, nil
 		}
 		var cmd tea.Cmd
@@ -309,8 +332,8 @@ func (m Model) View() string {
 	body := m.renderBody()
 	footer := m.renderFooter()
 	view := lipgloss.JoinVertical(lipgloss.Left, body, footer)
-	if m.pickerVisible {
-		view = lipgloss.JoinVertical(lipgloss.Left, view, m.renderSessionPicker())
+	if m.hasPicker() {
+		view = lipgloss.JoinVertical(lipgloss.Left, view, m.renderPicker())
 	}
 	if m.width > 0 && m.height > 0 {
 		return lipgloss.Place(m.width, m.height, lipgloss.Left, lipgloss.Bottom, view)
@@ -319,30 +342,27 @@ func (m Model) View() string {
 }
 
 func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if m.pickerVisible {
+	if m.hasPicker() {
 		switch msg.String() {
 		case "up":
-			if m.pickerIndex > 0 {
-				m.pickerIndex--
-			}
+			m.movePicker(-1)
 			return m, nil
 		case "down":
-			if m.pickerIndex < len(m.sessions)-1 {
-				m.pickerIndex++
-			}
+			m.movePicker(1)
 			return m, nil
 		case "enter":
-			if len(m.sessions) == 0 {
-				m.startBusy(busyScopeSidebar, "Creating session…")
-				return m, tea.Batch(m.newSessionCmd(), m.spinnerCmdIfNeeded())
-			}
-			m.startBusy(busyScopeSidebar, fmt.Sprintf("Resuming session %d…", m.sessions[m.pickerIndex].ID))
-			return m, tea.Batch(m.loadSessionCmd(m.sessions[m.pickerIndex].ID), m.spinnerCmdIfNeeded())
+			return m.submitPickerSelection()
 		case "esc":
-			m.startBusy(busyScopeSidebar, "Creating session…")
-			return m, tea.Batch(m.newSessionCmd(), m.spinnerCmdIfNeeded())
+			return m.cancelPicker()
 		case "ctrl+c":
 			return m.quit()
+		case "backspace":
+			m.trimPickerQuery()
+			return m, nil
+		default:
+			if m.updatePickerQuery(msg) {
+				return m, nil
+			}
 		}
 	}
 
@@ -1048,7 +1068,7 @@ func (m Model) UpdateLoad(msg loadMsg) Model {
 	m.tasks = msg.tasks
 	m.workspace = msg.workspace
 	m.approvalChoice = 0
-	m.pickerVisible = false
+	m.closePicker()
 	m.refreshViewport()
 	return m
 }
@@ -1089,6 +1109,11 @@ func (m *Model) handleLocalCommand(prompt string) (tea.Model, tea.Cmd, bool) {
 		m.updateSlashMenu()
 		m.startBusy(busyScopeTranscript, "Compacting session...")
 		return m, tea.Batch(m.compactCmd(), m.spinnerCmdIfNeeded()), true
+	case trimmed == "/theme":
+		m.composer.Reset()
+		m.updateSlashMenu()
+		m.openThemePicker()
+		return m, nil, true
 	case strings.HasPrefix(trimmed, "/approve "):
 		id, err := strconv.ParseInt(strings.TrimSpace(strings.TrimPrefix(trimmed, "/approve")), 10, 64)
 		if err != nil {
@@ -1359,24 +1384,36 @@ func (m *Model) renderSlashMenu() string {
 	return lipgloss.NewStyle().Border(lipgloss.NormalBorder()).Padding(0, 1).Render(strings.Join(lines, "\n"))
 }
 
-func (m *Model) renderSessionPicker() string {
+func (m *Model) renderPicker() string {
+	if !m.hasPicker() {
+		return ""
+	}
 	var lines []string
-	lines = append(lines, lipgloss.NewStyle().Bold(true).Render("Resume Session"))
-	lines = append(lines, "enter resume  esc new session  ctrl+c quit")
+	lines = append(lines, lipgloss.NewStyle().Bold(true).Render(m.picker.title))
+	if hint := strings.TrimSpace(m.picker.hint); hint != "" {
+		lines = append(lines, hint)
+	}
 	lines = append(lines, "")
-	for idx, session := range m.sessions {
-		cursor := " "
-		if idx == m.pickerIndex {
-			cursor = ">"
+	lines = append(lines, fmt.Sprintf("filter: %s", m.picker.query))
+	lines = append(lines, "")
+	if len(m.picker.matches) == 0 {
+		lines = append(lines, "  no matches")
+	} else {
+		start := 0
+		if m.picker.index >= 6 {
+			start = m.picker.index - 5
 		}
-		title := truncate(session.Title, 18)
-		if strings.TrimSpace(title) == "" {
-			title = "Untitled"
-		}
-		last := truncate(session.LastMessage, 28)
-		lines = append(lines, fmt.Sprintf("%s #%d  %s", cursor, session.ID, title))
-		if last != "" {
-			lines = append(lines, fmt.Sprintf("    %s", last))
+		end := min(len(m.picker.matches), start+8)
+		for idx := start; idx < end; idx++ {
+			item := m.picker.matches[idx]
+			cursor := " "
+			if idx == m.picker.index {
+				cursor = ">"
+			}
+			lines = append(lines, fmt.Sprintf("%s %s", cursor, item.Title))
+			if desc := strings.TrimSpace(item.Description); desc != "" {
+				lines = append(lines, fmt.Sprintf("    %s", truncate(desc, 40)))
+			}
 		}
 	}
 	return lipgloss.NewStyle().
@@ -1433,6 +1470,7 @@ func internalSlashCommands() []slashCommand {
 		{Name: "/mouse", Description: "Toggle mouse capture", NeedsArgs: true, Autocomplete: "/mouse "},
 		{Name: "/perm", Description: "Set permission profile", NeedsArgs: true, Autocomplete: "/perm "},
 		{Name: "/quit", Description: "Quit koder"},
+		{Name: "/theme", Description: "Choose a color theme"},
 	}
 }
 
@@ -1493,6 +1531,235 @@ func applyComposerTheme(composer *textarea.Model, palette theme.Palette) {
 	applyTextareaStyle(&blurred)
 	composer.FocusedStyle = focused
 	composer.BlurredStyle = blurred
+}
+
+func (m *Model) hasPicker() bool {
+	return m.picker.visible
+}
+
+func (m *Model) closePicker() {
+	m.picker = pickerModel{}
+}
+
+func (m *Model) openSessionPicker() {
+	items := make([]pickerItem, 0, len(m.sessions))
+	for _, session := range m.sessions {
+		title := strings.TrimSpace(session.Title)
+		if title == "" {
+			title = fmt.Sprintf("Session #%d", session.ID)
+		}
+		description := strings.TrimSpace(session.LastMessage)
+		if description == "" {
+			description = "No messages yet"
+		}
+		items = append(items, pickerItem{
+			Title:       fmt.Sprintf("#%d  %s", session.ID, truncate(title, 24)),
+			Description: truncate(description, 40),
+			Value:       strconv.FormatInt(session.ID, 10),
+		})
+	}
+	m.picker = pickerModel{
+		visible: true,
+		mode:    pickerModeSession,
+		title:   "Resume Session",
+		hint:    "type to filter  enter select  esc new session  ctrl+c quit",
+		items:   items,
+	}
+	m.refilterPicker()
+}
+
+func (m *Model) openThemePicker() {
+	items := make([]pickerItem, 0, len(theme.Names()))
+	for _, name := range theme.Names() {
+		items = append(items, pickerItem{
+			Title:       name,
+			Description: "Preview theme colors",
+			Value:       name,
+		})
+	}
+	current := strings.TrimSpace(m.cfg.UI.Theme)
+	if current == "" {
+		current = theme.Default().Name
+	}
+	m.picker = pickerModel{
+		visible:      true,
+		mode:         pickerModeTheme,
+		title:        "Themes",
+		hint:         "type to filter  enter apply  esc cancel",
+		items:        items,
+		initialValue: current,
+	}
+	m.refilterPicker()
+	m.previewSelectedTheme()
+}
+
+func (m *Model) refilterPicker() {
+	if !m.hasPicker() {
+		return
+	}
+	query := strings.ToLower(strings.TrimSpace(m.picker.query))
+	targetValue := ""
+	if item, ok := m.currentPickerItem(); ok {
+		targetValue = item.Value
+	} else if strings.TrimSpace(m.picker.initialValue) != "" {
+		targetValue = m.picker.initialValue
+	}
+	m.picker.matches = nil
+	for _, item := range m.picker.items {
+		haystack := strings.ToLower(item.Title + " " + item.Description + " " + item.Value)
+		if query == "" || strings.Contains(haystack, query) {
+			m.picker.matches = append(m.picker.matches, item)
+		}
+	}
+	if len(m.picker.matches) == 0 {
+		m.picker.index = 0
+		return
+	}
+	if targetValue != "" {
+		for idx, item := range m.picker.matches {
+			if item.Value == targetValue {
+				m.picker.index = idx
+				m.previewSelectedTheme()
+				return
+			}
+		}
+	}
+	if m.picker.index >= len(m.picker.matches) {
+		m.picker.index = len(m.picker.matches) - 1
+	}
+	if m.picker.index < 0 {
+		m.picker.index = 0
+	}
+	m.previewSelectedTheme()
+}
+
+func (m *Model) movePicker(delta int) {
+	if !m.hasPicker() || len(m.picker.matches) == 0 {
+		return
+	}
+	m.picker.index += delta
+	if m.picker.index < 0 {
+		m.picker.index = 0
+	}
+	if m.picker.index >= len(m.picker.matches) {
+		m.picker.index = len(m.picker.matches) - 1
+	}
+	m.previewSelectedTheme()
+}
+
+func (m *Model) trimPickerQuery() {
+	if !m.hasPicker() || m.picker.query == "" {
+		return
+	}
+	m.picker.query = m.picker.query[:len(m.picker.query)-1]
+	m.refilterPicker()
+}
+
+func (m *Model) updatePickerQuery(msg tea.KeyMsg) bool {
+	if !m.hasPicker() {
+		return false
+	}
+	if msg.Type != tea.KeyRunes {
+		return false
+	}
+	m.picker.query += msg.String()
+	m.refilterPicker()
+	return true
+}
+
+func (m *Model) currentPickerItem() (pickerItem, bool) {
+	if !m.hasPicker() || len(m.picker.matches) == 0 {
+		return pickerItem{}, false
+	}
+	if m.picker.index < 0 || m.picker.index >= len(m.picker.matches) {
+		return pickerItem{}, false
+	}
+	return m.picker.matches[m.picker.index], true
+}
+
+func (m *Model) submitPickerSelection() (tea.Model, tea.Cmd) {
+	switch m.picker.mode {
+	case pickerModeSession:
+		item, ok := m.currentPickerItem()
+		if !ok {
+			m.startBusy(busyScopeSidebar, "Creating session…")
+			return m, tea.Batch(m.newSessionCmd(), m.spinnerCmdIfNeeded())
+		}
+		sessionID, err := strconv.ParseInt(item.Value, 10, 64)
+		if err != nil {
+			m.status = fmt.Sprintf("invalid session id: %v", err)
+			return m, nil
+		}
+		m.startBusy(busyScopeSidebar, fmt.Sprintf("Resuming session %d…", sessionID))
+		return m, tea.Batch(m.loadSessionCmd(sessionID), m.spinnerCmdIfNeeded())
+	case pickerModeTheme:
+		item, ok := m.currentPickerItem()
+		if !ok {
+			return m, nil
+		}
+		if err := m.setTheme(item.Value, true); err != nil {
+			m.status = fmt.Sprintf("theme save failed: %v", err)
+			return m, nil
+		}
+		m.status = fmt.Sprintf("Theme set to %s", item.Value)
+		m.closePicker()
+		return m, nil
+	default:
+		return m, nil
+	}
+}
+
+func (m *Model) cancelPicker() (tea.Model, tea.Cmd) {
+	switch m.picker.mode {
+	case pickerModeSession:
+		m.startBusy(busyScopeSidebar, "Creating session…")
+		return m, tea.Batch(m.newSessionCmd(), m.spinnerCmdIfNeeded())
+	case pickerModeTheme:
+		restore := strings.TrimSpace(m.picker.initialValue)
+		if restore == "" {
+			restore = theme.Default().Name
+		}
+		if err := m.setTheme(restore, false); err != nil {
+			m.status = fmt.Sprintf("theme restore failed: %v", err)
+		}
+		m.closePicker()
+		return m, nil
+	default:
+		m.closePicker()
+		return m, nil
+	}
+}
+
+func (m *Model) previewSelectedTheme() {
+	if m.picker.mode != pickerModeTheme {
+		return
+	}
+	item, ok := m.currentPickerItem()
+	if !ok {
+		return
+	}
+	if err := m.setTheme(item.Value, false); err != nil {
+		m.status = fmt.Sprintf("theme preview failed: %v", err)
+	}
+}
+
+func (m *Model) setTheme(name string, save bool) error {
+	selected := theme.Resolve(name)
+	renderer, err := markdown.New(selected.Palette)
+	if err != nil {
+		return err
+	}
+	m.cfg.UI.Theme = selected.Name
+	m.palette = selected.Palette
+	m.renderer = renderer
+	applyComposerTheme(&m.composer, selected.Palette)
+	m.refreshViewport()
+	if save {
+		if err := m.cfg.Save(); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func spinnerTickCmd() tea.Cmd {

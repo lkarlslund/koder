@@ -51,6 +51,7 @@ Create the first working implementation of `koder` from the approved plan.
 - Borrowed non-default OpenCode theme palettes into `koder`, expanded the named theme token set for richer markdown/link/list styling, and made `tokyonight` the default theme instead of the old local placeholder palette.
 - Fixed TUI resize logic to compute viewport height from the measured footer height instead of reserving a hardcoded 10 rows, which stops the app from leaving several blank lines at the top of the terminal.
 - Fixed assistant compaction-summary rendering so `compaction` parts use the markdown renderer like normal assistant text, which resolves raw `##` headings and `-` list markers showing up after auto-compaction.
+- Replaced the hardcoded resume-session picker with a reusable filterable picker model and used it for a new `/theme` command, including live theme preview while moving or filtering, OpenCode-style cancel-to-restore behavior, and persisted theme selection on confirm.
 
 ## Tests run
 
@@ -66,4 +67,4 @@ Create the first working implementation of `koder` from the approved plan.
 
 ## Next step
 
-Continue tightening the approval flow so approved or denied tool calls can optionally resume the interrupted model turn automatically.
+Reuse the new filterable picker for more runtime selection flows such as permission profiles or in-session session switching, so ad hoc one-off chooser UIs can be removed.

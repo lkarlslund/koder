@@ -1,6 +1,10 @@
 package theme
 
-import "github.com/charmbracelet/lipgloss"
+import (
+	"slices"
+
+	"github.com/charmbracelet/lipgloss"
+)
 
 type Palette struct {
 	ActivityText                 lipgloss.Color
@@ -36,6 +40,12 @@ type Palette struct {
 type Theme struct {
 	Name    string
 	Palette Palette
+}
+
+func Names() []string {
+	names := []string{"tokyonight", "gruvbox", "flexoki", "rosepine"}
+	slices.Sort(names)
+	return names
 }
 
 func Resolve(name string) Theme {

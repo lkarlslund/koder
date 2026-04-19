@@ -40,6 +40,11 @@ func TestMatchingSlashCommands(t *testing.T) {
 		t.Fatalf("expected /compact, got %#v", matches)
 	}
 
+	matches = matchingSlashCommands("the")
+	if len(matches) != 1 || matches[0].Name != "/theme" {
+		t.Fatalf("expected /theme, got %#v", matches)
+	}
+
 	matches = matchingSlashCommands("rea")
 	if len(matches) != 0 {
 		t.Fatalf("expected tool slash commands to stay hidden, got %#v", matches)
@@ -262,9 +267,12 @@ func TestCtrlCUsesQuitPath(t *testing.T) {
 
 func TestSessionPickerEscapeCreatesNewSession(t *testing.T) {
 	m := Model{
-		composer:      textarea.New(),
-		pickerVisible: true,
-		sessions:      []domain.Session{{ID: 1}},
+		composer: textarea.New(),
+		picker: pickerModel{
+			visible: true,
+			mode:    pickerModeSession,
+		},
+		sessions: []domain.Session{{ID: 1}},
 	}
 
 	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
@@ -279,18 +287,134 @@ func TestSessionPickerEscapeCreatesNewSession(t *testing.T) {
 
 func TestUpdateLoadHidesSessionPicker(t *testing.T) {
 	m := Model{
-		pickerVisible: true,
+		picker: pickerModel{
+			visible: true,
+			mode:    pickerModeSession,
+		},
 	}
 
 	updated := m.UpdateLoad(loadMsg{
 		current: domain.Session{ID: 4},
 	})
 
-	if updated.pickerVisible {
+	if updated.hasPicker() {
 		t.Fatal("expected picker to close after loading a session")
 	}
 	if updated.currentSession.ID != 4 {
 		t.Fatalf("unexpected current session: %#v", updated.currentSession)
+	}
+}
+
+func TestThemeCommandOpensFilterablePicker(t *testing.T) {
+	m := Model{
+		cfg:      config.Default(),
+		composer: textarea.New(),
+	}
+	m.composer.SetValue("/theme")
+
+	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	next := updated.(*Model)
+	if cmd != nil {
+		t.Fatal("expected no async command for theme picker")
+	}
+	if !next.hasPicker() {
+		t.Fatal("expected picker to open")
+	}
+	if next.picker.mode != pickerModeTheme {
+		t.Fatalf("expected theme picker mode, got %v", next.picker.mode)
+	}
+	if len(next.picker.matches) == 0 {
+		t.Fatal("expected theme matches")
+	}
+}
+
+func TestThemePickerFiltersAndPreviewsSelection(t *testing.T) {
+	cfg := config.Default()
+	cfg.UI.Theme = "tokyonight"
+
+	m, err := New(cfg, nil, nil, StartupModeNew)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.openThemePicker()
+
+	updated, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("g")})
+	next := updated.(*Model)
+	updated, _ = next.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
+	next = updated.(*Model)
+
+	if len(next.picker.matches) == 0 {
+		t.Fatal("expected filtered theme matches")
+	}
+	if next.picker.matches[0].Value != "gruvbox" {
+		t.Fatalf("expected gruvbox after filtering, got %#v", next.picker.matches)
+	}
+	if next.cfg.UI.Theme != "gruvbox" {
+		t.Fatalf("expected live theme preview to apply gruvbox, got %q", next.cfg.UI.Theme)
+	}
+}
+
+func TestThemePickerEscapeRestoresOriginalTheme(t *testing.T) {
+	cfg := config.Default()
+	cfg.UI.Theme = "flexoki"
+
+	m, err := New(cfg, nil, nil, StartupModeNew)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.openThemePicker()
+	m.movePicker(1)
+	if m.cfg.UI.Theme == "flexoki" {
+		t.Fatal("expected theme preview to change current theme before cancel")
+	}
+
+	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	next := updated.(*Model)
+	if cmd != nil {
+		t.Fatal("expected no async command on theme picker cancel")
+	}
+	if next.cfg.UI.Theme != "flexoki" {
+		t.Fatalf("expected original theme restored, got %q", next.cfg.UI.Theme)
+	}
+	if next.hasPicker() {
+		t.Fatal("expected picker to close on cancel")
+	}
+}
+
+func TestThemePickerEnterSavesTheme(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.UI.Theme = "flexoki"
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	m, err := New(cfg, nil, nil, StartupModeNew)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.openThemePicker()
+	m.movePicker(1)
+
+	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	next := updated.(*Model)
+	if cmd != nil {
+		t.Fatal("expected no async command on theme apply")
+	}
+	if next.hasPicker() {
+		t.Fatal("expected picker to close after selection")
+	}
+	if next.cfg.UI.Theme == "flexoki" {
+		t.Fatal("expected theme selection to persist a new theme")
+	}
+	if !strings.Contains(next.status, "Theme set to") {
+		t.Fatalf("expected status update after theme apply, got %q", next.status)
 	}
 }
 
