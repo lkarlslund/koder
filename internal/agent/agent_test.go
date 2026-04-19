@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -242,6 +243,64 @@ func TestApproveContinuesModelWithToolOutput(t *testing.T) {
 	}
 }
 
+func TestRunPromptPersistsAssistantErrorOnBackendFailure(t *testing.T) {
+	cfg := config.Default()
+	cfg.Providers = map[string]config.Provider{
+		"test": {
+			BaseURL: "http://127.0.0.1:1/v1",
+			Timeout: 50 * time.Millisecond,
+		},
+	}
+	cfg.DefaultProvider = "test"
+	cfg.DefaultModel = "test-model"
+
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	engine := New(cfg, st, tools.NewRegistry(t.TempDir()))
+	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	events, err := engine.RunPrompt(context.Background(), session, "hello")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var sawError bool
+	for evt := range events {
+		if evt.Kind == domain.EventKindError {
+			sawError = true
+		}
+	}
+	if !sawError {
+		t.Fatal("expected backend failure event")
+	}
+
+	messages, parts, err := st.PartsForSession(context.Background(), session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) < 2 {
+		t.Fatalf("expected persisted user and assistant error messages, got %d", len(messages))
+	}
+	last := messages[len(messages)-1]
+	if last.Role != domain.MessageRoleAssistant {
+		t.Fatalf("expected assistant error message, got %s", last.Role)
+	}
+	errorParts := parts[last.ID]
+	if len(errorParts) != 1 || errorParts[0].Kind != domain.PartKindText {
+		t.Fatalf("expected one assistant text part, got %#v", errorParts)
+	}
+	if !strings.Contains(errorParts[0].Body, "Error:") {
+		t.Fatalf("expected stored error prefix, got %q", errorParts[0].Body)
+	}
+}
+
 func TestModelTaskPersistsTranscriptUpdate(t *testing.T) {
 	t.Parallel()
 
@@ -289,4 +348,11 @@ func TestModelTaskPersistsTranscriptUpdate(t *testing.T) {
 
 func parseApprovalID(raw string) (int64, error) {
 	return strconv.ParseInt(raw, 10, 64)
+}
+
+func TestErrorSummaryPrefixesMessage(t *testing.T) {
+	got := errorSummary(errors.New("connection refused"))
+	if got != "Error: connection refused" {
+		t.Fatalf("unexpected error summary: %q", got)
+	}
 }

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -100,6 +101,35 @@ func TestExactSlashCommandDoesNotConsumeEnterForAutocomplete(t *testing.T) {
 	}
 	if !next.loading {
 		t.Fatal("expected loading after slash command enter")
+	}
+}
+
+func TestRunPromptErrorAppendsAssistantErrorToTranscript(t *testing.T) {
+	m := Model{
+		composer: textarea.New(),
+		parts:    map[int64][]domain.Part{},
+		viewport: viewport.New(40, 6),
+	}
+
+	updated, cmd := m.Update(runPromptMsg{err: errors.New("connection refused")})
+	next := updated.(Model)
+	if cmd != nil {
+		t.Fatal("expected no follow-up command on immediate prompt error")
+	}
+	if next.loading {
+		t.Fatal("expected loading cleared after prompt error")
+	}
+	if len(next.messages) != 1 {
+		t.Fatalf("expected local assistant error message, got %#v", next.messages)
+	}
+	if next.messages[0].Role != domain.MessageRoleAssistant {
+		t.Fatalf("expected assistant role, got %s", next.messages[0].Role)
+	}
+	if got := next.parts[next.messages[0].ID][0].Body; got != "Error: connection refused" {
+		t.Fatalf("unexpected local error part: %q", got)
+	}
+	if !strings.Contains(next.viewport.View(), "Error: connection refused") {
+		t.Fatalf("expected viewport to show error, got %q", next.viewport.View())
 	}
 }
 

@@ -72,6 +72,7 @@ func (e *Engine) Compact(ctx context.Context, sessionID int64) (<-chan domain.Ev
 		defer close(out)
 		out <- domain.Event{Kind: domain.EventKindStatus, Text: "Compacting session..."}
 		if err := e.compactSession(ctx, session, client, "manual", out); err != nil {
+			e.recordAssistantError(ctx, session.ID, err)
 			out <- domain.Event{Kind: domain.EventKindError, Err: err}
 			return
 		}
@@ -95,6 +96,7 @@ func (e *Engine) runModelPrompt(ctx context.Context, session domain.Session, pro
 		defer close(out)
 		compacted, err := e.autoCompactIfNeeded(ctx, session, client, out)
 		if err != nil {
+			e.recordAssistantError(ctx, session.ID, err)
 			out <- domain.Event{Kind: domain.EventKindError, Err: err}
 			return
 		}
@@ -115,6 +117,7 @@ func (e *Engine) runModelPrompt(ctx context.Context, session domain.Session, pro
 			return
 		}
 		if err := e.continueModelTurn(ctx, session, client, out); err != nil {
+			e.recordAssistantError(ctx, session.ID, err)
 			out <- domain.Event{Kind: domain.EventKindError, Err: err}
 			return
 		}
@@ -341,6 +344,7 @@ func (e *Engine) approve(ctx context.Context, sessionID int64, rawID string) (<-
 		}
 		compacted, err := e.autoCompactIfNeeded(ctx, session, client, out)
 		if err != nil {
+			e.recordAssistantError(ctx, session.ID, err)
 			out <- domain.Event{Kind: domain.EventKindError, Err: err}
 			return
 		}
@@ -352,6 +356,7 @@ func (e *Engine) approve(ctx context.Context, sessionID int64, rawID string) (<-
 			}
 		}
 		if err := e.continueModelTurn(ctx, session, client, out); err != nil {
+			e.recordAssistantError(ctx, session.ID, err)
 			out <- domain.Event{Kind: domain.EventKindError, Err: err}
 		}
 	}()
@@ -398,6 +403,21 @@ func emitOnce(evt domain.Event) <-chan domain.Event {
 	out <- evt
 	close(out)
 	return out
+}
+
+func (e *Engine) recordAssistantError(ctx context.Context, sessionID int64, err error) {
+	if err == nil || sessionID == 0 {
+		return
+	}
+	msg, addErr := e.store.AddMessage(ctx, sessionID, domain.MessageRoleAssistant, errorSummary(err))
+	if addErr != nil {
+		return
+	}
+	_, _ = e.store.AddPart(ctx, msg.ID, domain.PartKindText, errorSummary(err), "")
+}
+
+func errorSummary(err error) string {
+	return "Error: " + strings.TrimSpace(err.Error())
 }
 
 func (e *Engine) buildConversation(ctx context.Context, sessionID int64) ([]provider.Message, error) {

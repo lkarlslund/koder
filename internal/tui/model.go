@@ -181,6 +181,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case runPromptMsg:
 		if msg.err != nil {
 			m.status = msg.err.Error()
+			m.appendLocalAssistantError(msg.err)
 			m.loading = false
 			return m, nil
 		}
@@ -567,7 +568,7 @@ func (m *Model) renderSidebar() string {
 }
 
 func (m *Model) refreshViewport() {
-	if m.currentSession.ID == 0 {
+	if m.currentSession.ID == 0 && len(m.messages) == 0 {
 		m.viewport.SetContent("No session")
 		return
 	}
@@ -1090,6 +1091,33 @@ func (m *Model) appendLocalUserPrompt(prompt string) {
 		MessageID: messageID,
 		Kind:      domain.PartKindText,
 		Body:      prompt,
+		CreatedAt: now,
+	}}
+	m.refreshViewport()
+}
+
+func (m *Model) appendLocalAssistantError(err error) {
+	if err == nil {
+		return
+	}
+	now := time.Now().UTC()
+	if m.parts == nil {
+		m.parts = make(map[int64][]domain.Part)
+	}
+	messageID := m.nextPendingID()
+	body := "Error: " + strings.TrimSpace(err.Error())
+	m.messages = append(m.messages, domain.Message{
+		ID:        messageID,
+		SessionID: m.currentSession.ID,
+		Role:      domain.MessageRoleAssistant,
+		Summary:   body,
+		CreatedAt: now,
+	})
+	m.parts[messageID] = []domain.Part{{
+		ID:        m.nextPendingID(),
+		MessageID: messageID,
+		Kind:      domain.PartKindText,
+		Body:      body,
 		CreatedAt: now,
 	}}
 	m.refreshViewport()
