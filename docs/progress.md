@@ -33,6 +33,7 @@
 - Split model-turn activity from generic loading so the bottom spinner only appears for active LLM work, with a stable `Working ...` label instead of startup or resume text.
 - Moved hotkey hints out of the footer and into a dedicated `Keys` section at the bottom of the sidebar so the composer area stays clean.
 - Fixed the bottom working spinner animation by refreshing the transcript viewport on each spinner tick while the model is active.
+- Bottom-aligned the main TUI view so the chat input/footer sits flush with the terminal bottom edge instead of floating above it.
 - Verified `go test ./...`, `go vet ./...`, `staticcheck ./...`, and `golangci-lint run`.
 
 ## Current gaps

@@ -242,7 +242,10 @@ func (m Model) View() string {
 	footer := m.renderFooter()
 	view := lipgloss.JoinVertical(lipgloss.Left, body, footer)
 	if m.pickerVisible {
-		return lipgloss.JoinVertical(lipgloss.Left, view, m.renderSessionPicker())
+		view = lipgloss.JoinVertical(lipgloss.Left, view, m.renderSessionPicker())
+	}
+	if m.width > 0 && m.height > 0 {
+		return lipgloss.Place(m.width, m.height, lipgloss.Left, lipgloss.Bottom, view)
 	}
 	return view
 }

@@ -40,6 +40,7 @@ Create the first working implementation of `koder` from the approved plan.
 - Split model activity from generic loading so only active LLM turns show the transcript-tail spinner, and changed that indicator to display `Working ...` instead of transient resume or wait text.
 - Moved the hotkey/help hints from above the chat input into a `Keys` section at the bottom of the sidebar.
 - Fixed the transcript-tail spinner animation by refreshing the viewport content on each spinner tick while a model turn is active.
+- Bottom-aligned the overall TUI layout so the footer and chat composer stay at the very bottom of the terminal window.
 
 ## Tests run
 

@@ -328,6 +328,25 @@ func TestRenderFooterOmitsHotkeyHints(t *testing.T) {
 	}
 }
 
+func TestViewBottomAlignsFooter(t *testing.T) {
+	m := Model{
+		width:    40,
+		height:   12,
+		composer: textarea.New(),
+		viewport: viewport.New(38, 4),
+	}
+	m.viewport.SetContent("history")
+
+	got := m.View()
+	lines := strings.Split(got, "\n")
+	if len(lines) != 12 {
+		t.Fatalf("expected placed view to match height, got %d lines", len(lines))
+	}
+	if strings.TrimSpace(lines[len(lines)-1]) == "" {
+		t.Fatalf("expected footer/composer content at bottom, got %q", got)
+	}
+}
+
 func TestRefreshViewportOmitsWorkingLineForGenericLoading(t *testing.T) {
 	m := Model{
 		currentSession: domain.Session{ID: 1},
