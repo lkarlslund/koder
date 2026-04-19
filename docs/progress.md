@@ -21,6 +21,8 @@
 - Changed transcript rendering so user prompts appear as styled message blocks instead of bracketed role labels.
 - Changed the interaction loop so persisted events refresh the transcript immediately while a turn is still running, including tool and task updates.
 - Changed mouse handling so native terminal selection works by default, with opt-in mouse capture via `/mouse on` when viewport scrolling is needed.
+- Changed slash-command autocomplete to show only internal app commands, and kept internal slash commands out of the LLM tool contract.
+- Separated internal slash commands from tool invocation so slash input is handled by the runtime, while model tool use stays on the dedicated tool contract.
 - Verified `go test ./...`, `go vet ./...`, `staticcheck ./...`, and `golangci-lint run`.
 
 ## Current gaps

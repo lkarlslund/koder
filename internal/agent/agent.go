@@ -38,10 +38,19 @@ func New(cfg config.Config, st *store.Store, registry *tools.Registry) *Engine {
 }
 
 func (e *Engine) RunPrompt(ctx context.Context, session domain.Session, prompt string) (<-chan domain.Event, error) {
-	if strings.HasPrefix(strings.TrimSpace(prompt), "/") {
-		return e.runSlashCommand(ctx, session, prompt)
-	}
 	return e.runModelPrompt(ctx, session, prompt)
+}
+
+func (e *Engine) SetPermissionProfile(ctx context.Context, sessionID int64, profile string) (<-chan domain.Event, error) {
+	return e.setPermissionProfile(ctx, sessionID, profile)
+}
+
+func (e *Engine) Approve(ctx context.Context, sessionID, approvalID int64) (<-chan domain.Event, error) {
+	return e.approve(ctx, sessionID, strconv.FormatInt(approvalID, 10))
+}
+
+func (e *Engine) Deny(ctx context.Context, sessionID, approvalID int64) (<-chan domain.Event, error) {
+	return e.deny(ctx, sessionID, strconv.FormatInt(approvalID, 10))
 }
 
 func (e *Engine) runModelPrompt(ctx context.Context, session domain.Session, prompt string) (<-chan domain.Event, error) {
@@ -225,87 +234,6 @@ func normalizeSessionTitle(raw string) string {
 		words = words[:6]
 	}
 	return strings.Join(words, " ")
-}
-
-func (e *Engine) runSlashCommand(ctx context.Context, session domain.Session, prompt string) (<-chan domain.Event, error) {
-	fields := strings.Fields(prompt)
-	if len(fields) == 0 {
-		return nil, fmt.Errorf("empty command")
-	}
-	name := strings.TrimPrefix(fields[0], "/")
-	args := strings.TrimSpace(strings.TrimPrefix(prompt, fields[0]))
-
-	var req tools.Request
-	switch name {
-	case "read":
-		req = tools.Request{Tool: domain.ToolKindRead, Args: map[string]string{"path": args}}
-	case "glob":
-		req = tools.Request{Tool: domain.ToolKindGlob, Args: map[string]string{"pattern": args}}
-	case "grep":
-		req = tools.Request{Tool: domain.ToolKindGrep, Args: map[string]string{"pattern": args}}
-	case "bash":
-		req = tools.Request{Tool: domain.ToolKindBash, Args: map[string]string{"command": args}}
-	case "task":
-		req = tools.Request{Tool: domain.ToolKindTask, Args: map[string]string{"body": args}}
-	case "fetch":
-		req = tools.Request{Tool: domain.ToolKindWebFetch, Args: map[string]string{"url": args}}
-	case "patch":
-		parts := strings.SplitN(args, " ", 2)
-		if len(parts) != 2 {
-			return nil, fmt.Errorf("usage: /patch <path> <content>")
-		}
-		req = tools.Request{Tool: domain.ToolKindApplyPatch, Args: map[string]string{"path": parts[0], "content": parts[1]}}
-	case "approve":
-		return e.approve(ctx, session.ID, args)
-	case "deny":
-		return e.deny(ctx, session.ID, args)
-	case "perm":
-		return e.setPermissionProfile(ctx, session.ID, args)
-	default:
-		return nil, fmt.Errorf("unknown slash command %q", name)
-	}
-
-	mode := permission.Evaluate(e.cfg.Permissions, effectivePermissionProfile(e.cfg, session), permissionRequest(req))
-	if mode == domain.PermissionModeDeny {
-		return nil, fmt.Errorf("%s is denied by policy", req.Tool)
-	}
-
-	if req.Tool == domain.ToolKindTask {
-		task, err := e.store.AddTask(ctx, session.ID, req.Args["body"], domain.TaskStatusPending)
-		if err != nil {
-			return nil, err
-		}
-		if err := e.recordTaskUpdate(ctx, session.ID, task.Body, task.Status); err != nil {
-			return nil, err
-		}
-		return emitOnce(domain.Event{Kind: domain.EventKindTaskUpdate, Text: task.Body, Meta: map[string]string{"id": strconv.FormatInt(task.ID, 10), "status": string(task.Status)}}), nil
-	}
-
-	if mode == domain.PermissionModeAsk {
-		storedArgs, err := serializeRequest(req)
-		if err != nil {
-			return nil, err
-		}
-		approval, err := e.store.CreateApproval(ctx, session.ID, req.Tool, storedArgs)
-		if err != nil {
-			return nil, err
-		}
-		meta := map[string]string{
-			"approval_id": strconv.FormatInt(approval.ID, 10),
-			"tool":        string(req.Tool),
-			"command":     approvalPreview(req),
-		}
-		if err := e.recordApprovalRequest(ctx, session.ID, req.Tool, approval.ID, approvalPreview(req)); err != nil {
-			return nil, err
-		}
-		return emitOnce(domain.Event{Kind: domain.EventKindApprovalAsk, Text: fmt.Sprintf("%s requires approval", req.Tool), Tool: req.Tool, Meta: meta}), nil
-	}
-
-	result, err := e.registry.Execute(ctx, req)
-	if err != nil {
-		return emitOnce(domain.Event{Kind: domain.EventKindError, Err: err}), nil
-	}
-	return e.persistToolResult(ctx, session.ID, req.Tool, result)
 }
 
 func (e *Engine) setPermissionProfile(ctx context.Context, sessionID int64, raw string) (<-chan domain.Event, error) {

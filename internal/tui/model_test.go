@@ -31,6 +31,11 @@ func TestMatchingSlashCommands(t *testing.T) {
 	if len(matches) != 1 || matches[0].Name != "/perm" {
 		t.Fatalf("expected /perm, got %#v", matches)
 	}
+
+	matches = matchingSlashCommands("rea")
+	if len(matches) != 0 {
+		t.Fatalf("expected tool slash commands to stay hidden, got %#v", matches)
+	}
 }
 
 func TestSlashQuery(t *testing.T) {
@@ -44,7 +49,7 @@ func TestSlashQuery(t *testing.T) {
 		t.Fatalf("unexpected slash query for /new: ok=%v query=%q", ok, query)
 	}
 
-	if _, ok := slashQuery("/read file.txt"); ok {
+	if _, ok := slashQuery("/mouse on"); ok {
 		t.Fatal("expected no autocomplete query after slash command arguments start")
 	}
 }
@@ -79,7 +84,7 @@ func TestExactSlashCommandDoesNotConsumeEnterForAutocomplete(t *testing.T) {
 	m := Model{
 		composer: textarea.New(),
 	}
-	m.composer.SetValue("/read")
+	m.composer.SetValue("/new")
 	m.updateSlashMenu()
 
 	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
@@ -89,6 +94,25 @@ func TestExactSlashCommandDoesNotConsumeEnterForAutocomplete(t *testing.T) {
 	}
 	if !next.loading {
 		t.Fatal("expected loading after slash command enter")
+	}
+}
+
+func TestToolLikeSlashCommandIsRejectedLocally(t *testing.T) {
+	m := Model{
+		composer: textarea.New(),
+	}
+	m.composer.SetValue("/read README.md")
+
+	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	next := updated.(*Model)
+	if cmd != nil {
+		t.Fatal("expected no command for hidden tool-like slash input")
+	}
+	if next.loading {
+		t.Fatal("expected hidden tool-like slash input to stay local")
+	}
+	if next.status != "unknown command: /read README.md" {
+		t.Fatalf("unexpected status: %q", next.status)
 	}
 }
 

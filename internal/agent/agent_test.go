@@ -29,6 +29,15 @@ func TestParseToolCall(t *testing.T) {
 	}
 }
 
+func TestSystemPromptDoesNotMentionInternalSlashCommands(t *testing.T) {
+	prompt := systemPrompt()
+	for _, command := range []string{"/new", "/quit", "/perm", "/mouse", "/approve", "/deny"} {
+		if strings.Contains(prompt, command) {
+			t.Fatalf("expected system prompt to exclude internal slash command %q", command)
+		}
+	}
+}
+
 func TestApprovalSerializationRoundTrip(t *testing.T) {
 	req := tools.Request{
 		Tool: domain.ToolKindApplyPatch,
@@ -156,7 +165,7 @@ func TestApproveContinuesModelWithToolOutput(t *testing.T) {
 	}
 }
 
-func TestSlashTaskPersistsTranscriptUpdate(t *testing.T) {
+func TestModelTaskPersistsTranscriptUpdate(t *testing.T) {
 	t.Parallel()
 
 	cfg := config.Default()
@@ -172,18 +181,15 @@ func TestSlashTaskPersistsTranscriptUpdate(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	events, err := engine.RunPrompt(context.Background(), session, "/task write docs")
+	evt, err := engine.handleModelToolCall(context.Background(), session, toolCall{
+		Tool: domain.ToolKindTask,
+		Body: "write docs",
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	var sawTaskUpdate bool
-	for evt := range events {
-		if evt.Kind == domain.EventKindTaskUpdate && evt.Text == "write docs" {
-			sawTaskUpdate = true
-		}
-	}
-	if !sawTaskUpdate {
-		t.Fatal("expected task update event")
+	if evt.Kind != domain.EventKindTaskUpdate || evt.Text != "write docs" {
+		t.Fatalf("unexpected task update event: %#v", evt)
 	}
 
 	messages, parts, err := st.PartsForSession(context.Background(), session.ID)

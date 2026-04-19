@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -836,32 +837,86 @@ func (m Model) UpdateLoad(msg loadMsg) Model {
 }
 
 func (m *Model) handleLocalCommand(prompt string) (tea.Model, tea.Cmd, bool) {
-	switch strings.TrimSpace(prompt) {
-	case "/new":
+	trimmed := strings.TrimSpace(prompt)
+	switch {
+	case trimmed == "/new":
 		m.composer.Reset()
 		m.updateSlashMenu()
 		m.loading = true
 		m.status = "Creating session…"
 		return m, m.newSessionCmd(), true
-	case "/quit":
+	case trimmed == "/quit":
 		m.composer.Reset()
 		m.updateSlashMenu()
 		model, cmd := m.quit()
 		return model, cmd, true
-	case "/mouse on":
+	case trimmed == "/mouse on":
 		m.composer.Reset()
 		m.updateSlashMenu()
 		m.mouseEnabled = true
 		m.status = "Mouse capture enabled"
 		return m, func() tea.Msg { return tea.EnableMouseCellMotion() }, true
-	case "/mouse off":
+	case trimmed == "/mouse off":
 		m.composer.Reset()
 		m.updateSlashMenu()
 		m.mouseEnabled = false
 		m.status = "Mouse capture disabled"
 		return m, func() tea.Msg { return tea.DisableMouse() }, true
+	case strings.HasPrefix(trimmed, "/perm "):
+		profile := strings.TrimSpace(strings.TrimPrefix(trimmed, "/perm"))
+		m.composer.Reset()
+		m.updateSlashMenu()
+		m.loading = true
+		m.status = fmt.Sprintf("Setting permission profile to %s…", profile)
+		return m, m.permissionProfileCmd(profile), true
+	case strings.HasPrefix(trimmed, "/approve "):
+		id, err := strconv.ParseInt(strings.TrimSpace(strings.TrimPrefix(trimmed, "/approve")), 10, 64)
+		if err != nil {
+			m.status = fmt.Sprintf("invalid approval id: %v", err)
+			return m, nil, true
+		}
+		m.composer.Reset()
+		m.updateSlashMenu()
+		m.loading = true
+		m.status = fmt.Sprintf("Approving approval %d…", id)
+		return m, m.approveCmd(id), true
+	case strings.HasPrefix(trimmed, "/deny "):
+		id, err := strconv.ParseInt(strings.TrimSpace(strings.TrimPrefix(trimmed, "/deny")), 10, 64)
+		if err != nil {
+			m.status = fmt.Sprintf("invalid approval id: %v", err)
+			return m, nil, true
+		}
+		m.composer.Reset()
+		m.updateSlashMenu()
+		m.loading = true
+		m.status = fmt.Sprintf("Denying approval %d…", id)
+		return m, m.denyCmd(id), true
+	case strings.HasPrefix(trimmed, "/"):
+		m.status = fmt.Sprintf("unknown command: %s", trimmed)
+		return m, nil, true
 	default:
 		return nil, nil, false
+	}
+}
+
+func (m Model) permissionProfileCmd(profile string) tea.Cmd {
+	return func() tea.Msg {
+		events, err := m.agent.SetPermissionProfile(context.Background(), m.currentSession.ID, profile)
+		return promptDoneMsg{events: events, err: err}
+	}
+}
+
+func (m Model) approveCmd(approvalID int64) tea.Cmd {
+	return func() tea.Msg {
+		events, err := m.agent.Approve(context.Background(), m.currentSession.ID, approvalID)
+		return promptDoneMsg{events: events, err: err}
+	}
+}
+
+func (m Model) denyCmd(approvalID int64) tea.Cmd {
+	return func() tea.Msg {
+		events, err := m.agent.Deny(context.Background(), m.currentSession.ID, approvalID)
+		return promptDoneMsg{events: events, err: err}
 	}
 }
 
@@ -1052,14 +1107,13 @@ func (m *Model) submitApprovalChoice(approve bool) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	id := m.approvals[0].ID
-	command := fmt.Sprintf("/deny %d", id)
-	m.status = fmt.Sprintf("Denying approval %d…", id)
-	if approve {
-		command = fmt.Sprintf("/approve %d", id)
-		m.status = fmt.Sprintf("Approving approval %d…", id)
-	}
 	m.loading = true
-	return m, m.promptCmd(command)
+	if approve {
+		m.status = fmt.Sprintf("Approving approval %d…", id)
+		return m, m.approveCmd(id)
+	}
+	m.status = fmt.Sprintf("Denying approval %d…", id)
+	return m, m.denyCmd(id)
 }
 
 func (m *Model) renderApprovalPrompt() string {
@@ -1086,21 +1140,12 @@ func approvalOption(label string, selected bool) string {
 	return style.Render(label)
 }
 
-func slashCommands() []slashCommand {
+func internalSlashCommands() []slashCommand {
 	return []slashCommand{
 		{Name: "/new", Description: "Start a new session"},
 		{Name: "/mouse", Description: "Toggle mouse capture", NeedsArgs: true, Autocomplete: "/mouse "},
 		{Name: "/perm", Description: "Set permission profile", NeedsArgs: true, Autocomplete: "/perm "},
 		{Name: "/quit", Description: "Quit koder"},
-		{Name: "/read", Description: "Read a file", NeedsArgs: true, Autocomplete: "/read "},
-		{Name: "/glob", Description: "Find files by glob", NeedsArgs: true, Autocomplete: "/glob "},
-		{Name: "/grep", Description: "Search text in files", NeedsArgs: true, Autocomplete: "/grep "},
-		{Name: "/bash", Description: "Run a shell command", NeedsArgs: true, Autocomplete: "/bash "},
-		{Name: "/task", Description: "Add a tracked task", NeedsArgs: true, Autocomplete: "/task "},
-		{Name: "/fetch", Description: "Fetch a URL", NeedsArgs: true, Autocomplete: "/fetch "},
-		{Name: "/patch", Description: "Replace a file with content", NeedsArgs: true, Autocomplete: "/patch "},
-		{Name: "/approve", Description: "Approve a pending action", NeedsArgs: true, Autocomplete: "/approve "},
-		{Name: "/deny", Description: "Deny a pending action", NeedsArgs: true, Autocomplete: "/deny "},
 	}
 }
 
@@ -1153,7 +1198,7 @@ func slashQuery(value string) (string, bool) {
 
 func matchingSlashCommands(query string) []slashCommand {
 	var matches []slashCommand
-	for _, item := range slashCommands() {
+	for _, item := range internalSlashCommands() {
 		name := strings.TrimPrefix(strings.ToLower(item.Name), "/")
 		if query == "" || strings.HasPrefix(name, query) {
 			matches = append(matches, item)
