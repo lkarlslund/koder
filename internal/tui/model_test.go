@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/charmbracelet/bubbles/textarea"
@@ -171,5 +172,23 @@ func TestWorkingIndicatorShownWhenLoading(t *testing.T) {
 	got := m.workingIndicator()
 	if got == "" {
 		t.Fatal("expected working indicator while loading")
+	}
+}
+
+func TestRenderMessagePartsShowsReasoningBeforeText(t *testing.T) {
+	m := Model{
+		showReasoning: true,
+	}
+
+	got := m.renderMessageParts([]domain.Part{
+		{Kind: domain.PartKindText, Body: "final answer"},
+		{Kind: domain.PartKindReasoning, Body: "thinking first"},
+	})
+
+	if !strings.Contains(got, "thinking first") || !strings.Contains(got, "final answer") {
+		t.Fatalf("expected both reasoning and text, got %q", got)
+	}
+	if strings.Index(got, "thinking first") > strings.Index(got, "final answer") {
+		t.Fatalf("expected reasoning before text, got %q", got)
 	}
 }

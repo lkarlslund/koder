@@ -512,6 +512,8 @@ func (m *Model) refreshViewport() {
 
 func (m *Model) renderMessageParts(parts []domain.Part) string {
 	var blocks []string
+	var reasoningBlocks []string
+	var textBlocks []string
 	var textBuf strings.Builder
 	var reasoningBuf strings.Builder
 
@@ -519,7 +521,7 @@ func (m *Model) renderMessageParts(parts []domain.Part) string {
 		if textBuf.Len() == 0 {
 			return
 		}
-		blocks = append(blocks, m.renderer.Render(textBuf.String()))
+		textBlocks = append(textBlocks, m.renderer.Render(textBuf.String()))
 		textBuf.Reset()
 	}
 	flushReasoning := func() {
@@ -527,7 +529,7 @@ func (m *Model) renderMessageParts(parts []domain.Part) string {
 			return
 		}
 		if m.showReasoning {
-			blocks = append(blocks, m.renderer.Render(reasoningBuf.String()))
+			reasoningBlocks = append(reasoningBlocks, m.renderReasoningBlock(reasoningBuf.String()))
 		}
 		reasoningBuf.Reset()
 	}
@@ -550,7 +552,22 @@ func (m *Model) renderMessageParts(parts []domain.Part) string {
 	flushText()
 	flushReasoning()
 
+	blocks = append(blocks, reasoningBlocks...)
+	blocks = append(blocks, textBlocks...)
+
 	return strings.TrimSpace(strings.Join(blocks, "\n"))
+}
+
+func (m *Model) renderReasoningBlock(input string) string {
+	content := m.renderer.Render(input)
+	if strings.TrimSpace(content) == "" {
+		return ""
+	}
+	return lipgloss.NewStyle().
+		Background(lipgloss.Color("236")).
+		Foreground(lipgloss.Color("252")).
+		Padding(0, 1).
+		Render(strings.TrimSpace(content))
 }
 
 func (m Model) loadCmd() tea.Cmd {
