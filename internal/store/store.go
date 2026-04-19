@@ -172,6 +172,30 @@ ORDER BY s.updated_at DESC`)
 	return items, rows.Err()
 }
 
+func (s *Store) GetSession(ctx context.Context, sessionID int64) (domain.Session, error) {
+	row := s.db.QueryRowContext(ctx, `
+SELECT s.id, s.parent_id, s.title, s.provider_id, s.model_id, s.permission_profile, s.created_at, s.updated_at,
+COALESCE((SELECT summary FROM messages m WHERE m.session_id = s.id ORDER BY m.id DESC LIMIT 1), '')
+FROM sessions s
+WHERE s.id = ?`, sessionID)
+
+	var item domain.Session
+	var created, updated string
+	var parent sql.NullInt64
+	if err := row.Scan(&item.ID, &parent, &item.Title, &item.ProviderID, &item.ModelID, &item.PermissionProfile, &created, &updated, &item.LastMessage); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return domain.Session{}, fmt.Errorf("session %d not found", sessionID)
+		}
+		return domain.Session{}, fmt.Errorf("get session: %w", err)
+	}
+	if parent.Valid {
+		item.ParentID = &parent.Int64
+	}
+	item.CreatedAt, _ = time.Parse(time.RFC3339Nano, created)
+	item.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updated)
+	return item, nil
+}
+
 func (s *Store) SetSessionPermissionProfile(ctx context.Context, sessionID int64, profile string) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE sessions SET permission_profile = ?, updated_at = ? WHERE id = ?`,
 		profile, time.Now().UTC().Format(time.RFC3339Nano), sessionID)

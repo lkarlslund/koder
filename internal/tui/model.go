@@ -26,6 +26,8 @@ type promptDoneMsg struct {
 	err    error
 }
 
+type spinnerTickMsg struct{}
+
 type eventMsg struct {
 	event  domain.Event
 	events <-chan domain.Event
@@ -92,6 +94,7 @@ type Model struct {
 	startupMode    StartupMode
 	pickerVisible  bool
 	pickerIndex    int
+	spinnerFrame   int
 }
 
 func New(cfg config.Config, st *store.Store, a *agent.Engine, mode StartupMode) (Model, error) {
@@ -141,6 +144,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.resize()
 		m.refreshViewport()
 		return m, nil
+	case spinnerTickMsg:
+		if !m.isWorking() {
+			return m, nil
+		}
+		m.spinnerFrame++
+		return m, spinnerTickCmd()
 	case promptDoneMsg:
 		if msg.err != nil {
 			m.status = msg.err.Error()
@@ -149,7 +158,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.loading = true
 		m.status = "Waiting for model…"
-		return m, nextEventCmd(msg.events)
+		return m, tea.Batch(nextEventCmd(msg.events), spinnerTickCmd())
 	case runPromptMsg:
 		if msg.err != nil {
 			m.status = msg.err.Error()
@@ -159,7 +168,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.currentSession = msg.session
 		m.loading = true
 		m.status = "Waiting for model…"
-		return m, nextEventCmd(msg.events)
+		return m, tea.Batch(nextEventCmd(msg.events), spinnerTickCmd())
 	case eventMsg:
 		m.applyEvent(msg.event)
 		if msg.events != nil {
@@ -394,8 +403,8 @@ func (m *Model) renderHeader() string {
 		model = "(unset)"
 	}
 	return style.Render(fmt.Sprintf(
-		"koder  session:%d  profile:%s  provider:%s  model:%s  status:%s",
-		m.currentSession.ID, m.permissionProfile(), m.currentSession.ProviderID, model, m.status,
+		"koder%s  session:%d  profile:%s  provider:%s  model:%s  status:%s",
+		m.workingIndicator(), m.currentSession.ID, m.permissionProfile(), m.currentSession.ProviderID, model, m.status,
 	))
 }
 
@@ -785,6 +794,18 @@ func (m *Model) quit() (tea.Model, tea.Cmd) {
 	return m, tea.Quit
 }
 
+func (m *Model) isWorking() bool {
+	return m.loading
+}
+
+func (m *Model) workingIndicator() string {
+	if !m.isWorking() {
+		return ""
+	}
+	frames := []string{" [·  ]", " [·· ]", " [···]", " [ ··]", " [  ·]"}
+	return frames[m.spinnerFrame%len(frames)]
+}
+
 func (m Model) draftSession() domain.Session {
 	providerID := m.currentSession.ProviderID
 	if providerID == "" {
@@ -986,6 +1007,12 @@ func approvalSummary(item store.Approval) string {
 		return item.Command
 	}
 	return string(item.Tool)
+}
+
+func spinnerTickCmd() tea.Cmd {
+	return tea.Tick(120*time.Millisecond, func(time.Time) tea.Msg {
+		return spinnerTickMsg{}
+	})
 }
 
 func slashQuery(value string) (string, bool) {

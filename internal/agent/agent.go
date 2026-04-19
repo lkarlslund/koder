@@ -65,95 +65,91 @@ func (e *Engine) runModelPrompt(ctx context.Context, session domain.Session, pro
 	out := make(chan domain.Event)
 	go func() {
 		defer close(out)
-		for steps := 0; steps < 6; steps++ {
-			messages, buildErr := e.buildConversation(ctx, session.ID)
-			if buildErr != nil {
-				out <- domain.Event{Kind: domain.EventKindError, Err: buildErr}
-				return
-			}
-
-			text, reasoning, usage, completeErr := client.CompleteChat(ctx, provider.ChatRequest{
-				Model:    session.ModelID,
-				Messages: messages,
-				Stream:   false,
-			})
-			if completeErr != nil {
-				out <- domain.Event{Kind: domain.EventKindError, Err: completeErr}
-				return
-			}
-
-			call, plain := parseToolCall(text)
-			if call != nil {
-				assistantMsg, err := e.store.AddMessage(ctx, session.ID, domain.MessageRoleAssistant, fmt.Sprintf("tool:%s", call.Tool))
-				if err != nil {
-					out <- domain.Event{Kind: domain.EventKindError, Err: err}
-					return
-				}
-				meta, _ := json.Marshal(call)
-				if _, err := e.store.AddPart(ctx, assistantMsg.ID, domain.PartKindToolCall, strings.TrimSpace(text), string(meta)); err != nil {
-					out <- domain.Event{Kind: domain.EventKindError, Err: err}
-					return
-				}
-				if strings.TrimSpace(plain) != "" {
-					if _, err := e.store.AddPart(ctx, assistantMsg.ID, domain.PartKindSystemNotice, strings.TrimSpace(plain), ""); err != nil {
-						out <- domain.Event{Kind: domain.EventKindError, Err: err}
-						return
-					}
-				}
-
-				evt, handledErr := e.handleModelToolCall(ctx, session, *call)
-				if handledErr != nil {
-					out <- domain.Event{Kind: domain.EventKindError, Err: handledErr}
-					return
-				}
-				out <- evt
-				if evt.Kind == domain.EventKindApprovalAsk {
-					return
-				}
-				continue
-			}
-
-			assistantMsg, err := e.store.AddMessage(ctx, session.ID, domain.MessageRoleAssistant, strings.TrimSpace(text))
-			if err != nil {
-				out <- domain.Event{Kind: domain.EventKindError, Err: err}
-				return
-			}
-			if strings.TrimSpace(text) != "" {
-				if _, err := e.store.AddPart(ctx, assistantMsg.ID, domain.PartKindText, text, ""); err != nil {
-					out <- domain.Event{Kind: domain.EventKindError, Err: err}
-					return
-				}
-			}
-			if strings.TrimSpace(reasoning) != "" {
-				if _, err := e.store.AddPart(ctx, assistantMsg.ID, domain.PartKindReasoning, reasoning, ""); err != nil {
-					out <- domain.Event{Kind: domain.EventKindError, Err: err}
-					return
-				}
-			}
-			if usage.TotalTokens > 0 {
-				meta, _ := json.Marshal(usage)
-				if _, err := e.store.AddPart(ctx, assistantMsg.ID, domain.PartKindSystemNotice, "usage", string(meta)); err != nil {
-					out <- domain.Event{Kind: domain.EventKindError, Err: err}
-					return
-				}
-				out <- domain.Event{Kind: domain.EventKindUsage, Usage: usage}
-			}
-			if strings.TrimSpace(text) != "" {
-				out <- domain.Event{Kind: domain.EventKindMessageDelta, Text: text}
-			}
-			if strings.TrimSpace(reasoning) != "" {
-				out <- domain.Event{Kind: domain.EventKindReasoning, Text: reasoning}
-			}
-			if titleErr := e.maybeUpdateSessionTitle(ctx, session, client); titleErr != nil {
-				out <- domain.Event{Kind: domain.EventKindError, Err: titleErr}
-				return
-			}
-			out <- domain.Event{Kind: domain.EventKindMessageDone}
+		if err := e.continueModelTurn(ctx, session, client, out); err != nil {
+			out <- domain.Event{Kind: domain.EventKindError, Err: err}
 			return
 		}
-		out <- domain.Event{Kind: domain.EventKindError, Err: fmt.Errorf("tool loop exceeded max steps")}
 	}()
 	return out, nil
+}
+
+func (e *Engine) continueModelTurn(ctx context.Context, session domain.Session, client *provider.Client, out chan<- domain.Event) error {
+	for steps := 0; steps < 6; steps++ {
+		messages, buildErr := e.buildConversation(ctx, session.ID)
+		if buildErr != nil {
+			return buildErr
+		}
+
+		text, reasoning, usage, completeErr := client.CompleteChat(ctx, provider.ChatRequest{
+			Model:    session.ModelID,
+			Messages: messages,
+			Stream:   false,
+		})
+		if completeErr != nil {
+			return completeErr
+		}
+
+		call, plain := parseToolCall(text)
+		if call != nil {
+			assistantMsg, err := e.store.AddMessage(ctx, session.ID, domain.MessageRoleAssistant, fmt.Sprintf("tool:%s", call.Tool))
+			if err != nil {
+				return err
+			}
+			meta, _ := json.Marshal(call)
+			if _, err := e.store.AddPart(ctx, assistantMsg.ID, domain.PartKindToolCall, strings.TrimSpace(text), string(meta)); err != nil {
+				return err
+			}
+			if strings.TrimSpace(plain) != "" {
+				if _, err := e.store.AddPart(ctx, assistantMsg.ID, domain.PartKindSystemNotice, strings.TrimSpace(plain), ""); err != nil {
+					return err
+				}
+			}
+
+			evt, handledErr := e.handleModelToolCall(ctx, session, *call)
+			if handledErr != nil {
+				return handledErr
+			}
+			out <- evt
+			if evt.Kind == domain.EventKindApprovalAsk {
+				return nil
+			}
+			continue
+		}
+
+		assistantMsg, err := e.store.AddMessage(ctx, session.ID, domain.MessageRoleAssistant, strings.TrimSpace(text))
+		if err != nil {
+			return err
+		}
+		if strings.TrimSpace(text) != "" {
+			if _, err := e.store.AddPart(ctx, assistantMsg.ID, domain.PartKindText, text, ""); err != nil {
+				return err
+			}
+		}
+		if strings.TrimSpace(reasoning) != "" {
+			if _, err := e.store.AddPart(ctx, assistantMsg.ID, domain.PartKindReasoning, reasoning, ""); err != nil {
+				return err
+			}
+		}
+		if usage.TotalTokens > 0 {
+			meta, _ := json.Marshal(usage)
+			if _, err := e.store.AddPart(ctx, assistantMsg.ID, domain.PartKindSystemNotice, "usage", string(meta)); err != nil {
+				return err
+			}
+			out <- domain.Event{Kind: domain.EventKindUsage, Usage: usage}
+		}
+		if strings.TrimSpace(text) != "" {
+			out <- domain.Event{Kind: domain.EventKindMessageDelta, Text: text}
+		}
+		if strings.TrimSpace(reasoning) != "" {
+			out <- domain.Event{Kind: domain.EventKindReasoning, Text: reasoning}
+		}
+		if titleErr := e.maybeUpdateSessionTitle(ctx, session, client); titleErr != nil {
+			return titleErr
+		}
+		out <- domain.Event{Kind: domain.EventKindMessageDone}
+		return nil
+	}
+	return fmt.Errorf("tool loop exceeded max steps")
 }
 
 func (e *Engine) maybeUpdateSessionTitle(ctx context.Context, session domain.Session, client *provider.Client) error {
@@ -350,7 +346,33 @@ func (e *Engine) approve(ctx context.Context, sessionID int64, rawID string) (<-
 	if execErr != nil {
 		return emitOnce(domain.Event{Kind: domain.EventKindError, Err: execErr}), nil
 	}
-	return e.persistToolResult(ctx, sessionID, item.Tool, result)
+	toolEvents, err := e.persistToolResult(ctx, sessionID, item.Tool, result)
+	if err != nil {
+		return nil, err
+	}
+	session, err := e.store.GetSession(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	providerCfg, ok := e.cfg.Provider(session.ProviderID)
+	if !ok {
+		return nil, fmt.Errorf("provider %q not found", session.ProviderID)
+	}
+	client, err := provider.New(session.ProviderID, providerCfg)
+	if err != nil {
+		return nil, err
+	}
+	out := make(chan domain.Event)
+	go func() {
+		defer close(out)
+		for evt := range toolEvents {
+			out <- evt
+		}
+		if err := e.continueModelTurn(ctx, session, client, out); err != nil {
+			out <- domain.Event{Kind: domain.EventKindError, Err: err}
+		}
+	}()
+	return out, nil
 }
 
 func (e *Engine) deny(ctx context.Context, _ int64, rawID string) (<-chan domain.Event, error) {

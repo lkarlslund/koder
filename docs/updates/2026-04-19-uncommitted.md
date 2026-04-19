@@ -22,6 +22,8 @@ Create the first working implementation of `koder` from the approved plan.
 - Added a local `/quit` command and routed `Ctrl-C` through the same quit behavior.
 - Added automatic session title generation using the active model after the 1st, 3rd, and 10th prompts.
 - Changed `/new` and fresh startup sessions to remain unsaved until the first prompt is actually sent.
+- Changed approval handling so once a gated tool is approved and executed, the tool result is sent back into the model automatically.
+- Added a live animated working indicator in the TUI header while the model is processing.
 
 ## Tests run
 

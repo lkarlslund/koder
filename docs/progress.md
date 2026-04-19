@@ -15,6 +15,8 @@
 - Added a local `/quit` command and routed `Ctrl-C` through the same quit path.
 - Added model-generated session titles that refresh after the 1st, 3rd, and 10th user prompts.
 - Changed new-session behavior so draft sessions are kept in memory and only saved after the first real prompt.
+- Changed approved model tool calls to resume the same LLM turn so tool output is fed back into the conversation automatically.
+- Added a live animated working indicator in the TUI header while the remote model is active.
 - Verified `go test ./...`, `go vet ./...`, `staticcheck ./...`, and `golangci-lint run`.
 
 ## Current gaps

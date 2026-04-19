@@ -162,3 +162,14 @@ func TestUpdateLoadHidesSessionPicker(t *testing.T) {
 		t.Fatalf("unexpected current session: %#v", updated.currentSession)
 	}
 }
+
+func TestWorkingIndicatorShownWhenLoading(t *testing.T) {
+	m := Model{
+		loading: true,
+	}
+
+	got := m.workingIndicator()
+	if got == "" {
+		t.Fatal("expected working indicator while loading")
+	}
+}
