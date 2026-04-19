@@ -54,6 +54,7 @@ Create the first working implementation of `koder` from the approved plan.
 - Replaced the hardcoded resume-session picker with a reusable filterable picker model and used it for a new `/theme` command, including live theme preview while moving or filtering, OpenCode-style cancel-to-restore behavior, and persisted theme selection on confirm.
 - Added named sidebar palette tokens and styled the right-hand status panel with a theme-controlled background, foreground, and border so the sidebar is visually distinct in every theme.
 - Fixed slash autocomplete so exact matches for commands that still need arguments, such as `/perm`, continue to autocomplete on `Enter` instead of being treated as a finished command and doing nothing.
+- Embedded the full local OpenCode theme catalog into `koder` instead of maintaining a tiny handpicked subset, and added Claude-inspired `claude-dark`, `claude-light`, and daltonized palettes so the theme picker covers both reference agents that actually ship reusable theme sets.
 
 ## Tests run
 

@@ -520,7 +520,7 @@ func TestRenderBodyAppliesSidebarThemeBackground(t *testing.T) {
 	m.viewport.SetContent("history")
 
 	got := m.renderBody()
-	if !strings.Contains(got, "48;2;26;31;46") {
+	if !strings.Contains(got, "48;2;30;32;48") {
 		t.Fatalf("expected sidebar background ANSI color in render, got %q", got)
 	}
 }
