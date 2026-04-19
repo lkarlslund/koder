@@ -50,6 +50,7 @@ func TestSlashQuery(t *testing.T) {
 func TestEnterSendsNormalPrompt(t *testing.T) {
 	m := Model{
 		composer: textarea.New(),
+		parts:    map[int64][]domain.Part{},
 	}
 	m.composer.SetValue("hello")
 
@@ -63,6 +64,12 @@ func TestEnterSendsNormalPrompt(t *testing.T) {
 	}
 	if next.composer.Value() != "" {
 		t.Fatalf("expected composer reset, got %q", next.composer.Value())
+	}
+	if len(next.messages) != 1 || next.messages[0].Summary != "hello" {
+		t.Fatalf("expected optimistic user message, got %#v", next.messages)
+	}
+	if len(next.parts[next.messages[0].ID]) != 1 || next.parts[next.messages[0].ID][0].Body != "hello" {
+		t.Fatalf("expected optimistic user part, got %#v", next.parts)
 	}
 }
 

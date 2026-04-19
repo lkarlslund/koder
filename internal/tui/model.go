@@ -95,6 +95,7 @@ type Model struct {
 	pickerVisible  bool
 	pickerIndex    int
 	spinnerFrame   int
+	pendingPartID  int64
 }
 
 func New(cfg config.Config, st *store.Store, a *agent.Engine, mode StartupMode) (Model, error) {
@@ -335,6 +336,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.composer.Reset()
 		m.updateSlashMenu()
+		m.appendLocalUserPrompt(prompt)
 		m.loading = true
 		m.status = "Running…"
 		return m, m.promptCmd(prompt)
@@ -814,6 +816,37 @@ func (m *Model) quit() (tea.Model, tea.Cmd) {
 	m.loading = false
 	m.status = "Quitting"
 	return m, tea.Quit
+}
+
+func (m *Model) appendLocalUserPrompt(prompt string) {
+	now := time.Now().UTC()
+	if m.parts == nil {
+		m.parts = make(map[int64][]domain.Part)
+	}
+	messageID := m.nextPendingID()
+	m.messages = append(m.messages, domain.Message{
+		ID:        messageID,
+		SessionID: m.currentSession.ID,
+		Role:      domain.MessageRoleUser,
+		Summary:   prompt,
+		CreatedAt: now,
+	})
+	m.parts[messageID] = []domain.Part{{
+		ID:        m.nextPendingID(),
+		MessageID: messageID,
+		Kind:      domain.PartKindText,
+		Body:      prompt,
+		CreatedAt: now,
+	}}
+	m.refreshViewport()
+}
+
+func (m *Model) nextPendingID() int64 {
+	m.pendingPartID--
+	if m.pendingPartID == 0 {
+		m.pendingPartID = -1
+	}
+	return m.pendingPartID
 }
 
 func (m *Model) isWorking() bool {
