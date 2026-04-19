@@ -21,15 +21,17 @@ type UI struct {
 }
 
 type Provider struct {
-	Name         string            `toml:"name"`
-	BaseURL      string            `toml:"base_url"`
-	APIKey       string            `toml:"api_key"`
-	APIKeyEnv    string            `toml:"api_key_env"`
-	Headers      map[string]string `toml:"headers"`
-	DefaultModel string            `toml:"default_model"`
-	Stream       bool              `toml:"stream"`
-	Timeout      time.Duration     `toml:"timeout"`
-	Disabled     bool              `toml:"disabled"`
+	Name          string            `toml:"name"`
+	BaseURL       string            `toml:"base_url"`
+	APIKey        string            `toml:"api_key"`
+	APIKeyEnv     string            `toml:"api_key_env"`
+	Headers       map[string]string `toml:"headers"`
+	DefaultModel  string            `toml:"default_model"`
+	ContextWindow int               `toml:"context_window"`
+	AutoCompactAt int               `toml:"auto_compact_at"`
+	Stream        bool              `toml:"stream"`
+	Timeout       time.Duration     `toml:"timeout"`
+	Disabled      bool              `toml:"disabled"`
 }
 
 type PermissionRules struct {
@@ -114,12 +116,14 @@ func Default() Config {
 		DefaultProvider: "llamacpp-local",
 		Providers: map[string]Provider{
 			"llamacpp-local": {
-				Name:     "Local llama.cpp",
-				BaseURL:  "http://127.0.0.1:8888/v1",
-				Headers:  map[string]string{},
-				Stream:   true,
-				Timeout:  2 * time.Minute,
-				Disabled: false,
+				Name:          "Local llama.cpp",
+				BaseURL:       "http://127.0.0.1:8888/v1",
+				Headers:       map[string]string{},
+				ContextWindow: 32768,
+				AutoCompactAt: 85,
+				Stream:        true,
+				Timeout:       2 * time.Minute,
+				Disabled:      false,
 			},
 		},
 		Permissions: PermissionRules{
@@ -205,6 +209,12 @@ func (c *Config) applyDefaults() {
 	for id, provider := range c.Providers {
 		if provider.Timeout == 0 {
 			provider.Timeout = def.Providers[c.DefaultProvider].Timeout
+		}
+		if provider.ContextWindow == 0 {
+			provider.ContextWindow = def.Providers[c.DefaultProvider].ContextWindow
+		}
+		if provider.AutoCompactAt == 0 {
+			provider.AutoCompactAt = def.Providers[c.DefaultProvider].AutoCompactAt
 		}
 		if provider.Headers == nil {
 			provider.Headers = map[string]string{}

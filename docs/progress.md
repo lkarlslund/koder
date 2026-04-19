@@ -34,6 +34,7 @@
 - Moved hotkey hints out of the footer and into a dedicated `Keys` section at the bottom of the sidebar so the composer area stays clean.
 - Fixed the bottom working spinner animation by refreshing the transcript viewport on each spinner tick while the model is active.
 - Bottom-aligned the main TUI view so the chat input/footer sits flush with the terminal bottom edge instead of floating above it.
+- Added sidebar context metrics from the latest token usage, plus `/compact` and pre-turn auto-compaction using the current session model and a persisted compaction summary boundary.
 - Verified `go test ./...`, `go vet ./...`, `staticcheck ./...`, and `golangci-lint run`.
 
 ## Current gaps

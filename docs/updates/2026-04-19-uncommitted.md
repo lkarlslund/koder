@@ -41,6 +41,7 @@ Create the first working implementation of `koder` from the approved plan.
 - Moved the hotkey/help hints from above the chat input into a `Keys` section at the bottom of the sidebar.
 - Fixed the transcript-tail spinner animation by refreshing the viewport content on each spinner tick while a model turn is active.
 - Bottom-aligned the overall TUI layout so the footer and chat composer stay at the very bottom of the terminal window.
+- Added shared context usage metrics, surfaced `used / max / % used` in the sidebar, and implemented manual `/compact` plus pre-turn auto-compaction with persisted summary boundaries in session history.
 
 ## Tests run
 

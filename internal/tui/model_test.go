@@ -33,6 +33,11 @@ func TestMatchingSlashCommands(t *testing.T) {
 		t.Fatalf("expected /perm, got %#v", matches)
 	}
 
+	matches = matchingSlashCommands("comp")
+	if len(matches) != 1 || matches[0].Name != "/compact" {
+		t.Fatalf("expected /compact, got %#v", matches)
+	}
+
 	matches = matchingSlashCommands("rea")
 	if len(matches) != 0 {
 		t.Fatalf("expected tool slash commands to stay hidden, got %#v", matches)
@@ -287,6 +292,15 @@ func TestRenderSidebarShowsStatusAndSessionInfo(t *testing.T) {
 		status:         "Working ...",
 		modelWorking:   true,
 		workdir:        "/tmp/project",
+		cfg: config.Config{
+			Providers: map[string]config.Provider{
+				"test": {ContextWindow: 32768},
+			},
+		},
+		messages: []domain.Message{{ID: 1}},
+		parts: map[int64][]domain.Part{
+			1: {{Kind: domain.PartKindSystemNotice, Body: "usage", MetaJSON: `{"TotalTokens":8192}`}},
+		},
 	}
 
 	got := m.renderSidebar()
@@ -298,6 +312,9 @@ func TestRenderSidebarShowsStatusAndSessionInfo(t *testing.T) {
 	}
 	if !strings.Contains(got, "Keys") || !strings.Contains(got, "enter send/select") {
 		t.Fatalf("expected sidebar to include hotkey hints, got %q", got)
+	}
+	if !strings.Contains(got, "Context") || !strings.Contains(got, "25% used") {
+		t.Fatalf("expected sidebar to include context usage, got %q", got)
 	}
 }
 

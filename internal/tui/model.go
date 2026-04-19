@@ -18,6 +18,7 @@ import (
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/markdown"
 	"github.com/lkarlslund/koder/internal/permission"
+	"github.com/lkarlslund/koder/internal/sessionctx"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/workspace"
 )
@@ -483,6 +484,12 @@ func (m *Model) renderSidebar() string {
 	} else {
 		lines = append(lines, fmt.Sprintf("  %s", truncate(status, 24)))
 	}
+	if metrics, ok := sessionctx.FromMessages(m.cfg, m.currentSession, m.messages, m.parts); ok {
+		lines = append(lines, "")
+		lines = append(lines, "Context")
+		lines = append(lines, fmt.Sprintf("  used   %s / %s", formatTokens(metrics.Used), formatTokens(metrics.Max)))
+		lines = append(lines, fmt.Sprintf("  usage  %d%% used", metrics.UsagePercent))
+	}
 	lines = append(lines, "")
 	lines = append(lines, "Workspace")
 	lines = append(lines, truncate(m.workdir, 28))
@@ -546,6 +553,7 @@ func (m *Model) renderSidebar() string {
 	lines = append(lines, "  tab   autocomplete")
 	lines = append(lines, "  ^s    sidebar")
 	lines = append(lines, "  ^r    reasoning")
+	lines = append(lines, "  /compact")
 	lines = append(lines, "  /new  session")
 	lines = append(lines, "  /perm profile")
 	lines = append(lines, "  /quit")
@@ -916,6 +924,17 @@ func truncate(s string, maxLen int) string {
 	return s[:maxLen-1] + "…"
 }
 
+func formatTokens(value int) string {
+	switch {
+	case value >= 1_000_000:
+		return fmt.Sprintf("%.1fm", float64(value)/1_000_000)
+	case value >= 1_000:
+		return fmt.Sprintf("%.1fk", float64(value)/1_000)
+	default:
+		return strconv.Itoa(value)
+	}
+}
+
 func min(a, b int) int {
 	if a < b {
 		return a
@@ -977,6 +996,12 @@ func (m *Model) handleLocalCommand(prompt string) (tea.Model, tea.Cmd, bool) {
 		m.loading = true
 		m.status = fmt.Sprintf("Setting permission profile to %s…", profile)
 		return m, m.permissionProfileCmd(profile), true
+	case trimmed == "/compact":
+		m.composer.Reset()
+		m.updateSlashMenu()
+		m.loading = true
+		m.status = "Compacting session..."
+		return m, m.compactCmd(), true
 	case strings.HasPrefix(trimmed, "/approve "):
 		id, err := strconv.ParseInt(strings.TrimSpace(strings.TrimPrefix(trimmed, "/approve")), 10, 64)
 		if err != nil {
@@ -1010,6 +1035,13 @@ func (m *Model) handleLocalCommand(prompt string) (tea.Model, tea.Cmd, bool) {
 func (m Model) permissionProfileCmd(profile string) tea.Cmd {
 	return func() tea.Msg {
 		events, err := m.agent.SetPermissionProfile(context.Background(), m.currentSession.ID, profile)
+		return promptDoneMsg{events: events, err: err}
+	}
+}
+
+func (m Model) compactCmd() tea.Cmd {
+	return func() tea.Msg {
+		events, err := m.agent.Compact(context.Background(), m.currentSession.ID)
 		return promptDoneMsg{events: events, err: err}
 	}
 }
@@ -1250,6 +1282,7 @@ func approvalOption(label string, selected bool) string {
 
 func internalSlashCommands() []slashCommand {
 	return []slashCommand{
+		{Name: "/compact", Description: "Summarize old context"},
 		{Name: "/new", Description: "Start a new session"},
 		{Name: "/mouse", Description: "Toggle mouse capture", NeedsArgs: true, Autocomplete: "/mouse "},
 		{Name: "/perm", Description: "Set permission profile", NeedsArgs: true, Autocomplete: "/perm "},

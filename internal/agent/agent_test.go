@@ -72,6 +72,56 @@ func TestStringifyPartsExcludesSystemNotice(t *testing.T) {
 	}
 }
 
+func TestBuildConversationResetsAtCompactionBoundary(t *testing.T) {
+	cfg := config.Default()
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	engine := New(cfg, st, tools.NewRegistry(t.TempDir()))
+	session, err := st.CreateSession(context.Background(), "test", cfg.DefaultProvider, "test-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := st.AddMessage(context.Background(), session.ID, domain.MessageRoleUser, "before")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.AddPart(context.Background(), before.ID, domain.PartKindText, "old question", ""); err != nil {
+		t.Fatal(err)
+	}
+	compactMsg, err := st.AddMessage(context.Background(), session.ID, domain.MessageRoleAssistant, "compact")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.AddPart(context.Background(), compactMsg.ID, domain.PartKindCompaction, "summary block", ""); err != nil {
+		t.Fatal(err)
+	}
+	after, err := st.AddMessage(context.Background(), session.ID, domain.MessageRoleUser, "after")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.AddPart(context.Background(), after.ID, domain.PartKindText, "new question", ""); err != nil {
+		t.Fatal(err)
+	}
+
+	conversation, err := engine.buildConversation(context.Background(), session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(conversation) != 3 {
+		t.Fatalf("expected system + compact summary + later message, got %#v", conversation)
+	}
+	if !strings.Contains(conversation[1].Content, "summary block") {
+		t.Fatalf("expected compact summary in context, got %#v", conversation[1])
+	}
+	if strings.Contains(conversation[2].Content, "old question") || !strings.Contains(conversation[2].Content, "new question") {
+		t.Fatalf("expected only post-compact history, got %#v", conversation[2])
+	}
+}
+
 func TestStringifyPartsNormalizesToolCallFromMetadata(t *testing.T) {
 	got := stringifyParts([]domain.Part{{
 		Kind:     domain.PartKindToolCall,

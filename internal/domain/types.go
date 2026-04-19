@@ -19,6 +19,7 @@ const (
 	PartKindToolCall        PartKind = "tool_call"
 	PartKindToolOutput      PartKind = "tool_output"
 	PartKindDiff            PartKind = "diff"
+	PartKindCompaction      PartKind = "compaction"
 	PartKindApprovalRequest PartKind = "approval_request"
 	PartKindQuestion        PartKind = "question"
 	PartKindTaskUpdate      PartKind = "task_update"

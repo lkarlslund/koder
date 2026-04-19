@@ -13,6 +13,7 @@ import (
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/permission"
 	"github.com/lkarlslund/koder/internal/provider"
+	"github.com/lkarlslund/koder/internal/sessionctx"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools"
 )
@@ -53,6 +54,32 @@ func (e *Engine) Deny(ctx context.Context, sessionID, approvalID int64) (<-chan 
 	return e.deny(ctx, sessionID, strconv.FormatInt(approvalID, 10))
 }
 
+func (e *Engine) Compact(ctx context.Context, sessionID int64) (<-chan domain.Event, error) {
+	session, err := e.store.GetSession(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	providerCfg, ok := e.cfg.Provider(session.ProviderID)
+	if !ok {
+		return nil, fmt.Errorf("provider %q not found", session.ProviderID)
+	}
+	client, err := provider.New(session.ProviderID, providerCfg)
+	if err != nil {
+		return nil, err
+	}
+	out := make(chan domain.Event)
+	go func() {
+		defer close(out)
+		out <- domain.Event{Kind: domain.EventKindStatus, Text: "Compacting session..."}
+		if err := e.compactSession(ctx, session, client, "manual", out); err != nil {
+			out <- domain.Event{Kind: domain.EventKindError, Err: err}
+			return
+		}
+		out <- domain.Event{Kind: domain.EventKindMessageDone}
+	}()
+	return out, nil
+}
+
 func (e *Engine) runModelPrompt(ctx context.Context, session domain.Session, prompt string) (<-chan domain.Event, error) {
 	providerCfg, ok := e.cfg.Provider(session.ProviderID)
 	if !ok {
@@ -63,17 +90,30 @@ func (e *Engine) runModelPrompt(ctx context.Context, session domain.Session, pro
 		return nil, err
 	}
 
-	userMsg, err := e.store.AddMessage(ctx, session.ID, domain.MessageRoleUser, prompt)
-	if err != nil {
-		return nil, err
-	}
-	if _, err := e.store.AddPart(ctx, userMsg.ID, domain.PartKindText, prompt, ""); err != nil {
-		return nil, err
-	}
-
 	out := make(chan domain.Event)
 	go func() {
 		defer close(out)
+		compacted, err := e.autoCompactIfNeeded(ctx, session, client, out)
+		if err != nil {
+			out <- domain.Event{Kind: domain.EventKindError, Err: err}
+			return
+		}
+		if compacted {
+			session, err = e.store.GetSession(ctx, session.ID)
+			if err != nil {
+				out <- domain.Event{Kind: domain.EventKindError, Err: err}
+				return
+			}
+		}
+		userMsg, err := e.store.AddMessage(ctx, session.ID, domain.MessageRoleUser, prompt)
+		if err != nil {
+			out <- domain.Event{Kind: domain.EventKindError, Err: err}
+			return
+		}
+		if _, err := e.store.AddPart(ctx, userMsg.ID, domain.PartKindText, prompt, ""); err != nil {
+			out <- domain.Event{Kind: domain.EventKindError, Err: err}
+			return
+		}
 		if err := e.continueModelTurn(ctx, session, client, out); err != nil {
 			out <- domain.Event{Kind: domain.EventKindError, Err: err}
 			return
@@ -299,6 +339,18 @@ func (e *Engine) approve(ctx context.Context, sessionID int64, rawID string) (<-
 		for evt := range toolEvents {
 			out <- evt
 		}
+		compacted, err := e.autoCompactIfNeeded(ctx, session, client, out)
+		if err != nil {
+			out <- domain.Event{Kind: domain.EventKindError, Err: err}
+			return
+		}
+		if compacted {
+			session, err = e.store.GetSession(ctx, session.ID)
+			if err != nil {
+				out <- domain.Event{Kind: domain.EventKindError, Err: err}
+				return
+			}
+		}
 		if err := e.continueModelTurn(ctx, session, client, out); err != nil {
 			out <- domain.Event{Kind: domain.EventKindError, Err: err}
 		}
@@ -358,6 +410,13 @@ func (e *Engine) buildConversation(ctx context.Context, sessionID int64) ([]prov
 		{Role: domain.MessageRoleSystem, Content: systemPrompt()},
 	}
 	for _, msg := range messages {
+		if summary, ok := compactionSummary(partsByMessage[msg.ID]); ok {
+			conversation = []provider.Message{
+				{Role: domain.MessageRoleSystem, Content: systemPrompt()},
+				{Role: domain.MessageRoleSystem, Content: "Compacted session summary:\n" + summary},
+			}
+			continue
+		}
 		content := stringifyParts(partsByMessage[msg.ID])
 		if strings.TrimSpace(content) == "" {
 			content = msg.Summary
@@ -377,6 +436,8 @@ func stringifyParts(parts []domain.Part) string {
 	var chunks []string
 	for _, part := range parts {
 		switch part.Kind {
+		case domain.PartKindCompaction:
+			continue
 		case domain.PartKindReasoning:
 			chunks = append(chunks, "Reasoning:\n"+part.Body)
 		case domain.PartKindToolCall:
@@ -396,6 +457,15 @@ func stringifyParts(parts []domain.Part) string {
 		}
 	}
 	return strings.TrimSpace(strings.Join(chunks, "\n\n"))
+}
+
+func compactionSummary(parts []domain.Part) (string, bool) {
+	for _, part := range parts {
+		if part.Kind == domain.PartKindCompaction && strings.TrimSpace(part.Body) != "" {
+			return strings.TrimSpace(part.Body), true
+		}
+	}
+	return "", false
 }
 
 func toolCallContext(part domain.Part) string {
@@ -466,6 +536,31 @@ Rules:
 `)
 }
 
+func compactPrompt() string {
+	return strings.TrimSpace(`
+Summarize this coding session so another agent can continue it with minimal loss.
+
+Return only the summary text. Do not call tools.
+
+Use this structure:
+## Goal
+[current user goal]
+
+## Constraints
+- [important instructions or preferences]
+
+## Progress
+- [finished work]
+- [work still in progress]
+
+## Relevant Files
+- [important files and why they matter]
+
+## Next Step
+- [best immediate continuation]
+`)
+}
+
 func parseToolCall(text string) (*toolCall, string) {
 	re := regexp.MustCompile(`(?s)<koder_tool>\s*(\{.*?\})\s*</koder_tool>`)
 	match := re.FindStringSubmatch(text)
@@ -478,6 +573,81 @@ func parseToolCall(text string) (*toolCall, string) {
 	}
 	plain := strings.TrimSpace(re.ReplaceAllString(text, ""))
 	return &call, plain
+}
+
+func (e *Engine) autoCompactIfNeeded(ctx context.Context, session domain.Session, client *provider.Client, out chan<- domain.Event) (bool, error) {
+	messages, parts, err := e.store.PartsForSession(ctx, session.ID)
+	if err != nil {
+		return false, err
+	}
+	metrics, ok := sessionctx.FromMessages(e.cfg, session, messages, parts)
+	if !ok {
+		return false, nil
+	}
+	providerCfg, ok := e.cfg.Provider(session.ProviderID)
+	if !ok {
+		return false, nil
+	}
+	threshold := providerCfg.AutoCompactAt
+	if threshold <= 0 {
+		threshold = 85
+	}
+	if metrics.UsagePercent < threshold {
+		return false, nil
+	}
+	if out != nil {
+		out <- domain.Event{Kind: domain.EventKindStatus, Text: fmt.Sprintf("Auto-compacting at %d%% context used", metrics.UsagePercent)}
+	}
+	if err := e.compactSession(ctx, session, client, "auto", out); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (e *Engine) compactSession(ctx context.Context, session domain.Session, client *provider.Client, trigger string, out chan<- domain.Event) error {
+	messages, err := e.buildConversation(ctx, session.ID)
+	if err != nil {
+		return err
+	}
+	if len(messages) <= 1 {
+		return nil
+	}
+	summary, _, usage, err := client.CompleteChat(ctx, provider.ChatRequest{
+		Model: session.ModelID,
+		Messages: append(messages, provider.Message{
+			Role:    domain.MessageRoleUser,
+			Content: compactPrompt(),
+		}),
+		Stream: false,
+	})
+	if err != nil {
+		return err
+	}
+	summary = strings.TrimSpace(summary)
+	if summary == "" {
+		return nil
+	}
+	msg, err := e.store.AddMessage(ctx, session.ID, domain.MessageRoleAssistant, "Compacted session summary")
+	if err != nil {
+		return err
+	}
+	meta, _ := json.Marshal(map[string]string{"trigger": trigger})
+	if _, err := e.store.AddPart(ctx, msg.ID, domain.PartKindCompaction, summary, string(meta)); err != nil {
+		return err
+	}
+	if usage.TotalTokens > 0 {
+		usageMeta, _ := json.Marshal(usage)
+		if _, err := e.store.AddPart(ctx, msg.ID, domain.PartKindSystemNotice, "usage", string(usageMeta)); err != nil {
+			return err
+		}
+		if out != nil {
+			out <- domain.Event{Kind: domain.EventKindUsage, Usage: usage}
+		}
+	}
+	if out != nil {
+		out <- domain.Event{Kind: domain.EventKindStatus, Text: "Session compacted"}
+	}
+	return nil
 }
 
 func (e *Engine) handleModelToolCall(ctx context.Context, session domain.Session, call toolCall) (domain.Event, error) {
