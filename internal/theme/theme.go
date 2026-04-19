@@ -15,10 +15,12 @@ type Palette struct {
 	MarkdownHeadingTertiary      lipgloss.Color
 	MarkdownInlineCodeBackground lipgloss.Color
 	MarkdownInlineCodeText       lipgloss.Color
+	MarkdownLinkText             lipgloss.Color
 	MarkdownListMarker           lipgloss.Color
 	MarkdownQuoteBorder          lipgloss.Color
 	MarkdownQuoteText            lipgloss.Color
 	MarkdownRule                 lipgloss.Color
+	MarkdownTableBorder          lipgloss.Color
 	ReasoningBackground          lipgloss.Color
 	ReasoningText                lipgloss.Color
 	UserTextBackground           lipgloss.Color
@@ -56,10 +58,12 @@ func Default() Theme {
 			MarkdownHeadingTertiary:      lipgloss.Color("252"),
 			MarkdownInlineCodeBackground: lipgloss.Color("237"),
 			MarkdownInlineCodeText:       lipgloss.Color("228"),
+			MarkdownLinkText:             lipgloss.Color("117"),
 			MarkdownListMarker:           lipgloss.Color("111"),
 			MarkdownQuoteBorder:          lipgloss.Color("243"),
 			MarkdownQuoteText:            lipgloss.Color("250"),
 			MarkdownRule:                 lipgloss.Color("240"),
+			MarkdownTableBorder:          lipgloss.Color("240"),
 			ReasoningBackground:          lipgloss.Color("236"),
 			ReasoningText:                lipgloss.Color("252"),
 			UserTextBackground:           lipgloss.Color("238"),

@@ -13,10 +13,13 @@ func TestRenderFormatsHeadingsAndLists(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	got := renderer.Render("# Title\n\n- first\n1. second")
+	got := renderer.Render("# Title\n\n## Subtitle\n\n- first\n1. second")
 
 	if !strings.Contains(got, "Title") {
 		t.Fatalf("expected heading text, got %q", got)
+	}
+	if !strings.Contains(got, "Subtitle") {
+		t.Fatalf("expected h2 text, got %q", got)
 	}
 	if !strings.Contains(got, "• first") {
 		t.Fatalf("expected bullet item, got %q", got)
@@ -86,6 +89,53 @@ func TestRenderFormatsInlineMarkdown(t *testing.T) {
 	got := renderer.Render("plain `code` **bold** _italic_")
 
 	for _, want := range []string{"plain", "code", "bold", "italic"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected %q in rendered output, got %q", want, got)
+		}
+	}
+}
+
+func TestRenderFormatsNestedLists(t *testing.T) {
+	renderer, err := New(theme.Default().Palette)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	got := renderer.Render("- parent\n    - child\n    - second child")
+
+	if !strings.Contains(got, "• parent") {
+		t.Fatalf("expected top-level bullet, got %q", got)
+	}
+	if !strings.Contains(got, "\n     • child") || !strings.Contains(got, "\n     • second child") {
+		t.Fatalf("expected indented nested bullets, got %q", got)
+	}
+}
+
+func TestRenderFormatsBlockquoteAndLink(t *testing.T) {
+	renderer, err := New(theme.Default().Palette)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	got := renderer.Render("> quoted text with [link](https://example.com)")
+
+	if !strings.Contains(got, "│") || !strings.Contains(got, "quoted text") {
+		t.Fatalf("expected blockquote rendering, got %q", got)
+	}
+	if !strings.Contains(got, "link (https://example.com)") {
+		t.Fatalf("expected rendered markdown link, got %q", got)
+	}
+}
+
+func TestRenderFormatsTableAndTaskList(t *testing.T) {
+	renderer, err := New(theme.Default().Palette)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	got := renderer.Render("| Name | Value |\n| --- | --- |\n| one | two |\n\n- [x] done\n- [ ] todo")
+
+	for _, want := range []string{"| Name", "| one", "[x] done", "[ ] todo"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("expected %q in rendered output, got %q", want, got)
 		}

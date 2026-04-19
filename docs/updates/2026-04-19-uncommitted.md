@@ -47,6 +47,7 @@ Create the first working implementation of `koder` from the approved plan.
 - Fixed user message bubble rendering so top and bottom padding lines match the full bubble width, and multi-line or wrapped user input keeps one continuous background span across each rendered line.
 - Refactored TUI busy handling around a centralized busy/spinner state model so spinner rendering no longer depends on scattered `loading` vs `modelWorking` flags, and `/compact` now keeps animating while status events arrive.
 - Fixed the transcript renderer to ignore `system_notice` parts, which removes spurious `usage` text from the chat window while keeping usage metadata available for sidebar/context accounting.
+- Replaced the markdown line parser with a `goldmark` CommonMark/GFM AST renderer using local theme styles, which fixes `##` and `-` rendering and broadens support to nested lists, links, blockquotes, tables, task lists, and fenced code blocks.
 
 ## Tests run
 
