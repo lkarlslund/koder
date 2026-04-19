@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -242,6 +243,74 @@ func TestMouseWheelScrollsViewport(t *testing.T) {
 	}
 	if next.viewport.YOffset == 0 {
 		t.Fatalf("expected viewport to scroll, got y offset %d", next.viewport.YOffset)
+	}
+}
+
+func TestEventMsgReloadsTranscriptBeforeTurnCompletes(t *testing.T) {
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	session, err := st.CreateSession(context.Background(), "test", "provider", "model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	msg, err := st.AddMessage(context.Background(), session.ID, domain.MessageRoleTool, "bash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.AddPart(context.Background(), msg.ID, domain.PartKindToolOutput, "file-a\nfile-b", ""); err != nil {
+		t.Fatal(err)
+	}
+
+	m := Model{
+		store:          st,
+		currentSession: session,
+		parts:          map[int64][]domain.Part{},
+	}
+	events := make(chan domain.Event)
+	defer close(events)
+
+	updated, cmd := m.Update(eventMsg{
+		event:  domain.Event{Kind: domain.EventKindToolResult, Tool: domain.ToolKindBash, Text: "file-a\nfile-b"},
+		events: events,
+	})
+	next := updated.(Model)
+	if next.status != "Tool bash finished" {
+		t.Fatalf("unexpected status: %q", next.status)
+	}
+	if cmd == nil {
+		t.Fatal("expected reload command")
+	}
+	msgAny := cmd()
+	batch, ok := msgAny.(tea.BatchMsg)
+	if !ok {
+		t.Fatalf("expected tea.BatchMsg, got %T", msgAny)
+	}
+	var load loadMsg
+	found := false
+	for _, cmd := range batch {
+		if cmd == nil {
+			continue
+		}
+		candidate, ok := cmd().(loadMsg)
+		if !ok {
+			continue
+		}
+		load = candidate
+		found = true
+		break
+	}
+	if !found {
+		t.Fatalf("expected batched loadMsg, got %#v", batch)
+	}
+	if len(load.messages) != 1 {
+		t.Fatalf("expected one reloaded message, got %d", len(load.messages))
+	}
+	if got := load.parts[load.messages[0].ID][0].Body; got != "file-a\nfile-b" {
+		t.Fatalf("unexpected reloaded tool output: %q", got)
 	}
 }
 

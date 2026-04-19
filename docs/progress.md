@@ -19,6 +19,7 @@
 - Added a live animated working indicator in the TUI header while the remote model is active.
 - Added mouse-wheel scrolling for the transcript viewport so previous chat history can be browsed directly in the TUI.
 - Changed transcript rendering so user prompts appear as styled message blocks instead of bracketed role labels.
+- Changed the interaction loop so persisted events refresh the transcript immediately while a turn is still running, including tool and task updates.
 - Verified `go test ./...`, `go vet ./...`, `staticcheck ./...`, and `golangci-lint run`.
 
 ## Current gaps

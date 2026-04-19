@@ -26,6 +26,7 @@ Create the first working implementation of `koder` from the approved plan.
 - Added a live animated working indicator in the TUI header while the model is processing.
 - Added mouse-wheel scrolling support for the transcript viewport.
 - Changed the chat transcript to render user prompts as filled message blocks instead of `[user]` and `[assistant]` labels.
+- Changed turn handling so persisted events reload the visible transcript immediately, and task updates are now written into chat history too.
 
 ## Tests run
 

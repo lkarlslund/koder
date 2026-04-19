@@ -275,6 +275,9 @@ func (e *Engine) runSlashCommand(ctx context.Context, session domain.Session, pr
 		if err != nil {
 			return nil, err
 		}
+		if err := e.recordTaskUpdate(ctx, session.ID, task.Body, task.Status); err != nil {
+			return nil, err
+		}
 		return emitOnce(domain.Event{Kind: domain.EventKindTaskUpdate, Text: task.Body, Meta: map[string]string{"id": strconv.FormatInt(task.ID, 10), "status": string(task.Status)}}), nil
 	}
 
@@ -555,6 +558,9 @@ func (e *Engine) handleModelToolCall(ctx context.Context, session domain.Session
 		if err != nil {
 			return domain.Event{}, err
 		}
+		if err := e.recordTaskUpdate(ctx, sessionID, task.Body, task.Status); err != nil {
+			return domain.Event{}, err
+		}
 		return domain.Event{Kind: domain.EventKindTaskUpdate, Text: task.Body, Tool: req.Tool}, nil
 	}
 	if mode == domain.PermissionModeAsk {
@@ -705,6 +711,18 @@ func (e *Engine) recordApprovalReply(ctx context.Context, sessionID int64, tool 
 		return err
 	}
 	_, err = e.store.AddPart(ctx, msg.ID, domain.PartKindSystemNotice, body, string(meta))
+	return err
+}
+
+func (e *Engine) recordTaskUpdate(ctx context.Context, sessionID int64, body string, status domain.TaskStatus) error {
+	msg, err := e.store.AddMessage(ctx, sessionID, domain.MessageRoleTool, fmt.Sprintf("task:%s", status))
+	if err != nil {
+		return err
+	}
+	meta, _ := json.Marshal(map[string]string{
+		"status": string(status),
+	})
+	_, err = e.store.AddPart(ctx, msg.ID, domain.PartKindTaskUpdate, body, string(meta))
 	return err
 }
 

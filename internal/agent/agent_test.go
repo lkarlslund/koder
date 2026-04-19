@@ -156,6 +156,54 @@ func TestApproveContinuesModelWithToolOutput(t *testing.T) {
 	}
 }
 
+func TestSlashTaskPersistsTranscriptUpdate(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.Default()
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	engine := New(cfg, st, tools.NewRegistry(t.TempDir()))
+	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	events, err := engine.RunPrompt(context.Background(), session, "/task write docs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sawTaskUpdate bool
+	for evt := range events {
+		if evt.Kind == domain.EventKindTaskUpdate && evt.Text == "write docs" {
+			sawTaskUpdate = true
+		}
+	}
+	if !sawTaskUpdate {
+		t.Fatal("expected task update event")
+	}
+
+	messages, parts, err := st.PartsForSession(context.Background(), session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 1 {
+		t.Fatalf("expected one persisted message, got %d", len(messages))
+	}
+	if messages[0].Role != domain.MessageRoleTool {
+		t.Fatalf("expected tool role, got %s", messages[0].Role)
+	}
+	if got := parts[messages[0].ID][0].Kind; got != domain.PartKindTaskUpdate {
+		t.Fatalf("expected task update part, got %s", got)
+	}
+	if got := parts[messages[0].ID][0].Body; got != "write docs" {
+		t.Fatalf("unexpected task update body: %q", got)
+	}
+}
+
 func parseApprovalID(raw string) (int64, error) {
 	return strconv.ParseInt(raw, 10, 64)
 }

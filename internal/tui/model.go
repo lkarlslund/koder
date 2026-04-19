@@ -173,7 +173,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case eventMsg:
 		m.applyEvent(msg.event)
 		if msg.events != nil {
-			return m, nextEventCmd(msg.events)
+			return m, tea.Batch(m.reloadDetailsCmd(), nextEventCmd(msg.events))
 		}
 		m.loading = false
 		return m, m.reloadDetailsCmd()
