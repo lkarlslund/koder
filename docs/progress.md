@@ -45,6 +45,7 @@
 - Fixed TUI height calculation to measure the real footer height instead of subtracting a hardcoded 10 lines, which removes the blank rows that were being left at the top of taller terminals.
 - Fixed transcript rendering for assistant `compaction` parts so compacted session summaries now pass through the markdown renderer instead of displaying raw `##` and `-` source text.
 - Replaced the old one-off resume dialog with a reusable filterable picker model, wired `koder resume` through it, and added a new `/theme` picker with live preview and persisted theme selection inspired by OpenCode’s dialog-select flow.
+- Added explicit sidebar theme tokens and applied them to the right-hand status panel so the sidebar now renders with a visible themed background instead of blending into the terminal default.
 - Verified `go test ./...`, `go vet ./...`, `staticcheck ./...`, and `golangci-lint run`.
 
 ## Current gaps

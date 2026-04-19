@@ -52,6 +52,7 @@ Create the first working implementation of `koder` from the approved plan.
 - Fixed TUI resize logic to compute viewport height from the measured footer height instead of reserving a hardcoded 10 rows, which stops the app from leaving several blank lines at the top of the terminal.
 - Fixed assistant compaction-summary rendering so `compaction` parts use the markdown renderer like normal assistant text, which resolves raw `##` headings and `-` list markers showing up after auto-compaction.
 - Replaced the hardcoded resume-session picker with a reusable filterable picker model and used it for a new `/theme` command, including live theme preview while moving or filtering, OpenCode-style cancel-to-restore behavior, and persisted theme selection on confirm.
+- Added named sidebar palette tokens and styled the right-hand status panel with a theme-controlled background, foreground, and border so the sidebar is visually distinct in every theme.
 
 ## Tests run
 

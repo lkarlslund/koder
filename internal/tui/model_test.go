@@ -10,10 +10,12 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/store"
+	"github.com/lkarlslund/koder/internal/theme"
 )
 
 func TestMatchingSlashCommands(t *testing.T) {
@@ -482,6 +484,24 @@ func TestRenderSidebarShowsStatusAndSessionInfo(t *testing.T) {
 	}
 	if !strings.Contains(got, "Context") || !strings.Contains(got, "25% used") {
 		t.Fatalf("expected sidebar to include context usage, got %q", got)
+	}
+}
+
+func TestRenderBodyAppliesSidebarThemeBackground(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	defer lipgloss.SetColorProfile(prev)
+
+	m := Model{
+		showSidebar: true,
+		palette:     theme.Resolve("tokyonight").Palette,
+		viewport:    viewport.New(40, 6),
+	}
+	m.viewport.SetContent("history")
+
+	got := m.renderBody()
+	if !strings.Contains(got, "48;2;26;31;46") {
+		t.Fatalf("expected sidebar background ANSI color in render, got %q", got)
 	}
 }
 

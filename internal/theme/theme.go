@@ -32,6 +32,9 @@ type Palette struct {
 	MarkdownText                 lipgloss.Color
 	ReasoningBackground          lipgloss.Color
 	ReasoningText                lipgloss.Color
+	SidebarBackground            lipgloss.Color
+	SidebarBorder                lipgloss.Color
+	SidebarForeground            lipgloss.Color
 	UserTextBackground           lipgloss.Color
 	UserTextForeground           lipgloss.Color
 	UserTimestampForeground      lipgloss.Color
@@ -96,6 +99,9 @@ func tokyonight() Theme {
 			MarkdownText:                 color("#c0caf5"),
 			ReasoningBackground:          color("#24283b"),
 			ReasoningText:                color("#c0caf5"),
+			SidebarBackground:            color("#1a1f2e"),
+			SidebarBorder:                color("#414868"),
+			SidebarForeground:            color("#c0caf5"),
 			UserTextBackground:           color("#1f2335"),
 			UserTextForeground:           color("#c0caf5"),
 			UserTimestampForeground:      color("#7dcfff"),
@@ -132,6 +138,9 @@ func gruvbox() Theme {
 			MarkdownText:                 color("#ebdbb2"),
 			ReasoningBackground:          color("#3c3836"),
 			ReasoningText:                color("#ebdbb2"),
+			SidebarBackground:            color("#282828"),
+			SidebarBorder:                color("#504945"),
+			SidebarForeground:            color("#ebdbb2"),
 			UserTextBackground:           color("#32302f"),
 			UserTextForeground:           color("#ebdbb2"),
 			UserTimestampForeground:      color("#d3869b"),
@@ -168,6 +177,9 @@ func flexoki() Theme {
 			MarkdownText:                 color("#CECDC3"),
 			ReasoningBackground:          color("#1c1b1a"),
 			ReasoningText:                color("#CECDC3"),
+			SidebarBackground:            color("#100f0f"),
+			SidebarBorder:                color("#403e3c"),
+			SidebarForeground:            color("#CECDC3"),
 			UserTextBackground:           color("#181716"),
 			UserTextForeground:           color("#CECDC3"),
 			UserTimestampForeground:      color("#3AA99F"),
@@ -204,6 +216,9 @@ func rosepine() Theme {
 			MarkdownText:                 color("#e0def4"),
 			ReasoningBackground:          color("#26233a"),
 			ReasoningText:                color("#e0def4"),
+			SidebarBackground:            color("#191724"),
+			SidebarBorder:                color("#403d52"),
+			SidebarForeground:            color("#e0def4"),
 			UserTextBackground:           color("#1f1d2e"),
 			UserTextForeground:           color("#e0def4"),
 			UserTimestampForeground:      color("#9ccfd8"),

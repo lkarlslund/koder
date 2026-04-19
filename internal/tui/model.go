@@ -520,7 +520,14 @@ func (m *Model) renderBody() string {
 	if !m.showSidebar {
 		return main
 	}
-	sidebar := lipgloss.NewStyle().Width(30).Padding(0, 1).BorderLeft(true).Render(m.renderSidebar())
+	sidebar := lipgloss.NewStyle().
+		Width(30).
+		Padding(0, 1).
+		Background(m.palette.SidebarBackground).
+		Foreground(m.palette.SidebarForeground).
+		BorderLeft(true).
+		BorderForeground(m.palette.SidebarBorder).
+		Render(m.renderSidebar())
 	return lipgloss.JoinHorizontal(lipgloss.Top, main, sidebar)
 }
 
