@@ -43,6 +43,7 @@
 - Replaced the heuristic markdown scanner with a `goldmark` CommonMark/GFM parser plus local ANSI renderer, which fixes headings and list detection and adds broader support for nested lists, blockquotes, links, tables, task lists, and fenced code blocks.
 - Imported a curated set of non-default OpenCode theme palettes (`tokyonight`, `gruvbox`, `flexoki`, `rosepine`), expanded our named color tokens to cover more semantic markdown roles, and switched the default `koder` theme to `tokyonight`.
 - Fixed TUI height calculation to measure the real footer height instead of subtracting a hardcoded 10 lines, which removes the blank rows that were being left at the top of taller terminals.
+- Fixed transcript rendering for assistant `compaction` parts so compacted session summaries now pass through the markdown renderer instead of displaying raw `##` and `-` source text.
 - Verified `go test ./...`, `go vet ./...`, `staticcheck ./...`, and `golangci-lint run`.
 
 ## Current gaps

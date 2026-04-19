@@ -533,6 +533,28 @@ func TestRenderMessagePartsSkipsSystemNotice(t *testing.T) {
 	}
 }
 
+func TestRenderMessagePartsFormatsCompactionMarkdown(t *testing.T) {
+	cfg := config.Default()
+	m, err := New(cfg, nil, nil, StartupModeNew)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got := m.renderMessageParts([]domain.Part{
+		{Kind: domain.PartKindCompaction, Body: "## Goal\n\n- first\n- second"},
+	})
+
+	if !strings.Contains(got, "Goal") {
+		t.Fatalf("expected compaction heading text, got %q", got)
+	}
+	if !strings.Contains(got, "• first") || !strings.Contains(got, "• second") {
+		t.Fatalf("expected compaction list markdown rendering, got %q", got)
+	}
+	if strings.Contains(got, "## Goal") || strings.Contains(got, "- first") {
+		t.Fatalf("expected rendered markdown instead of raw compaction markdown, got %q", got)
+	}
+}
+
 func TestRenderReasoningBlockStartsWithBlankStyledLine(t *testing.T) {
 	m := Model{}
 

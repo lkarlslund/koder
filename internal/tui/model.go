@@ -723,6 +723,7 @@ func (m *Model) renderMessageParts(parts []domain.Part) string {
 	var blocks []string
 	var reasoningBlocks []string
 	var textBlocks []string
+	var compactionBlocks []string
 	var textBuf strings.Builder
 	var reasoningBuf strings.Builder
 
@@ -751,6 +752,12 @@ func (m *Model) renderMessageParts(parts []domain.Part) string {
 		case domain.PartKindReasoning:
 			flushText()
 			reasoningBuf.WriteString(part.Body)
+		case domain.PartKindCompaction:
+			flushText()
+			flushReasoning()
+			if body := strings.TrimSpace(part.Body); body != "" {
+				compactionBlocks = append(compactionBlocks, m.renderer.Render(body))
+			}
 		case domain.PartKindSystemNotice:
 			flushText()
 			flushReasoning()
@@ -765,6 +772,7 @@ func (m *Model) renderMessageParts(parts []domain.Part) string {
 	flushText()
 	flushReasoning()
 
+	blocks = append(blocks, compactionBlocks...)
 	blocks = append(blocks, reasoningBlocks...)
 	blocks = append(blocks, textBlocks...)
 
