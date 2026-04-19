@@ -52,9 +52,9 @@ func (r *Renderer) renderBlockChildren(parent ast.Node, source []byte) []string 
 func (r *Renderer) renderBlock(node ast.Node, source []byte) string {
 	switch typed := node.(type) {
 	case *ast.Paragraph:
-		return r.renderInlineChildren(node, source)
+		return lipgloss.NewStyle().Foreground(r.palette.MarkdownText).Render(r.renderInlineChildren(node, source))
 	case *ast.TextBlock:
-		return r.renderInlineChildren(node, source)
+		return lipgloss.NewStyle().Foreground(r.palette.MarkdownText).Render(r.renderInlineChildren(node, source))
 	case *ast.Heading:
 		return r.renderHeading(typed, source)
 	case *ast.Blockquote:
@@ -151,7 +151,11 @@ func (r *Renderer) renderList(node *ast.List, source []byte) string {
 			markerText = strconv.Itoa(itemNumber) + "."
 			itemNumber++
 		}
-		marker := lipgloss.NewStyle().Foreground(r.palette.MarkdownListMarker).Render(markerText)
+		markerColor := r.palette.MarkdownListMarker
+		if node.IsOrdered() {
+			markerColor = r.palette.MarkdownListEnumeration
+		}
+		marker := lipgloss.NewStyle().Foreground(markerColor).Render(markerText)
 		lines = append(lines, r.renderListItem(listItem, source, marker, len(markerText)+1)...)
 	}
 	return strings.Join(lines, "\n")
@@ -208,9 +212,9 @@ func (r *Renderer) renderInline(node ast.Node, source []byte) string {
 		text := r.renderInlineChildren(node, source)
 		style := lipgloss.NewStyle()
 		if typed.Level == 2 {
-			style = style.Bold(true)
+			style = style.Bold(true).Foreground(r.palette.MarkdownStrongText)
 		} else {
-			style = style.Italic(true)
+			style = style.Italic(true).Foreground(r.palette.MarkdownEmphasisText)
 		}
 		return style.Render(text)
 	case *extensionast.Strikethrough:
@@ -219,7 +223,7 @@ func (r *Renderer) renderInline(node ast.Node, source []byte) string {
 		return r.renderLink(typed, source)
 	case *ast.AutoLink:
 		target := string(typed.URL(source))
-		return lipgloss.NewStyle().Foreground(r.palette.MarkdownLinkText).Underline(true).Render(target)
+		return lipgloss.NewStyle().Foreground(r.palette.MarkdownLinkTargetText).Underline(true).Render(target)
 	case *ast.RawHTML:
 		return ""
 	case *extensionast.TaskCheckBox:
@@ -239,10 +243,11 @@ func (r *Renderer) renderLink(node *ast.Link, source []byte) string {
 	label := r.renderInlineChildren(node, source)
 	target := string(node.Destination)
 	if strings.TrimSpace(label) == "" || label == target {
-		return lipgloss.NewStyle().Foreground(r.palette.MarkdownLinkText).Underline(true).Render(target)
+		return lipgloss.NewStyle().Foreground(r.palette.MarkdownLinkTargetText).Underline(true).Render(target)
 	}
 	linkLabel := lipgloss.NewStyle().Foreground(r.palette.MarkdownLinkText).Underline(true).Render(label)
-	return fmt.Sprintf("%s (%s)", linkLabel, target)
+	targetText := lipgloss.NewStyle().Foreground(r.palette.MarkdownLinkTargetText).Render(target)
+	return fmt.Sprintf("%s (%s)", linkLabel, targetText)
 }
 
 func (r *Renderer) renderTable(node *extensionast.Table, source []byte) string {
@@ -298,7 +303,7 @@ func (r *Renderer) renderTableRow(row []string, widths []int) string {
 		if idx < len(row) {
 			cell = row[idx]
 		}
-		cells = append(cells, padRight(cell, width))
+		cells = append(cells, lipgloss.NewStyle().Foreground(r.palette.MarkdownText).Render(padRight(cell, width)))
 	}
 	return "| " + strings.Join(cells, " | ") + " |"
 }

@@ -171,7 +171,7 @@ func Default() Config {
 			},
 		},
 		UI: UI{
-			Theme:          "default",
+			Theme:          "tokyonight",
 			ShowSidebar:    true,
 			ShowTimestamps: false,
 			ShowReasoning:  false,

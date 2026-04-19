@@ -41,6 +41,7 @@
 - Centralized busy and spinner handling into a dedicated TUI state model so transcript/sidebar spinners are driven by one source of truth, which fixes stalled animation during `/compact` and other status-driven busy flows.
 - Fixed transcript rendering so `system_notice` metadata like stored `usage` no longer leaks into visible chat messages.
 - Replaced the heuristic markdown scanner with a `goldmark` CommonMark/GFM parser plus local ANSI renderer, which fixes headings and list detection and adds broader support for nested lists, blockquotes, links, tables, task lists, and fenced code blocks.
+- Imported a curated set of non-default OpenCode theme palettes (`tokyonight`, `gruvbox`, `flexoki`, `rosepine`), expanded our named color tokens to cover more semantic markdown roles, and switched the default `koder` theme to `tokyonight`.
 - Verified `go test ./...`, `go vet ./...`, `staticcheck ./...`, and `golangci-lint run`.
 
 ## Current gaps
