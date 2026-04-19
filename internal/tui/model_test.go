@@ -296,6 +296,9 @@ func TestRenderSidebarShowsStatusAndSessionInfo(t *testing.T) {
 	if !strings.Contains(got, "Status") || !strings.Contains(got, "Working ...") {
 		t.Fatalf("expected sidebar to include status, got %q", got)
 	}
+	if !strings.Contains(got, "Keys") || !strings.Contains(got, "enter send/select") {
+		t.Fatalf("expected sidebar to include hotkey hints, got %q", got)
+	}
 }
 
 func TestRefreshViewportAppendsWorkingLine(t *testing.T) {
@@ -311,6 +314,17 @@ func TestRefreshViewportAppendsWorkingLine(t *testing.T) {
 	got := m.viewport.View()
 	if !strings.Contains(got, "Working ...") || !strings.Contains(got, "[=") {
 		t.Fatalf("expected transcript activity line, got %q", got)
+	}
+}
+
+func TestRenderFooterOmitsHotkeyHints(t *testing.T) {
+	m := Model{
+		composer: textarea.New(),
+	}
+
+	got := m.renderFooter()
+	if strings.Contains(got, "enter send/select") || strings.Contains(got, "/perm profile") {
+		t.Fatalf("expected footer to omit hotkey hints, got %q", got)
 	}
 }
 

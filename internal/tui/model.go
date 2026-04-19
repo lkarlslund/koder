@@ -441,8 +441,7 @@ func (m *Model) renderBody() string {
 
 func (m *Model) renderFooter() string {
 	style := lipgloss.NewStyle().BorderTop(true).Padding(0, 1)
-	help := "enter send/select  tab autocomplete  ctrl+s sidebar  ctrl+r reasoning  /mouse on|off  /new session  /perm profile  /quit"
-	parts := []string{help}
+	parts := []string{}
 	if prompt := m.renderApprovalPrompt(); prompt != "" {
 		parts = append(parts, prompt)
 	}
@@ -537,6 +536,15 @@ func (m *Model) renderSidebar() string {
 	for _, item := range m.tasks {
 		lines = append(lines, fmt.Sprintf("  [%s] %s", item.Status, truncate(item.Body, 18)))
 	}
+	lines = append(lines, "")
+	lines = append(lines, "Keys")
+	lines = append(lines, "  enter send/select")
+	lines = append(lines, "  tab   autocomplete")
+	lines = append(lines, "  ^s    sidebar")
+	lines = append(lines, "  ^r    reasoning")
+	lines = append(lines, "  /new  session")
+	lines = append(lines, "  /perm profile")
+	lines = append(lines, "  /quit")
 	return strings.Join(lines, "\n")
 }
 

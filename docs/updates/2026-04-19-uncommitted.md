@@ -38,6 +38,7 @@ Create the first working implementation of `koder` from the approved plan.
 - Replaced Glamour with a native `internal/markdown` renderer for headings, lists, blockquotes, fenced code, and inline emphasis/code so transcript styling is controlled locally.
 - Tightened native markdown list rendering so adjacent bullet and numbered list items stay compact instead of being separated by blank lines.
 - Split model activity from generic loading so only active LLM turns show the transcript-tail spinner, and changed that indicator to display `Working ...` instead of transient resume or wait text.
+- Moved the hotkey/help hints from above the chat input into a `Keys` section at the bottom of the sidebar.
 
 ## Tests run
 
