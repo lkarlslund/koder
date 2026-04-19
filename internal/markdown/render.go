@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/lkarlslund/koder/internal/theme"
 )
 
 var (
@@ -15,10 +16,12 @@ var (
 	inlineCodePattern = regexp.MustCompile("`([^`]+)`")
 )
 
-type Renderer struct{}
+type Renderer struct {
+	palette theme.Palette
+}
 
-func New() (*Renderer, error) {
-	return &Renderer{}, nil
+func New(palette theme.Palette) (*Renderer, error) {
+	return &Renderer{palette: palette}, nil
 }
 
 func (r *Renderer) Render(input string) string {
@@ -133,7 +136,7 @@ func (r *Renderer) renderBlock(line string) (string, bool) {
 	case strings.HasPrefix(line, ">"):
 		return r.renderBlockquote(line), true
 	case isRule(line):
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render(strings.Repeat("─", 32)), true
+		return lipgloss.NewStyle().Foreground(r.palette.MarkdownRule).Render(strings.Repeat("─", 32)), true
 	default:
 		return "", false
 	}
@@ -165,11 +168,11 @@ func (r *Renderer) renderHeading(line string) string {
 	style := lipgloss.NewStyle().Bold(true)
 	switch level {
 	case 1:
-		style = style.Foreground(lipgloss.Color("230"))
+		style = style.Foreground(r.palette.MarkdownHeadingPrimary)
 	case 2:
-		style = style.Foreground(lipgloss.Color("223"))
+		style = style.Foreground(r.palette.MarkdownHeadingSecondary)
 	default:
-		style = style.Foreground(lipgloss.Color("252"))
+		style = style.Foreground(r.palette.MarkdownHeadingTertiary)
 	}
 	return style.Render(r.renderInline(text))
 }
@@ -180,7 +183,7 @@ func isBullet(line string) bool {
 
 func (r *Renderer) renderBullet(line string) string {
 	text := strings.TrimSpace(line[2:])
-	bullet := lipgloss.NewStyle().Foreground(lipgloss.Color("111")).Render("•")
+	bullet := lipgloss.NewStyle().Foreground(r.palette.MarkdownListMarker).Render("•")
 	return fmt.Sprintf("%s %s", bullet, r.renderInline(text))
 }
 
@@ -195,14 +198,14 @@ func isOrderedItem(line string) bool {
 
 func (r *Renderer) renderOrderedItem(line string) string {
 	parts := strings.SplitN(line, ". ", 2)
-	number := lipgloss.NewStyle().Foreground(lipgloss.Color("111")).Render(parts[0] + ".")
+	number := lipgloss.NewStyle().Foreground(r.palette.MarkdownListMarker).Render(parts[0] + ".")
 	return fmt.Sprintf("%s %s", number, r.renderInline(parts[1]))
 }
 
 func (r *Renderer) renderBlockquote(line string) string {
 	text := strings.TrimSpace(strings.TrimPrefix(line, ">"))
-	prefix := lipgloss.NewStyle().Foreground(lipgloss.Color("243")).Render("│")
-	body := lipgloss.NewStyle().Foreground(lipgloss.Color("250")).Italic(true).Render(r.renderInline(text))
+	prefix := lipgloss.NewStyle().Foreground(r.palette.MarkdownQuoteBorder).Render("│")
+	body := lipgloss.NewStyle().Foreground(r.palette.MarkdownQuoteText).Italic(true).Render(r.renderInline(text))
 	return prefix + " " + body
 }
 
@@ -215,9 +218,9 @@ func (r *Renderer) renderParagraph(text string) string {
 }
 
 func (r *Renderer) renderCodeBlock(lang string, lines []string) string {
-	border := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	border := lipgloss.NewStyle().Foreground(r.palette.MarkdownCodeBlockBorder)
 	body := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("252")).
+		Foreground(r.palette.MarkdownCodeBlockText).
 		Padding(0, 1)
 
 	label := "code"
@@ -241,8 +244,8 @@ func (r *Renderer) renderInline(input string) string {
 			return match
 		}
 		return lipgloss.NewStyle().
-			Foreground(lipgloss.Color("228")).
-			Background(lipgloss.Color("237")).
+			Foreground(r.palette.MarkdownInlineCodeText).
+			Background(r.palette.MarkdownInlineCodeBackground).
 			Render(groups[1])
 	})
 	out = boldPattern.ReplaceAllStringFunc(out, func(match string) string {

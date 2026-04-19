@@ -20,6 +20,7 @@ import (
 	"github.com/lkarlslund/koder/internal/permission"
 	"github.com/lkarlslund/koder/internal/sessionctx"
 	"github.com/lkarlslund/koder/internal/store"
+	"github.com/lkarlslund/koder/internal/theme"
 	"github.com/lkarlslund/koder/internal/workspace"
 )
 
@@ -74,6 +75,7 @@ type Model struct {
 	store          *store.Store
 	agent          *agent.Engine
 	renderer       *markdown.Renderer
+	palette        theme.Palette
 	sessions       []domain.Session
 	currentSession domain.Session
 	messages       []domain.Message
@@ -103,7 +105,8 @@ type Model struct {
 }
 
 func New(cfg config.Config, st *store.Store, a *agent.Engine, mode StartupMode) (Model, error) {
-	renderer, err := markdown.New()
+	tuiTheme := theme.Resolve(cfg.UI.Theme)
+	renderer, err := markdown.New(tuiTheme.Palette)
 	if err != nil {
 		return Model{}, err
 	}
@@ -113,6 +116,7 @@ func New(cfg config.Config, st *store.Store, a *agent.Engine, mode StartupMode) 
 	composer.SetHeight(4)
 	composer.Focus()
 	composer.ShowLineNumbers = false
+	applyComposerTheme(&composer, tuiTheme.Palette)
 
 	vp := viewport.New(40, 10)
 	vp.SetContent("Loading…")
@@ -126,6 +130,7 @@ func New(cfg config.Config, st *store.Store, a *agent.Engine, mode StartupMode) 
 		store:         st,
 		agent:         a,
 		renderer:      renderer,
+		palette:       tuiTheme.Palette,
 		viewport:      vp,
 		composer:      composer,
 		showSidebar:   cfg.UI.ShowSidebar,
@@ -453,6 +458,7 @@ func (m *Model) renderFooter() string {
 	if menu := m.renderSlashMenu(); menu != "" {
 		parts = append(parts, menu)
 	}
+	parts = append(parts, "")
 	parts = append(parts, m.composer.View())
 	return style.Render(lipgloss.JoinVertical(lipgloss.Left, parts...))
 }
@@ -585,7 +591,7 @@ func (m *Model) renderTranscriptActivity() string {
 	}
 	line := fmt.Sprintf("%s  Working ...", m.workingIndicator())
 	return lipgloss.NewStyle().
-		Foreground(lipgloss.Color("45")).
+		Foreground(m.palette.ActivityText).
 		Bold(true).
 		Padding(0, 1).
 		Render(line)
@@ -604,10 +610,10 @@ func (m *Model) renderTranscriptMessage(msg domain.Message) string {
 
 func (m *Model) renderUserMessage(body, stamp string) string {
 	style := lipgloss.NewStyle().
-		Background(lipgloss.Color("238")).
-		Foreground(lipgloss.Color("255")).
+		Background(m.palette.UserTextBackground).
+		Foreground(m.palette.UserTextForeground).
 		Padding(0, 1)
-	timestampStyle := style.Foreground(lipgloss.Color("251"))
+	timestampStyle := style.Foreground(m.palette.UserTimestampForeground)
 
 	lines := []string{""}
 	content := strings.TrimSpace(body)
@@ -636,7 +642,7 @@ func (m *Model) renderAssistantMessage(body, stamp string) string {
 		return body
 	}
 	header := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("245")).
+		Foreground(m.palette.AssistantTimestampText).
 		Render(stamp)
 	return header + "\n" + body
 }
@@ -724,8 +730,8 @@ func (m *Model) renderReasoningBlock(input string) string {
 		return ""
 	}
 	lineStyle := lipgloss.NewStyle().
-		Background(lipgloss.Color("236")).
-		Foreground(lipgloss.Color("252"))
+		Background(m.palette.ReasoningBackground).
+		Foreground(m.palette.ReasoningText)
 
 	lines := append([]string{""}, strings.Split(content, "\n")...)
 	rendered := make([]string, 0, len(lines))
@@ -1316,9 +1322,37 @@ func (m *Model) renderChangedFile(item workspace.FileStatus) string {
 	if item.Additions == 0 && item.Deletions == 0 {
 		return base
 	}
-	added := lipgloss.NewStyle().Foreground(lipgloss.Color("2")).Render(fmt.Sprintf("+%d", item.Additions))
-	deleted := lipgloss.NewStyle().Foreground(lipgloss.Color("1")).Render(fmt.Sprintf("-%d", item.Deletions))
+	added := lipgloss.NewStyle().Foreground(m.palette.DiffAddedText).Render(fmt.Sprintf("+%d", item.Additions))
+	deleted := lipgloss.NewStyle().Foreground(m.palette.DiffDeletedText).Render(fmt.Sprintf("-%d", item.Deletions))
 	return base + " " + added + " " + deleted
+}
+
+func applyComposerTheme(composer *textarea.Model, palette theme.Palette) {
+	focused, blurred := textarea.DefaultStyles()
+	applyTextareaStyle := func(style *textarea.Style) {
+		style.Base = style.Base.
+			Background(palette.UserTextBackground).
+			Foreground(palette.UserTextForeground)
+		style.CursorLine = style.CursorLine.
+			Background(palette.UserTextBackground).
+			Foreground(palette.UserTextForeground)
+		style.Text = style.Text.
+			Background(palette.UserTextBackground).
+			Foreground(palette.UserTextForeground)
+		style.Prompt = style.Prompt.
+			Background(palette.UserTextBackground).
+			Foreground(palette.UserTextForeground)
+		style.Placeholder = style.Placeholder.
+			Background(palette.UserTextBackground).
+			Foreground(palette.ComposerMutedText)
+		style.EndOfBuffer = style.EndOfBuffer.
+			Background(palette.UserTextBackground).
+			Foreground(palette.ComposerMutedText)
+	}
+	applyTextareaStyle(&focused)
+	applyTextareaStyle(&blurred)
+	composer.FocusedStyle = focused
+	composer.BlurredStyle = blurred
 }
 
 func spinnerTickCmd() tea.Cmd {

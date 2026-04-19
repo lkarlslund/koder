@@ -42,6 +42,7 @@ Create the first working implementation of `koder` from the approved plan.
 - Fixed the transcript-tail spinner animation by refreshing the viewport content on each spinner tick while a model turn is active.
 - Bottom-aligned the overall TUI layout so the footer and chat composer stay at the very bottom of the terminal window.
 - Added shared context usage metrics, surfaced `used / max / % used` in the sidebar, and implemented manual `/compact` plus pre-turn auto-compaction with persisted summary boundaries in session history.
+- Added a named theme palette for TUI and markdown colors, inserted a blank spacer line between the transcript and composer, and styled the input box with the same background as user chat bubbles.
 
 ## Tests run
 

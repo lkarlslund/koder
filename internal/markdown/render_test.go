@@ -3,10 +3,12 @@ package markdown
 import (
 	"strings"
 	"testing"
+
+	"github.com/lkarlslund/koder/internal/theme"
 )
 
 func TestRenderFormatsHeadingsAndLists(t *testing.T) {
-	renderer, err := New()
+	renderer, err := New(theme.Default().Palette)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -25,7 +27,7 @@ func TestRenderFormatsHeadingsAndLists(t *testing.T) {
 }
 
 func TestRenderKeepsConsecutiveBulletItemsTight(t *testing.T) {
-	renderer, err := New()
+	renderer, err := New(theme.Default().Palette)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -41,7 +43,7 @@ func TestRenderKeepsConsecutiveBulletItemsTight(t *testing.T) {
 }
 
 func TestRenderKeepsConsecutiveOrderedItemsTight(t *testing.T) {
-	renderer, err := New()
+	renderer, err := New(theme.Default().Palette)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -57,7 +59,7 @@ func TestRenderKeepsConsecutiveOrderedItemsTight(t *testing.T) {
 }
 
 func TestRenderFormatsFencedCodeBlock(t *testing.T) {
-	renderer, err := New()
+	renderer, err := New(theme.Default().Palette)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -76,7 +78,7 @@ func TestRenderFormatsFencedCodeBlock(t *testing.T) {
 }
 
 func TestRenderFormatsInlineMarkdown(t *testing.T) {
-	renderer, err := New()
+	renderer, err := New(theme.Default().Palette)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
