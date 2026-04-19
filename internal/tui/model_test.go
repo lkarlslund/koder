@@ -112,6 +112,26 @@ func TestExactSlashCommandDoesNotConsumeEnterForAutocomplete(t *testing.T) {
 	}
 }
 
+func TestExactSlashCommandWithArgsConsumesEnterForAutocomplete(t *testing.T) {
+	m := Model{
+		composer: textarea.New(),
+	}
+	m.composer.SetValue("/perm")
+	m.updateSlashMenu()
+
+	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	next := updated.(*Model)
+	if cmd != nil {
+		t.Fatal("expected no command while autocompleting needs-args slash command")
+	}
+	if next.loading {
+		t.Fatal("expected no loading while autocompleting needs-args slash command")
+	}
+	if got := next.composer.Value(); got != "/perm " {
+		t.Fatalf("expected /perm autocompletion, got %q", got)
+	}
+}
+
 func TestRunPromptErrorAppendsAssistantErrorToTranscript(t *testing.T) {
 	m := Model{
 		composer: textarea.New(),

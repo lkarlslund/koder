@@ -408,7 +408,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.startBusy(busyScopeSidebar, "Creating session…")
 				return m, tea.Batch(m.newSessionCmd(), m.spinnerCmdIfNeeded())
 			}
-			if len(m.slashMatches) == 1 && m.slashMatches[0].Name == prompt {
+			if len(m.slashMatches) == 1 && m.slashMatches[0].Name == prompt && !m.slashMatches[0].NeedsArgs {
 				break
 			}
 			m.acceptSlashSelection()

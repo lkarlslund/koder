@@ -53,6 +53,7 @@ Create the first working implementation of `koder` from the approved plan.
 - Fixed assistant compaction-summary rendering so `compaction` parts use the markdown renderer like normal assistant text, which resolves raw `##` headings and `-` list markers showing up after auto-compaction.
 - Replaced the hardcoded resume-session picker with a reusable filterable picker model and used it for a new `/theme` command, including live theme preview while moving or filtering, OpenCode-style cancel-to-restore behavior, and persisted theme selection on confirm.
 - Added named sidebar palette tokens and styled the right-hand status panel with a theme-controlled background, foreground, and border so the sidebar is visually distinct in every theme.
+- Fixed slash autocomplete so exact matches for commands that still need arguments, such as `/perm`, continue to autocomplete on `Enter` instead of being treated as a finished command and doing nothing.
 
 ## Tests run
 
