@@ -132,12 +132,18 @@ func New(cfg config.Config, st *store.Store, a *agent.Engine, mode StartupMode) 
 		status:        "Ready",
 		workdir:       workdir,
 		startupMode:   mode,
-		mouseEnabled:  false,
+		mouseEnabled:  cfg.UI.Mouse,
 	}, nil
 }
 
 func (m Model) Init() tea.Cmd {
-	return m.loadCmd()
+	if !m.mouseEnabled {
+		return m.loadCmd()
+	}
+	return tea.Batch(
+		m.loadCmd(),
+		func() tea.Msg { return tea.EnableMouseCellMotion() },
+	)
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {

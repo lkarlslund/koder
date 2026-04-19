@@ -23,6 +23,7 @@
 - Changed mouse handling so native terminal selection works by default, with opt-in mouse capture via `/mouse on` when viewport scrolling is needed.
 - Changed slash-command autocomplete to show only internal app commands, and kept internal slash commands out of the LLM tool contract.
 - Separated internal slash commands from tool invocation so slash input is handled by the runtime, while model tool use stays on the dedicated tool contract.
+- Fixed startup mouse handling so `ui.mouse` is respected again and mouse scrolling works on launch when enabled in config.
 - Verified `go test ./...`, `go vet ./...`, `staticcheck ./...`, and `golangci-lint run`.
 
 ## Current gaps

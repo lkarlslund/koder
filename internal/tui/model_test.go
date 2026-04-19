@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/store"
 )
@@ -184,6 +185,27 @@ func TestMouseOffCommandDisablesMouseCapture(t *testing.T) {
 	}
 	if next.status != "Mouse capture disabled" {
 		t.Fatalf("unexpected status: %q", next.status)
+	}
+}
+
+func TestInitEnablesMouseWhenConfigured(t *testing.T) {
+	cfg := config.Default()
+	cfg.UI.Mouse = true
+
+	m, err := New(cfg, nil, nil, StartupModeNew)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !m.mouseEnabled {
+		t.Fatal("expected mouseEnabled to follow config")
+	}
+
+	cmd := m.Init()
+	if cmd == nil {
+		t.Fatal("expected init command")
+	}
+	if _, ok := cmd().(tea.BatchMsg); !ok {
+		t.Fatalf("expected batched init command when mouse is enabled, got %T", cmd())
 	}
 }
 

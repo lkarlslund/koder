@@ -30,6 +30,7 @@ Create the first working implementation of `koder` from the approved plan.
 - Changed mouse handling to default to native terminal selection, and added `/mouse on` and `/mouse off` to toggle viewport mouse capture explicitly.
 - Changed slash-command autocomplete to exclude tool commands, and added a guard test so internal slash commands are not offered to the model prompt.
 - Removed the shared slash-command execution path so internal commands like `/perm`, `/approve`, and `/deny` are handled explicitly by the runtime instead of reusing tool-style slash dispatch.
+- Fixed startup mouse initialization so configured mouse capture is enabled again at launch instead of only after a manual `/mouse on`.
 
 ## Tests run
 
