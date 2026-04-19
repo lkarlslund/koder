@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/domain"
@@ -589,6 +590,7 @@ func TestRenderTranscriptMessageUserBubbleHasBlankPaddingLines(t *testing.T) {
 		parts: map[int64][]domain.Part{
 			1: {{Kind: domain.PartKindText, Body: "hello world"}},
 		},
+		viewport: viewport.New(24, 6),
 	}
 
 	got := m.renderTranscriptMessage(domain.Message{
@@ -608,6 +610,66 @@ func TestRenderTranscriptMessageUserBubbleHasBlankPaddingLines(t *testing.T) {
 	}
 	if strings.TrimSpace(lines[len(lines)-1]) != "" {
 		t.Fatalf("expected blank bottom line, got %q", lines[len(lines)-1])
+	}
+	wantWidth := lipgloss.Width(lines[1])
+	if wantWidth <= 2 {
+		t.Fatalf("expected padded width, got %d from %q", wantWidth, lines[1])
+	}
+	if got := lipgloss.Width(lines[0]); got != wantWidth {
+		t.Fatalf("expected blank top line width %d, got %d", wantWidth, got)
+	}
+	if got := lipgloss.Width(lines[len(lines)-1]); got != wantWidth {
+		t.Fatalf("expected blank bottom line width %d, got %d", wantWidth, got)
+	}
+}
+
+func TestRenderTranscriptMessageUserBubbleUsesConsistentWidthForMultilineInput(t *testing.T) {
+	m := Model{
+		parts: map[int64][]domain.Part{
+			1: {{Kind: domain.PartKindText, Body: "short\nthis is a much longer line"}},
+		},
+		viewport: viewport.New(30, 6),
+	}
+
+	got := m.renderTranscriptMessage(domain.Message{
+		ID:   1,
+		Role: domain.MessageRoleUser,
+	})
+
+	lines := strings.Split(got, "\n")
+	if len(lines) < 4 {
+		t.Fatalf("expected multiline bubble, got %q", got)
+	}
+	wantWidth := lipgloss.Width(lines[1])
+	for idx, line := range lines {
+		if gotWidth := lipgloss.Width(line); gotWidth != wantWidth {
+			t.Fatalf("expected consistent line width %d at line %d, got %d from %q", wantWidth, idx, gotWidth, line)
+		}
+	}
+}
+
+func TestRenderTranscriptMessageUserBubbleWrapsToViewportWidth(t *testing.T) {
+	m := Model{
+		parts: map[int64][]domain.Part{
+			1: {{Kind: domain.PartKindText, Body: "this line is intentionally longer than the viewport width"}},
+		},
+		viewport: viewport.New(18, 6),
+	}
+
+	got := m.renderTranscriptMessage(domain.Message{
+		ID:   1,
+		Role: domain.MessageRoleUser,
+	})
+
+	lines := strings.Split(got, "\n")
+	if len(lines) < 4 {
+		t.Fatalf("expected wrapped bubble lines, got %q", got)
+	}
+	wantWidth := lipgloss.Width(lines[0])
+	for idx, line := range lines {
+		if gotWidth := lipgloss.Width(line); gotWidth != wantWidth {
+			t.Fatalf("expected wrapped line width %d at line %d, got %d from %q", wantWidth, idx, gotWidth, line)
+		}
 	}
 }
 

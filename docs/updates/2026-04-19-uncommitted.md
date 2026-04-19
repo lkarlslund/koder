@@ -44,6 +44,7 @@ Create the first working implementation of `koder` from the approved plan.
 - Added shared context usage metrics, surfaced `used / max / % used` in the sidebar, and implemented manual `/compact` plus pre-turn auto-compaction with persisted summary boundaries in session history.
 - Added a named theme palette for TUI and markdown colors, inserted a blank spacer line between the transcript and composer, and styled the input box with the same background as user chat bubbles.
 - Changed backend and model-turn request failures to produce a single assistant-visible error message in the chat transcript, and fixed draft-session rendering so immediate first-prompt connection errors are visible too.
+- Fixed user message bubble rendering so top and bottom padding lines match the full bubble width, and multi-line or wrapped user input keeps one continuous background span across each rendered line.
 
 ## Tests run
 

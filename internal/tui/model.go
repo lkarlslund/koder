@@ -610,12 +610,6 @@ func (m *Model) renderTranscriptMessage(msg domain.Message) string {
 }
 
 func (m *Model) renderUserMessage(body, stamp string) string {
-	style := lipgloss.NewStyle().
-		Background(m.palette.UserTextBackground).
-		Foreground(m.palette.UserTextForeground).
-		Padding(0, 1)
-	timestampStyle := style.Foreground(m.palette.UserTimestampForeground)
-
 	lines := []string{""}
 	content := strings.TrimSpace(body)
 	if content != "" {
@@ -626,6 +620,14 @@ func (m *Model) renderUserMessage(body, stamp string) string {
 	}
 	lines = append(lines, "")
 
+	width := m.userMessageWidth(lines)
+	style := lipgloss.NewStyle().
+		Background(m.palette.UserTextBackground).
+		Foreground(m.palette.UserTextForeground).
+		Width(width).
+		Padding(0, 1)
+	timestampStyle := style.Foreground(m.palette.UserTimestampForeground)
+
 	rendered := make([]string, 0, len(lines))
 	for idx, line := range lines {
 		if stamp != "" && idx == len(lines)-2 {
@@ -635,6 +637,17 @@ func (m *Model) renderUserMessage(body, stamp string) string {
 		rendered = append(rendered, style.Render(line))
 	}
 	return strings.Join(rendered, "\n")
+}
+
+func (m *Model) userMessageWidth(lines []string) int {
+	if m.viewport.Width > 0 {
+		return m.viewport.Width
+	}
+	width := 3
+	for _, line := range lines {
+		width = max(width, lipgloss.Width(line)+2)
+	}
+	return width
 }
 
 func (m *Model) renderAssistantMessage(body, stamp string) string {
