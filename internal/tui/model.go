@@ -559,15 +559,20 @@ func (m *Model) renderMessageParts(parts []domain.Part) string {
 }
 
 func (m *Model) renderReasoningBlock(input string) string {
-	content := m.renderer.Render(input)
-	if strings.TrimSpace(content) == "" {
+	content := strings.TrimSpace(input)
+	if content == "" {
 		return ""
 	}
-	return lipgloss.NewStyle().
+	lineStyle := lipgloss.NewStyle().
 		Background(lipgloss.Color("236")).
-		Foreground(lipgloss.Color("252")).
-		Padding(0, 1).
-		Render(strings.TrimSpace(content))
+		Foreground(lipgloss.Color("252"))
+
+	lines := append([]string{""}, strings.Split(content, "\n")...)
+	rendered := make([]string, 0, len(lines))
+	for _, line := range lines {
+		rendered = append(rendered, lineStyle.Render(line))
+	}
+	return strings.Join(rendered, "\n")
 }
 
 func (m Model) loadCmd() tea.Cmd {
