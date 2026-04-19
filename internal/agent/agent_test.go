@@ -59,6 +59,33 @@ func TestApprovalSerializationRoundTrip(t *testing.T) {
 	}
 }
 
+func TestStringifyPartsExcludesSystemNotice(t *testing.T) {
+	got := stringifyParts([]domain.Part{
+		{Kind: domain.PartKindText, Body: "answer"},
+		{Kind: domain.PartKindSystemNotice, Body: "usage", MetaJSON: `{"PromptTokens":1}`},
+	})
+	if strings.Contains(got, "PromptTokens") || strings.Contains(got, "usage") {
+		t.Fatalf("expected system notices to stay out of model context, got %q", got)
+	}
+	if !strings.Contains(got, "answer") {
+		t.Fatalf("expected text to remain in model context, got %q", got)
+	}
+}
+
+func TestStringifyPartsNormalizesToolCallFromMetadata(t *testing.T) {
+	got := stringifyParts([]domain.Part{{
+		Kind:     domain.PartKindToolCall,
+		Body:     "Tool call:\n<koder_tool>\n{\"tool\":\"read\",\"path\":\"README.md\"}\n</koder_tool>",
+		MetaJSON: `{"tool":"read","path":"README.md"}`,
+	}})
+	if !strings.Contains(got, `"tool":"read"`) || !strings.Contains(got, `"path":"README.md"`) {
+		t.Fatalf("expected structured tool call in model context, got %q", got)
+	}
+	if strings.Contains(got, "<koder_tool>") || strings.Contains(got, "Tool call:\nTool call:") {
+		t.Fatalf("expected raw wrapper text to be removed, got %q", got)
+	}
+}
+
 func TestApproveContinuesModelWithToolOutput(t *testing.T) {
 	t.Parallel()
 

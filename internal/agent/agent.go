@@ -380,22 +380,63 @@ func stringifyParts(parts []domain.Part) string {
 		case domain.PartKindReasoning:
 			chunks = append(chunks, "Reasoning:\n"+part.Body)
 		case domain.PartKindToolCall:
-			chunks = append(chunks, "Tool call:\n"+part.Body)
+			if callText := toolCallContext(part); callText != "" {
+				chunks = append(chunks, callText)
+			}
 		case domain.PartKindToolOutput:
 			chunks = append(chunks, "Tool output:\n"+part.Body)
 		case domain.PartKindDiff:
 			chunks = append(chunks, "Diff:\n"+part.Body)
-		case domain.PartKindSystemNotice:
-			if part.MetaJSON != "" {
-				chunks = append(chunks, part.Body+"\n"+part.MetaJSON)
-			} else {
-				chunks = append(chunks, part.Body)
-			}
+		case domain.PartKindTaskUpdate:
+			chunks = append(chunks, "Task update:\n"+part.Body)
+		case domain.PartKindApprovalRequest, domain.PartKindSystemNotice:
+			continue
 		default:
 			chunks = append(chunks, part.Body)
 		}
 	}
 	return strings.TrimSpace(strings.Join(chunks, "\n\n"))
+}
+
+func toolCallContext(part domain.Part) string {
+	if strings.TrimSpace(part.MetaJSON) != "" {
+		var call toolCall
+		if err := json.Unmarshal([]byte(part.MetaJSON), &call); err == nil && call.Tool != "" {
+			return "Tool call:\n" + call.contextString()
+		}
+	}
+	if call, _ := parseToolCall(part.Body); call != nil {
+		return "Tool call:\n" + call.contextString()
+	}
+	body := strings.TrimSpace(part.Body)
+	if body == "" {
+		return ""
+	}
+	return "Tool call:\n" + body
+}
+
+func (c toolCall) contextString() string {
+	payload := map[string]string{"tool": string(c.Tool)}
+	switch c.Tool {
+	case domain.ToolKindRead:
+		payload["path"] = c.Path
+	case domain.ToolKindGlob, domain.ToolKindGrep:
+		payload["pattern"] = c.Pattern
+	case domain.ToolKindBash:
+		payload["command"] = c.Command
+	case domain.ToolKindApplyPatch:
+		payload["path"] = c.Path
+		payload["content"] = c.Content
+	case domain.ToolKindTask:
+		payload["body"] = c.Body
+	case domain.ToolKindWebFetch:
+		payload["url"] = c.URL
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Sprintf(`{"tool":"%s"}`, c.Tool)
+	}
+	return string(data)
 }
 
 func systemPrompt() string {

@@ -24,6 +24,7 @@
 - Changed slash-command autocomplete to show only internal app commands, and kept internal slash commands out of the LLM tool contract.
 - Separated internal slash commands from tool invocation so slash input is handled by the runtime, while model tool use stays on the dedicated tool contract.
 - Fixed startup mouse handling so `ui.mouse` is respected again and mouse scrolling works on launch when enabled in config.
+- Cleaned up model conversation rebuilding so `system_notice` stays out of prompt history and tool calls are fed back as structured semantics instead of UI wrapper text.
 - Verified `go test ./...`, `go vet ./...`, `staticcheck ./...`, and `golangci-lint run`.
 
 ## Current gaps
