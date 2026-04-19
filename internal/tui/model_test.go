@@ -269,26 +269,30 @@ func TestWorkingIndicatorShownWhenLoading(t *testing.T) {
 	}
 }
 
-func TestRenderHeaderOmitsStatus(t *testing.T) {
+func TestRenderHeaderIsEmpty(t *testing.T) {
 	m := Model{
 		currentSession: domain.Session{ID: 2, ProviderID: "test", ModelID: "model"},
 		status:         "Waiting for model…",
 	}
 
 	got := m.renderHeader()
-	if strings.Contains(got, "status:") || strings.Contains(got, "Waiting for model") {
-		t.Fatalf("expected header to omit status, got %q", got)
+	if got != "" {
+		t.Fatalf("expected empty header, got %q", got)
 	}
 }
 
-func TestRenderSidebarShowsStatus(t *testing.T) {
+func TestRenderSidebarShowsStatusAndSessionInfo(t *testing.T) {
 	m := Model{
-		status:  "Waiting for model…",
-		loading: true,
-		workdir: "/tmp/project",
+		currentSession: domain.Session{ID: 2, ProviderID: "test", ModelID: "model", PermissionProfile: "default"},
+		status:         "Waiting for model…",
+		loading:        true,
+		workdir:        "/tmp/project",
 	}
 
 	got := m.renderSidebar()
+	if !strings.Contains(got, "Session") || !strings.Contains(got, "provider test") || !strings.Contains(got, "model   model") {
+		t.Fatalf("expected sidebar to include session details, got %q", got)
+	}
 	if !strings.Contains(got, "Status") || !strings.Contains(got, "Waiting for model") {
 		t.Fatalf("expected sidebar to include status, got %q", got)
 	}
@@ -305,7 +309,7 @@ func TestRefreshViewportAppendsWorkingLine(t *testing.T) {
 
 	m.refreshViewport()
 	got := m.viewport.View()
-	if !strings.Contains(got, "Waiting for model") {
+	if !strings.Contains(got, "Waiting for model") || !strings.Contains(got, "[=") {
 		t.Fatalf("expected transcript activity line, got %q", got)
 	}
 }

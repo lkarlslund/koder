@@ -34,6 +34,7 @@ Create the first working implementation of `koder` from the approved plan.
 - Cleaned up conversation serialization for the model: `system_notice` no longer leaks back into prompts, approval decorations stay out of model context, and tool calls are normalized from metadata before being re-sent.
 - Removed the header status line, moved status into the sidebar, and rendered the working spinner as a transcript-tail activity line so active turns are visible where the conversation is happening.
 - Changed user prompt bubble rendering to bypass markdown styling, add blank top and bottom padding lines, and keep the prompt text on the bubble background instead of falling back to black.
+- Removed the remaining top header line entirely, moved session and provider metadata into the sidebar, and changed the transcript-tail activity indicator to a more visible animated working bar.
 
 ## Tests run
 

@@ -27,6 +27,7 @@
 - Cleaned up model conversation rebuilding so `system_notice` stays out of prompt history and tool calls are fed back as structured semantics instead of UI wrapper text.
 - Moved transient status out of the header into the sidebar and added a visible end-of-transcript working spinner so activity appears in the chat flow.
 - Changed user prompt bubbles to render with explicit blank top and bottom padding lines, and kept user text on the same bubble background instead of inheriting markdown resets.
+- Removed the top header line entirely, moved session/provider details into the sidebar, and made the transcript-tail working spinner more visible.
 - Verified `go test ./...`, `go vet ./...`, `staticcheck ./...`, and `golangci-lint run`.
 
 ## Current gaps

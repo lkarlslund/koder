@@ -231,10 +231,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) View() string {
-	header := m.renderHeader()
 	body := m.renderBody()
 	footer := m.renderFooter()
-	view := lipgloss.JoinVertical(lipgloss.Left, header, body, footer)
+	view := lipgloss.JoinVertical(lipgloss.Left, body, footer)
 	if m.pickerVisible {
 		return lipgloss.JoinVertical(lipgloss.Left, view, m.renderSessionPicker())
 	}
@@ -415,15 +414,7 @@ func (m *Model) resize() {
 }
 
 func (m *Model) renderHeader() string {
-	style := lipgloss.NewStyle().Bold(true).Padding(0, 1)
-	model := m.currentSession.ModelID
-	if model == "" {
-		model = "(unset)"
-	}
-	return style.Render(fmt.Sprintf(
-		"koder  session:%d  profile:%s  mouse:%s  provider:%s  model:%s",
-		m.currentSession.ID, m.permissionProfile(), m.mouseStatus(), m.currentSession.ProviderID, model,
-	))
+	return ""
 }
 
 func (m *Model) renderBody() string {
@@ -451,8 +442,31 @@ func (m *Model) renderFooter() string {
 
 func (m *Model) renderSidebar() string {
 	var lines []string
+	lines = append(lines, "Session")
+	lines = append(lines, fmt.Sprintf("  id      %d", m.currentSession.ID))
+	lines = append(lines, fmt.Sprintf("  profile %s", truncate(m.permissionProfile(), 19)))
+	lines = append(lines, fmt.Sprintf("  mouse   %s", m.mouseStatus()))
+	provider := m.currentSession.ProviderID
+	if provider == "" {
+		provider = "(unset)"
+	}
+	lines = append(lines, fmt.Sprintf("  provider %s", truncate(provider, 18)))
+	model := m.currentSession.ModelID
+	if model == "" {
+		model = "(unset)"
+	}
+	lines = append(lines, fmt.Sprintf("  model   %s", truncate(model, 18)))
+	lines = append(lines, "")
 	lines = append(lines, "Status")
-	lines = append(lines, fmt.Sprintf("  %s %s", m.workingIndicator(), truncate(strings.TrimSpace(m.status), 24)))
+	status := strings.TrimSpace(m.status)
+	if status == "" {
+		status = "Ready"
+	}
+	if m.isWorking() {
+		lines = append(lines, fmt.Sprintf("  %s %s", m.workingIndicator(), truncate(status, 22)))
+	} else {
+		lines = append(lines, fmt.Sprintf("  %s", truncate(status, 24)))
+	}
 	lines = append(lines, "")
 	lines = append(lines, "Workspace")
 	lines = append(lines, truncate(m.workdir, 28))
@@ -536,11 +550,16 @@ func (m *Model) renderTranscriptActivity() string {
 	if !m.isWorking() {
 		return ""
 	}
-	line := fmt.Sprintf("%s %s", m.workingIndicator(), strings.TrimSpace(m.status))
+	status := strings.TrimSpace(m.status)
+	if status == "" {
+		status = "Working"
+	}
+	line := fmt.Sprintf("%s  %s", m.workingIndicator(), status)
 	return lipgloss.NewStyle().
-		Foreground(lipgloss.Color("246")).
-		Italic(true).
-		Render(strings.TrimSpace(line))
+		Foreground(lipgloss.Color("45")).
+		Bold(true).
+		Padding(0, 1).
+		Render(line)
 }
 
 func (m *Model) renderTranscriptMessage(msg domain.Message) string {
@@ -1033,7 +1052,7 @@ func (m *Model) workingIndicator() string {
 	if !m.isWorking() {
 		return ""
 	}
-	frames := []string{"•", "◦", "•", "◦"}
+	frames := []string{"[=   ]", "[==  ]", "[=== ]", "[ ===]", "[  ==]", "[   =]"}
 	return frames[m.spinnerFrame%len(frames)]
 }
 
