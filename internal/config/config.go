@@ -1,0 +1,317 @@
+package config
+
+import (
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/lkarlslund/koder/internal/domain"
+	toml "github.com/pelletier/go-toml/v2"
+)
+
+type UI struct {
+	Theme          string `toml:"theme"`
+	ShowSidebar    bool   `toml:"show_sidebar"`
+	ShowTimestamps bool   `toml:"show_timestamps"`
+	ShowReasoning  bool   `toml:"show_reasoning"`
+	Mouse          bool   `toml:"mouse"`
+}
+
+type Provider struct {
+	Name         string            `toml:"name"`
+	BaseURL      string            `toml:"base_url"`
+	APIKey       string            `toml:"api_key"`
+	APIKeyEnv    string            `toml:"api_key_env"`
+	Headers      map[string]string `toml:"headers"`
+	DefaultModel string            `toml:"default_model"`
+	Stream       bool              `toml:"stream"`
+	Timeout      time.Duration     `toml:"timeout"`
+	Disabled     bool              `toml:"disabled"`
+}
+
+type PermissionRules struct {
+	Profile  string                       `toml:"profile"`
+	Profiles map[string]PermissionProfile `toml:"profiles"`
+
+	Read       domain.PermissionMode `toml:"read"`
+	Glob       domain.PermissionMode `toml:"glob"`
+	Grep       domain.PermissionMode `toml:"grep"`
+	Bash       domain.PermissionMode `toml:"bash"`
+	ApplyPatch domain.PermissionMode `toml:"apply_patch"`
+	Task       domain.PermissionMode `toml:"task"`
+	Question   domain.PermissionMode `toml:"question"`
+	WebFetch   domain.PermissionMode `toml:"webfetch"`
+	WebSearch  domain.PermissionMode `toml:"websearch"`
+}
+
+type PermissionProfile struct {
+	Rules []PermissionRule `toml:"rules"`
+}
+
+type PermissionRule struct {
+	Tool    domain.ToolKind       `toml:"tool"`
+	Pattern string                `toml:"pattern"`
+	Action  domain.PermissionMode `toml:"action"`
+}
+
+type Config struct {
+	DefaultProvider string              `toml:"default_provider"`
+	DefaultModel    string              `toml:"default_model"`
+	Providers       map[string]Provider `toml:"providers"`
+	Permissions     PermissionRules     `toml:"permissions"`
+	UI              UI                  `toml:"ui"`
+	path            string
+	configDir       string
+	stateDir        string
+	cacheDir        string
+}
+
+func Load() (Config, error) {
+	cfg := Default()
+	configDir := configDir()
+	cfg.configDir = configDir
+	cfg.stateDir = stateDir()
+	cfg.cacheDir = cacheDir()
+	cfg.path = filepath.Join(configDir, "config.toml")
+
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		return Config{}, fmt.Errorf("create config dir: %w", err)
+	}
+	if err := os.MkdirAll(cfg.stateDir, 0o755); err != nil {
+		return Config{}, fmt.Errorf("create state dir: %w", err)
+	}
+	if err := os.MkdirAll(cfg.cacheDir, 0o755); err != nil {
+		return Config{}, fmt.Errorf("create cache dir: %w", err)
+	}
+
+	data, err := os.ReadFile(cfg.path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			if err := cfg.Save(); err != nil {
+				return Config{}, err
+			}
+			return cfg, nil
+		}
+		return Config{}, fmt.Errorf("read config: %w", err)
+	}
+
+	if err := toml.Unmarshal(data, &cfg); err != nil {
+		return Config{}, fmt.Errorf("parse config: %w", err)
+	}
+	cfg.configDir = configDir
+	cfg.stateDir = stateDir()
+	cfg.cacheDir = cacheDir()
+	cfg.path = filepath.Join(configDir, "config.toml")
+	cfg.applyDefaults()
+	return cfg, nil
+}
+
+func Default() Config {
+	return Config{
+		DefaultProvider: "llamacpp-local",
+		Providers: map[string]Provider{
+			"llamacpp-local": {
+				Name:     "Local llama.cpp",
+				BaseURL:  "http://127.0.0.1:8888/v1",
+				Headers:  map[string]string{},
+				Stream:   true,
+				Timeout:  2 * time.Minute,
+				Disabled: false,
+			},
+		},
+		Permissions: PermissionRules{
+			Profile: "default",
+			Profiles: map[string]PermissionProfile{
+				"default": {
+					Rules: []PermissionRule{
+						{Tool: domain.ToolKindRead, Pattern: "*", Action: domain.PermissionModeAllow},
+						{Tool: domain.ToolKindGlob, Pattern: "*", Action: domain.PermissionModeAllow},
+						{Tool: domain.ToolKindGrep, Pattern: "*", Action: domain.PermissionModeAllow},
+						{Tool: domain.ToolKindBash, Pattern: "*", Action: domain.PermissionModeAsk},
+						{Tool: domain.ToolKindApplyPatch, Pattern: "*", Action: domain.PermissionModeAsk},
+						{Tool: domain.ToolKindTask, Pattern: "*", Action: domain.PermissionModeAsk},
+						{Tool: domain.ToolKindQuestion, Pattern: "*", Action: domain.PermissionModeAsk},
+						{Tool: domain.ToolKindWebFetch, Pattern: "*", Action: domain.PermissionModeAsk},
+						{Tool: domain.ToolKindWebSearch, Pattern: "*", Action: domain.PermissionModeAsk},
+					},
+				},
+				"readonly": {
+					Rules: []PermissionRule{
+						{Tool: domain.ToolKindRead, Pattern: "*", Action: domain.PermissionModeAllow},
+						{Tool: domain.ToolKindGlob, Pattern: "*", Action: domain.PermissionModeAllow},
+						{Tool: domain.ToolKindGrep, Pattern: "*", Action: domain.PermissionModeAllow},
+						{Tool: domain.ToolKindBash, Pattern: "*", Action: domain.PermissionModeDeny},
+						{Tool: domain.ToolKindApplyPatch, Pattern: "*", Action: domain.PermissionModeDeny},
+						{Tool: domain.ToolKindTask, Pattern: "*", Action: domain.PermissionModeAsk},
+						{Tool: domain.ToolKindQuestion, Pattern: "*", Action: domain.PermissionModeAsk},
+						{Tool: domain.ToolKindWebFetch, Pattern: "*", Action: domain.PermissionModeAsk},
+						{Tool: domain.ToolKindWebSearch, Pattern: "*", Action: domain.PermissionModeAsk},
+					},
+				},
+				"auto": {
+					Rules: []PermissionRule{
+						{Tool: domain.ToolKindRead, Pattern: "*", Action: domain.PermissionModeAllow},
+						{Tool: domain.ToolKindGlob, Pattern: "*", Action: domain.PermissionModeAllow},
+						{Tool: domain.ToolKindGrep, Pattern: "*", Action: domain.PermissionModeAllow},
+						{Tool: domain.ToolKindBash, Pattern: "*", Action: domain.PermissionModeAllow},
+						{Tool: domain.ToolKindApplyPatch, Pattern: "*", Action: domain.PermissionModeAllow},
+						{Tool: domain.ToolKindTask, Pattern: "*", Action: domain.PermissionModeAllow},
+						{Tool: domain.ToolKindQuestion, Pattern: "*", Action: domain.PermissionModeAllow},
+						{Tool: domain.ToolKindWebFetch, Pattern: "*", Action: domain.PermissionModeAllow},
+						{Tool: domain.ToolKindWebSearch, Pattern: "*", Action: domain.PermissionModeAsk},
+					},
+				},
+			},
+		},
+		UI: UI{
+			Theme:          "default",
+			ShowSidebar:    true,
+			ShowTimestamps: false,
+			ShowReasoning:  false,
+			Mouse:          true,
+		},
+	}
+}
+
+func (c *Config) applyDefaults() {
+	def := Default()
+	if c.DefaultProvider == "" {
+		c.DefaultProvider = def.DefaultProvider
+	}
+	if c.Providers == nil {
+		c.Providers = def.Providers
+	}
+	if _, ok := c.Providers[c.DefaultProvider]; !ok {
+		c.Providers[c.DefaultProvider] = def.Providers[c.DefaultProvider]
+	}
+	if c.Permissions.Profile == "" {
+		c.Permissions.Profile = def.Permissions.Profile
+	}
+	if c.Permissions.Profiles == nil {
+		c.Permissions.Profiles = cloneProfiles(def.Permissions.Profiles)
+	}
+	if hasLegacyPermissions(c.Permissions) {
+		c.Permissions.Profiles["default"] = legacyPermissionProfile(c.Permissions)
+	}
+	if _, ok := c.Permissions.Profiles[c.Permissions.Profile]; !ok {
+		c.Permissions.Profile = def.Permissions.Profile
+	}
+	if c.UI.Theme == "" {
+		c.UI = def.UI
+	}
+	for id, provider := range c.Providers {
+		if provider.Timeout == 0 {
+			provider.Timeout = def.Providers[c.DefaultProvider].Timeout
+		}
+		if provider.Headers == nil {
+			provider.Headers = map[string]string{}
+		}
+		c.Providers[id] = provider
+	}
+}
+
+func (c Config) Save() error {
+	data, err := toml.Marshal(c)
+	if err != nil {
+		return fmt.Errorf("marshal config: %w", err)
+	}
+	if err := os.WriteFile(c.path, data, 0o644); err != nil {
+		return fmt.Errorf("write config: %w", err)
+	}
+	return nil
+}
+
+func (c Config) Path() string {
+	return c.path
+}
+
+func (c Config) StateDir() string {
+	return c.stateDir
+}
+
+func (c Config) CacheDir() string {
+	return c.cacheDir
+}
+
+func (c Config) Provider(id string) (Provider, bool) {
+	p, ok := c.Providers[id]
+	if !ok {
+		return Provider{}, false
+	}
+	if p.APIKey == "" && p.APIKeyEnv != "" {
+		p.APIKey = strings.TrimSpace(os.Getenv(p.APIKeyEnv))
+	}
+	return p, true
+}
+
+func cloneProfiles(src map[string]PermissionProfile) map[string]PermissionProfile {
+	dst := make(map[string]PermissionProfile, len(src))
+	for name, profile := range src {
+		rules := make([]PermissionRule, len(profile.Rules))
+		copy(rules, profile.Rules)
+		dst[name] = PermissionProfile{Rules: rules}
+	}
+	return dst
+}
+
+func hasLegacyPermissions(rules PermissionRules) bool {
+	return rules.Read != "" ||
+		rules.Glob != "" ||
+		rules.Grep != "" ||
+		rules.Bash != "" ||
+		rules.ApplyPatch != "" ||
+		rules.Task != "" ||
+		rules.Question != "" ||
+		rules.WebFetch != "" ||
+		rules.WebSearch != ""
+}
+
+func legacyPermissionProfile(rules PermissionRules) PermissionProfile {
+	return PermissionProfile{
+		Rules: []PermissionRule{
+			{Tool: domain.ToolKindRead, Pattern: "*", Action: firstPermission(rules.Read, domain.PermissionModeAllow)},
+			{Tool: domain.ToolKindGlob, Pattern: "*", Action: firstPermission(rules.Glob, domain.PermissionModeAllow)},
+			{Tool: domain.ToolKindGrep, Pattern: "*", Action: firstPermission(rules.Grep, domain.PermissionModeAllow)},
+			{Tool: domain.ToolKindBash, Pattern: "*", Action: firstPermission(rules.Bash, domain.PermissionModeAsk)},
+			{Tool: domain.ToolKindApplyPatch, Pattern: "*", Action: firstPermission(rules.ApplyPatch, domain.PermissionModeAsk)},
+			{Tool: domain.ToolKindTask, Pattern: "*", Action: firstPermission(rules.Task, domain.PermissionModeAsk)},
+			{Tool: domain.ToolKindQuestion, Pattern: "*", Action: firstPermission(rules.Question, domain.PermissionModeAsk)},
+			{Tool: domain.ToolKindWebFetch, Pattern: "*", Action: firstPermission(rules.WebFetch, domain.PermissionModeAsk)},
+			{Tool: domain.ToolKindWebSearch, Pattern: "*", Action: firstPermission(rules.WebSearch, domain.PermissionModeAsk)},
+		},
+	}
+}
+
+func firstPermission(got, fallback domain.PermissionMode) domain.PermissionMode {
+	if got != "" {
+		return got
+	}
+	return fallback
+}
+
+func configDir() string {
+	if dir := os.Getenv("XDG_CONFIG_HOME"); dir != "" {
+		return filepath.Join(dir, "koder")
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".config", "koder")
+}
+
+func stateDir() string {
+	if dir := os.Getenv("XDG_STATE_HOME"); dir != "" {
+		return filepath.Join(dir, "koder")
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".local", "state", "koder")
+}
+
+func cacheDir() string {
+	if dir := os.Getenv("XDG_CACHE_HOME"); dir != "" {
+		return filepath.Join(dir, "koder")
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".cache", "koder")
+}

@@ -1,0 +1,119 @@
+package store
+
+import (
+	"context"
+	"testing"
+
+	"github.com/lkarlslund/koder/internal/domain"
+)
+
+func TestSessionMessageRoundTrip(t *testing.T) {
+	st, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	session, err := st.CreateSession(context.Background(), "test", "provider", "model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	msg, err := st.AddMessage(context.Background(), session.ID, domain.MessageRoleUser, "hello")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.AddPart(context.Background(), msg.ID, domain.PartKindText, "hello", ""); err != nil {
+		t.Fatal(err)
+	}
+
+	messages, parts, err := st.PartsForSession(context.Background(), session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 1 {
+		t.Fatalf("unexpected message count: %d", len(messages))
+	}
+	if got := parts[msg.ID][0].Body; got != "hello" {
+		t.Fatalf("unexpected part body: %q", got)
+	}
+}
+
+func TestApprovalAndTask(t *testing.T) {
+	st, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	session, err := st.CreateSession(context.Background(), "test", "provider", "model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	approval, err := st.CreateApproval(context.Background(), session.ID, domain.ToolKindBash, "echo hi")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetSessionPermissionProfile(context.Background(), session.ID, "readonly"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpdateApproval(context.Background(), approval.ID, domain.ApprovalStatusApproved); err != nil {
+		t.Fatal(err)
+	}
+	task, err := st.AddTask(context.Background(), session.ID, "ship v1", domain.TaskStatusPending)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpdateTask(context.Background(), task.ID, domain.TaskStatusCompleted); err != nil {
+		t.Fatal(err)
+	}
+	tasks, err := st.ListTasks(context.Background(), session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tasks) != 1 || tasks[0].Status != domain.TaskStatusCompleted {
+		t.Fatalf("unexpected tasks: %#v", tasks)
+	}
+	sessions, err := st.ListSessions(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions) != 1 || sessions[0].PermissionProfile != "readonly" {
+		t.Fatalf("unexpected session profile: %#v", sessions)
+	}
+}
+
+func TestUpdateSessionTitleAndCountMessagesByRole(t *testing.T) {
+	st, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	session, err := st.CreateSession(context.Background(), "test", "provider", "model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.AddMessage(context.Background(), session.ID, domain.MessageRoleUser, "hello"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.AddMessage(context.Background(), session.ID, domain.MessageRoleAssistant, "hi"); err != nil {
+		t.Fatal(err)
+	}
+	count, err := st.CountMessagesByRole(context.Background(), session.ID, domain.MessageRoleUser)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("unexpected user message count: %d", count)
+	}
+	if err := st.UpdateSessionTitle(context.Background(), session.ID, "Short Helpful Session Title"); err != nil {
+		t.Fatal(err)
+	}
+	sessions, err := st.ListSessions(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := sessions[0].Title; got != "Short Helpful Session Title" {
+		t.Fatalf("unexpected title: %q", got)
+	}
+}
