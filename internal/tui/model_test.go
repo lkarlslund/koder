@@ -124,6 +124,45 @@ func TestQuitCommandQuits(t *testing.T) {
 	}
 }
 
+func TestMouseOnCommandEnablesMouseCapture(t *testing.T) {
+	m := Model{
+		composer: textarea.New(),
+	}
+	m.composer.SetValue("/mouse on")
+
+	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	next := updated.(*Model)
+	if cmd == nil {
+		t.Fatal("expected mouse enable command")
+	}
+	if !next.mouseEnabled {
+		t.Fatal("expected mouse capture enabled")
+	}
+	if next.status != "Mouse capture enabled" {
+		t.Fatalf("unexpected status: %q", next.status)
+	}
+}
+
+func TestMouseOffCommandDisablesMouseCapture(t *testing.T) {
+	m := Model{
+		composer:     textarea.New(),
+		mouseEnabled: true,
+	}
+	m.composer.SetValue("/mouse off")
+
+	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	next := updated.(*Model)
+	if cmd == nil {
+		t.Fatal("expected mouse disable command")
+	}
+	if next.mouseEnabled {
+		t.Fatal("expected mouse capture disabled")
+	}
+	if next.status != "Mouse capture disabled" {
+		t.Fatalf("unexpected status: %q", next.status)
+	}
+}
+
 func TestCtrlCUsesQuitPath(t *testing.T) {
 	m := Model{
 		composer: textarea.New(),

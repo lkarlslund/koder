@@ -27,6 +27,7 @@ Create the first working implementation of `koder` from the approved plan.
 - Added mouse-wheel scrolling support for the transcript viewport.
 - Changed the chat transcript to render user prompts as filled message blocks instead of `[user]` and `[assistant]` labels.
 - Changed turn handling so persisted events reload the visible transcript immediately, and task updates are now written into chat history too.
+- Changed mouse handling to default to native terminal selection, and added `/mouse on` and `/mouse off` to toggle viewport mouse capture explicitly.
 
 ## Tests run
 

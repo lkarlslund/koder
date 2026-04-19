@@ -96,6 +96,7 @@ type Model struct {
 	pickerIndex    int
 	spinnerFrame   int
 	pendingPartID  int64
+	mouseEnabled   bool
 }
 
 func New(cfg config.Config, st *store.Store, a *agent.Engine, mode StartupMode) (Model, error) {
@@ -130,6 +131,7 @@ func New(cfg config.Config, st *store.Store, a *agent.Engine, mode StartupMode) 
 		status:        "Ready",
 		workdir:       workdir,
 		startupMode:   mode,
+		mouseEnabled:  false,
 	}, nil
 }
 
@@ -412,8 +414,8 @@ func (m *Model) renderHeader() string {
 		model = "(unset)"
 	}
 	return style.Render(fmt.Sprintf(
-		"koder%s  session:%d  profile:%s  provider:%s  model:%s  status:%s",
-		m.workingIndicator(), m.currentSession.ID, m.permissionProfile(), m.currentSession.ProviderID, model, m.status,
+		"koder%s  session:%d  profile:%s  mouse:%s  provider:%s  model:%s  status:%s",
+		m.workingIndicator(), m.currentSession.ID, m.permissionProfile(), m.mouseStatus(), m.currentSession.ProviderID, model, m.status,
 	))
 }
 
@@ -428,7 +430,7 @@ func (m *Model) renderBody() string {
 
 func (m *Model) renderFooter() string {
 	style := lipgloss.NewStyle().BorderTop(true).Padding(0, 1)
-	help := "enter send/select  tab autocomplete  ctrl+s sidebar  ctrl+r reasoning  /new session  /perm profile  /quit"
+	help := "enter send/select  tab autocomplete  ctrl+s sidebar  ctrl+r reasoning  /mouse on|off  /new session  /perm profile  /quit"
 	parts := []string{help}
 	if prompt := m.renderApprovalPrompt(); prompt != "" {
 		parts = append(parts, prompt)
@@ -780,7 +782,7 @@ func Run(cfg config.Config, st *store.Store, a *agent.Engine, mode StartupMode) 
 	if err != nil {
 		return err
 	}
-	p := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion())
+	p := tea.NewProgram(model, tea.WithAltScreen())
 	finalModel, err := p.Run()
 	if err != nil {
 		return err
@@ -846,6 +848,18 @@ func (m *Model) handleLocalCommand(prompt string) (tea.Model, tea.Cmd, bool) {
 		m.updateSlashMenu()
 		model, cmd := m.quit()
 		return model, cmd, true
+	case "/mouse on":
+		m.composer.Reset()
+		m.updateSlashMenu()
+		m.mouseEnabled = true
+		m.status = "Mouse capture enabled"
+		return m, func() tea.Msg { return tea.EnableMouseCellMotion() }, true
+	case "/mouse off":
+		m.composer.Reset()
+		m.updateSlashMenu()
+		m.mouseEnabled = false
+		m.status = "Mouse capture disabled"
+		return m, func() tea.Msg { return tea.DisableMouse() }, true
 	default:
 		return nil, nil, false
 	}
@@ -1075,6 +1089,7 @@ func approvalOption(label string, selected bool) string {
 func slashCommands() []slashCommand {
 	return []slashCommand{
 		{Name: "/new", Description: "Start a new session"},
+		{Name: "/mouse", Description: "Toggle mouse capture", NeedsArgs: true, Autocomplete: "/mouse "},
 		{Name: "/perm", Description: "Set permission profile", NeedsArgs: true, Autocomplete: "/perm "},
 		{Name: "/quit", Description: "Quit koder"},
 		{Name: "/read", Description: "Read a file", NeedsArgs: true, Autocomplete: "/read "},
@@ -1094,6 +1109,13 @@ func (m *Model) permissionProfile() string {
 		return m.currentSession.PermissionProfile
 	}
 	return m.cfg.Permissions.Profile
+}
+
+func (m *Model) mouseStatus() string {
+	if m.mouseEnabled {
+		return "on"
+	}
+	return "off"
 }
 
 func approvalSummary(item store.Approval) string {
