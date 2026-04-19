@@ -4,7 +4,8 @@ import "testing"
 
 func TestParseStatus(t *testing.T) {
 	raw := "## main...origin/main [ahead 1]\n M internal/tui/model.go\nA  internal/workspace/status.go\nD  old.txt\n?? new.txt\n"
-	got := parseStatus(raw)
+	numstat := "12\t4\tinternal/tui/model.go\n7\t0\tinternal/workspace/status.go\n0\t9\told.txt\n"
+	got := parseStatus(raw, numstat)
 
 	if got.Branch != "main" {
 		t.Fatalf("unexpected branch: %q", got.Branch)
@@ -23,5 +24,11 @@ func TestParseStatus(t *testing.T) {
 	}
 	if got.Files[0].Path != "internal/tui/model.go" {
 		t.Fatalf("unexpected first file: %#v", got.Files[0])
+	}
+	if got.Files[0].Additions != 12 || got.Files[0].Deletions != 4 {
+		t.Fatalf("unexpected diff stats: %#v", got.Files[0])
+	}
+	if got.Files[3].Additions != 0 || got.Files[3].Deletions != 0 {
+		t.Fatalf("unexpected untracked diff stats: %#v", got.Files[3])
 	}
 }

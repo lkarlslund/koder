@@ -457,7 +457,7 @@ func (m *Model) renderSidebar() string {
 		} else {
 			lines = append(lines, "Changed files")
 			for _, item := range m.workspace.Files[:min(8, len(m.workspace.Files))] {
-				lines = append(lines, fmt.Sprintf("  %-2s %s", item.Code, truncate(item.Path, 22)))
+				lines = append(lines, m.renderChangedFile(item))
 			}
 			if len(m.workspace.Files) > 8 {
 				lines = append(lines, fmt.Sprintf("  … %d more", len(m.workspace.Files)-8))
@@ -1007,6 +1007,16 @@ func approvalSummary(item store.Approval) string {
 		return item.Command
 	}
 	return string(item.Tool)
+}
+
+func (m *Model) renderChangedFile(item workspace.FileStatus) string {
+	base := fmt.Sprintf("  %-2s %s", item.Code, truncate(item.Path, 16))
+	if item.Additions == 0 && item.Deletions == 0 {
+		return base
+	}
+	added := lipgloss.NewStyle().Foreground(lipgloss.Color("2")).Render(fmt.Sprintf("+%d", item.Additions))
+	deleted := lipgloss.NewStyle().Foreground(lipgloss.Color("1")).Render(fmt.Sprintf("-%d", item.Deletions))
+	return base + " " + added + " " + deleted
 }
 
 func spinnerTickCmd() tea.Cmd {

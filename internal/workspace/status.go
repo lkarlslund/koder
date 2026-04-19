@@ -8,8 +8,10 @@ import (
 )
 
 type FileStatus struct {
-	Code string
-	Path string
+	Code      string
+	Path      string
+	Additions int
+	Deletions int
 }
 
 type Status struct {
@@ -25,17 +27,26 @@ type Status struct {
 }
 
 func Snapshot(ctx context.Context, dir string) (Status, error) {
-	cmd := exec.CommandContext(ctx, "git", "status", "--short", "--branch")
-	cmd.Dir = dir
-	output, err := cmd.Output()
+	statusCmd := exec.CommandContext(ctx, "git", "status", "--short", "--branch")
+	statusCmd.Dir = dir
+	statusOutput, err := statusCmd.Output()
 	if err != nil {
 		return Status{}, nil
 	}
-	return parseStatus(string(output)), nil
+
+	numstatCmd := exec.CommandContext(ctx, "git", "diff", "--numstat", "--find-renames", "HEAD")
+	numstatCmd.Dir = dir
+	numstatOutput, err := numstatCmd.Output()
+	if err != nil {
+		numstatOutput = nil
+	}
+
+	return parseStatus(string(statusOutput), string(numstatOutput)), nil
 }
 
-func parseStatus(raw string) Status {
+func parseStatus(raw string, numstatRaw string) Status {
 	status := Status{Available: true}
+	numstats := parseNumstat(numstatRaw)
 	for _, line := range strings.Split(raw, "\n") {
 		line = strings.TrimRight(line, "\r")
 		if strings.TrimSpace(line) == "" {
@@ -46,6 +57,10 @@ func parseStatus(raw string) Status {
 			continue
 		}
 		file := parseFileLine(line)
+		if stat, ok := numstats[file.Path]; ok {
+			file.Additions = stat.Additions
+			file.Deletions = stat.Deletions
+		}
 		status.Files = append(status.Files, file)
 		switch {
 		case file.Code == "??":
@@ -59,6 +74,44 @@ func parseStatus(raw string) Status {
 		}
 	}
 	return status
+}
+
+func parseNumstat(raw string) map[string]FileStatus {
+	stats := make(map[string]FileStatus)
+	for _, line := range strings.Split(raw, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		fields := strings.Split(line, "\t")
+		if len(fields) < 3 {
+			continue
+		}
+		path := fields[2]
+		if idx := strings.Index(path, " -> "); idx >= 0 {
+			path = strings.TrimSpace(path[idx+4:])
+		}
+		stats[path] = FileStatus{
+			Path:      path,
+			Additions: parseNumstatCount(fields[0]),
+			Deletions: parseNumstatCount(fields[1]),
+		}
+	}
+	return stats
+}
+
+func parseNumstatCount(raw string) int {
+	if raw == "-" {
+		return 0
+	}
+	value := 0
+	for _, ch := range raw {
+		if ch < '0' || ch > '9' {
+			return 0
+		}
+		value = value*10 + int(ch-'0')
+	}
+	return value
 }
 
 func parseBranchLine(line string) (branch string, upstream string, summary string) {
