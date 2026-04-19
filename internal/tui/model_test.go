@@ -258,14 +258,14 @@ func TestUpdateLoadHidesSessionPicker(t *testing.T) {
 	}
 }
 
-func TestWorkingIndicatorShownWhenLoading(t *testing.T) {
+func TestWorkingIndicatorShownWhenModelWorking(t *testing.T) {
 	m := Model{
-		loading: true,
+		modelWorking: true,
 	}
 
 	got := m.workingIndicator()
 	if got == "" {
-		t.Fatal("expected working indicator while loading")
+		t.Fatal("expected working indicator while model is working")
 	}
 }
 
@@ -284,8 +284,8 @@ func TestRenderHeaderIsEmpty(t *testing.T) {
 func TestRenderSidebarShowsStatusAndSessionInfo(t *testing.T) {
 	m := Model{
 		currentSession: domain.Session{ID: 2, ProviderID: "test", ModelID: "model", PermissionProfile: "default"},
-		status:         "Waiting for model…",
-		loading:        true,
+		status:         "Working ...",
+		modelWorking:   true,
 		workdir:        "/tmp/project",
 	}
 
@@ -293,7 +293,7 @@ func TestRenderSidebarShowsStatusAndSessionInfo(t *testing.T) {
 	if !strings.Contains(got, "Session") || !strings.Contains(got, "provider test") || !strings.Contains(got, "model   model") {
 		t.Fatalf("expected sidebar to include session details, got %q", got)
 	}
-	if !strings.Contains(got, "Status") || !strings.Contains(got, "Waiting for model") {
+	if !strings.Contains(got, "Status") || !strings.Contains(got, "Working ...") {
 		t.Fatalf("expected sidebar to include status, got %q", got)
 	}
 }
@@ -301,16 +301,32 @@ func TestRenderSidebarShowsStatusAndSessionInfo(t *testing.T) {
 func TestRefreshViewportAppendsWorkingLine(t *testing.T) {
 	m := Model{
 		currentSession: domain.Session{ID: 1},
-		loading:        true,
-		status:         "Waiting for model…",
+		modelWorking:   true,
+		status:         "Working ...",
 		parts:          map[int64][]domain.Part{},
 		viewport:       viewport.New(40, 6),
 	}
 
 	m.refreshViewport()
 	got := m.viewport.View()
-	if !strings.Contains(got, "Waiting for model") || !strings.Contains(got, "[=") {
+	if !strings.Contains(got, "Working ...") || !strings.Contains(got, "[=") {
 		t.Fatalf("expected transcript activity line, got %q", got)
+	}
+}
+
+func TestRefreshViewportOmitsWorkingLineForGenericLoading(t *testing.T) {
+	m := Model{
+		currentSession: domain.Session{ID: 1},
+		loading:        true,
+		status:         "Resuming session 2…",
+		parts:          map[int64][]domain.Part{},
+		viewport:       viewport.New(40, 6),
+	}
+
+	m.refreshViewport()
+	got := m.viewport.View()
+	if strings.Contains(got, "Resuming session 2") || strings.Contains(got, "[=") {
+		t.Fatalf("expected no model activity line for generic loading, got %q", got)
 	}
 }
 

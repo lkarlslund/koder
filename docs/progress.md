@@ -30,6 +30,7 @@
 - Removed the top header line entirely, moved session/provider details into the sidebar, and made the transcript-tail working spinner more visible.
 - Replaced the external Glamour markdown renderer with an internal renderer so transcript styling stays under local control and no longer fights background resets.
 - Tightened internal markdown list rendering so consecutive bullet and numbered items no longer get blank lines between them.
+- Split model-turn activity from generic loading so the bottom spinner only appears for active LLM work, with a stable `Working ...` label instead of startup or resume text.
 - Verified `go test ./...`, `go vet ./...`, `staticcheck ./...`, and `golangci-lint run`.
 
 ## Current gaps

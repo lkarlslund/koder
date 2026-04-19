@@ -85,6 +85,7 @@ type Model struct {
 	height         int
 	status         string
 	loading        bool
+	modelWorking   bool
 	showSidebar    bool
 	showReasoning  bool
 	slashMatches   []slashCommand
@@ -167,7 +168,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.loading = true
-		m.status = "Waiting for model…"
+		m.modelWorking = true
+		m.status = "Working ..."
 		return m, tea.Batch(nextEventCmd(msg.events), spinnerTickCmd())
 	case runPromptMsg:
 		if msg.err != nil {
@@ -177,7 +179,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.currentSession = msg.session
 		m.loading = true
-		m.status = "Waiting for model…"
+		m.modelWorking = true
+		m.status = "Working ..."
 		return m, tea.Batch(nextEventCmd(msg.events), spinnerTickCmd())
 	case eventMsg:
 		m.applyEvent(msg.event)
@@ -185,10 +188,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(m.reloadDetailsCmd(), nextEventCmd(msg.events))
 		}
 		m.loading = false
+		m.modelWorking = false
 		return m, m.reloadDetailsCmd()
 	case loadMsg:
 		m = m.UpdateLoad(msg)
 		m.loading = false
+		m.modelWorking = false
 		m.status = "Ready"
 		return m, nil
 	case newSessionMsg:
@@ -211,6 +216,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.pickerVisible = true
 		m.pickerIndex = 0
 		m.loading = false
+		m.modelWorking = false
 		m.status = "Select a session to resume"
 		return m, nil
 	case tea.MouseMsg:
@@ -353,6 +359,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.updateSlashMenu()
 		m.appendLocalUserPrompt(prompt)
 		m.loading = true
+		m.modelWorking = false
 		m.status = "Running…"
 		return m, m.promptCmd(prompt)
 	}
@@ -366,12 +373,16 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m *Model) applyEvent(evt domain.Event) {
 	switch evt.Kind {
 	case domain.EventKindMessageDelta:
-		m.status = "Streaming response…"
+		m.modelWorking = true
+		m.status = "Working ..."
 	case domain.EventKindReasoning:
-		m.status = "Receiving reasoning…"
+		m.modelWorking = true
+		m.status = "Working ..."
 	case domain.EventKindToolResult:
+		m.modelWorking = true
 		m.status = fmt.Sprintf("Tool %s finished", evt.Tool)
 	case domain.EventKindApprovalAsk:
+		m.modelWorking = false
 		m.status = evt.Text
 	case domain.EventKindApprovalReply:
 		m.status = evt.Text
@@ -387,10 +398,12 @@ func (m *Model) applyEvent(evt domain.Event) {
 			m.currentSession.PermissionProfile = profile
 		}
 	case domain.EventKindError:
+		m.modelWorking = false
 		if evt.Err != nil {
 			m.status = evt.Err.Error()
 		}
 	case domain.EventKindMessageDone:
+		m.modelWorking = false
 		m.status = "Ready"
 	}
 }
@@ -550,11 +563,7 @@ func (m *Model) renderTranscriptActivity() string {
 	if !m.isWorking() {
 		return ""
 	}
-	status := strings.TrimSpace(m.status)
-	if status == "" {
-		status = "Working"
-	}
-	line := fmt.Sprintf("%s  %s", m.workingIndicator(), status)
+	line := fmt.Sprintf("%s  Working ...", m.workingIndicator())
 	return lipgloss.NewStyle().
 		Foreground(lipgloss.Color("45")).
 		Bold(true).
@@ -1045,7 +1054,7 @@ func (m *Model) nextPendingID() int64 {
 }
 
 func (m *Model) isWorking() bool {
-	return m.loading
+	return m.modelWorking
 }
 
 func (m *Model) workingIndicator() string {
