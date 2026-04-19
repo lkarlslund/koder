@@ -508,15 +508,47 @@ func (m *Model) refreshViewport() {
 	}
 	var blocks []string
 	for _, msg := range m.messages {
-		body := m.renderMessageParts(m.parts[msg.ID])
-		title := fmt.Sprintf("[%s] %s", msg.Role, timestamp(msg.CreatedAt, m.cfg.UI.ShowTimestamps))
-		blocks = append(blocks, lipgloss.NewStyle().Bold(true).Render(strings.TrimSpace(title))+"\n"+body)
+		blocks = append(blocks, m.renderTranscriptMessage(msg))
 	}
 	if len(blocks) == 0 {
 		blocks = append(blocks, "Start by asking a question or type / for commands.")
 	}
 	m.viewport.SetContent(strings.Join(blocks, "\n\n"))
 	m.viewport.GotoBottom()
+}
+
+func (m *Model) renderTranscriptMessage(msg domain.Message) string {
+	body := m.renderMessageParts(m.parts[msg.ID])
+	stamp := timestamp(msg.CreatedAt, m.cfg.UI.ShowTimestamps)
+	switch msg.Role {
+	case domain.MessageRoleUser:
+		return m.renderUserMessage(body, stamp)
+	default:
+		return m.renderAssistantMessage(body, stamp)
+	}
+}
+
+func (m *Model) renderUserMessage(body, stamp string) string {
+	parts := []string{strings.TrimSpace(body)}
+	if stamp != "" {
+		parts = append(parts, lipgloss.NewStyle().Foreground(lipgloss.Color("251")).Render(stamp))
+	}
+	return lipgloss.NewStyle().
+		Background(lipgloss.Color("238")).
+		Foreground(lipgloss.Color("255")).
+		Padding(0, 1).
+		Render(strings.Join(parts, "\n"))
+}
+
+func (m *Model) renderAssistantMessage(body, stamp string) string {
+	body = strings.TrimSpace(body)
+	if stamp == "" {
+		return body
+	}
+	header := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("245")).
+		Render(stamp)
+	return header + "\n" + body
 }
 
 func (m *Model) renderMessageParts(parts []domain.Part) string {

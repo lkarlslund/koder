@@ -244,3 +244,43 @@ func TestMouseWheelScrollsViewport(t *testing.T) {
 		t.Fatalf("expected viewport to scroll, got y offset %d", next.viewport.YOffset)
 	}
 }
+
+func TestRenderTranscriptMessageUsesUserStyleWithoutRoleLabel(t *testing.T) {
+	m := Model{
+		parts: map[int64][]domain.Part{
+			1: {{Kind: domain.PartKindText, Body: "hello world"}},
+		},
+	}
+
+	got := m.renderTranscriptMessage(domain.Message{
+		ID:   1,
+		Role: domain.MessageRoleUser,
+	})
+
+	if !strings.Contains(got, "hello world") {
+		t.Fatalf("expected user body in transcript, got %q", got)
+	}
+	if strings.Contains(got, "[user]") || strings.Contains(got, "[assistant]") {
+		t.Fatalf("expected no bracketed role labels, got %q", got)
+	}
+}
+
+func TestRenderTranscriptMessageUsesAssistantStyleWithoutRoleLabel(t *testing.T) {
+	m := Model{
+		parts: map[int64][]domain.Part{
+			2: {{Kind: domain.PartKindText, Body: "final answer"}},
+		},
+	}
+
+	got := m.renderTranscriptMessage(domain.Message{
+		ID:   2,
+		Role: domain.MessageRoleAssistant,
+	})
+
+	if !strings.Contains(got, "final answer") {
+		t.Fatalf("expected assistant body in transcript, got %q", got)
+	}
+	if strings.Contains(got, "[user]") || strings.Contains(got, "[assistant]") {
+		t.Fatalf("expected no bracketed role labels, got %q", got)
+	}
+}

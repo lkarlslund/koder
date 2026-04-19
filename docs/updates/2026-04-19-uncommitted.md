@@ -25,6 +25,7 @@ Create the first working implementation of `koder` from the approved plan.
 - Changed approval handling so once a gated tool is approved and executed, the tool result is sent back into the model automatically.
 - Added a live animated working indicator in the TUI header while the model is processing.
 - Added mouse-wheel scrolling support for the transcript viewport.
+- Changed the chat transcript to render user prompts as filled message blocks instead of `[user]` and `[assistant]` labels.
 
 ## Tests run
 
