@@ -32,6 +32,7 @@
 - Tightened internal markdown list rendering so consecutive bullet and numbered items no longer get blank lines between them.
 - Split model-turn activity from generic loading so the bottom spinner only appears for active LLM work, with a stable `Working ...` label instead of startup or resume text.
 - Moved hotkey hints out of the footer and into a dedicated `Keys` section at the bottom of the sidebar so the composer area stays clean.
+- Fixed the bottom working spinner animation by refreshing the transcript viewport on each spinner tick while the model is active.
 - Verified `go test ./...`, `go vet ./...`, `staticcheck ./...`, and `golangci-lint run`.
 
 ## Current gaps

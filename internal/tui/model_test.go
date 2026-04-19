@@ -344,6 +344,30 @@ func TestRefreshViewportOmitsWorkingLineForGenericLoading(t *testing.T) {
 	}
 }
 
+func TestSpinnerTickRefreshesTranscriptActivity(t *testing.T) {
+	m := Model{
+		currentSession: domain.Session{ID: 1},
+		modelWorking:   true,
+		status:         "Working ...",
+		parts:          map[int64][]domain.Part{},
+		viewport:       viewport.New(40, 6),
+	}
+
+	m.refreshViewport()
+	before := m.viewport.View()
+
+	updated, cmd := m.Update(spinnerTickMsg{})
+	next := updated.(Model)
+	after := next.viewport.View()
+
+	if before == after {
+		t.Fatalf("expected spinner tick to refresh transcript activity, before=%q after=%q", before, after)
+	}
+	if cmd == nil {
+		t.Fatal("expected follow-up spinner tick command")
+	}
+}
+
 func TestRenderMessagePartsShowsReasoningBeforeText(t *testing.T) {
 	m := Model{
 		showReasoning: true,

@@ -160,6 +160,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.spinnerFrame++
+		m.refreshViewport()
 		return m, spinnerTickCmd()
 	case promptDoneMsg:
 		if msg.err != nil {
