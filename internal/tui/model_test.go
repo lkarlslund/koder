@@ -413,6 +413,25 @@ func TestViewBottomAlignsFooter(t *testing.T) {
 	}
 }
 
+func TestResizeUsesMeasuredFooterHeight(t *testing.T) {
+	m := Model{
+		width:    80,
+		height:   24,
+		composer: textarea.New(),
+	}
+	m.composer.SetHeight(4)
+
+	m.resize()
+
+	want := 24 - m.footerHeight()
+	if want < 5 {
+		want = 5
+	}
+	if m.viewport.Height != want {
+		t.Fatalf("expected viewport height %d from measured footer, got %d", want, m.viewport.Height)
+	}
+}
+
 func TestRefreshViewportOmitsWorkingLineForGenericLoading(t *testing.T) {
 	m := Model{
 		currentSession: domain.Session{ID: 1},

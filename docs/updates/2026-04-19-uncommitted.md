@@ -49,6 +49,7 @@ Create the first working implementation of `koder` from the approved plan.
 - Fixed the transcript renderer to ignore `system_notice` parts, which removes spurious `usage` text from the chat window while keeping usage metadata available for sidebar/context accounting.
 - Replaced the markdown line parser with a `goldmark` CommonMark/GFM AST renderer using local theme styles, which fixes `##` and `-` rendering and broadens support to nested lists, links, blockquotes, tables, task lists, and fenced code blocks.
 - Borrowed non-default OpenCode theme palettes into `koder`, expanded the named theme token set for richer markdown/link/list styling, and made `tokyonight` the default theme instead of the old local placeholder palette.
+- Fixed TUI resize logic to compute viewport height from the measured footer height instead of reserving a hardcoded 10 rows, which stops the app from leaving several blank lines at the top of the terminal.
 
 ## Tests run
 

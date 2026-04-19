@@ -482,13 +482,13 @@ func (m *Model) resize() {
 	if bodyWidth < 20 {
 		bodyWidth = 20
 	}
-	bodyHeight := m.height - 10
+	m.composer.SetWidth(bodyWidth - 2)
+	bodyHeight := m.height - m.footerHeight()
 	if bodyHeight < 5 {
 		bodyHeight = 5
 	}
 	m.viewport.Width = bodyWidth
 	m.viewport.Height = bodyHeight
-	m.composer.SetWidth(bodyWidth - 2)
 }
 
 func (m *Model) renderHeader() string {
@@ -516,6 +516,10 @@ func (m *Model) renderFooter() string {
 	parts = append(parts, "")
 	parts = append(parts, m.composer.View())
 	return style.Render(lipgloss.JoinVertical(lipgloss.Left, parts...))
+}
+
+func (m *Model) footerHeight() int {
+	return lipgloss.Height(m.renderFooter())
 }
 
 func (m *Model) renderSidebar() string {
