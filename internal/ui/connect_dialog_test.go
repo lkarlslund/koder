@@ -40,6 +40,20 @@ func TestConnectDialogCanFilterProviderList(t *testing.T) {
 	}
 }
 
+func TestConnectDialogProviderListRendersSingleLineRows(t *testing.T) {
+	dialog := NewConnectDialog(provider.Catalog(), map[string]config.Provider{
+		"openai": {},
+	})
+
+	got := dialog.View(88, theme.Resolve("tokyonight").Palette)
+	if !strings.Contains(got, "✓ OpenAI") {
+		t.Fatalf("expected compact provider row, got %q", got)
+	}
+	if strings.Contains(got, "Direct OpenAI API access\n") {
+		t.Fatalf("expected description to stay on the same row, got %q", got)
+	}
+}
+
 func TestConnectDialogTestActionEmitsDraft(t *testing.T) {
 	dialog := NewConnectDialog(provider.Catalog(), map[string]config.Provider{})
 	dialog.selectProvider(provider.Catalog()[0])

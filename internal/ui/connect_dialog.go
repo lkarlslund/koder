@@ -207,27 +207,32 @@ func (d *ConnectDialog) providerListView(width int, palette theme.Palette) strin
 	if len(d.view) == 0 {
 		lines = append(lines, "No providers match your filter.")
 	} else {
+		listWidth := dialogWidth - 8
+		nameWidth := minInt(22, maxInt(12, listWidth/3))
+		descWidth := maxInt(16, listWidth-nameWidth-4)
 		start, end := windowBounds(d.index, len(d.view), 10)
 		for idx := start; idx < end; idx++ {
 			item := d.view[idx]
-			prefix := "  "
+			prefix := "·"
 			if _, ok := d.configured[item.ID]; ok {
-				prefix = "✓ "
+				prefix = "✓"
+			} else if item.Local {
+				prefix = "⌂"
 			}
-			if item.Local {
-				prefix = "⌂ "
-			}
-			line := fmt.Sprintf("%s%s", prefix, item.Title)
-			desc := lipgloss.NewStyle().Foreground(palette.AssistantTimestampText).Render(item.Description)
-			row := strings.Join([]string{line, "  " + desc}, "\n")
+			name := lipgloss.NewStyle().Width(nameWidth).Render(truncateText(item.Title, nameWidth))
+			desc := lipgloss.NewStyle().
+				Width(descWidth).
+				Foreground(palette.AssistantTimestampText).
+				Render(truncateText(item.Description, descWidth))
+			row := lipgloss.JoinHorizontal(lipgloss.Top, prefix+" ", name, " ", desc)
 			if idx == d.index {
 				row = lipgloss.NewStyle().Background(palette.UserTextBackground).Foreground(palette.UserTextForeground).Render(row)
 			}
-			lines = append(lines, row, "")
+			lines = append(lines, row)
 		}
 	}
 	if status := strings.TrimSpace(d.status); status != "" {
-		lines = append(lines, lipgloss.NewStyle().Foreground(palette.AssistantTimestampText).Render(status))
+		lines = append(lines, "", lipgloss.NewStyle().Foreground(palette.AssistantTimestampText).Render(status))
 	}
 	return Modal{
 		Title:  "Connect Provider",
