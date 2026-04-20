@@ -20,6 +20,7 @@ import (
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/debugsrv"
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/permission"
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/theme"
@@ -42,8 +43,11 @@ func TestMatchingSlashCommands(t *testing.T) {
 	}
 
 	matches = matchingSlashCommands("per")
-	if len(matches) != 1 || matches[0].Name != "/perm" {
-		t.Fatalf("expected /perm, got %#v", matches)
+	if len(matches) != 2 {
+		t.Fatalf("expected two permission matches, got %#v", matches)
+	}
+	if matches[0].Name != "/perm" || matches[1].Name != "/permissions" {
+		t.Fatalf("expected /perm and /permissions, got %#v", matches)
 	}
 
 	matches = matchingSlashCommands("comp")
@@ -84,6 +88,49 @@ func TestMatchingSlashCommands(t *testing.T) {
 	matches = matchingSlashCommands("rea")
 	if len(matches) != 0 {
 		t.Fatalf("expected tool slash commands to stay hidden, got %#v", matches)
+	}
+}
+
+func TestHandleLocalCommandOpensPermissionsPicker(t *testing.T) {
+	m := Model{
+		cfg:      testConfig(t),
+		composer: textarea.New(),
+	}
+	model, cmd, ok := m.handleLocalCommand("/permissions")
+	if !ok {
+		t.Fatal("expected local command to be handled")
+	}
+	if cmd == nil {
+		t.Fatal("expected sync title command")
+	}
+	next := model.(*Model)
+	if !next.hasPicker() {
+		t.Fatal("expected permissions picker to open")
+	}
+	if next.picker.mode != pickerModePermissions {
+		t.Fatalf("expected permissions picker mode, got %v", next.picker.mode)
+	}
+}
+
+func TestPermissionsPickerSelectionUpdatesDraftSession(t *testing.T) {
+	m := Model{
+		cfg:      testConfig(t),
+		composer: textarea.New(),
+	}
+	m.openPermissionsPicker()
+	for idx, item := range m.picker.matches {
+		if item.Value == permission.ProfileWriteAsk {
+			m.picker.index = idx
+			break
+		}
+	}
+	model, _ := m.submitPickerSelection()
+	next := model.(*Model)
+	if next.currentSession.PermissionProfile != permission.ProfileWriteAsk {
+		t.Fatalf("expected draft session permission profile updated, got %q", next.currentSession.PermissionProfile)
+	}
+	if next.hasPicker() {
+		t.Fatal("expected picker to close after selection")
 	}
 }
 
@@ -579,8 +626,8 @@ func TestRefreshViewportGroupsToolRunMessagesIntoCard(t *testing.T) {
 		palette: theme.Resolve("tokyonight").Palette,
 		parts: map[int64][]domain.Part{
 			1: {{
-				Kind: domain.PartKindToolCall,
-				Body: `{"command":"git status","tool":"bash","tool_call_id":"call_1"}`,
+				Kind:     domain.PartKindToolCall,
+				Body:     `{"command":"git status","tool":"bash","tool_call_id":"call_1"}`,
 				MetaJSON: `{"command":"git status","tool":"bash","tool_call_id":"call_1"}`,
 			}},
 			2: {{
@@ -2073,6 +2120,61 @@ func TestMouseWheelScrollsViewport(t *testing.T) {
 	}
 	if next.viewport.YOffset == 0 {
 		t.Fatalf("expected viewport to scroll, got y offset %d", next.viewport.YOffset)
+	}
+}
+
+func TestMouseClickTogglesToolRunExpansion(t *testing.T) {
+	m := Model{
+		mouseEnabled:     true,
+		currentSession:   domain.Session{ID: 1},
+		viewport:         viewport.New(80, 8),
+		parts:            map[int64][]domain.Part{},
+		expandedToolRuns: map[string]bool{},
+		palette:          theme.Resolve("tokyonight").Palette,
+	}
+	m.messages = []domain.Message{
+		{ID: 1, Role: domain.MessageRoleTool, Summary: "bash"},
+	}
+	m.parts[1] = []domain.Part{{
+		Kind:     domain.PartKindToolOutput,
+		Body:     "line one\nline two",
+		MetaJSON: `{"tool":"bash","command":"echo hi","tool_call_id":"call_bash_1"}`,
+	}}
+
+	m.refreshViewport()
+	if strings.Contains(m.viewport.View(), "line one\nline two") {
+		t.Fatalf("expected collapsed tool output, got %q", m.viewport.View())
+	}
+	if !strings.Contains(m.viewport.View(), "Expand (1 line more)") {
+		t.Fatalf("expected expand indicator, got %q", m.viewport.View())
+	}
+
+	updated, cmd := m.Update(tea.MouseMsg{
+		Action: tea.MouseActionPress,
+		Button: tea.MouseButtonLeft,
+		X:      2,
+		Y:      0,
+	})
+	next := updated.(*Model)
+	if cmd != nil {
+		t.Fatal("expected no command from tool run mouse toggle")
+	}
+	if !strings.Contains(next.viewport.View(), "│ line one") || !strings.Contains(next.viewport.View(), "│ line two") {
+		t.Fatalf("expected expanded tool output, got %q", next.viewport.View())
+	}
+	if !strings.Contains(next.viewport.View(), "Collapse") {
+		t.Fatalf("expected collapse indicator, got %q", next.viewport.View())
+	}
+
+	updated, _ = next.Update(tea.MouseMsg{
+		Action: tea.MouseActionPress,
+		Button: tea.MouseButtonLeft,
+		X:      2,
+		Y:      0,
+	})
+	final := updated.(*Model)
+	if strings.Contains(final.viewport.View(), "line one\nline two") {
+		t.Fatalf("expected collapsed tool output after second click, got %q", final.viewport.View())
 	}
 }
 

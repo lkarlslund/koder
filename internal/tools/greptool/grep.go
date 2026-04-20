@@ -19,14 +19,21 @@ func init() { tools.Register(tool{}) }
 func (tool) Kind() domain.ToolKind    { return domain.ToolKindGrep }
 func (tool) BypassesPermission() bool { return false }
 func (tool) Definition() (provider.ToolDefinition, bool) {
-	return tools.FunctionDefinition(domain.ToolKindGrep, "Search for text within workspace files", `{"type":"object","properties":{"pattern":{"type":"string","description":"Text or regex to search for"}},"required":["pattern"],"additionalProperties":false}`), true
+	return tools.FunctionDefinition(domain.ToolKindGrep, "Search for text within workspace files", `{"type":"object","properties":{"pattern":{"type":"string","description":"Text or regex to search for"},"path":{"type":"string","description":"Optional workspace directory to search from"},"include":{"type":"string","description":"Optional glob for files to include"}},"required":["pattern"],"additionalProperties":false}`), true
 }
 func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
-	pattern := strings.TrimSpace(args["pattern"])
+	pattern := strings.TrimSpace(tools.FirstArg(args, "pattern", "query", "search"))
 	if pattern == "" {
 		return nil, errors.New("pattern is empty")
 	}
-	return map[string]string{"pattern": pattern}, nil
+	out := map[string]string{"pattern": pattern}
+	if root := tools.NormalizePathInput(tools.FirstArg(args, "path", "root", "dir")); root != "" {
+		out["path"] = root
+	}
+	if include := strings.TrimSpace(tools.FirstArg(args, "include", "glob")); include != "" {
+		out["include"] = include
+	}
+	return out, nil
 }
 func (tool) LegacyArgs(raw string) map[string]string { return map[string]string{"pattern": raw} }
 func (tool) Preview(req tools.Request) string        { return req.Args["pattern"] }
@@ -43,15 +50,47 @@ func (tool) Presentation(req tools.Request) tools.Presentation {
 }
 func (tool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
 	if _, err := exec.LookPath("rg"); err == nil {
-		cmd := exec.CommandContext(ctx, "rg", "-n", req.Args["pattern"], ".")
-		cmd.Dir = runtime.Workdir
-		output, err := cmd.CombinedOutput()
-		if err != nil && len(output) == 0 {
+		rootAbs, _, err := tools.WorkspaceDir(runtime.Workdir, req.Args["path"])
+		if err != nil {
 			return tools.Result{}, err
 		}
-		return tools.Result{Output: string(output)}, nil
+		args := []string{"-n", req.Args["pattern"]}
+		if include := strings.TrimSpace(req.Args["include"]); include != "" {
+			args = append(args, "--glob", include)
+		}
+		args = append(args, ".")
+		cmd := exec.CommandContext(ctx, "rg", args...)
+		cmd.Dir = rootAbs
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			var exitErr *exec.ExitError
+			if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+				return tools.Result{
+					Output: "No matches found",
+					Meta: map[string]string{
+						"pattern":   req.Args["pattern"],
+						"include":   req.Args["include"],
+						"base_path": strings.TrimSpace(req.Args["path"]),
+						"matches":   "0",
+					},
+				}, nil
+			}
+			if len(output) == 0 {
+				return tools.Result{}, err
+			}
+		}
+		text, truncated := tools.TruncateText(string(output), tools.DefaultToolOutputLimit)
+		return tools.Result{
+			Output: text,
+			Meta: map[string]string{
+				"pattern":   req.Args["pattern"],
+				"include":   req.Args["include"],
+				"base_path": strings.TrimSpace(req.Args["path"]),
+				"truncated": tools.BoolString(truncated),
+			},
+		}, nil
 	}
-	return tools.Result{}, errors.New("rg is required for grep fallback in this build")
+	return tools.Result{}, errors.New("grep requires ripgrep (rg) to be installed")
 }
 func (tool) SummarizeResult(req tools.Request, result tools.Result) (string, string) {
 	return tools.DefaultSummarizeResult(req, result)

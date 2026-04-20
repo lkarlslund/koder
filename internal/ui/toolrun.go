@@ -36,6 +36,10 @@ type ToolRun struct {
 	ErrorText  string
 }
 
+func (r ToolRun) PreviewText() string {
+	return firstNonEmpty(strings.TrimSpace(r.ErrorText), strings.TrimSpace(r.Output), strings.TrimSpace(r.Diff), strings.TrimSpace(r.Preview))
+}
+
 type ToolRunDockProps struct {
 	Palette      theme.Palette
 	Run          ToolRun
@@ -66,12 +70,13 @@ func (r ToolRun) StatusLabel() string {
 	}
 }
 
-func RenderToolRunCard(run ToolRun, palette theme.Palette, width int) string {
+func RenderToolRunCard(run ToolRun, palette theme.Palette, width int, expanded bool) string {
 	statusStyle := lipgloss.NewStyle().Foreground(toolRunStatusColor(run.Status, palette)).Bold(true)
 	titleStyle := lipgloss.NewStyle().Foreground(palette.MarkdownText).Bold(true)
 	subtitleStyle := lipgloss.NewStyle().Foreground(palette.ComposerMutedText)
 	bodyStyle := lipgloss.NewStyle().Foreground(palette.MarkdownText)
 	diffStyle := lipgloss.NewStyle().Foreground(palette.DiffAddedText)
+	toggleStyle := lipgloss.NewStyle().Foreground(palette.UserAccentBar).Bold(true)
 	cardStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(toolRunStatusColor(run.Status, palette)).
@@ -80,18 +85,29 @@ func RenderToolRunCard(run ToolRun, palette theme.Palette, width int) string {
 		cardStyle = cardStyle.MaxWidth(width)
 	}
 
-	lines := []string{
-		lipgloss.JoinHorizontal(lipgloss.Left,
-			titleStyle.Render(run.Title),
-			"  ",
-			statusStyle.Render(run.StatusLabel()),
-		),
+	headerParts := []string{
+		titleStyle.Render(run.Title),
+		"  ",
+		statusStyle.Render(run.StatusLabel()),
 	}
+	if hiddenLines := ToolRunHiddenLineCount(run, innerCardWidth(width)); hiddenLines > 0 {
+		label := "[+] Expand"
+		if hiddenLines == 1 {
+			label = "[+] Expand (1 line more)"
+		} else {
+			label = "[+] Expand (" + strconv.Itoa(hiddenLines) + " lines more)"
+		}
+		if expanded {
+			label = "[-] Collapse"
+		}
+		headerParts = append(headerParts, "  ", toggleStyle.Render(label))
+	}
+	lines := []string{lipgloss.JoinHorizontal(lipgloss.Left, headerParts...)}
 	if subtitle := strings.TrimSpace(run.Subtitle); subtitle != "" {
 		lines = append(lines, subtitleStyle.Render(wrapPlain(subtitle, innerCardWidth(width))))
 	}
-	if preview := firstNonEmpty(strings.TrimSpace(run.ErrorText), strings.TrimSpace(run.Output), strings.TrimSpace(run.Diff), strings.TrimSpace(run.Preview)); preview != "" {
-		lines = append(lines, renderToolRunPreview(preview, run, bodyStyle, diffStyle, innerCardWidth(width)))
+	if preview := run.PreviewText(); preview != "" {
+		lines = append(lines, renderToolRunPreview(preview, run, bodyStyle, diffStyle, innerCardWidth(width), expanded))
 	}
 	return cardStyle.Render(strings.Join(lines, "\n"))
 }
@@ -132,13 +148,44 @@ func RenderToolRunDock(props ToolRunDockProps) string {
 		Render(strings.Join(lines, "\n"))
 }
 
-func renderToolRunPreview(preview string, run ToolRun, bodyStyle, diffStyle lipgloss.Style, width int) string {
+func ToolRunExpandable(run ToolRun, width int) bool {
+	return ToolRunHiddenLineCount(run, width) > 0
+}
+
+func ToolRunHiddenLineCount(run ToolRun, width int) int {
+	preview := strings.TrimSpace(run.PreviewText())
+	if preview == "" {
+		return 0
+	}
+	if strings.TrimSpace(run.Diff) != "" && strings.TrimSpace(run.Output) == "" && strings.TrimSpace(run.ErrorText) == "" {
+		expandedLines := renderedLineCount(wrapPlain(preview, width))
+		collapsedLines := renderedLineCount(wrapPlain(diffSummary(preview), width))
+		if expandedLines <= collapsedLines {
+			return 0
+		}
+		return expandedLines - collapsedLines
+	}
+	expandedLines := renderedLineCount(wrapPlain(preview, width))
+	collapsedLines := renderedLineCount(wrapPlain(singleLineSummary(preview), width))
+	if expandedLines <= collapsedLines {
+		return 0
+	}
+	return expandedLines - collapsedLines
+}
+
+func renderToolRunPreview(preview string, run ToolRun, bodyStyle, diffStyle lipgloss.Style, width int, expanded bool) string {
 	preview = strings.TrimSpace(preview)
 	if preview == "" {
 		return ""
 	}
 	if strings.TrimSpace(run.Diff) != "" && strings.TrimSpace(run.Output) == "" && strings.TrimSpace(run.ErrorText) == "" {
+		if expanded {
+			return diffStyle.Render(wrapPlain(preview, width))
+		}
 		return diffStyle.Render(wrapPlain(diffSummary(preview), width))
+	}
+	if expanded {
+		return bodyStyle.Render(wrapPlain(preview, width))
 	}
 	return bodyStyle.Render(wrapPlain(singleLineSummary(preview), width))
 }
@@ -210,4 +257,12 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func renderedLineCount(input string) int {
+	input = strings.TrimRight(input, "\n")
+	if input == "" {
+		return 0
+	}
+	return len(strings.Split(input, "\n"))
 }

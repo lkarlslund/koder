@@ -148,6 +148,7 @@ type pickerMode int
 const (
 	pickerModeNone pickerMode = iota
 	pickerModeTheme
+	pickerModePermissions
 )
 
 type pickerItem struct {
@@ -252,6 +253,8 @@ type Model struct {
 	tasks              []store.Task
 	approvals          []store.Approval
 	viewport           viewport.Model
+	toolRunClickZones  []toolRunClickZone
+	expandedToolRuns   map[string]bool
 	composer           textarea.Model
 	width              int
 	height             int
@@ -288,6 +291,12 @@ type Model struct {
 	writeClipboardText func(string) error
 }
 
+type toolRunClickZone struct {
+	RunID    string
+	StartRow int
+	EndRow   int
+}
+
 func New(cfg config.Config, st *store.Store, a *agent.Engine, mode StartupMode, debug *debugsrv.Recorder) (Model, error) {
 	tuiTheme := theme.Resolve(cfg.UI.Theme)
 	renderer, err := markdown.New(tuiTheme.Palette)
@@ -311,23 +320,24 @@ func New(cfg config.Config, st *store.Store, a *agent.Engine, mode StartupMode, 
 	}
 
 	return Model{
-		cfg:             cfg,
-		store:           st,
-		agent:           a,
-		renderer:        renderer,
-		palette:         tuiTheme.Palette,
-		viewport:        vp,
-		composer:        composer,
-		showSidebar:     cfg.UI.ShowSidebar,
-		showReasoning:   cfg.UI.ShowReasoning,
-		parts:           make(map[int64][]domain.Part),
-		status:          "Ready",
-		workdir:         workdir,
-		startupMode:     mode,
-		mouseEnabled:    cfg.UI.Mouse,
-		debug:           debug,
-		caps:            provider.NewCapabilityStore(cfg.StateDir()),
-		attachmentFiles: attachment.NewManager(cfg.StateDir()),
+		cfg:              cfg,
+		store:            st,
+		agent:            a,
+		renderer:         renderer,
+		palette:          tuiTheme.Palette,
+		viewport:         vp,
+		composer:         composer,
+		showSidebar:      cfg.UI.ShowSidebar,
+		showReasoning:    cfg.UI.ShowReasoning,
+		expandedToolRuns: make(map[string]bool),
+		parts:            make(map[int64][]domain.Part),
+		status:           "Ready",
+		workdir:          workdir,
+		startupMode:      mode,
+		mouseEnabled:     cfg.UI.Mouse,
+		debug:            debug,
+		caps:             provider.NewCapabilityStore(cfg.StateDir()),
+		attachmentFiles:  attachment.NewManager(cfg.StateDir()),
 	}, nil
 }
 
@@ -487,6 +497,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.MouseMsg:
 		if m.hasPicker() || m.hasApprovalPrompt() {
 			return m, nil
+		}
+		if updated, cmd, ok := m.handleMouse(msg); ok {
+			return updated, cmd
 		}
 		var cmd tea.Cmd
 		m.viewport, cmd = m.viewport.Update(msg)
@@ -703,6 +716,37 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd, bool) {
+	if !m.mouseEnabled {
+		return m, nil, false
+	}
+	if msg.Action != tea.MouseActionPress || msg.Button != tea.MouseButtonLeft {
+		return m, nil, false
+	}
+	if msg.Y < 0 || msg.Y >= m.viewport.Height {
+		return m, nil, false
+	}
+	if msg.X < 1 || msg.X > m.viewport.Width+2 {
+		return m, nil, false
+	}
+	row := m.viewport.YOffset + msg.Y
+	for _, zone := range m.toolRunClickZones {
+		if row < zone.StartRow || row > zone.EndRow {
+			continue
+		}
+		if strings.TrimSpace(zone.RunID) == "" {
+			return m, nil, true
+		}
+		if m.expandedToolRuns == nil {
+			m.expandedToolRuns = make(map[string]bool)
+		}
+		m.expandedToolRuns[zone.RunID] = !m.expandedToolRuns[zone.RunID]
+		m.refreshViewportPreserve()
+		return m, nil, true
+	}
+	return m, nil, false
+}
+
 func (m *Model) applyEvent(evt domain.Event) {
 	switch evt.Kind {
 	case domain.EventKindMessageDelta:
@@ -877,7 +921,7 @@ func (m *Model) renderSidebar() string {
 	var lines []string
 	lines = append(lines, "Session")
 	lines = append(lines, fmt.Sprintf("  id      %d", m.currentSession.ID))
-	lines = append(lines, fmt.Sprintf("  profile %s", truncate(m.permissionProfile(), 19)))
+	lines = append(lines, fmt.Sprintf("  profile %s", truncate(m.permissionProfileLabel(), 19)))
 	lines = append(lines, fmt.Sprintf("  mouse   %s", m.mouseStatus()))
 	provider := m.currentSession.ProviderID
 	if provider == "" {
@@ -972,7 +1016,7 @@ func (m *Model) renderSidebar() string {
 		if profile == m.permissionProfile() {
 			cursor = ">"
 		}
-		lines = append(lines, fmt.Sprintf("%s %s", cursor, profile))
+		lines = append(lines, fmt.Sprintf("%s %s", cursor, permission.DisplayName(profile)))
 	}
 	lines = append(lines, "")
 	lines = append(lines, "Tasks")
@@ -1010,6 +1054,7 @@ func (m *Model) renderSidebar() string {
 	lines = append(lines, "  /model")
 	lines = append(lines, "  /new  session")
 	lines = append(lines, "  /perm profile")
+	lines = append(lines, "  /permissions")
 	lines = append(lines, "  /preferences")
 	lines = append(lines, "  /resume")
 	lines = append(lines, "  /quit")
@@ -1024,6 +1069,15 @@ func (m Model) debugAPIAddr() string {
 }
 
 func (m *Model) refreshViewport() {
+	m.refreshViewportAt(-1)
+}
+
+func (m *Model) refreshViewportPreserve() {
+	m.refreshViewportAt(m.viewport.YOffset)
+}
+
+func (m *Model) refreshViewportAt(offset int) {
+	m.toolRunClickZones = nil
 	if m.currentSession.ID == 0 && len(m.messages) == 0 {
 		if !m.cfg.HasUsableDefaultProvider() {
 			m.viewport.SetContent("No provider configured.\n\nType /connect to add one before sending prompts.")
@@ -1033,8 +1087,27 @@ func (m *Model) refreshViewport() {
 		return
 	}
 	var blocks []string
-	for _, block := range m.transcriptBlocks() {
-		blocks = append(blocks, m.renderTranscriptBlock(block))
+	row := 0
+	separator := "\n\n"
+	if m.halfBlocksEnabled() {
+		separator = "\n"
+	}
+	separatorHeight := renderedSeparatorHeight(separator)
+	transcriptBlocks := m.transcriptBlocks()
+	for i, block := range transcriptBlocks {
+		rendered := m.renderTranscriptBlock(block)
+		blocks = append(blocks, rendered)
+		if block.Kind == transcriptBlockToolRun && ui.ToolRunExpandable(block.ToolRun, m.viewport.Width) {
+			m.toolRunClickZones = append(m.toolRunClickZones, toolRunClickZone{
+				RunID:    block.ToolRun.ID,
+				StartRow: row,
+				EndRow:   row + max(0, lipgloss.Height(rendered)-1),
+			})
+		}
+		row += lipgloss.Height(rendered)
+		if i < len(transcriptBlocks)-1 {
+			row += separatorHeight
+		}
 	}
 	if indicator := m.renderTranscriptActivity(); indicator != "" {
 		blocks = append(blocks, indicator)
@@ -1046,12 +1119,19 @@ func (m *Model) refreshViewport() {
 			blocks = append(blocks, "Start by asking a question or type / for commands.")
 		}
 	}
-	separator := "\n\n"
-	if m.halfBlocksEnabled() {
-		separator = "\n"
-	}
 	m.viewport.SetContent(strings.Join(blocks, separator))
+	if offset >= 0 {
+		m.viewport.SetYOffset(offset)
+		return
+	}
 	m.viewport.GotoBottom()
+}
+
+func renderedSeparatorHeight(separator string) int {
+	if separator == "" {
+		return 0
+	}
+	return max(0, lipgloss.Height("x"+separator+"x")-2)
 }
 
 func (m *Model) renderTranscriptActivity() string {
@@ -1731,6 +1811,11 @@ func (m *Model) handleLocalCommand(prompt string) (tea.Model, tea.Cmd, bool) {
 		m.updateSlashMenu()
 		m.openThemePicker()
 		return m, nil, true
+	case trimmed == "/permissions":
+		m.composer.Reset()
+		m.updateSlashMenu()
+		m.openPermissionsPicker()
+		return m, m.syncWindowTitleCmd(), true
 	case trimmed == "/preferences":
 		m.composer.Reset()
 		m.updateSlashMenu()
@@ -2636,6 +2721,7 @@ func internalSlashCommands() []slashCommand {
 		{Name: "/new", Description: "Start a new session"},
 		{Name: "/mouse", Description: "Toggle mouse capture", NeedsArgs: true, Autocomplete: "/mouse "},
 		{Name: "/perm", Description: "Set permission profile", NeedsArgs: true, Autocomplete: "/perm "},
+		{Name: "/permissions", Description: "Pick a built-in permission mode"},
 		{Name: "/preferences", Description: "Open preferences"},
 		{Name: "/quit", Description: "Quit koder"},
 		{Name: "/resume", Description: "Resume a saved session"},
@@ -2648,6 +2734,10 @@ func (m *Model) permissionProfile() string {
 		return m.currentSession.PermissionProfile
 	}
 	return m.cfg.Permissions.Profile
+}
+
+func (m *Model) permissionProfileLabel() string {
+	return permission.DisplayName(m.permissionProfile())
 }
 
 func (m *Model) mouseStatus() string {
@@ -3137,6 +3227,26 @@ func (m *Model) openThemePicker() {
 	m.previewSelectedTheme()
 }
 
+func (m *Model) openPermissionsPicker() {
+	items := make([]pickerItem, 0, len(permission.BuiltinProfiles()))
+	for _, item := range permission.BuiltinProfiles() {
+		items = append(items, pickerItem{
+			Title:       item.Label,
+			Description: item.Description,
+			Value:       item.Name,
+		})
+	}
+	m.picker = pickerModel{
+		visible:      true,
+		mode:         pickerModePermissions,
+		title:        "Permissions",
+		hint:         "enter apply  esc cancel",
+		items:        items,
+		initialValue: m.permissionProfile(),
+	}
+	m.refilterPicker()
+}
+
 func (m *Model) refilterPicker() {
 	if !m.hasPicker() {
 		return
@@ -3235,6 +3345,18 @@ func (m *Model) submitPickerSelection() (tea.Model, tea.Cmd) {
 		m.status = fmt.Sprintf("Theme set to %s", item.Value)
 		m.closePicker()
 		return m, nil
+	case pickerModePermissions:
+		item, ok := m.currentPickerItem()
+		if !ok {
+			return m, nil
+		}
+		if err := m.selectPermissionProfile(item.Value); err != nil {
+			m.status = err.Error()
+			return m, nil
+		}
+		m.status = fmt.Sprintf("Permission mode set to %s", permission.DisplayName(item.Value))
+		m.closePicker()
+		return m, m.syncWindowTitleCmd()
 	default:
 		return m, nil
 	}
@@ -3251,6 +3373,10 @@ func (m *Model) cancelPicker() (tea.Model, tea.Cmd) {
 			m.status = fmt.Sprintf("theme restore failed: %v", err)
 		}
 		m.closePicker()
+		return m, nil
+	case pickerModePermissions:
+		m.closePicker()
+		m.status = "Permission mode selection cancelled"
 		return m, nil
 	default:
 		m.closePicker()
@@ -3269,6 +3395,30 @@ func (m *Model) previewSelectedTheme() {
 	if err := m.setTheme(item.Value, false); err != nil {
 		m.status = fmt.Sprintf("theme preview failed: %v", err)
 	}
+}
+
+func (m *Model) selectPermissionProfile(profile string) error {
+	profile = strings.TrimSpace(profile)
+	if profile == "" {
+		return fmt.Errorf("permission profile is required")
+	}
+	if !permission.IsBuiltinProfile(profile) {
+		if _, ok := m.cfg.Permissions.Profiles[profile]; !ok {
+			return fmt.Errorf("unknown permission profile %q", profile)
+		}
+	}
+	if m.currentSession.ID != 0 {
+		if err := m.store.SetSessionPermissionProfile(context.Background(), m.currentSession.ID, profile); err != nil {
+			return err
+		}
+	}
+	m.currentSession.PermissionProfile = profile
+	for idx := range m.sessions {
+		if m.sessions[idx].ID == m.currentSession.ID {
+			m.sessions[idx].PermissionProfile = profile
+		}
+	}
+	return nil
 }
 
 func (m *Model) setTheme(name string, save bool) error {

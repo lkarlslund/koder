@@ -170,8 +170,10 @@ func toolRunApprovalReply(parts []domain.Part) (ui.ToolRun, bool) {
 		preview := strings.TrimSpace(meta["command"])
 		presentation := presentationFromPreview(tool, preview)
 		status := ui.ToolRunStatusApproved
+		output := ""
 		if strings.EqualFold(strings.TrimSpace(meta["status"]), "denied") {
 			status = ui.ToolRunStatusDenied
+			output = strings.TrimSpace(part.Body)
 		}
 		return ui.ToolRun{
 			ID:         approvalFallbackID(approvalID, tool, preview),
@@ -180,7 +182,7 @@ func toolRunApprovalReply(parts []domain.Part) (ui.ToolRun, bool) {
 			Title:      presentation.Title,
 			Subtitle:   presentation.Subtitle,
 			Preview:    preview,
-			Output:     strings.TrimSpace(part.Body),
+			Output:     output,
 			Status:     status,
 		}, tool != ""
 	}
@@ -303,7 +305,7 @@ func mergeToolRun(dst *ui.ToolRun, src ui.ToolRun) {
 func (m *Model) renderTranscriptBlock(block transcriptBlock) string {
 	switch block.Kind {
 	case transcriptBlockToolRun:
-		return ui.RenderToolRunCard(block.ToolRun, m.palette, m.viewport.Width)
+		return ui.RenderToolRunCard(block.ToolRun, m.palette, m.viewport.Width, m.expandedToolRuns[block.ToolRun.ID])
 	default:
 		return m.renderTranscriptMessage(block.Message)
 	}

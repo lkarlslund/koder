@@ -27,8 +27,8 @@ func (r Request) MarshalJSON() ([]byte, error) {
 }
 
 func (r *Request) UnmarshalJSON(data []byte) error {
-	var raw map[string]string
-	if err := json.Unmarshal(data, &raw); err != nil {
+	raw, err := decodeStringMap(data)
+	if err != nil {
 		return err
 	}
 	req, err := RequestFromMetaMap(raw)
@@ -73,6 +73,7 @@ func (r Request) ContextString() string {
 type Result struct {
 	Output   string
 	DiffText string
+	Meta     map[string]string
 }
 
 type Presentation struct {
@@ -185,8 +186,8 @@ func ParseProviderCall(call provider.ToolCall) (Request, error) {
 	if kind == "" {
 		return Request{}, fmt.Errorf("provider tool call missing function name")
 	}
-	var args map[string]string
-	if err := json.Unmarshal([]byte(call.Function.Arguments), &args); err != nil {
+	args, err := decodeStringMap([]byte(call.Function.Arguments))
+	if err != nil {
 		return Request{}, fmt.Errorf("decode tool arguments for %s: %w", kind, err)
 	}
 	req := Request{
@@ -205,8 +206,8 @@ func ParseProviderCall(call provider.ToolCall) (Request, error) {
 }
 
 func RequestFromStored(kind domain.ToolKind, raw string) (Request, error) {
-	var args map[string]string
-	if err := json.Unmarshal([]byte(raw), &args); err != nil {
+	args, err := decodeStringMap([]byte(raw))
+	if err != nil {
 		tool, ok := Lookup(kind)
 		if !ok {
 			return Request{}, fmt.Errorf("unsupported tool %q", kind)
@@ -318,7 +319,15 @@ func PersistStandardResult(ctx context.Context, st *store.Store, sessionID int64
 	if err != nil {
 		return nil, err
 	}
-	meta, _ := json.Marshal(req.Meta())
+	payload := req.Meta()
+	for key, value := range result.Meta {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		payload[key] = value
+	}
+	meta, _ := json.Marshal(payload)
 	if _, err := st.AddPart(ctx, msg.ID, domain.PartKindToolOutput, body, string(meta)); err != nil {
 		return nil, err
 	}
@@ -339,6 +348,10 @@ func emitOnce(evt domain.Event) <-chan domain.Event {
 	out <- evt
 	close(out)
 	return out
+}
+
+func EmitOnce(evt domain.Event) <-chan domain.Event {
+	return emitOnce(evt)
 }
 
 func normalizeRequest(req Request) (Request, Tool, error) {
@@ -372,4 +385,39 @@ func defaultSummary(tool domain.ToolKind, result Result) (string, string) {
 		body := fmt.Sprintf("%s completed with no output", tool)
 		return body, body
 	}
+}
+
+func decodeStringMap(data []byte) (map[string]string, error) {
+	trimmed := strings.TrimSpace(string(data))
+	if trimmed == "" || trimmed == "null" {
+		return map[string]string{}, nil
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, err
+	}
+	out := make(map[string]string, len(raw))
+	for key, value := range raw {
+		switch typed := value.(type) {
+		case nil:
+			continue
+		case string:
+			out[key] = typed
+		case bool:
+			if typed {
+				out[key] = "true"
+			} else {
+				out[key] = "false"
+			}
+		case float64:
+			out[key] = strings.TrimSuffix(strings.TrimSuffix(fmt.Sprintf("%f", typed), "0"), ".")
+		default:
+			encoded, err := json.Marshal(typed)
+			if err != nil {
+				return nil, err
+			}
+			out[key] = string(encoded)
+		}
+	}
+	return out, nil
 }

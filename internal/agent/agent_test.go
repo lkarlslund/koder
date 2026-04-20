@@ -16,6 +16,7 @@ import (
 	"github.com/lkarlslund/koder/internal/attachment"
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/permission"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools"
 )
@@ -40,7 +41,7 @@ func testConfig(t *testing.T) config.Config {
 
 func TestSystemPromptDoesNotMentionInternalSlashCommands(t *testing.T) {
 	prompt := systemPrompt()
-	for _, command := range []string{"/new", "/quit", "/perm", "/mouse", "/approve", "/deny"} {
+	for _, command := range []string{"/new", "/quit", "/perm", "/permissions", "/mouse", "/approve", "/deny"} {
 		if strings.Contains(prompt, command) {
 			t.Fatalf("expected system prompt to exclude internal slash command %q", command)
 		}
@@ -51,8 +52,7 @@ func TestApprovalSerializationRoundTrip(t *testing.T) {
 	req := tools.Request{
 		Tool: domain.ToolKindApplyPatch,
 		Args: map[string]string{
-			"path":    "file.txt",
-			"content": "hello",
+			"patch": "--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-before\n+after\n",
 		},
 	}
 	raw, err := serializeRequest(req)
@@ -63,7 +63,7 @@ func TestApprovalSerializationRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Args["path"] != "file.txt" || got.Args["content"] != "hello" {
+	if got.Args["patch"] == "" {
 		t.Fatalf("unexpected round trip args: %#v", got.Args)
 	}
 }
@@ -465,6 +465,108 @@ func TestRunPromptPersistsAssistantErrorOnBackendFailure(t *testing.T) {
 	}
 	if !strings.Contains(errorParts[0].Body, "Error:") {
 		t.Fatalf("expected stored error prefix, got %q", errorParts[0].Body)
+	}
+}
+
+func TestHandleModelToolCallAsksForOutsideProjectRead(t *testing.T) {
+	cfg := testConfig(t)
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	workdir := t.TempDir()
+	engine := New(cfg, st, tools.NewRegistry(workdir), nil, workdir)
+	session, err := st.CreateSession(context.Background(), "test", cfg.DefaultProvider, "test-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	session.PermissionProfile = permission.ProfileReadAsk
+	session.ProjectRoot = workdir
+
+	outsideDir := t.TempDir()
+	outsidePath := filepath.Join(outsideDir, "outside.txt")
+	if err := os.WriteFile(outsidePath, []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	evt, err := engine.handleModelToolCall(context.Background(), session, tools.Request{
+		Tool: domain.ToolKindRead,
+		Args: map[string]string{"path": outsidePath},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if evt.Kind != domain.EventKindApprovalAsk {
+		t.Fatalf("expected approval ask, got %#v", evt)
+	}
+	if !strings.Contains(evt.Text, "outside the current project folder") {
+		t.Fatalf("expected outside-project reason, got %q", evt.Text)
+	}
+}
+
+func TestHandleModelToolCallAllowsProjectWriteInWriteAskMode(t *testing.T) {
+	cfg := testConfig(t)
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	workdir := t.TempDir()
+	engine := New(cfg, st, tools.NewRegistry(workdir), nil, workdir)
+	session, err := st.CreateSession(context.Background(), "test", cfg.DefaultProvider, "test-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	session.PermissionProfile = permission.ProfileWriteAsk
+	session.ProjectRoot = workdir
+
+	evt, err := engine.handleModelToolCall(context.Background(), session, tools.Request{
+		Tool: domain.ToolKindWrite,
+		Args: map[string]string{"path": "note.txt", "content": "hello"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if evt.Kind != domain.EventKindToolResult {
+		t.Fatalf("expected tool result, got %#v", evt)
+	}
+	if _, err := os.Stat(filepath.Join(workdir, "note.txt")); err != nil {
+		t.Fatalf("expected write to succeed: %v", err)
+	}
+}
+
+func TestHandleModelToolCallAsksForBashInWriteAskMode(t *testing.T) {
+	cfg := testConfig(t)
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	workdir := t.TempDir()
+	engine := New(cfg, st, tools.NewRegistry(workdir), nil, workdir)
+	session, err := st.CreateSession(context.Background(), "test", cfg.DefaultProvider, "test-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	session.PermissionProfile = permission.ProfileWriteAsk
+	session.ProjectRoot = workdir
+
+	evt, err := engine.handleModelToolCall(context.Background(), session, tools.Request{
+		Tool: domain.ToolKindBash,
+		Args: map[string]string{"command": "pwd"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if evt.Kind != domain.EventKindApprovalAsk {
+		t.Fatalf("expected approval ask, got %#v", evt)
+	}
+	if !strings.Contains(evt.Text, "shell commands require approval in this mode") {
+		t.Fatalf("unexpected approval text: %q", evt.Text)
 	}
 }
 

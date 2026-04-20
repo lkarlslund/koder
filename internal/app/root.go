@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/lkarlslund/koder/internal/agent"
+	"github.com/lkarlslund/koder/internal/agents"
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/debugsrv"
 	"github.com/lkarlslund/koder/internal/domain"
@@ -58,7 +59,7 @@ func runTUI(ctx context.Context, mode tui.StartupMode) error {
 	if err != nil {
 		return err
 	}
-	registry := tools.NewRegistry(wd)
+	registry := tools.NewRegistry(agents.FindProjectRoot(wd))
 	var recorder *debugsrv.Recorder
 	if debugServer != nil {
 		recorder = debugServer.Recorder()
