@@ -176,6 +176,122 @@ func TestAltEnterInsertsNewlineInsteadOfSending(t *testing.T) {
 	}
 }
 
+func TestEnterWhileBusyQueuesPrompt(t *testing.T) {
+	cfg := config.Default()
+	cfg.DefaultProvider = "openai"
+	cfg.DefaultModel = "gpt-5.4"
+	cfg.Providers = map[string]config.Provider{
+		"openai": {
+			Kind:         "openai-compatible",
+			AuthMethod:   "api_key",
+			BaseURL:      "https://api.openai.com/v1",
+			APIKey:       "secret",
+			DefaultModel: "gpt-5.4",
+		},
+	}
+	m := Model{
+		cfg:      cfg,
+		composer: textarea.New(),
+		parts:    map[int64][]domain.Part{},
+		loading:  true,
+		busy: busyModel{
+			active: true,
+			scope:  busyScopeTranscript,
+		},
+	}
+	m.composer.SetValue("follow up")
+
+	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	next := updated.(*Model)
+	if cmd == nil {
+		t.Fatal("expected title sync command after queueing")
+	}
+	if next.queuedPrompt == nil || next.queuedPrompt.Text != "follow up" || next.queuedPrompt.Mode != queuedPromptModeNormal {
+		t.Fatalf("expected queued prompt, got %#v", next.queuedPrompt)
+	}
+	if next.composer.Value() != "" {
+		t.Fatalf("expected composer reset after queueing, got %q", next.composer.Value())
+	}
+	if len(next.messages) != 0 {
+		t.Fatalf("expected no optimistic send while busy, got %#v", next.messages)
+	}
+}
+
+func TestTabWhileBusyQueuesSteeringPrompt(t *testing.T) {
+	cfg := config.Default()
+	cfg.DefaultProvider = "openai"
+	cfg.DefaultModel = "gpt-5.4"
+	cfg.Providers = map[string]config.Provider{
+		"openai": {
+			Kind:         "openai-compatible",
+			AuthMethod:   "api_key",
+			BaseURL:      "https://api.openai.com/v1",
+			APIKey:       "secret",
+			DefaultModel: "gpt-5.4",
+		},
+	}
+	m := Model{
+		cfg:      cfg,
+		composer: textarea.New(),
+		loading:  true,
+		busy: busyModel{
+			active: true,
+			scope:  busyScopeTranscript,
+		},
+	}
+	m.composer.SetValue("nudge the plan")
+
+	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyTab})
+	next := updated.(*Model)
+	if cmd == nil {
+		t.Fatal("expected title sync command after steering queue")
+	}
+	if next.queuedPrompt == nil || next.queuedPrompt.Mode != queuedPromptModeSteer {
+		t.Fatalf("expected steering queue, got %#v", next.queuedPrompt)
+	}
+}
+
+func TestLoadMsgDispatchesQueuedPrompt(t *testing.T) {
+	cfg := config.Default()
+	cfg.DefaultProvider = "openai"
+	cfg.DefaultModel = "gpt-5.4"
+	cfg.Providers = map[string]config.Provider{
+		"openai": {
+			Kind:         "openai-compatible",
+			AuthMethod:   "api_key",
+			BaseURL:      "https://api.openai.com/v1",
+			APIKey:       "secret",
+			DefaultModel: "gpt-5.4",
+		},
+	}
+	m := Model{
+		cfg:            cfg,
+		composer:       textarea.New(),
+		parts:          map[int64][]domain.Part{},
+		viewport:       viewport.New(40, 6),
+		currentSession: domain.Session{ID: 9, ProviderID: "openai", ModelID: "gpt-5.4", Title: "Queued"},
+		queuedPrompt:   &queuedPrompt{Text: "queued ask", Mode: queuedPromptModeNormal},
+	}
+
+	updated, cmd := m.Update(loadMsg{
+		current: domain.Session{ID: 9, ProviderID: "openai", ModelID: "gpt-5.4", Title: "Queued"},
+		parts:   map[int64][]domain.Part{},
+	})
+	next := updated.(Model)
+	if cmd == nil {
+		t.Fatal("expected queued prompt dispatch command")
+	}
+	if !next.loading {
+		t.Fatal("expected queued prompt dispatch to restart loading")
+	}
+	if len(next.messages) != 1 || next.messages[0].Summary != "queued ask" {
+		t.Fatalf("expected optimistic queued message, got %#v", next.messages)
+	}
+	if next.queuedPrompt != nil {
+		t.Fatalf("expected queued prompt cleared, got %#v", next.queuedPrompt)
+	}
+}
+
 func TestWindowTitleUsesSessionTitle(t *testing.T) {
 	m := Model{
 		cfg:            config.Default(),
@@ -554,6 +670,56 @@ func TestCtrlCUsesQuitPath(t *testing.T) {
 	}
 	if next.status != "Quitting" {
 		t.Fatalf("unexpected status: %q", next.status)
+	}
+}
+
+func TestEscInterruptRequiresDoublePress(t *testing.T) {
+	m := Model{
+		composer: textarea.New(),
+		loading:  true,
+		busy: busyModel{
+			active: true,
+			scope:  busyScopeTranscript,
+		},
+		activeOpCancel: func() {},
+	}
+
+	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	next := updated.(*Model)
+	if cmd == nil {
+		t.Fatal("expected title sync command after first esc")
+	}
+	if next.status != "Press Esc again to interrupt" {
+		t.Fatalf("unexpected first esc status: %q", next.status)
+	}
+	if next.interruptArmedAt.IsZero() {
+		t.Fatal("expected interrupt to arm on first esc")
+	}
+}
+
+func TestEscInterruptCancelsActiveOperation(t *testing.T) {
+	cancelled := false
+	m := Model{
+		composer: textarea.New(),
+		loading:  true,
+		busy: busyModel{
+			active: true,
+			scope:  busyScopeTranscript,
+		},
+		activeOpCancel:   func() { cancelled = true },
+		interruptArmedAt: time.Now(),
+	}
+
+	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	next := updated.(*Model)
+	if cmd == nil {
+		t.Fatal("expected title sync command after second esc")
+	}
+	if !cancelled {
+		t.Fatal("expected active operation to be cancelled")
+	}
+	if next.status != "Interrupting…" {
+		t.Fatalf("unexpected second esc status: %q", next.status)
 	}
 }
 

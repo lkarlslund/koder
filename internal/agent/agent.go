@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"slices"
@@ -80,6 +81,10 @@ func (e *Engine) Compact(ctx context.Context, sessionID int64) (<-chan domain.Ev
 		defer close(out)
 		out <- domain.Event{Kind: domain.EventKindStatus, Text: "Compacting session..."}
 		if err := e.compactSession(ctx, session, client, "manual", out); err != nil {
+			if interruptedErr(err) {
+				e.emitInterrupted(out, session.ID)
+				return
+			}
 			e.recordAssistantError(ctx, session.ID, err)
 			out <- domain.Event{Kind: domain.EventKindError, Err: err}
 			return
@@ -105,6 +110,10 @@ func (e *Engine) runModelPrompt(ctx context.Context, session domain.Session, pro
 		e.recordLifecycle(session.ID, "prompt_started", prompt, map[string]string{"provider": session.ProviderID, "model": session.ModelID})
 		compacted, err := e.autoCompactIfNeeded(ctx, session, client, out)
 		if err != nil {
+			if interruptedErr(err) {
+				e.emitInterrupted(out, session.ID)
+				return
+			}
 			e.recordAssistantError(ctx, session.ID, err)
 			out <- domain.Event{Kind: domain.EventKindError, Err: err}
 			return
@@ -112,21 +121,37 @@ func (e *Engine) runModelPrompt(ctx context.Context, session domain.Session, pro
 		if compacted {
 			session, err = e.store.GetSession(ctx, session.ID)
 			if err != nil {
+				if interruptedErr(err) {
+					e.emitInterrupted(out, session.ID)
+					return
+				}
 				out <- domain.Event{Kind: domain.EventKindError, Err: err}
 				return
 			}
 		}
 		userMsg, err := e.store.AddMessage(ctx, session.ID, domain.MessageRoleUser, prompt)
 		if err != nil {
+			if interruptedErr(err) {
+				e.emitInterrupted(out, session.ID)
+				return
+			}
 			out <- domain.Event{Kind: domain.EventKindError, Err: err}
 			return
 		}
 		if _, err := e.store.AddPart(ctx, userMsg.ID, domain.PartKindText, prompt, ""); err != nil {
+			if interruptedErr(err) {
+				e.emitInterrupted(out, session.ID)
+				return
+			}
 			out <- domain.Event{Kind: domain.EventKindError, Err: err}
 			return
 		}
 		e.recordLifecycle(session.ID, "user_message_persisted", prompt, map[string]string{"message_id": strconv.FormatInt(userMsg.ID, 10)})
 		if err := e.continueModelTurn(ctx, session, client, out); err != nil {
+			if interruptedErr(err) {
+				e.emitInterrupted(out, session.ID)
+				return
+			}
 			e.recordAssistantError(ctx, session.ID, err)
 			out <- domain.Event{Kind: domain.EventKindError, Err: err}
 			return
@@ -385,6 +410,9 @@ func (e *Engine) approve(ctx context.Context, sessionID int64, rawID string) (<-
 	result, execErr := e.registry.Execute(ctx, req)
 	if execErr != nil {
 		e.recordLifecycle(sessionID, "tool_execution_failed", execErr.Error(), map[string]string{"tool": string(item.Tool), "approval_id": strconv.FormatInt(id, 10)})
+		if interruptedErr(execErr) {
+			return emitOnce(domain.Event{Kind: domain.EventKindStatus, Text: "Interrupted"}), nil
+		}
 		return emitOnce(domain.Event{Kind: domain.EventKindError, Err: execErr}), nil
 	}
 	e.recordLifecycle(sessionID, "tool_execution_finished", item.Command, map[string]string{"tool": string(item.Tool), "approval_id": strconv.FormatInt(id, 10)})
@@ -412,6 +440,10 @@ func (e *Engine) approve(ctx context.Context, sessionID int64, rawID string) (<-
 		}
 		compacted, err := e.autoCompactIfNeeded(ctx, session, client, out)
 		if err != nil {
+			if interruptedErr(err) {
+				e.emitInterrupted(out, session.ID)
+				return
+			}
 			e.recordAssistantError(ctx, session.ID, err)
 			out <- domain.Event{Kind: domain.EventKindError, Err: err}
 			return
@@ -419,11 +451,19 @@ func (e *Engine) approve(ctx context.Context, sessionID int64, rawID string) (<-
 		if compacted {
 			session, err = e.store.GetSession(ctx, session.ID)
 			if err != nil {
+				if interruptedErr(err) {
+					e.emitInterrupted(out, session.ID)
+					return
+				}
 				out <- domain.Event{Kind: domain.EventKindError, Err: err}
 				return
 			}
 		}
 		if err := e.continueModelTurn(ctx, session, client, out); err != nil {
+			if interruptedErr(err) {
+				e.emitInterrupted(out, session.ID)
+				return
+			}
 			e.recordAssistantError(ctx, session.ID, err)
 			out <- domain.Event{Kind: domain.EventKindError, Err: err}
 		}
@@ -497,6 +537,9 @@ func (e *Engine) recordAssistantError(ctx context.Context, sessionID int64, err 
 	if err == nil || sessionID == 0 {
 		return
 	}
+	if interruptedErr(err) {
+		return
+	}
 	e.recordLifecycle(sessionID, "assistant_error", err.Error(), nil)
 	msg, addErr := e.store.AddMessage(ctx, sessionID, domain.MessageRoleAssistant, errorSummary(err))
 	if addErr != nil {
@@ -510,6 +553,15 @@ func (e *Engine) recordLifecycle(sessionID int64, kind, text string, meta map[st
 		return
 	}
 	e.debug.RecordLifecycle(sessionID, kind, text, meta)
+}
+
+func (e *Engine) emitInterrupted(out chan<- domain.Event, sessionID int64) {
+	e.recordLifecycle(sessionID, "interrupted", "Interrupted", nil)
+	out <- domain.Event{Kind: domain.EventKindStatus, Text: "Interrupted"}
+}
+
+func interruptedErr(err error) bool {
+	return errors.Is(err, context.Canceled)
 }
 
 func errorSummary(err error) string {

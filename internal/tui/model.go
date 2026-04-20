@@ -172,6 +172,45 @@ type runPromptMsg struct {
 	err     error
 }
 
+type queuedPromptMode int
+
+const (
+	queuedPromptModeNormal queuedPromptMode = iota
+	queuedPromptModeSteer
+)
+
+type queuedPrompt struct {
+	Text string
+	Mode queuedPromptMode
+}
+
+func (q queuedPrompt) modeLabel() string {
+	switch q.Mode {
+	case queuedPromptModeSteer:
+		return "steering"
+	default:
+		return "after idle"
+	}
+}
+
+func (q queuedPrompt) statusText() string {
+	switch q.Mode {
+	case queuedPromptModeSteer:
+		return "Queued steering for after the current run"
+	default:
+		return "Queued prompt for when koder is idle"
+	}
+}
+
+func (q queuedPrompt) runStatus() string {
+	switch q.Mode {
+	case queuedPromptModeSteer:
+		return "Applying steering…"
+	default:
+		return "Running queued prompt…"
+	}
+}
+
 type providerProbeMsg struct {
 	result provider.ProbeResult
 	err    error
@@ -227,6 +266,9 @@ type Model struct {
 	disconnectDialog *ui.DisconnectDialog
 	modelDialog      *ui.ModelDialog
 	debug            *debugsrv.Recorder
+	activeOpCancel   context.CancelFunc
+	queuedPrompt     *queuedPrompt
+	interruptArmedAt time.Time
 }
 
 func New(cfg config.Config, st *store.Store, a *agent.Engine, mode StartupMode, debug *debugsrv.Recorder) (Model, error) {
@@ -302,18 +344,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(spinnerTickCmd(), m.syncWindowTitleCmd())
 	case promptDoneMsg:
 		if msg.err != nil {
-			m.status = msg.err.Error()
-			m.stopBusy()
-			return m, m.syncWindowTitleCmd()
+			return m.finishOperationWithError(msg.err)
 		}
 		m.startBusy(m.busy.scopeOrDefault(busyScopeTranscript), m.busy.statusOrDefault("Working ..."))
 		return m, tea.Batch(nextEventCmd(msg.events), m.spinnerCmdIfNeeded(), m.syncWindowTitleCmd())
 	case runPromptMsg:
 		if msg.err != nil {
-			m.status = msg.err.Error()
-			m.appendLocalAssistantError(msg.err)
-			m.stopBusy()
-			return m, m.syncWindowTitleCmd()
+			return m.finishOperationWithError(msg.err)
 		}
 		m.currentSession = msg.session
 		m.startBusy(m.busy.scopeOrDefault(busyScopeTranscript), "Working ...")
@@ -332,6 +369,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.debug.RecordLifecycle(m.currentSession.ID, "session_reloaded", fmt.Sprintf("%d messages", len(m.messages)), map[string]string{"messages": strconv.Itoa(len(m.messages))})
 		}
 		m.stopBusyWithStatus("Ready")
+		if cmd := m.dequeuePromptCmd(); cmd != nil {
+			return m, tea.Batch(cmd, m.syncWindowTitleCmd())
+		}
 		return m, m.syncWindowTitleCmd()
 	case forkSessionMsg:
 		if msg.err != nil {
@@ -459,6 +499,9 @@ func (m Model) View() string {
 }
 
 func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if msg.String() != "esc" {
+		m.interruptArmedAt = time.Time{}
+	}
 	if m.hasModelDialog() {
 		return m.handleModelDialogKey(msg)
 	}
@@ -557,6 +600,10 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c":
 		return m.quit()
+	case "esc":
+		if m.loading {
+			return m.handleInterruptKey()
+		}
 	case "ctrl+s":
 		m.showSidebar = !m.showSidebar
 		m.resize()
@@ -570,13 +617,17 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.composer.InsertRune('\n')
 		m.updateSlashMenu()
 		return m, nil
-	case "enter":
-		if m.loading {
-			return m, nil
+	case "tab":
+		if m.loading && !m.hasSlashMenu() {
+			return m.queueComposerPrompt(queuedPromptModeSteer)
 		}
+	case "enter":
 		prompt := strings.TrimSpace(m.composer.Value())
 		if prompt == "" {
 			return m, nil
+		}
+		if m.loading {
+			return m.queueComposerPrompt(queuedPromptModeNormal)
 		}
 		if handledModel, cmd, ok := m.handleLocalCommand(prompt); ok {
 			return handledModel, cmd
@@ -590,7 +641,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.updateSlashMenu()
 		m.appendLocalUserPrompt(prompt)
 		m.startBusy(busyScopeTranscript, "Running…")
-		return m, tea.Batch(m.promptCmd(prompt), m.spinnerCmdIfNeeded())
+		return m, tea.Batch(m.promptCmd(m.beginActiveOperation(), prompt), m.spinnerCmdIfNeeded())
 	}
 
 	var cmd tea.Cmd
@@ -782,6 +833,12 @@ func (m *Model) renderSidebar() string {
 	} else {
 		lines = append(lines, fmt.Sprintf("  %s", truncate(status, 24)))
 	}
+	if m.queuedPrompt != nil {
+		lines = append(lines, "")
+		lines = append(lines, "Queued")
+		lines = append(lines, fmt.Sprintf("  %s", m.queuedPrompt.modeLabel()))
+		lines = append(lines, fmt.Sprintf("  %s", truncate(m.queuedPrompt.Text, 24)))
+	}
 	if metrics, ok := sessionctx.FromMessages(m.cfg, m.currentSession, m.messages, m.parts); ok {
 		lines = append(lines, "")
 		lines = append(lines, "Context")
@@ -853,7 +910,13 @@ func (m *Model) renderSidebar() string {
 	lines = append(lines, "")
 	lines = append(lines, "Keys")
 	lines = append(lines, "  enter send/select")
-	lines = append(lines, "  tab   autocomplete")
+	if m.loading {
+		lines = append(lines, "  esc   interrupt")
+		lines = append(lines, "  enter queue next")
+		lines = append(lines, "  tab   queue steer")
+	} else {
+		lines = append(lines, "  tab   autocomplete")
+	}
 	lines = append(lines, "  ^s    sidebar")
 	lines = append(lines, "  ^r    reasoning")
 	lines = append(lines, "  /compact")
@@ -1131,9 +1194,8 @@ type loadMsg struct {
 	workspace workspace.Status
 }
 
-func (m Model) promptCmd(prompt string) tea.Cmd {
+func (m Model) promptCmd(ctx context.Context, prompt string) tea.Cmd {
 	return func() tea.Msg {
-		ctx := context.Background()
 		session := m.currentSession
 		if session.ID == 0 {
 			var err error
@@ -1439,12 +1501,12 @@ func (m *Model) handleLocalCommand(prompt string) (tea.Model, tea.Cmd, bool) {
 		m.composer.Reset()
 		m.updateSlashMenu()
 		m.startBusy(busyScopeSidebar, fmt.Sprintf("Setting permission profile to %s…", profile))
-		return m, tea.Batch(m.permissionProfileCmd(profile), m.spinnerCmdIfNeeded()), true
+		return m, tea.Batch(m.permissionProfileCmd(m.beginActiveOperation(), profile), m.spinnerCmdIfNeeded()), true
 	case trimmed == "/compact":
 		m.composer.Reset()
 		m.updateSlashMenu()
 		m.startBusy(busyScopeTranscript, "Compacting session...")
-		return m, tea.Batch(m.compactCmd(), m.spinnerCmdIfNeeded()), true
+		return m, tea.Batch(m.compactCmd(m.beginActiveOperation()), m.spinnerCmdIfNeeded()), true
 	case trimmed == "/connect":
 		m.composer.Reset()
 		m.updateSlashMenu()
@@ -1497,7 +1559,7 @@ func (m *Model) handleLocalCommand(prompt string) (tea.Model, tea.Cmd, bool) {
 		m.composer.Reset()
 		m.updateSlashMenu()
 		m.startBusy(busyScopeTranscript, fmt.Sprintf("Approving approval %d…", id))
-		return m, tea.Batch(m.approveCmd(id), m.spinnerCmdIfNeeded()), true
+		return m, tea.Batch(m.approveCmd(m.beginActiveOperation(), id), m.spinnerCmdIfNeeded()), true
 	case strings.HasPrefix(trimmed, "/deny "):
 		id, err := strconv.ParseInt(strings.TrimSpace(strings.TrimPrefix(trimmed, "/deny")), 10, 64)
 		if err != nil {
@@ -1507,7 +1569,7 @@ func (m *Model) handleLocalCommand(prompt string) (tea.Model, tea.Cmd, bool) {
 		m.composer.Reset()
 		m.updateSlashMenu()
 		m.startBusy(busyScopeSidebar, fmt.Sprintf("Denying approval %d…", id))
-		return m, tea.Batch(m.denyCmd(id), m.spinnerCmdIfNeeded()), true
+		return m, tea.Batch(m.denyCmd(m.beginActiveOperation(), id), m.spinnerCmdIfNeeded()), true
 	case strings.HasPrefix(trimmed, "/"):
 		m.status = fmt.Sprintf("unknown command: %s", trimmed)
 		return m, nil, true
@@ -1516,30 +1578,104 @@ func (m *Model) handleLocalCommand(prompt string) (tea.Model, tea.Cmd, bool) {
 	}
 }
 
-func (m Model) permissionProfileCmd(profile string) tea.Cmd {
+func (m Model) permissionProfileCmd(ctx context.Context, profile string) tea.Cmd {
 	return func() tea.Msg {
-		events, err := m.agent.SetPermissionProfile(context.Background(), m.currentSession.ID, profile)
+		events, err := m.agent.SetPermissionProfile(ctx, m.currentSession.ID, profile)
 		return promptDoneMsg{events: events, err: err}
 	}
 }
 
-func (m Model) compactCmd() tea.Cmd {
+func (m *Model) beginActiveOperation() context.Context {
+	if m.activeOpCancel != nil {
+		m.activeOpCancel()
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	m.activeOpCancel = cancel
+	m.interruptArmedAt = time.Time{}
+	return ctx
+}
+
+func (m *Model) handleInterruptKey() (tea.Model, tea.Cmd) {
+	if m.activeOpCancel == nil {
+		return m, nil
+	}
+	now := time.Now()
+	if m.interruptArmedAt.IsZero() || now.Sub(m.interruptArmedAt) > 5*time.Second {
+		m.interruptArmedAt = now
+		m.status = "Press Esc again to interrupt"
+		return m, m.syncWindowTitleCmd()
+	}
+	m.interruptArmedAt = time.Time{}
+	m.status = "Interrupting…"
+	m.activeOpCancel()
+	return m, m.syncWindowTitleCmd()
+}
+
+func (m *Model) queueComposerPrompt(mode queuedPromptMode) (tea.Model, tea.Cmd) {
+	prompt := strings.TrimSpace(m.composer.Value())
+	if prompt == "" {
+		return m, nil
+	}
+	if strings.HasPrefix(prompt, "/") {
+		m.status = "Wait for the current run to finish before using slash commands"
+		return m, m.syncWindowTitleCmd()
+	}
+	m.queuedPrompt = &queuedPrompt{Text: prompt, Mode: mode}
+	m.composer.Reset()
+	m.updateSlashMenu()
+	m.status = m.queuedPrompt.statusText()
+	return m, m.syncWindowTitleCmd()
+}
+
+func (m *Model) dequeuePromptCmd() tea.Cmd {
+	if m.queuedPrompt == nil || m.loading {
+		return nil
+	}
+	if len(m.approvals) > 0 {
+		return nil
+	}
+	item := *m.queuedPrompt
+	m.queuedPrompt = nil
+	if ok, status := m.canSendPrompt(); !ok {
+		m.openConnectDialog()
+		m.status = status
+		m.composer.SetValue(item.Text)
+		m.updateSlashMenu()
+		return nil
+	}
+	m.appendLocalUserPrompt(item.Text)
+	m.startBusy(busyScopeTranscript, item.runStatus())
+	return tea.Batch(m.promptCmd(m.beginActiveOperation(), item.Text), m.spinnerCmdIfNeeded())
+}
+
+func (m *Model) finishOperationWithError(err error) (tea.Model, tea.Cmd) {
+	if errors.Is(err, context.Canceled) {
+		m.stopBusyWithStatus("Interrupted")
+		return *m, m.syncWindowTitleCmd()
+	}
+	m.status = err.Error()
+	m.appendLocalAssistantError(err)
+	m.stopBusy()
+	return *m, m.syncWindowTitleCmd()
+}
+
+func (m Model) compactCmd(ctx context.Context) tea.Cmd {
 	return func() tea.Msg {
-		events, err := m.agent.Compact(context.Background(), m.currentSession.ID)
+		events, err := m.agent.Compact(ctx, m.currentSession.ID)
 		return promptDoneMsg{events: events, err: err}
 	}
 }
 
-func (m Model) approveCmd(approvalID int64) tea.Cmd {
+func (m Model) approveCmd(ctx context.Context, approvalID int64) tea.Cmd {
 	return func() tea.Msg {
-		events, err := m.agent.Approve(context.Background(), m.currentSession.ID, approvalID)
+		events, err := m.agent.Approve(ctx, m.currentSession.ID, approvalID)
 		return promptDoneMsg{events: events, err: err}
 	}
 }
 
-func (m Model) denyCmd(approvalID int64) tea.Cmd {
+func (m Model) denyCmd(ctx context.Context, approvalID int64) tea.Cmd {
 	return func() tea.Msg {
-		events, err := m.agent.Deny(context.Background(), m.currentSession.ID, approvalID)
+		events, err := m.agent.Deny(ctx, m.currentSession.ID, approvalID)
 		return promptDoneMsg{events: events, err: err}
 	}
 }
@@ -1622,6 +1758,8 @@ func (m *Model) startBusy(scope busyScope, status string) {
 func (m *Model) stopBusy() {
 	m.loading = false
 	m.busy.stop()
+	m.activeOpCancel = nil
+	m.interruptArmedAt = time.Time{}
 }
 
 func (m *Model) stopBusyWithStatus(status string) {
@@ -2099,10 +2237,10 @@ func (m *Model) submitApprovalChoice(approve bool) (tea.Model, tea.Cmd) {
 	id := m.approvals[0].ID
 	if approve {
 		m.startBusy(busyScopeTranscript, fmt.Sprintf("Approving approval %d…", id))
-		return m, tea.Batch(m.approveCmd(id), m.spinnerCmdIfNeeded())
+		return m, tea.Batch(m.approveCmd(m.beginActiveOperation(), id), m.spinnerCmdIfNeeded())
 	}
 	m.startBusy(busyScopeSidebar, fmt.Sprintf("Denying approval %d…", id))
-	return m, tea.Batch(m.denyCmd(id), m.spinnerCmdIfNeeded())
+	return m, tea.Batch(m.denyCmd(m.beginActiveOperation(), id), m.spinnerCmdIfNeeded())
 }
 
 func (m *Model) renderApprovalPrompt() string {

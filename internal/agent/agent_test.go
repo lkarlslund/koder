@@ -350,6 +350,75 @@ func TestRunPromptPersistsAssistantErrorOnBackendFailure(t *testing.T) {
 	}
 }
 
+func TestRunPromptCancellationDoesNotPersistAssistantError(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
+	}))
+	defer server.Close()
+
+	cfg := config.Default()
+	cfg.Providers = map[string]config.Provider{
+		"test": {
+			BaseURL: server.URL + "/v1",
+			Timeout: time.Second,
+		},
+	}
+	cfg.DefaultProvider = "test"
+	cfg.DefaultModel = "test-model"
+
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	engine := New(cfg, st, tools.NewRegistry(t.TempDir()), nil)
+	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	events, err := engine.RunPrompt(ctx, session, "hello")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cancel()
+
+	var sawInterrupted bool
+	for evt := range events {
+		if evt.Kind == domain.EventKindStatus && evt.Text == "Interrupted" {
+			sawInterrupted = true
+		}
+		if evt.Kind == domain.EventKindError {
+			t.Fatalf("expected interruption status instead of error, got %#v", evt)
+		}
+	}
+	if !sawInterrupted {
+		t.Fatal("expected interrupted status event")
+	}
+
+	messages, parts, err := st.PartsForSession(context.Background(), session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) > 0 {
+		last := messages[len(messages)-1]
+		if last.Role == domain.MessageRoleAssistant {
+			t.Fatalf("did not expect assistant error message after cancellation, got %#v", last)
+		}
+	}
+	for _, byMessage := range parts {
+		for _, part := range byMessage {
+			if strings.Contains(part.Body, "context canceled") {
+				t.Fatalf("unexpected persisted cancellation error: %#v", part)
+			}
+		}
+	}
+}
+
 func TestModelTaskPersistsTranscriptUpdate(t *testing.T) {
 	t.Parallel()
 
