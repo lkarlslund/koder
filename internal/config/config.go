@@ -14,6 +14,7 @@ import (
 
 type UI struct {
 	Theme          string `toml:"theme"`
+	HalfBlocks     bool   `toml:"half_blocks"`
 	ShowSidebar    bool   `toml:"show_sidebar"`
 	ShowTimestamps bool   `toml:"show_timestamps"`
 	ShowReasoning  bool   `toml:"show_reasoning"`
@@ -180,6 +181,7 @@ func Default() Config {
 		},
 		UI: UI{
 			Theme:          "tokyonight",
+			HalfBlocks:     true,
 			ShowSidebar:    true,
 			ShowTimestamps: false,
 			ShowReasoning:  false,

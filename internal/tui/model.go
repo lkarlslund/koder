@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/lkarlslund/koder/internal/agent"
 	"github.com/lkarlslund/koder/internal/config"
@@ -37,6 +38,8 @@ const (
 	busyScopeNone busyScope = iota
 	busyScopeSidebar
 	busyScopeTranscript
+	composerHeight      = 3
+	composerInputHeight = 1
 )
 
 type spinnerModel struct {
@@ -208,7 +211,8 @@ func New(cfg config.Config, st *store.Store, a *agent.Engine, mode StartupMode) 
 	composer := textarea.New()
 	composer.Placeholder = "Ask koder or type / for commands"
 	composer.SetWidth(40)
-	composer.SetHeight(3)
+	composer.SetHeight(composerInputHeight)
+	composer.Prompt = mPrompt(cfg)
 	composer.Focus()
 	composer.ShowLineNumbers = false
 	applyComposerTheme(&composer, tuiTheme.Palette)
@@ -550,12 +554,67 @@ func (m *Model) footerHeight() int {
 }
 
 func (m *Model) renderComposer() string {
+	m.composer.Prompt = m.promptGlyph() + " "
 	width := max(1, m.composerWidth())
-	return lipgloss.NewStyle().
+	prompt := m.composer.Prompt
+	promptWidth := ansi.StringWidth(prompt)
+	if promptWidth >= width {
+		prompt = ansi.Truncate(prompt, max(1, width-1), "")
+		promptWidth = ansi.StringWidth(prompt)
+	}
+	contentWidth := max(0, width-promptWidth)
+	promptStyle := lipgloss.NewStyle().
+		Background(m.palette.UserTextBackground).
+		Foreground(m.palette.UserAccentBar)
+	contentStyle := lipgloss.NewStyle().
+		Width(contentWidth).
+		Background(m.palette.UserTextBackground).
+		Foreground(m.palette.UserTextForeground)
+
+	renderBlankLine := func() string {
+		return promptStyle.Render(prompt) + contentStyle.Render("")
+	}
+	renderSeparatorLine := func(char string) string {
+		return m.renderHalfBlockLine(width, char)
+	}
+
+	middle := lipgloss.NewStyle().
 		Width(width).
 		Background(m.palette.UserTextBackground).
 		Foreground(m.palette.UserTextForeground).
 		Render(m.composer.View())
+	if strings.TrimSpace(m.composer.Value()) == "" {
+		middle = m.renderComposerPlaceholderLine(promptStyle, contentStyle, prompt, contentWidth)
+	}
+
+	rendered := []string{}
+	if m.halfBlocksEnabled() {
+		rendered = append(rendered, renderSeparatorLine("▄"), middle, renderSeparatorLine("▀"))
+	} else {
+		rendered = append(rendered, renderBlankLine(), middle, renderBlankLine())
+	}
+	return lipgloss.JoinVertical(lipgloss.Left, rendered...)
+}
+
+func (m *Model) renderComposerPlaceholderLine(promptStyle, contentStyle lipgloss.Style, prompt string, contentWidth int) string {
+	placeholder := ansi.Truncate(m.composer.Placeholder, contentWidth, "")
+	muted := lipgloss.NewStyle().
+		Background(m.palette.UserTextBackground).
+		Foreground(m.palette.ComposerMutedText)
+
+	m.composer.Cursor.TextStyle = muted
+	if placeholder == "" {
+		m.composer.Cursor.SetChar(" ")
+		return promptStyle.Render(prompt) + contentStyle.Render(m.composer.Cursor.View())
+	}
+
+	runes := []rune(placeholder)
+	m.composer.Cursor.SetChar(string(runes[0]))
+	rest := ""
+	if len(runes) > 1 {
+		rest = muted.Render(string(runes[1:]))
+	}
+	return promptStyle.Render(prompt) + contentStyle.Render(m.composer.Cursor.View()+rest)
 }
 
 func (m *Model) composerWidth() int {
@@ -571,6 +630,31 @@ func (m *Model) composerWidth() int {
 		bodyWidth = 20
 	}
 	return bodyWidth - 2
+}
+
+func (m *Model) halfBlocksEnabled() bool {
+	return m.cfg.UI.HalfBlocks
+}
+
+func (m *Model) promptGlyph() string {
+	if m.halfBlocksEnabled() {
+		return "▌"
+	}
+	return "┃"
+}
+
+func (m *Model) renderHalfBlockLine(width int, char string) string {
+	return lipgloss.NewStyle().
+		Width(width).
+		Foreground(m.palette.UserTextBackground).
+		Render(strings.Repeat(char, max(1, width)))
+}
+
+func mPrompt(cfg config.Config) string {
+	if cfg.UI.HalfBlocks {
+		return "▌ "
+	}
+	return "┃ "
 }
 
 func (m *Model) renderSidebar() string {
@@ -719,42 +803,88 @@ func (m *Model) renderTranscriptMessage(msg domain.Message) string {
 }
 
 func (m *Model) renderUserMessage(body, stamp string) string {
-	lines := []string{""}
+	baseLines := []string{""}
 	content := strings.TrimSpace(body)
 	if content != "" {
-		lines = append(lines, strings.Split(content, "\n")...)
+		baseLines = append(baseLines, strings.Split(content, "\n")...)
 	}
 	if stamp != "" {
-		lines = append(lines, stamp)
+		baseLines = append(baseLines, stamp)
 	}
-	lines = append(lines, "")
+	baseLines = append(baseLines, "")
 
-	width := m.userMessageWidth(lines)
-	style := lipgloss.NewStyle().
+	width := m.userMessageWidth(baseLines)
+	bar := m.promptGlyph() + " "
+	contentWidth := max(1, width-lipgloss.Width(bar))
+	innerWidth := max(1, contentWidth-2)
+	barStyle := lipgloss.NewStyle().
+		Background(m.palette.UserTextBackground).
+		Foreground(m.palette.UserAccentBar)
+	contentStyle := lipgloss.NewStyle().
 		Background(m.palette.UserTextBackground).
 		Foreground(m.palette.UserTextForeground).
-		Width(width).
+		Width(contentWidth).
 		Padding(0, 1)
-	timestampStyle := style.Foreground(m.palette.UserTimestampForeground)
+	timestampStyle := contentStyle.Foreground(m.palette.UserTimestampForeground)
+
+	lines := []string{}
+	if content != "" {
+		for _, line := range strings.Split(content, "\n") {
+			lines = append(lines, wrapUserMessageLine(line, innerWidth)...)
+		}
+	}
+	if stamp != "" {
+		lines = append(lines, wrapUserMessageLine(stamp, innerWidth)...)
+	}
 
 	rendered := make([]string, 0, len(lines))
+	stampStart := -1
+	if stamp != "" {
+		stampStart = len(lines) - len(wrapUserMessageLine(stamp, innerWidth))
+	}
+	if m.halfBlocksEnabled() {
+		rendered = append(rendered, m.renderHalfBlockLine(width, "▄"))
+	} else {
+		rendered = append(rendered, barStyle.Render(bar)+contentStyle.Render(""))
+	}
 	for idx, line := range lines {
-		if stamp != "" && idx == len(lines)-2 {
-			rendered = append(rendered, timestampStyle.Render(line))
+		prefix := barStyle.Render(bar)
+		if stampStart >= 0 && idx >= stampStart {
+			rendered = append(rendered, prefix+timestampStyle.Render(line))
 			continue
 		}
-		rendered = append(rendered, style.Render(line))
+		rendered = append(rendered, prefix+contentStyle.Render(line))
+	}
+	if m.halfBlocksEnabled() {
+		rendered = append(rendered, m.renderHalfBlockLine(width, "▀"))
+	} else {
+		rendered = append(rendered, barStyle.Render(bar)+contentStyle.Render(""))
 	}
 	return strings.Join(rendered, "\n")
+}
+
+func wrapUserMessageLine(line string, width int) []string {
+	if width <= 0 {
+		return []string{""}
+	}
+	if strings.TrimSpace(line) == "" {
+		return []string{""}
+	}
+	wrapped := ansi.Wordwrap(line, width, "")
+	lines := strings.Split(wrapped, "\n")
+	if len(lines) == 0 {
+		return []string{""}
+	}
+	return lines
 }
 
 func (m *Model) userMessageWidth(lines []string) int {
 	if m.viewport.Width > 0 {
 		return m.viewport.Width
 	}
-	width := 3
+	width := lipgloss.Width("┃ ") + 2
 	for _, line := range lines {
-		width = max(width, lipgloss.Width(line)+2)
+		width = max(width, lipgloss.Width(line)+lipgloss.Width("┃ ")+2)
 	}
 	return width
 }

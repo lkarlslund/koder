@@ -559,10 +559,16 @@ func TestRenderFooterOmitsHotkeyHints(t *testing.T) {
 }
 
 func TestViewBottomAlignsFooter(t *testing.T) {
+	composer := textarea.New()
+	composer.Placeholder = "Ask koder or type / for commands"
+	composer.SetHeight(composerInputHeight)
+	composer.SetWidth(38)
+	composer.Focus()
+
 	m := Model{
 		width:    40,
 		height:   12,
-		composer: textarea.New(),
+		composer: composer,
 		viewport: viewport.New(38, 4),
 	}
 	m.viewport.SetContent("history")
@@ -572,8 +578,9 @@ func TestViewBottomAlignsFooter(t *testing.T) {
 	if len(lines) != 12 {
 		t.Fatalf("expected placed view to match height, got %d lines", len(lines))
 	}
-	if strings.TrimSpace(lines[len(lines)-1]) == "" {
-		t.Fatalf("expected footer/composer content at bottom, got %q", got)
+	bottom := strings.Join(lines[len(lines)-3:], "\n")
+	if !strings.Contains(bottom, "Ask koder or type / for") {
+		t.Fatalf("expected composer box at bottom, got %q", got)
 	}
 }
 
@@ -598,14 +605,17 @@ func TestResizeUsesMeasuredFooterHeight(t *testing.T) {
 
 func TestRenderComposerUsesThreeLineBoxAndFullWidth(t *testing.T) {
 	palette := theme.Resolve("tokyonight").Palette
+	cfg := config.Default()
 	m := Model{
+		cfg:         cfg,
 		width:       80,
 		showSidebar: true,
 		composer:    textarea.New(),
 		palette:     palette,
 	}
 	m.composer.Placeholder = "Ask koder or type / for commands"
-	m.composer.SetHeight(3)
+	m.composer.Prompt = mPrompt(cfg)
+	m.composer.SetHeight(composerInputHeight)
 	m.composer.SetWidth(m.composerWidth())
 	applyComposerTheme(&m.composer, palette)
 
@@ -613,10 +623,60 @@ func TestRenderComposerUsesThreeLineBoxAndFullWidth(t *testing.T) {
 	if lipgloss.Height(got) != 3 {
 		t.Fatalf("expected 3-line composer box, got %d lines in %q", lipgloss.Height(got), got)
 	}
-	for _, line := range strings.Split(got, "\n") {
+	lines := strings.Split(got, "\n")
+	if !strings.Contains(lines[0], "▄") || !strings.Contains(lines[len(lines)-1], "▀") {
+		t.Fatalf("expected half-block top and bottom lines, got %q", got)
+	}
+	if !strings.Contains(lines[1], "▌") {
+		t.Fatalf("expected block accent glyph on content line, got %q", lines[1])
+	}
+	for _, line := range lines {
 		if lipgloss.Width(line) != m.composerWidth() {
 			t.Fatalf("expected composer line width %d, got %d in %q", m.composerWidth(), lipgloss.Width(line), line)
 		}
+	}
+}
+
+func TestRenderUserMessageUsesAccentBarOnAllLines(t *testing.T) {
+	cfg := config.Default()
+	m := Model{
+		cfg:     cfg,
+		palette: theme.Resolve("tokyonight").Palette,
+		viewport: viewport.Model{
+			Width: 40,
+		},
+	}
+
+	got := m.renderUserMessage("hello", "")
+	lines := strings.Split(got, "\n")
+	if len(lines) != 3 {
+		t.Fatalf("expected 3 user message lines, got %d in %q", len(lines), got)
+	}
+	if !strings.Contains(lines[0], "▄") || !strings.Contains(lines[2], "▀") {
+		t.Fatalf("expected half-block separator rows, got %q", got)
+	}
+	if !strings.Contains(lines[1], "▌") {
+		t.Fatalf("expected block accent on content row, got %q", lines[1])
+	}
+}
+
+func TestRenderUserMessageCanDisableHalfBlocks(t *testing.T) {
+	cfg := config.Default()
+	cfg.UI.HalfBlocks = false
+	m := Model{
+		cfg:     cfg,
+		palette: theme.Resolve("tokyonight").Palette,
+		viewport: viewport.Model{
+			Width: 40,
+		},
+	}
+
+	got := m.renderUserMessage("hello", "")
+	if strings.Contains(got, "▄") || strings.Contains(got, "▀") || strings.Contains(got, "▌") {
+		t.Fatalf("expected classic user message rendering when half blocks disabled, got %q", got)
+	}
+	if !strings.Contains(got, "┃") {
+		t.Fatalf("expected classic accent bar when half blocks disabled, got %q", got)
 	}
 }
 
@@ -856,7 +916,9 @@ func TestEventMsgReloadsTranscriptBeforeTurnCompletes(t *testing.T) {
 }
 
 func TestRenderTranscriptMessageUsesUserStyleWithoutRoleLabel(t *testing.T) {
+	cfg := config.Default()
 	m := Model{
+		cfg: cfg,
 		parts: map[int64][]domain.Part{
 			1: {{Kind: domain.PartKindText, Body: "hello world"}},
 		},
@@ -876,7 +938,9 @@ func TestRenderTranscriptMessageUsesUserStyleWithoutRoleLabel(t *testing.T) {
 }
 
 func TestRenderTranscriptMessageUserBubbleHasBlankPaddingLines(t *testing.T) {
+	cfg := config.Default()
 	m := Model{
+		cfg: cfg,
 		parts: map[int64][]domain.Part{
 			1: {{Kind: domain.PartKindText, Body: "hello world"}},
 		},
@@ -892,14 +956,14 @@ func TestRenderTranscriptMessageUserBubbleHasBlankPaddingLines(t *testing.T) {
 	if len(lines) < 3 {
 		t.Fatalf("expected padded user bubble, got %q", got)
 	}
-	if strings.TrimSpace(lines[0]) != "" {
-		t.Fatalf("expected blank top line, got %q", lines[0])
+	if !strings.Contains(lines[0], "▄") {
+		t.Fatalf("expected half-block top line, got %q", lines[0])
 	}
-	if strings.TrimSpace(lines[1]) != "hello world" {
+	if !strings.Contains(lines[1], "▌") || strings.TrimSpace(strings.ReplaceAll(lines[1], "▌", "")) != "hello world" {
 		t.Fatalf("expected padded body line, got %q", lines[1])
 	}
-	if strings.TrimSpace(lines[len(lines)-1]) != "" {
-		t.Fatalf("expected blank bottom line, got %q", lines[len(lines)-1])
+	if !strings.Contains(lines[len(lines)-1], "▀") {
+		t.Fatalf("expected half-block bottom line, got %q", lines[len(lines)-1])
 	}
 	wantWidth := lipgloss.Width(lines[1])
 	if wantWidth <= 2 {
@@ -914,7 +978,9 @@ func TestRenderTranscriptMessageUserBubbleHasBlankPaddingLines(t *testing.T) {
 }
 
 func TestRenderTranscriptMessageUserBubbleUsesConsistentWidthForMultilineInput(t *testing.T) {
+	cfg := config.Default()
 	m := Model{
+		cfg: cfg,
 		parts: map[int64][]domain.Part{
 			1: {{Kind: domain.PartKindText, Body: "short\nthis is a much longer line"}},
 		},
@@ -939,7 +1005,9 @@ func TestRenderTranscriptMessageUserBubbleUsesConsistentWidthForMultilineInput(t
 }
 
 func TestRenderTranscriptMessageUserBubbleWrapsToViewportWidth(t *testing.T) {
+	cfg := config.Default()
 	m := Model{
+		cfg: cfg,
 		parts: map[int64][]domain.Part{
 			1: {{Kind: domain.PartKindText, Body: "this line is intentionally longer than the viewport width"}},
 		},
