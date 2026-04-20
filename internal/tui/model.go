@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"slices"
@@ -1273,13 +1274,18 @@ func Run(cfg config.Config, st *store.Store, a *agent.Engine, mode StartupMode, 
 		return err
 	}
 	model.syncDebugRuntime()
-	p := tea.NewProgram(model, tea.WithAltScreen())
+	p := tea.NewProgram(model, tea.WithAltScreen(), tea.WithoutSignalHandler())
 	finalModel, err := p.Run()
-	if err != nil {
+	if err != nil && !errors.Is(err, tea.ErrInterrupted) {
 		return err
 	}
 	if typed, ok := finalModel.(Model); ok {
 		fmt.Println(typed.exitSummary())
+		return nil
+	}
+	if errors.Is(err, tea.ErrInterrupted) {
+		fmt.Println("Exited koder.")
+		return nil
 	}
 	return nil
 }
