@@ -58,6 +58,9 @@ func (m *Model) transcriptBlocks() []transcriptBlock {
 			if strings.TrimSpace(body) == "" {
 				body = strings.TrimSpace(msg.Summary)
 			}
+			if isSyntheticToolSummary(body) {
+				body = ""
+			}
 			if strings.TrimSpace(body) != "" {
 				appendMessage(msg)
 			}
@@ -211,7 +214,7 @@ func toolRunOutput(parts []domain.Part, msg domain.Message) (ui.ToolRun, bool) {
 		if strings.HasPrefix(output, "Error:") {
 			status = ui.ToolRunStatusFailed
 		}
-		preview := strings.TrimSpace(msg.Summary)
+		preview := firstNonEmptyString(toolPreviewFromMeta(tool, meta), strings.TrimSpace(msg.Summary))
 		title, subtitle := summarizeToolSummary(tool, preview)
 		if title == "" {
 			title, subtitle = summarizeToolSummary(tool, output)
@@ -483,6 +486,37 @@ func approvalFallbackID(approvalID int64, tool domain.ToolKind, preview string) 
 		return fmt.Sprintf("approval:%d", approvalID)
 	}
 	return toolRunFallbackID(tool, preview)
+}
+
+func toolPreviewFromMeta(tool domain.ToolKind, meta map[string]string) string {
+	switch tool {
+	case domain.ToolKindRead:
+		return strings.TrimSpace(meta["path"])
+	case domain.ToolKindGlob, domain.ToolKindGrep:
+		return strings.TrimSpace(meta["pattern"])
+	case domain.ToolKindBash:
+		return strings.TrimSpace(meta["command"])
+	case domain.ToolKindApplyPatch:
+		return firstNonEmptyString(strings.TrimSpace(meta["path"]), strings.TrimSpace(meta["content"]))
+	case domain.ToolKindTask:
+		return strings.TrimSpace(meta["body"])
+	case domain.ToolKindQuestion:
+		return strings.TrimSpace(meta["question"])
+	case domain.ToolKindWebFetch:
+		return strings.TrimSpace(meta["url"])
+	case domain.ToolKindWebSearch:
+		return strings.TrimSpace(meta["query"])
+	default:
+		return ""
+	}
+}
+
+func isSyntheticToolSummary(input string) bool {
+	input = strings.TrimSpace(input)
+	if input == "" {
+		return false
+	}
+	return strings.HasPrefix(input, "tool:")
 }
 
 func toolRunDiffBody(parts []domain.Part) string {

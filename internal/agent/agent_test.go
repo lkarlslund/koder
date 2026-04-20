@@ -598,7 +598,7 @@ func TestPersistToolResultSynthesizesVisibleOutputWhenToolReturnsNothing(t *test
 		t.Fatal(err)
 	}
 
-	events, err := engine.persistToolResult(context.Background(), session.ID, domain.ToolKindBash, "", tools.Result{})
+	events, err := engine.persistToolResult(context.Background(), session.ID, tools.Request{Tool: domain.ToolKindBash}, tools.Result{})
 	if err != nil {
 		t.Fatal(err)
 	}

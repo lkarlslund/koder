@@ -451,7 +451,7 @@ func (e *Engine) approve(ctx context.Context, sessionID int64, rawID string) (<-
 		return emitOnce(domain.Event{Kind: domain.EventKindError, Err: execErr}), nil
 	}
 	e.recordLifecycle(sessionID, "tool_execution_finished", item.Command, map[string]string{"tool": string(item.Tool), "approval_id": strconv.FormatInt(id, 10)})
-	toolEvents, err := e.persistToolResult(ctx, sessionID, item.Tool, req.Args["tool_call_id"], result)
+	toolEvents, err := e.persistToolResult(ctx, sessionID, req, result)
 	if err != nil {
 		return nil, err
 	}
@@ -528,15 +528,18 @@ func (e *Engine) deny(ctx context.Context, _ int64, rawID string) (<-chan domain
 	return emitOnce(domain.Event{Kind: domain.EventKindApprovalReply, Text: fmt.Sprintf("approval %d denied", id)}), nil
 }
 
-func (e *Engine) persistToolResult(ctx context.Context, sessionID int64, tool domain.ToolKind, toolCallID string, result tools.Result) (<-chan domain.Event, error) {
-	summary, body := toolResultSummary(tool, result)
+func (e *Engine) persistToolResult(ctx context.Context, sessionID int64, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
+	summary, body := toolResultSummary(req.Tool, result)
 	msg, err := e.store.AddMessage(ctx, sessionID, domain.MessageRoleTool, summary)
 	if err != nil {
 		return nil, err
 	}
-	metaPayload := map[string]string{"tool": string(tool)}
-	if strings.TrimSpace(toolCallID) != "" {
-		metaPayload["tool_call_id"] = toolCallID
+	metaPayload := map[string]string{"tool": string(req.Tool)}
+	for key, value := range req.Args {
+		if strings.TrimSpace(value) == "" {
+			continue
+		}
+		metaPayload[key] = value
 	}
 	meta, _ := json.Marshal(metaPayload)
 	if _, err := e.store.AddPart(ctx, msg.ID, domain.PartKindToolOutput, body, string(meta)); err != nil {
@@ -547,8 +550,8 @@ func (e *Engine) persistToolResult(ctx context.Context, sessionID int64, tool do
 			return nil, err
 		}
 	}
-	e.recordLifecycle(sessionID, "tool_result_persisted", summary, map[string]string{"tool": string(tool), "message_id": strconv.FormatInt(msg.ID, 10)})
-	return emitOnce(domain.Event{Kind: domain.EventKindToolResult, Text: body, Tool: tool}), nil
+	e.recordLifecycle(sessionID, "tool_result_persisted", summary, map[string]string{"tool": string(req.Tool), "message_id": strconv.FormatInt(msg.ID, 10)})
+	return emitOnce(domain.Event{Kind: domain.EventKindToolResult, Text: body, Tool: req.Tool}), nil
 }
 
 func toolResultSummary(tool domain.ToolKind, result tools.Result) (string, string) {
@@ -1225,7 +1228,7 @@ func (e *Engine) handleModelToolCall(ctx context.Context, session domain.Session
 	if err != nil {
 		return domain.Event{Kind: domain.EventKindError, Err: err}, nil
 	}
-	evt, err := e.persistToolResult(ctx, sessionID, req.Tool, req.Args["tool_call_id"], result)
+	evt, err := e.persistToolResult(ctx, sessionID, req, result)
 	if err != nil {
 		return domain.Event{}, err
 	}

@@ -633,6 +633,61 @@ func TestRenderApprovalPromptUsesToolRunDock(t *testing.T) {
 	}
 }
 
+func TestRefreshViewportSkipsSyntheticAssistantToolSummary(t *testing.T) {
+	cfg := testConfig(t)
+	m := Model{
+		cfg:     cfg,
+		palette: theme.Resolve("tokyonight").Palette,
+		parts: map[int64][]domain.Part{
+			1: {{
+				Kind:     domain.PartKindToolCall,
+				MetaJSON: `{"path":"README.md","tool":"read","tool_call_id":"call_2"}`,
+			}},
+		},
+		messages: []domain.Message{
+			{ID: 1, Role: domain.MessageRoleAssistant, Summary: "tool:read"},
+		},
+		viewport: viewport.New(80, 8),
+	}
+
+	m.refreshViewport()
+	got := m.viewport.View()
+	if strings.Contains(got, "tool:read") {
+		t.Fatalf("expected synthetic tool summary to stay hidden, got %q", got)
+	}
+	if !strings.Contains(got, "Read file") || !strings.Contains(got, "README.md") {
+		t.Fatalf("expected grouped read tool card, got %q", got)
+	}
+}
+
+func TestToolOutputUsesRequestPreviewFromMeta(t *testing.T) {
+	cfg := testConfig(t)
+	m := Model{
+		cfg:     cfg,
+		palette: theme.Resolve("tokyonight").Palette,
+		parts: map[int64][]domain.Part{
+			1: {{
+				Kind:     domain.PartKindToolOutput,
+				Body:     "# heading",
+				MetaJSON: `{"tool":"read","path":"README.md","tool_call_id":"call_2"}`,
+			}},
+		},
+		messages: []domain.Message{
+			{ID: 1, Role: domain.MessageRoleTool, Summary: "read"},
+		},
+		viewport: viewport.New(80, 8),
+	}
+
+	m.refreshViewport()
+	got := m.viewport.View()
+	if !strings.Contains(got, "README.md") {
+		t.Fatalf("expected read path from tool output metadata, got %q", got)
+	}
+	if strings.Contains(got, "\nread\n") {
+		t.Fatalf("expected generic summary to be replaced by request preview, got %q", got)
+	}
+}
+
 func TestEnterWithoutProviderOpensConnectDialog(t *testing.T) {
 	m := Model{
 		cfg:      config.Default(),
