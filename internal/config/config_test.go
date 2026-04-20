@@ -29,6 +29,9 @@ func TestLoadWritesDefaultConfig(t *testing.T) {
 	if !cfg.UI.HalfBlocks {
 		t.Fatal("expected half block mode enabled by default")
 	}
+	if cfg.UI.Spinner != "dots" {
+		t.Fatalf("expected default spinner dots, got %q", cfg.UI.Spinner)
+	}
 	if len(cfg.Permissions.Profiles) == 0 {
 		t.Fatal("expected permission profiles")
 	}
@@ -74,5 +77,16 @@ func TestApplyDefaultsInfersProviderKindAndAuthMethod(t *testing.T) {
 	}
 	if got := cfg.Providers["local"].AuthMethod; got != "local_endpoint" {
 		t.Fatalf("expected local endpoint auth method, got %q", got)
+	}
+}
+
+func TestApplyDefaultsFillsMissingUISpinner(t *testing.T) {
+	cfg := Default()
+	cfg.UI.Spinner = ""
+
+	cfg.applyDefaults()
+
+	if cfg.UI.Spinner != "dots" {
+		t.Fatalf("expected spinner default applied, got %q", cfg.UI.Spinner)
 	}
 }

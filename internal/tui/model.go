@@ -50,11 +50,6 @@ type spinnerModel struct {
 	frame  int
 }
 
-func (s spinnerModel) view() string {
-	frames := []string{"[=   ]", "[==  ]", "[=== ]", "[ ===]", "[  ==]", "[   =]"}
-	return frames[s.frame%len(frames)]
-}
-
 func (s *spinnerModel) start() {
 	s.active = true
 }
@@ -281,10 +276,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refreshViewport()
 		return m, nil
 	case spinnerTickMsg:
-		if !m.isWorking() {
+		if !m.shouldAnimateSpinner() {
 			return m, nil
 		}
 		m.busy.spinner.tick()
+		if m.hasPreferencesDialog() {
+			m.preferences.Tick()
+		}
 		m.refreshViewport()
 		return m, spinnerTickCmd()
 	case promptDoneMsg:
@@ -1313,7 +1311,7 @@ func (m *Model) handleLocalCommand(prompt string) (tea.Model, tea.Cmd, bool) {
 		m.composer.Reset()
 		m.updateSlashMenu()
 		m.openPreferencesDialog()
-		return m, nil, true
+		return m, spinnerTickCmd(), true
 	case strings.HasPrefix(trimmed, "/approve "):
 		id, err := strconv.ParseInt(strings.TrimSpace(strings.TrimPrefix(trimmed, "/approve")), 10, 64)
 		if err != nil {
@@ -1474,6 +1472,10 @@ func (m *Model) isWorking() bool {
 	return m.busy.transcriptActive()
 }
 
+func (m *Model) shouldAnimateSpinner() bool {
+	return m.isWorking() || m.hasPreferencesDialog()
+}
+
 func (m *Model) canSendPrompt() (bool, string) {
 	session := m.draftSession()
 	if strings.TrimSpace(session.ProviderID) == "" {
@@ -1492,7 +1494,7 @@ func (m *Model) workingIndicator() string {
 	if !m.busy.spinner.active {
 		return ""
 	}
-	return m.busy.spinner.view()
+	return ui.SpinnerFrame(m.cfg.UI.Spinner, m.busy.spinner.frame)
 }
 
 func (m Model) draftSession() domain.Session {
@@ -2410,6 +2412,7 @@ func (m *Model) applyUIConfig(next config.UI, save bool) (tea.Cmd, error) {
 	}
 
 	next.Theme = selected.Name
+	next.Spinner = ui.NormalizeSpinner(next.Spinner)
 	m.cfg.UI = next
 	m.palette = selected.Palette
 	m.renderer = renderer

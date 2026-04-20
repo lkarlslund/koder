@@ -14,6 +14,7 @@ import (
 
 type UI struct {
 	Theme          string `toml:"theme"`
+	Spinner        string `toml:"spinner"`
 	HalfBlocks     bool   `toml:"half_blocks"`
 	ShowSidebar    bool   `toml:"show_sidebar"`
 	ShowTimestamps bool   `toml:"show_timestamps"`
@@ -174,6 +175,7 @@ func Default() Config {
 		},
 		UI: UI{
 			Theme:          "tokyonight",
+			Spinner:        "dots",
 			HalfBlocks:     true,
 			ShowSidebar:    true,
 			ShowTimestamps: false,
@@ -205,6 +207,9 @@ func (c *Config) applyDefaults() {
 	}
 	if c.UI.Theme == "" {
 		c.UI = def.UI
+	}
+	if c.UI.Spinner == "" {
+		c.UI.Spinner = def.UI.Spinner
 	}
 	fallbackProvider := providerDefaults()
 	for id, provider := range c.Providers {

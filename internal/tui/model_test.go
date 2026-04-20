@@ -549,8 +549,8 @@ func TestPrefsCommandOpensPreferencesDialog(t *testing.T) {
 
 	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
 	next := updated.(*Model)
-	if cmd != nil {
-		t.Fatal("expected no async command when opening preferences")
+	if cmd == nil {
+		t.Fatal("expected spinner tick command when opening preferences")
 	}
 	if !next.hasPreferencesDialog() {
 		t.Fatal("expected preferences dialog to open")
@@ -1003,7 +1003,7 @@ func TestRefreshViewportAppendsWorkingLine(t *testing.T) {
 
 	m.refreshViewport()
 	got := m.viewport.View()
-	if !strings.Contains(got, "Working ...") || !strings.Contains(got, "[=") {
+	if !strings.Contains(got, "Working ...") || !strings.Contains(got, ui.SpinnerFrame(config.Default().UI.Spinner, 0)) {
 		t.Fatalf("expected transcript activity line, got %q", got)
 	}
 }
@@ -1230,7 +1230,7 @@ func TestStatusEventKeepsTranscriptSpinnerActive(t *testing.T) {
 	if !m.busy.transcriptActive() {
 		t.Fatal("expected transcript spinner to remain active for status updates during busy work")
 	}
-	if got := m.renderTranscriptActivity(); !strings.Contains(got, "Working ...") || !strings.Contains(got, "[=") {
+	if got := m.renderTranscriptActivity(); !strings.Contains(got, "Working ...") || !strings.Contains(got, ui.SpinnerFrame(config.Default().UI.Spinner, 0)) {
 		t.Fatalf("expected transcript activity to still render, got %q", got)
 	}
 }

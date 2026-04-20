@@ -22,6 +22,15 @@ func TestPreferencesDialogThemeAndToggleEmitDraftChanges(t *testing.T) {
 	}
 
 	dialog.Update(tea.KeyMsg{Type: tea.KeyDown})
+	action = dialog.Update(tea.KeyMsg{Type: tea.KeyRight})
+	if action.Kind != PreferencesActionChanged {
+		t.Fatalf("expected spinner change action, got %#v", action)
+	}
+	if action.UI.Spinner == "dots" {
+		t.Fatalf("expected spinner to advance, got %#v", action.UI)
+	}
+
+	dialog.Update(tea.KeyMsg{Type: tea.KeyDown})
 	action = dialog.Update(tea.KeyMsg{Type: tea.KeySpace})
 	if action.Kind != PreferencesActionChanged {
 		t.Fatalf("expected toggle change action, got %#v", action)
@@ -49,9 +58,21 @@ func TestPreferencesDialogRenderShowsTabsAndButtons(t *testing.T) {
 	dialog := NewPreferencesDialog(config.Default().UI, []string{"tokyonight", "gruvbox"})
 
 	view := dialog.View(84, theme.Default().Palette)
-	for _, needle := range []string{"Preferences", "Appearance", "Behavior", "Theme", "OK", "Cancel"} {
+	for _, needle := range []string{"Preferences", "Appearance", "Behavior", "Theme", "Spinner", "OK", "Cancel"} {
 		if !strings.Contains(view, needle) {
 			t.Fatalf("expected %q in preferences dialog, got %q", needle, view)
 		}
+	}
+}
+
+func TestPreferencesDialogSpinnerPreviewAnimates(t *testing.T) {
+	dialog := NewPreferencesDialog(config.Default().UI, []string{"tokyonight", "gruvbox"})
+
+	before := dialog.View(84, theme.Default().Palette)
+	dialog.Tick()
+	after := dialog.View(84, theme.Default().Palette)
+
+	if before == after {
+		t.Fatalf("expected animated spinner preview to change view")
 	}
 }

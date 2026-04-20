@@ -37,6 +37,7 @@ type preferencesFieldKind int
 
 const (
 	preferencesFieldTheme preferencesFieldKind = iota
+	preferencesFieldSpinner
 	preferencesFieldToggle
 )
 
@@ -56,6 +57,7 @@ type PreferencesDialog struct {
 	original    config.UI
 	draft       config.UI
 	themeNames  []string
+	spinnerFrame int
 	tabs        []preferencesTab
 	tabList     VerticalTabs
 	focus       preferencesFocus
@@ -72,6 +74,7 @@ func NewPreferencesDialog(current config.UI, themeNames []string) PreferencesDia
 			Title: "Appearance",
 			Fields: []preferencesField{
 				{Kind: preferencesFieldTheme, ID: "theme", Label: "Theme", Description: "Choose the active color theme"},
+				{Kind: preferencesFieldSpinner, ID: "spinner", Label: "Spinner", Description: "Choose the activity spinner style"},
 				{Kind: preferencesFieldToggle, ID: "half_blocks", Label: "Half Blocks", Description: "Use half-block separators for boxed user text"},
 				{Kind: preferencesFieldToggle, ID: "show_sidebar", Label: "Sidebar", Description: "Show the session sidebar"},
 				{Kind: preferencesFieldToggle, ID: "show_timestamps", Label: "Timestamps", Description: "Show message timestamps in the transcript"},
@@ -99,6 +102,10 @@ func NewPreferencesDialog(current config.UI, themeNames []string) PreferencesDia
 		},
 		focus: preferencesFocusFields,
 	}
+}
+
+func (d *PreferencesDialog) Tick() {
+	d.spinnerFrame++
 }
 
 func (d PreferencesDialog) Draft() config.UI {
@@ -230,6 +237,20 @@ func (d *PreferencesDialog) adjustField(delta int) PreferencesAction {
 			idx = 0
 		}
 		d.draft.Theme = d.themeNames[idx]
+	case preferencesFieldSpinner:
+		names := SpinnerNames()
+		idx := SpinnerIndex(d.draft.Spinner)
+		if idx < 0 {
+			idx = 0
+		}
+		idx += delta
+		if idx < 0 {
+			idx = len(names) - 1
+		}
+		if idx >= len(names) {
+			idx = 0
+		}
+		d.draft.Spinner = names[idx]
 	case preferencesFieldToggle:
 		d.setToggle(field.ID, !d.toggleValue(field.ID))
 	default:
@@ -263,6 +284,14 @@ func (d PreferencesDialog) View(width int, palette theme.Palette) string {
 				Description: field.Description,
 				Value:       d.draft.Theme,
 			}.View(fieldWidth, palette, focused))
+		case preferencesFieldSpinner:
+			style := SpinnerStyleByID(d.draft.Spinner)
+			value := SpinnerFrame(d.draft.Spinner, d.spinnerFrame) + " " + style.Label
+			fieldLines = append(fieldLines, ChoiceRow{
+				Label:       field.Label,
+				Description: field.Description,
+				Value:       value,
+			}.View(fieldWidth, palette, focused))
 		case preferencesFieldToggle:
 			fieldLines = append(fieldLines, ToggleRow{
 				Label:       field.Label,
@@ -294,7 +323,7 @@ func (d PreferencesDialog) View(width int, palette theme.Palette) string {
 		Title:    "Preferences",
 		Subtitle: "Tab/Shift+Tab moves focus. Enter or arrows change values.",
 		Body:     body,
-		Footer:   fmt.Sprintf("Theme: %s", strings.TrimSpace(d.draft.Theme)),
+		Footer:   fmt.Sprintf("Theme: %s  Spinner: %s", strings.TrimSpace(d.draft.Theme), SpinnerStyleByID(d.draft.Spinner).Label),
 		Width:    dialogWidth,
 	}.View(palette)
 }
