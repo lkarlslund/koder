@@ -410,6 +410,123 @@ func TestApproveContinuesModelWithToolOutput(t *testing.T) {
 	}
 }
 
+func TestPermissionProfileChangeReevaluatesPendingApproval(t *testing.T) {
+	t.Parallel()
+
+	var requests []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read body: %v", err)
+		}
+		requests = append(requests, string(body))
+		switch len(requests) {
+		case 1:
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"tool_calls":[{"id":"call_1","type":"function","function":{"name":"bash","arguments":"{\"command\":\"printf hello\"}"}}]}}],"usage":{"total_tokens":1}}`))
+		case 2:
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"done"}}],"usage":{"total_tokens":1}}`))
+		default:
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ignored title"}}],"usage":{"total_tokens":1}}`))
+		}
+	}))
+	defer server.Close()
+
+	cfg := testConfig(t)
+	cfg.Providers = map[string]config.Provider{
+		"test": {
+			BaseURL: server.URL + "/v1",
+			Timeout: time.Second,
+		},
+	}
+	cfg.DefaultProvider = "test"
+	cfg.DefaultModel = "test-model"
+	cfg.Permissions.Profile = permission.ProfileAsk
+
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	workdir := t.TempDir()
+	engine := New(cfg, st, tools.NewRegistry(workdir), nil, workdir)
+	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetSessionPermissionProfile(context.Background(), session.ID, permission.ProfileAsk); err != nil {
+		t.Fatal(err)
+	}
+
+	events, err := engine.RunPrompt(context.Background(), session, "say hello")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var approvalID int64
+	for evt := range events {
+		if evt.Kind == domain.EventKindApprovalAsk {
+			approvalID, err = parseApprovalID(evt.Meta["approval_id"])
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if approvalID == 0 {
+		t.Fatal("expected approval request")
+	}
+
+	reeval, err := engine.SetPermissionProfileAndReevaluateApproval(context.Background(), session.ID, approvalID, permission.ProfileFullAccess)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sawProfileChange bool
+	var sawToolResult bool
+	var sawFinalAnswer bool
+	for evt := range reeval {
+		if evt.Kind == domain.EventKindStatus && evt.Meta["permission_profile"] == permission.ProfileFullAccess {
+			sawProfileChange = true
+		}
+		if evt.Kind == domain.EventKindToolResult && strings.Contains(evt.Text, "hello") {
+			sawToolResult = true
+		}
+		if evt.Kind == domain.EventKindMessageDelta && evt.Text == "done" {
+			sawFinalAnswer = true
+		}
+	}
+	if !sawProfileChange {
+		t.Fatal("expected permission profile status event")
+	}
+	if !sawToolResult {
+		t.Fatal("expected tool result after re-evaluation")
+	}
+	if !sawFinalAnswer {
+		t.Fatal("expected final assistant answer after re-evaluation")
+	}
+
+	updated, err := st.GetSession(context.Background(), session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.PermissionProfile != permission.ProfileFullAccess {
+		t.Fatalf("expected permission profile %q, got %q", permission.ProfileFullAccess, updated.PermissionProfile)
+	}
+
+	approval, err := st.GetApproval(context.Background(), approvalID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if approval.Status != domain.ApprovalStatusApproved {
+		t.Fatalf("expected approval to be approved, got %s", approval.Status)
+	}
+	if len(requests) < 2 {
+		t.Fatalf("expected approval re-evaluation to continue the model, got %d requests", len(requests))
+	}
+}
+
 func TestRunPromptPersistsAssistantErrorOnBackendFailure(t *testing.T) {
 	cfg := testConfig(t)
 	cfg.Providers = map[string]config.Provider{

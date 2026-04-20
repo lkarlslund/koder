@@ -69,6 +69,10 @@ func (e *Engine) SetPermissionProfile(ctx context.Context, sessionID int64, prof
 	return e.setPermissionProfile(ctx, sessionID, profile)
 }
 
+func (e *Engine) SetPermissionProfileAndReevaluateApproval(ctx context.Context, sessionID, approvalID int64, profile string) (<-chan domain.Event, error) {
+	return e.setPermissionProfileAndReevaluateApproval(ctx, sessionID, approvalID, profile)
+}
+
 func (e *Engine) Approve(ctx context.Context, sessionID, approvalID int64) (<-chan domain.Event, error) {
 	return e.approve(ctx, sessionID, strconv.FormatInt(approvalID, 10))
 }
@@ -573,6 +577,54 @@ func (e *Engine) setPermissionProfile(ctx context.Context, sessionID int64, raw 
 	}), nil
 }
 
+func (e *Engine) setPermissionProfileAndReevaluateApproval(ctx context.Context, sessionID, approvalID int64, raw string) (<-chan domain.Event, error) {
+	item, err := e.store.GetApproval(ctx, approvalID)
+	if err != nil {
+		return nil, err
+	}
+	targetSessionID := item.SessionID
+	if sessionID != 0 {
+		targetSessionID = sessionID
+	}
+	setEvents, err := e.setPermissionProfile(ctx, targetSessionID, raw)
+	if err != nil {
+		return nil, err
+	}
+	session, err := e.store.GetSession(ctx, item.SessionID)
+	if err != nil {
+		return nil, err
+	}
+	req, err := requestFromStoredApproval(item.Tool, item.Command)
+	if err != nil {
+		return nil, err
+	}
+
+	decision := permission.Decision{Mode: domain.PermissionModeAllow}
+	if toolSpec, ok := tools.Lookup(req.Tool); !ok {
+		return nil, fmt.Errorf("unsupported tool %q", req.Tool)
+	} else if !toolSpec.BypassesPermission() {
+		decision = permission.Evaluate(e.cfg.Permissions, effectivePermissionProfile(e.cfg, session), e.permissionRequest(session, req))
+	}
+
+	var next <-chan domain.Event
+	switch decision.Mode {
+	case domain.PermissionModeAllow:
+		next, err = e.approve(ctx, item.SessionID, strconv.FormatInt(approvalID, 10))
+	case domain.PermissionModeDeny:
+		next, err = e.deny(ctx, item.SessionID, strconv.FormatInt(approvalID, 10))
+	default:
+		status := fmt.Sprintf("%s still requires approval", item.Tool)
+		if strings.TrimSpace(decision.Reason) != "" {
+			status += ": " + decision.Reason
+		}
+		next = emitOnce(domain.Event{Kind: domain.EventKindStatus, Text: status})
+	}
+	if err != nil {
+		return nil, err
+	}
+	return concatEvents(setEvents, next), nil
+}
+
 func (e *Engine) approve(ctx context.Context, sessionID int64, rawID string) (<-chan domain.Event, error) {
 	id, err := strconv.ParseInt(strings.TrimSpace(rawID), 10, 64)
 	if err != nil {
@@ -693,6 +745,22 @@ func emitOnce(evt domain.Event) <-chan domain.Event {
 	out := make(chan domain.Event, 1)
 	out <- evt
 	close(out)
+	return out
+}
+
+func concatEvents(streams ...<-chan domain.Event) <-chan domain.Event {
+	out := make(chan domain.Event)
+	go func() {
+		defer close(out)
+		for _, stream := range streams {
+			if stream == nil {
+				continue
+			}
+			for evt := range stream {
+				out <- evt
+			}
+		}
+	}()
 	return out
 }
 

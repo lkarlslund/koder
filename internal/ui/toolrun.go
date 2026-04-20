@@ -44,8 +44,10 @@ type ToolRunDockProps struct {
 	Palette      theme.Palette
 	Run          ToolRun
 	ApproveLabel string
+	ActionLabel  string
 	DenyLabel    string
 	ApproveFocus bool
+	ActionFocus  bool
 	DenyFocus    bool
 	Hints        string
 }
@@ -132,13 +134,23 @@ func RenderToolRunDock(props ToolRunDockProps) string {
 	if props.ApproveFocus {
 		approve = approve.Reverse(true).Bold(true)
 	}
+	action := lipgloss.NewStyle().Padding(0, 1)
+	if props.ActionFocus {
+		action = action.Reverse(true).Bold(true)
+	}
 	deny := lipgloss.NewStyle().Padding(0, 1)
 	if props.DenyFocus {
 		deny = deny.Reverse(true).Bold(true)
 	}
 
+	buttons := []string{approve.Render(props.ApproveLabel)}
+	if strings.TrimSpace(props.ActionLabel) != "" {
+		buttons = append(buttons, action.Render(props.ActionLabel))
+	}
+	buttons = append(buttons, deny.Render(props.DenyLabel))
+
 	lines = append(lines,
-		lipgloss.JoinHorizontal(lipgloss.Left, approve.Render(props.ApproveLabel), "  ", deny.Render(props.DenyLabel)),
+		strings.Join(buttons, "  "),
 		props.Hints,
 	)
 	return lipgloss.NewStyle().

@@ -764,6 +764,9 @@ func TestRenderApprovalPromptUsesToolRunDock(t *testing.T) {
 	if !strings.Contains(got, "Run command") || !strings.Contains(got, "Needs approval #9") {
 		t.Fatalf("expected typed approval dock, got %q", got)
 	}
+	if !strings.Contains(got, "Permissions") {
+		t.Fatalf("expected permission action in approval dock, got %q", got)
+	}
 	if strings.Contains(got, `{"command":"git status"`) {
 		t.Fatalf("expected approval dock to avoid raw JSON, got %q", got)
 	}
@@ -1056,6 +1059,33 @@ func TestApprovalPromptConsumesEnter(t *testing.T) {
 	}
 	if !next.loading {
 		t.Fatal("expected loading after approval enter")
+	}
+}
+
+func TestApprovalPromptOpensPermissionsPicker(t *testing.T) {
+	m := Model{
+		cfg:       testConfig(t),
+		composer:  textarea.New(),
+		approvals: []store.Approval{{ID: 7, Tool: domain.ToolKindBash, Command: `{"command":"git status"}`}},
+	}
+	m.approvalChoice = 1
+
+	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	next := updated.(*Model)
+	if cmd == nil {
+		t.Fatal("expected sync title command")
+	}
+	if !next.hasPicker() {
+		t.Fatal("expected permission picker to open from approval prompt")
+	}
+	if next.picker.mode != pickerModePermissions {
+		t.Fatalf("expected permissions picker mode, got %v", next.picker.mode)
+	}
+	if next.picker.approvalID != 7 {
+		t.Fatalf("expected approval id to be preserved, got %d", next.picker.approvalID)
+	}
+	if next.loading {
+		t.Fatal("expected opening permissions picker to avoid starting approval command")
 	}
 }
 

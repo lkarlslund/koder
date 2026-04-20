@@ -168,6 +168,7 @@ type pickerModel struct {
 	items        []pickerItem
 	matches      []pickerItem
 	initialValue string
+	approvalID   int64
 }
 
 type runPromptMsg struct {
@@ -615,16 +616,27 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		case "right", "down", "tab":
-			if m.approvalChoice < 1 {
+			if m.approvalChoice < 2 {
 				m.approvalChoice++
 			}
 			return m, nil
 		case "y":
 			return m.submitApprovalChoice(true)
+		case "p":
+			m.openApprovalPermissionsPicker()
+			return m, m.syncWindowTitleCmd()
 		case "n", "esc":
 			return m.submitApprovalChoice(false)
 		case "enter":
-			return m.submitApprovalChoice(m.approvalChoice == 0)
+			switch m.approvalChoice {
+			case 0:
+				return m.submitApprovalChoice(true)
+			case 1:
+				m.openApprovalPermissionsPicker()
+				return m, m.syncWindowTitleCmd()
+			default:
+				return m.submitApprovalChoice(false)
+			}
 		}
 	}
 
@@ -798,6 +810,12 @@ func (m *Model) applyEvent(evt domain.Event) {
 		}
 		if profile := strings.TrimSpace(evt.Meta["permission_profile"]); profile != "" {
 			m.currentSession.PermissionProfile = profile
+			for idx := range m.sessions {
+				if m.sessions[idx].ID == m.currentSession.ID {
+					m.sessions[idx].PermissionProfile = profile
+					break
+				}
+			}
 		}
 	case domain.EventKindError:
 		if evt.Err != nil {
@@ -1898,6 +1916,13 @@ func (m Model) permissionProfileCmd(ctx context.Context, profile string) tea.Cmd
 	}
 }
 
+func (m Model) approvalPermissionProfileCmd(ctx context.Context, approvalID int64, profile string) tea.Cmd {
+	return func() tea.Msg {
+		events, err := m.agent.SetPermissionProfileAndReevaluateApproval(ctx, m.currentSession.ID, approvalID, profile)
+		return promptDoneMsg{events: events, err: err}
+	}
+}
+
 func (m *Model) beginActiveOperation() context.Context {
 	if m.activeOpCancel != nil {
 		m.activeOpCancel()
@@ -2750,10 +2775,12 @@ func (m *Model) renderApprovalPrompt() string {
 		Palette:      m.palette,
 		Run:          m.approvalToolRun(m.approvals[0]),
 		ApproveLabel: "Approve",
+		ActionLabel:  "Permissions",
 		DenyLabel:    "Deny",
 		ApproveFocus: m.approvalChoice == 0,
-		DenyFocus:    m.approvalChoice == 1,
-		Hints:        "enter select  tab switch  y approve  n deny",
+		ActionFocus:  m.approvalChoice == 1,
+		DenyFocus:    m.approvalChoice == 2,
+		Hints:        "enter select  tab switch  p permissions  y approve  n deny",
 	})
 }
 
@@ -3294,6 +3321,14 @@ func (m *Model) openPermissionsPicker() {
 	m.refilterPicker()
 }
 
+func (m *Model) openApprovalPermissionsPicker() {
+	if !m.hasApprovalPrompt() {
+		return
+	}
+	m.openPermissionsPicker()
+	m.picker.approvalID = m.approvals[0].ID
+}
+
 func (m *Model) refilterPicker() {
 	if !m.hasPicker() {
 		return
@@ -3397,12 +3432,17 @@ func (m *Model) submitPickerSelection() (tea.Model, tea.Cmd) {
 		if !ok {
 			return m, nil
 		}
+		approvalID := m.picker.approvalID
+		m.closePicker()
+		if approvalID > 0 {
+			m.startBusy(busyScopeTranscript, fmt.Sprintf("Re-evaluating approval %d with %s…", approvalID, permission.DisplayName(item.Value)))
+			return m, tea.Batch(m.approvalPermissionProfileCmd(m.beginActiveOperation(), approvalID, item.Value), m.spinnerCmdIfNeeded(), m.syncWindowTitleCmd())
+		}
 		if err := m.selectPermissionProfile(item.Value); err != nil {
 			m.status = err.Error()
 			return m, nil
 		}
 		m.status = fmt.Sprintf("Permission mode set to %s; model will be updated on the next turn", permission.DisplayName(item.Value))
-		m.closePicker()
 		return m, m.syncWindowTitleCmd()
 	default:
 		return m, nil
@@ -3422,8 +3462,13 @@ func (m *Model) cancelPicker() (tea.Model, tea.Cmd) {
 		m.closePicker()
 		return m, nil
 	case pickerModePermissions:
+		approvalID := m.picker.approvalID
 		m.closePicker()
-		m.status = "Permission mode selection cancelled"
+		if approvalID > 0 {
+			m.status = "Permission mode change cancelled"
+		} else {
+			m.status = "Permission mode selection cancelled"
+		}
 		return m, nil
 	default:
 		m.closePicker()
