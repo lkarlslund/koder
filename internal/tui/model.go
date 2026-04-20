@@ -181,6 +181,7 @@ type queuedPromptMode int
 const (
 	queuedPromptModeNormal queuedPromptMode = iota
 	queuedPromptModeSteer
+	queuedPromptModeContinue
 )
 
 type queuedPrompt struct {
@@ -193,6 +194,8 @@ func (q queuedPrompt) modeLabel() string {
 	switch q.Mode {
 	case queuedPromptModeSteer:
 		return "steering"
+	case queuedPromptModeContinue:
+		return "continue"
 	default:
 		return "after idle"
 	}
@@ -202,6 +205,8 @@ func (q queuedPrompt) statusText() string {
 	switch q.Mode {
 	case queuedPromptModeSteer:
 		return "Queued steering for after the current run"
+	case queuedPromptModeContinue:
+		return "Queued continue for when koder is idle"
 	default:
 		return "Queued prompt for when koder is idle"
 	}
@@ -211,6 +216,8 @@ func (q queuedPrompt) runStatus() string {
 	switch q.Mode {
 	case queuedPromptModeSteer:
 		return "Applying steering…"
+	case queuedPromptModeContinue:
+		return "Continuing…"
 	default:
 		return "Running queued prompt…"
 	}
@@ -283,6 +290,7 @@ type Model struct {
 	caps               *provider.CapabilityStore
 	activeOpCancel     context.CancelFunc
 	queuedPrompt       *queuedPrompt
+	pendingModelNote   string
 	draftAttachments   []attachment.Draft
 	attachmentFiles    *attachment.Manager
 	interruptArmedAt   time.Time
@@ -382,6 +390,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.finishOperationWithError(msg.err)
 		}
 		m.currentSession = msg.session
+		m.pendingModelNote = ""
 		m.startBusy(m.busy.scopeOrDefault(busyScopeTranscript), "Working ...")
 		return m, tea.Batch(nextEventCmd(msg.events), m.spinnerCmdIfNeeded(), m.syncWindowTitleCmd())
 	case eventMsg:
@@ -672,6 +681,16 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.showReasoning = !m.showReasoning
 		m.refreshViewport()
 		return m, nil
+	case "ctrl+g":
+		if m.loading {
+			return m.queueContinuePrompt()
+		}
+		if ok, status := m.canContinue(); !ok {
+			m.status = status
+			return m, m.syncWindowTitleCmd()
+		}
+		m.startBusy(busyScopeTranscript, "Continuing…")
+		return m, tea.Batch(m.continueCmd(m.beginActiveOperation()), m.spinnerCmdIfNeeded())
 	case "shift+enter", "alt+enter":
 		m.composer.InsertRune('\n')
 		m.updateSlashMenu()
@@ -1040,6 +1059,7 @@ func (m *Model) renderSidebar() string {
 	lines = append(lines, "  ^y    copy last answer")
 	lines = append(lines, "  ^s    sidebar")
 	lines = append(lines, "  ^r    reasoning")
+	lines = append(lines, "  ^g    continue")
 	lines = append(lines, "  /agents")
 	lines = append(lines, "  /agents refresh")
 	lines = append(lines, "  /compact")
@@ -1400,7 +1420,18 @@ func (m Model) promptCmd(ctx context.Context, prompt string, drafts []attachment
 				return runPromptMsg{err: err}
 			}
 		}
-		events, err := m.agent.RunPromptWithAttachments(ctx, session, prompt, drafts)
+		events, err := m.agent.RunPromptWithAttachments(ctx, session, prompt, drafts, m.pendingModelNote)
+		return runPromptMsg{session: session, events: events, err: err}
+	}
+}
+
+func (m Model) continueCmd(ctx context.Context) tea.Cmd {
+	return func() tea.Msg {
+		session := m.currentSession
+		if session.ID == 0 {
+			return runPromptMsg{err: fmt.Errorf("no saved session to continue")}
+		}
+		events, err := m.agent.RunContinue(ctx, session, m.pendingModelNote)
 		return runPromptMsg{session: session, events: events, err: err}
 	}
 }
@@ -1914,6 +1945,16 @@ func (m *Model) queueComposerPrompt(mode queuedPromptMode) (tea.Model, tea.Cmd) 
 	return m, m.syncWindowTitleCmd()
 }
 
+func (m *Model) queueContinuePrompt() (tea.Model, tea.Cmd) {
+	if ok, status := m.canContinue(); !ok {
+		m.status = status
+		return m, m.syncWindowTitleCmd()
+	}
+	m.queuedPrompt = &queuedPrompt{Mode: queuedPromptModeContinue}
+	m.status = m.queuedPrompt.statusText()
+	return m, m.syncWindowTitleCmd()
+}
+
 func (m *Model) dequeuePromptCmd() tea.Cmd {
 	if m.queuedPrompt == nil || m.loading {
 		return nil
@@ -1924,15 +1965,20 @@ func (m *Model) dequeuePromptCmd() tea.Cmd {
 	item := *m.queuedPrompt
 	m.queuedPrompt = nil
 	if ok, status := m.canSendPrompt(); !ok {
-		m.openConnectDialog()
-		m.status = status
-		m.composer.SetValue(item.Text)
-		m.draftAttachments = item.Attachments
-		m.updateSlashMenu()
-		return nil
+		if item.Mode != queuedPromptModeContinue {
+			m.openConnectDialog()
+			m.status = status
+			m.composer.SetValue(item.Text)
+			m.draftAttachments = item.Attachments
+			m.updateSlashMenu()
+			return nil
+		}
+	}
+	m.startBusy(busyScopeTranscript, item.runStatus())
+	if item.Mode == queuedPromptModeContinue {
+		return tea.Batch(m.continueCmd(m.beginActiveOperation()), m.spinnerCmdIfNeeded())
 	}
 	m.appendLocalUserPrompt(item.Text, item.Attachments)
-	m.startBusy(busyScopeTranscript, item.runStatus())
 	return tea.Batch(m.promptCmd(m.beginActiveOperation(), item.Text, item.Attachments), m.spinnerCmdIfNeeded())
 }
 
@@ -3355,7 +3401,7 @@ func (m *Model) submitPickerSelection() (tea.Model, tea.Cmd) {
 			m.status = err.Error()
 			return m, nil
 		}
-		m.status = fmt.Sprintf("Permission mode set to %s", permission.DisplayName(item.Value))
+		m.status = fmt.Sprintf("Permission mode set to %s; model will be updated on the next turn", permission.DisplayName(item.Value))
 		m.closePicker()
 		return m, m.syncWindowTitleCmd()
 	default:
@@ -3419,6 +3465,7 @@ func (m *Model) selectPermissionProfile(profile string) error {
 			m.sessions[idx].PermissionProfile = profile
 		}
 	}
+	m.queuePermissionChangeNote()
 	return nil
 }
 
@@ -3439,6 +3486,32 @@ func (m *Model) setTheme(name string, save bool) error {
 		}
 	}
 	return nil
+}
+
+func (m *Model) canContinue() (bool, string) {
+	if strings.TrimSpace(m.composer.Value()) != "" || len(m.draftAttachments) > 0 {
+		return false, "Clear the composer before continuing"
+	}
+	if m.currentSession.ID == 0 {
+		return false, "No saved session to continue"
+	}
+	if ok, status := m.canSendPrompt(); !ok {
+		return false, status
+	}
+	return true, ""
+}
+
+func (m *Model) queuePermissionChangeNote() {
+	label := permission.DisplayName(m.permissionProfile())
+	projectRoot := strings.TrimSpace(m.currentProjectRoot())
+	if projectRoot == "" {
+		projectRoot = m.workdir
+	}
+	m.pendingModelNote = fmt.Sprintf(
+		"Permission mode changed to %s. Treat %s as the current project root. Actions outside that project require approval in the active mode.",
+		label,
+		projectRoot,
+	)
 }
 
 func (m *Model) applyUIConfig(next config.UI, save bool) (tea.Cmd, error) {

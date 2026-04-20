@@ -109,6 +109,32 @@ func TestHandleLocalCommandOpensPermissionsPicker(t *testing.T) {
 	}
 }
 
+func TestPermissionsCommandOpensWhileBusy(t *testing.T) {
+	m := Model{
+		cfg:      testConfig(t),
+		composer: textarea.New(),
+		loading:  true,
+		busy: busyModel{
+			active: true,
+			scope:  busyScopeTranscript,
+		},
+	}
+	m.composer.SetValue("/permissions")
+	m.updateSlashMenu()
+
+	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	next := updated.(*Model)
+	if cmd == nil {
+		t.Fatal("expected permissions command to execute while busy")
+	}
+	if !next.hasPicker() {
+		t.Fatal("expected permissions picker to open while busy")
+	}
+	if next.queuedPrompt != nil {
+		t.Fatalf("expected no queued prompt, got %#v", next.queuedPrompt)
+	}
+}
+
 func TestPermissionsPickerSelectionUpdatesDraftSession(t *testing.T) {
 	m := Model{
 		cfg:      testConfig(t),
@@ -125,6 +151,9 @@ func TestPermissionsPickerSelectionUpdatesDraftSession(t *testing.T) {
 	next := model.(*Model)
 	if next.currentSession.PermissionProfile != permission.ProfileWriteAsk {
 		t.Fatalf("expected draft session permission profile updated, got %q", next.currentSession.PermissionProfile)
+	}
+	if !strings.Contains(next.pendingModelNote, "Permission mode changed to write / ask.") {
+		t.Fatalf("expected pending model note, got %q", next.pendingModelNote)
 	}
 	if next.hasPicker() {
 		t.Fatal("expected picker to close after selection")
@@ -497,6 +526,69 @@ func TestTabWhileBusyQueuesSteeringPrompt(t *testing.T) {
 	}
 	if next.queuedPrompt == nil || next.queuedPrompt.Mode != queuedPromptModeSteer {
 		t.Fatalf("expected steering queue, got %#v", next.queuedPrompt)
+	}
+}
+
+func TestCtrlGQueuesContinueWhileBusy(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.DefaultProvider = "openai"
+	cfg.DefaultModel = "gpt-5.4"
+	cfg.Providers = map[string]config.Provider{
+		"openai": {
+			Kind:         "openai-compatible",
+			AuthMethod:   "api_key",
+			BaseURL:      "https://api.openai.com/v1",
+			APIKey:       "secret",
+			DefaultModel: "gpt-5.4",
+		},
+	}
+	m := Model{
+		cfg:            cfg,
+		composer:       textarea.New(),
+		loading:        true,
+		currentSession: domain.Session{ID: 9, ProviderID: "openai", ModelID: "gpt-5.4"},
+		busy: busyModel{
+			active: true,
+			scope:  busyScopeTranscript,
+		},
+	}
+
+	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlG})
+	next := updated.(*Model)
+	if cmd == nil {
+		t.Fatal("expected title sync command after queueing continue")
+	}
+	if next.queuedPrompt == nil || next.queuedPrompt.Mode != queuedPromptModeContinue {
+		t.Fatalf("expected queued continue, got %#v", next.queuedPrompt)
+	}
+}
+
+func TestCtrlGStartsContinueWhenIdle(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.DefaultProvider = "openai"
+	cfg.DefaultModel = "gpt-5.4"
+	cfg.Providers = map[string]config.Provider{
+		"openai": {
+			Kind:         "openai-compatible",
+			AuthMethod:   "api_key",
+			BaseURL:      "https://api.openai.com/v1",
+			APIKey:       "secret",
+			DefaultModel: "gpt-5.4",
+		},
+	}
+	m := Model{
+		cfg:            cfg,
+		composer:       textarea.New(),
+		currentSession: domain.Session{ID: 9, ProviderID: "openai", ModelID: "gpt-5.4"},
+	}
+
+	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlG})
+	next := updated.(*Model)
+	if cmd == nil {
+		t.Fatal("expected continue command")
+	}
+	if !next.loading {
+		t.Fatal("expected loading after continue hotkey")
 	}
 }
 

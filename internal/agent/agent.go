@@ -58,11 +58,11 @@ func (e *Engine) UpdateConfig(cfg config.Config) {
 }
 
 func (e *Engine) RunPrompt(ctx context.Context, session domain.Session, prompt string) (<-chan domain.Event, error) {
-	return e.RunPromptWithAttachments(ctx, session, prompt, nil)
+	return e.RunPromptWithAttachments(ctx, session, prompt, nil, "")
 }
 
-func (e *Engine) RunPromptWithAttachments(ctx context.Context, session domain.Session, prompt string, drafts []attachment.Draft) (<-chan domain.Event, error) {
-	return e.runModelPrompt(ctx, session, prompt, drafts)
+func (e *Engine) RunPromptWithAttachments(ctx context.Context, session domain.Session, prompt string, drafts []attachment.Draft, note string) (<-chan domain.Event, error) {
+	return e.runModelPrompt(ctx, session, prompt, drafts, note)
 }
 
 func (e *Engine) SetPermissionProfile(ctx context.Context, sessionID int64, profile string) (<-chan domain.Event, error) {
@@ -108,7 +108,11 @@ func (e *Engine) Compact(ctx context.Context, sessionID int64) (<-chan domain.Ev
 	return out, nil
 }
 
-func (e *Engine) runModelPrompt(ctx context.Context, session domain.Session, prompt string, drafts []attachment.Draft) (<-chan domain.Event, error) {
+func (e *Engine) RunContinue(ctx context.Context, session domain.Session, note string) (<-chan domain.Event, error) {
+	return e.runContinue(ctx, session, note)
+}
+
+func (e *Engine) runModelPrompt(ctx context.Context, session domain.Session, prompt string, drafts []attachment.Draft, note string) (<-chan domain.Event, error) {
 	if err := e.validatePromptAttachments(session, drafts); err != nil {
 		return nil, err
 	}
@@ -169,7 +173,71 @@ func (e *Engine) runModelPrompt(ctx context.Context, session domain.Session, pro
 			return
 		}
 		e.recordLifecycle(session.ID, "user_message_persisted", prompt, map[string]string{"message_id": strconv.FormatInt(userMsg.ID, 10)})
-		if err := e.continueModelTurn(ctx, session, client, out); err != nil {
+		if err := e.continueModelTurn(ctx, session, client, out, transientTurnMessages(note, "")); err != nil {
+			if interruptedErr(err) {
+				e.emitInterrupted(out, session.ID)
+				return
+			}
+			e.recordAssistantError(ctx, session.ID, err)
+			out <- domain.Event{Kind: domain.EventKindError, Err: err}
+			return
+		}
+	}()
+	return out, nil
+}
+
+func (e *Engine) runContinue(ctx context.Context, session domain.Session, note string) (<-chan domain.Event, error) {
+	providerCfg, ok := e.cfg.Provider(session.ProviderID)
+	if !ok {
+		return nil, fmt.Errorf("provider %q not found", session.ProviderID)
+	}
+	client, err := provider.New(session.ProviderID, providerCfg, e.debug)
+	if err != nil {
+		return nil, err
+	}
+	out := make(chan domain.Event)
+	go func() {
+		defer close(out)
+		if session.ID > 0 {
+			out <- domain.Event{Kind: domain.EventKindStatus, Text: "Checking project instructions..."}
+		}
+		session, err = e.ensureSessionAgents(ctx, session, client)
+		if err != nil {
+			if interruptedErr(err) {
+				e.emitInterrupted(out, session.ID)
+				return
+			}
+			e.recordAssistantError(ctx, session.ID, err)
+			out <- domain.Event{Kind: domain.EventKindError, Err: err}
+			return
+		}
+		if strings.TrimSpace(note) != "" {
+			e.recordLifecycle(session.ID, "continue_with_note", note, nil)
+		} else {
+			e.recordLifecycle(session.ID, "continue", "", nil)
+		}
+		compacted, err := e.autoCompactIfNeeded(ctx, session, client, out)
+		if err != nil {
+			if interruptedErr(err) {
+				e.emitInterrupted(out, session.ID)
+				return
+			}
+			e.recordAssistantError(ctx, session.ID, err)
+			out <- domain.Event{Kind: domain.EventKindError, Err: err}
+			return
+		}
+		if compacted {
+			session, err = e.store.GetSession(ctx, session.ID)
+			if err != nil {
+				if interruptedErr(err) {
+					e.emitInterrupted(out, session.ID)
+					return
+				}
+				out <- domain.Event{Kind: domain.EventKindError, Err: err}
+				return
+			}
+		}
+		if err := e.continueModelTurn(ctx, session, client, out, transientTurnMessages(note, "Continue from where you left off.")); err != nil {
 			if interruptedErr(err) {
 				e.emitInterrupted(out, session.ID)
 				return
@@ -267,13 +335,15 @@ func (e *Engine) persistUserPrompt(ctx context.Context, session domain.Session, 
 	return userMsg, nil
 }
 
-func (e *Engine) continueModelTurn(ctx context.Context, session domain.Session, client *provider.Client, out chan<- domain.Event) error {
+func (e *Engine) continueModelTurn(ctx context.Context, session domain.Session, client *provider.Client, out chan<- domain.Event, transient []provider.Message) error {
 	for steps := 0; steps < 6; steps++ {
 		e.recordLifecycle(session.ID, "model_turn_started", "", map[string]string{"step": strconv.Itoa(steps + 1)})
 		messages, buildErr := e.buildConversation(ctx, session.ID)
 		if buildErr != nil {
 			return buildErr
 		}
+		messages = injectTransientMessages(messages, transient)
+		transient = nil
 
 		resp, completeErr := client.CompleteChat(ctx, provider.ChatRequest{
 			Model:      session.ModelID,
@@ -575,7 +645,7 @@ func (e *Engine) approve(ctx context.Context, sessionID int64, rawID string) (<-
 				return
 			}
 		}
-		if err := e.continueModelTurn(ctx, session, client, out); err != nil {
+		if err := e.continueModelTurn(ctx, session, client, out, nil); err != nil {
 			if interruptedErr(err) {
 				e.emitInterrupted(out, session.ID)
 				return
@@ -659,6 +729,41 @@ func interruptedErr(err error) bool {
 
 func errorSummary(err error) string {
 	return "Error: " + strings.TrimSpace(err.Error())
+}
+
+func transientTurnMessages(note string, continuePrompt string) []provider.Message {
+	var out []provider.Message
+	if strings.TrimSpace(note) != "" {
+		out = append(out, provider.Message{
+			Role:    domain.MessageRoleSystem,
+			Content: "Session update:\n" + strings.TrimSpace(note),
+		})
+	}
+	if strings.TrimSpace(continuePrompt) != "" {
+		out = append(out, provider.Message{
+			Role:    domain.MessageRoleUser,
+			Content: strings.TrimSpace(continuePrompt),
+		})
+	}
+	return out
+}
+
+func injectTransientMessages(messages []provider.Message, transient []provider.Message) []provider.Message {
+	if len(transient) == 0 {
+		return messages
+	}
+	insertAt := len(messages)
+	for idx := len(messages) - 1; idx >= 0; idx-- {
+		if messages[idx].Role == domain.MessageRoleUser {
+			insertAt = idx
+			break
+		}
+	}
+	out := make([]provider.Message, 0, len(messages)+len(transient))
+	out = append(out, messages[:insertAt]...)
+	out = append(out, transient...)
+	out = append(out, messages[insertAt:]...)
+	return out
 }
 
 func (e *Engine) buildConversation(ctx context.Context, sessionID int64) ([]provider.Message, error) {
@@ -1088,6 +1193,17 @@ func (e *Engine) compactSession(ctx context.Context, session domain.Session, cli
 
 func (e *Engine) handleModelToolCall(ctx context.Context, session domain.Session, req tools.Request) (domain.Event, error) {
 	sessionID := session.ID
+	if sessionID > 0 {
+		if latest, err := e.store.GetSession(ctx, sessionID); err == nil {
+			if strings.TrimSpace(latest.PermissionProfile) == "" {
+				latest.PermissionProfile = session.PermissionProfile
+			}
+			if strings.TrimSpace(latest.ProjectRoot) == "" {
+				latest.ProjectRoot = session.ProjectRoot
+			}
+			session = latest
+		}
+	}
 	req, err := tools.Normalize(req)
 	if err != nil {
 		return domain.Event{}, err

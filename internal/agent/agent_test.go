@@ -293,7 +293,7 @@ func TestRunPromptWithUnsupportedPDFAttachmentFailsBeforeProviderCall(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := engine.RunPromptWithAttachments(context.Background(), session, "summarize", []attachment.Draft{draft}); err == nil {
+	if _, err := engine.RunPromptWithAttachments(context.Background(), session, "summarize", []attachment.Draft{draft}, ""); err == nil {
 		t.Fatal("expected unsupported pdf attachment to be rejected")
 	}
 }
@@ -567,6 +567,100 @@ func TestHandleModelToolCallAsksForBashInWriteAskMode(t *testing.T) {
 	}
 	if !strings.Contains(evt.Text, "shell commands require approval in this mode") {
 		t.Fatalf("unexpected approval text: %q", evt.Text)
+	}
+}
+
+func TestRunPromptIncludesTransientSessionNote(t *testing.T) {
+	t.Parallel()
+
+	var requests []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read body: %v", err)
+		}
+		requests = append(requests, string(body))
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"done"}}],"usage":{"total_tokens":1}}`))
+	}))
+	defer server.Close()
+
+	cfg := testConfig(t)
+	cfg.Providers = map[string]config.Provider{
+		"test": {BaseURL: server.URL + "/v1", Timeout: time.Second},
+	}
+	cfg.DefaultProvider = "test"
+	cfg.DefaultModel = "test-model"
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	engine := New(cfg, st, tools.NewRegistry(t.TempDir()), nil, t.TempDir())
+	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	events, err := engine.RunPromptWithAttachments(context.Background(), session, "hello", nil, "Permission mode changed to ask.")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range events {
+	}
+	if len(requests) == 0 || !strings.Contains(requests[0], `Session update:\nPermission mode changed to ask.`) {
+		t.Fatalf("expected transient session note in request, got %v", requests)
+	}
+	messages, _, err := st.PartsForSession(context.Background(), session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) == 0 || messages[0].Summary != "hello" {
+		t.Fatalf("expected persisted user prompt only, got %#v", messages)
+	}
+}
+
+func TestRunContinueSendsContinueInstruction(t *testing.T) {
+	t.Parallel()
+
+	var requests []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read body: %v", err)
+		}
+		requests = append(requests, string(body))
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"continued"}}],"usage":{"total_tokens":1}}`))
+	}))
+	defer server.Close()
+
+	cfg := testConfig(t)
+	cfg.Providers = map[string]config.Provider{
+		"test": {BaseURL: server.URL + "/v1", Timeout: time.Second},
+	}
+	cfg.DefaultProvider = "test"
+	cfg.DefaultModel = "test-model"
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	engine := New(cfg, st, tools.NewRegistry(t.TempDir()), nil, t.TempDir())
+	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	events, err := engine.RunContinue(context.Background(), session, "Permission mode changed to write / ask.")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range events {
+	}
+	if len(requests) == 0 || !strings.Contains(requests[0], "Continue from where you left off.") {
+		t.Fatalf("expected continue instruction in request, got %v", requests)
+	}
+	if !strings.Contains(requests[0], "Permission mode changed to write / ask.") {
+		t.Fatalf("expected transient note in continue request, got %v", requests)
 	}
 }
 
