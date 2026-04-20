@@ -386,12 +386,13 @@ func (e *Engine) deny(ctx context.Context, _ int64, rawID string) (<-chan domain
 }
 
 func (e *Engine) persistToolResult(ctx context.Context, sessionID int64, tool domain.ToolKind, result tools.Result) (<-chan domain.Event, error) {
-	msg, err := e.store.AddMessage(ctx, sessionID, domain.MessageRoleTool, string(tool))
+	summary, body := toolResultSummary(tool, result)
+	msg, err := e.store.AddMessage(ctx, sessionID, domain.MessageRoleTool, summary)
 	if err != nil {
 		return nil, err
 	}
 	meta, _ := json.Marshal(map[string]string{"tool": string(tool)})
-	if _, err := e.store.AddPart(ctx, msg.ID, domain.PartKindToolOutput, result.Output, string(meta)); err != nil {
+	if _, err := e.store.AddPart(ctx, msg.ID, domain.PartKindToolOutput, body, string(meta)); err != nil {
 		return nil, err
 	}
 	if result.DiffText != "" {
@@ -399,7 +400,21 @@ func (e *Engine) persistToolResult(ctx context.Context, sessionID int64, tool do
 			return nil, err
 		}
 	}
-	return emitOnce(domain.Event{Kind: domain.EventKindToolResult, Text: result.Output, Tool: tool}), nil
+	return emitOnce(domain.Event{Kind: domain.EventKindToolResult, Text: body, Tool: tool}), nil
+}
+
+func toolResultSummary(tool domain.ToolKind, result tools.Result) (string, string) {
+	output := strings.TrimSpace(result.Output)
+	switch {
+	case output != "":
+		return string(tool), result.Output
+	case strings.TrimSpace(result.DiffText) != "":
+		body := fmt.Sprintf("%s completed and produced a diff", tool)
+		return body, body
+	default:
+		body := fmt.Sprintf("%s completed with no output", tool)
+		return body, body
+	}
 }
 
 func emitOnce(evt domain.Event) <-chan domain.Event {

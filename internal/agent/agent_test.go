@@ -346,6 +346,43 @@ func TestModelTaskPersistsTranscriptUpdate(t *testing.T) {
 	}
 }
 
+func TestPersistToolResultSynthesizesVisibleOutputWhenToolReturnsNothing(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.Default()
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	engine := New(cfg, st, tools.NewRegistry(t.TempDir()))
+	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	events, err := engine.persistToolResult(context.Background(), session.ID, domain.ToolKindBash, tools.Result{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	evt := <-events
+	if evt.Kind != domain.EventKindToolResult || !strings.Contains(evt.Text, "completed with no output") {
+		t.Fatalf("unexpected tool result event: %#v", evt)
+	}
+
+	messages, parts, err := st.PartsForSession(context.Background(), session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 1 {
+		t.Fatalf("expected one tool message, got %d", len(messages))
+	}
+	if got := parts[messages[0].ID][0].Body; !strings.Contains(got, "completed with no output") {
+		t.Fatalf("expected synthesized visible tool output, got %q", got)
+	}
+}
+
 func parseApprovalID(raw string) (int64, error) {
 	return strconv.ParseInt(raw, 10, 64)
 }

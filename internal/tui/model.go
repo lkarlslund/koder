@@ -1499,10 +1499,6 @@ func (m *Model) workingIndicator() string {
 }
 
 func (m Model) windowTitle() string {
-	spinner := ui.SpinnerFrame(m.cfg.UI.Spinner, m.busy.spinner.frame)
-	if strings.TrimSpace(spinner) == "" {
-		spinner = ui.SpinnerFrame(config.Default().UI.Spinner, 0)
-	}
 	title := strings.TrimSpace(m.currentSession.Title)
 	switch {
 	case title != "":
@@ -1511,7 +1507,14 @@ func (m Model) windowTitle() string {
 	default:
 		title = "New Session"
 	}
-	return fmt.Sprintf("%sK %s", spinner, title)
+	if m.busy.spinner.active {
+		spinner := ui.SpinnerFrame(m.cfg.UI.Spinner, m.busy.spinner.frame)
+		if strings.TrimSpace(spinner) == "" {
+			spinner = ui.SpinnerFrame(config.Default().UI.Spinner, 0)
+		}
+		return fmt.Sprintf("%sK %s", spinner, title)
+	}
+	return fmt.Sprintf("K %s", title)
 }
 
 func (m Model) syncWindowTitleCmd() tea.Cmd {

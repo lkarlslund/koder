@@ -133,7 +133,7 @@ func TestWindowTitleUsesSessionTitle(t *testing.T) {
 		currentSession: domain.Session{ID: 7, Title: "Helpful Session Title"},
 	}
 	got := m.windowTitle()
-	if !strings.Contains(got, "K Helpful Session Title") {
+	if got != "K Helpful Session Title" {
 		t.Fatalf("unexpected window title: %q", got)
 	}
 }
@@ -156,6 +156,24 @@ func TestWindowTitleUsesAnimatedSpinnerFrame(t *testing.T) {
 	got := m.windowTitle()
 	if !strings.HasPrefix(got, "◑K ") {
 		t.Fatalf("unexpected animated window title: %q", got)
+	}
+}
+
+func TestRenderTranscriptToolMessageFallsBackToSummaryWhenBodyMissing(t *testing.T) {
+	cfg := config.Default()
+	m := Model{
+		cfg:     cfg,
+		palette: theme.Resolve("tokyonight").Palette,
+		parts:   map[int64][]domain.Part{},
+	}
+
+	got := m.renderTranscriptMessage(domain.Message{
+		ID:      1,
+		Role:    domain.MessageRoleTool,
+		Summary: "bash completed with no output",
+	})
+	if !strings.Contains(got, "bash completed with no output") {
+		t.Fatalf("expected tool summary fallback in transcript, got %q", got)
 	}
 }
 
