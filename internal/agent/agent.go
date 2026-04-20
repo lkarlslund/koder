@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"os"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -35,6 +36,8 @@ type Engine struct {
 	agents   *agents.Manager
 	workdir  string
 }
+
+var patchPathPattern = regexp.MustCompile(`(?m)^(?:\+\+\+|---)\s+(?:a/|b/)?([^\t\n]+)`)
 
 func New(cfg config.Config, st *store.Store, registry *tools.Registry, debug *debugsrv.Recorder, workdir string) *Engine {
 	return &Engine{
@@ -478,15 +481,24 @@ func (e *Engine) setPermissionProfile(ctx context.Context, sessionID int64, raw 
 	if profile == "" {
 		return nil, fmt.Errorf("usage: /perm <%s>", strings.Join(permission.ProfileNames(e.cfg.Permissions), "|"))
 	}
-	if _, ok := e.cfg.Permissions.Profiles[profile]; !ok {
-		return nil, fmt.Errorf("unknown permission profile %q", profile)
+	if !permission.IsBuiltinProfile(profile) {
+		if _, ok := e.cfg.Permissions.Profiles[profile]; !ok {
+			return nil, fmt.Errorf("unknown permission profile %q", profile)
+		}
+	}
+	if sessionID == 0 {
+		return emitOnce(domain.Event{
+			Kind: domain.EventKindStatus,
+			Text: fmt.Sprintf("permission profile set to %s", permission.DisplayName(profile)),
+			Meta: map[string]string{"permission_profile": profile},
+		}), nil
 	}
 	if err := e.store.SetSessionPermissionProfile(ctx, sessionID, profile); err != nil {
 		return nil, err
 	}
 	return emitOnce(domain.Event{
 		Kind: domain.EventKindStatus,
-		Text: fmt.Sprintf("permission profile set to %s", profile),
+		Text: fmt.Sprintf("permission profile set to %s", permission.DisplayName(profile)),
 		Meta: map[string]string{"permission_profile": profile},
 	}), nil
 }
@@ -1085,22 +1097,26 @@ func (e *Engine) handleModelToolCall(ctx context.Context, session domain.Session
 		return domain.Event{}, fmt.Errorf("unsupported model tool %q", req.Tool)
 	}
 
-	mode := domain.PermissionModeAllow
+	decision := permission.Decision{Mode: domain.PermissionModeAllow}
 	if !toolSpec.BypassesPermission() {
-		mode = permission.Evaluate(e.cfg.Permissions, effectivePermissionProfile(e.cfg, session), permissionRequest(req))
+		decision = permission.Evaluate(e.cfg.Permissions, effectivePermissionProfile(e.cfg, session), e.permissionRequest(session, req))
 	}
-	if mode == domain.PermissionModeDeny {
+	if decision.Mode == domain.PermissionModeDeny {
+		text := fmt.Sprintf("%s denied by policy", req.Tool)
+		if strings.TrimSpace(decision.Reason) != "" {
+			text = fmt.Sprintf("%s denied by policy: %s", req.Tool, decision.Reason)
+		}
 		msg, err := e.store.AddMessage(ctx, sessionID, domain.MessageRoleTool, string(req.Tool))
 		if err != nil {
 			return domain.Event{}, err
 		}
 		meta, _ := json.Marshal(req)
-		if _, err := e.store.AddPart(ctx, msg.ID, domain.PartKindToolOutput, fmt.Sprintf("%s denied by policy", req.Tool), string(meta)); err != nil {
+		if _, err := e.store.AddPart(ctx, msg.ID, domain.PartKindToolOutput, text, string(meta)); err != nil {
 			return domain.Event{}, err
 		}
-		return domain.Event{Kind: domain.EventKindToolResult, Tool: req.Tool, Text: fmt.Sprintf("%s denied by policy", req.Tool)}, nil
+		return domain.Event{Kind: domain.EventKindToolResult, Tool: req.Tool, Text: text}, nil
 	}
-	if mode == domain.PermissionModeAsk {
+	if decision.Mode == domain.PermissionModeAsk {
 		storedArgs, err := serializeRequest(req)
 		if err != nil {
 			return domain.Event{}, err
@@ -1113,14 +1129,19 @@ func (e *Engine) handleModelToolCall(ctx context.Context, session domain.Session
 		if err := e.recordApprovalRequest(ctx, sessionID, req.Tool, approval.ID, preview, req.ToolCallID); err != nil {
 			return domain.Event{}, err
 		}
+		text := fmt.Sprintf("%s requires approval", req.Tool)
+		if strings.TrimSpace(decision.Reason) != "" {
+			text += ": " + decision.Reason
+		}
 		return domain.Event{
 			Kind: domain.EventKindApprovalAsk,
-			Text: fmt.Sprintf("%s requires approval", req.Tool),
+			Text: text,
 			Tool: req.Tool,
 			Meta: map[string]string{
 				"approval_id":  strconv.FormatInt(approval.ID, 10),
 				"tool":         string(req.Tool),
 				"command":      preview,
+				"reason":       decision.Reason,
 				"tool_call_id": req.ToolCallID,
 			},
 		}, nil
@@ -1144,10 +1165,19 @@ func effectivePermissionProfile(cfg config.Config, session domain.Session) strin
 	return cfg.Permissions.Profile
 }
 
-func permissionRequest(req tools.Request) permission.Request {
+func (e *Engine) permissionRequest(session domain.Session, req tools.Request) permission.Request {
+	projectRoot := strings.TrimSpace(session.ProjectRoot)
+	if projectRoot == "" {
+		projectRoot = agents.FindProjectRoot(e.workdir)
+	}
+	targets, outsideProject, ambiguous := e.resolvePermissionTargets(projectRoot, req)
 	return permission.Request{
-		Tool:    req.Tool,
-		Pattern: tools.Preview(req),
+		Tool:           req.Tool,
+		Pattern:        tools.Preview(req),
+		ProjectRoot:    projectRoot,
+		Targets:        targets,
+		OutsideProject: outsideProject,
+		Ambiguous:      ambiguous,
 	}
 }
 
@@ -1161,6 +1191,97 @@ func serializeRequest(req tools.Request) (string, error) {
 		return "", fmt.Errorf("serialize request: %w", err)
 	}
 	return string(data), nil
+}
+
+func (e *Engine) resolvePermissionTargets(projectRoot string, req tools.Request) ([]string, bool, bool) {
+	baseDir := e.workdir
+	if strings.TrimSpace(projectRoot) != "" {
+		baseDir = projectRoot
+	}
+	var raws []string
+	switch req.Tool {
+	case domain.ToolKindRead, domain.ToolKindEdit, domain.ToolKindWrite:
+		raws = append(raws, req.Args["path"])
+	case domain.ToolKindGlob, domain.ToolKindGrep:
+		if root := strings.TrimSpace(req.Args["path"]); root != "" {
+			raws = append(raws, root)
+		} else {
+			raws = append(raws, ".")
+		}
+	case domain.ToolKindApplyPatch:
+		raws = append(raws, patchPaths(req.Args["patch"])...)
+	default:
+		return nil, false, false
+	}
+	if len(raws) == 0 {
+		return nil, false, true
+	}
+	projectRoot = filepath.Clean(projectRoot)
+	var targets []string
+	outsideProject := false
+	for _, raw := range raws {
+		target, ok := resolvePermissionTarget(baseDir, raw)
+		if !ok {
+			return nil, false, true
+		}
+		targets = append(targets, target)
+		if strings.TrimSpace(projectRoot) == "" {
+			outsideProject = true
+			continue
+		}
+		rel, err := filepath.Rel(projectRoot, target)
+		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			outsideProject = true
+		}
+	}
+	return targets, outsideProject, false
+}
+
+func resolvePermissionTarget(baseDir, raw string) (string, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", false
+	}
+	raw = tools.NormalizePathInput(raw)
+	if raw == "" {
+		return "", false
+	}
+	if filepath.IsAbs(raw) {
+		return maybeResolveExistingPath(filepath.Clean(raw)), true
+	}
+	abs := filepath.Join(baseDir, raw)
+	return maybeResolveExistingPath(filepath.Clean(abs)), true
+}
+
+func maybeResolveExistingPath(path string) string {
+	resolved, err := filepath.EvalSymlinks(path)
+	if err == nil {
+		return resolved
+	}
+	if os.IsNotExist(err) {
+		return path
+	}
+	return path
+}
+
+func patchPaths(patch string) []string {
+	seen := map[string]struct{}{}
+	var paths []string
+	for _, match := range patchPathPattern.FindAllStringSubmatch(patch, -1) {
+		if len(match) < 2 {
+			continue
+		}
+		path := strings.TrimSpace(match[1])
+		if path == "" || path == "/dev/null" {
+			continue
+		}
+		if _, ok := seen[path]; ok {
+			continue
+		}
+		seen[path] = struct{}{}
+		paths = append(paths, path)
+	}
+	return paths
 }
 
 func requestFromStoredApproval(tool domain.ToolKind, raw string) (tools.Request, error) {

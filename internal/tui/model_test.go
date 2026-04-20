@@ -20,6 +20,7 @@ import (
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/debugsrv"
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/permission"
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/theme"
@@ -42,8 +43,11 @@ func TestMatchingSlashCommands(t *testing.T) {
 	}
 
 	matches = matchingSlashCommands("per")
-	if len(matches) != 1 || matches[0].Name != "/perm" {
-		t.Fatalf("expected /perm, got %#v", matches)
+	if len(matches) != 2 {
+		t.Fatalf("expected two permission matches, got %#v", matches)
+	}
+	if matches[0].Name != "/perm" || matches[1].Name != "/permissions" {
+		t.Fatalf("expected /perm and /permissions, got %#v", matches)
 	}
 
 	matches = matchingSlashCommands("comp")
@@ -84,6 +88,49 @@ func TestMatchingSlashCommands(t *testing.T) {
 	matches = matchingSlashCommands("rea")
 	if len(matches) != 0 {
 		t.Fatalf("expected tool slash commands to stay hidden, got %#v", matches)
+	}
+}
+
+func TestHandleLocalCommandOpensPermissionsPicker(t *testing.T) {
+	m := Model{
+		cfg:      testConfig(t),
+		composer: textarea.New(),
+	}
+	model, cmd, ok := m.handleLocalCommand("/permissions")
+	if !ok {
+		t.Fatal("expected local command to be handled")
+	}
+	if cmd == nil {
+		t.Fatal("expected sync title command")
+	}
+	next := model.(*Model)
+	if !next.hasPicker() {
+		t.Fatal("expected permissions picker to open")
+	}
+	if next.picker.mode != pickerModePermissions {
+		t.Fatalf("expected permissions picker mode, got %v", next.picker.mode)
+	}
+}
+
+func TestPermissionsPickerSelectionUpdatesDraftSession(t *testing.T) {
+	m := Model{
+		cfg:      testConfig(t),
+		composer: textarea.New(),
+	}
+	m.openPermissionsPicker()
+	for idx, item := range m.picker.matches {
+		if item.Value == permission.ProfileWriteAsk {
+			m.picker.index = idx
+			break
+		}
+	}
+	model, _ := m.submitPickerSelection()
+	next := model.(*Model)
+	if next.currentSession.PermissionProfile != permission.ProfileWriteAsk {
+		t.Fatalf("expected draft session permission profile updated, got %q", next.currentSession.PermissionProfile)
+	}
+	if next.hasPicker() {
+		t.Fatal("expected picker to close after selection")
 	}
 }
 
@@ -579,8 +626,8 @@ func TestRefreshViewportGroupsToolRunMessagesIntoCard(t *testing.T) {
 		palette: theme.Resolve("tokyonight").Palette,
 		parts: map[int64][]domain.Part{
 			1: {{
-				Kind: domain.PartKindToolCall,
-				Body: `{"command":"git status","tool":"bash","tool_call_id":"call_1"}`,
+				Kind:     domain.PartKindToolCall,
+				Body:     `{"command":"git status","tool":"bash","tool_call_id":"call_1"}`,
 				MetaJSON: `{"command":"git status","tool":"bash","tool_call_id":"call_1"}`,
 			}},
 			2: {{

@@ -148,6 +148,7 @@ type pickerMode int
 const (
 	pickerModeNone pickerMode = iota
 	pickerModeTheme
+	pickerModePermissions
 )
 
 type pickerItem struct {
@@ -877,7 +878,7 @@ func (m *Model) renderSidebar() string {
 	var lines []string
 	lines = append(lines, "Session")
 	lines = append(lines, fmt.Sprintf("  id      %d", m.currentSession.ID))
-	lines = append(lines, fmt.Sprintf("  profile %s", truncate(m.permissionProfile(), 19)))
+	lines = append(lines, fmt.Sprintf("  profile %s", truncate(m.permissionProfileLabel(), 19)))
 	lines = append(lines, fmt.Sprintf("  mouse   %s", m.mouseStatus()))
 	provider := m.currentSession.ProviderID
 	if provider == "" {
@@ -972,7 +973,7 @@ func (m *Model) renderSidebar() string {
 		if profile == m.permissionProfile() {
 			cursor = ">"
 		}
-		lines = append(lines, fmt.Sprintf("%s %s", cursor, profile))
+		lines = append(lines, fmt.Sprintf("%s %s", cursor, permission.DisplayName(profile)))
 	}
 	lines = append(lines, "")
 	lines = append(lines, "Tasks")
@@ -1010,6 +1011,7 @@ func (m *Model) renderSidebar() string {
 	lines = append(lines, "  /model")
 	lines = append(lines, "  /new  session")
 	lines = append(lines, "  /perm profile")
+	lines = append(lines, "  /permissions")
 	lines = append(lines, "  /preferences")
 	lines = append(lines, "  /resume")
 	lines = append(lines, "  /quit")
@@ -1731,6 +1733,11 @@ func (m *Model) handleLocalCommand(prompt string) (tea.Model, tea.Cmd, bool) {
 		m.updateSlashMenu()
 		m.openThemePicker()
 		return m, nil, true
+	case trimmed == "/permissions":
+		m.composer.Reset()
+		m.updateSlashMenu()
+		m.openPermissionsPicker()
+		return m, m.syncWindowTitleCmd(), true
 	case trimmed == "/preferences":
 		m.composer.Reset()
 		m.updateSlashMenu()
@@ -2636,6 +2643,7 @@ func internalSlashCommands() []slashCommand {
 		{Name: "/new", Description: "Start a new session"},
 		{Name: "/mouse", Description: "Toggle mouse capture", NeedsArgs: true, Autocomplete: "/mouse "},
 		{Name: "/perm", Description: "Set permission profile", NeedsArgs: true, Autocomplete: "/perm "},
+		{Name: "/permissions", Description: "Pick a built-in permission mode"},
 		{Name: "/preferences", Description: "Open preferences"},
 		{Name: "/quit", Description: "Quit koder"},
 		{Name: "/resume", Description: "Resume a saved session"},
@@ -2648,6 +2656,10 @@ func (m *Model) permissionProfile() string {
 		return m.currentSession.PermissionProfile
 	}
 	return m.cfg.Permissions.Profile
+}
+
+func (m *Model) permissionProfileLabel() string {
+	return permission.DisplayName(m.permissionProfile())
 }
 
 func (m *Model) mouseStatus() string {
@@ -3137,6 +3149,26 @@ func (m *Model) openThemePicker() {
 	m.previewSelectedTheme()
 }
 
+func (m *Model) openPermissionsPicker() {
+	items := make([]pickerItem, 0, len(permission.BuiltinProfiles()))
+	for _, item := range permission.BuiltinProfiles() {
+		items = append(items, pickerItem{
+			Title:       item.Label,
+			Description: item.Description,
+			Value:       item.Name,
+		})
+	}
+	m.picker = pickerModel{
+		visible:      true,
+		mode:         pickerModePermissions,
+		title:        "Permissions",
+		hint:         "enter apply  esc cancel",
+		items:        items,
+		initialValue: m.permissionProfile(),
+	}
+	m.refilterPicker()
+}
+
 func (m *Model) refilterPicker() {
 	if !m.hasPicker() {
 		return
@@ -3235,6 +3267,18 @@ func (m *Model) submitPickerSelection() (tea.Model, tea.Cmd) {
 		m.status = fmt.Sprintf("Theme set to %s", item.Value)
 		m.closePicker()
 		return m, nil
+	case pickerModePermissions:
+		item, ok := m.currentPickerItem()
+		if !ok {
+			return m, nil
+		}
+		if err := m.selectPermissionProfile(item.Value); err != nil {
+			m.status = err.Error()
+			return m, nil
+		}
+		m.status = fmt.Sprintf("Permission mode set to %s", permission.DisplayName(item.Value))
+		m.closePicker()
+		return m, m.syncWindowTitleCmd()
 	default:
 		return m, nil
 	}
@@ -3251,6 +3295,10 @@ func (m *Model) cancelPicker() (tea.Model, tea.Cmd) {
 			m.status = fmt.Sprintf("theme restore failed: %v", err)
 		}
 		m.closePicker()
+		return m, nil
+	case pickerModePermissions:
+		m.closePicker()
+		m.status = "Permission mode selection cancelled"
 		return m, nil
 	default:
 		m.closePicker()
@@ -3269,6 +3317,30 @@ func (m *Model) previewSelectedTheme() {
 	if err := m.setTheme(item.Value, false); err != nil {
 		m.status = fmt.Sprintf("theme preview failed: %v", err)
 	}
+}
+
+func (m *Model) selectPermissionProfile(profile string) error {
+	profile = strings.TrimSpace(profile)
+	if profile == "" {
+		return fmt.Errorf("permission profile is required")
+	}
+	if !permission.IsBuiltinProfile(profile) {
+		if _, ok := m.cfg.Permissions.Profiles[profile]; !ok {
+			return fmt.Errorf("unknown permission profile %q", profile)
+		}
+	}
+	if m.currentSession.ID != 0 {
+		if err := m.store.SetSessionPermissionProfile(context.Background(), m.currentSession.ID, profile); err != nil {
+			return err
+		}
+	}
+	m.currentSession.PermissionProfile = profile
+	for idx := range m.sessions {
+		if m.sessions[idx].ID == m.currentSession.ID {
+			m.sessions[idx].PermissionProfile = profile
+		}
+	}
+	return nil
 }
 
 func (m *Model) setTheme(name string, save bool) error {
