@@ -1816,3 +1816,28 @@ func TestRenderTranscriptMessageAssistantWrapsToViewportWidth(t *testing.T) {
 		}
 	}
 }
+
+func TestRefreshViewportUsesSingleNewlineBetweenBlocksWithHalfBlocks(t *testing.T) {
+	cfg := config.Default()
+	m := Model{
+		cfg: cfg,
+		messages: []domain.Message{
+			{ID: 1, Role: domain.MessageRoleUser},
+			{ID: 2, Role: domain.MessageRoleAssistant},
+		},
+		parts: map[int64][]domain.Part{
+			1: {{Kind: domain.PartKindText, Body: "hello"}},
+			2: {{Kind: domain.PartKindText, Body: "reply"}},
+		},
+		viewport: viewport.New(24, 8),
+	}
+
+	m.refreshViewport()
+	got := m.viewport.View()
+	if strings.Contains(got, "▀\n\nreply") {
+		t.Fatalf("expected no extra blank line between user bubble and assistant reply, got %q", got)
+	}
+	if !strings.Contains(got, "▀\nreply") {
+		t.Fatalf("expected single newline between user bubble and assistant reply, got %q", got)
+	}
+}

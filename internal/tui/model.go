@@ -899,7 +899,11 @@ func (m *Model) refreshViewport() {
 			blocks = append(blocks, "Start by asking a question or type / for commands.")
 		}
 	}
-	m.viewport.SetContent(strings.Join(blocks, "\n\n"))
+	separator := "\n\n"
+	if m.halfBlocksEnabled() {
+		separator = "\n"
+	}
+	m.viewport.SetContent(strings.Join(blocks, separator))
 	m.viewport.GotoBottom()
 }
 
