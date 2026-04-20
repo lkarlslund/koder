@@ -563,6 +563,10 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.showReasoning = !m.showReasoning
 		m.refreshViewport()
 		return m, nil
+	case "shift+enter", "alt+enter":
+		m.composer.InsertRune('\n')
+		m.updateSlashMenu()
+		return m, nil
 	case "enter":
 		if m.loading {
 			return m, nil

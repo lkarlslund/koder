@@ -139,6 +139,43 @@ func TestEnterSendsNormalPrompt(t *testing.T) {
 	}
 }
 
+func TestAltEnterInsertsNewlineInsteadOfSending(t *testing.T) {
+	cfg := config.Default()
+	cfg.DefaultProvider = "openai"
+	cfg.DefaultModel = "gpt-5.4"
+	cfg.Providers = map[string]config.Provider{
+		"openai": {
+			Kind:         "openai-compatible",
+			AuthMethod:   "api_key",
+			BaseURL:      "https://api.openai.com/v1",
+			APIKey:       "secret",
+			DefaultModel: "gpt-5.4",
+		},
+	}
+	m := Model{
+		cfg:      cfg,
+		composer: textarea.New(),
+		parts:    map[int64][]domain.Part{},
+	}
+	m.composer.SetValue("hello")
+	m.composer.SetCursor(len("hello"))
+
+	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter, Alt: true})
+	next := updated.(*Model)
+	if cmd != nil {
+		t.Fatal("expected no send command for modified enter")
+	}
+	if next.loading {
+		t.Fatal("expected modified enter not to start loading")
+	}
+	if next.composer.Value() != "hello\n" {
+		t.Fatalf("expected newline inserted, got %q", next.composer.Value())
+	}
+	if len(next.messages) != 0 {
+		t.Fatalf("expected no optimistic transcript append, got %#v", next.messages)
+	}
+}
+
 func TestWindowTitleUsesSessionTitle(t *testing.T) {
 	m := Model{
 		cfg:            config.Default(),
