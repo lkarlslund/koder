@@ -135,9 +135,13 @@ func newSessionCommand() *cobra.Command {
 }
 
 func newDebugCommand() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "debug",
 		Short: "Inspect debug API configuration",
+	}
+	cmd.AddCommand(&cobra.Command{
+		Use:   "info",
+		Short: "Print debug API environment configuration",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			bind := strings.TrimSpace(os.Getenv(debugsrv.EnvDebugAPI))
 			if bind == "" {
@@ -150,7 +154,8 @@ func newDebugCommand() *cobra.Command {
 			}
 			return nil
 		},
-	}
+	})
+	return cmd
 }
 
 func newSessionDumpCommand() *cobra.Command {

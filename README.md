@@ -15,8 +15,28 @@ Current implementation includes:
 ```bash
 koder
 koder doctor
+koder debug info
+koder session tail --id 1 --addr 127.0.0.1:61347
 koder version
 ```
+
+## Live Debug API
+
+Set `KODER_DEBUG_API` before launching `koder` to expose a read-only local debug API from the running process:
+
+```bash
+KODER_DEBUG_API=127.0.0.1:61347 koder
+```
+
+If you prefer an ephemeral port, use `127.0.0.1:0`; `koder` will show the resolved address in the UI while running.
+
+Useful endpoints:
+
+- `/debug/runtime`
+- `/debug/sessions`
+- `/debug/sessions/<id>/transcript`
+- `/debug/sessions/<id>/events`
+- `/debug/http`
 
 ## Provider Configuration
 

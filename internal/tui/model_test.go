@@ -15,6 +15,7 @@ import (
 	"github.com/muesli/termenv"
 
 	"github.com/lkarlslund/koder/internal/config"
+	"github.com/lkarlslund/koder/internal/debugsrv"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/store"
@@ -174,6 +175,23 @@ func TestRenderTranscriptToolMessageFallsBackToSummaryWhenBodyMissing(t *testing
 	})
 	if !strings.Contains(got, "bash completed with no output") {
 		t.Fatalf("expected tool summary fallback in transcript, got %q", got)
+	}
+}
+
+func TestRenderFooterShowsDebugAPIHint(t *testing.T) {
+	cfg := config.Default()
+	m := Model{
+		cfg:      cfg,
+		palette:  theme.Resolve("tokyonight").Palette,
+		composer: textarea.New(),
+		debug:    debugsrv.NewRecorder(),
+	}
+	m.debug.SetDebugAPI("127.0.0.1:61347")
+	m.composer.Placeholder = "Ask koder or type / for commands"
+
+	got := m.renderFooter()
+	if !strings.Contains(got, "Debug API 127.0.0.1:61347") {
+		t.Fatalf("expected debug api hint in footer, got %q", got)
 	}
 }
 

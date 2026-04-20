@@ -641,6 +641,9 @@ func (m *Model) renderFooter() string {
 	if menu := m.renderSlashMenu(); menu != "" {
 		parts = append(parts, menu)
 	}
+	if debugAddr := m.debugAPIAddr(); debugAddr != "" {
+		parts = append(parts, "Debug API "+debugAddr)
+	}
 	parts = append(parts, "")
 	parts = append(parts, m.renderComposer())
 	return ui.RenderFooter(parts)
