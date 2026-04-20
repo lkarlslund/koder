@@ -110,10 +110,25 @@ func (d SessionDialog) View(width int, palette theme.Palette) string {
 		}
 		blocks = append(blocks, item.Details...)
 		if desc := strings.TrimSpace(item.Description); desc != "" {
-			blocks = append(blocks, "", truncateText(desc, detailWidth))
+			blocks = append(blocks, "", wrapPlain(compactInlineText(desc), detailWidth))
 		}
 		details = strings.Join(blocks, "\n")
 	}
+
+	listPane := lipgloss.NewStyle().
+		Width(listWidth).
+		BorderRight(true).
+		BorderForeground(palette.SidebarBorder).
+		Background(palette.SidebarBackground).
+		Foreground(palette.SidebarForeground).
+		PaddingRight(1).
+		Render(strings.Join(listLines, "\n"))
+	detailPane := lipgloss.NewStyle().
+		Width(detailWidth).
+		Background(palette.SidebarBackground).
+		Foreground(palette.SidebarForeground).
+		PaddingLeft(1).
+		Render(details)
 
 	body := lipgloss.JoinVertical(
 		lipgloss.Left,
@@ -121,9 +136,9 @@ func (d SessionDialog) View(width int, palette theme.Palette) string {
 		"",
 		lipgloss.JoinHorizontal(
 			lipgloss.Top,
-			lipgloss.NewStyle().Width(listWidth).BorderRight(true).BorderForeground(palette.SidebarBorder).PaddingRight(1).Render(strings.Join(listLines, "\n")),
+			listPane,
 			" ",
-			lipgloss.NewStyle().Width(detailWidth).PaddingLeft(1).Render(details),
+			detailPane,
 		),
 	)
 

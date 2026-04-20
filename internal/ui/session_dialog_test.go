@@ -40,3 +40,20 @@ func TestSessionDialogFiltersItems(t *testing.T) {
 		t.Fatalf("expected Beta in filtered list, got %q", view)
 	}
 }
+
+func TestSessionDialogViewCollapsesMultilineDescriptions(t *testing.T) {
+	dialog := NewSessionDialog([]SessionItem{{
+		Title:       "Session A",
+		Description: "line one\nline two\n\nline three",
+		Details:     []string{"Session ID: 1"},
+		Value:       "1",
+	}})
+
+	got := dialog.View(84, theme.Default().Palette)
+	if strings.Contains(got, "line one\nline two") {
+		t.Fatalf("expected multiline description to collapse in picker row, got %q", got)
+	}
+	if !strings.Contains(got, "line one line two line three") {
+		t.Fatalf("expected collapsed description in view, got %q", got)
+	}
+}

@@ -13,6 +13,9 @@ func RenderSelectableRow(primary, secondary, tertiary string, width int, palette
 	if width <= 0 {
 		width = 72
 	}
+	primary = compactInlineText(primary)
+	secondary = compactInlineText(secondary)
+	tertiary = compactInlineText(tertiary)
 	primaryWidth := minInt(28, maxInt(12, width/3))
 	tertiaryWidth := 0
 	if strings.TrimSpace(tertiary) != "" {
@@ -174,6 +177,7 @@ func truncateText(input string, width int) string {
 	if width <= 0 {
 		return ""
 	}
+	input = compactInlineText(input)
 	if lipgloss.Width(input) <= width {
 		return input
 	}
@@ -181,6 +185,10 @@ func truncateText(input string, width int) string {
 		return "…"
 	}
 	return lipgloss.NewStyle().MaxWidth(width).Render(input)
+}
+
+func compactInlineText(input string) string {
+	return strings.Join(strings.Fields(strings.TrimSpace(input)), " ")
 }
 
 func maxInt(a, b int) int {
