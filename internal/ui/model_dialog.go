@@ -98,7 +98,7 @@ func (d ModelDialog) View(width int, palette theme.Palette) string {
 		}
 		for idx := start; idx < end; idx++ {
 			item := d.view[idx]
-			line := truncateText(item.ID, listWidth)
+			line := truncateText(modelLine(item), listWidth)
 			if idx == d.Index {
 				line = lipgloss.NewStyle().
 					Background(palette.UserTextBackground).
@@ -118,6 +118,9 @@ func (d ModelDialog) View(width int, palette theme.Palette) string {
 		}
 		if strings.TrimSpace(item.OwnedBy) != "" {
 			lines = append(lines, fmt.Sprintf("Owner:    %s", item.OwnedBy))
+		}
+		if badges := capabilityBadges(item); badges != "" {
+			lines = append(lines, fmt.Sprintf("Supports: %s", badges))
 		}
 		details = strings.Join(lines, "\n")
 	}
@@ -182,4 +185,25 @@ func (d ModelDialog) current() (domain.Model, bool) {
 		return domain.Model{}, false
 	}
 	return d.view[d.Index], true
+}
+
+func modelLine(model domain.Model) string {
+	if badges := capabilityBadges(model); badges != "" {
+		return model.ID + "  [" + badges + "]"
+	}
+	return model.ID
+}
+
+func capabilityBadges(model domain.Model) string {
+	var badges []string
+	if model.SupportsImages {
+		badges = append(badges, "image")
+	}
+	if model.SupportsPDFs {
+		badges = append(badges, "pdf")
+	}
+	if len(badges) == 0 && model.CapabilitiesKnown {
+		badges = append(badges, "text")
+	}
+	return strings.Join(badges, ", ")
 }

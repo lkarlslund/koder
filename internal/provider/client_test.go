@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lkarlslund/koder/internal/attachment"
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/domain"
 )
@@ -112,5 +113,47 @@ func TestMessageMarshalJSONWithContentParts(t *testing.T) {
 	}
 	if !strings.Contains(raw, `"url":"data:image/png;base64,`) {
 		t.Fatalf("expected image data URL, got %s", raw)
+	}
+}
+
+func TestCapabilityStoreEnrichesAndCachesModels(t *testing.T) {
+	store := NewCapabilityStore(t.TempDir())
+	cfg := config.Provider{BaseURL: "https://api.openai.com/v1"}
+
+	model, err := store.EnrichModel("openai", cfg, domain.Model{ID: "gpt-5.4"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !model.SupportsImages || !model.CapabilitiesKnown {
+		t.Fatalf("expected enriched image capability, got %#v", model)
+	}
+
+	models, err := store.EnrichModels("openai", cfg, []domain.Model{{ID: "gpt-5.4"}, {ID: "gpt-4.1-mini"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(models) != 2 || !models[0].SupportsImages || !models[1].SupportsImages {
+		t.Fatalf("expected cached enriched models, got %#v", models)
+	}
+}
+
+func TestCapabilityStoreSupportsAttachment(t *testing.T) {
+	store := NewCapabilityStore(t.TempDir())
+	cfg := config.Provider{BaseURL: "https://api.openai.com/v1"}
+
+	ok, err := store.SupportsAttachment("openai", cfg, "gpt-5.4", attachment.KindImage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("expected gpt-5.4 image support")
+	}
+
+	ok, err = store.SupportsAttachment("openai", cfg, "gpt-5.4", attachment.KindPDF)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok {
+		t.Fatal("expected pdf support to remain disabled")
 	}
 }

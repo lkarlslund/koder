@@ -113,8 +113,12 @@ type Part struct {
 }
 
 type Model struct {
-	ID      string
-	OwnedBy string
+	ID                string
+	OwnedBy           string
+	SupportsImages    bool
+	SupportsPDFs      bool
+	CapabilitySource  string
+	CapabilitiesKnown bool
 }
 
 type Usage struct {

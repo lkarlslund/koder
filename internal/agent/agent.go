@@ -27,6 +27,7 @@ type Engine struct {
 	registry *tools.Registry
 	debug    *debugsrv.Recorder
 	files    *attachment.Manager
+	caps     *provider.CapabilityStore
 }
 
 type toolCall struct {
@@ -48,6 +49,7 @@ func New(cfg config.Config, st *store.Store, registry *tools.Registry, debug *de
 		registry: registry,
 		debug:    debug,
 		files:    attachment.NewManager(cfg.StateDir()),
+		caps:     provider.NewCapabilityStore(cfg.StateDir()),
 	}
 }
 
@@ -815,7 +817,11 @@ func (e *Engine) validatePromptAttachments(session domain.Session, drafts []atta
 		case attachment.KindText:
 			continue
 		case attachment.KindImage, attachment.KindPDF:
-			if provider.SupportsAttachment(session.ProviderID, session.ModelID, kind) {
+			supported, err := e.caps.SupportsAttachment(session.ProviderID, providerCfgForSession(e.cfg, session), session.ModelID, kind)
+			if err != nil {
+				return err
+			}
+			if supported {
 				continue
 			}
 			return fmt.Errorf("provider %s model %s does not support %s attachments", session.ProviderID, session.ModelID, kind)
@@ -824,6 +830,13 @@ func (e *Engine) validatePromptAttachments(session domain.Session, drafts []atta
 		}
 	}
 	return nil
+}
+
+func providerCfgForSession(cfg config.Config, session domain.Session) config.Provider {
+	if providerCfg, ok := cfg.Provider(session.ProviderID); ok {
+		return providerCfg
+	}
+	return config.Provider{}
 }
 
 func compactionSummary(parts []domain.Part) (string, bool) {

@@ -30,9 +30,9 @@ func TestModelDialogFiltersModels(t *testing.T) {
 }
 
 func TestModelDialogRenderShowsProvider(t *testing.T) {
-	dialog := NewModelDialog("openai", []domain.Model{{ID: "gpt-5.4", OwnedBy: "openai"}}, "gpt-5.4")
+	dialog := NewModelDialog("openai", []domain.Model{{ID: "gpt-5.4", OwnedBy: "openai", SupportsImages: true, CapabilitiesKnown: true}}, "gpt-5.4")
 	got := dialog.View(84, theme.Resolve("tokyonight").Palette)
-	if !strings.Contains(got, "Select Model") || !strings.Contains(got, "Provider: openai") {
+	if !strings.Contains(got, "Select Model") || !strings.Contains(got, "Provider: openai") || !strings.Contains(got, "image") {
 		t.Fatalf("unexpected render: %q", got)
 	}
 }

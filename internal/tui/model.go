@@ -270,6 +270,7 @@ type Model struct {
 	disconnectDialog   *ui.DisconnectDialog
 	modelDialog        *ui.ModelDialog
 	debug              *debugsrv.Recorder
+	caps               *provider.CapabilityStore
 	activeOpCancel     context.CancelFunc
 	queuedPrompt       *queuedPrompt
 	draftAttachments   []attachment.Draft
@@ -318,6 +319,7 @@ func New(cfg config.Config, st *store.Store, a *agent.Engine, mode StartupMode, 
 		startupMode:     mode,
 		mouseEnabled:    cfg.UI.Mouse,
 		debug:           debug,
+		caps:            provider.NewCapabilityStore(cfg.StateDir()),
 		attachmentFiles: attachment.NewManager(cfg.StateDir()),
 	}, nil
 }
@@ -2118,7 +2120,11 @@ func (m *Model) canSendPrompt() (bool, string) {
 	}
 	for _, draft := range m.draftAttachments {
 		kind := attachment.ClassifyMIME(draft.MIME)
-		if provider.SupportsAttachment(session.ProviderID, session.ModelID, kind) {
+		supported, err := m.capabilityStore().SupportsAttachment(session.ProviderID, providerCfgForDraft(m.cfg, session.ProviderID), session.ModelID, kind)
+		if err != nil {
+			return false, err.Error()
+		}
+		if supported {
 			continue
 		}
 		return false, fmt.Sprintf("%s does not support %s attachments", session.ModelID, kind)
@@ -2728,6 +2734,9 @@ func (m *Model) openModelDialog(providerID string, models []domain.Model) {
 func (m Model) probeProviderCmd(draft provider.ConnectDraft) tea.Cmd {
 	return func() tea.Msg {
 		result, err := provider.Probe(context.Background(), draft, m.debug)
+		if err == nil {
+			result.Models, err = m.capabilityStore().EnrichModels(draft.ProviderID, draft.ToConfig(), result.Models)
+		}
 		return providerProbeMsg{result: result, err: err}
 	}
 }
@@ -2743,8 +2752,25 @@ func (m Model) loadModelsCmd(providerID string, postConnect bool) tea.Cmd {
 			return modelListMsg{providerID: providerID, err: err}
 		}
 		models, err := client.ListModels(context.Background())
+		if err == nil {
+			models, err = m.capabilityStore().EnrichModels(providerID, cfg, models)
+		}
 		return modelListMsg{providerID: providerID, models: models, postConnect: postConnect, err: err}
 	}
+}
+
+func (m Model) capabilityStore() *provider.CapabilityStore {
+	if m.caps != nil {
+		return m.caps
+	}
+	return provider.NewCapabilityStore(m.cfg.StateDir())
+}
+
+func providerCfgForDraft(cfg config.Config, providerID string) config.Provider {
+	if providerCfg, ok := cfg.Provider(providerID); ok {
+		return providerCfg
+	}
+	return config.Provider{}
 }
 
 func (m *Model) saveProviderDraft(draft provider.ConnectDraft) error {
