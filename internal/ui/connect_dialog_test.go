@@ -70,7 +70,7 @@ func TestConnectDialogCyclesDiscoveredModels(t *testing.T) {
 	dialog.selectProvider(provider.Catalog()[0])
 	dialog.SetModels([]string{"model-a", "model-b"})
 	dialog.fieldIndex = len(dialog.formFields()) - 1
-	dialog.Update(tea.KeyMsg{Type: tea.KeyRight})
+	dialog.Update(tea.KeyMsg{Type: tea.KeyEnter})
 
 	if dialog.draft.Model != "model-b" {
 		t.Fatalf("expected next discovered model, got %q", dialog.draft.Model)
@@ -81,6 +81,7 @@ func TestConnectDialogViewShowsEditorCursorAndTail(t *testing.T) {
 	dialog := NewConnectDialog(provider.Catalog(), map[string]config.Provider{})
 	dialog.selectProvider(provider.Catalog()[0])
 	dialog.draft.BaseURL = "https://example.com/very/long/path/that/should/show/the/end"
+	dialog.resetCursors()
 	dialog.fieldIndex = 1
 
 	got := dialog.View(90, theme.Resolve("tokyonight").Palette)
@@ -89,5 +90,23 @@ func TestConnectDialogViewShowsEditorCursorAndTail(t *testing.T) {
 	}
 	if !strings.Contains(got, "show/the/end") {
 		t.Fatalf("expected editor to keep tail of typed value visible, got %q", got)
+	}
+}
+
+func TestConnectDialogMovesCursorAndInsertsAtCursor(t *testing.T) {
+	dialog := NewConnectDialog(provider.Catalog(), map[string]config.Provider{})
+	dialog.selectProvider(provider.Catalog()[0])
+	dialog.fieldIndex = 1
+	dialog.draft.BaseURL = "abcd"
+	dialog.resetCursors()
+	dialog.moveCursorTo(2)
+	dialog.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("X")})
+	if dialog.draft.BaseURL != "abXcd" {
+		t.Fatalf("expected insertion at cursor, got %q", dialog.draft.BaseURL)
+	}
+	dialog.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	dialog.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	if dialog.draft.BaseURL != "aXcd" {
+		t.Fatalf("expected backspace before cursor, got %q", dialog.draft.BaseURL)
 	}
 }

@@ -56,6 +56,7 @@ type ConnectDialog struct {
 	focus      connectFocus
 	fieldIndex int
 	buttonIdx  int
+	cursors    map[string]int
 }
 
 func NewConnectDialog(items []provider.Descriptor, configured map[string]config.Provider) ConnectDialog {
@@ -63,6 +64,7 @@ func NewConnectDialog(items []provider.Descriptor, configured map[string]config.
 		stage:      connectStageProvider,
 		items:      items,
 		configured: configured,
+		cursors:    map[string]int{},
 	}
 	dialog.refilter()
 	return dialog
@@ -167,14 +169,18 @@ func (d *ConnectDialog) updateForm(msg tea.KeyMsg) ProviderConnectAction {
 		if d.focus == connectFocusButtons {
 			d.moveButtons(-1)
 		} else {
-			d.adjustModel(-1)
+			d.moveCursor(-1)
 		}
 	case "right":
 		if d.focus == connectFocusButtons {
 			d.moveButtons(1)
 		} else {
-			d.adjustModel(1)
+			d.moveCursor(1)
 		}
+	case "home", "ctrl+a":
+		d.moveCursorTo(0)
+	case "end", "ctrl+e":
+		d.moveCursorTo(len([]rune(d.fieldValue(d.currentFieldID()))))
 	case "backspace":
 		d.deleteRune()
 	case "ctrl+t":
@@ -335,21 +341,18 @@ func (d ConnectDialog) renderFormField(field connectField, width int, palette th
 
 func (d ConnectDialog) renderEditorValue(fieldID string, width int, palette theme.Palette) string {
 	value := d.fieldValue(fieldID)
-	if fieldID == "api_key" {
-		value = strings.Repeat("•", len([]rune(value)))
-	}
 	placeholder := d.placeholderValue(fieldID)
 	editorWidth := maxInt(12, width)
-	content := fitEditorTail(value, placeholder, editorWidth-3)
-	line := " " + content + " "
+	content := d.renderEditorContent(fieldID, value, placeholder, editorWidth-2)
+	line := content
 	style := lipgloss.NewStyle().
 		Width(editorWidth).
 		Background(palette.UserTextBackground).
 		Foreground(palette.UserTextForeground)
-	if strings.TrimSpace(value) == "" {
+	if strings.TrimSpace(value) == "" && placeholder != "" {
 		style = style.Foreground(palette.ComposerMutedText)
 	}
-	return style.Render(line)
+	return style.Render(" " + line)
 }
 
 func (d ConnectDialog) displayValue(fieldID string) string {
@@ -393,6 +396,7 @@ func (d *ConnectDialog) selectProvider(item provider.Descriptor) {
 	d.models = nil
 	d.status = ""
 	d.draft, _ = provider.BuildDraft(item.ID, d.configured)
+	d.resetCursors()
 	if len(item.AuthMethods) > 1 {
 		d.stage = connectStageAuth
 		return
@@ -410,6 +414,7 @@ func (d *ConnectDialog) chooseAuthMethod() {
 	}
 	method := d.selected.AuthMethods[d.authIndex].ID
 	d.draft = d.draft.WithAuthMethod(method, d.selected)
+	d.resetCursors()
 	d.stage = connectStageForm
 	d.focus = connectFocusFields
 	d.fieldIndex = 0
@@ -519,11 +524,16 @@ func (d *ConnectDialog) deleteRune() {
 	if d.focus != connectFocusFields {
 		return
 	}
-	value := []rune(d.fieldValue(d.currentFieldID()))
-	if len(value) == 0 {
+	id := d.currentFieldID()
+	value := []rune(d.fieldValue(id))
+	cursor := d.cursorPosition(id)
+	if len(value) == 0 || cursor <= 0 {
 		return
 	}
-	d.setFieldValue(d.currentFieldID(), string(value[:len(value)-1]))
+	next := append([]rune{}, value[:cursor-1]...)
+	next = append(next, value[cursor:]...)
+	d.setFieldValue(id, string(next))
+	d.moveCursorTo(cursor - 1)
 }
 
 func (d *ConnectDialog) appendText(input string) {
@@ -534,7 +544,17 @@ func (d *ConnectDialog) appendText(input string) {
 	if id == "" {
 		return
 	}
-	d.setFieldValue(id, d.fieldValue(id)+input)
+	current := []rune(d.fieldValue(id))
+	insert := []rune(input)
+	cursor := d.cursorPosition(id)
+	if cursor > len(current) {
+		cursor = len(current)
+	}
+	next := append([]rune{}, current[:cursor]...)
+	next = append(next, insert...)
+	next = append(next, current[cursor:]...)
+	d.setFieldValue(id, string(next))
+	d.moveCursorTo(cursor + len(insert))
 }
 
 func (d *ConnectDialog) adjustModel(delta int) {
@@ -585,6 +605,7 @@ func (d *ConnectDialog) setFieldValue(id, value string) {
 	case "model":
 		d.draft.Model = value
 	}
+	d.clampCursor(id)
 }
 
 func clampWidth(width, minWidth, maxWidth int) int {
@@ -631,6 +652,119 @@ func fitEditorTail(value, placeholder string, width int) string {
 		return "…" + string(runes[len(runes)-maxInt(1, width-1):]) + "█"
 	}
 	return value + "█"
+}
+
+func (d *ConnectDialog) moveCursor(delta int) {
+	id := d.currentFieldID()
+	if id == "" {
+		return
+	}
+	d.moveCursorTo(d.cursorPosition(id) + delta)
+}
+
+func (d *ConnectDialog) moveCursorTo(pos int) {
+	id := d.currentFieldID()
+	if id == "" {
+		return
+	}
+	if d.cursors == nil {
+		d.cursors = map[string]int{}
+	}
+	if pos < 0 {
+		pos = 0
+	}
+	maxPos := len([]rune(d.fieldValue(id)))
+	if pos > maxPos {
+		pos = maxPos
+	}
+	d.cursors[id] = pos
+}
+
+func (d ConnectDialog) cursorPosition(id string) int {
+	if d.cursors == nil {
+		return len([]rune(d.fieldValue(id)))
+	}
+	pos, ok := d.cursors[id]
+	if !ok {
+		return len([]rune(d.fieldValue(id)))
+	}
+	maxPos := len([]rune(d.fieldValue(id)))
+	if pos > maxPos {
+		return maxPos
+	}
+	if pos < 0 {
+		return 0
+	}
+	return pos
+}
+
+func (d *ConnectDialog) clampCursor(id string) {
+	if d.cursors == nil {
+		return
+	}
+	maxPos := len([]rune(d.fieldValue(id)))
+	if d.cursors[id] > maxPos {
+		d.cursors[id] = maxPos
+	}
+	if d.cursors[id] < 0 {
+		d.cursors[id] = 0
+	}
+}
+
+func (d *ConnectDialog) resetCursors() {
+	d.cursors = map[string]int{}
+	for _, field := range d.formFields() {
+		d.cursors[field.ID] = len([]rune(d.fieldValue(field.ID)))
+	}
+}
+
+func (d ConnectDialog) renderEditorContent(fieldID, value, placeholder string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	displayRunes := []rune(value)
+	if fieldID == "api_key" {
+		displayRunes = []rune(strings.Repeat("•", len([]rune(value))))
+	}
+	cursor := d.cursorPosition(fieldID)
+	if strings.TrimSpace(value) == "" && placeholder != "" {
+		text := truncateText(placeholder, maxInt(1, width-1))
+		return padRight(text, width-1)
+	}
+	if cursor > len(displayRunes) {
+		cursor = len(displayRunes)
+	}
+	available := maxInt(1, width-1)
+	start := 0
+	if cursor > available {
+		start = cursor - available
+	}
+	if start > 0 {
+		start--
+	}
+	end := minInt(len(displayRunes), start+available)
+	segment := string(displayRunes[start:end])
+	cursorCol := cursor - start
+	if start > 0 {
+		segment = "…" + string(displayRunes[start+1:end])
+		cursorCol = maxInt(0, cursorCol-1)
+	}
+	segmentRunes := []rune(segment)
+	if cursorCol > len(segmentRunes) {
+		cursorCol = len(segmentRunes)
+	}
+	before := string(segmentRunes[:cursorCol])
+	after := string(segmentRunes[cursorCol:])
+	content := before + "█" + after
+	return padRight(content, width)
+}
+
+func padRight(input string, width int) string {
+	got := lipgloss.Width(input)
+	if got >= width {
+		return truncateText(input, width)
+	}
+	return input + strings.Repeat(" ", width-got)
 }
 
 func minInt(a, b int) int {
