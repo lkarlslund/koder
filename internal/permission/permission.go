@@ -2,8 +2,9 @@ package permission
 
 import (
 	"fmt"
-	"path/filepath"
+	"regexp"
 	"slices"
+	"strings"
 
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/domain"
@@ -57,9 +58,25 @@ func wildcardMatch(pattern, value string) bool {
 	if pattern == "" {
 		pattern = "*"
 	}
-	matched, err := filepath.Match(pattern, value)
-	if err == nil {
-		return matched
+	if pattern == "*" || pattern == "**" {
+		return true
 	}
-	return pattern == value
+	var expr strings.Builder
+	expr.WriteString("^")
+	for _, r := range pattern {
+		switch r {
+		case '*':
+			expr.WriteString(".*")
+		case '?':
+			expr.WriteString(".")
+		default:
+			expr.WriteString(regexp.QuoteMeta(string(r)))
+		}
+	}
+	expr.WriteString("$")
+	matched, err := regexp.MatchString(expr.String(), value)
+	if err != nil {
+		return pattern == value
+	}
+	return matched
 }
