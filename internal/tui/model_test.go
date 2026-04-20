@@ -1175,6 +1175,21 @@ func TestRenderBodyAppliesSidebarThemeBackground(t *testing.T) {
 	}
 }
 
+func TestRenderBodyClipsSidebarToViewportHeight(t *testing.T) {
+	m := Model{
+		showSidebar: true,
+		palette:     theme.Resolve("tokyonight").Palette,
+		viewport:    viewport.New(40, 6),
+		workdir:     "/tmp/project",
+	}
+	m.viewport.SetContent("history")
+
+	got := m.renderBody()
+	if h := lipgloss.Height(got); h != 6 {
+		t.Fatalf("expected body height 6, got %d from %q", h, got)
+	}
+}
+
 func TestRefreshViewportAppendsWorkingLine(t *testing.T) {
 	m := Model{
 		currentSession: domain.Session{ID: 1},

@@ -652,7 +652,7 @@ func (m *Model) renderHeader() string {
 }
 
 func (m *Model) renderBody() string {
-	return ui.RenderBody(m.viewport.View(), ui.RenderSidebar(m.renderSidebar(), m.palette), m.showSidebar)
+	return ui.RenderBody(m.viewport.View(), ui.RenderSidebar(m.renderSidebar(), m.palette, m.viewport.Height), m.showSidebar)
 }
 
 func (m *Model) renderFooter() string {
