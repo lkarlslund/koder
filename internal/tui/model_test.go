@@ -1089,6 +1089,51 @@ func TestApprovalPromptOpensPermissionsPicker(t *testing.T) {
 	}
 }
 
+func TestApprovalPromptAltHotkeys(t *testing.T) {
+	m := Model{
+		cfg:       testConfig(t),
+		composer:  textarea.New(),
+		approvals: []store.Approval{{ID: 7, Tool: domain.ToolKindBash, Command: `{"command":"git status"}`}},
+	}
+
+	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Alt: true, Runes: []rune("p")})
+	next := updated.(*Model)
+	if cmd == nil {
+		t.Fatal("expected sync title command")
+	}
+	if !next.hasPicker() || next.picker.approvalID != 7 {
+		t.Fatalf("expected alt+p to open permission picker for approval, got %#v", next.picker)
+	}
+
+	m = Model{
+		cfg:       testConfig(t),
+		composer:  textarea.New(),
+		approvals: []store.Approval{{ID: 7, Tool: domain.ToolKindBash, Command: `{"command":"git status"}`}},
+	}
+	updated, cmd = m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Alt: true, Runes: []rune("a")})
+	next = updated.(*Model)
+	if cmd == nil {
+		t.Fatal("expected alt+a to trigger approval command")
+	}
+	if !next.loading {
+		t.Fatal("expected alt+a to start approval flow")
+	}
+
+	m = Model{
+		cfg:       testConfig(t),
+		composer:  textarea.New(),
+		approvals: []store.Approval{{ID: 7, Tool: domain.ToolKindBash, Command: `{"command":"git status"}`}},
+	}
+	updated, cmd = m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Alt: true, Runes: []rune("d")})
+	next = updated.(*Model)
+	if cmd == nil {
+		t.Fatal("expected alt+d to trigger deny command")
+	}
+	if !next.loading {
+		t.Fatal("expected alt+d to start deny flow")
+	}
+}
+
 func TestQuitCommandQuits(t *testing.T) {
 	m := Model{
 		composer: textarea.New(),

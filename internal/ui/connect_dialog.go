@@ -191,6 +191,10 @@ func (d *ConnectDialog) updateForm(msg tea.KeyMsg) ProviderConnectAction {
 		d.deleteRune()
 	case "ctrl+t":
 		return ProviderConnectAction{Kind: ProviderConnectActionTest, Draft: d.draft}
+	case "alt+t":
+		return ProviderConnectAction{Kind: ProviderConnectActionTest, Draft: d.draft}
+	case "alt+s":
+		return ProviderConnectAction{Kind: ProviderConnectActionSave, Draft: d.draft}
 	case "enter":
 		if d.focus == connectFocusButtons {
 			switch d.buttonIdx {
@@ -279,8 +283,8 @@ func (d *ConnectDialog) formView(width int, palette theme.Palette) string {
 		lines = append(lines, lipgloss.NewStyle().Foreground(palette.AssistantTimestampText).Render(status))
 	}
 	buttons := []string{
-		Button{Label: "Test", Focused: d.focus == connectFocusButtons && d.buttonIdx == 0}.View(palette),
-		Button{Label: "Save", Focused: d.focus == connectFocusButtons && d.buttonIdx == 1, Primary: true}.View(palette),
+		Button{Label: "Test", Hotkey: 't', Focused: d.focus == connectFocusButtons && d.buttonIdx == 0}.View(palette),
+		Button{Label: "Save", Hotkey: 's', Focused: d.focus == connectFocusButtons && d.buttonIdx == 1, Primary: true}.View(palette),
 		Button{Label: "Cancel", Focused: d.focus == connectFocusButtons && d.buttonIdx == 2}.View(palette),
 	}
 	lines = append(lines, lipgloss.JoinHorizontal(lipgloss.Left, buttons...))

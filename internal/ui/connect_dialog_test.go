@@ -65,6 +65,18 @@ func TestConnectDialogTestActionEmitsDraft(t *testing.T) {
 	}
 }
 
+func TestConnectDialogAltHotkeysTriggerActions(t *testing.T) {
+	dialog := NewConnectDialog(provider.Catalog(), map[string]config.Provider{})
+	dialog.selectProvider(provider.Catalog()[0])
+
+	if action := dialog.Update(tea.KeyMsg{Type: tea.KeyRunes, Alt: true, Runes: []rune("t")}); action.Kind != ProviderConnectActionTest {
+		t.Fatalf("expected alt+t to trigger test, got %#v", action)
+	}
+	if action := dialog.Update(tea.KeyMsg{Type: tea.KeyRunes, Alt: true, Runes: []rune("s")}); action.Kind != ProviderConnectActionSave {
+		t.Fatalf("expected alt+s to trigger save, got %#v", action)
+	}
+}
+
 func TestConnectDialogCyclesDiscoveredModels(t *testing.T) {
 	dialog := NewConnectDialog(provider.Catalog(), map[string]config.Provider{})
 	dialog.selectProvider(provider.Catalog()[0])

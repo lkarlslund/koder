@@ -129,6 +129,7 @@ func (r ChoiceRow) View(width int, palette theme.Palette, focused bool) string {
 
 type Button struct {
 	Label    string
+	Hotkey   rune
 	Focused  bool
 	Primary  bool
 	Selected bool
@@ -142,7 +143,31 @@ func (b Button) View(palette theme.Palette) string {
 	if b.Focused || b.Selected {
 		style = style.Reverse(true)
 	}
-	return style.Render(b.Label)
+	label := b.Label
+	if b.Hotkey != 0 {
+		label = renderButtonLabel(b.Label, b.Hotkey, palette)
+	}
+	return style.Render(label)
+}
+
+func renderButtonLabel(label string, hotkey rune, palette theme.Palette) string {
+	labelRunes := []rune(label)
+	target := []rune(strings.ToLower(string(hotkey)))
+	if len(target) == 0 {
+		return label
+	}
+	idx := -1
+	for i, r := range labelRunes {
+		if strings.ToLower(string(r)) == string(target) {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return label
+	}
+	hot := lipgloss.NewStyle().Foreground(palette.ActivityText).Bold(true).Render(string(labelRunes[idx]))
+	return string(labelRunes[:idx]) + hot + string(labelRunes[idx+1:])
 }
 
 func truncateText(input string, width int) string {

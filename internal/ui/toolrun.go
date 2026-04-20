@@ -130,24 +130,11 @@ func RenderToolRunDock(props ToolRunDockProps) string {
 		lines = append(lines, preview)
 	}
 
-	approve := lipgloss.NewStyle().Padding(0, 1)
-	if props.ApproveFocus {
-		approve = approve.Reverse(true).Bold(true)
-	}
-	action := lipgloss.NewStyle().Padding(0, 1)
-	if props.ActionFocus {
-		action = action.Reverse(true).Bold(true)
-	}
-	deny := lipgloss.NewStyle().Padding(0, 1)
-	if props.DenyFocus {
-		deny = deny.Reverse(true).Bold(true)
-	}
-
-	buttons := []string{approve.Render(props.ApproveLabel)}
+	buttons := []string{Button{Label: props.ApproveLabel, Hotkey: 'a', Focused: props.ApproveFocus, Primary: true}.View(props.Palette)}
 	if strings.TrimSpace(props.ActionLabel) != "" {
-		buttons = append(buttons, action.Render(props.ActionLabel))
+		buttons = append(buttons, Button{Label: props.ActionLabel, Hotkey: 'p', Focused: props.ActionFocus}.View(props.Palette))
 	}
-	buttons = append(buttons, deny.Render(props.DenyLabel))
+	buttons = append(buttons, Button{Label: props.DenyLabel, Hotkey: 'd', Focused: props.DenyFocus}.View(props.Palette))
 
 	lines = append(lines,
 		strings.Join(buttons, "  "),

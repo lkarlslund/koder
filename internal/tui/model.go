@@ -622,10 +622,17 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "y":
 			return m.submitApprovalChoice(true)
+		case "alt+a":
+			return m.submitApprovalChoice(true)
 		case "p":
 			m.openApprovalPermissionsPicker()
 			return m, m.syncWindowTitleCmd()
+		case "alt+p":
+			m.openApprovalPermissionsPicker()
+			return m, m.syncWindowTitleCmd()
 		case "n", "esc":
+			return m.submitApprovalChoice(false)
+		case "alt+d":
 			return m.submitApprovalChoice(false)
 		case "enter":
 			switch m.approvalChoice {
