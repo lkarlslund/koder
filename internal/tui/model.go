@@ -649,7 +649,7 @@ func (m *Model) renderHalfBlockLine(width int, char string) string {
 	}
 	bar := lipgloss.NewStyle().
 		Foreground(m.palette.UserAccentBar).
-		Render("▌")
+		Render(char)
 	fill := lipgloss.NewStyle().
 		Width(max(0, width-1)).
 		Foreground(m.palette.UserTextBackground).
