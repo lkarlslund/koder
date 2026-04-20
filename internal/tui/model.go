@@ -644,10 +644,17 @@ func (m *Model) promptGlyph() string {
 }
 
 func (m *Model) renderHalfBlockLine(width int, char string) string {
-	return lipgloss.NewStyle().
-		Width(width).
+	if width <= 0 {
+		return ""
+	}
+	bar := lipgloss.NewStyle().
+		Foreground(m.palette.UserAccentBar).
+		Render("▌")
+	fill := lipgloss.NewStyle().
+		Width(max(0, width-1)).
 		Foreground(m.palette.UserTextBackground).
-		Render(strings.Repeat(char, max(1, width)))
+		Render(strings.Repeat(char, max(1, width-1)))
+	return bar + fill
 }
 
 func mPrompt(cfg config.Config) string {

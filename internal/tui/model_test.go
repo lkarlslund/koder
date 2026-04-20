@@ -627,6 +627,9 @@ func TestRenderComposerUsesThreeLineBoxAndFullWidth(t *testing.T) {
 	if !strings.Contains(lines[0], "▄") || !strings.Contains(lines[len(lines)-1], "▀") {
 		t.Fatalf("expected half-block top and bottom lines, got %q", got)
 	}
+	if !strings.Contains(lines[0], "▌") || !strings.Contains(lines[len(lines)-1], "▌") {
+		t.Fatalf("expected accent strip on separator rows, got %q", got)
+	}
 	if !strings.Contains(lines[1], "▌") {
 		t.Fatalf("expected block accent glyph on content line, got %q", lines[1])
 	}
@@ -654,6 +657,9 @@ func TestRenderUserMessageUsesAccentBarOnAllLines(t *testing.T) {
 	}
 	if !strings.Contains(lines[0], "▄") || !strings.Contains(lines[2], "▀") {
 		t.Fatalf("expected half-block separator rows, got %q", got)
+	}
+	if !strings.Contains(lines[0], "▌") || !strings.Contains(lines[2], "▌") {
+		t.Fatalf("expected accent strip on separator rows, got %q", got)
 	}
 	if !strings.Contains(lines[1], "▌") {
 		t.Fatalf("expected block accent on content row, got %q", lines[1])
