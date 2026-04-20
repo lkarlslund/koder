@@ -27,6 +27,7 @@ type Engine struct {
 }
 
 type toolCall struct {
+	ID      string          `json:"tool_call_id,omitempty"`
 	Tool    domain.ToolKind `json:"tool"`
 	Path    string          `json:"path,omitempty"`
 	Pattern string          `json:"pattern,omitempty"`
@@ -34,6 +35,7 @@ type toolCall struct {
 	Body    string          `json:"body,omitempty"`
 	URL     string          `json:"url,omitempty"`
 	Content string          `json:"content,omitempty"`
+	Reason  string          `json:"reason,omitempty"`
 }
 
 func New(cfg config.Config, st *store.Store, registry *tools.Registry, debug *debugsrv.Recorder) *Engine {
@@ -141,15 +143,56 @@ func (e *Engine) continueModelTurn(ctx context.Context, session domain.Session, 
 			return buildErr
 		}
 
-		text, reasoning, usage, completeErr := client.CompleteChat(ctx, provider.ChatRequest{
-			Model:    session.ModelID,
-			Messages: messages,
-			Stream:   false,
+		resp, completeErr := client.CompleteChat(ctx, provider.ChatRequest{
+			Model:      session.ModelID,
+			Messages:   messages,
+			Tools:      modelToolDefinitions(),
+			ToolChoice: "auto",
+			Stream:     false,
 		})
 		if completeErr != nil {
 			return completeErr
 		}
 
+		if len(resp.ToolCalls) > 0 {
+			call, err := toolCallFromProvider(resp.ToolCalls[0])
+			if err != nil {
+				return err
+			}
+			e.recordLifecycle(session.ID, "tool_call_parsed", call.contextString(), map[string]string{"tool": string(call.Tool), "tool_call_id": call.ID})
+			assistantMsg, err := e.store.AddMessage(ctx, session.ID, domain.MessageRoleAssistant, fmt.Sprintf("tool:%s", call.Tool))
+			if err != nil {
+				return err
+			}
+			meta, _ := json.Marshal(call)
+			body := call.contextString()
+			if _, err := e.store.AddPart(ctx, assistantMsg.ID, domain.PartKindToolCall, body, string(meta)); err != nil {
+				return err
+			}
+			if strings.TrimSpace(resp.Text) != "" {
+				if _, err := e.store.AddPart(ctx, assistantMsg.ID, domain.PartKindSystemNotice, strings.TrimSpace(resp.Text), ""); err != nil {
+					return err
+				}
+			}
+			if resp.Usage.TotalTokens > 0 {
+				usageMeta, _ := json.Marshal(resp.Usage)
+				if _, err := e.store.AddPart(ctx, assistantMsg.ID, domain.PartKindSystemNotice, "usage", string(usageMeta)); err != nil {
+					return err
+				}
+				out <- domain.Event{Kind: domain.EventKindUsage, Usage: resp.Usage}
+			}
+			evt, handledErr := e.handleModelToolCall(ctx, session, call)
+			if handledErr != nil {
+				return handledErr
+			}
+			out <- evt
+			if evt.Kind == domain.EventKindApprovalAsk {
+				return nil
+			}
+			continue
+		}
+
+		text, reasoning, usage := resp.Text, resp.Reasoning, resp.Usage
 		call, plain := parseToolCall(text)
 		if call != nil {
 			e.recordLifecycle(session.ID, "tool_call_parsed", call.contextString(), map[string]string{"tool": string(call.Tool)})
@@ -227,7 +270,7 @@ func (e *Engine) maybeUpdateSessionTitle(ctx context.Context, session domain.Ses
 	if err != nil {
 		return err
 	}
-	title, _, _, err := client.CompleteChat(ctx, provider.ChatRequest{
+	resp, err := client.CompleteChat(ctx, provider.ChatRequest{
 		Model:    session.ModelID,
 		Messages: messages,
 		Stream:   false,
@@ -235,7 +278,7 @@ func (e *Engine) maybeUpdateSessionTitle(ctx context.Context, session domain.Ses
 	if err != nil {
 		return err
 	}
-	title = normalizeSessionTitle(title)
+	title := normalizeSessionTitle(resp.Text)
 	if title == "" {
 		return nil
 	}
@@ -334,7 +377,7 @@ func (e *Engine) approve(ctx context.Context, sessionID int64, rawID string) (<-
 		return emitOnce(domain.Event{Kind: domain.EventKindError, Err: execErr}), nil
 	}
 	e.recordLifecycle(sessionID, "tool_execution_finished", item.Command, map[string]string{"tool": string(item.Tool), "approval_id": strconv.FormatInt(id, 10)})
-	toolEvents, err := e.persistToolResult(ctx, sessionID, item.Tool, result)
+	toolEvents, err := e.persistToolResult(ctx, sessionID, item.Tool, req.Args["tool_call_id"], result)
 	if err != nil {
 		return nil, err
 	}
@@ -395,13 +438,17 @@ func (e *Engine) deny(ctx context.Context, _ int64, rawID string) (<-chan domain
 	return emitOnce(domain.Event{Kind: domain.EventKindApprovalReply, Text: fmt.Sprintf("approval %d denied", id)}), nil
 }
 
-func (e *Engine) persistToolResult(ctx context.Context, sessionID int64, tool domain.ToolKind, result tools.Result) (<-chan domain.Event, error) {
+func (e *Engine) persistToolResult(ctx context.Context, sessionID int64, tool domain.ToolKind, toolCallID string, result tools.Result) (<-chan domain.Event, error) {
 	summary, body := toolResultSummary(tool, result)
 	msg, err := e.store.AddMessage(ctx, sessionID, domain.MessageRoleTool, summary)
 	if err != nil {
 		return nil, err
 	}
-	meta, _ := json.Marshal(map[string]string{"tool": string(tool)})
+	metaPayload := map[string]string{"tool": string(tool)}
+	if strings.TrimSpace(toolCallID) != "" {
+		metaPayload["tool_call_id"] = toolCallID
+	}
+	meta, _ := json.Marshal(metaPayload)
 	if _, err := e.store.AddPart(ctx, msg.ID, domain.PartKindToolOutput, body, string(meta)); err != nil {
 		return nil, err
 	}
@@ -475,19 +522,108 @@ func (e *Engine) buildConversation(ctx context.Context, sessionID int64) ([]prov
 			}
 			continue
 		}
-		content := stringifyParts(partsByMessage[msg.ID])
-		if strings.TrimSpace(content) == "" {
-			content = msg.Summary
-		}
-		if strings.TrimSpace(content) == "" {
-			continue
-		}
-		conversation = append(conversation, provider.Message{
-			Role:    msg.Role,
-			Content: content,
-		})
+		conversation = append(conversation, conversationMessagesForStoredMessage(msg, partsByMessage[msg.ID])...)
 	}
 	return conversation, nil
+}
+
+func conversationMessagesForStoredMessage(msg domain.Message, parts []domain.Part) []provider.Message {
+	switch msg.Role {
+	case domain.MessageRoleAssistant:
+		if assistantMsg, ok := structuredAssistantMessage(parts); ok {
+			return []provider.Message{assistantMsg}
+		}
+	case domain.MessageRoleTool:
+		if toolMsg, ok := structuredToolMessage(parts); ok {
+			return []provider.Message{toolMsg}
+		}
+	}
+	content := stringifyParts(parts)
+	if strings.TrimSpace(content) == "" {
+		content = msg.Summary
+	}
+	if strings.TrimSpace(content) == "" {
+		return nil
+	}
+	role := msg.Role
+	if msg.Role == domain.MessageRoleTool {
+		role = domain.MessageRoleUser
+	}
+	return []provider.Message{{Role: role, Content: content}}
+}
+
+func structuredAssistantMessage(parts []domain.Part) (provider.Message, bool) {
+	var toolCalls []provider.ToolCall
+	textChunks := make([]string, 0, 2)
+	for _, part := range parts {
+		switch part.Kind {
+		case domain.PartKindToolCall:
+			call, ok := storedToolCall(part)
+			if !ok || strings.TrimSpace(call.ID) == "" {
+				return provider.Message{}, false
+			}
+			toolCalls = append(toolCalls, provider.ToolCall{
+				ID:   call.ID,
+				Type: "function",
+				Function: provider.FunctionCall{
+					Name:      string(call.Tool),
+					Arguments: toolCallArgumentsJSON(call),
+				},
+			})
+		case domain.PartKindText:
+			if strings.TrimSpace(part.Body) != "" {
+				textChunks = append(textChunks, strings.TrimSpace(part.Body))
+			}
+		case domain.PartKindSystemNotice:
+			if strings.TrimSpace(part.Body) != "" && strings.TrimSpace(part.Body) != "usage" {
+				textChunks = append(textChunks, strings.TrimSpace(part.Body))
+			}
+		}
+	}
+	if len(toolCalls) == 0 {
+		return provider.Message{}, false
+	}
+	return provider.Message{
+		Role:      domain.MessageRoleAssistant,
+		Content:   strings.Join(textChunks, "\n\n"),
+		ToolCalls: toolCalls,
+	}, true
+}
+
+func structuredToolMessage(parts []domain.Part) (provider.Message, bool) {
+	for _, part := range parts {
+		if part.Kind != domain.PartKindToolOutput {
+			continue
+		}
+		meta := partMetaMap(part)
+		toolCallID := strings.TrimSpace(meta["tool_call_id"])
+		if toolCallID == "" {
+			return provider.Message{}, false
+		}
+		body := strings.TrimSpace(part.Body)
+		if diff := diffBody(parts); diff != "" {
+			if body != "" {
+				body += "\n\nDiff:\n" + diff
+			} else {
+				body = "Diff:\n" + diff
+			}
+		}
+		return provider.Message{
+			Role:       domain.MessageRoleTool,
+			Content:    body,
+			ToolCallID: toolCallID,
+		}, true
+	}
+	return provider.Message{}, false
+}
+
+func diffBody(parts []domain.Part) string {
+	for _, part := range parts {
+		if part.Kind == domain.PartKindDiff && strings.TrimSpace(part.Body) != "" {
+			return part.Body
+		}
+	}
+	return ""
 }
 
 func stringifyParts(parts []domain.Part) string {
@@ -527,11 +663,8 @@ func compactionSummary(parts []domain.Part) (string, bool) {
 }
 
 func toolCallContext(part domain.Part) string {
-	if strings.TrimSpace(part.MetaJSON) != "" {
-		var call toolCall
-		if err := json.Unmarshal([]byte(part.MetaJSON), &call); err == nil && call.Tool != "" {
-			return "Tool call:\n" + call.contextString()
-		}
+	if call, ok := storedToolCall(part); ok {
+		return "Tool call:\n" + call.contextString()
 	}
 	if call, _ := parseToolCall(part.Body); call != nil {
 		return "Tool call:\n" + call.contextString()
@@ -543,8 +676,61 @@ func toolCallContext(part domain.Part) string {
 	return "Tool call:\n" + body
 }
 
+func storedToolCall(part domain.Part) (toolCall, bool) {
+	if strings.TrimSpace(part.MetaJSON) == "" {
+		return toolCall{}, false
+	}
+	var call toolCall
+	if err := json.Unmarshal([]byte(part.MetaJSON), &call); err != nil || call.Tool == "" {
+		return toolCall{}, false
+	}
+	return call, true
+}
+
+func toolCallArgumentsJSON(call toolCall) string {
+	args := map[string]string{}
+	switch call.Tool {
+	case domain.ToolKindRead:
+		args["path"] = call.Path
+	case domain.ToolKindGlob, domain.ToolKindGrep:
+		args["pattern"] = call.Pattern
+	case domain.ToolKindBash:
+		args["command"] = call.Command
+	case domain.ToolKindApplyPatch:
+		args["path"] = call.Path
+		args["content"] = call.Content
+	case domain.ToolKindTask:
+		args["body"] = call.Body
+	case domain.ToolKindQuestion:
+		args["question"] = call.Body
+	case domain.ToolKindWebFetch:
+		args["url"] = call.URL
+	case domain.ToolKindWebSearch:
+		args["query"] = call.Body
+	}
+	data, err := json.Marshal(args)
+	if err != nil {
+		return "{}"
+	}
+	return string(data)
+}
+
+func partMetaMap(part domain.Part) map[string]string {
+	if strings.TrimSpace(part.MetaJSON) == "" {
+		return nil
+	}
+	var meta map[string]string
+	if err := json.Unmarshal([]byte(part.MetaJSON), &meta); err != nil {
+		return nil
+	}
+	return meta
+}
+
 func (c toolCall) contextString() string {
 	payload := map[string]string{"tool": string(c.Tool)}
+	if c.ID != "" {
+		payload["tool_call_id"] = c.ID
+	}
 	switch c.Tool {
 	case domain.ToolKindRead:
 		payload["path"] = c.Path
@@ -567,23 +753,73 @@ func (c toolCall) contextString() string {
 	return string(data)
 }
 
+func toolCallFromProvider(call provider.ToolCall) (toolCall, error) {
+	parsed := toolCall{
+		ID:   strings.TrimSpace(call.ID),
+		Tool: domain.ToolKind(strings.TrimSpace(call.Function.Name)),
+	}
+	if parsed.Tool == "" {
+		return toolCall{}, fmt.Errorf("provider tool call missing function name")
+	}
+	var args map[string]string
+	if err := json.Unmarshal([]byte(call.Function.Arguments), &args); err != nil {
+		return toolCall{}, fmt.Errorf("decode tool arguments for %s: %w", parsed.Tool, err)
+	}
+	switch parsed.Tool {
+	case domain.ToolKindRead:
+		parsed.Path = args["path"]
+	case domain.ToolKindGlob, domain.ToolKindGrep:
+		parsed.Pattern = args["pattern"]
+	case domain.ToolKindBash:
+		parsed.Command = args["command"]
+	case domain.ToolKindApplyPatch:
+		parsed.Path = args["path"]
+		parsed.Content = args["content"]
+	case domain.ToolKindTask:
+		parsed.Body = args["body"]
+	case domain.ToolKindQuestion:
+		parsed.Body = args["question"]
+	case domain.ToolKindWebFetch:
+		parsed.URL = args["url"]
+	case domain.ToolKindWebSearch:
+		parsed.Body = args["query"]
+	default:
+		return toolCall{}, fmt.Errorf("unsupported provider tool %q", parsed.Tool)
+	}
+	if parsed.ID == "" {
+		parsed.ID = "call_" + strings.ToLower(string(parsed.Tool))
+	}
+	return parsed, nil
+}
+
+func modelToolDefinitions() []provider.ToolDefinition {
+	return []provider.ToolDefinition{
+		modelToolDefinition("read", "Read a file from the workspace", `{"type":"object","properties":{"path":{"type":"string","description":"Relative file path to read"}},"required":["path"],"additionalProperties":false}`),
+		modelToolDefinition("glob", "Find workspace paths matching a glob pattern", `{"type":"object","properties":{"pattern":{"type":"string","description":"Glob pattern relative to the workspace"}},"required":["pattern"],"additionalProperties":false}`),
+		modelToolDefinition("grep", "Search for text within workspace files", `{"type":"object","properties":{"pattern":{"type":"string","description":"Text or regex to search for"}},"required":["pattern"],"additionalProperties":false}`),
+		modelToolDefinition("bash", "Run a shell command in the workspace", `{"type":"object","properties":{"command":{"type":"string","description":"Shell command to execute"}},"required":["command"],"additionalProperties":false}`),
+		modelToolDefinition("apply_patch", "Write file content directly to a workspace path", `{"type":"object","properties":{"path":{"type":"string","description":"Relative file path to overwrite"},"content":{"type":"string","description":"Full new file contents"}},"required":["path","content"],"additionalProperties":false}`),
+		modelToolDefinition("task", "Record a short task for later follow-up", `{"type":"object","properties":{"body":{"type":"string","description":"Short task description"}},"required":["body"],"additionalProperties":false}`),
+		modelToolDefinition("webfetch", "Fetch the contents of a URL", `{"type":"object","properties":{"url":{"type":"string","description":"Fully qualified URL"}},"required":["url"],"additionalProperties":false}`),
+	}
+}
+
+func modelToolDefinition(name, description, schema string) provider.ToolDefinition {
+	return provider.ToolDefinition{
+		Type: "function",
+		Function: provider.FunctionDefinition{
+			Name:        name,
+			Description: description,
+			Parameters:  json.RawMessage(schema),
+		},
+	}
+}
+
 func systemPrompt() string {
 	return strings.TrimSpace(`
 You are koder, a terminal coding agent.
 
-You can inspect files and run commands through koder tools. When you need a tool, respond with exactly one XML block in this format and no markdown fence:
-<koder_tool>
-{"tool":"read","path":"README.md"}
-</koder_tool>
-
-Supported tools and arguments:
-- read: {"tool":"read","path":"relative/path"}
-- glob: {"tool":"glob","pattern":"*.go"}
-- grep: {"tool":"grep","pattern":"search text"}
-- bash: {"tool":"bash","command":"pwd"}
-- apply_patch: {"tool":"apply_patch","path":"file.txt","content":"new file content"}
-- task: {"tool":"task","body":"short task text"}
-- webfetch: {"tool":"webfetch","url":"https://example.com"}
+Use the provided tools whenever they are needed to inspect files, search the workspace, run commands, edit files, or fetch URLs.
 
 Rules:
 - Use tools instead of claiming you cannot run commands.
@@ -591,6 +827,7 @@ Rules:
 - After receiving tool output, continue the task.
 - If no tool is needed, answer normally.
 - Paths are relative to the current workspace.
+- Keep tool arguments precise and minimal.
 `)
 }
 
@@ -670,7 +907,7 @@ func (e *Engine) compactSession(ctx context.Context, session domain.Session, cli
 	if len(messages) <= 1 {
 		return nil
 	}
-	summary, _, usage, err := client.CompleteChat(ctx, provider.ChatRequest{
+	resp, err := client.CompleteChat(ctx, provider.ChatRequest{
 		Model: session.ModelID,
 		Messages: append(messages, provider.Message{
 			Role:    domain.MessageRoleUser,
@@ -681,6 +918,7 @@ func (e *Engine) compactSession(ctx context.Context, session domain.Session, cli
 	if err != nil {
 		return err
 	}
+	summary, usage := resp.Text, resp.Usage
 	summary = strings.TrimSpace(summary)
 	if summary == "" {
 		return nil
@@ -711,6 +949,9 @@ func (e *Engine) compactSession(ctx context.Context, session domain.Session, cli
 func (e *Engine) handleModelToolCall(ctx context.Context, session domain.Session, call toolCall) (domain.Event, error) {
 	sessionID := session.ID
 	req := tools.Request{Tool: call.Tool, Args: map[string]string{}}
+	if call.ID != "" {
+		req.Args["tool_call_id"] = call.ID
+	}
 	commandText := ""
 	switch call.Tool {
 	case domain.ToolKindRead:
@@ -778,9 +1019,10 @@ func (e *Engine) handleModelToolCall(ctx context.Context, session domain.Session
 			Text: fmt.Sprintf("%s requires approval", req.Tool),
 			Tool: req.Tool,
 			Meta: map[string]string{
-				"approval_id": strconv.FormatInt(approval.ID, 10),
-				"tool":        string(req.Tool),
-				"command":     preview,
+				"approval_id":  strconv.FormatInt(approval.ID, 10),
+				"tool":         string(req.Tool),
+				"command":      preview,
+				"tool_call_id": req.Args["tool_call_id"],
 			},
 		}, nil
 	}
@@ -788,7 +1030,7 @@ func (e *Engine) handleModelToolCall(ctx context.Context, session domain.Session
 	if err != nil {
 		return domain.Event{Kind: domain.EventKindError, Err: err}, nil
 	}
-	evt, err := e.persistToolResult(ctx, sessionID, req.Tool, result)
+	evt, err := e.persistToolResult(ctx, sessionID, req.Tool, req.Args["tool_call_id"], result)
 	if err != nil {
 		return domain.Event{}, err
 	}

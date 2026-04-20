@@ -19,14 +19,40 @@ import (
 )
 
 type Message struct {
-	Role    domain.MessageRole `json:"role"`
-	Content string             `json:"content"`
+	Role       domain.MessageRole `json:"role"`
+	Content    string             `json:"content,omitempty"`
+	ToolCallID string             `json:"tool_call_id,omitempty"`
+	ToolCalls  []ToolCall         `json:"tool_calls,omitempty"`
+}
+
+type ToolDefinition struct {
+	Type     string             `json:"type"`
+	Function FunctionDefinition `json:"function"`
+}
+
+type FunctionDefinition struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description,omitempty"`
+	Parameters  json.RawMessage `json:"parameters,omitempty"`
+}
+
+type ToolCall struct {
+	ID       string       `json:"id,omitempty"`
+	Type     string       `json:"type,omitempty"`
+	Function FunctionCall `json:"function"`
+}
+
+type FunctionCall struct {
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
 }
 
 type ChatRequest struct {
-	Model    string    `json:"model"`
-	Messages []Message `json:"messages"`
-	Stream   bool      `json:"stream"`
+	Model      string           `json:"model"`
+	Messages   []Message        `json:"messages"`
+	Tools      []ToolDefinition `json:"tools,omitempty"`
+	ToolChoice string           `json:"tool_choice,omitempty"`
+	Stream     bool             `json:"stream"`
 }
 
 type modelsResponse struct {
@@ -41,10 +67,26 @@ type chatChunk struct {
 		Delta struct {
 			Content          string `json:"content"`
 			ReasoningContent string `json:"reasoning_content"`
+			ToolCalls        []struct {
+				ID       string `json:"id"`
+				Type     string `json:"type"`
+				Function struct {
+					Name      string `json:"name"`
+					Arguments string `json:"arguments"`
+				} `json:"function"`
+			} `json:"tool_calls"`
 		} `json:"delta"`
 		Message struct {
 			Content          string `json:"content"`
 			ReasoningContent string `json:"reasoning_content"`
+			ToolCalls        []struct {
+				ID       string `json:"id"`
+				Type     string `json:"type"`
+				Function struct {
+					Name      string `json:"name"`
+					Arguments string `json:"arguments"`
+				} `json:"function"`
+			} `json:"tool_calls"`
 		} `json:"message"`
 		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
@@ -61,6 +103,13 @@ type Client struct {
 	apiKey   string
 	headers  map[string]string
 	provider string
+}
+
+type ChatResponse struct {
+	Text      string
+	Reasoning string
+	Usage     domain.Usage
+	ToolCalls []ToolCall
 }
 
 func New(id string, cfg config.Provider, recorder *debugsrv.Recorder) (*Client, error) {
@@ -140,31 +189,31 @@ func (c *Client) Health(ctx context.Context) error {
 	return nil
 }
 
-func (c *Client) CompleteChat(ctx context.Context, input ChatRequest) (string, string, domain.Usage, error) {
+func (c *Client) CompleteChat(ctx context.Context, input ChatRequest) (ChatResponse, error) {
 	var body bytes.Buffer
 	if err := json.NewEncoder(&body).Encode(input); err != nil {
-		return "", "", domain.Usage{}, fmt.Errorf("encode chat request: %w", err)
+		return ChatResponse{}, fmt.Errorf("encode chat request: %w", err)
 	}
 	req, err := c.newRequest(ctx, http.MethodPost, "/chat/completions", &body)
 	if err != nil {
-		return "", "", domain.Usage{}, err
+		return ChatResponse{}, err
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return "", "", domain.Usage{}, fmt.Errorf("complete chat: %w", err)
+		return ChatResponse{}, fmt.Errorf("complete chat: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
-		return "", "", domain.Usage{}, fmt.Errorf("chat status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		return ChatResponse{}, fmt.Errorf("chat status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 
 	var payload chatChunk
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		return "", "", domain.Usage{}, fmt.Errorf("decode chat response: %w", err)
+		return ChatResponse{}, fmt.Errorf("decode chat response: %w", err)
 	}
 	if len(payload.Choices) == 0 {
-		return "", "", domain.Usage{}, nil
+		return ChatResponse{}, nil
 	}
 	choice := payload.Choices[0]
 	usage := domain.Usage{
@@ -172,7 +221,12 @@ func (c *Client) CompleteChat(ctx context.Context, input ChatRequest) (string, s
 		CompletionTokens: payload.Usage.CompletionTokens,
 		TotalTokens:      payload.Usage.TotalTokens,
 	}
-	return choice.Message.Content, choice.Message.ReasoningContent, usage, nil
+	return ChatResponse{
+		Text:      choice.Message.Content,
+		Reasoning: choice.Message.ReasoningContent,
+		Usage:     usage,
+		ToolCalls: convertToolCalls(choice.Message.ToolCalls),
+	}, nil
 }
 
 func (c *Client) StreamChat(ctx context.Context, input ChatRequest) (<-chan domain.Event, error) {
@@ -254,6 +308,40 @@ func (c *Client) emitChunk(events chan<- domain.Event, chunk chatChunk, raw stri
 			},
 		}
 	}
+}
+
+func convertToolCalls(raw []struct {
+	ID       string `json:"id"`
+	Type     string `json:"type"`
+	Function struct {
+		Name      string `json:"name"`
+		Arguments string `json:"arguments"`
+	} `json:"function"`
+}) []ToolCall {
+	if len(raw) == 0 {
+		return nil
+	}
+	calls := make([]ToolCall, 0, len(raw))
+	for _, item := range raw {
+		calls = append(calls, ToolCall{
+			ID:   item.ID,
+			Type: firstNonEmptyString(item.Type, "function"),
+			Function: FunctionCall{
+				Name:      item.Function.Name,
+				Arguments: item.Function.Arguments,
+			},
+		})
+	}
+	return calls
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 type tracingTransport struct {

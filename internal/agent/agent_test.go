@@ -137,6 +137,49 @@ func TestStringifyPartsNormalizesToolCallFromMetadata(t *testing.T) {
 	}
 }
 
+func TestBuildConversationUsesStructuredToolMessages(t *testing.T) {
+	cfg := config.Default()
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	engine := New(cfg, st, tools.NewRegistry(t.TempDir()), nil)
+	session, err := st.CreateSession(context.Background(), "test", cfg.DefaultProvider, "test-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assistantMsg, err := st.AddMessage(context.Background(), session.ID, domain.MessageRoleAssistant, "tool:bash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.AddPart(context.Background(), assistantMsg.ID, domain.PartKindToolCall, `{"tool":"bash","command":"pwd"}`, `{"tool_call_id":"call_1","tool":"bash","command":"pwd"}`); err != nil {
+		t.Fatal(err)
+	}
+	toolMsg, err := st.AddMessage(context.Background(), session.ID, domain.MessageRoleTool, "bash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.AddPart(context.Background(), toolMsg.ID, domain.PartKindToolOutput, "/tmp/workspace", `{"tool":"bash","tool_call_id":"call_1"}`); err != nil {
+		t.Fatal(err)
+	}
+
+	conversation, err := engine.buildConversation(context.Background(), session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(conversation) != 3 {
+		t.Fatalf("expected system + assistant tool call + tool output, got %#v", conversation)
+	}
+	if len(conversation[1].ToolCalls) != 1 || conversation[1].ToolCalls[0].ID != "call_1" {
+		t.Fatalf("expected structured assistant tool call, got %#v", conversation[1])
+	}
+	if conversation[2].Role != domain.MessageRoleTool || conversation[2].ToolCallID != "call_1" || conversation[2].Content != "/tmp/workspace" {
+		t.Fatalf("expected structured tool message, got %#v", conversation[2])
+	}
+}
+
 func TestApproveContinuesModelWithToolOutput(t *testing.T) {
 	t.Parallel()
 
@@ -154,9 +197,15 @@ func TestApproveContinuesModelWithToolOutput(t *testing.T) {
 		callIndex := len(requests)
 		switch callIndex {
 		case 1:
-			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"<koder_tool>\n{\"tool\":\"bash\",\"command\":\"printf hello\"}\n</koder_tool>"}}],"usage":{"total_tokens":1}}`))
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"tool_calls":[{"id":"call_1","type":"function","function":{"name":"bash","arguments":"{\"command\":\"printf hello\"}"}}]}}],"usage":{"total_tokens":1}}`))
 		case 2:
-			if !strings.Contains(string(body), `"role":"tool","content":"Tool output:\nhello"`) {
+			if !strings.Contains(string(body), `"tool_call_id":"call_1"`) {
+				t.Fatalf("expected second request to include tool call id, got %s", string(body))
+			}
+			if !strings.Contains(string(body), `"tool_calls":[{"id":"call_1","type":"function","function":{"name":"bash","arguments":"{\"command\":\"printf hello\"}"}}]`) {
+				t.Fatalf("expected second request to include assistant tool call, got %s", string(body))
+			}
+			if !strings.Contains(string(body), `"role":"tool","content":"hello","tool_call_id":"call_1"`) {
 				t.Fatalf("expected second request to include tool output, got %s", string(body))
 			}
 			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"done"}}],"usage":{"total_tokens":1}}`))
@@ -362,7 +411,7 @@ func TestPersistToolResultSynthesizesVisibleOutputWhenToolReturnsNothing(t *test
 		t.Fatal(err)
 	}
 
-	events, err := engine.persistToolResult(context.Background(), session.ID, domain.ToolKindBash, tools.Result{})
+	events, err := engine.persistToolResult(context.Background(), session.ID, domain.ToolKindBash, "", tools.Result{})
 	if err != nil {
 		t.Fatal(err)
 	}

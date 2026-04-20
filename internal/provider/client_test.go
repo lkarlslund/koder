@@ -49,14 +49,42 @@ func TestCompleteChatReasoning(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	text, reasoning, usage, err := client.CompleteChat(context.Background(), ChatRequest{
+	resp, err := client.CompleteChat(context.Background(), ChatRequest{
 		Model:  "test",
 		Stream: false,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if text != "hello" || reasoning != "trace" || usage.TotalTokens != 3 {
-		t.Fatalf("unexpected response: text=%q reasoning=%q usage=%+v", text, reasoning, usage)
+	if resp.Text != "hello" || resp.Reasoning != "trace" || resp.Usage.TotalTokens != 3 {
+		t.Fatalf("unexpected response: %#v", resp)
+	}
+}
+
+func TestCompleteChatToolCalls(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"tool_calls":[{"id":"call_1","type":"function","function":{"name":"bash","arguments":"{\"command\":\"pwd\"}"}}]}}],"usage":{"total_tokens":3}}`))
+	}))
+	defer server.Close()
+
+	client, err := New("test", config.Provider{
+		BaseURL: server.URL,
+		Timeout: time.Second,
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := client.CompleteChat(context.Background(), ChatRequest{
+		Model:  "test",
+		Stream: false,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.ToolCalls) != 1 {
+		t.Fatalf("expected tool call, got %#v", resp)
+	}
+	if resp.ToolCalls[0].ID != "call_1" || resp.ToolCalls[0].Function.Name != "bash" {
+		t.Fatalf("unexpected tool call: %#v", resp.ToolCalls[0])
 	}
 }
