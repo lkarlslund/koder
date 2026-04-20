@@ -170,8 +170,10 @@ func toolRunApprovalReply(parts []domain.Part) (ui.ToolRun, bool) {
 		preview := strings.TrimSpace(meta["command"])
 		presentation := presentationFromPreview(tool, preview)
 		status := ui.ToolRunStatusApproved
+		output := ""
 		if strings.EqualFold(strings.TrimSpace(meta["status"]), "denied") {
 			status = ui.ToolRunStatusDenied
+			output = strings.TrimSpace(part.Body)
 		}
 		return ui.ToolRun{
 			ID:         approvalFallbackID(approvalID, tool, preview),
@@ -180,7 +182,7 @@ func toolRunApprovalReply(parts []domain.Part) (ui.ToolRun, bool) {
 			Title:      presentation.Title,
 			Subtitle:   presentation.Subtitle,
 			Preview:    preview,
-			Output:     strings.TrimSpace(part.Body),
+			Output:     output,
 			Status:     status,
 		}, tool != ""
 	}

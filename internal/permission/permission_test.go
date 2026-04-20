@@ -10,16 +10,16 @@ import (
 func TestEvaluateDefaultProfile(t *testing.T) {
 	cfg := config.Default()
 
-	if got := Evaluate(cfg.Permissions, "default", Request{Tool: domain.ToolKindRead, Pattern: "README.md"}); got != domain.PermissionModeAllow {
+	if got := Evaluate(cfg.Permissions, "default", Request{Tool: domain.ToolKindRead, Pattern: "README.md"}); got.Mode != domain.PermissionModeAllow {
 		t.Fatalf("unexpected read mode: %s", got)
 	}
-	if got := Evaluate(cfg.Permissions, "default", Request{Tool: domain.ToolKindBash, Pattern: "ls"}); got != domain.PermissionModeAsk {
+	if got := Evaluate(cfg.Permissions, "default", Request{Tool: domain.ToolKindBash, Pattern: "ls"}); got.Mode != domain.PermissionModeAsk {
 		t.Fatalf("unexpected bash mode: %s", got)
 	}
-	if got := Evaluate(cfg.Permissions, "default", Request{Tool: domain.ToolKindRead, Pattern: "internal/domain/types.go"}); got != domain.PermissionModeAllow {
+	if got := Evaluate(cfg.Permissions, "default", Request{Tool: domain.ToolKindRead, Pattern: "internal/domain/types.go"}); got.Mode != domain.PermissionModeAllow {
 		t.Fatalf("unexpected read mode for nested path: %s", got)
 	}
-	if got := Evaluate(cfg.Permissions, "default", Request{Tool: domain.ToolKindBash, Pattern: `git add internal/domain/types.go && git commit -m "Update types.go" && git push`}); got != domain.PermissionModeAsk {
+	if got := Evaluate(cfg.Permissions, "default", Request{Tool: domain.ToolKindBash, Pattern: `git add internal/domain/types.go && git commit -m "Update types.go" && git push`}); got.Mode != domain.PermissionModeAsk {
 		t.Fatalf("unexpected bash mode for path-containing command: %s", got)
 	}
 }
@@ -27,7 +27,7 @@ func TestEvaluateDefaultProfile(t *testing.T) {
 func TestEvaluateReadonlyProfile(t *testing.T) {
 	cfg := config.Default()
 
-	if got := Evaluate(cfg.Permissions, "readonly", Request{Tool: domain.ToolKindApplyPatch, Pattern: "main.go"}); got != domain.PermissionModeDeny {
+	if got := Evaluate(cfg.Permissions, "readonly", Request{Tool: domain.ToolKindApplyPatch, Pattern: "main.go"}); got.Mode != domain.PermissionModeDeny {
 		t.Fatalf("unexpected apply_patch mode: %s", got)
 	}
 }
