@@ -21,6 +21,7 @@ import (
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/theme"
 	"github.com/lkarlslund/koder/internal/ui"
+	"github.com/lkarlslund/koder/internal/workspace"
 )
 
 func TestMatchingSlashCommands(t *testing.T) {
@@ -278,6 +279,39 @@ func TestRunPromptErrorAppendsAssistantErrorToTranscript(t *testing.T) {
 	}
 	if !strings.Contains(next.viewport.View(), "Error: connection refused") {
 		t.Fatalf("expected viewport to show error, got %q", next.viewport.View())
+	}
+}
+
+func TestNewSessionMsgClearsBusyState(t *testing.T) {
+	m := Model{
+		busy: busyModel{
+			active: true,
+			scope:  busyScopeSidebar,
+			status: "Creating session…",
+			spinner: spinnerModel{
+				active: true,
+			},
+		},
+		loading:  true,
+		composer: textarea.New(),
+		parts:    map[int64][]domain.Part{},
+		viewport: viewport.New(40, 6),
+	}
+
+	updated, _ := m.Update(newSessionMsg{
+		session:   domain.Session{Title: "New Session"},
+		parts:     map[int64][]domain.Part{},
+		workspace: workspace.Status{},
+	})
+	next := updated.(Model)
+	if next.loading {
+		t.Fatal("expected new session to clear loading")
+	}
+	if next.busy.active {
+		t.Fatal("expected new session to stop busy state")
+	}
+	if next.status != "Started new session" {
+		t.Fatalf("unexpected status: %q", next.status)
 	}
 }
 

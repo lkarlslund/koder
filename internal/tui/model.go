@@ -337,7 +337,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.closeConnectDialog()
 		m.closeDisconnectDialog()
 		m.closeModelDialog()
-		m.status = fmt.Sprintf("Started session %d", msg.session.ID)
+		m.stopBusy()
+		if msg.session.ID > 0 {
+			m.status = fmt.Sprintf("Started session %d", msg.session.ID)
+		} else {
+			m.status = "Started new session"
+		}
 		if m.debug != nil {
 			m.debug.RecordLifecycle(msg.session.ID, "new_session_ready", msg.session.Title, nil)
 		}
