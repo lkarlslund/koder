@@ -638,7 +638,7 @@ func (m *Model) halfBlocksEnabled() bool {
 
 func (m *Model) promptGlyph() string {
 	if m.halfBlocksEnabled() {
-		return "▌"
+		return "█"
 	}
 	return "┃"
 }
@@ -1687,7 +1687,7 @@ func applyComposerTheme(composer *textarea.Model, palette theme.Palette) {
 			Foreground(palette.UserTextForeground)
 		style.Prompt = style.Prompt.
 			Background(palette.UserTextBackground).
-			Foreground(palette.UserTextForeground)
+			Foreground(palette.UserAccentBar)
 		style.Placeholder = style.Placeholder.
 			Background(palette.UserTextBackground).
 			Foreground(palette.ComposerMutedText)

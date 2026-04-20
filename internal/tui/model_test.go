@@ -630,7 +630,7 @@ func TestRenderComposerUsesThreeLineBoxAndFullWidth(t *testing.T) {
 	if !strings.HasPrefix(lines[0], "▄") || !strings.HasPrefix(lines[len(lines)-1], "▀") {
 		t.Fatalf("expected half-height accent strip on separator rows, got %q", got)
 	}
-	if !strings.Contains(lines[1], "▌") {
+	if !strings.Contains(lines[1], "█") {
 		t.Fatalf("expected block accent glyph on content line, got %q", lines[1])
 	}
 	for _, line := range lines {
@@ -661,7 +661,7 @@ func TestRenderUserMessageUsesAccentBarOnAllLines(t *testing.T) {
 	if !strings.HasPrefix(lines[0], "▄") || !strings.HasPrefix(lines[2], "▀") {
 		t.Fatalf("expected half-height accent strip on separator rows, got %q", got)
 	}
-	if !strings.Contains(lines[1], "▌") {
+	if !strings.Contains(lines[1], "█") {
 		t.Fatalf("expected block accent on content row, got %q", lines[1])
 	}
 }
@@ -678,7 +678,7 @@ func TestRenderUserMessageCanDisableHalfBlocks(t *testing.T) {
 	}
 
 	got := m.renderUserMessage("hello", "")
-	if strings.Contains(got, "▄") || strings.Contains(got, "▀") || strings.Contains(got, "▌") {
+	if strings.Contains(got, "▄") || strings.Contains(got, "▀") || strings.Contains(got, "█") {
 		t.Fatalf("expected classic user message rendering when half blocks disabled, got %q", got)
 	}
 	if !strings.Contains(got, "┃") {
@@ -965,7 +965,7 @@ func TestRenderTranscriptMessageUserBubbleHasBlankPaddingLines(t *testing.T) {
 	if !strings.Contains(lines[0], "▄") {
 		t.Fatalf("expected half-block top line, got %q", lines[0])
 	}
-	if !strings.Contains(lines[1], "▌") || strings.TrimSpace(strings.ReplaceAll(lines[1], "▌", "")) != "hello world" {
+	if !strings.Contains(lines[1], "█") || strings.TrimSpace(strings.ReplaceAll(lines[1], "█", "")) != "hello world" {
 		t.Fatalf("expected padded body line, got %q", lines[1])
 	}
 	if !strings.Contains(lines[len(lines)-1], "▀") {
