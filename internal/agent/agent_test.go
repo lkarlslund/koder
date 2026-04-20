@@ -33,6 +33,11 @@ func TestParseToolCall(t *testing.T) {
 	}
 }
 
+func testConfig(t *testing.T) config.Config {
+	t.Helper()
+	return config.Default().WithStateDir(t.TempDir())
+}
+
 func TestSystemPromptDoesNotMentionInternalSlashCommands(t *testing.T) {
 	prompt := systemPrompt()
 	for _, command := range []string{"/new", "/quit", "/perm", "/mouse", "/approve", "/deny"} {
@@ -77,7 +82,7 @@ func TestStringifyPartsExcludesSystemNotice(t *testing.T) {
 }
 
 func TestBuildConversationResetsAtCompactionBoundary(t *testing.T) {
-	cfg := config.Default()
+	cfg := testConfig(t)
 	st, err := store.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -141,7 +146,7 @@ func TestStringifyPartsNormalizesToolCallFromMetadata(t *testing.T) {
 }
 
 func TestBuildConversationUsesStructuredToolMessages(t *testing.T) {
-	cfg := config.Default()
+	cfg := testConfig(t)
 	st, err := store.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -184,7 +189,7 @@ func TestBuildConversationUsesStructuredToolMessages(t *testing.T) {
 }
 
 func TestBuildConversationIncludesImageAndTextAttachments(t *testing.T) {
-	cfg := config.Default()
+	cfg := testConfig(t)
 	st, err := store.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -258,7 +263,7 @@ func TestBuildConversationIncludesImageAndTextAttachments(t *testing.T) {
 }
 
 func TestRunPromptWithUnsupportedPDFAttachmentFailsBeforeProviderCall(t *testing.T) {
-	cfg := config.Default()
+	cfg := testConfig(t)
 	cfg.Providers = map[string]config.Provider{
 		"test": {
 			BaseURL: "http://127.0.0.1:1/v1",
@@ -328,7 +333,7 @@ func TestApproveContinuesModelWithToolOutput(t *testing.T) {
 	}))
 	defer server.Close()
 
-	cfg := config.Default()
+	cfg := testConfig(t)
 	cfg.Providers = map[string]config.Provider{
 		"test": {
 			BaseURL: server.URL + "/v1",
@@ -406,7 +411,7 @@ func TestApproveContinuesModelWithToolOutput(t *testing.T) {
 }
 
 func TestRunPromptPersistsAssistantErrorOnBackendFailure(t *testing.T) {
-	cfg := config.Default()
+	cfg := testConfig(t)
 	cfg.Providers = map[string]config.Provider{
 		"test": {
 			BaseURL: "http://127.0.0.1:1/v1",
@@ -471,7 +476,7 @@ func TestRunPromptCancellationDoesNotPersistAssistantError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	cfg := config.Default()
+	cfg := testConfig(t)
 	cfg.Providers = map[string]config.Provider{
 		"test": {
 			BaseURL: server.URL + "/v1",
@@ -535,7 +540,7 @@ func TestRunPromptCancellationDoesNotPersistAssistantError(t *testing.T) {
 func TestModelTaskPersistsTranscriptUpdate(t *testing.T) {
 	t.Parallel()
 
-	cfg := config.Default()
+	cfg := testConfig(t)
 	st, err := store.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -580,7 +585,7 @@ func TestModelTaskPersistsTranscriptUpdate(t *testing.T) {
 func TestPersistToolResultSynthesizesVisibleOutputWhenToolReturnsNothing(t *testing.T) {
 	t.Parallel()
 
-	cfg := config.Default()
+	cfg := testConfig(t)
 	st, err := store.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)

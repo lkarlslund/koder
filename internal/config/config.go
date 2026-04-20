@@ -258,6 +258,11 @@ func (c Config) StateDir() string {
 	return c.stateDir
 }
 
+func (c Config) WithStateDir(path string) Config {
+	c.stateDir = strings.TrimSpace(path)
+	return c
+}
+
 func (c Config) CacheDir() string {
 	return c.cacheDir
 }

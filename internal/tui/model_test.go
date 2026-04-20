@@ -87,6 +87,11 @@ func TestMatchingSlashCommands(t *testing.T) {
 	}
 }
 
+func testConfig(t *testing.T) config.Config {
+	t.Helper()
+	return config.Default().WithStateDir(t.TempDir())
+}
+
 func TestSlashQuery(t *testing.T) {
 	query, ok := slashQuery("/")
 	if !ok || query != "" {
@@ -104,7 +109,7 @@ func TestSlashQuery(t *testing.T) {
 }
 
 func TestEnterSendsNormalPrompt(t *testing.T) {
-	cfg := config.Default()
+	cfg := testConfig(t)
 	cfg.DefaultProvider = "openai"
 	cfg.DefaultModel = "gpt-5.4"
 	cfg.Providers = map[string]config.Provider{
@@ -143,7 +148,7 @@ func TestEnterSendsNormalPrompt(t *testing.T) {
 }
 
 func TestAltEnterInsertsNewlineInsteadOfSending(t *testing.T) {
-	cfg := config.Default()
+	cfg := testConfig(t)
 	cfg.DefaultProvider = "openai"
 	cfg.DefaultModel = "gpt-5.4"
 	cfg.Providers = map[string]config.Provider{
@@ -278,7 +283,7 @@ func TestForkSessionCopiesAttachmentFiles(t *testing.T) {
 	defer st.Close()
 
 	manager := attachment.NewManager(root)
-	cfg := config.Default()
+	cfg := testConfig(t)
 	cfg.DefaultProvider = "openai"
 	cfg.DefaultModel = "gpt-5.4"
 	cfg.Providers = map[string]config.Provider{
@@ -377,7 +382,7 @@ func TestCtrlYCopiesLatestAssistantMessage(t *testing.T) {
 }
 
 func TestEnterWhileBusyQueuesPrompt(t *testing.T) {
-	cfg := config.Default()
+	cfg := testConfig(t)
 	cfg.DefaultProvider = "openai"
 	cfg.DefaultModel = "gpt-5.4"
 	cfg.Providers = map[string]config.Provider{
@@ -418,7 +423,7 @@ func TestEnterWhileBusyQueuesPrompt(t *testing.T) {
 }
 
 func TestTabWhileBusyQueuesSteeringPrompt(t *testing.T) {
-	cfg := config.Default()
+	cfg := testConfig(t)
 	cfg.DefaultProvider = "openai"
 	cfg.DefaultModel = "gpt-5.4"
 	cfg.Providers = map[string]config.Provider{
@@ -452,7 +457,7 @@ func TestTabWhileBusyQueuesSteeringPrompt(t *testing.T) {
 }
 
 func TestLoadMsgDispatchesQueuedPrompt(t *testing.T) {
-	cfg := config.Default()
+	cfg := testConfig(t)
 	cfg.DefaultProvider = "openai"
 	cfg.DefaultModel = "gpt-5.4"
 	cfg.Providers = map[string]config.Provider{
@@ -504,7 +509,7 @@ func TestWindowTitleUsesSessionTitle(t *testing.T) {
 }
 
 func TestWindowTitleUsesAnimatedSpinnerFrame(t *testing.T) {
-	cfg := config.Default()
+	cfg := testConfig(t)
 	cfg.UI.Spinner = "circles"
 	m := Model{
 		cfg: cfg,
@@ -550,7 +555,7 @@ func TestSyncDebugRuntimeIncludesViewportState(t *testing.T) {
 }
 
 func TestRenderTranscriptToolMessageFallsBackToSummaryWhenBodyMissing(t *testing.T) {
-	cfg := config.Default()
+	cfg := testConfig(t)
 	m := Model{
 		cfg:     cfg,
 		palette: theme.Resolve("tokyonight").Palette,
@@ -687,7 +692,7 @@ func TestNewSessionMsgClearsBusyState(t *testing.T) {
 }
 
 func TestForkCommandCreatesForkedSession(t *testing.T) {
-	cfg := config.Default()
+	cfg := testConfig(t)
 	st, err := store.OpenWithOptions(t.TempDir(), store.Options{Backend: store.BackendJSONFS})
 	if err != nil {
 		t.Fatal(err)
@@ -838,7 +843,7 @@ func TestMouseOffCommandDisablesMouseCapture(t *testing.T) {
 }
 
 func TestInitEnablesMouseWhenConfigured(t *testing.T) {
-	cfg := config.Default()
+	cfg := testConfig(t)
 	cfg.UI.Mouse = true
 
 	m, err := New(cfg, nil, nil, StartupModeNew, nil)
@@ -1048,7 +1053,7 @@ func TestThemeCommandOpensFilterablePicker(t *testing.T) {
 }
 
 func TestThemePickerFiltersAndPreviewsSelection(t *testing.T) {
-	cfg := config.Default()
+	cfg := testConfig(t)
 	cfg.UI.Theme = "tokyonight"
 
 	m, err := New(cfg, nil, nil, StartupModeNew, nil)
@@ -1074,7 +1079,7 @@ func TestThemePickerFiltersAndPreviewsSelection(t *testing.T) {
 }
 
 func TestThemePickerEscapeRestoresOriginalTheme(t *testing.T) {
-	cfg := config.Default()
+	cfg := testConfig(t)
 	cfg.UI.Theme = "flexoki"
 
 	m, err := New(cfg, nil, nil, StartupModeNew, nil)
@@ -1227,7 +1232,7 @@ func TestModelCommandWithoutProviderShowsStatus(t *testing.T) {
 }
 
 func TestModelCommandLoadsModelsForActiveProvider(t *testing.T) {
-	cfg := config.Default()
+	cfg := testConfig(t)
 	cfg.DefaultProvider = "openai"
 	cfg.DefaultModel = "gpt-5.4"
 	cfg.Providers = map[string]config.Provider{
@@ -1413,7 +1418,7 @@ func TestModelListMsgOpensModelDialog(t *testing.T) {
 }
 
 func TestPreferencesDialogCancelRestoresOriginalUI(t *testing.T) {
-	cfg := config.Default()
+	cfg := testConfig(t)
 	cfg.UI.Theme = "flexoki"
 
 	m, err := New(cfg, nil, nil, StartupModeNew, nil)
@@ -1686,7 +1691,7 @@ func TestResizeUsesMeasuredFooterHeight(t *testing.T) {
 
 func TestRenderComposerUsesThreeLineBoxAndFullWidth(t *testing.T) {
 	palette := theme.Resolve("tokyonight").Palette
-	cfg := config.Default()
+	cfg := testConfig(t)
 	m := Model{
 		cfg:         cfg,
 		width:       80,
@@ -1722,7 +1727,7 @@ func TestRenderComposerUsesThreeLineBoxAndFullWidth(t *testing.T) {
 }
 
 func TestRenderUserMessageUsesAccentBarOnAllLines(t *testing.T) {
-	cfg := config.Default()
+	cfg := testConfig(t)
 	m := Model{
 		cfg:     cfg,
 		palette: theme.Resolve("tokyonight").Palette,
@@ -1748,7 +1753,7 @@ func TestRenderUserMessageUsesAccentBarOnAllLines(t *testing.T) {
 }
 
 func TestRenderUserMessageCanDisableHalfBlocks(t *testing.T) {
-	cfg := config.Default()
+	cfg := testConfig(t)
 	cfg.UI.HalfBlocks = false
 	m := Model{
 		cfg:     cfg,
@@ -1768,7 +1773,7 @@ func TestRenderUserMessageCanDisableHalfBlocks(t *testing.T) {
 }
 
 func TestRenderTranscriptUserMessageFallsBackToSummaryWhenPartsMissing(t *testing.T) {
-	cfg := config.Default()
+	cfg := testConfig(t)
 	m := Model{
 		cfg:     cfg,
 		palette: theme.Resolve("tokyonight").Palette,
@@ -1890,7 +1895,7 @@ func TestRenderMessagePartsSkipsSystemNotice(t *testing.T) {
 }
 
 func TestRenderMessagePartsFormatsCompactionMarkdown(t *testing.T) {
-	cfg := config.Default()
+	cfg := testConfig(t)
 	m, err := New(cfg, nil, nil, StartupModeNew, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -2024,7 +2029,7 @@ func TestEventMsgReloadsTranscriptBeforeTurnCompletes(t *testing.T) {
 }
 
 func TestRenderTranscriptMessageUsesUserStyleWithoutRoleLabel(t *testing.T) {
-	cfg := config.Default()
+	cfg := testConfig(t)
 	m := Model{
 		cfg: cfg,
 		parts: map[int64][]domain.Part{
@@ -2046,7 +2051,7 @@ func TestRenderTranscriptMessageUsesUserStyleWithoutRoleLabel(t *testing.T) {
 }
 
 func TestRenderTranscriptMessageUserBubbleHasBlankPaddingLines(t *testing.T) {
-	cfg := config.Default()
+	cfg := testConfig(t)
 	m := Model{
 		cfg: cfg,
 		parts: map[int64][]domain.Part{
@@ -2086,7 +2091,7 @@ func TestRenderTranscriptMessageUserBubbleHasBlankPaddingLines(t *testing.T) {
 }
 
 func TestRenderTranscriptMessageUserBubbleUsesConsistentWidthForMultilineInput(t *testing.T) {
-	cfg := config.Default()
+	cfg := testConfig(t)
 	m := Model{
 		cfg: cfg,
 		parts: map[int64][]domain.Part{
@@ -2113,7 +2118,7 @@ func TestRenderTranscriptMessageUserBubbleUsesConsistentWidthForMultilineInput(t
 }
 
 func TestRenderTranscriptMessageUserBubbleWrapsToViewportWidth(t *testing.T) {
-	cfg := config.Default()
+	cfg := testConfig(t)
 	m := Model{
 		cfg: cfg,
 		parts: map[int64][]domain.Part{
@@ -2202,7 +2207,7 @@ func TestRenderTranscriptMessageAssistantPreservesPlainTextContent(t *testing.T)
 }
 
 func TestRefreshViewportUsesSingleNewlineBetweenBlocksWithHalfBlocks(t *testing.T) {
-	cfg := config.Default()
+	cfg := testConfig(t)
 	m := Model{
 		cfg: cfg,
 		messages: []domain.Message{

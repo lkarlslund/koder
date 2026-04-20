@@ -37,9 +37,6 @@ type Manager struct {
 }
 
 func NewManager(stateDir string) *Manager {
-	if strings.TrimSpace(stateDir) == "" {
-		stateDir = filepath.Join(os.TempDir(), "koder")
-	}
 	return &Manager{root: filepath.Join(stateDir, "attachments")}
 }
 
