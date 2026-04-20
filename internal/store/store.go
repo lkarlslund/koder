@@ -34,6 +34,7 @@ type backend interface {
 	AddMessage(context.Context, int64, domain.MessageRole, string) (domain.Message, error)
 	UpdateMessageSummary(context.Context, int64, string) error
 	AddPart(context.Context, int64, domain.PartKind, string, string) (domain.Part, error)
+	UpdatePartMetaJSON(context.Context, int64, string) error
 	PartsForSession(context.Context, int64) ([]domain.Message, map[int64][]domain.Part, error)
 	CreateApproval(context.Context, int64, domain.ToolKind, string) (Approval, error)
 	UpdateApproval(context.Context, int64, domain.ApprovalStatus) error
@@ -133,6 +134,10 @@ func (s *Store) UpdateMessageSummary(ctx context.Context, messageID int64, summa
 
 func (s *Store) AddPart(ctx context.Context, messageID int64, kind domain.PartKind, body, metaJSON string) (domain.Part, error) {
 	return s.backend.AddPart(ctx, messageID, kind, body, metaJSON)
+}
+
+func (s *Store) UpdatePartMetaJSON(ctx context.Context, partID int64, metaJSON string) error {
+	return s.backend.UpdatePartMetaJSON(ctx, partID, metaJSON)
 }
 
 func (s *Store) PartsForSession(ctx context.Context, sessionID int64) ([]domain.Message, map[int64][]domain.Part, error) {

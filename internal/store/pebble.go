@@ -298,6 +298,27 @@ func (b *pebbleBackend) AddPart(ctx context.Context, messageID int64, kind domai
 	return part, nil
 }
 
+func (b *pebbleBackend) UpdatePartMetaJSON(ctx context.Context, partID int64, metaJSON string) error {
+	if err := ensureContext(ctx); err != nil {
+		return err
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	part, err := b.readPart(partID)
+	if err != nil {
+		return err
+	}
+	part.MetaJSON = metaJSON
+
+	batch := b.db.NewBatch()
+	defer batch.Close()
+	if err := b.putPart(batch, part); err != nil {
+		return err
+	}
+	return batch.Commit(pebble.Sync)
+}
+
 func (b *pebbleBackend) PartsForSession(ctx context.Context, sessionID int64) ([]domain.Message, map[int64][]domain.Part, error) {
 	if err := ensureContext(ctx); err != nil {
 		return nil, nil, err
@@ -672,6 +693,14 @@ func (b *pebbleBackend) readMessage(messageID int64) (domain.Message, error) {
 		return domain.Message{}, fmt.Errorf("get message: %w", err)
 	}
 	return message, nil
+}
+
+func (b *pebbleBackend) readPart(partID int64) (domain.Part, error) {
+	var part domain.Part
+	if err := b.readRecord(partKey(partID), &part); err != nil {
+		return domain.Part{}, fmt.Errorf("get part: %w", err)
+	}
+	return part, nil
 }
 
 func (b *pebbleBackend) readApproval(approvalID int64) (Approval, error) {

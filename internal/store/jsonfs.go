@@ -265,6 +265,21 @@ func (b *jsonfsBackend) AddPart(ctx context.Context, messageID int64, kind domai
 	return part, nil
 }
 
+func (b *jsonfsBackend) UpdatePartMetaJSON(ctx context.Context, partID int64, metaJSON string) error {
+	if err := ensureContext(ctx); err != nil {
+		return err
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	part, err := b.readPart(partID)
+	if err != nil {
+		return err
+	}
+	part.MetaJSON = metaJSON
+	return b.writePart(part)
+}
+
 func (b *jsonfsBackend) PartsForSession(ctx context.Context, sessionID int64) ([]domain.Message, map[int64][]domain.Part, error) {
 	if err := ensureContext(ctx); err != nil {
 		return nil, nil, err
@@ -504,6 +519,15 @@ func (b *jsonfsBackend) readMessage(messageID int64) (domain.Message, error) {
 		return domain.Message{}, fmt.Errorf("read message: %w", err)
 	}
 	return message, nil
+}
+
+func (b *jsonfsBackend) readPart(partID int64) (domain.Part, error) {
+	var part domain.Part
+	path := filepath.Join(b.root, "parts", formatID(partID)+".json")
+	if err := readJSONFile(path, &part); err != nil {
+		return domain.Part{}, fmt.Errorf("read part: %w", err)
+	}
+	return part, nil
 }
 
 func (b *jsonfsBackend) writeMessage(message domain.Message) error {

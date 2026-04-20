@@ -168,6 +168,37 @@ func TestForkSessionCopiesTranscriptAndParent(t *testing.T) {
 	}
 }
 
+func TestUpdatePartMetaJSON(t *testing.T) {
+	for _, backend := range []string{BackendPebble, BackendJSONFS} {
+		t.Run(backend, func(t *testing.T) {
+			st := openTestStore(t, backend)
+
+			session, err := st.CreateSession(context.Background(), "test", "provider", "model", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			msg, err := st.AddMessage(context.Background(), session.ID, domain.MessageRoleUser, "hello")
+			if err != nil {
+				t.Fatal(err)
+			}
+			part, err := st.AddPart(context.Background(), msg.ID, domain.PartKindAttachment, "note.txt", `{"path":"old"}`)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := st.UpdatePartMetaJSON(context.Background(), part.ID, `{"path":"new"}`); err != nil {
+				t.Fatal(err)
+			}
+			_, parts, err := st.PartsForSession(context.Background(), session.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := parts[msg.ID][0].MetaJSON; got != `{"path":"new"}` {
+				t.Fatalf("unexpected updated part metadata: %q", got)
+			}
+		})
+	}
+}
+
 func TestJSONFSWritesInspectableFiles(t *testing.T) {
 	root := t.TempDir()
 	st, err := OpenWithOptions(root, Options{Backend: BackendJSONFS})
