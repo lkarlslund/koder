@@ -54,15 +54,15 @@ type preferencesTab struct {
 }
 
 type PreferencesDialog struct {
-	original    config.UI
-	draft       config.UI
-	themeNames  []string
+	original     config.UI
+	draft        config.UI
+	themeNames   []string
 	spinnerFrame int
-	tabs        []preferencesTab
-	tabList     VerticalTabs
-	focus       preferencesFocus
-	fieldIndex  int
-	buttonIndex int
+	tabs         []preferencesTab
+	tabList      VerticalTabs
+	focus        preferencesFocus
+	fieldIndex   int
+	buttonIndex  int
 }
 
 func NewPreferencesDialog(current config.UI, themeNames []string) PreferencesDialog {
@@ -274,7 +274,7 @@ func (d PreferencesDialog) View(width int, palette theme.Palette) string {
 		BorderForeground(palette.SidebarBorder).
 		Render(d.tabList.View(tabWidth-2, palette, d.focus == preferencesFocusTabs))
 
-	fieldLines := make([]string, 0, len(d.currentFields())*2)
+	fieldLines := make([]string, 0, len(d.currentFields()))
 	for idx, field := range d.currentFields() {
 		focused := d.focus == preferencesFocusFields && idx == d.fieldIndex
 		switch field.Kind {
@@ -303,7 +303,7 @@ func (d PreferencesDialog) View(width int, palette theme.Palette) string {
 	fields := lipgloss.NewStyle().
 		Width(fieldWidth).
 		PaddingLeft(1).
-		Render(strings.Join(fieldLines, "\n\n"))
+		Render(strings.Join(fieldLines, "\n"))
 
 	buttons := lipgloss.JoinHorizontal(
 		lipgloss.Left,

@@ -18,7 +18,7 @@ type Modal struct {
 
 func (m Modal) View(palette theme.Palette) string {
 	lines := []string{
-		lipgloss.NewStyle().Bold(true).Render(strings.TrimSpace(m.Title)),
+		lipgloss.NewStyle().Bold(true).Foreground(palette.MarkdownText).Render(strings.TrimSpace(m.Title)),
 	}
 	if subtitle := strings.TrimSpace(m.Subtitle); subtitle != "" {
 		lines = append(lines, lipgloss.NewStyle().Foreground(palette.AssistantTimestampText).Render(subtitle))
@@ -32,6 +32,9 @@ func (m Modal) View(palette theme.Palette) string {
 
 	style := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
+		BorderForeground(palette.SidebarBorder).
+		Background(palette.SidebarBackground).
+		Foreground(palette.SidebarForeground).
 		Padding(1, 2)
 	if m.Width > 0 {
 		style = style.Width(m.Width)

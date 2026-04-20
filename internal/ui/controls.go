@@ -9,6 +9,41 @@ import (
 	"github.com/lkarlslund/koder/internal/theme"
 )
 
+func RenderSelectableRow(primary, secondary, tertiary string, width int, palette theme.Palette, selected bool) string {
+	if width <= 0 {
+		width = 72
+	}
+	primaryWidth := minInt(28, maxInt(12, width/3))
+	tertiaryWidth := 0
+	if strings.TrimSpace(tertiary) != "" {
+		tertiaryWidth = minInt(18, maxInt(8, width/5))
+	}
+	gapWidth := 2
+	secondaryWidth := maxInt(8, width-primaryWidth-tertiaryWidth-gapWidth*2)
+	if tertiaryWidth == 0 {
+		secondaryWidth = maxInt(8, width-primaryWidth-gapWidth)
+	}
+	row := lipgloss.JoinHorizontal(
+		lipgloss.Top,
+		lipgloss.NewStyle().Width(primaryWidth).Bold(true).Render(truncateText(strings.TrimSpace(primary), primaryWidth)),
+		lipgloss.NewStyle().Width(gapWidth).Render(""),
+		lipgloss.NewStyle().Width(secondaryWidth).Foreground(palette.AssistantTimestampText).Render(truncateText(strings.TrimSpace(secondary), secondaryWidth)),
+	)
+	if tertiaryWidth > 0 {
+		row = lipgloss.JoinHorizontal(
+			lipgloss.Top,
+			row,
+			lipgloss.NewStyle().Width(gapWidth).Render(""),
+			lipgloss.NewStyle().Width(tertiaryWidth).Align(lipgloss.Right).Foreground(palette.ActivityText).Render(truncateText(strings.TrimSpace(tertiary), tertiaryWidth)),
+		)
+	}
+	style := lipgloss.NewStyle().Width(width)
+	if selected {
+		style = style.Background(palette.UserTextBackground).Foreground(palette.UserTextForeground)
+	}
+	return style.Render(row)
+}
+
 type VerticalTabs struct {
 	Tabs   []string
 	Active int
@@ -75,24 +110,11 @@ func (r ToggleRow) View(width int, palette theme.Palette, focused bool) string {
 		value = "On"
 		valueColor = palette.ActivityText
 	}
-	labelWidth := maxInt(12, width-8)
-	line := lipgloss.JoinHorizontal(
-		lipgloss.Top,
-		lipgloss.NewStyle().Width(labelWidth).Bold(true).Render(truncateText(r.Label, labelWidth)),
-		lipgloss.NewStyle().Foreground(valueColor).Render(value),
-	)
+	row := RenderSelectableRow(r.Label, r.Description, value, width, palette, focused)
 	if focused {
-		line = lipgloss.NewStyle().
-			Background(palette.UserTextBackground).
-			Foreground(palette.UserTextForeground).
-			Render(line)
+		return lipgloss.NewStyle().Foreground(valueColor).Background(palette.UserTextBackground).Render(row)
 	}
-	descWidth := maxInt(12, width)
-	desc := lipgloss.NewStyle().
-		Width(descWidth).
-		Foreground(palette.AssistantTimestampText).
-		Render(truncateText(r.Description, descWidth))
-	return strings.Join([]string{line, desc}, "\n")
+	return row
 }
 
 type ChoiceRow struct {
@@ -102,24 +124,7 @@ type ChoiceRow struct {
 }
 
 func (r ChoiceRow) View(width int, palette theme.Palette, focused bool) string {
-	labelWidth := maxInt(12, width-16)
-	line := lipgloss.JoinHorizontal(
-		lipgloss.Top,
-		lipgloss.NewStyle().Width(labelWidth).Bold(true).Render(truncateText(r.Label, labelWidth)),
-		lipgloss.NewStyle().Foreground(palette.ActivityText).Render(truncateText(r.Value, 14)),
-	)
-	if focused {
-		line = lipgloss.NewStyle().
-			Background(palette.UserTextBackground).
-			Foreground(palette.UserTextForeground).
-			Render(line)
-	}
-	descWidth := maxInt(12, width)
-	desc := lipgloss.NewStyle().
-		Width(descWidth).
-		Foreground(palette.AssistantTimestampText).
-		Render(truncateText(r.Description, descWidth))
-	return strings.Join([]string{line, desc}, "\n")
+	return RenderSelectableRow(r.Label, r.Description, r.Value, width, palette, focused)
 }
 
 type Button struct {

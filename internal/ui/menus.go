@@ -70,29 +70,21 @@ func RenderApprovalPrompt(props ApprovalPromptProps) string {
 }
 
 func RenderPickerDialog(props PickerDialogProps) string {
-	lines := []string{
-		lipgloss.NewStyle().Bold(true).Render(props.Title),
-	}
+	lines := []string{}
 	if hint := strings.TrimSpace(props.Hint); hint != "" {
-		lines = append(lines, hint)
+		lines = append(lines, lipgloss.NewStyle().Foreground(props.Palette.AssistantTimestampText).Render(hint))
 	}
 	lines = append(lines, "", fmt.Sprintf("filter: %s", props.Query), "")
 	if len(props.Items) == 0 {
 		lines = append(lines, "  no matches")
 	} else {
 		for idx, item := range props.Items {
-			cursor := " "
-			if idx == props.Index {
-				cursor = ">"
-			}
-			lines = append(lines, fmt.Sprintf("%s %s", cursor, item.Title))
-			if desc := strings.TrimSpace(item.Description); desc != "" {
-				lines = append(lines, fmt.Sprintf("    %s", item.Description))
-			}
+			lines = append(lines, RenderSelectableRow(item.Title, item.Description, "", 72, props.Palette, idx == props.Index))
 		}
 	}
-	return lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		Padding(0, 1).
-		Render(strings.Join(lines, "\n"))
+	return Modal{
+		Title: props.Title,
+		Body:  strings.Join(lines, "\n"),
+		Width: 80,
+	}.View(props.Palette)
 }

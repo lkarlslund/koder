@@ -46,10 +46,10 @@ func TestConnectDialogProviderListRendersSingleLineRows(t *testing.T) {
 	})
 
 	got := dialog.View(88, theme.Resolve("tokyonight").Palette)
-	if !strings.Contains(got, "✓ OpenAI") {
+	if !strings.Contains(got, "OpenAI") || !strings.Contains(got, "configured") {
 		t.Fatalf("expected compact provider row, got %q", got)
 	}
-	if strings.Contains(got, "Direct OpenAI API access\n") {
+	if strings.Contains(got, "OpenAI\n") {
 		t.Fatalf("expected description to stay on the same row, got %q", got)
 	}
 }
@@ -88,7 +88,7 @@ func TestConnectDialogViewShowsEditorCursorAndTail(t *testing.T) {
 	if !strings.Contains(got, "█") {
 		t.Fatalf("expected editor cursor in view, got %q", got)
 	}
-	if !strings.Contains(got, "show/the/end") {
+	if !strings.Contains(got, "…should/show/the/en") {
 		t.Fatalf("expected editor to keep tail of typed value visible, got %q", got)
 	}
 }

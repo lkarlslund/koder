@@ -99,15 +99,7 @@ func (d SessionDialog) View(width int, palette theme.Palette) string {
 		}
 		for idx := start; idx < end; idx++ {
 			item := d.view[idx]
-			line := fmt.Sprintf("#%s  %s", item.Value, truncateText(item.Title, maxInt(8, listWidth-6-len(item.Value))))
-			if idx == d.Index {
-				line = lipgloss.NewStyle().
-					Background(palette.UserTextBackground).
-					Foreground(palette.UserAccentBar).
-					Bold(true).
-					Render(line)
-			}
-			listLines = append(listLines, line)
+			listLines = append(listLines, RenderSelectableRow(item.Title, item.Description, "#"+item.Value, listWidth, palette, idx == d.Index))
 		}
 	}
 
@@ -136,10 +128,10 @@ func (d SessionDialog) View(width int, palette theme.Palette) string {
 	)
 
 	return Modal{
-		Title:    "Resume Session",
-		Body:     body,
-		Footer:   "Enter to select, Esc to start new session",
-		Width:    dialogWidth,
+		Title:  "Resume Session",
+		Body:   body,
+		Footer: "Enter to select, Esc to start new session",
+		Width:  dialogWidth,
 	}.View(palette)
 }
 

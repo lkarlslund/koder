@@ -98,15 +98,7 @@ func (d ModelDialog) View(width int, palette theme.Palette) string {
 		}
 		for idx := start; idx < end; idx++ {
 			item := d.view[idx]
-			line := truncateText(modelLine(item), listWidth)
-			if idx == d.Index {
-				line = lipgloss.NewStyle().
-					Background(palette.UserTextBackground).
-					Foreground(palette.UserAccentBar).
-					Bold(true).
-					Render(line)
-			}
-			listLines = append(listLines, line)
+			listLines = append(listLines, RenderSelectableRow(item.ID, item.OwnedBy, capabilityBadges(item), listWidth, palette, idx == d.Index))
 		}
 	}
 

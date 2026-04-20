@@ -543,12 +543,12 @@ func (m Model) View() string {
 	if m.hasPreferencesDialog() && m.width > 0 && m.height > 0 {
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, m.renderPreferencesDialog())
 	}
+	if m.hasPicker() && m.width > 0 && m.height > 0 {
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, m.renderPicker())
+	}
 	body := m.renderBody()
 	footer := m.renderFooter()
 	view := lipgloss.JoinVertical(lipgloss.Left, body, footer)
-	if m.hasPicker() {
-		view = lipgloss.JoinVertical(lipgloss.Left, view, m.renderPicker())
-	}
 	if m.width > 0 && m.height > 0 {
 		return lipgloss.Place(m.width, m.height, lipgloss.Left, lipgloss.Bottom, view)
 	}

@@ -94,15 +94,7 @@ func (d DisconnectDialog) View(width int, palette theme.Palette) string {
 		}
 		for idx := start; idx < end; idx++ {
 			item := d.view[idx]
-			line := fmt.Sprintf("• %s", truncateText(item.Title, maxInt(8, listWidth-3)))
-			if idx == d.Index {
-				line = lipgloss.NewStyle().
-					Background(palette.UserTextBackground).
-					Foreground(palette.UserAccentBar).
-					Bold(true).
-					Render(line)
-			}
-			listLines = append(listLines, line)
+			listLines = append(listLines, RenderSelectableRow(item.Title, item.Description, item.ID, listWidth, palette, idx == d.Index))
 		}
 	}
 

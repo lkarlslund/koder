@@ -219,28 +219,16 @@ func (d *ConnectDialog) providerListView(width int, palette theme.Palette) strin
 	if len(d.view) == 0 {
 		lines = append(lines, "No providers match your filter.")
 	} else {
-		listWidth := dialogWidth - 8
-		nameWidth := minInt(22, maxInt(12, listWidth/3))
-		descWidth := maxInt(16, listWidth-nameWidth-4)
 		start, end := windowBounds(d.index, len(d.view), 10)
 		for idx := start; idx < end; idx++ {
 			item := d.view[idx]
-			prefix := "·"
+			tertiary := "remote"
 			if _, ok := d.configured[item.ID]; ok {
-				prefix = "✓"
+				tertiary = "configured"
 			} else if item.Local {
-				prefix = "⌂"
+				tertiary = "local"
 			}
-			name := lipgloss.NewStyle().Width(nameWidth).Render(truncateText(item.Title, nameWidth))
-			desc := lipgloss.NewStyle().
-				Width(descWidth).
-				Foreground(palette.AssistantTimestampText).
-				Render(truncateText(item.Description, descWidth))
-			row := lipgloss.JoinHorizontal(lipgloss.Top, prefix+" ", name, " ", desc)
-			if idx == d.index {
-				row = lipgloss.NewStyle().Background(palette.UserTextBackground).Foreground(palette.UserTextForeground).Render(row)
-			}
-			lines = append(lines, row)
+			lines = append(lines, RenderSelectableRow(item.Title, item.Description, tertiary, dialogWidth-8, palette, idx == d.index))
 		}
 	}
 	if status := strings.TrimSpace(d.status); status != "" {
@@ -262,14 +250,7 @@ func (d *ConnectDialog) authPickerView(width int, palette theme.Palette) string 
 		"",
 	}
 	for idx, method := range d.selected.AuthMethods {
-		row := lipgloss.JoinVertical(lipgloss.Left,
-			method.Title,
-			lipgloss.NewStyle().Foreground(palette.AssistantTimestampText).Render(method.Description),
-		)
-		if idx == d.authIndex {
-			row = lipgloss.NewStyle().Background(palette.UserTextBackground).Foreground(palette.UserTextForeground).Render(row)
-		}
-		lines = append(lines, row, "")
+		lines = append(lines, RenderSelectableRow(method.Title, method.Description, "", dialogWidth-8, palette, idx == d.authIndex))
 	}
 	return Modal{
 		Title:  "Choose Auth Method",
@@ -289,15 +270,13 @@ func (d *ConnectDialog) formView(width int, palette theme.Palette) string {
 	for idx, field := range d.formFields() {
 		active := d.focus == connectFocusFields && d.fieldIndex == idx
 		row := d.renderFormField(field, dialogWidth-8, palette, active)
-		lines = append(lines, row, "")
+		lines = append(lines, row)
 	}
 	if len(d.models) > 0 {
 		lines = append(lines, lipgloss.NewStyle().Foreground(palette.AssistantTimestampText).Render("Discovered models: "+strings.Join(d.models[:minInt(4, len(d.models))], ", ")))
-		lines = append(lines, "")
 	}
 	if status := strings.TrimSpace(d.status); status != "" {
 		lines = append(lines, lipgloss.NewStyle().Foreground(palette.AssistantTimestampText).Render(status))
-		lines = append(lines, "")
 	}
 	buttons := []string{
 		Button{Label: "Test", Focused: d.focus == connectFocusButtons && d.buttonIdx == 0}.View(palette),
@@ -314,45 +293,29 @@ func (d *ConnectDialog) formView(width int, palette theme.Palette) string {
 }
 
 func (d ConnectDialog) renderFormField(field connectField, width int, palette theme.Palette, active bool) string {
-	label := lipgloss.NewStyle().Bold(true).Render(field.Label)
-	desc := lipgloss.NewStyle().
-		Width(width).
-		Foreground(palette.AssistantTimestampText).
-		Render(truncateText(field.Description, width))
-
-	value := d.fieldValue(field.ID)
 	if active {
-		return strings.Join([]string{
-			label,
-			desc,
-			d.renderEditorValue(field.ID, width, palette),
-		}, "\n")
+		return d.renderEditorValue(field.ID, field.Label, field.Description, width, palette)
 	}
-
-	display := d.displayValue(field.ID)
-	row := lipgloss.JoinHorizontal(
-		lipgloss.Top,
-		lipgloss.NewStyle().Width(maxInt(12, width-18)).Bold(true).Render(truncateText(field.Label, maxInt(12, width-18))),
-		lipgloss.NewStyle().Foreground(palette.ActivityText).Render(truncateText(display, 16)),
-	)
-	if strings.TrimSpace(value) == "" {
-		row = lipgloss.JoinHorizontal(
-			lipgloss.Top,
-			lipgloss.NewStyle().Width(maxInt(12, width-18)).Bold(true).Render(truncateText(field.Label, maxInt(12, width-18))),
-			lipgloss.NewStyle().Foreground(palette.AssistantTimestampText).Render(truncateText(display, 16)),
-		)
-	}
-	return strings.Join([]string{row, desc}, "\n")
+	return RenderSelectableRow(field.Label, field.Description, d.displayValue(field.ID), width, palette, false)
 }
 
-func (d ConnectDialog) renderEditorValue(fieldID string, width int, palette theme.Palette) string {
+func (d ConnectDialog) renderEditorValue(fieldID string, label string, description string, width int, palette theme.Palette) string {
 	value := d.fieldValue(fieldID)
 	placeholder := d.placeholderValue(fieldID)
-	editorWidth := maxInt(12, width)
-	content := d.renderEditorContent(fieldID, value, placeholder, editorWidth-2)
-	line := content
+	labelWidth := minInt(20, maxInt(10, width/4))
+	valueWidth := minInt(22, maxInt(10, width/4))
+	descWidth := maxInt(8, width-labelWidth-valueWidth-4)
+	content := d.renderEditorContent(fieldID, value, placeholder, valueWidth)
+	line := lipgloss.JoinHorizontal(
+		lipgloss.Top,
+		lipgloss.NewStyle().Width(labelWidth).Bold(true).Render(truncateText(label, labelWidth)),
+		lipgloss.NewStyle().Width(2).Render(""),
+		lipgloss.NewStyle().Width(descWidth).Foreground(palette.AssistantTimestampText).Render(truncateText(description, descWidth)),
+		lipgloss.NewStyle().Width(2).Render(""),
+		lipgloss.NewStyle().Width(valueWidth).Render(content),
+	)
 	style := lipgloss.NewStyle().
-		Width(editorWidth).
+		Width(width).
 		Background(palette.UserTextBackground).
 		Foreground(palette.UserTextForeground)
 	if strings.TrimSpace(value) == "" && placeholder != "" {
