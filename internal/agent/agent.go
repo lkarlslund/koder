@@ -249,8 +249,16 @@ func (e *Engine) continueModelTurn(ctx context.Context, session domain.Session, 
 			out <- domain.Event{Kind: domain.EventKindReasoning, Text: reasoning}
 		}
 		e.recordLifecycle(session.ID, "assistant_message_persisted", strings.TrimSpace(text), map[string]string{"message_id": strconv.FormatInt(assistantMsg.ID, 10)})
-		if titleErr := e.maybeUpdateSessionTitle(ctx, session, client); titleErr != nil {
+		title, titleErr := e.maybeUpdateSessionTitle(ctx, session, client)
+		if titleErr != nil {
 			return titleErr
+		}
+		if strings.TrimSpace(title) != "" {
+			out <- domain.Event{
+				Kind: domain.EventKindSessionTitle,
+				Text: title,
+				Meta: map[string]string{"session_id": strconv.FormatInt(session.ID, 10)},
+			}
 		}
 		out <- domain.Event{Kind: domain.EventKindMessageDone}
 		return nil
@@ -258,17 +266,17 @@ func (e *Engine) continueModelTurn(ctx context.Context, session domain.Session, 
 	return fmt.Errorf("tool loop exceeded max steps")
 }
 
-func (e *Engine) maybeUpdateSessionTitle(ctx context.Context, session domain.Session, client *provider.Client) error {
+func (e *Engine) maybeUpdateSessionTitle(ctx context.Context, session domain.Session, client *provider.Client) (string, error) {
 	count, err := e.store.CountMessagesByRole(ctx, session.ID, domain.MessageRoleUser)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if !shouldRefreshSessionTitle(count) {
-		return nil
+		return "", nil
 	}
 	messages, err := e.titleSummaryMessages(ctx, session.ID)
 	if err != nil {
-		return err
+		return "", err
 	}
 	resp, err := client.CompleteChat(ctx, provider.ChatRequest{
 		Model:    session.ModelID,
@@ -276,13 +284,16 @@ func (e *Engine) maybeUpdateSessionTitle(ctx context.Context, session domain.Ses
 		Stream:   false,
 	})
 	if err != nil {
-		return err
+		return "", err
 	}
 	title := normalizeSessionTitle(resp.Text)
 	if title == "" {
-		return nil
+		return "", nil
 	}
-	return e.store.UpdateSessionTitle(ctx, session.ID, title)
+	if err := e.store.UpdateSessionTitle(ctx, session.ID, title); err != nil {
+		return "", err
+	}
+	return title, nil
 }
 
 func shouldRefreshSessionTitle(promptCount int) bool {

@@ -77,6 +77,7 @@ const (
 	EventKindApprovalAsk   EventKind = "approval_ask"
 	EventKindApprovalReply EventKind = "approval_reply"
 	EventKindTaskUpdate    EventKind = "task_update"
+	EventKindSessionTitle  EventKind = "session_title"
 	EventKindError         EventKind = "error"
 	EventKindStatus        EventKind = "status"
 )

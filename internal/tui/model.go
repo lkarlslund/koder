@@ -614,6 +614,17 @@ func (m *Model) applyEvent(evt domain.Event) {
 		m.status = evt.Text
 	case domain.EventKindTaskUpdate:
 		m.status = "Task updated"
+	case domain.EventKindSessionTitle:
+		title := strings.TrimSpace(evt.Text)
+		if title != "" {
+			m.currentSession.Title = title
+			for i := range m.sessions {
+				if m.sessions[i].ID == m.currentSession.ID {
+					m.sessions[i].Title = title
+					break
+				}
+			}
+		}
 	case domain.EventKindUsage:
 		m.status = fmt.Sprintf("Usage total=%d", evt.Usage.TotalTokens)
 	case domain.EventKindStatus:
