@@ -253,6 +253,8 @@ type Model struct {
 	tasks              []store.Task
 	approvals          []store.Approval
 	viewport           viewport.Model
+	toolRunClickZones  []toolRunClickZone
+	expandedToolRuns   map[string]bool
 	composer           textarea.Model
 	width              int
 	height             int
@@ -289,6 +291,12 @@ type Model struct {
 	writeClipboardText func(string) error
 }
 
+type toolRunClickZone struct {
+	RunID    string
+	StartRow int
+	EndRow   int
+}
+
 func New(cfg config.Config, st *store.Store, a *agent.Engine, mode StartupMode, debug *debugsrv.Recorder) (Model, error) {
 	tuiTheme := theme.Resolve(cfg.UI.Theme)
 	renderer, err := markdown.New(tuiTheme.Palette)
@@ -312,23 +320,24 @@ func New(cfg config.Config, st *store.Store, a *agent.Engine, mode StartupMode, 
 	}
 
 	return Model{
-		cfg:             cfg,
-		store:           st,
-		agent:           a,
-		renderer:        renderer,
-		palette:         tuiTheme.Palette,
-		viewport:        vp,
-		composer:        composer,
-		showSidebar:     cfg.UI.ShowSidebar,
-		showReasoning:   cfg.UI.ShowReasoning,
-		parts:           make(map[int64][]domain.Part),
-		status:          "Ready",
-		workdir:         workdir,
-		startupMode:     mode,
-		mouseEnabled:    cfg.UI.Mouse,
-		debug:           debug,
-		caps:            provider.NewCapabilityStore(cfg.StateDir()),
-		attachmentFiles: attachment.NewManager(cfg.StateDir()),
+		cfg:              cfg,
+		store:            st,
+		agent:            a,
+		renderer:         renderer,
+		palette:          tuiTheme.Palette,
+		viewport:         vp,
+		composer:         composer,
+		showSidebar:      cfg.UI.ShowSidebar,
+		showReasoning:    cfg.UI.ShowReasoning,
+		expandedToolRuns: make(map[string]bool),
+		parts:            make(map[int64][]domain.Part),
+		status:           "Ready",
+		workdir:          workdir,
+		startupMode:      mode,
+		mouseEnabled:     cfg.UI.Mouse,
+		debug:            debug,
+		caps:             provider.NewCapabilityStore(cfg.StateDir()),
+		attachmentFiles:  attachment.NewManager(cfg.StateDir()),
 	}, nil
 }
 
@@ -488,6 +497,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.MouseMsg:
 		if m.hasPicker() || m.hasApprovalPrompt() {
 			return m, nil
+		}
+		if updated, cmd, ok := m.handleMouse(msg); ok {
+			return updated, cmd
 		}
 		var cmd tea.Cmd
 		m.viewport, cmd = m.viewport.Update(msg)
@@ -702,6 +714,37 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m.composer, cmd = m.composer.Update(msg)
 	m.updateSlashMenu()
 	return m, cmd
+}
+
+func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd, bool) {
+	if !m.mouseEnabled {
+		return m, nil, false
+	}
+	if msg.Action != tea.MouseActionPress || msg.Button != tea.MouseButtonLeft {
+		return m, nil, false
+	}
+	if msg.Y < 0 || msg.Y >= m.viewport.Height {
+		return m, nil, false
+	}
+	if msg.X < 1 || msg.X > m.viewport.Width+2 {
+		return m, nil, false
+	}
+	row := m.viewport.YOffset + msg.Y
+	for _, zone := range m.toolRunClickZones {
+		if row < zone.StartRow || row > zone.EndRow {
+			continue
+		}
+		if strings.TrimSpace(zone.RunID) == "" {
+			return m, nil, true
+		}
+		if m.expandedToolRuns == nil {
+			m.expandedToolRuns = make(map[string]bool)
+		}
+		m.expandedToolRuns[zone.RunID] = !m.expandedToolRuns[zone.RunID]
+		m.refreshViewportPreserve()
+		return m, nil, true
+	}
+	return m, nil, false
 }
 
 func (m *Model) applyEvent(evt domain.Event) {
@@ -1026,6 +1069,15 @@ func (m Model) debugAPIAddr() string {
 }
 
 func (m *Model) refreshViewport() {
+	m.refreshViewportAt(-1)
+}
+
+func (m *Model) refreshViewportPreserve() {
+	m.refreshViewportAt(m.viewport.YOffset)
+}
+
+func (m *Model) refreshViewportAt(offset int) {
+	m.toolRunClickZones = nil
 	if m.currentSession.ID == 0 && len(m.messages) == 0 {
 		if !m.cfg.HasUsableDefaultProvider() {
 			m.viewport.SetContent("No provider configured.\n\nType /connect to add one before sending prompts.")
@@ -1035,8 +1087,27 @@ func (m *Model) refreshViewport() {
 		return
 	}
 	var blocks []string
-	for _, block := range m.transcriptBlocks() {
-		blocks = append(blocks, m.renderTranscriptBlock(block))
+	row := 0
+	separator := "\n\n"
+	if m.halfBlocksEnabled() {
+		separator = "\n"
+	}
+	separatorHeight := renderedSeparatorHeight(separator)
+	transcriptBlocks := m.transcriptBlocks()
+	for i, block := range transcriptBlocks {
+		rendered := m.renderTranscriptBlock(block)
+		blocks = append(blocks, rendered)
+		if block.Kind == transcriptBlockToolRun && ui.ToolRunExpandable(block.ToolRun, m.viewport.Width) {
+			m.toolRunClickZones = append(m.toolRunClickZones, toolRunClickZone{
+				RunID:    block.ToolRun.ID,
+				StartRow: row,
+				EndRow:   row + max(0, lipgloss.Height(rendered)-1),
+			})
+		}
+		row += lipgloss.Height(rendered)
+		if i < len(transcriptBlocks)-1 {
+			row += separatorHeight
+		}
 	}
 	if indicator := m.renderTranscriptActivity(); indicator != "" {
 		blocks = append(blocks, indicator)
@@ -1048,12 +1119,19 @@ func (m *Model) refreshViewport() {
 			blocks = append(blocks, "Start by asking a question or type / for commands.")
 		}
 	}
-	separator := "\n\n"
-	if m.halfBlocksEnabled() {
-		separator = "\n"
-	}
 	m.viewport.SetContent(strings.Join(blocks, separator))
+	if offset >= 0 {
+		m.viewport.SetYOffset(offset)
+		return
+	}
 	m.viewport.GotoBottom()
+}
+
+func renderedSeparatorHeight(separator string) int {
+	if separator == "" {
+		return 0
+	}
+	return max(0, lipgloss.Height("x"+separator+"x")-2)
 }
 
 func (m *Model) renderTranscriptActivity() string {

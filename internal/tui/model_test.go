@@ -2123,6 +2123,61 @@ func TestMouseWheelScrollsViewport(t *testing.T) {
 	}
 }
 
+func TestMouseClickTogglesToolRunExpansion(t *testing.T) {
+	m := Model{
+		mouseEnabled:     true,
+		currentSession:   domain.Session{ID: 1},
+		viewport:         viewport.New(80, 8),
+		parts:            map[int64][]domain.Part{},
+		expandedToolRuns: map[string]bool{},
+		palette:          theme.Resolve("tokyonight").Palette,
+	}
+	m.messages = []domain.Message{
+		{ID: 1, Role: domain.MessageRoleTool, Summary: "bash"},
+	}
+	m.parts[1] = []domain.Part{{
+		Kind:     domain.PartKindToolOutput,
+		Body:     "line one\nline two",
+		MetaJSON: `{"tool":"bash","command":"echo hi","tool_call_id":"call_bash_1"}`,
+	}}
+
+	m.refreshViewport()
+	if strings.Contains(m.viewport.View(), "line one\nline two") {
+		t.Fatalf("expected collapsed tool output, got %q", m.viewport.View())
+	}
+	if !strings.Contains(m.viewport.View(), "Expand") {
+		t.Fatalf("expected expand indicator, got %q", m.viewport.View())
+	}
+
+	updated, cmd := m.Update(tea.MouseMsg{
+		Action: tea.MouseActionPress,
+		Button: tea.MouseButtonLeft,
+		X:      2,
+		Y:      0,
+	})
+	next := updated.(*Model)
+	if cmd != nil {
+		t.Fatal("expected no command from tool run mouse toggle")
+	}
+	if !strings.Contains(next.viewport.View(), "│ line one") || !strings.Contains(next.viewport.View(), "│ line two") {
+		t.Fatalf("expected expanded tool output, got %q", next.viewport.View())
+	}
+	if !strings.Contains(next.viewport.View(), "Collapse") {
+		t.Fatalf("expected collapse indicator, got %q", next.viewport.View())
+	}
+
+	updated, _ = next.Update(tea.MouseMsg{
+		Action: tea.MouseActionPress,
+		Button: tea.MouseButtonLeft,
+		X:      2,
+		Y:      0,
+	})
+	final := updated.(*Model)
+	if strings.Contains(final.viewport.View(), "line one\nline two") {
+		t.Fatalf("expected collapsed tool output after second click, got %q", final.viewport.View())
+	}
+}
+
 func TestEventMsgReloadsTranscriptBeforeTurnCompletes(t *testing.T) {
 	st, err := store.Open(t.TempDir())
 	if err != nil {

@@ -305,7 +305,7 @@ func mergeToolRun(dst *ui.ToolRun, src ui.ToolRun) {
 func (m *Model) renderTranscriptBlock(block transcriptBlock) string {
 	switch block.Kind {
 	case transcriptBlockToolRun:
-		return ui.RenderToolRunCard(block.ToolRun, m.palette, m.viewport.Width)
+		return ui.RenderToolRunCard(block.ToolRun, m.palette, m.viewport.Width, m.expandedToolRuns[block.ToolRun.ID])
 	default:
 		return m.renderTranscriptMessage(block.Message)
 	}
