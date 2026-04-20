@@ -9,6 +9,7 @@ import (
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools"
+	_ "github.com/lkarlslund/koder/internal/tools/all"
 	"github.com/lkarlslund/koder/internal/ui"
 )
 
@@ -23,17 +24,6 @@ type transcriptBlock struct {
 	Kind    transcriptBlockKind
 	Message domain.Message
 	ToolRun ui.ToolRun
-}
-
-type toolCallView struct {
-	ID      string          `json:"tool_call_id,omitempty"`
-	Tool    domain.ToolKind `json:"tool"`
-	Path    string          `json:"path,omitempty"`
-	Pattern string          `json:"pattern,omitempty"`
-	Command string          `json:"command,omitempty"`
-	Content string          `json:"content,omitempty"`
-	Body    string          `json:"body,omitempty"`
-	URL     string          `json:"url,omitempty"`
 }
 
 func (m *Model) transcriptBlocks() []transcriptBlock {
@@ -122,18 +112,18 @@ func toolRunsFromAssistantMessage(parts []domain.Part) []ui.ToolRun {
 		if part.Kind != domain.PartKindToolCall {
 			continue
 		}
-		call, ok := decodeToolCallView(part.MetaJSON)
-		if !ok {
+		req, err := tools.RequestFromMeta(part.MetaJSON)
+		if err != nil {
 			continue
 		}
-		title, subtitle := summarizeToolCall(call.Tool, call)
+		presentation := tools.PresentationForRequest(req)
 		runs = append(runs, ui.ToolRun{
-			ID:         firstNonEmptyString(strings.TrimSpace(call.ID), toolRunFallbackID(call.Tool, subtitle)),
-			Tool:       call.Tool,
-			ToolCallID: strings.TrimSpace(call.ID),
-			Title:      title,
-			Subtitle:   subtitle,
-			Preview:    toolRunPreview(call.Tool, call),
+			ID:         firstNonEmptyString(strings.TrimSpace(req.ToolCallID), toolRunFallbackID(req.Tool, presentation.Preview)),
+			Tool:       req.Tool,
+			ToolCallID: strings.TrimSpace(req.ToolCallID),
+			Title:      presentation.Title,
+			Subtitle:   presentation.Subtitle,
+			Preview:    presentation.Preview,
 			Status:     ui.ToolRunStatusRequested,
 		})
 	}
@@ -149,13 +139,13 @@ func toolRunApprovalRequest(parts []domain.Part) (ui.ToolRun, bool) {
 		approvalID, _ := strconv.ParseInt(strings.TrimSpace(meta["approval_id"]), 10, 64)
 		tool := domain.ToolKind(strings.TrimSpace(meta["tool"]))
 		preview := strings.TrimSpace(meta["command"])
-		title, subtitle := summarizeToolSummary(tool, preview)
+		presentation := presentationFromPreview(tool, preview)
 		return ui.ToolRun{
 			ID:         approvalFallbackID(approvalID, tool, preview),
 			Tool:       tool,
 			ApprovalID: approvalID,
-			Title:      title,
-			Subtitle:   subtitle,
+			Title:      presentation.Title,
+			Subtitle:   presentation.Subtitle,
 			Preview:    preview,
 			Status:     ui.ToolRunStatusPendingApproval,
 		}, tool != ""
@@ -178,7 +168,7 @@ func toolRunApprovalReply(parts []domain.Part) (ui.ToolRun, bool) {
 		approvalID, _ := strconv.ParseInt(strings.TrimSpace(meta["approval_id"]), 10, 64)
 		tool := domain.ToolKind(strings.TrimSpace(meta["tool"]))
 		preview := strings.TrimSpace(meta["command"])
-		title, subtitle := summarizeToolSummary(tool, preview)
+		presentation := presentationFromPreview(tool, preview)
 		status := ui.ToolRunStatusApproved
 		if strings.EqualFold(strings.TrimSpace(meta["status"]), "denied") {
 			status = ui.ToolRunStatusDenied
@@ -187,8 +177,8 @@ func toolRunApprovalReply(parts []domain.Part) (ui.ToolRun, bool) {
 			ID:         approvalFallbackID(approvalID, tool, preview),
 			Tool:       tool,
 			ApprovalID: approvalID,
-			Title:      title,
-			Subtitle:   subtitle,
+			Title:      presentation.Title,
+			Subtitle:   presentation.Subtitle,
 			Preview:    preview,
 			Output:     strings.TrimSpace(part.Body),
 			Status:     status,
@@ -203,8 +193,7 @@ func toolRunOutput(parts []domain.Part, msg domain.Message) (ui.ToolRun, bool) {
 			continue
 		}
 		meta := stringMeta(part.MetaJSON)
-		tool := domain.ToolKind(strings.TrimSpace(meta["tool"]))
-		toolCallID := strings.TrimSpace(meta["tool_call_id"])
+		req, err := tools.RequestFromMetaMap(meta)
 		output := strings.TrimSpace(part.Body)
 		diff := toolRunDiffBody(parts)
 		status := ui.ToolRunStatusCompleted
@@ -214,18 +203,27 @@ func toolRunOutput(parts []domain.Part, msg domain.Message) (ui.ToolRun, bool) {
 		if strings.HasPrefix(output, "Error:") {
 			status = ui.ToolRunStatusFailed
 		}
-		preview := firstNonEmptyString(toolPreviewFromMeta(tool, meta), strings.TrimSpace(msg.Summary))
-		title, subtitle := summarizeToolSummary(tool, preview)
-		if title == "" {
-			title, subtitle = summarizeToolSummary(tool, output)
+		if err != nil {
+			req = tools.Request{
+				Tool:       domain.ToolKind(strings.TrimSpace(meta["tool"])),
+				ToolCallID: strings.TrimSpace(meta["tool_call_id"]),
+				Args:       map[string]string{},
+			}
+		}
+		presentation := tools.PresentationForRequest(req)
+		if strings.TrimSpace(presentation.Preview) == "" {
+			presentation.Preview = firstNonEmptyString(strings.TrimSpace(msg.Summary), output)
+		}
+		if strings.TrimSpace(presentation.Subtitle) == "" {
+			presentation.Subtitle = presentation.Preview
 		}
 		return ui.ToolRun{
-			ID:         firstNonEmptyString(toolCallID, toolRunFallbackID(tool, preview), msg.Summary),
-			Tool:       tool,
-			ToolCallID: toolCallID,
-			Title:      title,
-			Subtitle:   subtitle,
-			Preview:    preview,
+			ID:         firstNonEmptyString(req.ToolCallID, toolRunFallbackID(req.Tool, presentation.Preview), msg.Summary),
+			Tool:       req.Tool,
+			ToolCallID: req.ToolCallID,
+			Title:      presentation.Title,
+			Subtitle:   presentation.Subtitle,
+			Preview:    presentation.Preview,
 			Output:     output,
 			Diff:       diff,
 			Status:     status,
@@ -316,17 +314,17 @@ func (m *Model) approvalToolRun(item store.Approval) ui.ToolRun {
 		ID:         approvalFallbackID(item.ID, item.Tool, item.Command),
 		Tool:       item.Tool,
 		ApprovalID: item.ID,
-		Title:      toolTitle(item.Tool),
-		Subtitle:   summarizePreview(item.Tool, item.Command),
+		Title:      tools.PresentationForTool(item.Tool, item.Command).Title,
+		Subtitle:   strings.TrimSpace(item.Command),
 		Preview:    strings.TrimSpace(item.Command),
 		Status:     ui.ToolRunStatusPendingApproval,
 	}
-	if req, err := approvalRequestFromStored(item.Tool, item.Command); err == nil {
-		if toolCallID := strings.TrimSpace(req.Args["tool_call_id"]); toolCallID != "" {
-			run.ToolCallID = toolCallID
-		}
-		run.Preview = firstNonEmptyString(strings.TrimSpace(approvalRequestPreview(req)), run.Preview)
-		run.Subtitle = summarizePreview(item.Tool, run.Preview)
+	if req, err := tools.RequestFromStored(item.Tool, item.Command); err == nil {
+		presentation := tools.PresentationForRequest(req)
+		run.ToolCallID = req.ToolCallID
+		run.Title = presentation.Title
+		run.Subtitle = presentation.Subtitle
+		run.Preview = firstNonEmptyString(presentation.Preview, run.Preview)
 	}
 	for _, block := range m.transcriptBlocks() {
 		if block.Kind != transcriptBlockToolRun {
@@ -347,17 +345,6 @@ func (m *Model) approvalToolRun(item store.Approval) ui.ToolRun {
 	return run
 }
 
-func decodeToolCallView(raw string) (toolCallView, bool) {
-	if strings.TrimSpace(raw) == "" {
-		return toolCallView{}, false
-	}
-	var call toolCallView
-	if err := json.Unmarshal([]byte(raw), &call); err != nil || call.Tool == "" {
-		return toolCallView{}, false
-	}
-	return call, true
-}
-
 func stringMeta(raw string) map[string]string {
 	if strings.TrimSpace(raw) == "" {
 		return nil
@@ -367,105 +354,6 @@ func stringMeta(raw string) map[string]string {
 		return nil
 	}
 	return meta
-}
-
-func summarizeToolCall(tool domain.ToolKind, call toolCallView) (string, string) {
-	switch tool {
-	case domain.ToolKindBash:
-		return "Run command", summarizePreview(tool, call.Command)
-	case domain.ToolKindRead:
-		return "Read file", summarizePreview(tool, call.Path)
-	case domain.ToolKindGlob:
-		return "Find files", summarizePreview(tool, call.Pattern)
-	case domain.ToolKindGrep:
-		return "Search text", summarizePreview(tool, call.Pattern)
-	case domain.ToolKindApplyPatch:
-		return "Apply patch", summarizePreview(tool, call.Path)
-	case domain.ToolKindTask:
-		return "Create task", summarizePreview(tool, call.Body)
-	case domain.ToolKindQuestion:
-		return "Ask question", summarizePreview(tool, call.Body)
-	case domain.ToolKindWebFetch:
-		return "Fetch URL", summarizePreview(tool, call.URL)
-	case domain.ToolKindWebSearch:
-		return "Search web", summarizePreview(tool, call.Body)
-	default:
-		return toolTitle(tool), summarizePreview(tool, toolRunPreview(tool, call))
-	}
-}
-
-func summarizeToolSummary(tool domain.ToolKind, preview string) (string, string) {
-	return toolTitle(tool), summarizePreview(tool, preview)
-}
-
-func toolRunPreview(tool domain.ToolKind, call toolCallView) string {
-	switch tool {
-	case domain.ToolKindRead:
-		return call.Path
-	case domain.ToolKindGlob, domain.ToolKindGrep:
-		return call.Pattern
-	case domain.ToolKindBash:
-		return call.Command
-	case domain.ToolKindApplyPatch:
-		return firstNonEmptyString(call.Path, call.Content)
-	case domain.ToolKindTask, domain.ToolKindQuestion, domain.ToolKindWebSearch:
-		return call.Body
-	case domain.ToolKindWebFetch:
-		return call.URL
-	default:
-		return ""
-	}
-}
-
-func summarizePreview(tool domain.ToolKind, preview string) string {
-	preview = strings.TrimSpace(preview)
-	if preview == "" {
-		return ""
-	}
-	switch tool {
-	case domain.ToolKindBash:
-		return preview
-	case domain.ToolKindRead, domain.ToolKindApplyPatch:
-		return preview
-	case domain.ToolKindGlob:
-		return "Pattern: " + preview
-	case domain.ToolKindGrep:
-		return "Query: " + preview
-	case domain.ToolKindWebFetch:
-		return preview
-	case domain.ToolKindWebSearch:
-		return "Query: " + preview
-	default:
-		return preview
-	}
-}
-
-func toolTitle(tool domain.ToolKind) string {
-	switch tool {
-	case domain.ToolKindBash:
-		return "Run command"
-	case domain.ToolKindRead:
-		return "Read file"
-	case domain.ToolKindGlob:
-		return "Find files"
-	case domain.ToolKindGrep:
-		return "Search text"
-	case domain.ToolKindApplyPatch:
-		return "Apply patch"
-	case domain.ToolKindTask:
-		return "Create task"
-	case domain.ToolKindQuestion:
-		return "Ask question"
-	case domain.ToolKindWebFetch:
-		return "Fetch URL"
-	case domain.ToolKindWebSearch:
-		return "Search web"
-	default:
-		if tool == "" {
-			return "Tool"
-		}
-		return strings.ToUpper(string(tool[:1])) + string(tool[1:])
-	}
 }
 
 func previewsMatch(left, right string) bool {
@@ -488,29 +376,6 @@ func approvalFallbackID(approvalID int64, tool domain.ToolKind, preview string) 
 	return toolRunFallbackID(tool, preview)
 }
 
-func toolPreviewFromMeta(tool domain.ToolKind, meta map[string]string) string {
-	switch tool {
-	case domain.ToolKindRead:
-		return strings.TrimSpace(meta["path"])
-	case domain.ToolKindGlob, domain.ToolKindGrep:
-		return strings.TrimSpace(meta["pattern"])
-	case domain.ToolKindBash:
-		return strings.TrimSpace(meta["command"])
-	case domain.ToolKindApplyPatch:
-		return firstNonEmptyString(strings.TrimSpace(meta["path"]), strings.TrimSpace(meta["content"]))
-	case domain.ToolKindTask:
-		return strings.TrimSpace(meta["body"])
-	case domain.ToolKindQuestion:
-		return strings.TrimSpace(meta["question"])
-	case domain.ToolKindWebFetch:
-		return strings.TrimSpace(meta["url"])
-	case domain.ToolKindWebSearch:
-		return strings.TrimSpace(meta["query"])
-	default:
-		return ""
-	}
-}
-
 func isSyntheticToolSummary(input string) bool {
 	input = strings.TrimSpace(input)
 	if input == "" {
@@ -528,50 +393,6 @@ func toolRunDiffBody(parts []domain.Part) string {
 	return ""
 }
 
-func approvalRequestFromStored(tool domain.ToolKind, raw string) (tools.Request, error) {
-	var args map[string]string
-	if err := json.Unmarshal([]byte(raw), &args); err != nil {
-		args = legacyApprovalArgs(tool, raw)
-	}
-	return tools.Request{Tool: tool, Args: args}, nil
-}
-
-func legacyApprovalArgs(tool domain.ToolKind, raw string) map[string]string {
-	switch tool {
-	case domain.ToolKindRead:
-		return map[string]string{"path": raw}
-	case domain.ToolKindGlob, domain.ToolKindGrep:
-		return map[string]string{"pattern": raw}
-	case domain.ToolKindBash:
-		return map[string]string{"command": raw}
-	case domain.ToolKindWebFetch:
-		return map[string]string{"url": raw}
-	case domain.ToolKindTask:
-		return map[string]string{"body": raw}
-	default:
-		return map[string]string{"command": raw}
-	}
-}
-
-func approvalRequestPreview(req tools.Request) string {
-	switch req.Tool {
-	case domain.ToolKindRead:
-		return req.Args["path"]
-	case domain.ToolKindGlob, domain.ToolKindGrep:
-		return req.Args["pattern"]
-	case domain.ToolKindBash:
-		return req.Args["command"]
-	case domain.ToolKindApplyPatch:
-		return req.Args["path"]
-	case domain.ToolKindTask:
-		return req.Args["body"]
-	case domain.ToolKindWebFetch:
-		return req.Args["url"]
-	default:
-		return string(req.Tool)
-	}
-}
-
 func firstNonEmptyString(values ...string) string {
 	for _, value := range values {
 		if strings.TrimSpace(value) != "" {
@@ -579,4 +400,8 @@ func firstNonEmptyString(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func presentationFromPreview(tool domain.ToolKind, preview string) tools.Presentation {
+	return tools.PresentationForTool(tool, preview)
 }

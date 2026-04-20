@@ -25,7 +25,7 @@ func TestParseToolCall(t *testing.T) {
 	if call == nil {
 		t.Fatal("expected tool call")
 	}
-	if call.Tool != domain.ToolKindBash || call.Command != "pwd" {
+	if call.Tool != domain.ToolKindBash || call.Args["command"] != "pwd" {
 		t.Fatalf("unexpected tool call: %#v", call)
 	}
 	if plain != "I will inspect the repo." {
@@ -553,9 +553,9 @@ func TestModelTaskPersistsTranscriptUpdate(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	evt, err := engine.handleModelToolCall(context.Background(), session, toolCall{
+	evt, err := engine.handleModelToolCall(context.Background(), session, tools.Request{
 		Tool: domain.ToolKindTask,
-		Body: "write docs",
+		Args: map[string]string{"body": "write docs"},
 	})
 	if err != nil {
 		t.Fatal(err)

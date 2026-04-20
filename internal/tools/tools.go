@@ -1,155 +1,375 @@
 package tools
 
 import (
-	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
-	"os"
-	"os/exec"
-	"path/filepath"
+	"slices"
 	"strings"
-
-	"github.com/sergi/go-diff/diffmatchpatch"
+	"sync"
 
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/provider"
+	"github.com/lkarlslund/koder/internal/store"
 )
 
 type Request struct {
-	Tool domain.ToolKind
-	Args map[string]string
+	Tool       domain.ToolKind   `json:"tool"`
+	ToolCallID string            `json:"tool_call_id,omitempty"`
+	Args       map[string]string `json:"-"`
+}
+
+func (r Request) MarshalJSON() ([]byte, error) {
+	payload := r.Meta()
+	return json.Marshal(payload)
+}
+
+func (r *Request) UnmarshalJSON(data []byte) error {
+	var raw map[string]string
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	req, err := RequestFromMetaMap(raw)
+	if err != nil {
+		return err
+	}
+	*r = req
+	return nil
+}
+
+func (r Request) Meta() map[string]string {
+	payload := make(map[string]string, len(r.Args)+2)
+	payload["tool"] = string(r.Tool)
+	if strings.TrimSpace(r.ToolCallID) != "" {
+		payload["tool_call_id"] = r.ToolCallID
+	}
+	for key, value := range r.Args {
+		if strings.TrimSpace(value) == "" {
+			continue
+		}
+		payload[key] = value
+	}
+	return payload
+}
+
+func (r Request) ArgumentsJSON() string {
+	data, err := json.Marshal(r.Args)
+	if err != nil {
+		return "{}"
+	}
+	return string(data)
+}
+
+func (r Request) ContextString() string {
+	data, err := json.Marshal(r)
+	if err != nil {
+		return fmt.Sprintf(`{"tool":"%s"}`, r.Tool)
+	}
+	return string(data)
 }
 
 type Result struct {
-	Tool     domain.ToolKind
 	Output   string
 	DiffText string
 }
 
+type Presentation struct {
+	Title    string
+	Subtitle string
+	Preview  string
+}
+
+type Runtime struct {
+	Workdir    string
+	HTTPClient *http.Client
+}
+
+type Tool interface {
+	Kind() domain.ToolKind
+	Definition() (provider.ToolDefinition, bool)
+	BypassesPermission() bool
+	NormalizeArgs(map[string]string) (map[string]string, error)
+	LegacyArgs(raw string) map[string]string
+	Preview(req Request) string
+	PresentationForPreview(preview string) Presentation
+	Presentation(req Request) Presentation
+	Execute(ctx context.Context, runtime Runtime, req Request) (Result, error)
+	SummarizeResult(req Request, result Result) (summary string, body string)
+	PersistResult(ctx context.Context, st *store.Store, sessionID int64, req Request, result Result) (<-chan domain.Event, error)
+}
+
 type Registry struct {
-	workdir string
-	client  *http.Client
+	runtime Runtime
+}
+
+var (
+	regMu    sync.RWMutex
+	registry = map[domain.ToolKind]Tool{}
+	order    []domain.ToolKind
+)
+
+func Register(tool Tool) {
+	regMu.Lock()
+	defer regMu.Unlock()
+	kind := tool.Kind()
+	if kind == "" {
+		panic("tools: empty tool kind")
+	}
+	if _, exists := registry[kind]; exists {
+		panic(fmt.Sprintf("tools: duplicate tool registration %q", kind))
+	}
+	registry[kind] = tool
+	order = append(order, kind)
+}
+
+func Lookup(kind domain.ToolKind) (Tool, bool) {
+	regMu.RLock()
+	defer regMu.RUnlock()
+	tool, ok := registry[kind]
+	return tool, ok
 }
 
 func NewRegistry(workdir string) *Registry {
-	return &Registry{workdir: workdir, client: &http.Client{}}
+	return &Registry{
+		runtime: Runtime{
+			Workdir:    workdir,
+			HTTPClient: &http.Client{},
+		},
+	}
 }
 
 func (r *Registry) Execute(ctx context.Context, req Request) (Result, error) {
-	switch req.Tool {
-	case domain.ToolKindRead:
-		return r.read(req.Args["path"])
-	case domain.ToolKindGlob:
-		return r.glob(req.Args["pattern"])
-	case domain.ToolKindGrep:
-		return r.grep(ctx, req.Args["pattern"])
-	case domain.ToolKindBash:
-		return r.bash(ctx, req.Args["command"])
-	case domain.ToolKindApplyPatch:
-		return r.applyPatch(req.Args["path"], req.Args["content"])
-	case domain.ToolKindTask:
-		return Result{Tool: req.Tool, Output: req.Args["body"]}, nil
-	case domain.ToolKindQuestion:
-		return Result{Tool: req.Tool, Output: req.Args["question"]}, nil
-	case domain.ToolKindWebFetch:
-		return r.webFetch(ctx, req.Args["url"])
-	case domain.ToolKindWebSearch:
-		return Result{}, errors.New("websearch is not implemented yet")
+	req, tool, err := normalizeRequest(req)
+	if err != nil {
+		return Result{}, err
+	}
+	return tool.Execute(ctx, r.runtime, req)
+}
+
+func (r *Registry) PersistResult(ctx context.Context, st *store.Store, sessionID int64, req Request, result Result) (<-chan domain.Event, error) {
+	if req.Tool == "" {
+		return nil, errors.New("tool is empty")
+	}
+	tool, ok := Lookup(req.Tool)
+	if !ok {
+		return nil, fmt.Errorf("unsupported tool %q", req.Tool)
+	}
+	if req.Args == nil {
+		req.Args = map[string]string{}
+	}
+	return tool.PersistResult(ctx, st, sessionID, req, result)
+}
+
+func Definitions() []provider.ToolDefinition {
+	regMu.RLock()
+	kinds := slices.Clone(order)
+	regMu.RUnlock()
+	defs := make([]provider.ToolDefinition, 0, len(kinds))
+	for _, kind := range kinds {
+		tool, ok := Lookup(kind)
+		if !ok {
+			continue
+		}
+		def, enabled := tool.Definition()
+		if enabled {
+			defs = append(defs, def)
+		}
+	}
+	return defs
+}
+
+func ParseProviderCall(call provider.ToolCall) (Request, error) {
+	kind := domain.ToolKind(strings.TrimSpace(call.Function.Name))
+	if kind == "" {
+		return Request{}, fmt.Errorf("provider tool call missing function name")
+	}
+	var args map[string]string
+	if err := json.Unmarshal([]byte(call.Function.Arguments), &args); err != nil {
+		return Request{}, fmt.Errorf("decode tool arguments for %s: %w", kind, err)
+	}
+	req := Request{
+		Tool:       kind,
+		ToolCallID: strings.TrimSpace(call.ID),
+		Args:       args,
+	}
+	req, tool, err := normalizeRequest(req)
+	if err != nil {
+		return Request{}, err
+	}
+	if req.ToolCallID == "" {
+		req.ToolCallID = "call_" + strings.ToLower(string(tool.Kind()))
+	}
+	return req, nil
+}
+
+func RequestFromStored(kind domain.ToolKind, raw string) (Request, error) {
+	var args map[string]string
+	if err := json.Unmarshal([]byte(raw), &args); err != nil {
+		tool, ok := Lookup(kind)
+		if !ok {
+			return Request{}, fmt.Errorf("unsupported tool %q", kind)
+		}
+		args = tool.LegacyArgs(raw)
+	}
+	req := Request{
+		Tool:       kind,
+		ToolCallID: strings.TrimSpace(args["tool_call_id"]),
+		Args:       map[string]string{},
+	}
+	for key, value := range args {
+		if key == "tool_call_id" {
+			continue
+		}
+		req.Args[key] = value
+	}
+	return Normalize(req)
+}
+
+func RequestFromMeta(raw string) (Request, error) {
+	if strings.TrimSpace(raw) == "" {
+		return Request{}, errors.New("empty request metadata")
+	}
+	var req Request
+	if err := json.Unmarshal([]byte(raw), &req); err != nil {
+		return Request{}, err
+	}
+	return Normalize(req)
+}
+
+func RequestFromMetaMap(raw map[string]string) (Request, error) {
+	req := Request{
+		Tool:       domain.ToolKind(strings.TrimSpace(raw["tool"])),
+		ToolCallID: strings.TrimSpace(raw["tool_call_id"]),
+		Args:       map[string]string{},
+	}
+	for key, value := range raw {
+		if key == "tool" || key == "tool_call_id" {
+			continue
+		}
+		req.Args[key] = value
+	}
+	return Normalize(req)
+}
+
+func Normalize(req Request) (Request, error) {
+	req, _, err := normalizeRequest(req)
+	return req, err
+}
+
+func Preview(req Request) string {
+	req, tool, err := normalizeRequest(req)
+	if err != nil {
+		return string(req.Tool)
+	}
+	return tool.Preview(req)
+}
+
+func PresentationForRequest(req Request) Presentation {
+	req, tool, err := normalizeRequest(req)
+	if err != nil {
+		return PresentationForTool(req.Tool, Preview(req))
+	}
+	return tool.Presentation(req)
+}
+
+func PresentationForTool(kind domain.ToolKind, preview string) Presentation {
+	tool, ok := Lookup(kind)
+	if !ok {
+		return Presentation{Title: "Tool", Subtitle: strings.TrimSpace(preview), Preview: strings.TrimSpace(preview)}
+	}
+	return tool.PresentationForPreview(preview)
+}
+
+func SummarizeResult(req Request, result Result) (string, string) {
+	req, tool, err := normalizeRequest(req)
+	if err != nil {
+		return defaultSummary(req.Tool, result)
+	}
+	return tool.SummarizeResult(req, result)
+}
+
+func ToolCall(req Request) provider.ToolCall {
+	return provider.ToolCall{
+		ID:   req.ToolCallID,
+		Type: "function",
+		Function: provider.FunctionCall{
+			Name:      string(req.Tool),
+			Arguments: req.ArgumentsJSON(),
+		},
+	}
+}
+
+func FunctionDefinition(kind domain.ToolKind, description, schema string) provider.ToolDefinition {
+	return provider.ToolDefinition{
+		Type: "function",
+		Function: provider.FunctionDefinition{
+			Name:        string(kind),
+			Description: description,
+			Parameters:  json.RawMessage(schema),
+		},
+	}
+}
+
+func PersistStandardResult(ctx context.Context, st *store.Store, sessionID int64, req Request, result Result) (<-chan domain.Event, error) {
+	summary, body := SummarizeResult(req, result)
+	msg, err := st.AddMessage(ctx, sessionID, domain.MessageRoleTool, summary)
+	if err != nil {
+		return nil, err
+	}
+	meta, _ := json.Marshal(req.Meta())
+	if _, err := st.AddPart(ctx, msg.ID, domain.PartKindToolOutput, body, string(meta)); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(result.DiffText) != "" {
+		if _, err := st.AddPart(ctx, msg.ID, domain.PartKindDiff, result.DiffText, ""); err != nil {
+			return nil, err
+		}
+	}
+	return emitOnce(domain.Event{Kind: domain.EventKindToolResult, Text: body, Tool: req.Tool}), nil
+}
+
+func DefaultSummarizeResult(req Request, result Result) (string, string) {
+	return defaultSummary(req.Tool, result)
+}
+
+func emitOnce(evt domain.Event) <-chan domain.Event {
+	out := make(chan domain.Event, 1)
+	out <- evt
+	close(out)
+	return out
+}
+
+func normalizeRequest(req Request) (Request, Tool, error) {
+	if req.Tool == "" {
+		return Request{}, nil, errors.New("tool is empty")
+	}
+	tool, ok := Lookup(req.Tool)
+	if !ok {
+		return Request{}, nil, fmt.Errorf("unsupported tool %q", req.Tool)
+	}
+	if req.Args == nil {
+		req.Args = map[string]string{}
+	}
+	args, err := tool.NormalizeArgs(req.Args)
+	if err != nil {
+		return Request{}, nil, err
+	}
+	req.Args = args
+	return req, tool, nil
+}
+
+func defaultSummary(tool domain.ToolKind, result Result) (string, string) {
+	output := strings.TrimSpace(result.Output)
+	switch {
+	case output != "":
+		return string(tool), result.Output
+	case strings.TrimSpace(result.DiffText) != "":
+		body := fmt.Sprintf("%s completed and produced a diff", tool)
+		return body, body
 	default:
-		return Result{}, fmt.Errorf("unsupported tool %q", req.Tool)
+		body := fmt.Sprintf("%s completed with no output", tool)
+		return body, body
 	}
-}
-
-func (r *Registry) read(path string) (Result, error) {
-	if path == "" {
-		return Result{}, errors.New("path is empty")
-	}
-	data, err := os.ReadFile(filepath.Join(r.workdir, path))
-	if err != nil {
-		return Result{}, err
-	}
-	return Result{Tool: domain.ToolKindRead, Output: string(data)}, nil
-}
-
-func (r *Registry) glob(pattern string) (Result, error) {
-	if pattern == "" {
-		pattern = "*"
-	}
-	matches, err := filepath.Glob(filepath.Join(r.workdir, pattern))
-	if err != nil {
-		return Result{}, err
-	}
-	for i, item := range matches {
-		rel, relErr := filepath.Rel(r.workdir, item)
-		if relErr == nil {
-			matches[i] = rel
-		}
-	}
-	return Result{Tool: domain.ToolKindGlob, Output: strings.Join(matches, "\n")}, nil
-}
-
-func (r *Registry) grep(ctx context.Context, pattern string) (Result, error) {
-	if pattern == "" {
-		return Result{}, errors.New("pattern is empty")
-	}
-	if _, err := exec.LookPath("rg"); err == nil {
-		cmd := exec.CommandContext(ctx, "rg", "-n", pattern, ".")
-		cmd.Dir = r.workdir
-		output, err := cmd.CombinedOutput()
-		if err != nil && len(output) == 0 {
-			return Result{}, err
-		}
-		return Result{Tool: domain.ToolKindGrep, Output: string(output)}, nil
-	}
-	return Result{}, errors.New("rg is required for grep fallback in this build")
-}
-
-func (r *Registry) bash(ctx context.Context, command string) (Result, error) {
-	if command == "" {
-		return Result{}, errors.New("command is empty")
-	}
-	cmd := exec.CommandContext(ctx, "bash", "-lc", command)
-	cmd.Dir = r.workdir
-	output, err := cmd.CombinedOutput()
-	return Result{Tool: domain.ToolKindBash, Output: string(output)}, err
-}
-
-func (r *Registry) applyPatch(path, content string) (Result, error) {
-	if path == "" {
-		return Result{}, errors.New("path is empty")
-	}
-	fullPath := filepath.Join(r.workdir, path)
-	before, _ := os.ReadFile(fullPath)
-	if err := os.WriteFile(fullPath, []byte(content), 0o644); err != nil {
-		return Result{}, err
-	}
-	dmp := diffmatchpatch.New()
-	diffs := dmp.DiffMain(string(before), content, false)
-	return Result{
-		Tool:     domain.ToolKindApplyPatch,
-		Output:   "patched " + path,
-		DiffText: dmp.DiffPrettyText(diffs),
-	}, nil
-}
-
-func (r *Registry) webFetch(ctx context.Context, rawURL string) (Result, error) {
-	if rawURL == "" {
-		return Result{}, errors.New("url is empty")
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
-	if err != nil {
-		return Result{}, err
-	}
-	resp, err := r.client.Do(req)
-	if err != nil {
-		return Result{}, err
-	}
-	defer resp.Body.Close()
-	var buf bytes.Buffer
-	if _, err := io.CopyN(&buf, resp.Body, 16*1024); err != nil && !errors.Is(err, io.EOF) {
-		return Result{}, err
-	}
-	return Result{Tool: domain.ToolKindWebFetch, Output: buf.String()}, nil
 }

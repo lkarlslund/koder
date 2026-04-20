@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"regexp"
 	"slices"
 	"strconv"
@@ -19,6 +20,7 @@ import (
 	"github.com/lkarlslund/koder/internal/sessionctx"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools"
+	_ "github.com/lkarlslund/koder/internal/tools/all"
 )
 
 type Engine struct {
@@ -28,18 +30,6 @@ type Engine struct {
 	debug    *debugsrv.Recorder
 	files    *attachment.Manager
 	caps     *provider.CapabilityStore
-}
-
-type toolCall struct {
-	ID      string          `json:"tool_call_id,omitempty"`
-	Tool    domain.ToolKind `json:"tool"`
-	Path    string          `json:"path,omitempty"`
-	Pattern string          `json:"pattern,omitempty"`
-	Command string          `json:"command,omitempty"`
-	Body    string          `json:"body,omitempty"`
-	URL     string          `json:"url,omitempty"`
-	Content string          `json:"content,omitempty"`
-	Reason  string          `json:"reason,omitempty"`
 }
 
 func New(cfg config.Config, st *store.Store, registry *tools.Registry, debug *debugsrv.Recorder) *Engine {
@@ -206,7 +196,7 @@ func (e *Engine) continueModelTurn(ctx context.Context, session domain.Session, 
 		resp, completeErr := client.CompleteChat(ctx, provider.ChatRequest{
 			Model:      session.ModelID,
 			Messages:   messages,
-			Tools:      modelToolDefinitions(),
+			Tools:      tools.Definitions(),
 			ToolChoice: "auto",
 			Stream:     false,
 		})
@@ -215,17 +205,17 @@ func (e *Engine) continueModelTurn(ctx context.Context, session domain.Session, 
 		}
 
 		if len(resp.ToolCalls) > 0 {
-			call, err := toolCallFromProvider(resp.ToolCalls[0])
+			call, err := tools.ParseProviderCall(resp.ToolCalls[0])
 			if err != nil {
 				return err
 			}
-			e.recordLifecycle(session.ID, "tool_call_parsed", call.contextString(), map[string]string{"tool": string(call.Tool), "tool_call_id": call.ID})
+			e.recordLifecycle(session.ID, "tool_call_parsed", call.ContextString(), map[string]string{"tool": string(call.Tool), "tool_call_id": call.ToolCallID})
 			assistantMsg, err := e.store.AddMessage(ctx, session.ID, domain.MessageRoleAssistant, fmt.Sprintf("tool:%s", call.Tool))
 			if err != nil {
 				return err
 			}
 			meta, _ := json.Marshal(call)
-			body := call.contextString()
+			body := call.ContextString()
 			if _, err := e.store.AddPart(ctx, assistantMsg.ID, domain.PartKindToolCall, body, string(meta)); err != nil {
 				return err
 			}
@@ -255,7 +245,7 @@ func (e *Engine) continueModelTurn(ctx context.Context, session domain.Session, 
 		text, reasoning, usage := resp.Text, resp.Reasoning, resp.Usage
 		call, plain := parseToolCall(text)
 		if call != nil {
-			e.recordLifecycle(session.ID, "tool_call_parsed", call.contextString(), map[string]string{"tool": string(call.Tool)})
+			e.recordLifecycle(session.ID, "tool_call_parsed", call.ContextString(), map[string]string{"tool": string(call.Tool), "tool_call_id": call.ToolCallID})
 			assistantMsg, err := e.store.AddMessage(ctx, session.ID, domain.MessageRoleAssistant, fmt.Sprintf("tool:%s", call.Tool))
 			if err != nil {
 				return err
@@ -438,7 +428,7 @@ func (e *Engine) approve(ctx context.Context, sessionID int64, rawID string) (<-
 	if err != nil {
 		return nil, err
 	}
-	if err := e.recordApprovalReply(ctx, sessionID, item.Tool, id, "approved", approvalPreview(req), req.Args["tool_call_id"]); err != nil {
+	if err := e.recordApprovalReply(ctx, sessionID, item.Tool, id, "approved", tools.Preview(req), req.ToolCallID); err != nil {
 		return nil, err
 	}
 	e.recordLifecycle(sessionID, "tool_execution_started", item.Command, map[string]string{"tool": string(item.Tool), "approval_id": strconv.FormatInt(id, 10)})
@@ -520,7 +510,7 @@ func (e *Engine) deny(ctx context.Context, _ int64, rawID string) (<-chan domain
 	}
 	toolCallID := ""
 	if req, err := requestFromStoredApproval(item.Tool, item.Command); err == nil {
-		toolCallID = req.Args["tool_call_id"]
+		toolCallID = req.ToolCallID
 	}
 	if err := e.recordApprovalReply(ctx, item.SessionID, item.Tool, id, "denied", approvalPreviewFromStored(item.Tool, item.Command), toolCallID); err != nil {
 		return nil, err
@@ -529,43 +519,13 @@ func (e *Engine) deny(ctx context.Context, _ int64, rawID string) (<-chan domain
 }
 
 func (e *Engine) persistToolResult(ctx context.Context, sessionID int64, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
-	summary, body := toolResultSummary(req.Tool, result)
-	msg, err := e.store.AddMessage(ctx, sessionID, domain.MessageRoleTool, summary)
+	events, err := e.registry.PersistResult(ctx, e.store, sessionID, req, result)
 	if err != nil {
 		return nil, err
 	}
-	metaPayload := map[string]string{"tool": string(req.Tool)}
-	for key, value := range req.Args {
-		if strings.TrimSpace(value) == "" {
-			continue
-		}
-		metaPayload[key] = value
-	}
-	meta, _ := json.Marshal(metaPayload)
-	if _, err := e.store.AddPart(ctx, msg.ID, domain.PartKindToolOutput, body, string(meta)); err != nil {
-		return nil, err
-	}
-	if result.DiffText != "" {
-		if _, err := e.store.AddPart(ctx, msg.ID, domain.PartKindDiff, result.DiffText, ""); err != nil {
-			return nil, err
-		}
-	}
-	e.recordLifecycle(sessionID, "tool_result_persisted", summary, map[string]string{"tool": string(req.Tool), "message_id": strconv.FormatInt(msg.ID, 10)})
-	return emitOnce(domain.Event{Kind: domain.EventKindToolResult, Text: body, Tool: req.Tool}), nil
-}
-
-func toolResultSummary(tool domain.ToolKind, result tools.Result) (string, string) {
-	output := strings.TrimSpace(result.Output)
-	switch {
-	case output != "":
-		return string(tool), result.Output
-	case strings.TrimSpace(result.DiffText) != "":
-		body := fmt.Sprintf("%s completed and produced a diff", tool)
-		return body, body
-	default:
-		body := fmt.Sprintf("%s completed with no output", tool)
-		return body, body
-	}
+	summary, _ := tools.SummarizeResult(req, result)
+	e.recordLifecycle(sessionID, "tool_result_persisted", summary, map[string]string{"tool": string(req.Tool)})
+	return events, nil
 }
 
 func emitOnce(evt domain.Event) <-chan domain.Event {
@@ -721,17 +681,10 @@ func structuredAssistantMessage(parts []domain.Part) (provider.Message, bool) {
 		switch part.Kind {
 		case domain.PartKindToolCall:
 			call, ok := storedToolCall(part)
-			if !ok || strings.TrimSpace(call.ID) == "" {
+			if !ok || strings.TrimSpace(call.ToolCallID) == "" {
 				return provider.Message{}, false
 			}
-			toolCalls = append(toolCalls, provider.ToolCall{
-				ID:   call.ID,
-				Type: "function",
-				Function: provider.FunctionCall{
-					Name:      string(call.Tool),
-					Arguments: toolCallArgumentsJSON(call),
-				},
-			})
+			toolCalls = append(toolCalls, tools.ToolCall(call))
 		case domain.PartKindText:
 			if strings.TrimSpace(part.Body) != "" {
 				textChunks = append(textChunks, strings.TrimSpace(part.Body))
@@ -857,10 +810,10 @@ func compactionSummary(parts []domain.Part) (string, bool) {
 
 func toolCallContext(part domain.Part) string {
 	if call, ok := storedToolCall(part); ok {
-		return "Tool call:\n" + call.contextString()
+		return "Tool call:\n" + call.ContextString()
 	}
 	if call, _ := parseToolCall(part.Body); call != nil {
-		return "Tool call:\n" + call.contextString()
+		return "Tool call:\n" + call.ContextString()
 	}
 	body := strings.TrimSpace(part.Body)
 	if body == "" {
@@ -869,44 +822,18 @@ func toolCallContext(part domain.Part) string {
 	return "Tool call:\n" + body
 }
 
-func storedToolCall(part domain.Part) (toolCall, bool) {
+func storedToolCall(part domain.Part) (tools.Request, bool) {
 	if strings.TrimSpace(part.MetaJSON) == "" {
-		return toolCall{}, false
+		return tools.Request{}, false
 	}
-	var call toolCall
-	if err := json.Unmarshal([]byte(part.MetaJSON), &call); err != nil || call.Tool == "" {
-		return toolCall{}, false
+	call, err := tools.RequestFromMeta(part.MetaJSON)
+	if err != nil || call.Tool == "" {
+		return tools.Request{}, false
 	}
 	return call, true
 }
 
-func toolCallArgumentsJSON(call toolCall) string {
-	args := map[string]string{}
-	switch call.Tool {
-	case domain.ToolKindRead:
-		args["path"] = call.Path
-	case domain.ToolKindGlob, domain.ToolKindGrep:
-		args["pattern"] = call.Pattern
-	case domain.ToolKindBash:
-		args["command"] = call.Command
-	case domain.ToolKindApplyPatch:
-		args["path"] = call.Path
-		args["content"] = call.Content
-	case domain.ToolKindTask:
-		args["body"] = call.Body
-	case domain.ToolKindQuestion:
-		args["question"] = call.Body
-	case domain.ToolKindWebFetch:
-		args["url"] = call.URL
-	case domain.ToolKindWebSearch:
-		args["query"] = call.Body
-	}
-	data, err := json.Marshal(args)
-	if err != nil {
-		return "{}"
-	}
-	return string(data)
-}
+func toolCallArgumentsJSON(call tools.Request) string { return call.ArgumentsJSON() }
 
 func partMetaMap(part domain.Part) map[string]string {
 	if strings.TrimSpace(part.MetaJSON) == "" {
@@ -917,95 +844,6 @@ func partMetaMap(part domain.Part) map[string]string {
 		return nil
 	}
 	return meta
-}
-
-func (c toolCall) contextString() string {
-	payload := map[string]string{"tool": string(c.Tool)}
-	if c.ID != "" {
-		payload["tool_call_id"] = c.ID
-	}
-	switch c.Tool {
-	case domain.ToolKindRead:
-		payload["path"] = c.Path
-	case domain.ToolKindGlob, domain.ToolKindGrep:
-		payload["pattern"] = c.Pattern
-	case domain.ToolKindBash:
-		payload["command"] = c.Command
-	case domain.ToolKindApplyPatch:
-		payload["path"] = c.Path
-		payload["content"] = c.Content
-	case domain.ToolKindTask:
-		payload["body"] = c.Body
-	case domain.ToolKindWebFetch:
-		payload["url"] = c.URL
-	}
-	data, err := json.Marshal(payload)
-	if err != nil {
-		return fmt.Sprintf(`{"tool":"%s"}`, c.Tool)
-	}
-	return string(data)
-}
-
-func toolCallFromProvider(call provider.ToolCall) (toolCall, error) {
-	parsed := toolCall{
-		ID:   strings.TrimSpace(call.ID),
-		Tool: domain.ToolKind(strings.TrimSpace(call.Function.Name)),
-	}
-	if parsed.Tool == "" {
-		return toolCall{}, fmt.Errorf("provider tool call missing function name")
-	}
-	var args map[string]string
-	if err := json.Unmarshal([]byte(call.Function.Arguments), &args); err != nil {
-		return toolCall{}, fmt.Errorf("decode tool arguments for %s: %w", parsed.Tool, err)
-	}
-	switch parsed.Tool {
-	case domain.ToolKindRead:
-		parsed.Path = args["path"]
-	case domain.ToolKindGlob, domain.ToolKindGrep:
-		parsed.Pattern = args["pattern"]
-	case domain.ToolKindBash:
-		parsed.Command = args["command"]
-	case domain.ToolKindApplyPatch:
-		parsed.Path = args["path"]
-		parsed.Content = args["content"]
-	case domain.ToolKindTask:
-		parsed.Body = args["body"]
-	case domain.ToolKindQuestion:
-		parsed.Body = args["question"]
-	case domain.ToolKindWebFetch:
-		parsed.URL = args["url"]
-	case domain.ToolKindWebSearch:
-		parsed.Body = args["query"]
-	default:
-		return toolCall{}, fmt.Errorf("unsupported provider tool %q", parsed.Tool)
-	}
-	if parsed.ID == "" {
-		parsed.ID = "call_" + strings.ToLower(string(parsed.Tool))
-	}
-	return parsed, nil
-}
-
-func modelToolDefinitions() []provider.ToolDefinition {
-	return []provider.ToolDefinition{
-		modelToolDefinition("read", "Read a file from the workspace", `{"type":"object","properties":{"path":{"type":"string","description":"Relative file path to read"}},"required":["path"],"additionalProperties":false}`),
-		modelToolDefinition("glob", "Find workspace paths matching a glob pattern", `{"type":"object","properties":{"pattern":{"type":"string","description":"Glob pattern relative to the workspace"}},"required":["pattern"],"additionalProperties":false}`),
-		modelToolDefinition("grep", "Search for text within workspace files", `{"type":"object","properties":{"pattern":{"type":"string","description":"Text or regex to search for"}},"required":["pattern"],"additionalProperties":false}`),
-		modelToolDefinition("bash", "Run a shell command in the workspace", `{"type":"object","properties":{"command":{"type":"string","description":"Shell command to execute"}},"required":["command"],"additionalProperties":false}`),
-		modelToolDefinition("apply_patch", "Write file content directly to a workspace path", `{"type":"object","properties":{"path":{"type":"string","description":"Relative file path to overwrite"},"content":{"type":"string","description":"Full new file contents"}},"required":["path","content"],"additionalProperties":false}`),
-		modelToolDefinition("task", "Record a short task for later follow-up", `{"type":"object","properties":{"body":{"type":"string","description":"Short task description"}},"required":["body"],"additionalProperties":false}`),
-		modelToolDefinition("webfetch", "Fetch the contents of a URL", `{"type":"object","properties":{"url":{"type":"string","description":"Fully qualified URL"}},"required":["url"],"additionalProperties":false}`),
-	}
-}
-
-func modelToolDefinition(name, description, schema string) provider.ToolDefinition {
-	return provider.ToolDefinition{
-		Type: "function",
-		Function: provider.FunctionDefinition{
-			Name:        name,
-			Description: description,
-			Parameters:  json.RawMessage(schema),
-		},
-	}
 }
 
 func systemPrompt() string {
@@ -1049,14 +887,14 @@ Use this structure:
 `)
 }
 
-func parseToolCall(text string) (*toolCall, string) {
+func parseToolCall(text string) (*tools.Request, string) {
 	re := regexp.MustCompile(`(?s)<koder_tool>\s*(\{.*?\})\s*</koder_tool>`)
 	match := re.FindStringSubmatch(text)
 	if len(match) != 2 {
 		return nil, text
 	}
-	var call toolCall
-	if err := json.Unmarshal([]byte(match[1]), &call); err != nil || call.Tool == "" {
+	call, err := tools.RequestFromMeta(match[1])
+	if err != nil || call.Tool == "" {
 		return nil, text
 	}
 	plain := strings.TrimSpace(re.ReplaceAllString(text, ""))
@@ -1139,65 +977,31 @@ func (e *Engine) compactSession(ctx context.Context, session domain.Session, cli
 	return nil
 }
 
-func (e *Engine) handleModelToolCall(ctx context.Context, session domain.Session, call toolCall) (domain.Event, error) {
+func (e *Engine) handleModelToolCall(ctx context.Context, session domain.Session, req tools.Request) (domain.Event, error) {
 	sessionID := session.ID
-	req := tools.Request{Tool: call.Tool, Args: map[string]string{}}
-	if call.ID != "" {
-		req.Args["tool_call_id"] = call.ID
+	req, err := tools.Normalize(req)
+	if err != nil {
+		return domain.Event{}, err
 	}
-	commandText := ""
-	switch call.Tool {
-	case domain.ToolKindRead:
-		req.Args["path"] = call.Path
-		commandText = call.Path
-	case domain.ToolKindGlob:
-		req.Args["pattern"] = call.Pattern
-		commandText = call.Pattern
-	case domain.ToolKindGrep:
-		req.Args["pattern"] = call.Pattern
-		commandText = call.Pattern
-	case domain.ToolKindBash:
-		req.Args["command"] = call.Command
-		commandText = call.Command
-	case domain.ToolKindApplyPatch:
-		req.Args["path"] = call.Path
-		req.Args["content"] = call.Content
-		commandText = call.Path
-	case domain.ToolKindTask:
-		req.Args["body"] = call.Body
-		commandText = call.Body
-	case domain.ToolKindWebFetch:
-		req.Args["url"] = call.URL
-		commandText = call.URL
-	default:
-		return domain.Event{}, fmt.Errorf("unsupported model tool %q", call.Tool)
+	toolSpec, ok := tools.Lookup(req.Tool)
+	if !ok {
+		return domain.Event{}, fmt.Errorf("unsupported model tool %q", req.Tool)
 	}
 
-	mode := permission.Evaluate(e.cfg.Permissions, effectivePermissionProfile(e.cfg, session), permissionRequest(req))
+	mode := domain.PermissionModeAllow
+	if !toolSpec.BypassesPermission() {
+		mode = permission.Evaluate(e.cfg.Permissions, effectivePermissionProfile(e.cfg, session), permissionRequest(req))
+	}
 	if mode == domain.PermissionModeDeny {
 		msg, err := e.store.AddMessage(ctx, sessionID, domain.MessageRoleTool, string(req.Tool))
 		if err != nil {
 			return domain.Event{}, err
 		}
-		metaPayload := map[string]string{"tool": string(req.Tool)}
-		if toolCallID := strings.TrimSpace(req.Args["tool_call_id"]); toolCallID != "" {
-			metaPayload["tool_call_id"] = toolCallID
-		}
-		meta, _ := json.Marshal(metaPayload)
+		meta, _ := json.Marshal(req)
 		if _, err := e.store.AddPart(ctx, msg.ID, domain.PartKindToolOutput, fmt.Sprintf("%s denied by policy", req.Tool), string(meta)); err != nil {
 			return domain.Event{}, err
 		}
 		return domain.Event{Kind: domain.EventKindToolResult, Tool: req.Tool, Text: fmt.Sprintf("%s denied by policy", req.Tool)}, nil
-	}
-	if req.Tool == domain.ToolKindTask {
-		task, err := e.store.AddTask(ctx, sessionID, req.Args["body"], domain.TaskStatusPending)
-		if err != nil {
-			return domain.Event{}, err
-		}
-		if err := e.recordTaskUpdate(ctx, sessionID, task.Body, task.Status); err != nil {
-			return domain.Event{}, err
-		}
-		return domain.Event{Kind: domain.EventKindTaskUpdate, Text: task.Body, Tool: req.Tool}, nil
 	}
 	if mode == domain.PermissionModeAsk {
 		storedArgs, err := serializeRequest(req)
@@ -1208,8 +1012,8 @@ func (e *Engine) handleModelToolCall(ctx context.Context, session domain.Session
 		if err != nil {
 			return domain.Event{}, err
 		}
-		preview := firstNonEmpty(commandText, approvalPreview(req))
-		if err := e.recordApprovalRequest(ctx, sessionID, req.Tool, approval.ID, preview, req.Args["tool_call_id"]); err != nil {
+		preview := tools.Preview(req)
+		if err := e.recordApprovalRequest(ctx, sessionID, req.Tool, approval.ID, preview, req.ToolCallID); err != nil {
 			return domain.Event{}, err
 		}
 		return domain.Event{
@@ -1220,7 +1024,7 @@ func (e *Engine) handleModelToolCall(ctx context.Context, session domain.Session
 				"approval_id":  strconv.FormatInt(approval.ID, 10),
 				"tool":         string(req.Tool),
 				"command":      preview,
-				"tool_call_id": req.Args["tool_call_id"],
+				"tool_call_id": req.ToolCallID,
 			},
 		}, nil
 	}
@@ -1246,12 +1050,16 @@ func effectivePermissionProfile(cfg config.Config, session domain.Session) strin
 func permissionRequest(req tools.Request) permission.Request {
 	return permission.Request{
 		Tool:    req.Tool,
-		Pattern: approvalPreview(req),
+		Pattern: tools.Preview(req),
 	}
 }
 
 func serializeRequest(req tools.Request) (string, error) {
-	data, err := json.Marshal(req.Args)
+	payload := maps.Clone(req.Args)
+	if strings.TrimSpace(req.ToolCallID) != "" {
+		payload["tool_call_id"] = req.ToolCallID
+	}
+	data, err := json.Marshal(payload)
 	if err != nil {
 		return "", fmt.Errorf("serialize request: %w", err)
 	}
@@ -1259,47 +1067,7 @@ func serializeRequest(req tools.Request) (string, error) {
 }
 
 func requestFromStoredApproval(tool domain.ToolKind, raw string) (tools.Request, error) {
-	var args map[string]string
-	if err := json.Unmarshal([]byte(raw), &args); err != nil {
-		args = legacyArgs(tool, raw)
-	}
-	return tools.Request{Tool: tool, Args: args}, nil
-}
-
-func legacyArgs(tool domain.ToolKind, raw string) map[string]string {
-	switch tool {
-	case domain.ToolKindRead:
-		return map[string]string{"path": raw}
-	case domain.ToolKindGlob, domain.ToolKindGrep:
-		return map[string]string{"pattern": raw}
-	case domain.ToolKindBash:
-		return map[string]string{"command": raw}
-	case domain.ToolKindWebFetch:
-		return map[string]string{"url": raw}
-	case domain.ToolKindTask:
-		return map[string]string{"body": raw}
-	default:
-		return map[string]string{"command": raw}
-	}
-}
-
-func approvalPreview(req tools.Request) string {
-	switch req.Tool {
-	case domain.ToolKindRead:
-		return req.Args["path"]
-	case domain.ToolKindGlob, domain.ToolKindGrep:
-		return req.Args["pattern"]
-	case domain.ToolKindBash:
-		return req.Args["command"]
-	case domain.ToolKindApplyPatch:
-		return req.Args["path"]
-	case domain.ToolKindTask:
-		return req.Args["body"]
-	case domain.ToolKindWebFetch:
-		return req.Args["url"]
-	default:
-		return string(req.Tool)
-	}
+	return tools.RequestFromStored(tool, raw)
 }
 
 func firstNonEmpty(values ...string) string {
@@ -1376,5 +1144,5 @@ func approvalPreviewFromStored(tool domain.ToolKind, raw string) string {
 	if err != nil {
 		return raw
 	}
-	return approvalPreview(req)
+	return tools.Preview(req)
 }

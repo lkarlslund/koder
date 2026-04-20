@@ -1,4 +1,4 @@
-package tools
+package tools_test
 
 import (
 	"context"
@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/tools"
+	_ "github.com/lkarlslund/koder/internal/tools/all"
 )
 
 func TestReadAndPatch(t *testing.T) {
@@ -15,8 +17,8 @@ func TestReadAndPatch(t *testing.T) {
 	if err := os.WriteFile(path, []byte("before"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	registry := NewRegistry(dir)
-	readResult, err := registry.Execute(context.Background(), Request{
+	registry := tools.NewRegistry(dir)
+	readResult, err := registry.Execute(context.Background(), tools.Request{
 		Tool: domain.ToolKindRead,
 		Args: map[string]string{"path": "file.txt"},
 	})
@@ -26,7 +28,7 @@ func TestReadAndPatch(t *testing.T) {
 	if readResult.Output != "before" {
 		t.Fatalf("unexpected read result: %q", readResult.Output)
 	}
-	patchResult, err := registry.Execute(context.Background(), Request{
+	patchResult, err := registry.Execute(context.Background(), tools.Request{
 		Tool: domain.ToolKindApplyPatch,
 		Args: map[string]string{"path": "file.txt", "content": "after"},
 	})
