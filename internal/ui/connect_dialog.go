@@ -270,21 +270,8 @@ func (d *ConnectDialog) formView(width int, palette theme.Palette) string {
 		"",
 	}
 	for idx, field := range d.formFields() {
-		value := d.fieldValue(field.ID)
-		if field.ID == "api_key" && value != "" {
-			value = strings.Repeat("•", minVisibleRunes(len([]rune(value)), 12))
-		}
-		if field.ID == "api_key" && value == "" {
-			value = "(required)"
-		}
-		if field.ID == "model" && value == "" {
-			value = "(set a model)"
-		}
-		row := ChoiceRow{
-			Label:       field.Label,
-			Description: field.Description,
-			Value:       value,
-		}.View(dialogWidth-8, palette, d.focus == connectFocusFields && d.fieldIndex == idx)
+		active := d.focus == connectFocusFields && d.fieldIndex == idx
+		row := d.renderFormField(field, dialogWidth-8, palette, active)
 		lines = append(lines, row, "")
 	}
 	if len(d.models) > 0 {
@@ -307,6 +294,85 @@ func (d *ConnectDialog) formView(width int, palette theme.Palette) string {
 		Footer: "Type to edit  Ctrl+T test  Enter select  Esc cancel",
 		Width:  dialogWidth,
 	}.View(palette)
+}
+
+func (d ConnectDialog) renderFormField(field connectField, width int, palette theme.Palette, active bool) string {
+	label := lipgloss.NewStyle().Bold(true).Render(field.Label)
+	desc := lipgloss.NewStyle().
+		Width(width).
+		Foreground(palette.AssistantTimestampText).
+		Render(truncateText(field.Description, width))
+
+	value := d.fieldValue(field.ID)
+	if active {
+		return strings.Join([]string{
+			label,
+			desc,
+			d.renderEditorValue(field.ID, width, palette),
+		}, "\n")
+	}
+
+	display := d.displayValue(field.ID)
+	row := lipgloss.JoinHorizontal(
+		lipgloss.Top,
+		lipgloss.NewStyle().Width(maxInt(12, width-18)).Bold(true).Render(truncateText(field.Label, maxInt(12, width-18))),
+		lipgloss.NewStyle().Foreground(palette.ActivityText).Render(truncateText(display, 16)),
+	)
+	if strings.TrimSpace(value) == "" {
+		row = lipgloss.JoinHorizontal(
+			lipgloss.Top,
+			lipgloss.NewStyle().Width(maxInt(12, width-18)).Bold(true).Render(truncateText(field.Label, maxInt(12, width-18))),
+			lipgloss.NewStyle().Foreground(palette.AssistantTimestampText).Render(truncateText(display, 16)),
+		)
+	}
+	return strings.Join([]string{row, desc}, "\n")
+}
+
+func (d ConnectDialog) renderEditorValue(fieldID string, width int, palette theme.Palette) string {
+	value := d.fieldValue(fieldID)
+	if fieldID == "api_key" {
+		value = strings.Repeat("•", len([]rune(value)))
+	}
+	placeholder := d.placeholderValue(fieldID)
+	editorWidth := maxInt(12, width)
+	content := fitEditorTail(value, placeholder, editorWidth-3)
+	line := " " + content + " "
+	style := lipgloss.NewStyle().
+		Width(editorWidth).
+		Background(palette.UserTextBackground).
+		Foreground(palette.UserTextForeground)
+	if strings.TrimSpace(value) == "" {
+		style = style.Foreground(palette.ComposerMutedText)
+	}
+	return style.Render(line)
+}
+
+func (d ConnectDialog) displayValue(fieldID string) string {
+	value := d.fieldValue(fieldID)
+	if fieldID == "api_key" {
+		if value == "" {
+			return "(required)"
+		}
+		return strings.Repeat("•", minVisibleRunes(len([]rune(value)), 12))
+	}
+	if fieldID == "model" && strings.TrimSpace(value) == "" {
+		return "(set a model)"
+	}
+	if strings.TrimSpace(value) == "" {
+		return "(empty)"
+	}
+	return value
+}
+
+func (d ConnectDialog) placeholderValue(fieldID string) string {
+	switch fieldID {
+	case "api_key":
+		return "(required)"
+	case "model":
+		return "(set a model)"
+	default:
+		return ""
+	}
 }
 
 func (d *ConnectDialog) currentProvider() (provider.Descriptor, bool) {
@@ -543,6 +609,23 @@ func minVisibleRunes(value, max int) int {
 		return value
 	}
 	return max
+}
+
+func fitEditorTail(value, placeholder string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	if strings.TrimSpace(value) == "" {
+		if lipgloss.Width(placeholder) <= width {
+			return placeholder
+		}
+		return truncateText(placeholder, width)
+	}
+	runes := []rune(value)
+	if len(runes) >= width {
+		return "…" + string(runes[len(runes)-maxInt(1, width-1):]) + "█"
+	}
+	return value + "█"
 }
 
 func minInt(a, b int) int {

@@ -1,12 +1,14 @@
 package ui
 
 import (
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/provider"
+	"github.com/lkarlslund/koder/internal/theme"
 )
 
 func TestConnectDialogSelectsProviderAndSavesDraft(t *testing.T) {
@@ -58,5 +60,20 @@ func TestConnectDialogCyclesDiscoveredModels(t *testing.T) {
 
 	if dialog.draft.Model != "model-b" {
 		t.Fatalf("expected next discovered model, got %q", dialog.draft.Model)
+	}
+}
+
+func TestConnectDialogViewShowsEditorCursorAndTail(t *testing.T) {
+	dialog := NewConnectDialog(provider.Catalog(), map[string]config.Provider{})
+	dialog.selectProvider(provider.Catalog()[0])
+	dialog.draft.BaseURL = "https://example.com/very/long/path/that/should/show/the/end"
+	dialog.fieldIndex = 1
+
+	got := dialog.View(90, theme.Resolve("tokyonight").Palette)
+	if !strings.Contains(got, "█") {
+		t.Fatalf("expected editor cursor in view, got %q", got)
+	}
+	if !strings.Contains(got, "show/the/end") {
+		t.Fatalf("expected editor to keep tail of typed value visible, got %q", got)
 	}
 }
