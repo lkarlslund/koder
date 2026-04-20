@@ -2,12 +2,15 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/lkarlslund/koder/internal/config"
+	"github.com/lkarlslund/koder/internal/domain"
 )
 
 func TestListModels(t *testing.T) {
@@ -86,5 +89,28 @@ func TestCompleteChatToolCalls(t *testing.T) {
 	}
 	if resp.ToolCalls[0].ID != "call_1" || resp.ToolCalls[0].Function.Name != "bash" {
 		t.Fatalf("unexpected tool call: %#v", resp.ToolCalls[0])
+	}
+}
+
+func TestMessageMarshalJSONWithContentParts(t *testing.T) {
+	buf, err := json.Marshal(Message{
+		Role: domain.MessageRoleUser,
+		ContentParts: []ContentPart{
+			TextPart("hello"),
+			ImagePart("image/png", []byte("pngbytes")),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := string(buf)
+	if !strings.Contains(raw, `"content":[`) {
+		t.Fatalf("expected multipart content, got %s", raw)
+	}
+	if !strings.Contains(raw, `"type":"text"`) || !strings.Contains(raw, `"type":"image_url"`) {
+		t.Fatalf("expected text and image content parts, got %s", raw)
+	}
+	if !strings.Contains(raw, `"url":"data:image/png;base64,`) {
+		t.Fatalf("expected image data URL, got %s", raw)
 	}
 }

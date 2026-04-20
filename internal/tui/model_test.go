@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -14,6 +16,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
 
+	"github.com/lkarlslund/koder/internal/attachment"
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/debugsrv"
 	"github.com/lkarlslund/koder/internal/domain"
@@ -179,6 +182,7 @@ func TestAltEnterInsertsNewlineInsteadOfSending(t *testing.T) {
 func TestCtrlVPastesClipboardText(t *testing.T) {
 	m := Model{
 		composer:          textarea.New(),
+		attachmentFiles:   attachment.NewManager(t.TempDir()),
 		readClipboardText: func() (string, error) { return "pasted text", nil },
 	}
 	m.composer.SetValue("hello ")
@@ -194,6 +198,151 @@ func TestCtrlVPastesClipboardText(t *testing.T) {
 	}
 	if next.status != "Pasted from clipboard" {
 		t.Fatalf("unexpected paste status: %q", next.status)
+	}
+}
+
+func TestCtrlVPastesClipboardImageAsAttachment(t *testing.T) {
+	m := Model{
+		composer:          textarea.New(),
+		attachmentFiles:   attachment.NewManager(t.TempDir()),
+		readClipboardText: func() (string, error) { return "", nil },
+		readClipboardImage: func() ([]byte, error) {
+			return []byte("\x89PNG\r\n\x1a\nfake"), nil
+		},
+	}
+
+	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlV})
+	next := updated.(*Model)
+	if cmd == nil {
+		t.Fatal("expected title sync command after image attach")
+	}
+	if len(next.draftAttachments) != 1 {
+		t.Fatalf("expected one draft attachment, got %#v", next.draftAttachments)
+	}
+	if next.composer.Value() != "" {
+		t.Fatalf("expected composer text to stay empty, got %q", next.composer.Value())
+	}
+	if !strings.Contains(next.status, "Attached image") {
+		t.Fatalf("unexpected attach status: %q", next.status)
+	}
+}
+
+func TestCtrlVPastesAttachmentFilePath(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "note.txt")
+	if err := os.WriteFile(path, []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m := Model{
+		composer:          textarea.New(),
+		attachmentFiles:   attachment.NewManager(root),
+		readClipboardText: func() (string, error) { return path, nil },
+		readClipboardImage: func() ([]byte, error) {
+			return nil, nil
+		},
+	}
+
+	updated, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlV})
+	next := updated.(*Model)
+	if len(next.draftAttachments) != 1 {
+		t.Fatalf("expected one draft attachment, got %#v", next.draftAttachments)
+	}
+	if next.draftAttachments[0].Name != "note.txt" {
+		t.Fatalf("unexpected attachment name: %#v", next.draftAttachments[0])
+	}
+}
+
+func TestBackspaceRemovesLastDraftAttachmentWhenComposerEmpty(t *testing.T) {
+	root := t.TempDir()
+	m := Model{
+		composer:        textarea.New(),
+		attachmentFiles: attachment.NewManager(root),
+		draftAttachments: []attachment.Draft{{
+			Metadata: attachment.Metadata{Name: "note.txt", MIME: "text/plain", Path: filepath.Join(root, "note.txt")},
+		}},
+	}
+
+	updated, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyBackspace})
+	next := updated.(*Model)
+	if len(next.draftAttachments) != 0 {
+		t.Fatalf("expected attachment to be removed, got %#v", next.draftAttachments)
+	}
+}
+
+func TestForkSessionCopiesAttachmentFiles(t *testing.T) {
+	root := t.TempDir()
+	st, err := store.OpenWithOptions(root, store.Options{Backend: store.BackendPebble})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	manager := attachment.NewManager(root)
+	cfg := config.Default()
+	cfg.DefaultProvider = "openai"
+	cfg.DefaultModel = "gpt-5.4"
+	cfg.Providers = map[string]config.Provider{
+		"openai": {BaseURL: "https://api.openai.com/v1", APIKey: "secret", DefaultModel: "gpt-5.4"},
+	}
+	m := Model{
+		cfg:             cfg,
+		store:           st,
+		attachmentFiles: manager,
+		workdir:         root,
+	}
+
+	session, err := st.CreateSession(context.Background(), "test", "openai", "gpt-5.4", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	msg, err := st.AddMessage(context.Background(), session.ID, domain.MessageRoleUser, "hello")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(root, "note.txt")
+	if err := os.WriteFile(src, []byte("fork me"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	draft, err := manager.ImportFile(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	meta, err := manager.AdoptDraft(draft, session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := attachment.EncodeMeta(meta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.AddPart(context.Background(), msg.ID, domain.PartKindAttachment, meta.Name, raw); err != nil {
+		t.Fatal(err)
+	}
+
+	msgAny := m.forkSessionCmd(session.ID)()
+	forked, ok := msgAny.(forkSessionMsg)
+	if !ok {
+		t.Fatalf("unexpected fork message: %#v", msgAny)
+	}
+	if forked.err != nil {
+		t.Fatal(forked.err)
+	}
+	if forked.forkedID == session.ID {
+		t.Fatal("expected distinct forked session id")
+	}
+	forkParts := forked.load.parts[forked.load.messages[0].ID]
+	if len(forkParts) != 1 {
+		t.Fatalf("unexpected forked parts: %#v", forkParts)
+	}
+	forkMeta, err := attachment.DecodeMeta(forkParts[0].MetaJSON)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if forkMeta.Path == meta.Path {
+		t.Fatalf("expected copied attachment path, got %q", forkMeta.Path)
+	}
+	if _, err := os.Stat(forkMeta.Path); err != nil {
+		t.Fatalf("expected copied attachment file: %v", err)
 	}
 }
 

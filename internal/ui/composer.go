@@ -21,6 +21,10 @@ type ComposerProps struct {
 	MutedCursorStyle lipgloss.Style
 }
 
+type AttachmentItem struct {
+	Label string
+}
+
 func RenderComposer(props ComposerProps) string {
 	width := maxInt(1, props.Width)
 	prompt := props.PromptGlyph + " "
@@ -86,4 +90,20 @@ func RenderHalfBlockLine(width int, char string, palette theme.Palette) string {
 		Foreground(palette.UserTextBackground).
 		Render(strings.Repeat(char, maxInt(1, width-1)))
 	return bar + fill
+}
+
+func RenderAttachmentRows(items []AttachmentItem, width int, palette theme.Palette) string {
+	if len(items) == 0 || width <= 0 {
+		return ""
+	}
+	style := lipgloss.NewStyle().
+		Width(width).
+		Foreground(palette.MarkdownText).
+		Background(palette.UserTextBackground).
+		Padding(0, 1)
+	rows := make([]string, 0, len(items))
+	for _, item := range items {
+		rows = append(rows, style.Render(ansi.Truncate(item.Label, maxInt(1, width-2), "")))
+	}
+	return strings.Join(rows, "\n")
 }

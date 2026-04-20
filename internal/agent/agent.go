@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/lkarlslund/koder/internal/attachment"
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/debugsrv"
 	"github.com/lkarlslund/koder/internal/domain"
@@ -25,6 +26,7 @@ type Engine struct {
 	store    *store.Store
 	registry *tools.Registry
 	debug    *debugsrv.Recorder
+	files    *attachment.Manager
 }
 
 type toolCall struct {
@@ -40,7 +42,13 @@ type toolCall struct {
 }
 
 func New(cfg config.Config, st *store.Store, registry *tools.Registry, debug *debugsrv.Recorder) *Engine {
-	return &Engine{cfg: cfg, store: st, registry: registry, debug: debug}
+	return &Engine{
+		cfg:      cfg,
+		store:    st,
+		registry: registry,
+		debug:    debug,
+		files:    attachment.NewManager(cfg.StateDir()),
+	}
 }
 
 func (e *Engine) UpdateConfig(cfg config.Config) {
@@ -48,7 +56,11 @@ func (e *Engine) UpdateConfig(cfg config.Config) {
 }
 
 func (e *Engine) RunPrompt(ctx context.Context, session domain.Session, prompt string) (<-chan domain.Event, error) {
-	return e.runModelPrompt(ctx, session, prompt)
+	return e.RunPromptWithAttachments(ctx, session, prompt, nil)
+}
+
+func (e *Engine) RunPromptWithAttachments(ctx context.Context, session domain.Session, prompt string, drafts []attachment.Draft) (<-chan domain.Event, error) {
+	return e.runModelPrompt(ctx, session, prompt, drafts)
 }
 
 func (e *Engine) SetPermissionProfile(ctx context.Context, sessionID int64, profile string) (<-chan domain.Event, error) {
@@ -94,7 +106,10 @@ func (e *Engine) Compact(ctx context.Context, sessionID int64) (<-chan domain.Ev
 	return out, nil
 }
 
-func (e *Engine) runModelPrompt(ctx context.Context, session domain.Session, prompt string) (<-chan domain.Event, error) {
+func (e *Engine) runModelPrompt(ctx context.Context, session domain.Session, prompt string, drafts []attachment.Draft) (<-chan domain.Event, error) {
+	if err := e.validatePromptAttachments(session, drafts); err != nil {
+		return nil, err
+	}
 	providerCfg, ok := e.cfg.Provider(session.ProviderID)
 	if !ok {
 		return nil, fmt.Errorf("provider %q not found", session.ProviderID)
@@ -129,16 +144,8 @@ func (e *Engine) runModelPrompt(ctx context.Context, session domain.Session, pro
 				return
 			}
 		}
-		userMsg, err := e.store.AddMessage(ctx, session.ID, domain.MessageRoleUser, prompt)
+		userMsg, err := e.persistUserPrompt(ctx, session, prompt, drafts)
 		if err != nil {
-			if interruptedErr(err) {
-				e.emitInterrupted(out, session.ID)
-				return
-			}
-			out <- domain.Event{Kind: domain.EventKindError, Err: err}
-			return
-		}
-		if _, err := e.store.AddPart(ctx, userMsg.ID, domain.PartKindText, prompt, ""); err != nil {
 			if interruptedErr(err) {
 				e.emitInterrupted(out, session.ID)
 				return
@@ -158,6 +165,32 @@ func (e *Engine) runModelPrompt(ctx context.Context, session domain.Session, pro
 		}
 	}()
 	return out, nil
+}
+
+func (e *Engine) persistUserPrompt(ctx context.Context, session domain.Session, prompt string, drafts []attachment.Draft) (domain.Message, error) {
+	userMsg, err := e.store.AddMessage(ctx, session.ID, domain.MessageRoleUser, prompt)
+	if err != nil {
+		return domain.Message{}, err
+	}
+	if strings.TrimSpace(prompt) != "" {
+		if _, err := e.store.AddPart(ctx, userMsg.ID, domain.PartKindText, prompt, ""); err != nil {
+			return domain.Message{}, err
+		}
+	}
+	for _, draft := range drafts {
+		meta, err := e.files.AdoptDraft(draft, session.ID)
+		if err != nil {
+			return domain.Message{}, err
+		}
+		raw, err := attachment.EncodeMeta(meta)
+		if err != nil {
+			return domain.Message{}, err
+		}
+		if _, err := e.store.AddPart(ctx, userMsg.ID, domain.PartKindAttachment, meta.Name, raw); err != nil {
+			return domain.Message{}, err
+		}
+	}
+	return userMsg, nil
 }
 
 func (e *Engine) continueModelTurn(ctx context.Context, session domain.Session, client *provider.Client, out chan<- domain.Event) error {
@@ -585,20 +618,32 @@ func (e *Engine) buildConversation(ctx context.Context, sessionID int64) ([]prov
 			}
 			continue
 		}
-		conversation = append(conversation, conversationMessagesForStoredMessage(msg, partsByMessage[msg.ID])...)
+		items, err := e.conversationMessagesForStoredMessage(msg, partsByMessage[msg.ID])
+		if err != nil {
+			return nil, err
+		}
+		conversation = append(conversation, items...)
 	}
 	return conversation, nil
 }
 
-func conversationMessagesForStoredMessage(msg domain.Message, parts []domain.Part) []provider.Message {
+func (e *Engine) conversationMessagesForStoredMessage(msg domain.Message, parts []domain.Part) ([]provider.Message, error) {
 	switch msg.Role {
 	case domain.MessageRoleAssistant:
 		if assistantMsg, ok := structuredAssistantMessage(parts); ok {
-			return []provider.Message{assistantMsg}
+			return []provider.Message{assistantMsg}, nil
 		}
 	case domain.MessageRoleTool:
 		if toolMsg, ok := structuredToolMessage(parts); ok {
-			return []provider.Message{toolMsg}
+			return []provider.Message{toolMsg}, nil
+		}
+	case domain.MessageRoleUser:
+		msg, ok, err := e.userMessageWithAttachments(parts)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			return []provider.Message{msg}, nil
 		}
 	}
 	content := stringifyParts(parts)
@@ -606,13 +651,58 @@ func conversationMessagesForStoredMessage(msg domain.Message, parts []domain.Par
 		content = msg.Summary
 	}
 	if strings.TrimSpace(content) == "" {
-		return nil
+		return nil, nil
 	}
 	role := msg.Role
 	if msg.Role == domain.MessageRoleTool {
 		role = domain.MessageRoleUser
 	}
-	return []provider.Message{{Role: role, Content: content}}
+	return []provider.Message{{Role: role, Content: content}}, nil
+}
+
+func (e *Engine) userMessageWithAttachments(parts []domain.Part) (provider.Message, bool, error) {
+	contentParts := make([]provider.ContentPart, 0, len(parts)+1)
+	plainText := make([]string, 0, 1)
+	var hasAttachments bool
+	for _, part := range parts {
+		switch part.Kind {
+		case domain.PartKindText:
+			if strings.TrimSpace(part.Body) != "" {
+				plainText = append(plainText, part.Body)
+				contentParts = append(contentParts, provider.TextPart(part.Body))
+			}
+		case domain.PartKindAttachment:
+			hasAttachments = true
+			meta, err := attachment.DecodeMeta(part.MetaJSON)
+			if err != nil {
+				return provider.Message{}, false, err
+			}
+			switch attachment.ClassifyMIME(meta.MIME) {
+			case attachment.KindText:
+				body, err := e.files.ReadText(meta)
+				if err != nil {
+					return provider.Message{}, false, err
+				}
+				contentParts = append(contentParts, provider.TextPart("Attached file "+meta.Name+":\n"+body))
+			case attachment.KindImage:
+				data, err := e.files.ReadBytes(meta)
+				if err != nil {
+					return provider.Message{}, false, err
+				}
+				contentParts = append(contentParts, provider.ImagePart(meta.MIME, data))
+			default:
+				return provider.Message{}, false, fmt.Errorf("unsupported attachment in conversation: %s", meta.MIME)
+			}
+		}
+	}
+	if !hasAttachments {
+		return provider.Message{}, false, nil
+	}
+	message := provider.Message{Role: domain.MessageRoleUser, ContentParts: contentParts}
+	if len(contentParts) == 0 && len(plainText) > 0 {
+		message.Content = strings.Join(plainText, "\n\n")
+	}
+	return message, true, nil
 }
 
 func structuredAssistantMessage(parts []domain.Part) (provider.Message, bool) {
@@ -695,6 +785,8 @@ func stringifyParts(parts []domain.Part) string {
 		switch part.Kind {
 		case domain.PartKindCompaction:
 			continue
+		case domain.PartKindAttachment:
+			continue
 		case domain.PartKindReasoning:
 			chunks = append(chunks, "Reasoning:\n"+part.Body)
 		case domain.PartKindToolCall:
@@ -714,6 +806,24 @@ func stringifyParts(parts []domain.Part) string {
 		}
 	}
 	return strings.TrimSpace(strings.Join(chunks, "\n\n"))
+}
+
+func (e *Engine) validatePromptAttachments(session domain.Session, drafts []attachment.Draft) error {
+	for _, draft := range drafts {
+		kind := attachment.ClassifyMIME(draft.MIME)
+		switch kind {
+		case attachment.KindText:
+			continue
+		case attachment.KindImage, attachment.KindPDF:
+			if provider.SupportsAttachment(session.ProviderID, session.ModelID, kind) {
+				continue
+			}
+			return fmt.Errorf("provider %s model %s does not support %s attachments", session.ProviderID, session.ModelID, kind)
+		default:
+			return fmt.Errorf("unsupported attachment type %q", draft.MIME)
+		}
+	}
+	return nil
 }
 
 func compactionSummary(parts []domain.Part) (string, bool) {

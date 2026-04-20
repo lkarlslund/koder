@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -19,6 +20,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/lkarlslund/koder/internal/agent"
+	"github.com/lkarlslund/koder/internal/attachment"
 	kclipboard "github.com/lkarlslund/koder/internal/clipboard"
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/debugsrv"
@@ -181,8 +183,9 @@ const (
 )
 
 type queuedPrompt struct {
-	Text string
-	Mode queuedPromptMode
+	Text        string
+	Mode        queuedPromptMode
+	Attachments []attachment.Draft
 }
 
 func (q queuedPrompt) modeLabel() string {
@@ -269,8 +272,11 @@ type Model struct {
 	debug              *debugsrv.Recorder
 	activeOpCancel     context.CancelFunc
 	queuedPrompt       *queuedPrompt
+	draftAttachments   []attachment.Draft
+	attachmentFiles    *attachment.Manager
 	interruptArmedAt   time.Time
 	readClipboardText  func() (string, error)
+	readClipboardImage func() ([]byte, error)
 	writeClipboardText func(string) error
 }
 
@@ -297,21 +303,22 @@ func New(cfg config.Config, st *store.Store, a *agent.Engine, mode StartupMode, 
 	}
 
 	return Model{
-		cfg:           cfg,
-		store:         st,
-		agent:         a,
-		renderer:      renderer,
-		palette:       tuiTheme.Palette,
-		viewport:      vp,
-		composer:      composer,
-		showSidebar:   cfg.UI.ShowSidebar,
-		showReasoning: cfg.UI.ShowReasoning,
-		parts:         make(map[int64][]domain.Part),
-		status:        "Ready",
-		workdir:       workdir,
-		startupMode:   mode,
-		mouseEnabled:  cfg.UI.Mouse,
-		debug:         debug,
+		cfg:             cfg,
+		store:           st,
+		agent:           a,
+		renderer:        renderer,
+		palette:         tuiTheme.Palette,
+		viewport:        vp,
+		composer:        composer,
+		showSidebar:     cfg.UI.ShowSidebar,
+		showReasoning:   cfg.UI.ShowReasoning,
+		parts:           make(map[int64][]domain.Part),
+		status:          "Ready",
+		workdir:         workdir,
+		startupMode:     mode,
+		mouseEnabled:    cfg.UI.Mouse,
+		debug:           debug,
+		attachmentFiles: attachment.NewManager(cfg.StateDir()),
 	}, nil
 }
 
@@ -395,6 +402,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.tasks = msg.tasks
 		m.workspace = msg.workspace
 		m.composer.Reset()
+		m.draftAttachments = nil
 		m.closePicker()
 		m.closeSessionDialog()
 		m.closeConnectDialog()
@@ -607,6 +615,11 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.pasteClipboardText()
 	case "ctrl+y":
 		return m.copyLatestAssistantMessage()
+	case "backspace":
+		if strings.TrimSpace(m.composer.Value()) == "" && m.poppedLastDraftAttachment() {
+			m.refreshViewport()
+			return m, m.syncWindowTitleCmd()
+		}
 	case "esc":
 		if m.loading {
 			return m.handleInterruptKey()
@@ -630,7 +643,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "enter":
 		prompt := strings.TrimSpace(m.composer.Value())
-		if prompt == "" {
+		if prompt == "" && len(m.draftAttachments) == 0 {
 			return m, nil
 		}
 		if m.loading {
@@ -644,11 +657,13 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.status = status
 			return m, nil
 		}
+		drafts := slices.Clone(m.draftAttachments)
 		m.composer.Reset()
+		m.draftAttachments = nil
 		m.updateSlashMenu()
-		m.appendLocalUserPrompt(prompt)
+		m.appendLocalUserPrompt(prompt, drafts)
 		m.startBusy(busyScopeTranscript, "Running…")
-		return m, tea.Batch(m.promptCmd(m.beginActiveOperation(), prompt), m.spinnerCmdIfNeeded())
+		return m, tea.Batch(m.promptCmd(m.beginActiveOperation(), prompt, drafts), m.spinnerCmdIfNeeded())
 	}
 
 	var cmd tea.Cmd
@@ -739,6 +754,9 @@ func (m *Model) renderFooter() string {
 	if menu := m.renderSlashMenu(); menu != "" {
 		parts = append(parts, menu)
 	}
+	if attachments := m.renderDraftAttachments(); attachments != "" {
+		parts = append(parts, attachments)
+	}
 	parts = append(parts, "")
 	parts = append(parts, m.renderComposer())
 	return ui.RenderFooter(parts)
@@ -774,6 +792,17 @@ func (m *Model) renderComposer() string {
 		CursorView:       cursorView,
 		MutedCursorStyle: muted,
 	})
+}
+
+func (m *Model) renderDraftAttachments() string {
+	if len(m.draftAttachments) == 0 {
+		return ""
+	}
+	items := make([]ui.AttachmentItem, 0, len(m.draftAttachments))
+	for _, draft := range m.draftAttachments {
+		items = append(items, ui.AttachmentItem{Label: m.attachmentLabel(draft.Metadata)})
+	}
+	return ui.RenderAttachmentRows(items, m.composerWidth(), m.palette)
 }
 
 func (m *Model) composerWidth() int {
@@ -1052,6 +1081,19 @@ func (m *Model) renderAssistantMessage(body, stamp string) string {
 	return ui.RenderAssistantMessageWidth(body, stamp, m.viewport.Width, m.palette)
 }
 
+func (m *Model) attachmentLabel(meta attachment.Metadata) string {
+	switch attachment.ClassifyMIME(meta.MIME) {
+	case attachment.KindImage:
+		return "[Image] " + meta.Name
+	case attachment.KindPDF:
+		return "[PDF] " + meta.Name
+	case attachment.KindText:
+		return "[Text] " + meta.Name
+	default:
+		return "[File] " + meta.Name
+	}
+}
+
 func (m *Model) renderMessageParts(parts []domain.Part) string {
 	var blocks []string
 	var reasoningBlocks []string
@@ -1095,6 +1137,17 @@ func (m *Model) renderMessageParts(parts []domain.Part) string {
 			flushText()
 			flushReasoning()
 			continue
+		case domain.PartKindAttachment:
+			flushText()
+			flushReasoning()
+			meta, err := attachment.DecodeMeta(part.MetaJSON)
+			if err != nil {
+				if body := strings.TrimSpace(part.Body); body != "" {
+					blocks = append(blocks, body)
+				}
+				continue
+			}
+			blocks = append(blocks, m.attachmentLabel(meta))
 		default:
 			flushText()
 			flushReasoning()
@@ -1128,6 +1181,16 @@ func (m *Model) renderUserMessageParts(parts []domain.Part) string {
 		switch part.Kind {
 		case domain.PartKindText:
 			textBuf.WriteString(part.Body)
+		case domain.PartKindAttachment:
+			flushText()
+			meta, err := attachment.DecodeMeta(part.MetaJSON)
+			if err != nil {
+				if body := strings.TrimSpace(part.Body); body != "" {
+					blocks = append(blocks, body)
+				}
+				continue
+			}
+			blocks = append(blocks, m.attachmentLabel(meta))
 		default:
 			flushText()
 			if body := strings.TrimSpace(part.Body); body != "" {
@@ -1203,7 +1266,7 @@ type loadMsg struct {
 	workspace workspace.Status
 }
 
-func (m Model) promptCmd(ctx context.Context, prompt string) tea.Cmd {
+func (m Model) promptCmd(ctx context.Context, prompt string, drafts []attachment.Draft) tea.Cmd {
 	return func() tea.Msg {
 		session := m.currentSession
 		if session.ID == 0 {
@@ -1213,7 +1276,7 @@ func (m Model) promptCmd(ctx context.Context, prompt string) tea.Cmd {
 				return runPromptMsg{err: err}
 			}
 		}
-		events, err := m.agent.RunPrompt(ctx, session, prompt)
+		events, err := m.agent.RunPromptWithAttachments(ctx, session, prompt, drafts)
 		return runPromptMsg{session: session, events: events, err: err}
 	}
 }
@@ -1313,6 +1376,30 @@ func (m Model) forkSessionCmd(sourceSessionID int64) tea.Cmd {
 		messages, parts, err := m.store.PartsForSession(ctx, forked.ID)
 		if err != nil {
 			return forkSessionMsg{err: err}
+		}
+		for _, msg := range messages {
+			for i, part := range parts[msg.ID] {
+				if part.Kind != domain.PartKindAttachment {
+					continue
+				}
+				meta, err := attachment.DecodeMeta(part.MetaJSON)
+				if err != nil {
+					return forkSessionMsg{err: err}
+				}
+				rewritten, err := m.attachmentFiles.CopyToSession(meta, forked.ID)
+				if err != nil {
+					return forkSessionMsg{err: err}
+				}
+				raw, err := attachment.EncodeMeta(rewritten)
+				if err != nil {
+					return forkSessionMsg{err: err}
+				}
+				if err := m.store.UpdatePartMetaJSON(ctx, part.ID, raw); err != nil {
+					return forkSessionMsg{err: err}
+				}
+				part.MetaJSON = raw
+				parts[msg.ID][i] = part
+			}
 		}
 		approvals, err := m.store.PendingApprovals(ctx, forked.ID)
 		if err != nil {
@@ -1465,6 +1552,7 @@ func (m Model) UpdateLoad(msg loadMsg) Model {
 	m.tasks = msg.tasks
 	m.workspace = msg.workspace
 	m.approvalChoice = 0
+	m.draftAttachments = nil
 	m.closePicker()
 	m.closeSessionDialog()
 	m.closePreferencesDialog()
@@ -1622,15 +1710,20 @@ func (m *Model) handleInterruptKey() (tea.Model, tea.Cmd) {
 
 func (m *Model) queueComposerPrompt(mode queuedPromptMode) (tea.Model, tea.Cmd) {
 	prompt := strings.TrimSpace(m.composer.Value())
-	if prompt == "" {
+	if prompt == "" && len(m.draftAttachments) == 0 {
 		return m, nil
 	}
 	if strings.HasPrefix(prompt, "/") {
 		m.status = "Wait for the current run to finish before using slash commands"
 		return m, m.syncWindowTitleCmd()
 	}
-	m.queuedPrompt = &queuedPrompt{Text: prompt, Mode: mode}
+	m.queuedPrompt = &queuedPrompt{
+		Text:        prompt,
+		Mode:        mode,
+		Attachments: slices.Clone(m.draftAttachments),
+	}
 	m.composer.Reset()
+	m.draftAttachments = nil
 	m.updateSlashMenu()
 	m.status = m.queuedPrompt.statusText()
 	return m, m.syncWindowTitleCmd()
@@ -1649,12 +1742,13 @@ func (m *Model) dequeuePromptCmd() tea.Cmd {
 		m.openConnectDialog()
 		m.status = status
 		m.composer.SetValue(item.Text)
+		m.draftAttachments = item.Attachments
 		m.updateSlashMenu()
 		return nil
 	}
-	m.appendLocalUserPrompt(item.Text)
+	m.appendLocalUserPrompt(item.Text, item.Attachments)
 	m.startBusy(busyScopeTranscript, item.runStatus())
-	return tea.Batch(m.promptCmd(m.beginActiveOperation(), item.Text), m.spinnerCmdIfNeeded())
+	return tea.Batch(m.promptCmd(m.beginActiveOperation(), item.Text, item.Attachments), m.spinnerCmdIfNeeded())
 }
 
 func (m *Model) finishOperationWithError(err error) (tea.Model, tea.Cmd) {
@@ -1694,7 +1788,7 @@ func (m *Model) quit() (tea.Model, tea.Cmd) {
 	return m, tea.Quit
 }
 
-func (m *Model) appendLocalUserPrompt(prompt string) {
+func (m *Model) appendLocalUserPrompt(prompt string, drafts []attachment.Draft) {
 	now := time.Now().UTC()
 	if m.parts == nil {
 		m.parts = make(map[int64][]domain.Part)
@@ -1707,13 +1801,31 @@ func (m *Model) appendLocalUserPrompt(prompt string) {
 		Summary:   prompt,
 		CreatedAt: now,
 	})
-	m.parts[messageID] = []domain.Part{{
-		ID:        m.nextPendingID(),
-		MessageID: messageID,
-		Kind:      domain.PartKindText,
-		Body:      prompt,
-		CreatedAt: now,
-	}}
+	var parts []domain.Part
+	if strings.TrimSpace(prompt) != "" {
+		parts = append(parts, domain.Part{
+			ID:        m.nextPendingID(),
+			MessageID: messageID,
+			Kind:      domain.PartKindText,
+			Body:      prompt,
+			CreatedAt: now,
+		})
+	}
+	for _, draft := range drafts {
+		raw, err := attachment.EncodeMeta(draft.Metadata)
+		if err != nil {
+			continue
+		}
+		parts = append(parts, domain.Part{
+			ID:        m.nextPendingID(),
+			MessageID: messageID,
+			Kind:      domain.PartKindAttachment,
+			Body:      draft.Name,
+			MetaJSON:  raw,
+			CreatedAt: now,
+		})
+	}
+	m.parts[messageID] = parts
 	if m.debug != nil {
 		m.debug.RecordLifecycle(m.currentSession.ID, "prompt_submitted", prompt, map[string]string{"optimistic": "true"})
 	}
@@ -1757,6 +1869,13 @@ func (m Model) clipboardReadText() (string, error) {
 	return kclipboard.ReadText()
 }
 
+func (m Model) clipboardReadImage() ([]byte, error) {
+	if m.readClipboardImage != nil {
+		return m.readClipboardImage()
+	}
+	return kclipboard.ReadImage()
+}
+
 func (m Model) clipboardWriteText(text string) error {
 	if m.writeClipboardText != nil {
 		return m.writeClipboardText(text)
@@ -1765,6 +1884,22 @@ func (m Model) clipboardWriteText(text string) error {
 }
 
 func (m *Model) pasteClipboardText() (tea.Model, tea.Cmd) {
+	image, err := m.clipboardReadImage()
+	if err != nil {
+		m.status = "Clipboard image paste failed: " + err.Error()
+		return m, m.syncWindowTitleCmd()
+	}
+	if len(image) > 0 {
+		draft, err := m.attachmentFiles.ImportClipboardImage(image)
+		if err != nil {
+			m.status = "Clipboard image paste failed: " + err.Error()
+			return m, m.syncWindowTitleCmd()
+		}
+		m.draftAttachments = append(m.draftAttachments, draft)
+		m.status = fmt.Sprintf("Attached image %s", draft.Name)
+		return m, m.syncWindowTitleCmd()
+	}
+
 	text, err := m.clipboardReadText()
 	if err != nil {
 		m.status = "Clipboard paste failed: " + err.Error()
@@ -1774,10 +1909,48 @@ func (m *Model) pasteClipboardText() (tea.Model, tea.Cmd) {
 		m.status = "Clipboard is empty"
 		return m, m.syncWindowTitleCmd()
 	}
+	if path := m.pastedAttachmentPath(text); path != "" {
+		draft, err := m.attachmentFiles.ImportFile(path)
+		if err != nil {
+			m.status = "Attachment import failed: " + err.Error()
+			return m, m.syncWindowTitleCmd()
+		}
+		m.draftAttachments = append(m.draftAttachments, draft)
+		m.status = fmt.Sprintf("Attached %s", draft.Name)
+		return m, m.syncWindowTitleCmd()
+	}
 	m.composer.InsertString(text)
 	m.updateSlashMenu()
 	m.status = "Pasted from clipboard"
 	return m, m.syncWindowTitleCmd()
+}
+
+func (m *Model) poppedLastDraftAttachment() bool {
+	if len(m.draftAttachments) == 0 {
+		return false
+	}
+	last := m.draftAttachments[len(m.draftAttachments)-1]
+	m.draftAttachments = m.draftAttachments[:len(m.draftAttachments)-1]
+	m.status = fmt.Sprintf("Removed attachment %s", last.Name)
+	return true
+}
+
+func (m Model) pastedAttachmentPath(text string) string {
+	path := strings.TrimSpace(text)
+	if path == "" || strings.ContainsRune(path, '\n') {
+		return ""
+	}
+	if !filepath.IsAbs(path) && strings.HasPrefix(path, "~") {
+		home, err := os.UserHomeDir()
+		if err == nil {
+			path = filepath.Join(home, strings.TrimPrefix(path, "~/"))
+		}
+	}
+	info, err := os.Stat(path)
+	if err != nil || info.IsDir() {
+		return ""
+	}
+	return path
 }
 
 func (m *Model) copyLatestAssistantMessage() (tea.Model, tea.Cmd) {
@@ -1942,6 +2115,13 @@ func (m *Model) canSendPrompt() (bool, string) {
 	}
 	if strings.TrimSpace(session.ModelID) == "" {
 		return false, "Select a default model with /connect before sending prompts"
+	}
+	for _, draft := range m.draftAttachments {
+		kind := attachment.ClassifyMIME(draft.MIME)
+		if provider.SupportsAttachment(session.ProviderID, session.ModelID, kind) {
+			continue
+		}
+		return false, fmt.Sprintf("%s does not support %s attachments", session.ModelID, kind)
 	}
 	return true, ""
 }

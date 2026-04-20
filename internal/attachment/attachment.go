@@ -37,6 +37,9 @@ type Manager struct {
 }
 
 func NewManager(stateDir string) *Manager {
+	if strings.TrimSpace(stateDir) == "" {
+		stateDir = filepath.Join(os.TempDir(), "koder")
+	}
 	return &Manager{root: filepath.Join(stateDir, "attachments")}
 }
 
@@ -163,6 +166,14 @@ func (m *Manager) ReadText(meta Metadata) (string, error) {
 		return "", fmt.Errorf("read attachment %q: %w", meta.Name, err)
 	}
 	return string(buf), nil
+}
+
+func (m *Manager) ReadBytes(meta Metadata) ([]byte, error) {
+	buf, err := os.ReadFile(meta.Path)
+	if err != nil {
+		return nil, fmt.Errorf("read attachment %q: %w", meta.Name, err)
+	}
+	return buf, nil
 }
 
 func EncodeMeta(meta Metadata) (string, error) {

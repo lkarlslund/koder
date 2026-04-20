@@ -6,11 +6,14 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/lkarlslund/koder/internal/attachment"
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/store"
@@ -177,6 +180,116 @@ func TestBuildConversationUsesStructuredToolMessages(t *testing.T) {
 	}
 	if conversation[2].Role != domain.MessageRoleTool || conversation[2].ToolCallID != "call_1" || conversation[2].Content != "/tmp/workspace" {
 		t.Fatalf("expected structured tool message, got %#v", conversation[2])
+	}
+}
+
+func TestBuildConversationIncludesImageAndTextAttachments(t *testing.T) {
+	cfg := config.Default()
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	engine := New(cfg, st, tools.NewRegistry(t.TempDir()), nil)
+	session, err := st.CreateSession(context.Background(), "test", "openai", "gpt-5.4", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	msg, err := st.AddMessage(context.Background(), session.ID, domain.MessageRoleUser, "inspect these")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.AddPart(context.Background(), msg.ID, domain.PartKindText, "inspect these", ""); err != nil {
+		t.Fatal(err)
+	}
+	imageDraft, err := engine.files.ImportClipboardImage([]byte("\x89PNG\r\n\x1a\nfake"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	imageMeta, err := engine.files.AdoptDraft(imageDraft, session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	imageRaw, err := attachment.EncodeMeta(imageMeta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.AddPart(context.Background(), msg.ID, domain.PartKindAttachment, imageMeta.Name, imageRaw); err != nil {
+		t.Fatal(err)
+	}
+	textPath := filepath.Join(t.TempDir(), "note.txt")
+	if err := os.WriteFile(textPath, []byte("remember this"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	textDraft, err := engine.files.ImportFile(textPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	textMeta, err := engine.files.AdoptDraft(textDraft, session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	textRaw, err := attachment.EncodeMeta(textMeta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.AddPart(context.Background(), msg.ID, domain.PartKindAttachment, textMeta.Name, textRaw); err != nil {
+		t.Fatal(err)
+	}
+
+	conversation, err := engine.buildConversation(context.Background(), session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(conversation) != 2 {
+		t.Fatalf("expected system + user message, got %#v", conversation)
+	}
+	if got := len(conversation[1].ContentParts); got != 3 {
+		t.Fatalf("expected text + image + attached text content parts, got %#v", conversation[1].ContentParts)
+	}
+	if conversation[1].ContentParts[1].Type != "image_url" {
+		t.Fatalf("expected image attachment content part, got %#v", conversation[1].ContentParts)
+	}
+	if conversation[1].ContentParts[2].Type != "text" || !strings.Contains(conversation[1].ContentParts[2].Text, "remember this") {
+		t.Fatalf("expected attached text file content, got %#v", conversation[1].ContentParts[2])
+	}
+}
+
+func TestRunPromptWithUnsupportedPDFAttachmentFailsBeforeProviderCall(t *testing.T) {
+	cfg := config.Default()
+	cfg.Providers = map[string]config.Provider{
+		"test": {
+			BaseURL: "http://127.0.0.1:1/v1",
+			Timeout: 50 * time.Millisecond,
+		},
+	}
+	cfg.DefaultProvider = "test"
+	cfg.DefaultModel = "test-model"
+
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	engine := New(cfg, st, tools.NewRegistry(t.TempDir()), nil)
+	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	pdfPath := filepath.Join(t.TempDir(), "doc.pdf")
+	if err := os.WriteFile(pdfPath, []byte("%PDF-1.7\nfake"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	draft, err := engine.files.ImportFile(pdfPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := engine.RunPromptWithAttachments(context.Background(), session, "summarize", []attachment.Draft{draft}); err == nil {
+		t.Fatal("expected unsupported pdf attachment to be rejected")
 	}
 }
 

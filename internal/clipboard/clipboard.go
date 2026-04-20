@@ -29,6 +29,17 @@ func ReadText() (string, error) {
 	return string(data), nil
 }
 
+func ReadImage() ([]byte, error) {
+	if err := Init(); err != nil {
+		return nil, err
+	}
+	data := xclipboard.Read(xclipboard.FmtImage)
+	if len(data) == 0 {
+		return nil, nil
+	}
+	return data, nil
+}
+
 func WriteText(text string) error {
 	if err := Init(); err != nil {
 		return err

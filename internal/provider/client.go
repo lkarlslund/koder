@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,10 +20,64 @@ import (
 )
 
 type Message struct {
-	Role       domain.MessageRole `json:"role"`
-	Content    string             `json:"content,omitempty"`
-	ToolCallID string             `json:"tool_call_id,omitempty"`
-	ToolCalls  []ToolCall         `json:"tool_calls,omitempty"`
+	Role         domain.MessageRole `json:"role"`
+	Content      string             `json:"content,omitempty"`
+	ContentParts []ContentPart      `json:"-"`
+	ToolCallID   string             `json:"tool_call_id,omitempty"`
+	ToolCalls    []ToolCall         `json:"tool_calls,omitempty"`
+}
+
+type ContentPart struct {
+	Type     string `json:"type"`
+	Text     string `json:"text,omitempty"`
+	MIMEType string `json:"-"`
+	Data     []byte `json:"-"`
+}
+
+func TextPart(text string) ContentPart {
+	return ContentPart{Type: "text", Text: text}
+}
+
+func ImagePart(mimeType string, data []byte) ContentPart {
+	return ContentPart{Type: "image_url", MIMEType: mimeType, Data: data}
+}
+
+func (m Message) MarshalJSON() ([]byte, error) {
+	type wireMessage struct {
+		Role       domain.MessageRole `json:"role"`
+		Content    any                `json:"content,omitempty"`
+		ToolCallID string             `json:"tool_call_id,omitempty"`
+		ToolCalls  []ToolCall         `json:"tool_calls,omitempty"`
+	}
+	content := any(strings.TrimSpace(m.Content))
+	if len(m.ContentParts) > 0 {
+		items := make([]any, 0, len(m.ContentParts))
+		for _, part := range m.ContentParts {
+			switch part.Type {
+			case "text":
+				items = append(items, map[string]any{
+					"type": "text",
+					"text": part.Text,
+				})
+			case "image_url":
+				items = append(items, map[string]any{
+					"type": "image_url",
+					"image_url": map[string]any{
+						"url": imageDataURL(part.MIMEType, part.Data),
+					},
+				})
+			default:
+				return nil, fmt.Errorf("unsupported content part type %q", part.Type)
+			}
+		}
+		content = items
+	}
+	return json.Marshal(wireMessage{
+		Role:       m.Role,
+		Content:    content,
+		ToolCallID: m.ToolCallID,
+		ToolCalls:  m.ToolCalls,
+	})
 }
 
 type ToolDefinition struct {
@@ -342,6 +397,14 @@ func firstNonEmptyString(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func imageDataURL(mimeType string, data []byte) string {
+	mimeType = strings.TrimSpace(mimeType)
+	if mimeType == "" {
+		mimeType = "image/png"
+	}
+	return "data:" + mimeType + ";base64," + base64.StdEncoding.EncodeToString(data)
 }
 
 type tracingTransport struct {
