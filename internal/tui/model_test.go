@@ -56,6 +56,11 @@ func TestMatchingSlashCommands(t *testing.T) {
 		t.Fatalf("expected /disconnect, got %#v", matches)
 	}
 
+	matches = matchingSlashCommands("mod")
+	if len(matches) != 1 || matches[0].Name != "/model" {
+		t.Fatalf("expected /model, got %#v", matches)
+	}
+
 	matches = matchingSlashCommands("the")
 	if len(matches) != 1 || matches[0].Name != "/theme" {
 		t.Fatalf("expected /theme, got %#v", matches)
@@ -607,6 +612,53 @@ func TestDisconnectCommandWithoutProvidersShowsStatus(t *testing.T) {
 	}
 }
 
+func TestModelCommandWithoutProviderShowsStatus(t *testing.T) {
+	m := Model{
+		cfg:      config.Default(),
+		composer: textarea.New(),
+	}
+	m.composer.SetValue("/model")
+
+	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	next := updated.(*Model)
+	if cmd != nil {
+		t.Fatal("expected no async command")
+	}
+	if next.status != "Configure a provider first with /connect" {
+		t.Fatalf("unexpected status: %q", next.status)
+	}
+}
+
+func TestModelCommandLoadsModelsForActiveProvider(t *testing.T) {
+	cfg := config.Default()
+	cfg.DefaultProvider = "openai"
+	cfg.DefaultModel = "gpt-5.4"
+	cfg.Providers = map[string]config.Provider{
+		"openai": {
+			Name:         "OpenAI",
+			Kind:         "openai-compatible",
+			AuthMethod:   "api_key",
+			BaseURL:      "https://api.openai.com/v1",
+			APIKey:       "secret",
+			DefaultModel: "gpt-5.4",
+		},
+	}
+	m := Model{
+		cfg:      cfg,
+		composer: textarea.New(),
+	}
+	m.composer.SetValue("/model")
+
+	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	next := updated.(*Model)
+	if cmd == nil {
+		t.Fatal("expected async model load command")
+	}
+	if next.status != "Loading models for openai…" {
+		t.Fatalf("unexpected status: %q", next.status)
+	}
+}
+
 func TestSaveProviderDraftPersistsDefaults(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
@@ -692,6 +744,74 @@ func TestDisconnectProviderClearsDefaultAndFallsBack(t *testing.T) {
 	}
 	if _, ok := reloaded.Providers["openai"]; ok {
 		t.Fatal("expected provider removed from saved config")
+	}
+}
+
+func TestSelectModelUpdatesConfigAndCurrentSession(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.DefaultProvider = "openai"
+	cfg.DefaultModel = "gpt-5.4"
+	cfg.Providers = map[string]config.Provider{
+		"openai": {
+			Name:         "OpenAI",
+			Kind:         "openai-compatible",
+			AuthMethod:   "api_key",
+			BaseURL:      "https://api.openai.com/v1",
+			DefaultModel: "gpt-5.4",
+		},
+	}
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	session, err := st.CreateSession(context.Background(), "test", "openai", "gpt-5.4", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := Model{
+		cfg:            cfg,
+		store:          st,
+		currentSession: session,
+	}
+
+	if err := m.selectModel("gpt-4.1-mini"); err != nil {
+		t.Fatal(err)
+	}
+	if m.cfg.DefaultModel != "gpt-4.1-mini" || m.currentSession.ModelID != "gpt-4.1-mini" {
+		t.Fatalf("unexpected model selection state: cfg=%q session=%q", m.cfg.DefaultModel, m.currentSession.ModelID)
+	}
+	reloaded, err := st.GetSession(context.Background(), session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.ModelID != "gpt-4.1-mini" {
+		t.Fatalf("expected persisted session model, got %q", reloaded.ModelID)
+	}
+}
+
+func TestModelListMsgOpensModelDialog(t *testing.T) {
+	m := Model{}
+	updated, _ := m.Update(modelListMsg{
+		providerID: "openai",
+		models: []domain.Model{
+			{ID: "gpt-5.4", OwnedBy: "openai"},
+			{ID: "gpt-4.1-mini", OwnedBy: "openai"},
+		},
+	})
+	next := updated.(Model)
+	if !next.hasModelDialog() {
+		t.Fatal("expected model dialog to open")
 	}
 }
 

@@ -81,6 +81,12 @@ func (d *ConnectDialog) SetModels(models []string) {
 	}
 }
 
+func (d ConnectDialog) Models() []string {
+	out := make([]string, len(d.models))
+	copy(out, d.models)
+	return out
+}
+
 func (d *ConnectDialog) Update(msg tea.KeyMsg) ProviderConnectAction {
 	switch d.stage {
 	case connectStageProvider:

@@ -178,6 +178,13 @@ type providerProbeMsg struct {
 	err    error
 }
 
+type modelListMsg struct {
+	providerID  string
+	models      []domain.Model
+	postConnect bool
+	err         error
+}
+
 type Model struct {
 	cfg            config.Config
 	store          *store.Store
@@ -212,6 +219,7 @@ type Model struct {
 	preferences    *ui.PreferencesDialog
 	connectDialog  *ui.ConnectDialog
 	disconnectDialog *ui.DisconnectDialog
+	modelDialog    *ui.ModelDialog
 }
 
 func New(cfg config.Config, st *store.Store, a *agent.Engine, mode StartupMode) (Model, error) {
@@ -321,6 +329,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.closeSessionDialog()
 		m.closeConnectDialog()
 		m.closeDisconnectDialog()
+		m.closeModelDialog()
 		m.status = fmt.Sprintf("Started session %d", msg.session.ID)
 		m.updateSlashMenu()
 		m.refreshViewport()
@@ -352,6 +361,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.status = fmt.Sprintf("Provider connected: %d models", len(modelIDs))
 		}
 		return m, nil
+	case modelListMsg:
+		if msg.err != nil {
+			m.status = msg.err.Error()
+			return m, nil
+		}
+		if len(msg.models) == 0 {
+			m.status = "No models returned by provider"
+			return m, nil
+		}
+		m.openModelDialog(msg.providerID, msg.models)
+		if msg.postConnect {
+			m.status = "Choose an initial model"
+		} else {
+			m.status = fmt.Sprintf("Loaded %d models", len(msg.models))
+		}
+		return m, nil
 	case tea.MouseMsg:
 		if m.hasPicker() || m.hasApprovalPrompt() {
 			return m, nil
@@ -370,6 +395,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) View() string {
+	if m.hasModelDialog() && m.width > 0 && m.height > 0 {
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, m.renderModelDialog())
+	}
 	if m.hasDisconnectDialog() && m.width > 0 && m.height > 0 {
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, m.renderDisconnectDialog())
 	}
@@ -395,6 +423,9 @@ func (m Model) View() string {
 }
 
 func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.hasModelDialog() {
+		return m.handleModelDialogKey(msg)
+	}
 	if m.hasDisconnectDialog() {
 		return m.handleDisconnectDialogKey(msg)
 	}
@@ -772,6 +803,7 @@ func (m *Model) renderSidebar() string {
 	lines = append(lines, "  /compact")
 	lines = append(lines, "  /connect")
 	lines = append(lines, "  /disconnect")
+	lines = append(lines, "  /model")
 	lines = append(lines, "  /new  session")
 	lines = append(lines, "  /perm profile")
 	lines = append(lines, "  /prefs")
@@ -1200,6 +1232,7 @@ func (m Model) UpdateLoad(msg loadMsg) Model {
 	m.closePreferencesDialog()
 	m.closeConnectDialog()
 	m.closeDisconnectDialog()
+	m.closeModelDialog()
 	m.refreshViewport()
 	return m
 }
@@ -1254,6 +1287,16 @@ func (m *Model) handleLocalCommand(prompt string) (tea.Model, tea.Cmd, bool) {
 		}
 		m.openDisconnectDialog()
 		return m, nil, true
+	case trimmed == "/model":
+		m.composer.Reset()
+		m.updateSlashMenu()
+		providerID := m.activeProviderID()
+		if providerID == "" || !m.cfg.HasUsableProvider(providerID) {
+			m.status = "Configure a provider first with /connect"
+			return m, nil, true
+		}
+		m.status = fmt.Sprintf("Loading models for %s…", providerID)
+		return m, m.loadModelsCmd(providerID, false), true
 	case trimmed == "/theme":
 		m.composer.Reset()
 		m.updateSlashMenu()
@@ -1620,6 +1663,17 @@ func (m *Model) renderDisconnectDialog() string {
 	return m.disconnectDialog.View(width, m.palette)
 }
 
+func (m *Model) renderModelDialog() string {
+	if !m.hasModelDialog() {
+		return ""
+	}
+	width := 84
+	if m.width > 0 {
+		width = min(96, max(72, m.width-8))
+	}
+	return m.modelDialog.View(width, m.palette)
+}
+
 func (m *Model) handleSessionDialogKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if !m.hasSessionDialog() {
 		return m, nil
@@ -1683,12 +1737,17 @@ func (m *Model) handleConnectDialogKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.connectDialog.SetStatus("Testing connection…")
 		return m, m.probeProviderCmd(action.Draft)
 	case ui.ProviderConnectActionSave:
+		discoveredModels := m.connectDialog.Models()
 		if err := m.saveProviderDraft(action.Draft); err != nil {
 			m.connectDialog.SetStatus("Save failed: " + err.Error())
 			m.status = err.Error()
 			return m, nil
 		}
 		m.closeConnectDialog()
+		if len(discoveredModels) > 0 {
+			m.status = fmt.Sprintf("Connected provider %s", action.Draft.ProviderID)
+			return m, m.loadModelsCmd(action.Draft.ProviderID, true)
+		}
 		m.status = fmt.Sprintf("Connected provider %s", action.Draft.ProviderID)
 		m.refreshViewport()
 		return m, nil
@@ -1719,6 +1778,30 @@ func (m *Model) handleDisconnectDialogKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case ui.DisconnectDialogActionCancel:
 		m.closeDisconnectDialog()
 		m.status = "Provider disconnect cancelled"
+		return m, nil
+	default:
+		return m, nil
+	}
+}
+
+func (m *Model) handleModelDialogKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if !m.hasModelDialog() {
+		return m, nil
+	}
+	action := m.modelDialog.Update(msg)
+	switch action.Kind {
+	case ui.ModelDialogActionSelect:
+		if err := m.selectModel(action.ModelID); err != nil {
+			m.status = err.Error()
+			return m, nil
+		}
+		m.closeModelDialog()
+		m.status = fmt.Sprintf("Selected model %s", action.ModelID)
+		m.refreshViewport()
+		return m, nil
+	case ui.ModelDialogActionCancel:
+		m.closeModelDialog()
+		m.status = "Model selection cancelled"
 		return m, nil
 	default:
 		return m, nil
@@ -1765,6 +1848,7 @@ func internalSlashCommands() []slashCommand {
 		{Name: "/compact", Description: "Summarize old context"},
 		{Name: "/connect", Description: "Configure a provider"},
 		{Name: "/disconnect", Description: "Remove a configured provider"},
+		{Name: "/model", Description: "Choose a model for the active provider"},
 		{Name: "/new", Description: "Start a new session"},
 		{Name: "/mouse", Description: "Toggle mouse capture", NeedsArgs: true, Autocomplete: "/mouse "},
 		{Name: "/perm", Description: "Set permission profile", NeedsArgs: true, Autocomplete: "/perm "},
@@ -1873,6 +1957,14 @@ func (m *Model) closeDisconnectDialog() {
 	m.disconnectDialog = nil
 }
 
+func (m *Model) hasModelDialog() bool {
+	return m.modelDialog != nil
+}
+
+func (m *Model) closeModelDialog() {
+	m.modelDialog = nil
+}
+
 func (m *Model) openSessionPicker() {
 	items := make([]ui.SessionItem, 0, len(m.sessions))
 	for _, session := range m.sessions {
@@ -1954,10 +2046,34 @@ func (m *Model) openDisconnectDialog() {
 	m.disconnectDialog = &dialog
 }
 
+func (m *Model) openModelDialog(providerID string, models []domain.Model) {
+	current := m.currentSession.ModelID
+	if strings.TrimSpace(current) == "" {
+		current = m.cfg.DefaultModel
+	}
+	dialog := ui.NewModelDialog(providerID, models, current)
+	m.modelDialog = &dialog
+}
+
 func (m Model) probeProviderCmd(draft provider.ConnectDraft) tea.Cmd {
 	return func() tea.Msg {
 		result, err := provider.Probe(context.Background(), draft)
 		return providerProbeMsg{result: result, err: err}
+	}
+}
+
+func (m Model) loadModelsCmd(providerID string, postConnect bool) tea.Cmd {
+	return func() tea.Msg {
+		cfg, ok := m.cfg.Provider(providerID)
+		if !ok {
+			return modelListMsg{providerID: providerID, err: fmt.Errorf("provider %q not configured", providerID)}
+		}
+		client, err := provider.New(providerID, cfg)
+		if err != nil {
+			return modelListMsg{providerID: providerID, err: err}
+		}
+		models, err := client.ListModels(context.Background())
+		return modelListMsg{providerID: providerID, models: models, postConnect: postConnect, err: err}
 	}
 }
 
@@ -2054,6 +2170,49 @@ func (m *Model) disconnectProvider(providerID string) error {
 		m.currentSession.ModelID = m.cfg.DefaultModel
 	}
 	return nil
+}
+
+func (m *Model) selectModel(modelID string) error {
+	modelID = strings.TrimSpace(modelID)
+	if modelID == "" {
+		return fmt.Errorf("model id is required")
+	}
+	providerID := m.activeProviderID()
+	if providerID == "" || !m.cfg.HasUsableProvider(providerID) {
+		return fmt.Errorf("provider is not configured")
+	}
+	providerCfg, ok := m.cfg.Providers[providerID]
+	if !ok {
+		return fmt.Errorf("provider %q not configured", providerID)
+	}
+	providerCfg.DefaultModel = modelID
+	m.cfg.Providers[providerID] = providerCfg
+	if providerID == m.cfg.DefaultProvider {
+		m.cfg.DefaultModel = modelID
+	}
+	if err := m.cfg.Save(); err != nil {
+		return err
+	}
+	if m.agent != nil {
+		m.agent.UpdateConfig(m.cfg)
+	}
+	if m.currentSession.ID != 0 && (m.currentSession.ProviderID == providerID || m.currentSession.ProviderID == "") && m.store != nil {
+		if err := m.store.SetSessionModel(context.Background(), m.currentSession.ID, providerID, modelID); err != nil {
+			return err
+		}
+	}
+	if m.currentSession.ProviderID == providerID || strings.TrimSpace(m.currentSession.ProviderID) == "" {
+		m.currentSession.ProviderID = providerID
+		m.currentSession.ModelID = modelID
+	}
+	return nil
+}
+
+func (m *Model) activeProviderID() string {
+	if strings.TrimSpace(m.currentSession.ProviderID) != "" {
+		return m.currentSession.ProviderID
+	}
+	return m.cfg.DefaultProvider
 }
 
 func (m *Model) openThemePicker() {
