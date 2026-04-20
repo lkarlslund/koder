@@ -6,11 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
 	"strings"
 
+	"github.com/lkarlslund/koder/internal/agents"
 	"github.com/lkarlslund/koder/internal/attachment"
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/debugsrv"
@@ -30,9 +32,11 @@ type Engine struct {
 	debug    *debugsrv.Recorder
 	files    *attachment.Manager
 	caps     *provider.CapabilityStore
+	agents   *agents.Manager
+	workdir  string
 }
 
-func New(cfg config.Config, st *store.Store, registry *tools.Registry, debug *debugsrv.Recorder) *Engine {
+func New(cfg config.Config, st *store.Store, registry *tools.Registry, debug *debugsrv.Recorder, workdir string) *Engine {
 	return &Engine{
 		cfg:      cfg,
 		store:    st,
@@ -40,11 +44,14 @@ func New(cfg config.Config, st *store.Store, registry *tools.Registry, debug *de
 		debug:    debug,
 		files:    attachment.NewManager(cfg.StateDir()),
 		caps:     provider.NewCapabilityStore(cfg.StateDir()),
+		agents:   agents.NewManager(cfg.StateDir(), filepath.Join(filepath.Dir(cfg.Path()), "AGENTS.md")),
+		workdir:  workdir,
 	}
 }
 
 func (e *Engine) UpdateConfig(cfg config.Config) {
 	e.cfg = cfg
+	e.agents = agents.NewManager(cfg.StateDir(), filepath.Join(filepath.Dir(cfg.Path()), "AGENTS.md"))
 }
 
 func (e *Engine) RunPrompt(ctx context.Context, session domain.Session, prompt string) (<-chan domain.Event, error) {
@@ -114,6 +121,19 @@ func (e *Engine) runModelPrompt(ctx context.Context, session domain.Session, pro
 	out := make(chan domain.Event)
 	go func() {
 		defer close(out)
+		if session.ID > 0 {
+			out <- domain.Event{Kind: domain.EventKindStatus, Text: "Checking project instructions..."}
+		}
+		session, err = e.ensureSessionAgents(ctx, session, client)
+		if err != nil {
+			if interruptedErr(err) {
+				e.emitInterrupted(out, session.ID)
+				return
+			}
+			e.recordAssistantError(ctx, session.ID, err)
+			out <- domain.Event{Kind: domain.EventKindError, Err: err}
+			return
+		}
 		e.recordLifecycle(session.ID, "prompt_started", prompt, map[string]string{"provider": session.ProviderID, "model": session.ModelID})
 		compacted, err := e.autoCompactIfNeeded(ctx, session, client, out)
 		if err != nil {
@@ -157,6 +177,65 @@ func (e *Engine) runModelPrompt(ctx context.Context, session domain.Session, pro
 		}
 	}()
 	return out, nil
+}
+
+func (e *Engine) RefreshAgents(ctx context.Context, sessionID int64) (domain.Session, error) {
+	session, err := e.store.GetSession(ctx, sessionID)
+	if err != nil {
+		return domain.Session{}, err
+	}
+	providerCfg, ok := e.cfg.Provider(session.ProviderID)
+	if !ok {
+		return domain.Session{}, fmt.Errorf("provider %q not found", session.ProviderID)
+	}
+	client, err := provider.New(session.ProviderID, providerCfg, e.debug)
+	if err != nil {
+		return domain.Session{}, err
+	}
+	return e.refreshSessionAgents(ctx, session, client)
+}
+
+func (e *Engine) ensureSessionAgents(ctx context.Context, session domain.Session, client *provider.Client) (domain.Session, error) {
+	if strings.TrimSpace(session.ProjectChecksum) != "" && (strings.TrimSpace(session.AgentsResolved) != "" || strings.TrimSpace(session.AgentsSummary) != "") {
+		return session, nil
+	}
+	return e.refreshSessionAgents(ctx, session, client)
+}
+
+func (e *Engine) refreshSessionAgents(ctx context.Context, session domain.Session, client *provider.Client) (domain.Session, error) {
+	snapshot, err := e.agents.Discover(ctx, e.workdir)
+	if err != nil {
+		return domain.Session{}, err
+	}
+	resolution, err := e.agents.Resolve(ctx, client, session.ModelID, snapshot)
+	if err != nil {
+		return domain.Session{}, err
+	}
+	files := make([]domain.AgentsFile, 0, len(resolution.Snapshot.Files))
+	for _, item := range resolution.Snapshot.Files {
+		files = append(files, domain.AgentsFile{
+			Path:         item.Path,
+			Kind:         item.Kind,
+			Priority:     item.Priority,
+			ModTime:      item.ModTime,
+			Checksum:     item.Checksum,
+			Size:         item.Size,
+			DiscoveredBy: item.DiscoveredBy,
+		})
+	}
+	if err := e.store.UpdateSessionAgents(
+		ctx,
+		session.ID,
+		resolution.Snapshot.ProjectRoot,
+		resolution.Snapshot.Checksum,
+		resolution.ResolvedAgents,
+		resolution.ConflictSummary,
+		files,
+		resolution.GeneratedAt,
+	); err != nil {
+		return domain.Session{}, err
+	}
+	return e.store.GetSession(ctx, session.ID)
 }
 
 func (e *Engine) persistUserPrompt(ctx context.Context, session domain.Session, prompt string, drafts []attachment.Draft) (domain.Message, error) {
@@ -571,6 +650,10 @@ func errorSummary(err error) string {
 }
 
 func (e *Engine) buildConversation(ctx context.Context, sessionID int64) ([]provider.Message, error) {
+	session, err := e.store.GetSession(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
 	messages, partsByMessage, err := e.store.PartsForSession(ctx, sessionID)
 	if err != nil {
 		return nil, err
@@ -579,12 +662,26 @@ func (e *Engine) buildConversation(ctx context.Context, sessionID int64) ([]prov
 	conversation := []provider.Message{
 		{Role: domain.MessageRoleSystem, Content: systemPrompt()},
 	}
+	if agentsText := strings.TrimSpace(session.AgentsResolved); agentsText != "" {
+		conversation = append(conversation, provider.Message{
+			Role:    domain.MessageRoleSystem,
+			Content: "Resolved project AGENTS.md instructions:\n" + agentsText,
+		})
+	}
 	for _, msg := range messages {
 		if summary, ok := compactionSummary(partsByMessage[msg.ID]); ok {
 			conversation = []provider.Message{
 				{Role: domain.MessageRoleSystem, Content: systemPrompt()},
-				{Role: domain.MessageRoleSystem, Content: "Compacted session summary:\n" + summary},
 			}
+			if agentsText := strings.TrimSpace(session.AgentsResolved); agentsText != "" {
+				conversation = append(conversation, provider.Message{
+					Role:    domain.MessageRoleSystem,
+					Content: "Resolved project AGENTS.md instructions:\n" + agentsText,
+				})
+			}
+			conversation = append(conversation,
+				provider.Message{Role: domain.MessageRoleSystem, Content: "Compacted session summary:\n" + summary},
+			)
 			continue
 		}
 		items, err := e.conversationMessagesForStoredMessage(msg, partsByMessage[msg.ID])

@@ -89,7 +89,7 @@ func TestBuildConversationResetsAtCompactionBoundary(t *testing.T) {
 	}
 	defer st.Close()
 
-	engine := New(cfg, st, tools.NewRegistry(t.TempDir()), nil)
+	engine := New(cfg, st, tools.NewRegistry(t.TempDir()), nil, t.TempDir())
 	session, err := st.CreateSession(context.Background(), "test", cfg.DefaultProvider, "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -153,7 +153,7 @@ func TestBuildConversationUsesStructuredToolMessages(t *testing.T) {
 	}
 	defer st.Close()
 
-	engine := New(cfg, st, tools.NewRegistry(t.TempDir()), nil)
+	engine := New(cfg, st, tools.NewRegistry(t.TempDir()), nil, t.TempDir())
 	session, err := st.CreateSession(context.Background(), "test", cfg.DefaultProvider, "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -196,7 +196,7 @@ func TestBuildConversationIncludesImageAndTextAttachments(t *testing.T) {
 	}
 	defer st.Close()
 
-	engine := New(cfg, st, tools.NewRegistry(t.TempDir()), nil)
+	engine := New(cfg, st, tools.NewRegistry(t.TempDir()), nil, t.TempDir())
 	session, err := st.CreateSession(context.Background(), "test", "openai", "gpt-5.4", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -279,7 +279,7 @@ func TestRunPromptWithUnsupportedPDFAttachmentFailsBeforeProviderCall(t *testing
 	}
 	defer st.Close()
 
-	engine := New(cfg, st, tools.NewRegistry(t.TempDir()), nil)
+	engine := New(cfg, st, tools.NewRegistry(t.TempDir()), nil, t.TempDir())
 	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -358,7 +358,7 @@ func TestApproveContinuesModelWithToolOutput(t *testing.T) {
 	defer st.Close()
 
 	workdir := t.TempDir()
-	engine := New(cfg, st, tools.NewRegistry(workdir), nil)
+	engine := New(cfg, st, tools.NewRegistry(workdir), nil, workdir)
 	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -427,7 +427,7 @@ func TestRunPromptPersistsAssistantErrorOnBackendFailure(t *testing.T) {
 	}
 	defer st.Close()
 
-	engine := New(cfg, st, tools.NewRegistry(t.TempDir()), nil)
+	engine := New(cfg, st, tools.NewRegistry(t.TempDir()), nil, t.TempDir())
 	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -492,7 +492,7 @@ func TestRunPromptCancellationDoesNotPersistAssistantError(t *testing.T) {
 	}
 	defer st.Close()
 
-	engine := New(cfg, st, tools.NewRegistry(t.TempDir()), nil)
+	engine := New(cfg, st, tools.NewRegistry(t.TempDir()), nil, t.TempDir())
 	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -547,7 +547,7 @@ func TestModelTaskPersistsTranscriptUpdate(t *testing.T) {
 	}
 	defer st.Close()
 
-	engine := New(cfg, st, tools.NewRegistry(t.TempDir()), nil)
+	engine := New(cfg, st, tools.NewRegistry(t.TempDir()), nil, t.TempDir())
 	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -592,7 +592,7 @@ func TestPersistToolResultSynthesizesVisibleOutputWhenToolReturnsNothing(t *test
 	}
 	defer st.Close()
 
-	engine := New(cfg, st, tools.NewRegistry(t.TempDir()), nil)
+	engine := New(cfg, st, tools.NewRegistry(t.TempDir()), nil, t.TempDir())
 	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
 	if err != nil {
 		t.Fatal(err)

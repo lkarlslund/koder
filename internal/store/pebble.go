@@ -154,6 +154,26 @@ func (b *pebbleBackend) UpdateSessionTitle(ctx context.Context, sessionID int64,
 	})
 }
 
+func (b *pebbleBackend) UpdateSessionAgents(
+	ctx context.Context,
+	sessionID int64,
+	projectRoot string,
+	projectChecksum string,
+	resolved string,
+	summary string,
+	files []domain.AgentsFile,
+	generatedAt time.Time,
+) error {
+	return b.updateSession(ctx, sessionID, func(session *domain.Session) {
+		session.ProjectRoot = projectRoot
+		session.ProjectChecksum = projectChecksum
+		session.AgentsResolved = resolved
+		session.AgentsSummary = summary
+		session.AgentsFiles = append([]domain.AgentsFile(nil), files...)
+		session.AgentsGeneratedAt = generatedAt
+	})
+}
+
 func (b *pebbleBackend) CountMessagesByRole(ctx context.Context, sessionID int64, role domain.MessageRole) (int, error) {
 	messages, _, err := b.PartsForSession(ctx, sessionID)
 	if err != nil {
