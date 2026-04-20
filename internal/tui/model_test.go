@@ -176,6 +176,57 @@ func TestAltEnterInsertsNewlineInsteadOfSending(t *testing.T) {
 	}
 }
 
+func TestCtrlVPastesClipboardText(t *testing.T) {
+	m := Model{
+		composer:          textarea.New(),
+		readClipboardText: func() (string, error) { return "pasted text", nil },
+	}
+	m.composer.SetValue("hello ")
+	m.composer.SetCursor(len("hello "))
+
+	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlV})
+	next := updated.(*Model)
+	if cmd == nil {
+		t.Fatal("expected title sync command after paste")
+	}
+	if got := next.composer.Value(); got != "hello pasted text" {
+		t.Fatalf("unexpected pasted composer value: %q", got)
+	}
+	if next.status != "Pasted from clipboard" {
+		t.Fatalf("unexpected paste status: %q", next.status)
+	}
+}
+
+func TestCtrlYCopiesLatestAssistantMessage(t *testing.T) {
+	var copied string
+	m := Model{
+		composer: textarea.New(),
+		parts: map[int64][]domain.Part{
+			2: {{Kind: domain.PartKindText, Body: "latest assistant reply"}},
+		},
+		messages: []domain.Message{
+			{ID: 1, Role: domain.MessageRoleUser, Summary: "hello"},
+			{ID: 2, Role: domain.MessageRoleAssistant, Summary: "latest assistant reply"},
+		},
+		writeClipboardText: func(text string) error {
+			copied = text
+			return nil
+		},
+	}
+
+	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlY})
+	next := updated.(*Model)
+	if cmd == nil {
+		t.Fatal("expected title sync command after copy")
+	}
+	if copied != "latest assistant reply" {
+		t.Fatalf("unexpected copied text: %q", copied)
+	}
+	if next.status != "Copied last assistant message" {
+		t.Fatalf("unexpected copy status: %q", next.status)
+	}
+}
+
 func TestEnterWhileBusyQueuesPrompt(t *testing.T) {
 	cfg := config.Default()
 	cfg.DefaultProvider = "openai"

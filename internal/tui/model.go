@@ -19,6 +19,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/lkarlslund/koder/internal/agent"
+	kclipboard "github.com/lkarlslund/koder/internal/clipboard"
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/debugsrv"
 	"github.com/lkarlslund/koder/internal/domain"
@@ -231,44 +232,46 @@ type forkSessionMsg struct {
 }
 
 type Model struct {
-	cfg              config.Config
-	store            *store.Store
-	agent            *agent.Engine
-	renderer         *markdown.Renderer
-	palette          theme.Palette
-	sessions         []domain.Session
-	currentSession   domain.Session
-	messages         []domain.Message
-	parts            map[int64][]domain.Part
-	tasks            []store.Task
-	approvals        []store.Approval
-	viewport         viewport.Model
-	composer         textarea.Model
-	width            int
-	height           int
-	status           string
-	loading          bool
-	busy             busyModel
-	showSidebar      bool
-	showReasoning    bool
-	slashMatches     []slashCommand
-	slashIndex       int
-	approvalChoice   int
-	workdir          string
-	workspace        workspace.Status
-	startupMode      StartupMode
-	picker           pickerModel
-	pendingPartID    int64
-	mouseEnabled     bool
-	sessionDialog    *ui.SessionDialog
-	preferences      *ui.PreferencesDialog
-	connectDialog    *ui.ConnectDialog
-	disconnectDialog *ui.DisconnectDialog
-	modelDialog      *ui.ModelDialog
-	debug            *debugsrv.Recorder
-	activeOpCancel   context.CancelFunc
-	queuedPrompt     *queuedPrompt
-	interruptArmedAt time.Time
+	cfg                config.Config
+	store              *store.Store
+	agent              *agent.Engine
+	renderer           *markdown.Renderer
+	palette            theme.Palette
+	sessions           []domain.Session
+	currentSession     domain.Session
+	messages           []domain.Message
+	parts              map[int64][]domain.Part
+	tasks              []store.Task
+	approvals          []store.Approval
+	viewport           viewport.Model
+	composer           textarea.Model
+	width              int
+	height             int
+	status             string
+	loading            bool
+	busy               busyModel
+	showSidebar        bool
+	showReasoning      bool
+	slashMatches       []slashCommand
+	slashIndex         int
+	approvalChoice     int
+	workdir            string
+	workspace          workspace.Status
+	startupMode        StartupMode
+	picker             pickerModel
+	pendingPartID      int64
+	mouseEnabled       bool
+	sessionDialog      *ui.SessionDialog
+	preferences        *ui.PreferencesDialog
+	connectDialog      *ui.ConnectDialog
+	disconnectDialog   *ui.DisconnectDialog
+	modelDialog        *ui.ModelDialog
+	debug              *debugsrv.Recorder
+	activeOpCancel     context.CancelFunc
+	queuedPrompt       *queuedPrompt
+	interruptArmedAt   time.Time
+	readClipboardText  func() (string, error)
+	writeClipboardText func(string) error
 }
 
 func New(cfg config.Config, st *store.Store, a *agent.Engine, mode StartupMode, debug *debugsrv.Recorder) (Model, error) {
@@ -600,6 +603,10 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c":
 		return m.quit()
+	case "ctrl+v":
+		return m.pasteClipboardText()
+	case "ctrl+y":
+		return m.copyLatestAssistantMessage()
 	case "esc":
 		if m.loading {
 			return m.handleInterruptKey()
@@ -917,6 +924,8 @@ func (m *Model) renderSidebar() string {
 	} else {
 		lines = append(lines, "  tab   autocomplete")
 	}
+	lines = append(lines, "  ^v    paste clipboard")
+	lines = append(lines, "  ^y    copy last answer")
 	lines = append(lines, "  ^s    sidebar")
 	lines = append(lines, "  ^r    reasoning")
 	lines = append(lines, "  /compact")
@@ -1739,6 +1748,67 @@ func (m *Model) appendLocalAssistantError(err error) {
 		m.debug.RecordLifecycle(m.currentSession.ID, "ui_error_appended", err.Error(), nil)
 	}
 	m.refreshViewport()
+}
+
+func (m Model) clipboardReadText() (string, error) {
+	if m.readClipboardText != nil {
+		return m.readClipboardText()
+	}
+	return kclipboard.ReadText()
+}
+
+func (m Model) clipboardWriteText(text string) error {
+	if m.writeClipboardText != nil {
+		return m.writeClipboardText(text)
+	}
+	return kclipboard.WriteText(text)
+}
+
+func (m *Model) pasteClipboardText() (tea.Model, tea.Cmd) {
+	text, err := m.clipboardReadText()
+	if err != nil {
+		m.status = "Clipboard paste failed: " + err.Error()
+		return m, m.syncWindowTitleCmd()
+	}
+	if text == "" {
+		m.status = "Clipboard is empty"
+		return m, m.syncWindowTitleCmd()
+	}
+	m.composer.InsertString(text)
+	m.updateSlashMenu()
+	m.status = "Pasted from clipboard"
+	return m, m.syncWindowTitleCmd()
+}
+
+func (m *Model) copyLatestAssistantMessage() (tea.Model, tea.Cmd) {
+	text := strings.TrimSpace(m.latestAssistantCopyText())
+	if text == "" {
+		m.status = "No assistant message to copy"
+		return m, m.syncWindowTitleCmd()
+	}
+	if err := m.clipboardWriteText(text); err != nil {
+		m.status = "Clipboard copy failed: " + err.Error()
+		return m, m.syncWindowTitleCmd()
+	}
+	m.status = "Copied last assistant message"
+	return m, m.syncWindowTitleCmd()
+}
+
+func (m Model) latestAssistantCopyText() string {
+	for i := len(m.messages) - 1; i >= 0; i-- {
+		msg := m.messages[i]
+		if msg.Role != domain.MessageRoleAssistant {
+			continue
+		}
+		body := strings.TrimSpace(ansi.Strip(m.renderMessageParts(m.parts[msg.ID])))
+		if body == "" {
+			body = strings.TrimSpace(msg.Summary)
+		}
+		if body != "" {
+			return body
+		}
+	}
+	return ""
 }
 
 func (m *Model) nextPendingID() int64 {

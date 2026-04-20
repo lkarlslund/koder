@@ -1,0 +1,42 @@
+package clipboard
+
+import (
+	"sync"
+
+	xclipboard "golang.design/x/clipboard"
+)
+
+var (
+	initOnce sync.Once
+	initErr  error
+)
+
+func Init() error {
+	initOnce.Do(func() {
+		initErr = xclipboard.Init()
+	})
+	return initErr
+}
+
+func ReadText() (string, error) {
+	if err := Init(); err != nil {
+		return "", err
+	}
+	data := xclipboard.Read(xclipboard.FmtText)
+	if len(data) == 0 {
+		return "", nil
+	}
+	return string(data), nil
+}
+
+func WriteText(text string) error {
+	if err := Init(); err != nil {
+		return err
+	}
+	xclipboard.Write(xclipboard.FmtText, []byte(text))
+	return nil
+}
+
+func Supported() bool {
+	return Init() == nil
+}
