@@ -786,6 +786,14 @@ func (m *Model) applyEvent(evt domain.Event) {
 		m.startBusy(busyScopeTranscript, "Working ...")
 	case domain.EventKindReasoning:
 		m.startBusy(busyScopeTranscript, "Working ...")
+	case domain.EventKindToolStart:
+		status := strings.TrimSpace(evt.Text)
+		if status == "" {
+			status = fmt.Sprintf("Running %s…", evt.Tool)
+		} else {
+			status = fmt.Sprintf("Running %s…", status)
+		}
+		m.startBusy(busyScopeTranscript, status)
 	case domain.EventKindToolResult:
 		m.startBusy(busyScopeTranscript, fmt.Sprintf("Tool %s finished", evt.Tool))
 	case domain.EventKindApprovalAsk:

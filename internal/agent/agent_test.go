@@ -527,6 +527,92 @@ func TestPermissionProfileChangeReevaluatesPendingApproval(t *testing.T) {
 	}
 }
 
+func TestRunPromptExecutesMultipleToolCallsInParallel(t *testing.T) {
+	t.Parallel()
+
+	var requests []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read body: %v", err)
+		}
+		requests = append(requests, string(body))
+		switch len(requests) {
+		case 1:
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"tool_calls":[{"id":"call_slow","type":"function","function":{"name":"bash","arguments":"{\"command\":\"sleep 0.2; printf slow\"}"}},{"id":"call_fast","type":"function","function":{"name":"bash","arguments":"{\"command\":\"printf fast\"}"}}]}}],"usage":{"total_tokens":1}}`))
+		case 2:
+			if !strings.Contains(string(body), `"tool_call_id":"call_slow"`) || !strings.Contains(string(body), `"tool_call_id":"call_fast"`) {
+				t.Fatalf("expected second request to include both tool outputs, got %s", string(body))
+			}
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"done"}}],"usage":{"total_tokens":1}}`))
+		default:
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ignored title"}}],"usage":{"total_tokens":1}}`))
+		}
+	}))
+	defer server.Close()
+
+	cfg := testConfig(t)
+	cfg.Providers = map[string]config.Provider{
+		"test": {
+			BaseURL: server.URL + "/v1",
+			Timeout: time.Second,
+		},
+	}
+	cfg.DefaultProvider = "test"
+	cfg.DefaultModel = "test-model"
+	cfg.Permissions.Profile = permission.ProfileFullAccess
+
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	workdir := t.TempDir()
+	engine := New(cfg, st, tools.NewRegistry(workdir), nil, workdir)
+	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetSessionPermissionProfile(context.Background(), session.ID, permission.ProfileFullAccess); err != nil {
+		t.Fatal(err)
+	}
+
+	events, err := engine.RunPrompt(context.Background(), session, "say hello")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var toolResults []string
+	var sawFinalAnswer bool
+	for evt := range events {
+		if evt.Kind == domain.EventKindToolResult {
+			toolResults = append(toolResults, evt.Text)
+		}
+		if evt.Kind == domain.EventKindMessageDelta && evt.Text == "done" {
+			sawFinalAnswer = true
+		}
+	}
+	if len(toolResults) != 2 {
+		t.Fatalf("expected two tool results, got %#v", toolResults)
+	}
+	if !strings.Contains(toolResults[0], "fast") {
+		t.Fatalf("expected faster tool result first, got %#v", toolResults)
+	}
+	if !strings.Contains(toolResults[1], "slow") {
+		t.Fatalf("expected slower tool result second, got %#v", toolResults)
+	}
+	if !sawFinalAnswer {
+		t.Fatal("expected final assistant answer after tool batch")
+	}
+	if len(requests) < 2 {
+		t.Fatalf("expected at least two provider requests, got %d", len(requests))
+	}
+}
+
 func TestRunPromptPersistsAssistantErrorOnBackendFailure(t *testing.T) {
 	cfg := testConfig(t)
 	cfg.Providers = map[string]config.Provider{

@@ -361,38 +361,21 @@ func (e *Engine) continueModelTurn(ctx context.Context, session domain.Session, 
 		}
 
 		if len(resp.ToolCalls) > 0 {
-			call, err := tools.ParseProviderCall(resp.ToolCalls[0])
+			calls, err := e.parseProviderToolCalls(resp.ToolCalls, session.ID)
 			if err != nil {
 				return err
 			}
-			e.recordLifecycle(session.ID, "tool_call_parsed", call.ContextString(), map[string]string{"tool": string(call.Tool), "tool_call_id": call.ToolCallID})
-			assistantMsg, err := e.store.AddMessage(ctx, session.ID, domain.MessageRoleAssistant, fmt.Sprintf("tool:%s", call.Tool))
-			if err != nil {
+			if err := e.persistAssistantToolCalls(ctx, session.ID, calls, strings.TrimSpace(resp.Text), resp.Usage); err != nil {
 				return err
-			}
-			meta, _ := json.Marshal(call)
-			body := call.ContextString()
-			if _, err := e.store.AddPart(ctx, assistantMsg.ID, domain.PartKindToolCall, body, string(meta)); err != nil {
-				return err
-			}
-			if strings.TrimSpace(resp.Text) != "" {
-				if _, err := e.store.AddPart(ctx, assistantMsg.ID, domain.PartKindSystemNotice, strings.TrimSpace(resp.Text), ""); err != nil {
-					return err
-				}
 			}
 			if resp.Usage.TotalTokens > 0 {
-				usageMeta, _ := json.Marshal(resp.Usage)
-				if _, err := e.store.AddPart(ctx, assistantMsg.ID, domain.PartKindSystemNotice, "usage", string(usageMeta)); err != nil {
-					return err
-				}
 				out <- domain.Event{Kind: domain.EventKindUsage, Usage: resp.Usage}
 			}
-			evt, handledErr := e.handleModelToolCall(ctx, session, call)
+			needsApproval, handledErr := e.handleModelToolCalls(ctx, session, calls, out)
 			if handledErr != nil {
 				return handledErr
 			}
-			out <- evt
-			if evt.Kind == domain.EventKindApprovalAsk {
+			if needsApproval {
 				return nil
 			}
 			continue
@@ -1340,6 +1323,225 @@ func (e *Engine) handleModelToolCall(ctx context.Context, session domain.Session
 	}
 	final := <-evt
 	return final, nil
+}
+
+type preparedToolCall struct {
+	req   tools.Request
+	event domain.Event
+	run   bool
+}
+
+type completedToolCall struct {
+	events []domain.Event
+	err    error
+}
+
+func (e *Engine) parseProviderToolCalls(raw []provider.ToolCall, sessionID int64) ([]tools.Request, error) {
+	calls := make([]tools.Request, 0, len(raw))
+	for _, item := range raw {
+		call, err := tools.ParseProviderCall(item)
+		if err != nil {
+			return nil, err
+		}
+		e.recordLifecycle(sessionID, "tool_call_parsed", call.ContextString(), map[string]string{"tool": string(call.Tool), "tool_call_id": call.ToolCallID})
+		calls = append(calls, call)
+	}
+	return calls, nil
+}
+
+func (e *Engine) persistAssistantToolCalls(ctx context.Context, sessionID int64, calls []tools.Request, text string, usage domain.Usage) error {
+	summary := "tool"
+	if len(calls) == 1 {
+		summary = fmt.Sprintf("tool:%s", calls[0].Tool)
+	} else if len(calls) > 1 {
+		summary = fmt.Sprintf("tools:%d", len(calls))
+	}
+	assistantMsg, err := e.store.AddMessage(ctx, sessionID, domain.MessageRoleAssistant, summary)
+	if err != nil {
+		return err
+	}
+	for _, call := range calls {
+		meta, _ := json.Marshal(call)
+		body := call.ContextString()
+		if _, err := e.store.AddPart(ctx, assistantMsg.ID, domain.PartKindToolCall, body, string(meta)); err != nil {
+			return err
+		}
+	}
+	if text != "" {
+		if _, err := e.store.AddPart(ctx, assistantMsg.ID, domain.PartKindSystemNotice, text, ""); err != nil {
+			return err
+		}
+	}
+	if usage.TotalTokens > 0 {
+		usageMeta, _ := json.Marshal(usage)
+		if _, err := e.store.AddPart(ctx, assistantMsg.ID, domain.PartKindSystemNotice, "usage", string(usageMeta)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (e *Engine) handleModelToolCalls(ctx context.Context, session domain.Session, calls []tools.Request, out chan<- domain.Event) (bool, error) {
+	if len(calls) == 0 {
+		return false, nil
+	}
+	prepared := make([]preparedToolCall, 0, len(calls))
+	needsApproval := false
+	for _, call := range calls {
+		next, err := e.prepareModelToolCall(ctx, session, call)
+		if err != nil {
+			return false, err
+		}
+		prepared = append(prepared, next)
+	}
+
+	execCount := 0
+	for _, item := range prepared {
+		if item.run {
+			execCount++
+			continue
+		}
+		out <- item.event
+		if item.event.Kind == domain.EventKindApprovalAsk {
+			needsApproval = true
+		}
+	}
+
+	if execCount == 0 {
+		return needsApproval, nil
+	}
+
+	results := make(chan completedToolCall, execCount)
+	for _, item := range prepared {
+		if !item.run {
+			continue
+		}
+		out <- domain.Event{Kind: domain.EventKindToolStart, Tool: item.req.Tool, Text: tools.Preview(item.req)}
+		go func(req tools.Request) {
+			events, err := e.executePreparedToolCall(ctx, session.ID, req)
+			results <- completedToolCall{events: events, err: err}
+		}(item.req)
+	}
+
+	var firstErr error
+	for i := 0; i < execCount; i++ {
+		completed := <-results
+		if completed.err != nil {
+			if firstErr == nil {
+				firstErr = completed.err
+			}
+			continue
+		}
+		for _, evt := range completed.events {
+			out <- evt
+			if evt.Kind == domain.EventKindApprovalAsk {
+				needsApproval = true
+			}
+		}
+	}
+	if firstErr != nil {
+		return needsApproval, firstErr
+	}
+	return needsApproval, nil
+}
+
+func (e *Engine) prepareModelToolCall(ctx context.Context, session domain.Session, req tools.Request) (preparedToolCall, error) {
+	sessionID := session.ID
+	if sessionID > 0 {
+		if latest, err := e.store.GetSession(ctx, sessionID); err == nil {
+			if strings.TrimSpace(latest.PermissionProfile) == "" {
+				latest.PermissionProfile = session.PermissionProfile
+			}
+			if strings.TrimSpace(latest.ProjectRoot) == "" {
+				latest.ProjectRoot = session.ProjectRoot
+			}
+			session = latest
+		}
+	}
+	req, err := tools.Normalize(req)
+	if err != nil {
+		return preparedToolCall{}, err
+	}
+	toolSpec, ok := tools.Lookup(req.Tool)
+	if !ok {
+		return preparedToolCall{}, fmt.Errorf("unsupported model tool %q", req.Tool)
+	}
+
+	decision := permission.Decision{Mode: domain.PermissionModeAllow}
+	if !toolSpec.BypassesPermission() {
+		decision = permission.Evaluate(e.cfg.Permissions, effectivePermissionProfile(e.cfg, session), e.permissionRequest(session, req))
+	}
+	if decision.Mode == domain.PermissionModeDeny {
+		text := fmt.Sprintf("%s denied by policy", req.Tool)
+		if strings.TrimSpace(decision.Reason) != "" {
+			text = fmt.Sprintf("%s denied by policy: %s", req.Tool, decision.Reason)
+		}
+		msg, err := e.store.AddMessage(ctx, sessionID, domain.MessageRoleTool, string(req.Tool))
+		if err != nil {
+			return preparedToolCall{}, err
+		}
+		meta, _ := json.Marshal(req)
+		if _, err := e.store.AddPart(ctx, msg.ID, domain.PartKindToolOutput, text, string(meta)); err != nil {
+			return preparedToolCall{}, err
+		}
+		return preparedToolCall{
+			req:   req,
+			event: domain.Event{Kind: domain.EventKindToolResult, Tool: req.Tool, Text: text},
+		}, nil
+	}
+	if decision.Mode == domain.PermissionModeAsk {
+		storedArgs, err := serializeRequest(req)
+		if err != nil {
+			return preparedToolCall{}, err
+		}
+		approval, err := e.store.CreateApproval(ctx, sessionID, req.Tool, storedArgs)
+		if err != nil {
+			return preparedToolCall{}, err
+		}
+		preview := tools.Preview(req)
+		if err := e.recordApprovalRequest(ctx, sessionID, req.Tool, approval.ID, preview, req.ToolCallID); err != nil {
+			return preparedToolCall{}, err
+		}
+		text := fmt.Sprintf("%s requires approval", req.Tool)
+		if strings.TrimSpace(decision.Reason) != "" {
+			text += ": " + decision.Reason
+		}
+		return preparedToolCall{
+			req: req,
+			event: domain.Event{
+				Kind: domain.EventKindApprovalAsk,
+				Text: text,
+				Tool: req.Tool,
+				Meta: map[string]string{
+					"approval_id":  strconv.FormatInt(approval.ID, 10),
+					"tool":         string(req.Tool),
+					"command":      preview,
+					"reason":       decision.Reason,
+					"tool_call_id": req.ToolCallID,
+				},
+			},
+		}, nil
+	}
+	return preparedToolCall{req: req, run: true}, nil
+}
+
+func (e *Engine) executePreparedToolCall(ctx context.Context, sessionID int64, req tools.Request) ([]domain.Event, error) {
+	e.recordLifecycle(sessionID, "tool_execution_started", req.ContextString(), map[string]string{"tool": string(req.Tool), "tool_call_id": req.ToolCallID})
+	result, err := e.registry.Execute(ctx, req)
+	if err != nil {
+		e.recordLifecycle(sessionID, "tool_execution_failed", err.Error(), map[string]string{"tool": string(req.Tool), "tool_call_id": req.ToolCallID})
+		return nil, err
+	}
+	e.recordLifecycle(sessionID, "tool_execution_finished", req.ContextString(), map[string]string{"tool": string(req.Tool), "tool_call_id": req.ToolCallID})
+	events, err := e.persistToolResult(ctx, sessionID, req, result)
+	if err != nil {
+		return nil, err
+	}
+	var out []domain.Event
+	for evt := range events {
+		out = append(out, evt)
+	}
+	return out, nil
 }
 
 func effectivePermissionProfile(cfg config.Config, session domain.Session) string {
