@@ -989,8 +989,8 @@ func (m *Model) refreshViewport() {
 		return
 	}
 	var blocks []string
-	for _, msg := range m.messages {
-		blocks = append(blocks, m.renderTranscriptMessage(msg))
+	for _, block := range m.transcriptBlocks() {
+		blocks = append(blocks, m.renderTranscriptBlock(block))
 	}
 	if indicator := m.renderTranscriptActivity(); indicator != "" {
 		blocks = append(blocks, indicator)
@@ -1136,6 +1136,10 @@ func (m *Model) renderMessageParts(parts []domain.Part) string {
 				compactionBlocks = append(compactionBlocks, m.renderer.Render(body))
 			}
 		case domain.PartKindSystemNotice:
+			flushText()
+			flushReasoning()
+			continue
+		case domain.PartKindToolCall, domain.PartKindToolOutput, domain.PartKindDiff, domain.PartKindApprovalRequest:
 			flushText()
 			flushReasoning()
 			continue
@@ -2503,12 +2507,9 @@ func (m *Model) renderApprovalPrompt() string {
 	if !m.hasApprovalPrompt() {
 		return ""
 	}
-	item := m.approvals[0]
-	body := fmt.Sprintf("#%d  %s  %s", item.ID, item.Tool, truncate(approvalSummary(item), max(24, m.viewport.Width-10)))
-	return ui.RenderApprovalPrompt(ui.ApprovalPromptProps{
+	return ui.RenderToolRunDock(ui.ToolRunDockProps{
 		Palette:      m.palette,
-		Title:        "Permission required",
-		Body:         body,
+		Run:          m.approvalToolRun(m.approvals[0]),
 		ApproveLabel: "Approve",
 		DenyLabel:    "Deny",
 		ApproveFocus: m.approvalChoice == 0,

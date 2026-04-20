@@ -438,7 +438,7 @@ func (e *Engine) approve(ctx context.Context, sessionID int64, rawID string) (<-
 	if err != nil {
 		return nil, err
 	}
-	if err := e.recordApprovalReply(ctx, sessionID, item.Tool, id, "approved", approvalPreview(req)); err != nil {
+	if err := e.recordApprovalReply(ctx, sessionID, item.Tool, id, "approved", approvalPreview(req), req.Args["tool_call_id"]); err != nil {
 		return nil, err
 	}
 	e.recordLifecycle(sessionID, "tool_execution_started", item.Command, map[string]string{"tool": string(item.Tool), "approval_id": strconv.FormatInt(id, 10)})
@@ -518,7 +518,11 @@ func (e *Engine) deny(ctx context.Context, _ int64, rawID string) (<-chan domain
 	if err := e.store.UpdateApproval(ctx, id, domain.ApprovalStatusDenied); err != nil {
 		return nil, err
 	}
-	if err := e.recordApprovalReply(ctx, item.SessionID, item.Tool, id, "denied", approvalPreviewFromStored(item.Tool, item.Command)); err != nil {
+	toolCallID := ""
+	if req, err := requestFromStoredApproval(item.Tool, item.Command); err == nil {
+		toolCallID = req.Args["tool_call_id"]
+	}
+	if err := e.recordApprovalReply(ctx, item.SessionID, item.Tool, id, "denied", approvalPreviewFromStored(item.Tool, item.Command), toolCallID); err != nil {
 		return nil, err
 	}
 	return emitOnce(domain.Event{Kind: domain.EventKindApprovalReply, Text: fmt.Sprintf("approval %d denied", id)}), nil
@@ -1172,7 +1176,12 @@ func (e *Engine) handleModelToolCall(ctx context.Context, session domain.Session
 		if err != nil {
 			return domain.Event{}, err
 		}
-		if _, err := e.store.AddPart(ctx, msg.ID, domain.PartKindToolOutput, fmt.Sprintf("%s denied by policy", req.Tool), ""); err != nil {
+		metaPayload := map[string]string{"tool": string(req.Tool)}
+		if toolCallID := strings.TrimSpace(req.Args["tool_call_id"]); toolCallID != "" {
+			metaPayload["tool_call_id"] = toolCallID
+		}
+		meta, _ := json.Marshal(metaPayload)
+		if _, err := e.store.AddPart(ctx, msg.ID, domain.PartKindToolOutput, fmt.Sprintf("%s denied by policy", req.Tool), string(meta)); err != nil {
 			return domain.Event{}, err
 		}
 		return domain.Event{Kind: domain.EventKindToolResult, Tool: req.Tool, Text: fmt.Sprintf("%s denied by policy", req.Tool)}, nil
@@ -1197,7 +1206,7 @@ func (e *Engine) handleModelToolCall(ctx context.Context, session domain.Session
 			return domain.Event{}, err
 		}
 		preview := firstNonEmpty(commandText, approvalPreview(req))
-		if err := e.recordApprovalRequest(ctx, sessionID, req.Tool, approval.ID, preview); err != nil {
+		if err := e.recordApprovalRequest(ctx, sessionID, req.Tool, approval.ID, preview, req.Args["tool_call_id"]); err != nil {
 			return domain.Event{}, err
 		}
 		return domain.Event{
@@ -1303,33 +1312,41 @@ func max(a, b int) int {
 	return slices.Max([]int{a, b})
 }
 
-func (e *Engine) recordApprovalRequest(ctx context.Context, sessionID int64, tool domain.ToolKind, approvalID int64, preview string) error {
+func (e *Engine) recordApprovalRequest(ctx context.Context, sessionID int64, tool domain.ToolKind, approvalID int64, preview, toolCallID string) error {
 	msg, err := e.store.AddMessage(ctx, sessionID, domain.MessageRoleTool, fmt.Sprintf("approval:%s", tool))
 	if err != nil {
 		return err
 	}
-	meta, _ := json.Marshal(map[string]string{
+	payload := map[string]string{
 		"approval_id": strconv.FormatInt(approvalID, 10),
 		"tool":        string(tool),
 		"status":      "pending",
 		"command":     preview,
-	})
+	}
+	if strings.TrimSpace(toolCallID) != "" {
+		payload["tool_call_id"] = toolCallID
+	}
+	meta, _ := json.Marshal(payload)
 	body := fmt.Sprintf("Approval required for %s: %s", tool, preview)
 	_, err = e.store.AddPart(ctx, msg.ID, domain.PartKindApprovalRequest, body, string(meta))
 	return err
 }
 
-func (e *Engine) recordApprovalReply(ctx context.Context, sessionID int64, tool domain.ToolKind, approvalID int64, status, preview string) error {
+func (e *Engine) recordApprovalReply(ctx context.Context, sessionID int64, tool domain.ToolKind, approvalID int64, status, preview, toolCallID string) error {
 	msg, err := e.store.AddMessage(ctx, sessionID, domain.MessageRoleTool, fmt.Sprintf("approval:%s:%s", tool, status))
 	if err != nil {
 		return err
 	}
-	meta, _ := json.Marshal(map[string]string{
+	payload := map[string]string{
 		"approval_id": strconv.FormatInt(approvalID, 10),
 		"tool":        string(tool),
 		"status":      status,
 		"command":     preview,
-	})
+	}
+	if strings.TrimSpace(toolCallID) != "" {
+		payload["tool_call_id"] = toolCallID
+	}
+	meta, _ := json.Marshal(payload)
 	body := fmt.Sprintf("Approval %d %s for %s: %s", approvalID, status, tool, preview)
 	if status == "denied" {
 		_, err = e.store.AddPart(ctx, msg.ID, domain.PartKindToolOutput, body, string(meta))

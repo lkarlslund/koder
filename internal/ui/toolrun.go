@@ -1,0 +1,213 @@
+package ui
+
+import (
+	"strconv"
+	"strings"
+
+	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
+
+	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/theme"
+)
+
+type ToolRunStatus string
+
+const (
+	ToolRunStatusRequested       ToolRunStatus = "requested"
+	ToolRunStatusPendingApproval ToolRunStatus = "pending_approval"
+	ToolRunStatusApproved        ToolRunStatus = "approved"
+	ToolRunStatusCompleted       ToolRunStatus = "completed"
+	ToolRunStatusDenied          ToolRunStatus = "denied"
+	ToolRunStatusFailed          ToolRunStatus = "failed"
+)
+
+type ToolRun struct {
+	ID         string
+	Tool       domain.ToolKind
+	ToolCallID string
+	ApprovalID int64
+	Title      string
+	Subtitle   string
+	Preview    string
+	Status     ToolRunStatus
+	Output     string
+	Diff       string
+	ErrorText  string
+}
+
+type ToolRunDockProps struct {
+	Palette      theme.Palette
+	Run          ToolRun
+	ApproveLabel string
+	DenyLabel    string
+	ApproveFocus bool
+	DenyFocus    bool
+	Hints        string
+}
+
+func (r ToolRun) StatusLabel() string {
+	switch r.Status {
+	case ToolRunStatusPendingApproval:
+		if r.ApprovalID > 0 {
+			return "Needs approval #" + strconv.FormatInt(r.ApprovalID, 10)
+		}
+		return "Needs approval"
+	case ToolRunStatusApproved:
+		return "Approved"
+	case ToolRunStatusCompleted:
+		return "Completed"
+	case ToolRunStatusDenied:
+		return "Denied"
+	case ToolRunStatusFailed:
+		return "Failed"
+	default:
+		return "Requested"
+	}
+}
+
+func RenderToolRunCard(run ToolRun, palette theme.Palette, width int) string {
+	statusStyle := lipgloss.NewStyle().Foreground(toolRunStatusColor(run.Status, palette)).Bold(true)
+	titleStyle := lipgloss.NewStyle().Foreground(palette.MarkdownText).Bold(true)
+	subtitleStyle := lipgloss.NewStyle().Foreground(palette.ComposerMutedText)
+	bodyStyle := lipgloss.NewStyle().Foreground(palette.MarkdownText)
+	diffStyle := lipgloss.NewStyle().Foreground(palette.DiffAddedText)
+	cardStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(toolRunStatusColor(run.Status, palette)).
+		Padding(0, 1)
+	if width > 0 {
+		cardStyle = cardStyle.MaxWidth(width)
+	}
+
+	lines := []string{
+		lipgloss.JoinHorizontal(lipgloss.Left,
+			titleStyle.Render(run.Title),
+			"  ",
+			statusStyle.Render(run.StatusLabel()),
+		),
+	}
+	if subtitle := strings.TrimSpace(run.Subtitle); subtitle != "" {
+		lines = append(lines, subtitleStyle.Render(wrapPlain(subtitle, innerCardWidth(width))))
+	}
+	if preview := firstNonEmpty(strings.TrimSpace(run.ErrorText), strings.TrimSpace(run.Output), strings.TrimSpace(run.Diff), strings.TrimSpace(run.Preview)); preview != "" {
+		lines = append(lines, renderToolRunPreview(preview, run, bodyStyle, diffStyle, innerCardWidth(width)))
+	}
+	return cardStyle.Render(strings.Join(lines, "\n"))
+}
+
+func RenderToolRunDock(props ToolRunDockProps) string {
+	run := props.Run
+	statusStyle := lipgloss.NewStyle().Foreground(toolRunStatusColor(run.Status, props.Palette)).Bold(true)
+	title := lipgloss.JoinHorizontal(lipgloss.Left,
+		lipgloss.NewStyle().Bold(true).Render(run.Title),
+		"  ",
+		statusStyle.Render(run.StatusLabel()),
+	)
+	lines := []string{title}
+	if subtitle := strings.TrimSpace(run.Subtitle); subtitle != "" {
+		lines = append(lines, lipgloss.NewStyle().Foreground(props.Palette.ComposerMutedText).Render(subtitle))
+	}
+	if preview := firstNonEmpty(strings.TrimSpace(run.Preview), strings.TrimSpace(run.Output), strings.TrimSpace(run.ErrorText)); preview != "" {
+		lines = append(lines, preview)
+	}
+
+	approve := lipgloss.NewStyle().Padding(0, 1)
+	if props.ApproveFocus {
+		approve = approve.Reverse(true).Bold(true)
+	}
+	deny := lipgloss.NewStyle().Padding(0, 1)
+	if props.DenyFocus {
+		deny = deny.Reverse(true).Bold(true)
+	}
+
+	lines = append(lines,
+		lipgloss.JoinHorizontal(lipgloss.Left, approve.Render(props.ApproveLabel), "  ", deny.Render(props.DenyLabel)),
+		props.Hints,
+	)
+	return lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(toolRunStatusColor(run.Status, props.Palette)).
+		Padding(0, 1).
+		Render(strings.Join(lines, "\n"))
+}
+
+func renderToolRunPreview(preview string, run ToolRun, bodyStyle, diffStyle lipgloss.Style, width int) string {
+	preview = strings.TrimSpace(preview)
+	if preview == "" {
+		return ""
+	}
+	if strings.TrimSpace(run.Diff) != "" && strings.TrimSpace(run.Output) == "" && strings.TrimSpace(run.ErrorText) == "" {
+		return diffStyle.Render(wrapPlain(diffSummary(preview), width))
+	}
+	return bodyStyle.Render(wrapPlain(singleLineSummary(preview), width))
+}
+
+func toolRunStatusColor(status ToolRunStatus, palette theme.Palette) lipgloss.Color {
+	switch status {
+	case ToolRunStatusPendingApproval, ToolRunStatusApproved:
+		return palette.ActivityText
+	case ToolRunStatusDenied, ToolRunStatusFailed:
+		return palette.DiffDeletedText
+	default:
+		return palette.UserAccentBar
+	}
+}
+
+func diffSummary(diff string) string {
+	lines := strings.Split(strings.TrimSpace(diff), "\n")
+	if len(lines) == 0 {
+		return "Diff generated"
+	}
+	return firstNonEmpty(strings.TrimSpace(lines[0]), "Diff generated")
+}
+
+func singleLineSummary(input string) string {
+	input = strings.TrimSpace(input)
+	if input == "" {
+		return ""
+	}
+	lines := strings.Fields(strings.ReplaceAll(input, "\n", " "))
+	if len(lines) == 0 {
+		return ""
+	}
+	summary := strings.Join(lines, " ")
+	if lipgloss.Width(summary) <= 90 {
+		return summary
+	}
+	return ansi.Truncate(summary, 90, "…")
+}
+
+func wrapPlain(input string, width int) string {
+	if width <= 0 {
+		return input
+	}
+	var lines []string
+	for _, line := range strings.Split(input, "\n") {
+		if strings.TrimSpace(line) == "" {
+			lines = append(lines, "")
+			continue
+		}
+		lines = append(lines, strings.Split(ansi.Wordwrap(line, width, ""), "\n")...)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func innerCardWidth(width int) int {
+	if width <= 0 {
+		return 0
+	}
+	if width-6 < 1 {
+		return 1
+	}
+	return width - 6
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}

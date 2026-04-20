@@ -572,6 +572,67 @@ func TestRenderTranscriptToolMessageFallsBackToSummaryWhenBodyMissing(t *testing
 	}
 }
 
+func TestRefreshViewportGroupsToolRunMessagesIntoCard(t *testing.T) {
+	cfg := testConfig(t)
+	m := Model{
+		cfg:     cfg,
+		palette: theme.Resolve("tokyonight").Palette,
+		parts: map[int64][]domain.Part{
+			1: {{
+				Kind: domain.PartKindToolCall,
+				Body: `{"command":"git status","tool":"bash","tool_call_id":"call_1"}`,
+				MetaJSON: `{"command":"git status","tool":"bash","tool_call_id":"call_1"}`,
+			}},
+			2: {{
+				Kind:     domain.PartKindApprovalRequest,
+				Body:     "Approval required for bash: git status",
+				MetaJSON: `{"approval_id":"7","tool":"bash","status":"pending","command":"git status","tool_call_id":"call_1"}`,
+			}},
+			3: {{
+				Kind:     domain.PartKindToolOutput,
+				Body:     "On branch main",
+				MetaJSON: `{"tool":"bash","tool_call_id":"call_1"}`,
+			}},
+		},
+		messages: []domain.Message{
+			{ID: 1, Role: domain.MessageRoleAssistant},
+			{ID: 2, Role: domain.MessageRoleTool},
+			{ID: 3, Role: domain.MessageRoleTool, Summary: "bash"},
+		},
+		viewport: viewport.New(80, 12),
+	}
+
+	m.refreshViewport()
+	got := m.viewport.View()
+	if !strings.Contains(got, "Run command") {
+		t.Fatalf("expected grouped tool title in transcript, got %q", got)
+	}
+	if !strings.Contains(got, "Completed") {
+		t.Fatalf("expected completed tool status, got %q", got)
+	}
+	if strings.Contains(got, `"tool":"bash"`) || strings.Contains(got, "Approval required for bash") {
+		t.Fatalf("expected compact tool card instead of raw transcript blobs, got %q", got)
+	}
+}
+
+func TestRenderApprovalPromptUsesToolRunDock(t *testing.T) {
+	cfg := testConfig(t)
+	m := Model{
+		cfg:       cfg,
+		palette:   theme.Resolve("tokyonight").Palette,
+		viewport:  viewport.New(80, 12),
+		approvals: []store.Approval{{ID: 9, Tool: domain.ToolKindBash, Command: `{"command":"git status","tool_call_id":"call_1"}`}},
+	}
+
+	got := m.renderApprovalPrompt()
+	if !strings.Contains(got, "Run command") || !strings.Contains(got, "Needs approval #9") {
+		t.Fatalf("expected typed approval dock, got %q", got)
+	}
+	if strings.Contains(got, `{"command":"git status"`) {
+		t.Fatalf("expected approval dock to avoid raw JSON, got %q", got)
+	}
+}
+
 func TestEnterWithoutProviderOpensConnectDialog(t *testing.T) {
 	m := Model{
 		cfg:      config.Default(),
