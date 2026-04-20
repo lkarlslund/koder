@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -25,7 +26,7 @@ func openPebbleBackend(stateDir string) (*pebbleBackend, error) {
 	if err := ensureDir(dir); err != nil {
 		return nil, fmt.Errorf("create pebble store dir: %w", err)
 	}
-	db, err := pebble.Open(dir, &pebble.Options{})
+	db, err := pebble.Open(dir, &pebble.Options{Logger: silentPebbleLogger{}})
 	if err != nil {
 		return nil, fmt.Errorf("open pebble: %w", err)
 	}
@@ -35,6 +36,14 @@ func openPebbleBackend(stateDir string) (*pebbleBackend, error) {
 		return nil, err
 	}
 	return b, nil
+}
+
+type silentPebbleLogger struct{}
+
+func (silentPebbleLogger) Infof(string, ...interface{}) {}
+
+func (silentPebbleLogger) Fatalf(format string, args ...interface{}) {
+	log.Printf("pebble fatal: "+format, args...)
 }
 
 func (b *pebbleBackend) init() error {
