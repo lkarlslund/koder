@@ -36,9 +36,6 @@ func runTUI(ctx context.Context, mode tui.StartupMode) error {
 	if err != nil {
 		return err
 	}
-	if err := cfg.RequireProvider(); err != nil {
-		return err
-	}
 	st, err := store.OpenWithOptions(cfg.StateDir(), store.Options{Backend: cfg.Store.Backend})
 	if err != nil {
 		return err

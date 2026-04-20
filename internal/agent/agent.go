@@ -38,6 +38,10 @@ func New(cfg config.Config, st *store.Store, registry *tools.Registry) *Engine {
 	return &Engine{cfg: cfg, store: st, registry: registry}
 }
 
+func (e *Engine) UpdateConfig(cfg config.Config) {
+	e.cfg = cfg
+}
+
 func (e *Engine) RunPrompt(ctx context.Context, session domain.Session, prompt string) (<-chan domain.Event, error) {
 	return e.runModelPrompt(ctx, session, prompt)
 }

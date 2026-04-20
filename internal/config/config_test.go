@@ -51,3 +51,28 @@ func TestRequireProviderRejectsMissingProviderConfiguration(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+func TestApplyDefaultsInfersProviderKindAndAuthMethod(t *testing.T) {
+	cfg := Default()
+	cfg.Providers["remote"] = Provider{
+		BaseURL:      "https://example.com/v1",
+		APIKeyEnv:    "EXAMPLE_KEY",
+		DefaultModel: "gpt-test",
+	}
+	cfg.Providers["local"] = Provider{
+		BaseURL:      "http://127.0.0.1:11434/v1",
+		DefaultModel: "local-model",
+	}
+
+	cfg.applyDefaults()
+
+	if got := cfg.Providers["remote"].Kind; got != "openai-compatible" {
+		t.Fatalf("expected inferred provider kind, got %q", got)
+	}
+	if got := cfg.Providers["remote"].AuthMethod; got != "api_key" {
+		t.Fatalf("expected api_key auth method, got %q", got)
+	}
+	if got := cfg.Providers["local"].AuthMethod; got != "local_endpoint" {
+		t.Fatalf("expected local endpoint auth method, got %q", got)
+	}
+}

@@ -26,6 +26,8 @@ type Store struct {
 }
 
 type Provider struct {
+	Kind          string            `toml:"kind"`
+	AuthMethod    string            `toml:"auth_method"`
 	Name          string            `toml:"name"`
 	BaseURL       string            `toml:"base_url"`
 	APIKey        string            `toml:"api_key"`
@@ -206,6 +208,16 @@ func (c *Config) applyDefaults() {
 	}
 	fallbackProvider := providerDefaults()
 	for id, provider := range c.Providers {
+		if provider.Kind == "" {
+			provider.Kind = "openai-compatible"
+		}
+		if provider.AuthMethod == "" {
+			if strings.TrimSpace(provider.APIKey) != "" || strings.TrimSpace(provider.APIKeyEnv) != "" {
+				provider.AuthMethod = "api_key"
+			} else {
+				provider.AuthMethod = "local_endpoint"
+			}
+		}
 		if provider.Timeout == 0 {
 			provider.Timeout = fallbackProvider.Timeout
 		}
@@ -271,6 +283,18 @@ func (c Config) RequireProvider() error {
 		return fmt.Errorf("default provider %q not configured; %s", c.DefaultProvider, providerConfigurationHint)
 	}
 	return nil
+}
+
+func (c Config) HasUsableProvider(id string) bool {
+	provider, ok := c.Provider(id)
+	if !ok {
+		return false
+	}
+	return !provider.Disabled
+}
+
+func (c Config) HasUsableDefaultProvider() bool {
+	return c.HasUsableProvider(c.DefaultProvider)
 }
 
 func providerDefaults() Provider {
