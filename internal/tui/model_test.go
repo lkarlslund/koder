@@ -557,6 +557,19 @@ func TestCtrlCUsesQuitPath(t *testing.T) {
 	}
 }
 
+func TestExitSummaryIncludesSessionDetails(t *testing.T) {
+	m := Model{
+		currentSession: domain.Session{ID: 4, Title: "Testing Session Review Flow"},
+		messages:       []domain.Message{{ID: 1}, {ID: 2}, {ID: 3}},
+	}
+
+	got := m.exitSummary()
+	want := `Closed session 4 "Testing Session Review Flow" with 3 messages.`
+	if got != want {
+		t.Fatalf("unexpected summary: %q", got)
+	}
+}
+
 func TestSessionPickerEscapeCreatesNewSession(t *testing.T) {
 	m := Model{
 		composer:      textarea.New(),

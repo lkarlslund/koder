@@ -189,41 +189,41 @@ type forkSessionMsg struct {
 }
 
 type Model struct {
-	cfg            config.Config
-	store          *store.Store
-	agent          *agent.Engine
-	renderer       *markdown.Renderer
-	palette        theme.Palette
-	sessions       []domain.Session
-	currentSession domain.Session
-	messages       []domain.Message
-	parts          map[int64][]domain.Part
-	tasks          []store.Task
-	approvals      []store.Approval
-	viewport       viewport.Model
-	composer       textarea.Model
-	width          int
-	height         int
-	status         string
-	loading        bool
-	busy           busyModel
-	showSidebar    bool
-	showReasoning  bool
-	slashMatches   []slashCommand
-	slashIndex     int
-	approvalChoice int
-	workdir        string
-	workspace      workspace.Status
-	startupMode    StartupMode
-	picker         pickerModel
-	pendingPartID  int64
-	mouseEnabled   bool
-	sessionDialog  *ui.SessionDialog
-	preferences    *ui.PreferencesDialog
-	connectDialog  *ui.ConnectDialog
+	cfg              config.Config
+	store            *store.Store
+	agent            *agent.Engine
+	renderer         *markdown.Renderer
+	palette          theme.Palette
+	sessions         []domain.Session
+	currentSession   domain.Session
+	messages         []domain.Message
+	parts            map[int64][]domain.Part
+	tasks            []store.Task
+	approvals        []store.Approval
+	viewport         viewport.Model
+	composer         textarea.Model
+	width            int
+	height           int
+	status           string
+	loading          bool
+	busy             busyModel
+	showSidebar      bool
+	showReasoning    bool
+	slashMatches     []slashCommand
+	slashIndex       int
+	approvalChoice   int
+	workdir          string
+	workspace        workspace.Status
+	startupMode      StartupMode
+	picker           pickerModel
+	pendingPartID    int64
+	mouseEnabled     bool
+	sessionDialog    *ui.SessionDialog
+	preferences      *ui.PreferencesDialog
+	connectDialog    *ui.ConnectDialog
 	disconnectDialog *ui.DisconnectDialog
-	modelDialog    *ui.ModelDialog
-	debug          *debugsrv.Recorder
+	modelDialog      *ui.ModelDialog
+	debug            *debugsrv.Recorder
 }
 
 func New(cfg config.Config, st *store.Store, a *agent.Engine, mode StartupMode, debug *debugsrv.Recorder) (Model, error) {
@@ -1279,9 +1279,20 @@ func Run(cfg config.Config, st *store.Store, a *agent.Engine, mode StartupMode, 
 		return err
 	}
 	if typed, ok := finalModel.(Model); ok {
-		_ = typed
+		fmt.Println(typed.exitSummary())
 	}
 	return nil
+}
+
+func (m Model) exitSummary() string {
+	if m.currentSession.ID <= 0 {
+		return "Exited koder."
+	}
+	title := strings.TrimSpace(m.currentSession.Title)
+	if title == "" {
+		title = "untitled session"
+	}
+	return fmt.Sprintf("Closed session %d \"%s\" with %d messages.", m.currentSession.ID, title, len(m.messages))
 }
 
 func timestamp(t time.Time, enabled bool) string {
