@@ -16,7 +16,7 @@ func TestRecorderTracksSessionEventsAndRuntime(t *testing.T) {
 	rec := NewRecorder()
 	rec.RecordLifecycle(7, "prompt_submitted", "hello", map[string]string{"source": "tui"})
 	rec.RecordEvent(7, domain.Event{Kind: domain.EventKindToolResult, Text: "done"})
-	rec.UpdateRuntime(RuntimeSnapshot{CurrentSession: 7, Status: "Ready"})
+	rec.UpdateRuntime(RuntimeSnapshot{CurrentSession: 7, Status: "Ready", ViewportWidth: 80, MessageCount: 2, ViewportPreview: "hello"})
 
 	events := rec.Events(7)
 	if len(events) != 2 {
@@ -24,6 +24,9 @@ func TestRecorderTracksSessionEventsAndRuntime(t *testing.T) {
 	}
 	if rec.Runtime().CurrentSession != 7 {
 		t.Fatalf("unexpected runtime snapshot: %#v", rec.Runtime())
+	}
+	if rec.Runtime().ViewportWidth != 80 || rec.Runtime().MessageCount != 2 {
+		t.Fatalf("expected runtime viewport details, got %#v", rec.Runtime())
 	}
 }
 

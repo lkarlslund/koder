@@ -171,6 +171,31 @@ func TestWindowTitleUsesAnimatedSpinnerFrame(t *testing.T) {
 	}
 }
 
+func TestSyncDebugRuntimeIncludesViewportState(t *testing.T) {
+	rec := debugsrv.NewRecorder()
+	m := Model{
+		debug:          rec,
+		status:         "Ready",
+		currentSession: domain.Session{ID: 7, Title: "Debug Session", ProviderID: "test", ModelID: "model"},
+		messages:       []domain.Message{{ID: 1}, {ID: 2}},
+		viewport:       viewport.New(40, 6),
+	}
+	m.viewport.SetContent("line one\nline two")
+
+	m.syncDebugRuntime()
+
+	got := rec.Runtime()
+	if got.CurrentSession != 7 || got.ViewportWidth != 40 || got.ViewportHeight != 6 {
+		t.Fatalf("unexpected runtime snapshot: %#v", got)
+	}
+	if got.MessageCount != 2 {
+		t.Fatalf("expected message count 2, got %#v", got)
+	}
+	if !strings.Contains(got.ViewportPreview, "line one") {
+		t.Fatalf("expected viewport preview, got %#v", got)
+	}
+}
+
 func TestRenderTranscriptToolMessageFallsBackToSummaryWhenBodyMissing(t *testing.T) {
 	cfg := config.Default()
 	m := Model{

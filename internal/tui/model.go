@@ -1574,19 +1574,31 @@ func (m Model) syncDebugRuntime() {
 	if m.debug == nil {
 		return
 	}
+	renderedBlocks := len(m.messages)
+	if m.renderTranscriptActivity() != "" {
+		renderedBlocks++
+	}
+	viewportContent := m.viewport.View()
 	m.debug.UpdateRuntime(debugsrv.RuntimeSnapshot{
-		DebugAPI:       m.debugAPIAddr(),
-		CurrentSession: m.currentSession.ID,
-		SessionTitle:   strings.TrimSpace(m.currentSession.Title),
-		ProviderID:     strings.TrimSpace(m.currentSession.ProviderID),
-		ModelID:        strings.TrimSpace(m.currentSession.ModelID),
-		Status:         strings.TrimSpace(m.status),
-		Busy:           m.busy.active,
-		BusyStatus:     strings.TrimSpace(m.busy.status),
-		OpenDialog:     m.openDialogName(),
-		ShowSidebar:    m.showSidebar,
-		ShowReasoning:  m.showReasoning,
-		LastError:      m.currentError(),
+		DebugAPI:           m.debugAPIAddr(),
+		CurrentSession:     m.currentSession.ID,
+		SessionTitle:       strings.TrimSpace(m.currentSession.Title),
+		ProviderID:         strings.TrimSpace(m.currentSession.ProviderID),
+		ModelID:            strings.TrimSpace(m.currentSession.ModelID),
+		Status:             strings.TrimSpace(m.status),
+		Busy:               m.busy.active,
+		BusyStatus:         strings.TrimSpace(m.busy.status),
+		OpenDialog:         m.openDialogName(),
+		ShowSidebar:        m.showSidebar,
+		ShowReasoning:      m.showReasoning,
+		LastError:          m.currentError(),
+		ViewportWidth:      m.viewport.Width,
+		ViewportHeight:     m.viewport.Height,
+		ViewportYOffset:    m.viewport.YOffset,
+		MessageCount:       len(m.messages),
+		RenderBlockCount:   renderedBlocks,
+		ViewportPreview:    truncate(strings.TrimSpace(viewportContent), 2048),
+		ViewportContentLen: len(viewportContent),
 	})
 }
 
