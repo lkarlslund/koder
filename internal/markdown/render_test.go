@@ -95,6 +95,19 @@ func TestRenderFormatsInlineMarkdown(t *testing.T) {
 	}
 }
 
+func TestRenderRestoresBaseColorAfterStrongText(t *testing.T) {
+	renderer, err := New(theme.Default().Palette)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	got := renderer.Render("plain **bold** plain")
+	wantReset := "\x1b[38;2;200;211;245m"
+	if !strings.Contains(got, wantReset) {
+		t.Fatalf("expected base markdown foreground to be restored after strong text, got %q", got)
+	}
+}
+
 func TestRenderFormatsNestedLists(t *testing.T) {
 	renderer, err := New(theme.Default().Palette)
 	if err != nil {
