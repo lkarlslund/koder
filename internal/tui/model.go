@@ -19,6 +19,7 @@ import (
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/markdown"
 	"github.com/lkarlslund/koder/internal/permission"
+	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/sessionctx"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/theme"
@@ -171,6 +172,11 @@ type runPromptMsg struct {
 	err     error
 }
 
+type providerProbeMsg struct {
+	result provider.ProbeResult
+	err    error
+}
+
 type Model struct {
 	cfg            config.Config
 	store          *store.Store
@@ -203,6 +209,7 @@ type Model struct {
 	mouseEnabled   bool
 	sessionDialog  *ui.SessionDialog
 	preferences    *ui.PreferencesDialog
+	connectDialog  *ui.ConnectDialog
 }
 
 func New(cfg config.Config, st *store.Store, a *agent.Engine, mode StartupMode) (Model, error) {
@@ -310,6 +317,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.composer.Reset()
 		m.closePicker()
 		m.closeSessionDialog()
+		m.closeConnectDialog()
 		m.status = fmt.Sprintf("Started session %d", msg.session.ID)
 		m.updateSlashMenu()
 		m.refreshViewport()
@@ -318,6 +326,28 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.sessions = msg.sessions
 		m.openSessionPicker()
 		m.stopBusyWithStatus("Select a session to resume")
+		return m, nil
+	case providerProbeMsg:
+		if !m.hasConnectDialog() {
+			return m, nil
+		}
+		if msg.err != nil {
+			m.connectDialog.SetStatus("Connection test failed: " + msg.err.Error())
+			m.status = msg.err.Error()
+			return m, nil
+		}
+		modelIDs := make([]string, 0, len(msg.result.Models))
+		for _, item := range msg.result.Models {
+			modelIDs = append(modelIDs, item.ID)
+		}
+		m.connectDialog.SetModels(modelIDs)
+		if len(modelIDs) == 0 {
+			m.connectDialog.SetStatus("Connected, but no models were returned")
+			m.status = "Provider connected"
+		} else {
+			m.connectDialog.SetStatus(fmt.Sprintf("Connected: discovered %d models", len(modelIDs)))
+			m.status = fmt.Sprintf("Provider connected: %d models", len(modelIDs))
+		}
 		return m, nil
 	case tea.MouseMsg:
 		if m.hasPicker() || m.hasApprovalPrompt() {
@@ -337,6 +367,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) View() string {
+	if m.hasConnectDialog() && m.width > 0 && m.height > 0 {
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, m.renderConnectDialog())
+	}
 	if m.hasSessionDialog() && m.width > 0 && m.height > 0 {
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, m.renderSessionDialog())
 	}
@@ -356,6 +389,9 @@ func (m Model) View() string {
 }
 
 func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.hasConnectDialog() {
+		return m.handleConnectDialogKey(msg)
+	}
 	if m.hasPreferencesDialog() {
 		return m.handlePreferencesKey(msg)
 	}
@@ -464,6 +500,11 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		if handledModel, cmd, ok := m.handleLocalCommand(prompt); ok {
 			return handledModel, cmd
+		}
+		if ok, status := m.canSendPrompt(); !ok {
+			m.openConnectDialog()
+			m.status = status
+			return m, nil
 		}
 		m.composer.Reset()
 		m.updateSlashMenu()
@@ -720,6 +761,7 @@ func (m *Model) renderSidebar() string {
 	lines = append(lines, "  ^s    sidebar")
 	lines = append(lines, "  ^r    reasoning")
 	lines = append(lines, "  /compact")
+	lines = append(lines, "  /connect")
 	lines = append(lines, "  /new  session")
 	lines = append(lines, "  /perm profile")
 	lines = append(lines, "  /prefs")
@@ -729,6 +771,10 @@ func (m *Model) renderSidebar() string {
 
 func (m *Model) refreshViewport() {
 	if m.currentSession.ID == 0 && len(m.messages) == 0 {
+		if !m.cfg.HasUsableDefaultProvider() {
+			m.viewport.SetContent("No provider configured.\n\nType /connect to add one before sending prompts.")
+			return
+		}
 		m.viewport.SetContent("No session")
 		return
 	}
@@ -740,7 +786,11 @@ func (m *Model) refreshViewport() {
 		blocks = append(blocks, indicator)
 	}
 	if len(blocks) == 0 {
-		blocks = append(blocks, "Start by asking a question or type / for commands.")
+		if !m.cfg.HasUsableDefaultProvider() {
+			blocks = append(blocks, "No provider configured.\n\nType /connect to add one before sending prompts.")
+		} else {
+			blocks = append(blocks, "Start by asking a question or type / for commands.")
+		}
 	}
 	m.viewport.SetContent(strings.Join(blocks, "\n\n"))
 	m.viewport.GotoBottom()
@@ -1131,6 +1181,7 @@ func (m Model) UpdateLoad(msg loadMsg) Model {
 	m.closePicker()
 	m.closeSessionDialog()
 	m.closePreferencesDialog()
+	m.closeConnectDialog()
 	m.refreshViewport()
 	return m
 }
@@ -1171,6 +1222,11 @@ func (m *Model) handleLocalCommand(prompt string) (tea.Model, tea.Cmd, bool) {
 		m.updateSlashMenu()
 		m.startBusy(busyScopeTranscript, "Compacting session...")
 		return m, tea.Batch(m.compactCmd(), m.spinnerCmdIfNeeded()), true
+	case trimmed == "/connect":
+		m.composer.Reset()
+		m.updateSlashMenu()
+		m.openConnectDialog()
+		return m, nil, true
 	case trimmed == "/theme":
 		m.composer.Reset()
 		m.updateSlashMenu()
@@ -1341,6 +1397,20 @@ func (m *Model) isWorking() bool {
 	return m.busy.transcriptActive()
 }
 
+func (m *Model) canSendPrompt() (bool, string) {
+	session := m.draftSession()
+	if strings.TrimSpace(session.ProviderID) == "" {
+		return false, "Configure a provider first with /connect"
+	}
+	if !m.cfg.HasUsableProvider(session.ProviderID) {
+		return false, fmt.Sprintf("Provider %q is not configured; use /connect", session.ProviderID)
+	}
+	if strings.TrimSpace(session.ModelID) == "" {
+		return false, "Select a default model with /connect before sending prompts"
+	}
+	return true, ""
+}
+
 func (m *Model) workingIndicator() string {
 	if !m.busy.spinner.active {
 		return ""
@@ -1501,6 +1571,17 @@ func (m *Model) renderPreferencesDialog() string {
 	return m.preferences.View(width, m.palette)
 }
 
+func (m *Model) renderConnectDialog() string {
+	if !m.hasConnectDialog() {
+		return ""
+	}
+	width := 88
+	if m.width > 0 {
+		width = min(104, max(76, m.width-8))
+	}
+	return m.connectDialog.View(width, m.palette)
+}
+
 func (m *Model) handleSessionDialogKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if !m.hasSessionDialog() {
 		return m, nil
@@ -1554,6 +1635,34 @@ func (m *Model) handlePreferencesKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 }
 
+func (m *Model) handleConnectDialogKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if !m.hasConnectDialog() {
+		return m, nil
+	}
+	action := m.connectDialog.Update(msg)
+	switch action.Kind {
+	case ui.ProviderConnectActionTest:
+		m.connectDialog.SetStatus("Testing connection…")
+		return m, m.probeProviderCmd(action.Draft)
+	case ui.ProviderConnectActionSave:
+		if err := m.saveProviderDraft(action.Draft); err != nil {
+			m.connectDialog.SetStatus("Save failed: " + err.Error())
+			m.status = err.Error()
+			return m, nil
+		}
+		m.closeConnectDialog()
+		m.status = fmt.Sprintf("Connected provider %s", action.Draft.ProviderID)
+		m.refreshViewport()
+		return m, nil
+	case ui.ProviderConnectActionCancel:
+		m.closeConnectDialog()
+		m.status = "Provider connect cancelled"
+		return m, nil
+	default:
+		return m, nil
+	}
+}
+
 func (m *Model) hasApprovalPrompt() bool {
 	return !m.loading && len(m.approvals) > 0
 }
@@ -1592,6 +1701,7 @@ func (m *Model) renderApprovalPrompt() string {
 func internalSlashCommands() []slashCommand {
 	return []slashCommand{
 		{Name: "/compact", Description: "Summarize old context"},
+		{Name: "/connect", Description: "Configure a provider"},
 		{Name: "/new", Description: "Start a new session"},
 		{Name: "/mouse", Description: "Toggle mouse capture", NeedsArgs: true, Autocomplete: "/mouse "},
 		{Name: "/perm", Description: "Set permission profile", NeedsArgs: true, Autocomplete: "/perm "},
@@ -1684,6 +1794,14 @@ func (m *Model) closePreferencesDialog() {
 	m.preferences = nil
 }
 
+func (m *Model) hasConnectDialog() bool {
+	return m.connectDialog != nil
+}
+
+func (m *Model) closeConnectDialog() {
+	m.connectDialog = nil
+}
+
 func (m *Model) openSessionPicker() {
 	items := make([]ui.SessionItem, 0, len(m.sessions))
 	for _, session := range m.sessions {
@@ -1720,6 +1838,71 @@ func (m *Model) openSessionPicker() {
 func (m *Model) openPreferencesDialog() {
 	dialog := ui.NewPreferencesDialog(m.cfg.UI, theme.Names())
 	m.preferences = &dialog
+}
+
+func (m *Model) openConnectDialog() {
+	dialog := ui.NewConnectDialog(provider.Catalog(), m.cfg.Providers)
+	m.connectDialog = &dialog
+}
+
+func (m Model) probeProviderCmd(draft provider.ConnectDraft) tea.Cmd {
+	return func() tea.Msg {
+		result, err := provider.Probe(context.Background(), draft)
+		return providerProbeMsg{result: result, err: err}
+	}
+}
+
+func (m *Model) saveProviderDraft(draft provider.ConnectDraft) error {
+	if err := provider.ValidateDraft(draft); err != nil {
+		return err
+	}
+	if m.cfg.Providers == nil {
+		m.cfg.Providers = map[string]config.Provider{}
+	}
+	next := draft.ToConfig()
+	existing, ok := m.cfg.Providers[draft.ProviderID]
+	if ok {
+		if next.ContextWindow == 0 {
+			next.ContextWindow = existing.ContextWindow
+		}
+		if next.AutoCompactAt == 0 {
+			next.AutoCompactAt = existing.AutoCompactAt
+		}
+		if next.Timeout == 0 {
+			next.Timeout = existing.Timeout
+		}
+		next.Stream = existing.Stream
+		next.Disabled = false
+	} else {
+		next.ContextWindow = 32768
+		next.AutoCompactAt = 85
+		next.Timeout = 2 * time.Minute
+		next.Stream = true
+		next.Disabled = false
+	}
+	if strings.TrimSpace(next.Name) == "" {
+		if desc, found := provider.Lookup(draft.ProviderID); found {
+			next.Name = desc.Title
+		} else {
+			next.Name = draft.ProviderID
+		}
+	}
+	m.cfg.Providers[draft.ProviderID] = next
+	m.cfg.DefaultProvider = draft.ProviderID
+	m.cfg.DefaultModel = draft.Model
+	if err := m.cfg.Save(); err != nil {
+		return err
+	}
+	if m.agent != nil {
+		m.agent.UpdateConfig(m.cfg)
+	}
+	if strings.TrimSpace(m.currentSession.ProviderID) == "" || !m.cfg.HasUsableProvider(m.currentSession.ProviderID) {
+		m.currentSession.ProviderID = draft.ProviderID
+	}
+	if strings.TrimSpace(m.currentSession.ModelID) == "" {
+		m.currentSession.ModelID = draft.Model
+	}
+	return nil
 }
 
 func (m *Model) openThemePicker() {

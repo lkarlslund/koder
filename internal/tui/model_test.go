@@ -16,6 +16,7 @@ import (
 
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/theme"
 	"github.com/lkarlslund/koder/internal/ui"
@@ -43,6 +44,11 @@ func TestMatchingSlashCommands(t *testing.T) {
 	matches = matchingSlashCommands("comp")
 	if len(matches) != 1 || matches[0].Name != "/compact" {
 		t.Fatalf("expected /compact, got %#v", matches)
+	}
+
+	matches = matchingSlashCommands("conn")
+	if len(matches) != 1 || matches[0].Name != "/connect" {
+		t.Fatalf("expected /connect, got %#v", matches)
 	}
 
 	matches = matchingSlashCommands("the")
@@ -73,7 +79,20 @@ func TestSlashQuery(t *testing.T) {
 }
 
 func TestEnterSendsNormalPrompt(t *testing.T) {
+	cfg := config.Default()
+	cfg.DefaultProvider = "openai"
+	cfg.DefaultModel = "gpt-5.4"
+	cfg.Providers = map[string]config.Provider{
+		"openai": {
+			Kind:         "openai-compatible",
+			AuthMethod:   "api_key",
+			BaseURL:      "https://api.openai.com/v1",
+			APIKey:       "secret",
+			DefaultModel: "gpt-5.4",
+		},
+	}
 	m := Model{
+		cfg:      cfg,
 		composer: textarea.New(),
 		parts:    map[int64][]domain.Part{},
 	}
@@ -95,6 +114,26 @@ func TestEnterSendsNormalPrompt(t *testing.T) {
 	}
 	if len(next.parts[next.messages[0].ID]) != 1 || next.parts[next.messages[0].ID][0].Body != "hello" {
 		t.Fatalf("expected optimistic user part, got %#v", next.parts)
+	}
+}
+
+func TestEnterWithoutProviderOpensConnectDialog(t *testing.T) {
+	m := Model{
+		cfg:      config.Default(),
+		composer: textarea.New(),
+	}
+	m.composer.SetValue("hello")
+
+	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	next := updated.(*Model)
+	if cmd != nil {
+		t.Fatal("expected no async command when provider is missing")
+	}
+	if !next.hasConnectDialog() {
+		t.Fatal("expected connect dialog to open")
+	}
+	if next.composer.Value() != "hello" {
+		t.Fatalf("expected prompt to remain in composer, got %q", next.composer.Value())
 	}
 }
 
@@ -508,6 +547,58 @@ func TestPrefsCommandOpensPreferencesDialog(t *testing.T) {
 	}
 }
 
+func TestConnectCommandOpensConnectDialog(t *testing.T) {
+	m := Model{
+		cfg:      config.Default(),
+		composer: textarea.New(),
+	}
+	m.composer.SetValue("/connect")
+
+	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	next := updated.(*Model)
+	if cmd != nil {
+		t.Fatal("expected no async command when opening connect dialog")
+	}
+	if !next.hasConnectDialog() {
+		t.Fatal("expected connect dialog to open")
+	}
+}
+
+func TestSaveProviderDraftPersistsDefaults(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := Model{cfg: cfg}
+	draft, err := provider.BuildDraft("openai", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	draft.APIKey = "secret"
+	draft.Model = "gpt-5.4"
+
+	if err := m.saveProviderDraft(draft); err != nil {
+		t.Fatal(err)
+	}
+	if !m.cfg.HasUsableDefaultProvider() {
+		t.Fatal("expected usable default provider after save")
+	}
+	if got := m.cfg.DefaultModel; got != "gpt-5.4" {
+		t.Fatalf("unexpected default model: %q", got)
+	}
+	reloaded, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.DefaultProvider != "openai" {
+		t.Fatalf("unexpected saved default provider: %q", reloaded.DefaultProvider)
+	}
+}
+
 func TestPreferencesDialogCancelRestoresOriginalUI(t *testing.T) {
 	cfg := config.Default()
 	cfg.UI.Theme = "flexoki"
@@ -642,8 +733,22 @@ func TestRenderSidebarShowsStatusAndSessionInfo(t *testing.T) {
 	if !strings.Contains(got, "Keys") || !strings.Contains(got, "enter send/select") {
 		t.Fatalf("expected sidebar to include hotkey hints, got %q", got)
 	}
+	if !strings.Contains(got, "/connect") {
+		t.Fatalf("expected sidebar to include /connect hint, got %q", got)
+	}
 	if !strings.Contains(got, "Context") || !strings.Contains(got, "25% used") {
 		t.Fatalf("expected sidebar to include context usage, got %q", got)
+	}
+}
+
+func TestRefreshViewportShowsConnectHintWithoutProvider(t *testing.T) {
+	m := Model{
+		cfg:      config.Default(),
+		viewport: viewport.New(40, 6),
+	}
+	m.refreshViewport()
+	if got := m.viewport.View(); !strings.Contains(got, "/connect") {
+		t.Fatalf("expected connect hint in empty viewport, got %q", got)
 	}
 }
 
