@@ -1147,6 +1147,27 @@ func TestRenderUserMessageCanDisableHalfBlocks(t *testing.T) {
 	}
 }
 
+func TestRenderTranscriptUserMessageFallsBackToSummaryWhenPartsMissing(t *testing.T) {
+	cfg := config.Default()
+	m := Model{
+		cfg:     cfg,
+		palette: theme.Resolve("tokyonight").Palette,
+		parts:   map[int64][]domain.Part{},
+		viewport: viewport.Model{
+			Width: 40,
+		},
+	}
+
+	got := m.renderTranscriptMessage(domain.Message{
+		ID:      1,
+		Role:    domain.MessageRoleUser,
+		Summary: "what tools are available",
+	})
+	if !strings.Contains(got, "what tools are available") {
+		t.Fatalf("expected user summary fallback in transcript, got %q", got)
+	}
+}
+
 func TestRefreshViewportOmitsWorkingLineForGenericLoading(t *testing.T) {
 	m := Model{
 		currentSession: domain.Session{ID: 1},

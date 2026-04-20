@@ -850,8 +850,15 @@ func (m *Model) renderTranscriptMessage(msg domain.Message) string {
 	stamp := timestamp(msg.CreatedAt, m.cfg.UI.ShowTimestamps)
 	switch msg.Role {
 	case domain.MessageRoleUser:
-		return m.renderUserMessage(m.renderUserMessageParts(m.parts[msg.ID]), stamp)
+		userBody := m.renderUserMessageParts(m.parts[msg.ID])
+		if strings.TrimSpace(userBody) == "" {
+			userBody = strings.TrimSpace(msg.Summary)
+		}
+		return m.renderUserMessage(userBody, stamp)
 	default:
+		if strings.TrimSpace(body) == "" {
+			body = strings.TrimSpace(msg.Summary)
+		}
 		return m.renderAssistantMessage(body, stamp)
 	}
 }
