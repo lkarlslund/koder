@@ -479,7 +479,7 @@ func normalizeSessionTitle(raw string) string {
 func (e *Engine) setPermissionProfile(ctx context.Context, sessionID int64, raw string) (<-chan domain.Event, error) {
 	profile := strings.TrimSpace(raw)
 	if profile == "" {
-		return nil, fmt.Errorf("usage: /perm <%s>", strings.Join(permission.ProfileNames(e.cfg.Permissions), "|"))
+		return nil, fmt.Errorf("permission profile is required; choose one of: %s", strings.Join(permission.ProfileNames(e.cfg.Permissions), "|"))
 	}
 	if !permission.IsBuiltinProfile(profile) {
 		if _, ok := e.cfg.Permissions.Profiles[profile]; !ok {

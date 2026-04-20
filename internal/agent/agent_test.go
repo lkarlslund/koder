@@ -41,7 +41,7 @@ func testConfig(t *testing.T) config.Config {
 
 func TestSystemPromptDoesNotMentionInternalSlashCommands(t *testing.T) {
 	prompt := systemPrompt()
-	for _, command := range []string{"/new", "/quit", "/perm", "/permissions", "/mouse", "/approve", "/deny"} {
+	for _, command := range []string{"/new", "/quit", "/permissions", "/mouse", "/approve", "/deny"} {
 		if strings.Contains(prompt, command) {
 			t.Fatalf("expected system prompt to exclude internal slash command %q", command)
 		}

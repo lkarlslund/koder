@@ -635,13 +635,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.acceptSlashSelection()
 			return m, nil
 		case "enter":
-			prompt := strings.TrimSpace(m.composer.Value())
-			if prompt == "/new" {
-				m.startBusy(busyScopeSidebar, "Creating session…")
-				return m, tea.Batch(m.newSessionCmd(), m.spinnerCmdIfNeeded())
-			}
-			if len(m.slashMatches) == 1 && m.slashMatches[0].Name == prompt && !m.slashMatches[0].NeedsArgs {
-				break
+			if model, cmd, ok := m.executeSelectedSlashCommand(); ok {
+				return model, cmd
 			}
 			m.acceptSlashSelection()
 			return m, nil
@@ -1053,7 +1048,6 @@ func (m *Model) renderSidebar() string {
 	lines = append(lines, "  /fork")
 	lines = append(lines, "  /model")
 	lines = append(lines, "  /new  session")
-	lines = append(lines, "  /perm profile")
 	lines = append(lines, "  /permissions")
 	lines = append(lines, "  /preferences")
 	lines = append(lines, "  /resume")
@@ -1771,12 +1765,6 @@ func (m *Model) handleLocalCommand(prompt string) (tea.Model, tea.Cmd, bool) {
 		m.mouseEnabled = false
 		m.status = "Mouse capture disabled"
 		return m, func() tea.Msg { return tea.DisableMouse() }, true
-	case strings.HasPrefix(trimmed, "/perm "):
-		profile := strings.TrimSpace(strings.TrimPrefix(trimmed, "/perm"))
-		m.composer.Reset()
-		m.updateSlashMenu()
-		m.startBusy(busyScopeSidebar, fmt.Sprintf("Setting permission profile to %s…", profile))
-		return m, tea.Batch(m.permissionProfileCmd(m.beginActiveOperation(), profile), m.spinnerCmdIfNeeded()), true
 	case trimmed == "/compact":
 		m.composer.Reset()
 		m.updateSlashMenu()
@@ -2437,6 +2425,20 @@ func (m *Model) acceptSlashSelection() {
 	m.updateSlashMenu()
 }
 
+func (m *Model) executeSelectedSlashCommand() (tea.Model, tea.Cmd, bool) {
+	if len(m.slashMatches) == 0 {
+		return nil, nil, false
+	}
+	selected := m.slashMatches[m.slashIndex]
+	if selected.NeedsArgs {
+		return nil, nil, false
+	}
+	m.composer.SetValue(selected.Name)
+	m.composer.SetCursor(len(selected.Name))
+	m.updateSlashMenu()
+	return m.handleLocalCommand(selected.Name)
+}
+
 func (m *Model) renderSlashMenu() string {
 	if len(m.slashMatches) == 0 {
 		return ""
@@ -2720,7 +2722,6 @@ func internalSlashCommands() []slashCommand {
 		{Name: "/model", Description: "Choose a model for the active provider"},
 		{Name: "/new", Description: "Start a new session"},
 		{Name: "/mouse", Description: "Toggle mouse capture", NeedsArgs: true, Autocomplete: "/mouse "},
-		{Name: "/perm", Description: "Set permission profile", NeedsArgs: true, Autocomplete: "/perm "},
 		{Name: "/permissions", Description: "Pick a built-in permission mode"},
 		{Name: "/preferences", Description: "Open preferences"},
 		{Name: "/quit", Description: "Quit koder"},

@@ -43,11 +43,8 @@ func TestMatchingSlashCommands(t *testing.T) {
 	}
 
 	matches = matchingSlashCommands("per")
-	if len(matches) != 2 {
-		t.Fatalf("expected two permission matches, got %#v", matches)
-	}
-	if matches[0].Name != "/perm" || matches[1].Name != "/permissions" {
-		t.Fatalf("expected /perm and /permissions, got %#v", matches)
+	if len(matches) != 1 || matches[0].Name != "/permissions" {
+		t.Fatalf("expected /permissions, got %#v", matches)
 	}
 
 	matches = matchingSlashCommands("comp")
@@ -776,7 +773,7 @@ func TestExactSlashCommandWithArgsConsumesEnterForAutocomplete(t *testing.T) {
 	m := Model{
 		composer: textarea.New(),
 	}
-	m.composer.SetValue("/perm")
+	m.composer.SetValue("/mouse")
 	m.updateSlashMenu()
 
 	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
@@ -787,8 +784,28 @@ func TestExactSlashCommandWithArgsConsumesEnterForAutocomplete(t *testing.T) {
 	if next.loading {
 		t.Fatal("expected no loading while autocompleting needs-args slash command")
 	}
-	if got := next.composer.Value(); got != "/perm " {
-		t.Fatalf("expected /perm autocompletion, got %q", got)
+	if got := next.composer.Value(); got != "/mouse " {
+		t.Fatalf("expected /mouse autocompletion, got %q", got)
+	}
+}
+
+func TestSlashSelectionExecutesNoArgsCommandDirectly(t *testing.T) {
+	m := Model{
+		composer: textarea.New(),
+	}
+	m.composer.SetValue("/per")
+	m.updateSlashMenu()
+
+	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	next := updated.(*Model)
+	if cmd == nil {
+		t.Fatal("expected direct command execution")
+	}
+	if !next.hasPicker() {
+		t.Fatal("expected /permissions to open immediately from slash menu")
+	}
+	if next.composer.Value() != "" {
+		t.Fatalf("expected composer reset after command execution, got %q", next.composer.Value())
 	}
 }
 
@@ -1802,7 +1819,7 @@ func TestRenderFooterOmitsHotkeyHints(t *testing.T) {
 	}
 
 	got := m.renderFooter()
-	if strings.Contains(got, "enter send/select") || strings.Contains(got, "/perm profile") {
+	if strings.Contains(got, "enter send/select") || strings.Contains(got, "/permissions") {
 		t.Fatalf("expected footer to omit hotkey hints, got %q", got)
 	}
 }
