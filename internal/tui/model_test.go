@@ -127,6 +127,38 @@ func TestEnterSendsNormalPrompt(t *testing.T) {
 	}
 }
 
+func TestWindowTitleUsesSessionTitle(t *testing.T) {
+	m := Model{
+		cfg:            config.Default(),
+		currentSession: domain.Session{ID: 7, Title: "Helpful Session Title"},
+	}
+	got := m.windowTitle()
+	if !strings.Contains(got, "K Helpful Session Title") {
+		t.Fatalf("unexpected window title: %q", got)
+	}
+}
+
+func TestWindowTitleUsesAnimatedSpinnerFrame(t *testing.T) {
+	cfg := config.Default()
+	cfg.UI.Spinner = "circles"
+	m := Model{
+		cfg: cfg,
+		busy: busyModel{
+			active: true,
+			scope:  busyScopeTranscript,
+			spinner: spinnerModel{
+				active: true,
+				frame:  2,
+			},
+		},
+		currentSession: domain.Session{Title: "Build fixes"},
+	}
+	got := m.windowTitle()
+	if !strings.HasPrefix(got, "◑K ") {
+		t.Fatalf("unexpected animated window title: %q", got)
+	}
+}
+
 func TestEnterWithoutProviderOpensConnectDialog(t *testing.T) {
 	m := Model{
 		cfg:      config.Default(),
@@ -193,8 +225,8 @@ func TestRunPromptErrorAppendsAssistantErrorToTranscript(t *testing.T) {
 
 	updated, cmd := m.Update(runPromptMsg{err: errors.New("connection refused")})
 	next := updated.(Model)
-	if cmd != nil {
-		t.Fatal("expected no follow-up command on immediate prompt error")
+	if cmd == nil {
+		t.Fatal("expected title sync command on immediate prompt error")
 	}
 	if next.loading {
 		t.Fatal("expected loading cleared after prompt error")
@@ -566,8 +598,8 @@ func TestConnectCommandOpensConnectDialog(t *testing.T) {
 
 	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
 	next := updated.(*Model)
-	if cmd != nil {
-		t.Fatal("expected no async command when opening connect dialog")
+	if cmd == nil {
+		t.Fatal("expected title sync command when opening connect dialog")
 	}
 	if !next.hasConnectDialog() {
 		t.Fatal("expected connect dialog to open")
@@ -587,8 +619,8 @@ func TestDisconnectCommandOpensDisconnectDialog(t *testing.T) {
 
 	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
 	next := updated.(*Model)
-	if cmd != nil {
-		t.Fatal("expected no async command when opening disconnect dialog")
+	if cmd == nil {
+		t.Fatal("expected title sync command when opening disconnect dialog")
 	}
 	if !next.hasDisconnectDialog() {
 		t.Fatal("expected disconnect dialog to open")
@@ -604,8 +636,8 @@ func TestDisconnectCommandWithoutProvidersShowsStatus(t *testing.T) {
 
 	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
 	next := updated.(*Model)
-	if cmd != nil {
-		t.Fatal("expected no async command")
+	if cmd == nil {
+		t.Fatal("expected title sync command")
 	}
 	if next.status != "No configured providers to disconnect" {
 		t.Fatalf("unexpected status: %q", next.status)
@@ -621,8 +653,8 @@ func TestModelCommandWithoutProviderShowsStatus(t *testing.T) {
 
 	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
 	next := updated.(*Model)
-	if cmd != nil {
-		t.Fatal("expected no async command")
+	if cmd == nil {
+		t.Fatal("expected title sync command")
 	}
 	if next.status != "Configure a provider first with /connect" {
 		t.Fatalf("unexpected status: %q", next.status)
@@ -833,8 +865,8 @@ func TestPreferencesDialogCancelRestoresOriginalUI(t *testing.T) {
 
 	updated, cmd := next.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
 	next = updated.(*Model)
-	if cmd != nil {
-		t.Fatal("expected no command when cancelling preferences")
+	if cmd == nil {
+		t.Fatal("expected title sync command when cancelling preferences")
 	}
 	if next.cfg.UI.Theme != "flexoki" {
 		t.Fatalf("expected original theme restored, got %q", next.cfg.UI.Theme)

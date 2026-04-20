@@ -259,10 +259,11 @@ func New(cfg config.Config, st *store.Store, a *agent.Engine, mode StartupMode) 
 
 func (m Model) Init() tea.Cmd {
 	if !m.mouseEnabled {
-		return m.loadCmd()
+		return tea.Batch(m.loadCmd(), m.syncWindowTitleCmd())
 	}
 	return tea.Batch(
 		m.loadCmd(),
+		m.syncWindowTitleCmd(),
 		func() tea.Msg { return tea.EnableMouseCellMotion() },
 	)
 }
@@ -284,36 +285,36 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.preferences.Tick()
 		}
 		m.refreshViewport()
-		return m, spinnerTickCmd()
+		return m, tea.Batch(spinnerTickCmd(), m.syncWindowTitleCmd())
 	case promptDoneMsg:
 		if msg.err != nil {
 			m.status = msg.err.Error()
 			m.stopBusy()
-			return m, nil
+			return m, m.syncWindowTitleCmd()
 		}
 		m.startBusy(m.busy.scopeOrDefault(busyScopeTranscript), m.busy.statusOrDefault("Working ..."))
-		return m, tea.Batch(nextEventCmd(msg.events), m.spinnerCmdIfNeeded())
+		return m, tea.Batch(nextEventCmd(msg.events), m.spinnerCmdIfNeeded(), m.syncWindowTitleCmd())
 	case runPromptMsg:
 		if msg.err != nil {
 			m.status = msg.err.Error()
 			m.appendLocalAssistantError(msg.err)
 			m.stopBusy()
-			return m, nil
+			return m, m.syncWindowTitleCmd()
 		}
 		m.currentSession = msg.session
 		m.startBusy(m.busy.scopeOrDefault(busyScopeTranscript), "Working ...")
-		return m, tea.Batch(nextEventCmd(msg.events), m.spinnerCmdIfNeeded())
+		return m, tea.Batch(nextEventCmd(msg.events), m.spinnerCmdIfNeeded(), m.syncWindowTitleCmd())
 	case eventMsg:
 		m.applyEvent(msg.event)
 		if msg.events != nil {
-			return m, tea.Batch(m.reloadDetailsCmd(), nextEventCmd(msg.events))
+			return m, tea.Batch(m.reloadDetailsCmd(), nextEventCmd(msg.events), m.syncWindowTitleCmd())
 		}
 		m.stopBusy()
-		return m, m.reloadDetailsCmd()
+		return m, tea.Batch(m.reloadDetailsCmd(), m.syncWindowTitleCmd())
 	case loadMsg:
 		m = m.UpdateLoad(msg)
 		m.stopBusyWithStatus("Ready")
-		return m, nil
+		return m, m.syncWindowTitleCmd()
 	case newSessionMsg:
 		m.sessions = msg.sessions
 		m.currentSession = msg.session
@@ -331,12 +332,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.status = fmt.Sprintf("Started session %d", msg.session.ID)
 		m.updateSlashMenu()
 		m.refreshViewport()
-		return m, nil
+		return m, m.syncWindowTitleCmd()
 	case sessionPickerMsg:
 		m.sessions = msg.sessions
 		m.openSessionPicker()
 		m.stopBusyWithStatus("Select a session to resume")
-		return m, nil
+		return m, m.syncWindowTitleCmd()
 	case providerProbeMsg:
 		if !m.hasConnectDialog() {
 			return m, nil
@@ -344,7 +345,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.connectDialog.SetStatus("Connection test failed: " + msg.err.Error())
 			m.status = msg.err.Error()
-			return m, nil
+			return m, m.syncWindowTitleCmd()
 		}
 		modelIDs := make([]string, 0, len(msg.result.Models))
 		for _, item := range msg.result.Models {
@@ -358,15 +359,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.connectDialog.SetStatus(fmt.Sprintf("Connected: discovered %d models", len(modelIDs)))
 			m.status = fmt.Sprintf("Provider connected: %d models", len(modelIDs))
 		}
-		return m, nil
+		return m, m.syncWindowTitleCmd()
 	case modelListMsg:
 		if msg.err != nil {
 			m.status = msg.err.Error()
-			return m, nil
+			return m, m.syncWindowTitleCmd()
 		}
 		if len(msg.models) == 0 {
 			m.status = "No models returned by provider"
-			return m, nil
+			return m, m.syncWindowTitleCmd()
 		}
 		m.openModelDialog(msg.providerID, msg.models)
 		if msg.postConnect {
@@ -374,7 +375,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.status = fmt.Sprintf("Loaded %d models", len(msg.models))
 		}
-		return m, nil
+		return m, m.syncWindowTitleCmd()
 	case tea.MouseMsg:
 		if m.hasPicker() || m.hasApprovalPrompt() {
 			return m, nil
@@ -1282,26 +1283,26 @@ func (m *Model) handleLocalCommand(prompt string) (tea.Model, tea.Cmd, bool) {
 		m.composer.Reset()
 		m.updateSlashMenu()
 		m.openConnectDialog()
-		return m, nil, true
+		return m, m.syncWindowTitleCmd(), true
 	case trimmed == "/disconnect":
 		m.composer.Reset()
 		m.updateSlashMenu()
 		if len(m.cfg.Providers) == 0 {
 			m.status = "No configured providers to disconnect"
-			return m, nil, true
+			return m, m.syncWindowTitleCmd(), true
 		}
 		m.openDisconnectDialog()
-		return m, nil, true
+		return m, m.syncWindowTitleCmd(), true
 	case trimmed == "/model":
 		m.composer.Reset()
 		m.updateSlashMenu()
 		providerID := m.activeProviderID()
 		if providerID == "" || !m.cfg.HasUsableProvider(providerID) {
 			m.status = "Configure a provider first with /connect"
-			return m, nil, true
+			return m, m.syncWindowTitleCmd(), true
 		}
 		m.status = fmt.Sprintf("Loading models for %s…", providerID)
-		return m, m.loadModelsCmd(providerID, false), true
+		return m, tea.Batch(m.loadModelsCmd(providerID, false), m.syncWindowTitleCmd()), true
 	case trimmed == "/theme":
 		m.composer.Reset()
 		m.updateSlashMenu()
@@ -1311,7 +1312,7 @@ func (m *Model) handleLocalCommand(prompt string) (tea.Model, tea.Cmd, bool) {
 		m.composer.Reset()
 		m.updateSlashMenu()
 		m.openPreferencesDialog()
-		return m, spinnerTickCmd(), true
+		return m, tea.Batch(spinnerTickCmd(), m.syncWindowTitleCmd()), true
 	case strings.HasPrefix(trimmed, "/approve "):
 		id, err := strconv.ParseInt(strings.TrimSpace(strings.TrimPrefix(trimmed, "/approve")), 10, 64)
 		if err != nil {
@@ -1495,6 +1496,26 @@ func (m *Model) workingIndicator() string {
 		return ""
 	}
 	return ui.SpinnerFrame(m.cfg.UI.Spinner, m.busy.spinner.frame)
+}
+
+func (m Model) windowTitle() string {
+	spinner := ui.SpinnerFrame(m.cfg.UI.Spinner, m.busy.spinner.frame)
+	if strings.TrimSpace(spinner) == "" {
+		spinner = ui.SpinnerFrame(config.Default().UI.Spinner, 0)
+	}
+	title := strings.TrimSpace(m.currentSession.Title)
+	switch {
+	case title != "":
+	case m.currentSession.ID > 0:
+		title = fmt.Sprintf("Session #%d", m.currentSession.ID)
+	default:
+		title = "New Session"
+	}
+	return fmt.Sprintf("%sK %s", spinner, title)
+}
+
+func (m Model) syncWindowTitleCmd() tea.Cmd {
+	return tea.SetWindowTitle(m.windowTitle())
 }
 
 func (m Model) draftSession() domain.Session {
@@ -1710,27 +1731,27 @@ func (m *Model) handlePreferencesKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		cmd, err := m.applyUIConfig(action.UI, false)
 		if err != nil {
 			m.status = fmt.Sprintf("preferences preview failed: %v", err)
-			return m, nil
+			return m, m.syncWindowTitleCmd()
 		}
-		return m, cmd
+		return m, tea.Batch(cmd, m.syncWindowTitleCmd())
 	case ui.PreferencesActionApply:
 		cmd, err := m.applyUIConfig(action.UI, true)
 		if err != nil {
 			m.status = fmt.Sprintf("preferences save failed: %v", err)
-			return m, nil
+			return m, m.syncWindowTitleCmd()
 		}
 		m.closePreferencesDialog()
 		m.status = "Preferences saved"
-		return m, cmd
+		return m, tea.Batch(cmd, m.syncWindowTitleCmd())
 	case ui.PreferencesActionCancel:
 		cmd, err := m.applyUIConfig(action.UI, false)
 		if err != nil {
 			m.status = fmt.Sprintf("preferences restore failed: %v", err)
-			return m, nil
+			return m, m.syncWindowTitleCmd()
 		}
 		m.closePreferencesDialog()
 		m.status = "Preferences cancelled"
-		return m, cmd
+		return m, tea.Batch(cmd, m.syncWindowTitleCmd())
 	default:
 		return m, nil
 	}
@@ -1744,26 +1765,26 @@ func (m *Model) handleConnectDialogKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch action.Kind {
 	case ui.ProviderConnectActionTest:
 		m.connectDialog.SetStatus("Testing connection…")
-		return m, m.probeProviderCmd(action.Draft)
+		return m, tea.Batch(m.probeProviderCmd(action.Draft), m.syncWindowTitleCmd())
 	case ui.ProviderConnectActionSave:
 		discoveredModels := m.connectDialog.Models()
 		if err := m.saveProviderDraft(action.Draft); err != nil {
 			m.connectDialog.SetStatus("Save failed: " + err.Error())
 			m.status = err.Error()
-			return m, nil
+			return m, m.syncWindowTitleCmd()
 		}
 		m.closeConnectDialog()
 		if len(discoveredModels) > 0 {
 			m.status = fmt.Sprintf("Connected provider %s", action.Draft.ProviderID)
-			return m, m.loadModelsCmd(action.Draft.ProviderID, true)
+			return m, tea.Batch(m.loadModelsCmd(action.Draft.ProviderID, true), m.syncWindowTitleCmd())
 		}
 		m.status = fmt.Sprintf("Connected provider %s", action.Draft.ProviderID)
 		m.refreshViewport()
-		return m, nil
+		return m, m.syncWindowTitleCmd()
 	case ui.ProviderConnectActionCancel:
 		m.closeConnectDialog()
 		m.status = "Provider connect cancelled"
-		return m, nil
+		return m, m.syncWindowTitleCmd()
 	default:
 		return m, nil
 	}
@@ -1778,16 +1799,16 @@ func (m *Model) handleDisconnectDialogKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case ui.DisconnectDialogActionSelect:
 		if err := m.disconnectProvider(action.ProviderID); err != nil {
 			m.status = err.Error()
-			return m, nil
+			return m, m.syncWindowTitleCmd()
 		}
 		m.closeDisconnectDialog()
 		m.status = fmt.Sprintf("Disconnected provider %s", action.ProviderID)
 		m.refreshViewport()
-		return m, nil
+		return m, m.syncWindowTitleCmd()
 	case ui.DisconnectDialogActionCancel:
 		m.closeDisconnectDialog()
 		m.status = "Provider disconnect cancelled"
-		return m, nil
+		return m, m.syncWindowTitleCmd()
 	default:
 		return m, nil
 	}
@@ -1802,16 +1823,16 @@ func (m *Model) handleModelDialogKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case ui.ModelDialogActionSelect:
 		if err := m.selectModel(action.ModelID); err != nil {
 			m.status = err.Error()
-			return m, nil
+			return m, m.syncWindowTitleCmd()
 		}
 		m.closeModelDialog()
 		m.status = fmt.Sprintf("Selected model %s", action.ModelID)
 		m.refreshViewport()
-		return m, nil
+		return m, m.syncWindowTitleCmd()
 	case ui.ModelDialogActionCancel:
 		m.closeModelDialog()
 		m.status = "Model selection cancelled"
-		return m, nil
+		return m, m.syncWindowTitleCmd()
 	default:
 		return m, nil
 	}
