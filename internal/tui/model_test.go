@@ -2145,7 +2145,7 @@ func TestMouseClickTogglesToolRunExpansion(t *testing.T) {
 	if strings.Contains(m.viewport.View(), "line one\nline two") {
 		t.Fatalf("expected collapsed tool output, got %q", m.viewport.View())
 	}
-	if !strings.Contains(m.viewport.View(), "Expand") {
+	if !strings.Contains(m.viewport.View(), "Expand (1 line more)") {
 		t.Fatalf("expected expand indicator, got %q", m.viewport.View())
 	}
 

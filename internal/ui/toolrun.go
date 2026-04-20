@@ -90,8 +90,13 @@ func RenderToolRunCard(run ToolRun, palette theme.Palette, width int, expanded b
 		"  ",
 		statusStyle.Render(run.StatusLabel()),
 	}
-	if ToolRunExpandable(run, innerCardWidth(width)) {
+	if hiddenLines := ToolRunHiddenLineCount(run, innerCardWidth(width)); hiddenLines > 0 {
 		label := "[+] Expand"
+		if hiddenLines == 1 {
+			label = "[+] Expand (1 line more)"
+		} else {
+			label = "[+] Expand (" + strconv.Itoa(hiddenLines) + " lines more)"
+		}
 		if expanded {
 			label = "[-] Collapse"
 		}
@@ -144,16 +149,28 @@ func RenderToolRunDock(props ToolRunDockProps) string {
 }
 
 func ToolRunExpandable(run ToolRun, width int) bool {
+	return ToolRunHiddenLineCount(run, width) > 0
+}
+
+func ToolRunHiddenLineCount(run ToolRun, width int) int {
 	preview := strings.TrimSpace(run.PreviewText())
 	if preview == "" {
-		return false
+		return 0
 	}
 	if strings.TrimSpace(run.Diff) != "" && strings.TrimSpace(run.Output) == "" && strings.TrimSpace(run.ErrorText) == "" {
-		return strings.TrimSpace(diffSummary(preview)) != strings.TrimSpace(wrapPlain(diffSummary(preview), width))
+		expandedLines := renderedLineCount(wrapPlain(preview, width))
+		collapsedLines := renderedLineCount(wrapPlain(diffSummary(preview), width))
+		if expandedLines <= collapsedLines {
+			return 0
+		}
+		return expandedLines - collapsedLines
 	}
-	collapsed := singleLineSummary(preview)
-	expanded := wrapPlain(preview, width)
-	return strings.TrimSpace(collapsed) != strings.TrimSpace(expanded)
+	expandedLines := renderedLineCount(wrapPlain(preview, width))
+	collapsedLines := renderedLineCount(wrapPlain(singleLineSummary(preview), width))
+	if expandedLines <= collapsedLines {
+		return 0
+	}
+	return expandedLines - collapsedLines
 }
 
 func renderToolRunPreview(preview string, run ToolRun, bodyStyle, diffStyle lipgloss.Style, width int, expanded bool) string {
@@ -240,4 +257,12 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func renderedLineCount(input string) int {
+	input = strings.TrimRight(input, "\n")
+	if input == "" {
+		return 0
+	}
+	return len(strings.Split(input, "\n"))
 }
