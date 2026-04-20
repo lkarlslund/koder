@@ -596,6 +596,30 @@ func TestResizeUsesMeasuredFooterHeight(t *testing.T) {
 	}
 }
 
+func TestRenderComposerUsesThreeLineBoxAndFullWidth(t *testing.T) {
+	palette := theme.Resolve("tokyonight").Palette
+	m := Model{
+		width:       80,
+		showSidebar: true,
+		composer:    textarea.New(),
+		palette:     palette,
+	}
+	m.composer.Placeholder = "Ask koder or type / for commands"
+	m.composer.SetHeight(3)
+	m.composer.SetWidth(m.composerWidth())
+	applyComposerTheme(&m.composer, palette)
+
+	got := m.renderComposer()
+	if lipgloss.Height(got) != 3 {
+		t.Fatalf("expected 3-line composer box, got %d lines in %q", lipgloss.Height(got), got)
+	}
+	for _, line := range strings.Split(got, "\n") {
+		if lipgloss.Width(line) != m.composerWidth() {
+			t.Fatalf("expected composer line width %d, got %d in %q", m.composerWidth(), lipgloss.Width(line), line)
+		}
+	}
+}
+
 func TestRefreshViewportOmitsWorkingLineForGenericLoading(t *testing.T) {
 	m := Model{
 		currentSession: domain.Session{ID: 1},

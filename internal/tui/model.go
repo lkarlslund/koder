@@ -208,7 +208,7 @@ func New(cfg config.Config, st *store.Store, a *agent.Engine, mode StartupMode) 
 	composer := textarea.New()
 	composer.Placeholder = "Ask koder or type / for commands"
 	composer.SetWidth(40)
-	composer.SetHeight(4)
+	composer.SetHeight(3)
 	composer.Focus()
 	composer.ShowLineNumbers = false
 	applyComposerTheme(&composer, tuiTheme.Palette)
@@ -502,7 +502,7 @@ func (m *Model) resize() {
 	if bodyWidth < 20 {
 		bodyWidth = 20
 	}
-	m.composer.SetWidth(bodyWidth - 2)
+	m.composer.SetWidth(m.composerWidth())
 	bodyHeight := m.height - m.footerHeight()
 	if bodyHeight < 5 {
 		bodyHeight = 5
@@ -541,12 +541,36 @@ func (m *Model) renderFooter() string {
 		parts = append(parts, menu)
 	}
 	parts = append(parts, "")
-	parts = append(parts, m.composer.View())
+	parts = append(parts, m.renderComposer())
 	return style.Render(lipgloss.JoinVertical(lipgloss.Left, parts...))
 }
 
 func (m *Model) footerHeight() int {
 	return lipgloss.Height(m.renderFooter())
+}
+
+func (m *Model) renderComposer() string {
+	width := max(1, m.composerWidth())
+	return lipgloss.NewStyle().
+		Width(width).
+		Background(m.palette.UserTextBackground).
+		Foreground(m.palette.UserTextForeground).
+		Render(m.composer.View())
+}
+
+func (m *Model) composerWidth() int {
+	if m.width <= 0 {
+		return 40
+	}
+	sidebarWidth := 0
+	if m.showSidebar {
+		sidebarWidth = min(32, max(20, m.width/4))
+	}
+	bodyWidth := m.width - sidebarWidth - 3
+	if bodyWidth < 20 {
+		bodyWidth = 20
+	}
+	return bodyWidth - 2
 }
 
 func (m *Model) renderSidebar() string {
