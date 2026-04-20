@@ -9,6 +9,8 @@ import (
 
 func TestFromMessagesUsesLatestUsageAndContextWindow(t *testing.T) {
 	cfg := config.Default()
+	cfg.DefaultProvider = "test"
+	cfg.Providers["test"] = config.Provider{ContextWindow: 32768}
 	session := domain.Session{ProviderID: cfg.DefaultProvider}
 	messages := []domain.Message{
 		{ID: 1},
@@ -30,7 +32,8 @@ func TestFromMessagesUsesLatestUsageAndContextWindow(t *testing.T) {
 
 func TestFromMessagesSkipsMissingContextWindow(t *testing.T) {
 	cfg := config.Default()
-	cfg.Providers[cfg.DefaultProvider] = config.Provider{}
+	cfg.DefaultProvider = "test"
+	cfg.Providers["test"] = config.Provider{}
 	session := domain.Session{ProviderID: cfg.DefaultProvider}
 
 	if _, ok := FromMessages(cfg, session, nil, nil); ok {

@@ -36,6 +36,9 @@ func runTUI(ctx context.Context, mode tui.StartupMode) error {
 	if err != nil {
 		return err
 	}
+	if err := cfg.RequireProvider(); err != nil {
+		return err
+	}
 	st, err := store.OpenWithOptions(cfg.StateDir(), store.Options{Backend: cfg.Store.Backend})
 	if err != nil {
 		return err
@@ -68,6 +71,9 @@ func newDoctorCommand() *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			cfg, err := config.Load()
 			if err != nil {
+				return err
+			}
+			if err := cfg.RequireProvider(); err != nil {
 				return err
 			}
 			providerCfg, ok := cfg.Provider(cfg.DefaultProvider)

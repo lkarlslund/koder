@@ -77,6 +77,8 @@ type Config struct {
 	cacheDir        string
 }
 
+const providerConfigurationHint = "configure at least one provider in config.toml and set default_provider"
+
 func Load() (Config, error) {
 	cfg := Default()
 	configDir := configDir()
@@ -119,19 +121,8 @@ func Load() (Config, error) {
 
 func Default() Config {
 	return Config{
-		DefaultProvider: "llamacpp-local",
-		Providers: map[string]Provider{
-			"llamacpp-local": {
-				Name:          "Local llama.cpp",
-				BaseURL:       "http://127.0.0.1:8888/v1",
-				Headers:       map[string]string{},
-				ContextWindow: 32768,
-				AutoCompactAt: 85,
-				Stream:        true,
-				Timeout:       2 * time.Minute,
-				Disabled:      false,
-			},
-		},
+		DefaultProvider: "",
+		Providers:       map[string]Provider{},
 		Permissions: PermissionRules{
 			Profile: "default",
 			Profiles: map[string]PermissionProfile{
@@ -192,14 +183,8 @@ func Default() Config {
 
 func (c *Config) applyDefaults() {
 	def := Default()
-	if c.DefaultProvider == "" {
-		c.DefaultProvider = def.DefaultProvider
-	}
 	if c.Providers == nil {
 		c.Providers = def.Providers
-	}
-	if _, ok := c.Providers[c.DefaultProvider]; !ok {
-		c.Providers[c.DefaultProvider] = def.Providers[c.DefaultProvider]
 	}
 	if c.Permissions.Profile == "" {
 		c.Permissions.Profile = def.Permissions.Profile
@@ -219,15 +204,16 @@ func (c *Config) applyDefaults() {
 	if c.UI.Theme == "" {
 		c.UI = def.UI
 	}
+	fallbackProvider := providerDefaults()
 	for id, provider := range c.Providers {
 		if provider.Timeout == 0 {
-			provider.Timeout = def.Providers[c.DefaultProvider].Timeout
+			provider.Timeout = fallbackProvider.Timeout
 		}
 		if provider.ContextWindow == 0 {
-			provider.ContextWindow = def.Providers[c.DefaultProvider].ContextWindow
+			provider.ContextWindow = fallbackProvider.ContextWindow
 		}
 		if provider.AutoCompactAt == 0 {
-			provider.AutoCompactAt = def.Providers[c.DefaultProvider].AutoCompactAt
+			provider.AutoCompactAt = fallbackProvider.AutoCompactAt
 		}
 		if provider.Headers == nil {
 			provider.Headers = map[string]string{}
@@ -260,6 +246,10 @@ func (c Config) CacheDir() string {
 }
 
 func (c Config) Provider(id string) (Provider, bool) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return Provider{}, false
+	}
 	p, ok := c.Providers[id]
 	if !ok {
 		return Provider{}, false
@@ -268,6 +258,30 @@ func (c Config) Provider(id string) (Provider, bool) {
 		p.APIKey = strings.TrimSpace(os.Getenv(p.APIKeyEnv))
 	}
 	return p, true
+}
+
+func (c Config) RequireProvider() error {
+	if len(c.Providers) == 0 {
+		return fmt.Errorf("no providers configured; %s", providerConfigurationHint)
+	}
+	if strings.TrimSpace(c.DefaultProvider) == "" {
+		return fmt.Errorf("default_provider is not set; %s", providerConfigurationHint)
+	}
+	if _, ok := c.Provider(c.DefaultProvider); !ok {
+		return fmt.Errorf("default provider %q not configured; %s", c.DefaultProvider, providerConfigurationHint)
+	}
+	return nil
+}
+
+func providerDefaults() Provider {
+	return Provider{
+		Headers:       map[string]string{},
+		ContextWindow: 32768,
+		AutoCompactAt: 85,
+		Stream:        true,
+		Timeout:       2 * time.Minute,
+		Disabled:      false,
+	}
 }
 
 func cloneProfiles(src map[string]PermissionProfile) map[string]PermissionProfile {

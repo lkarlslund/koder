@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -16,8 +17,8 @@ func TestLoadWritesDefaultConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.DefaultProvider != "llamacpp-local" {
-		t.Fatalf("unexpected provider: %s", cfg.DefaultProvider)
+	if cfg.DefaultProvider != "" {
+		t.Fatalf("expected no default provider, got %q", cfg.DefaultProvider)
 	}
 	if cfg.Permissions.Profile != "default" {
 		t.Fatalf("unexpected permission profile: %s", cfg.Permissions.Profile)
@@ -31,7 +32,22 @@ func TestLoadWritesDefaultConfig(t *testing.T) {
 	if len(cfg.Permissions.Profiles) == 0 {
 		t.Fatal("expected permission profiles")
 	}
+	if len(cfg.Providers) != 0 {
+		t.Fatalf("expected no providers in default config, got %#v", cfg.Providers)
+	}
 	if _, err := os.Stat(filepath.Join(temp, "koder", "config.toml")); err != nil {
 		t.Fatalf("expected config file: %v", err)
+	}
+}
+
+func TestRequireProviderRejectsMissingProviderConfiguration(t *testing.T) {
+	cfg := Default()
+
+	err := cfg.RequireProvider()
+	if err == nil {
+		t.Fatal("expected missing provider configuration error")
+	}
+	if !strings.Contains(err.Error(), "configure at least one provider") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
