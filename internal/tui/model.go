@@ -22,6 +22,7 @@ import (
 	"github.com/lkarlslund/koder/internal/sessionctx"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/theme"
+	"github.com/lkarlslund/koder/internal/ui"
 	"github.com/lkarlslund/koder/internal/workspace"
 )
 
@@ -142,7 +143,6 @@ type pickerMode int
 
 const (
 	pickerModeNone pickerMode = iota
-	pickerModeSession
 	pickerModeTheme
 )
 
@@ -201,6 +201,8 @@ type Model struct {
 	picker         pickerModel
 	pendingPartID  int64
 	mouseEnabled   bool
+	sessionDialog  *ui.SessionDialog
+	preferences    *ui.PreferencesDialog
 }
 
 func New(cfg config.Config, st *store.Store, a *agent.Engine, mode StartupMode) (Model, error) {
@@ -307,6 +309,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.workspace = msg.workspace
 		m.composer.Reset()
 		m.closePicker()
+		m.closeSessionDialog()
 		m.status = fmt.Sprintf("Started session %d", msg.session.ID)
 		m.updateSlashMenu()
 		m.refreshViewport()
@@ -334,8 +337,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) View() string {
-	if m.hasPicker() && m.picker.mode == pickerModeSession && m.width > 0 && m.height > 0 {
-		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, m.renderPicker())
+	if m.hasSessionDialog() && m.width > 0 && m.height > 0 {
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, m.renderSessionDialog())
+	}
+	if m.hasPreferencesDialog() && m.width > 0 && m.height > 0 {
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, m.renderPreferencesDialog())
 	}
 	body := m.renderBody()
 	footer := m.renderFooter()
@@ -350,6 +356,14 @@ func (m Model) View() string {
 }
 
 func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.hasPreferencesDialog() {
+		return m.handlePreferencesKey(msg)
+	}
+
+	if m.hasSessionDialog() {
+		return m.handleSessionDialogKey(msg)
+	}
+
 	if m.hasPicker() {
 		switch msg.String() {
 		case "up":
@@ -767,6 +781,7 @@ func (m *Model) renderSidebar() string {
 	lines = append(lines, "  /compact")
 	lines = append(lines, "  /new  session")
 	lines = append(lines, "  /perm profile")
+	lines = append(lines, "  /prefs")
 	lines = append(lines, "  /quit")
 	return strings.Join(lines, "\n")
 }
@@ -1259,6 +1274,8 @@ func (m Model) UpdateLoad(msg loadMsg) Model {
 	m.workspace = msg.workspace
 	m.approvalChoice = 0
 	m.closePicker()
+	m.closeSessionDialog()
+	m.closePreferencesDialog()
 	m.refreshViewport()
 	return m
 }
@@ -1303,6 +1320,11 @@ func (m *Model) handleLocalCommand(prompt string) (tea.Model, tea.Cmd, bool) {
 		m.composer.Reset()
 		m.updateSlashMenu()
 		m.openThemePicker()
+		return m, nil, true
+	case trimmed == "/prefs":
+		m.composer.Reset()
+		m.updateSlashMenu()
+		m.openPreferencesDialog()
 		return m, nil, true
 	case strings.HasPrefix(trimmed, "/approve "):
 		id, err := strconv.ParseInt(strings.TrimSpace(strings.TrimPrefix(trimmed, "/approve")), 10, 64)
@@ -1578,9 +1600,6 @@ func (m *Model) renderPicker() string {
 	if !m.hasPicker() {
 		return ""
 	}
-	if m.picker.mode == pickerModeSession {
-		return m.renderSessionPickerDialog()
-	}
 	var lines []string
 	lines = append(lines, lipgloss.NewStyle().Bold(true).Render(m.picker.title))
 	if hint := strings.TrimSpace(m.picker.hint); hint != "" {
@@ -1615,88 +1634,79 @@ func (m *Model) renderPicker() string {
 		Render(strings.Join(lines, "\n"))
 }
 
-func (m *Model) renderSessionPickerDialog() string {
-	title := lipgloss.NewStyle().Bold(true).Render("Resume Session")
-	filter := fmt.Sprintf("Filter: %s", m.picker.query)
-	helper := "Enter to select, Esc to start new session"
-
-	listWidth := 34
-	if m.width > 0 {
-		listWidth = min(40, max(28, m.width/3))
+func (m *Model) renderSessionDialog() string {
+	if !m.hasSessionDialog() {
+		return ""
 	}
-	detailWidth := 42
+	width := 84
 	if m.width > 0 {
-		detailWidth = min(56, max(36, m.width-listWidth-12))
+		width = min(96, max(72, m.width-8))
 	}
-
-	list := m.renderSessionPickerList(listWidth)
-	details := m.renderSessionPickerDetails(detailWidth)
-	content := lipgloss.JoinHorizontal(lipgloss.Top, list, "  ", details)
-
-	dialog := lipgloss.JoinVertical(
-		lipgloss.Left,
-		title,
-		filter,
-		"",
-		content,
-		"",
-		lipgloss.NewStyle().Foreground(m.palette.AssistantTimestampText).Render(helper),
-	)
-
-	return lipgloss.NewStyle().
-		Width(listWidth+detailWidth+6).
-		Border(lipgloss.RoundedBorder()).
-		Padding(1, 2).
-		Render(dialog)
+	return m.sessionDialog.View(width, m.palette)
 }
 
-func (m *Model) renderSessionPickerList(width int) string {
-	lines := []string{}
-	if len(m.picker.matches) == 0 {
-		lines = append(lines, "No matches")
-	} else {
-		start := 0
-		if m.picker.index >= 5 {
-			start = m.picker.index - 4
-		}
-		end := min(len(m.picker.matches), start+9)
-		for idx := start; idx < end; idx++ {
-			item := m.picker.matches[idx]
-			cursor := " "
-			if idx == m.picker.index {
-				cursor = ">"
-			}
-			line := fmt.Sprintf("%s #%s  %s", cursor, item.Value, truncate(item.Title, max(8, width-8-len(item.Value))))
-			if idx == m.picker.index {
-				line = lipgloss.NewStyle().Reverse(true).Render(line)
-			}
-			lines = append(lines, line)
-		}
+func (m *Model) renderPreferencesDialog() string {
+	if !m.hasPreferencesDialog() {
+		return ""
 	}
-	return lipgloss.NewStyle().
-		Width(width).
-		Border(lipgloss.NormalBorder()).
-		Padding(0, 1).
-		Render(strings.Join(lines, "\n"))
+	width := 86
+	if m.width > 0 {
+		width = min(100, max(74, m.width-8))
+	}
+	return m.preferences.View(width, m.palette)
 }
 
-func (m *Model) renderSessionPickerDetails(width int) string {
-	item, ok := m.currentPickerItem()
-	if !ok {
-		return lipgloss.NewStyle().Width(width).Render("No session selected")
+func (m *Model) handleSessionDialogKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if !m.hasSessionDialog() {
+		return m, nil
 	}
-	lines := []string{
-		lipgloss.NewStyle().Bold(true).Render(truncate(item.Title, width)),
+	action := m.sessionDialog.Update(msg)
+	switch action.Kind {
+	case ui.SessionDialogActionSelect:
+		m.startBusy(busyScopeSidebar, fmt.Sprintf("Resuming session %d…", action.SessionID))
+		return m, tea.Batch(m.loadSessionCmd(action.SessionID), m.spinnerCmdIfNeeded())
+	case ui.SessionDialogActionCancel:
+		m.startBusy(busyScopeSidebar, "Creating session…")
+		return m, tea.Batch(m.newSessionCmd(), m.spinnerCmdIfNeeded())
+	default:
+		return m, nil
 	}
-	lines = append(lines, item.Details...)
-	if desc := strings.TrimSpace(item.Description); desc != "" {
-		lines = append(lines, "", truncate(desc, width))
+}
+
+func (m *Model) handlePreferencesKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if !m.hasPreferencesDialog() {
+		return m, nil
 	}
-	return lipgloss.NewStyle().
-		Width(width).
-		Border(lipgloss.NormalBorder()).
-		Padding(0, 1).
-		Render(strings.Join(lines, "\n"))
+	action := m.preferences.Update(msg)
+	switch action.Kind {
+	case ui.PreferencesActionChanged:
+		cmd, err := m.applyUIConfig(action.UI, false)
+		if err != nil {
+			m.status = fmt.Sprintf("preferences preview failed: %v", err)
+			return m, nil
+		}
+		return m, cmd
+	case ui.PreferencesActionApply:
+		cmd, err := m.applyUIConfig(action.UI, true)
+		if err != nil {
+			m.status = fmt.Sprintf("preferences save failed: %v", err)
+			return m, nil
+		}
+		m.closePreferencesDialog()
+		m.status = "Preferences saved"
+		return m, cmd
+	case ui.PreferencesActionCancel:
+		cmd, err := m.applyUIConfig(action.UI, false)
+		if err != nil {
+			m.status = fmt.Sprintf("preferences restore failed: %v", err)
+			return m, nil
+		}
+		m.closePreferencesDialog()
+		m.status = "Preferences cancelled"
+		return m, cmd
+	default:
+		return m, nil
+	}
 }
 
 func (m *Model) hasApprovalPrompt() bool {
@@ -1746,6 +1756,7 @@ func internalSlashCommands() []slashCommand {
 		{Name: "/new", Description: "Start a new session"},
 		{Name: "/mouse", Description: "Toggle mouse capture", NeedsArgs: true, Autocomplete: "/mouse "},
 		{Name: "/perm", Description: "Set permission profile", NeedsArgs: true, Autocomplete: "/perm "},
+		{Name: "/prefs", Description: "Open preferences"},
 		{Name: "/quit", Description: "Quit koder"},
 		{Name: "/theme", Description: "Choose a color theme"},
 	}
@@ -1818,8 +1829,24 @@ func (m *Model) closePicker() {
 	m.picker = pickerModel{}
 }
 
+func (m *Model) hasSessionDialog() bool {
+	return m.sessionDialog != nil
+}
+
+func (m *Model) closeSessionDialog() {
+	m.sessionDialog = nil
+}
+
+func (m *Model) hasPreferencesDialog() bool {
+	return m.preferences != nil
+}
+
+func (m *Model) closePreferencesDialog() {
+	m.preferences = nil
+}
+
 func (m *Model) openSessionPicker() {
-	items := make([]pickerItem, 0, len(m.sessions))
+	items := make([]ui.SessionItem, 0, len(m.sessions))
 	for _, session := range m.sessions {
 		title := strings.TrimSpace(session.Title)
 		if title == "" {
@@ -1840,21 +1867,20 @@ func (m *Model) openSessionPicker() {
 		} else {
 			details = append(details, "Tokens:     in -  out -")
 		}
-		items = append(items, pickerItem{
+		items = append(items, ui.SessionItem{
 			Title:       title,
 			Description: description,
 			Details:     details,
 			Value:       strconv.FormatInt(session.ID, 10),
 		})
 	}
-	m.picker = pickerModel{
-		visible: true,
-		mode:    pickerModeSession,
-		title:   "Resume Session",
-		hint:    "Enter to select, Esc to start new session",
-		items:   items,
-	}
-	m.refilterPicker()
+	dialog := ui.NewSessionDialog(items)
+	m.sessionDialog = &dialog
+}
+
+func (m *Model) openPreferencesDialog() {
+	dialog := ui.NewPreferencesDialog(m.cfg.UI, theme.Names())
+	m.preferences = &dialog
 }
 
 func (m *Model) openThemePicker() {
@@ -1968,19 +1994,6 @@ func (m *Model) currentPickerItem() (pickerItem, bool) {
 
 func (m *Model) submitPickerSelection() (tea.Model, tea.Cmd) {
 	switch m.picker.mode {
-	case pickerModeSession:
-		item, ok := m.currentPickerItem()
-		if !ok {
-			m.startBusy(busyScopeSidebar, "Creating session…")
-			return m, tea.Batch(m.newSessionCmd(), m.spinnerCmdIfNeeded())
-		}
-		sessionID, err := strconv.ParseInt(item.Value, 10, 64)
-		if err != nil {
-			m.status = fmt.Sprintf("invalid session id: %v", err)
-			return m, nil
-		}
-		m.startBusy(busyScopeSidebar, fmt.Sprintf("Resuming session %d…", sessionID))
-		return m, tea.Batch(m.loadSessionCmd(sessionID), m.spinnerCmdIfNeeded())
 	case pickerModeTheme:
 		item, ok := m.currentPickerItem()
 		if !ok {
@@ -2000,9 +2013,6 @@ func (m *Model) submitPickerSelection() (tea.Model, tea.Cmd) {
 
 func (m *Model) cancelPicker() (tea.Model, tea.Cmd) {
 	switch m.picker.mode {
-	case pickerModeSession:
-		m.startBusy(busyScopeSidebar, "Creating session…")
-		return m, tea.Batch(m.newSessionCmd(), m.spinnerCmdIfNeeded())
 	case pickerModeTheme:
 		restore := strings.TrimSpace(m.picker.initialValue)
 		if restore == "" {
@@ -2049,6 +2059,41 @@ func (m *Model) setTheme(name string, save bool) error {
 		}
 	}
 	return nil
+}
+
+func (m *Model) applyUIConfig(next config.UI, save bool) (tea.Cmd, error) {
+	prevMouse := m.mouseEnabled
+
+	selected := theme.Resolve(next.Theme)
+	renderer, err := markdown.New(selected.Palette)
+	if err != nil {
+		return nil, err
+	}
+
+	next.Theme = selected.Name
+	m.cfg.UI = next
+	m.palette = selected.Palette
+	m.renderer = renderer
+	m.showSidebar = next.ShowSidebar
+	m.showReasoning = next.ShowReasoning
+	m.mouseEnabled = next.Mouse
+	applyComposerTheme(&m.composer, selected.Palette)
+	m.resize()
+	m.refreshViewport()
+
+	if save {
+		if err := m.cfg.Save(); err != nil {
+			return nil, err
+		}
+	}
+
+	if prevMouse == m.mouseEnabled {
+		return nil, nil
+	}
+	if m.mouseEnabled {
+		return func() tea.Msg { return tea.EnableMouseCellMotion() }, nil
+	}
+	return func() tea.Msg { return tea.DisableMouse() }, nil
 }
 
 func spinnerTickCmd() tea.Cmd {

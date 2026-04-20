@@ -18,6 +18,7 @@ import (
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/theme"
+	"github.com/lkarlslund/koder/internal/ui"
 )
 
 func TestMatchingSlashCommands(t *testing.T) {
@@ -291,12 +292,9 @@ func TestCtrlCUsesQuitPath(t *testing.T) {
 
 func TestSessionPickerEscapeCreatesNewSession(t *testing.T) {
 	m := Model{
-		composer: textarea.New(),
-		picker: pickerModel{
-			visible: true,
-			mode:    pickerModeSession,
-		},
-		sessions: []domain.Session{{ID: 1}},
+		composer:      textarea.New(),
+		sessionDialog: &ui.SessionDialog{},
+		sessions:      []domain.Session{{ID: 1}},
 	}
 
 	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
@@ -365,18 +363,15 @@ func TestSessionPickerRendersCenteredDialogWithDetails(t *testing.T) {
 
 func TestUpdateLoadHidesSessionPicker(t *testing.T) {
 	m := Model{
-		picker: pickerModel{
-			visible: true,
-			mode:    pickerModeSession,
-		},
+		sessionDialog: &ui.SessionDialog{},
 	}
 
 	updated := m.UpdateLoad(loadMsg{
 		current: domain.Session{ID: 4},
 	})
 
-	if updated.hasPicker() {
-		t.Fatal("expected picker to close after loading a session")
+	if updated.hasSessionDialog() {
+		t.Fatal("expected session dialog to close after loading a session")
 	}
 	if updated.currentSession.ID != 4 {
 		t.Fatalf("unexpected current session: %#v", updated.currentSession)
@@ -493,6 +488,95 @@ func TestThemePickerEnterSavesTheme(t *testing.T) {
 	}
 	if !strings.Contains(next.status, "Theme set to") {
 		t.Fatalf("expected status update after theme apply, got %q", next.status)
+	}
+}
+
+func TestPrefsCommandOpensPreferencesDialog(t *testing.T) {
+	m := Model{
+		cfg:      config.Default(),
+		composer: textarea.New(),
+	}
+	m.composer.SetValue("/prefs")
+
+	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	next := updated.(*Model)
+	if cmd != nil {
+		t.Fatal("expected no async command when opening preferences")
+	}
+	if !next.hasPreferencesDialog() {
+		t.Fatal("expected preferences dialog to open")
+	}
+}
+
+func TestPreferencesDialogCancelRestoresOriginalUI(t *testing.T) {
+	cfg := config.Default()
+	cfg.UI.Theme = "flexoki"
+
+	m, err := New(cfg, nil, nil, StartupModeNew)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.openPreferencesDialog()
+
+	updated, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyRight})
+	next := updated.(*Model)
+	if next.cfg.UI.Theme == "flexoki" {
+		t.Fatal("expected preferences preview to change current theme")
+	}
+
+	updated, cmd := next.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	next = updated.(*Model)
+	if cmd != nil {
+		t.Fatal("expected no command when cancelling preferences")
+	}
+	if next.cfg.UI.Theme != "flexoki" {
+		t.Fatalf("expected original theme restored, got %q", next.cfg.UI.Theme)
+	}
+	if next.hasPreferencesDialog() {
+		t.Fatal("expected preferences dialog to close on cancel")
+	}
+}
+
+func TestPreferencesDialogApplySavesUIConfig(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.UI.Theme = "flexoki"
+	cfg.UI.ShowSidebar = true
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	m, err := New(cfg, nil, nil, StartupModeNew)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.openPreferencesDialog()
+
+	updated, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyRight})
+	next := updated.(*Model)
+	updated, _ = next.handleKey(tea.KeyMsg{Type: tea.KeyTab})
+	next = updated.(*Model)
+	updated, _ = next.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	next = updated.(*Model)
+
+	if next.hasPreferencesDialog() {
+		t.Fatal("expected preferences dialog to close after apply")
+	}
+	if next.cfg.UI.Theme == "flexoki" {
+		t.Fatal("expected preferences apply to persist a different theme")
+	}
+	reloaded, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.UI.Theme != next.cfg.UI.Theme {
+		t.Fatalf("expected saved theme %q, got %q", next.cfg.UI.Theme, reloaded.UI.Theme)
 	}
 }
 

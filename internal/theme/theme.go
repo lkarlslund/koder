@@ -42,6 +42,7 @@ type Palette struct {
 	SidebarBackground            lipgloss.Color
 	SidebarBorder                lipgloss.Color
 	SidebarForeground            lipgloss.Color
+	UserAccentBar                lipgloss.Color
 	UserTextBackground           lipgloss.Color
 	UserTextForeground           lipgloss.Color
 	UserTimestampForeground      lipgloss.Color
@@ -196,6 +197,7 @@ func buildOpenCodePalette(src opencodeThemeFile) Palette {
 		SidebarBackground:            resolve("backgroundPanel"),
 		SidebarBorder:                resolve("border"),
 		SidebarForeground:            resolve("text"),
+		UserAccentBar:                firstNonEmpty(resolve("primary"), resolve("info"), resolve("text")),
 		UserTextBackground:           resolve("backgroundElement"),
 		UserTextForeground:           resolve("text"),
 		UserTimestampForeground:      firstNonEmpty(resolve("info"), resolve("secondary"), resolve("primary")),
@@ -268,6 +270,7 @@ func claudeThemes() map[string]Theme {
 				SidebarBackground:            color("#1f1f1f"),
 				SidebarBorder:                color("#505050"),
 				SidebarForeground:            color("#ffffff"),
+				UserAccentBar:                color("#b1b9f9"),
 				UserTextBackground:           color("#373737"),
 				UserTextForeground:           color("#ffffff"),
 				UserTimestampForeground:      color("#7ab4e8"),
@@ -304,6 +307,7 @@ func claudeThemes() map[string]Theme {
 				SidebarBackground:            color("#f5f5f5"),
 				SidebarBorder:                color("#b7b7b7"),
 				SidebarForeground:            color("#000000"),
+				UserAccentBar:                color("#5769f7"),
 				UserTextBackground:           color("#f0f0f0"),
 				UserTextForeground:           color("#000000"),
 				UserTimestampForeground:      color("#4782c8"),
@@ -340,6 +344,7 @@ func claudeThemes() map[string]Theme {
 				SidebarBackground:            color("#1f1f1f"),
 				SidebarBorder:                color("#505050"),
 				SidebarForeground:            color("#ffffff"),
+				UserAccentBar:                color("#99ccff"),
 				UserTextBackground:           color("#373737"),
 				UserTextForeground:           color("#ffffff"),
 				UserTimestampForeground:      color("#66b2ff"),
@@ -376,6 +381,7 @@ func claudeThemes() map[string]Theme {
 				SidebarBackground:            color("#f5f5f5"),
 				SidebarBorder:                color("#b7b7b7"),
 				SidebarForeground:            color("#000000"),
+				UserAccentBar:                color("#3366ff"),
 				UserTextBackground:           color("#dcdcdc"),
 				UserTextForeground:           color("#000000"),
 				UserTimestampForeground:      color("#0066cc"),
