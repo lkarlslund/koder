@@ -22,6 +22,9 @@ func TestLoadWritesDefaultConfig(t *testing.T) {
 	if cfg.Permissions.Profile != "default" {
 		t.Fatalf("unexpected permission profile: %s", cfg.Permissions.Profile)
 	}
+	if cfg.Store.Backend != "pebble" {
+		t.Fatalf("unexpected store backend: %s", cfg.Store.Backend)
+	}
 	if len(cfg.Permissions.Profiles) == 0 {
 		t.Fatal("expected permission profiles")
 	}

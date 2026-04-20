@@ -20,6 +20,10 @@ type UI struct {
 	Mouse          bool   `toml:"mouse"`
 }
 
+type Store struct {
+	Backend string `toml:"backend"`
+}
+
 type Provider struct {
 	Name          string            `toml:"name"`
 	BaseURL       string            `toml:"base_url"`
@@ -64,6 +68,7 @@ type Config struct {
 	DefaultModel    string              `toml:"default_model"`
 	Providers       map[string]Provider `toml:"providers"`
 	Permissions     PermissionRules     `toml:"permissions"`
+	Store           Store               `toml:"store"`
 	UI              UI                  `toml:"ui"`
 	path            string
 	configDir       string
@@ -170,6 +175,9 @@ func Default() Config {
 				},
 			},
 		},
+		Store: Store{
+			Backend: "pebble",
+		},
 		UI: UI{
 			Theme:          "tokyonight",
 			ShowSidebar:    true,
@@ -193,6 +201,9 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Permissions.Profile == "" {
 		c.Permissions.Profile = def.Permissions.Profile
+	}
+	if c.Store.Backend == "" {
+		c.Store.Backend = def.Store.Backend
 	}
 	if c.Permissions.Profiles == nil {
 		c.Permissions.Profiles = cloneProfiles(def.Permissions.Profiles)
