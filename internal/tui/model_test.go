@@ -2,9 +2,11 @@ package tui
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -304,6 +306,60 @@ func TestSessionPickerEscapeCreatesNewSession(t *testing.T) {
 	}
 	if !next.loading {
 		t.Fatal("expected loading after picker escape")
+	}
+}
+
+func TestSessionPickerRendersCenteredDialogWithDetails(t *testing.T) {
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	session, err := st.CreateSession(context.Background(), "Generated Session Title", "provider", "model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	msg, err := st.AddMessage(context.Background(), session.ID, domain.MessageRoleAssistant, "summary")
+	if err != nil {
+		t.Fatal(err)
+	}
+	usage, _ := json.Marshal(domain.Usage{PromptTokens: 123, CompletionTokens: 456, TotalTokens: 579})
+	if _, err := st.AddPart(context.Background(), msg.ID, domain.PartKindSystemNotice, "usage", string(usage)); err != nil {
+		t.Fatal(err)
+	}
+
+	m := Model{
+		width:  100,
+		height: 30,
+		store:  st,
+		sessions: []domain.Session{{
+			ID:        session.ID,
+			Title:     "Generated Session Title",
+			CreatedAt: time.Date(2026, 4, 20, 10, 30, 0, 0, time.UTC),
+			UpdatedAt: time.Date(2026, 4, 20, 12, 45, 0, 0, time.UTC),
+		}},
+	}
+	m.openSessionPicker()
+
+	got := m.View()
+	if !strings.Contains(got, "Resume Session") {
+		t.Fatalf("expected centered dialog title, got %q", got)
+	}
+	if !strings.Contains(got, "Session ID: 1") {
+		t.Fatalf("expected session id in dialog, got %q", got)
+	}
+	if !strings.Contains(got, "Created:") || !strings.Contains(got, "Changed:") {
+		t.Fatalf("expected timestamps in dialog, got %q", got)
+	}
+	if !strings.Contains(got, "Generated Session Title") {
+		t.Fatalf("expected title in dialog, got %q", got)
+	}
+	if !strings.Contains(got, "Tokens:     in 123  out 456") {
+		t.Fatalf("expected token counts in dialog, got %q", got)
+	}
+	if !strings.Contains(got, "Enter to select, Esc to start new session") {
+		t.Fatalf("expected helper text in dialog, got %q", got)
 	}
 }
 

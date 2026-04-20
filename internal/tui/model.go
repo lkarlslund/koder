@@ -149,6 +149,7 @@ const (
 type pickerItem struct {
 	Title       string
 	Description string
+	Details     []string
 	Value       string
 }
 
@@ -333,6 +334,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) View() string {
+	if m.hasPicker() && m.picker.mode == pickerModeSession && m.width > 0 && m.height > 0 {
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, m.renderPicker())
+	}
 	body := m.renderBody()
 	footer := m.renderFooter()
 	view := lipgloss.JoinVertical(lipgloss.Left, body, footer)
@@ -883,6 +887,24 @@ func wrapUserMessageLine(line string, width int) []string {
 		return []string{""}
 	}
 	return lines
+}
+
+func formatSessionTime(t time.Time) string {
+	if t.IsZero() {
+		return "-"
+	}
+	return t.Local().Format("2006-01-02 15:04")
+}
+
+func (m *Model) sessionUsageSummary(sessionID int64) (domain.Usage, bool) {
+	if m.store == nil {
+		return domain.Usage{}, false
+	}
+	messages, parts, err := m.store.PartsForSession(context.Background(), sessionID)
+	if err != nil {
+		return domain.Usage{}, false
+	}
+	return sessionctx.LatestUsage(messages, parts)
 }
 
 func (m *Model) userMessageWidth(lines []string) int {
@@ -1556,6 +1578,9 @@ func (m *Model) renderPicker() string {
 	if !m.hasPicker() {
 		return ""
 	}
+	if m.picker.mode == pickerModeSession {
+		return m.renderSessionPickerDialog()
+	}
 	var lines []string
 	lines = append(lines, lipgloss.NewStyle().Bold(true).Render(m.picker.title))
 	if hint := strings.TrimSpace(m.picker.hint); hint != "" {
@@ -1586,6 +1611,90 @@ func (m *Model) renderPicker() string {
 	}
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
+		Padding(0, 1).
+		Render(strings.Join(lines, "\n"))
+}
+
+func (m *Model) renderSessionPickerDialog() string {
+	title := lipgloss.NewStyle().Bold(true).Render("Resume Session")
+	filter := fmt.Sprintf("Filter: %s", m.picker.query)
+	helper := "Enter to select, Esc to start new session"
+
+	listWidth := 34
+	if m.width > 0 {
+		listWidth = min(40, max(28, m.width/3))
+	}
+	detailWidth := 42
+	if m.width > 0 {
+		detailWidth = min(56, max(36, m.width-listWidth-12))
+	}
+
+	list := m.renderSessionPickerList(listWidth)
+	details := m.renderSessionPickerDetails(detailWidth)
+	content := lipgloss.JoinHorizontal(lipgloss.Top, list, "  ", details)
+
+	dialog := lipgloss.JoinVertical(
+		lipgloss.Left,
+		title,
+		filter,
+		"",
+		content,
+		"",
+		lipgloss.NewStyle().Foreground(m.palette.AssistantTimestampText).Render(helper),
+	)
+
+	return lipgloss.NewStyle().
+		Width(listWidth+detailWidth+6).
+		Border(lipgloss.RoundedBorder()).
+		Padding(1, 2).
+		Render(dialog)
+}
+
+func (m *Model) renderSessionPickerList(width int) string {
+	lines := []string{}
+	if len(m.picker.matches) == 0 {
+		lines = append(lines, "No matches")
+	} else {
+		start := 0
+		if m.picker.index >= 5 {
+			start = m.picker.index - 4
+		}
+		end := min(len(m.picker.matches), start+9)
+		for idx := start; idx < end; idx++ {
+			item := m.picker.matches[idx]
+			cursor := " "
+			if idx == m.picker.index {
+				cursor = ">"
+			}
+			line := fmt.Sprintf("%s #%s  %s", cursor, item.Value, truncate(item.Title, max(8, width-8-len(item.Value))))
+			if idx == m.picker.index {
+				line = lipgloss.NewStyle().Reverse(true).Render(line)
+			}
+			lines = append(lines, line)
+		}
+	}
+	return lipgloss.NewStyle().
+		Width(width).
+		Border(lipgloss.NormalBorder()).
+		Padding(0, 1).
+		Render(strings.Join(lines, "\n"))
+}
+
+func (m *Model) renderSessionPickerDetails(width int) string {
+	item, ok := m.currentPickerItem()
+	if !ok {
+		return lipgloss.NewStyle().Width(width).Render("No session selected")
+	}
+	lines := []string{
+		lipgloss.NewStyle().Bold(true).Render(truncate(item.Title, width)),
+	}
+	lines = append(lines, item.Details...)
+	if desc := strings.TrimSpace(item.Description); desc != "" {
+		lines = append(lines, "", truncate(desc, width))
+	}
+	return lipgloss.NewStyle().
+		Width(width).
+		Border(lipgloss.NormalBorder()).
 		Padding(0, 1).
 		Render(strings.Join(lines, "\n"))
 }
@@ -1720,9 +1829,21 @@ func (m *Model) openSessionPicker() {
 		if description == "" {
 			description = "No messages yet"
 		}
+		details := []string{
+			fmt.Sprintf("Session ID: %d", session.ID),
+			fmt.Sprintf("Created:    %s", formatSessionTime(session.CreatedAt)),
+			fmt.Sprintf("Changed:    %s", formatSessionTime(session.UpdatedAt)),
+			fmt.Sprintf("Title:      %s", truncate(title, 28)),
+		}
+		if usage, ok := m.sessionUsageSummary(session.ID); ok {
+			details = append(details, fmt.Sprintf("Tokens:     in %s  out %s", formatTokens(usage.PromptTokens), formatTokens(usage.CompletionTokens)))
+		} else {
+			details = append(details, "Tokens:     in -  out -")
+		}
 		items = append(items, pickerItem{
-			Title:       fmt.Sprintf("#%d  %s", session.ID, truncate(title, 24)),
-			Description: truncate(description, 40),
+			Title:       title,
+			Description: description,
+			Details:     details,
 			Value:       strconv.FormatInt(session.ID, 10),
 		})
 	}
@@ -1730,7 +1851,7 @@ func (m *Model) openSessionPicker() {
 		visible: true,
 		mode:    pickerModeSession,
 		title:   "Resume Session",
-		hint:    "type to filter  enter select  esc new session  ctrl+c quit",
+		hint:    "Enter to select, Esc to start new session",
 		items:   items,
 	}
 	m.refilterPicker()

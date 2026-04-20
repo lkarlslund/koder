@@ -18,7 +18,7 @@ func FromMessages(cfg config.Config, session domain.Session, messages []domain.M
 	if !ok || providerCfg.ContextWindow <= 0 {
 		return Metrics{}, false
 	}
-	usage, ok := latestUsage(messages, parts)
+	usage, ok := LatestUsage(messages, parts)
 	if !ok || usage.TotalTokens <= 0 {
 		return Metrics{}, false
 	}
@@ -36,7 +36,7 @@ func FromMessages(cfg config.Config, session domain.Session, messages []domain.M
 	}, true
 }
 
-func latestUsage(messages []domain.Message, parts map[int64][]domain.Part) (domain.Usage, bool) {
+func LatestUsage(messages []domain.Message, parts map[int64][]domain.Part) (domain.Usage, bool) {
 	for msgIdx := len(messages) - 1; msgIdx >= 0; msgIdx-- {
 		msg := messages[msgIdx]
 		messageParts := parts[msg.ID]
