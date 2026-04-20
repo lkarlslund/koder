@@ -1,0 +1,161 @@
+package ui
+
+import (
+	"fmt"
+	"strings"
+
+	"github.com/charmbracelet/lipgloss"
+
+	"github.com/lkarlslund/koder/internal/theme"
+)
+
+type VerticalTabs struct {
+	Tabs   []string
+	Active int
+}
+
+func (v *VerticalTabs) Move(delta int) {
+	if len(v.Tabs) == 0 {
+		v.Active = 0
+		return
+	}
+	v.Active += delta
+	if v.Active < 0 {
+		v.Active = 0
+	}
+	if v.Active >= len(v.Tabs) {
+		v.Active = len(v.Tabs) - 1
+	}
+}
+
+func (v VerticalTabs) Current() int {
+	if len(v.Tabs) == 0 {
+		return 0
+	}
+	if v.Active < 0 {
+		return 0
+	}
+	if v.Active >= len(v.Tabs) {
+		return len(v.Tabs) - 1
+	}
+	return v.Active
+}
+
+func (v VerticalTabs) View(width int, palette theme.Palette, focused bool) string {
+	lines := make([]string, 0, len(v.Tabs))
+	base := lipgloss.NewStyle().Width(width)
+	activeStyle := base.
+		Background(palette.UserTextBackground).
+		Foreground(palette.UserAccentBar).
+		Bold(true)
+	if focused {
+		activeStyle = activeStyle.Reverse(true)
+	}
+	for idx, tab := range v.Tabs {
+		label := fmt.Sprintf(" %s ", strings.TrimSpace(tab))
+		if idx == v.Current() {
+			lines = append(lines, activeStyle.Render(label))
+			continue
+		}
+		lines = append(lines, base.Foreground(palette.SidebarForeground).Render(label))
+	}
+	return strings.Join(lines, "\n")
+}
+
+type ToggleRow struct {
+	Label       string
+	Description string
+	Value       bool
+}
+
+func (r ToggleRow) View(width int, palette theme.Palette, focused bool) string {
+	value := "Off"
+	valueColor := palette.AssistantTimestampText
+	if r.Value {
+		value = "On"
+		valueColor = palette.ActivityText
+	}
+	labelWidth := maxInt(12, width-8)
+	line := lipgloss.JoinHorizontal(
+		lipgloss.Top,
+		lipgloss.NewStyle().Width(labelWidth).Bold(true).Render(truncateText(r.Label, labelWidth)),
+		lipgloss.NewStyle().Foreground(valueColor).Render(value),
+	)
+	if focused {
+		line = lipgloss.NewStyle().
+			Background(palette.UserTextBackground).
+			Foreground(palette.UserTextForeground).
+			Render(line)
+	}
+	descWidth := maxInt(12, width)
+	desc := lipgloss.NewStyle().
+		Width(descWidth).
+		Foreground(palette.AssistantTimestampText).
+		Render(truncateText(r.Description, descWidth))
+	return strings.Join([]string{line, desc}, "\n")
+}
+
+type ChoiceRow struct {
+	Label       string
+	Description string
+	Value       string
+}
+
+func (r ChoiceRow) View(width int, palette theme.Palette, focused bool) string {
+	labelWidth := maxInt(12, width-16)
+	line := lipgloss.JoinHorizontal(
+		lipgloss.Top,
+		lipgloss.NewStyle().Width(labelWidth).Bold(true).Render(truncateText(r.Label, labelWidth)),
+		lipgloss.NewStyle().Foreground(palette.ActivityText).Render(truncateText(r.Value, 14)),
+	)
+	if focused {
+		line = lipgloss.NewStyle().
+			Background(palette.UserTextBackground).
+			Foreground(palette.UserTextForeground).
+			Render(line)
+	}
+	descWidth := maxInt(12, width)
+	desc := lipgloss.NewStyle().
+		Width(descWidth).
+		Foreground(palette.AssistantTimestampText).
+		Render(truncateText(r.Description, descWidth))
+	return strings.Join([]string{line, desc}, "\n")
+}
+
+type Button struct {
+	Label    string
+	Focused  bool
+	Primary  bool
+	Selected bool
+}
+
+func (b Button) View(palette theme.Palette) string {
+	style := lipgloss.NewStyle().Padding(0, 2)
+	if b.Primary {
+		style = style.Background(palette.UserTextBackground).Foreground(palette.UserAccentBar).Bold(true)
+	}
+	if b.Focused || b.Selected {
+		style = style.Reverse(true)
+	}
+	return style.Render(b.Label)
+}
+
+func truncateText(input string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	if lipgloss.Width(input) <= width {
+		return input
+	}
+	if width == 1 {
+		return "…"
+	}
+	return lipgloss.NewStyle().MaxWidth(width).Render(input)
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
