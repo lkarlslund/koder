@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/lkarlslund/koder/internal/config"
+	"github.com/lkarlslund/koder/internal/debugsrv"
 	"github.com/lkarlslund/koder/internal/domain"
 )
 
@@ -62,7 +63,7 @@ type Client struct {
 	provider string
 }
 
-func New(id string, cfg config.Provider) (*Client, error) {
+func New(id string, cfg config.Provider, recorder *debugsrv.Recorder) (*Client, error) {
 	if cfg.BaseURL == "" {
 		return nil, errors.New("provider base url is empty")
 	}
@@ -73,9 +74,18 @@ func New(id string, cfg config.Provider) (*Client, error) {
 	if timeout == 0 {
 		timeout = 2 * time.Minute
 	}
+	transport := http.DefaultTransport
+	if recorder != nil {
+		transport = &tracingTransport{
+			base:       http.DefaultTransport,
+			recorder:   recorder,
+			providerID: id,
+		}
+	}
 	return &Client{
 		http: &http.Client{
-			Timeout: timeout,
+			Timeout:   timeout,
+			Transport: transport,
 		},
 		baseURL:  strings.TrimRight(cfg.BaseURL, "/"),
 		apiKey:   cfg.APIKey,
@@ -244,6 +254,67 @@ func (c *Client) emitChunk(events chan<- domain.Event, chunk chatChunk, raw stri
 			},
 		}
 	}
+}
+
+type tracingTransport struct {
+	base       http.RoundTripper
+	recorder   *debugsrv.Recorder
+	providerID string
+}
+
+func (t *tracingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	start := time.Now()
+	var requestBody string
+	if req.Body != nil {
+		body, _ := io.ReadAll(req.Body)
+		requestBody = redactBody(string(body))
+		req.Body = io.NopCloser(bytes.NewReader(body))
+	}
+	resp, err := t.base.RoundTrip(req)
+	trace := debugsrv.HTTPTrace{
+		ProviderID:  t.providerID,
+		Method:      req.Method,
+		Path:        req.URL.Path,
+		DurationMS:  time.Since(start).Milliseconds(),
+		RequestBody: requestBody,
+		RequestHdrs: redactHeaders(req.Header),
+	}
+	if err != nil {
+		trace.Error = err.Error()
+		t.recorder.RecordHTTP(trace)
+		return nil, err
+	}
+	trace.Status = resp.StatusCode
+	trace.ResponseHdrs = redactHeaders(resp.Header)
+	if resp.Body != nil {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
+		trace.ResponseBody = redactBody(string(body))
+		resp.Body = io.NopCloser(io.MultiReader(bytes.NewReader(body), resp.Body))
+	}
+	t.recorder.RecordHTTP(trace)
+	return resp, nil
+}
+
+func redactHeaders(headers http.Header) map[string]string {
+	if len(headers) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(headers))
+	for key, values := range headers {
+		lower := strings.ToLower(key)
+		if lower == "authorization" || strings.Contains(lower, "api-key") || strings.Contains(lower, "token") {
+			out[key] = "[redacted]"
+			continue
+		}
+		out[key] = strings.Join(values, ", ")
+	}
+	return out
+}
+
+func redactBody(body string) string {
+	body = strings.TrimSpace(body)
+	body = strings.ReplaceAll(body, "Bearer ", "Bearer [redacted]")
+	return body
 }
 
 func (c *Client) newRequest(ctx context.Context, method, path string, body io.Reader) (*http.Request, error) {

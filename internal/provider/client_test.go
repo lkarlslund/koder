@@ -22,7 +22,7 @@ func TestListModels(t *testing.T) {
 	client, err := New("test", config.Provider{
 		BaseURL: server.URL + "/v1",
 		Timeout: time.Second,
-	})
+	}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,7 +45,7 @@ func TestCompleteChatReasoning(t *testing.T) {
 	client, err := New("test", config.Provider{
 		BaseURL: server.URL,
 		Timeout: time.Second,
-	})
+	}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

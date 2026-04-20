@@ -357,7 +357,7 @@ func TestInitEnablesMouseWhenConfigured(t *testing.T) {
 	cfg := config.Default()
 	cfg.UI.Mouse = true
 
-	m, err := New(cfg, nil, nil, StartupModeNew)
+	m, err := New(cfg, nil, nil, StartupModeNew, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -504,7 +504,7 @@ func TestThemePickerFiltersAndPreviewsSelection(t *testing.T) {
 	cfg := config.Default()
 	cfg.UI.Theme = "tokyonight"
 
-	m, err := New(cfg, nil, nil, StartupModeNew)
+	m, err := New(cfg, nil, nil, StartupModeNew, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -530,7 +530,7 @@ func TestThemePickerEscapeRestoresOriginalTheme(t *testing.T) {
 	cfg := config.Default()
 	cfg.UI.Theme = "flexoki"
 
-	m, err := New(cfg, nil, nil, StartupModeNew)
+	m, err := New(cfg, nil, nil, StartupModeNew, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -567,7 +567,7 @@ func TestThemePickerEnterSavesTheme(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	m, err := New(cfg, nil, nil, StartupModeNew)
+	m, err := New(cfg, nil, nil, StartupModeNew, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -869,7 +869,7 @@ func TestPreferencesDialogCancelRestoresOriginalUI(t *testing.T) {
 	cfg := config.Default()
 	cfg.UI.Theme = "flexoki"
 
-	m, err := New(cfg, nil, nil, StartupModeNew)
+	m, err := New(cfg, nil, nil, StartupModeNew, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -909,7 +909,7 @@ func TestPreferencesDialogApplySavesUIConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	m, err := New(cfg, nil, nil, StartupModeNew)
+	m, err := New(cfg, nil, nil, StartupModeNew, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1321,7 +1321,7 @@ func TestRenderMessagePartsSkipsSystemNotice(t *testing.T) {
 
 func TestRenderMessagePartsFormatsCompactionMarkdown(t *testing.T) {
 	cfg := config.Default()
-	m, err := New(cfg, nil, nil, StartupModeNew)
+	m, err := New(cfg, nil, nil, StartupModeNew, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

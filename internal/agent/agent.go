@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/lkarlslund/koder/internal/config"
+	"github.com/lkarlslund/koder/internal/debugsrv"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/permission"
 	"github.com/lkarlslund/koder/internal/provider"
@@ -22,6 +23,7 @@ type Engine struct {
 	cfg      config.Config
 	store    *store.Store
 	registry *tools.Registry
+	debug    *debugsrv.Recorder
 }
 
 type toolCall struct {
@@ -34,8 +36,8 @@ type toolCall struct {
 	Content string          `json:"content,omitempty"`
 }
 
-func New(cfg config.Config, st *store.Store, registry *tools.Registry) *Engine {
-	return &Engine{cfg: cfg, store: st, registry: registry}
+func New(cfg config.Config, st *store.Store, registry *tools.Registry, debug *debugsrv.Recorder) *Engine {
+	return &Engine{cfg: cfg, store: st, registry: registry, debug: debug}
 }
 
 func (e *Engine) UpdateConfig(cfg config.Config) {
@@ -67,7 +69,7 @@ func (e *Engine) Compact(ctx context.Context, sessionID int64) (<-chan domain.Ev
 	if !ok {
 		return nil, fmt.Errorf("provider %q not found", session.ProviderID)
 	}
-	client, err := provider.New(session.ProviderID, providerCfg)
+	client, err := provider.New(session.ProviderID, providerCfg, e.debug)
 	if err != nil {
 		return nil, err
 	}
@@ -90,7 +92,7 @@ func (e *Engine) runModelPrompt(ctx context.Context, session domain.Session, pro
 	if !ok {
 		return nil, fmt.Errorf("provider %q not found", session.ProviderID)
 	}
-	client, err := provider.New(session.ProviderID, providerCfg)
+	client, err := provider.New(session.ProviderID, providerCfg, e.debug)
 	if err != nil {
 		return nil, err
 	}
@@ -98,6 +100,7 @@ func (e *Engine) runModelPrompt(ctx context.Context, session domain.Session, pro
 	out := make(chan domain.Event)
 	go func() {
 		defer close(out)
+		e.recordLifecycle(session.ID, "prompt_started", prompt, map[string]string{"provider": session.ProviderID, "model": session.ModelID})
 		compacted, err := e.autoCompactIfNeeded(ctx, session, client, out)
 		if err != nil {
 			e.recordAssistantError(ctx, session.ID, err)
@@ -120,6 +123,7 @@ func (e *Engine) runModelPrompt(ctx context.Context, session domain.Session, pro
 			out <- domain.Event{Kind: domain.EventKindError, Err: err}
 			return
 		}
+		e.recordLifecycle(session.ID, "user_message_persisted", prompt, map[string]string{"message_id": strconv.FormatInt(userMsg.ID, 10)})
 		if err := e.continueModelTurn(ctx, session, client, out); err != nil {
 			e.recordAssistantError(ctx, session.ID, err)
 			out <- domain.Event{Kind: domain.EventKindError, Err: err}
@@ -131,6 +135,7 @@ func (e *Engine) runModelPrompt(ctx context.Context, session domain.Session, pro
 
 func (e *Engine) continueModelTurn(ctx context.Context, session domain.Session, client *provider.Client, out chan<- domain.Event) error {
 	for steps := 0; steps < 6; steps++ {
+		e.recordLifecycle(session.ID, "model_turn_started", "", map[string]string{"step": strconv.Itoa(steps + 1)})
 		messages, buildErr := e.buildConversation(ctx, session.ID)
 		if buildErr != nil {
 			return buildErr
@@ -147,6 +152,7 @@ func (e *Engine) continueModelTurn(ctx context.Context, session domain.Session, 
 
 		call, plain := parseToolCall(text)
 		if call != nil {
+			e.recordLifecycle(session.ID, "tool_call_parsed", call.contextString(), map[string]string{"tool": string(call.Tool)})
 			assistantMsg, err := e.store.AddMessage(ctx, session.ID, domain.MessageRoleAssistant, fmt.Sprintf("tool:%s", call.Tool))
 			if err != nil {
 				return err
@@ -199,6 +205,7 @@ func (e *Engine) continueModelTurn(ctx context.Context, session domain.Session, 
 		if strings.TrimSpace(reasoning) != "" {
 			out <- domain.Event{Kind: domain.EventKindReasoning, Text: reasoning}
 		}
+		e.recordLifecycle(session.ID, "assistant_message_persisted", strings.TrimSpace(text), map[string]string{"message_id": strconv.FormatInt(assistantMsg.ID, 10)})
 		if titleErr := e.maybeUpdateSessionTitle(ctx, session, client); titleErr != nil {
 			return titleErr
 		}
@@ -320,10 +327,13 @@ func (e *Engine) approve(ctx context.Context, sessionID int64, rawID string) (<-
 	if err := e.recordApprovalReply(ctx, sessionID, item.Tool, id, "approved", approvalPreview(req)); err != nil {
 		return nil, err
 	}
+	e.recordLifecycle(sessionID, "tool_execution_started", item.Command, map[string]string{"tool": string(item.Tool), "approval_id": strconv.FormatInt(id, 10)})
 	result, execErr := e.registry.Execute(ctx, req)
 	if execErr != nil {
+		e.recordLifecycle(sessionID, "tool_execution_failed", execErr.Error(), map[string]string{"tool": string(item.Tool), "approval_id": strconv.FormatInt(id, 10)})
 		return emitOnce(domain.Event{Kind: domain.EventKindError, Err: execErr}), nil
 	}
+	e.recordLifecycle(sessionID, "tool_execution_finished", item.Command, map[string]string{"tool": string(item.Tool), "approval_id": strconv.FormatInt(id, 10)})
 	toolEvents, err := e.persistToolResult(ctx, sessionID, item.Tool, result)
 	if err != nil {
 		return nil, err
@@ -336,7 +346,7 @@ func (e *Engine) approve(ctx context.Context, sessionID int64, rawID string) (<-
 	if !ok {
 		return nil, fmt.Errorf("provider %q not found", session.ProviderID)
 	}
-	client, err := provider.New(session.ProviderID, providerCfg)
+	client, err := provider.New(session.ProviderID, providerCfg, e.debug)
 	if err != nil {
 		return nil, err
 	}
@@ -400,6 +410,7 @@ func (e *Engine) persistToolResult(ctx context.Context, sessionID int64, tool do
 			return nil, err
 		}
 	}
+	e.recordLifecycle(sessionID, "tool_result_persisted", summary, map[string]string{"tool": string(tool), "message_id": strconv.FormatInt(msg.ID, 10)})
 	return emitOnce(domain.Event{Kind: domain.EventKindToolResult, Text: body, Tool: tool}), nil
 }
 
@@ -428,11 +439,19 @@ func (e *Engine) recordAssistantError(ctx context.Context, sessionID int64, err 
 	if err == nil || sessionID == 0 {
 		return
 	}
+	e.recordLifecycle(sessionID, "assistant_error", err.Error(), nil)
 	msg, addErr := e.store.AddMessage(ctx, sessionID, domain.MessageRoleAssistant, errorSummary(err))
 	if addErr != nil {
 		return
 	}
 	_, _ = e.store.AddPart(ctx, msg.ID, domain.PartKindText, errorSummary(err), "")
+}
+
+func (e *Engine) recordLifecycle(sessionID int64, kind, text string, meta map[string]string) {
+	if e.debug == nil {
+		return
+	}
+	e.debug.RecordLifecycle(sessionID, kind, text, meta)
 }
 
 func errorSummary(err error) string {

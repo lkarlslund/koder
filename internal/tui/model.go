@@ -17,6 +17,7 @@ import (
 
 	"github.com/lkarlslund/koder/internal/agent"
 	"github.com/lkarlslund/koder/internal/config"
+	"github.com/lkarlslund/koder/internal/debugsrv"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/markdown"
 	"github.com/lkarlslund/koder/internal/permission"
@@ -215,9 +216,10 @@ type Model struct {
 	connectDialog  *ui.ConnectDialog
 	disconnectDialog *ui.DisconnectDialog
 	modelDialog    *ui.ModelDialog
+	debug          *debugsrv.Recorder
 }
 
-func New(cfg config.Config, st *store.Store, a *agent.Engine, mode StartupMode) (Model, error) {
+func New(cfg config.Config, st *store.Store, a *agent.Engine, mode StartupMode, debug *debugsrv.Recorder) (Model, error) {
 	tuiTheme := theme.Resolve(cfg.UI.Theme)
 	renderer, err := markdown.New(tuiTheme.Palette)
 	if err != nil {
@@ -254,6 +256,7 @@ func New(cfg config.Config, st *store.Store, a *agent.Engine, mode StartupMode) 
 		workdir:       workdir,
 		startupMode:   mode,
 		mouseEnabled:  cfg.UI.Mouse,
+		debug:         debug,
 	}, nil
 }
 
@@ -269,6 +272,7 @@ func (m Model) Init() tea.Cmd {
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	defer m.syncDebugRuntime()
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -305,6 +309,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.startBusy(m.busy.scopeOrDefault(busyScopeTranscript), "Working ...")
 		return m, tea.Batch(nextEventCmd(msg.events), m.spinnerCmdIfNeeded(), m.syncWindowTitleCmd())
 	case eventMsg:
+		m.recordEvent(msg.event)
 		m.applyEvent(msg.event)
 		if msg.events != nil {
 			return m, tea.Batch(m.reloadDetailsCmd(), nextEventCmd(msg.events), m.syncWindowTitleCmd())
@@ -313,6 +318,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(m.reloadDetailsCmd(), m.syncWindowTitleCmd())
 	case loadMsg:
 		m = m.UpdateLoad(msg)
+		if m.debug != nil && m.currentSession.ID > 0 {
+			m.debug.RecordLifecycle(m.currentSession.ID, "session_reloaded", fmt.Sprintf("%d messages", len(m.messages)), map[string]string{"messages": strconv.Itoa(len(m.messages))})
+		}
 		m.stopBusyWithStatus("Ready")
 		return m, m.syncWindowTitleCmd()
 	case newSessionMsg:
@@ -330,6 +338,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.closeDisconnectDialog()
 		m.closeModelDialog()
 		m.status = fmt.Sprintf("Started session %d", msg.session.ID)
+		if m.debug != nil {
+			m.debug.RecordLifecycle(msg.session.ID, "new_session_ready", msg.session.Title, nil)
+		}
 		m.updateSlashMenu()
 		m.refreshViewport()
 		return m, m.syncWindowTitleCmd()
@@ -394,6 +405,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) View() string {
+	m.syncDebugRuntime()
 	if m.hasModelDialog() && m.width > 0 && m.height > 0 {
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, m.renderModelDialog())
 	}
@@ -793,6 +805,11 @@ func (m *Model) renderSidebar() string {
 	for _, item := range m.tasks {
 		lines = append(lines, fmt.Sprintf("  [%s] %s", item.Status, truncate(item.Body, 18)))
 	}
+	if debugAddr := m.debugAPIAddr(); debugAddr != "" {
+		lines = append(lines, "")
+		lines = append(lines, "Debug")
+		lines = append(lines, fmt.Sprintf("  api %s", truncate(debugAddr, 23)))
+	}
 	lines = append(lines, "")
 	lines = append(lines, "Keys")
 	lines = append(lines, "  enter send/select")
@@ -808,6 +825,13 @@ func (m *Model) renderSidebar() string {
 	lines = append(lines, "  /prefs")
 	lines = append(lines, "  /quit")
 	return strings.Join(lines, "\n")
+}
+
+func (m Model) debugAPIAddr() string {
+	if m.debug == nil {
+		return ""
+	}
+	return strings.TrimSpace(m.debug.Runtime().DebugAPI)
 }
 
 func (m *Model) refreshViewport() {
@@ -1162,11 +1186,12 @@ func nextEventCmd(events <-chan domain.Event) tea.Cmd {
 	}
 }
 
-func Run(cfg config.Config, st *store.Store, a *agent.Engine, mode StartupMode) error {
-	model, err := New(cfg, st, a, mode)
+func Run(cfg config.Config, st *store.Store, a *agent.Engine, mode StartupMode, debug *debugsrv.Recorder) error {
+	model, err := New(cfg, st, a, mode, debug)
 	if err != nil {
 		return err
 	}
+	model.syncDebugRuntime()
 	p := tea.NewProgram(model, tea.WithAltScreen())
 	finalModel, err := p.Run()
 	if err != nil {
@@ -1394,6 +1419,9 @@ func (m *Model) appendLocalUserPrompt(prompt string) {
 		Body:      prompt,
 		CreatedAt: now,
 	}}
+	if m.debug != nil {
+		m.debug.RecordLifecycle(m.currentSession.ID, "prompt_submitted", prompt, map[string]string{"optimistic": "true"})
+	}
 	m.refreshViewport()
 }
 
@@ -1421,6 +1449,9 @@ func (m *Model) appendLocalAssistantError(err error) {
 		Body:      body,
 		CreatedAt: now,
 	}}
+	if m.debug != nil {
+		m.debug.RecordLifecycle(m.currentSession.ID, "ui_error_appended", err.Error(), nil)
+	}
 	m.refreshViewport()
 }
 
@@ -1446,6 +1477,60 @@ func (m *Model) stopBusy() {
 func (m *Model) stopBusyWithStatus(status string) {
 	m.stopBusy()
 	m.status = status
+}
+
+func (m Model) syncDebugRuntime() {
+	if m.debug == nil {
+		return
+	}
+	m.debug.UpdateRuntime(debugsrv.RuntimeSnapshot{
+		DebugAPI:       m.debugAPIAddr(),
+		CurrentSession: m.currentSession.ID,
+		SessionTitle:   strings.TrimSpace(m.currentSession.Title),
+		ProviderID:     strings.TrimSpace(m.currentSession.ProviderID),
+		ModelID:        strings.TrimSpace(m.currentSession.ModelID),
+		Status:         strings.TrimSpace(m.status),
+		Busy:           m.busy.active,
+		BusyStatus:     strings.TrimSpace(m.busy.status),
+		OpenDialog:     m.openDialogName(),
+		ShowSidebar:    m.showSidebar,
+		ShowReasoning:  m.showReasoning,
+		LastError:      m.currentError(),
+	})
+}
+
+func (m Model) currentError() string {
+	status := strings.TrimSpace(m.status)
+	if strings.HasPrefix(status, "Error:") {
+		return status
+	}
+	return ""
+}
+
+func (m Model) openDialogName() string {
+	switch {
+	case m.hasModelDialog():
+		return "model"
+	case m.hasDisconnectDialog():
+		return "disconnect"
+	case m.hasConnectDialog():
+		return "connect"
+	case m.hasSessionDialog():
+		return "session"
+	case m.hasPreferencesDialog():
+		return "preferences"
+	case m.hasPicker():
+		return "picker"
+	default:
+		return ""
+	}
+}
+
+func (m Model) recordEvent(evt domain.Event) {
+	if m.debug == nil {
+		return
+	}
+	m.debug.RecordEvent(m.currentSession.ID, evt)
 }
 
 func (m *Model) spinnerCmdIfNeeded() tea.Cmd {
@@ -2090,7 +2175,7 @@ func (m *Model) openModelDialog(providerID string, models []domain.Model) {
 
 func (m Model) probeProviderCmd(draft provider.ConnectDraft) tea.Cmd {
 	return func() tea.Msg {
-		result, err := provider.Probe(context.Background(), draft)
+		result, err := provider.Probe(context.Background(), draft, m.debug)
 		return providerProbeMsg{result: result, err: err}
 	}
 }
@@ -2101,7 +2186,7 @@ func (m Model) loadModelsCmd(providerID string, postConnect bool) tea.Cmd {
 		if !ok {
 			return modelListMsg{providerID: providerID, err: fmt.Errorf("provider %q not configured", providerID)}
 		}
-		client, err := provider.New(providerID, cfg)
+		client, err := provider.New(providerID, cfg, m.debug)
 		if err != nil {
 			return modelListMsg{providerID: providerID, err: err}
 		}

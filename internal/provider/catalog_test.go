@@ -61,7 +61,7 @@ func TestProbeReturnsSortedModels(t *testing.T) {
 		BaseURL:    server.URL + "/v1",
 		Model:      "a-model",
 		Headers:    map[string]string{},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +113,7 @@ func TestProbeUsesValidProviderConfig(t *testing.T) {
 		BaseURL:    server.URL,
 		APIKey:     "secret",
 		Model:      "model-a",
-	})
+	}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,7 +127,7 @@ func TestClientStillSupportsConfigFromDraft(t *testing.T) {
 		BaseURL:    "https://example.com/v1",
 		APIKey:     "secret",
 		Model:      "model-a",
-	}.ToConfig())
+	}.ToConfig(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

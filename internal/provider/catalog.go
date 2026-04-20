@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/lkarlslund/koder/internal/config"
+	"github.com/lkarlslund/koder/internal/debugsrv"
 	"github.com/lkarlslund/koder/internal/domain"
 )
 
@@ -136,8 +137,8 @@ func (d ConnectDraft) ToConfig() config.Provider {
 	return cfg
 }
 
-func Probe(ctx context.Context, draft ConnectDraft) (ProbeResult, error) {
-	client, err := New(draft.ProviderID, draft.ToConfig())
+func Probe(ctx context.Context, draft ConnectDraft, recorder *debugsrv.Recorder) (ProbeResult, error) {
+	client, err := New(draft.ProviderID, draft.ToConfig(), recorder)
 	if err != nil {
 		return ProbeResult{}, err
 	}
@@ -164,7 +165,7 @@ func ValidateDraft(draft ConnectDraft) error {
 	if strings.TrimSpace(draft.Model) == "" {
 		return fmt.Errorf("model is required")
 	}
-	_, err := New(draft.ProviderID, draft.ToConfig())
+	_, err := New(draft.ProviderID, draft.ToConfig(), nil)
 	return err
 }
 
