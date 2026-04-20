@@ -120,6 +120,54 @@ func TestUpdateSessionTitleAndCountMessagesByRole(t *testing.T) {
 	}
 }
 
+func TestForkSessionCopiesTranscriptAndParent(t *testing.T) {
+	for _, backend := range []string{BackendPebble, BackendJSONFS} {
+		t.Run(backend, func(t *testing.T) {
+			st := openTestStore(t, backend)
+
+			session, err := st.CreateSession(context.Background(), "test", "provider", "model", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := st.SetSessionPermissionProfile(context.Background(), session.ID, "readonly"); err != nil {
+				t.Fatal(err)
+			}
+			msg, err := st.AddMessage(context.Background(), session.ID, domain.MessageRoleUser, "hello")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := st.AddPart(context.Background(), msg.ID, domain.PartKindText, "hello", ""); err != nil {
+				t.Fatal(err)
+			}
+
+			forked, err := st.ForkSession(context.Background(), session.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if forked.ID == session.ID {
+				t.Fatal("expected forked session to have distinct id")
+			}
+			if forked.ParentID == nil || *forked.ParentID != session.ID {
+				t.Fatalf("expected parent id %d, got %#v", session.ID, forked.ParentID)
+			}
+			if forked.PermissionProfile != "readonly" {
+				t.Fatalf("expected permission profile copied, got %q", forked.PermissionProfile)
+			}
+
+			messages, parts, err := st.PartsForSession(context.Background(), forked.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(messages) != 1 || messages[0].Summary != "hello" {
+				t.Fatalf("unexpected forked messages: %#v", messages)
+			}
+			if got := parts[messages[0].ID][0].Body; got != "hello" {
+				t.Fatalf("unexpected forked part body: %q", got)
+			}
+		})
+	}
+}
+
 func TestJSONFSWritesInspectableFiles(t *testing.T) {
 	root := t.TempDir()
 	st, err := OpenWithOptions(root, Options{Backend: BackendJSONFS})

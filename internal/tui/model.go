@@ -181,6 +181,13 @@ type modelListMsg struct {
 	err         error
 }
 
+type forkSessionMsg struct {
+	load     loadMsg
+	sourceID int64
+	forkedID int64
+	err      error
+}
+
 type Model struct {
 	cfg            config.Config
 	store          *store.Store
@@ -322,6 +329,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.debug.RecordLifecycle(m.currentSession.ID, "session_reloaded", fmt.Sprintf("%d messages", len(m.messages)), map[string]string{"messages": strconv.Itoa(len(m.messages))})
 		}
 		m.stopBusyWithStatus("Ready")
+		return m, m.syncWindowTitleCmd()
+	case forkSessionMsg:
+		if msg.err != nil {
+			m.status = msg.err.Error()
+			m.stopBusy()
+			return m, m.syncWindowTitleCmd()
+		}
+		m = m.UpdateLoad(msg.load)
+		m.stopBusy()
+		m.status = fmt.Sprintf("Forked session %d from %d", msg.forkedID, msg.sourceID)
 		return m, m.syncWindowTitleCmd()
 	case newSessionMsg:
 		m.sessions = msg.sessions
@@ -827,10 +844,12 @@ func (m *Model) renderSidebar() string {
 	lines = append(lines, "  /compact")
 	lines = append(lines, "  /connect")
 	lines = append(lines, "  /disconnect")
+	lines = append(lines, "  /fork")
 	lines = append(lines, "  /model")
 	lines = append(lines, "  /new  session")
 	lines = append(lines, "  /perm profile")
 	lines = append(lines, "  /prefs")
+	lines = append(lines, "  /resume")
 	lines = append(lines, "  /quit")
 	return strings.Join(lines, "\n")
 }
@@ -1132,6 +1151,16 @@ func (m Model) newSessionCmd() tea.Cmd {
 	}
 }
 
+func (m Model) sessionPickerCmd() tea.Cmd {
+	return func() tea.Msg {
+		sessions, err := m.store.ListSessions(context.Background())
+		if err != nil {
+			return promptDoneMsg{err: err}
+		}
+		return sessionPickerMsg{sessions: sessions}
+	}
+}
+
 func (m Model) loadSessionCmd(sessionID int64) tea.Cmd {
 	return func() tea.Msg {
 		if sessionID == 0 {
@@ -1176,6 +1205,49 @@ func (m Model) loadSessionCmd(sessionID int64) tea.Cmd {
 			approvals: approvals,
 			tasks:     tasks,
 			workspace: workspaceStatus,
+		}
+	}
+}
+
+func (m Model) forkSessionCmd(sourceSessionID int64) tea.Cmd {
+	return func() tea.Msg {
+		ctx := context.Background()
+		forked, err := m.store.ForkSession(ctx, sourceSessionID)
+		if err != nil {
+			return forkSessionMsg{err: err}
+		}
+		sessions, err := m.store.ListSessions(ctx)
+		if err != nil {
+			return forkSessionMsg{err: err}
+		}
+		messages, parts, err := m.store.PartsForSession(ctx, forked.ID)
+		if err != nil {
+			return forkSessionMsg{err: err}
+		}
+		approvals, err := m.store.PendingApprovals(ctx, forked.ID)
+		if err != nil {
+			return forkSessionMsg{err: err}
+		}
+		tasks, err := m.store.ListTasks(ctx, forked.ID)
+		if err != nil {
+			return forkSessionMsg{err: err}
+		}
+		workspaceStatus, err := workspace.Snapshot(ctx, m.workdir)
+		if err != nil {
+			return forkSessionMsg{err: err}
+		}
+		return forkSessionMsg{
+			sourceID: sourceSessionID,
+			forkedID: forked.ID,
+			load: loadMsg{
+				sessions:  sessions,
+				current:   forked,
+				messages:  messages,
+				parts:     parts,
+				approvals: approvals,
+				tasks:     tasks,
+				workspace: workspaceStatus,
+			},
 		}
 	}
 }
@@ -1284,6 +1356,11 @@ func (m *Model) handleLocalCommand(prompt string) (tea.Model, tea.Cmd, bool) {
 		m.updateSlashMenu()
 		m.startBusy(busyScopeSidebar, "Creating session…")
 		return m, tea.Batch(m.newSessionCmd(), m.spinnerCmdIfNeeded()), true
+	case trimmed == "/resume":
+		m.composer.Reset()
+		m.updateSlashMenu()
+		m.startBusy(busyScopeSidebar, "Loading sessions…")
+		return m, tea.Batch(m.sessionPickerCmd(), m.spinnerCmdIfNeeded()), true
 	case trimmed == "/quit":
 		m.composer.Reset()
 		m.updateSlashMenu()
@@ -1346,6 +1423,15 @@ func (m *Model) handleLocalCommand(prompt string) (tea.Model, tea.Cmd, bool) {
 		m.updateSlashMenu()
 		m.openPreferencesDialog()
 		return m, tea.Batch(spinnerTickCmd(), m.syncWindowTitleCmd()), true
+	case trimmed == "/fork":
+		m.composer.Reset()
+		m.updateSlashMenu()
+		if m.currentSession.ID == 0 {
+			m.status = "No saved session to fork"
+			return m, m.syncWindowTitleCmd(), true
+		}
+		m.startBusy(busyScopeSidebar, fmt.Sprintf("Forking session %d…", m.currentSession.ID))
+		return m, tea.Batch(m.forkSessionCmd(m.currentSession.ID), m.spinnerCmdIfNeeded()), true
 	case strings.HasPrefix(trimmed, "/approve "):
 		id, err := strconv.ParseInt(strings.TrimSpace(strings.TrimPrefix(trimmed, "/approve")), 10, 64)
 		if err != nil {
@@ -1974,12 +2060,14 @@ func internalSlashCommands() []slashCommand {
 		{Name: "/compact", Description: "Summarize old context"},
 		{Name: "/connect", Description: "Configure a provider"},
 		{Name: "/disconnect", Description: "Remove a configured provider"},
+		{Name: "/fork", Description: "Branch from the current session"},
 		{Name: "/model", Description: "Choose a model for the active provider"},
 		{Name: "/new", Description: "Start a new session"},
 		{Name: "/mouse", Description: "Toggle mouse capture", NeedsArgs: true, Autocomplete: "/mouse "},
 		{Name: "/perm", Description: "Set permission profile", NeedsArgs: true, Autocomplete: "/perm "},
 		{Name: "/prefs", Description: "Open preferences"},
 		{Name: "/quit", Description: "Quit koder"},
+		{Name: "/resume", Description: "Resume a saved session"},
 		{Name: "/theme", Description: "Choose a color theme"},
 	}
 }

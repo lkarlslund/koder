@@ -58,9 +58,19 @@ func TestMatchingSlashCommands(t *testing.T) {
 		t.Fatalf("expected /disconnect, got %#v", matches)
 	}
 
+	matches = matchingSlashCommands("fork")
+	if len(matches) != 1 || matches[0].Name != "/fork" {
+		t.Fatalf("expected /fork, got %#v", matches)
+	}
+
 	matches = matchingSlashCommands("mod")
 	if len(matches) != 1 || matches[0].Name != "/model" {
 		t.Fatalf("expected /model, got %#v", matches)
+	}
+
+	matches = matchingSlashCommands("res")
+	if len(matches) != 1 || matches[0].Name != "/resume" {
+		t.Fatalf("expected /resume, got %#v", matches)
 	}
 
 	matches = matchingSlashCommands("the")
@@ -312,6 +322,67 @@ func TestNewSessionMsgClearsBusyState(t *testing.T) {
 	}
 	if next.status != "Started new session" {
 		t.Fatalf("unexpected status: %q", next.status)
+	}
+}
+
+func TestForkCommandCreatesForkedSession(t *testing.T) {
+	cfg := config.Default()
+	st, err := store.OpenWithOptions(t.TempDir(), store.Options{Backend: store.BackendJSONFS})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	session, err := st.CreateSession(context.Background(), "Source Session", "provider", "model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	msg, err := st.AddMessage(context.Background(), session.ID, domain.MessageRoleUser, "hello")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.AddPart(context.Background(), msg.ID, domain.PartKindText, "hello", ""); err != nil {
+		t.Fatal(err)
+	}
+
+	m := Model{
+		cfg:            cfg,
+		store:          st,
+		composer:       textarea.New(),
+		viewport:       viewport.New(40, 6),
+		currentSession: session,
+		parts:          map[int64][]domain.Part{},
+		workdir:        t.TempDir(),
+	}
+	m.composer.SetValue("/fork")
+
+	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	next := updated.(*Model)
+	if cmd == nil {
+		t.Fatal("expected fork command")
+	}
+	if !next.loading {
+		t.Fatal("expected loading while forking")
+	}
+
+	msgAny := next.forkSessionCmd(session.ID)()
+	forkMsg, ok := msgAny.(forkSessionMsg)
+	if !ok {
+		t.Fatalf("expected forkSessionMsg, got %T", msgAny)
+	}
+	updated, _ = next.Update(forkMsg)
+	forked := updated.(Model)
+	if forked.currentSession.ID == session.ID {
+		t.Fatal("expected forked session id to differ from source")
+	}
+	if forked.currentSession.ParentID == nil || *forked.currentSession.ParentID != session.ID {
+		t.Fatalf("expected parent id %d, got %#v", session.ID, forked.currentSession.ParentID)
+	}
+	if len(forked.messages) != 1 || forked.messages[0].Summary != "hello" {
+		t.Fatalf("unexpected forked messages: %#v", forked.messages)
+	}
+	if forked.status == "" || !strings.Contains(forked.status, "Forked session") {
+		t.Fatalf("unexpected fork status: %q", forked.status)
 	}
 }
 
