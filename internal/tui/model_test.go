@@ -189,23 +189,6 @@ func TestRenderTranscriptToolMessageFallsBackToSummaryWhenBodyMissing(t *testing
 	}
 }
 
-func TestRenderFooterShowsDebugAPIHint(t *testing.T) {
-	cfg := config.Default()
-	m := Model{
-		cfg:      cfg,
-		palette:  theme.Resolve("tokyonight").Palette,
-		composer: textarea.New(),
-		debug:    debugsrv.NewRecorder(),
-	}
-	m.debug.SetDebugAPI("127.0.0.1:61347")
-	m.composer.Placeholder = "Ask koder or type / for commands"
-
-	got := m.renderFooter()
-	if !strings.Contains(got, "Debug API 127.0.0.1:61347") {
-		t.Fatalf("expected debug api hint in footer, got %q", got)
-	}
-}
-
 func TestEnterWithoutProviderOpensConnectDialog(t *testing.T) {
 	m := Model{
 		cfg:      config.Default(),
@@ -1093,6 +1076,11 @@ func TestRenderSidebarShowsStatusAndSessionInfo(t *testing.T) {
 	m := Model{
 		currentSession: domain.Session{ID: 2, ProviderID: "test", ModelID: "model", PermissionProfile: "default"},
 		status:         "Working ...",
+		debug: func() *debugsrv.Recorder {
+			rec := debugsrv.NewRecorder()
+			rec.SetDebugAPI("127.0.0.1:61347")
+			return rec
+		}(),
 		busy: busyModel{
 			active: true,
 			scope:  busyScopeTranscript,
@@ -1127,6 +1115,9 @@ func TestRenderSidebarShowsStatusAndSessionInfo(t *testing.T) {
 	}
 	if !strings.Contains(got, "Context") || !strings.Contains(got, "25% used") {
 		t.Fatalf("expected sidebar to include context usage, got %q", got)
+	}
+	if !strings.Contains(got, "Debug") || !strings.Contains(got, "127.0.0.1:61347") {
+		t.Fatalf("expected sidebar to include debug api status, got %q", got)
 	}
 }
 
