@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+
+	"github.com/lkarlslund/koder/internal/agents"
 )
 
 type FileStatus struct {
@@ -15,33 +17,50 @@ type FileStatus struct {
 }
 
 type Status struct {
-	Available bool
-	Branch    string
-	Upstream  string
-	Summary   string
-	Files     []FileStatus
-	Added     int
-	Modified  int
-	Deleted   int
-	Untracked int
+	Available      bool
+	ProjectRoot    string
+	AgentsChecksum string
+	AgentsFiles    int
+	Branch         string
+	Upstream       string
+	Summary        string
+	Files          []FileStatus
+	Added          int
+	Modified       int
+	Deleted        int
+	Untracked      int
 }
 
 func Snapshot(ctx context.Context, dir string) (Status, error) {
+	projectRoot := agents.FindProjectRoot(dir)
+	status := Status{ProjectRoot: projectRoot}
+	snapshot, discoverErr := agents.NewManager("", "").Discover(ctx, dir)
+	if discoverErr == nil {
+		if snapshot.ProjectRoot != "" {
+			status.ProjectRoot = snapshot.ProjectRoot
+		}
+		status.AgentsChecksum = snapshot.Checksum
+		status.AgentsFiles = len(snapshot.Files)
+	}
 	statusCmd := exec.CommandContext(ctx, "git", "status", "--short", "--branch")
-	statusCmd.Dir = dir
+	statusCmd.Dir = projectRoot
 	statusOutput, err := statusCmd.Output()
 	if err != nil {
-		return Status{}, nil
+		return status, nil
 	}
 
 	numstatCmd := exec.CommandContext(ctx, "git", "diff", "--numstat", "--find-renames", "HEAD")
-	numstatCmd.Dir = dir
+	numstatCmd.Dir = projectRoot
 	numstatOutput, err := numstatCmd.Output()
 	if err != nil {
 		numstatOutput = nil
 	}
 
-	return parseStatus(string(statusOutput), string(numstatOutput)), nil
+	parsed := parseStatus(string(statusOutput), string(numstatOutput))
+	parsed.ProjectRoot = status.ProjectRoot
+	parsed.AgentsChecksum = status.AgentsChecksum
+	parsed.AgentsFiles = status.AgentsFiles
+	return parsed, nil
 }
 
 func parseStatus(raw string, numstatRaw string) Status {

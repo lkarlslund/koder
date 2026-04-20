@@ -234,6 +234,11 @@ type forkSessionMsg struct {
 	err      error
 }
 
+type agentsRefreshMsg struct {
+	load loadMsg
+	err  error
+}
+
 type Model struct {
 	cfg                config.Config
 	store              *store.Store
@@ -260,12 +265,14 @@ type Model struct {
 	approvalChoice     int
 	workdir            string
 	workspace          workspace.Status
+	agentsDrift        bool
 	startupMode        StartupMode
 	picker             pickerModel
 	pendingPartID      int64
 	mouseEnabled       bool
 	sessionDialog      *ui.SessionDialog
 	preferences        *ui.PreferencesDialog
+	agentsModal        *ui.Modal
 	connectDialog      *ui.ConnectDialog
 	disconnectDialog   *ui.DisconnectDialog
 	modelDialog        *ui.ModelDialog
@@ -385,6 +392,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(cmd, m.syncWindowTitleCmd())
 		}
 		return m, m.syncWindowTitleCmd()
+	case agentsRefreshMsg:
+		if msg.err != nil {
+			m.status = msg.err.Error()
+			m.stopBusy()
+			return m, m.syncWindowTitleCmd()
+		}
+		m = m.UpdateLoad(msg.load)
+		m.stopBusy()
+		m.status = "Refreshed project instructions"
+		return m, m.syncWindowTitleCmd()
 	case forkSessionMsg:
 		if msg.err != nil {
 			m.status = msg.err.Error()
@@ -410,6 +427,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.closeConnectDialog()
 		m.closeDisconnectDialog()
 		m.closeModelDialog()
+		m.closeAgentsModal()
+		m.agentsDrift = false
 		m.stopBusy()
 		if msg.session.ID > 0 {
 			m.status = fmt.Sprintf("Started session %d", msg.session.ID)
@@ -496,6 +515,9 @@ func (m Model) View() string {
 	if m.hasSessionDialog() && m.width > 0 && m.height > 0 {
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, m.renderSessionDialog())
 	}
+	if m.hasAgentsModal() && m.width > 0 && m.height > 0 {
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, m.renderAgentsModal())
+	}
 	if m.hasPreferencesDialog() && m.width > 0 && m.height > 0 {
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, m.renderPreferencesDialog())
 	}
@@ -523,6 +545,13 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	if m.hasConnectDialog() {
 		return m.handleConnectDialogKey(msg)
+	}
+	if m.hasAgentsModal() {
+		if msg.String() == "esc" || msg.String() == "enter" {
+			m.closeAgentsModal()
+			return m, m.syncWindowTitleCmd()
+		}
+		return m, nil
 	}
 	if m.hasPreferencesDialog() {
 		return m.handlePreferencesKey(msg)
@@ -885,7 +914,20 @@ func (m *Model) renderSidebar() string {
 	}
 	lines = append(lines, "")
 	lines = append(lines, "Workspace")
-	lines = append(lines, truncate(m.workdir, 28))
+	lines = append(lines, fmt.Sprintf("  cwd     %s", truncate(m.workdir, 20)))
+	lines = append(lines, fmt.Sprintf("  project %s", truncate(m.currentProjectRoot(), 20)))
+	lines = append(lines, "")
+	lines = append(lines, "AGENTS")
+	lines = append(lines, fmt.Sprintf("  %s", m.agentsStatusLabel()))
+	if m.currentSession.ProjectChecksum != "" {
+		lines = append(lines, fmt.Sprintf("  saved   %s", truncate(m.currentSession.ProjectChecksum, 12)))
+	}
+	if m.workspace.AgentsChecksum != "" {
+		lines = append(lines, fmt.Sprintf("  live    %s", truncate(m.workspace.AgentsChecksum, 12)))
+	}
+	if m.workspace.AgentsFiles > 0 {
+		lines = append(lines, fmt.Sprintf("  files   %d", m.workspace.AgentsFiles))
+	}
 	lines = append(lines, "")
 	lines = append(lines, "Git")
 	if !m.workspace.Available {
@@ -959,6 +1001,8 @@ func (m *Model) renderSidebar() string {
 	lines = append(lines, "  ^y    copy last answer")
 	lines = append(lines, "  ^s    sidebar")
 	lines = append(lines, "  ^r    reasoning")
+	lines = append(lines, "  /agents")
+	lines = append(lines, "  /agents refresh")
 	lines = append(lines, "  /compact")
 	lines = append(lines, "  /connect")
 	lines = append(lines, "  /disconnect")
@@ -1368,6 +1412,50 @@ func (m Model) loadSessionCmd(sessionID int64) tea.Cmd {
 	}
 }
 
+func (m Model) agentsRefreshCmd(sessionID int64) tea.Cmd {
+	return func() tea.Msg {
+		ctx := context.Background()
+		if _, err := m.agent.RefreshAgents(ctx, sessionID); err != nil {
+			return agentsRefreshMsg{err: err}
+		}
+		sessions, err := m.store.ListSessions(ctx)
+		if err != nil {
+			return agentsRefreshMsg{err: err}
+		}
+		session, err := m.store.GetSession(ctx, sessionID)
+		if err != nil {
+			return agentsRefreshMsg{err: err}
+		}
+		messages, parts, err := m.store.PartsForSession(ctx, session.ID)
+		if err != nil {
+			return agentsRefreshMsg{err: err}
+		}
+		approvals, err := m.store.PendingApprovals(ctx, session.ID)
+		if err != nil {
+			return agentsRefreshMsg{err: err}
+		}
+		tasks, err := m.store.ListTasks(ctx, session.ID)
+		if err != nil {
+			return agentsRefreshMsg{err: err}
+		}
+		workspaceStatus, err := workspace.Snapshot(ctx, m.workdir)
+		if err != nil {
+			return agentsRefreshMsg{err: err}
+		}
+		return agentsRefreshMsg{
+			load: loadMsg{
+				sessions:  sessions,
+				current:   session,
+				messages:  messages,
+				parts:     parts,
+				approvals: approvals,
+				tasks:     tasks,
+				workspace: workspaceStatus,
+			},
+		}
+	}
+}
+
 func (m Model) forkSessionCmd(sourceSessionID int64) tea.Cmd {
 	return func() tea.Msg {
 		ctx := context.Background()
@@ -1565,6 +1653,10 @@ func (m Model) UpdateLoad(msg loadMsg) Model {
 	m.closeConnectDialog()
 	m.closeDisconnectDialog()
 	m.closeModelDialog()
+	m.closeAgentsModal()
+	m.agentsDrift = m.currentSession.ProjectChecksum != "" &&
+		m.workspace.AgentsChecksum != "" &&
+		m.currentSession.ProjectChecksum != m.workspace.AgentsChecksum
 	m.refreshViewport()
 	return m
 }
@@ -1644,6 +1736,20 @@ func (m *Model) handleLocalCommand(prompt string) (tea.Model, tea.Cmd, bool) {
 		m.updateSlashMenu()
 		m.openPreferencesDialog()
 		return m, tea.Batch(spinnerTickCmd(), m.syncWindowTitleCmd()), true
+	case trimmed == "/agents":
+		m.composer.Reset()
+		m.updateSlashMenu()
+		m.openAgentsModal()
+		return m, m.syncWindowTitleCmd(), true
+	case trimmed == "/agents refresh":
+		m.composer.Reset()
+		m.updateSlashMenu()
+		if m.currentSession.ID == 0 {
+			m.status = "No saved session to refresh"
+			return m, m.syncWindowTitleCmd(), true
+		}
+		m.startBusy(busyScopeSidebar, "Refreshing project instructions…")
+		return m, tea.Batch(m.agentsRefreshCmd(m.currentSession.ID), m.spinnerCmdIfNeeded()), true
 	case trimmed == "/fork":
 		m.composer.Reset()
 		m.updateSlashMenu()
@@ -2520,6 +2626,8 @@ func (m *Model) renderApprovalPrompt() string {
 
 func internalSlashCommands() []slashCommand {
 	return []slashCommand{
+		{Name: "/agents", Description: "Show resolved project instructions"},
+		{Name: "/agents refresh", Description: "Re-resolve project instructions"},
 		{Name: "/compact", Description: "Summarize old context"},
 		{Name: "/connect", Description: "Configure a provider"},
 		{Name: "/disconnect", Description: "Remove a configured provider"},
@@ -2616,6 +2724,14 @@ func (m *Model) hasPreferencesDialog() bool {
 
 func (m *Model) closePreferencesDialog() {
 	m.preferences = nil
+}
+
+func (m *Model) hasAgentsModal() bool {
+	return m.agentsModal != nil
+}
+
+func (m *Model) closeAgentsModal() {
+	m.agentsModal = nil
 }
 
 func (m *Model) hasConnectDialog() bool {
@@ -2730,6 +2846,90 @@ func (m *Model) openModelDialog(providerID string, models []domain.Model) {
 	}
 	dialog := ui.NewModelDialog(providerID, models, current)
 	m.modelDialog = &dialog
+}
+
+func (m *Model) openAgentsModal() {
+	lines := []string{
+		fmt.Sprintf("CWD: %s", blankAsDash(m.workdir)),
+		fmt.Sprintf("Project root: %s", blankAsDash(m.currentProjectRoot())),
+		fmt.Sprintf("Session checksum: %s", blankAsDash(m.currentSession.ProjectChecksum)),
+		fmt.Sprintf("Live checksum: %s", blankAsDash(m.workspace.AgentsChecksum)),
+		fmt.Sprintf("Live files: %d", m.workspace.AgentsFiles),
+		fmt.Sprintf("Generated: %s", formatSessionTime(m.currentSession.AgentsGeneratedAt)),
+	}
+	if m.agentsDrift {
+		lines = append(lines, "Drift: WARNING session checksum differs from workspace")
+	} else {
+		lines = append(lines, "Drift: clean")
+	}
+	lines = append(lines, "")
+	lines = append(lines, "Conflict Summary")
+	summary := strings.TrimSpace(m.currentSession.AgentsSummary)
+	if summary == "" {
+		summary = "No resolved AGENTS data stored for this session yet."
+	}
+	lines = append(lines, summary)
+	lines = append(lines, "")
+	lines = append(lines, "Included Files")
+	if len(m.currentSession.AgentsFiles) == 0 {
+		lines = append(lines, "none")
+	} else {
+		for _, item := range m.currentSession.AgentsFiles {
+			line := fmt.Sprintf("%s [%s p=%d %s]", item.Path, item.Kind, item.Priority, item.ModTime.Local().Format("2006-01-02 15:04:05"))
+			if item.DiscoveredBy != "" {
+				line += " <- " + item.DiscoveredBy
+			}
+			lines = append(lines, line)
+		}
+	}
+	lines = append(lines, "")
+	lines = append(lines, "Resolved Text")
+	resolved := strings.TrimSpace(m.currentSession.AgentsResolved)
+	if resolved == "" {
+		resolved = "No resolved AGENTS data stored for this session yet. Send a prompt or run /agents refresh."
+	}
+	lines = append(lines, resolved)
+	modal := ui.Modal{
+		Title:    "Resolved AGENTS",
+		Subtitle: fmt.Sprintf("Project root: %s", blankAsDash(m.currentProjectRoot())),
+		Body:     strings.Join(lines, "\n"),
+		Footer:   "enter or esc close  /agents refresh recomputes and updates the session snapshot",
+		Width:    min(110, max(72, m.width-8)),
+	}
+	m.agentsModal = &modal
+}
+
+func (m *Model) renderAgentsModal() string {
+	if m.agentsModal == nil {
+		return ""
+	}
+	return m.agentsModal.View(m.palette)
+}
+
+func (m Model) currentProjectRoot() string {
+	if strings.TrimSpace(m.workspace.ProjectRoot) != "" {
+		return m.workspace.ProjectRoot
+	}
+	if strings.TrimSpace(m.currentSession.ProjectRoot) != "" {
+		return m.currentSession.ProjectRoot
+	}
+	return m.workdir
+}
+
+func (m Model) agentsStatusLabel() string {
+	if m.busy.active && strings.Contains(strings.ToLower(m.busy.status), "project instructions") {
+		return "resolving"
+	}
+	if m.workspace.AgentsFiles == 0 {
+		return "missing"
+	}
+	if m.agentsDrift {
+		return "WARNING drifted"
+	}
+	if m.currentSession.ProjectChecksum != "" && m.currentSession.ProjectChecksum == m.workspace.AgentsChecksum {
+		return "cached"
+	}
+	return "clean"
 }
 
 func (m Model) probeProviderCmd(draft provider.ConnectDraft) tea.Cmd {

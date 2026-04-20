@@ -29,6 +29,7 @@ type backend interface {
 	GetSession(context.Context, int64) (domain.Session, error)
 	SetSessionPermissionProfile(context.Context, int64, string) error
 	UpdateSessionTitle(context.Context, int64, string) error
+	UpdateSessionAgents(context.Context, int64, string, string, string, string, []domain.AgentsFile, time.Time) error
 	CountMessagesByRole(context.Context, int64, domain.MessageRole) (int, error)
 	SetSessionModel(context.Context, int64, string, string) error
 	AddMessage(context.Context, int64, domain.MessageRole, string) (domain.Message, error)
@@ -114,6 +115,19 @@ func (s *Store) SetSessionPermissionProfile(ctx context.Context, sessionID int64
 
 func (s *Store) UpdateSessionTitle(ctx context.Context, sessionID int64, title string) error {
 	return s.backend.UpdateSessionTitle(ctx, sessionID, title)
+}
+
+func (s *Store) UpdateSessionAgents(
+	ctx context.Context,
+	sessionID int64,
+	projectRoot string,
+	projectChecksum string,
+	resolved string,
+	summary string,
+	files []domain.AgentsFile,
+	generatedAt time.Time,
+) error {
+	return s.backend.UpdateSessionAgents(ctx, sessionID, projectRoot, projectChecksum, resolved, summary, files, generatedAt)
 }
 
 func (s *Store) CountMessagesByRole(ctx context.Context, sessionID int64, role domain.MessageRole) (int, error) {

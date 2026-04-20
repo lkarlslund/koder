@@ -159,6 +159,26 @@ func (b *jsonfsBackend) UpdateSessionTitle(ctx context.Context, sessionID int64,
 	})
 }
 
+func (b *jsonfsBackend) UpdateSessionAgents(
+	ctx context.Context,
+	sessionID int64,
+	projectRoot string,
+	projectChecksum string,
+	resolved string,
+	summary string,
+	files []domain.AgentsFile,
+	generatedAt time.Time,
+) error {
+	return b.updateSession(ctx, sessionID, func(session *domain.Session) {
+		session.ProjectRoot = projectRoot
+		session.ProjectChecksum = projectChecksum
+		session.AgentsResolved = resolved
+		session.AgentsSummary = summary
+		session.AgentsFiles = append([]domain.AgentsFile(nil), files...)
+		session.AgentsGeneratedAt = generatedAt
+	})
+}
+
 func (b *jsonfsBackend) CountMessagesByRole(ctx context.Context, sessionID int64, role domain.MessageRole) (int, error) {
 	messages, err := b.sessionMessages(sessionID)
 	if err != nil {

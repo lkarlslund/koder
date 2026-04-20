@@ -90,9 +90,25 @@ type Session struct {
 	ProviderID        string
 	ModelID           string
 	PermissionProfile string
+	ProjectRoot       string
+	ProjectChecksum   string
+	AgentsResolved    string
+	AgentsSummary     string
+	AgentsFiles       []AgentsFile
+	AgentsGeneratedAt time.Time
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
 	LastMessage       string
+}
+
+type AgentsFile struct {
+	Path         string
+	Kind         string
+	Priority     int
+	ModTime      time.Time
+	Checksum     string
+	Size         int64
+	DiscoveredBy string
 }
 
 type Message struct {

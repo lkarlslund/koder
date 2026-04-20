@@ -63,7 +63,7 @@ func runTUI(ctx context.Context, mode tui.StartupMode) error {
 	if debugServer != nil {
 		recorder = debugServer.Recorder()
 	}
-	engine := agent.New(cfg, st, registry, recorder)
+	engine := agent.New(cfg, st, registry, recorder, wd)
 	return tui.Run(cfg, st, engine, mode, recorder)
 }
 
