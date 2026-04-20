@@ -1817,6 +1817,24 @@ func TestRenderTranscriptMessageAssistantWrapsToViewportWidth(t *testing.T) {
 	}
 }
 
+func TestRenderTranscriptMessageAssistantPreservesPlainTextContent(t *testing.T) {
+	m := Model{
+		palette: theme.Default().Palette,
+		parts: map[int64][]domain.Part{
+			2: {{Kind: domain.PartKindText, Body: "plain assistant text"}},
+		},
+	}
+
+	got := m.renderTranscriptMessage(domain.Message{
+		ID:   2,
+		Role: domain.MessageRoleAssistant,
+	})
+
+	if !strings.Contains(got, "plain assistant text") {
+		t.Fatalf("expected assistant text to remain visible, got %q", got)
+	}
+}
+
 func TestRefreshViewportUsesSingleNewlineBetweenBlocksWithHalfBlocks(t *testing.T) {
 	cfg := config.Default()
 	m := Model{

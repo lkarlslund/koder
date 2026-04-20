@@ -124,6 +124,15 @@ func RenderAssistantMessage(body, stamp string, palette theme.Palette) string {
 func RenderAssistantMessageWidth(body, stamp string, width int, palette theme.Palette) string {
 	body = strings.TrimSpace(body)
 	body = WrapStyledBlock(body, width)
+	bodyStyle := lipgloss.NewStyle().Foreground(palette.MarkdownText)
+	if body != "" {
+		lines := strings.Split(body, "\n")
+		rendered := make([]string, 0, len(lines))
+		for _, line := range lines {
+			rendered = append(rendered, bodyStyle.Render(line))
+		}
+		body = strings.Join(rendered, "\n")
+	}
 	if stamp == "" {
 		return body
 	}
