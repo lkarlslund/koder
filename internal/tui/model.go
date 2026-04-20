@@ -863,7 +863,7 @@ func (m *Model) renderSidebar() string {
 	lines = append(lines, "  /model")
 	lines = append(lines, "  /new  session")
 	lines = append(lines, "  /perm profile")
-	lines = append(lines, "  /prefs")
+	lines = append(lines, "  /preferences")
 	lines = append(lines, "  /resume")
 	lines = append(lines, "  /quit")
 	return strings.Join(lines, "\n")
@@ -1474,7 +1474,7 @@ func (m *Model) handleLocalCommand(prompt string) (tea.Model, tea.Cmd, bool) {
 		m.updateSlashMenu()
 		m.openThemePicker()
 		return m, nil, true
-	case trimmed == "/prefs":
+	case trimmed == "/preferences":
 		m.composer.Reset()
 		m.updateSlashMenu()
 		m.openPreferencesDialog()
@@ -2133,7 +2133,7 @@ func internalSlashCommands() []slashCommand {
 		{Name: "/new", Description: "Start a new session"},
 		{Name: "/mouse", Description: "Toggle mouse capture", NeedsArgs: true, Autocomplete: "/mouse "},
 		{Name: "/perm", Description: "Set permission profile", NeedsArgs: true, Autocomplete: "/perm "},
-		{Name: "/prefs", Description: "Open preferences"},
+		{Name: "/preferences", Description: "Open preferences"},
 		{Name: "/quit", Description: "Quit koder"},
 		{Name: "/resume", Description: "Resume a saved session"},
 		{Name: "/theme", Description: "Choose a color theme"},

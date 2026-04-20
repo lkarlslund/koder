@@ -776,7 +776,7 @@ func TestPrefsCommandOpensPreferencesDialog(t *testing.T) {
 		cfg:      config.Default(),
 		composer: textarea.New(),
 	}
-	m.composer.SetValue("/prefs")
+	m.composer.SetValue("/preferences")
 
 	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
 	next := updated.(*Model)
