@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/signal"
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/charmbracelet/bubbles/textarea"
@@ -1275,11 +1277,32 @@ func Run(cfg config.Config, st *store.Store, a *agent.Engine, mode StartupMode, 
 	}
 	model.syncDebugRuntime()
 	p := tea.NewProgram(model, tea.WithAltScreen(), tea.WithoutSignalHandler())
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(sig)
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		select {
+		case s := <-sig:
+			switch s {
+			case os.Interrupt:
+				p.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
+			default:
+				p.Send(tea.QuitMsg{})
+			}
+		case <-done:
+		}
+	}()
 	finalModel, err := p.Run()
 	if err != nil && !errors.Is(err, tea.ErrInterrupted) {
 		return err
 	}
-	if typed, ok := finalModel.(Model); ok {
+	switch typed := finalModel.(type) {
+	case Model:
+		fmt.Println(typed.exitSummary())
+		return nil
+	case *Model:
 		fmt.Println(typed.exitSummary())
 		return nil
 	}
