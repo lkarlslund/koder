@@ -118,7 +118,12 @@ func UserMessageWidth(lines []string) int {
 }
 
 func RenderAssistantMessage(body, stamp string, palette theme.Palette) string {
+	return RenderAssistantMessageWidth(body, stamp, 0, palette)
+}
+
+func RenderAssistantMessageWidth(body, stamp string, width int, palette theme.Palette) string {
 	body = strings.TrimSpace(body)
+	body = WrapStyledBlock(body, width)
 	if stamp == "" {
 		return body
 	}
@@ -129,10 +134,15 @@ func RenderAssistantMessage(body, stamp string, palette theme.Palette) string {
 }
 
 func RenderReasoningBlock(input string, palette theme.Palette) string {
+	return RenderReasoningBlockWidth(input, 0, palette)
+}
+
+func RenderReasoningBlockWidth(input string, width int, palette theme.Palette) string {
 	content := strings.TrimSpace(input)
 	if content == "" {
 		return ""
 	}
+	content = WrapStyledBlock(content, width)
 	lineStyle := lipgloss.NewStyle().
 		Background(palette.ReasoningBackground).
 		Foreground(palette.ReasoningText)
@@ -149,4 +159,20 @@ func WorkingIndicatorLine(indicator string) string {
 		return ""
 	}
 	return fmt.Sprintf("%s  Working ...", indicator)
+}
+
+func WrapStyledBlock(input string, width int) string {
+	if width <= 0 {
+		return input
+	}
+	var wrapped []string
+	for _, line := range strings.Split(input, "\n") {
+		if strings.TrimSpace(line) == "" {
+			wrapped = append(wrapped, "")
+			continue
+		}
+		chunks := strings.Split(ansi.Wordwrap(line, width, ""), "\n")
+		wrapped = append(wrapped, chunks...)
+	}
+	return strings.Join(wrapped, "\n")
 }

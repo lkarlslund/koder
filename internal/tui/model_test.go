@@ -1792,3 +1792,27 @@ func TestRenderTranscriptMessageUsesAssistantStyleWithoutRoleLabel(t *testing.T)
 		t.Fatalf("expected no bracketed role labels, got %q", got)
 	}
 }
+
+func TestRenderTranscriptMessageAssistantWrapsToViewportWidth(t *testing.T) {
+	m := Model{
+		parts: map[int64][]domain.Part{
+			2: {{Kind: domain.PartKindText, Body: "this assistant line is intentionally longer than the viewport width"}},
+		},
+		viewport: viewport.New(18, 6),
+	}
+
+	got := m.renderTranscriptMessage(domain.Message{
+		ID:   2,
+		Role: domain.MessageRoleAssistant,
+	})
+
+	lines := strings.Split(got, "\n")
+	if len(lines) < 2 {
+		t.Fatalf("expected wrapped assistant lines, got %q", got)
+	}
+	for idx, line := range lines {
+		if gotWidth := lipgloss.Width(line); gotWidth > m.viewport.Width {
+			t.Fatalf("expected line width <= %d at line %d, got %d from %q", m.viewport.Width, idx, gotWidth, line)
+		}
+	}
+}

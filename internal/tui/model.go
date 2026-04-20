@@ -973,7 +973,7 @@ func (m *Model) userMessageWidth(body, stamp string) int {
 }
 
 func (m *Model) renderAssistantMessage(body, stamp string) string {
-	return ui.RenderAssistantMessage(body, stamp, m.palette)
+	return ui.RenderAssistantMessageWidth(body, stamp, m.viewport.Width, m.palette)
 }
 
 func (m *Model) renderMessageParts(parts []domain.Part) string {
@@ -1066,7 +1066,7 @@ func (m *Model) renderUserMessageParts(parts []domain.Part) string {
 }
 
 func (m *Model) renderReasoningBlock(input string) string {
-	return ui.RenderReasoningBlock(input, m.palette)
+	return ui.RenderReasoningBlockWidth(input, m.viewport.Width, m.palette)
 }
 
 func (m Model) loadCmd() tea.Cmd {
