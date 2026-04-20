@@ -3,7 +3,12 @@ package globtool
 import (
 	"context"
 	"errors"
+	"io/fs"
+	"os"
+	pathpkg "path"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/lkarlslund/koder/internal/domain"
@@ -19,14 +24,18 @@ func init() { tools.Register(tool{}) }
 func (tool) Kind() domain.ToolKind    { return domain.ToolKindGlob }
 func (tool) BypassesPermission() bool { return false }
 func (tool) Definition() (provider.ToolDefinition, bool) {
-	return tools.FunctionDefinition(domain.ToolKindGlob, "Find workspace paths matching a glob pattern", `{"type":"object","properties":{"pattern":{"type":"string","description":"Glob pattern relative to the workspace"}},"required":["pattern"],"additionalProperties":false}`), true
+	return tools.FunctionDefinition(domain.ToolKindGlob, "Find workspace paths matching a glob pattern", `{"type":"object","properties":{"pattern":{"type":"string","description":"Glob pattern relative to the workspace"},"path":{"type":"string","description":"Optional workspace directory to search from"}},"required":["pattern"],"additionalProperties":false}`), true
 }
 func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
-	pattern := strings.TrimSpace(args["pattern"])
+	pattern := strings.TrimSpace(tools.FirstArg(args, "pattern", "glob"))
 	if pattern == "" {
 		return nil, errors.New("pattern is empty")
 	}
-	return map[string]string{"pattern": pattern}, nil
+	out := map[string]string{"pattern": pattern}
+	if root := tools.NormalizePathInput(tools.FirstArg(args, "path", "root", "dir")); root != "" {
+		out["path"] = root
+	}
+	return out, nil
 }
 func (tool) LegacyArgs(raw string) map[string]string { return map[string]string{"pattern": raw} }
 func (tool) Preview(req tools.Request) string        { return req.Args["pattern"] }
@@ -41,17 +50,41 @@ func (tool) Presentation(req tools.Request) tools.Presentation {
 	return tool{}.PresentationForPreview(req.Args["pattern"])
 }
 func (tool) Execute(_ context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
-	matches, err := filepath.Glob(filepath.Join(runtime.Workdir, req.Args["pattern"]))
+	rootAbs, _, err := tools.WorkspaceDir(runtime.Workdir, req.Args["path"])
 	if err != nil {
 		return tools.Result{}, err
 	}
-	for i, item := range matches {
-		rel, relErr := filepath.Rel(runtime.Workdir, item)
-		if relErr == nil {
-			matches[i] = rel
+	pattern := req.Args["pattern"]
+	var matches []string
+	walkErr := fs.WalkDir(os.DirFS(rootAbs), ".", func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
 		}
+		if path == "." {
+			return nil
+		}
+		slashPath := filepath.ToSlash(path)
+		matched, matchErr := pathpkg.Match(pattern, slashPath)
+		if matchErr == nil && matched {
+			matches = append(matches, slashPath)
+		}
+		return nil
+	})
+	if walkErr != nil {
+		return tools.Result{}, walkErr
 	}
-	return tools.Result{Output: strings.Join(matches, "\n")}, nil
+	sort.Strings(matches)
+	body := strings.Join(matches, "\n")
+	body, truncated := tools.TruncateText(body, tools.DefaultToolOutputLimit)
+	return tools.Result{
+		Output: body,
+		Meta: map[string]string{
+			"pattern":   pattern,
+			"base_path": strings.TrimSpace(req.Args["path"]),
+			"matches":   strconv.Itoa(len(matches)),
+			"truncated": tools.BoolString(truncated),
+		},
+	}, nil
 }
 func (tool) SummarizeResult(req tools.Request, result tools.Result) (string, string) {
 	return tools.DefaultSummarizeResult(req, result)

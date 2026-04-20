@@ -24,6 +24,7 @@ const (
 	PartKindApprovalRequest PartKind = "approval_request"
 	PartKindQuestion        PartKind = "question"
 	PartKindTaskUpdate      PartKind = "task_update"
+	PartKindPlanUpdate      PartKind = "plan_update"
 	PartKindSystemNotice    PartKind = "system_notice"
 )
 
@@ -35,8 +36,12 @@ const (
 	ToolKindGrep       ToolKind = "grep"
 	ToolKindBash       ToolKind = "bash"
 	ToolKindApplyPatch ToolKind = "apply_patch"
+	ToolKindEdit       ToolKind = "edit"
+	ToolKindWrite      ToolKind = "write"
 	ToolKindTask       ToolKind = "task"
 	ToolKindQuestion   ToolKind = "question"
+	ToolKindUpdatePlan ToolKind = "update_plan"
+	ToolKindSkill      ToolKind = "skill"
 	ToolKindWebFetch   ToolKind = "webfetch"
 	ToolKindWebSearch  ToolKind = "websearch"
 )

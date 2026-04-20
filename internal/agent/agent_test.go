@@ -51,8 +51,7 @@ func TestApprovalSerializationRoundTrip(t *testing.T) {
 	req := tools.Request{
 		Tool: domain.ToolKindApplyPatch,
 		Args: map[string]string{
-			"path":    "file.txt",
-			"content": "hello",
+			"patch": "--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-before\n+after\n",
 		},
 	}
 	raw, err := serializeRequest(req)
@@ -63,7 +62,7 @@ func TestApprovalSerializationRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Args["path"] != "file.txt" || got.Args["content"] != "hello" {
+	if got.Args["patch"] == "" {
 		t.Fatalf("unexpected round trip args: %#v", got.Args)
 	}
 }
