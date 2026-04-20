@@ -51,6 +51,11 @@ func TestMatchingSlashCommands(t *testing.T) {
 		t.Fatalf("expected /connect, got %#v", matches)
 	}
 
+	matches = matchingSlashCommands("disc")
+	if len(matches) != 1 || matches[0].Name != "/disconnect" {
+		t.Fatalf("expected /disconnect, got %#v", matches)
+	}
+
 	matches = matchingSlashCommands("the")
 	if len(matches) != 1 || matches[0].Name != "/theme" {
 		t.Fatalf("expected /theme, got %#v", matches)
@@ -564,6 +569,44 @@ func TestConnectCommandOpensConnectDialog(t *testing.T) {
 	}
 }
 
+func TestDisconnectCommandOpensDisconnectDialog(t *testing.T) {
+	m := Model{
+		cfg: config.Config{
+			Providers: map[string]config.Provider{
+				"openai": {Name: "OpenAI", BaseURL: "https://api.openai.com/v1"},
+			},
+		},
+		composer: textarea.New(),
+	}
+	m.composer.SetValue("/disconnect")
+
+	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	next := updated.(*Model)
+	if cmd != nil {
+		t.Fatal("expected no async command when opening disconnect dialog")
+	}
+	if !next.hasDisconnectDialog() {
+		t.Fatal("expected disconnect dialog to open")
+	}
+}
+
+func TestDisconnectCommandWithoutProvidersShowsStatus(t *testing.T) {
+	m := Model{
+		cfg:      config.Default(),
+		composer: textarea.New(),
+	}
+	m.composer.SetValue("/disconnect")
+
+	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	next := updated.(*Model)
+	if cmd != nil {
+		t.Fatal("expected no async command")
+	}
+	if next.status != "No configured providers to disconnect" {
+		t.Fatalf("unexpected status: %q", next.status)
+	}
+}
+
 func TestSaveProviderDraftPersistsDefaults(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
@@ -596,6 +639,59 @@ func TestSaveProviderDraftPersistsDefaults(t *testing.T) {
 	}
 	if reloaded.DefaultProvider != "openai" {
 		t.Fatalf("unexpected saved default provider: %q", reloaded.DefaultProvider)
+	}
+}
+
+func TestDisconnectProviderClearsDefaultAndFallsBack(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.DefaultProvider = "openai"
+	cfg.DefaultModel = "gpt-5.4"
+	cfg.Providers = map[string]config.Provider{
+		"openai": {
+			Name:         "OpenAI",
+			Kind:         "openai-compatible",
+			AuthMethod:   "api_key",
+			BaseURL:      "https://api.openai.com/v1",
+			DefaultModel: "gpt-5.4",
+		},
+		"ollama": {
+			Name:         "Ollama",
+			Kind:         "openai-compatible",
+			AuthMethod:   "local_endpoint",
+			BaseURL:      "http://127.0.0.1:11434/v1",
+			DefaultModel: "qwen",
+		},
+	}
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+	m := Model{
+		cfg:            cfg,
+		currentSession: domain.Session{ProviderID: "openai", ModelID: "gpt-5.4"},
+	}
+
+	if err := m.disconnectProvider("openai"); err != nil {
+		t.Fatal(err)
+	}
+	if m.cfg.DefaultProvider != "ollama" {
+		t.Fatalf("expected fallback default provider, got %q", m.cfg.DefaultProvider)
+	}
+	if m.currentSession.ProviderID != "ollama" || m.currentSession.ModelID != "qwen" {
+		t.Fatalf("expected current session to fall back, got %#v", m.currentSession)
+	}
+	reloaded, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := reloaded.Providers["openai"]; ok {
+		t.Fatal("expected provider removed from saved config")
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -210,6 +211,7 @@ type Model struct {
 	sessionDialog  *ui.SessionDialog
 	preferences    *ui.PreferencesDialog
 	connectDialog  *ui.ConnectDialog
+	disconnectDialog *ui.DisconnectDialog
 }
 
 func New(cfg config.Config, st *store.Store, a *agent.Engine, mode StartupMode) (Model, error) {
@@ -318,6 +320,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.closePicker()
 		m.closeSessionDialog()
 		m.closeConnectDialog()
+		m.closeDisconnectDialog()
 		m.status = fmt.Sprintf("Started session %d", msg.session.ID)
 		m.updateSlashMenu()
 		m.refreshViewport()
@@ -367,6 +370,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) View() string {
+	if m.hasDisconnectDialog() && m.width > 0 && m.height > 0 {
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, m.renderDisconnectDialog())
+	}
 	if m.hasConnectDialog() && m.width > 0 && m.height > 0 {
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, m.renderConnectDialog())
 	}
@@ -389,6 +395,9 @@ func (m Model) View() string {
 }
 
 func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.hasDisconnectDialog() {
+		return m.handleDisconnectDialogKey(msg)
+	}
 	if m.hasConnectDialog() {
 		return m.handleConnectDialogKey(msg)
 	}
@@ -762,6 +771,7 @@ func (m *Model) renderSidebar() string {
 	lines = append(lines, "  ^r    reasoning")
 	lines = append(lines, "  /compact")
 	lines = append(lines, "  /connect")
+	lines = append(lines, "  /disconnect")
 	lines = append(lines, "  /new  session")
 	lines = append(lines, "  /perm profile")
 	lines = append(lines, "  /prefs")
@@ -1155,6 +1165,13 @@ func formatTokens(value int) string {
 	}
 }
 
+func blankAsDash(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return "-"
+	}
+	return value
+}
+
 func min(a, b int) int {
 	if a < b {
 		return a
@@ -1182,6 +1199,7 @@ func (m Model) UpdateLoad(msg loadMsg) Model {
 	m.closeSessionDialog()
 	m.closePreferencesDialog()
 	m.closeConnectDialog()
+	m.closeDisconnectDialog()
 	m.refreshViewport()
 	return m
 }
@@ -1226,6 +1244,15 @@ func (m *Model) handleLocalCommand(prompt string) (tea.Model, tea.Cmd, bool) {
 		m.composer.Reset()
 		m.updateSlashMenu()
 		m.openConnectDialog()
+		return m, nil, true
+	case trimmed == "/disconnect":
+		m.composer.Reset()
+		m.updateSlashMenu()
+		if len(m.cfg.Providers) == 0 {
+			m.status = "No configured providers to disconnect"
+			return m, nil, true
+		}
+		m.openDisconnectDialog()
 		return m, nil, true
 	case trimmed == "/theme":
 		m.composer.Reset()
@@ -1582,6 +1609,17 @@ func (m *Model) renderConnectDialog() string {
 	return m.connectDialog.View(width, m.palette)
 }
 
+func (m *Model) renderDisconnectDialog() string {
+	if !m.hasDisconnectDialog() {
+		return ""
+	}
+	width := 84
+	if m.width > 0 {
+		width = min(96, max(72, m.width-8))
+	}
+	return m.disconnectDialog.View(width, m.palette)
+}
+
 func (m *Model) handleSessionDialogKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if !m.hasSessionDialog() {
 		return m, nil
@@ -1663,6 +1701,30 @@ func (m *Model) handleConnectDialogKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 }
 
+func (m *Model) handleDisconnectDialogKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if !m.hasDisconnectDialog() {
+		return m, nil
+	}
+	action := m.disconnectDialog.Update(msg)
+	switch action.Kind {
+	case ui.DisconnectDialogActionSelect:
+		if err := m.disconnectProvider(action.ProviderID); err != nil {
+			m.status = err.Error()
+			return m, nil
+		}
+		m.closeDisconnectDialog()
+		m.status = fmt.Sprintf("Disconnected provider %s", action.ProviderID)
+		m.refreshViewport()
+		return m, nil
+	case ui.DisconnectDialogActionCancel:
+		m.closeDisconnectDialog()
+		m.status = "Provider disconnect cancelled"
+		return m, nil
+	default:
+		return m, nil
+	}
+}
+
 func (m *Model) hasApprovalPrompt() bool {
 	return !m.loading && len(m.approvals) > 0
 }
@@ -1702,6 +1764,7 @@ func internalSlashCommands() []slashCommand {
 	return []slashCommand{
 		{Name: "/compact", Description: "Summarize old context"},
 		{Name: "/connect", Description: "Configure a provider"},
+		{Name: "/disconnect", Description: "Remove a configured provider"},
 		{Name: "/new", Description: "Start a new session"},
 		{Name: "/mouse", Description: "Toggle mouse capture", NeedsArgs: true, Autocomplete: "/mouse "},
 		{Name: "/perm", Description: "Set permission profile", NeedsArgs: true, Autocomplete: "/perm "},
@@ -1802,6 +1865,14 @@ func (m *Model) closeConnectDialog() {
 	m.connectDialog = nil
 }
 
+func (m *Model) hasDisconnectDialog() bool {
+	return m.disconnectDialog != nil
+}
+
+func (m *Model) closeDisconnectDialog() {
+	m.disconnectDialog = nil
+}
+
 func (m *Model) openSessionPicker() {
 	items := make([]ui.SessionItem, 0, len(m.sessions))
 	for _, session := range m.sessions {
@@ -1843,6 +1914,44 @@ func (m *Model) openPreferencesDialog() {
 func (m *Model) openConnectDialog() {
 	dialog := ui.NewConnectDialog(provider.Catalog(), m.cfg.Providers)
 	m.connectDialog = &dialog
+}
+
+func (m *Model) openDisconnectDialog() {
+	items := make([]ui.ProviderItem, 0, len(m.cfg.Providers))
+	ids := make([]string, 0, len(m.cfg.Providers))
+	for id := range m.cfg.Providers {
+		ids = append(ids, id)
+	}
+	slices.Sort(ids)
+	for _, id := range ids {
+		p := m.cfg.Providers[id]
+		title := id
+		if strings.TrimSpace(p.Name) != "" {
+			title = p.Name
+		}
+		desc := strings.TrimSpace(p.BaseURL)
+		if desc == "" {
+			desc = p.Kind
+		}
+		details := []string{
+			fmt.Sprintf("Provider ID: %s", id),
+			fmt.Sprintf("Kind:        %s", blankAsDash(p.Kind)),
+			fmt.Sprintf("Auth:        %s", blankAsDash(p.AuthMethod)),
+			fmt.Sprintf("Base URL:    %s", blankAsDash(p.BaseURL)),
+			fmt.Sprintf("Model:       %s", blankAsDash(p.DefaultModel)),
+		}
+		if id == m.cfg.DefaultProvider {
+			details = append(details, "Default:     yes")
+		}
+		items = append(items, ui.ProviderItem{
+			ID:          id,
+			Title:       title,
+			Description: desc,
+			Details:     details,
+		})
+	}
+	dialog := ui.NewDisconnectDialog(items)
+	m.disconnectDialog = &dialog
 }
 
 func (m Model) probeProviderCmd(draft provider.ConnectDraft) tea.Cmd {
@@ -1901,6 +2010,48 @@ func (m *Model) saveProviderDraft(draft provider.ConnectDraft) error {
 	}
 	if strings.TrimSpace(m.currentSession.ModelID) == "" {
 		m.currentSession.ModelID = draft.Model
+	}
+	return nil
+}
+
+func (m *Model) disconnectProvider(providerID string) error {
+	providerID = strings.TrimSpace(providerID)
+	if providerID == "" {
+		return fmt.Errorf("provider id is required")
+	}
+	if _, ok := m.cfg.Providers[providerID]; !ok {
+		return fmt.Errorf("provider %q is not configured", providerID)
+	}
+	delete(m.cfg.Providers, providerID)
+
+	nextDefault := strings.TrimSpace(m.cfg.DefaultProvider)
+	if nextDefault == providerID || !m.cfg.HasUsableProvider(nextDefault) {
+		nextDefault = ""
+		ids := make([]string, 0, len(m.cfg.Providers))
+		for id := range m.cfg.Providers {
+			ids = append(ids, id)
+		}
+		slices.Sort(ids)
+		if len(ids) > 0 {
+			nextDefault = ids[0]
+		}
+	}
+	m.cfg.DefaultProvider = nextDefault
+	m.cfg.DefaultModel = ""
+	if nextDefault != "" {
+		if next, ok := m.cfg.Provider(nextDefault); ok {
+			m.cfg.DefaultModel = next.DefaultModel
+		}
+	}
+	if err := m.cfg.Save(); err != nil {
+		return err
+	}
+	if m.agent != nil {
+		m.agent.UpdateConfig(m.cfg)
+	}
+	if strings.TrimSpace(m.currentSession.ProviderID) == providerID {
+		m.currentSession.ProviderID = m.cfg.DefaultProvider
+		m.currentSession.ModelID = m.cfg.DefaultModel
 	}
 	return nil
 }
