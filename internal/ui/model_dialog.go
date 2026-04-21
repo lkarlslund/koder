@@ -45,6 +45,7 @@ func NewModelDialog(providerID string, models []domain.Model, current string) Mo
 			{ID: "ok", Label: "OK", Hotkey: 'o', Primary: true},
 			{ID: "cancel", Label: "Cancel", Hotkey: 'c'},
 		},
+		Align: HorizontalAlignRight,
 	}
 	d.refilter()
 	for idx, item := range d.view {
@@ -163,7 +164,7 @@ func (d ModelDialog) View(width int, palette theme.Palette) string {
 			lipgloss.NewStyle().Width(detailWidth).PaddingLeft(1).Render(details),
 		),
 		"",
-		d.buttons.View(palette),
+		d.buttonRow(dialogWidth).View(palette),
 	)
 
 	return Modal{
@@ -184,10 +185,11 @@ func (d *ModelDialog) HandleMouse(localX, localY, width int, palette theme.Palet
 		return ModelDialogAction{}
 	}
 	line := ansi.Strip(lines[localY])
+	buttons := d.buttonRow(width)
 	if strings.Contains(line, "OK") && strings.Contains(line, "Cancel") {
-		if start, ok := buttonRowOffset(line, d.buttons, palette); ok {
+		if start, ok := buttonRowOffset(line, buttons, palette); ok {
 			d.focus = pickerDialogFocusButtons
-			if idx, hit := d.buttons.IndexAtX(localX-start, palette); hit {
+			if idx, hit := buttons.IndexAtX(localX-start, palette); hit {
 				d.buttons.Index = idx
 				d.buttons.ActivateFocused()
 				return action
@@ -267,7 +269,15 @@ func (d *ModelDialog) ensureButtons() {
 			{ID: "ok", Label: "OK", Hotkey: 'o', Primary: true},
 			{ID: "cancel", Label: "Cancel", Hotkey: 'c'},
 		},
+		Align: HorizontalAlignRight,
 	}
+}
+
+func (d ModelDialog) buttonRow(width int) ButtonRow {
+	buttons := d.buttons
+	buttons.Width = maxInt(0, width)
+	buttons.Align = HorizontalAlignRight
+	return buttons
 }
 
 func capabilityBadges(model domain.Model) string {

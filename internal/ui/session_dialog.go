@@ -51,6 +51,7 @@ func NewSessionDialog(items []SessionItem) SessionDialog {
 			{ID: "ok", Label: "OK", Hotkey: 'o', Primary: true},
 			{ID: "cancel", Label: "Cancel", Hotkey: 'c'},
 		},
+		Align: HorizontalAlignRight,
 	}
 	d.refilter()
 	return d
@@ -175,7 +176,7 @@ func (d SessionDialog) View(width int, palette theme.Palette) string {
 		"",
 		detailPane,
 		"",
-		d.buttons.View(palette),
+		d.buttonRow(contentWidth).View(palette),
 	)
 
 	return Modal{
@@ -197,10 +198,11 @@ func (d *SessionDialog) HandleMouse(localX, localY, width int, palette theme.Pal
 		return SessionDialogAction{}
 	}
 	line := ansi.Strip(lines[localY])
+	buttons := d.buttonRow(width)
 	if strings.Contains(line, "OK") && strings.Contains(line, "Cancel") {
-		if start, ok := buttonRowOffset(line, d.buttons, palette); ok {
+		if start, ok := buttonRowOffset(line, buttons, palette); ok {
 			d.focus = pickerDialogFocusButtons
-			if idx, hit := d.buttons.IndexAtX(localX-start, palette); hit {
+			if idx, hit := buttons.IndexAtX(localX-start, palette); hit {
 				d.buttons.Index = idx
 				d.buttons.ActivateFocused()
 				return action
@@ -284,7 +286,15 @@ func (d *SessionDialog) ensureButtons() {
 			{ID: "ok", Label: "OK", Hotkey: 'o', Primary: true},
 			{ID: "cancel", Label: "Cancel", Hotkey: 'c'},
 		},
+		Align: HorizontalAlignRight,
 	}
+}
+
+func (d SessionDialog) buttonRow(width int) ButtonRow {
+	buttons := d.buttons
+	buttons.Width = maxInt(0, width)
+	buttons.Align = HorizontalAlignRight
+	return buttons
 }
 
 func renderSessionTableHeader(idWidth, changedWidth, tokensWidth, titleWidth int, palette theme.Palette) string {

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/muesli/termenv"
 
 	"github.com/lkarlslund/koder/internal/theme"
@@ -37,5 +38,26 @@ func TestRenderSelectableRowSelectedUsesDistinctHighlightColors(t *testing.T) {
 	}
 	if !strings.Contains(selected, "38;2;13;14;15") {
 		t.Fatalf("expected selected row tertiary text to use accent color, got %q", selected)
+	}
+}
+
+func TestButtonRowRightAlignsWithinWidth(t *testing.T) {
+	palette := theme.Default().Palette
+	row := ButtonRow{
+		Buttons: []Button{
+			{Label: "OK", Primary: true},
+			{Label: "Cancel"},
+		},
+		Width: 32,
+		Align: HorizontalAlignRight,
+	}
+
+	got := ansi.Strip(row.View(palette))
+	raw := ansi.Strip(ButtonRow{Buttons: row.Buttons}.View(palette))
+	if !strings.HasSuffix(got, raw) {
+		t.Fatalf("expected right-aligned row to end with raw button line, got %q", got)
+	}
+	if len(got) == len(raw) || got[0] != ' ' {
+		t.Fatalf("expected left padding from right alignment, got %q", got)
 	}
 }

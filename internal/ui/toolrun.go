@@ -112,9 +112,22 @@ func RenderToolRunDock(props ToolRunDockProps) string {
 	if preview := firstNonEmpty(strings.TrimSpace(run.Preview), strings.TrimSpace(run.Output), strings.TrimSpace(run.ErrorText)); preview != "" {
 		lines = append(lines, preview)
 	}
+	buttons := props.Buttons
+	buttons.Align = HorizontalAlignRight
+	contentWidth := maxInt(ansi.StringWidth(title), ansi.StringWidth(props.Hints))
+	contentWidth = maxInt(contentWidth, ansi.StringWidth(buttons.line(props.Palette)))
+	if subtitle := strings.TrimSpace(run.Subtitle); subtitle != "" {
+		contentWidth = maxInt(contentWidth, ansi.StringWidth(subtitle))
+	}
+	if preview := firstNonEmpty(strings.TrimSpace(run.Preview), strings.TrimSpace(run.Output), strings.TrimSpace(run.ErrorText)); preview != "" {
+		for _, line := range strings.Split(preview, "\n") {
+			contentWidth = maxInt(contentWidth, ansi.StringWidth(line))
+		}
+	}
+	buttons.Width = contentWidth
 
 	lines = append(lines,
-		props.Buttons.View(props.Palette),
+		buttons.View(props.Palette),
 		props.Hints,
 	)
 	return lipgloss.NewStyle().

@@ -59,6 +59,7 @@ func NewPickerDialog(title, hint string, items []PickerItem) PickerDialog {
 			{ID: "ok", Label: "OK", Hotkey: 'o', Primary: true},
 			{ID: "cancel", Label: "Cancel", Hotkey: 'c'},
 		},
+		Align: HorizontalAlignRight,
 	}
 	d.refilter()
 	return d
@@ -154,10 +155,11 @@ func (d *PickerDialog) HandleMouse(localX, localY, width int, palette theme.Pale
 		return PickerDialogAction{}
 	}
 	line := ansi.Strip(lines[localY])
+	buttons := d.buttonRow(width)
 	if strings.Contains(line, "OK") && strings.Contains(line, "Cancel") {
-		if start, ok := buttonRowOffset(line, d.buttons, palette); ok {
+		if start, ok := buttonRowOffset(line, buttons, palette); ok {
 			d.Focus = pickerDialogFocusButtons
-			if idx, hit := d.buttons.IndexAtX(localX-start, palette); hit {
+			if idx, hit := buttons.IndexAtX(localX-start, palette); hit {
 				d.buttons.Index = idx
 				d.buttons.ActivateFocused()
 				return action
@@ -191,13 +193,20 @@ func (d PickerDialog) View(width int, palette theme.Palette) string {
 			lines = append(lines, RenderSelectableRow(item.Title, item.Description, "", 72, palette, idx == d.Index && d.Focus == pickerDialogFocusList))
 		}
 	}
-	lines = append(lines, "", d.buttons.View(palette))
+	lines = append(lines, "", d.buttonRow(width).View(palette))
 	return Modal{
 		Title:  d.Title,
 		Body:   strings.Join(lines, "\n"),
 		Footer: "Enter selects. Tab switches focus. Esc cancels.",
 		Width:  80,
 	}.View(palette)
+}
+
+func (d PickerDialog) buttonRow(width int) ButtonRow {
+	buttons := d.buttons
+	buttons.Width = maxInt(0, width-4)
+	buttons.Align = HorizontalAlignRight
+	return buttons
 }
 
 func (d *PickerDialog) move(delta int) {

@@ -167,17 +167,28 @@ func (b Button) View(palette theme.Palette) string {
 }
 
 func RenderDialogButtons(palette theme.Palette, okLabel, cancelLabel string) string {
-	return lipgloss.JoinHorizontal(
-		lipgloss.Left,
-		Button{Label: okLabel, Primary: true}.View(palette),
-		"  ",
-		Button{Label: cancelLabel}.View(palette),
-	)
+	return ButtonRow{
+		Buttons: []Button{
+			{Label: okLabel, Primary: true},
+			{Label: cancelLabel},
+		},
+	}.View(palette)
 }
+
+type HorizontalAlign int
+
+const (
+	HorizontalAlignLeft HorizontalAlign = iota
+	HorizontalAlignCenter
+	HorizontalAlignRight
+)
 
 type ButtonRow struct {
 	Buttons []Button
 	Index   int
+	Gap     int
+	Width   int
+	Align   HorizontalAlign
 }
 
 func (r *ButtonRow) Move(delta int) {
@@ -253,12 +264,27 @@ func (r *ButtonRow) HotkeyIndex(msg tea.KeyMsg) (int, bool) {
 }
 
 func (r ButtonRow) View(palette theme.Palette) string {
+	line := r.line(palette)
+	if r.Width <= ansi.StringWidth(line) {
+		return line
+	}
+	align := lipgloss.Left
+	switch r.Align {
+	case HorizontalAlignCenter:
+		align = lipgloss.Center
+	case HorizontalAlignRight:
+		align = lipgloss.Right
+	}
+	return lipgloss.NewStyle().Width(r.Width).Align(align).Render(line)
+}
+
+func (r ButtonRow) line(palette theme.Palette) string {
 	parts := make([]string, 0, len(r.Buttons))
 	for idx, button := range r.Buttons {
 		button.Focused = idx == r.Index
 		parts = append(parts, button.View(palette))
 	}
-	return strings.Join(parts, "  ")
+	return strings.Join(parts, strings.Repeat(" ", r.gap()))
 }
 
 func (r ButtonRow) ActivateAtX(x int, palette theme.Palette) bool {
@@ -288,17 +314,28 @@ func (r ButtonRow) IndexAtX(x int, palette theme.Palette) (int, bool) {
 		if x >= offset && x < offset+width {
 			return idx, true
 		}
-		offset += width + 2
+		offset += width + r.gap()
 	}
 	return 0, false
 }
 
 func buttonRowOffset(line string, row ButtonRow, palette theme.Palette) (int, bool) {
-	start := strings.Index(line, ansi.Strip(row.View(palette)))
+	return row.OffsetIn(line, palette)
+}
+
+func (r ButtonRow) OffsetIn(line string, palette theme.Palette) (int, bool) {
+	start := strings.Index(line, ansi.Strip(r.line(palette)))
 	if start < 0 {
 		return 0, false
 	}
 	return start, true
+}
+
+func (r ButtonRow) gap() int {
+	if r.Gap <= 0 {
+		return 2
+	}
+	return r.Gap
 }
 
 func renderButtonLabel(label string, hotkey rune, palette theme.Palette) string {

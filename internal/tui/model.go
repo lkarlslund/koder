@@ -630,8 +630,9 @@ func (m *Model) handleDialogMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd, bool) {
 		}
 		line := ansi.Strip(lines[localY])
 		if strings.Contains(line, "Approve") && strings.Contains(line, "Deny") {
-			if start := strings.Index(line, ansi.Strip(m.approvalButtons.View(m.palette))); start >= 0 {
-				idx, ok := m.approvalButtons.IndexAtX(msg.X-start, m.palette)
+			buttons := m.approvalButtonRow()
+			if start, ok := buttons.OffsetIn(line, m.palette); ok {
+				idx, ok := buttons.IndexAtX(msg.X-start, m.palette)
 				if ok {
 					m.approvalButtons.Index = idx
 					next, cmd := m.activateApprovalButton(idx)
@@ -2840,7 +2841,7 @@ func (m *Model) renderApprovalPrompt() string {
 	return ui.RenderToolRunDock(ui.ToolRunDockProps{
 		Palette: m.palette,
 		Run:     m.approvalToolRun(m.approvals[0]),
-		Buttons: m.approvalButtons,
+		Buttons: m.approvalButtonRow(),
 		Hints:   "enter select  tab switch  p permissions  y approve  n deny",
 	})
 }
@@ -2857,7 +2858,28 @@ func (m *Model) ensureApprovalButtons() {
 			{ID: "deny", Label: "Deny", Hotkey: 'd'},
 		},
 		Index: index,
+		Align: ui.HorizontalAlignRight,
 	}
+}
+
+func (m *Model) approvalButtonRow() ui.ButtonRow {
+	buttons := m.approvalButtons
+	buttons.Align = ui.HorizontalAlignRight
+	run := m.approvalToolRun(m.approvals[0])
+	title := run.Title + "  " + run.StatusLabel()
+	width := lipgloss.Width(title)
+	if subtitle := strings.TrimSpace(run.Subtitle); subtitle != "" {
+		width = max(width, lipgloss.Width(subtitle))
+	}
+	if preview := firstNonEmptyString(strings.TrimSpace(run.Preview), strings.TrimSpace(run.Output), strings.TrimSpace(run.ErrorText)); preview != "" {
+		for _, line := range strings.Split(preview, "\n") {
+			width = max(width, lipgloss.Width(line))
+		}
+	}
+	width = max(width, lipgloss.Width(buttons.View(m.palette)))
+	width = max(width, lipgloss.Width("enter select  tab switch  p permissions  y approve  n deny"))
+	buttons.Width = width
+	return buttons
 }
 
 func internalSlashCommands() []slashCommand {
