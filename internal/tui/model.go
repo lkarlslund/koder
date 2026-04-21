@@ -1392,6 +1392,26 @@ func formatSessionTime(t time.Time) string {
 	return t.Local().Format("2006-01-02 15:04")
 }
 
+func formatRelativeSessionTime(t time.Time) string {
+	if t.IsZero() {
+		return "-"
+	}
+	delta := time.Since(t)
+	if delta < 0 {
+		delta = 0
+	}
+	switch {
+	case delta < time.Minute:
+		return "now"
+	case delta < time.Hour:
+		return fmt.Sprintf("%dm ago", int(delta/time.Minute))
+	case delta < 24*time.Hour:
+		return fmt.Sprintf("%dh ago", int(delta/time.Hour))
+	default:
+		return fmt.Sprintf("%dd ago", int(delta/(24*time.Hour)))
+	}
+}
+
 func (m *Model) sessionUsageSummary(sessionID int64) (domain.Usage, bool) {
 	if m.store == nil {
 		return domain.Usage{}, false
@@ -3446,25 +3466,14 @@ func (m *Model) openSessionPicker() {
 		if m.renderer != nil {
 			preview = m.renderer.Render(description)
 		}
-		details := []string{
-			fmt.Sprintf("Session ID: %d", session.ID),
-			fmt.Sprintf("Created:    %s", formatSessionTime(session.CreatedAt)),
-			fmt.Sprintf("Changed:    %s", formatSessionTime(session.UpdatedAt)),
-			fmt.Sprintf("Title:      %s", truncate(title, 28)),
-		}
-		if usage, ok := m.sessionUsageSummary(session.ID); ok {
-			details = append(details, fmt.Sprintf("Tokens:     in %s  out %s", formatTokens(usage.PromptTokens), formatTokens(usage.CompletionTokens)))
-		} else {
-			details = append(details, "Tokens:     in -  out -")
-		}
 		items = append(items, ui.SessionItem{
 			SessionID:    "#" + strconv.FormatInt(session.ID, 10),
-			ChangedAt:    formatSessionTime(session.UpdatedAt),
+			CreatedAt:    formatRelativeSessionTime(session.CreatedAt),
+			ModifiedAt:   formatRelativeSessionTime(session.UpdatedAt),
 			TokenSummary: sessionTokenSummary(m, session.ID),
 			Title:        title,
 			Description:  description,
 			Preview:      preview,
-			Details:      details,
 			Value:        strconv.FormatInt(session.ID, 10),
 		})
 	}

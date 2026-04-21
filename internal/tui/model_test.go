@@ -1490,7 +1490,7 @@ func TestSessionPickerEscapeCreatesNewSession(t *testing.T) {
 	}
 }
 
-func TestSessionPickerRendersCenteredDialogWithDetails(t *testing.T) {
+func TestSessionPickerRendersCenteredDialogWithPreview(t *testing.T) {
 	st, err := store.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -1515,10 +1515,11 @@ func TestSessionPickerRendersCenteredDialogWithDetails(t *testing.T) {
 		height: 30,
 		store:  st,
 		sessions: []domain.Session{{
-			ID:        session.ID,
-			Title:     "Generated Session Title",
-			CreatedAt: time.Date(2026, 4, 20, 10, 30, 0, 0, time.UTC),
-			UpdatedAt: time.Date(2026, 4, 20, 12, 45, 0, 0, time.UTC),
+			ID:          session.ID,
+			Title:       "Generated Session Title",
+			LastMessage: "summary",
+			CreatedAt:   time.Date(2026, 4, 20, 10, 30, 0, 0, time.UTC),
+			UpdatedAt:   time.Date(2026, 4, 20, 12, 45, 0, 0, time.UTC),
 		}},
 	}
 	m.openSessionPicker()
@@ -1527,26 +1528,47 @@ func TestSessionPickerRendersCenteredDialogWithDetails(t *testing.T) {
 	if !strings.Contains(got, "Resume Session") {
 		t.Fatalf("expected centered dialog title, got %q", got)
 	}
-	if !strings.Contains(got, "Session ID: 1") {
-		t.Fatalf("expected session id in dialog, got %q", got)
-	}
-	if !strings.Contains(got, "Created:") || !strings.Contains(got, "Changed:") {
-		t.Fatalf("expected timestamps in dialog, got %q", got)
-	}
 	if !strings.Contains(got, "Generated Session Title") {
 		t.Fatalf("expected title in dialog, got %q", got)
 	}
-	if !strings.Contains(got, "Tokens:     in 123  out 456") {
-		t.Fatalf("expected token counts in dialog, got %q", got)
+	if !strings.Contains(got, "summary") {
+		t.Fatalf("expected last message preview in dialog, got %q", got)
 	}
-	if !strings.Contains(got, "ID") || !strings.Contains(got, "Changed") || !strings.Contains(got, "Tokens") {
+	if strings.Contains(got, "Session ID: 1") {
+		t.Fatalf("expected session details to stay in the table, got %q", got)
+	}
+	if !strings.Contains(got, "ID") || !strings.Contains(got, "Created") || !strings.Contains(got, "Modified") || !strings.Contains(got, "Tokens") {
 		t.Fatalf("expected session table headers in dialog, got %q", got)
+	}
+	if !strings.Contains(got, "123/456") {
+		t.Fatalf("expected token summary in table, got %q", got)
 	}
 	if !strings.Contains(got, "OK") || !strings.Contains(got, "Cancel") {
 		t.Fatalf("expected dialog buttons in session dialog, got %q", got)
 	}
 	if !strings.Contains(got, "Enter resumes the highlighted session. Esc creates a new session.") {
 		t.Fatalf("expected helper text in dialog, got %q", got)
+	}
+}
+
+func TestFormatRelativeSessionTime(t *testing.T) {
+	now := time.Now()
+	cases := []struct {
+		name string
+		when time.Time
+		want string
+	}{
+		{name: "zero", when: time.Time{}, want: "-"},
+		{name: "now", when: now.Add(-30 * time.Second), want: "now"},
+		{name: "minutes", when: now.Add(-3 * time.Minute), want: "3m ago"},
+		{name: "hours", when: now.Add(-10 * time.Hour), want: "10h ago"},
+		{name: "days", when: now.Add(-48 * time.Hour), want: "2d ago"},
+	}
+
+	for _, tc := range cases {
+		if got := formatRelativeSessionTime(tc.when); got != tc.want {
+			t.Fatalf("%s: expected %q, got %q", tc.name, tc.want, got)
+		}
 	}
 }
 

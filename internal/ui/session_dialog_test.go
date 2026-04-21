@@ -46,12 +46,12 @@ func TestSessionDialogFiltersItems(t *testing.T) {
 func TestSessionDialogViewPreservesPreviewLineBreaks(t *testing.T) {
 	dialog := NewSessionDialog([]SessionItem{{
 		SessionID:    "#1",
-		ChangedAt:    "2026-04-20",
+		CreatedAt:    "10h ago",
+		ModifiedAt:   "3m ago",
 		TokenSummary: "123/456",
 		Title:        "Session A",
 		Description:  "line one\nline two\n\nline three",
 		Preview:      "line one\nline two\n\nline three",
-		Details:      []string{"Session ID: 1"},
 		Value:        "1",
 	}})
 
@@ -68,11 +68,17 @@ func TestSessionDialogViewPreservesPreviewLineBreaks(t *testing.T) {
 	if !strings.Contains(got, "line two") || !strings.Contains(got, "line three") {
 		t.Fatalf("expected preview lines in detail pane, got %q", got)
 	}
-	if !strings.Contains(got, "│                                                                                                │\n│  line three") {
+	if !strings.Contains(got, "│                                                                                                │\n│   line three") {
 		t.Fatalf("expected blank line before line three, got %q", got)
 	}
-	if !strings.Contains(got, "ID") || !strings.Contains(got, "Changed") || !strings.Contains(got, "Tokens") {
+	if !strings.Contains(got, "ID") || !strings.Contains(got, "Created") || !strings.Contains(got, "Modified") || !strings.Contains(got, "Tokens") {
 		t.Fatalf("expected table headers in session dialog, got %q", got)
+	}
+	if !strings.Contains(got, "10h ago") || !strings.Contains(got, "3m ago") {
+		t.Fatalf("expected relative times in table row, got %q", got)
+	}
+	if strings.Contains(got, "Session ID: 1") {
+		t.Fatalf("expected session details to stay in the table only, got %q", got)
 	}
 	if !strings.Contains(got, "OK") || !strings.Contains(got, "Cancel") {
 		t.Fatalf("expected dialog buttons in session dialog, got %q", got)
