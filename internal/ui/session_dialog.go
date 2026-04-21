@@ -18,6 +18,7 @@ type SessionItem struct {
 	ModifiedAt   string
 	TokenSummary string
 	Title        string
+	CWD          string
 	Description  string
 	Preview      string
 	Value        string
@@ -40,13 +41,14 @@ type SessionDialog struct {
 	Query   string
 	Index   int
 	Items   []SessionItem
+	ShowCWD bool
 	view    []SessionItem
 	focus   pickerDialogFocus
 	buttons ButtonRow
 }
 
-func NewSessionDialog(items []SessionItem) SessionDialog {
-	d := SessionDialog{Items: items}
+func NewSessionDialog(items []SessionItem, showCWD bool) SessionDialog {
+	d := SessionDialog{Items: items, ShowCWD: showCWD}
 	d.buttons = ButtonRow{
 		Buttons: []Button{
 			{ID: "ok", Label: "OK", Hotkey: 'o', Primary: true},
@@ -123,10 +125,16 @@ func (d SessionDialog) View(width int, palette theme.Palette) string {
 	idWidth := 8
 	timeWidth := 10
 	tokensWidth := minInt(18, maxInt(14, contentWidth/6))
-	titleWidth := maxInt(16, contentWidth-idWidth-timeWidth-timeWidth-tokensWidth-8)
+	cwdWidth := 0
+	gapCount := 4
+	if d.ShowCWD {
+		cwdWidth = minInt(24, maxInt(16, contentWidth/5))
+		gapCount = 5
+	}
+	titleWidth := maxInt(16, contentWidth-idWidth-timeWidth-timeWidth-tokensWidth-cwdWidth-(gapCount*2))
 
 	listLines := []string{
-		renderSessionTableHeader(idWidth, timeWidth, tokensWidth, titleWidth, palette),
+		renderSessionTableHeader(idWidth, timeWidth, tokensWidth, cwdWidth, titleWidth, d.ShowCWD, palette),
 	}
 	if len(d.view) == 0 {
 		listLines = append(listLines, "No matches")
@@ -141,7 +149,7 @@ func (d SessionDialog) View(width int, palette theme.Palette) string {
 		}
 		for idx := start; idx < end; idx++ {
 			item := d.view[idx]
-			listLines = append(listLines, renderSessionTableRow(item, idWidth, timeWidth, tokensWidth, titleWidth, palette, idx == d.Index))
+			listLines = append(listLines, renderSessionTableRow(item, idWidth, timeWidth, tokensWidth, cwdWidth, titleWidth, d.ShowCWD, palette, idx == d.Index))
 		}
 	}
 
@@ -239,7 +247,7 @@ func (d *SessionDialog) refilter() {
 	query := strings.ToLower(strings.TrimSpace(d.Query))
 	d.view = d.view[:0]
 	for _, item := range d.Items {
-		haystack := strings.ToLower(item.Title + " " + item.Description + " " + item.Value)
+		haystack := strings.ToLower(item.Title + " " + item.Description + " " + item.Value + " " + item.CWD)
 		if query == "" || strings.Contains(haystack, query) {
 			d.view = append(d.view, item)
 		}
@@ -295,14 +303,14 @@ func (d SessionDialog) buttonRow(width int) ButtonRow {
 	return buttons
 }
 
-func renderSessionTableHeader(idWidth, timeWidth, tokensWidth, titleWidth int, palette theme.Palette) string {
+func renderSessionTableHeader(idWidth, timeWidth, tokensWidth, cwdWidth, titleWidth int, showCWD bool, palette theme.Palette) string {
 	style := lipgloss.NewStyle().
 		Foreground(palette.AssistantTimestampText).
 		Bold(true)
-	return style.Render(joinSessionColumns("ID", idWidth, "Created", timeWidth, "Modified", timeWidth, "Tokens", tokensWidth, "Title", titleWidth))
+	return style.Render(joinSessionColumns("ID", idWidth, "Created", timeWidth, "Modified", timeWidth, "Tokens", tokensWidth, "CWD", cwdWidth, "Title", titleWidth, showCWD))
 }
 
-func renderSessionTableRow(item SessionItem, idWidth, timeWidth, tokensWidth, titleWidth int, palette theme.Palette, selected bool) string {
+func renderSessionTableRow(item SessionItem, idWidth, timeWidth, tokensWidth, cwdWidth, titleWidth int, showCWD bool, palette theme.Palette, selected bool) string {
 	row := joinSessionColumns(
 		item.SessionID,
 		idWidth,
@@ -312,24 +320,34 @@ func renderSessionTableRow(item SessionItem, idWidth, timeWidth, tokensWidth, ti
 		timeWidth,
 		item.TokenSummary,
 		tokensWidth,
+		item.CWD,
+		cwdWidth,
 		item.Title,
 		titleWidth,
+		showCWD,
 	)
-	style := lipgloss.NewStyle().Width(idWidth + timeWidth + timeWidth + tokensWidth + titleWidth + 8)
+	totalWidth := idWidth + timeWidth + timeWidth + tokensWidth + titleWidth + 8
+	if showCWD {
+		totalWidth += cwdWidth + 2
+	}
+	style := lipgloss.NewStyle().Width(totalWidth)
 	if selected {
 		style = style.Background(palette.UserTextBackground).Foreground(palette.UserTextForeground)
 	}
 	return style.Render(row)
 }
 
-func joinSessionColumns(id string, idWidth int, created string, createdWidth int, modified string, modifiedWidth int, tokens string, tokensWidth int, title string, titleWidth int) string {
+func joinSessionColumns(id string, idWidth int, created string, createdWidth int, modified string, modifiedWidth int, tokens string, tokensWidth int, cwd string, cwdWidth int, title string, titleWidth int, showCWD bool) string {
 	cols := []string{
 		lipgloss.NewStyle().Width(idWidth).Render(truncateText(strings.TrimSpace(id), idWidth)),
 		lipgloss.NewStyle().Width(createdWidth).Render(truncateText(strings.TrimSpace(created), createdWidth)),
 		lipgloss.NewStyle().Width(modifiedWidth).Render(truncateText(strings.TrimSpace(modified), modifiedWidth)),
 		lipgloss.NewStyle().Width(tokensWidth).Render(truncateText(strings.TrimSpace(tokens), tokensWidth)),
-		lipgloss.NewStyle().Width(titleWidth).Render(truncateText(strings.TrimSpace(title), titleWidth)),
 	}
+	if showCWD {
+		cols = append(cols, lipgloss.NewStyle().Width(cwdWidth).Render(truncateText(strings.TrimSpace(cwd), cwdWidth)))
+	}
+	cols = append(cols, lipgloss.NewStyle().Width(titleWidth).Render(truncateText(strings.TrimSpace(title), titleWidth)))
 	return strings.Join(cols, "  ")
 }
 

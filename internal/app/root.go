@@ -35,7 +35,7 @@ func NewRootCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return runTUI(cmd.Context(), tui.StartupModeNew, workdir)
+			return runTUI(cmd.Context(), tui.StartupModeNew, workdir, tui.StartupOptions{})
 		},
 	}
 	bindStartupFlags(cmd, &opts)
@@ -84,7 +84,7 @@ func (o startupOptions) resolve() (string, error) {
 	return abs, nil
 }
 
-func runTUI(ctx context.Context, mode tui.StartupMode, workdir string) error {
+func runTUI(ctx context.Context, mode tui.StartupMode, workdir string, startupOpts tui.StartupOptions) error {
 	cfg, err := config.Load()
 	if err != nil {
 		return err
@@ -109,11 +109,12 @@ func runTUI(ctx context.Context, mode tui.StartupMode, workdir string) error {
 	}
 	registry := tools.NewRegistry(agents.FindProjectRoot(workdir))
 	engine := agent.New(cfg, st, registry, recorder, workdir)
-	return tui.RunWithWorkdir(cfg, st, engine, mode, recorder, workdir)
+	return tui.RunWithWorkdir(cfg, st, engine, mode, recorder, workdir, startupOpts)
 }
 
 func newResumeCommand() *cobra.Command {
 	opts := startupOptions{}
+	var showAllSessions bool
 	cmd := &cobra.Command{
 		Use:   "resume",
 		Short: "Resume an existing session from a picker",
@@ -122,10 +123,11 @@ func newResumeCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return runTUI(cmd.Context(), tui.StartupModeResume, workdir)
+			return runTUI(cmd.Context(), tui.StartupModeResume, workdir, tui.StartupOptions{ShowAllSessions: showAllSessions})
 		},
 	}
 	bindStartupFlags(cmd, &opts)
+	cmd.Flags().BoolVar(&showAllSessions, "all-sessions", false, "Show sessions from every working directory")
 	return cmd
 }
 

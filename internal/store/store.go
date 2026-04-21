@@ -27,6 +27,7 @@ type backend interface {
 	CreateSession(context.Context, string, string, string, *int64) (domain.Session, error)
 	ListSessions(context.Context) ([]domain.Session, error)
 	GetSession(context.Context, int64) (domain.Session, error)
+	UpdateSessionWorkspace(context.Context, int64, string, string) error
 	SetSessionPermissionProfile(context.Context, int64, string) error
 	SetSessionToolStates(context.Context, int64, map[domain.ToolKind]bool) error
 	UpdateSessionTitle(context.Context, int64, string) error
@@ -121,6 +122,10 @@ func (s *Store) GetSession(ctx context.Context, sessionID int64) (domain.Session
 	return s.backend.GetSession(ctx, sessionID)
 }
 
+func (s *Store) UpdateSessionWorkspace(ctx context.Context, sessionID int64, cwd, projectRoot string) error {
+	return s.backend.UpdateSessionWorkspace(ctx, sessionID, cwd, projectRoot)
+}
+
 func (s *Store) SetSessionPermissionProfile(ctx context.Context, sessionID int64, profile string) error {
 	return s.backend.SetSessionPermissionProfile(ctx, sessionID, profile)
 }
@@ -213,6 +218,9 @@ func (s *Store) ForkSession(ctx context.Context, sourceSessionID int64) (domain.
 	}
 	forked, err := s.CreateSession(ctx, source.Title, source.ProviderID, source.ModelID, &source.ID)
 	if err != nil {
+		return domain.Session{}, err
+	}
+	if err := s.UpdateSessionWorkspace(ctx, forked.ID, source.CWD, source.ProjectRoot); err != nil {
 		return domain.Session{}, err
 	}
 	if source.PermissionProfile != "" {

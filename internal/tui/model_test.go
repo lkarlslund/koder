@@ -1668,6 +1668,38 @@ func TestSessionPickerRendersCenteredDialogWithPreview(t *testing.T) {
 	}
 }
 
+func TestOpenSessionPickerShowsCWDWhenAllSessionsEnabled(t *testing.T) {
+	m := Model{
+		startupOptions: StartupOptions{ShowAllSessions: true},
+		sessions: []domain.Session{{
+			ID:          1,
+			Title:       "Session A",
+			LastMessage: "summary",
+			CWD:         "/tmp/worktree",
+		}},
+	}
+
+	m.openSessionPicker()
+	got := m.renderSessionDialog()
+	if !strings.Contains(got, "CWD") || !strings.Contains(got, "/tmp/worktree") {
+		t.Fatalf("expected cwd column in picker, got %q", got)
+	}
+}
+
+func TestVisibleSessionsFiltersByExactCWD(t *testing.T) {
+	m := Model{workdir: "/repo/a"}
+	sessions := []domain.Session{
+		{ID: 1, CWD: "/repo/a"},
+		{ID: 2, CWD: "/repo/b"},
+		{ID: 3, ProjectRoot: "/repo"},
+	}
+
+	got := m.visibleSessions(sessions)
+	if len(got) != 1 || got[0].ID != 1 {
+		t.Fatalf("expected only matching cwd session, got %#v", got)
+	}
+}
+
 func TestFormatRelativeSessionTime(t *testing.T) {
 	now := time.Now()
 	cases := []struct {

@@ -143,6 +143,13 @@ func (b *pebbleBackend) GetSession(ctx context.Context, sessionID int64) (domain
 	return b.readSession(sessionID)
 }
 
+func (b *pebbleBackend) UpdateSessionWorkspace(ctx context.Context, sessionID int64, cwd, projectRoot string) error {
+	return b.updateSession(ctx, sessionID, func(session *domain.Session) {
+		session.CWD = cwd
+		session.ProjectRoot = projectRoot
+	})
+}
+
 func (b *pebbleBackend) SetSessionPermissionProfile(ctx context.Context, sessionID int64, profile string) error {
 	return b.updateSession(ctx, sessionID, func(session *domain.Session) {
 		session.PermissionProfile = profile

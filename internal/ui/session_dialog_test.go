@@ -15,7 +15,7 @@ func TestSessionDialogSelectsCurrentSession(t *testing.T) {
 	dialog := NewSessionDialog([]SessionItem{
 		{Title: "First", Value: "1"},
 		{Title: "Second", Value: "2"},
-	})
+	}, false)
 	dialog.Update(tea.KeyMsg{Type: tea.KeyDown})
 
 	action := dialog.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -31,7 +31,7 @@ func TestSessionDialogFiltersItems(t *testing.T) {
 	dialog := NewSessionDialog([]SessionItem{
 		{Title: "Alpha", Value: "1"},
 		{Title: "Beta", Value: "2"},
-	})
+	}, false)
 	dialog.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("b")})
 
 	view := dialog.View(84, theme.Default().Palette)
@@ -53,7 +53,7 @@ func TestSessionDialogViewPreservesPreviewLineBreaks(t *testing.T) {
 		Description:  "line one\nline two\n\nline three",
 		Preview:      "line one\nline two\n\nline three",
 		Value:        "1",
-	}})
+	}}, false)
 
 	got := dialog.View(84, theme.Default().Palette)
 	lineOne := strings.Index(got, "line one")
@@ -91,7 +91,7 @@ func TestSessionDialogViewPrefersPreviewOverDescription(t *testing.T) {
 		Description: "plain fallback",
 		Preview:     "rendered\npreview",
 		Value:       "1",
-	}})
+	}}, false)
 
 	got := dialog.View(84, theme.Default().Palette)
 	if !strings.Contains(got, "rendered") || !strings.Contains(got, "preview") {
@@ -111,7 +111,7 @@ func TestSessionDialogViewClampsPreviewToTenLines(t *testing.T) {
 		Title:   "Session A",
 		Preview: strings.Join(lines, "\n"),
 		Value:   "1",
-	}})
+	}}, false)
 
 	got := dialog.View(84, theme.Default().Palette)
 	if strings.Contains(got, "line 11") || strings.Contains(got, "line 12") {
@@ -122,8 +122,25 @@ func TestSessionDialogViewClampsPreviewToTenLines(t *testing.T) {
 	}
 }
 
+func TestSessionDialogViewShowsCWDColumnWhenEnabled(t *testing.T) {
+	dialog := NewSessionDialog([]SessionItem{{
+		SessionID:    "#1",
+		CreatedAt:    "10h ago",
+		ModifiedAt:   "3m ago",
+		TokenSummary: "123/456",
+		Title:        "Session A",
+		CWD:          "/tmp/worktree",
+		Value:        "1",
+	}}, true)
+
+	got := dialog.View(96, theme.Default().Palette)
+	if !strings.Contains(got, "CWD") || !strings.Contains(got, "/tmp/worktree") {
+		t.Fatalf("expected cwd column in session dialog, got %q", got)
+	}
+}
+
 func TestSessionDialogAltCCancels(t *testing.T) {
-	dialog := NewSessionDialog([]SessionItem{{Title: "First", Value: "1"}})
+	dialog := NewSessionDialog([]SessionItem{{Title: "First", Value: "1"}}, false)
 	action := dialog.Update(tea.KeyMsg{Type: tea.KeyRunes, Alt: true, Runes: []rune("c")})
 	if action.Kind != SessionDialogActionCancel {
 		t.Fatalf("expected alt+c to cancel, got %#v", action)
@@ -132,7 +149,7 @@ func TestSessionDialogAltCCancels(t *testing.T) {
 
 func TestSessionDialogMouseCancelButton(t *testing.T) {
 	palette := theme.Default().Palette
-	dialog := NewSessionDialog([]SessionItem{{Title: "First", Value: "1"}})
+	dialog := NewSessionDialog([]SessionItem{{Title: "First", Value: "1"}}, false)
 	lines := strings.Split(dialog.View(96, palette), "\n")
 
 	buttonLine := -1

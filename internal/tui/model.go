@@ -132,6 +132,10 @@ const (
 	StartupModeResume
 )
 
+type StartupOptions struct {
+	ShowAllSessions bool
+}
+
 type newSessionMsg struct {
 	session   domain.Session
 	sessions  []domain.Session
@@ -283,6 +287,7 @@ type Model struct {
 	workspace          workspace.Status
 	agentsDrift        bool
 	startupMode        StartupMode
+	startupOptions     StartupOptions
 	picker             pickerModel
 	pendingPartID      int64
 	mouseEnabled       bool
@@ -330,10 +335,10 @@ func New(cfg config.Config, st *store.Store, a *agent.Engine, mode StartupMode, 
 	if err != nil {
 		return Model{}, err
 	}
-	return NewWithWorkdir(cfg, st, a, mode, debug, workdir)
+	return NewWithWorkdir(cfg, st, a, mode, debug, workdir, StartupOptions{})
 }
 
-func NewWithWorkdir(cfg config.Config, st *store.Store, a *agent.Engine, mode StartupMode, debug *debugsrv.Recorder, workdir string) (Model, error) {
+func NewWithWorkdir(cfg config.Config, st *store.Store, a *agent.Engine, mode StartupMode, debug *debugsrv.Recorder, workdir string, startupOpts StartupOptions) (Model, error) {
 	tuiTheme := theme.Resolve(cfg.UI.Theme)
 	renderer, err := markdown.New(tuiTheme.Palette)
 	if err != nil {
@@ -367,6 +372,7 @@ func NewWithWorkdir(cfg config.Config, st *store.Store, a *agent.Engine, mode St
 		status:            "Ready",
 		workdir:           workdir,
 		startupMode:       mode,
+		startupOptions:    startupOpts,
 		mouseEnabled:      cfg.UI.Mouse,
 		debug:             debug,
 		caps:              provider.NewCapabilityStore(cfg.StateDir()),
@@ -1699,10 +1705,11 @@ func (m *Model) renderReasoningBlock(input string) string {
 func (m Model) loadCmd() tea.Cmd {
 	return func() tea.Msg {
 		ctx := context.Background()
-		sessions, err := m.store.ListSessions(ctx)
+		allSessions, err := m.store.ListSessions(ctx)
 		if err != nil {
 			return promptDoneMsg{err: err}
 		}
+		sessions := m.visibleSessions(allSessions)
 		if m.startupMode == StartupModeResume {
 			if len(sessions) == 0 {
 				return m.newSessionCmd()()
@@ -1806,10 +1813,11 @@ func (m Model) continueCmd(ctx context.Context) tea.Cmd {
 func (m Model) newSessionCmd() tea.Cmd {
 	return func() tea.Msg {
 		ctx := context.Background()
-		sessions, err := m.store.ListSessions(ctx)
+		allSessions, err := m.store.ListSessions(ctx)
 		if err != nil {
 			return promptDoneMsg{err: err}
 		}
+		sessions := m.visibleSessions(allSessions)
 		workspaceStatus, err := workspace.Snapshot(ctx, m.workdir)
 		if err != nil {
 			return promptDoneMsg{err: err}
@@ -1828,10 +1836,11 @@ func (m Model) newSessionCmd() tea.Cmd {
 
 func (m Model) sessionPickerCmd() tea.Cmd {
 	return func() tea.Msg {
-		sessions, err := m.store.ListSessions(context.Background())
+		allSessions, err := m.store.ListSessions(context.Background())
 		if err != nil {
 			return promptDoneMsg{err: err}
 		}
+		sessions := m.visibleSessions(allSessions)
 		return sessionPickerMsg{sessions: sessions}
 	}
 }
@@ -1842,10 +1851,11 @@ func (m Model) loadSessionCmd(sessionID int64) tea.Cmd {
 			return nil
 		}
 		ctx := context.Background()
-		sessions, err := m.store.ListSessions(ctx)
+		allSessions, err := m.store.ListSessions(ctx)
 		if err != nil {
 			return promptDoneMsg{err: err}
 		}
+		sessions := m.visibleSessions(allSessions)
 		var session domain.Session
 		for _, item := range sessions {
 			if item.ID == sessionID {
@@ -1890,10 +1900,11 @@ func (m Model) agentsRefreshCmd(sessionID int64) tea.Cmd {
 		if _, err := m.agent.RefreshAgents(ctx, sessionID); err != nil {
 			return agentsRefreshMsg{err: err}
 		}
-		sessions, err := m.store.ListSessions(ctx)
+		allSessions, err := m.store.ListSessions(ctx)
 		if err != nil {
 			return agentsRefreshMsg{err: err}
 		}
+		sessions := m.visibleSessions(allSessions)
 		session, err := m.store.GetSession(ctx, sessionID)
 		if err != nil {
 			return agentsRefreshMsg{err: err}
@@ -1935,10 +1946,11 @@ func (m Model) forkSessionCmd(sourceSessionID int64) tea.Cmd {
 		if err != nil {
 			return forkSessionMsg{err: err}
 		}
-		sessions, err := m.store.ListSessions(ctx)
+		allSessions, err := m.store.ListSessions(ctx)
 		if err != nil {
 			return forkSessionMsg{err: err}
 		}
+		sessions := m.visibleSessions(allSessions)
 		messages, parts, err := m.store.PartsForSession(ctx, forked.ID)
 		if err != nil {
 			return forkSessionMsg{err: err}
@@ -2022,11 +2034,11 @@ func Run(cfg config.Config, st *store.Store, a *agent.Engine, mode StartupMode, 
 	if err != nil {
 		return err
 	}
-	return RunWithWorkdir(cfg, st, a, mode, debug, workdir)
+	return RunWithWorkdir(cfg, st, a, mode, debug, workdir, StartupOptions{})
 }
 
-func RunWithWorkdir(cfg config.Config, st *store.Store, a *agent.Engine, mode StartupMode, debug *debugsrv.Recorder, workdir string) error {
-	model, err := NewWithWorkdir(cfg, st, a, mode, debug, workdir)
+func RunWithWorkdir(cfg config.Config, st *store.Store, a *agent.Engine, mode StartupMode, debug *debugsrv.Recorder, workdir string, startupOpts StartupOptions) error {
+	model, err := NewWithWorkdir(cfg, st, a, mode, debug, workdir, startupOpts)
 	if err != nil {
 		return err
 	}
@@ -3018,6 +3030,8 @@ func (m Model) draftSession() domain.Session {
 		ModelID:           modelID,
 		PermissionProfile: profile,
 		ToolStates:        m.sessionToolStates(),
+		CWD:               m.workdir,
+		ProjectRoot:       m.currentProjectRoot(),
 		CreatedAt:         now,
 		UpdatedAt:         now,
 	}
@@ -3028,22 +3042,55 @@ func (m Model) persistDraftSession(ctx context.Context) (domain.Session, error) 
 	if err != nil {
 		return domain.Session{}, err
 	}
+	if err := m.store.UpdateSessionWorkspace(ctx, session.ID, m.draftSession().CWD, m.draftSession().ProjectRoot); err != nil {
+		return domain.Session{}, err
+	}
 	if err := m.store.SetSessionPermissionProfile(ctx, session.ID, m.draftSession().PermissionProfile); err != nil {
 		return domain.Session{}, err
 	}
 	if err := m.store.SetSessionToolStates(ctx, session.ID, m.draftSession().ToolStates); err != nil {
 		return domain.Session{}, err
 	}
-	sessions, err := m.store.ListSessions(ctx)
+	allSessions, err := m.store.ListSessions(ctx)
 	if err != nil {
 		return domain.Session{}, err
 	}
+	sessions := m.visibleSessions(allSessions)
 	for _, item := range sessions {
 		if item.ID == session.ID {
 			return item, nil
 		}
 	}
 	return session, nil
+}
+
+func (m Model) visibleSessions(sessions []domain.Session) []domain.Session {
+	if m.startupOptions.ShowAllSessions {
+		return sessions
+	}
+	filtered := make([]domain.Session, 0, len(sessions))
+	for _, session := range sessions {
+		if m.sessionMatchesWorkdir(session) {
+			filtered = append(filtered, session)
+		}
+	}
+	return filtered
+}
+
+func (m Model) sessionMatchesWorkdir(session domain.Session) bool {
+	return normalizedSessionCWD(session) == normalizedSessionPath(m.workdir)
+}
+
+func normalizedSessionCWD(session domain.Session) string {
+	return normalizedSessionPath(session.CWD)
+}
+
+func normalizedSessionPath(path string) string {
+	trimmed := strings.TrimSpace(path)
+	if trimmed == "" {
+		return ""
+	}
+	return filepath.Clean(trimmed)
 }
 
 func (m *Model) updateComposerMenus() {
@@ -3739,6 +3786,7 @@ func (m *Model) closeModelDialog() {
 
 func (m *Model) openSessionPicker() {
 	items := make([]ui.SessionItem, 0, len(m.sessions))
+	showCWD := m.startupOptions.ShowAllSessions
 	for _, session := range m.sessions {
 		title := strings.TrimSpace(session.Title)
 		if title == "" {
@@ -3758,12 +3806,13 @@ func (m *Model) openSessionPicker() {
 			ModifiedAt:   formatRelativeSessionTime(session.UpdatedAt),
 			TokenSummary: sessionTokenSummary(m, session.ID),
 			Title:        title,
+			CWD:          session.CWD,
 			Description:  description,
 			Preview:      preview,
 			Value:        strconv.FormatInt(session.ID, 10),
 		})
 	}
-	dialog := ui.NewSessionDialog(items)
+	dialog := ui.NewSessionDialog(items, showCWD)
 	m.sessionDialog = &dialog
 }
 

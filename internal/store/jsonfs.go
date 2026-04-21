@@ -132,6 +132,13 @@ func (b *jsonfsBackend) ListSessions(ctx context.Context) ([]domain.Session, err
 	return sessions, nil
 }
 
+func (b *jsonfsBackend) UpdateSessionWorkspace(ctx context.Context, sessionID int64, cwd, projectRoot string) error {
+	return b.updateSession(ctx, sessionID, func(session *domain.Session) {
+		session.CWD = cwd
+		session.ProjectRoot = projectRoot
+	})
+}
+
 func (b *jsonfsBackend) GetSession(ctx context.Context, sessionID int64) (domain.Session, error) {
 	if err := ensureContext(ctx); err != nil {
 		return domain.Session{}, err

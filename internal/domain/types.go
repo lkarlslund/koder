@@ -114,6 +114,7 @@ type Session struct {
 	ModelID           string
 	PermissionProfile string
 	ToolStates        map[ToolKind]bool
+	CWD               string
 	ProjectRoot       string
 	ProjectChecksum   string
 	AgentsResolved    string

@@ -16,6 +16,7 @@ Current implementation includes:
 koder
 koder --cwd /path/to/worktree
 koder resume --project-root /path/to/worktree
+koder resume --cwd /path/to/worktree --all-sessions
 koder doctor
 koder debug info
 koder session tail --id 1 --addr 127.0.0.1:61347
