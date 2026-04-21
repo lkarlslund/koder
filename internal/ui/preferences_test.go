@@ -38,6 +38,18 @@ func TestPreferencesDialogThemeAndToggleEmitDraftChanges(t *testing.T) {
 	if action.UI.HalfBlocks {
 		t.Fatalf("expected half blocks toggled off, got %#v", action.UI)
 	}
+
+	dialog.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	dialog.Update(tea.KeyMsg{Type: tea.KeyDown})
+	dialog.Update(tea.KeyMsg{Type: tea.KeyTab})
+	dialog.Update(tea.KeyMsg{Type: tea.KeyDown})
+	action = dialog.Update(tea.KeyMsg{Type: tea.KeySpace})
+	if action.Kind != PreferencesActionChanged {
+		t.Fatalf("expected system toggle change action, got %#v", action)
+	}
+	if !action.UI.ShowSystem {
+		t.Fatalf("expected show system toggled on, got %#v", action.UI)
+	}
 }
 
 func TestPreferencesDialogCancelReturnsOriginalUI(t *testing.T) {
@@ -62,6 +74,13 @@ func TestPreferencesDialogRenderShowsTabsAndButtons(t *testing.T) {
 		if !strings.Contains(view, needle) {
 			t.Fatalf("expected %q in preferences dialog, got %q", needle, view)
 		}
+	}
+
+	dialog.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	dialog.Update(tea.KeyMsg{Type: tea.KeyDown})
+	view = dialog.View(84, theme.Default().Palette)
+	if !strings.Contains(view, "System") {
+		t.Fatalf("expected behavior tab to show system toggle, got %q", view)
 	}
 }
 

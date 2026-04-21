@@ -2508,6 +2508,27 @@ func TestRenderMessagePartsSkipsSystemNotice(t *testing.T) {
 	}
 }
 
+func TestRenderMessagePartsShowsSystemNoticeWhenEnabled(t *testing.T) {
+	cfg := testConfig(t)
+	m, err := New(cfg, nil, nil, StartupModeNew, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.showSystem = true
+
+	got := m.renderMessageParts([]domain.Part{
+		{Kind: domain.PartKindText, Body: "final answer"},
+		{Kind: domain.PartKindSystemNotice, Body: "usage", MetaJSON: `{"PromptTokens":1}`},
+	})
+
+	if !strings.Contains(got, "System") || !strings.Contains(got, "usage") || !strings.Contains(got, "PromptTokens") {
+		t.Fatalf("expected visible system notice, got %q", got)
+	}
+	if !strings.Contains(got, "final answer") {
+		t.Fatalf("expected text to remain visible, got %q", got)
+	}
+}
+
 func TestRenderMessagePartsFormatsCompactionMarkdown(t *testing.T) {
 	cfg := testConfig(t)
 	m, err := New(cfg, nil, nil, StartupModeNew, nil)

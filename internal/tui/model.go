@@ -262,6 +262,7 @@ type Model struct {
 	busy               busyModel
 	showSidebar        bool
 	showReasoning      bool
+	showSystem         bool
 	slashMatches       []slashCommand
 	slashIndex         int
 	skillMatches       []skills.Skill
@@ -333,6 +334,7 @@ func New(cfg config.Config, st *store.Store, a *agent.Engine, mode StartupMode, 
 		composer:         composer,
 		showSidebar:      cfg.UI.ShowSidebar,
 		showReasoning:    cfg.UI.ShowReasoning,
+		showSystem:       cfg.UI.ShowSystem,
 		expandedToolRuns: make(map[string]bool),
 		parts:            make(map[int64][]domain.Part),
 		status:           "Ready",
@@ -1404,6 +1406,7 @@ func (m *Model) attachmentLabel(meta attachment.Metadata) string {
 func (m *Model) renderMessageParts(parts []domain.Part) string {
 	var blocks []string
 	var reasoningBlocks []string
+	var systemBlocks []string
 	var textBlocks []string
 	var compactionBlocks []string
 	var textBuf strings.Builder
@@ -1443,6 +1446,11 @@ func (m *Model) renderMessageParts(parts []domain.Part) string {
 		case domain.PartKindSystemNotice:
 			flushText()
 			flushReasoning()
+			if m.showSystem {
+				if block := m.renderSystemNoticeBlock(part); block != "" {
+					systemBlocks = append(systemBlocks, block)
+				}
+			}
 			continue
 		case domain.PartKindToolCall, domain.PartKindToolOutput, domain.PartKindDiff, domain.PartKindApprovalRequest:
 			flushText()
@@ -1470,10 +1478,30 @@ func (m *Model) renderMessageParts(parts []domain.Part) string {
 	flushReasoning()
 
 	blocks = append(blocks, compactionBlocks...)
+	blocks = append(blocks, systemBlocks...)
 	blocks = append(blocks, reasoningBlocks...)
 	blocks = append(blocks, textBlocks...)
 
 	return strings.TrimSpace(strings.Join(blocks, "\n"))
+}
+
+func (m *Model) renderSystemNoticeBlock(part domain.Part) string {
+	title := strings.TrimSpace(part.Body)
+	switch {
+	case title == "" && strings.TrimSpace(part.MetaJSON) == "":
+		return ""
+	case title == "":
+		title = "system notice"
+	}
+	var body strings.Builder
+	body.WriteString("### System\n\n")
+	body.WriteString(title)
+	if meta := strings.TrimSpace(part.MetaJSON); meta != "" {
+		body.WriteString("\n\n```json\n")
+		body.WriteString(meta)
+		body.WriteString("\n```")
+	}
+	return m.renderer.Render(body.String())
 }
 
 func (m *Model) renderUserMessageParts(parts []domain.Part) string {
@@ -2460,6 +2488,7 @@ func (m Model) syncDebugRuntime() {
 		OpenDialog:         m.openDialogName(),
 		ShowSidebar:        m.showSidebar,
 		ShowReasoning:      m.showReasoning,
+		ShowSystem:         m.showSystem,
 		LastError:          m.currentError(),
 		ViewportWidth:      m.viewport.Width,
 		ViewportHeight:     m.viewport.Height,
@@ -3969,6 +3998,7 @@ func (m *Model) applyUIConfig(next config.UI, save bool) (tea.Cmd, error) {
 	m.renderer = renderer
 	m.showSidebar = next.ShowSidebar
 	m.showReasoning = next.ShowReasoning
+	m.showSystem = next.ShowSystem
 	m.mouseEnabled = next.Mouse
 	applyComposerTheme(&m.composer, selected.Palette)
 	m.resize()

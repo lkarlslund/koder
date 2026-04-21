@@ -61,6 +61,7 @@ type RuntimeSnapshot struct {
 	OpenDialog         string    `json:"open_dialog,omitempty"`
 	ShowSidebar        bool      `json:"show_sidebar"`
 	ShowReasoning      bool      `json:"show_reasoning"`
+	ShowSystem         bool      `json:"show_system"`
 	LastError          string    `json:"last_error,omitempty"`
 	ViewportWidth      int       `json:"viewport_width"`
 	ViewportHeight     int       `json:"viewport_height"`
@@ -72,14 +73,14 @@ type RuntimeSnapshot struct {
 }
 
 type Recorder struct {
-	mu             sync.RWMutex
-	debugAPI       string
-	maxEvents      int
-	maxHTTP        int
-	runtime        RuntimeSnapshot
-	events         []RecordedEvent
-	sessionEvents  map[int64][]RecordedEvent
-	httpTraces     []HTTPTrace
+	mu            sync.RWMutex
+	debugAPI      string
+	maxEvents     int
+	maxHTTP       int
+	runtime       RuntimeSnapshot
+	events        []RecordedEvent
+	sessionEvents map[int64][]RecordedEvent
+	httpTraces    []HTTPTrace
 }
 
 func NewRecorder() *Recorder {

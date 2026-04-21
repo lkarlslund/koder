@@ -19,6 +19,7 @@ type UI struct {
 	ShowSidebar    bool   `toml:"show_sidebar"`
 	ShowTimestamps bool   `toml:"show_timestamps"`
 	ShowReasoning  bool   `toml:"show_reasoning"`
+	ShowSystem     bool   `toml:"show_system"`
 	Mouse          bool   `toml:"mouse"`
 }
 
@@ -201,6 +202,7 @@ func Default() Config {
 			ShowSidebar:    true,
 			ShowTimestamps: false,
 			ShowReasoning:  false,
+			ShowSystem:     false,
 			Mouse:          true,
 		},
 	}

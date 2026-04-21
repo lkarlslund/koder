@@ -84,6 +84,7 @@ func NewPreferencesDialog(current config.UI, themeNames []string) PreferencesDia
 			Title: "Behavior",
 			Fields: []preferencesField{
 				{Kind: preferencesFieldToggle, ID: "show_reasoning", Label: "Reasoning", Description: "Render model reasoning blocks in the transcript"},
+				{Kind: preferencesFieldToggle, ID: "show_system", Label: "System", Description: "Render system prompts, internal notices, and skill output in the transcript"},
 				{Kind: preferencesFieldToggle, ID: "mouse", Label: "Mouse", Description: "Enable terminal mouse capture"},
 			},
 		},
@@ -351,6 +352,8 @@ func (d PreferencesDialog) toggleValue(id string) bool {
 		return d.draft.ShowTimestamps
 	case "show_reasoning":
 		return d.draft.ShowReasoning
+	case "show_system":
+		return d.draft.ShowSystem
 	case "mouse":
 		return d.draft.Mouse
 	default:
@@ -368,6 +371,8 @@ func (d *PreferencesDialog) setToggle(id string, value bool) {
 		d.draft.ShowTimestamps = value
 	case "show_reasoning":
 		d.draft.ShowReasoning = value
+	case "show_system":
+		d.draft.ShowSystem = value
 	case "mouse":
 		d.draft.Mouse = value
 	}
