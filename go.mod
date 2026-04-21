@@ -9,6 +9,7 @@ require (
 	github.com/pelletier/go-toml/v2 v2.3.0
 	github.com/sergi/go-diff v1.4.0
 	github.com/spf13/cobra v1.10.2
+	golang.design/x/clipboard v0.7.1
 )
 
 require (
@@ -34,7 +35,6 @@ require (
 	github.com/prometheus/common v0.42.0 // indirect
 	github.com/prometheus/procfs v0.9.0 // indirect
 	github.com/rogpeppe/go-internal v1.9.0 // indirect
-	golang.design/x/clipboard v0.7.1 // indirect
 	golang.org/x/exp v0.0.0-20231006140011-7918f672742d // indirect
 	golang.org/x/exp/shiny v0.0.0-20250606033433-dcc06ee1d476 // indirect
 	golang.org/x/image v0.28.0 // indirect
@@ -47,7 +47,7 @@ require (
 	github.com/atotto/clipboard v0.1.4 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/charmbracelet/colorprofile v0.4.3 // indirect
-	github.com/charmbracelet/x/ansi v0.11.7 // indirect
+	github.com/charmbracelet/x/ansi v0.11.7
 	github.com/charmbracelet/x/cellbuf v0.0.15 // indirect
 	github.com/charmbracelet/x/term v0.2.2 // indirect
 	github.com/clipperhouse/displaywidth v0.11.0 // indirect
@@ -67,5 +67,5 @@ require (
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	github.com/yuin/goldmark v1.8.2
 	golang.org/x/sys v0.43.0 // indirect
-	golang.org/x/text v0.30.0 // indirect
+	golang.org/x/text v0.30.0
 )

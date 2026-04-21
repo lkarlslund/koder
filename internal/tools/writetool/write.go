@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"github.com/sergi/go-diff/diffmatchpatch"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/provider"
@@ -60,7 +62,7 @@ func (tool) Execute(_ context.Context, runtime tools.Runtime, req tools.Request)
 	}
 	dmp := diffmatchpatch.New()
 	diffs := dmp.DiffMain(string(beforeBytes), req.Args["content"], false)
-	summary := fmt.Sprintf("%s %s", strings.Title(action), rel)
+	summary := fmt.Sprintf("%s %s", cases.Title(language.English).String(action), rel)
 	return tools.Result{
 		Output:   summary,
 		DiffText: dmp.DiffPrettyText(diffs),
