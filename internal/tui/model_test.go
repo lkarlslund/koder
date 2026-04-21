@@ -1907,7 +1907,7 @@ func TestRenderSidebarShowsStatusAndSessionInfo(t *testing.T) {
 	}
 
 	got := m.renderSidebar()
-	if !strings.Contains(got, "Session") || !strings.Contains(got, "provider test") || !strings.Contains(got, "model   model") {
+	if !strings.Contains(got, "Session 2") || !strings.Contains(got, "provider test") || !strings.Contains(got, "model   model") {
 		t.Fatalf("expected sidebar to include session details, got %q", got)
 	}
 	if !strings.Contains(got, "Status") || !strings.Contains(got, "Working ...") {
@@ -1934,11 +1934,8 @@ func TestRenderSidebarShowsStatusAndSessionInfo(t *testing.T) {
 	if strings.Contains(got, "Pending approvals") {
 		t.Fatalf("expected sidebar to omit pending approvals, got %q", got)
 	}
-	if !strings.Contains(got, "Profile default") {
-		t.Fatalf("expected sidebar to show current profile on one line, got %q", got)
-	}
-	if strings.Contains(got, "Profiles") || strings.Contains(got, "> default") {
-		t.Fatalf("expected sidebar to omit profile list, got %q", got)
+	if strings.Contains(got, "Profile ") || strings.Contains(got, "profile ") || strings.Contains(got, "mouse   ") {
+		t.Fatalf("expected sidebar to omit session profile and mouse status, got %q", got)
 	}
 }
 

@@ -980,10 +980,7 @@ func mPrompt(cfg config.Config) string {
 
 func (m *Model) renderSidebar() string {
 	var lines []string
-	lines = append(lines, "Session")
-	lines = append(lines, fmt.Sprintf("  id      %d", m.currentSession.ID))
-	lines = append(lines, fmt.Sprintf("  profile %s", truncate(m.permissionProfileLabel(), 19)))
-	lines = append(lines, fmt.Sprintf("  mouse   %s", m.mouseStatus()))
+	lines = append(lines, fmt.Sprintf("Session %d", m.currentSession.ID))
 	provider := m.currentSession.ProviderID
 	if provider == "" {
 		provider = "(unset)"
@@ -1053,8 +1050,6 @@ func (m *Model) renderSidebar() string {
 			}
 		}
 	}
-	lines = append(lines, "")
-	lines = append(lines, fmt.Sprintf("Profile %s", permission.DisplayName(m.permissionProfile())))
 	lines = append(lines, "")
 	lines = append(lines, "Tasks")
 	if len(m.tasks) == 0 {
@@ -2791,17 +2786,6 @@ func (m *Model) permissionProfile() string {
 		return m.currentSession.PermissionProfile
 	}
 	return m.cfg.Permissions.Profile
-}
-
-func (m *Model) permissionProfileLabel() string {
-	return permission.DisplayName(m.permissionProfile())
-}
-
-func (m *Model) mouseStatus() string {
-	if m.mouseEnabled {
-		return "on"
-	}
-	return "off"
 }
 
 func approvalSummary(item store.Approval) string {
