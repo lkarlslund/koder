@@ -263,6 +263,15 @@ func testConfig(t *testing.T) config.Config {
 	return config.Default().WithStateDir(t.TempDir())
 }
 
+func mustMarshalMeta(t *testing.T, meta map[string]string) string {
+	t.Helper()
+	raw, err := json.Marshal(meta)
+	if err != nil {
+		t.Fatalf("marshal meta: %v", err)
+	}
+	return string(raw)
+}
+
 func newSkillRepo(t *testing.T) string {
 	t.Helper()
 	home := t.TempDir()
@@ -1362,6 +1371,62 @@ func TestApprovalPromptAltHotkeys(t *testing.T) {
 	}
 	if !next.loading {
 		t.Fatal("expected alt+d to start deny flow")
+	}
+}
+
+func TestAltOOpensLatestRawToolOutputModal(t *testing.T) {
+	cfg := testConfig(t)
+	m := Model{
+		cfg:      cfg,
+		composer: textarea.New(),
+		parts: map[int64][]domain.Part{
+			1: {{
+				Kind:     domain.PartKindToolOutput,
+				Body:     "Created note.txt",
+				MetaJSON: mustMarshalMeta(t, tools.MetaWithStoredResult(map[string]string{"tool": "write", "path": "note.txt", "tool_call_id": "call_write_1"}, domain.PartKindToolOutput, domain.ToolKindWrite, tools.StoredResultStatusOK, tools.WriteStoredResult{Path: "note.txt", Action: "created", Summary: "Created note.txt"})),
+			}, {
+				Kind: domain.PartKindDiff,
+				Body: "@@ -0,0 +1 @@\n+hello\n",
+			}},
+		},
+		messages: []domain.Message{
+			{ID: 1, Role: domain.MessageRoleTool, Summary: "write"},
+		},
+	}
+
+	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Alt: true, Runes: []rune("o")})
+	next := updated.(*Model)
+	if cmd == nil {
+		t.Fatal("expected sync title command")
+	}
+	if !next.hasRawOutputModal() {
+		t.Fatal("expected raw output modal to open")
+	}
+	got := next.renderRawOutputModal()
+	if !strings.Contains(got, "Created note.txt") {
+		t.Fatalf("expected summary in raw output modal, got %q", got)
+	}
+	if !strings.Contains(got, "Diff:") || !strings.Contains(got, "+hello") {
+		t.Fatalf("expected diff in raw output modal, got %q", got)
+	}
+}
+
+func TestAltOWithoutToolOutputShowsStatus(t *testing.T) {
+	m := Model{
+		cfg:      testConfig(t),
+		composer: textarea.New(),
+	}
+
+	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Alt: true, Runes: []rune("o")})
+	next := updated.(*Model)
+	if cmd == nil {
+		t.Fatal("expected sync title command")
+	}
+	if next.hasRawOutputModal() {
+		t.Fatal("expected no raw output modal")
+	}
+	if next.status != "No tool output available yet" {
+		t.Fatalf("unexpected status: %q", next.status)
 	}
 }
 

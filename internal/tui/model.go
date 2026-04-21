@@ -283,6 +283,7 @@ type Model struct {
 	preferences        *ui.PreferencesDialog
 	agentsModal        *ui.Modal
 	helpModal          *ui.Modal
+	rawOutputModal     *ui.Modal
 	connectDialog      *ui.ConnectDialog
 	disconnectDialog   *ui.DisconnectDialog
 	modelDialog        *ui.ModelDialog
@@ -749,6 +750,9 @@ func (m Model) View() string {
 	if m.hasHelpModal() && m.width > 0 && m.height > 0 {
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, m.renderHelpModal())
 	}
+	if m.hasRawOutputModal() && m.width > 0 && m.height > 0 {
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, m.renderRawOutputModal())
+	}
 	if m.hasPreferencesDialog() && m.width > 0 && m.height > 0 {
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, m.renderPreferencesDialog())
 	}
@@ -787,6 +791,13 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.hasHelpModal() {
 		if msg.String() == "esc" || msg.String() == "enter" || msg.String() == "alt+h" {
 			m.closeHelpModal()
+			return m, m.syncWindowTitleCmd()
+		}
+		return m, nil
+	}
+	if m.hasRawOutputModal() {
+		if msg.String() == "esc" || msg.String() == "enter" || msg.String() == "alt+o" {
+			m.closeRawOutputModal()
 			return m, m.syncWindowTitleCmd()
 		}
 		return m, nil
@@ -952,6 +963,12 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.showSystem = !m.showSystem
 		m.refreshViewport()
 		return m, nil
+	case "alt+o":
+		if !m.openLatestToolOutputModal() {
+			m.status = "No tool output available yet"
+			return m, m.syncWindowTitleCmd()
+		}
+		return m, m.syncWindowTitleCmd()
 	case "ctrl+r":
 		if !m.openComposerHistorySearch() {
 			return m, nil
@@ -2853,6 +2870,8 @@ func (m Model) openDialogName() string {
 		return "tools"
 	case m.hasHelpModal():
 		return "help"
+	case m.hasRawOutputModal():
+		return "raw_output"
 	case m.hasPicker():
 		return "picker"
 	default:
@@ -3658,6 +3677,14 @@ func (m *Model) closeHelpModal() {
 	m.helpModal = nil
 }
 
+func (m *Model) hasRawOutputModal() bool {
+	return m.rawOutputModal != nil
+}
+
+func (m *Model) closeRawOutputModal() {
+	m.rawOutputModal = nil
+}
+
 func (m *Model) hasConnectDialog() bool {
 	return m.connectDialog != nil
 }
@@ -3874,6 +3901,7 @@ func (m *Model) openHelpModal() {
 		"Ctrl-S              toggle sidebar",
 		"Alt-R               toggle reasoning",
 		"Alt-P               toggle system output",
+		"Alt-O               show latest raw tool output sent to the model",
 		"Ctrl-G              continue",
 	}
 	commands := []string{
@@ -3910,6 +3938,70 @@ func (m *Model) renderHelpModal() string {
 		return ""
 	}
 	return m.helpModal.View(m.palette)
+}
+
+func (m *Model) openLatestToolOutputModal() bool {
+	title, subtitle, body, ok := m.latestToolOutputModalContent()
+	if !ok {
+		return false
+	}
+	modal := ui.Modal{
+		Title:    title,
+		Subtitle: subtitle,
+		Body:     body,
+		Footer:   "Alt-O, Enter, or Esc closes this dialog",
+		Width:    min(110, max(84, m.width-8)),
+	}
+	m.rawOutputModal = &modal
+	return true
+}
+
+func (m *Model) renderRawOutputModal() string {
+	if m.rawOutputModal == nil {
+		return ""
+	}
+	return m.rawOutputModal.View(m.palette)
+}
+
+func (m *Model) latestToolOutputModalContent() (string, string, string, bool) {
+	for msgIdx := len(m.messages) - 1; msgIdx >= 0; msgIdx-- {
+		msg := m.messages[msgIdx]
+		parts := m.parts[msg.ID]
+		if len(parts) == 0 {
+			continue
+		}
+		diff := toolRunDiffBody(parts)
+		for partIdx := len(parts) - 1; partIdx >= 0; partIdx-- {
+			part := parts[partIdx]
+			if part.Kind != domain.PartKindToolOutput {
+				continue
+			}
+			body, ok := tools.ModelTextForPart(part, diff)
+			if !ok || strings.TrimSpace(body) == "" {
+				continue
+			}
+			meta := stringMeta(part.MetaJSON)
+			req, err := tools.RequestFromMetaMap(meta)
+			if err != nil {
+				req = tools.Request{
+					Tool:       domain.ToolKind(strings.TrimSpace(meta["tool"])),
+					ToolCallID: strings.TrimSpace(meta["tool_call_id"]),
+					Args:       map[string]string{},
+				}
+			}
+			presentation := tools.PresentationForRequest(req)
+			title := "Raw Tool Output"
+			if strings.TrimSpace(presentation.Title) != "" {
+				title = presentation.Title
+			}
+			subtitle := "Exact tool text sent back to the model"
+			if strings.TrimSpace(presentation.Subtitle) != "" {
+				subtitle = presentation.Subtitle + "  |  " + subtitle
+			}
+			return title, subtitle, body, true
+		}
+	}
+	return "", "", "", false
 }
 
 func (m Model) currentProjectRoot() string {
