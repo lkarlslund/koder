@@ -609,6 +609,74 @@ func TestEnterWhileBusyQueuesSteeringPrompt(t *testing.T) {
 	}
 }
 
+func TestUpDownBrowseComposerPromptHistory(t *testing.T) {
+	m := Model{
+		composer: textarea.New(),
+		messages: []domain.Message{
+			{ID: 1, Role: domain.MessageRoleUser, Summary: "first"},
+			{ID: 2, Role: domain.MessageRoleAssistant, Summary: "reply"},
+			{ID: 3, Role: domain.MessageRoleUser, Summary: "second"},
+		},
+		parts: map[int64][]domain.Part{},
+	}
+	m.composer.SetValue("draft")
+
+	updated, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyUp})
+	next := updated.(*Model)
+	if got := next.composer.Value(); got != "second" {
+		t.Fatalf("expected newest history entry, got %q", got)
+	}
+
+	updated, _ = next.handleKey(tea.KeyMsg{Type: tea.KeyUp})
+	next = updated.(*Model)
+	if got := next.composer.Value(); got != "first" {
+		t.Fatalf("expected older history entry, got %q", got)
+	}
+
+	updated, _ = next.handleKey(tea.KeyMsg{Type: tea.KeyDown})
+	next = updated.(*Model)
+	if got := next.composer.Value(); got != "second" {
+		t.Fatalf("expected newer history entry, got %q", got)
+	}
+
+	updated, _ = next.handleKey(tea.KeyMsg{Type: tea.KeyDown})
+	next = updated.(*Model)
+	if got := next.composer.Value(); got != "draft" {
+		t.Fatalf("expected draft restored after newest history entry, got %q", got)
+	}
+}
+
+func TestCtrlRSearchesComposerPromptHistory(t *testing.T) {
+	m := Model{
+		composer: textarea.New(),
+		messages: []domain.Message{
+			{ID: 1, Role: domain.MessageRoleUser, Summary: "alpha one"},
+			{ID: 2, Role: domain.MessageRoleUser, Summary: "beta two"},
+			{ID: 3, Role: domain.MessageRoleUser, Summary: "alpha three"},
+		},
+		parts: map[int64][]domain.Part{},
+	}
+	m.composer.SetValue("alpha")
+
+	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlR})
+	next := updated.(*Model)
+	if cmd == nil {
+		t.Fatal("expected title sync command after history search")
+	}
+	if got := next.composer.Value(); got != "alpha three" {
+		t.Fatalf("expected latest matching history entry, got %q", got)
+	}
+
+	updated, cmd = next.handleKey(tea.KeyMsg{Type: tea.KeyCtrlR})
+	next = updated.(*Model)
+	if cmd == nil {
+		t.Fatal("expected title sync command after repeated history search")
+	}
+	if got := next.composer.Value(); got != "alpha one" {
+		t.Fatalf("expected earlier matching history entry, got %q", got)
+	}
+}
+
 func TestTabWhileBusyQueuesSteeringPrompt(t *testing.T) {
 	cfg := testConfig(t)
 	cfg.DefaultProvider = "openai"
@@ -2114,7 +2182,7 @@ func TestAltHTogglesHelpDialog(t *testing.T) {
 		t.Fatal("expected help dialog to open")
 	}
 	view := next.View()
-	if !strings.Contains(view, "Help") || !strings.Contains(view, "/connect") || !strings.Contains(view, "Ctrl-V") || !strings.Contains(view, "Ctrl-P") {
+	if !strings.Contains(view, "Help") || !strings.Contains(view, "/connect") || !strings.Contains(view, "Ctrl-V") || !strings.Contains(view, "Alt-P") || !strings.Contains(view, "Ctrl-R") {
 		t.Fatalf("expected help dialog content, got %q", view)
 	}
 
@@ -2128,29 +2196,55 @@ func TestAltHTogglesHelpDialog(t *testing.T) {
 	}
 }
 
-func TestCtrlPTogglesSystemOutput(t *testing.T) {
+func TestAltPTogglesSystemOutput(t *testing.T) {
 	cfg := testConfig(t)
 	m, err := New(cfg, nil, nil, StartupModeNew, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlP})
+	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Alt: true, Runes: []rune("p")})
 	next := updated.(*Model)
 	if cmd != nil {
 		t.Fatalf("expected no command, got %v", cmd)
 	}
 	if !next.showSystem {
-		t.Fatal("expected ctrl+p to enable system output")
+		t.Fatal("expected alt+p to enable system output")
 	}
 
-	updated, cmd = next.handleKey(tea.KeyMsg{Type: tea.KeyCtrlP})
+	updated, cmd = next.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Alt: true, Runes: []rune("p")})
 	next = updated.(*Model)
 	if cmd != nil {
 		t.Fatalf("expected no command, got %v", cmd)
 	}
 	if next.showSystem {
-		t.Fatal("expected ctrl+p to disable system output")
+		t.Fatal("expected alt+p to disable system output")
+	}
+}
+
+func TestAltRTogglesReasoningOutput(t *testing.T) {
+	cfg := testConfig(t)
+	m, err := New(cfg, nil, nil, StartupModeNew, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Alt: true, Runes: []rune("r")})
+	next := updated.(*Model)
+	if cmd != nil {
+		t.Fatalf("expected no command, got %v", cmd)
+	}
+	if !next.showReasoning {
+		t.Fatal("expected alt+r to enable reasoning output")
+	}
+
+	updated, cmd = next.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Alt: true, Runes: []rune("r")})
+	next = updated.(*Model)
+	if cmd != nil {
+		t.Fatalf("expected no command, got %v", cmd)
+	}
+	if next.showReasoning {
+		t.Fatal("expected alt+r to disable reasoning output")
 	}
 }
 

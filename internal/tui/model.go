@@ -255,6 +255,7 @@ type Model struct {
 	toolRunClickZones  []toolRunClickZone
 	expandedToolRuns   map[string]bool
 	composer           textarea.Model
+	composerHistory    composerHistoryState
 	width              int
 	height             int
 	status             string
@@ -300,6 +301,15 @@ type toolRunClickZone struct {
 	RunID    string
 	StartRow int
 	EndRow   int
+}
+
+type composerHistoryState struct {
+	Index        int
+	Active       bool
+	Draft        string
+	SearchIndex  int
+	SearchActive bool
+	SearchQuery  string
 }
 
 func New(cfg config.Config, st *store.Store, a *agent.Engine, mode StartupMode, debug *debugsrv.Recorder) (Model, error) {
@@ -439,7 +449,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.approvals = msg.approvals
 		m.tasks = msg.tasks
 		m.workspace = msg.workspace
-		m.composer.Reset()
+		m.resetComposerInput()
 		m.draftAttachments = nil
 		m.closePicker()
 		m.closeSessionDialog()
@@ -883,14 +893,19 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.resize()
 		m.refreshViewport()
 		return m, nil
-	case "ctrl+r":
+	case "alt+r":
 		m.showReasoning = !m.showReasoning
 		m.refreshViewport()
 		return m, nil
-	case "ctrl+p":
+	case "alt+p":
 		m.showSystem = !m.showSystem
 		m.refreshViewport()
 		return m, nil
+	case "ctrl+r":
+		if !m.searchComposerHistoryBackward() {
+			return m, nil
+		}
+		return m, m.syncWindowTitleCmd()
 	case "ctrl+g":
 		if m.loading {
 			return m.queueContinuePrompt()
@@ -904,6 +919,16 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "shift+enter", "alt+enter":
 		m.composer.InsertRune('\n')
 		m.updateComposerMenus()
+		return m, nil
+	case "up":
+		if !m.recallComposerHistory(-1) {
+			return m, nil
+		}
+		return m, nil
+	case "down":
+		if !m.recallComposerHistory(1) {
+			return m, nil
+		}
 		return m, nil
 	case "tab":
 		if m.loading && !m.hasSlashMenu() {
@@ -926,16 +951,19 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		drafts := slices.Clone(m.draftAttachments)
-		m.composer.Reset()
+		m.resetComposerInput()
 		m.draftAttachments = nil
-		m.updateComposerMenus()
 		m.appendLocalUserPrompt(prompt, drafts)
 		m.startBusy(busyScopeTranscript, "Running…")
 		return m, tea.Batch(m.promptCmd(m.beginActiveOperation(), prompt, drafts), m.spinnerCmdIfNeeded())
 	}
 
 	var cmd tea.Cmd
+	before := m.composer.Value()
 	m.composer, cmd = m.composer.Update(msg)
+	if before != m.composer.Value() {
+		m.resetComposerHistory()
+	}
 	m.updateComposerMenus()
 	return m, cmd
 }
@@ -1969,6 +1997,7 @@ func (m Model) UpdateLoad(msg loadMsg) Model {
 	m.approvals = msg.approvals
 	m.tasks = msg.tasks
 	m.workspace = msg.workspace
+	m.resetComposerHistory()
 	m.approvalButtons.Index = 0
 	m.draftAttachments = nil
 	m.closePicker()
@@ -1990,45 +2019,37 @@ func (m *Model) handleLocalCommand(prompt string) (tea.Model, tea.Cmd, bool) {
 	trimmed := strings.TrimSpace(prompt)
 	switch {
 	case trimmed == "/new":
-		m.composer.Reset()
-		m.updateComposerMenus()
+		m.resetComposerInput()
 		m.startBusy(busyScopeSidebar, "Creating session…")
 		return m, tea.Batch(m.newSessionCmd(), m.spinnerCmdIfNeeded()), true
 	case trimmed == "/resume":
-		m.composer.Reset()
-		m.updateComposerMenus()
+		m.resetComposerInput()
 		m.startBusy(busyScopeSidebar, "Loading sessions…")
 		return m, tea.Batch(m.sessionPickerCmd(), m.spinnerCmdIfNeeded()), true
 	case trimmed == "/quit":
-		m.composer.Reset()
-		m.updateComposerMenus()
+		m.resetComposerInput()
 		model, cmd := m.quit()
 		return model, cmd, true
 	case trimmed == "/mouse on":
-		m.composer.Reset()
-		m.updateComposerMenus()
+		m.resetComposerInput()
 		m.mouseEnabled = true
 		m.status = "Mouse capture enabled"
 		return m, func() tea.Msg { return tea.EnableMouseCellMotion() }, true
 	case trimmed == "/mouse off":
-		m.composer.Reset()
-		m.updateComposerMenus()
+		m.resetComposerInput()
 		m.mouseEnabled = false
 		m.status = "Mouse capture disabled"
 		return m, func() tea.Msg { return tea.DisableMouse() }, true
 	case trimmed == "/compact":
-		m.composer.Reset()
-		m.updateComposerMenus()
+		m.resetComposerInput()
 		m.startBusy(busyScopeTranscript, "Compacting session...")
 		return m, tea.Batch(m.compactCmd(m.beginActiveOperation()), m.spinnerCmdIfNeeded()), true
 	case trimmed == "/connect":
-		m.composer.Reset()
-		m.updateComposerMenus()
+		m.resetComposerInput()
 		m.openConnectDialog()
 		return m, m.syncWindowTitleCmd(), true
 	case trimmed == "/disconnect":
-		m.composer.Reset()
-		m.updateComposerMenus()
+		m.resetComposerInput()
 		if len(m.cfg.Providers) == 0 {
 			m.status = "No configured providers to disconnect"
 			return m, m.syncWindowTitleCmd(), true
@@ -2036,8 +2057,7 @@ func (m *Model) handleLocalCommand(prompt string) (tea.Model, tea.Cmd, bool) {
 		m.openDisconnectDialog()
 		return m, m.syncWindowTitleCmd(), true
 	case trimmed == "/model":
-		m.composer.Reset()
-		m.updateComposerMenus()
+		m.resetComposerInput()
 		providerID := m.activeProviderID()
 		if providerID == "" || !m.cfg.HasUsableProvider(providerID) {
 			m.status = "Configure a provider first with /connect"
@@ -2046,38 +2066,31 @@ func (m *Model) handleLocalCommand(prompt string) (tea.Model, tea.Cmd, bool) {
 		m.status = fmt.Sprintf("Loading models for %s…", providerID)
 		return m, tea.Batch(m.loadModelsCmd(providerID, false), m.syncWindowTitleCmd()), true
 	case trimmed == "/theme":
-		m.composer.Reset()
-		m.updateComposerMenus()
+		m.resetComposerInput()
 		m.openThemePicker()
 		return m, nil, true
 	case trimmed == "/skills":
-		m.composer.Reset()
-		m.updateComposerMenus()
+		m.resetComposerInput()
 		m.openSkillsPicker()
 		return m, m.syncWindowTitleCmd(), true
 	case trimmed == "/permissions":
-		m.composer.Reset()
-		m.updateComposerMenus()
+		m.resetComposerInput()
 		m.openPermissionsPicker()
 		return m, m.syncWindowTitleCmd(), true
 	case trimmed == "/preferences":
-		m.composer.Reset()
-		m.updateComposerMenus()
+		m.resetComposerInput()
 		m.openPreferencesDialog()
 		return m, tea.Batch(spinnerTickCmd(), m.syncWindowTitleCmd()), true
 	case trimmed == "/tools":
-		m.composer.Reset()
-		m.updateComposerMenus()
+		m.resetComposerInput()
 		m.openToolsDialog()
 		return m, m.syncWindowTitleCmd(), true
 	case trimmed == "/agents":
-		m.composer.Reset()
-		m.updateComposerMenus()
+		m.resetComposerInput()
 		m.openAgentsModal()
 		return m, m.syncWindowTitleCmd(), true
 	case trimmed == "/agents refresh":
-		m.composer.Reset()
-		m.updateComposerMenus()
+		m.resetComposerInput()
 		if m.currentSession.ID == 0 {
 			m.status = "No saved session to refresh"
 			return m, m.syncWindowTitleCmd(), true
@@ -2085,8 +2098,7 @@ func (m *Model) handleLocalCommand(prompt string) (tea.Model, tea.Cmd, bool) {
 		m.startBusy(busyScopeSidebar, "Refreshing project instructions…")
 		return m, tea.Batch(m.agentsRefreshCmd(m.currentSession.ID), m.spinnerCmdIfNeeded()), true
 	case trimmed == "/fork":
-		m.composer.Reset()
-		m.updateComposerMenus()
+		m.resetComposerInput()
 		if m.currentSession.ID == 0 {
 			m.status = "No saved session to fork"
 			return m, m.syncWindowTitleCmd(), true
@@ -2099,8 +2111,7 @@ func (m *Model) handleLocalCommand(prompt string) (tea.Model, tea.Cmd, bool) {
 			m.status = fmt.Sprintf("invalid approval id: %v", err)
 			return m, nil, true
 		}
-		m.composer.Reset()
-		m.updateComposerMenus()
+		m.resetComposerInput()
 		m.startBusy(busyScopeTranscript, fmt.Sprintf("Approving approval %d…", id))
 		return m, tea.Batch(m.approveCmd(m.beginActiveOperation(), id), m.spinnerCmdIfNeeded()), true
 	case strings.HasPrefix(trimmed, "/deny "):
@@ -2109,8 +2120,7 @@ func (m *Model) handleLocalCommand(prompt string) (tea.Model, tea.Cmd, bool) {
 			m.status = fmt.Sprintf("invalid approval id: %v", err)
 			return m, nil, true
 		}
-		m.composer.Reset()
-		m.updateComposerMenus()
+		m.resetComposerInput()
 		m.startBusy(busyScopeSidebar, fmt.Sprintf("Denying approval %d…", id))
 		return m, tea.Batch(m.denyCmd(m.beginActiveOperation(), id), m.spinnerCmdIfNeeded()), true
 	case strings.HasPrefix(trimmed, "/"):
@@ -2168,9 +2178,8 @@ func (m *Model) queueComposerPrompt(mode queuedPromptMode) (tea.Model, tea.Cmd) 
 		Mode:        mode,
 		Attachments: slices.Clone(m.draftAttachments),
 	}
-	m.composer.Reset()
+	m.resetComposerInput()
 	m.draftAttachments = nil
-	m.updateComposerMenus()
 	m.status = m.queuedPrompt.statusText()
 	return m, m.syncWindowTitleCmd()
 }
@@ -2198,9 +2207,8 @@ func (m *Model) dequeuePromptCmd() tea.Cmd {
 		if item.Mode != queuedPromptModeContinue {
 			m.openConnectDialog()
 			m.status = status
-			m.composer.SetValue(item.Text)
+			m.setComposerValue(item.Text)
 			m.draftAttachments = item.Attachments
-			m.updateComposerMenus()
 			return nil
 		}
 	}
@@ -2210,6 +2218,125 @@ func (m *Model) dequeuePromptCmd() tea.Cmd {
 	}
 	m.appendLocalUserPrompt(item.Text, item.Attachments)
 	return tea.Batch(m.promptCmd(m.beginActiveOperation(), item.Text, item.Attachments), m.spinnerCmdIfNeeded())
+}
+
+func (m *Model) resetComposerHistory() {
+	m.composerHistory = composerHistoryState{}
+}
+
+func (m *Model) resetComposerInput() {
+	m.composer.Reset()
+	m.resetComposerHistory()
+	m.updateComposerMenus()
+}
+
+func (m *Model) setComposerValue(value string) {
+	m.composer.SetValue(value)
+	m.composer.SetCursor(len(value))
+	m.updateComposerMenus()
+}
+
+func (m Model) composerPromptHistory() []string {
+	entries := make([]string, 0, len(m.messages))
+	for _, msg := range m.messages {
+		if msg.Role != domain.MessageRoleUser {
+			continue
+		}
+		if text := strings.TrimSpace(m.messagePromptText(msg.ID, msg.Summary)); text != "" {
+			entries = append(entries, text)
+		}
+	}
+	return entries
+}
+
+func (m Model) messagePromptText(messageID int64, fallback string) string {
+	parts := m.parts[messageID]
+	var body strings.Builder
+	for _, part := range parts {
+		if part.Kind != domain.PartKindText {
+			continue
+		}
+		body.WriteString(part.Body)
+	}
+	if text := strings.TrimSpace(body.String()); text != "" {
+		return text
+	}
+	return strings.TrimSpace(fallback)
+}
+
+func (m *Model) recallComposerHistory(delta int) bool {
+	history := m.composerPromptHistory()
+	if len(history) == 0 {
+		return false
+	}
+	m.composerHistory.SearchActive = false
+	m.composerHistory.SearchIndex = 0
+	m.composerHistory.SearchQuery = ""
+	if !m.composerHistory.Active {
+		if delta > 0 {
+			return false
+		}
+		m.composerHistory.Active = true
+		m.composerHistory.Draft = m.composer.Value()
+		m.composerHistory.Index = len(history) - 1
+		m.setComposerValue(history[m.composerHistory.Index])
+		return true
+	}
+	next := m.composerHistory.Index + delta
+	if next < 0 {
+		next = 0
+	}
+	if next >= len(history) {
+		m.setComposerValue(m.composerHistory.Draft)
+		m.resetComposerHistory()
+		return true
+	}
+	m.composerHistory.Index = next
+	m.setComposerValue(history[next])
+	return true
+}
+
+func (m *Model) searchComposerHistoryBackward() bool {
+	history := m.composerPromptHistory()
+	if len(history) == 0 {
+		m.status = "No prompt history in this session"
+		return true
+	}
+	var query string
+	start := len(history) - 1
+	if m.composerHistory.SearchActive {
+		query = m.composerHistory.SearchQuery
+		start = m.composerHistory.SearchIndex - 1
+	} else {
+		query = strings.TrimSpace(m.composer.Value())
+		m.composerHistory.Draft = m.composer.Value()
+		if m.composerHistory.Active {
+			start = m.composerHistory.Index - 1
+		}
+	}
+	if start < 0 {
+		m.status = "No earlier history match"
+		return true
+	}
+	for i := start; i >= 0; i-- {
+		if query != "" && !strings.Contains(history[i], query) {
+			continue
+		}
+		m.composerHistory.Active = true
+		m.composerHistory.Index = i
+		m.composerHistory.SearchActive = true
+		m.composerHistory.SearchIndex = i
+		m.composerHistory.SearchQuery = query
+		m.setComposerValue(history[i])
+		if query == "" {
+			m.status = fmt.Sprintf("History %d/%d", i+1, len(history))
+		} else {
+			m.status = fmt.Sprintf("History match %d/%d", i+1, len(history))
+		}
+		return true
+	}
+	m.status = fmt.Sprintf("No earlier history match for %q", query)
+	return true
 }
 
 func (m *Model) finishOperationWithError(err error) (tea.Model, tea.Cmd) {
@@ -3499,12 +3626,14 @@ func (m *Model) openHelpModal() {
 		"Enter               send prompt or confirm selection",
 		"Esc                 cancel dialog or interrupt active run",
 		"Tab                 autocomplete, or queue steering while running",
+		"Up/Down             browse session prompt history",
 		"Alt-Enter           insert newline",
 		"Ctrl-V              paste clipboard text",
 		"Ctrl-Y              copy last assistant message",
+		"Ctrl-R              search prompt history",
 		"Ctrl-S              toggle sidebar",
-		"Ctrl-R              toggle reasoning",
-		"Ctrl-P              toggle system output",
+		"Alt-R               toggle reasoning",
+		"Alt-P               toggle system output",
 		"Ctrl-G              continue",
 	}
 	commands := []string{
