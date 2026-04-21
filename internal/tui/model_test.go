@@ -1959,7 +1959,7 @@ func TestEnsureRuntimeContextWindowDetectsAndPersistsLlamaCPP(t *testing.T) {
 			Name:          "llama.cpp",
 			Kind:          "openai-compatible",
 			AuthMethod:    "local_endpoint",
-			BaseURL:       server.URL + "/v1",
+			BaseURL:       server.URL,
 			DefaultModel:  "coder.gguf",
 			ContextWindow: 0,
 		},

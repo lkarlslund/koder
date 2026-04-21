@@ -53,7 +53,7 @@ func TestPropsUsesModelQueryAndParsesContextWindow(t *testing.T) {
 	defer server.Close()
 
 	client, err := New("llamacpp", config.Provider{
-		BaseURL: server.URL + "/v1",
+		BaseURL: server.URL,
 		Timeout: time.Second,
 	}, nil)
 	if err != nil {
@@ -82,7 +82,7 @@ func TestDetectContextWindowUsesLlamaCPPProps(t *testing.T) {
 	defer server.Close()
 
 	got, err := DetectContextWindow(context.Background(), "llamacpp", config.Provider{
-		BaseURL: server.URL + "/v1",
+		BaseURL: server.URL,
 		Timeout: time.Second,
 	}, "model-a", nil)
 	if err != nil {
@@ -93,33 +93,41 @@ func TestDetectContextWindowUsesLlamaCPPProps(t *testing.T) {
 	}
 }
 
-func TestPropsFallsBackToV1PathWhenRootPropsMissing(t *testing.T) {
+func TestListModelsUsesV1ForLlamaCPP(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/props":
-			http.NotFound(w, r)
-		case "/v1/props":
-			_, _ = w.Write([]byte(`{"default_generation_settings":{"n_ctx":12288}}`))
-		default:
+		if r.URL.Path != "/v1/models" {
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
+		_, _ = w.Write([]byte(`{"data":[{"id":"model-a","owned_by":"llamacpp"}]}`))
 	}))
 	defer server.Close()
 
 	client, err := New("llamacpp", config.Provider{
-		BaseURL: server.URL + "/v1",
+		BaseURL: server.URL,
 		Timeout: time.Second,
 	}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	props, err := client.Props(context.Background(), "")
+	models, err := client.ListModels(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if props.DefaultGenerationSettings.NCtx != 12288 {
-		t.Fatalf("unexpected props payload: %#v", props)
+	if len(models) != 1 || models[0].ID != "model-a" {
+		t.Fatalf("unexpected models: %#v", models)
+	}
+}
+
+func TestNewNormalizesLegacyLlamaCPPV1BaseURL(t *testing.T) {
+	client, err := New("llamacpp", config.Provider{
+		BaseURL: "http://127.0.0.1:8888/v1",
+		Timeout: time.Second,
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if client.baseURL != "http://127.0.0.1:8888" {
+		t.Fatalf("expected normalized llama.cpp base url, got %q", client.baseURL)
 	}
 }
 

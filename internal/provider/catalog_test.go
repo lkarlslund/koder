@@ -31,6 +31,9 @@ func TestBuildDraftLeavesLlamaCPPModelBlank(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if draft.BaseURL != "http://127.0.0.1:8888" {
+		t.Fatalf("expected root llama.cpp base url, got %q", draft.BaseURL)
+	}
 	if draft.Model != "" {
 		t.Fatalf("expected blank llama.cpp model, got %q", draft.Model)
 	}
