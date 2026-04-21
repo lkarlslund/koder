@@ -1054,14 +1054,7 @@ func (m *Model) renderSidebar() string {
 		}
 	}
 	lines = append(lines, "")
-	lines = append(lines, "Profiles")
-	for _, profile := range permission.ProfileNames(m.cfg.Permissions) {
-		cursor := " "
-		if profile == m.permissionProfile() {
-			cursor = ">"
-		}
-		lines = append(lines, fmt.Sprintf("%s %s", cursor, permission.DisplayName(profile)))
-	}
+	lines = append(lines, fmt.Sprintf("Profile %s", permission.DisplayName(m.permissionProfile())))
 	lines = append(lines, "")
 	lines = append(lines, "Tasks")
 	if len(m.tasks) == 0 {
