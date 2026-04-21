@@ -455,7 +455,7 @@ func TestCtrlYCopiesLatestAssistantMessage(t *testing.T) {
 	}
 }
 
-func TestEnterWhileBusyQueuesPrompt(t *testing.T) {
+func TestEnterWhileBusyQueuesSteeringPrompt(t *testing.T) {
 	cfg := testConfig(t)
 	cfg.DefaultProvider = "openai"
 	cfg.DefaultModel = "gpt-5.4"
@@ -485,7 +485,7 @@ func TestEnterWhileBusyQueuesPrompt(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("expected title sync command after queueing")
 	}
-	if next.queuedPrompt == nil || next.queuedPrompt.Text != "follow up" || next.queuedPrompt.Mode != queuedPromptModeNormal {
+	if next.queuedPrompt == nil || next.queuedPrompt.Text != "follow up" || next.queuedPrompt.Mode != queuedPromptModeSteer {
 		t.Fatalf("expected queued prompt, got %#v", next.queuedPrompt)
 	}
 	if next.composer.Value() != "" {

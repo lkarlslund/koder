@@ -884,7 +884,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if m.loading {
-			return m.queueComposerPrompt(queuedPromptModeNormal)
+			return m.queueComposerPrompt(queuedPromptModeSteer)
 		}
 		if handledModel, cmd, ok := m.handleLocalCommand(prompt); ok {
 			return handledModel, cmd
