@@ -1909,11 +1909,11 @@ func TestRenderSidebarShowsStatusAndSessionInfo(t *testing.T) {
 	if !strings.Contains(got, "Status") || !strings.Contains(got, "Working ...") {
 		t.Fatalf("expected sidebar to include status, got %q", got)
 	}
-	if !strings.Contains(got, "Keys") || !strings.Contains(got, "enter send/select") {
-		t.Fatalf("expected sidebar to include hotkey hints, got %q", got)
+	if !strings.Contains(got, "Help") || !strings.Contains(got, "Alt-H  hotkeys and commands") {
+		t.Fatalf("expected sidebar to include help hint, got %q", got)
 	}
-	if !strings.Contains(got, "/connect") {
-		t.Fatalf("expected sidebar to include /connect hint, got %q", got)
+	if strings.Contains(got, "enter send/select") || strings.Contains(got, "/connect") {
+		t.Fatalf("expected sidebar to omit detailed hotkeys and commands, got %q", got)
 	}
 	if !strings.Contains(got, "Context") || !strings.Contains(got, "25% used") {
 		t.Fatalf("expected sidebar to include context usage, got %q", got)
@@ -1931,6 +1931,37 @@ func TestRefreshViewportShowsConnectHintWithoutProvider(t *testing.T) {
 	m.refreshViewport()
 	if got := m.viewport.View(); !strings.Contains(got, "/connect") {
 		t.Fatalf("expected connect hint in empty viewport, got %q", got)
+	}
+}
+
+func TestAltHTogglesHelpDialog(t *testing.T) {
+	m := Model{
+		cfg:      testConfig(t),
+		composer: textarea.New(),
+		width:    120,
+		height:   40,
+	}
+
+	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Alt: true, Runes: []rune("h")})
+	next := updated.(*Model)
+	if cmd == nil {
+		t.Fatal("expected sync command when opening help dialog")
+	}
+	if !next.hasHelpModal() {
+		t.Fatal("expected help dialog to open")
+	}
+	view := next.View()
+	if !strings.Contains(view, "Help") || !strings.Contains(view, "/connect") || !strings.Contains(view, "Ctrl-V") {
+		t.Fatalf("expected help dialog content, got %q", view)
+	}
+
+	updated, cmd = next.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Alt: true, Runes: []rune("h")})
+	next = updated.(*Model)
+	if cmd == nil {
+		t.Fatal("expected sync command when closing help dialog")
+	}
+	if next.hasHelpModal() {
+		t.Fatal("expected help dialog to close")
 	}
 }
 

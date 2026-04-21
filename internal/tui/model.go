@@ -284,6 +284,7 @@ type Model struct {
 	sessionDialog      *ui.SessionDialog
 	preferences        *ui.PreferencesDialog
 	agentsModal        *ui.Modal
+	helpModal          *ui.Modal
 	connectDialog      *ui.ConnectDialog
 	disconnectDialog   *ui.DisconnectDialog
 	modelDialog        *ui.ModelDialog
@@ -541,6 +542,9 @@ func (m Model) View() string {
 	if m.hasAgentsModal() && m.width > 0 && m.height > 0 {
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, m.renderAgentsModal())
 	}
+	if m.hasHelpModal() && m.width > 0 && m.height > 0 {
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, m.renderHelpModal())
+	}
 	if m.hasPreferencesDialog() && m.width > 0 && m.height > 0 {
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, m.renderPreferencesDialog())
 	}
@@ -572,6 +576,13 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.hasAgentsModal() {
 		if msg.String() == "esc" || msg.String() == "enter" {
 			m.closeAgentsModal()
+			return m, m.syncWindowTitleCmd()
+		}
+		return m, nil
+	}
+	if m.hasHelpModal() {
+		if msg.String() == "esc" || msg.String() == "enter" || msg.String() == "alt+h" {
+			m.closeHelpModal()
 			return m, m.syncWindowTitleCmd()
 		}
 		return m, nil
@@ -678,6 +689,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c":
 		return m.quit()
+	case "alt+h":
+		m.openHelpModal()
+		return m, m.syncWindowTitleCmd()
 	case "ctrl+v":
 		return m.pasteClipboardText()
 	case "ctrl+y":
@@ -1079,32 +1093,8 @@ func (m *Model) renderSidebar() string {
 		lines = append(lines, fmt.Sprintf("  api %s", truncate(debugAddr, 23)))
 	}
 	lines = append(lines, "")
-	lines = append(lines, "Keys")
-	lines = append(lines, "  enter send/select")
-	if m.loading {
-		lines = append(lines, "  esc   interrupt")
-		lines = append(lines, "  enter queue next")
-		lines = append(lines, "  tab   queue steer")
-	} else {
-		lines = append(lines, "  tab   autocomplete")
-	}
-	lines = append(lines, "  ^v    paste clipboard")
-	lines = append(lines, "  ^y    copy last answer")
-	lines = append(lines, "  ^s    sidebar")
-	lines = append(lines, "  ^r    reasoning")
-	lines = append(lines, "  ^g    continue")
-	lines = append(lines, "  /agents")
-	lines = append(lines, "  /agents refresh")
-	lines = append(lines, "  /compact")
-	lines = append(lines, "  /connect")
-	lines = append(lines, "  /disconnect")
-	lines = append(lines, "  /fork")
-	lines = append(lines, "  /model")
-	lines = append(lines, "  /new  session")
-	lines = append(lines, "  /permissions")
-	lines = append(lines, "  /preferences")
-	lines = append(lines, "  /resume")
-	lines = append(lines, "  /quit")
+	lines = append(lines, "Help")
+	lines = append(lines, "  Alt-H  hotkeys and commands")
 	return strings.Join(lines, "\n")
 }
 
@@ -2333,6 +2323,8 @@ func (m Model) openDialogName() string {
 		return "session"
 	case m.hasPreferencesDialog():
 		return "preferences"
+	case m.hasHelpModal():
+		return "help"
 	case m.hasPicker():
 		return "picker"
 	default:
@@ -2913,6 +2905,14 @@ func (m *Model) closeAgentsModal() {
 	m.agentsModal = nil
 }
 
+func (m *Model) hasHelpModal() bool {
+	return m.helpModal != nil
+}
+
+func (m *Model) closeHelpModal() {
+	m.helpModal = nil
+}
+
 func (m *Model) hasConnectDialog() bool {
 	return m.connectDialog != nil
 }
@@ -3093,6 +3093,55 @@ func (m *Model) renderAgentsModal() string {
 		return ""
 	}
 	return m.agentsModal.View(m.palette)
+}
+
+func (m *Model) openHelpModal() {
+	hotkeys := []string{
+		"Hotkeys",
+		"Alt-H               show or close help",
+		"Enter               send prompt or confirm selection",
+		"Esc                 cancel dialog or interrupt active run",
+		"Tab                 autocomplete, or queue steering while running",
+		"Alt-Enter           insert newline",
+		"Ctrl-V              paste clipboard text",
+		"Ctrl-Y              copy last assistant message",
+		"Ctrl-S              toggle sidebar",
+		"Ctrl-R              toggle reasoning",
+		"Ctrl-G              continue",
+	}
+	commands := []string{
+		"Commands",
+		"/agents             show resolved AGENTS details",
+		"/agents refresh     recompute project instructions",
+		"/compact            compact session history",
+		"/connect            configure a provider",
+		"/disconnect         remove a configured provider",
+		"/fork               fork current session",
+		"/model              choose a model",
+		"/new                create a new session",
+		"/permissions        change permission mode",
+		"/preferences        open UI preferences",
+		"/quit               exit koder",
+		"/resume             resume another session",
+		"/theme              preview and select theme",
+	}
+	lines := append([]string{}, hotkeys...)
+	lines = append(lines, "")
+	lines = append(lines, commands...)
+	modal := ui.Modal{
+		Title:  "Help",
+		Body:   strings.Join(lines, "\n"),
+		Footer: "Alt-H, Enter, or Esc closes this help dialog",
+		Width:  min(104, max(84, m.width-8)),
+	}
+	m.helpModal = &modal
+}
+
+func (m *Model) renderHelpModal() string {
+	if m.helpModal == nil {
+		return ""
+	}
+	return m.helpModal.View(m.palette)
 }
 
 func (m Model) currentProjectRoot() string {
