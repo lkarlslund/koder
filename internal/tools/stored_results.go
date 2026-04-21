@@ -75,9 +75,11 @@ type EditStoredResult struct {
 }
 
 type WriteStoredResult struct {
-	Path    string `json:"path"`
-	Action  string `json:"action,omitempty"`
-	Summary string `json:"summary,omitempty"`
+	Path      string `json:"path"`
+	Action    string `json:"action,omitempty"`
+	Summary   string `json:"summary,omitempty"`
+	Content   string `json:"content,omitempty"`
+	Truncated bool   `json:"truncated,omitempty"`
 }
 
 type GlobStoredResult struct {
@@ -195,6 +197,18 @@ func ModelTextForPart(part domain.Part, diff string) (string, bool) {
 	return text, true
 }
 
+func DisplayTextForPart(part domain.Part) (string, bool) {
+	env, ok := storedResultFromPart(part)
+	if !ok {
+		return "", false
+	}
+	text, ok := formatStoredResultForDisplay(env)
+	if !ok || strings.TrimSpace(text) == "" {
+		return "", false
+	}
+	return text, true
+}
+
 func marshalStoredResult(partKind domain.PartKind, tool domain.ToolKind, status StoredResultStatus, payload StoredResultPayload) (string, error) {
 	rawPayload, err := json.Marshal(payload)
 	if err != nil {
@@ -300,6 +314,21 @@ func formatStoredToolOutput(env storedResultEnvelope) (string, bool) {
 	}
 }
 
+func formatStoredResultForDisplay(env storedResultEnvelope) (string, bool) {
+	if env.Status == StoredResultStatusDenied || env.Status == StoredResultStatusError {
+		return formatStoredToolOutput(env)
+	}
+	switch env.PartKind {
+	case domain.PartKindToolOutput:
+		if env.Tool == domain.ToolKindWrite {
+			return decodeAndFormat[WriteStoredResult](env.Payload, formatWriteStoredResultForDisplay)
+		}
+		return formatStoredToolOutput(env)
+	default:
+		return "", false
+	}
+}
+
 func decodeAndFormat[T any](payload json.RawMessage, format func(T) string) (string, bool) {
 	if len(payload) == 0 {
 		return "", false
@@ -351,6 +380,17 @@ func formatUpdatePlanStoredResult(result UpdatePlanStoredResult) string {
 		lines = append(lines, "["+strings.TrimSpace(step.Status)+"] "+strings.TrimSpace(step.Step))
 	}
 	return strings.TrimSpace(strings.Join(lines, "\n"))
+}
+
+func formatWriteStoredResultForDisplay(result WriteStoredResult) string {
+	if strings.TrimSpace(result.Content) == "" {
+		return strings.TrimSpace(result.Summary)
+	}
+	text := strings.TrimSpace(result.Content)
+	if result.Truncated {
+		text += "\n... truncated ..."
+	}
+	return text
 }
 
 func formatWebSearchStoredResult(result WebSearchStoredResult) string {

@@ -63,6 +63,7 @@ func (tool) Execute(_ context.Context, runtime tools.Runtime, req tools.Request)
 	dmp := diffmatchpatch.New()
 	diffs := dmp.DiffMain(string(beforeBytes), req.Args["content"], false)
 	summary := fmt.Sprintf("%s %s", cases.Title(language.English).String(action), rel)
+	content, truncated := tools.TruncateText(req.Args["content"], tools.DefaultToolOutputLimit)
 	return tools.Result{
 		Output:   summary,
 		DiffText: dmp.DiffPrettyText(diffs),
@@ -71,9 +72,11 @@ func (tool) Execute(_ context.Context, runtime tools.Runtime, req tools.Request)
 			"action": action,
 		},
 		Stored: tools.WriteStoredResult{
-			Path:    rel,
-			Action:  action,
-			Summary: summary,
+			Path:      rel,
+			Action:    action,
+			Summary:   summary,
+			Content:   content,
+			Truncated: truncated,
 		},
 	}, nil
 }

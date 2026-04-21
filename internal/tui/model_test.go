@@ -27,6 +27,7 @@ import (
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/theme"
+	"github.com/lkarlslund/koder/internal/tools"
 	"github.com/lkarlslund/koder/internal/ui"
 	"github.com/lkarlslund/koder/internal/workspace"
 )
@@ -2883,6 +2884,53 @@ func TestMouseClickTogglesToolRunExpansion(t *testing.T) {
 	final := updated.(*Model)
 	if strings.Contains(final.viewport.View(), "line one\nline two") {
 		t.Fatalf("expected collapsed tool output after second click, got %q", final.viewport.View())
+	}
+}
+
+func TestWriteToolRunUsesStoredContentForExpansion(t *testing.T) {
+	m := Model{
+		currentSession:   domain.Session{ID: 1},
+		viewport:         viewport.New(80, 8),
+		parts:            map[int64][]domain.Part{},
+		expandedToolRuns: map[string]bool{},
+		palette:          theme.Resolve("tokyonight").Palette,
+	}
+
+	meta, err := json.Marshal(tools.MetaWithStoredResult(map[string]string{
+		"tool":         "write",
+		"path":         "note.txt",
+		"tool_call_id": "call_write_1",
+	}, domain.PartKindToolOutput, domain.ToolKindWrite, tools.StoredResultStatusOK, tools.WriteStoredResult{
+		Path:    "note.txt",
+		Action:  "created",
+		Summary: "Created note.txt",
+		Content: "line one\nline two",
+	}))
+	if err != nil {
+		t.Fatalf("marshal meta: %v", err)
+	}
+
+	m.messages = []domain.Message{
+		{ID: 1, Role: domain.MessageRoleTool, Summary: "write"},
+	}
+	m.parts[1] = []domain.Part{{
+		Kind:     domain.PartKindToolOutput,
+		Body:     "Created note.txt",
+		MetaJSON: string(meta),
+	}}
+
+	m.refreshViewport()
+	if strings.Contains(m.viewport.View(), " line one\n line two") {
+		t.Fatalf("expected collapsed write output, got %q", m.viewport.View())
+	}
+	if !strings.Contains(m.viewport.View(), "Expand (1 line more)") {
+		t.Fatalf("expected expand indicator, got %q", m.viewport.View())
+	}
+
+	m.expandedToolRuns["call_write_1"] = true
+	m.refreshViewport()
+	if !strings.Contains(m.viewport.View(), " line one") || !strings.Contains(m.viewport.View(), " line two") {
+		t.Fatalf("expected expanded write content, got %q", m.viewport.View())
 	}
 }
 

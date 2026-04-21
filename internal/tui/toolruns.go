@@ -197,6 +197,9 @@ func toolRunOutput(parts []domain.Part, msg domain.Message) (ui.ToolRun, bool) {
 		meta := stringMeta(part.MetaJSON)
 		req, err := tools.RequestFromMetaMap(meta)
 		output := strings.TrimSpace(part.Body)
+		if display, ok := tools.DisplayTextForPart(part); ok {
+			output = strings.TrimSpace(display)
+		}
 		diff := toolRunDiffBody(parts)
 		status := ui.ToolRunStatusCompleted
 		if strings.Contains(strings.ToLower(output), "denied") {
