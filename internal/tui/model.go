@@ -829,6 +829,35 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	if m.hasComposerHistoryMenu() {
+		switch msg.String() {
+		case "ctrl+c":
+			return m.quit()
+		case "esc":
+			m.cancelComposerHistorySearch()
+			return m, m.syncWindowTitleCmd()
+		case "enter", "tab":
+			if !m.acceptComposerHistorySelection() {
+				return m, nil
+			}
+			return m, m.syncWindowTitleCmd()
+		case "up", "ctrl+s":
+			m.moveComposerHistorySelection(-1)
+			return m, nil
+		case "down", "ctrl+r":
+			m.moveComposerHistorySelection(1)
+			return m, nil
+		case "backspace":
+			m.trimComposerHistoryQuery()
+			return m, nil
+		default:
+			if msg.Type == tea.KeyRunes {
+				m.appendComposerHistoryQuery(msg.String())
+				return m, nil
+			}
+		}
+	}
+
 	if m.hasSlashMenu() {
 		switch msg.String() {
 		case "up":
@@ -911,7 +940,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.refreshViewport()
 		return m, nil
 	case "ctrl+r":
-		if !m.searchComposerHistoryBackward() {
+		if !m.openComposerHistorySearch() {
 			return m, nil
 		}
 		return m, m.syncWindowTitleCmd()
@@ -1101,7 +1130,9 @@ func (m *Model) renderFooter() string {
 	if prompt := m.renderApprovalPrompt(); prompt != "" {
 		parts = append(parts, prompt)
 	}
-	if menu := m.renderSlashMenu(); menu != "" {
+	if menu := m.renderComposerHistoryMenu(); menu != "" {
+		parts = append(parts, menu)
+	} else if menu := m.renderSlashMenu(); menu != "" {
 		parts = append(parts, menu)
 	} else if menu := m.renderSkillMenu(); menu != "" {
 		parts = append(parts, menu)
@@ -2325,47 +2356,106 @@ func (m *Model) recallComposerHistory(delta int) bool {
 	return true
 }
 
-func (m *Model) searchComposerHistoryBackward() bool {
-	history := m.composerPromptHistory()
+func (m *Model) openComposerHistorySearch() bool {
+	history := m.filteredComposerHistory("")
 	if len(history) == 0 {
 		m.status = "No prompt history in this session"
 		return true
 	}
-	var query string
-	start := len(history) - 1
-	if m.composerHistory.SearchActive {
-		query = m.composerHistory.SearchQuery
-		start = m.composerHistory.SearchIndex - 1
-	} else {
-		query = strings.TrimSpace(m.composer.Value())
+	if !m.composerHistory.SearchActive {
 		m.composerHistory.Draft = m.composer.Value()
-		if m.composerHistory.Active {
-			start = m.composerHistory.Index - 1
-		}
-	}
-	if start < 0 {
-		m.status = "No earlier history match"
+		m.composerHistory.SearchQuery = strings.TrimSpace(m.composer.Value())
+		m.composerHistory.SearchIndex = 0
+		m.composerHistory.SearchActive = true
+		m.status = "Search prompt history"
 		return true
 	}
-	for i := start; i >= 0; i-- {
-		if query != "" && !strings.Contains(history[i], query) {
+	m.moveComposerHistorySelection(1)
+	return true
+}
+
+func (m *Model) hasComposerHistoryMenu() bool {
+	return m.composerHistory.SearchActive
+}
+
+func (m *Model) filteredComposerHistory(query string) []string {
+	history := m.composerPromptHistory()
+	if len(history) == 0 {
+		return nil
+	}
+	query = strings.TrimSpace(query)
+	queryLower := strings.ToLower(query)
+	matches := make([]string, 0, len(history))
+	for i := len(history) - 1; i >= 0; i-- {
+		entry := strings.TrimSpace(history[i])
+		if entry == "" {
 			continue
 		}
-		m.composerHistory.Active = true
-		m.composerHistory.Index = i
-		m.composerHistory.SearchActive = true
-		m.composerHistory.SearchIndex = i
-		m.composerHistory.SearchQuery = query
-		m.setComposerValue(history[i])
-		if query == "" {
-			m.status = fmt.Sprintf("History %d/%d", i+1, len(history))
-		} else {
-			m.status = fmt.Sprintf("History match %d/%d", i+1, len(history))
+		if queryLower != "" && !strings.Contains(strings.ToLower(entry), queryLower) {
+			continue
 		}
-		return true
+		matches = append(matches, entry)
 	}
-	m.status = fmt.Sprintf("No earlier history match for %q", query)
+	return matches
+}
+
+func (m *Model) composerHistorySelection() (string, bool) {
+	matches := m.filteredComposerHistory(m.composerHistory.SearchQuery)
+	if len(matches) == 0 {
+		return "", false
+	}
+	if m.composerHistory.SearchIndex < 0 {
+		m.composerHistory.SearchIndex = 0
+	}
+	if m.composerHistory.SearchIndex >= len(matches) {
+		m.composerHistory.SearchIndex = len(matches) - 1
+	}
+	return matches[m.composerHistory.SearchIndex], true
+}
+
+func (m *Model) moveComposerHistorySelection(delta int) {
+	matches := m.filteredComposerHistory(m.composerHistory.SearchQuery)
+	if len(matches) == 0 {
+		m.composerHistory.SearchIndex = 0
+		return
+	}
+	m.composerHistory.SearchIndex += delta
+	if m.composerHistory.SearchIndex < 0 {
+		m.composerHistory.SearchIndex = 0
+	}
+	if m.composerHistory.SearchIndex >= len(matches) {
+		m.composerHistory.SearchIndex = len(matches) - 1
+	}
+}
+
+func (m *Model) appendComposerHistoryQuery(fragment string) {
+	m.composerHistory.SearchQuery += fragment
+	m.composerHistory.SearchIndex = 0
+}
+
+func (m *Model) trimComposerHistoryQuery() {
+	if m.composerHistory.SearchQuery == "" {
+		return
+	}
+	m.composerHistory.SearchQuery = m.composerHistory.SearchQuery[:len(m.composerHistory.SearchQuery)-1]
+	m.composerHistory.SearchIndex = 0
+}
+
+func (m *Model) acceptComposerHistorySelection() bool {
+	value, ok := m.composerHistorySelection()
+	if !ok {
+		m.status = "No matching prompt history entry"
+		return false
+	}
+	m.setComposerValue(value)
+	m.resetComposerHistory()
+	m.status = "Loaded prompt from history"
 	return true
+}
+
+func (m *Model) cancelComposerHistorySearch() {
+	m.resetComposerHistory()
+	m.status = "History search cancelled"
 }
 
 func (m *Model) finishOperationWithError(err error) (tea.Model, tea.Cmd) {
@@ -2951,6 +3041,59 @@ func (m *Model) renderSkillMenu() string {
 	}
 	selected := m.skillIndex - start
 	return ui.RenderSlashMenu("Skills", items, selected)
+}
+
+func (m *Model) renderComposerHistoryMenu() string {
+	if !m.hasComposerHistoryMenu() {
+		return ""
+	}
+	matches := m.filteredComposerHistory(m.composerHistory.SearchQuery)
+	width := max(48, min(88, m.composerWidth()))
+	lines := []string{
+		lipgloss.NewStyle().Bold(true).Render("History"),
+		lipgloss.NewStyle().Foreground(m.palette.AssistantTimestampText).Render("filter: " + m.composerHistory.SearchQuery),
+	}
+	if len(matches) == 0 {
+		lines = append(lines, "", "  no matches")
+	} else {
+		start := 0
+		if m.composerHistory.SearchIndex >= 6 {
+			start = m.composerHistory.SearchIndex - 5
+		}
+		end := min(len(matches), start+6)
+		lines = append(lines, "")
+		for idx := start; idx < end; idx++ {
+			entry := matches[idx]
+			lines = append(lines, ui.RenderSelectableRow(firstHistoryLine(entry), historySummary(entry), "", width-4, m.palette, idx == m.composerHistory.SearchIndex))
+		}
+	}
+	lines = append(lines, "", lipgloss.NewStyle().Foreground(m.palette.AssistantTimestampText).Render("enter accept  esc cancel  ctrl-r/down older  ctrl-s/up newer"))
+	return lipgloss.NewStyle().Border(lipgloss.NormalBorder()).Padding(0, 1).Width(width).Render(strings.Join(lines, "\n"))
+}
+
+func firstHistoryLine(input string) string {
+	input = strings.TrimSpace(input)
+	if input == "" {
+		return ""
+	}
+	lines := strings.Split(input, "\n")
+	return strings.TrimSpace(lines[0])
+}
+
+func historySummary(input string) string {
+	input = strings.TrimSpace(input)
+	if input == "" {
+		return ""
+	}
+	lines := strings.Split(input, "\n")
+	if len(lines) == 1 {
+		return input
+	}
+	summary := strings.TrimSpace(strings.Join(lines[1:], " "))
+	if summary == "" {
+		return input
+	}
+	return summary
 }
 
 func (m *Model) renderPicker() string {

@@ -646,7 +646,7 @@ func TestUpDownBrowseComposerPromptHistory(t *testing.T) {
 	}
 }
 
-func TestCtrlRSearchesComposerPromptHistory(t *testing.T) {
+func TestCtrlROpensComposerHistoryMenuAndAcceptsSelection(t *testing.T) {
 	m := Model{
 		composer: textarea.New(),
 		messages: []domain.Message{
@@ -661,19 +661,62 @@ func TestCtrlRSearchesComposerPromptHistory(t *testing.T) {
 	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlR})
 	next := updated.(*Model)
 	if cmd == nil {
-		t.Fatal("expected title sync command after history search")
+		t.Fatal("expected title sync command after opening history search")
 	}
-	if got := next.composer.Value(); got != "alpha three" {
-		t.Fatalf("expected latest matching history entry, got %q", got)
+	if !next.hasComposerHistoryMenu() {
+		t.Fatal("expected composer history menu to open")
+	}
+	if got := next.composer.Value(); got != "alpha" {
+		t.Fatalf("expected draft to remain in composer while searching, got %q", got)
+	}
+	if got := next.renderFooter(); !strings.Contains(got, "History") || !strings.Contains(got, "alpha three") {
+		t.Fatalf("expected history menu in footer, got %q", got)
 	}
 
-	updated, cmd = next.handleKey(tea.KeyMsg{Type: tea.KeyCtrlR})
+	updated, _ = next.handleKey(tea.KeyMsg{Type: tea.KeyCtrlR})
+	next = updated.(*Model)
+	if got := next.filteredComposerHistory(next.composerHistory.SearchQuery)[next.composerHistory.SearchIndex]; got != "alpha one" {
+		t.Fatalf("expected ctrl-r to move to earlier matching history entry, got %q", got)
+	}
+
+	updated, cmd = next.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
 	next = updated.(*Model)
 	if cmd == nil {
-		t.Fatal("expected title sync command after repeated history search")
+		t.Fatal("expected title sync command after accepting history selection")
+	}
+	if next.hasComposerHistoryMenu() {
+		t.Fatal("expected history menu to close after selection")
 	}
 	if got := next.composer.Value(); got != "alpha one" {
-		t.Fatalf("expected earlier matching history entry, got %q", got)
+		t.Fatalf("expected selected history entry in composer, got %q", got)
+	}
+}
+
+func TestComposerHistoryMenuFiltersWithoutMutatingComposer(t *testing.T) {
+	m := Model{
+		composer: textarea.New(),
+		messages: []domain.Message{
+			{ID: 1, Role: domain.MessageRoleUser, Summary: "first deploy"},
+			{ID: 2, Role: domain.MessageRoleUser, Summary: "second status"},
+		},
+		parts: map[int64][]domain.Part{},
+	}
+	m.composer.SetValue("")
+
+	updated, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlR})
+	next := updated.(*Model)
+	updated, _ = next.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("status")})
+	next = updated.(*Model)
+
+	if !next.hasComposerHistoryMenu() {
+		t.Fatal("expected history menu to remain open while filtering")
+	}
+	if got := next.composer.Value(); got != "" {
+		t.Fatalf("expected composer draft to remain unchanged while filtering, got %q", got)
+	}
+	matches := next.filteredComposerHistory(next.composerHistory.SearchQuery)
+	if len(matches) != 1 || matches[0] != "second status" {
+		t.Fatalf("expected filtered history match, got %#v", matches)
 	}
 }
 
