@@ -85,6 +85,40 @@ func TestApprovalSerializationRoundTrip(t *testing.T) {
 	}
 }
 
+func TestHandleModelToolCallDeniesDisabledSessionTool(t *testing.T) {
+	cfg := testConfig(t)
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	engine := New(cfg, st, tools.NewRegistry(t.TempDir()), nil, t.TempDir())
+	session, err := st.CreateSession(context.Background(), "test", "provider", "model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetSessionToolStates(context.Background(), session.ID, map[domain.ToolKind]bool{
+		domain.ToolKindRead: false,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	evt, err := engine.handleModelToolCall(context.Background(), session, tools.Request{
+		Tool: domain.ToolKindRead,
+		Args: map[string]string{"path": "README.md"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if evt.Kind != domain.EventKindToolResult {
+		t.Fatalf("expected tool result event, got %#v", evt)
+	}
+	if !strings.Contains(evt.Text, "disabled for this session") {
+		t.Fatalf("expected disabled tool message, got %#v", evt)
+	}
+}
+
 func TestStringifyPartsExcludesSystemNotice(t *testing.T) {
 	got := stringifyParts([]domain.Part{
 		{Kind: domain.PartKindText, Body: "answer"},

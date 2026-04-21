@@ -95,6 +95,7 @@ func (b *pebbleBackend) CreateSession(ctx context.Context, title, providerID, mo
 		ProviderID:        providerID,
 		ModelID:           modelID,
 		PermissionProfile: "",
+		ToolStates:        map[domain.ToolKind]bool{},
 		CreatedAt:         now,
 		UpdatedAt:         now,
 		LastMessage:       "",
@@ -145,6 +146,12 @@ func (b *pebbleBackend) GetSession(ctx context.Context, sessionID int64) (domain
 func (b *pebbleBackend) SetSessionPermissionProfile(ctx context.Context, sessionID int64, profile string) error {
 	return b.updateSession(ctx, sessionID, func(session *domain.Session) {
 		session.PermissionProfile = profile
+	})
+}
+
+func (b *pebbleBackend) SetSessionToolStates(ctx context.Context, sessionID int64, states map[domain.ToolKind]bool) error {
+	return b.updateSession(ctx, sessionID, func(session *domain.Session) {
+		session.ToolStates = cloneToolStates(states)
 	})
 }
 

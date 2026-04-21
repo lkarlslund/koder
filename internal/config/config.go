@@ -68,13 +68,14 @@ type PermissionRule struct {
 }
 
 type Config struct {
-	DefaultProvider  string              `toml:"default_provider"`
-	DefaultModel     string              `toml:"default_model"`
-	MaxToolLoopSteps int                 `toml:"max_tool_loop_steps"`
-	Providers        map[string]Provider `toml:"providers"`
-	Permissions      PermissionRules     `toml:"permissions"`
-	Store            Store               `toml:"store"`
-	UI               UI                  `toml:"ui"`
+	DefaultProvider  string                   `toml:"default_provider"`
+	DefaultModel     string                   `toml:"default_model"`
+	MaxToolLoopSteps int                      `toml:"max_tool_loop_steps"`
+	ToolDefaults     map[domain.ToolKind]bool `toml:"tool_defaults"`
+	Providers        map[string]Provider      `toml:"providers"`
+	Permissions      PermissionRules          `toml:"permissions"`
+	Store            Store                    `toml:"store"`
+	UI               UI                       `toml:"ui"`
 	path             string
 	configDir        string
 	stateDir         string
@@ -125,9 +126,14 @@ func Load() (Config, error) {
 }
 
 func Default() Config {
+	toolDefaults := make(map[domain.ToolKind]bool, len(domain.AllToolKinds()))
+	for _, kind := range domain.AllToolKinds() {
+		toolDefaults[kind] = true
+	}
 	return Config{
 		DefaultProvider:  "",
 		MaxToolLoopSteps: defaultMaxToolLoopSteps,
+		ToolDefaults:     toolDefaults,
 		Providers:        map[string]Provider{},
 		Permissions: PermissionRules{
 			Profile: "default",
@@ -207,6 +213,14 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Providers == nil {
 		c.Providers = def.Providers
+	}
+	if c.ToolDefaults == nil {
+		c.ToolDefaults = cloneToolDefaults(def.ToolDefaults)
+	}
+	for _, kind := range domain.AllToolKinds() {
+		if _, ok := c.ToolDefaults[kind]; !ok {
+			c.ToolDefaults[kind] = true
+		}
 	}
 	if c.Permissions.Profile == "" {
 		c.Permissions.Profile = def.Permissions.Profile
@@ -342,6 +356,14 @@ func cloneProfiles(src map[string]PermissionProfile) map[string]PermissionProfil
 		rules := make([]PermissionRule, len(profile.Rules))
 		copy(rules, profile.Rules)
 		dst[name] = PermissionProfile{Rules: rules}
+	}
+	return dst
+}
+
+func cloneToolDefaults(src map[domain.ToolKind]bool) map[domain.ToolKind]bool {
+	dst := make(map[domain.ToolKind]bool, len(src))
+	for kind, enabled := range src {
+		dst[kind] = enabled
 	}
 	return dst
 }

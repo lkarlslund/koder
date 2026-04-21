@@ -1517,6 +1517,38 @@ func TestPrefsCommandOpensPreferencesDialog(t *testing.T) {
 	}
 }
 
+func TestToolsCommandOpensToolsDialog(t *testing.T) {
+	m := Model{
+		cfg:      config.Default(),
+		composer: textarea.New(),
+	}
+	m.composer.SetValue("/tools")
+
+	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	next := updated.(*Model)
+	if cmd == nil {
+		t.Fatal("expected title sync command when opening tools dialog")
+	}
+	if !next.hasToolsDialog() {
+		t.Fatal("expected tools dialog to open")
+	}
+}
+
+func TestApplySessionToolStatesUpdatesDraftSession(t *testing.T) {
+	m := Model{cfg: config.Default()}
+
+	err := m.applySessionToolStates(map[domain.ToolKind]bool{
+		domain.ToolKindRead: true,
+		domain.ToolKindBash: false,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.currentSession.ToolStates[domain.ToolKindBash] {
+		t.Fatalf("expected bash disabled in draft session, got %#v", m.currentSession.ToolStates)
+	}
+}
+
 func TestConnectCommandOpensConnectDialog(t *testing.T) {
 	m := Model{
 		cfg:      config.Default(),

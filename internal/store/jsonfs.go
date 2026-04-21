@@ -80,6 +80,7 @@ func (b *jsonfsBackend) CreateSession(ctx context.Context, title, providerID, mo
 		CreatedAt:         now,
 		UpdatedAt:         now,
 		PermissionProfile: "",
+		ToolStates:        map[domain.ToolKind]bool{},
 	}
 	meta.NextSessionID++
 	if err := b.writeMeta(meta); err != nil {
@@ -150,6 +151,12 @@ func (b *jsonfsBackend) GetSession(ctx context.Context, sessionID int64) (domain
 func (b *jsonfsBackend) SetSessionPermissionProfile(ctx context.Context, sessionID int64, profile string) error {
 	return b.updateSession(ctx, sessionID, func(session *domain.Session) {
 		session.PermissionProfile = profile
+	})
+}
+
+func (b *jsonfsBackend) SetSessionToolStates(ctx context.Context, sessionID int64, states map[domain.ToolKind]bool) error {
+	return b.updateSession(ctx, sessionID, func(session *domain.Session) {
+		session.ToolStates = cloneToolStates(states)
 	})
 }
 

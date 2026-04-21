@@ -31,6 +31,7 @@ import (
 	"github.com/lkarlslund/koder/internal/sessionctx"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/theme"
+	"github.com/lkarlslund/koder/internal/tools"
 	"github.com/lkarlslund/koder/internal/ui"
 	"github.com/lkarlslund/koder/internal/workspace"
 )
@@ -276,6 +277,7 @@ type Model struct {
 	connectDialog      *ui.ConnectDialog
 	disconnectDialog   *ui.DisconnectDialog
 	modelDialog        *ui.ModelDialog
+	toolsDialog        *ui.ToolsDialog
 	debug              *debugsrv.Recorder
 	caps               *provider.CapabilityStore
 	activeOpCancel     context.CancelFunc
@@ -595,6 +597,33 @@ func (m *Model) handleDialogMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd, bool) {
 		default:
 			return m, nil, true
 		}
+	case m.hasToolsDialog():
+		width := 90
+		if m.width > 0 {
+			width = min(100, max(76, m.width-8))
+		}
+		view := m.renderToolsDialog()
+		localX, localY, ok := m.modalLocalPoint(msg, view)
+		if !ok {
+			return m, nil, true
+		}
+		action := m.toolsDialog.HandleMouse(localX, localY, width, m.palette)
+		switch action.Kind {
+		case ui.ToolsDialogActionApply:
+			if err := m.applySessionToolStates(action.States); err != nil {
+				m.status = err.Error()
+				return m, m.syncWindowTitleCmd(), true
+			}
+			m.closeToolsDialog()
+			m.status = "Session tools updated"
+			return m, m.syncWindowTitleCmd(), true
+		case ui.ToolsDialogActionCancel:
+			m.closeToolsDialog()
+			m.status = "Tool selection cancelled"
+			return m, m.syncWindowTitleCmd(), true
+		default:
+			return m, nil, true
+		}
 	case m.hasPicker():
 		view := m.renderPicker()
 		localX, localY, ok := m.modalLocalPoint(msg, view)
@@ -665,6 +694,9 @@ func (m Model) View() string {
 	if m.hasDisconnectDialog() && m.width > 0 && m.height > 0 {
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, m.renderDisconnectDialog())
 	}
+	if m.hasToolsDialog() && m.width > 0 && m.height > 0 {
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, m.renderToolsDialog())
+	}
 	if m.hasConnectDialog() && m.width > 0 && m.height > 0 {
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, m.renderConnectDialog())
 	}
@@ -721,6 +753,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	if m.hasPreferencesDialog() {
 		return m.handlePreferencesKey(msg)
+	}
+	if m.hasToolsDialog() {
+		return m.handleToolsDialogKey(msg)
 	}
 
 	if m.hasSessionDialog() {
@@ -1831,6 +1866,14 @@ func blankAsDash(value string) string {
 	return value
 }
 
+func mapsCloneToolStates(src map[domain.ToolKind]bool) map[domain.ToolKind]bool {
+	dst := make(map[domain.ToolKind]bool, len(src))
+	for kind, enabled := range src {
+		dst[kind] = enabled
+	}
+	return dst
+}
+
 func min(a, b int) int {
 	if a < b {
 		return a
@@ -1846,8 +1889,11 @@ func max(a, b int) int {
 }
 
 func (m Model) UpdateLoad(msg loadMsg) Model {
-	m.sessions = msg.sessions
-	m.currentSession = msg.current
+	m.sessions = make([]domain.Session, 0, len(msg.sessions))
+	for _, session := range msg.sessions {
+		m.sessions = append(m.sessions, m.normalizeSessionToolStates(session))
+	}
+	m.currentSession = m.normalizeSessionToolStates(msg.current)
 	m.messages = msg.messages
 	m.parts = msg.parts
 	m.approvals = msg.approvals
@@ -1858,6 +1904,7 @@ func (m Model) UpdateLoad(msg loadMsg) Model {
 	m.closePicker()
 	m.closeSessionDialog()
 	m.closePreferencesDialog()
+	m.closeToolsDialog()
 	m.closeConnectDialog()
 	m.closeDisconnectDialog()
 	m.closeModelDialog()
@@ -1943,6 +1990,11 @@ func (m *Model) handleLocalCommand(prompt string) (tea.Model, tea.Cmd, bool) {
 		m.updateSlashMenu()
 		m.openPreferencesDialog()
 		return m, tea.Batch(spinnerTickCmd(), m.syncWindowTitleCmd()), true
+	case trimmed == "/tools":
+		m.composer.Reset()
+		m.updateSlashMenu()
+		m.openToolsDialog()
+		return m, m.syncWindowTitleCmd(), true
 	case trimmed == "/agents":
 		m.composer.Reset()
 		m.updateSlashMenu()
@@ -2396,6 +2448,8 @@ func (m Model) openDialogName() string {
 		return "session"
 	case m.hasPreferencesDialog():
 		return "preferences"
+	case m.hasToolsDialog():
+		return "tools"
 	case m.hasHelpModal():
 		return "help"
 	case m.hasPicker():
@@ -2516,6 +2570,7 @@ func (m Model) draftSession() domain.Session {
 		ProviderID:        providerID,
 		ModelID:           modelID,
 		PermissionProfile: profile,
+		ToolStates:        m.sessionToolStates(),
 		CreatedAt:         now,
 		UpdatedAt:         now,
 	}
@@ -2527,6 +2582,9 @@ func (m Model) persistDraftSession(ctx context.Context) (domain.Session, error) 
 		return domain.Session{}, err
 	}
 	if err := m.store.SetSessionPermissionProfile(ctx, session.ID, m.draftSession().PermissionProfile); err != nil {
+		return domain.Session{}, err
+	}
+	if err := m.store.SetSessionToolStates(ctx, session.ID, m.draftSession().ToolStates); err != nil {
 		return domain.Session{}, err
 	}
 	sessions, err := m.store.ListSessions(ctx)
@@ -2637,6 +2695,17 @@ func (m *Model) renderPreferencesDialog() string {
 	return m.preferences.View(width, m.palette)
 }
 
+func (m *Model) renderToolsDialog() string {
+	if !m.hasToolsDialog() {
+		return ""
+	}
+	width := 90
+	if m.width > 0 {
+		width = min(100, max(76, m.width-8))
+	}
+	return m.toolsDialog.View(width, m.palette)
+}
+
 func (m *Model) renderConnectDialog() string {
 	if !m.hasConnectDialog() {
 		return ""
@@ -2718,6 +2787,29 @@ func (m *Model) handlePreferencesKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.closePreferencesDialog()
 		m.status = "Preferences cancelled"
 		return m, tea.Batch(cmd, m.syncWindowTitleCmd())
+	default:
+		return m, nil
+	}
+}
+
+func (m *Model) handleToolsDialogKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if !m.hasToolsDialog() {
+		return m, nil
+	}
+	action := m.toolsDialog.Update(msg)
+	switch action.Kind {
+	case ui.ToolsDialogActionApply:
+		if err := m.applySessionToolStates(action.States); err != nil {
+			m.status = err.Error()
+			return m, m.syncWindowTitleCmd()
+		}
+		m.closeToolsDialog()
+		m.status = "Session tools updated"
+		return m, m.syncWindowTitleCmd()
+	case ui.ToolsDialogActionCancel:
+		m.closeToolsDialog()
+		m.status = "Tool selection cancelled"
+		return m, m.syncWindowTitleCmd()
 	default:
 		return m, nil
 	}
@@ -2897,6 +2989,7 @@ func internalSlashCommands() []slashCommand {
 		{Name: "/preferences", Description: "Open preferences"},
 		{Name: "/quit", Description: "Quit koder"},
 		{Name: "/resume", Description: "Resume a saved session"},
+		{Name: "/tools", Description: "Enable or disable tools for this session"},
 		{Name: "/theme", Description: "Choose a color theme"},
 	}
 }
@@ -2906,6 +2999,67 @@ func (m *Model) permissionProfile() string {
 		return m.currentSession.PermissionProfile
 	}
 	return m.cfg.Permissions.Profile
+}
+
+func (m *Model) sessionToolStates() map[domain.ToolKind]bool {
+	states := make(map[domain.ToolKind]bool, len(domain.AllToolKinds()))
+	for _, kind := range domain.AllToolKinds() {
+		enabled := true
+		if value, ok := m.cfg.ToolDefaults[kind]; ok {
+			enabled = value
+		}
+		if value, ok := m.currentSession.ToolStates[kind]; ok {
+			enabled = value
+		}
+		states[kind] = enabled
+	}
+	return states
+}
+
+func (m *Model) sessionToolEnabled(kind domain.ToolKind) bool {
+	return m.sessionToolStates()[kind]
+}
+
+func (m *Model) normalizeSessionToolStates(session domain.Session) domain.Session {
+	states := make(map[domain.ToolKind]bool, len(domain.AllToolKinds()))
+	for _, kind := range domain.AllToolKinds() {
+		enabled := true
+		if value, ok := m.cfg.ToolDefaults[kind]; ok {
+			enabled = value
+		}
+		if value, ok := session.ToolStates[kind]; ok {
+			enabled = value
+		}
+		states[kind] = enabled
+	}
+	session.ToolStates = states
+	return session
+}
+
+func (m *Model) applySessionToolStates(states map[domain.ToolKind]bool) error {
+	next := make(map[domain.ToolKind]bool, len(domain.AllToolKinds()))
+	for _, kind := range domain.AllToolKinds() {
+		enabled := true
+		if value, ok := m.cfg.ToolDefaults[kind]; ok {
+			enabled = value
+		}
+		if value, ok := states[kind]; ok {
+			enabled = value
+		}
+		next[kind] = enabled
+	}
+	if m.currentSession.ID != 0 && m.store != nil {
+		if err := m.store.SetSessionToolStates(context.Background(), m.currentSession.ID, next); err != nil {
+			return err
+		}
+	}
+	m.currentSession.ToolStates = next
+	for idx := range m.sessions {
+		if m.sessions[idx].ID == m.currentSession.ID {
+			m.sessions[idx].ToolStates = mapsCloneToolStates(next)
+		}
+	}
+	return nil
 }
 
 func (m *Model) renderChangedFile(item workspace.FileStatus) string {
@@ -2968,6 +3122,14 @@ func (m *Model) hasPreferencesDialog() bool {
 
 func (m *Model) closePreferencesDialog() {
 	m.preferences = nil
+}
+
+func (m *Model) hasToolsDialog() bool {
+	return m.toolsDialog != nil
+}
+
+func (m *Model) closeToolsDialog() {
+	m.toolsDialog = nil
 }
 
 func (m *Model) hasAgentsModal() bool {
@@ -3056,6 +3218,31 @@ func sessionTokenSummary(m *Model, sessionID int64) string {
 func (m *Model) openPreferencesDialog() {
 	dialog := ui.NewPreferencesDialog(m.cfg.UI, theme.Names())
 	m.preferences = &dialog
+}
+
+func (m *Model) openToolsDialog() {
+	items := make([]ui.ToolToggleItem, 0, len(domain.AllToolKinds()))
+	for _, kind := range domain.AllToolKinds() {
+		description := "Enable this tool for the current session"
+		label := string(kind)
+		if tool, ok := tools.Lookup(kind); ok {
+			presentation := tool.PresentationForPreview("")
+			if strings.TrimSpace(presentation.Title) != "" {
+				label = presentation.Title
+			}
+			if def, enabled := tool.Definition(); enabled && strings.TrimSpace(def.Function.Description) != "" {
+				description = def.Function.Description
+			}
+		}
+		items = append(items, ui.ToolToggleItem{
+			Tool:        kind,
+			Label:       label,
+			Description: description,
+			Enabled:     m.sessionToolEnabled(kind),
+		})
+	}
+	dialog := ui.NewToolsDialog(items)
+	m.toolsDialog = &dialog
 }
 
 func (m *Model) openConnectDialog() {

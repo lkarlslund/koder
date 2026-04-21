@@ -293,10 +293,12 @@ func (d PreferencesDialog) View(width int, palette theme.Palette) string {
 				Value:       value,
 			}.View(fieldWidth, palette, focused))
 		case preferencesFieldToggle:
-			fieldLines = append(fieldLines, ToggleRow{
+			fieldLines = append(fieldLines, CheckboxRow{
 				Label:       field.Label,
 				Description: field.Description,
-				Value:       d.toggleValue(field.ID),
+				Checked:     d.toggleValue(field.ID),
+				OnLabel:     "Enabled",
+				OffLabel:    "Disabled",
 			}.View(fieldWidth, palette, focused))
 		}
 	}

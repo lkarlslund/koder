@@ -631,6 +631,20 @@ func (e *Engine) approve(ctx context.Context, sessionID int64, rawID string) (<-
 	if err != nil {
 		return nil, err
 	}
+	session, err := e.store.GetSession(ctx, item.SessionID)
+	if err != nil {
+		return nil, err
+	}
+	if !toolEnabledForSession(e.cfg, session, req.Tool) {
+		if err := e.store.UpdateApproval(ctx, id, domain.ApprovalStatusDenied); err != nil {
+			return nil, err
+		}
+		text := fmt.Sprintf("%s disabled for this session", req.Tool)
+		if err := e.recordApprovalReply(ctx, item.SessionID, item.Tool, id, "denied", text, req.ToolCallID); err != nil {
+			return nil, err
+		}
+		return emitOnce(domain.Event{Kind: domain.EventKindApprovalReply, Text: text, Tool: req.Tool}), nil
+	}
 	if err := e.recordApprovalReply(ctx, sessionID, item.Tool, id, "approved", tools.Preview(req), req.ToolCallID); err != nil {
 		return nil, err
 	}
@@ -648,7 +662,7 @@ func (e *Engine) approve(ctx context.Context, sessionID int64, rawID string) (<-
 	if err != nil {
 		return nil, err
 	}
-	session, err := e.store.GetSession(ctx, sessionID)
+	session, err = e.store.GetSession(ctx, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -1286,6 +1300,9 @@ func (e *Engine) handleModelToolCall(ctx context.Context, session domain.Session
 	if !ok {
 		return domain.Event{}, fmt.Errorf("unsupported model tool %q", req.Tool)
 	}
+	if !toolEnabledForSession(e.cfg, session, req.Tool) {
+		return e.recordDisabledToolResult(ctx, sessionID, req)
+	}
 
 	decision := permission.Decision{Mode: domain.PermissionModeAllow}
 	if !toolSpec.BypassesPermission() {
@@ -1491,6 +1508,17 @@ func (e *Engine) prepareModelToolCall(ctx context.Context, session domain.Sessio
 	if !ok {
 		return preparedToolCall{}, fmt.Errorf("unsupported model tool %q", req.Tool)
 	}
+	if !toolEnabledForSession(e.cfg, session, req.Tool) {
+		evt, err := e.recordDisabledToolResult(ctx, sessionID, req)
+		if err != nil {
+			return preparedToolCall{}, err
+		}
+		return preparedToolCall{
+			req:   req,
+			event: evt,
+			run:   false,
+		}, nil
+	}
 
 	decision := permission.Decision{Mode: domain.PermissionModeAllow}
 	if !toolSpec.BypassesPermission() {
@@ -1550,6 +1578,34 @@ func (e *Engine) prepareModelToolCall(ctx context.Context, session domain.Sessio
 		}, nil
 	}
 	return preparedToolCall{req: req, run: true}, nil
+}
+
+func (e *Engine) recordDisabledToolResult(ctx context.Context, sessionID int64, req tools.Request) (domain.Event, error) {
+	text := fmt.Sprintf("%s disabled for this session", req.Tool)
+	if sessionID == 0 {
+		return domain.Event{Kind: domain.EventKindToolResult, Tool: req.Tool, Text: text}, nil
+	}
+	msg, err := e.store.AddMessage(ctx, sessionID, domain.MessageRoleTool, string(req.Tool))
+	if err != nil {
+		return domain.Event{}, err
+	}
+	meta, _ := json.Marshal(tools.MetaWithStoredResult(req.Meta(), domain.PartKindToolOutput, req.Tool, tools.StoredResultStatusDenied, tools.DeniedStoredResult{
+		Message: text,
+	}))
+	if _, err := e.store.AddPart(ctx, msg.ID, domain.PartKindToolOutput, text, string(meta)); err != nil {
+		return domain.Event{}, err
+	}
+	return domain.Event{Kind: domain.EventKindToolResult, Tool: req.Tool, Text: text}, nil
+}
+
+func toolEnabledForSession(cfg config.Config, session domain.Session, kind domain.ToolKind) bool {
+	if enabled, ok := session.ToolStates[kind]; ok {
+		return enabled
+	}
+	if enabled, ok := cfg.ToolDefaults[kind]; ok {
+		return enabled
+	}
+	return true
 }
 
 func (e *Engine) executePreparedToolCall(ctx context.Context, sessionID int64, req tools.Request) ([]domain.Event, error) {

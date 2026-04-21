@@ -56,6 +56,12 @@ func TestApprovalAndTask(t *testing.T) {
 			if err := st.SetSessionPermissionProfile(context.Background(), session.ID, "readonly"); err != nil {
 				t.Fatal(err)
 			}
+			if err := st.SetSessionToolStates(context.Background(), session.ID, map[domain.ToolKind]bool{
+				domain.ToolKindRead: true,
+				domain.ToolKindBash: false,
+			}); err != nil {
+				t.Fatal(err)
+			}
 			if err := st.UpdateApproval(context.Background(), approval.ID, domain.ApprovalStatusApproved); err != nil {
 				t.Fatal(err)
 			}
@@ -79,6 +85,9 @@ func TestApprovalAndTask(t *testing.T) {
 			}
 			if len(sessions) != 1 || sessions[0].PermissionProfile != "readonly" {
 				t.Fatalf("unexpected session profile: %#v", sessions)
+			}
+			if sessions[0].ToolStates[domain.ToolKindBash] {
+				t.Fatalf("expected bash tool disabled in stored session, got %#v", sessions[0].ToolStates)
 			}
 		})
 	}
@@ -132,6 +141,12 @@ func TestForkSessionCopiesTranscriptAndParent(t *testing.T) {
 			if err := st.SetSessionPermissionProfile(context.Background(), session.ID, "readonly"); err != nil {
 				t.Fatal(err)
 			}
+			if err := st.SetSessionToolStates(context.Background(), session.ID, map[domain.ToolKind]bool{
+				domain.ToolKindRead: true,
+				domain.ToolKindBash: false,
+			}); err != nil {
+				t.Fatal(err)
+			}
 			msg, err := st.AddMessage(context.Background(), session.ID, domain.MessageRoleUser, "hello")
 			if err != nil {
 				t.Fatal(err)
@@ -152,6 +167,9 @@ func TestForkSessionCopiesTranscriptAndParent(t *testing.T) {
 			}
 			if forked.PermissionProfile != "readonly" {
 				t.Fatalf("expected permission profile copied, got %q", forked.PermissionProfile)
+			}
+			if forked.ToolStates[domain.ToolKindBash] {
+				t.Fatalf("expected tool states copied, got %#v", forked.ToolStates)
 			}
 
 			messages, parts, err := st.PartsForSession(context.Background(), forked.ID)

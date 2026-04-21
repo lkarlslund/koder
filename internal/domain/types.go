@@ -46,6 +46,24 @@ const (
 	ToolKindWebSearch  ToolKind = "websearch"
 )
 
+func AllToolKinds() []ToolKind {
+	return []ToolKind{
+		ToolKindRead,
+		ToolKindGlob,
+		ToolKindGrep,
+		ToolKindBash,
+		ToolKindApplyPatch,
+		ToolKindEdit,
+		ToolKindWrite,
+		ToolKindTask,
+		ToolKindQuestion,
+		ToolKindUpdatePlan,
+		ToolKindSkill,
+		ToolKindWebFetch,
+		ToolKindWebSearch,
+	}
+}
+
 type PermissionMode string
 
 const (
@@ -95,6 +113,7 @@ type Session struct {
 	ProviderID        string
 	ModelID           string
 	PermissionProfile string
+	ToolStates        map[ToolKind]bool
 	ProjectRoot       string
 	ProjectChecksum   string
 	AgentsResolved    string

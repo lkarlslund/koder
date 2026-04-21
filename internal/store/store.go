@@ -28,6 +28,7 @@ type backend interface {
 	ListSessions(context.Context) ([]domain.Session, error)
 	GetSession(context.Context, int64) (domain.Session, error)
 	SetSessionPermissionProfile(context.Context, int64, string) error
+	SetSessionToolStates(context.Context, int64, map[domain.ToolKind]bool) error
 	UpdateSessionTitle(context.Context, int64, string) error
 	UpdateSessionAgents(context.Context, int64, string, string, string, string, []domain.AgentsFile, time.Time) error
 	CountMessagesByRole(context.Context, int64, domain.MessageRole) (int, error)
@@ -61,6 +62,17 @@ type Task struct {
 	Body      string
 	Status    domain.TaskStatus
 	CreatedAt time.Time
+}
+
+func cloneToolStates(src map[domain.ToolKind]bool) map[domain.ToolKind]bool {
+	if len(src) == 0 {
+		return map[domain.ToolKind]bool{}
+	}
+	dst := make(map[domain.ToolKind]bool, len(src))
+	for kind, enabled := range src {
+		dst[kind] = enabled
+	}
+	return dst
 }
 
 func Open(stateDir string) (*Store, error) {
@@ -111,6 +123,10 @@ func (s *Store) GetSession(ctx context.Context, sessionID int64) (domain.Session
 
 func (s *Store) SetSessionPermissionProfile(ctx context.Context, sessionID int64, profile string) error {
 	return s.backend.SetSessionPermissionProfile(ctx, sessionID, profile)
+}
+
+func (s *Store) SetSessionToolStates(ctx context.Context, sessionID int64, states map[domain.ToolKind]bool) error {
+	return s.backend.SetSessionToolStates(ctx, sessionID, states)
 }
 
 func (s *Store) UpdateSessionTitle(ctx context.Context, sessionID int64, title string) error {
@@ -201,6 +217,11 @@ func (s *Store) ForkSession(ctx context.Context, sourceSessionID int64) (domain.
 	}
 	if source.PermissionProfile != "" {
 		if err := s.SetSessionPermissionProfile(ctx, forked.ID, source.PermissionProfile); err != nil {
+			return domain.Session{}, err
+		}
+	}
+	if len(source.ToolStates) != 0 {
+		if err := s.SetSessionToolStates(ctx, forked.ID, source.ToolStates); err != nil {
 			return domain.Session{}, err
 		}
 	}

@@ -111,20 +111,31 @@ func (v VerticalTabs) View(width int, palette theme.Palette, focused bool) strin
 	return strings.Join(lines, "\n")
 }
 
-type ToggleRow struct {
+type CheckboxRow struct {
 	Label       string
 	Description string
-	Value       bool
+	Checked     bool
+	OnLabel     string
+	OffLabel    string
 }
 
-func (r ToggleRow) View(width int, palette theme.Palette, focused bool) string {
-	value := "Off"
+func (r CheckboxRow) View(width int, palette theme.Palette, focused bool) string {
+	label := strings.TrimSpace(r.OffLabel)
 	valueColor := palette.AssistantTimestampText
-	if r.Value {
-		value = "On"
+	glyph := "☐"
+	if r.Checked {
+		label = strings.TrimSpace(r.OnLabel)
 		valueColor = palette.ActivityText
+		glyph = "☑"
 	}
-	row := RenderSelectableRow(r.Label, r.Description, value, width, palette, focused)
+	if label == "" {
+		if r.Checked {
+			label = "On"
+		} else {
+			label = "Off"
+		}
+	}
+	row := RenderSelectableRow(r.Label, r.Description, glyph+" "+label, width, palette, focused)
 	if focused {
 		return lipgloss.NewStyle().Foreground(valueColor).Background(palette.UserTextBackground).Render(row)
 	}
