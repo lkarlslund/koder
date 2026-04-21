@@ -2324,6 +2324,43 @@ func TestStatusEventKeepsTranscriptSpinnerActive(t *testing.T) {
 	}
 }
 
+func TestLoadMsgPreserveBusyKeepsSpinnerActive(t *testing.T) {
+	m := Model{
+		cfg:      testConfig(t),
+		viewport: viewport.New(40, 6),
+		busy: busyModel{
+			active: true,
+			scope:  busyScopeTranscript,
+			status: "Working ...",
+			spinner: spinnerModel{
+				active: true,
+				frame:  2,
+			},
+		},
+		currentSession: domain.Session{ID: 1, Title: "Test"},
+	}
+
+	updated, cmd := m.Update(loadMsg{
+		current:      domain.Session{ID: 1, Title: "Test"},
+		parts:        map[int64][]domain.Part{},
+		workspace:    workspace.Status{},
+		preserveBusy: true,
+	})
+	next := updated.(Model)
+	if cmd == nil {
+		t.Fatal("expected sync title command after load update")
+	}
+	if !next.busy.spinner.active {
+		t.Fatal("expected spinner to remain active during preserved busy reload")
+	}
+	if got := next.workingIndicator(); got == "" {
+		t.Fatal("expected working indicator to remain visible")
+	}
+	if !strings.Contains(next.windowTitle(), ui.SpinnerFrame(next.cfg.UI.Spinner, 2)) {
+		t.Fatalf("expected spinner in window title, got %q", next.windowTitle())
+	}
+}
+
 func TestRenderMessagePartsShowsReasoningBeforeText(t *testing.T) {
 	m := Model{
 		showReasoning: true,

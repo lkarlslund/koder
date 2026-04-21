@@ -398,7 +398,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.debug != nil && m.currentSession.ID > 0 {
 			m.debug.RecordLifecycle(m.currentSession.ID, "session_reloaded", fmt.Sprintf("%d messages", len(m.messages)), map[string]string{"messages": strconv.Itoa(len(m.messages))})
 		}
-		m.stopBusyWithStatus("Ready")
+		if !msg.preserveBusy {
+			m.stopBusyWithStatus("Ready")
+		}
 		if cmd := m.dequeuePromptCmd(); cmd != nil {
 			return m, tea.Batch(cmd, m.syncWindowTitleCmd())
 		}
@@ -1539,13 +1541,14 @@ func (m Model) loadCmd() tea.Cmd {
 }
 
 type loadMsg struct {
-	sessions  []domain.Session
-	current   domain.Session
-	messages  []domain.Message
-	parts     map[int64][]domain.Part
-	approvals []store.Approval
-	tasks     []store.Task
-	workspace workspace.Status
+	sessions     []domain.Session
+	current      domain.Session
+	messages     []domain.Message
+	parts        map[int64][]domain.Part
+	approvals    []store.Approval
+	tasks        []store.Task
+	workspace    workspace.Status
+	preserveBusy bool
 }
 
 func (m Model) promptCmd(ctx context.Context, prompt string, drafts []attachment.Draft) tea.Cmd {
@@ -1767,7 +1770,15 @@ func (m Model) forkSessionCmd(sourceSessionID int64) tea.Cmd {
 }
 
 func (m Model) reloadDetailsCmd() tea.Cmd {
-	return m.loadSessionCmd(m.currentSession.ID)
+	return func() tea.Msg {
+		msg := m.loadSessionCmd(m.currentSession.ID)()
+		load, ok := msg.(loadMsg)
+		if !ok {
+			return msg
+		}
+		load.preserveBusy = true
+		return load
+	}
 }
 
 func nextEventCmd(events <-chan domain.Event) tea.Cmd {
