@@ -2823,8 +2823,29 @@ func TestRenderMessagePartsShowsSystemNoticeWhenEnabled(t *testing.T) {
 		{Kind: domain.PartKindSystemNotice, Body: "usage", MetaJSON: `{"PromptTokens":1}`},
 	})
 
-	if !strings.Contains(got, "System") || !strings.Contains(got, "usage") || !strings.Contains(got, "PromptTokens") {
-		t.Fatalf("expected visible system notice, got %q", got)
+	if strings.Contains(got, "System") || strings.Contains(got, "usage") || strings.Contains(got, "PromptTokens") {
+		t.Fatalf("expected usage notice to stay hidden, got %q", got)
+	}
+	if !strings.Contains(got, "final answer") {
+		t.Fatalf("expected text to remain visible, got %q", got)
+	}
+}
+
+func TestRenderMessagePartsShowsNonUsageSystemNoticeWhenEnabled(t *testing.T) {
+	cfg := testConfig(t)
+	m, err := New(cfg, nil, nil, StartupModeNew, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.showSystem = true
+
+	got := m.renderMessageParts([]domain.Part{
+		{Kind: domain.PartKindText, Body: "final answer"},
+		{Kind: domain.PartKindSystemNotice, Body: "provider warning", MetaJSON: `{"detail":"retry suggested"}`},
+	})
+
+	if !strings.Contains(got, "System") || !strings.Contains(got, "provider warning") || !strings.Contains(got, "retry suggested") {
+		t.Fatalf("expected visible non-usage system notice, got %q", got)
 	}
 	if !strings.Contains(got, "final answer") {
 		t.Fatalf("expected text to remain visible, got %q", got)

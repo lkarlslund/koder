@@ -1609,6 +1609,9 @@ func (m *Model) renderMessageParts(parts []domain.Part) string {
 
 func (m *Model) renderSystemNoticeBlock(part domain.Part) string {
 	title := strings.TrimSpace(part.Body)
+	if strings.EqualFold(title, "usage") {
+		return ""
+	}
 	switch {
 	case title == "" && strings.TrimSpace(part.MetaJSON) == "":
 		return ""
