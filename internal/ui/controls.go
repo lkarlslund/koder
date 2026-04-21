@@ -162,6 +162,15 @@ func (b Button) View(palette theme.Palette) string {
 	return style.Render(label)
 }
 
+func RenderDialogButtons(palette theme.Palette, okLabel, cancelLabel string) string {
+	return lipgloss.JoinHorizontal(
+		lipgloss.Left,
+		Button{Label: okLabel, Primary: true}.View(palette),
+		"  ",
+		Button{Label: cancelLabel}.View(palette),
+	)
+}
+
 func renderButtonLabel(label string, hotkey rune, palette theme.Palette) string {
 	labelRunes := []rune(label)
 	target := []rune(strings.ToLower(string(hotkey)))

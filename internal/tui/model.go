@@ -2580,9 +2580,9 @@ func (m *Model) renderSessionDialog() string {
 	if !m.hasSessionDialog() {
 		return ""
 	}
-	width := 84
+	width := 112
 	if m.width > 0 {
-		width = min(96, max(72, m.width-8))
+		width = min(124, max(96, m.width-8))
 	}
 	return m.sessionDialog.View(width, m.palette)
 }
@@ -2960,14 +2960,24 @@ func (m *Model) openSessionPicker() {
 			details = append(details, "Tokens:     in -  out -")
 		}
 		items = append(items, ui.SessionItem{
-			Title:       title,
-			Description: description,
-			Details:     details,
-			Value:       strconv.FormatInt(session.ID, 10),
+			SessionID:    "#" + strconv.FormatInt(session.ID, 10),
+			ChangedAt:    formatSessionTime(session.UpdatedAt),
+			TokenSummary: sessionTokenSummary(m, session.ID),
+			Title:        title,
+			Description:  description,
+			Details:      details,
+			Value:        strconv.FormatInt(session.ID, 10),
 		})
 	}
 	dialog := ui.NewSessionDialog(items)
 	m.sessionDialog = &dialog
+}
+
+func sessionTokenSummary(m *Model, sessionID int64) string {
+	if usage, ok := m.sessionUsageSummary(sessionID); ok {
+		return fmt.Sprintf("%s/%s", formatTokens(usage.PromptTokens), formatTokens(usage.CompletionTokens))
+	}
+	return "-/-"
 }
 
 func (m *Model) openPreferencesDialog() {

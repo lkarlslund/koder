@@ -82,9 +82,11 @@ func RenderPickerDialog(props PickerDialogProps) string {
 			lines = append(lines, RenderSelectableRow(item.Title, item.Description, "", 72, props.Palette, idx == props.Index))
 		}
 	}
+	lines = append(lines, "", RenderDialogButtons(props.Palette, "OK", "Cancel"))
 	return Modal{
-		Title: props.Title,
-		Body:  strings.Join(lines, "\n"),
-		Width: 80,
+		Title:  props.Title,
+		Body:   strings.Join(lines, "\n"),
+		Footer: "Enter applies the highlighted row. Esc cancels.",
+		Width:  80,
 	}.View(props.Palette)
 }

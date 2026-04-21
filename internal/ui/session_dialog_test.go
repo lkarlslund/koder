@@ -43,10 +43,13 @@ func TestSessionDialogFiltersItems(t *testing.T) {
 
 func TestSessionDialogViewCollapsesMultilineDescriptions(t *testing.T) {
 	dialog := NewSessionDialog([]SessionItem{{
-		Title:       "Session A",
-		Description: "line one\nline two\n\nline three",
-		Details:     []string{"Session ID: 1"},
-		Value:       "1",
+		SessionID:    "#1",
+		ChangedAt:    "2026-04-20",
+		TokenSummary: "123/456",
+		Title:        "Session A",
+		Description:  "line one\nline two\n\nline three",
+		Details:      []string{"Session ID: 1"},
+		Value:        "1",
 	}})
 
 	got := dialog.View(84, theme.Default().Palette)
@@ -55,5 +58,11 @@ func TestSessionDialogViewCollapsesMultilineDescriptions(t *testing.T) {
 	}
 	if !strings.Contains(got, "line one line two line three") {
 		t.Fatalf("expected collapsed description in view, got %q", got)
+	}
+	if !strings.Contains(got, "ID") || !strings.Contains(got, "Changed") || !strings.Contains(got, "Tokens") {
+		t.Fatalf("expected table headers in session dialog, got %q", got)
+	}
+	if !strings.Contains(got, "OK") || !strings.Contains(got, "Cancel") {
+		t.Fatalf("expected dialog buttons in session dialog, got %q", got)
 	}
 }

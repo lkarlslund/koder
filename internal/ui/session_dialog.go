@@ -12,10 +12,13 @@ import (
 )
 
 type SessionItem struct {
-	Title       string
-	Description string
-	Details     []string
-	Value       string
+	SessionID    string
+	ChangedAt    string
+	TokenSummary string
+	Title        string
+	Description  string
+	Details      []string
+	Value        string
 }
 
 type SessionDialogActionKind int
@@ -79,13 +82,18 @@ func (d *SessionDialog) Update(msg tea.KeyMsg) SessionDialogAction {
 func (d SessionDialog) View(width int, palette theme.Palette) string {
 	dialogWidth := width
 	if dialogWidth <= 0 {
-		dialogWidth = 84
+		dialogWidth = 110
 	}
-	dialogWidth = maxInt(72, dialogWidth)
-	listWidth := 30
-	detailWidth := maxInt(36, dialogWidth-listWidth-9)
+	dialogWidth = maxInt(96, dialogWidth)
+	contentWidth := maxInt(80, dialogWidth-6)
+	idWidth := 8
+	changedWidth := minInt(18, maxInt(14, contentWidth/6))
+	tokensWidth := minInt(18, maxInt(14, contentWidth/6))
+	titleWidth := maxInt(24, contentWidth-idWidth-changedWidth-tokensWidth-6)
 
-	listLines := []string{}
+	listLines := []string{
+		renderSessionTableHeader(idWidth, changedWidth, tokensWidth, titleWidth, palette),
+	}
 	if len(d.view) == 0 {
 		listLines = append(listLines, "No matches")
 	} else {
@@ -94,12 +102,12 @@ func (d SessionDialog) View(width int, palette theme.Palette) string {
 			start = d.Index - 4
 		}
 		end := len(d.view)
-		if end > start+9 {
-			end = start + 9
+		if end > start+10 {
+			end = start + 10
 		}
 		for idx := start; idx < end; idx++ {
 			item := d.view[idx]
-			listLines = append(listLines, RenderSelectableRow(item.Title, item.Description, "#"+item.Value, listWidth, palette, idx == d.Index))
+			listLines = append(listLines, renderSessionTableRow(item, idWidth, changedWidth, tokensWidth, titleWidth, palette, idx == d.Index))
 		}
 	}
 
@@ -110,42 +118,38 @@ func (d SessionDialog) View(width int, palette theme.Palette) string {
 		}
 		blocks = append(blocks, item.Details...)
 		if desc := strings.TrimSpace(item.Description); desc != "" {
-			blocks = append(blocks, "", wrapPlain(compactInlineText(desc), detailWidth))
+			blocks = append(blocks, "", wrapPlain(compactInlineText(desc), contentWidth))
 		}
 		details = strings.Join(blocks, "\n")
 	}
 
-	listPane := lipgloss.NewStyle().
-		Width(listWidth).
-		BorderRight(true).
-		BorderForeground(palette.SidebarBorder).
+	tablePane := lipgloss.NewStyle().
+		Width(contentWidth).
 		Background(palette.SidebarBackground).
 		Foreground(palette.SidebarForeground).
-		PaddingRight(1).
 		Render(strings.Join(listLines, "\n"))
 	detailPane := lipgloss.NewStyle().
-		Width(detailWidth).
-		Background(palette.SidebarBackground).
-		Foreground(palette.SidebarForeground).
-		PaddingLeft(1).
+		Width(contentWidth).
+		BorderTop(true).
+		BorderForeground(palette.SidebarBorder).
+		PaddingTop(1).
 		Render(details)
 
 	body := lipgloss.JoinVertical(
 		lipgloss.Left,
 		fmt.Sprintf("Filter: %s", d.Query),
 		"",
-		lipgloss.JoinHorizontal(
-			lipgloss.Top,
-			listPane,
-			" ",
-			detailPane,
-		),
+		tablePane,
+		"",
+		detailPane,
+		"",
+		RenderDialogButtons(palette, "OK", "Cancel"),
 	)
 
 	return Modal{
 		Title:  "Resume Session",
 		Body:   body,
-		Footer: "Enter to select, Esc to start new session",
+		Footer: "Enter resumes the highlighted session. Esc creates a new session.",
 		Width:  dialogWidth,
 	}.View(palette)
 }
@@ -190,4 +194,39 @@ func (d SessionDialog) current() (SessionItem, bool) {
 		return SessionItem{}, false
 	}
 	return d.view[d.Index], true
+}
+
+func renderSessionTableHeader(idWidth, changedWidth, tokensWidth, titleWidth int, palette theme.Palette) string {
+	style := lipgloss.NewStyle().
+		Foreground(palette.AssistantTimestampText).
+		Bold(true)
+	return style.Render(joinSessionColumns("ID", idWidth, "Changed", changedWidth, "Tokens", tokensWidth, "Title", titleWidth))
+}
+
+func renderSessionTableRow(item SessionItem, idWidth, changedWidth, tokensWidth, titleWidth int, palette theme.Palette, selected bool) string {
+	row := joinSessionColumns(
+		item.SessionID,
+		idWidth,
+		item.ChangedAt,
+		changedWidth,
+		item.TokenSummary,
+		tokensWidth,
+		item.Title,
+		titleWidth,
+	)
+	style := lipgloss.NewStyle().Width(idWidth + changedWidth + tokensWidth + titleWidth + 6)
+	if selected {
+		style = style.Background(palette.UserTextBackground).Foreground(palette.UserTextForeground)
+	}
+	return style.Render(row)
+}
+
+func joinSessionColumns(id string, idWidth int, changed string, changedWidth int, tokens string, tokensWidth int, title string, titleWidth int) string {
+	cols := []string{
+		lipgloss.NewStyle().Width(idWidth).Render(truncateText(strings.TrimSpace(id), idWidth)),
+		lipgloss.NewStyle().Width(changedWidth).Render(truncateText(strings.TrimSpace(changed), changedWidth)),
+		lipgloss.NewStyle().Width(tokensWidth).Render(truncateText(strings.TrimSpace(tokens), tokensWidth)),
+		lipgloss.NewStyle().Width(titleWidth).Render(truncateText(strings.TrimSpace(title), titleWidth)),
+	}
+	return strings.Join(cols, "  ")
 }

@@ -1357,7 +1357,13 @@ func TestSessionPickerRendersCenteredDialogWithDetails(t *testing.T) {
 	if !strings.Contains(got, "Tokens:     in 123  out 456") {
 		t.Fatalf("expected token counts in dialog, got %q", got)
 	}
-	if !strings.Contains(got, "Enter to select, Esc to start new session") {
+	if !strings.Contains(got, "ID") || !strings.Contains(got, "Changed") || !strings.Contains(got, "Tokens") {
+		t.Fatalf("expected session table headers in dialog, got %q", got)
+	}
+	if !strings.Contains(got, "OK") || !strings.Contains(got, "Cancel") {
+		t.Fatalf("expected dialog buttons in session dialog, got %q", got)
+	}
+	if !strings.Contains(got, "Enter resumes the highlighted session. Esc creates a new session.") {
 		t.Fatalf("expected helper text in dialog, got %q", got)
 	}
 }
