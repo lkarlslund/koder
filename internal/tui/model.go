@@ -317,6 +317,14 @@ type composerHistoryState struct {
 }
 
 func New(cfg config.Config, st *store.Store, a *agent.Engine, mode StartupMode, debug *debugsrv.Recorder) (Model, error) {
+	workdir, err := os.Getwd()
+	if err != nil {
+		return Model{}, err
+	}
+	return NewWithWorkdir(cfg, st, a, mode, debug, workdir)
+}
+
+func NewWithWorkdir(cfg config.Config, st *store.Store, a *agent.Engine, mode StartupMode, debug *debugsrv.Recorder, workdir string) (Model, error) {
 	tuiTheme := theme.Resolve(cfg.UI.Theme)
 	renderer, err := markdown.New(tuiTheme.Palette)
 	if err != nil {
@@ -333,10 +341,6 @@ func New(cfg config.Config, st *store.Store, a *agent.Engine, mode StartupMode, 
 
 	vp := viewport.New(40, 10)
 	vp.SetContent("Loading…")
-	workdir, err := os.Getwd()
-	if err != nil {
-		return Model{}, err
-	}
 
 	return Model{
 		cfg:               cfg,
@@ -1970,7 +1974,15 @@ func nextEventCmd(events <-chan domain.Event) tea.Cmd {
 }
 
 func Run(cfg config.Config, st *store.Store, a *agent.Engine, mode StartupMode, debug *debugsrv.Recorder) error {
-	model, err := New(cfg, st, a, mode, debug)
+	workdir, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	return RunWithWorkdir(cfg, st, a, mode, debug, workdir)
+}
+
+func RunWithWorkdir(cfg config.Config, st *store.Store, a *agent.Engine, mode StartupMode, debug *debugsrv.Recorder, workdir string) error {
+	model, err := NewWithWorkdir(cfg, st, a, mode, debug, workdir)
 	if err != nil {
 		return err
 	}

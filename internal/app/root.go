@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -25,18 +26,65 @@ import (
 )
 
 func NewRootCommand() *cobra.Command {
+	opts := startupOptions{}
 	cmd := &cobra.Command{
 		Use:   "koder",
 		Short: "Terminal coding agent",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runTUI(cmd.Context(), tui.StartupModeNew)
+			workdir, err := opts.resolve()
+			if err != nil {
+				return err
+			}
+			return runTUI(cmd.Context(), tui.StartupModeNew, workdir)
 		},
 	}
+	bindStartupFlags(cmd, &opts)
 	cmd.AddCommand(newDoctorCommand(), newVersionCommand(), newResumeCommand(), newSessionCommand(), newDebugCommand())
 	return cmd
 }
 
-func runTUI(ctx context.Context, mode tui.StartupMode) error {
+type startupOptions struct {
+	cwd         string
+	projectRoot string
+}
+
+func bindStartupFlags(cmd *cobra.Command, opts *startupOptions) {
+	flags := cmd.PersistentFlags()
+	flags.StringVar(&opts.cwd, "cwd", "", "Start koder in this working directory")
+	flags.StringVar(&opts.projectRoot, "project-root", "", "Alias for --cwd")
+}
+
+func (o startupOptions) resolve() (string, error) {
+	cwd := strings.TrimSpace(o.cwd)
+	projectRoot := strings.TrimSpace(o.projectRoot)
+	if cwd != "" && projectRoot != "" && cwd != projectRoot {
+		return "", fmt.Errorf("--cwd and --project-root must match when both are set")
+	}
+	if cwd == "" {
+		cwd = projectRoot
+	}
+	if cwd == "" {
+		var err error
+		cwd, err = os.Getwd()
+		if err != nil {
+			return "", err
+		}
+	}
+	abs, err := filepath.Abs(cwd)
+	if err != nil {
+		return "", err
+	}
+	info, err := os.Stat(abs)
+	if err != nil {
+		return "", err
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("workdir must be a directory: %s", abs)
+	}
+	return abs, nil
+}
+
+func runTUI(ctx context.Context, mode tui.StartupMode, workdir string) error {
 	cfg, err := config.Load()
 	if err != nil {
 		return err
@@ -55,27 +103,30 @@ func runTUI(ctx context.Context, mode tui.StartupMode) error {
 		defer debugServer.Close()
 	}
 
-	wd, err := os.Getwd()
-	if err != nil {
-		return err
-	}
-	registry := tools.NewRegistry(agents.FindProjectRoot(wd))
 	var recorder *debugsrv.Recorder
 	if debugServer != nil {
 		recorder = debugServer.Recorder()
 	}
-	engine := agent.New(cfg, st, registry, recorder, wd)
-	return tui.Run(cfg, st, engine, mode, recorder)
+	registry := tools.NewRegistry(agents.FindProjectRoot(workdir))
+	engine := agent.New(cfg, st, registry, recorder, workdir)
+	return tui.RunWithWorkdir(cfg, st, engine, mode, recorder, workdir)
 }
 
 func newResumeCommand() *cobra.Command {
-	return &cobra.Command{
+	opts := startupOptions{}
+	cmd := &cobra.Command{
 		Use:   "resume",
 		Short: "Resume an existing session from a picker",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runTUI(cmd.Context(), tui.StartupModeResume)
+			workdir, err := opts.resolve()
+			if err != nil {
+				return err
+			}
+			return runTUI(cmd.Context(), tui.StartupModeResume, workdir)
 		},
 	}
+	bindStartupFlags(cmd, &opts)
+	return cmd
 }
 
 func newDoctorCommand() *cobra.Command {

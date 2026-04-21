@@ -14,6 +14,8 @@ Current implementation includes:
 
 ```bash
 koder
+koder --cwd /path/to/worktree
+koder resume --project-root /path/to/worktree
 koder doctor
 koder debug info
 koder session tail --id 1 --addr 127.0.0.1:61347
