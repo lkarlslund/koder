@@ -42,7 +42,7 @@ func TestListModels(t *testing.T) {
 
 func TestPropsUsesModelQueryAndParsesContextWindow(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/props" {
+		if r.URL.Path != "/props" {
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
 		if got := r.URL.Query().Get("model"); got != "model-a" {
@@ -71,7 +71,7 @@ func TestPropsUsesModelQueryAndParsesContextWindow(t *testing.T) {
 
 func TestDetectContextWindowUsesLlamaCPPProps(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/props" {
+		if r.URL.Path != "/props" {
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
 		if got := r.URL.Query().Get("model"); got != "model-a" {
@@ -90,6 +90,36 @@ func TestDetectContextWindowUsesLlamaCPPProps(t *testing.T) {
 	}
 	if got != 16384 {
 		t.Fatalf("unexpected detected context window: %d", got)
+	}
+}
+
+func TestPropsFallsBackToV1PathWhenRootPropsMissing(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/props":
+			http.NotFound(w, r)
+		case "/v1/props":
+			_, _ = w.Write([]byte(`{"default_generation_settings":{"n_ctx":12288}}`))
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client, err := New("llamacpp", config.Provider{
+		BaseURL: server.URL + "/v1",
+		Timeout: time.Second,
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	props, err := client.Props(context.Background(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if props.DefaultGenerationSettings.NCtx != 12288 {
+		t.Fatalf("unexpected props payload: %#v", props)
 	}
 }
 

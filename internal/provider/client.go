@@ -260,26 +260,45 @@ func DetectContextWindow(ctx context.Context, providerID string, cfg config.Prov
 }
 
 func (c *Client) propsRequest(ctx context.Context, path string) (propsResponse, error) {
-	req, err := c.newRequest(ctx, http.MethodGet, path, nil)
-	if err != nil {
+	rootURL := strings.TrimSuffix(c.baseURL, "/v1") + path
+	payload, status, err := c.propsRequestURL(ctx, rootURL)
+	if err == nil {
+		return payload, nil
+	}
+	if status != http.StatusNotFound || rootURL == c.baseURL+path {
 		return propsResponse{}, err
+	}
+	payload, _, err = c.propsRequestURL(ctx, c.baseURL+path)
+	return payload, err
+}
+
+func (c *Client) propsRequestURL(ctx context.Context, endpoint string) (propsResponse, int, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return propsResponse{}, 0, fmt.Errorf("new request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json, text/event-stream")
+	if c.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	}
+	for key, value := range c.headers {
+		req.Header.Set(key, value)
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return propsResponse{}, fmt.Errorf("get props: %w", err)
+		return propsResponse{}, 0, fmt.Errorf("get props: %w", err)
 	}
 	defer resp.Body.Close()
-
 	if resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
-		return propsResponse{}, fmt.Errorf("props status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		return propsResponse{}, resp.StatusCode, fmt.Errorf("props status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
-
 	var payload propsResponse
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		return propsResponse{}, fmt.Errorf("decode props: %w", err)
+		return propsResponse{}, resp.StatusCode, fmt.Errorf("decode props: %w", err)
 	}
-	return payload, nil
+	return payload, resp.StatusCode, nil
 }
 
 func (c *Client) Health(ctx context.Context) error {

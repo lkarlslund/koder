@@ -1944,7 +1944,7 @@ func TestEnsureRuntimeContextWindowDetectsAndPersistsLlamaCPP(t *testing.T) {
 		t.Fatal(err)
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/props" {
+		if r.URL.Path != "/props" {
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
 		if got := r.URL.Query().Get("model"); got != "coder.gguf" {
