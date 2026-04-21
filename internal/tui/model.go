@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -242,6 +243,12 @@ type agentsRefreshMsg struct {
 	err  error
 }
 
+type llmPreviewMsg struct {
+	title string
+	body  string
+	err   error
+}
+
 type Model struct {
 	cfg                config.Config
 	store              *store.Store
@@ -283,7 +290,8 @@ type Model struct {
 	preferences        *ui.PreferencesDialog
 	agentsModal        *ui.Modal
 	helpModal          *ui.Modal
-	rawOutputModal     *ui.Modal
+	llmPreview         *viewport.Model
+	llmPreviewTitle    string
 	connectDialog      *ui.ConnectDialog
 	disconnectDialog   *ui.DisconnectDialog
 	modelDialog        *ui.ModelDialog
@@ -424,6 +432,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.pendingModelNote = ""
 		m.startBusy(m.busy.scopeOrDefault(busyScopeTranscript), "Working ...")
 		return m, tea.Batch(nextEventCmd(msg.events), m.spinnerCmdIfNeeded(), m.syncWindowTitleCmd())
+	case llmPreviewMsg:
+		if msg.err != nil {
+			m.status = msg.err.Error()
+			return m, m.syncWindowTitleCmd()
+		}
+		m.openLLMPreview(msg.title, msg.body)
+		return m, m.syncWindowTitleCmd()
 	case eventMsg:
 		m.recordEvent(msg.event)
 		m.applyEvent(msg.event)
@@ -537,6 +552,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.syncWindowTitleCmd()
 	case tea.MouseMsg:
+		if m.hasLLMPreview() {
+			var cmd tea.Cmd
+			*m.llmPreview, cmd = m.llmPreview.Update(msg)
+			return m, cmd
+		}
 		if updated, cmd, ok := m.handleDialogMouse(msg); ok {
 			return updated, cmd
 		}
@@ -750,8 +770,8 @@ func (m Model) View() string {
 	if m.hasHelpModal() && m.width > 0 && m.height > 0 {
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, m.renderHelpModal())
 	}
-	if m.hasRawOutputModal() && m.width > 0 && m.height > 0 {
-		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, m.renderRawOutputModal())
+	if m.hasLLMPreview() && m.width > 0 && m.height > 0 {
+		return m.renderLLMPreview()
 	}
 	if m.hasPreferencesDialog() && m.width > 0 && m.height > 0 {
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, m.renderPreferencesDialog())
@@ -795,12 +815,14 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
-	if m.hasRawOutputModal() {
+	if m.hasLLMPreview() {
 		if msg.String() == "esc" || msg.String() == "enter" || msg.String() == "alt+o" {
-			m.closeRawOutputModal()
+			m.closeLLMPreview()
 			return m, m.syncWindowTitleCmd()
 		}
-		return m, nil
+		var cmd tea.Cmd
+		*m.llmPreview, cmd = m.llmPreview.Update(msg)
+		return m, cmd
 	}
 	if m.hasPreferencesDialog() {
 		return m.handlePreferencesKey(msg)
@@ -964,11 +986,12 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.refreshViewport()
 		return m, nil
 	case "alt+o":
-		if !m.openLatestToolOutputModal() {
-			m.status = "No tool output available yet"
+		prompt := strings.TrimSpace(m.composer.Value())
+		if prompt == "" && len(m.draftAttachments) == 0 {
+			m.status = "No draft prompt to preview"
 			return m, m.syncWindowTitleCmd()
 		}
-		return m, m.syncWindowTitleCmd()
+		return m, m.previewLLMRequestCmd(context.Background(), prompt, slices.Clone(m.draftAttachments))
 	case "ctrl+r":
 		if !m.openComposerHistorySearch() {
 			return m, nil
@@ -1145,6 +1168,7 @@ func (m *Model) resize() {
 	}
 	m.viewport.Width = bodyWidth
 	m.viewport.Height = bodyHeight
+	m.resizeLLMPreview()
 }
 
 func (m *Model) renderHeader() string {
@@ -2873,8 +2897,8 @@ func (m Model) openDialogName() string {
 		return "tools"
 	case m.hasHelpModal():
 		return "help"
-	case m.hasRawOutputModal():
-		return "raw_output"
+	case m.hasLLMPreview():
+		return "llm_preview"
 	case m.hasPicker():
 		return "picker"
 	default:
@@ -3680,12 +3704,13 @@ func (m *Model) closeHelpModal() {
 	m.helpModal = nil
 }
 
-func (m *Model) hasRawOutputModal() bool {
-	return m.rawOutputModal != nil
+func (m *Model) hasLLMPreview() bool {
+	return m.llmPreview != nil
 }
 
-func (m *Model) closeRawOutputModal() {
-	m.rawOutputModal = nil
+func (m *Model) closeLLMPreview() {
+	m.llmPreview = nil
+	m.llmPreviewTitle = ""
 }
 
 func (m *Model) hasConnectDialog() bool {
@@ -3904,7 +3929,7 @@ func (m *Model) openHelpModal() {
 		"Ctrl-S              toggle sidebar",
 		"Alt-R               toggle reasoning",
 		"Alt-P               toggle system output",
-		"Alt-O               show latest raw tool output sent to the model",
+		"Alt-O               preview the full next LLM request for the current draft",
 		"Ctrl-G              continue",
 	}
 	commands := []string{
@@ -3943,68 +3968,73 @@ func (m *Model) renderHelpModal() string {
 	return m.helpModal.View(m.palette)
 }
 
-func (m *Model) openLatestToolOutputModal() bool {
-	title, subtitle, body, ok := m.latestToolOutputModalContent()
-	if !ok {
-		return false
+func (m Model) previewLLMRequestCmd(ctx context.Context, prompt string, drafts []attachment.Draft) tea.Cmd {
+	return func() tea.Msg {
+		req, err := m.agent.PreviewNextRequest(ctx, m.currentSession, prompt, drafts, m.pendingModelNote)
+		if err != nil {
+			return llmPreviewMsg{err: err}
+		}
+		body, err := json.MarshalIndent(req, "", "  ")
+		if err != nil {
+			return llmPreviewMsg{err: err}
+		}
+		return llmPreviewMsg{
+			title: "Next LLM Request",
+			body:  string(body),
+		}
 	}
-	modal := ui.Modal{
-		Title:    title,
-		Subtitle: subtitle,
-		Body:     body,
-		Footer:   "Alt-O, Enter, or Esc closes this dialog",
-		Width:    min(110, max(84, m.width-8)),
-	}
-	m.rawOutputModal = &modal
-	return true
 }
 
-func (m *Model) renderRawOutputModal() string {
-	if m.rawOutputModal == nil {
+func (m *Model) openLLMPreview(title string, body string) {
+	vp := viewport.New(0, 0)
+	vp.SetContent(body)
+	m.llmPreview = &vp
+	m.llmPreviewTitle = title
+	m.resizeLLMPreview()
+}
+
+func (m *Model) resizeLLMPreview() {
+	if m.llmPreview == nil {
+		return
+	}
+	width := max(40, m.width-4)
+	height := max(6, m.height-4)
+	bodyWidth := max(20, width-4)
+	bodyHeight := max(3, height-4)
+	m.llmPreview.Width = bodyWidth
+	m.llmPreview.Height = bodyHeight
+}
+
+func (m *Model) renderLLMPreview() string {
+	if m.llmPreview == nil {
 		return ""
 	}
-	return m.rawOutputModal.View(m.palette)
-}
-
-func (m *Model) latestToolOutputModalContent() (string, string, string, bool) {
-	for msgIdx := len(m.messages) - 1; msgIdx >= 0; msgIdx-- {
-		msg := m.messages[msgIdx]
-		parts := m.parts[msg.ID]
-		if len(parts) == 0 {
-			continue
-		}
-		diff := toolRunDiffBody(parts)
-		for partIdx := len(parts) - 1; partIdx >= 0; partIdx-- {
-			part := parts[partIdx]
-			if part.Kind != domain.PartKindToolOutput {
-				continue
-			}
-			body, ok := tools.ModelTextForPart(part, diff)
-			if !ok || strings.TrimSpace(body) == "" {
-				continue
-			}
-			meta := stringMeta(part.MetaJSON)
-			req, err := tools.RequestFromMetaMap(meta)
-			if err != nil {
-				req = tools.Request{
-					Tool:       domain.ToolKind(strings.TrimSpace(meta["tool"])),
-					ToolCallID: strings.TrimSpace(meta["tool_call_id"]),
-					Args:       map[string]string{},
-				}
-			}
-			presentation := tools.PresentationForRequest(req)
-			title := "Raw Tool Output"
-			if strings.TrimSpace(presentation.Title) != "" {
-				title = presentation.Title
-			}
-			subtitle := "Exact tool text sent back to the model"
-			if strings.TrimSpace(presentation.Subtitle) != "" {
-				subtitle = presentation.Subtitle + "  |  " + subtitle
-			}
-			return title, subtitle, body, true
-		}
+	width := max(40, m.width-4)
+	height := max(6, m.height-4)
+	title := strings.TrimSpace(m.llmPreviewTitle)
+	if title == "" {
+		title = "Next LLM Request"
 	}
-	return "", "", "", false
+	titleBar := lipgloss.NewStyle().
+		Width(width).
+		Padding(0, 1).
+		Background(m.palette.SidebarBackground).
+		Foreground(m.palette.SidebarForeground).
+		Bold(true).
+		Render(title)
+	body := lipgloss.NewStyle().
+		Width(width).
+		Height(max(3, height-4)).
+		Padding(1).
+		Border(lipgloss.NormalBorder(), false, true, false, true).
+		BorderForeground(m.palette.SidebarBorder).
+		Render(m.llmPreview.View())
+	footer := lipgloss.NewStyle().
+		Width(width).
+		Padding(0, 1).
+		Foreground(m.palette.ComposerMutedText).
+		Render("Alt-O, Enter, or Esc closes  •  Use arrows, PgUp/PgDn, or wheel to scroll")
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, lipgloss.JoinVertical(lipgloss.Left, titleBar, body, footer))
 }
 
 func (m Model) currentProjectRoot() string {

@@ -394,6 +394,50 @@ func TestBuildConversationIncludesImageAndTextAttachments(t *testing.T) {
 	}
 }
 
+func TestPreviewNextRequestIncludesUnsentDraftMessage(t *testing.T) {
+	cfg := testConfig(t)
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	workdir := t.TempDir()
+	engine := New(cfg, st, tools.NewRegistry(workdir), nil, workdir)
+	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	msg, err := st.AddMessage(context.Background(), session.ID, domain.MessageRoleUser, "saved prompt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.AddPart(context.Background(), msg.ID, domain.PartKindText, "saved prompt", ""); err != nil {
+		t.Fatal(err)
+	}
+
+	req, err := engine.PreviewNextRequest(context.Background(), session, "unsent draft", nil, "Permission mode changed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if req.Model != "test-model" {
+		t.Fatalf("expected model in preview request, got %#v", req)
+	}
+	if len(req.Messages) < 4 {
+		t.Fatalf("expected system, note, saved prompt, and unsent draft, got %#v", req.Messages)
+	}
+	last := req.Messages[len(req.Messages)-1]
+	if last.Role != domain.MessageRoleUser || last.Content != "unsent draft" {
+		t.Fatalf("expected unsent draft as final user message, got %#v", last)
+	}
+	if req.Messages[len(req.Messages)-2].Content != "saved prompt" {
+		t.Fatalf("expected stored conversation before draft, got %#v", req.Messages)
+	}
+	if !strings.Contains(req.Messages[len(req.Messages)-3].Content, "Permission mode changed") {
+		t.Fatalf("expected transient note before draft, got %#v", req.Messages)
+	}
+}
+
 func TestRunPromptWithUnsupportedPDFAttachmentFailsBeforeProviderCall(t *testing.T) {
 	cfg := testConfig(t)
 	cfg.Providers = map[string]config.Provider{

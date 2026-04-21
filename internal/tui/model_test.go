@@ -19,6 +19,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/muesli/termenv"
 
+	"github.com/lkarlslund/koder/internal/agent"
 	"github.com/lkarlslund/koder/internal/attachment"
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/debugsrv"
@@ -1374,44 +1375,49 @@ func TestApprovalPromptAltHotkeys(t *testing.T) {
 	}
 }
 
-func TestAltOOpensLatestRawToolOutputModal(t *testing.T) {
+func TestAltOOpensNextLLMRequestPreview(t *testing.T) {
 	cfg := testConfig(t)
-	m := Model{
-		cfg:      cfg,
-		composer: textarea.New(),
-		parts: map[int64][]domain.Part{
-			1: {{
-				Kind:     domain.PartKindToolOutput,
-				Body:     "Created note.txt",
-				MetaJSON: mustMarshalMeta(t, tools.MetaWithStoredResult(map[string]string{"tool": "write", "path": "note.txt", "tool_call_id": "call_write_1"}, domain.PartKindToolOutput, domain.ToolKindWrite, tools.StoredResultStatusOK, tools.WriteStoredResult{Path: "note.txt", Action: "created", Summary: "Created note.txt"})),
-			}, {
-				Kind: domain.PartKindDiff,
-				Body: "@@ -0,0 +1 @@\n+hello\n",
-			}},
-		},
-		messages: []domain.Message{
-			{ID: 1, Role: domain.MessageRoleTool, Summary: "write"},
-		},
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
 	}
+	defer st.Close()
+
+	workdir := t.TempDir()
+	m := Model{
+		cfg:            cfg,
+		composer:       textarea.New(),
+		agent:          agent.New(cfg, st, tools.NewRegistry(workdir), nil, workdir),
+		currentSession: domain.Session{ProviderID: "test", ModelID: "test-model"},
+		width:          100,
+		height:         30,
+	}
+	m.composer.SetValue("draft question")
 
 	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Alt: true, Runes: []rune("o")})
 	next := updated.(*Model)
 	if cmd == nil {
-		t.Fatal("expected sync title command")
+		t.Fatal("expected preview command")
 	}
-	if !next.hasRawOutputModal() {
-		t.Fatal("expected raw output modal to open")
+	msg := cmd()
+	if _, ok := msg.(llmPreviewMsg); !ok {
+		t.Fatalf("expected llmPreviewMsg, got %T", msg)
 	}
-	got := next.renderRawOutputModal()
-	if !strings.Contains(got, "Created note.txt") {
-		t.Fatalf("expected summary in raw output modal, got %q", got)
+	updated, cmd = next.Update(msg)
+	if cmd == nil {
+		t.Fatal("expected sync title command after preview opens")
 	}
-	if !strings.Contains(got, "Diff:") || !strings.Contains(got, "+hello") {
-		t.Fatalf("expected diff in raw output modal, got %q", got)
+	previewModel := updated.(Model)
+	rendered := (&previewModel).renderLLMPreview()
+	if !strings.Contains(rendered, "Next LLM Request") {
+		t.Fatalf("expected preview title, got %q", rendered)
+	}
+	if !strings.Contains(rendered, `"model": "test-model"`) || !strings.Contains(rendered, `"draft question"`) {
+		t.Fatalf("expected preview payload in rendered output, got %q", rendered)
 	}
 }
 
-func TestAltOWithoutToolOutputShowsStatus(t *testing.T) {
+func TestAltOWithoutDraftShowsStatus(t *testing.T) {
 	m := Model{
 		cfg:      testConfig(t),
 		composer: textarea.New(),
@@ -1422,10 +1428,10 @@ func TestAltOWithoutToolOutputShowsStatus(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("expected sync title command")
 	}
-	if next.hasRawOutputModal() {
-		t.Fatal("expected no raw output modal")
+	if next.hasLLMPreview() {
+		t.Fatal("expected no preview")
 	}
-	if next.status != "No tool output available yet" {
+	if next.status != "No draft prompt to preview" {
 		t.Fatalf("unexpected status: %q", next.status)
 	}
 }

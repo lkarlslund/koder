@@ -117,6 +117,23 @@ func (e *Engine) RunContinue(ctx context.Context, session domain.Session, note s
 	return e.runContinue(ctx, session, note)
 }
 
+func (e *Engine) PreviewNextRequest(ctx context.Context, session domain.Session, prompt string, drafts []attachment.Draft, note string) (provider.ChatRequest, error) {
+	if err := e.validatePromptAttachments(session, drafts); err != nil {
+		return provider.ChatRequest{}, err
+	}
+	messages, err := e.buildConversationPreview(ctx, session, prompt, drafts, transientTurnMessages(note, ""))
+	if err != nil {
+		return provider.ChatRequest{}, err
+	}
+	return provider.ChatRequest{
+		Model:      session.ModelID,
+		Messages:   messages,
+		Tools:      tools.Definitions(tools.Runtime{Workdir: e.workdir}),
+		ToolChoice: "auto",
+		Stream:     false,
+	}, nil
+}
+
 func (e *Engine) runModelPrompt(ctx context.Context, session domain.Session, prompt string, drafts []attachment.Draft, note string) (<-chan domain.Event, error) {
 	if err := e.validatePromptAttachments(session, drafts); err != nil {
 		return nil, err
@@ -343,11 +360,10 @@ func (e *Engine) persistUserPrompt(ctx context.Context, session domain.Session, 
 func (e *Engine) continueModelTurn(ctx context.Context, session domain.Session, client *provider.Client, out chan<- domain.Event, transient []provider.Message) error {
 	for steps := 0; steps < e.maxToolLoopSteps(); steps++ {
 		e.recordLifecycle(session.ID, "model_turn_started", "", map[string]string{"step": strconv.Itoa(steps + 1)})
-		messages, buildErr := e.buildConversation(ctx, session.ID)
+		messages, buildErr := e.buildConversationPreview(ctx, session, "", nil, transient)
 		if buildErr != nil {
 			return buildErr
 		}
-		messages = injectTransientMessages(messages, transient)
 		transient = nil
 
 		resp, completeErr := client.CompleteChat(ctx, provider.ChatRequest{
@@ -904,11 +920,45 @@ func (e *Engine) buildConversation(ctx context.Context, sessionID int64) ([]prov
 	if err != nil {
 		return nil, err
 	}
-	messages, partsByMessage, err := e.store.PartsForSession(ctx, sessionID)
-	if err != nil {
-		return nil, err
-	}
+	return e.buildConversationPreview(ctx, session, "", nil, nil)
+}
 
+func (e *Engine) buildConversationPreview(ctx context.Context, session domain.Session, prompt string, drafts []attachment.Draft, transient []provider.Message) ([]provider.Message, error) {
+	conversation := e.baseConversation(session)
+	if session.ID > 0 {
+		messages, partsByMessage, err := e.store.PartsForSession(ctx, session.ID)
+		if err != nil {
+			return nil, err
+		}
+		for _, msg := range messages {
+			if summary, ok := compactionSummary(partsByMessage[msg.ID]); ok {
+				conversation = e.baseConversation(session)
+				conversation = append(conversation,
+					provider.Message{Role: domain.MessageRoleSystem, Content: "Compacted session summary:\n" + summary},
+				)
+				continue
+			}
+			items, err := e.conversationMessagesForStoredMessage(msg, partsByMessage[msg.ID])
+			if err != nil {
+				return nil, err
+			}
+			conversation = append(conversation, items...)
+		}
+	}
+	conversation = injectTransientMessages(conversation, transient)
+	if strings.TrimSpace(prompt) != "" || len(drafts) > 0 {
+		msg, ok, err := e.previewUserMessage(prompt, drafts)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			conversation = append(conversation, msg)
+		}
+	}
+	return conversation, nil
+}
+
+func (e *Engine) baseConversation(session domain.Session) []provider.Message {
 	conversation := []provider.Message{
 		{Role: domain.MessageRoleSystem, Content: systemPrompt()},
 	}
@@ -924,35 +974,35 @@ func (e *Engine) buildConversation(ctx context.Context, sessionID int64) ([]prov
 			Content: skillText,
 		})
 	}
-	for _, msg := range messages {
-		if summary, ok := compactionSummary(partsByMessage[msg.ID]); ok {
-			conversation = []provider.Message{
-				{Role: domain.MessageRoleSystem, Content: systemPrompt()},
-			}
-			if agentsText := strings.TrimSpace(session.AgentsResolved); agentsText != "" {
-				conversation = append(conversation, provider.Message{
-					Role:    domain.MessageRoleSystem,
-					Content: "Resolved project AGENTS.md instructions:\n" + agentsText,
-				})
-			}
-			if skillText := strings.TrimSpace(skills.PromptContext(e.workdir)); skillText != "" {
-				conversation = append(conversation, provider.Message{
-					Role:    domain.MessageRoleSystem,
-					Content: skillText,
-				})
-			}
-			conversation = append(conversation,
-				provider.Message{Role: domain.MessageRoleSystem, Content: "Compacted session summary:\n" + summary},
-			)
-			continue
-		}
-		items, err := e.conversationMessagesForStoredMessage(msg, partsByMessage[msg.ID])
-		if err != nil {
-			return nil, err
-		}
-		conversation = append(conversation, items...)
+	return conversation
+}
+
+func (e *Engine) previewUserMessage(prompt string, drafts []attachment.Draft) (provider.Message, bool, error) {
+	parts := make([]domain.Part, 0, len(drafts)+1)
+	if strings.TrimSpace(prompt) != "" {
+		parts = append(parts, domain.Part{Kind: domain.PartKindText, Body: prompt})
 	}
-	return conversation, nil
+	for _, draft := range drafts {
+		raw, err := attachment.EncodeMeta(draft.Metadata)
+		if err != nil {
+			return provider.Message{}, false, err
+		}
+		parts = append(parts, domain.Part{
+			Kind:     domain.PartKindAttachment,
+			Body:     draft.Name,
+			MetaJSON: raw,
+		})
+	}
+	if msg, ok, err := e.userMessageWithAttachments(parts); ok || err != nil {
+		return msg, ok, err
+	}
+	if len(parts) == 0 {
+		return provider.Message{}, false, nil
+	}
+	return provider.Message{
+		Role:    domain.MessageRoleUser,
+		Content: strings.TrimSpace(prompt),
+	}, true, nil
 }
 
 func (e *Engine) conversationMessagesForStoredMessage(msg domain.Message, parts []domain.Part) ([]provider.Message, error) {
