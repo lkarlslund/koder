@@ -743,8 +743,11 @@ func TestRefreshViewportGroupsToolRunMessagesIntoCard(t *testing.T) {
 	if !strings.Contains(got, "Run command") {
 		t.Fatalf("expected grouped tool title in transcript, got %q", got)
 	}
-	if !strings.Contains(got, "Completed") {
-		t.Fatalf("expected completed tool status, got %q", got)
+	if strings.Contains(got, "│") || strings.Contains(got, "╭") || strings.Contains(got, "╰") {
+		t.Fatalf("expected compact tool row without border chrome, got %q", got)
+	}
+	if !strings.Contains(got, " On branch main") {
+		t.Fatalf("expected indented tool output preview, got %q", got)
 	}
 	if strings.Contains(got, `"tool":"bash"`) || strings.Contains(got, "Approval required for bash") {
 		t.Fatalf("expected compact tool card instead of raw transcript blobs, got %q", got)
@@ -2343,7 +2346,7 @@ func TestMouseClickTogglesToolRunExpansion(t *testing.T) {
 	if cmd != nil {
 		t.Fatal("expected no command from tool run mouse toggle")
 	}
-	if !strings.Contains(next.viewport.View(), "│ line one") || !strings.Contains(next.viewport.View(), "│ line two") {
+	if !strings.Contains(next.viewport.View(), " line one") || !strings.Contains(next.viewport.View(), " line two") {
 		t.Fatalf("expected expanded tool output, got %q", next.viewport.View())
 	}
 	if !strings.Contains(next.viewport.View(), "Collapse") {

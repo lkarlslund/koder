@@ -73,45 +73,36 @@ func (r ToolRun) StatusLabel() string {
 }
 
 func RenderToolRunCard(run ToolRun, palette theme.Palette, width int, expanded bool) string {
-	statusStyle := lipgloss.NewStyle().Foreground(toolRunStatusColor(run.Status, palette)).Bold(true)
-	titleStyle := lipgloss.NewStyle().Foreground(palette.MarkdownText).Bold(true)
+	titleStyle := lipgloss.NewStyle().Foreground(palette.MarkdownText).Bold(true).Italic(true)
 	subtitleStyle := lipgloss.NewStyle().Foreground(palette.ComposerMutedText)
 	bodyStyle := lipgloss.NewStyle().Foreground(palette.MarkdownText)
 	diffStyle := lipgloss.NewStyle().Foreground(palette.DiffAddedText)
 	toggleStyle := lipgloss.NewStyle().Foreground(palette.UserAccentBar).Bold(true)
-	cardStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(toolRunStatusColor(run.Status, palette)).
-		Padding(0, 1)
-	if width > 0 {
-		cardStyle = cardStyle.MaxWidth(width)
+	headerWidth := innerCardWidth(width)
+	headerParts := []string{titleStyle.Render(run.Title)}
+	if subtitle := strings.TrimSpace(run.Subtitle); subtitle != "" {
+		headerParts = append(headerParts, subtitleStyle.Render(subtitle))
 	}
-
-	headerParts := []string{
-		titleStyle.Render(run.Title),
-		"  ",
-		statusStyle.Render(run.StatusLabel()),
-	}
-	if hiddenLines := ToolRunHiddenLineCount(run, innerCardWidth(width)); hiddenLines > 0 {
-		label := "[+] Expand"
+	if hiddenLines := ToolRunHiddenLineCount(run, headerWidth); hiddenLines > 0 {
+		label := "Collapse"
+		if !expanded {
+			label = "Expand"
+		}
 		if hiddenLines == 1 {
-			label = "[+] Expand (1 line more)"
+			label = "Expand (1 line more)"
 		} else {
-			label = "[+] Expand (" + strconv.Itoa(hiddenLines) + " lines more)"
+			label = "Expand (" + strconv.Itoa(hiddenLines) + " lines more)"
 		}
 		if expanded {
-			label = "[-] Collapse"
+			label = "Collapse"
 		}
-		headerParts = append(headerParts, "  ", toggleStyle.Render(label))
+		headerParts = append(headerParts, toggleStyle.Render(label))
 	}
-	lines := []string{lipgloss.JoinHorizontal(lipgloss.Left, headerParts...)}
-	if subtitle := strings.TrimSpace(run.Subtitle); subtitle != "" {
-		lines = append(lines, subtitleStyle.Render(wrapPlain(subtitle, innerCardWidth(width))))
-	}
+	lines := []string{strings.Join(headerParts, "  ")}
 	if preview := run.PreviewText(); preview != "" {
-		lines = append(lines, renderToolRunPreview(preview, run, bodyStyle, diffStyle, innerCardWidth(width), expanded))
+		lines = append(lines, renderToolRunPreview(preview, run, bodyStyle, diffStyle, headerWidth, expanded))
 	}
-	return cardStyle.Render(strings.Join(lines, "\n"))
+	return strings.Join(lines, "\n")
 }
 
 func RenderToolRunDock(props ToolRunDockProps) string {
@@ -177,16 +168,29 @@ func renderToolRunPreview(preview string, run ToolRun, bodyStyle, diffStyle lipg
 	if preview == "" {
 		return ""
 	}
+	renderIndented := func(style lipgloss.Style, value string) string {
+		var rendered string
+		if expanded {
+			rendered = wrapPlain(value, max(1, width-1))
+		} else {
+			rendered = firstWrappedLine(value, max(1, width-1))
+		}
+		lines := strings.Split(rendered, "\n")
+		for idx, line := range lines {
+			lines[idx] = " " + style.Render(line)
+		}
+		return strings.Join(lines, "\n")
+	}
 	if strings.TrimSpace(run.Diff) != "" && strings.TrimSpace(run.Output) == "" && strings.TrimSpace(run.ErrorText) == "" {
 		if expanded {
-			return diffStyle.Render(wrapPlain(preview, width))
+			return renderIndented(diffStyle, preview)
 		}
-		return diffStyle.Render(wrapPlain(diffSummary(preview), width))
+		return renderIndented(diffStyle, diffSummary(preview))
 	}
 	if expanded {
-		return bodyStyle.Render(wrapPlain(preview, width))
+		return renderIndented(bodyStyle, preview)
 	}
-	return bodyStyle.Render(wrapPlain(singleLineSummary(preview), width))
+	return renderIndented(bodyStyle, firstPreviewLine(preview))
 }
 
 func toolRunStatusColor(status ToolRunStatus, palette theme.Palette) lipgloss.Color {
@@ -222,6 +226,32 @@ func singleLineSummary(input string) string {
 		return summary
 	}
 	return ansi.Truncate(summary, 90, "…")
+}
+
+func firstPreviewLine(input string) string {
+	input = strings.TrimSpace(input)
+	if input == "" {
+		return ""
+	}
+	for _, line := range strings.Split(input, "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			return line
+		}
+	}
+	return ""
+}
+
+func firstWrappedLine(input string, width int) string {
+	wrapped := wrapPlain(input, width)
+	if wrapped == "" {
+		return ""
+	}
+	lines := strings.Split(wrapped, "\n")
+	if len(lines) == 0 {
+		return ""
+	}
+	return lines[0]
 }
 
 func wrapPlain(input string, width int) string {
