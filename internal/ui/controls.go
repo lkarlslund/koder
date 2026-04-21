@@ -26,25 +26,34 @@ func RenderSelectableRow(primary, secondary, tertiary string, width int, palette
 	if tertiaryWidth == 0 {
 		secondaryWidth = maxInt(8, width-primaryWidth-gapWidth)
 	}
+	selectionBackground := palette.UserTextBackground
+	primaryStyle := lipgloss.NewStyle().Width(primaryWidth).Bold(true)
+	gapStyle := lipgloss.NewStyle().Width(gapWidth)
+	secondaryStyle := lipgloss.NewStyle().Width(secondaryWidth).Foreground(palette.AssistantTimestampText)
+	tertiaryStyle := lipgloss.NewStyle().Width(tertiaryWidth).Align(lipgloss.Right).Foreground(palette.ActivityText)
+	rowStyle := lipgloss.NewStyle().Width(width)
+	if selected {
+		rowStyle = rowStyle.Background(selectionBackground).Foreground(palette.UserTextForeground)
+		primaryStyle = primaryStyle.Background(selectionBackground).Foreground(palette.UserTextForeground)
+		gapStyle = gapStyle.Background(selectionBackground)
+		secondaryStyle = secondaryStyle.Background(selectionBackground).Foreground(palette.UserTextForeground)
+		tertiaryStyle = tertiaryStyle.Background(selectionBackground).Foreground(palette.UserAccentBar).Bold(true)
+	}
 	row := lipgloss.JoinHorizontal(
 		lipgloss.Top,
-		lipgloss.NewStyle().Width(primaryWidth).Bold(true).Render(truncateText(strings.TrimSpace(primary), primaryWidth)),
-		lipgloss.NewStyle().Width(gapWidth).Render(""),
-		lipgloss.NewStyle().Width(secondaryWidth).Foreground(palette.AssistantTimestampText).Render(truncateText(strings.TrimSpace(secondary), secondaryWidth)),
+		primaryStyle.Render(truncateText(strings.TrimSpace(primary), primaryWidth)),
+		gapStyle.Render(""),
+		secondaryStyle.Render(truncateText(strings.TrimSpace(secondary), secondaryWidth)),
 	)
 	if tertiaryWidth > 0 {
 		row = lipgloss.JoinHorizontal(
 			lipgloss.Top,
 			row,
-			lipgloss.NewStyle().Width(gapWidth).Render(""),
-			lipgloss.NewStyle().Width(tertiaryWidth).Align(lipgloss.Right).Foreground(palette.ActivityText).Render(truncateText(strings.TrimSpace(tertiary), tertiaryWidth)),
+			gapStyle.Render(""),
+			tertiaryStyle.Render(truncateText(strings.TrimSpace(tertiary), tertiaryWidth)),
 		)
 	}
-	style := lipgloss.NewStyle().Width(width)
-	if selected {
-		style = style.Background(palette.UserTextBackground).Foreground(palette.UserTextForeground)
-	}
-	return style.Render(row)
+	return rowStyle.Render(row)
 }
 
 type VerticalTabs struct {
