@@ -36,3 +36,13 @@ func TestModelDialogRenderShowsProvider(t *testing.T) {
 		t.Fatalf("unexpected render: %q", got)
 	}
 }
+
+func TestModelDialogTabThenEnterCancels(t *testing.T) {
+	dialog := NewModelDialog("openai", []domain.Model{{ID: "gpt-5.4"}}, "gpt-5.4")
+	dialog.Update(tea.KeyMsg{Type: tea.KeyTab})
+	dialog.Update(tea.KeyMsg{Type: tea.KeyRight})
+	action := dialog.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if action.Kind != ModelDialogActionCancel {
+		t.Fatalf("expected button focus cancel, got %#v", action)
+	}
+}

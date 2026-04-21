@@ -151,24 +151,12 @@ const (
 	pickerModePermissions
 )
 
-type pickerItem struct {
-	Title       string
-	Description string
-	Details     []string
-	Value       string
-}
-
 type pickerModel struct {
 	visible      bool
 	mode         pickerMode
-	title        string
-	hint         string
-	query        string
-	index        int
-	items        []pickerItem
-	matches      []pickerItem
 	initialValue string
 	approvalID   int64
+	dialog       ui.PickerDialog
 }
 
 type runPromptMsg struct {
@@ -273,7 +261,7 @@ type Model struct {
 	showReasoning      bool
 	slashMatches       []slashCommand
 	slashIndex         int
-	approvalChoice     int
+	approvalButtons    ui.ButtonRow
 	workdir            string
 	workspace          workspace.Status
 	agentsDrift        bool
@@ -506,8 +494,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.syncWindowTitleCmd()
 	case tea.MouseMsg:
-		if m.hasPicker() || m.hasApprovalPrompt() {
-			return m, nil
+		if updated, cmd, ok := m.handleDialogMouse(msg); ok {
+			return updated, cmd
 		}
 		if updated, cmd, ok := m.handleMouse(msg); ok {
 			return updated, cmd
@@ -523,6 +511,149 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	m.composer, cmd = m.composer.Update(msg)
 	m.updateSlashMenu()
 	return m, cmd
+}
+
+func (m *Model) handleDialogMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd, bool) {
+	if !m.mouseEnabled || msg.Action != tea.MouseActionPress || msg.Button != tea.MouseButtonLeft {
+		return m, nil, false
+	}
+	switch {
+	case m.hasSessionDialog():
+		width := 84
+		if m.width > 0 {
+			width = min(124, max(96, m.width-8))
+		}
+		view := m.renderSessionDialog()
+		localX, localY, ok := m.modalLocalPoint(msg, view)
+		if !ok {
+			return m, nil, true
+		}
+		action := m.sessionDialog.HandleMouse(localX, localY, width, m.palette)
+		switch action.Kind {
+		case ui.SessionDialogActionSelect:
+			m.startBusy(busyScopeSidebar, fmt.Sprintf("Resuming session %d…", action.SessionID))
+			return m, tea.Batch(m.loadSessionCmd(action.SessionID), m.spinnerCmdIfNeeded()), true
+		case ui.SessionDialogActionCancel:
+			m.startBusy(busyScopeSidebar, "Creating session…")
+			return m, tea.Batch(m.newSessionCmd(), m.spinnerCmdIfNeeded()), true
+		default:
+			return m, nil, true
+		}
+	case m.hasModelDialog():
+		width := 84
+		if m.width > 0 {
+			width = min(96, max(72, m.width-8))
+		}
+		view := m.renderModelDialog()
+		localX, localY, ok := m.modalLocalPoint(msg, view)
+		if !ok {
+			return m, nil, true
+		}
+		action := m.modelDialog.HandleMouse(localX, localY, width, m.palette)
+		switch action.Kind {
+		case ui.ModelDialogActionSelect:
+			if err := m.selectModel(action.ModelID); err != nil {
+				m.status = err.Error()
+				return m, m.syncWindowTitleCmd(), true
+			}
+			m.closeModelDialog()
+			m.status = fmt.Sprintf("Selected model %s", action.ModelID)
+			m.refreshViewport()
+			return m, m.syncWindowTitleCmd(), true
+		case ui.ModelDialogActionCancel:
+			m.closeModelDialog()
+			m.status = "Model selection cancelled"
+			return m, m.syncWindowTitleCmd(), true
+		default:
+			return m, nil, true
+		}
+	case m.hasDisconnectDialog():
+		width := 84
+		if m.width > 0 {
+			width = min(96, max(72, m.width-8))
+		}
+		view := m.renderDisconnectDialog()
+		localX, localY, ok := m.modalLocalPoint(msg, view)
+		if !ok {
+			return m, nil, true
+		}
+		action := m.disconnectDialog.HandleMouse(localX, localY, width, m.palette)
+		switch action.Kind {
+		case ui.DisconnectDialogActionSelect:
+			if err := m.disconnectProvider(action.ProviderID); err != nil {
+				m.status = err.Error()
+				return m, m.syncWindowTitleCmd(), true
+			}
+			m.closeDisconnectDialog()
+			m.status = fmt.Sprintf("Disconnected provider %s", action.ProviderID)
+			m.refreshViewport()
+			return m, m.syncWindowTitleCmd(), true
+		case ui.DisconnectDialogActionCancel:
+			m.closeDisconnectDialog()
+			m.status = "Provider disconnect cancelled"
+			return m, m.syncWindowTitleCmd(), true
+		default:
+			return m, nil, true
+		}
+	case m.hasPicker():
+		view := m.renderPicker()
+		localX, localY, ok := m.modalLocalPoint(msg, view)
+		if !ok {
+			return m, nil, true
+		}
+		action := m.picker.dialog.HandleMouse(localX, localY, 80, m.palette)
+		switch action.Kind {
+		case ui.PickerDialogActionSelect:
+			next, cmd := m.submitPickerSelection(action.Value)
+			return next, cmd, true
+		case ui.PickerDialogActionCancel:
+			next, cmd := m.cancelPicker()
+			return next, cmd, true
+		default:
+			m.previewSelectedTheme()
+			return m, nil, true
+		}
+	case m.hasApprovalPrompt():
+		if msg.Y < 0 || msg.Y >= m.height {
+			return m, nil, true
+		}
+		prompt := m.renderApprovalPrompt()
+		promptHeight := lipgloss.Height(prompt)
+		startY := m.height - m.footerHeight()
+		if msg.Y < startY || msg.Y >= startY+promptHeight {
+			return m, nil, true
+		}
+		lines := strings.Split(prompt, "\n")
+		localY := msg.Y - startY
+		if localY < 0 || localY >= len(lines) {
+			return m, nil, true
+		}
+		line := ansi.Strip(lines[localY])
+		if strings.Contains(line, "Approve") && strings.Contains(line, "Deny") {
+			if start := strings.Index(line, ansi.Strip(m.approvalButtons.View(m.palette))); start >= 0 {
+				idx, ok := m.approvalButtons.IndexAtX(msg.X-start, m.palette)
+				if ok {
+					m.approvalButtons.Index = idx
+					next, cmd := m.activateApprovalButton(idx)
+					return next, cmd, true
+				}
+			}
+		}
+		return m, nil, true
+	default:
+		return m, nil, false
+	}
+}
+
+func (m Model) modalLocalPoint(msg tea.MouseMsg, rendered string) (int, int, bool) {
+	width := lipgloss.Width(rendered)
+	height := lipgloss.Height(rendered)
+	startX := max(0, (m.width-width)/2)
+	startY := max(0, (m.height-height)/2)
+	if msg.X < startX || msg.X >= startX+width || msg.Y < startY || msg.Y >= startY+height {
+		return 0, 0, false
+	}
+	return msg.X - startX, msg.Y - startY, true
 }
 
 func (m Model) View() string {
@@ -596,65 +727,42 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	if m.hasPicker() {
-		switch msg.String() {
-		case "up":
-			m.movePicker(-1)
-			return m, nil
-		case "down":
-			m.movePicker(1)
-			return m, nil
-		case "enter":
-			return m.submitPickerSelection()
-		case "esc":
-			return m.cancelPicker()
-		case "ctrl+c":
+		if msg.String() == "ctrl+c" {
 			return m.quit()
-		case "backspace":
-			m.trimPickerQuery()
-			return m, nil
+		}
+		action := m.picker.dialog.Update(msg)
+		m.previewSelectedTheme()
+		switch action.Kind {
+		case ui.PickerDialogActionSelect:
+			return m.submitPickerSelection(action.Value)
+		case ui.PickerDialogActionCancel:
+			return m.cancelPicker()
 		default:
-			if m.updatePickerQuery(msg) {
-				return m, nil
-			}
+			return m, nil
 		}
 	}
 
 	if m.hasApprovalPrompt() {
+		m.ensureApprovalButtons()
+		if idx, ok := m.approvalButtons.HotkeyIndex(msg); ok {
+			return m.activateApprovalButton(idx)
+		}
 		switch msg.String() {
 		case "left", "up", "shift+tab":
-			if m.approvalChoice > 0 {
-				m.approvalChoice--
-			}
+			m.approvalButtons.Move(-1)
 			return m, nil
 		case "right", "down", "tab":
-			if m.approvalChoice < 2 {
-				m.approvalChoice++
-			}
+			m.approvalButtons.Move(1)
 			return m, nil
 		case "y":
-			return m.submitApprovalChoice(true)
-		case "alt+a":
 			return m.submitApprovalChoice(true)
 		case "p":
 			m.openApprovalPermissionsPicker()
 			return m, m.syncWindowTitleCmd()
-		case "alt+p":
-			m.openApprovalPermissionsPicker()
-			return m, m.syncWindowTitleCmd()
 		case "n", "esc":
 			return m.submitApprovalChoice(false)
-		case "alt+d":
-			return m.submitApprovalChoice(false)
 		case "enter":
-			switch m.approvalChoice {
-			case 0:
-				return m.submitApprovalChoice(true)
-			case 1:
-				m.openApprovalPermissionsPicker()
-				return m, m.syncWindowTitleCmd()
-			default:
-				return m.submitApprovalChoice(false)
-			}
+			return m.activateApprovalButton(m.approvalButtons.Index)
 		}
 	}
 
@@ -1744,7 +1852,7 @@ func (m Model) UpdateLoad(msg loadMsg) Model {
 	m.approvals = msg.approvals
 	m.tasks = msg.tasks
 	m.workspace = msg.workspace
-	m.approvalChoice = 0
+	m.approvalButtons.Index = 0
 	m.draftAttachments = nil
 	m.closePicker()
 	m.closeSessionDialog()
@@ -1882,13 +1990,6 @@ func (m *Model) handleLocalCommand(prompt string) (tea.Model, tea.Cmd, bool) {
 		return m, nil, true
 	default:
 		return nil, nil, false
-	}
-}
-
-func (m Model) permissionProfileCmd(ctx context.Context, profile string) tea.Cmd {
-	return func() tea.Msg {
-		events, err := m.agent.SetPermissionProfile(ctx, m.currentSession.ID, profile)
-		return promptDoneMsg{events: events, err: err}
 	}
 }
 
@@ -2510,33 +2611,7 @@ func (m *Model) renderPicker() string {
 	if !m.hasPicker() {
 		return ""
 	}
-	items := make([]ui.MenuItem, 0, min(len(m.picker.matches), 8))
-	if len(m.picker.matches) == 0 {
-	} else {
-		start := 0
-		if m.picker.index >= 6 {
-			start = m.picker.index - 5
-		}
-		end := min(len(m.picker.matches), start+8)
-		for idx := start; idx < end; idx++ {
-			item := m.picker.matches[idx]
-			items = append(items, ui.MenuItem{Title: item.Title, Description: truncate(item.Description, 40)})
-		}
-		return ui.RenderPickerDialog(ui.PickerDialogProps{
-			Palette: m.palette,
-			Title:   m.picker.title,
-			Hint:    m.picker.hint,
-			Query:   m.picker.query,
-			Items:   items,
-			Index:   m.picker.index - start,
-		})
-	}
-	return ui.RenderPickerDialog(ui.PickerDialogProps{
-		Palette: m.palette,
-		Title:   m.picker.title,
-		Hint:    m.picker.hint,
-		Query:   m.picker.query,
-	})
+	return m.picker.dialog.View(80, m.palette)
 }
 
 func (m *Model) renderSessionDialog() string {
@@ -2745,21 +2820,44 @@ func (m *Model) submitApprovalChoice(approve bool) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(m.denyCmd(m.beginActiveOperation(), id), m.spinnerCmdIfNeeded())
 }
 
+func (m *Model) activateApprovalButton(index int) (tea.Model, tea.Cmd) {
+	switch index {
+	case 0:
+		return m.submitApprovalChoice(true)
+	case 1:
+		m.openApprovalPermissionsPicker()
+		return m, m.syncWindowTitleCmd()
+	default:
+		return m.submitApprovalChoice(false)
+	}
+}
+
 func (m *Model) renderApprovalPrompt() string {
 	if !m.hasApprovalPrompt() {
 		return ""
 	}
+	m.ensureApprovalButtons()
 	return ui.RenderToolRunDock(ui.ToolRunDockProps{
-		Palette:      m.palette,
-		Run:          m.approvalToolRun(m.approvals[0]),
-		ApproveLabel: "Approve",
-		ActionLabel:  "Permissions",
-		DenyLabel:    "Deny",
-		ApproveFocus: m.approvalChoice == 0,
-		ActionFocus:  m.approvalChoice == 1,
-		DenyFocus:    m.approvalChoice == 2,
-		Hints:        "enter select  tab switch  p permissions  y approve  n deny",
+		Palette: m.palette,
+		Run:     m.approvalToolRun(m.approvals[0]),
+		Buttons: m.approvalButtons,
+		Hints:   "enter select  tab switch  p permissions  y approve  n deny",
 	})
+}
+
+func (m *Model) ensureApprovalButtons() {
+	if len(m.approvalButtons.Buttons) != 0 {
+		return
+	}
+	index := m.approvalButtons.Index
+	m.approvalButtons = ui.ButtonRow{
+		Buttons: []ui.Button{
+			{ID: "approve", Label: "Approve", Hotkey: 'a', Primary: true},
+			{ID: "permissions", Label: "Permissions", Hotkey: 'p'},
+			{ID: "deny", Label: "Deny", Hotkey: 'd'},
+		},
+		Index: index,
+	}
 }
 
 func internalSlashCommands() []slashCommand {
@@ -2786,13 +2884,6 @@ func (m *Model) permissionProfile() string {
 		return m.currentSession.PermissionProfile
 	}
 	return m.cfg.Permissions.Profile
-}
-
-func approvalSummary(item store.Approval) string {
-	if strings.TrimSpace(item.Command) != "" {
-		return item.Command
-	}
-	return string(item.Tool)
 }
 
 func (m *Model) renderChangedFile(item workspace.FileStatus) string {
@@ -3316,9 +3407,9 @@ func (m *Model) activeProviderID() string {
 }
 
 func (m *Model) openThemePicker() {
-	items := make([]pickerItem, 0, len(theme.Names()))
+	items := make([]ui.PickerItem, 0, len(theme.Names()))
 	for _, name := range theme.Names() {
-		items = append(items, pickerItem{
+		items = append(items, ui.PickerItem{
 			Title:       name,
 			Description: "Preview theme colors",
 			Value:       name,
@@ -3331,19 +3422,17 @@ func (m *Model) openThemePicker() {
 	m.picker = pickerModel{
 		visible:      true,
 		mode:         pickerModeTheme,
-		title:        "Themes",
-		hint:         "type to filter  enter apply  esc cancel",
-		items:        items,
 		initialValue: current,
+		dialog:       ui.NewPickerDialog("Themes", "type to filter  enter apply  tab buttons  esc cancel", items),
 	}
-	m.refilterPicker()
+	m.setPickerCurrentValue(current)
 	m.previewSelectedTheme()
 }
 
 func (m *Model) openPermissionsPicker() {
-	items := make([]pickerItem, 0, len(permission.BuiltinProfiles()))
+	items := make([]ui.PickerItem, 0, len(permission.BuiltinProfiles()))
 	for _, item := range permission.BuiltinProfiles() {
-		items = append(items, pickerItem{
+		items = append(items, ui.PickerItem{
 			Title:       item.Label,
 			Description: item.Description,
 			Value:       item.Name,
@@ -3352,12 +3441,10 @@ func (m *Model) openPermissionsPicker() {
 	m.picker = pickerModel{
 		visible:      true,
 		mode:         pickerModePermissions,
-		title:        "Permissions",
-		hint:         "enter apply  esc cancel",
-		items:        items,
 		initialValue: m.permissionProfile(),
+		dialog:       ui.NewPickerDialog("Permissions", "type to filter  enter apply  tab buttons  esc cancel", items),
 	}
-	m.refilterPicker()
+	m.setPickerCurrentValue(m.permissionProfile())
 }
 
 func (m *Model) openApprovalPermissionsPicker() {
@@ -3368,120 +3455,42 @@ func (m *Model) openApprovalPermissionsPicker() {
 	m.picker.approvalID = m.approvals[0].ID
 }
 
-func (m *Model) refilterPicker() {
-	if !m.hasPicker() {
-		return
-	}
-	query := strings.ToLower(strings.TrimSpace(m.picker.query))
-	targetValue := ""
-	if item, ok := m.currentPickerItem(); ok {
-		targetValue = item.Value
-	} else if strings.TrimSpace(m.picker.initialValue) != "" {
-		targetValue = m.picker.initialValue
-	}
-	m.picker.matches = nil
-	for _, item := range m.picker.items {
-		haystack := strings.ToLower(item.Title + " " + item.Description + " " + item.Value)
-		if query == "" || strings.Contains(haystack, query) {
-			m.picker.matches = append(m.picker.matches, item)
-		}
-	}
-	if len(m.picker.matches) == 0 {
-		m.picker.index = 0
-		return
-	}
-	if targetValue != "" {
-		for idx, item := range m.picker.matches {
-			if item.Value == targetValue {
-				m.picker.index = idx
-				m.previewSelectedTheme()
-				return
-			}
-		}
-	}
-	if m.picker.index >= len(m.picker.matches) {
-		m.picker.index = len(m.picker.matches) - 1
-	}
-	if m.picker.index < 0 {
-		m.picker.index = 0
-	}
-	m.previewSelectedTheme()
-}
-
 func (m *Model) movePicker(delta int) {
-	if !m.hasPicker() || len(m.picker.matches) == 0 {
+	if !m.hasPicker() {
 		return
 	}
-	m.picker.index += delta
-	if m.picker.index < 0 {
-		m.picker.index = 0
-	}
-	if m.picker.index >= len(m.picker.matches) {
-		m.picker.index = len(m.picker.matches) - 1
-	}
+	m.picker.dialog.Move(delta)
 	m.previewSelectedTheme()
 }
 
-func (m *Model) trimPickerQuery() {
-	if !m.hasPicker() || m.picker.query == "" {
-		return
-	}
-	m.picker.query = m.picker.query[:len(m.picker.query)-1]
-	m.refilterPicker()
-}
-
-func (m *Model) updatePickerQuery(msg tea.KeyMsg) bool {
-	if !m.hasPicker() {
-		return false
-	}
-	if msg.Type != tea.KeyRunes {
-		return false
-	}
-	m.picker.query += msg.String()
-	m.refilterPicker()
-	return true
-}
-
-func (m *Model) currentPickerItem() (pickerItem, bool) {
-	if !m.hasPicker() || len(m.picker.matches) == 0 {
-		return pickerItem{}, false
-	}
-	if m.picker.index < 0 || m.picker.index >= len(m.picker.matches) {
-		return pickerItem{}, false
-	}
-	return m.picker.matches[m.picker.index], true
-}
-
-func (m *Model) submitPickerSelection() (tea.Model, tea.Cmd) {
+func (m *Model) submitPickerSelection(value string) (tea.Model, tea.Cmd) {
 	switch m.picker.mode {
 	case pickerModeTheme:
-		item, ok := m.currentPickerItem()
-		if !ok {
+		if strings.TrimSpace(value) == "" {
 			return m, nil
 		}
-		if err := m.setTheme(item.Value, true); err != nil {
+		if err := m.setTheme(value, true); err != nil {
 			m.status = fmt.Sprintf("theme save failed: %v", err)
 			return m, nil
 		}
-		m.status = fmt.Sprintf("Theme set to %s", item.Value)
+		m.status = fmt.Sprintf("Theme set to %s", value)
 		m.closePicker()
 		return m, nil
 	case pickerModePermissions:
-		item, ok := m.currentPickerItem()
-		if !ok {
+		if strings.TrimSpace(value) == "" {
 			return m, nil
 		}
 		approvalID := m.picker.approvalID
 		m.closePicker()
 		if approvalID > 0 {
-			m.startBusy(busyScopeTranscript, fmt.Sprintf("Re-evaluating approval %d with %s…", approvalID, permission.DisplayName(item.Value)))
-			return m, tea.Batch(m.approvalPermissionProfileCmd(m.beginActiveOperation(), approvalID, item.Value), m.spinnerCmdIfNeeded(), m.syncWindowTitleCmd())
+			m.startBusy(busyScopeTranscript, fmt.Sprintf("Re-evaluating approval %d with %s…", approvalID, permission.DisplayName(value)))
+			return m, tea.Batch(m.approvalPermissionProfileCmd(m.beginActiveOperation(), approvalID, value), m.spinnerCmdIfNeeded(), m.syncWindowTitleCmd())
 		}
-		if err := m.selectPermissionProfile(item.Value); err != nil {
+		if err := m.selectPermissionProfile(value); err != nil {
 			m.status = err.Error()
 			return m, nil
 		}
-		m.status = fmt.Sprintf("Permission mode set to %s; model will be updated on the next turn", permission.DisplayName(item.Value))
+		m.status = fmt.Sprintf("Permission mode set to %s; model will be updated on the next turn", permission.DisplayName(value))
 		return m, m.syncWindowTitleCmd()
 	default:
 		return m, nil
@@ -3519,13 +3528,20 @@ func (m *Model) previewSelectedTheme() {
 	if m.picker.mode != pickerModeTheme {
 		return
 	}
-	item, ok := m.currentPickerItem()
+	item, ok := m.picker.dialog.Current()
 	if !ok {
 		return
 	}
 	if err := m.setTheme(item.Value, false); err != nil {
 		m.status = fmt.Sprintf("theme preview failed: %v", err)
 	}
+}
+
+func (m *Model) setPickerCurrentValue(value string) {
+	if !m.hasPicker() {
+		return
+	}
+	m.picker.dialog.SetCurrentValue(value)
 }
 
 func (m *Model) selectPermissionProfile(profile string) error {

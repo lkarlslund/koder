@@ -41,15 +41,10 @@ func (r ToolRun) PreviewText() string {
 }
 
 type ToolRunDockProps struct {
-	Palette      theme.Palette
-	Run          ToolRun
-	ApproveLabel string
-	ActionLabel  string
-	DenyLabel    string
-	ApproveFocus bool
-	ActionFocus  bool
-	DenyFocus    bool
-	Hints        string
+	Palette theme.Palette
+	Run     ToolRun
+	Buttons ButtonRow
+	Hints   string
 }
 
 func (r ToolRun) StatusLabel() string {
@@ -118,14 +113,8 @@ func RenderToolRunDock(props ToolRunDockProps) string {
 		lines = append(lines, preview)
 	}
 
-	buttons := []string{Button{Label: props.ApproveLabel, Hotkey: 'a', Focused: props.ApproveFocus, Primary: true}.View(props.Palette)}
-	if strings.TrimSpace(props.ActionLabel) != "" {
-		buttons = append(buttons, Button{Label: props.ActionLabel, Hotkey: 'p', Focused: props.ActionFocus}.View(props.Palette))
-	}
-	buttons = append(buttons, Button{Label: props.DenyLabel, Hotkey: 'd', Focused: props.DenyFocus}.View(props.Palette))
-
 	lines = append(lines,
-		strings.Join(buttons, "  "),
+		props.Buttons.View(props.Palette),
 		props.Hints,
 	)
 	return lipgloss.NewStyle().

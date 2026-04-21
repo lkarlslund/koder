@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/muesli/termenv"
 
 	"github.com/lkarlslund/koder/internal/attachment"
@@ -141,13 +142,13 @@ func TestPermissionsPickerSelectionUpdatesDraftSession(t *testing.T) {
 		composer: textarea.New(),
 	}
 	m.openPermissionsPicker()
-	for idx, item := range m.picker.matches {
+	for idx, item := range m.picker.dialog.Items {
 		if item.Value == permission.ProfileWriteAsk {
-			m.picker.index = idx
+			m.picker.dialog.Index = idx
 			break
 		}
 	}
-	model, _ := m.submitPickerSelection()
+	model, _ := m.submitPickerSelection(permission.ProfileWriteAsk)
 	next := model.(*Model)
 	if next.currentSession.PermissionProfile != permission.ProfileWriteAsk {
 		t.Fatalf("expected draft session permission profile updated, got %q", next.currentSession.PermissionProfile)
@@ -1071,7 +1072,7 @@ func TestApprovalPromptOpensPermissionsPicker(t *testing.T) {
 		composer:  textarea.New(),
 		approvals: []store.Approval{{ID: 7, Tool: domain.ToolKindBash, Command: `{"command":"git status"}`}},
 	}
-	m.approvalChoice = 1
+	m.approvalButtons.Index = 1
 
 	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
 	next := updated.(*Model)
@@ -1403,7 +1404,7 @@ func TestThemeCommandOpensFilterablePicker(t *testing.T) {
 	if next.picker.mode != pickerModeTheme {
 		t.Fatalf("expected theme picker mode, got %v", next.picker.mode)
 	}
-	if len(next.picker.matches) == 0 {
+	if len(next.picker.dialog.Items) == 0 {
 		t.Fatal("expected theme matches")
 	}
 }
@@ -1423,11 +1424,12 @@ func TestThemePickerFiltersAndPreviewsSelection(t *testing.T) {
 	updated, _ = next.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
 	next = updated.(*Model)
 
-	if len(next.picker.matches) == 0 {
+	if len(next.picker.dialog.Items) == 0 {
 		t.Fatal("expected filtered theme matches")
 	}
-	if next.picker.matches[0].Value != "gruvbox" {
-		t.Fatalf("expected gruvbox after filtering, got %#v", next.picker.matches)
+	current, ok := next.picker.dialog.Current()
+	if !ok || current.Value != "gruvbox" {
+		t.Fatalf("expected gruvbox after filtering, got %#v", current)
 	}
 	if next.cfg.UI.Theme != "gruvbox" {
 		t.Fatalf("expected live theme preview to apply gruvbox, got %q", next.cfg.UI.Theme)
@@ -2442,6 +2444,60 @@ func TestMouseClickTogglesToolRunExpansion(t *testing.T) {
 	final := updated.(*Model)
 	if strings.Contains(final.viewport.View(), "line one\nline two") {
 		t.Fatalf("expected collapsed tool output after second click, got %q", final.viewport.View())
+	}
+}
+
+func TestMouseClickOnApprovalPromptPermissionsOpensPicker(t *testing.T) {
+	m := Model{
+		mouseEnabled: true,
+		width:        100,
+		height:       28,
+		palette:      theme.Resolve("tokyonight").Palette,
+		composer:     textarea.New(),
+		approvals: []store.Approval{{
+			ID:      7,
+			Tool:    domain.ToolKindRead,
+			Command: `{"path":"README.md"}`,
+		}},
+	}
+	m.ensureApprovalButtons()
+
+	prompt := m.renderApprovalPrompt()
+	lines := strings.Split(prompt, "\n")
+	buttonLine := -1
+	buttonX := -1
+	for idx, line := range lines {
+		stripped := ansi.Strip(line)
+		if !strings.Contains(stripped, "Approve") || !strings.Contains(stripped, "Permissions") || !strings.Contains(stripped, "Deny") {
+			continue
+		}
+		buttonLine = idx
+		buttonX = strings.Index(stripped, "Permissions") + 1
+		break
+	}
+	if buttonLine < 0 || buttonX < 0 {
+		t.Fatalf("failed to find approval prompt buttons in view: %q", prompt)
+	}
+
+	startY := m.height - m.footerHeight()
+	updated, cmd := m.Update(tea.MouseMsg{
+		Action: tea.MouseActionPress,
+		Button: tea.MouseButtonLeft,
+		X:      buttonX,
+		Y:      startY + buttonLine,
+	})
+	next := updated.(*Model)
+	if cmd == nil {
+		t.Fatal("expected title sync command when opening permissions picker")
+	}
+	if !next.hasPicker() {
+		t.Fatal("expected permissions picker to open from approval prompt mouse click")
+	}
+	if next.picker.mode != pickerModePermissions {
+		t.Fatalf("expected permissions picker mode, got %v", next.picker.mode)
+	}
+	if next.picker.approvalID != 7 {
+		t.Fatalf("expected approval picker to target approval 7, got %d", next.picker.approvalID)
 	}
 }
 

@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"strings"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/lkarlslund/koder/internal/theme"
 )
@@ -140,11 +142,13 @@ func (r ChoiceRow) View(width int, palette theme.Palette, focused bool) string {
 }
 
 type Button struct {
+	ID       string
 	Label    string
 	Hotkey   rune
 	Focused  bool
 	Primary  bool
 	Selected bool
+	OnPress  func()
 }
 
 func (b Button) View(palette theme.Palette) string {
@@ -169,6 +173,132 @@ func RenderDialogButtons(palette theme.Palette, okLabel, cancelLabel string) str
 		"  ",
 		Button{Label: cancelLabel}.View(palette),
 	)
+}
+
+type ButtonRow struct {
+	Buttons []Button
+	Index   int
+}
+
+func (r *ButtonRow) Move(delta int) {
+	if len(r.Buttons) == 0 {
+		r.Index = 0
+		return
+	}
+	r.Index += delta
+	if r.Index < 0 {
+		r.Index = 0
+	}
+	if r.Index >= len(r.Buttons) {
+		r.Index = len(r.Buttons) - 1
+	}
+}
+
+func (r *ButtonRow) ActivateFocused() bool {
+	if len(r.Buttons) == 0 || r.Index < 0 || r.Index >= len(r.Buttons) {
+		return false
+	}
+	button := r.Buttons[r.Index]
+	if button.OnPress == nil {
+		return false
+	}
+	button.OnPress()
+	return true
+}
+
+func (r *ButtonRow) ActivateHotkey(msg tea.KeyMsg) bool {
+	if len(r.Buttons) == 0 {
+		return false
+	}
+	if !msg.Alt {
+		return false
+	}
+	key := strings.TrimSpace(strings.ToLower(msg.String()))
+	key = strings.TrimPrefix(key, "alt+")
+	if key == "" {
+		return false
+	}
+	target := []rune(key)[0]
+	for idx, button := range r.Buttons {
+		if !strings.EqualFold(string(button.Hotkey), string(target)) {
+			continue
+		}
+		r.Index = idx
+		if button.OnPress != nil {
+			button.OnPress()
+			return true
+		}
+	}
+	return false
+}
+
+func (r *ButtonRow) HotkeyIndex(msg tea.KeyMsg) (int, bool) {
+	if len(r.Buttons) == 0 || !msg.Alt {
+		return 0, false
+	}
+	key := strings.TrimSpace(strings.ToLower(msg.String()))
+	key = strings.TrimPrefix(key, "alt+")
+	if key == "" {
+		return 0, false
+	}
+	target := []rune(key)[0]
+	for idx, button := range r.Buttons {
+		if !strings.EqualFold(string(button.Hotkey), string(target)) {
+			continue
+		}
+		r.Index = idx
+		return idx, true
+	}
+	return 0, false
+}
+
+func (r ButtonRow) View(palette theme.Palette) string {
+	parts := make([]string, 0, len(r.Buttons))
+	for idx, button := range r.Buttons {
+		button.Focused = idx == r.Index
+		parts = append(parts, button.View(palette))
+	}
+	return strings.Join(parts, "  ")
+}
+
+func (r ButtonRow) ActivateAtX(x int, palette theme.Palette) bool {
+	if len(r.Buttons) == 0 {
+		return false
+	}
+	idx, ok := r.IndexAtX(x, palette)
+	if !ok {
+		return false
+	}
+	button := r.Buttons[idx]
+	if button.OnPress != nil {
+		button.OnPress()
+		return true
+	}
+	return false
+}
+
+func (r ButtonRow) IndexAtX(x int, palette theme.Palette) (int, bool) {
+	if len(r.Buttons) == 0 {
+		return 0, false
+	}
+	offset := 0
+	for idx, button := range r.Buttons {
+		rendered := button.View(palette)
+		width := ansi.StringWidth(rendered)
+		if x >= offset && x < offset+width {
+			return idx, true
+		}
+		offset += width + 2
+	}
+	return 0, false
+}
+
+func buttonRowOffset(line string, row ButtonRow, palette theme.Palette) (int, bool) {
+	start := strings.Index(line, ansi.Strip(row.View(palette)))
+	if start < 0 {
+		return 0, false
+	}
+	return start, true
 }
 
 func renderButtonLabel(label string, hotkey rune, palette theme.Palette) string {

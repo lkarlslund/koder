@@ -6,6 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/theme"
@@ -30,12 +31,20 @@ type ModelDialog struct {
 	Index      int
 	Models     []domain.Model
 	view       []domain.Model
+	focus      pickerDialogFocus
+	buttons    ButtonRow
 }
 
 func NewModelDialog(providerID string, models []domain.Model, current string) ModelDialog {
 	d := ModelDialog{
 		ProviderID: providerID,
 		Models:     models,
+	}
+	d.buttons = ButtonRow{
+		Buttons: []Button{
+			{ID: "ok", Label: "OK", Hotkey: 'o', Primary: true},
+			{ID: "cancel", Label: "Cancel", Hotkey: 'c'},
+		},
 	}
 	d.refilter()
 	for idx, item := range d.view {
@@ -48,26 +57,52 @@ func NewModelDialog(providerID string, models []domain.Model, current string) Mo
 }
 
 func (d *ModelDialog) Update(msg tea.KeyMsg) ModelDialogAction {
+	d.ensureButtons()
+	var action ModelDialogAction
+	d.buttons.Buttons[0].OnPress = func() { action = d.selectCurrent() }
+	d.buttons.Buttons[1].OnPress = func() { action = ModelDialogAction{Kind: ModelDialogActionCancel} }
+	if d.buttons.ActivateHotkey(msg) {
+		return action
+	}
 	switch msg.String() {
 	case "esc":
 		return ModelDialogAction{Kind: ModelDialogActionCancel}
-	case "enter":
-		item, ok := d.current()
-		if !ok {
-			return ModelDialogAction{Kind: ModelDialogActionCancel}
+	case "tab":
+		d.focus = (d.focus + 1) % 2
+	case "shift+tab":
+		d.focus--
+		if d.focus < 0 {
+			d.focus = pickerDialogFocusButtons
 		}
-		return ModelDialogAction{Kind: ModelDialogActionSelect, ModelID: item.ID}
+	case "enter":
+		if d.focus == pickerDialogFocusButtons {
+			d.buttons.ActivateFocused()
+			return action
+		}
+		return d.selectCurrent()
 	case "up":
-		d.move(-1)
+		if d.focus == pickerDialogFocusList {
+			d.move(-1)
+		}
 	case "down":
-		d.move(1)
+		if d.focus == pickerDialogFocusList {
+			d.move(1)
+		}
+	case "left":
+		if d.focus == pickerDialogFocusButtons {
+			d.buttons.Move(-1)
+		}
+	case "right":
+		if d.focus == pickerDialogFocusButtons {
+			d.buttons.Move(1)
+		}
 	case "backspace":
-		if d.Query != "" {
+		if d.focus == pickerDialogFocusList && d.Query != "" {
 			d.Query = d.Query[:len(d.Query)-1]
 			d.refilter()
 		}
 	default:
-		if msg.Type == tea.KeyRunes {
+		if d.focus == pickerDialogFocusList && msg.Type == tea.KeyRunes {
 			d.Query += msg.String()
 			d.refilter()
 		}
@@ -127,6 +162,8 @@ func (d ModelDialog) View(width int, palette theme.Palette) string {
 			" ",
 			lipgloss.NewStyle().Width(detailWidth).PaddingLeft(1).Render(details),
 		),
+		"",
+		d.buttons.View(palette),
 	)
 
 	return Modal{
@@ -135,6 +172,40 @@ func (d ModelDialog) View(width int, palette theme.Palette) string {
 		Footer: "Enter to select, Esc to cancel",
 		Width:  dialogWidth,
 	}.View(palette)
+}
+
+func (d *ModelDialog) HandleMouse(localX, localY, width int, palette theme.Palette) ModelDialogAction {
+	d.ensureButtons()
+	var action ModelDialogAction
+	d.buttons.Buttons[0].OnPress = func() { action = d.selectCurrent() }
+	d.buttons.Buttons[1].OnPress = func() { action = ModelDialogAction{Kind: ModelDialogActionCancel} }
+	lines := strings.Split(d.View(width, palette), "\n")
+	if localY < 0 || localY >= len(lines) {
+		return ModelDialogAction{}
+	}
+	line := ansi.Strip(lines[localY])
+	if strings.Contains(line, "OK") && strings.Contains(line, "Cancel") {
+		if start, ok := buttonRowOffset(line, d.buttons, palette); ok {
+			d.focus = pickerDialogFocusButtons
+			if idx, hit := d.buttons.IndexAtX(localX-start, palette); hit {
+				d.buttons.Index = idx
+				d.buttons.ActivateFocused()
+				return action
+			}
+		}
+	}
+	for idx, item := range d.view {
+		if strings.TrimSpace(item.ID) == "" {
+			continue
+		}
+		if !strings.Contains(line, item.ID) {
+			continue
+		}
+		d.Index = idx
+		d.focus = pickerDialogFocusList
+		return d.selectCurrent()
+	}
+	return ModelDialogAction{}
 }
 
 func (d *ModelDialog) move(delta int) {
@@ -179,11 +250,24 @@ func (d ModelDialog) current() (domain.Model, bool) {
 	return d.view[d.Index], true
 }
 
-func modelLine(model domain.Model) string {
-	if badges := capabilityBadges(model); badges != "" {
-		return model.ID + "  [" + badges + "]"
+func (d ModelDialog) selectCurrent() ModelDialogAction {
+	item, ok := d.current()
+	if !ok {
+		return ModelDialogAction{Kind: ModelDialogActionCancel}
 	}
-	return model.ID
+	return ModelDialogAction{Kind: ModelDialogActionSelect, ModelID: item.ID}
+}
+
+func (d *ModelDialog) ensureButtons() {
+	if len(d.buttons.Buttons) != 0 {
+		return
+	}
+	d.buttons = ButtonRow{
+		Buttons: []Button{
+			{ID: "ok", Label: "OK", Hotkey: 'o', Primary: true},
+			{ID: "cancel", Label: "Cancel", Hotkey: 'c'},
+		},
+	}
 }
 
 func capabilityBadges(model domain.Model) string {

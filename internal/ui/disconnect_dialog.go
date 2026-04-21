@@ -6,6 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/lkarlslund/koder/internal/theme"
 )
@@ -31,39 +32,73 @@ type DisconnectDialogAction struct {
 }
 
 type DisconnectDialog struct {
-	Query string
-	Index int
-	Items []ProviderItem
-	view  []ProviderItem
+	Query   string
+	Index   int
+	Items   []ProviderItem
+	view    []ProviderItem
+	focus   pickerDialogFocus
+	buttons ButtonRow
 }
 
 func NewDisconnectDialog(items []ProviderItem) DisconnectDialog {
 	d := DisconnectDialog{Items: items}
+	d.buttons = ButtonRow{
+		Buttons: []Button{
+			{ID: "ok", Label: "OK", Hotkey: 'o', Primary: true},
+			{ID: "cancel", Label: "Cancel", Hotkey: 'c'},
+		},
+	}
 	d.refilter()
 	return d
 }
 
 func (d *DisconnectDialog) Update(msg tea.KeyMsg) DisconnectDialogAction {
+	d.ensureButtons()
+	var action DisconnectDialogAction
+	d.buttons.Buttons[0].OnPress = func() { action = d.selectCurrent() }
+	d.buttons.Buttons[1].OnPress = func() { action = DisconnectDialogAction{Kind: DisconnectDialogActionCancel} }
+	if d.buttons.ActivateHotkey(msg) {
+		return action
+	}
 	switch msg.String() {
 	case "esc":
 		return DisconnectDialogAction{Kind: DisconnectDialogActionCancel}
-	case "enter":
-		item, ok := d.current()
-		if !ok {
-			return DisconnectDialogAction{Kind: DisconnectDialogActionCancel}
+	case "tab":
+		d.focus = (d.focus + 1) % 2
+	case "shift+tab":
+		d.focus--
+		if d.focus < 0 {
+			d.focus = pickerDialogFocusButtons
 		}
-		return DisconnectDialogAction{Kind: DisconnectDialogActionSelect, ProviderID: item.ID}
+	case "enter":
+		if d.focus == pickerDialogFocusButtons {
+			d.buttons.ActivateFocused()
+			return action
+		}
+		return d.selectCurrent()
 	case "up":
-		d.move(-1)
+		if d.focus == pickerDialogFocusList {
+			d.move(-1)
+		}
 	case "down":
-		d.move(1)
+		if d.focus == pickerDialogFocusList {
+			d.move(1)
+		}
+	case "left":
+		if d.focus == pickerDialogFocusButtons {
+			d.buttons.Move(-1)
+		}
+	case "right":
+		if d.focus == pickerDialogFocusButtons {
+			d.buttons.Move(1)
+		}
 	case "backspace":
-		if d.Query != "" {
+		if d.focus == pickerDialogFocusList && d.Query != "" {
 			d.Query = d.Query[:len(d.Query)-1]
 			d.refilter()
 		}
 	default:
-		if msg.Type == tea.KeyRunes {
+		if d.focus == pickerDialogFocusList && msg.Type == tea.KeyRunes {
 			d.Query += msg.String()
 			d.refilter()
 		}
@@ -120,6 +155,8 @@ func (d DisconnectDialog) View(width int, palette theme.Palette) string {
 			" ",
 			lipgloss.NewStyle().Width(detailWidth).PaddingLeft(1).Render(details),
 		),
+		"",
+		d.buttons.View(palette),
 	)
 
 	return Modal{
@@ -128,6 +165,40 @@ func (d DisconnectDialog) View(width int, palette theme.Palette) string {
 		Footer: "Enter to disconnect, Esc to cancel",
 		Width:  dialogWidth,
 	}.View(palette)
+}
+
+func (d *DisconnectDialog) HandleMouse(localX, localY, width int, palette theme.Palette) DisconnectDialogAction {
+	d.ensureButtons()
+	var action DisconnectDialogAction
+	d.buttons.Buttons[0].OnPress = func() { action = d.selectCurrent() }
+	d.buttons.Buttons[1].OnPress = func() { action = DisconnectDialogAction{Kind: DisconnectDialogActionCancel} }
+	lines := strings.Split(d.View(width, palette), "\n")
+	if localY < 0 || localY >= len(lines) {
+		return DisconnectDialogAction{}
+	}
+	line := ansi.Strip(lines[localY])
+	if strings.Contains(line, "OK") && strings.Contains(line, "Cancel") {
+		if start, ok := buttonRowOffset(line, d.buttons, palette); ok {
+			d.focus = pickerDialogFocusButtons
+			if idx, hit := d.buttons.IndexAtX(localX-start, palette); hit {
+				d.buttons.Index = idx
+				d.buttons.ActivateFocused()
+				return action
+			}
+		}
+	}
+	for idx, item := range d.view {
+		if strings.TrimSpace(item.Title) == "" {
+			continue
+		}
+		if !strings.Contains(line, item.Title) {
+			continue
+		}
+		d.Index = idx
+		d.focus = pickerDialogFocusList
+		return d.selectCurrent()
+	}
+	return DisconnectDialogAction{}
 }
 
 func (d *DisconnectDialog) move(delta int) {
@@ -170,4 +241,24 @@ func (d DisconnectDialog) current() (ProviderItem, bool) {
 		return ProviderItem{}, false
 	}
 	return d.view[d.Index], true
+}
+
+func (d DisconnectDialog) selectCurrent() DisconnectDialogAction {
+	item, ok := d.current()
+	if !ok {
+		return DisconnectDialogAction{Kind: DisconnectDialogActionCancel}
+	}
+	return DisconnectDialogAction{Kind: DisconnectDialogActionSelect, ProviderID: item.ID}
+}
+
+func (d *DisconnectDialog) ensureButtons() {
+	if len(d.buttons.Buttons) != 0 {
+		return
+	}
+	d.buttons = ButtonRow{
+		Buttons: []Button{
+			{ID: "ok", Label: "OK", Hotkey: 'o', Primary: true},
+			{ID: "cancel", Label: "Cancel", Hotkey: 'c'},
+		},
+	}
 }

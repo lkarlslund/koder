@@ -7,6 +7,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/lkarlslund/koder/internal/theme"
 )
@@ -35,43 +36,74 @@ type SessionDialogAction struct {
 }
 
 type SessionDialog struct {
-	Query string
-	Index int
-	Items []SessionItem
-	view  []SessionItem
+	Query   string
+	Index   int
+	Items   []SessionItem
+	view    []SessionItem
+	focus   pickerDialogFocus
+	buttons ButtonRow
 }
 
 func NewSessionDialog(items []SessionItem) SessionDialog {
 	d := SessionDialog{Items: items}
+	d.buttons = ButtonRow{
+		Buttons: []Button{
+			{ID: "ok", Label: "OK", Hotkey: 'o', Primary: true},
+			{ID: "cancel", Label: "Cancel", Hotkey: 'c'},
+		},
+	}
 	d.refilter()
 	return d
 }
 
 func (d *SessionDialog) Update(msg tea.KeyMsg) SessionDialogAction {
+	d.ensureButtons()
+	var action SessionDialogAction
+	d.buttons.Buttons[0].OnPress = func() { action = d.selectCurrent() }
+	d.buttons.Buttons[1].OnPress = func() { action = SessionDialogAction{Kind: SessionDialogActionCancel} }
+
+	if d.buttons.ActivateHotkey(msg) {
+		return action
+	}
 	switch msg.String() {
 	case "esc":
 		return SessionDialogAction{Kind: SessionDialogActionCancel}
+	case "tab":
+		d.focus = (d.focus + 1) % 2
+	case "shift+tab":
+		d.focus--
+		if d.focus < 0 {
+			d.focus = pickerDialogFocusButtons
+		}
 	case "enter":
-		item, ok := d.current()
-		if !ok {
-			return SessionDialogAction{Kind: SessionDialogActionCancel}
+		if d.focus == pickerDialogFocusButtons {
+			d.buttons.ActivateFocused()
+			return action
 		}
-		id, err := strconv.ParseInt(item.Value, 10, 64)
-		if err != nil {
-			return SessionDialogAction{}
-		}
-		return SessionDialogAction{Kind: SessionDialogActionSelect, SessionID: id}
+		return d.selectCurrent()
 	case "up":
-		d.move(-1)
+		if d.focus == pickerDialogFocusList {
+			d.move(-1)
+		}
 	case "down":
-		d.move(1)
+		if d.focus == pickerDialogFocusList {
+			d.move(1)
+		}
+	case "left":
+		if d.focus == pickerDialogFocusButtons {
+			d.buttons.Move(-1)
+		}
+	case "right":
+		if d.focus == pickerDialogFocusButtons {
+			d.buttons.Move(1)
+		}
 	case "backspace":
-		if d.Query != "" {
+		if d.focus == pickerDialogFocusList && d.Query != "" {
 			d.Query = d.Query[:len(d.Query)-1]
 			d.refilter()
 		}
 	default:
-		if msg.Type == tea.KeyRunes {
+		if d.focus == pickerDialogFocusList && msg.Type == tea.KeyRunes {
 			d.Query += msg.String()
 			d.refilter()
 		}
@@ -143,7 +175,7 @@ func (d SessionDialog) View(width int, palette theme.Palette) string {
 		"",
 		detailPane,
 		"",
-		RenderDialogButtons(palette, "OK", "Cancel"),
+		d.buttons.View(palette),
 	)
 
 	return Modal{
@@ -152,6 +184,41 @@ func (d SessionDialog) View(width int, palette theme.Palette) string {
 		Footer: "Enter resumes the highlighted session. Esc creates a new session.",
 		Width:  dialogWidth,
 	}.View(palette)
+}
+
+func (d *SessionDialog) HandleMouse(localX, localY, width int, palette theme.Palette) SessionDialogAction {
+	d.ensureButtons()
+	var action SessionDialogAction
+	d.buttons.Buttons[0].OnPress = func() { action = d.selectCurrent() }
+	d.buttons.Buttons[1].OnPress = func() { action = SessionDialogAction{Kind: SessionDialogActionCancel} }
+
+	lines := strings.Split(d.View(width, palette), "\n")
+	if localY < 0 || localY >= len(lines) {
+		return SessionDialogAction{}
+	}
+	line := ansi.Strip(lines[localY])
+	if strings.Contains(line, "OK") && strings.Contains(line, "Cancel") {
+		if start, ok := buttonRowOffset(line, d.buttons, palette); ok {
+			d.focus = pickerDialogFocusButtons
+			if idx, hit := d.buttons.IndexAtX(localX-start, palette); hit {
+				d.buttons.Index = idx
+				d.buttons.ActivateFocused()
+				return action
+			}
+		}
+	}
+	for idx, item := range d.view {
+		if strings.TrimSpace(item.Title) == "" {
+			continue
+		}
+		if !strings.Contains(line, item.Title) {
+			continue
+		}
+		d.Index = idx
+		d.focus = pickerDialogFocusList
+		return d.selectCurrent()
+	}
+	return SessionDialogAction{}
 }
 
 func (d *SessionDialog) move(delta int) {
@@ -194,6 +261,30 @@ func (d SessionDialog) current() (SessionItem, bool) {
 		return SessionItem{}, false
 	}
 	return d.view[d.Index], true
+}
+
+func (d SessionDialog) selectCurrent() SessionDialogAction {
+	item, ok := d.current()
+	if !ok {
+		return SessionDialogAction{Kind: SessionDialogActionCancel}
+	}
+	id, err := strconv.ParseInt(item.Value, 10, 64)
+	if err != nil {
+		return SessionDialogAction{}
+	}
+	return SessionDialogAction{Kind: SessionDialogActionSelect, SessionID: id}
+}
+
+func (d *SessionDialog) ensureButtons() {
+	if len(d.buttons.Buttons) != 0 {
+		return
+	}
+	d.buttons = ButtonRow{
+		Buttons: []Button{
+			{ID: "ok", Label: "OK", Hotkey: 'o', Primary: true},
+			{ID: "cancel", Label: "Cancel", Hotkey: 'c'},
+		},
+	}
 }
 
 func renderSessionTableHeader(idWidth, changedWidth, tokensWidth, titleWidth int, palette theme.Palette) string {
