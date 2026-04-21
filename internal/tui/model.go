@@ -3315,6 +3315,10 @@ func (m *Model) openSessionPicker() {
 		if description == "" {
 			description = "No messages yet"
 		}
+		preview := description
+		if m.renderer != nil {
+			preview = m.renderer.Render(description)
+		}
 		details := []string{
 			fmt.Sprintf("Session ID: %d", session.ID),
 			fmt.Sprintf("Created:    %s", formatSessionTime(session.CreatedAt)),
@@ -3332,6 +3336,7 @@ func (m *Model) openSessionPicker() {
 			TokenSummary: sessionTokenSummary(m, session.ID),
 			Title:        title,
 			Description:  description,
+			Preview:      preview,
 			Details:      details,
 			Value:        strconv.FormatInt(session.ID, 10),
 		})

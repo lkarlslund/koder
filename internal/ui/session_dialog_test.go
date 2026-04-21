@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 
@@ -42,29 +43,76 @@ func TestSessionDialogFiltersItems(t *testing.T) {
 	}
 }
 
-func TestSessionDialogViewCollapsesMultilineDescriptions(t *testing.T) {
+func TestSessionDialogViewPreservesPreviewLineBreaks(t *testing.T) {
 	dialog := NewSessionDialog([]SessionItem{{
 		SessionID:    "#1",
 		ChangedAt:    "2026-04-20",
 		TokenSummary: "123/456",
 		Title:        "Session A",
 		Description:  "line one\nline two\n\nline three",
+		Preview:      "line one\nline two\n\nline three",
 		Details:      []string{"Session ID: 1"},
 		Value:        "1",
 	}})
 
 	got := dialog.View(84, theme.Default().Palette)
-	if strings.Contains(got, "line one\nline two") {
-		t.Fatalf("expected multiline description to collapse in picker row, got %q", got)
+	lineOne := strings.Index(got, "line one")
+	lineTwo := strings.Index(got, "line two")
+	lineThree := strings.Index(got, "line three")
+	if lineOne < 0 || lineTwo < 0 || lineThree < 0 {
+		t.Fatalf("expected preview lines in view, got %q", got)
 	}
-	if !strings.Contains(got, "line one line two line three") {
-		t.Fatalf("expected collapsed description in view, got %q", got)
+	if !(lineOne < lineTwo && lineTwo < lineThree) {
+		t.Fatalf("expected preview lines to remain ordered, got %q", got)
+	}
+	if !strings.Contains(got, "line two") || !strings.Contains(got, "line three") {
+		t.Fatalf("expected preview lines in detail pane, got %q", got)
+	}
+	if !strings.Contains(got, "│                                                                                                │\n│  line three") {
+		t.Fatalf("expected blank line before line three, got %q", got)
 	}
 	if !strings.Contains(got, "ID") || !strings.Contains(got, "Changed") || !strings.Contains(got, "Tokens") {
 		t.Fatalf("expected table headers in session dialog, got %q", got)
 	}
 	if !strings.Contains(got, "OK") || !strings.Contains(got, "Cancel") {
 		t.Fatalf("expected dialog buttons in session dialog, got %q", got)
+	}
+}
+
+func TestSessionDialogViewPrefersPreviewOverDescription(t *testing.T) {
+	dialog := NewSessionDialog([]SessionItem{{
+		Title:       "Session A",
+		Description: "plain fallback",
+		Preview:     "rendered\npreview",
+		Value:       "1",
+	}})
+
+	got := dialog.View(84, theme.Default().Palette)
+	if !strings.Contains(got, "rendered") || !strings.Contains(got, "preview") {
+		t.Fatalf("expected rendered preview in detail pane, got %q", got)
+	}
+	if strings.Contains(got, "plain fallback") {
+		t.Fatalf("expected description fallback to be ignored when preview exists, got %q", got)
+	}
+}
+
+func TestSessionDialogViewClampsPreviewToTenLines(t *testing.T) {
+	lines := make([]string, 12)
+	for i := range lines {
+		lines[i] = "line " + strconv.Itoa(i+1)
+	}
+	dialog := NewSessionDialog([]SessionItem{{
+		Title:   "Session A",
+		Preview: strings.Join(lines, "\n"),
+		Value:   "1",
+	}})
+
+	got := dialog.View(84, theme.Default().Palette)
+	if strings.Contains(got, "line 11") || strings.Contains(got, "line 12") {
+		t.Fatalf("expected preview to clamp at ten lines, got %q", got)
+	}
+	if !strings.Contains(got, "line 10 …") {
+		t.Fatalf("expected clamped preview marker on tenth line, got %q", got)
 	}
 }
 

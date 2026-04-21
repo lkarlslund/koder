@@ -18,6 +18,7 @@ type SessionItem struct {
 	TokenSummary string
 	Title        string
 	Description  string
+	Preview      string
 	Details      []string
 	Value        string
 }
@@ -150,8 +151,8 @@ func (d SessionDialog) View(width int, palette theme.Palette) string {
 			lipgloss.NewStyle().Bold(true).Render(item.Title),
 		}
 		blocks = append(blocks, item.Details...)
-		if desc := strings.TrimSpace(item.Description); desc != "" {
-			blocks = append(blocks, "", wrapPlain(compactInlineText(desc), contentWidth))
+		if preview := sessionPreviewText(item, contentWidth); preview != "" {
+			blocks = append(blocks, "", clampPreviewLines(preview, 10))
 		}
 		details = strings.Join(blocks, "\n")
 	}
@@ -330,4 +331,27 @@ func joinSessionColumns(id string, idWidth int, changed string, changedWidth int
 		lipgloss.NewStyle().Width(titleWidth).Render(truncateText(strings.TrimSpace(title), titleWidth)),
 	}
 	return strings.Join(cols, "  ")
+}
+
+func sessionPreviewText(item SessionItem, width int) string {
+	if preview := strings.TrimSpace(item.Preview); preview != "" {
+		return preview
+	}
+	if desc := strings.TrimSpace(item.Description); desc != "" {
+		return wrapPlain(desc, width)
+	}
+	return ""
+}
+
+func clampPreviewLines(text string, maxLines int) string {
+	if maxLines <= 0 {
+		return ""
+	}
+	lines := strings.Split(strings.TrimSpace(text), "\n")
+	if len(lines) <= maxLines {
+		return strings.Join(lines, "\n")
+	}
+	lines = lines[:maxLines]
+	lines[maxLines-1] = strings.TrimRight(lines[maxLines-1], " ") + " …"
+	return strings.Join(lines, "\n")
 }
