@@ -2,6 +2,7 @@ package tools
 
 import (
 	"encoding/json"
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -68,10 +69,19 @@ type ApplyPatchStoredResult struct {
 }
 
 type EditStoredResult struct {
-	Path        string `json:"path"`
-	ReplaceAll  bool   `json:"replace_all,omitempty"`
-	Occurrences int    `json:"occurrences,omitempty"`
-	Summary     string `json:"summary,omitempty"`
+	Path        string           `json:"path"`
+	ReplaceAll  bool             `json:"replace_all,omitempty"`
+	Occurrences int              `json:"occurrences,omitempty"`
+	Summary     string           `json:"summary,omitempty"`
+	Hunks       []EditStoredHunk `json:"hunks,omitempty"`
+	Truncated   bool             `json:"truncated,omitempty"`
+}
+
+type EditStoredHunk struct {
+	OldStart int      `json:"old_start"`
+	NewStart int      `json:"new_start"`
+	OldLines []string `json:"old_lines,omitempty"`
+	NewLines []string `json:"new_lines,omitempty"`
 }
 
 type WriteStoredResult struct {
@@ -320,6 +330,9 @@ func formatStoredResultForDisplay(env storedResultEnvelope) (string, bool) {
 	}
 	switch env.PartKind {
 	case domain.PartKindToolOutput:
+		if env.Tool == domain.ToolKindEdit {
+			return decodeAndFormat[EditStoredResult](env.Payload, formatEditStoredResultForDisplay)
+		}
 		if env.Tool == domain.ToolKindWrite {
 			return decodeAndFormat[WriteStoredResult](env.Payload, formatWriteStoredResultForDisplay)
 		}
@@ -391,6 +404,25 @@ func formatWriteStoredResultForDisplay(result WriteStoredResult) string {
 		text += "\n... truncated ..."
 	}
 	return text
+}
+
+func formatEditStoredResultForDisplay(result EditStoredResult) string {
+	lines := []string{strings.TrimSpace(result.Summary)}
+	for _, hunk := range result.Hunks {
+		oldCount := max(1, len(hunk.OldLines))
+		newCount := max(1, len(hunk.NewLines))
+		lines = append(lines, fmt.Sprintf("@@ -%d,%d +%d,%d @@", hunk.OldStart, oldCount, hunk.NewStart, newCount))
+		for idx, line := range hunk.OldLines {
+			lines = append(lines, fmt.Sprintf("-%d %s", hunk.OldStart+idx, line))
+		}
+		for idx, line := range hunk.NewLines {
+			lines = append(lines, fmt.Sprintf("+%d %s", hunk.NewStart+idx, line))
+		}
+	}
+	if result.Truncated {
+		lines = append(lines, "... additional replacements omitted ...")
+	}
+	return strings.TrimSpace(strings.Join(lines, "\n"))
 }
 
 func formatWebSearchStoredResult(result WebSearchStoredResult) string {

@@ -3020,6 +3020,53 @@ func TestWriteToolRunUsesStoredContentForExpansion(t *testing.T) {
 	}
 }
 
+func TestEditToolRunShowsStoredHunkDetails(t *testing.T) {
+	m := Model{
+		currentSession:   domain.Session{ID: 1},
+		viewport:         viewport.New(80, 10),
+		parts:            map[int64][]domain.Part{},
+		expandedToolRuns: map[string]bool{"call_edit_1": true},
+		palette:          theme.Resolve("tokyonight").Palette,
+	}
+
+	meta := mustMarshalMeta(t, tools.MetaWithStoredResult(map[string]string{
+		"tool":         "edit",
+		"path":         "game/map.go",
+		"tool_call_id": "call_edit_1",
+	}, domain.PartKindToolOutput, domain.ToolKindEdit, tools.StoredResultStatusOK, tools.EditStoredResult{
+		Path:    "game/map.go",
+		Summary: "Edited game/map.go (replaced 1 occurrence)",
+		Hunks: []tools.EditStoredHunk{{
+			OldStart: 12,
+			NewStart: 12,
+			OldLines: []string{"if oldCondition {"},
+			NewLines: []string{"if newCondition {"},
+		}},
+	}))
+
+	m.messages = []domain.Message{
+		{ID: 1, Role: domain.MessageRoleTool, Summary: "edit"},
+	}
+	m.parts[1] = []domain.Part{{
+		Kind:     domain.PartKindToolOutput,
+		Body:     "Edited game/map.go (replaced 1 occurrence)",
+		MetaJSON: meta,
+	}}
+
+	m.refreshViewport()
+	got := m.viewport.View()
+	for _, want := range []string{
+		"Edited game/map.go (replaced 1 occurrence)",
+		"@@ -12,1 +12,1 @@",
+		"-12 if oldCondition {",
+		"+12 if newCondition {",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected %q in %q", want, got)
+		}
+	}
+}
+
 func TestMouseClickOnApprovalPromptPermissionsOpensPicker(t *testing.T) {
 	m := Model{
 		mouseEnabled: true,

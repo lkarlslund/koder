@@ -71,7 +71,9 @@ func RenderToolRunCard(run ToolRun, palette theme.Palette, width int, expanded b
 	titleStyle := lipgloss.NewStyle().Foreground(palette.MarkdownText).Bold(true).Italic(true)
 	subtitleStyle := lipgloss.NewStyle().Foreground(palette.ComposerMutedText)
 	bodyStyle := lipgloss.NewStyle().Foreground(palette.MarkdownText)
-	diffStyle := lipgloss.NewStyle().Foreground(palette.DiffAddedText)
+	addedStyle := lipgloss.NewStyle().Foreground(palette.DiffAddedText)
+	deletedStyle := lipgloss.NewStyle().Foreground(palette.DiffDeletedText)
+	metaStyle := lipgloss.NewStyle().Foreground(palette.ComposerMutedText)
 	toggleStyle := lipgloss.NewStyle().Foreground(palette.UserAccentBar).Bold(true)
 	headerWidth := innerCardWidth(width)
 	headerParts := []string{titleStyle.Render(run.Title)}
@@ -92,7 +94,7 @@ func RenderToolRunCard(run ToolRun, palette theme.Palette, width int, expanded b
 	}
 	lines := []string{strings.Join(headerParts, "  ")}
 	if preview := run.PreviewText(); preview != "" {
-		lines = append(lines, renderToolRunPreview(preview, run, bodyStyle, diffStyle, headerWidth, expanded))
+		lines = append(lines, renderToolRunPreview(preview, run, bodyStyle, addedStyle, deletedStyle, metaStyle, headerWidth, expanded))
 	}
 	return strings.Join(lines, "\n")
 }
@@ -162,7 +164,7 @@ func ToolRunHiddenLineCount(run ToolRun, width int) int {
 	return expandedLines - collapsedLines
 }
 
-func renderToolRunPreview(preview string, run ToolRun, bodyStyle, diffStyle lipgloss.Style, width int, expanded bool) string {
+func renderToolRunPreview(preview string, run ToolRun, bodyStyle, addedStyle, deletedStyle, metaStyle lipgloss.Style, width int, expanded bool) string {
 	preview = strings.TrimSpace(preview)
 	if preview == "" {
 		return ""
@@ -180,11 +182,40 @@ func renderToolRunPreview(preview string, run ToolRun, bodyStyle, diffStyle lipg
 		}
 		return strings.Join(lines, "\n")
 	}
+	renderStyledLines := func(value string) string {
+		lines := strings.Split(value, "\n")
+		if !expanded {
+			lines = lines[:1]
+		}
+		rendered := make([]string, 0, len(lines))
+		for _, line := range lines {
+			style := bodyStyle
+			switch {
+			case strings.HasPrefix(line, "+"):
+				style = addedStyle
+			case strings.HasPrefix(line, "-"):
+				style = deletedStyle
+			case strings.HasPrefix(line, "@@"):
+				style = metaStyle
+			}
+			wrapped := wrapPlain(line, max(1, width-1))
+			for _, wrappedLine := range strings.Split(wrapped, "\n") {
+				rendered = append(rendered, " "+style.Render(wrappedLine))
+			}
+		}
+		return strings.Join(rendered, "\n")
+	}
 	if strings.TrimSpace(run.Diff) != "" && strings.TrimSpace(run.Output) == "" && strings.TrimSpace(run.ErrorText) == "" {
 		if expanded {
-			return renderIndented(diffStyle, preview)
+			return renderIndented(addedStyle, preview)
 		}
-		return renderIndented(diffStyle, diffSummary(preview))
+		return renderIndented(addedStyle, diffSummary(preview))
+	}
+	if run.Tool == domain.ToolKindEdit && strings.Contains(preview, "@@") {
+		if expanded {
+			return renderStyledLines(preview)
+		}
+		return renderIndented(bodyStyle, firstPreviewLine(preview))
 	}
 	if expanded {
 		return renderIndented(bodyStyle, preview)

@@ -99,6 +99,7 @@ func (tool) Execute(_ context.Context, runtime tools.Runtime, req tools.Request)
 		mode = fmt.Sprintf("replaced %d occurrences", occurrences)
 	}
 	summary := fmt.Sprintf("Edited %s (%s)", rel, mode)
+	hunks, truncated := buildStoredHunks(before, oldString, newString, replaceAll)
 	return tools.Result{
 		Output:   summary,
 		DiffText: dmp.DiffPrettyText(diffs),
@@ -112,6 +113,8 @@ func (tool) Execute(_ context.Context, runtime tools.Runtime, req tools.Request)
 			ReplaceAll:  replaceAll,
 			Occurrences: occurrences,
 			Summary:     summary,
+			Hunks:       hunks,
+			Truncated:   truncated,
 		},
 	}, nil
 }
@@ -120,4 +123,51 @@ func (tool) SummarizeResult(req tools.Request, result tools.Result) (string, str
 }
 func (tool) PersistResult(ctx context.Context, st *store.Store, sessionID int64, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
 	return tools.PersistStandardResult(ctx, st, sessionID, req, result)
+}
+
+const maxStoredHunks = 8
+
+func buildStoredHunks(before, oldString, newString string, replaceAll bool) ([]tools.EditStoredHunk, bool) {
+	if strings.TrimSpace(oldString) == "" {
+		return nil, false
+	}
+	oldLines := splitStoredLines(oldString)
+	newLines := splitStoredLines(newString)
+	var hunks []tools.EditStoredHunk
+	searchFrom := 0
+	for {
+		idx := strings.Index(before[searchFrom:], oldString)
+		if idx < 0 {
+			break
+		}
+		abs := searchFrom + idx
+		oldStart := 1 + strings.Count(before[:abs], "\n")
+		newStart := oldStart
+		hunks = append(hunks, tools.EditStoredHunk{
+			OldStart: oldStart,
+			NewStart: newStart,
+			OldLines: oldLines,
+			NewLines: newLines,
+		})
+		if len(hunks) >= maxStoredHunks {
+			return hunks, true
+		}
+		searchFrom = abs + len(oldString)
+		if !replaceAll {
+			break
+		}
+	}
+	return hunks, false
+}
+
+func splitStoredLines(input string) []string {
+	lines := strings.Split(strings.TrimSuffix(input, "\n"), "\n")
+	if len(lines) == 1 && lines[0] == "" {
+		return []string{""}
+	}
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		out = append(out, strings.ReplaceAll(line, "\t", "    "))
+	}
+	return out
 }
