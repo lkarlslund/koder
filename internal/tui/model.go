@@ -1054,14 +1054,6 @@ func (m *Model) renderSidebar() string {
 		}
 	}
 	lines = append(lines, "")
-	lines = append(lines, "Pending approvals")
-	if len(m.approvals) == 0 {
-		lines = append(lines, "  none")
-	}
-	for _, item := range m.approvals {
-		lines = append(lines, fmt.Sprintf("  #%d %s", item.ID, truncate(item.Command, 22)))
-	}
-	lines = append(lines, "")
 	lines = append(lines, "Profiles")
 	for _, profile := range permission.ProfileNames(m.cfg.Permissions) {
 		cursor := " "

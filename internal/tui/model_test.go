@@ -1931,6 +1931,9 @@ func TestRenderSidebarShowsStatusAndSessionInfo(t *testing.T) {
 	if strings.Contains(got, "saved   ") || strings.Contains(got, "live    ") || strings.Contains(got, "files   ") {
 		t.Fatalf("expected sidebar to omit AGENTS checksum details, got %q", got)
 	}
+	if strings.Contains(got, "Pending approvals") {
+		t.Fatalf("expected sidebar to omit pending approvals, got %q", got)
+	}
 }
 
 func TestRefreshViewportShowsConnectHintWithoutProvider(t *testing.T) {
