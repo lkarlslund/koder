@@ -71,6 +71,13 @@ func (tool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Reques
 			"timeout_ms": strconv.FormatInt(timeout.Milliseconds(), 10),
 			"exit_code":  strconv.Itoa(exitCode),
 		},
+		Stored: tools.BashStoredResult{
+			Command:   req.Args["command"],
+			Workdir:   rel,
+			TimeoutMS: timeout.Milliseconds(),
+			ExitCode:  exitCode,
+			Output:    output,
+		},
 	}
 	if err != nil {
 		return result, err

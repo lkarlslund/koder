@@ -73,6 +73,12 @@ func (tool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Reques
 						"base_path": strings.TrimSpace(req.Args["path"]),
 						"matches":   "0",
 					},
+					Stored: tools.GrepStoredResult{
+						Pattern:  req.Args["pattern"],
+						BasePath: strings.TrimSpace(req.Args["path"]),
+						Include:  req.Args["include"],
+						Output:   "No matches found",
+					},
 				}, nil
 			}
 			if len(output) == 0 {
@@ -87,6 +93,13 @@ func (tool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Reques
 				"include":   req.Args["include"],
 				"base_path": strings.TrimSpace(req.Args["path"]),
 				"truncated": tools.BoolString(truncated),
+			},
+			Stored: tools.GrepStoredResult{
+				Pattern:   req.Args["pattern"],
+				BasePath:  strings.TrimSpace(req.Args["path"]),
+				Include:   req.Args["include"],
+				Output:    text,
+				Truncated: truncated,
 			},
 		}, nil
 	}

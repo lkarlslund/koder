@@ -988,7 +988,9 @@ func structuredToolMessage(parts []domain.Part) (provider.Message, bool) {
 			return provider.Message{}, false
 		}
 		body := strings.TrimSpace(part.Body)
-		if diff := diffBody(parts); diff != "" {
+		if formatted, ok := tools.ModelTextForPart(part, diffBody(parts)); ok {
+			body = strings.TrimSpace(formatted)
+		} else if diff := diffBody(parts); diff != "" {
 			if body != "" {
 				body += "\n\nDiff:\n" + diff
 			} else {
@@ -1028,11 +1030,25 @@ func stringifyParts(parts []domain.Part) string {
 				chunks = append(chunks, callText)
 			}
 		case domain.PartKindToolOutput:
-			chunks = append(chunks, "Tool output:\n"+part.Body)
+			body := part.Body
+			if formatted, ok := tools.ModelTextForPart(part, ""); ok {
+				body = formatted
+			}
+			chunks = append(chunks, "Tool output:\n"+body)
 		case domain.PartKindDiff:
 			chunks = append(chunks, "Diff:\n"+part.Body)
 		case domain.PartKindTaskUpdate:
-			chunks = append(chunks, "Task update:\n"+part.Body)
+			body := part.Body
+			if formatted, ok := tools.ModelTextForPart(part, ""); ok {
+				body = formatted
+			}
+			chunks = append(chunks, "Task update:\n"+body)
+		case domain.PartKindPlanUpdate:
+			body := part.Body
+			if formatted, ok := tools.ModelTextForPart(part, ""); ok {
+				body = formatted
+			}
+			chunks = append(chunks, "Plan update:\n"+body)
 		case domain.PartKindApprovalRequest, domain.PartKindSystemNotice:
 			continue
 		default:
@@ -1284,7 +1300,9 @@ func (e *Engine) handleModelToolCall(ctx context.Context, session domain.Session
 		if err != nil {
 			return domain.Event{}, err
 		}
-		meta, _ := json.Marshal(req)
+		meta, _ := json.Marshal(tools.MetaWithStoredResult(req.Meta(), domain.PartKindToolOutput, req.Tool, tools.StoredResultStatusDenied, tools.DeniedStoredResult{
+			Message: text,
+		}))
 		if _, err := e.store.AddPart(ctx, msg.ID, domain.PartKindToolOutput, text, string(meta)); err != nil {
 			return domain.Event{}, err
 		}
@@ -1487,7 +1505,9 @@ func (e *Engine) prepareModelToolCall(ctx context.Context, session domain.Sessio
 		if err != nil {
 			return preparedToolCall{}, err
 		}
-		meta, _ := json.Marshal(req)
+		meta, _ := json.Marshal(tools.MetaWithStoredResult(req.Meta(), domain.PartKindToolOutput, req.Tool, tools.StoredResultStatusDenied, tools.DeniedStoredResult{
+			Message: text,
+		}))
 		if _, err := e.store.AddPart(ctx, msg.ID, domain.PartKindToolOutput, text, string(meta)); err != nil {
 			return preparedToolCall{}, err
 		}
@@ -1719,6 +1739,7 @@ func (e *Engine) recordApprovalReply(ctx context.Context, sessionID int64, tool 
 	if err != nil {
 		return err
 	}
+	body := fmt.Sprintf("Approval %d %s for %s: %s", approvalID, status, tool, preview)
 	payload := map[string]string{
 		"approval_id": strconv.FormatInt(approvalID, 10),
 		"tool":        string(tool),
@@ -1728,8 +1749,12 @@ func (e *Engine) recordApprovalReply(ctx context.Context, sessionID int64, tool 
 	if strings.TrimSpace(toolCallID) != "" {
 		payload["tool_call_id"] = toolCallID
 	}
+	if status == "denied" {
+		payload = tools.MetaWithStoredResult(payload, domain.PartKindToolOutput, tool, tools.StoredResultStatusDenied, tools.DeniedStoredResult{
+			Message: body,
+		})
+	}
 	meta, _ := json.Marshal(payload)
-	body := fmt.Sprintf("Approval %d %s for %s: %s", approvalID, status, tool, preview)
 	if status == "denied" {
 		_, err = e.store.AddPart(ctx, msg.ID, domain.PartKindToolOutput, body, string(meta))
 		return err
@@ -1743,9 +1768,13 @@ func (e *Engine) recordTaskUpdate(ctx context.Context, sessionID int64, body str
 	if err != nil {
 		return err
 	}
-	meta, _ := json.Marshal(map[string]string{
+	payload := tools.MetaWithStoredResult(map[string]string{
 		"status": string(status),
+	}, domain.PartKindTaskUpdate, domain.ToolKindTask, tools.StoredResultStatusOK, tools.TaskStoredResult{
+		Body:   body,
+		Status: status,
 	})
+	meta, _ := json.Marshal(payload)
 	_, err = e.store.AddPart(ctx, msg.ID, domain.PartKindTaskUpdate, body, string(meta))
 	return err
 }

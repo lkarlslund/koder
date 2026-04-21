@@ -186,7 +186,17 @@ func TestBuildConversationUsesStructuredToolMessages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.AddPart(context.Background(), toolMsg.ID, domain.PartKindToolOutput, "/tmp/workspace", `{"tool":"bash","tool_call_id":"call_1"}`); err != nil {
+	meta := tools.MetaWithStoredResult(map[string]string{
+		"tool":         "bash",
+		"tool_call_id": "call_1",
+	}, domain.PartKindToolOutput, domain.ToolKindBash, tools.StoredResultStatusOK, tools.BashStoredResult{
+		Command:   "pwd",
+		Workdir:   ".",
+		TimeoutMS: 1000,
+		ExitCode:  0,
+		Output:    "/typed/output",
+	})
+	if _, err := st.AddPart(context.Background(), toolMsg.ID, domain.PartKindToolOutput, "/stale/body", tools.JSONMeta(meta)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -200,8 +210,35 @@ func TestBuildConversationUsesStructuredToolMessages(t *testing.T) {
 	if len(conversation[1].ToolCalls) != 1 || conversation[1].ToolCalls[0].ID != "call_1" {
 		t.Fatalf("expected structured assistant tool call, got %#v", conversation[1])
 	}
-	if conversation[2].Role != domain.MessageRoleTool || conversation[2].ToolCallID != "call_1" || conversation[2].Content != "/tmp/workspace" {
+	if conversation[2].Role != domain.MessageRoleTool || conversation[2].ToolCallID != "call_1" || conversation[2].Content != "/typed/output" {
 		t.Fatalf("expected structured tool message, got %#v", conversation[2])
+	}
+}
+
+func TestStringifyPartsFormatsStoredTaskAndPlanUpdates(t *testing.T) {
+	taskMeta := tools.MetaWithStoredResult(map[string]string{
+		"status": "pending",
+	}, domain.PartKindTaskUpdate, domain.ToolKindTask, tools.StoredResultStatusOK, tools.TaskStoredResult{
+		Body:   "write docs",
+		Status: domain.TaskStatusPending,
+	})
+	planMeta := tools.MetaWithStoredResult(nil, domain.PartKindPlanUpdate, domain.ToolKindUpdatePlan, tools.StoredResultStatusOK, tools.UpdatePlanStoredResult{
+		Explanation: "updated plan",
+		Steps: []tools.PlanStoredStep{
+			{Step: "inspect repo", Status: "completed"},
+			{Step: "wire persistence", Status: "in_progress"},
+		},
+	})
+
+	got := stringifyParts([]domain.Part{
+		{Kind: domain.PartKindTaskUpdate, Body: "stale task body", MetaJSON: tools.JSONMeta(taskMeta)},
+		{Kind: domain.PartKindPlanUpdate, Body: "stale plan body", MetaJSON: tools.JSONMeta(planMeta)},
+	})
+	if !strings.Contains(got, "Task update:\nwrite docs") {
+		t.Fatalf("expected task update from stored result, got %q", got)
+	}
+	if !strings.Contains(got, "Plan update:\nupdated plan\n[completed] inspect repo\n[in_progress] wire persistence") {
+		t.Fatalf("expected plan update from stored result, got %q", got)
 	}
 }
 

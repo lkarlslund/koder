@@ -60,12 +60,18 @@ func (tool) Execute(_ context.Context, runtime tools.Runtime, req tools.Request)
 	}
 	dmp := diffmatchpatch.New()
 	diffs := dmp.DiffMain(string(beforeBytes), req.Args["content"], false)
+	summary := fmt.Sprintf("%s %s", strings.Title(action), rel)
 	return tools.Result{
-		Output:   fmt.Sprintf("%s %s", strings.Title(action), rel),
+		Output:   summary,
 		DiffText: dmp.DiffPrettyText(diffs),
 		Meta: map[string]string{
 			"path":   rel,
 			"action": action,
+		},
+		Stored: tools.WriteStoredResult{
+			Path:    rel,
+			Action:  action,
+			Summary: summary,
 		},
 	}, nil
 }

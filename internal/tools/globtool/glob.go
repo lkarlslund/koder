@@ -76,6 +76,11 @@ func (tool) Execute(_ context.Context, runtime tools.Runtime, req tools.Request)
 	sort.Strings(matches)
 	body := strings.Join(matches, "\n")
 	body, truncated := tools.TruncateText(body, tools.DefaultToolOutputLimit)
+	storedMatches := append([]string(nil), matches...)
+	footer := ""
+	if truncated {
+		storedMatches, footer = splitTruncatedLines(body)
+	}
 	return tools.Result{
 		Output: body,
 		Meta: map[string]string{
@@ -84,6 +89,13 @@ func (tool) Execute(_ context.Context, runtime tools.Runtime, req tools.Request)
 			"matches":   strconv.Itoa(len(matches)),
 			"truncated": tools.BoolString(truncated),
 		},
+		Stored: tools.GlobStoredResult{
+			Pattern:   pattern,
+			BasePath:  strings.TrimSpace(req.Args["path"]),
+			Matches:   storedMatches,
+			Footer:    footer,
+			Truncated: truncated,
+		},
 	}, nil
 }
 func (tool) SummarizeResult(req tools.Request, result tools.Result) (string, string) {
@@ -91,4 +103,15 @@ func (tool) SummarizeResult(req tools.Request, result tools.Result) (string, str
 }
 func (tool) PersistResult(ctx context.Context, st *store.Store, sessionID int64, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
 	return tools.PersistStandardResult(ctx, st, sessionID, req, result)
+}
+
+func splitTruncatedLines(body string) ([]string, string) {
+	lines := strings.Split(strings.TrimSpace(body), "\n")
+	if len(lines) == 0 {
+		return nil, ""
+	}
+	if !strings.HasPrefix(lines[len(lines)-1], "... truncated") {
+		return lines, ""
+	}
+	return lines[:len(lines)-1], lines[len(lines)-1]
 }

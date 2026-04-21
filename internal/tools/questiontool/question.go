@@ -35,7 +35,10 @@ func (tool) Presentation(req tools.Request) tools.Presentation {
 	return tool{}.PresentationForPreview(req.Args["question"])
 }
 func (tool) Execute(_ context.Context, _ tools.Runtime, req tools.Request) (tools.Result, error) {
-	return tools.Result{Output: req.Args["question"]}, nil
+	return tools.Result{
+		Output: req.Args["question"],
+		Stored: tools.QuestionStoredResult{Question: req.Args["question"]},
+	}, nil
 }
 func (tool) SummarizeResult(req tools.Request, result tools.Result) (string, string) {
 	return tools.DefaultSummarizeResult(req, result)

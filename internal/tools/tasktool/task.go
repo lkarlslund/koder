@@ -53,7 +53,12 @@ func (tool) PersistResult(ctx context.Context, st *store.Store, sessionID int64,
 	if err != nil {
 		return nil, err
 	}
-	meta, _ := json.Marshal(map[string]string{"status": string(task.Status)})
+	meta, _ := json.Marshal(tools.MetaWithStoredResult(map[string]string{
+		"status": string(task.Status),
+	}, domain.PartKindTaskUpdate, req.Tool, tools.StoredResultStatusOK, tools.TaskStoredResult{
+		Body:   task.Body,
+		Status: task.Status,
+	}))
 	if _, err := st.AddPart(ctx, msg.ID, domain.PartKindTaskUpdate, task.Body, string(meta)); err != nil {
 		return nil, err
 	}

@@ -79,6 +79,11 @@ func (tool) Execute(_ context.Context, runtime tools.Runtime, req tools.Request)
 			"changed_files": strings.Join(paths, ","),
 			"file_count":    strconv.Itoa(len(paths)),
 		},
+		Stored: tools.ApplyPatchStoredResult{
+			Summary:      "Applied patch to " + tools.SummarizePaths(paths, 5),
+			ChangedFiles: paths,
+			FileCount:    len(paths),
+		},
 	}, nil
 }
 func (tool) SummarizeResult(req tools.Request, result tools.Result) (string, string) {

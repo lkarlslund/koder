@@ -98,13 +98,20 @@ func (tool) Execute(_ context.Context, runtime tools.Runtime, req tools.Request)
 	if replaceAll {
 		mode = fmt.Sprintf("replaced %d occurrences", occurrences)
 	}
+	summary := fmt.Sprintf("Edited %s (%s)", rel, mode)
 	return tools.Result{
-		Output:   fmt.Sprintf("Edited %s (%s)", rel, mode),
+		Output:   summary,
 		DiffText: dmp.DiffPrettyText(diffs),
 		Meta: map[string]string{
 			"path":        rel,
 			"replace_all": tools.BoolString(replaceAll),
 			"occurrences": fmt.Sprintf("%d", occurrences),
+		},
+		Stored: tools.EditStoredResult{
+			Path:        rel,
+			ReplaceAll:  replaceAll,
+			Occurrences: occurrences,
+			Summary:     summary,
 		},
 	}, nil
 }

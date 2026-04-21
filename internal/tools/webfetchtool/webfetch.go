@@ -94,6 +94,13 @@ func (tool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Reques
 			"content_type": contentType,
 			"truncated":    tools.BoolString(truncated),
 		},
+		Stored: tools.WebFetchStoredResult{
+			URL:         req.Args["url"],
+			Status:      resp.StatusCode,
+			ContentType: contentType,
+			Body:        body,
+			Truncated:   truncated,
+		},
 	}, nil
 }
 func (tool) SummarizeResult(req tools.Request, result tools.Result) (string, string) {

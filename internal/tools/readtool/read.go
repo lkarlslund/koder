@@ -64,12 +64,24 @@ func (tool) Execute(_ context.Context, runtime tools.Runtime, req tools.Request)
 		}
 		body := strings.Join(items, "\n")
 		body, truncated := tools.TruncateText(body, tools.DefaultToolOutputLimit)
+		storedEntries := append([]string(nil), items...)
+		footer := ""
+		if truncated {
+			storedEntries, footer = splitDirectoryOutput(body)
+		}
 		return tools.Result{
 			Output: body,
 			Meta: map[string]string{
 				"path":      rel,
 				"mode":      "dir",
 				"truncated": tools.BoolString(truncated),
+			},
+			Stored: tools.ReadStoredResult{
+				Path:      rel,
+				Mode:      tools.ReadStoredModeDirectory,
+				Entries:   storedEntries,
+				Footer:    footer,
+				Truncated: truncated,
 			},
 		}, nil
 	}
@@ -100,6 +112,7 @@ func (tool) Execute(_ context.Context, runtime tools.Runtime, req tools.Request)
 	offset := parseOptionalInt(req.Args["offset"])
 	limit := parseOptionalInt(req.Args["limit"])
 	text = applyReadWindow(text, offset, limit)
+	lines, footer := tools.ParseReadStoredLines(text)
 	return tools.Result{
 		Output: text,
 		Meta: map[string]string{
@@ -108,6 +121,15 @@ func (tool) Execute(_ context.Context, runtime tools.Runtime, req tools.Request)
 			"offset":    strings.TrimSpace(req.Args["offset"]),
 			"limit":     strings.TrimSpace(req.Args["limit"]),
 			"truncated": tools.BoolString(truncated),
+		},
+		Stored: tools.ReadStoredResult{
+			Path:      rel,
+			Mode:      tools.ReadStoredModeFile,
+			Lines:     lines,
+			Footer:    footer,
+			Offset:    strings.TrimSpace(req.Args["offset"]),
+			Limit:     strings.TrimSpace(req.Args["limit"]),
+			Truncated: truncated,
 		},
 	}, nil
 }
@@ -147,4 +169,16 @@ func isTextHeader(header []byte) bool {
 		return true
 	}
 	return bytes.IndexByte(header, 0) == -1
+}
+
+func splitDirectoryOutput(body string) ([]string, string) {
+	lines := strings.Split(strings.TrimSpace(body), "\n")
+	if len(lines) == 0 {
+		return nil, ""
+	}
+	last := strings.TrimSpace(lines[len(lines)-1])
+	if !strings.HasPrefix(last, "... truncated") {
+		return lines, ""
+	}
+	return lines[:len(lines)-1], last
 }

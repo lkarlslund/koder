@@ -57,6 +57,12 @@ func (tool) Execute(_ context.Context, runtime tools.Runtime, req tools.Request)
 			"path":      path,
 			"truncated": tools.BoolString(truncated),
 		},
+		Stored: tools.SkillStoredResult{
+			Name:      req.Args["name"],
+			Path:      path,
+			Content:   text,
+			Truncated: truncated,
+		},
 	}, nil
 }
 func (tool) SummarizeResult(req tools.Request, result tools.Result) (string, string) {

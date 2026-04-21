@@ -74,6 +74,7 @@ type Result struct {
 	Output   string
 	DiffText string
 	Meta     map[string]string
+	Stored   StoredResultPayload
 }
 
 type Presentation struct {
@@ -327,6 +328,7 @@ func PersistStandardResult(ctx context.Context, st *store.Store, sessionID int64
 		}
 		payload[key] = value
 	}
+	payload = MetaWithStoredResult(payload, domain.PartKindToolOutput, req.Tool, StoredResultStatusOK, result.Stored)
 	meta, _ := json.Marshal(payload)
 	if _, err := st.AddPart(ctx, msg.ID, domain.PartKindToolOutput, body, string(meta)); err != nil {
 		return nil, err

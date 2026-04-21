@@ -85,7 +85,22 @@ func (tool) PersistResult(ctx context.Context, st *store.Store, sessionID int64,
 	if err != nil {
 		return nil, err
 	}
-	if _, err := st.AddPart(ctx, msg.ID, domain.PartKindPlanUpdate, result.Output, tools.JSONMeta(result.Meta)); err != nil {
+	steps, err := normalizePlan(req.Args["plan"])
+	if err != nil {
+		return nil, err
+	}
+	storedSteps := make([]tools.PlanStoredStep, 0, len(steps))
+	for _, item := range steps {
+		storedSteps = append(storedSteps, tools.PlanStoredStep{
+			Step:   item.Step,
+			Status: item.Status,
+		})
+	}
+	meta := tools.MetaWithStoredResult(result.Meta, domain.PartKindPlanUpdate, req.Tool, tools.StoredResultStatusOK, tools.UpdatePlanStoredResult{
+		Explanation: req.Args["explanation"],
+		Steps:       storedSteps,
+	})
+	if _, err := st.AddPart(ctx, msg.ID, domain.PartKindPlanUpdate, result.Output, tools.JSONMeta(meta)); err != nil {
 		return nil, err
 	}
 	return tools.EmitOnce(domain.Event{Kind: domain.EventKindStatus, Text: "Plan updated", Tool: req.Tool}), nil

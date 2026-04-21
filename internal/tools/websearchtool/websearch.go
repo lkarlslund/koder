@@ -99,6 +99,9 @@ func (tool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Reques
 				"query":   req.Args["query"],
 				"results": "0",
 			},
+			Stored: tools.WebSearchStoredResult{
+				Query: req.Args["query"],
+			},
 		}, nil
 	}
 	lines := make([]string, 0, len(results)*3)
@@ -110,11 +113,23 @@ func (tool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Reques
 		}
 		lines = append(lines, "")
 	}
+	storedItems := make([]tools.WebSearchStoredItem, 0, len(results))
+	for _, item := range results {
+		storedItems = append(storedItems, tools.WebSearchStoredItem{
+			Title:   item.Title,
+			URL:     item.URL,
+			Snippet: item.Snippet,
+		})
+	}
 	return tools.Result{
 		Output: strings.TrimSpace(strings.Join(lines, "\n")),
 		Meta: map[string]string{
 			"query":   req.Args["query"],
 			"results": strconv.Itoa(len(results)),
+		},
+		Stored: tools.WebSearchStoredResult{
+			Query: req.Args["query"],
+			Items: storedItems,
 		},
 	}, nil
 }
