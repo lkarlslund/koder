@@ -887,6 +887,10 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.showReasoning = !m.showReasoning
 		m.refreshViewport()
 		return m, nil
+	case "ctrl+p":
+		m.showSystem = !m.showSystem
+		m.refreshViewport()
+		return m, nil
 	case "ctrl+g":
 		if m.loading {
 			return m.queueContinuePrompt()
@@ -3495,6 +3499,7 @@ func (m *Model) openHelpModal() {
 		"Ctrl-Y              copy last assistant message",
 		"Ctrl-S              toggle sidebar",
 		"Ctrl-R              toggle reasoning",
+		"Ctrl-P              toggle system output",
 		"Ctrl-G              continue",
 	}
 	commands := []string{

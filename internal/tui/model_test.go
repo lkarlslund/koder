@@ -2114,7 +2114,7 @@ func TestAltHTogglesHelpDialog(t *testing.T) {
 		t.Fatal("expected help dialog to open")
 	}
 	view := next.View()
-	if !strings.Contains(view, "Help") || !strings.Contains(view, "/connect") || !strings.Contains(view, "Ctrl-V") {
+	if !strings.Contains(view, "Help") || !strings.Contains(view, "/connect") || !strings.Contains(view, "Ctrl-V") || !strings.Contains(view, "Ctrl-P") {
 		t.Fatalf("expected help dialog content, got %q", view)
 	}
 
@@ -2125,6 +2125,32 @@ func TestAltHTogglesHelpDialog(t *testing.T) {
 	}
 	if next.hasHelpModal() {
 		t.Fatal("expected help dialog to close")
+	}
+}
+
+func TestCtrlPTogglesSystemOutput(t *testing.T) {
+	cfg := testConfig(t)
+	m, err := New(cfg, nil, nil, StartupModeNew, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlP})
+	next := updated.(*Model)
+	if cmd != nil {
+		t.Fatalf("expected no command, got %v", cmd)
+	}
+	if !next.showSystem {
+		t.Fatal("expected ctrl+p to enable system output")
+	}
+
+	updated, cmd = next.handleKey(tea.KeyMsg{Type: tea.KeyCtrlP})
+	next = updated.(*Model)
+	if cmd != nil {
+		t.Fatalf("expected no command, got %v", cmd)
+	}
+	if next.showSystem {
+		t.Fatal("expected ctrl+p to disable system output")
 	}
 }
 
