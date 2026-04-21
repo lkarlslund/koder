@@ -40,6 +40,35 @@ func TestListModels(t *testing.T) {
 	}
 }
 
+func TestPropsUsesModelQueryAndParsesContextWindow(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/props" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		if got := r.URL.Query().Get("model"); got != "model-a" {
+			t.Fatalf("unexpected model query: %q", got)
+		}
+		_, _ = w.Write([]byte(`{"default_generation_settings":{"n_ctx":8192}}`))
+	}))
+	defer server.Close()
+
+	client, err := New("llamacpp", config.Provider{
+		BaseURL: server.URL + "/v1",
+		Timeout: time.Second,
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	props, err := client.Props(context.Background(), "model-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if props.DefaultGenerationSettings.NCtx != 8192 {
+		t.Fatalf("unexpected props payload: %#v", props)
+	}
+}
+
 func TestCompleteChatReasoning(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"hello","reasoning_content":"trace"}}],"usage":{"prompt_tokens":1,"completion_tokens":2,"total_tokens":3}}`))

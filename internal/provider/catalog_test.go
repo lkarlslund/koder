@@ -80,6 +80,45 @@ func TestProbeReturnsSortedModels(t *testing.T) {
 	}
 }
 
+func TestProbeDetectsLlamaCPPContextWindow(t *testing.T) {
+	var propsCalls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/models":
+			_, _ = w.Write([]byte(`{"data":[{"id":"z-model","owned_by":"test"},{"id":"a-model","owned_by":"test"}]}`))
+		case "/v1/props":
+			propsCalls++
+			if got := r.URL.Query().Get("model"); got != "a-model" {
+				t.Fatalf("unexpected props model query: %q", got)
+			}
+			_, _ = w.Write([]byte(`{"default_generation_settings":{"n_ctx":16384}}`))
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	result, err := Probe(context.Background(), ConnectDraft{
+		ProviderID: "llamacpp",
+		Kind:       ProviderKindCompatible,
+		AuthMethod: AuthMethodLocal,
+		BaseURL:    server.URL + "/v1",
+		Headers:    map[string]string{},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if propsCalls != 1 {
+		t.Fatalf("expected one props call, got %d", propsCalls)
+	}
+	if result.ContextWindow != 16384 {
+		t.Fatalf("unexpected detected context window: %#v", result)
+	}
+	if len(result.Models) != 2 || result.Models[0].ID != "a-model" {
+		t.Fatalf("unexpected models: %#v", result.Models)
+	}
+}
+
 func TestConnectDraftToConfigClearsAPIKeyForLocalEndpoints(t *testing.T) {
 	cfg := ConnectDraft{
 		ProviderID: "ollama",

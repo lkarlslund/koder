@@ -40,18 +40,20 @@ type Descriptor struct {
 }
 
 type ConnectDraft struct {
-	ProviderID string
-	Kind       string
-	AuthMethod AuthMethodKind
-	Name       string
-	BaseURL    string
-	APIKey     string
-	Model      string
-	Headers    map[string]string
+	ProviderID    string
+	Kind          string
+	AuthMethod    AuthMethodKind
+	Name          string
+	BaseURL       string
+	APIKey        string
+	Model         string
+	ContextWindow int
+	Headers       map[string]string
 }
 
 type ProbeResult struct {
-	Models []domain.Model
+	Models        []domain.Model
+	ContextWindow int
 }
 
 var catalog = []Descriptor{
@@ -106,6 +108,7 @@ func BuildDraft(id string, existing map[string]config.Provider) (ConnectDraft, e
 		draft.BaseURL = firstNonEmpty(existingCfg.BaseURL, desc.DefaultBaseURL)
 		draft.APIKey = existingCfg.APIKey
 		draft.Model = firstNonEmpty(existingCfg.DefaultModel, desc.ModelHint)
+		draft.ContextWindow = existingCfg.ContextWindow
 		draft.Headers = cloneHeaders(existingCfg.Headers)
 	}
 	return draft, nil
@@ -127,12 +130,13 @@ func (d ConnectDraft) WithAuthMethod(method AuthMethodKind, desc Descriptor) Con
 
 func (d ConnectDraft) ToConfig() config.Provider {
 	cfg := config.Provider{
-		Kind:         firstNonEmpty(d.Kind, ProviderKindCompatible),
-		AuthMethod:   string(d.AuthMethod),
-		Name:         strings.TrimSpace(d.Name),
-		BaseURL:      strings.TrimSpace(d.BaseURL),
-		Headers:      cloneHeaders(d.Headers),
-		DefaultModel: strings.TrimSpace(d.Model),
+		Kind:          firstNonEmpty(d.Kind, ProviderKindCompatible),
+		AuthMethod:    string(d.AuthMethod),
+		Name:          strings.TrimSpace(d.Name),
+		BaseURL:       strings.TrimSpace(d.BaseURL),
+		Headers:       cloneHeaders(d.Headers),
+		DefaultModel:  strings.TrimSpace(d.Model),
+		ContextWindow: d.ContextWindow,
 	}
 	if d.AuthMethod == AuthMethodAPIKey {
 		cfg.APIKey = strings.TrimSpace(d.APIKey)
@@ -152,7 +156,19 @@ func Probe(ctx context.Context, draft ConnectDraft, recorder *debugsrv.Recorder)
 	slices.SortFunc(models, func(a, b domain.Model) int {
 		return strings.Compare(a.ID, b.ID)
 	})
-	return ProbeResult{Models: models}, nil
+	selectedModel := strings.TrimSpace(draft.Model)
+	if selectedModel == "" && len(models) > 0 {
+		selectedModel = strings.TrimSpace(models[0].ID)
+	}
+	result := ProbeResult{Models: models}
+	if strings.TrimSpace(draft.ProviderID) == "llamacpp" {
+		props, err := client.Props(ctx, selectedModel)
+		if err != nil {
+			return ProbeResult{}, err
+		}
+		result.ContextWindow = props.DefaultGenerationSettings.NCtx
+	}
+	return result, nil
 }
 
 func ValidateDraft(draft ConnectDraft) error {

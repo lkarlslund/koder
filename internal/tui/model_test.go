@@ -1889,6 +1889,35 @@ func TestSaveProviderDraftPersistsDefaults(t *testing.T) {
 	}
 }
 
+func TestSaveProviderDraftPreservesDetectedContextWindow(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := Model{cfg: cfg}
+	draft, err := provider.BuildDraft("llamacpp", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	draft.Model = "coder.gguf"
+	draft.ContextWindow = 16384
+
+	if err := m.saveProviderDraft(draft); err != nil {
+		t.Fatal(err)
+	}
+	providerCfg, ok := m.cfg.Provider("llamacpp")
+	if !ok {
+		t.Fatal("expected saved llama.cpp provider")
+	}
+	if providerCfg.ContextWindow != 16384 {
+		t.Fatalf("expected detected context window to persist, got %#v", providerCfg)
+	}
+}
+
 func TestDisconnectProviderClearsDefaultAndFallsBack(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("XDG_STATE_HOME", t.TempDir())

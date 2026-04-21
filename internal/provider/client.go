@@ -117,6 +117,12 @@ type modelsResponse struct {
 	} `json:"data"`
 }
 
+type propsResponse struct {
+	DefaultGenerationSettings struct {
+		NCtx int `json:"n_ctx"`
+	} `json:"default_generation_settings"`
+}
+
 type chatChunk struct {
 	Choices []struct {
 		Delta struct {
@@ -224,6 +230,41 @@ func (c *Client) ListModels(ctx context.Context) ([]domain.Model, error) {
 		models = append(models, domain.Model{ID: item.ID, OwnedBy: item.OwnedBy})
 	}
 	return models, nil
+}
+
+func (c *Client) Props(ctx context.Context, modelID string) (propsResponse, error) {
+	path := "/props"
+	if trimmed := strings.TrimSpace(modelID); trimmed != "" {
+		path += "?model=" + url.QueryEscape(trimmed)
+	}
+	props, err := c.propsRequest(ctx, path)
+	if err == nil || strings.TrimSpace(modelID) == "" {
+		return props, err
+	}
+	return c.propsRequest(ctx, "/props")
+}
+
+func (c *Client) propsRequest(ctx context.Context, path string) (propsResponse, error) {
+	req, err := c.newRequest(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return propsResponse{}, err
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return propsResponse{}, fmt.Errorf("get props: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
+		return propsResponse{}, fmt.Errorf("props status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+
+	var payload propsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return propsResponse{}, fmt.Errorf("decode props: %w", err)
+	}
+	return payload, nil
 }
 
 func (c *Client) Health(ctx context.Context) error {

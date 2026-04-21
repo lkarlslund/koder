@@ -489,11 +489,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			modelIDs = append(modelIDs, item.ID)
 		}
 		m.connectDialog.SetModels(modelIDs)
+		m.connectDialog.SetContextWindow(msg.result.ContextWindow)
 		if len(modelIDs) == 0 {
-			m.connectDialog.SetStatusSuccess("Connected, but no models were returned")
+			if msg.result.ContextWindow > 0 {
+				m.connectDialog.SetStatusSuccess(fmt.Sprintf("Connected, but no models were returned (context %d)", msg.result.ContextWindow))
+			} else {
+				m.connectDialog.SetStatusSuccess("Connected, but no models were returned")
+			}
 			m.status = "Provider connected"
 		} else {
-			m.connectDialog.SetStatusSuccess(fmt.Sprintf("Connected: discovered %d models", len(modelIDs)))
+			if msg.result.ContextWindow > 0 {
+				m.connectDialog.SetStatusSuccess(fmt.Sprintf("Connected: discovered %d models, context %d", len(modelIDs), msg.result.ContextWindow))
+			} else {
+				m.connectDialog.SetStatusSuccess(fmt.Sprintf("Connected: discovered %d models", len(modelIDs)))
+			}
 			m.status = fmt.Sprintf("Provider connected: %d models", len(modelIDs))
 		}
 		return m, m.syncWindowTitleCmd()
@@ -3776,7 +3785,9 @@ func (m *Model) saveProviderDraft(draft provider.ConnectDraft) error {
 		next.Stream = existing.Stream
 		next.Disabled = false
 	} else {
-		next.ContextWindow = 32768
+		if next.ContextWindow == 0 {
+			next.ContextWindow = 32768
+		}
 		next.AutoCompactAt = 85
 		next.Timeout = 2 * time.Minute
 		next.Stream = true
