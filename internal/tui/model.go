@@ -29,6 +29,7 @@ import (
 	"github.com/lkarlslund/koder/internal/permission"
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/sessionctx"
+	"github.com/lkarlslund/koder/internal/skills"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/theme"
 	"github.com/lkarlslund/koder/internal/tools"
@@ -150,6 +151,7 @@ const (
 	pickerModeNone pickerMode = iota
 	pickerModeTheme
 	pickerModePermissions
+	pickerModeSkills
 )
 
 type pickerModel struct {
@@ -262,6 +264,8 @@ type Model struct {
 	showReasoning      bool
 	slashMatches       []slashCommand
 	slashIndex         int
+	skillMatches       []skills.Skill
+	skillIndex         int
 	approvalButtons    ui.ButtonRow
 	workdir            string
 	workspace          workspace.Status
@@ -451,7 +455,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.debug != nil {
 			m.debug.RecordLifecycle(msg.session.ID, "new_session_ready", msg.session.Title, nil)
 		}
-		m.updateSlashMenu()
+		m.updateComposerMenus()
 		m.refreshViewport()
 		return m, m.syncWindowTitleCmd()
 	case sessionPickerMsg:
@@ -513,7 +517,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	var cmd tea.Cmd
 	m.composer, cmd = m.composer.Update(msg)
-	m.updateSlashMenu()
+	m.updateComposerMenus()
 	return m, cmd
 }
 
@@ -831,6 +835,27 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 	}
+	if m.hasSkillMenu() {
+		switch msg.String() {
+		case "up":
+			if m.skillIndex > 0 {
+				m.skillIndex--
+			}
+			return m, nil
+		case "down":
+			if m.skillIndex < len(m.skillMatches)-1 {
+				m.skillIndex++
+			}
+			return m, nil
+		case "tab", "enter":
+			m.acceptSkillSelection()
+			return m, nil
+		case "esc":
+			m.skillMatches = nil
+			m.skillIndex = 0
+			return m, nil
+		}
+	}
 
 	switch msg.String() {
 	case "ctrl+c":
@@ -872,7 +897,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(m.continueCmd(m.beginActiveOperation()), m.spinnerCmdIfNeeded())
 	case "shift+enter", "alt+enter":
 		m.composer.InsertRune('\n')
-		m.updateSlashMenu()
+		m.updateComposerMenus()
 		return m, nil
 	case "tab":
 		if m.loading && !m.hasSlashMenu() {
@@ -897,7 +922,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		drafts := slices.Clone(m.draftAttachments)
 		m.composer.Reset()
 		m.draftAttachments = nil
-		m.updateSlashMenu()
+		m.updateComposerMenus()
 		m.appendLocalUserPrompt(prompt, drafts)
 		m.startBusy(busyScopeTranscript, "Running…")
 		return m, tea.Batch(m.promptCmd(m.beginActiveOperation(), prompt, drafts), m.spinnerCmdIfNeeded())
@@ -905,7 +930,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	var cmd tea.Cmd
 	m.composer, cmd = m.composer.Update(msg)
-	m.updateSlashMenu()
+	m.updateComposerMenus()
 	return m, cmd
 }
 
@@ -1034,6 +1059,8 @@ func (m *Model) renderFooter() string {
 		parts = append(parts, prompt)
 	}
 	if menu := m.renderSlashMenu(); menu != "" {
+		parts = append(parts, menu)
+	} else if menu := m.renderSkillMenu(); menu != "" {
 		parts = append(parts, menu)
 	}
 	if attachments := m.renderDraftAttachments(); attachments != "" {
@@ -1932,44 +1959,44 @@ func (m *Model) handleLocalCommand(prompt string) (tea.Model, tea.Cmd, bool) {
 	switch {
 	case trimmed == "/new":
 		m.composer.Reset()
-		m.updateSlashMenu()
+		m.updateComposerMenus()
 		m.startBusy(busyScopeSidebar, "Creating session…")
 		return m, tea.Batch(m.newSessionCmd(), m.spinnerCmdIfNeeded()), true
 	case trimmed == "/resume":
 		m.composer.Reset()
-		m.updateSlashMenu()
+		m.updateComposerMenus()
 		m.startBusy(busyScopeSidebar, "Loading sessions…")
 		return m, tea.Batch(m.sessionPickerCmd(), m.spinnerCmdIfNeeded()), true
 	case trimmed == "/quit":
 		m.composer.Reset()
-		m.updateSlashMenu()
+		m.updateComposerMenus()
 		model, cmd := m.quit()
 		return model, cmd, true
 	case trimmed == "/mouse on":
 		m.composer.Reset()
-		m.updateSlashMenu()
+		m.updateComposerMenus()
 		m.mouseEnabled = true
 		m.status = "Mouse capture enabled"
 		return m, func() tea.Msg { return tea.EnableMouseCellMotion() }, true
 	case trimmed == "/mouse off":
 		m.composer.Reset()
-		m.updateSlashMenu()
+		m.updateComposerMenus()
 		m.mouseEnabled = false
 		m.status = "Mouse capture disabled"
 		return m, func() tea.Msg { return tea.DisableMouse() }, true
 	case trimmed == "/compact":
 		m.composer.Reset()
-		m.updateSlashMenu()
+		m.updateComposerMenus()
 		m.startBusy(busyScopeTranscript, "Compacting session...")
 		return m, tea.Batch(m.compactCmd(m.beginActiveOperation()), m.spinnerCmdIfNeeded()), true
 	case trimmed == "/connect":
 		m.composer.Reset()
-		m.updateSlashMenu()
+		m.updateComposerMenus()
 		m.openConnectDialog()
 		return m, m.syncWindowTitleCmd(), true
 	case trimmed == "/disconnect":
 		m.composer.Reset()
-		m.updateSlashMenu()
+		m.updateComposerMenus()
 		if len(m.cfg.Providers) == 0 {
 			m.status = "No configured providers to disconnect"
 			return m, m.syncWindowTitleCmd(), true
@@ -1978,7 +2005,7 @@ func (m *Model) handleLocalCommand(prompt string) (tea.Model, tea.Cmd, bool) {
 		return m, m.syncWindowTitleCmd(), true
 	case trimmed == "/model":
 		m.composer.Reset()
-		m.updateSlashMenu()
+		m.updateComposerMenus()
 		providerID := m.activeProviderID()
 		if providerID == "" || !m.cfg.HasUsableProvider(providerID) {
 			m.status = "Configure a provider first with /connect"
@@ -1988,32 +2015,37 @@ func (m *Model) handleLocalCommand(prompt string) (tea.Model, tea.Cmd, bool) {
 		return m, tea.Batch(m.loadModelsCmd(providerID, false), m.syncWindowTitleCmd()), true
 	case trimmed == "/theme":
 		m.composer.Reset()
-		m.updateSlashMenu()
+		m.updateComposerMenus()
 		m.openThemePicker()
 		return m, nil, true
+	case trimmed == "/skills":
+		m.composer.Reset()
+		m.updateComposerMenus()
+		m.openSkillsPicker()
+		return m, m.syncWindowTitleCmd(), true
 	case trimmed == "/permissions":
 		m.composer.Reset()
-		m.updateSlashMenu()
+		m.updateComposerMenus()
 		m.openPermissionsPicker()
 		return m, m.syncWindowTitleCmd(), true
 	case trimmed == "/preferences":
 		m.composer.Reset()
-		m.updateSlashMenu()
+		m.updateComposerMenus()
 		m.openPreferencesDialog()
 		return m, tea.Batch(spinnerTickCmd(), m.syncWindowTitleCmd()), true
 	case trimmed == "/tools":
 		m.composer.Reset()
-		m.updateSlashMenu()
+		m.updateComposerMenus()
 		m.openToolsDialog()
 		return m, m.syncWindowTitleCmd(), true
 	case trimmed == "/agents":
 		m.composer.Reset()
-		m.updateSlashMenu()
+		m.updateComposerMenus()
 		m.openAgentsModal()
 		return m, m.syncWindowTitleCmd(), true
 	case trimmed == "/agents refresh":
 		m.composer.Reset()
-		m.updateSlashMenu()
+		m.updateComposerMenus()
 		if m.currentSession.ID == 0 {
 			m.status = "No saved session to refresh"
 			return m, m.syncWindowTitleCmd(), true
@@ -2022,7 +2054,7 @@ func (m *Model) handleLocalCommand(prompt string) (tea.Model, tea.Cmd, bool) {
 		return m, tea.Batch(m.agentsRefreshCmd(m.currentSession.ID), m.spinnerCmdIfNeeded()), true
 	case trimmed == "/fork":
 		m.composer.Reset()
-		m.updateSlashMenu()
+		m.updateComposerMenus()
 		if m.currentSession.ID == 0 {
 			m.status = "No saved session to fork"
 			return m, m.syncWindowTitleCmd(), true
@@ -2036,7 +2068,7 @@ func (m *Model) handleLocalCommand(prompt string) (tea.Model, tea.Cmd, bool) {
 			return m, nil, true
 		}
 		m.composer.Reset()
-		m.updateSlashMenu()
+		m.updateComposerMenus()
 		m.startBusy(busyScopeTranscript, fmt.Sprintf("Approving approval %d…", id))
 		return m, tea.Batch(m.approveCmd(m.beginActiveOperation(), id), m.spinnerCmdIfNeeded()), true
 	case strings.HasPrefix(trimmed, "/deny "):
@@ -2046,7 +2078,7 @@ func (m *Model) handleLocalCommand(prompt string) (tea.Model, tea.Cmd, bool) {
 			return m, nil, true
 		}
 		m.composer.Reset()
-		m.updateSlashMenu()
+		m.updateComposerMenus()
 		m.startBusy(busyScopeSidebar, fmt.Sprintf("Denying approval %d…", id))
 		return m, tea.Batch(m.denyCmd(m.beginActiveOperation(), id), m.spinnerCmdIfNeeded()), true
 	case strings.HasPrefix(trimmed, "/"):
@@ -2106,7 +2138,7 @@ func (m *Model) queueComposerPrompt(mode queuedPromptMode) (tea.Model, tea.Cmd) 
 	}
 	m.composer.Reset()
 	m.draftAttachments = nil
-	m.updateSlashMenu()
+	m.updateComposerMenus()
 	m.status = m.queuedPrompt.statusText()
 	return m, m.syncWindowTitleCmd()
 }
@@ -2136,7 +2168,7 @@ func (m *Model) dequeuePromptCmd() tea.Cmd {
 			m.status = status
 			m.composer.SetValue(item.Text)
 			m.draftAttachments = item.Attachments
-			m.updateSlashMenu()
+			m.updateComposerMenus()
 			return nil
 		}
 	}
@@ -2317,7 +2349,7 @@ func (m *Model) pasteClipboardText() (tea.Model, tea.Cmd) {
 		return m, m.syncWindowTitleCmd()
 	}
 	m.composer.InsertString(text)
-	m.updateSlashMenu()
+	m.updateComposerMenus()
 	m.status = "Pasted from clipboard"
 	return m, m.syncWindowTitleCmd()
 }
@@ -2610,25 +2642,43 @@ func (m Model) persistDraftSession(ctx context.Context) (domain.Session, error) 
 	return session, nil
 }
 
-func (m *Model) updateSlashMenu() {
+func (m *Model) updateComposerMenus() {
 	query, ok := slashQuery(m.composer.Value())
-	if !ok {
+	if ok {
+		m.slashMatches = matchingSlashCommands(query)
+		if len(m.slashMatches) == 0 {
+			m.slashIndex = 0
+		} else if m.slashIndex >= len(m.slashMatches) {
+			m.slashIndex = len(m.slashMatches) - 1
+		}
+	} else {
 		m.slashMatches = nil
 		m.slashIndex = 0
-		return
 	}
-	m.slashMatches = matchingSlashCommands(query)
-	if len(m.slashMatches) == 0 {
-		m.slashIndex = 0
-		return
-	}
-	if m.slashIndex >= len(m.slashMatches) {
-		m.slashIndex = len(m.slashMatches) - 1
+
+	query, _, ok = skillQuery(m.composer.Value())
+	if ok {
+		m.skillMatches = matchingSkills(m.workdir, query)
+		if len(m.skillMatches) == 1 && strings.EqualFold(m.skillMatches[0].Name, query) {
+			m.skillMatches = nil
+			m.skillIndex = 0
+		} else if len(m.skillMatches) == 0 {
+			m.skillIndex = 0
+		} else if m.skillIndex >= len(m.skillMatches) {
+			m.skillIndex = len(m.skillMatches) - 1
+		}
+	} else {
+		m.skillMatches = nil
+		m.skillIndex = 0
 	}
 }
 
 func (m *Model) hasSlashMenu() bool {
 	return len(m.slashMatches) > 0
+}
+
+func (m *Model) hasSkillMenu() bool {
+	return len(m.skillMatches) > 0
 }
 
 func (m *Model) acceptSlashSelection() {
@@ -2642,7 +2692,7 @@ func (m *Model) acceptSlashSelection() {
 	}
 	m.composer.SetValue(next)
 	m.composer.SetCursor(len(next))
-	m.updateSlashMenu()
+	m.updateComposerMenus()
 }
 
 func (m *Model) executeSelectedSlashCommand() (tea.Model, tea.Cmd, bool) {
@@ -2655,8 +2705,24 @@ func (m *Model) executeSelectedSlashCommand() (tea.Model, tea.Cmd, bool) {
 	}
 	m.composer.SetValue(selected.Name)
 	m.composer.SetCursor(len(selected.Name))
-	m.updateSlashMenu()
+	m.updateComposerMenus()
 	return m.handleLocalCommand(selected.Name)
+}
+
+func (m *Model) acceptSkillSelection() {
+	if len(m.skillMatches) == 0 {
+		return
+	}
+	selected := m.skillMatches[m.skillIndex]
+	query, start, ok := skillQuery(m.composer.Value())
+	if !ok {
+		return
+	}
+	_ = query
+	next := m.composer.Value()[:start] + "$" + selected.Name
+	m.composer.SetValue(next)
+	m.composer.SetCursor(len(next))
+	m.updateComposerMenus()
 }
 
 func (m *Model) renderSlashMenu() string {
@@ -2675,6 +2741,27 @@ func (m *Model) renderSlashMenu() string {
 	}
 	selected := m.slashIndex - start
 	return ui.RenderSlashMenu("Commands", items, selected)
+}
+
+func (m *Model) renderSkillMenu() string {
+	if len(m.skillMatches) == 0 {
+		return ""
+	}
+	start := 0
+	if m.skillIndex >= 6 {
+		start = m.skillIndex - 5
+	}
+	end := min(len(m.skillMatches), start+6)
+	var items []ui.MenuItem
+	for idx := start; idx < end; idx++ {
+		item := m.skillMatches[idx]
+		items = append(items, ui.MenuItem{
+			Title:       "$" + item.Name,
+			Description: blankAsDash(item.Description),
+		})
+	}
+	selected := m.skillIndex - start
+	return ui.RenderSlashMenu("Skills", items, selected)
 }
 
 func (m *Model) renderPicker() string {
@@ -3000,6 +3087,7 @@ func internalSlashCommands() []slashCommand {
 		{Name: "/preferences", Description: "Open preferences"},
 		{Name: "/quit", Description: "Quit koder"},
 		{Name: "/resume", Description: "Resume a saved session"},
+		{Name: "/skills", Description: "Insert a discovered skill mention"},
 		{Name: "/tools", Description: "Enable or disable tools for this session"},
 		{Name: "/theme", Description: "Choose a color theme"},
 	}
@@ -3241,7 +3329,7 @@ func (m *Model) openToolsDialog() {
 			if strings.TrimSpace(presentation.Title) != "" {
 				label = presentation.Title
 			}
-			if def, enabled := tool.Definition(); enabled && strings.TrimSpace(def.Function.Description) != "" {
+			if def, enabled := tool.Definition(tools.Runtime{Workdir: m.workdir}); enabled && strings.TrimSpace(def.Function.Description) != "" {
 				description = def.Function.Description
 			}
 		}
@@ -3394,6 +3482,7 @@ func (m *Model) openHelpModal() {
 		"/preferences        open UI preferences",
 		"/quit               exit koder",
 		"/resume             resume another session",
+		"/skills             insert a discovered skill mention",
 		"/theme              preview and select theme",
 	}
 	lines := append([]string{}, hotkeys...)
@@ -3667,6 +3756,23 @@ func (m *Model) openPermissionsPicker() {
 	m.setPickerCurrentValue(m.permissionProfile())
 }
 
+func (m *Model) openSkillsPicker() {
+	catalog := skills.Discover(m.workdir)
+	items := make([]ui.PickerItem, 0, len(catalog))
+	for _, item := range catalog {
+		items = append(items, ui.PickerItem{
+			Title:       "$" + item.Name,
+			Description: blankAsDash(item.Description),
+			Value:       item.Name,
+		})
+	}
+	m.picker = pickerModel{
+		visible: true,
+		mode:    pickerModeSkills,
+		dialog:  ui.NewPickerDialog("Skills", "type to filter  enter insert  tab buttons  esc cancel", items),
+	}
+}
+
 func (m *Model) openApprovalPermissionsPicker() {
 	if !m.hasApprovalPrompt() {
 		return
@@ -3712,6 +3818,15 @@ func (m *Model) submitPickerSelection(value string) (tea.Model, tea.Cmd) {
 		}
 		m.status = fmt.Sprintf("Permission mode set to %s; model will be updated on the next turn", permission.DisplayName(value))
 		return m, m.syncWindowTitleCmd()
+	case pickerModeSkills:
+		if strings.TrimSpace(value) == "" {
+			return m, nil
+		}
+		m.closePicker()
+		m.composer.InsertString("$" + value)
+		m.updateComposerMenus()
+		m.status = fmt.Sprintf("Inserted $%s", value)
+		return m, m.syncWindowTitleCmd()
 	default:
 		return m, nil
 	}
@@ -3737,6 +3852,10 @@ func (m *Model) cancelPicker() (tea.Model, tea.Cmd) {
 		} else {
 			m.status = "Permission mode selection cancelled"
 		}
+		return m, nil
+	case pickerModeSkills:
+		m.closePicker()
+		m.status = "Skill selection cancelled"
 		return m, nil
 	default:
 		m.closePicker()
@@ -3886,10 +4005,42 @@ func slashQuery(value string) (string, bool) {
 	return strings.TrimPrefix(strings.ToLower(strings.TrimSpace(value)), "/"), true
 }
 
+func skillQuery(value string) (query string, start int, ok bool) {
+	value = strings.TrimRight(value, "\n")
+	if strings.TrimSpace(value) == "" {
+		return "", 0, false
+	}
+	start = strings.LastIndex(value, "$")
+	if start < 0 {
+		return "", 0, false
+	}
+	if strings.ContainsAny(value[start:], " \t\n") {
+		return "", 0, false
+	}
+	if start > 0 {
+		prev := value[start-1]
+		if !strings.ContainsRune(" \t\n([{", rune(prev)) {
+			return "", 0, false
+		}
+	}
+	return strings.ToLower(strings.TrimSpace(strings.TrimPrefix(value[start:], "$"))), start, true
+}
+
 func matchingSlashCommands(query string) []slashCommand {
 	var matches []slashCommand
 	for _, item := range internalSlashCommands() {
 		name := strings.TrimPrefix(strings.ToLower(item.Name), "/")
+		if query == "" || strings.HasPrefix(name, query) {
+			matches = append(matches, item)
+		}
+	}
+	return matches
+}
+
+func matchingSkills(workdir string, query string) []skills.Skill {
+	var matches []skills.Skill
+	for _, item := range skills.Discover(workdir) {
+		name := strings.ToLower(strings.TrimSpace(item.Name))
 		if query == "" || strings.HasPrefix(name, query) {
 			matches = append(matches, item)
 		}

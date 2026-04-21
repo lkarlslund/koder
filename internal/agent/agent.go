@@ -21,6 +21,7 @@ import (
 	"github.com/lkarlslund/koder/internal/permission"
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/sessionctx"
+	"github.com/lkarlslund/koder/internal/skills"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools"
 	_ "github.com/lkarlslund/koder/internal/tools/all"
@@ -352,7 +353,7 @@ func (e *Engine) continueModelTurn(ctx context.Context, session domain.Session, 
 		resp, completeErr := client.CompleteChat(ctx, provider.ChatRequest{
 			Model:      session.ModelID,
 			Messages:   messages,
-			Tools:      tools.Definitions(),
+			Tools:      tools.Definitions(tools.Runtime{Workdir: e.workdir}),
 			ToolChoice: "auto",
 			Stream:     false,
 		})
@@ -857,6 +858,12 @@ func (e *Engine) buildConversation(ctx context.Context, sessionID int64) ([]prov
 			Content: "Resolved project AGENTS.md instructions:\n" + agentsText,
 		})
 	}
+	if skillText := strings.TrimSpace(skills.PromptContext(e.workdir)); skillText != "" {
+		conversation = append(conversation, provider.Message{
+			Role:    domain.MessageRoleSystem,
+			Content: skillText,
+		})
+	}
 	for _, msg := range messages {
 		if summary, ok := compactionSummary(partsByMessage[msg.ID]); ok {
 			conversation = []provider.Message{
@@ -866,6 +873,12 @@ func (e *Engine) buildConversation(ctx context.Context, sessionID int64) ([]prov
 				conversation = append(conversation, provider.Message{
 					Role:    domain.MessageRoleSystem,
 					Content: "Resolved project AGENTS.md instructions:\n" + agentsText,
+				})
+			}
+			if skillText := strings.TrimSpace(skills.PromptContext(e.workdir)); skillText != "" {
+				conversation = append(conversation, provider.Message{
+					Role:    domain.MessageRoleSystem,
+					Content: skillText,
 				})
 			}
 			conversation = append(conversation,

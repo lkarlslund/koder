@@ -18,7 +18,7 @@ func init() { tools.Register(tool{}) }
 
 func (tool) Kind() domain.ToolKind    { return domain.ToolKindGrep }
 func (tool) BypassesPermission() bool { return false }
-func (tool) Definition() (provider.ToolDefinition, bool) {
+func (tool) Definition(tools.Runtime) (provider.ToolDefinition, bool) {
 	return tools.FunctionDefinition(domain.ToolKindGrep, "Search for text within workspace files", `{"type":"object","properties":{"pattern":{"type":"string","description":"Text or regex to search for"},"path":{"type":"string","description":"Optional workspace directory to search from"},"include":{"type":"string","description":"Optional glob for files to include"}},"required":["pattern"],"additionalProperties":false}`), true
 }
 func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {

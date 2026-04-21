@@ -83,9 +83,30 @@ func TestMatchingSlashCommands(t *testing.T) {
 		t.Fatalf("expected /theme, got %#v", matches)
 	}
 
+	matches = matchingSlashCommands("ski")
+	if len(matches) != 1 || matches[0].Name != "/skills" {
+		t.Fatalf("expected /skills, got %#v", matches)
+	}
+
 	matches = matchingSlashCommands("rea")
 	if len(matches) != 0 {
 		t.Fatalf("expected tool slash commands to stay hidden, got %#v", matches)
+	}
+}
+
+func TestSkillQuery(t *testing.T) {
+	query, start, ok := skillQuery("Investigate $rev")
+	if !ok || query != "rev" {
+		t.Fatalf("unexpected skill query: ok=%v query=%q start=%d", ok, query, start)
+	}
+	if start != len("Investigate ") {
+		t.Fatalf("unexpected start index %d", start)
+	}
+	if _, _, ok := skillQuery("Investigate$rev"); ok {
+		t.Fatal("expected no skill query when $ is embedded in a word")
+	}
+	if _, _, ok := skillQuery("Investigate $rev more"); ok {
+		t.Fatal("expected no skill query when token is not at end")
 	}
 }
 
@@ -110,6 +131,79 @@ func TestHandleLocalCommandOpensPermissionsPicker(t *testing.T) {
 	}
 }
 
+func TestHandleLocalCommandOpensSkillsPicker(t *testing.T) {
+	workdir := newSkillRepo(t)
+	m := Model{
+		cfg:      testConfig(t),
+		composer: textarea.New(),
+		workdir:  workdir,
+	}
+	model, cmd, ok := m.handleLocalCommand("/skills")
+	if !ok {
+		t.Fatal("expected local command to be handled")
+	}
+	if cmd == nil {
+		t.Fatal("expected sync title command")
+	}
+	next := model.(*Model)
+	if !next.hasPicker() {
+		t.Fatal("expected skills picker to open")
+	}
+	if next.picker.mode != pickerModeSkills {
+		t.Fatalf("expected skills picker mode, got %v", next.picker.mode)
+	}
+	if len(next.picker.dialog.Items) != 1 || next.picker.dialog.Items[0].Value != "review" {
+		t.Fatalf("unexpected picker items: %#v", next.picker.dialog.Items)
+	}
+}
+
+func TestSkillAutocompleteAcceptsSelection(t *testing.T) {
+	workdir := newSkillRepo(t)
+	m := Model{
+		cfg:      testConfig(t),
+		composer: textarea.New(),
+		workdir:  workdir,
+	}
+	m.composer.SetValue("Use $rev")
+	m.updateComposerMenus()
+	if !m.hasSkillMenu() {
+		t.Fatal("expected skill menu")
+	}
+
+	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyTab})
+	next := updated.(*Model)
+	if cmd != nil {
+		t.Fatal("expected no async command")
+	}
+	if got := next.composer.Value(); got != "Use $review" {
+		t.Fatalf("expected completed skill mention, got %q", got)
+	}
+	if next.hasSkillMenu() {
+		t.Fatal("expected skill menu to close after selection")
+	}
+}
+
+func TestSkillsPickerSelectionInsertsToken(t *testing.T) {
+	workdir := newSkillRepo(t)
+	m := Model{
+		cfg:      testConfig(t),
+		composer: textarea.New(),
+		workdir:  workdir,
+	}
+	m.openSkillsPicker()
+	model, cmd := m.submitPickerSelection("review")
+	next := model.(*Model)
+	if cmd == nil {
+		t.Fatal("expected sync title command")
+	}
+	if got := next.composer.Value(); got != "$review" {
+		t.Fatalf("expected inserted skill token, got %q", got)
+	}
+	if next.hasPicker() {
+		t.Fatal("expected picker to close after selection")
+	}
+}
+
 func TestPermissionsCommandOpensWhileBusy(t *testing.T) {
 	m := Model{
 		cfg:      testConfig(t),
@@ -121,7 +215,7 @@ func TestPermissionsCommandOpensWhileBusy(t *testing.T) {
 		},
 	}
 	m.composer.SetValue("/permissions")
-	m.updateSlashMenu()
+	m.updateComposerMenus()
 
 	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
 	next := updated.(*Model)
@@ -164,6 +258,25 @@ func TestPermissionsPickerSelectionUpdatesDraftSession(t *testing.T) {
 func testConfig(t *testing.T) config.Config {
 	t.Helper()
 	return config.Default().WithStateDir(t.TempDir())
+}
+
+func newSkillRepo(t *testing.T) string {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	repo := filepath.Join(t.TempDir(), "repo")
+	if err := os.MkdirAll(filepath.Join(repo, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(repo, ".agents", "skills", "review", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("---\nname: review\ndescription: Review code carefully\n---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return repo
 }
 
 func TestSlashQuery(t *testing.T) {
@@ -856,7 +969,7 @@ func TestExactSlashCommandDoesNotConsumeEnterForAutocomplete(t *testing.T) {
 		composer: textarea.New(),
 	}
 	m.composer.SetValue("/new")
-	m.updateSlashMenu()
+	m.updateComposerMenus()
 
 	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
 	next := updated.(*Model)
@@ -873,7 +986,7 @@ func TestExactSlashCommandWithArgsConsumesEnterForAutocomplete(t *testing.T) {
 		composer: textarea.New(),
 	}
 	m.composer.SetValue("/mouse")
-	m.updateSlashMenu()
+	m.updateComposerMenus()
 
 	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
 	next := updated.(*Model)
@@ -893,7 +1006,7 @@ func TestSlashSelectionExecutesNoArgsCommandDirectly(t *testing.T) {
 		composer: textarea.New(),
 	}
 	m.composer.SetValue("/per")
-	m.updateSlashMenu()
+	m.updateComposerMenus()
 
 	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
 	next := updated.(*Model)

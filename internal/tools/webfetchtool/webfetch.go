@@ -24,7 +24,7 @@ func init() { tools.Register(tool{}) }
 
 func (tool) Kind() domain.ToolKind    { return domain.ToolKindWebFetch }
 func (tool) BypassesPermission() bool { return false }
-func (tool) Definition() (provider.ToolDefinition, bool) {
+func (tool) Definition(tools.Runtime) (provider.ToolDefinition, bool) {
 	return tools.FunctionDefinition(domain.ToolKindWebFetch, "Fetch the contents of a URL", `{"type":"object","properties":{"url":{"type":"string","description":"Fully qualified URL"},"format":{"type":"string","description":"Optional response format such as text or markdown"}},"required":["url"],"additionalProperties":false}`), true
 }
 func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {

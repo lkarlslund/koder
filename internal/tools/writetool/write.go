@@ -21,7 +21,7 @@ func init() { tools.Register(tool{}) }
 
 func (tool) Kind() domain.ToolKind    { return domain.ToolKindWrite }
 func (tool) BypassesPermission() bool { return false }
-func (tool) Definition() (provider.ToolDefinition, bool) {
+func (tool) Definition(tools.Runtime) (provider.ToolDefinition, bool) {
 	return tools.FunctionDefinition(domain.ToolKindWrite, "Write a full file in the workspace", `{"type":"object","properties":{"path":{"type":"string","description":"File to create or overwrite"},"content":{"type":"string","description":"Full file contents"}},"required":["path","content"],"additionalProperties":false}`), true
 }
 func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {

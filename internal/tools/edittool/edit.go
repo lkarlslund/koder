@@ -21,7 +21,7 @@ func init() { tools.Register(tool{}) }
 
 func (tool) Kind() domain.ToolKind    { return domain.ToolKindEdit }
 func (tool) BypassesPermission() bool { return false }
-func (tool) Definition() (provider.ToolDefinition, bool) {
+func (tool) Definition(tools.Runtime) (provider.ToolDefinition, bool) {
 	return tools.FunctionDefinition(domain.ToolKindEdit, "Edit an existing text file by replacing exact text", `{"type":"object","properties":{"path":{"type":"string","description":"File to edit"},"old_string":{"type":"string","description":"Exact text to replace"},"new_string":{"type":"string","description":"Replacement text"},"replace_all":{"type":"boolean","description":"Replace every occurrence instead of exactly one"}},"required":["path","old_string","new_string"],"additionalProperties":false}`), true
 }
 func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {

@@ -90,7 +90,7 @@ type Runtime struct {
 
 type Tool interface {
 	Kind() domain.ToolKind
-	Definition() (provider.ToolDefinition, bool)
+	Definition(Runtime) (provider.ToolDefinition, bool)
 	BypassesPermission() bool
 	NormalizeArgs(map[string]string) (map[string]string, error)
 	LegacyArgs(raw string) map[string]string
@@ -164,7 +164,7 @@ func (r *Registry) PersistResult(ctx context.Context, st *store.Store, sessionID
 	return tool.PersistResult(ctx, st, sessionID, req, result)
 }
 
-func Definitions() []provider.ToolDefinition {
+func Definitions(runtime Runtime) []provider.ToolDefinition {
 	regMu.RLock()
 	kinds := slices.Clone(order)
 	regMu.RUnlock()
@@ -174,7 +174,7 @@ func Definitions() []provider.ToolDefinition {
 		if !ok {
 			continue
 		}
-		def, enabled := tool.Definition()
+		def, enabled := tool.Definition(runtime)
 		if enabled {
 			defs = append(defs, def)
 		}

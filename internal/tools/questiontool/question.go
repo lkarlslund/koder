@@ -15,9 +15,11 @@ type tool struct{}
 
 func init() { tools.Register(tool{}) }
 
-func (tool) Kind() domain.ToolKind                       { return domain.ToolKindQuestion }
-func (tool) BypassesPermission() bool                    { return false }
-func (tool) Definition() (provider.ToolDefinition, bool) { return provider.ToolDefinition{}, false }
+func (tool) Kind() domain.ToolKind    { return domain.ToolKindQuestion }
+func (tool) BypassesPermission() bool { return false }
+func (tool) Definition(tools.Runtime) (provider.ToolDefinition, bool) {
+	return provider.ToolDefinition{}, false
+}
 func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 	question := strings.TrimSpace(args["question"])
 	if question == "" {

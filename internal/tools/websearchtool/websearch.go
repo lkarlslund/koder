@@ -30,7 +30,7 @@ func init() { tools.Register(tool{}) }
 
 func (tool) Kind() domain.ToolKind    { return domain.ToolKindWebSearch }
 func (tool) BypassesPermission() bool { return false }
-func (tool) Definition() (provider.ToolDefinition, bool) {
+func (tool) Definition(tools.Runtime) (provider.ToolDefinition, bool) {
 	return tools.FunctionDefinition(domain.ToolKindWebSearch, "Search the web for recent public information", `{"type":"object","properties":{"query":{"type":"string","description":"Search query"},"limit":{"type":"integer","description":"Optional maximum result count"}},"required":["query"],"additionalProperties":false}`), true
 }
 func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {

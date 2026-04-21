@@ -171,14 +171,55 @@ func TestBuildConversationResetsAtCompactionBoundary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(conversation) != 3 {
-		t.Fatalf("expected system + compact summary + later message, got %#v", conversation)
+	if len(conversation) < 3 {
+		t.Fatalf("expected compact summary and later message, got %#v", conversation)
 	}
-	if !strings.Contains(conversation[1].Content, "summary block") {
-		t.Fatalf("expected compact summary in context, got %#v", conversation[1])
+	if !strings.Contains(conversation[len(conversation)-2].Content, "summary block") {
+		t.Fatalf("expected compact summary in context, got %#v", conversation[len(conversation)-2])
 	}
-	if strings.Contains(conversation[2].Content, "old question") || !strings.Contains(conversation[2].Content, "new question") {
-		t.Fatalf("expected only post-compact history, got %#v", conversation[2])
+	if strings.Contains(conversation[len(conversation)-1].Content, "old question") || !strings.Contains(conversation[len(conversation)-1].Content, "new question") {
+		t.Fatalf("expected only post-compact history, got %#v", conversation[len(conversation)-1])
+	}
+}
+
+func TestBuildConversationIncludesSkillPromptContext(t *testing.T) {
+	cfg := testConfig(t)
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	repo := filepath.Join(t.TempDir(), "repo")
+	if err := os.MkdirAll(filepath.Join(repo, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	skillPath := filepath.Join(repo, ".agents", "skills", "review", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(skillPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(skillPath, []byte("---\nname: review\ndescription: Review code carefully\n---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	engine := New(cfg, st, tools.NewRegistry(repo), nil, repo)
+	session, err := st.CreateSession(context.Background(), "test", cfg.DefaultProvider, "test-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	conversation, err := engine.buildConversation(context.Background(), session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(conversation) < 2 {
+		t.Fatalf("expected system prompt and skill prompt, got %#v", conversation)
+	}
+	if !strings.Contains(conversation[1].Content, "$skill-name") || !strings.Contains(conversation[1].Content, "<name>review</name>") {
+		t.Fatalf("expected skill prompt context in conversation, got %#v", conversation[1])
 	}
 }
 
@@ -238,14 +279,14 @@ func TestBuildConversationUsesStructuredToolMessages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(conversation) != 3 {
-		t.Fatalf("expected system + assistant tool call + tool output, got %#v", conversation)
+	if len(conversation) < 3 {
+		t.Fatalf("expected assistant tool call and tool output, got %#v", conversation)
 	}
-	if len(conversation[1].ToolCalls) != 1 || conversation[1].ToolCalls[0].ID != "call_1" {
-		t.Fatalf("expected structured assistant tool call, got %#v", conversation[1])
+	if len(conversation[len(conversation)-2].ToolCalls) != 1 || conversation[len(conversation)-2].ToolCalls[0].ID != "call_1" {
+		t.Fatalf("expected structured assistant tool call, got %#v", conversation[len(conversation)-2])
 	}
-	if conversation[2].Role != domain.MessageRoleTool || conversation[2].ToolCallID != "call_1" || conversation[2].Content != "/typed/output" {
-		t.Fatalf("expected structured tool message, got %#v", conversation[2])
+	if conversation[len(conversation)-1].Role != domain.MessageRoleTool || conversation[len(conversation)-1].ToolCallID != "call_1" || conversation[len(conversation)-1].Content != "/typed/output" {
+		t.Fatalf("expected structured tool message, got %#v", conversation[len(conversation)-1])
 	}
 }
 
@@ -336,17 +377,18 @@ func TestBuildConversationIncludesImageAndTextAttachments(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(conversation) != 2 {
-		t.Fatalf("expected system + user message, got %#v", conversation)
+	if len(conversation) < 2 {
+		t.Fatalf("expected user message, got %#v", conversation)
 	}
-	if got := len(conversation[1].ContentParts); got != 3 {
-		t.Fatalf("expected text + image + attached text content parts, got %#v", conversation[1].ContentParts)
+	userMsg := conversation[len(conversation)-1]
+	if got := len(userMsg.ContentParts); got != 3 {
+		t.Fatalf("expected text + image + attached text content parts, got %#v", userMsg.ContentParts)
 	}
-	if conversation[1].ContentParts[1].Type != "image_url" {
-		t.Fatalf("expected image attachment content part, got %#v", conversation[1].ContentParts)
+	if userMsg.ContentParts[1].Type != "image_url" {
+		t.Fatalf("expected image attachment content part, got %#v", userMsg.ContentParts)
 	}
-	if conversation[1].ContentParts[2].Type != "text" || !strings.Contains(conversation[1].ContentParts[2].Text, "remember this") {
-		t.Fatalf("expected attached text file content, got %#v", conversation[1].ContentParts[2])
+	if userMsg.ContentParts[2].Type != "text" || !strings.Contains(userMsg.ContentParts[2].Text, "remember this") {
+		t.Fatalf("expected attached text file content, got %#v", userMsg.ContentParts[2])
 	}
 }
 

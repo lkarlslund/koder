@@ -22,7 +22,7 @@ func init() { tools.Register(tool{}) }
 
 func (tool) Kind() domain.ToolKind    { return domain.ToolKindRead }
 func (tool) BypassesPermission() bool { return false }
-func (tool) Definition() (provider.ToolDefinition, bool) {
+func (tool) Definition(tools.Runtime) (provider.ToolDefinition, bool) {
 	return tools.FunctionDefinition(domain.ToolKindRead, "Read a file or list a directory from the workspace", `{"type":"object","properties":{"path":{"type":"string","description":"Relative or absolute workspace path to read"},"offset":{"type":"integer","description":"Optional starting line number for text files (1-indexed)"},"limit":{"type":"integer","description":"Optional maximum number of lines to return"}},"required":["path"],"additionalProperties":false}`), true
 }
 func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {

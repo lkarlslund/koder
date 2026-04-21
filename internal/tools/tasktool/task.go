@@ -19,7 +19,7 @@ func init() { tools.Register(tool{}) }
 
 func (tool) Kind() domain.ToolKind    { return domain.ToolKindTask }
 func (tool) BypassesPermission() bool { return true }
-func (tool) Definition() (provider.ToolDefinition, bool) {
+func (tool) Definition(tools.Runtime) (provider.ToolDefinition, bool) {
 	return tools.FunctionDefinition(domain.ToolKindTask, "Record a short task for later follow-up", `{"type":"object","properties":{"body":{"type":"string","description":"Short task description"}},"required":["body"],"additionalProperties":false}`), true
 }
 func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
