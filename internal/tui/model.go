@@ -1023,16 +1023,7 @@ func (m *Model) renderSidebar() string {
 	lines = append(lines, fmt.Sprintf("  project %s", truncate(m.currentProjectRoot(), 20)))
 	lines = append(lines, "")
 	lines = append(lines, "AGENTS")
-	lines = append(lines, fmt.Sprintf("  %s", m.agentsStatusLabel()))
-	if m.currentSession.ProjectChecksum != "" {
-		lines = append(lines, fmt.Sprintf("  saved   %s", truncate(m.currentSession.ProjectChecksum, 12)))
-	}
-	if m.workspace.AgentsChecksum != "" {
-		lines = append(lines, fmt.Sprintf("  live    %s", truncate(m.workspace.AgentsChecksum, 12)))
-	}
-	if m.workspace.AgentsFiles > 0 {
-		lines = append(lines, fmt.Sprintf("  files   %d", m.workspace.AgentsFiles))
-	}
+	lines = append(lines, "  "+m.renderAgentsSidebarStatus())
 	lines = append(lines, "")
 	lines = append(lines, "Git")
 	if !m.workspace.Available {
@@ -3155,19 +3146,24 @@ func (m Model) currentProjectRoot() string {
 }
 
 func (m Model) agentsStatusLabel() string {
-	if m.busy.active && strings.Contains(strings.ToLower(m.busy.status), "project instructions") {
-		return "resolving"
-	}
 	if m.workspace.AgentsFiles == 0 {
-		return "missing"
-	}
-	if m.agentsDrift {
-		return "WARNING drifted"
+		return "None"
 	}
 	if m.currentSession.ProjectChecksum != "" && m.currentSession.ProjectChecksum == m.workspace.AgentsChecksum {
-		return "cached"
+		return "Up to date"
 	}
-	return "clean"
+	return "Changed"
+}
+
+func (m Model) renderAgentsSidebarStatus() string {
+	color := lipgloss.Color("#e06c75")
+	switch m.agentsStatusLabel() {
+	case "None":
+		color = lipgloss.Color("#e0af68")
+	case "Up to date":
+		color = lipgloss.Color("#98c379")
+	}
+	return lipgloss.NewStyle().Foreground(color).Render(m.agentsStatusLabel())
 }
 
 func (m Model) probeProviderCmd(draft provider.ConnectDraft) tea.Cmd {
