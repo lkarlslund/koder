@@ -41,6 +41,15 @@ const (
 	connectFocusButtons
 )
 
+type connectStatusKind int
+
+const (
+	connectStatusNone connectStatusKind = iota
+	connectStatusInfo
+	connectStatusSuccess
+	connectStatusError
+)
+
 type ConnectDialog struct {
 	stage      connectStage
 	query      string
@@ -53,6 +62,7 @@ type ConnectDialog struct {
 	draft      provider.ConnectDraft
 	models     []string
 	status     string
+	statusKind connectStatusKind
 	focus      connectFocus
 	fieldIndex int
 	buttonIdx  int
@@ -72,6 +82,29 @@ func NewConnectDialog(items []provider.Descriptor, configured map[string]config.
 
 func (d *ConnectDialog) SetStatus(status string) {
 	d.status = strings.TrimSpace(status)
+	if d.status == "" {
+		d.statusKind = connectStatusNone
+		return
+	}
+	d.statusKind = connectStatusInfo
+}
+
+func (d *ConnectDialog) SetStatusSuccess(status string) {
+	d.status = strings.TrimSpace(status)
+	if d.status == "" {
+		d.statusKind = connectStatusNone
+		return
+	}
+	d.statusKind = connectStatusSuccess
+}
+
+func (d *ConnectDialog) SetStatusError(status string) {
+	d.status = strings.TrimSpace(status)
+	if d.status == "" {
+		d.statusKind = connectStatusNone
+		return
+	}
+	d.statusKind = connectStatusError
 }
 
 func (d *ConnectDialog) SetModels(models []string) {
@@ -280,7 +313,7 @@ func (d *ConnectDialog) formView(width int, palette theme.Palette) string {
 		lines = append(lines, lipgloss.NewStyle().Foreground(palette.AssistantTimestampText).Render("Discovered models: "+strings.Join(d.models[:minInt(4, len(d.models))], ", ")))
 	}
 	if status := strings.TrimSpace(d.status); status != "" {
-		lines = append(lines, lipgloss.NewStyle().Foreground(palette.AssistantTimestampText).Render(status))
+		lines = append(lines, d.renderStatus(palette))
 	}
 	buttons := []string{
 		Button{Label: "Test", Hotkey: 't', Focused: d.focus == connectFocusButtons && d.buttonIdx == 0}.View(palette),
@@ -368,6 +401,7 @@ func (d *ConnectDialog) selectProvider(item provider.Descriptor) {
 	d.authIndex = 0
 	d.models = nil
 	d.status = ""
+	d.statusKind = connectStatusNone
 	d.draft, _ = provider.BuildDraft(item.ID, d.configured)
 	d.resetCursors()
 	if len(item.AuthMethods) > 1 {
@@ -730,6 +764,35 @@ func (d ConnectDialog) renderEditorContent(fieldID, value, placeholder string, w
 	after := string(segmentRunes[cursorCol:])
 	content := before + "█" + after
 	return padRight(content, width)
+}
+
+func (d ConnectDialog) renderStatus(palette theme.Palette) string {
+	status := strings.TrimSpace(d.status)
+	if status == "" {
+		return ""
+	}
+	label := "WAIT"
+	labelColor := palette.ActivityText
+	switch d.statusKind {
+	case connectStatusSuccess:
+		label = "OK"
+		labelColor = palette.DiffAddedText
+	case connectStatusError:
+		label = "ERROR"
+		labelColor = palette.DiffDeletedText
+	}
+	tag := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(labelColor).
+		Background(palette.UserTextBackground).
+		Padding(0, 1).
+		Render(label)
+	body := lipgloss.NewStyle().
+		Foreground(palette.SidebarForeground).
+		Background(palette.UserTextBackground).
+		Padding(0, 1).
+		Render(status)
+	return lipgloss.JoinHorizontal(lipgloss.Left, tag, " ", body)
 }
 
 func padRight(input string, width int) string {

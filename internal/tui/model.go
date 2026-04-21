@@ -471,7 +471,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if msg.err != nil {
-			m.connectDialog.SetStatus("Connection test failed: " + msg.err.Error())
+			m.connectDialog.SetStatusError("Connection test failed: " + msg.err.Error())
 			m.status = msg.err.Error()
 			return m, m.syncWindowTitleCmd()
 		}
@@ -481,10 +481,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.connectDialog.SetModels(modelIDs)
 		if len(modelIDs) == 0 {
-			m.connectDialog.SetStatus("Connected, but no models were returned")
+			m.connectDialog.SetStatusSuccess("Connected, but no models were returned")
 			m.status = "Provider connected"
 		} else {
-			m.connectDialog.SetStatus(fmt.Sprintf("Connected: discovered %d models", len(modelIDs)))
+			m.connectDialog.SetStatusSuccess(fmt.Sprintf("Connected: discovered %d models", len(modelIDs)))
 			m.status = fmt.Sprintf("Provider connected: %d models", len(modelIDs))
 		}
 		return m, m.syncWindowTitleCmd()
@@ -2696,7 +2696,7 @@ func (m *Model) handleConnectDialogKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case ui.ProviderConnectActionSave:
 		discoveredModels := m.connectDialog.Models()
 		if err := m.saveProviderDraft(action.Draft); err != nil {
-			m.connectDialog.SetStatus("Save failed: " + err.Error())
+			m.connectDialog.SetStatusError("Save failed: " + err.Error())
 			m.status = err.Error()
 			return m, m.syncWindowTitleCmd()
 		}

@@ -26,6 +26,16 @@ func TestBuildDraftUsesDescriptorDefaults(t *testing.T) {
 	}
 }
 
+func TestBuildDraftLeavesLlamaCPPModelBlank(t *testing.T) {
+	draft, err := BuildDraft("llamacpp", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if draft.Model != "" {
+		t.Fatalf("expected blank llama.cpp model, got %q", draft.Model)
+	}
+}
+
 func TestBuildDraftPrefillsExistingProvider(t *testing.T) {
 	draft, err := BuildDraft("openrouter", map[string]config.Provider{
 		"openrouter": {

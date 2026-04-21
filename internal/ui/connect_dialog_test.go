@@ -89,6 +89,52 @@ func TestConnectDialogCyclesDiscoveredModels(t *testing.T) {
 	}
 }
 
+func TestConnectDialogFillsBlankModelFromFirstDiscoveredModel(t *testing.T) {
+	dialog := NewConnectDialog(provider.Catalog(), map[string]config.Provider{})
+	dialog.selectProvider(provider.Catalog()[0])
+	dialog.draft.Model = ""
+
+	dialog.SetModels([]string{"model-a", "model-b"})
+
+	if dialog.draft.Model != "model-a" {
+		t.Fatalf("expected blank model to adopt first discovered model, got %q", dialog.draft.Model)
+	}
+}
+
+func TestConnectDialogPreservesExistingModelWhenModelsDiscovered(t *testing.T) {
+	dialog := NewConnectDialog(provider.Catalog(), map[string]config.Provider{})
+	dialog.selectProvider(provider.Catalog()[0])
+	dialog.draft.Model = "custom-model"
+
+	dialog.SetModels([]string{"model-a", "model-b"})
+
+	if dialog.draft.Model != "custom-model" {
+		t.Fatalf("expected existing model to be preserved, got %q", dialog.draft.Model)
+	}
+}
+
+func TestConnectDialogViewShowsSuccessStatus(t *testing.T) {
+	dialog := NewConnectDialog(provider.Catalog(), map[string]config.Provider{})
+	dialog.selectProvider(provider.Catalog()[0])
+	dialog.SetStatusSuccess("Connected: discovered 2 models")
+
+	got := dialog.View(90, theme.Resolve("tokyonight").Palette)
+	if !strings.Contains(got, "OK") || !strings.Contains(got, "Connected: discovered 2 models") {
+		t.Fatalf("expected success status in view, got %q", got)
+	}
+}
+
+func TestConnectDialogViewShowsErrorStatus(t *testing.T) {
+	dialog := NewConnectDialog(provider.Catalog(), map[string]config.Provider{})
+	dialog.selectProvider(provider.Catalog()[0])
+	dialog.SetStatusError("Connection test failed: boom")
+
+	got := dialog.View(90, theme.Resolve("tokyonight").Palette)
+	if !strings.Contains(got, "ERROR") || !strings.Contains(got, "Connection test failed: boom") {
+		t.Fatalf("expected error status in view, got %q", got)
+	}
+}
+
 func TestConnectDialogViewShowsEditorCursorAndTail(t *testing.T) {
 	dialog := NewConnectDialog(provider.Catalog(), map[string]config.Provider{})
 	dialog.selectProvider(provider.Catalog()[0])
