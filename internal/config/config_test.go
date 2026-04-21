@@ -20,6 +20,9 @@ func TestLoadWritesDefaultConfig(t *testing.T) {
 	if cfg.DefaultProvider != "" {
 		t.Fatalf("expected no default provider, got %q", cfg.DefaultProvider)
 	}
+	if cfg.MaxToolLoopSteps != 20 {
+		t.Fatalf("expected default max tool loop steps 20, got %d", cfg.MaxToolLoopSteps)
+	}
 	if cfg.Permissions.Profile != "default" {
 		t.Fatalf("unexpected permission profile: %s", cfg.Permissions.Profile)
 	}
@@ -88,5 +91,16 @@ func TestApplyDefaultsFillsMissingUISpinner(t *testing.T) {
 
 	if cfg.UI.Spinner != "dots" {
 		t.Fatalf("expected spinner default applied, got %q", cfg.UI.Spinner)
+	}
+}
+
+func TestApplyDefaultsFillsMissingMaxToolLoopSteps(t *testing.T) {
+	cfg := Default()
+	cfg.MaxToolLoopSteps = 0
+
+	cfg.applyDefaults()
+
+	if cfg.MaxToolLoopSteps != 20 {
+		t.Fatalf("expected default max tool loop steps applied, got %d", cfg.MaxToolLoopSteps)
 	}
 }

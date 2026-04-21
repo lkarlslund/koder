@@ -68,19 +68,21 @@ type PermissionRule struct {
 }
 
 type Config struct {
-	DefaultProvider string              `toml:"default_provider"`
-	DefaultModel    string              `toml:"default_model"`
-	Providers       map[string]Provider `toml:"providers"`
-	Permissions     PermissionRules     `toml:"permissions"`
-	Store           Store               `toml:"store"`
-	UI              UI                  `toml:"ui"`
-	path            string
-	configDir       string
-	stateDir        string
-	cacheDir        string
+	DefaultProvider  string              `toml:"default_provider"`
+	DefaultModel     string              `toml:"default_model"`
+	MaxToolLoopSteps int                 `toml:"max_tool_loop_steps"`
+	Providers        map[string]Provider `toml:"providers"`
+	Permissions      PermissionRules     `toml:"permissions"`
+	Store            Store               `toml:"store"`
+	UI               UI                  `toml:"ui"`
+	path             string
+	configDir        string
+	stateDir         string
+	cacheDir         string
 }
 
 const providerConfigurationHint = "configure at least one provider in config.toml and set default_provider"
+const defaultMaxToolLoopSteps = 20
 
 func Load() (Config, error) {
 	cfg := Default()
@@ -124,8 +126,9 @@ func Load() (Config, error) {
 
 func Default() Config {
 	return Config{
-		DefaultProvider: "",
-		Providers:       map[string]Provider{},
+		DefaultProvider:  "",
+		MaxToolLoopSteps: defaultMaxToolLoopSteps,
+		Providers:        map[string]Provider{},
 		Permissions: PermissionRules{
 			Profile: "default",
 			Profiles: map[string]PermissionProfile{
@@ -199,6 +202,9 @@ func Default() Config {
 
 func (c *Config) applyDefaults() {
 	def := Default()
+	if c.MaxToolLoopSteps <= 0 {
+		c.MaxToolLoopSteps = def.MaxToolLoopSteps
+	}
 	if c.Providers == nil {
 		c.Providers = def.Providers
 	}

@@ -340,7 +340,7 @@ func (e *Engine) persistUserPrompt(ctx context.Context, session domain.Session, 
 }
 
 func (e *Engine) continueModelTurn(ctx context.Context, session domain.Session, client *provider.Client, out chan<- domain.Event, transient []provider.Message) error {
-	for steps := 0; steps < 6; steps++ {
+	for steps := 0; steps < e.maxToolLoopSteps(); steps++ {
 		e.recordLifecycle(session.ID, "model_turn_started", "", map[string]string{"step": strconv.Itoa(steps + 1)})
 		messages, buildErr := e.buildConversation(ctx, session.ID)
 		if buildErr != nil {
@@ -453,6 +453,13 @@ func (e *Engine) continueModelTurn(ctx context.Context, session domain.Session, 
 		return nil
 	}
 	return fmt.Errorf("tool loop exceeded max steps")
+}
+
+func (e *Engine) maxToolLoopSteps() int {
+	if e.cfg.MaxToolLoopSteps > 0 {
+		return e.cfg.MaxToolLoopSteps
+	}
+	return config.Default().MaxToolLoopSteps
 }
 
 func (e *Engine) maybeUpdateSessionTitle(ctx context.Context, session domain.Session, client *provider.Client) (string, error) {

@@ -48,6 +48,23 @@ func TestSystemPromptDoesNotMentionInternalSlashCommands(t *testing.T) {
 	}
 }
 
+func TestMaxToolLoopStepsDefaultsToTwenty(t *testing.T) {
+	engine := New(testConfig(t), nil, nil, nil, t.TempDir())
+	if got := engine.maxToolLoopSteps(); got != 20 {
+		t.Fatalf("expected default max tool loop steps 20, got %d", got)
+	}
+}
+
+func TestMaxToolLoopStepsUsesConfiguredValue(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.MaxToolLoopSteps = 7
+
+	engine := New(cfg, nil, nil, nil, t.TempDir())
+	if got := engine.maxToolLoopSteps(); got != 7 {
+		t.Fatalf("expected configured max tool loop steps 7, got %d", got)
+	}
+}
+
 func TestApprovalSerializationRoundTrip(t *testing.T) {
 	req := tools.Request{
 		Tool: domain.ToolKindApplyPatch,

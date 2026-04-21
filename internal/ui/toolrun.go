@@ -85,16 +85,13 @@ func RenderToolRunCard(run ToolRun, palette theme.Palette, width int, expanded b
 	}
 	if hiddenLines := ToolRunHiddenLineCount(run, headerWidth); hiddenLines > 0 {
 		label := "Collapse"
-		if !expanded {
+		if !expanded && hiddenLines == 1 {
+			label = "Expand (1 line more)"
+		} else if !expanded {
 			label = "Expand"
 		}
-		if hiddenLines == 1 {
-			label = "Expand (1 line more)"
-		} else {
+		if hiddenLines > 1 && !expanded {
 			label = "Expand (" + strconv.Itoa(hiddenLines) + " lines more)"
-		}
-		if expanded {
-			label = "Collapse"
 		}
 		headerParts = append(headerParts, toggleStyle.Render(label))
 	}
