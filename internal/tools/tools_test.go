@@ -77,3 +77,34 @@ func TestReadAndPatch(t *testing.T) {
 		t.Fatalf("unexpected file contents: %q", string(afterBytes))
 	}
 }
+
+func TestReadCurrentDirectoryListsFiles(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "alpha.txt"), []byte("a\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(dir, "nested"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	registry := tools.NewRegistry(dir)
+	result, err := registry.Execute(context.Background(), tools.Request{
+		Tool: domain.ToolKindRead,
+		Args: map[string]string{"path": "."},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Meta["mode"] != "dir" {
+		t.Fatalf("expected directory mode, got %#v", result.Meta)
+	}
+	if result.Meta["path"] != "." {
+		t.Fatalf("expected current directory path, got %#v", result.Meta)
+	}
+	if !strings.Contains(result.Output, "alpha.txt") {
+		t.Fatalf("expected file listing to include alpha.txt, got %q", result.Output)
+	}
+	if !strings.Contains(result.Output, "nested/") {
+		t.Fatalf("expected file listing to include nested directory, got %q", result.Output)
+	}
+}

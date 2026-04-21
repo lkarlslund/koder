@@ -64,8 +64,11 @@ func WorkspacePath(root string, raw string) (abs string, rel string, err error) 
 		return "", "", errors.New("path is empty")
 	}
 	clean := NormalizePathInput(raw)
-	if clean == "" || clean == "." {
+	if clean == "" {
 		return "", "", errors.New("path is empty")
+	}
+	if clean == "." {
+		return root, ".", nil
 	}
 	if filepath.IsAbs(clean) {
 		abs = clean
