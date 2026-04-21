@@ -104,6 +104,36 @@ func WorkspacePath(root string, raw string) (abs string, rel string, err error) 
 	return abs, filepath.ToSlash(rel), nil
 }
 
+func ReadablePath(root string, raw string) (abs string, label string, err error) {
+	root, err = filepath.Abs(strings.TrimSpace(root))
+	if err != nil {
+		return "", "", fmt.Errorf("resolve workspace root: %w", err)
+	}
+	if strings.TrimSpace(raw) == "" {
+		return "", "", errors.New("path is empty")
+	}
+	clean := NormalizePathInput(raw)
+	if clean == "" {
+		return "", "", errors.New("path is empty")
+	}
+	if filepath.IsAbs(clean) {
+		abs = filepath.Clean(clean)
+		if info, statErr := os.Stat(abs); statErr == nil {
+			resolved, resolveErr := filepath.EvalSymlinks(abs)
+			if resolveErr == nil {
+				abs = resolved
+			} else if !errors.Is(resolveErr, fs.ErrNotExist) {
+				return "", "", fmt.Errorf("resolve symlink: %w", resolveErr)
+			}
+			_ = info
+		} else if !errors.Is(statErr, fs.ErrNotExist) {
+			return "", "", fmt.Errorf("stat path: %w", statErr)
+		}
+		return abs, filepath.ToSlash(abs), nil
+	}
+	return WorkspacePath(root, clean)
+}
+
 func WorkspaceDir(root string, raw string) (abs string, rel string, err error) {
 	if strings.TrimSpace(raw) == "" {
 		abs, err = filepath.Abs(strings.TrimSpace(root))

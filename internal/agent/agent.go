@@ -656,7 +656,45 @@ func (e *Engine) approve(ctx context.Context, sessionID int64, rawID string) (<-
 		if interruptedErr(execErr) {
 			return emitOnce(domain.Event{Kind: domain.EventKindStatus, Text: "Interrupted"}), nil
 		}
-		return emitOnce(domain.Event{Kind: domain.EventKindError, Err: execErr}), nil
+		toolEvents, err := e.persistToolFailure(ctx, sessionID, req, execErr)
+		if err != nil {
+			return nil, err
+		}
+		out := make(chan domain.Event)
+		go func() {
+			defer close(out)
+			for evt := range toolEvents {
+				out <- evt
+			}
+			session, err = e.store.GetSession(ctx, sessionID)
+			if err != nil {
+				if interruptedErr(err) {
+					e.emitInterrupted(out, sessionID)
+					return
+				}
+				out <- domain.Event{Kind: domain.EventKindError, Err: err}
+				return
+			}
+			providerCfg, ok := e.cfg.Provider(session.ProviderID)
+			if !ok {
+				out <- domain.Event{Kind: domain.EventKindError, Err: fmt.Errorf("provider %q not found", session.ProviderID)}
+				return
+			}
+			client, err := provider.New(session.ProviderID, providerCfg, e.debug)
+			if err != nil {
+				out <- domain.Event{Kind: domain.EventKindError, Err: err}
+				return
+			}
+			if err := e.continueModelTurn(ctx, session, client, out, nil); err != nil {
+				if interruptedErr(err) {
+					e.emitInterrupted(out, session.ID)
+					return
+				}
+				e.recordAssistantError(ctx, session.ID, err)
+				out <- domain.Event{Kind: domain.EventKindError, Err: err}
+			}
+		}()
+		return out, nil
 	}
 	e.recordLifecycle(sessionID, "tool_execution_finished", item.Command, map[string]string{"tool": string(item.Tool), "approval_id": strconv.FormatInt(id, 10)})
 	toolEvents, err := e.persistToolResult(ctx, sessionID, req, result)
@@ -744,6 +782,28 @@ func (e *Engine) persistToolResult(ctx context.Context, sessionID int64, req too
 	summary, _ := tools.SummarizeResult(req, result)
 	e.recordLifecycle(sessionID, "tool_result_persisted", summary, map[string]string{"tool": string(req.Tool)})
 	return events, nil
+}
+
+func (e *Engine) persistToolFailure(ctx context.Context, sessionID int64, req tools.Request, execErr error) (<-chan domain.Event, error) {
+	if execErr == nil {
+		return nil, errors.New("tool failure error is nil")
+	}
+	text := fmt.Sprintf("%s failed: %v", req.Tool, execErr)
+	if sessionID == 0 {
+		return emitOnce(domain.Event{Kind: domain.EventKindToolResult, Tool: req.Tool, Text: text}), nil
+	}
+	msg, err := e.store.AddMessage(ctx, sessionID, domain.MessageRoleTool, string(req.Tool))
+	if err != nil {
+		return nil, err
+	}
+	meta, _ := json.Marshal(tools.MetaWithStoredResult(req.Meta(), domain.PartKindToolOutput, req.Tool, tools.StoredResultStatusError, tools.ErrorStoredResult{
+		Message: text,
+	}))
+	if _, err := e.store.AddPart(ctx, msg.ID, domain.PartKindToolOutput, text, string(meta)); err != nil {
+		return nil, err
+	}
+	e.recordLifecycle(sessionID, "tool_result_persisted", text, map[string]string{"tool": string(req.Tool), "status": "error"})
+	return emitOnce(domain.Event{Kind: domain.EventKindToolResult, Tool: req.Tool, Text: text}), nil
 }
 
 func emitOnce(evt domain.Event) <-chan domain.Event {
@@ -1370,7 +1430,12 @@ func (e *Engine) handleModelToolCall(ctx context.Context, session domain.Session
 	}
 	result, err := e.registry.Execute(ctx, req)
 	if err != nil {
-		return domain.Event{Kind: domain.EventKindError, Err: err}, nil
+		events, persistErr := e.persistToolFailure(ctx, sessionID, req, err)
+		if persistErr != nil {
+			return domain.Event{}, persistErr
+		}
+		final := <-events
+		return final, nil
 	}
 	evt, err := e.persistToolResult(ctx, sessionID, req, result)
 	if err != nil {
@@ -1626,7 +1691,15 @@ func (e *Engine) executePreparedToolCall(ctx context.Context, sessionID int64, r
 	result, err := e.registry.Execute(ctx, req)
 	if err != nil {
 		e.recordLifecycle(sessionID, "tool_execution_failed", err.Error(), map[string]string{"tool": string(req.Tool), "tool_call_id": req.ToolCallID})
-		return nil, err
+		events, persistErr := e.persistToolFailure(ctx, sessionID, req, err)
+		if persistErr != nil {
+			return nil, persistErr
+		}
+		var out []domain.Event
+		for evt := range events {
+			out = append(out, evt)
+		}
+		return out, nil
 	}
 	e.recordLifecycle(sessionID, "tool_execution_finished", req.ContextString(), map[string]string{"tool": string(req.Tool), "tool_call_id": req.ToolCallID})
 	events, err := e.persistToolResult(ctx, sessionID, req, result)

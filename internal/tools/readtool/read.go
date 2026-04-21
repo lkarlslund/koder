@@ -49,7 +49,7 @@ func (tool) Presentation(req tools.Request) tools.Presentation {
 	return tool{}.PresentationForPreview(req.Args["path"])
 }
 func (tool) Execute(_ context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
-	abs, rel, err := tools.WorkspacePath(runtime.Workdir, req.Args["path"])
+	abs, rel, err := tools.ReadablePath(runtime.Workdir, req.Args["path"])
 	if err != nil {
 		return tools.Result{}, err
 	}

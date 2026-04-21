@@ -15,6 +15,7 @@ type StoredResultStatus string
 const (
 	StoredResultStatusOK     StoredResultStatus = "ok"
 	StoredResultStatusDenied StoredResultStatus = "denied"
+	StoredResultStatusError  StoredResultStatus = "error"
 )
 
 type StoredResultPayload interface {
@@ -144,6 +145,10 @@ type DeniedStoredResult struct {
 	Message string `json:"message"`
 }
 
+type ErrorStoredResult struct {
+	Message string `json:"message"`
+}
+
 func (ReadStoredResult) storedResultPayload()       {}
 func (BashStoredResult) storedResultPayload()       {}
 func (ApplyPatchStoredResult) storedResultPayload() {}
@@ -158,6 +163,7 @@ func (SkillStoredResult) storedResultPayload()      {}
 func (WebFetchStoredResult) storedResultPayload()   {}
 func (WebSearchStoredResult) storedResultPayload()  {}
 func (DeniedStoredResult) storedResultPayload()     {}
+func (ErrorStoredResult) storedResultPayload()      {}
 
 func MetaWithStoredResult(meta map[string]string, partKind domain.PartKind, tool domain.ToolKind, status StoredResultStatus, payload StoredResultPayload) map[string]string {
 	if payload == nil {
@@ -242,6 +248,11 @@ func formatStoredResultForPart(env storedResultEnvelope) (string, bool) {
 func formatStoredToolOutput(env storedResultEnvelope) (string, bool) {
 	if env.Status == StoredResultStatusDenied {
 		return decodeAndFormat[DeniedStoredResult](env.Payload, func(result DeniedStoredResult) string {
+			return strings.TrimSpace(result.Message)
+		})
+	}
+	if env.Status == StoredResultStatusError {
+		return decodeAndFormat[ErrorStoredResult](env.Payload, func(result ErrorStoredResult) string {
 			return strings.TrimSpace(result.Message)
 		})
 	}

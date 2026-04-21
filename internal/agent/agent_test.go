@@ -2,7 +2,9 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -873,6 +875,214 @@ func TestHandleModelToolCallAllowsProjectReadInReadAskMode(t *testing.T) {
 	}
 	if strings.Contains(strings.ToLower(evt.Text), "requires approval") {
 		t.Fatalf("expected read to avoid approval in read-ask mode, got %q", evt.Text)
+	}
+}
+
+func TestApproveContinuesAfterOutsideWorkspaceRead(t *testing.T) {
+	t.Parallel()
+
+	outsideDir := t.TempDir()
+	outsidePath := filepath.Join(outsideDir, "rules.md")
+	if err := os.WriteFile(outsidePath, []byte("# Rules\nhello\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var requests []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read body: %v", err)
+		}
+		requests = append(requests, string(body))
+		args, err := json.Marshal(map[string]string{"path": outsidePath})
+		if err != nil {
+			t.Fatalf("marshal args: %v", err)
+		}
+		switch len(requests) {
+		case 1:
+			_, _ = w.Write([]byte(fmt.Sprintf(`{"choices":[{"message":{"tool_calls":[{"id":"call_1","type":"function","function":{"name":"read","arguments":%q}}]}}],"usage":{"total_tokens":1}}`, string(args))))
+		case 2:
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"done"}}],"usage":{"total_tokens":1}}`))
+		default:
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ignored"}}],"usage":{"total_tokens":1}}`))
+		}
+	}))
+	defer server.Close()
+
+	cfg := testConfig(t)
+	cfg.Providers = map[string]config.Provider{
+		"test": {
+			BaseURL: server.URL + "/v1",
+			Timeout: time.Second,
+		},
+	}
+	cfg.DefaultProvider = "test"
+	cfg.DefaultModel = "test-model"
+
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	workdir := t.TempDir()
+	engine := New(cfg, st, tools.NewRegistry(workdir), nil, workdir)
+	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	session.PermissionProfile = permission.ProfileReadAsk
+	session.ProjectRoot = workdir
+	if err := st.SetSessionPermissionProfile(context.Background(), session.ID, permission.ProfileReadAsk); err != nil {
+		t.Fatal(err)
+	}
+
+	events, err := engine.RunPrompt(context.Background(), session, "continue")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var approvalID int64
+	for evt := range events {
+		if evt.Kind == domain.EventKindApprovalAsk {
+			id, convErr := parseApprovalID(evt.Meta["approval_id"])
+			if convErr != nil {
+				t.Fatal(convErr)
+			}
+			approvalID = id
+		}
+	}
+	if approvalID == 0 {
+		t.Fatal("expected approval request")
+	}
+
+	approvedEvents, err := engine.approve(context.Background(), session.ID, strconv.FormatInt(approvalID, 10))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sawToolResult bool
+	var sawFinalAnswer bool
+	for evt := range approvedEvents {
+		if evt.Kind == domain.EventKindToolResult && strings.Contains(evt.Text, "hello") {
+			sawToolResult = true
+		}
+		if evt.Kind == domain.EventKindMessageDelta && evt.Text == "done" {
+			sawFinalAnswer = true
+		}
+	}
+	if !sawToolResult {
+		t.Fatal("expected approved outside-workspace read to emit tool result")
+	}
+	if !sawFinalAnswer {
+		t.Fatal("expected final assistant answer after approved outside-workspace read")
+	}
+}
+
+func TestApproveContinuesAfterApprovedToolFailure(t *testing.T) {
+	t.Parallel()
+
+	missingPath := filepath.Join(t.TempDir(), "missing.md")
+
+	var requests []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read body: %v", err)
+		}
+		requests = append(requests, string(body))
+		args, err := json.Marshal(map[string]string{"path": missingPath})
+		if err != nil {
+			t.Fatalf("marshal args: %v", err)
+		}
+		switch len(requests) {
+		case 1:
+			_, _ = w.Write([]byte(fmt.Sprintf(`{"choices":[{"message":{"tool_calls":[{"id":"call_1","type":"function","function":{"name":"read","arguments":%q}}]}}],"usage":{"total_tokens":1}}`, string(args))))
+		case 2:
+			if !strings.Contains(requests[1], "read failed:") {
+				t.Fatalf("expected second request to include tool failure, got %s", requests[1])
+			}
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"handled failure"}}],"usage":{"total_tokens":1}}`))
+		default:
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ignored"}}],"usage":{"total_tokens":1}}`))
+		}
+	}))
+	defer server.Close()
+
+	cfg := testConfig(t)
+	cfg.Providers = map[string]config.Provider{
+		"test": {
+			BaseURL: server.URL + "/v1",
+			Timeout: time.Second,
+		},
+	}
+	cfg.DefaultProvider = "test"
+	cfg.DefaultModel = "test-model"
+
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	workdir := t.TempDir()
+	engine := New(cfg, st, tools.NewRegistry(workdir), nil, workdir)
+	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	session.PermissionProfile = permission.ProfileReadAsk
+	session.ProjectRoot = workdir
+	if err := st.SetSessionPermissionProfile(context.Background(), session.ID, permission.ProfileReadAsk); err != nil {
+		t.Fatal(err)
+	}
+
+	events, err := engine.RunPrompt(context.Background(), session, "continue")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var approvalID int64
+	for evt := range events {
+		if evt.Kind == domain.EventKindApprovalAsk {
+			id, convErr := parseApprovalID(evt.Meta["approval_id"])
+			if convErr != nil {
+				t.Fatal(convErr)
+			}
+			approvalID = id
+		}
+	}
+	if approvalID == 0 {
+		t.Fatal("expected approval request")
+	}
+
+	approvedEvents, err := engine.approve(context.Background(), session.ID, strconv.FormatInt(approvalID, 10))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sawToolFailure bool
+	var sawFinalAnswer bool
+	for evt := range approvedEvents {
+		if evt.Kind == domain.EventKindToolResult && strings.Contains(evt.Text, "read failed:") {
+			sawToolFailure = true
+		}
+		if evt.Kind == domain.EventKindMessageDelta && evt.Text == "handled failure" {
+			sawFinalAnswer = true
+		}
+		if evt.Kind == domain.EventKindError {
+			t.Fatalf("expected failure to be shipped as tool result, got %#v", evt)
+		}
+	}
+	if !sawToolFailure {
+		t.Fatal("expected approved tool failure to emit tool result")
+	}
+	if !sawFinalAnswer {
+		t.Fatal("expected final assistant answer after approved tool failure")
 	}
 }
 
