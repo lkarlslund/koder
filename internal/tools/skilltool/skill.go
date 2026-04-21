@@ -20,7 +20,7 @@ type tool struct{}
 func init() { tools.Register(tool{}) }
 
 func (tool) Kind() domain.ToolKind    { return domain.ToolKindSkill }
-func (tool) BypassesPermission() bool { return false }
+func (tool) BypassesPermission() bool { return true }
 func (tool) Definition(runtime tools.Runtime) (provider.ToolDefinition, bool) {
 	description := skills.ToolDescription("Load a reusable local skill by name", runtime.Workdir)
 	return tools.FunctionDefinition(domain.ToolKindSkill, description, `{"type":"object","properties":{"name":{"type":"string","description":"Skill name to load"}},"required":["name"],"additionalProperties":false}`), true

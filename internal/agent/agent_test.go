@@ -839,6 +839,86 @@ func TestHandleModelToolCallAsksForOutsideProjectRead(t *testing.T) {
 	}
 }
 
+func TestHandleModelToolCallAllowsProjectReadInReadAskMode(t *testing.T) {
+	cfg := testConfig(t)
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	workdir := t.TempDir()
+	engine := New(cfg, st, tools.NewRegistry(workdir), nil, workdir)
+	session, err := st.CreateSession(context.Background(), "test", cfg.DefaultProvider, "test-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	session.PermissionProfile = permission.ProfileReadAsk
+	session.ProjectRoot = workdir
+
+	targetPath := filepath.Join(workdir, "inside.txt")
+	if err := os.WriteFile(targetPath, []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	evt, err := engine.handleModelToolCall(context.Background(), session, tools.Request{
+		Tool: domain.ToolKindRead,
+		Args: map[string]string{"path": "inside.txt"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if evt.Kind != domain.EventKindToolResult {
+		t.Fatalf("expected tool result, got %#v", evt)
+	}
+	if strings.Contains(strings.ToLower(evt.Text), "requires approval") {
+		t.Fatalf("expected read to avoid approval in read-ask mode, got %q", evt.Text)
+	}
+}
+
+func TestHandleModelToolCallBypassesApprovalForSkill(t *testing.T) {
+	cfg := testConfig(t)
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	workdir := t.TempDir()
+	skillPath := filepath.Join(home, ".agents", "skills", "review", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(skillPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(skillPath, []byte("---\nname: review\ndescription: Review code carefully\n---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	engine := New(cfg, st, tools.NewRegistry(workdir), nil, workdir)
+	session, err := st.CreateSession(context.Background(), "test", cfg.DefaultProvider, "test-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	session.PermissionProfile = permission.ProfileAsk
+	session.ProjectRoot = workdir
+
+	evt, err := engine.handleModelToolCall(context.Background(), session, tools.Request{
+		Tool: domain.ToolKindSkill,
+		Args: map[string]string{"name": "review"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if evt.Kind != domain.EventKindToolResult {
+		t.Fatalf("expected tool result, got %#v", evt)
+	}
+	if strings.Contains(strings.ToLower(evt.Text), "requires approval") {
+		t.Fatalf("expected skill load to bypass approval, got %q", evt.Text)
+	}
+}
+
 func TestHandleModelToolCallAllowsProjectWriteInWriteAskMode(t *testing.T) {
 	cfg := testConfig(t)
 	st, err := store.Open(t.TempDir())
