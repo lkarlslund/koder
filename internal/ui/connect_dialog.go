@@ -114,12 +114,6 @@ func (d *ConnectDialog) SetModels(models []string) {
 	}
 }
 
-func (d *ConnectDialog) SetContextWindow(tokens int) {
-	if tokens > 0 {
-		d.draft.ContextWindow = tokens
-	}
-}
-
 func (d ConnectDialog) Models() []string {
 	out := make([]string, len(d.models))
 	copy(out, d.models)

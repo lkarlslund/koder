@@ -163,9 +163,12 @@ type pickerModel struct {
 }
 
 type runPromptMsg struct {
-	session domain.Session
-	events  <-chan domain.Event
-	err     error
+	session        domain.Session
+	events         <-chan domain.Event
+	err            error
+	providerID     string
+	contextWindow  int
+	contextChecked bool
 }
 
 type queuedPromptMode int
@@ -286,6 +289,7 @@ type Model struct {
 	toolsDialog        *ui.ToolsDialog
 	debug              *debugsrv.Recorder
 	caps               *provider.CapabilityStore
+	runtimeCtxChecked  map[string]bool
 	activeOpCancel     context.CancelFunc
 	queuedPrompt       *queuedPrompt
 	pendingModelNote   string
@@ -335,25 +339,26 @@ func New(cfg config.Config, st *store.Store, a *agent.Engine, mode StartupMode, 
 	}
 
 	return Model{
-		cfg:              cfg,
-		store:            st,
-		agent:            a,
-		renderer:         renderer,
-		palette:          tuiTheme.Palette,
-		viewport:         vp,
-		composer:         composer,
-		showSidebar:      cfg.UI.ShowSidebar,
-		showReasoning:    cfg.UI.ShowReasoning,
-		showSystem:       cfg.UI.ShowSystem,
-		expandedToolRuns: make(map[string]bool),
-		parts:            make(map[int64][]domain.Part),
-		status:           "Ready",
-		workdir:          workdir,
-		startupMode:      mode,
-		mouseEnabled:     cfg.UI.Mouse,
-		debug:            debug,
-		caps:             provider.NewCapabilityStore(cfg.StateDir()),
-		attachmentFiles:  attachment.NewManager(cfg.StateDir()),
+		cfg:               cfg,
+		store:             st,
+		agent:             a,
+		renderer:          renderer,
+		palette:           tuiTheme.Palette,
+		viewport:          vp,
+		composer:          composer,
+		showSidebar:       cfg.UI.ShowSidebar,
+		showReasoning:     cfg.UI.ShowReasoning,
+		showSystem:        cfg.UI.ShowSystem,
+		expandedToolRuns:  make(map[string]bool),
+		parts:             make(map[int64][]domain.Part),
+		status:            "Ready",
+		workdir:           workdir,
+		startupMode:       mode,
+		mouseEnabled:      cfg.UI.Mouse,
+		debug:             debug,
+		caps:              provider.NewCapabilityStore(cfg.StateDir()),
+		runtimeCtxChecked: map[string]bool{},
+		attachmentFiles:   attachment.NewManager(cfg.StateDir()),
 	}, nil
 }
 
@@ -396,6 +401,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case runPromptMsg:
 		if msg.err != nil {
 			return m.finishOperationWithError(msg.err)
+		}
+		if msg.contextChecked {
+			if m.runtimeCtxChecked == nil {
+				m.runtimeCtxChecked = map[string]bool{}
+			}
+			m.runtimeCtxChecked[msg.providerID] = true
+		}
+		if msg.providerID != "" && msg.contextWindow > 0 {
+			providerCfg, ok := m.cfg.Provider(msg.providerID)
+			if ok && providerCfg.ContextWindow != msg.contextWindow {
+				providerCfg.ContextWindow = msg.contextWindow
+				m.cfg.Providers[msg.providerID] = providerCfg
+			}
 		}
 		m.currentSession = msg.session
 		m.pendingModelNote = ""
@@ -489,20 +507,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			modelIDs = append(modelIDs, item.ID)
 		}
 		m.connectDialog.SetModels(modelIDs)
-		m.connectDialog.SetContextWindow(msg.result.ContextWindow)
 		if len(modelIDs) == 0 {
-			if msg.result.ContextWindow > 0 {
-				m.connectDialog.SetStatusSuccess(fmt.Sprintf("Connected, but no models were returned (context %d)", msg.result.ContextWindow))
-			} else {
-				m.connectDialog.SetStatusSuccess("Connected, but no models were returned")
-			}
+			m.connectDialog.SetStatusSuccess("Connected, but no models were returned")
 			m.status = "Provider connected"
 		} else {
-			if msg.result.ContextWindow > 0 {
-				m.connectDialog.SetStatusSuccess(fmt.Sprintf("Connected: discovered %d models, context %d", len(modelIDs), msg.result.ContextWindow))
-			} else {
-				m.connectDialog.SetStatusSuccess(fmt.Sprintf("Connected: discovered %d models", len(modelIDs)))
-			}
+			m.connectDialog.SetStatusSuccess(fmt.Sprintf("Connected: discovered %d models", len(modelIDs)))
 			m.status = fmt.Sprintf("Provider connected: %d models", len(modelIDs))
 		}
 		return m, m.syncWindowTitleCmd()
@@ -1708,8 +1717,19 @@ func (m Model) promptCmd(ctx context.Context, prompt string, drafts []attachment
 				return runPromptMsg{err: err}
 			}
 		}
+		providerID, contextWindow, contextChecked, err := m.ensureRuntimeContextWindow(ctx, session)
+		if err != nil {
+			return runPromptMsg{err: err}
+		}
 		events, err := m.agent.RunPromptWithAttachments(ctx, session, prompt, drafts, m.pendingModelNote)
-		return runPromptMsg{session: session, events: events, err: err}
+		return runPromptMsg{
+			session:        session,
+			events:         events,
+			err:            err,
+			providerID:     providerID,
+			contextWindow:  contextWindow,
+			contextChecked: contextChecked,
+		}
 	}
 }
 
@@ -1719,8 +1739,19 @@ func (m Model) continueCmd(ctx context.Context) tea.Cmd {
 		if session.ID == 0 {
 			return runPromptMsg{err: fmt.Errorf("no saved session to continue")}
 		}
+		providerID, contextWindow, contextChecked, err := m.ensureRuntimeContextWindow(ctx, session)
+		if err != nil {
+			return runPromptMsg{err: err}
+		}
 		events, err := m.agent.RunContinue(ctx, session, m.pendingModelNote)
-		return runPromptMsg{session: session, events: events, err: err}
+		return runPromptMsg{
+			session:        session,
+			events:         events,
+			err:            err,
+			providerID:     providerID,
+			contextWindow:  contextWindow,
+			contextChecked: contextChecked,
+		}
 	}
 }
 
@@ -2278,6 +2309,42 @@ func (m *Model) dequeuePromptCmd() tea.Cmd {
 	}
 	m.appendLocalUserPrompt(item.Text, item.Attachments)
 	return tea.Batch(m.promptCmd(m.beginActiveOperation(), item.Text, item.Attachments), m.spinnerCmdIfNeeded())
+}
+
+func (m Model) ensureRuntimeContextWindow(ctx context.Context, session domain.Session) (string, int, bool, error) {
+	providerID := strings.TrimSpace(session.ProviderID)
+	if providerID != "llamacpp" {
+		return "", 0, false, nil
+	}
+	if m.runtimeCtxChecked != nil && m.runtimeCtxChecked[providerID] {
+		if providerCfg, ok := m.cfg.Provider(providerID); ok {
+			return providerID, providerCfg.ContextWindow, false, nil
+		}
+		return providerID, 0, false, nil
+	}
+	providerCfg, ok := m.cfg.Provider(providerID)
+	if !ok {
+		return "", 0, false, fmt.Errorf("provider %q not configured", providerID)
+	}
+	modelID := strings.TrimSpace(session.ModelID)
+	if modelID == "" {
+		modelID = strings.TrimSpace(providerCfg.DefaultModel)
+	}
+	contextWindow, err := provider.DetectContextWindow(ctx, providerID, providerCfg, modelID, m.debug)
+	if err != nil {
+		return providerID, 0, false, err
+	}
+	if contextWindow > 0 && providerCfg.ContextWindow != contextWindow {
+		providerCfg.ContextWindow = contextWindow
+		m.cfg.Providers[providerID] = providerCfg
+		if err := m.cfg.Save(); err != nil {
+			return providerID, 0, false, err
+		}
+		if m.agent != nil {
+			m.agent.UpdateConfig(m.cfg)
+		}
+	}
+	return providerID, contextWindow, true, nil
 }
 
 func (m *Model) resetComposerHistory() {
@@ -3928,7 +3995,7 @@ func (m *Model) saveProviderDraft(draft provider.ConnectDraft) error {
 		next.Stream = existing.Stream
 		next.Disabled = false
 	} else {
-		if next.ContextWindow == 0 {
+		if next.ContextWindow == 0 && draft.ProviderID != "llamacpp" {
 			next.ContextWindow = 32768
 		}
 		next.AutoCompactAt = 85

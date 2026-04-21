@@ -69,6 +69,30 @@ func TestPropsUsesModelQueryAndParsesContextWindow(t *testing.T) {
 	}
 }
 
+func TestDetectContextWindowUsesLlamaCPPProps(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/props" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		if got := r.URL.Query().Get("model"); got != "model-a" {
+			t.Fatalf("unexpected model query: %q", got)
+		}
+		_, _ = w.Write([]byte(`{"default_generation_settings":{"n_ctx":16384}}`))
+	}))
+	defer server.Close()
+
+	got, err := DetectContextWindow(context.Background(), "llamacpp", config.Provider{
+		BaseURL: server.URL + "/v1",
+		Timeout: time.Second,
+	}, "model-a", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != 16384 {
+		t.Fatalf("unexpected detected context window: %d", got)
+	}
+}
+
 func TestCompleteChatReasoning(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"hello","reasoning_content":"trace"}}],"usage":{"prompt_tokens":1,"completion_tokens":2,"total_tokens":3}}`))

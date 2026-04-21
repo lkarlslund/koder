@@ -260,7 +260,7 @@ func (c *Config) applyDefaults() {
 		if provider.Timeout == 0 {
 			provider.Timeout = fallbackProvider.Timeout
 		}
-		if provider.ContextWindow == 0 {
+		if provider.ContextWindow == 0 && id != "llamacpp" {
 			provider.ContextWindow = fallbackProvider.ContextWindow
 		}
 		if provider.AutoCompactAt == 0 {

@@ -244,6 +244,21 @@ func (c *Client) Props(ctx context.Context, modelID string) (propsResponse, erro
 	return c.propsRequest(ctx, "/props")
 }
 
+func DetectContextWindow(ctx context.Context, providerID string, cfg config.Provider, modelID string, recorder *debugsrv.Recorder) (int, error) {
+	if strings.TrimSpace(providerID) != "llamacpp" {
+		return cfg.ContextWindow, nil
+	}
+	client, err := New(providerID, cfg, recorder)
+	if err != nil {
+		return 0, err
+	}
+	props, err := client.Props(ctx, modelID)
+	if err != nil {
+		return 0, err
+	}
+	return props.DefaultGenerationSettings.NCtx, nil
+}
+
 func (c *Client) propsRequest(ctx context.Context, path string) (propsResponse, error) {
 	req, err := c.newRequest(ctx, http.MethodGet, path, nil)
 	if err != nil {

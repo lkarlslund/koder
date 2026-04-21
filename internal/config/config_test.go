@@ -104,3 +104,18 @@ func TestApplyDefaultsFillsMissingMaxToolLoopSteps(t *testing.T) {
 		t.Fatalf("expected default max tool loop steps applied, got %d", cfg.MaxToolLoopSteps)
 	}
 }
+
+func TestApplyDefaultsKeepsLlamaCPPContextWindowUnset(t *testing.T) {
+	cfg := Default()
+	cfg.Providers["llamacpp"] = Provider{
+		BaseURL:      "http://127.0.0.1:8888/v1",
+		AuthMethod:   "local_endpoint",
+		DefaultModel: "coder.gguf",
+	}
+
+	cfg.applyDefaults()
+
+	if got := cfg.Providers["llamacpp"].ContextWindow; got != 0 {
+		t.Fatalf("expected llama.cpp context window to stay unset, got %d", got)
+	}
+}
