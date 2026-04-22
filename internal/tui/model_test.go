@@ -3726,3 +3726,79 @@ func TestRefreshViewportUsesBlankLineBetweenAssistantTextAndToolRunWithHalfBlock
 		t.Fatalf("expected blank spacer row between assistant text and tool run, got %q", got)
 	}
 }
+
+func TestRefreshViewportUsesBlankLineBetweenConsecutiveToolRunsWithHalfBlocks(t *testing.T) {
+	cfg := testConfig(t)
+	m := Model{
+		cfg: cfg,
+		messages: []domain.Message{
+			{ID: 1, Role: domain.MessageRoleAssistant},
+			{ID: 2, Role: domain.MessageRoleTool},
+			{ID: 3, Role: domain.MessageRoleAssistant},
+			{ID: 4, Role: domain.MessageRoleTool},
+		},
+		parts: map[int64][]domain.Part{
+			1: {{
+				Kind: domain.PartKindToolCall,
+				MetaJSON: mustMarshalMeta(t, map[string]string{
+					"tool":         string(domain.ToolKindRead),
+					"path":         "README.md",
+					"preview":      "README.md",
+					"tool_call_id": "call_1",
+				}),
+			}},
+			2: {{
+				Kind: domain.PartKindToolOutput,
+				Body: "first line",
+				MetaJSON: mustMarshalMeta(t, map[string]string{
+					"tool":         string(domain.ToolKindRead),
+					"path":         "README.md",
+					"preview":      "README.md",
+					"tool_call_id": "call_1",
+				}),
+			}},
+			3: {{
+				Kind: domain.PartKindToolCall,
+				MetaJSON: mustMarshalMeta(t, map[string]string{
+					"tool":         string(domain.ToolKindRead),
+					"path":         "go.mod",
+					"preview":      "go.mod",
+					"tool_call_id": "call_2",
+				}),
+			}},
+			4: {{
+				Kind: domain.PartKindToolOutput,
+				Body: "second line",
+				MetaJSON: mustMarshalMeta(t, map[string]string{
+					"tool":         string(domain.ToolKindRead),
+					"path":         "go.mod",
+					"preview":      "go.mod",
+					"tool_call_id": "call_2",
+				}),
+			}},
+		},
+		viewport: viewport.New(60, 12),
+	}
+
+	m.refreshViewport()
+	got := m.viewport.View()
+	lines := strings.Split(got, "\n")
+	firstToolLine, secondToolLine := -1, -1
+	for i, line := range lines {
+		switch {
+		case firstToolLine == -1 && strings.Contains(line, "README.md"):
+			firstToolLine = i
+		case strings.Contains(line, "go.mod"):
+			secondToolLine = i
+		}
+	}
+	if firstToolLine == -1 || secondToolLine == -1 {
+		t.Fatalf("expected both grouped tool runs to render, got %q", got)
+	}
+	if secondToolLine <= firstToolLine+1 {
+		t.Fatalf("expected second tool run to appear after a blank spacer row, got %q", got)
+	}
+	if strings.TrimSpace(lines[secondToolLine-1]) != "" {
+		t.Fatalf("expected blank spacer row between consecutive tool runs, got %q", got)
+	}
+}

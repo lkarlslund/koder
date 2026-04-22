@@ -1532,7 +1532,8 @@ func (m *Model) transcriptSeparator(prev, next transcriptBlock) string {
 	if !m.halfBlocksEnabled() {
 		return "\n\n"
 	}
-	if prev.Kind == transcriptBlockMessage && next.Kind == transcriptBlockToolRun {
+	if (prev.Kind == transcriptBlockMessage && next.Kind == transcriptBlockToolRun) ||
+		(prev.Kind == transcriptBlockToolRun && next.Kind == transcriptBlockToolRun) {
 		return "\n\n"
 	}
 	return "\n"
