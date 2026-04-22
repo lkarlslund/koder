@@ -44,4 +44,7 @@ func TestDialogExpandsToFitButtonRowOnSingleLine(t *testing.T) {
 	if okIndex < 0 || cancelIndex < 0 || cancelIndex <= okIndex {
 		t.Fatalf("expected right-aligned OK/Cancel row, got %q", buttonLine)
 	}
+	if okIndex == 0 {
+		t.Fatalf("expected button row to include left padding for right alignment, got %q", buttonLine)
+	}
 }
