@@ -2644,6 +2644,28 @@ func TestRenderFooterOmitsHotkeyHints(t *testing.T) {
 	}
 }
 
+func TestRenderFooterShowsQueuedPromptPreviewAboveComposer(t *testing.T) {
+	composer := textarea.New()
+	composer.Placeholder = "Ask koder or type / for commands"
+	composer.SetHeight(composerInputHeight)
+	composer.SetWidth(38)
+	composer.Focus()
+
+	m := Model{
+		width:        40,
+		composer:     composer,
+		queuedPrompt: &queuedPrompt{Text: "queued submission", Mode: queuedPromptModeNormal},
+	}
+
+	got := ansi.Strip(m.renderFooter())
+	if !strings.Contains(got, "Queued follow-up inputs") || !strings.Contains(got, "queued submission") {
+		t.Fatalf("expected queued prompt preview above composer, got %q", got)
+	}
+	if strings.Index(got, "queued submission") > strings.Index(got, "Ask koder or type / for commands") {
+		t.Fatalf("expected queued preview to render above composer, got %q", got)
+	}
+}
+
 func TestViewBottomAlignsFooter(t *testing.T) {
 	composer := textarea.New()
 	composer.Placeholder = "Ask koder or type / for commands"

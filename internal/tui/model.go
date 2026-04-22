@@ -1266,6 +1266,9 @@ func (m *Model) renderFooter() string {
 	if attachments := m.renderDraftAttachments(); attachments != "" {
 		parts = append(parts, attachments)
 	}
+	if preview := m.renderQueuedPromptPreview(); preview != "" {
+		parts = append(parts, preview)
+	}
 	parts = append(parts, "")
 	parts = append(parts, m.renderComposer())
 	return ui.Footer{Parts: parts}.View()
@@ -1301,6 +1304,24 @@ func (m *Model) renderDraftAttachments() string {
 		items = append(items, ui.AttachmentItem{Label: m.attachmentLabel(draft.Metadata)})
 	}
 	return ui.AttachmentList{Items: items, Width: m.composerWidth()}.View(m.palette)
+}
+
+func (m *Model) renderQueuedPromptPreview() string {
+	if m.queuedPrompt == nil {
+		return ""
+	}
+	preview := ui.PendingInputPreview{
+		Width: m.composerWidth(),
+	}
+	switch m.queuedPrompt.Mode {
+	case queuedPromptModeSteer:
+		preview.PendingSteers = []string{m.queuedPrompt.Text}
+	case queuedPromptModeContinue:
+		preview.QueuedMessages = []string{"Continue"}
+	default:
+		preview.QueuedMessages = []string{m.queuedPrompt.Text}
+	}
+	return preview.View(m.palette)
 }
 
 func (m *Model) composerWidth() int {
