@@ -65,15 +65,14 @@ func (m UserMessage) View() string {
 	}
 	bar := m.PromptGlyph + " "
 	contentWidth := maxInt(1, width-lipgloss.Width(bar))
-	innerWidth := maxInt(1, contentWidth-2)
+	innerWidth := contentWidth
 	barStyle := lipgloss.NewStyle().
 		Background(m.Palette.UserTextBackground).
 		Foreground(m.Palette.UserAccentBar)
 	contentStyle := lipgloss.NewStyle().
 		Background(m.Palette.UserTextBackground).
 		Foreground(m.Palette.UserTextForeground).
-		Width(contentWidth).
-		Padding(0, 1)
+		Width(contentWidth)
 	timestampStyle := contentStyle.Foreground(m.Palette.UserTimestampForeground)
 
 	lines := []string{}
