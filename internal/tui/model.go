@@ -1452,13 +1452,13 @@ func (m *Model) refreshViewportAt(offset int) {
 	}
 	var blocks []string
 	row := 0
-	separator := "\n\n"
-	if m.halfBlocksEnabled() {
-		separator = "\n"
-	}
-	separatorHeight := renderedSeparatorHeight(separator)
 	transcriptBlocks := m.transcriptBlocks()
 	for i, block := range transcriptBlocks {
+		if i > 0 {
+			sep := m.transcriptSeparator(transcriptBlocks[i-1], block)
+			blocks = append(blocks, sep)
+			row += renderedSeparatorHeight(sep)
+		}
 		rendered := m.renderTranscriptBlock(block)
 		blocks = append(blocks, rendered)
 		if block.Kind == transcriptBlockToolRun && block.ToolRun.Expandable(m.viewport.Width) {
@@ -1469,11 +1469,11 @@ func (m *Model) refreshViewportAt(offset int) {
 			})
 		}
 		row += lipgloss.Height(rendered)
-		if i < len(transcriptBlocks)-1 {
-			row += separatorHeight
-		}
 	}
 	if indicator := m.renderTranscriptActivity(); indicator != "" {
+		if len(blocks) > 0 {
+			blocks = append(blocks, m.defaultTranscriptSeparator())
+		}
 		blocks = append(blocks, indicator)
 	}
 	if len(blocks) == 0 {
@@ -1483,12 +1483,29 @@ func (m *Model) refreshViewportAt(offset int) {
 			blocks = append(blocks, "Start by asking a question or type / for commands.")
 		}
 	}
-	m.viewport.SetContent(strings.Join(blocks, separator))
+	m.viewport.SetContent(strings.Join(blocks, ""))
 	if offset >= 0 {
 		m.viewport.SetYOffset(offset)
 		return
 	}
 	m.viewport.GotoBottom()
+}
+
+func (m *Model) defaultTranscriptSeparator() string {
+	if m.halfBlocksEnabled() {
+		return "\n"
+	}
+	return "\n\n"
+}
+
+func (m *Model) transcriptSeparator(prev, next transcriptBlock) string {
+	if !m.halfBlocksEnabled() {
+		return "\n\n"
+	}
+	if prev.Kind == transcriptBlockMessage && next.Kind == transcriptBlockToolRun {
+		return "\n\n"
+	}
+	return "\n"
 }
 
 func renderedSeparatorHeight(separator string) int {

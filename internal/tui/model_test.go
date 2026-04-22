@@ -3528,3 +3528,51 @@ func TestRefreshViewportUsesSingleNewlineBetweenBlocksWithHalfBlocks(t *testing.
 		t.Fatalf("expected single newline between user bubble and assistant reply, got %q", got)
 	}
 }
+
+func TestRefreshViewportUsesBlankLineBetweenAssistantTextAndToolRunWithHalfBlocks(t *testing.T) {
+	cfg := testConfig(t)
+	m := Model{
+		cfg: cfg,
+		messages: []domain.Message{
+			{ID: 1, Role: domain.MessageRoleAssistant},
+			{ID: 2, Role: domain.MessageRoleTool},
+		},
+		parts: map[int64][]domain.Part{
+			1: {{Kind: domain.PartKindText, Body: "plain assistant text"}},
+			2: {{
+				Kind: domain.PartKindToolOutput,
+				Body: "first line\nsecond line",
+				MetaJSON: mustMarshalMeta(t, map[string]string{
+					"tool":         string(domain.ToolKindRead),
+					"path":         "README.md",
+					"preview":      "README.md",
+					"tool_call_id": "call_1",
+				}),
+			}},
+		},
+		viewport: viewport.New(60, 12),
+	}
+
+	m.refreshViewport()
+	got := m.viewport.View()
+	if !strings.Contains(got, "Read file") {
+		t.Fatalf("expected grouped tool run card to render, got %q", got)
+	}
+	lines := strings.Split(got, "\n")
+	var toolLine int = -1
+	for i, line := range lines {
+		if strings.Contains(line, "Read file") {
+			toolLine = i
+			break
+		}
+	}
+	if toolLine < 2 {
+		t.Fatalf("expected tool run to appear after assistant text and a blank spacer row, got %q", got)
+	}
+	if !strings.Contains(lines[toolLine-2], "plain assistant text") {
+		t.Fatalf("expected assistant text two rows before tool run, got %q", got)
+	}
+	if strings.TrimSpace(lines[toolLine-1]) != "" {
+		t.Fatalf("expected blank spacer row between assistant text and tool run, got %q", got)
+	}
+}
