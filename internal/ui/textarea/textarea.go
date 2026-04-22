@@ -220,6 +220,10 @@ func (m Model) CursorView(char string) string {
 	return m.renderCursorChar(char)
 }
 
+func (m Model) CursorVisible() bool {
+	return m.focus && (!m.BlinkEnabled || m.blink)
+}
+
 type visibleLine struct {
 	before string
 	cursor string

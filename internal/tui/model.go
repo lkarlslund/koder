@@ -1252,7 +1252,11 @@ func (m *Model) renderComposer() string {
 	cursorView := " "
 	if placeholder := ansi.Truncate(m.composer.Placeholder, max(0, m.composerWidth()-ansi.StringWidth(m.composer.Prompt)), ""); placeholder != "" {
 		runes := []rune(placeholder)
-		cursorView = m.composer.CursorView(string(runes[0]))
+		if m.composer.CursorVisible() {
+			cursorView = m.composer.CursorView(string(runes[0]))
+		} else {
+			cursorView = muted.Render(string(runes[0]))
+		}
 	} else {
 		cursorView = m.composer.CursorView(" ")
 	}

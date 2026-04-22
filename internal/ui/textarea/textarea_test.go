@@ -190,6 +190,23 @@ func TestCursorViewHiddenWhenBlinkOffFrame(t *testing.T) {
 	}
 }
 
+func TestCursorVisibleReflectsBlinkState(t *testing.T) {
+	m := newTestModel()
+	if !m.CursorVisible() {
+		t.Fatal("expected focused cursor to be visible by default")
+	}
+
+	m.blink = false
+	if m.CursorVisible() {
+		t.Fatal("expected blink-off frame to hide the cursor when blinking is enabled")
+	}
+
+	m.BlinkEnabled = false
+	if !m.CursorVisible() {
+		t.Fatal("expected cursor to remain visible when blinking is disabled")
+	}
+}
+
 func TestBlurStopsBlinkAndInput(t *testing.T) {
 	m := newTestModel()
 	m.SetValue("abc")
