@@ -2935,6 +2935,22 @@ func TestRenderMessagePartsShowsNonUsageSystemNoticeWhenEnabled(t *testing.T) {
 	}
 }
 
+func TestRenderMessagePartsShowsAssistantNarrationWithoutSystemPrefix(t *testing.T) {
+	m := Model{}
+
+	got := m.renderMessageParts([]domain.Part{
+		{Kind: domain.PartKindText, Body: "There are two main functions. Let me check and remove the duplicate:"},
+		{Kind: domain.PartKindToolCall, Body: `{"path":"main.go","tool":"read","tool_call_id":"call_1"}`, MetaJSON: `{"path":"main.go","tool":"read","tool_call_id":"call_1"}`},
+	})
+
+	if !strings.Contains(got, "There are two main functions") {
+		t.Fatalf("expected narration text to remain visible, got %q", got)
+	}
+	if strings.Contains(got, "System") {
+		t.Fatalf("expected narration text not to render as a system block, got %q", got)
+	}
+}
+
 func TestRenderMessagePartsFormatsCompactionMarkdown(t *testing.T) {
 	cfg := testConfig(t)
 	m, err := New(cfg, nil, nil, StartupModeNew, nil)

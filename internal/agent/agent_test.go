@@ -135,6 +135,101 @@ func TestStringifyPartsExcludesSystemNotice(t *testing.T) {
 	}
 }
 
+func TestPersistAssistantToolCallsStoresNarrationAsText(t *testing.T) {
+	cfg := testConfig(t)
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	engine := New(cfg, st, tools.NewRegistry(t.TempDir()), nil, t.TempDir())
+	session, err := st.CreateSession(context.Background(), "test", cfg.DefaultProvider, "test-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	call := tools.Request{
+		Tool:       domain.ToolKindRead,
+		ToolCallID: "call_1",
+		Args:       map[string]string{"path": "README.md"},
+	}
+	if err := engine.persistAssistantToolCalls(context.Background(), session.ID, []tools.Request{call}, "Let me inspect that file first.", domain.Usage{TotalTokens: 10}); err != nil {
+		t.Fatal(err)
+	}
+
+	messages, parts, err := st.PartsForSession(context.Background(), session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 1 {
+		t.Fatalf("expected one assistant message, got %d", len(messages))
+	}
+	got := parts[messages[0].ID]
+	if len(got) < 3 {
+		t.Fatalf("expected text, tool call, and usage parts, got %#v", got)
+	}
+	if got[0].Kind != domain.PartKindToolCall {
+		t.Fatalf("expected first part to be tool call, got %#v", got[0])
+	}
+	if got[1].Kind != domain.PartKindText || !strings.Contains(got[1].Body, "inspect that file") {
+		t.Fatalf("expected narration to be stored as text, got %#v", got[1])
+	}
+	if got[2].Kind != domain.PartKindSystemNotice || got[2].Body != "usage" {
+		t.Fatalf("expected usage to remain a system notice, got %#v", got[2])
+	}
+}
+
+func TestBuildConversationIncludesAssistantNarrationAlongsideToolCalls(t *testing.T) {
+	cfg := testConfig(t)
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	engine := New(cfg, st, tools.NewRegistry(t.TempDir()), nil, t.TempDir())
+	session, err := st.CreateSession(context.Background(), "test", cfg.DefaultProvider, "test-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	assistantMsg, err := st.AddMessage(context.Background(), session.ID, domain.MessageRoleAssistant, "tool:read")
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := tools.Request{
+		Tool:       domain.ToolKindRead,
+		ToolCallID: "call_1",
+		Args:       map[string]string{"path": "README.md"},
+	}
+	meta, _ := json.Marshal(req)
+	if _, err := st.AddPart(context.Background(), assistantMsg.ID, domain.PartKindToolCall, req.ContextString(), string(meta)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.AddPart(context.Background(), assistantMsg.ID, domain.PartKindText, "Let me inspect that file first.", ""); err != nil {
+		t.Fatal(err)
+	}
+
+	conversation, err := engine.buildConversation(context.Background(), session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(conversation) == 0 {
+		t.Fatal("expected conversation entries")
+	}
+	got := conversation[len(conversation)-1]
+	if got.Role != domain.MessageRoleAssistant {
+		t.Fatalf("expected assistant conversation entry, got %#v", got)
+	}
+	if !strings.Contains(got.Content, "inspect that file") {
+		t.Fatalf("expected assistant narration in structured assistant message, got %#v", got)
+	}
+	if len(got.ToolCalls) != 1 || got.ToolCalls[0].ID != "call_1" {
+		t.Fatalf("expected structured tool call to remain attached, got %#v", got)
+	}
+}
+
 func TestBuildConversationResetsAtCompactionBoundary(t *testing.T) {
 	cfg := testConfig(t)
 	st, err := store.Open(t.TempDir())

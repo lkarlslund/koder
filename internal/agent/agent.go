@@ -431,7 +431,7 @@ func (e *Engine) continueModelTurn(ctx context.Context, session domain.Session, 
 				return err
 			}
 			if strings.TrimSpace(plain) != "" {
-				if _, err := e.store.AddPart(ctx, assistantMsg.ID, domain.PartKindSystemNotice, strings.TrimSpace(plain), ""); err != nil {
+				if _, err := e.store.AddPart(ctx, assistantMsg.ID, domain.PartKindText, strings.TrimSpace(plain), ""); err != nil {
 					return err
 				}
 			}
@@ -1627,7 +1627,7 @@ func (e *Engine) persistAssistantToolCalls(ctx context.Context, sessionID int64,
 		}
 	}
 	if text != "" {
-		if _, err := e.store.AddPart(ctx, assistantMsg.ID, domain.PartKindSystemNotice, text, ""); err != nil {
+		if _, err := e.store.AddPart(ctx, assistantMsg.ID, domain.PartKindText, text, ""); err != nil {
 			return err
 		}
 	}
