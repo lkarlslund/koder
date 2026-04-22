@@ -1251,7 +1251,8 @@ func (m *Model) renderComposer() string {
 		Foreground(m.palette.ComposerMutedText)
 	cursorView := " "
 	if placeholder := ansi.Truncate(m.composer.Placeholder, max(0, m.composerWidth()-ansi.StringWidth(m.composer.Prompt)), ""); placeholder != "" {
-		cursorView = m.composer.CursorView(" ")
+		runes := []rune(placeholder)
+		cursorView = m.composer.CursorView(string(runes[0]))
 	} else {
 		cursorView = m.composer.CursorView(" ")
 	}
