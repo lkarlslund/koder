@@ -1272,17 +1272,17 @@ func (m *Model) renderFooter() string {
 
 func (m *Model) renderFooterElement() ui.Element {
 	elements := []ui.Element{}
-	if prompt := m.renderApprovalPrompt(); prompt != "" {
-		elements = append(elements, ui.Static{Content: prompt})
+	if prompt := m.renderApprovalPromptElement(); prompt != nil {
+		elements = append(elements, prompt)
 	}
 	if menu := m.renderComposerHistoryMenu(); menu != "" {
 		elements = append(elements, ui.Static{Content: menu})
-	} else if menu := m.renderSlashMenu(); menu != "" {
-		elements = append(elements, ui.Static{Content: menu})
-	} else if menu := m.renderMentionMenu(); menu != "" {
-		elements = append(elements, ui.Static{Content: menu})
-	} else if menu := m.renderSkillMenu(); menu != "" {
-		elements = append(elements, ui.Static{Content: menu})
+	} else if menu := m.renderSlashMenuElement(); menu != nil {
+		elements = append(elements, menu)
+	} else if menu := m.renderMentionMenuElement(); menu != nil {
+		elements = append(elements, menu)
+	} else if menu := m.renderSkillMenuElement(); menu != nil {
+		elements = append(elements, menu)
 	}
 	if attachments := m.renderDraftAttachmentsElement(); attachments != nil {
 		elements = append(elements, attachments)
@@ -3478,8 +3478,15 @@ func (m *Model) acceptMentionSelection() {
 }
 
 func (m *Model) renderSlashMenu() string {
+	if element := m.renderSlashMenuElement(); element != nil {
+		return ui.RenderElement(&ui.Context{Palette: m.palette}, element, 0, 0)
+	}
+	return ""
+}
+
+func (m *Model) renderSlashMenuElement() ui.Element {
 	if len(m.slashMatches) == 0 {
-		return ""
+		return nil
 	}
 	start := 0
 	if m.slashIndex >= 6 {
@@ -3492,12 +3499,19 @@ func (m *Model) renderSlashMenu() string {
 		items = append(items, ui.MenuItem{Title: item.Name, Description: item.Description})
 	}
 	selected := m.slashIndex - start
-	return ui.SlashMenu{Title: "Commands", Items: items, Selected: selected}.View()
+	return ui.SlashMenu{Title: "Commands", Items: items, Selected: selected}
 }
 
 func (m *Model) renderSkillMenu() string {
+	if element := m.renderSkillMenuElement(); element != nil {
+		return ui.RenderElement(&ui.Context{Palette: m.palette}, element, 0, 0)
+	}
+	return ""
+}
+
+func (m *Model) renderSkillMenuElement() ui.Element {
 	if len(m.skillMatches) == 0 {
-		return ""
+		return nil
 	}
 	start := 0
 	if m.skillIndex >= 6 {
@@ -3513,12 +3527,19 @@ func (m *Model) renderSkillMenu() string {
 		})
 	}
 	selected := m.skillIndex - start
-	return ui.SlashMenu{Title: "Skills", Items: items, Selected: selected}.View()
+	return ui.SlashMenu{Title: "Skills", Items: items, Selected: selected}
 }
 
 func (m *Model) renderMentionMenu() string {
+	if element := m.renderMentionMenuElement(); element != nil {
+		return ui.RenderElement(&ui.Context{Palette: m.palette}, element, 0, 0)
+	}
+	return ""
+}
+
+func (m *Model) renderMentionMenuElement() ui.Element {
 	if len(m.mentionMatches) == 0 {
-		return ""
+		return nil
 	}
 	start := 0
 	if m.mentionIndex >= 6 {
@@ -3534,7 +3555,7 @@ func (m *Model) renderMentionMenu() string {
 		})
 	}
 	selected := m.mentionIndex - start
-	return ui.SlashMenu{Title: "References", Items: items, Selected: selected}.View()
+	return ui.SlashMenu{Title: "References", Items: items, Selected: selected}
 }
 
 func (m *Model) renderComposerHistoryMenu() string {
@@ -3856,8 +3877,15 @@ func (m *Model) activateApprovalButton(index int) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) renderApprovalPrompt() string {
+	if element := m.renderApprovalPromptElement(); element != nil {
+		return ui.RenderElement(&ui.Context{Palette: m.palette}, element, 0, 0)
+	}
+	return ""
+}
+
+func (m *Model) renderApprovalPromptElement() ui.Element {
 	if !m.hasApprovalPrompt() {
-		return ""
+		return nil
 	}
 	m.ensureApprovalButtons()
 	return ui.ToolRunDock{
@@ -3865,7 +3893,7 @@ func (m *Model) renderApprovalPrompt() string {
 		Run:     m.approvalToolRun(m.approvals[0]),
 		Buttons: m.approvalButtonRow(),
 		Hints:   "enter select  tab switch  p permissions  y approve  n deny",
-	}.View()
+	}
 }
 
 func (m *Model) ensureApprovalButtons() {

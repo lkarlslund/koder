@@ -55,6 +55,14 @@ func (m SlashMenu) View() string {
 	return lipgloss.NewStyle().Border(lipgloss.NormalBorder()).Padding(0, 1).Render(strings.Join(lines, "\n"))
 }
 
+func (m SlashMenu) Measure(_ *Context, constraints Constraints) Size {
+	return constraints.Clamp(SurfaceFromString(m.View()).Size())
+}
+
+func (m SlashMenu) Render(_ *Context, bounds Rect) Surface {
+	return SurfaceFromString(m.View()).normalize(bounds.W, bounds.H)
+}
+
 type ApprovalPrompt struct {
 	Palette      theme.Palette
 	Title        string
@@ -88,6 +96,14 @@ func (p ApprovalPrompt) View() string {
 			lipgloss.JoinHorizontal(lipgloss.Left, approve.Render(p.ApproveLabel), "  ", deny.Render(p.DenyLabel)),
 			p.Hints,
 		}, "\n"))
+}
+
+func (p ApprovalPrompt) Measure(_ *Context, constraints Constraints) Size {
+	return constraints.Clamp(SurfaceFromString(p.View()).Size())
+}
+
+func (p ApprovalPrompt) Render(_ *Context, bounds Rect) Surface {
+	return SurfaceFromString(p.View()).normalize(bounds.W, bounds.H)
 }
 
 type MenuPickerDialog struct {
@@ -129,4 +145,12 @@ func (d MenuPickerDialog) View() string {
 		Footer: "Enter applies the highlighted row. Esc cancels.",
 		Width:  80,
 	}.View(d.Palette)
+}
+
+func (d MenuPickerDialog) Measure(_ *Context, constraints Constraints) Size {
+	return constraints.Clamp(SurfaceFromString(d.View()).Size())
+}
+
+func (d MenuPickerDialog) Render(_ *Context, bounds Rect) Surface {
+	return SurfaceFromString(d.View()).normalize(bounds.W, bounds.H)
 }
