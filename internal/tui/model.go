@@ -1251,9 +1251,9 @@ func (m *Model) renderComposer() string {
 		Foreground(m.palette.ComposerMutedText)
 	cursorView := " "
 	if placeholder := ansi.Truncate(m.composer.Placeholder, max(0, m.composerWidth()-ansi.StringWidth(m.composer.Prompt)), ""); placeholder != "" {
-		cursorView = muted.Render(" ")
+		cursorView = m.composer.CursorView(" ")
 	} else {
-		cursorView = muted.Render(" ")
+		cursorView = m.composer.CursorView(" ")
 	}
 	return ui.RenderComposer(ui.ComposerProps{
 		Palette:          m.palette,

@@ -182,6 +182,14 @@ func TestBlinkCanBeDisabled(t *testing.T) {
 	}
 }
 
+func TestCursorViewHiddenWhenBlinkOffFrame(t *testing.T) {
+	m := newTestModel()
+	m.blink = false
+	if got := m.CursorView(" "); got != " " {
+		t.Fatalf("expected hidden blink frame to render plain space, got %q", got)
+	}
+}
+
 func TestBlurStopsBlinkAndInput(t *testing.T) {
 	m := newTestModel()
 	m.SetValue("abc")
@@ -218,7 +226,7 @@ func newTestModel() Model {
 	m := New()
 	m.Prompt = "> "
 	m.SetWidth(20)
-	m.Cursor.TextStyle = lipgloss.NewStyle().Reverse(true)
+	m.Cursor.TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("0")).Background(lipgloss.Color("15"))
 	return m
 }
 

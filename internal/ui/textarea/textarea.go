@@ -206,8 +206,18 @@ func (m Model) View() string {
 	if !m.focus || (!m.blink && m.BlinkEnabled) {
 		return prompt + style.Text.Render(line.plain)
 	}
-	text := line.before + m.Cursor.TextStyle.Render(line.cursor) + line.after
+	text := line.before + m.renderCursorChar(line.cursor) + line.after
 	return prompt + style.Text.Render(text)
+}
+
+func (m Model) CursorView(char string) string {
+	if char == "" {
+		char = " "
+	}
+	if !m.focus || (!m.blink && m.BlinkEnabled) {
+		return char
+	}
+	return m.renderCursorChar(char)
 }
 
 type visibleLine struct {
@@ -304,4 +314,11 @@ func max(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func (m Model) renderCursorChar(char string) string {
+	if char == "" {
+		char = " "
+	}
+	return m.Cursor.TextStyle.Render(char)
 }

@@ -20,3 +20,15 @@ func TestRenderComposerPlaceholderLineShowsCursorAndFirstPlaceholderCharacter(t 
 		t.Fatalf("expected cursor and full placeholder text, got %q", line)
 	}
 }
+
+func TestRenderComposerPlaceholderLineShowsCursorWhenPlaceholderPresent(t *testing.T) {
+	palette := theme.Default().Palette
+	promptStyle := lipgloss.NewStyle()
+	contentStyle := lipgloss.NewStyle()
+	muted := lipgloss.NewStyle()
+
+	line := RenderComposerPlaceholderLine(promptStyle, contentStyle, "> ", 12, "Hello", "|", muted, palette)
+	if !strings.Contains(line, "|Hello") {
+		t.Fatalf("expected visible cursor before placeholder, got %q", line)
+	}
+}
