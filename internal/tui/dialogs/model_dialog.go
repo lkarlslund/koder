@@ -1,7 +1,6 @@
 package dialogs
 
 import (
-	"fmt"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -118,8 +117,7 @@ func (d ModelDialog) View(width int, palette theme.Palette) string {
 		dialogWidth = 84
 	}
 	dialogWidth = maxInt(72, dialogWidth)
-	listWidth := 34
-	detailWidth := maxInt(30, dialogWidth-listWidth-9)
+	listWidth := maxInt(40, dialogWidth-4)
 
 	listLines := []string{}
 	if len(d.view) == 0 {
@@ -146,35 +144,15 @@ func (d ModelDialog) View(width int, palette theme.Palette) string {
 		}
 	}
 
-	details := "No model selected"
-	if item, ok := d.current(); ok {
-		lines := []string{
-			lipgloss.NewStyle().Bold(true).Render(item.ID),
-			fmt.Sprintf("Provider: %s", d.ProviderID),
-		}
-		if strings.TrimSpace(item.OwnedBy) != "" {
-			lines = append(lines, fmt.Sprintf("Owner:    %s", item.OwnedBy))
-		}
-		if badges := capabilityBadges(item); badges != "" {
-			lines = append(lines, fmt.Sprintf("Supports: %s", badges))
-		}
-		details = strings.Join(lines, "\n")
-	}
-
 	body := lipgloss.JoinVertical(
 		lipgloss.Left,
-		fmt.Sprintf("Filter: %s", d.Query),
+		"Filter: "+d.Query,
 		"",
-		lipgloss.JoinHorizontal(
-			lipgloss.Top,
-			lipgloss.NewStyle().Width(listWidth).BorderRight(true).BorderForeground(palette.SidebarBorder).PaddingRight(1).Render(strings.Join(listLines, "\n")),
-			" ",
-			lipgloss.NewStyle().Width(detailWidth).PaddingLeft(1).Render(details),
-		),
+		lipgloss.NewStyle().Width(listWidth).Render(strings.Join(listLines, "\n")),
 	)
 
 	return Dialog{
-		Title:  "Select Model",
+		Title: "Select Model",
 		Sections: []string{body},
 		Buttons: d.buttonRow(dialogWidth),
 		Footer: "Enter to select, Esc to cancel",
