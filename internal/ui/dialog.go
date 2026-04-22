@@ -59,6 +59,14 @@ func (d Dialog) View(palette theme.Palette) string {
 	}.View(palette)
 }
 
+func (d Dialog) Measure(ctx *Context, constraints Constraints) Size {
+	return constraints.Clamp(SurfaceFromString(d.View(ctx.Palette)).Size())
+}
+
+func (d Dialog) Render(ctx *Context, bounds Rect) Surface {
+	return SurfaceFromString(d.View(ctx.Palette)).normalize(bounds.W, bounds.H)
+}
+
 func maxDialogContentWidth(current int, block string) int {
 	for _, line := range strings.Split(block, "\n") {
 		current = max(current, ansi.StringWidth(line))

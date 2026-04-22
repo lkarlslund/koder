@@ -13,7 +13,7 @@ type Sidebar struct {
 	Height  int
 }
 
-func (s Sidebar) View(palette theme.Palette) string {
+func (s Sidebar) content(palette theme.Palette) string {
 	style := lipgloss.NewStyle().
 		Width(30).
 		Padding(0, 1).
@@ -25,6 +25,18 @@ func (s Sidebar) View(palette theme.Palette) string {
 		style = style.Height(s.Height).MaxHeight(s.Height)
 	}
 	return style.Render(strings.TrimRight(s.Content, "\n"))
+}
+
+func (s Sidebar) View(palette theme.Palette) string {
+	return s.content(palette)
+}
+
+func (s Sidebar) Measure(ctx *Context, constraints Constraints) Size {
+	return constraints.Clamp(SurfaceFromString(s.content(ctx.Palette)).Size())
+}
+
+func (s Sidebar) Render(ctx *Context, bounds Rect) Surface {
+	return SurfaceFromString(s.content(ctx.Palette)).normalize(bounds.W, bounds.H)
 }
 
 type BodyLayout struct {
@@ -41,6 +53,20 @@ func (l BodyLayout) View() string {
 	return lipgloss.JoinHorizontal(lipgloss.Top, main, l.Sidebar)
 }
 
+func (l BodyLayout) Measure(ctx *Context, constraints Constraints) Size {
+	return constraints.Clamp(SurfaceFromString(l.View()).Size())
+}
+
+func (l BodyLayout) Render(ctx *Context, bounds Rect) Surface {
+	children := []Child{
+		Flex(Inset{Padding: SymmetricInsets(1, 0), Child: Static{Content: l.Main}}, 1),
+	}
+	if l.ShowSidebar {
+		children = append(children, Fixed(Static{Content: l.Sidebar}))
+	}
+	return Row{Children: children}.Render(ctx, bounds)
+}
+
 type Footer struct {
 	Parts []string
 }
@@ -50,4 +76,12 @@ func (f Footer) View() string {
 		BorderTop(true).
 		Padding(0, 1).
 		Render(lipgloss.JoinVertical(lipgloss.Left, f.Parts...))
+}
+
+func (f Footer) Measure(ctx *Context, constraints Constraints) Size {
+	return constraints.Clamp(SurfaceFromString(f.View()).Size())
+}
+
+func (f Footer) Render(ctx *Context, bounds Rect) Surface {
+	return SurfaceFromString(f.View()).normalize(bounds.W, bounds.H)
 }

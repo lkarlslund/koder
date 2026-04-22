@@ -314,6 +314,7 @@ type Model struct {
 	modelDialog        *dialogs.ModelDialog
 	toolsDialog        *dialogs.ToolsDialog
 	debug              *debugsrv.Recorder
+	uiRuntime          ui.Runtime
 	caps               *provider.CapabilityStore
 	runtimeCtxChecked  map[string]bool
 	activeOpCancel     context.CancelFunc
@@ -779,7 +780,10 @@ func (m Model) modalLocalPoint(msg tea.MouseMsg, rendered string) (int, int, boo
 
 func (m Model) View() string {
 	m.syncDebugRuntime()
-	renderScreen := func(view string) string {
+	ctx := &ui.Context{Palette: m.palette, Runtime: &m.uiRuntime}
+	m.uiRuntime.BeginFrame()
+	renderScreen := func(element ui.Element) string {
+		view := ui.RenderElement(ctx, element, max(0, m.width), max(0, m.height))
 		style := lipgloss.NewStyle().Background(m.palette.ScreenBackground)
 		if m.width > 0 {
 			style = style.Width(m.width)
@@ -790,42 +794,46 @@ func (m Model) View() string {
 		return style.Render(view)
 	}
 	if m.hasModelDialog() && m.width > 0 && m.height > 0 {
-		return renderScreen(lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, m.renderModelDialog()))
+		return renderScreen(ui.Align{Horizontal: ui.AlignCenter, Vertical: ui.AlignCenter, Child: ui.Static{Content: m.renderModelDialog()}})
 	}
 	if m.hasDisconnectDialog() && m.width > 0 && m.height > 0 {
-		return renderScreen(lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, m.renderDisconnectDialog()))
+		return renderScreen(ui.Align{Horizontal: ui.AlignCenter, Vertical: ui.AlignCenter, Child: ui.Static{Content: m.renderDisconnectDialog()}})
 	}
 	if m.hasToolsDialog() && m.width > 0 && m.height > 0 {
-		return renderScreen(lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, m.renderToolsDialog()))
+		return renderScreen(ui.Align{Horizontal: ui.AlignCenter, Vertical: ui.AlignCenter, Child: ui.Static{Content: m.renderToolsDialog()}})
 	}
 	if m.hasConnectDialog() && m.width > 0 && m.height > 0 {
-		return renderScreen(lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, m.renderConnectDialog()))
+		return renderScreen(ui.Align{Horizontal: ui.AlignCenter, Vertical: ui.AlignCenter, Child: ui.Static{Content: m.renderConnectDialog()}})
 	}
 	if m.hasSessionDialog() && m.width > 0 && m.height > 0 {
-		return renderScreen(lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, m.renderSessionDialog()))
+		return renderScreen(ui.Align{Horizontal: ui.AlignCenter, Vertical: ui.AlignCenter, Child: ui.Static{Content: m.renderSessionDialog()}})
 	}
 	if m.hasAgentsModal() && m.width > 0 && m.height > 0 {
-		return renderScreen(lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, m.renderAgentsModal()))
+		return renderScreen(ui.Align{Horizontal: ui.AlignCenter, Vertical: ui.AlignCenter, Child: ui.Static{Content: m.renderAgentsModal()}})
 	}
 	if m.hasHelpModal() && m.width > 0 && m.height > 0 {
-		return renderScreen(lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, m.renderHelpModal()))
+		return renderScreen(ui.Align{Horizontal: ui.AlignCenter, Vertical: ui.AlignCenter, Child: ui.Static{Content: m.renderHelpModal()}})
 	}
 	if m.hasLLMPreview() && m.width > 0 && m.height > 0 {
-		return renderScreen(m.renderLLMPreview())
+		return renderScreen(ui.Static{Content: m.renderLLMPreview()})
 	}
 	if m.hasPreferencesDialog() && m.width > 0 && m.height > 0 {
-		return renderScreen(lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, m.renderPreferencesDialog()))
+		return renderScreen(ui.Align{Horizontal: ui.AlignCenter, Vertical: ui.AlignCenter, Child: ui.Static{Content: m.renderPreferencesDialog()}})
 	}
 	if m.hasPicker() && m.width > 0 && m.height > 0 {
-		return renderScreen(lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, m.renderPicker()))
+		return renderScreen(ui.Align{Horizontal: ui.AlignCenter, Vertical: ui.AlignCenter, Child: ui.Static{Content: m.renderPicker()}})
 	}
-	body := m.renderBody()
-	footer := m.renderFooter()
-	view := lipgloss.JoinVertical(lipgloss.Left, body, footer)
-	if m.width > 0 && m.height > 0 {
-		return renderScreen(lipgloss.Place(m.width, m.height, lipgloss.Left, lipgloss.Bottom, view))
+	root := ui.Align{
+		Horizontal: ui.AlignStart,
+		Vertical:   ui.AlignEnd,
+		Child: ui.Column{
+			Children: []ui.Child{
+				ui.Flex(m.renderBodyElement(), 1),
+				ui.Fixed(m.renderFooterElement()),
+			},
+		},
 	}
-	return renderScreen(view)
+	return renderScreen(root)
 }
 
 func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -1242,6 +1250,10 @@ func (m *Model) renderHeader() string {
 }
 
 func (m *Model) renderBody() string {
+	return ui.RenderElement(&ui.Context{Palette: m.palette}, m.renderBodyElement(), max(0, m.width), max(0, m.viewport.Height))
+}
+
+func (m *Model) renderBodyElement() ui.Element {
 	return ui.BodyLayout{
 		Main: m.viewport.View(),
 		Sidebar: ui.Sidebar{
@@ -1249,10 +1261,14 @@ func (m *Model) renderBody() string {
 			Height:  m.viewport.Height,
 		}.View(m.palette),
 		ShowSidebar: m.showSidebar,
-	}.View()
+	}
 }
 
 func (m *Model) renderFooter() string {
+	return ui.RenderElement(&ui.Context{Palette: m.palette}, m.renderFooterElement(), max(0, m.width), 0)
+}
+
+func (m *Model) renderFooterElement() ui.Element {
 	parts := []string{}
 	if prompt := m.renderApprovalPrompt(); prompt != "" {
 		parts = append(parts, prompt)
@@ -1274,7 +1290,7 @@ func (m *Model) renderFooter() string {
 	}
 	parts = append(parts, "")
 	parts = append(parts, m.renderComposer())
-	return ui.Footer{Parts: parts}.View()
+	return ui.Footer{Parts: parts}
 }
 
 func (m *Model) footerHeight() int {
