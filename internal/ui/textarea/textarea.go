@@ -49,6 +49,7 @@ type Model struct {
 	Prompt          string
 	Placeholder     string
 	ShowLineNumbers bool
+	BlinkEnabled    bool
 	FocusedStyle    Style
 	BlurredStyle    Style
 	Cursor          Cursor
@@ -63,7 +64,7 @@ type Model struct {
 }
 
 func New() Model {
-	return Model{focus: true, height: 1, blink: true}
+	return Model{focus: true, height: 1, blink: true, BlinkEnabled: true}
 }
 
 func (m *Model) Focus() {
@@ -119,7 +120,7 @@ func (m *Model) InsertString(s string) {
 }
 
 func (m Model) BlinkCmd() tea.Cmd {
-	if !m.focus {
+	if !m.focus || !m.BlinkEnabled {
 		return nil
 	}
 	generation := m.blinkGeneration
@@ -131,13 +132,13 @@ func (m Model) BlinkCmd() tea.Cmd {
 func (m *Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case blinkMsg:
-		if !m.focus {
+		if !m.focus || !m.BlinkEnabled {
 			return *m, nil
 		}
 		m.blink = !m.blink
 		return *m, m.BlinkCmd()
 	case blinkTickMsg:
-		if !m.focus {
+		if !m.focus || !m.BlinkEnabled {
 			return *m, nil
 		}
 		if msg.generation != m.blinkGeneration {
@@ -151,7 +152,10 @@ func (m *Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 		m.blink = true
 		m.blinkGeneration++
-		cmd := m.BlinkCmd()
+		var cmd tea.Cmd
+		if m.BlinkEnabled {
+			cmd = m.BlinkCmd()
+		}
 		switch msg.Type {
 		case tea.KeyLeft:
 			if m.cursor > 0 {
@@ -199,7 +203,7 @@ func (m Model) View() string {
 		style = m.FocusedStyle
 	}
 	prompt := style.Prompt.Render(m.Prompt)
-	if !m.focus || !m.blink {
+	if !m.focus || (!m.blink && m.BlinkEnabled) {
 		return prompt + style.Text.Render(line.plain)
 	}
 	text := line.before + m.Cursor.TextStyle.Render(line.cursor) + line.after

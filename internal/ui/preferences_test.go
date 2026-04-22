@@ -39,10 +39,19 @@ func TestPreferencesDialogThemeAndToggleEmitDraftChanges(t *testing.T) {
 		t.Fatalf("expected half blocks toggled off, got %#v", action.UI)
 	}
 
-	dialog.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
-	dialog.Update(tea.KeyMsg{Type: tea.KeyDown})
-	dialog.Update(tea.KeyMsg{Type: tea.KeyTab})
-	dialog.Update(tea.KeyMsg{Type: tea.KeyDown})
+	dialog = NewPreferencesDialog(config.Default().UI, []string{"tokyonight", "gruvbox"})
+	dialog.tabList.Active = 1
+	dialog.focus = preferencesFocusFields
+	dialog.fieldIndex = 0
+	action = dialog.Update(tea.KeyMsg{Type: tea.KeySpace})
+	if action.Kind != PreferencesActionChanged {
+		t.Fatalf("expected cursor blink toggle change action, got %#v", action)
+	}
+	if action.UI.CursorBlink {
+		t.Fatalf("expected cursor blink toggled off, got %#v", action.UI)
+	}
+
+	dialog.fieldIndex = 2
 	action = dialog.Update(tea.KeyMsg{Type: tea.KeySpace})
 	if action.Kind != PreferencesActionChanged {
 		t.Fatalf("expected system toggle change action, got %#v", action)
@@ -79,8 +88,10 @@ func TestPreferencesDialogRenderShowsTabsAndButtons(t *testing.T) {
 	dialog.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
 	dialog.Update(tea.KeyMsg{Type: tea.KeyDown})
 	view = dialog.View(84, theme.Default().Palette)
-	if !strings.Contains(view, "System") {
-		t.Fatalf("expected behavior tab to show system toggle, got %q", view)
+	for _, needle := range []string{"Cursor Blink", "System"} {
+		if !strings.Contains(view, needle) {
+			t.Fatalf("expected behavior tab to show %q, got %q", needle, view)
+		}
 	}
 }
 

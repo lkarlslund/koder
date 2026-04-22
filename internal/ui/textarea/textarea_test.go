@@ -162,6 +162,26 @@ func TestStaleBlinkTickIsIgnored(t *testing.T) {
 	}
 }
 
+func TestBlinkCanBeDisabled(t *testing.T) {
+	m := newTestModel()
+	m.BlinkEnabled = false
+	m.SetValue("abc")
+	m.SetCursor(len("abc"))
+
+	if cmd := m.BlinkCmd(); cmd != nil {
+		t.Fatal("expected no blink command when blinking is disabled")
+	}
+
+	visible := m.View()
+	next, cmd := m.Update(blinkTickMsg{generation: m.blinkGeneration})
+	if cmd != nil {
+		t.Fatal("expected disabled blinking to ignore blink ticks")
+	}
+	if next.View() != visible {
+		t.Fatalf("expected cursor to stay visible when blinking is disabled, before=%q after=%q", visible, next.View())
+	}
+}
+
 func TestBlurStopsBlinkAndInput(t *testing.T) {
 	m := newTestModel()
 	m.SetValue("abc")

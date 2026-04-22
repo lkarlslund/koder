@@ -66,16 +66,11 @@ func RenderComposer(props ComposerProps) string {
 }
 
 func RenderComposerPlaceholderLine(promptStyle, contentStyle lipgloss.Style, prompt string, contentWidth int, placeholder string, cursorView string, muted lipgloss.Style, palette theme.Palette) string {
-	placeholder = ansi.Truncate(placeholder, contentWidth, "")
+	placeholder = ansi.Truncate(placeholder, maxInt(0, contentWidth-ansi.StringWidth(cursorView)), "")
 	if placeholder == "" {
 		return promptStyle.Render(prompt) + contentStyle.Render(cursorView)
 	}
-	runes := []rune(placeholder)
-	rest := ""
-	if len(runes) > 1 {
-		rest = muted.Render(string(runes[1:]))
-	}
-	return promptStyle.Render(prompt) + contentStyle.Render(cursorView+rest)
+	return promptStyle.Render(prompt) + contentStyle.Render(cursorView+muted.Render(placeholder))
 }
 
 func RenderHalfBlockLine(width int, char string, palette theme.Palette) string {

@@ -356,6 +356,7 @@ func NewWithWorkdir(cfg config.Config, st *store.Store, a *agent.Engine, mode St
 	composer.SetHeight(composerInputHeight)
 	composer.Prompt = mPrompt(cfg)
 	composer.Focus()
+	composer.BlinkEnabled = cfg.UI.CursorBlink
 	composer.ShowLineNumbers = false
 	applyComposerTheme(&composer, tuiTheme.Palette)
 
@@ -1250,8 +1251,7 @@ func (m *Model) renderComposer() string {
 		Foreground(m.palette.ComposerMutedText)
 	cursorView := " "
 	if placeholder := ansi.Truncate(m.composer.Placeholder, max(0, m.composerWidth()-ansi.StringWidth(m.composer.Prompt)), ""); placeholder != "" {
-		runes := []rune(placeholder)
-		cursorView = muted.Render(string(runes[0]))
+		cursorView = muted.Render(" ")
 	} else {
 		cursorView = muted.Render(" ")
 	}
@@ -4717,6 +4717,7 @@ func (m *Model) applyUIConfig(next config.UI, save bool) (tea.Cmd, error) {
 	m.showReasoning = next.ShowReasoning
 	m.showSystem = next.ShowSystem
 	m.mouseEnabled = next.Mouse
+	m.composer.BlinkEnabled = next.CursorBlink
 	applyComposerTheme(&m.composer, selected.Palette)
 	m.resize()
 	m.refreshViewport()
@@ -4727,13 +4728,22 @@ func (m *Model) applyUIConfig(next config.UI, save bool) (tea.Cmd, error) {
 		}
 	}
 
+	cmds := make([]tea.Cmd, 0, 2)
+	if m.composer.BlinkEnabled {
+		cmds = append(cmds, m.composer.BlinkCmd())
+	}
 	if prevMouse == m.mouseEnabled {
-		return nil, nil
+		if len(cmds) == 0 {
+			return nil, nil
+		}
+		return tea.Batch(cmds...), nil
 	}
 	if m.mouseEnabled {
-		return func() tea.Msg { return tea.EnableMouseCellMotion() }, nil
+		cmds = append(cmds, func() tea.Msg { return tea.EnableMouseCellMotion() })
+		return tea.Batch(cmds...), nil
 	}
-	return func() tea.Msg { return tea.DisableMouse() }, nil
+	cmds = append(cmds, func() tea.Msg { return tea.DisableMouse() })
+	return tea.Batch(cmds...), nil
 }
 
 func spinnerTickCmd() tea.Cmd {

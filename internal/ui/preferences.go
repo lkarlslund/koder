@@ -83,6 +83,7 @@ func NewPreferencesDialog(current config.UI, themeNames []string) PreferencesDia
 		{
 			Title: "Behavior",
 			Fields: []preferencesField{
+				{Kind: preferencesFieldToggle, ID: "cursor_blink", Label: "Cursor Blink", Description: "Blink the composer cursor while the input is focused"},
 				{Kind: preferencesFieldToggle, ID: "show_reasoning", Label: "Reasoning", Description: "Render model reasoning blocks in the transcript"},
 				{Kind: preferencesFieldToggle, ID: "show_system", Label: "System", Description: "Render system prompts, internal notices, and skill output in the transcript"},
 				{Kind: preferencesFieldToggle, ID: "mouse", Label: "Mouse", Description: "Enable terminal mouse capture"},
@@ -344,6 +345,8 @@ func (d PreferencesDialog) currentFields() []preferencesField {
 
 func (d PreferencesDialog) toggleValue(id string) bool {
 	switch id {
+	case "cursor_blink":
+		return d.draft.CursorBlink
 	case "half_blocks":
 		return d.draft.HalfBlocks
 	case "show_sidebar":
@@ -363,6 +366,8 @@ func (d PreferencesDialog) toggleValue(id string) bool {
 
 func (d *PreferencesDialog) setToggle(id string, value bool) {
 	switch id {
+	case "cursor_blink":
+		d.draft.CursorBlink = value
 	case "half_blocks":
 		d.draft.HalfBlocks = value
 	case "show_sidebar":

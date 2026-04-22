@@ -15,6 +15,7 @@ import (
 type UI struct {
 	Theme          string `toml:"theme"`
 	Spinner        string `toml:"spinner"`
+	CursorBlink    bool   `toml:"cursor_blink"`
 	HalfBlocks     bool   `toml:"half_blocks"`
 	ShowSidebar    bool   `toml:"show_sidebar"`
 	ShowTimestamps bool   `toml:"show_timestamps"`
@@ -118,6 +119,9 @@ func Load() (Config, error) {
 	if err := toml.Unmarshal(data, &cfg); err != nil {
 		return Config{}, fmt.Errorf("parse config: %w", err)
 	}
+	if !strings.Contains(string(data), "cursor_blink") {
+		cfg.UI.CursorBlink = true
+	}
 	cfg.configDir = configDir
 	cfg.stateDir = stateDir()
 	cfg.cacheDir = cacheDir()
@@ -198,6 +202,7 @@ func Default() Config {
 		UI: UI{
 			Theme:          "tokyonight",
 			Spinner:        "dots",
+			CursorBlink:    true,
 			HalfBlocks:     true,
 			ShowSidebar:    true,
 			ShowTimestamps: false,
