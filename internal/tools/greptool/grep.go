@@ -39,14 +39,19 @@ func (tool) LegacyArgs(raw string) map[string]string { return map[string]string{
 func (tool) Preview(req tools.Request) string        { return req.Args["pattern"] }
 func (tool) PresentationForPreview(preview string) tools.Presentation {
 	preview = strings.TrimSpace(preview)
-	subtitle := preview
-	if subtitle != "" {
-		subtitle = "Query: " + subtitle
-	}
-	return tools.Presentation{Title: "Search text", Subtitle: subtitle, Preview: preview}
+	return tools.Presentation{Title: "Search text", Subtitle: preview, Preview: preview}
 }
 func (tool) Presentation(req tools.Request) tools.Presentation {
-	return tool{}.PresentationForPreview(req.Args["pattern"])
+	pattern := strings.TrimSpace(req.Args["pattern"])
+	subtitle := pattern
+	if scope := grepScopeLabel(req.Args["path"], req.Args["include"]); scope != "" {
+		if subtitle == "" {
+			subtitle = scope
+		} else {
+			subtitle += " in " + scope
+		}
+	}
+	return tools.Presentation{Title: "Search text", Subtitle: subtitle, Preview: pattern}
 }
 func (tool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
 	if _, err := exec.LookPath("rg"); err == nil {
@@ -110,4 +115,17 @@ func (tool) SummarizeResult(req tools.Request, result tools.Result) (string, str
 }
 func (tool) PersistResult(ctx context.Context, st *store.Store, sessionID int64, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
 	return tools.PersistStandardResult(ctx, st, sessionID, req, result)
+}
+
+func grepScopeLabel(path, include string) string {
+	path = strings.TrimSpace(path)
+	include = strings.TrimSpace(include)
+	switch {
+	case path != "" && include != "":
+		return path + " (" + include + ")"
+	case path != "":
+		return path
+	default:
+		return include
+	}
 }
