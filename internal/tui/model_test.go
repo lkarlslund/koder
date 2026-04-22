@@ -954,6 +954,85 @@ func TestLoadMsgDispatchesQueuedPrompt(t *testing.T) {
 	}
 }
 
+func TestAltUpRestoresQueuedPromptToComposer(t *testing.T) {
+	m := Model{
+		cfg:         testConfig(t),
+		composer:    textarea.New(),
+		queuedPrompt: &queuedPrompt{
+			Text: "queued ask",
+			Mode: queuedPromptModeNormal,
+		},
+	}
+
+	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyUp, Alt: true})
+	next := updated.(*Model)
+
+	if cmd == nil {
+		t.Fatal("expected title sync command after restoring queued prompt")
+	}
+	if next.queuedPrompt != nil {
+		t.Fatalf("expected queued prompt cleared, got %#v", next.queuedPrompt)
+	}
+	if next.composer.Value() != "queued ask" {
+		t.Fatalf("expected composer to contain restored queued prompt, got %q", next.composer.Value())
+	}
+}
+
+func TestAltUpSwapsQueuedPromptWithExistingDraft(t *testing.T) {
+	m := Model{
+		cfg:      testConfig(t),
+		composer: textarea.New(),
+		queuedPrompt: &queuedPrompt{
+			Text: "queued ask",
+			Mode: queuedPromptModeSteer,
+		},
+	}
+	m.setComposerValue("current draft")
+
+	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyUp, Alt: true})
+	next := updated.(*Model)
+
+	if cmd == nil {
+		t.Fatal("expected title sync command after swapping queued prompt")
+	}
+	if next.composer.Value() != "queued ask" {
+		t.Fatalf("expected composer to contain restored queued prompt, got %q", next.composer.Value())
+	}
+	if next.queuedPrompt == nil {
+		t.Fatal("expected previous draft to be re-queued")
+	}
+	if next.queuedPrompt.Text != "current draft" {
+		t.Fatalf("expected current draft to be re-queued, got %#v", next.queuedPrompt)
+	}
+	if next.queuedPrompt.Mode != queuedPromptModeNormal {
+		t.Fatalf("expected swapped draft to be queued as normal follow-up, got %#v", next.queuedPrompt)
+	}
+}
+
+func TestAltUpClearsQueuedContinue(t *testing.T) {
+	m := Model{
+		cfg:      testConfig(t),
+		composer: textarea.New(),
+		queuedPrompt: &queuedPrompt{
+			Mode: queuedPromptModeContinue,
+		},
+	}
+	m.setComposerValue("keep draft")
+
+	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyUp, Alt: true})
+	next := updated.(*Model)
+
+	if cmd == nil {
+		t.Fatal("expected title sync command after clearing queued continue")
+	}
+	if next.queuedPrompt != nil {
+		t.Fatalf("expected queued continue cleared, got %#v", next.queuedPrompt)
+	}
+	if next.composer.Value() != "keep draft" {
+		t.Fatalf("expected composer draft unchanged, got %q", next.composer.Value())
+	}
+}
+
 func TestWindowTitleUsesSessionTitle(t *testing.T) {
 	m := Model{
 		cfg:            config.Default(),

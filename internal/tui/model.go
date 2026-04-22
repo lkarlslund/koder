@@ -1072,6 +1072,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.composer.InsertRune('\n')
 		m.updateComposerMenus()
 		return m, nil
+	case "alt+up":
+		return m.popQueuedPromptForEditing()
 	case "up":
 		if !m.recallComposerHistory(-1) {
 			return m, nil
@@ -2464,6 +2466,38 @@ func (m *Model) queueContinuePrompt() (tea.Model, tea.Cmd) {
 	}
 	m.queuedPrompt = &queuedPrompt{Mode: queuedPromptModeContinue}
 	m.status = m.queuedPrompt.statusText()
+	return m, m.syncWindowTitleCmd()
+}
+
+func (m *Model) popQueuedPromptForEditing() (tea.Model, tea.Cmd) {
+	if m.queuedPrompt == nil {
+		return m, nil
+	}
+	if m.queuedPrompt.Mode == queuedPromptModeContinue {
+		m.queuedPrompt = nil
+		m.status = "Removed queued continue"
+		return m, m.syncWindowTitleCmd()
+	}
+
+	m.syncDraftReferencesFromComposer()
+	currentText := strings.TrimSpace(m.composer.Value())
+	hasCurrentDraft := currentText != "" || len(m.draftAttachments) > 0 || len(m.draftReferences) > 0
+	queued := *m.queuedPrompt
+	if hasCurrentDraft {
+		m.queuedPrompt = &queuedPrompt{
+			Text:        currentText,
+			Mode:        queuedPromptModeNormal,
+			Attachments: slices.Clone(m.draftAttachments),
+			References:  slices.Clone(m.draftReferences),
+		}
+		m.status = "Swapped queued prompt into composer"
+	} else {
+		m.queuedPrompt = nil
+		m.status = "Restored queued prompt to composer"
+	}
+	m.setComposerValue(queued.Text)
+	m.draftAttachments = slices.Clone(queued.Attachments)
+	m.draftReferences = slices.Clone(queued.References)
 	return m, m.syncWindowTitleCmd()
 }
 
