@@ -3679,6 +3679,42 @@ func TestRefreshViewportUsesSingleNewlineBetweenBlocksWithHalfBlocks(t *testing.
 	}
 }
 
+func TestRefreshViewportUsesBlankLineBetweenAssistantMessagesWithHalfBlocks(t *testing.T) {
+	cfg := testConfig(t)
+	m := Model{
+		cfg: cfg,
+		messages: []domain.Message{
+			{ID: 1, Role: domain.MessageRoleAssistant},
+			{ID: 2, Role: domain.MessageRoleAssistant},
+		},
+		parts: map[int64][]domain.Part{
+			1: {{Kind: domain.PartKindText, Body: "first reply"}},
+			2: {{Kind: domain.PartKindText, Body: "second reply"}},
+		},
+		viewport: viewport.New(24, 8),
+	}
+
+	m.refreshViewport()
+	got := m.viewport.View()
+	lines := strings.Split(got, "\n")
+	secondLine := -1
+	for i, line := range lines {
+		if strings.Contains(line, "second reply") {
+			secondLine = i
+			break
+		}
+	}
+	if secondLine < 2 {
+		t.Fatalf("expected second assistant message after a spacer row, got %q", got)
+	}
+	if !strings.Contains(lines[secondLine-2], "first reply") {
+		t.Fatalf("expected first assistant message two rows before second, got %q", got)
+	}
+	if strings.TrimSpace(lines[secondLine-1]) != "" {
+		t.Fatalf("expected blank line between assistant messages in half-block mode, got %q", got)
+	}
+}
+
 func TestRefreshViewportUsesBlankLineBetweenAssistantTextAndToolRunWithHalfBlocks(t *testing.T) {
 	cfg := testConfig(t)
 	m := Model{

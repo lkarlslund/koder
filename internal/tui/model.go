@@ -1502,7 +1502,7 @@ func (m *Model) refreshViewportAt(offset int) {
 	}
 	if indicator := m.renderTranscriptActivity(); indicator != "" {
 		if len(blocks) > 0 {
-			blocks = append(blocks, m.defaultTranscriptSeparator())
+			blocks = append(blocks, m.transcriptActivitySeparator(transcriptBlocks[len(transcriptBlocks)-1]))
 		}
 		blocks = append(blocks, indicator)
 	}
@@ -1522,9 +1522,6 @@ func (m *Model) refreshViewportAt(offset int) {
 }
 
 func (m *Model) defaultTranscriptSeparator() string {
-	if m.halfBlocksEnabled() {
-		return "\n"
-	}
 	return "\n\n"
 }
 
@@ -1532,11 +1529,21 @@ func (m *Model) transcriptSeparator(prev, next transcriptBlock) string {
 	if !m.halfBlocksEnabled() {
 		return "\n\n"
 	}
-	if (prev.Kind == transcriptBlockMessage && next.Kind == transcriptBlockToolRun) ||
-		(prev.Kind == transcriptBlockToolRun && next.Kind == transcriptBlockToolRun) {
-		return "\n\n"
+	if m.isHalfBlockUserMessage(prev) || m.isHalfBlockUserMessage(next) {
+		return "\n"
 	}
-	return "\n"
+	return "\n\n"
+}
+
+func (m *Model) transcriptActivitySeparator(prev transcriptBlock) string {
+	if m.halfBlocksEnabled() && m.isHalfBlockUserMessage(prev) {
+		return "\n"
+	}
+	return "\n\n"
+}
+
+func (m *Model) isHalfBlockUserMessage(block transcriptBlock) bool {
+	return m.halfBlocksEnabled() && block.Kind == transcriptBlockMessage && block.Message.Role == domain.MessageRoleUser
 }
 
 func renderedSeparatorHeight(separator string) int {
