@@ -157,7 +157,6 @@ type visibleLine struct {
 }
 
 func (m Model) visibleLine() visibleLine {
-	value := string(m.value)
 	runes := m.value
 	cursor := m.cursor
 	if cursor < 0 {
@@ -192,17 +191,14 @@ func (m Model) visibleLine() visibleLine {
 	lineRunes = lineRunes[start:end]
 	localCursor -= start
 	before := string(lineRunes[:localCursor])
-	var char string
+	char := " "
 	if localCursor < len(lineRunes) {
 		char = string(lineRunes[localCursor])
-	} else {
-		char = " "
 	}
 	after := ""
 	if localCursor < len(lineRunes) {
 		after = string(lineRunes[localCursor+1:])
 	}
-	_ = value
 	return visibleLine{before: before, cursor: char, after: after}
 }
 
