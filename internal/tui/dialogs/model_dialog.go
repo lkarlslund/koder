@@ -133,14 +133,7 @@ func (d ModelDialog) View(width int, palette theme.Palette) string {
 		}
 		for idx := start; idx < end; idx++ {
 			item := d.view[idx]
-			listLines = append(listLines, SelectableRow{
-				Primary:   item.ID,
-				Secondary: item.OwnedBy,
-				Tertiary:  capabilityBadges(item),
-				Width:     listWidth,
-				Selected:  idx == d.Index,
-				Focused:   idx == d.Index && d.focus == pickerDialogFocusList,
-			}.View(palette))
+			listLines = append(listLines, d.renderRow(item, listWidth, idx == d.Index, idx == d.Index && d.focus == pickerDialogFocusList, palette))
 		}
 	}
 
@@ -158,6 +151,97 @@ func (d ModelDialog) View(width int, palette theme.Palette) string {
 		Footer: "Enter to select, Esc to cancel",
 		Width:  dialogWidth,
 	}.View(palette)
+}
+
+func (d ModelDialog) renderRow(item domain.Model, width int, selected bool, focused bool, palette theme.Palette) string {
+	if width <= 0 {
+		width = 72
+	}
+	primary := compactModelCell(item.ID)
+	secondary := compactModelCell(firstNonEmptyModelValue(strings.TrimSpace(item.OwnedBy), strings.TrimSpace(d.ProviderID)))
+	tertiary := compactModelCell(capabilityBadges(item))
+	primaryWidth := minInt(42, maxInt(20, width/2))
+	tertiaryWidth := 0
+	if strings.TrimSpace(tertiary) != "" {
+		tertiaryWidth = minInt(12, maxInt(6, width/8))
+	}
+	gapWidth := 2
+	secondaryWidth := maxInt(8, width-primaryWidth-tertiaryWidth-gapWidth*2)
+	if tertiaryWidth == 0 {
+		secondaryWidth = maxInt(8, width-primaryWidth-gapWidth)
+	}
+	selectionBackground := palette.SelectionBackground
+	selectionForeground := palette.SelectionForeground
+	if strings.TrimSpace(string(selectionBackground)) == "" {
+		selectionBackground = palette.UserTextBackground
+	}
+	if strings.TrimSpace(string(selectionForeground)) == "" {
+		selectionForeground = palette.UserTextForeground
+	}
+	primaryStyle := lipgloss.NewStyle().Width(primaryWidth).Bold(true)
+	gapStyle := lipgloss.NewStyle().Width(gapWidth)
+	secondaryStyle := lipgloss.NewStyle().Width(secondaryWidth).Foreground(palette.AssistantTimestampText)
+	tertiaryStyle := lipgloss.NewStyle().Width(tertiaryWidth).Align(lipgloss.Right).Foreground(palette.ActivityText)
+	rowStyle := lipgloss.NewStyle().Width(width)
+	if selected {
+		rowStyle = rowStyle.Background(selectionBackground).Foreground(selectionForeground)
+		primaryStyle = primaryStyle.Background(selectionBackground).Foreground(selectionForeground)
+		gapStyle = gapStyle.Background(selectionBackground)
+		secondaryStyle = secondaryStyle.Background(selectionBackground).Foreground(selectionForeground)
+		tertiaryStyle = tertiaryStyle.Background(selectionBackground).Foreground(selectionForeground).Bold(true)
+	}
+	if focused {
+		focusedBackground := selectionBackground
+		if strings.TrimSpace(string(palette.UserTextBackground)) != "" {
+			focusedBackground = palette.UserTextBackground
+		}
+		focusedForeground := selectionForeground
+		rowStyle = rowStyle.Background(focusedBackground).Foreground(focusedForeground)
+		primaryStyle = primaryStyle.Background(focusedBackground).Foreground(focusedForeground)
+		gapStyle = gapStyle.Background(focusedBackground)
+		secondaryStyle = secondaryStyle.Background(focusedBackground).Foreground(focusedForeground)
+		tertiaryStyle = tertiaryStyle.Background(focusedBackground).Foreground(focusedForeground).Bold(true)
+	}
+	row := lipgloss.JoinHorizontal(
+		lipgloss.Top,
+		primaryStyle.Render(truncateModelCell(strings.TrimSpace(primary), primaryWidth)),
+		gapStyle.Render(""),
+		secondaryStyle.Render(truncateModelCell(strings.TrimSpace(secondary), secondaryWidth)),
+	)
+	if tertiaryWidth > 0 {
+		row = lipgloss.JoinHorizontal(
+			lipgloss.Top,
+			row,
+			gapStyle.Render(""),
+			tertiaryStyle.Render(truncateModelCell(strings.TrimSpace(tertiary), tertiaryWidth)),
+		)
+	}
+	return rowStyle.Render(row)
+}
+
+func compactModelCell(value string) string {
+	value = strings.ReplaceAll(value, "\n", " ")
+	return strings.Join(strings.Fields(value), " ")
+}
+
+func truncateModelCell(value string, width int) string {
+	value = strings.TrimSpace(value)
+	if width <= 0 {
+		return ""
+	}
+	if ansi.StringWidth(value) <= width {
+		return value
+	}
+	return ansi.Truncate(value, width, "…")
+}
+
+func firstNonEmptyModelValue(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func (d *ModelDialog) HandleMouse(localX, localY, width int, palette theme.Palette) ModelDialogAction {

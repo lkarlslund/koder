@@ -62,6 +62,26 @@ func TestModelDialogRenderUsesSingleLineTableRows(t *testing.T) {
 	}
 }
 
+func TestModelDialogRenderFallsBackToProviderWhenOwnerBlank(t *testing.T) {
+	dialog := NewModelDialog("ollama", []domain.Model{
+		{ID: "qwen2.5-coder:32b", OwnedBy: "", SupportsImages: true, CapabilitiesKnown: true},
+	}, "qwen2.5-coder:32b")
+	got := dialog.View(84, theme.Resolve("tokyonight").Palette)
+	if !strings.Contains(got, "ollama") {
+		t.Fatalf("expected provider fallback in owner column, got %q", got)
+	}
+}
+
+func TestModelDialogRenderPreservesLongModelNames(t *testing.T) {
+	dialog := NewModelDialog("openrouter", []domain.Model{
+		{ID: "anthropic/claude-sonnet-4-20250514", OwnedBy: "openrouter", SupportsImages: true, CapabilitiesKnown: true},
+	}, "anthropic/claude-sonnet-4-20250514")
+	got := dialog.View(96, theme.Resolve("tokyonight").Palette)
+	if !strings.Contains(got, "anthropic/claude-sonnet-4-20250514") {
+		t.Fatalf("expected long model id to stay visible at reasonable widths, got %q", got)
+	}
+}
+
 func TestModelDialogTabThenEnterCancels(t *testing.T) {
 	dialog := NewModelDialog("openai", []domain.Model{{ID: "gpt-5.4"}}, "gpt-5.4")
 	dialog.Update(tea.KeyMsg{Type: tea.KeyTab})
