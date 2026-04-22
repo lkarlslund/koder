@@ -68,7 +68,18 @@ func TestSessionDialogViewPreservesPreviewLineBreaks(t *testing.T) {
 	if !strings.Contains(got, "line two") || !strings.Contains(got, "line three") {
 		t.Fatalf("expected preview lines in detail pane, got %q", got)
 	}
-	if !strings.Contains(got, "│                                                                                                │\n│   line three") {
+	stripped := strings.Split(ansi.Strip(got), "\n")
+	lineThreeRow := -1
+	for i, line := range stripped {
+		if strings.Contains(line, "line three") {
+			lineThreeRow = i
+			break
+		}
+	}
+	trimDialogLine := func(line string) string {
+		return strings.TrimSpace(strings.Trim(line, "│ "))
+	}
+	if lineThreeRow < 1 || trimDialogLine(stripped[lineThreeRow-1]) != "" {
 		t.Fatalf("expected blank line before line three, got %q", got)
 	}
 	if !strings.Contains(got, "ID") || !strings.Contains(got, "Created") || !strings.Contains(got, "Modified") || !strings.Contains(got, "Tokens") {
