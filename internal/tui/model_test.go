@@ -3783,22 +3783,30 @@ func TestRefreshViewportUsesBlankLineBetweenConsecutiveToolRunsWithHalfBlocks(t 
 	m.refreshViewport()
 	got := m.viewport.View()
 	lines := strings.Split(got, "\n")
-	firstToolLine, secondToolLine := -1, -1
+	firstTitleLine, secondTitleLine := -1, -1
+	firstSubtitleLine, secondSubtitleLine := -1, -1
 	for i, line := range lines {
 		switch {
-		case firstToolLine == -1 && strings.Contains(line, "README.md"):
-			firstToolLine = i
+		case firstTitleLine == -1 && strings.Contains(line, "Read file"):
+			firstTitleLine = i
+		case firstTitleLine != -1 && secondTitleLine == -1 && strings.Contains(line, "Read file"):
+			secondTitleLine = i
+		case firstSubtitleLine == -1 && strings.Contains(line, "README.md"):
+			firstSubtitleLine = i
 		case strings.Contains(line, "go.mod"):
-			secondToolLine = i
+			secondSubtitleLine = i
 		}
 	}
-	if firstToolLine == -1 || secondToolLine == -1 {
+	if firstTitleLine == -1 || secondTitleLine == -1 || firstSubtitleLine == -1 || secondSubtitleLine == -1 {
 		t.Fatalf("expected both grouped tool runs to render, got %q", got)
 	}
-	if secondToolLine <= firstToolLine+1 {
+	if firstSubtitleLine != firstTitleLine+1 || secondSubtitleLine != secondTitleLine+1 {
+		t.Fatalf("expected tool subtitles directly under their titles, got %q", got)
+	}
+	if secondTitleLine <= firstTitleLine+1 {
 		t.Fatalf("expected second tool run to appear after a blank spacer row, got %q", got)
 	}
-	if strings.TrimSpace(lines[secondToolLine-1]) != "" {
+	if strings.TrimSpace(lines[secondTitleLine-1]) != "" {
 		t.Fatalf("expected blank spacer row between consecutive tool runs, got %q", got)
 	}
 }

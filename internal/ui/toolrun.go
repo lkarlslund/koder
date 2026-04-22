@@ -70,9 +70,6 @@ func (r ToolRun) CardView(palette theme.Palette, width int, expanded bool) strin
 	toggleStyle := lipgloss.NewStyle().Foreground(palette.UserAccentBar).Bold(true)
 	headerWidth := innerCardWidth(width)
 	headerParts := []string{titleStyle.Render(r.Title)}
-	if subtitle := strings.TrimSpace(r.Subtitle); subtitle != "" {
-		headerParts = append(headerParts, subtitleStyle.Render(subtitle))
-	}
 	if hiddenLines := r.HiddenLineCount(headerWidth); hiddenLines > 0 {
 		label := "Collapse"
 		if !expanded && hiddenLines == 1 {
@@ -86,6 +83,9 @@ func (r ToolRun) CardView(palette theme.Palette, width int, expanded bool) strin
 		headerParts = append(headerParts, toggleStyle.Render(label))
 	}
 	lines := []string{strings.Join(headerParts, "  ")}
+	if subtitle := strings.TrimSpace(r.Subtitle); subtitle != "" {
+		lines = append(lines, subtitleStyle.Render(subtitle))
+	}
 	if preview := r.PreviewText(); preview != "" {
 		lines = append(lines, renderToolRunPreview(preview, r, bodyStyle, addedStyle, deletedStyle, metaStyle, headerWidth, expanded))
 	}
