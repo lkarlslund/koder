@@ -557,17 +557,16 @@ func RenderElement(ctx *Context, element Element, width, height int) string {
 	if ctx == nil {
 		ctx = &Context{}
 	}
-	var size Size
-	if width > 0 && height > 0 {
-		size = Size{W: width, H: height}
-	} else {
-		size = element.Measure(ctx, Constraints{MaxW: width, MaxH: height})
-		if size.W == 0 {
-			size.W = max(0, width)
-		}
-		if size.H == 0 {
-			size.H = max(0, height)
-		}
+	size := element.Measure(ctx, Constraints{MaxW: width, MaxH: height})
+	if width > 0 {
+		size.W = width
+	} else if size.W == 0 {
+		size.W = 0
+	}
+	if height > 0 {
+		size.H = height
+	} else if size.H == 0 {
+		size.H = 0
 	}
 	return element.Render(ctx, Rect{W: size.W, H: size.H}).String()
 }

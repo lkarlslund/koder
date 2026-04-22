@@ -1254,13 +1254,15 @@ func (m *Model) renderBody() string {
 }
 
 func (m *Model) renderBodyElement() ui.Element {
+	main := ui.Static{Content: m.viewport.View()}
+	sidebar := ui.Sidebar{
+		Content: m.renderSidebar(),
+		Height:  m.viewport.Height,
+	}
 	return ui.BodyLayout{
-		Main: m.viewport.View(),
-		Sidebar: ui.Sidebar{
-			Content: m.renderSidebar(),
-			Height:  m.viewport.Height,
-		}.View(m.palette),
-		ShowSidebar: m.showSidebar,
+		MainElement:    main,
+		SidebarElement: sidebar,
+		ShowSidebar:    m.showSidebar,
 	}
 }
 
@@ -1269,28 +1271,28 @@ func (m *Model) renderFooter() string {
 }
 
 func (m *Model) renderFooterElement() ui.Element {
-	parts := []string{}
+	elements := []ui.Element{}
 	if prompt := m.renderApprovalPrompt(); prompt != "" {
-		parts = append(parts, prompt)
+		elements = append(elements, ui.Static{Content: prompt})
 	}
 	if menu := m.renderComposerHistoryMenu(); menu != "" {
-		parts = append(parts, menu)
+		elements = append(elements, ui.Static{Content: menu})
 	} else if menu := m.renderSlashMenu(); menu != "" {
-		parts = append(parts, menu)
+		elements = append(elements, ui.Static{Content: menu})
 	} else if menu := m.renderMentionMenu(); menu != "" {
-		parts = append(parts, menu)
+		elements = append(elements, ui.Static{Content: menu})
 	} else if menu := m.renderSkillMenu(); menu != "" {
-		parts = append(parts, menu)
+		elements = append(elements, ui.Static{Content: menu})
 	}
-	if attachments := m.renderDraftAttachments(); attachments != "" {
-		parts = append(parts, attachments)
+	if attachments := m.renderDraftAttachmentsElement(); attachments != nil {
+		elements = append(elements, attachments)
 	}
-	if preview := m.renderQueuedPromptPreview(); preview != "" {
-		parts = append(parts, preview)
+	if preview := m.renderQueuedPromptPreviewElement(); preview != nil {
+		elements = append(elements, preview)
 	}
-	parts = append(parts, "")
-	parts = append(parts, m.renderComposer())
-	return ui.Footer{Parts: parts}
+	elements = append(elements, ui.Spacer{H: 1})
+	elements = append(elements, m.renderComposerElement())
+	return ui.Footer{Elements: elements}
 }
 
 func (m *Model) footerHeight() int {
@@ -1298,6 +1300,10 @@ func (m *Model) footerHeight() int {
 }
 
 func (m *Model) renderComposer() string {
+	return ui.RenderElement(&ui.Context{Palette: m.palette}, m.renderComposerElement(), m.composerWidth(), 0)
+}
+
+func (m *Model) renderComposerElement() ui.Element {
 	m.composer.Prompt = m.promptGlyph() + " "
 	line := m.composer.VisibleLine()
 	return ui.NewComposer(ui.ComposerProps{
@@ -1311,23 +1317,37 @@ func (m *Model) renderComposer() string {
 		ContentCursor: line.Cursor(),
 		ContentAfter:  line.After(),
 		CursorVisible: m.composer.CursorVisible(),
-	}).View()
+	})
 }
 
 func (m *Model) renderDraftAttachments() string {
+	if element := m.renderDraftAttachmentsElement(); element != nil {
+		return ui.RenderElement(&ui.Context{Palette: m.palette}, element, m.composerWidth(), 0)
+	}
+	return ""
+}
+
+func (m *Model) renderDraftAttachmentsElement() ui.Element {
 	if len(m.draftAttachments) == 0 {
-		return ""
+		return nil
 	}
 	items := make([]ui.AttachmentItem, 0, len(m.draftAttachments))
 	for _, draft := range m.draftAttachments {
 		items = append(items, ui.AttachmentItem{Label: m.attachmentLabel(draft.Metadata)})
 	}
-	return ui.AttachmentList{Items: items, Width: m.composerWidth()}.View(m.palette)
+	return ui.AttachmentList{Items: items, Width: m.composerWidth()}
 }
 
 func (m *Model) renderQueuedPromptPreview() string {
+	if element := m.renderQueuedPromptPreviewElement(); element != nil {
+		return ui.RenderElement(&ui.Context{Palette: m.palette}, element, m.composerWidth(), 0)
+	}
+	return ""
+}
+
+func (m *Model) renderQueuedPromptPreviewElement() ui.Element {
 	if m.queuedPrompt == nil {
-		return ""
+		return nil
 	}
 	preview := ui.PendingInputPreview{
 		Width: m.composerWidth(),
@@ -1340,7 +1360,7 @@ func (m *Model) renderQueuedPromptPreview() string {
 	default:
 		preview.QueuedMessages = []string{m.queuedPrompt.Text}
 	}
-	return preview.View(m.palette)
+	return preview
 }
 
 func (m *Model) composerWidth() int {

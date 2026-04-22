@@ -139,6 +139,14 @@ func (d ToolRunDock) View() string {
 		Render(strings.Join(lines, "\n"))
 }
 
+func (d ToolRunDock) Measure(_ *Context, constraints Constraints) Size {
+	return constraints.Clamp(SurfaceFromString(d.View()).Size())
+}
+
+func (d ToolRunDock) Render(_ *Context, bounds Rect) Surface {
+	return SurfaceFromString(d.View()).normalize(bounds.W, bounds.H)
+}
+
 func (r ToolRun) Expandable(width int) bool {
 	return r.HiddenLineCount(width) > 0
 }

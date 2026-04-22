@@ -10,10 +10,10 @@ import (
 )
 
 type PendingInputPreview struct {
-	Width            int
-	PendingSteers    []string
-	RejectedSteers   []string
-	QueuedMessages   []string
+	Width          int
+	PendingSteers  []string
+	RejectedSteers []string
+	QueuedMessages []string
 }
 
 const pendingInputPreviewLineLimit = 3
@@ -45,6 +45,32 @@ func (p PendingInputPreview) View(palette theme.Palette) string {
 		rows = append(rows, p.renderPreviewRows(p.QueuedMessages, mutedFG, bg, true)...)
 	}
 	return strings.Join(rows, "\n")
+}
+
+func (p PendingInputPreview) Measure(ctx *Context, constraints Constraints) Size {
+	width := p.Width
+	if width <= 0 {
+		width = constraints.maxWidth()
+	}
+	return constraints.Clamp(SurfaceFromString(PendingInputPreview{
+		Width:          width,
+		PendingSteers:  p.PendingSteers,
+		RejectedSteers: p.RejectedSteers,
+		QueuedMessages: p.QueuedMessages,
+	}.View(ctx.Palette)).Size())
+}
+
+func (p PendingInputPreview) Render(ctx *Context, bounds Rect) Surface {
+	width := p.Width
+	if width <= 0 {
+		width = bounds.W
+	}
+	return SurfaceFromString(PendingInputPreview{
+		Width:          width,
+		PendingSteers:  p.PendingSteers,
+		RejectedSteers: p.RejectedSteers,
+		QueuedMessages: p.QueuedMessages,
+	}.View(ctx.Palette)).normalize(bounds.W, bounds.H)
 }
 
 func (p PendingInputPreview) renderHeader(text string, fg, bg lipgloss.Color) string {

@@ -34,6 +34,14 @@ func (i ActivityIndicator) View() string {
 		Render(i.Indicator)
 }
 
+func (i ActivityIndicator) Measure(_ *Context, constraints Constraints) Size {
+	return constraints.Clamp(SurfaceFromString(i.View()).Size())
+}
+
+func (i ActivityIndicator) Render(_ *Context, bounds Rect) Surface {
+	return SurfaceFromString(i.View()).normalize(bounds.W, bounds.H)
+}
+
 type UserMessage struct {
 	Palette     theme.Palette
 	Body        string
@@ -110,6 +118,14 @@ func (m UserMessage) View() string {
 	return strings.Join(rendered, "\n")
 }
 
+func (m UserMessage) Measure(_ *Context, constraints Constraints) Size {
+	return constraints.Clamp(SurfaceFromString(m.View()).Size())
+}
+
+func (m UserMessage) Render(_ *Context, bounds Rect) Surface {
+	return SurfaceFromString(m.View()).normalize(bounds.W, bounds.H)
+}
+
 func WrapUserMessageLine(line string, width int) []string {
 	if width <= 0 {
 		return []string{""}
@@ -161,6 +177,14 @@ func (m AssistantMessage) View() string {
 	return header + "\n" + body
 }
 
+func (m AssistantMessage) Measure(_ *Context, constraints Constraints) Size {
+	return constraints.Clamp(SurfaceFromString(m.View()).Size())
+}
+
+func (m AssistantMessage) Render(_ *Context, bounds Rect) Surface {
+	return SurfaceFromString(m.View()).normalize(bounds.W, bounds.H)
+}
+
 type ReasoningBlock struct {
 	Body    string
 	Width   int
@@ -182,6 +206,14 @@ func (b ReasoningBlock) View() string {
 		rendered = append(rendered, lineStyle.Render(line))
 	}
 	return strings.Join(rendered, "\n")
+}
+
+func (b ReasoningBlock) Measure(_ *Context, constraints Constraints) Size {
+	return constraints.Clamp(SurfaceFromString(b.View()).Size())
+}
+
+func (b ReasoningBlock) Render(_ *Context, bounds Rect) Surface {
+	return SurfaceFromString(b.View()).normalize(bounds.W, bounds.H)
 }
 
 func WorkingIndicatorLine(indicator string) string {

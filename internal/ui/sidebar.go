@@ -40,9 +40,11 @@ func (s Sidebar) Render(ctx *Context, bounds Rect) Surface {
 }
 
 type BodyLayout struct {
-	Main        string
-	Sidebar     string
-	ShowSidebar bool
+	Main           string
+	MainElement    Element
+	Sidebar        string
+	SidebarElement Element
+	ShowSidebar    bool
 }
 
 func (l BodyLayout) View() string {
@@ -58,17 +60,26 @@ func (l BodyLayout) Measure(ctx *Context, constraints Constraints) Size {
 }
 
 func (l BodyLayout) Render(ctx *Context, bounds Rect) Surface {
+	mainChild := Element(Static{Content: l.Main})
+	if l.MainElement != nil {
+		mainChild = l.MainElement
+	}
 	children := []Child{
-		Flex(Inset{Padding: SymmetricInsets(1, 0), Child: Static{Content: l.Main}}, 1),
+		Flex(Inset{Padding: SymmetricInsets(1, 0), Child: mainChild}, 1),
 	}
 	if l.ShowSidebar {
-		children = append(children, Fixed(Static{Content: l.Sidebar}))
+		sidebarChild := Element(Static{Content: l.Sidebar})
+		if l.SidebarElement != nil {
+			sidebarChild = l.SidebarElement
+		}
+		children = append(children, Fixed(sidebarChild))
 	}
 	return Row{Children: children}.Render(ctx, bounds)
 }
 
 type Footer struct {
-	Parts []string
+	Parts    []string
+	Elements []Element
 }
 
 func (f Footer) View() string {
@@ -79,9 +90,38 @@ func (f Footer) View() string {
 }
 
 func (f Footer) Measure(ctx *Context, constraints Constraints) Size {
-	return constraints.Clamp(SurfaceFromString(f.View()).Size())
+	if len(f.Elements) == 0 {
+		return constraints.Clamp(SurfaceFromString(f.View()).Size())
+	}
+	content := Column{Children: f.children()}
+	size := content.Measure(ctx, constraints)
+	return constraints.Clamp(Size{W: size.W + 2, H: size.H + 1})
 }
 
 func (f Footer) Render(ctx *Context, bounds Rect) Surface {
-	return SurfaceFromString(f.View()).normalize(bounds.W, bounds.H)
+	if len(f.Elements) == 0 {
+		return SurfaceFromString(f.View()).normalize(bounds.W, bounds.H)
+	}
+	content := Column{Children: f.children()}
+	width := bounds.W
+	if width <= 0 {
+		width = content.Measure(ctx, NewConstraints(0, bounds.H)).W + 2
+	}
+	rendered := lipgloss.NewStyle().
+		BorderTop(true).
+		Padding(0, 1).
+		Width(width).
+		Render(RenderElement(ctx, content, max(0, width-2), 0))
+	return SurfaceFromString(rendered).normalize(bounds.W, bounds.H)
+}
+
+func (f Footer) children() []Child {
+	children := make([]Child, 0, len(f.Elements))
+	for _, child := range f.Elements {
+		if child == nil {
+			continue
+		}
+		children = append(children, Fixed(child))
+	}
+	return children
 }

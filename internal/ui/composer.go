@@ -88,6 +88,14 @@ func (c Composer) View() string {
 	return lipgloss.JoinVertical(lipgloss.Left, renderBlankLine(), middle, renderBlankLine())
 }
 
+func (c Composer) Measure(_ *Context, constraints Constraints) Size {
+	return constraints.Clamp(SurfaceFromString(c.View()).Size())
+}
+
+func (c Composer) Render(_ *Context, bounds Rect) Surface {
+	return SurfaceFromString(c.View()).normalize(bounds.W, bounds.H)
+}
+
 func (c Composer) renderPlaceholderLine(promptStyle, contentStyle lipgloss.Style, prompt string, contentWidth int, placeholder string, cursorChar string) string {
 	placeholder = ansi.Truncate(placeholder, contentWidth, "")
 	if placeholder == "" {
@@ -190,4 +198,20 @@ func (l AttachmentList) View(palette theme.Palette) string {
 		rows = append(rows, style.Render(ansi.Truncate(item.Label, maxInt(1, l.Width-2), "")))
 	}
 	return strings.Join(rows, "\n")
+}
+
+func (l AttachmentList) Measure(ctx *Context, constraints Constraints) Size {
+	width := l.Width
+	if width <= 0 {
+		width = constraints.maxWidth()
+	}
+	return constraints.Clamp(SurfaceFromString(AttachmentList{Items: l.Items, Width: width}.View(ctx.Palette)).Size())
+}
+
+func (l AttachmentList) Render(ctx *Context, bounds Rect) Surface {
+	width := l.Width
+	if width <= 0 {
+		width = bounds.W
+	}
+	return SurfaceFromString(AttachmentList{Items: l.Items, Width: width}.View(ctx.Palette)).normalize(bounds.W, bounds.H)
 }
