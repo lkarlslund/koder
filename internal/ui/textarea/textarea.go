@@ -12,6 +12,9 @@ import (
 const blinkInterval = 530 * time.Millisecond
 
 type blinkMsg struct{}
+type blinkTickMsg struct {
+	generation int
+}
 
 type Cursor struct {
 	char      string
@@ -50,12 +53,13 @@ type Model struct {
 	BlurredStyle    Style
 	Cursor          Cursor
 
-	width  int
-	height int
-	focus  bool
-	value  []rune
-	cursor int
-	blink  bool
+	width           int
+	height          int
+	focus           bool
+	value           []rune
+	cursor          int
+	blink           bool
+	blinkGeneration int
 }
 
 func New() Model {
@@ -65,11 +69,13 @@ func New() Model {
 func (m *Model) Focus() {
 	m.focus = true
 	m.blink = true
+	m.blinkGeneration++
 }
 
 func (m *Model) Blur() {
 	m.focus = false
 	m.blink = false
+	m.blinkGeneration++
 }
 
 func (m *Model) SetWidth(width int) {
@@ -116,8 +122,9 @@ func (m Model) BlinkCmd() tea.Cmd {
 	if !m.focus {
 		return nil
 	}
+	generation := m.blinkGeneration
 	return tea.Tick(blinkInterval, func(time.Time) tea.Msg {
-		return blinkMsg{}
+		return blinkTickMsg{generation: generation}
 	})
 }
 
@@ -129,11 +136,21 @@ func (m *Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 		m.blink = !m.blink
 		return *m, m.BlinkCmd()
+	case blinkTickMsg:
+		if !m.focus {
+			return *m, nil
+		}
+		if msg.generation != m.blinkGeneration {
+			return *m, nil
+		}
+		m.blink = !m.blink
+		return *m, m.BlinkCmd()
 	case tea.KeyMsg:
 		if !m.focus {
 			return *m, nil
 		}
 		m.blink = true
+		m.blinkGeneration++
 		cmd := m.BlinkCmd()
 		switch msg.Type {
 		case tea.KeyLeft:

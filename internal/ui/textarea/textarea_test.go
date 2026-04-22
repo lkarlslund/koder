@@ -128,7 +128,7 @@ func TestBlinkTogglesCursorVisibility(t *testing.T) {
 		t.Fatalf("expected visible cursor rendering in view, got %q", visible)
 	}
 
-	next, cmd := m.Update(blinkMsg{})
+	next, cmd := m.Update(blinkTickMsg{generation: m.blinkGeneration})
 	if cmd == nil {
 		t.Fatal("expected blink tick to schedule the next blink")
 	}
@@ -141,12 +141,33 @@ func TestBlinkTogglesCursorVisibility(t *testing.T) {
 	}
 }
 
+func TestStaleBlinkTickIsIgnored(t *testing.T) {
+	m := newTestModel()
+	m.SetValue("abc")
+	m.SetCursor(len("abc"))
+
+	currentGen := m.blinkGeneration
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	if next.blinkGeneration == currentGen {
+		t.Fatal("expected key input to advance blink generation")
+	}
+
+	before := next.View()
+	after, cmd := next.Update(blinkTickMsg{generation: currentGen})
+	if cmd != nil {
+		t.Fatal("expected stale blink tick to be ignored without scheduling a new command")
+	}
+	if after.View() != before {
+		t.Fatalf("expected stale blink tick to leave view unchanged, before=%q after=%q", before, after.View())
+	}
+}
+
 func TestBlurStopsBlinkAndInput(t *testing.T) {
 	m := newTestModel()
 	m.SetValue("abc")
 	m.Blur()
 
-	next, cmd := m.Update(blinkMsg{})
+	next, cmd := m.Update(blinkTickMsg{generation: m.blinkGeneration})
 	if cmd != nil {
 		t.Fatal("expected no blink command while blurred")
 	}
