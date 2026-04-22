@@ -26,9 +26,26 @@ type AttachmentItem struct {
 	Label string
 }
 
-func RenderComposer(props ComposerProps) string {
-	width := maxInt(1, props.Width)
-	prompt := props.PromptGlyph + " "
+type Composer struct {
+	Palette       theme.Palette
+	Width         int
+	HalfBlocks    bool
+	PromptGlyph   string
+	Value         string
+	Placeholder   string
+	ContentBefore string
+	ContentCursor string
+	ContentAfter  string
+	CursorVisible bool
+}
+
+func NewComposer(props ComposerProps) Composer {
+	return Composer(props)
+}
+
+func (c Composer) View() string {
+	width := maxInt(1, c.Width)
+	prompt := c.PromptGlyph + " "
 	promptWidth := ansi.StringWidth(prompt)
 	if promptWidth >= width {
 		prompt = ansi.Truncate(prompt, maxInt(1, width-1), "")
@@ -36,45 +53,45 @@ func RenderComposer(props ComposerProps) string {
 	}
 	contentWidth := maxInt(0, width-promptWidth)
 	promptStyle := lipgloss.NewStyle().
-		Background(props.Palette.UserTextBackground).
-		Foreground(props.Palette.UserAccentBar)
+		Background(c.Palette.UserTextBackground).
+		Foreground(c.Palette.UserAccentBar)
 	contentStyle := lipgloss.NewStyle().
-		Background(props.Palette.UserTextBackground).
-		Foreground(props.Palette.UserTextForeground)
+		Background(c.Palette.UserTextBackground).
+		Foreground(c.Palette.UserTextForeground)
 
 	renderBlankLine := func() string {
-		return renderComposerLine(prompt, promptStyle, "", "", "", contentWidth, false, props.Palette.UserTextForeground, props.Palette.UserTextBackground)
+		return c.renderLine(prompt, promptStyle, "", "", "", contentWidth, false, c.Palette.UserTextForeground, c.Palette.UserTextBackground)
 	}
 
-	middle := renderComposerLine(
+	middle := c.renderLine(
 		prompt,
 		promptStyle,
-		props.ContentBefore,
-		props.ContentCursor,
-		props.ContentAfter,
+		c.ContentBefore,
+		c.ContentCursor,
+		c.ContentAfter,
 		contentWidth,
-		props.CursorVisible,
-		props.Palette.UserTextForeground,
-		props.Palette.UserTextBackground,
+		c.CursorVisible,
+		c.Palette.UserTextForeground,
+		c.Palette.UserTextBackground,
 	)
-	if strings.TrimSpace(props.Value) == "" {
-		middle = RenderComposerPlaceholderLine(promptStyle, contentStyle, prompt, contentWidth, props.Placeholder, props.ContentCursor, props.CursorVisible, props.Palette)
+	if strings.TrimSpace(c.Value) == "" {
+		middle = c.renderPlaceholderLine(promptStyle, contentStyle, prompt, contentWidth, c.Placeholder, c.ContentCursor)
 	}
 
-	if props.HalfBlocks {
+	if c.HalfBlocks {
 		return lipgloss.JoinVertical(lipgloss.Left,
-			RenderHalfBlockLine(width, "▄", props.Palette),
+			c.HalfBlockLine("▄"),
 			middle,
-			RenderHalfBlockLine(width, "▀", props.Palette),
+			c.HalfBlockLine("▀"),
 		)
 	}
 	return lipgloss.JoinVertical(lipgloss.Left, renderBlankLine(), middle, renderBlankLine())
 }
 
-func RenderComposerPlaceholderLine(promptStyle, contentStyle lipgloss.Style, prompt string, contentWidth int, placeholder string, cursorChar string, cursorVisible bool, palette theme.Palette) string {
+func (c Composer) renderPlaceholderLine(promptStyle, contentStyle lipgloss.Style, prompt string, contentWidth int, placeholder string, cursorChar string) string {
 	placeholder = ansi.Truncate(placeholder, contentWidth, "")
 	if placeholder == "" {
-		return renderComposerPlaceholder(prompt, promptStyle, "", cursorChar, "", contentWidth, cursorVisible, palette.UserTextForeground, palette.UserTextBackground, palette.ComposerMutedText)
+		return c.renderPlaceholder(prompt, promptStyle, "", cursorChar, "", contentWidth, c.CursorVisible, c.Palette.UserTextForeground, c.Palette.UserTextBackground, c.Palette.ComposerMutedText)
 	}
 	runes := []rune(placeholder)
 	cursor := string(runes[0])
@@ -85,10 +102,10 @@ func RenderComposerPlaceholderLine(promptStyle, contentStyle lipgloss.Style, pro
 	if len(runes) > 1 {
 		rest = string(runes[1:])
 	}
-	return renderComposerPlaceholder(prompt, promptStyle, "", cursor, rest, contentWidth, cursorVisible, palette.UserTextForeground, palette.UserTextBackground, palette.ComposerMutedText)
+	return c.renderPlaceholder(prompt, promptStyle, "", cursor, rest, contentWidth, c.CursorVisible, c.Palette.UserTextForeground, c.Palette.UserTextBackground, c.Palette.ComposerMutedText)
 }
 
-func renderComposerLine(prompt string, promptStyle lipgloss.Style, before, cursor, after string, contentWidth int, cursorVisible bool, textFG, textBG lipgloss.Color) string {
+func (c Composer) renderLine(prompt string, promptStyle lipgloss.Style, before, cursor, after string, contentWidth int, cursorVisible bool, textFG, textBG lipgloss.Color) string {
 	line := promptStyle.Render(prompt)
 	if contentWidth <= 0 {
 		return line
@@ -112,7 +129,7 @@ func renderComposerLine(prompt string, promptStyle lipgloss.Style, before, curso
 	return line
 }
 
-func renderComposerPlaceholder(prompt string, promptStyle lipgloss.Style, before, cursor, after string, contentWidth int, cursorVisible bool, textFG, textBG, muted lipgloss.Color) string {
+func (c Composer) renderPlaceholder(prompt string, promptStyle lipgloss.Style, before, cursor, after string, contentWidth int, cursorVisible bool, textFG, textBG, muted lipgloss.Color) string {
 	line := promptStyle.Render(prompt)
 	if contentWidth <= 0 {
 		return line
@@ -136,7 +153,11 @@ func renderComposerPlaceholder(prompt string, promptStyle lipgloss.Style, before
 	return line
 }
 
-func RenderHalfBlockLine(width int, char string, palette theme.Palette) string {
+func (c Composer) HalfBlockLine(char string) string {
+	return renderHalfBlockLine(c.Width, char, c.Palette)
+}
+
+func renderHalfBlockLine(width int, char string, palette theme.Palette) string {
 	if width <= 0 {
 		return ""
 	}
@@ -150,18 +171,23 @@ func RenderHalfBlockLine(width int, char string, palette theme.Palette) string {
 	return bar + fill
 }
 
-func RenderAttachmentRows(items []AttachmentItem, width int, palette theme.Palette) string {
-	if len(items) == 0 || width <= 0 {
+type AttachmentList struct {
+	Items []AttachmentItem
+	Width int
+}
+
+func (l AttachmentList) View(palette theme.Palette) string {
+	if len(l.Items) == 0 || l.Width <= 0 {
 		return ""
 	}
 	style := lipgloss.NewStyle().
-		Width(width).
+		Width(l.Width).
 		Foreground(palette.MarkdownText).
 		Background(palette.UserTextBackground).
 		Padding(0, 1)
-	rows := make([]string, 0, len(items))
-	for _, item := range items {
-		rows = append(rows, style.Render(ansi.Truncate(item.Label, maxInt(1, width-2), "")))
+	rows := make([]string, 0, len(l.Items))
+	for _, item := range l.Items {
+		rows = append(rows, style.Render(ansi.Truncate(item.Label, maxInt(1, l.Width-2), "")))
 	}
 	return strings.Join(rows, "\n")
 }

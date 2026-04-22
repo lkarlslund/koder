@@ -26,9 +26,12 @@ func TestRenderSelectableRowSelectedUsesDistinctHighlightColors(t *testing.T) {
 		UserTextForeground:     "#070809",
 	}
 
-	unselected := RenderSelectableRow("write", "Allow writes after approval", "active", 48, palette, false, false)
-	selected := RenderSelectableRow("write", "Allow writes after approval", "active", 48, palette, true, false)
-	focused := RenderSelectableRow("write", "Allow writes after approval", "active", 48, palette, true, true)
+	base := SelectableRow{Primary: "write", Secondary: "Allow writes after approval", Tertiary: "active", Width: 48}
+	unselected := base.View(palette)
+	base.Selected = true
+	selected := base.View(palette)
+	base.Focused = true
+	focused := base.View(palette)
 
 	if selected == unselected {
 		t.Fatal("expected selected row styling to differ from unselected row")

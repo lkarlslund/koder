@@ -1225,7 +1225,14 @@ func (m *Model) renderHeader() string {
 }
 
 func (m *Model) renderBody() string {
-	return ui.RenderBody(m.viewport.View(), ui.RenderSidebar(m.renderSidebar(), m.palette, m.viewport.Height), m.showSidebar)
+	return ui.BodyLayout{
+		Main: m.viewport.View(),
+		Sidebar: ui.Sidebar{
+			Content: m.renderSidebar(),
+			Height:  m.viewport.Height,
+		}.View(m.palette),
+		ShowSidebar: m.showSidebar,
+	}.View()
 }
 
 func (m *Model) renderFooter() string {
@@ -1247,7 +1254,7 @@ func (m *Model) renderFooter() string {
 	}
 	parts = append(parts, "")
 	parts = append(parts, m.renderComposer())
-	return ui.RenderFooter(parts)
+	return ui.Footer{Parts: parts}.View()
 }
 
 func (m *Model) footerHeight() int {
@@ -1257,7 +1264,7 @@ func (m *Model) footerHeight() int {
 func (m *Model) renderComposer() string {
 	m.composer.Prompt = m.promptGlyph() + " "
 	line := m.composer.VisibleLine()
-	return ui.RenderComposer(ui.ComposerProps{
+	return ui.NewComposer(ui.ComposerProps{
 		Palette:       m.palette,
 		Width:         m.composerWidth(),
 		HalfBlocks:    m.halfBlocksEnabled(),
@@ -1268,7 +1275,7 @@ func (m *Model) renderComposer() string {
 		ContentCursor: line.Cursor(),
 		ContentAfter:  line.After(),
 		CursorVisible: m.composer.CursorVisible(),
-	})
+	}).View()
 }
 
 func (m *Model) renderDraftAttachments() string {
@@ -1279,7 +1286,7 @@ func (m *Model) renderDraftAttachments() string {
 	for _, draft := range m.draftAttachments {
 		items = append(items, ui.AttachmentItem{Label: m.attachmentLabel(draft.Metadata)})
 	}
-	return ui.RenderAttachmentRows(items, m.composerWidth(), m.palette)
+	return ui.AttachmentList{Items: items, Width: m.composerWidth()}.View(m.palette)
 }
 
 func (m *Model) composerWidth() int {
@@ -1309,7 +1316,7 @@ func (m *Model) promptGlyph() string {
 }
 
 func (m *Model) renderHalfBlockLine(width int, char string) string {
-	return ui.RenderHalfBlockLine(width, char, m.palette)
+	return ui.Composer{Width: width, Palette: m.palette}.HalfBlockLine(char)
 }
 
 func mPrompt(cfg config.Config) string {
@@ -1446,7 +1453,7 @@ func (m *Model) refreshViewportAt(offset int) {
 	for i, block := range transcriptBlocks {
 		rendered := m.renderTranscriptBlock(block)
 		blocks = append(blocks, rendered)
-		if block.Kind == transcriptBlockToolRun && ui.ToolRunExpandable(block.ToolRun, m.viewport.Width) {
+		if block.Kind == transcriptBlockToolRun && block.ToolRun.Expandable(m.viewport.Width) {
 			m.toolRunClickZones = append(m.toolRunClickZones, toolRunClickZone{
 				RunID:    block.ToolRun.ID,
 				StartRow: row,
@@ -1487,7 +1494,10 @@ func (m *Model) renderTranscriptActivity() string {
 	if !m.busy.transcriptActive() {
 		return ""
 	}
-	return ui.RenderActivityIndicator(ui.WorkingIndicatorLine(m.workingIndicator()), m.palette)
+	return ui.ActivityIndicator{
+		Indicator: ui.WorkingIndicatorLine(m.workingIndicator()),
+		Palette:   m.palette,
+	}.View()
 }
 
 func (m *Model) renderTranscriptMessage(msg domain.Message) string {
@@ -1509,14 +1519,14 @@ func (m *Model) renderTranscriptMessage(msg domain.Message) string {
 }
 
 func (m *Model) renderUserMessage(body, stamp string) string {
-	return ui.RenderUserMessage(ui.UserMessageProps{
+	return ui.NewUserMessage(ui.UserMessageProps{
 		Palette:     m.palette,
 		Body:        body,
 		Stamp:       stamp,
 		Width:       m.userMessageWidth(body, stamp),
 		HalfBlocks:  m.halfBlocksEnabled(),
 		PromptGlyph: m.promptGlyph(),
-	})
+	}).View()
 }
 
 func formatSessionTime(t time.Time) string {
@@ -1573,7 +1583,12 @@ func (m *Model) userMessageWidth(body, stamp string) int {
 }
 
 func (m *Model) renderAssistantMessage(body, stamp string) string {
-	return ui.RenderAssistantMessageWidth(body, stamp, m.viewport.Width, m.palette)
+	return ui.AssistantMessage{
+		Body:    body,
+		Stamp:   stamp,
+		Width:   m.viewport.Width,
+		Palette: m.palette,
+	}.View()
 }
 
 func (m *Model) attachmentLabel(meta attachment.Metadata) string {
@@ -1739,7 +1754,11 @@ func (m *Model) renderUserMessageParts(parts []domain.Part) string {
 }
 
 func (m *Model) renderReasoningBlock(input string) string {
-	return ui.RenderReasoningBlockWidth(input, m.viewport.Width, m.palette)
+	return ui.ReasoningBlock{
+		Body:    input,
+		Width:   m.viewport.Width,
+		Palette: m.palette,
+	}.View()
 }
 
 func (m Model) loadCmd() tea.Cmd {
@@ -3332,7 +3351,7 @@ func (m *Model) renderSlashMenu() string {
 		items = append(items, ui.MenuItem{Title: item.Name, Description: item.Description})
 	}
 	selected := m.slashIndex - start
-	return ui.RenderSlashMenu("Commands", items, selected)
+	return ui.SlashMenu{Title: "Commands", Items: items, Selected: selected}.View()
 }
 
 func (m *Model) renderSkillMenu() string {
@@ -3353,7 +3372,7 @@ func (m *Model) renderSkillMenu() string {
 		})
 	}
 	selected := m.skillIndex - start
-	return ui.RenderSlashMenu("Skills", items, selected)
+	return ui.SlashMenu{Title: "Skills", Items: items, Selected: selected}.View()
 }
 
 func (m *Model) renderMentionMenu() string {
@@ -3374,7 +3393,7 @@ func (m *Model) renderMentionMenu() string {
 		})
 	}
 	selected := m.mentionIndex - start
-	return ui.RenderSlashMenu("References", items, selected)
+	return ui.SlashMenu{Title: "References", Items: items, Selected: selected}.View()
 }
 
 func (m *Model) renderComposerHistoryMenu() string {
@@ -3398,7 +3417,13 @@ func (m *Model) renderComposerHistoryMenu() string {
 		lines = append(lines, "")
 		for idx := start; idx < end; idx++ {
 			entry := matches[idx]
-			lines = append(lines, ui.RenderSelectableRow(firstHistoryLine(entry), historySummary(entry), "", width-4, m.palette, idx == m.composerHistory.SearchIndex, idx == m.composerHistory.SearchIndex))
+			lines = append(lines, ui.SelectableRow{
+				Primary:   firstHistoryLine(entry),
+				Secondary: historySummary(entry),
+				Width:     width - 4,
+				Selected:  idx == m.composerHistory.SearchIndex,
+				Focused:   idx == m.composerHistory.SearchIndex,
+			}.View(m.palette))
 		}
 	}
 	lines = append(lines, "", lipgloss.NewStyle().Foreground(m.palette.AssistantTimestampText).Render("enter accept  esc cancel  ctrl-r/down older  ctrl-s/up newer"))
@@ -3694,12 +3719,12 @@ func (m *Model) renderApprovalPrompt() string {
 		return ""
 	}
 	m.ensureApprovalButtons()
-	return ui.RenderToolRunDock(ui.ToolRunDockProps{
+	return ui.ToolRunDock{
 		Palette: m.palette,
 		Run:     m.approvalToolRun(m.approvals[0]),
 		Buttons: m.approvalButtonRow(),
 		Hints:   "enter select  tab switch  p permissions  y approve  n deny",
-	})
+	}.View()
 }
 
 func (m *Model) ensureApprovalButtons() {

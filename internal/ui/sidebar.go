@@ -8,7 +8,12 @@ import (
 	"github.com/lkarlslund/koder/internal/theme"
 )
 
-func RenderSidebar(content string, palette theme.Palette, height int) string {
+type Sidebar struct {
+	Content string
+	Height  int
+}
+
+func (s Sidebar) View(palette theme.Palette) string {
 	style := lipgloss.NewStyle().
 		Width(30).
 		Padding(0, 1).
@@ -16,23 +21,33 @@ func RenderSidebar(content string, palette theme.Palette, height int) string {
 		Foreground(palette.SidebarForeground).
 		BorderLeft(true).
 		BorderForeground(palette.SidebarBorder)
-	if height > 0 {
-		style = style.Height(height).MaxHeight(height)
+	if s.Height > 0 {
+		style = style.Height(s.Height).MaxHeight(s.Height)
 	}
-	return style.Render(strings.TrimRight(content, "\n"))
+	return style.Render(strings.TrimRight(s.Content, "\n"))
 }
 
-func RenderBody(main, sidebar string, showSidebar bool) string {
-	main = lipgloss.NewStyle().Padding(0, 1).Render(main)
-	if !showSidebar {
+type BodyLayout struct {
+	Main        string
+	Sidebar     string
+	ShowSidebar bool
+}
+
+func (l BodyLayout) View() string {
+	main := lipgloss.NewStyle().Padding(0, 1).Render(l.Main)
+	if !l.ShowSidebar {
 		return main
 	}
-	return lipgloss.JoinHorizontal(lipgloss.Top, main, sidebar)
+	return lipgloss.JoinHorizontal(lipgloss.Top, main, l.Sidebar)
 }
 
-func RenderFooter(parts []string) string {
+type Footer struct {
+	Parts []string
+}
+
+func (f Footer) View() string {
 	return lipgloss.NewStyle().
 		BorderTop(true).
 		Padding(0, 1).
-		Render(lipgloss.JoinVertical(lipgloss.Left, parts...))
+		Render(lipgloss.JoinVertical(lipgloss.Left, f.Parts...))
 }

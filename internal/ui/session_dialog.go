@@ -134,7 +134,7 @@ func (d SessionDialog) View(width int, palette theme.Palette) string {
 	titleWidth := maxInt(16, contentWidth-idWidth-timeWidth-timeWidth-tokensWidth-cwdWidth-(gapCount*2))
 
 	listLines := []string{
-		renderSessionTableHeader(idWidth, timeWidth, tokensWidth, cwdWidth, titleWidth, d.ShowCWD, palette),
+		d.renderTableHeader(idWidth, timeWidth, tokensWidth, cwdWidth, titleWidth, palette),
 	}
 	if len(d.view) == 0 {
 		listLines = append(listLines, "No matches")
@@ -149,13 +149,13 @@ func (d SessionDialog) View(width int, palette theme.Palette) string {
 		}
 		for idx := start; idx < end; idx++ {
 			item := d.view[idx]
-			listLines = append(listLines, renderSessionTableRow(item, idWidth, timeWidth, tokensWidth, cwdWidth, titleWidth, d.ShowCWD, palette, idx == d.Index, idx == d.Index && d.focus == pickerDialogFocusList))
+			listLines = append(listLines, d.renderTableRow(item, idWidth, timeWidth, tokensWidth, cwdWidth, titleWidth, palette, idx == d.Index, idx == d.Index && d.focus == pickerDialogFocusList))
 		}
 	}
 
 	details := "No session selected"
 	if item, ok := d.current(); ok {
-		details = clampPreviewLines(sessionPreviewText(item, contentWidth), 10)
+		details = d.clampPreviewLines(d.previewText(item, contentWidth), 10)
 	}
 
 	tablePane := lipgloss.NewStyle().
@@ -303,14 +303,14 @@ func (d SessionDialog) buttonRow(width int) ButtonRow {
 	return buttons
 }
 
-func renderSessionTableHeader(idWidth, timeWidth, tokensWidth, cwdWidth, titleWidth int, showCWD bool, palette theme.Palette) string {
+func (d SessionDialog) renderTableHeader(idWidth, timeWidth, tokensWidth, cwdWidth, titleWidth int, palette theme.Palette) string {
 	style := lipgloss.NewStyle().
 		Foreground(palette.AssistantTimestampText).
 		Bold(true)
-	return style.Render(joinSessionColumns("ID", idWidth, "Created", timeWidth, "Modified", timeWidth, "Tokens", tokensWidth, "CWD", cwdWidth, "Title", titleWidth, showCWD))
+	return style.Render(joinSessionColumns("ID", idWidth, "Created", timeWidth, "Modified", timeWidth, "Tokens", tokensWidth, "CWD", cwdWidth, "Title", titleWidth, d.ShowCWD))
 }
 
-func renderSessionTableRow(item SessionItem, idWidth, timeWidth, tokensWidth, cwdWidth, titleWidth int, showCWD bool, palette theme.Palette, selected bool, focused bool) string {
+func (d SessionDialog) renderTableRow(item SessionItem, idWidth, timeWidth, tokensWidth, cwdWidth, titleWidth int, palette theme.Palette, selected bool, focused bool) string {
 	row := joinSessionColumns(
 		item.SessionID,
 		idWidth,
@@ -324,10 +324,10 @@ func renderSessionTableRow(item SessionItem, idWidth, timeWidth, tokensWidth, cw
 		cwdWidth,
 		item.Title,
 		titleWidth,
-		showCWD,
+		d.ShowCWD,
 	)
 	totalWidth := idWidth + timeWidth + timeWidth + tokensWidth + titleWidth + 8
-	if showCWD {
+	if d.ShowCWD {
 		totalWidth += cwdWidth + 2
 	}
 	style := lipgloss.NewStyle().Width(totalWidth)
@@ -354,7 +354,7 @@ func joinSessionColumns(id string, idWidth int, created string, createdWidth int
 	return strings.Join(cols, "  ")
 }
 
-func sessionPreviewText(item SessionItem, width int) string {
+func (d SessionDialog) previewText(item SessionItem, width int) string {
 	if preview := strings.TrimSpace(item.Preview); preview != "" {
 		return preview
 	}
@@ -364,7 +364,7 @@ func sessionPreviewText(item SessionItem, width int) string {
 	return ""
 }
 
-func clampPreviewLines(text string, maxLines int) string {
+func (d SessionDialog) clampPreviewLines(text string, maxLines int) string {
 	if maxLines <= 0 {
 		return ""
 	}

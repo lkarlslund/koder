@@ -40,13 +40,6 @@ func (r ToolRun) PreviewText() string {
 	return firstNonEmpty(strings.TrimSpace(r.ErrorText), strings.TrimSpace(r.Output), strings.TrimSpace(r.Diff), strings.TrimSpace(r.Preview))
 }
 
-type ToolRunDockProps struct {
-	Palette theme.Palette
-	Run     ToolRun
-	Buttons ButtonRow
-	Hints   string
-}
-
 func (r ToolRun) StatusLabel() string {
 	switch r.Status {
 	case ToolRunStatusPendingApproval:
@@ -67,7 +60,7 @@ func (r ToolRun) StatusLabel() string {
 	}
 }
 
-func RenderToolRunCard(run ToolRun, palette theme.Palette, width int, expanded bool) string {
+func (r ToolRun) CardView(palette theme.Palette, width int, expanded bool) string {
 	titleStyle := lipgloss.NewStyle().Foreground(palette.MarkdownText).Bold(true).Italic(true)
 	subtitleStyle := lipgloss.NewStyle().Foreground(palette.ComposerMutedText)
 	bodyStyle := lipgloss.NewStyle().Foreground(palette.MarkdownText)
@@ -76,11 +69,11 @@ func RenderToolRunCard(run ToolRun, palette theme.Palette, width int, expanded b
 	metaStyle := lipgloss.NewStyle().Foreground(palette.ComposerMutedText)
 	toggleStyle := lipgloss.NewStyle().Foreground(palette.UserAccentBar).Bold(true)
 	headerWidth := innerCardWidth(width)
-	headerParts := []string{titleStyle.Render(run.Title)}
-	if subtitle := strings.TrimSpace(run.Subtitle); subtitle != "" {
+	headerParts := []string{titleStyle.Render(r.Title)}
+	if subtitle := strings.TrimSpace(r.Subtitle); subtitle != "" {
 		headerParts = append(headerParts, subtitleStyle.Render(subtitle))
 	}
-	if hiddenLines := ToolRunHiddenLineCount(run, headerWidth); hiddenLines > 0 {
+	if hiddenLines := r.HiddenLineCount(headerWidth); hiddenLines > 0 {
 		label := "Collapse"
 		if !expanded && hiddenLines == 1 {
 			label = "Expand (1 line more)"
@@ -93,15 +86,22 @@ func RenderToolRunCard(run ToolRun, palette theme.Palette, width int, expanded b
 		headerParts = append(headerParts, toggleStyle.Render(label))
 	}
 	lines := []string{strings.Join(headerParts, "  ")}
-	if preview := run.PreviewText(); preview != "" {
-		lines = append(lines, renderToolRunPreview(preview, run, bodyStyle, addedStyle, deletedStyle, metaStyle, headerWidth, expanded))
+	if preview := r.PreviewText(); preview != "" {
+		lines = append(lines, renderToolRunPreview(preview, r, bodyStyle, addedStyle, deletedStyle, metaStyle, headerWidth, expanded))
 	}
 	return strings.Join(lines, "\n")
 }
 
-func RenderToolRunDock(props ToolRunDockProps) string {
-	run := props.Run
-	statusStyle := lipgloss.NewStyle().Foreground(toolRunStatusColor(run.Status, props.Palette)).Bold(true)
+type ToolRunDock struct {
+	Palette theme.Palette
+	Run     ToolRun
+	Buttons ButtonRow
+	Hints   string
+}
+
+func (d ToolRunDock) View() string {
+	run := d.Run
+	statusStyle := lipgloss.NewStyle().Foreground(toolRunStatusColor(run.Status, d.Palette)).Bold(true)
 	title := lipgloss.JoinHorizontal(lipgloss.Left,
 		lipgloss.NewStyle().Bold(true).Render(run.Title),
 		"  ",
@@ -109,15 +109,15 @@ func RenderToolRunDock(props ToolRunDockProps) string {
 	)
 	lines := []string{title}
 	if subtitle := strings.TrimSpace(run.Subtitle); subtitle != "" {
-		lines = append(lines, lipgloss.NewStyle().Foreground(props.Palette.ComposerMutedText).Render(subtitle))
+		lines = append(lines, lipgloss.NewStyle().Foreground(d.Palette.ComposerMutedText).Render(subtitle))
 	}
 	if preview := firstNonEmpty(strings.TrimSpace(run.Preview), strings.TrimSpace(run.Output), strings.TrimSpace(run.ErrorText)); preview != "" {
 		lines = append(lines, preview)
 	}
-	buttons := props.Buttons
+	buttons := d.Buttons
 	buttons.Align = HorizontalAlignRight
-	contentWidth := maxInt(ansi.StringWidth(title), ansi.StringWidth(props.Hints))
-	contentWidth = maxInt(contentWidth, ansi.StringWidth(buttons.line(props.Palette)))
+	contentWidth := maxInt(ansi.StringWidth(title), ansi.StringWidth(d.Hints))
+	contentWidth = maxInt(contentWidth, ansi.StringWidth(buttons.line(d.Palette)))
 	if subtitle := strings.TrimSpace(run.Subtitle); subtitle != "" {
 		contentWidth = maxInt(contentWidth, ansi.StringWidth(subtitle))
 	}
@@ -129,26 +129,26 @@ func RenderToolRunDock(props ToolRunDockProps) string {
 	buttons.Width = contentWidth
 
 	lines = append(lines,
-		buttons.View(props.Palette),
-		props.Hints,
+		buttons.View(d.Palette),
+		d.Hints,
 	)
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(toolRunStatusColor(run.Status, props.Palette)).
+		BorderForeground(toolRunStatusColor(run.Status, d.Palette)).
 		Padding(0, 1).
 		Render(strings.Join(lines, "\n"))
 }
 
-func ToolRunExpandable(run ToolRun, width int) bool {
-	return ToolRunHiddenLineCount(run, width) > 0
+func (r ToolRun) Expandable(width int) bool {
+	return r.HiddenLineCount(width) > 0
 }
 
-func ToolRunHiddenLineCount(run ToolRun, width int) int {
-	preview := strings.TrimSpace(run.PreviewText())
+func (r ToolRun) HiddenLineCount(width int) int {
+	preview := strings.TrimSpace(r.PreviewText())
 	if preview == "" {
 		return 0
 	}
-	if strings.TrimSpace(run.Diff) != "" && strings.TrimSpace(run.Output) == "" && strings.TrimSpace(run.ErrorText) == "" {
+	if strings.TrimSpace(r.Diff) != "" && strings.TrimSpace(r.Output) == "" && strings.TrimSpace(r.ErrorText) == "" {
 		expandedLines := renderedLineCount(wrapPlain(preview, width))
 		collapsedLines := renderedLineCount(wrapPlain(diffSummary(preview), width))
 		if expandedLines <= collapsedLines {

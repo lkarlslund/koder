@@ -12,7 +12,22 @@ import (
 	"github.com/lkarlslund/koder/internal/theme"
 )
 
-func RenderSelectableRow(primary, secondary, tertiary string, width int, palette theme.Palette, selected bool, focused bool) string {
+type SelectableRow struct {
+	Primary   string
+	Secondary string
+	Tertiary  string
+	Width     int
+	Selected  bool
+	Focused   bool
+}
+
+func (r SelectableRow) View(palette theme.Palette) string {
+	primary := r.Primary
+	secondary := r.Secondary
+	tertiary := r.Tertiary
+	width := r.Width
+	selected := r.Selected
+	focused := r.Focused
 	if width <= 0 {
 		width = 72
 	}
@@ -154,7 +169,14 @@ func (r CheckboxRow) View(width int, palette theme.Palette, focused bool) string
 			label = "Off"
 		}
 	}
-	row := RenderSelectableRow(r.Label, r.Description, glyph+" "+label, width, palette, focused, focused)
+	row := SelectableRow{
+		Primary:   r.Label,
+		Secondary: r.Description,
+		Tertiary:  glyph + " " + label,
+		Width:     width,
+		Selected:  focused,
+		Focused:   focused,
+	}.View(palette)
 	if focused {
 		return lipgloss.NewStyle().Foreground(valueColor).Background(palette.UserTextBackground).Render(row)
 	}
@@ -168,7 +190,14 @@ type ChoiceRow struct {
 }
 
 func (r ChoiceRow) View(width int, palette theme.Palette, focused bool) string {
-	return RenderSelectableRow(r.Label, r.Description, r.Value, width, palette, focused, focused)
+	return SelectableRow{
+		Primary:   r.Label,
+		Secondary: r.Description,
+		Tertiary:  r.Value,
+		Width:     width,
+		Selected:  focused,
+		Focused:   focused,
+	}.View(palette)
 }
 
 type Button struct {

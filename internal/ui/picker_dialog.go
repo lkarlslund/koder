@@ -190,7 +190,13 @@ func (d PickerDialog) View(width int, palette theme.Palette) string {
 		lines = append(lines, "  no matches")
 	} else {
 		for idx, item := range d.view {
-			lines = append(lines, RenderSelectableRow(item.Title, item.Description, "", 72, palette, idx == d.Index, idx == d.Index && d.Focus == pickerDialogFocusList))
+			lines = append(lines, SelectableRow{
+				Primary:   item.Title,
+				Secondary: item.Description,
+				Width:     72,
+				Selected:  idx == d.Index,
+				Focused:   idx == d.Index && d.Focus == pickerDialogFocusList,
+			}.View(palette))
 		}
 	}
 	lines = append(lines, "", d.buttonRow(width).View(palette))

@@ -19,44 +19,62 @@ type UserMessageProps struct {
 	PromptGlyph string
 }
 
-func RenderActivityIndicator(indicator string, palette theme.Palette) string {
-	if strings.TrimSpace(indicator) == "" {
+type ActivityIndicator struct {
+	Indicator string
+	Palette   theme.Palette
+}
+
+func (i ActivityIndicator) View() string {
+	if strings.TrimSpace(i.Indicator) == "" {
 		return ""
 	}
 	return lipgloss.NewStyle().
-		Foreground(palette.ActivityText).
+		Foreground(i.Palette.ActivityText).
 		Bold(true).
 		Padding(0, 1).
-		Render(indicator)
+		Render(i.Indicator)
 }
 
-func RenderUserMessage(props UserMessageProps) string {
+type UserMessage struct {
+	Palette     theme.Palette
+	Body        string
+	Stamp       string
+	Width       int
+	HalfBlocks  bool
+	PromptGlyph string
+}
+
+func NewUserMessage(props UserMessageProps) UserMessage {
+	return UserMessage(props)
+}
+
+func (m UserMessage) View() string {
 	baseLines := []string{""}
-	content := strings.TrimSpace(props.Body)
+	content := strings.TrimSpace(m.Body)
 	if content != "" {
 		baseLines = append(baseLines, strings.Split(content, "\n")...)
 	}
-	if props.Stamp != "" {
-		baseLines = append(baseLines, props.Stamp)
+	if m.Stamp != "" {
+		baseLines = append(baseLines, m.Stamp)
 	}
 	baseLines = append(baseLines, "")
 
-	width := props.Width
+	width := m.Width
 	if width <= 0 {
 		width = UserMessageWidth(baseLines)
 	}
-	bar := props.PromptGlyph + " "
+	bar := m.PromptGlyph + " "
 	contentWidth := maxInt(1, width-lipgloss.Width(bar))
 	innerWidth := maxInt(1, contentWidth-2)
 	barStyle := lipgloss.NewStyle().
-		Background(props.Palette.UserTextBackground).
-		Foreground(props.Palette.UserAccentBar)
+		Background(m.Palette.UserTextBackground).
+		Foreground(m.Palette.UserAccentBar)
 	contentStyle := lipgloss.NewStyle().
-		Background(props.Palette.UserTextBackground).
-		Foreground(props.Palette.UserTextForeground).
+		Background(m.Palette.UserTextBackground).
+		Foreground(m.Palette.UserTextForeground).
 		Width(contentWidth).
 		Padding(0, 1)
-	timestampStyle := contentStyle.Foreground(props.Palette.UserTimestampForeground)
+	timestampStyle := contentStyle.Foreground(m.Palette.UserTimestampForeground)
 
 	lines := []string{}
 	if content != "" {
@@ -64,17 +82,17 @@ func RenderUserMessage(props UserMessageProps) string {
 			lines = append(lines, WrapUserMessageLine(line, innerWidth)...)
 		}
 	}
-	if props.Stamp != "" {
-		lines = append(lines, WrapUserMessageLine(props.Stamp, innerWidth)...)
+	if m.Stamp != "" {
+		lines = append(lines, WrapUserMessageLine(m.Stamp, innerWidth)...)
 	}
 
 	rendered := make([]string, 0, len(lines))
 	stampStart := -1
-	if props.Stamp != "" {
-		stampStart = len(lines) - len(WrapUserMessageLine(props.Stamp, innerWidth))
+	if m.Stamp != "" {
+		stampStart = len(lines) - len(WrapUserMessageLine(m.Stamp, innerWidth))
 	}
-	if props.HalfBlocks {
-		rendered = append(rendered, RenderHalfBlockLine(width, "▄", props.Palette))
+	if m.HalfBlocks {
+		rendered = append(rendered, renderHalfBlockLine(width, "▄", m.Palette))
 	} else {
 		rendered = append(rendered, barStyle.Render(bar)+contentStyle.Render(""))
 	}
@@ -86,8 +104,8 @@ func RenderUserMessage(props UserMessageProps) string {
 		}
 		rendered = append(rendered, prefix+contentStyle.Render(line))
 	}
-	if props.HalfBlocks {
-		rendered = append(rendered, RenderHalfBlockLine(width, "▀", props.Palette))
+	if m.HalfBlocks {
+		rendered = append(rendered, renderHalfBlockLine(width, "▀", m.Palette))
 	} else {
 		rendered = append(rendered, barStyle.Render(bar)+contentStyle.Render(""))
 	}
@@ -117,14 +135,17 @@ func UserMessageWidth(lines []string) int {
 	return width
 }
 
-func RenderAssistantMessage(body, stamp string, palette theme.Palette) string {
-	return RenderAssistantMessageWidth(body, stamp, 0, palette)
+type AssistantMessage struct {
+	Body    string
+	Stamp   string
+	Width   int
+	Palette theme.Palette
 }
 
-func RenderAssistantMessageWidth(body, stamp string, width int, palette theme.Palette) string {
-	body = strings.TrimSpace(body)
-	body = WrapStyledBlock(body, width)
-	bodyStyle := lipgloss.NewStyle().Foreground(palette.MarkdownText)
+func (m AssistantMessage) View() string {
+	body := strings.TrimSpace(m.Body)
+	body = WrapStyledBlock(body, m.Width)
+	bodyStyle := lipgloss.NewStyle().Foreground(m.Palette.MarkdownText)
 	if body != "" {
 		lines := strings.Split(body, "\n")
 		rendered := make([]string, 0, len(lines))
@@ -133,28 +154,30 @@ func RenderAssistantMessageWidth(body, stamp string, width int, palette theme.Pa
 		}
 		body = strings.Join(rendered, "\n")
 	}
-	if stamp == "" {
+	if m.Stamp == "" {
 		return body
 	}
 	header := lipgloss.NewStyle().
-		Foreground(palette.AssistantTimestampText).
-		Render(stamp)
+		Foreground(m.Palette.AssistantTimestampText).
+		Render(m.Stamp)
 	return header + "\n" + body
 }
 
-func RenderReasoningBlock(input string, palette theme.Palette) string {
-	return RenderReasoningBlockWidth(input, 0, palette)
+type ReasoningBlock struct {
+	Body    string
+	Width   int
+	Palette theme.Palette
 }
 
-func RenderReasoningBlockWidth(input string, width int, palette theme.Palette) string {
-	content := strings.TrimSpace(input)
+func (b ReasoningBlock) View() string {
+	content := strings.TrimSpace(b.Body)
 	if content == "" {
 		return ""
 	}
-	content = WrapStyledBlock(content, width)
+	content = WrapStyledBlock(content, b.Width)
 	lineStyle := lipgloss.NewStyle().
-		Background(palette.ReasoningBackground).
-		Foreground(palette.ReasoningText)
+		Background(b.Palette.ReasoningBackground).
+		Foreground(b.Palette.ReasoningText)
 	lines := append([]string{""}, strings.Split(content, "\n")...)
 	rendered := make([]string, 0, len(lines))
 	for _, line := range lines {
