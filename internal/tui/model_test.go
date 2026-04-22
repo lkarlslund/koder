@@ -2897,6 +2897,54 @@ func TestLoadMsgPreserveBusyKeepsSpinnerActive(t *testing.T) {
 	}
 }
 
+func TestSpinnerTickPreservesViewportOffsetWhenScrolledBack(t *testing.T) {
+	m := Model{
+		cfg:            testConfig(t),
+		currentSession: domain.Session{ID: 1, Title: "Test"},
+		viewport:       viewport.New(40, 4),
+		busy: busyModel{
+			active: true,
+			scope:  busyScopeTranscript,
+			status: "Working ...",
+			spinner: spinnerModel{
+				active: true,
+			},
+		},
+		messages: []domain.Message{
+			{ID: 1, Role: domain.MessageRoleAssistant},
+		},
+		parts: map[int64][]domain.Part{
+			1: {{
+				Kind: domain.PartKindText,
+				Body: strings.Join([]string{
+					"line 1",
+					"line 2",
+					"line 3",
+					"line 4",
+					"line 5",
+					"line 6",
+					"line 7",
+					"line 8",
+				}, "\n"),
+			}},
+		},
+	}
+
+	m.refreshViewport()
+	m.viewport.SetYOffset(1)
+	beforeOffset := m.viewport.YOffset
+
+	updated, cmd := m.Update(spinnerTickMsg{})
+	next := updated.(Model)
+
+	if cmd == nil {
+		t.Fatal("expected follow-up spinner tick command")
+	}
+	if next.viewport.YOffset != beforeOffset {
+		t.Fatalf("expected spinner tick to preserve viewport offset %d, got %d", beforeOffset, next.viewport.YOffset)
+	}
+}
+
 func TestRenderMessagePartsShowsReasoningBeforeText(t *testing.T) {
 	m := Model{
 		showReasoning: true,

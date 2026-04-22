@@ -419,11 +419,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.shouldAnimateSpinner() {
 			return m, nil
 		}
+		wasAtBottom := m.viewport.AtBottom()
+		offset := m.viewport.YOffset
 		m.busy.spinner.tick()
 		if m.hasPreferencesDialog() {
 			m.preferences.Tick()
 		}
-		m.refreshViewport()
+		if wasAtBottom {
+			m.refreshViewport()
+		} else {
+			m.refreshViewportAt(offset)
+		}
 		return m, tea.Batch(spinnerTickCmd(), m.syncWindowTitleCmd())
 	case promptDoneMsg:
 		if msg.err != nil {
