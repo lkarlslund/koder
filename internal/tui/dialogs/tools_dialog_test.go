@@ -1,4 +1,4 @@
-package ui
+package dialogs
 
 import (
 	"strings"

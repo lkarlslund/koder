@@ -1,4 +1,4 @@
-package ui
+package dialogs
 
 import (
 	"fmt"
@@ -9,6 +9,7 @@ import (
 
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/theme"
+	. "github.com/lkarlslund/koder/internal/ui"
 )
 
 type PreferencesActionKind int
@@ -309,24 +310,25 @@ func (d PreferencesDialog) View(width int, palette theme.Palette) string {
 		PaddingLeft(1).
 		Render(strings.Join(fieldLines, "\n"))
 
-	buttons := lipgloss.JoinHorizontal(
-		lipgloss.Left,
-		Button{Label: "OK", Primary: true, Focused: d.focus == preferencesFocusButtons && d.buttonIndex == 0}.View(palette),
-		"  ",
-		Button{Label: "Cancel", Focused: d.focus == preferencesFocusButtons && d.buttonIndex == 1}.View(palette),
-	)
+	buttons := ButtonRow{
+		Buttons: []Button{
+			{Label: "OK", Primary: true, Focused: d.focus == preferencesFocusButtons && d.buttonIndex == 0},
+			{Label: "Cancel", Focused: d.focus == preferencesFocusButtons && d.buttonIndex == 1},
+		},
+		Align: HorizontalAlignRight,
+		Width: dialogWidth - 4,
+	}
 
 	body := lipgloss.JoinVertical(
 		lipgloss.Left,
 		lipgloss.JoinHorizontal(lipgloss.Top, tabRail, " ", fields),
-		"",
-		buttons,
 	)
 
-	return Modal{
+	return Dialog{
 		Title:    "Preferences",
 		Subtitle: "Tab/Shift+Tab moves focus. Enter or arrows change values.",
-		Body:     body,
+		Sections: []string{body},
+		Buttons:  buttons,
 		Footer:   fmt.Sprintf("Theme: %s  Spinner: %s", strings.TrimSpace(d.draft.Theme), SpinnerStyleByID(d.draft.Spinner).Label),
 		Width:    dialogWidth,
 	}.View(palette)

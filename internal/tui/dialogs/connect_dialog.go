@@ -1,4 +1,4 @@
-package ui
+package dialogs
 
 import (
 	"fmt"
@@ -10,6 +10,7 @@ import (
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/theme"
+	. "github.com/lkarlslund/koder/internal/ui"
 )
 
 type ProviderConnectActionKind int
@@ -278,9 +279,9 @@ func (d *ConnectDialog) providerListView(width int, palette theme.Palette) strin
 	if status := strings.TrimSpace(d.status); status != "" {
 		lines = append(lines, "", lipgloss.NewStyle().Foreground(palette.AssistantTimestampText).Render(status))
 	}
-	return Modal{
+	return Dialog{
 		Title:  "Connect Provider",
-		Body:   strings.TrimRight(strings.Join(lines, "\n"), "\n"),
+		Sections: []string{strings.TrimRight(strings.Join(lines, "\n"), "\n")},
 		Footer: "Enter choose provider  Esc cancel",
 		Width:  dialogWidth,
 	}.View(palette)
@@ -302,9 +303,9 @@ func (d *ConnectDialog) authPickerView(width int, palette theme.Palette) string 
 			Focused:   idx == d.authIndex && d.stage == connectStageAuth,
 		}.View(palette))
 	}
-	return Modal{
+	return Dialog{
 		Title:  "Choose Auth Method",
-		Body:   strings.TrimRight(strings.Join(lines, "\n"), "\n"),
+		Sections: []string{strings.TrimRight(strings.Join(lines, "\n"), "\n")},
 		Footer: "Enter continue  Esc back",
 		Width:  dialogWidth,
 	}.View(palette)
@@ -328,15 +329,19 @@ func (d *ConnectDialog) formView(width int, palette theme.Palette) string {
 	if status := strings.TrimSpace(d.status); status != "" {
 		lines = append(lines, d.renderStatus(palette))
 	}
-	buttons := []string{
-		Button{Label: "Test", Hotkey: 't', Focused: d.focus == connectFocusButtons && d.buttonIdx == 0}.View(palette),
-		Button{Label: "Save", Hotkey: 's', Focused: d.focus == connectFocusButtons && d.buttonIdx == 1, Primary: true}.View(palette),
-		Button{Label: "Cancel", Focused: d.focus == connectFocusButtons && d.buttonIdx == 2}.View(palette),
+	buttons := ButtonRow{
+		Buttons: []Button{
+			{Label: "Test", Hotkey: 't', Focused: d.focus == connectFocusButtons && d.buttonIdx == 0},
+			{Label: "Save", Hotkey: 's', Focused: d.focus == connectFocusButtons && d.buttonIdx == 1, Primary: true},
+			{Label: "Cancel", Focused: d.focus == connectFocusButtons && d.buttonIdx == 2},
+		},
+		Align: HorizontalAlignRight,
+		Width: dialogWidth - 4,
 	}
-	lines = append(lines, lipgloss.JoinHorizontal(lipgloss.Left, buttons...))
-	return Modal{
+	return Dialog{
 		Title:  "Connect Provider",
-		Body:   strings.TrimRight(strings.Join(lines, "\n"), "\n"),
+		Sections: []string{strings.TrimRight(strings.Join(lines, "\n"), "\n")},
+		Buttons: buttons,
 		Footer: "Type to edit  Ctrl+T test  Enter select  Esc cancel",
 		Width:  dialogWidth,
 	}.View(palette)
@@ -819,11 +824,4 @@ func padRight(input string, width int) string {
 		return truncateText(input, width)
 	}
 	return input + strings.Repeat(" ", width-got)
-}
-
-func minInt(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }

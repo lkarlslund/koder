@@ -1,4 +1,4 @@
-package ui
+package dialogs
 
 import (
 	"strings"
@@ -9,6 +9,7 @@ import (
 
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/theme"
+	. "github.com/lkarlslund/koder/internal/ui"
 )
 
 type ToolToggleItem struct {
@@ -135,13 +136,12 @@ func (d ToolsDialog) View(width int, palette theme.Palette) string {
 	body := lipgloss.JoinVertical(
 		lipgloss.Left,
 		strings.Join(lines, "\n"),
-		"",
-		d.buttonRow(dialogWidth).View(palette),
 	)
-	return Modal{
+	return Dialog{
 		Title:    "Tools",
 		Subtitle: "Per-session tool access. Space toggles the current tool.",
-		Body:     body,
+		Sections: []string{body},
+		Buttons:  d.buttonRow(dialogWidth),
 		Footer:   "Enter toggles a tool or activates the focused button. Esc cancels.",
 		Width:    dialogWidth,
 	}.View(palette)

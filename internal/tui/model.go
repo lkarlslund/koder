@@ -34,6 +34,7 @@ import (
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/theme"
 	"github.com/lkarlslund/koder/internal/tools"
+	"github.com/lkarlslund/koder/internal/tui/dialogs"
 	"github.com/lkarlslund/koder/internal/ui"
 	"github.com/lkarlslund/koder/internal/ui/textarea"
 	"github.com/lkarlslund/koder/internal/workspace"
@@ -302,16 +303,16 @@ type Model struct {
 	picker             pickerModel
 	pendingPartID      int64
 	mouseEnabled       bool
-	sessionDialog      *ui.SessionDialog
-	preferences        *ui.PreferencesDialog
+	sessionDialog      *dialogs.SessionDialog
+	preferences        *dialogs.PreferencesDialog
 	agentsModal        *ui.Modal
 	helpModal          *ui.Modal
 	llmPreview         *viewport.Model
 	llmPreviewTitle    string
-	connectDialog      *ui.ConnectDialog
-	disconnectDialog   *ui.DisconnectDialog
-	modelDialog        *ui.ModelDialog
-	toolsDialog        *ui.ToolsDialog
+	connectDialog      *dialogs.ConnectDialog
+	disconnectDialog   *dialogs.DisconnectDialog
+	modelDialog        *dialogs.ModelDialog
+	toolsDialog        *dialogs.ToolsDialog
 	debug              *debugsrv.Recorder
 	caps               *provider.CapabilityStore
 	runtimeCtxChecked  map[string]bool
@@ -622,10 +623,10 @@ func (m *Model) handleDialogMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd, bool) {
 		}
 		action := m.sessionDialog.HandleMouse(localX, localY, width, m.palette)
 		switch action.Kind {
-		case ui.SessionDialogActionSelect:
+		case dialogs.SessionDialogActionSelect:
 			m.startBusy(busyScopeSidebar, fmt.Sprintf("Resuming session %d…", action.SessionID))
 			return m, tea.Batch(m.loadSessionCmd(action.SessionID), m.spinnerCmdIfNeeded()), true
-		case ui.SessionDialogActionCancel:
+		case dialogs.SessionDialogActionCancel:
 			m.startBusy(busyScopeSidebar, "Creating session…")
 			return m, tea.Batch(m.newSessionCmd(), m.spinnerCmdIfNeeded()), true
 		default:
@@ -643,7 +644,7 @@ func (m *Model) handleDialogMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd, bool) {
 		}
 		action := m.modelDialog.HandleMouse(localX, localY, width, m.palette)
 		switch action.Kind {
-		case ui.ModelDialogActionSelect:
+		case dialogs.ModelDialogActionSelect:
 			if err := m.selectModel(action.ModelID); err != nil {
 				m.status = err.Error()
 				return m, m.syncWindowTitleCmd(), true
@@ -652,7 +653,7 @@ func (m *Model) handleDialogMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd, bool) {
 			m.status = fmt.Sprintf("Selected model %s", action.ModelID)
 			m.refreshViewport()
 			return m, m.syncWindowTitleCmd(), true
-		case ui.ModelDialogActionCancel:
+		case dialogs.ModelDialogActionCancel:
 			m.closeModelDialog()
 			m.status = "Model selection cancelled"
 			return m, m.syncWindowTitleCmd(), true
@@ -671,7 +672,7 @@ func (m *Model) handleDialogMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd, bool) {
 		}
 		action := m.disconnectDialog.HandleMouse(localX, localY, width, m.palette)
 		switch action.Kind {
-		case ui.DisconnectDialogActionSelect:
+		case dialogs.DisconnectDialogActionSelect:
 			if err := m.disconnectProvider(action.ProviderID); err != nil {
 				m.status = err.Error()
 				return m, m.syncWindowTitleCmd(), true
@@ -680,7 +681,7 @@ func (m *Model) handleDialogMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd, bool) {
 			m.status = fmt.Sprintf("Disconnected provider %s", action.ProviderID)
 			m.refreshViewport()
 			return m, m.syncWindowTitleCmd(), true
-		case ui.DisconnectDialogActionCancel:
+		case dialogs.DisconnectDialogActionCancel:
 			m.closeDisconnectDialog()
 			m.status = "Provider disconnect cancelled"
 			return m, m.syncWindowTitleCmd(), true
@@ -699,7 +700,7 @@ func (m *Model) handleDialogMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd, bool) {
 		}
 		action := m.toolsDialog.HandleMouse(localX, localY, width, m.palette)
 		switch action.Kind {
-		case ui.ToolsDialogActionApply:
+		case dialogs.ToolsDialogActionApply:
 			if err := m.applySessionToolStates(action.States); err != nil {
 				m.status = err.Error()
 				return m, m.syncWindowTitleCmd(), true
@@ -707,7 +708,7 @@ func (m *Model) handleDialogMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd, bool) {
 			m.closeToolsDialog()
 			m.status = "Session tools updated"
 			return m, m.syncWindowTitleCmd(), true
-		case ui.ToolsDialogActionCancel:
+		case dialogs.ToolsDialogActionCancel:
 			m.closeToolsDialog()
 			m.status = "Tool selection cancelled"
 			return m, m.syncWindowTitleCmd(), true
@@ -3630,10 +3631,10 @@ func (m *Model) handleSessionDialogKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	action := m.sessionDialog.Update(msg)
 	switch action.Kind {
-	case ui.SessionDialogActionSelect:
+	case dialogs.SessionDialogActionSelect:
 		m.startBusy(busyScopeSidebar, fmt.Sprintf("Resuming session %d…", action.SessionID))
 		return m, tea.Batch(m.loadSessionCmd(action.SessionID), m.spinnerCmdIfNeeded())
-	case ui.SessionDialogActionCancel:
+	case dialogs.SessionDialogActionCancel:
 		m.startBusy(busyScopeSidebar, "Creating session…")
 		return m, tea.Batch(m.newSessionCmd(), m.spinnerCmdIfNeeded())
 	default:
@@ -3647,14 +3648,14 @@ func (m *Model) handlePreferencesKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	action := m.preferences.Update(msg)
 	switch action.Kind {
-	case ui.PreferencesActionChanged:
+	case dialogs.PreferencesActionChanged:
 		cmd, err := m.applyUIConfig(action.UI, false)
 		if err != nil {
 			m.status = fmt.Sprintf("preferences preview failed: %v", err)
 			return m, m.syncWindowTitleCmd()
 		}
 		return m, tea.Batch(cmd, m.syncWindowTitleCmd())
-	case ui.PreferencesActionApply:
+	case dialogs.PreferencesActionApply:
 		cmd, err := m.applyUIConfig(action.UI, true)
 		if err != nil {
 			m.status = fmt.Sprintf("preferences save failed: %v", err)
@@ -3663,7 +3664,7 @@ func (m *Model) handlePreferencesKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.closePreferencesDialog()
 		m.status = "Preferences saved"
 		return m, tea.Batch(cmd, m.syncWindowTitleCmd())
-	case ui.PreferencesActionCancel:
+	case dialogs.PreferencesActionCancel:
 		cmd, err := m.applyUIConfig(action.UI, false)
 		if err != nil {
 			m.status = fmt.Sprintf("preferences restore failed: %v", err)
@@ -3683,7 +3684,7 @@ func (m *Model) handleToolsDialogKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	action := m.toolsDialog.Update(msg)
 	switch action.Kind {
-	case ui.ToolsDialogActionApply:
+	case dialogs.ToolsDialogActionApply:
 		if err := m.applySessionToolStates(action.States); err != nil {
 			m.status = err.Error()
 			return m, m.syncWindowTitleCmd()
@@ -3691,7 +3692,7 @@ func (m *Model) handleToolsDialogKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.closeToolsDialog()
 		m.status = "Session tools updated"
 		return m, m.syncWindowTitleCmd()
-	case ui.ToolsDialogActionCancel:
+	case dialogs.ToolsDialogActionCancel:
 		m.closeToolsDialog()
 		m.status = "Tool selection cancelled"
 		return m, m.syncWindowTitleCmd()
@@ -3706,10 +3707,10 @@ func (m *Model) handleConnectDialogKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	action := m.connectDialog.Update(msg)
 	switch action.Kind {
-	case ui.ProviderConnectActionTest:
+	case dialogs.ProviderConnectActionTest:
 		m.connectDialog.SetStatus("Testing connection…")
 		return m, tea.Batch(m.probeProviderCmd(action.Draft), m.syncWindowTitleCmd())
-	case ui.ProviderConnectActionSave:
+	case dialogs.ProviderConnectActionSave:
 		discoveredModels := m.connectDialog.Models()
 		if err := m.saveProviderDraft(action.Draft); err != nil {
 			m.connectDialog.SetStatusError("Save failed: " + err.Error())
@@ -3724,7 +3725,7 @@ func (m *Model) handleConnectDialogKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.status = fmt.Sprintf("Connected provider %s", action.Draft.ProviderID)
 		m.refreshViewport()
 		return m, m.syncWindowTitleCmd()
-	case ui.ProviderConnectActionCancel:
+	case dialogs.ProviderConnectActionCancel:
 		m.closeConnectDialog()
 		m.status = "Provider connect cancelled"
 		return m, m.syncWindowTitleCmd()
@@ -3739,7 +3740,7 @@ func (m *Model) handleDisconnectDialogKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	action := m.disconnectDialog.Update(msg)
 	switch action.Kind {
-	case ui.DisconnectDialogActionSelect:
+	case dialogs.DisconnectDialogActionSelect:
 		if err := m.disconnectProvider(action.ProviderID); err != nil {
 			m.status = err.Error()
 			return m, m.syncWindowTitleCmd()
@@ -3748,7 +3749,7 @@ func (m *Model) handleDisconnectDialogKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.status = fmt.Sprintf("Disconnected provider %s", action.ProviderID)
 		m.refreshViewport()
 		return m, m.syncWindowTitleCmd()
-	case ui.DisconnectDialogActionCancel:
+	case dialogs.DisconnectDialogActionCancel:
 		m.closeDisconnectDialog()
 		m.status = "Provider disconnect cancelled"
 		return m, m.syncWindowTitleCmd()
@@ -3763,7 +3764,7 @@ func (m *Model) handleModelDialogKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	action := m.modelDialog.Update(msg)
 	switch action.Kind {
-	case ui.ModelDialogActionSelect:
+	case dialogs.ModelDialogActionSelect:
 		if err := m.selectModel(action.ModelID); err != nil {
 			m.status = err.Error()
 			return m, m.syncWindowTitleCmd()
@@ -3772,7 +3773,7 @@ func (m *Model) handleModelDialogKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.status = fmt.Sprintf("Selected model %s", action.ModelID)
 		m.refreshViewport()
 		return m, m.syncWindowTitleCmd()
-	case ui.ModelDialogActionCancel:
+	case dialogs.ModelDialogActionCancel:
 		m.closeModelDialog()
 		m.status = "Model selection cancelled"
 		return m, m.syncWindowTitleCmd()
@@ -4071,7 +4072,7 @@ func (m *Model) closeModelDialog() {
 }
 
 func (m *Model) openSessionPicker() {
-	items := make([]ui.SessionItem, 0, len(m.sessions))
+	items := make([]dialogs.SessionItem, 0, len(m.sessions))
 	showCWD := m.startupOptions.ShowAllSessions
 	for _, session := range m.sessions {
 		title := strings.TrimSpace(session.Title)
@@ -4086,7 +4087,7 @@ func (m *Model) openSessionPicker() {
 		if m.renderer != nil {
 			preview = m.renderer.Render(description)
 		}
-		items = append(items, ui.SessionItem{
+		items = append(items, dialogs.SessionItem{
 			SessionID:    "#" + strconv.FormatInt(session.ID, 10),
 			CreatedAt:    formatRelativeSessionTime(session.CreatedAt),
 			ModifiedAt:   formatRelativeSessionTime(session.UpdatedAt),
@@ -4098,7 +4099,7 @@ func (m *Model) openSessionPicker() {
 			Value:        strconv.FormatInt(session.ID, 10),
 		})
 	}
-	dialog := ui.NewSessionDialog(items, showCWD)
+	dialog := dialogs.NewSessionDialog(items, showCWD)
 	m.sessionDialog = &dialog
 }
 
@@ -4110,12 +4111,12 @@ func sessionTokenSummary(m *Model, sessionID int64) string {
 }
 
 func (m *Model) openPreferencesDialog() {
-	dialog := ui.NewPreferencesDialog(m.cfg.UI, theme.Names())
+	dialog := dialogs.NewPreferencesDialog(m.cfg.UI, theme.Names())
 	m.preferences = &dialog
 }
 
 func (m *Model) openToolsDialog() {
-	items := make([]ui.ToolToggleItem, 0, len(domain.AllToolKinds()))
+	items := make([]dialogs.ToolToggleItem, 0, len(domain.AllToolKinds()))
 	for _, kind := range domain.AllToolKinds() {
 		description := "Enable this tool for the current session"
 		label := string(kind)
@@ -4128,24 +4129,24 @@ func (m *Model) openToolsDialog() {
 				description = def.Function.Description
 			}
 		}
-		items = append(items, ui.ToolToggleItem{
+		items = append(items, dialogs.ToolToggleItem{
 			Tool:        kind,
 			Label:       label,
 			Description: description,
 			Enabled:     m.sessionToolEnabled(kind),
 		})
 	}
-	dialog := ui.NewToolsDialog(items)
+	dialog := dialogs.NewToolsDialog(items)
 	m.toolsDialog = &dialog
 }
 
 func (m *Model) openConnectDialog() {
-	dialog := ui.NewConnectDialog(provider.Catalog(), m.cfg.Providers)
+	dialog := dialogs.NewConnectDialog(provider.Catalog(), m.cfg.Providers)
 	m.connectDialog = &dialog
 }
 
 func (m *Model) openDisconnectDialog() {
-	items := make([]ui.ProviderItem, 0, len(m.cfg.Providers))
+	items := make([]dialogs.ProviderItem, 0, len(m.cfg.Providers))
 	ids := make([]string, 0, len(m.cfg.Providers))
 	for id := range m.cfg.Providers {
 		ids = append(ids, id)
@@ -4171,14 +4172,14 @@ func (m *Model) openDisconnectDialog() {
 		if id == m.cfg.DefaultProvider {
 			details = append(details, "Default:     yes")
 		}
-		items = append(items, ui.ProviderItem{
+		items = append(items, dialogs.ProviderItem{
 			ID:          id,
 			Title:       title,
 			Description: desc,
 			Details:     details,
 		})
 	}
-	dialog := ui.NewDisconnectDialog(items)
+	dialog := dialogs.NewDisconnectDialog(items)
 	m.disconnectDialog = &dialog
 }
 
@@ -4187,7 +4188,7 @@ func (m *Model) openModelDialog(providerID string, models []domain.Model) {
 	if strings.TrimSpace(current) == "" {
 		current = m.cfg.DefaultModel
 	}
-	dialog := ui.NewModelDialog(providerID, models, current)
+	dialog := dialogs.NewModelDialog(providerID, models, current)
 	m.modelDialog = &dialog
 }
 

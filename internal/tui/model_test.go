@@ -29,6 +29,7 @@ import (
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/theme"
 	"github.com/lkarlslund/koder/internal/tools"
+	"github.com/lkarlslund/koder/internal/tui/dialogs"
 	"github.com/lkarlslund/koder/internal/ui"
 	"github.com/lkarlslund/koder/internal/ui/textarea"
 	"github.com/lkarlslund/koder/internal/workspace"
@@ -1755,7 +1756,7 @@ func TestExitSummaryIncludesSessionDetails(t *testing.T) {
 func TestSessionPickerEscapeCreatesNewSession(t *testing.T) {
 	m := Model{
 		composer:      textarea.New(),
-		sessionDialog: &ui.SessionDialog{},
+		sessionDialog: &dialogs.SessionDialog{},
 		sessions:      []domain.Session{{ID: 1}},
 	}
 
@@ -1885,7 +1886,7 @@ func TestFormatRelativeSessionTime(t *testing.T) {
 
 func TestUpdateLoadHidesSessionPicker(t *testing.T) {
 	m := Model{
-		sessionDialog: &ui.SessionDialog{},
+		sessionDialog: &dialogs.SessionDialog{},
 	}
 
 	updated := m.UpdateLoad(loadMsg{

@@ -1,4 +1,4 @@
-package ui
+package dialogs
 
 import (
 	"fmt"
@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/lkarlslund/koder/internal/theme"
+	. "github.com/lkarlslund/koder/internal/ui"
 )
 
 type SessionItem struct {
@@ -181,13 +182,12 @@ func (d SessionDialog) View(width int, palette theme.Palette) string {
 		tablePane,
 		"",
 		detailPane,
-		"",
-		d.buttonRow(contentWidth).View(palette),
 	)
 
-	return Modal{
+	return Dialog{
 		Title:  "Resume Session",
-		Body:   body,
+		Sections: []string{body},
+		Buttons: d.buttonRow(contentWidth),
 		Footer: "Enter resumes the highlighted session. Esc creates a new session.",
 		Width:  dialogWidth,
 	}.View(palette)

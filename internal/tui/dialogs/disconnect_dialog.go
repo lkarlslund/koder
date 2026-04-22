@@ -1,4 +1,4 @@
-package ui
+package dialogs
 
 import (
 	"fmt"
@@ -8,38 +8,41 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/theme"
+	. "github.com/lkarlslund/koder/internal/ui"
 )
 
-type ModelDialogActionKind int
+type ProviderItem struct {
+	ID          string
+	Title       string
+	Description string
+	Details     []string
+}
+
+type DisconnectDialogActionKind int
 
 const (
-	ModelDialogActionNone ModelDialogActionKind = iota
-	ModelDialogActionSelect
-	ModelDialogActionCancel
+	DisconnectDialogActionNone DisconnectDialogActionKind = iota
+	DisconnectDialogActionSelect
+	DisconnectDialogActionCancel
 )
 
-type ModelDialogAction struct {
-	Kind    ModelDialogActionKind
-	ModelID string
-}
-
-type ModelDialog struct {
+type DisconnectDialogAction struct {
+	Kind       DisconnectDialogActionKind
 	ProviderID string
-	Query      string
-	Index      int
-	Models     []domain.Model
-	view       []domain.Model
-	focus      pickerDialogFocus
-	buttons    ButtonRow
 }
 
-func NewModelDialog(providerID string, models []domain.Model, current string) ModelDialog {
-	d := ModelDialog{
-		ProviderID: providerID,
-		Models:     models,
-	}
+type DisconnectDialog struct {
+	Query   string
+	Index   int
+	Items   []ProviderItem
+	view    []ProviderItem
+	focus   pickerDialogFocus
+	buttons ButtonRow
+}
+
+func NewDisconnectDialog(items []ProviderItem) DisconnectDialog {
+	d := DisconnectDialog{Items: items}
 	d.buttons = ButtonRow{
 		Buttons: []Button{
 			{ID: "ok", Label: "OK", Hotkey: 'o', Primary: true},
@@ -48,26 +51,20 @@ func NewModelDialog(providerID string, models []domain.Model, current string) Mo
 		Align: HorizontalAlignRight,
 	}
 	d.refilter()
-	for idx, item := range d.view {
-		if item.ID == strings.TrimSpace(current) {
-			d.Index = idx
-			break
-		}
-	}
 	return d
 }
 
-func (d *ModelDialog) Update(msg tea.KeyMsg) ModelDialogAction {
+func (d *DisconnectDialog) Update(msg tea.KeyMsg) DisconnectDialogAction {
 	d.ensureButtons()
-	var action ModelDialogAction
+	var action DisconnectDialogAction
 	d.buttons.Buttons[0].OnPress = func() { action = d.selectCurrent() }
-	d.buttons.Buttons[1].OnPress = func() { action = ModelDialogAction{Kind: ModelDialogActionCancel} }
+	d.buttons.Buttons[1].OnPress = func() { action = DisconnectDialogAction{Kind: DisconnectDialogActionCancel} }
 	if d.buttons.ActivateHotkey(msg) {
 		return action
 	}
 	switch msg.String() {
 	case "esc":
-		return ModelDialogAction{Kind: ModelDialogActionCancel}
+		return DisconnectDialogAction{Kind: DisconnectDialogActionCancel}
 	case "tab":
 		d.focus = (d.focus + 1) % 2
 	case "shift+tab":
@@ -108,17 +105,17 @@ func (d *ModelDialog) Update(msg tea.KeyMsg) ModelDialogAction {
 			d.refilter()
 		}
 	}
-	return ModelDialogAction{}
+	return DisconnectDialogAction{}
 }
 
-func (d ModelDialog) View(width int, palette theme.Palette) string {
+func (d DisconnectDialog) View(width int, palette theme.Palette) string {
 	dialogWidth := width
 	if dialogWidth <= 0 {
 		dialogWidth = 84
 	}
 	dialogWidth = maxInt(72, dialogWidth)
-	listWidth := 34
-	detailWidth := maxInt(30, dialogWidth-listWidth-9)
+	listWidth := 28
+	detailWidth := maxInt(36, dialogWidth-listWidth-9)
 
 	listLines := []string{}
 	if len(d.view) == 0 {
@@ -129,15 +126,15 @@ func (d ModelDialog) View(width int, palette theme.Palette) string {
 			start = d.Index - 4
 		}
 		end := len(d.view)
-		if end > start+10 {
-			end = start + 10
+		if end > start+9 {
+			end = start + 9
 		}
 		for idx := start; idx < end; idx++ {
 			item := d.view[idx]
 			listLines = append(listLines, SelectableRow{
-				Primary:   item.ID,
-				Secondary: item.OwnedBy,
-				Tertiary:  capabilityBadges(item),
+				Primary:   item.Title,
+				Secondary: item.Description,
+				Tertiary:  item.ID,
 				Width:     listWidth,
 				Selected:  idx == d.Index,
 				Focused:   idx == d.Index && d.focus == pickerDialogFocusList,
@@ -145,19 +142,16 @@ func (d ModelDialog) View(width int, palette theme.Palette) string {
 		}
 	}
 
-	details := "No model selected"
+	details := "No provider selected"
 	if item, ok := d.current(); ok {
-		lines := []string{
-			lipgloss.NewStyle().Bold(true).Render(item.ID),
-			fmt.Sprintf("Provider: %s", d.ProviderID),
+		blocks := []string{
+			lipgloss.NewStyle().Bold(true).Render(item.Title),
 		}
-		if strings.TrimSpace(item.OwnedBy) != "" {
-			lines = append(lines, fmt.Sprintf("Owner:    %s", item.OwnedBy))
+		blocks = append(blocks, item.Details...)
+		if desc := strings.TrimSpace(item.Description); desc != "" {
+			blocks = append(blocks, "", truncateText(desc, detailWidth))
 		}
-		if badges := capabilityBadges(item); badges != "" {
-			lines = append(lines, fmt.Sprintf("Supports: %s", badges))
-		}
-		details = strings.Join(lines, "\n")
+		details = strings.Join(blocks, "\n")
 	}
 
 	body := lipgloss.JoinVertical(
@@ -170,26 +164,25 @@ func (d ModelDialog) View(width int, palette theme.Palette) string {
 			" ",
 			lipgloss.NewStyle().Width(detailWidth).PaddingLeft(1).Render(details),
 		),
-		"",
-		d.buttonRow(dialogWidth).View(palette),
 	)
 
-	return Modal{
-		Title:  "Select Model",
-		Body:   body,
-		Footer: "Enter to select, Esc to cancel",
+	return Dialog{
+		Title:  "Disconnect Provider",
+		Sections: []string{body},
+		Buttons: d.buttonRow(dialogWidth),
+		Footer: "Enter to disconnect, Esc to cancel",
 		Width:  dialogWidth,
 	}.View(palette)
 }
 
-func (d *ModelDialog) HandleMouse(localX, localY, width int, palette theme.Palette) ModelDialogAction {
+func (d *DisconnectDialog) HandleMouse(localX, localY, width int, palette theme.Palette) DisconnectDialogAction {
 	d.ensureButtons()
-	var action ModelDialogAction
+	var action DisconnectDialogAction
 	d.buttons.Buttons[0].OnPress = func() { action = d.selectCurrent() }
-	d.buttons.Buttons[1].OnPress = func() { action = ModelDialogAction{Kind: ModelDialogActionCancel} }
+	d.buttons.Buttons[1].OnPress = func() { action = DisconnectDialogAction{Kind: DisconnectDialogActionCancel} }
 	lines := strings.Split(d.View(width, palette), "\n")
 	if localY < 0 || localY >= len(lines) {
-		return ModelDialogAction{}
+		return DisconnectDialogAction{}
 	}
 	line := ansi.Strip(lines[localY])
 	buttons := d.buttonRow(width)
@@ -204,20 +197,20 @@ func (d *ModelDialog) HandleMouse(localX, localY, width int, palette theme.Palet
 		}
 	}
 	for idx, item := range d.view {
-		if strings.TrimSpace(item.ID) == "" {
+		if strings.TrimSpace(item.Title) == "" {
 			continue
 		}
-		if !strings.Contains(line, item.ID) {
+		if !strings.Contains(line, item.Title) {
 			continue
 		}
 		d.Index = idx
 		d.focus = pickerDialogFocusList
 		return d.selectCurrent()
 	}
-	return ModelDialogAction{}
+	return DisconnectDialogAction{}
 }
 
-func (d *ModelDialog) move(delta int) {
+func (d *DisconnectDialog) move(delta int) {
 	if len(d.view) == 0 {
 		d.Index = 0
 		return
@@ -231,11 +224,11 @@ func (d *ModelDialog) move(delta int) {
 	}
 }
 
-func (d *ModelDialog) refilter() {
+func (d *DisconnectDialog) refilter() {
 	query := strings.ToLower(strings.TrimSpace(d.Query))
 	d.view = d.view[:0]
-	for _, item := range d.Models {
-		haystack := strings.ToLower(item.ID + " " + item.OwnedBy)
+	for _, item := range d.Items {
+		haystack := strings.ToLower(item.Title + " " + item.Description + " " + item.ID)
 		if query == "" || strings.Contains(haystack, query) {
 			d.view = append(d.view, item)
 		}
@@ -252,22 +245,22 @@ func (d *ModelDialog) refilter() {
 	}
 }
 
-func (d ModelDialog) current() (domain.Model, bool) {
+func (d DisconnectDialog) current() (ProviderItem, bool) {
 	if len(d.view) == 0 || d.Index < 0 || d.Index >= len(d.view) {
-		return domain.Model{}, false
+		return ProviderItem{}, false
 	}
 	return d.view[d.Index], true
 }
 
-func (d ModelDialog) selectCurrent() ModelDialogAction {
+func (d DisconnectDialog) selectCurrent() DisconnectDialogAction {
 	item, ok := d.current()
 	if !ok {
-		return ModelDialogAction{Kind: ModelDialogActionCancel}
+		return DisconnectDialogAction{Kind: DisconnectDialogActionCancel}
 	}
-	return ModelDialogAction{Kind: ModelDialogActionSelect, ModelID: item.ID}
+	return DisconnectDialogAction{Kind: DisconnectDialogActionSelect, ProviderID: item.ID}
 }
 
-func (d *ModelDialog) ensureButtons() {
+func (d *DisconnectDialog) ensureButtons() {
 	if len(d.buttons.Buttons) != 0 {
 		return
 	}
@@ -280,23 +273,9 @@ func (d *ModelDialog) ensureButtons() {
 	}
 }
 
-func (d ModelDialog) buttonRow(width int) ButtonRow {
+func (d DisconnectDialog) buttonRow(width int) ButtonRow {
 	buttons := d.buttons
 	buttons.Width = maxInt(0, width)
 	buttons.Align = HorizontalAlignRight
 	return buttons
-}
-
-func capabilityBadges(model domain.Model) string {
-	var badges []string
-	if model.SupportsImages {
-		badges = append(badges, "image")
-	}
-	if model.SupportsPDFs {
-		badges = append(badges, "pdf")
-	}
-	if len(badges) == 0 && model.CapabilitiesKnown {
-		badges = append(badges, "text")
-	}
-	return strings.Join(badges, ", ")
 }
