@@ -1,0 +1,250 @@
+package textarea
+
+import (
+	"unicode/utf8"
+
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
+)
+
+type Cursor struct {
+	char      string
+	TextStyle lipgloss.Style
+}
+
+func (c *Cursor) SetChar(char string) {
+	c.char = char
+}
+
+func (c Cursor) View() string {
+	if c.char == "" {
+		return c.TextStyle.Render(" ")
+	}
+	return c.TextStyle.Render(c.char)
+}
+
+type Style struct {
+	Base        lipgloss.Style
+	CursorLine  lipgloss.Style
+	Text        lipgloss.Style
+	Prompt      lipgloss.Style
+	Placeholder lipgloss.Style
+	EndOfBuffer lipgloss.Style
+}
+
+func DefaultStyles() (Style, Style) {
+	return Style{}, Style{}
+}
+
+type Model struct {
+	Prompt          string
+	Placeholder     string
+	ShowLineNumbers bool
+	FocusedStyle    Style
+	BlurredStyle    Style
+	Cursor          Cursor
+
+	width  int
+	height int
+	focus  bool
+	value  []rune
+	cursor int
+}
+
+func New() Model {
+	return Model{focus: true, height: 1}
+}
+
+func (m *Model) Focus() {
+	m.focus = true
+}
+
+func (m *Model) Blur() {
+	m.focus = false
+}
+
+func (m *Model) SetWidth(width int) {
+	m.width = width
+}
+
+func (m *Model) SetHeight(height int) {
+	m.height = height
+}
+
+func (m Model) Value() string {
+	return string(m.value)
+}
+
+func (m *Model) SetValue(value string) {
+	m.value = []rune(value)
+	m.cursor = len(m.value)
+}
+
+func (m *Model) Reset() {
+	m.value = nil
+	m.cursor = 0
+}
+
+func (m *Model) SetCursor(offset int) {
+	if offset < 0 {
+		offset = 0
+	}
+	m.cursor = byteOffsetToRuneIndex(string(m.value), offset)
+	if m.cursor > len(m.value) {
+		m.cursor = len(m.value)
+	}
+}
+
+func (m *Model) InsertRune(r rune) {
+	m.insertRunes([]rune{r})
+}
+
+func (m *Model) InsertString(s string) {
+	m.insertRunes([]rune(s))
+}
+
+func (m *Model) Update(msg tea.Msg) (Model, tea.Cmd) {
+	key, ok := msg.(tea.KeyMsg)
+	if !ok || !m.focus {
+		return *m, nil
+	}
+	switch key.String() {
+	case "left":
+		if m.cursor > 0 {
+			m.cursor--
+		}
+	case "right":
+		if m.cursor < len(m.value) {
+			m.cursor++
+		}
+	case "home", "ctrl+a":
+		m.cursor = 0
+	case "end", "ctrl+e":
+		m.cursor = len(m.value)
+	case "backspace":
+		if m.cursor > 0 {
+			m.value = append(m.value[:m.cursor-1], m.value[m.cursor:]...)
+			m.cursor--
+		}
+	case "delete":
+		if m.cursor < len(m.value) {
+			m.value = append(m.value[:m.cursor], m.value[m.cursor+1:]...)
+		}
+	default:
+		if key.Type == tea.KeyRunes {
+			m.insertRunes(key.Runes)
+		}
+	}
+	return *m, nil
+}
+
+func (m Model) View() string {
+	line := m.visibleLine()
+	style := m.BlurredStyle
+	if m.focus {
+		style = m.FocusedStyle
+	}
+	prompt := style.Prompt.Render(m.Prompt)
+	text := line.before + m.Cursor.TextStyle.Render(line.cursor) + line.after
+	return prompt + style.Text.Render(text)
+}
+
+type visibleLine struct {
+	before string
+	cursor string
+	after  string
+}
+
+func (m Model) visibleLine() visibleLine {
+	value := string(m.value)
+	runes := m.value
+	cursor := m.cursor
+	if cursor < 0 {
+		cursor = 0
+	}
+	if cursor > len(runes) {
+		cursor = len(runes)
+	}
+	lineStart := 0
+	for i := 0; i < cursor; i++ {
+		if runes[i] == '\n' {
+			lineStart = i + 1
+		}
+	}
+	lineEnd := len(runes)
+	for i := cursor; i < len(runes); i++ {
+		if runes[i] == '\n' {
+			lineEnd = i
+			break
+		}
+	}
+	lineRunes := runes[lineStart:lineEnd]
+	localCursor := cursor - lineStart
+	if localCursor < 0 {
+		localCursor = 0
+	}
+	if localCursor > len(lineRunes) {
+		localCursor = len(lineRunes)
+	}
+	contentWidth := max(1, m.width-ansi.StringWidth(m.Prompt))
+	start, end := windowAroundCursor(lineRunes, localCursor, contentWidth)
+	lineRunes = lineRunes[start:end]
+	localCursor -= start
+	before := string(lineRunes[:localCursor])
+	var char string
+	if localCursor < len(lineRunes) {
+		char = string(lineRunes[localCursor])
+	} else {
+		char = " "
+	}
+	after := ""
+	if localCursor < len(lineRunes) {
+		after = string(lineRunes[localCursor+1:])
+	}
+	_ = value
+	return visibleLine{before: before, cursor: char, after: after}
+}
+
+func (m *Model) insertRunes(runes []rune) {
+	if len(runes) == 0 {
+		return
+	}
+	head := append([]rune{}, m.value[:m.cursor]...)
+	head = append(head, runes...)
+	m.value = append(head, m.value[m.cursor:]...)
+	m.cursor += len(runes)
+}
+
+func byteOffsetToRuneIndex(s string, offset int) int {
+	if offset <= 0 {
+		return 0
+	}
+	if offset >= len(s) {
+		return utf8.RuneCountInString(s)
+	}
+	return utf8.RuneCountInString(s[:offset])
+}
+
+func windowAroundCursor(runes []rune, cursor int, width int) (int, int) {
+	if width <= 0 || len(runes) <= width {
+		return 0, len(runes)
+	}
+	start := cursor - width + 1
+	if start < 0 {
+		start = 0
+	}
+	end := start + width
+	if end > len(runes) {
+		end = len(runes)
+		start = max(0, end-width)
+	}
+	return start, end
+}
+
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
