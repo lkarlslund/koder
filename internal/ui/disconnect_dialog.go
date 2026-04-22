@@ -130,7 +130,7 @@ func (d DisconnectDialog) View(width int, palette theme.Palette) string {
 		}
 		for idx := start; idx < end; idx++ {
 			item := d.view[idx]
-			listLines = append(listLines, RenderSelectableRow(item.Title, item.Description, item.ID, listWidth, palette, idx == d.Index))
+			listLines = append(listLines, RenderSelectableRow(item.Title, item.Description, item.ID, listWidth, palette, idx == d.Index, idx == d.Index && d.focus == pickerDialogFocusList))
 		}
 	}
 

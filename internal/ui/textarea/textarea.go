@@ -224,14 +224,29 @@ func (m Model) CursorVisible() bool {
 	return m.focus && (!m.BlinkEnabled || m.blink)
 }
 
-type visibleLine struct {
+type VisibleLine struct {
 	before string
 	cursor string
 	after  string
 	plain  string
 }
 
-func (m Model) visibleLine() visibleLine {
+func (m Model) VisibleLine() VisibleLine {
+	line := m.visibleLine()
+	return VisibleLine{
+		before: line.before,
+		cursor: line.cursor,
+		after:  line.after,
+		plain:  line.plain,
+	}
+}
+
+func (l VisibleLine) Before() string { return l.before }
+func (l VisibleLine) Cursor() string { return l.cursor }
+func (l VisibleLine) After() string  { return l.after }
+func (l VisibleLine) Plain() string  { return l.plain }
+
+func (m Model) visibleLine() VisibleLine {
 	runes := m.value
 	cursor := m.cursor
 	if cursor < 0 {
@@ -274,7 +289,7 @@ func (m Model) visibleLine() visibleLine {
 	if localCursor < len(lineRunes) {
 		after = string(lineRunes[localCursor+1:])
 	}
-	return visibleLine{before: before, cursor: char, after: after, plain: string(lineRunes)}
+	return VisibleLine{before: before, cursor: char, after: after, plain: string(lineRunes)}
 }
 
 func (m *Model) insertRunes(runes []rune) {

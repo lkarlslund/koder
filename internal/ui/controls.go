@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -11,7 +12,7 @@ import (
 	"github.com/lkarlslund/koder/internal/theme"
 )
 
-func RenderSelectableRow(primary, secondary, tertiary string, width int, palette theme.Palette, selected bool) string {
+func RenderSelectableRow(primary, secondary, tertiary string, width int, palette theme.Palette, selected bool, focused bool) string {
 	if width <= 0 {
 		width = 72
 	}
@@ -47,6 +48,15 @@ func RenderSelectableRow(primary, secondary, tertiary string, width int, palette
 		gapStyle = gapStyle.Background(selectionBackground)
 		secondaryStyle = secondaryStyle.Background(selectionBackground).Foreground(selectionForeground)
 		tertiaryStyle = tertiaryStyle.Background(selectionBackground).Foreground(selectionForeground).Bold(true)
+	}
+	if focused {
+		focusedBackground := deriveFocusedBackground(selectionBackground, firstNonEmptyColor(palette.ScreenBackground, palette.SidebarBackground, palette.UserTextBackground))
+		focusedForeground := selectionForeground
+		rowStyle = rowStyle.Background(focusedBackground).Foreground(focusedForeground)
+		primaryStyle = primaryStyle.Background(focusedBackground).Foreground(focusedForeground)
+		gapStyle = gapStyle.Background(focusedBackground)
+		secondaryStyle = secondaryStyle.Background(focusedBackground).Foreground(focusedForeground)
+		tertiaryStyle = tertiaryStyle.Background(focusedBackground).Foreground(focusedForeground).Bold(true)
 	}
 	row := lipgloss.JoinHorizontal(
 		lipgloss.Top,
@@ -106,8 +116,8 @@ func (v VerticalTabs) View(width int, palette theme.Palette, focused bool) strin
 		Bold(true)
 	if focused {
 		activeStyle = activeStyle.
-			Background(firstNonEmptyColor(palette.FocusBackground, palette.SelectionBackground)).
-			Foreground(firstNonEmptyColor(palette.FocusForeground, palette.SelectionForeground))
+			Background(deriveFocusedBackground(firstNonEmptyColor(palette.SelectionBackground, palette.UserTextBackground), firstNonEmptyColor(palette.ScreenBackground, palette.SidebarBackground, palette.UserTextBackground))).
+			Foreground(firstNonEmptyColor(palette.SelectionForeground, palette.UserTextForeground))
 	}
 	for idx, tab := range v.Tabs {
 		label := fmt.Sprintf(" %s ", strings.TrimSpace(tab))
@@ -144,7 +154,7 @@ func (r CheckboxRow) View(width int, palette theme.Palette, focused bool) string
 			label = "Off"
 		}
 	}
-	row := RenderSelectableRow(r.Label, r.Description, glyph+" "+label, width, palette, focused)
+	row := RenderSelectableRow(r.Label, r.Description, glyph+" "+label, width, palette, focused, focused)
 	if focused {
 		return lipgloss.NewStyle().Foreground(valueColor).Background(palette.UserTextBackground).Render(row)
 	}
@@ -158,7 +168,7 @@ type ChoiceRow struct {
 }
 
 func (r ChoiceRow) View(width int, palette theme.Palette, focused bool) string {
-	return RenderSelectableRow(r.Label, r.Description, r.Value, width, palette, focused)
+	return RenderSelectableRow(r.Label, r.Description, r.Value, width, palette, focused, focused)
 }
 
 type Button struct {
@@ -172,27 +182,33 @@ type Button struct {
 }
 
 func (b Button) View(palette theme.Palette) string {
-	style := lipgloss.NewStyle().Padding(0, 2)
+	background := lipgloss.Color("")
+	foreground := lipgloss.Color("")
+	bold := false
 	if b.Primary {
-		style = style.Background(palette.UserTextBackground).Foreground(palette.UserAccentBar).Bold(true)
+		background = firstNonEmptyColor(palette.SelectionBackground, palette.UserTextBackground)
+		foreground = firstNonEmptyColor(palette.SelectionForeground, palette.UserTextForeground)
+		bold = true
 	}
 	if b.Selected {
-		style = style.
-			Background(firstNonEmptyColor(palette.SelectionBackground, palette.UserTextBackground)).
-			Foreground(firstNonEmptyColor(palette.SelectionForeground, palette.UserTextForeground)).
-			Bold(true)
+		background = firstNonEmptyColor(palette.SelectionBackground, palette.UserTextBackground)
+		foreground = firstNonEmptyColor(palette.SelectionForeground, palette.UserTextForeground)
+		bold = true
 	}
 	if b.Focused {
-		style = style.
-			Background(firstNonEmptyColor(palette.FocusBackground, palette.SelectionBackground, palette.UserTextBackground)).
-			Foreground(firstNonEmptyColor(palette.FocusForeground, palette.SelectionForeground, palette.UserTextForeground)).
-			Bold(true)
+		background = deriveFocusedBackground(firstNonEmptyColor(palette.SelectionBackground, palette.UserTextBackground), firstNonEmptyColor(palette.ScreenBackground, palette.SidebarBackground, palette.UserTextBackground))
+		foreground = firstNonEmptyColor(palette.SelectionForeground, palette.UserTextForeground)
+		bold = true
 	}
 	label := b.Label
 	if b.Hotkey != 0 {
-		label = renderButtonLabel(b.Label, b.Hotkey, palette)
+		label = renderButtonLabel(b.Label, b.Hotkey, palette, foreground, background, bold)
+	} else {
+		label = renderButtonSegment(b.Label, foreground, background, bold)
 	}
-	return style.Render(label)
+	leftPad := renderButtonSegment("  ", foreground, background, bold)
+	rightPad := renderButtonSegment("  ", foreground, background, bold)
+	return leftPad + label + rightPad
 }
 
 func RenderDialogButtons(palette theme.Palette, okLabel, cancelLabel string) string {
@@ -367,11 +383,11 @@ func (r ButtonRow) gap() int {
 	return r.Gap
 }
 
-func renderButtonLabel(label string, hotkey rune, palette theme.Palette) string {
+func renderButtonLabel(label string, hotkey rune, palette theme.Palette, foreground, background lipgloss.Color, bold bool) string {
 	labelRunes := []rune(label)
 	target := []rune(strings.ToLower(string(hotkey)))
 	if len(target) == 0 {
-		return label
+		return renderButtonSegment(label, foreground, background, bold)
 	}
 	idx := -1
 	for i, r := range labelRunes {
@@ -381,10 +397,26 @@ func renderButtonLabel(label string, hotkey rune, palette theme.Palette) string 
 		}
 	}
 	if idx < 0 {
-		return label
+		return renderButtonSegment(label, foreground, background, bold)
 	}
-	hot := lipgloss.NewStyle().Foreground(palette.ActivityText).Bold(true).Render(string(labelRunes[idx]))
-	return string(labelRunes[:idx]) + hot + string(labelRunes[idx+1:])
+	before := renderButtonSegment(string(labelRunes[:idx]), foreground, background, bold)
+	hot := renderButtonSegment(string(labelRunes[idx]), palette.ActivityText, background, true)
+	after := renderButtonSegment(string(labelRunes[idx+1:]), foreground, background, bold)
+	return before + hot + after
+}
+
+func renderButtonSegment(text string, foreground, background lipgloss.Color, bold bool) string {
+	style := lipgloss.NewStyle()
+	if strings.TrimSpace(string(foreground)) != "" {
+		style = style.Foreground(foreground)
+	}
+	if strings.TrimSpace(string(background)) != "" {
+		style = style.Background(background)
+	}
+	if bold {
+		style = style.Bold(true)
+	}
+	return style.Render(text)
 }
 
 func firstNonEmptyColor(values ...lipgloss.Color) lipgloss.Color {
@@ -394,6 +426,50 @@ func firstNonEmptyColor(values ...lipgloss.Color) lipgloss.Color {
 		}
 	}
 	return lipgloss.Color("")
+}
+
+func deriveFocusedBackground(base lipgloss.Color, screen lipgloss.Color) lipgloss.Color {
+	rawBase := strings.TrimSpace(string(base))
+	rawScreen := strings.TrimSpace(string(screen))
+	if len(rawBase) != 7 || rawBase[0] != '#' {
+		return base
+	}
+	r, errR := strconv.ParseInt(rawBase[1:3], 16, 64)
+	g, errG := strconv.ParseInt(rawBase[3:5], 16, 64)
+	b, errB := strconv.ParseInt(rawBase[5:7], 16, 64)
+	if errR != nil || errG != nil || errB != nil {
+		return base
+	}
+	screenLuminance := 255.0
+	if len(rawScreen) == 7 && rawScreen[0] == '#' {
+		sr, errSR := strconv.ParseInt(rawScreen[1:3], 16, 64)
+		sg, errSG := strconv.ParseInt(rawScreen[3:5], 16, 64)
+		sb, errSB := strconv.ParseInt(rawScreen[5:7], 16, 64)
+		if errSR == nil && errSG == nil && errSB == nil {
+			screenLuminance = 0.2126*float64(sr) + 0.7152*float64(sg) + 0.0722*float64(sb)
+		}
+	}
+	adjust := func(v int64) int64 {
+		if screenLuminance < 140 {
+			return minInt64(255, v+28)
+		}
+		return maxInt64(0, v-28)
+	}
+	return lipgloss.Color(fmt.Sprintf("#%02x%02x%02x", adjust(r), adjust(g), adjust(b)))
+}
+
+func minInt64(a, b int64) int64 {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func maxInt64(a, b int64) int64 {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 func truncateText(input string, width int) string {

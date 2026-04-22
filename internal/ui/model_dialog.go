@@ -134,7 +134,7 @@ func (d ModelDialog) View(width int, palette theme.Palette) string {
 		}
 		for idx := start; idx < end; idx++ {
 			item := d.view[idx]
-			listLines = append(listLines, RenderSelectableRow(item.ID, item.OwnedBy, capabilityBadges(item), listWidth, palette, idx == d.Index))
+			listLines = append(listLines, RenderSelectableRow(item.ID, item.OwnedBy, capabilityBadges(item), listWidth, palette, idx == d.Index, idx == d.Index && d.focus == pickerDialogFocusList))
 		}
 	}
 

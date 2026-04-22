@@ -764,43 +764,53 @@ func (m Model) modalLocalPoint(msg tea.MouseMsg, rendered string) (int, int, boo
 
 func (m Model) View() string {
 	m.syncDebugRuntime()
+	renderScreen := func(view string) string {
+		style := lipgloss.NewStyle().Background(m.palette.ScreenBackground)
+		if m.width > 0 {
+			style = style.Width(m.width)
+		}
+		if m.height > 0 {
+			style = style.Height(m.height)
+		}
+		return style.Render(view)
+	}
 	if m.hasModelDialog() && m.width > 0 && m.height > 0 {
-		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, m.renderModelDialog())
+		return renderScreen(lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, m.renderModelDialog()))
 	}
 	if m.hasDisconnectDialog() && m.width > 0 && m.height > 0 {
-		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, m.renderDisconnectDialog())
+		return renderScreen(lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, m.renderDisconnectDialog()))
 	}
 	if m.hasToolsDialog() && m.width > 0 && m.height > 0 {
-		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, m.renderToolsDialog())
+		return renderScreen(lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, m.renderToolsDialog()))
 	}
 	if m.hasConnectDialog() && m.width > 0 && m.height > 0 {
-		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, m.renderConnectDialog())
+		return renderScreen(lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, m.renderConnectDialog()))
 	}
 	if m.hasSessionDialog() && m.width > 0 && m.height > 0 {
-		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, m.renderSessionDialog())
+		return renderScreen(lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, m.renderSessionDialog()))
 	}
 	if m.hasAgentsModal() && m.width > 0 && m.height > 0 {
-		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, m.renderAgentsModal())
+		return renderScreen(lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, m.renderAgentsModal()))
 	}
 	if m.hasHelpModal() && m.width > 0 && m.height > 0 {
-		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, m.renderHelpModal())
+		return renderScreen(lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, m.renderHelpModal()))
 	}
 	if m.hasLLMPreview() && m.width > 0 && m.height > 0 {
-		return m.renderLLMPreview()
+		return renderScreen(m.renderLLMPreview())
 	}
 	if m.hasPreferencesDialog() && m.width > 0 && m.height > 0 {
-		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, m.renderPreferencesDialog())
+		return renderScreen(lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, m.renderPreferencesDialog()))
 	}
 	if m.hasPicker() && m.width > 0 && m.height > 0 {
-		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, m.renderPicker())
+		return renderScreen(lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, m.renderPicker()))
 	}
 	body := m.renderBody()
 	footer := m.renderFooter()
 	view := lipgloss.JoinVertical(lipgloss.Left, body, footer)
 	if m.width > 0 && m.height > 0 {
-		return lipgloss.Place(m.width, m.height, lipgloss.Left, lipgloss.Bottom, view)
+		return renderScreen(lipgloss.Place(m.width, m.height, lipgloss.Left, lipgloss.Bottom, view))
 	}
-	return view
+	return renderScreen(view)
 }
 
 func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -1246,30 +1256,18 @@ func (m *Model) footerHeight() int {
 
 func (m *Model) renderComposer() string {
 	m.composer.Prompt = m.promptGlyph() + " "
-	muted := lipgloss.NewStyle().
-		Background(m.palette.UserTextBackground).
-		Foreground(m.palette.ComposerMutedText)
-	cursorView := " "
-	if placeholder := ansi.Truncate(m.composer.Placeholder, max(0, m.composerWidth()-ansi.StringWidth(m.composer.Prompt)), ""); placeholder != "" {
-		runes := []rune(placeholder)
-		if m.composer.CursorVisible() {
-			cursorView = m.composer.CursorView(string(runes[0]))
-		} else {
-			cursorView = muted.Render(string(runes[0]))
-		}
-	} else {
-		cursorView = m.composer.CursorView(" ")
-	}
+	line := m.composer.VisibleLine()
 	return ui.RenderComposer(ui.ComposerProps{
-		Palette:          m.palette,
-		Width:            m.composerWidth(),
-		HalfBlocks:       m.halfBlocksEnabled(),
-		PromptGlyph:      m.promptGlyph(),
-		View:             m.composer.View(),
-		Value:            m.composer.Value(),
-		Placeholder:      m.composer.Placeholder,
-		CursorView:       cursorView,
-		MutedCursorStyle: muted,
+		Palette:       m.palette,
+		Width:         m.composerWidth(),
+		HalfBlocks:    m.halfBlocksEnabled(),
+		PromptGlyph:   m.promptGlyph(),
+		Value:         m.composer.Value(),
+		Placeholder:   m.composer.Placeholder,
+		ContentBefore: line.Before(),
+		ContentCursor: line.Cursor(),
+		ContentAfter:  line.After(),
+		CursorVisible: m.composer.CursorVisible(),
 	})
 }
 
@@ -3400,7 +3398,7 @@ func (m *Model) renderComposerHistoryMenu() string {
 		lines = append(lines, "")
 		for idx := start; idx < end; idx++ {
 			entry := matches[idx]
-			lines = append(lines, ui.RenderSelectableRow(firstHistoryLine(entry), historySummary(entry), "", width-4, m.palette, idx == m.composerHistory.SearchIndex))
+			lines = append(lines, ui.RenderSelectableRow(firstHistoryLine(entry), historySummary(entry), "", width-4, m.palette, idx == m.composerHistory.SearchIndex, idx == m.composerHistory.SearchIndex))
 		}
 	}
 	lines = append(lines, "", lipgloss.NewStyle().Foreground(m.palette.AssistantTimestampText).Render("enter accept  esc cancel  ctrl-r/down older  ctrl-s/up newer"))

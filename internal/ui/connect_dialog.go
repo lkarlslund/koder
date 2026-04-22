@@ -265,7 +265,7 @@ func (d *ConnectDialog) providerListView(width int, palette theme.Palette) strin
 			} else if item.Local {
 				tertiary = "local"
 			}
-			lines = append(lines, RenderSelectableRow(item.Title, item.Description, tertiary, dialogWidth-8, palette, idx == d.index))
+			lines = append(lines, RenderSelectableRow(item.Title, item.Description, tertiary, dialogWidth-8, palette, idx == d.index, idx == d.index && d.stage == connectStageProvider))
 		}
 	}
 	if status := strings.TrimSpace(d.status); status != "" {
@@ -287,7 +287,7 @@ func (d *ConnectDialog) authPickerView(width int, palette theme.Palette) string 
 		"",
 	}
 	for idx, method := range d.selected.AuthMethods {
-		lines = append(lines, RenderSelectableRow(method.Title, method.Description, "", dialogWidth-8, palette, idx == d.authIndex))
+		lines = append(lines, RenderSelectableRow(method.Title, method.Description, "", dialogWidth-8, palette, idx == d.authIndex, idx == d.authIndex && d.stage == connectStageAuth))
 	}
 	return Modal{
 		Title:  "Choose Auth Method",
@@ -333,7 +333,7 @@ func (d ConnectDialog) renderFormField(field connectField, width int, palette th
 	if active {
 		return d.renderEditorValue(field.ID, field.Label, field.Description, width, palette)
 	}
-	return RenderSelectableRow(field.Label, field.Description, d.displayValue(field.ID), width, palette, false)
+	return RenderSelectableRow(field.Label, field.Description, d.displayValue(field.ID), width, palette, false, false)
 }
 
 func (d ConnectDialog) renderEditorValue(fieldID string, label string, description string, width int, palette theme.Palette) string {

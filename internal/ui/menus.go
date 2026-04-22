@@ -79,7 +79,7 @@ func RenderPickerDialog(props PickerDialogProps) string {
 		lines = append(lines, "  no matches")
 	} else {
 		for idx, item := range props.Items {
-			lines = append(lines, RenderSelectableRow(item.Title, item.Description, "", 72, props.Palette, idx == props.Index))
+			lines = append(lines, RenderSelectableRow(item.Title, item.Description, "", 72, props.Palette, idx == props.Index, idx == props.Index))
 		}
 	}
 	lines = append(lines, "", RenderDialogButtons(props.Palette, "OK", "Cancel"))

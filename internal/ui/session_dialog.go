@@ -149,7 +149,7 @@ func (d SessionDialog) View(width int, palette theme.Palette) string {
 		}
 		for idx := start; idx < end; idx++ {
 			item := d.view[idx]
-			listLines = append(listLines, renderSessionTableRow(item, idWidth, timeWidth, tokensWidth, cwdWidth, titleWidth, d.ShowCWD, palette, idx == d.Index))
+			listLines = append(listLines, renderSessionTableRow(item, idWidth, timeWidth, tokensWidth, cwdWidth, titleWidth, d.ShowCWD, palette, idx == d.Index, idx == d.Index && d.focus == pickerDialogFocusList))
 		}
 	}
 
@@ -310,7 +310,7 @@ func renderSessionTableHeader(idWidth, timeWidth, tokensWidth, cwdWidth, titleWi
 	return style.Render(joinSessionColumns("ID", idWidth, "Created", timeWidth, "Modified", timeWidth, "Tokens", tokensWidth, "CWD", cwdWidth, "Title", titleWidth, showCWD))
 }
 
-func renderSessionTableRow(item SessionItem, idWidth, timeWidth, tokensWidth, cwdWidth, titleWidth int, showCWD bool, palette theme.Palette, selected bool) string {
+func renderSessionTableRow(item SessionItem, idWidth, timeWidth, tokensWidth, cwdWidth, titleWidth int, showCWD bool, palette theme.Palette, selected bool, focused bool) string {
 	row := joinSessionColumns(
 		item.SessionID,
 		idWidth,
@@ -332,7 +332,10 @@ func renderSessionTableRow(item SessionItem, idWidth, timeWidth, tokensWidth, cw
 	}
 	style := lipgloss.NewStyle().Width(totalWidth)
 	if selected {
-		style = style.Background(palette.UserTextBackground).Foreground(palette.UserTextForeground)
+		style = style.Background(palette.SelectionBackground).Foreground(palette.SelectionForeground)
+	}
+	if focused {
+		style = style.Background(deriveFocusedBackground(firstNonEmptyColor(palette.SelectionBackground, palette.UserTextBackground), firstNonEmptyColor(palette.ScreenBackground, palette.SidebarBackground, palette.UserTextBackground))).Foreground(firstNonEmptyColor(palette.SelectionForeground, palette.UserTextForeground))
 	}
 	return style.Render(row)
 }

@@ -19,13 +19,16 @@ func TestRenderSelectableRowSelectedUsesDistinctHighlightColors(t *testing.T) {
 	palette := theme.Palette{
 		ActivityText:           "#0a0b0c",
 		AssistantTimestampText: "#010203",
+		SelectionBackground:    "#040506",
+		SelectionForeground:    "#070809",
 		UserAccentBar:          "#0d0e0f",
 		UserTextBackground:     "#040506",
 		UserTextForeground:     "#070809",
 	}
 
-	unselected := RenderSelectableRow("write", "Allow writes after approval", "active", 48, palette, false)
-	selected := RenderSelectableRow("write", "Allow writes after approval", "active", 48, palette, true)
+	unselected := RenderSelectableRow("write", "Allow writes after approval", "active", 48, palette, false, false)
+	selected := RenderSelectableRow("write", "Allow writes after approval", "active", 48, palette, true, false)
+	focused := RenderSelectableRow("write", "Allow writes after approval", "active", 48, palette, true, true)
 
 	if selected == unselected {
 		t.Fatal("expected selected row styling to differ from unselected row")
@@ -39,6 +42,9 @@ func TestRenderSelectableRowSelectedUsesDistinctHighlightColors(t *testing.T) {
 	if strings.Contains(selected, "38;2;13;14;15") {
 		t.Fatalf("expected selected row tertiary text to use the shared selection foreground, got %q", selected)
 	}
+	if focused == selected {
+		t.Fatal("expected focused row styling to differ from merely selected row")
+	}
 }
 
 func TestFocusedButtonUsesFocusColors(t *testing.T) {
@@ -47,15 +53,15 @@ func TestFocusedButtonUsesFocusColors(t *testing.T) {
 	defer lipgloss.SetColorProfile(prev)
 
 	palette := theme.Palette{
-		FocusBackground:    "#101112",
-		FocusForeground:    "#f1f2f3",
-		UserTextBackground: "#040506",
-		UserTextForeground: "#070809",
-		UserAccentBar:      "#0d0e0f",
+		SelectionBackground: "#101112",
+		SelectionForeground: "#f1f2f3",
+		UserTextBackground:  "#040506",
+		UserTextForeground:  "#070809",
+		UserAccentBar:       "#0d0e0f",
 	}
 
 	view := Button{Label: "Approve", Focused: true}.View(palette)
-	if !strings.Contains(view, "48;2;16;17;18") {
+	if !strings.Contains(view, "48;2;44;44;46") {
 		t.Fatalf("expected focused button to use focus background, got %q", view)
 	}
 	if !strings.Contains(view, "38;2;241;242;243") {
