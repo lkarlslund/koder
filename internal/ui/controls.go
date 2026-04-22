@@ -28,18 +28,25 @@ func RenderSelectableRow(primary, secondary, tertiary string, width int, palette
 	if tertiaryWidth == 0 {
 		secondaryWidth = maxInt(8, width-primaryWidth-gapWidth)
 	}
-	selectionBackground := palette.UserTextBackground
+	selectionBackground := palette.SelectionBackground
+	selectionForeground := palette.SelectionForeground
+	if strings.TrimSpace(string(selectionBackground)) == "" {
+		selectionBackground = palette.UserTextBackground
+	}
+	if strings.TrimSpace(string(selectionForeground)) == "" {
+		selectionForeground = palette.UserTextForeground
+	}
 	primaryStyle := lipgloss.NewStyle().Width(primaryWidth).Bold(true)
 	gapStyle := lipgloss.NewStyle().Width(gapWidth)
 	secondaryStyle := lipgloss.NewStyle().Width(secondaryWidth).Foreground(palette.AssistantTimestampText)
 	tertiaryStyle := lipgloss.NewStyle().Width(tertiaryWidth).Align(lipgloss.Right).Foreground(palette.ActivityText)
 	rowStyle := lipgloss.NewStyle().Width(width)
 	if selected {
-		rowStyle = rowStyle.Background(selectionBackground).Foreground(palette.UserTextForeground)
-		primaryStyle = primaryStyle.Background(selectionBackground).Foreground(palette.UserTextForeground)
+		rowStyle = rowStyle.Background(selectionBackground).Foreground(selectionForeground)
+		primaryStyle = primaryStyle.Background(selectionBackground).Foreground(selectionForeground)
 		gapStyle = gapStyle.Background(selectionBackground)
-		secondaryStyle = secondaryStyle.Background(selectionBackground).Foreground(palette.UserTextForeground)
-		tertiaryStyle = tertiaryStyle.Background(selectionBackground).Foreground(palette.UserAccentBar).Bold(true)
+		secondaryStyle = secondaryStyle.Background(selectionBackground).Foreground(selectionForeground)
+		tertiaryStyle = tertiaryStyle.Background(selectionBackground).Foreground(selectionForeground).Bold(true)
 	}
 	row := lipgloss.JoinHorizontal(
 		lipgloss.Top,
@@ -94,11 +101,13 @@ func (v VerticalTabs) View(width int, palette theme.Palette, focused bool) strin
 	lines := make([]string, 0, len(v.Tabs))
 	base := lipgloss.NewStyle().Width(width)
 	activeStyle := base.
-		Background(palette.UserTextBackground).
-		Foreground(palette.UserAccentBar).
+		Background(palette.SelectionBackground).
+		Foreground(palette.SelectionForeground).
 		Bold(true)
 	if focused {
-		activeStyle = activeStyle.Reverse(true)
+		activeStyle = activeStyle.
+			Background(firstNonEmptyColor(palette.FocusBackground, palette.SelectionBackground)).
+			Foreground(firstNonEmptyColor(palette.FocusForeground, palette.SelectionForeground))
 	}
 	for idx, tab := range v.Tabs {
 		label := fmt.Sprintf(" %s ", strings.TrimSpace(tab))
@@ -167,8 +176,17 @@ func (b Button) View(palette theme.Palette) string {
 	if b.Primary {
 		style = style.Background(palette.UserTextBackground).Foreground(palette.UserAccentBar).Bold(true)
 	}
-	if b.Focused || b.Selected {
-		style = style.Reverse(true)
+	if b.Selected {
+		style = style.
+			Background(firstNonEmptyColor(palette.SelectionBackground, palette.UserTextBackground)).
+			Foreground(firstNonEmptyColor(palette.SelectionForeground, palette.UserTextForeground)).
+			Bold(true)
+	}
+	if b.Focused {
+		style = style.
+			Background(firstNonEmptyColor(palette.FocusBackground, palette.SelectionBackground, palette.UserTextBackground)).
+			Foreground(firstNonEmptyColor(palette.FocusForeground, palette.SelectionForeground, palette.UserTextForeground)).
+			Bold(true)
 	}
 	label := b.Label
 	if b.Hotkey != 0 {
@@ -367,6 +385,15 @@ func renderButtonLabel(label string, hotkey rune, palette theme.Palette) string 
 	}
 	hot := lipgloss.NewStyle().Foreground(palette.ActivityText).Bold(true).Render(string(labelRunes[idx]))
 	return string(labelRunes[:idx]) + hot + string(labelRunes[idx+1:])
+}
+
+func firstNonEmptyColor(values ...lipgloss.Color) lipgloss.Color {
+	for _, value := range values {
+		if strings.TrimSpace(string(value)) != "" {
+			return value
+		}
+	}
+	return lipgloss.Color("")
 }
 
 func truncateText(input string, width int) string {

@@ -39,9 +39,13 @@ type Palette struct {
 	MarkdownText                 lipgloss.Color
 	ReasoningBackground          lipgloss.Color
 	ReasoningText                lipgloss.Color
+	SelectionBackground          lipgloss.Color
+	SelectionForeground          lipgloss.Color
 	SidebarBackground            lipgloss.Color
 	SidebarBorder                lipgloss.Color
 	SidebarForeground            lipgloss.Color
+	FocusBackground              lipgloss.Color
+	FocusForeground              lipgloss.Color
 	UserAccentBar                lipgloss.Color
 	UserTextBackground           lipgloss.Color
 	UserTextForeground           lipgloss.Color
@@ -194,9 +198,13 @@ func buildOpenCodePalette(src opencodeThemeFile) Palette {
 		MarkdownText:                 resolve("markdownText"),
 		ReasoningBackground:          firstNonEmpty(resolve("backgroundElement"), resolve("backgroundPanel")),
 		ReasoningText:                resolve("text"),
+		SelectionBackground:          firstNonEmpty(resolve("secondary"), resolve("primary"), resolve("info"), resolve("backgroundElement")),
+		SelectionForeground:          firstNonEmpty(resolve("background"), resolve("backgroundPanel"), resolve("backgroundElement"), resolve("text")),
 		SidebarBackground:            resolve("backgroundPanel"),
 		SidebarBorder:                resolve("border"),
 		SidebarForeground:            resolve("text"),
+		FocusBackground:              firstNonEmpty(resolve("primary"), resolve("secondary"), resolve("info"), resolve("backgroundElement")),
+		FocusForeground:              firstNonEmpty(resolve("background"), resolve("backgroundPanel"), resolve("backgroundElement"), resolve("text")),
 		UserAccentBar:                firstNonEmpty(resolve("primary"), resolve("info"), resolve("text")),
 		UserTextBackground:           resolve("backgroundElement"),
 		UserTextForeground:           resolve("text"),
@@ -267,9 +275,13 @@ func claudeThemes() map[string]Theme {
 				MarkdownText:                 color("#ffffff"),
 				ReasoningBackground:          color("#373737"),
 				ReasoningText:                color("#ffffff"),
+				SelectionBackground:          color("#3b4261"),
+				SelectionForeground:          color("#ffffff"),
 				SidebarBackground:            color("#1f1f1f"),
 				SidebarBorder:                color("#505050"),
 				SidebarForeground:            color("#ffffff"),
+				FocusBackground:              color("#4c5a93"),
+				FocusForeground:              color("#ffffff"),
 				UserAccentBar:                color("#b1b9f9"),
 				UserTextBackground:           color("#373737"),
 				UserTextForeground:           color("#ffffff"),
@@ -304,9 +316,13 @@ func claudeThemes() map[string]Theme {
 				MarkdownText:                 color("#000000"),
 				ReasoningBackground:          color("#f0f0f0"),
 				ReasoningText:                color("#000000"),
+				SelectionBackground:          color("#cfd8ff"),
+				SelectionForeground:          color("#000000"),
 				SidebarBackground:            color("#f5f5f5"),
 				SidebarBorder:                color("#b7b7b7"),
 				SidebarForeground:            color("#000000"),
+				FocusBackground:              color("#b9c7ff"),
+				FocusForeground:              color("#000000"),
 				UserAccentBar:                color("#5769f7"),
 				UserTextBackground:           color("#f0f0f0"),
 				UserTextForeground:           color("#000000"),
@@ -341,9 +357,13 @@ func claudeThemes() map[string]Theme {
 				MarkdownText:                 color("#ffffff"),
 				ReasoningBackground:          color("#373737"),
 				ReasoningText:                color("#ffffff"),
+				SelectionBackground:          color("#3d4f66"),
+				SelectionForeground:          color("#ffffff"),
 				SidebarBackground:            color("#1f1f1f"),
 				SidebarBorder:                color("#505050"),
 				SidebarForeground:            color("#ffffff"),
+				FocusBackground:              color("#4a6a8d"),
+				FocusForeground:              color("#ffffff"),
 				UserAccentBar:                color("#99ccff"),
 				UserTextBackground:           color("#373737"),
 				UserTextForeground:           color("#ffffff"),
@@ -378,9 +398,13 @@ func claudeThemes() map[string]Theme {
 				MarkdownText:                 color("#000000"),
 				ReasoningBackground:          color("#ececec"),
 				ReasoningText:                color("#000000"),
+				SelectionBackground:          color("#c5d9ea"),
+				SelectionForeground:          color("#000000"),
 				SidebarBackground:            color("#f5f5f5"),
 				SidebarBorder:                color("#b7b7b7"),
 				SidebarForeground:            color("#000000"),
+				FocusBackground:              color("#bad2f0"),
+				FocusForeground:              color("#000000"),
 				UserAccentBar:                color("#3366ff"),
 				UserTextBackground:           color("#dcdcdc"),
 				UserTextForeground:           color("#000000"),

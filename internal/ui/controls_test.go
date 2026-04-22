@@ -36,8 +36,30 @@ func TestRenderSelectableRowSelectedUsesDistinctHighlightColors(t *testing.T) {
 	if !strings.Contains(selected, "38;2;7;8;9") {
 		t.Fatalf("expected selected row to use the selected row foreground, got %q", selected)
 	}
-	if !strings.Contains(selected, "38;2;13;14;15") {
-		t.Fatalf("expected selected row tertiary text to use accent color, got %q", selected)
+	if strings.Contains(selected, "38;2;13;14;15") {
+		t.Fatalf("expected selected row tertiary text to use the shared selection foreground, got %q", selected)
+	}
+}
+
+func TestFocusedButtonUsesFocusColors(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	defer lipgloss.SetColorProfile(prev)
+
+	palette := theme.Palette{
+		FocusBackground:    "#101112",
+		FocusForeground:    "#f1f2f3",
+		UserTextBackground: "#040506",
+		UserTextForeground: "#070809",
+		UserAccentBar:      "#0d0e0f",
+	}
+
+	view := Button{Label: "Approve", Focused: true}.View(palette)
+	if !strings.Contains(view, "48;2;16;17;18") {
+		t.Fatalf("expected focused button to use focus background, got %q", view)
+	}
+	if !strings.Contains(view, "38;2;241;242;243") {
+		t.Fatalf("expected focused button to use focus foreground, got %q", view)
 	}
 }
 
