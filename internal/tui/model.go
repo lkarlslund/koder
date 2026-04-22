@@ -177,6 +177,12 @@ type runPromptMsg struct {
 	contextChecked bool
 }
 
+type kickoffPromptMsg struct {
+	Prompt      string
+	Attachments []attachment.Draft
+	References  []reference.Draft
+}
+
 type queuedPromptMode int
 
 const (
@@ -446,6 +452,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.pendingModelNote = ""
 		m.startBusy(m.busy.scopeOrDefault(busyScopeTranscript), "Working ...")
 		return m, tea.Batch(nextEventCmd(msg.events), m.spinnerCmdIfNeeded(), m.syncWindowTitleCmd())
+	case kickoffPromptMsg:
+		return m, tea.Batch(m.promptCmd(m.beginActiveOperation(), msg.Prompt, msg.Attachments, msg.References), m.spinnerCmdIfNeeded(), m.syncWindowTitleCmd())
 	case llmPreviewMsg:
 		if msg.err != nil {
 			m.status = msg.err.Error()
@@ -1095,7 +1103,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.draftReferences = nil
 		m.appendLocalUserPrompt(prompt, drafts, refs)
 		m.startBusy(busyScopeTranscript, "Running…")
-		return m, tea.Batch(m.promptCmd(m.beginActiveOperation(), prompt, drafts, refs), m.spinnerCmdIfNeeded())
+		return m, m.kickoffPromptCmd(prompt, drafts, refs)
 	}
 
 	var cmd tea.Cmd
@@ -2439,7 +2447,7 @@ func (m *Model) dequeuePromptCmd() tea.Cmd {
 		return tea.Batch(m.continueCmd(m.beginActiveOperation()), m.spinnerCmdIfNeeded())
 	}
 	m.appendLocalUserPrompt(item.Text, item.Attachments, item.References)
-	return tea.Batch(m.promptCmd(m.beginActiveOperation(), item.Text, item.Attachments, item.References), m.spinnerCmdIfNeeded())
+	return m.kickoffPromptCmd(item.Text, item.Attachments, item.References)
 }
 
 func (m Model) ensureRuntimeContextWindow(ctx context.Context, session domain.Session) (string, int, bool, error) {
@@ -2476,6 +2484,16 @@ func (m Model) ensureRuntimeContextWindow(ctx context.Context, session domain.Se
 		}
 	}
 	return providerID, contextWindow, true, nil
+}
+
+func (m Model) kickoffPromptCmd(prompt string, drafts []attachment.Draft, refs []reference.Draft) tea.Cmd {
+	return tea.Tick(time.Millisecond, func(time.Time) tea.Msg {
+		return kickoffPromptMsg{
+			Prompt:      prompt,
+			Attachments: drafts,
+			References:  refs,
+		}
+	})
 }
 
 func (m *Model) resetComposerHistory() {

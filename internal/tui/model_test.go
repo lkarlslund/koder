@@ -304,6 +304,44 @@ func TestPermissionsPickerSelectionUpdatesDraftSession(t *testing.T) {
 	}
 }
 
+func TestEnterShowsOptimisticUserPromptBeforePromptStarts(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.DefaultProvider = "test"
+	cfg.DefaultModel = "model"
+	cfg.Providers = map[string]config.Provider{
+		"test": {BaseURL: "https://example.invalid/v1", APIKey: "secret", DefaultModel: "model"},
+	}
+	m := Model{
+		cfg:            cfg,
+		composer:       textarea.New(),
+		palette:        theme.Resolve("tokyonight").Palette,
+		viewport:       viewport.New(60, 10),
+		currentSession: domain.Session{ID: 1, ProviderID: "test", ModelID: "model"},
+		parts:          map[int64][]domain.Part{},
+	}
+	m.composer.SetValue("hello there")
+
+	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	next := updated.(*Model)
+	if cmd == nil {
+		t.Fatal("expected prompt kickoff command")
+	}
+	if len(next.messages) != 1 {
+		t.Fatalf("expected optimistic user message, got %#v", next.messages)
+	}
+	if next.messages[0].Role != domain.MessageRoleUser || next.messages[0].Summary != "hello there" {
+		t.Fatalf("unexpected optimistic message: %#v", next.messages[0])
+	}
+	if got := next.viewport.View(); !strings.Contains(got, "hello there") {
+		t.Fatalf("expected viewport to show optimistic user prompt, got %q", got)
+	}
+
+	msg := cmd()
+	if _, ok := msg.(kickoffPromptMsg); !ok {
+		t.Fatalf("expected kickoffPromptMsg before async prompt starts, got %#v", msg)
+	}
+}
+
 func testConfig(t *testing.T) config.Config {
 	t.Helper()
 	return config.Default().WithStateDir(t.TempDir())
