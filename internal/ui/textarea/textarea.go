@@ -1,12 +1,17 @@
 package textarea
 
 import (
+	"time"
 	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 )
+
+const blinkInterval = 530 * time.Millisecond
+
+type blinkMsg struct{}
 
 type Cursor struct {
 	char      string
@@ -50,18 +55,21 @@ type Model struct {
 	focus  bool
 	value  []rune
 	cursor int
+	blink  bool
 }
 
 func New() Model {
-	return Model{focus: true, height: 1}
+	return Model{focus: true, height: 1, blink: true}
 }
 
 func (m *Model) Focus() {
 	m.focus = true
+	m.blink = true
 }
 
 func (m *Model) Blur() {
 	m.focus = false
+	m.blink = false
 }
 
 func (m *Model) SetWidth(width int) {
@@ -104,39 +112,67 @@ func (m *Model) InsertString(s string) {
 	m.insertRunes([]rune(s))
 }
 
+func (m Model) BlinkCmd() tea.Cmd {
+	if !m.focus {
+		return nil
+	}
+	return tea.Tick(blinkInterval, func(time.Time) tea.Msg {
+		return blinkMsg{}
+	})
+}
+
 func (m *Model) Update(msg tea.Msg) (Model, tea.Cmd) {
-	key, ok := msg.(tea.KeyMsg)
-	if !ok || !m.focus {
+	switch msg := msg.(type) {
+	case blinkMsg:
+		if !m.focus {
+			return *m, nil
+		}
+		m.blink = !m.blink
+		return *m, m.BlinkCmd()
+	case tea.KeyMsg:
+		if !m.focus {
+			return *m, nil
+		}
+		m.blink = true
+		cmd := m.BlinkCmd()
+		switch msg.Type {
+		case tea.KeyLeft:
+			if m.cursor > 0 {
+				m.cursor--
+			}
+		case tea.KeyRight:
+			if m.cursor < len(m.value) {
+				m.cursor++
+			}
+		case tea.KeyHome:
+			m.cursor = 0
+		case tea.KeyEnd:
+			m.cursor = len(m.value)
+		case tea.KeyBackspace:
+			if m.cursor > 0 {
+				m.value = append(m.value[:m.cursor-1], m.value[m.cursor:]...)
+				m.cursor--
+			}
+		case tea.KeyDelete:
+			if m.cursor < len(m.value) {
+				m.value = append(m.value[:m.cursor], m.value[m.cursor+1:]...)
+			}
+		case tea.KeySpace:
+			m.insertRunes([]rune{' '})
+		case tea.KeyRunes:
+			m.insertRunes(msg.Runes)
+		default:
+			switch msg.String() {
+			case "ctrl+a":
+				m.cursor = 0
+			case "ctrl+e":
+				m.cursor = len(m.value)
+			}
+		}
+		return *m, cmd
+	default:
 		return *m, nil
 	}
-	switch key.String() {
-	case "left":
-		if m.cursor > 0 {
-			m.cursor--
-		}
-	case "right":
-		if m.cursor < len(m.value) {
-			m.cursor++
-		}
-	case "home", "ctrl+a":
-		m.cursor = 0
-	case "end", "ctrl+e":
-		m.cursor = len(m.value)
-	case "backspace":
-		if m.cursor > 0 {
-			m.value = append(m.value[:m.cursor-1], m.value[m.cursor:]...)
-			m.cursor--
-		}
-	case "delete":
-		if m.cursor < len(m.value) {
-			m.value = append(m.value[:m.cursor], m.value[m.cursor+1:]...)
-		}
-	default:
-		if key.Type == tea.KeyRunes {
-			m.insertRunes(key.Runes)
-		}
-	}
-	return *m, nil
 }
 
 func (m Model) View() string {
@@ -146,6 +182,9 @@ func (m Model) View() string {
 		style = m.FocusedStyle
 	}
 	prompt := style.Prompt.Render(m.Prompt)
+	if !m.focus || !m.blink {
+		return prompt + style.Text.Render(line.plain)
+	}
 	text := line.before + m.Cursor.TextStyle.Render(line.cursor) + line.after
 	return prompt + style.Text.Render(text)
 }
@@ -154,6 +193,7 @@ type visibleLine struct {
 	before string
 	cursor string
 	after  string
+	plain  string
 }
 
 func (m Model) visibleLine() visibleLine {
@@ -199,7 +239,7 @@ func (m Model) visibleLine() visibleLine {
 	if localCursor < len(lineRunes) {
 		after = string(lineRunes[localCursor+1:])
 	}
-	return visibleLine{before: before, cursor: char, after: after}
+	return visibleLine{before: before, cursor: char, after: after, plain: string(lineRunes)}
 }
 
 func (m *Model) insertRunes(runes []rune) {

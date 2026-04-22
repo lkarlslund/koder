@@ -389,11 +389,12 @@ func NewWithWorkdir(cfg config.Config, st *store.Store, a *agent.Engine, mode St
 
 func (m Model) Init() tea.Cmd {
 	if !m.mouseEnabled {
-		return tea.Batch(m.loadCmd(), m.syncWindowTitleCmd())
+		return tea.Batch(m.loadCmd(), m.syncWindowTitleCmd(), m.composer.BlinkCmd())
 	}
 	return tea.Batch(
 		m.loadCmd(),
 		m.syncWindowTitleCmd(),
+		m.composer.BlinkCmd(),
 		func() tea.Msg { return tea.EnableMouseCellMotion() },
 	)
 }
@@ -1247,15 +1248,12 @@ func (m *Model) renderComposer() string {
 	muted := lipgloss.NewStyle().
 		Background(m.palette.UserTextBackground).
 		Foreground(m.palette.ComposerMutedText)
-	m.composer.Cursor.TextStyle = muted
 	cursorView := " "
 	if placeholder := ansi.Truncate(m.composer.Placeholder, max(0, m.composerWidth()-ansi.StringWidth(m.composer.Prompt)), ""); placeholder != "" {
 		runes := []rune(placeholder)
-		m.composer.Cursor.SetChar(string(runes[0]))
-		cursorView = m.composer.Cursor.View()
+		cursorView = muted.Render(string(runes[0]))
 	} else {
-		m.composer.Cursor.SetChar(" ")
-		cursorView = m.composer.Cursor.View()
+		cursorView = muted.Render(" ")
 	}
 	return ui.RenderComposer(ui.ComposerProps{
 		Palette:          m.palette,
@@ -3862,6 +3860,9 @@ func applyComposerTheme(composer *textarea.Model, palette theme.Palette) {
 	applyTextareaStyle(&blurred)
 	composer.FocusedStyle = focused
 	composer.BlurredStyle = blurred
+	composer.Cursor.TextStyle = lipgloss.NewStyle().
+		Background(palette.UserTextForeground).
+		Foreground(palette.UserTextBackground)
 }
 
 func (m *Model) hasPicker() bool {
