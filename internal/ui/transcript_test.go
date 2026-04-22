@@ -29,3 +29,15 @@ func TestUserMessageClassicViewDoesNotAddLeadingSpaceBeforeBody(t *testing.T) {
 		t.Fatalf("expected text flush after prompt glyph separator, got %q", bodyLine)
 	}
 }
+
+func TestActivityIndicatorViewDoesNotAddLeadingSpace(t *testing.T) {
+	palette := theme.Resolve("tokyonight").Palette
+	got := ActivityIndicator{
+		Indicator: "x Working ...",
+		Palette:   palette,
+	}.View()
+
+	if strings.HasPrefix(got, " ") {
+		t.Fatalf("expected activity indicator to start without a leading space, got %q", got)
+	}
+}

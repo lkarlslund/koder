@@ -31,7 +31,6 @@ func (i ActivityIndicator) View() string {
 	return lipgloss.NewStyle().
 		Foreground(i.Palette.ActivityText).
 		Bold(true).
-		Padding(0, 1).
 		Render(i.Indicator)
 }
 
