@@ -3,6 +3,8 @@ package ui
 import (
 	"strings"
 
+	"github.com/charmbracelet/x/ansi"
+
 	"github.com/lkarlslund/koder/internal/theme"
 )
 
@@ -19,20 +21,41 @@ type Dialog struct {
 
 func (d Dialog) View(palette theme.Palette) string {
 	parts := make([]string, 0, len(d.Sections)+1)
+	maxContentWidth := 0
 	for _, section := range d.Sections {
 		if strings.TrimSpace(section) == "" {
 			continue
 		}
-		parts = append(parts, strings.TrimRight(section, "\n"))
+		trimmed := strings.TrimRight(section, "\n")
+		parts = append(parts, trimmed)
+		maxContentWidth = maxDialogContentWidth(maxContentWidth, trimmed)
 	}
 	if len(d.Buttons.Buttons) > 0 {
-		parts = append(parts, d.Buttons.View(palette))
+		buttons := d.Buttons
+		buttons.Width = 0
+		buttonLine := buttons.line(palette)
+		parts = append(parts, buttons.View(palette))
+		maxContentWidth = max(maxContentWidth, ansi.StringWidth(buttonLine))
+	}
+	maxContentWidth = max(maxContentWidth, ansi.StringWidth(strings.TrimSpace(d.Title)))
+	maxContentWidth = max(maxContentWidth, ansi.StringWidth(strings.TrimSpace(d.Subtitle)))
+	maxContentWidth = max(maxContentWidth, ansi.StringWidth(strings.TrimSpace(d.Footer)))
+	width := d.Width
+	if required := maxContentWidth + 6; required > width {
+		width = required
 	}
 	return Modal{
 		Title:    d.Title,
 		Subtitle: d.Subtitle,
 		Body:     strings.Join(parts, "\n\n"),
 		Footer:   d.Footer,
-		Width:    d.Width,
+		Width:    width,
 	}.View(palette)
+}
+
+func maxDialogContentWidth(current int, block string) int {
+	for _, line := range strings.Split(block, "\n") {
+		current = max(current, ansi.StringWidth(line))
+	}
+	return current
 }
