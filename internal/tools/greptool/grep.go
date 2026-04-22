@@ -3,7 +3,10 @@ package greptool
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/lkarlslund/koder/internal/domain"
@@ -55,7 +58,7 @@ func (tool) Presentation(req tools.Request) tools.Presentation {
 }
 func (tool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
 	if _, err := exec.LookPath("rg"); err == nil {
-		rootAbs, _, err := tools.WorkspaceDir(runtime.Workdir, req.Args["path"])
+		rootAbs, rootLabel, searchTarget, singleFile, err := grepScope(runtime.Workdir, req.Args["path"])
 		if err != nil {
 			return tools.Result{}, err
 		}
@@ -63,10 +66,14 @@ func (tool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Reques
 		if include := strings.TrimSpace(req.Args["include"]); include != "" {
 			args = append(args, "--glob", include)
 		}
-		args = append(args, ".")
+		args = append(args, searchTarget)
 		cmd := exec.CommandContext(ctx, "rg", args...)
 		cmd.Dir = rootAbs
 		output, err := cmd.CombinedOutput()
+		outputText := string(output)
+		if singleFile {
+			outputText = prefixSingleFileMatches(rootLabel, outputText)
+		}
 		if err != nil {
 			var exitErr *exec.ExitError
 			if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
@@ -75,12 +82,12 @@ func (tool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Reques
 					Meta: map[string]string{
 						"pattern":   req.Args["pattern"],
 						"include":   req.Args["include"],
-						"base_path": strings.TrimSpace(req.Args["path"]),
+						"base_path": rootLabel,
 						"matches":   "0",
 					},
 					Stored: tools.GrepStoredResult{
 						Pattern:  req.Args["pattern"],
-						BasePath: strings.TrimSpace(req.Args["path"]),
+						BasePath: rootLabel,
 						Include:  req.Args["include"],
 						Output:   "No matches found",
 					},
@@ -90,18 +97,18 @@ func (tool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Reques
 				return tools.Result{}, err
 			}
 		}
-		text, truncated := tools.TruncateText(string(output), tools.DefaultToolOutputLimit)
+		text, truncated := tools.TruncateText(outputText, tools.DefaultToolOutputLimit)
 		return tools.Result{
 			Output: text,
 			Meta: map[string]string{
 				"pattern":   req.Args["pattern"],
 				"include":   req.Args["include"],
-				"base_path": strings.TrimSpace(req.Args["path"]),
+				"base_path": rootLabel,
 				"truncated": tools.BoolString(truncated),
 			},
 			Stored: tools.GrepStoredResult{
 				Pattern:   req.Args["pattern"],
-				BasePath:  strings.TrimSpace(req.Args["path"]),
+				BasePath:  rootLabel,
 				Include:   req.Args["include"],
 				Output:    text,
 				Truncated: truncated,
@@ -128,4 +135,42 @@ func grepScopeLabel(path, include string) string {
 	default:
 		return include
 	}
+}
+
+func grepScope(workdir string, raw string) (rootAbs string, rootLabel string, searchTarget string, singleFile bool, err error) {
+	workspaceRoot, err := filepath.Abs(strings.TrimSpace(workdir))
+	if err != nil {
+		return "", "", "", false, fmt.Errorf("resolve workspace dir: %w", err)
+	}
+	if strings.TrimSpace(raw) == "" {
+		return workspaceRoot, ".", ".", false, nil
+	}
+	abs, rel, err := tools.WorkspacePath(workdir, raw)
+	if err != nil {
+		return "", "", "", false, err
+	}
+	info, err := os.Stat(abs)
+	if err != nil {
+		return "", "", "", false, err
+	}
+	if info.IsDir() {
+		return abs, rel, ".", false, nil
+	}
+	return workspaceRoot, rel, rel, true, nil
+}
+
+func prefixSingleFileMatches(path string, output string) string {
+	output = strings.TrimRight(output, "\n")
+	if strings.TrimSpace(output) == "" {
+		return output
+	}
+	lines := strings.Split(output, "\n")
+	for i, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		lines[i] = path + ":" + line
+	}
+	return strings.Join(lines, "\n") + "\n"
 }
