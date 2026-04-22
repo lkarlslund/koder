@@ -16,6 +16,7 @@ type PartKind string
 const (
 	PartKindText            PartKind = "text"
 	PartKindAttachment      PartKind = "attachment"
+	PartKindReference       PartKind = "reference"
 	PartKindReasoning       PartKind = "reasoning"
 	PartKindToolCall        PartKind = "tool_call"
 	PartKindToolOutput      PartKind = "tool_output"

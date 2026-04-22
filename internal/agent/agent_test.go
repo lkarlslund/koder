@@ -19,6 +19,7 @@ import (
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/permission"
+	"github.com/lkarlslund/koder/internal/reference"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools"
 )
@@ -416,7 +417,7 @@ func TestPreviewNextRequestIncludesUnsentDraftMessage(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	req, err := engine.PreviewNextRequest(context.Background(), session, "unsent draft", nil, "Permission mode changed")
+	req, err := engine.PreviewNextRequest(context.Background(), session, "unsent draft", nil, nil, "Permission mode changed")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -471,6 +472,48 @@ func TestRunPromptWithUnsupportedPDFAttachmentFailsBeforeProviderCall(t *testing
 	}
 	if _, err := engine.RunPromptWithAttachments(context.Background(), session, "summarize", []attachment.Draft{draft}, ""); err == nil {
 		t.Fatal("expected unsupported pdf attachment to be rejected")
+	}
+}
+
+func TestPreviewNextRequestIncludesStructuredFileReference(t *testing.T) {
+	cfg := testConfig(t)
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	workdir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workdir, "README.md"), []byte("hello refs"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	engine := New(cfg, st, tools.NewRegistry(workdir), nil, workdir)
+	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	prompt := "check @README.md"
+	refs := []reference.Draft{{
+		Kind:    reference.KindFile,
+		Path:    "README.md",
+		Display: "@README.md",
+		Start:   len("check "),
+		End:     len(prompt),
+	}}
+	req, err := engine.PreviewNextRequest(context.Background(), session, prompt, nil, refs, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	userMsg := req.Messages[len(req.Messages)-1]
+	if len(userMsg.ContentParts) != 2 {
+		t.Fatalf("expected prompt text plus resolved reference, got %#v", userMsg.ContentParts)
+	}
+	if userMsg.ContentParts[0].Text != "check " {
+		t.Fatalf("unexpected leading text part: %#v", userMsg.ContentParts)
+	}
+	if !strings.Contains(userMsg.ContentParts[1].Text, "Referenced file README.md") || !strings.Contains(userMsg.ContentParts[1].Text, "hello refs") {
+		t.Fatalf("expected resolved file reference content, got %#v", userMsg.ContentParts[1])
 	}
 }
 

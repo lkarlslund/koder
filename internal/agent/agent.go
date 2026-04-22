@@ -20,6 +20,7 @@ import (
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/permission"
 	"github.com/lkarlslund/koder/internal/provider"
+	"github.com/lkarlslund/koder/internal/reference"
 	"github.com/lkarlslund/koder/internal/sessionctx"
 	"github.com/lkarlslund/koder/internal/skills"
 	"github.com/lkarlslund/koder/internal/store"
@@ -59,11 +60,15 @@ func (e *Engine) UpdateConfig(cfg config.Config) {
 }
 
 func (e *Engine) RunPrompt(ctx context.Context, session domain.Session, prompt string) (<-chan domain.Event, error) {
-	return e.RunPromptWithAttachments(ctx, session, prompt, nil, "")
+	return e.RunPromptWithInputs(ctx, session, prompt, nil, nil, "")
 }
 
 func (e *Engine) RunPromptWithAttachments(ctx context.Context, session domain.Session, prompt string, drafts []attachment.Draft, note string) (<-chan domain.Event, error) {
-	return e.runModelPrompt(ctx, session, prompt, drafts, note)
+	return e.RunPromptWithInputs(ctx, session, prompt, drafts, nil, note)
+}
+
+func (e *Engine) RunPromptWithInputs(ctx context.Context, session domain.Session, prompt string, drafts []attachment.Draft, refs []reference.Draft, note string) (<-chan domain.Event, error) {
+	return e.runModelPrompt(ctx, session, prompt, drafts, refs, note)
 }
 
 func (e *Engine) SetPermissionProfile(ctx context.Context, sessionID int64, profile string) (<-chan domain.Event, error) {
@@ -117,11 +122,11 @@ func (e *Engine) RunContinue(ctx context.Context, session domain.Session, note s
 	return e.runContinue(ctx, session, note)
 }
 
-func (e *Engine) PreviewNextRequest(ctx context.Context, session domain.Session, prompt string, drafts []attachment.Draft, note string) (provider.ChatRequest, error) {
+func (e *Engine) PreviewNextRequest(ctx context.Context, session domain.Session, prompt string, drafts []attachment.Draft, refs []reference.Draft, note string) (provider.ChatRequest, error) {
 	if err := e.validatePromptAttachments(session, drafts); err != nil {
 		return provider.ChatRequest{}, err
 	}
-	messages, err := e.buildConversationPreview(ctx, session, prompt, drafts, transientTurnMessages(note, ""))
+	messages, err := e.buildConversationPreview(ctx, session, prompt, drafts, refs, transientTurnMessages(note, ""))
 	if err != nil {
 		return provider.ChatRequest{}, err
 	}
@@ -134,7 +139,7 @@ func (e *Engine) PreviewNextRequest(ctx context.Context, session domain.Session,
 	}, nil
 }
 
-func (e *Engine) runModelPrompt(ctx context.Context, session domain.Session, prompt string, drafts []attachment.Draft, note string) (<-chan domain.Event, error) {
+func (e *Engine) runModelPrompt(ctx context.Context, session domain.Session, prompt string, drafts []attachment.Draft, refs []reference.Draft, note string) (<-chan domain.Event, error) {
 	if err := e.validatePromptAttachments(session, drafts); err != nil {
 		return nil, err
 	}
@@ -185,7 +190,7 @@ func (e *Engine) runModelPrompt(ctx context.Context, session domain.Session, pro
 				return
 			}
 		}
-		userMsg, err := e.persistUserPrompt(ctx, session, prompt, drafts)
+		userMsg, err := e.persistUserPrompt(ctx, session, prompt, drafts, refs)
 		if err != nil {
 			if interruptedErr(err) {
 				e.emitInterrupted(out, session.ID)
@@ -331,7 +336,7 @@ func (e *Engine) refreshSessionAgents(ctx context.Context, session domain.Sessio
 	return e.store.GetSession(ctx, session.ID)
 }
 
-func (e *Engine) persistUserPrompt(ctx context.Context, session domain.Session, prompt string, drafts []attachment.Draft) (domain.Message, error) {
+func (e *Engine) persistUserPrompt(ctx context.Context, session domain.Session, prompt string, drafts []attachment.Draft, refs []reference.Draft) (domain.Message, error) {
 	userMsg, err := e.store.AddMessage(ctx, session.ID, domain.MessageRoleUser, prompt)
 	if err != nil {
 		return domain.Message{}, err
@@ -354,13 +359,28 @@ func (e *Engine) persistUserPrompt(ctx context.Context, session domain.Session, 
 			return domain.Message{}, err
 		}
 	}
+	for _, ref := range refs {
+		raw, err := reference.EncodeMeta(reference.Metadata{
+			Kind:    ref.Kind,
+			Path:    ref.Path,
+			Display: ref.Display,
+			Start:   ref.Start,
+			End:     ref.End,
+		})
+		if err != nil {
+			return domain.Message{}, err
+		}
+		if _, err := e.store.AddPart(ctx, userMsg.ID, domain.PartKindReference, ref.Display, raw); err != nil {
+			return domain.Message{}, err
+		}
+	}
 	return userMsg, nil
 }
 
 func (e *Engine) continueModelTurn(ctx context.Context, session domain.Session, client *provider.Client, out chan<- domain.Event, transient []provider.Message) error {
 	for steps := 0; steps < e.maxToolLoopSteps(); steps++ {
 		e.recordLifecycle(session.ID, "model_turn_started", "", map[string]string{"step": strconv.Itoa(steps + 1)})
-		messages, buildErr := e.buildConversationPreview(ctx, session, "", nil, transient)
+		messages, buildErr := e.buildConversationPreview(ctx, session, "", nil, nil, transient)
 		if buildErr != nil {
 			return buildErr
 		}
@@ -920,10 +940,10 @@ func (e *Engine) buildConversation(ctx context.Context, sessionID int64) ([]prov
 	if err != nil {
 		return nil, err
 	}
-	return e.buildConversationPreview(ctx, session, "", nil, nil)
+	return e.buildConversationPreview(ctx, session, "", nil, nil, nil)
 }
 
-func (e *Engine) buildConversationPreview(ctx context.Context, session domain.Session, prompt string, drafts []attachment.Draft, transient []provider.Message) ([]provider.Message, error) {
+func (e *Engine) buildConversationPreview(ctx context.Context, session domain.Session, prompt string, drafts []attachment.Draft, refs []reference.Draft, transient []provider.Message) ([]provider.Message, error) {
 	conversation := e.baseConversation(session)
 	if session.ID > 0 {
 		messages, partsByMessage, err := e.store.PartsForSession(ctx, session.ID)
@@ -947,7 +967,7 @@ func (e *Engine) buildConversationPreview(ctx context.Context, session domain.Se
 	}
 	conversation = injectTransientMessages(conversation, transient)
 	if strings.TrimSpace(prompt) != "" || len(drafts) > 0 {
-		msg, ok, err := e.previewUserMessage(prompt, drafts)
+		msg, ok, err := e.previewUserMessage(prompt, drafts, refs)
 		if err != nil {
 			return nil, err
 		}
@@ -977,8 +997,8 @@ func (e *Engine) baseConversation(session domain.Session) []provider.Message {
 	return conversation
 }
 
-func (e *Engine) previewUserMessage(prompt string, drafts []attachment.Draft) (provider.Message, bool, error) {
-	parts := make([]domain.Part, 0, len(drafts)+1)
+func (e *Engine) previewUserMessage(prompt string, drafts []attachment.Draft, refs []reference.Draft) (provider.Message, bool, error) {
+	parts := make([]domain.Part, 0, len(drafts)+len(refs)+1)
 	if strings.TrimSpace(prompt) != "" {
 		parts = append(parts, domain.Part{Kind: domain.PartKindText, Body: prompt})
 	}
@@ -993,7 +1013,24 @@ func (e *Engine) previewUserMessage(prompt string, drafts []attachment.Draft) (p
 			MetaJSON: raw,
 		})
 	}
-	if msg, ok, err := e.userMessageWithAttachments(parts); ok || err != nil {
+	for _, ref := range refs {
+		raw, err := reference.EncodeMeta(reference.Metadata{
+			Kind:    ref.Kind,
+			Path:    ref.Path,
+			Display: ref.Display,
+			Start:   ref.Start,
+			End:     ref.End,
+		})
+		if err != nil {
+			return provider.Message{}, false, err
+		}
+		parts = append(parts, domain.Part{
+			Kind:     domain.PartKindReference,
+			Body:     ref.Display,
+			MetaJSON: raw,
+		})
+	}
+	if msg, ok, err := e.userMessageWithContext(parts); ok || err != nil {
 		return msg, ok, err
 	}
 	if len(parts) == 0 {
@@ -1016,7 +1053,7 @@ func (e *Engine) conversationMessagesForStoredMessage(msg domain.Message, parts 
 			return []provider.Message{toolMsg}, nil
 		}
 	case domain.MessageRoleUser:
-		msg, ok, err := e.userMessageWithAttachments(parts)
+		msg, ok, err := e.userMessageWithContext(parts)
 		if err != nil {
 			return nil, err
 		}
@@ -1038,19 +1075,27 @@ func (e *Engine) conversationMessagesForStoredMessage(msg domain.Message, parts 
 	return []provider.Message{{Role: role, Content: content}}, nil
 }
 
-func (e *Engine) userMessageWithAttachments(parts []domain.Part) (provider.Message, bool, error) {
+func (e *Engine) userMessageWithContext(parts []domain.Part) (provider.Message, bool, error) {
 	contentParts := make([]provider.ContentPart, 0, len(parts)+1)
-	plainText := make([]string, 0, 1)
-	var hasAttachments bool
+	attachmentParts := make([]provider.ContentPart, 0, len(parts))
+	var prompt string
+	var refs []reference.Metadata
+	var hasStructured bool
 	for _, part := range parts {
 		switch part.Kind {
 		case domain.PartKindText:
 			if strings.TrimSpace(part.Body) != "" {
-				plainText = append(plainText, part.Body)
-				contentParts = append(contentParts, provider.TextPart(part.Body))
+				prompt = part.Body
 			}
+		case domain.PartKindReference:
+			hasStructured = true
+			meta, err := reference.DecodeMeta(part.MetaJSON)
+			if err != nil {
+				return provider.Message{}, false, err
+			}
+			refs = append(refs, meta)
 		case domain.PartKindAttachment:
-			hasAttachments = true
+			hasStructured = true
 			meta, err := attachment.DecodeMeta(part.MetaJSON)
 			if err != nil {
 				return provider.Message{}, false, err
@@ -1061,26 +1106,68 @@ func (e *Engine) userMessageWithAttachments(parts []domain.Part) (provider.Messa
 				if err != nil {
 					return provider.Message{}, false, err
 				}
-				contentParts = append(contentParts, provider.TextPart("Attached file "+meta.Name+":\n"+body))
+				attachmentParts = append(attachmentParts, provider.TextPart("Attached file "+meta.Name+":\n"+body))
 			case attachment.KindImage:
 				data, err := e.files.ReadBytes(meta)
 				if err != nil {
 					return provider.Message{}, false, err
 				}
-				contentParts = append(contentParts, provider.ImagePart(meta.MIME, data))
+				attachmentParts = append(attachmentParts, provider.ImagePart(meta.MIME, data))
 			default:
 				return provider.Message{}, false, fmt.Errorf("unsupported attachment in conversation: %s", meta.MIME)
 			}
 		}
 	}
-	if !hasAttachments {
+	if len(refs) > 0 {
+		slices.SortFunc(refs, func(a, b reference.Metadata) int {
+			if a.Start != b.Start {
+				return a.Start - b.Start
+			}
+			if a.End != b.End {
+				return a.End - b.End
+			}
+			return strings.Compare(a.Path, b.Path)
+		})
+		cursor := 0
+		for _, ref := range refs {
+			start := max(0, min(ref.Start, len(prompt)))
+			end := max(start, min(ref.End, len(prompt)))
+			if start > cursor {
+				contentParts = append(contentParts, provider.TextPart(prompt[cursor:start]))
+			}
+			resolved, err := e.resolveReference(ref)
+			if err != nil {
+				return provider.Message{}, false, err
+			}
+			contentParts = append(contentParts, provider.TextPart(resolved))
+			cursor = end
+		}
+		if cursor < len(prompt) {
+			contentParts = append(contentParts, provider.TextPart(prompt[cursor:]))
+		}
+	} else if strings.TrimSpace(prompt) != "" {
+		contentParts = append(contentParts, provider.TextPart(prompt))
+	}
+	contentParts = append(contentParts, attachmentParts...)
+	if !hasStructured {
 		return provider.Message{}, false, nil
 	}
 	message := provider.Message{Role: domain.MessageRoleUser, ContentParts: contentParts}
-	if len(contentParts) == 0 && len(plainText) > 0 {
-		message.Content = strings.Join(plainText, "\n\n")
+	if len(contentParts) == 0 && strings.TrimSpace(prompt) != "" {
+		message.Content = prompt
 	}
 	return message, true, nil
+}
+
+func (e *Engine) resolveReference(meta reference.Metadata) (string, error) {
+	switch meta.Kind {
+	case reference.KindFile:
+		return reference.ResolveFile(e.workdir, meta)
+	case reference.KindDirectory:
+		return reference.ResolveDirectory(e.workdir, meta)
+	default:
+		return "", fmt.Errorf("unsupported reference kind %q", meta.Kind)
+	}
 }
 
 func structuredAssistantMessage(parts []domain.Part) (provider.Message, bool) {
@@ -1159,6 +1246,8 @@ func stringifyParts(parts []domain.Part) string {
 		case domain.PartKindCompaction:
 			continue
 		case domain.PartKindAttachment:
+			continue
+		case domain.PartKindReference:
 			continue
 		case domain.PartKindReasoning:
 			chunks = append(chunks, "Reasoning:\n"+part.Body)

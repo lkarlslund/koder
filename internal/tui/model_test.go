@@ -26,6 +26,7 @@ import (
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/permission"
 	"github.com/lkarlslund/koder/internal/provider"
+	"github.com/lkarlslund/koder/internal/reference"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/theme"
 	"github.com/lkarlslund/koder/internal/tools"
@@ -111,6 +112,50 @@ func TestSkillQuery(t *testing.T) {
 	}
 	if _, _, ok := skillQuery("Investigate $rev more"); ok {
 		t.Fatal("expected no skill query when token is not at end")
+	}
+}
+
+func TestMentionQuery(t *testing.T) {
+	query, start, pathMode, ok := mentionQuery("inspect @rea", len("inspect @rea"))
+	if !ok || query != "rea" || pathMode {
+		t.Fatalf("unexpected mention query: ok=%v query=%q pathMode=%v start=%d", ok, query, pathMode, start)
+	}
+	if start != len("inspect ") {
+		t.Fatalf("unexpected mention start %d", start)
+	}
+	query, _, pathMode, ok = mentionQuery("inspect @./cmd/ko", len("inspect @./cmd/ko"))
+	if !ok || query != "./cmd/ko" || !pathMode {
+		t.Fatalf("unexpected path mention query: ok=%v query=%q pathMode=%v", ok, query, pathMode)
+	}
+}
+
+func TestAcceptMentionSelectionInsertsStructuredReference(t *testing.T) {
+	workdir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workdir, "README.md"), []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	composer := textarea.New()
+	composer.SetValue("inspect @rea")
+	composer.SetCursor(len("inspect @rea"))
+	m := Model{
+		cfg:            testConfig(t),
+		composer:       composer,
+		workdir:        workdir,
+		mentionMatches: []reference.Entry{{Kind: reference.KindFile, Path: "README.md", Display: "README.md", Description: "file"}},
+	}
+	m.acceptMentionSelection()
+	if got := m.composer.Value(); got != "inspect @README.md" {
+		t.Fatalf("unexpected composer value %q", got)
+	}
+	if len(m.draftReferences) != 1 {
+		t.Fatalf("expected one structured reference, got %#v", m.draftReferences)
+	}
+	ref := m.draftReferences[0]
+	if ref.Path != "README.md" || ref.Display != "@README.md" {
+		t.Fatalf("unexpected reference %#v", ref)
+	}
+	if ref.Start != len("inspect ") || ref.End != len("inspect @README.md") {
+		t.Fatalf("unexpected reference offsets %#v", ref)
 	}
 }
 

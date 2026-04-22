@@ -29,6 +29,7 @@ import (
 	"github.com/lkarlslund/koder/internal/markdown"
 	"github.com/lkarlslund/koder/internal/permission"
 	"github.com/lkarlslund/koder/internal/provider"
+	"github.com/lkarlslund/koder/internal/reference"
 	"github.com/lkarlslund/koder/internal/sessionctx"
 	"github.com/lkarlslund/koder/internal/skills"
 	"github.com/lkarlslund/koder/internal/store"
@@ -188,6 +189,7 @@ type queuedPrompt struct {
 	Text        string
 	Mode        queuedPromptMode
 	Attachments []attachment.Draft
+	References  []reference.Draft
 }
 
 func (q queuedPrompt) modeLabel() string {
@@ -282,6 +284,9 @@ type Model struct {
 	slashIndex         int
 	skillMatches       []skills.Skill
 	skillIndex         int
+	mentionMatches     []reference.Entry
+	mentionIndex       int
+	mentionCatalog     []reference.Entry
 	approvalButtons    ui.ButtonRow
 	workdir            string
 	workspace          workspace.Status
@@ -308,6 +313,7 @@ type Model struct {
 	queuedPrompt       *queuedPrompt
 	pendingModelNote   string
 	draftAttachments   []attachment.Draft
+	draftReferences    []reference.Draft
 	attachmentFiles    *attachment.Manager
 	interruptArmedAt   time.Time
 	readClipboardText  func() (string, error)
@@ -495,6 +501,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.workspace = msg.workspace
 		m.resetComposerInput()
 		m.draftAttachments = nil
+		m.draftReferences = nil
 		m.closePicker()
 		m.closeSessionDialog()
 		m.closeConnectDialog()
@@ -959,6 +966,28 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	if m.hasMentionMenu() {
+		switch msg.String() {
+		case "up":
+			if m.mentionIndex > 0 {
+				m.mentionIndex--
+			}
+			return m, nil
+		case "down":
+			if m.mentionIndex < len(m.mentionMatches)-1 {
+				m.mentionIndex++
+			}
+			return m, nil
+		case "tab", "enter":
+			m.acceptMentionSelection()
+			return m, nil
+		case "esc":
+			m.mentionMatches = nil
+			m.mentionIndex = 0
+			return m, nil
+		}
+	}
+
 	switch msg.String() {
 	case "ctrl+c":
 		return m.quit()
@@ -993,11 +1022,11 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "alt+o":
 		prompt := strings.TrimSpace(m.composer.Value())
-		if prompt == "" && len(m.draftAttachments) == 0 {
+		if prompt == "" && len(m.draftAttachments) == 0 && len(m.draftReferences) == 0 {
 			m.status = "No draft prompt to preview"
 			return m, m.syncWindowTitleCmd()
 		}
-		return m, m.previewLLMRequestCmd(context.Background(), prompt, slices.Clone(m.draftAttachments))
+		return m, m.previewLLMRequestCmd(context.Background(), prompt, slices.Clone(m.draftAttachments), slices.Clone(m.draftReferences))
 	case "ctrl+r":
 		if !m.openComposerHistorySearch() {
 			return m, nil
@@ -1033,7 +1062,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "enter":
 		prompt := strings.TrimSpace(m.composer.Value())
-		if prompt == "" && len(m.draftAttachments) == 0 {
+		if prompt == "" && len(m.draftAttachments) == 0 && len(m.draftReferences) == 0 {
 			return m, nil
 		}
 		if m.loading {
@@ -1048,11 +1077,13 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		drafts := slices.Clone(m.draftAttachments)
+		refs := slices.Clone(m.draftReferences)
 		m.resetComposerInput()
 		m.draftAttachments = nil
-		m.appendLocalUserPrompt(prompt, drafts)
+		m.draftReferences = nil
+		m.appendLocalUserPrompt(prompt, drafts, refs)
 		m.startBusy(busyScopeTranscript, "Running…")
-		return m, tea.Batch(m.promptCmd(m.beginActiveOperation(), prompt, drafts), m.spinnerCmdIfNeeded())
+		return m, tea.Batch(m.promptCmd(m.beginActiveOperation(), prompt, drafts, refs), m.spinnerCmdIfNeeded())
 	}
 
 	var cmd tea.Cmd
@@ -1193,6 +1224,8 @@ func (m *Model) renderFooter() string {
 	if menu := m.renderComposerHistoryMenu(); menu != "" {
 		parts = append(parts, menu)
 	} else if menu := m.renderSlashMenu(); menu != "" {
+		parts = append(parts, menu)
+	} else if menu := m.renderMentionMenu(); menu != "" {
 		parts = append(parts, menu)
 	} else if menu := m.renderSkillMenu(); menu != "" {
 		parts = append(parts, menu)
@@ -1619,6 +1652,10 @@ func (m *Model) renderMessageParts(parts []domain.Part) string {
 				continue
 			}
 			blocks = append(blocks, m.attachmentLabel(meta))
+		case domain.PartKindReference:
+			flushText()
+			flushReasoning()
+			continue
 		default:
 			flushText()
 			flushReasoning()
@@ -1685,6 +1722,8 @@ func (m *Model) renderUserMessageParts(parts []domain.Part) string {
 				continue
 			}
 			blocks = append(blocks, m.attachmentLabel(meta))
+		case domain.PartKindReference:
+			continue
 		default:
 			flushText()
 			if body := strings.TrimSpace(part.Body); body != "" {
@@ -1762,7 +1801,7 @@ type loadMsg struct {
 	preserveBusy bool
 }
 
-func (m Model) promptCmd(ctx context.Context, prompt string, drafts []attachment.Draft) tea.Cmd {
+func (m Model) promptCmd(ctx context.Context, prompt string, drafts []attachment.Draft, refs []reference.Draft) tea.Cmd {
 	return func() tea.Msg {
 		session := m.currentSession
 		if session.ID == 0 {
@@ -1776,7 +1815,7 @@ func (m Model) promptCmd(ctx context.Context, prompt string, drafts []attachment
 		if err != nil {
 			return runPromptMsg{err: err}
 		}
-		events, err := m.agent.RunPromptWithAttachments(ctx, session, prompt, drafts, m.pendingModelNote)
+		events, err := m.agent.RunPromptWithInputs(ctx, session, prompt, drafts, refs, m.pendingModelNote)
 		return runPromptMsg{
 			session:        session,
 			events:         events,
@@ -2159,6 +2198,7 @@ func (m Model) UpdateLoad(msg loadMsg) Model {
 	m.resetComposerHistory()
 	m.approvalButtons.Index = 0
 	m.draftAttachments = nil
+	m.draftReferences = nil
 	m.closePicker()
 	m.closeSessionDialog()
 	m.closePreferencesDialog()
@@ -2325,7 +2365,7 @@ func (m *Model) handleInterruptKey() (tea.Model, tea.Cmd) {
 
 func (m *Model) queueComposerPrompt(mode queuedPromptMode) (tea.Model, tea.Cmd) {
 	prompt := strings.TrimSpace(m.composer.Value())
-	if prompt == "" && len(m.draftAttachments) == 0 {
+	if prompt == "" && len(m.draftAttachments) == 0 && len(m.draftReferences) == 0 {
 		return m, nil
 	}
 	if strings.HasPrefix(prompt, "/") {
@@ -2336,9 +2376,11 @@ func (m *Model) queueComposerPrompt(mode queuedPromptMode) (tea.Model, tea.Cmd) 
 		Text:        prompt,
 		Mode:        mode,
 		Attachments: slices.Clone(m.draftAttachments),
+		References:  slices.Clone(m.draftReferences),
 	}
 	m.resetComposerInput()
 	m.draftAttachments = nil
+	m.draftReferences = nil
 	m.status = m.queuedPrompt.statusText()
 	return m, m.syncWindowTitleCmd()
 }
@@ -2368,6 +2410,7 @@ func (m *Model) dequeuePromptCmd() tea.Cmd {
 			m.status = status
 			m.setComposerValue(item.Text)
 			m.draftAttachments = item.Attachments
+			m.draftReferences = item.References
 			return nil
 		}
 	}
@@ -2375,8 +2418,8 @@ func (m *Model) dequeuePromptCmd() tea.Cmd {
 	if item.Mode == queuedPromptModeContinue {
 		return tea.Batch(m.continueCmd(m.beginActiveOperation()), m.spinnerCmdIfNeeded())
 	}
-	m.appendLocalUserPrompt(item.Text, item.Attachments)
-	return tea.Batch(m.promptCmd(m.beginActiveOperation(), item.Text, item.Attachments), m.spinnerCmdIfNeeded())
+	m.appendLocalUserPrompt(item.Text, item.Attachments, item.References)
+	return tea.Batch(m.promptCmd(m.beginActiveOperation(), item.Text, item.Attachments, item.References), m.spinnerCmdIfNeeded())
 }
 
 func (m Model) ensureRuntimeContextWindow(ctx context.Context, session domain.Session) (string, int, bool, error) {
@@ -2630,7 +2673,7 @@ func (m *Model) quit() (tea.Model, tea.Cmd) {
 	return m, tea.Quit
 }
 
-func (m *Model) appendLocalUserPrompt(prompt string, drafts []attachment.Draft) {
+func (m *Model) appendLocalUserPrompt(prompt string, drafts []attachment.Draft, refs []reference.Draft) {
 	now := time.Now().UTC()
 	if m.parts == nil {
 		m.parts = make(map[int64][]domain.Part)
@@ -2663,6 +2706,26 @@ func (m *Model) appendLocalUserPrompt(prompt string, drafts []attachment.Draft) 
 			MessageID: messageID,
 			Kind:      domain.PartKindAttachment,
 			Body:      draft.Name,
+			MetaJSON:  raw,
+			CreatedAt: now,
+		})
+	}
+	for _, ref := range refs {
+		raw, err := reference.EncodeMeta(reference.Metadata{
+			Kind:    ref.Kind,
+			Path:    ref.Path,
+			Display: ref.Display,
+			Start:   ref.Start,
+			End:     ref.End,
+		})
+		if err != nil {
+			continue
+		}
+		parts = append(parts, domain.Part{
+			ID:        m.nextPendingID(),
+			MessageID: messageID,
+			Kind:      domain.PartKindReference,
+			Body:      ref.Display,
 			MetaJSON:  raw,
 			CreatedAt: now,
 		})
@@ -2775,6 +2838,33 @@ func (m *Model) poppedLastDraftAttachment() bool {
 	m.draftAttachments = m.draftAttachments[:len(m.draftAttachments)-1]
 	m.status = fmt.Sprintf("Removed attachment %s", last.Name)
 	return true
+}
+
+func (m *Model) syncDraftReferencesFromComposer() {
+	if len(m.draftReferences) == 0 {
+		return
+	}
+	value := m.composer.Value()
+	refs := slices.Clone(m.draftReferences)
+	slices.SortFunc(refs, func(a, b reference.Draft) int {
+		if a.Start != b.Start {
+			return a.Start - b.Start
+		}
+		return strings.Compare(a.Path, b.Path)
+	})
+	var synced []reference.Draft
+	searchStart := 0
+	for _, draft := range refs {
+		idx := strings.Index(value[searchStart:], draft.Display)
+		if idx < 0 {
+			continue
+		}
+		draft.Start = searchStart + idx
+		draft.End = draft.Start + len(draft.Display)
+		synced = append(synced, draft)
+		searchStart = draft.End
+	}
+	m.draftReferences = synced
 }
 
 func (m Model) pastedAttachmentPath(text string) string {
@@ -3122,6 +3212,28 @@ func (m *Model) updateComposerMenus() {
 		m.skillMatches = nil
 		m.skillIndex = 0
 	}
+
+	var pathMode bool
+	query, _, pathMode, ok = mentionQuery(m.composer.Value(), len(m.composer.Value()))
+	if ok {
+		if pathMode {
+			m.mentionMatches, _ = reference.PathCompletions(m.workdir, query, 8)
+		} else {
+			if m.mentionCatalog == nil {
+				m.mentionCatalog, _ = reference.Entries(m.workdir)
+			}
+			m.mentionMatches = reference.Search(m.mentionCatalog, query, 8)
+		}
+		if len(m.mentionMatches) == 0 {
+			m.mentionIndex = 0
+		} else if m.mentionIndex >= len(m.mentionMatches) {
+			m.mentionIndex = len(m.mentionMatches) - 1
+		}
+	} else {
+		m.mentionMatches = nil
+		m.mentionIndex = 0
+	}
+	m.syncDraftReferencesFromComposer()
 }
 
 func (m *Model) hasSlashMenu() bool {
@@ -3130,6 +3242,10 @@ func (m *Model) hasSlashMenu() bool {
 
 func (m *Model) hasSkillMenu() bool {
 	return len(m.skillMatches) > 0
+}
+
+func (m *Model) hasMentionMenu() bool {
+	return len(m.mentionMatches) > 0
 }
 
 func (m *Model) acceptSlashSelection() {
@@ -3176,6 +3292,30 @@ func (m *Model) acceptSkillSelection() {
 	m.updateComposerMenus()
 }
 
+func (m *Model) acceptMentionSelection() {
+	if len(m.mentionMatches) == 0 {
+		return
+	}
+	selected := m.mentionMatches[m.mentionIndex]
+	query, start, _, ok := mentionQuery(m.composer.Value(), len(m.composer.Value()))
+	if !ok {
+		return
+	}
+	_ = query
+	end := mentionTokenEnd(m.composer.Value(), start)
+	display := reference.DisplayToken(selected.Path)
+	next := m.composer.Value()[:start] + display + m.composer.Value()[end:]
+	m.composer.SetValue(next)
+	m.composer.SetCursor(start + len(display))
+	m.draftReferences = append(m.draftReferences, reference.Draft{
+		Kind:    selected.Kind,
+		Path:    selected.Path,
+		Display: display,
+	})
+	m.updateComposerMenus()
+	m.status = fmt.Sprintf("Inserted %s", display)
+}
+
 func (m *Model) renderSlashMenu() string {
 	if len(m.slashMatches) == 0 {
 		return ""
@@ -3213,6 +3353,27 @@ func (m *Model) renderSkillMenu() string {
 	}
 	selected := m.skillIndex - start
 	return ui.RenderSlashMenu("Skills", items, selected)
+}
+
+func (m *Model) renderMentionMenu() string {
+	if len(m.mentionMatches) == 0 {
+		return ""
+	}
+	start := 0
+	if m.mentionIndex >= 6 {
+		start = m.mentionIndex - 5
+	}
+	end := min(len(m.mentionMatches), start+6)
+	var items []ui.MenuItem
+	for idx := start; idx < end; idx++ {
+		item := m.mentionMatches[idx]
+		items = append(items, ui.MenuItem{
+			Title:       reference.DisplayToken(item.Path),
+			Description: item.Description,
+		})
+	}
+	selected := m.mentionIndex - start
+	return ui.RenderSlashMenu("References", items, selected)
 }
 
 func (m *Model) renderComposerHistoryMenu() string {
@@ -4017,9 +4178,9 @@ func (m *Model) renderHelpModal() string {
 	return m.helpModal.View(m.palette)
 }
 
-func (m Model) previewLLMRequestCmd(ctx context.Context, prompt string, drafts []attachment.Draft) tea.Cmd {
+func (m Model) previewLLMRequestCmd(ctx context.Context, prompt string, drafts []attachment.Draft, refs []reference.Draft) tea.Cmd {
 	return func() tea.Msg {
-		req, err := m.agent.PreviewNextRequest(ctx, m.currentSession, prompt, drafts, m.pendingModelNote)
+		req, err := m.agent.PreviewNextRequest(ctx, m.currentSession, prompt, drafts, refs, m.pendingModelNote)
 		if err != nil {
 			return llmPreviewMsg{err: err}
 		}
@@ -4512,7 +4673,7 @@ func (m *Model) setTheme(name string, save bool) error {
 }
 
 func (m *Model) canContinue() (bool, string) {
-	if strings.TrimSpace(m.composer.Value()) != "" || len(m.draftAttachments) > 0 {
+	if strings.TrimSpace(m.composer.Value()) != "" || len(m.draftAttachments) > 0 || len(m.draftReferences) > 0 {
 		return false, "Clear the composer before continuing"
 	}
 	if m.currentSession.ID == 0 {
@@ -4609,6 +4770,54 @@ func skillQuery(value string) (query string, start int, ok bool) {
 		}
 	}
 	return strings.ToLower(strings.TrimSpace(strings.TrimPrefix(value[start:], "$"))), start, true
+}
+
+func mentionQuery(value string, cursor int) (query string, start int, pathMode bool, ok bool) {
+	value = strings.TrimRight(value, "\n")
+	if cursor < 0 || cursor > len(value) {
+		cursor = len(value)
+	}
+	if strings.TrimSpace(value) == "" {
+		return "", 0, false, false
+	}
+	start = cursor
+	for start > 0 && !strings.ContainsRune(" \t\n([{", rune(value[start-1])) {
+		start--
+	}
+	token := value[start:cursor]
+	if !strings.HasPrefix(token, "@") {
+		return "", 0, false, false
+	}
+	if strings.HasPrefix(token, `@"`) {
+		query = strings.TrimSuffix(strings.TrimPrefix(token, `@"`), `"`)
+	} else {
+		query = strings.TrimPrefix(token, "@")
+	}
+	query = strings.TrimSpace(query)
+	pathMode = strings.HasPrefix(query, "./") || strings.HasPrefix(query, "../") || strings.HasPrefix(query, "/")
+	if pathMode {
+		return query, start, pathMode, true
+	}
+	return strings.ToLower(query), start, pathMode, true
+}
+
+func mentionTokenEnd(value string, start int) int {
+	end := start
+	quoted := strings.HasPrefix(value[start:], `@"`)
+	if quoted {
+		end += 2
+		for end < len(value) {
+			if value[end] == '"' {
+				return end + 1
+			}
+			end++
+		}
+		return len(value)
+	}
+	for end < len(value) && !strings.ContainsRune(" \t\n([{", rune(value[end])) {
+		end++
+	}
+	return end
 }
 
 func matchingSlashCommands(query string) []slashCommand {
