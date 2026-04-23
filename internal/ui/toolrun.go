@@ -93,13 +93,13 @@ func (r ToolRun) renderCard(palette theme.Palette, width int, expanded bool) Sur
 	}
 	s := BlankSurface(cardWidth, strings.Count(strings.Join(lines, "\n"), "\n")+1)
 	row := 0
-	titleStyle := CellStyle{FG: palette.MarkdownText, Bold: true, Italic: true}
-	toggleStyle := CellStyle{FG: palette.UserAccentBar, Bold: true}
-	subtitleStyle := CellStyle{FG: palette.ComposerMutedText}
-	bodyStyle := CellStyle{FG: palette.MarkdownText}
-	addedStyle := CellStyle{FG: palette.DiffAddedText}
-	deletedStyle := CellStyle{FG: palette.DiffDeletedText}
-	metaStyle := CellStyle{FG: palette.ComposerMutedText}
+	titleStyle := CellStyle{FG: cellColor(palette.MarkdownText), Bold: true, Italic: true}
+	toggleStyle := CellStyle{FG: cellColor(palette.UserAccentBar), Bold: true}
+	subtitleStyle := CellStyle{FG: cellColor(palette.ComposerMutedText)}
+	bodyStyle := CellStyle{FG: cellColor(palette.MarkdownText)}
+	addedStyle := CellStyle{FG: cellColor(palette.DiffAddedText)}
+	deletedStyle := CellStyle{FG: cellColor(palette.DiffDeletedText)}
+	metaStyle := CellStyle{FG: cellColor(palette.ComposerMutedText)}
 	for _, header := range lines[:1] {
 		headerCols := strings.Split(header, "  ")
 		col := 0
@@ -328,8 +328,8 @@ func (t toolRunDockTitle) Render(_ *Context, bounds Rect) Surface {
 		width = bounds.W
 	}
 	s := BlankSurface(width, 1)
-	s.WriteText(0, 0, t.Title, CellStyle{FG: t.Palette.MarkdownText, Bold: true})
-	s.WriteText(PlainWidth(t.Title)+2, 0, t.Status, CellStyle{FG: t.Color, Bold: true})
+	s.WriteText(0, 0, t.Title, CellStyle{FG: cellColor(t.Palette.MarkdownText), Bold: true})
+	s.WriteText(PlainWidth(t.Title)+2, 0, t.Status, CellStyle{FG: cellColor(t.Color), Bold: true})
 	return s.normalize(bounds.W, bounds.H)
 }
 
@@ -364,7 +364,7 @@ func (p toolRunDockPreview) Render(_ *Context, bounds Rect) Surface {
 		width = bounds.W
 	}
 	s := BlankSurface(width, len(lines))
-	style := CellStyle{FG: p.Palette.MarkdownText}
+	style := CellStyle{FG: cellColor(p.Palette.MarkdownText)}
 	for y, line := range lines {
 		s.WriteText(0, y, PlainTruncate(line, width, ""), style)
 	}

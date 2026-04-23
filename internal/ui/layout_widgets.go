@@ -353,7 +353,7 @@ func (h tableHeader) Render(_ *Context, bounds Rect) Surface {
 		width = bounds.W
 	}
 	s := BlankSurface(width, 1)
-	style := CellStyle{FG: h.Palette.AssistantTimestampText, Bold: true}
+	style := CellStyle{FG: cellColor(h.Palette.AssistantTimestampText), Bold: true}
 	colX := 0
 	for idx, col := range h.Columns {
 		text := truncateText(strings.TrimSpace(col.Title), col.Width)
@@ -396,17 +396,17 @@ func (r tableRow) Render(_ *Context, bounds Rect) Surface {
 	}
 	rowStyle := CellStyle{}
 	primaryStyle := CellStyle{Bold: true}
-	cellStyle := CellStyle{FG: r.Palette.AssistantTimestampText}
+	cellStyle := CellStyle{FG: cellColor(r.Palette.AssistantTimestampText)}
 	if r.Row.Selected {
-		rowStyle = CellStyle{BG: selectionBackground, FG: selectionForeground}
-		primaryStyle = CellStyle{BG: selectionBackground, FG: selectionForeground, Bold: true}
-		cellStyle = CellStyle{BG: selectionBackground, FG: selectionForeground}
+		rowStyle = CellStyle{BG: cellColor(selectionBackground), FG: cellColor(selectionForeground)}
+		primaryStyle = CellStyle{BG: cellColor(selectionBackground), FG: cellColor(selectionForeground), Bold: true}
+		cellStyle = CellStyle{BG: cellColor(selectionBackground), FG: cellColor(selectionForeground)}
 	}
 	if r.Row.Focused {
 		focusedBackground := deriveFocusedBackground(selectionBackground, firstNonEmptyColor(r.Palette.ScreenBackground, r.Palette.SidebarBackground, r.Palette.UserTextBackground))
-		rowStyle = CellStyle{BG: focusedBackground, FG: selectionForeground}
-		primaryStyle = CellStyle{BG: focusedBackground, FG: selectionForeground, Bold: true}
-		cellStyle = CellStyle{BG: focusedBackground, FG: selectionForeground}
+		rowStyle = CellStyle{BG: cellColor(focusedBackground), FG: cellColor(selectionForeground)}
+		primaryStyle = CellStyle{BG: cellColor(focusedBackground), FG: cellColor(selectionForeground), Bold: true}
+		cellStyle = CellStyle{BG: cellColor(focusedBackground), FG: cellColor(selectionForeground)}
 	}
 	s := BlankSurface(width, 1)
 	for x := 0; x < width; x++ {

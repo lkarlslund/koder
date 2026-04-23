@@ -24,10 +24,11 @@ type SurfaceView interface {
 	SurfaceCellText(x, y int) string
 	SurfaceCellWidth(x, y int) int
 	SurfaceCellContinuation(x, y int) bool
-	SurfaceCellFG(x, y int) string
-	SurfaceCellBG(x, y int) string
+	SurfaceCellFG(x, y int) (uint8, uint8, uint8, bool)
+	SurfaceCellBG(x, y int) (uint8, uint8, uint8, bool)
 	SurfaceCellBold(x, y int) bool
 	SurfaceCellItalic(x, y int) bool
+	SurfaceCellUnderline(x, y int) bool
 }
 
 type Cmd func() Msg

@@ -1,9 +1,8 @@
 package ui
 
 import (
+	"strconv"
 	"strings"
-
-	"github.com/charmbracelet/lipgloss"
 )
 
 // This file is the ANSI output boundary for Surface serialization.
@@ -13,20 +12,34 @@ func applyCellStyle(style CellStyle, text string) string {
 	if style.isZero() || text == "" {
 		return text
 	}
-	render := lipgloss.NewStyle()
-	if style.FG != "" {
-		render = render.Foreground(style.FG)
-	}
-	if style.BG != "" {
-		render = render.Background(style.BG)
-	}
+	params := make([]string, 0, 10)
 	if style.Bold {
-		render = render.Bold(true)
+		params = append(params, "1")
 	}
 	if style.Italic {
-		render = render.Italic(true)
+		params = append(params, "3")
 	}
-	return render.Render(text)
+	if style.Underline {
+		params = append(params, "4")
+	}
+	if style.FG.Valid {
+		params = append(params, "38", "2",
+			strconv.Itoa(int(style.FG.R)),
+			strconv.Itoa(int(style.FG.G)),
+			strconv.Itoa(int(style.FG.B)),
+		)
+	}
+	if style.BG.Valid {
+		params = append(params, "48", "2",
+			strconv.Itoa(int(style.BG.R)),
+			strconv.Itoa(int(style.BG.G)),
+			strconv.Itoa(int(style.BG.B)),
+		)
+	}
+	if len(params) == 0 {
+		return text
+	}
+	return "\x1b[" + strings.Join(params, ";") + "m" + text + "\x1b[0m"
 }
 
 func serializeSurfaceRow(s Surface, y int) string {

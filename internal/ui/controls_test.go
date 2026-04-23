@@ -4,18 +4,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/muesli/termenv"
 
 	"github.com/lkarlslund/koder/internal/theme"
 )
 
 func TestRenderSelectableRowSelectedUsesDistinctHighlightColors(t *testing.T) {
-	prev := lipgloss.ColorProfile()
-	lipgloss.SetColorProfile(termenv.TrueColor)
-	defer lipgloss.SetColorProfile(prev)
-
 	palette := theme.Palette{
 		ActivityText:           "#0a0b0c",
 		AssistantTimestampText: "#010203",
@@ -27,34 +21,37 @@ func TestRenderSelectableRowSelectedUsesDistinctHighlightColors(t *testing.T) {
 	}
 
 	base := SelectableRow{Primary: "write", Secondary: "Allow writes after approval", Tertiary: "active", Width: 48}
-	unselected := base.render(palette).String()
+	unselected := base.render(palette)
 	base.Selected = true
-	selected := base.render(palette).String()
+	selected := base.render(palette)
 	base.Focused = true
-	focused := base.render(palette).String()
+	focused := base.render(palette)
 
-	if selected == unselected {
+	if selected.String() == unselected.String() && selected.cellAt(0, 0).Style.equal(unselected.cellAt(0, 0).Style) {
 		t.Fatal("expected selected row styling to differ from unselected row")
 	}
-	if !strings.Contains(selected, "48;2;4;5;6") {
-		t.Fatalf("expected selected row to use the selected row background, got %q", selected)
+	r, g, b, ok := selected.SurfaceCellBG(0, 0)
+	if !ok || r != 0x04 || g != 0x05 || b != 0x06 {
+		t.Fatalf("expected selected row to use the selected row background, got (%d,%d,%d,%v)", r, g, b, ok)
 	}
-	if !strings.Contains(selected, "38;2;7;8;9") {
-		t.Fatalf("expected selected row to use the selected row foreground, got %q", selected)
+	r, g, b, ok = selected.SurfaceCellFG(0, 0)
+	if !ok || r != 0x07 || g != 0x08 || b != 0x09 {
+		t.Fatalf("expected selected row to use the selected row foreground, got (%d,%d,%d,%v)", r, g, b, ok)
 	}
-	if strings.Contains(selected, "38;2;13;14;15") {
-		t.Fatalf("expected selected row tertiary text to use the shared selection foreground, got %q", selected)
+	activeOffset := strings.Index(selected.String(), "active")
+	if activeOffset == -1 {
+		t.Fatalf("expected row to contain tertiary text, got %q", selected.String())
 	}
-	if focused == selected {
+	r, g, b, ok = selected.SurfaceCellFG(activeOffset, 0)
+	if !ok || r != 0x07 || g != 0x08 || b != 0x09 {
+		t.Fatalf("expected selected row tertiary text to use the shared selection foreground, got (%d,%d,%d,%v)", r, g, b, ok)
+	}
+	if focused.cellAt(0, 0).Style.equal(selected.cellAt(0, 0).Style) {
 		t.Fatal("expected focused row styling to differ from merely selected row")
 	}
 }
 
 func TestFocusedButtonUsesFocusColors(t *testing.T) {
-	prev := lipgloss.ColorProfile()
-	lipgloss.SetColorProfile(termenv.TrueColor)
-	defer lipgloss.SetColorProfile(prev)
-
 	palette := theme.Palette{
 		SelectionBackground: "#101112",
 		SelectionForeground: "#f1f2f3",
@@ -63,12 +60,14 @@ func TestFocusedButtonUsesFocusColors(t *testing.T) {
 		UserAccentBar:       "#0d0e0f",
 	}
 
-	view := Button{Label: "Approve", Focused: true}.render(palette)
-	if !strings.Contains(view, "48;2;44;44;46") {
-		t.Fatalf("expected focused button to use focus background, got %q", view)
+	view := Button{Label: "Approve", Focused: true}.renderSurface(palette)
+	r, g, b, ok := view.SurfaceCellBG(0, 0)
+	if !ok || r != 0x2c || g != 0x2d || b != 0x2e {
+		t.Fatalf("expected focused button to use focus background, got (%d,%d,%d,%v)", r, g, b, ok)
 	}
-	if !strings.Contains(view, "38;2;241;242;243") {
-		t.Fatalf("expected focused button to use focus foreground, got %q", view)
+	r, g, b, ok = view.SurfaceCellFG(0, 0)
+	if !ok || r != 0xf1 || g != 0xf2 || b != 0xf3 {
+		t.Fatalf("expected focused button to use focus foreground, got (%d,%d,%d,%v)", r, g, b, ok)
 	}
 }
 

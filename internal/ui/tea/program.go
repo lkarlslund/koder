@@ -285,7 +285,8 @@ func surfaceCellsEqual(previous, current SurfaceView, x, y int) bool {
 		surfaceCellFG(previous, x, y) == surfaceCellFG(current, x, y) &&
 		surfaceCellBG(previous, x, y) == surfaceCellBG(current, x, y) &&
 		surfaceCellBold(previous, x, y) == surfaceCellBold(current, x, y) &&
-		surfaceCellItalic(previous, x, y) == surfaceCellItalic(current, x, y)
+		surfaceCellItalic(previous, x, y) == surfaceCellItalic(current, x, y) &&
+		surfaceCellUnderline(previous, x, y) == surfaceCellUnderline(current, x, y)
 }
 
 func serializeSurfaceRow(surface SurfaceView, y int) string {
@@ -307,10 +308,11 @@ func serializeSurfaceRow(surface SurfaceView, y int) string {
 			continue
 		}
 		style := styleState{
-			fg:     surfaceCellFG(surface, x, y),
-			bg:     surfaceCellBG(surface, x, y),
-			bold:   surfaceCellBold(surface, x, y),
-			italic: surfaceCellItalic(surface, x, y),
+			fg:        surfaceCellFG(surface, x, y),
+			bg:        surfaceCellBG(surface, x, y),
+			bold:      surfaceCellBold(surface, x, y),
+			italic:    surfaceCellItalic(surface, x, y),
+			underline: surfaceCellUnderline(surface, x, y),
 		}
 		text := surfaceCellText(surface, x, y)
 		if text == "" {
@@ -327,10 +329,18 @@ func serializeSurfaceRow(surface SurfaceView, y int) string {
 }
 
 type styleState struct {
-	fg     string
-	bg     string
-	bold   bool
-	italic bool
+	fg        rgbState
+	bg        rgbState
+	bold      bool
+	italic    bool
+	underline bool
+}
+
+type rgbState struct {
+	r     uint8
+	g     uint8
+	b     uint8
+	valid bool
 }
 
 func applyStyle(style styleState, text string) string {
@@ -344,46 +354,29 @@ func applyStyle(style styleState, text string) string {
 	if style.italic {
 		params = append(params, "3")
 	}
-	if rgb, ok := parseHexColor(style.fg); ok {
+	if style.underline {
+		params = append(params, "4")
+	}
+	if style.fg.valid {
 		params = append(params,
 			"38", "2",
-			strconv.Itoa(rgb[0]),
-			strconv.Itoa(rgb[1]),
-			strconv.Itoa(rgb[2]),
+			strconv.Itoa(int(style.fg.r)),
+			strconv.Itoa(int(style.fg.g)),
+			strconv.Itoa(int(style.fg.b)),
 		)
 	}
-	if rgb, ok := parseHexColor(style.bg); ok {
+	if style.bg.valid {
 		params = append(params,
 			"48", "2",
-			strconv.Itoa(rgb[0]),
-			strconv.Itoa(rgb[1]),
-			strconv.Itoa(rgb[2]),
+			strconv.Itoa(int(style.bg.r)),
+			strconv.Itoa(int(style.bg.g)),
+			strconv.Itoa(int(style.bg.b)),
 		)
 	}
 	if len(params) == 0 {
 		return text
 	}
 	return "\x1b[" + strings.Join(params, ";") + "m" + text + "\x1b[0m"
-}
-
-func parseHexColor(value string) ([3]int, bool) {
-	value = strings.TrimSpace(value)
-	if len(value) != 7 || value[0] != '#' {
-		return [3]int{}, false
-	}
-	r, err := strconv.ParseInt(value[1:3], 16, 64)
-	if err != nil {
-		return [3]int{}, false
-	}
-	g, err := strconv.ParseInt(value[3:5], 16, 64)
-	if err != nil {
-		return [3]int{}, false
-	}
-	b, err := strconv.ParseInt(value[5:7], 16, 64)
-	if err != nil {
-		return [3]int{}, false
-	}
-	return [3]int{int(r), int(g), int(b)}, true
 }
 
 func surfaceCellText(surface SurfaceView, x, y int) string {
@@ -407,18 +400,20 @@ func surfaceCellContinuation(surface SurfaceView, x, y int) bool {
 	return surface.SurfaceCellContinuation(x, y)
 }
 
-func surfaceCellFG(surface SurfaceView, x, y int) string {
+func surfaceCellFG(surface SurfaceView, x, y int) rgbState {
 	if surface == nil || y < 0 || y >= surface.SurfaceHeight() || x < 0 || x >= surface.SurfaceWidth() {
-		return ""
+		return rgbState{}
 	}
-	return surface.SurfaceCellFG(x, y)
+	r, g, b, ok := surface.SurfaceCellFG(x, y)
+	return rgbState{r: r, g: g, b: b, valid: ok}
 }
 
-func surfaceCellBG(surface SurfaceView, x, y int) string {
+func surfaceCellBG(surface SurfaceView, x, y int) rgbState {
 	if surface == nil || y < 0 || y >= surface.SurfaceHeight() || x < 0 || x >= surface.SurfaceWidth() {
-		return ""
+		return rgbState{}
 	}
-	return surface.SurfaceCellBG(x, y)
+	r, g, b, ok := surface.SurfaceCellBG(x, y)
+	return rgbState{r: r, g: g, b: b, valid: ok}
 }
 
 func surfaceCellBold(surface SurfaceView, x, y int) bool {
@@ -433,6 +428,13 @@ func surfaceCellItalic(surface SurfaceView, x, y int) bool {
 		return false
 	}
 	return surface.SurfaceCellItalic(x, y)
+}
+
+func surfaceCellUnderline(surface SurfaceView, x, y int) bool {
+	if surface == nil || y < 0 || y >= surface.SurfaceHeight() || x < 0 || x >= surface.SurfaceWidth() {
+		return false
+	}
+	return surface.SurfaceCellUnderline(x, y)
 }
 
 func (p *Program) setWindowTitle(out io.Writer, title string) {

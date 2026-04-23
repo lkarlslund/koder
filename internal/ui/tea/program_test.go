@@ -67,11 +67,11 @@ func TestRenderFrameSurfaceEmitsRealSGRSequences(t *testing.T) {
 		w: 5,
 		h: 1,
 		cells: []fakeCell{
-			{text: "H", fg: "#c8d3f5", bg: "#1e2030", bold: true},
-			{text: "e", fg: "#c8d3f5", bg: "#1e2030", bold: true},
-			{text: "l", fg: "#c8d3f5", bg: "#1e2030", bold: true},
-			{text: "l", fg: "#c8d3f5", bg: "#1e2030", bold: true},
-			{text: "o", fg: "#c8d3f5", bg: "#1e2030", bold: true},
+			{text: "H", fgr: [3]uint8{200, 211, 245}, fgv: true, bgr: [3]uint8{30, 32, 48}, bgv: true, bold: true},
+			{text: "e", fgr: [3]uint8{200, 211, 245}, fgv: true, bgr: [3]uint8{30, 32, 48}, bgv: true, bold: true},
+			{text: "l", fgr: [3]uint8{200, 211, 245}, fgv: true, bgr: [3]uint8{30, 32, 48}, bgv: true, bold: true},
+			{text: "l", fgr: [3]uint8{200, 211, 245}, fgv: true, bgr: [3]uint8{30, 32, 48}, bgv: true, bold: true},
+			{text: "o", fgr: [3]uint8{200, 211, 245}, fgv: true, bgr: [3]uint8{30, 32, 48}, bgv: true, bold: true},
 		},
 	}
 	got := renderFrameSurface(s)
@@ -87,10 +87,13 @@ type fakeCell struct {
 	text         string
 	width        int
 	continuation bool
-	fg           string
-	bg           string
+	fgr          [3]uint8
+	fgv          bool
+	bgr          [3]uint8
+	bgv          bool
 	bold         bool
 	italic       bool
+	underline    bool
 }
 
 type fakeSurface struct {
@@ -110,7 +113,14 @@ func (f fakeSurface) SurfaceCellWidth(x, y int) int {
 	return width
 }
 func (f fakeSurface) SurfaceCellContinuation(x, y int) bool { return f.cells[y*f.w+x].continuation }
-func (f fakeSurface) SurfaceCellFG(x, y int) string         { return f.cells[y*f.w+x].fg }
-func (f fakeSurface) SurfaceCellBG(x, y int) string         { return f.cells[y*f.w+x].bg }
+func (f fakeSurface) SurfaceCellFG(x, y int) (uint8, uint8, uint8, bool) {
+	cell := f.cells[y*f.w+x]
+	return cell.fgr[0], cell.fgr[1], cell.fgr[2], cell.fgv
+}
+func (f fakeSurface) SurfaceCellBG(x, y int) (uint8, uint8, uint8, bool) {
+	cell := f.cells[y*f.w+x]
+	return cell.bgr[0], cell.bgr[1], cell.bgr[2], cell.bgv
+}
 func (f fakeSurface) SurfaceCellBold(x, y int) bool         { return f.cells[y*f.w+x].bold }
 func (f fakeSurface) SurfaceCellItalic(x, y int) bool       { return f.cells[y*f.w+x].italic }
+func (f fakeSurface) SurfaceCellUnderline(x, y int) bool    { return f.cells[y*f.w+x].underline }

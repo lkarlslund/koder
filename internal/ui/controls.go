@@ -46,7 +46,7 @@ func (h SelectableHeader) render(palette theme.Palette) Surface {
 		width += gapWidth
 	}
 	s := BlankSurface(width, 1)
-	style := CellStyle{FG: palette.AssistantTimestampText, Bold: true}
+	style := CellStyle{FG: cellColor(palette.AssistantTimestampText), Bold: true}
 	col := 0
 	s.WriteText(col, 0, truncateText(strings.TrimSpace(h.Primary), primaryWidth), style)
 	col += primaryWidth + gapWidth
@@ -88,21 +88,21 @@ func (r SelectableRow) render(palette theme.Palette) Surface {
 	}
 	rowStyle := CellStyle{}
 	primaryStyle := CellStyle{Bold: true}
-	secondaryStyle := CellStyle{FG: palette.AssistantTimestampText}
-	tertiaryStyle := CellStyle{FG: palette.ActivityText}
+	secondaryStyle := CellStyle{FG: cellColor(palette.AssistantTimestampText)}
+	tertiaryStyle := CellStyle{FG: cellColor(palette.ActivityText)}
 	if selected {
-		rowStyle = CellStyle{BG: selectionBackground, FG: selectionForeground}
-		primaryStyle = CellStyle{BG: selectionBackground, FG: selectionForeground, Bold: true}
-		secondaryStyle = CellStyle{BG: selectionBackground, FG: selectionForeground}
-		tertiaryStyle = CellStyle{BG: selectionBackground, FG: selectionForeground, Bold: true}
+		rowStyle = CellStyle{BG: cellColor(selectionBackground), FG: cellColor(selectionForeground)}
+		primaryStyle = CellStyle{BG: cellColor(selectionBackground), FG: cellColor(selectionForeground), Bold: true}
+		secondaryStyle = CellStyle{BG: cellColor(selectionBackground), FG: cellColor(selectionForeground)}
+		tertiaryStyle = CellStyle{BG: cellColor(selectionBackground), FG: cellColor(selectionForeground), Bold: true}
 	}
 	if focused {
 		focusedBackground := deriveFocusedBackground(selectionBackground, firstNonEmptyColor(palette.ScreenBackground, palette.SidebarBackground, palette.UserTextBackground))
 		focusedForeground := selectionForeground
-		rowStyle = CellStyle{BG: focusedBackground, FG: focusedForeground}
-		primaryStyle = CellStyle{BG: focusedBackground, FG: focusedForeground, Bold: true}
-		secondaryStyle = CellStyle{BG: focusedBackground, FG: focusedForeground}
-		tertiaryStyle = CellStyle{BG: focusedBackground, FG: focusedForeground, Bold: true}
+		rowStyle = CellStyle{BG: cellColor(focusedBackground), FG: cellColor(focusedForeground)}
+		primaryStyle = CellStyle{BG: cellColor(focusedBackground), FG: cellColor(focusedForeground), Bold: true}
+		secondaryStyle = CellStyle{BG: cellColor(focusedBackground), FG: cellColor(focusedForeground)}
+		tertiaryStyle = CellStyle{BG: cellColor(focusedBackground), FG: cellColor(focusedForeground), Bold: true}
 	}
 	s := BlankSurface(width, 1)
 	fillStyle := rowStyle
@@ -224,12 +224,12 @@ func (v VerticalTabs) render(width int, palette theme.Palette, focused bool) Sur
 		width = 1
 	}
 	s := BlankSurface(width, len(v.Tabs))
-	baseStyle := CellStyle{FG: palette.SidebarForeground}
-	activeStyle := CellStyle{BG: palette.SelectionBackground, FG: palette.SelectionForeground, Bold: true}
+	baseStyle := CellStyle{FG: cellColor(palette.SidebarForeground)}
+	activeStyle := CellStyle{BG: cellColor(palette.SelectionBackground), FG: cellColor(palette.SelectionForeground), Bold: true}
 	if focused {
 		activeStyle = CellStyle{
-			BG:   deriveFocusedBackground(firstNonEmptyColor(palette.SelectionBackground, palette.UserTextBackground), firstNonEmptyColor(palette.ScreenBackground, palette.SidebarBackground, palette.UserTextBackground)),
-			FG:   firstNonEmptyColor(palette.SelectionForeground, palette.UserTextForeground),
+			BG:   cellColor(deriveFocusedBackground(firstNonEmptyColor(palette.SelectionBackground, palette.UserTextBackground), firstNonEmptyColor(palette.ScreenBackground, palette.SidebarBackground, palette.UserTextBackground))),
+			FG:   cellColor(firstNonEmptyColor(palette.SelectionForeground, palette.UserTextForeground)),
 			Bold: true,
 		}
 	}
@@ -423,9 +423,9 @@ func (b Button) renderSurface(palette theme.Palette) Surface {
 		foreground = firstNonEmptyColor(palette.SelectionForeground, palette.UserTextForeground)
 		bold = true
 	}
-	style := CellStyle{FG: foreground, BG: background, Bold: bold}
+	style := CellStyle{FG: cellColor(foreground), BG: cellColor(background), Bold: bold}
 	hotStyle := style
-	hotStyle.FG = palette.ActivityText
+	hotStyle.FG = cellColor(palette.ActivityText)
 	parts := buttonLabelParts(b.Label, b.Hotkey)
 	width := 4
 	for _, part := range parts {
@@ -676,9 +676,9 @@ func buttonLabelParts(label string, hotkey rune) []buttonLabelPart {
 }
 
 func buttonLabelSurface(label string, hotkey rune, palette theme.Palette, foreground, background lipgloss.Color, bold bool) Surface {
-	style := CellStyle{FG: foreground, BG: background, Bold: bold}
+	style := CellStyle{FG: cellColor(foreground), BG: cellColor(background), Bold: bold}
 	hotStyle := style
-	hotStyle.FG = palette.ActivityText
+	hotStyle.FG = cellColor(palette.ActivityText)
 	parts := buttonLabelParts(label, hotkey)
 	width := 0
 	for _, part := range parts {

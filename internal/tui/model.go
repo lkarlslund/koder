@@ -884,14 +884,18 @@ func (m Model) hitCenteredWindowControl(msg tea.MouseMsg) (ui.Control, bool) {
 }
 
 func (m Model) View() string {
-	return m.ViewSurface().String()
+	return m.viewSurface().String()
 }
 
 func (m Model) ViewLines() []string {
-	return m.ViewSurface().Lines()
+	return m.viewSurface().Lines()
 }
 
-func (m Model) ViewSurface() ui.Surface {
+func (m Model) ViewSurface() tea.SurfaceView {
+	return m.viewSurface()
+}
+
+func (m Model) viewSurface() ui.Surface {
 	if m.width <= 0 || m.height <= 0 {
 		return ui.Surface{}
 	}

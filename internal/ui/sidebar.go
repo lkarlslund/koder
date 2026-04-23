@@ -28,8 +28,8 @@ func (s Sidebar) render(ctx *Context, width int) Surface {
 		height = max(1, contentHeight)
 	}
 	surface := BlankSurface(width, height)
-	fillStyle := CellStyle{FG: ctx.Palette.SidebarForeground, BG: ctx.Palette.SidebarBackground}
-	borderStyle := CellStyle{FG: ctx.Palette.SidebarBorder, BG: ctx.Palette.SidebarBackground}
+	fillStyle := CellStyle{FG: cellColor(ctx.Palette.SidebarForeground), BG: cellColor(ctx.Palette.SidebarBackground)}
+	borderStyle := CellStyle{FG: cellColor(ctx.Palette.SidebarBorder), BG: cellColor(ctx.Palette.SidebarBackground)}
 	for y := 0; y < height; y++ {
 		for x := 0; x < width; x++ {
 			surface.setCell(x, y, Cell{Text: " ", Width: 1, Style: fillStyle})

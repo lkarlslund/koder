@@ -130,7 +130,7 @@ func (c Composer) renderLineSurface(prompt string, promptStyle lipgloss.Style, b
 		width = PlainWidth(prompt)
 	}
 	s := BlankSurface(width, 1)
-	promptCellStyle := CellStyle{BG: c.Palette.UserTextBackground, FG: c.Palette.UserAccentBar}
+	promptCellStyle := CellStyle{BG: cellColor(c.Palette.UserTextBackground), FG: cellColor(c.Palette.UserAccentBar)}
 	if contentWidth <= 0 {
 		s.WriteText(0, 0, prompt, promptCellStyle)
 		return s
@@ -140,10 +140,10 @@ func (c Composer) renderLineSurface(prompt string, promptStyle lipgloss.Style, b
 	remaining := maxInt(0, contentWidth-PlainWidth(before)-PlainWidth(cursor))
 	after = PlainTruncate(after, remaining, "")
 	remaining = maxInt(0, contentWidth-PlainWidth(before)-PlainWidth(cursor)-PlainWidth(after))
-	contentStyle := CellStyle{FG: textFG, BG: textBG}
+	contentStyle := CellStyle{FG: cellColor(textFG), BG: cellColor(textBG)}
 	cursorStyle := contentStyle
 	if cursorVisible {
-		cursorStyle = CellStyle{FG: textBG, BG: textFG}
+		cursorStyle = CellStyle{FG: cellColor(textBG), BG: cellColor(textFG)}
 	}
 	s.WriteText(0, 0, prompt, promptCellStyle)
 	offset := PlainWidth(prompt)
@@ -166,7 +166,7 @@ func (c Composer) renderPlaceholder(prompt string, promptStyle lipgloss.Style, b
 		width = PlainWidth(prompt)
 	}
 	s := BlankSurface(width, 1)
-	promptCellStyle := CellStyle{BG: c.Palette.UserTextBackground, FG: c.Palette.UserAccentBar}
+	promptCellStyle := CellStyle{BG: cellColor(c.Palette.UserTextBackground), FG: cellColor(c.Palette.UserAccentBar)}
 	if contentWidth <= 0 {
 		s.WriteText(0, 0, prompt, promptCellStyle)
 		return s
@@ -176,12 +176,12 @@ func (c Composer) renderPlaceholder(prompt string, promptStyle lipgloss.Style, b
 	remaining := maxInt(0, contentWidth-PlainWidth(before)-PlainWidth(cursor))
 	after = PlainTruncate(after, remaining, "")
 	remaining = maxInt(0, contentWidth-PlainWidth(before)-PlainWidth(cursor)-PlainWidth(after))
-	beforeStyle := CellStyle{FG: textFG, BG: textBG}
-	cursorStyle := CellStyle{FG: muted, BG: textBG}
+	beforeStyle := CellStyle{FG: cellColor(textFG), BG: cellColor(textBG)}
+	cursorStyle := CellStyle{FG: cellColor(muted), BG: cellColor(textBG)}
 	if cursorVisible {
-		cursorStyle = CellStyle{FG: textBG, BG: textFG}
+		cursorStyle = CellStyle{FG: cellColor(textBG), BG: cellColor(textFG)}
 	}
-	afterStyle := CellStyle{FG: muted, BG: textBG}
+	afterStyle := CellStyle{FG: cellColor(muted), BG: cellColor(textBG)}
 	s.WriteText(0, 0, prompt, promptCellStyle)
 	offset := PlainWidth(prompt)
 	for x := offset; x < width; x++ {
@@ -241,7 +241,7 @@ func (l AttachmentList) render(palette theme.Palette) Surface {
 		return Surface{}
 	}
 	s := BlankSurface(l.Width, len(l.Items))
-	style := CellStyle{FG: palette.MarkdownText, BG: palette.UserTextBackground}
+	style := CellStyle{FG: cellColor(palette.MarkdownText), BG: cellColor(palette.UserTextBackground)}
 	for y, item := range l.Items {
 		for x := 0; x < l.Width; x++ {
 			s.setCell(x, y, Cell{Text: " ", Width: 1, Style: style})

@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -165,19 +166,59 @@ type Context struct {
 	Runtime *Runtime
 }
 
+type CellColor struct {
+	R     uint8
+	G     uint8
+	B     uint8
+	Valid bool
+}
+
+func ParseCellColor(value string) CellColor {
+	value = strings.TrimSpace(value)
+	if len(value) != 7 || value[0] != '#' {
+		return CellColor{}
+	}
+	r, err := strconv.ParseUint(value[1:3], 16, 8)
+	if err != nil {
+		return CellColor{}
+	}
+	g, err := strconv.ParseUint(value[3:5], 16, 8)
+	if err != nil {
+		return CellColor{}
+	}
+	b, err := strconv.ParseUint(value[5:7], 16, 8)
+	if err != nil {
+		return CellColor{}
+	}
+	return CellColor{R: uint8(r), G: uint8(g), B: uint8(b), Valid: true}
+}
+
+func CellColorFromLipgloss(value lipgloss.Color) CellColor {
+	return ParseCellColor(string(value))
+}
+
+func cellColor(value lipgloss.Color) CellColor {
+	return CellColorFromLipgloss(value)
+}
+
 type CellStyle struct {
-	FG     lipgloss.Color
-	BG     lipgloss.Color
-	Bold   bool
-	Italic bool
+	FG        CellColor
+	BG        CellColor
+	Bold      bool
+	Italic    bool
+	Underline bool
 }
 
 func (s CellStyle) isZero() bool {
-	return s.FG == "" && s.BG == "" && !s.Bold && !s.Italic
+	return !s.FG.Valid && !s.BG.Valid && !s.Bold && !s.Italic && !s.Underline
 }
 
 func (s CellStyle) equal(other CellStyle) bool {
-	return s.FG == other.FG && s.BG == other.BG && s.Bold == other.Bold && s.Italic == other.Italic
+	return s.FG == other.FG &&
+		s.BG == other.BG &&
+		s.Bold == other.Bold &&
+		s.Italic == other.Italic &&
+		s.Underline == other.Underline
 }
 
 type Cell struct {
@@ -273,12 +314,20 @@ func (s Surface) SurfaceCellContinuation(x, y int) bool {
 	return s.cellAt(x, y).Continuation
 }
 
-func (s Surface) SurfaceCellFG(x, y int) string {
-	return string(s.cellAt(x, y).Style.FG)
+func (s Surface) SurfaceCellFG(x, y int) (uint8, uint8, uint8, bool) {
+	cell := s.cellAt(x, y).Style.FG
+	if !cell.Valid {
+		return 0, 0, 0, false
+	}
+	return cell.R, cell.G, cell.B, true
 }
 
-func (s Surface) SurfaceCellBG(x, y int) string {
-	return string(s.cellAt(x, y).Style.BG)
+func (s Surface) SurfaceCellBG(x, y int) (uint8, uint8, uint8, bool) {
+	cell := s.cellAt(x, y).Style.BG
+	if !cell.Valid {
+		return 0, 0, 0, false
+	}
+	return cell.R, cell.G, cell.B, true
 }
 
 func (s Surface) SurfaceCellBold(x, y int) bool {
@@ -287,6 +336,10 @@ func (s Surface) SurfaceCellBold(x, y int) bool {
 
 func (s Surface) SurfaceCellItalic(x, y int) bool {
 	return s.cellAt(x, y).Style.Italic
+}
+
+func (s Surface) SurfaceCellUnderline(x, y int) bool {
+	return s.cellAt(x, y).Style.Underline
 }
 
 func (s Surface) normalize(width, height int) Surface {
@@ -377,7 +430,19 @@ func (s Surface) cellLines() []string {
 	}
 	lines := make([]string, s.h)
 	for y := 0; y < s.h; y++ {
-		lines[y] = serializeSurfaceRow(s, y)
+		var b strings.Builder
+		for x := 0; x < s.w; x++ {
+			cell := s.cellAt(x, y)
+			if cell.Continuation {
+				continue
+			}
+			text := cell.Text
+			if text == "" {
+				text = " "
+			}
+			b.WriteString(text)
+		}
+		lines[y] = b.String()
 	}
 	return lines
 }

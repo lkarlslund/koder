@@ -4,18 +4,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/muesli/termenv"
 
 	"github.com/lkarlslund/koder/internal/theme"
 )
 
 func TestPendingInputPreviewShowsQueuedMessagesInMutedStyle(t *testing.T) {
-	prev := lipgloss.ColorProfile()
-	lipgloss.SetColorProfile(termenv.TrueColor)
-	defer lipgloss.SetColorProfile(prev)
-
 	palette := theme.Palette{
 		ComposerMutedText:  "#112233",
 		UserTextBackground: "#445566",
@@ -24,16 +18,18 @@ func TestPendingInputPreviewShowsQueuedMessagesInMutedStyle(t *testing.T) {
 	got := PendingInputPreview{
 		Width:          40,
 		QueuedMessages: []string{"queued submission"},
-	}.render(palette).String()
+	}.render(palette)
 
-	if !strings.Contains(ansi.Strip(got), "Queued follow-up inputs") {
-		t.Fatalf("expected queued preview header, got %q", got)
+	plain := got.String()
+	if !strings.Contains(ansi.Strip(plain), "Queued follow-up inputs") {
+		t.Fatalf("expected queued preview header, got %q", plain)
 	}
-	if !strings.Contains(ansi.Strip(got), "↳ queued submission") {
-		t.Fatalf("expected queued preview row, got %q", got)
+	if !strings.Contains(ansi.Strip(plain), "↳ queued submission") {
+		t.Fatalf("expected queued preview row, got %q", plain)
 	}
-	if !strings.Contains(got, "38;2;17;34;51") {
-		t.Fatalf("expected muted foreground color in queued preview, got %q", got)
+	r, g, b, ok := got.SurfaceCellFG(0, 0)
+	if !ok || r != 0x11 || g != 0x22 || b != 0x33 {
+		t.Fatalf("expected muted foreground color in queued preview, got (%d,%d,%d,%v)", r, g, b, ok)
 	}
 }
 

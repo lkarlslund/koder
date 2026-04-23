@@ -123,14 +123,14 @@ func (p Panel) Render(ctx *Context, bounds Rect) Surface {
 		H: max(0, height-inset.Top-inset.Bottom),
 	}
 	s := BlankSurface(width, height)
-	fillStyle := CellStyle{BG: p.Background, FG: p.Foreground}
+	fillStyle := CellStyle{BG: cellColor(p.Background), FG: cellColor(p.Foreground)}
 	for y := 0; y < height; y++ {
 		for x := 0; x < width; x++ {
 			s.setCell(x, y, Cell{Text: " ", Width: 1, Style: fillStyle})
 		}
 	}
 	border := lipgloss.NormalBorder()
-	borderStyle := CellStyle{FG: p.BorderColor, BG: p.Background}
+	borderStyle := CellStyle{FG: cellColor(p.BorderColor), BG: cellColor(p.Background)}
 	if p.BorderTop && width >= 2 {
 		s.WriteText(0, 0, border.TopLeft, borderStyle)
 		s.WriteText(width-1, 0, border.TopRight, borderStyle)
@@ -311,8 +311,8 @@ func (m ModalFrame) Render(ctx *Context, bounds Rect) Surface {
 	}
 	base := BlankSurface(bounds.W, bounds.H)
 	border := lipgloss.RoundedBorder()
-	borderStyle := CellStyle{FG: ctx.Palette.SidebarBorder, BG: ctx.Palette.SidebarBackground}
-	fillStyle := CellStyle{FG: ctx.Palette.SidebarForeground, BG: ctx.Palette.SidebarBackground}
+	borderStyle := CellStyle{FG: cellColor(ctx.Palette.SidebarBorder), BG: cellColor(ctx.Palette.SidebarBackground)}
+	fillStyle := CellStyle{FG: cellColor(ctx.Palette.SidebarForeground), BG: cellColor(ctx.Palette.SidebarBackground)}
 	for y := 1; y < max(1, bounds.H-1); y++ {
 		for x := 0; x < bounds.W; x++ {
 			base.setCell(x, y, Cell{Text: " ", Width: 1, Style: fillStyle})
@@ -391,9 +391,9 @@ func (m ModalFrame) closeLabel() string {
 
 func (m ModalFrame) topBorder(palette theme.Palette, width int) (Surface, int, int) {
 	border := lipgloss.RoundedBorder()
-	borderStyle := CellStyle{FG: palette.SidebarBorder, BG: palette.SidebarBackground}
-	titleStyle := CellStyle{FG: palette.MarkdownText, BG: palette.SidebarBackground, Bold: true}
-	closeStyle := CellStyle{FG: palette.AssistantTimestampText, BG: palette.SidebarBackground, Bold: true}
+	borderStyle := CellStyle{FG: cellColor(palette.SidebarBorder), BG: cellColor(palette.SidebarBackground)}
+	titleStyle := CellStyle{FG: cellColor(palette.MarkdownText), BG: cellColor(palette.SidebarBackground), Bold: true}
+	closeStyle := CellStyle{FG: cellColor(palette.AssistantTimestampText), BG: cellColor(palette.SidebarBackground), Bold: true}
 	innerWidth := max(0, width-2)
 	title := m.titleLabel()
 	close := m.closeLabel()
@@ -419,7 +419,7 @@ func (m ModalFrame) topBorder(palette theme.Palette, width int) (Surface, int, i
 
 func (m ModalFrame) bottomBorder(palette theme.Palette, width int) Surface {
 	border := lipgloss.RoundedBorder()
-	borderStyle := CellStyle{FG: palette.SidebarBorder, BG: palette.SidebarBackground}
+	borderStyle := CellStyle{FG: cellColor(palette.SidebarBorder), BG: cellColor(palette.SidebarBackground)}
 	s := BlankSurface(width, 1)
 	for x := 0; x < width; x++ {
 		s.setCell(x, 0, Cell{Text: " ", Width: 1, Style: borderStyle})
@@ -436,14 +436,15 @@ func (m ModalFrame) bottomBorder(palette theme.Palette, width int) Surface {
 
 func lipglossToCellStyle(style lipgloss.Style) CellStyle {
 	cell := CellStyle{
-		Bold:   style.GetBold(),
-		Italic: style.GetItalic(),
+		Bold:      style.GetBold(),
+		Italic:    style.GetItalic(),
+		Underline: style.GetUnderline(),
 	}
 	if fg := style.GetForeground(); fg != nil {
-		cell.FG = lipgloss.Color(fmt.Sprint(fg))
+		cell.FG = ParseCellColor(fmt.Sprint(fg))
 	}
 	if bg := style.GetBackground(); bg != nil {
-		cell.BG = lipgloss.Color(fmt.Sprint(bg))
+		cell.BG = ParseCellColor(fmt.Sprint(bg))
 	}
 	return cell
 }

@@ -83,7 +83,7 @@ func (i ActivityIndicator) render() Surface {
 		return Surface{}
 	}
 	line := BlankSurface(PlainWidth(i.Indicator), 1)
-	line.WriteText(0, 0, i.Indicator, CellStyle{FG: i.Palette.ActivityText, Bold: true})
+	line.WriteText(0, 0, i.Indicator, CellStyle{FG: cellColor(i.Palette.ActivityText), Bold: true})
 	return line
 }
 
@@ -154,21 +154,21 @@ func (m UserMessage) render() Surface {
 	if m.HalfBlocks {
 		rendered = appendSurfaceRows(rendered, 0, renderHalfBlockSurface(width, "▄", m.Palette))
 	} else {
-		rendered = appendSurfaceRows(rendered, 0, FilledLineSurface(width, bar, CellStyle{BG: m.Palette.UserTextBackground, FG: m.Palette.UserAccentBar}, CellStyle{BG: m.Palette.UserTextBackground}))
+		rendered = appendSurfaceRows(rendered, 0, FilledLineSurface(width, bar, CellStyle{BG: cellColor(m.Palette.UserTextBackground), FG: cellColor(m.Palette.UserAccentBar)}, CellStyle{BG: cellColor(m.Palette.UserTextBackground)}))
 	}
 	for idx, line := range lines {
 		row := idx + 1
-		rendered.WriteText(0, row, bar, CellStyle{BG: m.Palette.UserTextBackground, FG: m.Palette.UserAccentBar})
+		rendered.WriteText(0, row, bar, CellStyle{BG: cellColor(m.Palette.UserTextBackground), FG: cellColor(m.Palette.UserAccentBar)})
 		if stampStart >= 0 && idx >= stampStart {
-			rendered.WriteText(lipgloss.Width(bar), row, line, CellStyle{BG: m.Palette.UserTextBackground, FG: m.Palette.UserTimestampForeground})
+			rendered.WriteText(lipgloss.Width(bar), row, line, CellStyle{BG: cellColor(m.Palette.UserTextBackground), FG: cellColor(m.Palette.UserTimestampForeground)})
 			continue
 		}
-		rendered.WriteText(lipgloss.Width(bar), row, line, CellStyle{BG: m.Palette.UserTextBackground, FG: m.Palette.UserTextForeground})
+		rendered.WriteText(lipgloss.Width(bar), row, line, CellStyle{BG: cellColor(m.Palette.UserTextBackground), FG: cellColor(m.Palette.UserTextForeground)})
 	}
 	if m.HalfBlocks {
 		rendered = appendSurfaceRows(rendered, height-1, renderHalfBlockSurface(width, "▀", m.Palette))
 	} else {
-		rendered = appendSurfaceRows(rendered, height-1, FilledLineSurface(width, bar, CellStyle{BG: m.Palette.UserTextBackground, FG: m.Palette.UserAccentBar}, CellStyle{BG: m.Palette.UserTextBackground}))
+		rendered = appendSurfaceRows(rendered, height-1, FilledLineSurface(width, bar, CellStyle{BG: cellColor(m.Palette.UserTextBackground), FG: cellColor(m.Palette.UserAccentBar)}, CellStyle{BG: cellColor(m.Palette.UserTextBackground)}))
 	}
 	_ = barStyle
 	_ = contentStyle
@@ -223,9 +223,9 @@ func (m AssistantMessage) render() Surface {
 		lines = append(lines, struct {
 			text  string
 			style CellStyle
-		}{text: m.Stamp, style: CellStyle{FG: m.Palette.AssistantTimestampText}})
+		}{text: m.Stamp, style: CellStyle{FG: cellColor(m.Palette.AssistantTimestampText)}})
 	}
-	bodyStyle := CellStyle{FG: m.Palette.MarkdownText}
+	bodyStyle := CellStyle{FG: cellColor(m.Palette.MarkdownText)}
 	for _, line := range wrapStyledLines(strings.TrimSpace(m.Body), m.Width) {
 		lines = append(lines, struct {
 			text  string
@@ -271,7 +271,7 @@ func (b ReasoningBlock) render() Surface {
 		width = maxInt(width, PlainWidth(line))
 	}
 	s := BlankSurface(width, len(lines))
-	style := CellStyle{BG: b.Palette.ReasoningBackground, FG: b.Palette.ReasoningText}
+	style := CellStyle{BG: cellColor(b.Palette.ReasoningBackground), FG: cellColor(b.Palette.ReasoningText)}
 	for y, line := range lines {
 		for x := 0; x < width; x++ {
 			s.setCell(x, y, Cell{Text: " ", Width: 1, Style: style})
@@ -293,9 +293,9 @@ func renderHalfBlockSurface(width int, char string, palette theme.Palette) Surfa
 		return Surface{}
 	}
 	s := BlankSurface(width, 1)
-	s.WriteText(0, 0, char, CellStyle{FG: palette.UserAccentBar})
+	s.WriteText(0, 0, char, CellStyle{FG: cellColor(palette.UserAccentBar)})
 	if width > 1 {
-		fillStyle := CellStyle{FG: palette.UserTextBackground}
+		fillStyle := CellStyle{FG: cellColor(palette.UserTextBackground)}
 		for x := 1; x < width; x++ {
 			s.setCell(x, 0, Cell{Text: char, Width: 1, Style: fillStyle})
 		}

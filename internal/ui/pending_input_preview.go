@@ -82,7 +82,7 @@ func (p PendingInputPreview) renderHeader(text string, fg, bg lipgloss.Color) Su
 	available := maxInt(1, width-PlainWidth(prefix))
 	label := PlainTruncate(text, available, "")
 	surface := BlankSurface(width, 1)
-	style := CellStyle{FG: fg, BG: bg}
+	style := CellStyle{FG: cellColor(fg), BG: cellColor(bg)}
 	for x := 0; x < width; x++ {
 		surface.setCell(x, 0, Cell{Text: " ", Width: 1, Style: style})
 	}
@@ -121,7 +121,7 @@ func (p PendingInputPreview) renderPreviewRows(messages []string, fg, bg lipglos
 func (p PendingInputPreview) renderBlank(bg lipgloss.Color) Surface {
 	width := maxInt(1, p.Width)
 	surface := BlankSurface(width, 1)
-	style := CellStyle{FG: bg, BG: bg}
+	style := CellStyle{FG: cellColor(bg), BG: cellColor(bg)}
 	for x := 0; x < width; x++ {
 		surface.setCell(x, 0, Cell{Text: " ", Width: 1, Style: style})
 	}
@@ -134,7 +134,7 @@ func renderPendingPreviewLine(prefix, text string, width int, fg, bg lipgloss.Co
 	available := maxInt(0, width-PlainWidth(prefix))
 	text = PlainTruncate(text, available, "")
 	surface := BlankSurface(width, 1)
-	baseStyle := CellStyle{FG: fg, BG: bg}
+	baseStyle := CellStyle{FG: cellColor(fg), BG: cellColor(bg)}
 	textStyle := baseStyle
 	if italic {
 		textStyle.Italic = true

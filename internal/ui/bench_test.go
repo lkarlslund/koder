@@ -144,7 +144,7 @@ func BenchmarkSurfacePlaceAtLarge(b *testing.B) {
 
 func BenchmarkCellSurfaceWriteLine(b *testing.B) {
 	surface := BlankSurface(120, 8)
-	style := CellStyle{FG: benchmarkPalette().MarkdownText}
+	style := CellStyle{FG: cellColor(benchmarkPalette().MarkdownText)}
 	text := strings.Repeat("cell-write ", 8)
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
@@ -156,7 +156,7 @@ func BenchmarkCellSurfaceWriteLine(b *testing.B) {
 func BenchmarkCellSurfaceBlitLarge(b *testing.B) {
 	base := BlankSurface(120, 60)
 	child := BlankSurface(48, 8)
-	style := CellStyle{FG: benchmarkPalette().MarkdownText}
+	style := CellStyle{FG: cellColor(benchmarkPalette().MarkdownText)}
 	for y := 0; y < 8; y++ {
 		child.WriteText(0, y, strings.Repeat("overlay ", 6), style)
 	}

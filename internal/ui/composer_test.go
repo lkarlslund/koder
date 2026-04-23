@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/muesli/termenv"
 
 	"github.com/lkarlslund/koder/internal/theme"
 )
@@ -36,13 +35,19 @@ func TestRenderComposerPlaceholderLineDoesNotAddExtraCursorCell(t *testing.T) {
 }
 
 func TestRenderComposerLineKeepsTypedTextAfterCursorAtNormalColor(t *testing.T) {
-	prev := lipgloss.ColorProfile()
-	lipgloss.SetColorProfile(termenv.TrueColor)
-	defer lipgloss.SetColorProfile(prev)
-
 	promptStyle := lipgloss.NewStyle()
-	line := Composer{}.renderLine("> ", promptStyle, "ab", "c", "def", 16, true, lipgloss.Color("#112233"), lipgloss.Color("#445566"))
-	if !strings.Contains(line, "38;2;17;34;51;48;2;68;85;102mdef") {
-		t.Fatalf("expected typed text after cursor to keep the normal text color, got %q", line)
+	surface := Composer{}.renderLineSurface("> ", promptStyle, "ab", "c", "def", 16, true, lipgloss.Color("#112233"), lipgloss.Color("#445566"))
+	start := strings.Index(surface.String(), "def")
+	if start == -1 {
+		t.Fatalf("expected rendered line to contain trailing text, got %q", surface.String())
+	}
+	x := start
+	r, g, b, ok := surface.SurfaceCellFG(x, 0)
+	if !ok || r != 0x11 || g != 0x22 || b != 0x33 {
+		t.Fatalf("expected typed text after cursor to keep the normal foreground color, got (%d,%d,%d,%v)", r, g, b, ok)
+	}
+	r, g, b, ok = surface.SurfaceCellBG(x, 0)
+	if !ok || r != 0x44 || g != 0x55 || b != 0x66 {
+		t.Fatalf("expected typed text after cursor to keep the normal background color, got (%d,%d,%d,%v)", r, g, b, ok)
 	}
 }
