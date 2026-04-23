@@ -9,50 +9,67 @@ import (
 )
 
 type Sidebar struct {
-	Content string
-	Height  int
+	Child  Element
+	Height int
 }
 
-func (s Sidebar) content(palette theme.Palette) string {
+func (s Sidebar) content(ctx *Context, width int) string {
 	style := lipgloss.NewStyle().
-		Width(30).
+		Width(width).
 		Padding(0, 1).
-		Background(palette.SidebarBackground).
-		Foreground(palette.SidebarForeground).
+		Background(ctx.Palette.SidebarBackground).
+		Foreground(ctx.Palette.SidebarForeground).
 		BorderLeft(true).
-		BorderForeground(palette.SidebarBorder)
+		BorderForeground(ctx.Palette.SidebarBorder)
 	if s.Height > 0 {
 		style = style.Height(s.Height).MaxHeight(s.Height)
 	}
-	return style.Render(strings.TrimRight(s.Content, "\n"))
+	content := ""
+	if s.Child != nil {
+		content = RenderElement(ctx, s.Child, max(0, width-3), s.Height)
+	}
+	return style.Render(strings.TrimRight(content, "\n"))
 }
 
 func (s Sidebar) View(palette theme.Palette) string {
-	return s.content(palette)
+	return s.content(&Context{Palette: palette}, 30)
 }
 
 func (s Sidebar) Measure(ctx *Context, constraints Constraints) Size {
-	return constraints.Clamp(SurfaceFromString(s.content(ctx.Palette)).Size())
+	width := constraints.MaxW
+	if width <= 0 {
+		width = 30
+	}
+	return constraints.Clamp(SurfaceFromString(s.content(ctx, width)).Size())
 }
 
 func (s Sidebar) Render(ctx *Context, bounds Rect) Surface {
-	return SurfaceFromString(s.content(ctx.Palette)).normalize(bounds.W, bounds.H)
+	width := bounds.W
+	if width <= 0 {
+		width = 30
+	}
+	return SurfaceFromString(s.content(ctx, width)).normalize(bounds.W, bounds.H)
 }
 
 type BodyLayout struct {
-	Main           string
 	MainElement    Element
-	Sidebar        string
 	SidebarElement Element
 	ShowSidebar    bool
 }
 
 func (l BodyLayout) View() string {
-	main := lipgloss.NewStyle().Padding(0, 1).Render(l.Main)
+	main := ""
+	if l.MainElement != nil {
+		main = RenderElement(&Context{}, Inset{Padding: SymmetricInsets(1, 0), Child: l.MainElement}, 0, 0)
+	}
 	if !l.ShowSidebar {
 		return main
 	}
-	return lipgloss.JoinHorizontal(lipgloss.Top, main, l.Sidebar)
+	sidebar := ""
+	if l.SidebarElement != nil {
+		sidebar = RenderElement(&Context{}, l.SidebarElement, 0, 0)
+	}
+	return lipgloss.JoinHorizontal(lipgloss.Top, main, sidebar)
 }
 
 func (l BodyLayout) Measure(ctx *Context, constraints Constraints) Size {
@@ -60,19 +77,11 @@ func (l BodyLayout) Measure(ctx *Context, constraints Constraints) Size {
 }
 
 func (l BodyLayout) Render(ctx *Context, bounds Rect) Surface {
-	mainChild := Element(Static{Content: l.Main})
-	if l.MainElement != nil {
-		mainChild = l.MainElement
-	}
 	children := []Child{
-		Flex(Inset{Padding: SymmetricInsets(1, 0), Child: mainChild}, 1),
+		Flex(Inset{Padding: SymmetricInsets(1, 0), Child: l.MainElement}, 1),
 	}
 	if l.ShowSidebar {
-		sidebarChild := Element(Static{Content: l.Sidebar})
-		if l.SidebarElement != nil {
-			sidebarChild = l.SidebarElement
-		}
-		children = append(children, Fixed(sidebarChild))
+		children = append(children, Fixed(l.SidebarElement))
 	}
 	return Row{Children: children}.Render(ctx, bounds)
 }

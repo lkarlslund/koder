@@ -24,6 +24,18 @@ func (l Label) render() string {
 	return l.Style.Render(l.Text)
 }
 
+type TextPane struct {
+	Content string
+}
+
+func (t TextPane) Measure(_ *Context, constraints Constraints) Size {
+	return constraints.Clamp(SurfaceFromString(t.Content).Size())
+}
+
+func (t TextPane) Render(_ *Context, bounds Rect) Surface {
+	return SurfaceFromString(t.Content).normalize(bounds.W, bounds.H)
+}
+
 type Paragraph struct {
 	Text  string
 	Style lipgloss.Style

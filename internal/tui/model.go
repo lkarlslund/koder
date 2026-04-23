@@ -1253,13 +1253,12 @@ func (m *Model) renderBody() string {
 }
 
 func (m *Model) renderBodyElement() ui.Element {
-	main := ui.Static{Content: m.viewport.View()}
 	sidebar := ui.Sidebar{
-		Content: m.renderSidebar(),
-		Height:  m.viewport.Height,
+		Child:  ui.TextPane{Content: m.renderSidebar()},
+		Height: m.viewport.Height,
 	}
 	return ui.BodyLayout{
-		MainElement:    main,
+		MainElement:    ui.TextPane{Content: m.viewport.View()},
 		SidebarElement: sidebar,
 		ShowSidebar:    m.showSidebar,
 	}
@@ -1546,9 +1545,9 @@ func (m *Model) refreshViewportAt(offset int) {
 	}
 	if len(items) == 0 {
 		if !m.cfg.HasUsableDefaultProvider() {
-			items = append(items, ui.TranscriptItem{Element: ui.Static{Content: "No provider configured.\n\nType /connect to add one before sending prompts."}})
+			items = append(items, ui.TranscriptItem{Element: ui.Paragraph{Text: "No provider configured.\n\nType /connect to add one before sending prompts."}})
 		} else {
-			items = append(items, ui.TranscriptItem{Element: ui.Static{Content: "Start by asking a question or type / for commands."}})
+			items = append(items, ui.TranscriptItem{Element: ui.Paragraph{Text: "Start by asking a question or type / for commands."}})
 		}
 	}
 	m.viewport.SetContent(ui.RenderElement(ctx, ui.Transcript{Items: items}, transcriptWidth, 0))
