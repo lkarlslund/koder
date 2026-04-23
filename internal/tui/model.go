@@ -14,7 +14,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
@@ -274,7 +273,7 @@ type Model struct {
 	parts              map[int64][]domain.Part
 	tasks              []store.Task
 	approvals          []store.Approval
-	viewport           viewport.Model
+	viewport           transcriptViewport
 	transcriptControls []ui.Control
 	expandedToolRuns   map[string]bool
 	composer           textarea.Model
@@ -365,7 +364,7 @@ func NewWithWorkdir(cfg config.Config, st *store.Store, a *agent.Engine, mode St
 	composer.ShowLineNumbers = false
 	applyComposerTheme(&composer, tuiTheme.Palette)
 
-	vp := viewport.New(40, 10)
+	vp := newTranscriptViewport(40, 10)
 	vp.SetContent("Loading…")
 
 	return Model{

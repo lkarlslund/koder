@@ -12,7 +12,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
@@ -316,7 +315,7 @@ func TestEnterShowsOptimisticUserPromptBeforePromptStarts(t *testing.T) {
 		cfg:            cfg,
 		composer:       textarea.New(),
 		palette:        theme.Resolve("tokyonight").Palette,
-		viewport:       viewport.New(60, 10),
+		viewport:       newTranscriptViewport(60, 10),
 		currentSession: domain.Session{ID: 1, ProviderID: "test", ModelID: "model"},
 		parts:          map[int64][]domain.Part{},
 	}
@@ -944,7 +943,7 @@ func TestLoadMsgDispatchesQueuedPrompt(t *testing.T) {
 		cfg:            cfg,
 		composer:       textarea.New(),
 		parts:          map[int64][]domain.Part{},
-		viewport:       viewport.New(40, 6),
+		viewport:       newTranscriptViewport(40, 6),
 		currentSession: domain.Session{ID: 9, ProviderID: "openai", ModelID: "gpt-5.4", Title: "Queued"},
 		queuedPrompt:   &queuedPrompt{Text: "queued ask", Mode: queuedPromptModeNormal},
 	}
@@ -1086,7 +1085,7 @@ func TestSyncDebugRuntimeIncludesViewportState(t *testing.T) {
 		status:         "Ready",
 		currentSession: domain.Session{ID: 7, Title: "Debug Session", ProviderID: "test", ModelID: "model"},
 		messages:       []domain.Message{{ID: 1}, {ID: 2}},
-		viewport:       viewport.New(40, 6),
+		viewport:       newTranscriptViewport(40, 6),
 	}
 	m.viewport.SetContent("line one\nline two")
 
@@ -1149,7 +1148,7 @@ func TestRefreshViewportGroupsToolRunMessagesIntoCard(t *testing.T) {
 			{ID: 2, Role: domain.MessageRoleTool},
 			{ID: 3, Role: domain.MessageRoleTool, Summary: "bash"},
 		},
-		viewport: viewport.New(80, 12),
+		viewport: newTranscriptViewport(80, 12),
 	}
 
 	m.refreshViewport()
@@ -1173,7 +1172,7 @@ func TestRenderApprovalPromptUsesToolRunDock(t *testing.T) {
 	m := Model{
 		cfg:       cfg,
 		palette:   theme.Resolve("tokyonight").Palette,
-		viewport:  viewport.New(80, 12),
+		viewport:  newTranscriptViewport(80, 12),
 		approvals: []store.Approval{{ID: 9, Tool: domain.ToolKindBash, Command: `{"command":"git status","tool_call_id":"call_1"}`}},
 	}
 
@@ -1203,7 +1202,7 @@ func TestRefreshViewportSkipsSyntheticAssistantToolSummary(t *testing.T) {
 		messages: []domain.Message{
 			{ID: 1, Role: domain.MessageRoleAssistant, Summary: "tool:read"},
 		},
-		viewport: viewport.New(80, 8),
+		viewport: newTranscriptViewport(80, 8),
 	}
 
 	m.refreshViewport()
@@ -1231,7 +1230,7 @@ func TestToolOutputUsesRequestPreviewFromMeta(t *testing.T) {
 		messages: []domain.Message{
 			{ID: 1, Role: domain.MessageRoleTool, Summary: "read"},
 		},
-		viewport: viewport.New(80, 8),
+		viewport: newTranscriptViewport(80, 8),
 	}
 
 	m.refreshViewport()
@@ -1325,7 +1324,7 @@ func TestRunPromptErrorAppendsAssistantErrorToTranscript(t *testing.T) {
 	m := Model{
 		composer: textarea.New(),
 		parts:    map[int64][]domain.Part{},
-		viewport: viewport.New(40, 6),
+		viewport: newTranscriptViewport(40, 6),
 	}
 
 	updated, cmd := m.Update(runPromptMsg{err: errors.New("connection refused")})
@@ -1363,7 +1362,7 @@ func TestNewSessionMsgClearsBusyState(t *testing.T) {
 		loading:  true,
 		composer: textarea.New(),
 		parts:    map[int64][]domain.Part{},
-		viewport: viewport.New(40, 6),
+		viewport: newTranscriptViewport(40, 6),
 	}
 
 	updated, _ := m.Update(newSessionMsg{
@@ -1407,7 +1406,7 @@ func TestForkCommandCreatesForkedSession(t *testing.T) {
 		cfg:            cfg,
 		store:          st,
 		composer:       textarea.New(),
-		viewport:       viewport.New(40, 6),
+		viewport:       newTranscriptViewport(40, 6),
 		currentSession: session,
 		parts:          map[int64][]domain.Part{},
 		workdir:        t.TempDir(),
@@ -2620,7 +2619,7 @@ func TestRenderSidebarShowsStatusAndSessionInfo(t *testing.T) {
 func TestRefreshViewportShowsConnectHintWithoutProvider(t *testing.T) {
 	m := Model{
 		cfg:      config.Default(),
-		viewport: viewport.New(40, 6),
+		viewport: newTranscriptViewport(40, 6),
 	}
 	m.refreshViewport()
 	if got := m.viewport.View(); !strings.Contains(got, "/connect") {
@@ -2830,7 +2829,7 @@ func TestRenderBodyAppliesSidebarThemeBackground(t *testing.T) {
 	m := Model{
 		showSidebar: true,
 		palette:     theme.Resolve("tokyonight").Palette,
-		viewport:    viewport.New(40, 6),
+		viewport:    newTranscriptViewport(40, 6),
 	}
 	m.viewport.SetContent("history")
 
@@ -2844,7 +2843,7 @@ func TestRenderBodyClipsSidebarToViewportHeight(t *testing.T) {
 	m := Model{
 		showSidebar: true,
 		palette:     theme.Resolve("tokyonight").Palette,
-		viewport:    viewport.New(40, 6),
+		viewport:    newTranscriptViewport(40, 6),
 		workdir:     "/tmp/project",
 	}
 	m.viewport.SetContent("history")
@@ -2860,7 +2859,7 @@ func TestRenderBodyKeepsSidebarAtConfiguredWidth(t *testing.T) {
 		showSidebar: true,
 		width:       120,
 		palette:     theme.Resolve("tokyonight").Palette,
-		viewport:    viewport.New(87, 6),
+		viewport:    newTranscriptViewport(87, 6),
 		workdir:     "/tmp/project",
 	}
 	m.viewport.SetContent("history")
@@ -2894,7 +2893,7 @@ func TestRenderBodyUsesTranscriptElementInsteadOfViewportString(t *testing.T) {
 		parts: map[int64][]domain.Part{
 			1: {{Kind: domain.PartKindText, Body: "fresh transcript"}},
 		},
-		viewport: viewport.New(32, 6),
+		viewport: newTranscriptViewport(32, 6),
 	}
 	m.viewport.SetContent("stale viewport")
 
@@ -2913,7 +2912,7 @@ func TestViewUsesFullTerminalWidthWithSidebar(t *testing.T) {
 		palette:     theme.Resolve("tokyonight").Palette,
 		width:       100,
 		height:      12,
-		viewport:    viewport.New(68, 8),
+		viewport:    newTranscriptViewport(68, 8),
 		workdir:     "/tmp/project",
 	}
 	m.viewport.SetContent("history")
@@ -2935,7 +2934,7 @@ func TestRefreshViewportAppendsWorkingLine(t *testing.T) {
 		currentSession: domain.Session{ID: 1},
 		status:         "Working ...",
 		parts:          map[int64][]domain.Part{},
-		viewport:       viewport.New(40, 6),
+		viewport:       newTranscriptViewport(40, 6),
 		busy: busyModel{
 			active: true,
 			scope:  busyScopeTranscript,
@@ -2996,7 +2995,7 @@ func TestViewBottomAlignsFooter(t *testing.T) {
 		width:    40,
 		height:   12,
 		composer: composer,
-		viewport: viewport.New(38, 4),
+		viewport: newTranscriptViewport(38, 4),
 	}
 	m.viewport.SetContent("history")
 
@@ -3072,7 +3071,7 @@ func TestRenderUserMessageUsesAccentBarOnAllLines(t *testing.T) {
 	m := Model{
 		cfg:     cfg,
 		palette: theme.Resolve("tokyonight").Palette,
-		viewport: viewport.Model{
+		viewport: transcriptViewport{
 			Width: 40,
 		},
 	}
@@ -3099,7 +3098,7 @@ func TestRenderUserMessageCanDisableHalfBlocks(t *testing.T) {
 	m := Model{
 		cfg:     cfg,
 		palette: theme.Resolve("tokyonight").Palette,
-		viewport: viewport.Model{
+		viewport: transcriptViewport{
 			Width: 40,
 		},
 	}
@@ -3119,7 +3118,7 @@ func TestRenderTranscriptUserMessageFallsBackToSummaryWhenPartsMissing(t *testin
 		cfg:     cfg,
 		palette: theme.Resolve("tokyonight").Palette,
 		parts:   map[int64][]domain.Part{},
-		viewport: viewport.Model{
+		viewport: transcriptViewport{
 			Width: 40,
 		},
 	}
@@ -3140,7 +3139,7 @@ func TestRefreshViewportOmitsWorkingLineForGenericLoading(t *testing.T) {
 		loading:        true,
 		status:         "Resuming session 2…",
 		parts:          map[int64][]domain.Part{},
-		viewport:       viewport.New(40, 6),
+		viewport:       newTranscriptViewport(40, 6),
 		busy: busyModel{
 			active: true,
 			scope:  busyScopeSidebar,
@@ -3162,7 +3161,7 @@ func TestSpinnerTickRefreshesTranscriptActivity(t *testing.T) {
 		currentSession: domain.Session{ID: 1},
 		status:         "Working ...",
 		parts:          map[int64][]domain.Part{},
-		viewport:       viewport.New(40, 6),
+		viewport:       newTranscriptViewport(40, 6),
 		busy: busyModel{
 			active: true,
 			scope:  busyScopeTranscript,
@@ -3204,7 +3203,7 @@ func TestStatusEventKeepsTranscriptSpinnerActive(t *testing.T) {
 func TestLoadMsgPreserveBusyKeepsSpinnerActive(t *testing.T) {
 	m := Model{
 		cfg:      testConfig(t),
-		viewport: viewport.New(40, 6),
+		viewport: newTranscriptViewport(40, 6),
 		busy: busyModel{
 			active: true,
 			scope:  busyScopeTranscript,
@@ -3242,7 +3241,7 @@ func TestSpinnerTickPreservesViewportOffsetWhenScrolledBack(t *testing.T) {
 	m := Model{
 		cfg:            testConfig(t),
 		currentSession: domain.Session{ID: 1, Title: "Test"},
-		viewport:       viewport.New(40, 4),
+		viewport:       newTranscriptViewport(40, 4),
 		busy: busyModel{
 			active: true,
 			scope:  busyScopeTranscript,
@@ -3418,7 +3417,7 @@ func TestRenderReasoningBlockStartsWithBlankStyledLine(t *testing.T) {
 
 func TestMouseWheelScrollsViewport(t *testing.T) {
 	m := Model{
-		viewport: viewport.New(40, 4),
+		viewport: newTranscriptViewport(40, 4),
 	}
 	m.viewport.SetContent(strings.Join([]string{
 		"line 1",
@@ -3448,7 +3447,7 @@ func TestMouseClickTogglesToolRunExpansion(t *testing.T) {
 	m := Model{
 		mouseEnabled:     true,
 		currentSession:   domain.Session{ID: 1},
-		viewport:         viewport.New(80, 8),
+		viewport:         newTranscriptViewport(80, 8),
 		parts:            map[int64][]domain.Part{},
 		expandedToolRuns: map[string]bool{},
 		palette:          theme.Resolve("tokyonight").Palette,
@@ -3502,7 +3501,7 @@ func TestMouseClickTogglesToolRunExpansion(t *testing.T) {
 func TestWriteToolRunUsesStoredContentForExpansion(t *testing.T) {
 	m := Model{
 		currentSession:   domain.Session{ID: 1},
-		viewport:         viewport.New(80, 8),
+		viewport:         newTranscriptViewport(80, 8),
 		parts:            map[int64][]domain.Part{},
 		expandedToolRuns: map[string]bool{},
 		palette:          theme.Resolve("tokyonight").Palette,
@@ -3549,7 +3548,7 @@ func TestWriteToolRunUsesStoredContentForExpansion(t *testing.T) {
 func TestEditToolRunShowsStoredHunkDetails(t *testing.T) {
 	m := Model{
 		currentSession:   domain.Session{ID: 1},
-		viewport:         viewport.New(80, 10),
+		viewport:         newTranscriptViewport(80, 10),
 		parts:            map[int64][]domain.Part{},
 		expandedToolRuns: map[string]bool{"call_edit_1": true},
 		palette:          theme.Resolve("tokyonight").Palette,
@@ -3744,7 +3743,7 @@ func TestRenderTranscriptMessageUserBubbleHasBlankPaddingLines(t *testing.T) {
 		parts: map[int64][]domain.Part{
 			1: {{Kind: domain.PartKindText, Body: "hello world"}},
 		},
-		viewport: viewport.New(24, 6),
+		viewport: newTranscriptViewport(24, 6),
 	}
 
 	got := m.renderTranscriptMessage(domain.Message{
@@ -3784,7 +3783,7 @@ func TestRenderTranscriptMessageUserBubbleUsesConsistentWidthForMultilineInput(t
 		parts: map[int64][]domain.Part{
 			1: {{Kind: domain.PartKindText, Body: "short\nthis is a much longer line"}},
 		},
-		viewport: viewport.New(30, 6),
+		viewport: newTranscriptViewport(30, 6),
 	}
 
 	got := m.renderTranscriptMessage(domain.Message{
@@ -3811,7 +3810,7 @@ func TestRenderTranscriptMessageUserBubbleWrapsToViewportWidth(t *testing.T) {
 		parts: map[int64][]domain.Part{
 			1: {{Kind: domain.PartKindText, Body: "this line is intentionally longer than the viewport width"}},
 		},
-		viewport: viewport.New(18, 6),
+		viewport: newTranscriptViewport(18, 6),
 	}
 
 	got := m.renderTranscriptMessage(domain.Message{
@@ -3856,7 +3855,7 @@ func TestRenderTranscriptMessageAssistantWrapsToViewportWidth(t *testing.T) {
 		parts: map[int64][]domain.Part{
 			2: {{Kind: domain.PartKindText, Body: "this assistant line is intentionally longer than the viewport width"}},
 		},
-		viewport: viewport.New(18, 6),
+		viewport: newTranscriptViewport(18, 6),
 	}
 
 	got := m.renderTranscriptMessage(domain.Message{
@@ -3905,7 +3904,7 @@ func TestRefreshViewportUsesSingleNewlineBetweenBlocksWithHalfBlocks(t *testing.
 			1: {{Kind: domain.PartKindText, Body: "hello"}},
 			2: {{Kind: domain.PartKindText, Body: "reply"}},
 		},
-		viewport: viewport.New(24, 8),
+		viewport: newTranscriptViewport(24, 8),
 	}
 
 	m.refreshViewport()
@@ -3930,7 +3929,7 @@ func TestRefreshViewportUsesBlankLineBetweenAssistantMessagesWithHalfBlocks(t *t
 			1: {{Kind: domain.PartKindText, Body: "first reply"}},
 			2: {{Kind: domain.PartKindText, Body: "second reply"}},
 		},
-		viewport: viewport.New(24, 8),
+		viewport: newTranscriptViewport(24, 8),
 	}
 
 	m.refreshViewport()
@@ -3975,7 +3974,7 @@ func TestRefreshViewportUsesBlankLineBetweenAssistantTextAndToolRunWithHalfBlock
 				}),
 			}},
 		},
-		viewport: viewport.New(60, 12),
+		viewport: newTranscriptViewport(60, 12),
 	}
 
 	m.refreshViewport()
@@ -4052,7 +4051,7 @@ func TestRefreshViewportUsesBlankLineBetweenConsecutiveToolRunsWithHalfBlocks(t 
 				}),
 			}},
 		},
-		viewport: viewport.New(60, 12),
+		viewport: newTranscriptViewport(60, 12),
 	}
 
 	m.refreshViewport()
