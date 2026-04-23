@@ -457,7 +457,7 @@ func (r *Root) HandleEvent(event Event) (bool, tea.Cmd) {
 		}
 		return handled, cmd
 	case MouseEvent:
-		window := r.windowAt(Point{X: typed.X, Y: typed.Y})
+		window := r.windowAt(Point{X: max(0, typed.X-1), Y: typed.Y})
 		if window == nil {
 			return false, nil
 		}

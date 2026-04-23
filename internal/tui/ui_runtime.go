@@ -168,6 +168,10 @@ func (m *Model) overlayWindows() []ui.Window {
 		windows = append(windows, m.centeredWindow(sessionWindowID, 10, m.renderSessionDialogElement(), func(m *Model, msg tea.KeyMsg) tea.Cmd {
 			return m.handleSessionDialogKey(msg)
 		}, func(m *Model, controlID string) tea.Cmd {
+			if controlID == "window-close" {
+				m.startBusy(busyScopeSidebar, "Creating session…")
+				return tea.Batch(m.newSessionCmd(), m.spinnerCmdIfNeeded())
+			}
 			action := m.sessionDialog.ActivateControl(controlID)
 			switch action.Kind {
 			case dialogs.SessionDialogActionSelect:
@@ -185,6 +189,11 @@ func (m *Model) overlayWindows() []ui.Window {
 		windows = append(windows, m.centeredWindow(modelWindowID, 20, m.renderModelDialogElement(), func(m *Model, msg tea.KeyMsg) tea.Cmd {
 			return m.handleModelDialogKey(msg)
 		}, func(m *Model, controlID string) tea.Cmd {
+			if controlID == "window-close" {
+				m.closeModelDialog()
+				m.status = "Model selection cancelled"
+				return m.syncWindowTitleCmd()
+			}
 			action := m.modelDialog.ActivateControl(controlID)
 			switch action.Kind {
 			case dialogs.ModelDialogActionSelect:
@@ -209,6 +218,11 @@ func (m *Model) overlayWindows() []ui.Window {
 		windows = append(windows, m.centeredWindow(disconnectWindowID, 30, m.renderDisconnectDialogElement(), func(m *Model, msg tea.KeyMsg) tea.Cmd {
 			return m.handleDisconnectDialogKey(msg)
 		}, func(m *Model, controlID string) tea.Cmd {
+			if controlID == "window-close" {
+				m.closeDisconnectDialog()
+				m.status = "Provider disconnect cancelled"
+				return m.syncWindowTitleCmd()
+			}
 			action := m.disconnectDialog.ActivateControl(controlID)
 			switch action.Kind {
 			case dialogs.DisconnectDialogActionSelect:
@@ -233,6 +247,11 @@ func (m *Model) overlayWindows() []ui.Window {
 		windows = append(windows, m.centeredWindow(toolsWindowID, 40, m.renderToolsDialogElement(), func(m *Model, msg tea.KeyMsg) tea.Cmd {
 			return m.handleToolsDialogKey(msg)
 		}, func(m *Model, controlID string) tea.Cmd {
+			if controlID == "window-close" {
+				m.closeToolsDialog()
+				m.status = "Tool selection cancelled"
+				return m.syncWindowTitleCmd()
+			}
 			action := m.toolsDialog.ActivateControl(controlID)
 			switch action.Kind {
 			case dialogs.ToolsDialogActionApply:
@@ -410,7 +429,7 @@ func (m *Model) centeredWindow(id ui.WindowID, z int, element ui.Element, onKey 
 			ctx := &ui.Context{Palette: m.palette, Runtime: &runtime}
 			bounds := m.centeredWindowBounds(element)
 			element.Render(ctx, ui.Rect{W: bounds.W, H: bounds.H})
-			local := ui.Point{X: msg.X - bounds.X, Y: msg.Y - bounds.Y}
+			local := ui.Point{X: max(0, msg.X-1-bounds.X), Y: msg.Y - bounds.Y}
 			if control, ok := runtime.Hit(local); ok {
 				return true, onControl(m, control.ID)
 			}

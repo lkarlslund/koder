@@ -654,6 +654,15 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 	case tea.MouseMsg:
 		root := (&m).syncUIRoot()
 		if handled, cmd := root.HandleEvent(ui.MouseEvent(msg)); handled {
+			if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft {
+				return &m, cmd
+			}
+			return m, cmd
+		}
+		if handled, cmd := m.handleMainWindowMouse(msg); handled {
+			if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft {
+				return &m, cmd
+			}
 			return m, cmd
 		}
 		return m, nil
