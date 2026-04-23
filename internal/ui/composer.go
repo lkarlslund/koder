@@ -44,6 +44,18 @@ func NewComposer(props ComposerProps) Composer {
 }
 
 func (c Composer) View() string {
+	return c.render().String()
+}
+
+func (c Composer) Measure(_ *Context, constraints Constraints) Size {
+	return constraints.Clamp(c.render().Size())
+}
+
+func (c Composer) Render(_ *Context, bounds Rect) Surface {
+	return c.render().normalize(bounds.W, bounds.H)
+}
+
+func (c Composer) render() Surface {
 	width := maxInt(1, c.Width)
 	prompt := c.PromptGlyph + " "
 	promptWidth := ansi.StringWidth(prompt)
@@ -59,11 +71,11 @@ func (c Composer) View() string {
 		Background(c.Palette.UserTextBackground).
 		Foreground(c.Palette.UserTextForeground)
 
-	renderBlankLine := func() string {
-		return c.renderLine(prompt, promptStyle, "", "", "", contentWidth, false, c.Palette.UserTextForeground, c.Palette.UserTextBackground)
+	renderBlankLine := func() Surface {
+		return c.renderLineSurface(prompt, promptStyle, "", "", "", contentWidth, false, c.Palette.UserTextForeground, c.Palette.UserTextBackground)
 	}
 
-	middle := c.renderLine(
+	middle := c.renderLineSurface(
 		prompt,
 		promptStyle,
 		c.ContentBefore,
@@ -75,28 +87,28 @@ func (c Composer) View() string {
 		c.Palette.UserTextBackground,
 	)
 	if strings.TrimSpace(c.Value) == "" {
-		middle = c.renderPlaceholderLine(promptStyle, contentStyle, prompt, contentWidth, c.Placeholder, c.ContentCursor)
+		middle = c.renderPlaceholderSurface(promptStyle, contentStyle, prompt, contentWidth, c.Placeholder, c.ContentCursor)
 	}
 
 	if c.HalfBlocks {
-		return lipgloss.JoinVertical(lipgloss.Left,
+		return Surface{lines: []string{
 			c.HalfBlockLine("▄"),
-			middle,
+			middle.String(),
 			c.HalfBlockLine("▀"),
-		)
+		}}
 	}
-	return lipgloss.JoinVertical(lipgloss.Left, renderBlankLine(), middle, renderBlankLine())
-}
-
-func (c Composer) Measure(_ *Context, constraints Constraints) Size {
-	return constraints.Clamp(SurfaceFromString(c.View()).Size())
-}
-
-func (c Composer) Render(_ *Context, bounds Rect) Surface {
-	return SurfaceFromString(c.View()).normalize(bounds.W, bounds.H)
+	return Surface{lines: []string{
+		renderBlankLine().String(),
+		middle.String(),
+		renderBlankLine().String(),
+	}}
 }
 
 func (c Composer) renderPlaceholderLine(promptStyle, contentStyle lipgloss.Style, prompt string, contentWidth int, placeholder string, cursorChar string) string {
+	return c.renderPlaceholderSurface(promptStyle, contentStyle, prompt, contentWidth, placeholder, cursorChar).String()
+}
+
+func (c Composer) renderPlaceholderSurface(promptStyle, contentStyle lipgloss.Style, prompt string, contentWidth int, placeholder string, cursorChar string) Surface {
 	placeholder = ansi.Truncate(placeholder, contentWidth, "")
 	if placeholder == "" {
 		return c.renderPlaceholder(prompt, promptStyle, "", cursorChar, "", contentWidth, c.CursorVisible, c.Palette.UserTextForeground, c.Palette.UserTextBackground, c.Palette.ComposerMutedText)
@@ -114,9 +126,13 @@ func (c Composer) renderPlaceholderLine(promptStyle, contentStyle lipgloss.Style
 }
 
 func (c Composer) renderLine(prompt string, promptStyle lipgloss.Style, before, cursor, after string, contentWidth int, cursorVisible bool, textFG, textBG lipgloss.Color) string {
+	return c.renderLineSurface(prompt, promptStyle, before, cursor, after, contentWidth, cursorVisible, textFG, textBG).String()
+}
+
+func (c Composer) renderLineSurface(prompt string, promptStyle lipgloss.Style, before, cursor, after string, contentWidth int, cursorVisible bool, textFG, textBG lipgloss.Color) Surface {
 	line := promptStyle.Render(prompt)
 	if contentWidth <= 0 {
-		return line
+		return Surface{lines: []string{line}}
 	}
 	before = ansi.Truncate(before, contentWidth, "")
 	cursor = ansi.Truncate(cursor, maxInt(1, contentWidth-ansi.StringWidth(before)), "")
@@ -134,13 +150,13 @@ func (c Composer) renderLine(prompt string, promptStyle lipgloss.Style, before, 
 	if remaining > 0 {
 		line += renderButtonSegment(strings.Repeat(" ", remaining), textFG, textBG, false)
 	}
-	return line
+	return Surface{lines: []string{line}}
 }
 
-func (c Composer) renderPlaceholder(prompt string, promptStyle lipgloss.Style, before, cursor, after string, contentWidth int, cursorVisible bool, textFG, textBG, muted lipgloss.Color) string {
+func (c Composer) renderPlaceholder(prompt string, promptStyle lipgloss.Style, before, cursor, after string, contentWidth int, cursorVisible bool, textFG, textBG, muted lipgloss.Color) Surface {
 	line := promptStyle.Render(prompt)
 	if contentWidth <= 0 {
-		return line
+		return Surface{lines: []string{line}}
 	}
 	before = ansi.Truncate(before, contentWidth, "")
 	cursor = ansi.Truncate(cursor, maxInt(1, contentWidth-ansi.StringWidth(before)), "")
@@ -158,7 +174,7 @@ func (c Composer) renderPlaceholder(prompt string, promptStyle lipgloss.Style, b
 	if remaining > 0 {
 		line += renderButtonSegment(strings.Repeat(" ", remaining), textFG, textBG, false)
 	}
-	return line
+	return Surface{lines: []string{line}}
 }
 
 func (c Composer) HalfBlockLine(char string) string {
@@ -185,8 +201,28 @@ type AttachmentList struct {
 }
 
 func (l AttachmentList) View(palette theme.Palette) string {
+	return l.render(palette).String()
+}
+
+func (l AttachmentList) Measure(ctx *Context, constraints Constraints) Size {
+	width := l.Width
+	if width <= 0 {
+		width = constraints.maxWidth()
+	}
+	return constraints.Clamp(AttachmentList{Items: l.Items, Width: width}.render(ctx.Palette).Size())
+}
+
+func (l AttachmentList) Render(ctx *Context, bounds Rect) Surface {
+	width := l.Width
+	if width <= 0 {
+		width = bounds.W
+	}
+	return AttachmentList{Items: l.Items, Width: width}.render(ctx.Palette).normalize(bounds.W, bounds.H)
+}
+
+func (l AttachmentList) render(palette theme.Palette) Surface {
 	if len(l.Items) == 0 || l.Width <= 0 {
-		return ""
+		return Surface{}
 	}
 	style := lipgloss.NewStyle().
 		Width(l.Width).
@@ -197,21 +233,5 @@ func (l AttachmentList) View(palette theme.Palette) string {
 	for _, item := range l.Items {
 		rows = append(rows, style.Render(ansi.Truncate(item.Label, maxInt(1, l.Width-2), "")))
 	}
-	return strings.Join(rows, "\n")
-}
-
-func (l AttachmentList) Measure(ctx *Context, constraints Constraints) Size {
-	width := l.Width
-	if width <= 0 {
-		width = constraints.maxWidth()
-	}
-	return constraints.Clamp(SurfaceFromString(AttachmentList{Items: l.Items, Width: width}.View(ctx.Palette)).Size())
-}
-
-func (l AttachmentList) Render(ctx *Context, bounds Rect) Surface {
-	width := l.Width
-	if width <= 0 {
-		width = bounds.W
-	}
-	return SurfaceFromString(AttachmentList{Items: l.Items, Width: width}.View(ctx.Palette)).normalize(bounds.W, bounds.H)
+	return Surface{lines: rows}
 }
