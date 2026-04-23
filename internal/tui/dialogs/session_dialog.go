@@ -226,14 +226,6 @@ func (d SessionDialog) dialog(width int, palette theme.Palette) Element {
 	}
 }
 
-func (d *SessionDialog) HandleMouse(localX, localY, width int, palette theme.Palette) SessionDialogAction {
-	controlID, ok := dialogHitControl(width, palette, d.dialog, localX, localY)
-	if !ok {
-		return SessionDialogAction{}
-	}
-	return d.ActivateControl(controlID)
-}
-
 func (d *SessionDialog) ActivateControl(controlID string) SessionDialogAction {
 	d.ensureButtons()
 	var action SessionDialogAction

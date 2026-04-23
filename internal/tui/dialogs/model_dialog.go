@@ -221,14 +221,6 @@ func firstNonEmptyModelValue(values ...string) string {
 	return ""
 }
 
-func (d *ModelDialog) HandleMouse(localX, localY, width int, palette theme.Palette) ModelDialogAction {
-	controlID, ok := dialogHitControl(width, palette, d.dialog, localX, localY)
-	if !ok {
-		return ModelDialogAction{}
-	}
-	return d.ActivateControl(controlID)
-}
-
 func (d *ModelDialog) ActivateControl(controlID string) ModelDialogAction {
 	d.ensureButtons()
 	var action ModelDialogAction

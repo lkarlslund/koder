@@ -747,17 +747,6 @@ func (m *Model) handleDialogMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd, bool) {
 	}
 }
 
-func (m Model) modalLocalPoint(msg tea.MouseMsg, rendered string) (int, int, bool) {
-	width := lipgloss.Width(rendered)
-	height := lipgloss.Height(rendered)
-	startX := max(0, (m.width-width)/2)
-	startY := max(0, (m.height-height)/2)
-	if msg.X < startX || msg.X >= startX+width || msg.Y < startY || msg.Y >= startY+height {
-		return 0, 0, false
-	}
-	return msg.X - startX, msg.Y - startY, true
-}
-
 func (m Model) centeredModal(element ui.Element) ui.Element {
 	if element == nil {
 		return nil

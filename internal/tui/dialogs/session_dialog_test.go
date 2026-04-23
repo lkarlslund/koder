@@ -158,29 +158,11 @@ func TestSessionDialogAltCCancels(t *testing.T) {
 	}
 }
 
-func TestSessionDialogMouseCancelButton(t *testing.T) {
-	palette := theme.Default().Palette
+func TestSessionDialogActivateCancelButton(t *testing.T) {
 	dialog := NewSessionDialog([]SessionItem{{Title: "First", Value: "1"}}, false)
-	lines := strings.Split(dialog.View(96, palette), "\n")
-
-	buttonLine := -1
-	cancelX := -1
-	for idx, line := range lines {
-		stripped := ansi.Strip(line)
-		if !strings.Contains(stripped, "OK") || !strings.Contains(stripped, "Cancel") {
-			continue
-		}
-		buttonLine = idx
-		cancelX = strings.Index(stripped, "Cancel") + 1
-		break
-	}
-	if buttonLine < 0 || cancelX < 0 {
-		t.Fatalf("failed to find cancel button in view: %q", dialog.View(96, palette))
-	}
-
-	action := dialog.HandleMouse(cancelX, buttonLine, 96, palette)
+	action := dialog.ActivateControl("cancel")
 	if action.Kind != SessionDialogActionCancel {
-		t.Fatalf("expected mouse click to cancel, got %#v", action)
+		t.Fatalf("expected cancel action, got %#v", action)
 	}
 }
 

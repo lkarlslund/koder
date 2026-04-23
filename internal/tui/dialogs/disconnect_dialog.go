@@ -203,14 +203,6 @@ func (d DisconnectDialog) dialog(width int, palette theme.Palette) Element {
 	}
 }
 
-func (d *DisconnectDialog) HandleMouse(localX, localY, width int, palette theme.Palette) DisconnectDialogAction {
-	controlID, ok := dialogHitControl(width, palette, d.dialog, localX, localY)
-	if !ok {
-		return DisconnectDialogAction{}
-	}
-	return d.ActivateControl(controlID)
-}
-
 func (d *DisconnectDialog) ActivateControl(controlID string) DisconnectDialogAction {
 	d.ensureButtons()
 	var action DisconnectDialogAction

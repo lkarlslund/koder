@@ -145,18 +145,6 @@ func (d *PickerDialog) Update(msg tea.KeyMsg) PickerDialogAction {
 	return action
 }
 
-func (d *PickerDialog) HandleMouse(localX, localY, width int, palette theme.Palette) PickerDialogAction {
-	runtime := Runtime{}
-	ctx := &Context{Palette: palette, Runtime: &runtime}
-	width = maxInt(80, width)
-	RenderElement(ctx, d.element(width, palette), width, 0)
-	control, ok := runtime.Hit(Point{X: localX, Y: localY})
-	if !ok {
-		return PickerDialogAction{}
-	}
-	return d.ActivateControl(control.ID)
-}
-
 func (d *PickerDialog) ActivateControl(controlID string) PickerDialogAction {
 	var action PickerDialogAction
 	d.buttons.Buttons[0].OnPress = func() { action = d.selectCurrent() }
