@@ -426,13 +426,17 @@ func NewWithWorkdir(cfg config.Config, st *store.Store, a *agent.Engine, mode St
 }
 
 func (m Model) Init() tea.Cmd {
+	blinkCmd := tea.Cmd(nil)
+	if m.composerShouldBlink() {
+		blinkCmd = m.composer.BlinkCmd()
+	}
 	if !m.mouseEnabled {
-		return tea.Batch(m.loadCmd(), m.syncWindowTitleCmd(), m.composer.BlinkCmd())
+		return tea.Batch(m.loadCmd(), m.syncWindowTitleCmd(), blinkCmd)
 	}
 	return tea.Batch(
 		m.loadCmd(),
 		m.syncWindowTitleCmd(),
-		m.composer.BlinkCmd(),
+		blinkCmd,
 		func() tea.Msg { return tea.EnableMouseCellMotion() },
 	)
 }
@@ -4565,8 +4569,26 @@ func (m *Model) hasPicker() bool {
 	return m.picker.visible
 }
 
+func (m *Model) composerShouldBlink() bool {
+	return m.composer.BlinkEnabled && m.activeCenteredWindowElement() == nil && !m.hasApprovalPrompt()
+}
+
+func (m *Model) syncComposerVisibility() {
+	shouldFocus := m.activeCenteredWindowElement() == nil && !m.hasApprovalPrompt()
+	if shouldFocus {
+		if !m.composer.Focused() {
+			m.composer.Focus()
+		}
+		return
+	}
+	if m.composer.Focused() {
+		m.composer.Blur()
+	}
+}
+
 func (m *Model) closePicker() {
 	m.picker = pickerModel{}
+	m.syncComposerVisibility()
 }
 
 func (m *Model) hasSessionDialog() bool {
@@ -4575,6 +4597,7 @@ func (m *Model) hasSessionDialog() bool {
 
 func (m *Model) closeSessionDialog() {
 	m.sessionDialog = nil
+	m.syncComposerVisibility()
 }
 
 func (m *Model) hasPreferencesDialog() bool {
@@ -4583,6 +4606,7 @@ func (m *Model) hasPreferencesDialog() bool {
 
 func (m *Model) closePreferencesDialog() {
 	m.preferences = nil
+	m.syncComposerVisibility()
 }
 
 func (m *Model) hasToolsDialog() bool {
@@ -4591,6 +4615,7 @@ func (m *Model) hasToolsDialog() bool {
 
 func (m *Model) closeToolsDialog() {
 	m.toolsDialog = nil
+	m.syncComposerVisibility()
 }
 
 func (m *Model) hasAgentsModal() bool {
@@ -4599,6 +4624,7 @@ func (m *Model) hasAgentsModal() bool {
 
 func (m *Model) closeAgentsModal() {
 	m.agentsModal = nil
+	m.syncComposerVisibility()
 }
 
 func (m *Model) hasHelpModal() bool {
@@ -4607,6 +4633,7 @@ func (m *Model) hasHelpModal() bool {
 
 func (m *Model) closeHelpModal() {
 	m.helpModal = nil
+	m.syncComposerVisibility()
 }
 
 func (m *Model) hasLLMPreview() bool {
@@ -4619,6 +4646,7 @@ func (m *Model) closeLLMPreview() {
 	m.llmPreviewYOffset = 0
 	m.llmPreviewWidth = 0
 	m.llmPreviewHeight = 0
+	m.syncComposerVisibility()
 }
 
 func (m *Model) hasConnectDialog() bool {
@@ -4627,6 +4655,7 @@ func (m *Model) hasConnectDialog() bool {
 
 func (m *Model) closeConnectDialog() {
 	m.connectDialog = nil
+	m.syncComposerVisibility()
 }
 
 func (m *Model) hasDisconnectDialog() bool {
@@ -4635,6 +4664,7 @@ func (m *Model) hasDisconnectDialog() bool {
 
 func (m *Model) closeDisconnectDialog() {
 	m.disconnectDialog = nil
+	m.syncComposerVisibility()
 }
 
 func (m *Model) hasModelDialog() bool {
@@ -4643,6 +4673,7 @@ func (m *Model) hasModelDialog() bool {
 
 func (m *Model) closeModelDialog() {
 	m.modelDialog = nil
+	m.syncComposerVisibility()
 }
 
 func (m *Model) openSessionPicker() {
@@ -4672,6 +4703,7 @@ func (m *Model) openSessionPicker() {
 	}
 	dialog := dialogs.NewSessionDialog(items, showCWD)
 	m.sessionDialog = &dialog
+	m.syncComposerVisibility()
 }
 
 func sessionTokenSummary(m *Model, sessionID int64) string {
@@ -4684,6 +4716,7 @@ func sessionTokenSummary(m *Model, sessionID int64) string {
 func (m *Model) openPreferencesDialog() {
 	dialog := dialogs.NewPreferencesDialog(m.cfg.UI, theme.Names())
 	m.preferences = &dialog
+	m.syncComposerVisibility()
 }
 
 func (m *Model) openToolsDialog() {
@@ -4709,11 +4742,13 @@ func (m *Model) openToolsDialog() {
 	}
 	dialog := dialogs.NewToolsDialog(items)
 	m.toolsDialog = &dialog
+	m.syncComposerVisibility()
 }
 
 func (m *Model) openConnectDialog() {
 	dialog := dialogs.NewConnectDialog(provider.Catalog(), m.cfg.Providers)
 	m.connectDialog = &dialog
+	m.syncComposerVisibility()
 }
 
 func (m *Model) openDisconnectDialog() {
@@ -4752,6 +4787,7 @@ func (m *Model) openDisconnectDialog() {
 	}
 	dialog := dialogs.NewDisconnectDialog(items)
 	m.disconnectDialog = &dialog
+	m.syncComposerVisibility()
 }
 
 func (m *Model) openModelDialog(providerID string, models []domain.Model) {
@@ -4761,6 +4797,7 @@ func (m *Model) openModelDialog(providerID string, models []domain.Model) {
 	}
 	dialog := dialogs.NewModelDialog(providerID, models, current)
 	m.modelDialog = &dialog
+	m.syncComposerVisibility()
 }
 
 func (m *Model) openAgentsModal() {
@@ -4812,6 +4849,7 @@ func (m *Model) openAgentsModal() {
 		Width:       min(110, max(72, m.width-8)),
 	}
 	m.agentsModal = &modal
+	m.syncComposerVisibility()
 }
 
 func (m *Model) renderAgentsModal() string {
@@ -4873,6 +4911,7 @@ func (m *Model) openHelpModal() {
 		Width:       min(104, max(84, m.width-8)),
 	}
 	m.helpModal = &modal
+	m.syncComposerVisibility()
 }
 
 func (m *Model) renderHelpModal() string {
@@ -4911,6 +4950,7 @@ func (m *Model) openLLMPreview(title string, body string) {
 	m.llmPreviewBody = body
 	m.llmPreviewYOffset = 0
 	m.resizeLLMPreview()
+	m.syncComposerVisibility()
 }
 
 func (m *Model) resizeLLMPreview() {
@@ -5435,7 +5475,7 @@ func (m *Model) applyUIConfig(next config.UI, save bool) (tea.Cmd, error) {
 	}
 
 	cmds := make([]tea.Cmd, 0, 2)
-	if m.composer.BlinkEnabled {
+	if m.composerShouldBlink() {
 		cmds = append(cmds, m.composer.BlinkCmd())
 	}
 	if prevMouse == m.mouseEnabled {

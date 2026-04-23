@@ -260,6 +260,10 @@ func (m Model) CursorVisible() bool {
 	return m.focus && (!m.BlinkEnabled || m.blink)
 }
 
+func (m Model) Focused() bool {
+	return m.focus
+}
+
 type VisibleLine struct {
 	before string
 	cursor string

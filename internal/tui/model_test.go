@@ -2021,6 +2021,45 @@ func TestOpenSessionPickerShowsCWDWhenAllSessionsEnabled(t *testing.T) {
 	}
 }
 
+func TestOpenSessionPickerBlursComposer(t *testing.T) {
+	m := Model{
+		composer: textarea.New(),
+		sessions: []domain.Session{{
+			ID:          1,
+			Title:       "Session A",
+			LastMessage: "summary",
+		}},
+	}
+
+	if !m.composer.Focused() {
+		t.Fatal("expected composer to start focused")
+	}
+
+	m.openSessionPicker()
+
+	if m.composer.Focused() {
+		t.Fatal("expected session picker to blur the hidden composer")
+	}
+}
+
+func TestClosingSessionPickerRefocusesComposer(t *testing.T) {
+	m := Model{
+		composer: textarea.New(),
+		sessions: []domain.Session{{
+			ID:          1,
+			Title:       "Session A",
+			LastMessage: "summary",
+		}},
+	}
+
+	m.openSessionPicker()
+	m.closeSessionDialog()
+
+	if !m.composer.Focused() {
+		t.Fatal("expected closing the session picker to refocus the composer")
+	}
+}
+
 func TestVisibleSessionsFiltersByExactCWD(t *testing.T) {
 	m := Model{workdir: "/repo/a"}
 	sessions := []domain.Session{
