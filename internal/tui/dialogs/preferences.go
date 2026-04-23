@@ -284,12 +284,6 @@ func (d PreferencesDialog) dialog(width int, palette theme.Palette) Element {
 	tabWidth := 18
 	fieldWidth := maxInt(40, dialogWidth-tabWidth-9)
 
-	tabRail := lipgloss.NewStyle().
-		Width(tabWidth).
-		BorderRight(true).
-		BorderForeground(palette.SidebarBorder).
-		Render(d.tabList.View(tabWidth-2, palette, d.focus == preferencesFocusTabs))
-
 	fieldLines := make([]string, 0, len(d.currentFields()))
 	for idx, field := range d.currentFields() {
 		focused := d.focus == preferencesFocusFields && idx == d.fieldIndex
@@ -335,12 +329,20 @@ func (d PreferencesDialog) dialog(width int, palette theme.Palette) Element {
 	return Dialog{
 		Title:    "Preferences",
 		Subtitle: "Tab/Shift+Tab moves focus. Enter or arrows change values.",
-		Body: Row{
-			Children: []Child{
-				Fixed(staticBlock(tabRail)),
-				Fixed(Static{Content: " "}),
-				Flex(staticBlock(fields), 1),
+		Body: Split{
+			Direction: SplitHorizontal,
+			First: Section{
+				Title: "Tabs",
+				Width: tabWidth,
+				Child: staticBlock(d.tabList.View(tabWidth-2, palette, d.focus == preferencesFocusTabs)),
 			},
+			Second: Section{
+				Title: "Options",
+				Width: fieldWidth + 1,
+				Padding: Insets{Left: 1},
+				Child: staticBlock(fields),
+			},
+			Gap: 1,
 		},
 		Buttons: buttons,
 		Footer:  fmt.Sprintf("Theme: %s  Spinner: %s", strings.TrimSpace(d.draft.Theme), SpinnerStyleByID(d.draft.Spinner).Label),

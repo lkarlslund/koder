@@ -129,31 +129,23 @@ func (d DisconnectDialog) dialog(width int, palette theme.Palette) Element {
 	dialogWidth = maxInt(72, dialogWidth)
 	listWidth := 28
 	detailWidth := maxInt(36, dialogWidth-listWidth-9)
-
-	listRows := []Child{}
-	if len(d.view) == 0 {
-		listRows = append(listRows, Fixed(staticBlock("No matches")))
-	} else {
-		start := 0
-		if d.Index >= 5 {
-			start = d.Index - 4
-		}
-		end := len(d.view)
-		if end > start+9 {
-			end = start + 9
-		}
-		for idx := start; idx < end; idx++ {
-			item := d.view[idx]
-			listRows = append(listRows, Fixed(SelectableRow{
-				ControlID: "disconnect-row-" + strconv.Itoa(idx),
-				Primary:   item.Title,
-				Secondary: item.Description,
-				Tertiary:  item.ID,
-				Width:     listWidth,
-				Selected:  idx == d.Index,
-				Focused:   idx == d.Index && d.focus == pickerDialogFocusList,
-			}))
-		}
+	items := []ListItem{}
+	start := 0
+	if d.Index >= 5 {
+		start = d.Index - 4
+	}
+	end := len(d.view)
+	if end > start+9 {
+		end = start + 9
+	}
+	for idx := start; idx < end; idx++ {
+		item := d.view[idx]
+		items = append(items, ListItem{
+			ControlID: "disconnect-row-" + strconv.Itoa(idx),
+			Primary:   item.Title,
+			Secondary: item.Description,
+			Tertiary:  item.ID,
+		})
 	}
 
 	details := "No provider selected"
@@ -174,26 +166,34 @@ func (d DisconnectDialog) dialog(width int, palette theme.Palette) Element {
 			Children: []Child{
 				Fixed(staticBlock(fmt.Sprintf("Filter: %s", d.Query))),
 				Fixed(Spacer{H: 1}),
-				Fixed(Row{
-					Children: []Child{
-						Fixed(Panel{
-							Width:       listWidth + 2,
-							Padding:     Insets{Right: 1},
-							Background:  palette.SidebarBackground,
-							Foreground:  palette.SidebarForeground,
-							BorderRight: true,
-							BorderColor: palette.SidebarBorder,
-							Child:       Column{Children: listRows},
-						}),
-						Fixed(Static{Content: " "}),
-						Flex(Panel{
-							Width:      detailWidth + 1,
-							Padding:    Insets{Left: 1},
-							Background: palette.SidebarBackground,
-							Foreground: palette.SidebarForeground,
-							Child:      TextPane{Content: details},
-						}, 1),
+				Fixed(Split{
+					Direction:  SplitHorizontal,
+					First: Section{
+						Title: "Providers",
+						Width: listWidth + 2,
+						Padding: Insets{Right: 1},
+						Child: func() Element {
+							if len(items) == 0 {
+								return staticBlock("No matches")
+							}
+							return List{
+								Items:    items,
+								Width:    listWidth,
+								Selected: d.Index - start,
+								Focused:  d.focus == pickerDialogFocusList,
+							}
+						}(),
 					},
+					Second: Section{
+						Title:       "Details",
+						Width:       detailWidth + 1,
+						Padding:     Insets{Left: 1},
+						Background:  palette.SidebarBackground,
+						Foreground:  palette.SidebarForeground,
+						BorderColor: palette.SidebarBorder,
+						Child:       TextPane{Content: details},
+					},
+					Gap: 1,
 				}),
 			},
 		},

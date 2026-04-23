@@ -213,16 +213,23 @@ func (d PickerDialog) element(width int, palette theme.Palette) Element {
 	if len(d.view) == 0 {
 		children = append(children, Fixed(TextPane{Content: "  no matches"}))
 	} else {
+		items := make([]ListItem, 0, len(d.view))
 		for idx, item := range d.view {
-			children = append(children, Fixed(SelectableRow{
+			items = append(items, ListItem{
 				ControlID: "picker-row-" + strconv.Itoa(idx),
 				Primary:   item.Title,
 				Secondary: item.Description,
-				Width:     72,
-				Selected:  idx == d.Index,
-				Focused:   idx == d.Index && d.Focus == pickerDialogFocusList,
-			}))
+			})
 		}
+		children = append(children, Fixed(Section{
+			Width: 72,
+			Child: List{
+				Items:    items,
+				Width:    72,
+				Selected: d.Index,
+				Focused:  d.Focus == pickerDialogFocusList,
+			},
+		}))
 	}
 	children = append(children, Fixed(Spacer{H: 1}))
 	return Modal{
