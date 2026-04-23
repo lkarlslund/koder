@@ -2193,8 +2193,13 @@ func TestFormatRelativeSessionTime(t *testing.T) {
 
 func TestUpdateLoadHidesSessionPicker(t *testing.T) {
 	m := Model{
+		composer:      textarea.New(),
+		palette:       theme.Default().Palette,
+		width:         80,
+		height:        24,
 		sessionDialog: &dialogs.SessionDialog{},
 	}
+	m.composer.Blur()
 
 	updated := m.UpdateLoad(loadMsg{
 		current: domain.Session{ID: 4},
@@ -2205,6 +2210,9 @@ func TestUpdateLoadHidesSessionPicker(t *testing.T) {
 	}
 	if updated.currentSession.ID != 4 {
 		t.Fatalf("unexpected current session: %#v", updated.currentSession)
+	}
+	if !updated.composer.Focused() {
+		t.Fatal("expected loading a session to refocus the composer")
 	}
 }
 

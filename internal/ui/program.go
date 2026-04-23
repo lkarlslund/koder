@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/x/input"
 	"github.com/charmbracelet/x/term"
@@ -599,24 +601,6 @@ func convertKeyPress(ev input.KeyPressEvent) KeyMsg {
 				msg.Type = KeyCtrlY
 			}
 		}
-		if msg.Type == KeyUnknown {
-			switch strings.ToLower(ev.String()) {
-			case "ctrl+a":
-				msg.Type = KeyCtrlA
-			case "ctrl+c":
-				msg.Type = KeyCtrlC
-			case "ctrl+e":
-				msg.Type = KeyCtrlE
-			case "ctrl+g":
-				msg.Type = KeyCtrlG
-			case "ctrl+r":
-				msg.Type = KeyCtrlR
-			case "ctrl+v":
-				msg.Type = KeyCtrlV
-			case "ctrl+y":
-				msg.Type = KeyCtrlY
-			}
-		}
 	}
 	if msg.Type == KeyUnknown {
 		if key.Text == " " {
@@ -624,6 +608,12 @@ func convertKeyPress(ev input.KeyPressEvent) KeyMsg {
 		} else if key.Text != "" {
 			msg.Type = KeyRunes
 			msg.Runes = []rune(key.Text)
+		} else if !key.Mod.Contains(input.ModCtrl) && key.Code > 0 && key.Code <= 0x10ffff {
+			r := rune(key.Code)
+			if r != utf8.RuneError && unicode.IsPrint(r) {
+				msg.Type = KeyRunes
+				msg.Runes = []rune{r}
+			}
 		}
 	}
 	return msg
