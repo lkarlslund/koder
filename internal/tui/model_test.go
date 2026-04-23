@@ -1934,6 +1934,9 @@ func TestSessionPickerRendersCenteredDialogWithPreview(t *testing.T) {
 	if !strings.Contains(got, "Enter resumes the highlighted session. Esc creates a new session.") {
 		t.Fatalf("expected helper text in dialog, got %q", got)
 	}
+	if strings.Contains(got, "\x1b[") || strings.Contains(got, "[38;") || strings.Contains(got, "[1;") {
+		t.Fatalf("expected plain cell-rendered session picker output, got %q", got)
+	}
 }
 
 func TestSessionPickerLeavesScreenMarginForRightBorder(t *testing.T) {

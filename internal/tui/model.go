@@ -4579,9 +4579,6 @@ func (m *Model) openSessionPicker() {
 			description = "No messages yet"
 		}
 		preview := description
-		if m.renderer != nil {
-			preview = m.renderer.Render(description)
-		}
 		items = append(items, dialogs.SessionItem{
 			SessionID:    "#" + strconv.FormatInt(session.ID, 10),
 			CreatedAt:    formatRelativeSessionTime(session.CreatedAt),
