@@ -5,6 +5,8 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/lkarlslund/koder/internal/theme"
 )
 
 type Label struct {
@@ -250,25 +252,14 @@ func (m ModalFrame) Measure(ctx *Context, constraints Constraints) Size {
 	if width <= 0 {
 		width = 80
 	}
-	bodyWidth := max(0, width-6)
-	bodyHeight := 0
-	if m.Body != nil {
-		bodyHeight = m.Body.Measure(ctx, NewConstraints(bodyWidth, constraints.MaxH)).H
+	contentWidth := max(0, width-6)
+	content := m.contentElement(ctx.Palette)
+	contentSize := Size{}
+	if content != nil {
+		contentSize = content.Measure(ctx, NewConstraints(contentWidth, constraints.MaxH))
 	}
-	height := 2 // border + padding envelope approximation
-	if strings.TrimSpace(m.Title) != "" {
-		height++
-	}
-	if strings.TrimSpace(m.Subtitle) != "" {
-		height++
-	}
-	if bodyHeight > 0 {
-		height += 1 + bodyHeight
-	}
-	if strings.TrimSpace(m.Footer) != "" {
-		height += 1 + 1
-	}
-	height += 2
+	width = max(width, m.minimumFrameWidth(contentSize.W))
+	height := contentSize.H + 4
 	return constraints.Clamp(Size{W: width, H: height})
 }
 
@@ -282,36 +273,139 @@ func (m ModalFrame) Render(ctx *Context, bounds Rect) Surface {
 			bounds.H = size.H
 		}
 	}
-	bodyWidth := max(0, bounds.W-6)
-	parts := []string{}
-	bodyY := bounds.Y + 2
-	if title := strings.TrimSpace(m.Title); title != "" {
-		parts = append(parts, lipgloss.NewStyle().Bold(true).Foreground(ctx.Palette.MarkdownText).Render(title))
-		bodyY++
+	contentWidth := max(0, bounds.W-6)
+	content := m.contentElement(ctx.Palette)
+	contentHeight := 0
+	var contentSurface Surface
+	if content != nil {
+		contentHeight = content.Measure(ctx, NewConstraints(contentWidth, max(0, bounds.H-4))).H
+		contentSurface = content.Render(ctx, Rect{X: bounds.X + 3, Y: bounds.Y + 2, W: contentWidth, H: contentHeight})
 	}
+	base := BlankSurface(bounds.W, bounds.H)
+	top, closeStart, closeWidth := m.topBorder(ctx.Palette, bounds.W)
+	base = base.placeAt(0, 0, SurfaceFromString(top))
+	if ctx != nil && ctx.Runtime != nil && closeWidth > 0 {
+		ctx.Runtime.Register(Control{
+			ID:      "window-close",
+			Rect:    Rect{X: bounds.X + closeStart, Y: bounds.Y, W: closeWidth, H: 1},
+			Enabled: true,
+		})
+	}
+	base = base.placeAt(0, 1, SurfaceFromString(m.frameLine(ctx.Palette, bounds.W, "")))
+	for row := 0; row < contentHeight; row++ {
+		line := ""
+		if row < len(contentSurface.lines) {
+			line = contentSurface.lines[row]
+		}
+		base = base.placeAt(0, row+2, SurfaceFromString(m.frameLine(ctx.Palette, bounds.W, line)))
+	}
+	base = base.placeAt(0, contentHeight+2, SurfaceFromString(m.frameLine(ctx.Palette, bounds.W, "")))
+	base = base.placeAt(0, bounds.H-1, SurfaceFromString(m.bottomBorder(ctx.Palette, bounds.W)))
+	return base.normalize(bounds.W, bounds.H)
+}
+
+func (m ModalFrame) contentElement(palette theme.Palette) Element {
+	children := []Child{}
 	if subtitle := strings.TrimSpace(m.Subtitle); subtitle != "" {
-		parts = append(parts, lipgloss.NewStyle().Foreground(ctx.Palette.AssistantTimestampText).Render(subtitle))
-		bodyY++
+		children = append(children, Fixed(Label{
+			Text: subtitle,
+			Style: lipgloss.NewStyle().
+				Foreground(palette.AssistantTimestampText),
+		}))
 	}
 	if m.Body != nil {
-		if len(parts) > 0 {
-			bodyY++
+		if len(children) > 0 {
+			children = append(children, Fixed(Spacer{H: 1}))
 		}
-		bodyHeight := m.Body.Measure(ctx, NewConstraints(bodyWidth, max(0, bounds.H-bodyY))).H
-		bodySurface := m.Body.Render(ctx, Rect{X: bounds.X + 3, Y: bodyY, W: bodyWidth, H: bodyHeight})
-		parts = append(parts, bodySurface.String())
+		children = append(children, Fixed(m.Body))
 	}
 	if footer := strings.TrimSpace(m.Footer); footer != "" {
-		parts = append(parts, lipgloss.NewStyle().Foreground(ctx.Palette.AssistantTimestampText).Render(footer))
+		if len(children) > 0 {
+			children = append(children, Fixed(Spacer{H: 1}))
+		}
+		children = append(children, Fixed(Label{
+			Text: footer,
+			Style: lipgloss.NewStyle().
+				Foreground(palette.AssistantTimestampText),
+		}))
 	}
-	content := strings.Join(parts, "\n\n")
-	rendered := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(ctx.Palette.SidebarBorder).
-		Background(ctx.Palette.SidebarBackground).
-		Foreground(ctx.Palette.SidebarForeground).
-		Padding(1, 2).
-		Width(max(0, bounds.W-2)).
-		Render(content)
-	return SurfaceFromString(rendered).normalize(bounds.W, bounds.H)
+	if len(children) == 0 {
+		return nil
+	}
+	return Column{Children: children}
+}
+
+func (m ModalFrame) minimumFrameWidth(contentWidth int) int {
+	titleWidth := ansi.StringWidth(m.titleLabel())
+	closeWidth := ansi.StringWidth(m.closeLabel())
+	return max(contentWidth+6, titleWidth+closeWidth+2)
+}
+
+func (m ModalFrame) titleLabel() string {
+	title := strings.TrimSpace(m.Title)
+	if title == "" {
+		return ""
+	}
+	return "[" + title + "]"
+}
+
+func (m ModalFrame) closeLabel() string {
+	return "[X]"
+}
+
+func (m ModalFrame) topBorder(palette theme.Palette, width int) (string, int, int) {
+	border := lipgloss.RoundedBorder()
+	borderStyle := lipgloss.NewStyle().
+		Foreground(palette.SidebarBorder).
+		Background(palette.SidebarBackground)
+	titleStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(palette.MarkdownText).
+		Background(palette.SidebarBackground)
+	closeStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(palette.AssistantTimestampText).
+		Background(palette.SidebarBackground)
+	innerWidth := max(0, width-2)
+	title := m.titleLabel()
+	close := m.closeLabel()
+	closeWidth := min(innerWidth, ansi.StringWidth(close))
+	titleBudget := max(0, innerWidth-closeWidth)
+	if titleBudget > 0 && ansi.StringWidth(title) > titleBudget {
+		title = "[" + ansi.Truncate(strings.TrimSpace(m.Title), max(0, titleBudget-2), "") + "]"
+	}
+	titleWidth := min(innerWidth-closeWidth, ansi.StringWidth(title))
+	fillerWidth := max(0, innerWidth-titleWidth-closeWidth)
+	closeStart := width - 1 - closeWidth
+	line := borderStyle.Render(border.TopLeft) +
+		titleStyle.Render(title) +
+		borderStyle.Render(strings.Repeat(border.Top, fillerWidth)) +
+		closeStyle.Render(close) +
+		borderStyle.Render(border.TopRight)
+	return line, max(0, closeStart), closeWidth
+}
+
+func (m ModalFrame) bottomBorder(palette theme.Palette, width int) string {
+	border := lipgloss.RoundedBorder()
+	borderStyle := lipgloss.NewStyle().
+		Foreground(palette.SidebarBorder).
+		Background(palette.SidebarBackground)
+	return borderStyle.Render(border.BottomLeft + strings.Repeat(border.Bottom, max(0, width-2)) + border.BottomRight)
+}
+
+func (m ModalFrame) frameLine(palette theme.Palette, width int, content string) string {
+	border := lipgloss.RoundedBorder()
+	borderStyle := lipgloss.NewStyle().
+		Foreground(palette.SidebarBorder).
+		Background(palette.SidebarBackground)
+	fillStyle := lipgloss.NewStyle().
+		Foreground(palette.SidebarForeground).
+		Background(palette.SidebarBackground)
+	contentWidth := max(0, width-6)
+	line := ansi.Truncate(content, contentWidth, "")
+	if delta := contentWidth - ansi.StringWidth(line); delta > 0 {
+		line += strings.Repeat(" ", delta)
+	}
+	center := fillStyle.Render("  " + line + "  ")
+	return borderStyle.Render(border.Left) + center + borderStyle.Render(border.Right)
 }

@@ -605,6 +605,9 @@ func (m *Model) handleDialogMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd, bool) {
 	if !m.mouseEnabled || msg.Action != tea.MouseActionPress || msg.Button != tea.MouseButtonLeft {
 		return m, nil, false
 	}
+	if control, ok := m.hitCenteredWindowControl(msg); ok && control.ID == "window-close" {
+			return m.closeActiveCenteredWindow()
+	}
 	switch {
 	case m.hasSessionDialog():
 		width := 84
@@ -771,6 +774,98 @@ func (m Model) modalLocalPoint(msg tea.MouseMsg, rendered string) (int, int, boo
 	return msg.X - startX, msg.Y - startY, true
 }
 
+func (m Model) centeredModal(element ui.Element) ui.Element {
+	if element == nil {
+		return nil
+	}
+	return ui.Align{
+		Horizontal: ui.AlignCenter,
+		Vertical:   ui.AlignCenter,
+		Child: ui.Constrained{
+			Constraints: ui.Constraints{
+				MaxW: max(1, m.width-2),
+				MaxH: max(1, m.height-2),
+			},
+			Child: element,
+		},
+	}
+}
+
+func (m Model) activeCenteredWindowElement() ui.Element {
+	switch {
+	case m.hasModelDialog():
+		return m.renderModelDialogElement()
+	case m.hasDisconnectDialog():
+		return m.renderDisconnectDialogElement()
+	case m.hasToolsDialog():
+		return m.renderToolsDialogElement()
+	case m.hasConnectDialog():
+		return m.renderConnectDialogElement()
+	case m.hasSessionDialog():
+		return m.renderSessionDialogElement()
+	case m.hasAgentsModal():
+		return m.renderAgentsModalElement()
+	case m.hasHelpModal():
+		return m.renderHelpModalElement()
+	case m.hasLLMPreview():
+		return m.renderLLMPreviewElement()
+	case m.hasPreferencesDialog():
+		return m.renderPreferencesDialogElement()
+	case m.hasPicker():
+		return m.renderPickerElement()
+	default:
+		return nil
+	}
+}
+
+func (m *Model) closeActiveCenteredWindow() (tea.Model, tea.Cmd, bool) {
+	switch {
+	case m.hasSessionDialog():
+		next, cmd := m.handleSessionDialogKey(tea.KeyMsg{Type: tea.KeyEsc})
+		return next, cmd, true
+	case m.hasModelDialog():
+		next, cmd := m.handleModelDialogKey(tea.KeyMsg{Type: tea.KeyEsc})
+		return next, cmd, true
+	case m.hasDisconnectDialog():
+		next, cmd := m.handleDisconnectDialogKey(tea.KeyMsg{Type: tea.KeyEsc})
+		return next, cmd, true
+	case m.hasToolsDialog():
+		next, cmd := m.handleToolsDialogKey(tea.KeyMsg{Type: tea.KeyEsc})
+		return next, cmd, true
+	case m.hasConnectDialog():
+		next, cmd := m.handleConnectDialogKey(tea.KeyMsg{Type: tea.KeyEsc})
+		return next, cmd, true
+	case m.hasPreferencesDialog():
+		next, cmd := m.handlePreferencesKey(tea.KeyMsg{Type: tea.KeyEsc})
+		return next, cmd, true
+	case m.hasPicker():
+		next, cmd := m.cancelPicker()
+		return next, cmd, true
+	case m.hasAgentsModal():
+		m.closeAgentsModal()
+		return m, m.syncWindowTitleCmd(), true
+	case m.hasHelpModal():
+		m.closeHelpModal()
+		return m, m.syncWindowTitleCmd(), true
+	case m.hasLLMPreview():
+		m.closeLLMPreview()
+		return m, m.syncWindowTitleCmd(), true
+	default:
+		return m, nil, false
+	}
+}
+
+func (m Model) hitCenteredWindowControl(msg tea.MouseMsg) (ui.Control, bool) {
+	element := m.activeCenteredWindowElement()
+	if element == nil {
+		return ui.Control{}, false
+	}
+	runtime := ui.Runtime{}
+	ctx := &ui.Context{Palette: m.palette, Runtime: &runtime}
+	ui.RenderElement(ctx, m.centeredModal(element), max(0, m.width), max(0, m.height))
+	return runtime.Hit(ui.Point{X: msg.X, Y: msg.Y})
+}
+
 func (m Model) View() string {
 	if m.width <= 0 || m.height <= 0 {
 		return ""
@@ -789,48 +884,35 @@ func (m Model) View() string {
 		}
 		return style.Render(view)
 	}
-	centeredModal := func(element ui.Element) ui.Element {
-		return ui.Align{
-			Horizontal: ui.AlignCenter,
-			Vertical:   ui.AlignCenter,
-			Child: ui.Constrained{
-				Constraints: ui.Constraints{
-					MaxW: max(1, m.width-2),
-					MaxH: max(1, m.height-2),
-				},
-				Child: element,
-			},
-		}
-	}
 	if m.hasModelDialog() && m.width > 0 && m.height > 0 {
-		return renderScreen(centeredModal(m.renderModelDialogElement()))
+		return renderScreen(m.centeredModal(m.renderModelDialogElement()))
 	}
 	if m.hasDisconnectDialog() && m.width > 0 && m.height > 0 {
-		return renderScreen(centeredModal(m.renderDisconnectDialogElement()))
+		return renderScreen(m.centeredModal(m.renderDisconnectDialogElement()))
 	}
 	if m.hasToolsDialog() && m.width > 0 && m.height > 0 {
-		return renderScreen(centeredModal(m.renderToolsDialogElement()))
+		return renderScreen(m.centeredModal(m.renderToolsDialogElement()))
 	}
 	if m.hasConnectDialog() && m.width > 0 && m.height > 0 {
-		return renderScreen(centeredModal(m.renderConnectDialogElement()))
+		return renderScreen(m.centeredModal(m.renderConnectDialogElement()))
 	}
 	if m.hasSessionDialog() && m.width > 0 && m.height > 0 {
-		return renderScreen(centeredModal(m.renderSessionDialogElement()))
+		return renderScreen(m.centeredModal(m.renderSessionDialogElement()))
 	}
 	if m.hasAgentsModal() && m.width > 0 && m.height > 0 {
-		return renderScreen(centeredModal(m.renderAgentsModalElement()))
+		return renderScreen(m.centeredModal(m.renderAgentsModalElement()))
 	}
 	if m.hasHelpModal() && m.width > 0 && m.height > 0 {
-		return renderScreen(centeredModal(m.renderHelpModalElement()))
+		return renderScreen(m.centeredModal(m.renderHelpModalElement()))
 	}
 	if m.hasLLMPreview() && m.width > 0 && m.height > 0 {
-		return renderScreen(ui.Static{Content: m.renderLLMPreview()})
+		return renderScreen(m.centeredModal(m.renderLLMPreviewElement()))
 	}
 	if m.hasPreferencesDialog() && m.width > 0 && m.height > 0 {
-		return renderScreen(centeredModal(m.renderPreferencesDialogElement()))
+		return renderScreen(m.centeredModal(m.renderPreferencesDialogElement()))
 	}
 	if m.hasPicker() && m.width > 0 && m.height > 0 {
-		return renderScreen(centeredModal(m.renderPickerElement()))
+		return renderScreen(m.centeredModal(m.renderPickerElement()))
 	}
 	root := ui.Column{
 		Children: []ui.Child{
@@ -4540,35 +4622,26 @@ func (m *Model) resizeLLMPreview() {
 }
 
 func (m *Model) renderLLMPreview() string {
-	if m.llmPreview == nil {
-		return ""
+	if element := m.renderLLMPreviewElement(); element != nil {
+		return ui.RenderElement(&ui.Context{Palette: m.palette}, m.centeredModal(element), max(0, m.width), max(0, m.height))
 	}
-	width := max(40, m.width-4)
-	height := max(6, m.height-4)
+	return ""
+}
+
+func (m *Model) renderLLMPreviewElement() ui.Element {
+	if m.llmPreview == nil {
+		return nil
+	}
 	title := strings.TrimSpace(m.llmPreviewTitle)
 	if title == "" {
 		title = "Next LLM Request"
 	}
-	titleBar := lipgloss.NewStyle().
-		Width(width).
-		Padding(0, 1).
-		Background(m.palette.SidebarBackground).
-		Foreground(m.palette.SidebarForeground).
-		Bold(true).
-		Render(title)
-	body := lipgloss.NewStyle().
-		Width(width).
-		Height(max(3, height-4)).
-		Padding(1).
-		Border(lipgloss.NormalBorder(), false, true, false, true).
-		BorderForeground(m.palette.SidebarBorder).
-		Render(m.llmPreview.View())
-	footer := lipgloss.NewStyle().
-		Width(width).
-		Padding(0, 1).
-		Foreground(m.palette.ComposerMutedText).
-		Render("Alt-O, Enter, or Esc closes  •  Use arrows, PgUp/PgDn, or wheel to scroll")
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, lipgloss.JoinVertical(lipgloss.Left, titleBar, body, footer))
+	return ui.Modal{
+		Title:  title,
+		Body:   m.llmPreview.View(),
+		Footer: "Alt-O, Enter, or Esc closes  •  Use arrows, PgUp/PgDn, or wheel to scroll",
+		Width:  max(40, m.width-4),
+	}
 }
 
 func (m Model) currentProjectRoot() string {

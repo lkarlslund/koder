@@ -48,7 +48,7 @@ func (d Dialog) Render(ctx *Context, bounds Rect) Surface {
 		Body:     d.bodyElement(width, ctx.Palette),
 		Footer:   d.Footer,
 		Width:    width,
-	}.Render(ctx, Rect{W: width, H: bounds.H})
+	}.Render(ctx, Rect{X: bounds.X, Y: bounds.Y, W: width, H: bounds.H})
 }
 
 func (d Dialog) content(palette theme.Palette) string {

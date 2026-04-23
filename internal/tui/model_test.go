@@ -348,6 +348,19 @@ func testConfig(t *testing.T) config.Config {
 	return config.Default().WithStateDir(t.TempDir())
 }
 
+func asModelPtr(t *testing.T, model tea.Model) *Model {
+	t.Helper()
+	switch next := model.(type) {
+	case *Model:
+		return next
+	case Model:
+		return &next
+	default:
+		t.Fatalf("unexpected model type %T", model)
+		return nil
+	}
+}
+
 func mustMarshalMeta(t *testing.T, meta map[string]string) string {
 	t.Helper()
 	raw, err := json.Marshal(meta)
@@ -2608,6 +2621,90 @@ func TestAltHTogglesHelpDialog(t *testing.T) {
 	}
 	if next.hasHelpModal() {
 		t.Fatal("expected help dialog to close")
+	}
+}
+
+func TestMouseClickOnHelpModalCloseIndicatorClosesModal(t *testing.T) {
+	cfg := testConfig(t)
+	m, err := New(cfg, nil, nil, StartupModeNew, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.mouseEnabled = true
+	m.width = 100
+	m.height = 28
+	m.openHelpModal()
+
+	view := m.View()
+	lines := strings.Split(ansi.Strip(view), "\n")
+	closeX, closeY := -1, -1
+	for y, line := range lines {
+		if idx := strings.Index(line, "[X]"); idx >= 0 {
+			closeX, closeY = ansi.StringWidth(line[:idx])+1, y
+			break
+		}
+	}
+	if closeX < 0 || closeY < 0 {
+		t.Fatalf("failed to find help modal close indicator in %q", view)
+	}
+
+	updated, cmd := m.Update(tea.MouseMsg{
+		Action: tea.MouseActionPress,
+		Button: tea.MouseButtonLeft,
+		X:      closeX,
+		Y:      closeY,
+	})
+	next := asModelPtr(t, updated)
+	_ = cmd
+	if next.hasHelpModal() {
+		t.Fatal("expected help modal to close from mouse click")
+	}
+}
+
+func TestMouseClickOnModelDialogCloseIndicatorCancelsDialog(t *testing.T) {
+	m := Model{
+		cfg:          testConfig(t),
+		mouseEnabled: true,
+		width:        100,
+		height:       28,
+		palette:      theme.Resolve("tokyonight").Palette,
+		composer:     textarea.New(),
+	}
+	updated, _ := m.Update(modelListMsg{
+		providerID: "openai",
+		models: []domain.Model{
+			{ID: "gpt-5.4", OwnedBy: "openai"},
+			{ID: "gpt-4.1-mini", OwnedBy: "openai"},
+		},
+	})
+	nextModel := updated.(Model)
+
+	view := nextModel.View()
+	lines := strings.Split(ansi.Strip(view), "\n")
+	closeX, closeY := -1, -1
+	for y, line := range lines {
+		if idx := strings.Index(line, "[X]"); idx >= 0 {
+			closeX, closeY = ansi.StringWidth(line[:idx])+1, y
+			break
+		}
+	}
+	if closeX < 0 || closeY < 0 {
+		t.Fatalf("failed to find model dialog close indicator in %q", view)
+	}
+
+	updated, cmd := nextModel.Update(tea.MouseMsg{
+		Action: tea.MouseActionPress,
+		Button: tea.MouseButtonLeft,
+		X:      closeX,
+		Y:      closeY,
+	})
+	next := asModelPtr(t, updated)
+	_ = cmd
+	if next.hasModelDialog() {
+		t.Fatal("expected model dialog to close from mouse click")
+	}
+	if next.status != "Model selection cancelled" {
+		t.Fatalf("expected model dialog cancel status, got %q", next.status)
 	}
 }
 

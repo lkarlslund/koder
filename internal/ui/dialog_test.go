@@ -48,3 +48,24 @@ func TestDialogExpandsToFitButtonRowOnSingleLine(t *testing.T) {
 		t.Fatalf("expected button row to include left padding for right alignment, got %q", buttonLine)
 	}
 }
+
+func TestDialogEmbedsBracketedTitleAndCloseIndicatorInFrame(t *testing.T) {
+	palette := theme.Default().Palette
+	got := Dialog{
+		Title:    "Resume Session",
+		Sections: []string{"Body"},
+		Width:    32,
+	}.View(palette)
+
+	lines := strings.Split(ansi.Strip(got), "\n")
+	if len(lines) == 0 {
+		t.Fatalf("expected dialog output, got %q", got)
+	}
+	top := lines[0]
+	if !strings.Contains(top, "[Resume Session]") {
+		t.Fatalf("expected bracketed title in top frame line, got %q", top)
+	}
+	if !strings.Contains(top, "[X]") {
+		t.Fatalf("expected close indicator in top frame line, got %q", top)
+	}
+}

@@ -48,7 +48,7 @@ func dialogRender(ctx *Context, bounds Rect, fallbackWidth int, render func(int,
 func dialogRenderElement(ctx *Context, bounds Rect, fallbackWidth int, build func(int, theme.Palette) Element) Surface {
 	width := dialogRenderWidth(bounds, fallbackWidth)
 	element := build(width, ctx.Palette)
-	return element.Render(ctx, Rect{W: width, H: bounds.H})
+	return element.Render(ctx, Rect{X: bounds.X, Y: bounds.Y, W: width, H: bounds.H})
 }
 
 func dialogHitControl(width int, palette theme.Palette, build func(int, theme.Palette) Element, x, y int) (string, bool) {
