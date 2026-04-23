@@ -98,6 +98,6 @@ func (m Modal) Render(ctx *Context, bounds Rect) Surface {
 		Background(ctx.Palette.SidebarBackground).
 		Foreground(ctx.Palette.SidebarForeground).
 		Padding(1, 2).
-		Width(width).
+		Width(max(0, width-2)).
 		Render(strings.Join(parts, "\n"))).normalize(bounds.W, bounds.H)
 }

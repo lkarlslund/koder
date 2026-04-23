@@ -789,35 +789,48 @@ func (m Model) View() string {
 		}
 		return style.Render(view)
 	}
+	centeredModal := func(element ui.Element) ui.Element {
+		return ui.Align{
+			Horizontal: ui.AlignCenter,
+			Vertical:   ui.AlignCenter,
+			Child: ui.Constrained{
+				Constraints: ui.Constraints{
+					MaxW: max(1, m.width-2),
+					MaxH: max(1, m.height-2),
+				},
+				Child: element,
+			},
+		}
+	}
 	if m.hasModelDialog() && m.width > 0 && m.height > 0 {
-		return renderScreen(ui.Align{Horizontal: ui.AlignCenter, Vertical: ui.AlignCenter, Child: m.renderModelDialogElement()})
+		return renderScreen(centeredModal(m.renderModelDialogElement()))
 	}
 	if m.hasDisconnectDialog() && m.width > 0 && m.height > 0 {
-		return renderScreen(ui.Align{Horizontal: ui.AlignCenter, Vertical: ui.AlignCenter, Child: m.renderDisconnectDialogElement()})
+		return renderScreen(centeredModal(m.renderDisconnectDialogElement()))
 	}
 	if m.hasToolsDialog() && m.width > 0 && m.height > 0 {
-		return renderScreen(ui.Align{Horizontal: ui.AlignCenter, Vertical: ui.AlignCenter, Child: m.renderToolsDialogElement()})
+		return renderScreen(centeredModal(m.renderToolsDialogElement()))
 	}
 	if m.hasConnectDialog() && m.width > 0 && m.height > 0 {
-		return renderScreen(ui.Align{Horizontal: ui.AlignCenter, Vertical: ui.AlignCenter, Child: m.renderConnectDialogElement()})
+		return renderScreen(centeredModal(m.renderConnectDialogElement()))
 	}
 	if m.hasSessionDialog() && m.width > 0 && m.height > 0 {
-		return renderScreen(ui.Align{Horizontal: ui.AlignCenter, Vertical: ui.AlignCenter, Child: m.renderSessionDialogElement()})
+		return renderScreen(centeredModal(m.renderSessionDialogElement()))
 	}
 	if m.hasAgentsModal() && m.width > 0 && m.height > 0 {
-		return renderScreen(ui.Align{Horizontal: ui.AlignCenter, Vertical: ui.AlignCenter, Child: m.renderAgentsModalElement()})
+		return renderScreen(centeredModal(m.renderAgentsModalElement()))
 	}
 	if m.hasHelpModal() && m.width > 0 && m.height > 0 {
-		return renderScreen(ui.Align{Horizontal: ui.AlignCenter, Vertical: ui.AlignCenter, Child: m.renderHelpModalElement()})
+		return renderScreen(centeredModal(m.renderHelpModalElement()))
 	}
 	if m.hasLLMPreview() && m.width > 0 && m.height > 0 {
 		return renderScreen(ui.Static{Content: m.renderLLMPreview()})
 	}
 	if m.hasPreferencesDialog() && m.width > 0 && m.height > 0 {
-		return renderScreen(ui.Align{Horizontal: ui.AlignCenter, Vertical: ui.AlignCenter, Child: m.renderPreferencesDialogElement()})
+		return renderScreen(centeredModal(m.renderPreferencesDialogElement()))
 	}
 	if m.hasPicker() && m.width > 0 && m.height > 0 {
-		return renderScreen(ui.Align{Horizontal: ui.AlignCenter, Vertical: ui.AlignCenter, Child: m.renderPickerElement()})
+		return renderScreen(centeredModal(m.renderPickerElement()))
 	}
 	root := ui.Column{
 		Children: []ui.Child{

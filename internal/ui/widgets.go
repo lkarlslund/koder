@@ -311,7 +311,7 @@ func (m ModalFrame) Render(ctx *Context, bounds Rect) Surface {
 		Background(ctx.Palette.SidebarBackground).
 		Foreground(ctx.Palette.SidebarForeground).
 		Padding(1, 2).
-		Width(bounds.W).
+		Width(max(0, bounds.W-2)).
 		Render(content)
 	return SurfaceFromString(rendered).normalize(bounds.W, bounds.H)
 }

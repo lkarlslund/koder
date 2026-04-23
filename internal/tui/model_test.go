@@ -1831,6 +1831,38 @@ func TestSessionPickerRendersCenteredDialogWithPreview(t *testing.T) {
 	}
 }
 
+func TestSessionPickerLeavesScreenMarginForRightBorder(t *testing.T) {
+	m := Model{
+		width:  72,
+		height: 24,
+		sessions: []domain.Session{{
+			ID:          1,
+			Title:       "Session A",
+			LastMessage: "summary",
+		}},
+	}
+
+	m.openSessionPicker()
+	got := m.View()
+	lines := strings.Split(got, "\n")
+	foundTopBorder := false
+	for _, line := range lines {
+		if strings.Contains(line, "╮") {
+			foundTopBorder = true
+			if idx := strings.Index(line, "╮"); idx >= 0 {
+				col := ansi.StringWidth(line[:idx])
+				if col >= m.width-1 {
+					t.Fatalf("expected right border to render inside screen margin, got %q", line)
+				}
+			}
+			break
+		}
+	}
+	if !foundTopBorder {
+		t.Fatalf("expected session dialog border in view, got %q", got)
+	}
+}
+
 func TestOpenSessionPickerShowsCWDWhenAllSessionsEnabled(t *testing.T) {
 	m := Model{
 		startupOptions: StartupOptions{ShowAllSessions: true},
