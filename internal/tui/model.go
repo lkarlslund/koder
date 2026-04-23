@@ -581,8 +581,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.syncWindowTitleCmd()
 	case tea.MouseMsg:
 		if m.hasLLMPreview() {
-			if updated, ok := m.handleLLMPreviewMouse(msg); ok {
-				return updated, nil
+			if m.handleLLMPreviewMouse(msg) {
+				return m, nil
 			}
 			return m, nil
 		}
@@ -592,9 +592,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if updated, cmd, ok := m.handleMouse(msg); ok {
 			return updated, cmd
 		}
-		var cmd tea.Cmd
-		m.viewport, cmd = m.viewport.Update(msg)
-		return m, cmd
+		if m.handleTranscriptMouse(msg) {
+			return m, nil
+		}
+		return m, nil
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 	}
@@ -1239,23 +1240,36 @@ func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd, bool) {
 	return m, nil, false
 }
 
-func (m *Model) handleLLMPreviewMouse(msg tea.MouseMsg) (tea.Model, bool) {
-	if !m.mouseEnabled {
-		return m, false
+func (m *Model) handleTranscriptMouse(msg tea.MouseMsg) bool {
+	switch msg.Button {
+	case tea.MouseButtonWheelUp:
+		if msg.Action == tea.MouseActionPress {
+			m.scrollTranscript(-3)
+			return true
+		}
+	case tea.MouseButtonWheelDown:
+		if msg.Action == tea.MouseActionPress {
+			m.scrollTranscript(3)
+			return true
+		}
 	}
+	return false
+}
+
+func (m *Model) handleLLMPreviewMouse(msg tea.MouseMsg) bool {
 	switch msg.Button {
 	case tea.MouseButtonWheelUp:
 		if msg.Action == tea.MouseActionPress {
 			m.scrollLLMPreview(-3)
-			return m, true
+			return true
 		}
 	case tea.MouseButtonWheelDown:
 		if msg.Action == tea.MouseActionPress {
 			m.scrollLLMPreview(3)
-			return m, true
+			return true
 		}
 	}
-	return m, false
+	return false
 }
 
 func (m *Model) handleLLMPreviewKey(msg tea.KeyMsg) bool {
@@ -1285,6 +1299,10 @@ func (m *Model) handleLLMPreviewKey(msg tea.KeyMsg) bool {
 
 func (m *Model) scrollLLMPreview(delta int) {
 	m.llmPreviewYOffset = min(max(0, m.llmPreviewYOffset+delta), m.llmPreviewMaxOffset())
+}
+
+func (m *Model) scrollTranscript(delta int) {
+	m.viewport.SetYOffset(m.viewport.YOffset + delta)
 }
 
 func (m *Model) llmPreviewMaxOffset() int {
