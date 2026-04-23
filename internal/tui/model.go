@@ -826,14 +826,10 @@ func (m Model) View() string {
 	if m.hasPicker() && m.width > 0 && m.height > 0 {
 		return renderScreen(ui.Align{Horizontal: ui.AlignCenter, Vertical: ui.AlignCenter, Child: m.renderPickerElement()})
 	}
-	root := ui.Align{
-		Horizontal: ui.AlignStart,
-		Vertical:   ui.AlignEnd,
-		Child: ui.Column{
-			Children: []ui.Child{
-				ui.Flex(m.renderBodyElement(), 1),
-				ui.Fixed(m.renderFooterElement()),
-			},
+	root := ui.Column{
+		Children: []ui.Child{
+			ui.Flex(m.renderBodyElement(), 1),
+			ui.Fixed(m.renderFooterElement()),
 		},
 	}
 	return renderScreen(root)

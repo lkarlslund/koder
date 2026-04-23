@@ -957,8 +957,8 @@ func TestLoadMsgDispatchesQueuedPrompt(t *testing.T) {
 
 func TestAltUpRestoresQueuedPromptToComposer(t *testing.T) {
 	m := Model{
-		cfg:         testConfig(t),
-		composer:    textarea.New(),
+		cfg:      testConfig(t),
+		composer: textarea.New(),
 		queuedPrompt: &queuedPrompt{
 			Text: "queued ask",
 			Mode: queuedPromptModeNormal,
@@ -2688,6 +2688,29 @@ func TestRenderBodyClipsSidebarToViewportHeight(t *testing.T) {
 	got := m.renderBody()
 	if h := lipgloss.Height(got); h != 6 {
 		t.Fatalf("expected body height 6, got %d from %q", h, got)
+	}
+}
+
+func TestViewUsesFullTerminalWidthWithSidebar(t *testing.T) {
+	m := Model{
+		showSidebar: true,
+		palette:     theme.Resolve("tokyonight").Palette,
+		width:       100,
+		height:      12,
+		viewport:    viewport.New(68, 8),
+		workdir:     "/tmp/project",
+	}
+	m.viewport.SetContent("history")
+
+	got := m.View()
+	lines := strings.Split(ansi.Strip(got), "\n")
+	if len(lines) == 0 {
+		t.Fatalf("expected rendered view, got empty output")
+	}
+	for _, line := range lines {
+		if w := lipgloss.Width(line); w != m.width {
+			t.Fatalf("expected rendered line width %d, got %d from %q", m.width, w, got)
+		}
 	}
 }
 
