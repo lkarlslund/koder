@@ -898,14 +898,20 @@ func (m Model) ViewLines() []string {
 	m.uiRuntime.BeginFrame()
 	renderScreen := func(element ui.Element) []string {
 		view := ui.RenderElement(ctx, element, max(0, m.width), max(0, m.height))
-		style := lipgloss.NewStyle().Background(m.palette.ScreenBackground)
-		if m.width > 0 {
-			style = style.Width(m.width)
+		lines := strings.Split(view, "\n")
+		for len(lines) < m.height {
+			lines = append(lines, "")
 		}
-		if m.height > 0 {
-			style = style.Height(m.height)
+		if len(lines) > m.height {
+			lines = lines[:m.height]
 		}
-		return strings.Split(style.Render(view), "\n")
+		for i, line := range lines {
+			width := lipgloss.Width(line)
+			if width < m.width {
+				lines[i] = line + strings.Repeat(" ", m.width-width)
+			}
+		}
+		return lines
 	}
 	if m.hasModelDialog() && m.width > 0 && m.height > 0 {
 		return renderScreen(m.centeredModal(m.renderModelDialogElement()))
