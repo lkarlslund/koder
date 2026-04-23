@@ -42,21 +42,22 @@ func (h SelectableHeader) View(palette theme.Palette) string {
 func (h SelectableHeader) render(palette theme.Palette) Surface {
 	primaryWidth, secondaryWidth, tertiaryWidth := selectableColumnWidths(h.Width, h.Primary, h.Secondary, h.Tertiary, h.PrimaryWidth, h.SecondaryWidth, h.TertiaryWidth)
 	gapWidth := 2
-	row := lipgloss.JoinHorizontal(
-		lipgloss.Top,
-		lipgloss.NewStyle().Width(primaryWidth).Bold(true).Foreground(palette.AssistantTimestampText).Render(truncateText(strings.TrimSpace(h.Primary), primaryWidth)),
-		lipgloss.NewStyle().Width(gapWidth).Render(""),
-		lipgloss.NewStyle().Width(secondaryWidth).Bold(true).Foreground(palette.AssistantTimestampText).Render(truncateText(strings.TrimSpace(h.Secondary), secondaryWidth)),
-	)
+	width := maxInt(h.Width, primaryWidth+secondaryWidth+tertiaryWidth+gapWidth)
 	if tertiaryWidth > 0 {
-		row = lipgloss.JoinHorizontal(
-			lipgloss.Top,
-			row,
-			lipgloss.NewStyle().Width(gapWidth).Render(""),
-			lipgloss.NewStyle().Width(tertiaryWidth).Bold(true).Align(lipgloss.Right).Foreground(palette.AssistantTimestampText).Render(truncateText(strings.TrimSpace(h.Tertiary), tertiaryWidth)),
-		)
+		width += gapWidth
 	}
-	return SurfaceFromString(row)
+	s := BlankSurface(width, 1)
+	style := CellStyle{FG: palette.AssistantTimestampText, Bold: true}
+	col := 0
+	s.WriteText(col, 0, truncateText(strings.TrimSpace(h.Primary), primaryWidth), style)
+	col += primaryWidth + gapWidth
+	s.WriteText(col, 0, truncateText(strings.TrimSpace(h.Secondary), secondaryWidth), style)
+	if tertiaryWidth > 0 {
+		col += secondaryWidth + gapWidth
+		text := truncateText(strings.TrimSpace(h.Tertiary), tertiaryWidth)
+		s.WriteText(col+maxInt(0, tertiaryWidth-ansi.StringWidth(text)), 0, text, style)
+	}
+	return s
 }
 
 func (r SelectableRow) View(palette theme.Palette) string {
@@ -86,42 +87,42 @@ func (r SelectableRow) render(palette theme.Palette) Surface {
 	if strings.TrimSpace(string(selectionForeground)) == "" {
 		selectionForeground = palette.UserTextForeground
 	}
-	primaryStyle := lipgloss.NewStyle().Width(primaryWidth).Bold(true)
-	gapStyle := lipgloss.NewStyle().Width(gapWidth)
-	secondaryStyle := lipgloss.NewStyle().Width(secondaryWidth).Foreground(palette.AssistantTimestampText)
-	tertiaryStyle := lipgloss.NewStyle().Width(tertiaryWidth).Align(lipgloss.Right).Foreground(palette.ActivityText)
-	rowStyle := lipgloss.NewStyle().Width(width)
+	rowStyle := CellStyle{}
+	primaryStyle := CellStyle{Bold: true}
+	secondaryStyle := CellStyle{FG: palette.AssistantTimestampText}
+	tertiaryStyle := CellStyle{FG: palette.ActivityText}
 	if selected {
-		rowStyle = rowStyle.Background(selectionBackground).Foreground(selectionForeground)
-		primaryStyle = primaryStyle.Background(selectionBackground).Foreground(selectionForeground)
-		gapStyle = gapStyle.Background(selectionBackground)
-		secondaryStyle = secondaryStyle.Background(selectionBackground).Foreground(selectionForeground)
-		tertiaryStyle = tertiaryStyle.Background(selectionBackground).Foreground(selectionForeground).Bold(true)
+		rowStyle = CellStyle{BG: selectionBackground, FG: selectionForeground}
+		primaryStyle = CellStyle{BG: selectionBackground, FG: selectionForeground, Bold: true}
+		secondaryStyle = CellStyle{BG: selectionBackground, FG: selectionForeground}
+		tertiaryStyle = CellStyle{BG: selectionBackground, FG: selectionForeground, Bold: true}
 	}
 	if focused {
 		focusedBackground := deriveFocusedBackground(selectionBackground, firstNonEmptyColor(palette.ScreenBackground, palette.SidebarBackground, palette.UserTextBackground))
 		focusedForeground := selectionForeground
-		rowStyle = rowStyle.Background(focusedBackground).Foreground(focusedForeground)
-		primaryStyle = primaryStyle.Background(focusedBackground).Foreground(focusedForeground)
-		gapStyle = gapStyle.Background(focusedBackground)
-		secondaryStyle = secondaryStyle.Background(focusedBackground).Foreground(focusedForeground)
-		tertiaryStyle = tertiaryStyle.Background(focusedBackground).Foreground(focusedForeground).Bold(true)
+		rowStyle = CellStyle{BG: focusedBackground, FG: focusedForeground}
+		primaryStyle = CellStyle{BG: focusedBackground, FG: focusedForeground, Bold: true}
+		secondaryStyle = CellStyle{BG: focusedBackground, FG: focusedForeground}
+		tertiaryStyle = CellStyle{BG: focusedBackground, FG: focusedForeground, Bold: true}
 	}
-	row := lipgloss.JoinHorizontal(
-		lipgloss.Top,
-		primaryStyle.Render(truncateText(strings.TrimSpace(primary), primaryWidth)),
-		gapStyle.Render(""),
-		secondaryStyle.Render(truncateText(strings.TrimSpace(secondary), secondaryWidth)),
-	)
+	s := BlankSurface(width, 1)
+	fillStyle := rowStyle
+	if fillStyle.isZero() {
+		fillStyle = CellStyle{}
+	}
+	for x := 0; x < width; x++ {
+		s.setCell(x, 0, Cell{Text: " ", Width: 1, Style: fillStyle})
+	}
+	col := 0
+	s.WriteText(col, 0, truncateText(strings.TrimSpace(primary), primaryWidth), primaryStyle)
+	col += primaryWidth + gapWidth
+	s.WriteText(col, 0, truncateText(strings.TrimSpace(secondary), secondaryWidth), secondaryStyle)
 	if tertiaryWidth > 0 {
-		row = lipgloss.JoinHorizontal(
-			lipgloss.Top,
-			row,
-			gapStyle.Render(""),
-			tertiaryStyle.Render(truncateText(strings.TrimSpace(tertiary), tertiaryWidth)),
-		)
+		col += secondaryWidth + gapWidth
+		text := truncateText(strings.TrimSpace(tertiary), tertiaryWidth)
+		s.WriteText(col+maxInt(0, tertiaryWidth-ansi.StringWidth(text)), 0, text, tertiaryStyle)
 	}
-	return SurfaceFromString(rowStyle.Render(row))
+	return s
 }
 
 func (r SelectableRow) Measure(ctx *Context, constraints Constraints) Size {
@@ -196,26 +197,31 @@ func (v VerticalTabs) View(width int, palette theme.Palette, focused bool) strin
 }
 
 func (v VerticalTabs) render(width int, palette theme.Palette, focused bool) Surface {
-	lines := make([]string, 0, len(v.Tabs))
-	base := lipgloss.NewStyle().Width(width)
-	activeStyle := base.
-		Background(palette.SelectionBackground).
-		Foreground(palette.SelectionForeground).
-		Bold(true)
+	if width <= 0 {
+		width = 1
+	}
+	s := BlankSurface(width, len(v.Tabs))
+	baseStyle := CellStyle{FG: palette.SidebarForeground}
+	activeStyle := CellStyle{BG: palette.SelectionBackground, FG: palette.SelectionForeground, Bold: true}
 	if focused {
-		activeStyle = activeStyle.
-			Background(deriveFocusedBackground(firstNonEmptyColor(palette.SelectionBackground, palette.UserTextBackground), firstNonEmptyColor(palette.ScreenBackground, palette.SidebarBackground, palette.UserTextBackground))).
-			Foreground(firstNonEmptyColor(palette.SelectionForeground, palette.UserTextForeground))
+		activeStyle = CellStyle{
+			BG:   deriveFocusedBackground(firstNonEmptyColor(palette.SelectionBackground, palette.UserTextBackground), firstNonEmptyColor(palette.ScreenBackground, palette.SidebarBackground, palette.UserTextBackground)),
+			FG:   firstNonEmptyColor(palette.SelectionForeground, palette.UserTextForeground),
+			Bold: true,
+		}
 	}
 	for idx, tab := range v.Tabs {
 		label := fmt.Sprintf(" %s ", strings.TrimSpace(tab))
+		style := baseStyle
 		if idx == v.Current() {
-			lines = append(lines, activeStyle.Render(label))
-			continue
+			style = activeStyle
 		}
-		lines = append(lines, base.Foreground(palette.SidebarForeground).Render(label))
+		for x := 0; x < width; x++ {
+			s.setCell(x, idx, Cell{Text: " ", Width: 1, Style: style})
+		}
+		s.WriteText(0, idx, ansi.Truncate(label, width, ""), style)
 	}
-	return SurfaceFromString(strings.Join(lines, "\n"))
+	return s
 }
 
 type CheckboxRow struct {
@@ -232,11 +238,9 @@ func (r CheckboxRow) View(width int, palette theme.Palette, focused bool) string
 
 func (r CheckboxRow) render(width int, palette theme.Palette, focused bool) string {
 	label := strings.TrimSpace(r.OffLabel)
-	valueColor := palette.AssistantTimestampText
 	glyph := "☐"
 	if r.Checked {
 		label = strings.TrimSpace(r.OnLabel)
-		valueColor = palette.ActivityText
 		glyph = "☑"
 	}
 	if label == "" {
@@ -253,11 +257,14 @@ func (r CheckboxRow) render(width int, palette theme.Palette, focused bool) stri
 		Width:     width,
 		Selected:  focused,
 		Focused:   focused,
-	}.render(palette).String()
+	}.render(palette)
 	if focused {
-		return lipgloss.NewStyle().Foreground(valueColor).Background(palette.UserTextBackground).Render(row)
+		line := row.Lines()
+		if len(line) > 0 {
+			return line[0]
+		}
 	}
-	return row
+	return row.String()
 }
 
 type ChoiceRow struct {
@@ -292,10 +299,14 @@ type Button struct {
 }
 
 func (b Button) View(palette theme.Palette) string {
-	return b.render(palette)
+	return b.renderSurface(palette).String()
 }
 
 func (b Button) render(palette theme.Palette) string {
+	return b.renderSurface(palette).String()
+}
+
+func (b Button) renderSurface(palette theme.Palette) Surface {
 	background := lipgloss.Color("")
 	foreground := lipgloss.Color("")
 	bold := false
@@ -314,15 +325,28 @@ func (b Button) render(palette theme.Palette) string {
 		foreground = firstNonEmptyColor(palette.SelectionForeground, palette.UserTextForeground)
 		bold = true
 	}
-	label := b.Label
-	if b.Hotkey != 0 {
-		label = renderButtonLabel(b.Label, b.Hotkey, palette, foreground, background, bold)
-	} else {
-		label = renderButtonSegment(b.Label, foreground, background, bold)
+	style := CellStyle{FG: foreground, BG: background, Bold: bold}
+	hotStyle := style
+	hotStyle.FG = palette.ActivityText
+	parts := buttonLabelParts(b.Label, b.Hotkey)
+	width := 4
+	for _, part := range parts {
+		width += ansi.StringWidth(part.text)
 	}
-	leftPad := renderButtonSegment("  ", foreground, background, bold)
-	rightPad := renderButtonSegment("  ", foreground, background, bold)
-	return leftPad + label + rightPad
+	s := BlankSurface(width, 1)
+	for x := 0; x < width; x++ {
+		s.setCell(x, 0, Cell{Text: " ", Width: 1, Style: style})
+	}
+	col := 2
+	for _, part := range parts {
+		partStyle := style
+		if part.hot {
+			partStyle = hotStyle
+		}
+		s.WriteText(col, 0, part.text, partStyle)
+		col += ansi.StringWidth(part.text)
+	}
+	return s
 }
 
 func RenderDialogButtons(palette theme.Palette, okLabel, cancelLabel string) string {
@@ -428,17 +452,34 @@ func (r *ButtonRow) HotkeyIndex(msg tea.KeyMsg) (int, bool) {
 
 func (r ButtonRow) render(palette theme.Palette) Surface {
 	line := r.line(palette)
-	if r.Width <= ansi.StringWidth(line) {
-		return SurfaceFromString(line)
+	lineWidth := ansi.StringWidth(line)
+	width := maxInt(lineWidth, r.Width)
+	if width <= 0 {
+		width = lineWidth
 	}
-	align := lipgloss.Left
-	switch r.Align {
-	case HorizontalAlignCenter:
-		align = lipgloss.Center
-	case HorizontalAlignRight:
-		align = lipgloss.Right
+	s := BlankSurface(width, 1)
+	startX := 0
+	if width > lineWidth {
+		switch r.Align {
+		case HorizontalAlignCenter:
+			startX = max(0, (width-lineWidth)/2)
+		case HorizontalAlignRight:
+			startX = max(0, width-lineWidth)
+		}
 	}
-	return SurfaceFromString(lipgloss.NewStyle().Width(r.Width).Align(align).Render(line))
+	offset := startX
+	gap := strings.Repeat(" ", r.gap())
+	for idx, button := range r.Buttons {
+		button.Focused = idx == r.Index
+		buttonSurface := button.renderSurface(palette)
+		s = s.placeAt(offset, 0, buttonSurface)
+		offset += buttonSurface.Size().W
+		if idx < len(r.Buttons)-1 {
+			s.WriteText(offset, 0, gap, CellStyle{})
+			offset += ansi.StringWidth(gap)
+		}
+	}
+	return s
 }
 
 func (r ButtonRow) Measure(ctx *Context, constraints Constraints) Size {
@@ -478,7 +519,7 @@ func (r ButtonRow) line(palette theme.Palette) string {
 	parts := make([]string, 0, len(r.Buttons))
 	for idx, button := range r.Buttons {
 		button.Focused = idx == r.Index
-		parts = append(parts, button.render(palette))
+		parts = append(parts, button.renderSurface(palette).String())
 	}
 	return strings.Join(parts, strings.Repeat(" ", r.gap()))
 }
@@ -491,10 +532,19 @@ func (r ButtonRow) gap() int {
 }
 
 func renderButtonLabel(label string, hotkey rune, palette theme.Palette, foreground, background lipgloss.Color, bold bool) string {
+	return buttonLabelSurface(label, hotkey, palette, foreground, background, bold).String()
+}
+
+type buttonLabelPart struct {
+	text string
+	hot  bool
+}
+
+func buttonLabelParts(label string, hotkey rune) []buttonLabelPart {
 	labelRunes := []rune(label)
 	target := []rune(strings.ToLower(string(hotkey)))
 	if len(target) == 0 {
-		return renderButtonSegment(label, foreground, background, bold)
+		return []buttonLabelPart{{text: label}}
 	}
 	idx := -1
 	for i, r := range labelRunes {
@@ -504,12 +554,39 @@ func renderButtonLabel(label string, hotkey rune, palette theme.Palette, foregro
 		}
 	}
 	if idx < 0 {
-		return renderButtonSegment(label, foreground, background, bold)
+		return []buttonLabelPart{{text: label}}
 	}
-	before := renderButtonSegment(string(labelRunes[:idx]), foreground, background, bold)
-	hot := renderButtonSegment(string(labelRunes[idx]), palette.ActivityText, background, true)
-	after := renderButtonSegment(string(labelRunes[idx+1:]), foreground, background, bold)
-	return before + hot + after
+	parts := make([]buttonLabelPart, 0, 3)
+	if idx > 0 {
+		parts = append(parts, buttonLabelPart{text: string(labelRunes[:idx])})
+	}
+	parts = append(parts, buttonLabelPart{text: string(labelRunes[idx]), hot: true})
+	if idx+1 < len(labelRunes) {
+		parts = append(parts, buttonLabelPart{text: string(labelRunes[idx+1:])})
+	}
+	return parts
+}
+
+func buttonLabelSurface(label string, hotkey rune, palette theme.Palette, foreground, background lipgloss.Color, bold bool) Surface {
+	style := CellStyle{FG: foreground, BG: background, Bold: bold}
+	hotStyle := style
+	hotStyle.FG = palette.ActivityText
+	parts := buttonLabelParts(label, hotkey)
+	width := 0
+	for _, part := range parts {
+		width += ansi.StringWidth(part.text)
+	}
+	s := BlankSurface(width, 1)
+	col := 0
+	for _, part := range parts {
+		partStyle := style
+		if part.hot {
+			partStyle = hotStyle
+		}
+		s.WriteText(col, 0, part.text, partStyle)
+		col += ansi.StringWidth(part.text)
+	}
+	return s
 }
 
 func renderButtonSegment(text string, foreground, background lipgloss.Color, bold bool) string {
