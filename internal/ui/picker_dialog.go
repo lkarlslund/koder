@@ -2,11 +2,11 @@ package ui
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/x/ansi"
 
 	"github.com/lkarlslund/koder/internal/theme"
 )
@@ -149,63 +149,41 @@ func (d *PickerDialog) HandleMouse(localX, localY, width int, palette theme.Pale
 	var action PickerDialogAction
 	d.buttons.Buttons[0].OnPress = func() { action = d.selectCurrent() }
 	d.buttons.Buttons[1].OnPress = func() { action = PickerDialogAction{Kind: PickerDialogActionCancel} }
-
-	lines := strings.Split(d.View(width, palette), "\n")
-	if localY < 0 || localY >= len(lines) {
+	runtime := Runtime{}
+	ctx := &Context{Palette: palette, Runtime: &runtime}
+	width = maxInt(80, width)
+	RenderElement(ctx, d.element(width, palette), width, 0)
+	control, ok := runtime.Hit(Point{X: localX, Y: localY})
+	if !ok {
 		return PickerDialogAction{}
 	}
-	line := ansi.Strip(lines[localY])
-	buttons := d.buttonRow(width)
-	if strings.Contains(line, "OK") && strings.Contains(line, "Cancel") {
-		if start, ok := buttonRowOffset(line, buttons, palette); ok {
-			d.Focus = pickerDialogFocusButtons
-			if idx, hit := buttons.IndexAtX(localX-start, palette); hit {
+	switch control.ID {
+	case "ok", "cancel":
+		d.Focus = pickerDialogFocusButtons
+		for idx, button := range d.buttons.Buttons {
+			if button.ID == control.ID {
 				d.buttons.Index = idx
 				d.buttons.ActivateFocused()
 				return action
 			}
 		}
-	}
-	for idx, item := range d.view {
-		if strings.TrimSpace(item.Title) == "" {
-			continue
+	default:
+		if strings.HasPrefix(control.ID, "picker-row-") {
+			idx, err := strconv.Atoi(strings.TrimPrefix(control.ID, "picker-row-"))
+			if err != nil || idx < 0 || idx >= len(d.view) {
+				return PickerDialogAction{}
+			}
+			d.Index = idx
+			d.Focus = pickerDialogFocusList
+			return d.selectCurrent()
 		}
-		if !strings.Contains(line, item.Title) {
-			continue
-		}
-		d.Index = idx
-		d.Focus = pickerDialogFocusList
-		return d.selectCurrent()
 	}
 	return PickerDialogAction{}
 }
 
 func (d PickerDialog) View(width int, palette theme.Palette) string {
-	lines := []string{}
-	if hint := strings.TrimSpace(d.Hint); hint != "" {
-		lines = append(lines, styleMuted(palette, hint))
-	}
-	lines = append(lines, "", fmt.Sprintf("filter: %s", d.Query), "")
-	if len(d.view) == 0 {
-		lines = append(lines, "  no matches")
-	} else {
-		for idx, item := range d.view {
-			lines = append(lines, SelectableRow{
-				Primary:   item.Title,
-				Secondary: item.Description,
-				Width:     72,
-				Selected:  idx == d.Index,
-				Focused:   idx == d.Index && d.Focus == pickerDialogFocusList,
-			}.View(palette))
-		}
-	}
-	lines = append(lines, "", d.buttonRow(width).View(palette))
-	return Modal{
-		Title:  d.Title,
-		Body:   strings.Join(lines, "\n"),
-		Footer: "Enter selects. Tab switches focus. Esc cancels.",
-		Width:  80,
-	}.View(palette)
+	width = maxInt(80, width)
+	return RenderElement(&Context{Palette: palette}, d.element(width, palette), width, 0)
 }
 
 func (d PickerDialog) Measure(ctx *Context, constraints Constraints) Size {
@@ -213,7 +191,7 @@ func (d PickerDialog) Measure(ctx *Context, constraints Constraints) Size {
 	if width == int(^uint(0)>>1) || width <= 0 {
 		width = 80
 	}
-	return constraints.Clamp(SurfaceFromString(d.View(width, ctx.Palette)).Size())
+	return constraints.Clamp(d.element(width, ctx.Palette).Measure(ctx, Constraints{MaxW: width, MaxH: constraints.MaxH}))
 }
 
 func (d PickerDialog) Render(ctx *Context, bounds Rect) Surface {
@@ -221,7 +199,38 @@ func (d PickerDialog) Render(ctx *Context, bounds Rect) Surface {
 	if width <= 0 {
 		width = 80
 	}
-	return SurfaceFromString(d.View(width, ctx.Palette)).normalize(bounds.W, bounds.H)
+	return d.element(width, ctx.Palette).Render(ctx, Rect{W: width, H: bounds.H})
+}
+
+func (d PickerDialog) element(width int, palette theme.Palette) Element {
+	children := []Child{}
+	if hint := strings.TrimSpace(d.Hint); hint != "" {
+		children = append(children, Fixed(TextPane{Content: styleMuted(palette, hint)}))
+		children = append(children, Fixed(Spacer{H: 1}))
+	}
+	children = append(children, Fixed(TextPane{Content: fmt.Sprintf("filter: %s", d.Query)}))
+	children = append(children, Fixed(Spacer{H: 1}))
+	if len(d.view) == 0 {
+		children = append(children, Fixed(TextPane{Content: "  no matches"}))
+	} else {
+		for idx, item := range d.view {
+			children = append(children, Fixed(SelectableRow{
+				ControlID: "picker-row-" + strconv.Itoa(idx),
+				Primary:   item.Title,
+				Secondary: item.Description,
+				Width:     72,
+				Selected:  idx == d.Index,
+				Focused:   idx == d.Index && d.Focus == pickerDialogFocusList,
+			}))
+		}
+	}
+	children = append(children, Fixed(Spacer{H: 1}))
+	return Modal{
+		Title:       d.Title,
+		BodyElement: Column{Children: append(children, Fixed(d.buttonRow(width)))},
+		Footer:      "Enter selects. Tab switches focus. Esc cancels.",
+		Width:       80,
+	}
 }
 
 func (d PickerDialog) buttonRow(width int) ButtonRow {

@@ -7,7 +7,6 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/x/ansi"
 
 	"github.com/lkarlslund/koder/internal/theme"
 	. "github.com/lkarlslund/koder/internal/ui"
@@ -147,11 +146,11 @@ func (d SessionDialog) dialog(width int, palette theme.Palette) Element {
 	}
 	titleWidth := maxInt(16, contentWidth-idWidth-timeWidth-timeWidth-tokensWidth-cwdWidth-(gapCount*2))
 
-	listLines := []string{
-		d.renderTableHeader(idWidth, timeWidth, tokensWidth, cwdWidth, titleWidth, palette),
+	listRows := []Child{
+		Fixed(staticBlock(d.renderTableHeader(idWidth, timeWidth, tokensWidth, cwdWidth, titleWidth, palette))),
 	}
 	if len(d.view) == 0 {
-		listLines = append(listLines, "No matches")
+		listRows = append(listRows, Fixed(staticBlock("No matches")))
 	} else {
 		start := 0
 		if d.Index >= 5 {
@@ -163,7 +162,10 @@ func (d SessionDialog) dialog(width int, palette theme.Palette) Element {
 		}
 		for idx := start; idx < end; idx++ {
 			item := d.view[idx]
-			listLines = append(listLines, d.renderTableRow(item, idWidth, timeWidth, tokensWidth, cwdWidth, titleWidth, palette, idx == d.Index, idx == d.Index && d.focus == pickerDialogFocusList))
+			listRows = append(listRows, Fixed(HitBox{
+				ID:    "session-row-" + strconv.Itoa(idx),
+				Child: TextPane{Content: d.renderTableRow(item, idWidth, timeWidth, tokensWidth, cwdWidth, titleWidth, palette, idx == d.Index, idx == d.Index && d.focus == pickerDialogFocusList)},
+			}))
 		}
 	}
 
@@ -172,31 +174,28 @@ func (d SessionDialog) dialog(width int, palette theme.Palette) Element {
 		details = d.clampPreviewLines(d.previewText(item, contentWidth), 10)
 	}
 
-	tablePane := lipgloss.NewStyle().
-		Width(contentWidth).
-		Background(palette.SidebarBackground).
-		Foreground(palette.SidebarForeground).
-		Render(strings.Join(listLines, "\n"))
-	detailPane := lipgloss.NewStyle().
-		Width(contentWidth).
-		BorderTop(true).
-		BorderForeground(palette.SidebarBorder).
-		PaddingTop(1).
-		PaddingLeft(1).
-		PaddingRight(1).
-		Background(lipgloss.Color("#000000")).
-		Foreground(palette.SidebarForeground).
-		Render(details)
-
 	return Dialog{
 		Title: "Resume Session",
 		Body: Column{
 			Children: []Child{
 				Fixed(staticBlock(fmt.Sprintf("Filter: %s", d.Query))),
 				Fixed(Spacer{H: 1}),
-				Fixed(staticBlock(tablePane)),
+				Fixed(Panel{
+					Width:      contentWidth,
+					Background: palette.SidebarBackground,
+					Foreground: palette.SidebarForeground,
+					Child:      Column{Children: listRows},
+				}),
 				Fixed(Spacer{H: 1}),
-				Fixed(staticBlock(detailPane)),
+				Fixed(Panel{
+					Width:       contentWidth,
+					Padding:     Insets{Top: 1, Left: 1, Right: 1},
+					Background:  lipgloss.Color("#000000"),
+					Foreground:  palette.SidebarForeground,
+					BorderTop:   true,
+					BorderColor: palette.SidebarBorder,
+					Child:       TextPane{Content: details},
+				}),
 			},
 		},
 		Buttons: d.buttonRow(contentWidth),
@@ -210,33 +209,30 @@ func (d *SessionDialog) HandleMouse(localX, localY, width int, palette theme.Pal
 	var action SessionDialogAction
 	d.buttons.Buttons[0].OnPress = func() { action = d.selectCurrent() }
 	d.buttons.Buttons[1].OnPress = func() { action = SessionDialogAction{Kind: SessionDialogActionCancel} }
-
-	lines := strings.Split(d.View(width, palette), "\n")
-	if localY < 0 || localY >= len(lines) {
+	controlID, ok := dialogHitControl(width, palette, d.dialog, localX, localY)
+	if !ok {
 		return SessionDialogAction{}
 	}
-	line := ansi.Strip(lines[localY])
-	buttons := d.buttonRow(width)
-	if strings.Contains(line, "OK") && strings.Contains(line, "Cancel") {
-		if start, ok := buttonRowOffset(line, buttons, palette); ok {
-			d.focus = pickerDialogFocusButtons
-			if idx, hit := buttons.IndexAtX(localX-start, palette); hit {
+	switch controlID {
+	case "ok", "cancel":
+		d.focus = pickerDialogFocusButtons
+		for idx, button := range d.buttons.Buttons {
+			if button.ID == controlID {
 				d.buttons.Index = idx
 				d.buttons.ActivateFocused()
 				return action
 			}
 		}
-	}
-	for idx, item := range d.view {
-		if strings.TrimSpace(item.Title) == "" {
-			continue
+	default:
+		if strings.HasPrefix(controlID, "session-row-") {
+			idx, err := strconv.Atoi(strings.TrimPrefix(controlID, "session-row-"))
+			if err != nil || idx < 0 || idx >= len(d.view) {
+				return SessionDialogAction{}
+			}
+			d.Index = idx
+			d.focus = pickerDialogFocusList
+			return d.selectCurrent()
 		}
-		if !strings.Contains(line, item.Title) {
-			continue
-		}
-		d.Index = idx
-		d.focus = pickerDialogFocusList
-		return d.selectCurrent()
 	}
 	return SessionDialogAction{}
 }

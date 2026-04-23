@@ -2,11 +2,11 @@ package dialogs
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/x/ansi"
 
 	"github.com/lkarlslund/koder/internal/theme"
 	. "github.com/lkarlslund/koder/internal/ui"
@@ -130,9 +130,9 @@ func (d DisconnectDialog) dialog(width int, palette theme.Palette) Element {
 	listWidth := 28
 	detailWidth := maxInt(36, dialogWidth-listWidth-9)
 
-	listLines := []string{}
+	listRows := []Child{}
 	if len(d.view) == 0 {
-		listLines = append(listLines, "No matches")
+		listRows = append(listRows, Fixed(staticBlock("No matches")))
 	} else {
 		start := 0
 		if d.Index >= 5 {
@@ -144,14 +144,15 @@ func (d DisconnectDialog) dialog(width int, palette theme.Palette) Element {
 		}
 		for idx := start; idx < end; idx++ {
 			item := d.view[idx]
-			listLines = append(listLines, SelectableRow{
+			listRows = append(listRows, Fixed(SelectableRow{
+				ControlID: "disconnect-row-" + strconv.Itoa(idx),
 				Primary:   item.Title,
 				Secondary: item.Description,
 				Tertiary:  item.ID,
 				Width:     listWidth,
 				Selected:  idx == d.Index,
 				Focused:   idx == d.Index && d.focus == pickerDialogFocusList,
-			}.View(palette))
+			}))
 		}
 	}
 
@@ -175,9 +176,23 @@ func (d DisconnectDialog) dialog(width int, palette theme.Palette) Element {
 				Fixed(Spacer{H: 1}),
 				Fixed(Row{
 					Children: []Child{
-						Fixed(staticBlock(lipgloss.NewStyle().Width(listWidth).BorderRight(true).BorderForeground(palette.SidebarBorder).PaddingRight(1).Render(strings.Join(listLines, "\n")))),
+						Fixed(Panel{
+							Width:       listWidth + 2,
+							Padding:     Insets{Right: 1},
+							Background:  palette.SidebarBackground,
+							Foreground:  palette.SidebarForeground,
+							BorderRight: true,
+							BorderColor: palette.SidebarBorder,
+							Child:       Column{Children: listRows},
+						}),
 						Fixed(Static{Content: " "}),
-						Flex(staticBlock(lipgloss.NewStyle().Width(detailWidth).PaddingLeft(1).Render(details)), 1),
+						Flex(Panel{
+							Width:      detailWidth + 1,
+							Padding:    Insets{Left: 1},
+							Background: palette.SidebarBackground,
+							Foreground: palette.SidebarForeground,
+							Child:      TextPane{Content: details},
+						}, 1),
 					},
 				}),
 			},
@@ -193,32 +208,30 @@ func (d *DisconnectDialog) HandleMouse(localX, localY, width int, palette theme.
 	var action DisconnectDialogAction
 	d.buttons.Buttons[0].OnPress = func() { action = d.selectCurrent() }
 	d.buttons.Buttons[1].OnPress = func() { action = DisconnectDialogAction{Kind: DisconnectDialogActionCancel} }
-	lines := strings.Split(d.View(width, palette), "\n")
-	if localY < 0 || localY >= len(lines) {
+	controlID, ok := dialogHitControl(width, palette, d.dialog, localX, localY)
+	if !ok {
 		return DisconnectDialogAction{}
 	}
-	line := ansi.Strip(lines[localY])
-	buttons := d.buttonRow(width)
-	if strings.Contains(line, "OK") && strings.Contains(line, "Cancel") {
-		if start, ok := buttonRowOffset(line, buttons, palette); ok {
-			d.focus = pickerDialogFocusButtons
-			if idx, hit := buttons.IndexAtX(localX-start, palette); hit {
+	switch controlID {
+	case "ok", "cancel":
+		d.focus = pickerDialogFocusButtons
+		for idx, button := range d.buttons.Buttons {
+			if button.ID == controlID {
 				d.buttons.Index = idx
 				d.buttons.ActivateFocused()
 				return action
 			}
 		}
-	}
-	for idx, item := range d.view {
-		if strings.TrimSpace(item.Title) == "" {
-			continue
+	default:
+		if strings.HasPrefix(controlID, "disconnect-row-") {
+			idx, err := strconv.Atoi(strings.TrimPrefix(controlID, "disconnect-row-"))
+			if err != nil || idx < 0 || idx >= len(d.view) {
+				return DisconnectDialogAction{}
+			}
+			d.Index = idx
+			d.focus = pickerDialogFocusList
+			return d.selectCurrent()
 		}
-		if !strings.Contains(line, item.Title) {
-			continue
-		}
-		d.Index = idx
-		d.focus = pickerDialogFocusList
-		return d.selectCurrent()
 	}
 	return DisconnectDialogAction{}
 }

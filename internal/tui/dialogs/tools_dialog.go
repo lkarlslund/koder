@@ -1,10 +1,10 @@
 package dialogs
 
 import (
+	"strconv"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/x/ansi"
 
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/theme"
@@ -135,20 +135,23 @@ func (d ToolsDialog) dialog(width int, palette theme.Palette) Element {
 	}
 	dialogWidth = maxInt(72, dialogWidth)
 	rowWidth := maxInt(56, dialogWidth-6)
-	lines := make([]string, 0, len(d.items)+3)
+	rows := make([]Child, 0, len(d.items))
 	for idx, item := range d.items {
-		lines = append(lines, CheckboxRow{
-			Label:       item.Label,
-			Description: item.Description,
-			Checked:     item.Enabled,
-			OnLabel:     "Enabled",
-			OffLabel:    "Disabled",
-		}.View(rowWidth, palette, d.focus == toolsDialogFocusList && idx == d.index))
+		rows = append(rows, Fixed(HitBox{
+			ID: "tool-row-" + strconv.Itoa(idx),
+			Child: TextPane{Content: CheckboxRow{
+				Label:       item.Label,
+				Description: item.Description,
+				Checked:     item.Enabled,
+				OnLabel:     "Enabled",
+				OffLabel:    "Disabled",
+			}.View(rowWidth, palette, d.focus == toolsDialogFocusList && idx == d.index)},
+		}))
 	}
 	return Dialog{
 		Title:    "Tools",
 		Subtitle: "Per-session tool access. Space toggles the current tool.",
-		Body:     staticBlock(strings.Join(lines, "\n")),
+		Body:     Column{Children: rows},
 		Buttons:  d.buttonRow(dialogWidth),
 		Footer:   "Enter toggles a tool or activates the focused button. Esc cancels.",
 		Width:    dialogWidth,
@@ -163,30 +166,31 @@ func (d *ToolsDialog) HandleMouse(localX, localY, width int, palette theme.Palet
 	d.buttons.Buttons[1].OnPress = func() {
 		action = ToolsDialogAction{Kind: ToolsDialogActionCancel, States: d.originalStates()}
 	}
-	lines := strings.Split(d.View(width, palette), "\n")
-	if localY < 0 || localY >= len(lines) {
+	controlID, ok := dialogHitControl(width, palette, d.dialog, localX, localY)
+	if !ok {
 		return ToolsDialogAction{}
 	}
-	line := ansi.Strip(lines[localY])
-	buttons := d.buttonRow(width)
-	if strings.Contains(line, "OK") && strings.Contains(line, "Cancel") {
-		if start, ok := buttonRowOffset(line, buttons, palette); ok {
-			d.focus = toolsDialogFocusButtons
-			if idx, hit := buttons.IndexAtX(localX-start, palette); hit {
+	switch controlID {
+	case "ok", "cancel":
+		d.focus = toolsDialogFocusButtons
+		for idx, button := range d.buttons.Buttons {
+			if button.ID == controlID {
 				d.buttons.Index = idx
 				d.buttons.ActivateFocused()
 				return action
 			}
 		}
-	}
-	for idx, item := range d.items {
-		if !strings.Contains(line, item.Label) {
-			continue
+	default:
+		if strings.HasPrefix(controlID, "tool-row-") {
+			idx, err := strconv.Atoi(strings.TrimPrefix(controlID, "tool-row-"))
+			if err != nil || idx < 0 || idx >= len(d.items) {
+				return ToolsDialogAction{}
+			}
+			d.index = idx
+			d.focus = toolsDialogFocusList
+			d.toggleCurrent()
+			return ToolsDialogAction{}
 		}
-		d.index = idx
-		d.focus = toolsDialogFocusList
-		d.toggleCurrent()
-		return ToolsDialogAction{}
 	}
 	return ToolsDialogAction{}
 }

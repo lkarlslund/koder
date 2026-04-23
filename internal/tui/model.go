@@ -738,27 +738,26 @@ func (m *Model) handleDialogMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd, bool) {
 		if msg.Y < 0 || msg.Y >= m.height {
 			return m, nil, true
 		}
-		prompt := m.renderApprovalPrompt()
-		promptHeight := lipgloss.Height(prompt)
+		element := m.renderApprovalPromptElement()
+		if element == nil {
+			return m, nil, true
+		}
+		promptHeight := element.Measure(&ui.Context{Palette: m.palette}, ui.NewConstraints(m.width, 0)).H
 		startY := m.height - m.footerHeight()
 		if msg.Y < startY || msg.Y >= startY+promptHeight {
 			return m, nil, true
 		}
-		lines := strings.Split(prompt, "\n")
-		localY := msg.Y - startY
-		if localY < 0 || localY >= len(lines) {
-			return m, nil, true
-		}
-		line := ansi.Strip(lines[localY])
-		if strings.Contains(line, "Approve") && strings.Contains(line, "Deny") {
-			buttons := m.approvalButtonRow()
-			if start, ok := buttons.OffsetIn(line, m.palette); ok {
-				idx, ok := buttons.IndexAtX(msg.X-start, m.palette)
-				if ok {
-					m.approvalButtons.Index = idx
-					next, cmd := m.activateApprovalButton(idx)
-					return next, cmd, true
+		runtime := ui.Runtime{}
+		ctx := &ui.Context{Palette: m.palette, Runtime: &runtime}
+		element.Render(ctx, ui.Rect{X: 0, Y: startY, W: element.Measure(ctx, ui.NewConstraints(m.width, 0)).W, H: promptHeight})
+		if control, ok := runtime.Hit(ui.Point{X: msg.X, Y: msg.Y}); ok {
+			for idx, button := range m.approvalButtons.Buttons {
+				if button.ID != control.ID {
+					continue
 				}
+				m.approvalButtons.Index = idx
+				next, cmd := m.activateApprovalButton(idx)
+				return next, cmd, true
 			}
 		}
 		return m, nil, true

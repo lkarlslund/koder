@@ -25,6 +25,10 @@ type Rect struct {
 	H int
 }
 
+func (r Rect) Contains(p Point) bool {
+	return p.X >= r.X && p.X < r.X+r.W && p.Y >= r.Y && p.Y < r.Y+r.H
+}
+
 func (r Rect) Inset(in Insets) Rect {
 	x := r.X + in.Left
 	y := r.Y + in.Top
@@ -138,6 +142,22 @@ func (r *Runtime) Controls() []Control {
 	out := make([]Control, len(r.controls))
 	copy(out, r.controls)
 	return out
+}
+
+func (r *Runtime) Hit(p Point) (Control, bool) {
+	if r == nil {
+		return Control{}, false
+	}
+	for i := len(r.controls) - 1; i >= 0; i-- {
+		control := r.controls[i]
+		if !control.Enabled {
+			continue
+		}
+		if control.Rect.Contains(p) {
+			return control, true
+		}
+	}
+	return Control{}, false
 }
 
 type Context struct {
@@ -388,7 +408,7 @@ func (c Column) Render(ctx *Context, bounds Rect) Surface {
 		if child.Flex > 0 && totalFlex > 0 {
 			height = remaining * child.Flex / totalFlex
 		}
-		childSurface := child.Element.Render(ctx, Rect{W: bounds.W, H: max(0, height)})
+		childSurface := child.Element.Render(ctx, Rect{X: bounds.X, Y: bounds.Y + y, W: bounds.W, H: max(0, height)})
 		base = base.placeAt(0, y, childSurface)
 		y += height
 	}
@@ -471,7 +491,7 @@ func (r Row) Render(ctx *Context, bounds Rect) Surface {
 		if child.Flex > 0 && totalFlex > 0 {
 			width = remaining * child.Flex / totalFlex
 		}
-		childSurface := child.Element.Render(ctx, Rect{W: max(0, width), H: bounds.H})
+		childSurface := child.Element.Render(ctx, Rect{X: bounds.X + x, Y: bounds.Y, W: max(0, width), H: bounds.H})
 		base = base.placeAt(x, 0, childSurface)
 		x += width
 	}
@@ -500,7 +520,7 @@ func (i Inset) Render(ctx *Context, bounds Rect) Surface {
 		return base
 	}
 	childBounds := bounds.Inset(i.Padding)
-	childSurface := i.Child.Render(ctx, Rect{W: childBounds.W, H: childBounds.H})
+	childSurface := i.Child.Render(ctx, Rect{X: childBounds.X, Y: childBounds.Y, W: childBounds.W, H: childBounds.H})
 	return base.placeAt(i.Padding.Left, i.Padding.Top, childSurface)
 }
 
@@ -532,7 +552,6 @@ func (a Align) Render(ctx *Context, bounds Rect) Surface {
 	}
 	size := a.Child.Measure(ctx, NewConstraints(bounds.W, bounds.H))
 	size = NewConstraints(bounds.W, bounds.H).Clamp(size)
-	childSurface := a.Child.Render(ctx, Rect{W: size.W, H: size.H})
 	x := 0
 	y := 0
 	switch a.Horizontal {
@@ -547,6 +566,7 @@ func (a Align) Render(ctx *Context, bounds Rect) Surface {
 	case AlignEnd:
 		y = max(0, bounds.H-size.H)
 	}
+	childSurface := a.Child.Render(ctx, Rect{X: bounds.X + x, Y: bounds.Y + y, W: size.W, H: size.H})
 	return base.placeAt(x, y, childSurface)
 }
 

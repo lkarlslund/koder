@@ -143,7 +143,32 @@ func (d ToolRunDock) Measure(_ *Context, constraints Constraints) Size {
 	return constraints.Clamp(SurfaceFromString(d.View()).Size())
 }
 
-func (d ToolRunDock) Render(_ *Context, bounds Rect) Surface {
+func (d ToolRunDock) Render(ctx *Context, bounds Rect) Surface {
+	if ctx != nil && ctx.Runtime != nil {
+		run := d.Run
+		title := run.Title + "  " + run.StatusLabel()
+		contentWidth := maxInt(ansi.StringWidth(title), ansi.StringWidth(d.Hints))
+		if subtitle := strings.TrimSpace(run.Subtitle); subtitle != "" {
+			contentWidth = maxInt(contentWidth, ansi.StringWidth(subtitle))
+		}
+		if preview := firstNonEmpty(strings.TrimSpace(run.Preview), strings.TrimSpace(run.Output), strings.TrimSpace(run.ErrorText)); preview != "" {
+			for _, line := range strings.Split(preview, "\n") {
+				contentWidth = maxInt(contentWidth, ansi.StringWidth(line))
+			}
+		}
+		buttons := d.Buttons
+		buttons.Align = HorizontalAlignRight
+		contentWidth = maxInt(contentWidth, ansi.StringWidth(buttons.line(d.Palette)))
+		buttons.Width = contentWidth
+		lineOffset := 2
+		if strings.TrimSpace(run.Subtitle) != "" {
+			lineOffset++
+		}
+		if preview := firstNonEmpty(strings.TrimSpace(run.Preview), strings.TrimSpace(run.Output), strings.TrimSpace(run.ErrorText)); preview != "" {
+			lineOffset += len(strings.Split(preview, "\n"))
+		}
+		buttons.Render(ctx, Rect{X: bounds.X + 2, Y: bounds.Y + lineOffset, W: contentWidth, H: 1})
+	}
 	return SurfaceFromString(d.View()).normalize(bounds.W, bounds.H)
 }
 

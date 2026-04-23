@@ -36,6 +36,134 @@ func (t TextPane) Render(_ *Context, bounds Rect) Surface {
 	return SurfaceFromString(t.Content).normalize(bounds.W, bounds.H)
 }
 
+type HitBox struct {
+	ID    string
+	Child Element
+}
+
+func (h HitBox) Measure(ctx *Context, constraints Constraints) Size {
+	if h.Child == nil {
+		return constraints.Clamp(Size{})
+	}
+	return constraints.Clamp(h.Child.Measure(ctx, constraints))
+}
+
+func (h HitBox) Render(ctx *Context, bounds Rect) Surface {
+	if ctx != nil && ctx.Runtime != nil && strings.TrimSpace(h.ID) != "" {
+		ctx.Runtime.Register(Control{
+			ID:      h.ID,
+			Rect:    Rect{X: bounds.X, Y: bounds.Y, W: bounds.W, H: max(1, bounds.H)},
+			Enabled: true,
+		})
+	}
+	if h.Child == nil {
+		return BlankSurface(bounds.W, bounds.H)
+	}
+	return h.Child.Render(ctx, bounds)
+}
+
+type Panel struct {
+	Child        Element
+	Width        int
+	Height       int
+	Padding      Insets
+	Background   lipgloss.Color
+	Foreground   lipgloss.Color
+	BorderLeft   bool
+	BorderRight  bool
+	BorderTop    bool
+	BorderBottom bool
+	BorderColor  lipgloss.Color
+}
+
+func (p Panel) Measure(ctx *Context, constraints Constraints) Size {
+	width := constraints.MaxW
+	if p.Width > 0 {
+		width = p.Width
+	}
+	inset := p.panelInsets()
+	childSize := Size{}
+	if p.Child != nil {
+		childSize = p.Child.Measure(ctx, Constraints{MaxW: max(0, width-inset.Left-inset.Right), MaxH: max(0, constraints.MaxH-inset.Top-inset.Bottom)})
+	}
+	size := Size{
+		W: childSize.W + inset.Left + inset.Right,
+		H: childSize.H + inset.Top + inset.Bottom,
+	}
+	if p.Width > 0 {
+		size.W = p.Width
+	}
+	if p.Height > 0 {
+		size.H = p.Height
+	}
+	return constraints.Clamp(size)
+}
+
+func (p Panel) Render(ctx *Context, bounds Rect) Surface {
+	width := bounds.W
+	if width <= 0 {
+		width = p.Width
+	}
+	if width <= 0 {
+		width = p.Measure(ctx, NewConstraints(bounds.W, bounds.H)).W
+	}
+	height := bounds.H
+	if height <= 0 {
+		height = p.Height
+	}
+	if height <= 0 {
+		height = p.Measure(ctx, NewConstraints(width, bounds.H)).H
+	}
+	inset := p.panelInsets()
+	childBounds := Rect{
+		X: bounds.X + inset.Left,
+		Y: bounds.Y + inset.Top,
+		W: max(0, width-inset.Left-inset.Right),
+		H: max(0, height-inset.Top-inset.Bottom),
+	}
+	content := ""
+	if p.Child != nil {
+		content = p.Child.Render(ctx, childBounds).String()
+	}
+	style := lipgloss.NewStyle().
+		Width(width).
+		Padding(p.Padding.Top, p.Padding.Right, p.Padding.Bottom, p.Padding.Left).
+		Background(p.Background).
+		Foreground(p.Foreground).
+		Border(lipgloss.Border{
+			Top:         lipgloss.NormalBorder().Top,
+			Bottom:      lipgloss.NormalBorder().Bottom,
+			Left:        lipgloss.NormalBorder().Left,
+			Right:       lipgloss.NormalBorder().Right,
+			TopLeft:     lipgloss.NormalBorder().TopLeft,
+			TopRight:    lipgloss.NormalBorder().TopRight,
+			BottomLeft:  lipgloss.NormalBorder().BottomLeft,
+			BottomRight: lipgloss.NormalBorder().BottomRight,
+		}, p.BorderTop, p.BorderRight, p.BorderBottom, p.BorderLeft).
+		BorderForeground(p.BorderColor)
+	if height > 0 {
+		style = style.Height(height)
+	}
+	return SurfaceFromString(style.Render(content)).normalize(width, height)
+}
+
+func (p Panel) panelInsets() Insets {
+	inset := p.Padding
+	if p.BorderLeft {
+		inset.Left++
+	}
+	if p.BorderRight {
+		inset.Right++
+	}
+	if p.BorderTop {
+		inset.Top++
+	}
+	if p.BorderBottom {
+		inset.Bottom++
+	}
+	return inset
+}
+
 type Paragraph struct {
 	Text  string
 	Style lipgloss.Style
@@ -126,15 +254,22 @@ func (m ModalFrame) Render(ctx *Context, bounds Rect) Surface {
 	}
 	bodyWidth := max(0, bounds.W-6)
 	parts := []string{}
+	bodyY := bounds.Y + 2
 	if title := strings.TrimSpace(m.Title); title != "" {
 		parts = append(parts, lipgloss.NewStyle().Bold(true).Foreground(ctx.Palette.MarkdownText).Render(title))
+		bodyY++
 	}
 	if subtitle := strings.TrimSpace(m.Subtitle); subtitle != "" {
 		parts = append(parts, lipgloss.NewStyle().Foreground(ctx.Palette.AssistantTimestampText).Render(subtitle))
+		bodyY++
 	}
 	if m.Body != nil {
-		bodyHeight := max(0, bounds.H-6)
-		parts = append(parts, RenderElement(ctx, m.Body, bodyWidth, bodyHeight))
+		if len(parts) > 0 {
+			bodyY++
+		}
+		bodyHeight := m.Body.Measure(ctx, NewConstraints(bodyWidth, max(0, bounds.H-bodyY))).H
+		bodySurface := m.Body.Render(ctx, Rect{X: bounds.X + 3, Y: bodyY, W: bodyWidth, H: bodyHeight})
+		parts = append(parts, bodySurface.String())
 	}
 	if footer := strings.TrimSpace(m.Footer); footer != "" {
 		parts = append(parts, lipgloss.NewStyle().Foreground(ctx.Palette.AssistantTimestampText).Render(footer))

@@ -13,6 +13,7 @@ import (
 )
 
 type SelectableRow struct {
+	ControlID string
 	Primary   string
 	Secondary string
 	Tertiary  string
@@ -88,6 +89,21 @@ func (r SelectableRow) View(palette theme.Palette) string {
 		)
 	}
 	return rowStyle.Render(row)
+}
+
+func (r SelectableRow) Measure(ctx *Context, constraints Constraints) Size {
+	return constraints.Clamp(SurfaceFromString(r.View(ctx.Palette)).Size())
+}
+
+func (r SelectableRow) Render(ctx *Context, bounds Rect) Surface {
+	if ctx != nil && ctx.Runtime != nil && strings.TrimSpace(r.ControlID) != "" {
+		ctx.Runtime.Register(Control{
+			ID:      r.ControlID,
+			Rect:    Rect{X: bounds.X, Y: bounds.Y, W: bounds.W, H: max(1, bounds.H)},
+			Enabled: true,
+		})
+	}
+	return SurfaceFromString(r.View(ctx.Palette)).normalize(bounds.W, bounds.H)
 }
 
 type VerticalTabs struct {
@@ -350,6 +366,39 @@ func (r ButtonRow) View(palette theme.Palette) string {
 		align = lipgloss.Right
 	}
 	return lipgloss.NewStyle().Width(r.Width).Align(align).Render(line)
+}
+
+func (r ButtonRow) Measure(ctx *Context, constraints Constraints) Size {
+	return constraints.Clamp(SurfaceFromString(r.View(ctx.Palette)).Size())
+}
+
+func (r ButtonRow) Render(ctx *Context, bounds Rect) Surface {
+	rendered := r.View(ctx.Palette)
+	line := r.line(ctx.Palette)
+	rowWidth := ansi.StringWidth(rendered)
+	lineWidth := ansi.StringWidth(line)
+	startX := 0
+	if bounds.W > lineWidth {
+		switch r.Align {
+		case HorizontalAlignCenter:
+			startX = max(0, (bounds.W-lineWidth)/2)
+		case HorizontalAlignRight:
+			startX = max(0, bounds.W-lineWidth)
+		}
+	}
+	offset := 0
+	for _, button := range r.Buttons {
+		if ctx != nil && ctx.Runtime != nil && strings.TrimSpace(button.ID) != "" {
+			buttonWidth := ansi.StringWidth(button.View(ctx.Palette))
+			ctx.Runtime.Register(Control{
+				ID:      button.ID,
+				Rect:    Rect{X: bounds.X + startX + offset, Y: bounds.Y, W: buttonWidth, H: 1},
+				Enabled: true,
+			})
+			offset += buttonWidth + r.gap()
+		}
+	}
+	return SurfaceFromString(rendered).normalize(max(bounds.W, rowWidth), bounds.H)
 }
 
 func (r ButtonRow) line(palette theme.Palette) string {

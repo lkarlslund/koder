@@ -78,7 +78,7 @@ func (d Dialog) bodyElement(width int, palette theme.Palette) Element {
 	if len(d.Buttons.Buttons) > 0 {
 		buttons := d.Buttons
 		buttons.Width = max(0, width-6)
-		children = append(children, Fixed(Static{Content: buttons.View(palette)}))
+		children = append(children, Fixed(buttons))
 	}
 	if len(children) == 0 {
 		return nil

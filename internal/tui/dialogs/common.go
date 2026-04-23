@@ -51,6 +51,19 @@ func dialogRenderElement(ctx *Context, bounds Rect, fallbackWidth int, build fun
 	return element.Render(ctx, Rect{W: width, H: bounds.H})
 }
 
+func dialogHitControl(width int, palette theme.Palette, build func(int, theme.Palette) Element, x, y int) (string, bool) {
+	runtime := Runtime{}
+	ctx := &Context{Palette: palette, Runtime: &runtime}
+	width = dialogRenderWidth(Rect{W: width}, width)
+	element := build(width, palette)
+	RenderElement(ctx, element, width, 0)
+	control, ok := runtime.Hit(Point{X: x, Y: y})
+	if !ok {
+		return "", false
+	}
+	return control.ID, true
+}
+
 func staticBlock(text string) Element {
 	return Static{Content: strings.TrimRight(text, "\n")}
 }

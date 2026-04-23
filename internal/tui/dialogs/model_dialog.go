@@ -1,6 +1,7 @@
 package dialogs
 
 import (
+	"strconv"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -132,9 +133,9 @@ func (d ModelDialog) dialog(width int, palette theme.Palette) Element {
 	dialogWidth = maxInt(72, dialogWidth)
 	listWidth := maxInt(40, dialogWidth-6)
 
-	listLines := []string{}
+	listChildren := []Child{}
 	if len(d.view) == 0 {
-		listLines = append(listLines, "No matches")
+		listChildren = append(listChildren, Fixed(staticBlock("No matches")))
 	} else {
 		start := 0
 		if d.Index >= 5 {
@@ -146,17 +147,22 @@ func (d ModelDialog) dialog(width int, palette theme.Palette) Element {
 		}
 		for idx := start; idx < end; idx++ {
 			item := d.view[idx]
-			listLines = append(listLines, d.renderRow(item, listWidth, idx == d.Index, idx == d.Index && d.focus == pickerDialogFocusList, palette))
+			listChildren = append(listChildren, Fixed(HitBox{
+				ID:    "model-row-" + strconv.Itoa(idx),
+				Child: TextPane{Content: d.renderRow(item, listWidth, idx == d.Index, idx == d.Index && d.focus == pickerDialogFocusList, palette)},
+			}))
 		}
 	}
 
 	return Dialog{
 		Title: "Select Model",
-		Body: linesBlock(
-			"Filter: "+d.Query,
-			"",
-			lipgloss.NewStyle().Width(listWidth).Render(strings.Join(listLines, "\n")),
-		),
+		Body: Column{
+			Children: []Child{
+				Fixed(staticBlock("Filter: " + d.Query)),
+				Fixed(Spacer{H: 1}),
+				Fixed(Panel{Width: listWidth, Child: Column{Children: listChildren}}),
+			},
+		},
 		Buttons: d.buttonRow(dialogWidth),
 		Footer:  "Enter to select, Esc to cancel",
 		Width:   dialogWidth,
@@ -259,32 +265,30 @@ func (d *ModelDialog) HandleMouse(localX, localY, width int, palette theme.Palet
 	var action ModelDialogAction
 	d.buttons.Buttons[0].OnPress = func() { action = d.selectCurrent() }
 	d.buttons.Buttons[1].OnPress = func() { action = ModelDialogAction{Kind: ModelDialogActionCancel} }
-	lines := strings.Split(d.View(width, palette), "\n")
-	if localY < 0 || localY >= len(lines) {
+	controlID, ok := dialogHitControl(width, palette, d.dialog, localX, localY)
+	if !ok {
 		return ModelDialogAction{}
 	}
-	line := ansi.Strip(lines[localY])
-	buttons := d.buttonRow(width)
-	if strings.Contains(line, "OK") && strings.Contains(line, "Cancel") {
-		if start, ok := buttonRowOffset(line, buttons, palette); ok {
-			d.focus = pickerDialogFocusButtons
-			if idx, hit := buttons.IndexAtX(localX-start, palette); hit {
+	switch controlID {
+	case "ok", "cancel":
+		d.focus = pickerDialogFocusButtons
+		for idx, button := range d.buttons.Buttons {
+			if button.ID == controlID {
 				d.buttons.Index = idx
 				d.buttons.ActivateFocused()
 				return action
 			}
 		}
-	}
-	for idx, item := range d.view {
-		if strings.TrimSpace(item.ID) == "" {
-			continue
+	default:
+		if strings.HasPrefix(controlID, "model-row-") {
+			idx, err := strconv.Atoi(strings.TrimPrefix(controlID, "model-row-"))
+			if err != nil || idx < 0 || idx >= len(d.view) {
+				return ModelDialogAction{}
+			}
+			d.Index = idx
+			d.focus = pickerDialogFocusList
+			return d.selectCurrent()
 		}
-		if !strings.Contains(line, item.ID) {
-			continue
-		}
-		d.Index = idx
-		d.focus = pickerDialogFocusList
-		return d.selectCurrent()
 	}
 	return ModelDialogAction{}
 }
