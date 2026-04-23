@@ -14,6 +14,14 @@ type MenuItem struct {
 	Description string
 }
 
+type HistoryMenu struct {
+	Palette  theme.Palette
+	Query    string
+	Items    []MenuItem
+	Selected int
+	Width    int
+}
+
 type ApprovalPromptProps struct {
 	Palette      theme.Palette
 	Title        string
@@ -60,6 +68,41 @@ func (m SlashMenu) Measure(_ *Context, constraints Constraints) Size {
 }
 
 func (m SlashMenu) Render(_ *Context, bounds Rect) Surface {
+	return SurfaceFromString(m.View()).normalize(bounds.W, bounds.H)
+}
+
+func (m HistoryMenu) View() string {
+	width := m.Width
+	if width <= 0 {
+		width = 72
+	}
+	lines := []string{
+		lipgloss.NewStyle().Bold(true).Render("History"),
+		lipgloss.NewStyle().Foreground(m.Palette.AssistantTimestampText).Render("filter: " + m.Query),
+	}
+	if len(m.Items) == 0 {
+		lines = append(lines, "", "  no matches")
+	} else {
+		lines = append(lines, "")
+		for idx, item := range m.Items {
+			lines = append(lines, SelectableRow{
+				Primary:   item.Title,
+				Secondary: item.Description,
+				Width:     width - 4,
+				Selected:  idx == m.Selected,
+				Focused:   idx == m.Selected,
+			}.View(m.Palette))
+		}
+	}
+	lines = append(lines, "", lipgloss.NewStyle().Foreground(m.Palette.AssistantTimestampText).Render("enter accept  esc cancel  ctrl-r/down older  ctrl-s/up newer"))
+	return lipgloss.NewStyle().Border(lipgloss.NormalBorder()).Padding(0, 1).Width(width).Render(strings.Join(lines, "\n"))
+}
+
+func (m HistoryMenu) Measure(_ *Context, constraints Constraints) Size {
+	return constraints.Clamp(SurfaceFromString(m.View()).Size())
+}
+
+func (m HistoryMenu) Render(_ *Context, bounds Rect) Surface {
 	return SurfaceFromString(m.View()).normalize(bounds.W, bounds.H)
 }
 

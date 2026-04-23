@@ -1274,8 +1274,8 @@ func (m *Model) renderFooterElement() ui.Element {
 	if prompt := m.renderApprovalPromptElement(); prompt != nil {
 		elements = append(elements, prompt)
 	}
-	if menu := m.renderComposerHistoryMenu(); menu != "" {
-		elements = append(elements, ui.Static{Content: menu})
+	if menu := m.renderComposerHistoryMenuElement(); menu != nil {
+		elements = append(elements, menu)
 	} else if menu := m.renderSlashMenuElement(); menu != nil {
 		elements = append(elements, menu)
 	} else if menu := m.renderMentionMenuElement(); menu != nil {
@@ -3612,37 +3612,46 @@ func (m *Model) renderMentionMenuElement() ui.Element {
 }
 
 func (m *Model) renderComposerHistoryMenu() string {
+	if element := m.renderComposerHistoryMenuElement(); element != nil {
+		return ui.RenderElement(&ui.Context{Palette: m.palette}, element, 0, 0)
+	}
+	return ""
+}
+
+func (m *Model) renderComposerHistoryMenuElement() ui.Element {
 	if !m.hasComposerHistoryMenu() {
-		return ""
+		return nil
 	}
 	matches := m.filteredComposerHistory(m.composerHistory.SearchQuery)
 	width := max(48, min(88, m.composerWidth()))
-	lines := []string{
-		lipgloss.NewStyle().Bold(true).Render("History"),
-		lipgloss.NewStyle().Foreground(m.palette.AssistantTimestampText).Render("filter: " + m.composerHistory.SearchQuery),
-	}
+	var items []ui.MenuItem
 	if len(matches) == 0 {
-		lines = append(lines, "", "  no matches")
+		return ui.HistoryMenu{
+			Palette: m.palette,
+			Query:   m.composerHistory.SearchQuery,
+			Width:   width,
+		}
 	} else {
 		start := 0
 		if m.composerHistory.SearchIndex >= 6 {
 			start = m.composerHistory.SearchIndex - 5
 		}
 		end := min(len(matches), start+6)
-		lines = append(lines, "")
 		for idx := start; idx < end; idx++ {
 			entry := matches[idx]
-			lines = append(lines, ui.SelectableRow{
-				Primary:   firstHistoryLine(entry),
-				Secondary: historySummary(entry),
-				Width:     width - 4,
-				Selected:  idx == m.composerHistory.SearchIndex,
-				Focused:   idx == m.composerHistory.SearchIndex,
-			}.View(m.palette))
+			items = append(items, ui.MenuItem{
+				Title:       firstHistoryLine(entry),
+				Description: historySummary(entry),
+			})
+		}
+		return ui.HistoryMenu{
+			Palette:  m.palette,
+			Query:    m.composerHistory.SearchQuery,
+			Items:    items,
+			Selected: m.composerHistory.SearchIndex - start,
+			Width:    width,
 		}
 	}
-	lines = append(lines, "", lipgloss.NewStyle().Foreground(m.palette.AssistantTimestampText).Render("enter accept  esc cancel  ctrl-r/down older  ctrl-s/up newer"))
-	return lipgloss.NewStyle().Border(lipgloss.NormalBorder()).Padding(0, 1).Width(width).Render(strings.Join(lines, "\n"))
 }
 
 func firstHistoryLine(input string) string {
