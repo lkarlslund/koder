@@ -68,22 +68,80 @@ func wrapWordsPlain(line string, width int) []string {
 	if width <= 0 || PlainWidth(line) <= width {
 		return []string{line}
 	}
-	var lines []string
-	remaining := line
-	for remaining != "" {
-		if PlainWidth(remaining) <= width {
-			lines = append(lines, remaining)
-			break
+	words := strings.Fields(line)
+	if len(words) == 0 {
+		return []string{""}
+	}
+	lines := make([]string, 0, len(words))
+	current := words[0]
+	currentWidth := PlainWidth(current)
+	if currentWidth > width {
+		parts := splitLongWordPlain(current, width)
+		lines = append(lines, parts[:len(parts)-1]...)
+		current = parts[len(parts)-1]
+		currentWidth = PlainWidth(current)
+	}
+	for _, word := range words[1:] {
+		wordWidth := PlainWidth(word)
+		if wordWidth > width {
+			if current != "" {
+				lines = append(lines, current)
+				current = ""
+				currentWidth = 0
+			}
+			parts := splitLongWordPlain(word, width)
+			lines = append(lines, parts[:len(parts)-1]...)
+			current = parts[len(parts)-1]
+			currentWidth = PlainWidth(current)
+			continue
 		}
-		segment := truncateRunes(remaining, width)
-		if idx := strings.LastIndex(segment, " "); idx > 0 {
-			segment = strings.TrimRight(segment[:idx], " ")
+		if current == "" {
+			current = word
+			currentWidth = wordWidth
+			continue
 		}
-		if segment == "" {
-			segment = truncateRunes(remaining, width)
+		if currentWidth+1+wordWidth <= width {
+			current += " " + word
+			currentWidth += 1 + wordWidth
+			continue
 		}
-		lines = append(lines, segment)
-		remaining = strings.TrimSpace(strings.TrimPrefix(remaining, segment))
+		lines = append(lines, current)
+		current = word
+		currentWidth = wordWidth
+	}
+	if current != "" {
+		lines = append(lines, current)
 	}
 	return lines
+}
+
+func splitLongWordPlain(word string, width int) []string {
+	if width <= 0 || word == "" {
+		return []string{word}
+	}
+	parts := make([]string, 0, (len(word)/max(1, width))+1)
+	var (
+		b     strings.Builder
+		used  int
+	)
+	for _, r := range word {
+		rw := runewidth.RuneWidth(r)
+		if rw <= 0 {
+			continue
+		}
+		if used > 0 && used+rw > width {
+			parts = append(parts, b.String())
+			b.Reset()
+			used = 0
+		}
+		b.WriteRune(r)
+		used += rw
+	}
+	if b.Len() > 0 {
+		parts = append(parts, b.String())
+	}
+	if len(parts) == 0 {
+		return []string{""}
+	}
+	return parts
 }
