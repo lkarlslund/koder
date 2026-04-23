@@ -2105,6 +2105,30 @@ func TestClosingSessionPickerRestartsComposerBlinkTimer(t *testing.T) {
 	}
 }
 
+func TestSelectingSessionKeepsComposerBlinkStopped(t *testing.T) {
+	m := Model{
+		composer: textarea.New(),
+		palette:  theme.Default().Palette,
+		width:    80,
+		height:   24,
+		sessions: []domain.Session{{
+			ID:          7,
+			Title:       "Session A",
+			LastMessage: "summary",
+		}},
+	}
+
+	m.openSessionPicker()
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("expected resume command")
+	}
+	next := asModelPtr(t, updated)
+	if timers := next.syncUIRoot().ActiveTimers(composerBlinkTimerOwner); len(timers) != 0 {
+		t.Fatalf("expected composer blink timer to stay stopped while session dialog is active, got %v", timers)
+	}
+}
+
 func TestVisibleSessionsFiltersByExactCWD(t *testing.T) {
 	m := Model{workdir: "/repo/a"}
 	sessions := []domain.Session{

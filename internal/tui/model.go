@@ -5242,9 +5242,6 @@ func (m *Model) applyUIConfig(next config.UI, save bool) (tea.Cmd, error) {
 	}
 
 	cmds := make([]tea.Cmd, 0, 2)
-	if m.composerShouldBlink() {
-		cmds = append(cmds, m.composer.BlinkCmd())
-	}
 	if prevMouse == m.mouseEnabled {
 		if len(cmds) == 0 {
 			return nil, nil
