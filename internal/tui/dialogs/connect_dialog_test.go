@@ -10,10 +10,11 @@ import (
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/theme"
 	"github.com/lkarlslund/koder/internal/ui"
+	"github.com/lkarlslund/koder/internal/ui/uitest"
 )
 
 func renderConnectDialog(dialog ConnectDialog, width int, palette theme.Palette) string {
-	return ui.RenderElement(&ui.Context{Palette: palette}, dialog, width, 0)
+	return uitest.RenderElementText(&ui.Context{Palette: palette}, dialog, width, 0)
 }
 func TestConnectDialogSelectsProviderAndSavesDraft(t *testing.T) {
 	dialog := NewConnectDialog(provider.Catalog(), map[string]config.Provider{})

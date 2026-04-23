@@ -546,14 +546,66 @@ type Visibility interface {
 	Visible() bool
 }
 
+type BoxModel interface {
+	Box() BoxProps
+}
+
+type Display int
+
+const (
+	DisplayFlex Display = iota
+	DisplayNone
+)
+
 type BoxProps struct {
+	Display     Display
 	VisibleFlag bool
+	Hidden      bool
+	Grow        int
+	Shrink      int
+	Basis       int
+	MinW        int
+	MinH        int
+	MaxW        int
+	MaxH        int
 	HAlign      Alignment
 	VAlign      Alignment
 }
 
 func (p BoxProps) Visible() bool {
-	return p.VisibleFlag
+	if p.Display == DisplayNone {
+		return false
+	}
+	if p.Hidden {
+		return false
+	}
+	return true
+}
+
+func (p BoxProps) Box() BoxProps {
+	return p
+}
+
+func (p BoxProps) constrained(axis Axis, size int) int {
+	switch axis {
+	case AxisHorizontal:
+		return clampBoxDimension(size, p.MinW, p.MaxW)
+	default:
+		return clampBoxDimension(size, p.MinH, p.MaxH)
+	}
+}
+
+func clampBoxDimension(size, minValue, maxValue int) int {
+	if size < minValue {
+		size = minValue
+	}
+	if maxValue > 0 && size > maxValue {
+		size = maxValue
+	}
+	if size < 0 {
+		size = 0
+	}
+	return size
 }
 
 func elementVisible(element Element) bool {
@@ -569,6 +621,21 @@ func elementVisible(element Element) bool {
 
 func ElementVisible(element Element) bool {
 	return elementVisible(element)
+}
+
+func elementBox(element Element) BoxProps {
+	if element == nil {
+		return BoxProps{}
+	}
+	box, ok := element.(BoxModel)
+	if !ok {
+		return BoxProps{Display: DisplayFlex, VisibleFlag: true}
+	}
+	props := box.Box()
+	if props.Display == 0 {
+		props.Display = DisplayFlex
+	}
+	return props
 }
 
 type Static struct {
@@ -641,6 +708,9 @@ func (e VisibleElement) Render(ctx *Context, bounds Rect) Surface {
 type Child struct {
 	Element Element
 	Flex    int
+	Grow    int
+	Shrink  int
+	Basis   int
 }
 
 func Fixed(element Element) Child {
@@ -648,7 +718,31 @@ func Fixed(element Element) Child {
 }
 
 func Flex(element Element, weight int) Child {
-	return Child{Element: element, Flex: weight}
+	if weight <= 0 {
+		weight = 1
+	}
+	return Child{Element: element, Flex: weight, Grow: weight, Shrink: 1}
+}
+
+func (c Child) effectiveBox() BoxProps {
+	props := elementBox(c.Element)
+	if c.Basis > 0 {
+		props.Basis = c.Basis
+	}
+	if c.Grow > 0 {
+		props.Grow = c.Grow
+	} else if c.Flex > 0 && props.Grow == 0 {
+		props.Grow = c.Flex
+	}
+	if c.Shrink > 0 {
+		props.Shrink = c.Shrink
+	} else if c.Flex > 0 && props.Shrink == 0 {
+		props.Shrink = 1
+	}
+	if props.Display == 0 {
+		props.Display = DisplayFlex
+	}
+	return props
 }
 
 type Spacer struct {
@@ -670,79 +764,33 @@ type Column struct {
 }
 
 func (c Column) Measure(ctx *Context, constraints Constraints) Size {
-	available := constraints.maxHeight()
-	totalH := 0
-	maxW := 0
-	totalFlex := 0
-	count := 0
-	for _, child := range c.Children {
-		if !elementVisible(child.Element) {
-			continue
-		}
-		if count > 0 {
-			totalH += c.Spacing
-		}
-		count++
-		if child.Flex > 0 {
-			totalFlex += child.Flex
-			continue
-		}
-		size := child.Element.Measure(ctx, Constraints{MaxW: constraints.MaxW, MaxH: max(0, available-totalH)})
-		totalH += size.H
-		maxW = max(maxW, size.W)
-	}
-	if totalFlex > 0 {
-		remaining := max(0, available-totalH)
-		totalH += remaining
-		for _, child := range c.Children {
-			if !elementVisible(child.Element) || child.Flex <= 0 {
-				continue
-			}
-			height := remaining * child.Flex / totalFlex
-			size := child.Element.Measure(ctx, Constraints{MaxW: constraints.MaxW, MaxH: height})
-			maxW = max(maxW, size.W)
-		}
-	}
-	return constraints.Clamp(Size{W: maxW, H: totalH})
+	plan := c.layoutPlan(ctx, constraints, constraints.maxHeight())
+	return constraints.Clamp(Size{W: plan.cross, H: plan.main})
 }
 
 func (c Column) Render(ctx *Context, bounds Rect) Surface {
 	base := BlankSurface(bounds.W, bounds.H)
+	plan := c.layoutPlan(ctx, NewConstraints(bounds.W, bounds.H), bounds.H)
 	y := 0
-	totalFlex := 0
-	fixedHeight := 0
-	count := 0
-	for _, child := range c.Children {
-		if !elementVisible(child.Element) {
-			continue
-		}
-		if count > 0 {
-			fixedHeight += c.Spacing
-		}
-		count++
-		if child.Flex > 0 {
-			totalFlex += child.Flex
-			continue
-		}
-		fixedHeight += child.Element.Measure(ctx, Constraints{MaxW: bounds.W, MaxH: bounds.H}).H
-	}
-	remaining := max(0, bounds.H-fixedHeight)
-	index := 0
-	for _, child := range c.Children {
-		if !elementVisible(child.Element) {
-			continue
-		}
-		if index > 0 {
+	for idx, item := range plan.items {
+		if idx > 0 {
 			y += c.Spacing
 		}
-		index++
-		height := child.Element.Measure(ctx, Constraints{MaxW: bounds.W, MaxH: bounds.H}).H
-		if child.Flex > 0 && totalFlex > 0 {
-			height = remaining * child.Flex / totalFlex
-		}
-		childSurface := child.Element.Render(ctx, Rect{X: bounds.X, Y: bounds.Y + y, W: bounds.W, H: max(0, height)})
-		base = base.placeAt(0, y, childSurface)
-		y += height
+		slotH := max(0, item.main)
+		slotW := bounds.W
+		childSize := item.child.Element.Measure(ctx, Constraints{MaxW: slotW, MaxH: slotH})
+		childW := item.box.constrained(AxisHorizontal, min(slotW, childSize.W))
+		childH := item.box.constrained(AxisVertical, min(slotH, childSize.H))
+		x := alignedOffset(item.box.HAlign, slotW, childW)
+		dy := alignedOffset(item.box.VAlign, slotH, childH)
+		childSurface := item.child.Element.Render(ctx, Rect{
+			X: bounds.X + x,
+			Y: bounds.Y + y + dy,
+			W: childW,
+			H: childH,
+		})
+		base = base.placeAt(x, y+dy, childSurface)
+		y += slotH
 	}
 	return base
 }
@@ -753,79 +801,33 @@ type Row struct {
 }
 
 func (r Row) Measure(ctx *Context, constraints Constraints) Size {
-	available := constraints.maxWidth()
-	totalW := 0
-	maxH := 0
-	totalFlex := 0
-	count := 0
-	for _, child := range r.Children {
-		if !elementVisible(child.Element) {
-			continue
-		}
-		if count > 0 {
-			totalW += r.Spacing
-		}
-		count++
-		if child.Flex > 0 {
-			totalFlex += child.Flex
-			continue
-		}
-		size := child.Element.Measure(ctx, Constraints{MaxW: max(0, available-totalW), MaxH: constraints.MaxH})
-		totalW += size.W
-		maxH = max(maxH, size.H)
-	}
-	if totalFlex > 0 {
-		remaining := max(0, available-totalW)
-		totalW += remaining
-		for _, child := range r.Children {
-			if !elementVisible(child.Element) || child.Flex <= 0 {
-				continue
-			}
-			width := remaining * child.Flex / totalFlex
-			size := child.Element.Measure(ctx, Constraints{MaxW: width, MaxH: constraints.MaxH})
-			maxH = max(maxH, size.H)
-		}
-	}
-	return constraints.Clamp(Size{W: totalW, H: maxH})
+	plan := r.layoutPlan(ctx, constraints, constraints.maxWidth())
+	return constraints.Clamp(Size{W: plan.main, H: plan.cross})
 }
 
 func (r Row) Render(ctx *Context, bounds Rect) Surface {
 	base := BlankSurface(bounds.W, bounds.H)
+	plan := r.layoutPlan(ctx, NewConstraints(bounds.W, bounds.H), bounds.W)
 	x := 0
-	totalFlex := 0
-	fixedWidth := 0
-	count := 0
-	for _, child := range r.Children {
-		if !elementVisible(child.Element) {
-			continue
-		}
-		if count > 0 {
-			fixedWidth += r.Spacing
-		}
-		count++
-		if child.Flex > 0 {
-			totalFlex += child.Flex
-			continue
-		}
-		fixedWidth += child.Element.Measure(ctx, Constraints{MaxW: bounds.W, MaxH: bounds.H}).W
-	}
-	remaining := max(0, bounds.W-fixedWidth)
-	index := 0
-	for _, child := range r.Children {
-		if !elementVisible(child.Element) {
-			continue
-		}
-		if index > 0 {
+	for idx, item := range plan.items {
+		if idx > 0 {
 			x += r.Spacing
 		}
-		index++
-		width := child.Element.Measure(ctx, Constraints{MaxW: bounds.W, MaxH: bounds.H}).W
-		if child.Flex > 0 && totalFlex > 0 {
-			width = remaining * child.Flex / totalFlex
-		}
-		childSurface := child.Element.Render(ctx, Rect{X: bounds.X + x, Y: bounds.Y, W: max(0, width), H: bounds.H})
-		base = base.placeAt(x, 0, childSurface)
-		x += width
+		slotW := max(0, item.main)
+		slotH := bounds.H
+		childSize := item.child.Element.Measure(ctx, Constraints{MaxW: slotW, MaxH: slotH})
+		childW := item.box.constrained(AxisHorizontal, min(slotW, childSize.W))
+		childH := item.box.constrained(AxisVertical, min(slotH, childSize.H))
+		dx := alignedOffset(item.box.HAlign, slotW, childW)
+		y := alignedOffset(item.box.VAlign, slotH, childH)
+		childSurface := item.child.Element.Render(ctx, Rect{
+			X: bounds.X + x + dx,
+			Y: bounds.Y + y,
+			W: childW,
+			H: childH,
+		})
+		base = base.placeAt(x+dx, y, childSurface)
+		x += slotW
 	}
 	return base
 }
@@ -982,27 +984,6 @@ func (a Align) Render(ctx *Context, bounds Rect) Surface {
 	return base.placeAt(x, y, childSurface)
 }
 
-func RenderElement(ctx *Context, element Element, width, height int) string {
-	if element == nil {
-		return ""
-	}
-	if ctx == nil {
-		ctx = &Context{}
-	}
-	size := element.Measure(ctx, Constraints{MaxW: width, MaxH: height})
-	if width > 0 {
-		size.W = width
-	} else if size.W == 0 {
-		size.W = 0
-	}
-	if height > 0 {
-		size.H = height
-	} else if size.H == 0 {
-		size.H = 0
-	}
-	return strings.Join(element.Render(ctx, Rect{W: size.W, H: size.H}).Lines(), "\n")
-}
-
 func clampInt(value, low, high int) int {
 	if high < low {
 		high = low
@@ -1014,4 +995,175 @@ func clampInt(value, low, high int) int {
 		return high
 	}
 	return value
+}
+
+type Axis int
+
+const (
+	AxisHorizontal Axis = iota
+	AxisVertical
+)
+
+type flexItem struct {
+	child Child
+	box   BoxProps
+	main  int
+	cross int
+}
+
+type flexPlan struct {
+	items []flexItem
+	main  int
+	cross int
+}
+
+func (c Column) layoutPlan(ctx *Context, constraints Constraints, targetMain int) flexPlan {
+	return computeFlexPlan(ctx, c.Children, c.Spacing, AxisVertical, constraints, targetMain)
+}
+
+func (r Row) layoutPlan(ctx *Context, constraints Constraints, targetMain int) flexPlan {
+	return computeFlexPlan(ctx, r.Children, r.Spacing, AxisHorizontal, constraints, targetMain)
+}
+
+func computeFlexPlan(ctx *Context, children []Child, spacing int, axis Axis, constraints Constraints, targetMain int) flexPlan {
+	items := make([]flexItem, 0, len(children))
+	mainUsed := 0
+	cross := 0
+	for _, child := range children {
+		if !elementVisible(child.Element) {
+			continue
+		}
+		box := child.effectiveBox()
+		size := child.Element.Measure(ctx, constraintsForAxis(axis, constraints, 0))
+		mainSize := axisMain(axis, size)
+		if box.Basis > 0 {
+			mainSize = box.Basis
+		}
+		mainSize = box.constrained(axis, mainSize)
+		cross = max(cross, axisCross(axis, size))
+		items = append(items, flexItem{
+			child: child,
+			box:   box,
+			main:  mainSize,
+			cross: axisCross(axis, size),
+		})
+		mainUsed += mainSize
+	}
+	if len(items) > 1 {
+		mainUsed += spacing * (len(items) - 1)
+	}
+	if targetMain <= 0 {
+		targetMain = mainUsed
+	}
+	delta := targetMain - mainUsed
+	if delta > 0 {
+		totalGrow := 0
+		for _, item := range items {
+			totalGrow += max(0, item.box.Grow)
+		}
+		if totalGrow > 0 {
+			remaining := delta
+			for idx := range items {
+				grow := max(0, items[idx].box.Grow)
+				if grow == 0 {
+					continue
+				}
+				add := delta * grow / totalGrow
+				if idx == len(items)-1 {
+					add = remaining
+				}
+				items[idx].main = items[idx].box.constrained(axis, items[idx].main+add)
+				remaining -= add
+			}
+		}
+	}
+	if delta < 0 {
+		deficit := -delta
+		totalShrink := 0
+		for _, item := range items {
+			totalShrink += max(0, item.box.Shrink)
+		}
+		if totalShrink > 0 {
+			remaining := deficit
+			for idx := range items {
+				shrink := max(0, items[idx].box.Shrink)
+				if shrink == 0 {
+					continue
+				}
+				reduce := deficit * shrink / totalShrink
+				if idx == len(items)-1 {
+					reduce = remaining
+				}
+				items[idx].main = items[idx].box.constrained(axis, items[idx].main-reduce)
+				remaining -= reduce
+			}
+		}
+	}
+	main := 0
+	for idx, item := range items {
+		if idx > 0 {
+			main += spacing
+		}
+		main += item.main
+		cross = max(cross, item.cross)
+	}
+	return flexPlan{items: items, main: main, cross: cross}
+}
+
+func constraintsForAxis(axis Axis, constraints Constraints, main int) Constraints {
+	switch axis {
+	case AxisHorizontal:
+		return Constraints{MaxW: chooseMain(main, constraints.MaxW), MaxH: constraints.MaxH}
+	default:
+		return Constraints{MaxW: constraints.MaxW, MaxH: chooseMain(main, constraints.MaxH)}
+	}
+}
+
+func chooseMain(primary, fallback int) int {
+	if primary > 0 {
+		return primary
+	}
+	return fallback
+}
+
+func axisMain(axis Axis, size Size) int {
+	if axis == AxisHorizontal {
+		return size.W
+	}
+	return size.H
+}
+
+func axisCross(axis Axis, size Size) int {
+	if axis == AxisHorizontal {
+		return size.H
+	}
+	return size.W
+}
+
+func alignedOffset(alignment Alignment, outer, inner int) int {
+	switch alignment {
+	case AlignCenter:
+		return max(0, (outer-inner)/2)
+	case AlignEnd:
+		return max(0, outer-inner)
+	default:
+		return 0
+	}
+}
+
+func RenderSurface(ctx *Context, element Element, width, height int) Surface {
+	if element == nil {
+		return Surface{}
+	}
+	if ctx == nil {
+		ctx = &Context{}
+	}
+	size := element.Measure(ctx, Constraints{MaxW: width, MaxH: height})
+	if width > 0 {
+		size.W = width
+	}
+	if height > 0 {
+		size.H = height
+	}
+	return element.Render(ctx, Rect{W: size.W, H: size.H})
 }

@@ -17,10 +17,6 @@ type SurfaceModel interface {
 	ViewSurface() SurfaceView
 }
 
-type ViewModel interface {
-	View() string
-}
-
 type SurfaceView interface {
 	SurfaceWidth() int
 	SurfaceHeight() int

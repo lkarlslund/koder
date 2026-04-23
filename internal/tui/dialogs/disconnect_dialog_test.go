@@ -8,10 +8,11 @@ import (
 
 	"github.com/lkarlslund/koder/internal/theme"
 	"github.com/lkarlslund/koder/internal/ui"
+	"github.com/lkarlslund/koder/internal/ui/uitest"
 )
 
 func renderDisconnectDialog(dialog DisconnectDialog, width int, palette theme.Palette) string {
-	return ui.RenderElement(&ui.Context{Palette: palette}, dialog, width, 0)
+	return uitest.RenderElementText(&ui.Context{Palette: palette}, dialog, width, 0)
 }
 func TestDisconnectDialogSelectsProvider(t *testing.T) {
 	dialog := NewDisconnectDialog([]ProviderItem{{ID: "openai", Title: "OpenAI"}})

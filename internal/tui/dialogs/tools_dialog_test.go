@@ -9,10 +9,11 @@ import (
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/theme"
 	"github.com/lkarlslund/koder/internal/ui"
+	"github.com/lkarlslund/koder/internal/ui/uitest"
 )
 
 func renderToolsDialog(dialog ToolsDialog, width int, palette theme.Palette) string {
-	return ui.RenderElement(&ui.Context{Palette: palette}, dialog, width, 0)
+	return uitest.RenderElementText(&ui.Context{Palette: palette}, dialog, width, 0)
 }
 func TestToolsDialogTogglesAndAppliesStates(t *testing.T) {
 	dialog := NewToolsDialog([]ToolToggleItem{

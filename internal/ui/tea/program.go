@@ -156,33 +156,19 @@ func (p *Program) runCmd(cmd Cmd, out chan<- Msg) {
 
 func (p *Program) render(out io.Writer) error {
 	frame := ""
-	if surfaceModel, ok := p.model.(SurfaceModel); ok {
-		surface := surfaceModel.ViewSurface()
-		if !p.didRender {
-			frame = renderFrameSurface(surface)
-			p.didRender = true
-		} else {
-			frame = diffFrameSurface(p.rendered, surface)
-		}
-		p.rendered = surface
-		p.renderedRows = nil
-	} else {
-		var lines []string
-		viewModel, ok := p.model.(ViewModel)
-		if !ok {
-			return nil
-		}
-		view := viewModel.View()
-		lines = strings.Split(view, "\n")
-		if !p.didRender {
-			frame = renderFrameLines(lines)
-			p.didRender = true
-		} else {
-			frame = diffFrameLines(p.renderedRows, lines)
-		}
-		p.renderedRows = append(p.renderedRows[:0], lines...)
-		p.rendered = nil
+	surfaceModel, ok := p.model.(SurfaceModel)
+	if !ok {
+		return nil
 	}
+	surface := surfaceModel.ViewSurface()
+	if !p.didRender {
+		frame = renderFrameSurface(surface)
+		p.didRender = true
+	} else {
+		frame = diffFrameSurface(p.rendered, surface)
+	}
+	p.rendered = surface
+	p.renderedRows = nil
 	if frame == "" {
 		return nil
 	}

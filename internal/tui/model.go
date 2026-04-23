@@ -56,8 +56,8 @@ const (
 	busyScopeNone busyScope = iota
 	busyScopeSidebar
 	busyScopeTranscript
-	composerHeight      = 3
-	composerInputHeight = 1
+	composerHeight          = 3
+	composerInputHeight     = 1
 	composerBlinkTimerOwner = "composer"
 )
 
@@ -707,6 +707,10 @@ func (m Model) ViewLines() []string {
 
 func (m Model) ViewSurface() tea.SurfaceView {
 	return m.viewSurface()
+}
+
+func (m *Model) renderElementText(element ui.Element, width, height int) string {
+	return strings.Join(ui.RenderSurface(&ui.Context{Palette: m.palette}, element, width, height).Lines(), "\n")
 }
 
 func (m *Model) viewSurface() ui.Surface {
@@ -1393,13 +1397,13 @@ func (m *Model) renderMainScreenElement() ui.Element {
 	}
 	mainChildren := []ui.Child{
 		ui.Flex(transcript, 1),
-		ui.Fixed(ui.VisibleElement{Child: m.renderTranscriptActivityElement(), BoxProps: ui.BoxProps{VisibleFlag: m.renderTranscriptActivityElement() != nil}}),
+		ui.Fixed(ui.VisibleElement{Child: m.renderTranscriptActivityElement(), BoxProps: ui.BoxProps{Hidden: m.renderTranscriptActivityElement() == nil}}),
 		ui.Fixed(m.renderComposerAreaElement()),
 	}
 	mainColumn := ui.VBox{Children: mainChildren, Spacing: 1}
 	sidebar := ui.VisibleElement{
 		BoxProps: ui.BoxProps{
-			VisibleFlag: m.showSidebar,
+			Hidden: !m.showSidebar,
 		},
 		Child: ui.Sidebar{
 			Child:  ui.TextPane{Content: m.renderSidebar()},
@@ -1761,7 +1765,7 @@ func (m *Model) renderTranscriptMessageElement(msg domain.Message) ui.Element {
 
 func (m *Model) renderUserMessage(body, stamp string) string {
 	element := m.renderUserMessageElement(body, stamp)
-	return ui.RenderElement(&ui.Context{Palette: m.palette}, element, m.userMessageWidth(body, stamp), 0)
+	return m.renderElementText(element, m.userMessageWidth(body, stamp), 0)
 }
 
 func (m *Model) renderUserMessageElement(body, stamp string) ui.Element {
@@ -1830,7 +1834,7 @@ func (m *Model) userMessageWidth(body, stamp string) int {
 
 func (m *Model) renderAssistantMessage(body, stamp string) string {
 	element := m.renderAssistantMessageElement(body, stamp)
-	return ui.RenderElement(&ui.Context{Palette: m.palette}, element, max(0, m.viewport.Width), 0)
+	return m.renderElementText(element, max(0, m.viewport.Width), 0)
 }
 
 func (m *Model) renderAssistantMessageElement(body, stamp string) ui.Element {
@@ -2012,7 +2016,7 @@ func (m *Model) renderReasoningBlock(input string) string {
 	if width <= 0 {
 		width = element.Measure(ctx, ui.Constraints{}).W
 	}
-	rendered := ui.RenderElement(ctx, element, width, 0)
+	rendered := strings.Join(ui.RenderSurface(ctx, element, width, 0).Lines(), "\n")
 	if !trimLines {
 		return rendered
 	}
@@ -3673,7 +3677,7 @@ func (m *Model) acceptMentionSelection() {
 
 func (m *Model) renderSlashMenu() string {
 	if element := m.renderSlashMenuElement(); element != nil {
-		return ui.RenderElement(&ui.Context{Palette: m.palette}, element, 0, 0)
+		return m.renderElementText(element, 0, 0)
 	}
 	return ""
 }
@@ -3698,7 +3702,7 @@ func (m *Model) renderSlashMenuElement() ui.Element {
 
 func (m *Model) renderSkillMenu() string {
 	if element := m.renderSkillMenuElement(); element != nil {
-		return ui.RenderElement(&ui.Context{Palette: m.palette}, element, 0, 0)
+		return m.renderElementText(element, 0, 0)
 	}
 	return ""
 }
@@ -3726,7 +3730,7 @@ func (m *Model) renderSkillMenuElement() ui.Element {
 
 func (m *Model) renderMentionMenu() string {
 	if element := m.renderMentionMenuElement(); element != nil {
-		return ui.RenderElement(&ui.Context{Palette: m.palette}, element, 0, 0)
+		return m.renderElementText(element, 0, 0)
 	}
 	return ""
 }
@@ -3754,7 +3758,7 @@ func (m *Model) renderMentionMenuElement() ui.Element {
 
 func (m *Model) renderComposerHistoryMenu() string {
 	if element := m.renderComposerHistoryMenuElement(); element != nil {
-		return ui.RenderElement(&ui.Context{Palette: m.palette}, element, 0, 0)
+		return m.renderElementText(element, 0, 0)
 	}
 	return ""
 }
@@ -3822,7 +3826,7 @@ func historySummary(input string) string {
 
 func (m *Model) renderPicker() string {
 	if element := m.renderPickerElement(); element != nil {
-		return ui.RenderElement(&ui.Context{Palette: m.palette}, element, 80, 0)
+		return m.renderElementText(element, 80, 0)
 	}
 	return ""
 }
@@ -3840,7 +3844,7 @@ func (m *Model) renderSessionDialog() string {
 		if m.width > 0 {
 			width = min(124, max(96, m.width-8))
 		}
-		return ui.RenderElement(&ui.Context{Palette: m.palette}, element, width, 0)
+		return m.renderElementText(element, width, 0)
 	}
 	return ""
 }
@@ -3858,7 +3862,7 @@ func (m *Model) renderPreferencesDialog() string {
 		if m.width > 0 {
 			width = min(100, max(74, m.width-8))
 		}
-		return ui.RenderElement(&ui.Context{Palette: m.palette}, element, width, 0)
+		return m.renderElementText(element, width, 0)
 	}
 	return ""
 }
@@ -3876,7 +3880,7 @@ func (m *Model) renderToolsDialog() string {
 		if m.width > 0 {
 			width = min(100, max(76, m.width-8))
 		}
-		return ui.RenderElement(&ui.Context{Palette: m.palette}, element, width, 0)
+		return m.renderElementText(element, width, 0)
 	}
 	return ""
 }
@@ -3894,7 +3898,7 @@ func (m *Model) renderConnectDialog() string {
 		if m.width > 0 {
 			width = min(104, max(76, m.width-8))
 		}
-		return ui.RenderElement(&ui.Context{Palette: m.palette}, element, width, 0)
+		return m.renderElementText(element, width, 0)
 	}
 	return ""
 }
@@ -3912,7 +3916,7 @@ func (m *Model) renderDisconnectDialog() string {
 		if m.width > 0 {
 			width = min(96, max(72, m.width-8))
 		}
-		return ui.RenderElement(&ui.Context{Palette: m.palette}, element, width, 0)
+		return m.renderElementText(element, width, 0)
 	}
 	return ""
 }
@@ -3930,7 +3934,7 @@ func (m *Model) renderModelDialog() string {
 		if m.width > 0 {
 			width = min(96, max(72, m.width-8))
 		}
-		return ui.RenderElement(&ui.Context{Palette: m.palette}, element, width, 0)
+		return m.renderElementText(element, width, 0)
 	}
 	return ""
 }
@@ -4130,7 +4134,7 @@ func (m *Model) activateApprovalButton(index int) (tea.Model, tea.Cmd) {
 
 func (m *Model) renderApprovalPrompt() string {
 	if element := m.renderApprovalPromptElement(); element != nil {
-		return ui.RenderElement(&ui.Context{Palette: m.palette}, element, 0, 0)
+		return m.renderElementText(element, 0, 0)
 	}
 	return ""
 }
@@ -4178,7 +4182,7 @@ func (m *Model) approvalButtonRow() ui.ButtonRow {
 			width = max(width, lipgloss.Width(line))
 		}
 	}
-	width = max(width, lipgloss.Width(buttons.View(m.palette)))
+	width = max(width, ui.RenderSurface(&ui.Context{Palette: m.palette}, buttons, 0, 0).SurfaceWidth())
 	width = max(width, lipgloss.Width("enter select  tab switch  p permissions  y approve  n deny"))
 	buttons.Width = width
 	return buttons
@@ -4685,7 +4689,7 @@ func (m *Model) openAgentsModal() {
 
 func (m *Model) renderAgentsModal() string {
 	if element := m.renderAgentsModalElement(); element != nil {
-		return ui.RenderElement(&ui.Context{Palette: m.palette}, element, min(110, max(72, m.width-8)), 0)
+		return m.renderElementText(element, min(110, max(72, m.width-8)), 0)
 	}
 	return ""
 }
@@ -4747,7 +4751,7 @@ func (m *Model) openHelpModal() {
 
 func (m *Model) renderHelpModal() string {
 	if element := m.renderHelpModalElement(); element != nil {
-		return ui.RenderElement(&ui.Context{Palette: m.palette}, element, min(104, max(84, m.width-8)), 0)
+		return m.renderElementText(element, min(104, max(84, m.width-8)), 0)
 	}
 	return ""
 }
@@ -4799,7 +4803,7 @@ func (m *Model) resizeLLMPreview() {
 
 func (m *Model) renderLLMPreview() string {
 	if element := m.renderLLMPreviewElement(); element != nil {
-		return ui.RenderElement(&ui.Context{Palette: m.palette}, m.centeredModal(element), max(0, m.width), max(0, m.height))
+		return m.renderElementText(m.centeredModal(element), max(0, m.width), max(0, m.height))
 	}
 	return ""
 }

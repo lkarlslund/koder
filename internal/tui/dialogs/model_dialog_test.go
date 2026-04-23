@@ -11,10 +11,11 @@ import (
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/theme"
 	"github.com/lkarlslund/koder/internal/ui"
+	"github.com/lkarlslund/koder/internal/ui/uitest"
 )
 
 func renderModelDialog(dialog ModelDialog, width int, palette theme.Palette) string {
-	return ui.RenderElement(&ui.Context{Palette: palette}, dialog, width, 0)
+	return uitest.RenderElementText(&ui.Context{Palette: palette}, dialog, width, 0)
 }
 
 func TestModelDialogSelectsModel(t *testing.T) {

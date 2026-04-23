@@ -9,10 +9,11 @@ import (
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/theme"
 	"github.com/lkarlslund/koder/internal/ui"
+	"github.com/lkarlslund/koder/internal/ui/uitest"
 )
 
 func renderPreferencesDialog(dialog PreferencesDialog, width int, palette theme.Palette) string {
-	return ui.RenderElement(&ui.Context{Palette: palette}, dialog, width, 0)
+	return uitest.RenderElementText(&ui.Context{Palette: palette}, dialog, width, 0)
 }
 func TestPreferencesDialogThemeAndToggleEmitDraftChanges(t *testing.T) {
 	dialog := NewPreferencesDialog(config.Default().UI, []string{"tokyonight", "gruvbox"})
