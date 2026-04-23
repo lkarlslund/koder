@@ -62,7 +62,7 @@ func (d Dialog) frameWidth(ctx *Context, constraints Constraints) int {
 	if len(d.Buttons.Buttons) > 0 {
 		buttons := d.Buttons
 		buttons.Width = 0
-		maxContentWidth = max(maxContentWidth, PlainWidth(buttons.line(ctx.Palette)))
+		maxContentWidth = max(maxContentWidth, buttons.Measure(ctx, Constraints{}).W)
 	}
 	maxContentWidth = max(maxContentWidth, PlainWidth(strings.TrimSpace(d.Title)))
 	maxContentWidth = max(maxContentWidth, PlainWidth(strings.TrimSpace(d.Subtitle)))

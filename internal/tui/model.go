@@ -879,7 +879,7 @@ func (m Model) hitCenteredWindowControl(msg tea.MouseMsg) (ui.Control, bool) {
 	}
 	runtime := ui.Runtime{}
 	ctx := &ui.Context{Palette: m.palette, Runtime: &runtime}
-	ui.RenderElement(ctx, m.centeredModal(element), max(0, m.width), max(0, m.height))
+	m.centeredModal(element).Render(ctx, ui.Rect{W: max(0, m.width), H: max(0, m.height)})
 	return runtime.Hit(ui.Point{X: msg.X, Y: msg.Y})
 }
 

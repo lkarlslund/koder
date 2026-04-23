@@ -549,8 +549,7 @@ func (r *ButtonRow) HotkeyIndex(msg tea.KeyMsg) (int, bool) {
 }
 
 func (r ButtonRow) render(palette theme.Palette) Surface {
-	line := r.line(palette)
-	lineWidth := PlainWidth(line)
+	lineWidth := r.lineWidth(palette)
 	width := maxInt(lineWidth, r.Width)
 	if width <= 0 {
 		width = lineWidth
@@ -586,9 +585,8 @@ func (r ButtonRow) Measure(ctx *Context, constraints Constraints) Size {
 
 func (r ButtonRow) Render(ctx *Context, bounds Rect) Surface {
 	rendered := r.render(ctx.Palette)
-	line := r.line(ctx.Palette)
 	rowWidth := rendered.Size().W
-	lineWidth := PlainWidth(line)
+	lineWidth := r.lineWidth(ctx.Palette)
 	startX := 0
 	if bounds.W > lineWidth {
 		switch r.Align {
@@ -601,7 +599,7 @@ func (r ButtonRow) Render(ctx *Context, bounds Rect) Surface {
 	offset := 0
 	for _, button := range r.Buttons {
 		if ctx != nil && ctx.Runtime != nil && strings.TrimSpace(button.ID) != "" {
-			buttonWidth := PlainWidth(button.render(ctx.Palette))
+			buttonWidth := button.renderSurface(ctx.Palette).Size().W
 			ctx.Runtime.Register(Control{
 				ID:      button.ID,
 				Rect:    Rect{X: bounds.X + startX + offset, Y: bounds.Y, W: buttonWidth, H: 1},
@@ -620,6 +618,18 @@ func (r ButtonRow) line(palette theme.Palette) string {
 		parts = append(parts, button.renderSurface(palette).String())
 	}
 	return strings.Join(parts, strings.Repeat(" ", r.gap()))
+}
+
+func (r ButtonRow) lineWidth(palette theme.Palette) int {
+	width := 0
+	for idx, button := range r.Buttons {
+		button.Focused = idx == r.Index
+		width += button.renderSurface(palette).Size().W
+		if idx < len(r.Buttons)-1 {
+			width += r.gap()
+		}
+	}
+	return width
 }
 
 func (r ButtonRow) gap() int {
