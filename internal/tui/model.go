@@ -307,8 +307,11 @@ type Model struct {
 	preferences        *dialogs.PreferencesDialog
 	agentsModal        *ui.Modal
 	helpModal          *ui.Modal
-	llmPreview         *viewport.Model
 	llmPreviewTitle    string
+	llmPreviewBody     string
+	llmPreviewYOffset  int
+	llmPreviewWidth    int
+	llmPreviewHeight   int
 	connectDialog      *dialogs.ConnectDialog
 	disconnectDialog   *dialogs.DisconnectDialog
 	modelDialog        *dialogs.ModelDialog
@@ -578,9 +581,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.syncWindowTitleCmd()
 	case tea.MouseMsg:
 		if m.hasLLMPreview() {
-			var cmd tea.Cmd
-			*m.llmPreview, cmd = m.llmPreview.Update(msg)
-			return m, cmd
+			if updated, ok := m.handleLLMPreviewMouse(msg); ok {
+				return updated, nil
+			}
+			return m, nil
 		}
 		if updated, cmd, ok := m.handleDialogMouse(msg); ok {
 			return updated, cmd
@@ -955,9 +959,10 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.closeLLMPreview()
 			return m, m.syncWindowTitleCmd()
 		}
-		var cmd tea.Cmd
-		*m.llmPreview, cmd = m.llmPreview.Update(msg)
-		return m, cmd
+		if m.handleLLMPreviewKey(msg) {
+			return m, nil
+		}
+		return m, nil
 	}
 	if m.hasPreferencesDialog() {
 		return m.handlePreferencesKey(msg)
@@ -1253,6 +1258,59 @@ func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd, bool) {
 		}
 	}
 	return m, nil, false
+}
+
+func (m *Model) handleLLMPreviewMouse(msg tea.MouseMsg) (tea.Model, bool) {
+	if !m.mouseEnabled {
+		return m, false
+	}
+	switch msg.Button {
+	case tea.MouseButtonWheelUp:
+		if msg.Action == tea.MouseActionPress {
+			m.scrollLLMPreview(-3)
+			return m, true
+		}
+	case tea.MouseButtonWheelDown:
+		if msg.Action == tea.MouseActionPress {
+			m.scrollLLMPreview(3)
+			return m, true
+		}
+	}
+	return m, false
+}
+
+func (m *Model) handleLLMPreviewKey(msg tea.KeyMsg) bool {
+	switch msg.String() {
+	case "up":
+		m.scrollLLMPreview(-1)
+		return true
+	case "down":
+		m.scrollLLMPreview(1)
+		return true
+	case "pgup":
+		m.scrollLLMPreview(-max(1, m.llmPreviewHeight))
+		return true
+	case "pgdown":
+		m.scrollLLMPreview(max(1, m.llmPreviewHeight))
+		return true
+	case "home":
+		m.llmPreviewYOffset = 0
+		return true
+	case "end":
+		m.llmPreviewYOffset = m.llmPreviewMaxOffset()
+		return true
+	default:
+		return false
+	}
+}
+
+func (m *Model) scrollLLMPreview(delta int) {
+	m.llmPreviewYOffset = min(max(0, m.llmPreviewYOffset+delta), m.llmPreviewMaxOffset())
+}
+
+func (m *Model) llmPreviewMaxOffset() int {
+	contentHeight := lipgloss.Height(m.llmPreviewBody)
+	return max(0, contentHeight-max(0, m.llmPreviewHeight))
 }
 
 func (m *Model) applyEvent(evt domain.Event) {
@@ -4335,12 +4393,15 @@ func (m *Model) closeHelpModal() {
 }
 
 func (m *Model) hasLLMPreview() bool {
-	return m.llmPreview != nil
+	return strings.TrimSpace(m.llmPreviewBody) != ""
 }
 
 func (m *Model) closeLLMPreview() {
-	m.llmPreview = nil
 	m.llmPreviewTitle = ""
+	m.llmPreviewBody = ""
+	m.llmPreviewYOffset = 0
+	m.llmPreviewWidth = 0
+	m.llmPreviewHeight = 0
 }
 
 func (m *Model) hasConnectDialog() bool {
@@ -4632,23 +4693,23 @@ func (m Model) previewLLMRequestCmd(ctx context.Context, prompt string, drafts [
 }
 
 func (m *Model) openLLMPreview(title string, body string) {
-	vp := viewport.New(0, 0)
-	vp.SetContent(body)
-	m.llmPreview = &vp
 	m.llmPreviewTitle = title
+	m.llmPreviewBody = body
+	m.llmPreviewYOffset = 0
 	m.resizeLLMPreview()
 }
 
 func (m *Model) resizeLLMPreview() {
-	if m.llmPreview == nil {
+	if !m.hasLLMPreview() {
 		return
 	}
 	width := max(40, m.width-4)
 	height := max(6, m.height-4)
 	bodyWidth := max(20, width-4)
 	bodyHeight := max(3, height-4)
-	m.llmPreview.Width = bodyWidth
-	m.llmPreview.Height = bodyHeight
+	m.llmPreviewWidth = bodyWidth
+	m.llmPreviewHeight = bodyHeight
+	m.llmPreviewYOffset = min(max(0, m.llmPreviewYOffset), m.llmPreviewMaxOffset())
 }
 
 func (m *Model) renderLLMPreview() string {
@@ -4659,7 +4720,7 @@ func (m *Model) renderLLMPreview() string {
 }
 
 func (m *Model) renderLLMPreviewElement() ui.Element {
-	if m.llmPreview == nil {
+	if !m.hasLLMPreview() {
 		return nil
 	}
 	title := strings.TrimSpace(m.llmPreviewTitle)
@@ -4667,9 +4728,14 @@ func (m *Model) renderLLMPreviewElement() ui.Element {
 		title = "Next LLM Request"
 	}
 	return ui.Modal{
-		Title:  title,
-		Body:   m.llmPreview.View(),
-		Footer: "Alt-O, Enter, or Esc closes  •  Use arrows, PgUp/PgDn, or wheel to scroll",
+		Title: title,
+		BodyElement: ui.ScrollFrame{
+			Child:   ui.TextPane{Content: m.llmPreviewBody},
+			OffsetY: m.llmPreviewYOffset,
+			Width:   m.llmPreviewWidth,
+			Height:  m.llmPreviewHeight,
+		},
+		Footer: "Alt-O, Enter, or Esc closes  •  Use arrows, PgUp/PgDn, Home/End, or wheel to scroll",
 		Width:  max(40, m.width-4),
 	}
 }

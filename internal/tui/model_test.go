@@ -1612,6 +1612,41 @@ func TestAltOWithoutDraftShowsStatus(t *testing.T) {
 	}
 }
 
+func TestLLMPreviewScrollUsesElementOffsetState(t *testing.T) {
+	m := Model{
+		cfg:      testConfig(t),
+		composer: textarea.New(),
+		width:    80,
+		height:   12,
+	}
+	m.openLLMPreview("Preview", strings.Join([]string{
+		"line 1",
+		"line 2",
+		"line 3",
+		"line 4",
+		"line 5",
+		"line 6",
+		"line 7",
+	}, "\n"))
+	m.llmPreviewHeight = 3
+	m.llmPreviewWidth = 20
+
+	if !m.handleLLMPreviewKey(tea.KeyMsg{Type: tea.KeyDown}) {
+		t.Fatal("expected preview down key to be handled")
+	}
+	if m.llmPreviewYOffset != 1 {
+		t.Fatalf("expected preview offset 1, got %d", m.llmPreviewYOffset)
+	}
+
+	rendered := ansi.Strip(m.renderLLMPreview())
+	if !strings.Contains(rendered, "line 2") {
+		t.Fatalf("expected scrolled preview to show later lines, got %q", rendered)
+	}
+	if strings.Contains(rendered, "line 1") {
+		t.Fatalf("expected first line to scroll out of view, got %q", rendered)
+	}
+}
+
 func TestQuitCommandQuits(t *testing.T) {
 	m := Model{
 		composer: textarea.New(),
