@@ -115,8 +115,8 @@ func TestFooterOnlyComposerUpdatesKeepBodyCache(t *testing.T) {
 	if !m.ensureRenderCache().bodyValid {
 		t.Fatal("expected body cache to be primed")
 	}
-	if !m.ensureRenderCache().footerValid {
-		t.Fatal("expected footer cache to be primed")
+	if !m.ensureRenderCache().composerAreaValid {
+		t.Fatal("expected composer area cache to be primed")
 	}
 
 	nextModel, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyLeft})
@@ -125,8 +125,8 @@ func TestFooterOnlyComposerUpdatesKeepBodyCache(t *testing.T) {
 	if !next.ensureRenderCache().bodyValid {
 		t.Fatal("expected footer-only composer update to keep body cache valid")
 	}
-	if next.ensureRenderCache().footerValid {
-		t.Fatal("expected footer-only composer update to invalidate footer cache")
+	if next.ensureRenderCache().composerAreaValid {
+		t.Fatal("expected composer-only update to invalidate composer area cache")
 	}
 }
 

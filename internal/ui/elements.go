@@ -546,6 +546,16 @@ type Visibility interface {
 	Visible() bool
 }
 
+type BoxProps struct {
+	VisibleFlag bool
+	HAlign      Alignment
+	VAlign      Alignment
+}
+
+func (p BoxProps) Visible() bool {
+	return p.VisibleFlag
+}
+
 func elementVisible(element Element) bool {
 	if element == nil {
 		return false
@@ -586,12 +596,12 @@ func (b SurfaceBox) Render(_ *Context, bounds Rect) Surface {
 }
 
 type VisibleElement struct {
-	Child       Element
-	VisibleFlag bool
+	BoxProps
+	Child Element
 }
 
 func (e VisibleElement) Visible() bool {
-	return e.VisibleFlag && e.Child != nil
+	return e.BoxProps.Visible() && e.Child != nil
 }
 
 func (e VisibleElement) Measure(ctx *Context, constraints Constraints) Size {

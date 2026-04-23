@@ -267,11 +267,11 @@ type llmPreviewMsg struct {
 }
 
 type modelRenderCache struct {
-	renderedBodySurface   ui.Surface
-	bodyValid             bool
-	renderedFooterSurface ui.Surface
-	footerHeight          int
-	footerValid           bool
+	renderedBodySurface         ui.Surface
+	bodyValid                   bool
+	renderedComposerAreaSurface ui.Surface
+	composerAreaHeight          int
+	composerAreaValid           bool
 }
 
 type Model struct {
@@ -1296,8 +1296,8 @@ func (m *Model) renderComposerAreaLines() []string {
 
 func (m *Model) renderComposerAreaSurface() ui.Surface {
 	cache := m.ensureRenderCache()
-	if cache.footerValid {
-		return cache.renderedFooterSurface
+	if cache.composerAreaValid {
+		return cache.renderedComposerAreaSurface
 	}
 	ctx := &ui.Context{Palette: m.palette}
 	element := m.renderComposerAreaElement()
@@ -1306,13 +1306,13 @@ func (m *Model) renderComposerAreaSurface() ui.Surface {
 	if width <= 0 {
 		width = size.W
 	}
-	cache.renderedFooterSurface = element.Render(ctx, ui.Rect{
+	cache.renderedComposerAreaSurface = element.Render(ctx, ui.Rect{
 		W: width,
 		H: size.H,
 	})
-	cache.footerHeight = size.H
-	cache.footerValid = true
-	return cache.renderedFooterSurface
+	cache.composerAreaHeight = size.H
+	cache.composerAreaValid = true
+	return cache.renderedComposerAreaSurface
 }
 
 func (m *Model) renderComposerAreaElement() ui.Element {
@@ -1368,10 +1368,10 @@ func (m *Model) shouldShowComposerArea() bool {
 
 func (m *Model) composerAreaHeight() int {
 	cache := m.ensureRenderCache()
-	if !cache.footerValid {
+	if !cache.composerAreaValid {
 		_ = m.renderComposerAreaSurface()
 	}
-	return cache.footerHeight
+	return cache.composerAreaHeight
 }
 
 func (m *Model) renderStatusPaneElement() ui.Element {
@@ -1393,17 +1393,19 @@ func (m *Model) renderMainScreenElement() ui.Element {
 	}
 	mainChildren := []ui.Child{
 		ui.Flex(transcript, 1),
-		ui.Fixed(ui.VisibleElement{Child: m.renderTranscriptActivityElement(), VisibleFlag: m.renderTranscriptActivityElement() != nil}),
+		ui.Fixed(ui.VisibleElement{Child: m.renderTranscriptActivityElement(), BoxProps: ui.BoxProps{VisibleFlag: m.renderTranscriptActivityElement() != nil}}),
 		ui.Fixed(m.renderComposerAreaElement()),
 	}
 	mainColumn := ui.VBox{Children: mainChildren, Spacing: 1}
 	sidebar := ui.VisibleElement{
+		BoxProps: ui.BoxProps{
+			VisibleFlag: m.showSidebar,
+		},
 		Child: ui.Sidebar{
 			Child:  ui.TextPane{Content: m.renderSidebar()},
 			Height: m.viewport.Height,
 			Width:  m.sidebarWidth(),
 		},
-		VisibleFlag: m.showSidebar,
 	}
 	rootChildren := []ui.Child{
 		ui.Flex(ui.HBox{
@@ -1648,9 +1650,9 @@ func (m *Model) invalidateBodyCache() {
 
 func (m *Model) invalidateFooterCache() {
 	cache := m.ensureRenderCache()
-	cache.footerValid = false
-	cache.renderedFooterSurface = ui.Surface{}
-	cache.footerHeight = 0
+	cache.composerAreaValid = false
+	cache.renderedComposerAreaSurface = ui.Surface{}
+	cache.composerAreaHeight = 0
 }
 
 func (m *Model) ensureRenderCache() *modelRenderCache {
