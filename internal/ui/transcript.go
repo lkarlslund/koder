@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/x/ansi"
 
 	"github.com/lkarlslund/koder/internal/theme"
 )
@@ -83,7 +82,7 @@ func (i ActivityIndicator) render() Surface {
 	if strings.TrimSpace(i.Indicator) == "" {
 		return Surface{}
 	}
-	line := BlankSurface(ansi.StringWidth(i.Indicator), 1)
+	line := BlankSurface(PlainWidth(i.Indicator), 1)
 	line.WriteText(0, 0, i.Indicator, CellStyle{FG: i.Palette.ActivityText, Bold: true})
 	return line
 }
@@ -184,7 +183,7 @@ func WrapUserMessageLine(line string, width int) []string {
 	if strings.TrimSpace(line) == "" {
 		return []string{""}
 	}
-	wrapped := ansi.Wordwrap(line, width, "")
+	wrapped := PlainWordWrap(line, width)
 	lines := strings.Split(wrapped, "\n")
 	if len(lines) == 0 {
 		return []string{""}
@@ -235,7 +234,7 @@ func (m AssistantMessage) render() Surface {
 	}
 	width := 0
 	for _, line := range lines {
-		width = maxInt(width, ansi.StringWidth(line.text))
+		width = maxInt(width, PlainWidth(line.text))
 	}
 	s := BlankSurface(width, len(lines))
 	for y, line := range lines {
@@ -269,7 +268,7 @@ func (b ReasoningBlock) render() Surface {
 	}
 	width := 0
 	for _, line := range lines {
-		width = maxInt(width, ansi.StringWidth(line))
+		width = maxInt(width, PlainWidth(line))
 	}
 	s := BlankSurface(width, len(lines))
 	style := CellStyle{BG: b.Palette.ReasoningBackground, FG: b.Palette.ReasoningText}
@@ -325,7 +324,7 @@ func wrapStyledLines(input string, width int) []string {
 			wrapped = append(wrapped, "")
 			continue
 		}
-		chunks := strings.Split(ansi.Wordwrap(line, width, ""), "\n")
+		chunks := strings.Split(PlainWordWrap(line, width), "\n")
 		wrapped = append(wrapped, chunks...)
 	}
 	return wrapped

@@ -2,8 +2,6 @@ package ui
 
 import (
 	"strings"
-
-	"github.com/charmbracelet/x/ansi"
 )
 
 // Dialog is a declarative modal shell for app-specific dialog state that lives
@@ -64,11 +62,11 @@ func (d Dialog) frameWidth(ctx *Context, constraints Constraints) int {
 	if len(d.Buttons.Buttons) > 0 {
 		buttons := d.Buttons
 		buttons.Width = 0
-		maxContentWidth = max(maxContentWidth, ansi.StringWidth(buttons.line(ctx.Palette)))
+		maxContentWidth = max(maxContentWidth, PlainWidth(buttons.line(ctx.Palette)))
 	}
-	maxContentWidth = max(maxContentWidth, ansi.StringWidth(strings.TrimSpace(d.Title)))
-	maxContentWidth = max(maxContentWidth, ansi.StringWidth(strings.TrimSpace(d.Subtitle)))
-	maxContentWidth = max(maxContentWidth, ansi.StringWidth(strings.TrimSpace(d.Footer)))
+	maxContentWidth = max(maxContentWidth, PlainWidth(strings.TrimSpace(d.Title)))
+	maxContentWidth = max(maxContentWidth, PlainWidth(strings.TrimSpace(d.Subtitle)))
+	maxContentWidth = max(maxContentWidth, PlainWidth(strings.TrimSpace(d.Footer)))
 	width := d.Width
 	if required := maxContentWidth + 6; required > width {
 		width = required

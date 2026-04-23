@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
 	tea "github.com/lkarlslund/koder/internal/ui/tea"
 
 	"github.com/lkarlslund/koder/internal/config"
@@ -302,7 +301,7 @@ func (d *ConnectDialog) providerListDialog(width int, palette theme.Palette) Ele
 		Fixed(list),
 	}
 	if status := strings.TrimSpace(d.status); status != "" {
-		body = append(body, Fixed(Spacer{H: 1}), Fixed(staticBlock(lipgloss.NewStyle().Foreground(palette.AssistantTimestampText).Render(status))))
+		body = append(body, Fixed(Spacer{H: 1}), Fixed(Label{Text: status}))
 	}
 	return Dialog{
 		Title:  "Connect Provider",
@@ -315,8 +314,8 @@ func (d *ConnectDialog) providerListDialog(width int, palette theme.Palette) Ele
 func (d *ConnectDialog) authPickerDialog(width int, palette theme.Palette) Element {
 	dialogWidth := clampWidth(width, 68, 88)
 	lines := []string{
-		lipgloss.NewStyle().Bold(true).Render(d.selected.Title),
-		lipgloss.NewStyle().Foreground(palette.AssistantTimestampText).Render(d.selected.Description),
+		d.selected.Title,
+		d.selected.Description,
 		"",
 	}
 	items := make([]ListItem, 0, len(d.selected.AuthMethods))
@@ -351,8 +350,8 @@ func (d *ConnectDialog) authPickerDialog(width int, palette theme.Palette) Eleme
 func (d *ConnectDialog) formDialog(width int, palette theme.Palette) Element {
 	dialogWidth := clampWidth(width, 76, 100)
 	lines := []string{
-		lipgloss.NewStyle().Bold(true).Render(d.selected.Title),
-		lipgloss.NewStyle().Foreground(palette.AssistantTimestampText).Render(d.selected.Description),
+		d.selected.Title,
+		d.selected.Description,
 		"",
 	}
 	for idx, field := range d.formFields() {
@@ -361,7 +360,7 @@ func (d *ConnectDialog) formDialog(width int, palette theme.Palette) Element {
 		lines = append(lines, row)
 	}
 	if len(d.models) > 0 {
-		lines = append(lines, lipgloss.NewStyle().Foreground(palette.AssistantTimestampText).Render("Discovered models: "+strings.Join(d.models[:minInt(4, len(d.models))], ", ")))
+		lines = append(lines, "Discovered models: "+strings.Join(d.models[:minInt(4, len(d.models))], ", "))
 	}
 	if status := strings.TrimSpace(d.status); status != "" {
 		lines = append(lines, d.renderStatus(palette))
@@ -388,12 +387,19 @@ func (d ConnectDialog) renderFormField(field connectField, width int, palette th
 	if active {
 		return d.renderEditorValue(field.ID, field.Label, field.Description, width, palette)
 	}
-	return SelectableRow{
-		Primary:   field.Label,
-		Secondary: field.Description,
-		Tertiary:  d.displayValue(field.ID),
-		Width:     width,
-	}.View(palette)
+	labelWidth := minInt(20, maxInt(10, width/4))
+	valueWidth := minInt(22, maxInt(10, width/4))
+	descWidth := maxInt(8, width-labelWidth-valueWidth-4)
+	line := truncateText(field.Label, labelWidth)
+	line += strings.Repeat(" ", maxInt(0, labelWidth-PlainWidth(line)))
+	line += "  "
+	desc := truncateText(field.Description, descWidth)
+	line += desc
+	line += strings.Repeat(" ", maxInt(0, descWidth-PlainWidth(desc)))
+	line += "  "
+	value := truncateText(d.displayValue(field.ID), valueWidth)
+	line += value
+	return padRight(line, width)
 }
 
 func (d ConnectDialog) renderEditorValue(fieldID string, label string, description string, width int, palette theme.Palette) string {
@@ -403,22 +409,15 @@ func (d ConnectDialog) renderEditorValue(fieldID string, label string, descripti
 	valueWidth := minInt(22, maxInt(10, width/4))
 	descWidth := maxInt(8, width-labelWidth-valueWidth-4)
 	content := d.renderEditorContent(fieldID, value, placeholder, valueWidth)
-	line := lipgloss.JoinHorizontal(
-		lipgloss.Top,
-		lipgloss.NewStyle().Width(labelWidth).Bold(true).Render(truncateText(label, labelWidth)),
-		lipgloss.NewStyle().Width(2).Render(""),
-		lipgloss.NewStyle().Width(descWidth).Foreground(palette.AssistantTimestampText).Render(truncateText(description, descWidth)),
-		lipgloss.NewStyle().Width(2).Render(""),
-		lipgloss.NewStyle().Width(valueWidth).Render(content),
-	)
-	style := lipgloss.NewStyle().
-		Width(width).
-		Background(palette.UserTextBackground).
-		Foreground(palette.UserTextForeground)
-	if strings.TrimSpace(value) == "" && placeholder != "" {
-		style = style.Foreground(palette.ComposerMutedText)
-	}
-	return style.Render(" " + line)
+	line := truncateText(label, labelWidth)
+	line += strings.Repeat(" ", maxInt(0, labelWidth-PlainWidth(line)))
+	line += "  "
+	desc := truncateText(description, descWidth)
+	line += desc
+	line += strings.Repeat(" ", maxInt(0, descWidth-PlainWidth(desc)))
+	line += "  "
+	line += content
+	return padRight(" "+line, width)
 }
 
 func (d ConnectDialog) displayValue(fieldID string) string {
@@ -715,7 +714,7 @@ func fitEditorTail(value, placeholder string, width int) string {
 		return ""
 	}
 	if strings.TrimSpace(value) == "" {
-		if lipgloss.Width(placeholder) <= width {
+		if PlainWidth(placeholder) <= width {
 			return placeholder
 		}
 		return truncateText(placeholder, width)
@@ -847,22 +846,12 @@ func (d ConnectDialog) renderStatus(palette theme.Palette) string {
 		label = "ERROR"
 		labelColor = palette.DiffDeletedText
 	}
-	tag := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(labelColor).
-		Background(palette.UserTextBackground).
-		Padding(0, 1).
-		Render(label)
-	body := lipgloss.NewStyle().
-		Foreground(palette.SidebarForeground).
-		Background(palette.UserTextBackground).
-		Padding(0, 1).
-		Render(status)
-	return lipgloss.JoinHorizontal(lipgloss.Left, tag, " ", body)
+	_ = labelColor
+	return "[" + label + "] " + status
 }
 
 func padRight(input string, width int) string {
-	got := lipgloss.Width(input)
+	got := PlainWidth(input)
 	if got >= width {
 		return truncateText(input, width)
 	}

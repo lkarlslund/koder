@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/x/ansi"
 	tea "github.com/lkarlslund/koder/internal/ui/tea"
 
 	"github.com/lkarlslund/koder/internal/theme"
@@ -55,7 +54,7 @@ func (h SelectableHeader) render(palette theme.Palette) Surface {
 	if tertiaryWidth > 0 {
 		col += secondaryWidth + gapWidth
 		text := truncateText(strings.TrimSpace(h.Tertiary), tertiaryWidth)
-		s.WriteText(col+maxInt(0, tertiaryWidth-ansi.StringWidth(text)), 0, text, style)
+		s.WriteText(col+maxInt(0, tertiaryWidth-PlainWidth(text)), 0, text, style)
 	}
 	return s
 }
@@ -120,7 +119,7 @@ func (r SelectableRow) render(palette theme.Palette) Surface {
 	if tertiaryWidth > 0 {
 		col += secondaryWidth + gapWidth
 		text := truncateText(strings.TrimSpace(tertiary), tertiaryWidth)
-		s.WriteText(col+maxInt(0, tertiaryWidth-ansi.StringWidth(text)), 0, text, tertiaryStyle)
+		s.WriteText(col+maxInt(0, tertiaryWidth-PlainWidth(text)), 0, text, tertiaryStyle)
 	}
 	return s
 }
@@ -161,8 +160,10 @@ func selectableColumnWidths(width int, primary, secondary, tertiary string, prim
 }
 
 type VerticalTabs struct {
-	Tabs   []string
-	Active int
+	Tabs    []string
+	Active  int
+	Width   int
+	Focused bool
 }
 
 func (v *VerticalTabs) Move(delta int) {
@@ -196,6 +197,28 @@ func (v VerticalTabs) View(width int, palette theme.Palette, focused bool) strin
 	return v.render(width, palette, focused).String()
 }
 
+func (v VerticalTabs) Measure(ctx *Context, constraints Constraints) Size {
+	width := v.Width
+	if width <= 0 {
+		width = constraints.MaxW
+	}
+	if width <= 0 {
+		width = 1
+	}
+	return constraints.Clamp(Size{W: width, H: len(v.Tabs)})
+}
+
+func (v VerticalTabs) Render(ctx *Context, bounds Rect) Surface {
+	width := v.Width
+	if width <= 0 {
+		width = bounds.W
+	}
+	if width <= 0 {
+		width = 1
+	}
+	return v.render(width, ctx.Palette, v.Focused).normalize(bounds.W, bounds.H)
+}
+
 func (v VerticalTabs) render(width int, palette theme.Palette, focused bool) Surface {
 	if width <= 0 {
 		width = 1
@@ -219,7 +242,7 @@ func (v VerticalTabs) render(width int, palette theme.Palette, focused bool) Sur
 		for x := 0; x < width; x++ {
 			s.setCell(x, idx, Cell{Text: " ", Width: 1, Style: style})
 		}
-		s.WriteText(0, idx, ansi.Truncate(label, width, ""), style)
+		s.WriteText(0, idx, PlainTruncate(label, width, ""), style)
 	}
 	return s
 }
@@ -230,10 +253,54 @@ type CheckboxRow struct {
 	Checked     bool
 	OnLabel     string
 	OffLabel    string
+	Width       int
+	Focused     bool
 }
 
 func (r CheckboxRow) View(width int, palette theme.Palette, focused bool) string {
 	return r.render(width, palette, focused)
+}
+
+func (r CheckboxRow) Measure(ctx *Context, constraints Constraints) Size {
+	width := r.Width
+	if width <= 0 {
+		width = constraints.MaxW
+	}
+	if width <= 0 {
+		width = 1
+	}
+	return constraints.Clamp(Size{W: width, H: 1})
+}
+
+func (r CheckboxRow) Render(ctx *Context, bounds Rect) Surface {
+	width := r.Width
+	if width <= 0 {
+		width = bounds.W
+	}
+	if width <= 0 {
+		width = 1
+	}
+	label := strings.TrimSpace(r.OffLabel)
+	glyph := "☐"
+	if r.Checked {
+		label = strings.TrimSpace(r.OnLabel)
+		glyph = "☑"
+	}
+	if label == "" {
+		if r.Checked {
+			label = "On"
+		} else {
+			label = "Off"
+		}
+	}
+	return SelectableRow{
+		Primary:   r.Label,
+		Secondary: r.Description,
+		Tertiary:  glyph + " " + label,
+		Width:     width,
+		Selected:  r.Focused,
+		Focused:   r.Focused,
+	}.render(ctx.Palette).normalize(bounds.W, bounds.H)
 }
 
 func (r CheckboxRow) render(width int, palette theme.Palette, focused bool) string {
@@ -271,10 +338,41 @@ type ChoiceRow struct {
 	Label       string
 	Description string
 	Value       string
+	Width       int
+	Focused     bool
 }
 
 func (r ChoiceRow) View(width int, palette theme.Palette, focused bool) string {
 	return r.render(width, palette, focused)
+}
+
+func (r ChoiceRow) Measure(ctx *Context, constraints Constraints) Size {
+	width := r.Width
+	if width <= 0 {
+		width = constraints.MaxW
+	}
+	if width <= 0 {
+		width = 1
+	}
+	return constraints.Clamp(Size{W: width, H: 1})
+}
+
+func (r ChoiceRow) Render(ctx *Context, bounds Rect) Surface {
+	width := r.Width
+	if width <= 0 {
+		width = bounds.W
+	}
+	if width <= 0 {
+		width = 1
+	}
+	return SelectableRow{
+		Primary:   r.Label,
+		Secondary: r.Description,
+		Tertiary:  r.Value,
+		Width:     width,
+		Selected:  r.Focused,
+		Focused:   r.Focused,
+	}.render(ctx.Palette).normalize(bounds.W, bounds.H)
 }
 
 func (r ChoiceRow) render(width int, palette theme.Palette, focused bool) string {
@@ -331,7 +429,7 @@ func (b Button) renderSurface(palette theme.Palette) Surface {
 	parts := buttonLabelParts(b.Label, b.Hotkey)
 	width := 4
 	for _, part := range parts {
-		width += ansi.StringWidth(part.text)
+		width += PlainWidth(part.text)
 	}
 	s := BlankSurface(width, 1)
 	for x := 0; x < width; x++ {
@@ -344,7 +442,7 @@ func (b Button) renderSurface(palette theme.Palette) Surface {
 			partStyle = hotStyle
 		}
 		s.WriteText(col, 0, part.text, partStyle)
-		col += ansi.StringWidth(part.text)
+		col += PlainWidth(part.text)
 	}
 	return s
 }
@@ -452,7 +550,7 @@ func (r *ButtonRow) HotkeyIndex(msg tea.KeyMsg) (int, bool) {
 
 func (r ButtonRow) render(palette theme.Palette) Surface {
 	line := r.line(palette)
-	lineWidth := ansi.StringWidth(line)
+	lineWidth := PlainWidth(line)
 	width := maxInt(lineWidth, r.Width)
 	if width <= 0 {
 		width = lineWidth
@@ -476,7 +574,7 @@ func (r ButtonRow) render(palette theme.Palette) Surface {
 		offset += buttonSurface.Size().W
 		if idx < len(r.Buttons)-1 {
 			s.WriteText(offset, 0, gap, CellStyle{})
-			offset += ansi.StringWidth(gap)
+			offset += PlainWidth(gap)
 		}
 	}
 	return s
@@ -490,7 +588,7 @@ func (r ButtonRow) Render(ctx *Context, bounds Rect) Surface {
 	rendered := r.render(ctx.Palette)
 	line := r.line(ctx.Palette)
 	rowWidth := rendered.Size().W
-	lineWidth := ansi.StringWidth(line)
+	lineWidth := PlainWidth(line)
 	startX := 0
 	if bounds.W > lineWidth {
 		switch r.Align {
@@ -503,7 +601,7 @@ func (r ButtonRow) Render(ctx *Context, bounds Rect) Surface {
 	offset := 0
 	for _, button := range r.Buttons {
 		if ctx != nil && ctx.Runtime != nil && strings.TrimSpace(button.ID) != "" {
-			buttonWidth := ansi.StringWidth(button.render(ctx.Palette))
+			buttonWidth := PlainWidth(button.render(ctx.Palette))
 			ctx.Runtime.Register(Control{
 				ID:      button.ID,
 				Rect:    Rect{X: bounds.X + startX + offset, Y: bounds.Y, W: buttonWidth, H: 1},
@@ -574,7 +672,7 @@ func buttonLabelSurface(label string, hotkey rune, palette theme.Palette, foregr
 	parts := buttonLabelParts(label, hotkey)
 	width := 0
 	for _, part := range parts {
-		width += ansi.StringWidth(part.text)
+		width += PlainWidth(part.text)
 	}
 	s := BlankSurface(width, 1)
 	col := 0
@@ -584,7 +682,7 @@ func buttonLabelSurface(label string, hotkey rune, palette theme.Palette, foregr
 			partStyle = hotStyle
 		}
 		s.WriteText(col, 0, part.text, partStyle)
-		col += ansi.StringWidth(part.text)
+		col += PlainWidth(part.text)
 	}
 	return s
 }
@@ -647,13 +745,13 @@ func truncateText(input string, width int) string {
 		return ""
 	}
 	input = compactInlineText(input)
-	if ansi.StringWidth(input) <= width {
+	if PlainWidth(input) <= width {
 		return input
 	}
 	if width == 1 {
 		return "…"
 	}
-	return ansi.Truncate(input, width, "…")
+	return PlainTruncate(input, width, "…")
 }
 
 func compactInlineText(input string) string {

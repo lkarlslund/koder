@@ -4,7 +4,6 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/x/ansi"
 
 	"github.com/lkarlslund/koder/internal/theme"
 )
@@ -54,10 +53,10 @@ func (c Composer) Render(_ *Context, bounds Rect) Surface {
 func (c Composer) render() Surface {
 	width := maxInt(1, c.Width)
 	prompt := c.PromptGlyph + " "
-	promptWidth := ansi.StringWidth(prompt)
+	promptWidth := PlainWidth(prompt)
 	if promptWidth >= width {
-		prompt = ansi.Truncate(prompt, maxInt(1, width-1), "")
-		promptWidth = ansi.StringWidth(prompt)
+		prompt = PlainTruncate(prompt, maxInt(1, width-1), "")
+		promptWidth = PlainWidth(prompt)
 	}
 	contentWidth := maxInt(0, width-promptWidth)
 	promptStyle := lipgloss.NewStyle().
@@ -105,7 +104,7 @@ func (c Composer) renderPlaceholderLine(promptStyle, contentStyle lipgloss.Style
 }
 
 func (c Composer) renderPlaceholderSurface(promptStyle, contentStyle lipgloss.Style, prompt string, contentWidth int, placeholder string, cursorChar string) Surface {
-	placeholder = ansi.Truncate(placeholder, contentWidth, "")
+	placeholder = PlainTruncate(placeholder, contentWidth, "")
 	if placeholder == "" {
 		return c.renderPlaceholder(prompt, promptStyle, "", cursorChar, "", contentWidth, c.CursorVisible, c.Palette.UserTextForeground, c.Palette.UserTextBackground, c.Palette.ComposerMutedText)
 	}
@@ -126,9 +125,9 @@ func (c Composer) renderLine(prompt string, promptStyle lipgloss.Style, before, 
 }
 
 func (c Composer) renderLineSurface(prompt string, promptStyle lipgloss.Style, before, cursor, after string, contentWidth int, cursorVisible bool, textFG, textBG lipgloss.Color) Surface {
-	width := ansi.StringWidth(prompt) + maxInt(0, contentWidth)
+	width := PlainWidth(prompt) + maxInt(0, contentWidth)
 	if width <= 0 {
-		width = ansi.StringWidth(prompt)
+		width = PlainWidth(prompt)
 	}
 	s := BlankSurface(width, 1)
 	promptCellStyle := CellStyle{BG: c.Palette.UserTextBackground, FG: c.Palette.UserAccentBar}
@@ -136,35 +135,35 @@ func (c Composer) renderLineSurface(prompt string, promptStyle lipgloss.Style, b
 		s.WriteText(0, 0, prompt, promptCellStyle)
 		return s
 	}
-	before = ansi.Truncate(before, contentWidth, "")
-	cursor = ansi.Truncate(cursor, maxInt(1, contentWidth-ansi.StringWidth(before)), "")
-	remaining := maxInt(0, contentWidth-ansi.StringWidth(before)-ansi.StringWidth(cursor))
-	after = ansi.Truncate(after, remaining, "")
-	remaining = maxInt(0, contentWidth-ansi.StringWidth(before)-ansi.StringWidth(cursor)-ansi.StringWidth(after))
+	before = PlainTruncate(before, contentWidth, "")
+	cursor = PlainTruncate(cursor, maxInt(1, contentWidth-PlainWidth(before)), "")
+	remaining := maxInt(0, contentWidth-PlainWidth(before)-PlainWidth(cursor))
+	after = PlainTruncate(after, remaining, "")
+	remaining = maxInt(0, contentWidth-PlainWidth(before)-PlainWidth(cursor)-PlainWidth(after))
 	contentStyle := CellStyle{FG: textFG, BG: textBG}
 	cursorStyle := contentStyle
 	if cursorVisible {
 		cursorStyle = CellStyle{FG: textBG, BG: textFG}
 	}
 	s.WriteText(0, 0, prompt, promptCellStyle)
-	offset := ansi.StringWidth(prompt)
+	offset := PlainWidth(prompt)
 	for x := offset; x < width; x++ {
 		s.setCell(x, 0, Cell{Text: " ", Width: 1, Style: contentStyle})
 	}
 	s.WriteText(offset, 0, before, contentStyle)
-	s.WriteText(offset+ansi.StringWidth(before), 0, cursor, cursorStyle)
-	s.WriteText(offset+ansi.StringWidth(before)+ansi.StringWidth(cursor), 0, after, contentStyle)
+	s.WriteText(offset+PlainWidth(before), 0, cursor, cursorStyle)
+	s.WriteText(offset+PlainWidth(before)+PlainWidth(cursor), 0, after, contentStyle)
 	if remaining > 0 {
-		s.WriteText(offset+ansi.StringWidth(before)+ansi.StringWidth(cursor)+ansi.StringWidth(after), 0, strings.Repeat(" ", remaining), contentStyle)
+		s.WriteText(offset+PlainWidth(before)+PlainWidth(cursor)+PlainWidth(after), 0, strings.Repeat(" ", remaining), contentStyle)
 	}
 	_ = promptStyle
 	return s
 }
 
 func (c Composer) renderPlaceholder(prompt string, promptStyle lipgloss.Style, before, cursor, after string, contentWidth int, cursorVisible bool, textFG, textBG, muted lipgloss.Color) Surface {
-	width := ansi.StringWidth(prompt) + maxInt(0, contentWidth)
+	width := PlainWidth(prompt) + maxInt(0, contentWidth)
 	if width <= 0 {
-		width = ansi.StringWidth(prompt)
+		width = PlainWidth(prompt)
 	}
 	s := BlankSurface(width, 1)
 	promptCellStyle := CellStyle{BG: c.Palette.UserTextBackground, FG: c.Palette.UserAccentBar}
@@ -172,11 +171,11 @@ func (c Composer) renderPlaceholder(prompt string, promptStyle lipgloss.Style, b
 		s.WriteText(0, 0, prompt, promptCellStyle)
 		return s
 	}
-	before = ansi.Truncate(before, contentWidth, "")
-	cursor = ansi.Truncate(cursor, maxInt(1, contentWidth-ansi.StringWidth(before)), "")
-	remaining := maxInt(0, contentWidth-ansi.StringWidth(before)-ansi.StringWidth(cursor))
-	after = ansi.Truncate(after, remaining, "")
-	remaining = maxInt(0, contentWidth-ansi.StringWidth(before)-ansi.StringWidth(cursor)-ansi.StringWidth(after))
+	before = PlainTruncate(before, contentWidth, "")
+	cursor = PlainTruncate(cursor, maxInt(1, contentWidth-PlainWidth(before)), "")
+	remaining := maxInt(0, contentWidth-PlainWidth(before)-PlainWidth(cursor))
+	after = PlainTruncate(after, remaining, "")
+	remaining = maxInt(0, contentWidth-PlainWidth(before)-PlainWidth(cursor)-PlainWidth(after))
 	beforeStyle := CellStyle{FG: textFG, BG: textBG}
 	cursorStyle := CellStyle{FG: muted, BG: textBG}
 	if cursorVisible {
@@ -184,15 +183,15 @@ func (c Composer) renderPlaceholder(prompt string, promptStyle lipgloss.Style, b
 	}
 	afterStyle := CellStyle{FG: muted, BG: textBG}
 	s.WriteText(0, 0, prompt, promptCellStyle)
-	offset := ansi.StringWidth(prompt)
+	offset := PlainWidth(prompt)
 	for x := offset; x < width; x++ {
 		s.setCell(x, 0, Cell{Text: " ", Width: 1, Style: beforeStyle})
 	}
 	s.WriteText(offset, 0, before, beforeStyle)
-	s.WriteText(offset+ansi.StringWidth(before), 0, cursor, cursorStyle)
-	s.WriteText(offset+ansi.StringWidth(before)+ansi.StringWidth(cursor), 0, after, afterStyle)
+	s.WriteText(offset+PlainWidth(before), 0, cursor, cursorStyle)
+	s.WriteText(offset+PlainWidth(before)+PlainWidth(cursor), 0, after, afterStyle)
 	if remaining > 0 {
-		s.WriteText(offset+ansi.StringWidth(before)+ansi.StringWidth(cursor)+ansi.StringWidth(after), 0, strings.Repeat(" ", remaining), beforeStyle)
+		s.WriteText(offset+PlainWidth(before)+PlainWidth(cursor)+PlainWidth(after), 0, strings.Repeat(" ", remaining), beforeStyle)
 	}
 	_ = promptStyle
 	return s
@@ -247,7 +246,7 @@ func (l AttachmentList) render(palette theme.Palette) Surface {
 		for x := 0; x < l.Width; x++ {
 			s.setCell(x, y, Cell{Text: " ", Width: 1, Style: style})
 		}
-		s.WriteText(1, y, ansi.Truncate(item.Label, maxInt(1, l.Width-2), ""), style)
+		s.WriteText(1, y, PlainTruncate(item.Label, maxInt(1, l.Width-2), ""), style)
 	}
 	return s
 }

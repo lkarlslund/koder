@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/x/ansi"
 
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/theme"
@@ -89,7 +88,7 @@ func (r ToolRun) renderCard(palette theme.Palette, width int, expanded bool) Sur
 	cardWidth := 0
 	for _, line := range lines {
 		for _, sub := range strings.Split(line, "\n") {
-			cardWidth = maxInt(cardWidth, ansi.StringWidth(sub))
+			cardWidth = maxInt(cardWidth, PlainWidth(sub))
 		}
 	}
 	s := BlankSurface(cardWidth, strings.Count(strings.Join(lines, "\n"), "\n")+1)
@@ -106,13 +105,13 @@ func (r ToolRun) renderCard(palette theme.Palette, width int, expanded bool) Sur
 		col := 0
 		if len(headerCols) > 0 {
 			s.WriteText(col, row, headerCols[0], titleStyle)
-			col += ansi.StringWidth(headerCols[0])
+			col += PlainWidth(headerCols[0])
 		}
 		for _, extra := range headerCols[1:] {
 			s.WriteText(col, row, "  ", bodyStyle)
 			col += 2
 			s.WriteText(col, row, extra, toggleStyle)
-			col += ansi.StringWidth(extra)
+			col += PlainWidth(extra)
 		}
 		row++
 	}
@@ -205,17 +204,17 @@ func (d ToolRunDock) element() Element {
 
 func (d ToolRunDock) contentWidth() int {
 	run := d.Run
-	titleWidth := ansi.StringWidth(run.Title) + 2 + ansi.StringWidth(run.StatusLabel())
-	contentWidth := maxInt(titleWidth, ansi.StringWidth(d.Hints))
+	titleWidth := PlainWidth(run.Title) + 2 + PlainWidth(run.StatusLabel())
+	contentWidth := maxInt(titleWidth, PlainWidth(d.Hints))
 	buttons := d.Buttons
 	buttons.Align = HorizontalAlignRight
-	contentWidth = maxInt(contentWidth, ansi.StringWidth(buttons.line(d.Palette)))
+	contentWidth = maxInt(contentWidth, PlainWidth(buttons.line(d.Palette)))
 	if subtitle := strings.TrimSpace(run.Subtitle); subtitle != "" {
-		contentWidth = maxInt(contentWidth, ansi.StringWidth(subtitle))
+		contentWidth = maxInt(contentWidth, PlainWidth(subtitle))
 	}
 	if preview := firstNonEmpty(strings.TrimSpace(run.Preview), strings.TrimSpace(run.Output), strings.TrimSpace(run.ErrorText)); preview != "" {
 		for _, line := range strings.Split(preview, "\n") {
-			contentWidth = maxInt(contentWidth, ansi.StringWidth(line))
+			contentWidth = maxInt(contentWidth, PlainWidth(line))
 		}
 	}
 	return contentWidth
@@ -330,7 +329,7 @@ func (t toolRunDockTitle) Render(_ *Context, bounds Rect) Surface {
 	}
 	s := BlankSurface(width, 1)
 	s.WriteText(0, 0, t.Title, CellStyle{FG: t.Palette.MarkdownText, Bold: true})
-	s.WriteText(ansi.StringWidth(t.Title)+2, 0, t.Status, CellStyle{FG: t.Color, Bold: true})
+	s.WriteText(PlainWidth(t.Title)+2, 0, t.Status, CellStyle{FG: t.Color, Bold: true})
 	return s.normalize(bounds.W, bounds.H)
 }
 
@@ -347,7 +346,7 @@ func (p toolRunDockPreview) Measure(_ *Context, constraints Constraints) Size {
 	}
 	width := 0
 	for _, line := range lines {
-		width = max(width, ansi.StringWidth(line))
+		width = max(width, PlainWidth(line))
 	}
 	if p.Width > 0 {
 		width = min(width, p.Width)
@@ -367,7 +366,7 @@ func (p toolRunDockPreview) Render(_ *Context, bounds Rect) Surface {
 	s := BlankSurface(width, len(lines))
 	style := CellStyle{FG: p.Palette.MarkdownText}
 	for y, line := range lines {
-		s.WriteText(0, y, ansi.Truncate(line, width, ""), style)
+		s.WriteText(0, y, PlainTruncate(line, width, ""), style)
 	}
 	return s.normalize(bounds.W, bounds.H)
 }
@@ -393,7 +392,7 @@ func singleLineSummary(input string) string {
 	if lipgloss.Width(summary) <= 90 {
 		return summary
 	}
-	return ansi.Truncate(summary, 90, "…")
+	return PlainTruncate(summary, 90, "…")
 }
 
 func firstPreviewLine(input string) string {
@@ -432,7 +431,7 @@ func wrapPlain(input string, width int) string {
 			lines = append(lines, "")
 			continue
 		}
-		lines = append(lines, strings.Split(ansi.Wordwrap(line, width, ""), "\n")...)
+		lines = append(lines, strings.Split(PlainWordWrap(line, width), "\n")...)
 	}
 	return strings.Join(lines, "\n")
 }

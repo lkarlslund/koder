@@ -4,7 +4,6 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/x/ansi"
 
 	"github.com/lkarlslund/koder/internal/theme"
 )
@@ -101,11 +100,11 @@ func (m SlashMenu) element(contentWidth int) Element {
 }
 
 func (m SlashMenu) contentWidth() int {
-	primaryWidth := ansi.StringWidth(strings.TrimSpace(m.Title))
+	primaryWidth := PlainWidth(strings.TrimSpace(m.Title))
 	secondaryWidth := 0
 	for _, item := range m.Items {
-		primaryWidth = max(primaryWidth, ansi.StringWidth(compactInlineText(item.Title)))
-		secondaryWidth = max(secondaryWidth, ansi.StringWidth(compactInlineText(item.Description)))
+		primaryWidth = max(primaryWidth, PlainWidth(compactInlineText(item.Title)))
+		secondaryWidth = max(secondaryWidth, PlainWidth(compactInlineText(item.Description)))
 	}
 	primaryWidth = max(12, min(18, primaryWidth))
 	return max(20, primaryWidth+2+secondaryWidth)

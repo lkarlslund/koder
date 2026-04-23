@@ -5,7 +5,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
 	tea "github.com/lkarlslund/koder/internal/ui/tea"
 
 	"github.com/lkarlslund/koder/internal/theme"
@@ -150,16 +149,22 @@ func (d DisconnectDialog) dialog(width int, palette theme.Palette) Element {
 		})
 	}
 
-	details := "No provider selected"
+	var detailsElement Element = staticBlock("No provider selected")
 	if item, ok := d.current(); ok {
-		blocks := []string{
-			lipgloss.NewStyle().Bold(true).Render(item.Title),
+		blocks := []Child{
+			Fixed(Label{Text: item.Title}),
 		}
-		blocks = append(blocks, item.Details...)
+		for _, line := range item.Details {
+			if strings.TrimSpace(line) == "" {
+				blocks = append(blocks, Fixed(Spacer{H: 1}))
+				continue
+			}
+			blocks = append(blocks, Fixed(Label{Text: line}))
+		}
 		if desc := strings.TrimSpace(item.Description); desc != "" {
-			blocks = append(blocks, "", truncateText(desc, detailWidth))
+			blocks = append(blocks, Fixed(Spacer{H: 1}), Fixed(Paragraph{Text: truncateText(desc, detailWidth)}))
 		}
-		details = strings.Join(blocks, "\n")
+		detailsElement = Column{Children: blocks}
 	}
 
 	return Dialog{
@@ -193,7 +198,7 @@ func (d DisconnectDialog) dialog(width int, palette theme.Palette) Element {
 						Background:  palette.SidebarBackground,
 						Foreground:  palette.SidebarForeground,
 						BorderColor: palette.SidebarBorder,
-						Child:       TextPane{Content: details},
+						Child:       detailsElement,
 					},
 					Gap: 1,
 				}),

@@ -4,7 +4,6 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/x/ansi"
 
 	"github.com/lkarlslund/koder/internal/theme"
 )
@@ -360,7 +359,7 @@ func (h tableHeader) Render(_ *Context, bounds Rect) Surface {
 		text := truncateText(strings.TrimSpace(col.Title), col.Width)
 		writeX := colX
 		if col.AlignRight {
-			writeX += max(0, col.Width-ansi.StringWidth(text))
+			writeX += max(0, col.Width-PlainWidth(text))
 		}
 		s.WriteText(writeX, 0, text, style)
 		colX += col.Width
@@ -422,7 +421,7 @@ func (r tableRow) Render(_ *Context, bounds Rect) Surface {
 		value = truncateText(value, col.Width)
 		writeX := colX
 		if col.AlignRight {
-			writeX += max(0, col.Width-ansi.StringWidth(value))
+			writeX += max(0, col.Width-PlainWidth(value))
 		}
 		style := cellStyle
 		if idx == 0 {

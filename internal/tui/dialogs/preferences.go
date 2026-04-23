@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
 	tea "github.com/lkarlslund/koder/internal/ui/tea"
 
 	"github.com/lkarlslund/koder/internal/config"
@@ -286,38 +285,44 @@ func (d PreferencesDialog) dialog(width int, palette theme.Palette) Element {
 	tabWidth := 18
 	fieldWidth := maxInt(40, dialogWidth-tabWidth-9)
 
-	fieldLines := make([]string, 0, len(d.currentFields()))
+	fieldRows := make([]Child, 0, len(d.currentFields()))
 	for idx, field := range d.currentFields() {
 		focused := d.focus == preferencesFocusFields && idx == d.fieldIndex
 		switch field.Kind {
 		case preferencesFieldTheme:
-			fieldLines = append(fieldLines, ChoiceRow{
+			fieldRows = append(fieldRows, Fixed(ChoiceRow{
 				Label:       field.Label,
 				Description: field.Description,
 				Value:       d.draft.Theme,
-			}.View(fieldWidth, palette, focused))
+				Width:       fieldWidth,
+				Focused:     focused,
+			}))
 		case preferencesFieldSpinner:
 			style := SpinnerStyleByID(d.draft.Spinner)
 			value := SpinnerFrame(d.draft.Spinner, d.spinnerFrame) + " " + style.Label
-			fieldLines = append(fieldLines, ChoiceRow{
+			fieldRows = append(fieldRows, Fixed(ChoiceRow{
 				Label:       field.Label,
 				Description: field.Description,
 				Value:       value,
-			}.View(fieldWidth, palette, focused))
+				Width:       fieldWidth,
+				Focused:     focused,
+			}))
 		case preferencesFieldToggle:
-			fieldLines = append(fieldLines, CheckboxRow{
+			fieldRows = append(fieldRows, Fixed(CheckboxRow{
 				Label:       field.Label,
 				Description: field.Description,
 				Checked:     d.toggleValue(field.ID),
 				OnLabel:     "Enabled",
 				OffLabel:    "Disabled",
-			}.View(fieldWidth, palette, focused))
+				Width:       fieldWidth,
+				Focused:     focused,
+			}))
 		}
 	}
-	fields := lipgloss.NewStyle().
-		Width(fieldWidth).
-		PaddingLeft(1).
-		Render(strings.Join(fieldLines, "\n"))
+	fields := Inset{
+		Padding: Insets{Left: 1},
+		Child:   Column{Children: fieldRows},
+	}
 
 	buttons := ButtonRow{
 		Buttons: []Button{
@@ -336,13 +341,18 @@ func (d PreferencesDialog) dialog(width int, palette theme.Palette) Element {
 			First: Section{
 				Title: "Tabs",
 				Width: tabWidth,
-				Child: staticBlock(d.tabList.View(tabWidth-2, palette, d.focus == preferencesFocusTabs)),
+				Child: VerticalTabs{
+					Tabs:    d.tabList.Tabs,
+					Active:  d.tabList.Active,
+					Width:   tabWidth - 2,
+					Focused: d.focus == preferencesFocusTabs,
+				},
 			},
 			Second: Section{
 				Title:   "Options",
 				Width:   fieldWidth + 1,
 				Padding: Insets{Left: 1},
-				Child:   staticBlock(fields),
+				Child:   fields,
 			},
 			Gap: 1,
 		},

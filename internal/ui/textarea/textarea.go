@@ -5,8 +5,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/x/ansi"
 	tea "github.com/lkarlslund/koder/internal/ui/tea"
+	"github.com/mattn/go-runewidth"
 )
 
 const blinkInterval = 530 * time.Millisecond
@@ -315,7 +315,7 @@ func (m Model) visibleLine() VisibleLine {
 	if localCursor > len(lineRunes) {
 		localCursor = len(lineRunes)
 	}
-	contentWidth := max(1, m.width-ansi.StringWidth(m.Prompt))
+	contentWidth := max(1, m.width-runewidth.StringWidth(m.Prompt))
 	start, end := windowAroundCursor(lineRunes, localCursor, contentWidth)
 	lineRunes = lineRunes[start:end]
 	localCursor -= start

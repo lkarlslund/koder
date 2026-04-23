@@ -4,7 +4,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/charmbracelet/x/ansi"
 	tea "github.com/lkarlslund/koder/internal/ui/tea"
 
 	"github.com/lkarlslund/koder/internal/domain"
@@ -205,10 +204,10 @@ func truncateModelCell(value string, width int) string {
 	if width <= 0 {
 		return ""
 	}
-	if ansi.StringWidth(value) <= width {
+	if PlainWidth(value) <= width {
 		return value
 	}
-	return ansi.Truncate(value, width, "…")
+	return PlainTruncate(value, width, "…")
 }
 
 func firstNonEmptyModelValue(values ...string) string {

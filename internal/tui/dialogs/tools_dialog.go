@@ -141,13 +141,15 @@ func (d ToolsDialog) dialog(width int, palette theme.Palette) Element {
 	for idx, item := range d.items {
 		rows = append(rows, Fixed(HitBox{
 			ID: "tool-row-" + strconv.Itoa(idx),
-			Child: TextPane{Content: CheckboxRow{
+			Child: CheckboxRow{
 				Label:       item.Label,
 				Description: item.Description,
 				Checked:     item.Enabled,
 				OnLabel:     "Enabled",
 				OffLabel:    "Disabled",
-			}.View(rowWidth, palette, d.focus == toolsDialogFocusList && idx == d.index)},
+				Width:       rowWidth,
+				Focused:     d.focus == toolsDialogFocusList && idx == d.index,
+			},
 		}))
 	}
 	return Dialog{

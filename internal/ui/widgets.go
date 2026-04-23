@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/x/ansi"
 
 	"github.com/lkarlslund/koder/internal/theme"
 )
@@ -22,7 +21,7 @@ func (l Label) Measure(_ *Context, constraints Constraints) Size {
 func (l Label) Render(_ *Context, bounds Rect) Surface {
 	width := max(1, bounds.W)
 	s := BlankSurface(width, max(1, bounds.H))
-	s.WriteText(0, 0, ansi.Truncate(l.Text, width, ""), lipglossToCellStyle(l.Style))
+	s.WriteText(0, 0, PlainTruncate(l.Text, width, ""), lipglossToCellStyle(l.Style))
 	return s.normalize(bounds.W, bounds.H)
 }
 
@@ -207,7 +206,7 @@ func (d Divider) Render(_ *Context, bounds Rect) Surface {
 		text += strings.Repeat("─", width-lipgloss.Width(text))
 	}
 	s := BlankSurface(width, max(1, bounds.H))
-	s.WriteText(0, 0, ansi.Truncate(text, width, ""), lipglossToCellStyle(d.Style))
+	s.WriteText(0, 0, PlainTruncate(text, width, ""), lipglossToCellStyle(d.Style))
 	return s.normalize(width, bounds.H)
 }
 
@@ -220,7 +219,7 @@ func (p Paragraph) Measure(_ *Context, constraints Constraints) Size {
 	lines := p.lines(constraints.maxWidth())
 	width := 0
 	for _, line := range lines {
-		width = max(width, ansi.StringWidth(line))
+		width = max(width, PlainWidth(line))
 	}
 	return constraints.Clamp(Size{W: width, H: len(lines)})
 }
@@ -238,7 +237,7 @@ func (p Paragraph) Render(_ *Context, bounds Rect) Surface {
 	s := BlankSurface(width, len(lines))
 	style := lipglossToCellStyle(p.Style)
 	for y, line := range lines {
-		s.WriteText(0, y, ansi.Truncate(line, width, ""), style)
+		s.WriteText(0, y, PlainTruncate(line, width, ""), style)
 	}
 	return s.normalize(bounds.W, bounds.H)
 }
@@ -255,7 +254,7 @@ func (p Paragraph) lines(width int) []string {
 				lines = append(lines, "")
 				continue
 			}
-			lines = append(lines, strings.Split(ansi.Wordwrap(line, width, ""), "\n")...)
+			lines = append(lines, strings.Split(PlainWordWrap(line, width), "\n")...)
 		}
 		text = strings.Join(lines, "\n")
 	}
@@ -311,6 +310,20 @@ func (m ModalFrame) Render(ctx *Context, bounds Rect) Surface {
 		contentSurface = content.Render(ctx, Rect{X: bounds.X + 3, Y: bounds.Y + 2, W: contentWidth, H: contentHeight})
 	}
 	base := BlankSurface(bounds.W, bounds.H)
+	border := lipgloss.RoundedBorder()
+	borderStyle := CellStyle{FG: ctx.Palette.SidebarBorder, BG: ctx.Palette.SidebarBackground}
+	fillStyle := CellStyle{FG: ctx.Palette.SidebarForeground, BG: ctx.Palette.SidebarBackground}
+	for y := 1; y < max(1, bounds.H-1); y++ {
+		for x := 0; x < bounds.W; x++ {
+			base.setCell(x, y, Cell{Text: " ", Width: 1, Style: fillStyle})
+		}
+		if y < bounds.H-1 {
+			base.WriteText(0, y, border.Left, borderStyle)
+			if bounds.W > 1 {
+				base.WriteText(bounds.W-1, y, border.Right, borderStyle)
+			}
+		}
+	}
 	top, closeStart, closeWidth := m.topBorder(ctx.Palette, bounds.W)
 	base = base.placeAt(0, 0, top)
 	if ctx != nil && ctx.Runtime != nil && closeWidth > 0 {
@@ -320,16 +333,9 @@ func (m ModalFrame) Render(ctx *Context, bounds Rect) Surface {
 			Enabled: true,
 		})
 	}
-	base = base.placeAt(0, 1, m.frameLine(ctx.Palette, bounds.W, ""))
-	for row := 0; row < contentHeight; row++ {
-		line := ""
-		lines := contentSurface.Lines()
-		if row < len(lines) {
-			line = lines[row]
-		}
-		base = base.placeAt(0, row+2, m.frameLine(ctx.Palette, bounds.W, line))
+	if contentHeight > 0 {
+		base = base.placeAt(3, 2, contentSurface)
 	}
-	base = base.placeAt(0, contentHeight+2, m.frameLine(ctx.Palette, bounds.W, ""))
 	base = base.placeAt(0, bounds.H-1, m.bottomBorder(ctx.Palette, bounds.W))
 	return base.normalize(bounds.W, bounds.H)
 }
@@ -366,8 +372,8 @@ func (m ModalFrame) contentElement(palette theme.Palette) Element {
 }
 
 func (m ModalFrame) minimumFrameWidth(contentWidth int) int {
-	titleWidth := ansi.StringWidth(m.titleLabel())
-	closeWidth := ansi.StringWidth(m.closeLabel())
+	titleWidth := PlainWidth(m.titleLabel())
+	closeWidth := PlainWidth(m.closeLabel())
 	return max(contentWidth+6, titleWidth+closeWidth+2)
 }
 
@@ -391,12 +397,12 @@ func (m ModalFrame) topBorder(palette theme.Palette, width int) (Surface, int, i
 	innerWidth := max(0, width-2)
 	title := m.titleLabel()
 	close := m.closeLabel()
-	closeWidth := min(innerWidth, ansi.StringWidth(close))
+	closeWidth := min(innerWidth, PlainWidth(close))
 	titleBudget := max(0, innerWidth-closeWidth)
-	if titleBudget > 0 && ansi.StringWidth(title) > titleBudget {
-		title = "[" + ansi.Truncate(strings.TrimSpace(m.Title), max(0, titleBudget-2), "") + "]"
+	if titleBudget > 0 && PlainWidth(title) > titleBudget {
+		title = "[" + PlainTruncate(strings.TrimSpace(m.Title), max(0, titleBudget-2), "") + "]"
 	}
-	titleWidth := min(innerWidth-closeWidth, ansi.StringWidth(title))
+	titleWidth := min(innerWidth-closeWidth, PlainWidth(title))
 	fillerWidth := max(0, innerWidth-titleWidth-closeWidth)
 	closeStart := width - 1 - closeWidth
 	s := BlankSurface(width, 1)
@@ -425,25 +431,6 @@ func (m ModalFrame) bottomBorder(palette theme.Palette, width int) Surface {
 	if width > 1 {
 		s.WriteText(width-1, 0, border.BottomRight, borderStyle)
 	}
-	return s
-}
-
-func (m ModalFrame) frameLine(palette theme.Palette, width int, content string) Surface {
-	border := lipgloss.RoundedBorder()
-	borderStyle := CellStyle{FG: palette.SidebarBorder, BG: palette.SidebarBackground}
-	fillStyle := CellStyle{FG: palette.SidebarForeground, BG: palette.SidebarBackground}
-	contentWidth := max(0, width-6)
-	line := ansi.Truncate(content, contentWidth, "")
-	if delta := contentWidth - ansi.StringWidth(line); delta > 0 {
-		line += strings.Repeat(" ", delta)
-	}
-	s := BlankSurface(width, 1)
-	for x := 0; x < width; x++ {
-		s.setCell(x, 0, Cell{Text: " ", Width: 1, Style: fillStyle})
-	}
-	s.WriteText(0, 0, border.Left, borderStyle)
-	s.WriteText(1, 0, "  "+line+"  ", fillStyle)
-	s.WriteText(width-1, 0, border.Right, borderStyle)
 	return s
 }
 

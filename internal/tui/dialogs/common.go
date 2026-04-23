@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/x/ansi"
 
 	. "github.com/lkarlslund/koder/internal/ui"
 )
@@ -64,13 +63,13 @@ func truncateText(input string, width int) string {
 		return ""
 	}
 	plain := compactInlineText(input)
-	if ansi.StringWidth(plain) <= width {
+	if PlainWidth(plain) <= width {
 		return plain
 	}
 	if width == 1 {
 		return "…"
 	}
-	return ansi.Truncate(plain, width-1, "") + "…"
+	return PlainTruncate(plain, width-1, "") + "…"
 }
 
 func compactInlineText(input string) string {
@@ -133,24 +132,22 @@ func wrapPlain(input string, width int) string {
 }
 
 func wrapWords(line string, width int) []string {
-	if ansi.StringWidth(line) <= width {
+	if PlainWidth(line) <= width {
 		return []string{line}
 	}
 	var lines []string
 	remaining := line
 	for remaining != "" {
-		if ansi.StringWidth(remaining) <= width {
+		if PlainWidth(remaining) <= width {
 			lines = append(lines, remaining)
 			break
 		}
-		runes := []rune(remaining)
-		cut := minInt(len(runes), width)
-		segment := string(runes[:cut])
+		segment := PlainTruncate(remaining, width, "")
 		if idx := strings.LastIndex(segment, " "); idx > 0 {
 			segment = strings.TrimRight(segment[:idx], " ")
 		}
 		if segment == "" {
-			segment = string(runes[:cut])
+			segment = PlainTruncate(remaining, width, "")
 		}
 		lines = append(lines, segment)
 		remaining = strings.TrimSpace(strings.TrimPrefix(remaining, segment))

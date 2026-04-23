@@ -4,7 +4,6 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/x/ansi"
 
 	"github.com/lkarlslund/koder/internal/theme"
 )
@@ -80,8 +79,8 @@ func (p PendingInputPreview) Render(ctx *Context, bounds Rect) Surface {
 func (p PendingInputPreview) renderHeader(text string, fg, bg lipgloss.Color) Surface {
 	width := maxInt(1, p.Width)
 	prefix := "• "
-	available := maxInt(1, width-ansi.StringWidth(prefix))
-	label := ansi.Truncate(text, available, "")
+	available := maxInt(1, width-PlainWidth(prefix))
+	label := PlainTruncate(text, available, "")
 	surface := BlankSurface(width, 1)
 	style := CellStyle{FG: fg, BG: bg}
 	for x := 0; x < width; x++ {
@@ -131,9 +130,9 @@ func (p PendingInputPreview) renderBlank(bg lipgloss.Color) Surface {
 
 func renderPendingPreviewLine(prefix, text string, width int, fg, bg lipgloss.Color, italic bool) Surface {
 	width = maxInt(1, width)
-	prefix = ansi.Truncate(prefix, width, "")
-	available := maxInt(0, width-ansi.StringWidth(prefix))
-	text = ansi.Truncate(text, available, "")
+	prefix = PlainTruncate(prefix, width, "")
+	available := maxInt(0, width-PlainWidth(prefix))
+	text = PlainTruncate(text, available, "")
 	surface := BlankSurface(width, 1)
 	baseStyle := CellStyle{FG: fg, BG: bg}
 	textStyle := baseStyle
@@ -144,7 +143,7 @@ func renderPendingPreviewLine(prefix, text string, width int, fg, bg lipgloss.Co
 		surface.setCell(x, 0, Cell{Text: " ", Width: 1, Style: baseStyle})
 	}
 	surface.WriteText(0, 0, prefix, baseStyle)
-	surface.WriteText(ansi.StringWidth(prefix), 0, text, textStyle)
+	surface.WriteText(PlainWidth(prefix), 0, text, textStyle)
 	return surface
 }
 
@@ -157,7 +156,7 @@ func wrapPreviewLine(text string, width int) []string {
 	var lines []string
 	remaining := text
 	for remaining != "" {
-		if ansi.StringWidth(remaining) <= width {
+		if PlainWidth(remaining) <= width {
 			lines = append(lines, remaining)
 			break
 		}

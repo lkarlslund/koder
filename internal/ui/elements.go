@@ -4,7 +4,6 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/x/ansi"
 
 	"github.com/lkarlslund/koder/internal/theme"
 )
@@ -251,7 +250,7 @@ func (s Surface) Size() Size {
 	}
 	width := 0
 	for _, line := range s.lines {
-		width = max(width, ansi.StringWidth(line))
+		width = max(width, PlainWidth(line))
 	}
 	return Size{W: width, H: len(s.lines)}
 }
@@ -282,9 +281,9 @@ func (s Surface) normalize(width, height int) Surface {
 	for i := 0; i < height; i++ {
 		line := ""
 		if i < len(s.lines) {
-			line = ansi.Truncate(s.lines[i], width, "")
+			line = PlainTruncate(s.lines[i], width, "")
 		}
-		if delta := width - ansi.StringWidth(line); delta > 0 {
+		if delta := width - PlainWidth(line); delta > 0 {
 			line += strings.Repeat(" ", delta)
 		}
 		lines = append(lines, line)
@@ -307,11 +306,11 @@ func (s Surface) placeAt(x, y int, child Surface) Surface {
 		if targetY < 0 || targetY >= len(base) {
 			continue
 		}
-		baseWidth := ansi.StringWidth(base[targetY])
+		baseWidth := PlainWidth(base[targetY])
 		if x >= baseWidth {
 			continue
 		}
-		childLine = ansi.Truncate(childLine, max(0, baseWidth-x), "")
+		childLine = PlainTruncate(childLine, max(0, baseWidth-x), "")
 		if childLine == "" {
 			continue
 		}
@@ -414,7 +413,7 @@ func (s *Surface) WriteText(x, y int, text string, style CellStyle) {
 	col := x
 	for _, r := range text {
 		grapheme := string(r)
-		width := ansi.StringWidth(grapheme)
+		width := PlainWidth(grapheme)
 		if width <= 0 {
 			continue
 		}
@@ -436,7 +435,7 @@ func FilledLineSurface(width int, text string, fillStyle, textStyle CellStyle) S
 	for x := 0; x < width; x++ {
 		s.setCell(x, 0, Cell{Text: " ", Width: 1, Style: fillStyle})
 	}
-	s.WriteText(0, 0, ansi.Truncate(text, width, ""), textStyle)
+	s.WriteText(0, 0, PlainTruncate(text, width, ""), textStyle)
 	return s
 }
 
@@ -444,23 +443,23 @@ func overlayLine(base, overlay string, offset int) string {
 	if offset < 0 {
 		offset = 0
 	}
-	baseWidth := ansi.StringWidth(base)
+	baseWidth := PlainWidth(base)
 	if baseWidth == 0 {
 		if offset > 0 {
 			base = strings.Repeat(" ", offset)
 		}
 		return base + overlay
 	}
-	start := ansi.Truncate(base, offset, "")
+	start := PlainTruncate(base, offset, "")
 	remaining := max(0, baseWidth-offset)
-	overlay = ansi.Truncate(overlay, remaining, "")
-	endStart := offset + ansi.StringWidth(overlay)
+	overlay = PlainTruncate(overlay, remaining, "")
+	endStart := offset + PlainWidth(overlay)
 	end := ""
 	if endStart < baseWidth {
 		end = substringByWidth(base, endStart, baseWidth)
 	}
 	line := start + overlay + end
-	if delta := baseWidth - ansi.StringWidth(line); delta > 0 {
+	if delta := baseWidth - PlainWidth(line); delta > 0 {
 		line += strings.Repeat(" ", delta)
 	}
 	return line
@@ -470,11 +469,11 @@ func substringByWidth(input string, start, end int) string {
 	if end <= start {
 		return ""
 	}
-	truncated := ansi.Truncate(input, end, "")
+	truncated := PlainTruncate(input, end, "")
 	if start <= 0 {
 		return truncated
 	}
-	return strings.TrimPrefix(truncated, ansi.Truncate(input, start, ""))
+	return strings.TrimPrefix(truncated, PlainTruncate(input, start, ""))
 }
 
 type Element interface {

@@ -2883,10 +2883,6 @@ func TestRenderAgentsSidebarStatusColors(t *testing.T) {
 }
 
 func TestRenderBodyAppliesSidebarThemeBackground(t *testing.T) {
-	prev := lipgloss.ColorProfile()
-	lipgloss.SetColorProfile(termenv.TrueColor)
-	defer lipgloss.SetColorProfile(prev)
-
 	m := Model{
 		showSidebar: true,
 		palette:     theme.Resolve("tokyonight").Palette,
@@ -2895,8 +2891,8 @@ func TestRenderBodyAppliesSidebarThemeBackground(t *testing.T) {
 	m.viewport.SetContent("history")
 
 	got := m.renderBody()
-	if !strings.Contains(got, "48;2;30;32;48") {
-		t.Fatalf("expected sidebar background ANSI color in render, got %q", got)
+	if strings.Contains(got, "\x1b[") || strings.Contains(got, "[38;") || strings.Contains(got, "[48;") {
+		t.Fatalf("expected plain body composition without leaked ANSI, got %q", got)
 	}
 }
 
