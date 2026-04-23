@@ -667,147 +667,6 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 	return m, nextCmd
 }
 
-func (m *Model) handleDialogMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd, bool) {
-	if !m.mouseEnabled || msg.Action != tea.MouseActionPress || msg.Button != tea.MouseButtonLeft {
-		return m, nil, false
-	}
-	if control, ok := m.hitCenteredWindowControl(msg); ok && control.ID == "window-close" {
-		return m.closeActiveCenteredWindow()
-	}
-	switch {
-	case m.hasSessionDialog():
-		control, ok := m.hitCenteredWindowControl(msg)
-		if !ok {
-			return m, nil, true
-		}
-		action := m.sessionDialog.ActivateControl(control.ID)
-		switch action.Kind {
-		case dialogs.SessionDialogActionSelect:
-			m.startBusy(busyScopeSidebar, fmt.Sprintf("Resuming session %d…", action.SessionID))
-			return m, tea.Batch(m.loadSessionCmd(action.SessionID), m.spinnerCmdIfNeeded()), true
-		case dialogs.SessionDialogActionCancel:
-			m.startBusy(busyScopeSidebar, "Creating session…")
-			return m, tea.Batch(m.newSessionCmd(), m.spinnerCmdIfNeeded()), true
-		default:
-			return m, nil, true
-		}
-	case m.hasModelDialog():
-		control, ok := m.hitCenteredWindowControl(msg)
-		if !ok {
-			return m, nil, true
-		}
-		action := m.modelDialog.ActivateControl(control.ID)
-		switch action.Kind {
-		case dialogs.ModelDialogActionSelect:
-			if err := m.selectModel(action.ModelID); err != nil {
-				m.status = err.Error()
-				return m, m.syncWindowTitleCmd(), true
-			}
-			m.closeModelDialog()
-			m.status = fmt.Sprintf("Selected model %s", action.ModelID)
-			m.refreshViewport()
-			return m, m.syncWindowTitleCmd(), true
-		case dialogs.ModelDialogActionCancel:
-			m.closeModelDialog()
-			m.status = "Model selection cancelled"
-			return m, m.syncWindowTitleCmd(), true
-		default:
-			return m, nil, true
-		}
-	case m.hasDisconnectDialog():
-		control, ok := m.hitCenteredWindowControl(msg)
-		if !ok {
-			return m, nil, true
-		}
-		action := m.disconnectDialog.ActivateControl(control.ID)
-		switch action.Kind {
-		case dialogs.DisconnectDialogActionSelect:
-			if err := m.disconnectProvider(action.ProviderID); err != nil {
-				m.status = err.Error()
-				return m, m.syncWindowTitleCmd(), true
-			}
-			m.closeDisconnectDialog()
-			m.status = fmt.Sprintf("Disconnected provider %s", action.ProviderID)
-			m.refreshViewport()
-			return m, m.syncWindowTitleCmd(), true
-		case dialogs.DisconnectDialogActionCancel:
-			m.closeDisconnectDialog()
-			m.status = "Provider disconnect cancelled"
-			return m, m.syncWindowTitleCmd(), true
-		default:
-			return m, nil, true
-		}
-	case m.hasToolsDialog():
-		control, ok := m.hitCenteredWindowControl(msg)
-		if !ok {
-			return m, nil, true
-		}
-		action := m.toolsDialog.ActivateControl(control.ID)
-		switch action.Kind {
-		case dialogs.ToolsDialogActionApply:
-			if err := m.applySessionToolStates(action.States); err != nil {
-				m.status = err.Error()
-				return m, m.syncWindowTitleCmd(), true
-			}
-			m.closeToolsDialog()
-			m.status = "Session tools updated"
-			return m, m.syncWindowTitleCmd(), true
-		case dialogs.ToolsDialogActionCancel:
-			m.closeToolsDialog()
-			m.status = "Tool selection cancelled"
-			return m, m.syncWindowTitleCmd(), true
-		default:
-			return m, nil, true
-		}
-	case m.hasPicker():
-		control, ok := m.hitCenteredWindowControl(msg)
-		if !ok {
-			return m, nil, true
-		}
-		action := m.picker.dialog.ActivateControl(control.ID)
-		switch action.Kind {
-		case ui.PickerDialogActionSelect:
-			next, cmd := m.submitPickerSelection(action.Value)
-			return next, cmd, true
-		case ui.PickerDialogActionCancel:
-			next, cmd := m.cancelPicker()
-			return next, cmd, true
-		default:
-			m.previewSelectedTheme()
-			return m, nil, true
-		}
-	case m.hasApprovalPrompt():
-		if msg.Y < 0 || msg.Y >= m.height {
-			return m, nil, true
-		}
-		element := m.renderApprovalPromptElement()
-		if element == nil {
-			return m, nil, true
-		}
-		promptHeight := element.Measure(&ui.Context{Palette: m.palette}, ui.NewConstraints(m.width, 0)).H
-		startY := m.height - m.footerHeight()
-		if msg.Y < startY || msg.Y >= startY+promptHeight {
-			return m, nil, true
-		}
-		runtime := ui.Runtime{}
-		ctx := &ui.Context{Palette: m.palette, Runtime: &runtime}
-		element.Render(ctx, ui.Rect{X: 0, Y: startY, W: element.Measure(ctx, ui.NewConstraints(m.width, 0)).W, H: promptHeight})
-		if control, ok := runtime.Hit(ui.Point{X: msg.X, Y: msg.Y}); ok {
-			for idx, button := range m.approvalButtons.Buttons {
-				if button.ID != control.ID {
-					continue
-				}
-				m.approvalButtons.Index = idx
-				next, cmd := m.activateApprovalButton(idx)
-				return next, cmd, true
-			}
-		}
-		return m, nil, true
-	default:
-		return m, nil, false
-	}
-}
-
 func (m Model) centeredModal(element ui.Element) ui.Element {
 	if element == nil {
 		return nil
@@ -823,81 +682,6 @@ func (m Model) centeredModal(element ui.Element) ui.Element {
 			Child: element,
 		},
 	}
-}
-
-func (m Model) activeCenteredWindowElement() ui.Element {
-	switch {
-	case m.hasModelDialog():
-		return m.renderModelDialogElement()
-	case m.hasDisconnectDialog():
-		return m.renderDisconnectDialogElement()
-	case m.hasToolsDialog():
-		return m.renderToolsDialogElement()
-	case m.hasConnectDialog():
-		return m.renderConnectDialogElement()
-	case m.hasSessionDialog():
-		return m.renderSessionDialogElement()
-	case m.hasAgentsModal():
-		return m.renderAgentsModalElement()
-	case m.hasHelpModal():
-		return m.renderHelpModalElement()
-	case m.hasLLMPreview():
-		return m.renderLLMPreviewElement()
-	case m.hasPreferencesDialog():
-		return m.renderPreferencesDialogElement()
-	case m.hasPicker():
-		return m.renderPickerElement()
-	default:
-		return nil
-	}
-}
-
-func (m *Model) closeActiveCenteredWindow() (tea.Model, tea.Cmd, bool) {
-	switch {
-	case m.hasSessionDialog():
-		next, cmd := m.handleSessionDialogKey(tea.KeyMsg{Type: tea.KeyEsc})
-		return next, cmd, true
-	case m.hasModelDialog():
-		next, cmd := m.handleModelDialogKey(tea.KeyMsg{Type: tea.KeyEsc})
-		return next, cmd, true
-	case m.hasDisconnectDialog():
-		next, cmd := m.handleDisconnectDialogKey(tea.KeyMsg{Type: tea.KeyEsc})
-		return next, cmd, true
-	case m.hasToolsDialog():
-		next, cmd := m.handleToolsDialogKey(tea.KeyMsg{Type: tea.KeyEsc})
-		return next, cmd, true
-	case m.hasConnectDialog():
-		next, cmd := m.handleConnectDialogKey(tea.KeyMsg{Type: tea.KeyEsc})
-		return next, cmd, true
-	case m.hasPreferencesDialog():
-		next, cmd := m.handlePreferencesKey(tea.KeyMsg{Type: tea.KeyEsc})
-		return next, cmd, true
-	case m.hasPicker():
-		next, cmd := m.cancelPicker()
-		return next, cmd, true
-	case m.hasAgentsModal():
-		m.closeAgentsModal()
-		return m, m.syncWindowTitleCmd(), true
-	case m.hasHelpModal():
-		m.closeHelpModal()
-		return m, m.syncWindowTitleCmd(), true
-	case m.hasLLMPreview():
-		m.closeLLMPreview()
-		return m, m.syncWindowTitleCmd(), true
-	default:
-		return m, nil, false
-	}
-}
-
-func (m Model) hitCenteredWindowControl(msg tea.MouseMsg) (ui.Control, bool) {
-	element := m.activeCenteredWindowElement()
-	if element == nil {
-		return ui.Control{}, false
-	}
-	runtime := ui.Runtime{}
-	ctx := &ui.Context{Palette: m.palette, Runtime: &runtime}
-	m.centeredModal(element).Render(ctx, ui.Rect{W: max(0, m.width), H: max(0, m.height)})
-	return runtime.Hit(ui.Point{X: msg.X, Y: msg.Y})
 }
 
 func (m Model) View() string {
@@ -4496,12 +4280,25 @@ func (m *Model) hasPicker() bool {
 	return m.picker.visible
 }
 
+func (m *Model) hasModalOverlay() bool {
+	return m.hasModelDialog() ||
+		m.hasDisconnectDialog() ||
+		m.hasToolsDialog() ||
+		m.hasConnectDialog() ||
+		m.hasSessionDialog() ||
+		m.hasAgentsModal() ||
+		m.hasHelpModal() ||
+		m.hasLLMPreview() ||
+		m.hasPreferencesDialog() ||
+		m.hasPicker()
+}
+
 func (m *Model) composerShouldBlink() bool {
-	return m.composer.BlinkEnabled && m.activeCenteredWindowElement() == nil && !m.hasApprovalPrompt()
+	return m.composer.BlinkEnabled && !m.hasModalOverlay() && !m.hasApprovalPrompt()
 }
 
 func (m *Model) syncComposerVisibility() {
-	shouldFocus := m.activeCenteredWindowElement() == nil && !m.hasApprovalPrompt()
+	shouldFocus := !m.hasModalOverlay() && !m.hasApprovalPrompt()
 	if shouldFocus {
 		if !m.composer.Focused() {
 			m.composer.Focus()
