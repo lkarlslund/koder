@@ -209,3 +209,14 @@ func BenchmarkViewWithModelDialog(b *testing.B) {
 		_ = m.View()
 	}
 }
+
+func BenchmarkViewLinesFooterOnlyInvalidation(b *testing.B) {
+	m := benchmarkModel(b, 140)
+	m.composer.SetValue("draft")
+	_ = m.ViewLines()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		m.invalidateFooterCache()
+		_ = m.ViewLines()
+	}
+}

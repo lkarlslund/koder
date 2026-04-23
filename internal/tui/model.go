@@ -262,6 +262,16 @@ type llmPreviewMsg struct {
 	err   error
 }
 
+type modelRenderCache struct {
+	renderedBody        string
+	renderedBodyLines   []string
+	bodyValid           bool
+	renderedFooter      string
+	renderedFooterLines []string
+	footerHeight        int
+	footerValid         bool
+}
+
 type Model struct {
 	cfg                config.Config
 	store              *store.Store
@@ -277,8 +287,7 @@ type Model struct {
 	viewport           transcriptViewport
 	transcriptControls []ui.Control
 	transcriptCache    map[string]cachedTranscriptBlock
-	renderedBodyCache  string
-	bodyCacheValid     bool
+	renderCache        *modelRenderCache
 	expandedToolRuns   map[string]bool
 	composer           textarea.Model
 	composerQueries    composerQueryState
@@ -399,6 +408,7 @@ func NewWithWorkdir(cfg config.Config, st *store.Store, a *agent.Engine, mode St
 		renderer:          renderer,
 		palette:           tuiTheme.Palette,
 		viewport:          vp,
+		renderCache:       &modelRenderCache{},
 		composer:          composer,
 		showSidebar:       cfg.UI.ShowSidebar,
 		showReasoning:     cfg.UI.ShowReasoning,
@@ -927,24 +937,16 @@ func (m Model) ViewLines() []string {
 	if m.hasPicker() && m.width > 0 && m.height > 0 {
 		return renderScreen(m.centeredModal(m.renderPickerElement()))
 	}
-	body := m.renderBody()
-	footer := m.renderFooter()
-	bodyLines := []string{}
-	if body != "" {
-		bodyLines = strings.Split(body, "\n")
-	}
-	footerLines := []string{}
-	if footer != "" {
-		footerLines = strings.Split(footer, "\n")
-	}
+	bodyLines := m.renderBodyLines()
+	footerLines := m.renderFooterLines()
 	switch {
-	case body == "":
+	case len(bodyLines) == 0:
 		lines := footerLines
 		for len(lines) < m.height {
 			lines = append([]string{""}, lines...)
 		}
 		return lines
-	case footer == "":
+	case len(footerLines) == 0:
 		lines := bodyLines
 		for len(lines) < m.height {
 			lines = append(lines, "")
@@ -1058,24 +1060,31 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m.quit()
 		case "esc":
 			m.cancelComposerHistorySearch()
+			m.invalidateFooterCache()
 			return m, m.syncWindowTitleCmd()
 		case "enter", "tab":
 			if !m.acceptComposerHistorySelection() {
+				m.invalidateFooterCache()
 				return m, nil
 			}
+			m.invalidateFooterCache()
 			return m, m.syncWindowTitleCmd()
 		case "up", "ctrl+s":
 			m.moveComposerHistorySelection(-1)
+			m.invalidateFooterCache()
 			return m, nil
 		case "down", "ctrl+r":
 			m.moveComposerHistorySelection(1)
+			m.invalidateFooterCache()
 			return m, nil
 		case "backspace":
 			m.trimComposerHistoryQuery()
+			m.invalidateFooterCache()
 			return m, nil
 		default:
 			if msg.Type == tea.KeyRunes {
 				m.appendComposerHistoryQuery(msg.String())
+				m.invalidateFooterCache()
 				return m, nil
 			}
 		}
@@ -1087,24 +1096,29 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if m.slashIndex > 0 {
 				m.slashIndex--
 			}
+			m.invalidateFooterCache()
 			return m, nil
 		case "down":
 			if m.slashIndex < len(m.slashMatches)-1 {
 				m.slashIndex++
 			}
+			m.invalidateFooterCache()
 			return m, nil
 		case "tab":
 			m.acceptSlashSelection()
+			m.invalidateFooterCache()
 			return m, nil
 		case "enter":
 			if model, cmd, ok := m.executeSelectedSlashCommand(); ok {
 				return model, cmd
 			}
 			m.acceptSlashSelection()
+			m.invalidateFooterCache()
 			return m, nil
 		case "esc":
 			m.slashMatches = nil
 			m.slashIndex = 0
+			m.invalidateFooterCache()
 			return m, nil
 		}
 	}
@@ -1114,18 +1128,22 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if m.skillIndex > 0 {
 				m.skillIndex--
 			}
+			m.invalidateFooterCache()
 			return m, nil
 		case "down":
 			if m.skillIndex < len(m.skillMatches)-1 {
 				m.skillIndex++
 			}
+			m.invalidateFooterCache()
 			return m, nil
 		case "tab", "enter":
 			m.acceptSkillSelection()
+			m.invalidateFooterCache()
 			return m, nil
 		case "esc":
 			m.skillMatches = nil
 			m.skillIndex = 0
+			m.invalidateFooterCache()
 			return m, nil
 		}
 	}
@@ -1136,18 +1154,22 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if m.mentionIndex > 0 {
 				m.mentionIndex--
 			}
+			m.invalidateFooterCache()
 			return m, nil
 		case "down":
 			if m.mentionIndex < len(m.mentionMatches)-1 {
 				m.mentionIndex++
 			}
+			m.invalidateFooterCache()
 			return m, nil
 		case "tab", "enter":
 			m.acceptMentionSelection()
+			m.invalidateFooterCache()
 			return m, nil
 		case "esc":
 			m.mentionMatches = nil
 			m.mentionIndex = 0
+			m.invalidateFooterCache()
 			return m, nil
 		}
 	}
@@ -1164,7 +1186,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.copyLatestAssistantMessage()
 	case "backspace":
 		if strings.TrimSpace(m.composer.Value()) == "" && m.poppedLastDraftAttachment() {
-			m.refreshViewport()
+			m.invalidateFooterCache()
 			return m, m.syncWindowTitleCmd()
 		}
 	case "esc":
@@ -1209,6 +1231,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "shift+enter", "alt+enter":
 		m.composer.InsertRune('\n')
 		m.updateComposerMenus()
+		m.invalidateFooterCache()
 		return m, nil
 	case "alt+up":
 		return m.popQueuedPromptForEditing()
@@ -1216,11 +1239,13 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if !m.recallComposerHistory(-1) {
 			return m, nil
 		}
+		m.invalidateFooterCache()
 		return m, nil
 	case "down":
 		if !m.recallComposerHistory(1) {
 			return m, nil
 		}
+		m.invalidateFooterCache()
 		return m, nil
 	case "tab":
 		if m.loading && !m.hasSlashMenu() {
@@ -1254,11 +1279,16 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	var cmd tea.Cmd
 	beforeRevision := m.composer.Revision()
+	beforeCursorVisible := m.composer.CursorVisible()
+	beforeCursorIndex := m.composer.CursorIndex()
 	m.composer, cmd = m.composer.Update(msg)
 	if beforeRevision != m.composer.Revision() {
 		m.resetComposerHistory()
 	}
 	m.updateComposerMenus()
+	if beforeRevision != m.composer.Revision() || beforeCursorVisible != m.composer.CursorVisible() || beforeCursorIndex != m.composer.CursorIndex() {
+		m.invalidateFooterCache()
+	}
 	return m, cmd
 }
 
@@ -1452,12 +1482,29 @@ func (m *Model) renderHeader() string {
 }
 
 func (m *Model) renderBody() string {
-	if m.bodyCacheValid {
-		return m.renderedBodyCache
+	cache := m.ensureRenderCache()
+	if cache.bodyValid {
+		return cache.renderedBody
 	}
-	m.renderedBodyCache = ui.RenderElement(&ui.Context{Palette: m.palette}, m.renderBodyElement(), max(0, m.width), max(0, m.viewport.Height))
-	m.bodyCacheValid = true
-	return m.renderedBodyCache
+	cache.renderedBody = ui.RenderElement(&ui.Context{Palette: m.palette}, m.renderBodyElement(), max(0, m.width), max(0, m.viewport.Height))
+	if cache.renderedBody == "" {
+		cache.renderedBodyLines = nil
+	} else {
+		cache.renderedBodyLines = strings.Split(cache.renderedBody, "\n")
+	}
+	cache.bodyValid = true
+	return cache.renderedBody
+}
+
+func (m *Model) renderBodyLines() []string {
+	cache := m.ensureRenderCache()
+	if !cache.bodyValid {
+		_ = m.renderBody()
+	}
+	if len(cache.renderedBodyLines) == 0 {
+		return nil
+	}
+	return append([]string{}, cache.renderedBodyLines...)
 }
 
 func (m *Model) renderBodyElement() ui.Element {
@@ -1489,7 +1536,31 @@ func (m *Model) renderBodyElement() ui.Element {
 }
 
 func (m *Model) renderFooter() string {
-	return ui.RenderElement(&ui.Context{Palette: m.palette}, m.renderFooterElement(), max(0, m.width), 0)
+	cache := m.ensureRenderCache()
+	if cache.footerValid {
+		return cache.renderedFooter
+	}
+	cache.renderedFooter = ui.RenderElement(&ui.Context{Palette: m.palette}, m.renderFooterElement(), max(0, m.width), 0)
+	if cache.renderedFooter == "" {
+		cache.renderedFooterLines = nil
+		cache.footerHeight = 0
+	} else {
+		cache.renderedFooterLines = strings.Split(cache.renderedFooter, "\n")
+		cache.footerHeight = len(cache.renderedFooterLines)
+	}
+	cache.footerValid = true
+	return cache.renderedFooter
+}
+
+func (m *Model) renderFooterLines() []string {
+	cache := m.ensureRenderCache()
+	if !cache.footerValid {
+		_ = m.renderFooter()
+	}
+	if len(cache.renderedFooterLines) == 0 {
+		return nil
+	}
+	return append([]string{}, cache.renderedFooterLines...)
 }
 
 func (m *Model) renderFooterElement() ui.Element {
@@ -1518,7 +1589,11 @@ func (m *Model) renderFooterElement() ui.Element {
 }
 
 func (m *Model) footerHeight() int {
-	return lipgloss.Height(m.renderFooter())
+	cache := m.ensureRenderCache()
+	if !cache.footerValid {
+		_ = m.renderFooter()
+	}
+	return cache.footerHeight
 }
 
 func (m *Model) renderComposer() string {
@@ -1748,8 +1823,26 @@ func (m *Model) refreshViewportAt(offset int) {
 }
 
 func (m *Model) invalidateBodyCache() {
-	m.bodyCacheValid = false
-	m.renderedBodyCache = ""
+	cache := m.ensureRenderCache()
+	cache.bodyValid = false
+	cache.renderedBody = ""
+	cache.renderedBodyLines = nil
+	m.invalidateFooterCache()
+}
+
+func (m *Model) invalidateFooterCache() {
+	cache := m.ensureRenderCache()
+	cache.footerValid = false
+	cache.renderedFooter = ""
+	cache.renderedFooterLines = nil
+	cache.footerHeight = 0
+}
+
+func (m *Model) ensureRenderCache() *modelRenderCache {
+	if m.renderCache == nil {
+		m.renderCache = &modelRenderCache{}
+	}
+	return m.renderCache
 }
 
 func (m *Model) renderViewportTranscript() (string, []ui.Control) {

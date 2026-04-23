@@ -99,6 +99,37 @@ func TestMatchingSlashCommands(t *testing.T) {
 	}
 }
 
+func TestFooterOnlyComposerUpdatesKeepBodyCache(t *testing.T) {
+	m := Model{
+		cfg:         config.Default().WithStateDir(t.TempDir()),
+		palette:     theme.Default().Palette,
+		viewport:    newTranscriptViewport(80, 20),
+		renderCache: &modelRenderCache{},
+		composer:    textarea.New(),
+		width:       80,
+		height:      24,
+	}
+	m.composer.SetValue("draft text")
+
+	_ = m.ViewLines()
+	if !m.ensureRenderCache().bodyValid {
+		t.Fatal("expected body cache to be primed")
+	}
+	if !m.ensureRenderCache().footerValid {
+		t.Fatal("expected footer cache to be primed")
+	}
+
+	nextModel, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyLeft})
+	next := nextModel.(*Model)
+
+	if !next.ensureRenderCache().bodyValid {
+		t.Fatal("expected footer-only composer update to keep body cache valid")
+	}
+	if next.ensureRenderCache().footerValid {
+		t.Fatal("expected footer-only composer update to invalidate footer cache")
+	}
+}
+
 func TestSkillQuery(t *testing.T) {
 	query, start, ok := skillQuery("Investigate $rev")
 	if !ok || query != "rev" {
