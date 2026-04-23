@@ -4,7 +4,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/theme"
+	tea "github.com/lkarlslund/koder/internal/ui/tea"
 	"github.com/lkarlslund/koder/internal/ui/textarea"
 )
 
@@ -51,5 +53,32 @@ func TestViewSurfaceComposesMainWindowBehindModal(t *testing.T) {
 	}
 	if !strings.Contains(frame, "Session 0") {
 		t.Fatalf("expected main window content to remain in composed frame, got %q", frame)
+	}
+}
+
+func TestResumeClosesSessionDialogAndRestoresTyping(t *testing.T) {
+	m := newRuntimeTestModel(t)
+	m.sessions = []domain.Session{{ID: 7, Title: "Session A"}}
+	m.openSessionPicker()
+
+	m = m.UpdateLoad(loadMsg{
+		current:  domain.Session{ID: 7, Title: "Session A"},
+		sessions: m.sessions,
+		parts:    map[int64][]domain.Part{},
+	})
+	if m.hasSessionDialog() {
+		t.Fatal("expected session dialog to close after loading")
+	}
+	if got := m.syncUIRoot().FocusedWindow(); got != mainWindowID {
+		t.Fatalf("expected focus to return to main window, got %q", got)
+	}
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("i")})
+	next := asModelPtr(t, updated)
+	if got := next.composer.Value(); got != "i" {
+		t.Fatalf("expected typing to reach composer after resume, got %q", got)
+	}
+	if cmd == nil {
+		t.Fatal("expected root timer command to continue after local typing")
 	}
 }

@@ -730,36 +730,39 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if handled, cmd := root.HandleEvent(ui.KeyEvent(msg)); handled {
 		return m, cmd
 	}
-
-	return m, m.handleMainWindowKey(msg)
+	if root.FocusedWindow() != "" {
+		return m, nil
+	}
+	_, cmd := m.handleMainWindowKey(msg)
+	return m, cmd
 }
 
-func (m *Model) handleMainWindowKey(msg tea.KeyMsg) tea.Cmd {
+func (m *Model) handleMainWindowKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 	if m.hasApprovalPrompt() {
 		m.ensureApprovalButtons()
 		if idx, ok := m.approvalButtons.HotkeyIndex(msg); ok {
 			_, cmd := m.activateApprovalButton(idx)
-			return cmd
+			return true, cmd
 		}
 		switch msg.String() {
 		case "left", "up", "shift+tab":
 			m.approvalButtons.Move(-1)
-			return nil
+			return true, nil
 		case "right", "down", "tab":
 			m.approvalButtons.Move(1)
-			return nil
+			return true, nil
 		case "y":
 			_, cmd := m.submitApprovalChoice(true)
-			return cmd
+			return true, cmd
 		case "p":
 			m.openApprovalPermissionsPicker()
-			return m.syncWindowTitleCmd()
+			return true, m.syncWindowTitleCmd()
 		case "n", "esc":
 			_, cmd := m.submitApprovalChoice(false)
-			return cmd
+			return true, cmd
 		case "enter":
 			_, cmd := m.activateApprovalButton(m.approvalButtons.Index)
-			return cmd
+			return true, cmd
 		}
 	}
 
@@ -767,35 +770,35 @@ func (m *Model) handleMainWindowKey(msg tea.KeyMsg) tea.Cmd {
 		switch msg.String() {
 		case "ctrl+c":
 			_, cmd := m.quit()
-			return cmd
+			return true, cmd
 		case "esc":
 			m.cancelComposerHistorySearch()
 			m.invalidateFooterCache()
-			return m.syncWindowTitleCmd()
+			return true, m.syncWindowTitleCmd()
 		case "enter", "tab":
 			if !m.acceptComposerHistorySelection() {
 				m.invalidateFooterCache()
-				return nil
+				return true, nil
 			}
 			m.invalidateFooterCache()
-			return m.syncWindowTitleCmd()
+			return true, m.syncWindowTitleCmd()
 		case "up", "ctrl+s":
 			m.moveComposerHistorySelection(-1)
 			m.invalidateFooterCache()
-			return nil
+			return true, nil
 		case "down", "ctrl+r":
 			m.moveComposerHistorySelection(1)
 			m.invalidateFooterCache()
-			return nil
+			return true, nil
 		case "backspace":
 			m.trimComposerHistoryQuery()
 			m.invalidateFooterCache()
-			return nil
+			return true, nil
 		default:
 			if msg.Type == tea.KeyRunes {
 				m.appendComposerHistoryQuery(msg.String())
 				m.invalidateFooterCache()
-				return nil
+				return true, nil
 			}
 		}
 	}
@@ -807,30 +810,30 @@ func (m *Model) handleMainWindowKey(msg tea.KeyMsg) tea.Cmd {
 				m.slashIndex--
 			}
 			m.invalidateFooterCache()
-			return nil
+			return true, nil
 		case "down":
 			if m.slashIndex < len(m.slashMatches)-1 {
 				m.slashIndex++
 			}
 			m.invalidateFooterCache()
-			return nil
+			return true, nil
 		case "tab":
 			m.acceptSlashSelection()
 			m.invalidateFooterCache()
-			return nil
+			return true, nil
 		case "enter":
 			if model, cmd, ok := m.executeSelectedSlashCommand(); ok {
 				_ = model
-				return cmd
+				return true, cmd
 			}
 			m.acceptSlashSelection()
 			m.invalidateFooterCache()
-			return nil
+			return true, nil
 		case "esc":
 			m.slashMatches = nil
 			m.slashIndex = 0
 			m.invalidateFooterCache()
-			return nil
+			return true, nil
 		}
 	}
 	if m.hasSkillMenu() {
@@ -840,22 +843,22 @@ func (m *Model) handleMainWindowKey(msg tea.KeyMsg) tea.Cmd {
 				m.skillIndex--
 			}
 			m.invalidateFooterCache()
-			return nil
+			return true, nil
 		case "down":
 			if m.skillIndex < len(m.skillMatches)-1 {
 				m.skillIndex++
 			}
 			m.invalidateFooterCache()
-			return nil
+			return true, nil
 		case "tab", "enter":
 			m.acceptSkillSelection()
 			m.invalidateFooterCache()
-			return nil
+			return true, nil
 		case "esc":
 			m.skillMatches = nil
 			m.skillIndex = 0
 			m.invalidateFooterCache()
-			return nil
+			return true, nil
 		}
 	}
 
@@ -866,126 +869,126 @@ func (m *Model) handleMainWindowKey(msg tea.KeyMsg) tea.Cmd {
 				m.mentionIndex--
 			}
 			m.invalidateFooterCache()
-			return nil
+			return true, nil
 		case "down":
 			if m.mentionIndex < len(m.mentionMatches)-1 {
 				m.mentionIndex++
 			}
 			m.invalidateFooterCache()
-			return nil
+			return true, nil
 		case "tab", "enter":
 			m.acceptMentionSelection()
 			m.invalidateFooterCache()
-			return nil
+			return true, nil
 		case "esc":
 			m.mentionMatches = nil
 			m.mentionIndex = 0
 			m.invalidateFooterCache()
-			return nil
+			return true, nil
 		}
 	}
 
 	switch msg.String() {
 	case "ctrl+c":
 		_, cmd := m.quit()
-		return cmd
+		return true, cmd
 	case "alt+h":
 		m.openHelpModal()
-		return m.syncWindowTitleCmd()
+		return true, m.syncWindowTitleCmd()
 	case "ctrl+v":
 		_, cmd := m.pasteClipboardText()
-		return cmd
+		return true, cmd
 	case "ctrl+y":
 		_, cmd := m.copyLatestAssistantMessage()
-		return cmd
+		return true, cmd
 	case "backspace":
 		if strings.TrimSpace(m.composer.Value()) == "" && m.poppedLastDraftAttachment() {
 			m.invalidateFooterCache()
-			return m.syncWindowTitleCmd()
+			return true, m.syncWindowTitleCmd()
 		}
 	case "esc":
 		if m.loading {
 			_, cmd := m.handleInterruptKey()
-			return cmd
+			return true, cmd
 		}
 	case "ctrl+s":
 		m.showSidebar = !m.showSidebar
 		m.resize()
 		m.refreshViewport()
-		return nil
+		return true, nil
 	case "alt+r":
 		m.showReasoning = !m.showReasoning
 		m.refreshViewport()
-		return nil
+		return true, nil
 	case "alt+p":
 		m.showSystem = !m.showSystem
 		m.refreshViewport()
-		return nil
+		return true, nil
 	case "alt+o":
 		prompt := strings.TrimSpace(m.composer.Value())
 		if prompt == "" && len(m.draftAttachments) == 0 && len(m.draftReferences) == 0 {
 			m.status = "No draft prompt to preview"
-			return m.syncWindowTitleCmd()
+			return true, m.syncWindowTitleCmd()
 		}
-		return m.previewLLMRequestCmd(context.Background(), prompt, slices.Clone(m.draftAttachments), slices.Clone(m.draftReferences))
+		return true, m.previewLLMRequestCmd(context.Background(), prompt, slices.Clone(m.draftAttachments), slices.Clone(m.draftReferences))
 	case "ctrl+r":
 		if !m.openComposerHistorySearch() {
-			return nil
+			return true, nil
 		}
-		return m.syncWindowTitleCmd()
+		return true, m.syncWindowTitleCmd()
 	case "ctrl+g":
 		if m.loading {
 			_, cmd := m.queueContinuePrompt()
-			return cmd
+			return true, cmd
 		}
 		if ok, status := m.canContinue(); !ok {
 			m.status = status
-			return m.syncWindowTitleCmd()
+			return true, m.syncWindowTitleCmd()
 		}
 		m.startBusy(busyScopeTranscript, "Continuing…")
-		return tea.Batch(m.continueCmd(m.beginActiveOperation()), m.spinnerCmdIfNeeded())
+		return true, tea.Batch(m.continueCmd(m.beginActiveOperation()), m.spinnerCmdIfNeeded())
 	case "shift+enter", "alt+enter":
 		m.composer.InsertRune('\n')
 		m.updateComposerMenus()
 		m.invalidateFooterCache()
-		return nil
+		return true, nil
 	case "alt+up":
 		_, cmd := m.popQueuedPromptForEditing()
-		return cmd
+		return true, cmd
 	case "up":
 		if !m.recallComposerHistory(-1) {
-			return nil
+			return true, nil
 		}
 		m.invalidateFooterCache()
-		return nil
+		return true, nil
 	case "down":
 		if !m.recallComposerHistory(1) {
-			return nil
+			return true, nil
 		}
 		m.invalidateFooterCache()
-		return nil
+		return true, nil
 	case "tab":
 		if m.loading && !m.hasSlashMenu() {
 			_, cmd := m.queueComposerPrompt(queuedPromptModeSteer)
-			return cmd
+			return true, cmd
 		}
 	case "enter":
 		prompt := strings.TrimSpace(m.composer.Value())
 		if prompt == "" && len(m.draftAttachments) == 0 && len(m.draftReferences) == 0 {
-			return nil
+			return false, nil
 		}
 		if m.loading {
 			_, cmd := m.queueComposerPrompt(queuedPromptModeSteer)
-			return cmd
+			return true, cmd
 		}
 		if handledModel, cmd, ok := m.handleLocalCommand(prompt); ok {
 			_ = handledModel
-			return cmd
+			return true, cmd
 		}
 		if ok, status := m.canSendPrompt(); !ok {
 			m.openConnectDialog()
 			m.status = status
-			return nil
+			return true, nil
 		}
 		drafts := slices.Clone(m.draftAttachments)
 		refs := slices.Clone(m.draftReferences)
@@ -994,7 +997,7 @@ func (m *Model) handleMainWindowKey(msg tea.KeyMsg) tea.Cmd {
 		m.draftReferences = nil
 		m.appendLocalUserPrompt(prompt, drafts, refs)
 		m.startBusy(busyScopeTranscript, "Running…")
-		return m.kickoffPromptCmd(prompt, drafts, refs)
+		return true, m.kickoffPromptCmd(prompt, drafts, refs)
 	}
 
 	var cmd tea.Cmd
@@ -1009,7 +1012,11 @@ func (m *Model) handleMainWindowKey(msg tea.KeyMsg) tea.Cmd {
 	if beforeRevision != m.composer.Revision() || beforeCursorVisible != m.composer.CursorVisible() || beforeCursorIndex != m.composer.CursorIndex() {
 		m.invalidateFooterCache()
 	}
-	return cmd
+	handled := beforeRevision != m.composer.Revision() ||
+		beforeCursorVisible != m.composer.CursorVisible() ||
+		beforeCursorIndex != m.composer.CursorIndex() ||
+		cmd != nil
+	return handled, cmd
 }
 
 func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd, bool) {

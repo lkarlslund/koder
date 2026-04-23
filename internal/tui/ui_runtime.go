@@ -8,17 +8,17 @@ import (
 )
 
 const (
-	mainWindowID         ui.WindowID = "main"
-	sessionWindowID      ui.WindowID = "session-dialog"
-	preferencesWindowID  ui.WindowID = "preferences-dialog"
-	toolsWindowID        ui.WindowID = "tools-dialog"
-	connectWindowID      ui.WindowID = "connect-dialog"
-	disconnectWindowID   ui.WindowID = "disconnect-dialog"
-	modelWindowID        ui.WindowID = "model-dialog"
-	agentsWindowID       ui.WindowID = "agents-modal"
-	helpWindowID         ui.WindowID = "help-modal"
-	llmPreviewWindowID   ui.WindowID = "llm-preview"
-	pickerWindowID       ui.WindowID = "picker-dialog"
+	mainWindowID        ui.WindowID = "main"
+	sessionWindowID     ui.WindowID = "session-dialog"
+	preferencesWindowID ui.WindowID = "preferences-dialog"
+	toolsWindowID       ui.WindowID = "tools-dialog"
+	connectWindowID     ui.WindowID = "connect-dialog"
+	disconnectWindowID  ui.WindowID = "disconnect-dialog"
+	modelWindowID       ui.WindowID = "model-dialog"
+	agentsWindowID      ui.WindowID = "agents-modal"
+	helpWindowID        ui.WindowID = "help-modal"
+	llmPreviewWindowID  ui.WindowID = "llm-preview"
+	pickerWindowID      ui.WindowID = "picker-dialog"
 )
 
 type modelWindow struct {
@@ -26,7 +26,7 @@ type modelWindow struct {
 	model  *Model
 	bounds func(*Model, ui.Rect) ui.Rect
 	render func(*Model, ui.Rect) ui.Surface
-	key    func(*Model, tea.KeyMsg) tea.Cmd
+	key    func(*Model, tea.KeyMsg) (bool, tea.Cmd)
 	mouse  func(*Model, tea.MouseMsg) (bool, tea.Cmd)
 	timer  func(*Model, ui.TimerEvent) (bool, tea.Cmd)
 }
@@ -78,7 +78,7 @@ func (w *modelWindow) HandleKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 	if w.key == nil {
 		return false, nil
 	}
-	return true, w.key(w.model, msg)
+	return w.key(w.model, msg)
 }
 
 func (w *modelWindow) HandleMouse(msg tea.MouseMsg) (bool, tea.Cmd) {
@@ -136,7 +136,7 @@ func (m *Model) mainWindow() ui.Window {
 		render: func(m *Model, bounds ui.Rect) ui.Surface {
 			return m.renderBodySurface().Normalize(max(0, bounds.W), max(0, bounds.H))
 		},
-		key: func(m *Model, msg tea.KeyMsg) tea.Cmd {
+		key: func(m *Model, msg tea.KeyMsg) (bool, tea.Cmd) {
 			return m.handleMainWindowKey(msg)
 		},
 		mouse: func(m *Model, msg tea.MouseMsg) (bool, tea.Cmd) {
@@ -408,7 +408,9 @@ func (m *Model) centeredWindow(id ui.WindowID, z int, element ui.Element, onKey 
 			}
 			return element.Render(&ui.Context{Palette: m.palette}, ui.Rect{W: bounds.W, H: bounds.H}).Normalize(bounds.W, bounds.H)
 		},
-		key: onKey,
+		key: func(m *Model, msg tea.KeyMsg) (bool, tea.Cmd) {
+			return true, onKey(m, msg)
+		},
 		mouse: func(m *Model, msg tea.MouseMsg) (bool, tea.Cmd) {
 			if msg.Action != tea.MouseActionPress || msg.Button != tea.MouseButtonLeft {
 				if id == llmPreviewWindowID {
