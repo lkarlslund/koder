@@ -276,6 +276,7 @@ type Model struct {
 	approvals          []store.Approval
 	viewport           transcriptViewport
 	transcriptControls []ui.Control
+	transcriptCache    map[string]cachedTranscriptBlock
 	renderedBodyCache  string
 	bodyCacheValid     bool
 	expandedToolRuns   map[string]bool
@@ -356,6 +357,12 @@ type composerQueryState struct {
 	mentionEnd      int
 	mentionPathMode bool
 	hasMentionQuery bool
+}
+
+type cachedTranscriptBlock struct {
+	content   string
+	lineCount int
+	controlID string
 }
 
 func New(cfg config.Config, st *store.Store, a *agent.Engine, mode StartupMode, debug *debugsrv.Recorder) (Model, error) {
@@ -1730,19 +1737,9 @@ func (m *Model) refreshViewportPreserve() {
 func (m *Model) refreshViewportAt(offset int) {
 	m.invalidateBodyCache()
 	m.transcriptControls = nil
-	runtime := ui.Runtime{}
-	ctx := &ui.Context{Palette: m.palette, Runtime: &runtime}
-	transcript := m.transcriptElement(&runtime)
-	if transcript == nil {
-		if !m.cfg.HasUsableDefaultProvider() {
-			m.viewport.SetContent("No provider configured.\n\nType /connect to add one before sending prompts.")
-			return
-		}
-		m.viewport.SetContent("No session")
-		return
-	}
-	m.viewport.SetContent(ui.RenderElement(ctx, transcript, max(0, m.viewport.Width), 0))
-	m.transcriptControls = runtime.Controls()
+	content, controls := m.renderViewportTranscript()
+	m.viewport.SetContent(content)
+	m.transcriptControls = controls
 	if offset >= 0 {
 		m.viewport.SetYOffset(offset)
 		return
@@ -1753,6 +1750,67 @@ func (m *Model) refreshViewportAt(offset int) {
 func (m *Model) invalidateBodyCache() {
 	m.bodyCacheValid = false
 	m.renderedBodyCache = ""
+}
+
+func (m *Model) renderViewportTranscript() (string, []ui.Control) {
+	if m.currentSession.ID == 0 && len(m.messages) == 0 {
+		if !m.cfg.HasUsableDefaultProvider() {
+			return "No provider configured.\n\nType /connect to add one before sending prompts.", nil
+		}
+		return "Start by asking a question or type / for commands.", nil
+	}
+	if m.transcriptCache == nil {
+		m.transcriptCache = make(map[string]cachedTranscriptBlock)
+	}
+	var (
+		builder  strings.Builder
+		controls []ui.Control
+		row      int
+	)
+	appendGap := func(gap int) {
+		for i := 0; i < gap; i++ {
+			builder.WriteByte('\n')
+		}
+		row += gap
+	}
+	appendBlock := func(block transcriptBlock, gap int) {
+		cached := m.cachedTranscriptBlock(block)
+		appendGap(gap)
+		builder.WriteString(cached.content)
+		if cached.controlID != "" {
+			controls = append(controls, ui.Control{
+				ID:      cached.controlID,
+				Rect:    ui.Rect{X: 0, Y: row, W: max(1, m.viewport.Width), H: max(1, cached.lineCount)},
+				Enabled: true,
+			})
+		}
+		row += cached.lineCount
+	}
+	transcriptBlocks := m.transcriptBlocks()
+	for i, block := range transcriptBlocks {
+		gap := 0
+		if i > 0 {
+			gap = separatorLineBreaks(m.transcriptSeparator(transcriptBlocks[i-1], block))
+		}
+		appendBlock(block, gap)
+	}
+	if indicator := m.renderTranscriptActivityElement(); indicator != nil {
+		gap := 0
+		if len(transcriptBlocks) > 0 {
+			gap = separatorLineBreaks(m.transcriptActivitySeparator(transcriptBlocks[len(transcriptBlocks)-1]))
+		}
+		appendGap(gap)
+		content := ui.RenderElement(&ui.Context{Palette: m.palette}, indicator, max(0, m.viewport.Width), 0)
+		builder.WriteString(content)
+		row += lineCount(content)
+	}
+	if builder.Len() == 0 {
+		if !m.cfg.HasUsableDefaultProvider() {
+			return "No provider configured.\n\nType /connect to add one before sending prompts.", nil
+		}
+		return "Start by asking a question or type / for commands.", nil
+	}
+	return builder.String(), controls
 }
 
 func (m *Model) transcriptElement(runtime *ui.Runtime) ui.Element {
@@ -1822,6 +1880,10 @@ func renderedSeparatorHeight(separator string) int {
 		return 0
 	}
 	return max(0, lipgloss.Height("x"+separator+"x")-2)
+}
+
+func separatorLineBreaks(separator string) int {
+	return strings.Count(separator, "\n")
 }
 
 func (m *Model) renderTranscriptActivity() string {

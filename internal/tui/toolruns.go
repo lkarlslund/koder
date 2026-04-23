@@ -3,8 +3,11 @@ package tui
 import (
 	"encoding/json"
 	"fmt"
+	"hash"
+	"hash/fnv"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/store"
@@ -308,6 +311,81 @@ func mergeToolRun(dst *ui.ToolRun, src ui.ToolRun) {
 
 func (m *Model) renderTranscriptBlock(block transcriptBlock) string {
 	return ui.RenderElement(&ui.Context{Palette: m.palette}, m.renderTranscriptBlockElement(block), max(0, m.viewport.Width), 0)
+}
+
+func (m *Model) cachedTranscriptBlock(block transcriptBlock) cachedTranscriptBlock {
+	key := m.transcriptBlockCacheKey(block)
+	if cached, ok := m.transcriptCache[key]; ok {
+		return cached
+	}
+	content := m.renderTranscriptBlock(block)
+	cached := cachedTranscriptBlock{
+		content:   content,
+		lineCount: lineCount(content),
+	}
+	if block.Kind == transcriptBlockToolRun && strings.TrimSpace(block.ToolRun.ID) != "" && block.ToolRun.Expandable(m.viewport.Width) {
+		cached.controlID = "toolrun:" + block.ToolRun.ID
+	}
+	m.transcriptCache[key] = cached
+	return cached
+}
+
+func (m *Model) transcriptBlockCacheKey(block transcriptBlock) string {
+	width := max(0, m.viewport.Width)
+	hasher := fnv.New64a()
+	switch block.Kind {
+	case transcriptBlockToolRun:
+		writeHashStrings(hasher,
+			"toolrun",
+			strconv.Itoa(width),
+			strconv.FormatBool(m.expandedToolRuns[block.ToolRun.ID]),
+			string(block.ToolRun.Tool),
+			block.ToolRun.ID,
+			block.ToolRun.ToolCallID,
+			strconv.FormatInt(block.ToolRun.ApprovalID, 10),
+			block.ToolRun.Title,
+			block.ToolRun.Subtitle,
+			block.ToolRun.Preview,
+			block.ToolRun.Output,
+			block.ToolRun.Diff,
+			block.ToolRun.ErrorText,
+			string(block.ToolRun.Status),
+		)
+	default:
+		writeHashStrings(hasher,
+			"message",
+			strconv.Itoa(width),
+			string(block.Message.Role),
+			strconv.FormatBool(m.showReasoning),
+			strconv.FormatBool(m.showSystem),
+			strconv.FormatBool(m.halfBlocksEnabled()),
+			block.Message.Summary,
+			block.Message.CreatedAt.UTC().Format(time.RFC3339Nano),
+		)
+		for _, part := range m.parts[block.Message.ID] {
+			writeHashStrings(hasher,
+				strconv.FormatInt(part.ID, 10),
+				string(part.Kind),
+				part.Body,
+				part.MetaJSON,
+			)
+		}
+	}
+	return fmt.Sprintf("%d:%x", block.Message.ID+int64(block.ToolRun.ApprovalID), hasher.Sum64())
+}
+
+func writeHashStrings(hasher hash.Hash64, values ...string) {
+	for _, value := range values {
+		_, _ = hasher.Write([]byte(value))
+		_, _ = hasher.Write([]byte{0})
+	}
+}
+
+func lineCount(content string) int {
+	if content == "" {
+		return 0
+	}
+	return strings.Count(content, "\n") + 1
 }
 
 func (m *Model) renderTranscriptBlockElement(block transcriptBlock) ui.Element {
