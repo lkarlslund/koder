@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/http/pprof"
 	"strconv"
 	"strings"
 	"sync"
@@ -247,6 +248,11 @@ func Start(bind string, st *store.Store, recorder *Recorder) (*Server, error) {
 	mux.HandleFunc("/debug/http", s.handleHTTP)
 	mux.HandleFunc("/debug/sessions", s.handleSessions)
 	mux.HandleFunc("/debug/sessions/", s.handleSessionRoutes)
+	mux.HandleFunc("/debug/pprof/", pprof.Index)
+	mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+	mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+	mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+	mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
 	s.server = &http.Server{
 		Handler:           mux,
 		ReadHeaderTimeout: 5 * time.Second,

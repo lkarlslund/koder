@@ -3,7 +3,9 @@ package debugsrv
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/lkarlslund/koder/internal/domain"
@@ -97,5 +99,37 @@ func TestServerExposesTranscriptAndEvents(t *testing.T) {
 	}
 	if len(events.Events) != 1 || events.Events[0].Text != "hello" {
 		t.Fatalf("unexpected events payload: %#v", events)
+	}
+}
+
+func TestServerExposesPprofHandlers(t *testing.T) {
+	t.Parallel()
+
+	st, err := store.OpenWithOptions(t.TempDir(), store.Options{Backend: store.BackendJSONFS})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	srv, err := Start("127.0.0.1:0", st, NewRecorder())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer srv.Close()
+
+	resp, err := http.Get("http://" + srv.Addr() + "/debug/pprof/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected pprof status: %d", resp.StatusCode)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "profile") {
+		t.Fatalf("expected pprof index to mention profiles, got %q", string(body))
 	}
 }
