@@ -5354,20 +5354,19 @@ func slashQuery(value string) (string, bool) {
 }
 
 func slashQueryFromComposer(value textarea.Model) (string, bool) {
-	if value.RuneCount() == 0 {
+	runes := value.Runes()
+	if len(runes) == 0 {
 		return "", false
 	}
-	first, _ := value.RuneAt(0)
-	if first != '/' {
+	if runes[0] != '/' {
 		return "", false
 	}
-	query := make([]rune, 0, max(0, value.RuneCount()-1))
-	for i := 1; i < value.RuneCount(); i++ {
-		r, _ := value.RuneAt(i)
-		if strings.ContainsRune(" \t\n", r) {
+	query := make([]rune, 0, max(0, len(runes)-1))
+	for _, r := range runes[1:] {
+		if isComposerWhitespace(r) {
 			return "", false
 		}
-		query = append(query, lowerRune(r))
+		query = append(query, unicode.ToLower(r))
 	}
 	return string(query), true
 }
@@ -5394,38 +5393,24 @@ func skillQuery(value string) (query string, start int, ok bool) {
 }
 
 func skillQueryFromComposer(value textarea.Model) (query string, start int, ok bool) {
+	runes := value.Runes()
 	cursor := value.CursorIndex()
-	if cursor < 0 || cursor > value.RuneCount() {
-		cursor = value.RuneCount()
+	if cursor < 0 || cursor > len(runes) {
+		cursor = len(runes)
 	}
 	if cursor == 0 {
 		return "", 0, false
 	}
-	start = cursor
-	for start > 0 {
-		prev, _ := value.RuneAt(start - 1)
-		if strings.ContainsRune(" \t\n([{", prev) {
-			break
-		}
-		start--
-	}
-	first, _ := value.RuneAt(start)
-	if first != '$' {
+	start, _ = composerTokenBounds(runes, cursor)
+	if start >= len(runes) || runes[start] != '$' {
 		return "", 0, false
 	}
-	if start > 0 {
-		prev, _ := value.RuneAt(start - 1)
-		if !strings.ContainsRune(" \t\n([{", prev) {
-			return "", 0, false
-		}
-	}
 	queryRunes := make([]rune, 0, cursor-start)
-	for i := start + 1; i < cursor; i++ {
-		r, _ := value.RuneAt(i)
-		if strings.ContainsRune(" \t\n", r) {
+	for _, r := range runes[start+1 : cursor] {
+		if isComposerWhitespace(r) {
 			return "", 0, false
 		}
-		queryRunes = append(queryRunes, lowerRune(r))
+		queryRunes = append(queryRunes, unicode.ToLower(r))
 	}
 	return string(queryRunes), start, true
 }
@@ -5460,42 +5445,23 @@ func mentionQuery(value string, cursor int) (query string, start int, pathMode b
 }
 
 func mentionQueryFromComposer(value textarea.Model) (query string, start int, end int, pathMode bool, ok bool) {
+	runes := value.Runes()
 	cursor := value.CursorIndex()
-	if cursor < 0 || cursor > value.RuneCount() {
-		cursor = value.RuneCount()
+	if cursor < 0 || cursor > len(runes) {
+		cursor = len(runes)
 	}
-	if cursor == 0 || value.RuneCount() == 0 {
+	if cursor == 0 || len(runes) == 0 {
 		return "", 0, 0, false, false
 	}
-	start = cursor
-	for start > 0 {
-		prev, _ := value.RuneAt(start - 1)
-		if strings.ContainsRune(" \t\n([{", prev) {
-			break
-		}
-		start--
-	}
-	end = cursor
-	for end < value.RuneCount() {
-		r, _ := value.RuneAt(end)
-		if strings.ContainsRune(" \t\n([{", r) {
-			break
-		}
-		end++
-	}
-	tokenRunes := make([]rune, 0, cursor-start)
-	for i := start; i < cursor; i++ {
-		r, _ := value.RuneAt(i)
-		tokenRunes = append(tokenRunes, r)
-	}
-	token := string(tokenRunes)
-	if !strings.HasPrefix(token, "@") {
+	start, end = composerTokenBounds(runes, cursor)
+	if start >= len(runes) || runes[start] != '@' {
 		return "", 0, 0, false, false
 	}
-	if strings.HasPrefix(token, `@"`) {
-		query = strings.TrimSuffix(strings.TrimPrefix(token, `@"`), `"`)
+	tokenRunes := runes[start:cursor]
+	if len(tokenRunes) >= 2 && tokenRunes[0] == '@' && tokenRunes[1] == '"' {
+		query = strings.TrimSuffix(string(tokenRunes[2:]), `"`)
 	} else {
-		query = strings.TrimPrefix(token, "@")
+		query = string(tokenRunes[1:])
 	}
 	query = strings.TrimSpace(query)
 	pathMode = strings.HasPrefix(query, "./") || strings.HasPrefix(query, "../") || strings.HasPrefix(query, "/")
@@ -5503,6 +5469,42 @@ func mentionQueryFromComposer(value textarea.Model) (query string, start int, en
 		return query, start, end, pathMode, true
 	}
 	return strings.ToLower(query), start, end, pathMode, true
+}
+
+func composerTokenBounds(runes []rune, cursor int) (start, end int) {
+	if cursor < 0 {
+		cursor = 0
+	}
+	if cursor > len(runes) {
+		cursor = len(runes)
+	}
+	start = cursor
+	for start > 0 && !isComposerTokenBoundary(runes[start-1]) {
+		start--
+	}
+	end = cursor
+	for end < len(runes) && !isComposerTokenBoundary(runes[end]) {
+		end++
+	}
+	return start, end
+}
+
+func isComposerWhitespace(r rune) bool {
+	switch r {
+	case ' ', '\t', '\n':
+		return true
+	default:
+		return false
+	}
+}
+
+func isComposerTokenBoundary(r rune) bool {
+	switch r {
+	case ' ', '\t', '\n', '(', '[', '{':
+		return true
+	default:
+		return false
+	}
 }
 
 func mentionTokenEnd(value string, start int) int {

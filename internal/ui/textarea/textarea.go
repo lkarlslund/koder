@@ -146,6 +146,10 @@ func (m Model) RuneAt(i int) (rune, bool) {
 	return m.value[i], true
 }
 
+func (m Model) Runes() []rune {
+	return m.value
+}
+
 func (m *Model) SetCursor(offset int) {
 	if offset < 0 {
 		offset = 0
