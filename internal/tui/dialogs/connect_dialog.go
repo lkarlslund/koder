@@ -665,11 +665,17 @@ func clampWidth(width, minWidth, maxWidth int) int {
 }
 
 func windowBounds(index, total, visible int) (int, int) {
+	if visible <= 0 || total <= 0 {
+		return 0, 0
+	}
 	start := 0
 	if index >= visible-1 {
 		start = index - (visible - 2)
 	}
 	end := minInt(total, start+visible)
+	if end == total && end-start < visible {
+		start = maxInt(0, end-visible)
+	}
 	return start, end
 }
 

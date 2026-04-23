@@ -137,14 +137,7 @@ func (d ModelDialog) dialog(width int, palette theme.Palette) Element {
 	if len(d.view) == 0 {
 		listChildren = append(listChildren, Fixed(staticBlock("No matches")))
 	} else {
-		start := 0
-		if d.Index >= 5 {
-			start = d.Index - 4
-		}
-		end := len(d.view)
-		if end > start+10 {
-			end = start + 10
-		}
+		start, end := windowBounds(d.Index, len(d.view), 10)
 		for idx := start; idx < end; idx++ {
 			item := d.view[idx]
 			listChildren = append(listChildren, Fixed(HitBox{

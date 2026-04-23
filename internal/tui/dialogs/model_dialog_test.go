@@ -1,6 +1,7 @@
 package dialogs
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 
@@ -89,5 +90,36 @@ func TestModelDialogTabThenEnterCancels(t *testing.T) {
 	action := dialog.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if action.Kind != ModelDialogActionCancel {
 		t.Fatalf("expected button focus cancel, got %#v", action)
+	}
+}
+
+func TestModelDialogKeepsFullWindowNearListEnd(t *testing.T) {
+	models := make([]domain.Model, 12)
+	for i := range models {
+		models[i] = domain.Model{ID: "model-" + strconv.Itoa(i)}
+	}
+	dialog := NewModelDialog("openai", models, "")
+	for range 11 {
+		dialog.Update(tea.KeyMsg{Type: tea.KeyDown})
+	}
+
+	got := dialog.View(84, theme.Resolve("tokyonight").Palette)
+	lines := strings.Split(got, "\n")
+	hasModelLine := func(id string) bool {
+		for _, line := range lines {
+			if strings.Contains(line, id+" ") {
+				return true
+			}
+		}
+		return false
+	}
+	for i := 2; i <= 11; i++ {
+		id := "model-" + strconv.Itoa(i)
+		if !hasModelLine(id) {
+			t.Fatalf("expected %s in full tail window, got %q", id, got)
+		}
+	}
+	if hasModelLine("model-1") {
+		t.Fatalf("expected only the last ten rows near list end, got %q", got)
 	}
 }
