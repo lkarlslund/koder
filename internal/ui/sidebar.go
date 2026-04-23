@@ -15,6 +15,10 @@ type Sidebar struct {
 }
 
 func (s Sidebar) content(ctx *Context, width int) string {
+	return s.render(ctx, width).String()
+}
+
+func (s Sidebar) render(ctx *Context, width int) Surface {
 	style := lipgloss.NewStyle().
 		Width(width).
 		Padding(0, 1).
@@ -29,7 +33,7 @@ func (s Sidebar) content(ctx *Context, width int) string {
 	if s.Child != nil {
 		content = RenderElement(ctx, s.Child, max(0, width-3), s.Height)
 	}
-	return style.Render(strings.TrimRight(content, "\n"))
+	return SurfaceFromString(style.Render(strings.TrimRight(content, "\n")))
 }
 
 func (s Sidebar) View(palette theme.Palette) string {
@@ -48,7 +52,7 @@ func (s Sidebar) Measure(ctx *Context, constraints Constraints) Size {
 	if width <= 0 {
 		width = 30
 	}
-	return constraints.Clamp(SurfaceFromString(s.content(ctx, width)).Size())
+	return constraints.Clamp(s.render(ctx, width).Size())
 }
 
 func (s Sidebar) Render(ctx *Context, bounds Rect) Surface {
@@ -59,7 +63,7 @@ func (s Sidebar) Render(ctx *Context, bounds Rect) Surface {
 	if width <= 0 {
 		width = 30
 	}
-	return SurfaceFromString(s.content(ctx, width)).normalize(bounds.W, bounds.H)
+	return s.render(ctx, width).normalize(bounds.W, bounds.H)
 }
 
 type BodyLayout struct {
@@ -118,15 +122,19 @@ type Footer struct {
 }
 
 func (f Footer) View() string {
-	return lipgloss.NewStyle().
+	return f.render().String()
+}
+
+func (f Footer) render() Surface {
+	return SurfaceFromString(lipgloss.NewStyle().
 		BorderTop(true).
 		Padding(0, 1).
-		Render(lipgloss.JoinVertical(lipgloss.Left, f.Parts...))
+		Render(lipgloss.JoinVertical(lipgloss.Left, f.Parts...)))
 }
 
 func (f Footer) Measure(ctx *Context, constraints Constraints) Size {
 	if len(f.Elements) == 0 {
-		return constraints.Clamp(SurfaceFromString(f.View()).Size())
+		return constraints.Clamp(f.render().Size())
 	}
 	content := Column{Children: f.children()}
 	size := content.Measure(ctx, constraints)
@@ -135,7 +143,7 @@ func (f Footer) Measure(ctx *Context, constraints Constraints) Size {
 
 func (f Footer) Render(ctx *Context, bounds Rect) Surface {
 	if len(f.Elements) == 0 {
-		return SurfaceFromString(f.View()).normalize(bounds.W, bounds.H)
+		return f.render().normalize(bounds.W, bounds.H)
 	}
 	content := Column{Children: f.children()}
 	width := bounds.W

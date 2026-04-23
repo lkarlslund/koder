@@ -19,8 +19,12 @@ type PendingInputPreview struct {
 const pendingInputPreviewLineLimit = 3
 
 func (p PendingInputPreview) View(palette theme.Palette) string {
+	return p.render(palette).String()
+}
+
+func (p PendingInputPreview) render(palette theme.Palette) Surface {
 	if p.Width <= 0 || (len(p.PendingSteers) == 0 && len(p.RejectedSteers) == 0 && len(p.QueuedMessages) == 0) {
-		return ""
+		return Surface{}
 	}
 	mutedFG := palette.ComposerMutedText
 	bg := palette.UserTextBackground
@@ -44,7 +48,7 @@ func (p PendingInputPreview) View(palette theme.Palette) string {
 		rows = append(rows, p.renderHeader("Queued follow-up inputs", mutedFG, bg))
 		rows = append(rows, p.renderPreviewRows(p.QueuedMessages, mutedFG, bg, true)...)
 	}
-	return strings.Join(rows, "\n")
+	return SurfaceFromString(strings.Join(rows, "\n"))
 }
 
 func (p PendingInputPreview) Measure(ctx *Context, constraints Constraints) Size {
@@ -52,12 +56,12 @@ func (p PendingInputPreview) Measure(ctx *Context, constraints Constraints) Size
 	if width <= 0 {
 		width = constraints.maxWidth()
 	}
-	return constraints.Clamp(SurfaceFromString(PendingInputPreview{
+	return constraints.Clamp(PendingInputPreview{
 		Width:          width,
 		PendingSteers:  p.PendingSteers,
 		RejectedSteers: p.RejectedSteers,
 		QueuedMessages: p.QueuedMessages,
-	}.View(ctx.Palette)).Size())
+	}.render(ctx.Palette).Size())
 }
 
 func (p PendingInputPreview) Render(ctx *Context, bounds Rect) Surface {
@@ -65,12 +69,12 @@ func (p PendingInputPreview) Render(ctx *Context, bounds Rect) Surface {
 	if width <= 0 {
 		width = bounds.W
 	}
-	return SurfaceFromString(PendingInputPreview{
+	return PendingInputPreview{
 		Width:          width,
 		PendingSteers:  p.PendingSteers,
 		RejectedSteers: p.RejectedSteers,
 		QueuedMessages: p.QueuedMessages,
-	}.View(ctx.Palette)).normalize(bounds.W, bounds.H)
+	}.render(ctx.Palette).normalize(bounds.W, bounds.H)
 }
 
 func (p PendingInputPreview) renderHeader(text string, fg, bg lipgloss.Color) string {
