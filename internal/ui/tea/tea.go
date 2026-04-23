@@ -14,6 +14,22 @@ type Model interface {
 	View() string
 }
 
+type SurfaceModel interface {
+	ViewSurface() SurfaceView
+}
+
+type SurfaceView interface {
+	SurfaceWidth() int
+	SurfaceHeight() int
+	SurfaceCellText(x, y int) string
+	SurfaceCellWidth(x, y int) int
+	SurfaceCellContinuation(x, y int) bool
+	SurfaceCellFG(x, y int) string
+	SurfaceCellBG(x, y int) string
+	SurfaceCellBold(x, y int) bool
+	SurfaceCellItalic(x, y int) bool
+}
+
 type Cmd func() Msg
 
 type BatchMsg []Cmd

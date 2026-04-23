@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/input"
 	"github.com/charmbracelet/x/term"
 )
@@ -22,6 +23,7 @@ type Program struct {
 	mouseEnabled bool
 	sent         chan Msg
 	renderedRows []string
+	rendered     SurfaceView
 	didRender    bool
 }
 
@@ -148,21 +150,30 @@ func (p *Program) runCmd(cmd Cmd, out chan<- Msg) {
 }
 
 func (p *Program) render(out io.Writer) error {
-	var lines []string
-	if linesModel, ok := p.model.(interface{ ViewLines() []string }); ok {
-		lines = linesModel.ViewLines()
+	frame := ""
+	if surfaceModel, ok := p.model.(SurfaceModel); ok {
+		surface := surfaceModel.ViewSurface()
+		if !p.didRender {
+			frame = renderFrameSurface(surface)
+			p.didRender = true
+		} else {
+			frame = diffFrameSurface(p.rendered, surface)
+		}
+		p.rendered = surface
+		p.renderedRows = nil
 	} else {
+		var lines []string
 		view := p.model.View()
 		lines = strings.Split(view, "\n")
+		if !p.didRender {
+			frame = renderFrameLines(lines)
+			p.didRender = true
+		} else {
+			frame = diffFrameLines(p.renderedRows, lines)
+		}
+		p.renderedRows = append(p.renderedRows[:0], lines...)
+		p.rendered = nil
 	}
-	frame := ""
-	if !p.didRender {
-		frame = renderFrameLines(lines)
-		p.didRender = true
-	} else {
-		frame = diffFrameLines(p.renderedRows, lines)
-	}
-	p.renderedRows = append(p.renderedRows[:0], lines...)
 	if frame == "" {
 		return nil
 	}
@@ -180,6 +191,20 @@ func renderFrameLines(lines []string) string {
 	for idx, line := range lines {
 		fmt.Fprintf(&buf, "\x1b[%d;1H", idx+1)
 		buf.WriteString(line)
+	}
+	return buf.String()
+}
+
+func renderFrameSurface(surface SurfaceView) string {
+	var buf strings.Builder
+	buf.WriteString("\x1b[H\x1b[2J")
+	height := 0
+	if surface != nil {
+		height = surface.SurfaceHeight()
+	}
+	for idx := 0; idx < height; idx++ {
+		fmt.Fprintf(&buf, "\x1b[%d;1H", idx+1)
+		buf.WriteString(serializeSurfaceRow(surface, idx))
 	}
 	return buf.String()
 }
@@ -208,6 +233,173 @@ func diffFrameLines(previous, current []string) string {
 		buf.WriteString("\x1b[K")
 	}
 	return buf.String()
+}
+
+func diffFrameSurface(previous, current SurfaceView) string {
+	var buf strings.Builder
+	maxRows := 0
+	if previous != nil && previous.SurfaceHeight() > maxRows {
+		maxRows = previous.SurfaceHeight()
+	}
+	if current != nil && current.SurfaceHeight() > maxRows {
+		maxRows = current.SurfaceHeight()
+	}
+	for idx := 0; idx < maxRows; idx++ {
+		if surfaceRowsEqual(previous, current, idx) {
+			continue
+		}
+		fmt.Fprintf(&buf, "\x1b[%d;1H", idx+1)
+		if current != nil && idx < current.SurfaceHeight() {
+			buf.WriteString(serializeSurfaceRow(current, idx))
+		}
+		buf.WriteString("\x1b[K")
+	}
+	return buf.String()
+}
+
+func surfaceRowsEqual(previous, current SurfaceView, y int) bool {
+	prevWidth := 0
+	currWidth := 0
+	if previous != nil && y < previous.SurfaceHeight() {
+		prevWidth = previous.SurfaceWidth()
+	}
+	if current != nil && y < current.SurfaceHeight() {
+		currWidth = current.SurfaceWidth()
+	}
+	maxWidth := prevWidth
+	if currWidth > maxWidth {
+		maxWidth = currWidth
+	}
+	for x := 0; x < maxWidth; x++ {
+		if !surfaceCellsEqual(previous, current, x, y) {
+			return false
+		}
+	}
+	return true
+}
+
+func surfaceCellsEqual(previous, current SurfaceView, x, y int) bool {
+	return surfaceCellText(previous, x, y) == surfaceCellText(current, x, y) &&
+		surfaceCellWidth(previous, x, y) == surfaceCellWidth(current, x, y) &&
+		surfaceCellContinuation(previous, x, y) == surfaceCellContinuation(current, x, y) &&
+		surfaceCellFG(previous, x, y) == surfaceCellFG(current, x, y) &&
+		surfaceCellBG(previous, x, y) == surfaceCellBG(current, x, y) &&
+		surfaceCellBold(previous, x, y) == surfaceCellBold(current, x, y) &&
+		surfaceCellItalic(previous, x, y) == surfaceCellItalic(current, x, y)
+}
+
+func serializeSurfaceRow(surface SurfaceView, y int) string {
+	if surface == nil || y < 0 || y >= surface.SurfaceHeight() {
+		return ""
+	}
+	var b strings.Builder
+	var currentStyle styleState
+	var segment strings.Builder
+	flush := func() {
+		if segment.Len() == 0 {
+			return
+		}
+		b.WriteString(applyStyle(currentStyle, segment.String()))
+		segment.Reset()
+	}
+	for x := 0; x < surface.SurfaceWidth(); x++ {
+		if surface.SurfaceCellContinuation(x, y) {
+			continue
+		}
+		style := styleState{
+			fg:     surfaceCellFG(surface, x, y),
+			bg:     surfaceCellBG(surface, x, y),
+			bold:   surfaceCellBold(surface, x, y),
+			italic: surfaceCellItalic(surface, x, y),
+		}
+		text := surfaceCellText(surface, x, y)
+		if text == "" {
+			text = " "
+		}
+		if segment.Len() > 0 && currentStyle != style {
+			flush()
+		}
+		currentStyle = style
+		segment.WriteString(text)
+	}
+	flush()
+	return b.String()
+}
+
+type styleState struct {
+	fg     string
+	bg     string
+	bold   bool
+	italic bool
+}
+
+func applyStyle(style styleState, text string) string {
+	if text == "" || (style == styleState{}) {
+		return text
+	}
+	render := lipgloss.NewStyle()
+	if style.fg != "" {
+		render = render.Foreground(lipgloss.Color(style.fg))
+	}
+	if style.bg != "" {
+		render = render.Background(lipgloss.Color(style.bg))
+	}
+	if style.bold {
+		render = render.Bold(true)
+	}
+	if style.italic {
+		render = render.Italic(true)
+	}
+	return render.Render(text)
+}
+
+func surfaceCellText(surface SurfaceView, x, y int) string {
+	if surface == nil || y < 0 || y >= surface.SurfaceHeight() || x < 0 || x >= surface.SurfaceWidth() {
+		return " "
+	}
+	return surface.SurfaceCellText(x, y)
+}
+
+func surfaceCellWidth(surface SurfaceView, x, y int) int {
+	if surface == nil || y < 0 || y >= surface.SurfaceHeight() || x < 0 || x >= surface.SurfaceWidth() {
+		return 1
+	}
+	return surface.SurfaceCellWidth(x, y)
+}
+
+func surfaceCellContinuation(surface SurfaceView, x, y int) bool {
+	if surface == nil || y < 0 || y >= surface.SurfaceHeight() || x < 0 || x >= surface.SurfaceWidth() {
+		return false
+	}
+	return surface.SurfaceCellContinuation(x, y)
+}
+
+func surfaceCellFG(surface SurfaceView, x, y int) string {
+	if surface == nil || y < 0 || y >= surface.SurfaceHeight() || x < 0 || x >= surface.SurfaceWidth() {
+		return ""
+	}
+	return surface.SurfaceCellFG(x, y)
+}
+
+func surfaceCellBG(surface SurfaceView, x, y int) string {
+	if surface == nil || y < 0 || y >= surface.SurfaceHeight() || x < 0 || x >= surface.SurfaceWidth() {
+		return ""
+	}
+	return surface.SurfaceCellBG(x, y)
+}
+
+func surfaceCellBold(surface SurfaceView, x, y int) bool {
+	if surface == nil || y < 0 || y >= surface.SurfaceHeight() || x < 0 || x >= surface.SurfaceWidth() {
+		return false
+	}
+	return surface.SurfaceCellBold(x, y)
+}
+
+func surfaceCellItalic(surface SurfaceView, x, y int) bool {
+	if surface == nil || y < 0 || y >= surface.SurfaceHeight() || x < 0 || x >= surface.SurfaceWidth() {
+		return false
+	}
+	return surface.SurfaceCellItalic(x, y)
 }
 
 func (p *Program) setWindowTitle(out io.Writer, title string) {

@@ -263,13 +263,11 @@ type llmPreviewMsg struct {
 }
 
 type modelRenderCache struct {
-	renderedBody        string
-	renderedBodyLines   []string
-	bodyValid           bool
-	renderedFooter      string
-	renderedFooterLines []string
-	footerHeight        int
-	footerValid         bool
+	renderedBodySurface   ui.Surface
+	bodyValid             bool
+	renderedFooterSurface ui.Surface
+	footerHeight          int
+	footerValid           bool
 }
 
 type Model struct {
@@ -886,32 +884,25 @@ func (m Model) hitCenteredWindowControl(msg tea.MouseMsg) (ui.Control, bool) {
 }
 
 func (m Model) View() string {
-	return strings.Join(m.ViewLines(), "\n")
+	return m.ViewSurface().String()
 }
 
 func (m Model) ViewLines() []string {
+	return m.ViewSurface().Lines()
+}
+
+func (m Model) ViewSurface() ui.Surface {
 	if m.width <= 0 || m.height <= 0 {
-		return nil
+		return ui.Surface{}
 	}
 	m.syncDebugRuntime()
 	ctx := &ui.Context{Palette: m.palette, Runtime: &m.uiRuntime}
 	m.uiRuntime.BeginFrame()
-	renderScreen := func(element ui.Element) []string {
-		view := ui.RenderElement(ctx, element, max(0, m.width), max(0, m.height))
-		lines := strings.Split(view, "\n")
-		for len(lines) < m.height {
-			lines = append(lines, "")
+	renderScreen := func(element ui.Element) ui.Surface {
+		if element == nil {
+			return ui.BlankSurface(max(0, m.width), max(0, m.height))
 		}
-		if len(lines) > m.height {
-			lines = lines[:m.height]
-		}
-		for i, line := range lines {
-			width := lipgloss.Width(line)
-			if width < m.width {
-				lines[i] = line + strings.Repeat(" ", m.width-width)
-			}
-		}
-		return lines
+		return element.Render(ctx, ui.Rect{W: max(0, m.width), H: max(0, m.height)}).Normalize(max(0, m.width), max(0, m.height))
 	}
 	if m.hasModelDialog() && m.width > 0 && m.height > 0 {
 		return renderScreen(m.centeredModal(m.renderModelDialogElement()))
@@ -943,33 +934,14 @@ func (m Model) ViewLines() []string {
 	if m.hasPicker() && m.width > 0 && m.height > 0 {
 		return renderScreen(m.centeredModal(m.renderPickerElement()))
 	}
-	bodyLines := m.renderBodyLines()
-	footerLines := m.renderFooterLines()
-	switch {
-	case len(bodyLines) == 0:
-		lines := footerLines
-		for len(lines) < m.height {
-			lines = append([]string{""}, lines...)
-		}
-		return lines
-	case len(footerLines) == 0:
-		lines := bodyLines
-		for len(lines) < m.height {
-			lines = append(lines, "")
-		}
-		return lines
-	default:
-		availableBodyHeight := max(0, m.height-len(footerLines))
-		for len(bodyLines) < availableBodyHeight {
-			bodyLines = append(bodyLines, "")
-		}
-		if len(bodyLines) > availableBodyHeight {
-			bodyLines = bodyLines[:availableBodyHeight]
-		}
-		lines := append([]string{}, bodyLines...)
-		lines = append(lines, footerLines...)
-		return lines
+	root := ui.BlankSurface(max(0, m.width), max(0, m.height))
+	body := m.renderBodySurface().Normalize(max(0, m.width), max(0, m.viewport.Height))
+	root = root.PlaceAt(0, 0, body)
+	footer := m.renderFooterSurface()
+	if footerSize := footer.Size(); footerSize.H > 0 {
+		root = root.PlaceAt(0, max(0, m.height-footerSize.H), footer.Normalize(max(0, m.width), footerSize.H))
 	}
+	return root
 }
 
 func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -1488,29 +1460,34 @@ func (m *Model) renderHeader() string {
 }
 
 func (m *Model) renderBody() string {
-	cache := m.ensureRenderCache()
-	if cache.bodyValid {
-		return cache.renderedBody
-	}
-	cache.renderedBody = ui.RenderElement(&ui.Context{Palette: m.palette}, m.renderBodyElement(), max(0, m.width), max(0, m.viewport.Height))
-	if cache.renderedBody == "" {
-		cache.renderedBodyLines = nil
-	} else {
-		cache.renderedBodyLines = strings.Split(cache.renderedBody, "\n")
-	}
-	cache.bodyValid = true
-	return cache.renderedBody
+	return m.renderBodySurface().String()
 }
 
 func (m *Model) renderBodyLines() []string {
+	return m.renderBodySurface().Lines()
+}
+
+func (m *Model) renderBodySurface() ui.Surface {
 	cache := m.ensureRenderCache()
-	if !cache.bodyValid {
-		_ = m.renderBody()
+	if cache.bodyValid {
+		return cache.renderedBodySurface
 	}
-	if len(cache.renderedBodyLines) == 0 {
-		return nil
+	ctx := &ui.Context{Palette: m.palette}
+	element := m.renderBodyElement()
+	width := max(0, m.width)
+	height := max(0, m.viewport.Height)
+	if width <= 0 || height <= 0 {
+		size := element.Measure(ctx, ui.NewConstraints(width, height))
+		if width <= 0 {
+			width = size.W
+		}
+		if height <= 0 {
+			height = size.H
+		}
 	}
-	return append([]string{}, cache.renderedBodyLines...)
+	cache.renderedBodySurface = element.Render(ctx, ui.Rect{W: width, H: height})
+	cache.bodyValid = true
+	return cache.renderedBodySurface
 }
 
 func (m *Model) renderBodyElement() ui.Element {
@@ -1542,31 +1519,32 @@ func (m *Model) renderBodyElement() ui.Element {
 }
 
 func (m *Model) renderFooter() string {
-	cache := m.ensureRenderCache()
-	if cache.footerValid {
-		return cache.renderedFooter
-	}
-	cache.renderedFooter = ui.RenderElement(&ui.Context{Palette: m.palette}, m.renderFooterElement(), max(0, m.width), 0)
-	if cache.renderedFooter == "" {
-		cache.renderedFooterLines = nil
-		cache.footerHeight = 0
-	} else {
-		cache.renderedFooterLines = strings.Split(cache.renderedFooter, "\n")
-		cache.footerHeight = len(cache.renderedFooterLines)
-	}
-	cache.footerValid = true
-	return cache.renderedFooter
+	return m.renderFooterSurface().String()
 }
 
 func (m *Model) renderFooterLines() []string {
+	return m.renderFooterSurface().Lines()
+}
+
+func (m *Model) renderFooterSurface() ui.Surface {
 	cache := m.ensureRenderCache()
-	if !cache.footerValid {
-		_ = m.renderFooter()
+	if cache.footerValid {
+		return cache.renderedFooterSurface
 	}
-	if len(cache.renderedFooterLines) == 0 {
-		return nil
+	ctx := &ui.Context{Palette: m.palette}
+	element := m.renderFooterElement()
+	width := max(0, m.width)
+	size := element.Measure(ctx, ui.NewConstraints(width, 0))
+	if width <= 0 {
+		width = size.W
 	}
-	return append([]string{}, cache.renderedFooterLines...)
+	cache.renderedFooterSurface = element.Render(ctx, ui.Rect{
+		W: width,
+		H: size.H,
+	})
+	cache.footerHeight = size.H
+	cache.footerValid = true
+	return cache.renderedFooterSurface
 }
 
 func (m *Model) renderFooterElement() ui.Element {
@@ -1831,16 +1809,14 @@ func (m *Model) refreshViewportAt(offset int) {
 func (m *Model) invalidateBodyCache() {
 	cache := m.ensureRenderCache()
 	cache.bodyValid = false
-	cache.renderedBody = ""
-	cache.renderedBodyLines = nil
+	cache.renderedBodySurface = ui.Surface{}
 	m.invalidateFooterCache()
 }
 
 func (m *Model) invalidateFooterCache() {
 	cache := m.ensureRenderCache()
 	cache.footerValid = false
-	cache.renderedFooter = ""
-	cache.renderedFooterLines = nil
+	cache.renderedFooterSurface = ui.Surface{}
 	cache.footerHeight = 0
 }
 

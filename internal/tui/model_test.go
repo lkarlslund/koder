@@ -1927,9 +1927,10 @@ func TestSessionPickerRendersCenteredDialogWithPreview(t *testing.T) {
 	}
 
 	m := Model{
-		width:  100,
-		height: 30,
-		store:  st,
+		width:   100,
+		height:  30,
+		store:   st,
+		palette: theme.Default().Palette,
 		sessions: []domain.Session{{
 			ID:          session.ID,
 			Title:       "Generated Session Title",

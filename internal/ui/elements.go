@@ -239,6 +239,56 @@ func (s Surface) String() string {
 	return strings.Join(s.Lines(), "\n")
 }
 
+func (s Surface) Normalize(width, height int) Surface {
+	return s.normalize(width, height)
+}
+
+func (s Surface) PlaceAt(x, y int, child Surface) Surface {
+	return s.placeAt(x, y, child)
+}
+
+func (s Surface) SurfaceWidth() int {
+	if s.isCellBuffer() {
+		return s.w
+	}
+	return s.Size().W
+}
+
+func (s Surface) SurfaceHeight() int {
+	if s.isCellBuffer() {
+		return s.h
+	}
+	return s.Size().H
+}
+
+func (s Surface) SurfaceCellText(x, y int) string {
+	return s.cellAt(x, y).Text
+}
+
+func (s Surface) SurfaceCellWidth(x, y int) int {
+	return s.cellAt(x, y).Width
+}
+
+func (s Surface) SurfaceCellContinuation(x, y int) bool {
+	return s.cellAt(x, y).Continuation
+}
+
+func (s Surface) SurfaceCellFG(x, y int) string {
+	return string(s.cellAt(x, y).Style.FG)
+}
+
+func (s Surface) SurfaceCellBG(x, y int) string {
+	return string(s.cellAt(x, y).Style.BG)
+}
+
+func (s Surface) SurfaceCellBold(x, y int) bool {
+	return s.cellAt(x, y).Style.Bold
+}
+
+func (s Surface) SurfaceCellItalic(x, y int) bool {
+	return s.cellAt(x, y).Style.Italic
+}
+
 func (s Surface) normalize(width, height int) Surface {
 	if s.isCellBuffer() {
 		out := BlankSurface(width, height)
