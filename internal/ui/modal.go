@@ -41,3 +41,21 @@ func (m Modal) View(palette theme.Palette) string {
 	}
 	return style.Render(strings.Join(lines, "\n"))
 }
+
+func (m Modal) Measure(ctx *Context, constraints Constraints) Size {
+	return constraints.Clamp(SurfaceFromString(m.View(ctx.Palette)).Size())
+}
+
+func (m Modal) Render(ctx *Context, bounds Rect) Surface {
+	width := bounds.W
+	if width <= 0 {
+		width = m.Width
+	}
+	return SurfaceFromString(Modal{
+		Title:    m.Title,
+		Subtitle: m.Subtitle,
+		Body:     m.Body,
+		Footer:   m.Footer,
+		Width:    width,
+	}.View(ctx.Palette)).normalize(bounds.W, bounds.H)
+}

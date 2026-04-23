@@ -145,12 +145,20 @@ func (d ModelDialog) View(width int, palette theme.Palette) string {
 	)
 
 	return Dialog{
-		Title: "Select Model",
+		Title:    "Select Model",
 		Sections: []string{body},
-		Buttons: d.buttonRow(dialogWidth),
-		Footer: "Enter to select, Esc to cancel",
-		Width:  dialogWidth,
+		Buttons:  d.buttonRow(dialogWidth),
+		Footer:   "Enter to select, Esc to cancel",
+		Width:    dialogWidth,
 	}.View(palette)
+}
+
+func (d ModelDialog) Measure(ctx *Context, constraints Constraints) Size {
+	return dialogMeasure(ctx, constraints, 84, d.View)
+}
+
+func (d ModelDialog) Render(ctx *Context, bounds Rect) Surface {
+	return dialogRender(ctx, bounds, 84, d.View)
 }
 
 func (d ModelDialog) renderRow(item domain.Model, width int, selected bool, focused bool, palette theme.Palette) string {

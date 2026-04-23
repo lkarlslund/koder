@@ -334,6 +334,14 @@ func (d PreferencesDialog) View(width int, palette theme.Palette) string {
 	}.View(palette)
 }
 
+func (d PreferencesDialog) Measure(ctx *Context, constraints Constraints) Size {
+	return dialogMeasure(ctx, constraints, 84, d.View)
+}
+
+func (d PreferencesDialog) Render(ctx *Context, bounds Rect) Surface {
+	return dialogRender(ctx, bounds, 84, d.View)
+}
+
 func (d PreferencesDialog) currentFields() []preferencesField {
 	if len(d.tabs) == 0 {
 		return nil

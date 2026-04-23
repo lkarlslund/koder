@@ -167,12 +167,20 @@ func (d DisconnectDialog) View(width int, palette theme.Palette) string {
 	)
 
 	return Dialog{
-		Title:  "Disconnect Provider",
+		Title:    "Disconnect Provider",
 		Sections: []string{body},
-		Buttons: d.buttonRow(dialogWidth),
-		Footer: "Enter to disconnect, Esc to cancel",
-		Width:  dialogWidth,
+		Buttons:  d.buttonRow(dialogWidth),
+		Footer:   "Enter to disconnect, Esc to cancel",
+		Width:    dialogWidth,
 	}.View(palette)
+}
+
+func (d DisconnectDialog) Measure(ctx *Context, constraints Constraints) Size {
+	return dialogMeasure(ctx, constraints, 84, d.View)
+}
+
+func (d DisconnectDialog) Render(ctx *Context, bounds Rect) Surface {
+	return dialogRender(ctx, bounds, 84, d.View)
 }
 
 func (d *DisconnectDialog) HandleMouse(localX, localY, width int, palette theme.Palette) DisconnectDialogAction {

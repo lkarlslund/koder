@@ -794,34 +794,34 @@ func (m Model) View() string {
 		return style.Render(view)
 	}
 	if m.hasModelDialog() && m.width > 0 && m.height > 0 {
-		return renderScreen(ui.Align{Horizontal: ui.AlignCenter, Vertical: ui.AlignCenter, Child: ui.Static{Content: m.renderModelDialog()}})
+		return renderScreen(ui.Align{Horizontal: ui.AlignCenter, Vertical: ui.AlignCenter, Child: m.renderModelDialogElement()})
 	}
 	if m.hasDisconnectDialog() && m.width > 0 && m.height > 0 {
-		return renderScreen(ui.Align{Horizontal: ui.AlignCenter, Vertical: ui.AlignCenter, Child: ui.Static{Content: m.renderDisconnectDialog()}})
+		return renderScreen(ui.Align{Horizontal: ui.AlignCenter, Vertical: ui.AlignCenter, Child: m.renderDisconnectDialogElement()})
 	}
 	if m.hasToolsDialog() && m.width > 0 && m.height > 0 {
-		return renderScreen(ui.Align{Horizontal: ui.AlignCenter, Vertical: ui.AlignCenter, Child: ui.Static{Content: m.renderToolsDialog()}})
+		return renderScreen(ui.Align{Horizontal: ui.AlignCenter, Vertical: ui.AlignCenter, Child: m.renderToolsDialogElement()})
 	}
 	if m.hasConnectDialog() && m.width > 0 && m.height > 0 {
-		return renderScreen(ui.Align{Horizontal: ui.AlignCenter, Vertical: ui.AlignCenter, Child: ui.Static{Content: m.renderConnectDialog()}})
+		return renderScreen(ui.Align{Horizontal: ui.AlignCenter, Vertical: ui.AlignCenter, Child: m.renderConnectDialogElement()})
 	}
 	if m.hasSessionDialog() && m.width > 0 && m.height > 0 {
-		return renderScreen(ui.Align{Horizontal: ui.AlignCenter, Vertical: ui.AlignCenter, Child: ui.Static{Content: m.renderSessionDialog()}})
+		return renderScreen(ui.Align{Horizontal: ui.AlignCenter, Vertical: ui.AlignCenter, Child: m.renderSessionDialogElement()})
 	}
 	if m.hasAgentsModal() && m.width > 0 && m.height > 0 {
-		return renderScreen(ui.Align{Horizontal: ui.AlignCenter, Vertical: ui.AlignCenter, Child: ui.Static{Content: m.renderAgentsModal()}})
+		return renderScreen(ui.Align{Horizontal: ui.AlignCenter, Vertical: ui.AlignCenter, Child: m.renderAgentsModalElement()})
 	}
 	if m.hasHelpModal() && m.width > 0 && m.height > 0 {
-		return renderScreen(ui.Align{Horizontal: ui.AlignCenter, Vertical: ui.AlignCenter, Child: ui.Static{Content: m.renderHelpModal()}})
+		return renderScreen(ui.Align{Horizontal: ui.AlignCenter, Vertical: ui.AlignCenter, Child: m.renderHelpModalElement()})
 	}
 	if m.hasLLMPreview() && m.width > 0 && m.height > 0 {
 		return renderScreen(ui.Static{Content: m.renderLLMPreview()})
 	}
 	if m.hasPreferencesDialog() && m.width > 0 && m.height > 0 {
-		return renderScreen(ui.Align{Horizontal: ui.AlignCenter, Vertical: ui.AlignCenter, Child: ui.Static{Content: m.renderPreferencesDialog()}})
+		return renderScreen(ui.Align{Horizontal: ui.AlignCenter, Vertical: ui.AlignCenter, Child: m.renderPreferencesDialogElement()})
 	}
 	if m.hasPicker() && m.width > 0 && m.height > 0 {
-		return renderScreen(ui.Align{Horizontal: ui.AlignCenter, Vertical: ui.AlignCenter, Child: ui.Static{Content: m.renderPicker()}})
+		return renderScreen(ui.Align{Horizontal: ui.AlignCenter, Vertical: ui.AlignCenter, Child: m.renderPickerElement()})
 	}
 	root := ui.Align{
 		Horizontal: ui.AlignStart,
@@ -3618,76 +3618,125 @@ func historySummary(input string) string {
 }
 
 func (m *Model) renderPicker() string {
-	if !m.hasPicker() {
-		return ""
+	if element := m.renderPickerElement(); element != nil {
+		return ui.RenderElement(&ui.Context{Palette: m.palette}, element, 80, 0)
 	}
-	return m.picker.dialog.View(80, m.palette)
+	return ""
+}
+
+func (m *Model) renderPickerElement() ui.Element {
+	if !m.hasPicker() {
+		return nil
+	}
+	return m.picker.dialog
 }
 
 func (m *Model) renderSessionDialog() string {
+	if element := m.renderSessionDialogElement(); element != nil {
+		width := 112
+		if m.width > 0 {
+			width = min(124, max(96, m.width-8))
+		}
+		return ui.RenderElement(&ui.Context{Palette: m.palette}, element, width, 0)
+	}
+	return ""
+}
+
+func (m *Model) renderSessionDialogElement() ui.Element {
 	if !m.hasSessionDialog() {
-		return ""
+		return nil
 	}
-	width := 112
-	if m.width > 0 {
-		width = min(124, max(96, m.width-8))
-	}
-	return m.sessionDialog.View(width, m.palette)
+	return m.sessionDialog
 }
 
 func (m *Model) renderPreferencesDialog() string {
+	if element := m.renderPreferencesDialogElement(); element != nil {
+		width := 86
+		if m.width > 0 {
+			width = min(100, max(74, m.width-8))
+		}
+		return ui.RenderElement(&ui.Context{Palette: m.palette}, element, width, 0)
+	}
+	return ""
+}
+
+func (m *Model) renderPreferencesDialogElement() ui.Element {
 	if !m.hasPreferencesDialog() {
-		return ""
+		return nil
 	}
-	width := 86
-	if m.width > 0 {
-		width = min(100, max(74, m.width-8))
-	}
-	return m.preferences.View(width, m.palette)
+	return m.preferences
 }
 
 func (m *Model) renderToolsDialog() string {
+	if element := m.renderToolsDialogElement(); element != nil {
+		width := 90
+		if m.width > 0 {
+			width = min(100, max(76, m.width-8))
+		}
+		return ui.RenderElement(&ui.Context{Palette: m.palette}, element, width, 0)
+	}
+	return ""
+}
+
+func (m *Model) renderToolsDialogElement() ui.Element {
 	if !m.hasToolsDialog() {
-		return ""
+		return nil
 	}
-	width := 90
-	if m.width > 0 {
-		width = min(100, max(76, m.width-8))
-	}
-	return m.toolsDialog.View(width, m.palette)
+	return m.toolsDialog
 }
 
 func (m *Model) renderConnectDialog() string {
+	if element := m.renderConnectDialogElement(); element != nil {
+		width := 88
+		if m.width > 0 {
+			width = min(104, max(76, m.width-8))
+		}
+		return ui.RenderElement(&ui.Context{Palette: m.palette}, element, width, 0)
+	}
+	return ""
+}
+
+func (m *Model) renderConnectDialogElement() ui.Element {
 	if !m.hasConnectDialog() {
-		return ""
+		return nil
 	}
-	width := 88
-	if m.width > 0 {
-		width = min(104, max(76, m.width-8))
-	}
-	return m.connectDialog.View(width, m.palette)
+	return m.connectDialog
 }
 
 func (m *Model) renderDisconnectDialog() string {
+	if element := m.renderDisconnectDialogElement(); element != nil {
+		width := 84
+		if m.width > 0 {
+			width = min(96, max(72, m.width-8))
+		}
+		return ui.RenderElement(&ui.Context{Palette: m.palette}, element, width, 0)
+	}
+	return ""
+}
+
+func (m *Model) renderDisconnectDialogElement() ui.Element {
 	if !m.hasDisconnectDialog() {
-		return ""
+		return nil
 	}
-	width := 84
-	if m.width > 0 {
-		width = min(96, max(72, m.width-8))
-	}
-	return m.disconnectDialog.View(width, m.palette)
+	return m.disconnectDialog
 }
 
 func (m *Model) renderModelDialog() string {
+	if element := m.renderModelDialogElement(); element != nil {
+		width := 84
+		if m.width > 0 {
+			width = min(96, max(72, m.width-8))
+		}
+		return ui.RenderElement(&ui.Context{Palette: m.palette}, element, width, 0)
+	}
+	return ""
+}
+
+func (m *Model) renderModelDialogElement() ui.Element {
 	if !m.hasModelDialog() {
-		return ""
+		return nil
 	}
-	width := 84
-	if m.width > 0 {
-		width = min(96, max(72, m.width-8))
-	}
-	return m.modelDialog.View(width, m.palette)
+	return m.modelDialog
 }
 
 func (m *Model) handleSessionDialogKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -4316,10 +4365,17 @@ func (m *Model) openAgentsModal() {
 }
 
 func (m *Model) renderAgentsModal() string {
-	if m.agentsModal == nil {
-		return ""
+	if element := m.renderAgentsModalElement(); element != nil {
+		return ui.RenderElement(&ui.Context{Palette: m.palette}, element, min(110, max(72, m.width-8)), 0)
 	}
-	return m.agentsModal.View(m.palette)
+	return ""
+}
+
+func (m *Model) renderAgentsModalElement() ui.Element {
+	if m.agentsModal == nil {
+		return nil
+	}
+	return *m.agentsModal
 }
 
 func (m *Model) openHelpModal() {
@@ -4370,10 +4426,17 @@ func (m *Model) openHelpModal() {
 }
 
 func (m *Model) renderHelpModal() string {
-	if m.helpModal == nil {
-		return ""
+	if element := m.renderHelpModalElement(); element != nil {
+		return ui.RenderElement(&ui.Context{Palette: m.palette}, element, min(104, max(84, m.width-8)), 0)
 	}
-	return m.helpModal.View(m.palette)
+	return ""
+}
+
+func (m *Model) renderHelpModalElement() ui.Element {
+	if m.helpModal == nil {
+		return nil
+	}
+	return *m.helpModal
 }
 
 func (m Model) previewLLMRequestCmd(ctx context.Context, prompt string, drafts []attachment.Draft, refs []reference.Draft) tea.Cmd {

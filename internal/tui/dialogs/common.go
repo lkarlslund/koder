@@ -8,9 +8,33 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
-	. "github.com/lkarlslund/koder/internal/ui"
 	"github.com/lkarlslund/koder/internal/theme"
+	. "github.com/lkarlslund/koder/internal/ui"
 )
+
+func dialogRenderWidth(bounds Rect, fallback int) int {
+	width := bounds.W
+	if width <= 0 {
+		width = fallback
+	}
+	if width <= 0 {
+		width = 80
+	}
+	return width
+}
+
+func dialogMeasure(ctx *Context, constraints Constraints, fallbackWidth int, render func(int, theme.Palette) string) Size {
+	width := constraints.MaxW
+	if width <= 0 {
+		width = fallbackWidth
+	}
+	return constraints.Clamp(SurfaceFromString(render(width, ctx.Palette)).Size())
+}
+
+func dialogRender(ctx *Context, bounds Rect, fallbackWidth int, render func(int, theme.Palette) string) Surface {
+	width := dialogRenderWidth(bounds, fallbackWidth)
+	return SurfaceFromString(render(width, ctx.Palette))
+}
 
 type pickerDialogFocus int
 

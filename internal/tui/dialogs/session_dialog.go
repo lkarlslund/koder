@@ -185,12 +185,20 @@ func (d SessionDialog) View(width int, palette theme.Palette) string {
 	)
 
 	return Dialog{
-		Title:  "Resume Session",
+		Title:    "Resume Session",
 		Sections: []string{body},
-		Buttons: d.buttonRow(contentWidth),
-		Footer: "Enter resumes the highlighted session. Esc creates a new session.",
-		Width:  dialogWidth,
+		Buttons:  d.buttonRow(contentWidth),
+		Footer:   "Enter resumes the highlighted session. Esc creates a new session.",
+		Width:    dialogWidth,
 	}.View(palette)
+}
+
+func (d SessionDialog) Measure(ctx *Context, constraints Constraints) Size {
+	return dialogMeasure(ctx, constraints, 110, d.View)
+}
+
+func (d SessionDialog) Render(ctx *Context, bounds Rect) Surface {
+	return dialogRender(ctx, bounds, 110, d.View)
 }
 
 func (d *SessionDialog) HandleMouse(localX, localY, width int, palette theme.Palette) SessionDialogAction {

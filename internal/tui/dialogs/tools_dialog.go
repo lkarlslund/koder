@@ -147,6 +147,14 @@ func (d ToolsDialog) View(width int, palette theme.Palette) string {
 	}.View(palette)
 }
 
+func (d ToolsDialog) Measure(ctx *Context, constraints Constraints) Size {
+	return dialogMeasure(ctx, constraints, 88, d.View)
+}
+
+func (d ToolsDialog) Render(ctx *Context, bounds Rect) Surface {
+	return dialogRender(ctx, bounds, 88, d.View)
+}
+
 func (d *ToolsDialog) HandleMouse(localX, localY, width int, palette theme.Palette) ToolsDialogAction {
 	var action ToolsDialogAction
 	d.buttons.Buttons[0].OnPress = func() {

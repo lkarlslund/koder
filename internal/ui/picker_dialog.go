@@ -208,6 +208,22 @@ func (d PickerDialog) View(width int, palette theme.Palette) string {
 	}.View(palette)
 }
 
+func (d PickerDialog) Measure(ctx *Context, constraints Constraints) Size {
+	width := constraints.maxWidth()
+	if width == int(^uint(0)>>1) || width <= 0 {
+		width = 80
+	}
+	return constraints.Clamp(SurfaceFromString(d.View(width, ctx.Palette)).Size())
+}
+
+func (d PickerDialog) Render(ctx *Context, bounds Rect) Surface {
+	width := bounds.W
+	if width <= 0 {
+		width = 80
+	}
+	return SurfaceFromString(d.View(width, ctx.Palette)).normalize(bounds.W, bounds.H)
+}
+
 func (d PickerDialog) buttonRow(width int) ButtonRow {
 	buttons := d.buttons
 	buttons.Width = maxInt(0, width-4)

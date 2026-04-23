@@ -147,6 +147,14 @@ func (d ConnectDialog) View(width int, palette theme.Palette) string {
 	}
 }
 
+func (d ConnectDialog) Measure(ctx *Context, constraints Constraints) Size {
+	return dialogMeasure(ctx, constraints, 88, d.View)
+}
+
+func (d ConnectDialog) Render(ctx *Context, bounds Rect) Surface {
+	return dialogRender(ctx, bounds, 88, d.View)
+}
+
 func (d *ConnectDialog) updateProviderList(msg tea.KeyMsg) ProviderConnectAction {
 	switch msg.String() {
 	case "esc":
@@ -280,10 +288,10 @@ func (d *ConnectDialog) providerListView(width int, palette theme.Palette) strin
 		lines = append(lines, "", lipgloss.NewStyle().Foreground(palette.AssistantTimestampText).Render(status))
 	}
 	return Dialog{
-		Title:  "Connect Provider",
+		Title:    "Connect Provider",
 		Sections: []string{strings.TrimRight(strings.Join(lines, "\n"), "\n")},
-		Footer: "Enter choose provider  Esc cancel",
-		Width:  dialogWidth,
+		Footer:   "Enter choose provider  Esc cancel",
+		Width:    dialogWidth,
 	}.View(palette)
 }
 
@@ -304,10 +312,10 @@ func (d *ConnectDialog) authPickerView(width int, palette theme.Palette) string 
 		}.View(palette))
 	}
 	return Dialog{
-		Title:  "Choose Auth Method",
+		Title:    "Choose Auth Method",
 		Sections: []string{strings.TrimRight(strings.Join(lines, "\n"), "\n")},
-		Footer: "Enter continue  Esc back",
-		Width:  dialogWidth,
+		Footer:   "Enter continue  Esc back",
+		Width:    dialogWidth,
 	}.View(palette)
 }
 
@@ -339,11 +347,11 @@ func (d *ConnectDialog) formView(width int, palette theme.Palette) string {
 		Width: dialogWidth - 4,
 	}
 	return Dialog{
-		Title:  "Connect Provider",
+		Title:    "Connect Provider",
 		Sections: []string{strings.TrimRight(strings.Join(lines, "\n"), "\n")},
-		Buttons: buttons,
-		Footer: "Type to edit  Ctrl+T test  Enter select  Esc cancel",
-		Width:  dialogWidth,
+		Buttons:  buttons,
+		Footer:   "Type to edit  Ctrl+T test  Enter select  Esc cancel",
+		Width:    dialogWidth,
 	}.View(palette)
 }
 
