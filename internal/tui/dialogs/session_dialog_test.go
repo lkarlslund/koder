@@ -183,3 +183,21 @@ func TestSessionDialogMouseCancelButton(t *testing.T) {
 		t.Fatalf("expected mouse click to cancel, got %#v", action)
 	}
 }
+
+func TestSessionDialogAdaptsToNarrowWidth(t *testing.T) {
+	dialog := NewSessionDialog([]SessionItem{{
+		SessionID:    "#1",
+		CreatedAt:    "10h ago",
+		ModifiedAt:   "3m ago",
+		TokenSummary: "123/456",
+		Title:        "Very Long Session Title",
+		Value:        "1",
+	}}, false)
+
+	got := dialog.View(72, theme.Default().Palette)
+	for _, line := range strings.Split(ansi.Strip(got), "\n") {
+		if w := ansi.StringWidth(line); w > 72 {
+			t.Fatalf("expected dialog to fit requested width, got line width %d in %q", w, line)
+		}
+	}
+}

@@ -133,18 +133,23 @@ func (d SessionDialog) dialog(width int, palette theme.Palette) Element {
 	if dialogWidth <= 0 {
 		dialogWidth = 110
 	}
-	dialogWidth = maxInt(96, dialogWidth)
-	contentWidth := maxInt(80, dialogWidth-6)
+	if width <= 0 {
+		dialogWidth = maxInt(96, dialogWidth)
+	}
+	contentWidth := dialogWidth - 6
+	if contentWidth <= 0 {
+		contentWidth = dialogWidth
+	}
 	idWidth := 8
 	timeWidth := 10
-	tokensWidth := minInt(18, maxInt(14, contentWidth/6))
+	tokensWidth := minInt(18, maxInt(8, contentWidth/6))
 	cwdWidth := 0
 	gapCount := 4
 	if d.ShowCWD {
-		cwdWidth = minInt(24, maxInt(16, contentWidth/5))
+		cwdWidth = minInt(24, maxInt(8, contentWidth/5))
 		gapCount = 5
 	}
-	titleWidth := maxInt(16, contentWidth-idWidth-timeWidth-timeWidth-tokensWidth-cwdWidth-(gapCount*2))
+	titleWidth := maxInt(8, contentWidth-idWidth-timeWidth-timeWidth-tokensWidth-cwdWidth-(gapCount*2))
 
 	listRows := []Child{
 		Fixed(staticBlock(d.renderTableHeader(idWidth, timeWidth, tokensWidth, cwdWidth, titleWidth, palette))),
