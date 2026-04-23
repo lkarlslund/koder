@@ -114,7 +114,10 @@ func TestMainWindowFocusSyncsComposerLifecycle(t *testing.T) {
 	if timers := root.ActiveTimers(composerBlinkTimerOwner); len(timers) == 0 {
 		t.Fatal("expected main window focus to restart the composer blink timer")
 	}
-	if m.ensureRenderCache().bodyValid {
-		t.Fatal("expected focus transition to invalidate the cached main screen surface")
+	if !m.ensureRenderCache().bodyValid {
+		t.Fatal("expected focus transition to keep the cached main screen surface for patching")
+	}
+	if m.ensureRenderCache().composerAreaValid {
+		t.Fatal("expected focus transition to invalidate the composer area cache")
 	}
 }

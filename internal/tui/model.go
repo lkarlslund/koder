@@ -1254,7 +1254,18 @@ func (m *Model) renderBodyLines() []string {
 func (m *Model) renderBodySurface() ui.Surface {
 	cache := m.ensureRenderCache()
 	if cache.bodyValid {
-		return cache.renderedBodySurface
+		if !cache.composerAreaValid {
+			previousComposerHeight := cache.composerAreaHeight
+			composer := m.renderComposerAreaSurface()
+			if previousComposerHeight == cache.composerAreaHeight && previousComposerHeight > 0 {
+				rect := m.composerAreaRect(previousComposerHeight)
+				cache.renderedBodySurface = cache.renderedBodySurface.PlaceAt(rect.X, rect.Y, composer.Normalize(rect.W, rect.H))
+				return cache.renderedBodySurface
+			}
+			cache.bodyValid = false
+		} else {
+			return cache.renderedBodySurface
+		}
 	}
 	ctx := &ui.Context{Palette: m.palette}
 	element := m.renderBodyElement()
@@ -1280,6 +1291,23 @@ func (m *Model) renderBodySurface() ui.Surface {
 	cache.renderedBodySurface = element.Render(ctx, ui.Rect{W: width, H: height})
 	cache.bodyValid = true
 	return cache.renderedBodySurface
+}
+
+func (m *Model) composerAreaRect(height int) ui.Rect {
+	if height <= 0 {
+		return ui.Rect{}
+	}
+	totalHeight := max(0, m.height)
+	if totalHeight == 0 {
+		totalHeight = max(0, m.viewport.Height)
+	}
+	mainHeight := max(0, totalHeight-m.statusPaneHeight())
+	return ui.Rect{
+		X: 1,
+		Y: max(0, mainHeight-height),
+		W: max(0, m.composerWidth()),
+		H: height,
+	}
 }
 
 func (m *Model) renderBodyElement() ui.Element {
@@ -1665,11 +1693,8 @@ func (m *Model) invalidateBodyCache() {
 
 func (m *Model) invalidateFooterCache() {
 	cache := m.ensureRenderCache()
-	cache.bodyValid = false
-	cache.renderedBodySurface = ui.Surface{}
 	cache.composerAreaValid = false
 	cache.renderedComposerAreaSurface = ui.Surface{}
-	cache.composerAreaHeight = 0
 }
 
 func (m *Model) ensureRenderCache() *modelRenderCache {
