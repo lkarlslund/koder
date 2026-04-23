@@ -524,6 +524,60 @@ func (i Inset) Render(ctx *Context, bounds Rect) Surface {
 	return base.placeAt(i.Padding.Left, i.Padding.Top, childSurface)
 }
 
+type Constrained struct {
+	Constraints Constraints
+	Child       Element
+}
+
+func (c Constrained) Measure(ctx *Context, constraints Constraints) Size {
+	if c.Child == nil {
+		return constraints.Clamp(Size{})
+	}
+	merged := Constraints{
+		MinW: max(constraints.MinW, c.Constraints.MinW),
+		MaxW: min(constraints.maxWidth(), c.Constraints.maxWidth()),
+		MinH: max(constraints.MinH, c.Constraints.MinH),
+		MaxH: min(constraints.maxHeight(), c.Constraints.maxHeight()),
+	}
+	return constraints.Clamp(c.Child.Measure(ctx, merged))
+}
+
+func (c Constrained) Render(ctx *Context, bounds Rect) Surface {
+	if c.Child == nil {
+		return BlankSurface(bounds.W, bounds.H)
+	}
+	size := c.Measure(ctx, NewConstraints(bounds.W, bounds.H))
+	return c.Child.Render(ctx, Rect{X: bounds.X, Y: bounds.Y, W: size.W, H: size.H}).normalize(bounds.W, bounds.H)
+}
+
+type Stack struct {
+	Children []Element
+}
+
+func (s Stack) Measure(ctx *Context, constraints Constraints) Size {
+	size := Size{}
+	for _, child := range s.Children {
+		if child == nil {
+			continue
+		}
+		childSize := child.Measure(ctx, constraints)
+		size.W = max(size.W, childSize.W)
+		size.H = max(size.H, childSize.H)
+	}
+	return constraints.Clamp(size)
+}
+
+func (s Stack) Render(ctx *Context, bounds Rect) Surface {
+	base := BlankSurface(bounds.W, bounds.H)
+	for _, child := range s.Children {
+		if child == nil {
+			continue
+		}
+		base = base.placeAt(0, 0, child.Render(ctx, bounds))
+	}
+	return base
+}
+
 type Alignment int
 
 const (

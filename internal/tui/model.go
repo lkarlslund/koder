@@ -275,7 +275,7 @@ type Model struct {
 	tasks              []store.Task
 	approvals          []store.Approval
 	viewport           viewport.Model
-	toolRunClickZones  []toolRunClickZone
+	transcriptControls []ui.Control
 	expandedToolRuns   map[string]bool
 	composer           textarea.Model
 	composerHistory    composerHistoryState
@@ -327,12 +327,6 @@ type Model struct {
 	readClipboardText  func() (string, error)
 	readClipboardImage func() ([]byte, error)
 	writeClipboardText func(string) error
-}
-
-type toolRunClickZone struct {
-	RunID    string
-	StartRow int
-	EndRow   int
 }
 
 type composerHistoryState struct {
@@ -1145,19 +1139,23 @@ func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd, bool) {
 		return m, nil, false
 	}
 	row := m.viewport.YOffset + msg.Y
-	for _, zone := range m.toolRunClickZones {
-		if row < zone.StartRow || row > zone.EndRow {
+	for i := len(m.transcriptControls) - 1; i >= 0; i-- {
+		control := m.transcriptControls[i]
+		if !control.Enabled || !control.Rect.Contains(ui.Point{X: max(0, msg.X-1), Y: row}) {
 			continue
 		}
-		if strings.TrimSpace(zone.RunID) == "" {
+		if strings.HasPrefix(control.ID, "toolrun:") {
+			runID := strings.TrimPrefix(control.ID, "toolrun:")
+			if strings.TrimSpace(runID) == "" {
+				return m, nil, true
+			}
+			if m.expandedToolRuns == nil {
+				m.expandedToolRuns = make(map[string]bool)
+			}
+			m.expandedToolRuns[runID] = !m.expandedToolRuns[runID]
+			m.refreshViewportPreserve()
 			return m, nil, true
 		}
-		if m.expandedToolRuns == nil {
-			m.expandedToolRuns = make(map[string]bool)
-		}
-		m.expandedToolRuns[zone.RunID] = !m.expandedToolRuns[zone.RunID]
-		m.refreshViewportPreserve()
-		return m, nil, true
 	}
 	return m, nil, false
 }
@@ -1504,7 +1502,7 @@ func (m *Model) refreshViewportPreserve() {
 }
 
 func (m *Model) refreshViewportAt(offset int) {
-	m.toolRunClickZones = nil
+	m.transcriptControls = nil
 	if m.currentSession.ID == 0 && len(m.messages) == 0 {
 		if !m.cfg.HasUsableDefaultProvider() {
 			m.viewport.SetContent("No provider configured.\n\nType /connect to add one before sending prompts.")
@@ -1514,8 +1512,8 @@ func (m *Model) refreshViewportAt(offset int) {
 		return
 	}
 	var items []ui.TranscriptItem
-	row := 0
-	ctx := &ui.Context{Palette: m.palette}
+	runtime := ui.Runtime{}
+	ctx := &ui.Context{Palette: m.palette, Runtime: &runtime}
 	transcriptWidth := max(0, m.viewport.Width)
 	transcriptBlocks := m.transcriptBlocks()
 	for i, block := range transcriptBlocks {
@@ -1525,15 +1523,6 @@ func (m *Model) refreshViewportAt(offset int) {
 		}
 		element := m.renderTranscriptBlockElement(block)
 		items = append(items, ui.TranscriptItem{Element: element, GapBefore: gap})
-		height := element.Measure(ctx, ui.NewConstraints(transcriptWidth, 0)).H
-		if block.Kind == transcriptBlockToolRun && block.ToolRun.Expandable(m.viewport.Width) {
-			m.toolRunClickZones = append(m.toolRunClickZones, toolRunClickZone{
-				RunID:    block.ToolRun.ID,
-				StartRow: row + gap,
-				EndRow:   row + gap + max(0, height-1),
-			})
-		}
-		row += gap + height
 	}
 	if indicator := m.renderTranscriptActivityElement(); indicator != nil {
 		gap := 0
@@ -1550,6 +1539,7 @@ func (m *Model) refreshViewportAt(offset int) {
 		}
 	}
 	m.viewport.SetContent(ui.RenderElement(ctx, ui.Transcript{Items: items}, transcriptWidth, 0))
+	m.transcriptControls = runtime.Controls()
 	if offset >= 0 {
 		m.viewport.SetYOffset(offset)
 		return

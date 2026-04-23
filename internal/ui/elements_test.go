@@ -57,3 +57,27 @@ func TestInsetAddsPadding(t *testing.T) {
 		t.Fatalf("unexpected inset render: %q", got)
 	}
 }
+
+func TestStackOverlaysLaterChildren(t *testing.T) {
+	got := RenderElement(nil, Stack{
+		Children: []Element{
+			Static{Content: "AAAA"},
+			Static{Content: " BB "},
+		},
+	}, 4, 1)
+
+	if got != " BB " {
+		t.Fatalf("unexpected stack render: %q", got)
+	}
+}
+
+func TestConstrainedClampsChildSize(t *testing.T) {
+	got := RenderElement(nil, Constrained{
+		Constraints: Constraints{MaxW: 2, MaxH: 1},
+		Child:       Static{Content: "WIDE"},
+	}, 4, 1)
+
+	if got != "WI  " {
+		t.Fatalf("unexpected constrained render: %q", got)
+	}
+}

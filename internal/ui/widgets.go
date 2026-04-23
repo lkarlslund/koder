@@ -164,6 +164,36 @@ func (p Panel) panelInsets() Insets {
 	return inset
 }
 
+type Divider struct {
+	Text  string
+	Style lipgloss.Style
+}
+
+func (d Divider) Measure(_ *Context, constraints Constraints) Size {
+	width := constraints.MaxW
+	if width <= 0 {
+		width = lipgloss.Width(d.Text)
+	}
+	if width <= 0 {
+		width = 1
+	}
+	return constraints.Clamp(Size{W: width, H: 1})
+}
+
+func (d Divider) Render(_ *Context, bounds Rect) Surface {
+	width := bounds.W
+	if width <= 0 {
+		width = max(1, lipgloss.Width(d.Text))
+	}
+	text := strings.TrimSpace(d.Text)
+	if text == "" {
+		text = strings.Repeat("─", width)
+	} else if lipgloss.Width(text) < width {
+		text += strings.Repeat("─", width-lipgloss.Width(text))
+	}
+	return SurfaceFromString(d.Style.Render(text)).normalize(width, bounds.H)
+}
+
 type Paragraph struct {
 	Text  string
 	Style lipgloss.Style

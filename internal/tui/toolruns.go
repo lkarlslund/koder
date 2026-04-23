@@ -339,10 +339,17 @@ func (e toolRunCardElement) Measure(_ *ui.Context, constraints ui.Constraints) u
 	return constraints.Clamp(ui.SurfaceFromString(e.Run.CardView(e.Palette, width, e.Expanded)).Size())
 }
 
-func (e toolRunCardElement) Render(_ *ui.Context, bounds ui.Rect) ui.Surface {
+func (e toolRunCardElement) Render(ctx *ui.Context, bounds ui.Rect) ui.Surface {
 	width := e.Width
 	if width <= 0 {
 		width = bounds.W
+	}
+	if ctx != nil && ctx.Runtime != nil && strings.TrimSpace(e.Run.ID) != "" && e.Run.Expandable(width) {
+		ctx.Runtime.Register(ui.Control{
+			ID:      "toolrun:" + e.Run.ID,
+			Rect:    ui.Rect{X: bounds.X, Y: bounds.Y, W: max(1, width), H: max(1, bounds.H)},
+			Enabled: true,
+		})
 	}
 	return ui.SurfaceFromString(e.Run.CardView(e.Palette, width, e.Expanded))
 }

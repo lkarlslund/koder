@@ -50,7 +50,7 @@ func (t Transcript) Render(ctx *Context, bounds Rect) Surface {
 		if size.H <= 0 {
 			continue
 		}
-		child := item.Element.Render(ctx, Rect{W: bounds.W, H: size.H})
+		child := item.Element.Render(ctx, Rect{X: bounds.X, Y: bounds.Y + y, W: bounds.W, H: size.H})
 		base = base.placeAt(0, y, child)
 		y += size.H
 	}
