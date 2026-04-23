@@ -1660,6 +1660,8 @@ func (m *Model) invalidateBodyCache() {
 
 func (m *Model) invalidateFooterCache() {
 	cache := m.ensureRenderCache()
+	cache.bodyValid = false
+	cache.renderedBodySurface = ui.Surface{}
 	cache.composerAreaValid = false
 	cache.renderedComposerAreaSurface = ui.Surface{}
 	cache.composerAreaHeight = 0
@@ -4346,18 +4348,23 @@ func (m *Model) composerShouldBlink() bool {
 }
 
 func (m *Model) syncComposerVisibility() {
+	beforeFocus := m.composer.Focused()
+	beforeCursorVisible := m.composer.CursorVisible()
 	shouldFocus := !m.hasModalOverlay() && !m.hasApprovalPrompt()
 	if shouldFocus {
 		if !m.composer.Focused() {
 			m.composer.Focus()
 		}
 		m.syncComposerBlinkTimer()
-		return
+	} else {
+		if m.composer.Focused() {
+			m.composer.Blur()
+		}
+		m.syncComposerBlinkTimer()
 	}
-	if m.composer.Focused() {
-		m.composer.Blur()
+	if beforeFocus != m.composer.Focused() || beforeCursorVisible != m.composer.CursorVisible() {
+		m.invalidateFooterCache()
 	}
-	m.syncComposerBlinkTimer()
 }
 
 func (m *Model) syncComposerBlinkTimer() {

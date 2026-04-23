@@ -98,7 +98,7 @@ func TestMatchingSlashCommands(t *testing.T) {
 	}
 }
 
-func TestFooterOnlyComposerUpdatesKeepBodyCache(t *testing.T) {
+func TestComposerUpdatesInvalidateMainScreenCache(t *testing.T) {
 	m := Model{
 		cfg:         config.Default().WithStateDir(t.TempDir()),
 		palette:     theme.Default().Palette,
@@ -121,8 +121,8 @@ func TestFooterOnlyComposerUpdatesKeepBodyCache(t *testing.T) {
 	nextModel, _ := m.handleKey(ui.KeyMsg{Type: ui.KeyLeft})
 	next := nextModel.(*Model)
 
-	if !next.ensureRenderCache().bodyValid {
-		t.Fatal("expected footer-only composer update to keep body cache valid")
+	if next.ensureRenderCache().bodyValid {
+		t.Fatal("expected composer update to invalidate the cached main screen surface")
 	}
 	if next.ensureRenderCache().composerAreaValid {
 		t.Fatal("expected composer-only update to invalidate composer area cache")

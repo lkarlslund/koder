@@ -82,3 +82,39 @@ func TestResumeClosesSessionDialogAndRestoresTyping(t *testing.T) {
 		t.Fatal("expected root timer command to continue after local typing")
 	}
 }
+
+func TestMainWindowFocusSyncsComposerLifecycle(t *testing.T) {
+	m := newRuntimeTestModel(t)
+	m.sessions = []domain.Session{{ID: 7, Title: "Session A"}}
+	m.openSessionPicker()
+	m.composer.SetValue("draft")
+	cache := m.ensureRenderCache()
+	cache.bodyValid = true
+	cache.renderedBodySurface = ui.BlankSurface(10, 3)
+
+	root := m.syncUIRoot()
+	if got := root.FocusedWindow(); got != sessionWindowID {
+		t.Fatalf("expected session dialog focus, got %q", got)
+	}
+	if m.composer.Focused() {
+		t.Fatal("expected composer to blur while session dialog is focused")
+	}
+	if timers := root.ActiveTimers(composerBlinkTimerOwner); len(timers) != 0 {
+		t.Fatalf("expected composer blink timer to stop behind modal, got %v", timers)
+	}
+
+	m.closeSessionDialog()
+	root = m.syncUIRoot()
+	if got := root.FocusedWindow(); got != mainWindowID {
+		t.Fatalf("expected focus to return to main window, got %q", got)
+	}
+	if !m.composer.Focused() {
+		t.Fatal("expected main window focus to refocus the composer")
+	}
+	if timers := root.ActiveTimers(composerBlinkTimerOwner); len(timers) == 0 {
+		t.Fatal("expected main window focus to restart the composer blink timer")
+	}
+	if m.ensureRenderCache().bodyValid {
+		t.Fatal("expected focus transition to invalidate the cached main screen surface")
+	}
+}

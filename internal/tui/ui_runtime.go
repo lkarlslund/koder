@@ -129,6 +129,12 @@ func (m *Model) mainWindow() ui.Window {
 			FocusableFlag: true,
 			VisibleFlag:   true,
 			Dirty:         true,
+			OnFocus: func() {
+				m.syncComposerVisibility()
+			},
+			OnBlur: func() {
+				m.syncComposerVisibility()
+			},
 		},
 		model: m,
 		render: func(m *Model, bounds ui.Rect) ui.Surface {
