@@ -275,6 +275,8 @@ type Model struct {
 	approvals          []store.Approval
 	viewport           transcriptViewport
 	transcriptControls []ui.Control
+	renderedBodyCache  string
+	bodyCacheValid     bool
 	expandedToolRuns   map[string]bool
 	composer           textarea.Model
 	composerHistory    composerHistoryState
@@ -408,12 +410,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	defer m.syncDebugRuntime()
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
+		m.invalidateBodyCache()
 		m.width = msg.Width
 		m.height = msg.Height
 		m.resize()
 		m.refreshViewport()
 		return m, nil
 	case spinnerTickMsg:
+		m.invalidateBodyCache()
 		if !m.shouldAnimateSpinner() {
 			return m, nil
 		}
@@ -430,12 +434,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Batch(spinnerTickCmd(), m.syncWindowTitleCmd())
 	case promptDoneMsg:
+		m.invalidateBodyCache()
 		if msg.err != nil {
 			return m.finishOperationWithError(msg.err)
 		}
 		m.startBusy(m.busy.scopeOrDefault(busyScopeTranscript), m.busy.statusOrDefault("Working ..."))
 		return m, tea.Batch(nextEventCmd(msg.events), m.spinnerCmdIfNeeded(), m.syncWindowTitleCmd())
 	case runPromptMsg:
+		m.invalidateBodyCache()
 		if msg.err != nil {
 			return m.finishOperationWithError(msg.err)
 		}
@@ -466,6 +472,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.openLLMPreview(msg.title, msg.body)
 		return m, m.syncWindowTitleCmd()
 	case eventMsg:
+		m.invalidateBodyCache()
 		m.recordEvent(msg.event)
 		m.applyEvent(msg.event)
 		if msg.events != nil {
@@ -474,6 +481,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.stopBusy()
 		return m, tea.Batch(m.reloadDetailsCmd(), m.syncWindowTitleCmd())
 	case loadMsg:
+		m.invalidateBodyCache()
 		m = m.UpdateLoad(msg)
 		if m.debug != nil && m.currentSession.ID > 0 {
 			m.debug.RecordLifecycle(m.currentSession.ID, "session_reloaded", fmt.Sprintf("%d messages", len(m.messages)), map[string]string{"messages": strconv.Itoa(len(m.messages))})
@@ -486,6 +494,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.syncWindowTitleCmd()
 	case agentsRefreshMsg:
+		m.invalidateBodyCache()
 		if msg.err != nil {
 			m.status = msg.err.Error()
 			m.stopBusy()
@@ -496,6 +505,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.status = "Refreshed project instructions"
 		return m, m.syncWindowTitleCmd()
 	case forkSessionMsg:
+		m.invalidateBodyCache()
 		if msg.err != nil {
 			m.status = msg.err.Error()
 			m.stopBusy()
@@ -506,6 +516,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.status = fmt.Sprintf("Forked session %d from %d", msg.forkedID, msg.sourceID)
 		return m, m.syncWindowTitleCmd()
 	case newSessionMsg:
+		m.invalidateBodyCache()
 		m.sessions = msg.sessions
 		m.currentSession = msg.session
 		m.messages = msg.messages
@@ -536,11 +547,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refreshViewport()
 		return m, m.syncWindowTitleCmd()
 	case sessionPickerMsg:
+		m.invalidateBodyCache()
 		m.sessions = msg.sessions
 		m.openSessionPicker()
 		m.stopBusyWithStatus("Select a session to resume")
 		return m, m.syncWindowTitleCmd()
 	case providerProbeMsg:
+		m.invalidateBodyCache()
 		if !m.hasConnectDialog() {
 			return m, nil
 		}
@@ -563,6 +576,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.syncWindowTitleCmd()
 	case modelListMsg:
+		m.invalidateBodyCache()
 		if msg.err != nil {
 			m.status = msg.err.Error()
 			return m, m.syncWindowTitleCmd()
@@ -839,13 +853,17 @@ func (m Model) hitCenteredWindowControl(msg tea.MouseMsg) (ui.Control, bool) {
 }
 
 func (m Model) View() string {
+	return strings.Join(m.ViewLines(), "\n")
+}
+
+func (m Model) ViewLines() []string {
 	if m.width <= 0 || m.height <= 0 {
-		return ""
+		return nil
 	}
 	m.syncDebugRuntime()
 	ctx := &ui.Context{Palette: m.palette, Runtime: &m.uiRuntime}
 	m.uiRuntime.BeginFrame()
-	renderScreen := func(element ui.Element) string {
+	renderScreen := func(element ui.Element) []string {
 		view := ui.RenderElement(ctx, element, max(0, m.width), max(0, m.height))
 		style := lipgloss.NewStyle().Background(m.palette.ScreenBackground)
 		if m.width > 0 {
@@ -854,7 +872,7 @@ func (m Model) View() string {
 		if m.height > 0 {
 			style = style.Height(m.height)
 		}
-		return style.Render(view)
+		return strings.Split(style.Render(view), "\n")
 	}
 	if m.hasModelDialog() && m.width > 0 && m.height > 0 {
 		return renderScreen(m.centeredModal(m.renderModelDialogElement()))
@@ -886,13 +904,41 @@ func (m Model) View() string {
 	if m.hasPicker() && m.width > 0 && m.height > 0 {
 		return renderScreen(m.centeredModal(m.renderPickerElement()))
 	}
-	root := ui.Column{
-		Children: []ui.Child{
-			ui.Flex(m.renderBodyElement(), 1),
-			ui.Fixed(m.renderFooterElement()),
-		},
+	body := m.renderBody()
+	footer := m.renderFooter()
+	bodyLines := []string{}
+	if body != "" {
+		bodyLines = strings.Split(body, "\n")
 	}
-	return renderScreen(root)
+	footerLines := []string{}
+	if footer != "" {
+		footerLines = strings.Split(footer, "\n")
+	}
+	switch {
+	case body == "":
+		lines := footerLines
+		for len(lines) < m.height {
+			lines = append([]string{""}, lines...)
+		}
+		return lines
+	case footer == "":
+		lines := bodyLines
+		for len(lines) < m.height {
+			lines = append(lines, "")
+		}
+		return lines
+	default:
+		availableBodyHeight := max(0, m.height-len(footerLines))
+		for len(bodyLines) < availableBodyHeight {
+			bodyLines = append(bodyLines, "")
+		}
+		if len(bodyLines) > availableBodyHeight {
+			bodyLines = bodyLines[:availableBodyHeight]
+		}
+		lines := append([]string{}, bodyLines...)
+		lines = append(lines, footerLines...)
+		return lines
+	}
 }
 
 func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -1291,6 +1337,7 @@ func (m *Model) scrollLLMPreview(delta int) {
 
 func (m *Model) scrollTranscript(delta int) {
 	m.viewport.SetYOffset(m.viewport.YOffset + delta)
+	m.invalidateBodyCache()
 }
 
 func (m *Model) llmPreviewMaxOffset() int {
@@ -1374,6 +1421,7 @@ func (m *Model) resize() {
 	m.viewport.Width = bodyWidth
 	m.viewport.Height = bodyHeight
 	m.resizeLLMPreview()
+	m.invalidateBodyCache()
 }
 
 func (m *Model) renderHeader() string {
@@ -1381,7 +1429,12 @@ func (m *Model) renderHeader() string {
 }
 
 func (m *Model) renderBody() string {
-	return ui.RenderElement(&ui.Context{Palette: m.palette}, m.renderBodyElement(), max(0, m.width), max(0, m.viewport.Height))
+	if m.bodyCacheValid {
+		return m.renderedBodyCache
+	}
+	m.renderedBodyCache = ui.RenderElement(&ui.Context{Palette: m.palette}, m.renderBodyElement(), max(0, m.width), max(0, m.viewport.Height))
+	m.bodyCacheValid = true
+	return m.renderedBodyCache
 }
 
 func (m *Model) renderBodyElement() ui.Element {
@@ -1649,14 +1702,17 @@ func (m Model) debugAPIAddr() string {
 }
 
 func (m *Model) refreshViewport() {
+	m.invalidateBodyCache()
 	m.refreshViewportAt(-1)
 }
 
 func (m *Model) refreshViewportPreserve() {
+	m.invalidateBodyCache()
 	m.refreshViewportAt(m.viewport.YOffset)
 }
 
 func (m *Model) refreshViewportAt(offset int) {
+	m.invalidateBodyCache()
 	m.transcriptControls = nil
 	runtime := ui.Runtime{}
 	ctx := &ui.Context{Palette: m.palette, Runtime: &runtime}
@@ -1676,6 +1732,11 @@ func (m *Model) refreshViewportAt(offset int) {
 		return
 	}
 	m.viewport.GotoBottom()
+}
+
+func (m *Model) invalidateBodyCache() {
+	m.bodyCacheValid = false
+	m.renderedBodyCache = ""
 }
 
 func (m *Model) transcriptElement(runtime *ui.Runtime) ui.Element {

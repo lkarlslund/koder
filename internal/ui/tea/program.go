@@ -146,13 +146,20 @@ func (p *Program) runCmd(cmd Cmd, out chan<- Msg) {
 }
 
 func (p *Program) render(out io.Writer) error {
+	if linesModel, ok := p.model.(interface{ ViewLines() []string }); ok {
+		_, err := io.WriteString(out, renderFrameLines(linesModel.ViewLines()))
+		return err
+	}
 	view := p.model.View()
 	_, err := io.WriteString(out, renderFrame(view))
 	return err
 }
 
 func renderFrame(view string) string {
-	lines := strings.Split(view, "\n")
+	return renderFrameLines(strings.Split(view, "\n"))
+}
+
+func renderFrameLines(lines []string) string {
 	var buf strings.Builder
 	buf.WriteString("\x1b[H\x1b[2J")
 	for idx, line := range lines {
