@@ -1,14 +1,13 @@
 package tui
 
-import "strings"
+import "github.com/lkarlslund/koder/internal/ui"
 
 type transcriptViewport struct {
-	Width   int
-	Height  int
-	YOffset int
+	Width         int
+	Height        int
+	YOffset       int
 	contentHeight int
-	visible       string
-	lines         []string
+	visible       ui.Surface
 }
 
 func newTranscriptViewport(width, height int) transcriptViewport {
@@ -18,29 +17,22 @@ func newTranscriptViewport(width, height int) transcriptViewport {
 }
 
 func (v *transcriptViewport) SetContent(content string) {
-	v.visible = content
+	v.visible = ui.SurfaceFromString(content)
 	if content == "" {
-		v.lines = nil
 		v.contentHeight = 0
 		v.YOffset = 0
 		return
 	}
-	v.lines = strings.Split(content, "\n")
-	v.contentHeight = len(v.lines)
+	v.contentHeight = v.visible.SurfaceHeight()
 	v.SetYOffset(v.YOffset)
 }
 
-func (v transcriptViewport) View() string {
+func (v transcriptViewport) VisibleSurface() ui.Surface {
 	return v.visible
 }
 
-func (v *transcriptViewport) SetVisible(content string) {
+func (v *transcriptViewport) SetVisibleSurface(content ui.Surface) {
 	v.visible = content
-	if content == "" {
-		v.lines = nil
-		return
-	}
-	v.lines = strings.Split(content, "\n")
 }
 
 func (v *transcriptViewport) SetContentHeight(height int) {
@@ -65,10 +57,10 @@ func (v transcriptViewport) TotalLineCount() int {
 }
 
 func (v transcriptViewport) VisibleLineCount() int {
-	if v.Height <= 0 || len(v.lines) == 0 {
+	if v.Height <= 0 || v.visible.SurfaceHeight() == 0 {
 		return 0
 	}
-	return min(v.Height, len(v.lines))
+	return min(v.Height, v.visible.SurfaceHeight())
 }
 
 func (v transcriptViewport) maxYOffset() int {

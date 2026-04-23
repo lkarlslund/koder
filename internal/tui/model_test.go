@@ -1187,9 +1187,6 @@ func TestSyncDebugRuntimeIncludesViewportState(t *testing.T) {
 	if got.MessageCount != 2 {
 		t.Fatalf("expected message count 2, got %#v", got)
 	}
-	if !strings.Contains(got.ViewportPreview, "line one") {
-		t.Fatalf("expected viewport preview, got %#v", got)
-	}
 }
 
 func TestRenderTranscriptToolMessageFallsBackToSummaryWhenBodyMissing(t *testing.T) {
@@ -3173,7 +3170,7 @@ func TestRefreshViewportAppendsWorkingLine(t *testing.T) {
 	}
 
 	m.refreshViewport()
-	got := m.viewport.View()
+	got := m.renderBody()
 	if !strings.Contains(got, "Working ...") || !strings.Contains(got, ui.SpinnerFrame(config.Default().UI.Spinner, 0)) {
 		t.Fatalf("expected transcript activity line, got %q", got)
 	}
@@ -3378,7 +3375,7 @@ func TestRefreshViewportOmitsWorkingLineForGenericLoading(t *testing.T) {
 	}
 
 	m.refreshViewport()
-	got := m.viewport.View()
+	got := m.renderBody()
 	if strings.Contains(got, "Resuming session 2") || strings.Contains(got, "[=") {
 		t.Fatalf("expected no model activity line for generic loading, got %q", got)
 	}
@@ -3400,11 +3397,11 @@ func TestSpinnerTickRefreshesTranscriptActivity(t *testing.T) {
 	}
 
 	m.refreshViewport()
-	before := m.viewport.View()
+	before := m.renderBody()
 
 	updated, cmd := m.Update(spinnerTickMsg{})
 	next := updated.(Model)
-	after := next.viewport.View()
+	after := next.renderBody()
 
 	if before == after {
 		t.Fatalf("expected spinner tick to refresh transcript activity, before=%q after=%q", before, after)

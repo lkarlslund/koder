@@ -4,8 +4,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/x/ansi"
-
 	"github.com/lkarlslund/koder/internal/theme"
 )
 
@@ -27,7 +25,7 @@ func TestRenderSelectableRowSelectedUsesDistinctHighlightColors(t *testing.T) {
 	base.Focused = true
 	focused := base.render(palette)
 
-	if selected.String() == unselected.String() && selected.cellAt(0, 0).Style.equal(unselected.cellAt(0, 0).Style) {
+	if SurfaceText(selected) == SurfaceText(unselected) && selected.cellAt(0, 0).Style.equal(unselected.cellAt(0, 0).Style) {
 		t.Fatal("expected selected row styling to differ from unselected row")
 	}
 	r, g, b, ok := selected.SurfaceCellBG(0, 0)
@@ -38,9 +36,10 @@ func TestRenderSelectableRowSelectedUsesDistinctHighlightColors(t *testing.T) {
 	if !ok || r != 0x07 || g != 0x08 || b != 0x09 {
 		t.Fatalf("expected selected row to use the selected row foreground, got (%d,%d,%d,%v)", r, g, b, ok)
 	}
-	activeOffset := strings.Index(selected.String(), "active")
+	selectedText := SurfaceText(selected)
+	activeOffset := strings.Index(selectedText, "active")
 	if activeOffset == -1 {
-		t.Fatalf("expected row to contain tertiary text, got %q", selected.String())
+		t.Fatalf("expected row to contain tertiary text, got %q", selectedText)
 	}
 	r, g, b, ok = selected.SurfaceCellFG(activeOffset, 0)
 	if !ok || r != 0x07 || g != 0x08 || b != 0x09 {
@@ -82,8 +81,8 @@ func TestButtonRowRightAlignsWithinWidth(t *testing.T) {
 		Align: HorizontalAlignRight,
 	}
 
-	got := ansi.Strip(row.render(palette).String())
-	raw := ansi.Strip(ButtonRow{Buttons: row.Buttons}.render(palette).String())
+	got := SurfaceText(row.render(palette))
+	raw := SurfaceText(ButtonRow{Buttons: row.Buttons}.render(palette))
 	if !strings.HasSuffix(got, raw) {
 		t.Fatalf("expected right-aligned row to end with raw button line, got %q", got)
 	}

@@ -4,8 +4,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/x/ansi"
-
 	"github.com/lkarlslund/koder/internal/theme"
 )
 
@@ -20,11 +18,11 @@ func TestPendingInputPreviewShowsQueuedMessagesInMutedStyle(t *testing.T) {
 		QueuedMessages: []string{"queued submission"},
 	}.render(palette)
 
-	plain := got.String()
-	if !strings.Contains(ansi.Strip(plain), "Queued follow-up inputs") {
+	plain := SurfaceText(got)
+	if !strings.Contains(plain, "Queued follow-up inputs") {
 		t.Fatalf("expected queued preview header, got %q", plain)
 	}
-	if !strings.Contains(ansi.Strip(plain), "↳ queued submission") {
+	if !strings.Contains(plain, "↳ queued submission") {
 		t.Fatalf("expected queued preview row, got %q", plain)
 	}
 	r, g, b, ok := got.SurfaceCellFG(0, 0)
@@ -35,12 +33,12 @@ func TestPendingInputPreviewShowsQueuedMessagesInMutedStyle(t *testing.T) {
 
 func TestPendingInputPreviewShowsPendingSteersBeforeQueuedMessages(t *testing.T) {
 	palette := theme.Default().Palette
-	got := PendingInputPreview{
+	got := SurfaceText(PendingInputPreview{
 		Width:          56,
 		PendingSteers:  []string{"Please continue."},
 		QueuedMessages: []string{"follow up later"},
-	}.render(palette).String()
-	plain := ansi.Strip(got)
+	}.render(palette))
+	plain := got
 
 	steerIdx := strings.Index(plain, "Messages to be submitted after next tool call")
 	queueIdx := strings.Index(plain, "Queued follow-up inputs")

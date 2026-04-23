@@ -45,7 +45,7 @@ func TestViewSurfaceComposesMainWindowBehindModal(t *testing.T) {
 	m.status = "Ready"
 	m.openHelpModal()
 
-	frame := m.viewSurface().String()
+	frame := strings.Join(m.viewSurface().Lines(), "\n")
 	if !strings.Contains(frame, "Help") || !strings.Contains(frame, "Hotkeys") {
 		t.Fatalf("expected help modal content in frame, got %q", frame)
 	}

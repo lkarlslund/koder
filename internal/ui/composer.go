@@ -100,7 +100,7 @@ func (c Composer) render() Surface {
 }
 
 func (c Composer) renderPlaceholderLine(promptStyle, contentStyle lipgloss.Style, prompt string, contentWidth int, placeholder string, cursorChar string) string {
-	return c.renderPlaceholderSurface(promptStyle, contentStyle, prompt, contentWidth, placeholder, cursorChar).String()
+	return strings.Join(c.renderPlaceholderSurface(promptStyle, contentStyle, prompt, contentWidth, placeholder, cursorChar).Lines(), "\n")
 }
 
 func (c Composer) renderPlaceholderSurface(promptStyle, contentStyle lipgloss.Style, prompt string, contentWidth int, placeholder string, cursorChar string) Surface {
@@ -121,7 +121,7 @@ func (c Composer) renderPlaceholderSurface(promptStyle, contentStyle lipgloss.St
 }
 
 func (c Composer) renderLine(prompt string, promptStyle lipgloss.Style, before, cursor, after string, contentWidth int, cursorVisible bool, textFG, textBG lipgloss.Color) string {
-	return c.renderLineSurface(prompt, promptStyle, before, cursor, after, contentWidth, cursorVisible, textFG, textBG).String()
+	return strings.Join(c.renderLineSurface(prompt, promptStyle, before, cursor, after, contentWidth, cursorVisible, textFG, textBG).Lines(), "\n")
 }
 
 func (c Composer) renderLineSurface(prompt string, promptStyle lipgloss.Style, before, cursor, after string, contentWidth int, cursorVisible bool, textFG, textBG lipgloss.Color) Surface {

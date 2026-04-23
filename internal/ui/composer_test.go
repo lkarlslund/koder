@@ -37,9 +37,10 @@ func TestRenderComposerPlaceholderLineDoesNotAddExtraCursorCell(t *testing.T) {
 func TestRenderComposerLineKeepsTypedTextAfterCursorAtNormalColor(t *testing.T) {
 	promptStyle := lipgloss.NewStyle()
 	surface := Composer{}.renderLineSurface("> ", promptStyle, "ab", "c", "def", 16, true, lipgloss.Color("#112233"), lipgloss.Color("#445566"))
-	start := strings.Index(surface.String(), "def")
+	rendered := SurfaceText(surface)
+	start := strings.Index(rendered, "def")
 	if start == -1 {
-		t.Fatalf("expected rendered line to contain trailing text, got %q", surface.String())
+		t.Fatalf("expected rendered line to contain trailing text, got %q", rendered)
 	}
 	x := start
 	r, g, b, ok := surface.SurfaceCellFG(x, 0)

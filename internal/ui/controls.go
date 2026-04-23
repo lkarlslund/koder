@@ -35,7 +35,7 @@ type SelectableHeader struct {
 }
 
 func (h SelectableHeader) View(palette theme.Palette) string {
-	return h.render(palette).String()
+	return strings.Join(h.render(palette).Lines(), "\n")
 }
 
 func (h SelectableHeader) render(palette theme.Palette) Surface {
@@ -60,7 +60,7 @@ func (h SelectableHeader) render(palette theme.Palette) Surface {
 }
 
 func (r SelectableRow) View(palette theme.Palette) string {
-	return r.render(palette).String()
+	return strings.Join(r.render(palette).Lines(), "\n")
 }
 
 func (r SelectableRow) render(palette theme.Palette) Surface {
@@ -194,7 +194,7 @@ func (v VerticalTabs) Current() int {
 }
 
 func (v VerticalTabs) View(width int, palette theme.Palette, focused bool) string {
-	return v.render(width, palette, focused).String()
+	return strings.Join(v.render(width, palette, focused).Lines(), "\n")
 }
 
 func (v VerticalTabs) Measure(ctx *Context, constraints Constraints) Size {
@@ -331,7 +331,7 @@ func (r CheckboxRow) render(width int, palette theme.Palette, focused bool) stri
 			return line[0]
 		}
 	}
-	return row.String()
+	return strings.Join(row.Lines(), "\n")
 }
 
 type ChoiceRow struct {
@@ -376,14 +376,14 @@ func (r ChoiceRow) Render(ctx *Context, bounds Rect) Surface {
 }
 
 func (r ChoiceRow) render(width int, palette theme.Palette, focused bool) string {
-	return SelectableRow{
+	return strings.Join(SelectableRow{
 		Primary:   r.Label,
 		Secondary: r.Description,
 		Tertiary:  r.Value,
 		Width:     width,
 		Selected:  focused,
 		Focused:   focused,
-	}.render(palette).String()
+	}.render(palette).Lines(), "\n")
 }
 
 type Button struct {
@@ -397,11 +397,11 @@ type Button struct {
 }
 
 func (b Button) View(palette theme.Palette) string {
-	return b.renderSurface(palette).String()
+	return strings.Join(b.renderSurface(palette).Lines(), "\n")
 }
 
 func (b Button) render(palette theme.Palette) string {
-	return b.renderSurface(palette).String()
+	return strings.Join(b.renderSurface(palette).Lines(), "\n")
 }
 
 func (b Button) renderSurface(palette theme.Palette) Surface {
@@ -448,12 +448,12 @@ func (b Button) renderSurface(palette theme.Palette) Surface {
 }
 
 func RenderDialogButtons(palette theme.Palette, okLabel, cancelLabel string) string {
-	return ButtonRow{
+	return strings.Join(ButtonRow{
 		Buttons: []Button{
 			{Label: okLabel, Primary: true},
 			{Label: cancelLabel},
 		},
-	}.render(palette).String()
+	}.render(palette).Lines(), "\n")
 }
 
 type HorizontalAlign int
@@ -473,7 +473,7 @@ type ButtonRow struct {
 }
 
 func (r ButtonRow) View(palette theme.Palette) string {
-	return r.render(palette).String()
+	return strings.Join(r.render(palette).Lines(), "\n")
 }
 
 func (r *ButtonRow) Move(delta int) {
@@ -615,7 +615,7 @@ func (r ButtonRow) line(palette theme.Palette) string {
 	parts := make([]string, 0, len(r.Buttons))
 	for idx, button := range r.Buttons {
 		button.Focused = idx == r.Index
-		parts = append(parts, button.renderSurface(palette).String())
+		parts = append(parts, strings.Join(button.renderSurface(palette).Lines(), "\n"))
 	}
 	return strings.Join(parts, strings.Repeat(" ", r.gap()))
 }
@@ -640,7 +640,7 @@ func (r ButtonRow) gap() int {
 }
 
 func renderButtonLabel(label string, hotkey rune, palette theme.Palette, foreground, background lipgloss.Color, bold bool) string {
-	return buttonLabelSurface(label, hotkey, palette, foreground, background, bold).String()
+	return strings.Join(buttonLabelSurface(label, hotkey, palette, foreground, background, bold).Lines(), "\n")
 }
 
 type buttonLabelPart struct {

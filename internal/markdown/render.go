@@ -1,11 +1,10 @@
 package markdown
 
 import (
-	"fmt"
 	"strconv"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	"github.com/mattn/go-runewidth"
 	"github.com/lkarlslund/koder/internal/theme"
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/ast"
@@ -52,9 +51,9 @@ func (r *Renderer) renderBlockChildren(parent ast.Node, source []byte) []string 
 func (r *Renderer) renderBlock(node ast.Node, source []byte) string {
 	switch typed := node.(type) {
 	case *ast.Paragraph:
-		return lipgloss.NewStyle().Foreground(r.palette.MarkdownText).Render(r.renderInlineChildren(node, source))
+		return r.renderInlineChildren(node, source)
 	case *ast.TextBlock:
-		return lipgloss.NewStyle().Foreground(r.palette.MarkdownText).Render(r.renderInlineChildren(node, source))
+		return r.renderInlineChildren(node, source)
 	case *ast.Heading:
 		return r.renderHeading(typed, source)
 	case *ast.Blockquote:
@@ -66,7 +65,7 @@ func (r *Renderer) renderBlock(node ast.Node, source []byte) string {
 	case *ast.List:
 		return r.renderList(typed, source)
 	case *ast.ThematicBreak:
-		return lipgloss.NewStyle().Foreground(r.palette.MarkdownRule).Render(strings.Repeat("─", 32))
+		return strings.Repeat("─", 32)
 	case *extensionast.Table:
 		return r.renderTable(typed, source)
 	case *ast.HTMLBlock:
@@ -80,16 +79,7 @@ func (r *Renderer) renderBlock(node ast.Node, source []byte) string {
 }
 
 func (r *Renderer) renderHeading(node *ast.Heading, source []byte) string {
-	style := lipgloss.NewStyle().Bold(true)
-	switch node.Level {
-	case 1:
-		style = style.Foreground(r.palette.MarkdownHeadingPrimary)
-	case 2:
-		style = style.Foreground(r.palette.MarkdownHeadingSecondary)
-	default:
-		style = style.Foreground(r.palette.MarkdownHeadingTertiary)
-	}
-	return style.Render(r.renderInlineChildren(node, source))
+	return r.renderInlineChildren(node, source)
 }
 
 func (r *Renderer) renderBlockquote(node *ast.Blockquote, source []byte) string {
@@ -97,16 +87,14 @@ func (r *Renderer) renderBlockquote(node *ast.Blockquote, source []byte) string 
 	if strings.TrimSpace(inner) == "" {
 		return ""
 	}
-	prefix := lipgloss.NewStyle().Foreground(r.palette.MarkdownQuoteBorder).Render("│")
-	body := lipgloss.NewStyle().Foreground(r.palette.MarkdownQuoteText).Italic(true)
 	lines := strings.Split(inner, "\n")
 	rendered := make([]string, 0, len(lines))
 	for _, line := range lines {
 		if strings.TrimSpace(line) == "" {
-			rendered = append(rendered, prefix)
+			rendered = append(rendered, "│")
 			continue
 		}
-		rendered = append(rendered, prefix+" "+body.Render(line))
+		rendered = append(rendered, "│ "+line)
 	}
 	return strings.Join(rendered, "\n")
 }
@@ -116,9 +104,6 @@ func (r *Renderer) renderFencedCodeBlock(node *ast.FencedCodeBlock, source []byt
 }
 
 func (r *Renderer) renderCodeBlock(lang string, lines *text.Segments, source []byte) string {
-	border := lipgloss.NewStyle().Foreground(r.palette.MarkdownCodeBlockBorder)
-	body := lipgloss.NewStyle().Foreground(r.palette.MarkdownCodeBlockText).Padding(0, 1)
-
 	label := strings.TrimSpace(lang)
 	if label == "" {
 		label = "code"
@@ -133,9 +118,13 @@ func (r *Renderer) renderCodeBlock(lang string, lines *text.Segments, source []b
 	if strings.TrimSpace(content) == "" {
 		content = " "
 	}
-	header := border.Render("┌─ " + label)
-	footer := border.Render("└" + strings.Repeat("─", max(2, len(label)+2)))
-	return strings.Join([]string{header, body.Render(content), footer}, "\n")
+	header := "┌─ " + label
+	footer := "└" + strings.Repeat("─", max(2, runewidth.StringWidth(label)+2))
+	bodyLines := strings.Split(content, "\n")
+	for i := range bodyLines {
+		bodyLines[i] = "  " + bodyLines[i]
+	}
+	return strings.Join(append([]string{header}, append(bodyLines, footer)...), "\n")
 }
 
 func (r *Renderer) renderList(node *ast.List, source []byte) string {
@@ -151,12 +140,7 @@ func (r *Renderer) renderList(node *ast.List, source []byte) string {
 			markerText = strconv.Itoa(itemNumber) + "."
 			itemNumber++
 		}
-		markerColor := r.palette.MarkdownListMarker
-		if node.IsOrdered() {
-			markerColor = r.palette.MarkdownListEnumeration
-		}
-		marker := lipgloss.NewStyle().Foreground(markerColor).Render(markerText)
-		lines = append(lines, r.renderListItem(listItem, source, marker, len(markerText)+1)...)
+		lines = append(lines, r.renderListItem(listItem, source, markerText, len(markerText)+1)...)
 	}
 	return strings.Join(lines, "\n")
 }
@@ -204,26 +188,16 @@ func (r *Renderer) renderInline(node ast.Node, source []byte) string {
 	case *ast.String:
 		return string(typed.Value)
 	case *ast.CodeSpan:
-		return r.withInlineReset(lipgloss.NewStyle().
-			Foreground(r.palette.MarkdownInlineCodeText).
-			Background(r.palette.MarkdownInlineCodeBackground).
-			Render(r.renderInlineChildren(node, source)))
+		return "`" + r.renderInlineChildren(node, source) + "`"
 	case *ast.Emphasis:
-		text := r.renderInlineChildren(node, source)
-		style := lipgloss.NewStyle()
-		if typed.Level == 2 {
-			style = style.Bold(true).Foreground(r.palette.MarkdownStrongText)
-		} else {
-			style = style.Italic(true).Foreground(r.palette.MarkdownEmphasisText)
-		}
-		return r.withInlineReset(style.Render(text))
+		return r.renderInlineChildren(node, source)
 	case *extensionast.Strikethrough:
-		return r.withInlineReset(lipgloss.NewStyle().Strikethrough(true).Render(r.renderInlineChildren(node, source)))
+		return r.renderInlineChildren(node, source)
 	case *ast.Link:
 		return r.renderLink(typed, source)
 	case *ast.AutoLink:
 		target := string(typed.URL(source))
-		return r.withInlineReset(lipgloss.NewStyle().Foreground(r.palette.MarkdownLinkTargetText).Underline(true).Render(target))
+		return target
 	case *ast.RawHTML:
 		return ""
 	case *extensionast.TaskCheckBox:
@@ -243,11 +217,9 @@ func (r *Renderer) renderLink(node *ast.Link, source []byte) string {
 	label := r.renderInlineChildren(node, source)
 	target := string(node.Destination)
 	if strings.TrimSpace(label) == "" || label == target {
-		return r.withInlineReset(lipgloss.NewStyle().Foreground(r.palette.MarkdownLinkTargetText).Underline(true).Render(target))
+		return target
 	}
-	linkLabel := lipgloss.NewStyle().Foreground(r.palette.MarkdownLinkText).Underline(true).Render(label)
-	targetText := lipgloss.NewStyle().Foreground(r.palette.MarkdownLinkTargetText).Render(target)
-	return r.withInlineReset(fmt.Sprintf("%s (%s)", linkLabel, targetText))
+	return label + " (" + target + ")"
 }
 
 func (r *Renderer) renderTable(node *extensionast.Table, source []byte) string {
@@ -269,16 +241,15 @@ func (r *Renderer) renderTable(node *extensionast.Table, source []byte) string {
 			if idx >= len(widths) {
 				widths = append(widths, 0)
 			}
-			widths[idx] = max(widths[idx], lipgloss.Width(cell))
+			widths[idx] = max(widths[idx], runewidth.StringWidth(cell))
 		}
 	}
 
-	border := lipgloss.NewStyle().Foreground(r.palette.MarkdownTableBorder)
 	var lines []string
 	for rowIndex, row := range rows {
 		lines = append(lines, r.renderTableRow(row, widths))
 		if rowIndex == 0 {
-			lines = append(lines, r.renderTableDivider(widths, border))
+			lines = append(lines, r.renderTableDivider(widths))
 		}
 	}
 	return strings.Join(lines, "\n")
@@ -303,21 +274,21 @@ func (r *Renderer) renderTableRow(row []string, widths []int) string {
 		if idx < len(row) {
 			cell = row[idx]
 		}
-		cells = append(cells, lipgloss.NewStyle().Foreground(r.palette.MarkdownText).Render(padRight(cell, width)))
+		cells = append(cells, padRight(cell, width))
 	}
 	return "| " + strings.Join(cells, " | ") + " |"
 }
 
-func (r *Renderer) renderTableDivider(widths []int, border lipgloss.Style) string {
+func (r *Renderer) renderTableDivider(widths []int) string {
 	parts := make([]string, 0, len(widths))
 	for _, width := range widths {
 		parts = append(parts, strings.Repeat("-", width+2))
 	}
-	return border.Render("|" + strings.Join(parts, "|") + "|")
+	return "|" + strings.Join(parts, "|") + "|"
 }
 
 func padRight(value string, width int) string {
-	padding := width - lipgloss.Width(value)
+	padding := width - runewidth.StringWidth(value)
 	if padding <= 0 {
 		return value
 	}
@@ -329,25 +300,4 @@ func max(a, b int) int {
 		return a
 	}
 	return b
-}
-
-func (r *Renderer) withInlineReset(rendered string) string {
-	if rendered == "" {
-		return ""
-	}
-	return rendered + ansiForeground(r.palette.MarkdownText)
-}
-
-func ansiForeground(color lipgloss.Color) string {
-	raw := strings.TrimSpace(string(color))
-	if !strings.HasPrefix(raw, "#") || len(raw) != 7 {
-		return ""
-	}
-	rv, err1 := strconv.ParseInt(raw[1:3], 16, 64)
-	gv, err2 := strconv.ParseInt(raw[3:5], 16, 64)
-	bv, err3 := strconv.ParseInt(raw[5:7], 16, 64)
-	if err1 != nil || err2 != nil || err3 != nil {
-		return ""
-	}
-	return fmt.Sprintf("\x1b[38;2;%d;%d;%dm", rv, gv, bv)
 }

@@ -11,11 +11,14 @@ type Msg any
 type Model interface {
 	Init() Cmd
 	Update(Msg) (Model, Cmd)
-	View() string
 }
 
 type SurfaceModel interface {
 	ViewSurface() SurfaceView
+}
+
+type ViewModel interface {
+	View() string
 }
 
 type SurfaceView interface {

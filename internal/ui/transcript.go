@@ -88,6 +88,40 @@ func (t *RetainedTranscript) SetItems(items []TranscriptItem) {
 	t.items = append(t.items[:0], items...)
 }
 
+func (t *RetainedTranscript) Reconcile(items []TranscriptItem) {
+	if t == nil {
+		return
+	}
+	if len(items) == 0 {
+		t.items = nil
+		return
+	}
+	if len(t.items) == 0 {
+		t.SetItems(items)
+		return
+	}
+	prevByKey := make(map[string]TranscriptItem, len(t.items))
+	for _, item := range t.items {
+		if strings.TrimSpace(item.Key) == "" {
+			continue
+		}
+		prevByKey[item.Key] = item
+	}
+	next := make([]TranscriptItem, 0, len(items))
+	for _, item := range items {
+		if existing, ok := prevByKey[item.Key]; ok {
+			if item.Element == nil {
+				item.Element = existing.Element
+			}
+			if item.GapBefore == 0 {
+				item.GapBefore = existing.GapBefore
+			}
+		}
+		next = append(next, item)
+	}
+	t.items = next
+}
+
 func (t *RetainedTranscript) Add(item TranscriptItem) {
 	t.items = append(t.items, item)
 }

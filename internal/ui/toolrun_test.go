@@ -17,7 +17,7 @@ func TestToolRunCardViewPlacesSubtitleOnSeparateLine(t *testing.T) {
 		Output:   "line 1\nline 2",
 	}
 
-	got := run.CardSurface(palette, 80, false).String()
+	got := SurfaceText(run.CardSurface(palette, 80, false))
 	lines := strings.Split(got, "\n")
 	if len(lines) < 2 {
 		t.Fatalf("expected multi-line card, got %q", got)
@@ -42,7 +42,7 @@ func TestToolRunCardViewPlacesGrepSubtitleOnSeparateLine(t *testing.T) {
 		Output:   "internal/a.go:1:needle",
 	}
 
-	got := run.CardSurface(palette, 80, false).String()
+	got := SurfaceText(run.CardSurface(palette, 80, false))
 	lines := strings.Split(got, "\n")
 	if len(lines) < 2 {
 		t.Fatalf("expected multi-line card, got %q", got)

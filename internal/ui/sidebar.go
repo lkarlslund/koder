@@ -8,10 +8,6 @@ type Sidebar struct {
 	Width  int
 }
 
-func (s Sidebar) content(ctx *Context, width int) string {
-	return s.render(ctx, width).String()
-}
-
 func (s Sidebar) render(ctx *Context, width int) Surface {
 	height := s.Height
 	contentHeight := 0

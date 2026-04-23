@@ -168,7 +168,11 @@ func (p *Program) render(out io.Writer) error {
 		p.renderedRows = nil
 	} else {
 		var lines []string
-		view := p.model.View()
+		viewModel, ok := p.model.(ViewModel)
+		if !ok {
+			return nil
+		}
+		view := viewModel.View()
 		lines = strings.Split(view, "\n")
 		if !p.didRender {
 			frame = renderFrameLines(lines)

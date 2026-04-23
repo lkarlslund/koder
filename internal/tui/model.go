@@ -16,7 +16,6 @@ import (
 	"unicode"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/x/ansi"
 	tea "github.com/lkarlslund/koder/internal/ui/tea"
 
 	"github.com/lkarlslund/koder/internal/agent"
@@ -702,10 +701,6 @@ func (m Model) centeredModal(element ui.Element) ui.Element {
 	}
 }
 
-func (m Model) View() string {
-	return m.viewSurface().String()
-}
-
 func (m Model) ViewLines() []string {
 	return m.viewSurface().Lines()
 }
@@ -1237,10 +1232,6 @@ func (m *Model) renderHeader() string {
 	return ""
 }
 
-func (m *Model) renderBody() string {
-	return m.renderBodySurface().String()
-}
-
 func (m *Model) renderBodyLines() []string {
 	return m.renderBodySurface().Lines()
 }
@@ -1275,23 +1266,47 @@ func (m *Model) renderBodyElement() ui.Element {
 		Height: m.viewport.Height,
 		Width:  sidebarWidth,
 	}
-	main := ui.TextPane{Content: m.viewport.View()}
+	var mainElement ui.Element = ui.SurfaceBox{Surface: m.viewport.VisibleSurface()}
 	if transcript := m.transcriptElement(nil); transcript != nil {
+		mainElement = transcript
+	}
+	if activity := m.renderTranscriptActivityElement(); activity != nil {
+		mainElement = ui.Column{
+			Children: []ui.Child{
+				ui.Flex(mainElement, 1),
+				ui.Fixed(activity),
+			},
+			Spacing: 1,
+		}
+	}
+	if mainElement != nil {
 		return ui.BodyLayout{
-			MainElement:    transcript,
+			MainElement:    mainElement,
 			SidebarElement: sidebar,
 			ShowSidebar:    m.showSidebar,
 		}
 	}
 	return ui.BodyLayout{
-		MainElement:    main,
+		MainElement:    mainElement,
 		SidebarElement: sidebar,
 		ShowSidebar:    m.showSidebar,
 	}
 }
 
-func (m *Model) renderFooter() string {
-	return m.renderFooterSurface().String()
+func (m *Model) transcriptActivityHeight() int {
+	element := m.renderTranscriptActivityElement()
+	if element == nil {
+		return 0
+	}
+	return element.Measure(&ui.Context{Palette: m.palette}, ui.NewConstraints(max(0, m.viewport.Width), 0)).H
+}
+
+func (m *Model) transcriptViewportHeight() int {
+	activityHeight := m.transcriptActivityHeight()
+	if activityHeight <= 0 {
+		return max(0, m.viewport.Height)
+	}
+	return max(0, m.viewport.Height-activityHeight-1)
 }
 
 func (m *Model) renderFooterLines() []string {
@@ -1347,13 +1362,9 @@ func (m *Model) renderFooterElement() ui.Element {
 func (m *Model) footerHeight() int {
 	cache := m.ensureRenderCache()
 	if !cache.footerValid {
-		_ = m.renderFooter()
+		_ = m.renderFooterSurface()
 	}
 	return cache.footerHeight
-}
-
-func (m *Model) renderComposer() string {
-	return ui.RenderElement(&ui.Context{Palette: m.palette}, m.renderComposerElement(), m.composerWidth(), 0)
 }
 
 func (m *Model) renderComposerElement() ui.Element {
@@ -1373,13 +1384,6 @@ func (m *Model) renderComposerElement() ui.Element {
 	})
 }
 
-func (m *Model) renderDraftAttachments() string {
-	if element := m.renderDraftAttachmentsElement(); element != nil {
-		return ui.RenderElement(&ui.Context{Palette: m.palette}, element, m.composerWidth(), 0)
-	}
-	return ""
-}
-
 func (m *Model) renderDraftAttachmentsElement() ui.Element {
 	if len(m.draftAttachments) == 0 {
 		return nil
@@ -1389,13 +1393,6 @@ func (m *Model) renderDraftAttachmentsElement() ui.Element {
 		items = append(items, ui.AttachmentItem{Label: m.attachmentLabel(draft.Metadata)})
 	}
 	return ui.AttachmentList{Items: items, Width: m.composerWidth()}
-}
-
-func (m *Model) renderQueuedPromptPreview() string {
-	if element := m.renderQueuedPromptPreviewElement(); element != nil {
-		return ui.RenderElement(&ui.Context{Palette: m.palette}, element, m.composerWidth(), 0)
-	}
-	return ""
 }
 
 func (m *Model) renderQueuedPromptPreviewElement() ui.Element {
@@ -1580,15 +1577,16 @@ func (m *Model) refreshViewportAt(offset int) {
 		totalHeight int
 		appliedY    int
 	)
+	viewportHeight := max(0, m.transcriptViewportHeight())
 	if offset >= 0 {
-		surface, totalHeight, appliedY = retained.RenderVisible(ctx, max(0, m.viewport.Width), max(0, m.viewport.Height), offset)
+		surface, totalHeight, appliedY = retained.RenderVisible(ctx, max(0, m.viewport.Width), viewportHeight, offset)
 	} else {
-		surface, totalHeight, appliedY = retained.RenderBottom(ctx, max(0, m.viewport.Width), max(0, m.viewport.Height))
+		surface, totalHeight, appliedY = retained.RenderBottom(ctx, max(0, m.viewport.Width), viewportHeight)
 	}
 	m.viewport.SetContentHeight(totalHeight)
 	m.viewport.SetYOffset(appliedY)
 	m.transcriptControls = runtime.Controls()
-	m.viewport.SetVisible(surface.String())
+	m.viewport.SetVisibleSurface(surface)
 }
 
 func (m *Model) invalidateBodyCache() {
@@ -1625,7 +1623,7 @@ func (m *Model) transcriptElement(runtime *ui.Runtime) ui.Element {
 		return nil
 	}
 	width := max(0, m.viewport.Width)
-	height := max(0, m.viewport.Height)
+	height := max(0, m.transcriptViewportHeight())
 	if runtime != nil {
 		runtime.BeginFrame()
 	}
@@ -1639,9 +1637,9 @@ func (m *Model) transcriptElement(runtime *ui.Runtime) ui.Element {
 
 func (m *Model) syncRetainedTranscript() *ui.RetainedTranscript {
 	retained := m.ensureRetainedTranscript()
-	retained.SetItems(m.buildTranscriptItems())
+	retained.Reconcile(m.buildTranscriptItems())
 	if m.currentSession.ID == 0 && len(m.messages) == 0 && !m.cfg.HasUsableDefaultProvider() {
-		retained.SetItems([]ui.TranscriptItem{{
+		retained.Reconcile([]ui.TranscriptItem{{
 			Key:     "no-provider",
 			Element: ui.NewCachedElement(ui.Paragraph{Text: "No provider configured.\n\nType /connect to add one before sending prompts."}, 3),
 		}})
@@ -1681,13 +1679,6 @@ func renderedSeparatorHeight(separator string) int {
 	return max(0, lipgloss.Height("x"+separator+"x")-2)
 }
 
-func (m *Model) renderTranscriptActivity() string {
-	if element := m.renderTranscriptActivityElement(); element != nil {
-		return ui.RenderElement(&ui.Context{Palette: m.palette}, element, max(0, m.viewport.Width), 0)
-	}
-	return ""
-}
-
 func (m *Model) renderTranscriptActivityElement() ui.Element {
 	if !m.busy.transcriptActive() {
 		return nil
@@ -1696,13 +1687,6 @@ func (m *Model) renderTranscriptActivityElement() ui.Element {
 		Indicator: ui.WorkingIndicatorLine(m.workingIndicator()),
 		Palette:   m.palette,
 	}
-}
-
-func (m *Model) renderTranscriptMessage(msg domain.Message) string {
-	if element := m.renderTranscriptMessageElement(msg); element != nil {
-		return ui.RenderElement(&ui.Context{Palette: m.palette}, element, max(0, m.viewport.Width), 0)
-	}
-	return ""
 }
 
 func (m *Model) renderTranscriptMessageElement(msg domain.Message) ui.Element {
@@ -3203,7 +3187,7 @@ func (m Model) latestAssistantCopyText() string {
 		if msg.Role != domain.MessageRoleAssistant {
 			continue
 		}
-		body := strings.TrimSpace(ansi.Strip(m.renderMessageParts(m.parts[msg.ID])))
+		body := strings.TrimSpace(m.renderMessageParts(m.parts[msg.ID]))
 		if body == "" {
 			body = strings.TrimSpace(msg.Summary)
 		}
@@ -3245,10 +3229,9 @@ func (m Model) syncDebugRuntime() {
 		return
 	}
 	renderedBlocks := len(m.messages)
-	if m.renderTranscriptActivity() != "" {
+	if m.renderTranscriptActivityElement() != nil {
 		renderedBlocks++
 	}
-	viewportContent := m.viewport.View()
 	m.debug.UpdateRuntime(debugsrv.RuntimeSnapshot{
 		DebugAPI:           m.debugAPIAddr(),
 		CurrentSession:     m.currentSession.ID,
@@ -3268,8 +3251,8 @@ func (m Model) syncDebugRuntime() {
 		ViewportYOffset:    m.viewport.YOffset,
 		MessageCount:       len(m.messages),
 		RenderBlockCount:   renderedBlocks,
-		ViewportPreview:    truncate(strings.TrimSpace(viewportContent), 2048),
-		ViewportContentLen: len(viewportContent),
+		ViewportPreview:    "",
+		ViewportContentLen: m.viewport.VisibleSurface().SurfaceHeight(),
 	})
 }
 
@@ -4367,17 +4350,6 @@ func (m *Model) buildTranscriptItems() []ui.TranscriptItem {
 		items = append(items, ui.TranscriptItem{
 			Key:       m.transcriptBlockCacheKey(block),
 			Element:   cached.element,
-			GapBefore: gap,
-		})
-	}
-	if indicator := m.renderTranscriptActivityElement(); indicator != nil {
-		gap := 0
-		if len(items) > 0 {
-			gap = renderedSeparatorHeight(m.transcriptActivitySeparator(transcriptBlocks[len(transcriptBlocks)-1]))
-		}
-		items = append(items, ui.TranscriptItem{
-			Key:       "activity",
-			Element:   ui.NewCachedElement(indicator, 1),
 			GapBefore: gap,
 		})
 	}

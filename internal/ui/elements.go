@@ -276,10 +276,6 @@ func (s Surface) Size() Size {
 	return Size{W: width, H: len(s.lines)}
 }
 
-func (s Surface) String() string {
-	return strings.Join(s.Lines(), "\n")
-}
-
 func (s Surface) Normalize(width, height int) Surface {
 	return s.normalize(width, height)
 }
@@ -556,6 +552,18 @@ func (s Static) Measure(_ *Context, constraints Constraints) Size {
 
 func (s Static) Render(_ *Context, bounds Rect) Surface {
 	return SurfaceFromString(s.Content).normalize(bounds.W, bounds.H)
+}
+
+type SurfaceBox struct {
+	Surface Surface
+}
+
+func (b SurfaceBox) Measure(_ *Context, constraints Constraints) Size {
+	return constraints.Clamp(b.Surface.Size())
+}
+
+func (b SurfaceBox) Render(_ *Context, bounds Rect) Surface {
+	return b.Surface.normalize(bounds.W, bounds.H)
 }
 
 type Child struct {
@@ -894,7 +902,7 @@ func RenderElement(ctx *Context, element Element, width, height int) string {
 	} else if size.H == 0 {
 		size.H = 0
 	}
-	return element.Render(ctx, Rect{W: size.W, H: size.H}).String()
+	return strings.Join(element.Render(ctx, Rect{W: size.W, H: size.H}).Lines(), "\n")
 }
 
 func clampInt(value, low, high int) int {
