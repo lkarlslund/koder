@@ -72,21 +72,27 @@ type ActivityIndicator struct {
 }
 
 func (i ActivityIndicator) View() string {
-	if strings.TrimSpace(i.Indicator) == "" {
-		return ""
-	}
-	return lipgloss.NewStyle().
-		Foreground(i.Palette.ActivityText).
-		Bold(true).
-		Render(i.Indicator)
+	return i.render().String()
 }
 
 func (i ActivityIndicator) Measure(_ *Context, constraints Constraints) Size {
-	return constraints.Clamp(SurfaceFromString(i.View()).Size())
+	return constraints.Clamp(i.render().Size())
 }
 
 func (i ActivityIndicator) Render(_ *Context, bounds Rect) Surface {
-	return SurfaceFromString(i.View()).normalize(bounds.W, bounds.H)
+	return i.render().normalize(bounds.W, bounds.H)
+}
+
+func (i ActivityIndicator) render() Surface {
+	if strings.TrimSpace(i.Indicator) == "" {
+		return Surface{}
+	}
+	return Surface{lines: []string{
+		lipgloss.NewStyle().
+			Foreground(i.Palette.ActivityText).
+			Bold(true).
+			Render(i.Indicator),
+	}}
 }
 
 type UserMessage struct {
@@ -103,6 +109,18 @@ func NewUserMessage(props UserMessageProps) UserMessage {
 }
 
 func (m UserMessage) View() string {
+	return m.render().String()
+}
+
+func (m UserMessage) Measure(_ *Context, constraints Constraints) Size {
+	return constraints.Clamp(m.render().Size())
+}
+
+func (m UserMessage) Render(_ *Context, bounds Rect) Surface {
+	return m.render().normalize(bounds.W, bounds.H)
+}
+
+func (m UserMessage) render() Surface {
 	baseLines := []string{""}
 	content := strings.TrimSpace(m.Body)
 	if content != "" {
@@ -162,15 +180,7 @@ func (m UserMessage) View() string {
 	} else {
 		rendered = append(rendered, barStyle.Render(bar)+contentStyle.Render(""))
 	}
-	return strings.Join(rendered, "\n")
-}
-
-func (m UserMessage) Measure(_ *Context, constraints Constraints) Size {
-	return constraints.Clamp(SurfaceFromString(m.View()).Size())
-}
-
-func (m UserMessage) Render(_ *Context, bounds Rect) Surface {
-	return SurfaceFromString(m.View()).normalize(bounds.W, bounds.H)
+	return Surface{lines: rendered}
 }
 
 func WrapUserMessageLine(line string, width int) []string {
@@ -204,32 +214,29 @@ type AssistantMessage struct {
 }
 
 func (m AssistantMessage) View() string {
-	body := strings.TrimSpace(m.Body)
-	body = WrapStyledBlock(body, m.Width)
-	bodyStyle := lipgloss.NewStyle().Foreground(m.Palette.MarkdownText)
-	if body != "" {
-		lines := strings.Split(body, "\n")
-		rendered := make([]string, 0, len(lines))
-		for _, line := range lines {
-			rendered = append(rendered, bodyStyle.Render(line))
-		}
-		body = strings.Join(rendered, "\n")
-	}
-	if m.Stamp == "" {
-		return body
-	}
-	header := lipgloss.NewStyle().
-		Foreground(m.Palette.AssistantTimestampText).
-		Render(m.Stamp)
-	return header + "\n" + body
+	return m.render().String()
 }
 
 func (m AssistantMessage) Measure(_ *Context, constraints Constraints) Size {
-	return constraints.Clamp(SurfaceFromString(m.View()).Size())
+	return constraints.Clamp(m.render().Size())
 }
 
 func (m AssistantMessage) Render(_ *Context, bounds Rect) Surface {
-	return SurfaceFromString(m.View()).normalize(bounds.W, bounds.H)
+	return m.render().normalize(bounds.W, bounds.H)
+}
+
+func (m AssistantMessage) render() Surface {
+	lines := make([]string, 0, 1)
+	if m.Stamp != "" {
+		lines = append(lines, lipgloss.NewStyle().
+			Foreground(m.Palette.AssistantTimestampText).
+			Render(m.Stamp))
+	}
+	bodyStyle := lipgloss.NewStyle().Foreground(m.Palette.MarkdownText)
+	for _, line := range wrapStyledLines(strings.TrimSpace(m.Body), m.Width) {
+		lines = append(lines, bodyStyle.Render(line))
+	}
+	return Surface{lines: lines}
 }
 
 type ReasoningBlock struct {
@@ -239,28 +246,30 @@ type ReasoningBlock struct {
 }
 
 func (b ReasoningBlock) View() string {
-	content := strings.TrimSpace(b.Body)
-	if content == "" {
-		return ""
-	}
-	content = WrapStyledBlock(content, b.Width)
-	lineStyle := lipgloss.NewStyle().
-		Background(b.Palette.ReasoningBackground).
-		Foreground(b.Palette.ReasoningText)
-	lines := append([]string{""}, strings.Split(content, "\n")...)
-	rendered := make([]string, 0, len(lines))
-	for _, line := range lines {
-		rendered = append(rendered, lineStyle.Render(line))
-	}
-	return strings.Join(rendered, "\n")
+	return b.render().String()
 }
 
 func (b ReasoningBlock) Measure(_ *Context, constraints Constraints) Size {
-	return constraints.Clamp(SurfaceFromString(b.View()).Size())
+	return constraints.Clamp(b.render().Size())
 }
 
 func (b ReasoningBlock) Render(_ *Context, bounds Rect) Surface {
-	return SurfaceFromString(b.View()).normalize(bounds.W, bounds.H)
+	return b.render().normalize(bounds.W, bounds.H)
+}
+
+func (b ReasoningBlock) render() Surface {
+	content := strings.TrimSpace(b.Body)
+	if content == "" {
+		return Surface{}
+	}
+	lineStyle := lipgloss.NewStyle().
+		Background(b.Palette.ReasoningBackground).
+		Foreground(b.Palette.ReasoningText)
+	lines := []string{lineStyle.Render("")}
+	for _, line := range wrapStyledLines(content, b.Width) {
+		lines = append(lines, lineStyle.Render(line))
+	}
+	return Surface{lines: lines}
 }
 
 func WorkingIndicatorLine(indicator string) string {
@@ -271,8 +280,15 @@ func WorkingIndicatorLine(indicator string) string {
 }
 
 func WrapStyledBlock(input string, width int) string {
+	return strings.Join(wrapStyledLines(input, width), "\n")
+}
+
+func wrapStyledLines(input string, width int) []string {
 	if width <= 0 {
-		return input
+		if strings.TrimSpace(input) == "" {
+			return nil
+		}
+		return strings.Split(input, "\n")
 	}
 	var wrapped []string
 	for _, line := range strings.Split(input, "\n") {
@@ -283,5 +299,5 @@ func WrapStyledBlock(input string, width int) string {
 		chunks := strings.Split(ansi.Wordwrap(line, width, ""), "\n")
 		wrapped = append(wrapped, chunks...)
 	}
-	return strings.Join(wrapped, "\n")
+	return wrapped
 }
