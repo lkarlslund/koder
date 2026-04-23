@@ -135,24 +135,29 @@ func (d *ConnectDialog) Update(msg tea.KeyMsg) ProviderConnectAction {
 }
 
 func (d ConnectDialog) View(width int, palette theme.Palette) string {
-	switch d.stage {
-	case connectStageProvider:
-		return d.providerListView(width, palette)
-	case connectStageAuth:
-		return d.authPickerView(width, palette)
-	case connectStageForm:
-		return d.formView(width, palette)
-	default:
-		return ""
-	}
+	dialogWidth := dialogRenderWidth(Rect{W: width}, 88)
+	return RenderElement(&Context{Palette: palette}, d.dialog(dialogWidth, palette), dialogWidth, 0)
 }
 
 func (d ConnectDialog) Measure(ctx *Context, constraints Constraints) Size {
-	return dialogMeasure(ctx, constraints, 88, d.View)
+	return dialogMeasureElement(ctx, constraints, 88, d.dialog)
 }
 
 func (d ConnectDialog) Render(ctx *Context, bounds Rect) Surface {
-	return dialogRender(ctx, bounds, 88, d.View)
+	return dialogRenderElement(ctx, bounds, 88, d.dialog)
+}
+
+func (d ConnectDialog) dialog(width int, palette theme.Palette) Element {
+	switch d.stage {
+	case connectStageProvider:
+		return d.providerListDialog(width, palette)
+	case connectStageAuth:
+		return d.authPickerDialog(width, palette)
+	case connectStageForm:
+		return d.formDialog(width, palette)
+	default:
+		return Static{}
+	}
 }
 
 func (d *ConnectDialog) updateProviderList(msg tea.KeyMsg) ProviderConnectAction {
@@ -259,7 +264,7 @@ func (d *ConnectDialog) updateForm(msg tea.KeyMsg) ProviderConnectAction {
 	return ProviderConnectAction{}
 }
 
-func (d *ConnectDialog) providerListView(width int, palette theme.Palette) string {
+func (d *ConnectDialog) providerListDialog(width int, palette theme.Palette) Element {
 	dialogWidth := clampWidth(width, 72, 96)
 	lines := []string{fmt.Sprintf("Filter: %s", d.query), ""}
 	if len(d.view) == 0 {
@@ -288,14 +293,14 @@ func (d *ConnectDialog) providerListView(width int, palette theme.Palette) strin
 		lines = append(lines, "", lipgloss.NewStyle().Foreground(palette.AssistantTimestampText).Render(status))
 	}
 	return Dialog{
-		Title:    "Connect Provider",
-		Sections: []string{strings.TrimRight(strings.Join(lines, "\n"), "\n")},
-		Footer:   "Enter choose provider  Esc cancel",
-		Width:    dialogWidth,
-	}.View(palette)
+		Title:  "Connect Provider",
+		Body:   linesBlock(lines...),
+		Footer: "Enter choose provider  Esc cancel",
+		Width:  dialogWidth,
+	}
 }
 
-func (d *ConnectDialog) authPickerView(width int, palette theme.Palette) string {
+func (d *ConnectDialog) authPickerDialog(width int, palette theme.Palette) Element {
 	dialogWidth := clampWidth(width, 68, 88)
 	lines := []string{
 		lipgloss.NewStyle().Bold(true).Render(d.selected.Title),
@@ -312,14 +317,14 @@ func (d *ConnectDialog) authPickerView(width int, palette theme.Palette) string 
 		}.View(palette))
 	}
 	return Dialog{
-		Title:    "Choose Auth Method",
-		Sections: []string{strings.TrimRight(strings.Join(lines, "\n"), "\n")},
-		Footer:   "Enter continue  Esc back",
-		Width:    dialogWidth,
-	}.View(palette)
+		Title:  "Choose Auth Method",
+		Body:   linesBlock(lines...),
+		Footer: "Enter continue  Esc back",
+		Width:  dialogWidth,
+	}
 }
 
-func (d *ConnectDialog) formView(width int, palette theme.Palette) string {
+func (d *ConnectDialog) formDialog(width int, palette theme.Palette) Element {
 	dialogWidth := clampWidth(width, 76, 100)
 	lines := []string{
 		lipgloss.NewStyle().Bold(true).Render(d.selected.Title),
@@ -347,12 +352,12 @@ func (d *ConnectDialog) formView(width int, palette theme.Palette) string {
 		Width: dialogWidth - 4,
 	}
 	return Dialog{
-		Title:    "Connect Provider",
-		Sections: []string{strings.TrimRight(strings.Join(lines, "\n"), "\n")},
-		Buttons:  buttons,
-		Footer:   "Type to edit  Ctrl+T test  Enter select  Esc cancel",
-		Width:    dialogWidth,
-	}.View(palette)
+		Title:   "Connect Provider",
+		Body:    linesBlock(lines...),
+		Buttons: buttons,
+		Footer:  "Type to edit  Ctrl+T test  Enter select  Esc cancel",
+		Width:   dialogWidth,
+	}
 }
 
 func (d ConnectDialog) renderFormField(field connectField, width int, palette theme.Palette, active bool) string {

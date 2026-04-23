@@ -109,6 +109,19 @@ func (d *DisconnectDialog) Update(msg tea.KeyMsg) DisconnectDialogAction {
 }
 
 func (d DisconnectDialog) View(width int, palette theme.Palette) string {
+	dialogWidth := dialogRenderWidth(Rect{W: width}, 84)
+	return RenderElement(&Context{Palette: palette}, d.dialog(dialogWidth, palette), dialogWidth, 0)
+}
+
+func (d DisconnectDialog) Measure(ctx *Context, constraints Constraints) Size {
+	return dialogMeasureElement(ctx, constraints, 84, d.dialog)
+}
+
+func (d DisconnectDialog) Render(ctx *Context, bounds Rect) Surface {
+	return dialogRenderElement(ctx, bounds, 84, d.dialog)
+}
+
+func (d DisconnectDialog) dialog(width int, palette theme.Palette) Element {
 	dialogWidth := width
 	if dialogWidth <= 0 {
 		dialogWidth = 84
@@ -154,33 +167,25 @@ func (d DisconnectDialog) View(width int, palette theme.Palette) string {
 		details = strings.Join(blocks, "\n")
 	}
 
-	body := lipgloss.JoinVertical(
-		lipgloss.Left,
-		fmt.Sprintf("Filter: %s", d.Query),
-		"",
-		lipgloss.JoinHorizontal(
-			lipgloss.Top,
-			lipgloss.NewStyle().Width(listWidth).BorderRight(true).BorderForeground(palette.SidebarBorder).PaddingRight(1).Render(strings.Join(listLines, "\n")),
-			" ",
-			lipgloss.NewStyle().Width(detailWidth).PaddingLeft(1).Render(details),
-		),
-	)
-
 	return Dialog{
-		Title:    "Disconnect Provider",
-		Sections: []string{body},
-		Buttons:  d.buttonRow(dialogWidth),
-		Footer:   "Enter to disconnect, Esc to cancel",
-		Width:    dialogWidth,
-	}.View(palette)
-}
-
-func (d DisconnectDialog) Measure(ctx *Context, constraints Constraints) Size {
-	return dialogMeasure(ctx, constraints, 84, d.View)
-}
-
-func (d DisconnectDialog) Render(ctx *Context, bounds Rect) Surface {
-	return dialogRender(ctx, bounds, 84, d.View)
+		Title: "Disconnect Provider",
+		Body: Column{
+			Children: []Child{
+				Fixed(staticBlock(fmt.Sprintf("Filter: %s", d.Query))),
+				Fixed(Spacer{H: 1}),
+				Fixed(Row{
+					Children: []Child{
+						Fixed(staticBlock(lipgloss.NewStyle().Width(listWidth).BorderRight(true).BorderForeground(palette.SidebarBorder).PaddingRight(1).Render(strings.Join(listLines, "\n")))),
+						Fixed(Static{Content: " "}),
+						Flex(staticBlock(lipgloss.NewStyle().Width(detailWidth).PaddingLeft(1).Render(details)), 1),
+					},
+				}),
+			},
+		},
+		Buttons: d.buttonRow(dialogWidth),
+		Footer:  "Enter to disconnect, Esc to cancel",
+		Width:   dialogWidth,
+	}
 }
 
 func (d *DisconnectDialog) HandleMouse(localX, localY, width int, palette theme.Palette) DisconnectDialogAction {

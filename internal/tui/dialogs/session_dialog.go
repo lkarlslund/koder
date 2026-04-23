@@ -117,6 +117,19 @@ func (d *SessionDialog) Update(msg tea.KeyMsg) SessionDialogAction {
 }
 
 func (d SessionDialog) View(width int, palette theme.Palette) string {
+	dialogWidth := dialogRenderWidth(Rect{W: width}, 110)
+	return RenderElement(&Context{Palette: palette}, d.dialog(dialogWidth, palette), dialogWidth, 0)
+}
+
+func (d SessionDialog) Measure(ctx *Context, constraints Constraints) Size {
+	return dialogMeasureElement(ctx, constraints, 110, d.dialog)
+}
+
+func (d SessionDialog) Render(ctx *Context, bounds Rect) Surface {
+	return dialogRenderElement(ctx, bounds, 110, d.dialog)
+}
+
+func (d SessionDialog) dialog(width int, palette theme.Palette) Element {
 	dialogWidth := width
 	if dialogWidth <= 0 {
 		dialogWidth = 110
@@ -175,30 +188,21 @@ func (d SessionDialog) View(width int, palette theme.Palette) string {
 		Foreground(palette.SidebarForeground).
 		Render(details)
 
-	body := lipgloss.JoinVertical(
-		lipgloss.Left,
-		fmt.Sprintf("Filter: %s", d.Query),
-		"",
-		tablePane,
-		"",
-		detailPane,
-	)
-
 	return Dialog{
-		Title:    "Resume Session",
-		Sections: []string{body},
-		Buttons:  d.buttonRow(contentWidth),
-		Footer:   "Enter resumes the highlighted session. Esc creates a new session.",
-		Width:    dialogWidth,
-	}.View(palette)
-}
-
-func (d SessionDialog) Measure(ctx *Context, constraints Constraints) Size {
-	return dialogMeasure(ctx, constraints, 110, d.View)
-}
-
-func (d SessionDialog) Render(ctx *Context, bounds Rect) Surface {
-	return dialogRender(ctx, bounds, 110, d.View)
+		Title: "Resume Session",
+		Body: Column{
+			Children: []Child{
+				Fixed(staticBlock(fmt.Sprintf("Filter: %s", d.Query))),
+				Fixed(Spacer{H: 1}),
+				Fixed(staticBlock(tablePane)),
+				Fixed(Spacer{H: 1}),
+				Fixed(staticBlock(detailPane)),
+			},
+		},
+		Buttons: d.buttonRow(contentWidth),
+		Footer:  "Enter resumes the highlighted session. Esc creates a new session.",
+		Width:   dialogWidth,
+	}
 }
 
 func (d *SessionDialog) HandleMouse(localX, localY, width int, palette theme.Palette) SessionDialogAction {

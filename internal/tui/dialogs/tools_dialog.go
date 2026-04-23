@@ -4,7 +4,6 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/lkarlslund/koder/internal/domain"
@@ -117,6 +116,19 @@ func (d *ToolsDialog) Update(msg tea.KeyMsg) ToolsDialogAction {
 }
 
 func (d ToolsDialog) View(width int, palette theme.Palette) string {
+	dialogWidth := dialogRenderWidth(Rect{W: width}, 88)
+	return RenderElement(&Context{Palette: palette}, d.dialog(dialogWidth, palette), dialogWidth, 0)
+}
+
+func (d ToolsDialog) Measure(ctx *Context, constraints Constraints) Size {
+	return dialogMeasureElement(ctx, constraints, 88, d.dialog)
+}
+
+func (d ToolsDialog) Render(ctx *Context, bounds Rect) Surface {
+	return dialogRenderElement(ctx, bounds, 88, d.dialog)
+}
+
+func (d ToolsDialog) dialog(width int, palette theme.Palette) Element {
 	dialogWidth := width
 	if dialogWidth <= 0 {
 		dialogWidth = 88
@@ -133,26 +145,14 @@ func (d ToolsDialog) View(width int, palette theme.Palette) string {
 			OffLabel:    "Disabled",
 		}.View(rowWidth, palette, d.focus == toolsDialogFocusList && idx == d.index))
 	}
-	body := lipgloss.JoinVertical(
-		lipgloss.Left,
-		strings.Join(lines, "\n"),
-	)
 	return Dialog{
 		Title:    "Tools",
 		Subtitle: "Per-session tool access. Space toggles the current tool.",
-		Sections: []string{body},
+		Body:     staticBlock(strings.Join(lines, "\n")),
 		Buttons:  d.buttonRow(dialogWidth),
 		Footer:   "Enter toggles a tool or activates the focused button. Esc cancels.",
 		Width:    dialogWidth,
-	}.View(palette)
-}
-
-func (d ToolsDialog) Measure(ctx *Context, constraints Constraints) Size {
-	return dialogMeasure(ctx, constraints, 88, d.View)
-}
-
-func (d ToolsDialog) Render(ctx *Context, bounds Rect) Surface {
-	return dialogRender(ctx, bounds, 88, d.View)
+	}
 }
 
 func (d *ToolsDialog) HandleMouse(localX, localY, width int, palette theme.Palette) ToolsDialogAction {

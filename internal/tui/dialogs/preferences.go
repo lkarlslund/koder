@@ -263,6 +263,19 @@ func (d *PreferencesDialog) adjustField(delta int) PreferencesAction {
 }
 
 func (d PreferencesDialog) View(width int, palette theme.Palette) string {
+	dialogWidth := dialogRenderWidth(Rect{W: width}, 84)
+	return RenderElement(&Context{Palette: palette}, d.dialog(dialogWidth, palette), dialogWidth, 0)
+}
+
+func (d PreferencesDialog) Measure(ctx *Context, constraints Constraints) Size {
+	return dialogMeasureElement(ctx, constraints, 84, d.dialog)
+}
+
+func (d PreferencesDialog) Render(ctx *Context, bounds Rect) Surface {
+	return dialogRenderElement(ctx, bounds, 84, d.dialog)
+}
+
+func (d PreferencesDialog) dialog(width int, palette theme.Palette) Element {
 	dialogWidth := width
 	if dialogWidth <= 0 {
 		dialogWidth = 84
@@ -319,27 +332,20 @@ func (d PreferencesDialog) View(width int, palette theme.Palette) string {
 		Width: dialogWidth - 4,
 	}
 
-	body := lipgloss.JoinVertical(
-		lipgloss.Left,
-		lipgloss.JoinHorizontal(lipgloss.Top, tabRail, " ", fields),
-	)
-
 	return Dialog{
 		Title:    "Preferences",
 		Subtitle: "Tab/Shift+Tab moves focus. Enter or arrows change values.",
-		Sections: []string{body},
-		Buttons:  buttons,
-		Footer:   fmt.Sprintf("Theme: %s  Spinner: %s", strings.TrimSpace(d.draft.Theme), SpinnerStyleByID(d.draft.Spinner).Label),
-		Width:    dialogWidth,
-	}.View(palette)
-}
-
-func (d PreferencesDialog) Measure(ctx *Context, constraints Constraints) Size {
-	return dialogMeasure(ctx, constraints, 84, d.View)
-}
-
-func (d PreferencesDialog) Render(ctx *Context, bounds Rect) Surface {
-	return dialogRender(ctx, bounds, 84, d.View)
+		Body: Row{
+			Children: []Child{
+				Fixed(staticBlock(tabRail)),
+				Fixed(Static{Content: " "}),
+				Flex(staticBlock(fields), 1),
+			},
+		},
+		Buttons: buttons,
+		Footer:  fmt.Sprintf("Theme: %s  Spinner: %s", strings.TrimSpace(d.draft.Theme), SpinnerStyleByID(d.draft.Spinner).Label),
+		Width:   dialogWidth,
+	}
 }
 
 func (d PreferencesDialog) currentFields() []preferencesField {

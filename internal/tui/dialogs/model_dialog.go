@@ -112,12 +112,25 @@ func (d *ModelDialog) Update(msg tea.KeyMsg) ModelDialogAction {
 }
 
 func (d ModelDialog) View(width int, palette theme.Palette) string {
+	dialogWidth := dialogRenderWidth(Rect{W: width}, 84)
+	return RenderElement(&Context{Palette: palette}, d.dialog(dialogWidth, palette), dialogWidth, 0)
+}
+
+func (d ModelDialog) Measure(ctx *Context, constraints Constraints) Size {
+	return dialogMeasureElement(ctx, constraints, 84, d.dialog)
+}
+
+func (d ModelDialog) Render(ctx *Context, bounds Rect) Surface {
+	return dialogRenderElement(ctx, bounds, 84, d.dialog)
+}
+
+func (d ModelDialog) dialog(width int, palette theme.Palette) Element {
 	dialogWidth := width
 	if dialogWidth <= 0 {
 		dialogWidth = 84
 	}
 	dialogWidth = maxInt(72, dialogWidth)
-	listWidth := maxInt(40, dialogWidth-4)
+	listWidth := maxInt(40, dialogWidth-6)
 
 	listLines := []string{}
 	if len(d.view) == 0 {
@@ -137,28 +150,17 @@ func (d ModelDialog) View(width int, palette theme.Palette) string {
 		}
 	}
 
-	body := lipgloss.JoinVertical(
-		lipgloss.Left,
-		"Filter: "+d.Query,
-		"",
-		lipgloss.NewStyle().Width(listWidth).Render(strings.Join(listLines, "\n")),
-	)
-
 	return Dialog{
-		Title:    "Select Model",
-		Sections: []string{body},
-		Buttons:  d.buttonRow(dialogWidth),
-		Footer:   "Enter to select, Esc to cancel",
-		Width:    dialogWidth,
-	}.View(palette)
-}
-
-func (d ModelDialog) Measure(ctx *Context, constraints Constraints) Size {
-	return dialogMeasure(ctx, constraints, 84, d.View)
-}
-
-func (d ModelDialog) Render(ctx *Context, bounds Rect) Surface {
-	return dialogRender(ctx, bounds, 84, d.View)
+		Title: "Select Model",
+		Body: linesBlock(
+			"Filter: "+d.Query,
+			"",
+			lipgloss.NewStyle().Width(listWidth).Render(strings.Join(listLines, "\n")),
+		),
+		Buttons: d.buttonRow(dialogWidth),
+		Footer:  "Enter to select, Esc to cancel",
+		Width:   dialogWidth,
+	}
 }
 
 func (d ModelDialog) renderRow(item domain.Model, width int, selected bool, focused bool, palette theme.Palette) string {

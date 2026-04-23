@@ -31,9 +31,40 @@ func dialogMeasure(ctx *Context, constraints Constraints, fallbackWidth int, ren
 	return constraints.Clamp(SurfaceFromString(render(width, ctx.Palette)).Size())
 }
 
+func dialogMeasureElement(ctx *Context, constraints Constraints, fallbackWidth int, build func(int, theme.Palette) Element) Size {
+	width := constraints.MaxW
+	if width <= 0 {
+		width = fallbackWidth
+	}
+	element := build(width, ctx.Palette)
+	return constraints.Clamp(element.Measure(ctx, Constraints{MaxW: width, MaxH: constraints.MaxH}))
+}
+
 func dialogRender(ctx *Context, bounds Rect, fallbackWidth int, render func(int, theme.Palette) string) Surface {
 	width := dialogRenderWidth(bounds, fallbackWidth)
 	return SurfaceFromString(render(width, ctx.Palette))
+}
+
+func dialogRenderElement(ctx *Context, bounds Rect, fallbackWidth int, build func(int, theme.Palette) Element) Surface {
+	width := dialogRenderWidth(bounds, fallbackWidth)
+	element := build(width, ctx.Palette)
+	return element.Render(ctx, Rect{W: width, H: bounds.H})
+}
+
+func staticBlock(text string) Element {
+	return Static{Content: strings.TrimRight(text, "\n")}
+}
+
+func linesBlock(lines ...string) Element {
+	children := make([]Child, 0, len(lines))
+	for _, line := range lines {
+		if line == "" {
+			children = append(children, Fixed(Spacer{H: 1}))
+			continue
+		}
+		children = append(children, Fixed(Static{Content: line}))
+	}
+	return Column{Children: children}
 }
 
 type pickerDialogFocus int
