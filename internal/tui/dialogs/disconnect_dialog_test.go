@@ -7,8 +7,13 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/lkarlslund/koder/internal/theme"
+	"github.com/lkarlslund/koder/internal/ui"
 )
 
+
+func renderDisconnectDialog(dialog DisconnectDialog, width int, palette theme.Palette) string {
+	return ui.RenderElement(&ui.Context{Palette: palette}, dialog, width, 0)
+}
 func TestDisconnectDialogSelectsProvider(t *testing.T) {
 	dialog := NewDisconnectDialog([]ProviderItem{{ID: "openai", Title: "OpenAI"}})
 	action := dialog.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -32,7 +37,7 @@ func TestDisconnectDialogFiltersItems(t *testing.T) {
 
 func TestDisconnectDialogRenderShowsHelper(t *testing.T) {
 	dialog := NewDisconnectDialog([]ProviderItem{{ID: "openai", Title: "OpenAI", Description: "Direct API", Details: []string{"Default: yes"}}})
-	got := dialog.View(84, theme.Resolve("tokyonight").Palette)
+	got := renderDisconnectDialog(dialog, 84, theme.Resolve("tokyonight").Palette)
 	if !strings.Contains(got, "Disconnect Provider") || !strings.Contains(got, "Enter to disconnect") {
 		t.Fatalf("unexpected render: %q", got)
 	}

@@ -755,7 +755,7 @@ func (m Model) centeredModal(element ui.Element) ui.Element {
 		Vertical:   ui.AlignCenter,
 		Child: ui.Constrained{
 			Constraints: ui.Constraints{
-				MaxW: max(1, m.width-2),
+				MaxW: max(1, m.width-3),
 				MaxH: max(1, m.height-2),
 			},
 			Child: element,
@@ -4576,11 +4576,11 @@ func (m *Model) openAgentsModal() {
 	}
 	lines = append(lines, resolved)
 	modal := ui.Modal{
-		Title:    "Resolved AGENTS",
-		Subtitle: fmt.Sprintf("Project root: %s", blankAsDash(m.currentProjectRoot())),
-		Body:     strings.Join(lines, "\n"),
-		Footer:   "enter or esc close  /agents refresh recomputes and updates the session snapshot",
-		Width:    min(110, max(72, m.width-8)),
+		Title:       "Resolved AGENTS",
+		Subtitle:    fmt.Sprintf("Project root: %s", blankAsDash(m.currentProjectRoot())),
+		BodyElement: ui.TextPane{Content: strings.Join(lines, "\n")},
+		Footer:      "enter or esc close  /agents refresh recomputes and updates the session snapshot",
+		Width:       min(110, max(72, m.width-8)),
 	}
 	m.agentsModal = &modal
 }
@@ -4638,10 +4638,10 @@ func (m *Model) openHelpModal() {
 	lines = append(lines, "")
 	lines = append(lines, commands...)
 	modal := ui.Modal{
-		Title:  "Help",
-		Body:   strings.Join(lines, "\n"),
-		Footer: "Alt-H, Enter, or Esc closes this help dialog",
-		Width:  min(104, max(84, m.width-8)),
+		Title:       "Help",
+		BodyElement: ui.TextPane{Content: strings.Join(lines, "\n")},
+		Footer:      "Alt-H, Enter, or Esc closes this help dialog",
+		Width:       min(104, max(84, m.width-8)),
 	}
 	m.helpModal = &modal
 }

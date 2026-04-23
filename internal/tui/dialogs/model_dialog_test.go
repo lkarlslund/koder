@@ -10,7 +10,12 @@ import (
 
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/theme"
+	"github.com/lkarlslund/koder/internal/ui"
 )
+
+func renderModelDialog(dialog ModelDialog, width int, palette theme.Palette) string {
+	return ui.RenderElement(&ui.Context{Palette: palette}, dialog, width, 0)
+}
 
 func TestModelDialogSelectsModel(t *testing.T) {
 	dialog := NewModelDialog("openai", []domain.Model{{ID: "gpt-5.4"}}, "gpt-5.4")
@@ -33,7 +38,7 @@ func TestModelDialogFiltersModels(t *testing.T) {
 
 func TestModelDialogRenderShowsProvider(t *testing.T) {
 	dialog := NewModelDialog("openai", []domain.Model{{ID: "gpt-5.4", OwnedBy: "openai", SupportsImages: true, CapabilitiesKnown: true}}, "gpt-5.4")
-	got := dialog.View(84, theme.Resolve("tokyonight").Palette)
+	got := renderModelDialog(dialog, 84, theme.Resolve("tokyonight").Palette)
 	if !strings.Contains(got, "Select Model") || !strings.Contains(got, "gpt-5.4") || !strings.Contains(got, "openai") || !strings.Contains(got, "image") {
 		t.Fatalf("unexpected render: %q", got)
 	}
@@ -44,7 +49,7 @@ func TestModelDialogRenderUsesSingleLineTableRows(t *testing.T) {
 		{ID: "gpt-5.4", OwnedBy: "openai", SupportsImages: true, CapabilitiesKnown: true},
 		{ID: "gpt-4.1-mini", OwnedBy: "openai"},
 	}, "gpt-5.4")
-	got := dialog.View(84, theme.Resolve("tokyonight").Palette)
+	got := renderModelDialog(dialog, 84, theme.Resolve("tokyonight").Palette)
 	if !strings.Contains(got, "Model") || !strings.Contains(got, "Owner") {
 		t.Fatalf("expected table header row, got %q", got)
 	}
@@ -71,7 +76,7 @@ func TestModelDialogRenderFallsBackToProviderWhenOwnerBlank(t *testing.T) {
 	dialog := NewModelDialog("ollama", []domain.Model{
 		{ID: "qwen2.5-coder:32b", OwnedBy: "", SupportsImages: true, CapabilitiesKnown: true},
 	}, "qwen2.5-coder:32b")
-	got := dialog.View(84, theme.Resolve("tokyonight").Palette)
+	got := renderModelDialog(dialog, 84, theme.Resolve("tokyonight").Palette)
 	if !strings.Contains(got, "ollama") {
 		t.Fatalf("expected provider fallback in owner column, got %q", got)
 	}
@@ -81,7 +86,7 @@ func TestModelDialogRenderPreservesLongModelNames(t *testing.T) {
 	dialog := NewModelDialog("openrouter", []domain.Model{
 		{ID: "anthropic/claude-sonnet-4-20250514", OwnedBy: "openrouter", SupportsImages: true, CapabilitiesKnown: true},
 	}, "anthropic/claude-sonnet-4-20250514")
-	got := dialog.View(96, theme.Resolve("tokyonight").Palette)
+	got := renderModelDialog(dialog, 96, theme.Resolve("tokyonight").Palette)
 	if !strings.Contains(got, "anthropic/claude-sonnet-4-20250514") {
 		t.Fatalf("expected long model id to stay visible at reasonable widths, got %q", got)
 	}
@@ -107,7 +112,7 @@ func TestModelDialogKeepsFullWindowNearListEnd(t *testing.T) {
 		dialog.Update(tea.KeyMsg{Type: tea.KeyDown})
 	}
 
-	got := dialog.View(84, theme.Resolve("tokyonight").Palette)
+	got := renderModelDialog(dialog, 84, theme.Resolve("tokyonight").Palette)
 	lines := strings.Split(got, "\n")
 	hasModelLine := func(id string) bool {
 		for _, line := range lines {
@@ -130,7 +135,7 @@ func TestModelDialogKeepsFullWindowNearListEnd(t *testing.T) {
 
 func TestModelDialogUsesTighterWidthBudget(t *testing.T) {
 	dialog := NewModelDialog("ollama", []domain.Model{{ID: "qwen2.5-coder:32b", OwnedBy: "", SupportsImages: true, CapabilitiesKnown: true}}, "")
-	got := dialog.View(120, theme.Resolve("tokyonight").Palette)
+	got := renderModelDialog(dialog, 120, theme.Resolve("tokyonight").Palette)
 	for _, line := range strings.Split(got, "\n") {
 		if ansi.StringWidth(line) > 76 {
 			t.Fatalf("expected model dialog to stay compact, got width %d in %q", ansi.StringWidth(line), line)

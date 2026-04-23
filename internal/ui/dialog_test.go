@@ -11,9 +11,9 @@ import (
 
 func TestDialogExpandsToFitButtonRowOnSingleLine(t *testing.T) {
 	palette := theme.Default().Palette
-	got := Dialog{
+	got := RenderElement(&Context{Palette: palette}, Dialog{
 		Title:    "Resume Session",
-		Sections: []string{"Body"},
+		Body:     TextPane{Content: "Body"},
 		Buttons: ButtonRow{
 			Buttons: []Button{
 				{Label: "OK", Primary: true},
@@ -23,7 +23,7 @@ func TestDialogExpandsToFitButtonRowOnSingleLine(t *testing.T) {
 		},
 		Footer: "Enter selects. Esc cancels.",
 		Width:  12,
-	}.View(palette)
+	}, 80, 0)
 
 	lines := strings.Split(ansi.Strip(got), "\n")
 	var buttonLine string
@@ -51,11 +51,11 @@ func TestDialogExpandsToFitButtonRowOnSingleLine(t *testing.T) {
 
 func TestDialogEmbedsBracketedTitleAndCloseIndicatorInFrame(t *testing.T) {
 	palette := theme.Default().Palette
-	got := Dialog{
+	got := RenderElement(&Context{Palette: palette}, Dialog{
 		Title:    "Resume Session",
-		Sections: []string{"Body"},
+		Body:     TextPane{Content: "Body"},
 		Width:    32,
-	}.View(palette)
+	}, 32, 0)
 
 	lines := strings.Split(ansi.Strip(got), "\n")
 	if len(lines) == 0 {

@@ -8,8 +8,13 @@ import (
 
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/theme"
+	"github.com/lkarlslund/koder/internal/ui"
 )
 
+
+func renderToolsDialog(dialog ToolsDialog, width int, palette theme.Palette) string {
+	return ui.RenderElement(&ui.Context{Palette: palette}, dialog, width, 0)
+}
 func TestToolsDialogTogglesAndAppliesStates(t *testing.T) {
 	dialog := NewToolsDialog([]ToolToggleItem{
 		{Tool: domain.ToolKindRead, Label: "Read", Enabled: true},
@@ -37,7 +42,7 @@ func TestToolsDialogRenderShowsCheckboxes(t *testing.T) {
 		{Tool: domain.ToolKindBash, Label: "Bash", Description: "Run shell commands", Enabled: false},
 	})
 
-	view := dialog.View(88, theme.Default().Palette)
+	view := renderToolsDialog(dialog, 88, theme.Default().Palette)
 	for _, needle := range []string{"Tools", "Read", "Bash", "☑ Enabled", "☐ Disabled", "OK", "Cancel"} {
 		if !strings.Contains(view, needle) {
 			t.Fatalf("expected %q in tools dialog, got %q", needle, view)

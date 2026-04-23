@@ -9,7 +9,12 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/lkarlslund/koder/internal/theme"
+	"github.com/lkarlslund/koder/internal/ui"
 )
+
+func renderSessionDialog(dialog SessionDialog, width int, palette theme.Palette) string {
+	return ui.RenderElement(&ui.Context{Palette: palette}, dialog, width, 0)
+}
 
 func TestSessionDialogSelectsCurrentSession(t *testing.T) {
 	dialog := NewSessionDialog([]SessionItem{
@@ -34,7 +39,7 @@ func TestSessionDialogFiltersItems(t *testing.T) {
 	}, false)
 	dialog.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("b")})
 
-	view := dialog.View(84, theme.Default().Palette)
+	view := renderSessionDialog(dialog, 84, theme.Default().Palette)
 	if strings.Contains(view, "Alpha") {
 		t.Fatalf("expected filtered session list, got %q", view)
 	}
@@ -55,7 +60,7 @@ func TestSessionDialogViewPreservesPreviewLineBreaks(t *testing.T) {
 		Value:        "1",
 	}}, false)
 
-	got := dialog.View(84, theme.Default().Palette)
+	got := renderSessionDialog(dialog, 84, theme.Default().Palette)
 	lineOne := strings.Index(got, "line one")
 	lineTwo := strings.Index(got, "line two")
 	lineThree := strings.Index(got, "line three")
@@ -104,7 +109,7 @@ func TestSessionDialogViewPrefersPreviewOverDescription(t *testing.T) {
 		Value:       "1",
 	}}, false)
 
-	got := dialog.View(84, theme.Default().Palette)
+	got := renderSessionDialog(dialog, 84, theme.Default().Palette)
 	if !strings.Contains(got, "rendered") || !strings.Contains(got, "preview") {
 		t.Fatalf("expected rendered preview in detail pane, got %q", got)
 	}
@@ -124,7 +129,7 @@ func TestSessionDialogViewClampsPreviewToTenLines(t *testing.T) {
 		Value:   "1",
 	}}, false)
 
-	got := dialog.View(84, theme.Default().Palette)
+	got := renderSessionDialog(dialog, 84, theme.Default().Palette)
 	if strings.Contains(got, "line 11") || strings.Contains(got, "line 12") {
 		t.Fatalf("expected preview to clamp at ten lines, got %q", got)
 	}
@@ -144,7 +149,7 @@ func TestSessionDialogViewShowsCWDColumnWhenEnabled(t *testing.T) {
 		Value:        "1",
 	}}, true)
 
-	got := dialog.View(96, theme.Default().Palette)
+	got := renderSessionDialog(dialog, 96, theme.Default().Palette)
 	if !strings.Contains(got, "CWD") || !strings.Contains(got, "/tmp/worktree") {
 		t.Fatalf("expected cwd column in session dialog, got %q", got)
 	}
@@ -176,7 +181,7 @@ func TestSessionDialogAdaptsToNarrowWidth(t *testing.T) {
 		Value:        "1",
 	}}, false)
 
-	got := dialog.View(72, theme.Default().Palette)
+	got := renderSessionDialog(dialog, 72, theme.Default().Palette)
 	for _, line := range strings.Split(ansi.Strip(got), "\n") {
 		if w := ansi.StringWidth(line); w > 72 {
 			t.Fatalf("expected dialog to fit requested width, got line width %d in %q", w, line)

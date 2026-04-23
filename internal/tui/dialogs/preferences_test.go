@@ -8,8 +8,13 @@ import (
 
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/theme"
+	"github.com/lkarlslund/koder/internal/ui"
 )
 
+
+func renderPreferencesDialog(dialog PreferencesDialog, width int, palette theme.Palette) string {
+	return ui.RenderElement(&ui.Context{Palette: palette}, dialog, width, 0)
+}
 func TestPreferencesDialogThemeAndToggleEmitDraftChanges(t *testing.T) {
 	dialog := NewPreferencesDialog(config.Default().UI, []string{"tokyonight", "gruvbox"})
 
@@ -78,7 +83,7 @@ func TestPreferencesDialogCancelReturnsOriginalUI(t *testing.T) {
 func TestPreferencesDialogRenderShowsTabsAndButtons(t *testing.T) {
 	dialog := NewPreferencesDialog(config.Default().UI, []string{"tokyonight", "gruvbox"})
 
-	view := dialog.View(84, theme.Default().Palette)
+	view := renderPreferencesDialog(dialog, 84, theme.Default().Palette)
 	for _, needle := range []string{"Preferences", "Appearance", "Behavior", "Theme", "Spinner", "OK", "Cancel"} {
 		if !strings.Contains(view, needle) {
 			t.Fatalf("expected %q in preferences dialog, got %q", needle, view)
@@ -87,7 +92,7 @@ func TestPreferencesDialogRenderShowsTabsAndButtons(t *testing.T) {
 
 	dialog.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
 	dialog.Update(tea.KeyMsg{Type: tea.KeyDown})
-	view = dialog.View(84, theme.Default().Palette)
+	view = renderPreferencesDialog(dialog, 84, theme.Default().Palette)
 	for _, needle := range []string{"Cursor Blink", "System"} {
 		if !strings.Contains(view, needle) {
 			t.Fatalf("expected behavior tab to show %q, got %q", needle, view)
@@ -98,9 +103,9 @@ func TestPreferencesDialogRenderShowsTabsAndButtons(t *testing.T) {
 func TestPreferencesDialogSpinnerPreviewAnimates(t *testing.T) {
 	dialog := NewPreferencesDialog(config.Default().UI, []string{"tokyonight", "gruvbox"})
 
-	before := dialog.View(84, theme.Default().Palette)
+	before := renderPreferencesDialog(dialog, 84, theme.Default().Palette)
 	dialog.Tick()
-	after := dialog.View(84, theme.Default().Palette)
+	after := renderPreferencesDialog(dialog, 84, theme.Default().Palette)
 
 	if before == after {
 		t.Fatalf("expected animated spinner preview to change view")

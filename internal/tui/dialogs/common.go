@@ -8,7 +8,6 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/lkarlslund/koder/internal/theme"
 	. "github.com/lkarlslund/koder/internal/ui"
 )
 
@@ -21,34 +20,6 @@ func dialogRenderWidth(bounds Rect, fallback int) int {
 		width = 80
 	}
 	return width
-}
-
-func dialogMeasure(ctx *Context, constraints Constraints, fallbackWidth int, render func(int, theme.Palette) string) Size {
-	width := constraints.MaxW
-	if width <= 0 {
-		width = fallbackWidth
-	}
-	return constraints.Clamp(SurfaceFromString(render(width, ctx.Palette)).Size())
-}
-
-func dialogMeasureElement(ctx *Context, constraints Constraints, fallbackWidth int, build func(int, theme.Palette) Element) Size {
-	width := constraints.MaxW
-	if width <= 0 {
-		width = fallbackWidth
-	}
-	element := build(width, ctx.Palette)
-	return constraints.Clamp(element.Measure(ctx, Constraints{MaxW: width, MaxH: constraints.MaxH}))
-}
-
-func dialogRender(ctx *Context, bounds Rect, fallbackWidth int, render func(int, theme.Palette) string) Surface {
-	width := dialogRenderWidth(bounds, fallbackWidth)
-	return SurfaceFromString(render(width, ctx.Palette))
-}
-
-func dialogRenderElement(ctx *Context, bounds Rect, fallbackWidth int, build func(int, theme.Palette) Element) Surface {
-	width := dialogRenderWidth(bounds, fallbackWidth)
-	element := build(width, ctx.Palette)
-	return element.Render(ctx, Rect{X: bounds.X, Y: bounds.Y, W: width, H: bounds.H})
 }
 
 func staticBlock(text string) Element {
@@ -73,10 +44,6 @@ const (
 	pickerDialogFocusList pickerDialogFocus = iota
 	pickerDialogFocusButtons
 )
-
-func buttonRowOffset(line string, row ButtonRow, palette theme.Palette) (int, bool) {
-	return row.OffsetIn(line, palette)
-}
 
 func minInt(a, b int) int {
 	if a < b {
@@ -109,10 +76,6 @@ func truncateText(input string, width int) string {
 func compactInlineText(input string) string {
 	fields := strings.Fields(strings.TrimSpace(input))
 	return strings.Join(fields, " ")
-}
-
-func styleMuted(text string, palette theme.Palette) string {
-	return lipgloss.NewStyle().Foreground(palette.AssistantTimestampText).Render(text)
 }
 
 func firstNonEmptyColor(values ...lipgloss.Color) lipgloss.Color {

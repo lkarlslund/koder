@@ -198,12 +198,12 @@ func (d MenuPickerDialog) render() Surface {
 		}
 	}
 	lines = append(lines, "", RenderDialogButtons(d.Palette, "OK", "Cancel"))
-	return SurfaceFromString(Modal{
-		Title:  d.Title,
-		Body:   strings.Join(lines, "\n"),
-		Footer: "Enter applies the highlighted row. Esc cancels.",
-		Width:  80,
-	}.View(d.Palette))
+	return SurfaceFromString(RenderElement(&Context{Palette: d.Palette}, Modal{
+		Title:       d.Title,
+		BodyElement: TextPane{Content: strings.Join(lines, "\n")},
+		Footer:      "Enter applies the highlighted row. Esc cancels.",
+		Width:       80,
+	}, 80, 0))
 }
 
 func (d MenuPickerDialog) Measure(_ *Context, constraints Constraints) Size {

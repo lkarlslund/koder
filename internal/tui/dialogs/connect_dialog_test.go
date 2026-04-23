@@ -9,8 +9,13 @@ import (
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/theme"
+	"github.com/lkarlslund/koder/internal/ui"
 )
 
+
+func renderConnectDialog(dialog ConnectDialog, width int, palette theme.Palette) string {
+	return ui.RenderElement(&ui.Context{Palette: palette}, dialog, width, 0)
+}
 func TestConnectDialogSelectsProviderAndSavesDraft(t *testing.T) {
 	dialog := NewConnectDialog(provider.Catalog(), map[string]config.Provider{})
 
@@ -45,7 +50,7 @@ func TestConnectDialogProviderListRendersSingleLineRows(t *testing.T) {
 		"openai": {},
 	})
 
-	got := dialog.View(88, theme.Resolve("tokyonight").Palette)
+	got := renderConnectDialog(dialog, 88, theme.Resolve("tokyonight").Palette)
 	if !strings.Contains(got, "OpenAI") || !strings.Contains(got, "configured") {
 		t.Fatalf("expected compact provider row, got %q", got)
 	}
@@ -118,7 +123,7 @@ func TestConnectDialogViewShowsSuccessStatus(t *testing.T) {
 	dialog.selectProvider(provider.Catalog()[0])
 	dialog.SetStatusSuccess("Connected: discovered 2 models")
 
-	got := dialog.View(90, theme.Resolve("tokyonight").Palette)
+	got := renderConnectDialog(dialog, 90, theme.Resolve("tokyonight").Palette)
 	if !strings.Contains(got, "OK") || !strings.Contains(got, "Connected: discovered 2 models") {
 		t.Fatalf("expected success status in view, got %q", got)
 	}
@@ -129,7 +134,7 @@ func TestConnectDialogViewShowsErrorStatus(t *testing.T) {
 	dialog.selectProvider(provider.Catalog()[0])
 	dialog.SetStatusError("Connection test failed: boom")
 
-	got := dialog.View(90, theme.Resolve("tokyonight").Palette)
+	got := renderConnectDialog(dialog, 90, theme.Resolve("tokyonight").Palette)
 	if !strings.Contains(got, "ERROR") || !strings.Contains(got, "Connection test failed: boom") {
 		t.Fatalf("expected error status in view, got %q", got)
 	}
@@ -142,7 +147,7 @@ func TestConnectDialogViewShowsEditorCursorAndTail(t *testing.T) {
 	dialog.resetCursors()
 	dialog.fieldIndex = 1
 
-	got := dialog.View(90, theme.Resolve("tokyonight").Palette)
+	got := renderConnectDialog(dialog, 90, theme.Resolve("tokyonight").Palette)
 	if !strings.Contains(got, "█") {
 		t.Fatalf("expected editor cursor in view, got %q", got)
 	}

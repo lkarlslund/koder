@@ -111,20 +111,19 @@ func (d *ModelDialog) Update(msg tea.KeyMsg) ModelDialogAction {
 	return ModelDialogAction{}
 }
 
-func (d ModelDialog) View(width int, palette theme.Palette) string {
-	dialogWidth := dialogRenderWidth(Rect{W: width}, 84)
-	ctx := &Context{Palette: palette}
-	element := d.dialog(dialogWidth, palette)
-	size := element.Measure(ctx, Constraints{MaxW: dialogWidth})
-	return RenderElement(ctx, element, size.W, 0)
-}
-
 func (d ModelDialog) Measure(ctx *Context, constraints Constraints) Size {
-	return dialogMeasureElement(ctx, constraints, 84, d.dialog)
+	width := constraints.MaxW
+	if width <= 0 {
+		width = 84
+	}
+	return constraints.Clamp(d.dialog(width, ctx.Palette).Measure(ctx, Constraints{MaxW: width, MaxH: constraints.MaxH}))
 }
 
 func (d ModelDialog) Render(ctx *Context, bounds Rect) Surface {
-	return dialogRenderElement(ctx, bounds, 84, d.dialog)
+	maxWidth := dialogRenderWidth(bounds, 84)
+	element := d.dialog(maxWidth, ctx.Palette)
+	size := element.Measure(ctx, Constraints{MaxW: maxWidth, MaxH: bounds.H})
+	return element.Render(ctx, Rect{X: bounds.X, Y: bounds.Y, W: size.W, H: bounds.H})
 }
 
 func (d ModelDialog) dialog(width int, palette theme.Palette) Element {
