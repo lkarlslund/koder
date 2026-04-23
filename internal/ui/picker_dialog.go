@@ -192,13 +192,16 @@ func (d PickerDialog) Render(ctx *Context, bounds Rect) Surface {
 func (d PickerDialog) element(width int, palette theme.Palette) Element {
 	children := []Child{}
 	if hint := strings.TrimSpace(d.Hint); hint != "" {
-		children = append(children, Fixed(TextPane{Content: styleMuted(palette, hint)}))
+		children = append(children, Fixed(Label{
+			Text:  hint,
+			Style: lipgloss.NewStyle().Foreground(palette.AssistantTimestampText),
+		}))
 		children = append(children, Fixed(Spacer{H: 1}))
 	}
-	children = append(children, Fixed(TextPane{Content: fmt.Sprintf("filter: %s", d.Query)}))
+	children = append(children, Fixed(Label{Text: fmt.Sprintf("filter: %s", d.Query)}))
 	children = append(children, Fixed(Spacer{H: 1}))
 	if len(d.view) == 0 {
-		children = append(children, Fixed(TextPane{Content: "  no matches"}))
+		children = append(children, Fixed(Label{Text: "  no matches"}))
 	} else {
 		items := make([]ListItem, 0, len(d.view))
 		for idx, item := range d.view {
@@ -287,8 +290,4 @@ func (d *PickerDialog) selectCurrent() PickerDialogAction {
 		return PickerDialogAction{Kind: PickerDialogActionCancel}
 	}
 	return PickerDialogAction{Kind: PickerDialogActionSelect, Value: item.Value}
-}
-
-func styleMuted(palette theme.Palette, text string) string {
-	return lipgloss.NewStyle().Foreground(palette.AssistantTimestampText).Render(text)
 }

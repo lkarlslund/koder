@@ -25,7 +25,7 @@ func (p PendingInputPreview) render(palette theme.Palette) Surface {
 	mutedFG := palette.ComposerMutedText
 	bg := palette.UserTextBackground
 
-	rows := make([]string, 0, 8)
+	rows := make([]Surface, 0, 8)
 	if len(p.PendingSteers) > 0 {
 		rows = append(rows, p.renderHeader("Messages to be submitted after next tool call", mutedFG, bg))
 		rows = append(rows, p.renderPreviewRows(p.PendingSteers, mutedFG, bg, true)...)
@@ -44,7 +44,11 @@ func (p PendingInputPreview) render(palette theme.Palette) Surface {
 		rows = append(rows, p.renderHeader("Queued follow-up inputs", mutedFG, bg))
 		rows = append(rows, p.renderPreviewRows(p.QueuedMessages, mutedFG, bg, true)...)
 	}
-	return SurfaceFromString(strings.Join(rows, "\n"))
+	surface := BlankSurface(p.Width, len(rows))
+	for y, row := range rows {
+		surface = surface.placeAt(0, y, row)
+	}
+	return surface
 }
 
 func (p PendingInputPreview) Measure(ctx *Context, constraints Constraints) Size {
@@ -73,18 +77,22 @@ func (p PendingInputPreview) Render(ctx *Context, bounds Rect) Surface {
 	}.render(ctx.Palette).normalize(bounds.W, bounds.H)
 }
 
-func (p PendingInputPreview) renderHeader(text string, fg, bg lipgloss.Color) string {
+func (p PendingInputPreview) renderHeader(text string, fg, bg lipgloss.Color) Surface {
 	width := maxInt(1, p.Width)
 	prefix := "• "
 	available := maxInt(1, width-ansi.StringWidth(prefix))
 	label := ansi.Truncate(text, available, "")
-	return renderButtonSegment(prefix, fg, bg, false) +
-		renderButtonSegment(label, fg, bg, false) +
-		renderButtonSegment(strings.Repeat(" ", maxInt(0, width-ansi.StringWidth(prefix)-ansi.StringWidth(label))), fg, bg, false)
+	surface := BlankSurface(width, 1)
+	style := CellStyle{FG: fg, BG: bg}
+	for x := 0; x < width; x++ {
+		surface.setCell(x, 0, Cell{Text: " ", Width: 1, Style: style})
+	}
+	surface.WriteText(0, 0, prefix+label, style)
+	return surface
 }
 
-func (p PendingInputPreview) renderPreviewRows(messages []string, fg, bg lipgloss.Color, italic bool) []string {
-	rows := make([]string, 0, len(messages))
+func (p PendingInputPreview) renderPreviewRows(messages []string, fg, bg lipgloss.Color, italic bool) []Surface {
+	rows := make([]Surface, 0, len(messages))
 	for _, message := range messages {
 		lines := strings.Split(strings.ReplaceAll(message, "\r\n", "\n"), "\n")
 		rendered := 0
@@ -111,26 +119,33 @@ func (p PendingInputPreview) renderPreviewRows(messages []string, fg, bg lipglos
 	return rows
 }
 
-func (p PendingInputPreview) renderBlank(bg lipgloss.Color) string {
-	return renderButtonSegment(strings.Repeat(" ", maxInt(1, p.Width)), bg, bg, false)
+func (p PendingInputPreview) renderBlank(bg lipgloss.Color) Surface {
+	width := maxInt(1, p.Width)
+	surface := BlankSurface(width, 1)
+	style := CellStyle{FG: bg, BG: bg}
+	for x := 0; x < width; x++ {
+		surface.setCell(x, 0, Cell{Text: " ", Width: 1, Style: style})
+	}
+	return surface
 }
 
-func renderPendingPreviewLine(prefix, text string, width int, fg, bg lipgloss.Color, italic bool) string {
+func renderPendingPreviewLine(prefix, text string, width int, fg, bg lipgloss.Color, italic bool) Surface {
 	width = maxInt(1, width)
 	prefix = ansi.Truncate(prefix, width, "")
 	available := maxInt(0, width-ansi.StringWidth(prefix))
 	text = ansi.Truncate(text, available, "")
-	line := renderButtonSegment(prefix, fg, bg, false)
+	surface := BlankSurface(width, 1)
+	baseStyle := CellStyle{FG: fg, BG: bg}
+	textStyle := baseStyle
 	if italic {
-		line += lipgloss.NewStyle().Foreground(fg).Background(bg).Italic(true).Render(text)
-	} else {
-		line += renderButtonSegment(text, fg, bg, false)
+		textStyle.Italic = true
 	}
-	remaining := maxInt(0, width-ansi.StringWidth(prefix)-ansi.StringWidth(text))
-	if remaining > 0 {
-		line += renderButtonSegment(strings.Repeat(" ", remaining), fg, bg, false)
+	for x := 0; x < width; x++ {
+		surface.setCell(x, 0, Cell{Text: " ", Width: 1, Style: baseStyle})
 	}
-	return line
+	surface.WriteText(0, 0, prefix, baseStyle)
+	surface.WriteText(ansi.StringWidth(prefix), 0, text, textStyle)
+	return surface
 }
 
 func wrapPreviewLine(text string, width int) []string {

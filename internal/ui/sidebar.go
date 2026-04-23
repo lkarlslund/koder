@@ -1,10 +1,6 @@
 package ui
 
-import (
-	"strings"
-
-	"github.com/charmbracelet/lipgloss"
-)
+import "strings"
 
 type Sidebar struct {
 	Child  Element
@@ -17,21 +13,35 @@ func (s Sidebar) content(ctx *Context, width int) string {
 }
 
 func (s Sidebar) render(ctx *Context, width int) Surface {
-	style := lipgloss.NewStyle().
-		Width(width).
-		Padding(0, 1).
-		Background(ctx.Palette.SidebarBackground).
-		Foreground(ctx.Palette.SidebarForeground).
-		BorderLeft(true).
-		BorderForeground(ctx.Palette.SidebarBorder)
-	if s.Height > 0 {
-		style = style.Height(s.Height).MaxHeight(s.Height)
-	}
-	content := ""
+	height := s.Height
+	contentHeight := 0
+	var content Surface
 	if s.Child != nil {
-		content = RenderElement(ctx, s.Child, max(0, width-3), s.Height)
+		contentBounds := Rect{W: max(0, width-3), H: height}
+		if height <= 0 {
+			contentHeight = s.Child.Measure(ctx, NewConstraints(contentBounds.W, 0)).H
+			contentBounds.H = contentHeight
+		}
+		content = s.Child.Render(ctx, contentBounds)
 	}
-	return SurfaceFromString(style.Render(strings.TrimRight(content, "\n")))
+	if height <= 0 {
+		height = max(1, contentHeight)
+	}
+	surface := BlankSurface(width, height)
+	fillStyle := CellStyle{FG: ctx.Palette.SidebarForeground, BG: ctx.Palette.SidebarBackground}
+	borderStyle := CellStyle{FG: ctx.Palette.SidebarBorder, BG: ctx.Palette.SidebarBackground}
+	for y := 0; y < height; y++ {
+		for x := 0; x < width; x++ {
+			surface.setCell(x, y, Cell{Text: " ", Width: 1, Style: fillStyle})
+		}
+		if width > 0 {
+			surface.setCell(0, y, Cell{Text: "│", Width: 1, Style: borderStyle})
+		}
+	}
+	if s.Child != nil && width > 2 {
+		surface = surface.placeAt(2, 0, content)
+	}
+	return surface
 }
 
 func (s Sidebar) Measure(ctx *Context, constraints Constraints) Size {
@@ -76,9 +86,9 @@ func (l BodyLayout) element() Element {
 		return main
 	}
 	return Split{
-		Direction:  SplitHorizontal,
-		First:      main,
-		Second:     l.SidebarElement,
+		Direction:   SplitHorizontal,
+		First:       main,
+		Second:      l.SidebarElement,
 		SecondFixed: l.sidebarWidth(),
 	}
 }
@@ -97,10 +107,11 @@ type Footer struct {
 }
 
 func (f Footer) render() Surface {
-	return SurfaceFromString(lipgloss.NewStyle().
-		BorderTop(true).
-		Padding(0, 1).
-		Render(lipgloss.JoinVertical(lipgloss.Left, f.Parts...)))
+	children := make([]Child, 0, len(f.Parts))
+	for _, part := range f.Parts {
+		children = append(children, Fixed(Label{Text: part}))
+	}
+	return f.renderContent(&Context{}, Column{Children: children})
 }
 
 func (f Footer) Measure(ctx *Context, constraints Constraints) Size {
@@ -113,20 +124,14 @@ func (f Footer) Measure(ctx *Context, constraints Constraints) Size {
 }
 
 func (f Footer) Render(ctx *Context, bounds Rect) Surface {
-	if len(f.Elements) == 0 {
-		return f.render().normalize(bounds.W, bounds.H)
-	}
 	content := Column{Children: f.children()}
-	width := bounds.W
-	if width <= 0 {
-		width = content.Measure(ctx, NewConstraints(0, bounds.H)).W + 2
+	if len(f.Elements) == 0 {
+		content = Column{Children: make([]Child, 0, len(f.Parts))}
+		for _, part := range f.Parts {
+			content.Children = append(content.Children, Fixed(Label{Text: part}))
+		}
 	}
-	rendered := lipgloss.NewStyle().
-		BorderTop(true).
-		Padding(0, 1).
-		Width(width).
-		Render(RenderElement(ctx, content, max(0, width-2), 0))
-	return SurfaceFromString(rendered).normalize(bounds.W, bounds.H)
+	return f.renderContent(ctx, content).normalize(bounds.W, bounds.H)
 }
 
 func (f Footer) children() []Child {
@@ -138,4 +143,27 @@ func (f Footer) children() []Child {
 		children = append(children, Fixed(child))
 	}
 	return children
+}
+
+func (f Footer) renderContent(ctx *Context, content Element) Surface {
+	width := 0
+	height := 1
+	if content != nil {
+		size := content.Measure(ctx, NewConstraints(0, 0))
+		width = size.W + 2
+		height += size.H
+	}
+	if width <= 0 {
+		width = 2
+	}
+	surface := BlankSurface(width, height)
+	borderStyle := CellStyle{}
+	if width > 0 {
+		surface.WriteText(0, 0, strings.Repeat("─", width), borderStyle)
+	}
+	if content != nil {
+		rendered := content.Render(ctx, Rect{W: max(0, width-2), H: max(0, height-1)})
+		surface = surface.placeAt(1, 1, rendered)
+	}
+	return surface
 }

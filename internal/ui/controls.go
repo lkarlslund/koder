@@ -589,20 +589,6 @@ func buttonLabelSurface(label string, hotkey rune, palette theme.Palette, foregr
 	return s
 }
 
-func renderButtonSegment(text string, foreground, background lipgloss.Color, bold bool) string {
-	style := lipgloss.NewStyle()
-	if strings.TrimSpace(string(foreground)) != "" {
-		style = style.Foreground(foreground)
-	}
-	if strings.TrimSpace(string(background)) != "" {
-		style = style.Background(background)
-	}
-	if bold {
-		style = style.Bold(true)
-	}
-	return style.Render(text)
-}
-
 func firstNonEmptyColor(values ...lipgloss.Color) lipgloss.Color {
 	for _, value := range values {
 		if strings.TrimSpace(string(value)) != "" {
@@ -661,13 +647,13 @@ func truncateText(input string, width int) string {
 		return ""
 	}
 	input = compactInlineText(input)
-	if lipgloss.Width(input) <= width {
+	if ansi.StringWidth(input) <= width {
 		return input
 	}
 	if width == 1 {
 		return "…"
 	}
-	return lipgloss.NewStyle().MaxWidth(width).Render(input)
+	return ansi.Truncate(input, width, "…")
 }
 
 func compactInlineText(input string) string {

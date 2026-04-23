@@ -146,23 +146,69 @@ type ToolRunDock struct {
 }
 
 func (d ToolRunDock) render() Surface {
-	run := d.Run
-	statusStyle := lipgloss.NewStyle().Foreground(toolRunStatusColor(run.Status, d.Palette)).Bold(true)
-	title := lipgloss.JoinHorizontal(lipgloss.Left,
-		lipgloss.NewStyle().Bold(true).Render(run.Title),
-		"  ",
-		statusStyle.Render(run.StatusLabel()),
-	)
-	lines := []string{title}
-	if subtitle := strings.TrimSpace(run.Subtitle); subtitle != "" {
-		lines = append(lines, lipgloss.NewStyle().Foreground(d.Palette.ComposerMutedText).Render(subtitle))
+	return d.element().Render(&Context{Palette: d.Palette}, Rect{W: d.width()})
+}
+
+func (d ToolRunDock) Measure(_ *Context, constraints Constraints) Size {
+	return constraints.Clamp(d.render().Size())
+}
+
+func (d ToolRunDock) Render(ctx *Context, bounds Rect) Surface {
+	return d.element().Render(ctx, bounds)
+}
+
+func (d ToolRunDock) element() Element {
+	children := []Child{
+		Fixed(toolRunDockTitle{
+			Palette: d.Palette,
+			Title:   d.Run.Title,
+			Status:  d.Run.StatusLabel(),
+			Color:   toolRunStatusColor(d.Run.Status, d.Palette),
+			Width:   d.contentWidth(),
+		}),
 	}
-	if preview := firstNonEmpty(strings.TrimSpace(run.Preview), strings.TrimSpace(run.Output), strings.TrimSpace(run.ErrorText)); preview != "" {
-		lines = append(lines, preview)
+	if subtitle := strings.TrimSpace(d.Run.Subtitle); subtitle != "" {
+		children = append(children, Fixed(Label{
+			Text: subtitle,
+			Style: lipgloss.NewStyle().
+				Foreground(d.Palette.ComposerMutedText),
+		}))
+	}
+	if preview := firstNonEmpty(strings.TrimSpace(d.Run.Preview), strings.TrimSpace(d.Run.Output), strings.TrimSpace(d.Run.ErrorText)); preview != "" {
+		children = append(children, Fixed(toolRunDockPreview{
+			Palette: d.Palette,
+			Text:    preview,
+			Width:   d.contentWidth(),
+		}))
 	}
 	buttons := d.Buttons
 	buttons.Align = HorizontalAlignRight
-	contentWidth := maxInt(ansi.StringWidth(title), ansi.StringWidth(d.Hints))
+	buttons.Width = d.contentWidth()
+	children = append(children,
+		Fixed(buttons),
+		Fixed(Label{
+			Text:  d.Hints,
+			Style: lipgloss.NewStyle().Foreground(d.Palette.AssistantTimestampText),
+		}),
+	)
+	return Panel{
+		Child:        Column{Children: children, Spacing: 1},
+		Width:        d.width(),
+		Padding:      SymmetricInsets(1, 0),
+		BorderLeft:   true,
+		BorderRight:  true,
+		BorderTop:    true,
+		BorderBottom: true,
+		BorderColor:  toolRunStatusColor(d.Run.Status, d.Palette),
+	}
+}
+
+func (d ToolRunDock) contentWidth() int {
+	run := d.Run
+	titleWidth := ansi.StringWidth(run.Title) + 2 + ansi.StringWidth(run.StatusLabel())
+	contentWidth := maxInt(titleWidth, ansi.StringWidth(d.Hints))
+	buttons := d.Buttons
+	buttons.Align = HorizontalAlignRight
 	contentWidth = maxInt(contentWidth, ansi.StringWidth(buttons.line(d.Palette)))
 	if subtitle := strings.TrimSpace(run.Subtitle); subtitle != "" {
 		contentWidth = maxInt(contentWidth, ansi.StringWidth(subtitle))
@@ -172,50 +218,11 @@ func (d ToolRunDock) render() Surface {
 			contentWidth = maxInt(contentWidth, ansi.StringWidth(line))
 		}
 	}
-	buttons.Width = contentWidth
-
-	lines = append(lines,
-		buttons.render(d.Palette).String(),
-		d.Hints,
-	)
-	return SurfaceFromString(lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(toolRunStatusColor(run.Status, d.Palette)).
-		Padding(0, 1).
-		Render(strings.Join(lines, "\n")))
+	return contentWidth
 }
 
-func (d ToolRunDock) Measure(_ *Context, constraints Constraints) Size {
-	return constraints.Clamp(d.render().Size())
-}
-
-func (d ToolRunDock) Render(ctx *Context, bounds Rect) Surface {
-	if ctx != nil && ctx.Runtime != nil {
-		run := d.Run
-		title := run.Title + "  " + run.StatusLabel()
-		contentWidth := maxInt(ansi.StringWidth(title), ansi.StringWidth(d.Hints))
-		if subtitle := strings.TrimSpace(run.Subtitle); subtitle != "" {
-			contentWidth = maxInt(contentWidth, ansi.StringWidth(subtitle))
-		}
-		if preview := firstNonEmpty(strings.TrimSpace(run.Preview), strings.TrimSpace(run.Output), strings.TrimSpace(run.ErrorText)); preview != "" {
-			for _, line := range strings.Split(preview, "\n") {
-				contentWidth = maxInt(contentWidth, ansi.StringWidth(line))
-			}
-		}
-		buttons := d.Buttons
-		buttons.Align = HorizontalAlignRight
-		contentWidth = maxInt(contentWidth, ansi.StringWidth(buttons.line(d.Palette)))
-		buttons.Width = contentWidth
-		lineOffset := 2
-		if strings.TrimSpace(run.Subtitle) != "" {
-			lineOffset++
-		}
-		if preview := firstNonEmpty(strings.TrimSpace(run.Preview), strings.TrimSpace(run.Output), strings.TrimSpace(run.ErrorText)); preview != "" {
-			lineOffset += len(strings.Split(preview, "\n"))
-		}
-		buttons.Render(ctx, Rect{X: bounds.X + 2, Y: bounds.Y + lineOffset, W: contentWidth, H: 1})
-	}
-	return d.render().normalize(bounds.W, bounds.H)
+func (d ToolRunDock) width() int {
+	return d.contentWidth() + 4
 }
 
 func (r ToolRun) Expandable(width int) bool {
@@ -243,12 +250,12 @@ func (r ToolRun) HiddenLineCount(width int) int {
 	return expandedLines - collapsedLines
 }
 
-func renderToolRunPreview(preview string, run ToolRun, bodyStyle, addedStyle, deletedStyle, metaStyle lipgloss.Style, width int, expanded bool) string {
+func renderToolRunPreview(preview string, run ToolRun, _ lipgloss.Style, _ lipgloss.Style, _ lipgloss.Style, _ lipgloss.Style, width int, expanded bool) string {
 	preview = strings.TrimSpace(preview)
 	if preview == "" {
 		return ""
 	}
-	renderIndented := func(style lipgloss.Style, value string) string {
+	renderIndented := func(value string) string {
 		var rendered string
 		if expanded {
 			rendered = wrapPlain(value, max(1, width-1))
@@ -257,7 +264,7 @@ func renderToolRunPreview(preview string, run ToolRun, bodyStyle, addedStyle, de
 		}
 		lines := strings.Split(rendered, "\n")
 		for idx, line := range lines {
-			lines[idx] = " " + style.Render(line)
+			lines[idx] = " " + line
 		}
 		return strings.Join(lines, "\n")
 	}
@@ -268,38 +275,29 @@ func renderToolRunPreview(preview string, run ToolRun, bodyStyle, addedStyle, de
 		}
 		rendered := make([]string, 0, len(lines))
 		for _, line := range lines {
-			style := bodyStyle
-			switch {
-			case strings.HasPrefix(line, "+"):
-				style = addedStyle
-			case strings.HasPrefix(line, "-"):
-				style = deletedStyle
-			case strings.HasPrefix(line, "@@"):
-				style = metaStyle
-			}
 			wrapped := wrapPlain(line, max(1, width-1))
 			for _, wrappedLine := range strings.Split(wrapped, "\n") {
-				rendered = append(rendered, " "+style.Render(wrappedLine))
+				rendered = append(rendered, " "+wrappedLine)
 			}
 		}
 		return strings.Join(rendered, "\n")
 	}
 	if strings.TrimSpace(run.Diff) != "" && strings.TrimSpace(run.Output) == "" && strings.TrimSpace(run.ErrorText) == "" {
 		if expanded {
-			return renderIndented(addedStyle, preview)
+			return renderIndented(preview)
 		}
-		return renderIndented(addedStyle, diffSummary(preview))
+		return renderIndented(diffSummary(preview))
 	}
 	if run.Tool == domain.ToolKindEdit && strings.Contains(preview, "@@") {
 		if expanded {
 			return renderStyledLines(preview)
 		}
-		return renderIndented(bodyStyle, firstPreviewLine(preview))
+		return renderIndented(firstPreviewLine(preview))
 	}
 	if expanded {
-		return renderIndented(bodyStyle, preview)
+		return renderIndented(preview)
 	}
-	return renderIndented(bodyStyle, firstPreviewLine(preview))
+	return renderIndented(firstPreviewLine(preview))
 }
 
 func toolRunStatusColor(status ToolRunStatus, palette theme.Palette) lipgloss.Color {
@@ -311,6 +309,67 @@ func toolRunStatusColor(status ToolRunStatus, palette theme.Palette) lipgloss.Co
 	default:
 		return palette.UserAccentBar
 	}
+}
+
+type toolRunDockTitle struct {
+	Palette theme.Palette
+	Title   string
+	Status  string
+	Color   lipgloss.Color
+	Width   int
+}
+
+func (t toolRunDockTitle) Measure(_ *Context, constraints Constraints) Size {
+	return constraints.Clamp(Size{W: t.Width, H: 1})
+}
+
+func (t toolRunDockTitle) Render(_ *Context, bounds Rect) Surface {
+	width := t.Width
+	if width <= 0 {
+		width = bounds.W
+	}
+	s := BlankSurface(width, 1)
+	s.WriteText(0, 0, t.Title, CellStyle{FG: t.Palette.MarkdownText, Bold: true})
+	s.WriteText(ansi.StringWidth(t.Title)+2, 0, t.Status, CellStyle{FG: t.Color, Bold: true})
+	return s.normalize(bounds.W, bounds.H)
+}
+
+type toolRunDockPreview struct {
+	Palette theme.Palette
+	Text    string
+	Width   int
+}
+
+func (p toolRunDockPreview) Measure(_ *Context, constraints Constraints) Size {
+	lines := strings.Split(strings.TrimRight(p.Text, "\n"), "\n")
+	if len(lines) == 0 {
+		lines = []string{""}
+	}
+	width := 0
+	for _, line := range lines {
+		width = max(width, ansi.StringWidth(line))
+	}
+	if p.Width > 0 {
+		width = min(width, p.Width)
+	}
+	return constraints.Clamp(Size{W: width, H: len(lines)})
+}
+
+func (p toolRunDockPreview) Render(_ *Context, bounds Rect) Surface {
+	lines := strings.Split(strings.TrimRight(p.Text, "\n"), "\n")
+	if len(lines) == 0 {
+		lines = []string{""}
+	}
+	width := p.Width
+	if width <= 0 {
+		width = bounds.W
+	}
+	s := BlankSurface(width, len(lines))
+	style := CellStyle{FG: p.Palette.MarkdownText}
+	for y, line := range lines {
+		s.WriteText(0, y, ansi.Truncate(line, width, ""), style)
+	}
+	return s.normalize(bounds.W, bounds.H)
 }
 
 func diffSummary(diff string) string {

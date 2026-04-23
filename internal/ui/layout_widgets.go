@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/lkarlslund/koder/internal/theme"
 )
@@ -161,12 +162,12 @@ func (s Split) verticalHeights(ctx *Context, height int) (int, int) {
 }
 
 type Section struct {
-	Title      string
-	Child      Element
-	Width      int
-	Padding    Insets
-	Background lipgloss.Color
-	Foreground lipgloss.Color
+	Title       string
+	Child       Element
+	Width       int
+	Padding     Insets
+	Background  lipgloss.Color
+	Foreground  lipgloss.Color
 	BorderColor lipgloss.Color
 }
 
@@ -195,11 +196,11 @@ func (s Section) Render(ctx *Context, bounds Rect) Surface {
 
 func (s Section) children(ctx *Context) Element {
 	body := Panel{
-		Child:      s.Child,
-		Width:      s.Width,
-		Padding:    s.Padding,
-		Background: firstColor(s.Background, ctx.Palette.SidebarBackground),
-		Foreground: firstColor(s.Foreground, ctx.Palette.SidebarForeground),
+		Child:       s.Child,
+		Width:       s.Width,
+		Padding:     s.Padding,
+		Background:  firstColor(s.Background, ctx.Palette.SidebarBackground),
+		Foreground:  firstColor(s.Foreground, ctx.Palette.SidebarForeground),
 		BorderColor: firstColor(s.BorderColor, ctx.Palette.SidebarBorder),
 	}
 	if strings.TrimSpace(s.Title) == "" {
@@ -230,10 +231,10 @@ type ListItem struct {
 }
 
 type List struct {
-	Items          []ListItem
-	Width          int
-	Selected       int
-	Focused        bool
+	Items    []ListItem
+	Width    int
+	Selected int
+	Focused  bool
 }
 
 func (l List) Measure(ctx *Context, constraints Constraints) Size {
@@ -306,13 +307,20 @@ func (t Table) Render(ctx *Context, bounds Rect) Surface {
 	width := t.width(bounds.W)
 	children := make([]Child, 0, len(t.Rows)+1)
 	if t.ShowHeader {
-		children = append(children, Fixed(TextPane{Content: t.header(ctx.Palette, width)}))
+		children = append(children, Fixed(tableHeader{
+			Palette: ctx.Palette,
+			Columns: t.Columns,
+			Width:   width,
+		}))
 	}
 	for _, row := range t.Rows {
 		children = append(children, Fixed(HitBox{
 			ID: row.ControlID,
-			Child: TextPane{
-				Content: t.renderRow(ctx.Palette, width, row),
+			Child: tableRow{
+				Palette: ctx.Palette,
+				Columns: t.Columns,
+				Width:   width,
+				Row:     row,
 			},
 		}))
 	}
@@ -330,75 +338,103 @@ func (t Table) width(fallback int) int {
 	return width
 }
 
-func (t Table) header(palette theme.Palette, width int) string {
-	parts := make([]string, 0, len(t.Columns))
-	for idx, col := range t.Columns {
-		style := lipgloss.NewStyle().
-			Width(col.Width).
-			Bold(true).
-			Foreground(palette.AssistantTimestampText)
-		if col.AlignRight {
-			style = style.Align(lipgloss.Right)
-		}
-		parts = append(parts, style.Render(truncateText(strings.TrimSpace(col.Title), col.Width)))
-		if idx < len(t.Columns)-1 {
-			parts = append(parts, lipgloss.NewStyle().Width(2).Render(""))
-		}
-	}
-	return lipgloss.NewStyle().Width(width).Render(lipgloss.JoinHorizontal(lipgloss.Top, parts...))
+type tableHeader struct {
+	Palette theme.Palette
+	Columns []TableColumn
+	Width   int
 }
 
-func (t Table) renderRow(palette theme.Palette, width int, row TableRow) string {
-	selectionBackground := palette.SelectionBackground
-	selectionForeground := palette.SelectionForeground
+func (h tableHeader) Measure(_ *Context, constraints Constraints) Size {
+	return constraints.Clamp(Size{W: h.Width, H: 1})
+}
+
+func (h tableHeader) Render(_ *Context, bounds Rect) Surface {
+	width := h.Width
+	if width <= 0 {
+		width = bounds.W
+	}
+	s := BlankSurface(width, 1)
+	style := CellStyle{FG: h.Palette.AssistantTimestampText, Bold: true}
+	colX := 0
+	for idx, col := range h.Columns {
+		text := truncateText(strings.TrimSpace(col.Title), col.Width)
+		writeX := colX
+		if col.AlignRight {
+			writeX += max(0, col.Width-ansi.StringWidth(text))
+		}
+		s.WriteText(writeX, 0, text, style)
+		colX += col.Width
+		if idx < len(h.Columns)-1 {
+			colX += 2
+		}
+	}
+	return s.normalize(bounds.W, bounds.H)
+}
+
+type tableRow struct {
+	Palette theme.Palette
+	Columns []TableColumn
+	Width   int
+	Row     TableRow
+}
+
+func (r tableRow) Measure(_ *Context, constraints Constraints) Size {
+	return constraints.Clamp(Size{W: r.Width, H: 1})
+}
+
+func (r tableRow) Render(_ *Context, bounds Rect) Surface {
+	width := r.Width
+	if width <= 0 {
+		width = bounds.W
+	}
+	selectionBackground := r.Palette.SelectionBackground
+	selectionForeground := r.Palette.SelectionForeground
 	if strings.TrimSpace(string(selectionBackground)) == "" {
-		selectionBackground = palette.UserTextBackground
+		selectionBackground = r.Palette.UserTextBackground
 	}
 	if strings.TrimSpace(string(selectionForeground)) == "" {
-		selectionForeground = palette.UserTextForeground
+		selectionForeground = r.Palette.UserTextForeground
 	}
-	background := lipgloss.Color("")
-	foreground := lipgloss.Color("")
-	if row.Selected {
-		background = selectionBackground
-		foreground = selectionForeground
+	rowStyle := CellStyle{}
+	primaryStyle := CellStyle{Bold: true}
+	cellStyle := CellStyle{FG: r.Palette.AssistantTimestampText}
+	if r.Row.Selected {
+		rowStyle = CellStyle{BG: selectionBackground, FG: selectionForeground}
+		primaryStyle = CellStyle{BG: selectionBackground, FG: selectionForeground, Bold: true}
+		cellStyle = CellStyle{BG: selectionBackground, FG: selectionForeground}
 	}
-	if row.Focused {
-		background = deriveFocusedBackground(selectionBackground, firstNonEmptyColor(palette.ScreenBackground, palette.SidebarBackground, palette.UserTextBackground))
-		foreground = selectionForeground
+	if r.Row.Focused {
+		focusedBackground := deriveFocusedBackground(selectionBackground, firstNonEmptyColor(r.Palette.ScreenBackground, r.Palette.SidebarBackground, r.Palette.UserTextBackground))
+		rowStyle = CellStyle{BG: focusedBackground, FG: selectionForeground}
+		primaryStyle = CellStyle{BG: focusedBackground, FG: selectionForeground, Bold: true}
+		cellStyle = CellStyle{BG: focusedBackground, FG: selectionForeground}
 	}
-	parts := make([]string, 0, len(t.Columns)*2)
-	for idx, col := range t.Columns {
+	s := BlankSurface(width, 1)
+	for x := 0; x < width; x++ {
+		s.setCell(x, 0, Cell{Text: " ", Width: 1, Style: rowStyle})
+	}
+	colX := 0
+	for idx, col := range r.Columns {
 		value := ""
-		if idx < len(row.Cells) {
-			value = compactInlineText(row.Cells[idx])
+		if idx < len(r.Row.Cells) {
+			value = compactInlineText(r.Row.Cells[idx])
 		}
-		style := lipgloss.NewStyle().Width(col.Width)
-		if idx == 0 {
-			style = style.Bold(true)
-		} else {
-			style = style.Foreground(palette.AssistantTimestampText)
-		}
+		value = truncateText(value, col.Width)
+		writeX := colX
 		if col.AlignRight {
-			style = style.Align(lipgloss.Right)
+			writeX += max(0, col.Width-ansi.StringWidth(value))
 		}
-		if strings.TrimSpace(string(background)) != "" {
-			style = style.Background(background).Foreground(foreground)
+		style := cellStyle
+		if idx == 0 {
+			style = primaryStyle
 		}
-		parts = append(parts, style.Render(truncateText(value, col.Width)))
-		if idx < len(t.Columns)-1 {
-			gap := lipgloss.NewStyle().Width(2)
-			if strings.TrimSpace(string(background)) != "" {
-				gap = gap.Background(background)
-			}
-			parts = append(parts, gap.Render(""))
+		s.WriteText(writeX, 0, value, style)
+		colX += col.Width
+		if idx < len(r.Columns)-1 {
+			colX += 2
 		}
 	}
-	rowStyle := lipgloss.NewStyle().Width(width)
-	if strings.TrimSpace(string(background)) != "" {
-		rowStyle = rowStyle.Background(background).Foreground(foreground)
-	}
-	return rowStyle.Render(lipgloss.JoinHorizontal(lipgloss.Top, parts...))
+	return s.normalize(bounds.W, bounds.H)
 }
 
 func firstColor(values ...lipgloss.Color) lipgloss.Color {

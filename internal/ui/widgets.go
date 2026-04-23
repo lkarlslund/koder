@@ -217,8 +217,12 @@ type Paragraph struct {
 }
 
 func (p Paragraph) Measure(_ *Context, constraints Constraints) Size {
-	rendered := p.render(constraints.maxWidth())
-	return constraints.Clamp(SurfaceFromString(rendered).Size())
+	lines := p.lines(constraints.maxWidth())
+	width := 0
+	for _, line := range lines {
+		width = max(width, ansi.StringWidth(line))
+	}
+	return constraints.Clamp(Size{W: width, H: len(lines)})
 }
 
 func (p Paragraph) Render(_ *Context, bounds Rect) Surface {
@@ -230,8 +234,7 @@ func (p Paragraph) Render(_ *Context, bounds Rect) Surface {
 	if width <= 0 {
 		width = lipgloss.Width(text)
 	}
-	rendered := p.render(width)
-	lines := strings.Split(rendered, "\n")
+	lines := p.lines(width)
 	s := BlankSurface(width, len(lines))
 	style := lipglossToCellStyle(p.Style)
 	for y, line := range lines {
@@ -240,10 +243,10 @@ func (p Paragraph) Render(_ *Context, bounds Rect) Surface {
 	return s.normalize(bounds.W, bounds.H)
 }
 
-func (p Paragraph) render(width int) string {
+func (p Paragraph) lines(width int) []string {
 	text := strings.TrimSpace(p.Text)
 	if text == "" {
-		return ""
+		return nil
 	}
 	if width > 0 {
 		var lines []string
@@ -256,11 +259,7 @@ func (p Paragraph) render(width int) string {
 		}
 		text = strings.Join(lines, "\n")
 	}
-	var rendered []string
-	for _, line := range strings.Split(text, "\n") {
-		rendered = append(rendered, p.Style.Render(line))
-	}
-	return strings.Join(rendered, "\n")
+	return strings.Split(text, "\n")
 }
 
 type ModalFrame struct {
