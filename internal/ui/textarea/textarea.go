@@ -58,9 +58,12 @@ type Model struct {
 	height          int
 	focus           bool
 	value           []rune
+	cachedValue     string
+	valueDirty      bool
 	cursor          int
 	blink           bool
 	blinkGeneration int
+	revision        uint64
 }
 
 func New() Model {
@@ -87,18 +90,33 @@ func (m *Model) SetHeight(height int) {
 	m.height = height
 }
 
-func (m Model) Value() string {
-	return string(m.value)
+func (m *Model) Value() string {
+	if !m.valueDirty {
+		return m.cachedValue
+	}
+	m.cachedValue = string(m.value)
+	m.valueDirty = false
+	return m.cachedValue
 }
 
 func (m *Model) SetValue(value string) {
 	m.value = []rune(value)
+	m.valueDirty = true
+	m.cachedValue = ""
 	m.cursor = len(m.value)
+	m.revision++
 }
 
 func (m *Model) Reset() {
 	m.value = nil
+	m.valueDirty = true
+	m.cachedValue = ""
 	m.cursor = 0
+	m.revision++
+}
+
+func (m Model) Revision() uint64 {
+	return m.revision
 }
 
 func (m *Model) SetCursor(offset int) {
@@ -172,11 +190,17 @@ func (m *Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		case tea.KeyBackspace:
 			if m.cursor > 0 {
 				m.value = append(m.value[:m.cursor-1], m.value[m.cursor:]...)
+				m.valueDirty = true
+				m.cachedValue = ""
 				m.cursor--
+				m.revision++
 			}
 		case tea.KeyDelete:
 			if m.cursor < len(m.value) {
 				m.value = append(m.value[:m.cursor], m.value[m.cursor+1:]...)
+				m.valueDirty = true
+				m.cachedValue = ""
+				m.revision++
 			}
 		case tea.KeySpace:
 			m.insertRunes([]rune{' '})
@@ -296,10 +320,19 @@ func (m *Model) insertRunes(runes []rune) {
 	if len(runes) == 0 {
 		return
 	}
-	head := append([]rune{}, m.value[:m.cursor]...)
-	head = append(head, runes...)
-	m.value = append(head, m.value[m.cursor:]...)
+	if m.cursor >= len(m.value) {
+		m.value = append(m.value, runes...)
+	} else {
+		oldLen := len(m.value)
+		insertLen := len(runes)
+		m.value = append(m.value, make([]rune, insertLen)...)
+		copy(m.value[m.cursor+insertLen:], m.value[m.cursor:oldLen])
+		copy(m.value[m.cursor:], runes)
+	}
+	m.valueDirty = true
+	m.cachedValue = ""
 	m.cursor += len(runes)
+	m.revision++
 }
 
 func byteOffsetToRuneIndex(s string, offset int) int {

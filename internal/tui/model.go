@@ -1230,9 +1230,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	var cmd tea.Cmd
-	before := m.composer.Value()
+	beforeRevision := m.composer.Revision()
 	m.composer, cmd = m.composer.Update(msg)
-	if before != m.composer.Value() {
+	if beforeRevision != m.composer.Revision() {
 		m.resetComposerHistory()
 	}
 	m.updateComposerMenus()
@@ -3607,7 +3607,8 @@ func normalizedSessionPath(path string) string {
 }
 
 func (m *Model) updateComposerMenus() {
-	query, ok := slashQuery(m.composer.Value())
+	value := m.composer.Value()
+	query, ok := slashQuery(value)
 	if ok {
 		m.slashMatches = matchingSlashCommands(query)
 		if len(m.slashMatches) == 0 {
@@ -3620,7 +3621,7 @@ func (m *Model) updateComposerMenus() {
 		m.slashIndex = 0
 	}
 
-	query, _, ok = skillQuery(m.composer.Value())
+	query, _, ok = skillQuery(value)
 	if ok {
 		m.skillMatches = matchingSkills(m.workdir, query)
 		if len(m.skillMatches) == 1 && strings.EqualFold(m.skillMatches[0].Name, query) {
@@ -3637,7 +3638,7 @@ func (m *Model) updateComposerMenus() {
 	}
 
 	var pathMode bool
-	query, _, pathMode, ok = mentionQuery(m.composer.Value(), len(m.composer.Value()))
+	query, _, pathMode, ok = mentionQuery(value, len(value))
 	if ok {
 		if pathMode {
 			m.mentionMatches, _ = reference.PathCompletions(m.workdir, query, 8)
