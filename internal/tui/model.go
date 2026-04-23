@@ -1348,8 +1348,22 @@ func (m *Model) renderBodyElement() ui.Element {
 		Height: m.viewport.Height,
 		Width:  sidebarWidth,
 	}
+	main := ui.TextPane{Content: m.viewport.View()}
+	if transcript := m.transcriptElement(nil); transcript != nil {
+		main = ui.TextPane{}
+		return ui.BodyLayout{
+			MainElement: ui.ScrollFrame{
+				Child:   transcript,
+				OffsetY: max(0, m.viewport.YOffset),
+				Width:   m.viewport.Width,
+				Height:  m.viewport.Height,
+			},
+			SidebarElement: sidebar,
+			ShowSidebar:    m.showSidebar,
+		}
+	}
 	return ui.BodyLayout{
-		MainElement:    ui.TextPane{Content: m.viewport.View()},
+		MainElement:    main,
 		SidebarElement: sidebar,
 		ShowSidebar:    m.showSidebar,
 	}
@@ -1601,7 +1615,10 @@ func (m *Model) refreshViewportPreserve() {
 
 func (m *Model) refreshViewportAt(offset int) {
 	m.transcriptControls = nil
-	if m.currentSession.ID == 0 && len(m.messages) == 0 {
+	runtime := ui.Runtime{}
+	ctx := &ui.Context{Palette: m.palette, Runtime: &runtime}
+	transcript := m.transcriptElement(&runtime)
+	if transcript == nil {
 		if !m.cfg.HasUsableDefaultProvider() {
 			m.viewport.SetContent("No provider configured.\n\nType /connect to add one before sending prompts.")
 			return
@@ -1609,10 +1626,23 @@ func (m *Model) refreshViewportAt(offset int) {
 		m.viewport.SetContent("No session")
 		return
 	}
+	m.viewport.SetContent(ui.RenderElement(ctx, transcript, max(0, m.viewport.Width), 0))
+	m.transcriptControls = runtime.Controls()
+	if offset >= 0 {
+		m.viewport.SetYOffset(offset)
+		return
+	}
+	m.viewport.GotoBottom()
+}
+
+func (m *Model) transcriptElement(runtime *ui.Runtime) ui.Element {
+	if m.currentSession.ID == 0 && len(m.messages) == 0 {
+		if !m.cfg.HasUsableDefaultProvider() {
+			return ui.Paragraph{Text: "No provider configured.\n\nType /connect to add one before sending prompts."}
+		}
+		return ui.Paragraph{Text: "Start by asking a question or type / for commands."}
+	}
 	var items []ui.TranscriptItem
-	runtime := ui.Runtime{}
-	ctx := &ui.Context{Palette: m.palette, Runtime: &runtime}
-	transcriptWidth := max(0, m.viewport.Width)
 	transcriptBlocks := m.transcriptBlocks()
 	for i, block := range transcriptBlocks {
 		gap := 0
@@ -1636,13 +1666,10 @@ func (m *Model) refreshViewportAt(offset int) {
 			items = append(items, ui.TranscriptItem{Element: ui.Paragraph{Text: "Start by asking a question or type / for commands."}})
 		}
 	}
-	m.viewport.SetContent(ui.RenderElement(ctx, ui.Transcript{Items: items}, transcriptWidth, 0))
-	m.transcriptControls = runtime.Controls()
-	if offset >= 0 {
-		m.viewport.SetYOffset(offset)
-		return
+	if runtime != nil {
+		runtime.BeginFrame()
 	}
-	m.viewport.GotoBottom()
+	return ui.Transcript{Items: items}
 }
 
 func (m *Model) defaultTranscriptSeparator() string {

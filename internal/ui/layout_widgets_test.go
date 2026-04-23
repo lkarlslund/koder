@@ -67,3 +67,20 @@ func TestSectionRendersTitleAbovePanel(t *testing.T) {
 		t.Fatalf("expected section body, got %q", got)
 	}
 }
+
+func TestScrollFrameRendersVisibleWindowAtOffset(t *testing.T) {
+	got := RenderElement(nil, ScrollFrame{
+		Child: Static{Content: "line1\nline2\nline3\nline4"},
+		OffsetY: 1,
+		Width:   5,
+		Height:  2,
+	}, 5, 2)
+
+	lines := strings.Split(ansi.Strip(got), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 visible lines, got %d in %q", len(lines), got)
+	}
+	if strings.TrimSpace(lines[0]) != "line2" || strings.TrimSpace(lines[1]) != "line3" {
+		t.Fatalf("expected scrolled window to show line2/line3, got %#v", lines)
+	}
+}

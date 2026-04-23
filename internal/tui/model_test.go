@@ -2848,6 +2848,30 @@ func TestRenderBodyKeepsSidebarAtConfiguredWidth(t *testing.T) {
 	}
 }
 
+func TestRenderBodyUsesTranscriptElementInsteadOfViewportString(t *testing.T) {
+	cfg := testConfig(t)
+	m := Model{
+		cfg: cfg,
+		currentSession: domain.Session{ID: 1, ProviderID: "test", ModelID: "model"},
+		messages: []domain.Message{
+			{ID: 1, Role: domain.MessageRoleAssistant},
+		},
+		parts: map[int64][]domain.Part{
+			1: {{Kind: domain.PartKindText, Body: "fresh transcript"}},
+		},
+		viewport: viewport.New(32, 6),
+	}
+	m.viewport.SetContent("stale viewport")
+
+	got := ansi.Strip(m.renderBody())
+	if !strings.Contains(got, "fresh transcript") {
+		t.Fatalf("expected body to render transcript element, got %q", got)
+	}
+	if strings.Contains(got, "stale viewport") {
+		t.Fatalf("expected body to ignore stale viewport string, got %q", got)
+	}
+}
+
 func TestViewUsesFullTerminalWidthWithSidebar(t *testing.T) {
 	m := Model{
 		showSidebar: true,

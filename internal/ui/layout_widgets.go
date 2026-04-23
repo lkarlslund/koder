@@ -409,3 +409,48 @@ func firstColor(values ...lipgloss.Color) lipgloss.Color {
 	}
 	return ""
 }
+
+type ScrollFrame struct {
+	Child   Element
+	OffsetY int
+	Width   int
+	Height  int
+}
+
+func (s ScrollFrame) Measure(ctx *Context, constraints Constraints) Size {
+	if s.Child == nil {
+		return constraints.Clamp(Size{})
+	}
+	width := s.Width
+	if width <= 0 {
+		width = constraints.MaxW
+	}
+	height := s.Height
+	if height <= 0 {
+		height = constraints.MaxH
+	}
+	childSize := s.Child.Measure(ctx, Constraints{MaxW: width, MaxH: 0})
+	if width <= 0 {
+		width = childSize.W
+	}
+	if height <= 0 {
+		height = childSize.H
+	}
+	return constraints.Clamp(Size{W: width, H: height})
+}
+
+func (s ScrollFrame) Render(ctx *Context, bounds Rect) Surface {
+	base := BlankSurface(bounds.W, bounds.H)
+	if s.Child == nil || bounds.W <= 0 || bounds.H <= 0 {
+		return base
+	}
+	childSize := s.Child.Measure(ctx, Constraints{MaxW: bounds.W, MaxH: 0})
+	childHeight := max(bounds.H, childSize.H)
+	childSurface := s.Child.Render(ctx, Rect{
+		X: bounds.X,
+		Y: bounds.Y - max(0, s.OffsetY),
+		W: bounds.W,
+		H: childHeight,
+	})
+	return base.placeAt(0, -max(0, s.OffsetY), childSurface)
+}
