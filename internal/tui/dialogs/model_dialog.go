@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/lkarlslund/koder/internal/domain"
@@ -141,27 +140,35 @@ func (d ModelDialog) dialog(width int, palette theme.Palette) Element {
 		tertiaryWidth = minInt(10, maxInt(5, listWidth/8))
 	}
 	secondaryWidth := maxInt(6, listWidth-primaryWidth-tertiaryWidth-4)
+	rows := []TableRow{}
+	start, end := windowBounds(d.Index, len(d.view), 10)
+	for idx := start; idx < end; idx++ {
+		item := d.view[idx]
+		rows = append(rows, TableRow{
+			ControlID: "model-row-" + strconv.Itoa(idx),
+			Cells: []string{
+				item.ID,
+				firstNonEmptyModelValue(strings.TrimSpace(item.OwnedBy), strings.TrimSpace(d.ProviderID)),
+				capabilityBadges(item),
+			},
+			Selected: idx == d.Index,
+			Focused:  idx == d.Index && d.focus == pickerDialogFocusList,
+		})
+	}
 
-	listChildren := []Child{}
-	if len(d.view) == 0 {
-		listChildren = append(listChildren, Fixed(staticBlock("No matches")))
+	var list Element
+	if len(rows) == 0 {
+		list = staticBlock("No matches")
 	} else {
-		listChildren = append(listChildren, Fixed(staticBlock(SelectableHeader{
-			Primary:        "Model",
-			Secondary:      "Owner",
-			Tertiary:       "Caps",
-			Width:          listWidth,
-			PrimaryWidth:   primaryWidth,
-			SecondaryWidth: secondaryWidth,
-			TertiaryWidth:  tertiaryWidth,
-		}.View(palette))))
-		start, end := windowBounds(d.Index, len(d.view), 10)
-		for idx := start; idx < end; idx++ {
-			item := d.view[idx]
-			listChildren = append(listChildren, Fixed(HitBox{
-				ID:    "model-row-" + strconv.Itoa(idx),
-				Child: TextPane{Content: d.renderRow(item, listWidth, primaryWidth, secondaryWidth, tertiaryWidth, idx == d.Index, idx == d.Index && d.focus == pickerDialogFocusList, palette)},
-			}))
+		list = Table{
+			Width: listWidth,
+			Columns: []TableColumn{
+				{Title: "Model", Width: primaryWidth},
+				{Title: "Owner", Width: secondaryWidth},
+				{Title: "Caps", Width: tertiaryWidth, AlignRight: tertiaryWidth > 0},
+			},
+			ShowHeader: true,
+			Rows:       rows,
 		}
 	}
 
@@ -171,70 +178,13 @@ func (d ModelDialog) dialog(width int, palette theme.Palette) Element {
 			Children: []Child{
 				Fixed(staticBlock("Filter: " + d.Query)),
 				Fixed(Spacer{H: 1}),
-				Fixed(Panel{Width: listWidth, Child: Column{Children: listChildren}}),
+				Fixed(Section{Width: listWidth, Child: list}),
 			},
 		},
 		Buttons: d.buttonRow(dialogWidth),
 		Footer:  "Enter to select, Esc to cancel",
 		Width:   dialogWidth,
 	}
-}
-
-func (d ModelDialog) renderRow(item domain.Model, width int, primaryWidth int, secondaryWidth int, tertiaryWidth int, selected bool, focused bool, palette theme.Palette) string {
-	if width <= 0 {
-		width = 72
-	}
-	gapWidth := 2
-	primary := compactModelCell(item.ID)
-	secondary := compactModelCell(firstNonEmptyModelValue(strings.TrimSpace(item.OwnedBy), strings.TrimSpace(d.ProviderID)))
-	tertiary := compactModelCell(capabilityBadges(item))
-	selectionBackground := palette.SelectionBackground
-	selectionForeground := palette.SelectionForeground
-	if strings.TrimSpace(string(selectionBackground)) == "" {
-		selectionBackground = palette.UserTextBackground
-	}
-	if strings.TrimSpace(string(selectionForeground)) == "" {
-		selectionForeground = palette.UserTextForeground
-	}
-	primaryStyle := lipgloss.NewStyle().Width(primaryWidth).Bold(true)
-	gapStyle := lipgloss.NewStyle().Width(gapWidth)
-	secondaryStyle := lipgloss.NewStyle().Width(secondaryWidth).Foreground(palette.AssistantTimestampText)
-	tertiaryStyle := lipgloss.NewStyle().Width(tertiaryWidth).Align(lipgloss.Right).Foreground(palette.ActivityText)
-	rowStyle := lipgloss.NewStyle().Width(width)
-	if selected {
-		rowStyle = rowStyle.Background(selectionBackground).Foreground(selectionForeground)
-		primaryStyle = primaryStyle.Background(selectionBackground).Foreground(selectionForeground)
-		gapStyle = gapStyle.Background(selectionBackground)
-		secondaryStyle = secondaryStyle.Background(selectionBackground).Foreground(selectionForeground)
-		tertiaryStyle = tertiaryStyle.Background(selectionBackground).Foreground(selectionForeground).Bold(true)
-	}
-	if focused {
-		focusedBackground := selectionBackground
-		if strings.TrimSpace(string(palette.UserTextBackground)) != "" {
-			focusedBackground = palette.UserTextBackground
-		}
-		focusedForeground := selectionForeground
-		rowStyle = rowStyle.Background(focusedBackground).Foreground(focusedForeground)
-		primaryStyle = primaryStyle.Background(focusedBackground).Foreground(focusedForeground)
-		gapStyle = gapStyle.Background(focusedBackground)
-		secondaryStyle = secondaryStyle.Background(focusedBackground).Foreground(focusedForeground)
-		tertiaryStyle = tertiaryStyle.Background(focusedBackground).Foreground(focusedForeground).Bold(true)
-	}
-	row := lipgloss.JoinHorizontal(
-		lipgloss.Top,
-		primaryStyle.Render(truncateModelCell(strings.TrimSpace(primary), primaryWidth)),
-		gapStyle.Render(""),
-		secondaryStyle.Render(truncateModelCell(strings.TrimSpace(secondary), secondaryWidth)),
-	)
-	if tertiaryWidth > 0 {
-		row = lipgloss.JoinHorizontal(
-			lipgloss.Top,
-			row,
-			gapStyle.Render(""),
-			tertiaryStyle.Render(truncateModelCell(strings.TrimSpace(tertiary), tertiaryWidth)),
-		)
-	}
-	return rowStyle.Render(row)
 }
 
 func anyModelHasCapabilities(models []domain.Model) bool {

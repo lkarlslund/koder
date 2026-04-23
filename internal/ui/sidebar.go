@@ -84,17 +84,32 @@ func (l BodyLayout) View() string {
 }
 
 func (l BodyLayout) Measure(ctx *Context, constraints Constraints) Size {
-	return constraints.Clamp(SurfaceFromString(l.View()).Size())
+	return constraints.Clamp(l.element().Measure(ctx, constraints))
 }
 
 func (l BodyLayout) Render(ctx *Context, bounds Rect) Surface {
-	children := []Child{
-		Flex(Inset{Padding: SymmetricInsets(1, 0), Child: l.MainElement}, 1),
+	return l.element().Render(ctx, bounds)
+}
+
+func (l BodyLayout) element() Element {
+	main := Inset{Padding: SymmetricInsets(1, 0), Child: l.MainElement}
+	if !l.ShowSidebar || l.SidebarElement == nil {
+		return main
 	}
-	if l.ShowSidebar {
-		children = append(children, Fixed(l.SidebarElement))
+	return Split{
+		Direction:  SplitHorizontal,
+		First:      main,
+		Second:     l.SidebarElement,
+		SecondFixed: l.sidebarWidth(),
 	}
-	return Row{Children: children}.Render(ctx, bounds)
+}
+
+func (l BodyLayout) sidebarWidth() int {
+	sidebar, ok := l.SidebarElement.(Sidebar)
+	if !ok {
+		return 0
+	}
+	return sidebar.Width
 }
 
 type Footer struct {

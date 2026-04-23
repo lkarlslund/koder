@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 
 	"github.com/lkarlslund/koder/internal/theme"
 	. "github.com/lkarlslund/koder/internal/ui"
@@ -150,13 +149,19 @@ func (d SessionDialog) dialog(width int, palette theme.Palette) Element {
 		gapCount = 5
 	}
 	titleWidth := maxInt(8, contentWidth-idWidth-timeWidth-timeWidth-tokensWidth-cwdWidth-(gapCount*2))
-
-	listRows := []Child{
-		Fixed(staticBlock(d.renderTableHeader(idWidth, timeWidth, tokensWidth, cwdWidth, titleWidth, palette))),
+	columns := []TableColumn{
+		{Title: "ID", Width: idWidth},
+		{Title: "Created", Width: timeWidth},
+		{Title: "Modified", Width: timeWidth},
+		{Title: "Tokens", Width: tokensWidth},
 	}
-	if len(d.view) == 0 {
-		listRows = append(listRows, Fixed(staticBlock("No matches")))
-	} else {
+	if d.ShowCWD {
+		columns = append(columns, TableColumn{Title: "CWD", Width: cwdWidth})
+	}
+	columns = append(columns, TableColumn{Title: "Title", Width: titleWidth})
+
+	rows := []TableRow{}
+	if len(d.view) > 0 {
 		start := 0
 		if d.Index >= 5 {
 			start = d.Index - 4
@@ -167,10 +172,17 @@ func (d SessionDialog) dialog(width int, palette theme.Palette) Element {
 		}
 		for idx := start; idx < end; idx++ {
 			item := d.view[idx]
-			listRows = append(listRows, Fixed(HitBox{
-				ID:    "session-row-" + strconv.Itoa(idx),
-				Child: TextPane{Content: d.renderTableRow(item, idWidth, timeWidth, tokensWidth, cwdWidth, titleWidth, palette, idx == d.Index, idx == d.Index && d.focus == pickerDialogFocusList)},
-			}))
+			cells := []string{item.SessionID, item.CreatedAt, item.ModifiedAt, item.TokenSummary}
+			if d.ShowCWD {
+				cells = append(cells, item.CWD)
+			}
+			cells = append(cells, item.Title)
+			rows = append(rows, TableRow{
+				ControlID: "session-row-" + strconv.Itoa(idx),
+				Cells:     cells,
+				Selected:  idx == d.Index,
+				Focused:   idx == d.Index && d.focus == pickerDialogFocusList,
+			})
 		}
 	}
 
@@ -179,27 +191,32 @@ func (d SessionDialog) dialog(width int, palette theme.Palette) Element {
 		details = d.clampPreviewLines(d.previewText(item, contentWidth), 10)
 	}
 
+	list := Element(staticBlock("No matches"))
+	if len(rows) > 0 {
+		list = Table{
+			Width:      contentWidth,
+			Columns:    columns,
+			Rows:       rows,
+			ShowHeader: true,
+		}
+	}
+
 	return Dialog{
 		Title: "Resume Session",
 		Body: Column{
 			Children: []Child{
 				Fixed(staticBlock(fmt.Sprintf("Filter: %s", d.Query))),
 				Fixed(Spacer{H: 1}),
-				Fixed(Panel{
-					Width:      contentWidth,
-					Background: palette.SidebarBackground,
-					Foreground: palette.SidebarForeground,
-					Child:      Column{Children: listRows},
-				}),
+				Fixed(Section{Width: contentWidth, Child: list}),
 				Fixed(Spacer{H: 1}),
-				Fixed(Panel{
-					Width:       contentWidth,
-					Padding:     Insets{Top: 1, Left: 1, Right: 1},
-					Background:  lipgloss.Color("#000000"),
-					Foreground:  palette.SidebarForeground,
-					BorderTop:   true,
+				Fixed(Section{
+					Title:      "Preview",
+					Width:      contentWidth,
+					Padding:    Insets{Top: 1, Left: 1, Right: 1},
+					Background: palette.ScreenBackground,
+					Foreground: palette.SidebarForeground,
 					BorderColor: palette.SidebarBorder,
-					Child:       TextPane{Content: details},
+					Child:      TextPane{Content: details},
 				}),
 			},
 		},
@@ -314,57 +331,6 @@ func (d SessionDialog) buttonRow(width int) ButtonRow {
 	buttons.Width = maxInt(0, width)
 	buttons.Align = HorizontalAlignRight
 	return buttons
-}
-
-func (d SessionDialog) renderTableHeader(idWidth, timeWidth, tokensWidth, cwdWidth, titleWidth int, palette theme.Palette) string {
-	style := lipgloss.NewStyle().
-		Foreground(palette.AssistantTimestampText).
-		Bold(true)
-	return style.Render(joinSessionColumns("ID", idWidth, "Created", timeWidth, "Modified", timeWidth, "Tokens", tokensWidth, "CWD", cwdWidth, "Title", titleWidth, d.ShowCWD))
-}
-
-func (d SessionDialog) renderTableRow(item SessionItem, idWidth, timeWidth, tokensWidth, cwdWidth, titleWidth int, palette theme.Palette, selected bool, focused bool) string {
-	row := joinSessionColumns(
-		item.SessionID,
-		idWidth,
-		item.CreatedAt,
-		timeWidth,
-		item.ModifiedAt,
-		timeWidth,
-		item.TokenSummary,
-		tokensWidth,
-		item.CWD,
-		cwdWidth,
-		item.Title,
-		titleWidth,
-		d.ShowCWD,
-	)
-	totalWidth := idWidth + timeWidth + timeWidth + tokensWidth + titleWidth + 8
-	if d.ShowCWD {
-		totalWidth += cwdWidth + 2
-	}
-	style := lipgloss.NewStyle().Width(totalWidth)
-	if selected {
-		style = style.Background(palette.SelectionBackground).Foreground(palette.SelectionForeground)
-	}
-	if focused {
-		style = style.Background(deriveFocusedBackground(firstNonEmptyColor(palette.SelectionBackground, palette.UserTextBackground), firstNonEmptyColor(palette.ScreenBackground, palette.SidebarBackground, palette.UserTextBackground))).Foreground(firstNonEmptyColor(palette.SelectionForeground, palette.UserTextForeground))
-	}
-	return style.Render(row)
-}
-
-func joinSessionColumns(id string, idWidth int, created string, createdWidth int, modified string, modifiedWidth int, tokens string, tokensWidth int, cwd string, cwdWidth int, title string, titleWidth int, showCWD bool) string {
-	cols := []string{
-		lipgloss.NewStyle().Width(idWidth).Render(truncateText(strings.TrimSpace(id), idWidth)),
-		lipgloss.NewStyle().Width(createdWidth).Render(truncateText(strings.TrimSpace(created), createdWidth)),
-		lipgloss.NewStyle().Width(modifiedWidth).Render(truncateText(strings.TrimSpace(modified), modifiedWidth)),
-		lipgloss.NewStyle().Width(tokensWidth).Render(truncateText(strings.TrimSpace(tokens), tokensWidth)),
-	}
-	if showCWD {
-		cols = append(cols, lipgloss.NewStyle().Width(cwdWidth).Render(truncateText(strings.TrimSpace(cwd), cwdWidth)))
-	}
-	cols = append(cols, lipgloss.NewStyle().Width(titleWidth).Render(truncateText(strings.TrimSpace(title), titleWidth)))
-	return strings.Join(cols, "  ")
 }
 
 func (d SessionDialog) previewText(item SessionItem, width int) string {
