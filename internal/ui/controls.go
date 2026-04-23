@@ -36,6 +36,10 @@ type SelectableHeader struct {
 }
 
 func (h SelectableHeader) View(palette theme.Palette) string {
+	return h.render(palette).String()
+}
+
+func (h SelectableHeader) render(palette theme.Palette) Surface {
 	primaryWidth, secondaryWidth, tertiaryWidth := selectableColumnWidths(h.Width, h.Primary, h.Secondary, h.Tertiary, h.PrimaryWidth, h.SecondaryWidth, h.TertiaryWidth)
 	gapWidth := 2
 	row := lipgloss.JoinHorizontal(
@@ -52,10 +56,14 @@ func (h SelectableHeader) View(palette theme.Palette) string {
 			lipgloss.NewStyle().Width(tertiaryWidth).Bold(true).Align(lipgloss.Right).Foreground(palette.AssistantTimestampText).Render(truncateText(strings.TrimSpace(h.Tertiary), tertiaryWidth)),
 		)
 	}
-	return row
+	return SurfaceFromString(row)
 }
 
 func (r SelectableRow) View(palette theme.Palette) string {
+	return r.render(palette).String()
+}
+
+func (r SelectableRow) render(palette theme.Palette) Surface {
 	primary := r.Primary
 	secondary := r.Secondary
 	tertiary := r.Tertiary
@@ -113,11 +121,11 @@ func (r SelectableRow) View(palette theme.Palette) string {
 			tertiaryStyle.Render(truncateText(strings.TrimSpace(tertiary), tertiaryWidth)),
 		)
 	}
-	return rowStyle.Render(row)
+	return SurfaceFromString(rowStyle.Render(row))
 }
 
 func (r SelectableRow) Measure(ctx *Context, constraints Constraints) Size {
-	return constraints.Clamp(SurfaceFromString(r.View(ctx.Palette)).Size())
+	return constraints.Clamp(r.render(ctx.Palette).Size())
 }
 
 func (r SelectableRow) Render(ctx *Context, bounds Rect) Surface {
@@ -128,7 +136,7 @@ func (r SelectableRow) Render(ctx *Context, bounds Rect) Surface {
 			Enabled: true,
 		})
 	}
-	return SurfaceFromString(r.View(ctx.Palette)).normalize(bounds.W, bounds.H)
+	return r.render(ctx.Palette).normalize(bounds.W, bounds.H)
 }
 
 func selectableColumnWidths(width int, primary, secondary, tertiary string, primaryWidth, secondaryWidth, tertiaryWidth int) (int, int, int) {
@@ -184,6 +192,10 @@ func (v VerticalTabs) Current() int {
 }
 
 func (v VerticalTabs) View(width int, palette theme.Palette, focused bool) string {
+	return v.render(width, palette, focused).String()
+}
+
+func (v VerticalTabs) render(width int, palette theme.Palette, focused bool) Surface {
 	lines := make([]string, 0, len(v.Tabs))
 	base := lipgloss.NewStyle().Width(width)
 	activeStyle := base.
@@ -203,7 +215,7 @@ func (v VerticalTabs) View(width int, palette theme.Palette, focused bool) strin
 		}
 		lines = append(lines, base.Foreground(palette.SidebarForeground).Render(label))
 	}
-	return strings.Join(lines, "\n")
+	return SurfaceFromString(strings.Join(lines, "\n"))
 }
 
 type CheckboxRow struct {
@@ -399,9 +411,13 @@ func (r *ButtonRow) HotkeyIndex(msg tea.KeyMsg) (int, bool) {
 }
 
 func (r ButtonRow) View(palette theme.Palette) string {
+	return r.render(palette).String()
+}
+
+func (r ButtonRow) render(palette theme.Palette) Surface {
 	line := r.line(palette)
 	if r.Width <= ansi.StringWidth(line) {
-		return line
+		return SurfaceFromString(line)
 	}
 	align := lipgloss.Left
 	switch r.Align {
@@ -410,17 +426,17 @@ func (r ButtonRow) View(palette theme.Palette) string {
 	case HorizontalAlignRight:
 		align = lipgloss.Right
 	}
-	return lipgloss.NewStyle().Width(r.Width).Align(align).Render(line)
+	return SurfaceFromString(lipgloss.NewStyle().Width(r.Width).Align(align).Render(line))
 }
 
 func (r ButtonRow) Measure(ctx *Context, constraints Constraints) Size {
-	return constraints.Clamp(SurfaceFromString(r.View(ctx.Palette)).Size())
+	return constraints.Clamp(r.render(ctx.Palette).Size())
 }
 
 func (r ButtonRow) Render(ctx *Context, bounds Rect) Surface {
-	rendered := r.View(ctx.Palette)
+	rendered := r.render(ctx.Palette)
 	line := r.line(ctx.Palette)
-	rowWidth := ansi.StringWidth(rendered)
+	rowWidth := rendered.Size().W
 	lineWidth := ansi.StringWidth(line)
 	startX := 0
 	if bounds.W > lineWidth {
@@ -443,7 +459,7 @@ func (r ButtonRow) Render(ctx *Context, bounds Rect) Surface {
 			offset += buttonWidth + r.gap()
 		}
 	}
-	return SurfaceFromString(rendered).normalize(max(bounds.W, rowWidth), bounds.H)
+	return rendered.normalize(max(bounds.W, rowWidth), bounds.H)
 }
 
 func (r ButtonRow) line(palette theme.Palette) string {
