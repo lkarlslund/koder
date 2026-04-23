@@ -2216,6 +2216,41 @@ func TestUpdateLoadHidesSessionPicker(t *testing.T) {
 	}
 }
 
+func TestAppendingPromptPreservesRetainedTranscriptPrefix(t *testing.T) {
+	m := Model{
+		cfg:              testConfig(t),
+		palette:          theme.Default().Palette,
+		viewport:         newTranscriptViewport(80, 18),
+		renderCache:      &modelRenderCache{},
+		composer:         textarea.New(),
+		width:            80,
+		height:           24,
+		parts:            make(map[int64][]domain.Part),
+		expandedToolRuns: make(map[string]bool),
+		transcriptDirty:  true,
+	}
+
+	m.appendLocalUserPrompt("first", nil, nil)
+	retained := m.ensureRetainedTranscript()
+	items := retained.Items()
+	if len(items) != 1 {
+		t.Fatalf("expected one retained transcript item, got %d", len(items))
+	}
+	first := items[0].Element
+
+	m.appendLocalUserPrompt("second", nil, nil)
+	items = retained.Items()
+	if len(items) != 2 {
+		t.Fatalf("expected two retained transcript items, got %d", len(items))
+	}
+	if items[0].Element != first {
+		t.Fatal("expected appending a prompt to preserve the existing retained transcript element")
+	}
+	if m.transcriptDirty {
+		t.Fatal("expected transcript sync to clear the dirty flag after append")
+	}
+}
+
 func TestThemeCommandOpensFilterablePicker(t *testing.T) {
 	m := Model{
 		cfg:      config.Default(),

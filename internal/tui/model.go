@@ -289,6 +289,7 @@ type Model struct {
 	transcriptControls []ui.Control
 	transcriptCache    map[string]cachedTranscriptBlock
 	retainedTranscript *ui.RetainedTranscript
+	transcriptDirty    bool
 	renderCache        *modelRenderCache
 	expandedToolRuns   map[string]bool
 	composer           textarea.Model
@@ -420,6 +421,7 @@ func NewWithWorkdir(cfg config.Config, st *store.Store, a *agent.Engine, mode St
 		showReasoning:     cfg.UI.ShowReasoning,
 		showSystem:        cfg.UI.ShowSystem,
 		expandedToolRuns:  make(map[string]bool),
+		transcriptDirty:   true,
 		parts:             make(map[int64][]domain.Part),
 		status:            "Ready",
 		workdir:           workdir,
@@ -547,7 +549,7 @@ func (m Model) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 		m.stopBusy()
 		return m, ui.Batch(m.reloadDetailsCmd(), m.syncWindowTitleCmd())
 	case loadMsg:
-		m.invalidateBodyCache()
+		m.invalidateTranscript()
 		m = m.UpdateLoad(msg)
 		if m.debug != nil && m.currentSession.ID > 0 {
 			m.debug.RecordLifecycle(m.currentSession.ID, "session_reloaded", fmt.Sprintf("%d messages", len(m.messages)), map[string]string{"messages": strconv.Itoa(len(m.messages))})
@@ -560,7 +562,7 @@ func (m Model) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 		}
 		return m, m.syncWindowTitleCmd()
 	case agentsRefreshMsg:
-		m.invalidateBodyCache()
+		m.invalidateTranscript()
 		if msg.err != nil {
 			m.status = msg.err.Error()
 			m.stopBusy()
@@ -571,7 +573,7 @@ func (m Model) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 		m.status = "Refreshed project instructions"
 		return m, m.syncWindowTitleCmd()
 	case forkSessionMsg:
-		m.invalidateBodyCache()
+		m.invalidateTranscript()
 		if msg.err != nil {
 			m.status = msg.err.Error()
 			m.stopBusy()
@@ -582,7 +584,7 @@ func (m Model) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 		m.status = fmt.Sprintf("Forked session %d from %d", msg.forkedID, msg.sourceID)
 		return m, m.syncWindowTitleCmd()
 	case newSessionMsg:
-		m.invalidateBodyCache()
+		m.invalidateTranscript()
 		m.sessions = msg.sessions
 		m.currentSession = msg.session
 		m.messages = msg.messages
@@ -917,10 +919,12 @@ func (m *Model) handleMainWindowKey(msg ui.KeyMsg) (bool, ui.Cmd) {
 		return true, nil
 	case "alt+r":
 		m.showReasoning = !m.showReasoning
+		m.invalidateTranscript()
 		m.refreshViewport()
 		return true, nil
 	case "alt+p":
 		m.showSystem = !m.showSystem
+		m.invalidateTranscript()
 		m.refreshViewport()
 		return true, nil
 	case "alt+o":
@@ -1046,6 +1050,7 @@ func (m *Model) handleMouse(msg ui.MouseMsg) (ui.Model, ui.Cmd, bool) {
 				m.expandedToolRuns = make(map[string]bool)
 			}
 			m.expandedToolRuns[runID] = !m.expandedToolRuns[runID]
+			m.invalidateTranscript()
 			m.refreshViewportPreserve()
 			return m, nil, true
 		}
@@ -1235,7 +1240,7 @@ func (m *Model) resize() {
 	m.viewport.Width = bodyWidth
 	m.viewport.Height = bodyHeight
 	m.resizeLLMPreview()
-	m.invalidateBodyCache()
+	m.invalidateTranscript()
 }
 
 func (m *Model) renderHeader() string {
@@ -1681,6 +1686,11 @@ func (m *Model) ensureRetainedTranscript() *ui.RetainedTranscript {
 	return m.retainedTranscript
 }
 
+func (m *Model) invalidateTranscript() {
+	m.transcriptDirty = true
+	m.invalidateBodyCache()
+}
+
 func (m *Model) transcriptElement(runtime *ui.Runtime) ui.Element {
 	retained := m.syncRetainedTranscript()
 	if retained == nil {
@@ -1701,14 +1711,42 @@ func (m *Model) transcriptElement(runtime *ui.Runtime) ui.Element {
 
 func (m *Model) syncRetainedTranscript() *ui.RetainedTranscript {
 	retained := m.ensureRetainedTranscript()
-	retained.Reconcile(m.buildTranscriptItems())
-	if m.currentSession.ID == 0 && len(m.messages) == 0 && !m.cfg.HasUsableDefaultProvider() {
-		retained.Reconcile([]ui.TranscriptItem{{
-			Key:     "no-provider",
-			Element: ui.NewCachedElement(ui.Paragraph{Text: "No provider configured.\n\nType /connect to add one before sending prompts."}, 3),
-		}})
+	if m.transcriptDirty || len(retained.Items()) == 0 {
+		items := m.buildTranscriptItems()
+		if m.currentSession.ID == 0 && len(m.messages) == 0 && !m.cfg.HasUsableDefaultProvider() {
+			items = []ui.TranscriptItem{{
+				Key:     "no-provider",
+				Element: ui.NewCachedElement(ui.Paragraph{Text: "No provider configured.\n\nType /connect to add one before sending prompts."}, 3),
+			}}
+		}
+		m.syncRetainedTranscriptItems(retained, items)
+		m.transcriptDirty = false
 	}
 	return retained
+}
+
+func (m *Model) syncRetainedTranscriptItems(retained *ui.RetainedTranscript, items []ui.TranscriptItem) {
+	if retained == nil {
+		return
+	}
+	existing := retained.Items()
+	prefix := 0
+	for prefix < len(existing) && prefix < len(items) && existing[prefix].Key == items[prefix].Key {
+		prefix++
+	}
+	suffix := 0
+	for suffix < len(existing)-prefix && suffix < len(items)-prefix &&
+		existing[len(existing)-1-suffix].Key == items[len(items)-1-suffix].Key {
+		suffix++
+	}
+	removeEnd := len(existing) - suffix
+	for idx := removeEnd - 1; idx >= prefix; idx-- {
+		retained.Remove(idx)
+	}
+	insertEnd := len(items) - suffix
+	for idx := prefix; idx < insertEnd; idx++ {
+		retained.Insert(idx, items[idx])
+	}
 }
 
 func (m *Model) defaultTranscriptSeparator() string {
@@ -2514,6 +2552,7 @@ func (m Model) UpdateLoad(msg loadMsg) Model {
 		m.currentSession.ProjectChecksum != m.workspace.AgentsChecksum
 	m.transcriptCache = nil
 	m.ensureRetainedTranscript().Clear()
+	m.transcriptDirty = true
 	m.refreshViewport()
 	return m
 }
@@ -3080,6 +3119,7 @@ func (m *Model) appendLocalUserPrompt(prompt string, drafts []attachment.Draft, 
 	if m.debug != nil {
 		m.debug.RecordLifecycle(m.currentSession.ID, "prompt_submitted", prompt, map[string]string{"optimistic": "true"})
 	}
+	m.transcriptDirty = true
 	m.refreshViewport()
 }
 
@@ -3110,6 +3150,7 @@ func (m *Model) appendLocalAssistantError(err error) {
 	if m.debug != nil {
 		m.debug.RecordLifecycle(m.currentSession.ID, "ui_error_appended", err.Error(), nil)
 	}
+	m.transcriptDirty = true
 	m.refreshViewport()
 }
 
@@ -4052,6 +4093,7 @@ func (m *Model) handleConnectDialogKey(msg ui.KeyMsg) ui.Cmd {
 			return ui.Batch(m.loadModelsCmd(action.Draft.ProviderID, true), m.syncWindowTitleCmd())
 		}
 		m.status = fmt.Sprintf("Connected provider %s", action.Draft.ProviderID)
+		m.invalidateTranscript()
 		m.refreshViewport()
 		return m.syncWindowTitleCmd()
 	case dialogs.ProviderConnectActionCancel:
@@ -4076,6 +4118,7 @@ func (m *Model) handleDisconnectDialogKey(msg ui.KeyMsg) ui.Cmd {
 		}
 		m.closeDisconnectDialog()
 		m.status = fmt.Sprintf("Disconnected provider %s", action.ProviderID)
+		m.invalidateTranscript()
 		m.refreshViewport()
 		return m.syncWindowTitleCmd()
 	case dialogs.DisconnectDialogActionCancel:
@@ -4100,6 +4143,7 @@ func (m *Model) handleModelDialogKey(msg ui.KeyMsg) ui.Cmd {
 		}
 		m.closeModelDialog()
 		m.status = fmt.Sprintf("Selected model %s", action.ModelID)
+		m.invalidateTranscript()
 		m.refreshViewport()
 		return m.syncWindowTitleCmd()
 	case dialogs.ModelDialogActionCancel:
@@ -5258,6 +5302,7 @@ func (m *Model) setTheme(name string, save bool) error {
 	m.palette = selected.Palette
 	m.renderer = renderer
 	applyComposerTheme(&m.composer, selected.Palette)
+	m.invalidateTranscript()
 	m.refreshViewport()
 	if save {
 		if err := m.cfg.Save(); err != nil {
