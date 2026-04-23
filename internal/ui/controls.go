@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
-	tea "github.com/lkarlslund/koder/internal/ui/tea"
 
 	"github.com/lkarlslund/koder/internal/theme"
 )
@@ -502,7 +501,7 @@ func (r *ButtonRow) ActivateFocused() bool {
 	return true
 }
 
-func (r *ButtonRow) ActivateHotkey(msg tea.KeyMsg) bool {
+func (r *ButtonRow) ActivateHotkey(msg KeyMsg) bool {
 	if len(r.Buttons) == 0 {
 		return false
 	}
@@ -528,7 +527,7 @@ func (r *ButtonRow) ActivateHotkey(msg tea.KeyMsg) bool {
 	return false
 }
 
-func (r *ButtonRow) HotkeyIndex(msg tea.KeyMsg) (int, bool) {
+func (r *ButtonRow) HotkeyIndex(msg KeyMsg) (int, bool) {
 	if len(r.Buttons) == 0 || !msg.Alt {
 		return 0, false
 	}

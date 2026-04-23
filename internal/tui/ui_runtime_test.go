@@ -6,7 +6,7 @@ import (
 
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/theme"
-	tea "github.com/lkarlslund/koder/internal/ui/tea"
+	"github.com/lkarlslund/koder/internal/ui"
 	"github.com/lkarlslund/koder/internal/ui/textarea"
 )
 
@@ -73,7 +73,7 @@ func TestResumeClosesSessionDialogAndRestoresTyping(t *testing.T) {
 		t.Fatalf("expected focus to return to main window, got %q", got)
 	}
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("i")})
+	updated, cmd := m.Update(ui.KeyMsg{Type: ui.KeyRunes, Runes: []rune("i")})
 	next := asModelPtr(t, updated)
 	if got := next.composer.Value(); got != "i" {
 		t.Fatalf("expected typing to reach composer after resume, got %q", got)

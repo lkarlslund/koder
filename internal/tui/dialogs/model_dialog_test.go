@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/x/ansi"
-	tea "github.com/lkarlslund/koder/internal/ui/tea"
 
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/theme"
@@ -20,7 +19,7 @@ func renderModelDialog(dialog ModelDialog, width int, palette theme.Palette) str
 
 func TestModelDialogSelectsModel(t *testing.T) {
 	dialog := NewModelDialog("openai", []domain.Model{{ID: "gpt-5.4"}}, "gpt-5.4")
-	action := dialog.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	action := dialog.Update(ui.KeyMsg{Type: ui.KeyEnter})
 	if action.Kind != ModelDialogActionSelect || action.ModelID != "gpt-5.4" {
 		t.Fatalf("unexpected action: %#v", action)
 	}
@@ -28,9 +27,9 @@ func TestModelDialogSelectsModel(t *testing.T) {
 
 func TestModelDialogFiltersModels(t *testing.T) {
 	dialog := NewModelDialog("openai", []domain.Model{{ID: "gpt-5.4"}, {ID: "gpt-4.1-mini"}}, "")
-	dialog.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("m")})
-	dialog.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("i")})
-	dialog.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")})
+	dialog.Update(ui.KeyMsg{Type: ui.KeyRunes, Runes: []rune("m")})
+	dialog.Update(ui.KeyMsg{Type: ui.KeyRunes, Runes: []rune("i")})
+	dialog.Update(ui.KeyMsg{Type: ui.KeyRunes, Runes: []rune("n")})
 
 	if len(dialog.view) == 0 || dialog.view[0].ID != "gpt-4.1-mini" {
 		t.Fatalf("unexpected filtered models: %#v", dialog.view)
@@ -95,9 +94,9 @@ func TestModelDialogRenderPreservesLongModelNames(t *testing.T) {
 
 func TestModelDialogTabThenEnterCancels(t *testing.T) {
 	dialog := NewModelDialog("openai", []domain.Model{{ID: "gpt-5.4"}}, "gpt-5.4")
-	dialog.Update(tea.KeyMsg{Type: tea.KeyTab})
-	dialog.Update(tea.KeyMsg{Type: tea.KeyRight})
-	action := dialog.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	dialog.Update(ui.KeyMsg{Type: ui.KeyTab})
+	dialog.Update(ui.KeyMsg{Type: ui.KeyRight})
+	action := dialog.Update(ui.KeyMsg{Type: ui.KeyEnter})
 	if action.Kind != ModelDialogActionCancel {
 		t.Fatalf("expected button focus cancel, got %#v", action)
 	}
@@ -110,7 +109,7 @@ func TestModelDialogKeepsFullWindowNearListEnd(t *testing.T) {
 	}
 	dialog := NewModelDialog("openai", models, "")
 	for range 11 {
-		dialog.Update(tea.KeyMsg{Type: tea.KeyDown})
+		dialog.Update(ui.KeyMsg{Type: ui.KeyDown})
 	}
 
 	got := renderModelDialog(dialog, 84, theme.Resolve("tokyonight").Palette)

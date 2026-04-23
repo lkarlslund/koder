@@ -121,8 +121,8 @@ func splitLongWordPlain(word string, width int) []string {
 	}
 	parts := make([]string, 0, (len(word)/max(1, width))+1)
 	var (
-		b     strings.Builder
-		used  int
+		b    strings.Builder
+		used int
 	)
 	for _, r := range word {
 		rw := runewidth.RuneWidth(r)

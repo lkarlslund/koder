@@ -4,8 +4,6 @@ import (
 	"strconv"
 	"strings"
 
-	tea "github.com/lkarlslund/koder/internal/ui/tea"
-
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/theme"
 	. "github.com/lkarlslund/koder/internal/ui"
@@ -56,7 +54,7 @@ func NewModelDialog(providerID string, models []domain.Model, current string) Mo
 	return d
 }
 
-func (d *ModelDialog) Update(msg tea.KeyMsg) ModelDialogAction {
+func (d *ModelDialog) Update(msg KeyMsg) ModelDialogAction {
 	d.ensureButtons()
 	var action ModelDialogAction
 	d.buttons.Buttons[0].OnPress = func() { action = d.selectCurrent() }
@@ -102,7 +100,7 @@ func (d *ModelDialog) Update(msg tea.KeyMsg) ModelDialogAction {
 			d.refilter()
 		}
 	default:
-		if d.focus == pickerDialogFocusList && msg.Type == tea.KeyRunes {
+		if d.focus == pickerDialogFocusList && msg.Type == KeyRunes {
 			d.Query += msg.String()
 			d.refilter()
 		}

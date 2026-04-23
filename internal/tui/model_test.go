@@ -14,7 +14,6 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
-	tea "github.com/lkarlslund/koder/internal/ui/tea"
 	"github.com/muesli/termenv"
 
 	"github.com/lkarlslund/koder/internal/agent"
@@ -119,7 +118,7 @@ func TestFooterOnlyComposerUpdatesKeepBodyCache(t *testing.T) {
 		t.Fatal("expected composer area cache to be primed")
 	}
 
-	nextModel, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyLeft})
+	nextModel, _ := m.handleKey(ui.KeyMsg{Type: ui.KeyLeft})
 	next := nextModel.(*Model)
 
 	if !next.ensureRenderCache().bodyValid {
@@ -250,7 +249,7 @@ func TestSkillAutocompleteAcceptsSelection(t *testing.T) {
 		t.Fatal("expected skill menu")
 	}
 
-	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyTab})
+	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyTab})
 	next := updated.(*Model)
 	if cmd != nil {
 		t.Fatal("expected no async command")
@@ -297,7 +296,7 @@ func TestPermissionsCommandOpensWhileBusy(t *testing.T) {
 	m.composer.SetValue("/permissions")
 	m.updateComposerMenus()
 
-	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
 	next := updated.(*Model)
 	if cmd == nil {
 		t.Fatal("expected permissions command to execute while busy")
@@ -352,7 +351,7 @@ func TestEnterShowsOptimisticUserPromptBeforePromptStarts(t *testing.T) {
 	}
 	m.composer.SetValue("hello there")
 
-	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
 	next := updated.(*Model)
 	if cmd == nil {
 		t.Fatal("expected prompt kickoff command")
@@ -378,7 +377,7 @@ func testConfig(t *testing.T) config.Config {
 	return config.Default().WithStateDir(t.TempDir())
 }
 
-func asModelPtr(t *testing.T, model tea.Model) *Model {
+func asModelPtr(t *testing.T, model ui.Model) *Model {
 	t.Helper()
 	switch next := model.(type) {
 	case *Model:
@@ -513,7 +512,7 @@ func TestEnterSendsNormalPrompt(t *testing.T) {
 	}
 	m.composer.SetValue("hello")
 
-	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
 	next := updated.(*Model)
 	if cmd == nil {
 		t.Fatal("expected send command")
@@ -553,7 +552,7 @@ func TestAltEnterInsertsNewlineInsteadOfSending(t *testing.T) {
 	m.composer.SetValue("hello")
 	m.composer.SetCursor(len("hello"))
 
-	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter, Alt: true})
+	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEnter, Alt: true})
 	next := updated.(*Model)
 	if cmd != nil {
 		t.Fatal("expected no send command for modified enter")
@@ -578,7 +577,7 @@ func TestCtrlVPastesClipboardText(t *testing.T) {
 	m.composer.SetValue("hello ")
 	m.composer.SetCursor(len("hello "))
 
-	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlV})
+	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyCtrlV})
 	next := updated.(*Model)
 	if cmd == nil {
 		t.Fatal("expected title sync command after paste")
@@ -601,7 +600,7 @@ func TestCtrlVPastesClipboardImageAsAttachment(t *testing.T) {
 		},
 	}
 
-	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlV})
+	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyCtrlV})
 	next := updated.(*Model)
 	if cmd == nil {
 		t.Fatal("expected title sync command after image attach")
@@ -632,7 +631,7 @@ func TestCtrlVPastesAttachmentFilePath(t *testing.T) {
 		},
 	}
 
-	updated, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlV})
+	updated, _ := m.handleKey(ui.KeyMsg{Type: ui.KeyCtrlV})
 	next := updated.(*Model)
 	if len(next.draftAttachments) != 1 {
 		t.Fatalf("expected one draft attachment, got %#v", next.draftAttachments)
@@ -652,7 +651,7 @@ func TestBackspaceRemovesLastDraftAttachmentWhenComposerEmpty(t *testing.T) {
 		}},
 	}
 
-	updated, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyBackspace})
+	updated, _ := m.handleKey(ui.KeyMsg{Type: ui.KeyBackspace})
 	next := updated.(*Model)
 	if len(next.draftAttachments) != 0 {
 		t.Fatalf("expected attachment to be removed, got %#v", next.draftAttachments)
@@ -753,7 +752,7 @@ func TestCtrlYCopiesLatestAssistantMessage(t *testing.T) {
 		},
 	}
 
-	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlY})
+	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyCtrlY})
 	next := updated.(*Model)
 	if cmd == nil {
 		t.Fatal("expected title sync command after copy")
@@ -791,7 +790,7 @@ func TestEnterWhileBusyQueuesSteeringPrompt(t *testing.T) {
 	}
 	m.composer.SetValue("follow up")
 
-	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
 	next := updated.(*Model)
 	if cmd == nil {
 		t.Fatal("expected title sync command after queueing")
@@ -819,25 +818,25 @@ func TestUpDownBrowseComposerPromptHistory(t *testing.T) {
 	}
 	m.composer.SetValue("draft")
 
-	updated, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyUp})
+	updated, _ := m.handleKey(ui.KeyMsg{Type: ui.KeyUp})
 	next := updated.(*Model)
 	if got := next.composer.Value(); got != "second" {
 		t.Fatalf("expected newest history entry, got %q", got)
 	}
 
-	updated, _ = next.handleKey(tea.KeyMsg{Type: tea.KeyUp})
+	updated, _ = next.handleKey(ui.KeyMsg{Type: ui.KeyUp})
 	next = updated.(*Model)
 	if got := next.composer.Value(); got != "first" {
 		t.Fatalf("expected older history entry, got %q", got)
 	}
 
-	updated, _ = next.handleKey(tea.KeyMsg{Type: tea.KeyDown})
+	updated, _ = next.handleKey(ui.KeyMsg{Type: ui.KeyDown})
 	next = updated.(*Model)
 	if got := next.composer.Value(); got != "second" {
 		t.Fatalf("expected newer history entry, got %q", got)
 	}
 
-	updated, _ = next.handleKey(tea.KeyMsg{Type: tea.KeyDown})
+	updated, _ = next.handleKey(ui.KeyMsg{Type: ui.KeyDown})
 	next = updated.(*Model)
 	if got := next.composer.Value(); got != "draft" {
 		t.Fatalf("expected draft restored after newest history entry, got %q", got)
@@ -856,7 +855,7 @@ func TestCtrlROpensComposerHistoryMenuAndAcceptsSelection(t *testing.T) {
 	}
 	m.composer.SetValue("alpha")
 
-	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlR})
+	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyCtrlR})
 	next := updated.(*Model)
 	if cmd == nil {
 		t.Fatal("expected title sync command after opening history search")
@@ -871,13 +870,13 @@ func TestCtrlROpensComposerHistoryMenuAndAcceptsSelection(t *testing.T) {
 		t.Fatalf("expected history menu in footer, got %q", got)
 	}
 
-	updated, _ = next.handleKey(tea.KeyMsg{Type: tea.KeyCtrlR})
+	updated, _ = next.handleKey(ui.KeyMsg{Type: ui.KeyCtrlR})
 	next = updated.(*Model)
 	if got := next.filteredComposerHistory(next.composerHistory.SearchQuery)[next.composerHistory.SearchIndex]; got != "alpha one" {
 		t.Fatalf("expected ctrl-r to move to earlier matching history entry, got %q", got)
 	}
 
-	updated, cmd = next.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd = next.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
 	next = updated.(*Model)
 	if cmd == nil {
 		t.Fatal("expected title sync command after accepting history selection")
@@ -901,9 +900,9 @@ func TestComposerHistoryMenuFiltersWithoutMutatingComposer(t *testing.T) {
 	}
 	m.composer.SetValue("")
 
-	updated, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlR})
+	updated, _ := m.handleKey(ui.KeyMsg{Type: ui.KeyCtrlR})
 	next := updated.(*Model)
-	updated, _ = next.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("status")})
+	updated, _ = next.handleKey(ui.KeyMsg{Type: ui.KeyRunes, Runes: []rune("status")})
 	next = updated.(*Model)
 
 	if !next.hasComposerHistoryMenu() {
@@ -942,7 +941,7 @@ func TestTabWhileBusyQueuesSteeringPrompt(t *testing.T) {
 	}
 	m.composer.SetValue("nudge the plan")
 
-	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyTab})
+	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyTab})
 	next := updated.(*Model)
 	if cmd == nil {
 		t.Fatal("expected title sync command after steering queue")
@@ -976,7 +975,7 @@ func TestCtrlGQueuesContinueWhileBusy(t *testing.T) {
 		},
 	}
 
-	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlG})
+	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyCtrlG})
 	next := updated.(*Model)
 	if cmd == nil {
 		t.Fatal("expected title sync command after queueing continue")
@@ -1005,7 +1004,7 @@ func TestCtrlGStartsContinueWhenIdle(t *testing.T) {
 		currentSession: domain.Session{ID: 9, ProviderID: "openai", ModelID: "gpt-5.4"},
 	}
 
-	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlG})
+	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyCtrlG})
 	next := updated.(*Model)
 	if cmd == nil {
 		t.Fatal("expected continue command")
@@ -1066,7 +1065,7 @@ func TestAltUpRestoresQueuedPromptToComposer(t *testing.T) {
 		},
 	}
 
-	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyUp, Alt: true})
+	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyUp, Alt: true})
 	next := updated.(*Model)
 
 	if cmd == nil {
@@ -1091,7 +1090,7 @@ func TestAltUpSwapsQueuedPromptWithExistingDraft(t *testing.T) {
 	}
 	m.setComposerValue("current draft")
 
-	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyUp, Alt: true})
+	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyUp, Alt: true})
 	next := updated.(*Model)
 
 	if cmd == nil {
@@ -1121,7 +1120,7 @@ func TestAltUpClearsQueuedContinue(t *testing.T) {
 	}
 	m.setComposerValue("keep draft")
 
-	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyUp, Alt: true})
+	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyUp, Alt: true})
 	next := updated.(*Model)
 
 	if cmd == nil {
@@ -1336,7 +1335,7 @@ func TestEnterWithoutProviderOpensConnectDialog(t *testing.T) {
 	}
 	m.composer.SetValue("hello")
 
-	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
 	next := updated.(*Model)
 	if cmd != nil {
 		t.Fatal("expected no async command when provider is missing")
@@ -1356,7 +1355,7 @@ func TestExactSlashCommandDoesNotConsumeEnterForAutocomplete(t *testing.T) {
 	m.composer.SetValue("/new")
 	m.updateComposerMenus()
 
-	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
 	next := updated.(*Model)
 	if cmd == nil {
 		t.Fatal("expected enter to continue to normal command handling")
@@ -1373,7 +1372,7 @@ func TestExactSlashCommandWithArgsConsumesEnterForAutocomplete(t *testing.T) {
 	m.composer.SetValue("/mouse")
 	m.updateComposerMenus()
 
-	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
 	next := updated.(*Model)
 	if cmd != nil {
 		t.Fatal("expected no command while autocompleting needs-args slash command")
@@ -1393,7 +1392,7 @@ func TestSlashSelectionExecutesNoArgsCommandDirectly(t *testing.T) {
 	m.composer.SetValue("/per")
 	m.updateComposerMenus()
 
-	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
 	next := updated.(*Model)
 	if cmd == nil {
 		t.Fatal("expected direct command execution")
@@ -1499,7 +1498,7 @@ func TestForkCommandCreatesForkedSession(t *testing.T) {
 	}
 	m.composer.SetValue("/fork")
 
-	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
 	next := updated.(*Model)
 	if cmd == nil {
 		t.Fatal("expected fork command")
@@ -1535,7 +1534,7 @@ func TestToolLikeSlashCommandIsRejectedLocally(t *testing.T) {
 	}
 	m.composer.SetValue("/read README.md")
 
-	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
 	next := updated.(*Model)
 	if cmd != nil {
 		t.Fatal("expected no command for hidden tool-like slash input")
@@ -1554,7 +1553,7 @@ func TestApprovalPromptConsumesEnter(t *testing.T) {
 		approvals: []store.Approval{{ID: 7}},
 	}
 
-	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
 	next := updated.(*Model)
 	if cmd == nil {
 		t.Fatal("expected approval command")
@@ -1572,7 +1571,7 @@ func TestApprovalPromptOpensPermissionsPicker(t *testing.T) {
 	}
 	m.approvalButtons.Index = 1
 
-	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
 	next := updated.(*Model)
 	if cmd == nil {
 		t.Fatal("expected sync title command")
@@ -1598,7 +1597,7 @@ func TestApprovalPromptAltHotkeys(t *testing.T) {
 		approvals: []store.Approval{{ID: 7, Tool: domain.ToolKindBash, Command: `{"command":"git status"}`}},
 	}
 
-	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Alt: true, Runes: []rune("p")})
+	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyRunes, Alt: true, Runes: []rune("p")})
 	next := updated.(*Model)
 	if cmd == nil {
 		t.Fatal("expected sync title command")
@@ -1612,7 +1611,7 @@ func TestApprovalPromptAltHotkeys(t *testing.T) {
 		composer:  textarea.New(),
 		approvals: []store.Approval{{ID: 7, Tool: domain.ToolKindBash, Command: `{"command":"git status"}`}},
 	}
-	updated, cmd = m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Alt: true, Runes: []rune("a")})
+	updated, cmd = m.handleKey(ui.KeyMsg{Type: ui.KeyRunes, Alt: true, Runes: []rune("a")})
 	next = updated.(*Model)
 	if cmd == nil {
 		t.Fatal("expected alt+a to trigger approval command")
@@ -1626,7 +1625,7 @@ func TestApprovalPromptAltHotkeys(t *testing.T) {
 		composer:  textarea.New(),
 		approvals: []store.Approval{{ID: 7, Tool: domain.ToolKindBash, Command: `{"command":"git status"}`}},
 	}
-	updated, cmd = m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Alt: true, Runes: []rune("d")})
+	updated, cmd = m.handleKey(ui.KeyMsg{Type: ui.KeyRunes, Alt: true, Runes: []rune("d")})
 	next = updated.(*Model)
 	if cmd == nil {
 		t.Fatal("expected alt+d to trigger deny command")
@@ -1655,7 +1654,7 @@ func TestAltOOpensNextLLMRequestPreview(t *testing.T) {
 	}
 	m.composer.SetValue("draft question")
 
-	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Alt: true, Runes: []rune("o")})
+	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyRunes, Alt: true, Runes: []rune("o")})
 	next := updated.(*Model)
 	if cmd == nil {
 		t.Fatal("expected preview command")
@@ -1684,7 +1683,7 @@ func TestAltOWithoutDraftShowsStatus(t *testing.T) {
 		composer: textarea.New(),
 	}
 
-	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Alt: true, Runes: []rune("o")})
+	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyRunes, Alt: true, Runes: []rune("o")})
 	next := updated.(*Model)
 	if cmd == nil {
 		t.Fatal("expected sync title command")
@@ -1716,7 +1715,7 @@ func TestLLMPreviewScrollUsesElementOffsetState(t *testing.T) {
 	m.llmPreviewHeight = 3
 	m.llmPreviewWidth = 20
 
-	if !m.handleLLMPreviewKey(tea.KeyMsg{Type: tea.KeyDown}) {
+	if !m.handleLLMPreviewKey(ui.KeyMsg{Type: ui.KeyDown}) {
 		t.Fatal("expected preview down key to be handled")
 	}
 	if m.llmPreviewYOffset != 1 {
@@ -1738,7 +1737,7 @@ func TestQuitCommandQuits(t *testing.T) {
 	}
 	m.composer.SetValue("/quit")
 
-	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
 	next := updated.(*Model)
 	if cmd == nil {
 		t.Fatal("expected quit command")
@@ -1754,7 +1753,7 @@ func TestMouseOnCommandEnablesMouseCapture(t *testing.T) {
 	}
 	m.composer.SetValue("/mouse on")
 
-	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
 	next := updated.(*Model)
 	if cmd == nil {
 		t.Fatal("expected mouse enable command")
@@ -1774,7 +1773,7 @@ func TestMouseOffCommandDisablesMouseCapture(t *testing.T) {
 	}
 	m.composer.SetValue("/mouse off")
 
-	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
 	next := updated.(*Model)
 	if cmd == nil {
 		t.Fatal("expected mouse disable command")
@@ -1803,7 +1802,7 @@ func TestInitEnablesMouseWhenConfigured(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("expected init command")
 	}
-	if _, ok := cmd().(tea.BatchMsg); !ok {
+	if _, ok := cmd().(ui.BatchMsg); !ok {
 		t.Fatalf("expected batched init command when mouse is enabled, got %T", cmd())
 	}
 }
@@ -1813,7 +1812,7 @@ func TestCtrlCUsesQuitPath(t *testing.T) {
 		composer: textarea.New(),
 	}
 
-	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlC})
+	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyCtrlC})
 	next := updated.(*Model)
 	if cmd == nil {
 		t.Fatal("expected quit command")
@@ -1834,7 +1833,7 @@ func TestEscInterruptRequiresDoublePress(t *testing.T) {
 		activeOpCancel: func() {},
 	}
 
-	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEsc})
 	next := updated.(*Model)
 	if cmd == nil {
 		t.Fatal("expected title sync command after first esc")
@@ -1860,7 +1859,7 @@ func TestEscInterruptCancelsActiveOperation(t *testing.T) {
 		interruptArmedAt: time.Now(),
 	}
 
-	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEsc})
 	next := updated.(*Model)
 	if cmd == nil {
 		t.Fatal("expected title sync command after second esc")
@@ -1893,7 +1892,7 @@ func TestSessionPickerEscapeCreatesNewSession(t *testing.T) {
 		sessions:      []domain.Session{{ID: 1}},
 	}
 
-	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEsc})
 	next := updated.(*Model)
 	if cmd == nil {
 		t.Fatal("expected new session command")
@@ -2116,7 +2115,7 @@ func TestSelectingSessionKeepsComposerBlinkStopped(t *testing.T) {
 	}
 
 	m.openSessionPicker()
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.Update(ui.KeyMsg{Type: ui.KeyEnter})
 	if cmd == nil {
 		t.Fatal("expected resume command")
 	}
@@ -2216,7 +2215,7 @@ func TestThemeCommandOpensFilterablePicker(t *testing.T) {
 	}
 	m.composer.SetValue("/theme")
 
-	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
 	next := updated.(*Model)
 	if cmd != nil {
 		t.Fatal("expected no async command for theme picker")
@@ -2242,9 +2241,9 @@ func TestThemePickerFiltersAndPreviewsSelection(t *testing.T) {
 	}
 	m.openThemePicker()
 
-	updated, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("g")})
+	updated, _ := m.handleKey(ui.KeyMsg{Type: ui.KeyRunes, Runes: []rune("g")})
 	next := updated.(*Model)
-	updated, _ = next.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
+	updated, _ = next.handleKey(ui.KeyMsg{Type: ui.KeyRunes, Runes: []rune("r")})
 	next = updated.(*Model)
 
 	if len(next.picker.dialog.Items) == 0 {
@@ -2273,7 +2272,7 @@ func TestThemePickerEscapeRestoresOriginalTheme(t *testing.T) {
 		t.Fatal("expected theme preview to change current theme before cancel")
 	}
 
-	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEsc})
 	next := updated.(*Model)
 	if cmd != nil {
 		t.Fatal("expected no async command on theme picker cancel")
@@ -2307,7 +2306,7 @@ func TestThemePickerEnterSavesTheme(t *testing.T) {
 	m.openThemePicker()
 	m.movePicker(1)
 
-	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
 	next := updated.(*Model)
 	if cmd != nil {
 		t.Fatal("expected no async command on theme apply")
@@ -2330,7 +2329,7 @@ func TestPrefsCommandOpensPreferencesDialog(t *testing.T) {
 	}
 	m.composer.SetValue("/preferences")
 
-	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
 	next := updated.(*Model)
 	if cmd == nil {
 		t.Fatal("expected spinner tick command when opening preferences")
@@ -2347,7 +2346,7 @@ func TestToolsCommandOpensToolsDialog(t *testing.T) {
 	}
 	m.composer.SetValue("/tools")
 
-	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
 	next := updated.(*Model)
 	if cmd == nil {
 		t.Fatal("expected title sync command when opening tools dialog")
@@ -2379,7 +2378,7 @@ func TestConnectCommandOpensConnectDialog(t *testing.T) {
 	}
 	m.composer.SetValue("/connect")
 
-	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
 	next := updated.(*Model)
 	if cmd == nil {
 		t.Fatal("expected title sync command when opening connect dialog")
@@ -2400,7 +2399,7 @@ func TestDisconnectCommandOpensDisconnectDialog(t *testing.T) {
 	}
 	m.composer.SetValue("/disconnect")
 
-	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
 	next := updated.(*Model)
 	if cmd == nil {
 		t.Fatal("expected title sync command when opening disconnect dialog")
@@ -2417,7 +2416,7 @@ func TestDisconnectCommandWithoutProvidersShowsStatus(t *testing.T) {
 	}
 	m.composer.SetValue("/disconnect")
 
-	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
 	next := updated.(*Model)
 	if cmd == nil {
 		t.Fatal("expected title sync command")
@@ -2434,7 +2433,7 @@ func TestModelCommandWithoutProviderShowsStatus(t *testing.T) {
 	}
 	m.composer.SetValue("/model")
 
-	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
 	next := updated.(*Model)
 	if cmd == nil {
 		t.Fatal("expected title sync command")
@@ -2464,7 +2463,7 @@ func TestModelCommandLoadsModelsForActiveProvider(t *testing.T) {
 	}
 	m.composer.SetValue("/model")
 
-	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
 	next := updated.(*Model)
 	if cmd == nil {
 		t.Fatal("expected async model load command")
@@ -2689,13 +2688,13 @@ func TestPreferencesDialogCancelRestoresOriginalUI(t *testing.T) {
 	}
 	m.openPreferencesDialog()
 
-	updated, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyRight})
+	updated, _ := m.handleKey(ui.KeyMsg{Type: ui.KeyRight})
 	next := updated.(*Model)
 	if next.cfg.UI.Theme == "flexoki" {
 		t.Fatal("expected preferences preview to change current theme")
 	}
 
-	updated, cmd := next.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	updated, cmd := next.handleKey(ui.KeyMsg{Type: ui.KeyEsc})
 	next = updated.(*Model)
 	if cmd == nil {
 		t.Fatal("expected title sync command when cancelling preferences")
@@ -2729,11 +2728,11 @@ func TestPreferencesDialogApplySavesUIConfig(t *testing.T) {
 	}
 	m.openPreferencesDialog()
 
-	updated, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyRight})
+	updated, _ := m.handleKey(ui.KeyMsg{Type: ui.KeyRight})
 	next := updated.(*Model)
-	updated, _ = next.handleKey(tea.KeyMsg{Type: tea.KeyTab})
+	updated, _ = next.handleKey(ui.KeyMsg{Type: ui.KeyTab})
 	next = updated.(*Model)
-	updated, _ = next.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, _ = next.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
 	next = updated.(*Model)
 
 	if next.hasPreferencesDialog() {
@@ -2864,7 +2863,7 @@ func TestAltHTogglesHelpDialog(t *testing.T) {
 		height:   40,
 	}
 
-	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Alt: true, Runes: []rune("h")})
+	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyRunes, Alt: true, Runes: []rune("h")})
 	next := updated.(*Model)
 	if cmd == nil {
 		t.Fatal("expected sync command when opening help dialog")
@@ -2877,7 +2876,7 @@ func TestAltHTogglesHelpDialog(t *testing.T) {
 		t.Fatalf("expected help dialog content, got %q", view)
 	}
 
-	updated, cmd = next.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Alt: true, Runes: []rune("h")})
+	updated, cmd = next.handleKey(ui.KeyMsg{Type: ui.KeyRunes, Alt: true, Runes: []rune("h")})
 	next = updated.(*Model)
 	if cmd == nil {
 		t.Fatal("expected sync command when closing help dialog")
@@ -2911,9 +2910,9 @@ func TestMouseClickOnHelpModalCloseIndicatorClosesModal(t *testing.T) {
 		t.Fatalf("failed to find help modal close indicator in %q", view)
 	}
 
-	updated, cmd := m.Update(tea.MouseMsg{
-		Action: tea.MouseActionPress,
-		Button: tea.MouseButtonLeft,
+	updated, cmd := m.Update(ui.MouseMsg{
+		Action: ui.MouseActionPress,
+		Button: ui.MouseButtonLeft,
 		X:      closeX,
 		Y:      closeY,
 	})
@@ -2955,9 +2954,9 @@ func TestMouseClickOnModelDialogCloseIndicatorCancelsDialog(t *testing.T) {
 		t.Fatalf("failed to find model dialog close indicator in %q", view)
 	}
 
-	updated, cmd := nextModel.Update(tea.MouseMsg{
-		Action: tea.MouseActionPress,
-		Button: tea.MouseButtonLeft,
+	updated, cmd := nextModel.Update(ui.MouseMsg{
+		Action: ui.MouseActionPress,
+		Button: ui.MouseButtonLeft,
 		X:      closeX,
 		Y:      closeY,
 	})
@@ -2978,7 +2977,7 @@ func TestAltPTogglesSystemOutput(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Alt: true, Runes: []rune("p")})
+	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyRunes, Alt: true, Runes: []rune("p")})
 	next := updated.(*Model)
 	if cmd != nil {
 		t.Fatalf("expected no command, got %v", cmd)
@@ -2987,7 +2986,7 @@ func TestAltPTogglesSystemOutput(t *testing.T) {
 		t.Fatal("expected alt+p to enable system output")
 	}
 
-	updated, cmd = next.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Alt: true, Runes: []rune("p")})
+	updated, cmd = next.handleKey(ui.KeyMsg{Type: ui.KeyRunes, Alt: true, Runes: []rune("p")})
 	next = updated.(*Model)
 	if cmd != nil {
 		t.Fatalf("expected no command, got %v", cmd)
@@ -3004,7 +3003,7 @@ func TestAltRTogglesReasoningOutput(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	updated, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Alt: true, Runes: []rune("r")})
+	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyRunes, Alt: true, Runes: []rune("r")})
 	next := updated.(*Model)
 	if cmd != nil {
 		t.Fatalf("expected no command, got %v", cmd)
@@ -3013,7 +3012,7 @@ func TestAltRTogglesReasoningOutput(t *testing.T) {
 		t.Fatal("expected alt+r to enable reasoning output")
 	}
 
-	updated, cmd = next.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Alt: true, Runes: []rune("r")})
+	updated, cmd = next.handleKey(ui.KeyMsg{Type: ui.KeyRunes, Alt: true, Runes: []rune("r")})
 	next = updated.(*Model)
 	if cmd != nil {
 		t.Fatalf("expected no command, got %v", cmd)
@@ -3658,9 +3657,9 @@ func TestMouseWheelScrollsViewport(t *testing.T) {
 		"line 8",
 	}, "\n"))
 
-	updated, cmd := m.Update(tea.MouseMsg{
-		Action: tea.MouseActionPress,
-		Button: tea.MouseButtonWheelDown,
+	updated, cmd := m.Update(ui.MouseMsg{
+		Action: ui.MouseActionPress,
+		Button: ui.MouseButtonWheelDown,
 	})
 	next := updated.(Model)
 	if cmd != nil {
@@ -3697,9 +3696,9 @@ func TestMouseClickTogglesToolRunExpansion(t *testing.T) {
 		t.Fatalf("expected expand indicator, got %q", m.viewport.View())
 	}
 
-	updated, cmd := m.Update(tea.MouseMsg{
-		Action: tea.MouseActionPress,
-		Button: tea.MouseButtonLeft,
+	updated, cmd := m.Update(ui.MouseMsg{
+		Action: ui.MouseActionPress,
+		Button: ui.MouseButtonLeft,
 		X:      2,
 		Y:      0,
 	})
@@ -3714,9 +3713,9 @@ func TestMouseClickTogglesToolRunExpansion(t *testing.T) {
 		t.Fatalf("expected collapse indicator, got %q", next.viewport.View())
 	}
 
-	updated, _ = next.Update(tea.MouseMsg{
-		Action: tea.MouseActionPress,
-		Button: tea.MouseButtonLeft,
+	updated, _ = next.Update(ui.MouseMsg{
+		Action: ui.MouseActionPress,
+		Button: ui.MouseButtonLeft,
 		X:      2,
 		Y:      0,
 	})
@@ -3853,9 +3852,9 @@ func TestMouseClickOnApprovalPromptPermissionsOpensPicker(t *testing.T) {
 	}
 
 	startY := m.height - m.footerHeight()
-	updated, cmd := m.Update(tea.MouseMsg{
-		Action: tea.MouseActionPress,
-		Button: tea.MouseButtonLeft,
+	updated, cmd := m.Update(ui.MouseMsg{
+		Action: ui.MouseActionPress,
+		Button: ui.MouseButtonLeft,
 		X:      buttonX,
 		Y:      startY + buttonLine,
 	})
@@ -3913,9 +3912,9 @@ func TestEventMsgReloadsTranscriptBeforeTurnCompletes(t *testing.T) {
 		t.Fatal("expected reload command")
 	}
 	msgAny := cmd()
-	batch, ok := msgAny.(tea.BatchMsg)
+	batch, ok := msgAny.(ui.BatchMsg)
 	if !ok {
-		t.Fatalf("expected tea.BatchMsg, got %T", msgAny)
+		t.Fatalf("expected ui.BatchMsg, got %T", msgAny)
 	}
 	var load loadMsg
 	found := false

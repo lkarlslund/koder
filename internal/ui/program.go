@@ -1,4 +1,4 @@
-package tea
+package ui
 
 import (
 	"fmt"
@@ -156,11 +156,7 @@ func (p *Program) runCmd(cmd Cmd, out chan<- Msg) {
 
 func (p *Program) render(out io.Writer) error {
 	frame := ""
-	surfaceModel, ok := p.model.(SurfaceModel)
-	if !ok {
-		return nil
-	}
-	surface := surfaceModel.ViewSurface()
+	surface := p.model.ViewSurface()
 	if !p.didRender {
 		frame = renderFrameSurface(surface)
 		p.didRender = true
@@ -199,7 +195,7 @@ func renderFrameSurface(surface SurfaceView) string {
 	}
 	for idx := 0; idx < height; idx++ {
 		fmt.Fprintf(&buf, "\x1b[%d;1H", idx+1)
-		buf.WriteString(serializeSurfaceRow(surface, idx))
+		buf.WriteString(serializeSurfaceViewRow(surface, idx))
 	}
 	return buf.String()
 }
@@ -245,7 +241,7 @@ func diffFrameSurface(previous, current SurfaceView) string {
 		}
 		fmt.Fprintf(&buf, "\x1b[%d;1H", idx+1)
 		if current != nil && idx < current.SurfaceHeight() {
-			buf.WriteString(serializeSurfaceRow(current, idx))
+			buf.WriteString(serializeSurfaceViewRow(current, idx))
 		}
 		buf.WriteString("\x1b[K")
 	}
@@ -277,14 +273,14 @@ func surfaceCellsEqual(previous, current SurfaceView, x, y int) bool {
 	return surfaceCellText(previous, x, y) == surfaceCellText(current, x, y) &&
 		surfaceCellWidth(previous, x, y) == surfaceCellWidth(current, x, y) &&
 		surfaceCellContinuation(previous, x, y) == surfaceCellContinuation(current, x, y) &&
-		surfaceCellFG(previous, x, y) == surfaceCellFG(current, x, y) &&
-		surfaceCellBG(previous, x, y) == surfaceCellBG(current, x, y) &&
+		surfaceCellFGState(previous, x, y) == surfaceCellFGState(current, x, y) &&
+		surfaceCellBGState(previous, x, y) == surfaceCellBGState(current, x, y) &&
 		surfaceCellBold(previous, x, y) == surfaceCellBold(current, x, y) &&
 		surfaceCellItalic(previous, x, y) == surfaceCellItalic(current, x, y) &&
 		surfaceCellUnderline(previous, x, y) == surfaceCellUnderline(current, x, y)
 }
 
-func serializeSurfaceRow(surface SurfaceView, y int) string {
+func serializeSurfaceViewRow(surface SurfaceView, y int) string {
 	if surface == nil || y < 0 || y >= surface.SurfaceHeight() {
 		return ""
 	}
@@ -303,8 +299,8 @@ func serializeSurfaceRow(surface SurfaceView, y int) string {
 			continue
 		}
 		style := styleState{
-			fg:        surfaceCellFG(surface, x, y),
-			bg:        surfaceCellBG(surface, x, y),
+			fg:        surfaceCellFGState(surface, x, y),
+			bg:        surfaceCellBGState(surface, x, y),
 			bold:      surfaceCellBold(surface, x, y),
 			italic:    surfaceCellItalic(surface, x, y),
 			underline: surfaceCellUnderline(surface, x, y),
@@ -353,16 +349,14 @@ func applyStyle(style styleState, text string) string {
 		params = append(params, "4")
 	}
 	if style.fg.valid {
-		params = append(params,
-			"38", "2",
+		params = append(params, "38", "2",
 			strconv.Itoa(int(style.fg.r)),
 			strconv.Itoa(int(style.fg.g)),
 			strconv.Itoa(int(style.fg.b)),
 		)
 	}
 	if style.bg.valid {
-		params = append(params,
-			"48", "2",
+		params = append(params, "48", "2",
 			strconv.Itoa(int(style.bg.r)),
 			strconv.Itoa(int(style.bg.g)),
 			strconv.Itoa(int(style.bg.b)),
@@ -395,7 +389,7 @@ func surfaceCellContinuation(surface SurfaceView, x, y int) bool {
 	return surface.SurfaceCellContinuation(x, y)
 }
 
-func surfaceCellFG(surface SurfaceView, x, y int) rgbState {
+func surfaceCellFGState(surface SurfaceView, x, y int) rgbState {
 	if surface == nil || y < 0 || y >= surface.SurfaceHeight() || x < 0 || x >= surface.SurfaceWidth() {
 		return rgbState{}
 	}
@@ -403,7 +397,7 @@ func surfaceCellFG(surface SurfaceView, x, y int) rgbState {
 	return rgbState{r: r, g: g, b: b, valid: ok}
 }
 
-func surfaceCellBG(surface SurfaceView, x, y int) rgbState {
+func surfaceCellBGState(surface SurfaceView, x, y int) rgbState {
 	if surface == nil || y < 0 || y >= surface.SurfaceHeight() || x < 0 || x >= surface.SurfaceWidth() {
 		return rgbState{}
 	}

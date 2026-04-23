@@ -4,8 +4,6 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/lkarlslund/koder/internal/ui/tea"
-
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/theme"
 	"github.com/lkarlslund/koder/internal/ui"
@@ -18,7 +16,7 @@ func renderPreferencesDialog(dialog PreferencesDialog, width int, palette theme.
 func TestPreferencesDialogThemeAndToggleEmitDraftChanges(t *testing.T) {
 	dialog := NewPreferencesDialog(config.Default().UI, []string{"tokyonight", "gruvbox"})
 
-	action := dialog.Update(tea.KeyMsg{Type: tea.KeyRight})
+	action := dialog.Update(ui.KeyMsg{Type: ui.KeyRight})
 	if action.Kind != PreferencesActionChanged {
 		t.Fatalf("expected draft change action, got %#v", action)
 	}
@@ -26,8 +24,8 @@ func TestPreferencesDialogThemeAndToggleEmitDraftChanges(t *testing.T) {
 		t.Fatalf("expected theme to advance, got %q", action.UI.Theme)
 	}
 
-	dialog.Update(tea.KeyMsg{Type: tea.KeyDown})
-	action = dialog.Update(tea.KeyMsg{Type: tea.KeyRight})
+	dialog.Update(ui.KeyMsg{Type: ui.KeyDown})
+	action = dialog.Update(ui.KeyMsg{Type: ui.KeyRight})
 	if action.Kind != PreferencesActionChanged {
 		t.Fatalf("expected spinner change action, got %#v", action)
 	}
@@ -35,8 +33,8 @@ func TestPreferencesDialogThemeAndToggleEmitDraftChanges(t *testing.T) {
 		t.Fatalf("expected spinner to advance, got %#v", action.UI)
 	}
 
-	dialog.Update(tea.KeyMsg{Type: tea.KeyDown})
-	action = dialog.Update(tea.KeyMsg{Type: tea.KeySpace})
+	dialog.Update(ui.KeyMsg{Type: ui.KeyDown})
+	action = dialog.Update(ui.KeyMsg{Type: ui.KeySpace})
 	if action.Kind != PreferencesActionChanged {
 		t.Fatalf("expected toggle change action, got %#v", action)
 	}
@@ -48,7 +46,7 @@ func TestPreferencesDialogThemeAndToggleEmitDraftChanges(t *testing.T) {
 	dialog.tabList.Active = 1
 	dialog.focus = preferencesFocusFields
 	dialog.fieldIndex = 0
-	action = dialog.Update(tea.KeyMsg{Type: tea.KeySpace})
+	action = dialog.Update(ui.KeyMsg{Type: ui.KeySpace})
 	if action.Kind != PreferencesActionChanged {
 		t.Fatalf("expected cursor blink toggle change action, got %#v", action)
 	}
@@ -57,7 +55,7 @@ func TestPreferencesDialogThemeAndToggleEmitDraftChanges(t *testing.T) {
 	}
 
 	dialog.fieldIndex = 2
-	action = dialog.Update(tea.KeyMsg{Type: tea.KeySpace})
+	action = dialog.Update(ui.KeyMsg{Type: ui.KeySpace})
 	if action.Kind != PreferencesActionChanged {
 		t.Fatalf("expected system toggle change action, got %#v", action)
 	}
@@ -69,9 +67,9 @@ func TestPreferencesDialogThemeAndToggleEmitDraftChanges(t *testing.T) {
 func TestPreferencesDialogCancelReturnsOriginalUI(t *testing.T) {
 	original := config.Default().UI
 	dialog := NewPreferencesDialog(original, []string{"tokyonight", "gruvbox"})
-	dialog.Update(tea.KeyMsg{Type: tea.KeyRight})
+	dialog.Update(ui.KeyMsg{Type: ui.KeyRight})
 
-	action := dialog.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	action := dialog.Update(ui.KeyMsg{Type: ui.KeyEsc})
 	if action.Kind != PreferencesActionCancel {
 		t.Fatalf("expected cancel action, got %#v", action)
 	}
@@ -90,8 +88,8 @@ func TestPreferencesDialogRenderShowsTabsAndButtons(t *testing.T) {
 		}
 	}
 
-	dialog.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
-	dialog.Update(tea.KeyMsg{Type: tea.KeyDown})
+	dialog.Update(ui.KeyMsg{Type: ui.KeyShiftTab})
+	dialog.Update(ui.KeyMsg{Type: ui.KeyDown})
 	view = renderPreferencesDialog(dialog, 84, theme.Default().Palette)
 	for _, needle := range []string{"Cursor Blink", "System"} {
 		if !strings.Contains(view, needle) {

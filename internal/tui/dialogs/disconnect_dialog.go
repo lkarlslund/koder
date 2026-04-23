@@ -5,8 +5,6 @@ import (
 	"strconv"
 	"strings"
 
-	tea "github.com/lkarlslund/koder/internal/ui/tea"
-
 	"github.com/lkarlslund/koder/internal/theme"
 	. "github.com/lkarlslund/koder/internal/ui"
 )
@@ -53,7 +51,7 @@ func NewDisconnectDialog(items []ProviderItem) DisconnectDialog {
 	return d
 }
 
-func (d *DisconnectDialog) Update(msg tea.KeyMsg) DisconnectDialogAction {
+func (d *DisconnectDialog) Update(msg KeyMsg) DisconnectDialogAction {
 	d.ensureButtons()
 	var action DisconnectDialogAction
 	d.buttons.Buttons[0].OnPress = func() { action = d.selectCurrent() }
@@ -99,7 +97,7 @@ func (d *DisconnectDialog) Update(msg tea.KeyMsg) DisconnectDialogAction {
 			d.refilter()
 		}
 	default:
-		if d.focus == pickerDialogFocusList && msg.Type == tea.KeyRunes {
+		if d.focus == pickerDialogFocusList && msg.Type == KeyRunes {
 			d.Query += msg.String()
 			d.refilter()
 		}

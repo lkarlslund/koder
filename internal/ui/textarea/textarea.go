@@ -5,7 +5,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/charmbracelet/lipgloss"
-	tea "github.com/lkarlslund/koder/internal/ui/tea"
+	"github.com/lkarlslund/koder/internal/ui"
 	"github.com/mattn/go-runewidth"
 )
 
@@ -164,17 +164,17 @@ func (m *Model) InsertString(s string) {
 	m.insertRunes([]rune(s))
 }
 
-func (m Model) BlinkCmd() tea.Cmd {
+func (m Model) BlinkCmd() ui.Cmd {
 	if !m.focus || !m.BlinkEnabled {
 		return nil
 	}
 	generation := m.blinkGeneration
-	return tea.Tick(blinkInterval, func(time.Time) tea.Msg {
+	return ui.Tick(blinkInterval, func(time.Time) ui.Msg {
 		return blinkTickMsg{generation: generation}
 	})
 }
 
-func (m *Model) Update(msg tea.Msg) (Model, tea.Cmd) {
+func (m *Model) Update(msg ui.Msg) (Model, ui.Cmd) {
 	switch msg := msg.(type) {
 	case blinkMsg:
 		if !m.focus || !m.BlinkEnabled {
@@ -191,30 +191,30 @@ func (m *Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 		m.blink = !m.blink
 		return *m, m.BlinkCmd()
-	case tea.KeyMsg:
+	case ui.KeyMsg:
 		if !m.focus {
 			return *m, nil
 		}
 		m.blink = true
 		m.blinkGeneration++
-		var cmd tea.Cmd
+		var cmd ui.Cmd
 		if m.BlinkEnabled {
 			cmd = m.BlinkCmd()
 		}
 		switch msg.Type {
-		case tea.KeyLeft:
+		case ui.KeyLeft:
 			if m.cursor > 0 {
 				m.cursor--
 			}
-		case tea.KeyRight:
+		case ui.KeyRight:
 			if m.cursor < len(m.value) {
 				m.cursor++
 			}
-		case tea.KeyHome:
+		case ui.KeyHome:
 			m.cursor = 0
-		case tea.KeyEnd:
+		case ui.KeyEnd:
 			m.cursor = len(m.value)
-		case tea.KeyBackspace:
+		case ui.KeyBackspace:
 			if m.cursor > 0 {
 				m.value = append(m.value[:m.cursor-1], m.value[m.cursor:]...)
 				m.valueDirty = true
@@ -222,16 +222,16 @@ func (m *Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				m.cursor--
 				m.revision++
 			}
-		case tea.KeyDelete:
+		case ui.KeyDelete:
 			if m.cursor < len(m.value) {
 				m.value = append(m.value[:m.cursor], m.value[m.cursor+1:]...)
 				m.valueDirty = true
 				m.cachedValue = ""
 				m.revision++
 			}
-		case tea.KeySpace:
+		case ui.KeySpace:
 			m.insertRunes([]rune{' '})
-		case tea.KeyRunes:
+		case ui.KeyRunes:
 			m.insertRunes(msg.Runes)
 		default:
 			switch msg.String() {

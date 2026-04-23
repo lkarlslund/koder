@@ -1,8 +1,6 @@
 package tui
 
 import (
-	tea "github.com/lkarlslund/koder/internal/ui/tea"
-
 	"github.com/lkarlslund/koder/internal/tui/dialogs"
 	"github.com/lkarlslund/koder/internal/ui"
 )
@@ -26,9 +24,9 @@ type modelWindow struct {
 	model  *Model
 	bounds func(*Model, ui.Rect) ui.Rect
 	render func(*Model, ui.Rect) ui.Surface
-	key    func(*Model, tea.KeyMsg) (bool, tea.Cmd)
-	mouse  func(*Model, tea.MouseMsg) (bool, tea.Cmd)
-	timer  func(*Model, ui.TimerEvent) (bool, tea.Cmd)
+	key    func(*Model, ui.KeyMsg) (bool, ui.Cmd)
+	mouse  func(*Model, ui.MouseMsg) (bool, ui.Cmd)
+	timer  func(*Model, ui.TimerEvent) (bool, ui.Cmd)
 }
 
 func (w *modelWindow) ID() ui.WindowID {
@@ -74,14 +72,14 @@ func (w *modelWindow) Blur() {
 	w.base.Blur()
 }
 
-func (w *modelWindow) HandleKey(msg tea.KeyMsg) (bool, tea.Cmd) {
+func (w *modelWindow) HandleKey(msg ui.KeyMsg) (bool, ui.Cmd) {
 	if w.key == nil {
 		return false, nil
 	}
 	return w.key(w.model, msg)
 }
 
-func (w *modelWindow) HandleMouse(msg tea.MouseMsg) (bool, tea.Cmd) {
+func (w *modelWindow) HandleMouse(msg ui.MouseMsg) (bool, ui.Cmd) {
 	if w.mouse == nil {
 		return false, nil
 	}
@@ -95,7 +93,7 @@ func (w *modelWindow) Render(ctx *ui.Context, bounds ui.Rect) ui.Surface {
 	return w.render(w.model, bounds)
 }
 
-func (w *modelWindow) HandleTimer(event ui.TimerEvent) (bool, tea.Cmd) {
+func (w *modelWindow) HandleTimer(event ui.TimerEvent) (bool, ui.Cmd) {
 	if w.timer == nil {
 		return false, nil
 	}
@@ -136,13 +134,13 @@ func (m *Model) mainWindow() ui.Window {
 		render: func(m *Model, bounds ui.Rect) ui.Surface {
 			return m.renderBodySurface().Normalize(max(0, bounds.W), max(0, bounds.H))
 		},
-		key: func(m *Model, msg tea.KeyMsg) (bool, tea.Cmd) {
+		key: func(m *Model, msg ui.KeyMsg) (bool, ui.Cmd) {
 			return m.handleMainWindowKey(msg)
 		},
-		mouse: func(m *Model, msg tea.MouseMsg) (bool, tea.Cmd) {
+		mouse: func(m *Model, msg ui.MouseMsg) (bool, ui.Cmd) {
 			return m.handleMainWindowMouse(msg)
 		},
-		timer: func(m *Model, event ui.TimerEvent) (bool, tea.Cmd) {
+		timer: func(m *Model, event ui.TimerEvent) (bool, ui.Cmd) {
 			if event.Owner != composerBlinkTimerOwner {
 				return false, nil
 			}
@@ -158,30 +156,30 @@ func (m *Model) mainWindow() ui.Window {
 func (m *Model) overlayWindows() []ui.Window {
 	windows := make([]ui.Window, 0, 8)
 	if m.hasSessionDialog() {
-		windows = append(windows, m.centeredWindow(sessionWindowID, 10, m.renderSessionDialogElement(), func(m *Model, msg tea.KeyMsg) tea.Cmd {
+		windows = append(windows, m.centeredWindow(sessionWindowID, 10, m.renderSessionDialogElement(), func(m *Model, msg ui.KeyMsg) ui.Cmd {
 			return m.handleSessionDialogKey(msg)
-		}, func(m *Model, controlID string) tea.Cmd {
+		}, func(m *Model, controlID string) ui.Cmd {
 			if controlID == "window-close" {
 				m.startBusy(busyScopeSidebar, "Creating session…")
-				return tea.Batch(m.newSessionCmd(), m.spinnerCmdIfNeeded())
+				return ui.Batch(m.newSessionCmd(), m.spinnerCmdIfNeeded())
 			}
 			action := m.sessionDialog.ActivateControl(controlID)
 			switch action.Kind {
 			case dialogs.SessionDialogActionSelect:
 				m.startBusy(busyScopeSidebar, "Resuming session…")
-				return tea.Batch(m.loadSessionCmd(action.SessionID), m.spinnerCmdIfNeeded())
+				return ui.Batch(m.loadSessionCmd(action.SessionID), m.spinnerCmdIfNeeded())
 			case dialogs.SessionDialogActionCancel:
 				m.startBusy(busyScopeSidebar, "Creating session…")
-				return tea.Batch(m.newSessionCmd(), m.spinnerCmdIfNeeded())
+				return ui.Batch(m.newSessionCmd(), m.spinnerCmdIfNeeded())
 			default:
 				return nil
 			}
 		}))
 	}
 	if m.hasModelDialog() {
-		windows = append(windows, m.centeredWindow(modelWindowID, 20, m.renderModelDialogElement(), func(m *Model, msg tea.KeyMsg) tea.Cmd {
+		windows = append(windows, m.centeredWindow(modelWindowID, 20, m.renderModelDialogElement(), func(m *Model, msg ui.KeyMsg) ui.Cmd {
 			return m.handleModelDialogKey(msg)
-		}, func(m *Model, controlID string) tea.Cmd {
+		}, func(m *Model, controlID string) ui.Cmd {
 			if controlID == "window-close" {
 				m.closeModelDialog()
 				m.status = "Model selection cancelled"
@@ -208,9 +206,9 @@ func (m *Model) overlayWindows() []ui.Window {
 		}))
 	}
 	if m.hasDisconnectDialog() {
-		windows = append(windows, m.centeredWindow(disconnectWindowID, 30, m.renderDisconnectDialogElement(), func(m *Model, msg tea.KeyMsg) tea.Cmd {
+		windows = append(windows, m.centeredWindow(disconnectWindowID, 30, m.renderDisconnectDialogElement(), func(m *Model, msg ui.KeyMsg) ui.Cmd {
 			return m.handleDisconnectDialogKey(msg)
-		}, func(m *Model, controlID string) tea.Cmd {
+		}, func(m *Model, controlID string) ui.Cmd {
 			if controlID == "window-close" {
 				m.closeDisconnectDialog()
 				m.status = "Provider disconnect cancelled"
@@ -237,9 +235,9 @@ func (m *Model) overlayWindows() []ui.Window {
 		}))
 	}
 	if m.hasToolsDialog() {
-		windows = append(windows, m.centeredWindow(toolsWindowID, 40, m.renderToolsDialogElement(), func(m *Model, msg tea.KeyMsg) tea.Cmd {
+		windows = append(windows, m.centeredWindow(toolsWindowID, 40, m.renderToolsDialogElement(), func(m *Model, msg ui.KeyMsg) ui.Cmd {
 			return m.handleToolsDialogKey(msg)
-		}, func(m *Model, controlID string) tea.Cmd {
+		}, func(m *Model, controlID string) ui.Cmd {
 			if controlID == "window-close" {
 				m.closeToolsDialog()
 				m.status = "Tool selection cancelled"
@@ -265,9 +263,9 @@ func (m *Model) overlayWindows() []ui.Window {
 		}))
 	}
 	if m.hasConnectDialog() {
-		windows = append(windows, m.centeredWindow(connectWindowID, 50, m.renderConnectDialogElement(), func(m *Model, msg tea.KeyMsg) tea.Cmd {
+		windows = append(windows, m.centeredWindow(connectWindowID, 50, m.renderConnectDialogElement(), func(m *Model, msg ui.KeyMsg) ui.Cmd {
 			return m.handleConnectDialogKey(msg)
-		}, func(m *Model, controlID string) tea.Cmd {
+		}, func(m *Model, controlID string) ui.Cmd {
 			if controlID == "window-close" {
 				m.closeConnectDialog()
 				m.status = "Provider connect cancelled"
@@ -277,7 +275,7 @@ func (m *Model) overlayWindows() []ui.Window {
 		}))
 	}
 	if m.hasAgentsModal() {
-		windows = append(windows, m.centeredWindow(agentsWindowID, 60, m.renderAgentsModalElement(), func(m *Model, msg tea.KeyMsg) tea.Cmd {
+		windows = append(windows, m.centeredWindow(agentsWindowID, 60, m.renderAgentsModalElement(), func(m *Model, msg ui.KeyMsg) ui.Cmd {
 			switch msg.String() {
 			case "esc", "enter":
 				m.closeAgentsModal()
@@ -285,7 +283,7 @@ func (m *Model) overlayWindows() []ui.Window {
 			default:
 				return nil
 			}
-		}, func(m *Model, controlID string) tea.Cmd {
+		}, func(m *Model, controlID string) ui.Cmd {
 			if controlID == "window-close" {
 				m.closeAgentsModal()
 				return m.syncWindowTitleCmd()
@@ -294,7 +292,7 @@ func (m *Model) overlayWindows() []ui.Window {
 		}))
 	}
 	if m.hasHelpModal() {
-		windows = append(windows, m.centeredWindow(helpWindowID, 70, m.renderHelpModalElement(), func(m *Model, msg tea.KeyMsg) tea.Cmd {
+		windows = append(windows, m.centeredWindow(helpWindowID, 70, m.renderHelpModalElement(), func(m *Model, msg ui.KeyMsg) ui.Cmd {
 			switch msg.String() {
 			case "esc", "enter", "alt+h":
 				m.closeHelpModal()
@@ -302,7 +300,7 @@ func (m *Model) overlayWindows() []ui.Window {
 			default:
 				return nil
 			}
-		}, func(m *Model, controlID string) tea.Cmd {
+		}, func(m *Model, controlID string) ui.Cmd {
 			if controlID == "window-close" {
 				m.closeHelpModal()
 				return m.syncWindowTitleCmd()
@@ -311,7 +309,7 @@ func (m *Model) overlayWindows() []ui.Window {
 		}))
 	}
 	if m.hasLLMPreview() {
-		windows = append(windows, m.centeredWindow(llmPreviewWindowID, 80, m.renderLLMPreviewElement(), func(m *Model, msg tea.KeyMsg) tea.Cmd {
+		windows = append(windows, m.centeredWindow(llmPreviewWindowID, 80, m.renderLLMPreviewElement(), func(m *Model, msg ui.KeyMsg) ui.Cmd {
 			switch msg.String() {
 			case "esc", "enter", "alt+o":
 				m.closeLLMPreview()
@@ -322,7 +320,7 @@ func (m *Model) overlayWindows() []ui.Window {
 				}
 				return nil
 			}
-		}, func(m *Model, msgControl string) tea.Cmd {
+		}, func(m *Model, msgControl string) ui.Cmd {
 			if msgControl == "window-close" {
 				m.closeLLMPreview()
 				return m.syncWindowTitleCmd()
@@ -331,9 +329,9 @@ func (m *Model) overlayWindows() []ui.Window {
 		}))
 	}
 	if m.hasPreferencesDialog() {
-		windows = append(windows, m.centeredWindow(preferencesWindowID, 90, m.renderPreferencesDialogElement(), func(m *Model, msg tea.KeyMsg) tea.Cmd {
+		windows = append(windows, m.centeredWindow(preferencesWindowID, 90, m.renderPreferencesDialogElement(), func(m *Model, msg ui.KeyMsg) ui.Cmd {
 			return m.handlePreferencesKey(msg)
-		}, func(m *Model, controlID string) tea.Cmd {
+		}, func(m *Model, controlID string) ui.Cmd {
 			if controlID == "window-close" {
 				m.closePreferencesDialog()
 				m.status = "Preferences cancelled"
@@ -343,7 +341,7 @@ func (m *Model) overlayWindows() []ui.Window {
 		}))
 	}
 	if m.hasPicker() {
-		windows = append(windows, m.centeredWindow(pickerWindowID, 100, m.renderPickerElement(), func(m *Model, msg tea.KeyMsg) tea.Cmd {
+		windows = append(windows, m.centeredWindow(pickerWindowID, 100, m.renderPickerElement(), func(m *Model, msg ui.KeyMsg) ui.Cmd {
 			if msg.String() == "ctrl+c" {
 				_, cmd := m.quit()
 				return cmd
@@ -360,7 +358,7 @@ func (m *Model) overlayWindows() []ui.Window {
 			default:
 				return nil
 			}
-		}, func(m *Model, controlID string) tea.Cmd {
+		}, func(m *Model, controlID string) ui.Cmd {
 			action := m.picker.dialog.ActivateControl(controlID)
 			switch action.Kind {
 			case ui.PickerDialogActionSelect:
@@ -378,7 +376,7 @@ func (m *Model) overlayWindows() []ui.Window {
 	return windows
 }
 
-func (m *Model) centeredWindow(id ui.WindowID, z int, element ui.Element, onKey func(*Model, tea.KeyMsg) tea.Cmd, onControl func(*Model, string) tea.Cmd) ui.Window {
+func (m *Model) centeredWindow(id ui.WindowID, z int, element ui.Element, onKey func(*Model, ui.KeyMsg) ui.Cmd, onControl func(*Model, string) ui.Cmd) ui.Window {
 	return &modelWindow{
 		base: ui.BaseWindow{
 			WindowID:      id,
@@ -408,11 +406,11 @@ func (m *Model) centeredWindow(id ui.WindowID, z int, element ui.Element, onKey 
 			}
 			return element.Render(&ui.Context{Palette: m.palette}, ui.Rect{W: bounds.W, H: bounds.H}).Normalize(bounds.W, bounds.H)
 		},
-		key: func(m *Model, msg tea.KeyMsg) (bool, tea.Cmd) {
+		key: func(m *Model, msg ui.KeyMsg) (bool, ui.Cmd) {
 			return true, onKey(m, msg)
 		},
-		mouse: func(m *Model, msg tea.MouseMsg) (bool, tea.Cmd) {
-			if msg.Action != tea.MouseActionPress || msg.Button != tea.MouseButtonLeft {
+		mouse: func(m *Model, msg ui.MouseMsg) (bool, ui.Cmd) {
+			if msg.Action != ui.MouseActionPress || msg.Button != ui.MouseButtonLeft {
 				if id == llmPreviewWindowID {
 					if m.handleLLMPreviewMouse(msg) {
 						return true, nil

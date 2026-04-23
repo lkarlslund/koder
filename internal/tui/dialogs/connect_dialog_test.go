@@ -4,8 +4,6 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/lkarlslund/koder/internal/ui/tea"
-
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/theme"
@@ -19,13 +17,13 @@ func renderConnectDialog(dialog ConnectDialog, width int, palette theme.Palette)
 func TestConnectDialogSelectsProviderAndSavesDraft(t *testing.T) {
 	dialog := NewConnectDialog(provider.Catalog(), map[string]config.Provider{})
 
-	if action := dialog.Update(tea.KeyMsg{Type: tea.KeyEnter}); action.Kind != ProviderConnectActionNone {
+	if action := dialog.Update(ui.KeyMsg{Type: ui.KeyEnter}); action.Kind != ProviderConnectActionNone {
 		t.Fatalf("unexpected action on provider select: %#v", action)
 	}
-	if action := dialog.Update(tea.KeyMsg{Type: tea.KeyTab}); action.Kind != ProviderConnectActionNone {
+	if action := dialog.Update(ui.KeyMsg{Type: ui.KeyTab}); action.Kind != ProviderConnectActionNone {
 		t.Fatalf("unexpected action on tab: %#v", action)
 	}
-	action := dialog.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	action := dialog.Update(ui.KeyMsg{Type: ui.KeyEnter})
 	if action.Kind != ProviderConnectActionSave {
 		t.Fatalf("expected save action, got %#v", action)
 	}
@@ -36,9 +34,9 @@ func TestConnectDialogSelectsProviderAndSavesDraft(t *testing.T) {
 
 func TestConnectDialogCanFilterProviderList(t *testing.T) {
 	dialog := NewConnectDialog(provider.Catalog(), map[string]config.Provider{})
-	dialog.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("o")})
-	dialog.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("l")})
-	dialog.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("l")})
+	dialog.Update(ui.KeyMsg{Type: ui.KeyRunes, Runes: []rune("o")})
+	dialog.Update(ui.KeyMsg{Type: ui.KeyRunes, Runes: []rune("l")})
+	dialog.Update(ui.KeyMsg{Type: ui.KeyRunes, Runes: []rune("l")})
 
 	if len(dialog.view) == 0 || dialog.view[0].ID != "ollama" {
 		t.Fatalf("expected ollama filtered to top, got %#v", dialog.view)
@@ -64,7 +62,7 @@ func TestConnectDialogTestActionEmitsDraft(t *testing.T) {
 	dialog.selectProvider(provider.Catalog()[0])
 	dialog.advanceFocus(1)
 	dialog.moveButtons(-1)
-	action := dialog.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	action := dialog.Update(ui.KeyMsg{Type: ui.KeyEnter})
 	if action.Kind != ProviderConnectActionTest {
 		t.Fatalf("expected test action, got %#v", action)
 	}
@@ -74,10 +72,10 @@ func TestConnectDialogAltHotkeysTriggerActions(t *testing.T) {
 	dialog := NewConnectDialog(provider.Catalog(), map[string]config.Provider{})
 	dialog.selectProvider(provider.Catalog()[0])
 
-	if action := dialog.Update(tea.KeyMsg{Type: tea.KeyRunes, Alt: true, Runes: []rune("t")}); action.Kind != ProviderConnectActionTest {
+	if action := dialog.Update(ui.KeyMsg{Type: ui.KeyRunes, Alt: true, Runes: []rune("t")}); action.Kind != ProviderConnectActionTest {
 		t.Fatalf("expected alt+t to trigger test, got %#v", action)
 	}
-	if action := dialog.Update(tea.KeyMsg{Type: tea.KeyRunes, Alt: true, Runes: []rune("s")}); action.Kind != ProviderConnectActionSave {
+	if action := dialog.Update(ui.KeyMsg{Type: ui.KeyRunes, Alt: true, Runes: []rune("s")}); action.Kind != ProviderConnectActionSave {
 		t.Fatalf("expected alt+s to trigger save, got %#v", action)
 	}
 }
@@ -87,7 +85,7 @@ func TestConnectDialogCyclesDiscoveredModels(t *testing.T) {
 	dialog.selectProvider(provider.Catalog()[0])
 	dialog.SetModels([]string{"model-a", "model-b"})
 	dialog.fieldIndex = len(dialog.formFields()) - 1
-	dialog.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	dialog.Update(ui.KeyMsg{Type: ui.KeyEnter})
 
 	if dialog.draft.Model != "model-b" {
 		t.Fatalf("expected next discovered model, got %q", dialog.draft.Model)
@@ -163,12 +161,12 @@ func TestConnectDialogMovesCursorAndInsertsAtCursor(t *testing.T) {
 	dialog.draft.BaseURL = "abcd"
 	dialog.resetCursors()
 	dialog.moveCursorTo(2)
-	dialog.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("X")})
+	dialog.Update(ui.KeyMsg{Type: ui.KeyRunes, Runes: []rune("X")})
 	if dialog.draft.BaseURL != "abXcd" {
 		t.Fatalf("expected insertion at cursor, got %q", dialog.draft.BaseURL)
 	}
-	dialog.Update(tea.KeyMsg{Type: tea.KeyLeft})
-	dialog.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	dialog.Update(ui.KeyMsg{Type: ui.KeyLeft})
+	dialog.Update(ui.KeyMsg{Type: ui.KeyBackspace})
 	if dialog.draft.BaseURL != "aXcd" {
 		t.Fatalf("expected backspace before cursor, got %q", dialog.draft.BaseURL)
 	}

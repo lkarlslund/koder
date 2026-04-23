@@ -5,8 +5,6 @@ import (
 	"strconv"
 	"strings"
 
-	tea "github.com/lkarlslund/koder/internal/ui/tea"
-
 	"github.com/lkarlslund/koder/internal/theme"
 	. "github.com/lkarlslund/koder/internal/ui"
 )
@@ -59,7 +57,7 @@ func NewSessionDialog(items []SessionItem, showCWD bool) SessionDialog {
 	return d
 }
 
-func (d *SessionDialog) Update(msg tea.KeyMsg) SessionDialogAction {
+func (d *SessionDialog) Update(msg KeyMsg) SessionDialogAction {
 	d.ensureButtons()
 	var action SessionDialogAction
 	d.buttons.Buttons[0].OnPress = func() { action = d.selectCurrent() }
@@ -106,7 +104,7 @@ func (d *SessionDialog) Update(msg tea.KeyMsg) SessionDialogAction {
 			d.refilter()
 		}
 	default:
-		if d.focus == pickerDialogFocusList && msg.Type == tea.KeyRunes {
+		if d.focus == pickerDialogFocusList && msg.Type == KeyRunes {
 			d.Query += msg.String()
 			d.refilter()
 		}

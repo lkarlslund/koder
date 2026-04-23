@@ -4,12 +4,12 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/lkarlslund/koder/internal/ui/tea"
+	"github.com/lkarlslund/koder/internal/ui"
 )
 
 func BenchmarkUpdateRunes(b *testing.B) {
 	m := New()
-	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("benchmark")}
+	msg := ui.KeyMsg{Type: ui.KeyRunes, Runes: []rune("benchmark")}
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		next, _ := m.Update(msg)

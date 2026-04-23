@@ -16,7 +16,6 @@ import (
 	"unicode"
 
 	"github.com/charmbracelet/lipgloss"
-	tea "github.com/lkarlslund/koder/internal/ui/tea"
 
 	"github.com/lkarlslund/koder/internal/agent"
 	"github.com/lkarlslund/koder/internal/attachment"
@@ -434,18 +433,18 @@ func NewWithWorkdir(cfg config.Config, st *store.Store, a *agent.Engine, mode St
 	}, nil
 }
 
-func (m Model) Init() tea.Cmd {
+func (m Model) Init() ui.Cmd {
 	if !m.mouseEnabled {
-		return m.withRootTimers(tea.Batch(m.loadCmd(), m.syncWindowTitleCmd()))
+		return m.withRootTimers(ui.Batch(m.loadCmd(), m.syncWindowTitleCmd()))
 	}
-	return m.withRootTimers(tea.Batch(
+	return m.withRootTimers(ui.Batch(
 		m.loadCmd(),
 		m.syncWindowTitleCmd(),
-		func() tea.Msg { return tea.EnableMouseCellMotion() },
+		func() ui.Msg { return ui.EnableMouseCellMotion() },
 	))
 }
 
-func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
+func (m Model) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 	defer func() {
 		if next == nil {
 			next = m
@@ -461,7 +460,7 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		}
 	}()
 	switch msg := msg.(type) {
-	case tea.WindowSizeMsg:
+	case ui.WindowSizeMsg:
 		m.invalidateBodyCache()
 		m.width = msg.Width
 		m.height = msg.Height
@@ -475,14 +474,14 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		m.rootTimerPending = false
 		m.rootTimerPendingAt = time.Time{}
 		root := (&m).syncUIRoot()
-		var cmds []tea.Cmd
+		var cmds []ui.Cmd
 		for _, event := range root.DueTimers(msg.At) {
 			handled, timerCmd := root.HandleEvent(event)
 			if handled {
 				cmds = append(cmds, timerCmd)
 			}
 		}
-		return m, tea.Batch(cmds...)
+		return m, ui.Batch(cmds...)
 	case spinnerTickMsg:
 		m.invalidateBodyCache()
 		if !m.shouldAnimateSpinner() {
@@ -499,14 +498,14 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		} else {
 			m.refreshViewportAt(offset)
 		}
-		return m, tea.Batch(spinnerTickCmd(), m.syncWindowTitleCmd())
+		return m, ui.Batch(spinnerTickCmd(), m.syncWindowTitleCmd())
 	case promptDoneMsg:
 		m.invalidateBodyCache()
 		if msg.err != nil {
 			return m.finishOperationWithError(msg.err)
 		}
 		m.startBusy(m.busy.scopeOrDefault(busyScopeTranscript), m.busy.statusOrDefault("Working ..."))
-		return m, tea.Batch(nextEventCmd(msg.events), m.spinnerCmdIfNeeded(), m.syncWindowTitleCmd())
+		return m, ui.Batch(nextEventCmd(msg.events), m.spinnerCmdIfNeeded(), m.syncWindowTitleCmd())
 	case runPromptMsg:
 		m.invalidateBodyCache()
 		if msg.err != nil {
@@ -528,9 +527,9 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		m.currentSession = msg.session
 		m.pendingModelNote = ""
 		m.startBusy(m.busy.scopeOrDefault(busyScopeTranscript), "Working ...")
-		return m, tea.Batch(nextEventCmd(msg.events), m.spinnerCmdIfNeeded(), m.syncWindowTitleCmd())
+		return m, ui.Batch(nextEventCmd(msg.events), m.spinnerCmdIfNeeded(), m.syncWindowTitleCmd())
 	case kickoffPromptMsg:
-		return m, tea.Batch(m.promptCmd(m.beginActiveOperation(), msg.Prompt, msg.Attachments, msg.References), m.spinnerCmdIfNeeded(), m.syncWindowTitleCmd())
+		return m, ui.Batch(m.promptCmd(m.beginActiveOperation(), msg.Prompt, msg.Attachments, msg.References), m.spinnerCmdIfNeeded(), m.syncWindowTitleCmd())
 	case llmPreviewMsg:
 		if msg.err != nil {
 			m.status = msg.err.Error()
@@ -543,10 +542,10 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		m.recordEvent(msg.event)
 		m.applyEvent(msg.event)
 		if msg.events != nil {
-			return m, tea.Batch(m.reloadDetailsCmd(), nextEventCmd(msg.events), m.syncWindowTitleCmd())
+			return m, ui.Batch(m.reloadDetailsCmd(), nextEventCmd(msg.events), m.syncWindowTitleCmd())
 		}
 		m.stopBusy()
-		return m, tea.Batch(m.reloadDetailsCmd(), m.syncWindowTitleCmd())
+		return m, ui.Batch(m.reloadDetailsCmd(), m.syncWindowTitleCmd())
 	case loadMsg:
 		m.invalidateBodyCache()
 		m = m.UpdateLoad(msg)
@@ -557,7 +556,7 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 			m.stopBusyWithStatus("Ready")
 		}
 		if cmd := m.dequeuePromptCmd(); cmd != nil {
-			return m, tea.Batch(cmd, m.syncWindowTitleCmd())
+			return m, ui.Batch(cmd, m.syncWindowTitleCmd())
 		}
 		return m, m.syncWindowTitleCmd()
 	case agentsRefreshMsg:
@@ -659,26 +658,26 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 			m.status = fmt.Sprintf("Loaded %d models", len(msg.models))
 		}
 		return m, m.syncWindowTitleCmd()
-	case tea.MouseMsg:
+	case ui.MouseMsg:
 		root := (&m).syncUIRoot()
 		if handled, cmd := root.HandleEvent(ui.MouseEvent(msg)); handled {
-			if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft {
+			if msg.Action == ui.MouseActionPress && msg.Button == ui.MouseButtonLeft {
 				return &m, cmd
 			}
 			return m, cmd
 		}
 		if handled, cmd := m.handleMainWindowMouse(msg); handled {
-			if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft {
+			if msg.Action == ui.MouseActionPress && msg.Button == ui.MouseButtonLeft {
 				return &m, cmd
 			}
 			return m, cmd
 		}
 		return m, nil
-	case tea.KeyMsg:
+	case ui.KeyMsg:
 		return m.handleKey(msg)
 	}
 
-	var nextCmd tea.Cmd
+	var nextCmd ui.Cmd
 	m.composer, nextCmd = m.composer.Update(msg)
 	m.updateComposerMenus()
 	return m, nextCmd
@@ -705,7 +704,7 @@ func (m Model) ViewLines() []string {
 	return m.viewSurface().Lines()
 }
 
-func (m Model) ViewSurface() tea.SurfaceView {
+func (m Model) ViewSurface() ui.SurfaceView {
 	return m.viewSurface()
 }
 
@@ -722,7 +721,7 @@ func (m *Model) viewSurface() ui.Surface {
 	return root.RenderFrame()
 }
 
-func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *Model) handleKey(msg ui.KeyMsg) (ui.Model, ui.Cmd) {
 	if msg.String() != "esc" {
 		m.interruptArmedAt = time.Time{}
 	}
@@ -737,7 +736,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (m *Model) handleMainWindowKey(msg tea.KeyMsg) (bool, tea.Cmd) {
+func (m *Model) handleMainWindowKey(msg ui.KeyMsg) (bool, ui.Cmd) {
 	if m.hasApprovalPrompt() {
 		m.ensureApprovalButtons()
 		if idx, ok := m.approvalButtons.HotkeyIndex(msg); ok {
@@ -795,7 +794,7 @@ func (m *Model) handleMainWindowKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 			m.invalidateFooterCache()
 			return true, nil
 		default:
-			if msg.Type == tea.KeyRunes {
+			if msg.Type == ui.KeyRunes {
 				m.appendComposerHistoryQuery(msg.String())
 				m.invalidateFooterCache()
 				return true, nil
@@ -946,7 +945,7 @@ func (m *Model) handleMainWindowKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 			return true, m.syncWindowTitleCmd()
 		}
 		m.startBusy(busyScopeTranscript, "Continuing…")
-		return true, tea.Batch(m.continueCmd(m.beginActiveOperation()), m.spinnerCmdIfNeeded())
+		return true, ui.Batch(m.continueCmd(m.beginActiveOperation()), m.spinnerCmdIfNeeded())
 	case "shift+enter", "alt+enter":
 		m.composer.InsertRune('\n')
 		m.updateComposerMenus()
@@ -1000,7 +999,7 @@ func (m *Model) handleMainWindowKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 		return true, m.kickoffPromptCmd(prompt, drafts, refs)
 	}
 
-	var cmd tea.Cmd
+	var cmd ui.Cmd
 	beforeRevision := m.composer.Revision()
 	beforeCursorVisible := m.composer.CursorVisible()
 	beforeCursorIndex := m.composer.CursorIndex()
@@ -1019,11 +1018,11 @@ func (m *Model) handleMainWindowKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 	return handled, cmd
 }
 
-func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd, bool) {
+func (m *Model) handleMouse(msg ui.MouseMsg) (ui.Model, ui.Cmd, bool) {
 	if !m.mouseEnabled {
 		return m, nil, false
 	}
-	if msg.Action != tea.MouseActionPress || msg.Button != tea.MouseButtonLeft {
+	if msg.Action != ui.MouseActionPress || msg.Button != ui.MouseButtonLeft {
 		return m, nil, false
 	}
 	if msg.Y < 0 || msg.Y >= m.viewport.Height {
@@ -1054,8 +1053,8 @@ func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd, bool) {
 	return m, nil, false
 }
 
-func (m *Model) handleMainWindowMouse(msg tea.MouseMsg) (bool, tea.Cmd) {
-	if m.hasApprovalPrompt() && m.mouseEnabled && msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft {
+func (m *Model) handleMainWindowMouse(msg ui.MouseMsg) (bool, ui.Cmd) {
+	if m.hasApprovalPrompt() && m.mouseEnabled && msg.Action == ui.MouseActionPress && msg.Button == ui.MouseButtonLeft {
 		if msg.Y >= 0 && msg.Y < m.height {
 			element := m.renderApprovalPromptElement()
 			if element != nil {
@@ -1089,15 +1088,15 @@ func (m *Model) handleMainWindowMouse(msg tea.MouseMsg) (bool, tea.Cmd) {
 	return false, nil
 }
 
-func (m *Model) handleTranscriptMouse(msg tea.MouseMsg) bool {
+func (m *Model) handleTranscriptMouse(msg ui.MouseMsg) bool {
 	switch msg.Button {
-	case tea.MouseButtonWheelUp:
-		if msg.Action == tea.MouseActionPress {
+	case ui.MouseButtonWheelUp:
+		if msg.Action == ui.MouseActionPress {
 			m.scrollTranscript(-3)
 			return true
 		}
-	case tea.MouseButtonWheelDown:
-		if msg.Action == tea.MouseActionPress {
+	case ui.MouseButtonWheelDown:
+		if msg.Action == ui.MouseActionPress {
 			m.scrollTranscript(3)
 			return true
 		}
@@ -1105,15 +1104,15 @@ func (m *Model) handleTranscriptMouse(msg tea.MouseMsg) bool {
 	return false
 }
 
-func (m *Model) handleLLMPreviewMouse(msg tea.MouseMsg) bool {
+func (m *Model) handleLLMPreviewMouse(msg ui.MouseMsg) bool {
 	switch msg.Button {
-	case tea.MouseButtonWheelUp:
-		if msg.Action == tea.MouseActionPress {
+	case ui.MouseButtonWheelUp:
+		if msg.Action == ui.MouseActionPress {
 			m.scrollLLMPreview(-3)
 			return true
 		}
-	case tea.MouseButtonWheelDown:
-		if msg.Action == tea.MouseActionPress {
+	case ui.MouseButtonWheelDown:
+		if msg.Action == ui.MouseActionPress {
 			m.scrollLLMPreview(3)
 			return true
 		}
@@ -1121,7 +1120,7 @@ func (m *Model) handleLLMPreviewMouse(msg tea.MouseMsg) bool {
 	return false
 }
 
-func (m *Model) handleLLMPreviewKey(msg tea.KeyMsg) bool {
+func (m *Model) handleLLMPreviewKey(msg ui.KeyMsg) bool {
 	switch msg.String() {
 	case "up":
 		m.scrollLLMPreview(-1)
@@ -2042,8 +2041,8 @@ func (m *Model) renderReasoningBlockElement(input string) ui.Element {
 	}
 }
 
-func (m Model) loadCmd() tea.Cmd {
-	return func() tea.Msg {
+func (m Model) loadCmd() ui.Cmd {
+	return func() ui.Msg {
 		ctx := context.Background()
 		allSessions, err := m.store.ListSessions(ctx)
 		if err != nil {
@@ -2102,8 +2101,8 @@ type loadMsg struct {
 	preserveBusy bool
 }
 
-func (m Model) promptCmd(ctx context.Context, prompt string, drafts []attachment.Draft, refs []reference.Draft) tea.Cmd {
-	return func() tea.Msg {
+func (m Model) promptCmd(ctx context.Context, prompt string, drafts []attachment.Draft, refs []reference.Draft) ui.Cmd {
+	return func() ui.Msg {
 		session := m.currentSession
 		if session.ID == 0 {
 			var err error
@@ -2128,8 +2127,8 @@ func (m Model) promptCmd(ctx context.Context, prompt string, drafts []attachment
 	}
 }
 
-func (m Model) continueCmd(ctx context.Context) tea.Cmd {
-	return func() tea.Msg {
+func (m Model) continueCmd(ctx context.Context) ui.Cmd {
+	return func() ui.Msg {
 		session := m.currentSession
 		if session.ID == 0 {
 			return runPromptMsg{err: fmt.Errorf("no saved session to continue")}
@@ -2150,8 +2149,8 @@ func (m Model) continueCmd(ctx context.Context) tea.Cmd {
 	}
 }
 
-func (m Model) newSessionCmd() tea.Cmd {
-	return func() tea.Msg {
+func (m Model) newSessionCmd() ui.Cmd {
+	return func() ui.Msg {
 		ctx := context.Background()
 		allSessions, err := m.store.ListSessions(ctx)
 		if err != nil {
@@ -2174,8 +2173,8 @@ func (m Model) newSessionCmd() tea.Cmd {
 	}
 }
 
-func (m Model) sessionPickerCmd() tea.Cmd {
-	return func() tea.Msg {
+func (m Model) sessionPickerCmd() ui.Cmd {
+	return func() ui.Msg {
 		allSessions, err := m.store.ListSessions(context.Background())
 		if err != nil {
 			return promptDoneMsg{err: err}
@@ -2185,8 +2184,8 @@ func (m Model) sessionPickerCmd() tea.Cmd {
 	}
 }
 
-func (m Model) loadSessionCmd(sessionID int64) tea.Cmd {
-	return func() tea.Msg {
+func (m Model) loadSessionCmd(sessionID int64) ui.Cmd {
+	return func() ui.Msg {
 		if sessionID == 0 {
 			return nil
 		}
@@ -2234,8 +2233,8 @@ func (m Model) loadSessionCmd(sessionID int64) tea.Cmd {
 	}
 }
 
-func (m Model) agentsRefreshCmd(sessionID int64) tea.Cmd {
-	return func() tea.Msg {
+func (m Model) agentsRefreshCmd(sessionID int64) ui.Cmd {
+	return func() ui.Msg {
 		ctx := context.Background()
 		if _, err := m.agent.RefreshAgents(ctx, sessionID); err != nil {
 			return agentsRefreshMsg{err: err}
@@ -2279,8 +2278,8 @@ func (m Model) agentsRefreshCmd(sessionID int64) tea.Cmd {
 	}
 }
 
-func (m Model) forkSessionCmd(sourceSessionID int64) tea.Cmd {
-	return func() tea.Msg {
+func (m Model) forkSessionCmd(sourceSessionID int64) ui.Cmd {
+	return func() ui.Msg {
 		ctx := context.Background()
 		forked, err := m.store.ForkSession(ctx, sourceSessionID)
 		if err != nil {
@@ -2347,8 +2346,8 @@ func (m Model) forkSessionCmd(sourceSessionID int64) tea.Cmd {
 	}
 }
 
-func (m Model) reloadDetailsCmd() tea.Cmd {
-	return func() tea.Msg {
+func (m Model) reloadDetailsCmd() ui.Cmd {
+	return func() ui.Msg {
 		msg := m.loadSessionCmd(m.currentSession.ID)()
 		load, ok := msg.(loadMsg)
 		if !ok {
@@ -2359,8 +2358,8 @@ func (m Model) reloadDetailsCmd() tea.Cmd {
 	}
 }
 
-func nextEventCmd(events <-chan domain.Event) tea.Cmd {
-	return func() tea.Msg {
+func nextEventCmd(events <-chan domain.Event) ui.Cmd {
+	return func() ui.Msg {
 		evt, ok := <-events
 		if !ok {
 			return eventMsg{}
@@ -2383,7 +2382,7 @@ func RunWithWorkdir(cfg config.Config, st *store.Store, a *agent.Engine, mode St
 		return err
 	}
 	model.syncDebugRuntime()
-	p := tea.NewProgram(model, tea.WithAltScreen(), tea.WithoutSignalHandler())
+	p := ui.NewProgram(model, ui.WithAltScreen(), ui.WithoutSignalHandler())
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
 	defer signal.Stop(sig)
@@ -2394,15 +2393,15 @@ func RunWithWorkdir(cfg config.Config, st *store.Store, a *agent.Engine, mode St
 		case s := <-sig:
 			switch s {
 			case os.Interrupt:
-				p.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
+				p.Send(ui.KeyMsg{Type: ui.KeyCtrlC})
 			default:
-				p.Send(tea.QuitMsg{})
+				p.Send(ui.QuitMsg{})
 			}
 		case <-done:
 		}
 	}()
 	finalModel, err := p.Run()
-	if err != nil && !errors.Is(err, tea.ErrInterrupted) {
+	if err != nil && !errors.Is(err, ui.ErrInterrupted) {
 		return err
 	}
 	switch typed := finalModel.(type) {
@@ -2413,7 +2412,7 @@ func RunWithWorkdir(cfg config.Config, st *store.Store, a *agent.Engine, mode St
 		fmt.Println(typed.exitSummary())
 		return nil
 	}
-	if errors.Is(err, tea.ErrInterrupted) {
+	if errors.Is(err, ui.ErrInterrupted) {
 		fmt.Println("Exited koder.")
 		return nil
 	}
@@ -2517,17 +2516,17 @@ func (m Model) UpdateLoad(msg loadMsg) Model {
 	return m
 }
 
-func (m *Model) handleLocalCommand(prompt string) (tea.Model, tea.Cmd, bool) {
+func (m *Model) handleLocalCommand(prompt string) (ui.Model, ui.Cmd, bool) {
 	trimmed := strings.TrimSpace(prompt)
 	switch {
 	case trimmed == "/new":
 		m.resetComposerInput()
 		m.startBusy(busyScopeSidebar, "Creating session…")
-		return m, tea.Batch(m.newSessionCmd(), m.spinnerCmdIfNeeded()), true
+		return m, ui.Batch(m.newSessionCmd(), m.spinnerCmdIfNeeded()), true
 	case trimmed == "/resume":
 		m.resetComposerInput()
 		m.startBusy(busyScopeSidebar, "Loading sessions…")
-		return m, tea.Batch(m.sessionPickerCmd(), m.spinnerCmdIfNeeded()), true
+		return m, ui.Batch(m.sessionPickerCmd(), m.spinnerCmdIfNeeded()), true
 	case trimmed == "/quit":
 		m.resetComposerInput()
 		model, cmd := m.quit()
@@ -2536,16 +2535,16 @@ func (m *Model) handleLocalCommand(prompt string) (tea.Model, tea.Cmd, bool) {
 		m.resetComposerInput()
 		m.mouseEnabled = true
 		m.status = "Mouse capture enabled"
-		return m, func() tea.Msg { return tea.EnableMouseCellMotion() }, true
+		return m, func() ui.Msg { return ui.EnableMouseCellMotion() }, true
 	case trimmed == "/mouse off":
 		m.resetComposerInput()
 		m.mouseEnabled = false
 		m.status = "Mouse capture disabled"
-		return m, func() tea.Msg { return tea.DisableMouse() }, true
+		return m, func() ui.Msg { return ui.DisableMouse() }, true
 	case trimmed == "/compact":
 		m.resetComposerInput()
 		m.startBusy(busyScopeTranscript, "Compacting session...")
-		return m, tea.Batch(m.compactCmd(m.beginActiveOperation()), m.spinnerCmdIfNeeded()), true
+		return m, ui.Batch(m.compactCmd(m.beginActiveOperation()), m.spinnerCmdIfNeeded()), true
 	case trimmed == "/connect":
 		m.resetComposerInput()
 		m.openConnectDialog()
@@ -2566,7 +2565,7 @@ func (m *Model) handleLocalCommand(prompt string) (tea.Model, tea.Cmd, bool) {
 			return m, m.syncWindowTitleCmd(), true
 		}
 		m.status = fmt.Sprintf("Loading models for %s…", providerID)
-		return m, tea.Batch(m.loadModelsCmd(providerID, false), m.syncWindowTitleCmd()), true
+		return m, ui.Batch(m.loadModelsCmd(providerID, false), m.syncWindowTitleCmd()), true
 	case trimmed == "/theme":
 		m.resetComposerInput()
 		m.openThemePicker()
@@ -2582,7 +2581,7 @@ func (m *Model) handleLocalCommand(prompt string) (tea.Model, tea.Cmd, bool) {
 	case trimmed == "/preferences":
 		m.resetComposerInput()
 		m.openPreferencesDialog()
-		return m, tea.Batch(spinnerTickCmd(), m.syncWindowTitleCmd()), true
+		return m, ui.Batch(spinnerTickCmd(), m.syncWindowTitleCmd()), true
 	case trimmed == "/tools":
 		m.resetComposerInput()
 		m.openToolsDialog()
@@ -2598,7 +2597,7 @@ func (m *Model) handleLocalCommand(prompt string) (tea.Model, tea.Cmd, bool) {
 			return m, m.syncWindowTitleCmd(), true
 		}
 		m.startBusy(busyScopeSidebar, "Refreshing project instructions…")
-		return m, tea.Batch(m.agentsRefreshCmd(m.currentSession.ID), m.spinnerCmdIfNeeded()), true
+		return m, ui.Batch(m.agentsRefreshCmd(m.currentSession.ID), m.spinnerCmdIfNeeded()), true
 	case trimmed == "/fork":
 		m.resetComposerInput()
 		if m.currentSession.ID == 0 {
@@ -2606,7 +2605,7 @@ func (m *Model) handleLocalCommand(prompt string) (tea.Model, tea.Cmd, bool) {
 			return m, m.syncWindowTitleCmd(), true
 		}
 		m.startBusy(busyScopeSidebar, fmt.Sprintf("Forking session %d…", m.currentSession.ID))
-		return m, tea.Batch(m.forkSessionCmd(m.currentSession.ID), m.spinnerCmdIfNeeded()), true
+		return m, ui.Batch(m.forkSessionCmd(m.currentSession.ID), m.spinnerCmdIfNeeded()), true
 	case strings.HasPrefix(trimmed, "/approve "):
 		id, err := strconv.ParseInt(strings.TrimSpace(strings.TrimPrefix(trimmed, "/approve")), 10, 64)
 		if err != nil {
@@ -2615,7 +2614,7 @@ func (m *Model) handleLocalCommand(prompt string) (tea.Model, tea.Cmd, bool) {
 		}
 		m.resetComposerInput()
 		m.startBusy(busyScopeTranscript, fmt.Sprintf("Approving approval %d…", id))
-		return m, tea.Batch(m.approveCmd(m.beginActiveOperation(), id), m.spinnerCmdIfNeeded()), true
+		return m, ui.Batch(m.approveCmd(m.beginActiveOperation(), id), m.spinnerCmdIfNeeded()), true
 	case strings.HasPrefix(trimmed, "/deny "):
 		id, err := strconv.ParseInt(strings.TrimSpace(strings.TrimPrefix(trimmed, "/deny")), 10, 64)
 		if err != nil {
@@ -2624,7 +2623,7 @@ func (m *Model) handleLocalCommand(prompt string) (tea.Model, tea.Cmd, bool) {
 		}
 		m.resetComposerInput()
 		m.startBusy(busyScopeSidebar, fmt.Sprintf("Denying approval %d…", id))
-		return m, tea.Batch(m.denyCmd(m.beginActiveOperation(), id), m.spinnerCmdIfNeeded()), true
+		return m, ui.Batch(m.denyCmd(m.beginActiveOperation(), id), m.spinnerCmdIfNeeded()), true
 	case strings.HasPrefix(trimmed, "/"):
 		m.status = fmt.Sprintf("unknown command: %s", trimmed)
 		return m, nil, true
@@ -2633,8 +2632,8 @@ func (m *Model) handleLocalCommand(prompt string) (tea.Model, tea.Cmd, bool) {
 	}
 }
 
-func (m Model) approvalPermissionProfileCmd(ctx context.Context, approvalID int64, profile string) tea.Cmd {
-	return func() tea.Msg {
+func (m Model) approvalPermissionProfileCmd(ctx context.Context, approvalID int64, profile string) ui.Cmd {
+	return func() ui.Msg {
 		events, err := m.agent.SetPermissionProfileAndReevaluateApproval(ctx, m.currentSession.ID, approvalID, profile)
 		return promptDoneMsg{events: events, err: err}
 	}
@@ -2650,7 +2649,7 @@ func (m *Model) beginActiveOperation() context.Context {
 	return ctx
 }
 
-func (m *Model) handleInterruptKey() (tea.Model, tea.Cmd) {
+func (m *Model) handleInterruptKey() (ui.Model, ui.Cmd) {
 	if m.activeOpCancel == nil {
 		return m, nil
 	}
@@ -2666,7 +2665,7 @@ func (m *Model) handleInterruptKey() (tea.Model, tea.Cmd) {
 	return m, m.syncWindowTitleCmd()
 }
 
-func (m *Model) queueComposerPrompt(mode queuedPromptMode) (tea.Model, tea.Cmd) {
+func (m *Model) queueComposerPrompt(mode queuedPromptMode) (ui.Model, ui.Cmd) {
 	prompt := strings.TrimSpace(m.composer.Value())
 	if prompt == "" && len(m.draftAttachments) == 0 && len(m.draftReferences) == 0 {
 		return m, nil
@@ -2688,7 +2687,7 @@ func (m *Model) queueComposerPrompt(mode queuedPromptMode) (tea.Model, tea.Cmd) 
 	return m, m.syncWindowTitleCmd()
 }
 
-func (m *Model) queueContinuePrompt() (tea.Model, tea.Cmd) {
+func (m *Model) queueContinuePrompt() (ui.Model, ui.Cmd) {
 	if ok, status := m.canContinue(); !ok {
 		m.status = status
 		return m, m.syncWindowTitleCmd()
@@ -2698,7 +2697,7 @@ func (m *Model) queueContinuePrompt() (tea.Model, tea.Cmd) {
 	return m, m.syncWindowTitleCmd()
 }
 
-func (m *Model) popQueuedPromptForEditing() (tea.Model, tea.Cmd) {
+func (m *Model) popQueuedPromptForEditing() (ui.Model, ui.Cmd) {
 	if m.queuedPrompt == nil {
 		return m, nil
 	}
@@ -2730,7 +2729,7 @@ func (m *Model) popQueuedPromptForEditing() (tea.Model, tea.Cmd) {
 	return m, m.syncWindowTitleCmd()
 }
 
-func (m *Model) dequeuePromptCmd() tea.Cmd {
+func (m *Model) dequeuePromptCmd() ui.Cmd {
 	if m.queuedPrompt == nil || m.loading {
 		return nil
 	}
@@ -2751,7 +2750,7 @@ func (m *Model) dequeuePromptCmd() tea.Cmd {
 	}
 	m.startBusy(busyScopeTranscript, item.runStatus())
 	if item.Mode == queuedPromptModeContinue {
-		return tea.Batch(m.continueCmd(m.beginActiveOperation()), m.spinnerCmdIfNeeded())
+		return ui.Batch(m.continueCmd(m.beginActiveOperation()), m.spinnerCmdIfNeeded())
 	}
 	m.appendLocalUserPrompt(item.Text, item.Attachments, item.References)
 	return m.kickoffPromptCmd(item.Text, item.Attachments, item.References)
@@ -2793,8 +2792,8 @@ func (m Model) ensureRuntimeContextWindow(ctx context.Context, session domain.Se
 	return providerID, contextWindow, true, nil
 }
 
-func (m Model) kickoffPromptCmd(prompt string, drafts []attachment.Draft, refs []reference.Draft) tea.Cmd {
-	return tea.Tick(time.Millisecond, func(time.Time) tea.Msg {
+func (m Model) kickoffPromptCmd(prompt string, drafts []attachment.Draft, refs []reference.Draft) ui.Cmd {
+	return ui.Tick(time.Millisecond, func(time.Time) ui.Msg {
 		return kickoffPromptMsg{
 			Prompt:      prompt,
 			Attachments: drafts,
@@ -2981,7 +2980,7 @@ func (m *Model) cancelComposerHistorySearch() {
 	m.status = "History search cancelled"
 }
 
-func (m *Model) finishOperationWithError(err error) (tea.Model, tea.Cmd) {
+func (m *Model) finishOperationWithError(err error) (ui.Model, ui.Cmd) {
 	if errors.Is(err, context.Canceled) {
 		m.stopBusyWithStatus("Interrupted")
 		return *m, m.syncWindowTitleCmd()
@@ -2992,30 +2991,30 @@ func (m *Model) finishOperationWithError(err error) (tea.Model, tea.Cmd) {
 	return *m, m.syncWindowTitleCmd()
 }
 
-func (m Model) compactCmd(ctx context.Context) tea.Cmd {
-	return func() tea.Msg {
+func (m Model) compactCmd(ctx context.Context) ui.Cmd {
+	return func() ui.Msg {
 		events, err := m.agent.Compact(ctx, m.currentSession.ID)
 		return promptDoneMsg{events: events, err: err}
 	}
 }
 
-func (m Model) approveCmd(ctx context.Context, approvalID int64) tea.Cmd {
-	return func() tea.Msg {
+func (m Model) approveCmd(ctx context.Context, approvalID int64) ui.Cmd {
+	return func() ui.Msg {
 		events, err := m.agent.Approve(ctx, m.currentSession.ID, approvalID)
 		return promptDoneMsg{events: events, err: err}
 	}
 }
 
-func (m Model) denyCmd(ctx context.Context, approvalID int64) tea.Cmd {
-	return func() tea.Msg {
+func (m Model) denyCmd(ctx context.Context, approvalID int64) ui.Cmd {
+	return func() ui.Msg {
 		events, err := m.agent.Deny(ctx, m.currentSession.ID, approvalID)
 		return promptDoneMsg{events: events, err: err}
 	}
 }
 
-func (m *Model) quit() (tea.Model, tea.Cmd) {
+func (m *Model) quit() (ui.Model, ui.Cmd) {
 	m.stopBusyWithStatus("Quitting")
-	return m, tea.Quit
+	return m, ui.Quit
 }
 
 func (m *Model) appendLocalUserPrompt(prompt string, drafts []attachment.Draft, refs []reference.Draft) {
@@ -3133,7 +3132,7 @@ func (m Model) clipboardWriteText(text string) error {
 	return kclipboard.WriteText(text)
 }
 
-func (m *Model) pasteClipboardText() (tea.Model, tea.Cmd) {
+func (m *Model) pasteClipboardText() (ui.Model, ui.Cmd) {
 	image, err := m.clipboardReadImage()
 	if err != nil {
 		m.status = "Clipboard image paste failed: " + err.Error()
@@ -3230,7 +3229,7 @@ func (m Model) pastedAttachmentPath(text string) string {
 	return path
 }
 
-func (m *Model) copyLatestAssistantMessage() (tea.Model, tea.Cmd) {
+func (m *Model) copyLatestAssistantMessage() (ui.Model, ui.Cmd) {
 	text := strings.TrimSpace(m.latestAssistantCopyText())
 	if text == "" {
 		m.status = "No assistant message to copy"
@@ -3359,7 +3358,7 @@ func (m Model) recordEvent(evt domain.Event) {
 	m.debug.RecordEvent(m.currentSession.ID, evt)
 }
 
-func (m *Model) spinnerCmdIfNeeded() tea.Cmd {
+func (m *Model) spinnerCmdIfNeeded() ui.Cmd {
 	if !m.busy.spinner.active {
 		return nil
 	}
@@ -3439,8 +3438,8 @@ func (m Model) windowTitle() string {
 	return fmt.Sprintf("K %s", title)
 }
 
-func (m Model) syncWindowTitleCmd() tea.Cmd {
-	return tea.SetWindowTitle(m.windowTitle())
+func (m Model) syncWindowTitleCmd() ui.Cmd {
+	return ui.SetWindowTitle(m.windowTitle())
 }
 
 func (m Model) draftSession() domain.Session {
@@ -3629,7 +3628,7 @@ func (m *Model) acceptSlashSelection() {
 	m.updateComposerMenus()
 }
 
-func (m *Model) executeSelectedSlashCommand() (tea.Model, tea.Cmd, bool) {
+func (m *Model) executeSelectedSlashCommand() (ui.Model, ui.Cmd, bool) {
 	if len(m.slashMatches) == 0 {
 		return nil, nil, false
 	}
@@ -3953,7 +3952,7 @@ func (m *Model) renderModelDialogElement() ui.Element {
 	return m.modelDialog
 }
 
-func (m *Model) handleSessionDialogKey(msg tea.KeyMsg) tea.Cmd {
+func (m *Model) handleSessionDialogKey(msg ui.KeyMsg) ui.Cmd {
 	if !m.hasSessionDialog() {
 		return nil
 	}
@@ -3961,16 +3960,16 @@ func (m *Model) handleSessionDialogKey(msg tea.KeyMsg) tea.Cmd {
 	switch action.Kind {
 	case dialogs.SessionDialogActionSelect:
 		m.startBusy(busyScopeSidebar, fmt.Sprintf("Resuming session %d…", action.SessionID))
-		return tea.Batch(m.loadSessionCmd(action.SessionID), m.spinnerCmdIfNeeded())
+		return ui.Batch(m.loadSessionCmd(action.SessionID), m.spinnerCmdIfNeeded())
 	case dialogs.SessionDialogActionCancel:
 		m.startBusy(busyScopeSidebar, "Creating session…")
-		return tea.Batch(m.newSessionCmd(), m.spinnerCmdIfNeeded())
+		return ui.Batch(m.newSessionCmd(), m.spinnerCmdIfNeeded())
 	default:
 		return nil
 	}
 }
 
-func (m *Model) handlePreferencesKey(msg tea.KeyMsg) tea.Cmd {
+func (m *Model) handlePreferencesKey(msg ui.KeyMsg) ui.Cmd {
 	if !m.hasPreferencesDialog() {
 		return nil
 	}
@@ -3982,7 +3981,7 @@ func (m *Model) handlePreferencesKey(msg tea.KeyMsg) tea.Cmd {
 			m.status = fmt.Sprintf("preferences preview failed: %v", err)
 			return m.syncWindowTitleCmd()
 		}
-		return tea.Batch(cmd, m.syncWindowTitleCmd())
+		return ui.Batch(cmd, m.syncWindowTitleCmd())
 	case dialogs.PreferencesActionApply:
 		cmd, err := m.applyUIConfig(action.UI, true)
 		if err != nil {
@@ -3991,7 +3990,7 @@ func (m *Model) handlePreferencesKey(msg tea.KeyMsg) tea.Cmd {
 		}
 		m.closePreferencesDialog()
 		m.status = "Preferences saved"
-		return tea.Batch(cmd, m.syncWindowTitleCmd())
+		return ui.Batch(cmd, m.syncWindowTitleCmd())
 	case dialogs.PreferencesActionCancel:
 		cmd, err := m.applyUIConfig(action.UI, false)
 		if err != nil {
@@ -4000,13 +3999,13 @@ func (m *Model) handlePreferencesKey(msg tea.KeyMsg) tea.Cmd {
 		}
 		m.closePreferencesDialog()
 		m.status = "Preferences cancelled"
-		return tea.Batch(cmd, m.syncWindowTitleCmd())
+		return ui.Batch(cmd, m.syncWindowTitleCmd())
 	default:
 		return nil
 	}
 }
 
-func (m *Model) handleToolsDialogKey(msg tea.KeyMsg) tea.Cmd {
+func (m *Model) handleToolsDialogKey(msg ui.KeyMsg) ui.Cmd {
 	if !m.hasToolsDialog() {
 		return nil
 	}
@@ -4029,7 +4028,7 @@ func (m *Model) handleToolsDialogKey(msg tea.KeyMsg) tea.Cmd {
 	}
 }
 
-func (m *Model) handleConnectDialogKey(msg tea.KeyMsg) tea.Cmd {
+func (m *Model) handleConnectDialogKey(msg ui.KeyMsg) ui.Cmd {
 	if !m.hasConnectDialog() {
 		return nil
 	}
@@ -4037,7 +4036,7 @@ func (m *Model) handleConnectDialogKey(msg tea.KeyMsg) tea.Cmd {
 	switch action.Kind {
 	case dialogs.ProviderConnectActionTest:
 		m.connectDialog.SetStatus("Testing connection…")
-		return tea.Batch(m.probeProviderCmd(action.Draft), m.syncWindowTitleCmd())
+		return ui.Batch(m.probeProviderCmd(action.Draft), m.syncWindowTitleCmd())
 	case dialogs.ProviderConnectActionSave:
 		discoveredModels := m.connectDialog.Models()
 		if err := m.saveProviderDraft(action.Draft); err != nil {
@@ -4048,7 +4047,7 @@ func (m *Model) handleConnectDialogKey(msg tea.KeyMsg) tea.Cmd {
 		m.closeConnectDialog()
 		if len(discoveredModels) > 0 {
 			m.status = fmt.Sprintf("Connected provider %s", action.Draft.ProviderID)
-			return tea.Batch(m.loadModelsCmd(action.Draft.ProviderID, true), m.syncWindowTitleCmd())
+			return ui.Batch(m.loadModelsCmd(action.Draft.ProviderID, true), m.syncWindowTitleCmd())
 		}
 		m.status = fmt.Sprintf("Connected provider %s", action.Draft.ProviderID)
 		m.refreshViewport()
@@ -4062,7 +4061,7 @@ func (m *Model) handleConnectDialogKey(msg tea.KeyMsg) tea.Cmd {
 	}
 }
 
-func (m *Model) handleDisconnectDialogKey(msg tea.KeyMsg) tea.Cmd {
+func (m *Model) handleDisconnectDialogKey(msg ui.KeyMsg) ui.Cmd {
 	if !m.hasDisconnectDialog() {
 		return nil
 	}
@@ -4086,7 +4085,7 @@ func (m *Model) handleDisconnectDialogKey(msg tea.KeyMsg) tea.Cmd {
 	}
 }
 
-func (m *Model) handleModelDialogKey(msg tea.KeyMsg) tea.Cmd {
+func (m *Model) handleModelDialogKey(msg ui.KeyMsg) ui.Cmd {
 	if !m.hasModelDialog() {
 		return nil
 	}
@@ -4114,20 +4113,20 @@ func (m *Model) hasApprovalPrompt() bool {
 	return !m.loading && len(m.approvals) > 0
 }
 
-func (m *Model) submitApprovalChoice(approve bool) (tea.Model, tea.Cmd) {
+func (m *Model) submitApprovalChoice(approve bool) (ui.Model, ui.Cmd) {
 	if !m.hasApprovalPrompt() {
 		return m, nil
 	}
 	id := m.approvals[0].ID
 	if approve {
 		m.startBusy(busyScopeTranscript, fmt.Sprintf("Approving approval %d…", id))
-		return m, tea.Batch(m.approveCmd(m.beginActiveOperation(), id), m.spinnerCmdIfNeeded())
+		return m, ui.Batch(m.approveCmd(m.beginActiveOperation(), id), m.spinnerCmdIfNeeded())
 	}
 	m.startBusy(busyScopeSidebar, fmt.Sprintf("Denying approval %d…", id))
-	return m, tea.Batch(m.denyCmd(m.beginActiveOperation(), id), m.spinnerCmdIfNeeded())
+	return m, ui.Batch(m.denyCmd(m.beginActiveOperation(), id), m.spinnerCmdIfNeeded())
 }
 
-func (m *Model) activateApprovalButton(index int) (tea.Model, tea.Cmd) {
+func (m *Model) activateApprovalButton(index int) (ui.Model, ui.Cmd) {
 	switch index {
 	case 0:
 		return m.submitApprovalChoice(true)
@@ -4373,7 +4372,7 @@ func (m *Model) syncComposerBlinkTimer() {
 	})
 }
 
-func (m *Model) rootTimerCmd() tea.Cmd {
+func (m *Model) rootTimerCmd() ui.Cmd {
 	root := m.syncUIRoot()
 	now := time.Now()
 	delay, ok := root.NextTimerDelay(now)
@@ -4390,7 +4389,7 @@ func (m *Model) rootTimerCmd() tea.Cmd {
 	m.rootTimerPending = true
 	m.rootTimerPendingAt = dueAt
 	seq := m.rootTimerSeq
-	return tea.Tick(delay, func(t time.Time) tea.Msg {
+	return ui.Tick(delay, func(t time.Time) ui.Msg {
 		return rootTimerMsg{At: t, Seq: seq}
 	})
 }
@@ -4419,13 +4418,13 @@ func (m *Model) buildTranscriptItems() []ui.TranscriptItem {
 	return items
 }
 
-func (m *Model) withRootTimers(cmd tea.Cmd) tea.Cmd {
+func (m *Model) withRootTimers(cmd ui.Cmd) ui.Cmd {
 	m.syncComposerBlinkTimer()
 	timerCmd := m.rootTimerCmd()
 	if timerCmd == nil {
 		return cmd
 	}
-	return tea.Batch(cmd, timerCmd)
+	return ui.Batch(cmd, timerCmd)
 }
 
 func (m *Model) closePicker() {
@@ -4770,8 +4769,8 @@ func (m *Model) renderHelpModalElement() ui.Element {
 	return *m.helpModal
 }
 
-func (m Model) previewLLMRequestCmd(ctx context.Context, prompt string, drafts []attachment.Draft, refs []reference.Draft) tea.Cmd {
-	return func() tea.Msg {
+func (m Model) previewLLMRequestCmd(ctx context.Context, prompt string, drafts []attachment.Draft, refs []reference.Draft) ui.Cmd {
+	return func() ui.Msg {
 		req, err := m.agent.PreviewNextRequest(ctx, m.currentSession, prompt, drafts, refs, m.pendingModelNote)
 		if err != nil {
 			return llmPreviewMsg{err: err}
@@ -4867,8 +4866,8 @@ func (m Model) renderAgentsSidebarStatus() string {
 	return lipgloss.NewStyle().Foreground(color).Render(m.agentsStatusLabel())
 }
 
-func (m Model) probeProviderCmd(draft provider.ConnectDraft) tea.Cmd {
-	return func() tea.Msg {
+func (m Model) probeProviderCmd(draft provider.ConnectDraft) ui.Cmd {
+	return func() ui.Msg {
 		result, err := provider.Probe(context.Background(), draft, m.debug)
 		if err == nil {
 			result.Models, err = m.capabilityStore().EnrichModels(draft.ProviderID, draft.ToConfig(), result.Models)
@@ -4877,8 +4876,8 @@ func (m Model) probeProviderCmd(draft provider.ConnectDraft) tea.Cmd {
 	}
 }
 
-func (m Model) loadModelsCmd(providerID string, postConnect bool) tea.Cmd {
-	return func() tea.Msg {
+func (m Model) loadModelsCmd(providerID string, postConnect bool) ui.Cmd {
+	return func() ui.Msg {
 		cfg, ok := m.cfg.Provider(providerID)
 		if !ok {
 			return modelListMsg{providerID: providerID, err: fmt.Errorf("provider %q not configured", providerID)}
@@ -5123,7 +5122,7 @@ func (m *Model) movePicker(delta int) {
 	m.previewSelectedTheme()
 }
 
-func (m *Model) submitPickerSelection(value string) (tea.Model, tea.Cmd) {
+func (m *Model) submitPickerSelection(value string) (ui.Model, ui.Cmd) {
 	switch m.picker.mode {
 	case pickerModeTheme:
 		if strings.TrimSpace(value) == "" {
@@ -5144,7 +5143,7 @@ func (m *Model) submitPickerSelection(value string) (tea.Model, tea.Cmd) {
 		m.closePicker()
 		if approvalID > 0 {
 			m.startBusy(busyScopeTranscript, fmt.Sprintf("Re-evaluating approval %d with %s…", approvalID, permission.DisplayName(value)))
-			return m, tea.Batch(m.approvalPermissionProfileCmd(m.beginActiveOperation(), approvalID, value), m.spinnerCmdIfNeeded(), m.syncWindowTitleCmd())
+			return m, ui.Batch(m.approvalPermissionProfileCmd(m.beginActiveOperation(), approvalID, value), m.spinnerCmdIfNeeded(), m.syncWindowTitleCmd())
 		}
 		if err := m.selectPermissionProfile(value); err != nil {
 			m.status = err.Error()
@@ -5166,7 +5165,7 @@ func (m *Model) submitPickerSelection(value string) (tea.Model, tea.Cmd) {
 	}
 }
 
-func (m *Model) cancelPicker() (tea.Model, tea.Cmd) {
+func (m *Model) cancelPicker() (ui.Model, ui.Cmd) {
 	switch m.picker.mode {
 	case pickerModeTheme:
 		restore := strings.TrimSpace(m.picker.initialValue)
@@ -5287,7 +5286,7 @@ func (m *Model) queuePermissionChangeNote() {
 	)
 }
 
-func (m *Model) applyUIConfig(next config.UI, save bool) (tea.Cmd, error) {
+func (m *Model) applyUIConfig(next config.UI, save bool) (ui.Cmd, error) {
 	prevMouse := m.mouseEnabled
 
 	selected := theme.Resolve(next.Theme)
@@ -5316,23 +5315,23 @@ func (m *Model) applyUIConfig(next config.UI, save bool) (tea.Cmd, error) {
 		}
 	}
 
-	cmds := make([]tea.Cmd, 0, 2)
+	cmds := make([]ui.Cmd, 0, 2)
 	if prevMouse == m.mouseEnabled {
 		if len(cmds) == 0 {
 			return nil, nil
 		}
-		return tea.Batch(cmds...), nil
+		return ui.Batch(cmds...), nil
 	}
 	if m.mouseEnabled {
-		cmds = append(cmds, func() tea.Msg { return tea.EnableMouseCellMotion() })
-		return tea.Batch(cmds...), nil
+		cmds = append(cmds, func() ui.Msg { return ui.EnableMouseCellMotion() })
+		return ui.Batch(cmds...), nil
 	}
-	cmds = append(cmds, func() tea.Msg { return tea.DisableMouse() })
-	return tea.Batch(cmds...), nil
+	cmds = append(cmds, func() ui.Msg { return ui.DisableMouse() })
+	return ui.Batch(cmds...), nil
 }
 
-func spinnerTickCmd() tea.Cmd {
-	return tea.Tick(120*time.Millisecond, func(time.Time) tea.Msg {
+func spinnerTickCmd() ui.Cmd {
+	return ui.Tick(120*time.Millisecond, func(time.Time) ui.Msg {
 		return spinnerTickMsg{}
 	})
 }

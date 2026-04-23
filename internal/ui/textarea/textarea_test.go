@@ -5,13 +5,13 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/lipgloss"
-	tea "github.com/lkarlslund/koder/internal/ui/tea"
+	"github.com/lkarlslund/koder/internal/ui"
 )
 
 func TestUpdateInsertsRunesAndSpaces(t *testing.T) {
 	m := newTestModel()
 
-	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("hi")})
+	next, cmd := m.Update(ui.KeyMsg{Type: ui.KeyRunes, Runes: []rune("hi")})
 	if cmd == nil {
 		t.Fatal("expected blink command after rune input")
 	}
@@ -19,12 +19,12 @@ func TestUpdateInsertsRunesAndSpaces(t *testing.T) {
 		t.Fatalf("expected rune input to be inserted, got %q", got)
 	}
 
-	next, _ = next.Update(tea.KeyMsg{Type: tea.KeySpace})
+	next, _ = next.Update(ui.KeyMsg{Type: ui.KeySpace})
 	if got := next.Value(); got != "hi " {
 		t.Fatalf("expected space key to insert a space, got %q", got)
 	}
 
-	next, _ = next.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("there")})
+	next, _ = next.Update(ui.KeyMsg{Type: ui.KeyRunes, Runes: []rune("there")})
 	if got := next.Value(); got != "hi there" {
 		t.Fatalf("expected text after space insertion, got %q", got)
 	}
@@ -35,18 +35,18 @@ func TestUpdateMovesCursorAndEditsAtCursor(t *testing.T) {
 	m.SetValue("ac")
 	m.SetCursor(len("a"))
 
-	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("b")})
+	next, _ := m.Update(ui.KeyMsg{Type: ui.KeyRunes, Runes: []rune("b")})
 	if got := next.Value(); got != "abc" {
 		t.Fatalf("expected insertion at cursor, got %q", got)
 	}
 
-	next, _ = next.Update(tea.KeyMsg{Type: tea.KeyLeft})
-	next, _ = next.Update(tea.KeyMsg{Type: tea.KeyDelete})
+	next, _ = next.Update(ui.KeyMsg{Type: ui.KeyLeft})
+	next, _ = next.Update(ui.KeyMsg{Type: ui.KeyDelete})
 	if got := next.Value(); got != "ac" {
 		t.Fatalf("expected delete at cursor to remove the following rune, got %q", got)
 	}
 
-	next, _ = next.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	next, _ = next.Update(ui.KeyMsg{Type: ui.KeyBackspace})
 	if got := next.Value(); got != "c" {
 		t.Fatalf("expected backspace to remove the previous rune, got %q", got)
 	}
@@ -56,27 +56,27 @@ func TestUpdateHomeEndAndControlAliases(t *testing.T) {
 	m := newTestModel()
 	m.SetValue("hello")
 
-	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyHome})
-	next, _ = next.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("!")})
+	next, _ := m.Update(ui.KeyMsg{Type: ui.KeyHome})
+	next, _ = next.Update(ui.KeyMsg{Type: ui.KeyRunes, Runes: []rune("!")})
 	if got := next.Value(); got != "!hello" {
 		t.Fatalf("expected home to move to the beginning, got %q", got)
 	}
 
-	next, _ = next.Update(tea.KeyMsg{Type: tea.KeyEnd})
-	next, _ = next.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("?")})
+	next, _ = next.Update(ui.KeyMsg{Type: ui.KeyEnd})
+	next, _ = next.Update(ui.KeyMsg{Type: ui.KeyRunes, Runes: []rune("?")})
 	if got := next.Value(); got != "!hello?" {
 		t.Fatalf("expected end to move to the end, got %q", got)
 	}
 
-	next, _ = next.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(" more")})
-	next, _ = next.Update(tea.KeyMsg{Type: tea.KeyCtrlA})
-	next, _ = next.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(">")})
+	next, _ = next.Update(ui.KeyMsg{Type: ui.KeyRunes, Runes: []rune(" more")})
+	next, _ = next.Update(ui.KeyMsg{Type: ui.KeyCtrlA})
+	next, _ = next.Update(ui.KeyMsg{Type: ui.KeyRunes, Runes: []rune(">")})
 	if got := next.Value(); got[0] != '>' {
 		t.Fatalf("expected ctrl+a to move cursor to start, got %q", got)
 	}
 
-	next, _ = next.Update(tea.KeyMsg{Type: tea.KeyCtrlE})
-	next, _ = next.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("<")})
+	next, _ = next.Update(ui.KeyMsg{Type: ui.KeyCtrlE})
+	next, _ = next.Update(ui.KeyMsg{Type: ui.KeyRunes, Runes: []rune("<")})
 	if got := next.Value(); got[len(got)-1] != '<' {
 		t.Fatalf("expected ctrl+e to move cursor to end, got %q", got)
 	}
@@ -147,7 +147,7 @@ func TestStaleBlinkTickIsIgnored(t *testing.T) {
 	m.SetCursor(len("abc"))
 
 	currentGen := m.blinkGeneration
-	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	next, _ := m.Update(ui.KeyMsg{Type: ui.KeyRunes, Runes: []rune("d")})
 	if next.blinkGeneration == currentGen {
 		t.Fatal("expected key input to advance blink generation")
 	}
@@ -220,7 +220,7 @@ func TestBlurStopsBlinkAndInput(t *testing.T) {
 		t.Fatalf("expected blurred view to remain unchanged, before=%q after=%q", m.View(), got)
 	}
 
-	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+	next, _ = m.Update(ui.KeyMsg{Type: ui.KeyRunes, Runes: []rune("x")})
 	if got := next.Value(); got != "abc" {
 		t.Fatalf("expected blurred model to ignore text input, got %q", got)
 	}
@@ -233,7 +233,7 @@ func TestResetClearsValueAndCursor(t *testing.T) {
 	if got := m.Value(); got != "" {
 		t.Fatalf("expected reset to clear the value, got %q", got)
 	}
-	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")})
+	next, _ := m.Update(ui.KeyMsg{Type: ui.KeyRunes, Runes: []rune("a")})
 	if got := next.Value(); got != "a" {
 		t.Fatalf("expected input after reset to start from an empty state, got %q", got)
 	}

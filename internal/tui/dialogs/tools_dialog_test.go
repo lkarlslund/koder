@@ -4,8 +4,6 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/lkarlslund/koder/internal/ui/tea"
-
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/theme"
 	"github.com/lkarlslund/koder/internal/ui"
@@ -21,13 +19,13 @@ func TestToolsDialogTogglesAndAppliesStates(t *testing.T) {
 		{Tool: domain.ToolKindBash, Label: "Bash", Enabled: true},
 	})
 
-	dialog.Update(tea.KeyMsg{Type: tea.KeyDown})
-	dialog.Update(tea.KeyMsg{Type: tea.KeySpace})
-	action := dialog.Update(tea.KeyMsg{Type: tea.KeyTab})
+	dialog.Update(ui.KeyMsg{Type: ui.KeyDown})
+	dialog.Update(ui.KeyMsg{Type: ui.KeySpace})
+	action := dialog.Update(ui.KeyMsg{Type: ui.KeyTab})
 	if action.Kind != ToolsDialogActionNone {
 		t.Fatalf("unexpected action on tab: %#v", action)
 	}
-	action = dialog.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	action = dialog.Update(ui.KeyMsg{Type: ui.KeyEnter})
 	if action.Kind != ToolsDialogActionApply {
 		t.Fatalf("expected apply action, got %#v", action)
 	}

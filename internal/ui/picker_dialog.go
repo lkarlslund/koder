@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
-	tea "github.com/lkarlslund/koder/internal/ui/tea"
 
 	"github.com/lkarlslund/koder/internal/theme"
 )
@@ -91,7 +90,7 @@ func (d *PickerDialog) SetCurrentValue(value string) bool {
 	return false
 }
 
-func (d *PickerDialog) Update(msg tea.KeyMsg) PickerDialogAction {
+func (d *PickerDialog) Update(msg KeyMsg) PickerDialogAction {
 	var action PickerDialogAction
 	d.buttons.Buttons[0].OnPress = func() { action = d.selectCurrent() }
 	d.buttons.Buttons[1].OnPress = func() { action = PickerDialogAction{Kind: PickerDialogActionCancel} }
@@ -137,7 +136,7 @@ func (d *PickerDialog) Update(msg tea.KeyMsg) PickerDialogAction {
 			d.refilter()
 		}
 	default:
-		if d.Focus == pickerDialogFocusList && msg.Type == tea.KeyRunes {
+		if d.Focus == pickerDialogFocusList && msg.Type == KeyRunes {
 			d.Query += msg.String()
 			d.refilter()
 		}

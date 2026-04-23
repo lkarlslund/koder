@@ -8,10 +8,9 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/lkarlslund/koder/internal/ui/tea"
-
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/ui"
 	"github.com/lkarlslund/koder/internal/workspace"
 )
 
@@ -115,7 +114,7 @@ func BenchmarkRefreshViewportLargeTranscript(b *testing.B) {
 
 func BenchmarkHandleKeyTyping(b *testing.B) {
 	m := benchmarkModel(b, 40)
-	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")}
+	msg := ui.KeyMsg{Type: ui.KeyRunes, Runes: []rune("x")}
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		next, _ := m.handleKey(msg)
@@ -126,7 +125,7 @@ func BenchmarkHandleKeyTyping(b *testing.B) {
 func BenchmarkHandleKeyTypingSlashMode(b *testing.B) {
 	m := benchmarkModel(b, 40)
 	m.composer.SetValue("/")
-	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")}
+	msg := ui.KeyMsg{Type: ui.KeyRunes, Runes: []rune("n")}
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		next, _ := m.handleKey(msg)
@@ -137,7 +136,7 @@ func BenchmarkHandleKeyTypingSlashMode(b *testing.B) {
 func BenchmarkHandleKeyTypingMentionMode(b *testing.B) {
 	m := benchmarkModel(b, 40)
 	m.composer.SetValue("inspect @./cmd/")
-	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("k")}
+	msg := ui.KeyMsg{Type: ui.KeyRunes, Runes: []rune("k")}
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		next, _ := m.handleKey(msg)
@@ -148,7 +147,7 @@ func BenchmarkHandleKeyTypingMentionMode(b *testing.B) {
 func BenchmarkHandleKeyTypingLargeDraft(b *testing.B) {
 	m := benchmarkModel(b, 40)
 	m.composer.SetValue(strings.Repeat("draft text ", 200))
-	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")}
+	msg := ui.KeyMsg{Type: ui.KeyRunes, Runes: []rune("x")}
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		next, _ := m.handleKey(msg)

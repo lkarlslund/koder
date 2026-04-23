@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	tea "github.com/lkarlslund/koder/internal/ui/tea"
-
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/theme"
 	. "github.com/lkarlslund/koder/internal/ui"
@@ -118,7 +116,7 @@ func (d PreferencesDialog) Original() config.UI {
 	return d.original
 }
 
-func (d *PreferencesDialog) Update(msg tea.KeyMsg) PreferencesAction {
+func (d *PreferencesDialog) Update(msg KeyMsg) PreferencesAction {
 	switch msg.String() {
 	case "esc":
 		return PreferencesAction{Kind: PreferencesActionCancel, UI: d.original}

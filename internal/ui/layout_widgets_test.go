@@ -70,7 +70,7 @@ func TestSectionRendersTitleAbovePanel(t *testing.T) {
 
 func TestScrollFrameRendersVisibleWindowAtOffset(t *testing.T) {
 	got := RenderElement(nil, ScrollFrame{
-		Child: Static{Content: "line1\nline2\nline3\nline4"},
+		Child:   Static{Content: "line1\nline2\nline3\nline4"},
 		OffsetY: 1,
 		Width:   5,
 		Height:  2,

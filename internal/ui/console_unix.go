@@ -1,6 +1,6 @@
 //go:build !windows
 
-package tea
+package ui
 
 import "os"
 

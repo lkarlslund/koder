@@ -4,8 +4,6 @@ import (
 	"strconv"
 	"strings"
 
-	tea "github.com/lkarlslund/koder/internal/ui/tea"
-
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/theme"
 	. "github.com/lkarlslund/koder/internal/ui"
@@ -64,7 +62,7 @@ func NewToolsDialog(items []ToolToggleItem) ToolsDialog {
 	return dialog
 }
 
-func (d *ToolsDialog) Update(msg tea.KeyMsg) ToolsDialogAction {
+func (d *ToolsDialog) Update(msg KeyMsg) ToolsDialogAction {
 	var action ToolsDialogAction
 	d.buttons.Buttons[0].OnPress = func() {
 		action = ToolsDialogAction{Kind: ToolsDialogActionApply, States: d.States()}

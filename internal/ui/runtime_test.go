@@ -4,7 +4,6 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/lkarlslund/koder/internal/ui/tea"
 	"github.com/lkarlslund/koder/internal/theme"
 )
 
@@ -35,21 +34,21 @@ func (w *stubWindow) Bounds(Rect) Rect {
 	return w.bounds
 }
 
-func (w *stubWindow) HandleKey(msg KeyEvent) (bool, tea.Cmd) {
+func (w *stubWindow) HandleKey(msg KeyEvent) (bool, Cmd) {
 	w.keys = append(w.keys, msg.String())
 	w.Dirty = true
 	return true, nil
 }
 
-func (w *stubWindow) HandleMouse(msg MouseEvent) (bool, tea.Cmd) {
-	if msg.Action == tea.MouseActionPress {
+func (w *stubWindow) HandleMouse(msg MouseEvent) (bool, Cmd) {
+	if msg.Action == MouseActionPress {
 		w.mousePresses++
 	}
 	w.Dirty = true
 	return true, nil
 }
 
-func (w *stubWindow) HandleTimer(TimerEvent) (bool, tea.Cmd) {
+func (w *stubWindow) HandleTimer(TimerEvent) (bool, Cmd) {
 	w.timerEvents++
 	w.Dirty = true
 	return true, nil
@@ -73,7 +72,7 @@ func TestRootRoutesKeysToFocusedWindow(t *testing.T) {
 	root.SetMainWindow(main)
 	root.PushWindow(modal)
 
-	handled, _ := root.HandleEvent(KeyEvent{Type: tea.KeyEnter})
+	handled, _ := root.HandleEvent(KeyEvent{Type: KeyEnter})
 	if !handled {
 		t.Fatal("expected focused window to handle key")
 	}
@@ -100,7 +99,7 @@ func TestRootRestoresFocusWhenModalCloses(t *testing.T) {
 	if got := root.FocusedWindow(); got != "main" {
 		t.Fatalf("expected focus to return to main, got %q", got)
 	}
-	handled, _ := root.HandleEvent(KeyEvent{Type: tea.KeyTab})
+	handled, _ := root.HandleEvent(KeyEvent{Type: KeyTab})
 	if !handled {
 		t.Fatal("expected main window to handle key after modal closes")
 	}
@@ -117,7 +116,7 @@ func TestRootRoutesMouseToTopmostHitWindow(t *testing.T) {
 	root.SetMainWindow(main)
 	root.PushWindow(modal)
 
-	handled, _ := root.HandleEvent(MouseEvent{X: 5, Y: 3, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
+	handled, _ := root.HandleEvent(MouseEvent{X: 5, Y: 3, Action: MouseActionPress, Button: MouseButtonLeft})
 	if !handled {
 		t.Fatal("expected topmost hit window to handle mouse")
 	}

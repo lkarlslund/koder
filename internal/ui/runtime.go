@@ -2,17 +2,14 @@ package ui
 
 import (
 	"cmp"
+	"github.com/lkarlslund/koder/internal/theme"
 	"slices"
 	"time"
-
-	tea "github.com/lkarlslund/koder/internal/ui/tea"
-	"github.com/lkarlslund/koder/internal/theme"
 )
 
-type SurfaceView = tea.SurfaceView
 type Event interface{}
-type KeyEvent = tea.KeyMsg
-type MouseEvent = tea.MouseMsg
+type KeyEvent = KeyMsg
+type MouseEvent = MouseMsg
 
 type ElementID string
 type WindowID string
@@ -151,18 +148,18 @@ type Window interface {
 	ClearRedraw()
 	Focus()
 	Blur()
-	HandleKey(KeyEvent) (bool, tea.Cmd)
-	HandleMouse(MouseEvent) (bool, tea.Cmd)
+	HandleKey(KeyEvent) (bool, Cmd)
+	HandleMouse(MouseEvent) (bool, Cmd)
 	Render(ctx *Context, bounds Rect) Surface
 }
 
 type TimerHandler interface {
-	HandleTimer(TimerEvent) (bool, tea.Cmd)
+	HandleTimer(TimerEvent) (bool, Cmd)
 }
 
 type BaseWindow struct {
-	WindowID  WindowID
-	Order     int
+	WindowID      WindowID
+	Order         int
 	FocusableFlag bool
 	VisibleFlag   bool
 	ModalFlag     bool
@@ -217,11 +214,11 @@ func (w *BaseWindow) Blur() {
 	w.Dirty = true
 }
 
-func (w *BaseWindow) HandleKey(KeyEvent) (bool, tea.Cmd) {
+func (w *BaseWindow) HandleKey(KeyEvent) (bool, Cmd) {
 	return false, nil
 }
 
-func (w *BaseWindow) HandleMouse(MouseEvent) (bool, tea.Cmd) {
+func (w *BaseWindow) HandleMouse(MouseEvent) (bool, Cmd) {
 	return false, nil
 }
 
@@ -435,7 +432,7 @@ func (r *Root) NextTimerDelay(now time.Time) (time.Duration, bool) {
 	return r.timerSchedule.NextDelay(now)
 }
 
-func (r *Root) HandleEvent(event Event) (bool, tea.Cmd) {
+func (r *Root) HandleEvent(event Event) (bool, Cmd) {
 	if r == nil {
 		return false, nil
 	}
@@ -461,7 +458,7 @@ func (r *Root) HandleEvent(event Event) (bool, tea.Cmd) {
 		if window == nil {
 			return false, nil
 		}
-		if typed.Action == tea.MouseActionPress && typed.Button == tea.MouseButtonLeft && window.Focusable() {
+		if typed.Action == MouseActionPress && typed.Button == MouseButtonLeft && window.Focusable() {
 			r.FocusWindow(window.ID())
 		}
 		handled, cmd := window.HandleMouse(typed)

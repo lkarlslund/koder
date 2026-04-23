@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	tea "github.com/lkarlslund/koder/internal/ui/tea"
-
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/theme"
@@ -120,7 +118,7 @@ func (d ConnectDialog) Models() []string {
 	return out
 }
 
-func (d *ConnectDialog) Update(msg tea.KeyMsg) ProviderConnectAction {
+func (d *ConnectDialog) Update(msg KeyMsg) ProviderConnectAction {
 	switch d.stage {
 	case connectStageProvider:
 		return d.updateProviderList(msg)
@@ -161,7 +159,7 @@ func (d ConnectDialog) dialog(width int, palette theme.Palette) Element {
 	}
 }
 
-func (d *ConnectDialog) updateProviderList(msg tea.KeyMsg) ProviderConnectAction {
+func (d *ConnectDialog) updateProviderList(msg KeyMsg) ProviderConnectAction {
 	switch msg.String() {
 	case "esc":
 		return ProviderConnectAction{Kind: ProviderConnectActionCancel}
@@ -181,7 +179,7 @@ func (d *ConnectDialog) updateProviderList(msg tea.KeyMsg) ProviderConnectAction
 		}
 		d.selectProvider(item)
 	default:
-		if msg.Type == tea.KeyRunes {
+		if msg.Type == KeyRunes {
 			d.query += msg.String()
 			d.refilter()
 		}
@@ -189,7 +187,7 @@ func (d *ConnectDialog) updateProviderList(msg tea.KeyMsg) ProviderConnectAction
 	return ProviderConnectAction{}
 }
 
-func (d *ConnectDialog) updateAuthPicker(msg tea.KeyMsg) ProviderConnectAction {
+func (d *ConnectDialog) updateAuthPicker(msg KeyMsg) ProviderConnectAction {
 	switch msg.String() {
 	case "esc":
 		d.stage = connectStageProvider
@@ -207,7 +205,7 @@ func (d *ConnectDialog) updateAuthPicker(msg tea.KeyMsg) ProviderConnectAction {
 	return ProviderConnectAction{}
 }
 
-func (d *ConnectDialog) updateForm(msg tea.KeyMsg) ProviderConnectAction {
+func (d *ConnectDialog) updateForm(msg KeyMsg) ProviderConnectAction {
 	switch msg.String() {
 	case "esc":
 		return ProviderConnectAction{Kind: ProviderConnectActionCancel}
@@ -258,7 +256,7 @@ func (d *ConnectDialog) updateForm(msg tea.KeyMsg) ProviderConnectAction {
 			d.adjustModel(1)
 		}
 	default:
-		if msg.Type == tea.KeyRunes {
+		if msg.Type == KeyRunes {
 			d.appendText(msg.String())
 		}
 	}

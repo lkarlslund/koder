@@ -1,4 +1,4 @@
-package tea
+package ui
 
 import (
 	"errors"
@@ -11,9 +11,6 @@ type Msg any
 type Model interface {
 	Init() Cmd
 	Update(Msg) (Model, Cmd)
-}
-
-type SurfaceModel interface {
 	ViewSurface() SurfaceView
 }
 

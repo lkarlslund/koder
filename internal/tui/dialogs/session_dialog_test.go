@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/x/ansi"
-	tea "github.com/lkarlslund/koder/internal/ui/tea"
 
 	"github.com/lkarlslund/koder/internal/theme"
 	"github.com/lkarlslund/koder/internal/ui"
@@ -22,9 +21,9 @@ func TestSessionDialogSelectsCurrentSession(t *testing.T) {
 		{Title: "First", Value: "1"},
 		{Title: "Second", Value: "2"},
 	}, false)
-	dialog.Update(tea.KeyMsg{Type: tea.KeyDown})
+	dialog.Update(ui.KeyMsg{Type: ui.KeyDown})
 
-	action := dialog.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	action := dialog.Update(ui.KeyMsg{Type: ui.KeyEnter})
 	if action.Kind != SessionDialogActionSelect {
 		t.Fatalf("expected select action, got %#v", action)
 	}
@@ -38,7 +37,7 @@ func TestSessionDialogFiltersItems(t *testing.T) {
 		{Title: "Alpha", Value: "1"},
 		{Title: "Beta", Value: "2"},
 	}, false)
-	dialog.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("b")})
+	dialog.Update(ui.KeyMsg{Type: ui.KeyRunes, Runes: []rune("b")})
 
 	view := renderSessionDialog(dialog, 84, theme.Default().Palette)
 	if strings.Contains(view, "Alpha") {
@@ -158,7 +157,7 @@ func TestSessionDialogViewShowsCWDColumnWhenEnabled(t *testing.T) {
 
 func TestSessionDialogAltCCancels(t *testing.T) {
 	dialog := NewSessionDialog([]SessionItem{{Title: "First", Value: "1"}}, false)
-	action := dialog.Update(tea.KeyMsg{Type: tea.KeyRunes, Alt: true, Runes: []rune("c")})
+	action := dialog.Update(ui.KeyMsg{Type: ui.KeyRunes, Alt: true, Runes: []rune("c")})
 	if action.Kind != SessionDialogActionCancel {
 		t.Fatalf("expected alt+c to cancel, got %#v", action)
 	}
