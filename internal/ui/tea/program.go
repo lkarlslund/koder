@@ -1,6 +1,7 @@
 package tea
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -146,8 +147,19 @@ func (p *Program) runCmd(cmd Cmd, out chan<- Msg) {
 
 func (p *Program) render(out io.Writer) error {
 	view := p.model.View()
-	_, err := io.WriteString(out, "\x1b[H\x1b[2J"+view)
+	_, err := io.WriteString(out, renderFrame(view))
 	return err
+}
+
+func renderFrame(view string) string {
+	lines := strings.Split(view, "\n")
+	var buf strings.Builder
+	buf.WriteString("\x1b[H\x1b[2J")
+	for idx, line := range lines {
+		fmt.Fprintf(&buf, "\x1b[%d;1H", idx+1)
+		buf.WriteString(line)
+	}
+	return buf.String()
 }
 
 func (p *Program) setWindowTitle(out io.Writer, title string) {
