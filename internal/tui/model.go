@@ -3904,26 +3904,26 @@ func (m *Model) renderModelDialogElement() ui.Element {
 	return m.modelDialog
 }
 
-func (m *Model) handleSessionDialogKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *Model) handleSessionDialogKey(msg tea.KeyMsg) tea.Cmd {
 	if !m.hasSessionDialog() {
-		return m, nil
+		return nil
 	}
 	action := m.sessionDialog.Update(msg)
 	switch action.Kind {
 	case dialogs.SessionDialogActionSelect:
 		m.startBusy(busyScopeSidebar, fmt.Sprintf("Resuming session %d…", action.SessionID))
-		return m, tea.Batch(m.loadSessionCmd(action.SessionID), m.spinnerCmdIfNeeded())
+		return tea.Batch(m.loadSessionCmd(action.SessionID), m.spinnerCmdIfNeeded())
 	case dialogs.SessionDialogActionCancel:
 		m.startBusy(busyScopeSidebar, "Creating session…")
-		return m, tea.Batch(m.newSessionCmd(), m.spinnerCmdIfNeeded())
+		return tea.Batch(m.newSessionCmd(), m.spinnerCmdIfNeeded())
 	default:
-		return m, nil
+		return nil
 	}
 }
 
-func (m *Model) handlePreferencesKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *Model) handlePreferencesKey(msg tea.KeyMsg) tea.Cmd {
 	if !m.hasPreferencesDialog() {
-		return m, nil
+		return nil
 	}
 	action := m.preferences.Update(msg)
 	switch action.Kind {
@@ -3931,133 +3931,133 @@ func (m *Model) handlePreferencesKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		cmd, err := m.applyUIConfig(action.UI, false)
 		if err != nil {
 			m.status = fmt.Sprintf("preferences preview failed: %v", err)
-			return m, m.syncWindowTitleCmd()
+			return m.syncWindowTitleCmd()
 		}
-		return m, tea.Batch(cmd, m.syncWindowTitleCmd())
+		return tea.Batch(cmd, m.syncWindowTitleCmd())
 	case dialogs.PreferencesActionApply:
 		cmd, err := m.applyUIConfig(action.UI, true)
 		if err != nil {
 			m.status = fmt.Sprintf("preferences save failed: %v", err)
-			return m, m.syncWindowTitleCmd()
+			return m.syncWindowTitleCmd()
 		}
 		m.closePreferencesDialog()
 		m.status = "Preferences saved"
-		return m, tea.Batch(cmd, m.syncWindowTitleCmd())
+		return tea.Batch(cmd, m.syncWindowTitleCmd())
 	case dialogs.PreferencesActionCancel:
 		cmd, err := m.applyUIConfig(action.UI, false)
 		if err != nil {
 			m.status = fmt.Sprintf("preferences restore failed: %v", err)
-			return m, m.syncWindowTitleCmd()
+			return m.syncWindowTitleCmd()
 		}
 		m.closePreferencesDialog()
 		m.status = "Preferences cancelled"
-		return m, tea.Batch(cmd, m.syncWindowTitleCmd())
+		return tea.Batch(cmd, m.syncWindowTitleCmd())
 	default:
-		return m, nil
+		return nil
 	}
 }
 
-func (m *Model) handleToolsDialogKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *Model) handleToolsDialogKey(msg tea.KeyMsg) tea.Cmd {
 	if !m.hasToolsDialog() {
-		return m, nil
+		return nil
 	}
 	action := m.toolsDialog.Update(msg)
 	switch action.Kind {
 	case dialogs.ToolsDialogActionApply:
 		if err := m.applySessionToolStates(action.States); err != nil {
 			m.status = err.Error()
-			return m, m.syncWindowTitleCmd()
+			return m.syncWindowTitleCmd()
 		}
 		m.closeToolsDialog()
 		m.status = "Session tools updated"
-		return m, m.syncWindowTitleCmd()
+		return m.syncWindowTitleCmd()
 	case dialogs.ToolsDialogActionCancel:
 		m.closeToolsDialog()
 		m.status = "Tool selection cancelled"
-		return m, m.syncWindowTitleCmd()
+		return m.syncWindowTitleCmd()
 	default:
-		return m, nil
+		return nil
 	}
 }
 
-func (m *Model) handleConnectDialogKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *Model) handleConnectDialogKey(msg tea.KeyMsg) tea.Cmd {
 	if !m.hasConnectDialog() {
-		return m, nil
+		return nil
 	}
 	action := m.connectDialog.Update(msg)
 	switch action.Kind {
 	case dialogs.ProviderConnectActionTest:
 		m.connectDialog.SetStatus("Testing connection…")
-		return m, tea.Batch(m.probeProviderCmd(action.Draft), m.syncWindowTitleCmd())
+		return tea.Batch(m.probeProviderCmd(action.Draft), m.syncWindowTitleCmd())
 	case dialogs.ProviderConnectActionSave:
 		discoveredModels := m.connectDialog.Models()
 		if err := m.saveProviderDraft(action.Draft); err != nil {
 			m.connectDialog.SetStatusError("Save failed: " + err.Error())
 			m.status = err.Error()
-			return m, m.syncWindowTitleCmd()
+			return m.syncWindowTitleCmd()
 		}
 		m.closeConnectDialog()
 		if len(discoveredModels) > 0 {
 			m.status = fmt.Sprintf("Connected provider %s", action.Draft.ProviderID)
-			return m, tea.Batch(m.loadModelsCmd(action.Draft.ProviderID, true), m.syncWindowTitleCmd())
+			return tea.Batch(m.loadModelsCmd(action.Draft.ProviderID, true), m.syncWindowTitleCmd())
 		}
 		m.status = fmt.Sprintf("Connected provider %s", action.Draft.ProviderID)
 		m.refreshViewport()
-		return m, m.syncWindowTitleCmd()
+		return m.syncWindowTitleCmd()
 	case dialogs.ProviderConnectActionCancel:
 		m.closeConnectDialog()
 		m.status = "Provider connect cancelled"
-		return m, m.syncWindowTitleCmd()
+		return m.syncWindowTitleCmd()
 	default:
-		return m, nil
+		return nil
 	}
 }
 
-func (m *Model) handleDisconnectDialogKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *Model) handleDisconnectDialogKey(msg tea.KeyMsg) tea.Cmd {
 	if !m.hasDisconnectDialog() {
-		return m, nil
+		return nil
 	}
 	action := m.disconnectDialog.Update(msg)
 	switch action.Kind {
 	case dialogs.DisconnectDialogActionSelect:
 		if err := m.disconnectProvider(action.ProviderID); err != nil {
 			m.status = err.Error()
-			return m, m.syncWindowTitleCmd()
+			return m.syncWindowTitleCmd()
 		}
 		m.closeDisconnectDialog()
 		m.status = fmt.Sprintf("Disconnected provider %s", action.ProviderID)
 		m.refreshViewport()
-		return m, m.syncWindowTitleCmd()
+		return m.syncWindowTitleCmd()
 	case dialogs.DisconnectDialogActionCancel:
 		m.closeDisconnectDialog()
 		m.status = "Provider disconnect cancelled"
-		return m, m.syncWindowTitleCmd()
+		return m.syncWindowTitleCmd()
 	default:
-		return m, nil
+		return nil
 	}
 }
 
-func (m *Model) handleModelDialogKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *Model) handleModelDialogKey(msg tea.KeyMsg) tea.Cmd {
 	if !m.hasModelDialog() {
-		return m, nil
+		return nil
 	}
 	action := m.modelDialog.Update(msg)
 	switch action.Kind {
 	case dialogs.ModelDialogActionSelect:
 		if err := m.selectModel(action.ModelID); err != nil {
 			m.status = err.Error()
-			return m, m.syncWindowTitleCmd()
+			return m.syncWindowTitleCmd()
 		}
 		m.closeModelDialog()
 		m.status = fmt.Sprintf("Selected model %s", action.ModelID)
 		m.refreshViewport()
-		return m, m.syncWindowTitleCmd()
+		return m.syncWindowTitleCmd()
 	case dialogs.ModelDialogActionCancel:
 		m.closeModelDialog()
 		m.status = "Model selection cancelled"
-		return m, m.syncWindowTitleCmd()
+		return m.syncWindowTitleCmd()
 	default:
-		return m, nil
+		return nil
 	}
 }
 

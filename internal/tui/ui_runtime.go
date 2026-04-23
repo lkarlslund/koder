@@ -166,8 +166,7 @@ func (m *Model) overlayWindows() []ui.Window {
 	windows := make([]ui.Window, 0, 8)
 	if m.hasSessionDialog() {
 		windows = append(windows, m.centeredWindow(sessionWindowID, 10, m.renderSessionDialogElement(), func(m *Model, msg tea.KeyMsg) tea.Cmd {
-			_, cmd := m.handleSessionDialogKey(msg)
-			return cmd
+			return m.handleSessionDialogKey(msg)
 		}, func(m *Model, controlID string) tea.Cmd {
 			action := m.sessionDialog.ActivateControl(controlID)
 			switch action.Kind {
@@ -184,8 +183,7 @@ func (m *Model) overlayWindows() []ui.Window {
 	}
 	if m.hasModelDialog() {
 		windows = append(windows, m.centeredWindow(modelWindowID, 20, m.renderModelDialogElement(), func(m *Model, msg tea.KeyMsg) tea.Cmd {
-			_, cmd := m.handleModelDialogKey(msg)
-			return cmd
+			return m.handleModelDialogKey(msg)
 		}, func(m *Model, controlID string) tea.Cmd {
 			action := m.modelDialog.ActivateControl(controlID)
 			switch action.Kind {
@@ -209,8 +207,7 @@ func (m *Model) overlayWindows() []ui.Window {
 	}
 	if m.hasDisconnectDialog() {
 		windows = append(windows, m.centeredWindow(disconnectWindowID, 30, m.renderDisconnectDialogElement(), func(m *Model, msg tea.KeyMsg) tea.Cmd {
-			_, cmd := m.handleDisconnectDialogKey(msg)
-			return cmd
+			return m.handleDisconnectDialogKey(msg)
 		}, func(m *Model, controlID string) tea.Cmd {
 			action := m.disconnectDialog.ActivateControl(controlID)
 			switch action.Kind {
@@ -234,8 +231,7 @@ func (m *Model) overlayWindows() []ui.Window {
 	}
 	if m.hasToolsDialog() {
 		windows = append(windows, m.centeredWindow(toolsWindowID, 40, m.renderToolsDialogElement(), func(m *Model, msg tea.KeyMsg) tea.Cmd {
-			_, cmd := m.handleToolsDialogKey(msg)
-			return cmd
+			return m.handleToolsDialogKey(msg)
 		}, func(m *Model, controlID string) tea.Cmd {
 			action := m.toolsDialog.ActivateControl(controlID)
 			switch action.Kind {
@@ -258,8 +254,7 @@ func (m *Model) overlayWindows() []ui.Window {
 	}
 	if m.hasConnectDialog() {
 		windows = append(windows, m.centeredWindow(connectWindowID, 50, m.renderConnectDialogElement(), func(m *Model, msg tea.KeyMsg) tea.Cmd {
-			_, cmd := m.handleConnectDialogKey(msg)
-			return cmd
+			return m.handleConnectDialogKey(msg)
 		}, func(m *Model, controlID string) tea.Cmd {
 			if controlID == "window-close" {
 				m.closeConnectDialog()
@@ -325,8 +320,7 @@ func (m *Model) overlayWindows() []ui.Window {
 	}
 	if m.hasPreferencesDialog() {
 		windows = append(windows, m.centeredWindow(preferencesWindowID, 90, m.renderPreferencesDialogElement(), func(m *Model, msg tea.KeyMsg) tea.Cmd {
-			_, cmd := m.handlePreferencesKey(msg)
-			return cmd
+			return m.handlePreferencesKey(msg)
 		}, func(m *Model, controlID string) tea.Cmd {
 			if controlID == "window-close" {
 				m.closePreferencesDialog()
