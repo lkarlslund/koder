@@ -21,6 +21,8 @@ type Program struct {
 	title        string
 	mouseEnabled bool
 	sent         chan Msg
+	renderedRows []string
+	didRender    bool
 }
 
 func NewProgram(model Model, opts ...ProgramOption) *Program {
@@ -146,12 +148,25 @@ func (p *Program) runCmd(cmd Cmd, out chan<- Msg) {
 }
 
 func (p *Program) render(out io.Writer) error {
+	var lines []string
 	if linesModel, ok := p.model.(interface{ ViewLines() []string }); ok {
-		_, err := io.WriteString(out, renderFrameLines(linesModel.ViewLines()))
-		return err
+		lines = linesModel.ViewLines()
+	} else {
+		view := p.model.View()
+		lines = strings.Split(view, "\n")
 	}
-	view := p.model.View()
-	_, err := io.WriteString(out, renderFrame(view))
+	frame := ""
+	if !p.didRender {
+		frame = renderFrameLines(lines)
+		p.didRender = true
+	} else {
+		frame = diffFrameLines(p.renderedRows, lines)
+	}
+	p.renderedRows = append(p.renderedRows[:0], lines...)
+	if frame == "" {
+		return nil
+	}
+	_, err := io.WriteString(out, frame)
 	return err
 }
 
@@ -165,6 +180,32 @@ func renderFrameLines(lines []string) string {
 	for idx, line := range lines {
 		fmt.Fprintf(&buf, "\x1b[%d;1H", idx+1)
 		buf.WriteString(line)
+	}
+	return buf.String()
+}
+
+func diffFrameLines(previous, current []string) string {
+	var buf strings.Builder
+	maxRows := len(previous)
+	if len(current) > maxRows {
+		maxRows = len(current)
+	}
+	for idx := 0; idx < maxRows; idx++ {
+		var prevLine, currLine string
+		if idx < len(previous) {
+			prevLine = previous[idx]
+		}
+		if idx < len(current) {
+			currLine = current[idx]
+		}
+		if prevLine == currLine {
+			continue
+		}
+		fmt.Fprintf(&buf, "\x1b[%d;1H", idx+1)
+		if currLine != "" {
+			buf.WriteString(currLine)
+		}
+		buf.WriteString("\x1b[K")
 	}
 	return buf.String()
 }
