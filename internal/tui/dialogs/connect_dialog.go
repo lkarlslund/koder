@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	tea "github.com/lkarlslund/koder/internal/ui/tea"
 
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/provider"
@@ -327,7 +327,7 @@ func (d *ConnectDialog) authPickerDialog(width int, palette theme.Palette) Eleme
 		})
 	}
 	return Dialog{
-		Title:  "Choose Auth Method",
+		Title: "Choose Auth Method",
 		Body: Column{
 			Children: []Child{
 				Fixed(linesBlock(lines...)),

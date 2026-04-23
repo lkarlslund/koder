@@ -3,7 +3,7 @@ package ui
 import (
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "github.com/lkarlslund/koder/internal/ui/tea"
 )
 
 func TestPickerDialogAltOCSelectsCurrentItem(t *testing.T) {

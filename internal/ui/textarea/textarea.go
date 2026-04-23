@@ -4,9 +4,9 @@ import (
 	"time"
 	"unicode/utf8"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	tea "github.com/lkarlslund/koder/internal/ui/tea"
 )
 
 const blinkInterval = 530 * time.Millisecond

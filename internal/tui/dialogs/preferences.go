@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	tea "github.com/lkarlslund/koder/internal/ui/tea"
 
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/theme"
@@ -339,10 +339,10 @@ func (d PreferencesDialog) dialog(width int, palette theme.Palette) Element {
 				Child: staticBlock(d.tabList.View(tabWidth-2, palette, d.focus == preferencesFocusTabs)),
 			},
 			Second: Section{
-				Title: "Options",
-				Width: fieldWidth + 1,
+				Title:   "Options",
+				Width:   fieldWidth + 1,
 				Padding: Insets{Left: 1},
-				Child: staticBlock(fields),
+				Child:   staticBlock(fields),
 			},
 			Gap: 1,
 		},

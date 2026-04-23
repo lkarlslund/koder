@@ -14,9 +14,9 @@ import (
 	"syscall"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	tea "github.com/lkarlslund/koder/internal/ui/tea"
 
 	"github.com/lkarlslund/koder/internal/agent"
 	"github.com/lkarlslund/koder/internal/attachment"
@@ -610,7 +610,7 @@ func (m *Model) handleDialogMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd, bool) {
 		return m, nil, false
 	}
 	if control, ok := m.hitCenteredWindowControl(msg); ok && control.ID == "window-close" {
-			return m.closeActiveCenteredWindow()
+		return m.closeActiveCenteredWindow()
 	}
 	switch {
 	case m.hasSessionDialog():

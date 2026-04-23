@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "github.com/lkarlslund/koder/internal/ui/tea"
 
 	"github.com/lkarlslund/koder/internal/theme"
 	. "github.com/lkarlslund/koder/internal/ui"
@@ -212,13 +212,13 @@ func (d SessionDialog) dialog(width int, palette theme.Palette) Element {
 				Fixed(Section{Width: contentWidth, Child: list}),
 				Fixed(Spacer{H: 1}),
 				Fixed(Section{
-					Title:      "Preview",
-					Width:      contentWidth,
-					Padding:    Insets{Top: 1, Left: 1, Right: 1},
-					Background: palette.ScreenBackground,
-					Foreground: palette.SidebarForeground,
+					Title:       "Preview",
+					Width:       contentWidth,
+					Padding:     Insets{Top: 1, Left: 1, Right: 1},
+					Background:  palette.ScreenBackground,
+					Foreground:  palette.SidebarForeground,
 					BorderColor: palette.SidebarBorder,
-					Child:      TextPane{Content: details},
+					Child:       TextPane{Content: details},
 				}),
 			},
 		},

@@ -5,8 +5,8 @@ import (
 	"strconv"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	tea "github.com/lkarlslund/koder/internal/ui/tea"
 
 	"github.com/lkarlslund/koder/internal/theme"
 	. "github.com/lkarlslund/koder/internal/ui"
@@ -169,10 +169,10 @@ func (d DisconnectDialog) dialog(width int, palette theme.Palette) Element {
 				Fixed(staticBlock(fmt.Sprintf("Filter: %s", d.Query))),
 				Fixed(Spacer{H: 1}),
 				Fixed(Split{
-					Direction:  SplitHorizontal,
+					Direction: SplitHorizontal,
 					First: Section{
-						Title: "Providers",
-						Width: listWidth + 2,
+						Title:   "Providers",
+						Width:   listWidth + 2,
 						Padding: Insets{Right: 1},
 						Child: func() Element {
 							if len(items) == 0 {

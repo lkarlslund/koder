@@ -12,9 +12,9 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	tea "github.com/lkarlslund/koder/internal/ui/tea"
 	"github.com/muesli/termenv"
 
 	"github.com/lkarlslund/koder/internal/agent"
@@ -2885,7 +2885,7 @@ func TestRenderBodyKeepsSidebarAtConfiguredWidth(t *testing.T) {
 func TestRenderBodyUsesTranscriptElementInsteadOfViewportString(t *testing.T) {
 	cfg := testConfig(t)
 	m := Model{
-		cfg: cfg,
+		cfg:            cfg,
 		currentSession: domain.Session{ID: 1, ProviderID: "test", ModelID: "model"},
 		messages: []domain.Message{
 			{ID: 1, Role: domain.MessageRoleAssistant},

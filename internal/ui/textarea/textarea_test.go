@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	tea "github.com/lkarlslund/koder/internal/ui/tea"
 )
 
 func TestUpdateInsertsRunesAndSpaces(t *testing.T) {

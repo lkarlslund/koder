@@ -133,7 +133,7 @@ func (d ToolRunDock) render() Surface {
 	buttons.Width = contentWidth
 
 	lines = append(lines,
-		buttons.View(d.Palette),
+		buttons.render(d.Palette).String(),
 		d.Hints,
 	)
 	return SurfaceFromString(lipgloss.NewStyle().

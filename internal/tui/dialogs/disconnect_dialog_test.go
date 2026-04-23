@@ -4,12 +4,11 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "github.com/lkarlslund/koder/internal/ui/tea"
 
 	"github.com/lkarlslund/koder/internal/theme"
 	"github.com/lkarlslund/koder/internal/ui"
 )
-
 
 func renderDisconnectDialog(dialog DisconnectDialog, width int, palette theme.Palette) string {
 	return ui.RenderElement(&ui.Context{Palette: palette}, dialog, width, 0)
