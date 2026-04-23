@@ -267,10 +267,10 @@ func (d *ConnectDialog) updateForm(msg tea.KeyMsg) ProviderConnectAction {
 func (d *ConnectDialog) providerListDialog(width int, palette theme.Palette) Element {
 	dialogWidth := clampWidth(width, 72, 96)
 	lines := []string{fmt.Sprintf("Filter: %s", d.query), ""}
-	if len(d.view) == 0 {
-		lines = append(lines, "No providers match your filter.")
-	} else {
+	var list Element = staticBlock("No providers match your filter.")
+	if len(d.view) > 0 {
 		start, end := windowBounds(d.index, len(d.view), 10)
+		items := make([]ListItem, 0, end-start)
 		for idx := start; idx < end; idx++ {
 			item := d.view[idx]
 			tertiary := "remote"
@@ -279,22 +279,32 @@ func (d *ConnectDialog) providerListDialog(width int, palette theme.Palette) Ele
 			} else if item.Local {
 				tertiary = "local"
 			}
-			lines = append(lines, SelectableRow{
+			items = append(items, ListItem{
 				Primary:   item.Title,
 				Secondary: item.Description,
 				Tertiary:  tertiary,
-				Width:     dialogWidth - 8,
-				Selected:  idx == d.index,
-				Focused:   idx == d.index && d.stage == connectStageProvider,
-			}.View(palette))
+			})
+		}
+		list = Section{
+			Width: dialogWidth - 8,
+			Child: List{
+				Items:    items,
+				Width:    dialogWidth - 8,
+				Selected: d.index - start,
+				Focused:  d.stage == connectStageProvider,
+			},
 		}
 	}
+	body := []Child{
+		Fixed(linesBlock(lines...)),
+		Fixed(list),
+	}
 	if status := strings.TrimSpace(d.status); status != "" {
-		lines = append(lines, "", lipgloss.NewStyle().Foreground(palette.AssistantTimestampText).Render(status))
+		body = append(body, Fixed(Spacer{H: 1}), Fixed(staticBlock(lipgloss.NewStyle().Foreground(palette.AssistantTimestampText).Render(status))))
 	}
 	return Dialog{
 		Title:  "Connect Provider",
-		Body:   linesBlock(lines...),
+		Body:   Column{Children: body, Spacing: 1},
 		Footer: "Enter choose provider  Esc cancel",
 		Width:  dialogWidth,
 	}
@@ -307,18 +317,30 @@ func (d *ConnectDialog) authPickerDialog(width int, palette theme.Palette) Eleme
 		lipgloss.NewStyle().Foreground(palette.AssistantTimestampText).Render(d.selected.Description),
 		"",
 	}
-	for idx, method := range d.selected.AuthMethods {
-		lines = append(lines, SelectableRow{
+	items := make([]ListItem, 0, len(d.selected.AuthMethods))
+	for _, method := range d.selected.AuthMethods {
+		items = append(items, ListItem{
 			Primary:   method.Title,
 			Secondary: method.Description,
-			Width:     dialogWidth - 8,
-			Selected:  idx == d.authIndex,
-			Focused:   idx == d.authIndex && d.stage == connectStageAuth,
-		}.View(palette))
+		})
 	}
 	return Dialog{
 		Title:  "Choose Auth Method",
-		Body:   linesBlock(lines...),
+		Body: Column{
+			Children: []Child{
+				Fixed(linesBlock(lines...)),
+				Fixed(Section{
+					Width: dialogWidth - 8,
+					Child: List{
+						Items:    items,
+						Width:    dialogWidth - 8,
+						Selected: d.authIndex,
+						Focused:  d.stage == connectStageAuth,
+					},
+				}),
+			},
+			Spacing: 1,
+		},
 		Footer: "Enter continue  Esc back",
 		Width:  dialogWidth,
 	}
