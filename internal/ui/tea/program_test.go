@@ -61,3 +61,56 @@ func TestDiffFrameLinesClearsRemovedRows(t *testing.T) {
 		t.Fatalf("expected removed row to be cleared, got %q", got)
 	}
 }
+
+func TestRenderFrameSurfaceEmitsRealSGRSequences(t *testing.T) {
+	s := fakeSurface{
+		w: 5,
+		h: 1,
+		cells: []fakeCell{
+			{text: "H", fg: "#c8d3f5", bg: "#1e2030", bold: true},
+			{text: "e", fg: "#c8d3f5", bg: "#1e2030", bold: true},
+			{text: "l", fg: "#c8d3f5", bg: "#1e2030", bold: true},
+			{text: "l", fg: "#c8d3f5", bg: "#1e2030", bold: true},
+			{text: "o", fg: "#c8d3f5", bg: "#1e2030", bold: true},
+		},
+	}
+	got := renderFrameSurface(s)
+	if !strings.Contains(got, "\x1b[1;38;2;200;211;245") {
+		t.Fatalf("expected real SGR foreground sequence, got %q", got)
+	}
+	if strings.Contains(got, "[38;2;200;211;245") && !strings.Contains(got, "\x1b[1;38;2;200;211;245") {
+		t.Fatalf("expected no bare CSI tail without ESC, got %q", got)
+	}
+}
+
+type fakeCell struct {
+	text         string
+	width        int
+	continuation bool
+	fg           string
+	bg           string
+	bold         bool
+	italic       bool
+}
+
+type fakeSurface struct {
+	w     int
+	h     int
+	cells []fakeCell
+}
+
+func (f fakeSurface) SurfaceWidth() int                     { return f.w }
+func (f fakeSurface) SurfaceHeight() int                    { return f.h }
+func (f fakeSurface) SurfaceCellText(x, y int) string       { return f.cells[y*f.w+x].text }
+func (f fakeSurface) SurfaceCellWidth(x, y int) int {
+	width := f.cells[y*f.w+x].width
+	if width <= 0 {
+		return 1
+	}
+	return width
+}
+func (f fakeSurface) SurfaceCellContinuation(x, y int) bool { return f.cells[y*f.w+x].continuation }
+func (f fakeSurface) SurfaceCellFG(x, y int) string         { return f.cells[y*f.w+x].fg }
+func (f fakeSurface) SurfaceCellBG(x, y int) string         { return f.cells[y*f.w+x].bg }
+func (f fakeSurface) SurfaceCellBold(x, y int) bool         { return f.cells[y*f.w+x].bold }
+func (f fakeSurface) SurfaceCellItalic(x, y int) bool       { return f.cells[y*f.w+x].italic }

@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/input"
 	"github.com/charmbracelet/x/term"
 )
@@ -337,20 +337,53 @@ func applyStyle(style styleState, text string) string {
 	if text == "" || (style == styleState{}) {
 		return text
 	}
-	render := lipgloss.NewStyle()
-	if style.fg != "" {
-		render = render.Foreground(lipgloss.Color(style.fg))
-	}
-	if style.bg != "" {
-		render = render.Background(lipgloss.Color(style.bg))
-	}
+	params := make([]string, 0, 10)
 	if style.bold {
-		render = render.Bold(true)
+		params = append(params, "1")
 	}
 	if style.italic {
-		render = render.Italic(true)
+		params = append(params, "3")
 	}
-	return render.Render(text)
+	if rgb, ok := parseHexColor(style.fg); ok {
+		params = append(params,
+			"38", "2",
+			strconv.Itoa(rgb[0]),
+			strconv.Itoa(rgb[1]),
+			strconv.Itoa(rgb[2]),
+		)
+	}
+	if rgb, ok := parseHexColor(style.bg); ok {
+		params = append(params,
+			"48", "2",
+			strconv.Itoa(rgb[0]),
+			strconv.Itoa(rgb[1]),
+			strconv.Itoa(rgb[2]),
+		)
+	}
+	if len(params) == 0 {
+		return text
+	}
+	return "\x1b[" + strings.Join(params, ";") + "m" + text + "\x1b[0m"
+}
+
+func parseHexColor(value string) ([3]int, bool) {
+	value = strings.TrimSpace(value)
+	if len(value) != 7 || value[0] != '#' {
+		return [3]int{}, false
+	}
+	r, err := strconv.ParseInt(value[1:3], 16, 64)
+	if err != nil {
+		return [3]int{}, false
+	}
+	g, err := strconv.ParseInt(value[3:5], 16, 64)
+	if err != nil {
+		return [3]int{}, false
+	}
+	b, err := strconv.ParseInt(value[5:7], 16, 64)
+	if err != nil {
+		return [3]int{}, false
+	}
+	return [3]int{int(r), int(g), int(b)}, true
 }
 
 func surfaceCellText(surface SurfaceView, x, y int) string {
