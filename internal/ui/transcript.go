@@ -18,6 +18,59 @@ type Transcript struct {
 	Items []TranscriptItem
 }
 
+type RetainedTranscript struct {
+	items []TranscriptItem
+}
+
+func NewRetainedTranscript() *RetainedTranscript {
+	return &RetainedTranscript{}
+}
+
+func (t *RetainedTranscript) SetItems(items []TranscriptItem) {
+	t.items = append(t.items[:0], items...)
+}
+
+func (t *RetainedTranscript) Add(item TranscriptItem) {
+	t.items = append(t.items, item)
+}
+
+func (t *RetainedTranscript) Insert(index int, item TranscriptItem) {
+	index = max(0, min(index, len(t.items)))
+	t.items = append(t.items[:index], append([]TranscriptItem{item}, t.items[index:]...)...)
+}
+
+func (t *RetainedTranscript) Remove(index int) {
+	if index < 0 || index >= len(t.items) {
+		return
+	}
+	t.items = append(t.items[:index], t.items[index+1:]...)
+}
+
+func (t *RetainedTranscript) Replace(index int, item TranscriptItem) {
+	if index < 0 || index >= len(t.items) {
+		return
+	}
+	t.items[index] = item
+}
+
+func (t *RetainedTranscript) Clear() {
+	t.items = nil
+}
+
+func (t *RetainedTranscript) Items() []TranscriptItem {
+	out := make([]TranscriptItem, len(t.items))
+	copy(out, t.items)
+	return out
+}
+
+func (t *RetainedTranscript) Measure(ctx *Context, constraints Constraints) Size {
+	return Transcript{Items: t.items}.Measure(ctx, constraints)
+}
+
+func (t *RetainedTranscript) Render(ctx *Context, bounds Rect) Surface {
+	return Transcript{Items: t.items}.Render(ctx, bounds)
+}
+
 func (t Transcript) Measure(ctx *Context, constraints Constraints) Size {
 	maxW := 0
 	totalH := 0

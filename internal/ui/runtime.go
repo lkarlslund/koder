@@ -121,6 +121,25 @@ func (s *TimerScheduler) Due(now time.Time) []TimerEvent {
 	return events
 }
 
+func (s *TimerScheduler) NextDelay(now time.Time) (time.Duration, bool) {
+	if s == nil || len(s.timers) == 0 {
+		return 0, false
+	}
+	var next time.Time
+	for _, timer := range s.timers {
+		if next.IsZero() || timer.nextFire.Before(next) {
+			next = timer.nextFire
+		}
+	}
+	if next.IsZero() {
+		return 0, false
+	}
+	if !next.After(now) {
+		return 0, true
+	}
+	return next.Sub(now), true
+}
+
 type Window interface {
 	ID() WindowID
 	Bounds(root Rect) Rect
@@ -396,6 +415,10 @@ func (r *Root) StartTimer(owner string, spec TimerSpec) TimerID {
 	return r.timerSchedule.StartTimer(owner, spec)
 }
 
+func (r *Root) ActiveTimers(owner string) []TimerID {
+	return r.timerSchedule.Active(owner)
+}
+
 func (r *Root) StopTimer(id TimerID) {
 	r.timerSchedule.StopTimer(id)
 }
@@ -406,6 +429,10 @@ func (r *Root) StopOwnerTimers(owner string) {
 
 func (r *Root) DueTimers(now time.Time) []TimerEvent {
 	return r.timerSchedule.Due(now)
+}
+
+func (r *Root) NextTimerDelay(now time.Time) (time.Duration, bool) {
+	return r.timerSchedule.NextDelay(now)
 }
 
 func (r *Root) HandleEvent(event Event) (bool, tea.Cmd) {
@@ -443,14 +470,15 @@ func (r *Root) HandleEvent(event Event) (bool, tea.Cmd) {
 		}
 		return handled, cmd
 	case TimerEvent:
-		window := r.windowByID(WindowID(typed.Owner))
-		handler, ok := window.(TimerHandler)
-		if !ok || window == nil {
-			return false, nil
-		}
-		if handled, cmd := handler.HandleTimer(typed); handled {
-			r.RequestRedraw()
-			return true, cmd
+		for _, window := range r.allWindows() {
+			handler, ok := window.(TimerHandler)
+			if !ok || window == nil {
+				continue
+			}
+			if handled, cmd := handler.HandleTimer(typed); handled {
+				r.RequestRedraw()
+				return true, cmd
+			}
 		}
 	}
 	return false, nil

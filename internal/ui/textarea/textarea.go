@@ -11,6 +11,10 @@ import (
 
 const blinkInterval = 530 * time.Millisecond
 
+func BlinkInterval() time.Duration {
+	return blinkInterval
+}
+
 type blinkMsg struct{}
 type blinkTickMsg struct {
 	generation int
@@ -80,6 +84,14 @@ func (m *Model) Blur() {
 	m.focus = false
 	m.blink = false
 	m.blinkGeneration++
+}
+
+func (m *Model) ToggleBlink() bool {
+	if !m.focus || !m.BlinkEnabled {
+		return false
+	}
+	m.blink = !m.blink
+	return true
 }
 
 func (m *Model) SetWidth(width int) {

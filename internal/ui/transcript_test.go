@@ -41,3 +41,25 @@ func TestActivityIndicatorViewDoesNotAddLeadingSpace(t *testing.T) {
 		t.Fatalf("expected activity indicator to start without a leading space, got %q", got)
 	}
 }
+
+func TestRetainedTranscriptMaintainsChildItems(t *testing.T) {
+	transcript := NewRetainedTranscript()
+	transcript.Add(TranscriptItem{Element: Paragraph{Text: "first"}})
+	transcript.Add(TranscriptItem{Element: Paragraph{Text: "second"}, GapBefore: 1})
+
+	got := RenderElement(nil, transcript, 0, 0)
+	if !strings.Contains(got, "first") || !strings.Contains(got, "second") {
+		t.Fatalf("expected retained transcript to render added items, got %q", got)
+	}
+
+	transcript.Replace(1, TranscriptItem{Element: Paragraph{Text: "updated"}, GapBefore: 1})
+	got = RenderElement(nil, transcript, 0, 0)
+	if strings.Contains(got, "second") || !strings.Contains(got, "updated") {
+		t.Fatalf("expected retained transcript replace to update content, got %q", got)
+	}
+
+	transcript.Clear()
+	if size := transcript.Measure(nil, Constraints{}); size.H != 0 || size.W != 0 {
+		t.Fatalf("expected cleared transcript to measure empty, got %#v", size)
+	}
+}

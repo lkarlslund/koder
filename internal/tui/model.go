@@ -46,6 +46,9 @@ type promptDoneMsg struct {
 }
 
 type spinnerTickMsg struct{}
+type rootTimerMsg struct {
+	At time.Time
+}
 
 type busyScope int
 
@@ -55,6 +58,7 @@ const (
 	busyScopeTranscript
 	composerHeight      = 3
 	composerInputHeight = 1
+	composerBlinkTimerOwner = "composer"
 )
 
 type spinnerModel struct {
@@ -285,6 +289,7 @@ type Model struct {
 	viewport           transcriptViewport
 	transcriptControls []ui.Control
 	transcriptCache    map[string]cachedTranscriptBlock
+	retainedTranscript *ui.RetainedTranscript
 	renderCache        *modelRenderCache
 	expandedToolRuns   map[string]bool
 	composer           textarea.Model
@@ -427,23 +432,31 @@ func NewWithWorkdir(cfg config.Config, st *store.Store, a *agent.Engine, mode St
 }
 
 func (m Model) Init() tea.Cmd {
-	blinkCmd := tea.Cmd(nil)
-	if m.composerShouldBlink() {
-		blinkCmd = m.composer.BlinkCmd()
-	}
 	if !m.mouseEnabled {
-		return tea.Batch(m.loadCmd(), m.syncWindowTitleCmd(), blinkCmd)
+		return m.withRootTimers(tea.Batch(m.loadCmd(), m.syncWindowTitleCmd()))
 	}
-	return tea.Batch(
+	return m.withRootTimers(tea.Batch(
 		m.loadCmd(),
 		m.syncWindowTitleCmd(),
-		blinkCmd,
 		func() tea.Msg { return tea.EnableMouseCellMotion() },
-	)
+	))
 }
 
-func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	defer m.syncDebugRuntime()
+func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
+	defer func() {
+		if next == nil {
+			next = m
+		}
+		switch typed := next.(type) {
+		case Model:
+			typed.syncDebugRuntime()
+			cmd = typed.withRootTimers(cmd)
+			next = typed
+		case *Model:
+			typed.syncDebugRuntime()
+			cmd = typed.withRootTimers(cmd)
+		}
+	}()
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.invalidateBodyCache()
@@ -452,6 +465,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.resize()
 		m.refreshViewport()
 		return m, nil
+	case rootTimerMsg:
+		root := (&m).syncUIRoot()
+		var cmds []tea.Cmd
+		for _, event := range root.DueTimers(msg.At) {
+			handled, timerCmd := root.HandleEvent(event)
+			if handled {
+				cmds = append(cmds, timerCmd)
+			}
+		}
+		return m, tea.Batch(cmds...)
 	case spinnerTickMsg:
 		m.invalidateBodyCache()
 		if !m.shouldAnimateSpinner() {
@@ -638,10 +661,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleKey(msg)
 	}
 
-	var cmd tea.Cmd
-	m.composer, cmd = m.composer.Update(msg)
+	var nextCmd tea.Cmd
+	m.composer, nextCmd = m.composer.Update(msg)
 	m.updateComposerMenus()
-	return m, cmd
+	return m, nextCmd
 }
 
 func (m *Model) handleDialogMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd, bool) {
@@ -1794,8 +1817,17 @@ func (m *Model) ensureRenderCache() *modelRenderCache {
 	return m.renderCache
 }
 
+func (m *Model) ensureRetainedTranscript() *ui.RetainedTranscript {
+	if m.retainedTranscript == nil {
+		m.retainedTranscript = ui.NewRetainedTranscript()
+	}
+	return m.retainedTranscript
+}
+
 func (m *Model) transcriptElement(runtime *ui.Runtime) ui.Element {
+	retained := m.ensureRetainedTranscript()
 	if m.currentSession.ID == 0 && len(m.messages) == 0 {
+		retained.Clear()
 		if !m.cfg.HasUsableDefaultProvider() {
 			return ui.Paragraph{Text: "No provider configured.\n\nType /connect to add one before sending prompts."}
 		}
@@ -1828,7 +1860,8 @@ func (m *Model) transcriptElement(runtime *ui.Runtime) ui.Element {
 	if runtime != nil {
 		runtime.BeginFrame()
 	}
-	return ui.Transcript{Items: items}
+	retained.SetItems(items)
+	return retained
 }
 
 func (m *Model) defaultTranscriptSeparator() string {
@@ -4473,11 +4506,45 @@ func (m *Model) syncComposerVisibility() {
 		if !m.composer.Focused() {
 			m.composer.Focus()
 		}
+		m.syncComposerBlinkTimer()
 		return
 	}
 	if m.composer.Focused() {
 		m.composer.Blur()
 	}
+	m.syncComposerBlinkTimer()
+}
+
+func (m *Model) syncComposerBlinkTimer() {
+	root := m.ensureUIRoot()
+	root.StopOwnerTimers(composerBlinkTimerOwner)
+	if !m.composerShouldBlink() || !m.composer.Focused() {
+		return
+	}
+	root.StartTimer(composerBlinkTimerOwner, ui.TimerSpec{
+		Interval: textarea.BlinkInterval(),
+		Repeat:   true,
+	})
+}
+
+func (m *Model) rootTimerCmd() tea.Cmd {
+	root := m.syncUIRoot()
+	delay, ok := root.NextTimerDelay(time.Now())
+	if !ok {
+		return nil
+	}
+	return tea.Tick(delay, func(t time.Time) tea.Msg {
+		return rootTimerMsg{At: t}
+	})
+}
+
+func (m Model) withRootTimers(cmd tea.Cmd) tea.Cmd {
+	m.syncComposerBlinkTimer()
+	timerCmd := m.rootTimerCmd()
+	if timerCmd == nil {
+		return cmd
+	}
+	return tea.Batch(cmd, timerCmd)
 }
 
 func (m *Model) closePicker() {

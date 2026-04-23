@@ -2060,6 +2060,51 @@ func TestClosingSessionPickerRefocusesComposer(t *testing.T) {
 	}
 }
 
+func TestOpenSessionPickerStopsComposerBlinkTimer(t *testing.T) {
+	m := Model{
+		composer: textarea.New(),
+		palette:  theme.Default().Palette,
+		width:    80,
+		height:   24,
+		sessions: []domain.Session{{
+			ID:          1,
+			Title:       "Session A",
+			LastMessage: "summary",
+		}},
+	}
+
+	m.syncComposerBlinkTimer()
+	if timers := m.syncUIRoot().ActiveTimers(composerBlinkTimerOwner); len(timers) == 0 {
+		t.Fatal("expected focused composer to own a blink timer")
+	}
+
+	m.openSessionPicker()
+	if timers := m.syncUIRoot().ActiveTimers(composerBlinkTimerOwner); len(timers) != 0 {
+		t.Fatalf("expected session picker to stop composer blink timer, got %v", timers)
+	}
+}
+
+func TestClosingSessionPickerRestartsComposerBlinkTimer(t *testing.T) {
+	m := Model{
+		composer: textarea.New(),
+		palette:  theme.Default().Palette,
+		width:    80,
+		height:   24,
+		sessions: []domain.Session{{
+			ID:          1,
+			Title:       "Session A",
+			LastMessage: "summary",
+		}},
+	}
+
+	m.openSessionPicker()
+	m.closeSessionDialog()
+
+	if timers := m.syncUIRoot().ActiveTimers(composerBlinkTimerOwner); len(timers) == 0 {
+		t.Fatal("expected closing session picker to restart composer blink timer")
+	}
+}
+
 func TestVisibleSessionsFiltersByExactCWD(t *testing.T) {
 	m := Model{workdir: "/repo/a"}
 	sessions := []domain.Session{

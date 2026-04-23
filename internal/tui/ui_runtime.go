@@ -28,6 +28,7 @@ type modelWindow struct {
 	render func(*Model, ui.Rect) ui.Surface
 	key    func(*Model, tea.KeyMsg) tea.Cmd
 	mouse  func(*Model, tea.MouseMsg) (bool, tea.Cmd)
+	timer  func(*Model, ui.TimerEvent) (bool, tea.Cmd)
 }
 
 func (w *modelWindow) ID() ui.WindowID {
@@ -94,6 +95,13 @@ func (w *modelWindow) Render(ctx *ui.Context, bounds ui.Rect) ui.Surface {
 	return w.render(w.model, bounds)
 }
 
+func (w *modelWindow) HandleTimer(event ui.TimerEvent) (bool, tea.Cmd) {
+	if w.timer == nil {
+		return false, nil
+	}
+	return w.timer(w.model, event)
+}
+
 func (m *Model) ensureUIRoot() *ui.Root {
 	if m.uiRoot == nil {
 		m.uiRoot = ui.NewRoot(m.palette, ui.Rect{W: max(0, m.width), H: max(0, m.height)})
@@ -140,6 +148,16 @@ func (m *Model) mainWindow() ui.Window {
 		},
 		mouse: func(m *Model, msg tea.MouseMsg) (bool, tea.Cmd) {
 			return m.handleMainWindowMouse(msg)
+		},
+		timer: func(m *Model, event ui.TimerEvent) (bool, tea.Cmd) {
+			if event.Owner != composerBlinkTimerOwner {
+				return false, nil
+			}
+			if !m.composer.ToggleBlink() {
+				return false, nil
+			}
+			m.invalidateFooterCache()
+			return true, nil
 		},
 	}
 }
