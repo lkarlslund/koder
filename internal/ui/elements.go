@@ -615,7 +615,27 @@ func (e VisibleElement) Render(ctx *Context, bounds Rect) Surface {
 	if !e.Visible() {
 		return Surface{}
 	}
-	return e.Child.Render(ctx, bounds)
+	if e.HAlign == AlignStart && e.VAlign == AlignStart {
+		return e.Child.Render(ctx, bounds)
+	}
+	size := e.Child.Measure(ctx, NewConstraints(bounds.W, bounds.H))
+	x := 0
+	y := 0
+	switch e.HAlign {
+	case AlignCenter:
+		x = max(0, (bounds.W-size.W)/2)
+	case AlignEnd:
+		x = max(0, bounds.W-size.W)
+	}
+	switch e.VAlign {
+	case AlignCenter:
+		y = max(0, (bounds.H-size.H)/2)
+	case AlignEnd:
+		y = max(0, bounds.H-size.H)
+	}
+	base := BlankSurface(bounds.W, bounds.H)
+	child := e.Child.Render(ctx, Rect{X: bounds.X + x, Y: bounds.Y + y, W: min(bounds.W, size.W), H: min(bounds.H, size.H)})
+	return base.placeAt(x, y, child)
 }
 
 type Child struct {
