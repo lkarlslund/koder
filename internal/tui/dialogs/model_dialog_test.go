@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/theme"
@@ -44,6 +45,9 @@ func TestModelDialogRenderUsesSingleLineTableRows(t *testing.T) {
 		{ID: "gpt-4.1-mini", OwnedBy: "openai"},
 	}, "gpt-5.4")
 	got := dialog.View(84, theme.Resolve("tokyonight").Palette)
+	if !strings.Contains(got, "Model") || !strings.Contains(got, "Owner") {
+		t.Fatalf("expected table header row, got %q", got)
+	}
 	lines := strings.Split(got, "\n")
 	var modelLine string
 	for _, line := range lines {
@@ -121,5 +125,15 @@ func TestModelDialogKeepsFullWindowNearListEnd(t *testing.T) {
 	}
 	if hasModelLine("model-1") {
 		t.Fatalf("expected only the last ten rows near list end, got %q", got)
+	}
+}
+
+func TestModelDialogUsesTighterWidthBudget(t *testing.T) {
+	dialog := NewModelDialog("ollama", []domain.Model{{ID: "qwen2.5-coder:32b", OwnedBy: "", SupportsImages: true, CapabilitiesKnown: true}}, "")
+	got := dialog.View(120, theme.Resolve("tokyonight").Palette)
+	for _, line := range strings.Split(got, "\n") {
+		if ansi.StringWidth(line) > 76 {
+			t.Fatalf("expected model dialog to stay compact, got width %d in %q", ansi.StringWidth(line), line)
+		}
 	}
 }

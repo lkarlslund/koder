@@ -13,13 +13,46 @@ import (
 )
 
 type SelectableRow struct {
-	ControlID string
-	Primary   string
-	Secondary string
-	Tertiary  string
-	Width     int
-	Selected  bool
-	Focused   bool
+	ControlID      string
+	Primary        string
+	Secondary      string
+	Tertiary       string
+	Width          int
+	PrimaryWidth   int
+	SecondaryWidth int
+	TertiaryWidth  int
+	Selected       bool
+	Focused        bool
+}
+
+type SelectableHeader struct {
+	Primary        string
+	Secondary      string
+	Tertiary       string
+	Width          int
+	PrimaryWidth   int
+	SecondaryWidth int
+	TertiaryWidth  int
+}
+
+func (h SelectableHeader) View(palette theme.Palette) string {
+	primaryWidth, secondaryWidth, tertiaryWidth := selectableColumnWidths(h.Width, h.Primary, h.Secondary, h.Tertiary, h.PrimaryWidth, h.SecondaryWidth, h.TertiaryWidth)
+	gapWidth := 2
+	row := lipgloss.JoinHorizontal(
+		lipgloss.Top,
+		lipgloss.NewStyle().Width(primaryWidth).Bold(true).Foreground(palette.AssistantTimestampText).Render(truncateText(strings.TrimSpace(h.Primary), primaryWidth)),
+		lipgloss.NewStyle().Width(gapWidth).Render(""),
+		lipgloss.NewStyle().Width(secondaryWidth).Bold(true).Foreground(palette.AssistantTimestampText).Render(truncateText(strings.TrimSpace(h.Secondary), secondaryWidth)),
+	)
+	if tertiaryWidth > 0 {
+		row = lipgloss.JoinHorizontal(
+			lipgloss.Top,
+			row,
+			lipgloss.NewStyle().Width(gapWidth).Render(""),
+			lipgloss.NewStyle().Width(tertiaryWidth).Bold(true).Align(lipgloss.Right).Foreground(palette.AssistantTimestampText).Render(truncateText(strings.TrimSpace(h.Tertiary), tertiaryWidth)),
+		)
+	}
+	return row
 }
 
 func (r SelectableRow) View(palette theme.Palette) string {
@@ -35,16 +68,8 @@ func (r SelectableRow) View(palette theme.Palette) string {
 	primary = compactInlineText(primary)
 	secondary = compactInlineText(secondary)
 	tertiary = compactInlineText(tertiary)
-	primaryWidth := minInt(28, maxInt(12, width/3))
-	tertiaryWidth := 0
-	if strings.TrimSpace(tertiary) != "" {
-		tertiaryWidth = minInt(18, maxInt(8, width/5))
-	}
+	primaryWidth, secondaryWidth, tertiaryWidth := selectableColumnWidths(width, primary, secondary, tertiary, r.PrimaryWidth, r.SecondaryWidth, r.TertiaryWidth)
 	gapWidth := 2
-	secondaryWidth := maxInt(8, width-primaryWidth-tertiaryWidth-gapWidth*2)
-	if tertiaryWidth == 0 {
-		secondaryWidth = maxInt(8, width-primaryWidth-gapWidth)
-	}
 	selectionBackground := palette.SelectionBackground
 	selectionForeground := palette.SelectionForeground
 	if strings.TrimSpace(string(selectionBackground)) == "" {
@@ -104,6 +129,26 @@ func (r SelectableRow) Render(ctx *Context, bounds Rect) Surface {
 		})
 	}
 	return SurfaceFromString(r.View(ctx.Palette)).normalize(bounds.W, bounds.H)
+}
+
+func selectableColumnWidths(width int, primary, secondary, tertiary string, primaryWidth, secondaryWidth, tertiaryWidth int) (int, int, int) {
+	if width <= 0 {
+		width = 72
+	}
+	gapWidth := 2
+	if primaryWidth <= 0 {
+		primaryWidth = minInt(28, maxInt(12, width/3))
+	}
+	if tertiaryWidth <= 0 && strings.TrimSpace(tertiary) != "" {
+		tertiaryWidth = minInt(18, maxInt(8, width/5))
+	}
+	if secondaryWidth <= 0 {
+		secondaryWidth = maxInt(8, width-primaryWidth-tertiaryWidth-gapWidth*2)
+		if tertiaryWidth == 0 {
+			secondaryWidth = maxInt(8, width-primaryWidth-gapWidth)
+		}
+	}
+	return primaryWidth, secondaryWidth, tertiaryWidth
 }
 
 type VerticalTabs struct {

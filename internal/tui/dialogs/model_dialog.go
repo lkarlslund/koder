@@ -114,7 +114,10 @@ func (d *ModelDialog) Update(msg tea.KeyMsg) ModelDialogAction {
 
 func (d ModelDialog) View(width int, palette theme.Palette) string {
 	dialogWidth := dialogRenderWidth(Rect{W: width}, 84)
-	return RenderElement(&Context{Palette: palette}, d.dialog(dialogWidth, palette), dialogWidth, 0)
+	ctx := &Context{Palette: palette}
+	element := d.dialog(dialogWidth, palette)
+	size := element.Measure(ctx, Constraints{MaxW: dialogWidth})
+	return RenderElement(ctx, element, size.W, 0)
 }
 
 func (d ModelDialog) Measure(ctx *Context, constraints Constraints) Size {
@@ -128,21 +131,36 @@ func (d ModelDialog) Render(ctx *Context, bounds Rect) Surface {
 func (d ModelDialog) dialog(width int, palette theme.Palette) Element {
 	dialogWidth := width
 	if dialogWidth <= 0 {
-		dialogWidth = 84
+		dialogWidth = 72
 	}
-	dialogWidth = maxInt(72, dialogWidth)
-	listWidth := maxInt(40, dialogWidth-6)
+	dialogWidth = minInt(76, maxInt(64, dialogWidth))
+	listWidth := maxInt(34, dialogWidth-6)
+	primaryWidth := minInt(40, maxInt(18, listWidth/2))
+	tertiaryWidth := 0
+	if anyModelHasCapabilities(d.view) {
+		tertiaryWidth = minInt(10, maxInt(5, listWidth/8))
+	}
+	secondaryWidth := maxInt(6, listWidth-primaryWidth-tertiaryWidth-4)
 
 	listChildren := []Child{}
 	if len(d.view) == 0 {
 		listChildren = append(listChildren, Fixed(staticBlock("No matches")))
 	} else {
+		listChildren = append(listChildren, Fixed(staticBlock(SelectableHeader{
+			Primary:        "Model",
+			Secondary:      "Owner",
+			Tertiary:       "Caps",
+			Width:          listWidth,
+			PrimaryWidth:   primaryWidth,
+			SecondaryWidth: secondaryWidth,
+			TertiaryWidth:  tertiaryWidth,
+		}.View(palette))))
 		start, end := windowBounds(d.Index, len(d.view), 10)
 		for idx := start; idx < end; idx++ {
 			item := d.view[idx]
 			listChildren = append(listChildren, Fixed(HitBox{
 				ID:    "model-row-" + strconv.Itoa(idx),
-				Child: TextPane{Content: d.renderRow(item, listWidth, idx == d.Index, idx == d.Index && d.focus == pickerDialogFocusList, palette)},
+				Child: TextPane{Content: d.renderRow(item, listWidth, primaryWidth, secondaryWidth, tertiaryWidth, idx == d.Index, idx == d.Index && d.focus == pickerDialogFocusList, palette)},
 			}))
 		}
 	}
@@ -162,23 +180,14 @@ func (d ModelDialog) dialog(width int, palette theme.Palette) Element {
 	}
 }
 
-func (d ModelDialog) renderRow(item domain.Model, width int, selected bool, focused bool, palette theme.Palette) string {
+func (d ModelDialog) renderRow(item domain.Model, width int, primaryWidth int, secondaryWidth int, tertiaryWidth int, selected bool, focused bool, palette theme.Palette) string {
 	if width <= 0 {
 		width = 72
 	}
+	gapWidth := 2
 	primary := compactModelCell(item.ID)
 	secondary := compactModelCell(firstNonEmptyModelValue(strings.TrimSpace(item.OwnedBy), strings.TrimSpace(d.ProviderID)))
 	tertiary := compactModelCell(capabilityBadges(item))
-	primaryWidth := minInt(42, maxInt(20, width/2))
-	tertiaryWidth := 0
-	if strings.TrimSpace(tertiary) != "" {
-		tertiaryWidth = minInt(12, maxInt(6, width/8))
-	}
-	gapWidth := 2
-	secondaryWidth := maxInt(8, width-primaryWidth-tertiaryWidth-gapWidth*2)
-	if tertiaryWidth == 0 {
-		secondaryWidth = maxInt(8, width-primaryWidth-gapWidth)
-	}
 	selectionBackground := palette.SelectionBackground
 	selectionForeground := palette.SelectionForeground
 	if strings.TrimSpace(string(selectionBackground)) == "" {
@@ -226,6 +235,15 @@ func (d ModelDialog) renderRow(item domain.Model, width int, selected bool, focu
 		)
 	}
 	return rowStyle.Render(row)
+}
+
+func anyModelHasCapabilities(models []domain.Model) bool {
+	for _, model := range models {
+		if strings.TrimSpace(capabilityBadges(model)) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func compactModelCell(value string) string {
