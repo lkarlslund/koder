@@ -521,8 +521,7 @@ func (p *Program) readInput(reader inputEventReader, out chan<- Msg, done <-chan
 			continue
 		}
 		for _, ev := range evs {
-			msg, ok := convertInputEvent(ev)
-			if ok {
+			for _, msg := range convertInputEvents(ev) {
 				out <- msg
 			}
 		}
@@ -533,23 +532,31 @@ func writeString(w io.Writer, s string) {
 	_, _ = io.WriteString(w, s)
 }
 
-func convertInputEvent(ev input.Event) (Msg, bool) {
+func convertInputEvents(ev input.Event) []Msg {
 	switch typed := ev.(type) {
+	case input.MultiEvent:
+		msgs := make([]Msg, 0, len(typed))
+		for _, nested := range typed {
+			msgs = append(msgs, convertInputEvents(nested)...)
+		}
+		return msgs
 	case input.KeyPressEvent:
-		return convertKeyPress(typed), true
+		return []Msg{convertKeyPress(typed)}
+	case input.KeyReleaseEvent:
+		return nil
 	case input.MouseClickEvent:
 		m := typed.Mouse()
-		return MouseMsg{X: m.X, Y: m.Y, Button: convertMouseButton(m.Button), Action: MouseActionPress, Alt: m.Mod.Contains(input.ModAlt)}, true
+		return []Msg{MouseMsg{X: m.X, Y: m.Y, Button: convertMouseButton(m.Button), Action: MouseActionPress, Alt: m.Mod.Contains(input.ModAlt)}}
 	case input.MouseWheelEvent:
 		m := typed.Mouse()
-		return MouseMsg{X: m.X, Y: m.Y, Button: convertMouseButton(m.Button), Action: MouseActionPress, Alt: m.Mod.Contains(input.ModAlt)}, true
+		return []Msg{MouseMsg{X: m.X, Y: m.Y, Button: convertMouseButton(m.Button), Action: MouseActionPress, Alt: m.Mod.Contains(input.ModAlt)}}
 	case input.MouseReleaseEvent:
 		m := typed.Mouse()
-		return MouseMsg{X: m.X, Y: m.Y, Button: convertMouseButton(m.Button), Action: MouseActionRelease, Alt: m.Mod.Contains(input.ModAlt)}, true
+		return []Msg{MouseMsg{X: m.X, Y: m.Y, Button: convertMouseButton(m.Button), Action: MouseActionRelease, Alt: m.Mod.Contains(input.ModAlt)}}
 	case input.WindowSizeEvent:
-		return WindowSizeMsg{Width: typed.Width, Height: typed.Height}, true
+		return []Msg{WindowSizeMsg{Width: typed.Width, Height: typed.Height}}
 	default:
-		return nil, false
+		return nil
 	}
 }
 
@@ -573,7 +580,7 @@ func convertKeyPress(ev input.KeyPressEvent) KeyMsg {
 		msg.Type = KeyBackspace
 	case input.KeyDelete:
 		msg.Type = KeyDelete
-	case input.KeyEnter:
+	case input.KeyEnter, input.KeyKpEnter:
 		msg.Type = KeyEnter
 	case input.KeyTab:
 		if key.Mod.Contains(input.ModShift) {
@@ -587,7 +594,11 @@ func convertKeyPress(ev input.KeyPressEvent) KeyMsg {
 		msg.Type = KeySpace
 	default:
 		if key.Mod.Contains(input.ModCtrl) {
-			switch strings.ToLower(key.Text) {
+			ctrlKey := strings.ToLower(key.Text)
+			if ctrlKey == "" && key.Code > 0 && key.Code <= 0x7f {
+				ctrlKey = strings.ToLower(string(rune(key.Code)))
+			}
+			switch ctrlKey {
 			case "a":
 				msg.Type = KeyCtrlA
 			case "c":

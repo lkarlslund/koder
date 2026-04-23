@@ -104,6 +104,39 @@ func TestReadInputBacksOffWhenReaderReturnsNoEvents(t *testing.T) {
 	}
 }
 
+func TestConvertInputEventsFlattensMultiEvent(t *testing.T) {
+	msgs := convertInputEvents(input.MultiEvent{
+		input.KeyPressEvent{Code: input.KeyEnter},
+		input.KeyReleaseEvent{Code: input.KeyEnter},
+		input.WindowSizeEvent{Width: 80, Height: 24},
+	})
+	if len(msgs) != 2 {
+		t.Fatalf("expected two messages from multi-event, got %d", len(msgs))
+	}
+	key, ok := msgs[0].(KeyMsg)
+	if !ok || key.Type != KeyEnter {
+		t.Fatalf("expected first message to be enter key, got %#v", msgs[0])
+	}
+	size, ok := msgs[1].(WindowSizeMsg)
+	if !ok || size.Width != 80 || size.Height != 24 {
+		t.Fatalf("expected second message to be window size, got %#v", msgs[1])
+	}
+}
+
+func TestConvertKeyPressMapsKeypadEnter(t *testing.T) {
+	got := convertKeyPress(input.KeyPressEvent{Code: input.KeyKpEnter})
+	if got.Type != KeyEnter {
+		t.Fatalf("expected keypad enter to map to enter, got %#v", got)
+	}
+}
+
+func TestConvertKeyPressMapsCtrlCombosByCodeWhenTextEmpty(t *testing.T) {
+	got := convertKeyPress(input.KeyPressEvent{Code: 'c', Mod: input.ModCtrl})
+	if got.Type != KeyCtrlC {
+		t.Fatalf("expected ctrl+c to map from code even without text, got %#v", got)
+	}
+}
+
 type fakeCell struct {
 	text         string
 	width        int
