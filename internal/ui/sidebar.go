@@ -4,8 +4,6 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
-
-	"github.com/lkarlslund/koder/internal/theme"
 )
 
 type Sidebar struct {
@@ -36,14 +34,6 @@ func (s Sidebar) render(ctx *Context, width int) Surface {
 	return SurfaceFromString(style.Render(strings.TrimRight(content, "\n")))
 }
 
-func (s Sidebar) View(palette theme.Palette) string {
-	width := s.Width
-	if width <= 0 {
-		width = 30
-	}
-	return s.content(&Context{Palette: palette}, width)
-}
-
 func (s Sidebar) Measure(ctx *Context, constraints Constraints) Size {
 	width := s.Width
 	if width <= 0 {
@@ -70,21 +60,6 @@ type BodyLayout struct {
 	MainElement    Element
 	SidebarElement Element
 	ShowSidebar    bool
-}
-
-func (l BodyLayout) View() string {
-	main := ""
-	if l.MainElement != nil {
-		main = RenderElement(&Context{}, Inset{Padding: SymmetricInsets(1, 0), Child: l.MainElement}, 0, 0)
-	}
-	if !l.ShowSidebar {
-		return main
-	}
-	sidebar := ""
-	if l.SidebarElement != nil {
-		sidebar = RenderElement(&Context{}, l.SidebarElement, 0, 0)
-	}
-	return lipgloss.JoinHorizontal(lipgloss.Top, main, sidebar)
 }
 
 func (l BodyLayout) Measure(ctx *Context, constraints Constraints) Size {
@@ -119,10 +94,6 @@ func (l BodyLayout) sidebarWidth() int {
 type Footer struct {
 	Parts    []string
 	Elements []Element
-}
-
-func (f Footer) View() string {
-	return f.render().String()
 }
 
 func (f Footer) render() Surface {

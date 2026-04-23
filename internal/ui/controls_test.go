@@ -27,11 +27,11 @@ func TestRenderSelectableRowSelectedUsesDistinctHighlightColors(t *testing.T) {
 	}
 
 	base := SelectableRow{Primary: "write", Secondary: "Allow writes after approval", Tertiary: "active", Width: 48}
-	unselected := base.View(palette)
+	unselected := base.render(palette).String()
 	base.Selected = true
-	selected := base.View(palette)
+	selected := base.render(palette).String()
 	base.Focused = true
-	focused := base.View(palette)
+	focused := base.render(palette).String()
 
 	if selected == unselected {
 		t.Fatal("expected selected row styling to differ from unselected row")
@@ -63,7 +63,7 @@ func TestFocusedButtonUsesFocusColors(t *testing.T) {
 		UserAccentBar:       "#0d0e0f",
 	}
 
-	view := Button{Label: "Approve", Focused: true}.View(palette)
+	view := Button{Label: "Approve", Focused: true}.render(palette)
 	if !strings.Contains(view, "48;2;44;44;46") {
 		t.Fatalf("expected focused button to use focus background, got %q", view)
 	}
@@ -83,8 +83,8 @@ func TestButtonRowRightAlignsWithinWidth(t *testing.T) {
 		Align: HorizontalAlignRight,
 	}
 
-	got := ansi.Strip(row.View(palette))
-	raw := ansi.Strip(ButtonRow{Buttons: row.Buttons}.View(palette))
+	got := ansi.Strip(row.render(palette).String())
+	raw := ansi.Strip(ButtonRow{Buttons: row.Buttons}.render(palette).String())
 	if !strings.HasSuffix(got, raw) {
 		t.Fatalf("expected right-aligned row to end with raw button line, got %q", got)
 	}

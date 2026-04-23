@@ -48,10 +48,6 @@ type SlashMenu struct {
 	Selected int
 }
 
-func (m SlashMenu) View() string {
-	return m.render().String()
-}
-
 func (m SlashMenu) render() Surface {
 	if len(m.Items) == 0 {
 		return Surface{}
@@ -75,10 +71,6 @@ func (m SlashMenu) Render(_ *Context, bounds Rect) Surface {
 	return m.render().normalize(bounds.W, bounds.H)
 }
 
-func (m HistoryMenu) View() string {
-	return m.render().String()
-}
-
 func (m HistoryMenu) render() Surface {
 	width := m.Width
 	if width <= 0 {
@@ -99,7 +91,7 @@ func (m HistoryMenu) render() Surface {
 				Width:     width - 4,
 				Selected:  idx == m.Selected,
 				Focused:   idx == m.Selected,
-			}.View(m.Palette))
+			}.render(m.Palette).String())
 		}
 	}
 	lines = append(lines, "", lipgloss.NewStyle().Foreground(m.Palette.AssistantTimestampText).Render("enter accept  esc cancel  ctrl-r/down older  ctrl-s/up newer"))
@@ -127,10 +119,6 @@ type ApprovalPrompt struct {
 
 func NewApprovalPrompt(props ApprovalPromptProps) ApprovalPrompt {
 	return ApprovalPrompt(props)
-}
-
-func (p ApprovalPrompt) View() string {
-	return p.render().String()
 }
 
 func (p ApprovalPrompt) render() Surface {
@@ -174,10 +162,6 @@ func NewMenuPickerDialog(props PickerDialogProps) MenuPickerDialog {
 	return MenuPickerDialog(props)
 }
 
-func (d MenuPickerDialog) View() string {
-	return d.render().String()
-}
-
 func (d MenuPickerDialog) render() Surface {
 	lines := []string{}
 	if hint := strings.TrimSpace(d.Hint); hint != "" {
@@ -194,7 +178,7 @@ func (d MenuPickerDialog) render() Surface {
 				Width:     72,
 				Selected:  idx == d.Index,
 				Focused:   idx == d.Index,
-			}.View(d.Palette))
+			}.render(d.Palette).String())
 		}
 	}
 	lines = append(lines, "", RenderDialogButtons(d.Palette, "OK", "Cancel"))

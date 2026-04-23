@@ -43,10 +43,6 @@ func NewComposer(props ComposerProps) Composer {
 	return Composer(props)
 }
 
-func (c Composer) View() string {
-	return c.render().String()
-}
-
 func (c Composer) Measure(_ *Context, constraints Constraints) Size {
 	return constraints.Clamp(c.render().Size())
 }
@@ -198,10 +194,6 @@ func renderHalfBlockLine(width int, char string, palette theme.Palette) string {
 type AttachmentList struct {
 	Items []AttachmentItem
 	Width int
-}
-
-func (l AttachmentList) View(palette theme.Palette) string {
-	return l.render(palette).String()
 }
 
 func (l AttachmentList) Measure(ctx *Context, constraints Constraints) Size {

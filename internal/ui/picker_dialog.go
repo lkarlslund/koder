@@ -173,11 +173,6 @@ func (d *PickerDialog) ActivateControl(controlID string) PickerDialogAction {
 	return PickerDialogAction{}
 }
 
-func (d PickerDialog) View(width int, palette theme.Palette) string {
-	width = maxInt(80, width)
-	return RenderElement(&Context{Palette: palette}, d.element(width, palette), width, 0)
-}
-
 func (d PickerDialog) Measure(ctx *Context, constraints Constraints) Size {
 	width := constraints.maxWidth()
 	if width == int(^uint(0)>>1) || width <= 0 {

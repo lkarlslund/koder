@@ -227,6 +227,10 @@ type CheckboxRow struct {
 }
 
 func (r CheckboxRow) View(width int, palette theme.Palette, focused bool) string {
+	return r.render(width, palette, focused)
+}
+
+func (r CheckboxRow) render(width int, palette theme.Palette, focused bool) string {
 	label := strings.TrimSpace(r.OffLabel)
 	valueColor := palette.AssistantTimestampText
 	glyph := "☐"
@@ -249,7 +253,7 @@ func (r CheckboxRow) View(width int, palette theme.Palette, focused bool) string
 		Width:     width,
 		Selected:  focused,
 		Focused:   focused,
-	}.View(palette)
+	}.render(palette).String()
 	if focused {
 		return lipgloss.NewStyle().Foreground(valueColor).Background(palette.UserTextBackground).Render(row)
 	}
@@ -263,6 +267,10 @@ type ChoiceRow struct {
 }
 
 func (r ChoiceRow) View(width int, palette theme.Palette, focused bool) string {
+	return r.render(width, palette, focused)
+}
+
+func (r ChoiceRow) render(width int, palette theme.Palette, focused bool) string {
 	return SelectableRow{
 		Primary:   r.Label,
 		Secondary: r.Description,
@@ -270,7 +278,7 @@ func (r ChoiceRow) View(width int, palette theme.Palette, focused bool) string {
 		Width:     width,
 		Selected:  focused,
 		Focused:   focused,
-	}.View(palette)
+	}.render(palette).String()
 }
 
 type Button struct {
@@ -284,6 +292,10 @@ type Button struct {
 }
 
 func (b Button) View(palette theme.Palette) string {
+	return b.render(palette)
+}
+
+func (b Button) render(palette theme.Palette) string {
 	background := lipgloss.Color("")
 	foreground := lipgloss.Color("")
 	bold := false
@@ -319,7 +331,7 @@ func RenderDialogButtons(palette theme.Palette, okLabel, cancelLabel string) str
 			{Label: okLabel, Primary: true},
 			{Label: cancelLabel},
 		},
-	}.View(palette)
+	}.render(palette).String()
 }
 
 type HorizontalAlign int
@@ -336,6 +348,10 @@ type ButtonRow struct {
 	Gap     int
 	Width   int
 	Align   HorizontalAlign
+}
+
+func (r ButtonRow) View(palette theme.Palette) string {
+	return r.render(palette).String()
 }
 
 func (r *ButtonRow) Move(delta int) {
@@ -410,10 +426,6 @@ func (r *ButtonRow) HotkeyIndex(msg tea.KeyMsg) (int, bool) {
 	return 0, false
 }
 
-func (r ButtonRow) View(palette theme.Palette) string {
-	return r.render(palette).String()
-}
-
 func (r ButtonRow) render(palette theme.Palette) Surface {
 	line := r.line(palette)
 	if r.Width <= ansi.StringWidth(line) {
@@ -450,7 +462,7 @@ func (r ButtonRow) Render(ctx *Context, bounds Rect) Surface {
 	offset := 0
 	for _, button := range r.Buttons {
 		if ctx != nil && ctx.Runtime != nil && strings.TrimSpace(button.ID) != "" {
-			buttonWidth := ansi.StringWidth(button.View(ctx.Palette))
+			buttonWidth := ansi.StringWidth(button.render(ctx.Palette))
 			ctx.Runtime.Register(Control{
 				ID:      button.ID,
 				Rect:    Rect{X: bounds.X + startX + offset, Y: bounds.Y, W: buttonWidth, H: 1},
@@ -466,7 +478,7 @@ func (r ButtonRow) line(palette theme.Palette) string {
 	parts := make([]string, 0, len(r.Buttons))
 	for idx, button := range r.Buttons {
 		button.Focused = idx == r.Index
-		parts = append(parts, button.View(palette))
+		parts = append(parts, button.render(palette))
 	}
 	return strings.Join(parts, strings.Repeat(" ", r.gap()))
 }
