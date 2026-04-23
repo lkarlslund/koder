@@ -371,19 +371,26 @@ func mustMarshalMeta(t *testing.T, meta map[string]string) string {
 
 func newSkillRepo(t *testing.T) string {
 	t.Helper()
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+	return newSkillRepoTB(t)
+}
 
-	repo := filepath.Join(t.TempDir(), "repo")
+func newSkillRepoTB(tb testing.TB) string {
+	tb.Helper()
+	home := tb.TempDir()
+	if setter, ok := any(tb).(interface{ Setenv(string, string) }); ok {
+		setter.Setenv("HOME", home)
+	}
+
+	repo := filepath.Join(tb.TempDir(), "repo")
 	if err := os.MkdirAll(filepath.Join(repo, ".git"), 0o755); err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
 	path := filepath.Join(repo, ".agents", "skills", "review", "SKILL.md")
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
 	if err := os.WriteFile(path, []byte("---\nname: review\ndescription: Review code carefully\n---\n"), 0o644); err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
 	return repo
 }
@@ -401,6 +408,57 @@ func TestSlashQuery(t *testing.T) {
 
 	if _, ok := slashQuery("/mouse on"); ok {
 		t.Fatal("expected no autocomplete query after slash command arguments start")
+	}
+}
+
+func TestComposerQueryHelpers(t *testing.T) {
+	composer := textarea.New()
+	composer.SetValue("inspect @./cmd/ko")
+	composer.SetCursor(len("inspect @./cmd/ko"))
+
+	slash, ok := slashQueryFromComposer(composer)
+	if ok || slash != "" {
+		t.Fatalf("unexpected slash query: ok=%v query=%q", ok, slash)
+	}
+
+	query, start, pathMode, ok := mentionQuery(composer.Value(), len(composer.Value()))
+	if !ok {
+		t.Fatal("expected string mention query")
+	}
+	composerQuery, composerStart, composerEnd, composerPathMode, composerOK := mentionQueryFromComposer(composer)
+	if !composerOK {
+		t.Fatal("expected composer mention query")
+	}
+	if composerQuery != query || composerStart != start || !composerPathMode || composerPathMode != pathMode {
+		t.Fatalf("unexpected composer mention query: got %q %d %v want %q %d %v", composerQuery, composerStart, composerPathMode, query, start, pathMode)
+	}
+	if composerEnd != len(composer.Value()) {
+		t.Fatalf("unexpected mention end: got %d want %d", composerEnd, len(composer.Value()))
+	}
+
+	composer.SetValue("Investigate $rev")
+	composer.SetCursor(len("Investigate $rev"))
+	query, start, ok = skillQuery(composer.Value())
+	if !ok {
+		t.Fatal("expected string skill query")
+	}
+	composerQuery, composerStart, composerOK2 := skillQueryFromComposer(composer)
+	if !composerOK2 {
+		t.Fatal("expected composer skill query")
+	}
+	if composerQuery != query || composerStart != start {
+		t.Fatalf("unexpected composer skill query: got %q %d want %q %d", composerQuery, composerStart, query, start)
+	}
+
+	composer.SetValue("/new")
+	composer.SetCursor(len("/new"))
+	query, ok = slashQuery(composer.Value())
+	if !ok {
+		t.Fatal("expected string slash query")
+	}
+	composerQuery, composerOK2 = slashQueryFromComposer(composer)
+	if !composerOK2 || composerQuery != query {
+		t.Fatalf("unexpected composer slash query: got %q %v want %q true", composerQuery, composerOK2, query)
 	}
 }
 

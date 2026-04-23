@@ -13,6 +13,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"unicode"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
@@ -279,6 +280,7 @@ type Model struct {
 	bodyCacheValid     bool
 	expandedToolRuns   map[string]bool
 	composer           textarea.Model
+	composerQueries    composerQueryState
 	composerHistory    composerHistoryState
 	width              int
 	height             int
@@ -340,6 +342,20 @@ type composerHistoryState struct {
 	SearchIndex  int
 	SearchActive bool
 	SearchQuery  string
+}
+
+type composerQueryState struct {
+	revision        uint64
+	slashQuery      string
+	hasSlashQuery   bool
+	skillQuery      string
+	skillStart      int
+	hasSkillQuery   bool
+	mentionQuery    string
+	mentionStart    int
+	mentionEnd      int
+	mentionPathMode bool
+	hasMentionQuery bool
 }
 
 func New(cfg config.Config, st *store.Store, a *agent.Engine, mode StartupMode, debug *debugsrv.Recorder) (Model, error) {
@@ -3606,11 +3622,36 @@ func normalizedSessionPath(path string) string {
 	return filepath.Clean(trimmed)
 }
 
+func (m *Model) currentComposerQueries() composerQueryState {
+	revision := m.composer.Revision()
+	if m.composerQueries.revision == revision {
+		return m.composerQueries
+	}
+	state := composerQueryState{revision: revision}
+	if query, ok := slashQueryFromComposer(m.composer); ok {
+		state.slashQuery = query
+		state.hasSlashQuery = true
+	}
+	if query, start, ok := skillQueryFromComposer(m.composer); ok {
+		state.skillQuery = query
+		state.skillStart = start
+		state.hasSkillQuery = true
+	}
+	if query, start, end, pathMode, ok := mentionQueryFromComposer(m.composer); ok {
+		state.mentionQuery = query
+		state.mentionStart = start
+		state.mentionEnd = end
+		state.mentionPathMode = pathMode
+		state.hasMentionQuery = true
+	}
+	m.composerQueries = state
+	return state
+}
+
 func (m *Model) updateComposerMenus() {
-	value := m.composer.Value()
-	query, ok := slashQuery(value)
-	if ok {
-		m.slashMatches = matchingSlashCommands(query)
+	queries := m.currentComposerQueries()
+	if queries.hasSlashQuery {
+		m.slashMatches = matchingSlashCommands(queries.slashQuery)
 		if len(m.slashMatches) == 0 {
 			m.slashIndex = 0
 		} else if m.slashIndex >= len(m.slashMatches) {
@@ -3621,10 +3662,9 @@ func (m *Model) updateComposerMenus() {
 		m.slashIndex = 0
 	}
 
-	query, _, ok = skillQuery(value)
-	if ok {
-		m.skillMatches = matchingSkills(m.workdir, query)
-		if len(m.skillMatches) == 1 && strings.EqualFold(m.skillMatches[0].Name, query) {
+	if queries.hasSkillQuery {
+		m.skillMatches = matchingSkills(m.workdir, queries.skillQuery)
+		if len(m.skillMatches) == 1 && strings.EqualFold(m.skillMatches[0].Name, queries.skillQuery) {
 			m.skillMatches = nil
 			m.skillIndex = 0
 		} else if len(m.skillMatches) == 0 {
@@ -3637,16 +3677,14 @@ func (m *Model) updateComposerMenus() {
 		m.skillIndex = 0
 	}
 
-	var pathMode bool
-	query, _, pathMode, ok = mentionQuery(value, len(value))
-	if ok {
-		if pathMode {
-			m.mentionMatches, _ = reference.PathCompletions(m.workdir, query, 8)
+	if queries.hasMentionQuery {
+		if queries.mentionPathMode {
+			m.mentionMatches, _ = reference.PathCompletions(m.workdir, queries.mentionQuery, 8)
 		} else {
 			if m.mentionCatalog == nil {
 				m.mentionCatalog, _ = reference.Entries(m.workdir)
 			}
-			m.mentionMatches = reference.Search(m.mentionCatalog, query, 8)
+			m.mentionMatches = reference.Search(m.mentionCatalog, queries.mentionQuery, 8)
 		}
 		if len(m.mentionMatches) == 0 {
 			m.mentionIndex = 0
@@ -3705,12 +3743,12 @@ func (m *Model) acceptSkillSelection() {
 		return
 	}
 	selected := m.skillMatches[m.skillIndex]
-	query, start, ok := skillQuery(m.composer.Value())
-	if !ok {
+	queries := m.currentComposerQueries()
+	if !queries.hasSkillQuery {
 		return
 	}
-	_ = query
-	next := m.composer.Value()[:start] + "$" + selected.Name
+	value := m.composer.Value()
+	next := value[:queries.skillStart] + "$" + selected.Name
 	m.composer.SetValue(next)
 	m.composer.SetCursor(len(next))
 	m.updateComposerMenus()
@@ -3721,16 +3759,15 @@ func (m *Model) acceptMentionSelection() {
 		return
 	}
 	selected := m.mentionMatches[m.mentionIndex]
-	query, start, _, ok := mentionQuery(m.composer.Value(), len(m.composer.Value()))
-	if !ok {
+	queries := m.currentComposerQueries()
+	if !queries.hasMentionQuery {
 		return
 	}
-	_ = query
-	end := mentionTokenEnd(m.composer.Value(), start)
+	value := m.composer.Value()
 	display := reference.DisplayToken(selected.Path)
-	next := m.composer.Value()[:start] + display + m.composer.Value()[end:]
+	next := value[:queries.mentionStart] + display + value[queries.mentionEnd:]
 	m.composer.SetValue(next)
-	m.composer.SetCursor(start + len(display))
+	m.composer.SetCursor(queries.mentionStart + len(display))
 	m.draftReferences = append(m.draftReferences, reference.Draft{
 		Kind:    selected.Kind,
 		Path:    selected.Path,
@@ -5293,6 +5330,25 @@ func slashQuery(value string) (string, bool) {
 	return strings.TrimPrefix(strings.ToLower(strings.TrimSpace(value)), "/"), true
 }
 
+func slashQueryFromComposer(value textarea.Model) (string, bool) {
+	if value.RuneCount() == 0 {
+		return "", false
+	}
+	first, _ := value.RuneAt(0)
+	if first != '/' {
+		return "", false
+	}
+	query := make([]rune, 0, max(0, value.RuneCount()-1))
+	for i := 1; i < value.RuneCount(); i++ {
+		r, _ := value.RuneAt(i)
+		if strings.ContainsRune(" \t\n", r) {
+			return "", false
+		}
+		query = append(query, lowerRune(r))
+	}
+	return string(query), true
+}
+
 func skillQuery(value string) (query string, start int, ok bool) {
 	value = strings.TrimRight(value, "\n")
 	if strings.TrimSpace(value) == "" {
@@ -5312,6 +5368,43 @@ func skillQuery(value string) (query string, start int, ok bool) {
 		}
 	}
 	return strings.ToLower(strings.TrimSpace(strings.TrimPrefix(value[start:], "$"))), start, true
+}
+
+func skillQueryFromComposer(value textarea.Model) (query string, start int, ok bool) {
+	cursor := value.CursorIndex()
+	if cursor < 0 || cursor > value.RuneCount() {
+		cursor = value.RuneCount()
+	}
+	if cursor == 0 {
+		return "", 0, false
+	}
+	start = cursor
+	for start > 0 {
+		prev, _ := value.RuneAt(start - 1)
+		if strings.ContainsRune(" \t\n([{", prev) {
+			break
+		}
+		start--
+	}
+	first, _ := value.RuneAt(start)
+	if first != '$' {
+		return "", 0, false
+	}
+	if start > 0 {
+		prev, _ := value.RuneAt(start - 1)
+		if !strings.ContainsRune(" \t\n([{", prev) {
+			return "", 0, false
+		}
+	}
+	queryRunes := make([]rune, 0, cursor-start)
+	for i := start + 1; i < cursor; i++ {
+		r, _ := value.RuneAt(i)
+		if strings.ContainsRune(" \t\n", r) {
+			return "", 0, false
+		}
+		queryRunes = append(queryRunes, lowerRune(r))
+	}
+	return string(queryRunes), start, true
 }
 
 func mentionQuery(value string, cursor int) (query string, start int, pathMode bool, ok bool) {
@@ -5343,6 +5436,52 @@ func mentionQuery(value string, cursor int) (query string, start int, pathMode b
 	return strings.ToLower(query), start, pathMode, true
 }
 
+func mentionQueryFromComposer(value textarea.Model) (query string, start int, end int, pathMode bool, ok bool) {
+	cursor := value.CursorIndex()
+	if cursor < 0 || cursor > value.RuneCount() {
+		cursor = value.RuneCount()
+	}
+	if cursor == 0 || value.RuneCount() == 0 {
+		return "", 0, 0, false, false
+	}
+	start = cursor
+	for start > 0 {
+		prev, _ := value.RuneAt(start - 1)
+		if strings.ContainsRune(" \t\n([{", prev) {
+			break
+		}
+		start--
+	}
+	end = cursor
+	for end < value.RuneCount() {
+		r, _ := value.RuneAt(end)
+		if strings.ContainsRune(" \t\n([{", r) {
+			break
+		}
+		end++
+	}
+	tokenRunes := make([]rune, 0, cursor-start)
+	for i := start; i < cursor; i++ {
+		r, _ := value.RuneAt(i)
+		tokenRunes = append(tokenRunes, r)
+	}
+	token := string(tokenRunes)
+	if !strings.HasPrefix(token, "@") {
+		return "", 0, 0, false, false
+	}
+	if strings.HasPrefix(token, `@"`) {
+		query = strings.TrimSuffix(strings.TrimPrefix(token, `@"`), `"`)
+	} else {
+		query = strings.TrimPrefix(token, "@")
+	}
+	query = strings.TrimSpace(query)
+	pathMode = strings.HasPrefix(query, "./") || strings.HasPrefix(query, "../") || strings.HasPrefix(query, "/")
+	if pathMode {
+		return query, start, end, pathMode, true
+	}
+	return strings.ToLower(query), start, end, pathMode, true
+}
+
 func mentionTokenEnd(value string, start int) int {
 	end := start
 	quoted := strings.HasPrefix(value[start:], `@"`)
@@ -5360,6 +5499,10 @@ func mentionTokenEnd(value string, start int) int {
 		end++
 	}
 	return end
+}
+
+func lowerRune(r rune) rune {
+	return unicode.ToLower(r)
 }
 
 func matchingSlashCommands(query string) []slashCommand {

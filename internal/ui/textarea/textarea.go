@@ -119,6 +119,21 @@ func (m Model) Revision() uint64 {
 	return m.revision
 }
 
+func (m Model) RuneCount() int {
+	return len(m.value)
+}
+
+func (m Model) CursorIndex() int {
+	return m.cursor
+}
+
+func (m Model) RuneAt(i int) (rune, bool) {
+	if i < 0 || i >= len(m.value) {
+		return 0, false
+	}
+	return m.value[i], true
+}
+
 func (m *Model) SetCursor(offset int) {
 	if offset < 0 {
 		offset = 0

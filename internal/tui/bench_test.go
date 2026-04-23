@@ -2,6 +2,8 @@ package tui
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -118,6 +120,77 @@ func BenchmarkHandleKeyTyping(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		next, _ := m.handleKey(msg)
 		m = *next.(*Model)
+	}
+}
+
+func BenchmarkHandleKeyTypingSlashMode(b *testing.B) {
+	m := benchmarkModel(b, 40)
+	m.composer.SetValue("/")
+	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")}
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		next, _ := m.handleKey(msg)
+		m = *next.(*Model)
+	}
+}
+
+func BenchmarkHandleKeyTypingMentionMode(b *testing.B) {
+	m := benchmarkModel(b, 40)
+	m.composer.SetValue("inspect @./cmd/")
+	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("k")}
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		next, _ := m.handleKey(msg)
+		m = *next.(*Model)
+	}
+}
+
+func BenchmarkHandleKeyTypingLargeDraft(b *testing.B) {
+	m := benchmarkModel(b, 40)
+	m.composer.SetValue(strings.Repeat("draft text ", 200))
+	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")}
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		next, _ := m.handleKey(msg)
+		m = *next.(*Model)
+	}
+}
+
+func BenchmarkUpdateComposerMenusSlash(b *testing.B) {
+	m := benchmarkModel(b, 10)
+	m.composer.SetValue("/per")
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		m.composerQueries.revision = 0
+		m.updateComposerMenus()
+	}
+}
+
+func BenchmarkUpdateComposerMenusSkill(b *testing.B) {
+	m := benchmarkModel(b, 10)
+	m.workdir = newSkillRepoTB(b)
+	m.composer.SetValue("Investigate $rev")
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		m.composerQueries.revision = 0
+		m.updateComposerMenus()
+	}
+}
+
+func BenchmarkUpdateComposerMenusMention(b *testing.B) {
+	m := benchmarkModel(b, 10)
+	m.workdir = b.TempDir()
+	if err := os.MkdirAll(filepath.Join(m.workdir, "cmd"), 0o755); err != nil {
+		b.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(m.workdir, "cmd", "koder.go"), []byte("package main\n"), 0o644); err != nil {
+		b.Fatal(err)
+	}
+	m.composer.SetValue("inspect @./cmd/ko")
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		m.composerQueries.revision = 0
+		m.updateComposerMenus()
 	}
 }
 
