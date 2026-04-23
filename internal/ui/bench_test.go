@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/theme"
 )
@@ -181,6 +182,50 @@ func BenchmarkButtonRowRender(b *testing.B) {
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		_ = row.render(palette)
+	}
+}
+
+func BenchmarkMenuRenderCell(b *testing.B) {
+	ctx := benchmarkContext()
+	menu := HistoryMenu{
+		Palette: benchmarkPalette(),
+		Query:   "needle",
+		Width:   72,
+		Items: []MenuItem{
+			{Title: "first-entry", Description: "first description"},
+			{Title: "second-entry", Description: "second description"},
+			{Title: "third-entry", Description: "third description"},
+			{Title: "fourth-entry", Description: "fourth description"},
+		},
+		Selected: 2,
+	}
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		_ = menu.Render(ctx, Rect{W: 72})
+	}
+}
+
+func BenchmarkPanelRenderCell(b *testing.B) {
+	ctx := benchmarkContext()
+	panel := Panel{
+		Width:        72,
+		Padding:      SymmetricInsets(1, 1),
+		Background:   benchmarkPalette().SidebarBackground,
+		Foreground:   benchmarkPalette().SidebarForeground,
+		BorderLeft:   true,
+		BorderRight:  true,
+		BorderTop:    true,
+		BorderBottom: true,
+		BorderColor:  benchmarkPalette().SidebarBorder,
+		Child: Paragraph{
+			Text: strings.Repeat("panel paragraph content ", 12),
+			Style: lipgloss.NewStyle().
+				Foreground(benchmarkPalette().MarkdownText),
+		},
+	}
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		_ = panel.Render(ctx, Rect{W: 72, H: panel.Measure(ctx, NewConstraints(72, 0)).H})
 	}
 }
 

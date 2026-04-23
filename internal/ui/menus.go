@@ -1,10 +1,10 @@
 package ui
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/lkarlslund/koder/internal/theme"
 )
@@ -49,61 +49,136 @@ type SlashMenu struct {
 }
 
 func (m SlashMenu) render() Surface {
-	if len(m.Items) == 0 {
+	element := m.element(m.contentWidth())
+	if element == nil {
 		return Surface{}
 	}
-	lines := []string{lipgloss.NewStyle().Bold(true).Render(m.Title)}
-	for idx, item := range m.Items {
-		line := fmt.Sprintf("%-12s %s", item.Title, item.Description)
-		if idx == m.Selected {
-			line = lipgloss.NewStyle().Reverse(true).Render(line)
-		}
-		lines = append(lines, line)
+	width := m.panelWidth(m.contentWidth())
+	return element.Render(&Context{Palette: theme.Default().Palette}, Rect{W: width})
+}
+
+func (m SlashMenu) Measure(ctx *Context, constraints Constraints) Size {
+	return constraints.Clamp(m.element(m.contentWidth()).Measure(ctx, constraints))
+}
+
+func (m SlashMenu) Render(ctx *Context, bounds Rect) Surface {
+	width := m.panelWidth(m.contentWidth())
+	if bounds.W > 0 {
+		width = min(width, bounds.W)
 	}
-	return SurfaceFromString(lipgloss.NewStyle().Border(lipgloss.NormalBorder()).Padding(0, 1).Render(strings.Join(lines, "\n")))
+	return m.element(max(0, width-4)).Render(ctx, Rect{X: bounds.X, Y: bounds.Y, W: width, H: bounds.H})
 }
 
-func (m SlashMenu) Measure(_ *Context, constraints Constraints) Size {
-	return constraints.Clamp(m.render().Size())
+func (m SlashMenu) element(contentWidth int) Element {
+	if len(m.Items) == 0 {
+		return nil
+	}
+	children := make([]Child, 0, len(m.Items)+1)
+	children = append(children, Fixed(Label{
+		Text: m.Title,
+		Style: lipgloss.NewStyle().
+			Bold(true),
+	}))
+	for idx, item := range m.Items {
+		children = append(children, Fixed(SelectableRow{
+			Primary:        item.Title,
+			Secondary:      item.Description,
+			Width:          contentWidth,
+			PrimaryWidth:   min(16, max(10, contentWidth/4)),
+			SecondaryWidth: max(8, contentWidth-min(16, max(10, contentWidth/4))-2),
+			Selected:       idx == m.Selected,
+			Focused:        idx == m.Selected,
+		}))
+	}
+	return Panel{
+		Child:        Column{Children: children},
+		Padding:      SymmetricInsets(1, 0),
+		BorderLeft:   true,
+		BorderRight:  true,
+		BorderTop:    true,
+		BorderBottom: true,
+	}
 }
 
-func (m SlashMenu) Render(_ *Context, bounds Rect) Surface {
-	return m.render().normalize(bounds.W, bounds.H)
+func (m SlashMenu) contentWidth() int {
+	primaryWidth := ansi.StringWidth(strings.TrimSpace(m.Title))
+	secondaryWidth := 0
+	for _, item := range m.Items {
+		primaryWidth = max(primaryWidth, ansi.StringWidth(compactInlineText(item.Title)))
+		secondaryWidth = max(secondaryWidth, ansi.StringWidth(compactInlineText(item.Description)))
+	}
+	primaryWidth = max(12, min(18, primaryWidth))
+	return max(20, primaryWidth+2+secondaryWidth)
+}
+
+func (m SlashMenu) panelWidth(contentWidth int) int {
+	return max(0, contentWidth) + 4
 }
 
 func (m HistoryMenu) render() Surface {
-	width := m.Width
-	if width <= 0 {
-		width = 72
+	return m.element().Render(&Context{Palette: m.Palette}, Rect{W: m.width()})
+}
+
+func (m HistoryMenu) Measure(ctx *Context, constraints Constraints) Size {
+	return constraints.Clamp(m.element().Measure(ctx, constraints))
+}
+
+func (m HistoryMenu) Render(ctx *Context, bounds Rect) Surface {
+	width := m.width()
+	if bounds.W > 0 {
+		width = min(width, bounds.W)
 	}
-	lines := []string{
-		lipgloss.NewStyle().Bold(true).Render("History"),
-		lipgloss.NewStyle().Foreground(m.Palette.AssistantTimestampText).Render("filter: " + m.Query),
+	return m.element().Render(ctx, Rect{X: bounds.X, Y: bounds.Y, W: width, H: bounds.H})
+}
+
+func (m HistoryMenu) element() Element {
+	width := m.width()
+	contentWidth := max(1, width-4)
+	muted := lipgloss.NewStyle().Foreground(m.Palette.AssistantTimestampText)
+	children := []Child{
+		Fixed(Label{Text: "History", Style: lipgloss.NewStyle().Bold(true)}),
+		Fixed(Label{Text: "filter: " + m.Query, Style: muted}),
 	}
 	if len(m.Items) == 0 {
-		lines = append(lines, "", "  no matches")
+		children = append(children,
+			Fixed(Spacer{H: 1}),
+			Fixed(Label{Text: "  no matches"}),
+		)
 	} else {
-		lines = append(lines, "")
+		children = append(children, Fixed(Spacer{H: 1}))
 		for idx, item := range m.Items {
-			lines = append(lines, SelectableRow{
+			children = append(children, Fixed(SelectableRow{
 				Primary:   item.Title,
 				Secondary: item.Description,
-				Width:     width - 4,
+				Width:     contentWidth,
 				Selected:  idx == m.Selected,
 				Focused:   idx == m.Selected,
-			}.render(m.Palette).String())
+			}))
 		}
 	}
-	lines = append(lines, "", lipgloss.NewStyle().Foreground(m.Palette.AssistantTimestampText).Render("enter accept  esc cancel  ctrl-r/down older  ctrl-s/up newer"))
-	return SurfaceFromString(lipgloss.NewStyle().Border(lipgloss.NormalBorder()).Padding(0, 1).Width(width).Render(strings.Join(lines, "\n")))
+	children = append(children,
+		Fixed(Spacer{H: 1}),
+		Fixed(Label{
+			Text:  "enter accept  esc cancel  ctrl-r/down older  ctrl-s/up newer",
+			Style: muted,
+		}),
+	)
+	return Panel{
+		Child:        Column{Children: children},
+		Width:        width,
+		Padding:      SymmetricInsets(1, 0),
+		BorderLeft:   true,
+		BorderRight:  true,
+		BorderTop:    true,
+		BorderBottom: true,
+	}
 }
 
-func (m HistoryMenu) Measure(_ *Context, constraints Constraints) Size {
-	return constraints.Clamp(m.render().Size())
-}
-
-func (m HistoryMenu) Render(_ *Context, bounds Rect) Surface {
-	return m.render().normalize(bounds.W, bounds.H)
+func (m HistoryMenu) width() int {
+	if m.Width > 0 {
+		return m.Width
+	}
+	return 72
 }
 
 type ApprovalPrompt struct {
@@ -122,31 +197,54 @@ func NewApprovalPrompt(props ApprovalPromptProps) ApprovalPrompt {
 }
 
 func (p ApprovalPrompt) render() Surface {
-	approve := lipgloss.NewStyle().Padding(0, 1)
-	if p.ApproveFocus {
-		approve = approve.Reverse(true).Bold(true)
-	}
-	deny := lipgloss.NewStyle().Padding(0, 1)
-	if p.DenyFocus {
-		deny = deny.Reverse(true).Bold(true)
-	}
-	return SurfaceFromString(lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		Padding(0, 1).
-		Render(strings.Join([]string{
-			lipgloss.NewStyle().Bold(true).Render(p.Title),
-			p.Body,
-			lipgloss.JoinHorizontal(lipgloss.Left, approve.Render(p.ApproveLabel), "  ", deny.Render(p.DenyLabel)),
-			p.Hints,
-		}, "\n")))
+	element := p.element()
+	size := element.Measure(&Context{Palette: p.Palette}, Constraints{})
+	return element.Render(&Context{Palette: p.Palette}, Rect{W: size.W, H: size.H})
 }
 
-func (p ApprovalPrompt) Measure(_ *Context, constraints Constraints) Size {
-	return constraints.Clamp(p.render().Size())
+func (p ApprovalPrompt) Measure(ctx *Context, constraints Constraints) Size {
+	return constraints.Clamp(p.element().Measure(ctx, constraints))
 }
 
-func (p ApprovalPrompt) Render(_ *Context, bounds Rect) Surface {
-	return p.render().normalize(bounds.W, bounds.H)
+func (p ApprovalPrompt) Render(ctx *Context, bounds Rect) Surface {
+	return p.element().Render(ctx, bounds)
+}
+
+func (p ApprovalPrompt) element() Element {
+	buttons := ButtonRow{
+		Buttons: []Button{
+			{Label: p.ApproveLabel, Primary: true, Focused: p.ApproveFocus},
+			{Label: p.DenyLabel, Focused: p.DenyFocus},
+		},
+		Index: p.focusedIndex(),
+		Align: HorizontalAlignLeft,
+	}
+	return Panel{
+		Child: Column{
+			Children: []Child{
+				Fixed(Label{Text: p.Title, Style: lipgloss.NewStyle().Bold(true)}),
+				Fixed(Paragraph{Text: p.Body}),
+				Fixed(buttons),
+				Fixed(Label{
+					Text:  p.Hints,
+					Style: lipgloss.NewStyle().Foreground(p.Palette.AssistantTimestampText),
+				}),
+			},
+			Spacing: 1,
+		},
+		Padding:      SymmetricInsets(1, 0),
+		BorderLeft:   true,
+		BorderRight:  true,
+		BorderTop:    true,
+		BorderBottom: true,
+	}
+}
+
+func (p ApprovalPrompt) focusedIndex() int {
+	if p.DenyFocus && !p.ApproveFocus {
+		return 1
+	}
+	return 0
 }
 
 type MenuPickerDialog struct {
@@ -163,37 +261,59 @@ func NewMenuPickerDialog(props PickerDialogProps) MenuPickerDialog {
 }
 
 func (d MenuPickerDialog) render() Surface {
-	lines := []string{}
+	element := d.element()
+	size := element.Measure(&Context{Palette: d.Palette}, NewConstraints(80, 0))
+	return element.Render(&Context{Palette: d.Palette}, Rect{W: size.W, H: size.H})
+}
+
+func (d MenuPickerDialog) Measure(ctx *Context, constraints Constraints) Size {
+	return constraints.Clamp(d.element().Measure(ctx, constraints))
+}
+
+func (d MenuPickerDialog) Render(ctx *Context, bounds Rect) Surface {
+	return d.element().Render(ctx, bounds)
+}
+
+func (d MenuPickerDialog) element() Element {
+	width := 80
+	listWidth := width - 6
+	children := make([]Child, 0, len(d.Items)+5)
 	if hint := strings.TrimSpace(d.Hint); hint != "" {
-		lines = append(lines, lipgloss.NewStyle().Foreground(d.Palette.AssistantTimestampText).Render(hint))
+		children = append(children, Fixed(Label{
+			Text:  hint,
+			Style: lipgloss.NewStyle().Foreground(d.Palette.AssistantTimestampText),
+		}))
 	}
-	lines = append(lines, "", fmt.Sprintf("filter: %s", d.Query), "")
+	if len(children) > 0 {
+		children = append(children, Fixed(Spacer{H: 1}))
+	}
+	children = append(children, Fixed(Label{Text: "filter: " + d.Query}))
+	children = append(children, Fixed(Spacer{H: 1}))
 	if len(d.Items) == 0 {
-		lines = append(lines, "  no matches")
+		children = append(children, Fixed(Label{Text: "  no matches"}))
 	} else {
 		for idx, item := range d.Items {
-			lines = append(lines, SelectableRow{
+			children = append(children, Fixed(SelectableRow{
 				Primary:   item.Title,
 				Secondary: item.Description,
-				Width:     72,
+				Width:     listWidth,
 				Selected:  idx == d.Index,
 				Focused:   idx == d.Index,
-			}.render(d.Palette).String())
+			}))
 		}
 	}
-	lines = append(lines, "", RenderDialogButtons(d.Palette, "OK", "Cancel"))
-	return SurfaceFromString(RenderElement(&Context{Palette: d.Palette}, Modal{
-		Title:       d.Title,
-		BodyElement: TextPane{Content: strings.Join(lines, "\n")},
-		Footer:      "Enter applies the highlighted row. Esc cancels.",
-		Width:       80,
-	}, 80, 0))
-}
-
-func (d MenuPickerDialog) Measure(_ *Context, constraints Constraints) Size {
-	return constraints.Clamp(d.render().Size())
-}
-
-func (d MenuPickerDialog) Render(_ *Context, bounds Rect) Surface {
-	return d.render().normalize(bounds.W, bounds.H)
+	return Dialog{
+		Title: " " + strings.TrimSpace(d.Title),
+		Body:  Column{Children: children},
+		Buttons: ButtonRow{
+			Buttons: []Button{
+				{Label: "OK", Primary: true},
+				{Label: "Cancel"},
+			},
+			Width: listWidth,
+			Align: HorizontalAlignRight,
+		},
+		Footer: "Enter applies the highlighted row. Esc cancels.",
+		Width:  width,
+	}
 }
