@@ -180,26 +180,6 @@ func (s CellStyle) equal(other CellStyle) bool {
 	return s.FG == other.FG && s.BG == other.BG && s.Bold == other.Bold && s.Italic == other.Italic
 }
 
-func (s CellStyle) apply(text string) string {
-	if s.isZero() || text == "" {
-		return text
-	}
-	style := lipgloss.NewStyle()
-	if s.FG != "" {
-		style = style.Foreground(s.FG)
-	}
-	if s.BG != "" {
-		style = style.Background(s.BG)
-	}
-	if s.Bold {
-		style = style.Bold(true)
-	}
-	if s.Italic {
-		style = style.Italic(true)
-	}
-	return style.Render(text)
-}
-
 type Cell struct {
 	Text         string
 	Width        int
@@ -347,42 +327,9 @@ func (s Surface) cellLines() []string {
 	}
 	lines := make([]string, s.h)
 	for y := 0; y < s.h; y++ {
-		lines[y] = s.serializeRow(y)
+		lines[y] = serializeSurfaceRow(s, y)
 	}
 	return lines
-}
-
-func (s Surface) serializeRow(y int) string {
-	if y < 0 || y >= s.h || len(s.cells) == 0 {
-		return ""
-	}
-	var b strings.Builder
-	var currentStyle CellStyle
-	var segment strings.Builder
-	flush := func() {
-		if segment.Len() == 0 {
-			return
-		}
-		b.WriteString(currentStyle.apply(segment.String()))
-		segment.Reset()
-	}
-	for x := 0; x < s.w; x++ {
-		cell := s.cellAt(x, y)
-		if cell.Continuation {
-			continue
-		}
-		text := cell.Text
-		if text == "" {
-			text = " "
-		}
-		if segment.Len() > 0 && !currentStyle.equal(cell.Style) {
-			flush()
-		}
-		currentStyle = cell.Style
-		segment.WriteString(text)
-	}
-	flush()
-	return b.String()
 }
 
 func (s Surface) blitAt(x, y int, child Surface) Surface {

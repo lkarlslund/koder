@@ -27,9 +27,9 @@ func (c *Cursor) SetChar(char string) {
 
 func (c Cursor) View() string {
 	if c.char == "" {
-		return c.TextStyle.Render(" ")
+		return "|"
 	}
-	return c.TextStyle.Render(c.char)
+	return "|" + c.char
 }
 
 type Style struct {
@@ -237,16 +237,10 @@ func (m *Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 func (m Model) View() string {
 	line := m.visibleLine()
-	style := m.BlurredStyle
-	if m.focus {
-		style = m.FocusedStyle
-	}
-	prompt := style.Prompt.Render(m.Prompt)
 	if !m.focus || (!m.blink && m.BlinkEnabled) {
-		return prompt + style.Text.Render(line.plain)
+		return m.Prompt + line.plain
 	}
-	text := line.before + m.renderCursorChar(line.cursor) + line.after
-	return prompt + style.Text.Render(text)
+	return m.Prompt + line.before + m.CursorView(line.cursor) + line.after
 }
 
 func (m Model) CursorView(char string) string {
@@ -256,7 +250,10 @@ func (m Model) CursorView(char string) string {
 	if !m.focus || (!m.blink && m.BlinkEnabled) {
 		return char
 	}
-	return m.renderCursorChar(char)
+	if char == " " {
+		return "|"
+	}
+	return "|" + char
 }
 
 func (m Model) CursorVisible() bool {
@@ -381,11 +378,4 @@ func max(a, b int) int {
 		return a
 	}
 	return b
-}
-
-func (m Model) renderCursorChar(char string) string {
-	if char == "" {
-		char = " "
-	}
-	return m.Cursor.TextStyle.Render(char)
 }

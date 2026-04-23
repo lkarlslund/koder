@@ -69,6 +69,24 @@ func TestNoStyledStringRenderingInDialogs(t *testing.T) {
 	}
 }
 
+func TestNoStyledStringRenderingInTextarea(t *testing.T) {
+	root := repoRoot(t)
+	path := filepath.Join(root, "internal/ui/textarea/textarea.go")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(raw)
+	for _, forbidden := range []string{
+		".Render(",
+		"lipgloss.NewStyle().Render(",
+	} {
+		if strings.Contains(text, forbidden) {
+			t.Fatalf("unexpected %q usage in %s", forbidden, path)
+		}
+	}
+}
+
 func repoRoot(t *testing.T) string {
 	t.Helper()
 	dir, err := os.Getwd()
