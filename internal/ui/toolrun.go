@@ -65,15 +65,8 @@ func (r ToolRun) CardSurface(palette theme.Palette, width int, expanded bool) Su
 }
 
 func (r ToolRun) renderCard(palette theme.Palette, width int, expanded bool) Surface {
-	titleStyle := lipgloss.NewStyle().Foreground(palette.MarkdownText).Bold(true).Italic(true)
-	subtitleStyle := lipgloss.NewStyle().Foreground(palette.ComposerMutedText)
-	bodyStyle := lipgloss.NewStyle().Foreground(palette.MarkdownText)
-	addedStyle := lipgloss.NewStyle().Foreground(palette.DiffAddedText)
-	deletedStyle := lipgloss.NewStyle().Foreground(palette.DiffDeletedText)
-	metaStyle := lipgloss.NewStyle().Foreground(palette.ComposerMutedText)
-	toggleStyle := lipgloss.NewStyle().Foreground(palette.UserAccentBar).Bold(true)
 	headerWidth := innerCardWidth(width)
-	headerParts := []string{titleStyle.Render(r.Title)}
+	headerParts := []string{r.Title}
 	if hiddenLines := r.HiddenLineCount(headerWidth); hiddenLines > 0 {
 		label := "Collapse"
 		if !expanded && hiddenLines == 1 {
@@ -84,16 +77,65 @@ func (r ToolRun) renderCard(palette theme.Palette, width int, expanded bool) Sur
 		if hiddenLines > 1 && !expanded {
 			label = "Expand (" + strconv.Itoa(hiddenLines) + " lines more)"
 		}
-		headerParts = append(headerParts, toggleStyle.Render(label))
+		headerParts = append(headerParts, label)
 	}
 	lines := []string{strings.Join(headerParts, "  ")}
 	if subtitle := strings.TrimSpace(r.Subtitle); subtitle != "" {
-		lines = append(lines, subtitleStyle.Render(subtitle))
+		lines = append(lines, subtitle)
 	}
 	if preview := r.PreviewText(); preview != "" {
-		lines = append(lines, renderToolRunPreview(preview, r, bodyStyle, addedStyle, deletedStyle, metaStyle, headerWidth, expanded))
+		lines = append(lines, renderToolRunPreview(preview, r, lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle(), headerWidth, expanded))
 	}
-	return SurfaceFromString(strings.Join(lines, "\n"))
+	cardWidth := 0
+	for _, line := range lines {
+		for _, sub := range strings.Split(line, "\n") {
+			cardWidth = maxInt(cardWidth, ansi.StringWidth(sub))
+		}
+	}
+	s := BlankSurface(cardWidth, strings.Count(strings.Join(lines, "\n"), "\n")+1)
+	row := 0
+	titleStyle := CellStyle{FG: palette.MarkdownText, Bold: true, Italic: true}
+	toggleStyle := CellStyle{FG: palette.UserAccentBar, Bold: true}
+	subtitleStyle := CellStyle{FG: palette.ComposerMutedText}
+	bodyStyle := CellStyle{FG: palette.MarkdownText}
+	addedStyle := CellStyle{FG: palette.DiffAddedText}
+	deletedStyle := CellStyle{FG: palette.DiffDeletedText}
+	metaStyle := CellStyle{FG: palette.ComposerMutedText}
+	for _, header := range lines[:1] {
+		headerCols := strings.Split(header, "  ")
+		col := 0
+		if len(headerCols) > 0 {
+			s.WriteText(col, row, headerCols[0], titleStyle)
+			col += ansi.StringWidth(headerCols[0])
+		}
+		for _, extra := range headerCols[1:] {
+			s.WriteText(col, row, "  ", bodyStyle)
+			col += 2
+			s.WriteText(col, row, extra, toggleStyle)
+			col += ansi.StringWidth(extra)
+		}
+		row++
+	}
+	if len(lines) > 1 {
+		for _, line := range lines[1:] {
+			for _, sub := range strings.Split(line, "\n") {
+				style := bodyStyle
+				trimmed := strings.TrimLeft(sub, " ")
+				if strings.HasPrefix(trimmed, "+") {
+					style = addedStyle
+				} else if strings.HasPrefix(trimmed, "-") {
+					style = deletedStyle
+				} else if strings.HasPrefix(trimmed, "@@") {
+					style = metaStyle
+				} else if row == 1 && strings.TrimSpace(r.Subtitle) != "" {
+					style = subtitleStyle
+				}
+				s.WriteText(0, row, sub, style)
+				row++
+			}
+		}
+	}
+	return s
 }
 
 type ToolRunDock struct {

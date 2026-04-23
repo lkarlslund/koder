@@ -87,17 +87,17 @@ func (c Composer) render() Surface {
 	}
 
 	if c.HalfBlocks {
-		return Surface{lines: []string{
-			c.HalfBlockLine("▄"),
-			middle.String(),
-			c.HalfBlockLine("▀"),
-		}}
+		s := BlankSurface(width, 3)
+		s = s.placeAt(0, 0, renderHalfBlockSurface(width, "▄", c.Palette))
+		s = s.placeAt(0, 1, middle)
+		s = s.placeAt(0, 2, renderHalfBlockSurface(width, "▀", c.Palette))
+		return s
 	}
-	return Surface{lines: []string{
-		renderBlankLine().String(),
-		middle.String(),
-		renderBlankLine().String(),
-	}}
+	s := BlankSurface(width, 3)
+	s = s.placeAt(0, 0, renderBlankLine())
+	s = s.placeAt(0, 1, middle)
+	s = s.placeAt(0, 2, renderBlankLine())
+	return s
 }
 
 func (c Composer) renderPlaceholderLine(promptStyle, contentStyle lipgloss.Style, prompt string, contentWidth int, placeholder string, cursorChar string) string {
@@ -126,51 +126,76 @@ func (c Composer) renderLine(prompt string, promptStyle lipgloss.Style, before, 
 }
 
 func (c Composer) renderLineSurface(prompt string, promptStyle lipgloss.Style, before, cursor, after string, contentWidth int, cursorVisible bool, textFG, textBG lipgloss.Color) Surface {
-	line := promptStyle.Render(prompt)
+	width := ansi.StringWidth(prompt) + maxInt(0, contentWidth)
+	if width <= 0 {
+		width = ansi.StringWidth(prompt)
+	}
+	s := BlankSurface(width, 1)
+	promptCellStyle := CellStyle{BG: c.Palette.UserTextBackground, FG: c.Palette.UserAccentBar}
 	if contentWidth <= 0 {
-		return Surface{lines: []string{line}}
+		s.WriteText(0, 0, prompt, promptCellStyle)
+		return s
 	}
 	before = ansi.Truncate(before, contentWidth, "")
 	cursor = ansi.Truncate(cursor, maxInt(1, contentWidth-ansi.StringWidth(before)), "")
 	remaining := maxInt(0, contentWidth-ansi.StringWidth(before)-ansi.StringWidth(cursor))
 	after = ansi.Truncate(after, remaining, "")
 	remaining = maxInt(0, contentWidth-ansi.StringWidth(before)-ansi.StringWidth(cursor)-ansi.StringWidth(after))
-
-	line += renderButtonSegment(before, textFG, textBG, false)
+	contentStyle := CellStyle{FG: textFG, BG: textBG}
+	cursorStyle := contentStyle
 	if cursorVisible {
-		line += renderButtonSegment(cursor, textBG, textFG, false)
-	} else {
-		line += renderButtonSegment(cursor, textFG, textBG, false)
+		cursorStyle = CellStyle{FG: textBG, BG: textFG}
 	}
-	line += renderButtonSegment(after, textFG, textBG, false)
+	s.WriteText(0, 0, prompt, promptCellStyle)
+	offset := ansi.StringWidth(prompt)
+	for x := offset; x < width; x++ {
+		s.setCell(x, 0, Cell{Text: " ", Width: 1, Style: contentStyle})
+	}
+	s.WriteText(offset, 0, before, contentStyle)
+	s.WriteText(offset+ansi.StringWidth(before), 0, cursor, cursorStyle)
+	s.WriteText(offset+ansi.StringWidth(before)+ansi.StringWidth(cursor), 0, after, contentStyle)
 	if remaining > 0 {
-		line += renderButtonSegment(strings.Repeat(" ", remaining), textFG, textBG, false)
+		s.WriteText(offset+ansi.StringWidth(before)+ansi.StringWidth(cursor)+ansi.StringWidth(after), 0, strings.Repeat(" ", remaining), contentStyle)
 	}
-	return Surface{lines: []string{line}}
+	_ = promptStyle
+	return s
 }
 
 func (c Composer) renderPlaceholder(prompt string, promptStyle lipgloss.Style, before, cursor, after string, contentWidth int, cursorVisible bool, textFG, textBG, muted lipgloss.Color) Surface {
-	line := promptStyle.Render(prompt)
+	width := ansi.StringWidth(prompt) + maxInt(0, contentWidth)
+	if width <= 0 {
+		width = ansi.StringWidth(prompt)
+	}
+	s := BlankSurface(width, 1)
+	promptCellStyle := CellStyle{BG: c.Palette.UserTextBackground, FG: c.Palette.UserAccentBar}
 	if contentWidth <= 0 {
-		return Surface{lines: []string{line}}
+		s.WriteText(0, 0, prompt, promptCellStyle)
+		return s
 	}
 	before = ansi.Truncate(before, contentWidth, "")
 	cursor = ansi.Truncate(cursor, maxInt(1, contentWidth-ansi.StringWidth(before)), "")
 	remaining := maxInt(0, contentWidth-ansi.StringWidth(before)-ansi.StringWidth(cursor))
 	after = ansi.Truncate(after, remaining, "")
 	remaining = maxInt(0, contentWidth-ansi.StringWidth(before)-ansi.StringWidth(cursor)-ansi.StringWidth(after))
-
-	line += renderButtonSegment(before, textFG, textBG, false)
+	beforeStyle := CellStyle{FG: textFG, BG: textBG}
+	cursorStyle := CellStyle{FG: muted, BG: textBG}
 	if cursorVisible {
-		line += renderButtonSegment(cursor, textBG, textFG, false)
-	} else {
-		line += renderButtonSegment(cursor, muted, textBG, false)
+		cursorStyle = CellStyle{FG: textBG, BG: textFG}
 	}
-	line += renderButtonSegment(after, muted, textBG, false)
+	afterStyle := CellStyle{FG: muted, BG: textBG}
+	s.WriteText(0, 0, prompt, promptCellStyle)
+	offset := ansi.StringWidth(prompt)
+	for x := offset; x < width; x++ {
+		s.setCell(x, 0, Cell{Text: " ", Width: 1, Style: beforeStyle})
+	}
+	s.WriteText(offset, 0, before, beforeStyle)
+	s.WriteText(offset+ansi.StringWidth(before), 0, cursor, cursorStyle)
+	s.WriteText(offset+ansi.StringWidth(before)+ansi.StringWidth(cursor), 0, after, afterStyle)
 	if remaining > 0 {
-		line += renderButtonSegment(strings.Repeat(" ", remaining), textFG, textBG, false)
+		s.WriteText(offset+ansi.StringWidth(before)+ansi.StringWidth(cursor)+ansi.StringWidth(after), 0, strings.Repeat(" ", remaining), beforeStyle)
 	}
-	return Surface{lines: []string{line}}
+	_ = promptStyle
+	return s
 }
 
 func (c Composer) HalfBlockLine(char string) string {
@@ -216,14 +241,13 @@ func (l AttachmentList) render(palette theme.Palette) Surface {
 	if len(l.Items) == 0 || l.Width <= 0 {
 		return Surface{}
 	}
-	style := lipgloss.NewStyle().
-		Width(l.Width).
-		Foreground(palette.MarkdownText).
-		Background(palette.UserTextBackground).
-		Padding(0, 1)
-	rows := make([]string, 0, len(l.Items))
-	for _, item := range l.Items {
-		rows = append(rows, style.Render(ansi.Truncate(item.Label, maxInt(1, l.Width-2), "")))
+	s := BlankSurface(l.Width, len(l.Items))
+	style := CellStyle{FG: palette.MarkdownText, BG: palette.UserTextBackground}
+	for y, item := range l.Items {
+		for x := 0; x < l.Width; x++ {
+			s.setCell(x, y, Cell{Text: " ", Width: 1, Style: style})
+		}
+		s.WriteText(1, y, ansi.Truncate(item.Label, maxInt(1, l.Width-2), ""), style)
 	}
-	return Surface{lines: rows}
+	return s
 }

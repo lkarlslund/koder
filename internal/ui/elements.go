@@ -3,6 +3,7 @@ package ui
 import (
 	"strings"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/lkarlslund/koder/internal/theme"
@@ -165,8 +166,53 @@ type Context struct {
 	Runtime *Runtime
 }
 
+type CellStyle struct {
+	FG     lipgloss.Color
+	BG     lipgloss.Color
+	Bold   bool
+	Italic bool
+}
+
+func (s CellStyle) isZero() bool {
+	return s.FG == "" && s.BG == "" && !s.Bold && !s.Italic
+}
+
+func (s CellStyle) equal(other CellStyle) bool {
+	return s.FG == other.FG && s.BG == other.BG && s.Bold == other.Bold && s.Italic == other.Italic
+}
+
+func (s CellStyle) apply(text string) string {
+	if s.isZero() || text == "" {
+		return text
+	}
+	style := lipgloss.NewStyle()
+	if s.FG != "" {
+		style = style.Foreground(s.FG)
+	}
+	if s.BG != "" {
+		style = style.Background(s.BG)
+	}
+	if s.Bold {
+		style = style.Bold(true)
+	}
+	if s.Italic {
+		style = style.Italic(true)
+	}
+	return style.Render(text)
+}
+
+type Cell struct {
+	Text         string
+	Width        int
+	Style        CellStyle
+	Continuation bool
+}
+
 type Surface struct {
 	lines []string
+	w     int
+	h     int
+	cells []Cell
 }
 
 func BlankSurface(width, height int) Surface {
@@ -176,11 +222,11 @@ func BlankSurface(width, height int) Surface {
 	if height < 0 {
 		height = 0
 	}
-	lines := make([]string, height)
-	for i := range lines {
-		lines[i] = strings.Repeat(" ", width)
+	cells := make([]Cell, width*height)
+	for i := range cells {
+		cells[i] = Cell{Text: " ", Width: 1}
 	}
-	return Surface{lines: lines}
+	return Surface{w: width, h: height, cells: cells}
 }
 
 func SurfaceFromString(input string) Surface {
@@ -191,12 +237,18 @@ func SurfaceFromString(input string) Surface {
 }
 
 func (s Surface) Lines() []string {
+	if s.isCellBuffer() {
+		return s.cellLines()
+	}
 	out := make([]string, len(s.lines))
 	copy(out, s.lines)
 	return out
 }
 
 func (s Surface) Size() Size {
+	if s.isCellBuffer() {
+		return Size{W: s.w, H: s.h}
+	}
 	width := 0
 	for _, line := range s.lines {
 		width = max(width, ansi.StringWidth(line))
@@ -205,10 +257,21 @@ func (s Surface) Size() Size {
 }
 
 func (s Surface) String() string {
-	return strings.Join(s.lines, "\n")
+	return strings.Join(s.Lines(), "\n")
 }
 
 func (s Surface) normalize(width, height int) Surface {
+	if s.isCellBuffer() {
+		out := BlankSurface(width, height)
+		copyH := min(height, s.h)
+		copyW := min(width, s.w)
+		for y := 0; y < copyH; y++ {
+			for x := 0; x < copyW; x++ {
+				out.setCell(x, y, s.cellAt(x, y))
+			}
+		}
+		return out
+	}
 	if width < 0 {
 		width = 0
 	}
@@ -230,11 +293,16 @@ func (s Surface) normalize(width, height int) Surface {
 }
 
 func (s Surface) placeAt(x, y int, child Surface) Surface {
-	if len(s.lines) == 0 || len(child.lines) == 0 {
+	if s.isCellBuffer() && child.isCellBuffer() {
+		return s.blitAt(x, y, child)
+	}
+	baseLines := s.Lines()
+	childLines := child.Lines()
+	if len(baseLines) == 0 || len(childLines) == 0 {
 		return s
 	}
-	base := s.Lines()
-	for row, childLine := range child.lines {
+	base := baseLines
+	for row, childLine := range childLines {
 		targetY := y + row
 		if targetY < 0 || targetY >= len(base) {
 			continue
@@ -250,6 +318,126 @@ func (s Surface) placeAt(x, y int, child Surface) Surface {
 		base[targetY] = overlayLine(base[targetY], childLine, x)
 	}
 	return Surface{lines: base}
+}
+
+func (s Surface) isCellBuffer() bool {
+	return len(s.cells) > 0 || (s.w == 0 && s.h == 0 && s.lines == nil)
+}
+
+func (s Surface) cellIndex(x, y int) int {
+	return y*s.w + x
+}
+
+func (s Surface) cellAt(x, y int) Cell {
+	if x < 0 || y < 0 || x >= s.w || y >= s.h || len(s.cells) == 0 {
+		return Cell{Text: " ", Width: 1}
+	}
+	return s.cells[s.cellIndex(x, y)]
+}
+
+func (s *Surface) setCell(x, y int, cell Cell) {
+	if x < 0 || y < 0 || x >= s.w || y >= s.h || len(s.cells) == 0 {
+		return
+	}
+	s.cells[s.cellIndex(x, y)] = cell
+}
+
+func (s Surface) cellLines() []string {
+	if !s.isCellBuffer() {
+		return s.Lines()
+	}
+	lines := make([]string, s.h)
+	for y := 0; y < s.h; y++ {
+		lines[y] = s.serializeRow(y)
+	}
+	return lines
+}
+
+func (s Surface) serializeRow(y int) string {
+	if y < 0 || y >= s.h || len(s.cells) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	var currentStyle CellStyle
+	var segment strings.Builder
+	flush := func() {
+		if segment.Len() == 0 {
+			return
+		}
+		b.WriteString(currentStyle.apply(segment.String()))
+		segment.Reset()
+	}
+	for x := 0; x < s.w; x++ {
+		cell := s.cellAt(x, y)
+		if cell.Continuation {
+			continue
+		}
+		text := cell.Text
+		if text == "" {
+			text = " "
+		}
+		if segment.Len() > 0 && !currentStyle.equal(cell.Style) {
+			flush()
+		}
+		currentStyle = cell.Style
+		segment.WriteString(text)
+	}
+	flush()
+	return b.String()
+}
+
+func (s Surface) blitAt(x, y int, child Surface) Surface {
+	if !s.isCellBuffer() || !child.isCellBuffer() {
+		return s
+	}
+	out := s
+	for cy := 0; cy < child.h; cy++ {
+		targetY := y + cy
+		if targetY < 0 || targetY >= out.h {
+			continue
+		}
+		for cx := 0; cx < child.w; cx++ {
+			targetX := x + cx
+			if targetX < 0 || targetX >= out.w {
+				continue
+			}
+			out.setCell(targetX, targetY, child.cellAt(cx, cy))
+		}
+	}
+	return out
+}
+
+func (s *Surface) WriteText(x, y int, text string, style CellStyle) {
+	if !s.isCellBuffer() || y < 0 || y >= s.h {
+		return
+	}
+	col := x
+	for _, r := range text {
+		grapheme := string(r)
+		width := ansi.StringWidth(grapheme)
+		if width <= 0 {
+			continue
+		}
+		if col >= s.w {
+			break
+		}
+		if col >= 0 {
+			s.setCell(col, y, Cell{Text: grapheme, Width: width, Style: style})
+			for extra := 1; extra < width && col+extra < s.w; extra++ {
+				s.setCell(col+extra, y, Cell{Continuation: true, Style: style})
+			}
+		}
+		col += width
+	}
+}
+
+func FilledLineSurface(width int, text string, fillStyle, textStyle CellStyle) Surface {
+	s := BlankSurface(width, 1)
+	for x := 0; x < width; x++ {
+		s.setCell(x, 0, Cell{Text: " ", Width: 1, Style: fillStyle})
+	}
+	s.WriteText(0, 0, ansi.Truncate(text, width, ""), textStyle)
+	return s
 }
 
 func overlayLine(base, overlay string, offset int) string {

@@ -141,6 +141,30 @@ func BenchmarkSurfacePlaceAtLarge(b *testing.B) {
 	}
 }
 
+func BenchmarkCellSurfaceWriteLine(b *testing.B) {
+	surface := BlankSurface(120, 8)
+	style := CellStyle{FG: benchmarkPalette().MarkdownText}
+	text := strings.Repeat("cell-write ", 8)
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		s := surface
+		s.WriteText(4, 3, text, style)
+	}
+}
+
+func BenchmarkCellSurfaceBlitLarge(b *testing.B) {
+	base := BlankSurface(120, 60)
+	child := BlankSurface(48, 8)
+	style := CellStyle{FG: benchmarkPalette().MarkdownText}
+	for y := 0; y < 8; y++ {
+		child.WriteText(0, y, strings.Repeat("overlay ", 6), style)
+	}
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		_ = base.placeAt(8, 10, child)
+	}
+}
+
 func BenchmarkButtonRowRender(b *testing.B) {
 	row := ButtonRow{
 		Buttons: []Button{
