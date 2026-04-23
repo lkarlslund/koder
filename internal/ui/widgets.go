@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -15,15 +16,14 @@ type Label struct {
 }
 
 func (l Label) Measure(_ *Context, constraints Constraints) Size {
-	return constraints.Clamp(SurfaceFromString(l.render()).Size())
+	return constraints.Clamp(Size{W: lipgloss.Width(l.Text), H: 1})
 }
 
 func (l Label) Render(_ *Context, bounds Rect) Surface {
-	return SurfaceFromString(l.render()).normalize(bounds.W, bounds.H)
-}
-
-func (l Label) render() string {
-	return l.Style.Render(l.Text)
+	width := max(1, bounds.W)
+	s := BlankSurface(width, max(1, bounds.H))
+	s.WriteText(0, 0, ansi.Truncate(l.Text, width, ""), lipglossToCellStyle(l.Style))
+	return s.normalize(bounds.W, bounds.H)
 }
 
 type TextPane struct {
@@ -123,30 +123,43 @@ func (p Panel) Render(ctx *Context, bounds Rect) Surface {
 		W: max(0, width-inset.Left-inset.Right),
 		H: max(0, height-inset.Top-inset.Bottom),
 	}
-	content := ""
+	s := BlankSurface(width, height)
+	fillStyle := CellStyle{BG: p.Background, FG: p.Foreground}
+	for y := 0; y < height; y++ {
+		for x := 0; x < width; x++ {
+			s.setCell(x, y, Cell{Text: " ", Width: 1, Style: fillStyle})
+		}
+	}
+	border := lipgloss.NormalBorder()
+	borderStyle := CellStyle{FG: p.BorderColor, BG: p.Background}
+	if p.BorderTop && width >= 2 {
+		s.WriteText(0, 0, border.TopLeft, borderStyle)
+		s.WriteText(width-1, 0, border.TopRight, borderStyle)
+		for x := 1; x < width-1; x++ {
+			s.setCell(x, 0, Cell{Text: border.Top, Width: 1, Style: borderStyle})
+		}
+	}
+	if p.BorderBottom && height >= 2 && width >= 2 {
+		s.WriteText(0, height-1, border.BottomLeft, borderStyle)
+		s.WriteText(width-1, height-1, border.BottomRight, borderStyle)
+		for x := 1; x < width-1; x++ {
+			s.setCell(x, height-1, Cell{Text: border.Bottom, Width: 1, Style: borderStyle})
+		}
+	}
+	if p.BorderLeft {
+		for y := 1; y < height-1; y++ {
+			s.setCell(0, y, Cell{Text: border.Left, Width: 1, Style: borderStyle})
+		}
+	}
+	if p.BorderRight && width > 1 {
+		for y := 1; y < height-1; y++ {
+			s.setCell(width-1, y, Cell{Text: border.Right, Width: 1, Style: borderStyle})
+		}
+	}
 	if p.Child != nil {
-		content = p.Child.Render(ctx, childBounds).String()
+		s = s.placeAt(inset.Left, inset.Top, p.Child.Render(ctx, childBounds))
 	}
-	style := lipgloss.NewStyle().
-		Width(width).
-		Padding(p.Padding.Top, p.Padding.Right, p.Padding.Bottom, p.Padding.Left).
-		Background(p.Background).
-		Foreground(p.Foreground).
-		Border(lipgloss.Border{
-			Top:         lipgloss.NormalBorder().Top,
-			Bottom:      lipgloss.NormalBorder().Bottom,
-			Left:        lipgloss.NormalBorder().Left,
-			Right:       lipgloss.NormalBorder().Right,
-			TopLeft:     lipgloss.NormalBorder().TopLeft,
-			TopRight:    lipgloss.NormalBorder().TopRight,
-			BottomLeft:  lipgloss.NormalBorder().BottomLeft,
-			BottomRight: lipgloss.NormalBorder().BottomRight,
-		}, p.BorderTop, p.BorderRight, p.BorderBottom, p.BorderLeft).
-		BorderForeground(p.BorderColor)
-	if height > 0 {
-		style = style.Height(height)
-	}
-	return SurfaceFromString(style.Render(content)).normalize(width, height)
+	return s.normalize(width, height)
 }
 
 func (p Panel) panelInsets() Insets {
@@ -193,7 +206,9 @@ func (d Divider) Render(_ *Context, bounds Rect) Surface {
 	} else if lipgloss.Width(text) < width {
 		text += strings.Repeat("─", width-lipgloss.Width(text))
 	}
-	return SurfaceFromString(d.Style.Render(text)).normalize(width, bounds.H)
+	s := BlankSurface(width, max(1, bounds.H))
+	s.WriteText(0, 0, ansi.Truncate(text, width, ""), lipglossToCellStyle(d.Style))
+	return s.normalize(width, bounds.H)
 }
 
 type Paragraph struct {
@@ -207,7 +222,22 @@ func (p Paragraph) Measure(_ *Context, constraints Constraints) Size {
 }
 
 func (p Paragraph) Render(_ *Context, bounds Rect) Surface {
-	return SurfaceFromString(p.render(bounds.W)).normalize(bounds.W, bounds.H)
+	text := strings.TrimSpace(p.Text)
+	if text == "" {
+		return BlankSurface(max(0, bounds.W), max(0, bounds.H))
+	}
+	width := bounds.W
+	if width <= 0 {
+		width = lipgloss.Width(text)
+	}
+	rendered := p.render(width)
+	lines := strings.Split(rendered, "\n")
+	s := BlankSurface(width, len(lines))
+	style := lipglossToCellStyle(p.Style)
+	for y, line := range lines {
+		s.WriteText(0, y, ansi.Truncate(line, width, ""), style)
+	}
+	return s.normalize(bounds.W, bounds.H)
 }
 
 func (p Paragraph) render(width int) string {
@@ -283,7 +313,7 @@ func (m ModalFrame) Render(ctx *Context, bounds Rect) Surface {
 	}
 	base := BlankSurface(bounds.W, bounds.H)
 	top, closeStart, closeWidth := m.topBorder(ctx.Palette, bounds.W)
-	base = base.placeAt(0, 0, SurfaceFromString(top))
+	base = base.placeAt(0, 0, top)
 	if ctx != nil && ctx.Runtime != nil && closeWidth > 0 {
 		ctx.Runtime.Register(Control{
 			ID:      "window-close",
@@ -291,16 +321,17 @@ func (m ModalFrame) Render(ctx *Context, bounds Rect) Surface {
 			Enabled: true,
 		})
 	}
-	base = base.placeAt(0, 1, SurfaceFromString(m.frameLine(ctx.Palette, bounds.W, "")))
+	base = base.placeAt(0, 1, m.frameLine(ctx.Palette, bounds.W, ""))
 	for row := 0; row < contentHeight; row++ {
 		line := ""
-		if row < len(contentSurface.lines) {
-			line = contentSurface.lines[row]
+		lines := contentSurface.Lines()
+		if row < len(lines) {
+			line = lines[row]
 		}
-		base = base.placeAt(0, row+2, SurfaceFromString(m.frameLine(ctx.Palette, bounds.W, line)))
+		base = base.placeAt(0, row+2, m.frameLine(ctx.Palette, bounds.W, line))
 	}
-	base = base.placeAt(0, contentHeight+2, SurfaceFromString(m.frameLine(ctx.Palette, bounds.W, "")))
-	base = base.placeAt(0, bounds.H-1, SurfaceFromString(m.bottomBorder(ctx.Palette, bounds.W)))
+	base = base.placeAt(0, contentHeight+2, m.frameLine(ctx.Palette, bounds.W, ""))
+	base = base.placeAt(0, bounds.H-1, m.bottomBorder(ctx.Palette, bounds.W))
 	return base.normalize(bounds.W, bounds.H)
 }
 
@@ -353,19 +384,11 @@ func (m ModalFrame) closeLabel() string {
 	return "[X]"
 }
 
-func (m ModalFrame) topBorder(palette theme.Palette, width int) (string, int, int) {
+func (m ModalFrame) topBorder(palette theme.Palette, width int) (Surface, int, int) {
 	border := lipgloss.RoundedBorder()
-	borderStyle := lipgloss.NewStyle().
-		Foreground(palette.SidebarBorder).
-		Background(palette.SidebarBackground)
-	titleStyle := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(palette.MarkdownText).
-		Background(palette.SidebarBackground)
-	closeStyle := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(palette.AssistantTimestampText).
-		Background(palette.SidebarBackground)
+	borderStyle := CellStyle{FG: palette.SidebarBorder, BG: palette.SidebarBackground}
+	titleStyle := CellStyle{FG: palette.MarkdownText, BG: palette.SidebarBackground, Bold: true}
+	closeStyle := CellStyle{FG: palette.AssistantTimestampText, BG: palette.SidebarBackground, Bold: true}
 	innerWidth := max(0, width-2)
 	title := m.titleLabel()
 	close := m.closeLabel()
@@ -377,35 +400,64 @@ func (m ModalFrame) topBorder(palette theme.Palette, width int) (string, int, in
 	titleWidth := min(innerWidth-closeWidth, ansi.StringWidth(title))
 	fillerWidth := max(0, innerWidth-titleWidth-closeWidth)
 	closeStart := width - 1 - closeWidth
-	line := borderStyle.Render(border.TopLeft) +
-		titleStyle.Render(title) +
-		borderStyle.Render(strings.Repeat(border.Top, fillerWidth)) +
-		closeStyle.Render(close) +
-		borderStyle.Render(border.TopRight)
-	return line, max(0, closeStart), closeWidth
+	s := BlankSurface(width, 1)
+	for x := 0; x < width; x++ {
+		s.setCell(x, 0, Cell{Text: " ", Width: 1, Style: borderStyle})
+	}
+	s.WriteText(0, 0, border.TopLeft, borderStyle)
+	s.WriteText(1, 0, title, titleStyle)
+	s.WriteText(1+titleWidth, 0, strings.Repeat(border.Top, fillerWidth), borderStyle)
+	s.WriteText(closeStart, 0, close, closeStyle)
+	s.WriteText(width-1, 0, border.TopRight, borderStyle)
+	return s, max(0, closeStart), closeWidth
 }
 
-func (m ModalFrame) bottomBorder(palette theme.Palette, width int) string {
+func (m ModalFrame) bottomBorder(palette theme.Palette, width int) Surface {
 	border := lipgloss.RoundedBorder()
-	borderStyle := lipgloss.NewStyle().
-		Foreground(palette.SidebarBorder).
-		Background(palette.SidebarBackground)
-	return borderStyle.Render(border.BottomLeft + strings.Repeat(border.Bottom, max(0, width-2)) + border.BottomRight)
+	borderStyle := CellStyle{FG: palette.SidebarBorder, BG: palette.SidebarBackground}
+	s := BlankSurface(width, 1)
+	for x := 0; x < width; x++ {
+		s.setCell(x, 0, Cell{Text: " ", Width: 1, Style: borderStyle})
+	}
+	s.WriteText(0, 0, border.BottomLeft, borderStyle)
+	if width > 2 {
+		s.WriteText(1, 0, strings.Repeat(border.Bottom, width-2), borderStyle)
+	}
+	if width > 1 {
+		s.WriteText(width-1, 0, border.BottomRight, borderStyle)
+	}
+	return s
 }
 
-func (m ModalFrame) frameLine(palette theme.Palette, width int, content string) string {
+func (m ModalFrame) frameLine(palette theme.Palette, width int, content string) Surface {
 	border := lipgloss.RoundedBorder()
-	borderStyle := lipgloss.NewStyle().
-		Foreground(palette.SidebarBorder).
-		Background(palette.SidebarBackground)
-	fillStyle := lipgloss.NewStyle().
-		Foreground(palette.SidebarForeground).
-		Background(palette.SidebarBackground)
+	borderStyle := CellStyle{FG: palette.SidebarBorder, BG: palette.SidebarBackground}
+	fillStyle := CellStyle{FG: palette.SidebarForeground, BG: palette.SidebarBackground}
 	contentWidth := max(0, width-6)
 	line := ansi.Truncate(content, contentWidth, "")
 	if delta := contentWidth - ansi.StringWidth(line); delta > 0 {
 		line += strings.Repeat(" ", delta)
 	}
-	center := fillStyle.Render("  " + line + "  ")
-	return borderStyle.Render(border.Left) + center + borderStyle.Render(border.Right)
+	s := BlankSurface(width, 1)
+	for x := 0; x < width; x++ {
+		s.setCell(x, 0, Cell{Text: " ", Width: 1, Style: fillStyle})
+	}
+	s.WriteText(0, 0, border.Left, borderStyle)
+	s.WriteText(1, 0, "  "+line+"  ", fillStyle)
+	s.WriteText(width-1, 0, border.Right, borderStyle)
+	return s
+}
+
+func lipglossToCellStyle(style lipgloss.Style) CellStyle {
+	cell := CellStyle{
+		Bold:   style.GetBold(),
+		Italic: style.GetItalic(),
+	}
+	if fg := style.GetForeground(); fg != nil {
+		cell.FG = lipgloss.Color(fmt.Sprint(fg))
+	}
+	if bg := style.GetBackground(); bg != nil {
+		cell.BG = lipgloss.Color(fmt.Sprint(bg))
+	}
+	return cell
 }
