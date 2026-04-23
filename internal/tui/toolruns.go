@@ -8,6 +8,7 @@ import (
 
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/store"
+	"github.com/lkarlslund/koder/internal/theme"
 	"github.com/lkarlslund/koder/internal/tools"
 	_ "github.com/lkarlslund/koder/internal/tools/all"
 	"github.com/lkarlslund/koder/internal/ui"
@@ -306,12 +307,44 @@ func mergeToolRun(dst *ui.ToolRun, src ui.ToolRun) {
 }
 
 func (m *Model) renderTranscriptBlock(block transcriptBlock) string {
+	return ui.RenderElement(&ui.Context{Palette: m.palette}, m.renderTranscriptBlockElement(block), max(0, m.viewport.Width), 0)
+}
+
+func (m *Model) renderTranscriptBlockElement(block transcriptBlock) ui.Element {
 	switch block.Kind {
 	case transcriptBlockToolRun:
-		return block.ToolRun.CardView(m.palette, m.viewport.Width, m.expandedToolRuns[block.ToolRun.ID])
+		return toolRunCardElement{
+			Run:      block.ToolRun,
+			Palette:  m.palette,
+			Width:    m.viewport.Width,
+			Expanded: m.expandedToolRuns[block.ToolRun.ID],
+		}
 	default:
-		return m.renderTranscriptMessage(block.Message)
+		return m.renderTranscriptMessageElement(block.Message)
 	}
+}
+
+type toolRunCardElement struct {
+	Run      ui.ToolRun
+	Palette  theme.Palette
+	Width    int
+	Expanded bool
+}
+
+func (e toolRunCardElement) Measure(_ *ui.Context, constraints ui.Constraints) ui.Size {
+	width := e.Width
+	if width <= 0 {
+		width = constraints.MaxW
+	}
+	return constraints.Clamp(ui.SurfaceFromString(e.Run.CardView(e.Palette, width, e.Expanded)).Size())
+}
+
+func (e toolRunCardElement) Render(_ *ui.Context, bounds ui.Rect) ui.Surface {
+	width := e.Width
+	if width <= 0 {
+		width = bounds.W
+	}
+	return ui.SurfaceFromString(e.Run.CardView(e.Palette, width, e.Expanded))
 }
 
 func (m *Model) approvalToolRun(item store.Approval) ui.ToolRun {

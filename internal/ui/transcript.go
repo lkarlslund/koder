@@ -10,6 +10,53 @@ import (
 	"github.com/lkarlslund/koder/internal/theme"
 )
 
+type TranscriptItem struct {
+	Element   Element
+	GapBefore int
+}
+
+type Transcript struct {
+	Items []TranscriptItem
+}
+
+func (t Transcript) Measure(ctx *Context, constraints Constraints) Size {
+	maxW := 0
+	totalH := 0
+	for _, item := range t.Items {
+		if item.GapBefore > 0 {
+			totalH += item.GapBefore
+		}
+		if item.Element == nil {
+			continue
+		}
+		size := item.Element.Measure(ctx, constraints)
+		if size.W > maxW {
+			maxW = size.W
+		}
+		totalH += size.H
+	}
+	return constraints.Clamp(Size{W: maxW, H: totalH})
+}
+
+func (t Transcript) Render(ctx *Context, bounds Rect) Surface {
+	base := BlankSurface(bounds.W, bounds.H)
+	y := 0
+	for _, item := range t.Items {
+		y += max(0, item.GapBefore)
+		if item.Element == nil || y >= bounds.H {
+			continue
+		}
+		size := item.Element.Measure(ctx, NewConstraints(bounds.W, max(0, bounds.H-y)))
+		if size.H <= 0 {
+			continue
+		}
+		child := item.Element.Render(ctx, Rect{W: bounds.W, H: size.H})
+		base = base.placeAt(0, y, child)
+		y += size.H
+	}
+	return base
+}
+
 type UserMessageProps struct {
 	Palette     theme.Palette
 	Body        string

@@ -1515,40 +1515,43 @@ func (m *Model) refreshViewportAt(offset int) {
 		m.viewport.SetContent("No session")
 		return
 	}
-	var blocks []string
+	var items []ui.TranscriptItem
 	row := 0
+	ctx := &ui.Context{Palette: m.palette}
+	transcriptWidth := max(0, m.viewport.Width)
 	transcriptBlocks := m.transcriptBlocks()
 	for i, block := range transcriptBlocks {
+		gap := 0
 		if i > 0 {
-			sep := m.transcriptSeparator(transcriptBlocks[i-1], block)
-			blocks = append(blocks, sep)
-			row += renderedSeparatorHeight(sep)
+			gap = renderedSeparatorHeight(m.transcriptSeparator(transcriptBlocks[i-1], block))
 		}
-		rendered := m.renderTranscriptBlock(block)
-		blocks = append(blocks, rendered)
+		element := m.renderTranscriptBlockElement(block)
+		items = append(items, ui.TranscriptItem{Element: element, GapBefore: gap})
+		height := element.Measure(ctx, ui.NewConstraints(transcriptWidth, 0)).H
 		if block.Kind == transcriptBlockToolRun && block.ToolRun.Expandable(m.viewport.Width) {
 			m.toolRunClickZones = append(m.toolRunClickZones, toolRunClickZone{
 				RunID:    block.ToolRun.ID,
-				StartRow: row,
-				EndRow:   row + max(0, lipgloss.Height(rendered)-1),
+				StartRow: row + gap,
+				EndRow:   row + gap + max(0, height-1),
 			})
 		}
-		row += lipgloss.Height(rendered)
+		row += gap + height
 	}
-	if indicator := m.renderTranscriptActivity(); indicator != "" {
-		if len(blocks) > 0 {
-			blocks = append(blocks, m.transcriptActivitySeparator(transcriptBlocks[len(transcriptBlocks)-1]))
+	if indicator := m.renderTranscriptActivityElement(); indicator != nil {
+		gap := 0
+		if len(items) > 0 {
+			gap = renderedSeparatorHeight(m.transcriptActivitySeparator(transcriptBlocks[len(transcriptBlocks)-1]))
 		}
-		blocks = append(blocks, indicator)
+		items = append(items, ui.TranscriptItem{Element: indicator, GapBefore: gap})
 	}
-	if len(blocks) == 0 {
+	if len(items) == 0 {
 		if !m.cfg.HasUsableDefaultProvider() {
-			blocks = append(blocks, "No provider configured.\n\nType /connect to add one before sending prompts.")
+			items = append(items, ui.TranscriptItem{Element: ui.Static{Content: "No provider configured.\n\nType /connect to add one before sending prompts."}})
 		} else {
-			blocks = append(blocks, "Start by asking a question or type / for commands.")
+			items = append(items, ui.TranscriptItem{Element: ui.Static{Content: "Start by asking a question or type / for commands."}})
 		}
 	}
-	m.viewport.SetContent(strings.Join(blocks, ""))
+	m.viewport.SetContent(ui.RenderElement(ctx, ui.Transcript{Items: items}, transcriptWidth, 0))
 	if offset >= 0 {
 		m.viewport.SetYOffset(offset)
 		return
@@ -1589,16 +1592,43 @@ func renderedSeparatorHeight(separator string) int {
 }
 
 func (m *Model) renderTranscriptActivity() string {
+	if element := m.renderTranscriptActivityElement(); element != nil {
+		if m.viewport.Width <= 0 {
+			if indicator, ok := element.(ui.ActivityIndicator); ok {
+				return indicator.View()
+			}
+		}
+		return ui.RenderElement(&ui.Context{Palette: m.palette}, element, max(0, m.viewport.Width), 0)
+	}
+	return ""
+}
+
+func (m *Model) renderTranscriptActivityElement() ui.Element {
 	if !m.busy.transcriptActive() {
-		return ""
+		return nil
 	}
 	return ui.ActivityIndicator{
 		Indicator: ui.WorkingIndicatorLine(m.workingIndicator()),
 		Palette:   m.palette,
-	}.View()
+	}
 }
 
 func (m *Model) renderTranscriptMessage(msg domain.Message) string {
+	if element := m.renderTranscriptMessageElement(msg); element != nil {
+		if m.viewport.Width <= 0 {
+			switch typed := element.(type) {
+			case ui.UserMessage:
+				return typed.View()
+			case ui.AssistantMessage:
+				return typed.View()
+			}
+		}
+		return ui.RenderElement(&ui.Context{Palette: m.palette}, element, max(0, m.viewport.Width), 0)
+	}
+	return ""
+}
+
+func (m *Model) renderTranscriptMessageElement(msg domain.Message) ui.Element {
 	body := m.renderMessageParts(m.parts[msg.ID])
 	stamp := timestamp(msg.CreatedAt, m.cfg.UI.ShowTimestamps)
 	switch msg.Role {
@@ -1607,16 +1637,24 @@ func (m *Model) renderTranscriptMessage(msg domain.Message) string {
 		if strings.TrimSpace(userBody) == "" {
 			userBody = strings.TrimSpace(msg.Summary)
 		}
-		return m.renderUserMessage(userBody, stamp)
+		return m.renderUserMessageElement(userBody, stamp)
 	default:
 		if strings.TrimSpace(body) == "" {
 			body = strings.TrimSpace(msg.Summary)
 		}
-		return m.renderAssistantMessage(body, stamp)
+		return m.renderAssistantMessageElement(body, stamp)
 	}
 }
 
 func (m *Model) renderUserMessage(body, stamp string) string {
+	element := m.renderUserMessageElement(body, stamp)
+	if typed, ok := element.(ui.UserMessage); ok && m.userMessageWidth(body, stamp) <= 0 {
+		return typed.View()
+	}
+	return ui.RenderElement(&ui.Context{Palette: m.palette}, element, m.userMessageWidth(body, stamp), 0)
+}
+
+func (m *Model) renderUserMessageElement(body, stamp string) ui.Element {
 	return ui.NewUserMessage(ui.UserMessageProps{
 		Palette:     m.palette,
 		Body:        body,
@@ -1624,7 +1662,7 @@ func (m *Model) renderUserMessage(body, stamp string) string {
 		Width:       m.userMessageWidth(body, stamp),
 		HalfBlocks:  m.halfBlocksEnabled(),
 		PromptGlyph: m.promptGlyph(),
-	}).View()
+	})
 }
 
 func formatSessionTime(t time.Time) string {
@@ -1681,12 +1719,20 @@ func (m *Model) userMessageWidth(body, stamp string) int {
 }
 
 func (m *Model) renderAssistantMessage(body, stamp string) string {
+	element := m.renderAssistantMessageElement(body, stamp)
+	if typed, ok := element.(ui.AssistantMessage); ok && m.viewport.Width <= 0 {
+		return typed.View()
+	}
+	return ui.RenderElement(&ui.Context{Palette: m.palette}, element, max(0, m.viewport.Width), 0)
+}
+
+func (m *Model) renderAssistantMessageElement(body, stamp string) ui.Element {
 	return ui.AssistantMessage{
 		Body:    body,
 		Stamp:   stamp,
 		Width:   m.viewport.Width,
 		Palette: m.palette,
-	}.View()
+	}
 }
 
 func (m *Model) attachmentLabel(meta attachment.Metadata) string {
@@ -1852,11 +1898,19 @@ func (m *Model) renderUserMessageParts(parts []domain.Part) string {
 }
 
 func (m *Model) renderReasoningBlock(input string) string {
+	element := m.renderReasoningBlockElement(input)
+	if typed, ok := element.(ui.ReasoningBlock); ok && m.viewport.Width <= 0 {
+		return typed.View()
+	}
+	return ui.RenderElement(&ui.Context{Palette: m.palette}, element, max(0, m.viewport.Width), 0)
+}
+
+func (m *Model) renderReasoningBlockElement(input string) ui.Element {
 	return ui.ReasoningBlock{
 		Body:    input,
 		Width:   m.viewport.Width,
 		Palette: m.palette,
-	}.View()
+	}
 }
 
 func (m Model) loadCmd() tea.Cmd {
