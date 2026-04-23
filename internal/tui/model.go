@@ -368,7 +368,7 @@ type composerQueryState struct {
 }
 
 type cachedTranscriptBlock struct {
-	content   string
+	element   ui.Element
 	lineCount int
 	controlID string
 }
@@ -1749,14 +1749,28 @@ func (m *Model) refreshViewportPreserve() {
 func (m *Model) refreshViewportAt(offset int) {
 	m.invalidateBodyCache()
 	m.transcriptControls = nil
-	content, controls := m.renderViewportTranscript()
-	m.viewport.SetContent(content)
-	m.transcriptControls = controls
-	if offset >= 0 {
-		m.viewport.SetYOffset(offset)
+	element := m.transcriptElement(nil)
+	if element == nil {
+		m.viewport.SetContent("")
 		return
 	}
-	m.viewport.GotoBottom()
+	totalHeight := element.Measure(&ui.Context{Palette: m.palette}, ui.NewConstraints(max(0, m.viewport.Width), 0)).H
+	m.viewport.SetContentHeight(totalHeight)
+	if offset >= 0 {
+		m.viewport.SetYOffset(offset)
+	} else {
+		m.viewport.GotoBottom()
+	}
+	runtime := ui.Runtime{}
+	ctx := &ui.Context{Palette: m.palette, Runtime: &runtime}
+	surface := ui.ScrollFrame{
+		Child:   element,
+		OffsetY: max(0, m.viewport.YOffset),
+		Width:   max(0, m.viewport.Width),
+		Height:  max(0, m.viewport.Height),
+	}.Render(ctx, ui.Rect{W: max(0, m.viewport.Width), H: max(0, m.viewport.Height)})
+	m.transcriptControls = runtime.Controls()
+	m.viewport.SetVisible(surface.String())
 }
 
 func (m *Model) invalidateBodyCache() {
@@ -1780,67 +1794,6 @@ func (m *Model) ensureRenderCache() *modelRenderCache {
 	return m.renderCache
 }
 
-func (m *Model) renderViewportTranscript() (string, []ui.Control) {
-	if m.currentSession.ID == 0 && len(m.messages) == 0 {
-		if !m.cfg.HasUsableDefaultProvider() {
-			return "No provider configured.\n\nType /connect to add one before sending prompts.", nil
-		}
-		return "Start by asking a question or type / for commands.", nil
-	}
-	if m.transcriptCache == nil {
-		m.transcriptCache = make(map[string]cachedTranscriptBlock)
-	}
-	var (
-		builder  strings.Builder
-		controls []ui.Control
-		row      int
-	)
-	appendGap := func(gap int) {
-		for i := 0; i < gap; i++ {
-			builder.WriteByte('\n')
-		}
-		row += gap
-	}
-	appendBlock := func(block transcriptBlock, gap int) {
-		cached := m.cachedTranscriptBlock(block)
-		appendGap(gap)
-		builder.WriteString(cached.content)
-		if cached.controlID != "" {
-			controls = append(controls, ui.Control{
-				ID:      cached.controlID,
-				Rect:    ui.Rect{X: 0, Y: row, W: max(1, m.viewport.Width), H: max(1, cached.lineCount)},
-				Enabled: true,
-			})
-		}
-		row += cached.lineCount
-	}
-	transcriptBlocks := m.transcriptBlocks()
-	for i, block := range transcriptBlocks {
-		gap := 0
-		if i > 0 {
-			gap = separatorLineBreaks(m.transcriptSeparator(transcriptBlocks[i-1], block))
-		}
-		appendBlock(block, gap)
-	}
-	if indicator := m.renderTranscriptActivityElement(); indicator != nil {
-		gap := 0
-		if len(transcriptBlocks) > 0 {
-			gap = separatorLineBreaks(m.transcriptActivitySeparator(transcriptBlocks[len(transcriptBlocks)-1]))
-		}
-		appendGap(gap)
-		content := ui.RenderElement(&ui.Context{Palette: m.palette}, indicator, max(0, m.viewport.Width), 0)
-		builder.WriteString(content)
-		row += lineCount(content)
-	}
-	if builder.Len() == 0 {
-		if !m.cfg.HasUsableDefaultProvider() {
-			return "No provider configured.\n\nType /connect to add one before sending prompts.", nil
-		}
-		return "Start by asking a question or type / for commands.", nil
-	}
-	return builder.String(), controls
-}
-
 func (m *Model) transcriptElement(runtime *ui.Runtime) ui.Element {
 	if m.currentSession.ID == 0 && len(m.messages) == 0 {
 		if !m.cfg.HasUsableDefaultProvider() {
@@ -1855,8 +1808,8 @@ func (m *Model) transcriptElement(runtime *ui.Runtime) ui.Element {
 		if i > 0 {
 			gap = renderedSeparatorHeight(m.transcriptSeparator(transcriptBlocks[i-1], block))
 		}
-		element := m.renderTranscriptBlockElement(block)
-		items = append(items, ui.TranscriptItem{Element: element, GapBefore: gap})
+		cached := m.cachedTranscriptBlock(block)
+		items = append(items, ui.TranscriptItem{Element: cached.element, GapBefore: gap})
 	}
 	if indicator := m.renderTranscriptActivityElement(); indicator != nil {
 		gap := 0
@@ -1908,10 +1861,6 @@ func renderedSeparatorHeight(separator string) int {
 		return 0
 	}
 	return max(0, lipgloss.Height("x"+separator+"x")-2)
-}
-
-func separatorLineBreaks(separator string) int {
-	return strings.Count(separator, "\n")
 }
 
 func (m *Model) renderTranscriptActivity() string {

@@ -6,8 +6,9 @@ type transcriptViewport struct {
 	Width   int
 	Height  int
 	YOffset int
-	content string
-	lines   []string
+	contentHeight int
+	visible       string
+	lines         []string
 }
 
 func newTranscriptViewport(width, height int) transcriptViewport {
@@ -17,23 +18,34 @@ func newTranscriptViewport(width, height int) transcriptViewport {
 }
 
 func (v *transcriptViewport) SetContent(content string) {
-	v.content = content
+	v.visible = content
 	if content == "" {
 		v.lines = nil
+		v.contentHeight = 0
 		v.YOffset = 0
 		return
 	}
 	v.lines = strings.Split(content, "\n")
+	v.contentHeight = len(v.lines)
 	v.SetYOffset(v.YOffset)
 }
 
 func (v transcriptViewport) View() string {
-	if len(v.lines) == 0 || v.Height <= 0 {
-		return ""
+	return v.visible
+}
+
+func (v *transcriptViewport) SetVisible(content string) {
+	v.visible = content
+	if content == "" {
+		v.lines = nil
+		return
 	}
-	top := max(0, min(v.YOffset, v.maxYOffset()))
-	bottom := min(len(v.lines), top+v.Height)
-	return strings.Join(v.lines[top:bottom], "\n")
+	v.lines = strings.Split(content, "\n")
+}
+
+func (v *transcriptViewport) SetContentHeight(height int) {
+	v.contentHeight = max(0, height)
+	v.SetYOffset(v.YOffset)
 }
 
 func (v *transcriptViewport) SetYOffset(n int) {
@@ -49,16 +61,16 @@ func (v transcriptViewport) AtBottom() bool {
 }
 
 func (v transcriptViewport) TotalLineCount() int {
-	return len(v.lines)
+	return v.contentHeight
 }
 
 func (v transcriptViewport) VisibleLineCount() int {
-	if v.Height <= 0 {
+	if v.Height <= 0 || len(v.lines) == 0 {
 		return 0
 	}
-	return min(v.Height, max(0, len(v.lines)-v.YOffset))
+	return min(v.Height, len(v.lines))
 }
 
 func (v transcriptViewport) maxYOffset() int {
-	return max(0, len(v.lines)-max(0, v.Height))
+	return max(0, v.contentHeight-max(0, v.Height))
 }

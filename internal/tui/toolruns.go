@@ -309,19 +309,22 @@ func mergeToolRun(dst *ui.ToolRun, src ui.ToolRun) {
 	}
 }
 
-func (m *Model) renderTranscriptBlock(block transcriptBlock) string {
-	return ui.RenderElement(&ui.Context{Palette: m.palette}, m.renderTranscriptBlockElement(block), max(0, m.viewport.Width), 0)
-}
-
 func (m *Model) cachedTranscriptBlock(block transcriptBlock) cachedTranscriptBlock {
+	if m.transcriptCache == nil {
+		m.transcriptCache = make(map[string]cachedTranscriptBlock)
+	}
 	key := m.transcriptBlockCacheKey(block)
 	if cached, ok := m.transcriptCache[key]; ok {
 		return cached
 	}
-	content := m.renderTranscriptBlock(block)
+	element := m.renderTranscriptBlockElement(block)
+	lineCount := 0
+	if element != nil {
+		lineCount = element.Measure(&ui.Context{Palette: m.palette}, ui.NewConstraints(max(0, m.viewport.Width), 0)).H
+	}
 	cached := cachedTranscriptBlock{
-		content:   content,
-		lineCount: lineCount(content),
+		element:   element,
+		lineCount: lineCount,
 	}
 	if block.Kind == transcriptBlockToolRun && strings.TrimSpace(block.ToolRun.ID) != "" && block.ToolRun.Expandable(m.viewport.Width) {
 		cached.controlID = "toolrun:" + block.ToolRun.ID
@@ -379,13 +382,6 @@ func writeHashStrings(hasher hash.Hash64, values ...string) {
 		_, _ = hasher.Write([]byte(value))
 		_, _ = hasher.Write([]byte{0})
 	}
-}
-
-func lineCount(content string) int {
-	if content == "" {
-		return 0
-	}
-	return strings.Count(content, "\n") + 1
 }
 
 func (m *Model) renderTranscriptBlockElement(block transcriptBlock) ui.Element {
