@@ -1318,10 +1318,7 @@ func (m *Model) applyEvent(evt domain.Event) {
 }
 
 func (m *Model) resize() {
-	sidebarWidth := 0
-	if m.showSidebar {
-		sidebarWidth = min(32, max(20, m.width/4))
-	}
+	sidebarWidth := m.sidebarWidth()
 	bodyWidth := m.width - sidebarWidth - 3
 	if bodyWidth < 20 {
 		bodyWidth = 20
@@ -1345,9 +1342,11 @@ func (m *Model) renderBody() string {
 }
 
 func (m *Model) renderBodyElement() ui.Element {
+	sidebarWidth := m.sidebarWidth()
 	sidebar := ui.Sidebar{
 		Child:  ui.TextPane{Content: m.renderSidebar()},
 		Height: m.viewport.Height,
+		Width:  sidebarWidth,
 	}
 	return ui.BodyLayout{
 		MainElement:    ui.TextPane{Content: m.viewport.View()},
@@ -1457,15 +1456,19 @@ func (m *Model) composerWidth() int {
 	if m.width <= 0 {
 		return 40
 	}
-	sidebarWidth := 0
-	if m.showSidebar {
-		sidebarWidth = min(32, max(20, m.width/4))
-	}
+	sidebarWidth := m.sidebarWidth()
 	bodyWidth := m.width - sidebarWidth - 3
 	if bodyWidth < 20 {
 		bodyWidth = 20
 	}
 	return bodyWidth - 2
+}
+
+func (m *Model) sidebarWidth() int {
+	if !m.showSidebar {
+		return 0
+	}
+	return min(32, max(20, m.width/4))
 }
 
 func (m *Model) halfBlocksEnabled() bool {

@@ -11,6 +11,7 @@ import (
 type Sidebar struct {
 	Child  Element
 	Height int
+	Width  int
 }
 
 func (s Sidebar) content(ctx *Context, width int) string {
@@ -32,11 +33,18 @@ func (s Sidebar) content(ctx *Context, width int) string {
 }
 
 func (s Sidebar) View(palette theme.Palette) string {
-	return s.content(&Context{Palette: palette}, 30)
+	width := s.Width
+	if width <= 0 {
+		width = 30
+	}
+	return s.content(&Context{Palette: palette}, width)
 }
 
 func (s Sidebar) Measure(ctx *Context, constraints Constraints) Size {
-	width := constraints.MaxW
+	width := s.Width
+	if width <= 0 {
+		width = constraints.MaxW
+	}
 	if width <= 0 {
 		width = 30
 	}
@@ -44,7 +52,10 @@ func (s Sidebar) Measure(ctx *Context, constraints Constraints) Size {
 }
 
 func (s Sidebar) Render(ctx *Context, bounds Rect) Surface {
-	width := bounds.W
+	width := s.Width
+	if width <= 0 {
+		width = bounds.W
+	}
 	if width <= 0 {
 		width = 30
 	}

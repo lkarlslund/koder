@@ -2820,6 +2820,34 @@ func TestRenderBodyClipsSidebarToViewportHeight(t *testing.T) {
 	}
 }
 
+func TestRenderBodyKeepsSidebarAtConfiguredWidth(t *testing.T) {
+	m := Model{
+		showSidebar: true,
+		width:       120,
+		palette:     theme.Resolve("tokyonight").Palette,
+		viewport:    viewport.New(87, 6),
+		workdir:     "/tmp/project",
+	}
+	m.viewport.SetContent("history")
+
+	got := m.renderBody()
+	lines := strings.Split(ansi.Strip(got), "\n")
+	if len(lines) == 0 {
+		t.Fatalf("expected rendered body, got %q", got)
+	}
+	sidebarWidth := m.sidebarWidth()
+	first := lines[0]
+	if ansi.StringWidth(first) != 120 {
+		t.Fatalf("expected body width 120, got %d in %q", ansi.StringWidth(first), first)
+	}
+	if sidebarWidth <= 0 || sidebarWidth >= 120 {
+		t.Fatalf("unexpected sidebar width %d", sidebarWidth)
+	}
+	if strings.HasPrefix(strings.TrimSpace(first), "Session") {
+		t.Fatalf("expected transcript pane before sidebar, got %q", first)
+	}
+}
+
 func TestViewUsesFullTerminalWidthWithSidebar(t *testing.T) {
 	m := Model{
 		showSidebar: true,
