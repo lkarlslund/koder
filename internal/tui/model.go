@@ -779,6 +779,9 @@ func (m Model) modalLocalPoint(msg tea.MouseMsg, rendered string) (int, int, boo
 }
 
 func (m Model) View() string {
+	if m.width <= 0 || m.height <= 0 {
+		return ""
+	}
 	m.syncDebugRuntime()
 	ctx := &ui.Context{Palette: m.palette, Runtime: &m.uiRuntime}
 	m.uiRuntime.BeginFrame()
