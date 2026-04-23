@@ -318,19 +318,43 @@ func (m *Model) cachedTranscriptBlock(block transcriptBlock) cachedTranscriptBlo
 		return cached
 	}
 	element := m.renderTranscriptBlockElement(block)
-	lineCount := 0
+	lineCount := m.estimateTranscriptBlockHeight(block)
 	if element != nil {
-		lineCount = element.Measure(&ui.Context{Palette: m.palette}, ui.NewConstraints(max(0, m.viewport.Width), 0)).H
+		element = ui.NewCachedElement(element, lineCount)
 	}
 	cached := cachedTranscriptBlock{
 		element:   element,
 		lineCount: lineCount,
 	}
-	if block.Kind == transcriptBlockToolRun && strings.TrimSpace(block.ToolRun.ID) != "" && block.ToolRun.Expandable(m.viewport.Width) {
+	if block.Kind == transcriptBlockToolRun && strings.TrimSpace(block.ToolRun.ID) != "" {
 		cached.controlID = "toolrun:" + block.ToolRun.ID
 	}
 	m.transcriptCache[key] = cached
 	return cached
+}
+
+func (m *Model) estimateTranscriptBlockHeight(block transcriptBlock) int {
+	width := max(1, m.viewport.Width)
+	switch block.Kind {
+	case transcriptBlockToolRun:
+		lines := 3
+		lines += strings.Count(block.ToolRun.Title, "\n")
+		lines += strings.Count(block.ToolRun.Subtitle, "\n")
+		lines += strings.Count(block.ToolRun.Preview, "\n")
+		lines += strings.Count(block.ToolRun.Output, "\n")
+		lines += strings.Count(block.ToolRun.Diff, "\n")
+		lines += strings.Count(block.ToolRun.ErrorText, "\n")
+		return max(3, lines)
+	case transcriptBlockMessage:
+		summary := strings.TrimSpace(block.Message.Summary)
+		if summary == "" {
+			summary = "message"
+		}
+		lines := strings.Count(summary, "\n") + 1
+		return max(1, lines+(len([]rune(summary))/max(24, width)))
+	default:
+		return 1
+	}
 }
 
 func (m *Model) transcriptBlockCacheKey(block transcriptBlock) string {

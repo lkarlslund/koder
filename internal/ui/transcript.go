@@ -10,6 +10,7 @@ import (
 )
 
 type TranscriptItem struct {
+	Key       string
 	Element   Element
 	GapBefore int
 }
@@ -20,6 +21,63 @@ type Transcript struct {
 
 type RetainedTranscript struct {
 	items []TranscriptItem
+}
+
+type transcriptViewportElement interface {
+	ApproxHeight(width int) int
+	RenderCached(ctx *Context, width int) Surface
+}
+
+type CachedElement struct {
+	Child      Element
+	HeightHint int
+	surfaces   map[int]Surface
+}
+
+func NewCachedElement(child Element, heightHint int) *CachedElement {
+	return &CachedElement{Child: child, HeightHint: max(0, heightHint)}
+}
+
+func (e *CachedElement) ApproxHeight(width int) int {
+	if e == nil {
+		return 0
+	}
+	if cached, ok := e.surfaces[width]; ok {
+		return cached.Size().H
+	}
+	if e.HeightHint > 0 {
+		return e.HeightHint
+	}
+	return 1
+}
+
+func (e *CachedElement) RenderCached(ctx *Context, width int) Surface {
+	if e == nil || e.Child == nil {
+		return Surface{}
+	}
+	if width <= 0 {
+		size := e.Child.Measure(ctx, Constraints{})
+		width = size.W
+	}
+	if cached, ok := e.surfaces[width]; ok {
+		return cached
+	}
+	size := e.Child.Measure(ctx, NewConstraints(width, 0))
+	surface := e.Child.Render(ctx, Rect{W: width, H: size.H})
+	if e.surfaces == nil {
+		e.surfaces = make(map[int]Surface)
+	}
+	e.surfaces[width] = surface
+	return surface
+}
+
+func (e *CachedElement) Measure(ctx *Context, constraints Constraints) Size {
+	surface := e.RenderCached(ctx, constraints.MaxW)
+	return constraints.Clamp(surface.Size())
+}
+
+func (e *CachedElement) Render(ctx *Context, bounds Rect) Surface {
+	return e.RenderCached(ctx, bounds.W).normalize(bounds.W, bounds.H)
 }
 
 func NewRetainedTranscript() *RetainedTranscript {
@@ -69,6 +127,123 @@ func (t *RetainedTranscript) Measure(ctx *Context, constraints Constraints) Size
 
 func (t *RetainedTranscript) Render(ctx *Context, bounds Rect) Surface {
 	return Transcript{Items: t.items}.Render(ctx, bounds)
+}
+
+func (t *RetainedTranscript) ContentHeight(width int) int {
+	total := 0
+	for _, item := range t.items {
+		total += max(0, item.GapBefore)
+		total += t.itemApproxHeight(item, width)
+	}
+	return total
+}
+
+func (t *RetainedTranscript) RenderVisible(ctx *Context, width, height, offset int) (Surface, int, int) {
+	totalHeight := t.ContentHeight(width)
+	maxOffset := max(0, totalHeight-max(0, height))
+	offset = min(max(0, offset), maxOffset)
+	base := BlankSurface(width, height)
+	y := 0
+	for _, item := range t.items {
+		gap := max(0, item.GapBefore)
+		top := y + gap
+		approxHeight := t.itemApproxHeight(item, width)
+		bottom := top + approxHeight
+		y = bottom
+		if item.Element == nil || bottom <= offset || top >= offset+height {
+			continue
+		}
+		surface := t.itemSurface(ctx, item, width)
+		exactHeight := surface.Size().H
+		if exactHeight <= 0 {
+			continue
+		}
+		renderY := top - offset
+		base = base.placeAt(0, renderY, surface)
+	}
+	return base, totalHeight, offset
+}
+
+func (t *RetainedTranscript) RenderBottom(ctx *Context, width, height int) (Surface, int, int) {
+	base := BlankSurface(width, height)
+	if len(t.items) == 0 {
+		return base, 0, 0
+	}
+	indices := make([]int, 0, min(len(t.items), max(1, height)))
+	usedHeight := 0
+	for idx := len(t.items) - 1; idx >= 0 && usedHeight < height; idx-- {
+		surface := t.itemSurface(ctx, t.items[idx], width)
+		blockHeight := surface.Size().H
+		if blockHeight <= 0 {
+			continue
+		}
+		usedHeight += blockHeight
+		if len(indices) > 0 {
+			usedHeight += max(0, t.items[indices[len(indices)-1]].GapBefore)
+		}
+		indices = append(indices, idx)
+	}
+	totalHeight := t.ContentHeight(width)
+	startY := max(0, height-usedHeight)
+	cursorY := startY
+	for i := len(indices) - 1; i >= 0; i-- {
+		idx := indices[i]
+		if i < len(indices)-1 {
+			cursorY += max(0, t.items[idx].GapBefore)
+		}
+		surface := t.itemSurface(ctx, t.items[idx], width)
+		base = base.placeAt(0, cursorY, surface)
+		cursorY += surface.Size().H
+	}
+	return base, totalHeight, max(0, totalHeight-height)
+}
+
+func (t *RetainedTranscript) itemApproxHeight(item TranscriptItem, width int) int {
+	if item.Element == nil {
+		return 0
+	}
+	if cached, ok := item.Element.(transcriptViewportElement); ok {
+		return cached.ApproxHeight(width)
+	}
+	return item.Element.Measure(nil, NewConstraints(width, 0)).H
+}
+
+func (t *RetainedTranscript) itemSurface(ctx *Context, item TranscriptItem, width int) Surface {
+	if item.Element == nil {
+		return Surface{}
+	}
+	if cached, ok := item.Element.(transcriptViewportElement); ok {
+		return cached.RenderCached(ctx, width)
+	}
+	size := item.Element.Measure(ctx, NewConstraints(width, 0))
+	return item.Element.Render(ctx, Rect{W: width, H: size.H})
+}
+
+type TranscriptViewport struct {
+	Transcript *RetainedTranscript
+	OffsetY    int
+	Width      int
+	Height     int
+}
+
+func (v TranscriptViewport) Measure(_ *Context, constraints Constraints) Size {
+	width := v.Width
+	if width <= 0 {
+		width = constraints.MaxW
+	}
+	height := v.Height
+	if height <= 0 {
+		height = constraints.MaxH
+	}
+	return constraints.Clamp(Size{W: width, H: height})
+}
+
+func (v TranscriptViewport) Render(ctx *Context, bounds Rect) Surface {
+	if v.Transcript == nil {
+		return BlankSurface(bounds.W, bounds.H)
+	}
+	surface, _, _ := v.Transcript.RenderVisible(ctx, bounds.W, bounds.H, v.OffsetY)
+	return surface.normalize(bounds.W, bounds.H)
 }
 
 func (t Transcript) Measure(ctx *Context, constraints Constraints) Size {

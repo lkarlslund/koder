@@ -47,7 +47,8 @@ type promptDoneMsg struct {
 
 type spinnerTickMsg struct{}
 type rootTimerMsg struct {
-	At time.Time
+	At  time.Time
+	Seq uint64
 }
 
 type busyScope int
@@ -335,6 +336,9 @@ type Model struct {
 	debug              *debugsrv.Recorder
 	uiRoot             *ui.Root
 	uiRuntime          ui.Runtime
+	rootTimerSeq       uint64
+	rootTimerPending   bool
+	rootTimerPendingAt time.Time
 	caps               *provider.CapabilityStore
 	runtimeCtxChecked  map[string]bool
 	activeOpCancel     context.CancelFunc
@@ -466,6 +470,11 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		m.refreshViewport()
 		return m, nil
 	case rootTimerMsg:
+		if msg.Seq != m.rootTimerSeq {
+			return m, nil
+		}
+		m.rootTimerPending = false
+		m.rootTimerPendingAt = time.Time{}
 		root := (&m).syncUIRoot()
 		var cmds []tea.Cmd
 		for _, event := range root.DueTimers(msg.At) {
@@ -1268,14 +1277,8 @@ func (m *Model) renderBodyElement() ui.Element {
 	}
 	main := ui.TextPane{Content: m.viewport.View()}
 	if transcript := m.transcriptElement(nil); transcript != nil {
-		main = ui.TextPane{}
 		return ui.BodyLayout{
-			MainElement: ui.ScrollFrame{
-				Child:   transcript,
-				OffsetY: max(0, m.viewport.YOffset),
-				Width:   m.viewport.Width,
-				Height:  m.viewport.Height,
-			},
+			MainElement:    transcript,
 			SidebarElement: sidebar,
 			ShowSidebar:    m.showSidebar,
 		}
@@ -1565,26 +1568,25 @@ func (m *Model) refreshViewportPreserve() {
 func (m *Model) refreshViewportAt(offset int) {
 	m.invalidateBodyCache()
 	m.transcriptControls = nil
-	element := m.transcriptElement(nil)
-	if element == nil {
+	retained := m.syncRetainedTranscript()
+	if retained == nil {
 		m.viewport.SetContent("")
 		return
 	}
-	totalHeight := element.Measure(&ui.Context{Palette: m.palette}, ui.NewConstraints(max(0, m.viewport.Width), 0)).H
-	m.viewport.SetContentHeight(totalHeight)
-	if offset >= 0 {
-		m.viewport.SetYOffset(offset)
-	} else {
-		m.viewport.GotoBottom()
-	}
 	runtime := ui.Runtime{}
 	ctx := &ui.Context{Palette: m.palette, Runtime: &runtime}
-	surface := ui.ScrollFrame{
-		Child:   element,
-		OffsetY: max(0, m.viewport.YOffset),
-		Width:   max(0, m.viewport.Width),
-		Height:  max(0, m.viewport.Height),
-	}.Render(ctx, ui.Rect{W: max(0, m.viewport.Width), H: max(0, m.viewport.Height)})
+	var (
+		surface     ui.Surface
+		totalHeight int
+		appliedY    int
+	)
+	if offset >= 0 {
+		surface, totalHeight, appliedY = retained.RenderVisible(ctx, max(0, m.viewport.Width), max(0, m.viewport.Height), offset)
+	} else {
+		surface, totalHeight, appliedY = retained.RenderBottom(ctx, max(0, m.viewport.Width), max(0, m.viewport.Height))
+	}
+	m.viewport.SetContentHeight(totalHeight)
+	m.viewport.SetYOffset(appliedY)
 	m.transcriptControls = runtime.Controls()
 	m.viewport.SetVisible(surface.String())
 }
@@ -1618,42 +1620,32 @@ func (m *Model) ensureRetainedTranscript() *ui.RetainedTranscript {
 }
 
 func (m *Model) transcriptElement(runtime *ui.Runtime) ui.Element {
-	retained := m.ensureRetainedTranscript()
-	if m.currentSession.ID == 0 && len(m.messages) == 0 {
-		retained.Clear()
-		if !m.cfg.HasUsableDefaultProvider() {
-			return ui.Paragraph{Text: "No provider configured.\n\nType /connect to add one before sending prompts."}
-		}
-		return ui.Paragraph{Text: "Start by asking a question or type / for commands."}
+	retained := m.syncRetainedTranscript()
+	if retained == nil {
+		return nil
 	}
-	var items []ui.TranscriptItem
-	transcriptBlocks := m.transcriptBlocks()
-	for i, block := range transcriptBlocks {
-		gap := 0
-		if i > 0 {
-			gap = renderedSeparatorHeight(m.transcriptSeparator(transcriptBlocks[i-1], block))
-		}
-		cached := m.cachedTranscriptBlock(block)
-		items = append(items, ui.TranscriptItem{Element: cached.element, GapBefore: gap})
-	}
-	if indicator := m.renderTranscriptActivityElement(); indicator != nil {
-		gap := 0
-		if len(items) > 0 {
-			gap = renderedSeparatorHeight(m.transcriptActivitySeparator(transcriptBlocks[len(transcriptBlocks)-1]))
-		}
-		items = append(items, ui.TranscriptItem{Element: indicator, GapBefore: gap})
-	}
-	if len(items) == 0 {
-		if !m.cfg.HasUsableDefaultProvider() {
-			items = append(items, ui.TranscriptItem{Element: ui.Paragraph{Text: "No provider configured.\n\nType /connect to add one before sending prompts."}})
-		} else {
-			items = append(items, ui.TranscriptItem{Element: ui.Paragraph{Text: "Start by asking a question or type / for commands."}})
-		}
-	}
+	width := max(0, m.viewport.Width)
+	height := max(0, m.viewport.Height)
 	if runtime != nil {
 		runtime.BeginFrame()
 	}
-	retained.SetItems(items)
+	return ui.TranscriptViewport{
+		Transcript: retained,
+		OffsetY:    max(0, m.viewport.YOffset),
+		Width:      width,
+		Height:     height,
+	}
+}
+
+func (m *Model) syncRetainedTranscript() *ui.RetainedTranscript {
+	retained := m.ensureRetainedTranscript()
+	retained.SetItems(m.buildTranscriptItems())
+	if m.currentSession.ID == 0 && len(m.messages) == 0 && !m.cfg.HasUsableDefaultProvider() {
+		retained.SetItems([]ui.TranscriptItem{{
+			Key:     "no-provider",
+			Element: ui.NewCachedElement(ui.Paragraph{Text: "No provider configured.\n\nType /connect to add one before sending prompts."}, 3),
+		}})
+	}
 	return retained
 }
 
@@ -2472,6 +2464,8 @@ func (m Model) UpdateLoad(msg loadMsg) Model {
 	m.agentsDrift = m.currentSession.ProjectChecksum != "" &&
 		m.workspace.AgentsChecksum != "" &&
 		m.currentSession.ProjectChecksum != m.workspace.AgentsChecksum
+	m.transcriptCache = nil
+	m.ensureRetainedTranscript().Clear()
 	m.refreshViewport()
 	return m
 }
@@ -4335,16 +4329,62 @@ func (m *Model) syncComposerBlinkTimer() {
 
 func (m *Model) rootTimerCmd() tea.Cmd {
 	root := m.syncUIRoot()
-	delay, ok := root.NextTimerDelay(time.Now())
+	now := time.Now()
+	delay, ok := root.NextTimerDelay(now)
 	if !ok {
+		m.rootTimerPending = false
+		m.rootTimerPendingAt = time.Time{}
 		return nil
 	}
+	dueAt := now.Add(delay)
+	if m.rootTimerPending && !m.rootTimerPendingAt.IsZero() && !dueAt.Before(m.rootTimerPendingAt) {
+		return nil
+	}
+	m.rootTimerSeq++
+	m.rootTimerPending = true
+	m.rootTimerPendingAt = dueAt
+	seq := m.rootTimerSeq
 	return tea.Tick(delay, func(t time.Time) tea.Msg {
-		return rootTimerMsg{At: t}
+		return rootTimerMsg{At: t, Seq: seq}
 	})
 }
 
-func (m Model) withRootTimers(cmd tea.Cmd) tea.Cmd {
+func (m *Model) buildTranscriptItems() []ui.TranscriptItem {
+	if m.currentSession.ID == 0 && len(m.messages) == 0 {
+		return []ui.TranscriptItem{{
+			Key:     "empty",
+			Element: ui.NewCachedElement(ui.Paragraph{Text: "Start by asking a question or type / for commands."}, 1),
+		}}
+	}
+	var items []ui.TranscriptItem
+	transcriptBlocks := m.transcriptBlocks()
+	for i, block := range transcriptBlocks {
+		gap := 0
+		if i > 0 {
+			gap = renderedSeparatorHeight(m.transcriptSeparator(transcriptBlocks[i-1], block))
+		}
+		cached := m.cachedTranscriptBlock(block)
+		items = append(items, ui.TranscriptItem{
+			Key:       m.transcriptBlockCacheKey(block),
+			Element:   cached.element,
+			GapBefore: gap,
+		})
+	}
+	if indicator := m.renderTranscriptActivityElement(); indicator != nil {
+		gap := 0
+		if len(items) > 0 {
+			gap = renderedSeparatorHeight(m.transcriptActivitySeparator(transcriptBlocks[len(transcriptBlocks)-1]))
+		}
+		items = append(items, ui.TranscriptItem{
+			Key:       "activity",
+			Element:   ui.NewCachedElement(indicator, 1),
+			GapBefore: gap,
+		})
+	}
+	return items
+}
+
+func (m *Model) withRootTimers(cmd tea.Cmd) tea.Cmd {
 	m.syncComposerBlinkTimer()
 	timerCmd := m.rootTimerCmd()
 	if timerCmd == nil {

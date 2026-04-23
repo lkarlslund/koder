@@ -2129,6 +2129,37 @@ func TestSelectingSessionKeepsComposerBlinkStopped(t *testing.T) {
 	}
 }
 
+func TestWithRootTimersDoesNotQueueDuplicateTicks(t *testing.T) {
+	m := Model{
+		composer: textarea.New(),
+		palette:  theme.Default().Palette,
+		width:    80,
+		height:   24,
+	}
+	m.composer.Focus()
+
+	first := m.withRootTimers(nil)
+	if first == nil {
+		t.Fatal("expected initial root timer command")
+	}
+	if !m.rootTimerPending {
+		t.Fatal("expected root timer to be marked pending")
+	}
+	firstSeq := m.rootTimerSeq
+	firstDue := m.rootTimerPendingAt
+
+	second := m.withRootTimers(nil)
+	if second != nil {
+		t.Fatal("expected duplicate root timer scheduling to be suppressed")
+	}
+	if m.rootTimerSeq != firstSeq {
+		t.Fatalf("expected root timer sequence to remain %d, got %d", firstSeq, m.rootTimerSeq)
+	}
+	if !m.rootTimerPendingAt.Equal(firstDue) {
+		t.Fatalf("expected pending due time to stay %v, got %v", firstDue, m.rootTimerPendingAt)
+	}
+}
+
 func TestVisibleSessionsFiltersByExactCWD(t *testing.T) {
 	m := Model{workdir: "/repo/a"}
 	sessions := []domain.Session{
