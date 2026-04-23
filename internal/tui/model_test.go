@@ -3245,12 +3245,15 @@ func TestResizeUsesMeasuredFooterHeight(t *testing.T) {
 
 	m.resize()
 
-	want := 24 - m.footerHeight()
+	want := 24 - m.statusPaneHeight()
 	if want < 5 {
 		want = 5
 	}
 	if m.viewport.Height != want {
 		t.Fatalf("expected viewport height %d from measured footer, got %d", want, m.viewport.Height)
+	}
+	if got := m.transcriptViewportHeight(); got >= m.viewport.Height {
+		t.Fatalf("expected transcript viewport height to shrink inside main layout, got transcript=%d main=%d", got, m.viewport.Height)
 	}
 }
 

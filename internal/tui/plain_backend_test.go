@@ -20,7 +20,15 @@ func (m *Model) renderBody() string {
 }
 
 func (m *Model) renderFooter() string {
-	return strings.Join(m.renderFooterSurface().Lines(), "\n")
+	return strings.Join(m.renderComposerAreaSurface().Lines(), "\n")
+}
+
+func (m *Model) renderFooterSurface() ui.Surface {
+	return m.renderComposerAreaSurface()
+}
+
+func (m *Model) footerHeight() int {
+	return m.composerAreaHeight()
 }
 
 func (m *Model) renderComposer() string {

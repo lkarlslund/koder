@@ -542,6 +542,25 @@ type Element interface {
 	Render(ctx *Context, bounds Rect) Surface
 }
 
+type Visibility interface {
+	Visible() bool
+}
+
+func elementVisible(element Element) bool {
+	if element == nil {
+		return false
+	}
+	visible, ok := element.(Visibility)
+	if !ok {
+		return true
+	}
+	return visible.Visible()
+}
+
+func ElementVisible(element Element) bool {
+	return elementVisible(element)
+}
+
 type Static struct {
 	Content string
 }
@@ -564,6 +583,29 @@ func (b SurfaceBox) Measure(_ *Context, constraints Constraints) Size {
 
 func (b SurfaceBox) Render(_ *Context, bounds Rect) Surface {
 	return b.Surface.normalize(bounds.W, bounds.H)
+}
+
+type VisibleElement struct {
+	Child       Element
+	VisibleFlag bool
+}
+
+func (e VisibleElement) Visible() bool {
+	return e.VisibleFlag && e.Child != nil
+}
+
+func (e VisibleElement) Measure(ctx *Context, constraints Constraints) Size {
+	if !e.Visible() {
+		return Size{}
+	}
+	return constraints.Clamp(e.Child.Measure(ctx, constraints))
+}
+
+func (e VisibleElement) Render(ctx *Context, bounds Rect) Surface {
+	if !e.Visible() {
+		return Surface{}
+	}
+	return e.Child.Render(ctx, bounds)
 }
 
 type Child struct {
@@ -604,7 +646,7 @@ func (c Column) Measure(ctx *Context, constraints Constraints) Size {
 	totalFlex := 0
 	count := 0
 	for _, child := range c.Children {
-		if child.Element == nil {
+		if !elementVisible(child.Element) {
 			continue
 		}
 		if count > 0 {
@@ -623,7 +665,7 @@ func (c Column) Measure(ctx *Context, constraints Constraints) Size {
 		remaining := max(0, available-totalH)
 		totalH += remaining
 		for _, child := range c.Children {
-			if child.Element == nil || child.Flex <= 0 {
+			if !elementVisible(child.Element) || child.Flex <= 0 {
 				continue
 			}
 			height := remaining * child.Flex / totalFlex
@@ -641,7 +683,7 @@ func (c Column) Render(ctx *Context, bounds Rect) Surface {
 	fixedHeight := 0
 	count := 0
 	for _, child := range c.Children {
-		if child.Element == nil {
+		if !elementVisible(child.Element) {
 			continue
 		}
 		if count > 0 {
@@ -657,7 +699,7 @@ func (c Column) Render(ctx *Context, bounds Rect) Surface {
 	remaining := max(0, bounds.H-fixedHeight)
 	index := 0
 	for _, child := range c.Children {
-		if child.Element == nil {
+		if !elementVisible(child.Element) {
 			continue
 		}
 		if index > 0 {
@@ -687,7 +729,7 @@ func (r Row) Measure(ctx *Context, constraints Constraints) Size {
 	totalFlex := 0
 	count := 0
 	for _, child := range r.Children {
-		if child.Element == nil {
+		if !elementVisible(child.Element) {
 			continue
 		}
 		if count > 0 {
@@ -706,7 +748,7 @@ func (r Row) Measure(ctx *Context, constraints Constraints) Size {
 		remaining := max(0, available-totalW)
 		totalW += remaining
 		for _, child := range r.Children {
-			if child.Element == nil || child.Flex <= 0 {
+			if !elementVisible(child.Element) || child.Flex <= 0 {
 				continue
 			}
 			width := remaining * child.Flex / totalFlex
@@ -724,7 +766,7 @@ func (r Row) Render(ctx *Context, bounds Rect) Surface {
 	fixedWidth := 0
 	count := 0
 	for _, child := range r.Children {
-		if child.Element == nil {
+		if !elementVisible(child.Element) {
 			continue
 		}
 		if count > 0 {
@@ -740,7 +782,7 @@ func (r Row) Render(ctx *Context, bounds Rect) Surface {
 	remaining := max(0, bounds.W-fixedWidth)
 	index := 0
 	for _, child := range r.Children {
-		if child.Element == nil {
+		if !elementVisible(child.Element) {
 			continue
 		}
 		if index > 0 {
@@ -764,7 +806,7 @@ type Inset struct {
 }
 
 func (i Inset) Measure(ctx *Context, constraints Constraints) Size {
-	if i.Child == nil {
+	if !elementVisible(i.Child) {
 		return constraints.Clamp(Size{})
 	}
 	childSize := i.Child.Measure(ctx, constraints.Deflate(i.Padding))
@@ -776,7 +818,7 @@ func (i Inset) Measure(ctx *Context, constraints Constraints) Size {
 
 func (i Inset) Render(ctx *Context, bounds Rect) Surface {
 	base := BlankSurface(bounds.W, bounds.H)
-	if i.Child == nil {
+	if !elementVisible(i.Child) {
 		return base
 	}
 	childBounds := bounds.Inset(i.Padding)
@@ -790,7 +832,7 @@ type Constrained struct {
 }
 
 func (c Constrained) Measure(ctx *Context, constraints Constraints) Size {
-	if c.Child == nil {
+	if !elementVisible(c.Child) {
 		return constraints.Clamp(Size{})
 	}
 	merged := Constraints{
@@ -803,7 +845,7 @@ func (c Constrained) Measure(ctx *Context, constraints Constraints) Size {
 }
 
 func (c Constrained) Render(ctx *Context, bounds Rect) Surface {
-	if c.Child == nil {
+	if !elementVisible(c.Child) {
 		return BlankSurface(bounds.W, bounds.H)
 	}
 	size := c.Measure(ctx, NewConstraints(bounds.W, bounds.H))
@@ -817,7 +859,7 @@ type Stack struct {
 func (s Stack) Measure(ctx *Context, constraints Constraints) Size {
 	size := Size{}
 	for _, child := range s.Children {
-		if child == nil {
+		if !elementVisible(child) {
 			continue
 		}
 		childSize := child.Measure(ctx, constraints)
@@ -830,12 +872,38 @@ func (s Stack) Measure(ctx *Context, constraints Constraints) Size {
 func (s Stack) Render(ctx *Context, bounds Rect) Surface {
 	base := BlankSurface(bounds.W, bounds.H)
 	for _, child := range s.Children {
-		if child == nil {
+		if !elementVisible(child) {
 			continue
 		}
 		base = base.placeAt(0, 0, child.Render(ctx, bounds))
 	}
 	return base
+}
+
+type VBox struct {
+	Children []Child
+	Spacing  int
+}
+
+func (b VBox) Measure(ctx *Context, constraints Constraints) Size {
+	return Column{Children: b.Children, Spacing: b.Spacing}.Measure(ctx, constraints)
+}
+
+func (b VBox) Render(ctx *Context, bounds Rect) Surface {
+	return Column{Children: b.Children, Spacing: b.Spacing}.Render(ctx, bounds)
+}
+
+type HBox struct {
+	Children []Child
+	Spacing  int
+}
+
+func (b HBox) Measure(ctx *Context, constraints Constraints) Size {
+	return Row{Children: b.Children, Spacing: b.Spacing}.Measure(ctx, constraints)
+}
+
+func (b HBox) Render(ctx *Context, bounds Rect) Surface {
+	return Row{Children: b.Children, Spacing: b.Spacing}.Render(ctx, bounds)
 }
 
 type Alignment int

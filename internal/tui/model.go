@@ -1049,7 +1049,7 @@ func (m *Model) handleMainWindowMouse(msg tea.MouseMsg) (bool, tea.Cmd) {
 			element := m.renderApprovalPromptElement()
 			if element != nil {
 				promptHeight := element.Measure(&ui.Context{Palette: m.palette}, ui.NewConstraints(m.width, 0)).H
-				startY := m.height - m.footerHeight()
+				startY := m.height - m.composerAreaHeight()
 				if msg.Y >= startY && msg.Y < startY+promptHeight {
 					runtime := ui.Runtime{}
 					ctx := &ui.Context{Palette: m.palette, Runtime: &runtime}
@@ -1218,7 +1218,7 @@ func (m *Model) resize() {
 		bodyWidth = 20
 	}
 	m.composer.SetWidth(m.composerWidth())
-	bodyHeight := m.height - m.footerHeight()
+	bodyHeight := m.height - m.statusPaneHeight()
 	if bodyHeight < 5 {
 		bodyHeight = 5
 	}
@@ -1244,15 +1244,23 @@ func (m *Model) renderBodySurface() ui.Surface {
 	ctx := &ui.Context{Palette: m.palette}
 	element := m.renderBodyElement()
 	width := max(0, m.width)
-	height := max(0, m.viewport.Height)
+	height := max(0, m.height)
 	if width <= 0 || height <= 0 {
-		size := element.Measure(ctx, ui.NewConstraints(width, height))
 		if width <= 0 {
-			width = size.W
+			width = max(0, m.viewport.Width)
+			if width == 0 {
+				width = max(40, m.composerWidth()+m.sidebarWidth()+3)
+			}
 		}
 		if height <= 0 {
-			height = size.H
+			height = max(0, m.viewport.Height)
+			if height == 0 {
+				height = max(6, m.transcriptViewportHeight()+m.composerAreaHeight()+m.statusPaneHeight())
+			}
 		}
+		size := element.Measure(ctx, ui.NewConstraints(width, height))
+		width = max(width, size.W)
+		height = max(height, size.H)
 	}
 	cache.renderedBodySurface = element.Render(ctx, ui.Rect{W: width, H: height})
 	cache.bodyValid = true
@@ -1260,37 +1268,7 @@ func (m *Model) renderBodySurface() ui.Surface {
 }
 
 func (m *Model) renderBodyElement() ui.Element {
-	sidebarWidth := m.sidebarWidth()
-	sidebar := ui.Sidebar{
-		Child:  ui.TextPane{Content: m.renderSidebar()},
-		Height: m.viewport.Height,
-		Width:  sidebarWidth,
-	}
-	var mainElement ui.Element = ui.SurfaceBox{Surface: m.viewport.VisibleSurface()}
-	if transcript := m.transcriptElement(nil); transcript != nil {
-		mainElement = transcript
-	}
-	if activity := m.renderTranscriptActivityElement(); activity != nil {
-		mainElement = ui.Column{
-			Children: []ui.Child{
-				ui.Flex(mainElement, 1),
-				ui.Fixed(activity),
-			},
-			Spacing: 1,
-		}
-	}
-	if mainElement != nil {
-		return ui.BodyLayout{
-			MainElement:    mainElement,
-			SidebarElement: sidebar,
-			ShowSidebar:    m.showSidebar,
-		}
-	}
-	return ui.BodyLayout{
-		MainElement:    mainElement,
-		SidebarElement: sidebar,
-		ShowSidebar:    m.showSidebar,
-	}
+	return m.renderMainScreenElement()
 }
 
 func (m *Model) transcriptActivityHeight() int {
@@ -1302,24 +1280,27 @@ func (m *Model) transcriptActivityHeight() int {
 }
 
 func (m *Model) transcriptViewportHeight() int {
-	activityHeight := m.transcriptActivityHeight()
-	if activityHeight <= 0 {
-		return max(0, m.viewport.Height)
+	height := max(0, m.viewport.Height)
+	if activityHeight := m.transcriptActivityHeight(); activityHeight > 0 {
+		height -= activityHeight + 1
 	}
-	return max(0, m.viewport.Height-activityHeight-1)
+	if composerHeight := m.composerAreaHeight(); composerHeight > 0 {
+		height -= composerHeight + 1
+	}
+	return max(0, height)
 }
 
-func (m *Model) renderFooterLines() []string {
-	return m.renderFooterSurface().Lines()
+func (m *Model) renderComposerAreaLines() []string {
+	return m.renderComposerAreaSurface().Lines()
 }
 
-func (m *Model) renderFooterSurface() ui.Surface {
+func (m *Model) renderComposerAreaSurface() ui.Surface {
 	cache := m.ensureRenderCache()
 	if cache.footerValid {
 		return cache.renderedFooterSurface
 	}
 	ctx := &ui.Context{Palette: m.palette}
-	element := m.renderFooterElement()
+	element := m.renderComposerAreaElement()
 	width := max(0, m.width)
 	size := element.Measure(ctx, ui.NewConstraints(width, 0))
 	if width <= 0 {
@@ -1334,7 +1315,10 @@ func (m *Model) renderFooterSurface() ui.Surface {
 	return cache.renderedFooterSurface
 }
 
-func (m *Model) renderFooterElement() ui.Element {
+func (m *Model) renderComposerAreaElement() ui.Element {
+	if !m.shouldShowComposerArea() {
+		return ui.VisibleElement{}
+	}
 	elements := []ui.Element{}
 	if prompt := m.renderApprovalPromptElement(); prompt != nil {
 		elements = append(elements, prompt)
@@ -1356,15 +1340,81 @@ func (m *Model) renderFooterElement() ui.Element {
 	}
 	elements = append(elements, ui.Spacer{H: 1})
 	elements = append(elements, m.renderComposerElement())
-	return ui.Footer{Elements: elements}
+	children := make([]ui.Child, 0, len(elements))
+	for _, element := range elements {
+		if element == nil {
+			continue
+		}
+		children = append(children, ui.Fixed(element))
+	}
+	return ui.VBox{Children: children}
 }
 
-func (m *Model) footerHeight() int {
+func (m *Model) shouldShowComposerArea() bool {
+	if len(m.draftAttachments) > 0 || m.queuedPrompt != nil {
+		return true
+	}
+	if m.renderApprovalPromptElement() != nil ||
+		m.renderComposerHistoryMenuElement() != nil ||
+		m.renderSlashMenuElement() != nil ||
+		m.renderMentionMenuElement() != nil ||
+		m.renderSkillMenuElement() != nil {
+		return true
+	}
+	return strings.TrimSpace(m.composer.Placeholder) != "" ||
+		strings.TrimSpace(m.composer.Value()) != "" ||
+		m.composer.Focused()
+}
+
+func (m *Model) composerAreaHeight() int {
 	cache := m.ensureRenderCache()
 	if !cache.footerValid {
-		_ = m.renderFooterSurface()
+		_ = m.renderComposerAreaSurface()
 	}
 	return cache.footerHeight
+}
+
+func (m *Model) renderStatusPaneElement() ui.Element {
+	return ui.VisibleElement{}
+}
+
+func (m *Model) statusPaneHeight() int {
+	element := m.renderStatusPaneElement()
+	if !ui.ElementVisible(element) {
+		return 0
+	}
+	return element.Measure(&ui.Context{Palette: m.palette}, ui.NewConstraints(max(0, m.width), 0)).H
+}
+
+func (m *Model) renderMainScreenElement() ui.Element {
+	var transcript ui.Element = ui.SurfaceBox{Surface: m.viewport.VisibleSurface()}
+	if retained := m.transcriptElement(nil); retained != nil {
+		transcript = retained
+	}
+	mainChildren := []ui.Child{
+		ui.Flex(transcript, 1),
+		ui.Fixed(ui.VisibleElement{Child: m.renderTranscriptActivityElement(), VisibleFlag: m.renderTranscriptActivityElement() != nil}),
+		ui.Fixed(m.renderComposerAreaElement()),
+	}
+	mainColumn := ui.VBox{Children: mainChildren, Spacing: 1}
+	sidebar := ui.VisibleElement{
+		Child: ui.Sidebar{
+			Child:  ui.TextPane{Content: m.renderSidebar()},
+			Height: m.viewport.Height,
+			Width:  m.sidebarWidth(),
+		},
+		VisibleFlag: m.showSidebar,
+	}
+	rootChildren := []ui.Child{
+		ui.Flex(ui.HBox{
+			Children: []ui.Child{
+				ui.Flex(ui.Inset{Padding: ui.SymmetricInsets(1, 0), Child: mainColumn}, 1),
+				ui.Fixed(sidebar),
+			},
+		}, 1),
+		ui.Fixed(m.renderStatusPaneElement()),
+	}
+	return ui.VBox{Children: rootChildren}
 }
 
 func (m *Model) renderComposerElement() ui.Element {

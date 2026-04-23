@@ -134,14 +134,7 @@ func (m *Model) mainWindow() ui.Window {
 		},
 		model: m,
 		render: func(m *Model, bounds ui.Rect) ui.Surface {
-			root := ui.BlankSurface(max(0, bounds.W), max(0, bounds.H))
-			body := m.renderBodySurface().Normalize(max(0, bounds.W), max(0, m.viewport.Height))
-			root = root.PlaceAt(0, 0, body)
-			footer := m.renderFooterSurface()
-			if footerSize := footer.Size(); footerSize.H > 0 {
-				root = root.PlaceAt(0, max(0, bounds.H-footerSize.H), footer.Normalize(max(0, bounds.W), footerSize.H))
-			}
-			return root
+			return m.renderBodySurface().Normalize(max(0, bounds.W), max(0, bounds.H))
 		},
 		key: func(m *Model, msg tea.KeyMsg) tea.Cmd {
 			return m.handleMainWindowKey(msg)
