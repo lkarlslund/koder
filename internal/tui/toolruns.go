@@ -336,7 +336,7 @@ func (e toolRunCardElement) Measure(_ *ui.Context, constraints ui.Constraints) u
 	if width <= 0 {
 		width = constraints.MaxW
 	}
-	return constraints.Clamp(ui.SurfaceFromString(e.Run.CardView(e.Palette, width, e.Expanded)).Size())
+	return constraints.Clamp(e.Run.CardSurface(e.Palette, width, e.Expanded).Size())
 }
 
 func (e toolRunCardElement) Render(ctx *ui.Context, bounds ui.Rect) ui.Surface {
@@ -351,7 +351,7 @@ func (e toolRunCardElement) Render(ctx *ui.Context, bounds ui.Rect) ui.Surface {
 			Enabled: true,
 		})
 	}
-	return ui.SurfaceFromString(e.Run.CardView(e.Palette, width, e.Expanded))
+	return e.Run.CardSurface(e.Palette, width, e.Expanded)
 }
 
 func (m *Model) approvalToolRun(item store.Approval) ui.ToolRun {

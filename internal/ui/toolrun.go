@@ -61,6 +61,14 @@ func (r ToolRun) StatusLabel() string {
 }
 
 func (r ToolRun) CardView(palette theme.Palette, width int, expanded bool) string {
+	return r.renderCard(palette, width, expanded).String()
+}
+
+func (r ToolRun) CardSurface(palette theme.Palette, width int, expanded bool) Surface {
+	return r.renderCard(palette, width, expanded)
+}
+
+func (r ToolRun) renderCard(palette theme.Palette, width int, expanded bool) Surface {
 	titleStyle := lipgloss.NewStyle().Foreground(palette.MarkdownText).Bold(true).Italic(true)
 	subtitleStyle := lipgloss.NewStyle().Foreground(palette.ComposerMutedText)
 	bodyStyle := lipgloss.NewStyle().Foreground(palette.MarkdownText)
@@ -89,7 +97,7 @@ func (r ToolRun) CardView(palette theme.Palette, width int, expanded bool) strin
 	if preview := r.PreviewText(); preview != "" {
 		lines = append(lines, renderToolRunPreview(preview, r, bodyStyle, addedStyle, deletedStyle, metaStyle, headerWidth, expanded))
 	}
-	return strings.Join(lines, "\n")
+	return SurfaceFromString(strings.Join(lines, "\n"))
 }
 
 type ToolRunDock struct {
@@ -100,6 +108,10 @@ type ToolRunDock struct {
 }
 
 func (d ToolRunDock) View() string {
+	return d.render().String()
+}
+
+func (d ToolRunDock) render() Surface {
 	run := d.Run
 	statusStyle := lipgloss.NewStyle().Foreground(toolRunStatusColor(run.Status, d.Palette)).Bold(true)
 	title := lipgloss.JoinHorizontal(lipgloss.Left,
@@ -132,15 +144,15 @@ func (d ToolRunDock) View() string {
 		buttons.View(d.Palette),
 		d.Hints,
 	)
-	return lipgloss.NewStyle().
+	return SurfaceFromString(lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(toolRunStatusColor(run.Status, d.Palette)).
 		Padding(0, 1).
-		Render(strings.Join(lines, "\n"))
+		Render(strings.Join(lines, "\n")))
 }
 
 func (d ToolRunDock) Measure(_ *Context, constraints Constraints) Size {
-	return constraints.Clamp(SurfaceFromString(d.View()).Size())
+	return constraints.Clamp(d.render().Size())
 }
 
 func (d ToolRunDock) Render(ctx *Context, bounds Rect) Surface {
@@ -169,7 +181,7 @@ func (d ToolRunDock) Render(ctx *Context, bounds Rect) Surface {
 		}
 		buttons.Render(ctx, Rect{X: bounds.X + 2, Y: bounds.Y + lineOffset, W: contentWidth, H: 1})
 	}
-	return SurfaceFromString(d.View()).normalize(bounds.W, bounds.H)
+	return d.render().normalize(bounds.W, bounds.H)
 }
 
 func (r ToolRun) Expandable(width int) bool {

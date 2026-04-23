@@ -49,8 +49,12 @@ type SlashMenu struct {
 }
 
 func (m SlashMenu) View() string {
+	return m.render().String()
+}
+
+func (m SlashMenu) render() Surface {
 	if len(m.Items) == 0 {
-		return ""
+		return Surface{}
 	}
 	lines := []string{lipgloss.NewStyle().Bold(true).Render(m.Title)}
 	for idx, item := range m.Items {
@@ -60,18 +64,22 @@ func (m SlashMenu) View() string {
 		}
 		lines = append(lines, line)
 	}
-	return lipgloss.NewStyle().Border(lipgloss.NormalBorder()).Padding(0, 1).Render(strings.Join(lines, "\n"))
+	return SurfaceFromString(lipgloss.NewStyle().Border(lipgloss.NormalBorder()).Padding(0, 1).Render(strings.Join(lines, "\n")))
 }
 
 func (m SlashMenu) Measure(_ *Context, constraints Constraints) Size {
-	return constraints.Clamp(SurfaceFromString(m.View()).Size())
+	return constraints.Clamp(m.render().Size())
 }
 
 func (m SlashMenu) Render(_ *Context, bounds Rect) Surface {
-	return SurfaceFromString(m.View()).normalize(bounds.W, bounds.H)
+	return m.render().normalize(bounds.W, bounds.H)
 }
 
 func (m HistoryMenu) View() string {
+	return m.render().String()
+}
+
+func (m HistoryMenu) render() Surface {
 	width := m.Width
 	if width <= 0 {
 		width = 72
@@ -95,15 +103,15 @@ func (m HistoryMenu) View() string {
 		}
 	}
 	lines = append(lines, "", lipgloss.NewStyle().Foreground(m.Palette.AssistantTimestampText).Render("enter accept  esc cancel  ctrl-r/down older  ctrl-s/up newer"))
-	return lipgloss.NewStyle().Border(lipgloss.NormalBorder()).Padding(0, 1).Width(width).Render(strings.Join(lines, "\n"))
+	return SurfaceFromString(lipgloss.NewStyle().Border(lipgloss.NormalBorder()).Padding(0, 1).Width(width).Render(strings.Join(lines, "\n")))
 }
 
 func (m HistoryMenu) Measure(_ *Context, constraints Constraints) Size {
-	return constraints.Clamp(SurfaceFromString(m.View()).Size())
+	return constraints.Clamp(m.render().Size())
 }
 
 func (m HistoryMenu) Render(_ *Context, bounds Rect) Surface {
-	return SurfaceFromString(m.View()).normalize(bounds.W, bounds.H)
+	return m.render().normalize(bounds.W, bounds.H)
 }
 
 type ApprovalPrompt struct {
@@ -122,6 +130,10 @@ func NewApprovalPrompt(props ApprovalPromptProps) ApprovalPrompt {
 }
 
 func (p ApprovalPrompt) View() string {
+	return p.render().String()
+}
+
+func (p ApprovalPrompt) render() Surface {
 	approve := lipgloss.NewStyle().Padding(0, 1)
 	if p.ApproveFocus {
 		approve = approve.Reverse(true).Bold(true)
@@ -130,7 +142,7 @@ func (p ApprovalPrompt) View() string {
 	if p.DenyFocus {
 		deny = deny.Reverse(true).Bold(true)
 	}
-	return lipgloss.NewStyle().
+	return SurfaceFromString(lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		Padding(0, 1).
 		Render(strings.Join([]string{
@@ -138,15 +150,15 @@ func (p ApprovalPrompt) View() string {
 			p.Body,
 			lipgloss.JoinHorizontal(lipgloss.Left, approve.Render(p.ApproveLabel), "  ", deny.Render(p.DenyLabel)),
 			p.Hints,
-		}, "\n"))
+		}, "\n")))
 }
 
 func (p ApprovalPrompt) Measure(_ *Context, constraints Constraints) Size {
-	return constraints.Clamp(SurfaceFromString(p.View()).Size())
+	return constraints.Clamp(p.render().Size())
 }
 
 func (p ApprovalPrompt) Render(_ *Context, bounds Rect) Surface {
-	return SurfaceFromString(p.View()).normalize(bounds.W, bounds.H)
+	return p.render().normalize(bounds.W, bounds.H)
 }
 
 type MenuPickerDialog struct {
@@ -163,6 +175,10 @@ func NewMenuPickerDialog(props PickerDialogProps) MenuPickerDialog {
 }
 
 func (d MenuPickerDialog) View() string {
+	return d.render().String()
+}
+
+func (d MenuPickerDialog) render() Surface {
 	lines := []string{}
 	if hint := strings.TrimSpace(d.Hint); hint != "" {
 		lines = append(lines, lipgloss.NewStyle().Foreground(d.Palette.AssistantTimestampText).Render(hint))
@@ -182,18 +198,18 @@ func (d MenuPickerDialog) View() string {
 		}
 	}
 	lines = append(lines, "", RenderDialogButtons(d.Palette, "OK", "Cancel"))
-	return Modal{
+	return SurfaceFromString(Modal{
 		Title:  d.Title,
 		Body:   strings.Join(lines, "\n"),
 		Footer: "Enter applies the highlighted row. Esc cancels.",
 		Width:  80,
-	}.View(d.Palette)
+	}.View(d.Palette))
 }
 
 func (d MenuPickerDialog) Measure(_ *Context, constraints Constraints) Size {
-	return constraints.Clamp(SurfaceFromString(d.View()).Size())
+	return constraints.Clamp(d.render().Size())
 }
 
 func (d MenuPickerDialog) Render(_ *Context, bounds Rect) Surface {
-	return SurfaceFromString(d.View()).normalize(bounds.W, bounds.H)
+	return d.render().normalize(bounds.W, bounds.H)
 }
