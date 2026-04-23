@@ -146,9 +146,6 @@ func (d *PickerDialog) Update(msg tea.KeyMsg) PickerDialogAction {
 }
 
 func (d *PickerDialog) HandleMouse(localX, localY, width int, palette theme.Palette) PickerDialogAction {
-	var action PickerDialogAction
-	d.buttons.Buttons[0].OnPress = func() { action = d.selectCurrent() }
-	d.buttons.Buttons[1].OnPress = func() { action = PickerDialogAction{Kind: PickerDialogActionCancel} }
 	runtime := Runtime{}
 	ctx := &Context{Palette: palette, Runtime: &runtime}
 	width = maxInt(80, width)
@@ -157,19 +154,26 @@ func (d *PickerDialog) HandleMouse(localX, localY, width int, palette theme.Pale
 	if !ok {
 		return PickerDialogAction{}
 	}
-	switch control.ID {
+	return d.ActivateControl(control.ID)
+}
+
+func (d *PickerDialog) ActivateControl(controlID string) PickerDialogAction {
+	var action PickerDialogAction
+	d.buttons.Buttons[0].OnPress = func() { action = d.selectCurrent() }
+	d.buttons.Buttons[1].OnPress = func() { action = PickerDialogAction{Kind: PickerDialogActionCancel} }
+	switch controlID {
 	case "ok", "cancel":
 		d.Focus = pickerDialogFocusButtons
 		for idx, button := range d.buttons.Buttons {
-			if button.ID == control.ID {
+			if button.ID == controlID {
 				d.buttons.Index = idx
 				d.buttons.ActivateFocused()
 				return action
 			}
 		}
 	default:
-		if strings.HasPrefix(control.ID, "picker-row-") {
-			idx, err := strconv.Atoi(strings.TrimPrefix(control.ID, "picker-row-"))
+		if strings.HasPrefix(controlID, "picker-row-") {
+			idx, err := strconv.Atoi(strings.TrimPrefix(controlID, "picker-row-"))
 			if err != nil || idx < 0 || idx >= len(d.view) {
 				return PickerDialogAction{}
 			}

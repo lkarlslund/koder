@@ -222,14 +222,18 @@ func firstNonEmptyModelValue(values ...string) string {
 }
 
 func (d *ModelDialog) HandleMouse(localX, localY, width int, palette theme.Palette) ModelDialogAction {
-	d.ensureButtons()
-	var action ModelDialogAction
-	d.buttons.Buttons[0].OnPress = func() { action = d.selectCurrent() }
-	d.buttons.Buttons[1].OnPress = func() { action = ModelDialogAction{Kind: ModelDialogActionCancel} }
 	controlID, ok := dialogHitControl(width, palette, d.dialog, localX, localY)
 	if !ok {
 		return ModelDialogAction{}
 	}
+	return d.ActivateControl(controlID)
+}
+
+func (d *ModelDialog) ActivateControl(controlID string) ModelDialogAction {
+	d.ensureButtons()
+	var action ModelDialogAction
+	d.buttons.Buttons[0].OnPress = func() { action = d.selectCurrent() }
+	d.buttons.Buttons[1].OnPress = func() { action = ModelDialogAction{Kind: ModelDialogActionCancel} }
 	switch controlID {
 	case "ok", "cancel":
 		d.focus = pickerDialogFocusButtons

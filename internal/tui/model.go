@@ -614,16 +614,11 @@ func (m *Model) handleDialogMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd, bool) {
 	}
 	switch {
 	case m.hasSessionDialog():
-		width := 84
-		if m.width > 0 {
-			width = min(124, max(96, m.width-8))
-		}
-		view := m.renderSessionDialog()
-		localX, localY, ok := m.modalLocalPoint(msg, view)
+		control, ok := m.hitCenteredWindowControl(msg)
 		if !ok {
 			return m, nil, true
 		}
-		action := m.sessionDialog.HandleMouse(localX, localY, width, m.palette)
+		action := m.sessionDialog.ActivateControl(control.ID)
 		switch action.Kind {
 		case dialogs.SessionDialogActionSelect:
 			m.startBusy(busyScopeSidebar, fmt.Sprintf("Resuming session %d…", action.SessionID))
@@ -635,16 +630,11 @@ func (m *Model) handleDialogMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd, bool) {
 			return m, nil, true
 		}
 	case m.hasModelDialog():
-		width := 84
-		if m.width > 0 {
-			width = min(96, max(72, m.width-8))
-		}
-		view := m.renderModelDialog()
-		localX, localY, ok := m.modalLocalPoint(msg, view)
+		control, ok := m.hitCenteredWindowControl(msg)
 		if !ok {
 			return m, nil, true
 		}
-		action := m.modelDialog.HandleMouse(localX, localY, width, m.palette)
+		action := m.modelDialog.ActivateControl(control.ID)
 		switch action.Kind {
 		case dialogs.ModelDialogActionSelect:
 			if err := m.selectModel(action.ModelID); err != nil {
@@ -663,16 +653,11 @@ func (m *Model) handleDialogMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd, bool) {
 			return m, nil, true
 		}
 	case m.hasDisconnectDialog():
-		width := 84
-		if m.width > 0 {
-			width = min(96, max(72, m.width-8))
-		}
-		view := m.renderDisconnectDialog()
-		localX, localY, ok := m.modalLocalPoint(msg, view)
+		control, ok := m.hitCenteredWindowControl(msg)
 		if !ok {
 			return m, nil, true
 		}
-		action := m.disconnectDialog.HandleMouse(localX, localY, width, m.palette)
+		action := m.disconnectDialog.ActivateControl(control.ID)
 		switch action.Kind {
 		case dialogs.DisconnectDialogActionSelect:
 			if err := m.disconnectProvider(action.ProviderID); err != nil {
@@ -691,16 +676,11 @@ func (m *Model) handleDialogMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd, bool) {
 			return m, nil, true
 		}
 	case m.hasToolsDialog():
-		width := 90
-		if m.width > 0 {
-			width = min(100, max(76, m.width-8))
-		}
-		view := m.renderToolsDialog()
-		localX, localY, ok := m.modalLocalPoint(msg, view)
+		control, ok := m.hitCenteredWindowControl(msg)
 		if !ok {
 			return m, nil, true
 		}
-		action := m.toolsDialog.HandleMouse(localX, localY, width, m.palette)
+		action := m.toolsDialog.ActivateControl(control.ID)
 		switch action.Kind {
 		case dialogs.ToolsDialogActionApply:
 			if err := m.applySessionToolStates(action.States); err != nil {
@@ -718,12 +698,11 @@ func (m *Model) handleDialogMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd, bool) {
 			return m, nil, true
 		}
 	case m.hasPicker():
-		view := m.renderPicker()
-		localX, localY, ok := m.modalLocalPoint(msg, view)
+		control, ok := m.hitCenteredWindowControl(msg)
 		if !ok {
 			return m, nil, true
 		}
-		action := m.picker.dialog.HandleMouse(localX, localY, 80, m.palette)
+		action := m.picker.dialog.ActivateControl(control.ID)
 		switch action.Kind {
 		case ui.PickerDialogActionSelect:
 			next, cmd := m.submitPickerSelection(action.Value)

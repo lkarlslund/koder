@@ -204,14 +204,18 @@ func (d DisconnectDialog) dialog(width int, palette theme.Palette) Element {
 }
 
 func (d *DisconnectDialog) HandleMouse(localX, localY, width int, palette theme.Palette) DisconnectDialogAction {
-	d.ensureButtons()
-	var action DisconnectDialogAction
-	d.buttons.Buttons[0].OnPress = func() { action = d.selectCurrent() }
-	d.buttons.Buttons[1].OnPress = func() { action = DisconnectDialogAction{Kind: DisconnectDialogActionCancel} }
 	controlID, ok := dialogHitControl(width, palette, d.dialog, localX, localY)
 	if !ok {
 		return DisconnectDialogAction{}
 	}
+	return d.ActivateControl(controlID)
+}
+
+func (d *DisconnectDialog) ActivateControl(controlID string) DisconnectDialogAction {
+	d.ensureButtons()
+	var action DisconnectDialogAction
+	d.buttons.Buttons[0].OnPress = func() { action = d.selectCurrent() }
+	d.buttons.Buttons[1].OnPress = func() { action = DisconnectDialogAction{Kind: DisconnectDialogActionCancel} }
 	switch controlID {
 	case "ok", "cancel":
 		d.focus = pickerDialogFocusButtons

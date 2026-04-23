@@ -227,14 +227,18 @@ func (d SessionDialog) dialog(width int, palette theme.Palette) Element {
 }
 
 func (d *SessionDialog) HandleMouse(localX, localY, width int, palette theme.Palette) SessionDialogAction {
-	d.ensureButtons()
-	var action SessionDialogAction
-	d.buttons.Buttons[0].OnPress = func() { action = d.selectCurrent() }
-	d.buttons.Buttons[1].OnPress = func() { action = SessionDialogAction{Kind: SessionDialogActionCancel} }
 	controlID, ok := dialogHitControl(width, palette, d.dialog, localX, localY)
 	if !ok {
 		return SessionDialogAction{}
 	}
+	return d.ActivateControl(controlID)
+}
+
+func (d *SessionDialog) ActivateControl(controlID string) SessionDialogAction {
+	d.ensureButtons()
+	var action SessionDialogAction
+	d.buttons.Buttons[0].OnPress = func() { action = d.selectCurrent() }
+	d.buttons.Buttons[1].OnPress = func() { action = SessionDialogAction{Kind: SessionDialogActionCancel} }
 	switch controlID {
 	case "ok", "cancel":
 		d.focus = pickerDialogFocusButtons

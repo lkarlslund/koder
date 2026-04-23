@@ -159,16 +159,20 @@ func (d ToolsDialog) dialog(width int, palette theme.Palette) Element {
 }
 
 func (d *ToolsDialog) HandleMouse(localX, localY, width int, palette theme.Palette) ToolsDialogAction {
+	controlID, ok := dialogHitControl(width, palette, d.dialog, localX, localY)
+	if !ok {
+		return ToolsDialogAction{}
+	}
+	return d.ActivateControl(controlID)
+}
+
+func (d *ToolsDialog) ActivateControl(controlID string) ToolsDialogAction {
 	var action ToolsDialogAction
 	d.buttons.Buttons[0].OnPress = func() {
 		action = ToolsDialogAction{Kind: ToolsDialogActionApply, States: d.States()}
 	}
 	d.buttons.Buttons[1].OnPress = func() {
 		action = ToolsDialogAction{Kind: ToolsDialogActionCancel, States: d.originalStates()}
-	}
-	controlID, ok := dialogHitControl(width, palette, d.dialog, localX, localY)
-	if !ok {
-		return ToolsDialogAction{}
 	}
 	switch controlID {
 	case "ok", "cancel":
