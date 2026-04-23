@@ -71,10 +71,6 @@ type ActivityIndicator struct {
 	Palette   theme.Palette
 }
 
-func (i ActivityIndicator) View() string {
-	return i.render().String()
-}
-
 func (i ActivityIndicator) Measure(_ *Context, constraints Constraints) Size {
 	return constraints.Clamp(i.render().Size())
 }
@@ -106,10 +102,6 @@ type UserMessage struct {
 
 func NewUserMessage(props UserMessageProps) UserMessage {
 	return UserMessage(props)
-}
-
-func (m UserMessage) View() string {
-	return m.render().String()
 }
 
 func (m UserMessage) Measure(_ *Context, constraints Constraints) Size {
@@ -213,10 +205,6 @@ type AssistantMessage struct {
 	Palette theme.Palette
 }
 
-func (m AssistantMessage) View() string {
-	return m.render().String()
-}
-
 func (m AssistantMessage) Measure(_ *Context, constraints Constraints) Size {
 	return constraints.Clamp(m.render().Size())
 }
@@ -243,10 +231,6 @@ type ReasoningBlock struct {
 	Body    string
 	Width   int
 	Palette theme.Palette
-}
-
-func (b ReasoningBlock) View() string {
-	return b.render().String()
 }
 
 func (b ReasoningBlock) Measure(_ *Context, constraints Constraints) Size {

@@ -1749,11 +1749,6 @@ func renderedSeparatorHeight(separator string) int {
 
 func (m *Model) renderTranscriptActivity() string {
 	if element := m.renderTranscriptActivityElement(); element != nil {
-		if m.viewport.Width <= 0 {
-			if indicator, ok := element.(ui.ActivityIndicator); ok {
-				return indicator.View()
-			}
-		}
 		return ui.RenderElement(&ui.Context{Palette: m.palette}, element, max(0, m.viewport.Width), 0)
 	}
 	return ""
@@ -1771,14 +1766,6 @@ func (m *Model) renderTranscriptActivityElement() ui.Element {
 
 func (m *Model) renderTranscriptMessage(msg domain.Message) string {
 	if element := m.renderTranscriptMessageElement(msg); element != nil {
-		if m.viewport.Width <= 0 {
-			switch typed := element.(type) {
-			case ui.UserMessage:
-				return typed.View()
-			case ui.AssistantMessage:
-				return typed.View()
-			}
-		}
 		return ui.RenderElement(&ui.Context{Palette: m.palette}, element, max(0, m.viewport.Width), 0)
 	}
 	return ""
@@ -1804,9 +1791,6 @@ func (m *Model) renderTranscriptMessageElement(msg domain.Message) ui.Element {
 
 func (m *Model) renderUserMessage(body, stamp string) string {
 	element := m.renderUserMessageElement(body, stamp)
-	if typed, ok := element.(ui.UserMessage); ok && m.userMessageWidth(body, stamp) <= 0 {
-		return typed.View()
-	}
 	return ui.RenderElement(&ui.Context{Palette: m.palette}, element, m.userMessageWidth(body, stamp), 0)
 }
 
@@ -1876,9 +1860,6 @@ func (m *Model) userMessageWidth(body, stamp string) int {
 
 func (m *Model) renderAssistantMessage(body, stamp string) string {
 	element := m.renderAssistantMessageElement(body, stamp)
-	if typed, ok := element.(ui.AssistantMessage); ok && m.viewport.Width <= 0 {
-		return typed.View()
-	}
 	return ui.RenderElement(&ui.Context{Palette: m.palette}, element, max(0, m.viewport.Width), 0)
 }
 
@@ -2055,10 +2036,21 @@ func (m *Model) renderUserMessageParts(parts []domain.Part) string {
 
 func (m *Model) renderReasoningBlock(input string) string {
 	element := m.renderReasoningBlockElement(input)
-	if typed, ok := element.(ui.ReasoningBlock); ok && m.viewport.Width <= 0 {
-		return typed.View()
+	ctx := &ui.Context{Palette: m.palette}
+	width := max(0, m.viewport.Width)
+	trimLines := width <= 0
+	if width <= 0 {
+		width = element.Measure(ctx, ui.Constraints{}).W
 	}
-	return ui.RenderElement(&ui.Context{Palette: m.palette}, element, max(0, m.viewport.Width), 0)
+	rendered := ui.RenderElement(ctx, element, width, 0)
+	if !trimLines {
+		return rendered
+	}
+	lines := strings.Split(rendered, "\n")
+	for i, line := range lines {
+		lines[i] = strings.TrimRight(line, " ")
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (m *Model) renderReasoningBlockElement(input string) ui.Element {

@@ -60,10 +60,6 @@ func (r ToolRun) StatusLabel() string {
 	}
 }
 
-func (r ToolRun) CardView(palette theme.Palette, width int, expanded bool) string {
-	return r.renderCard(palette, width, expanded).String()
-}
-
 func (r ToolRun) CardSurface(palette theme.Palette, width int, expanded bool) Surface {
 	return r.renderCard(palette, width, expanded)
 }
@@ -105,10 +101,6 @@ type ToolRunDock struct {
 	Run     ToolRun
 	Buttons ButtonRow
 	Hints   string
-}
-
-func (d ToolRunDock) View() string {
-	return d.render().String()
 }
 
 func (d ToolRunDock) render() Surface {

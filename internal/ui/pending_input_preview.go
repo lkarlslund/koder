@@ -18,10 +18,6 @@ type PendingInputPreview struct {
 
 const pendingInputPreviewLineLimit = 3
 
-func (p PendingInputPreview) View(palette theme.Palette) string {
-	return p.render(palette).String()
-}
-
 func (p PendingInputPreview) render(palette theme.Palette) Surface {
 	if p.Width <= 0 || (len(p.PendingSteers) == 0 && len(p.RejectedSteers) == 0 && len(p.QueuedMessages) == 0) {
 		return Surface{}

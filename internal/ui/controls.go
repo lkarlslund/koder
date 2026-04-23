@@ -471,50 +471,6 @@ func (r ButtonRow) line(palette theme.Palette) string {
 	return strings.Join(parts, strings.Repeat(" ", r.gap()))
 }
 
-func (r ButtonRow) ActivateAtX(x int, palette theme.Palette) bool {
-	if len(r.Buttons) == 0 {
-		return false
-	}
-	idx, ok := r.IndexAtX(x, palette)
-	if !ok {
-		return false
-	}
-	button := r.Buttons[idx]
-	if button.OnPress != nil {
-		button.OnPress()
-		return true
-	}
-	return false
-}
-
-func (r ButtonRow) IndexAtX(x int, palette theme.Palette) (int, bool) {
-	if len(r.Buttons) == 0 {
-		return 0, false
-	}
-	offset := 0
-	for idx, button := range r.Buttons {
-		rendered := button.View(palette)
-		width := ansi.StringWidth(rendered)
-		if x >= offset && x < offset+width {
-			return idx, true
-		}
-		offset += width + r.gap()
-	}
-	return 0, false
-}
-
-func buttonRowOffset(line string, row ButtonRow, palette theme.Palette) (int, bool) {
-	return row.OffsetIn(line, palette)
-}
-
-func (r ButtonRow) OffsetIn(line string, palette theme.Palette) (int, bool) {
-	start := strings.Index(line, ansi.Strip(r.line(palette)))
-	if start < 0 {
-		return 0, false
-	}
-	return start, true
-}
-
 func (r ButtonRow) gap() int {
 	if r.Gap <= 0 {
 		return 2

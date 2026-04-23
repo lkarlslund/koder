@@ -9,13 +9,13 @@ import (
 
 func TestUserMessageClassicViewDoesNotAddLeadingSpaceBeforeBody(t *testing.T) {
 	palette := theme.Resolve("tokyonight").Palette
-	got := NewUserMessage(UserMessageProps{
+	got := RenderElement(&Context{Palette: palette}, NewUserMessage(UserMessageProps{
 		Palette:     palette,
 		Body:        "hello",
 		Width:       12,
 		HalfBlocks:  false,
 		PromptGlyph: "┃",
-	}).View()
+	}), 12, 0)
 
 	lines := strings.Split(got, "\n")
 	if len(lines) < 2 {
@@ -32,10 +32,10 @@ func TestUserMessageClassicViewDoesNotAddLeadingSpaceBeforeBody(t *testing.T) {
 
 func TestActivityIndicatorViewDoesNotAddLeadingSpace(t *testing.T) {
 	palette := theme.Resolve("tokyonight").Palette
-	got := ActivityIndicator{
+	got := RenderElement(&Context{Palette: palette}, ActivityIndicator{
 		Indicator: "x Working ...",
 		Palette:   palette,
-	}.View()
+	}, 0, 0)
 
 	if strings.HasPrefix(got, " ") {
 		t.Fatalf("expected activity indicator to start without a leading space, got %q", got)

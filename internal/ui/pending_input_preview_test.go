@@ -24,7 +24,7 @@ func TestPendingInputPreviewShowsQueuedMessagesInMutedStyle(t *testing.T) {
 	got := PendingInputPreview{
 		Width:          40,
 		QueuedMessages: []string{"queued submission"},
-	}.View(palette)
+	}.render(palette).String()
 
 	if !strings.Contains(ansi.Strip(got), "Queued follow-up inputs") {
 		t.Fatalf("expected queued preview header, got %q", got)
@@ -43,7 +43,7 @@ func TestPendingInputPreviewShowsPendingSteersBeforeQueuedMessages(t *testing.T)
 		Width:          56,
 		PendingSteers:  []string{"Please continue."},
 		QueuedMessages: []string{"follow up later"},
-	}.View(palette)
+	}.render(palette).String()
 	plain := ansi.Strip(got)
 
 	steerIdx := strings.Index(plain, "Messages to be submitted after next tool call")
