@@ -1,8 +1,13 @@
 package tea
 
 import (
+	"io"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
+
+	"github.com/charmbracelet/x/input"
 )
 
 func TestRenderFrameAddressesRowsWithoutNewlines(t *testing.T) {
@@ -83,6 +88,22 @@ func TestRenderFrameSurfaceEmitsRealSGRSequences(t *testing.T) {
 	}
 }
 
+func TestReadInputBacksOffWhenReaderReturnsNoEvents(t *testing.T) {
+	reader := &fakeInputReader{}
+	done := make(chan struct{})
+	out := make(chan Msg, 8)
+	p := &Program{}
+
+	go p.readInput(reader, out, done)
+	time.Sleep(35 * time.Millisecond)
+	close(done)
+	time.Sleep(5 * time.Millisecond)
+
+	if calls := reader.calls.Load(); calls > 8 {
+		t.Fatalf("expected readInput to back off on empty reads, got %d calls in ~35ms", calls)
+	}
+}
+
 type fakeCell struct {
 	text         string
 	width        int
@@ -95,6 +116,22 @@ type fakeCell struct {
 	italic       bool
 	underline    bool
 }
+
+type fakeInputReader struct {
+	calls atomic.Int64
+}
+
+func (f *fakeInputReader) ReadEvents() ([]input.Event, error) {
+	f.calls.Add(1)
+	return nil, nil
+}
+
+func (f *fakeInputReader) Close() error { return nil }
+
+type eofInputReader struct{}
+
+func (eofInputReader) ReadEvents() ([]input.Event, error) { return nil, io.EOF }
+func (eofInputReader) Close() error                       { return nil }
 
 type fakeSurface struct {
 	w     int

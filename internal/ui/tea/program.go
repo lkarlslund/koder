@@ -27,6 +27,11 @@ type Program struct {
 	didRender    bool
 }
 
+type inputEventReader interface {
+	ReadEvents() ([]input.Event, error)
+	Close() error
+}
+
 func NewProgram(model Model, opts ...ProgramOption) *Program {
 	p := &Program{
 		model: model,
@@ -494,7 +499,9 @@ func (p *Program) watchSize(in *os.File, out chan<- Msg, done <-chan struct{}) {
 	}
 }
 
-func (p *Program) readInput(reader *input.Reader, out chan<- Msg, done <-chan struct{}) {
+const idleInputPollDelay = 10 * time.Millisecond
+
+func (p *Program) readInput(reader inputEventReader, out chan<- Msg, done <-chan struct{}) {
 	for {
 		select {
 		case <-done:
@@ -506,6 +513,11 @@ func (p *Program) readInput(reader *input.Reader, out chan<- Msg, done <-chan st
 			if err == io.EOF {
 				return
 			}
+			time.Sleep(idleInputPollDelay)
+			continue
+		}
+		if len(evs) == 0 {
+			time.Sleep(idleInputPollDelay)
 			continue
 		}
 		for _, ev := range evs {
