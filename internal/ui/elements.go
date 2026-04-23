@@ -360,7 +360,7 @@ func (s Surface) normalize(width, height int) Surface {
 	if height < 0 {
 		height = 0
 	}
-	lines := make([]string, 0, height)
+	out := BlankSurface(width, height)
 	for i := 0; i < height; i++ {
 		line := ""
 		if i < len(s.lines) {
@@ -369,13 +369,16 @@ func (s Surface) normalize(width, height int) Surface {
 		if delta := width - PlainWidth(line); delta > 0 {
 			line += strings.Repeat(" ", delta)
 		}
-		lines = append(lines, line)
+		out.WriteText(0, i, line, CellStyle{})
 	}
-	return Surface{lines: lines}
+	return out
 }
 
 func (s Surface) placeAt(x, y int, child Surface) Surface {
-	if s.isCellBuffer() && child.isCellBuffer() {
+	if s.isCellBuffer() {
+		if !child.isCellBuffer() {
+			child = child.normalize(child.Size().W, child.Size().H)
+		}
 		return s.blitAt(x, y, child)
 	}
 	baseLines := s.Lines()

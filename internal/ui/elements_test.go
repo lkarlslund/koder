@@ -81,3 +81,29 @@ func TestConstrainedClampsChildSize(t *testing.T) {
 		t.Fatalf("unexpected constrained render: %q", got)
 	}
 }
+
+func TestNormalizeConvertsPlainStringSurfaceToCells(t *testing.T) {
+	got := SurfaceFromString("abc\ndef").normalize(4, 2)
+
+	if got.SurfaceWidth() != 4 || got.SurfaceHeight() != 2 {
+		t.Fatalf("expected normalized surface size 4x2, got %dx%d", got.SurfaceWidth(), got.SurfaceHeight())
+	}
+	if text := got.SurfaceCellText(0, 0); text != "a" {
+		t.Fatalf("expected first cell text to survive normalization, got %q", text)
+	}
+	if text := got.SurfaceCellText(2, 1); text != "f" {
+		t.Fatalf("expected second row text to survive normalization, got %q", text)
+	}
+}
+
+func TestPlaceAtBlitsPlainStringChildOntoCellSurface(t *testing.T) {
+	base := BlankSurface(6, 2)
+	got := base.placeAt(1, 0, SurfaceFromString("abc"))
+
+	if text := got.SurfaceCellText(1, 0); text != "a" {
+		t.Fatalf("expected plain string child to blit into cell surface, got %q", text)
+	}
+	if text := got.SurfaceCellText(3, 0); text != "c" {
+		t.Fatalf("expected plain string child tail to blit into cell surface, got %q", text)
+	}
+}
