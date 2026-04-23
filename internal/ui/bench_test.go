@@ -1,0 +1,177 @@
+package ui
+
+import (
+	"fmt"
+	"strings"
+	"testing"
+
+	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/theme"
+)
+
+func benchmarkPalette() theme.Palette {
+	return theme.Default().Palette
+}
+
+func benchmarkContext() *Context {
+	return &Context{Palette: benchmarkPalette()}
+}
+
+func benchmarkTranscript(width, items int) Transcript {
+	palette := benchmarkPalette()
+	entries := make([]TranscriptItem, 0, items)
+	for i := 0; i < items; i++ {
+		var element Element
+		switch i % 4 {
+		case 0:
+			element = UserMessage{
+				Palette:     palette,
+				Body:        strings.Repeat("user text ", 8),
+				Stamp:       "12:34:56",
+				Width:       width / 2,
+				HalfBlocks:  true,
+				PromptGlyph: "┃",
+			}
+		case 1:
+			element = AssistantMessage{
+				Palette: palette,
+				Body:    strings.Repeat("assistant response body ", 12),
+				Stamp:   "12:34:57",
+				Width:   width,
+			}
+		case 2:
+			element = AssistantMessage{
+				Palette: palette,
+				Body:    strings.Repeat("tool narration and output summary ", 8),
+				Stamp:   "12:34:58",
+				Width:   width,
+			}
+		default:
+			element = ReasoningBlock{
+				Palette: palette,
+				Body:    strings.Repeat("reasoning line ", 14),
+				Width:   width,
+			}
+		}
+		entries = append(entries, TranscriptItem{Element: element, GapBefore: 2})
+	}
+	return Transcript{Items: entries}
+}
+
+func BenchmarkRenderElementTranscriptLarge(b *testing.B) {
+	ctx := benchmarkContext()
+	transcript := benchmarkTranscript(100, 120)
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		_ = RenderElement(ctx, transcript, 100, 0)
+	}
+}
+
+func BenchmarkRenderElementComposer(b *testing.B) {
+	ctx := benchmarkContext()
+	composer := Composer{
+		Palette:       benchmarkPalette(),
+		Width:         100,
+		HalfBlocks:    true,
+		PromptGlyph:   "┃",
+		Value:         "benchmark composer text",
+		ContentBefore: strings.Repeat("composed text ", 4),
+		ContentCursor: "x",
+		ContentAfter:  strings.Repeat(" trailing", 3),
+		CursorVisible: true,
+	}
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		_ = RenderElement(ctx, composer, 100, 3)
+	}
+}
+
+func BenchmarkRenderElementTableAndList(b *testing.B) {
+	ctx := benchmarkContext()
+	rows := make([]TableRow, 0, 40)
+	items := make([]ListItem, 0, 40)
+	for i := 0; i < 40; i++ {
+		rows = append(rows, TableRow{
+			ControlID: fmt.Sprintf("row-%d", i),
+			Cells:     []string{fmt.Sprintf("model-%02d-long-name", i), "provider", "img,pdf"},
+			Selected:  i == 12,
+			Focused:   i == 12,
+		})
+		items = append(items, ListItem{
+			ControlID: fmt.Sprintf("item-%d", i),
+			Primary:   fmt.Sprintf("title-%02d", i),
+			Secondary: "secondary description",
+			Tertiary:  "meta",
+		})
+	}
+	element := Column{Children: []Child{
+		Fixed(Table{
+			Columns: []TableColumn{
+				{Title: "Model", Width: 32},
+				{Title: "Owner", Width: 18},
+				{Title: "Caps", Width: 12},
+			},
+			Rows:       rows,
+			Width:      72,
+			ShowHeader: true,
+		}),
+		Fixed(Spacer{H: 1}),
+		Fixed(List{Items: items, Width: 72, Selected: 12, Focused: true}),
+	}}
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		_ = RenderElement(ctx, element, 72, 0)
+	}
+}
+
+func BenchmarkSurfaceNormalizeLarge(b *testing.B) {
+	surface := SurfaceFromString(strings.Repeat("0123456789abcdef", 16) + "\n" + strings.Repeat("line\n", 120))
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		_ = surface.normalize(96, 80)
+	}
+}
+
+func BenchmarkSurfacePlaceAtLarge(b *testing.B) {
+	base := BlankSurface(120, 60)
+	child := SurfaceFromString(strings.Repeat("overlay-content ", 4) + "\n" + strings.Repeat("more ", 8))
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		_ = base.placeAt(8, 10, child)
+	}
+}
+
+func BenchmarkButtonRowRender(b *testing.B) {
+	row := ButtonRow{
+		Buttons: []Button{
+			{Label: "Approve", Primary: true, Hotkey: 'a'},
+			{Label: "Permissions", Hotkey: 'p'},
+			{Label: "Deny", Hotkey: 'd'},
+		},
+		Index: 1,
+		Gap:   2,
+		Width: 64,
+		Align: HorizontalAlignRight,
+	}
+	palette := benchmarkPalette()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		_ = row.render(palette)
+	}
+}
+
+func BenchmarkToolRunCardRender(b *testing.B) {
+	run := ToolRun{
+		ID:       "grep-1",
+		Tool:     domain.ToolKindGrep,
+		Title:    "Search text",
+		Subtitle: "needle in internal (*.go)",
+		Status:   ToolRunStatusCompleted,
+		Output:   strings.Repeat("internal/tui/model.go:123:matching line output\n", 10),
+	}
+	palette := benchmarkPalette()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		_ = run.CardSurface(palette, 92, false)
+	}
+}
