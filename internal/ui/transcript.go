@@ -546,11 +546,15 @@ func (b ReasoningBlock) render() Surface {
 	return s
 }
 
-func WorkingIndicatorLine(indicator string) string {
+func WorkingIndicatorLine(indicator, status string) string {
 	if strings.TrimSpace(indicator) == "" {
 		return ""
 	}
-	return fmt.Sprintf("%s  Working ...", indicator)
+	status = strings.TrimSpace(status)
+	if status == "" {
+		status = "Working ..."
+	}
+	return fmt.Sprintf("%s  %s", indicator, status)
 }
 
 func renderHalfBlockSurface(width int, char string, palette theme.Palette) Surface {

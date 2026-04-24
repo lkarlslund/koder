@@ -3490,7 +3490,7 @@ func TestStatusEventKeepsTranscriptSpinnerActive(t *testing.T) {
 	if !m.busy.transcriptActive() {
 		t.Fatal("expected transcript spinner to remain active for status updates during busy work")
 	}
-	if got := m.renderTranscriptActivity(); !strings.Contains(got, "Working ...") || !strings.Contains(got, ui.SpinnerFrame(config.Default().UI.Spinner, 0)) {
+	if got := m.renderTranscriptActivity(); !strings.Contains(got, "Compacting session...") || !strings.Contains(got, ui.SpinnerFrame(config.Default().UI.Spinner, 0)) {
 		t.Fatalf("expected transcript activity to still render, got %q", got)
 	}
 }
@@ -3650,6 +3650,22 @@ func TestRenderMessagePartsShowsNonUsageSystemNoticeWhenEnabled(t *testing.T) {
 
 	if !strings.Contains(got, "System") || !strings.Contains(got, "provider warning") || !strings.Contains(got, "retry suggested") {
 		t.Fatalf("expected visible non-usage system notice, got %q", got)
+	}
+	if !strings.Contains(got, "final answer") {
+		t.Fatalf("expected text to remain visible, got %q", got)
+	}
+}
+
+func TestRenderMessagePartsShowsEventNotice(t *testing.T) {
+	m := Model{}
+
+	got := m.renderMessageParts([]domain.Part{
+		{Kind: domain.PartKindText, Body: "final answer"},
+		{Kind: domain.PartKindEventNotice, Body: "Error: chat status 429"},
+	})
+
+	if !strings.Contains(got, "Error") || !strings.Contains(got, "chat status 429") {
+		t.Fatalf("expected visible event notice, got %q", got)
 	}
 	if !strings.Contains(got, "final answer") {
 		t.Fatalf("expected text to remain visible, got %q", got)

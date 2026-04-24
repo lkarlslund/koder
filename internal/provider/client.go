@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -18,6 +19,48 @@ import (
 	"github.com/lkarlslund/koder/internal/debugsrv"
 	"github.com/lkarlslund/koder/internal/domain"
 )
+
+type APIError struct {
+	Operation  string
+	StatusCode int
+	Body       string
+	RetryAfter time.Duration
+}
+
+func (e *APIError) Error() string {
+	if e == nil {
+		return ""
+	}
+	body := strings.TrimSpace(e.Body)
+	if body == "" {
+		return fmt.Sprintf("%s status %d", e.Operation, e.StatusCode)
+	}
+	return fmt.Sprintf("%s status %d: %s", e.Operation, e.StatusCode, body)
+}
+
+func parseRetryAfter(value string, now time.Time) time.Duration {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return 0
+	}
+	if secs, err := strconv.Atoi(trimmed); err == nil {
+		if secs <= 0 {
+			return 0
+		}
+		return time.Duration(secs) * time.Second
+	}
+	when, err := http.ParseTime(trimmed)
+	if err != nil {
+		return 0
+	}
+	if now.IsZero() {
+		now = time.Now()
+	}
+	if when.Before(now) {
+		return 0
+	}
+	return when.Sub(now)
+}
 
 type Message struct {
 	Role         domain.MessageRole `json:"role"`
@@ -221,7 +264,12 @@ func (c *Client) ListModels(ctx context.Context) ([]domain.Model, error) {
 
 	if resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
-		return nil, fmt.Errorf("list models status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		return nil, &APIError{
+			Operation:  "list models",
+			StatusCode: resp.StatusCode,
+			Body:       strings.TrimSpace(string(body)),
+			RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After"), time.Now()),
+		}
 	}
 
 	var payload modelsResponse
@@ -271,7 +319,12 @@ func (c *Client) propsRequest(ctx context.Context, path string) (propsResponse, 
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
-		return propsResponse{}, fmt.Errorf("props status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		return propsResponse{}, &APIError{
+			Operation:  "props",
+			StatusCode: resp.StatusCode,
+			Body:       strings.TrimSpace(string(body)),
+			RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After"), time.Now()),
+		}
 	}
 	var payload propsResponse
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
@@ -314,7 +367,12 @@ func (c *Client) CompleteChat(ctx context.Context, input ChatRequest) (ChatRespo
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
-		return ChatResponse{}, fmt.Errorf("chat status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		return ChatResponse{}, &APIError{
+			Operation:  "chat",
+			StatusCode: resp.StatusCode,
+			Body:       strings.TrimSpace(string(body)),
+			RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After"), time.Now()),
+		}
 	}
 
 	var payload chatChunk
@@ -355,7 +413,12 @@ func (c *Client) StreamChat(ctx context.Context, input ChatRequest) (<-chan doma
 	if resp.StatusCode >= 300 {
 		defer resp.Body.Close()
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
-		return nil, fmt.Errorf("chat status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		return nil, &APIError{
+			Operation:  "chat",
+			StatusCode: resp.StatusCode,
+			Body:       strings.TrimSpace(string(body)),
+			RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After"), time.Now()),
+		}
 	}
 
 	events := make(chan domain.Event)

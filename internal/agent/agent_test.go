@@ -977,8 +977,8 @@ func TestRunPromptPersistsAssistantErrorOnBackendFailure(t *testing.T) {
 		t.Fatalf("expected assistant error message, got %s", last.Role)
 	}
 	errorParts := parts[last.ID]
-	if len(errorParts) != 1 || errorParts[0].Kind != domain.PartKindText {
-		t.Fatalf("expected one assistant text part, got %#v", errorParts)
+	if len(errorParts) != 1 || errorParts[0].Kind != domain.PartKindEventNotice {
+		t.Fatalf("expected one assistant event notice part, got %#v", errorParts)
 	}
 	if !strings.Contains(errorParts[0].Body, "Error:") {
 		t.Fatalf("expected stored error prefix, got %q", errorParts[0].Body)
@@ -1580,6 +1580,221 @@ func TestModelTaskPersistsTranscriptUpdate(t *testing.T) {
 	}
 	if got := parts[messages[0].ID][0].Body; got != "write docs" {
 		t.Fatalf("unexpected task update body: %q", got)
+	}
+}
+
+func TestRunPromptRetriesRateLimitAndCompletes(t *testing.T) {
+	t.Parallel()
+
+	var requests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests++
+		switch requests {
+		case 1:
+			w.Header().Set("Retry-After", "2")
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte(`{"error":{"message":"rate limit"}}`))
+		case 2:
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"done"}}],"usage":{"total_tokens":1}}`))
+		default:
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ignored title"}}],"usage":{"total_tokens":1}}`))
+		}
+	}))
+	defer server.Close()
+
+	cfg := testConfig(t)
+	cfg.Providers = map[string]config.Provider{
+		"test": {
+			BaseURL: server.URL + "/v1",
+			Timeout: time.Second,
+		},
+	}
+	cfg.DefaultProvider = "test"
+	cfg.DefaultModel = "test-model"
+
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	engine := New(cfg, st, tools.NewRegistry(t.TempDir()), nil, t.TempDir())
+	var waited []time.Duration
+	engine.retryPause = func(_ context.Context, delay time.Duration) error {
+		waited = append(waited, delay)
+		return nil
+	}
+	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	events, err := engine.RunPrompt(context.Background(), session, "hello")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var sawRetryStatus bool
+	for evt := range events {
+		if evt.Kind == domain.EventKindStatus && strings.Contains(evt.Text, "rate limit hit") {
+			sawRetryStatus = true
+		}
+		if evt.Kind == domain.EventKindError {
+			t.Fatalf("expected retry to succeed, got %#v", evt)
+		}
+	}
+	if !sawRetryStatus {
+		t.Fatal("expected retry status event")
+	}
+	if len(waited) != 1 || waited[0] != 2*time.Second {
+		t.Fatalf("expected single retry wait of 2s, got %#v", waited)
+	}
+
+	messages, parts, err := st.PartsForSession(context.Background(), session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	last := messages[len(messages)-1]
+	if last.Role != domain.MessageRoleAssistant {
+		t.Fatalf("expected assistant message, got %#v", last)
+	}
+	got := parts[last.ID]
+	if len(got) == 0 || got[0].Kind != domain.PartKindText || !strings.Contains(got[0].Body, "done") {
+		t.Fatalf("expected final assistant text after retry, got %#v", got)
+	}
+}
+
+func TestRunPromptPersistsEventNoticeWhenRetriesExhausted(t *testing.T) {
+	t.Parallel()
+
+	var requests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests++
+		w.Header().Set("Retry-After", "1")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"error":{"message":"rate limit"}}`))
+	}))
+	defer server.Close()
+
+	cfg := testConfig(t)
+	cfg.Providers = map[string]config.Provider{
+		"test": {
+			BaseURL: server.URL + "/v1",
+			Timeout: time.Second,
+		},
+	}
+	cfg.DefaultProvider = "test"
+	cfg.DefaultModel = "test-model"
+
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	engine := New(cfg, st, tools.NewRegistry(t.TempDir()), nil, t.TempDir())
+	engine.retryPause = func(_ context.Context, _ time.Duration) error { return nil }
+	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	events, err := engine.RunPrompt(context.Background(), session, "hello")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var sawError bool
+	for evt := range events {
+		if evt.Kind == domain.EventKindError {
+			sawError = true
+		}
+	}
+	if !sawError {
+		t.Fatal("expected terminal error event")
+	}
+	if requests != maxRateLimitRetries+1 {
+		t.Fatalf("expected %d attempts, got %d", maxRateLimitRetries+1, requests)
+	}
+
+	messages, parts, err := st.PartsForSession(context.Background(), session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	last := messages[len(messages)-1]
+	got := parts[last.ID]
+	if len(got) != 1 || got[0].Kind != domain.PartKindEventNotice {
+		t.Fatalf("expected persisted event notice, got %#v", got)
+	}
+	if !strings.Contains(got[0].Body, "Error: chat status 429") {
+		t.Fatalf("expected persisted provider failure, got %#v", got[0])
+	}
+}
+
+func TestRunPromptPersistsInterruptedEventNoticeDuringRetryWait(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Retry-After", "9")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"error":{"message":"rate limit"}}`))
+	}))
+	defer server.Close()
+
+	cfg := testConfig(t)
+	cfg.Providers = map[string]config.Provider{
+		"test": {
+			BaseURL: server.URL + "/v1",
+			Timeout: time.Second,
+		},
+	}
+	cfg.DefaultProvider = "test"
+	cfg.DefaultModel = "test-model"
+
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	engine := New(cfg, st, tools.NewRegistry(t.TempDir()), nil, t.TempDir())
+	ctx, cancel := context.WithCancel(context.Background())
+	engine.retryPause = func(ctx context.Context, _ time.Duration) error {
+		cancel()
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	events, err := engine.RunPrompt(ctx, session, "hello")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var sawInterrupted bool
+	for evt := range events {
+		if evt.Kind == domain.EventKindStatus && evt.Text == "Interrupted" {
+			sawInterrupted = true
+		}
+		if evt.Kind == domain.EventKindError {
+			t.Fatalf("expected interruption status instead of error, got %#v", evt)
+		}
+	}
+	if !sawInterrupted {
+		t.Fatal("expected interrupted status event")
+	}
+
+	messages, parts, err := st.PartsForSession(context.Background(), session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	last := messages[len(messages)-1]
+	got := parts[last.ID]
+	if len(got) != 1 || got[0].Kind != domain.PartKindEventNotice || got[0].Body != "Interrupted" {
+		t.Fatalf("expected persisted interruption notice, got %#v", got)
 	}
 }
 

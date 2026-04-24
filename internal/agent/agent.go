@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/lkarlslund/koder/internal/agents"
 	"github.com/lkarlslund/koder/internal/attachment"
@@ -29,28 +30,35 @@ import (
 )
 
 type Engine struct {
-	cfg      config.Config
-	store    *store.Store
-	registry *tools.Registry
-	debug    *debugsrv.Recorder
-	files    *attachment.Manager
-	caps     *provider.CapabilityStore
-	agents   *agents.Manager
-	workdir  string
+	cfg        config.Config
+	store      *store.Store
+	registry   *tools.Registry
+	debug      *debugsrv.Recorder
+	files      *attachment.Manager
+	caps       *provider.CapabilityStore
+	agents     *agents.Manager
+	workdir    string
+	retryPause func(context.Context, time.Duration) error
 }
 
 var patchPathPattern = regexp.MustCompile(`(?m)^(?:\+\+\+|---)\s+(?:a/|b/)?([^\t\n]+)`)
 
+const (
+	maxRateLimitRetries       = 3
+	defaultRateLimitRetryWait = 5 * time.Second
+)
+
 func New(cfg config.Config, st *store.Store, registry *tools.Registry, debug *debugsrv.Recorder, workdir string) *Engine {
 	return &Engine{
-		cfg:      cfg,
-		store:    st,
-		registry: registry,
-		debug:    debug,
-		files:    attachment.NewManager(cfg.StateDir()),
-		caps:     provider.NewCapabilityStore(cfg.StateDir()),
-		agents:   agents.NewManager(cfg.StateDir(), filepath.Join(filepath.Dir(cfg.Path()), "AGENTS.md")),
-		workdir:  workdir,
+		cfg:        cfg,
+		store:      st,
+		registry:   registry,
+		debug:      debug,
+		files:      attachment.NewManager(cfg.StateDir()),
+		caps:       provider.NewCapabilityStore(cfg.StateDir()),
+		agents:     agents.NewManager(cfg.StateDir(), filepath.Join(filepath.Dir(cfg.Path()), "AGENTS.md")),
+		workdir:    workdir,
+		retryPause: waitForRetry,
 	}
 }
 
@@ -386,13 +394,14 @@ func (e *Engine) continueModelTurn(ctx context.Context, session domain.Session, 
 		}
 		transient = nil
 
-		resp, completeErr := client.CompleteChat(ctx, provider.ChatRequest{
+		req := provider.ChatRequest{
 			Model:      session.ModelID,
 			Messages:   messages,
 			Tools:      tools.Definitions(tools.Runtime{Workdir: e.workdir}),
 			ToolChoice: "auto",
 			Stream:     false,
-		})
+		}
+		resp, completeErr := e.completeChatWithRetry(ctx, session.ID, client, out, req)
 		if completeErr != nil {
 			return completeErr
 		}
@@ -873,11 +882,10 @@ func (e *Engine) recordAssistantError(ctx context.Context, sessionID int64, err 
 		return
 	}
 	e.recordLifecycle(sessionID, "assistant_error", err.Error(), nil)
-	msg, addErr := e.store.AddMessage(ctx, sessionID, domain.MessageRoleAssistant, errorSummary(err))
-	if addErr != nil {
-		return
-	}
-	_, _ = e.store.AddPart(ctx, msg.ID, domain.PartKindText, errorSummary(err), "")
+	e.persistTranscriptNotice(ctx, sessionID, errorSummary(err), transcriptNotice{
+		Kind:     "model_error",
+		Severity: "error",
+	})
 }
 
 func (e *Engine) recordLifecycle(sessionID int64, kind, text string, meta map[string]string) {
@@ -889,6 +897,10 @@ func (e *Engine) recordLifecycle(sessionID int64, kind, text string, meta map[st
 
 func (e *Engine) emitInterrupted(out chan<- domain.Event, sessionID int64) {
 	e.recordLifecycle(sessionID, "interrupted", "Interrupted", nil)
+	e.persistTranscriptNotice(context.Background(), sessionID, "Interrupted", transcriptNotice{
+		Kind:     "interrupted",
+		Severity: "warning",
+	})
 	out <- domain.Event{Kind: domain.EventKindStatus, Text: "Interrupted"}
 }
 
@@ -898,6 +910,81 @@ func interruptedErr(err error) bool {
 
 func errorSummary(err error) string {
 	return "Error: " + strings.TrimSpace(err.Error())
+}
+
+type transcriptNotice struct {
+	Kind     string `json:"kind,omitempty"`
+	Severity string `json:"severity,omitempty"`
+}
+
+func (e *Engine) persistTranscriptNotice(ctx context.Context, sessionID int64, body string, meta transcriptNotice) {
+	if sessionID == 0 || e.store == nil {
+		return
+	}
+	body = strings.TrimSpace(body)
+	if body == "" {
+		return
+	}
+	msg, err := e.store.AddMessage(ctx, sessionID, domain.MessageRoleAssistant, body)
+	if err != nil {
+		return
+	}
+	raw, _ := json.Marshal(meta)
+	_, _ = e.store.AddPart(ctx, msg.ID, domain.PartKindEventNotice, body, string(raw))
+}
+
+func waitForRetry(ctx context.Context, delay time.Duration) error {
+	if delay <= 0 {
+		delay = defaultRateLimitRetryWait
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+func (e *Engine) completeChatWithRetry(ctx context.Context, sessionID int64, client *provider.Client, out chan<- domain.Event, req provider.ChatRequest) (provider.ChatResponse, error) {
+	for attempt := 0; ; attempt++ {
+		resp, err := client.CompleteChat(ctx, req)
+		if err == nil {
+			return resp, nil
+		}
+		var apiErr *provider.APIError
+		if !errors.As(err, &apiErr) || apiErr.StatusCode != 429 || attempt >= maxRateLimitRetries {
+			return provider.ChatResponse{}, err
+		}
+		delay := apiErr.RetryAfter
+		if delay <= 0 {
+			delay = defaultRateLimitRetryWait
+		}
+		retryNumber := attempt + 1
+		status := formatRateLimitRetryStatus(delay, retryNumber)
+		e.recordLifecycle(sessionID, "rate_limit_retry", status, map[string]string{
+			"retry":       strconv.Itoa(retryNumber),
+			"retry_after": delay.String(),
+		})
+		if out != nil {
+			out <- domain.Event{Kind: domain.EventKindStatus, Text: status}
+		}
+		if err := e.retryPause(ctx, delay); err != nil {
+			return provider.ChatResponse{}, err
+		}
+	}
+}
+
+func formatRateLimitRetryStatus(delay time.Duration, retryNumber int) string {
+	if delay <= 0 {
+		delay = defaultRateLimitRetryWait
+	}
+	delay = delay.Round(time.Second)
+	if delay <= 0 {
+		delay = time.Second
+	}
+	return fmt.Sprintf("Working (rate limit hit, retrying in %s, retry %d)", delay, retryNumber)
 }
 
 func transientTurnMessages(note string, continuePrompt string) []provider.Message {
@@ -1063,6 +1150,9 @@ func (e *Engine) conversationMessagesForStoredMessage(msg domain.Message, parts 
 	}
 	content := stringifyParts(parts)
 	if strings.TrimSpace(content) == "" {
+		if msg.Role == domain.MessageRoleAssistant && assistantSummaryExcludedFromModel(parts) {
+			return nil, nil
+		}
 		content = msg.Summary
 	}
 	if strings.TrimSpace(content) == "" {
@@ -1073,6 +1163,21 @@ func (e *Engine) conversationMessagesForStoredMessage(msg domain.Message, parts 
 		role = domain.MessageRoleUser
 	}
 	return []provider.Message{{Role: role, Content: content}}, nil
+}
+
+func assistantSummaryExcludedFromModel(parts []domain.Part) bool {
+	if len(parts) == 0 {
+		return false
+	}
+	for _, part := range parts {
+		switch part.Kind {
+		case domain.PartKindSystemNotice, domain.PartKindEventNotice:
+			continue
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func (e *Engine) userMessageWithContext(parts []domain.Part) (provider.Message, bool, error) {
@@ -1189,6 +1294,8 @@ func structuredAssistantMessage(parts []domain.Part) (provider.Message, bool) {
 			if strings.TrimSpace(part.Body) != "" && strings.TrimSpace(part.Body) != "usage" {
 				textChunks = append(textChunks, strings.TrimSpace(part.Body))
 			}
+		case domain.PartKindEventNotice:
+			continue
 		}
 	}
 	if len(toolCalls) == 0 {
@@ -1275,7 +1382,7 @@ func stringifyParts(parts []domain.Part) string {
 				body = formatted
 			}
 			chunks = append(chunks, "Plan update:\n"+body)
-		case domain.PartKindApprovalRequest, domain.PartKindSystemNotice:
+		case domain.PartKindApprovalRequest, domain.PartKindSystemNotice, domain.PartKindEventNotice:
 			continue
 		default:
 			chunks = append(chunks, part.Body)

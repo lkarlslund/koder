@@ -1809,7 +1809,7 @@ func (m *Model) renderTranscriptActivityElement() ui.Element {
 		return nil
 	}
 	return ui.ActivityIndicator{
-		Indicator: ui.WorkingIndicatorLine(m.workingIndicator()),
+		Indicator: ui.WorkingIndicatorLine(m.workingIndicator(), m.busy.statusOrDefault("Working ...")),
 		Palette:   m.palette,
 	}
 }
@@ -1992,6 +1992,13 @@ func (m *Model) renderMessageParts(parts []domain.Part) string {
 				}
 			}
 			continue
+		case domain.PartKindEventNotice:
+			flushText()
+			flushReasoning()
+			if block := m.renderEventNoticeBlock(part); block != "" {
+				systemBlocks = append(systemBlocks, block)
+			}
+			continue
 		case domain.PartKindToolCall, domain.PartKindToolOutput, domain.PartKindDiff, domain.PartKindApprovalRequest:
 			flushText()
 			flushReasoning()
@@ -2061,6 +2068,11 @@ func (m *Model) renderStyledMessageParts(parts []domain.Part) []ui.StyledSpan {
 				if block := m.renderStyledSystemNoticeBlock(part); len(block) > 0 {
 					blocks = append(blocks, block)
 				}
+			}
+		case domain.PartKindEventNotice:
+			flushText()
+			if block := m.renderStyledEventNoticeBlock(part); len(block) > 0 {
+				blocks = append(blocks, block)
 			}
 		case domain.PartKindReasoning, domain.PartKindToolCall, domain.PartKindToolOutput, domain.PartKindDiff, domain.PartKindApprovalRequest, domain.PartKindReference:
 			flushText()
@@ -2136,6 +2148,62 @@ func (m *Model) renderStyledSystemNoticeBlock(part domain.Part) []ui.StyledSpan 
 		body.WriteString("\n```")
 	}
 	return m.renderer.RenderStyled(body.String())
+}
+
+type eventNoticeMeta struct {
+	Kind     string `json:"kind,omitempty"`
+	Severity string `json:"severity,omitempty"`
+}
+
+func (m *Model) renderEventNoticeBlock(part domain.Part) string {
+	title, body := eventNoticePresentation(part)
+	if body == "" {
+		return ""
+	}
+	var text strings.Builder
+	text.WriteString("### ")
+	text.WriteString(title)
+	if body != title {
+		text.WriteString("\n\n")
+		text.WriteString(body)
+	}
+	return m.renderer.RenderPlain(text.String())
+}
+
+func (m *Model) renderStyledEventNoticeBlock(part domain.Part) []ui.StyledSpan {
+	title, body := eventNoticePresentation(part)
+	if body == "" {
+		return nil
+	}
+	var text strings.Builder
+	text.WriteString("### ")
+	text.WriteString(title)
+	if body != title {
+		text.WriteString("\n\n")
+		text.WriteString(body)
+	}
+	return m.renderer.RenderStyled(text.String())
+}
+
+func eventNoticePresentation(part domain.Part) (string, string) {
+	body := strings.TrimSpace(part.Body)
+	if body == "" {
+		return "", ""
+	}
+	var meta eventNoticeMeta
+	_ = json.Unmarshal([]byte(part.MetaJSON), &meta)
+	switch strings.TrimSpace(meta.Kind) {
+	case "interrupted":
+		return "Interrupted", body
+	}
+	switch strings.TrimSpace(meta.Severity) {
+	case "error":
+		return "Error", body
+	case "warning":
+		return "Interrupted", body
+	default:
+		return "Notice", body
+	}
 }
 
 func (m *Model) renderUserMessageParts(parts []domain.Part) string {

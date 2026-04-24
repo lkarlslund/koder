@@ -27,6 +27,7 @@ const (
 	PartKindTaskUpdate      PartKind = "task_update"
 	PartKindPlanUpdate      PartKind = "plan_update"
 	PartKindSystemNotice    PartKind = "system_notice"
+	PartKindEventNotice     PartKind = "event_notice"
 )
 
 type ToolKind string

@@ -272,7 +272,7 @@ func sidebarWidgetHash(m *Model, bounds ui.Rect) uint64 {
 func activityWidgetHash(m *Model, bounds ui.Rect) uint64 {
 	line := ""
 	if m.busy.transcriptActive() {
-		line = ui.WorkingIndicatorLine(m.workingIndicator())
+		line = ui.WorkingIndicatorLine(m.workingIndicator(), m.busy.statusOrDefault("Working ..."))
 	}
 	return hashStrings(
 		strconv.Itoa(bounds.W),

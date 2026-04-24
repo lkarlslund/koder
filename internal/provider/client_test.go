@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -181,6 +182,45 @@ func TestCompleteChatToolCalls(t *testing.T) {
 	}
 	if resp.ToolCalls[0].ID != "call_1" || resp.ToolCalls[0].Function.Name != "bash" {
 		t.Fatalf("unexpected tool call: %#v", resp.ToolCalls[0])
+	}
+}
+
+func TestCompleteChatReturnsAPIErrorWithRetryAfter(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Retry-After", "7")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"error":{"message":"rate limit"}}`))
+	}))
+	defer server.Close()
+
+	client, err := New("test", config.Provider{
+		BaseURL: server.URL,
+		Timeout: time.Second,
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = client.CompleteChat(context.Background(), ChatRequest{
+		Model:  "test",
+		Stream: false,
+	})
+	if err == nil {
+		t.Fatal("expected API error")
+	}
+
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("expected APIError, got %T", err)
+	}
+	if apiErr.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("expected 429 status, got %d", apiErr.StatusCode)
+	}
+	if apiErr.RetryAfter != 7*time.Second {
+		t.Fatalf("expected retry-after 7s, got %s", apiErr.RetryAfter)
+	}
+	if !strings.Contains(apiErr.Error(), "chat status 429") {
+		t.Fatalf("expected formatted error message, got %q", apiErr.Error())
 	}
 }
 
