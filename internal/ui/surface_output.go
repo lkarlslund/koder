@@ -22,6 +22,9 @@ func applyCellStyle(style CellStyle, text string) string {
 	if style.Underline {
 		params = append(params, "4")
 	}
+	if style.Strikethrough {
+		params = append(params, "9")
+	}
 	if style.FG.Valid {
 		params = append(params, "38", "2",
 			strconv.Itoa(int(style.FG.R)),
@@ -40,6 +43,14 @@ func applyCellStyle(style CellStyle, text string) string {
 		return text
 	}
 	return "\x1b[" + strings.Join(params, ";") + "m" + text + "\x1b[0m"
+}
+
+func RenderStyledTextANSI(spans []StyledSpan) string {
+	var b strings.Builder
+	for _, span := range spans {
+		b.WriteString(applyCellStyle(span.Style, span.Text))
+	}
+	return b.String()
 }
 
 func serializeSurfaceRow(s Surface, y int) string {

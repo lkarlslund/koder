@@ -202,15 +202,16 @@ func cellColor(value lipgloss.Color) CellColor {
 }
 
 type CellStyle struct {
-	FG        CellColor
-	BG        CellColor
-	Bold      bool
-	Italic    bool
-	Underline bool
+	FG            CellColor
+	BG            CellColor
+	Bold          bool
+	Italic        bool
+	Underline     bool
+	Strikethrough bool
 }
 
 func (s CellStyle) isZero() bool {
-	return !s.FG.Valid && !s.BG.Valid && !s.Bold && !s.Italic && !s.Underline
+	return !s.FG.Valid && !s.BG.Valid && !s.Bold && !s.Italic && !s.Underline && !s.Strikethrough
 }
 
 func (s CellStyle) equal(other CellStyle) bool {
@@ -218,7 +219,23 @@ func (s CellStyle) equal(other CellStyle) bool {
 		s.BG == other.BG &&
 		s.Bold == other.Bold &&
 		s.Italic == other.Italic &&
-		s.Underline == other.Underline
+		s.Underline == other.Underline &&
+		s.Strikethrough == other.Strikethrough
+}
+
+func (s CellStyle) Merge(overlay CellStyle) CellStyle {
+	out := s
+	if overlay.FG.Valid {
+		out.FG = overlay.FG
+	}
+	if overlay.BG.Valid {
+		out.BG = overlay.BG
+	}
+	out.Bold = out.Bold || overlay.Bold
+	out.Italic = out.Italic || overlay.Italic
+	out.Underline = out.Underline || overlay.Underline
+	out.Strikethrough = out.Strikethrough || overlay.Strikethrough
+	return out
 }
 
 type Cell struct {
@@ -336,6 +353,10 @@ func (s Surface) SurfaceCellItalic(x, y int) bool {
 
 func (s Surface) SurfaceCellUnderline(x, y int) bool {
 	return s.cellAt(x, y).Style.Underline
+}
+
+func (s Surface) SurfaceCellStrikethrough(x, y int) bool {
+	return s.cellAt(x, y).Style.Strikethrough
 }
 
 func (s Surface) normalize(width, height int) Surface {
@@ -488,6 +509,36 @@ func (s *Surface) WriteText(x, y int, text string, style CellStyle) {
 			}
 		}
 		col += width
+	}
+}
+
+func (s *Surface) WriteStyledSpans(x, y int, spans []StyledSpan, base CellStyle) {
+	if !s.isCellBuffer() || y < 0 || y >= s.h {
+		return
+	}
+	col := x
+	for _, span := range spans {
+		if span.Text == "" {
+			continue
+		}
+		style := base.Merge(span.Style)
+		for _, r := range span.Text {
+			grapheme := string(r)
+			width := PlainWidth(grapheme)
+			if width <= 0 {
+				continue
+			}
+			if col >= s.w {
+				return
+			}
+			if col >= 0 {
+				s.setCell(col, y, Cell{Text: grapheme, Width: width, Style: style})
+				for extra := 1; extra < width && col+extra < s.w; extra++ {
+					s.setCell(col+extra, y, Cell{Continuation: true, Style: style})
+				}
+			}
+			col += width
+		}
 	}
 }
 

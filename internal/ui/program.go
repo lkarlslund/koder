@@ -279,7 +279,8 @@ func surfaceCellsEqual(previous, current SurfaceView, x, y int) bool {
 		surfaceCellBGState(previous, x, y) == surfaceCellBGState(current, x, y) &&
 		surfaceCellBold(previous, x, y) == surfaceCellBold(current, x, y) &&
 		surfaceCellItalic(previous, x, y) == surfaceCellItalic(current, x, y) &&
-		surfaceCellUnderline(previous, x, y) == surfaceCellUnderline(current, x, y)
+		surfaceCellUnderline(previous, x, y) == surfaceCellUnderline(current, x, y) &&
+		surfaceCellStrikethrough(previous, x, y) == surfaceCellStrikethrough(current, x, y)
 }
 
 func serializeSurfaceViewRow(surface SurfaceView, y int) string {
@@ -306,6 +307,7 @@ func serializeSurfaceViewRow(surface SurfaceView, y int) string {
 			bold:      surfaceCellBold(surface, x, y),
 			italic:    surfaceCellItalic(surface, x, y),
 			underline: surfaceCellUnderline(surface, x, y),
+			strike:    surfaceCellStrikethrough(surface, x, y),
 		}
 		text := surfaceCellText(surface, x, y)
 		if text == "" {
@@ -327,6 +329,7 @@ type styleState struct {
 	bold      bool
 	italic    bool
 	underline bool
+	strike    bool
 }
 
 type rgbState struct {
@@ -349,6 +352,9 @@ func applyStyle(style styleState, text string) string {
 	}
 	if style.underline {
 		params = append(params, "4")
+	}
+	if style.strike {
+		params = append(params, "9")
 	}
 	if style.fg.valid {
 		params = append(params, "38", "2",
@@ -426,6 +432,13 @@ func surfaceCellUnderline(surface SurfaceView, x, y int) bool {
 		return false
 	}
 	return surface.SurfaceCellUnderline(x, y)
+}
+
+func surfaceCellStrikethrough(surface SurfaceView, x, y int) bool {
+	if surface == nil || y < 0 || y >= surface.SurfaceHeight() || x < 0 || x >= surface.SurfaceWidth() {
+		return false
+	}
+	return surface.SurfaceCellStrikethrough(x, y)
 }
 
 func (p *Program) setWindowTitle(out io.Writer, title string) {

@@ -155,6 +155,7 @@ type fakeCell struct {
 	bold         bool
 	italic       bool
 	underline    bool
+	strike       bool
 }
 
 type fakeInputReader struct {
@@ -201,3 +202,6 @@ func (f fakeSurface) SurfaceCellBG(x, y int) (uint8, uint8, uint8, bool) {
 func (f fakeSurface) SurfaceCellBold(x, y int) bool      { return f.cells[y*f.w+x].bold }
 func (f fakeSurface) SurfaceCellItalic(x, y int) bool    { return f.cells[y*f.w+x].italic }
 func (f fakeSurface) SurfaceCellUnderline(x, y int) bool { return f.cells[y*f.w+x].underline }
+func (f fakeSurface) SurfaceCellStrikethrough(x, y int) bool {
+	return f.cells[y*f.w+x].strike
+}

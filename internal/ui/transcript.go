@@ -462,10 +462,12 @@ func UserMessageWidth(lines []string) int {
 }
 
 type AssistantMessage struct {
-	Body    string
-	Stamp   string
-	Width   int
-	Palette theme.Palette
+	Body       string
+	StyledBody []StyledSpan
+	BaseStyle  CellStyle
+	Stamp      string
+	Width      int
+	Palette    theme.Palette
 }
 
 func (m AssistantMessage) Measure(_ *Context, constraints Constraints) Size {
@@ -477,30 +479,31 @@ func (m AssistantMessage) Render(_ *Context, bounds Rect) Surface {
 }
 
 func (m AssistantMessage) render() Surface {
-	lines := make([]struct {
-		text  string
-		style CellStyle
-	}, 0, 1)
+	lines := make([][]StyledSpan, 0, 1)
 	if m.Stamp != "" {
-		lines = append(lines, struct {
-			text  string
-			style CellStyle
-		}{text: m.Stamp, style: CellStyle{FG: cellColor(m.Palette.AssistantTimestampText)}})
+		lines = append(lines, []StyledSpan{{
+			Text:  m.Stamp,
+			Style: CellStyle{FG: cellColor(m.Palette.AssistantTimestampText)},
+		}})
 	}
-	bodyStyle := CellStyle{FG: cellColor(m.Palette.MarkdownText)}
-	for _, line := range wrapStyledLines(strings.TrimSpace(m.Body), m.Width) {
-		lines = append(lines, struct {
-			text  string
-			style CellStyle
-		}{text: line, style: bodyStyle})
+	body := m.StyledBody
+	if len(body) == 0 {
+		body = []StyledSpan{{Text: strings.TrimSpace(m.Body)}}
+	}
+	baseStyle := m.BaseStyle
+	if baseStyle.isZero() {
+		baseStyle = CellStyle{FG: cellColor(m.Palette.MarkdownText)}
+	}
+	for _, line := range WrapStyledText(body, m.Width) {
+		lines = append(lines, line)
 	}
 	width := 0
 	for _, line := range lines {
-		width = maxInt(width, PlainWidth(line.text))
+		width = maxInt(width, StyledTextWidth(line))
 	}
 	s := BlankSurface(width, len(lines))
 	for y, line := range lines {
-		s.WriteText(0, y, line.text, line.style)
+		s.WriteStyledSpans(0, y, line, baseStyle)
 	}
 	return s
 }

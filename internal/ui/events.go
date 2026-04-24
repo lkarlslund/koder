@@ -25,6 +25,7 @@ type SurfaceView interface {
 	SurfaceCellBold(x, y int) bool
 	SurfaceCellItalic(x, y int) bool
 	SurfaceCellUnderline(x, y int) bool
+	SurfaceCellStrikethrough(x, y int) bool
 }
 
 type Cmd func() Msg

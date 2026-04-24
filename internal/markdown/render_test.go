@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/lkarlslund/koder/internal/theme"
 )
 
@@ -13,7 +14,7 @@ func TestRenderFormatsHeadingsAndLists(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	got := renderer.Render("# Title\n\n## Subtitle\n\n- first\n1. second")
+	got := ansi.Strip(renderer.Render("# Title\n\n## Subtitle\n\n- first\n1. second"))
 
 	if !strings.Contains(got, "Title") {
 		t.Fatalf("expected heading text, got %q", got)
@@ -35,7 +36,7 @@ func TestRenderKeepsConsecutiveBulletItemsTight(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	got := renderer.Render("- first\n- second\n- third")
+	got := ansi.Strip(renderer.Render("- first\n- second\n- third"))
 
 	if strings.Contains(got, "\n\n") {
 		t.Fatalf("expected no blank lines between bullet items, got %q", got)
@@ -51,7 +52,7 @@ func TestRenderKeepsConsecutiveOrderedItemsTight(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	got := renderer.Render("1. first\n2. second\n3. third")
+	got := ansi.Strip(renderer.Render("1. first\n2. second\n3. third"))
 
 	if strings.Contains(got, "\n\n") {
 		t.Fatalf("expected no blank lines between ordered items, got %q", got)
@@ -67,7 +68,7 @@ func TestRenderFormatsFencedCodeBlock(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	got := renderer.Render("```go\nfmt.Println(\"hi\")\n```")
+	got := ansi.Strip(renderer.Render("```go\nfmt.Println(\"hi\")\n```"))
 
 	if !strings.Contains(got, "┌─ go") {
 		t.Fatalf("expected code block header, got %q", got)
@@ -86,7 +87,7 @@ func TestRenderFormatsInlineMarkdown(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	got := renderer.Render("plain `code` **bold** _italic_")
+	got := ansi.Strip(renderer.Render("plain `code` **bold** _italic_"))
 
 	for _, want := range []string{"plain", "code", "bold", "italic"} {
 		if !strings.Contains(got, want) {
@@ -114,7 +115,7 @@ func TestRenderFormatsNestedLists(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	got := renderer.Render("- parent\n    - child\n    - second child")
+	got := ansi.Strip(renderer.Render("- parent\n    - child\n    - second child"))
 
 	if !strings.Contains(got, "• parent") {
 		t.Fatalf("expected top-level bullet, got %q", got)
@@ -130,7 +131,7 @@ func TestRenderFormatsBlockquoteAndLink(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	got := renderer.Render("> quoted text with [link](https://example.com)")
+	got := ansi.Strip(renderer.Render("> quoted text with [link](https://example.com)"))
 
 	if !strings.Contains(got, "│") || !strings.Contains(got, "quoted text") {
 		t.Fatalf("expected blockquote rendering, got %q", got)
@@ -146,11 +147,41 @@ func TestRenderFormatsTableAndTaskList(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	got := renderer.Render("| Name | Value |\n| --- | --- |\n| one | two |\n\n- [x] done\n- [ ] todo")
+	got := ansi.Strip(renderer.Render("| Name | Value |\n| --- | --- |\n| one | two |\n\n- [x] done\n- [ ] todo"))
 
 	for _, want := range []string{"| Name", "| one", "[x] done", "[ ] todo"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("expected %q in rendered output, got %q", want, got)
 		}
+	}
+}
+
+func TestRenderStyledTracksInlineAttributes(t *testing.T) {
+	renderer, err := New(theme.Default().Palette)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	got := renderer.RenderStyled("plain **bold** _italic_ ~~gone~~ [link](https://example.com)")
+	var (
+		sawBold   bool
+		sawItalic bool
+		sawStrike bool
+		sawLink   bool
+	)
+	for _, span := range got {
+		switch strings.TrimSpace(span.Text) {
+		case "bold":
+			sawBold = span.Style.Bold
+		case "italic":
+			sawItalic = span.Style.Italic
+		case "gone":
+			sawStrike = span.Style.Strikethrough
+		case "link":
+			sawLink = span.Style.Underline
+		}
+	}
+	if !sawBold || !sawItalic || !sawStrike || !sawLink {
+		t.Fatalf("expected inline styles in spans, got %#v", got)
 	}
 }

@@ -1820,6 +1820,7 @@ func (m *Model) renderTranscriptActivityElement() ui.Element {
 
 func (m *Model) renderTranscriptMessageElement(msg domain.Message) ui.Element {
 	body := m.renderMessageParts(m.parts[msg.ID])
+	styledBody := m.renderStyledMessageParts(m.parts[msg.ID])
 	stamp := timestamp(msg.CreatedAt, m.cfg.UI.ShowTimestamps)
 	switch msg.Role {
 	case domain.MessageRoleUser:
@@ -1832,7 +1833,10 @@ func (m *Model) renderTranscriptMessageElement(msg domain.Message) ui.Element {
 		if strings.TrimSpace(body) == "" {
 			body = strings.TrimSpace(msg.Summary)
 		}
-		return m.renderAssistantMessageElement(body, stamp)
+		if len(styledBody) == 0 && body != "" {
+			styledBody = []ui.StyledSpan{{Text: body}}
+		}
+		return m.renderStyledAssistantMessageElement(styledBody, stamp)
 	}
 }
 
@@ -1912,10 +1916,21 @@ func (m *Model) renderAssistantMessage(body, stamp string) string {
 
 func (m *Model) renderAssistantMessageElement(body, stamp string) ui.Element {
 	return ui.AssistantMessage{
-		Body:    body,
-		Stamp:   stamp,
-		Width:   m.viewport.Width,
-		Palette: m.palette,
+		Body:      body,
+		BaseStyle: ui.CellStyle{FG: ui.CellColorFromLipgloss(m.palette.MarkdownText)},
+		Stamp:     stamp,
+		Width:     m.viewport.Width,
+		Palette:   m.palette,
+	}
+}
+
+func (m *Model) renderStyledAssistantMessageElement(body []ui.StyledSpan, stamp string) ui.Element {
+	return ui.AssistantMessage{
+		StyledBody: body,
+		BaseStyle:  ui.CellStyle{FG: ui.CellColorFromLipgloss(m.palette.MarkdownText)},
+		Stamp:      stamp,
+		Width:      m.viewport.Width,
+		Palette:    m.palette,
 	}
 }
 
@@ -1945,7 +1960,7 @@ func (m *Model) renderMessageParts(parts []domain.Part) string {
 		if textBuf.Len() == 0 {
 			return
 		}
-		textBlocks = append(textBlocks, m.renderer.Render(textBuf.String()))
+		textBlocks = append(textBlocks, m.renderer.RenderPlain(textBuf.String()))
 		textBuf.Reset()
 	}
 	flushReasoning := func() {
@@ -1970,7 +1985,7 @@ func (m *Model) renderMessageParts(parts []domain.Part) string {
 			flushText()
 			flushReasoning()
 			if body := strings.TrimSpace(part.Body); body != "" {
-				compactionBlocks = append(compactionBlocks, m.renderer.Render(body))
+				compactionBlocks = append(compactionBlocks, m.renderer.RenderPlain(body))
 			}
 		case domain.PartKindSystemNotice:
 			flushText()
@@ -2018,6 +2033,71 @@ func (m *Model) renderMessageParts(parts []domain.Part) string {
 	return strings.TrimSpace(strings.Join(blocks, "\n"))
 }
 
+func (m *Model) renderStyledMessageParts(parts []domain.Part) []ui.StyledSpan {
+	var blocks [][]ui.StyledSpan
+	var textBuf strings.Builder
+
+	flushText := func() {
+		if textBuf.Len() == 0 {
+			return
+		}
+		block := m.renderer.RenderStyled(textBuf.String())
+		if len(block) > 0 {
+			blocks = append(blocks, block)
+		}
+		textBuf.Reset()
+	}
+
+	for _, part := range parts {
+		switch part.Kind {
+		case domain.PartKindText:
+			textBuf.WriteString(part.Body)
+		case domain.PartKindCompaction:
+			flushText()
+			if body := strings.TrimSpace(part.Body); body != "" {
+				if block := m.renderer.RenderStyled(body); len(block) > 0 {
+					blocks = append(blocks, block)
+				}
+			}
+		case domain.PartKindSystemNotice:
+			flushText()
+			if m.showSystem {
+				if block := m.renderStyledSystemNoticeBlock(part); len(block) > 0 {
+					blocks = append(blocks, block)
+				}
+			}
+		case domain.PartKindReasoning, domain.PartKindToolCall, domain.PartKindToolOutput, domain.PartKindDiff, domain.PartKindApprovalRequest, domain.PartKindReference:
+			flushText()
+		case domain.PartKindAttachment:
+			flushText()
+			meta, err := attachment.DecodeMeta(part.MetaJSON)
+			if err != nil {
+				if body := strings.TrimSpace(part.Body); body != "" {
+					blocks = append(blocks, []ui.StyledSpan{{Text: body}})
+				}
+				continue
+			}
+			blocks = append(blocks, []ui.StyledSpan{{Text: m.attachmentLabel(meta)}})
+		default:
+			flushText()
+			if body := strings.TrimSpace(part.Body); body != "" {
+				blocks = append(blocks, []ui.StyledSpan{{Text: body}})
+			}
+		}
+	}
+
+	flushText()
+
+	var out []ui.StyledSpan
+	for idx, block := range blocks {
+		if idx > 0 {
+			out = ui.AppendStyledSpan(out, "\n", ui.CellStyle{})
+		}
+		out = append(out, block...)
+	}
+	return out
+}
+
 func (m *Model) renderSystemNoticeBlock(part domain.Part) string {
 	title := strings.TrimSpace(part.Body)
 	if strings.EqualFold(title, "usage") {
@@ -2037,7 +2117,29 @@ func (m *Model) renderSystemNoticeBlock(part domain.Part) string {
 		body.WriteString(meta)
 		body.WriteString("\n```")
 	}
-	return m.renderer.Render(body.String())
+	return m.renderer.RenderPlain(body.String())
+}
+
+func (m *Model) renderStyledSystemNoticeBlock(part domain.Part) []ui.StyledSpan {
+	title := strings.TrimSpace(part.Body)
+	if strings.EqualFold(title, "usage") {
+		return nil
+	}
+	switch {
+	case title == "" && strings.TrimSpace(part.MetaJSON) == "":
+		return nil
+	case title == "":
+		title = "system notice"
+	}
+	var body strings.Builder
+	body.WriteString("### System\n\n")
+	body.WriteString(title)
+	if meta := strings.TrimSpace(part.MetaJSON); meta != "" {
+		body.WriteString("\n\n```json\n")
+		body.WriteString(meta)
+		body.WriteString("\n```")
+	}
+	return m.renderer.RenderStyled(body.String())
 }
 
 func (m *Model) renderUserMessageParts(parts []domain.Part) string {
