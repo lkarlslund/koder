@@ -290,6 +290,7 @@ type Model struct {
 	transcriptCache    map[string]cachedTranscriptBlock
 	retainedTranscript *ui.RetainedTranscript
 	transcriptDirty    bool
+	mainScreen         *mainScreenWidget
 	renderCache        *modelRenderCache
 	expandedToolRuns   map[string]bool
 	composer           textarea.Model
@@ -1156,7 +1157,10 @@ func (m *Model) scrollLLMPreview(delta int) {
 
 func (m *Model) scrollTranscript(delta int) {
 	m.viewport.SetYOffset(m.viewport.YOffset + delta)
-	m.invalidateBodyCache()
+	m.invalidateMainSurface()
+	if main := m.ensureMainScreenWidget(); main != nil {
+		main.transcript.Invalidate()
+	}
 }
 
 func (m *Model) llmPreviewMaxOffset() int {
@@ -1252,23 +1256,7 @@ func (m *Model) renderBodyLines() []string {
 }
 
 func (m *Model) renderBodySurface() ui.Surface {
-	cache := m.ensureRenderCache()
-	if cache.bodyValid {
-		if !cache.composerAreaValid {
-			previousComposerHeight := cache.composerAreaHeight
-			composer := m.renderComposerAreaSurface()
-			if previousComposerHeight == cache.composerAreaHeight && previousComposerHeight > 0 {
-				rect := m.composerAreaRect(previousComposerHeight)
-				cache.renderedBodySurface = cache.renderedBodySurface.PlaceAt(rect.X, rect.Y, composer.Normalize(rect.W, rect.H))
-				return cache.renderedBodySurface
-			}
-			cache.bodyValid = false
-		} else {
-			return cache.renderedBodySurface
-		}
-	}
 	ctx := &ui.Context{Palette: m.palette}
-	element := m.renderBodyElement()
 	width := max(0, m.width)
 	height := max(0, m.height)
 	if width <= 0 || height <= 0 {
@@ -1284,30 +1272,8 @@ func (m *Model) renderBodySurface() ui.Surface {
 				height = max(6, m.transcriptViewportHeight()+m.composerAreaHeight()+m.statusPaneHeight())
 			}
 		}
-		size := element.Measure(ctx, ui.NewConstraints(width, height))
-		width = max(width, size.W)
-		height = max(height, size.H)
 	}
-	cache.renderedBodySurface = element.Render(ctx, ui.Rect{W: width, H: height})
-	cache.bodyValid = true
-	return cache.renderedBodySurface
-}
-
-func (m *Model) composerAreaRect(height int) ui.Rect {
-	if height <= 0 {
-		return ui.Rect{}
-	}
-	totalHeight := max(0, m.height)
-	if totalHeight == 0 {
-		totalHeight = max(0, m.viewport.Height)
-	}
-	mainHeight := max(0, totalHeight-m.statusPaneHeight())
-	return ui.Rect{
-		X: 1,
-		Y: max(0, mainHeight-height),
-		W: max(0, m.composerWidth()),
-		H: height,
-	}
+	return m.ensureMainScreenWidget().Surface(ctx, ui.Rect{W: width, H: height})
 }
 
 func (m *Model) renderBodyElement() ui.Element {
@@ -1338,24 +1304,9 @@ func (m *Model) renderComposerAreaLines() []string {
 }
 
 func (m *Model) renderComposerAreaSurface() ui.Surface {
-	cache := m.ensureRenderCache()
-	if cache.composerAreaValid {
-		return cache.renderedComposerAreaSurface
-	}
 	ctx := &ui.Context{Palette: m.palette}
-	element := m.renderComposerAreaElement()
 	width := max(0, m.width)
-	size := element.Measure(ctx, ui.NewConstraints(width, 0))
-	if width <= 0 {
-		width = size.W
-	}
-	cache.renderedComposerAreaSurface = element.Render(ctx, ui.Rect{
-		W: width,
-		H: size.H,
-	})
-	cache.composerAreaHeight = size.H
-	cache.composerAreaValid = true
-	return cache.renderedComposerAreaSurface
+	return m.ensureMainScreenWidget().composer.Surface(ctx, ui.Rect{W: width})
 }
 
 func (m *Model) renderComposerAreaElement() ui.Element {
@@ -1648,17 +1599,17 @@ func (m Model) debugAPIAddr() string {
 }
 
 func (m *Model) refreshViewport() {
-	m.invalidateBodyCache()
+	m.invalidateMainSurface()
 	m.refreshViewportAt(-1)
 }
 
 func (m *Model) refreshViewportPreserve() {
-	m.invalidateBodyCache()
+	m.invalidateMainSurface()
 	m.refreshViewportAt(m.viewport.YOffset)
 }
 
 func (m *Model) refreshViewportAt(offset int) {
-	m.invalidateBodyCache()
+	m.invalidateMainSurface()
 	m.transcriptControls = nil
 	retained := m.syncRetainedTranscript()
 	if retained == nil {
@@ -1682,19 +1633,42 @@ func (m *Model) refreshViewportAt(offset int) {
 	m.viewport.SetYOffset(appliedY)
 	m.transcriptControls = runtime.Controls()
 	m.viewport.SetVisibleSurface(surface)
+	if main := m.ensureMainScreenWidget(); main != nil {
+		main.transcript.Invalidate()
+	}
 }
 
 func (m *Model) invalidateBodyCache() {
 	cache := m.ensureRenderCache()
 	cache.bodyValid = false
 	cache.renderedBodySurface = ui.Surface{}
+	if main := m.ensureMainScreenWidget(); main != nil {
+		main.Invalidate()
+		main.transcript.Invalidate()
+		main.activity.Invalidate()
+		main.composer.Invalidate()
+		main.sidebar.Invalidate()
+		main.statusPane.Invalidate()
+	}
 	m.invalidateFooterCache()
+}
+
+func (m *Model) invalidateMainSurface() {
+	cache := m.ensureRenderCache()
+	cache.bodyValid = false
+	cache.renderedBodySurface = ui.Surface{}
+	if main := m.ensureMainScreenWidget(); main != nil {
+		main.Invalidate()
+	}
 }
 
 func (m *Model) invalidateFooterCache() {
 	cache := m.ensureRenderCache()
 	cache.composerAreaValid = false
 	cache.renderedComposerAreaSurface = ui.Surface{}
+	if main := m.ensureMainScreenWidget(); main != nil {
+		main.composer.Invalidate()
+	}
 }
 
 func (m *Model) ensureRenderCache() *modelRenderCache {
@@ -1713,6 +1687,9 @@ func (m *Model) ensureRetainedTranscript() *ui.RetainedTranscript {
 
 func (m *Model) invalidateTranscript() {
 	m.transcriptDirty = true
+	if main := m.ensureMainScreenWidget(); main != nil {
+		main.transcript.Invalidate()
+	}
 	m.invalidateBodyCache()
 }
 
@@ -3202,11 +3179,7 @@ func (m Model) clipboardWriteText(text string) error {
 
 func (m *Model) pasteClipboardText() (ui.Model, ui.Cmd) {
 	image, err := m.clipboardReadImage()
-	if err != nil {
-		m.status = "Clipboard image paste failed: " + err.Error()
-		return m, m.syncWindowTitleCmd()
-	}
-	if len(image) > 0 {
+	if err == nil && len(image) > 0 {
 		draft, err := m.attachmentFiles.ImportClipboardImage(image)
 		if err != nil {
 			m.status = "Clipboard image paste failed: " + err.Error()
@@ -3238,6 +3211,7 @@ func (m *Model) pasteClipboardText() (ui.Model, ui.Cmd) {
 	}
 	m.composer.InsertString(text)
 	m.updateComposerMenus()
+	m.invalidateFooterCache()
 	m.status = "Pasted from clipboard"
 	return m, m.syncWindowTitleCmd()
 }
