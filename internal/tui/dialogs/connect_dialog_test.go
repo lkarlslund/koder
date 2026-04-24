@@ -149,8 +149,27 @@ func TestConnectDialogViewShowsEditorCursorAndTail(t *testing.T) {
 	if !strings.Contains(got, "█") {
 		t.Fatalf("expected editor cursor in view, got %q", got)
 	}
-	if !strings.Contains(got, "…should/show/the/en") {
-		t.Fatalf("expected editor to keep tail of typed value visible, got %q", got)
+	if !strings.Contains(got, "┌") || !strings.Contains(got, "└") {
+		t.Fatalf("expected composed input box in view, got %q", got)
+	}
+	if !strings.Contains(got, "https://example.com/very/long/path/that/should/show/the/end█") {
+		t.Fatalf("expected editor to show current value inside the input box, got %q", got)
+	}
+}
+
+func TestConnectDialogFormSeparatesLabelsDescriptionsAndInputs(t *testing.T) {
+	dialog := NewConnectDialog(provider.Catalog(), map[string]config.Provider{})
+	dialog.selectProvider(provider.Catalog()[0])
+
+	got := renderConnectDialog(dialog, 90, theme.Resolve("tokyonight").Palette)
+	if !strings.Contains(got, "Configuration") || !strings.Contains(got, "Base URL") {
+		t.Fatalf("expected composed configuration section, got %q", got)
+	}
+	if !strings.Contains(got, "OpenAI-compatible API endpoint") {
+		t.Fatalf("expected field description line, got %q", got)
+	}
+	if !strings.Contains(got, "│ │ https://api.openai.com/v1") {
+		t.Fatalf("expected bordered value row separate from label/description, got %q", got)
 	}
 }
 

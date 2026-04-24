@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/theme"
@@ -347,21 +348,69 @@ func (d *ConnectDialog) authPickerDialog(width int, palette theme.Palette) Eleme
 
 func (d *ConnectDialog) formDialog(width int, palette theme.Palette) Element {
 	dialogWidth := clampWidth(width, 76, 100)
-	lines := []string{
-		d.selected.Title,
-		d.selected.Description,
-		"",
-	}
+	fieldChildren := make([]Child, 0, len(d.formFields()))
 	for idx, field := range d.formFields() {
 		active := d.focus == connectFocusFields && d.fieldIndex == idx
-		row := d.renderFormField(field, dialogWidth-8, palette, active)
-		lines = append(lines, row)
+		fieldChildren = append(fieldChildren, Fixed(d.renderFormField(field, dialogWidth-10, palette, active)))
 	}
-	if len(d.models) > 0 {
-		lines = append(lines, "Discovered models: "+strings.Join(d.models[:minInt(4, len(d.models))], ", "))
+
+	bodyChildren := []Child{
+		Fixed(Section{
+			Title:       "Provider",
+			Padding:     UniformInsets(1),
+			Background:  palette.SidebarBackground,
+			Foreground:  palette.SidebarForeground,
+			BorderColor: palette.SidebarBorder,
+			Child: Column{
+				Children: []Child{
+					Fixed(Label{
+						Text: d.selected.Title,
+						Style: lipgloss.NewStyle().
+							Bold(true).
+							Foreground(palette.MarkdownHeadingPrimary),
+					}),
+					Fixed(Paragraph{
+						Text:  d.selected.Description,
+						Style: lipgloss.NewStyle().Foreground(palette.ComposerMutedText),
+					}),
+				},
+				Spacing: 1,
+			},
+		}),
+		Fixed(Section{
+			Title:       "Configuration",
+			Padding:     UniformInsets(1),
+			Background:  palette.SidebarBackground,
+			Foreground:  palette.SidebarForeground,
+			BorderColor: palette.SidebarBorder,
+			Child: Column{
+				Children: fieldChildren,
+				Spacing:  1,
+			},
+		}),
 	}
-	if status := strings.TrimSpace(d.status); status != "" {
-		lines = append(lines, d.renderStatus(palette))
+	if len(d.models) > 0 || strings.TrimSpace(d.status) != "" {
+		auxChildren := make([]Child, 0, 2)
+		if len(d.models) > 0 {
+			auxChildren = append(auxChildren, Fixed(Paragraph{
+				Text:  "Discovered models: " + strings.Join(d.models[:minInt(4, len(d.models))], ", "),
+				Style: lipgloss.NewStyle().Foreground(palette.ComposerMutedText),
+			}))
+		}
+		if status := strings.TrimSpace(d.status); status != "" {
+			auxChildren = append(auxChildren, Fixed(d.renderStatusElement(palette)))
+		}
+		bodyChildren = append(bodyChildren, Fixed(Section{
+			Title:       "Connection",
+			Padding:     UniformInsets(1),
+			Background:  palette.SidebarBackground,
+			Foreground:  palette.SidebarForeground,
+			BorderColor: palette.SidebarBorder,
+			Child: Column{
+				Children: auxChildren,
+				Spacing:  1,
+			},
+		}))
 	}
 	buttons := ButtonRow{
 		Buttons: []Button{
@@ -374,48 +423,68 @@ func (d *ConnectDialog) formDialog(width int, palette theme.Palette) Element {
 	}
 	return Dialog{
 		Title:   "Connect Provider",
-		Body:    linesBlock(lines...),
+		Body:    Column{Children: bodyChildren, Spacing: 1},
 		Buttons: buttons,
 		Footer:  "Type to edit  Ctrl+T test  Enter select  Esc cancel",
 		Width:   dialogWidth,
 	}
 }
 
-func (d ConnectDialog) renderFormField(field connectField, width int, palette theme.Palette, active bool) string {
+func (d ConnectDialog) renderFormField(field connectField, width int, palette theme.Palette, active bool) Element {
+	valueWidth := maxInt(18, width-4)
+	valueText := d.displayValue(field.ID)
+	valueStyle := lipgloss.NewStyle().Foreground(palette.MarkdownText)
+	background := palette.ScreenBackground
+	borderColor := palette.SidebarBorder
 	if active {
-		return d.renderEditorValue(field.ID, field.Label, field.Description, width, palette)
+		valueText = d.renderEditorContent(field.ID, d.fieldValue(field.ID), d.placeholderValue(field.ID), valueWidth)
+		valueStyle = lipgloss.NewStyle().
+			Foreground(palette.UserTextForeground).
+			Background(palette.UserTextBackground)
+		background = palette.UserTextBackground
+		borderColor = firstNonEmptyColor(palette.SelectionBackground, palette.ActivityText, palette.SidebarBorder)
+	} else if strings.HasPrefix(valueText, "(") {
+		valueStyle = lipgloss.NewStyle().Foreground(palette.ComposerMutedText).Italic(true)
 	}
-	labelWidth := minInt(20, maxInt(10, width/4))
-	valueWidth := minInt(22, maxInt(10, width/4))
-	descWidth := maxInt(8, width-labelWidth-valueWidth-4)
-	line := truncateText(field.Label, labelWidth)
-	line += strings.Repeat(" ", maxInt(0, labelWidth-PlainWidth(line)))
-	line += "  "
-	desc := truncateText(field.Description, descWidth)
-	line += desc
-	line += strings.Repeat(" ", maxInt(0, descWidth-PlainWidth(desc)))
-	line += "  "
-	value := truncateText(d.displayValue(field.ID), valueWidth)
-	line += value
-	return padRight(line, width)
-}
-
-func (d ConnectDialog) renderEditorValue(fieldID string, label string, description string, width int, palette theme.Palette) string {
-	value := d.fieldValue(fieldID)
-	placeholder := d.placeholderValue(fieldID)
-	labelWidth := minInt(20, maxInt(10, width/4))
-	valueWidth := minInt(22, maxInt(10, width/4))
-	descWidth := maxInt(8, width-labelWidth-valueWidth-4)
-	content := d.renderEditorContent(fieldID, value, placeholder, valueWidth)
-	line := truncateText(label, labelWidth)
-	line += strings.Repeat(" ", maxInt(0, labelWidth-PlainWidth(line)))
-	line += "  "
-	desc := truncateText(description, descWidth)
-	line += desc
-	line += strings.Repeat(" ", maxInt(0, descWidth-PlainWidth(desc)))
-	line += "  "
-	line += content
-	return padRight(" "+line, width)
+	return Panel{
+		Padding:      UniformInsets(1),
+		Background:   palette.SidebarBackground,
+		Foreground:   palette.SidebarForeground,
+		BorderLeft:   true,
+		BorderRight:  true,
+		BorderTop:    true,
+		BorderBottom: true,
+		BorderColor:  borderColor,
+		Child: Column{
+			Children: []Child{
+				Fixed(Label{
+					Text: field.Label,
+					Style: lipgloss.NewStyle().
+						Bold(true).
+						Foreground(palette.AssistantTimestampText),
+				}),
+				Fixed(Paragraph{
+					Text:  field.Description,
+					Style: lipgloss.NewStyle().Foreground(palette.ComposerMutedText),
+				}),
+				Fixed(Panel{
+					Padding:      Insets{Left: 1, Right: 1},
+					Background:   background,
+					Foreground:   palette.MarkdownText,
+					BorderLeft:   true,
+					BorderRight:  true,
+					BorderTop:    true,
+					BorderBottom: true,
+					BorderColor:  borderColor,
+					Child: Label{
+						Text:  padRight(valueText, valueWidth),
+						Style: valueStyle,
+					},
+				}),
+			},
+			Spacing: 1,
+		},
+	}
 }
 
 func (d ConnectDialog) displayValue(fieldID string) string {
@@ -846,6 +915,38 @@ func (d ConnectDialog) renderStatus(palette theme.Palette) string {
 	}
 	_ = labelColor
 	return "[" + label + "] " + status
+}
+
+func (d ConnectDialog) renderStatusElement(palette theme.Palette) Element {
+	status := strings.TrimSpace(d.status)
+	if status == "" {
+		return Static{}
+	}
+	label := "WAIT"
+	labelColor := palette.ActivityText
+	switch d.statusKind {
+	case connectStatusSuccess:
+		label = "OK"
+		labelColor = palette.DiffAddedText
+	case connectStatusError:
+		label = "ERROR"
+		labelColor = palette.DiffDeletedText
+	}
+	return Row{
+		Children: []Child{
+			Fixed(Label{
+				Text: "[" + label + "]",
+				Style: lipgloss.NewStyle().
+					Bold(true).
+					Foreground(labelColor),
+			}),
+			Fixed(Label{
+				Text:  status,
+				Style: lipgloss.NewStyle().Foreground(palette.MarkdownText),
+			}),
+		},
+		Spacing: 1,
+	}
 }
 
 func padRight(input string, width int) string {
