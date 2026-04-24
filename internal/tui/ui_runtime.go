@@ -15,6 +15,7 @@ const (
 	connectWindowID     ui.WindowID = "connect-dialog"
 	disconnectWindowID  ui.WindowID = "disconnect-dialog"
 	modelWindowID       ui.WindowID = "model-dialog"
+	themeWindowID       ui.WindowID = "theme-dialog"
 	agentsWindowID      ui.WindowID = "agents-modal"
 	helpWindowID        ui.WindowID = "help-modal"
 	llmPreviewWindowID  ui.WindowID = "llm-preview"
@@ -398,6 +399,43 @@ func (m *Model) overlayWindows() []ui.Window {
 			return nil
 		}))
 	}
+	if m.hasThemeDialog() {
+		windows = append(windows, m.centeredWindow(themeWindowID, 100, m.renderThemeDialogElement(), func(m *Model, msg ui.KeyMsg) ui.Cmd {
+			if msg.String() == "ctrl+c" {
+				_, cmd := m.quit()
+				return cmd
+			}
+			action := m.themeDialog.Update(msg)
+			m.previewSelectedTheme()
+			switch action.Kind {
+			case dialogs.ThemeDialogActionSelect:
+				_, cmd := m.submitThemeSelection(action.Theme)
+				return cmd
+			case dialogs.ThemeDialogActionCancel:
+				_, cmd := m.cancelThemeDialog()
+				return cmd
+			default:
+				return nil
+			}
+		}, func(m *Model, controlID string) ui.Cmd {
+			if controlID == "window-close" {
+				_, cmd := m.cancelThemeDialog()
+				return cmd
+			}
+			action := m.themeDialog.ActivateControl(controlID)
+			switch action.Kind {
+			case dialogs.ThemeDialogActionSelect:
+				_, cmd := m.submitThemeSelection(action.Theme)
+				return cmd
+			case dialogs.ThemeDialogActionCancel:
+				_, cmd := m.cancelThemeDialog()
+				return cmd
+			default:
+				m.previewSelectedTheme()
+				return nil
+			}
+		}))
+	}
 	if m.hasPicker() {
 		windows = append(windows, m.centeredWindow(pickerWindowID, 100, m.renderPickerElement(), func(m *Model, msg ui.KeyMsg) ui.Cmd {
 			if msg.String() == "ctrl+c" {
@@ -405,7 +443,6 @@ func (m *Model) overlayWindows() []ui.Window {
 				return cmd
 			}
 			action := m.picker.dialog.Update(msg)
-			m.previewSelectedTheme()
 			switch action.Kind {
 			case ui.PickerDialogActionSelect:
 				_, cmd := m.submitPickerSelection(action.Value)
@@ -426,7 +463,6 @@ func (m *Model) overlayWindows() []ui.Window {
 				_, cmd := m.cancelPicker()
 				return cmd
 			default:
-				m.previewSelectedTheme()
 				return nil
 			}
 		}))

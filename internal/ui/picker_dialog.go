@@ -217,7 +217,7 @@ func (d PickerDialog) element(width int, palette theme.Palette) Element {
 			Child: List{
 				Items:    items,
 				Width:    72,
-				Selected: d.Index,
+				Selected: d.Index - start,
 				Focused:  d.Focus == pickerDialogFocusList,
 			},
 		}))

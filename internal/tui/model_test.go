@@ -2263,13 +2263,10 @@ func TestThemeCommandOpensFilterablePicker(t *testing.T) {
 	if cmd != nil {
 		t.Fatal("expected no async command for theme picker")
 	}
-	if !next.hasPicker() {
-		t.Fatal("expected picker to open")
+	if !next.hasThemeDialog() {
+		t.Fatal("expected theme dialog to open")
 	}
-	if next.picker.mode != pickerModeTheme {
-		t.Fatalf("expected theme picker mode, got %v", next.picker.mode)
-	}
-	if len(next.picker.dialog.Items) == 0 {
+	if len(next.themeDialog.Themes) == 0 {
 		t.Fatal("expected theme matches")
 	}
 }
@@ -2289,11 +2286,11 @@ func TestThemePickerFiltersAndPreviewsSelection(t *testing.T) {
 	updated, _ = next.handleKey(ui.KeyMsg{Type: ui.KeyRunes, Runes: []rune("r")})
 	next = updated.(*Model)
 
-	if len(next.picker.dialog.Items) == 0 {
+	if len(next.themeDialog.Themes) == 0 {
 		t.Fatal("expected filtered theme matches")
 	}
-	current, ok := next.picker.dialog.Current()
-	if !ok || current.Value != "gruvbox" {
+	current, ok := next.themeDialog.Current()
+	if !ok || current != "gruvbox" {
 		t.Fatalf("expected gruvbox after filtering, got %#v", current)
 	}
 	if next.cfg.UI.Theme != "gruvbox" {
@@ -2364,7 +2361,8 @@ func TestThemePickerEscapeRestoresOriginalTheme(t *testing.T) {
 		t.Fatal(err)
 	}
 	m.openThemePicker()
-	m.movePicker(1)
+	m.themeDialog.Update(ui.KeyMsg{Type: ui.KeyRight})
+	m.previewSelectedTheme()
 	if m.cfg.UI.Theme == "flexoki" {
 		t.Fatal("expected theme preview to change current theme before cancel")
 	}
@@ -2377,8 +2375,8 @@ func TestThemePickerEscapeRestoresOriginalTheme(t *testing.T) {
 	if next.cfg.UI.Theme != "flexoki" {
 		t.Fatalf("expected original theme restored, got %q", next.cfg.UI.Theme)
 	}
-	if next.hasPicker() {
-		t.Fatal("expected picker to close on cancel")
+	if next.hasThemeDialog() {
+		t.Fatal("expected theme dialog to close on cancel")
 	}
 }
 
@@ -2401,15 +2399,15 @@ func TestThemePickerEnterSavesTheme(t *testing.T) {
 		t.Fatal(err)
 	}
 	m.openThemePicker()
-	m.movePicker(1)
+	m.themeDialog.Update(ui.KeyMsg{Type: ui.KeyRight})
 
 	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
 	next := updated.(*Model)
 	if cmd != nil {
 		t.Fatal("expected no async command on theme apply")
 	}
-	if next.hasPicker() {
-		t.Fatal("expected picker to close after selection")
+	if next.hasThemeDialog() {
+		t.Fatal("expected theme dialog to close after selection")
 	}
 	if next.cfg.UI.Theme == "flexoki" {
 		t.Fatal("expected theme selection to persist a new theme")
@@ -2441,16 +2439,16 @@ func TestMouseClickOnThemePickerOKAppliesSelection(t *testing.T) {
 	m.width = 100
 	m.height = 28
 	m.openThemePicker()
-	m.picker.dialog.Query = "gr"
-	m.picker.dialog.SetCurrentValue("gruvbox")
-	m.picker.dialog.Update(ui.KeyMsg{Type: ui.KeyTab})
+	m.themeDialog.Query = "gr"
+	m.themeDialog.SetCurrentValue("gruvbox")
+	m.themeDialog.Update(ui.KeyMsg{Type: ui.KeyTab})
 	m.previewSelectedTheme()
-	bounds := m.centeredWindowBounds(m.renderPickerElement())
+	bounds := m.centeredWindowBounds(m.renderThemeDialogElement())
 	runtime := ui.Runtime{}
 	ctx := &ui.Context{Palette: m.palette, Runtime: &runtime}
-	element := m.renderPickerElement()
+	element := m.renderThemeDialogElement()
 	if element == nil {
-		t.Fatal("expected picker element")
+		t.Fatal("expected theme dialog element")
 	}
 	_ = element.Render(ctx, ui.Rect{W: bounds.W, H: bounds.H})
 	var okControl ui.Control
@@ -2465,7 +2463,7 @@ func TestMouseClickOnThemePickerOKAppliesSelection(t *testing.T) {
 	if !found {
 		t.Fatal("expected OK control to be registered")
 	}
-	if action := m.picker.dialog.ActivateControl("ok"); action.Kind != ui.PickerDialogActionSelect {
+	if action := m.themeDialog.ActivateControl("ok"); action.Kind != dialogs.ThemeDialogActionSelect {
 		t.Fatalf("expected OK control to select current item, got %#v", action)
 	}
 	okX := bounds.X + okControl.Rect.X + 1
@@ -2481,8 +2479,8 @@ func TestMouseClickOnThemePickerOKAppliesSelection(t *testing.T) {
 		Y:      okY,
 	})
 	next := asModelPtr(t, updated)
-	if next.hasPicker() {
-		t.Fatalf("expected picker to close after clicking OK, status=%q theme=%q index=%d focus=%v", next.status, next.cfg.UI.Theme, next.picker.dialog.Index, next.picker.dialog.Focus)
+	if next.hasThemeDialog() {
+		t.Fatalf("expected theme dialog to close after clicking OK, status=%q theme=%q", next.status, next.cfg.UI.Theme)
 	}
 	if next.cfg.UI.Theme != "gruvbox" {
 		t.Fatalf("expected theme selection to persist gruvbox, got %q", next.cfg.UI.Theme)

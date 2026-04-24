@@ -159,7 +159,6 @@ type pickerMode int
 
 const (
 	pickerModeNone pickerMode = iota
-	pickerModeTheme
 	pickerModePermissions
 	pickerModeSkills
 )
@@ -333,6 +332,8 @@ type Model struct {
 	disconnectDialog   *dialogs.DisconnectDialog
 	modelDialog        *dialogs.ModelDialog
 	toolsDialog        *dialogs.ToolsDialog
+	themeDialog        *dialogs.ThemeDialog
+	themeDialogInitial string
 	mainWindowView     *modelWindow
 	debug              *debugsrv.Recorder
 	uiRoot             *ui.Root
@@ -3571,6 +3572,8 @@ func (m Model) openDialogName() string {
 		return "session"
 	case m.hasPreferencesDialog():
 		return "preferences"
+	case m.hasThemeDialog():
+		return "theme"
 	case m.hasToolsDialog():
 		return "tools"
 	case m.hasHelpModal():
@@ -4077,6 +4080,13 @@ func (m *Model) renderPickerElement() ui.Element {
 	return m.picker.dialog
 }
 
+func (m *Model) renderThemeDialogElement() ui.Element {
+	if !m.hasThemeDialog() {
+		return nil
+	}
+	return m.themeDialog
+}
+
 func (m *Model) renderSessionDialog() string {
 	if element := m.renderSessionDialogElement(); element != nil {
 		width := 112
@@ -4557,11 +4567,16 @@ func (m *Model) hasPicker() bool {
 	return m.picker.visible
 }
 
+func (m *Model) hasThemeDialog() bool {
+	return m.themeDialog != nil
+}
+
 func (m *Model) hasModalOverlay() bool {
 	return m.hasModelDialog() ||
 		m.hasDisconnectDialog() ||
 		m.hasToolsDialog() ||
 		m.hasConnectDialog() ||
+		m.hasThemeDialog() ||
 		m.hasSessionDialog() ||
 		m.hasAgentsModal() ||
 		m.hasHelpModal() ||
@@ -4663,6 +4678,12 @@ func (m *Model) withRootTimers(cmd ui.Cmd) ui.Cmd {
 
 func (m *Model) closePicker() {
 	m.picker = pickerModel{}
+	m.syncComposerVisibility()
+}
+
+func (m *Model) closeThemeDialog() {
+	m.themeDialog = nil
+	m.themeDialogInitial = ""
 	m.syncComposerVisibility()
 }
 
@@ -5283,26 +5304,39 @@ func (m *Model) activeProviderID() string {
 }
 
 func (m *Model) openThemePicker() {
-	items := make([]ui.PickerItem, 0, len(theme.Names()))
-	for _, name := range theme.Names() {
-		items = append(items, ui.PickerItem{
-			Title:       name,
-			Description: "Preview theme colors",
-			Value:       name,
-		})
-	}
 	current := strings.TrimSpace(m.cfg.UI.Theme)
 	if current == "" {
 		current = theme.Default().Name
 	}
-	m.picker = pickerModel{
-		visible:      true,
-		mode:         pickerModeTheme,
-		initialValue: current,
-		dialog:       ui.NewPickerDialog("Themes", "type to filter  enter apply  tab buttons  esc cancel", items),
-	}
-	m.setPickerCurrentValue(current)
+	dialog := dialogs.NewThemeDialog(theme.Names(), current)
+	m.themeDialog = &dialog
+	m.themeDialogInitial = current
 	m.previewSelectedTheme()
+}
+
+func (m *Model) submitThemeSelection(value string) (ui.Model, ui.Cmd) {
+	if strings.TrimSpace(value) == "" {
+		return m, nil
+	}
+	if err := m.setTheme(value, true); err != nil {
+		m.status = fmt.Sprintf("theme save failed: %v", err)
+		return m, nil
+	}
+	m.status = fmt.Sprintf("Theme set to %s", value)
+	m.closeThemeDialog()
+	return m, nil
+}
+
+func (m *Model) cancelThemeDialog() (ui.Model, ui.Cmd) {
+	restore := strings.TrimSpace(m.themeDialogInitial)
+	if restore == "" {
+		restore = theme.Default().Name
+	}
+	if err := m.setTheme(restore, false); err != nil {
+		m.status = fmt.Sprintf("theme restore failed: %v", err)
+	}
+	m.closeThemeDialog()
+	return m, nil
 }
 
 func (m *Model) openPermissionsPicker() {
@@ -5358,17 +5392,6 @@ func (m *Model) movePicker(delta int) {
 
 func (m *Model) submitPickerSelection(value string) (ui.Model, ui.Cmd) {
 	switch m.picker.mode {
-	case pickerModeTheme:
-		if strings.TrimSpace(value) == "" {
-			return m, nil
-		}
-		if err := m.setTheme(value, true); err != nil {
-			m.status = fmt.Sprintf("theme save failed: %v", err)
-			return m, nil
-		}
-		m.status = fmt.Sprintf("Theme set to %s", value)
-		m.closePicker()
-		return m, nil
 	case pickerModePermissions:
 		if strings.TrimSpace(value) == "" {
 			return m, nil
@@ -5401,16 +5424,6 @@ func (m *Model) submitPickerSelection(value string) (ui.Model, ui.Cmd) {
 
 func (m *Model) cancelPicker() (ui.Model, ui.Cmd) {
 	switch m.picker.mode {
-	case pickerModeTheme:
-		restore := strings.TrimSpace(m.picker.initialValue)
-		if restore == "" {
-			restore = theme.Default().Name
-		}
-		if err := m.setTheme(restore, false); err != nil {
-			m.status = fmt.Sprintf("theme restore failed: %v", err)
-		}
-		m.closePicker()
-		return m, nil
 	case pickerModePermissions:
 		approvalID := m.picker.approvalID
 		m.closePicker()
@@ -5431,14 +5444,14 @@ func (m *Model) cancelPicker() (ui.Model, ui.Cmd) {
 }
 
 func (m *Model) previewSelectedTheme() {
-	if m.picker.mode != pickerModeTheme {
+	if !m.hasThemeDialog() {
 		return
 	}
-	item, ok := m.picker.dialog.Current()
+	item, ok := m.themeDialog.Current()
 	if !ok {
 		return
 	}
-	if err := m.setTheme(item.Value, false); err != nil {
+	if err := m.setTheme(item, false); err != nil {
 		m.status = fmt.Sprintf("theme preview failed: %v", err)
 	}
 }
