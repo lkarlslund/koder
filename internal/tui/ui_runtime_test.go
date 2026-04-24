@@ -56,6 +56,33 @@ func TestViewSurfaceComposesMainWindowBehindModal(t *testing.T) {
 	}
 }
 
+func TestHelpModalContentUsesWindowBackground(t *testing.T) {
+	m := newRuntimeTestModel(t)
+	m.openHelpModal()
+
+	surface := m.viewSurface()
+	lines := surface.Lines()
+	var foundX, foundY int
+	found := false
+	for y, line := range lines {
+		if x := strings.Index(line, "Hotkeys"); x >= 0 {
+			foundX, foundY, found = x, y, true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected help modal text in surface, got %q", strings.Join(lines, "\n"))
+	}
+	r, g, b, ok := surface.SurfaceCellBG(foundX, foundY)
+	if !ok {
+		t.Fatal("expected help modal text to inherit a background")
+	}
+	want := ui.ParseCellColor(string(m.palette.SidebarBackground))
+	if !want.Valid || r != want.R || g != want.G || b != want.B {
+		t.Fatalf("expected inherited help background %v, got %d %d %d", want, r, g, b)
+	}
+}
+
 func TestResumeClosesSessionDialogAndRestoresTyping(t *testing.T) {
 	m := newRuntimeTestModel(t)
 	m.sessions = []domain.Session{{ID: 7, Title: "Session A"}}

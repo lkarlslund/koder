@@ -205,22 +205,34 @@ type CellStyle struct {
 	FG            CellColor
 	BG            CellColor
 	Bold          bool
+	BoldSet       bool
 	Italic        bool
+	ItalicSet     bool
 	Underline     bool
+	UnderlineSet  bool
 	Strikethrough bool
+	StrikeSet     bool
 }
 
 func (s CellStyle) isZero() bool {
-	return !s.FG.Valid && !s.BG.Valid && !s.Bold && !s.Italic && !s.Underline && !s.Strikethrough
+	return !s.FG.Valid && !s.BG.Valid &&
+		!s.hasBold() &&
+		!s.hasItalic() &&
+		!s.hasUnderline() &&
+		!s.hasStrikethrough()
 }
 
 func (s CellStyle) equal(other CellStyle) bool {
 	return s.FG == other.FG &&
 		s.BG == other.BG &&
 		s.Bold == other.Bold &&
+		s.BoldSet == other.BoldSet &&
 		s.Italic == other.Italic &&
+		s.ItalicSet == other.ItalicSet &&
 		s.Underline == other.Underline &&
-		s.Strikethrough == other.Strikethrough
+		s.UnderlineSet == other.UnderlineSet &&
+		s.Strikethrough == other.Strikethrough &&
+		s.StrikeSet == other.StrikeSet
 }
 
 func (s CellStyle) Merge(overlay CellStyle) CellStyle {
@@ -231,11 +243,39 @@ func (s CellStyle) Merge(overlay CellStyle) CellStyle {
 	if overlay.BG.Valid {
 		out.BG = overlay.BG
 	}
-	out.Bold = out.Bold || overlay.Bold
-	out.Italic = out.Italic || overlay.Italic
-	out.Underline = out.Underline || overlay.Underline
-	out.Strikethrough = out.Strikethrough || overlay.Strikethrough
+	if overlay.hasBold() {
+		out.Bold = overlay.Bold
+		out.BoldSet = overlay.BoldSet || overlay.Bold
+	}
+	if overlay.hasItalic() {
+		out.Italic = overlay.Italic
+		out.ItalicSet = overlay.ItalicSet || overlay.Italic
+	}
+	if overlay.hasUnderline() {
+		out.Underline = overlay.Underline
+		out.UnderlineSet = overlay.UnderlineSet || overlay.Underline
+	}
+	if overlay.hasStrikethrough() {
+		out.Strikethrough = overlay.Strikethrough
+		out.StrikeSet = overlay.StrikeSet || overlay.Strikethrough
+	}
 	return out
+}
+
+func (s CellStyle) hasBold() bool {
+	return s.BoldSet || s.Bold
+}
+
+func (s CellStyle) hasItalic() bool {
+	return s.ItalicSet || s.Italic
+}
+
+func (s CellStyle) hasUnderline() bool {
+	return s.UnderlineSet || s.Underline
+}
+
+func (s CellStyle) hasStrikethrough() bool {
+	return s.StrikeSet || s.Strikethrough
 }
 
 type Cell struct {
@@ -243,6 +283,7 @@ type Cell struct {
 	Width        int
 	Style        CellStyle
 	Continuation bool
+	Painted      bool
 }
 
 type Surface struct {
@@ -261,8 +302,19 @@ func BlankSurface(width, height int) Surface {
 	}
 	cells := make([]Cell, width*height)
 	for i := range cells {
-		cells[i] = Cell{Text: " ", Width: 1}
+		cells[i] = Cell{Text: " ", Width: 1, Painted: true}
 	}
+	return Surface{w: width, h: height, cells: cells}
+}
+
+func TransparentSurface(width, height int) Surface {
+	if width < 0 {
+		width = 0
+	}
+	if height < 0 {
+		height = 0
+	}
+	cells := make([]Cell, width*height)
 	return Surface{w: width, h: height, cells: cells}
 }
 
@@ -270,7 +322,16 @@ func SurfaceFromString(input string) Surface {
 	if input == "" {
 		return Surface{}
 	}
-	return Surface{lines: strings.Split(input, "\n")}
+	lines := strings.Split(input, "\n")
+	width := 0
+	for _, line := range lines {
+		width = max(width, PlainWidth(line))
+	}
+	s := TransparentSurface(width, len(lines))
+	for y, line := range lines {
+		s.WriteText(0, y, line, CellStyle{})
+	}
+	return s
 }
 
 func (s Surface) Lines() []string {
@@ -361,7 +422,7 @@ func (s Surface) SurfaceCellStrikethrough(x, y int) bool {
 
 func (s Surface) normalize(width, height int) Surface {
 	if s.isCellBuffer() {
-		out := BlankSurface(width, height)
+		out := TransparentSurface(width, height)
 		copyH := min(height, s.h)
 		copyW := min(width, s.w)
 		for y := 0; y < copyH; y++ {
@@ -377,7 +438,7 @@ func (s Surface) normalize(width, height int) Surface {
 	if height < 0 {
 		height = 0
 	}
-	out := BlankSurface(width, height)
+	out := TransparentSurface(width, height)
 	for i := 0; i < height; i++ {
 		line := ""
 		if i < len(s.lines) {
@@ -432,7 +493,7 @@ func (s Surface) cellIndex(x, y int) int {
 
 func (s Surface) cellAt(x, y int) Cell {
 	if x < 0 || y < 0 || x >= s.w || y >= s.h || len(s.cells) == 0 {
-		return Cell{Text: " ", Width: 1}
+		return Cell{}
 	}
 	return s.cells[s.cellIndex(x, y)]
 }
@@ -440,6 +501,9 @@ func (s Surface) cellAt(x, y int) Cell {
 func (s *Surface) setCell(x, y int, cell Cell) {
 	if x < 0 || y < 0 || x >= s.w || y >= s.h || len(s.cells) == 0 {
 		return
+	}
+	if !cell.Painted && (cell.Text != "" || cell.Width > 0 || cell.Continuation || !cell.Style.isZero()) {
+		cell.Painted = true
 	}
 	s.cells[s.cellIndex(x, y)] = cell
 }
@@ -454,6 +518,10 @@ func (s Surface) cellLines() []string {
 		for x := 0; x < s.w; x++ {
 			cell := s.cellAt(x, y)
 			if cell.Continuation {
+				continue
+			}
+			if !cell.Painted {
+				b.WriteString(" ")
 				continue
 			}
 			text := cell.Text
@@ -482,7 +550,7 @@ func (s Surface) blitAt(x, y int, child Surface) Surface {
 			if targetX < 0 || targetX >= out.w {
 				continue
 			}
-			out.setCell(targetX, targetY, child.cellAt(cx, cy))
+			out.setCell(targetX, targetY, compositeCell(out.cellAt(targetX, targetY), child.cellAt(cx, cy)))
 		}
 	}
 	return out
@@ -503,9 +571,9 @@ func (s *Surface) WriteText(x, y int, text string, style CellStyle) {
 			break
 		}
 		if col >= 0 {
-			s.setCell(col, y, Cell{Text: grapheme, Width: width, Style: style})
+			s.setCell(col, y, Cell{Text: grapheme, Width: width, Style: style, Painted: true})
 			for extra := 1; extra < width && col+extra < s.w; extra++ {
-				s.setCell(col+extra, y, Cell{Continuation: true, Style: style})
+				s.setCell(col+extra, y, Cell{Continuation: true, Style: style, Painted: true})
 			}
 		}
 		col += width
@@ -532,9 +600,9 @@ func (s *Surface) WriteStyledSpans(x, y int, spans []StyledSpan, base CellStyle)
 				return
 			}
 			if col >= 0 {
-				s.setCell(col, y, Cell{Text: grapheme, Width: width, Style: style})
+				s.setCell(col, y, Cell{Text: grapheme, Width: width, Style: style, Painted: true})
 				for extra := 1; extra < width && col+extra < s.w; extra++ {
-					s.setCell(col+extra, y, Cell{Continuation: true, Style: style})
+					s.setCell(col+extra, y, Cell{Continuation: true, Style: style, Painted: true})
 				}
 			}
 			col += width
@@ -549,6 +617,25 @@ func FilledLineSurface(width int, text string, fillStyle, textStyle CellStyle) S
 	}
 	s.WriteText(0, 0, PlainTruncate(text, width, ""), textStyle)
 	return s
+}
+
+func compositeCell(base, overlay Cell) Cell {
+	if !overlay.Painted {
+		return base
+	}
+	out := base
+	if overlay.paintsGlyph() {
+		out.Text = overlay.Text
+		out.Width = overlay.Width
+		out.Continuation = overlay.Continuation
+	}
+	out.Style = base.Style.Merge(overlay.Style)
+	out.Painted = true
+	return out
+}
+
+func (c Cell) paintsGlyph() bool {
+	return c.Continuation || c.Width > 0 || c.Text != ""
 }
 
 func overlayLine(base, overlay string, offset int) string {
@@ -780,7 +867,7 @@ func (e VisibleElement) Render(ctx *Context, bounds Rect) Surface {
 	case AlignEnd:
 		y = max(0, bounds.H-size.H)
 	}
-	base := BlankSurface(bounds.W, bounds.H)
+	base := TransparentSurface(bounds.W, bounds.H)
 	child := e.Child.Render(ctx, Rect{X: bounds.X + x, Y: bounds.Y + y, W: min(bounds.W, size.W), H: min(bounds.H, size.H)})
 	return base.placeAt(x, y, child)
 }
@@ -842,7 +929,7 @@ func (s Spacer) Measure(_ *Context, constraints Constraints) Size {
 }
 
 func (s Spacer) Render(_ *Context, bounds Rect) Surface {
-	return BlankSurface(bounds.W, bounds.H)
+	return TransparentSurface(bounds.W, bounds.H)
 }
 
 type Column struct {
@@ -856,7 +943,7 @@ func (c Column) Measure(ctx *Context, constraints Constraints) Size {
 }
 
 func (c Column) Render(ctx *Context, bounds Rect) Surface {
-	base := BlankSurface(bounds.W, bounds.H)
+	base := TransparentSurface(bounds.W, bounds.H)
 	plan := c.layoutPlan(ctx, NewConstraints(bounds.W, bounds.H), bounds.H)
 	y := 0
 	for idx, item := range plan.items {
@@ -904,7 +991,7 @@ func (r Row) Measure(ctx *Context, constraints Constraints) Size {
 }
 
 func (r Row) Render(ctx *Context, bounds Rect) Surface {
-	base := BlankSurface(bounds.W, bounds.H)
+	base := TransparentSurface(bounds.W, bounds.H)
 	plan := r.layoutPlan(ctx, NewConstraints(bounds.W, bounds.H), bounds.W)
 	x := 0
 	for idx, item := range plan.items {
@@ -958,7 +1045,7 @@ func (i Inset) Measure(ctx *Context, constraints Constraints) Size {
 }
 
 func (i Inset) Render(ctx *Context, bounds Rect) Surface {
-	base := BlankSurface(bounds.W, bounds.H)
+	base := TransparentSurface(bounds.W, bounds.H)
 	if !elementVisible(i.Child) {
 		return base
 	}
@@ -994,7 +1081,7 @@ func (c Constrained) Measure(ctx *Context, constraints Constraints) Size {
 
 func (c Constrained) Render(ctx *Context, bounds Rect) Surface {
 	if !elementVisible(c.Child) {
-		return BlankSurface(bounds.W, bounds.H)
+		return TransparentSurface(bounds.W, bounds.H)
 	}
 	size := c.Measure(ctx, NewConstraints(bounds.W, bounds.H))
 	return c.Child.Render(ctx, Rect{X: bounds.X, Y: bounds.Y, W: size.W, H: size.H}).normalize(bounds.W, bounds.H)
@@ -1025,7 +1112,7 @@ func (s Stack) Measure(ctx *Context, constraints Constraints) Size {
 }
 
 func (s Stack) Render(ctx *Context, bounds Rect) Surface {
-	base := BlankSurface(bounds.W, bounds.H)
+	base := TransparentSurface(bounds.W, bounds.H)
 	for _, child := range s.Children {
 		if !elementVisible(child) {
 			continue
@@ -1102,7 +1189,7 @@ func (a Align) Measure(ctx *Context, constraints Constraints) Size {
 }
 
 func (a Align) Render(ctx *Context, bounds Rect) Surface {
-	base := BlankSurface(bounds.W, bounds.H)
+	base := TransparentSurface(bounds.W, bounds.H)
 	if a.Child == nil {
 		return base
 	}

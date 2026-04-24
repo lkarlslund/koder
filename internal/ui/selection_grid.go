@@ -31,7 +31,7 @@ func (g SelectionGrid) Measure(ctx *Context, constraints Constraints) Size {
 
 func (g SelectionGrid) Render(ctx *Context, bounds Rect) Surface {
 	width, cellWidth, rows, cellHeight, rowGap := g.layout(bounds.W)
-	s := BlankSurface(width, rows*cellHeight+max(0, rows-1)*rowGap)
+	s := TransparentSurface(width, rows*cellHeight+max(0, rows-1)*rowGap)
 	for idx, item := range g.Items {
 		col := idx % g.columns(width)
 		row := idx / g.columns(width)

@@ -44,7 +44,7 @@ func (h SelectableHeader) render(palette theme.Palette) Surface {
 	if tertiaryWidth > 0 {
 		width += gapWidth
 	}
-	s := BlankSurface(width, 1)
+	s := TransparentSurface(width, 1)
 	style := CellStyle{FG: cellColor(palette.AssistantTimestampText), Bold: true}
 	col := 0
 	s.WriteText(col, 0, truncateText(strings.TrimSpace(h.Primary), primaryWidth), style)
@@ -571,15 +571,13 @@ func (r ButtonRow) render(palette theme.Palette) Surface {
 		}
 	}
 	offset := startX
-	gap := strings.Repeat(" ", r.gap())
 	for idx, button := range r.Buttons {
 		button.Focused = idx == r.Index
 		buttonSurface := button.renderSurface(palette)
 		s = s.placeAt(offset, 0, buttonSurface)
 		offset += buttonSurface.Size().W
 		if idx < len(r.Buttons)-1 {
-			s.WriteText(offset, 0, gap, CellStyle{})
-			offset += PlainWidth(gap)
+			offset += r.gap()
 		}
 	}
 	return s

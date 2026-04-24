@@ -20,7 +20,7 @@ func (l Label) Measure(_ *Context, constraints Constraints) Size {
 
 func (l Label) Render(_ *Context, bounds Rect) Surface {
 	width := max(1, bounds.W)
-	s := BlankSurface(width, max(1, bounds.H))
+	s := TransparentSurface(width, max(1, bounds.H))
 	s.WriteText(0, 0, PlainTruncate(l.Text, width, ""), lipglossToCellStyle(l.Style))
 	return s.normalize(bounds.W, bounds.H)
 }
@@ -58,7 +58,7 @@ func (h HitBox) Render(ctx *Context, bounds Rect) Surface {
 		})
 	}
 	if h.Child == nil {
-		return BlankSurface(bounds.W, bounds.H)
+		return TransparentSurface(bounds.W, bounds.H)
 	}
 	return h.Child.Render(ctx, bounds)
 }
@@ -142,7 +142,7 @@ func (d Divider) Render(_ *Context, bounds Rect) Surface {
 	} else if lipgloss.Width(text) < width {
 		text += strings.Repeat("─", width-lipgloss.Width(text))
 	}
-	s := BlankSurface(width, max(1, bounds.H))
+	s := TransparentSurface(width, max(1, bounds.H))
 	s.WriteText(0, 0, PlainTruncate(text, width, ""), lipglossToCellStyle(d.Style))
 	return s.normalize(width, bounds.H)
 }
@@ -164,14 +164,14 @@ func (p Paragraph) Measure(_ *Context, constraints Constraints) Size {
 func (p Paragraph) Render(_ *Context, bounds Rect) Surface {
 	text := strings.TrimSpace(p.Text)
 	if text == "" {
-		return BlankSurface(max(0, bounds.W), max(0, bounds.H))
+		return TransparentSurface(max(0, bounds.W), max(0, bounds.H))
 	}
 	width := bounds.W
 	if width <= 0 {
 		width = lipgloss.Width(text)
 	}
 	lines := p.lines(width)
-	s := BlankSurface(width, len(lines))
+	s := TransparentSurface(width, len(lines))
 	style := lipglossToCellStyle(p.Style)
 	for y, line := range lines {
 		s.WriteText(0, y, PlainTruncate(line, width, ""), style)
@@ -266,9 +266,12 @@ func (m ModalFrame) window(ctx *Context) WindowFrame {
 
 func lipglossToCellStyle(style lipgloss.Style) CellStyle {
 	cell := CellStyle{
-		Bold:      style.GetBold(),
-		Italic:    style.GetItalic(),
-		Underline: style.GetUnderline(),
+		Bold:         style.GetBold(),
+		BoldSet:      style.GetBold(),
+		Italic:       style.GetItalic(),
+		ItalicSet:    style.GetItalic(),
+		Underline:    style.GetUnderline(),
+		UnderlineSet: style.GetUnderline(),
 	}
 	if fg := style.GetForeground(); fg != nil {
 		cell.FG = ParseCellColor(fmt.Sprint(fg))

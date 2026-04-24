@@ -107,3 +107,23 @@ func TestPlaceAtBlitsPlainStringChildOntoCellSurface(t *testing.T) {
 		t.Fatalf("expected plain string child tail to blit into cell surface, got %q", text)
 	}
 }
+
+func TestPlaceAtInheritsParentBackgroundForSparseChild(t *testing.T) {
+	base := BlankSurface(4, 1)
+	bg := cellColor("#112233")
+	for x := 0; x < 4; x++ {
+		base.setCell(x, 0, Cell{Text: " ", Width: 1, Style: CellStyle{BG: bg}})
+	}
+
+	child := TransparentSurface(4, 1)
+	child.WriteText(1, 0, "x", CellStyle{FG: cellColor("#ffffff")})
+	got := base.placeAt(0, 0, child)
+
+	if text := got.SurfaceCellText(1, 0); text != "x" {
+		t.Fatalf("expected child text to render, got %q", text)
+	}
+	r, g, b, ok := got.SurfaceCellBG(1, 0)
+	if !ok || r != 0x11 || g != 0x22 || b != 0x33 {
+		t.Fatalf("expected parent background to shine through, got %v %d %d %d", ok, r, g, b)
+	}
+}

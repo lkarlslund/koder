@@ -48,3 +48,25 @@ func TestWindowFrameRendersTitleAndCloseInBorder(t *testing.T) {
 		t.Fatalf("expected close indicator in window border, got %q", top)
 	}
 }
+
+func TestWindowFrameContentInheritsFrameBackground(t *testing.T) {
+	palette := theme.Default().Palette
+	surface := WindowFrame{
+		Title:   "Help",
+		Content: TextPane{Content: "Hotkeys"},
+		Width:   24,
+	}.Render(&Context{Palette: palette}, Rect{W: 24, H: 5})
+
+	x := strings.Index(surface.Lines()[2], "Hotkeys")
+	if x < 0 {
+		t.Fatalf("expected help text in rendered window, got %q", strings.Join(surface.Lines(), "\n"))
+	}
+	r, g, b, ok := surface.SurfaceCellBG(x, 2)
+	if !ok {
+		t.Fatal("expected text cell to inherit window background")
+	}
+	want := ParseCellColor(string(palette.SidebarBackground))
+	if !want.Valid || r != want.R || g != want.G || b != want.B {
+		t.Fatalf("expected inherited background %v, got %d %d %d", want, r, g, b)
+	}
+}

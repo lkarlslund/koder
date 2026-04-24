@@ -89,7 +89,7 @@ func (s Split) measureVertical(ctx *Context, constraints Constraints) Size {
 }
 
 func (s Split) renderHorizontal(ctx *Context, bounds Rect) Surface {
-	base := BlankSurface(bounds.W, bounds.H)
+	base := TransparentSurface(bounds.W, bounds.H)
 	firstW, secondW := s.horizontalWidths(ctx, bounds.W)
 	if s.First != nil {
 		base = base.placeAt(0, 0, s.First.Render(ctx, Rect{X: bounds.X, Y: bounds.Y, W: firstW, H: bounds.H}))
@@ -105,7 +105,7 @@ func (s Split) renderHorizontal(ctx *Context, bounds Rect) Surface {
 }
 
 func (s Split) renderVertical(ctx *Context, bounds Rect) Surface {
-	base := BlankSurface(bounds.W, bounds.H)
+	base := TransparentSurface(bounds.W, bounds.H)
 	firstH, secondH := s.verticalHeights(ctx, bounds.H)
 	if s.First != nil {
 		base = base.placeAt(0, 0, s.First.Render(ctx, Rect{X: bounds.X, Y: bounds.Y, W: bounds.W, H: firstH}))
@@ -562,7 +562,7 @@ func (s ScrollFrame) Measure(ctx *Context, constraints Constraints) Size {
 }
 
 func (s ScrollFrame) Render(ctx *Context, bounds Rect) Surface {
-	base := BlankSurface(bounds.W, bounds.H)
+	base := TransparentSurface(bounds.W, bounds.H)
 	if s.Child == nil || bounds.W <= 0 || bounds.H <= 0 {
 		return base
 	}
