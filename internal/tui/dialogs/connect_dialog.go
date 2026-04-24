@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/theme"
 	. "github.com/lkarlslund/koder/internal/ui"
+	"github.com/lkarlslund/koder/internal/ui/textarea"
 )
 
 type ProviderConnectActionKind int
@@ -65,7 +65,7 @@ type ConnectDialog struct {
 	focus      connectFocus
 	fieldIndex int
 	buttonIdx  int
-	cursors    map[string]int
+	editors    map[string]textarea.Model
 }
 
 func NewConnectDialog(items []provider.Descriptor, configured map[string]config.Provider) ConnectDialog {
@@ -73,7 +73,7 @@ func NewConnectDialog(items []provider.Descriptor, configured map[string]config.
 		stage:      connectStageProvider,
 		items:      items,
 		configured: configured,
-		cursors:    map[string]int{},
+		editors:    map[string]textarea.Model{},
 	}
 	dialog.refilter()
 	return dialog
@@ -222,20 +222,20 @@ func (d *ConnectDialog) updateForm(msg KeyMsg) ProviderConnectAction {
 		if d.focus == connectFocusButtons {
 			d.moveButtons(-1)
 		} else {
-			d.moveCursor(-1)
+			d.updateCurrentEditor(msg)
 		}
 	case "right":
 		if d.focus == connectFocusButtons {
 			d.moveButtons(1)
 		} else {
-			d.moveCursor(1)
+			d.updateCurrentEditor(msg)
 		}
 	case "home", "ctrl+a":
-		d.moveCursorTo(0)
+		d.updateCurrentEditor(msg)
 	case "end", "ctrl+e":
-		d.moveCursorTo(len([]rune(d.fieldValue(d.currentFieldID()))))
+		d.updateCurrentEditor(msg)
 	case "backspace":
-		d.deleteRune()
+		d.updateCurrentEditor(msg)
 	case "ctrl+t":
 		return ProviderConnectAction{Kind: ProviderConnectActionTest, Draft: d.draft}
 	case "alt+t":
@@ -258,7 +258,7 @@ func (d *ConnectDialog) updateForm(msg KeyMsg) ProviderConnectAction {
 		}
 	default:
 		if msg.Type == KeyRunes {
-			d.appendText(msg.String())
+			d.updateCurrentEditor(msg)
 		}
 	}
 	return ProviderConnectAction{}
@@ -363,16 +363,8 @@ func (d *ConnectDialog) formDialog(width int, palette theme.Palette) Element {
 			BorderColor: palette.SidebarBorder,
 			Child: Column{
 				Children: []Child{
-					Fixed(Label{
-						Text: d.selected.Title,
-						Style: lipgloss.NewStyle().
-							Bold(true).
-							Foreground(palette.MarkdownHeadingPrimary),
-					}),
-					Fixed(Paragraph{
-						Text:  compactInlineText(d.selected.Description),
-						Style: lipgloss.NewStyle().Foreground(palette.ComposerMutedText),
-					}),
+					Fixed(Static{Content: d.selected.Title}),
+					Fixed(Static{Content: compactInlineText(d.selected.Description)}),
 				},
 				Spacing: 0,
 			},
@@ -392,10 +384,7 @@ func (d *ConnectDialog) formDialog(width int, palette theme.Palette) Element {
 	if len(d.models) > 0 || strings.TrimSpace(d.status) != "" {
 		auxChildren := make([]Child, 0, 2)
 		if len(d.models) > 0 {
-			auxChildren = append(auxChildren, Fixed(Paragraph{
-				Text:  "Discovered models: " + strings.Join(d.models[:minInt(4, len(d.models))], ", "),
-				Style: lipgloss.NewStyle().Foreground(palette.ComposerMutedText),
-			}))
+			auxChildren = append(auxChildren, Fixed(Static{Content: "Discovered models: " + strings.Join(d.models[:minInt(4, len(d.models))], ", ")}))
 		}
 		if status := strings.TrimSpace(d.status); status != "" {
 			auxChildren = append(auxChildren, Fixed(d.renderStatusElement(palette)))
@@ -431,74 +420,58 @@ func (d *ConnectDialog) formDialog(width int, palette theme.Palette) Element {
 }
 
 func (d ConnectDialog) renderFormField(field connectField, width int, palette theme.Palette, active bool) Element {
-	valueWidth := maxInt(18, width-4)
-	valueText := d.displayValue(field.ID)
-	valueStyle := lipgloss.NewStyle().Foreground(palette.MarkdownText)
-	background := palette.ScreenBackground
-	borderColor := palette.SidebarBorder
-	if active {
-		valueText = d.renderEditorContent(field.ID, d.fieldValue(field.ID), d.placeholderValue(field.ID), valueWidth)
-		valueStyle = lipgloss.NewStyle().
-			Foreground(palette.UserTextForeground).
-			Background(palette.UserTextBackground)
-		background = palette.UserTextBackground
-		borderColor = firstNonEmptyColor(palette.SelectionBackground, palette.ActivityText, palette.SidebarBorder)
-	} else if strings.HasPrefix(valueText, "(") {
-		valueStyle = lipgloss.NewStyle().Foreground(palette.ComposerMutedText).Italic(true)
-	}
+	fieldWidth := maxInt(18, width)
 	hintWidth := maxInt(16, width-PlainWidth(field.Label)-3)
 	hint := truncateText(field.Description, hintWidth)
 	return Column{
 		Children: []Child{
 			Fixed(Row{
 				Children: []Child{
-					Fixed(Label{
-						Text: field.Label,
-						Style: lipgloss.NewStyle().
-							Bold(true).
-							Foreground(palette.AssistantTimestampText),
-					}),
+					Fixed(Static{Content: field.Label}),
 					Flex(Spacer{}, 1),
-					Fixed(Label{
-						Text:  hint,
-						Style: lipgloss.NewStyle().Foreground(palette.ComposerMutedText),
-					}),
+					Fixed(Static{Content: hint}),
 				},
 			}),
-			Fixed(Panel{
-				Padding:      Insets{Left: 1, Right: 1},
-				Background:   background,
-				Foreground:   palette.MarkdownText,
-				BorderLeft:   true,
-				BorderRight:  true,
-				BorderTop:    true,
-				BorderBottom: true,
-				BorderColor:  borderColor,
-				Child: Label{
-					Text:  padRight(valueText, valueWidth),
-					Style: valueStyle,
-				},
-			}),
+			Fixed(d.renderInputField(field.ID, fieldWidth, palette, active)),
 		},
 		Spacing: 1,
 	}
 }
 
-func (d ConnectDialog) displayValue(fieldID string) string {
-	value := d.fieldValue(fieldID)
+func (d ConnectDialog) renderInputField(fieldID string, width int, palette theme.Palette, active bool) Element {
+	editor := d.editor(fieldID)
+	line := editor.VisibleLine()
+	before, cursor, after := line.Before(), line.Cursor(), line.After()
+	value := editor.Value()
 	if fieldID == "api_key" {
-		if value == "" {
-			return "(required)"
+		before = maskVisible(before)
+		cursor = maskVisible(cursor)
+		after = maskVisible(after)
+		if strings.TrimSpace(value) != "" {
+			value = maskVisible(value)
 		}
-		return strings.Repeat("•", minVisibleRunes(len([]rune(value)), 12))
 	}
-	if fieldID == "model" && strings.TrimSpace(value) == "" {
-		return "(set a model)"
+	foreground := palette.MarkdownText
+	background := palette.ScreenBackground
+	borderColor := palette.SidebarBorder
+	if active {
+		foreground = palette.UserTextForeground
+		background = palette.UserTextBackground
+		borderColor = firstNonEmptyColor(palette.SelectionBackground, palette.ActivityText, palette.SidebarBorder)
 	}
-	if strings.TrimSpace(value) == "" {
-		return "(empty)"
+	return InputField{
+		Width:         width,
+		Value:         value,
+		Placeholder:   d.placeholderValue(fieldID),
+		ContentBefore: before,
+		ContentCursor: cursor,
+		ContentAfter:  after,
+		CursorVisible: active && editor.CursorVisible(),
+		Foreground:    foreground,
+		Background:    background,
+		PlaceholderFG: palette.ComposerMutedText,
+		BorderColor:   borderColor,
 	}
-	return value
 }
 
 func (d ConnectDialog) placeholderValue(fieldID string) string {
@@ -526,7 +499,7 @@ func (d *ConnectDialog) selectProvider(item provider.Descriptor) {
 	d.status = ""
 	d.statusKind = connectStatusNone
 	d.draft, _ = provider.BuildDraft(item.ID, d.configured)
-	d.resetCursors()
+	d.resetEditors()
 	if len(item.AuthMethods) > 1 {
 		d.stage = connectStageAuth
 		return
@@ -544,7 +517,7 @@ func (d *ConnectDialog) chooseAuthMethod() {
 	}
 	method := d.selected.AuthMethods[d.authIndex].ID
 	d.draft = d.draft.WithAuthMethod(method, d.selected)
-	d.resetCursors()
+	d.resetEditors()
 	d.stage = connectStageForm
 	d.focus = connectFocusFields
 	d.fieldIndex = 0
@@ -650,43 +623,6 @@ func (d *ConnectDialog) advanceFocus(delta int) {
 	d.focus = connectFocusButtons
 }
 
-func (d *ConnectDialog) deleteRune() {
-	if d.focus != connectFocusFields {
-		return
-	}
-	id := d.currentFieldID()
-	value := []rune(d.fieldValue(id))
-	cursor := d.cursorPosition(id)
-	if len(value) == 0 || cursor <= 0 {
-		return
-	}
-	next := append([]rune{}, value[:cursor-1]...)
-	next = append(next, value[cursor:]...)
-	d.setFieldValue(id, string(next))
-	d.moveCursorTo(cursor - 1)
-}
-
-func (d *ConnectDialog) appendText(input string) {
-	if d.focus != connectFocusFields {
-		return
-	}
-	id := d.currentFieldID()
-	if id == "" {
-		return
-	}
-	current := []rune(d.fieldValue(id))
-	insert := []rune(input)
-	cursor := d.cursorPosition(id)
-	if cursor > len(current) {
-		cursor = len(current)
-	}
-	next := append([]rune{}, current[:cursor]...)
-	next = append(next, insert...)
-	next = append(next, current[cursor:]...)
-	d.setFieldValue(id, string(next))
-	d.moveCursorTo(cursor + len(insert))
-}
-
 func (d *ConnectDialog) adjustModel(delta int) {
 	if d.currentFieldID() != "model" || len(d.models) == 0 {
 		return
@@ -735,7 +671,6 @@ func (d *ConnectDialog) setFieldValue(id, value string) {
 	case "model":
 		d.draft.Model = value
 	}
-	d.clampCursor(id)
 }
 
 func clampWidth(width, minWidth, maxWidth int) int {
@@ -766,36 +701,57 @@ func windowBounds(index, total, visible int) (int, int) {
 	return start, end
 }
 
-func minVisibleRunes(value, max int) int {
-	if value < max {
-		return value
+func (d *ConnectDialog) updateCurrentEditor(msg KeyMsg) {
+	if d.focus != connectFocusFields {
+		return
 	}
-	return max
-}
-
-func fitEditorTail(value, placeholder string, width int) string {
-	if width <= 0 {
-		return ""
-	}
-	if strings.TrimSpace(value) == "" {
-		if PlainWidth(placeholder) <= width {
-			return placeholder
-		}
-		return truncateText(placeholder, width)
-	}
-	runes := []rune(value)
-	if len(runes) >= width {
-		return "…" + string(runes[len(runes)-maxInt(1, width-1):]) + "█"
-	}
-	return value + "█"
-}
-
-func (d *ConnectDialog) moveCursor(delta int) {
 	id := d.currentFieldID()
 	if id == "" {
 		return
 	}
-	d.moveCursorTo(d.cursorPosition(id) + delta)
+	editor := d.editor(id)
+	updated, _ := editor.Update(msg)
+	d.storeEditor(id, updated)
+	d.setFieldValue(id, updated.Value())
+}
+
+func (d ConnectDialog) editor(id string) textarea.Model {
+	if d.editors == nil {
+		return d.newEditor(id)
+	}
+	editor, ok := d.editors[id]
+	if !ok {
+		return d.newEditor(id)
+	}
+	return editor
+}
+
+func (d *ConnectDialog) storeEditor(id string, editor textarea.Model) {
+	if d.editors == nil {
+		d.editors = map[string]textarea.Model{}
+	}
+	d.editors[id] = editor
+}
+
+func (d ConnectDialog) newEditor(id string) textarea.Model {
+	editor := textarea.New()
+	editor.BlinkEnabled = false
+	editor.Focus()
+	editor.SetHeight(1)
+	editor.SetWidth(256)
+	editor.SetValue(d.fieldValue(id))
+	return editor
+}
+
+func (d *ConnectDialog) resetEditors() {
+	d.editors = map[string]textarea.Model{}
+	for _, field := range d.formFields() {
+		d.editors[field.ID] = d.newEditor(field.ID)
+	}
+}
+
+func (d *ConnectDialog) resetCursors() {
+	d.resetEditors()
 }
 
 func (d *ConnectDialog) moveCursorTo(pos int) {
@@ -803,115 +759,16 @@ func (d *ConnectDialog) moveCursorTo(pos int) {
 	if id == "" {
 		return
 	}
-	if d.cursors == nil {
-		d.cursors = map[string]int{}
-	}
-	if pos < 0 {
-		pos = 0
-	}
-	maxPos := len([]rune(d.fieldValue(id)))
-	if pos > maxPos {
-		pos = maxPos
-	}
-	d.cursors[id] = pos
+	editor := d.editor(id)
+	editor.SetCursor(pos)
+	d.storeEditor(id, editor)
 }
 
-func (d ConnectDialog) cursorPosition(id string) int {
-	if d.cursors == nil {
-		return len([]rune(d.fieldValue(id)))
+func maskVisible(input string) string {
+	if strings.TrimSpace(input) == "" {
+		return input
 	}
-	pos, ok := d.cursors[id]
-	if !ok {
-		return len([]rune(d.fieldValue(id)))
-	}
-	maxPos := len([]rune(d.fieldValue(id)))
-	if pos > maxPos {
-		return maxPos
-	}
-	if pos < 0 {
-		return 0
-	}
-	return pos
-}
-
-func (d *ConnectDialog) clampCursor(id string) {
-	if d.cursors == nil {
-		return
-	}
-	maxPos := len([]rune(d.fieldValue(id)))
-	if d.cursors[id] > maxPos {
-		d.cursors[id] = maxPos
-	}
-	if d.cursors[id] < 0 {
-		d.cursors[id] = 0
-	}
-}
-
-func (d *ConnectDialog) resetCursors() {
-	d.cursors = map[string]int{}
-	for _, field := range d.formFields() {
-		d.cursors[field.ID] = len([]rune(d.fieldValue(field.ID)))
-	}
-}
-
-func (d ConnectDialog) renderEditorContent(fieldID, value, placeholder string, width int) string {
-	if width <= 0 {
-		return ""
-	}
-	displayRunes := []rune(value)
-	if fieldID == "api_key" {
-		displayRunes = []rune(strings.Repeat("•", len([]rune(value))))
-	}
-	cursor := d.cursorPosition(fieldID)
-	if strings.TrimSpace(value) == "" && placeholder != "" {
-		text := truncateText(placeholder, maxInt(1, width-1))
-		return padRight(text, width-1)
-	}
-	if cursor > len(displayRunes) {
-		cursor = len(displayRunes)
-	}
-	available := maxInt(1, width-1)
-	start := 0
-	if cursor > available {
-		start = cursor - available
-	}
-	if start > 0 {
-		start--
-	}
-	end := minInt(len(displayRunes), start+available)
-	segment := string(displayRunes[start:end])
-	cursorCol := cursor - start
-	if start > 0 {
-		segment = "…" + string(displayRunes[start+1:end])
-		cursorCol = maxInt(0, cursorCol-1)
-	}
-	segmentRunes := []rune(segment)
-	if cursorCol > len(segmentRunes) {
-		cursorCol = len(segmentRunes)
-	}
-	before := string(segmentRunes[:cursorCol])
-	after := string(segmentRunes[cursorCol:])
-	content := before + "█" + after
-	return padRight(content, width)
-}
-
-func (d ConnectDialog) renderStatus(palette theme.Palette) string {
-	status := strings.TrimSpace(d.status)
-	if status == "" {
-		return ""
-	}
-	label := "WAIT"
-	labelColor := palette.ActivityText
-	switch d.statusKind {
-	case connectStatusSuccess:
-		label = "OK"
-		labelColor = palette.DiffAddedText
-	case connectStatusError:
-		label = "ERROR"
-		labelColor = palette.DiffDeletedText
-	}
-	_ = labelColor
-	return "[" + label + "] " + status
+	return strings.Repeat("•", len([]rune(input)))
 }
 
 func (d ConnectDialog) renderStatusElement(palette theme.Palette) Element {
@@ -929,27 +786,6 @@ func (d ConnectDialog) renderStatusElement(palette theme.Palette) Element {
 		label = "ERROR"
 		labelColor = palette.DiffDeletedText
 	}
-	return Row{
-		Children: []Child{
-			Fixed(Label{
-				Text: "[" + label + "]",
-				Style: lipgloss.NewStyle().
-					Bold(true).
-					Foreground(labelColor),
-			}),
-			Fixed(Label{
-				Text:  status,
-				Style: lipgloss.NewStyle().Foreground(palette.MarkdownText),
-			}),
-		},
-		Spacing: 1,
-	}
-}
-
-func padRight(input string, width int) string {
-	got := PlainWidth(input)
-	if got >= width {
-		return truncateText(input, width)
-	}
-	return input + strings.Repeat(" ", width-got)
+	_ = labelColor
+	return Static{Content: "[" + label + "] " + status}
 }
