@@ -40,7 +40,12 @@ func (w *transcriptWidget) Surface(_ *ui.Context, bounds ui.Rect) ui.Surface {
 	if w.valid && !w.dirty && w.bounds == bounds {
 		return w.surface
 	}
+	retained := w.model.syncRetainedTranscript()
 	surface := w.model.viewport.VisibleSurface().Normalize(max(0, bounds.W), max(0, bounds.H))
+	if retained != nil {
+		rendered, _, _ := retained.RenderVisible(&ui.Context{Palette: w.model.palette}, max(0, bounds.W), max(0, bounds.H), max(0, w.model.viewport.YOffset))
+		surface = rendered
+	}
 	w.bounds = bounds
 	w.surface = surface
 	w.valid = true
@@ -291,6 +296,12 @@ func hashStrings(values ...string) uint64 {
 
 func (m *Model) ensureMainScreenWidget() *mainScreenWidget {
 	if m.mainScreen != nil {
+		m.mainScreen.model = m
+		m.mainScreen.transcript.model = m
+		m.mainScreen.activity.model = m
+		m.mainScreen.composer.model = m
+		m.mainScreen.sidebar.model = m
+		m.mainScreen.statusPane.model = m
 		return m.mainScreen
 	}
 	m.mainScreen = &mainScreenWidget{

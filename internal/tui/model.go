@@ -333,6 +333,7 @@ type Model struct {
 	disconnectDialog   *dialogs.DisconnectDialog
 	modelDialog        *dialogs.ModelDialog
 	toolsDialog        *dialogs.ToolsDialog
+	mainWindowView     *modelWindow
 	debug              *debugsrv.Recorder
 	uiRoot             *ui.Root
 	uiRuntime          ui.Runtime
@@ -1345,6 +1346,13 @@ func (m *Model) renderComposerAreaElement() ui.Element {
 }
 
 func (m *Model) shouldShowComposerArea() bool {
+	if m.composerAreaHasContent() {
+		return true
+	}
+	return m.composer.Focused()
+}
+
+func (m *Model) composerAreaHasContent() bool {
 	if len(m.draftAttachments) > 0 || m.queuedPrompt != nil {
 		return true
 	}
@@ -1356,8 +1364,7 @@ func (m *Model) shouldShowComposerArea() bool {
 		return true
 	}
 	return strings.TrimSpace(m.composer.Placeholder) != "" ||
-		strings.TrimSpace(m.composer.Value()) != "" ||
-		m.composer.Focused()
+		strings.TrimSpace(m.composer.Value()) != ""
 }
 
 func (m *Model) composerAreaHeight() int {
@@ -1610,6 +1617,9 @@ func (m *Model) refreshViewportPreserve() {
 
 func (m *Model) refreshViewportAt(offset int) {
 	m.invalidateMainSurface()
+	if m.hasExpandedToolRuns() {
+		m.transcriptDirty = true
+	}
 	m.transcriptControls = nil
 	retained := m.syncRetainedTranscript()
 	if retained == nil {
@@ -1636,6 +1646,15 @@ func (m *Model) refreshViewportAt(offset int) {
 	if main := m.ensureMainScreenWidget(); main != nil {
 		main.transcript.Invalidate()
 	}
+}
+
+func (m *Model) hasExpandedToolRuns() bool {
+	for _, expanded := range m.expandedToolRuns {
+		if expanded {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *Model) invalidateBodyCache() {
@@ -1740,6 +1759,12 @@ func (m *Model) syncRetainedTranscriptItems(retained *ui.RetainedTranscript, ite
 	for suffix < len(existing)-prefix && suffix < len(items)-prefix &&
 		existing[len(existing)-1-suffix].Key == items[len(items)-1-suffix].Key {
 		suffix++
+	}
+	for idx := 0; idx < prefix; idx++ {
+		retained.Replace(idx, items[idx])
+	}
+	for idx := 0; idx < suffix; idx++ {
+		retained.Replace(len(items)-1-idx, items[len(items)-1-idx])
 	}
 	removeEnd := len(existing) - suffix
 	for idx := removeEnd - 1; idx >= prefix; idx-- {
@@ -4393,7 +4418,7 @@ func (m *Model) composerShouldBlink() bool {
 func (m *Model) syncComposerVisibility() {
 	beforeFocus := m.composer.Focused()
 	beforeCursorVisible := m.composer.CursorVisible()
-	shouldFocus := !m.hasModalOverlay() && !m.hasApprovalPrompt()
+	shouldFocus := !m.hasModalOverlay() && !m.hasApprovalPrompt() && (beforeFocus || m.composer.BlinkEnabled || m.composerAreaHasContent())
 	if shouldFocus {
 		if !m.composer.Focused() {
 			m.composer.Focus()

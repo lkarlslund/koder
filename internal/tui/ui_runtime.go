@@ -122,41 +122,46 @@ func (m *Model) syncUIRoot() *ui.Root {
 }
 
 func (m *Model) mainWindow() ui.Window {
-	return &modelWindow{
-		base: ui.BaseWindow{
-			WindowID:      mainWindowID,
-			Order:         0,
-			FocusableFlag: true,
-			VisibleFlag:   true,
-			Dirty:         true,
-			OnFocus: func() {
-				m.syncComposerVisibility()
+	if m.mainWindowView == nil {
+		m.mainWindowView = &modelWindow{
+			base: ui.BaseWindow{
+				WindowID:      mainWindowID,
+				Order:         0,
+				FocusableFlag: true,
+				VisibleFlag:   true,
+				Dirty:         true,
+				OnFocus: func() {
+					m.syncComposerVisibility()
+				},
+				OnBlur: func() {
+					m.syncComposerVisibility()
+				},
 			},
-			OnBlur: func() {
-				m.syncComposerVisibility()
+			model: m,
+			render: func(m *Model, bounds ui.Rect) ui.Surface {
+				return m.renderBodySurface().Normalize(max(0, bounds.W), max(0, bounds.H))
 			},
-		},
-		model: m,
-		render: func(m *Model, bounds ui.Rect) ui.Surface {
-			return m.renderBodySurface().Normalize(max(0, bounds.W), max(0, bounds.H))
-		},
-		key: func(m *Model, msg ui.KeyMsg) (bool, ui.Cmd) {
-			return m.handleMainWindowKey(msg)
-		},
-		mouse: func(m *Model, msg ui.MouseMsg) (bool, ui.Cmd) {
-			return m.handleMainWindowMouse(msg)
-		},
-		timer: func(m *Model, event ui.TimerEvent) (bool, ui.Cmd) {
-			if event.Owner != composerBlinkTimerOwner {
-				return false, nil
-			}
-			if !m.composer.ToggleBlink() {
-				return false, nil
-			}
-			m.invalidateFooterCache()
-			return true, nil
-		},
+			key: func(m *Model, msg ui.KeyMsg) (bool, ui.Cmd) {
+				return m.handleMainWindowKey(msg)
+			},
+			mouse: func(m *Model, msg ui.MouseMsg) (bool, ui.Cmd) {
+				return m.handleMainWindowMouse(msg)
+			},
+			timer: func(m *Model, event ui.TimerEvent) (bool, ui.Cmd) {
+				if event.Owner != composerBlinkTimerOwner {
+					return false, nil
+				}
+				if !m.composer.ToggleBlink() {
+					return false, nil
+				}
+				m.invalidateFooterCache()
+				return true, nil
+			},
+		}
+		return m.mainWindowView
 	}
+	m.mainWindowView.model = m
+	return m.mainWindowView
 }
 
 func (m *Model) overlayWindows() []ui.Window {

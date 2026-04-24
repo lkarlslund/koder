@@ -267,6 +267,9 @@ func (r *Root) SetMainWindow(window Window) {
 	if r == nil {
 		return
 	}
+	if r.main == window {
+		return
+	}
 	r.main = window
 	r.RequestRedraw()
 	if window != nil && window.Focusable() && r.focused == "" {
@@ -294,6 +297,9 @@ func (r *Root) PushWindow(window Window) {
 
 func (r *Root) SetWindows(windows []Window) {
 	if r == nil {
+		return
+	}
+	if len(r.windows) == 0 && len(windows) == 0 {
 		return
 	}
 	desired := make(map[WindowID]Window, len(windows))

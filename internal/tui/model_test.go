@@ -3173,6 +3173,31 @@ func TestRenderBodyUsesTranscriptElementInsteadOfViewportString(t *testing.T) {
 	}
 }
 
+func TestSyncRetainedTranscriptItemsReplacesMatchingKeys(t *testing.T) {
+	retained := ui.NewRetainedTranscript()
+	first := ui.TranscriptItem{
+		Key:     "same",
+		Element: ui.NewCachedElement(ui.Paragraph{Text: "before"}, 1),
+	}
+	second := ui.TranscriptItem{
+		Key:     "same",
+		Element: ui.NewCachedElement(ui.Paragraph{Text: "after"}, 1),
+	}
+
+	m := Model{}
+	m.syncRetainedTranscriptItems(retained, []ui.TranscriptItem{first})
+	m.syncRetainedTranscriptItems(retained, []ui.TranscriptItem{second})
+
+	rendered := retained.Render(&ui.Context{}, ui.Rect{W: 16, H: 1})
+	got := strings.Join(rendered.Lines(), "\n")
+	if !strings.Contains(got, "after") {
+		t.Fatalf("expected retained transcript item to be replaced, got %q", got)
+	}
+	if strings.Contains(got, "before") {
+		t.Fatalf("expected stale retained transcript item to be removed, got %q", got)
+	}
+}
+
 func TestViewUsesFullTerminalWidthWithSidebar(t *testing.T) {
 	m := Model{
 		showSidebar: true,

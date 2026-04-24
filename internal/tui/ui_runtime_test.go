@@ -121,3 +121,18 @@ func TestMainWindowFocusSyncsComposerLifecycle(t *testing.T) {
 		t.Fatal("expected focus transition to invalidate the composer area cache")
 	}
 }
+
+func TestSyncUIRootNoopKeepsRootClean(t *testing.T) {
+	m := newRuntimeTestModel(t)
+	_ = m.viewSurface()
+
+	root := m.syncUIRoot()
+	if root.NeedsRedraw() {
+		t.Fatal("expected synced root to stay clean when nothing changed")
+	}
+
+	_ = m.syncUIRoot()
+	if root.NeedsRedraw() {
+		t.Fatal("expected repeated sync to avoid marking the root dirty")
+	}
+}
