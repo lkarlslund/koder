@@ -2937,7 +2937,7 @@ func TestMouseClickOnHelpModalCloseIndicatorClosesModal(t *testing.T) {
 	}
 	m.mouseEnabled = true
 	m.width = 100
-	m.height = 28
+	m.height = 40
 	m.openHelpModal()
 
 	view := m.View()

@@ -14,6 +14,7 @@ import (
 func renderConnectDialog(dialog ConnectDialog, width int, palette theme.Palette) string {
 	return uitest.RenderElementText(&ui.Context{Palette: palette}, dialog, width, 0)
 }
+
 func TestConnectDialogSelectsProviderAndSavesDraft(t *testing.T) {
 	dialog := NewConnectDialog(provider.Catalog(), map[string]config.Provider{})
 
@@ -77,6 +78,44 @@ func TestConnectDialogAltHotkeysTriggerActions(t *testing.T) {
 	}
 	if action := dialog.Update(ui.KeyMsg{Type: ui.KeyRunes, Alt: true, Runes: []rune("s")}); action.Kind != ProviderConnectActionSave {
 		t.Fatalf("expected alt+s to trigger save, got %#v", action)
+	}
+	if action := dialog.Update(ui.KeyMsg{Type: ui.KeyRunes, Alt: true, Runes: []rune("c")}); action.Kind != ProviderConnectActionCancel {
+		t.Fatalf("expected alt+c to trigger cancel, got %#v", action)
+	}
+}
+
+func TestConnectDialogActivateControlRoutesButtons(t *testing.T) {
+	dialog := NewConnectDialog(provider.Catalog(), map[string]config.Provider{})
+	dialog.selectProvider(provider.Catalog()[0])
+
+	if action := dialog.ActivateControl("test"); action.Kind != ProviderConnectActionTest {
+		t.Fatalf("expected test button action, got %#v", action)
+	}
+	if action := dialog.ActivateControl("save"); action.Kind != ProviderConnectActionSave {
+		t.Fatalf("expected save button action, got %#v", action)
+	}
+	if action := dialog.ActivateControl("cancel"); action.Kind != ProviderConnectActionCancel {
+		t.Fatalf("expected cancel button action, got %#v", action)
+	}
+}
+
+func TestConnectDialogRenderRegistersButtonControls(t *testing.T) {
+	dialog := NewConnectDialog(provider.Catalog(), map[string]config.Provider{})
+	dialog.selectProvider(provider.Catalog()[0])
+	runtime := &ui.Runtime{}
+	ctx := &ui.Context{Palette: theme.Resolve("tokyonight").Palette, Runtime: runtime}
+	size := dialog.Measure(ctx, ui.Constraints{MaxW: 90, MaxH: 40})
+	_ = dialog.Render(ctx, ui.Rect{W: size.W, H: size.H})
+
+	controls := runtime.Controls()
+	ids := map[string]bool{}
+	for _, control := range controls {
+		ids[control.ID] = true
+	}
+	for _, id := range []string{"test", "save", "cancel"} {
+		if !ids[id] {
+			t.Fatalf("expected rendered dialog to register %q control, got %#v", id, controls)
+		}
 	}
 }
 

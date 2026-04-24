@@ -1,5 +1,7 @@
 package tui
 
+import "fmt"
+
 import (
 	"github.com/lkarlslund/koder/internal/tui/dialogs"
 	"github.com/lkarlslund/koder/internal/ui"
@@ -282,7 +284,27 @@ func (m *Model) overlayWindows() []ui.Window {
 				m.status = "Provider connect cancelled"
 				return m.syncWindowTitleCmd()
 			}
-			return nil
+			action := m.connectDialog.ActivateControl(controlID)
+			switch action.Kind {
+			case dialogs.ProviderConnectActionTest:
+				m.connectDialog.SetStatus("Testing connection…")
+				return ui.Batch(m.probeProviderCmd(action.Draft), m.syncWindowTitleCmd())
+			case dialogs.ProviderConnectActionSave:
+				if err := m.saveProviderDraft(action.Draft); err != nil {
+					m.connectDialog.SetStatusError("Save failed: " + err.Error())
+					m.status = err.Error()
+					return m.syncWindowTitleCmd()
+				}
+				m.closeConnectDialog()
+				m.status = fmt.Sprintf("Connected provider %s", action.Draft.ProviderID)
+				return ui.Batch(m.loadModelsCmd(action.Draft.ProviderID, true), m.syncWindowTitleCmd())
+			case dialogs.ProviderConnectActionCancel:
+				m.closeConnectDialog()
+				m.status = "Provider connect cancelled"
+				return m.syncWindowTitleCmd()
+			default:
+				return nil
+			}
 		}))
 	}
 	if m.hasAgentsModal() {

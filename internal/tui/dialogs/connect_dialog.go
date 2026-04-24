@@ -193,6 +193,20 @@ func (d *ConnectDialog) updateAuthPicker(msg KeyMsg) ProviderConnectAction {
 }
 
 func (d *ConnectDialog) updateForm(msg KeyMsg) ProviderConnectAction {
+	buttons := d.formButtons()
+	buttons.Index = d.buttonIdx
+	if idx, ok := buttons.HotkeyIndex(msg); ok {
+		d.focus = connectFocusButtons
+		d.buttonIdx = idx
+		switch idx {
+		case 0:
+			return ProviderConnectAction{Kind: ProviderConnectActionTest, Draft: d.draft}
+		case 1:
+			return ProviderConnectAction{Kind: ProviderConnectActionSave, Draft: d.draft}
+		default:
+			return ProviderConnectAction{Kind: ProviderConnectActionCancel}
+		}
+	}
 	switch msg.String() {
 	case "esc":
 		return ProviderConnectAction{Kind: ProviderConnectActionCancel}
@@ -224,10 +238,6 @@ func (d *ConnectDialog) updateForm(msg KeyMsg) ProviderConnectAction {
 		d.updateCurrentEditor(msg)
 	case "ctrl+t":
 		return ProviderConnectAction{Kind: ProviderConnectActionTest, Draft: d.draft}
-	case "alt+t":
-		return ProviderConnectAction{Kind: ProviderConnectActionTest, Draft: d.draft}
-	case "alt+s":
-		return ProviderConnectAction{Kind: ProviderConnectActionSave, Draft: d.draft}
 	case "enter":
 		if d.focus == connectFocusButtons {
 			switch d.buttonIdx {
@@ -393,15 +403,8 @@ func (d *ConnectDialog) formDialog(width int, palette theme.Palette) Element {
 			},
 		}))
 	}
-	buttons := ButtonRow{
-		Buttons: []Button{
-			{Label: "Test", Hotkey: 't', Focused: d.focus == connectFocusButtons && d.buttonIdx == 0},
-			{Label: "Save", Hotkey: 's', Focused: d.focus == connectFocusButtons && d.buttonIdx == 1, Primary: true},
-			{Label: "Cancel", Focused: d.focus == connectFocusButtons && d.buttonIdx == 2},
-		},
-		Align: HorizontalAlignRight,
-		Width: dialogWidth - 4,
-	}
+	buttons := d.formButtons()
+	buttons.Index = d.buttonIdx
 	buttons.Width = maxInt(0, dialogWidth-6)
 	return WindowFrame{
 		Title: "Connect Provider",
@@ -415,6 +418,17 @@ func (d *ConnectDialog) formDialog(width int, palette theme.Palette) Element {
 			Spacing: 2,
 		},
 		ShowClose: true,
+	}
+}
+
+func (d ConnectDialog) formButtons() ButtonRow {
+	return ButtonRow{
+		Buttons: []Button{
+			{ID: "test", Label: "Test", Hotkey: 't'},
+			{ID: "save", Label: "Save", Hotkey: 's', Primary: true},
+			{ID: "cancel", Label: "Cancel", Hotkey: 'c'},
+		},
+		Align: HorizontalAlignRight,
 	}
 }
 
@@ -599,6 +613,25 @@ func (d *ConnectDialog) moveButtons(delta int) {
 	}
 	if d.buttonIdx > 2 {
 		d.buttonIdx = 2
+	}
+}
+
+func (d *ConnectDialog) ActivateControl(controlID string) ProviderConnectAction {
+	switch controlID {
+	case "test":
+		d.focus = connectFocusButtons
+		d.buttonIdx = 0
+		return ProviderConnectAction{Kind: ProviderConnectActionTest, Draft: d.draft}
+	case "save":
+		d.focus = connectFocusButtons
+		d.buttonIdx = 1
+		return ProviderConnectAction{Kind: ProviderConnectActionSave, Draft: d.draft}
+	case "cancel":
+		d.focus = connectFocusButtons
+		d.buttonIdx = 2
+		return ProviderConnectAction{Kind: ProviderConnectActionCancel}
+	default:
+		return ProviderConnectAction{}
 	}
 }
 
