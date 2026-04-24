@@ -68,6 +68,27 @@ func TestSectionRendersTitleAbovePanel(t *testing.T) {
 	}
 }
 
+func TestListSelectionChangedCallback(t *testing.T) {
+	list := List{
+		Items: []ListItem{
+			{Primary: "A"},
+			{Primary: "B"},
+		},
+	}
+	var gotIndex int
+	var gotItem ListItem
+	list.OnSelectionChanged = func(index int, item ListItem) {
+		gotIndex = index
+		gotItem = item
+	}
+	if !list.Move(1) {
+		t.Fatal("expected selection to move")
+	}
+	if gotIndex != 1 || gotItem.Primary != "B" {
+		t.Fatalf("unexpected callback payload: index=%d item=%+v", gotIndex, gotItem)
+	}
+}
+
 func TestScrollFrameRendersVisibleWindowAtOffset(t *testing.T) {
 	got := RenderElement(nil, ScrollFrame{
 		Child:   Static{Content: "line1\nline2\nline3\nline4"},

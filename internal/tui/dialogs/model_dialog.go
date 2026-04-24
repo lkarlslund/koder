@@ -57,8 +57,8 @@ func NewModelDialog(providerID string, models []domain.Model, current string) Mo
 func (d *ModelDialog) Update(msg KeyMsg) ModelDialogAction {
 	d.ensureButtons()
 	var action ModelDialogAction
-	d.buttons.Buttons[0].OnPress = func() { action = d.selectCurrent() }
-	d.buttons.Buttons[1].OnPress = func() { action = ModelDialogAction{Kind: ModelDialogActionCancel} }
+	d.buttons.Buttons[0].OnClick = func() { action = d.selectCurrent() }
+	d.buttons.Buttons[1].OnClick = func() { action = ModelDialogAction{Kind: ModelDialogActionCancel} }
 	if d.buttons.ActivateHotkey(msg) {
 		return action
 	}
@@ -168,18 +168,26 @@ func (d ModelDialog) dialog(width int, palette theme.Palette) Element {
 		}
 	}
 
-	return Dialog{
+	buttons := d.buttonRow(dialogWidth)
+	buttons.Width = maxInt(0, dialogWidth-6)
+	return WindowFrame{
 		Title: "Select Model",
-		Body: Column{
+		Width: dialogWidth,
+		Content: Column{
 			Children: []Child{
-				Fixed(staticBlock("Filter: " + d.Query)),
-				Fixed(Spacer{H: 1}),
-				Fixed(Section{Width: listWidth, Child: list}),
+				Fixed(Column{
+					Children: []Child{
+						Fixed(staticBlock("Filter: " + d.Query)),
+						Fixed(Spacer{H: 1}),
+						Fixed(Section{Width: listWidth, Child: list}),
+					},
+				}),
+				Fixed(buttons),
+				Fixed(Static{Content: "Enter to select, Esc to cancel"}),
 			},
+			Spacing: 2,
 		},
-		Buttons: d.buttonRow(dialogWidth),
-		Footer:  "Enter to select, Esc to cancel",
-		Width:   dialogWidth,
+		ShowClose: true,
 	}
 }
 
@@ -220,8 +228,8 @@ func firstNonEmptyModelValue(values ...string) string {
 func (d *ModelDialog) ActivateControl(controlID string) ModelDialogAction {
 	d.ensureButtons()
 	var action ModelDialogAction
-	d.buttons.Buttons[0].OnPress = func() { action = d.selectCurrent() }
-	d.buttons.Buttons[1].OnPress = func() { action = ModelDialogAction{Kind: ModelDialogActionCancel} }
+	d.buttons.Buttons[0].OnClick = func() { action = d.selectCurrent() }
+	d.buttons.Buttons[1].OnClick = func() { action = ModelDialogAction{Kind: ModelDialogActionCancel} }
 	switch controlID {
 	case "ok", "cancel":
 		d.focus = pickerDialogFocusButtons

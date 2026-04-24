@@ -60,8 +60,8 @@ func NewSessionDialog(items []SessionItem, showCWD bool) SessionDialog {
 func (d *SessionDialog) Update(msg KeyMsg) SessionDialogAction {
 	d.ensureButtons()
 	var action SessionDialogAction
-	d.buttons.Buttons[0].OnPress = func() { action = d.selectCurrent() }
-	d.buttons.Buttons[1].OnPress = func() { action = SessionDialogAction{Kind: SessionDialogActionCancel} }
+	d.buttons.Buttons[0].OnClick = func() { action = d.selectCurrent() }
+	d.buttons.Buttons[1].OnClick = func() { action = SessionDialogAction{Kind: SessionDialogActionCancel} }
 
 	if d.buttons.ActivateHotkey(msg) {
 		return action
@@ -201,36 +201,44 @@ func (d SessionDialog) dialog(width int, palette theme.Palette) Element {
 		}
 	}
 
-	return Dialog{
+	buttons := d.buttonRow(contentWidth)
+	buttons.Width = maxInt(0, dialogWidth-6)
+	return WindowFrame{
 		Title: "Resume Session",
-		Body: Column{
+		Width: dialogWidth,
+		Content: Column{
 			Children: []Child{
-				Fixed(staticBlock(fmt.Sprintf("Filter: %s", d.Query))),
-				Fixed(Spacer{H: 1}),
-				Fixed(Section{Width: contentWidth, Child: list}),
-				Fixed(Spacer{H: 1}),
-				Fixed(Section{
-					Title:       "Preview",
-					Width:       contentWidth,
-					Padding:     Insets{Top: 1, Left: 1, Right: 1},
-					Background:  palette.ScreenBackground,
-					Foreground:  palette.SidebarForeground,
-					BorderColor: palette.SidebarBorder,
-					Child:       TextPane{Content: details},
+				Fixed(Column{
+					Children: []Child{
+						Fixed(staticBlock(fmt.Sprintf("Filter: %s", d.Query))),
+						Fixed(Spacer{H: 1}),
+						Fixed(Section{Width: contentWidth, Child: list}),
+						Fixed(Spacer{H: 1}),
+						Fixed(Section{
+							Title:       "Preview",
+							Width:       contentWidth,
+							Padding:     Insets{Top: 1, Left: 1, Right: 1},
+							Background:  palette.ScreenBackground,
+							Foreground:  palette.SidebarForeground,
+							BorderColor: palette.SidebarBorder,
+							Child:       TextPane{Content: details},
+						}),
+					},
 				}),
+				Fixed(buttons),
+				Fixed(Static{Content: "Enter resumes the highlighted session. Esc creates a new session."}),
 			},
+			Spacing: 2,
 		},
-		Buttons: d.buttonRow(contentWidth),
-		Footer:  "Enter resumes the highlighted session. Esc creates a new session.",
-		Width:   dialogWidth,
+		ShowClose: true,
 	}
 }
 
 func (d *SessionDialog) ActivateControl(controlID string) SessionDialogAction {
 	d.ensureButtons()
 	var action SessionDialogAction
-	d.buttons.Buttons[0].OnPress = func() { action = d.selectCurrent() }
-	d.buttons.Buttons[1].OnPress = func() { action = SessionDialogAction{Kind: SessionDialogActionCancel} }
+	d.buttons.Buttons[0].OnClick = func() { action = d.selectCurrent() }
+	d.buttons.Buttons[1].OnClick = func() { action = SessionDialogAction{Kind: SessionDialogActionCancel} }
 	switch controlID {
 	case "ok", "cancel":
 		d.focus = pickerDialogFocusButtons

@@ -392,6 +392,7 @@ type Button struct {
 	Focused  bool
 	Primary  bool
 	Selected bool
+	OnClick  func()
 	OnPress  func()
 }
 
@@ -493,12 +494,7 @@ func (r *ButtonRow) ActivateFocused() bool {
 	if len(r.Buttons) == 0 || r.Index < 0 || r.Index >= len(r.Buttons) {
 		return false
 	}
-	button := r.Buttons[r.Index]
-	if button.OnPress == nil {
-		return false
-	}
-	button.OnPress()
-	return true
+	return triggerButton(r.Buttons[r.Index])
 }
 
 func (r *ButtonRow) ActivateHotkey(msg KeyMsg) bool {
@@ -519,10 +515,21 @@ func (r *ButtonRow) ActivateHotkey(msg KeyMsg) bool {
 			continue
 		}
 		r.Index = idx
-		if button.OnPress != nil {
-			button.OnPress()
+		if triggerButton(button) {
 			return true
 		}
+	}
+	return false
+}
+
+func triggerButton(button Button) bool {
+	if button.OnClick != nil {
+		button.OnClick()
+		return true
+	}
+	if button.OnPress != nil {
+		button.OnPress()
+		return true
 	}
 	return false
 }

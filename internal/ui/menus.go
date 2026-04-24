@@ -301,18 +301,25 @@ func (d MenuPickerDialog) element() Element {
 			}))
 		}
 	}
-	return Dialog{
-		Title: " " + strings.TrimSpace(d.Title),
-		Body:  Column{Children: children},
-		Buttons: ButtonRow{
-			Buttons: []Button{
-				{Label: "OK", Primary: true},
-				{Label: "Cancel"},
-			},
-			Width: listWidth,
-			Align: HorizontalAlignRight,
+	buttons := ButtonRow{
+		Buttons: []Button{
+			{Label: "OK", Primary: true},
+			{Label: "Cancel"},
 		},
-		Footer: "Enter applies the highlighted row. Esc cancels.",
-		Width:  width,
+		Width: maxInt(0, width-6),
+		Align: HorizontalAlignRight,
+	}
+	return WindowFrame{
+		Title: strings.TrimSpace(d.Title),
+		Width: width,
+		Content: Column{
+			Children: []Child{
+				Fixed(Column{Children: children}),
+				Fixed(buttons),
+				Fixed(Static{Content: "Enter applies the highlighted row. Esc cancels."}),
+			},
+			Spacing: 2,
+		},
+		ShowClose: true,
 	}
 }

@@ -54,8 +54,8 @@ func NewDisconnectDialog(items []ProviderItem) DisconnectDialog {
 func (d *DisconnectDialog) Update(msg KeyMsg) DisconnectDialogAction {
 	d.ensureButtons()
 	var action DisconnectDialogAction
-	d.buttons.Buttons[0].OnPress = func() { action = d.selectCurrent() }
-	d.buttons.Buttons[1].OnPress = func() { action = DisconnectDialogAction{Kind: DisconnectDialogActionCancel} }
+	d.buttons.Buttons[0].OnClick = func() { action = d.selectCurrent() }
+	d.buttons.Buttons[1].OnClick = func() { action = DisconnectDialogAction{Kind: DisconnectDialogActionCancel} }
 	if d.buttons.ActivateHotkey(msg) {
 		return action
 	}
@@ -165,54 +165,62 @@ func (d DisconnectDialog) dialog(width int, palette theme.Palette) Element {
 		detailsElement = Column{Children: blocks}
 	}
 
-	return Dialog{
+	buttons := d.buttonRow(dialogWidth)
+	buttons.Width = maxInt(0, dialogWidth-6)
+	return WindowFrame{
 		Title: "Disconnect Provider",
-		Body: Column{
+		Width: dialogWidth,
+		Content: Column{
 			Children: []Child{
-				Fixed(staticBlock(fmt.Sprintf("Filter: %s", d.Query))),
-				Fixed(Spacer{H: 1}),
-				Fixed(Split{
-					Direction: SplitHorizontal,
-					First: Section{
-						Title:   "Providers",
-						Width:   listWidth + 2,
-						Padding: Insets{Right: 1},
-						Child: func() Element {
-							if len(items) == 0 {
-								return staticBlock("No matches")
-							}
-							return List{
-								Items:    items,
-								Width:    listWidth,
-								Selected: d.Index - start,
-								Focused:  d.focus == pickerDialogFocusList,
-							}
-						}(),
+				Fixed(Column{
+					Children: []Child{
+						Fixed(staticBlock(fmt.Sprintf("Filter: %s", d.Query))),
+						Fixed(Spacer{H: 1}),
+						Fixed(Split{
+							Direction: SplitHorizontal,
+							First: Section{
+								Title:   "Providers",
+								Width:   listWidth + 2,
+								Padding: Insets{Right: 1},
+								Child: func() Element {
+									if len(items) == 0 {
+										return staticBlock("No matches")
+									}
+									return List{
+										Items:    items,
+										Width:    listWidth,
+										Selected: d.Index - start,
+										Focused:  d.focus == pickerDialogFocusList,
+									}
+								}(),
+							},
+							Second: Section{
+								Title:       "Details",
+								Width:       detailWidth + 1,
+								Padding:     Insets{Left: 1},
+								Background:  palette.SidebarBackground,
+								Foreground:  palette.SidebarForeground,
+								BorderColor: palette.SidebarBorder,
+								Child:       detailsElement,
+							},
+							Gap: 1,
+						}),
 					},
-					Second: Section{
-						Title:       "Details",
-						Width:       detailWidth + 1,
-						Padding:     Insets{Left: 1},
-						Background:  palette.SidebarBackground,
-						Foreground:  palette.SidebarForeground,
-						BorderColor: palette.SidebarBorder,
-						Child:       detailsElement,
-					},
-					Gap: 1,
 				}),
+				Fixed(buttons),
+				Fixed(Static{Content: "Enter to disconnect, Esc to cancel"}),
 			},
+			Spacing: 2,
 		},
-		Buttons: d.buttonRow(dialogWidth),
-		Footer:  "Enter to disconnect, Esc to cancel",
-		Width:   dialogWidth,
+		ShowClose: true,
 	}
 }
 
 func (d *DisconnectDialog) ActivateControl(controlID string) DisconnectDialogAction {
 	d.ensureButtons()
 	var action DisconnectDialogAction
-	d.buttons.Buttons[0].OnPress = func() { action = d.selectCurrent() }
-	d.buttons.Buttons[1].OnPress = func() { action = DisconnectDialogAction{Kind: DisconnectDialogActionCancel} }
+	d.buttons.Buttons[0].OnClick = func() { action = d.selectCurrent() }
+	d.buttons.Buttons[1].OnClick = func() { action = DisconnectDialogAction{Kind: DisconnectDialogActionCancel} }
 	switch controlID {
 	case "ok", "cancel":
 		d.focus = pickerDialogFocusButtons

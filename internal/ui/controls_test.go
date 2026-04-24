@@ -90,3 +90,18 @@ func TestButtonRowRightAlignsWithinWidth(t *testing.T) {
 		t.Fatalf("expected left padding from right alignment, got %q", got)
 	}
 }
+
+func TestButtonRowHotkeyTriggersOnClick(t *testing.T) {
+	var clicked bool
+	row := ButtonRow{
+		Buttons: []Button{
+			{Label: "Save", Hotkey: 's', OnClick: func() { clicked = true }},
+		},
+	}
+	if !row.ActivateHotkey(KeyMsg{Type: KeyRunes, Runes: []rune("s"), Alt: true}) {
+		t.Fatal("expected hotkey activation to succeed")
+	}
+	if !clicked {
+		t.Fatal("expected on-click callback to run")
+	}
+}

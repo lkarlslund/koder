@@ -64,10 +64,10 @@ func NewToolsDialog(items []ToolToggleItem) ToolsDialog {
 
 func (d *ToolsDialog) Update(msg KeyMsg) ToolsDialogAction {
 	var action ToolsDialogAction
-	d.buttons.Buttons[0].OnPress = func() {
+	d.buttons.Buttons[0].OnClick = func() {
 		action = ToolsDialogAction{Kind: ToolsDialogActionApply, States: d.States()}
 	}
-	d.buttons.Buttons[1].OnPress = func() {
+	d.buttons.Buttons[1].OnClick = func() {
 		action = ToolsDialogAction{Kind: ToolsDialogActionCancel, States: d.originalStates()}
 	}
 	if d.buttons.ActivateHotkey(msg) {
@@ -150,22 +150,30 @@ func (d ToolsDialog) dialog(width int, palette theme.Palette) Element {
 			},
 		}))
 	}
-	return Dialog{
-		Title:    "Tools",
-		Subtitle: "Per-session tool access. Space toggles the current tool.",
-		Body:     Column{Children: rows},
-		Buttons:  d.buttonRow(dialogWidth),
-		Footer:   "Enter toggles a tool or activates the focused button. Esc cancels.",
-		Width:    dialogWidth,
+	buttons := d.buttonRow(dialogWidth)
+	buttons.Width = maxInt(0, dialogWidth-6)
+	return WindowFrame{
+		Title: "Tools",
+		Width: dialogWidth,
+		Content: Column{
+			Children: []Child{
+				Fixed(Static{Content: "Per-session tool access. Space toggles the current tool."}),
+				Fixed(Column{Children: rows}),
+				Fixed(buttons),
+				Fixed(Static{Content: "Enter toggles a tool or activates the focused button. Esc cancels."}),
+			},
+			Spacing: 2,
+		},
+		ShowClose: true,
 	}
 }
 
 func (d *ToolsDialog) ActivateControl(controlID string) ToolsDialogAction {
 	var action ToolsDialogAction
-	d.buttons.Buttons[0].OnPress = func() {
+	d.buttons.Buttons[0].OnClick = func() {
 		action = ToolsDialogAction{Kind: ToolsDialogActionApply, States: d.States()}
 	}
-	d.buttons.Buttons[1].OnPress = func() {
+	d.buttons.Buttons[1].OnClick = func() {
 		action = ToolsDialogAction{Kind: ToolsDialogActionCancel, States: d.originalStates()}
 	}
 	switch controlID {

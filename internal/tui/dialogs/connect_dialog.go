@@ -302,11 +302,17 @@ func (d *ConnectDialog) providerListDialog(width int, palette theme.Palette) Ele
 	if status := strings.TrimSpace(d.status); status != "" {
 		body = append(body, Fixed(Spacer{H: 1}), Fixed(Label{Text: status}))
 	}
-	return Dialog{
-		Title:  "Connect Provider",
-		Body:   Column{Children: body, Spacing: 1},
-		Footer: "Enter choose provider  Esc cancel",
-		Width:  dialogWidth,
+	return WindowFrame{
+		Title: "Connect Provider",
+		Width: dialogWidth,
+		Content: Column{
+			Children: []Child{
+				Fixed(Column{Children: body, Spacing: 1}),
+				Fixed(Static{Content: "Enter choose provider  Esc cancel"}),
+			},
+			Spacing: 2,
+		},
+		ShowClose: true,
 	}
 }
 
@@ -324,25 +330,31 @@ func (d *ConnectDialog) authPickerDialog(width int, palette theme.Palette) Eleme
 			Secondary: method.Description,
 		})
 	}
-	return Dialog{
+	return WindowFrame{
 		Title: "Choose Auth Method",
-		Body: Column{
+		Width: dialogWidth,
+		Content: Column{
 			Children: []Child{
-				Fixed(linesBlock(lines...)),
-				Fixed(Section{
-					Width: dialogWidth - 8,
-					Child: List{
-						Items:    items,
-						Width:    dialogWidth - 8,
-						Selected: d.authIndex,
-						Focused:  d.stage == connectStageAuth,
+				Fixed(Column{
+					Children: []Child{
+						Fixed(linesBlock(lines...)),
+						Fixed(Section{
+							Width: dialogWidth - 8,
+							Child: List{
+								Items:    items,
+								Width:    dialogWidth - 8,
+								Selected: d.authIndex,
+								Focused:  d.stage == connectStageAuth,
+							},
+						}),
 					},
+					Spacing: 1,
 				}),
+				Fixed(Static{Content: "Enter continue  Esc back"}),
 			},
-			Spacing: 1,
+			Spacing: 2,
 		},
-		Footer: "Enter continue  Esc back",
-		Width:  dialogWidth,
+		ShowClose: true,
 	}
 }
 
@@ -410,12 +422,19 @@ func (d *ConnectDialog) formDialog(width int, palette theme.Palette) Element {
 		Align: HorizontalAlignRight,
 		Width: dialogWidth - 4,
 	}
-	return Dialog{
-		Title:   "Connect Provider",
-		Body:    Column{Children: bodyChildren, Spacing: 1},
-		Buttons: buttons,
-		Footer:  "Type to edit  Ctrl+T test  Enter select  Esc cancel",
-		Width:   dialogWidth,
+	buttons.Width = maxInt(0, dialogWidth-6)
+	return WindowFrame{
+		Title: "Connect Provider",
+		Width: dialogWidth,
+		Content: Column{
+			Children: []Child{
+				Fixed(Column{Children: bodyChildren, Spacing: 1}),
+				Fixed(buttons),
+				Fixed(Static{Content: "Type to edit  Ctrl+T test  Enter select  Esc cancel"}),
+			},
+			Spacing: 2,
+		},
+		ShowClose: true,
 	}
 }
 

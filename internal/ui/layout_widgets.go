@@ -230,10 +230,12 @@ type ListItem struct {
 }
 
 type List struct {
-	Items    []ListItem
-	Width    int
-	Selected int
-	Focused  bool
+	Items              []ListItem
+	Width              int
+	Selected           int
+	Focused            bool
+	OnSelectionChanged func(index int, item ListItem)
+	OnActivate         func(index int, item ListItem)
 }
 
 func (l List) Measure(ctx *Context, constraints Constraints) Size {
@@ -271,6 +273,45 @@ func (l List) Render(ctx *Context, bounds Rect) Surface {
 		}))
 	}
 	return Column{Children: children}.Render(ctx, Rect{X: bounds.X, Y: bounds.Y, W: width, H: bounds.H})
+}
+
+func (l *List) Move(delta int) bool {
+	if len(l.Items) == 0 {
+		return false
+	}
+	return l.SetSelected(l.Selected + delta)
+}
+
+func (l *List) SetSelected(index int) bool {
+	if len(l.Items) == 0 {
+		if l.Selected != 0 {
+			l.Selected = 0
+			return true
+		}
+		return false
+	}
+	if index < 0 {
+		index = 0
+	}
+	if index >= len(l.Items) {
+		index = len(l.Items) - 1
+	}
+	if index == l.Selected {
+		return false
+	}
+	l.Selected = index
+	if l.OnSelectionChanged != nil {
+		l.OnSelectionChanged(index, l.Items[index])
+	}
+	return true
+}
+
+func (l *List) ActivateSelected() bool {
+	if len(l.Items) == 0 || l.Selected < 0 || l.Selected >= len(l.Items) || l.OnActivate == nil {
+		return false
+	}
+	l.OnActivate(l.Selected, l.Items[l.Selected])
+	return true
 }
 
 type TableColumn struct {

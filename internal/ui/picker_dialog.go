@@ -92,8 +92,8 @@ func (d *PickerDialog) SetCurrentValue(value string) bool {
 
 func (d *PickerDialog) Update(msg KeyMsg) PickerDialogAction {
 	var action PickerDialogAction
-	d.buttons.Buttons[0].OnPress = func() { action = d.selectCurrent() }
-	d.buttons.Buttons[1].OnPress = func() { action = PickerDialogAction{Kind: PickerDialogActionCancel} }
+	d.buttons.Buttons[0].OnClick = func() { action = d.selectCurrent() }
+	d.buttons.Buttons[1].OnClick = func() { action = PickerDialogAction{Kind: PickerDialogActionCancel} }
 
 	if d.buttons.ActivateHotkey(msg) {
 		return action
@@ -146,8 +146,8 @@ func (d *PickerDialog) Update(msg KeyMsg) PickerDialogAction {
 
 func (d *PickerDialog) ActivateControl(controlID string) PickerDialogAction {
 	var action PickerDialogAction
-	d.buttons.Buttons[0].OnPress = func() { action = d.selectCurrent() }
-	d.buttons.Buttons[1].OnPress = func() { action = PickerDialogAction{Kind: PickerDialogActionCancel} }
+	d.buttons.Buttons[0].OnClick = func() { action = d.selectCurrent() }
+	d.buttons.Buttons[1].OnClick = func() { action = PickerDialogAction{Kind: PickerDialogActionCancel} }
 	switch controlID {
 	case "ok", "cancel":
 		d.Focus = pickerDialogFocusButtons
