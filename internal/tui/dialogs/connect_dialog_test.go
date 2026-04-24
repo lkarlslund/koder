@@ -168,8 +168,8 @@ func TestConnectDialogFormSeparatesLabelsDescriptionsAndInputs(t *testing.T) {
 	if !strings.Contains(got, "OpenAI-compatible API endpoint") {
 		t.Fatalf("expected field description line, got %q", got)
 	}
-	if !strings.Contains(got, "│ │ https://api.openai.com/v1") {
-		t.Fatalf("expected bordered value row separate from label/description, got %q", got)
+	if !strings.Contains(got, "Base URL") || !strings.Contains(got, "┌────────────────") || !strings.Contains(got, "https://api.openai.com/v1") {
+		t.Fatalf("expected compact metadata row plus bordered input row, got %q", got)
 	}
 }
 

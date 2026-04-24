@@ -357,7 +357,7 @@ func (d *ConnectDialog) formDialog(width int, palette theme.Palette) Element {
 	bodyChildren := []Child{
 		Fixed(Section{
 			Title:       "Provider",
-			Padding:     UniformInsets(1),
+			Padding:     Insets{Left: 1, Right: 1, Bottom: 1},
 			Background:  palette.SidebarBackground,
 			Foreground:  palette.SidebarForeground,
 			BorderColor: palette.SidebarBorder,
@@ -370,16 +370,16 @@ func (d *ConnectDialog) formDialog(width int, palette theme.Palette) Element {
 							Foreground(palette.MarkdownHeadingPrimary),
 					}),
 					Fixed(Paragraph{
-						Text:  d.selected.Description,
+						Text:  compactInlineText(d.selected.Description),
 						Style: lipgloss.NewStyle().Foreground(palette.ComposerMutedText),
 					}),
 				},
-				Spacing: 1,
+				Spacing: 0,
 			},
 		}),
 		Fixed(Section{
 			Title:       "Configuration",
-			Padding:     UniformInsets(1),
+			Padding:     Insets{Left: 1, Right: 1, Bottom: 1},
 			Background:  palette.SidebarBackground,
 			Foreground:  palette.SidebarForeground,
 			BorderColor: palette.SidebarBorder,
@@ -402,7 +402,7 @@ func (d *ConnectDialog) formDialog(width int, palette theme.Palette) Element {
 		}
 		bodyChildren = append(bodyChildren, Fixed(Section{
 			Title:       "Connection",
-			Padding:     UniformInsets(1),
+			Padding:     Insets{Left: 1, Right: 1, Bottom: 1},
 			Background:  palette.SidebarBackground,
 			Foreground:  palette.SidebarForeground,
 			BorderColor: palette.SidebarBorder,
@@ -446,44 +446,41 @@ func (d ConnectDialog) renderFormField(field connectField, width int, palette th
 	} else if strings.HasPrefix(valueText, "(") {
 		valueStyle = lipgloss.NewStyle().Foreground(palette.ComposerMutedText).Italic(true)
 	}
-	return Panel{
-		Padding:      UniformInsets(1),
-		Background:   palette.SidebarBackground,
-		Foreground:   palette.SidebarForeground,
-		BorderLeft:   true,
-		BorderRight:  true,
-		BorderTop:    true,
-		BorderBottom: true,
-		BorderColor:  borderColor,
-		Child: Column{
-			Children: []Child{
-				Fixed(Label{
-					Text: field.Label,
-					Style: lipgloss.NewStyle().
-						Bold(true).
-						Foreground(palette.AssistantTimestampText),
-				}),
-				Fixed(Paragraph{
-					Text:  field.Description,
-					Style: lipgloss.NewStyle().Foreground(palette.ComposerMutedText),
-				}),
-				Fixed(Panel{
-					Padding:      Insets{Left: 1, Right: 1},
-					Background:   background,
-					Foreground:   palette.MarkdownText,
-					BorderLeft:   true,
-					BorderRight:  true,
-					BorderTop:    true,
-					BorderBottom: true,
-					BorderColor:  borderColor,
-					Child: Label{
-						Text:  padRight(valueText, valueWidth),
-						Style: valueStyle,
-					},
-				}),
-			},
-			Spacing: 1,
+	hintWidth := maxInt(16, width-PlainWidth(field.Label)-3)
+	hint := truncateText(field.Description, hintWidth)
+	return Column{
+		Children: []Child{
+			Fixed(Row{
+				Children: []Child{
+					Fixed(Label{
+						Text: field.Label,
+						Style: lipgloss.NewStyle().
+							Bold(true).
+							Foreground(palette.AssistantTimestampText),
+					}),
+					Flex(Spacer{}, 1),
+					Fixed(Label{
+						Text:  hint,
+						Style: lipgloss.NewStyle().Foreground(palette.ComposerMutedText),
+					}),
+				},
+			}),
+			Fixed(Panel{
+				Padding:      Insets{Left: 1, Right: 1},
+				Background:   background,
+				Foreground:   palette.MarkdownText,
+				BorderLeft:   true,
+				BorderRight:  true,
+				BorderTop:    true,
+				BorderBottom: true,
+				BorderColor:  borderColor,
+				Child: Label{
+					Text:  padRight(valueText, valueWidth),
+					Style: valueStyle,
+				},
+			}),
 		},
+		Spacing: 1,
 	}
 }
 
