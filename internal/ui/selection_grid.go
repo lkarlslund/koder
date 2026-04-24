@@ -107,23 +107,28 @@ func (c selectionGridCard) Render(ctx *Context, bounds Rect) Surface {
 	if ctx != nil {
 		palette = ctx.Palette
 	}
+	baseBackground := firstNonEmptyColor(palette.SidebarBackground, palette.ScreenBackground)
+	selectedBackground := firstNonEmptyColor(palette.SelectionBackground, palette.UserTextBackground, palette.UserAccentBar, baseBackground)
 	borderColor := palette.SidebarBorder
-	background := firstNonEmptyColor(palette.SidebarBackground, palette.ScreenBackground)
+	background := baseBackground
 	foreground := firstNonEmptyColor(palette.SidebarForeground, palette.MarkdownText)
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(foreground)
 	descriptionStyle := lipgloss.NewStyle().Foreground(firstNonEmptyColor(palette.AssistantTimestampText, palette.ComposerMutedText))
 	if c.Selected {
-		background = firstNonEmptyColor(palette.SelectionBackground, palette.UserTextBackground, background)
+		background = selectedBackground
 		foreground = firstNonEmptyColor(palette.SelectionForeground, palette.UserTextForeground, foreground)
-		borderColor = firstNonEmptyColor(palette.SelectionBackground, palette.ActivityText, borderColor)
+		borderColor = firstNonEmptyColor(selectedBackground, palette.ActivityText, borderColor)
 		titleStyle = lipgloss.NewStyle().Bold(true).Foreground(foreground)
 		descriptionStyle = lipgloss.NewStyle().Foreground(foreground)
 	}
 	if c.Focused {
 		background = deriveFocusedBackground(
-			firstNonEmptyColor(palette.SelectionBackground, palette.UserTextBackground, background),
+			selectedBackground,
 			firstNonEmptyColor(palette.ScreenBackground, palette.SidebarBackground, palette.UserTextBackground),
 		)
+		if strings.TrimSpace(string(background)) == "" || background == baseBackground {
+			background = selectedBackground
+		}
 		foreground = firstNonEmptyColor(palette.SelectionForeground, palette.UserTextForeground, foreground)
 		borderColor = firstNonEmptyColor(palette.SelectionForeground, palette.UserTextForeground, borderColor)
 		titleStyle = lipgloss.NewStyle().Bold(true).Foreground(foreground)
@@ -137,13 +142,17 @@ func (c selectionGridCard) Render(ctx *Context, bounds Rect) Surface {
 		if foreground != "" {
 			fillStyle.FG = cellColor(foreground)
 		}
+		textStyle := lipglossToCellStyle(titleStyle)
+		if background != "" {
+			textStyle.BG = cellColor(background)
+		}
 		text := truncateText(strings.TrimSpace(c.Item.Title), max(1, bounds.W))
 		if pad := max(0, bounds.W-PlainWidth(text)); pad > 0 {
 			left := pad / 2
 			right := pad - left
 			text = strings.Repeat(" ", left) + text + strings.Repeat(" ", right)
 		}
-		return FilledLineSurface(bounds.W, text, fillStyle, lipglossToCellStyle(titleStyle)).normalize(bounds.W, bounds.H)
+		return FilledLineSurface(bounds.W, text, fillStyle, textStyle).normalize(bounds.W, bounds.H)
 	}
 	content := Column{
 		Children: []Child{
