@@ -1620,7 +1620,10 @@ func TestRunPromptRetriesRateLimitAndCompletes(t *testing.T) {
 
 	engine := New(cfg, st, tools.NewRegistry(t.TempDir()), nil, t.TempDir())
 	var waited []time.Duration
-	engine.retryPause = func(_ context.Context, delay time.Duration) error {
+	engine.retryPause = func(_ context.Context, delay time.Duration, onTick func(time.Duration)) error {
+		if onTick != nil {
+			onTick(delay)
+		}
 		waited = append(waited, delay)
 		return nil
 	}
@@ -1664,6 +1667,75 @@ func TestRunPromptRetriesRateLimitAndCompletes(t *testing.T) {
 	}
 }
 
+func TestRunPromptRateLimitStatusCountsDown(t *testing.T) {
+	t.Parallel()
+
+	var requests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests++
+		switch requests {
+		case 1:
+			w.Header().Set("Retry-After", "3")
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte(`{"error":{"message":"rate limit"}}`))
+		case 2:
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"done"}}],"usage":{"total_tokens":1}}`))
+		default:
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ignored title"}}],"usage":{"total_tokens":1}}`))
+		}
+	}))
+	defer server.Close()
+
+	cfg := testConfig(t)
+	cfg.Providers = map[string]config.Provider{
+		"test": {
+			BaseURL: server.URL + "/v1",
+			Timeout: time.Second,
+		},
+	}
+	cfg.DefaultProvider = "test"
+	cfg.DefaultModel = "test-model"
+
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	engine := New(cfg, st, tools.NewRegistry(t.TempDir()), nil, t.TempDir())
+	engine.retryPause = func(_ context.Context, delay time.Duration, onTick func(time.Duration)) error {
+		for _, remaining := range []time.Duration{delay, 2 * time.Second, time.Second, 0} {
+			onTick(remaining)
+		}
+		return nil
+	}
+	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	events, err := engine.RunPrompt(context.Background(), session, "hello")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var statuses []string
+	for evt := range events {
+		if evt.Kind == domain.EventKindStatus && strings.Contains(evt.Text, "rate limit hit") {
+			statuses = append(statuses, evt.Text)
+		}
+	}
+	if len(statuses) < 4 {
+		t.Fatalf("expected countdown statuses, got %#v", statuses)
+	}
+	wantSuffixes := []string{"3s, retry 1)", "2s, retry 1)", "1s, retry 1)", "0s, retry 1)"}
+	for idx, want := range wantSuffixes {
+		if !strings.HasSuffix(statuses[idx], want) {
+			t.Fatalf("expected status %d to end with %q, got %q", idx, want, statuses[idx])
+		}
+	}
+}
+
 func TestRunPromptPersistsEventNoticeWhenRetriesExhausted(t *testing.T) {
 	t.Parallel()
 
@@ -1693,7 +1765,12 @@ func TestRunPromptPersistsEventNoticeWhenRetriesExhausted(t *testing.T) {
 	defer st.Close()
 
 	engine := New(cfg, st, tools.NewRegistry(t.TempDir()), nil, t.TempDir())
-	engine.retryPause = func(_ context.Context, _ time.Duration) error { return nil }
+	engine.retryPause = func(_ context.Context, delay time.Duration, onTick func(time.Duration)) error {
+		if onTick != nil {
+			onTick(delay)
+		}
+		return nil
+	}
 	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -1759,7 +1836,7 @@ func TestRunPromptPersistsInterruptedEventNoticeDuringRetryWait(t *testing.T) {
 
 	engine := New(cfg, st, tools.NewRegistry(t.TempDir()), nil, t.TempDir())
 	ctx, cancel := context.WithCancel(context.Background())
-	engine.retryPause = func(ctx context.Context, _ time.Duration) error {
+	engine.retryPause = func(ctx context.Context, _ time.Duration, _ func(time.Duration)) error {
 		cancel()
 		<-ctx.Done()
 		return ctx.Err()

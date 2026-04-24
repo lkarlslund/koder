@@ -38,7 +38,7 @@ type Engine struct {
 	caps       *provider.CapabilityStore
 	agents     *agents.Manager
 	workdir    string
-	retryPause func(context.Context, time.Duration) error
+	retryPause func(context.Context, time.Duration, func(time.Duration)) error
 }
 
 var patchPathPattern = regexp.MustCompile(`(?m)^(?:\+\+\+|---)\s+(?:a/|b/)?([^\t\n]+)`)
@@ -933,17 +933,37 @@ func (e *Engine) persistTranscriptNotice(ctx context.Context, sessionID int64, b
 	_, _ = e.store.AddPart(ctx, msg.ID, domain.PartKindEventNotice, body, string(raw))
 }
 
-func waitForRetry(ctx context.Context, delay time.Duration) error {
+func waitForRetry(ctx context.Context, delay time.Duration, onTick func(time.Duration)) error {
 	if delay <= 0 {
 		delay = defaultRateLimitRetryWait
 	}
-	timer := time.NewTimer(delay)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-timer.C:
+	remaining := roundRetryDelay(delay)
+	if onTick != nil {
+		onTick(remaining)
+	}
+	if remaining <= 0 {
 		return nil
+	}
+	deadline := time.Now().Add(delay)
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+			next := time.Until(deadline)
+			if next <= 0 {
+				if onTick != nil {
+					onTick(0)
+				}
+				return nil
+			}
+			rounded := roundRetryDelay(next)
+			if onTick != nil {
+				onTick(rounded)
+			}
+		}
 	}
 }
 
@@ -962,29 +982,40 @@ func (e *Engine) completeChatWithRetry(ctx context.Context, sessionID int64, cli
 			delay = defaultRateLimitRetryWait
 		}
 		retryNumber := attempt + 1
-		status := formatRateLimitRetryStatus(delay, retryNumber)
-		e.recordLifecycle(sessionID, "rate_limit_retry", status, map[string]string{
+		initialStatus := formatRateLimitRetryStatus(delay, retryNumber)
+		e.recordLifecycle(sessionID, "rate_limit_retry", initialStatus, map[string]string{
 			"retry":       strconv.Itoa(retryNumber),
 			"retry_after": delay.String(),
 		})
-		if out != nil {
-			out <- domain.Event{Kind: domain.EventKindStatus, Text: status}
-		}
-		if err := e.retryPause(ctx, delay); err != nil {
+		lastRemaining := time.Duration(-1)
+		if err := e.retryPause(ctx, delay, func(remaining time.Duration) {
+			if remaining == lastRemaining {
+				return
+			}
+			lastRemaining = remaining
+			if out != nil {
+				out <- domain.Event{Kind: domain.EventKindStatus, Text: formatRateLimitRetryStatus(remaining, retryNumber)}
+			}
+		}); err != nil {
 			return provider.ChatResponse{}, err
 		}
 	}
 }
 
 func formatRateLimitRetryStatus(delay time.Duration, retryNumber int) string {
+	delay = roundRetryDelay(delay)
+	return fmt.Sprintf("Working (rate limit hit, retrying in %s, retry %d)", delay, retryNumber)
+}
+
+func roundRetryDelay(delay time.Duration) time.Duration {
 	if delay <= 0 {
-		delay = defaultRateLimitRetryWait
+		return 0
 	}
 	delay = delay.Round(time.Second)
 	if delay <= 0 {
-		delay = time.Second
+		return time.Second
 	}
-	return fmt.Sprintf("Working (rate limit hit, retrying in %s, retry %d)", delay, retryNumber)
+	return delay
 }
 
 func transientTurnMessages(note string, continuePrompt string) []provider.Message {
