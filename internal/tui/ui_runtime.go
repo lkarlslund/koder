@@ -111,6 +111,7 @@ func (m *Model) ensureUIRoot() *ui.Root {
 
 func (m *Model) syncUIRoot() *ui.Root {
 	root := m.ensureUIRoot()
+	root.SetPalette(m.palette)
 	root.SetBounds(ui.Rect{W: max(0, m.width), H: max(0, m.height)})
 	root.SetMainWindow(m.mainWindow())
 	overlays := m.overlayWindows()

@@ -2301,6 +2301,60 @@ func TestThemePickerFiltersAndPreviewsSelection(t *testing.T) {
 	}
 }
 
+func TestSetThemeRefreshesTranscriptColors(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.UI.Theme = "tokyonight"
+
+	m, err := New(cfg, nil, nil, StartupModeNew, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.width = 80
+	m.height = 24
+	m.viewport = newTranscriptViewport(60, 12)
+	m.messages = []domain.Message{{
+		ID:        1,
+		Role:      domain.MessageRoleAssistant,
+		Summary:   "hello",
+		CreatedAt: time.Now(),
+	}}
+	m.parts = map[int64][]domain.Part{
+		1: {{Kind: domain.PartKindText, Body: "hello"}},
+	}
+
+	m.refreshViewport()
+	before := m.viewport.VisibleSurface()
+	beforeR, beforeG, beforeB, beforeOK := firstSurfaceFG(before)
+	if !beforeOK {
+		t.Fatal("expected transcript foreground color before theme change")
+	}
+
+	if err := m.setTheme("flexoki", false); err != nil {
+		t.Fatal(err)
+	}
+
+	after := m.viewport.VisibleSurface()
+	afterR, afterG, afterB, afterOK := firstSurfaceFG(after)
+	if !afterOK {
+		t.Fatal("expected transcript foreground color after theme change")
+	}
+	if beforeR == afterR && beforeG == afterG && beforeB == afterB {
+		t.Fatal("expected transcript colors to update after theme change")
+	}
+}
+
+func firstSurfaceFG(view ui.SurfaceView) (uint8, uint8, uint8, bool) {
+	for y := 0; y < view.SurfaceHeight(); y++ {
+		for x := 0; x < view.SurfaceWidth(); x++ {
+			r, g, b, ok := view.SurfaceCellFG(x, y)
+			if ok {
+				return r, g, b, true
+			}
+		}
+	}
+	return 0, 0, 0, false
+}
+
 func TestThemePickerEscapeRestoresOriginalTheme(t *testing.T) {
 	cfg := testConfig(t)
 	cfg.UI.Theme = "flexoki"

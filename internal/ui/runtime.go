@@ -256,6 +256,17 @@ func (r *Root) SetBounds(bounds Rect) {
 	r.RequestRedraw()
 }
 
+func (r *Root) SetPalette(palette theme.Palette) {
+	if r == nil {
+		return
+	}
+	if r.palette == palette {
+		return
+	}
+	r.palette = palette
+	r.RequestRedraw()
+}
+
 func (r *Root) Bounds() Rect {
 	if r == nil {
 		return Rect{}

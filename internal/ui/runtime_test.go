@@ -64,6 +64,21 @@ func (w *stubWindow) Render(*Context, Rect) Surface {
 	return s
 }
 
+type paletteWindow struct {
+	BaseWindow
+	bounds Rect
+}
+
+func (w *paletteWindow) Bounds(Rect) Rect {
+	return w.bounds
+}
+
+func (w *paletteWindow) Render(ctx *Context, bounds Rect) Surface {
+	s := BlankSurface(bounds.W, bounds.H)
+	s.WriteText(0, 0, "x", CellStyle{FG: cellColor(ctx.Palette.MarkdownText)})
+	return s
+}
+
 func TestRootRoutesKeysToFocusedWindow(t *testing.T) {
 	root := NewRoot(theme.Default().Palette, Rect{W: 20, H: 10})
 	main := newStubWindow("main", 0, Rect{W: 20, H: 10})
@@ -173,5 +188,32 @@ func TestRootRoutesTimerEventsToOwningWindow(t *testing.T) {
 	}
 	if main.timerEvents != 1 {
 		t.Fatalf("expected one timer event, got %d", main.timerEvents)
+	}
+}
+
+func TestRootSetPaletteUpdatesRenderContext(t *testing.T) {
+	first := theme.Resolve("tokyonight").Palette
+	second := theme.Resolve("flexoki").Palette
+
+	root := NewRoot(first, Rect{W: 4, H: 2})
+	root.SetMainWindow(&paletteWindow{
+		BaseWindow: BaseWindow{WindowID: "main", VisibleFlag: true},
+		bounds:     Rect{W: 4, H: 2},
+	})
+
+	initial := root.RenderFrame()
+	beforeR, beforeG, beforeB, beforeOK := initial.SurfaceCellFG(0, 0)
+	if !beforeOK {
+		t.Fatal("expected initial foreground color")
+	}
+
+	root.SetPalette(second)
+	updated := root.RenderFrame()
+	afterR, afterG, afterB, afterOK := updated.SurfaceCellFG(0, 0)
+	if !afterOK {
+		t.Fatal("expected updated foreground color")
+	}
+	if beforeR == afterR && beforeG == afterG && beforeB == afterB {
+		t.Fatal("expected palette change to affect render output")
 	}
 }
