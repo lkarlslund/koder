@@ -632,17 +632,13 @@ func (m Model) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 			m.status = msg.err.Error()
 			return m, m.syncWindowTitleCmd()
 		}
-		modelIDs := make([]string, 0, len(msg.result.Models))
-		for _, item := range msg.result.Models {
-			modelIDs = append(modelIDs, item.ID)
-		}
-		m.connectDialog.SetModels(modelIDs)
-		if len(modelIDs) == 0 {
-			m.connectDialog.SetStatusSuccess("Connected, but no models were returned")
+		modelCount := len(msg.result.Models)
+		if modelCount == 0 {
+			m.connectDialog.SetStatusSuccess("Connection success, 0 models discovered")
 			m.status = "Provider connected"
 		} else {
-			m.connectDialog.SetStatusSuccess(fmt.Sprintf("Connected: discovered %d models", len(modelIDs)))
-			m.status = fmt.Sprintf("Provider connected: %d models", len(modelIDs))
+			m.connectDialog.SetStatusSuccess(fmt.Sprintf("Connection success, %d models discovered", modelCount))
+			m.status = fmt.Sprintf("Provider connected: %d models", modelCount)
 		}
 		return m, m.syncWindowTitleCmd()
 	case modelListMsg:
@@ -4207,21 +4203,14 @@ func (m *Model) handleConnectDialogKey(msg ui.KeyMsg) ui.Cmd {
 		m.connectDialog.SetStatus("Testing connection…")
 		return ui.Batch(m.probeProviderCmd(action.Draft), m.syncWindowTitleCmd())
 	case dialogs.ProviderConnectActionSave:
-		discoveredModels := m.connectDialog.Models()
 		if err := m.saveProviderDraft(action.Draft); err != nil {
 			m.connectDialog.SetStatusError("Save failed: " + err.Error())
 			m.status = err.Error()
 			return m.syncWindowTitleCmd()
 		}
 		m.closeConnectDialog()
-		if len(discoveredModels) > 0 {
-			m.status = fmt.Sprintf("Connected provider %s", action.Draft.ProviderID)
-			return ui.Batch(m.loadModelsCmd(action.Draft.ProviderID, true), m.syncWindowTitleCmd())
-		}
 		m.status = fmt.Sprintf("Connected provider %s", action.Draft.ProviderID)
-		m.invalidateTranscript()
-		m.refreshViewport()
-		return m.syncWindowTitleCmd()
+		return ui.Batch(m.loadModelsCmd(action.Draft.ProviderID, true), m.syncWindowTitleCmd())
 	case dialogs.ProviderConnectActionCancel:
 		m.closeConnectDialog()
 		m.status = "Provider connect cancelled"

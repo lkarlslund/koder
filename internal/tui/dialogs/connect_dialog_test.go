@@ -80,49 +80,13 @@ func TestConnectDialogAltHotkeysTriggerActions(t *testing.T) {
 	}
 }
 
-func TestConnectDialogCyclesDiscoveredModels(t *testing.T) {
-	dialog := NewConnectDialog(provider.Catalog(), map[string]config.Provider{})
-	dialog.selectProvider(provider.Catalog()[0])
-	dialog.SetModels([]string{"model-a", "model-b"})
-	dialog.fieldIndex = len(dialog.formFields()) - 1
-	dialog.Update(ui.KeyMsg{Type: ui.KeyEnter})
-
-	if dialog.draft.Model != "model-b" {
-		t.Fatalf("expected next discovered model, got %q", dialog.draft.Model)
-	}
-}
-
-func TestConnectDialogFillsBlankModelFromFirstDiscoveredModel(t *testing.T) {
-	dialog := NewConnectDialog(provider.Catalog(), map[string]config.Provider{})
-	dialog.selectProvider(provider.Catalog()[0])
-	dialog.draft.Model = ""
-
-	dialog.SetModels([]string{"model-a", "model-b"})
-
-	if dialog.draft.Model != "model-a" {
-		t.Fatalf("expected blank model to adopt first discovered model, got %q", dialog.draft.Model)
-	}
-}
-
-func TestConnectDialogPreservesExistingModelWhenModelsDiscovered(t *testing.T) {
-	dialog := NewConnectDialog(provider.Catalog(), map[string]config.Provider{})
-	dialog.selectProvider(provider.Catalog()[0])
-	dialog.draft.Model = "custom-model"
-
-	dialog.SetModels([]string{"model-a", "model-b"})
-
-	if dialog.draft.Model != "custom-model" {
-		t.Fatalf("expected existing model to be preserved, got %q", dialog.draft.Model)
-	}
-}
-
 func TestConnectDialogViewShowsSuccessStatus(t *testing.T) {
 	dialog := NewConnectDialog(provider.Catalog(), map[string]config.Provider{})
 	dialog.selectProvider(provider.Catalog()[0])
-	dialog.SetStatusSuccess("Connected: discovered 2 models")
+	dialog.SetStatusSuccess("Connection success, 2 models discovered")
 
 	got := renderConnectDialog(dialog, 90, theme.Resolve("tokyonight").Palette)
-	if !strings.Contains(got, "OK") || !strings.Contains(got, "Connected: discovered 2 models") {
+	if !strings.Contains(got, "OK") || !strings.Contains(got, "Connection success, 2 models discovered") {
 		t.Fatalf("expected success status in view, got %q", got)
 	}
 }
@@ -170,6 +134,9 @@ func TestConnectDialogFormSeparatesLabelsDescriptionsAndInputs(t *testing.T) {
 	}
 	if !strings.Contains(got, "Base URL") || !strings.Contains(got, "┌────────────────") || !strings.Contains(got, "https://api.openai.com/v1") {
 		t.Fatalf("expected compact metadata row plus bordered input row, got %q", got)
+	}
+	if strings.Contains(got, "Model") {
+		t.Fatalf("expected connect dialog to omit model field, got %q", got)
 	}
 }
 

@@ -59,7 +59,6 @@ type ConnectDialog struct {
 	selected   provider.Descriptor
 	authIndex  int
 	draft      provider.ConnectDraft
-	models     []string
 	status     string
 	statusKind connectStatusKind
 	focus      connectFocus
@@ -104,19 +103,6 @@ func (d *ConnectDialog) SetStatusError(status string) {
 		return
 	}
 	d.statusKind = connectStatusError
-}
-
-func (d *ConnectDialog) SetModels(models []string) {
-	d.models = append(d.models[:0], models...)
-	if strings.TrimSpace(d.draft.Model) == "" && len(models) > 0 {
-		d.draft.Model = models[0]
-	}
-}
-
-func (d ConnectDialog) Models() []string {
-	out := make([]string, len(d.models))
-	copy(out, d.models)
-	return out
 }
 
 func (d *ConnectDialog) Update(msg KeyMsg) ProviderConnectAction {
@@ -252,9 +238,6 @@ func (d *ConnectDialog) updateForm(msg KeyMsg) ProviderConnectAction {
 			default:
 				return ProviderConnectAction{Kind: ProviderConnectActionCancel}
 			}
-		}
-		if d.currentFieldID() == "model" {
-			d.adjustModel(1)
 		}
 	default:
 		if msg.Type == KeyRunes {
@@ -393,11 +376,8 @@ func (d *ConnectDialog) formDialog(width int, palette theme.Palette) Element {
 			},
 		}),
 	}
-	if len(d.models) > 0 || strings.TrimSpace(d.status) != "" {
+	if strings.TrimSpace(d.status) != "" {
 		auxChildren := make([]Child, 0, 2)
-		if len(d.models) > 0 {
-			auxChildren = append(auxChildren, Fixed(Static{Content: "Discovered models: " + strings.Join(d.models[:minInt(4, len(d.models))], ", ")}))
-		}
 		if status := strings.TrimSpace(d.status); status != "" {
 			auxChildren = append(auxChildren, Fixed(d.renderStatusElement(palette)))
 		}
@@ -497,8 +477,6 @@ func (d ConnectDialog) placeholderValue(fieldID string) string {
 	switch fieldID {
 	case "api_key":
 		return "(required)"
-	case "model":
-		return "(set a model)"
 	default:
 		return ""
 	}
@@ -514,7 +492,6 @@ func (d *ConnectDialog) currentProvider() (provider.Descriptor, bool) {
 func (d *ConnectDialog) selectProvider(item provider.Descriptor) {
 	d.selected = item
 	d.authIndex = 0
-	d.models = nil
 	d.status = ""
 	d.statusKind = connectStatusNone
 	d.draft, _ = provider.BuildDraft(item.ID, d.configured)
@@ -585,7 +562,6 @@ func (d ConnectDialog) formFields() []connectField {
 	if d.draft.AuthMethod == provider.AuthMethodAPIKey {
 		fields = append(fields, connectField{ID: "api_key", Label: "API Key", Description: "Stored in config.toml for now"})
 	}
-	fields = append(fields, connectField{ID: "model", Label: "Model", Description: "Default model used for new sessions"})
 	return fields
 }
 
@@ -642,28 +618,6 @@ func (d *ConnectDialog) advanceFocus(delta int) {
 	d.focus = connectFocusButtons
 }
 
-func (d *ConnectDialog) adjustModel(delta int) {
-	if d.currentFieldID() != "model" || len(d.models) == 0 {
-		return
-	}
-	current := strings.TrimSpace(d.draft.Model)
-	idx := 0
-	for i, item := range d.models {
-		if item == current {
-			idx = i
-			break
-		}
-	}
-	idx += delta
-	if idx < 0 {
-		idx = len(d.models) - 1
-	}
-	if idx >= len(d.models) {
-		idx = 0
-	}
-	d.draft.Model = d.models[idx]
-}
-
 func (d ConnectDialog) fieldValue(id string) string {
 	switch id {
 	case "name":
@@ -672,8 +626,6 @@ func (d ConnectDialog) fieldValue(id string) string {
 		return d.draft.BaseURL
 	case "api_key":
 		return d.draft.APIKey
-	case "model":
-		return d.draft.Model
 	default:
 		return ""
 	}
@@ -687,8 +639,6 @@ func (d *ConnectDialog) setFieldValue(id, value string) {
 		d.draft.BaseURL = value
 	case "api_key":
 		d.draft.APIKey = value
-	case "model":
-		d.draft.Model = value
 	}
 }
 
