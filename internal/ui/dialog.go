@@ -2,6 +2,10 @@ package ui
 
 import (
 	"strings"
+
+	"github.com/charmbracelet/lipgloss"
+
+	"github.com/lkarlslund/koder/internal/theme"
 )
 
 // Dialog is a declarative modal shell for app-specific dialog state that lives
@@ -17,28 +21,22 @@ type Dialog struct {
 
 func (d Dialog) Measure(ctx *Context, constraints Constraints) Size {
 	width := d.frameWidth(ctx, constraints)
-	return constraints.Clamp(ModalFrame{
-		Title:    d.Title,
-		Subtitle: d.Subtitle,
-		Body:     d.bodyElement(width),
-		Footer:   d.Footer,
-		Width:    width,
-	}.Measure(ctx, constraints))
+	return constraints.Clamp(d.window(ctx, width).Measure(ctx, constraints))
 }
 
 func (d Dialog) Render(ctx *Context, bounds Rect) Surface {
 	width := d.frameWidth(ctx, Constraints{MaxW: bounds.W, MaxH: bounds.H})
-	return ModalFrame{
-		Title:    d.Title,
-		Subtitle: d.Subtitle,
-		Body:     d.bodyElement(width),
-		Footer:   d.Footer,
-		Width:    width,
-	}.Render(ctx, Rect{X: bounds.X, Y: bounds.Y, W: width, H: bounds.H})
+	return d.window(ctx, width).Render(ctx, Rect{X: bounds.X, Y: bounds.Y, W: width, H: bounds.H})
 }
 
-func (d Dialog) bodyElement(width int) Element {
-	children := make([]Child, 0, 2)
+func (d Dialog) bodyElement(width int, palette theme.Palette) Element {
+	children := make([]Child, 0, 4)
+	if subtitle := strings.TrimSpace(d.Subtitle); subtitle != "" {
+		children = append(children, Fixed(Label{
+			Text:  subtitle,
+			Style: lipgloss.NewStyle().Foreground(palette.AssistantTimestampText),
+		}))
+	}
 	if d.Body != nil {
 		children = append(children, Fixed(d.Body))
 	}
@@ -47,10 +45,29 @@ func (d Dialog) bodyElement(width int) Element {
 		buttons.Width = max(0, width-6)
 		children = append(children, Fixed(buttons))
 	}
+	if footer := strings.TrimSpace(d.Footer); footer != "" {
+		children = append(children, Fixed(Label{
+			Text:  footer,
+			Style: lipgloss.NewStyle().Foreground(palette.AssistantTimestampText),
+		}))
+	}
 	if len(children) == 0 {
 		return nil
 	}
 	return Column{Children: children, Spacing: 2}
+}
+
+func (d Dialog) window(ctx *Context, width int) WindowFrame {
+	palette := themePalette(ctx)
+	return WindowFrame{
+		Title:       d.Title,
+		Content:     d.bodyElement(width, palette),
+		Width:       width,
+		Background:  palette.SidebarBackground,
+		Foreground:  palette.SidebarForeground,
+		BorderColor: palette.SidebarBorder,
+		ShowClose:   true,
+	}
 }
 
 func (d Dialog) frameWidth(ctx *Context, constraints Constraints) int {

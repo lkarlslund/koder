@@ -78,104 +78,27 @@ type Panel struct {
 }
 
 func (p Panel) Measure(ctx *Context, constraints Constraints) Size {
-	width := constraints.MaxW
-	if p.Width > 0 {
-		width = p.Width
-	}
-	inset := p.panelInsets()
-	childSize := Size{}
-	if p.Child != nil {
-		childSize = p.Child.Measure(ctx, Constraints{MaxW: max(0, width-inset.Left-inset.Right), MaxH: max(0, constraints.MaxH-inset.Top-inset.Bottom)})
-	}
-	size := Size{
-		W: childSize.W + inset.Left + inset.Right,
-		H: childSize.H + inset.Top + inset.Bottom,
-	}
-	if p.Width > 0 {
-		size.W = p.Width
-	}
-	if p.Height > 0 {
-		size.H = p.Height
-	}
-	return constraints.Clamp(size)
+	return p.border().Measure(ctx, constraints)
 }
 
 func (p Panel) Render(ctx *Context, bounds Rect) Surface {
-	width := bounds.W
-	if width <= 0 {
-		width = p.Width
-	}
-	if width <= 0 {
-		width = p.Measure(ctx, NewConstraints(bounds.W, bounds.H)).W
-	}
-	height := bounds.H
-	if height <= 0 {
-		height = p.Height
-	}
-	if height <= 0 {
-		height = p.Measure(ctx, NewConstraints(width, bounds.H)).H
-	}
-	inset := p.panelInsets()
-	childBounds := Rect{
-		X: bounds.X + inset.Left,
-		Y: bounds.Y + inset.Top,
-		W: max(0, width-inset.Left-inset.Right),
-		H: max(0, height-inset.Top-inset.Bottom),
-	}
-	s := BlankSurface(width, height)
-	fillStyle := CellStyle{BG: cellColor(p.Background), FG: cellColor(p.Foreground)}
-	for y := 0; y < height; y++ {
-		for x := 0; x < width; x++ {
-			s.setCell(x, y, Cell{Text: " ", Width: 1, Style: fillStyle})
-		}
-	}
-	border := lipgloss.NormalBorder()
-	borderStyle := CellStyle{FG: cellColor(p.BorderColor), BG: cellColor(p.Background)}
-	if p.BorderTop && width >= 2 {
-		s.WriteText(0, 0, border.TopLeft, borderStyle)
-		s.WriteText(width-1, 0, border.TopRight, borderStyle)
-		for x := 1; x < width-1; x++ {
-			s.setCell(x, 0, Cell{Text: border.Top, Width: 1, Style: borderStyle})
-		}
-	}
-	if p.BorderBottom && height >= 2 && width >= 2 {
-		s.WriteText(0, height-1, border.BottomLeft, borderStyle)
-		s.WriteText(width-1, height-1, border.BottomRight, borderStyle)
-		for x := 1; x < width-1; x++ {
-			s.setCell(x, height-1, Cell{Text: border.Bottom, Width: 1, Style: borderStyle})
-		}
-	}
-	if p.BorderLeft {
-		for y := 1; y < height-1; y++ {
-			s.setCell(0, y, Cell{Text: border.Left, Width: 1, Style: borderStyle})
-		}
-	}
-	if p.BorderRight && width > 1 {
-		for y := 1; y < height-1; y++ {
-			s.setCell(width-1, y, Cell{Text: border.Right, Width: 1, Style: borderStyle})
-		}
-	}
-	if p.Child != nil {
-		s = s.placeAt(inset.Left, inset.Top, p.Child.Render(ctx, childBounds))
-	}
-	return s.normalize(width, height)
+	return p.border().Render(ctx, bounds)
 }
 
-func (p Panel) panelInsets() Insets {
-	inset := p.Padding
-	if p.BorderLeft {
-		inset.Left++
+func (p Panel) border() Border {
+	return Border{
+		Child:        p.Child,
+		Width:        p.Width,
+		Height:       p.Height,
+		Padding:      p.Padding,
+		Background:   p.Background,
+		Foreground:   p.Foreground,
+		BorderColor:  p.BorderColor,
+		BorderLeft:   p.BorderLeft,
+		BorderRight:  p.BorderRight,
+		BorderTop:    p.BorderTop,
+		BorderBottom: p.BorderBottom,
 	}
-	if p.BorderRight {
-		inset.Right++
-	}
-	if p.BorderTop {
-		inset.Top++
-	}
-	if p.BorderBottom {
-		inset.Bottom++
-	}
-	return inset
 }
 
 type Divider struct {
@@ -270,74 +193,11 @@ type ModalFrame struct {
 }
 
 func (m ModalFrame) Measure(ctx *Context, constraints Constraints) Size {
-	width := constraints.maxWidth()
-	if m.Width > 0 {
-		width = min(width, m.Width)
-	}
-	if width <= 0 || width == int(^uint(0)>>1) {
-		width = m.Width
-	}
-	if width <= 0 {
-		width = 80
-	}
-	contentWidth := max(0, width-6)
-	content := m.contentElement(ctx.Palette)
-	contentSize := Size{}
-	if content != nil {
-		contentSize = content.Measure(ctx, NewConstraints(contentWidth, constraints.MaxH))
-	}
-	width = max(width, m.minimumFrameWidth(contentSize.W))
-	height := contentSize.H + 4
-	return constraints.Clamp(Size{W: width, H: height})
+	return m.window(ctx).Measure(ctx, constraints)
 }
 
 func (m ModalFrame) Render(ctx *Context, bounds Rect) Surface {
-	if bounds.W <= 0 || bounds.H <= 0 {
-		size := m.Measure(ctx, NewConstraints(bounds.W, bounds.H))
-		if bounds.W <= 0 {
-			bounds.W = size.W
-		}
-		if bounds.H <= 0 {
-			bounds.H = size.H
-		}
-	}
-	contentWidth := max(0, bounds.W-6)
-	content := m.contentElement(ctx.Palette)
-	contentHeight := 0
-	var contentSurface Surface
-	if content != nil {
-		contentHeight = content.Measure(ctx, NewConstraints(contentWidth, max(0, bounds.H-4))).H
-		contentSurface = content.Render(ctx, Rect{X: bounds.X + 3, Y: bounds.Y + 2, W: contentWidth, H: contentHeight})
-	}
-	base := BlankSurface(bounds.W, bounds.H)
-	border := lipgloss.RoundedBorder()
-	borderStyle := CellStyle{FG: cellColor(ctx.Palette.SidebarBorder), BG: cellColor(ctx.Palette.SidebarBackground)}
-	fillStyle := CellStyle{FG: cellColor(ctx.Palette.SidebarForeground), BG: cellColor(ctx.Palette.SidebarBackground)}
-	for y := 1; y < max(1, bounds.H-1); y++ {
-		for x := 0; x < bounds.W; x++ {
-			base.setCell(x, y, Cell{Text: " ", Width: 1, Style: fillStyle})
-		}
-		if y < bounds.H-1 {
-			base.WriteText(0, y, border.Left, borderStyle)
-			if bounds.W > 1 {
-				base.WriteText(bounds.W-1, y, border.Right, borderStyle)
-			}
-		}
-	}
-	top, closeStart, closeWidth := m.topBorder(ctx.Palette, bounds.W)
-	base = base.placeAt(0, 0, top)
-	if ctx != nil && ctx.Runtime != nil && closeWidth > 0 {
-		ctx.Runtime.Register(Control{
-			ID:      "window-close",
-			Rect:    Rect{X: bounds.X + closeStart, Y: bounds.Y, W: closeWidth, H: 1},
-			Enabled: true,
-		})
-	}
-	if contentHeight > 0 {
-		base = base.placeAt(3, 2, contentSurface)
-	}
-	base = base.placeAt(0, bounds.H-1, m.bottomBorder(ctx.Palette, bounds.W))
-	return base.normalize(bounds.W, bounds.H)
+	return m.window(ctx).Render(ctx, bounds)
 }
 
 func (m ModalFrame) contentElement(palette theme.Palette) Element {
@@ -371,67 +231,16 @@ func (m ModalFrame) contentElement(palette theme.Palette) Element {
 	return Column{Children: children}
 }
 
-func (m ModalFrame) minimumFrameWidth(contentWidth int) int {
-	titleWidth := PlainWidth(m.titleLabel())
-	closeWidth := PlainWidth(m.closeLabel())
-	return max(contentWidth+6, titleWidth+closeWidth+2)
-}
-
-func (m ModalFrame) titleLabel() string {
-	title := strings.TrimSpace(m.Title)
-	if title == "" {
-		return ""
+func (m ModalFrame) window(ctx *Context) WindowFrame {
+	return WindowFrame{
+		Title:       m.Title,
+		Content:     m.contentElement(themePalette(ctx)),
+		Width:       m.Width,
+		Background:  themePalette(ctx).SidebarBackground,
+		Foreground:  themePalette(ctx).SidebarForeground,
+		BorderColor: themePalette(ctx).SidebarBorder,
+		ShowClose:   true,
 	}
-	return "[" + title + "]"
-}
-
-func (m ModalFrame) closeLabel() string {
-	return "[X]"
-}
-
-func (m ModalFrame) topBorder(palette theme.Palette, width int) (Surface, int, int) {
-	border := lipgloss.RoundedBorder()
-	borderStyle := CellStyle{FG: cellColor(palette.SidebarBorder), BG: cellColor(palette.SidebarBackground)}
-	titleStyle := CellStyle{FG: cellColor(palette.MarkdownText), BG: cellColor(palette.SidebarBackground), Bold: true}
-	closeStyle := CellStyle{FG: cellColor(palette.AssistantTimestampText), BG: cellColor(palette.SidebarBackground), Bold: true}
-	innerWidth := max(0, width-2)
-	title := m.titleLabel()
-	close := m.closeLabel()
-	closeWidth := min(innerWidth, PlainWidth(close))
-	titleBudget := max(0, innerWidth-closeWidth)
-	if titleBudget > 0 && PlainWidth(title) > titleBudget {
-		title = "[" + PlainTruncate(strings.TrimSpace(m.Title), max(0, titleBudget-2), "") + "]"
-	}
-	titleWidth := min(innerWidth-closeWidth, PlainWidth(title))
-	fillerWidth := max(0, innerWidth-titleWidth-closeWidth)
-	closeStart := width - 1 - closeWidth
-	s := BlankSurface(width, 1)
-	for x := 0; x < width; x++ {
-		s.setCell(x, 0, Cell{Text: " ", Width: 1, Style: borderStyle})
-	}
-	s.WriteText(0, 0, border.TopLeft, borderStyle)
-	s.WriteText(1, 0, title, titleStyle)
-	s.WriteText(1+titleWidth, 0, strings.Repeat(border.Top, fillerWidth), borderStyle)
-	s.WriteText(closeStart, 0, close, closeStyle)
-	s.WriteText(width-1, 0, border.TopRight, borderStyle)
-	return s, max(0, closeStart), closeWidth
-}
-
-func (m ModalFrame) bottomBorder(palette theme.Palette, width int) Surface {
-	border := lipgloss.RoundedBorder()
-	borderStyle := CellStyle{FG: cellColor(palette.SidebarBorder), BG: cellColor(palette.SidebarBackground)}
-	s := BlankSurface(width, 1)
-	for x := 0; x < width; x++ {
-		s.setCell(x, 0, Cell{Text: " ", Width: 1, Style: borderStyle})
-	}
-	s.WriteText(0, 0, border.BottomLeft, borderStyle)
-	if width > 2 {
-		s.WriteText(1, 0, strings.Repeat(border.Bottom, width-2), borderStyle)
-	}
-	if width > 1 {
-		s.WriteText(width-1, 0, border.BottomRight, borderStyle)
-	}
-	return s
 }
 
 func lipglossToCellStyle(style lipgloss.Style) CellStyle {

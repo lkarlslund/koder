@@ -194,7 +194,7 @@ func (s Section) Render(ctx *Context, bounds Rect) Surface {
 }
 
 func (s Section) children(ctx *Context) Element {
-	body := Panel{
+	body := Border{
 		Child:       s.Child,
 		Width:       s.Width,
 		Padding:     s.Padding,
