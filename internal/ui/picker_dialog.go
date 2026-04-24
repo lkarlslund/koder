@@ -203,7 +203,9 @@ func (d PickerDialog) element(width int, palette theme.Palette) Element {
 		children = append(children, Fixed(Label{Text: "  no matches"}))
 	} else {
 		items := make([]ListItem, 0, len(d.view))
-		for idx, item := range d.view {
+		start, end := pickerWindowBounds(d.Index, len(d.view), 10)
+		for idx := start; idx < end; idx++ {
+			item := d.view[idx]
 			items = append(items, ListItem{
 				ControlID: "picker-row-" + strconv.Itoa(idx),
 				Primary:   item.Title,
@@ -289,4 +291,19 @@ func (d *PickerDialog) selectCurrent() PickerDialogAction {
 		return PickerDialogAction{Kind: PickerDialogActionCancel}
 	}
 	return PickerDialogAction{Kind: PickerDialogActionSelect, Value: item.Value}
+}
+
+func pickerWindowBounds(index, total, visible int) (int, int) {
+	if visible <= 0 || total <= 0 {
+		return 0, 0
+	}
+	start := 0
+	if index >= visible-1 {
+		start = index - (visible - 2)
+	}
+	end := minInt(total, start+visible)
+	if end == total && end-start < visible {
+		start = maxInt(0, end-visible)
+	}
+	return start, end
 }

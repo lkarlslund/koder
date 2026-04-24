@@ -2419,6 +2419,79 @@ func TestThemePickerEnterSavesTheme(t *testing.T) {
 	}
 }
 
+func TestMouseClickOnThemePickerOKAppliesSelection(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.UI.Theme = "flexoki"
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	m, err := New(cfg, nil, nil, StartupModeNew, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.mouseEnabled = true
+	m.width = 100
+	m.height = 28
+	m.openThemePicker()
+	m.picker.dialog.Query = "gr"
+	m.picker.dialog.SetCurrentValue("gruvbox")
+	m.picker.dialog.Update(ui.KeyMsg{Type: ui.KeyTab})
+	m.previewSelectedTheme()
+	bounds := m.centeredWindowBounds(m.renderPickerElement())
+	runtime := ui.Runtime{}
+	ctx := &ui.Context{Palette: m.palette, Runtime: &runtime}
+	element := m.renderPickerElement()
+	if element == nil {
+		t.Fatal("expected picker element")
+	}
+	_ = element.Render(ctx, ui.Rect{W: bounds.W, H: bounds.H})
+	var okControl ui.Control
+	found := false
+	for _, control := range runtime.Controls() {
+		if control.ID == "ok" {
+			okControl = control
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("expected OK control to be registered")
+	}
+	if action := m.picker.dialog.ActivateControl("ok"); action.Kind != ui.PickerDialogActionSelect {
+		t.Fatalf("expected OK control to select current item, got %#v", action)
+	}
+	okX := bounds.X + okControl.Rect.X + 1
+	okY := bounds.Y + okControl.Rect.Y
+	if control, ok := runtime.Hit(ui.Point{X: okControl.Rect.X, Y: okControl.Rect.Y}); !ok || control.ID != "ok" {
+		t.Fatalf("expected local hit to resolve OK control, got %#v %v", control, ok)
+	}
+
+	updated, _ := m.Update(ui.MouseMsg{
+		Action: ui.MouseActionPress,
+		Button: ui.MouseButtonLeft,
+		X:      okX,
+		Y:      okY,
+	})
+	next := asModelPtr(t, updated)
+	if next.hasPicker() {
+		t.Fatalf("expected picker to close after clicking OK, status=%q theme=%q index=%d focus=%v", next.status, next.cfg.UI.Theme, next.picker.dialog.Index, next.picker.dialog.Focus)
+	}
+	if next.cfg.UI.Theme != "gruvbox" {
+		t.Fatalf("expected theme selection to persist gruvbox, got %q", next.cfg.UI.Theme)
+	}
+	if !strings.Contains(next.status, "Theme set to") {
+		t.Fatalf("expected status update after clicking OK, got %q", next.status)
+	}
+}
+
 func TestPrefsCommandOpensPreferencesDialog(t *testing.T) {
 	m := Model{
 		cfg:      config.Default(),
