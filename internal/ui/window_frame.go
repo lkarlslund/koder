@@ -24,6 +24,13 @@ type WindowFrame struct {
 	CloseID     string
 }
 
+func (w WindowFrame) WalkChildren(ctx *Context, visit func(Element)) {
+	if visit == nil {
+		return
+	}
+	visit(w.border(ctx))
+}
+
 func (w WindowFrame) Measure(ctx *Context, constraints Constraints) Size {
 	return w.border(ctx).Measure(ctx, constraints)
 }

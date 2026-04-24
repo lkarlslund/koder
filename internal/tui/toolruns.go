@@ -314,11 +314,21 @@ func (m *Model) cachedTranscriptBlock(block transcriptBlock) cachedTranscriptBlo
 		m.transcriptCache = make(map[string]cachedTranscriptBlock)
 	}
 	key := m.transcriptBlockCacheKey(block)
-	if cached, ok := m.transcriptCache[key]; ok {
-		return cached
-	}
 	element := m.renderTranscriptBlockElement(block)
 	lineCount := m.estimateTranscriptBlockHeight(block)
+	if cached, ok := m.transcriptCache[key]; ok {
+		if reusable, ok := cached.element.(*ui.CachedElement); ok {
+			reusable.SetChild(element)
+		} else {
+			cached.element = element
+		}
+		cached.lineCount = lineCount
+		if block.Kind == transcriptBlockToolRun && strings.TrimSpace(block.ToolRun.ID) != "" {
+			cached.controlID = "toolrun:" + block.ToolRun.ID
+		}
+		m.transcriptCache[key] = cached
+		return cached
+	}
 	if element != nil {
 		element = ui.NewCachedElement(element, lineCount)
 	}

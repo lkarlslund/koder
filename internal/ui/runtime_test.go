@@ -79,6 +79,40 @@ func (w *paletteWindow) Render(ctx *Context, bounds Rect) Surface {
 	return s
 }
 
+type paletteElement struct{}
+
+func (paletteElement) Measure(_ *Context, constraints Constraints) Size {
+	return constraints.Clamp(Size{W: 1, H: 1})
+}
+
+func (paletteElement) Render(ctx *Context, bounds Rect) Surface {
+	s := BlankSurface(max(1, bounds.W), max(1, bounds.H))
+	s.WriteText(0, 0, "x", CellStyle{FG: cellColor(ctx.Palette.MarkdownText)})
+	return s.normalize(bounds.W, bounds.H)
+}
+
+type elementWindow struct {
+	BaseWindow
+	bounds  Rect
+	element Element
+}
+
+func (w *elementWindow) Bounds(Rect) Rect {
+	return w.bounds
+}
+
+func (w *elementWindow) Render(ctx *Context, bounds Rect) Surface {
+	if w.element == nil {
+		return BlankSurface(bounds.W, bounds.H)
+	}
+	return w.element.Render(ctx, bounds)
+}
+
+func (w *elementWindow) InvalidateCaches(ctx *Context) {
+	InvalidateElementCaches(ctx, w.element)
+	w.Dirty = true
+}
+
 func TestRootRoutesKeysToFocusedWindow(t *testing.T) {
 	root := NewRoot(theme.Default().Palette, Rect{W: 20, H: 10})
 	main := newStubWindow("main", 0, Rect{W: 20, H: 10})
@@ -215,5 +249,67 @@ func TestRootSetPaletteUpdatesRenderContext(t *testing.T) {
 	}
 	if beforeR == afterR && beforeG == afterG && beforeB == afterB {
 		t.Fatal("expected palette change to affect render output")
+	}
+}
+
+func TestInvalidateElementCachesReachesNestedCachedChild(t *testing.T) {
+	first := theme.Resolve("tokyonight").Palette
+	second := theme.Resolve("flexoki").Palette
+
+	cached := NewCachedElement(paletteElement{}, 1)
+	element := Inset{
+		Padding: UniformInsets(1),
+		Child: VisibleElement{
+			Child: cached,
+		},
+	}
+
+	before := element.Render(&Context{Palette: first}, Rect{W: 4, H: 3})
+	beforeR, beforeG, beforeB, beforeOK := before.SurfaceCellFG(1, 1)
+	if !beforeOK {
+		t.Fatal("expected foreground color before invalidation")
+	}
+
+	InvalidateElementCaches(&Context{Palette: first}, element)
+	after := element.Render(&Context{Palette: second}, Rect{W: 4, H: 3})
+	afterR, afterG, afterB, afterOK := after.SurfaceCellFG(1, 1)
+	if !afterOK {
+		t.Fatal("expected foreground color after invalidation")
+	}
+	if beforeR == afterR && beforeG == afterG && beforeB == afterB {
+		t.Fatal("expected nested cached element to repaint after invalidation")
+	}
+}
+
+func TestRootSetPaletteInvalidatesCachedDescendants(t *testing.T) {
+	first := theme.Resolve("tokyonight").Palette
+	second := theme.Resolve("flexoki").Palette
+
+	root := NewRoot(first, Rect{W: 6, H: 4})
+	root.SetMainWindow(&elementWindow{
+		BaseWindow: BaseWindow{WindowID: "main", VisibleFlag: true, Dirty: true},
+		bounds:     Rect{W: 6, H: 4},
+		element: Inset{
+			Padding: UniformInsets(1),
+			Child: VisibleElement{
+				Child: NewCachedElement(paletteElement{}, 1),
+			},
+		},
+	})
+
+	before := root.RenderFrame()
+	beforeR, beforeG, beforeB, beforeOK := before.SurfaceCellFG(1, 1)
+	if !beforeOK {
+		t.Fatal("expected foreground color before palette update")
+	}
+
+	root.SetPalette(second)
+	after := root.RenderFrame()
+	afterR, afterG, afterB, afterOK := after.SurfaceCellFG(1, 1)
+	if !afterOK {
+		t.Fatal("expected foreground color after palette update")
+	}
+	if beforeR == afterR && beforeG == afterG && beforeB == afterB {
+		t.Fatal("expected root palette update to invalidate cached descendants")
 	}
 }

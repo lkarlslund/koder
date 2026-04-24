@@ -63,6 +63,13 @@ func (h HitBox) Render(ctx *Context, bounds Rect) Surface {
 	return h.Child.Render(ctx, bounds)
 }
 
+func (h HitBox) WalkChildren(_ *Context, visit func(Element)) {
+	if h.Child == nil || visit == nil {
+		return
+	}
+	visit(h.Child)
+}
+
 type Panel struct {
 	Child        Element
 	Width        int
@@ -75,6 +82,13 @@ type Panel struct {
 	BorderTop    bool
 	BorderBottom bool
 	BorderColor  lipgloss.Color
+}
+
+func (p Panel) WalkChildren(ctx *Context, visit func(Element)) {
+	if visit == nil {
+		return
+	}
+	visit(p.border())
 }
 
 func (p Panel) Measure(ctx *Context, constraints Constraints) Size {
@@ -190,6 +204,13 @@ type ModalFrame struct {
 	Body     Element
 	Footer   string
 	Width    int
+}
+
+func (m ModalFrame) WalkChildren(ctx *Context, visit func(Element)) {
+	if visit == nil {
+		return
+	}
+	visit(m.window(ctx))
 }
 
 func (m ModalFrame) Measure(ctx *Context, constraints Constraints) Size {

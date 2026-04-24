@@ -26,6 +26,13 @@ type Border struct {
 	BorderBottom  bool
 }
 
+func (b Border) WalkChildren(_ *Context, visit func(Element)) {
+	if b.Child == nil || visit == nil {
+		return
+	}
+	visit(b.Child)
+}
+
 func (b Border) Measure(ctx *Context, constraints Constraints) Size {
 	width := constraints.MaxW
 	if b.Width > 0 {

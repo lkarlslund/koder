@@ -80,6 +80,28 @@ func (e *CachedElement) Render(ctx *Context, bounds Rect) Surface {
 	return e.RenderCached(ctx, bounds.W).normalize(bounds.W, bounds.H)
 }
 
+func (e *CachedElement) InvalidateCache() {
+	if e == nil {
+		return
+	}
+	clear(e.surfaces)
+}
+
+func (e *CachedElement) SetChild(child Element) {
+	if e == nil {
+		return
+	}
+	e.Child = child
+	e.InvalidateCache()
+}
+
+func (e *CachedElement) WalkChildren(_ *Context, visit func(Element)) {
+	if e == nil || e.Child == nil || visit == nil {
+		return
+	}
+	visit(e.Child)
+}
+
 func NewRetainedTranscript() *RetainedTranscript {
 	return &RetainedTranscript{}
 }
@@ -278,6 +300,17 @@ func (v TranscriptViewport) Render(ctx *Context, bounds Rect) Surface {
 	}
 	surface, _, _ := v.Transcript.RenderVisible(ctx, bounds.W, bounds.H, v.OffsetY)
 	return surface.normalize(bounds.W, bounds.H)
+}
+
+func (v TranscriptViewport) WalkChildren(_ *Context, visit func(Element)) {
+	if v.Transcript == nil || visit == nil {
+		return
+	}
+	for _, item := range v.Transcript.items {
+		if item.Element != nil {
+			visit(item.Element)
+		}
+	}
 }
 
 func (t Transcript) Measure(ctx *Context, constraints Constraints) Size {

@@ -22,13 +22,15 @@ const (
 )
 
 type modelWindow struct {
-	base   ui.BaseWindow
-	model  *Model
-	bounds func(*Model, ui.Rect) ui.Rect
-	render func(*Model, ui.Rect) ui.Surface
-	key    func(*Model, ui.KeyMsg) (bool, ui.Cmd)
-	mouse  func(*Model, ui.MouseMsg) (bool, ui.Cmd)
-	timer  func(*Model, ui.TimerEvent) (bool, ui.Cmd)
+	base       ui.BaseWindow
+	model      *Model
+	bounds     func(*Model, ui.Rect) ui.Rect
+	element    func(*Model) ui.Element
+	render     func(*Model, ui.Rect) ui.Surface
+	invalidate func(*Model, *ui.Context)
+	key        func(*Model, ui.KeyMsg) (bool, ui.Cmd)
+	mouse      func(*Model, ui.MouseMsg) (bool, ui.Cmd)
+	timer      func(*Model, ui.TimerEvent) (bool, ui.Cmd)
 }
 
 func (w *modelWindow) ID() ui.WindowID {
@@ -95,6 +97,21 @@ func (w *modelWindow) Render(ctx *ui.Context, bounds ui.Rect) ui.Surface {
 	return w.render(w.model, bounds)
 }
 
+func (w *modelWindow) InvalidateCaches(ctx *ui.Context) {
+	if w == nil {
+		return
+	}
+	if w.invalidate != nil {
+		w.invalidate(w.model, ctx)
+		w.base.Dirty = true
+		return
+	}
+	if w.element != nil {
+		ui.InvalidateElementCaches(ctx, w.element(w.model))
+	}
+	w.base.Dirty = true
+}
+
 func (w *modelWindow) HandleTimer(event ui.TimerEvent) (bool, ui.Cmd) {
 	if w.timer == nil {
 		return false, nil
@@ -141,8 +158,15 @@ func (m *Model) mainWindow() ui.Window {
 				},
 			},
 			model: m,
+			element: func(m *Model) ui.Element {
+				return m.renderBodyElement()
+			},
 			render: func(m *Model, bounds ui.Rect) ui.Surface {
 				return m.renderBodySurface().Normalize(max(0, bounds.W), max(0, bounds.H))
+			},
+			invalidate: func(m *Model, ctx *ui.Context) {
+				ui.InvalidateElementCaches(ctx, m.renderBodyElement())
+				m.invalidateBodyCache()
 			},
 			key: func(m *Model, msg ui.KeyMsg) (bool, ui.Cmd) {
 				return m.handleMainWindowKey(msg)
@@ -420,7 +444,8 @@ func (m *Model) centeredWindow(id ui.WindowID, z int, element ui.Element, onKey 
 			ModalFlag:     true,
 			Dirty:         true,
 		},
-		model: m,
+		model:   m,
+		element: func(*Model) ui.Element { return element },
 		bounds: func(m *Model, root ui.Rect) ui.Rect {
 			if element == nil {
 				return ui.Rect{}

@@ -5485,7 +5485,7 @@ func (m *Model) setTheme(name string, save bool) error {
 	m.palette = selected.Palette
 	m.renderer = renderer
 	applyComposerTheme(&m.composer, selected.Palette)
-	m.transcriptCache = nil
+	ui.InvalidateElementCaches(&ui.Context{Palette: m.palette}, m.renderBodyElement())
 	m.invalidateTranscript()
 	m.refreshViewport()
 	if save {

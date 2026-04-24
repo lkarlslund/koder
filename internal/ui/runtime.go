@@ -157,6 +157,10 @@ type TimerHandler interface {
 	HandleTimer(TimerEvent) (bool, Cmd)
 }
 
+type WindowCacheInvalidator interface {
+	InvalidateCaches(*Context)
+}
+
 type BaseWindow struct {
 	WindowID      WindowID
 	Order         int
@@ -264,6 +268,22 @@ func (r *Root) SetPalette(palette theme.Palette) {
 		return
 	}
 	r.palette = palette
+	r.InvalidateAll()
+}
+
+func (r *Root) InvalidateAll() {
+	if r == nil {
+		return
+	}
+	ctx := &Context{Palette: r.palette}
+	for _, window := range r.allWindows() {
+		if window == nil {
+			continue
+		}
+		if invalidator, ok := window.(WindowCacheInvalidator); ok {
+			invalidator.InvalidateCaches(ctx)
+		}
+	}
 	r.RequestRedraw()
 }
 

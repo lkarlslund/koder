@@ -593,6 +593,35 @@ type Element interface {
 	Render(ctx *Context, bounds Rect) Surface
 }
 
+type TreeWalker interface {
+	WalkChildren(ctx *Context, visit func(Element))
+}
+
+type CacheInvalidator interface {
+	InvalidateCache()
+}
+
+func InvalidateElementCaches(ctx *Context, element Element) {
+	if element == nil {
+		return
+	}
+	invalidateElementCaches(ctx, element)
+}
+
+func invalidateElementCaches(ctx *Context, element Element) {
+	if element == nil {
+		return
+	}
+	if invalidator, ok := element.(CacheInvalidator); ok {
+		invalidator.InvalidateCache()
+	}
+	if walker, ok := element.(TreeWalker); ok {
+		walker.WalkChildren(ctx, func(child Element) {
+			invalidateElementCaches(ctx, child)
+		})
+	}
+}
+
 type Visibility interface {
 	Visible() bool
 }
@@ -756,6 +785,13 @@ func (e VisibleElement) Render(ctx *Context, bounds Rect) Surface {
 	return base.placeAt(x, y, child)
 }
 
+func (e VisibleElement) WalkChildren(_ *Context, visit func(Element)) {
+	if e.Child == nil || visit == nil {
+		return
+	}
+	visit(e.Child)
+}
+
 type Child struct {
 	Element Element
 	Flex    int
@@ -846,6 +882,17 @@ func (c Column) Render(ctx *Context, bounds Rect) Surface {
 	return base
 }
 
+func (c Column) WalkChildren(_ *Context, visit func(Element)) {
+	if visit == nil {
+		return
+	}
+	for _, child := range c.Children {
+		if child.Element != nil {
+			visit(child.Element)
+		}
+	}
+}
+
 type Row struct {
 	Children []Child
 	Spacing  int
@@ -883,6 +930,17 @@ func (r Row) Render(ctx *Context, bounds Rect) Surface {
 	return base
 }
 
+func (r Row) WalkChildren(_ *Context, visit func(Element)) {
+	if visit == nil {
+		return
+	}
+	for _, child := range r.Children {
+		if child.Element != nil {
+			visit(child.Element)
+		}
+	}
+}
+
 type Inset struct {
 	Padding Insets
 	Child   Element
@@ -909,6 +967,13 @@ func (i Inset) Render(ctx *Context, bounds Rect) Surface {
 	return base.placeAt(i.Padding.Left, i.Padding.Top, childSurface)
 }
 
+func (i Inset) WalkChildren(_ *Context, visit func(Element)) {
+	if i.Child == nil || visit == nil {
+		return
+	}
+	visit(i.Child)
+}
+
 type Constrained struct {
 	Constraints Constraints
 	Child       Element
@@ -933,6 +998,13 @@ func (c Constrained) Render(ctx *Context, bounds Rect) Surface {
 	}
 	size := c.Measure(ctx, NewConstraints(bounds.W, bounds.H))
 	return c.Child.Render(ctx, Rect{X: bounds.X, Y: bounds.Y, W: size.W, H: size.H}).normalize(bounds.W, bounds.H)
+}
+
+func (c Constrained) WalkChildren(_ *Context, visit func(Element)) {
+	if c.Child == nil || visit == nil {
+		return
+	}
+	visit(c.Child)
 }
 
 type Stack struct {
@@ -963,6 +1035,17 @@ func (s Stack) Render(ctx *Context, bounds Rect) Surface {
 	return base
 }
 
+func (s Stack) WalkChildren(_ *Context, visit func(Element)) {
+	if visit == nil {
+		return
+	}
+	for _, child := range s.Children {
+		if child != nil {
+			visit(child)
+		}
+	}
+}
+
 type VBox struct {
 	Children []Child
 	Spacing  int
@@ -976,6 +1059,10 @@ func (b VBox) Render(ctx *Context, bounds Rect) Surface {
 	return Column{Children: b.Children, Spacing: b.Spacing}.Render(ctx, bounds)
 }
 
+func (b VBox) WalkChildren(ctx *Context, visit func(Element)) {
+	Column{Children: b.Children, Spacing: b.Spacing}.WalkChildren(ctx, visit)
+}
+
 type HBox struct {
 	Children []Child
 	Spacing  int
@@ -987,6 +1074,10 @@ func (b HBox) Measure(ctx *Context, constraints Constraints) Size {
 
 func (b HBox) Render(ctx *Context, bounds Rect) Surface {
 	return Row{Children: b.Children, Spacing: b.Spacing}.Render(ctx, bounds)
+}
+
+func (b HBox) WalkChildren(ctx *Context, visit func(Element)) {
+	Row{Children: b.Children, Spacing: b.Spacing}.WalkChildren(ctx, visit)
 }
 
 type Alignment int

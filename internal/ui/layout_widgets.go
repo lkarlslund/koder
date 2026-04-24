@@ -24,6 +24,18 @@ type Split struct {
 	Gap         int
 }
 
+func (s Split) WalkChildren(_ *Context, visit func(Element)) {
+	if visit == nil {
+		return
+	}
+	if s.First != nil {
+		visit(s.First)
+	}
+	if s.Second != nil {
+		visit(s.Second)
+	}
+}
+
 func (s Split) Measure(ctx *Context, constraints Constraints) Size {
 	switch s.Direction {
 	case SplitVertical:
@@ -170,6 +182,16 @@ type Section struct {
 	BorderColor lipgloss.Color
 }
 
+func (s Section) WalkChildren(ctx *Context, visit func(Element)) {
+	if visit == nil {
+		return
+	}
+	child := s.children(ctx)
+	if child != nil {
+		visit(child)
+	}
+}
+
 func (s Section) Measure(ctx *Context, constraints Constraints) Size {
 	width := s.Width
 	if width <= 0 {
@@ -236,6 +258,30 @@ type List struct {
 	Focused            bool
 	OnSelectionChanged func(index int, item ListItem)
 	OnActivate         func(index int, item ListItem)
+}
+
+func (l List) WalkChildren(ctx *Context, visit func(Element)) {
+	if visit == nil {
+		return
+	}
+	width := l.Width
+	if width <= 0 && ctx != nil {
+		width = 72
+	}
+	for idx, item := range l.Items {
+		visit(SelectableRow{
+			ControlID:      item.ControlID,
+			Primary:        item.Primary,
+			Secondary:      item.Secondary,
+			Tertiary:       item.Tertiary,
+			Width:          width,
+			PrimaryWidth:   item.PrimaryWidth,
+			SecondaryWidth: item.SecondaryWidth,
+			TertiaryWidth:  item.TertiaryWidth,
+			Selected:       idx == l.Selected,
+			Focused:        l.Focused && idx == l.Selected,
+		})
+	}
 }
 
 func (l List) Measure(ctx *Context, constraints Constraints) Size {
