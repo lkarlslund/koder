@@ -245,13 +245,6 @@ func ListDirectory(abs string) ([]string, error) {
 	return out, nil
 }
 
-func limitCopy(dst io.Writer, src io.Reader, n int64) (int64, error) {
-	if n <= 0 {
-		return io.Copy(dst, src)
-	}
-	return io.Copy(dst, io.LimitReader(src, n))
-}
-
 func BoolString(value bool) string {
 	if value {
 		return "true"

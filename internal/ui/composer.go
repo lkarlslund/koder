@@ -120,10 +120,6 @@ func (c Composer) renderPlaceholderSurface(promptStyle, contentStyle lipgloss.St
 	return c.renderPlaceholder(prompt, promptStyle, "", cursor, rest, contentWidth, c.CursorVisible, c.Palette.UserTextForeground, c.Palette.UserTextBackground, c.Palette.ComposerMutedText)
 }
 
-func (c Composer) renderLine(prompt string, promptStyle lipgloss.Style, before, cursor, after string, contentWidth int, cursorVisible bool, textFG, textBG lipgloss.Color) string {
-	return strings.Join(c.renderLineSurface(prompt, promptStyle, before, cursor, after, contentWidth, cursorVisible, textFG, textBG).Lines(), "\n")
-}
-
 func (c Composer) renderLineSurface(prompt string, promptStyle lipgloss.Style, before, cursor, after string, contentWidth int, cursorVisible bool, textFG, textBG lipgloss.Color) Surface {
 	width := PlainWidth(prompt) + maxInt(0, contentWidth)
 	if width <= 0 {

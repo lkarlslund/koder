@@ -200,22 +200,6 @@ func anyModelHasCapabilities(models []domain.Model) bool {
 	return false
 }
 
-func compactModelCell(value string) string {
-	value = strings.ReplaceAll(value, "\n", " ")
-	return strings.Join(strings.Fields(value), " ")
-}
-
-func truncateModelCell(value string, width int) string {
-	value = strings.TrimSpace(value)
-	if width <= 0 {
-		return ""
-	}
-	if PlainWidth(value) <= width {
-		return value
-	}
-	return PlainTruncate(value, width, "…")
-}
-
 func firstNonEmptyModelValue(values ...string) string {
 	for _, value := range values {
 		if strings.TrimSpace(value) != "" {

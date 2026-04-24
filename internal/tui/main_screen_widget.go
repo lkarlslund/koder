@@ -7,12 +7,6 @@ import (
 	"github.com/lkarlslund/koder/internal/ui"
 )
 
-type cachedRegionWidget interface {
-	Dirty() bool
-	Invalidate()
-	Surface(ctx *ui.Context, bounds ui.Rect) ui.Surface
-}
-
 type transcriptWidget struct {
 	model   *Model
 	bounds  ui.Rect

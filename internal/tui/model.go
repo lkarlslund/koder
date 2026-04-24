@@ -337,7 +337,6 @@ type Model struct {
 	mainWindowView     *modelWindow
 	debug              *debugsrv.Recorder
 	uiRoot             *ui.Root
-	uiRuntime          ui.Runtime
 	rootTimerSeq       uint64
 	rootTimerPending   bool
 	rootTimerPendingAt time.Time
@@ -1249,10 +1248,6 @@ func (m *Model) renderHeader() string {
 	return ""
 }
 
-func (m *Model) renderBodyLines() []string {
-	return m.renderBodySurface().Lines()
-}
-
 func (m *Model) renderBodySurface() ui.Surface {
 	ctx := &ui.Context{Palette: m.palette}
 	width := max(0, m.width)
@@ -1295,10 +1290,6 @@ func (m *Model) transcriptViewportHeight() int {
 		height -= composerHeight + 1
 	}
 	return max(0, height)
-}
-
-func (m *Model) renderComposerAreaLines() []string {
-	return m.renderComposerAreaSurface().Lines()
 }
 
 func (m *Model) renderComposerAreaSurface() ui.Surface {
@@ -1491,10 +1482,6 @@ func (m *Model) promptGlyph() string {
 		return "█"
 	}
 	return "┃"
-}
-
-func (m *Model) renderHalfBlockLine(width int, char string) string {
-	return ui.Composer{Width: width, Palette: m.palette}.HalfBlockLine(char)
 }
 
 func mPrompt(cfg config.Config) string {
@@ -1773,22 +1760,11 @@ func (m *Model) syncRetainedTranscriptItems(retained *ui.RetainedTranscript, ite
 	}
 }
 
-func (m *Model) defaultTranscriptSeparator() string {
-	return "\n\n"
-}
-
 func (m *Model) transcriptSeparator(prev, next transcriptBlock) string {
 	if !m.halfBlocksEnabled() {
 		return "\n\n"
 	}
 	if m.isHalfBlockUserMessage(prev) || m.isHalfBlockUserMessage(next) {
-		return "\n"
-	}
-	return "\n\n"
-}
-
-func (m *Model) transcriptActivitySeparator(prev transcriptBlock) string {
-	if m.halfBlocksEnabled() && m.isHalfBlockUserMessage(prev) {
 		return "\n"
 	}
 	return "\n\n"
@@ -1904,21 +1880,6 @@ func (m *Model) userMessageWidth(body, stamp string) int {
 	}
 	lines = append(lines, "")
 	return ui.UserMessageWidth(lines)
-}
-
-func (m *Model) renderAssistantMessage(body, stamp string) string {
-	element := m.renderAssistantMessageElement(body, stamp)
-	return m.renderElementText(element, max(0, m.viewport.Width), 0)
-}
-
-func (m *Model) renderAssistantMessageElement(body, stamp string) ui.Element {
-	return ui.AssistantMessage{
-		Body:      body,
-		BaseStyle: ui.CellStyle{FG: ui.CellColorFromLipgloss(m.palette.MarkdownText)},
-		Stamp:     stamp,
-		Width:     m.viewport.Width,
-		Palette:   m.palette,
-	}
 }
 
 func (m *Model) renderStyledAssistantMessageElement(body []ui.StyledSpan, stamp string) ui.Element {
@@ -3917,13 +3878,6 @@ func (m *Model) acceptMentionSelection() {
 	m.status = fmt.Sprintf("Inserted %s", display)
 }
 
-func (m *Model) renderSlashMenu() string {
-	if element := m.renderSlashMenuElement(); element != nil {
-		return m.renderElementText(element, 0, 0)
-	}
-	return ""
-}
-
 func (m *Model) renderSlashMenuElement() ui.Element {
 	if len(m.slashMatches) == 0 {
 		return nil
@@ -3940,13 +3894,6 @@ func (m *Model) renderSlashMenuElement() ui.Element {
 	}
 	selected := m.slashIndex - start
 	return ui.SlashMenu{Title: "Commands", Items: items, Selected: selected}
-}
-
-func (m *Model) renderSkillMenu() string {
-	if element := m.renderSkillMenuElement(); element != nil {
-		return m.renderElementText(element, 0, 0)
-	}
-	return ""
 }
 
 func (m *Model) renderSkillMenuElement() ui.Element {
@@ -3970,13 +3917,6 @@ func (m *Model) renderSkillMenuElement() ui.Element {
 	return ui.SlashMenu{Title: "Skills", Items: items, Selected: selected}
 }
 
-func (m *Model) renderMentionMenu() string {
-	if element := m.renderMentionMenuElement(); element != nil {
-		return m.renderElementText(element, 0, 0)
-	}
-	return ""
-}
-
 func (m *Model) renderMentionMenuElement() ui.Element {
 	if len(m.mentionMatches) == 0 {
 		return nil
@@ -3996,13 +3936,6 @@ func (m *Model) renderMentionMenuElement() ui.Element {
 	}
 	selected := m.mentionIndex - start
 	return ui.SlashMenu{Title: "References", Items: items, Selected: selected}
-}
-
-func (m *Model) renderComposerHistoryMenu() string {
-	if element := m.renderComposerHistoryMenuElement(); element != nil {
-		return m.renderElementText(element, 0, 0)
-	}
-	return ""
 }
 
 func (m *Model) renderComposerHistoryMenuElement() ui.Element {
@@ -4066,13 +3999,6 @@ func historySummary(input string) string {
 	return summary
 }
 
-func (m *Model) renderPicker() string {
-	if element := m.renderPickerElement(); element != nil {
-		return m.renderElementText(element, 80, 0)
-	}
-	return ""
-}
-
 func (m *Model) renderPickerElement() ui.Element {
 	if !m.hasPicker() {
 		return nil
@@ -4105,33 +4031,11 @@ func (m *Model) renderSessionDialogElement() ui.Element {
 	return m.sessionDialog
 }
 
-func (m *Model) renderPreferencesDialog() string {
-	if element := m.renderPreferencesDialogElement(); element != nil {
-		width := 86
-		if m.width > 0 {
-			width = min(100, max(74, m.width-8))
-		}
-		return m.renderElementText(element, width, 0)
-	}
-	return ""
-}
-
 func (m *Model) renderPreferencesDialogElement() ui.Element {
 	if !m.hasPreferencesDialog() {
 		return nil
 	}
 	return m.preferences
-}
-
-func (m *Model) renderToolsDialog() string {
-	if element := m.renderToolsDialogElement(); element != nil {
-		width := 90
-		if m.width > 0 {
-			width = min(100, max(76, m.width-8))
-		}
-		return m.renderElementText(element, width, 0)
-	}
-	return ""
 }
 
 func (m *Model) renderToolsDialogElement() ui.Element {
@@ -4141,17 +4045,6 @@ func (m *Model) renderToolsDialogElement() ui.Element {
 	return m.toolsDialog
 }
 
-func (m *Model) renderConnectDialog() string {
-	if element := m.renderConnectDialogElement(); element != nil {
-		width := 88
-		if m.width > 0 {
-			width = min(104, max(76, m.width-8))
-		}
-		return m.renderElementText(element, width, 0)
-	}
-	return ""
-}
-
 func (m *Model) renderConnectDialogElement() ui.Element {
 	if !m.hasConnectDialog() {
 		return nil
@@ -4159,33 +4052,11 @@ func (m *Model) renderConnectDialogElement() ui.Element {
 	return m.connectDialog
 }
 
-func (m *Model) renderDisconnectDialog() string {
-	if element := m.renderDisconnectDialogElement(); element != nil {
-		width := 84
-		if m.width > 0 {
-			width = min(96, max(72, m.width-8))
-		}
-		return m.renderElementText(element, width, 0)
-	}
-	return ""
-}
-
 func (m *Model) renderDisconnectDialogElement() ui.Element {
 	if !m.hasDisconnectDialog() {
 		return nil
 	}
 	return m.disconnectDialog
-}
-
-func (m *Model) renderModelDialog() string {
-	if element := m.renderModelDialogElement(); element != nil {
-		width := 84
-		if m.width > 0 {
-			width = min(96, max(72, m.width-8))
-		}
-		return m.renderElementText(element, width, 0)
-	}
-	return ""
 }
 
 func (m *Model) renderModelDialogElement() ui.Element {
@@ -4948,13 +4819,6 @@ func (m *Model) openAgentsModal() {
 	m.syncComposerVisibility()
 }
 
-func (m *Model) renderAgentsModal() string {
-	if element := m.renderAgentsModalElement(); element != nil {
-		return m.renderElementText(element, min(110, max(72, m.width-8)), 0)
-	}
-	return ""
-}
-
 func (m *Model) renderAgentsModalElement() ui.Element {
 	if m.agentsModal == nil {
 		return nil
@@ -5008,13 +4872,6 @@ func (m *Model) openHelpModal() {
 	}
 	m.helpModal = &modal
 	m.syncComposerVisibility()
-}
-
-func (m *Model) renderHelpModal() string {
-	if element := m.renderHelpModalElement(); element != nil {
-		return m.renderElementText(element, min(104, max(84, m.width-8)), 0)
-	}
-	return ""
 }
 
 func (m *Model) renderHelpModalElement() ui.Element {
@@ -5382,14 +5239,6 @@ func (m *Model) openApprovalPermissionsPicker() {
 	m.picker.approvalID = m.approvals[0].ID
 }
 
-func (m *Model) movePicker(delta int) {
-	if !m.hasPicker() {
-		return
-	}
-	m.picker.dialog.Move(delta)
-	m.previewSelectedTheme()
-}
-
 func (m *Model) submitPickerSelection(value string) (ui.Model, ui.Cmd) {
 	switch m.picker.mode {
 	case pickerModePermissions:
@@ -5747,29 +5596,6 @@ func isComposerTokenBoundary(r rune) bool {
 	default:
 		return false
 	}
-}
-
-func mentionTokenEnd(value string, start int) int {
-	end := start
-	quoted := strings.HasPrefix(value[start:], `@"`)
-	if quoted {
-		end += 2
-		for end < len(value) {
-			if value[end] == '"' {
-				return end + 1
-			}
-			end++
-		}
-		return len(value)
-	}
-	for end < len(value) && !strings.ContainsRune(" \t\n([{", rune(value[end])) {
-		end++
-	}
-	return end
-}
-
-func lowerRune(r rune) rune {
-	return unicode.ToLower(r)
 }
 
 func matchingSlashCommands(query string) []slashCommand {

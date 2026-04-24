@@ -1,8 +1,6 @@
 package dialogs
 
 import (
-	"fmt"
-	"math"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -86,27 +84,6 @@ func firstNonEmptyColor(values ...lipgloss.Color) lipgloss.Color {
 	return ""
 }
 
-func deriveFocusedBackground(base lipgloss.Color, screen lipgloss.Color) lipgloss.Color {
-	baseRGB, ok := parseHexColor(base)
-	if !ok {
-		return base
-	}
-	screenRGB, ok := parseHexColor(screen)
-	if !ok {
-		screenRGB = [3]float64{0, 0, 0}
-	}
-	baseLum := relativeLuminance(baseRGB)
-	screenLum := relativeLuminance(screenRGB)
-	adjust := 0.12
-	if screenLum > 0.5 {
-		return formatHexColor(darkenRGB(baseRGB, adjust))
-	}
-	if baseLum <= screenLum {
-		return formatHexColor(lightenRGB(baseRGB, adjust))
-	}
-	return formatHexColor(lightenRGB(baseRGB, adjust))
-}
-
 func wrapPlain(input string, width int) string {
 	if width <= 0 {
 		return strings.TrimSpace(input)
@@ -153,66 +130,4 @@ func wrapWords(line string, width int) []string {
 		remaining = strings.TrimSpace(strings.TrimPrefix(remaining, segment))
 	}
 	return lines
-}
-
-func parseHexColor(color lipgloss.Color) ([3]float64, bool) {
-	value := strings.TrimSpace(string(color))
-	if len(value) != 7 || !strings.HasPrefix(value, "#") {
-		return [3]float64{}, false
-	}
-	var rgb [3]float64
-	for i := 0; i < 3; i++ {
-		var component uint8
-		_, err := fmt.Sscanf(value[1+i*2:3+i*2], "%02x", &component)
-		if err != nil {
-			return [3]float64{}, false
-		}
-		rgb[i] = float64(component) / 255.0
-	}
-	return rgb, true
-}
-
-func formatHexColor(rgb [3]float64) lipgloss.Color {
-	return lipgloss.Color(fmt.Sprintf("#%02x%02x%02x",
-		clampColorComponent(rgb[0]*255),
-		clampColorComponent(rgb[1]*255),
-		clampColorComponent(rgb[2]*255),
-	))
-}
-
-func clampColorComponent(value float64) int {
-	if value < 0 {
-		return 0
-	}
-	if value > 255 {
-		return 255
-	}
-	return int(value + 0.5)
-}
-
-func relativeLuminance(rgb [3]float64) float64 {
-	return 0.2126*linearize(rgb[0]) + 0.7152*linearize(rgb[1]) + 0.0722*linearize(rgb[2])
-}
-
-func linearize(value float64) float64 {
-	if value <= 0.03928 {
-		return value / 12.92
-	}
-	return math.Pow((value+0.055)/1.055, 2.4)
-}
-
-func lightenRGB(rgb [3]float64, amount float64) [3]float64 {
-	return [3]float64{
-		rgb[0] + (1-rgb[0])*amount,
-		rgb[1] + (1-rgb[1])*amount,
-		rgb[2] + (1-rgb[2])*amount,
-	}
-}
-
-func darkenRGB(rgb [3]float64, amount float64) [3]float64 {
-	return [3]float64{
-		rgb[0] * (1 - amount),
-		rgb[1] * (1 - amount),
-		rgb[2] * (1 - amount),
-	}
 }

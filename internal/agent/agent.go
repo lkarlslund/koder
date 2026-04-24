@@ -1485,8 +1485,6 @@ func storedToolCall(part domain.Part) (tools.Request, bool) {
 	return call, true
 }
 
-func toolCallArgumentsJSON(call tools.Request) string { return call.ArgumentsJSON() }
-
 func partMetaMap(part domain.Part) map[string]string {
 	if strings.TrimSpace(part.MetaJSON) == "" {
 		return nil
@@ -2120,15 +2118,6 @@ func requestFromStoredApproval(tool domain.ToolKind, raw string) (tools.Request,
 	return tools.RequestFromStored(tool, raw)
 }
 
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if strings.TrimSpace(value) != "" {
-			return value
-		}
-	}
-	return ""
-}
-
 func max(a, b int) int {
 	return slices.Max([]int{a, b})
 }
@@ -2179,22 +2168,6 @@ func (e *Engine) recordApprovalReply(ctx context.Context, sessionID int64, tool 
 		return err
 	}
 	_, err = e.store.AddPart(ctx, msg.ID, domain.PartKindSystemNotice, body, string(meta))
-	return err
-}
-
-func (e *Engine) recordTaskUpdate(ctx context.Context, sessionID int64, body string, status domain.TaskStatus) error {
-	msg, err := e.store.AddMessage(ctx, sessionID, domain.MessageRoleTool, fmt.Sprintf("task:%s", status))
-	if err != nil {
-		return err
-	}
-	payload := tools.MetaWithStoredResult(map[string]string{
-		"status": string(status),
-	}, domain.PartKindTaskUpdate, domain.ToolKindTask, tools.StoredResultStatusOK, tools.TaskStoredResult{
-		Body:   body,
-		Status: status,
-	})
-	meta, _ := json.Marshal(payload)
-	_, err = e.store.AddPart(ctx, msg.ID, domain.PartKindTaskUpdate, body, string(meta))
 	return err
 }
 

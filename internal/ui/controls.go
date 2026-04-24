@@ -400,10 +400,6 @@ func (b Button) View(palette theme.Palette) string {
 	return strings.Join(b.renderSurface(palette).Lines(), "\n")
 }
 
-func (b Button) render(palette theme.Palette) string {
-	return strings.Join(b.renderSurface(palette).Lines(), "\n")
-}
-
 func (b Button) renderSurface(palette theme.Palette) Surface {
 	background := lipgloss.Color("")
 	foreground := lipgloss.Color("")
@@ -643,10 +639,6 @@ func (r ButtonRow) gap() int {
 	return r.Gap
 }
 
-func renderButtonLabel(label string, hotkey rune, palette theme.Palette, foreground, background lipgloss.Color, bold bool) string {
-	return strings.Join(buttonLabelSurface(label, hotkey, palette, foreground, background, bold).Lines(), "\n")
-}
-
 type buttonLabelPart struct {
 	text string
 	hot  bool
@@ -677,28 +669,6 @@ func buttonLabelParts(label string, hotkey rune) []buttonLabelPart {
 		parts = append(parts, buttonLabelPart{text: string(labelRunes[idx+1:])})
 	}
 	return parts
-}
-
-func buttonLabelSurface(label string, hotkey rune, palette theme.Palette, foreground, background lipgloss.Color, bold bool) Surface {
-	style := CellStyle{FG: cellColor(foreground), BG: cellColor(background), Bold: bold}
-	hotStyle := style
-	hotStyle.FG = cellColor(palette.ActivityText)
-	parts := buttonLabelParts(label, hotkey)
-	width := 0
-	for _, part := range parts {
-		width += PlainWidth(part.text)
-	}
-	s := BlankSurface(width, 1)
-	col := 0
-	for _, part := range parts {
-		partStyle := style
-		if part.hot {
-			partStyle = hotStyle
-		}
-		s.WriteText(col, 0, part.text, partStyle)
-		col += PlainWidth(part.text)
-	}
-	return s
 }
 
 func firstNonEmptyColor(values ...lipgloss.Color) lipgloss.Color {

@@ -47,15 +47,6 @@ type SlashMenu struct {
 	Selected int
 }
 
-func (m SlashMenu) render() Surface {
-	element := m.element(m.contentWidth())
-	if element == nil {
-		return Surface{}
-	}
-	width := m.panelWidth(m.contentWidth())
-	return element.Render(&Context{Palette: theme.Default().Palette}, Rect{W: width})
-}
-
 func (m SlashMenu) Measure(ctx *Context, constraints Constraints) Size {
 	return constraints.Clamp(m.element(m.contentWidth()).Measure(ctx, constraints))
 }
@@ -112,10 +103,6 @@ func (m SlashMenu) contentWidth() int {
 
 func (m SlashMenu) panelWidth(contentWidth int) int {
 	return max(0, contentWidth) + 4
-}
-
-func (m HistoryMenu) render() Surface {
-	return m.element().Render(&Context{Palette: m.Palette}, Rect{W: m.width()})
 }
 
 func (m HistoryMenu) Measure(ctx *Context, constraints Constraints) Size {
@@ -195,12 +182,6 @@ func NewApprovalPrompt(props ApprovalPromptProps) ApprovalPrompt {
 	return ApprovalPrompt(props)
 }
 
-func (p ApprovalPrompt) render() Surface {
-	element := p.element()
-	size := element.Measure(&Context{Palette: p.Palette}, Constraints{})
-	return element.Render(&Context{Palette: p.Palette}, Rect{W: size.W, H: size.H})
-}
-
 func (p ApprovalPrompt) Measure(ctx *Context, constraints Constraints) Size {
 	return constraints.Clamp(p.element().Measure(ctx, constraints))
 }
@@ -257,12 +238,6 @@ type MenuPickerDialog struct {
 
 func NewMenuPickerDialog(props PickerDialogProps) MenuPickerDialog {
 	return MenuPickerDialog(props)
-}
-
-func (d MenuPickerDialog) render() Surface {
-	element := d.element()
-	size := element.Measure(&Context{Palette: d.Palette}, NewConstraints(80, 0))
-	return element.Render(&Context{Palette: d.Palette}, Rect{W: size.W, H: size.H})
 }
 
 func (d MenuPickerDialog) Measure(ctx *Context, constraints Constraints) Size {

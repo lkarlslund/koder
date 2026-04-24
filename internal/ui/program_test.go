@@ -1,7 +1,6 @@
 package ui
 
 import (
-	"io"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -168,11 +167,6 @@ func (f *fakeInputReader) ReadEvents() ([]input.Event, error) {
 }
 
 func (f *fakeInputReader) Close() error { return nil }
-
-type eofInputReader struct{}
-
-func (eofInputReader) ReadEvents() ([]input.Event, error) { return nil, io.EOF }
-func (eofInputReader) Close() error                       { return nil }
 
 type fakeSurface struct {
 	w     int

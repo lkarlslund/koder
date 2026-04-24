@@ -52,36 +52,3 @@ func RenderStyledTextANSI(spans []StyledSpan) string {
 	}
 	return b.String()
 }
-
-func serializeSurfaceRow(s Surface, y int) string {
-	if y < 0 || y >= s.h || len(s.cells) == 0 {
-		return ""
-	}
-	var b strings.Builder
-	var currentStyle CellStyle
-	var segment strings.Builder
-	flush := func() {
-		if segment.Len() == 0 {
-			return
-		}
-		b.WriteString(applyCellStyle(currentStyle, segment.String()))
-		segment.Reset()
-	}
-	for x := 0; x < s.w; x++ {
-		cell := s.cellAt(x, y)
-		if cell.Continuation {
-			continue
-		}
-		text := cell.Text
-		if text == "" {
-			text = " "
-		}
-		if segment.Len() > 0 && !currentStyle.equal(cell.Style) {
-			flush()
-		}
-		currentStyle = cell.Style
-		segment.WriteString(text)
-	}
-	flush()
-	return b.String()
-}

@@ -1,7 +1,6 @@
 package ui
 
 import (
-	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -174,43 +173,4 @@ func (c selectionGridCard) Render(ctx *Context, bounds Rect) Surface {
 		BorderBottom: true,
 		BorderColor:  borderColor,
 	}.Render(ctx, bounds)
-}
-
-func selectionGridMove(index, total, columns, deltaCol, deltaRow int) int {
-	if total <= 0 {
-		return 0
-	}
-	if index < 0 {
-		index = 0
-	}
-	if index >= total {
-		index = total - 1
-	}
-	columns = max(1, columns)
-	col := index % columns
-	row := index / columns
-	col += deltaCol
-	row += deltaRow
-	if col < 0 {
-		col = 0
-	}
-	if col >= columns {
-		col = columns - 1
-	}
-	if row < 0 {
-		row = 0
-	}
-	maxRow := (total - 1) / columns
-	if row > maxRow {
-		row = maxRow
-	}
-	next := row*columns + col
-	if next >= total {
-		next = total - 1
-	}
-	return next
-}
-
-func selectionGridControlID(index int) string {
-	return "picker-item-" + strconv.Itoa(index)
 }
