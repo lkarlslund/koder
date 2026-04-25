@@ -1235,7 +1235,7 @@ func (m *Model) resize() {
 		bodyWidth = 20
 	}
 	m.composer.SetWidth(m.composerWidth())
-	bodyHeight := m.height - m.statusPaneHeight()
+	bodyHeight := m.height - m.statusPaneHeight() - (mainScreenVerticalInset * 2)
 	if bodyHeight < 5 {
 		bodyHeight = 5
 	}
@@ -1263,7 +1263,7 @@ func (m *Model) renderBodySurface() ui.Surface {
 		if height <= 0 {
 			height = max(0, m.viewport.Height)
 			if height == 0 {
-				height = max(6, m.transcriptViewportHeight()+m.composerAreaHeight()+m.statusPaneHeight())
+				height = max(6, m.transcriptViewportHeight()+m.composerAreaHeight()+m.statusPaneHeight()+(mainScreenVerticalInset*2))
 			}
 		}
 	}
@@ -1394,7 +1394,7 @@ func (m *Model) renderMainScreenElement() ui.Element {
 	rootChildren := []ui.Child{
 		ui.Flex(ui.HBox{
 			Children: []ui.Child{
-				ui.Flex(ui.Inset{Padding: ui.SymmetricInsets(1, 0), Child: mainColumn}, 1),
+				ui.Flex(ui.Inset{Padding: ui.SymmetricInsets(mainScreenVerticalInset, 0), Child: mainColumn}, 1),
 				ui.Fixed(sidebar),
 			},
 		}, 1),

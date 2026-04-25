@@ -3427,6 +3427,70 @@ func TestViewBottomAlignsFooter(t *testing.T) {
 	}
 }
 
+func TestViewShowsAllVisibleTranscriptLinesAboveComposer(t *testing.T) {
+	composer := textarea.New()
+	composer.Placeholder = "Ask koder or type / for commands"
+	composer.SetHeight(composerInputHeight)
+	composer.Focus()
+
+	m := Model{
+		cfg:            testConfig(t),
+		palette:        theme.Resolve("tokyonight").Palette,
+		width:          40,
+		height:         12,
+		composer:       composer,
+		currentSession: domain.Session{ID: 1},
+		messages: []domain.Message{
+			{ID: 1, Role: domain.MessageRoleAssistant},
+			{ID: 2, Role: domain.MessageRoleUser},
+		},
+		parts: map[int64][]domain.Part{
+			1: {{Kind: domain.PartKindText, Body: "assistant context"}},
+			2: {{Kind: domain.PartKindText, Body: "final user line one\nfinal user line two"}},
+		},
+		viewport: newTranscriptViewport(37, 8),
+	}
+
+	m.resize()
+	m.refreshViewport()
+
+	viewLines := strings.Split(strings.Join(m.viewSurface().Lines(), "\n"), "\n")
+	transcriptLines := m.viewport.VisibleSurface().Lines()
+	if len(transcriptLines) == 0 {
+		t.Fatal("expected visible transcript lines")
+	}
+	composerIdx := indexOfTrimmedLineContaining(viewLines, "Ask koder or type / for commands")
+	if composerIdx < 0 {
+		t.Fatalf("expected composer in rendered view, got:\n%s", strings.Join(viewLines, "\n"))
+	}
+	lastTranscriptLine := strings.TrimRight(ansi.Strip(transcriptLines[len(transcriptLines)-1]), " ")
+	lastTranscriptIdx := indexOfTrimmedLine(viewLines[:composerIdx], lastTranscriptLine)
+	if lastTranscriptIdx < 0 {
+		t.Fatalf("expected final visible transcript line %q before composer\nview:\n%s\n\ntranscript:\n%s", lastTranscriptLine, strings.Join(viewLines, "\n"), strings.Join(transcriptLines, "\n"))
+	}
+	if lastTranscriptIdx >= composerIdx {
+		t.Fatalf("expected final visible transcript line before composer, got transcript=%d composer=%d", lastTranscriptIdx, composerIdx)
+	}
+}
+
+func indexOfTrimmedLine(lines []string, want string) int {
+	for idx, line := range lines {
+		if strings.Contains(strings.TrimRight(ansi.Strip(line), " "), want) {
+			return idx
+		}
+	}
+	return -1
+}
+
+func indexOfTrimmedLineContaining(lines []string, want string) int {
+	for idx, line := range lines {
+		if strings.Contains(strings.TrimRight(ansi.Strip(line), " "), want) {
+			return idx
+		}
+	}
+	return -1
+}
+
 func TestResizeUsesMeasuredFooterHeight(t *testing.T) {
 	m := Model{
 		width:    80,
@@ -3437,7 +3501,7 @@ func TestResizeUsesMeasuredFooterHeight(t *testing.T) {
 
 	m.resize()
 
-	want := 24 - m.statusPaneHeight()
+	want := 24 - m.statusPaneHeight() - (mainScreenVerticalInset * 2)
 	if want < 5 {
 		want = 5
 	}

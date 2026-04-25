@@ -7,6 +7,8 @@ import (
 	"github.com/lkarlslund/koder/internal/ui"
 )
 
+const mainScreenVerticalInset = 1
+
 type transcriptWidget struct {
 	model   *Model
 	bounds  ui.Rect
@@ -224,7 +226,7 @@ func (w *mainScreenWidget) Surface(ctx *ui.Context, bounds ui.Rect) ui.Surface {
 	rootChildren := []ui.Child{
 		ui.Flex(ui.HBox{
 			Children: []ui.Child{
-				ui.Flex(ui.Inset{Padding: ui.SymmetricInsets(1, 0), Child: mainColumn}, 1),
+				ui.Flex(ui.Inset{Padding: ui.SymmetricInsets(mainScreenVerticalInset, 0), Child: mainColumn}, 1),
 				ui.Fixed(sidebarElement),
 			},
 		}, 1),
