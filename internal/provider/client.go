@@ -170,6 +170,7 @@ type chatChunk struct {
 	Choices []struct {
 		Delta struct {
 			Content          string `json:"content"`
+			Reasoning        string `json:"reasoning"`
 			ReasoningContent string `json:"reasoning_content"`
 			ToolCalls        []struct {
 				ID       string `json:"id"`
@@ -182,6 +183,7 @@ type chatChunk struct {
 		} `json:"delta"`
 		Message struct {
 			Content          string `json:"content"`
+			Reasoning        string `json:"reasoning"`
 			ReasoningContent string `json:"reasoning_content"`
 			ToolCalls        []struct {
 				ID       string `json:"id"`
@@ -423,7 +425,7 @@ func (c *Client) CompleteChat(ctx context.Context, input ChatRequest) (ChatRespo
 	}
 	return ChatResponse{
 		Text:      choice.Message.Content,
-		Reasoning: choice.Message.ReasoningContent,
+		Reasoning: firstNonEmptyString(choice.Message.ReasoningContent, choice.Message.Reasoning),
 		Usage:     usage,
 		ToolCalls: convertToolCalls(choice.Message.ToolCalls),
 	}, nil
@@ -496,8 +498,8 @@ func (c *Client) emitChunk(events chan<- domain.Event, chunk chatChunk, raw stri
 		if choice.Delta.Content != "" {
 			events <- domain.Event{Kind: domain.EventKindMessageDelta, Text: choice.Delta.Content, RawJSON: raw}
 		}
-		if choice.Delta.ReasoningContent != "" {
-			events <- domain.Event{Kind: domain.EventKindReasoning, Text: choice.Delta.ReasoningContent, RawJSON: raw}
+		if reasoning := firstNonEmptyString(choice.Delta.ReasoningContent, choice.Delta.Reasoning); reasoning != "" {
+			events <- domain.Event{Kind: domain.EventKindReasoning, Text: reasoning, RawJSON: raw}
 		}
 		if choice.FinishReason != "" {
 			events <- domain.Event{Kind: domain.EventKindStatus, Text: choice.FinishReason}
