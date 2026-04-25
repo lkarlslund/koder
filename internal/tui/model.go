@@ -1494,15 +1494,11 @@ func (m *Model) renderQueuedPromptPreviewElement() ui.Element {
 }
 
 func (m *Model) composerWidth() int {
-	if m.width <= 0 {
+	width := m.transcriptPaneWidth()
+	if width <= 0 {
 		return 40
 	}
-	sidebarWidth := m.sidebarWidth()
-	bodyWidth := m.width - sidebarWidth - 3
-	if bodyWidth < 20 {
-		bodyWidth = 20
-	}
-	return bodyWidth - 2
+	return width
 }
 
 func (m *Model) sidebarWidth() int {
