@@ -3,7 +3,6 @@ package greptool
 import (
 	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -63,9 +62,6 @@ func TestPresentationIncludesPathAndIncludeScope(t *testing.T) {
 }
 
 func TestExecuteSearchesSingleFilePath(t *testing.T) {
-	if _, err := exec.LookPath("rg"); err != nil {
-		t.Skip("rg not installed")
-	}
 	workdir := t.TempDir()
 	target := filepath.Join(workdir, "pkg", "file.go")
 	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
@@ -97,9 +93,6 @@ func TestExecuteSearchesSingleFilePath(t *testing.T) {
 }
 
 func TestExecuteSearchesDirectoryPath(t *testing.T) {
-	if _, err := exec.LookPath("rg"); err != nil {
-		t.Skip("rg not installed")
-	}
 	workdir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(workdir, "pkg"), 0o755); err != nil {
 		t.Fatalf("mkdir pkg: %v", err)
@@ -123,5 +116,104 @@ func TestExecuteSearchesDirectoryPath(t *testing.T) {
 	}
 	if !strings.Contains(result.Output, "a.go:1:needle a") || !strings.Contains(result.Output, "b.go:1:needle b") {
 		t.Fatalf("expected both directory matches in output, got %q", result.Output)
+	}
+}
+
+func TestNormalizeArgsAcceptsExtendedSearchOptions(t *testing.T) {
+	got, err := tool{}.NormalizeArgs(map[string]string{
+		"pattern":     "needle",
+		"type":        "go",
+		"output_mode": "files_with_matches",
+		"ignore_case": "true",
+		"head_limit":  "5.00000",
+		"path":        "pkg",
+		"include":     "*.go",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["type"] != "go" || got["output_mode"] != "files_with_matches" || got["ignore_case"] != "true" || got["head_limit"] != "5" {
+		t.Fatalf("unexpected normalized args: %#v", got)
+	}
+}
+
+func TestExecuteFilesWithMatchesMode(t *testing.T) {
+	workdir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(workdir, "pkg"), 0o755); err != nil {
+		t.Fatalf("mkdir pkg: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(workdir, "pkg", "a.go"), []byte("needle a\n"), 0o644); err != nil {
+		t.Fatalf("write a.go: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(workdir, "pkg", "b.txt"), []byte("needle b\n"), 0o644); err != nil {
+		t.Fatalf("write b.txt: %v", err)
+	}
+
+	result, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: workdir}, tools.Request{
+		Tool: domain.ToolKindGrep,
+		Args: map[string]string{
+			"pattern":     "needle",
+			"path":        "pkg",
+			"output_mode": "files_with_matches",
+			"type":        "go",
+		},
+	})
+	if err != nil {
+		t.Fatalf("execute grep files_with_matches: %v", err)
+	}
+	if strings.TrimSpace(result.Output) != "a.go" {
+		t.Fatalf("expected only matching go file, got %q", result.Output)
+	}
+}
+
+func TestExecuteCountMode(t *testing.T) {
+	workdir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(workdir, "pkg"), 0o755); err != nil {
+		t.Fatalf("mkdir pkg: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(workdir, "pkg", "a.go"), []byte("needle\nneedle\n"), 0o644); err != nil {
+		t.Fatalf("write a.go: %v", err)
+	}
+
+	result, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: workdir}, tools.Request{
+		Tool: domain.ToolKindGrep,
+		Args: map[string]string{
+			"pattern":     "needle",
+			"path":        "pkg",
+			"output_mode": "count",
+		},
+	})
+	if err != nil {
+		t.Fatalf("execute grep count mode: %v", err)
+	}
+	if !strings.Contains(strings.TrimSpace(result.Output), "a.go:2") {
+		t.Fatalf("expected count output, got %q", result.Output)
+	}
+}
+
+func TestExecuteFallsBackWithoutRipgrep(t *testing.T) {
+	t.Setenv("PATH", "")
+	workdir := t.TempDir()
+	target := filepath.Join(workdir, "pkg", "file.go")
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatalf("mkdir target dir: %v", err)
+	}
+	if err := os.WriteFile(target, []byte("Alpha\nneedle here\nomega\n"), 0o644); err != nil {
+		t.Fatalf("write target file: %v", err)
+	}
+
+	result, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: workdir}, tools.Request{
+		Tool: domain.ToolKindGrep,
+		Args: map[string]string{
+			"pattern":     "alpha|needle",
+			"path":        "pkg/file.go",
+			"ignore_case": "true",
+		},
+	})
+	if err != nil {
+		t.Fatalf("execute fallback grep on file path: %v", err)
+	}
+	if !strings.Contains(result.Output, "pkg/file.go:1:Alpha") || !strings.Contains(result.Output, "pkg/file.go:2:needle here") {
+		t.Fatalf("expected fallback matches in output, got %q", result.Output)
 	}
 }
