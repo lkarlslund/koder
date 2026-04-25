@@ -1283,9 +1283,6 @@ func (m *Model) transcriptActivityHeight() int {
 
 func (m *Model) transcriptViewportHeight() int {
 	height := max(0, m.viewport.Height)
-	if activityHeight := m.transcriptActivityHeight(); activityHeight > 0 {
-		height -= activityHeight + 1
-	}
 	if composerHeight := m.composerAreaHeight(); composerHeight > 0 {
 		height -= composerHeight + 1
 	}
@@ -1364,7 +1361,13 @@ func (m *Model) composerAreaHeight() int {
 }
 
 func (m *Model) renderStatusPaneElement() ui.Element {
-	return ui.VisibleElement{}
+	if !m.busy.transcriptActive() {
+		return ui.VisibleElement{}
+	}
+	return ui.ActivityIndicator{
+		Indicator: ui.WorkingIndicatorLine(m.workingIndicator(), m.busy.statusOrDefault("Working ...")),
+		Palette:   m.palette,
+	}
 }
 
 func (m *Model) statusPaneHeight() int {
@@ -1382,7 +1385,6 @@ func (m *Model) renderMainScreenElement() ui.Element {
 	}
 	mainChildren := []ui.Child{
 		ui.Flex(transcript, 1),
-		ui.Fixed(ui.VisibleElement{Child: m.renderTranscriptActivityElement(), BoxProps: ui.BoxProps{Hidden: m.renderTranscriptActivityElement() == nil}}),
 		ui.Fixed(m.renderComposerAreaElement()),
 	}
 	mainColumn := ui.VBox{Children: mainChildren, Spacing: 1}
@@ -1648,7 +1650,6 @@ func (m *Model) invalidateBodyCache() {
 	if main := m.ensureMainScreenWidget(); main != nil {
 		main.Invalidate()
 		main.transcript.Invalidate()
-		main.activity.Invalidate()
 		main.composer.Invalidate()
 		main.sidebar.Invalidate()
 		main.statusPane.Invalidate()
@@ -3467,6 +3468,12 @@ func (m *Model) startBusy(scope busyScope, status string) {
 	m.loading = true
 	m.status = status
 	m.busy.start(scope, status)
+	if m.width <= 0 || m.height <= 0 {
+		m.invalidateMainSurface()
+		return
+	}
+	m.resize()
+	m.invalidateMainSurface()
 }
 
 func (m *Model) stopBusy() {
@@ -3474,6 +3481,12 @@ func (m *Model) stopBusy() {
 	m.busy.stop()
 	m.activeOpCancel = nil
 	m.interruptArmedAt = time.Time{}
+	if m.width <= 0 || m.height <= 0 {
+		m.invalidateMainSurface()
+		return
+	}
+	m.resize()
+	m.refreshViewportPreserve()
 }
 
 func (m *Model) stopBusyWithStatus(status string) {
@@ -3486,9 +3499,6 @@ func (m Model) syncDebugRuntime() {
 		return
 	}
 	renderedBlocks := len(m.messages)
-	if m.renderTranscriptActivityElement() != nil {
-		renderedBlocks++
-	}
 	m.debug.UpdateRuntime(debugsrv.RuntimeSnapshot{
 		DebugAPI:           m.debugAPIAddr(),
 		CurrentSession:     m.currentSession.ID,

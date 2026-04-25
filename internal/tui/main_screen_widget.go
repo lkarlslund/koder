@@ -164,7 +164,6 @@ func (w *hashedElementWidget) Surface(ctx *ui.Context, bounds ui.Rect) ui.Surfac
 type mainScreenWidget struct {
 	model      *Model
 	transcript *transcriptWidget
-	activity   *hashedElementWidget
 	composer   *composerAreaWidget
 	sidebar    *hashedElementWidget
 	statusPane *hashedElementWidget
@@ -184,7 +183,7 @@ func (w *mainScreenWidget) dirty() bool {
 	if w == nil || !w.valid {
 		return true
 	}
-	return w.transcript.Dirty() || w.activity.Dirty() || w.composer.Dirty() || w.sidebar.Dirty() || w.statusPane.Dirty()
+	return w.transcript.Dirty() || w.composer.Dirty() || w.sidebar.Dirty() || w.statusPane.Dirty()
 }
 
 func (w *mainScreenWidget) Surface(ctx *ui.Context, bounds ui.Rect) ui.Surface {
@@ -195,7 +194,6 @@ func (w *mainScreenWidget) Surface(ctx *ui.Context, bounds ui.Rect) ui.Surface {
 		return w.surface
 	}
 	transcriptBounds := ui.Rect{W: max(0, w.model.viewport.Width), H: max(0, w.model.transcriptViewportHeight())}
-	activityBounds := ui.Rect{W: transcriptBounds.W, H: max(0, w.model.transcriptActivityHeight())}
 	composerBounds := ui.Rect{W: max(0, w.model.composerWidth())}
 	composerSurface := w.composer.Surface(ctx, composerBounds)
 	composerBounds.H = composerSurface.Size().H
@@ -203,19 +201,12 @@ func (w *mainScreenWidget) Surface(ctx *ui.Context, bounds ui.Rect) ui.Surface {
 	statusBounds := ui.Rect{W: max(0, bounds.W), H: max(0, w.model.statusPaneHeight())}
 
 	transcriptSurface := w.transcript.Surface(ctx, transcriptBounds)
-	activitySurface := w.activity.Surface(ctx, activityBounds)
 	sidebarSurface := w.sidebar.Surface(ctx, sidebarBounds)
 	statusSurface := w.statusPane.Surface(ctx, statusBounds)
 
 	var transcriptElement ui.Element = ui.SurfaceBox{Surface: transcriptSurface}
 	mainChildren := []ui.Child{
 		ui.Flex(transcriptElement, 1),
-		ui.Fixed(ui.VisibleElement{
-			Child: ui.SurfaceBox{Surface: activitySurface},
-			BoxProps: ui.BoxProps{
-				Hidden: activitySurface.Size().H == 0,
-			},
-		}),
 		ui.Fixed(ui.VisibleElement{
 			Child: ui.SurfaceBox{Surface: composerSurface},
 			BoxProps: ui.BoxProps{
@@ -263,7 +254,7 @@ func sidebarWidgetHash(m *Model, bounds ui.Rect) uint64 {
 	)
 }
 
-func activityWidgetHash(m *Model, bounds ui.Rect) uint64 {
+func statusPaneWidgetHash(m *Model, bounds ui.Rect) uint64 {
 	line := ""
 	if m.busy.transcriptActive() {
 		line = ui.WorkingIndicatorLine(m.workingIndicator(), m.busy.statusOrDefault("Working ..."))
@@ -273,10 +264,6 @@ func activityWidgetHash(m *Model, bounds ui.Rect) uint64 {
 		strconv.Itoa(bounds.H),
 		line,
 	)
-}
-
-func statusPaneWidgetHash(_ *Model, bounds ui.Rect) uint64 {
-	return hashStrings(strconv.Itoa(bounds.W), strconv.Itoa(bounds.H))
 }
 
 func hashStrings(values ...string) uint64 {
@@ -292,7 +279,6 @@ func (m *Model) ensureMainScreenWidget() *mainScreenWidget {
 	if m.mainScreen != nil {
 		m.mainScreen.model = m
 		m.mainScreen.transcript.model = m
-		m.mainScreen.activity.model = m
 		m.mainScreen.composer.model = m
 		m.mainScreen.sidebar.model = m
 		m.mainScreen.statusPane.model = m
@@ -301,13 +287,7 @@ func (m *Model) ensureMainScreenWidget() *mainScreenWidget {
 	m.mainScreen = &mainScreenWidget{
 		model:      m,
 		transcript: &transcriptWidget{model: m, dirty: true},
-		activity: &hashedElementWidget{
-			model: m,
-			build: func(m *Model) ui.Element { return m.renderTranscriptActivityElement() },
-			hash:  activityWidgetHash,
-			dirty: true,
-		},
-		composer: &composerAreaWidget{model: m, dirty: true},
+		composer:   &composerAreaWidget{model: m, dirty: true},
 		sidebar: &hashedElementWidget{
 			model: m,
 			build: func(m *Model) ui.Element {
