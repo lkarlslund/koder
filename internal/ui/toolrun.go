@@ -85,7 +85,7 @@ func (r ToolRun) renderCard(palette theme.Palette, width int, expanded bool) Sur
 	if subtitle := strings.TrimSpace(r.Subtitle); subtitle != "" {
 		lines = append(lines, subtitle)
 	}
-	if preview := r.PreviewText(); preview != "" {
+	if preview := r.visiblePreview(expanded); preview != "" {
 		lines = append(lines, renderToolRunPreview(preview, r, lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle(), headerWidth, expanded))
 	}
 	cardWidth := 0
@@ -138,6 +138,17 @@ func (r ToolRun) renderCard(palette theme.Palette, width int, expanded bool) Sur
 		}
 	}
 	return s
+}
+
+func (r ToolRun) visiblePreview(expanded bool) string {
+	preview := strings.TrimSpace(r.PreviewText())
+	if preview == "" {
+		return ""
+	}
+	if r.Tool == domain.ToolKindRead && !expanded && (r.Status == ToolRunStatusCompleted || r.Status == ToolRunStatusFailed || r.Status == ToolRunStatusDenied) {
+		return ""
+	}
+	return preview
 }
 
 type ToolRunDock struct {

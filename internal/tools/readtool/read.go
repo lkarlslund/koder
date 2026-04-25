@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -43,10 +44,16 @@ func (tool) LegacyArgs(raw string) map[string]string { return map[string]string{
 func (tool) Preview(req tools.Request) string        { return req.Args["path"] }
 func (tool) PresentationForPreview(preview string) tools.Presentation {
 	preview = strings.TrimSpace(preview)
-	return tools.Presentation{Title: "Read file", Subtitle: preview, Preview: preview}
+	return tools.Presentation{Title: readPresentationTitle(preview, "", ""), Preview: preview}
 }
 func (tool) Presentation(req tools.Request) tools.Presentation {
-	return tool{}.PresentationForPreview(req.Args["path"])
+	path := strings.TrimSpace(req.Args["path"])
+	offset := strings.TrimSpace(req.Args["offset"])
+	limit := strings.TrimSpace(req.Args["limit"])
+	return tools.Presentation{
+		Title:   readPresentationTitle(path, offset, limit),
+		Preview: path,
+	}
 }
 func (tool) Execute(_ context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
 	abs, rel, err := tools.ReadablePath(runtime.Workdir, req.Args["path"])
@@ -181,4 +188,33 @@ func splitDirectoryOutput(body string) ([]string, string) {
 		return lines, ""
 	}
 	return lines[:len(lines)-1], last
+}
+
+func readPresentationTitle(pathValue, offsetValue, limitValue string) string {
+	title := "Read file"
+	pathValue = strings.TrimSpace(pathValue)
+	if pathValue == "" {
+		return title
+	}
+	title += " " + filepath.ToSlash(pathValue)
+	if lineRange := readPresentationLineRange(offsetValue, limitValue); lineRange != "" {
+		title += ", " + lineRange
+	}
+	return title
+}
+
+func readPresentationLineRange(offsetValue, limitValue string) string {
+	offset, err := strconv.Atoi(strings.TrimSpace(offsetValue))
+	if err != nil || offset <= 0 {
+		return ""
+	}
+	limit, err := strconv.Atoi(strings.TrimSpace(limitValue))
+	if err != nil || limit <= 0 {
+		return ""
+	}
+	end := offset + limit - 1
+	if end < offset {
+		return ""
+	}
+	return fmt.Sprintf("lines %d-%d", offset, end)
 }

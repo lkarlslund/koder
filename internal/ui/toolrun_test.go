@@ -54,3 +54,26 @@ func TestToolRunCardViewPlacesGrepSubtitleOnSeparateLine(t *testing.T) {
 		t.Fatalf("expected grep subtitle on second line, got %q", got)
 	}
 }
+
+func TestToolRunCardViewHidesReadPreviewUntilExpanded(t *testing.T) {
+	palette := theme.Resolve("tokyonight").Palette
+	run := ToolRun{
+		Tool:   domain.ToolKindRead,
+		Title:  "Read file README.md, lines 1-2",
+		Output: "1: first line\n2: second line",
+		Status: ToolRunStatusCompleted,
+	}
+
+	collapsed := SurfaceText(run.CardSurface(palette, 80, false))
+	if strings.Contains(collapsed, "first line") || strings.Contains(collapsed, "second line") {
+		t.Fatalf("expected collapsed read card to hide file contents, got %q", collapsed)
+	}
+	if !strings.Contains(collapsed, "Expand") {
+		t.Fatalf("expected collapsed read card to remain expandable, got %q", collapsed)
+	}
+
+	expanded := SurfaceText(run.CardSurface(palette, 80, true))
+	if !strings.Contains(expanded, "first line") || !strings.Contains(expanded, "second line") {
+		t.Fatalf("expected expanded read card to show file contents, got %q", expanded)
+	}
+}
