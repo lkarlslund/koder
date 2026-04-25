@@ -182,6 +182,34 @@ func TestConvertInputEventsFlattensMultiEvent(t *testing.T) {
 	}
 }
 
+func TestConvertInputEventsTreatsEscPrefixedRunesAsAlt(t *testing.T) {
+	msgs := convertInputEvents(input.MultiEvent{
+		input.KeyPressEvent{Code: input.KeyEsc},
+		input.KeyPressEvent{Code: 'p'},
+	})
+	if len(msgs) != 1 {
+		t.Fatalf("expected one combined alt message, got %d", len(msgs))
+	}
+	key, ok := msgs[0].(KeyMsg)
+	if !ok {
+		t.Fatalf("expected key message, got %#v", msgs[0])
+	}
+	if key.Type != KeyRunes || string(key.Runes) != "p" || !key.Alt {
+		t.Fatalf("expected alt+p message, got %#v", key)
+	}
+}
+
+func TestConvertInputEventsLeavesBareEscAlone(t *testing.T) {
+	msgs := convertInputEvents(input.KeyPressEvent{Code: input.KeyEsc})
+	if len(msgs) != 1 {
+		t.Fatalf("expected one esc message, got %d", len(msgs))
+	}
+	key, ok := msgs[0].(KeyMsg)
+	if !ok || key.Type != KeyEsc || key.Alt {
+		t.Fatalf("expected bare esc, got %#v", msgs[0])
+	}
+}
+
 func TestConvertKeyPressMapsKeypadEnter(t *testing.T) {
 	got := convertKeyPress(input.KeyPressEvent{Code: input.KeyKpEnter})
 	if got.Type != KeyEnter {

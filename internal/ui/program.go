@@ -551,11 +551,74 @@ func writeString(w io.Writer, s string) {
 func convertInputEvents(ev input.Event) []Msg {
 	switch typed := ev.(type) {
 	case input.MultiEvent:
-		msgs := make([]Msg, 0, len(typed))
-		for _, nested := range typed {
-			msgs = append(msgs, convertInputEvents(nested)...)
+		return convertEventSequence(flattenInputEvents(typed))
+	case input.KeyPressEvent:
+		return convertEventSequence([]input.Event{typed})
+	case input.KeyReleaseEvent:
+		return nil
+	case input.MouseClickEvent:
+		m := typed.Mouse()
+		return []Msg{MouseMsg{X: m.X, Y: m.Y, Button: convertMouseButton(m.Button), Action: MouseActionPress, Alt: m.Mod.Contains(input.ModAlt)}}
+	case input.MouseWheelEvent:
+		m := typed.Mouse()
+		return []Msg{MouseMsg{X: m.X, Y: m.Y, Button: convertMouseButton(m.Button), Action: MouseActionPress, Alt: m.Mod.Contains(input.ModAlt)}}
+	case input.MouseReleaseEvent:
+		m := typed.Mouse()
+		return []Msg{MouseMsg{X: m.X, Y: m.Y, Button: convertMouseButton(m.Button), Action: MouseActionRelease, Alt: m.Mod.Contains(input.ModAlt)}}
+	case input.WindowSizeEvent:
+		return []Msg{WindowSizeMsg{Width: typed.Width, Height: typed.Height}}
+	default:
+		return nil
+	}
+}
+
+func flattenInputEvents(events []input.Event) []input.Event {
+	flat := make([]input.Event, 0, len(events))
+	for _, ev := range events {
+		if nested, ok := ev.(input.MultiEvent); ok {
+			flat = append(flat, flattenInputEvents(nested)...)
+			continue
 		}
-		return msgs
+		flat = append(flat, ev)
+	}
+	return flat
+}
+
+func convertEventSequence(events []input.Event) []Msg {
+	msgs := make([]Msg, 0, len(events))
+	for idx := 0; idx < len(events); idx++ {
+		if altMsg, consumed, ok := decodeEscPrefixedAlt(events, idx); ok {
+			msgs = append(msgs, altMsg)
+			idx += consumed - 1
+			continue
+		}
+		msgs = append(msgs, convertSingleInputEvent(events[idx])...)
+	}
+	return msgs
+}
+
+func decodeEscPrefixedAlt(events []input.Event, idx int) (Msg, int, bool) {
+	if idx+1 >= len(events) {
+		return nil, 0, false
+	}
+	first, ok := events[idx].(input.KeyPressEvent)
+	if !ok || first.Code != input.KeyEsc {
+		return nil, 0, false
+	}
+	second, ok := events[idx+1].(input.KeyPressEvent)
+	if !ok {
+		return nil, 0, false
+	}
+	msg := convertKeyPress(second)
+	if msg.Type == KeyUnknown || msg.Type == KeyEsc || msg.Alt {
+		return nil, 0, false
+	}
+	msg.Alt = true
+	return msg, 2, true
+}
+
+func convertSingleInputEvent(ev input.Event) []Msg {
+	switch typed := ev.(type) {
 	case input.KeyPressEvent:
 		return []Msg{convertKeyPress(typed)}
 	case input.KeyReleaseEvent:
