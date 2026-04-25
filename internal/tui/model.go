@@ -719,7 +719,9 @@ func (m *Model) viewSurface() ui.Surface {
 	}
 	m.syncDebugRuntime()
 	root := m.syncUIRoot()
-	return root.RenderFrame()
+	surface := root.RenderFrame()
+	m.syncDebugFrame(surface)
+	return surface
 }
 
 func (m *Model) handleKey(msg ui.KeyMsg) (ui.Model, ui.Cmd) {
@@ -2601,21 +2603,25 @@ func nextEventCmd(events <-chan domain.Event) ui.Cmd {
 	}
 }
 
-func Run(cfg config.Config, st *store.Store, a *agent.Engine, mode StartupMode, debug *debugsrv.Recorder) error {
+func Run(cfg config.Config, st *store.Store, a *agent.Engine, mode StartupMode, debug *debugsrv.Recorder, debugServer *debugsrv.Server) error {
 	workdir, err := os.Getwd()
 	if err != nil {
 		return err
 	}
-	return RunWithWorkdir(cfg, st, a, mode, debug, workdir, StartupOptions{})
+	return RunWithWorkdir(cfg, st, a, mode, debug, debugServer, workdir, StartupOptions{})
 }
 
-func RunWithWorkdir(cfg config.Config, st *store.Store, a *agent.Engine, mode StartupMode, debug *debugsrv.Recorder, workdir string, startupOpts StartupOptions) error {
+func RunWithWorkdir(cfg config.Config, st *store.Store, a *agent.Engine, mode StartupMode, debug *debugsrv.Recorder, debugServer *debugsrv.Server, workdir string, startupOpts StartupOptions) error {
 	model, err := NewWithWorkdir(cfg, st, a, mode, debug, workdir, startupOpts)
 	if err != nil {
 		return err
 	}
 	model.syncDebugRuntime()
 	p := ui.NewProgram(model, ui.WithAltScreen(), ui.WithoutSignalHandler())
+	if debugServer != nil {
+		debugServer.SetInputSink(p.Send)
+		defer debugServer.SetInputSink(nil)
+	}
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
 	defer signal.Stop(sig)
@@ -3559,6 +3565,28 @@ func (m Model) syncDebugRuntime() {
 		ViewportPreview:    "",
 		ViewportContentLen: m.viewport.VisibleSurface().SurfaceHeight(),
 	})
+}
+
+func (m Model) syncDebugFrame(surface ui.Surface) {
+	if m.debug == nil {
+		return
+	}
+	snapshot := m.debug.Runtime()
+	lines := surface.Lines()
+	controls := make([]debugsrv.ControlRef, 0, len(m.transcriptControls))
+	for _, control := range m.transcriptControls {
+		controls = append(controls, debugsrv.ControlRef{
+			ID:      control.ID,
+			X:       control.Rect.X,
+			Y:       control.Rect.Y,
+			W:       control.Rect.W,
+			H:       control.Rect.H,
+			Enabled: control.Enabled,
+		})
+	}
+	snapshot.FrameLines = lines
+	snapshot.TranscriptControls = controls
+	m.debug.UpdateRuntime(snapshot)
 }
 
 func (m Model) currentError() string {

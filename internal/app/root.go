@@ -109,7 +109,7 @@ func runTUI(ctx context.Context, mode tui.StartupMode, workdir string, startupOp
 	}
 	registry := tools.NewRegistry(agents.FindProjectRoot(workdir))
 	engine := agent.New(cfg, st, registry, recorder, workdir)
-	return tui.RunWithWorkdir(cfg, st, engine, mode, recorder, workdir, startupOpts)
+	return tui.RunWithWorkdir(cfg, st, engine, mode, recorder, debugServer, workdir, startupOpts)
 }
 
 func newResumeCommand() *cobra.Command {

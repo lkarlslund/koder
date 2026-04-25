@@ -10,6 +10,7 @@ import (
 
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/store"
+	"github.com/lkarlslund/koder/internal/ui"
 	"github.com/lkarlslund/koder/internal/version"
 )
 
@@ -135,5 +136,50 @@ func TestServerExposesPprofHandlers(t *testing.T) {
 	}
 	if !strings.Contains(string(body), "profile") {
 		t.Fatalf("expected pprof index to mention profiles, got %q", string(body))
+	}
+}
+
+func TestServerAcceptsLiveInput(t *testing.T) {
+	t.Parallel()
+
+	st, err := store.OpenWithOptions(t.TempDir(), store.Options{Backend: store.BackendJSONFS})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	srv, err := Start("127.0.0.1:0", st, NewRecorder())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer srv.Close()
+
+	received := make(chan ui.Msg, 1)
+	srv.SetInputSink(func(msg ui.Msg) {
+		received <- msg
+	})
+
+	body := strings.NewReader(`{"mouse":{"x":12,"y":7,"button":"left","action":"press"}}`)
+	resp, err := http.Post("http://"+srv.Addr()+"/debug/input", "application/json", body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		data, _ := io.ReadAll(resp.Body)
+		t.Fatalf("unexpected input status %d: %s", resp.StatusCode, string(data))
+	}
+
+	select {
+	case msg := <-received:
+		mouse, ok := msg.(ui.MouseMsg)
+		if !ok {
+			t.Fatalf("expected mouse msg, got %#v", msg)
+		}
+		if mouse.X != 12 || mouse.Y != 7 || mouse.Button != ui.MouseButtonLeft || mouse.Action != ui.MouseActionPress {
+			t.Fatalf("unexpected mouse msg %#v", mouse)
+		}
+	default:
+		t.Fatal("expected live input sink to receive a message")
 	}
 }
