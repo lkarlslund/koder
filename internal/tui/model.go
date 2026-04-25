@@ -1424,7 +1424,7 @@ func (m *Model) renderMainScreenElement() ui.Element {
 		ui.Flex(m.renderTranscriptPaneElement(transcript), 1),
 		ui.Fixed(m.renderComposerAreaElement()),
 	}
-	mainColumn := ui.VBox{Children: mainChildren, Spacing: 1}
+	mainColumn := ui.VBox{Children: mainChildren}
 	sidebar := ui.VisibleElement{
 		BoxProps: ui.BoxProps{
 			Hidden: !m.showSidebar,

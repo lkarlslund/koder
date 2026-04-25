@@ -4106,6 +4106,10 @@ func TestMouseWheelScrollRefreshesRetainedTranscriptSurface(t *testing.T) {
 				"line 10",
 				"line 11",
 				"line 12",
+				"line 13",
+				"line 14",
+				"line 15",
+				"line 16",
 			}, "\n")}},
 		},
 		viewport: newTranscriptViewport(37, 8),
@@ -4129,10 +4133,10 @@ func TestMouseWheelScrollRefreshesRetainedTranscriptSurface(t *testing.T) {
 	})
 	next := updated.(Model)
 	after := strings.Join(next.viewSurface().Lines(), "\n")
-	if !strings.Contains(after, "line 1") {
+	if !strings.Contains(after, "line 2") {
 		t.Fatalf("expected scrolled retained transcript to show earlier lines, got:\n%s", after)
 	}
-	if strings.Contains(after, "line 12") {
+	if strings.Contains(after, "line 16") {
 		t.Fatalf("expected scrolled retained transcript surface to change, got:\n%s", after)
 	}
 }

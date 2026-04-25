@@ -7,7 +7,7 @@ import (
 	"github.com/lkarlslund/koder/internal/ui"
 )
 
-const mainScreenVerticalInset = 1
+const mainScreenVerticalInset = 0
 
 type transcriptWidget struct {
 	model   *Model
@@ -227,7 +227,7 @@ func (w *mainScreenWidget) Surface(ctx *ui.Context, bounds ui.Rect) ui.Surface {
 			},
 		}),
 	}
-	mainColumn := ui.VBox{Children: mainChildren, Spacing: 1}
+	mainColumn := ui.VBox{Children: mainChildren}
 	sidebarElement := ui.VisibleElement{
 		BoxProps: ui.BoxProps{
 			Hidden: !w.model.showSidebar || sidebarSurface.Size().W == 0,
