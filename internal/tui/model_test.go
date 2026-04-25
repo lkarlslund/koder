@@ -4058,6 +4058,68 @@ func TestMouseWheelScrollsViewport(t *testing.T) {
 	}
 }
 
+func TestMouseWheelScrollRefreshesRetainedTranscriptSurface(t *testing.T) {
+	composer := textarea.New()
+	composer.Placeholder = "Ask koder or type / for commands"
+	composer.SetHeight(composerInputHeight)
+	composer.Focus()
+
+	m := Model{
+		cfg:            testConfig(t),
+		palette:        theme.Resolve("tokyonight").Palette,
+		mouseEnabled:   true,
+		width:          40,
+		height:         12,
+		composer:       composer,
+		currentSession: domain.Session{ID: 1},
+		messages: []domain.Message{
+			{ID: 1, Role: domain.MessageRoleAssistant},
+		},
+		parts: map[int64][]domain.Part{
+			1: {{Kind: domain.PartKindText, Body: strings.Join([]string{
+				"line 1",
+				"line 2",
+				"line 3",
+				"line 4",
+				"line 5",
+				"line 6",
+				"line 7",
+				"line 8",
+				"line 9",
+				"line 10",
+				"line 11",
+				"line 12",
+			}, "\n")}},
+		},
+		viewport: newTranscriptViewport(37, 8),
+	}
+
+	m.resize()
+	m.refreshViewport()
+	if m.viewport.YOffset == 0 {
+		t.Fatalf("expected retained transcript to start below top for scroll test, got offset %d", m.viewport.YOffset)
+	}
+	before := strings.Join(m.viewSurface().Lines(), "\n")
+	if !strings.Contains(before, "line 12") {
+		t.Fatalf("expected initial view to show transcript tail, got:\n%s", before)
+	}
+
+	updated, _ := m.Update(ui.MouseMsg{
+		Action: ui.MouseActionPress,
+		Button: ui.MouseButtonWheelUp,
+		X:      5,
+		Y:      3,
+	})
+	next := updated.(Model)
+	after := strings.Join(next.viewSurface().Lines(), "\n")
+	if !strings.Contains(after, "line 1") {
+		t.Fatalf("expected scrolled retained transcript to show earlier lines, got:\n%s", after)
+	}
+	if strings.Contains(after, "line 12") {
+		t.Fatalf("expected scrolled retained transcript surface to change, got:\n%s", after)
+	}
+}
+
 func TestMouseClickTogglesToolRunExpansion(t *testing.T) {
 	m := Model{
 		mouseEnabled:     true,

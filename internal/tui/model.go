@@ -1154,11 +1154,22 @@ func (m *Model) scrollLLMPreview(delta int) {
 }
 
 func (m *Model) scrollTranscript(delta int) {
-	m.viewport.SetYOffset(m.viewport.YOffset + delta)
-	m.invalidateMainSurface()
-	if main := m.ensureMainScreenWidget(); main != nil {
-		main.transcript.Invalidate()
+	target := m.viewport.YOffset + delta
+	if target < 0 {
+		target = 0
 	}
+	if target == m.viewport.YOffset {
+		return
+	}
+	if len(m.messages) == 0 && m.viewport.TotalLineCount() > 0 {
+		m.viewport.SetYOffset(target)
+		m.invalidateMainSurface()
+		if main := m.ensureMainScreenWidget(); main != nil {
+			main.transcript.Invalidate()
+		}
+		return
+	}
+	m.refreshViewportAt(target)
 }
 
 func (m *Model) llmPreviewMaxOffset() int {
