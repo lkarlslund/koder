@@ -266,7 +266,10 @@ func findToolRun(run ui.ToolRun, openRuns []*ui.ToolRun, byToolCallID map[string
 	}
 	for i := len(openRuns) - 1; i >= 0; i-- {
 		existing := openRuns[i]
-		if existing != nil && run.Tool != "" && existing.Tool == run.Tool {
+		if existing == nil || existing.Status == ui.ToolRunStatusCompleted || existing.Status == ui.ToolRunStatusDenied || existing.Status == ui.ToolRunStatusFailed {
+			continue
+		}
+		if run.Tool != "" && existing.Tool == run.Tool {
 			return existing
 		}
 	}

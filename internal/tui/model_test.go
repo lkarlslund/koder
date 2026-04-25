@@ -4651,3 +4651,84 @@ func TestRefreshViewportUsesBlankLineBetweenConsecutiveToolRunsWithHalfBlocks(t 
 		t.Fatalf("expected blank spacer row between consecutive tool runs, got %q", got)
 	}
 }
+
+func TestTranscriptBlocksKeepsRepeatedFailedToolRunsSeparate(t *testing.T) {
+	m := Model{
+		currentSession: domain.Session{ID: 1},
+		parts:          map[int64][]domain.Part{},
+	}
+	m.messages = []domain.Message{
+		{ID: 1, Role: domain.MessageRoleAssistant, Summary: "tool:bash"},
+		{ID: 2, Role: domain.MessageRoleTool, Summary: "approval:bash"},
+		{ID: 3, Role: domain.MessageRoleTool, Summary: "approval:bash:approved"},
+		{ID: 4, Role: domain.MessageRoleTool, Summary: "bash"},
+		{ID: 5, Role: domain.MessageRoleUser, Summary: "continue"},
+		{ID: 6, Role: domain.MessageRoleAssistant, Summary: "tool:bash"},
+		{ID: 7, Role: domain.MessageRoleTool, Summary: "approval:bash"},
+		{ID: 8, Role: domain.MessageRoleTool, Summary: "approval:bash:approved"},
+		{ID: 9, Role: domain.MessageRoleTool, Summary: "bash"},
+	}
+	m.parts[1] = []domain.Part{{
+		Kind: domain.PartKindToolCall,
+		MetaJSON: mustMarshalMeta(t, map[string]string{
+			"tool":         string(domain.ToolKindBash),
+			"command":      `go build -v . 2>&1; echo "EXIT_CODE=$?"`,
+			"tool_call_id": "call_1",
+		}),
+	}}
+	m.parts[2] = []domain.Part{{
+		Kind:     domain.PartKindApprovalRequest,
+		Body:     `Approval required for bash: go build -v . 2>&1; echo "EXIT_CODE=$?"`,
+		MetaJSON: mustMarshalMeta(t, map[string]string{"approval_id": "1", "command": `go build -v . 2>&1; echo "EXIT_CODE=$?"`, "status": "pending", "tool": string(domain.ToolKindBash), "tool_call_id": "call_1"}),
+	}}
+	m.parts[3] = []domain.Part{{
+		Kind:     domain.PartKindSystemNotice,
+		Body:     `Approval 1 approved for bash: go build -v . 2>&1; echo "EXIT_CODE=$?"`,
+		MetaJSON: mustMarshalMeta(t, map[string]string{"approval_id": "1", "command": `go build -v . 2>&1; echo "EXIT_CODE=$?"`, "status": "approved", "tool": string(domain.ToolKindBash), "tool_call_id": "call_1"}),
+	}}
+	m.parts[4] = []domain.Part{{
+		Kind:     domain.PartKindToolOutput,
+		Body:     "bash failed: timeout_ms must be a positive integer",
+		MetaJSON: mustMarshalMeta(t, map[string]string{"tool": string(domain.ToolKindBash), "command": `go build -v . 2>&1; echo "EXIT_CODE=$?"`, "tool_call_id": "call_1"}),
+	}}
+	m.parts[5] = []domain.Part{{Kind: domain.PartKindText, Body: "continue"}}
+	m.parts[6] = []domain.Part{{
+		Kind: domain.PartKindToolCall,
+		MetaJSON: mustMarshalMeta(t, map[string]string{
+			"tool":         string(domain.ToolKindBash),
+			"command":      `go build -v . 2>&1; echo "EXIT_CODE=$?"`,
+			"tool_call_id": "call_2",
+		}),
+	}}
+	m.parts[7] = []domain.Part{{
+		Kind:     domain.PartKindApprovalRequest,
+		Body:     `Approval required for bash: go build -v . 2>&1; echo "EXIT_CODE=$?"`,
+		MetaJSON: mustMarshalMeta(t, map[string]string{"approval_id": "2", "command": `go build -v . 2>&1; echo "EXIT_CODE=$?"`, "status": "pending", "tool": string(domain.ToolKindBash), "tool_call_id": "call_2"}),
+	}}
+	m.parts[8] = []domain.Part{{
+		Kind:     domain.PartKindSystemNotice,
+		Body:     `Approval 2 approved for bash: go build -v . 2>&1; echo "EXIT_CODE=$?"`,
+		MetaJSON: mustMarshalMeta(t, map[string]string{"approval_id": "2", "command": `go build -v . 2>&1; echo "EXIT_CODE=$?"`, "status": "approved", "tool": string(domain.ToolKindBash), "tool_call_id": "call_2"}),
+	}}
+	m.parts[9] = []domain.Part{{
+		Kind:     domain.PartKindToolOutput,
+		Body:     "bash failed: timeout_ms must be a positive integer",
+		MetaJSON: mustMarshalMeta(t, map[string]string{"tool": string(domain.ToolKindBash), "command": `go build -v . 2>&1; echo "EXIT_CODE=$?"`, "tool_call_id": "call_2"}),
+	}}
+
+	blocks := m.transcriptBlocks()
+	runCount := 0
+	lastKind := transcriptBlockKind(-1)
+	for _, block := range blocks {
+		if block.Kind == transcriptBlockToolRun {
+			runCount++
+		}
+		lastKind = block.Kind
+	}
+	if runCount != 2 {
+		t.Fatalf("expected two separate tool runs, got %d from %#v", runCount, blocks)
+	}
+	if lastKind != transcriptBlockToolRun {
+		t.Fatalf("expected tail block to remain the second tool run, got %#v", blocks[len(blocks)-1])
+	}
+}

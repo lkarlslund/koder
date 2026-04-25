@@ -42,6 +42,28 @@ func TestActivityIndicatorViewDoesNotAddLeadingSpace(t *testing.T) {
 	}
 }
 
+func TestUserMessageFillsEntireRowBackground(t *testing.T) {
+	palette := theme.Resolve("tokyonight").Palette
+	surface := NewUserMessage(UserMessageProps{
+		Palette:     palette,
+		Body:        "hello",
+		Width:       12,
+		HalfBlocks:  false,
+		PromptGlyph: "┃",
+	}).Render(&Context{Palette: palette}, Rect{W: 12, H: 3})
+
+	want := ParseCellColor(string(palette.UserTextBackground))
+	for x := 0; x < 12; x++ {
+		r, g, b, ok := surface.SurfaceCellBG(x, 1)
+		if !ok {
+			t.Fatalf("expected background color at x=%d", x)
+		}
+		if !want.Valid || r != want.R || g != want.G || b != want.B {
+			t.Fatalf("expected row background %v at x=%d, got %d %d %d", want, x, r, g, b)
+		}
+	}
+}
+
 func TestRetainedTranscriptMaintainsChildItems(t *testing.T) {
 	transcript := NewRetainedTranscript()
 	transcript.Add(TranscriptItem{Element: Paragraph{Text: "first"}})
