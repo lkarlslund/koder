@@ -33,10 +33,18 @@ func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 	}
 	out := map[string]string{"path": path}
 	if offset := tools.FirstArg(args, "offset", "start", "line"); offset != "" {
-		out["offset"] = offset
+		value, err := tools.ParseFlexibleInt(offset)
+		if err != nil || value <= 0 {
+			return nil, errors.New("offset must be a positive integer")
+		}
+		out["offset"] = strconv.Itoa(value)
 	}
 	if limit := tools.FirstArg(args, "limit", "lines", "max_lines"); limit != "" {
-		out["limit"] = limit
+		value, err := tools.ParseFlexibleInt(limit)
+		if err != nil || value <= 0 {
+			return nil, errors.New("limit must be a positive integer")
+		}
+		out["limit"] = strconv.Itoa(value)
 	}
 	return out, nil
 }
@@ -116,8 +124,14 @@ func (tool) Execute(_ context.Context, runtime tools.Runtime, req tools.Request)
 	if err != nil {
 		return tools.Result{}, err
 	}
-	offset := parseOptionalInt(req.Args["offset"])
-	limit := parseOptionalInt(req.Args["limit"])
+	offset, err := parseOptionalInt(req.Args["offset"])
+	if err != nil {
+		return tools.Result{}, errors.New("offset must be a positive integer")
+	}
+	limit, err := parseOptionalInt(req.Args["limit"])
+	if err != nil {
+		return tools.Result{}, errors.New("limit must be a positive integer")
+	}
 	text = applyReadWindow(text, offset, limit)
 	lines, footer := tools.ParseReadStoredLines(text)
 	return tools.Result{
@@ -147,9 +161,12 @@ func (tool) PersistResult(ctx context.Context, st *store.Store, sessionID int64,
 	return tools.PersistStandardResult(ctx, st, sessionID, req, result)
 }
 
-func parseOptionalInt(raw string) int {
-	value, _ := strconv.Atoi(strings.TrimSpace(raw))
-	return value
+func parseOptionalInt(raw string) (int, error) {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return 0, nil
+	}
+	return tools.ParseFlexibleInt(value)
 }
 
 func applyReadWindow(text string, offset int, limit int) string {
@@ -204,11 +221,11 @@ func readPresentationTitle(pathValue, offsetValue, limitValue string) string {
 }
 
 func readPresentationLineRange(offsetValue, limitValue string) string {
-	offset, err := strconv.Atoi(strings.TrimSpace(offsetValue))
+	offset, err := tools.ParseFlexibleInt(offsetValue)
 	if err != nil || offset <= 0 {
 		return ""
 	}
-	limit, err := strconv.Atoi(strings.TrimSpace(limitValue))
+	limit, err := tools.ParseFlexibleInt(limitValue)
 	if err != nil || limit <= 0 {
 		return ""
 	}

@@ -1806,7 +1806,12 @@ func (e *Engine) handleModelToolCall(ctx context.Context, session domain.Session
 	}
 	req, err := tools.Normalize(req)
 	if err != nil {
-		return domain.Event{}, err
+		events, persistErr := e.persistToolFailure(ctx, sessionID, req, err)
+		if persistErr != nil {
+			return domain.Event{}, persistErr
+		}
+		final := <-events
+		return final, nil
 	}
 	toolSpec, ok := tools.Lookup(req.Tool)
 	if !ok {
@@ -2019,7 +2024,16 @@ func (e *Engine) prepareModelToolCall(ctx context.Context, session domain.Sessio
 	}
 	req, err := tools.Normalize(req)
 	if err != nil {
-		return preparedToolCall{}, err
+		events, persistErr := e.persistToolFailure(ctx, sessionID, req, err)
+		if persistErr != nil {
+			return preparedToolCall{}, persistErr
+		}
+		final := <-events
+		return preparedToolCall{
+			req:   req,
+			event: final,
+			run:   false,
+		}, nil
 	}
 	toolSpec, ok := tools.Lookup(req.Tool)
 	if !ok {

@@ -40,7 +40,11 @@ func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 	}
 	out := map[string]string{"query": query}
 	if limit := strings.TrimSpace(tools.FirstArg(args, "limit", "count")); limit != "" {
-		out["limit"] = limit
+		value, err := tools.ParseFlexibleInt(limit)
+		if err != nil || value <= 0 {
+			return nil, errors.New("limit must be a positive integer")
+		}
+		out["limit"] = strconv.Itoa(value)
 	}
 	return out, nil
 }

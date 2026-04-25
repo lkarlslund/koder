@@ -122,6 +122,53 @@ func TestHandleModelToolCallDeniesDisabledSessionTool(t *testing.T) {
 	}
 }
 
+func TestHandleModelToolCallPersistsNormalizationFailure(t *testing.T) {
+	cfg := testConfig(t)
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	engine := New(cfg, st, tools.NewRegistry(t.TempDir()), nil, t.TempDir())
+	session, err := st.CreateSession(context.Background(), "test", cfg.DefaultProvider, "test-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	evt, err := engine.handleModelToolCall(context.Background(), session, tools.Request{
+		Tool: domain.ToolKindRead,
+		Args: map[string]string{
+			"path":   "README.md",
+			"offset": "400.5",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if evt.Kind != domain.EventKindToolResult {
+		t.Fatalf("expected tool result event, got %#v", evt)
+	}
+	if !strings.Contains(evt.Text, "offset must be a positive integer") {
+		t.Fatalf("expected normalization failure text, got %#v", evt)
+	}
+
+	messages, parts, err := st.PartsForSession(context.Background(), session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 1 {
+		t.Fatalf("expected one stored tool message, got %d", len(messages))
+	}
+	got := parts[messages[0].ID]
+	if len(got) != 1 || got[0].Kind != domain.PartKindToolOutput {
+		t.Fatalf("expected one tool output part, got %#v", got)
+	}
+	if !strings.Contains(got[0].Body, "offset must be a positive integer") {
+		t.Fatalf("expected persisted failure body, got %#v", got[0])
+	}
+}
+
 func TestStringifyPartsExcludesSystemNotice(t *testing.T) {
 	got := stringifyParts([]domain.Part{
 		{Kind: domain.PartKindText, Body: "answer"},

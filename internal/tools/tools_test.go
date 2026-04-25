@@ -168,3 +168,72 @@ func TestBashFractionalTimeoutStillFails(t *testing.T) {
 		t.Fatalf("expected positive integer error, got %v", err)
 	}
 }
+
+func TestReadWholeFloatStringOffsetAndLimitAreAccepted(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "file.txt")
+	if err := os.WriteFile(path, []byte("1\n2\n3\n4\n5\n6\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	registry := tools.NewRegistry(dir)
+
+	result, err := registry.Execute(context.Background(), tools.Request{
+		Tool: domain.ToolKindRead,
+		Args: map[string]string{
+			"path":   "file.txt",
+			"offset": "3.00000",
+			"limit":  "2.00000",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result.Output, "3") || !strings.Contains(result.Output, "4") {
+		t.Fatalf("expected sliced lines in output, got %q", result.Output)
+	}
+	if strings.Contains(result.Output, "1") || strings.Contains(result.Output, "6") {
+		t.Fatalf("expected read window to apply, got %q", result.Output)
+	}
+	if got := result.Meta["offset"]; got != "3" {
+		t.Fatalf("expected normalized offset metadata, got %q", got)
+	}
+	if got := result.Meta["limit"]; got != "2" {
+		t.Fatalf("expected normalized limit metadata, got %q", got)
+	}
+}
+
+func TestReadFractionalOffsetFails(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "file.txt")
+	if err := os.WriteFile(path, []byte("1\n2\n3\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	registry := tools.NewRegistry(dir)
+
+	_, err := registry.Execute(context.Background(), tools.Request{
+		Tool: domain.ToolKindRead,
+		Args: map[string]string{
+			"path":   "file.txt",
+			"offset": "3.5",
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "offset must be a positive integer") {
+		t.Fatalf("expected positive integer error, got %v", err)
+	}
+}
+
+func TestWebSearchWholeFloatStringLimitIsAccepted(t *testing.T) {
+	req, err := tools.Normalize(tools.Request{
+		Tool: domain.ToolKindWebSearch,
+		Args: map[string]string{
+			"query": "golang",
+			"limit": "4.00000",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := req.Args["limit"]; got != "4" {
+		t.Fatalf("expected normalized limit, got %q", got)
+	}
+}

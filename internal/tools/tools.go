@@ -196,12 +196,8 @@ func ParseProviderCall(call provider.ToolCall) (Request, error) {
 		ToolCallID: strings.TrimSpace(call.ID),
 		Args:       args,
 	}
-	req, tool, err := normalizeRequest(req)
-	if err != nil {
-		return Request{}, err
-	}
 	if req.ToolCallID == "" {
-		req.ToolCallID = "call_" + strings.ToLower(string(tool.Kind()))
+		req.ToolCallID = "call_" + strings.ToLower(string(kind))
 	}
 	return req, nil
 }

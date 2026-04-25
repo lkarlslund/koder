@@ -3,7 +3,6 @@ package bashtool
 import (
 	"context"
 	"errors"
-	"math"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -34,7 +33,11 @@ func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 		out["workdir"] = workdir
 	}
 	if timeout := strings.TrimSpace(tools.FirstArg(args, "timeout_ms", "timeout")); timeout != "" {
-		out["timeout_ms"] = timeout
+		ms, err := tools.ParseFlexibleInt(timeout)
+		if err != nil {
+			return nil, errors.New("timeout_ms must be a positive integer")
+		}
+		out["timeout_ms"] = strconv.Itoa(ms)
 	}
 	return out, nil
 }
@@ -57,7 +60,7 @@ func (tool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Reques
 	}
 	timeout := tools.DefaultBashTimeout
 	if raw := strings.TrimSpace(req.Args["timeout_ms"]); raw != "" {
-		ms, err := parseTimeoutMS(raw)
+		ms, err := strconv.Atoi(raw)
 		if err != nil {
 			return tools.Result{}, errors.New("timeout_ms must be a positive integer")
 		}
@@ -92,18 +95,4 @@ func (tool) SummarizeResult(req tools.Request, result tools.Result) (string, str
 }
 func (tool) PersistResult(ctx context.Context, st *store.Store, sessionID int64, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
 	return tools.PersistStandardResult(ctx, st, sessionID, req, result)
-}
-
-func parseTimeoutMS(raw string) (int, error) {
-	if ms, err := strconv.Atoi(raw); err == nil {
-		return ms, nil
-	}
-	value, err := strconv.ParseFloat(raw, 64)
-	if err != nil || math.IsNaN(value) || math.IsInf(value, 0) {
-		return 0, errors.New("invalid timeout")
-	}
-	if value != math.Trunc(value) {
-		return 0, errors.New("invalid timeout")
-	}
-	return int(value), nil
 }
