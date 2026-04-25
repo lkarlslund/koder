@@ -373,6 +373,7 @@ func mergeToolRun(dst *ui.ToolRun, src ui.ToolRun) {
 	if dst == nil {
 		return
 	}
+	replacePresentation := toolRunHasFinalPresentation(src)
 	if strings.TrimSpace(dst.ID) == "" {
 		dst.ID = src.ID
 	}
@@ -382,13 +383,13 @@ func mergeToolRun(dst *ui.ToolRun, src ui.ToolRun) {
 	if dst.ApprovalID == 0 {
 		dst.ApprovalID = src.ApprovalID
 	}
-	if strings.TrimSpace(dst.Title) == "" {
+	if replacePresentation || strings.TrimSpace(dst.Title) == "" {
 		dst.Title = src.Title
 	}
-	if strings.TrimSpace(dst.Subtitle) == "" {
+	if replacePresentation || strings.TrimSpace(dst.Subtitle) == "" {
 		dst.Subtitle = src.Subtitle
 	}
-	if strings.TrimSpace(dst.Preview) == "" {
+	if replacePresentation || strings.TrimSpace(dst.Preview) == "" {
 		dst.Preview = src.Preview
 	}
 	if strings.TrimSpace(dst.Output) == "" {
@@ -402,6 +403,15 @@ func mergeToolRun(dst *ui.ToolRun, src ui.ToolRun) {
 	}
 	if src.Status != "" {
 		dst.Status = src.Status
+	}
+}
+
+func toolRunHasFinalPresentation(run ui.ToolRun) bool {
+	switch run.Status {
+	case ui.ToolRunStatusApproved, ui.ToolRunStatusCompleted, ui.ToolRunStatusDenied, ui.ToolRunStatusFailed:
+		return strings.TrimSpace(run.Title) != "" || strings.TrimSpace(run.Subtitle) != "" || strings.TrimSpace(run.Preview) != ""
+	default:
+		return false
 	}
 }
 

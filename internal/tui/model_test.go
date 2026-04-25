@@ -1225,7 +1225,7 @@ func TestRefreshViewportGroupsToolRunMessagesIntoCard(t *testing.T) {
 			3: {{
 				Kind:     domain.PartKindToolOutput,
 				Body:     "On branch main",
-				MetaJSON: `{"tool":"bash","tool_call_id":"call_1"}`,
+				MetaJSON: `{"tool":"bash","command":"git status","tool_call_id":"call_1"}`,
 			}},
 		},
 		messages: []domain.Message{
@@ -1238,7 +1238,7 @@ func TestRefreshViewportGroupsToolRunMessagesIntoCard(t *testing.T) {
 
 	m.refreshViewport()
 	got := m.viewport.View()
-	if !strings.Contains(got, "Run command") {
+	if !strings.Contains(got, "Ran command git status") {
 		t.Fatalf("expected grouped tool title in transcript, got %q", got)
 	}
 	if strings.Contains(got, "│") || strings.Contains(got, "╭") || strings.Contains(got, "╰") {
@@ -4471,6 +4471,102 @@ func TestBashToolRunUsesRanCommandTitleAndCollapsedFirstOutputLine(t *testing.T)
 	}
 	if strings.Contains(got, " line two") {
 		t.Fatalf("expected collapsed bash card to hide later output lines, got %q", got)
+	}
+}
+
+func TestResumedBashToolRunReplacesRequestTitleWithCompletedTitle(t *testing.T) {
+	m := Model{
+		currentSession:   domain.Session{ID: 1},
+		viewport:         newTranscriptViewport(100, 8),
+		parts:            map[int64][]domain.Part{},
+		expandedToolRuns: map[string]bool{},
+		palette:          theme.Resolve("tokyonight").Palette,
+	}
+
+	callMeta := mustMarshalMeta(t, map[string]string{
+		"tool":         "bash",
+		"command":      "printf 'line one\\nline two\\n'",
+		"tool_call_id": "call_bash_1",
+	})
+	outputMeta := mustMarshalMeta(t, tools.MetaWithStoredResult(map[string]string{
+		"tool":         "bash",
+		"command":      "printf 'line one\\nline two\\n'",
+		"tool_call_id": "call_bash_1",
+	}, domain.PartKindToolOutput, domain.ToolKindBash, tools.StoredResultStatusOK, tools.BashStoredResult{
+		Command: "printf 'line one\\nline two\\n'",
+		Output:  "line one\nline two\n",
+	}))
+
+	m.messages = []domain.Message{
+		{ID: 1, Role: domain.MessageRoleAssistant, Summary: "tool:bash"},
+		{ID: 2, Role: domain.MessageRoleTool, Summary: "bash"},
+	}
+	m.parts[1] = []domain.Part{{
+		Kind:     domain.PartKindToolCall,
+		Body:     `{"command":"printf 'line one\\nline two\\n'","tool":"bash","tool_call_id":"call_bash_1"}`,
+		MetaJSON: callMeta,
+	}}
+	m.parts[2] = []domain.Part{{
+		Kind:     domain.PartKindToolOutput,
+		Body:     "line one\nline two\n",
+		MetaJSON: outputMeta,
+	}}
+
+	m.refreshViewport()
+	got := m.viewport.View()
+	if !strings.Contains(got, "Ran command printf 'line one\\nline two\\n'") {
+		t.Fatalf("expected resumed bash title to include command, got %q", got)
+	}
+	if strings.Contains(got, "Run command") {
+		t.Fatalf("expected resumed bash title to replace request title, got %q", got)
+	}
+}
+
+func TestResumedEditToolRunReplacesRequestTitleWithCompletedTitle(t *testing.T) {
+	m := Model{
+		currentSession:   domain.Session{ID: 1},
+		viewport:         newTranscriptViewport(100, 8),
+		parts:            map[int64][]domain.Part{},
+		expandedToolRuns: map[string]bool{},
+		palette:          theme.Resolve("tokyonight").Palette,
+	}
+
+	callMeta := mustMarshalMeta(t, map[string]string{
+		"tool":         "edit",
+		"path":         "game/map.go",
+		"tool_call_id": "call_edit_1",
+	})
+	outputMeta := mustMarshalMeta(t, tools.MetaWithStoredResult(map[string]string{
+		"tool":         "edit",
+		"path":         "game/map.go",
+		"tool_call_id": "call_edit_1",
+	}, domain.PartKindToolOutput, domain.ToolKindEdit, tools.StoredResultStatusOK, tools.EditStoredResult{
+		Path:    "game/map.go",
+		Summary: "Edited game/map.go (replaced 1 occurrence)",
+	}))
+
+	m.messages = []domain.Message{
+		{ID: 1, Role: domain.MessageRoleAssistant, Summary: "tool:edit"},
+		{ID: 2, Role: domain.MessageRoleTool, Summary: "edit"},
+	}
+	m.parts[1] = []domain.Part{{
+		Kind:     domain.PartKindToolCall,
+		Body:     `{"path":"game/map.go","tool":"edit","tool_call_id":"call_edit_1"}`,
+		MetaJSON: callMeta,
+	}}
+	m.parts[2] = []domain.Part{{
+		Kind:     domain.PartKindToolOutput,
+		Body:     "Edited game/map.go (replaced 1 occurrence)",
+		MetaJSON: outputMeta,
+	}}
+
+	m.refreshViewport()
+	got := m.viewport.View()
+	if !strings.Contains(got, "Edited file game/map.go") {
+		t.Fatalf("expected resumed edit title to include path, got %q", got)
+	}
+	if strings.Contains(got, "Edit file") {
+		t.Fatalf("expected resumed edit title to replace request title, got %q", got)
 	}
 }
 
