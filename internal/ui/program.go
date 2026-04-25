@@ -230,14 +230,19 @@ func diffFrameLines(previous, current []string) string {
 
 func diffFrameSurface(previous, current SurfaceView) string {
 	var buf strings.Builder
-	maxRows := 0
-	if previous != nil && previous.SurfaceHeight() > maxRows {
-		maxRows = previous.SurfaceHeight()
+	prevRows := 0
+	currRows := 0
+	if previous != nil {
+		prevRows = previous.SurfaceHeight()
 	}
-	if current != nil && current.SurfaceHeight() > maxRows {
-		maxRows = current.SurfaceHeight()
+	if current != nil {
+		currRows = current.SurfaceHeight()
 	}
-	for idx := 0; idx < maxRows; idx++ {
+	maxRows := prevRows
+	if currRows > maxRows {
+		maxRows = currRows
+	}
+	for idx := 0; idx < currRows; idx++ {
 		if surfaceRowsEqual(previous, current, idx) {
 			continue
 		}
@@ -246,6 +251,9 @@ func diffFrameSurface(previous, current SurfaceView) string {
 			buf.WriteString(serializeSurfaceViewRow(current, idx))
 		}
 		buf.WriteString("\x1b[K")
+	}
+	for idx := currRows; idx < prevRows; idx++ {
+		fmt.Fprintf(&buf, "\x1b[%d;1H\x1b[2K", idx+1)
 	}
 	return buf.String()
 }

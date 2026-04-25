@@ -66,6 +66,33 @@ func TestDiffFrameLinesClearsRemovedRows(t *testing.T) {
 	}
 }
 
+func TestDiffFrameSurfaceClearsRemovedRows(t *testing.T) {
+	previous := fakeSurface{
+		w: 4,
+		h: 3,
+		cells: []fakeCell{
+			{text: "a"}, {text: "a"}, {text: "a"}, {text: "a"},
+			{text: "b"}, {text: "b"}, {text: "b"}, {text: "b"},
+			{text: "c"}, {text: "c"}, {text: "c"}, {text: "c"},
+		},
+	}
+	current := fakeSurface{
+		w: 4,
+		h: 1,
+		cells: []fakeCell{
+			{text: "a"}, {text: "a"}, {text: "a"}, {text: "a"},
+		},
+	}
+
+	got := diffFrameSurface(previous, current)
+	if !strings.Contains(got, "\x1b[2;1H\x1b[2K") {
+		t.Fatalf("expected second removed row to be fully cleared, got %q", got)
+	}
+	if !strings.Contains(got, "\x1b[3;1H\x1b[2K") {
+		t.Fatalf("expected third removed row to be fully cleared, got %q", got)
+	}
+}
+
 func TestRenderFrameSurfaceEmitsRealSGRSequences(t *testing.T) {
 	s := fakeSurface{
 		w: 5,
