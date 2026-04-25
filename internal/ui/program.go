@@ -132,6 +132,9 @@ func (p *Program) handleRuntimeMsg(msg Msg, out io.Writer) (bool, error) {
 			p.runCmd(cmd, p.sent)
 		}
 		return false, nil
+	case WindowSizeMsg:
+		p.invalidateRenderCache()
+		return false, nil
 	case mouseModeMsg:
 		p.setMouseMode(out, typed.enabled)
 		return false, nil
@@ -172,6 +175,12 @@ func (p *Program) render(out io.Writer) error {
 	}
 	_, err := io.WriteString(out, frame)
 	return err
+}
+
+func (p *Program) invalidateRenderCache() {
+	p.rendered = nil
+	p.renderedRows = nil
+	p.didRender = false
 }
 
 func renderFrame(view string) string {

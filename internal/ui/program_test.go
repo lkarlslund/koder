@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"bytes"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -90,6 +91,38 @@ func TestDiffFrameSurfaceClearsRemovedRows(t *testing.T) {
 	}
 	if !strings.Contains(got, "\x1b[3;1H\x1b[2K") {
 		t.Fatalf("expected third removed row to be fully cleared, got %q", got)
+	}
+}
+
+func TestWindowSizeInvalidatesRenderCache(t *testing.T) {
+	model := &fakeModel{
+		surface: fakeSurface{
+			w: 2,
+			h: 1,
+			cells: []fakeCell{
+				{text: "a"}, {text: "b"},
+			},
+		},
+	}
+	p := &Program{
+		model:     model,
+		rendered:  model.surface,
+		didRender: true,
+	}
+
+	if quit, err := p.handleRuntimeMsg(WindowSizeMsg{Width: 80, Height: 24}, &bytes.Buffer{}); quit || err != nil {
+		t.Fatalf("unexpected runtime result: quit=%v err=%v", quit, err)
+	}
+	if p.didRender {
+		t.Fatal("expected resize to invalidate cached render state")
+	}
+
+	var out bytes.Buffer
+	if err := p.render(&out); err != nil {
+		t.Fatalf("render failed: %v", err)
+	}
+	if !strings.HasPrefix(out.String(), "\x1b[H\x1b[2J") {
+		t.Fatalf("expected resize-triggered render to perform full redraw, got %q", out.String())
 	}
 }
 
@@ -194,6 +227,14 @@ func (f *fakeInputReader) ReadEvents() ([]input.Event, error) {
 }
 
 func (f *fakeInputReader) Close() error { return nil }
+
+type fakeModel struct {
+	surface SurfaceView
+}
+
+func (f *fakeModel) Init() Cmd                { return nil }
+func (f *fakeModel) Update(Msg) (Model, Cmd)  { return f, nil }
+func (f *fakeModel) ViewSurface() SurfaceView { return f.surface }
 
 type fakeSurface struct {
 	w     int
