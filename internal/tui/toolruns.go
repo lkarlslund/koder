@@ -58,6 +58,9 @@ func (m *Model) transcriptBlocks() []transcriptBlock {
 			if strings.TrimSpace(body) != "" {
 				appendMessage(msg)
 			}
+			if run, ok := compactionToolRun(parts, msg); ok {
+				appendRun(run)
+			}
 			for _, run := range toolRunsFromAssistantMessage(parts) {
 				ptr := appendRun(run)
 				openRuns = append(openRuns, ptr)
@@ -108,6 +111,26 @@ func (m *Model) transcriptBlocks() []transcriptBlock {
 		}
 	}
 	return blocks
+}
+
+func compactionToolRun(parts []domain.Part, msg domain.Message) (ui.ToolRun, bool) {
+	for _, part := range parts {
+		if part.Kind != domain.PartKindCompaction {
+			continue
+		}
+		body := strings.TrimSpace(part.Body)
+		if body == "" {
+			continue
+		}
+		return ui.ToolRun{
+			ID:       fmt.Sprintf("compaction:%d", msg.ID),
+			Title:    "Compacted context",
+			Subtitle: "Replacement history sent to the model",
+			Preview:  body,
+			Status:   ui.ToolRunStatusCompleted,
+		}, true
+	}
+	return ui.ToolRun{}, false
 }
 
 func toolRunsFromAssistantMessage(parts []domain.Part) []ui.ToolRun {

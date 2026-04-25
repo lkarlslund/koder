@@ -4009,25 +4009,39 @@ func TestRenderMessagePartsShowsAssistantNarrationWithoutSystemPrefix(t *testing
 	}
 }
 
-func TestRenderMessagePartsFormatsCompactionMarkdown(t *testing.T) {
-	cfg := testConfig(t)
-	m, err := New(cfg, nil, nil, StartupModeNew, nil)
-	if err != nil {
-		t.Fatal(err)
+func TestTranscriptRendersCompactionAsExpandableCard(t *testing.T) {
+	m := Model{
+		currentSession:   domain.Session{ID: 1},
+		viewport:         newTranscriptViewport(80, 8),
+		parts:            map[int64][]domain.Part{},
+		expandedToolRuns: map[string]bool{},
+		palette:          theme.Resolve("tokyonight").Palette,
+	}
+	m.messages = []domain.Message{
+		{ID: 1, Role: domain.MessageRoleAssistant, Summary: "Compacted session summary"},
+	}
+	m.parts[1] = []domain.Part{{
+		Kind: domain.PartKindCompaction,
+		Body: "## Goal\n\n- first\n- second",
+	}}
+
+	m.refreshViewport()
+	got := m.viewport.View()
+	if !strings.Contains(got, "Compacted context") {
+		t.Fatalf("expected compaction card title, got %q", got)
+	}
+	if !strings.Contains(got, "Expand") {
+		t.Fatalf("expected compaction card to be collapsed by default, got %q", got)
+	}
+	if strings.Contains(got, "- second") {
+		t.Fatalf("expected collapsed compaction card to hide part of the body, got %q", got)
 	}
 
-	got := m.renderMessageParts([]domain.Part{
-		{Kind: domain.PartKindCompaction, Body: "## Goal\n\n- first\n- second"},
-	})
-
-	if !strings.Contains(got, "Goal") {
-		t.Fatalf("expected compaction heading text, got %q", got)
-	}
-	if !strings.Contains(got, "• first") || !strings.Contains(got, "• second") {
-		t.Fatalf("expected compaction list markdown rendering, got %q", got)
-	}
-	if strings.Contains(got, "## Goal") || strings.Contains(got, "- first") {
-		t.Fatalf("expected rendered markdown instead of raw compaction markdown, got %q", got)
+	m.expandedToolRuns["compaction:1"] = true
+	m.refreshViewport()
+	got = m.viewport.View()
+	if !strings.Contains(got, "## Goal") || !strings.Contains(got, "- first") || !strings.Contains(got, "- second") {
+		t.Fatalf("expected expanded compaction body, got %q", got)
 	}
 }
 

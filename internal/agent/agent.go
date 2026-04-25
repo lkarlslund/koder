@@ -785,7 +785,11 @@ func (e *Engine) approve(ctx context.Context, sessionID int64, rawID string) (<-
 				return
 			}
 		}
-		if err := e.continueModelTurn(ctx, session, client, out, nil); err != nil {
+		var transient []provider.Message
+		if compacted {
+			transient = transientTurnMessages("", "Continue from the compacted session summary. Do not restart, greet, or restate the summary. Continue the pending task from the latest tool result.")
+		}
+		if err := e.continueModelTurn(ctx, session, client, out, transient); err != nil {
 			if interruptedErr(err) {
 				e.emitInterrupted(out, session.ID)
 				return
@@ -1071,9 +1075,7 @@ func (e *Engine) buildConversationPreview(ctx context.Context, session domain.Se
 		for _, msg := range messages {
 			if summary, ok := compactionSummary(partsByMessage[msg.ID]); ok {
 				conversation = e.baseConversation(session)
-				conversation = append(conversation,
-					provider.Message{Role: domain.MessageRoleSystem, Content: "Compacted session summary:\n" + summary},
-				)
+				conversation = append(conversation, compactedHistoryMessage(summary))
 				continue
 			}
 			items, err := e.conversationMessagesForStoredMessage(msg, partsByMessage[msg.ID])
@@ -1113,6 +1115,17 @@ func (e *Engine) baseConversation(session domain.Session) []provider.Message {
 		})
 	}
 	return conversation
+}
+
+func compactedHistoryMessage(summary string) provider.Message {
+	return provider.Message{
+		Role: domain.MessageRoleUser,
+		Content: strings.TrimSpace(
+			"Compacted session summary for continuation:\n" +
+				summary +
+				"\n\nUse this summary as replacement history for the earlier conversation. Continue the task from the preserved context instead of restarting.",
+		),
+	}
 }
 
 func (e *Engine) previewUserMessage(prompt string, drafts []attachment.Draft, refs []reference.Draft) (provider.Message, bool, error) {

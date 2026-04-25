@@ -1949,7 +1949,6 @@ func (m *Model) renderMessageParts(parts []domain.Part) string {
 	var reasoningBlocks []string
 	var systemBlocks []string
 	var textBlocks []string
-	var compactionBlocks []string
 	var textBuf strings.Builder
 	var reasoningBuf strings.Builder
 
@@ -1981,9 +1980,7 @@ func (m *Model) renderMessageParts(parts []domain.Part) string {
 		case domain.PartKindCompaction:
 			flushText()
 			flushReasoning()
-			if body := strings.TrimSpace(part.Body); body != "" {
-				compactionBlocks = append(compactionBlocks, m.renderer.RenderPlain(body))
-			}
+			continue
 		case domain.PartKindSystemNotice:
 			flushText()
 			flushReasoning()
@@ -2029,7 +2026,6 @@ func (m *Model) renderMessageParts(parts []domain.Part) string {
 	flushText()
 	flushReasoning()
 
-	blocks = append(blocks, compactionBlocks...)
 	blocks = append(blocks, systemBlocks...)
 	blocks = append(blocks, reasoningBlocks...)
 	blocks = append(blocks, textBlocks...)
@@ -2058,11 +2054,7 @@ func (m *Model) renderStyledMessageParts(parts []domain.Part) []ui.StyledSpan {
 			textBuf.WriteString(part.Body)
 		case domain.PartKindCompaction:
 			flushText()
-			if body := strings.TrimSpace(part.Body); body != "" {
-				if block := m.renderer.RenderStyled(body); len(block) > 0 {
-					blocks = append(blocks, block)
-				}
-			}
+			continue
 		case domain.PartKindSystemNotice:
 			flushText()
 			if m.showSystem {

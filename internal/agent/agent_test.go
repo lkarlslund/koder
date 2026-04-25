@@ -272,8 +272,14 @@ func TestBuildConversationResetsAtCompactionBoundary(t *testing.T) {
 	if len(conversation) < 3 {
 		t.Fatalf("expected compact summary and later message, got %#v", conversation)
 	}
+	if conversation[len(conversation)-2].Role != domain.MessageRoleUser {
+		t.Fatalf("expected compact summary to be replayed as a user replacement-history anchor, got %#v", conversation[len(conversation)-2])
+	}
 	if !strings.Contains(conversation[len(conversation)-2].Content, "summary block") {
 		t.Fatalf("expected compact summary in context, got %#v", conversation[len(conversation)-2])
+	}
+	if !strings.Contains(conversation[len(conversation)-2].Content, "replacement history") {
+		t.Fatalf("expected compact summary to describe replacement history, got %#v", conversation[len(conversation)-2])
 	}
 	if strings.Contains(conversation[len(conversation)-1].Content, "old question") || !strings.Contains(conversation[len(conversation)-1].Content, "new question") {
 		t.Fatalf("expected only post-compact history, got %#v", conversation[len(conversation)-1])
@@ -1160,6 +1166,101 @@ func TestApproveContinuesAfterOutsideWorkspaceRead(t *testing.T) {
 	}
 	if !sawFinalAnswer {
 		t.Fatal("expected final assistant answer after approved outside-workspace read")
+	}
+}
+
+func TestApproveAutoCompactContinuesFromCompactedHistory(t *testing.T) {
+	t.Parallel()
+
+	var requests []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read body: %v", err)
+		}
+		requests = append(requests, string(body))
+		switch len(requests) {
+		case 1:
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"tool_calls":[{"id":"call_1","type":"function","function":{"name":"bash","arguments":"{\"command\":\"printf hello\"}"}}]}}],"usage":{"total_tokens":1}}`))
+		case 2:
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"## Goal\ncontinue the build fix\n\n## Next Step\nuse the latest tool result and keep going"}}],"usage":{"total_tokens":1}}`))
+		case 3:
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"done"}}],"usage":{"total_tokens":1}}`))
+		default:
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ignored"}}],"usage":{"total_tokens":1}}`))
+		}
+	}))
+	defer server.Close()
+
+	cfg := testConfig(t)
+	cfg.Providers = map[string]config.Provider{
+		"test": {
+			BaseURL:       server.URL + "/v1",
+			Timeout:       time.Second,
+			ContextWindow: 1,
+			AutoCompactAt: 1,
+		},
+	}
+	cfg.DefaultProvider = "test"
+	cfg.DefaultModel = "test-model"
+
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	engine := New(cfg, st, tools.NewRegistry(t.TempDir()), nil, t.TempDir())
+	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetSessionPermissionProfile(context.Background(), session.ID, "default"); err != nil {
+		t.Fatal(err)
+	}
+
+	events, err := engine.RunPrompt(context.Background(), session, "build it")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var approvalID int64
+	for evt := range events {
+		if evt.Kind == domain.EventKindApprovalAsk {
+			approvalID, err = parseApprovalID(evt.Meta["approval_id"])
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if approvalID == 0 {
+		t.Fatal("expected approval request")
+	}
+
+	approvedEvents, err := engine.approve(context.Background(), session.ID, strconv.FormatInt(approvalID, 10))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sawFinalAnswer bool
+	for evt := range approvedEvents {
+		if evt.Kind == domain.EventKindMessageDelta && evt.Text == "done" {
+			sawFinalAnswer = true
+		}
+	}
+	if !sawFinalAnswer {
+		t.Fatal("expected final assistant answer after auto compact continuation")
+	}
+	if len(requests) < 3 {
+		t.Fatalf("expected prompt, compact, and continuation requests, got %d", len(requests))
+	}
+	if !strings.Contains(requests[2], "Compacted session summary for continuation:") {
+		t.Fatalf("expected continuation request to include compacted history anchor, got %s", requests[2])
+	}
+	if !strings.Contains(requests[2], "Continue from the compacted session summary.") {
+		t.Fatalf("expected continuation request to include post-compact continue instruction, got %s", requests[2])
 	}
 }
 
