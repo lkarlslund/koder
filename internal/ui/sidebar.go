@@ -13,7 +13,7 @@ func (s Sidebar) render(ctx *Context, width int) Surface {
 	contentHeight := 0
 	var content Surface
 	if s.Child != nil {
-		contentBounds := Rect{W: max(0, width-3), H: height}
+		contentBounds := Rect{W: max(0, width-1), H: height}
 		if height <= 0 {
 			contentHeight = s.Child.Measure(ctx, NewConstraints(contentBounds.W, 0)).H
 			contentBounds.H = contentHeight
@@ -25,17 +25,13 @@ func (s Sidebar) render(ctx *Context, width int) Surface {
 	}
 	surface := BlankSurface(width, height)
 	fillStyle := CellStyle{FG: cellColor(ctx.Palette.SidebarForeground), BG: cellColor(ctx.Palette.SidebarBackground)}
-	borderStyle := CellStyle{FG: cellColor(ctx.Palette.SidebarBorder), BG: cellColor(ctx.Palette.SidebarBackground)}
 	for y := 0; y < height; y++ {
 		for x := 0; x < width; x++ {
 			surface.setCell(x, y, Cell{Text: " ", Width: 1, Style: fillStyle})
 		}
-		if width > 0 {
-			surface.setCell(0, y, Cell{Text: "│", Width: 1, Style: borderStyle})
-		}
 	}
-	if s.Child != nil && width > 2 {
-		surface = surface.placeAt(2, 0, content)
+	if s.Child != nil && width > 0 {
+		surface = surface.placeAt(1, 0, content)
 	}
 	return surface
 }
