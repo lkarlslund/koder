@@ -105,3 +105,25 @@ func TestScrollFrameRendersVisibleWindowAtOffset(t *testing.T) {
 		t.Fatalf("expected scrolled window to show line2/line3, got %#v", lines)
 	}
 }
+
+func TestScrollBoxClampsOffsetToContentBottom(t *testing.T) {
+	box := ScrollBox{
+		Child:   Static{Content: "line1\nline2\nline3"},
+		OffsetY: 99,
+		Width:   5,
+		Height:  2,
+	}
+
+	surface, totalHeight, offset := box.RenderVisible(nil, 5, 2, box.OffsetY)
+	lines := strings.Split(ansi.Strip(strings.Join(surface.Lines(), "\n")), "\n")
+
+	if totalHeight != 3 {
+		t.Fatalf("expected content height 3, got %d", totalHeight)
+	}
+	if offset != 1 {
+		t.Fatalf("expected offset to clamp to 1, got %d", offset)
+	}
+	if len(lines) != 2 || strings.TrimSpace(lines[0]) != "line2" || strings.TrimSpace(lines[1]) != "line3" {
+		t.Fatalf("expected bottom window to show line2/line3, got %#v", lines)
+	}
+}

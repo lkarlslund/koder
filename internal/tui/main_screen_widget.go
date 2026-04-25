@@ -40,14 +40,20 @@ func (w *transcriptWidget) Surface(_ *ui.Context, bounds ui.Rect) ui.Surface {
 	raw := w.model.viewport.VisibleSurface()
 	surface := raw.Normalize(max(0, bounds.W), max(0, bounds.H))
 	if retained != nil {
+		scroll := ui.ScrollBox{
+			Child:   retained,
+			OffsetY: max(0, w.model.viewport.YOffset),
+			Width:   max(0, bounds.W),
+			Height:  max(0, bounds.H),
+		}
 		if raw.SurfaceWidth() != max(0, bounds.W) || raw.SurfaceHeight() != max(0, bounds.H) {
-			rendered, _, _ := retained.RenderVisible(&ui.Context{Palette: w.model.palette}, max(0, bounds.W), max(0, bounds.H), max(0, w.model.viewport.YOffset))
+			rendered, _, _ := scroll.RenderVisible(&ui.Context{Palette: w.model.palette}, max(0, bounds.W), max(0, bounds.H), max(0, w.model.viewport.YOffset))
 			surface = rendered
 		} else {
 			// Keep the already-computed viewport surface from refreshViewport* so
 			// the cached widget cannot drift from the model's chosen alignment.
 			// Re-render retained content only to refresh runtime controls for this frame.
-			_, _, _ = retained.RenderVisible(&ui.Context{Palette: w.model.palette}, max(0, bounds.W), max(0, bounds.H), max(0, w.model.viewport.YOffset))
+			_, _, _ = scroll.RenderVisible(&ui.Context{Palette: w.model.palette}, max(0, bounds.W), max(0, bounds.H), max(0, w.model.viewport.YOffset))
 		}
 	}
 	w.bounds = bounds

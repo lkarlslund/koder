@@ -5,6 +5,7 @@ import "github.com/lkarlslund/koder/internal/ui"
 type transcriptViewport struct {
 	Width         int
 	Height        int
+	WindowHeight  int
 	YOffset       int
 	contentHeight int
 	visible       ui.Surface
@@ -40,6 +41,11 @@ func (v *transcriptViewport) SetContentHeight(height int) {
 	v.SetYOffset(v.YOffset)
 }
 
+func (v *transcriptViewport) SetWindowHeight(height int) {
+	v.WindowHeight = max(0, height)
+	v.SetYOffset(v.YOffset)
+}
+
 func (v *transcriptViewport) SetYOffset(n int) {
 	v.YOffset = min(max(0, n), v.maxYOffset())
 }
@@ -57,12 +63,20 @@ func (v transcriptViewport) TotalLineCount() int {
 }
 
 func (v transcriptViewport) VisibleLineCount() int {
-	if v.Height <= 0 || v.visible.SurfaceHeight() == 0 {
+	height := v.WindowHeight
+	if height <= 0 {
+		height = v.Height
+	}
+	if height <= 0 || v.visible.SurfaceHeight() == 0 {
 		return 0
 	}
-	return min(v.Height, v.visible.SurfaceHeight())
+	return min(height, v.visible.SurfaceHeight())
 }
 
 func (v transcriptViewport) maxYOffset() int {
-	return max(0, v.contentHeight-max(0, v.Height))
+	height := v.WindowHeight
+	if height <= 0 {
+		height = v.Height
+	}
+	return max(0, v.contentHeight-max(0, height))
 }

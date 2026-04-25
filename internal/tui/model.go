@@ -1072,14 +1072,14 @@ func (m *Model) handleMouse(msg ui.MouseMsg) (ui.Model, ui.Cmd, bool) {
 	}
 	paneWidth := m.transcriptPaneWidth()
 	paneHeight := m.transcriptPaneHeight()
-	if msg.Y < 1 || msg.Y >= max(1, paneHeight-1) {
+	if msg.Y < 0 || msg.Y >= paneHeight {
 		return m, nil, false
 	}
-	if msg.X < 1 || msg.X >= max(1, paneWidth-1) {
+	if msg.X < 0 || msg.X >= paneWidth {
 		return m, nil, false
 	}
-	contentX := msg.X - 1
-	contentY := msg.Y - 1
+	contentX := msg.X
+	contentY := msg.Y
 	for i := len(m.transcriptControls) - 1; i >= 0; i-- {
 		control := m.transcriptControls[i]
 		if !control.Enabled || !control.Rect.Contains(ui.Point{X: max(0, contentX), Y: contentY}) {
@@ -1295,8 +1295,9 @@ func (m *Model) resize() {
 	if bodyHeight < 5 {
 		bodyHeight = 5
 	}
-	m.viewport.Width = max(0, bodyWidth-2)
+	m.viewport.Width = max(0, bodyWidth)
 	m.viewport.Height = bodyHeight
+	m.viewport.SetWindowHeight(m.transcriptViewportHeight())
 	m.resizeLLMPreview()
 	m.invalidateTranscript()
 }
@@ -1334,15 +1335,18 @@ func (m *Model) renderBodyElement() ui.Element {
 }
 
 func (m *Model) transcriptViewportHeight() int {
-	return max(0, m.transcriptPaneHeight()-2)
+	return max(0, m.transcriptPaneHeight())
 }
 
 func (m *Model) transcriptPaneWidth() int {
 	if m.width <= 0 {
-		return max(0, m.viewport.Width+2)
+		return max(0, m.viewport.Width)
 	}
 	sidebarWidth := m.sidebarWidth()
 	bodyWidth := m.width - sidebarWidth
+	if m.showSidebar && sidebarWidth > 0 {
+		bodyWidth--
+	}
 	if bodyWidth < 20 {
 		bodyWidth = 20
 	}
@@ -1351,11 +1355,11 @@ func (m *Model) transcriptPaneWidth() int {
 
 func (m *Model) transcriptPaneHeight() int {
 	if m.height <= 0 {
-		return max(0, m.viewport.Height+2)
+		return max(0, m.viewport.Height)
 	}
 	height := max(0, m.viewport.Height)
 	if composerHeight := m.composerAreaHeight(); composerHeight > 0 {
-		height -= composerHeight + 1
+		height -= composerHeight
 	}
 	return max(0, height)
 }
@@ -1694,10 +1698,13 @@ func (m *Model) refreshViewportAt(offset int) {
 		appliedY    int
 	)
 	viewportHeight := max(0, m.transcriptViewportHeight())
+	m.viewport.SetWindowHeight(viewportHeight)
 	if offset >= 0 {
-		surface, totalHeight, appliedY = retained.RenderVisible(ctx, max(0, m.viewport.Width), viewportHeight, offset)
+		scroll := ui.ScrollBox{Child: retained, OffsetY: offset, Width: max(0, m.viewport.Width), Height: viewportHeight}
+		surface, totalHeight, appliedY = scroll.RenderVisible(ctx, max(0, m.viewport.Width), viewportHeight, offset)
 	} else {
-		surface, totalHeight, appliedY = retained.RenderBottom(ctx, max(0, m.viewport.Width), viewportHeight)
+		scroll := ui.ScrollBox{Child: retained, Width: max(0, m.viewport.Width), Height: viewportHeight}
+		surface, totalHeight, appliedY = scroll.RenderBottom(ctx, max(0, m.viewport.Width), viewportHeight)
 	}
 	m.viewport.SetContentHeight(totalHeight)
 	m.viewport.SetYOffset(appliedY)
@@ -1781,11 +1788,11 @@ func (m *Model) transcriptElement(runtime *ui.Runtime) ui.Element {
 	if runtime != nil {
 		runtime.BeginFrame()
 	}
-	return ui.TranscriptViewport{
-		Transcript: retained,
-		OffsetY:    max(0, m.viewport.YOffset),
-		Width:      width,
-		Height:     height,
+	return ui.ScrollBox{
+		Child:   retained,
+		OffsetY: max(0, m.viewport.YOffset),
+		Width:   width,
+		Height:  height,
 	}
 }
 

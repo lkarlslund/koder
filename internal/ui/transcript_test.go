@@ -170,3 +170,23 @@ func TestRetainedTranscriptOffsetsVisibleControls(t *testing.T) {
 		t.Fatalf("expected visible control to be offset into viewport row 1, got %#v", controls[0].Rect)
 	}
 }
+
+func TestRetainedTranscriptDoesNotBottomAlignShortContent(t *testing.T) {
+	transcript := NewRetainedTranscript()
+	transcript.Add(TranscriptItem{
+		Element: NewCachedElement(Paragraph{Text: "top\nnext"}, 2),
+	})
+
+	surface, totalHeight, offset := transcript.RenderBottom(nil, 8, 5)
+	lines := surface.Lines()
+
+	if totalHeight != 2 {
+		t.Fatalf("expected total height 2, got %d", totalHeight)
+	}
+	if offset != 0 {
+		t.Fatalf("expected offset 0 for short content, got %d", offset)
+	}
+	if len(lines) < 2 || strings.TrimSpace(lines[0]) != "top" || strings.TrimSpace(lines[1]) != "next" {
+		t.Fatalf("expected short transcript to start at top, got %#v", lines)
+	}
+}

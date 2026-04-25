@@ -532,14 +532,19 @@ func firstColor(values ...lipgloss.Color) lipgloss.Color {
 	return ""
 }
 
-type ScrollFrame struct {
+type scrollWindowRenderer interface {
+	RenderVisible(ctx *Context, width, height, offset int) (Surface, int, int)
+	RenderBottom(ctx *Context, width, height int) (Surface, int, int)
+}
+
+type ScrollBox struct {
 	Child   Element
 	OffsetY int
 	Width   int
 	Height  int
 }
 
-func (s ScrollFrame) Measure(ctx *Context, constraints Constraints) Size {
+func (s ScrollBox) Measure(ctx *Context, constraints Constraints) Size {
 	if s.Child == nil {
 		return constraints.Clamp(Size{})
 	}
@@ -561,18 +566,52 @@ func (s ScrollFrame) Measure(ctx *Context, constraints Constraints) Size {
 	return constraints.Clamp(Size{W: width, H: height})
 }
 
-func (s ScrollFrame) Render(ctx *Context, bounds Rect) Surface {
-	base := TransparentSurface(bounds.W, bounds.H)
-	if s.Child == nil || bounds.W <= 0 || bounds.H <= 0 {
-		return base
+func (s ScrollBox) Render(ctx *Context, bounds Rect) Surface {
+	surface, _, _ := s.RenderVisible(ctx, bounds.W, bounds.H, s.OffsetY)
+	return surface.normalize(bounds.W, bounds.H)
+}
+
+func (s ScrollBox) RenderVisible(ctx *Context, width, height, offset int) (Surface, int, int) {
+	base := TransparentSurface(width, height)
+	if s.Child == nil || width <= 0 || height <= 0 {
+		return base, 0, 0
 	}
-	childSize := s.Child.Measure(ctx, Constraints{MaxW: bounds.W, MaxH: 0})
-	childHeight := max(bounds.H, childSize.H)
+	if child, ok := s.Child.(scrollWindowRenderer); ok {
+		return child.RenderVisible(ctx, width, height, offset)
+	}
+	childSize := s.Child.Measure(ctx, Constraints{MaxW: width, MaxH: 0})
+	totalHeight := childSize.H
+	maxOffset := max(0, totalHeight-height)
+	offset = min(max(0, offset), maxOffset)
+	childHeight := max(height, totalHeight)
 	childSurface := s.Child.Render(ctx, Rect{
-		X: bounds.X,
-		Y: bounds.Y - max(0, s.OffsetY),
-		W: bounds.W,
+		X: 0,
+		Y: -offset,
+		W: width,
 		H: childHeight,
 	})
-	return base.placeAt(0, -max(0, s.OffsetY), childSurface)
+	return base.placeAt(0, -offset, childSurface), totalHeight, offset
 }
+
+func (s ScrollBox) RenderBottom(ctx *Context, width, height int) (Surface, int, int) {
+	base := TransparentSurface(width, height)
+	if s.Child == nil || width <= 0 || height <= 0 {
+		return base, 0, 0
+	}
+	if child, ok := s.Child.(scrollWindowRenderer); ok {
+		return child.RenderBottom(ctx, width, height)
+	}
+	childSize := s.Child.Measure(ctx, Constraints{MaxW: width, MaxH: 0})
+	totalHeight := childSize.H
+	offset := max(0, totalHeight-height)
+	childHeight := max(height, totalHeight)
+	childSurface := s.Child.Render(ctx, Rect{
+		X: 0,
+		Y: -offset,
+		W: width,
+		H: childHeight,
+	})
+	return base.placeAt(0, -offset, childSurface), totalHeight, offset
+}
+
+type ScrollFrame = ScrollBox

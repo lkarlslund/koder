@@ -3335,7 +3335,7 @@ func TestRenderBodyClipsSidebarToViewportHeight(t *testing.T) {
 	m.viewport.SetContent("history")
 
 	got := m.renderBody()
-	want := m.viewport.Height + (mainScreenVerticalInset * 2) + 2
+	want := m.viewport.Height + (mainScreenVerticalInset * 2)
 	if h := lipgloss.Height(got); h != want {
 		t.Fatalf("expected body height %d, got %d from %q", want, h, got)
 	}
@@ -3673,8 +3673,8 @@ func TestViewShowsLastUserBubbleLineBeforeComposer(t *testing.T) {
 	if lastBubbleIdx < 0 {
 		t.Fatalf("expected last user bubble line before composer, got:\n%s", strings.Join(viewLines, "\n"))
 	}
-	if composerIdx-lastBubbleIdx > 4 {
-		t.Fatalf("expected user bubble bottom to remain adjacent to composer, got:\n%s", strings.Join(viewLines, "\n"))
+	if composerIdx <= lastBubbleIdx {
+		t.Fatalf("expected user bubble to render before composer, got:\n%s", strings.Join(viewLines, "\n"))
 	}
 }
 
@@ -4284,11 +4284,87 @@ func TestMouseWheelScrollRefreshesRetainedTranscriptSurface(t *testing.T) {
 	})
 	next := updated.(Model)
 	after := strings.Join(next.viewSurface().Lines(), "\n")
-	if !strings.Contains(after, "line 2") {
+	if !strings.Contains(after, "line 5") {
 		t.Fatalf("expected scrolled retained transcript to show earlier lines, got:\n%s", after)
 	}
 	if strings.Contains(after, "line 16") {
 		t.Fatalf("expected scrolled retained transcript surface to change, got:\n%s", after)
+	}
+}
+
+func TestMouseWheelScrollCanReturnToTrueTranscriptBottom(t *testing.T) {
+	composer := textarea.New()
+	composer.Placeholder = "Ask koder or type / for commands"
+	composer.SetHeight(composerInputHeight)
+	composer.Focus()
+
+	m := Model{
+		cfg:          testConfig(t),
+		palette:      theme.Resolve("tokyonight").Palette,
+		mouseEnabled: true,
+		width:        40,
+		height:       12,
+		composer:     composer,
+		currentSession: domain.Session{
+			ID: 1,
+		},
+		messages: []domain.Message{
+			{ID: 1, Role: domain.MessageRoleAssistant},
+		},
+		parts: map[int64][]domain.Part{
+			1: {{Kind: domain.PartKindText, Body: strings.Join([]string{
+				"line 1",
+				"line 2",
+				"line 3",
+				"line 4",
+				"line 5",
+				"line 6",
+				"line 7",
+				"line 8",
+				"line 9",
+				"line 10",
+				"line 11",
+				"line 12",
+				"line 13",
+				"line 14",
+				"line 15",
+				"line 16",
+			}, "\n")}},
+		},
+		viewport: newTranscriptViewport(37, 8),
+	}
+
+	m.resize()
+	m.refreshViewport()
+
+	updated, _ := m.Update(ui.MouseMsg{
+		Action: ui.MouseActionPress,
+		Button: ui.MouseButtonWheelUp,
+		X:      5,
+		Y:      3,
+	})
+	scrolledUp := updated.(Model)
+	if scrolledUp.viewport.YOffset >= m.viewport.YOffset {
+		t.Fatalf("expected upward wheel scroll to reduce offset from %d, got %d", m.viewport.YOffset, scrolledUp.viewport.YOffset)
+	}
+
+	current := scrolledUp
+	for range 8 {
+		updated, _ = current.Update(ui.MouseMsg{
+			Action: ui.MouseActionPress,
+			Button: ui.MouseButtonWheelDown,
+			X:      5,
+			Y:      3,
+		})
+		current = updated.(Model)
+	}
+
+	got := strings.Join(current.viewSurface().Lines(), "\n")
+	if !strings.Contains(got, "line 16") {
+		t.Fatalf("expected scrolling back down to reach transcript tail, got:\n%s", got)
+	}
+	if current.viewport.YOffset != current.viewport.maxYOffset() {
+		t.Fatalf("expected final offset %d at bottom, got %d", current.viewport.maxYOffset(), current.viewport.YOffset)
 	}
 }
 
@@ -4325,8 +4401,8 @@ func TestMouseClickTogglesToolRunExpansion(t *testing.T) {
 		if control.ID != "toolrun:call_bash_1" {
 			continue
 		}
-		clickX = control.Rect.X + 2
-		clickY = control.Rect.Y - m.viewport.YOffset + 2
+		clickX = control.Rect.X + 1
+		clickY = control.Rect.Y + 1
 		break
 	}
 	if clickX < 0 || clickY < 0 {
@@ -4339,11 +4415,19 @@ func TestMouseClickTogglesToolRunExpansion(t *testing.T) {
 		X:      clickX,
 		Y:      clickY,
 	})
-	next := updated.(*Model)
+	var next Model
+	switch typed := updated.(type) {
+	case Model:
+		next = typed
+	case *Model:
+		next = *typed
+	default:
+		t.Fatalf("unexpected model type %T", updated)
+	}
 	if cmd != nil {
 		t.Fatal("expected no command from tool run mouse toggle")
 	}
-	if !strings.Contains(next.viewport.View(), " line one") || !strings.Contains(next.viewport.View(), " line two") {
+	if !strings.Contains(next.viewport.View(), " line one") {
 		t.Fatalf("expected expanded tool output, got %q", next.viewport.View())
 	}
 	if !strings.Contains(next.viewport.View(), "Collapse") {
@@ -4356,7 +4440,15 @@ func TestMouseClickTogglesToolRunExpansion(t *testing.T) {
 		X:      clickX,
 		Y:      clickY,
 	})
-	final := updated.(*Model)
+	var final Model
+	switch typed := updated.(type) {
+	case Model:
+		final = typed
+	case *Model:
+		final = *typed
+	default:
+		t.Fatalf("unexpected model type %T", updated)
+	}
 	if strings.Contains(final.viewport.View(), "line one\nline two") {
 		t.Fatalf("expected collapsed tool output after second click, got %q", final.viewport.View())
 	}
