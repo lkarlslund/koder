@@ -221,9 +221,6 @@ func New(id string, cfg config.Provider, recorder *debugsrv.Recorder) (*Client, 
 		return nil, errors.New("provider base url is empty")
 	}
 	baseURL := strings.TrimRight(cfg.BaseURL, "/")
-	if id == "llamacpp" {
-		baseURL = strings.TrimSuffix(baseURL, "/v1")
-	}
 	if _, err := url.Parse(baseURL); err != nil {
 		return nil, fmt.Errorf("parse provider base url: %w", err)
 	}
@@ -293,7 +290,7 @@ func (c *Client) Props(ctx context.Context, modelID string) (propsResponse, erro
 }
 
 func DetectContextWindow(ctx context.Context, providerID string, cfg config.Provider, modelID string, recorder *debugsrv.Recorder) (int, error) {
-	if !SupportsContextWindowDetection(providerID, cfg) {
+	if !SupportsContextWindowDetection(cfg) {
 		return cfg.ContextWindow, nil
 	}
 	for _, baseURL := range contextWindowProbeBaseURLs(cfg.BaseURL) {
@@ -317,10 +314,7 @@ func DetectContextWindow(ctx context.Context, providerID string, cfg config.Prov
 	return cfg.ContextWindow, nil
 }
 
-func SupportsContextWindowDetection(providerID string, cfg config.Provider) bool {
-	if strings.TrimSpace(providerID) == "llamacpp" {
-		return strings.TrimSpace(cfg.BaseURL) != ""
-	}
+func SupportsContextWindowDetection(cfg config.Provider) bool {
 	return strings.TrimSpace(cfg.Kind) == ProviderKindCompatible &&
 		strings.TrimSpace(cfg.AuthMethod) == string(AuthMethodLocal) &&
 		strings.TrimSpace(cfg.BaseURL) != ""
@@ -625,9 +619,6 @@ func redactBody(body string) string {
 }
 
 func (c *Client) apiPath(path string) string {
-	if c.provider == "llamacpp" {
-		return "/v1" + path
-	}
 	return path
 }
 

@@ -247,6 +247,13 @@ type modelListMsg struct {
 	err         error
 }
 
+type contextWindowMsg struct {
+	providerID    string
+	contextWindow int
+	checked       bool
+	err           error
+}
+
 type forkSessionMsg struct {
 	load     loadMsg
 	sourceID int64
@@ -560,10 +567,14 @@ func (m Model) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 		if !msg.preserveBusy {
 			m.stopBusyWithStatus("Ready")
 		}
+		cmds := []ui.Cmd{m.syncWindowTitleCmd()}
 		if cmd := m.dequeuePromptCmd(); cmd != nil {
-			return m, ui.Batch(cmd, m.syncWindowTitleCmd())
+			cmds = append(cmds, cmd)
 		}
-		return m, m.syncWindowTitleCmd()
+		if cmd := m.detectSessionContextWindowCmd(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		return m, ui.Batch(cmds...)
 	case agentsRefreshMsg:
 		m.invalidateTranscript()
 		if msg.err != nil {
@@ -657,6 +668,33 @@ func (m Model) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 			m.status = "Choose an initial model"
 		} else {
 			m.status = fmt.Sprintf("Loaded %d models", len(msg.models))
+		}
+		return m, m.syncWindowTitleCmd()
+	case contextWindowMsg:
+		m.invalidateBodyCache()
+		if msg.err != nil {
+			m.status = msg.err.Error()
+			return m, m.syncWindowTitleCmd()
+		}
+		if msg.checked {
+			if m.runtimeCtxChecked == nil {
+				m.runtimeCtxChecked = map[string]bool{}
+			}
+			m.runtimeCtxChecked[msg.providerID] = true
+		}
+		if msg.providerID != "" && msg.contextWindow > 0 {
+			providerCfg, ok := m.cfg.Provider(msg.providerID)
+			if ok && providerCfg.ContextWindow != msg.contextWindow {
+				providerCfg.ContextWindow = msg.contextWindow
+				m.cfg.Providers[msg.providerID] = providerCfg
+				if err := m.cfg.Save(); err != nil {
+					m.status = err.Error()
+					return m, m.syncWindowTitleCmd()
+				}
+				if m.agent != nil {
+					m.agent.UpdateConfig(m.cfg)
+				}
+			}
 		}
 		return m, m.syncWindowTitleCmd()
 	case ui.MouseMsg:
@@ -3005,7 +3043,7 @@ func (m Model) ensureRuntimeContextWindow(ctx context.Context, session domain.Se
 	if !ok {
 		return "", 0, false, fmt.Errorf("provider %q not configured", providerID)
 	}
-	if !provider.SupportsContextWindowDetection(providerID, providerCfg) {
+	if !provider.SupportsContextWindowDetection(providerCfg) {
 		return "", 0, false, nil
 	}
 	if m.runtimeCtxChecked != nil && m.runtimeCtxChecked[providerID] {
@@ -4235,7 +4273,12 @@ func (m *Model) handleConnectDialogKey(msg ui.KeyMsg) ui.Cmd {
 		}
 		m.closeConnectDialog()
 		m.status = fmt.Sprintf("Connected provider %s", action.Draft.ProviderID)
-		return ui.Batch(m.loadModelsCmd(action.Draft.ProviderID, true), m.syncWindowTitleCmd())
+		cfg, _ := m.cfg.Provider(action.Draft.ProviderID)
+		return ui.Batch(
+			m.loadModelsCmd(action.Draft.ProviderID, true),
+			m.detectContextWindowCmd(action.Draft.ProviderID, cfg, action.Draft.Model),
+			m.syncWindowTitleCmd(),
+		)
 	case dialogs.ProviderConnectActionCancel:
 		m.closeConnectDialog()
 		m.status = "Provider connect cancelled"
@@ -5064,6 +5107,41 @@ func (m Model) probeProviderCmd(draft provider.ConnectDraft) ui.Cmd {
 	}
 }
 
+func (m Model) detectContextWindowCmd(providerID string, providerCfg config.Provider, modelID string) ui.Cmd {
+	if !provider.SupportsContextWindowDetection(providerCfg) {
+		return nil
+	}
+	if strings.TrimSpace(modelID) == "" {
+		modelID = strings.TrimSpace(providerCfg.DefaultModel)
+	}
+	return func() ui.Msg {
+		contextWindow, err := provider.DetectContextWindow(context.Background(), providerID, providerCfg, modelID, m.debug)
+		if err != nil {
+			return contextWindowMsg{providerID: providerID, err: err}
+		}
+		return contextWindowMsg{providerID: providerID, contextWindow: contextWindow, checked: true}
+	}
+}
+
+func (m Model) detectSessionContextWindowCmd() ui.Cmd {
+	providerID := strings.TrimSpace(m.currentSession.ProviderID)
+	if providerID == "" {
+		return nil
+	}
+	if m.runtimeCtxChecked != nil && m.runtimeCtxChecked[providerID] {
+		return nil
+	}
+	providerCfg, ok := m.cfg.Provider(providerID)
+	if !ok {
+		return nil
+	}
+	modelID := strings.TrimSpace(m.currentSession.ModelID)
+	if modelID == "" {
+		modelID = strings.TrimSpace(providerCfg.DefaultModel)
+	}
+	return m.detectContextWindowCmd(providerID, providerCfg, modelID)
+}
+
 func (m Model) loadModelsCmd(providerID string, postConnect bool) ui.Cmd {
 	return func() ui.Msg {
 		cfg, ok := m.cfg.Provider(providerID)
@@ -5118,7 +5196,7 @@ func (m *Model) saveProviderDraft(draft provider.ConnectDraft) error {
 		next.Stream = existing.Stream
 		next.Disabled = false
 	} else {
-		if next.ContextWindow == 0 && draft.ProviderID != "llamacpp" {
+		if next.ContextWindow == 0 && !(next.Kind == provider.ProviderKindCompatible && next.AuthMethod == string(provider.AuthMethodLocal)) {
 			next.ContextWindow = 32768
 		}
 		next.AutoCompactAt = 85

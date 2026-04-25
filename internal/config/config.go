@@ -265,7 +265,7 @@ func (c *Config) applyDefaults() {
 		if provider.Timeout == 0 {
 			provider.Timeout = fallbackProvider.Timeout
 		}
-		if provider.ContextWindow == 0 && id != "llamacpp" {
+		if provider.ContextWindow == 0 && !(provider.Kind == "openai-compatible" && provider.AuthMethod == "local_endpoint") {
 			provider.ContextWindow = fallbackProvider.ContextWindow
 		}
 		if provider.AutoCompactAt == 0 {

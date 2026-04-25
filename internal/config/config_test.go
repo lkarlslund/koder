@@ -132,9 +132,10 @@ func TestApplyDefaultsFillsMissingMaxToolLoopSteps(t *testing.T) {
 	}
 }
 
-func TestApplyDefaultsKeepsLlamaCPPContextWindowUnset(t *testing.T) {
+func TestApplyDefaultsKeepsCompatibleLocalContextWindowUnset(t *testing.T) {
 	cfg := Default()
-	cfg.Providers["llamacpp"] = Provider{
+	cfg.Providers["compatible"] = Provider{
+		Kind:         "openai-compatible",
 		BaseURL:      "http://127.0.0.1:8888/v1",
 		AuthMethod:   "local_endpoint",
 		DefaultModel: "coder.gguf",
@@ -142,7 +143,7 @@ func TestApplyDefaultsKeepsLlamaCPPContextWindowUnset(t *testing.T) {
 
 	cfg.applyDefaults()
 
-	if got := cfg.Providers["llamacpp"].ContextWindow; got != 0 {
-		t.Fatalf("expected llama.cpp context window to stay unset, got %d", got)
+	if got := cfg.Providers["compatible"].ContextWindow; got != 0 {
+		t.Fatalf("expected compatible local context window to stay unset, got %d", got)
 	}
 }

@@ -53,9 +53,11 @@ func TestPropsUsesModelQueryAndParsesContextWindow(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := New("llamacpp", config.Provider{
-		BaseURL: server.URL,
-		Timeout: time.Second,
+	client, err := New("openai-compatible", config.Provider{
+		Kind:       ProviderKindCompatible,
+		AuthMethod: string(AuthMethodLocal),
+		BaseURL:    server.URL,
+		Timeout:    time.Second,
 	}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -70,7 +72,7 @@ func TestPropsUsesModelQueryAndParsesContextWindow(t *testing.T) {
 	}
 }
 
-func TestDetectContextWindowUsesLlamaCPPProps(t *testing.T) {
+func TestDetectContextWindowUsesCompatibleLocalProps(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/props" {
 			t.Fatalf("unexpected path: %s", r.URL.Path)
@@ -82,9 +84,11 @@ func TestDetectContextWindowUsesLlamaCPPProps(t *testing.T) {
 	}))
 	defer server.Close()
 
-	got, err := DetectContextWindow(context.Background(), "llamacpp", config.Provider{
-		BaseURL: server.URL,
-		Timeout: time.Second,
+	got, err := DetectContextWindow(context.Background(), "openai-compatible", config.Provider{
+		Kind:       ProviderKindCompatible,
+		AuthMethod: string(AuthMethodLocal),
+		BaseURL:    server.URL,
+		Timeout:    time.Second,
 	}, "model-a", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -141,18 +145,20 @@ func TestDetectContextWindowFallsBackWhenCompatibleEndpointHasNoProps(t *testing
 	}
 }
 
-func TestListModelsUsesV1ForLlamaCPP(t *testing.T) {
+func TestListModelsUsesConfiguredV1BaseURL(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/models" {
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
-		_, _ = w.Write([]byte(`{"data":[{"id":"model-a","owned_by":"llamacpp"}]}`))
+		_, _ = w.Write([]byte(`{"data":[{"id":"model-a","owned_by":"compatible"}]}`))
 	}))
 	defer server.Close()
 
-	client, err := New("llamacpp", config.Provider{
-		BaseURL: server.URL,
-		Timeout: time.Second,
+	client, err := New("openai-compatible", config.Provider{
+		Kind:       ProviderKindCompatible,
+		AuthMethod: string(AuthMethodLocal),
+		BaseURL:    server.URL + "/v1",
+		Timeout:    time.Second,
 	}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -163,19 +169,6 @@ func TestListModelsUsesV1ForLlamaCPP(t *testing.T) {
 	}
 	if len(models) != 1 || models[0].ID != "model-a" {
 		t.Fatalf("unexpected models: %#v", models)
-	}
-}
-
-func TestNewNormalizesLegacyLlamaCPPV1BaseURL(t *testing.T) {
-	client, err := New("llamacpp", config.Provider{
-		BaseURL: "http://127.0.0.1:8888/v1",
-		Timeout: time.Second,
-	}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if client.baseURL != "http://127.0.0.1:8888" {
-		t.Fatalf("expected normalized llama.cpp base url, got %q", client.baseURL)
 	}
 }
 

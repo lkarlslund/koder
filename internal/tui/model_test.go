@@ -2676,7 +2676,7 @@ func TestSaveProviderDraftPersistsDefaults(t *testing.T) {
 	}
 }
 
-func TestEnsureRuntimeContextWindowDetectsAndPersistsLlamaCPP(t *testing.T) {
+func TestSaveProviderDraftLeavesCompatibleLocalContextWindowUnset(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
@@ -2685,43 +2685,25 @@ func TestEnsureRuntimeContextWindowDetectsAndPersistsLlamaCPP(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/props" {
-			t.Fatalf("unexpected path: %s", r.URL.Path)
-		}
-		if got := r.URL.Query().Get("model"); got != "coder.gguf" {
-			t.Fatalf("unexpected model query: %q", got)
-		}
-		_, _ = w.Write([]byte(`{"default_generation_settings":{"n_ctx":16384}}`))
-	}))
-	defer server.Close()
-
-	cfg.Providers = map[string]config.Provider{
-		"llamacpp": {
-			Name:          "llama.cpp",
-			Kind:          "openai-compatible",
-			AuthMethod:    "local_endpoint",
-			BaseURL:       server.URL,
-			DefaultModel:  "coder.gguf",
-			ContextWindow: 0,
-		},
+	m := Model{cfg: cfg}
+	draft := provider.ConnectDraft{
+		ProviderID: "openai-compatible",
+		Kind:       provider.ProviderKindCompatible,
+		AuthMethod: provider.AuthMethodLocal,
+		Name:       "Compatible",
+		BaseURL:    "http://127.0.0.1:8888/v1",
+		Model:      "coder.gguf",
 	}
-	m := Model{cfg: cfg, runtimeCtxChecked: map[string]bool{}}
-	session := domain.Session{ProviderID: "llamacpp", ModelID: "coder.gguf"}
 
-	providerID, contextWindow, checked, err := m.ensureRuntimeContextWindow(context.Background(), session)
-	if err != nil {
+	if err := m.saveProviderDraft(draft); err != nil {
 		t.Fatal(err)
 	}
-	if providerID != "llamacpp" || !checked {
-		t.Fatalf("unexpected runtime detection result: provider=%q checked=%v", providerID, checked)
+	providerCfg, ok := m.cfg.Provider("openai-compatible")
+	if !ok {
+		t.Fatal("expected provider config to be saved")
 	}
-	if contextWindow != 16384 {
-		t.Fatalf("expected detected context window 16384, got %d", contextWindow)
-	}
-	providerCfg, ok := m.cfg.Provider("llamacpp")
-	if !ok || providerCfg.ContextWindow != 16384 {
-		t.Fatalf("expected detected context window to persist, got %#v", providerCfg)
+	if providerCfg.ContextWindow != 0 {
+		t.Fatalf("expected local compatible context window to stay unset, got %d", providerCfg.ContextWindow)
 	}
 }
 
@@ -2772,6 +2754,43 @@ func TestEnsureRuntimeContextWindowDetectsAndPersistsCompatibleLocalProvider(t *
 	providerCfg, ok := m.cfg.Provider("openai-compatible")
 	if !ok || providerCfg.ContextWindow != 131072 {
 		t.Fatalf("expected detected context window to persist, got %#v", providerCfg)
+	}
+}
+
+func TestUpdateLoadSchedulesContextWindowDetectionForCurrentSession(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Providers = map[string]config.Provider{
+		"openai-compatible": {
+			Name:         "Compatible",
+			Kind:         "openai-compatible",
+			AuthMethod:   "local_endpoint",
+			BaseURL:      "http://127.0.0.1:8888/v1",
+			DefaultModel: "coder.gguf",
+		},
+	}
+	m := Model{
+		cfg:               cfg,
+		composer:          textarea.New(),
+		runtimeCtxChecked: map[string]bool{},
+	}
+
+	load := loadMsg{
+		current: domain.Session{ID: 1, ProviderID: "openai-compatible", ModelID: "coder.gguf"},
+	}
+	updated, cmd := m.Update(load)
+	if cmd == nil {
+		t.Fatal("expected follow-up command after load")
+	}
+	next := updated.(Model)
+	if next.currentSession.ProviderID != "openai-compatible" {
+		t.Fatalf("unexpected current session: %#v", next.currentSession)
 	}
 }
 
