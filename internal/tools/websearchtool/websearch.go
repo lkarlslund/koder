@@ -5,10 +5,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"html"
 	"io"
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -31,7 +33,11 @@ func init() { tools.Register(tool{}) }
 func (tool) Kind() domain.ToolKind    { return domain.ToolKindWebSearch }
 func (tool) BypassesPermission() bool { return false }
 func (tool) Definition(tools.Runtime) (provider.ToolDefinition, bool) {
-	return tools.FunctionDefinition(domain.ToolKindWebSearch, "Search the web for recent public information", `{"type":"object","properties":{"query":{"type":"string","description":"Search query"},"limit":{"type":"integer","description":"Optional maximum result count"}},"required":["query"],"additionalProperties":false}`), true
+	return tools.FunctionDefinition(
+		domain.ToolKindWebSearch,
+		"Search the public web for current or external information beyond the local workspace. Use this to discover relevant pages, news, docs, or references when you do not already know the URL. Use webfetch once you know the page you want to read. Prefer specific queries, and include the current year when looking for recent information. Do not use this for local repository search; use grep or glob instead. allowed_domains and blocked_domains are optional comma-separated domain lists.",
+		`{"type":"object","properties":{"query":{"type":"string","description":"Search query"},"limit":{"type":"integer","description":"Optional maximum result count"},"allowed_domains":{"type":"string","description":"Optional comma-separated domains to include, such as example.com,docs.example.com"},"blocked_domains":{"type":"string","description":"Optional comma-separated domains to exclude"}},"required":["query"],"additionalProperties":false}`,
+	), true
 }
 func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 	query := strings.TrimSpace(tools.FirstArg(args, "query", "q", "search"))
@@ -45,6 +51,12 @@ func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 			return nil, errors.New("limit must be a positive integer")
 		}
 		out["limit"] = strconv.Itoa(value)
+	}
+	if domains := normalizeDomainList(tools.FirstArg(args, "allowed_domains", "domains", "domain")); domains != "" {
+		out["allowed_domains"] = domains
+	}
+	if domains := normalizeDomainList(tools.FirstArg(args, "blocked_domains", "exclude_domains")); domains != "" {
+		out["blocked_domains"] = domains
 	}
 	return out, nil
 }
@@ -72,10 +84,10 @@ func (tool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Reques
 		if err != nil || value <= 0 {
 			return tools.Result{}, errors.New("limit must be a positive integer")
 		}
-		if value < limit {
-			limit = value
-		}
+		limit = value
 	}
+	allowedDomains := splitDomainList(req.Args["allowed_domains"])
+	blockedDomains := splitDomainList(req.Args["blocked_domains"])
 	endpoint := "https://html.duckduckgo.com/html/?q=" + url.QueryEscape(req.Args["query"])
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
@@ -95,16 +107,24 @@ func (tool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Reques
 	if _, err := io.CopyN(&buf, resp.Body, int64(tools.DefaultToolOutputLimit)); err != nil && !errors.Is(err, io.EOF) {
 		return tools.Result{}, err
 	}
-	results := parseResults(buf.String(), limit)
+	results := parseResults(buf.String(), limit*4)
+	results = filterResults(results, allowedDomains, blockedDomains)
+	if len(results) > limit {
+		results = results[:limit]
+	}
 	if len(results) == 0 {
 		return tools.Result{
 			Output: "No results found",
 			Meta: map[string]string{
-				"query":   req.Args["query"],
-				"results": "0",
+				"query":           req.Args["query"],
+				"allowed_domains": req.Args["allowed_domains"],
+				"blocked_domains": req.Args["blocked_domains"],
+				"results":         "0",
 			},
 			Stored: tools.WebSearchStoredResult{
-				Query: req.Args["query"],
+				Query:          req.Args["query"],
+				AllowedDomains: req.Args["allowed_domains"],
+				BlockedDomains: req.Args["blocked_domains"],
 			},
 		}, nil
 	}
@@ -128,12 +148,16 @@ func (tool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Reques
 	return tools.Result{
 		Output: strings.TrimSpace(strings.Join(lines, "\n")),
 		Meta: map[string]string{
-			"query":   req.Args["query"],
-			"results": strconv.Itoa(len(results)),
+			"query":           req.Args["query"],
+			"allowed_domains": req.Args["allowed_domains"],
+			"blocked_domains": req.Args["blocked_domains"],
+			"results":         strconv.Itoa(len(results)),
 		},
 		Stored: tools.WebSearchStoredResult{
-			Query: req.Args["query"],
-			Items: storedItems,
+			Query:          req.Args["query"],
+			AllowedDomains: req.Args["allowed_domains"],
+			BlockedDomains: req.Args["blocked_domains"],
+			Items:          storedItems,
 		},
 	}, nil
 }
@@ -157,7 +181,7 @@ func parseResults(body string, limit int) []resultItem {
 		if len(match) < 6 {
 			continue
 		}
-		href := htmlDecode(body[match[2]:match[3]])
+		href := normalizeResultURL(htmlDecode(body[match[2]:match[3]]))
 		title := cleanHTML(body[match[4]:match[5]])
 		tail := body[match[1]:]
 		snippet := ""
@@ -179,10 +203,98 @@ func cleanHTML(value string) string {
 }
 
 func htmlDecode(value string) string {
-	value = strings.ReplaceAll(value, "&amp;", "&")
-	value = strings.ReplaceAll(value, "&quot;", `"`)
-	value = strings.ReplaceAll(value, "&#x27;", "'")
-	value = strings.ReplaceAll(value, "&lt;", "<")
-	value = strings.ReplaceAll(value, "&gt;", ">")
-	return value
+	return html.UnescapeString(value)
+}
+
+func normalizeDomainList(raw string) string {
+	domains := splitDomainList(raw)
+	if len(domains) == 0 {
+		return ""
+	}
+	slices.Sort(domains)
+	return strings.Join(domains, ",")
+}
+
+func splitDomainList(raw string) []string {
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	seen := map[string]struct{}{}
+	for _, part := range parts {
+		part = strings.ToLower(strings.TrimSpace(part))
+		part = strings.TrimPrefix(part, "http://")
+		part = strings.TrimPrefix(part, "https://")
+		part = strings.TrimPrefix(part, "www.")
+		part = strings.TrimSuffix(part, "/")
+		if part == "" {
+			continue
+		}
+		if _, ok := seen[part]; ok {
+			continue
+		}
+		seen[part] = struct{}{}
+		out = append(out, part)
+	}
+	return out
+}
+
+func filterResults(results []resultItem, allowedDomains []string, blockedDomains []string) []resultItem {
+	if len(allowedDomains) == 0 && len(blockedDomains) == 0 {
+		return results
+	}
+	filtered := make([]resultItem, 0, len(results))
+	for _, item := range results {
+		if !domainAllowed(item.URL, allowedDomains, blockedDomains) {
+			continue
+		}
+		filtered = append(filtered, item)
+	}
+	return filtered
+}
+
+func domainAllowed(rawURL string, allowedDomains []string, blockedDomains []string) bool {
+	host := normalizedHost(rawURL)
+	if host == "" {
+		return len(allowedDomains) == 0
+	}
+	for _, domain := range blockedDomains {
+		if hostMatchesDomain(host, domain) {
+			return false
+		}
+	}
+	if len(allowedDomains) == 0 {
+		return true
+	}
+	for _, domain := range allowedDomains {
+		if hostMatchesDomain(host, domain) {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizedHost(rawURL string) string {
+	parsed, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil {
+		return ""
+	}
+	host := strings.ToLower(parsed.Hostname())
+	host = strings.TrimPrefix(host, "www.")
+	return host
+}
+
+func hostMatchesDomain(host string, domain string) bool {
+	return host == domain || strings.HasSuffix(host, "."+domain)
+}
+
+func normalizeResultURL(rawURL string) string {
+	parsed, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil {
+		return strings.TrimSpace(rawURL)
+	}
+	if parsed.Host == "duckduckgo.com" && parsed.Path == "/l/" {
+		if target := parsed.Query().Get("uddg"); strings.TrimSpace(target) != "" {
+			return target
+		}
+	}
+	return parsed.String()
 }

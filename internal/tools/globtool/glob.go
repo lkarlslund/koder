@@ -5,8 +5,8 @@ import (
 	"errors"
 	"io/fs"
 	"os"
-	pathpkg "path"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -24,7 +24,11 @@ func init() { tools.Register(tool{}) }
 func (tool) Kind() domain.ToolKind    { return domain.ToolKindGlob }
 func (tool) BypassesPermission() bool { return false }
 func (tool) Definition(tools.Runtime) (provider.ToolDefinition, bool) {
-	return tools.FunctionDefinition(domain.ToolKindGlob, "Find workspace paths matching a glob pattern", `{"type":"object","properties":{"pattern":{"type":"string","description":"Glob pattern relative to the workspace"},"path":{"type":"string","description":"Optional workspace directory to search from"}},"required":["pattern"],"additionalProperties":false}`), true
+	return tools.FunctionDefinition(
+		domain.ToolKindGlob,
+		"Find workspace paths by glob pattern when you do not yet know the exact file path. Use this for local file discovery, grep for file contents, and read once you know which file to open. Patterns are matched against workspace-relative paths using slash-separated paths such as **/*.go, cmd/*, or internal/**/testdata/*.json. path optionally narrows the search to a subdirectory. limit caps the number of returned matches.",
+		`{"type":"object","properties":{"pattern":{"type":"string","description":"Glob pattern relative to the workspace"},"path":{"type":"string","description":"Optional workspace directory to search from"},"limit":{"type":"integer","description":"Optional maximum number of matches to return"}},"required":["pattern"],"additionalProperties":false}`,
+	), true
 }
 func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 	pattern := strings.TrimSpace(tools.FirstArg(args, "pattern", "glob"))
@@ -34,6 +38,13 @@ func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 	out := map[string]string{"pattern": pattern}
 	if root := tools.NormalizePathInput(tools.FirstArg(args, "path", "root", "dir")); root != "" {
 		out["path"] = root
+	}
+	if rawLimit := strings.TrimSpace(tools.FirstArg(args, "limit", "count")); rawLimit != "" {
+		value, err := tools.ParseFlexibleInt(rawLimit)
+		if err != nil || value <= 0 {
+			return nil, errors.New("limit must be a positive integer")
+		}
+		out["limit"] = strconv.Itoa(value)
 	}
 	return out, nil
 }
@@ -55,6 +66,14 @@ func (tool) Execute(_ context.Context, runtime tools.Runtime, req tools.Request)
 		return tools.Result{}, err
 	}
 	pattern := req.Args["pattern"]
+	limit := 0
+	if rawLimit := strings.TrimSpace(req.Args["limit"]); rawLimit != "" {
+		value, err := strconv.Atoi(rawLimit)
+		if err != nil || value <= 0 {
+			return tools.Result{}, errors.New("limit must be a positive integer")
+		}
+		limit = value
+	}
 	var matches []string
 	walkErr := fs.WalkDir(os.DirFS(rootAbs), ".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -64,7 +83,7 @@ func (tool) Execute(_ context.Context, runtime tools.Runtime, req tools.Request)
 			return nil
 		}
 		slashPath := filepath.ToSlash(path)
-		matched, matchErr := pathpkg.Match(pattern, slashPath)
+		matched, matchErr := matchGlobPattern(pattern, slashPath)
 		if matchErr == nil && matched {
 			matches = append(matches, slashPath)
 		}
@@ -74,6 +93,9 @@ func (tool) Execute(_ context.Context, runtime tools.Runtime, req tools.Request)
 		return tools.Result{}, walkErr
 	}
 	sort.Strings(matches)
+	if limit > 0 && len(matches) > limit {
+		matches = matches[:limit]
+	}
 	body := strings.Join(matches, "\n")
 	body, truncated := tools.TruncateText(body, tools.DefaultToolOutputLimit)
 	storedMatches := append([]string(nil), matches...)
@@ -86,6 +108,7 @@ func (tool) Execute(_ context.Context, runtime tools.Runtime, req tools.Request)
 		Meta: map[string]string{
 			"pattern":   pattern,
 			"base_path": strings.TrimSpace(req.Args["path"]),
+			"limit":     strings.TrimSpace(req.Args["limit"]),
 			"matches":   strconv.Itoa(len(matches)),
 			"truncated": tools.BoolString(truncated),
 		},
@@ -114,4 +137,35 @@ func splitTruncatedLines(body string) ([]string, string) {
 		return lines, ""
 	}
 	return lines[:len(lines)-1], lines[len(lines)-1]
+}
+
+func matchGlobPattern(pattern string, path string) (bool, error) {
+	expr, err := regexp.Compile(globPatternToRegexp(pattern))
+	if err != nil {
+		return false, err
+	}
+	return expr.MatchString(path), nil
+}
+
+func globPatternToRegexp(pattern string) string {
+	var builder strings.Builder
+	builder.WriteString("^")
+	for idx := 0; idx < len(pattern); idx++ {
+		ch := pattern[idx]
+		switch ch {
+		case '*':
+			if idx+1 < len(pattern) && pattern[idx+1] == '*' {
+				builder.WriteString(".*")
+				idx++
+				continue
+			}
+			builder.WriteString(`[^/]*`)
+		case '?':
+			builder.WriteString(`[^/]`)
+		default:
+			builder.WriteString(regexp.QuoteMeta(string(ch)))
+		}
+	}
+	builder.WriteString("$")
+	return builder.String()
 }

@@ -136,6 +136,8 @@ type SkillStoredResult struct {
 
 type WebFetchStoredResult struct {
 	URL         string `json:"url"`
+	FinalURL    string `json:"final_url,omitempty"`
+	Format      string `json:"format,omitempty"`
 	Status      int    `json:"status"`
 	ContentType string `json:"content_type,omitempty"`
 	Body        string `json:"body,omitempty"`
@@ -149,8 +151,10 @@ type WebSearchStoredItem struct {
 }
 
 type WebSearchStoredResult struct {
-	Query string                `json:"query"`
-	Items []WebSearchStoredItem `json:"items,omitempty"`
+	Query          string                `json:"query"`
+	AllowedDomains string                `json:"allowed_domains,omitempty"`
+	BlockedDomains string                `json:"blocked_domains,omitempty"`
+	Items          []WebSearchStoredItem `json:"items,omitempty"`
 }
 
 type DeniedStoredResult struct {
