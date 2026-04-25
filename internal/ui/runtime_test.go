@@ -313,3 +313,44 @@ func TestRootSetPaletteInvalidatesCachedDescendants(t *testing.T) {
 		t.Fatal("expected root palette update to invalidate cached descendants")
 	}
 }
+
+type controlElement struct {
+	id string
+}
+
+func (e controlElement) Measure(_ *Context, constraints Constraints) Size {
+	return constraints.Clamp(Size{W: 4, H: 1})
+}
+
+func (e controlElement) Render(ctx *Context, bounds Rect) Surface {
+	if ctx != nil && ctx.Runtime != nil {
+		ctx.Runtime.Register(Control{
+			ID:      e.id,
+			Rect:    Rect{X: bounds.X, Y: bounds.Y, W: max(1, bounds.W), H: max(1, bounds.H)},
+			Enabled: true,
+		})
+	}
+	return SurfaceFromString("test").normalize(bounds.W, bounds.H)
+}
+
+func TestCachedElementReRegistersControlsOnCachedRender(t *testing.T) {
+	cached := NewCachedElement(controlElement{id: "cached-control"}, 1)
+	ctx := &Context{Palette: theme.Resolve("tokyonight").Palette}
+
+	firstRuntime := &Runtime{}
+	ctx.Runtime = firstRuntime
+	_ = cached.RenderCached(ctx, 8)
+	if len(firstRuntime.Controls()) != 1 {
+		t.Fatalf("expected first render to register one control, got %d", len(firstRuntime.Controls()))
+	}
+
+	secondRuntime := &Runtime{}
+	ctx.Runtime = secondRuntime
+	_ = cached.RenderCached(ctx, 8)
+	if len(secondRuntime.Controls()) != 1 {
+		t.Fatalf("expected cached render to re-register one control, got %d", len(secondRuntime.Controls()))
+	}
+	if secondRuntime.Controls()[0].ID != "cached-control" {
+		t.Fatalf("unexpected control on cached render: %#v", secondRuntime.Controls()[0])
+	}
+}

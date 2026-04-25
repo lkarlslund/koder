@@ -60,6 +60,11 @@ func (e *CachedElement) RenderCached(ctx *Context, width int) Surface {
 		width = size.W
 	}
 	if cached, ok := e.surfaces[width]; ok {
+		if ctx != nil && ctx.Runtime != nil {
+			// Cached surfaces still need a render pass so interactive children can
+			// register fresh controls for the current frame.
+			_ = e.Child.Render(ctx, Rect{W: width, H: cached.Size().H})
+		}
 		return cached
 	}
 	size := e.Child.Measure(ctx, NewConstraints(width, 0))
