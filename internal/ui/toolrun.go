@@ -19,6 +19,7 @@ const (
 	ToolRunStatusCompleted       ToolRunStatus = "completed"
 	ToolRunStatusDenied          ToolRunStatus = "denied"
 	ToolRunStatusFailed          ToolRunStatus = "failed"
+	ToolRunStatusPaused          ToolRunStatus = "paused"
 )
 
 type ToolRun struct {
@@ -54,6 +55,8 @@ func (r ToolRun) StatusLabel() string {
 		return "Denied"
 	case ToolRunStatusFailed:
 		return "Failed"
+	case ToolRunStatusPaused:
+		return "Paused"
 	default:
 		return "Requested"
 	}
@@ -301,7 +304,7 @@ func renderToolRunPreview(preview string, run ToolRun, _ lipgloss.Style, _ lipgl
 
 func toolRunStatusColor(status ToolRunStatus, palette theme.Palette) lipgloss.Color {
 	switch status {
-	case ToolRunStatusPendingApproval, ToolRunStatusApproved:
+	case ToolRunStatusPendingApproval, ToolRunStatusApproved, ToolRunStatusPaused:
 		return palette.ActivityText
 	case ToolRunStatusDenied, ToolRunStatusFailed:
 		return palette.DiffDeletedText

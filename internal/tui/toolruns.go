@@ -48,8 +48,18 @@ func (m *Model) transcriptBlocks() []transcriptBlock {
 		parts := m.parts[msg.ID]
 		switch msg.Role {
 		case domain.MessageRoleAssistant:
+			hasSpecialCard := false
+			if _, ok := compactionToolRun(parts, msg); ok {
+				hasSpecialCard = true
+			}
+			for _, part := range parts {
+				if run := eventNoticeToolRun(part); strings.TrimSpace(run.ID) != "" {
+					hasSpecialCard = true
+					break
+				}
+			}
 			body := m.renderMessageParts(parts)
-			if strings.TrimSpace(body) == "" {
+			if strings.TrimSpace(body) == "" && !hasSpecialCard {
 				body = strings.TrimSpace(msg.Summary)
 			}
 			if isSyntheticToolSummary(body) {
@@ -60,6 +70,11 @@ func (m *Model) transcriptBlocks() []transcriptBlock {
 			}
 			if run, ok := compactionToolRun(parts, msg); ok {
 				appendRun(run)
+			}
+			for _, part := range parts {
+				if run := eventNoticeToolRun(part); strings.TrimSpace(run.ID) != "" {
+					appendRun(run)
+				}
 			}
 			for _, run := range toolRunsFromAssistantMessage(parts) {
 				ptr := appendRun(run)
@@ -131,6 +146,46 @@ func compactionToolRun(parts []domain.Part, msg domain.Message) (ui.ToolRun, boo
 		}, true
 	}
 	return ui.ToolRun{}, false
+}
+
+func eventNoticeToolRun(part domain.Part) ui.ToolRun {
+	if part.Kind != domain.PartKindEventNotice {
+		return ui.ToolRun{}
+	}
+	var meta eventNoticeMeta
+	_ = json.Unmarshal([]byte(part.MetaJSON), &meta)
+	if strings.TrimSpace(meta.Kind) != "loop_pause" {
+		return ui.ToolRun{}
+	}
+	title := firstNonEmptyString(strings.TrimSpace(meta.Title), "Continuation paused")
+	subtitle := firstNonEmptyString(strings.TrimSpace(meta.Subtitle), eventNoticePauseSubtitle(meta))
+	return ui.ToolRun{
+		ID:       "pause:" + title + ":" + subtitle + ":" + strings.TrimSpace(meta.Reason),
+		Tool:     domain.ToolKind(strings.TrimSpace(meta.Tool)),
+		Title:    title,
+		Subtitle: subtitle,
+		Preview:  strings.TrimSpace(part.Body),
+		Status:   ui.ToolRunStatusPaused,
+	}
+}
+
+func eventNoticePauseSubtitle(meta eventNoticeMeta) string {
+	switch strings.TrimSpace(meta.Reason) {
+	case "repeated_tool":
+		if tool := strings.TrimSpace(meta.Tool); tool != "" {
+			return "Repeated identical " + tool + " calls"
+		}
+		return "Repeated identical tool calls"
+	case "turn_limit":
+		if meta.Limit > 0 {
+			return fmt.Sprintf("Turn limit reached (%d)", meta.Limit)
+		}
+		return "Turn limit reached"
+	case "provider_refusal":
+		return "Provider stopped continuation"
+	default:
+		return ""
+	}
 }
 
 func toolRunsFromAssistantMessage(parts []domain.Part) []ui.ToolRun {

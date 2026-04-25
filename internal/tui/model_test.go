@@ -3993,6 +3993,22 @@ func TestRenderMessagePartsShowsEventNotice(t *testing.T) {
 	}
 }
 
+func TestRenderMessagePartsSkipsLoopPauseEventNotice(t *testing.T) {
+	m := Model{}
+
+	got := m.renderMessageParts([]domain.Part{
+		{Kind: domain.PartKindText, Body: "final answer"},
+		{Kind: domain.PartKindEventNotice, Body: "Paused continuation after repeated identical read calls.", MetaJSON: `{"kind":"loop_pause","reason":"repeated_tool","tool":"read"}`},
+	})
+
+	if strings.Contains(got, "Paused continuation") {
+		t.Fatalf("expected loop pause notice to render as a card instead of inline text, got %q", got)
+	}
+	if !strings.Contains(got, "final answer") {
+		t.Fatalf("expected text to remain visible, got %q", got)
+	}
+}
+
 func TestRenderMessagePartsShowsAssistantNarrationWithoutSystemPrefix(t *testing.T) {
 	m := Model{}
 
@@ -4042,6 +4058,36 @@ func TestTranscriptRendersCompactionAsExpandableCard(t *testing.T) {
 	got = m.viewport.View()
 	if !strings.Contains(got, "## Goal") || !strings.Contains(got, "- first") || !strings.Contains(got, "- second") {
 		t.Fatalf("expected expanded compaction body, got %q", got)
+	}
+}
+
+func TestTranscriptRendersLoopPauseAsCard(t *testing.T) {
+	m := Model{
+		currentSession:   domain.Session{ID: 1},
+		viewport:         newTranscriptViewport(80, 8),
+		parts:            map[int64][]domain.Part{},
+		expandedToolRuns: map[string]bool{},
+		palette:          theme.Resolve("tokyonight").Palette,
+	}
+	m.messages = []domain.Message{
+		{ID: 1, Role: domain.MessageRoleAssistant, Summary: "Paused continuation"},
+	}
+	m.parts[1] = []domain.Part{{
+		Kind:     domain.PartKindEventNotice,
+		Body:     "Paused continuation after 3 identical read calls with the same input.",
+		MetaJSON: `{"kind":"loop_pause","reason":"repeated_tool","title":"Continuation paused","subtitle":"Repeated identical read calls","tool":"read"}`,
+	}}
+
+	m.refreshViewport()
+	got := m.viewport.View()
+	if !strings.Contains(got, "Continuation paused") {
+		t.Fatalf("expected loop pause card title, got %q", got)
+	}
+	if !strings.Contains(got, "Paused") {
+		t.Fatalf("expected loop pause card status, got %q", got)
+	}
+	if !strings.Contains(got, "Repeated identical read calls") {
+		t.Fatalf("expected loop pause card subtitle, got %q", got)
 	}
 }
 

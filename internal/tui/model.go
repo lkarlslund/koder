@@ -1993,6 +1993,9 @@ func (m *Model) renderMessageParts(parts []domain.Part) string {
 		case domain.PartKindEventNotice:
 			flushText()
 			flushReasoning()
+			if eventNoticeToolRun(part).ID != "" {
+				continue
+			}
 			if block := m.renderEventNoticeBlock(part); block != "" {
 				systemBlocks = append(systemBlocks, block)
 			}
@@ -2064,6 +2067,9 @@ func (m *Model) renderStyledMessageParts(parts []domain.Part) []ui.StyledSpan {
 			}
 		case domain.PartKindEventNotice:
 			flushText()
+			if eventNoticeToolRun(part).ID != "" {
+				continue
+			}
 			if block := m.renderStyledEventNoticeBlock(part); len(block) > 0 {
 				blocks = append(blocks, block)
 			}
@@ -2146,6 +2152,12 @@ func (m *Model) renderStyledSystemNoticeBlock(part domain.Part) []ui.StyledSpan 
 type eventNoticeMeta struct {
 	Kind     string `json:"kind,omitempty"`
 	Severity string `json:"severity,omitempty"`
+	Reason   string `json:"reason,omitempty"`
+	Title    string `json:"title,omitempty"`
+	Subtitle string `json:"subtitle,omitempty"`
+	Tool     string `json:"tool,omitempty"`
+	Count    int    `json:"count,omitempty"`
+	Limit    int    `json:"limit,omitempty"`
 }
 
 func (m *Model) renderEventNoticeBlock(part domain.Part) string {

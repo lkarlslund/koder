@@ -53,8 +53,8 @@ func TestSystemPromptDoesNotMentionInternalSlashCommands(t *testing.T) {
 
 func TestMaxToolLoopStepsDefaultsToTwenty(t *testing.T) {
 	engine := New(testConfig(t), nil, nil, nil, t.TempDir())
-	if got := engine.maxToolLoopSteps(); got != 20 {
-		t.Fatalf("expected default max tool loop steps 20, got %d", got)
+	if got := engine.maxToolLoopSteps(); got != 50 {
+		t.Fatalf("expected default max tool loop steps 50, got %d", got)
 	}
 }
 
@@ -1835,6 +1835,235 @@ func TestRunPromptRateLimitStatusCountsDown(t *testing.T) {
 			t.Fatalf("expected status %d to end with %q, got %q", idx, want, statuses[idx])
 		}
 	}
+}
+
+func TestRunPromptPausesRepeatedIdenticalToolCalls(t *testing.T) {
+	t.Parallel()
+
+	workdir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workdir, "note.txt"), []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var requests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests++
+		_, _ = w.Write([]byte(fmt.Sprintf(`{"choices":[{"message":{"tool_calls":[{"id":"call_%d","type":"function","function":{"name":"read","arguments":"{\"path\":\"note.txt\"}"}}]}}],"usage":{"total_tokens":1}}`, requests)))
+	}))
+	defer server.Close()
+
+	cfg := testConfig(t)
+	cfg.Providers = map[string]config.Provider{
+		"test": {BaseURL: server.URL + "/v1", Timeout: time.Second},
+	}
+	cfg.DefaultProvider = "test"
+	cfg.DefaultModel = "test-model"
+
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	engine := New(cfg, st, tools.NewRegistry(workdir), nil, workdir)
+	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	events, err := engine.RunPrompt(context.Background(), session, "loop")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var sawPauseStatus bool
+	for evt := range events {
+		if evt.Kind == domain.EventKindStatus && strings.Contains(evt.Text, "identical read calls") {
+			sawPauseStatus = true
+		}
+		if evt.Kind == domain.EventKindError {
+			t.Fatalf("expected loop pause instead of error, got %#v", evt)
+		}
+	}
+	if !sawPauseStatus {
+		t.Fatal("expected repeated-tool pause status")
+	}
+
+	messages, parts, err := st.PartsForSession(context.Background(), session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var toolOutputs int
+	var sawPauseNotice bool
+	for _, msg := range messages {
+		for _, part := range parts[msg.ID] {
+			if part.Kind == domain.PartKindToolOutput {
+				toolOutputs++
+			}
+			if part.Kind != domain.PartKindEventNotice {
+				continue
+			}
+			var meta transcriptNotice
+			if err := json.Unmarshal([]byte(part.MetaJSON), &meta); err != nil {
+				t.Fatalf("unmarshal pause meta: %v", err)
+			}
+			if meta.Kind == "loop_pause" && meta.Reason == string(continuationPauseReasonRepeatedTool) {
+				sawPauseNotice = true
+			}
+		}
+	}
+	if toolOutputs != 2 {
+		t.Fatalf("expected only two executed tool outputs before pause, got %d", toolOutputs)
+	}
+	if !sawPauseNotice {
+		t.Fatal("expected persisted repeated-tool pause notice")
+	}
+}
+
+func TestRunPromptPausesOnProviderRefusalAfterToolResult(t *testing.T) {
+	t.Parallel()
+
+	workdir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workdir, "note.txt"), []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var requests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests++
+		switch requests {
+		case 1:
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"tool_calls":[{"id":"call_1","type":"function","function":{"name":"read","arguments":"{\"path\":\"note.txt\"}"}}]}}],"usage":{"total_tokens":1}}`))
+		default:
+			_, _ = w.Write([]byte(`{"choices":[{"message":{}}],"usage":{"total_tokens":1}}`))
+		}
+	}))
+	defer server.Close()
+
+	cfg := testConfig(t)
+	cfg.Providers = map[string]config.Provider{
+		"test": {BaseURL: server.URL + "/v1", Timeout: time.Second},
+	}
+	cfg.DefaultProvider = "test"
+	cfg.DefaultModel = "test-model"
+
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	engine := New(cfg, st, tools.NewRegistry(workdir), nil, workdir)
+	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	events, err := engine.RunPrompt(context.Background(), session, "loop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for evt := range events {
+		if evt.Kind == domain.EventKindError {
+			t.Fatalf("expected provider-refusal pause instead of error, got %#v", evt)
+		}
+	}
+
+	messages, parts, err := st.PartsForSession(context.Background(), session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, msg := range messages {
+		for _, part := range parts[msg.ID] {
+			if part.Kind != domain.PartKindEventNotice {
+				continue
+			}
+			var meta transcriptNotice
+			if err := json.Unmarshal([]byte(part.MetaJSON), &meta); err != nil {
+				t.Fatalf("unmarshal pause meta: %v", err)
+			}
+			if meta.Kind == "loop_pause" && meta.Reason == string(continuationPauseReasonProviderRefusal) {
+				return
+			}
+		}
+	}
+	t.Fatal("expected persisted provider-refusal pause notice")
+}
+
+func TestRunPromptPausesOnTurnLimit(t *testing.T) {
+	t.Parallel()
+
+	workdir := t.TempDir()
+	for _, name := range []string{"one.txt", "two.txt"} {
+		if err := os.WriteFile(filepath.Join(workdir, name), []byte(name), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var requests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests++
+		path := "one.txt"
+		if requests%2 == 0 {
+			path = "two.txt"
+		}
+		args, err := json.Marshal(map[string]string{"path": path})
+		if err != nil {
+			t.Fatalf("marshal args: %v", err)
+		}
+		_, _ = w.Write([]byte(fmt.Sprintf(`{"choices":[{"message":{"tool_calls":[{"id":"call_%d","type":"function","function":{"name":"read","arguments":%q}}]}}],"usage":{"total_tokens":1}}`, requests, string(args))))
+	}))
+	defer server.Close()
+
+	cfg := testConfig(t)
+	cfg.MaxToolLoopSteps = 2
+	cfg.Providers = map[string]config.Provider{
+		"test": {BaseURL: server.URL + "/v1", Timeout: time.Second},
+	}
+	cfg.DefaultProvider = "test"
+	cfg.DefaultModel = "test-model"
+
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	engine := New(cfg, st, tools.NewRegistry(workdir), nil, workdir)
+	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	events, err := engine.RunPrompt(context.Background(), session, "loop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for evt := range events {
+		if evt.Kind == domain.EventKindError {
+			t.Fatalf("expected turn-limit pause instead of error, got %#v", evt)
+		}
+	}
+
+	messages, parts, err := st.PartsForSession(context.Background(), session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, msg := range messages {
+		for _, part := range parts[msg.ID] {
+			if part.Kind != domain.PartKindEventNotice {
+				continue
+			}
+			var meta transcriptNotice
+			if err := json.Unmarshal([]byte(part.MetaJSON), &meta); err != nil {
+				t.Fatalf("unmarshal pause meta: %v", err)
+			}
+			if meta.Kind == "loop_pause" && meta.Reason == string(continuationPauseReasonTurnLimit) && meta.Limit == 2 {
+				return
+			}
+		}
+	}
+	t.Fatal("expected persisted turn-limit pause notice")
 }
 
 func TestRunPromptPersistsEventNoticeWhenRetriesExhausted(t *testing.T) {

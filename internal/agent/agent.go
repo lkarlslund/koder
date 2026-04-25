@@ -386,6 +386,7 @@ func (e *Engine) persistUserPrompt(ctx context.Context, session domain.Session, 
 }
 
 func (e *Engine) continueModelTurn(ctx context.Context, session domain.Session, client *provider.Client, out chan<- domain.Event, transient []provider.Message) error {
+	tracker := toolLoopTracker{}
 	for steps := 0; steps < e.maxToolLoopSteps(); steps++ {
 		e.recordLifecycle(session.ID, "model_turn_started", "", map[string]string{"step": strconv.Itoa(steps + 1)})
 		messages, buildErr := e.buildConversationPreview(ctx, session, "", nil, nil, transient)
@@ -417,6 +418,10 @@ func (e *Engine) continueModelTurn(ctx context.Context, session domain.Session, 
 			if resp.Usage.TotalTokens > 0 {
 				out <- domain.Event{Kind: domain.EventKindUsage, Usage: resp.Usage}
 			}
+			if pause, ok := tracker.trackCalls(calls); ok {
+				e.pauseContinuation(ctx, session.ID, pause, out)
+				return nil
+			}
 			needsApproval, handledErr := e.handleModelToolCalls(ctx, session, calls, out)
 			if handledErr != nil {
 				return handledErr
@@ -444,6 +449,10 @@ func (e *Engine) continueModelTurn(ctx context.Context, session domain.Session, 
 					return err
 				}
 			}
+			if pause, ok := tracker.trackCalls([]tools.Request{*call}); ok {
+				e.pauseContinuation(ctx, session.ID, pause, out)
+				return nil
+			}
 
 			evt, handledErr := e.handleModelToolCall(ctx, session, *call)
 			if handledErr != nil {
@@ -454,6 +463,15 @@ func (e *Engine) continueModelTurn(ctx context.Context, session domain.Session, 
 				return nil
 			}
 			continue
+		}
+		tracker.reset()
+
+		if steps > 0 && strings.TrimSpace(text) == "" && len(resp.ToolCalls) == 0 {
+			e.pauseContinuation(ctx, session.ID, continuationPause{
+				Reason: continuationPauseReasonProviderRefusal,
+				Body:   providerRefusalPauseBody(reasoning),
+			}, out)
+			return nil
 		}
 
 		assistantMsg, err := e.store.AddMessage(ctx, session.ID, domain.MessageRoleAssistant, strings.TrimSpace(text))
@@ -498,7 +516,12 @@ func (e *Engine) continueModelTurn(ctx context.Context, session domain.Session, 
 		out <- domain.Event{Kind: domain.EventKindMessageDone}
 		return nil
 	}
-	return fmt.Errorf("tool loop exceeded max steps")
+	e.pauseContinuation(ctx, session.ID, continuationPause{
+		Reason: continuationPauseReasonTurnLimit,
+		Limit:  e.maxToolLoopSteps(),
+		Body:   fmt.Sprintf("Paused continuation after reaching the model tool-turn limit (%d).", e.maxToolLoopSteps()),
+	}, out)
+	return nil
 }
 
 func (e *Engine) maxToolLoopSteps() int {
@@ -919,6 +942,139 @@ func errorSummary(err error) string {
 type transcriptNotice struct {
 	Kind     string `json:"kind,omitempty"`
 	Severity string `json:"severity,omitempty"`
+	Reason   string `json:"reason,omitempty"`
+	Title    string `json:"title,omitempty"`
+	Subtitle string `json:"subtitle,omitempty"`
+	Tool     string `json:"tool,omitempty"`
+	Count    int    `json:"count,omitempty"`
+	Limit    int    `json:"limit,omitempty"`
+}
+
+type continuationPauseReason string
+
+const (
+	continuationPauseReasonRepeatedTool    continuationPauseReason = "repeated_tool"
+	continuationPauseReasonTurnLimit       continuationPauseReason = "turn_limit"
+	continuationPauseReasonProviderRefusal continuationPauseReason = "provider_refusal"
+)
+
+const repeatedToolLoopThreshold = 3
+
+type continuationPause struct {
+	Reason   continuationPauseReason
+	Tool     domain.ToolKind
+	Count    int
+	Limit    int
+	Body     string
+	Subtitle string
+}
+
+type toolLoopTracker struct {
+	lastSignature string
+	lastTool      domain.ToolKind
+	repeatCount   int
+}
+
+func (t *toolLoopTracker) reset() {
+	t.lastSignature = ""
+	t.lastTool = ""
+	t.repeatCount = 0
+}
+
+func (t *toolLoopTracker) trackCalls(calls []tools.Request) (continuationPause, bool) {
+	if len(calls) != 1 {
+		t.reset()
+		return continuationPause{}, false
+	}
+	signature := toolLoopSignature(calls[0])
+	if signature == "" {
+		t.reset()
+		return continuationPause{}, false
+	}
+	if signature == t.lastSignature {
+		t.repeatCount++
+	} else {
+		t.lastSignature = signature
+		t.lastTool = calls[0].Tool
+		t.repeatCount = 1
+	}
+	if t.repeatCount < repeatedToolLoopThreshold {
+		return continuationPause{}, false
+	}
+	return continuationPause{
+		Reason:   continuationPauseReasonRepeatedTool,
+		Tool:     calls[0].Tool,
+		Count:    t.repeatCount,
+		Subtitle: fmt.Sprintf("Repeated identical %s calls", calls[0].Tool),
+		Body: fmt.Sprintf(
+			"Paused continuation after %d identical %s calls with the same input. The model kept retrying the same tool instead of reacting to the result.",
+			t.repeatCount,
+			calls[0].Tool,
+		),
+	}, true
+}
+
+func toolLoopSignature(req tools.Request) string {
+	return string(req.Tool) + "\x00" + req.ArgumentsJSON()
+}
+
+func providerRefusalPauseBody(reasoning string) string {
+	body := "Paused continuation because the provider ended the turn without any text or tool call after tool results."
+	if strings.TrimSpace(reasoning) == "" {
+		return body
+	}
+	return body + "\n\nProvider reasoning:\n" + strings.TrimSpace(reasoning)
+}
+
+func (e *Engine) pauseContinuation(ctx context.Context, sessionID int64, pause continuationPause, out chan<- domain.Event) {
+	body := strings.TrimSpace(pause.Body)
+	if body == "" {
+		body = "Paused continuation."
+	}
+	title := "Continuation paused"
+	subtitle := strings.TrimSpace(pause.Subtitle)
+	if subtitle == "" {
+		subtitle = continuationPauseSubtitle(pause)
+	}
+	e.recordLifecycle(sessionID, "model_turn_paused", body, map[string]string{
+		"reason": string(pause.Reason),
+		"tool":   string(pause.Tool),
+		"count":  strconv.Itoa(pause.Count),
+		"limit":  strconv.Itoa(pause.Limit),
+	})
+	e.persistTranscriptNotice(ctx, sessionID, body, transcriptNotice{
+		Kind:     "loop_pause",
+		Severity: "warning",
+		Reason:   string(pause.Reason),
+		Title:    title,
+		Subtitle: subtitle,
+		Tool:     string(pause.Tool),
+		Count:    pause.Count,
+		Limit:    pause.Limit,
+	})
+	if out != nil {
+		out <- domain.Event{Kind: domain.EventKindStatus, Text: body}
+		out <- domain.Event{Kind: domain.EventKindMessageDone}
+	}
+}
+
+func continuationPauseSubtitle(pause continuationPause) string {
+	switch pause.Reason {
+	case continuationPauseReasonRepeatedTool:
+		if pause.Tool != "" {
+			return fmt.Sprintf("Repeated identical %s calls", pause.Tool)
+		}
+		return "Repeated identical tool calls"
+	case continuationPauseReasonTurnLimit:
+		if pause.Limit > 0 {
+			return fmt.Sprintf("Turn limit reached (%d)", pause.Limit)
+		}
+		return "Turn limit reached"
+	case continuationPauseReasonProviderRefusal:
+		return "Provider stopped continuation"
+	default:
+		return "Continuation stopped"
+	}
 }
 
 func (e *Engine) persistTranscriptNotice(ctx context.Context, sessionID int64, body string, meta transcriptNotice) {

@@ -85,7 +85,7 @@ type Config struct {
 }
 
 const providerConfigurationHint = "configure at least one provider in config.toml and set default_provider"
-const defaultMaxToolLoopSteps = 20
+const defaultMaxToolLoopSteps = 50
 
 func Load() (Config, error) {
 	cfg := Default()
