@@ -63,3 +63,26 @@ func TestRetainedTranscriptMaintainsChildItems(t *testing.T) {
 		t.Fatalf("expected cleared transcript to measure empty, got %#v", size)
 	}
 }
+
+func TestRetainedTranscriptRenderBottomUsesExactCachedHeights(t *testing.T) {
+	transcript := NewRetainedTranscript()
+	transcript.Add(TranscriptItem{
+		Element: NewCachedElement(Paragraph{Text: "one\ntwo\nthree\nfour"}, 1),
+	})
+	transcript.Add(TranscriptItem{
+		Element: NewCachedElement(Paragraph{Text: "tail"}, 1),
+	})
+
+	surface, totalHeight, offset := transcript.RenderBottom(nil, 10, 2)
+	got := strings.Join(surface.Lines(), "\n")
+
+	if totalHeight != 5 {
+		t.Fatalf("expected exact total height 5, got %d", totalHeight)
+	}
+	if offset != 3 {
+		t.Fatalf("expected exact bottom offset 3, got %d", offset)
+	}
+	if got != "four      \ntail      " {
+		t.Fatalf("expected exact transcript tail, got %q", got)
+	}
+}

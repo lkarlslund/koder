@@ -200,7 +200,7 @@ func (t *RetainedTranscript) ContentHeight(width int) int {
 }
 
 func (t *RetainedTranscript) RenderVisible(ctx *Context, width, height, offset int) (Surface, int, int) {
-	totalHeight := t.ContentHeight(width)
+	totalHeight := t.exactContentHeight(ctx, width)
 	maxOffset := max(0, totalHeight-max(0, height))
 	offset = min(max(0, offset), maxOffset)
 	base := BlankSurface(width, height)
@@ -208,14 +208,13 @@ func (t *RetainedTranscript) RenderVisible(ctx *Context, width, height, offset i
 	for _, item := range t.items {
 		gap := max(0, item.GapBefore)
 		top := y + gap
-		approxHeight := t.itemApproxHeight(item, width)
-		bottom := top + approxHeight
+		surface := t.itemSurface(ctx, item, width)
+		exactHeight := surface.Size().H
+		bottom := top + exactHeight
 		y = bottom
 		if item.Element == nil || bottom <= offset || top >= offset+height {
 			continue
 		}
-		surface := t.itemSurface(ctx, item, width)
-		exactHeight := surface.Size().H
 		if exactHeight <= 0 {
 			continue
 		}
@@ -226,37 +225,22 @@ func (t *RetainedTranscript) RenderVisible(ctx *Context, width, height, offset i
 }
 
 func (t *RetainedTranscript) RenderBottom(ctx *Context, width, height int) (Surface, int, int) {
-	base := BlankSurface(width, height)
 	if len(t.items) == 0 {
-		return base, 0, 0
+		return BlankSurface(width, height), 0, 0
 	}
-	indices := make([]int, 0, min(len(t.items), max(1, height)))
-	usedHeight := 0
-	for idx := len(t.items) - 1; idx >= 0 && usedHeight < height; idx-- {
-		surface := t.itemSurface(ctx, t.items[idx], width)
-		blockHeight := surface.Size().H
-		if blockHeight <= 0 {
-			continue
-		}
-		usedHeight += blockHeight
-		if len(indices) > 0 {
-			usedHeight += max(0, t.items[indices[len(indices)-1]].GapBefore)
-		}
-		indices = append(indices, idx)
+	totalHeight := t.exactContentHeight(ctx, width)
+	offset := max(0, totalHeight-max(0, height))
+	surface, _, _ := t.RenderVisible(ctx, width, height, offset)
+	return surface, totalHeight, offset
+}
+
+func (t *RetainedTranscript) exactContentHeight(ctx *Context, width int) int {
+	total := 0
+	for _, item := range t.items {
+		total += max(0, item.GapBefore)
+		total += t.itemSurface(ctx, item, width).Size().H
 	}
-	totalHeight := t.ContentHeight(width)
-	startY := max(0, height-usedHeight)
-	cursorY := startY
-	for i := len(indices) - 1; i >= 0; i-- {
-		idx := indices[i]
-		if i < len(indices)-1 {
-			cursorY += max(0, t.items[idx].GapBefore)
-		}
-		surface := t.itemSurface(ctx, t.items[idx], width)
-		base = base.placeAt(0, cursorY, surface)
-		cursorY += surface.Size().H
-	}
-	return base, totalHeight, max(0, totalHeight-height)
+	return total
 }
 
 func (t *RetainedTranscript) itemApproxHeight(item TranscriptItem, width int) int {
