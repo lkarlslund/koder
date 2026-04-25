@@ -1311,7 +1311,6 @@ func (m *Model) renderComposerAreaElement() ui.Element {
 	if preview := m.renderQueuedPromptPreviewElement(); preview != nil {
 		elements = append(elements, preview)
 	}
-	elements = append(elements, ui.Spacer{H: 1})
 	elements = append(elements, m.renderComposerElement())
 	children := make([]ui.Child, 0, len(elements))
 	for _, element := range elements {
@@ -1376,9 +1375,10 @@ func (m *Model) renderMainScreenElement() ui.Element {
 	if retained := m.transcriptElement(nil); retained != nil {
 		transcript = retained
 	}
+	transcript = m.layoutDebugPane(transcript, "#1f3347")
 	mainChildren := []ui.Child{
 		ui.Flex(transcript, 1),
-		ui.Fixed(m.renderComposerAreaElement()),
+		ui.Fixed(m.layoutDebugPane(m.renderComposerAreaElement(), "#3a243f")),
 	}
 	mainColumn := ui.VBox{Children: mainChildren, Spacing: 1}
 	sidebar := ui.VisibleElement{
@@ -1391,16 +1391,34 @@ func (m *Model) renderMainScreenElement() ui.Element {
 			Width:  m.sidebarWidth(),
 		},
 	}
+	sidebar = ui.VisibleElement{
+		BoxProps: sidebar.BoxProps,
+		Child:    m.layoutDebugPane(sidebar.Child, "#3d3320"),
+	}
 	rootChildren := []ui.Child{
 		ui.Flex(ui.HBox{
 			Children: []ui.Child{
-				ui.Flex(ui.Inset{Padding: ui.SymmetricInsets(mainScreenVerticalInset, 0), Child: mainColumn}, 1),
+				ui.Flex(m.layoutDebugPane(ui.Inset{Padding: ui.SymmetricInsets(mainScreenVerticalInset, 0), Child: mainColumn}, "#16222d"), 1),
 				ui.Fixed(sidebar),
 			},
 		}, 1),
-		ui.Fixed(m.renderStatusPaneElement()),
+		ui.Fixed(m.layoutDebugPane(m.renderStatusPaneElement(), "#24351f")),
 	}
 	return ui.VBox{Children: rootChildren}
+}
+
+func (m Model) layoutDebugEnabled() bool {
+	return strings.TrimSpace(os.Getenv("KODER_DEBUG_LAYOUT")) != ""
+}
+
+func (m Model) layoutDebugPane(element ui.Element, background lipgloss.Color) ui.Element {
+	if !m.layoutDebugEnabled() || element == nil {
+		return element
+	}
+	return ui.Panel{
+		Child:      element,
+		Background: background,
+	}
 }
 
 func (m *Model) renderComposerElement() ui.Element {

@@ -3401,6 +3401,24 @@ func TestRenderFooterShowsQueuedPromptPreviewAboveComposer(t *testing.T) {
 	}
 }
 
+func TestRenderFooterOnlyUsesComposerHeightWhenNoAuxiliaryContent(t *testing.T) {
+	composer := textarea.New()
+	composer.Placeholder = "Ask koder or type / for commands"
+	composer.SetHeight(composerInputHeight)
+	composer.SetWidth(38)
+	composer.Focus()
+
+	m := Model{
+		width:    40,
+		composer: composer,
+	}
+
+	got := ansi.Strip(m.renderFooter())
+	if height := lipgloss.Height(got); height != composerHeight {
+		t.Fatalf("expected footer height %d with only composer visible, got %d in %q", composerHeight, height, got)
+	}
+}
+
 func TestViewBottomAlignsFooter(t *testing.T) {
 	composer := textarea.New()
 	composer.Placeholder = "Ask koder or type / for commands"
