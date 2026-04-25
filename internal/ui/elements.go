@@ -136,6 +136,29 @@ func (r *Runtime) Register(control Control) {
 	r.controls = append(r.controls, control)
 }
 
+func (r *Runtime) Len() int {
+	if r == nil {
+		return 0
+	}
+	return len(r.controls)
+}
+
+func (r *Runtime) OffsetFrom(start, dx, dy int) {
+	if r == nil {
+		return
+	}
+	if start < 0 {
+		start = 0
+	}
+	if start >= len(r.controls) {
+		return
+	}
+	for idx := start; idx < len(r.controls); idx++ {
+		r.controls[idx].Rect.X += dx
+		r.controls[idx].Rect.Y += dy
+	}
+}
+
 func (r *Runtime) Controls() []Control {
 	if r == nil {
 		return nil

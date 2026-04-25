@@ -200,7 +200,8 @@ func (t *RetainedTranscript) ContentHeight(width int) int {
 }
 
 func (t *RetainedTranscript) RenderVisible(ctx *Context, width, height, offset int) (Surface, int, int) {
-	totalHeight := t.exactContentHeight(ctx, width)
+	measureCtx := withoutRuntime(ctx)
+	totalHeight := t.exactContentHeight(measureCtx, width)
 	maxOffset := max(0, totalHeight-max(0, height))
 	offset = min(max(0, offset), maxOffset)
 	base := BlankSurface(width, height)
@@ -212,7 +213,7 @@ func (t *RetainedTranscript) RenderVisible(ctx *Context, width, height, offset i
 	for _, item := range t.items {
 		gap := max(0, item.GapBefore)
 		top := y + gap
-		surface := t.itemSurface(ctx, item, width)
+		surface := t.itemSurface(measureCtx, item, width)
 		exactHeight := surface.Size().H
 		bottom := top + exactHeight
 		y = bottom
@@ -223,6 +224,11 @@ func (t *RetainedTranscript) RenderVisible(ctx *Context, width, height, offset i
 			continue
 		}
 		renderY := startY + top - offset
+		if ctx != nil && ctx.Runtime != nil {
+			start := ctx.Runtime.Len()
+			surface = t.itemSurface(ctx, item, width)
+			ctx.Runtime.OffsetFrom(start, 0, renderY)
+		}
 		base = base.placeAt(0, renderY, surface)
 	}
 	return base, totalHeight, offset
@@ -232,7 +238,8 @@ func (t *RetainedTranscript) RenderBottom(ctx *Context, width, height int) (Surf
 	if len(t.items) == 0 {
 		return BlankSurface(width, height), 0, 0
 	}
-	totalHeight := t.exactContentHeight(ctx, width)
+	measureCtx := withoutRuntime(ctx)
+	totalHeight := t.exactContentHeight(measureCtx, width)
 	offset := max(0, totalHeight-max(0, height))
 	base := BlankSurface(width, height)
 	startY := max(0, height-totalHeight)
@@ -240,7 +247,7 @@ func (t *RetainedTranscript) RenderBottom(ctx *Context, width, height int) (Surf
 	for _, item := range t.items {
 		gap := max(0, item.GapBefore)
 		top := y + gap
-		surface := t.itemSurface(ctx, item, width)
+		surface := t.itemSurface(measureCtx, item, width)
 		exactHeight := surface.Size().H
 		bottom := top + exactHeight
 		y = bottom
@@ -248,6 +255,11 @@ func (t *RetainedTranscript) RenderBottom(ctx *Context, width, height int) (Surf
 			continue
 		}
 		renderY := startY + top - offset
+		if ctx != nil && ctx.Runtime != nil {
+			start := ctx.Runtime.Len()
+			surface = t.itemSurface(ctx, item, width)
+			ctx.Runtime.OffsetFrom(start, 0, renderY)
+		}
 		base = base.placeAt(0, renderY, surface)
 	}
 	return base, totalHeight, offset
@@ -260,6 +272,18 @@ func (t *RetainedTranscript) exactContentHeight(ctx *Context, width int) int {
 		total += t.itemSurface(ctx, item, width).Size().H
 	}
 	return total
+}
+
+func withoutRuntime(ctx *Context) *Context {
+	if ctx == nil {
+		return nil
+	}
+	if ctx.Runtime == nil {
+		return ctx
+	}
+	copy := *ctx
+	copy.Runtime = nil
+	return &copy
 }
 
 func (t *RetainedTranscript) itemApproxHeight(item TranscriptItem, width int) int {

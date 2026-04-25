@@ -1040,10 +1040,9 @@ func (m *Model) handleMouse(msg ui.MouseMsg) (ui.Model, ui.Cmd, bool) {
 	}
 	contentX := msg.X - 1
 	contentY := msg.Y - 1
-	row := m.viewport.YOffset + contentY
 	for i := len(m.transcriptControls) - 1; i >= 0; i-- {
 		control := m.transcriptControls[i]
-		if !control.Enabled || !control.Rect.Contains(ui.Point{X: max(0, contentX), Y: row}) {
+		if !control.Enabled || !control.Rect.Contains(ui.Point{X: max(0, contentX), Y: contentY}) {
 			continue
 		}
 		if strings.HasPrefix(control.ID, "toolrun:") {

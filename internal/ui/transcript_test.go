@@ -7,6 +7,27 @@ import (
 	"github.com/lkarlslund/koder/internal/theme"
 )
 
+type controlProbeElement struct {
+	id     string
+	width  int
+	height int
+}
+
+func (e controlProbeElement) Measure(_ *Context, constraints Constraints) Size {
+	return constraints.Clamp(Size{W: e.width, H: e.height})
+}
+
+func (e controlProbeElement) Render(ctx *Context, bounds Rect) Surface {
+	if ctx != nil && ctx.Runtime != nil {
+		ctx.Runtime.Register(Control{
+			ID:      e.id,
+			Rect:    Rect{X: bounds.X, Y: bounds.Y, W: max(1, bounds.W), H: max(1, bounds.H)},
+			Enabled: true,
+		})
+	}
+	return BlankSurface(bounds.W, bounds.H)
+}
+
 func TestUserMessageClassicViewDoesNotAddLeadingSpaceBeforeBody(t *testing.T) {
 	palette := theme.Resolve("tokyonight").Palette
 	got := RenderElement(&Context{Palette: palette}, NewUserMessage(UserMessageProps{
@@ -126,5 +147,26 @@ func TestRetainedTranscriptRenderBottomUsesExactCachedHeights(t *testing.T) {
 	}
 	if got != "four      \ntail      " {
 		t.Fatalf("expected exact transcript tail, got %q", got)
+	}
+}
+
+func TestRetainedTranscriptOffsetsVisibleControls(t *testing.T) {
+	transcript := NewRetainedTranscript()
+	transcript.Add(TranscriptItem{Key: "one", Element: controlProbeElement{id: "first", width: 8, height: 2}})
+	transcript.Add(TranscriptItem{Key: "two", GapBefore: 1, Element: controlProbeElement{id: "second", width: 8, height: 3}})
+
+	runtime := &Runtime{}
+	ctx := &Context{Palette: theme.Resolve("tokyonight").Palette, Runtime: runtime}
+	_, _, _ = transcript.RenderVisible(ctx, 8, 4, 2)
+
+	controls := runtime.Controls()
+	if len(controls) != 1 {
+		t.Fatalf("expected only the visible control to be registered, got %#v", controls)
+	}
+	if controls[0].ID != "second" {
+		t.Fatalf("expected second control to remain visible, got %#v", controls[0])
+	}
+	if controls[0].Rect.Y != 1 {
+		t.Fatalf("expected visible control to be offset into viewport row 1, got %#v", controls[0].Rect)
 	}
 }
