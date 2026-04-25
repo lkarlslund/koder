@@ -181,7 +181,7 @@ func ReadTextFile(abs string, lineLimit int, byteLimit int) (string, bool, error
 	}
 	numbered := make([]string, 0, len(lines))
 	for idx, line := range lines {
-		numbered = append(numbered, fmt.Sprintf("%6d\t%s", idx+1, line))
+		numbered = append(numbered, fmt.Sprintf("%d: %s", idx+1, line))
 	}
 	content, byteTruncated := TruncateText(strings.Join(numbered, "\n"), byteLimit)
 	truncated = truncated || byteTruncated

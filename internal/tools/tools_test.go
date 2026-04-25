@@ -237,3 +237,40 @@ func TestWebSearchWholeFloatStringLimitIsAccepted(t *testing.T) {
 		t.Fatalf("expected normalized limit, got %q", got)
 	}
 }
+
+func TestReadTextFileUsesColonLinePrefix(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "file.txt")
+	if err := os.WriteFile(path, []byte("alpha\nbeta\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	output, truncated, err := tools.ReadTextFile(path, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if truncated {
+		t.Fatal("expected untruncated output")
+	}
+	if output != "1: alpha\n2: beta\n3: " {
+		t.Fatalf("unexpected read output: %q", output)
+	}
+}
+
+func TestParseReadStoredLinesAcceptsColonAndLegacyFormats(t *testing.T) {
+	lines, footer := tools.ParseReadStoredLines("1: alpha\n2: beta")
+	if footer != "" {
+		t.Fatalf("expected empty footer, got %q", footer)
+	}
+	if len(lines) != 2 || lines[0].Number != 1 || lines[0].Text != "alpha" || lines[1].Number != 2 || lines[1].Text != "beta" {
+		t.Fatalf("unexpected colon parsed lines: %#v", lines)
+	}
+
+	lines, footer = tools.ParseReadStoredLines("     1\talpha\n     2\tbeta")
+	if footer != "" {
+		t.Fatalf("expected empty legacy footer, got %q", footer)
+	}
+	if len(lines) != 2 || lines[0].Number != 1 || lines[0].Text != "alpha" || lines[1].Number != 2 || lines[1].Text != "beta" {
+		t.Fatalf("unexpected legacy parsed lines: %#v", lines)
+	}
+}

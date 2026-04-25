@@ -450,17 +450,30 @@ func ParseReadStoredLines(output string) ([]ReadStoredLine, string) {
 		if strings.TrimSpace(raw) == "" {
 			continue
 		}
-		numberPart, textPart, ok := strings.Cut(raw, "\t")
+		number, textPart, ok := parseReadStoredLine(raw)
 		if !ok {
-			footer = append(footer, strings.TrimSpace(raw))
-			continue
-		}
-		number, err := strconv.Atoi(strings.TrimSpace(numberPart))
-		if err != nil {
 			footer = append(footer, strings.TrimSpace(raw))
 			continue
 		}
 		lines = append(lines, ReadStoredLine{Number: number, Text: textPart})
 	}
 	return lines, strings.TrimSpace(strings.Join(footer, "\n"))
+}
+
+func parseReadStoredLine(raw string) (int, string, bool) {
+	if numberPart, textPart, ok := strings.Cut(raw, "\t"); ok {
+		number, err := strconv.Atoi(strings.TrimSpace(numberPart))
+		if err == nil {
+			return number, textPart, true
+		}
+	}
+	numberPart, textPart, ok := strings.Cut(raw, ":")
+	if !ok {
+		return 0, "", false
+	}
+	number, err := strconv.Atoi(strings.TrimSpace(numberPart))
+	if err != nil {
+		return 0, "", false
+	}
+	return number, strings.TrimPrefix(textPart, " "), true
 }
