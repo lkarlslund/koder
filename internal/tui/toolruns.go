@@ -559,12 +559,20 @@ func (e toolRunCardElement) Render(ctx *ui.Context, bounds ui.Rect) ui.Surface {
 	if width <= 0 {
 		width = bounds.W
 	}
-	if ctx != nil && ctx.Runtime != nil && strings.TrimSpace(e.Run.ID) != "" && e.Run.Expandable(width) {
-		ctx.Runtime.Register(ui.Control{
-			ID:      "toolrun:" + e.Run.ID,
-			Rect:    ui.Rect{X: bounds.X, Y: bounds.Y, W: max(1, width), H: max(1, bounds.H)},
-			Enabled: true,
-		})
+	if ctx != nil && ctx.Runtime != nil && strings.TrimSpace(e.Run.ID) != "" {
+		label := e.Run.ToggleLabel(width, e.Expanded)
+		if label != "" {
+			titleWidth := ui.PlainWidth(e.Run.Title)
+			labelWidth := ui.PlainWidth(label)
+			x := bounds.X + titleWidth + 2
+			if labelWidth > 0 {
+				ctx.Runtime.Register(ui.Control{
+					ID:      "toolrun:" + e.Run.ID,
+					Rect:    ui.Rect{X: x, Y: bounds.Y, W: labelWidth, H: 1},
+					Enabled: true,
+				})
+			}
+		}
 	}
 	return e.Run.CardSurface(e.Palette, width, e.Expanded)
 }

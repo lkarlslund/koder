@@ -4393,23 +4393,28 @@ func TestMouseClickTogglesToolRunExpansion(t *testing.T) {
 	if strings.Contains(m.viewport.View(), "line one\nline two") {
 		t.Fatalf("expected collapsed tool output, got %q", m.viewport.View())
 	}
-	if !strings.Contains(m.viewport.View(), "Expand (1 line more)") {
+	if !strings.Contains(m.viewport.View(), "Expand (1 line)") {
 		t.Fatalf("expected expand indicator, got %q", m.viewport.View())
 	}
 
 	_ = m.viewSurface()
 	clickX := -1
 	clickY := -1
+	controlWidth := -1
 	for _, control := range m.transcriptControls {
 		if control.ID != "toolrun:call_bash_1" {
 			continue
 		}
 		clickX = control.Rect.X + 1
-		clickY = control.Rect.Y + 1
+		clickY = control.Rect.Y
+		controlWidth = control.Rect.W
 		break
 	}
 	if clickX < 0 || clickY < 0 {
 		t.Fatalf("expected toolrun control to be registered, got %#v", m.transcriptControls)
+	}
+	if controlWidth != ui.PlainWidth("Expand (1 line)") {
+		t.Fatalf("expected expand control width %d, got %d", ui.PlainWidth("Expand (1 line)"), controlWidth)
 	}
 
 	updated, cmd := m.Update(ui.MouseMsg{
@@ -4493,7 +4498,7 @@ func TestWriteToolRunUsesStoredContentForExpansion(t *testing.T) {
 	if strings.Contains(m.viewport.View(), " line one\n line two") {
 		t.Fatalf("expected collapsed write output, got %q", m.viewport.View())
 	}
-	if !strings.Contains(m.viewport.View(), "Expand (1 line more)") {
+	if !strings.Contains(m.viewport.View(), "Expand (1 line)") {
 		t.Fatalf("expected expand indicator, got %q", m.viewport.View())
 	}
 

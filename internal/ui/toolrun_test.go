@@ -68,13 +68,34 @@ func TestToolRunCardViewHidesReadPreviewUntilExpanded(t *testing.T) {
 	if strings.Contains(collapsed, "first line") || strings.Contains(collapsed, "second line") {
 		t.Fatalf("expected collapsed read card to hide file contents, got %q", collapsed)
 	}
-	if !strings.Contains(collapsed, "Expand") {
+	if !strings.Contains(collapsed, "Expand (1 line)") && !strings.Contains(collapsed, "Expand (2 lines)") {
 		t.Fatalf("expected collapsed read card to remain expandable, got %q", collapsed)
 	}
 
 	expanded := SurfaceText(run.CardSurface(palette, 80, true))
 	if !strings.Contains(expanded, "first line") || !strings.Contains(expanded, "second line") {
 		t.Fatalf("expected expanded read card to show file contents, got %q", expanded)
+	}
+}
+
+func TestToolRunToggleLabelUsesLineCountWithoutMore(t *testing.T) {
+	run := ToolRun{
+		Tool:   domain.ToolKindBash,
+		Title:  "Ran command echo hi",
+		Output: "one\ntwo",
+		Status: ToolRunStatusCompleted,
+	}
+
+	if got := run.ToggleLabel(80, false); got != "Expand (1 line)" {
+		t.Fatalf("expected singular expand label, got %q", got)
+	}
+	if got := run.ToggleLabel(80, true); got != "Collapse" {
+		t.Fatalf("expected collapse label when expanded, got %q", got)
+	}
+
+	run.Output = "one\ntwo\nthree"
+	if got := run.ToggleLabel(80, false); got != "Expand (2 lines)" {
+		t.Fatalf("expected plural expand label, got %q", got)
 	}
 }
 

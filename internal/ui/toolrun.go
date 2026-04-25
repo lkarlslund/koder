@@ -66,19 +66,24 @@ func (r ToolRun) CardSurface(palette theme.Palette, width int, expanded bool) Su
 	return r.renderCard(palette, width, expanded)
 }
 
+func (r ToolRun) ToggleLabel(width int, expanded bool) string {
+	hiddenLines := r.HiddenLineCount(innerCardWidth(width))
+	if hiddenLines <= 0 {
+		return ""
+	}
+	if expanded {
+		return "Collapse"
+	}
+	if hiddenLines == 1 {
+		return "Expand (1 line)"
+	}
+	return "Expand (" + strconv.Itoa(hiddenLines) + " lines)"
+}
+
 func (r ToolRun) renderCard(palette theme.Palette, width int, expanded bool) Surface {
 	headerWidth := innerCardWidth(width)
 	headerParts := []string{r.Title}
-	if hiddenLines := r.HiddenLineCount(headerWidth); hiddenLines > 0 {
-		label := "Collapse"
-		if !expanded && hiddenLines == 1 {
-			label = "Expand (1 line more)"
-		} else if !expanded {
-			label = "Expand"
-		}
-		if hiddenLines > 1 && !expanded {
-			label = "Expand (" + strconv.Itoa(hiddenLines) + " lines more)"
-		}
+	if label := r.ToggleLabel(width, expanded); label != "" {
 		headerParts = append(headerParts, label)
 	}
 	lines := []string{strings.Join(headerParts, "  ")}
