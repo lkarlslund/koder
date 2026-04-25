@@ -130,3 +130,41 @@ func TestBashZeroTimeoutUsesDefault(t *testing.T) {
 		t.Fatalf("expected default timeout metadata, got %q", got)
 	}
 }
+
+func TestBashWholeFloatStringTimeoutIsAccepted(t *testing.T) {
+	dir := t.TempDir()
+	registry := tools.NewRegistry(dir)
+
+	result, err := registry.Execute(context.Background(), tools.Request{
+		Tool: domain.ToolKindBash,
+		Args: map[string]string{
+			"command":    "printf ok",
+			"timeout_ms": "60000.00000",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(result.Output) != "ok" {
+		t.Fatalf("unexpected bash output: %q", result.Output)
+	}
+	if got := result.Meta["timeout_ms"]; got != "60000" {
+		t.Fatalf("expected normalized timeout metadata, got %q", got)
+	}
+}
+
+func TestBashFractionalTimeoutStillFails(t *testing.T) {
+	dir := t.TempDir()
+	registry := tools.NewRegistry(dir)
+
+	_, err := registry.Execute(context.Background(), tools.Request{
+		Tool: domain.ToolKindBash,
+		Args: map[string]string{
+			"command":    "printf ok",
+			"timeout_ms": "60000.5",
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "timeout_ms must be a positive integer") {
+		t.Fatalf("expected positive integer error, got %v", err)
+	}
+}
