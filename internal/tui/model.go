@@ -1241,7 +1241,7 @@ func (m *Model) applyEvent(evt domain.Event) {
 
 func (m *Model) resize() {
 	sidebarWidth := m.sidebarWidth()
-	bodyWidth := m.width - sidebarWidth - 3
+	bodyWidth := m.width - sidebarWidth
 	if bodyWidth < 20 {
 		bodyWidth = 20
 	}
@@ -1297,7 +1297,7 @@ func (m *Model) transcriptPaneWidth() int {
 		return max(0, m.viewport.Width+2)
 	}
 	sidebarWidth := m.sidebarWidth()
-	bodyWidth := m.width - sidebarWidth - 3
+	bodyWidth := m.width - sidebarWidth
 	if bodyWidth < 20 {
 		bodyWidth = 20
 	}
