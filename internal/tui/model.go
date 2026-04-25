@@ -1361,14 +1361,9 @@ func (m *Model) transcriptPaneHeight() int {
 }
 
 func (m *Model) renderTranscriptPaneElement(transcript ui.Element) ui.Element {
-	return ui.Border{
-		Child:        transcript,
-		Background:   m.palette.ScreenBackground,
-		BorderColor:  m.palette.SidebarBorder,
-		BorderLeft:   true,
-		BorderRight:  true,
-		BorderTop:    true,
-		BorderBottom: true,
+	return ui.Panel{
+		Child:      transcript,
+		Background: m.palette.ScreenBackground,
 	}
 }
 
@@ -1484,6 +1479,7 @@ func (m *Model) renderMainScreenElement() ui.Element {
 		ui.Flex(ui.HBox{
 			Children: []ui.Child{
 				ui.Flex(ui.Inset{Padding: ui.SymmetricInsets(mainScreenVerticalInset, 0), Child: mainColumn}, 1),
+				ui.Fixed(ui.Spacer{W: 1}),
 				ui.Fixed(sidebar),
 			},
 		}, 1),

@@ -3341,7 +3341,7 @@ func TestRenderBodyClipsSidebarToViewportHeight(t *testing.T) {
 	}
 }
 
-func TestRenderBodyShowsTranscriptBorder(t *testing.T) {
+func TestRenderBodyOmitsTranscriptBorder(t *testing.T) {
 	m := Model{
 		palette:  theme.Resolve("tokyonight").Palette,
 		viewport: newTranscriptViewport(38, 6),
@@ -3349,11 +3349,8 @@ func TestRenderBodyShowsTranscriptBorder(t *testing.T) {
 	m.viewport.SetContent("history")
 
 	got := ansi.Strip(m.renderBody())
-	if !strings.Contains(got, "┌") || !strings.Contains(got, "┐") {
-		t.Fatalf("expected transcript top border, got %q", got)
-	}
-	if !strings.Contains(got, "└") || !strings.Contains(got, "┘") {
-		t.Fatalf("expected transcript bottom border, got %q", got)
+	if strings.ContainsAny(got, "┌┐└┘│") {
+		t.Fatalf("expected transcript pane without border, got %q", got)
 	}
 }
 
