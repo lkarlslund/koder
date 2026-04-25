@@ -3241,8 +3241,25 @@ func TestRenderBodyClipsSidebarToViewportHeight(t *testing.T) {
 	m.viewport.SetContent("history")
 
 	got := m.renderBody()
-	if h := lipgloss.Height(got); h != 6 {
-		t.Fatalf("expected body height 6, got %d from %q", h, got)
+	want := m.viewport.Height + (mainScreenVerticalInset * 2) + 2
+	if h := lipgloss.Height(got); h != want {
+		t.Fatalf("expected body height %d, got %d from %q", want, h, got)
+	}
+}
+
+func TestRenderBodyShowsTranscriptBorder(t *testing.T) {
+	m := Model{
+		palette:  theme.Resolve("tokyonight").Palette,
+		viewport: newTranscriptViewport(38, 6),
+	}
+	m.viewport.SetContent("history")
+
+	got := ansi.Strip(m.renderBody())
+	if !strings.Contains(got, "┌") || !strings.Contains(got, "┐") {
+		t.Fatalf("expected transcript top border, got %q", got)
+	}
+	if !strings.Contains(got, "└") || !strings.Contains(got, "┘") {
+		t.Fatalf("expected transcript bottom border, got %q", got)
 	}
 }
 
@@ -3565,7 +3582,7 @@ func TestViewShowsLastUserBubbleLineBeforeComposer(t *testing.T) {
 	if lastBubbleIdx < 0 {
 		t.Fatalf("expected last user bubble line before composer, got:\n%s", strings.Join(viewLines, "\n"))
 	}
-	if composerIdx-lastBubbleIdx > 3 {
+	if composerIdx-lastBubbleIdx > 4 {
 		t.Fatalf("expected user bubble bottom to remain adjacent to composer, got:\n%s", strings.Join(viewLines, "\n"))
 	}
 }

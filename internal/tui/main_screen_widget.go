@@ -214,10 +214,10 @@ func (w *mainScreenWidget) Surface(ctx *ui.Context, bounds ui.Rect) ui.Surface {
 	sidebarSurface := w.sidebar.Surface(ctx, sidebarBounds)
 	statusSurface := w.statusPane.Surface(ctx, statusBounds)
 
-	var transcriptElement ui.Element = ui.Align{
+	var transcriptElement ui.Element = w.model.renderTranscriptPaneElement(ui.Align{
 		Vertical: ui.AlignEnd,
 		Child:    ui.SurfaceBox{Surface: transcriptSurface},
-	}
+	})
 	mainChildren := []ui.Child{
 		ui.Flex(transcriptElement, 1),
 		ui.Fixed(ui.VisibleElement{

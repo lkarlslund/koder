@@ -1250,7 +1250,7 @@ func (m *Model) resize() {
 	if bodyHeight < 5 {
 		bodyHeight = 5
 	}
-	m.viewport.Width = bodyWidth
+	m.viewport.Width = max(0, bodyWidth-2)
 	m.viewport.Height = bodyHeight
 	m.resizeLLMPreview()
 	m.invalidateTranscript()
@@ -1266,15 +1266,18 @@ func (m *Model) renderBodySurface() ui.Surface {
 	height := max(0, m.height)
 	if width <= 0 || height <= 0 {
 		if width <= 0 {
-			width = max(0, m.viewport.Width)
+			width = max(0, m.transcriptPaneWidth())
+			if m.showSidebar {
+				width += m.sidebarWidth() + 1
+			}
 			if width == 0 {
 				width = max(40, m.composerWidth()+m.sidebarWidth()+3)
 			}
 		}
 		if height <= 0 {
-			height = max(0, m.viewport.Height)
+			height = max(0, m.transcriptPaneHeight()+m.composerAreaHeight()+m.statusPaneHeight()+(mainScreenVerticalInset*2))
 			if height == 0 {
-				height = max(6, m.transcriptViewportHeight()+m.composerAreaHeight()+m.statusPaneHeight()+(mainScreenVerticalInset*2))
+				height = max(6, m.transcriptPaneHeight()+m.composerAreaHeight()+m.statusPaneHeight()+(mainScreenVerticalInset*2))
 			}
 		}
 	}
@@ -1286,11 +1289,42 @@ func (m *Model) renderBodyElement() ui.Element {
 }
 
 func (m *Model) transcriptViewportHeight() int {
+	return max(0, m.transcriptPaneHeight()-2)
+}
+
+func (m *Model) transcriptPaneWidth() int {
+	if m.width <= 0 {
+		return max(0, m.viewport.Width+2)
+	}
+	sidebarWidth := m.sidebarWidth()
+	bodyWidth := m.width - sidebarWidth - 3
+	if bodyWidth < 20 {
+		bodyWidth = 20
+	}
+	return bodyWidth
+}
+
+func (m *Model) transcriptPaneHeight() int {
+	if m.height <= 0 {
+		return max(0, m.viewport.Height+2)
+	}
 	height := max(0, m.viewport.Height)
 	if composerHeight := m.composerAreaHeight(); composerHeight > 0 {
 		height -= composerHeight + 1
 	}
 	return max(0, height)
+}
+
+func (m *Model) renderTranscriptPaneElement(transcript ui.Element) ui.Element {
+	return ui.Border{
+		Child:        transcript,
+		Background:   m.palette.ScreenBackground,
+		BorderColor:  m.palette.SidebarBorder,
+		BorderLeft:   true,
+		BorderRight:  true,
+		BorderTop:    true,
+		BorderBottom: true,
+	}
 }
 
 func (m *Model) renderComposerAreaSurface() ui.Surface {
@@ -1387,7 +1421,7 @@ func (m *Model) renderMainScreenElement() ui.Element {
 		transcript = retained
 	}
 	mainChildren := []ui.Child{
-		ui.Flex(transcript, 1),
+		ui.Flex(m.renderTranscriptPaneElement(transcript), 1),
 		ui.Fixed(m.renderComposerAreaElement()),
 	}
 	mainColumn := ui.VBox{Children: mainChildren, Spacing: 1}
