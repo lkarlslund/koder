@@ -148,6 +148,9 @@ func (r ToolRun) visiblePreview(expanded bool) string {
 	if r.Tool == domain.ToolKindRead && !expanded && (r.Status == ToolRunStatusCompleted || r.Status == ToolRunStatusFailed || r.Status == ToolRunStatusDenied) {
 		return ""
 	}
+	if r.Tool == domain.ToolKindEdit && !expanded && (r.Status == ToolRunStatusCompleted || r.Status == ToolRunStatusFailed || r.Status == ToolRunStatusDenied) {
+		return ""
+	}
 	return preview
 }
 

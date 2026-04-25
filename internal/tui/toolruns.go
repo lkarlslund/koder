@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"hash"
 	"hash/fnv"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -303,6 +304,20 @@ func toolRunOutput(parts []domain.Part, msg domain.Message) (ui.ToolRun, bool) {
 		}
 		if strings.TrimSpace(presentation.Subtitle) == "" {
 			presentation.Subtitle = presentation.Preview
+		}
+		switch req.Tool {
+		case domain.ToolKindBash:
+			command := firstNonEmptyString(strings.TrimSpace(req.Args["command"]), strings.TrimSpace(meta["command"]))
+			if command != "" {
+				presentation.Title = "Ran command " + command
+				presentation.Subtitle = ""
+			}
+		case domain.ToolKindEdit:
+			path := firstNonEmptyString(strings.TrimSpace(req.Args["path"]), strings.TrimSpace(meta["path"]))
+			if path != "" {
+				presentation.Title = "Edited file " + filepath.ToSlash(path)
+				presentation.Subtitle = ""
+			}
 		}
 		return ui.ToolRun{
 			ID:         firstNonEmptyString(req.ToolCallID, toolRunFallbackID(req.Tool, presentation.Preview), msg.Summary),

@@ -77,3 +77,23 @@ func TestToolRunCardViewHidesReadPreviewUntilExpanded(t *testing.T) {
 		t.Fatalf("expected expanded read card to show file contents, got %q", expanded)
 	}
 }
+
+func TestToolRunCardViewHidesEditPreviewUntilExpanded(t *testing.T) {
+	palette := theme.Resolve("tokyonight").Palette
+	run := ToolRun{
+		Tool:   domain.ToolKindEdit,
+		Title:  "Edited file game/map.go",
+		Output: "Edited game/map.go (replaced 1 occurrence)\n@@ -12,1 +12,1 @@\n-12 if oldCondition {\n+12 if newCondition {",
+		Status: ToolRunStatusCompleted,
+	}
+
+	collapsed := SurfaceText(run.CardSurface(palette, 80, false))
+	if strings.Contains(collapsed, "@@ -12,1 +12,1 @@") || strings.Contains(collapsed, "replaced 1 occurrence") {
+		t.Fatalf("expected collapsed edit card to hide edit details, got %q", collapsed)
+	}
+
+	expanded := SurfaceText(run.CardSurface(palette, 80, true))
+	if !strings.Contains(expanded, "@@ -12,1 +12,1 @@") || !strings.Contains(expanded, "+12 if newCondition {") {
+		t.Fatalf("expected expanded edit card to show edit details, got %q", expanded)
+	}
+}

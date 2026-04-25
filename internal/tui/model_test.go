@@ -4423,7 +4423,7 @@ func TestEditToolRunShowsStoredHunkDetails(t *testing.T) {
 	m.refreshViewport()
 	got := m.viewport.View()
 	for _, want := range []string{
-		"Edited game/map.go (replaced 1 occurrence)",
+		"Edited file game/map.go",
 		"@@ -12,1 +12,1 @@",
 		"-12 if oldCondition {",
 		"+12 if newCondition {",
@@ -4431,6 +4431,46 @@ func TestEditToolRunShowsStoredHunkDetails(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Fatalf("expected %q in %q", want, got)
 		}
+	}
+}
+
+func TestBashToolRunUsesRanCommandTitleAndCollapsedFirstOutputLine(t *testing.T) {
+	m := Model{
+		currentSession:   domain.Session{ID: 1},
+		viewport:         newTranscriptViewport(100, 8),
+		parts:            map[int64][]domain.Part{},
+		expandedToolRuns: map[string]bool{},
+		palette:          theme.Resolve("tokyonight").Palette,
+	}
+
+	meta := mustMarshalMeta(t, tools.MetaWithStoredResult(map[string]string{
+		"tool":         "bash",
+		"command":      "printf 'line one\\nline two\\n'",
+		"tool_call_id": "call_bash_1",
+	}, domain.PartKindToolOutput, domain.ToolKindBash, tools.StoredResultStatusOK, tools.BashStoredResult{
+		Command: "printf 'line one\\nline two\\n'",
+		Output:  "line one\nline two\n",
+	}))
+
+	m.messages = []domain.Message{
+		{ID: 1, Role: domain.MessageRoleTool, Summary: "bash"},
+	}
+	m.parts[1] = []domain.Part{{
+		Kind:     domain.PartKindToolOutput,
+		Body:     "line one\nline two\n",
+		MetaJSON: meta,
+	}}
+
+	m.refreshViewport()
+	got := m.viewport.View()
+	if !strings.Contains(got, "Ran command printf 'line one\\nline two\\n'") {
+		t.Fatalf("expected bash title to include command, got %q", got)
+	}
+	if !strings.Contains(got, " line one") {
+		t.Fatalf("expected collapsed bash card to show first output line, got %q", got)
+	}
+	if strings.Contains(got, " line two") {
+		t.Fatalf("expected collapsed bash card to hide later output lines, got %q", got)
 	}
 }
 
