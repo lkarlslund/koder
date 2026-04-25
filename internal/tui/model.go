@@ -1028,16 +1028,20 @@ func (m *Model) handleMouse(msg ui.MouseMsg) (ui.Model, ui.Cmd, bool) {
 	if msg.Action != ui.MouseActionPress || msg.Button != ui.MouseButtonLeft {
 		return m, nil, false
 	}
-	if msg.Y < 0 || msg.Y >= m.viewport.Height {
+	paneWidth := m.transcriptPaneWidth()
+	paneHeight := m.transcriptPaneHeight()
+	if msg.Y < 1 || msg.Y >= max(1, paneHeight-1) {
 		return m, nil, false
 	}
-	if msg.X < 1 || msg.X > m.viewport.Width+2 {
+	if msg.X < 1 || msg.X >= max(1, paneWidth-1) {
 		return m, nil, false
 	}
-	row := m.viewport.YOffset + msg.Y
+	contentX := msg.X - 1
+	contentY := msg.Y - 1
+	row := m.viewport.YOffset + contentY
 	for i := len(m.transcriptControls) - 1; i >= 0; i-- {
 		control := m.transcriptControls[i]
-		if !control.Enabled || !control.Rect.Contains(ui.Point{X: max(0, msg.X-1), Y: row}) {
+		if !control.Enabled || !control.Rect.Contains(ui.Point{X: max(0, contentX), Y: row}) {
 			continue
 		}
 		if strings.HasPrefix(control.ID, "toolrun:") {

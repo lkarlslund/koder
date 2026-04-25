@@ -4167,11 +4167,26 @@ func TestMouseClickTogglesToolRunExpansion(t *testing.T) {
 		t.Fatalf("expected expand indicator, got %q", m.viewport.View())
 	}
 
+	_ = m.viewSurface()
+	clickX := -1
+	clickY := -1
+	for _, control := range m.transcriptControls {
+		if control.ID != "toolrun:call_bash_1" {
+			continue
+		}
+		clickX = control.Rect.X + 2
+		clickY = control.Rect.Y - m.viewport.YOffset + 2
+		break
+	}
+	if clickX < 0 || clickY < 0 {
+		t.Fatalf("expected toolrun control to be registered, got %#v", m.transcriptControls)
+	}
+
 	updated, cmd := m.Update(ui.MouseMsg{
 		Action: ui.MouseActionPress,
 		Button: ui.MouseButtonLeft,
-		X:      2,
-		Y:      0,
+		X:      clickX,
+		Y:      clickY,
 	})
 	next := updated.(*Model)
 	if cmd != nil {
@@ -4187,8 +4202,8 @@ func TestMouseClickTogglesToolRunExpansion(t *testing.T) {
 	updated, _ = next.Update(ui.MouseMsg{
 		Action: ui.MouseActionPress,
 		Button: ui.MouseButtonLeft,
-		X:      2,
-		Y:      0,
+		X:      clickX,
+		Y:      clickY,
 	})
 	final := updated.(*Model)
 	if strings.Contains(final.viewport.View(), "line one\nline two") {
