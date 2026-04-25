@@ -23,6 +23,16 @@ koder session tail --id 1 --addr 127.0.0.1:61347
 koder version
 ```
 
+## Build Metadata
+
+For debug API and `koder version` build metadata, build the binary with:
+
+```bash
+scripts/build-koder
+```
+
+That injects version, commit, dirty state, and build time into the binary via Go `-ldflags -X`.
+
 ## Live Debug API
 
 Set `KODER_DEBUG_API` before launching `koder` to expose a read-only local debug API from the running process:

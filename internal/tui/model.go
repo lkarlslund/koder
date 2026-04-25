@@ -35,6 +35,7 @@ import (
 	"github.com/lkarlslund/koder/internal/tui/dialogs"
 	"github.com/lkarlslund/koder/internal/ui"
 	"github.com/lkarlslund/koder/internal/ui/textarea"
+	"github.com/lkarlslund/koder/internal/version"
 	"github.com/lkarlslund/koder/internal/workspace"
 )
 
@@ -1271,14 +1272,6 @@ func (m *Model) renderBodySurface() ui.Surface {
 
 func (m *Model) renderBodyElement() ui.Element {
 	return m.renderMainScreenElement()
-}
-
-func (m *Model) transcriptActivityHeight() int {
-	element := m.renderTranscriptActivityElement()
-	if element == nil {
-		return 0
-	}
-	return element.Measure(&ui.Context{Palette: m.palette}, ui.NewConstraints(max(0, m.viewport.Width), 0)).H
 }
 
 func (m *Model) transcriptViewportHeight() int {
@@ -3501,6 +3494,7 @@ func (m Model) syncDebugRuntime() {
 	renderedBlocks := len(m.messages)
 	m.debug.UpdateRuntime(debugsrv.RuntimeSnapshot{
 		DebugAPI:           m.debugAPIAddr(),
+		Build:              version.Current(),
 		CurrentSession:     m.currentSession.ID,
 		SessionTitle:       strings.TrimSpace(m.currentSession.Title),
 		ProviderID:         strings.TrimSpace(m.currentSession.ProviderID),

@@ -14,6 +14,7 @@ import (
 
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/store"
+	"github.com/lkarlslund/koder/internal/version"
 )
 
 const (
@@ -50,27 +51,28 @@ type HTTPTrace struct {
 }
 
 type RuntimeSnapshot struct {
-	Timestamp          time.Time `json:"timestamp"`
-	DebugAPI           string    `json:"debug_api"`
-	CurrentSession     int64     `json:"current_session"`
-	SessionTitle       string    `json:"session_title"`
-	ProviderID         string    `json:"provider_id"`
-	ModelID            string    `json:"model_id"`
-	Status             string    `json:"status"`
-	Busy               bool      `json:"busy"`
-	BusyStatus         string    `json:"busy_status,omitempty"`
-	OpenDialog         string    `json:"open_dialog,omitempty"`
-	ShowSidebar        bool      `json:"show_sidebar"`
-	ShowReasoning      bool      `json:"show_reasoning"`
-	ShowSystem         bool      `json:"show_system"`
-	LastError          string    `json:"last_error,omitempty"`
-	ViewportWidth      int       `json:"viewport_width"`
-	ViewportHeight     int       `json:"viewport_height"`
-	ViewportYOffset    int       `json:"viewport_y_offset"`
-	MessageCount       int       `json:"message_count"`
-	RenderBlockCount   int       `json:"render_block_count"`
-	ViewportPreview    string    `json:"viewport_preview,omitempty"`
-	ViewportContentLen int       `json:"viewport_content_len"`
+	Timestamp          time.Time    `json:"timestamp"`
+	DebugAPI           string       `json:"debug_api"`
+	Build              version.Info `json:"build"`
+	CurrentSession     int64        `json:"current_session"`
+	SessionTitle       string       `json:"session_title"`
+	ProviderID         string       `json:"provider_id"`
+	ModelID            string       `json:"model_id"`
+	Status             string       `json:"status"`
+	Busy               bool         `json:"busy"`
+	BusyStatus         string       `json:"busy_status,omitempty"`
+	OpenDialog         string       `json:"open_dialog,omitempty"`
+	ShowSidebar        bool         `json:"show_sidebar"`
+	ShowReasoning      bool         `json:"show_reasoning"`
+	ShowSystem         bool         `json:"show_system"`
+	LastError          string       `json:"last_error,omitempty"`
+	ViewportWidth      int          `json:"viewport_width"`
+	ViewportHeight     int          `json:"viewport_height"`
+	ViewportYOffset    int          `json:"viewport_y_offset"`
+	MessageCount       int          `json:"message_count"`
+	RenderBlockCount   int          `json:"render_block_count"`
+	ViewportPreview    string       `json:"viewport_preview,omitempty"`
+	ViewportContentLen int          `json:"viewport_content_len"`
 }
 
 type Recorder struct {
@@ -184,6 +186,9 @@ func (r *Recorder) UpdateRuntime(snapshot RuntimeSnapshot) {
 	}
 	if snapshot.LastError == "" {
 		snapshot.LastError = r.runtime.LastError
+	}
+	if snapshot.Build.Name == "" {
+		snapshot.Build = version.Current()
 	}
 	r.runtime = snapshot
 }

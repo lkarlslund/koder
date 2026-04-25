@@ -173,7 +173,12 @@ func newVersionCommand() *cobra.Command {
 		Use:   "version",
 		Short: "Print version",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			fmt.Fprintf(cmd.OutOrStdout(), "%s %s\n", version.Name, version.Version)
+			info := version.Current()
+			fmt.Fprintf(cmd.OutOrStdout(), "%s %s\n", info.Name, info.Version)
+			fmt.Fprintf(cmd.OutOrStdout(), "commit: %s\n", info.Commit)
+			fmt.Fprintf(cmd.OutOrStdout(), "dirty: %s\n", info.Dirty)
+			fmt.Fprintf(cmd.OutOrStdout(), "build_time: %s\n", info.BuildTime)
+			fmt.Fprintf(cmd.OutOrStdout(), "go_version: %s\n", info.GoVersion)
 			return nil
 		},
 	}

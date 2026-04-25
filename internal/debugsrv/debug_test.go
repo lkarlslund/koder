@@ -10,6 +10,7 @@ import (
 
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/store"
+	"github.com/lkarlslund/koder/internal/version"
 )
 
 func TestRecorderTracksSessionEventsAndRuntime(t *testing.T) {
@@ -29,6 +30,9 @@ func TestRecorderTracksSessionEventsAndRuntime(t *testing.T) {
 	}
 	if rec.Runtime().ViewportWidth != 80 || rec.Runtime().MessageCount != 2 {
 		t.Fatalf("expected runtime viewport details, got %#v", rec.Runtime())
+	}
+	if rec.Runtime().Build.Version != version.Version {
+		t.Fatalf("expected runtime build version %q, got %#v", version.Version, rec.Runtime().Build)
 	}
 }
 
