@@ -41,6 +41,39 @@ func TestListModels(t *testing.T) {
 	}
 }
 
+func TestSerializePromptEnvelopeCollapsesInstructionsIntoSingleSystemMessage(t *testing.T) {
+	env := PromptEnvelope{
+		Instructions: []InstructionBlock{
+			{Kind: InstructionKindBaseSystem, Text: "Base prompt"},
+			{Kind: InstructionKindProjectInstructions, Text: "Project instructions"},
+			{Kind: InstructionKindSkills, Text: "Skills"},
+			{Kind: InstructionKindSessionNote, Text: "Session update:\nPermission mode changed", Ephemeral: true},
+		},
+		Items: []Message{
+			{Role: domain.MessageRoleUser, Content: "hello"},
+		},
+	}
+
+	got := SerializePromptEnvelope(env)
+	if len(got) != 2 {
+		t.Fatalf("expected one system message plus user item, got %#v", got)
+	}
+	if got[0].Role != domain.MessageRoleSystem {
+		t.Fatalf("expected leading system message, got %#v", got)
+	}
+	if strings.Contains(got[0].Content, "\n\n\n") {
+		t.Fatalf("expected normalized system join, got %q", got[0].Content)
+	}
+	for _, want := range []string{"Base prompt", "Project instructions", "Skills", "Session update:\nPermission mode changed"} {
+		if !strings.Contains(got[0].Content, want) {
+			t.Fatalf("expected %q in joined system prompt, got %q", want, got[0].Content)
+		}
+	}
+	if got[1].Role != domain.MessageRoleUser || got[1].Content != "hello" {
+		t.Fatalf("unexpected trailing item: %#v", got[1])
+	}
+}
+
 func TestPropsUsesModelQueryAndParsesContextWindow(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/props" {

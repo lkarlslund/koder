@@ -385,7 +385,7 @@ func (e *Engine) persistUserPrompt(ctx context.Context, session domain.Session, 
 	return userMsg, nil
 }
 
-func (e *Engine) continueModelTurn(ctx context.Context, session domain.Session, client *provider.Client, out chan<- domain.Event, transient []provider.Message) error {
+func (e *Engine) continueModelTurn(ctx context.Context, session domain.Session, client *provider.Client, out chan<- domain.Event, transient []provider.InstructionBlock) error {
 	tracker := toolLoopTracker{}
 	for steps := 0; steps < e.maxToolLoopSteps(); steps++ {
 		e.recordLifecycle(session.ID, "model_turn_started", "", map[string]string{"step": strconv.Itoa(steps + 1)})
@@ -808,7 +808,7 @@ func (e *Engine) approve(ctx context.Context, sessionID int64, rawID string) (<-
 				return
 			}
 		}
-		var transient []provider.Message
+		var transient []provider.InstructionBlock
 		if compacted {
 			transient = transientTurnMessages("", "Continue from the compacted session summary. Do not restart, greet, or restate the summary. Continue the pending task from the latest tool result.")
 		}
@@ -1178,38 +1178,22 @@ func roundRetryDelay(delay time.Duration) time.Duration {
 	return delay
 }
 
-func transientTurnMessages(note string, continuePrompt string) []provider.Message {
-	var out []provider.Message
+func transientTurnMessages(note string, continuePrompt string) []provider.InstructionBlock {
+	var out []provider.InstructionBlock
 	if strings.TrimSpace(note) != "" {
-		out = append(out, provider.Message{
-			Role:    domain.MessageRoleSystem,
-			Content: "Session update:\n" + strings.TrimSpace(note),
+		out = append(out, provider.InstructionBlock{
+			Kind:      provider.InstructionKindSessionNote,
+			Text:      "Session update:\n" + strings.TrimSpace(note),
+			Ephemeral: true,
 		})
 	}
 	if strings.TrimSpace(continuePrompt) != "" {
-		out = append(out, provider.Message{
-			Role:    domain.MessageRoleUser,
-			Content: strings.TrimSpace(continuePrompt),
+		out = append(out, provider.InstructionBlock{
+			Kind:      provider.InstructionKindContinuation,
+			Text:      strings.TrimSpace(continuePrompt),
+			Ephemeral: true,
 		})
 	}
-	return out
-}
-
-func injectTransientMessages(messages []provider.Message, transient []provider.Message) []provider.Message {
-	if len(transient) == 0 {
-		return messages
-	}
-	insertAt := len(messages)
-	for idx := len(messages) - 1; idx >= 0; idx-- {
-		if messages[idx].Role == domain.MessageRoleUser {
-			insertAt = idx
-			break
-		}
-	}
-	out := make([]provider.Message, 0, len(messages)+len(transient))
-	out = append(out, messages[:insertAt]...)
-	out = append(out, transient...)
-	out = append(out, messages[insertAt:]...)
 	return out
 }
 
@@ -1221,56 +1205,67 @@ func (e *Engine) buildConversation(ctx context.Context, sessionID int64) ([]prov
 	return e.buildConversationPreview(ctx, session, "", nil, nil, nil)
 }
 
-func (e *Engine) buildConversationPreview(ctx context.Context, session domain.Session, prompt string, drafts []attachment.Draft, refs []reference.Draft, transient []provider.Message) ([]provider.Message, error) {
-	conversation := e.baseConversation(session)
+func (e *Engine) buildConversationPreview(ctx context.Context, session domain.Session, prompt string, drafts []attachment.Draft, refs []reference.Draft, transient []provider.InstructionBlock) ([]provider.Message, error) {
+	envelope, err := e.buildPromptEnvelopePreview(ctx, session, prompt, drafts, refs, transient)
+	if err != nil {
+		return nil, err
+	}
+	return provider.SerializePromptEnvelope(envelope), nil
+}
+
+func (e *Engine) buildPromptEnvelopePreview(ctx context.Context, session domain.Session, prompt string, drafts []attachment.Draft, refs []reference.Draft, transient []provider.InstructionBlock) (provider.PromptEnvelope, error) {
+	envelope := provider.PromptEnvelope{
+		Instructions: e.baseInstructions(session),
+	}
 	if session.ID > 0 {
 		messages, partsByMessage, err := e.store.PartsForSession(ctx, session.ID)
 		if err != nil {
-			return nil, err
+			return provider.PromptEnvelope{}, err
 		}
 		for _, msg := range messages {
 			if summary, ok := compactionSummary(partsByMessage[msg.ID]); ok {
-				conversation = e.baseConversation(session)
-				conversation = append(conversation, compactedHistoryMessage(summary))
+				envelope.Instructions = e.baseInstructions(session)
+				envelope.Items = append(envelope.Items[:0], compactedHistoryMessage(summary))
 				continue
 			}
 			items, err := e.conversationMessagesForStoredMessage(msg, partsByMessage[msg.ID])
 			if err != nil {
-				return nil, err
+				return provider.PromptEnvelope{}, err
 			}
-			conversation = append(conversation, items...)
+			envelope.Items = append(envelope.Items, items...)
 		}
 	}
-	conversation = injectTransientMessages(conversation, transient)
+	envelope.Instructions = append(envelope.Instructions, transient...)
 	if strings.TrimSpace(prompt) != "" || len(drafts) > 0 {
 		msg, ok, err := e.previewUserMessage(prompt, drafts, refs)
 		if err != nil {
-			return nil, err
+			return provider.PromptEnvelope{}, err
 		}
 		if ok {
-			conversation = append(conversation, msg)
+			envelope.Items = append(envelope.Items, msg)
 		}
 	}
-	return conversation, nil
+	return envelope, nil
 }
 
-func (e *Engine) baseConversation(session domain.Session) []provider.Message {
-	conversation := []provider.Message{
-		{Role: domain.MessageRoleSystem, Content: systemPrompt()},
-	}
+func (e *Engine) baseInstructions(session domain.Session) []provider.InstructionBlock {
+	instructions := []provider.InstructionBlock{{
+		Kind: provider.InstructionKindBaseSystem,
+		Text: systemPrompt(),
+	}}
 	if agentsText := strings.TrimSpace(session.AgentsResolved); agentsText != "" {
-		conversation = append(conversation, provider.Message{
-			Role:    domain.MessageRoleSystem,
-			Content: "Resolved project AGENTS.md instructions:\n" + agentsText,
+		instructions = append(instructions, provider.InstructionBlock{
+			Kind: provider.InstructionKindProjectInstructions,
+			Text: "Resolved project AGENTS.md instructions:\n" + agentsText,
 		})
 	}
 	if skillText := strings.TrimSpace(skills.PromptContext(e.workdir)); skillText != "" {
-		conversation = append(conversation, provider.Message{
-			Role:    domain.MessageRoleSystem,
-			Content: skillText,
+		instructions = append(instructions, provider.InstructionBlock{
+			Kind: provider.InstructionKindSkills,
+			Text: skillText,
 		})
 	}
-	return conversation
+	return instructions
 }
 
 func compactedHistoryMessage(summary string) provider.Message {

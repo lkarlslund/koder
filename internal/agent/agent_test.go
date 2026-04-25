@@ -319,11 +319,14 @@ func TestBuildConversationIncludesSkillPromptContext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(conversation) < 2 {
-		t.Fatalf("expected system prompt and skill prompt, got %#v", conversation)
+	if len(conversation) < 1 {
+		t.Fatalf("expected system prompt, got %#v", conversation)
 	}
-	if !strings.Contains(conversation[1].Content, "$skill-name") || !strings.Contains(conversation[1].Content, "<name>review</name>") {
-		t.Fatalf("expected skill prompt context in conversation, got %#v", conversation[1])
+	if conversation[0].Role != domain.MessageRoleSystem {
+		t.Fatalf("expected leading system prompt, got %#v", conversation)
+	}
+	if !strings.Contains(conversation[0].Content, "$skill-name") || !strings.Contains(conversation[0].Content, "<name>review</name>") {
+		t.Fatalf("expected skill prompt context in joined system prompt, got %#v", conversation[0])
 	}
 }
 
@@ -525,8 +528,8 @@ func TestPreviewNextRequestIncludesUnsentDraftMessage(t *testing.T) {
 	if req.Model != "test-model" {
 		t.Fatalf("expected model in preview request, got %#v", req)
 	}
-	if len(req.Messages) < 4 {
-		t.Fatalf("expected system, note, saved prompt, and unsent draft, got %#v", req.Messages)
+	if len(req.Messages) != 3 {
+		t.Fatalf("expected single system prompt plus saved prompt and unsent draft, got %#v", req.Messages)
 	}
 	last := req.Messages[len(req.Messages)-1]
 	if last.Role != domain.MessageRoleUser || last.Content != "unsent draft" {
@@ -535,8 +538,65 @@ func TestPreviewNextRequestIncludesUnsentDraftMessage(t *testing.T) {
 	if req.Messages[len(req.Messages)-2].Content != "saved prompt" {
 		t.Fatalf("expected stored conversation before draft, got %#v", req.Messages)
 	}
-	if !strings.Contains(req.Messages[len(req.Messages)-3].Content, "Permission mode changed") {
-		t.Fatalf("expected transient note before draft, got %#v", req.Messages)
+	if req.Messages[0].Role != domain.MessageRoleSystem || !strings.Contains(req.Messages[0].Content, "Permission mode changed") {
+		t.Fatalf("expected transient note folded into leading system prompt, got %#v", req.Messages)
+	}
+	if got := strings.Count(req.Messages[0].Content, "Session update:\nPermission mode changed"); got != 1 {
+		t.Fatalf("expected exactly one session update block in system prompt, got %q", req.Messages[0].Content)
+	}
+}
+
+func TestPreviewNextRequestUsesSingleLeadingSystemMessage(t *testing.T) {
+	cfg := testConfig(t)
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	repo := filepath.Join(t.TempDir(), "repo")
+	if err := os.MkdirAll(filepath.Join(repo, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	skillPath := filepath.Join(repo, ".agents", "skills", "review", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(skillPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(skillPath, []byte("---\nname: review\ndescription: Review code carefully\n---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	engine := New(cfg, st, tools.NewRegistry(repo), nil, repo)
+	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	session.AgentsResolved = "Follow repository instructions."
+
+	req, err := engine.PreviewNextRequest(context.Background(), session, "what's in this folder?", nil, nil, "Permission mode changed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(req.Messages) != 2 {
+		t.Fatalf("expected one system and one user message, got %#v", req.Messages)
+	}
+	if req.Messages[0].Role != domain.MessageRoleSystem {
+		t.Fatalf("expected leading system message, got %#v", req.Messages)
+	}
+	if req.Messages[1].Role != domain.MessageRoleUser {
+		t.Fatalf("expected trailing user message, got %#v", req.Messages)
+	}
+	for _, want := range []string{
+		"You are koder, a terminal coding agent.",
+		"Resolved project AGENTS.md instructions:\nFollow repository instructions.",
+		"$skill-name",
+		"Session update:\nPermission mode changed",
+	} {
+		if !strings.Contains(req.Messages[0].Content, want) {
+			t.Fatalf("expected %q in leading system message, got %q", want, req.Messages[0].Content)
+		}
 	}
 }
 
