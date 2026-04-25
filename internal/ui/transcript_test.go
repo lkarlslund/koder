@@ -64,6 +64,26 @@ func TestUserMessageFillsEntireRowBackground(t *testing.T) {
 	}
 }
 
+func TestUserMessageHalfBlocksKeepAccentTopAndBottomRows(t *testing.T) {
+	palette := theme.Resolve("tokyonight").Palette
+	surface := NewUserMessage(UserMessageProps{
+		Palette:     palette,
+		Body:        "hello",
+		Width:       12,
+		HalfBlocks:  true,
+		PromptGlyph: "┃",
+	}).Render(&Context{Palette: palette}, Rect{W: 12, H: 3})
+
+	top := surface.Lines()[0]
+	bottom := surface.Lines()[2]
+	if !strings.Contains(top, "▄") {
+		t.Fatalf("expected half-block accent on top row, got %q", top)
+	}
+	if !strings.Contains(bottom, "▀") {
+		t.Fatalf("expected half-block accent on bottom row, got %q", bottom)
+	}
+}
+
 func TestRetainedTranscriptMaintainsChildItems(t *testing.T) {
 	transcript := NewRetainedTranscript()
 	transcript.Add(TranscriptItem{Element: Paragraph{Text: "first"}})

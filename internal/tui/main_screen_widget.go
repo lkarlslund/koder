@@ -37,10 +37,18 @@ func (w *transcriptWidget) Surface(_ *ui.Context, bounds ui.Rect) ui.Surface {
 		return w.surface
 	}
 	retained := w.model.syncRetainedTranscript()
-	surface := w.model.viewport.VisibleSurface().Normalize(max(0, bounds.W), max(0, bounds.H))
+	raw := w.model.viewport.VisibleSurface()
+	surface := raw.Normalize(max(0, bounds.W), max(0, bounds.H))
 	if retained != nil {
-		rendered, _, _ := retained.RenderVisible(&ui.Context{Palette: w.model.palette}, max(0, bounds.W), max(0, bounds.H), max(0, w.model.viewport.YOffset))
-		surface = rendered
+		if raw.SurfaceWidth() != max(0, bounds.W) || raw.SurfaceHeight() != max(0, bounds.H) {
+			rendered, _, _ := retained.RenderVisible(&ui.Context{Palette: w.model.palette}, max(0, bounds.W), max(0, bounds.H), max(0, w.model.viewport.YOffset))
+			surface = rendered
+		} else {
+			// Keep the already-computed viewport surface from refreshViewport* so
+			// the cached widget cannot drift from the model's chosen alignment.
+			// Re-render retained content only to refresh runtime controls for this frame.
+			_, _, _ = retained.RenderVisible(&ui.Context{Palette: w.model.palette}, max(0, bounds.W), max(0, bounds.H), max(0, w.model.viewport.YOffset))
+		}
 	}
 	w.bounds = bounds
 	w.surface = surface
@@ -206,7 +214,10 @@ func (w *mainScreenWidget) Surface(ctx *ui.Context, bounds ui.Rect) ui.Surface {
 	sidebarSurface := w.sidebar.Surface(ctx, sidebarBounds)
 	statusSurface := w.statusPane.Surface(ctx, statusBounds)
 
-	var transcriptElement ui.Element = ui.SurfaceBox{Surface: transcriptSurface}
+	var transcriptElement ui.Element = ui.Align{
+		Vertical: ui.AlignEnd,
+		Child:    ui.SurfaceBox{Surface: transcriptSurface},
+	}
 	mainChildren := []ui.Child{
 		ui.Flex(transcriptElement, 1),
 		ui.Fixed(ui.VisibleElement{

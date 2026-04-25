@@ -3531,6 +3531,45 @@ func TestViewDoesNotLeaveLargeGapBetweenTranscriptAndComposer(t *testing.T) {
 	}
 }
 
+func TestViewShowsLastUserBubbleLineBeforeComposer(t *testing.T) {
+	composer := textarea.New()
+	composer.Placeholder = "Ask koder or type / for commands"
+	composer.SetHeight(composerInputHeight)
+	composer.Focus()
+
+	m := Model{
+		cfg:            testConfig(t),
+		palette:        theme.Resolve("tokyonight").Palette,
+		width:          40,
+		height:         10,
+		composer:       composer,
+		currentSession: domain.Session{ID: 1},
+		messages: []domain.Message{
+			{ID: 1, Role: domain.MessageRoleUser},
+		},
+		parts: map[int64][]domain.Part{
+			1: {{Kind: domain.PartKindText, Body: "final line"}},
+		},
+		viewport: newTranscriptViewport(37, 6),
+	}
+
+	m.resize()
+	m.refreshViewport()
+
+	viewLines := strings.Split(strings.Join(m.viewSurface().Lines(), "\n"), "\n")
+	composerIdx := indexOfTrimmedLineContaining(viewLines, "Ask koder or type / for commands")
+	if composerIdx < 0 {
+		t.Fatalf("expected composer in rendered view, got:\n%s", strings.Join(viewLines, "\n"))
+	}
+	lastBubbleIdx := lastIndexOfTrimmedLineContaining(viewLines[:composerIdx], "▀")
+	if lastBubbleIdx < 0 {
+		t.Fatalf("expected last user bubble line before composer, got:\n%s", strings.Join(viewLines, "\n"))
+	}
+	if composerIdx-lastBubbleIdx > 3 {
+		t.Fatalf("expected user bubble bottom to remain adjacent to composer, got:\n%s", strings.Join(viewLines, "\n"))
+	}
+}
+
 func indexOfTrimmedLine(lines []string, want string) int {
 	for idx, line := range lines {
 		if strings.Contains(strings.TrimRight(ansi.Strip(line), " "), want) {
@@ -3543,6 +3582,15 @@ func indexOfTrimmedLine(lines []string, want string) int {
 func indexOfTrimmedLineContaining(lines []string, want string) int {
 	for idx, line := range lines {
 		if strings.Contains(strings.TrimRight(ansi.Strip(line), " "), want) {
+			return idx
+		}
+	}
+	return -1
+}
+
+func lastIndexOfTrimmedLineContaining(lines []string, want string) int {
+	for idx := len(lines) - 1; idx >= 0; idx-- {
+		if strings.Contains(strings.TrimRight(ansi.Strip(lines[idx]), " "), want) {
 			return idx
 		}
 	}

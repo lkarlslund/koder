@@ -204,6 +204,10 @@ func (t *RetainedTranscript) RenderVisible(ctx *Context, width, height, offset i
 	maxOffset := max(0, totalHeight-max(0, height))
 	offset = min(max(0, offset), maxOffset)
 	base := BlankSurface(width, height)
+	startY := 0
+	if offset >= maxOffset {
+		startY = max(0, height-totalHeight)
+	}
 	y := 0
 	for _, item := range t.items {
 		gap := max(0, item.GapBefore)
@@ -218,7 +222,7 @@ func (t *RetainedTranscript) RenderVisible(ctx *Context, width, height, offset i
 		if exactHeight <= 0 {
 			continue
 		}
-		renderY := top - offset
+		renderY := startY + top - offset
 		base = base.placeAt(0, renderY, surface)
 	}
 	return base, totalHeight, offset
@@ -230,8 +234,23 @@ func (t *RetainedTranscript) RenderBottom(ctx *Context, width, height int) (Surf
 	}
 	totalHeight := t.exactContentHeight(ctx, width)
 	offset := max(0, totalHeight-max(0, height))
-	surface, _, _ := t.RenderVisible(ctx, width, height, offset)
-	return surface, totalHeight, offset
+	base := BlankSurface(width, height)
+	startY := max(0, height-totalHeight)
+	y := 0
+	for _, item := range t.items {
+		gap := max(0, item.GapBefore)
+		top := y + gap
+		surface := t.itemSurface(ctx, item, width)
+		exactHeight := surface.Size().H
+		bottom := top + exactHeight
+		y = bottom
+		if item.Element == nil || exactHeight <= 0 || bottom <= offset || top >= offset+height {
+			continue
+		}
+		renderY := startY + top - offset
+		base = base.placeAt(0, renderY, surface)
+	}
+	return base, totalHeight, offset
 }
 
 func (t *RetainedTranscript) exactContentHeight(ctx *Context, width int) int {
