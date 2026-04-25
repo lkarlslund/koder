@@ -952,9 +952,8 @@ func (c Column) Render(ctx *Context, bounds Rect) Surface {
 		}
 		slotH := max(0, item.main)
 		slotW := bounds.W
-		childSize := item.child.Element.Measure(ctx, Constraints{MaxW: slotW, MaxH: slotH})
-		childW := item.box.constrained(AxisHorizontal, min(slotW, childSize.W))
-		childH := item.box.constrained(AxisVertical, min(slotH, childSize.H))
+		childW := item.box.constrained(AxisHorizontal, slotW)
+		childH := item.box.constrained(AxisVertical, slotH)
 		x := alignedOffset(item.box.HAlign, slotW, childW)
 		dy := alignedOffset(item.box.VAlign, slotH, childH)
 		childSurface := item.child.Element.Render(ctx, Rect{
@@ -1000,9 +999,8 @@ func (r Row) Render(ctx *Context, bounds Rect) Surface {
 		}
 		slotW := max(0, item.main)
 		slotH := bounds.H
-		childSize := item.child.Element.Measure(ctx, Constraints{MaxW: slotW, MaxH: slotH})
-		childW := item.box.constrained(AxisHorizontal, min(slotW, childSize.W))
-		childH := item.box.constrained(AxisVertical, min(slotH, childSize.H))
+		childW := item.box.constrained(AxisHorizontal, slotW)
+		childH := item.box.constrained(AxisVertical, slotH)
 		dx := alignedOffset(item.box.HAlign, slotW, childW)
 		y := alignedOffset(item.box.VAlign, slotH, childH)
 		childSurface := item.child.Element.Render(ctx, Rect{

@@ -5,6 +5,30 @@ import (
 	"testing"
 )
 
+type fillBox struct {
+	BoxProps
+	mark string
+}
+
+func (f fillBox) Box() BoxProps {
+	return f.BoxProps
+}
+
+func (f fillBox) Measure(_ *Context, constraints Constraints) Size {
+	return constraints.Clamp(Size{W: 1, H: 1})
+}
+
+func (f fillBox) Render(_ *Context, bounds Rect) Surface {
+	if f.mark == "" {
+		f.mark = "x"
+	}
+	surface := BlankSurface(max(1, bounds.W), max(1, bounds.H))
+	for y := 0; y < max(1, bounds.H); y++ {
+		surface.WriteText(0, y, strings.Repeat(f.mark, max(1, bounds.W)), CellStyle{})
+	}
+	return surface.normalize(bounds.W, bounds.H)
+}
+
 func TestRowRenderPlacesChildrenHorizontally(t *testing.T) {
 	got := RenderElement(nil, Row{
 		Children: []Child{
@@ -30,6 +54,103 @@ func TestColumnRenderPlacesChildrenVertically(t *testing.T) {
 
 	if got != "A\n \nB" {
 		t.Fatalf("unexpected column render: %q", got)
+	}
+}
+
+func TestVBoxFlexChildFillsAllocatedHeight(t *testing.T) {
+	got := RenderElement(nil, VBox{
+		Children: []Child{
+			Flex(fillBox{mark: "A"}, 1),
+			Fixed(Static{Content: "B"}),
+		},
+		Spacing: 1,
+	}, 4, 5)
+
+	if got != "AAAA\nAAAA\nAAAA\n    \nB   " {
+		t.Fatalf("expected flex child to fill remaining height, got %q", got)
+	}
+}
+
+func TestHBoxFlexChildFillsAllocatedWidth(t *testing.T) {
+	got := RenderElement(nil, HBox{
+		Children: []Child{
+			Flex(fillBox{mark: "A"}, 1),
+			Fixed(Static{Content: "B"}),
+		},
+		Spacing: 1,
+	}, 5, 2)
+
+	if got != "AAA B\nAAA  " {
+		t.Fatalf("expected flex child to fill remaining width, got %q", got)
+	}
+}
+
+func TestVBoxFlexChildrenShareHeightEquallyByDefault(t *testing.T) {
+	got := RenderElement(nil, VBox{
+		Children: []Child{
+			Flex(fillBox{mark: "A"}, 1),
+			Flex(fillBox{mark: "B"}, 1),
+		},
+	}, 2, 4)
+
+	if got != "AA\nAA\nBB\nBB" {
+		t.Fatalf("expected equal-height sharing for equal flex weights, got %q", got)
+	}
+}
+
+func TestHBoxFlexChildrenShareWidthEquallyByDefault(t *testing.T) {
+	got := RenderElement(nil, HBox{
+		Children: []Child{
+			Flex(fillBox{mark: "A"}, 1),
+			Flex(fillBox{mark: "B"}, 1),
+		},
+	}, 4, 1)
+
+	if got != "AABB" {
+		t.Fatalf("expected equal-width sharing for equal flex weights, got %q", got)
+	}
+}
+
+func TestHBoxFlexChildrenRespectShareWeights(t *testing.T) {
+	got := RenderElement(nil, HBox{
+		Children: []Child{
+			Flex(fillBox{mark: "A"}, 1),
+			Flex(fillBox{mark: "B"}, 2),
+		},
+	}, 6, 1)
+
+	if got != "AABBBB" {
+		t.Fatalf("expected weighted width sharing, got %q", got)
+	}
+}
+
+func TestVBoxAlignmentCanOptOutOfFill(t *testing.T) {
+	got := RenderElement(nil, VBox{
+		Children: []Child{
+			Flex(VisibleElement{
+				BoxProps: BoxProps{VAlign: AlignCenter},
+				Child:    Static{Content: "A"},
+			}, 1),
+		},
+	}, 3, 3)
+
+	if got != "   \nA  \n   " {
+		t.Fatalf("expected aligned child to render smaller than slot, got %q", got)
+	}
+}
+
+func TestHBoxMaxWidthCanOptOutOfFill(t *testing.T) {
+	got := RenderElement(nil, HBox{
+		Children: []Child{
+			Flex(fillBox{
+				BoxProps: BoxProps{MaxW: 2},
+				mark:     "A",
+			}, 1),
+		},
+	}, 4, 1)
+
+	if got != "AA  " {
+		t.Fatalf("expected max width to cap child render width, got %q", got)
 	}
 }
 

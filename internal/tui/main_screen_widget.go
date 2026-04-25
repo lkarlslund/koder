@@ -206,20 +206,11 @@ func (w *mainScreenWidget) Surface(ctx *ui.Context, bounds ui.Rect) ui.Surface {
 	sidebarSurface := w.sidebar.Surface(ctx, sidebarBounds)
 	statusSurface := w.statusPane.Surface(ctx, statusBounds)
 
-	var transcriptElement ui.Element = ui.Constrained{
-		Constraints: ui.Constraints{
-			MinW: transcriptBounds.W,
-			MaxW: transcriptBounds.W,
-			MinH: transcriptBounds.H,
-			MaxH: transcriptBounds.H,
-		},
-		Child: ui.SurfaceBox{Surface: transcriptSurface},
-	}
-	transcriptElement = w.model.layoutDebugPane(transcriptElement, "#1f3347")
+	var transcriptElement ui.Element = ui.SurfaceBox{Surface: transcriptSurface}
 	mainChildren := []ui.Child{
 		ui.Flex(transcriptElement, 1),
 		ui.Fixed(ui.VisibleElement{
-			Child: w.model.layoutDebugPane(ui.SurfaceBox{Surface: composerSurface}, "#3a243f"),
+			Child: ui.SurfaceBox{Surface: composerSurface},
 			BoxProps: ui.BoxProps{
 				Hidden: composerSurface.Size().H == 0,
 			},
@@ -230,17 +221,17 @@ func (w *mainScreenWidget) Surface(ctx *ui.Context, bounds ui.Rect) ui.Surface {
 		BoxProps: ui.BoxProps{
 			Hidden: !w.model.showSidebar || sidebarSurface.Size().W == 0,
 		},
-		Child: w.model.layoutDebugPane(ui.SurfaceBox{Surface: sidebarSurface}, "#3d3320"),
+		Child: ui.SurfaceBox{Surface: sidebarSurface},
 	}
 	rootChildren := []ui.Child{
 		ui.Flex(ui.HBox{
 			Children: []ui.Child{
-				ui.Flex(w.model.layoutDebugPane(ui.Inset{Padding: ui.SymmetricInsets(mainScreenVerticalInset, 0), Child: mainColumn}, "#16222d"), 1),
+				ui.Flex(ui.Inset{Padding: ui.SymmetricInsets(mainScreenVerticalInset, 0), Child: mainColumn}, 1),
 				ui.Fixed(sidebarElement),
 			},
 		}, 1),
 		ui.Fixed(ui.VisibleElement{
-			Child: w.model.layoutDebugPane(ui.SurfaceBox{Surface: statusSurface}, "#24351f"),
+			Child: ui.SurfaceBox{Surface: statusSurface},
 			BoxProps: ui.BoxProps{
 				Hidden: statusSurface.Size().H == 0,
 			},
