@@ -94,6 +94,53 @@ func TestDetectContextWindowUsesLlamaCPPProps(t *testing.T) {
 	}
 }
 
+func TestDetectContextWindowUsesCompatibleLocalPropsWithoutV1(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/props" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		if got := r.URL.Query().Get("model"); got != "model-a" {
+			t.Fatalf("unexpected model query: %q", got)
+		}
+		_, _ = w.Write([]byte(`{"default_generation_settings":{"n_ctx":65536}}`))
+	}))
+	defer server.Close()
+
+	got, err := DetectContextWindow(context.Background(), "openai-compatible", config.Provider{
+		Kind:       ProviderKindCompatible,
+		AuthMethod: string(AuthMethodLocal),
+		BaseURL:    server.URL + "/v1",
+		Timeout:    time.Second,
+	}, "model-a", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != 65536 {
+		t.Fatalf("unexpected detected context window: %d", got)
+	}
+}
+
+func TestDetectContextWindowFallsBackWhenCompatibleEndpointHasNoProps(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	got, err := DetectContextWindow(context.Background(), "openai-compatible", config.Provider{
+		Kind:          ProviderKindCompatible,
+		AuthMethod:    string(AuthMethodLocal),
+		BaseURL:       server.URL + "/v1",
+		ContextWindow: 32768,
+		Timeout:       time.Second,
+	}, "model-a", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != 32768 {
+		t.Fatalf("unexpected fallback context window: %d", got)
+	}
+}
+
 func TestListModelsUsesV1ForLlamaCPP(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/models" {

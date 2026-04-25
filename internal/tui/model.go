@@ -3001,18 +3001,15 @@ func (m *Model) dequeuePromptCmd() ui.Cmd {
 
 func (m Model) ensureRuntimeContextWindow(ctx context.Context, session domain.Session) (string, int, bool, error) {
 	providerID := strings.TrimSpace(session.ProviderID)
-	if providerID != "llamacpp" {
-		return "", 0, false, nil
-	}
-	if m.runtimeCtxChecked != nil && m.runtimeCtxChecked[providerID] {
-		if providerCfg, ok := m.cfg.Provider(providerID); ok {
-			return providerID, providerCfg.ContextWindow, false, nil
-		}
-		return providerID, 0, false, nil
-	}
 	providerCfg, ok := m.cfg.Provider(providerID)
 	if !ok {
 		return "", 0, false, fmt.Errorf("provider %q not configured", providerID)
+	}
+	if !provider.SupportsContextWindowDetection(providerID, providerCfg) {
+		return "", 0, false, nil
+	}
+	if m.runtimeCtxChecked != nil && m.runtimeCtxChecked[providerID] {
+		return providerID, providerCfg.ContextWindow, false, nil
 	}
 	modelID := strings.TrimSpace(session.ModelID)
 	if modelID == "" {

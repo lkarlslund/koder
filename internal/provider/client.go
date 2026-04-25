@@ -293,18 +293,57 @@ func (c *Client) Props(ctx context.Context, modelID string) (propsResponse, erro
 }
 
 func DetectContextWindow(ctx context.Context, providerID string, cfg config.Provider, modelID string, recorder *debugsrv.Recorder) (int, error) {
-	if strings.TrimSpace(providerID) != "llamacpp" {
+	if !SupportsContextWindowDetection(providerID, cfg) {
 		return cfg.ContextWindow, nil
 	}
-	client, err := New(providerID, cfg, recorder)
-	if err != nil {
-		return 0, err
+	for _, baseURL := range contextWindowProbeBaseURLs(cfg.BaseURL) {
+		probeCfg := cfg
+		probeCfg.BaseURL = baseURL
+		client, err := New(providerID, probeCfg, recorder)
+		if err != nil {
+			return 0, err
+		}
+		props, err := client.Props(ctx, modelID)
+		if err == nil {
+			if props.DefaultGenerationSettings.NCtx > 0 {
+				return props.DefaultGenerationSettings.NCtx, nil
+			}
+			return cfg.ContextWindow, nil
+		}
+		if !isOptionalContextWindowProbeError(err) {
+			return 0, err
+		}
 	}
-	props, err := client.Props(ctx, modelID)
-	if err != nil {
-		return 0, err
+	return cfg.ContextWindow, nil
+}
+
+func SupportsContextWindowDetection(providerID string, cfg config.Provider) bool {
+	if strings.TrimSpace(providerID) == "llamacpp" {
+		return strings.TrimSpace(cfg.BaseURL) != ""
 	}
-	return props.DefaultGenerationSettings.NCtx, nil
+	return strings.TrimSpace(cfg.Kind) == ProviderKindCompatible &&
+		strings.TrimSpace(cfg.AuthMethod) == string(AuthMethodLocal) &&
+		strings.TrimSpace(cfg.BaseURL) != ""
+}
+
+func contextWindowProbeBaseURLs(baseURL string) []string {
+	trimmed := strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if trimmed == "" {
+		return nil
+	}
+	withoutV1 := strings.TrimSuffix(trimmed, "/v1")
+	if withoutV1 == trimmed {
+		return []string{trimmed}
+	}
+	return []string{withoutV1, trimmed}
+}
+
+func isOptionalContextWindowProbeError(err error) bool {
+	var apiErr *APIError
+	if errors.As(err, &apiErr) {
+		return apiErr.StatusCode == http.StatusNotFound || apiErr.StatusCode == http.StatusMethodNotAllowed
+	}
+	return false
 }
 
 func (c *Client) propsRequest(ctx context.Context, path string) (propsResponse, error) {
