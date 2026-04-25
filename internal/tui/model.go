@@ -418,7 +418,7 @@ func NewWithWorkdir(cfg config.Config, st *store.Store, a *agent.Engine, mode St
 	vp := newTranscriptViewport(40, 10)
 	vp.SetContent("Loading…")
 
-	return Model{
+	model := Model{
 		cfg:               cfg,
 		store:             st,
 		agent:             a,
@@ -442,7 +442,9 @@ func NewWithWorkdir(cfg config.Config, st *store.Store, a *agent.Engine, mode St
 		caps:              provider.NewCapabilityStore(cfg.StateDir()),
 		runtimeCtxChecked: map[string]bool{},
 		attachmentFiles:   attachment.NewManager(cfg.StateDir()),
-	}, nil
+	}
+	model.syncComposerVisibility()
+	return model, nil
 }
 
 func (m Model) Init() ui.Cmd {

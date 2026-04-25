@@ -2038,6 +2038,31 @@ func TestOpenSessionPickerBlursComposer(t *testing.T) {
 	}
 }
 
+func TestNewWithWorkdirStartsComposerFocusedWithBlinkTimer(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.UI.CursorBlink = true
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	workdir := t.TempDir()
+	m, err := NewWithWorkdir(cfg, st, nil, StartupModeNew, nil, workdir, StartupOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !m.composer.Focused() {
+		t.Fatal("expected composer to start focused")
+	}
+	if !m.composer.CursorVisible() {
+		t.Fatal("expected startup composer cursor to be visible")
+	}
+	if timers := m.ensureUIRoot().ActiveTimers(composerBlinkTimerOwner); len(timers) == 0 {
+		t.Fatal("expected startup composer to own a blink timer")
+	}
+}
+
 func TestClosingSessionPickerRefocusesComposer(t *testing.T) {
 	m := Model{
 		composer: textarea.New(),
