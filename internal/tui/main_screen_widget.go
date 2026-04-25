@@ -206,7 +206,15 @@ func (w *mainScreenWidget) Surface(ctx *ui.Context, bounds ui.Rect) ui.Surface {
 	sidebarSurface := w.sidebar.Surface(ctx, sidebarBounds)
 	statusSurface := w.statusPane.Surface(ctx, statusBounds)
 
-	var transcriptElement ui.Element = ui.SurfaceBox{Surface: transcriptSurface}
+	var transcriptElement ui.Element = ui.Constrained{
+		Constraints: ui.Constraints{
+			MinW: transcriptBounds.W,
+			MaxW: transcriptBounds.W,
+			MinH: transcriptBounds.H,
+			MaxH: transcriptBounds.H,
+		},
+		Child: ui.SurfaceBox{Surface: transcriptSurface},
+	}
 	transcriptElement = w.model.layoutDebugPane(transcriptElement, "#1f3347")
 	mainChildren := []ui.Child{
 		ui.Flex(transcriptElement, 1),

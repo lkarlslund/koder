@@ -3491,6 +3491,46 @@ func TestViewShowsAllVisibleTranscriptLinesAboveComposer(t *testing.T) {
 	}
 }
 
+func TestViewDoesNotLeaveLargeGapBetweenTranscriptAndComposer(t *testing.T) {
+	composer := textarea.New()
+	composer.Placeholder = "Ask koder or type / for commands"
+	composer.SetHeight(composerInputHeight)
+	composer.Focus()
+
+	m := Model{
+		cfg:            testConfig(t),
+		palette:        theme.Resolve("tokyonight").Palette,
+		width:          40,
+		height:         12,
+		composer:       composer,
+		currentSession: domain.Session{ID: 1},
+		messages: []domain.Message{
+			{ID: 1, Role: domain.MessageRoleAssistant},
+		},
+		parts: map[int64][]domain.Part{
+			1: {{Kind: domain.PartKindText, Body: "continue"}},
+		},
+		viewport: newTranscriptViewport(37, 8),
+	}
+
+	m.resize()
+	m.refreshViewport()
+
+	viewLines := strings.Split(strings.Join(m.viewSurface().Lines(), "\n"), "\n")
+	composerIdx := indexOfTrimmedLineContaining(viewLines, "Ask koder or type / for commands")
+	if composerIdx < 0 {
+		t.Fatalf("expected composer in rendered view, got:\n%s", strings.Join(viewLines, "\n"))
+	}
+	lastContentIdx := lastNonEmptyTrimmedLineIndex(viewLines[:composerIdx])
+	if lastContentIdx < 0 {
+		t.Fatalf("expected transcript content before composer, got:\n%s", strings.Join(viewLines, "\n"))
+	}
+	gap := composerIdx - lastContentIdx - 1
+	if gap > 1 {
+		t.Fatalf("expected at most one spacer line between transcript and composer, got %d\nview:\n%s", gap, strings.Join(viewLines, "\n"))
+	}
+}
+
 func indexOfTrimmedLine(lines []string, want string) int {
 	for idx, line := range lines {
 		if strings.Contains(strings.TrimRight(ansi.Strip(line), " "), want) {
@@ -3503,6 +3543,15 @@ func indexOfTrimmedLine(lines []string, want string) int {
 func indexOfTrimmedLineContaining(lines []string, want string) int {
 	for idx, line := range lines {
 		if strings.Contains(strings.TrimRight(ansi.Strip(line), " "), want) {
+			return idx
+		}
+	}
+	return -1
+}
+
+func lastNonEmptyTrimmedLineIndex(lines []string) int {
+	for idx := len(lines) - 1; idx >= 0; idx-- {
+		if strings.TrimSpace(ansi.Strip(lines[idx])) != "" {
 			return idx
 		}
 	}
