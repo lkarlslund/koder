@@ -33,9 +33,6 @@ type transcriptBlock struct {
 
 func (m *Model) transcriptBlocks() []transcriptBlock {
 	var blocks []transcriptBlock
-	openRuns := make([]*ui.ToolRun, 0, 4)
-	byToolCallID := map[string]*ui.ToolRun{}
-	byApprovalID := map[int64]*ui.ToolRun{}
 
 	appendMessage := func(msg domain.Message) {
 		blocks = append(blocks, transcriptBlock{Kind: transcriptBlockMessage, Message: msg})
@@ -44,6 +41,7 @@ func (m *Model) transcriptBlocks() []transcriptBlock {
 		blocks = append(blocks, transcriptBlock{Kind: transcriptBlockToolRun, ToolRun: run})
 		return &blocks[len(blocks)-1].ToolRun
 	}
+	tracker := newToolRunTracker(appendRun)
 
 	for _, msg := range m.messages {
 		parts := m.parts[msg.ID]
@@ -78,45 +76,12 @@ func (m *Model) transcriptBlocks() []transcriptBlock {
 				}
 			}
 			for _, run := range toolRunsFromAssistantMessage(parts) {
-				ptr := appendRun(run)
-				openRuns = append(openRuns, ptr)
-				if ptr.ToolCallID != "" {
-					byToolCallID[ptr.ToolCallID] = ptr
-				}
+				tracker.Upsert(run)
 			}
 		case domain.MessageRoleTool:
 			consumed := false
-			if run, ok := toolRunApprovalRequest(parts); ok {
-				target := findToolRun(run, openRuns, byToolCallID, byApprovalID)
-				if target == nil {
-					target = appendRun(run)
-					openRuns = append(openRuns, target)
-				}
-				mergeToolRun(target, run)
-				if target.ApprovalID > 0 {
-					byApprovalID[target.ApprovalID] = target
-				}
-				consumed = true
-			}
-			if run, ok := toolRunApprovalReply(parts); ok {
-				target := findToolRun(run, openRuns, byToolCallID, byApprovalID)
-				if target == nil {
-					target = appendRun(run)
-					openRuns = append(openRuns, target)
-				}
-				mergeToolRun(target, run)
-				if target.ApprovalID > 0 {
-					byApprovalID[target.ApprovalID] = target
-				}
-				consumed = true
-			}
-			if run, ok := toolRunOutput(parts, msg); ok {
-				target := findToolRun(run, openRuns, byToolCallID, byApprovalID)
-				if target == nil {
-					target = appendRun(run)
-					openRuns = append(openRuns, target)
-				}
-				mergeToolRun(target, run)
+			for _, run := range toolRunsFromToolMessage(parts, msg) {
+				tracker.Upsert(run)
 				consumed = true
 			}
 			if !consumed {
@@ -127,6 +92,69 @@ func (m *Model) transcriptBlocks() []transcriptBlock {
 		}
 	}
 	return blocks
+}
+
+type toolRunTracker struct {
+	append       func(ui.ToolRun) *ui.ToolRun
+	byID         map[string]*ui.ToolRun
+	byToolCallID map[string]*ui.ToolRun
+	byApprovalID map[int64]*ui.ToolRun
+}
+
+func newToolRunTracker(append func(ui.ToolRun) *ui.ToolRun) *toolRunTracker {
+	return &toolRunTracker{
+		append:       append,
+		byID:         map[string]*ui.ToolRun{},
+		byToolCallID: map[string]*ui.ToolRun{},
+		byApprovalID: map[int64]*ui.ToolRun{},
+	}
+}
+
+func (t *toolRunTracker) Upsert(run ui.ToolRun) {
+	if t == nil || strings.TrimSpace(run.ID) == "" {
+		return
+	}
+	if existing := t.lookup(run); existing != nil {
+		mergeToolRun(existing, run)
+		t.index(existing)
+		return
+	}
+	t.index(t.append(run))
+}
+
+func (t *toolRunTracker) lookup(run ui.ToolRun) *ui.ToolRun {
+	if t == nil {
+		return nil
+	}
+	if run.ToolCallID != "" {
+		if existing := t.byToolCallID[run.ToolCallID]; existing != nil {
+			return existing
+		}
+	}
+	if run.ApprovalID > 0 {
+		if existing := t.byApprovalID[run.ApprovalID]; existing != nil {
+			return existing
+		}
+	}
+	if existing := t.byID[run.ID]; existing != nil {
+		return existing
+	}
+	return nil
+}
+
+func (t *toolRunTracker) index(run *ui.ToolRun) {
+	if t == nil || run == nil {
+		return
+	}
+	if run.ID != "" {
+		t.byID[run.ID] = run
+	}
+	if run.ToolCallID != "" {
+		t.byToolCallID[run.ToolCallID] = run
+	}
+	if run.ApprovalID > 0 {
+		t.byApprovalID[run.ApprovalID] = run
+	}
 }
 
 func compactionToolRun(parts []domain.Part, msg domain.Message) (ui.ToolRun, bool) {
@@ -213,192 +241,168 @@ func toolRunsFromAssistantMessage(parts []domain.Part) []ui.ToolRun {
 	return runs
 }
 
-func toolRunApprovalRequest(parts []domain.Part) (ui.ToolRun, bool) {
+func toolRunsFromToolMessage(parts []domain.Part, msg domain.Message) []ui.ToolRun {
+	var runs []ui.ToolRun
 	for _, part := range parts {
-		if part.Kind != domain.PartKindApprovalRequest {
+		if run, ok := toolRunApprovalRequest(part); ok {
+			runs = append(runs, run)
 			continue
 		}
-		meta := stringMeta(part.MetaJSON)
-		approvalID, _ := strconv.ParseInt(strings.TrimSpace(meta["approval_id"]), 10, 64)
-		tool := domain.ToolKind(strings.TrimSpace(meta["tool"]))
-		preview := strings.TrimSpace(meta["command"])
-		presentation := presentationFromPreview(tool, preview)
-		return ui.ToolRun{
-			ID:         approvalFallbackID(approvalID, tool, preview),
-			Tool:       tool,
-			ApprovalID: approvalID,
-			Title:      presentation.Title,
-			Subtitle:   presentation.Subtitle,
-			Preview:    preview,
-			Status:     ui.ToolRunStatusPendingApproval,
-		}, tool != ""
-	}
-	return ui.ToolRun{}, false
-}
-
-func toolRunApprovalReply(parts []domain.Part) (ui.ToolRun, bool) {
-	for _, part := range parts {
-		if part.Kind != domain.PartKindSystemNotice && part.Kind != domain.PartKindToolOutput {
+		if run, ok := toolRunApprovalReply(part); ok {
+			runs = append(runs, run)
 			continue
 		}
-		meta := stringMeta(part.MetaJSON)
-		if strings.TrimSpace(meta["approval_id"]) == "" || strings.TrimSpace(meta["status"]) == "" {
-			continue
-		}
-		if strings.EqualFold(strings.TrimSpace(meta["status"]), "pending") {
-			continue
-		}
-		approvalID, _ := strconv.ParseInt(strings.TrimSpace(meta["approval_id"]), 10, 64)
-		tool := domain.ToolKind(strings.TrimSpace(meta["tool"]))
-		preview := strings.TrimSpace(meta["command"])
-		presentation := presentationFromPreview(tool, preview)
-		status := ui.ToolRunStatusApproved
-		output := ""
-		if strings.EqualFold(strings.TrimSpace(meta["status"]), "denied") {
-			status = ui.ToolRunStatusDenied
-			output = strings.TrimSpace(part.Body)
-		}
-		return ui.ToolRun{
-			ID:         approvalFallbackID(approvalID, tool, preview),
-			Tool:       tool,
-			ApprovalID: approvalID,
-			Title:      presentation.Title,
-			Subtitle:   presentation.Subtitle,
-			Preview:    preview,
-			Output:     output,
-			Status:     status,
-		}, tool != ""
-	}
-	return ui.ToolRun{}, false
-}
-
-func toolRunOutput(parts []domain.Part, msg domain.Message) (ui.ToolRun, bool) {
-	for _, part := range parts {
 		if part.Kind != domain.PartKindToolOutput {
 			continue
 		}
-		meta := stringMeta(part.MetaJSON)
-		req, err := tools.RequestFromMetaMap(meta)
-		output := strings.TrimSpace(part.Body)
-		if display, ok := tools.DisplayTextForPart(part); ok {
-			output = strings.TrimSpace(display)
-		}
-		diff := toolRunDiffBody(parts)
-		status := ui.ToolRunStatusCompleted
-		if strings.Contains(strings.ToLower(output), "denied") {
-			status = ui.ToolRunStatusDenied
-		}
-		if strings.HasPrefix(output, "Error:") {
-			status = ui.ToolRunStatusFailed
-		}
-		if err != nil {
-			req = tools.Request{
-				Tool:       domain.ToolKind(strings.TrimSpace(meta["tool"])),
-				ToolCallID: strings.TrimSpace(meta["tool_call_id"]),
-				Args:       map[string]string{},
-			}
-		}
-		presentation := tools.PresentationForRequest(req)
-		if strings.TrimSpace(presentation.Preview) == "" {
-			presentation.Preview = firstNonEmptyString(strings.TrimSpace(msg.Summary), output)
-		}
-		if strings.TrimSpace(presentation.Subtitle) == "" {
-			presentation.Subtitle = presentation.Preview
-		}
-		switch req.Tool {
-		case domain.ToolKindBash:
-			command := firstNonEmptyString(strings.TrimSpace(req.Args["command"]), strings.TrimSpace(meta["command"]))
-			if command != "" {
-				presentation.Title = "Ran command " + command
-				presentation.Subtitle = ""
-			}
-		case domain.ToolKindEdit:
-			path := firstNonEmptyString(strings.TrimSpace(req.Args["path"]), strings.TrimSpace(meta["path"]))
-			if path != "" {
-				presentation.Title = "Edited file " + filepath.ToSlash(path)
-				presentation.Subtitle = ""
-			}
-		}
-		return ui.ToolRun{
-			ID:         firstNonEmptyString(req.ToolCallID, toolRunFallbackID(req.Tool, presentation.Preview), msg.Summary),
-			Tool:       req.Tool,
-			ToolCallID: req.ToolCallID,
-			Title:      presentation.Title,
-			Subtitle:   presentation.Subtitle,
-			Preview:    presentation.Preview,
-			Output:     output,
-			Diff:       diff,
-			Status:     status,
-		}, true
+		runs = append(runs, toolRunOutput(part, parts, msg))
 	}
-	return ui.ToolRun{}, false
+	return runs
 }
 
-func findToolRun(run ui.ToolRun, openRuns []*ui.ToolRun, byToolCallID map[string]*ui.ToolRun, byApprovalID map[int64]*ui.ToolRun) *ui.ToolRun {
-	if run.ToolCallID != "" {
-		if existing := byToolCallID[run.ToolCallID]; existing != nil {
-			return existing
+func toolRunApprovalRequest(part domain.Part) (ui.ToolRun, bool) {
+	if part.Kind != domain.PartKindApprovalRequest {
+		return ui.ToolRun{}, false
+	}
+	meta := stringMeta(part.MetaJSON)
+	approvalID, _ := strconv.ParseInt(strings.TrimSpace(meta["approval_id"]), 10, 64)
+	tool := domain.ToolKind(strings.TrimSpace(meta["tool"]))
+	preview := strings.TrimSpace(meta["command"])
+	presentation := presentationFromPreview(tool, preview)
+	run := ui.ToolRun{
+		ID:         approvalFallbackID(approvalID, tool, preview),
+		Tool:       tool,
+		ToolCallID: strings.TrimSpace(meta["tool_call_id"]),
+		ApprovalID: approvalID,
+		Title:      presentation.Title,
+		Subtitle:   presentation.Subtitle,
+		Preview:    preview,
+		Status:     ui.ToolRunStatusPendingApproval,
+	}
+	return run, tool != ""
+}
+
+func toolRunApprovalReply(part domain.Part) (ui.ToolRun, bool) {
+	if part.Kind != domain.PartKindSystemNotice && part.Kind != domain.PartKindToolOutput {
+		return ui.ToolRun{}, false
+	}
+	meta := stringMeta(part.MetaJSON)
+	if strings.TrimSpace(meta["approval_id"]) == "" || strings.TrimSpace(meta["status"]) == "" {
+		return ui.ToolRun{}, false
+	}
+	if strings.EqualFold(strings.TrimSpace(meta["status"]), "pending") {
+		return ui.ToolRun{}, false
+	}
+	approvalID, _ := strconv.ParseInt(strings.TrimSpace(meta["approval_id"]), 10, 64)
+	tool := domain.ToolKind(strings.TrimSpace(meta["tool"]))
+	preview := strings.TrimSpace(meta["command"])
+	presentation := presentationFromPreview(tool, preview)
+	status := ui.ToolRunStatusApproved
+	output := ""
+	if strings.EqualFold(strings.TrimSpace(meta["status"]), "denied") {
+		status = ui.ToolRunStatusDenied
+		output = strings.TrimSpace(part.Body)
+	}
+	run := ui.ToolRun{
+		ID:         approvalFallbackID(approvalID, tool, preview),
+		Tool:       tool,
+		ToolCallID: strings.TrimSpace(meta["tool_call_id"]),
+		ApprovalID: approvalID,
+		Title:      presentation.Title,
+		Subtitle:   presentation.Subtitle,
+		Preview:    preview,
+		Output:     output,
+		Status:     status,
+	}
+	return run, tool != ""
+}
+
+func toolRunOutput(part domain.Part, parts []domain.Part, msg domain.Message) ui.ToolRun {
+	meta := stringMeta(part.MetaJSON)
+	req, err := tools.RequestFromMetaMap(meta)
+	output := strings.TrimSpace(part.Body)
+	if display, ok := tools.DisplayTextForPart(part); ok {
+		output = strings.TrimSpace(display)
+	}
+	diff := toolRunDiffBody(parts)
+	status := ui.ToolRunStatusCompleted
+	if strings.Contains(strings.ToLower(output), "denied") {
+		status = ui.ToolRunStatusDenied
+	}
+	if strings.HasPrefix(output, "Error:") {
+		status = ui.ToolRunStatusFailed
+	}
+	if err != nil {
+		req = tools.Request{
+			Tool:       domain.ToolKind(strings.TrimSpace(meta["tool"])),
+			ToolCallID: strings.TrimSpace(meta["tool_call_id"]),
+			Args:       map[string]string{},
 		}
 	}
-	if run.ApprovalID > 0 {
-		if existing := byApprovalID[run.ApprovalID]; existing != nil {
-			return existing
+	presentation := tools.PresentationForRequest(req)
+	if strings.TrimSpace(presentation.Preview) == "" {
+		presentation.Preview = firstNonEmptyString(strings.TrimSpace(msg.Summary), output)
+	}
+	if strings.TrimSpace(presentation.Subtitle) == "" {
+		presentation.Subtitle = presentation.Preview
+	}
+	switch req.Tool {
+	case domain.ToolKindBash:
+		command := firstNonEmptyString(strings.TrimSpace(req.Args["command"]), strings.TrimSpace(meta["command"]))
+		if command != "" {
+			presentation.Title = "Ran command " + command
+			presentation.Subtitle = ""
+		}
+	case domain.ToolKindEdit:
+		path := firstNonEmptyString(strings.TrimSpace(req.Args["path"]), strings.TrimSpace(meta["path"]))
+		if path != "" {
+			presentation.Title = "Edited file " + filepath.ToSlash(path)
+			presentation.Subtitle = ""
 		}
 	}
-	for i := len(openRuns) - 1; i >= 0; i-- {
-		existing := openRuns[i]
-		if existing == nil || existing.Status == ui.ToolRunStatusCompleted || existing.Status == ui.ToolRunStatusDenied || existing.Status == ui.ToolRunStatusFailed {
-			continue
-		}
-		if run.Tool != "" && existing.Tool != run.Tool {
-			continue
-		}
-		if previewsMatch(existing.Preview, run.Preview) || previewsMatch(existing.Subtitle, run.Subtitle) {
-			return existing
-		}
+	return ui.ToolRun{
+		ID:         firstNonEmptyString(req.ToolCallID, toolRunFallbackID(req.Tool, presentation.Preview), msg.Summary),
+		Tool:       req.Tool,
+		ToolCallID: req.ToolCallID,
+		Title:      presentation.Title,
+		Subtitle:   presentation.Subtitle,
+		Preview:    presentation.Preview,
+		Output:     output,
+		Diff:       diff,
+		Status:     status,
 	}
-	for i := len(openRuns) - 1; i >= 0; i-- {
-		existing := openRuns[i]
-		if existing == nil || existing.Status == ui.ToolRunStatusCompleted || existing.Status == ui.ToolRunStatusDenied || existing.Status == ui.ToolRunStatusFailed {
-			continue
-		}
-		if run.Tool != "" && existing.Tool == run.Tool {
-			return existing
-		}
-	}
-	return nil
 }
 
 func mergeToolRun(dst *ui.ToolRun, src ui.ToolRun) {
 	if dst == nil {
 		return
 	}
-	replacePresentation := toolRunHasFinalPresentation(src)
-	if strings.TrimSpace(dst.ID) == "" {
+	terminal := toolRunHasTerminalStatus(src.Status)
+	if strings.TrimSpace(src.ID) != "" {
 		dst.ID = src.ID
 	}
-	if strings.TrimSpace(dst.ToolCallID) == "" {
+	if strings.TrimSpace(src.ToolCallID) != "" {
 		dst.ToolCallID = src.ToolCallID
 	}
-	if dst.ApprovalID == 0 {
+	if src.ApprovalID > 0 {
 		dst.ApprovalID = src.ApprovalID
 	}
-	if replacePresentation || strings.TrimSpace(dst.Title) == "" {
+	if terminal || strings.TrimSpace(dst.Title) == "" {
 		dst.Title = src.Title
 	}
-	if replacePresentation || strings.TrimSpace(dst.Subtitle) == "" {
+	if terminal || strings.TrimSpace(dst.Subtitle) == "" {
 		dst.Subtitle = src.Subtitle
 	}
-	if replacePresentation || strings.TrimSpace(dst.Preview) == "" {
+	if terminal || strings.TrimSpace(dst.Preview) == "" {
 		dst.Preview = src.Preview
 	}
-	if strings.TrimSpace(dst.Output) == "" {
+	if strings.TrimSpace(src.Output) != "" {
 		dst.Output = src.Output
 	}
-	if strings.TrimSpace(dst.Diff) == "" {
+	if strings.TrimSpace(src.Diff) != "" {
 		dst.Diff = src.Diff
 	}
-	if strings.TrimSpace(dst.ErrorText) == "" {
+	if strings.TrimSpace(src.ErrorText) != "" {
 		dst.ErrorText = src.ErrorText
 	}
 	if src.Status != "" {
@@ -406,10 +410,10 @@ func mergeToolRun(dst *ui.ToolRun, src ui.ToolRun) {
 	}
 }
 
-func toolRunHasFinalPresentation(run ui.ToolRun) bool {
-	switch run.Status {
+func toolRunHasTerminalStatus(status ui.ToolRunStatus) bool {
+	switch status {
 	case ui.ToolRunStatusApproved, ui.ToolRunStatusCompleted, ui.ToolRunStatusDenied, ui.ToolRunStatusFailed:
-		return strings.TrimSpace(run.Title) != "" || strings.TrimSpace(run.Subtitle) != "" || strings.TrimSpace(run.Preview) != ""
+		return true
 	default:
 		return false
 	}
@@ -613,15 +617,6 @@ func stringMeta(raw string) map[string]string {
 		return nil
 	}
 	return meta
-}
-
-func previewsMatch(left, right string) bool {
-	left = strings.TrimSpace(left)
-	right = strings.TrimSpace(right)
-	if left == "" || right == "" {
-		return false
-	}
-	return left == right
 }
 
 func toolRunFallbackID(tool domain.ToolKind, preview string) string {
