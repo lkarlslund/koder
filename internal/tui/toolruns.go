@@ -343,9 +343,6 @@ func toolRunOutput(part domain.Part, parts []domain.Part, msg domain.Message) ui
 	if strings.TrimSpace(presentation.Preview) == "" {
 		presentation.Preview = firstNonEmptyString(strings.TrimSpace(msg.Summary), output)
 	}
-	if strings.TrimSpace(presentation.Subtitle) == "" {
-		presentation.Subtitle = presentation.Preview
-	}
 	switch req.Tool {
 	case domain.ToolKindBash:
 		command := firstNonEmptyString(strings.TrimSpace(req.Args["command"]), strings.TrimSpace(meta["command"]))

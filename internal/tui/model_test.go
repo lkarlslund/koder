@@ -1323,6 +1323,9 @@ func TestToolOutputUsesRequestPreviewFromMeta(t *testing.T) {
 	if !strings.Contains(got, "README.md") {
 		t.Fatalf("expected read path from tool output metadata, got %q", got)
 	}
+	if strings.Count(got, "README.md") != 1 {
+		t.Fatalf("expected read path to appear once in collapsed card, got %q", got)
+	}
 	if strings.Contains(got, "\nread\n") {
 		t.Fatalf("expected generic summary to be replaced by request preview, got %q", got)
 	}
@@ -5150,24 +5153,16 @@ func TestRefreshViewportUsesBlankLineBetweenConsecutiveToolRunsWithHalfBlocks(t 
 	got := m.viewport.View()
 	lines := strings.Split(got, "\n")
 	firstTitleLine, secondTitleLine := -1, -1
-	firstSubtitleLine, secondSubtitleLine := -1, -1
 	for i, line := range lines {
 		switch {
 		case firstTitleLine == -1 && strings.Contains(line, "Read file"):
 			firstTitleLine = i
 		case firstTitleLine != -1 && secondTitleLine == -1 && strings.Contains(line, "Read file"):
 			secondTitleLine = i
-		case firstSubtitleLine == -1 && strings.Contains(line, "README.md"):
-			firstSubtitleLine = i
-		case strings.Contains(line, "go.mod"):
-			secondSubtitleLine = i
 		}
 	}
-	if firstTitleLine == -1 || secondTitleLine == -1 || firstSubtitleLine == -1 || secondSubtitleLine == -1 {
+	if firstTitleLine == -1 || secondTitleLine == -1 {
 		t.Fatalf("expected both grouped tool runs to render, got %q", got)
-	}
-	if firstSubtitleLine != firstTitleLine+1 || secondSubtitleLine != secondTitleLine+1 {
-		t.Fatalf("expected tool subtitles directly under their titles, got %q", got)
 	}
 	if secondTitleLine <= firstTitleLine+1 {
 		t.Fatalf("expected second tool run to appear after a blank spacer row, got %q", got)
