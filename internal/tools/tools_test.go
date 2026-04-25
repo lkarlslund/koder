@@ -108,3 +108,25 @@ func TestReadCurrentDirectoryListsFiles(t *testing.T) {
 		t.Fatalf("expected file listing to include nested directory, got %q", result.Output)
 	}
 }
+
+func TestBashZeroTimeoutUsesDefault(t *testing.T) {
+	dir := t.TempDir()
+	registry := tools.NewRegistry(dir)
+
+	result, err := registry.Execute(context.Background(), tools.Request{
+		Tool: domain.ToolKindBash,
+		Args: map[string]string{
+			"command":    "printf ok",
+			"timeout_ms": "0",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(result.Output) != "ok" {
+		t.Fatalf("unexpected bash output: %q", result.Output)
+	}
+	if got := result.Meta["timeout_ms"]; got != "120000" {
+		t.Fatalf("expected default timeout metadata, got %q", got)
+	}
+}

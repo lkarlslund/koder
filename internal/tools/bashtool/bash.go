@@ -57,10 +57,12 @@ func (tool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Reques
 	timeout := tools.DefaultBashTimeout
 	if raw := strings.TrimSpace(req.Args["timeout_ms"]); raw != "" {
 		ms, err := strconv.Atoi(raw)
-		if err != nil || ms <= 0 {
+		if err != nil {
 			return tools.Result{}, errors.New("timeout_ms must be a positive integer")
 		}
-		timeout = time.Duration(ms) * time.Millisecond
+		if ms > 0 {
+			timeout = time.Duration(ms) * time.Millisecond
+		}
 	}
 	output, exitCode, err := tools.ShellResult(ctx, workdir, timeout, req.Args["command"])
 	result := tools.Result{
