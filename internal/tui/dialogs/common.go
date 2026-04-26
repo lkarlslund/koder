@@ -101,9 +101,7 @@ func wrapPlain(input string, width int) string {
 			}
 			continue
 		}
-		for _, wrapped := range wrapWords(line, width) {
-			out = append(out, wrapped)
-		}
+		out = append(out, wrapWords(line, width)...)
 	}
 	return strings.Join(out, "\n")
 }

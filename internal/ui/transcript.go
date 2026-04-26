@@ -560,9 +560,7 @@ func (m AssistantMessage) render() Surface {
 	if baseStyle.isZero() {
 		baseStyle = CellStyle{FG: cellColor(m.Palette.MarkdownText)}
 	}
-	for _, line := range WrapStyledText(body, m.Width) {
-		lines = append(lines, line)
-	}
+	lines = append(lines, WrapStyledText(body, m.Width)...)
 	width := 0
 	for _, line := range lines {
 		width = maxInt(width, StyledTextWidth(line))
@@ -594,9 +592,7 @@ func (b ReasoningBlock) render() Surface {
 		return Surface{}
 	}
 	lines := []string{""}
-	for _, line := range wrapStyledLines(content, b.Width) {
-		lines = append(lines, line)
-	}
+	lines = append(lines, wrapStyledLines(content, b.Width)...)
 	width := 0
 	for _, line := range lines {
 		width = maxInt(width, PlainWidth(line))
