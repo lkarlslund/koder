@@ -368,13 +368,7 @@ func (e *Engine) persistUserPrompt(ctx context.Context, session domain.Session, 
 		}
 	}
 	for _, ref := range refs {
-		raw, err := reference.EncodeMeta(reference.Metadata{
-			Kind:    ref.Kind,
-			Path:    ref.Path,
-			Display: ref.Display,
-			Start:   ref.Start,
-			End:     ref.End,
-		})
+		raw, err := reference.EncodeMeta(reference.Metadata(ref))
 		if err != nil {
 			return domain.Message{}, err
 		}
@@ -1296,13 +1290,7 @@ func (e *Engine) previewUserMessage(prompt string, drafts []attachment.Draft, re
 		})
 	}
 	for _, ref := range refs {
-		raw, err := reference.EncodeMeta(reference.Metadata{
-			Kind:    ref.Kind,
-			Path:    ref.Path,
-			Display: ref.Display,
-			Start:   ref.Start,
-			End:     ref.End,
-		})
+		raw, err := reference.EncodeMeta(reference.Metadata(ref))
 		if err != nil {
 			return provider.Message{}, false, err
 		}

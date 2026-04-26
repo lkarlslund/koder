@@ -3372,13 +3372,7 @@ func (m *Model) appendLocalUserPrompt(prompt string, drafts []attachment.Draft, 
 		})
 	}
 	for _, ref := range refs {
-		raw, err := reference.EncodeMeta(reference.Metadata{
-			Kind:    ref.Kind,
-			Path:    ref.Path,
-			Display: ref.Display,
-			Start:   ref.Start,
-			End:     ref.End,
-		})
+		raw, err := reference.EncodeMeta(reference.Metadata(ref))
 		if err != nil {
 			continue
 		}

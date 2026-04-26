@@ -948,7 +948,7 @@ type Spacer struct {
 }
 
 func (s Spacer) Measure(_ *Context, constraints Constraints) Size {
-	return constraints.Clamp(Size{W: s.W, H: s.H})
+	return constraints.Clamp(Size(s))
 }
 
 func (s Spacer) Render(_ *Context, bounds Rect) Surface {
@@ -1160,15 +1160,15 @@ type VBox struct {
 }
 
 func (b VBox) Measure(ctx *Context, constraints Constraints) Size {
-	return Column{Children: b.Children, Spacing: b.Spacing}.Measure(ctx, constraints)
+	return Column(b).Measure(ctx, constraints)
 }
 
 func (b VBox) Render(ctx *Context, bounds Rect) Surface {
-	return Column{Children: b.Children, Spacing: b.Spacing}.Render(ctx, bounds)
+	return Column(b).Render(ctx, bounds)
 }
 
 func (b VBox) WalkChildren(ctx *Context, visit func(Element)) {
-	Column{Children: b.Children, Spacing: b.Spacing}.WalkChildren(ctx, visit)
+	Column(b).WalkChildren(ctx, visit)
 }
 
 type HBox struct {
@@ -1177,15 +1177,15 @@ type HBox struct {
 }
 
 func (b HBox) Measure(ctx *Context, constraints Constraints) Size {
-	return Row{Children: b.Children, Spacing: b.Spacing}.Measure(ctx, constraints)
+	return Row(b).Measure(ctx, constraints)
 }
 
 func (b HBox) Render(ctx *Context, bounds Rect) Surface {
-	return Row{Children: b.Children, Spacing: b.Spacing}.Render(ctx, bounds)
+	return Row(b).Render(ctx, bounds)
 }
 
 func (b HBox) WalkChildren(ctx *Context, visit func(Element)) {
-	Row{Children: b.Children, Spacing: b.Spacing}.WalkChildren(ctx, visit)
+	Row(b).WalkChildren(ctx, visit)
 }
 
 type Alignment int
