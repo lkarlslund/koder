@@ -507,6 +507,26 @@ func (b *pebbleBackend) UpdateMessageSummary(ctx context.Context, messageID int6
 	return batch.Commit(pebble.Sync)
 }
 
+func (b *pebbleBackend) SetChatQueuedInputs(ctx context.Context, chatID int64, items []domain.QueuedInput) error {
+	if err := ensureContext(ctx); err != nil {
+		return err
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	chat, err := b.readChat(chatID)
+	if err != nil {
+		return err
+	}
+	chat.QueuedInputs = cloneQueuedInputs(items)
+	chat.UpdatedAt = time.Now().UTC()
+	batch := b.db.NewBatch()
+	defer batch.Close()
+	if err := b.putChat(batch, chat); err != nil {
+		return err
+	}
+	return batch.Commit(pebble.Sync)
+}
+
 func (b *pebbleBackend) AddPart(ctx context.Context, messageID int64, kind domain.PartKind, body, metaJSON string) (domain.Part, error) {
 	if err := ensureContext(ctx); err != nil {
 		return domain.Part{}, err

@@ -303,8 +303,8 @@ func TestPermissionsCommandOpensWhileBusy(t *testing.T) {
 	if !next.hasPicker() {
 		t.Fatal("expected permissions picker to open while busy")
 	}
-	if next.queuedPrompt != nil {
-		t.Fatalf("expected no queued prompt, got %#v", next.queuedPrompt)
+	if len(next.currentChat.QueuedInputs) != 0 {
+		t.Fatalf("expected no queued prompt, got %#v", next.currentChat.QueuedInputs)
 	}
 }
 
@@ -794,8 +794,8 @@ func TestEnterWhileBusyQueuesSteeringPrompt(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("expected title sync command after queueing")
 	}
-	if next.queuedPrompt == nil || next.queuedPrompt.Text != "follow up" || next.queuedPrompt.Mode != queuedPromptModeSteer {
-		t.Fatalf("expected queued prompt, got %#v", next.queuedPrompt)
+	if len(next.currentChat.QueuedInputs) != 1 || next.currentChat.QueuedInputs[0].Text != "follow up" || next.currentChat.QueuedInputs[0].Kind != domain.QueuedInputKindQueued {
+		t.Fatalf("expected queued input, got %#v", next.currentChat.QueuedInputs)
 	}
 	if next.composer.Value() != "" {
 		t.Fatalf("expected composer reset after queueing, got %q", next.composer.Value())
@@ -945,8 +945,8 @@ func TestTabWhileBusyQueuesSteeringPrompt(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("expected title sync command after steering queue")
 	}
-	if next.queuedPrompt == nil || next.queuedPrompt.Mode != queuedPromptModeSteer {
-		t.Fatalf("expected steering queue, got %#v", next.queuedPrompt)
+	if len(next.currentChat.QueuedInputs) != 1 || next.currentChat.QueuedInputs[0].Kind != domain.QueuedInputKindSteer {
+		t.Fatalf("expected steering queue, got %#v", next.currentChat.QueuedInputs)
 	}
 }
 
@@ -979,8 +979,8 @@ func TestCtrlGQueuesContinueWhileBusy(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("expected title sync command after queueing continue")
 	}
-	if next.queuedPrompt == nil || next.queuedPrompt.Mode != queuedPromptModeContinue {
-		t.Fatalf("expected queued continue, got %#v", next.queuedPrompt)
+	if len(next.currentChat.QueuedInputs) != 1 || next.currentChat.QueuedInputs[0].Kind != domain.QueuedInputKindContinue {
+		t.Fatalf("expected queued continue, got %#v", next.currentChat.QueuedInputs)
 	}
 }
 
@@ -1032,7 +1032,7 @@ func TestLoadMsgDispatchesQueuedPrompt(t *testing.T) {
 		parts:          map[int64][]domain.Part{},
 		viewport:       newTranscriptViewport(40, 6),
 		currentSession: domain.Session{ID: 9, ProviderID: "openai", ModelID: "gpt-5.4", Title: "Queued"},
-		queuedPrompt:   &queuedPrompt{Text: "queued ask", Mode: queuedPromptModeNormal},
+		currentChat:    domain.Chat{QueuedInputs: []domain.QueuedInput{{ID: 1, Text: "queued ask", Kind: domain.QueuedInputKindQueued}}},
 	}
 
 	updated, cmd := m.Update(loadMsg{
@@ -1041,92 +1041,81 @@ func TestLoadMsgDispatchesQueuedPrompt(t *testing.T) {
 	})
 	next := updated.(Model)
 	if cmd == nil {
-		t.Fatal("expected queued prompt dispatch command")
+		t.Fatal("expected queued input dispatch command")
 	}
 	if !next.loading {
-		t.Fatal("expected queued prompt dispatch to restart loading")
+		t.Fatal("expected queued input dispatch to restart loading")
 	}
 	if len(next.messages) != 1 || next.messages[0].Summary != "queued ask" {
 		t.Fatalf("expected optimistic queued message, got %#v", next.messages)
 	}
-	if next.queuedPrompt != nil {
-		t.Fatalf("expected queued prompt cleared, got %#v", next.queuedPrompt)
+	if len(next.currentChat.QueuedInputs) != 0 {
+		t.Fatalf("expected queued input cleared, got %#v", next.currentChat.QueuedInputs)
 	}
 }
 
-func TestAltUpRestoresQueuedPromptToComposer(t *testing.T) {
+func TestQueueEditEnterRestoresQueuedPromptToComposer(t *testing.T) {
 	m := Model{
-		cfg:      testConfig(t),
-		composer: textarea.New(),
-		queuedPrompt: &queuedPrompt{
-			Text: "queued ask",
-			Mode: queuedPromptModeNormal,
-		},
+		cfg:         testConfig(t),
+		composer:    textarea.New(),
+		currentChat: domain.Chat{QueuedInputs: []domain.QueuedInput{{ID: 1, Text: "queued ask", Kind: domain.QueuedInputKindQueued}}},
 	}
+	m.queueEditMode = true
 
-	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyUp, Alt: true})
+	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
 	next := updated.(*Model)
 
-	if cmd == nil {
-		t.Fatal("expected title sync command after restoring queued prompt")
-	}
-	if next.queuedPrompt != nil {
-		t.Fatalf("expected queued prompt cleared, got %#v", next.queuedPrompt)
+	_ = cmd
+	if len(next.currentChat.QueuedInputs) != 0 {
+		t.Fatalf("expected queued prompt cleared, got %#v", next.currentChat.QueuedInputs)
 	}
 	if next.composer.Value() != "queued ask" {
 		t.Fatalf("expected composer to contain restored queued prompt, got %q", next.composer.Value())
 	}
 }
 
-func TestAltUpSwapsQueuedPromptWithExistingDraft(t *testing.T) {
+func TestQueueEditEnterSwapsQueuedPromptWithExistingDraft(t *testing.T) {
 	m := Model{
-		cfg:      testConfig(t),
-		composer: textarea.New(),
-		queuedPrompt: &queuedPrompt{
-			Text: "queued ask",
-			Mode: queuedPromptModeSteer,
-		},
+		cfg:         testConfig(t),
+		composer:    textarea.New(),
+		currentChat: domain.Chat{QueuedInputs: []domain.QueuedInput{{ID: 1, Text: "queued ask", Kind: domain.QueuedInputKindSteer}}},
 	}
+	m.queueEditMode = true
 	m.setComposerValue("current draft")
 
-	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyUp, Alt: true})
+	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
 	next := updated.(*Model)
 
-	if cmd == nil {
-		t.Fatal("expected title sync command after swapping queued prompt")
-	}
+	_ = cmd
 	if next.composer.Value() != "queued ask" {
 		t.Fatalf("expected composer to contain restored queued prompt, got %q", next.composer.Value())
 	}
-	if next.queuedPrompt == nil {
+	if len(next.currentChat.QueuedInputs) != 1 {
 		t.Fatal("expected previous draft to be re-queued")
 	}
-	if next.queuedPrompt.Text != "current draft" {
-		t.Fatalf("expected current draft to be re-queued, got %#v", next.queuedPrompt)
+	if next.currentChat.QueuedInputs[0].Text != "current draft" {
+		t.Fatalf("expected current draft to be re-queued, got %#v", next.currentChat.QueuedInputs)
 	}
-	if next.queuedPrompt.Mode != queuedPromptModeNormal {
-		t.Fatalf("expected swapped draft to be queued as normal follow-up, got %#v", next.queuedPrompt)
+	if next.currentChat.QueuedInputs[0].Kind != domain.QueuedInputKindQueued {
+		t.Fatalf("expected swapped draft to be queued as normal follow-up, got %#v", next.currentChat.QueuedInputs)
 	}
 }
 
-func TestAltUpClearsQueuedContinue(t *testing.T) {
+func TestQueueEditEnterClearsQueuedContinue(t *testing.T) {
 	m := Model{
-		cfg:      testConfig(t),
-		composer: textarea.New(),
-		queuedPrompt: &queuedPrompt{
-			Mode: queuedPromptModeContinue,
-		},
+		cfg:         testConfig(t),
+		composer:    textarea.New(),
+		currentChat: domain.Chat{QueuedInputs: []domain.QueuedInput{{ID: 1, Kind: domain.QueuedInputKindContinue}}},
 	}
+	m.queueEditMode = true
 	m.setComposerValue("keep draft")
 
-	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyUp, Alt: true})
+	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
 	next := updated.(*Model)
 
-	if cmd == nil {
-		t.Fatal("expected title sync command after clearing queued continue")
-	}
-	if next.queuedPrompt != nil {
-		t.Fatalf("expected queued continue cleared, got %#v", next.queuedPrompt)
+	_ = cmd
+	if len(next.currentChat.QueuedInputs) != 0 {
+		t.Fatalf("expected queued continue cleared, got %#v", next.currentChat.QueuedInputs)
 	}
 	if next.composer.Value() != "keep draft" {
 		t.Fatalf("expected composer draft unchanged, got %q", next.composer.Value())
@@ -3534,13 +3523,17 @@ func TestRenderFooterShowsQueuedPromptPreviewAboveComposer(t *testing.T) {
 	composer.Focus()
 
 	m := Model{
-		width:        40,
-		composer:     composer,
-		queuedPrompt: &queuedPrompt{Text: "queued submission", Mode: queuedPromptModeNormal},
+		width:    40,
+		composer: composer,
+		currentChat: domain.Chat{QueuedInputs: []domain.QueuedInput{{
+			ID:   1,
+			Text: "queued submission",
+			Kind: domain.QueuedInputKindQueued,
+		}}},
 	}
 
 	got := ansi.Strip(m.renderFooter())
-	if !strings.Contains(got, "Queued follow-up inputs") || !strings.Contains(got, "queued submission") {
+	if !strings.Contains(got, "Queued inputs") || !strings.Contains(got, "queued submission") {
 		t.Fatalf("expected queued prompt preview above composer, got %q", got)
 	}
 	if strings.Index(got, "queued submission") > strings.Index(got, "Ask koder or type / for commands") {

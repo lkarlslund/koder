@@ -7,22 +7,25 @@ import (
 	"github.com/lkarlslund/koder/internal/theme"
 )
 
-func TestPendingInputPreviewShowsQueuedMessagesInMutedStyle(t *testing.T) {
+func TestPendingInputPreviewShowsQueueRowsInMutedStyle(t *testing.T) {
 	palette := theme.Palette{
 		ComposerMutedText:  "#112233",
 		UserTextBackground: "#445566",
 	}
 
 	got := PendingInputPreview{
-		Width:          40,
-		QueuedMessages: []string{"queued submission"},
+		Width: 40,
+		Items: []PendingInputRow{{
+			Badge: "QUEUED",
+			Text:  "queued submission",
+		}},
 	}.render(palette)
 
 	plain := SurfaceText(got)
-	if !strings.Contains(plain, "Queued follow-up inputs") {
+	if !strings.Contains(plain, "Queued inputs") {
 		t.Fatalf("expected queued preview header, got %q", plain)
 	}
-	if !strings.Contains(plain, "↳ queued submission") {
+	if !strings.Contains(plain, "QUEUED queued submission") {
 		t.Fatalf("expected queued preview row, got %q", plain)
 	}
 	r, g, b, ok := got.SurfaceCellFG(0, 0)
@@ -31,21 +34,22 @@ func TestPendingInputPreviewShowsQueuedMessagesInMutedStyle(t *testing.T) {
 	}
 }
 
-func TestPendingInputPreviewShowsPendingSteersBeforeQueuedMessages(t *testing.T) {
+func TestPendingInputPreviewShowsEditModeAndSelectedRow(t *testing.T) {
 	palette := theme.Default().Palette
 	got := SurfaceText(PendingInputPreview{
-		Width:          56,
-		PendingSteers:  []string{"Please continue."},
-		QueuedMessages: []string{"follow up later"},
+		Width: 56,
+		Items: []PendingInputRow{
+			{Badge: "STEER", Text: "Please continue."},
+			{Badge: "QUEUED", Text: "follow up later", Selected: true},
+		},
+		EditingMode: true,
 	}.render(palette))
 	plain := got
 
-	steerIdx := strings.Index(plain, "Messages to be submitted when current run finishes")
-	queueIdx := strings.Index(plain, "Queued follow-up inputs")
-	if steerIdx == -1 || queueIdx == -1 {
-		t.Fatalf("expected both preview sections, got %q", plain)
+	if !strings.Contains(plain, "Queued inputs • edit mode") {
+		t.Fatalf("expected edit mode header, got %q", plain)
 	}
-	if steerIdx > queueIdx {
-		t.Fatalf("expected pending steers before queued messages, got %q", plain)
+	if strings.Index(plain, "STEER Please continue.") > strings.Index(plain, "QUEUED follow up later") {
+		t.Fatalf("expected rows to render in queue order, got %q", plain)
 	}
 }

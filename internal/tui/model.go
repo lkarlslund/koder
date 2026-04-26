@@ -192,49 +192,152 @@ type kickoffPromptMsg struct {
 	References  []reference.Draft
 }
 
-type queuedPromptMode int
+type queuedContinueDispatchMsg struct{}
 
-const (
-	queuedPromptModeNormal queuedPromptMode = iota
-	queuedPromptModeSteer
-	queuedPromptModeContinue
-)
-
-type queuedPrompt struct {
-	Text        string
-	Mode        queuedPromptMode
-	Attachments []attachment.Draft
-	References  []reference.Draft
+type queuePersistMsg struct {
+	chatID int64
+	items  []domain.QueuedInput
+	err    error
 }
 
-func (q queuedPrompt) modeLabel() string {
-	switch q.Mode {
-	case queuedPromptModeSteer:
-		return "steering"
-	case queuedPromptModeContinue:
-		return "continue"
+var lastQueuedInputID int64
+
+func nextQueuedInputID() int64 {
+	now := time.Now().UTC().UnixNano()
+	if now <= lastQueuedInputID {
+		lastQueuedInputID++
+		return lastQueuedInputID
+	}
+	lastQueuedInputID = now
+	return now
+}
+
+func cloneQueuedInputs(src []domain.QueuedInput) []domain.QueuedInput {
+	if len(src) == 0 {
+		return nil
+	}
+	dst := make([]domain.QueuedInput, 0, len(src))
+	for _, item := range src {
+		cloned := item
+		cloned.Attachments = append([]domain.QueuedAttachment(nil), item.Attachments...)
+		cloned.References = append([]domain.QueuedReference(nil), item.References...)
+		dst = append(dst, cloned)
+	}
+	return dst
+}
+
+func queuedAttachmentsFromDrafts(src []attachment.Draft) []domain.QueuedAttachment {
+	if len(src) == 0 {
+		return nil
+	}
+	dst := make([]domain.QueuedAttachment, 0, len(src))
+	for _, draft := range src {
+		dst = append(dst, domain.QueuedAttachment{
+			ID:       draft.ID,
+			Name:     draft.Name,
+			MIME:     draft.MIME,
+			Path:     draft.Path,
+			Size:     draft.Size,
+			Source:   draft.Source,
+			Original: draft.Original,
+		})
+	}
+	return dst
+}
+
+func queuedReferencesFromDrafts(src []reference.Draft) []domain.QueuedReference {
+	if len(src) == 0 {
+		return nil
+	}
+	dst := make([]domain.QueuedReference, 0, len(src))
+	for _, draft := range src {
+		dst = append(dst, domain.QueuedReference{
+			Kind:    string(draft.Kind),
+			Path:    draft.Path,
+			Display: draft.Display,
+			Start:   draft.Start,
+			End:     draft.End,
+		})
+	}
+	return dst
+}
+
+func queuedAttachmentDrafts(src []domain.QueuedAttachment) []attachment.Draft {
+	if len(src) == 0 {
+		return nil
+	}
+	dst := make([]attachment.Draft, 0, len(src))
+	for _, item := range src {
+		dst = append(dst, attachment.Draft{Metadata: attachment.Metadata{
+			ID:       item.ID,
+			Name:     item.Name,
+			MIME:     item.MIME,
+			Path:     item.Path,
+			Size:     item.Size,
+			Source:   item.Source,
+			Original: item.Original,
+		}})
+	}
+	return dst
+}
+
+func queuedReferenceDrafts(src []domain.QueuedReference) []reference.Draft {
+	if len(src) == 0 {
+		return nil
+	}
+	dst := make([]reference.Draft, 0, len(src))
+	for _, item := range src {
+		dst = append(dst, reference.Draft{
+			Kind:    reference.Kind(item.Kind),
+			Path:    item.Path,
+			Display: item.Display,
+			Start:   item.Start,
+			End:     item.End,
+		})
+	}
+	return dst
+}
+
+func queuedInputBadge(item domain.QueuedInput) string {
+	if item.Held {
+		return "HELD"
+	}
+	switch item.Kind {
+	case domain.QueuedInputKindSteer:
+		return "STEER"
+	case domain.QueuedInputKindContinue:
+		return "CONTINUE"
+	case domain.QueuedInputKindRejectedSteer:
+		return "RETRY"
 	default:
-		return "after idle"
+		return "QUEUED"
 	}
 }
 
-func (q queuedPrompt) statusText() string {
-	switch q.Mode {
-	case queuedPromptModeSteer:
-		return "Queued steering for after the current run"
-	case queuedPromptModeContinue:
-		return "Queued continue for when koder is idle"
+func queuedInputStatusText(kind domain.QueuedInputKind, held bool) string {
+	if held {
+		return "Held queue item"
+	}
+	switch kind {
+	case domain.QueuedInputKindSteer:
+		return "Queued steer for the current run"
+	case domain.QueuedInputKindContinue:
+		return "Queued continue for next turn"
+	case domain.QueuedInputKindRejectedSteer:
+		return "Queued steer for retry after the current run"
 	default:
-		return "Queued prompt for when koder is idle"
+		return "Queued prompt for next turn"
 	}
 }
 
-func (q queuedPrompt) runStatus() string {
-	switch q.Mode {
-	case queuedPromptModeSteer:
-		return "Applying steering…"
-	case queuedPromptModeContinue:
+func queuedInputRunStatus(kind domain.QueuedInputKind) string {
+	switch kind {
+	case domain.QueuedInputKindSteer:
+		return "Applying queued steer…"
+	case domain.QueuedInputKindContinue:
 		return "Continuing…"
+	case domain.QueuedInputKindRejectedSteer:
+		return "Running queued steer…"
 	default:
 		return "Running queued prompt…"
 	}
@@ -362,7 +465,8 @@ type Model struct {
 	runtimeCtxChecked       map[string]bool
 	activeOpCancel          context.CancelFunc
 	activeOpCancels         map[int64]context.CancelFunc
-	queuedPrompt            *queuedPrompt
+	queueEditMode           bool
+	queueSelection          int
 	pendingModelNote        string
 	draftAttachments        []attachment.Draft
 	draftReferences         []reference.Draft
@@ -552,11 +656,26 @@ func (m Model) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 		}
 		m.currentSession = msg.session
 		m.currentChat = msg.chat
+		m.clampQueueSelection()
 		m.pendingModelNote = ""
 		m.startBusy(m.busy.scopeOrDefault(busyScopeTranscript), "Working ...")
 		return m, ui.Batch(nextEventCmd(msg.chat.ID, msg.events), m.spinnerCmdIfNeeded(), m.syncWindowTitleCmd())
 	case kickoffPromptMsg:
 		return m, ui.Batch(m.promptCmd(m.beginActiveOperation(), msg.Prompt, msg.Attachments, msg.References), m.spinnerCmdIfNeeded(), m.syncWindowTitleCmd())
+	case queuedContinueDispatchMsg:
+		return m, ui.Batch(m.continueCmd(m.beginActiveOperation()), m.spinnerCmdIfNeeded(), m.syncWindowTitleCmd())
+	case queuePersistMsg:
+		if msg.err != nil {
+			m.stopBusy()
+			m.status = msg.err.Error()
+			return m, m.syncWindowTitleCmd()
+		}
+		if msg.chatID == m.currentChat.ID {
+			m.currentChat.QueuedInputs = cloneQueuedInputs(msg.items)
+			m.clampQueueSelection()
+			m.invalidateFooterCache()
+		}
+		return m, m.syncWindowTitleCmd()
 	case llmPreviewMsg:
 		if msg.err != nil {
 			m.status = msg.err.Error()
@@ -630,6 +749,7 @@ func (m Model) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 		m.chats = msg.chats
 		m.currentSession = msg.session
 		m.currentChat = msg.chat
+		m.clampQueueSelection()
 		m.messages = msg.messages
 		m.parts = msg.parts
 		m.approvals = msg.approvals
@@ -935,6 +1055,13 @@ func (m *Model) handleMainWindowKey(msg ui.KeyMsg) (bool, ui.Cmd) {
 	case "ctrl+c":
 		_, cmd := m.quit()
 		return true, cmd
+	case "alt+q":
+		m.queueEditMode = !m.queueEditMode
+		if m.queueEditMode && len(m.currentChat.QueuedInputs) > 0 {
+			m.clampQueueSelection()
+		}
+		m.invalidateFooterCache()
+		return true, m.syncWindowTitleCmd()
 	case "alt+h":
 		m.openHelpModal()
 		return true, m.syncWindowTitleCmd()
@@ -945,11 +1072,19 @@ func (m *Model) handleMainWindowKey(msg ui.KeyMsg) (bool, ui.Cmd) {
 		_, cmd := m.copyLatestAssistantMessage()
 		return true, cmd
 	case "backspace":
+		if m.queueEditMode && len(m.currentChat.QueuedInputs) > 0 {
+			return true, m.deleteSelectedQueuedInput()
+		}
 		if strings.TrimSpace(m.composer.Value()) == "" && m.poppedLastDraftAttachment() {
 			m.invalidateFooterCache()
 			return true, m.syncWindowTitleCmd()
 		}
 	case "esc":
+		if m.queueEditMode {
+			m.queueEditMode = false
+			m.invalidateFooterCache()
+			return true, m.syncWindowTitleCmd()
+		}
 		if m.loading {
 			_, cmd := m.handleInterruptKey()
 			return true, cmd
@@ -997,33 +1132,52 @@ func (m *Model) handleMainWindowKey(msg ui.KeyMsg) (bool, ui.Cmd) {
 		m.updateComposerMenus()
 		m.invalidateFooterCache()
 		return true, nil
-	case "alt+up":
-		_, cmd := m.popQueuedPromptForEditing()
-		return true, cmd
 	case "up":
+		if m.queueEditMode && len(m.currentChat.QueuedInputs) > 0 {
+			m.moveQueueSelection(-1)
+			return true, m.syncWindowTitleCmd()
+		}
 		if !m.recallComposerHistory(-1) {
 			return true, nil
 		}
 		m.invalidateFooterCache()
 		return true, nil
 	case "down":
+		if m.queueEditMode && len(m.currentChat.QueuedInputs) > 0 {
+			m.moveQueueSelection(1)
+			return true, m.syncWindowTitleCmd()
+		}
 		if !m.recallComposerHistory(1) {
 			return true, nil
 		}
 		m.invalidateFooterCache()
 		return true, nil
+	case "alt+up":
+		if m.queueEditMode && len(m.currentChat.QueuedInputs) > 0 {
+			return true, m.reorderSelectedQueuedInput(-1)
+		}
+		_, cmd := m.popQueuedPromptForEditing()
+		return true, cmd
+	case "alt+down":
+		if m.queueEditMode && len(m.currentChat.QueuedInputs) > 0 {
+			return true, m.reorderSelectedQueuedInput(1)
+		}
 	case "tab":
 		if m.loading && !m.hasSlashMenu() {
-			_, cmd := m.queueComposerPrompt(queuedPromptModeSteer)
+			_, cmd := m.queueComposerPrompt(domain.QueuedInputKindSteer)
 			return true, cmd
 		}
 	case "enter":
+		if m.queueEditMode && len(m.currentChat.QueuedInputs) > 0 {
+			_, cmd := m.popQueuedPromptForEditing()
+			return true, cmd
+		}
 		prompt := strings.TrimSpace(m.composer.Value())
 		if prompt == "" && len(m.draftAttachments) == 0 && len(m.draftReferences) == 0 {
 			return false, nil
 		}
 		if m.loading {
-			_, cmd := m.queueComposerPrompt(queuedPromptModeSteer)
+			_, cmd := m.queueComposerPrompt(domain.QueuedInputKindQueued)
 			return true, cmd
 		}
 		if handledModel, cmd, ok := m.handleLocalCommand(prompt); ok {
@@ -1043,6 +1197,14 @@ func (m *Model) handleMainWindowKey(msg ui.KeyMsg) (bool, ui.Cmd) {
 		m.appendLocalUserPrompt(prompt, drafts, refs)
 		m.startBusy(busyScopeTranscript, "Running…")
 		return true, m.kickoffPromptCmd(prompt, drafts, refs)
+	case "h":
+		if m.queueEditMode && len(m.currentChat.QueuedInputs) > 0 {
+			return true, m.toggleSelectedQueuedInputHeld()
+		}
+	case "delete":
+		if m.queueEditMode && len(m.currentChat.QueuedInputs) > 0 {
+			return true, m.deleteSelectedQueuedInput()
+		}
 	}
 
 	var cmd ui.Cmd
@@ -1408,7 +1570,7 @@ func (m *Model) shouldShowComposerArea() bool {
 }
 
 func (m *Model) composerAreaHasContent() bool {
-	if len(m.draftAttachments) > 0 || m.queuedPrompt != nil {
+	if len(m.draftAttachments) > 0 || len(m.currentChat.QueuedInputs) > 0 {
 		return true
 	}
 	if m.renderComposerHistoryMenuElement() != nil ||
@@ -1510,21 +1672,27 @@ func (m *Model) renderDraftAttachmentsElement() ui.Element {
 }
 
 func (m *Model) renderQueuedPromptPreviewElement() ui.Element {
-	if m.queuedPrompt == nil {
+	if len(m.currentChat.QueuedInputs) == 0 {
 		return nil
 	}
-	preview := ui.PendingInputPreview{
-		Width: m.composerWidth(),
+	rows := make([]ui.PendingInputRow, 0, len(m.currentChat.QueuedInputs))
+	for idx, item := range m.currentChat.QueuedInputs {
+		text := strings.TrimSpace(item.Text)
+		if item.Kind == domain.QueuedInputKindContinue {
+			text = "Continue"
+		}
+		rows = append(rows, ui.PendingInputRow{
+			Badge:    queuedInputBadge(item),
+			Text:     text,
+			Held:     item.Held,
+			Selected: m.queueEditMode && idx == m.selectedQueuedInputIndex(),
+		})
 	}
-	switch m.queuedPrompt.Mode {
-	case queuedPromptModeSteer:
-		preview.PendingSteers = []string{m.queuedPrompt.Text}
-	case queuedPromptModeContinue:
-		preview.QueuedMessages = []string{"Continue"}
-	default:
-		preview.QueuedMessages = []string{m.queuedPrompt.Text}
+	return ui.PendingInputPreview{
+		Width:       m.composerWidth(),
+		Items:       rows,
+		EditingMode: m.queueEditMode,
 	}
-	return preview
 }
 
 func (m *Model) composerWidth() int {
@@ -1584,11 +1752,10 @@ func (m *Model) renderSidebar() string {
 	} else {
 		lines = append(lines, fmt.Sprintf("  %s", truncate(status, 24)))
 	}
-	if m.queuedPrompt != nil {
+	if len(m.currentChat.QueuedInputs) > 0 {
 		lines = append(lines, "")
-		lines = append(lines, "Queued")
-		lines = append(lines, fmt.Sprintf("  %s", m.queuedPrompt.modeLabel()))
-		lines = append(lines, fmt.Sprintf("  %s", truncate(m.queuedPrompt.Text, 24)))
+		lines = append(lines, "Queue")
+		lines = append(lines, fmt.Sprintf("  %d item(s)", len(m.currentChat.QueuedInputs)))
 	}
 	lines = append(lines, "")
 	lines = append(lines, "Chats")
@@ -3051,6 +3218,7 @@ func (m Model) UpdateLoad(msg loadMsg) Model {
 	m.currentSession = m.normalizeSessionToolStates(msg.current)
 	if msg.chat.ID != 0 {
 		m.currentChat = msg.chat
+		m.clampQueueSelection()
 	}
 	m.messages = msg.messages
 	m.parts = msg.parts
@@ -3287,7 +3455,7 @@ func (m *Model) handleInterruptKey() (ui.Model, ui.Cmd) {
 	return m, m.syncWindowTitleCmd()
 }
 
-func (m *Model) queueComposerPrompt(mode queuedPromptMode) (ui.Model, ui.Cmd) {
+func (m *Model) queueComposerPrompt(kind domain.QueuedInputKind) (ui.Model, ui.Cmd) {
 	prompt := strings.TrimSpace(m.composer.Value())
 	if prompt == "" && len(m.draftAttachments) == 0 && len(m.draftReferences) == 0 {
 		return m, nil
@@ -3296,17 +3464,21 @@ func (m *Model) queueComposerPrompt(mode queuedPromptMode) (ui.Model, ui.Cmd) {
 		m.status = "Wait for the current run to finish before using slash commands"
 		return m, m.syncWindowTitleCmd()
 	}
-	m.queuedPrompt = &queuedPrompt{
+	items := cloneQueuedInputs(m.currentChat.QueuedInputs)
+	items = append(items, domain.QueuedInput{
+		ID:          nextQueuedInputID(),
+		Kind:        kind,
 		Text:        prompt,
-		Mode:        mode,
-		Attachments: slices.Clone(m.draftAttachments),
-		References:  slices.Clone(m.draftReferences),
-	}
+		Attachments: queuedAttachmentsFromDrafts(m.draftAttachments),
+		References:  queuedReferencesFromDrafts(m.draftReferences),
+		CreatedAt:   time.Now().UTC(),
+	})
+	m.setQueuedInputs(items)
 	m.resetComposerInput()
 	m.draftAttachments = nil
 	m.draftReferences = nil
-	m.status = m.queuedPrompt.statusText()
-	return m, m.syncWindowTitleCmd()
+	m.status = queuedInputStatusText(kind, false)
+	return m, ui.Batch(m.saveQueuedInputsCmd(m.currentChat.ID, items), m.syncWindowTitleCmd())
 }
 
 func (m *Model) queueContinuePrompt() (ui.Model, ui.Cmd) {
@@ -3314,68 +3486,87 @@ func (m *Model) queueContinuePrompt() (ui.Model, ui.Cmd) {
 		m.status = status
 		return m, m.syncWindowTitleCmd()
 	}
-	m.queuedPrompt = &queuedPrompt{Mode: queuedPromptModeContinue}
-	m.status = m.queuedPrompt.statusText()
-	return m, m.syncWindowTitleCmd()
+	items := cloneQueuedInputs(m.currentChat.QueuedInputs)
+	items = append(items, domain.QueuedInput{
+		ID:        nextQueuedInputID(),
+		Kind:      domain.QueuedInputKindContinue,
+		CreatedAt: time.Now().UTC(),
+	})
+	m.setQueuedInputs(items)
+	m.status = queuedInputStatusText(domain.QueuedInputKindContinue, false)
+	return m, ui.Batch(m.saveQueuedInputsCmd(m.currentChat.ID, items), m.syncWindowTitleCmd())
 }
 
 func (m *Model) popQueuedPromptForEditing() (ui.Model, ui.Cmd) {
-	if m.queuedPrompt == nil {
+	items := cloneQueuedInputs(m.currentChat.QueuedInputs)
+	if len(items) == 0 {
 		return m, nil
 	}
-	if m.queuedPrompt.Mode == queuedPromptModeContinue {
-		m.queuedPrompt = nil
-		m.status = "Removed queued continue"
-		return m, m.syncWindowTitleCmd()
+	idx := m.selectedQueuedInputIndex()
+	if idx < 0 || idx >= len(items) {
+		idx = 0
 	}
-
+	queued := items[idx]
+	if queued.Kind == domain.QueuedInputKindContinue {
+		items = append(items[:idx], items[idx+1:]...)
+		m.setQueuedInputs(items)
+		m.status = "Removed queued continue"
+		return m, ui.Batch(m.saveQueuedInputsCmd(m.currentChat.ID, items), m.syncWindowTitleCmd())
+	}
 	m.syncDraftReferencesFromComposer()
 	currentText := strings.TrimSpace(m.composer.Value())
 	hasCurrentDraft := currentText != "" || len(m.draftAttachments) > 0 || len(m.draftReferences) > 0
-	queued := *m.queuedPrompt
 	if hasCurrentDraft {
-		m.queuedPrompt = &queuedPrompt{
+		items[idx] = domain.QueuedInput{
+			ID:          items[idx].ID,
+			Kind:        domain.QueuedInputKindQueued,
 			Text:        currentText,
-			Mode:        queuedPromptModeNormal,
-			Attachments: slices.Clone(m.draftAttachments),
-			References:  slices.Clone(m.draftReferences),
+			Attachments: queuedAttachmentsFromDrafts(m.draftAttachments),
+			References:  queuedReferencesFromDrafts(m.draftReferences),
+			CreatedAt:   items[idx].CreatedAt,
 		}
 		m.status = "Swapped queued prompt into composer"
 	} else {
-		m.queuedPrompt = nil
+		items = append(items[:idx], items[idx+1:]...)
 		m.status = "Restored queued prompt to composer"
 	}
+	m.setQueuedInputs(items)
 	m.setComposerValue(queued.Text)
-	m.draftAttachments = slices.Clone(queued.Attachments)
-	m.draftReferences = slices.Clone(queued.References)
-	return m, m.syncWindowTitleCmd()
+	m.draftAttachments = queuedAttachmentDrafts(queued.Attachments)
+	m.draftReferences = queuedReferenceDrafts(queued.References)
+	return m, ui.Batch(m.saveQueuedInputsCmd(m.currentChat.ID, items), m.syncWindowTitleCmd())
 }
 
 func (m *Model) dequeuePromptCmd() ui.Cmd {
-	if m.queuedPrompt == nil || m.loading {
+	if m.loading {
 		return nil
 	}
 	if len(m.approvals) > 0 {
 		return nil
 	}
-	item := *m.queuedPrompt
-	m.queuedPrompt = nil
+	idx := m.nextDispatchableQueuedInputIndex(false)
+	if idx < 0 {
+		return nil
+	}
+	items := cloneQueuedInputs(m.currentChat.QueuedInputs)
+	item := items[idx]
+	items = append(items[:idx], items[idx+1:]...)
+	m.setQueuedInputs(items)
 	if ok, status := m.canSendPrompt(); !ok {
-		if item.Mode != queuedPromptModeContinue {
+		if item.Kind != domain.QueuedInputKindContinue {
 			m.openConnectDialog()
 			m.status = status
 			m.setComposerValue(item.Text)
-			m.draftAttachments = item.Attachments
-			m.draftReferences = item.References
+			m.draftAttachments = queuedAttachmentDrafts(item.Attachments)
+			m.draftReferences = queuedReferenceDrafts(item.References)
 			return nil
 		}
 	}
-	m.startBusy(busyScopeTranscript, item.runStatus())
-	if item.Mode == queuedPromptModeContinue {
-		return ui.Batch(m.continueCmd(m.beginActiveOperation()), m.spinnerCmdIfNeeded())
+	m.startBusy(busyScopeTranscript, queuedInputRunStatus(item.Kind))
+	if item.Kind != domain.QueuedInputKindContinue {
+		m.appendLocalUserPrompt(item.Text, queuedAttachmentDrafts(item.Attachments), queuedReferenceDrafts(item.References))
 	}
-	m.appendLocalUserPrompt(item.Text, item.Attachments, item.References)
-	return m.kickoffPromptCmd(item.Text, item.Attachments, item.References)
+	return m.saveAndDispatchQueuedInputCmd(m.currentChat.ID, items, item)
 }
 
 func (m Model) ensureRuntimeContextWindow(ctx context.Context, session domain.Session) (string, int, bool, error) {
@@ -3894,6 +4085,150 @@ func (m *Model) currentChatID() int64 {
 		return m.currentChat.ID
 	}
 	return 0
+}
+
+func (m *Model) setQueuedInputs(items []domain.QueuedInput) {
+	m.currentChat.QueuedInputs = cloneQueuedInputs(items)
+	for idx := range m.chats {
+		if m.chats[idx].ID == m.currentChat.ID {
+			m.chats[idx].QueuedInputs = cloneQueuedInputs(items)
+			break
+		}
+	}
+	m.clampQueueSelection()
+	m.invalidateFooterCache()
+}
+
+func (m *Model) clampQueueSelection() {
+	count := len(m.currentChat.QueuedInputs)
+	if count == 0 {
+		m.queueSelection = 0
+		m.queueEditMode = false
+		return
+	}
+	if m.queueSelection < 0 {
+		m.queueSelection = 0
+	}
+	if m.queueSelection >= count {
+		m.queueSelection = count - 1
+	}
+}
+
+func (m *Model) selectedQueuedInputIndex() int {
+	m.clampQueueSelection()
+	if len(m.currentChat.QueuedInputs) == 0 {
+		return -1
+	}
+	return m.queueSelection
+}
+
+func (m *Model) moveQueueSelection(delta int) {
+	if len(m.currentChat.QueuedInputs) == 0 {
+		return
+	}
+	m.queueSelection = (m.queueSelection + delta + len(m.currentChat.QueuedInputs)) % len(m.currentChat.QueuedInputs)
+	m.invalidateFooterCache()
+}
+
+func (m Model) saveQueuedInputsCmd(chatID int64, items []domain.QueuedInput) ui.Cmd {
+	if chatID == 0 {
+		return nil
+	}
+	cloned := cloneQueuedInputs(items)
+	return func() ui.Msg {
+		ctx := context.Background()
+		err := m.store.SetChatQueuedInputs(ctx, chatID, cloned)
+		return queuePersistMsg{chatID: chatID, items: cloned, err: err}
+	}
+}
+
+func (m Model) saveAndDispatchQueuedInputCmd(chatID int64, items []domain.QueuedInput, item domain.QueuedInput) ui.Cmd {
+	clonedItems := cloneQueuedInputs(items)
+	clonedItem := item
+	clonedItem.Attachments = append([]domain.QueuedAttachment(nil), item.Attachments...)
+	clonedItem.References = append([]domain.QueuedReference(nil), item.References...)
+	return func() ui.Msg {
+		ctx := context.Background()
+		if chatID > 0 {
+			if err := m.store.SetChatQueuedInputs(ctx, chatID, clonedItems); err != nil {
+				return queuePersistMsg{chatID: chatID, items: clonedItems, err: err}
+			}
+		}
+		if clonedItem.Kind == domain.QueuedInputKindContinue {
+			return queuedContinueDispatchMsg{}
+		}
+		return kickoffPromptMsg{
+			Prompt:      clonedItem.Text,
+			Attachments: queuedAttachmentDrafts(clonedItem.Attachments),
+			References:  queuedReferenceDrafts(clonedItem.References),
+		}
+	}
+}
+
+func (m *Model) reorderSelectedQueuedInput(delta int) ui.Cmd {
+	items := cloneQueuedInputs(m.currentChat.QueuedInputs)
+	idx := m.selectedQueuedInputIndex()
+	if idx < 0 {
+		return nil
+	}
+	next := idx + delta
+	if next < 0 || next >= len(items) {
+		return nil
+	}
+	items[idx], items[next] = items[next], items[idx]
+	m.setQueuedInputs(items)
+	m.queueSelection = next
+	m.status = "Reordered queue item"
+	return ui.Batch(m.saveQueuedInputsCmd(m.currentChat.ID, items), m.syncWindowTitleCmd())
+}
+
+func (m *Model) toggleSelectedQueuedInputHeld() ui.Cmd {
+	items := cloneQueuedInputs(m.currentChat.QueuedInputs)
+	idx := m.selectedQueuedInputIndex()
+	if idx < 0 {
+		return nil
+	}
+	items[idx].Held = !items[idx].Held
+	m.setQueuedInputs(items)
+	if items[idx].Held {
+		m.status = "Held queue item"
+	} else {
+		m.status = "Unheld queue item"
+	}
+	return ui.Batch(m.saveQueuedInputsCmd(m.currentChat.ID, items), m.syncWindowTitleCmd())
+}
+
+func (m *Model) deleteSelectedQueuedInput() ui.Cmd {
+	items := cloneQueuedInputs(m.currentChat.QueuedInputs)
+	idx := m.selectedQueuedInputIndex()
+	if idx < 0 {
+		return nil
+	}
+	items = append(items[:idx], items[idx+1:]...)
+	m.setQueuedInputs(items)
+	m.status = "Deleted queue item"
+	return ui.Batch(m.saveQueuedInputsCmd(m.currentChat.ID, items), m.syncWindowTitleCmd())
+}
+
+func (m *Model) nextDispatchableQueuedInputIndex(activeTurn bool) int {
+	priority := []domain.QueuedInputKind{
+		domain.QueuedInputKindSteer,
+		domain.QueuedInputKindRejectedSteer,
+		domain.QueuedInputKindContinue,
+		domain.QueuedInputKindQueued,
+	}
+	for _, kind := range priority {
+		if activeTurn && kind != domain.QueuedInputKindSteer {
+			continue
+		}
+		for idx, item := range m.currentChat.QueuedInputs {
+			if item.Held || item.Kind != kind {
+				continue
+			}
+			return idx
+		}
+	}
+	return -1
 }
 
 func (m *Model) syncCurrentChatBusy() {

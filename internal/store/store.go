@@ -33,6 +33,7 @@ type backend interface {
 	GetChat(context.Context, int64) (domain.Chat, error)
 	DefaultChat(context.Context, int64) (domain.Chat, error)
 	UpdateChat(context.Context, domain.Chat) error
+	SetChatQueuedInputs(context.Context, int64, []domain.QueuedInput) error
 	UpdateSessionWorkspace(context.Context, int64, string, string) error
 	SetSessionPermissionProfile(context.Context, int64, string) error
 	AddSessionPermissionRule(context.Context, int64, domain.PermissionOverride) error
@@ -119,6 +120,20 @@ func cloneToolStates(src map[domain.ToolKind]bool) map[domain.ToolKind]bool {
 	return dst
 }
 
+func cloneQueuedInputs(src []domain.QueuedInput) []domain.QueuedInput {
+	if len(src) == 0 {
+		return nil
+	}
+	dst := make([]domain.QueuedInput, 0, len(src))
+	for _, item := range src {
+		cloned := item
+		cloned.Attachments = append([]domain.QueuedAttachment(nil), item.Attachments...)
+		cloned.References = append([]domain.QueuedReference(nil), item.References...)
+		dst = append(dst, cloned)
+	}
+	return dst
+}
+
 func appendPermissionRule(rules []domain.PermissionOverride, rule domain.PermissionOverride) []domain.PermissionOverride {
 	rule.Pattern = strings.TrimSpace(rule.Pattern)
 	if rule.Pattern == "" {
@@ -198,6 +213,10 @@ func (s *Store) DefaultChat(ctx context.Context, sessionID int64) (domain.Chat, 
 
 func (s *Store) UpdateChat(ctx context.Context, chat domain.Chat) error {
 	return s.backend.UpdateChat(ctx, chat)
+}
+
+func (s *Store) SetChatQueuedInputs(ctx context.Context, chatID int64, items []domain.QueuedInput) error {
+	return s.backend.SetChatQueuedInputs(ctx, chatID, items)
 }
 
 func (s *Store) UpdateSessionWorkspace(ctx context.Context, sessionID int64, cwd, projectRoot string) error {

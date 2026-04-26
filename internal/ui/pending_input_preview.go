@@ -8,40 +8,44 @@ import (
 	"github.com/lkarlslund/koder/internal/theme"
 )
 
+type PendingInputRow struct {
+	Badge    string
+	Text     string
+	Held     bool
+	Selected bool
+}
+
 type PendingInputPreview struct {
-	Width          int
-	PendingSteers  []string
-	RejectedSteers []string
-	QueuedMessages []string
+	Width       int
+	Items       []PendingInputRow
+	EditingMode bool
 }
 
 const pendingInputPreviewLineLimit = 3
 
 func (p PendingInputPreview) render(palette theme.Palette) Surface {
-	if p.Width <= 0 || (len(p.PendingSteers) == 0 && len(p.RejectedSteers) == 0 && len(p.QueuedMessages) == 0) {
+	if p.Width <= 0 || len(p.Items) == 0 {
 		return Surface{}
 	}
 	mutedFG := palette.ComposerMutedText
+	selectedFG := palette.SelectionForeground
 	bg := palette.UserTextBackground
 
-	rows := make([]Surface, 0, 8)
-	if len(p.PendingSteers) > 0 {
-		rows = append(rows, p.renderHeader("Messages to be submitted when current run finishes", mutedFG, bg))
-		rows = append(rows, p.renderPreviewRows(p.PendingSteers, mutedFG, bg, true)...)
+	rows := make([]Surface, 0, len(p.Items)+1)
+	header := "Queued inputs"
+	if p.EditingMode {
+		header = "Queued inputs • edit mode"
 	}
-	if len(p.RejectedSteers) > 0 {
-		if len(rows) > 0 {
-			rows = append(rows, p.renderBlank(bg))
+	rows = append(rows, p.renderHeader(header, mutedFG, bg))
+	for _, item := range p.Items {
+		if item.Held && strings.TrimSpace(item.Badge) != "HELD" {
+			item.Badge = "HELD " + strings.TrimSpace(item.Badge)
 		}
-		rows = append(rows, p.renderHeader("Messages to be submitted at end of turn", mutedFG, bg))
-		rows = append(rows, p.renderPreviewRows(p.RejectedSteers, mutedFG, bg, true)...)
-	}
-	if len(p.QueuedMessages) > 0 {
-		if len(rows) > 0 {
-			rows = append(rows, p.renderBlank(bg))
+		fg := mutedFG
+		if item.Selected {
+			fg = selectedFG
 		}
-		rows = append(rows, p.renderHeader("Queued follow-up inputs", mutedFG, bg))
-		rows = append(rows, p.renderPreviewRows(p.QueuedMessages, mutedFG, bg, true)...)
+		rows = append(rows, p.renderPreviewRows(item, fg, bg)...)
 	}
 	surface := BlankSurface(p.Width, len(rows))
 	for y, row := range rows {
@@ -56,10 +60,9 @@ func (p PendingInputPreview) Measure(ctx *Context, constraints Constraints) Size
 		width = constraints.maxWidth()
 	}
 	return constraints.Clamp(PendingInputPreview{
-		Width:          width,
-		PendingSteers:  p.PendingSteers,
-		RejectedSteers: p.RejectedSteers,
-		QueuedMessages: p.QueuedMessages,
+		Width:       width,
+		Items:       p.Items,
+		EditingMode: p.EditingMode,
 	}.render(ctx.Palette).Size())
 }
 
@@ -69,10 +72,9 @@ func (p PendingInputPreview) Render(ctx *Context, bounds Rect) Surface {
 		width = bounds.W
 	}
 	return PendingInputPreview{
-		Width:          width,
-		PendingSteers:  p.PendingSteers,
-		RejectedSteers: p.RejectedSteers,
-		QueuedMessages: p.QueuedMessages,
+		Width:       width,
+		Items:       p.Items,
+		EditingMode: p.EditingMode,
 	}.render(ctx.Palette).normalize(bounds.W, bounds.H)
 }
 
@@ -90,42 +92,34 @@ func (p PendingInputPreview) renderHeader(text string, fg, bg lipgloss.Color) Su
 	return surface
 }
 
-func (p PendingInputPreview) renderPreviewRows(messages []string, fg, bg lipgloss.Color, italic bool) []Surface {
-	rows := make([]Surface, 0, len(messages))
-	for _, message := range messages {
-		lines := strings.Split(strings.ReplaceAll(message, "\r\n", "\n"), "\n")
-		rendered := 0
-		for _, line := range lines {
-			for _, wrapped := range wrapPreviewLine(line, maxInt(1, p.Width-4)) {
-				prefix := "  ↳ "
-				if rendered > 0 {
-					prefix = "    "
-				}
-				rows = append(rows, renderPendingPreviewLine(prefix, wrapped, p.Width, fg, bg, italic))
-				rendered++
-				if rendered >= pendingInputPreviewLineLimit {
-					break
-				}
+func (p PendingInputPreview) renderPreviewRows(item PendingInputRow, fg, bg lipgloss.Color) []Surface {
+	rows := make([]Surface, 0, pendingInputPreviewLineLimit)
+	label := strings.TrimSpace(item.Badge)
+	if label == "" {
+		label = "ITEM"
+	}
+	lines := strings.Split(strings.ReplaceAll(item.Text, "\r\n", "\n"), "\n")
+	rendered := 0
+	for _, line := range lines {
+		for _, wrapped := range wrapPreviewLine(line, maxInt(1, p.Width-8-PlainWidth(label))) {
+			prefix := "  " + label + " "
+			if rendered > 0 {
+				prefix = strings.Repeat(" ", maxInt(2, PlainWidth(prefix)))
 			}
+			rows = append(rows, renderPendingPreviewLine(prefix, wrapped, p.Width, fg, bg, true))
+			rendered++
 			if rendered >= pendingInputPreviewLineLimit {
 				break
 			}
 		}
-		if countWrappedPreviewLines(lines, maxInt(1, p.Width-4)) > pendingInputPreviewLineLimit {
-			rows = append(rows, renderPendingPreviewLine("    ", "…", p.Width, fg, bg, italic))
+		if rendered >= pendingInputPreviewLineLimit {
+			break
 		}
 	}
-	return rows
-}
-
-func (p PendingInputPreview) renderBlank(bg lipgloss.Color) Surface {
-	width := maxInt(1, p.Width)
-	surface := BlankSurface(width, 1)
-	style := CellStyle{FG: cellColor(bg), BG: cellColor(bg)}
-	for x := 0; x < width; x++ {
-		surface.setCell(x, 0, Cell{Text: " ", Width: 1, Style: style})
+	if countWrappedPreviewLines(lines, maxInt(1, p.Width-8-PlainWidth(label))) > pendingInputPreviewLineLimit {
+		rows = append(rows, renderPendingPreviewLine(strings.Repeat(" ", maxInt(2, PlainWidth("  "+label+" "))), "…", p.Width, fg, bg, true))
 	}
-	return surface
+	return rows
 }
 
 func renderPendingPreviewLine(prefix, text string, width int, fg, bg lipgloss.Color, italic bool) Surface {

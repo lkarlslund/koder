@@ -431,10 +431,81 @@ func (e *Engine) persistUserPrompt(ctx context.Context, session domain.Session, 
 	return userMsg, nil
 }
 
+func queuedAttachmentDrafts(src []domain.QueuedAttachment) []attachment.Draft {
+	if len(src) == 0 {
+		return nil
+	}
+	dst := make([]attachment.Draft, 0, len(src))
+	for _, item := range src {
+		dst = append(dst, attachment.Draft{Metadata: attachment.Metadata{
+			ID:       item.ID,
+			Name:     item.Name,
+			MIME:     item.MIME,
+			Path:     item.Path,
+			Size:     item.Size,
+			Source:   item.Source,
+			Original: item.Original,
+		}})
+	}
+	return dst
+}
+
+func queuedReferenceDrafts(src []domain.QueuedReference) []reference.Draft {
+	if len(src) == 0 {
+		return nil
+	}
+	dst := make([]reference.Draft, 0, len(src))
+	for _, item := range src {
+		dst = append(dst, reference.Draft{
+			Kind:    reference.Kind(item.Kind),
+			Path:    item.Path,
+			Display: item.Display,
+			Start:   item.Start,
+			End:     item.End,
+		})
+	}
+	return dst
+}
+
+func (e *Engine) applyQueuedSteer(ctx context.Context, session domain.Session, chat *domain.Chat, out chan<- domain.Event) (bool, error) {
+	refreshed, err := e.store.GetChat(ctx, chat.ID)
+	if err != nil {
+		return false, err
+	}
+	*chat = refreshed
+	idx := -1
+	for i, item := range chat.QueuedInputs {
+		if item.Held || item.Kind != domain.QueuedInputKindSteer {
+			continue
+		}
+		idx = i
+		break
+	}
+	if idx < 0 {
+		return false, nil
+	}
+	item := chat.QueuedInputs[idx]
+	remaining := append(slices.Clone(chat.QueuedInputs[:idx]), slices.Clone(chat.QueuedInputs[idx+1:])...)
+	if err := e.store.SetChatQueuedInputs(ctx, chat.ID, remaining); err != nil {
+		return false, err
+	}
+	chat.QueuedInputs = remaining
+	out <- domain.Event{Kind: domain.EventKindStatus, Text: "Applying queued steer..."}
+	if _, err := e.persistUserPrompt(ctx, session, chat.ID, item.Text, queuedAttachmentDrafts(item.Attachments), queuedReferenceDrafts(item.References)); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 func (e *Engine) continueModelTurn(ctx context.Context, session domain.Session, chat domain.Chat, client *provider.Client, out chan<- domain.Event, transient []provider.InstructionBlock) error {
 	tracker := toolLoopTracker{}
 	for steps := 0; steps < e.maxToolLoopSteps(); steps++ {
 		e.recordLifecycle(session.ID, "model_turn_started", "", map[string]string{"step": strconv.Itoa(steps + 1)})
+		if applied, err := e.applyQueuedSteer(ctx, session, &chat, out); err != nil {
+			return err
+		} else if applied {
+			transient = nil
+		}
 		messages, buildErr := e.buildConversationPreview(ctx, session, chat.ID, "", nil, nil, transient)
 		if buildErr != nil {
 			return buildErr

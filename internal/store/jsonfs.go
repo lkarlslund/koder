@@ -245,6 +245,21 @@ func (b *jsonfsBackend) UpdateChat(ctx context.Context, chat domain.Chat) error 
 	return b.writeChat(updated)
 }
 
+func (b *jsonfsBackend) SetChatQueuedInputs(ctx context.Context, chatID int64, items []domain.QueuedInput) error {
+	if err := ensureContext(ctx); err != nil {
+		return err
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	chat, err := b.readChat(chatID)
+	if err != nil {
+		return err
+	}
+	chat.QueuedInputs = cloneQueuedInputs(items)
+	chat.UpdatedAt = time.Now().UTC()
+	return b.writeChat(chat)
+}
+
 func (b *jsonfsBackend) ListSessions(ctx context.Context) ([]domain.Session, error) {
 	if err := ensureContext(ctx); err != nil {
 		return nil, err

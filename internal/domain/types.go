@@ -202,9 +202,47 @@ type Chat struct {
 	ToolStates            map[ToolKind]bool
 	ActiveMilestoneRef    string
 	AssignedTodoBucketRef string
+	QueuedInputs          []QueuedInput
 	CreatedAt             time.Time
 	UpdatedAt             time.Time
 	LastMessage           string
+}
+
+type QueuedInputKind string
+
+const (
+	QueuedInputKindSteer         QueuedInputKind = "steer"
+	QueuedInputKindQueued        QueuedInputKind = "queued"
+	QueuedInputKindContinue      QueuedInputKind = "continue"
+	QueuedInputKindRejectedSteer QueuedInputKind = "rejected_steer"
+)
+
+type QueuedInput struct {
+	ID          int64
+	Kind        QueuedInputKind
+	Text        string
+	Held        bool
+	Attachments []QueuedAttachment
+	References  []QueuedReference
+	CreatedAt   time.Time
+}
+
+type QueuedAttachment struct {
+	ID       string
+	Name     string
+	MIME     string
+	Path     string
+	Size     int64
+	Source   string
+	Original string
+}
+
+type QueuedReference struct {
+	Kind    string
+	Path    string
+	Display string
+	Start   int
+	End     int
 }
 
 type AgentsFile struct {
