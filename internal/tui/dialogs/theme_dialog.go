@@ -4,7 +4,7 @@ import (
 	"strconv"
 	"strings"
 
-	. "github.com/lkarlslund/koder/internal/ui"
+	"github.com/lkarlslund/koder/internal/ui"
 )
 
 type ThemeDialogActionKind int
@@ -26,17 +26,17 @@ type ThemeDialog struct {
 	Themes  []string
 	view    []string
 	focus   pickerDialogFocus
-	buttons ButtonRow
+	buttons ui.ButtonRow
 }
 
 func NewThemeDialog(themes []string, current string) ThemeDialog {
 	d := ThemeDialog{Themes: themes}
-	d.buttons = ButtonRow{
-		Buttons: []Button{
+	d.buttons = ui.ButtonRow{
+		Buttons: []ui.Button{
 			{ID: "ok", Label: "OK", Hotkey: 'o', Primary: true},
 			{ID: "cancel", Label: "Cancel", Hotkey: 'c'},
 		},
-		Align: HorizontalAlignRight,
+		Align: ui.HorizontalAlignRight,
 	}
 	d.refilter()
 	d.SetCurrentValue(current)
@@ -65,7 +65,7 @@ func (d *ThemeDialog) SetCurrentValue(value string) bool {
 	return false
 }
 
-func (d *ThemeDialog) Update(msg KeyMsg) ThemeDialogAction {
+func (d *ThemeDialog) Update(msg ui.KeyMsg) ThemeDialogAction {
 	var action ThemeDialogAction
 	d.buttons.Buttons[0].OnClick = func() { action = d.selectCurrent() }
 	d.buttons.Buttons[1].OnClick = func() { action = ThemeDialogAction{Kind: ThemeDialogActionCancel} }
@@ -114,7 +114,7 @@ func (d *ThemeDialog) Update(msg KeyMsg) ThemeDialogAction {
 			d.refilter()
 		}
 	default:
-		if d.focus == pickerDialogFocusList && msg.Type == KeyRunes {
+		if d.focus == pickerDialogFocusList && msg.Type == ui.KeyRunes {
 			d.Query += msg.String()
 			d.refilter()
 		}
@@ -150,37 +150,37 @@ func (d *ThemeDialog) ActivateControl(controlID string) ThemeDialogAction {
 	return ThemeDialogAction{}
 }
 
-func (d ThemeDialog) Measure(ctx *Context, constraints Constraints) Size {
+func (d ThemeDialog) Measure(ctx *ui.Context, constraints ui.Constraints) ui.Size {
 	width := constraints.MaxW
 	if width <= 0 {
 		width = 84
 	}
-	return constraints.Clamp(d.dialog(width).Measure(ctx, Constraints{MaxW: width, MaxH: constraints.MaxH}))
+	return constraints.Clamp(d.dialog(width).Measure(ctx, ui.Constraints{MaxW: width, MaxH: constraints.MaxH}))
 }
 
-func (d ThemeDialog) Render(ctx *Context, bounds Rect) Surface {
+func (d ThemeDialog) Render(ctx *ui.Context, bounds ui.Rect) ui.Surface {
 	maxWidth := dialogRenderWidth(bounds, 84)
 	element := d.dialog(maxWidth)
-	size := element.Measure(ctx, Constraints{MaxW: maxWidth, MaxH: bounds.H})
-	return element.Render(ctx, Rect{X: bounds.X, Y: bounds.Y, W: size.W, H: bounds.H})
+	size := element.Measure(ctx, ui.Constraints{MaxW: maxWidth, MaxH: bounds.H})
+	return element.Render(ctx, ui.Rect{X: bounds.X, Y: bounds.Y, W: size.W, H: bounds.H})
 }
 
-func (d ThemeDialog) dialog(width int) Element {
+func (d ThemeDialog) dialog(width int) ui.Element {
 	dialogWidth := minInt(84, maxInt(68, width))
 	buttons := d.buttonRow(dialogWidth)
 	buttons.Width = maxInt(0, dialogWidth-6)
-	gridItems := make([]SelectionGridItem, 0, len(d.view))
+	gridItems := make([]ui.SelectionGridItem, 0, len(d.view))
 	for idx, item := range d.view {
-		gridItems = append(gridItems, SelectionGridItem{
+		gridItems = append(gridItems, ui.SelectionGridItem{
 			ControlID: "theme-item-" + strconv.Itoa(idx),
 			Title:     item,
 		})
 	}
-	var chooser Element
+	var chooser ui.Element
 	if len(gridItems) == 0 {
 		chooser = staticBlock("No matches")
 	} else {
-		chooser = SelectionGrid{
+		chooser = ui.SelectionGrid{
 			Items:      gridItems,
 			Width:      dialogWidth - 4,
 			Columns:    4,
@@ -189,14 +189,14 @@ func (d ThemeDialog) dialog(width int) Element {
 			CellHeight: 1,
 		}
 	}
-	return WindowFrame{
+	return ui.WindowFrame{
 		Title: "Themes",
 		Width: dialogWidth,
-		Content: Column{
-			Children: []Child{
-				Fixed(staticBlock("Filter: " + d.Query)),
-				Fixed(chooser),
-				Fixed(buttons),
+		Content: ui.Column{
+			Children: []ui.Child{
+				ui.Fixed(staticBlock("Filter: " + d.Query)),
+				ui.Fixed(chooser),
+				ui.Fixed(buttons),
 			},
 			Spacing: 1,
 		},
@@ -204,10 +204,10 @@ func (d ThemeDialog) dialog(width int) Element {
 	}
 }
 
-func (d ThemeDialog) buttonRow(width int) ButtonRow {
+func (d ThemeDialog) buttonRow(width int) ui.ButtonRow {
 	buttons := d.buttons
 	buttons.Width = maxInt(0, width-4)
-	buttons.Align = HorizontalAlignRight
+	buttons.Align = ui.HorizontalAlignRight
 	return buttons
 }
 

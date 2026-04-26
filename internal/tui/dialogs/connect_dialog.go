@@ -7,7 +7,7 @@ import (
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/theme"
-	. "github.com/lkarlslund/koder/internal/ui"
+	"github.com/lkarlslund/koder/internal/ui"
 	"github.com/lkarlslund/koder/internal/ui/textarea"
 )
 
@@ -105,7 +105,7 @@ func (d *ConnectDialog) SetStatusError(status string) {
 	d.statusKind = connectStatusError
 }
 
-func (d *ConnectDialog) Update(msg KeyMsg) ProviderConnectAction {
+func (d *ConnectDialog) Update(msg ui.KeyMsg) ProviderConnectAction {
 	switch d.stage {
 	case connectStageProvider:
 		return d.updateProviderList(msg)
@@ -118,22 +118,22 @@ func (d *ConnectDialog) Update(msg KeyMsg) ProviderConnectAction {
 	}
 }
 
-func (d ConnectDialog) Measure(ctx *Context, constraints Constraints) Size {
+func (d ConnectDialog) Measure(ctx *ui.Context, constraints ui.Constraints) ui.Size {
 	width := constraints.MaxW
 	if width <= 0 {
 		width = 88
 	}
-	return constraints.Clamp(d.dialog(width, ctx.Palette).Measure(ctx, Constraints{MaxW: width, MaxH: constraints.MaxH}))
+	return constraints.Clamp(d.dialog(width, ctx.Palette).Measure(ctx, ui.Constraints{MaxW: width, MaxH: constraints.MaxH}))
 }
 
-func (d ConnectDialog) Render(ctx *Context, bounds Rect) Surface {
+func (d ConnectDialog) Render(ctx *ui.Context, bounds ui.Rect) ui.Surface {
 	maxWidth := dialogRenderWidth(bounds, 88)
 	element := d.dialog(maxWidth, ctx.Palette)
-	size := element.Measure(ctx, Constraints{MaxW: maxWidth, MaxH: bounds.H})
-	return element.Render(ctx, Rect{X: bounds.X, Y: bounds.Y, W: size.W, H: bounds.H})
+	size := element.Measure(ctx, ui.Constraints{MaxW: maxWidth, MaxH: bounds.H})
+	return element.Render(ctx, ui.Rect{X: bounds.X, Y: bounds.Y, W: size.W, H: bounds.H})
 }
 
-func (d ConnectDialog) dialog(width int, palette theme.Palette) Element {
+func (d ConnectDialog) dialog(width int, palette theme.Palette) ui.Element {
 	switch d.stage {
 	case connectStageProvider:
 		return d.providerListDialog(width, palette)
@@ -142,11 +142,11 @@ func (d ConnectDialog) dialog(width int, palette theme.Palette) Element {
 	case connectStageForm:
 		return d.formDialog(width, palette)
 	default:
-		return Static{}
+		return ui.Static{}
 	}
 }
 
-func (d *ConnectDialog) updateProviderList(msg KeyMsg) ProviderConnectAction {
+func (d *ConnectDialog) updateProviderList(msg ui.KeyMsg) ProviderConnectAction {
 	switch msg.String() {
 	case "esc":
 		return ProviderConnectAction{Kind: ProviderConnectActionCancel}
@@ -166,7 +166,7 @@ func (d *ConnectDialog) updateProviderList(msg KeyMsg) ProviderConnectAction {
 		}
 		d.selectProvider(item)
 	default:
-		if msg.Type == KeyRunes {
+		if msg.Type == ui.KeyRunes {
 			d.query += msg.String()
 			d.refilter()
 		}
@@ -174,7 +174,7 @@ func (d *ConnectDialog) updateProviderList(msg KeyMsg) ProviderConnectAction {
 	return ProviderConnectAction{}
 }
 
-func (d *ConnectDialog) updateAuthPicker(msg KeyMsg) ProviderConnectAction {
+func (d *ConnectDialog) updateAuthPicker(msg ui.KeyMsg) ProviderConnectAction {
 	switch msg.String() {
 	case "esc":
 		d.stage = connectStageProvider
@@ -192,7 +192,7 @@ func (d *ConnectDialog) updateAuthPicker(msg KeyMsg) ProviderConnectAction {
 	return ProviderConnectAction{}
 }
 
-func (d *ConnectDialog) updateForm(msg KeyMsg) ProviderConnectAction {
+func (d *ConnectDialog) updateForm(msg ui.KeyMsg) ProviderConnectAction {
 	buttons := d.formButtons()
 	buttons.Index = d.buttonIdx
 	if idx, ok := buttons.HotkeyIndex(msg); ok {
@@ -250,20 +250,20 @@ func (d *ConnectDialog) updateForm(msg KeyMsg) ProviderConnectAction {
 			}
 		}
 	default:
-		if msg.Type == KeyRunes {
+		if msg.Type == ui.KeyRunes {
 			d.updateCurrentEditor(msg)
 		}
 	}
 	return ProviderConnectAction{}
 }
 
-func (d *ConnectDialog) providerListDialog(width int, palette theme.Palette) Element {
+func (d *ConnectDialog) providerListDialog(width int, palette theme.Palette) ui.Element {
 	dialogWidth := clampWidth(width, 72, 96)
 	lines := []string{fmt.Sprintf("Filter: %s", d.query), ""}
-	var list Element = staticBlock("No providers match your filter.")
+	var list ui.Element = staticBlock("No providers match your filter.")
 	if len(d.view) > 0 {
 		start, end := windowBounds(d.index, len(d.view), 10)
-		items := make([]ListItem, 0, end-start)
+		items := make([]ui.ListItem, 0, end-start)
 		for idx := start; idx < end; idx++ {
 			item := d.view[idx]
 			tertiary := "remote"
@@ -272,15 +272,15 @@ func (d *ConnectDialog) providerListDialog(width int, palette theme.Palette) Ele
 			} else if item.Local {
 				tertiary = "local"
 			}
-			items = append(items, ListItem{
+			items = append(items, ui.ListItem{
 				Primary:   item.Title,
 				Secondary: item.Description,
 				Tertiary:  tertiary,
 			})
 		}
-		list = Section{
+		list = ui.Section{
 			Width: dialogWidth - 8,
-			Child: List{
+			Child: ui.List{
 				Items:    items,
 				Width:    dialogWidth - 8,
 				Selected: d.index - start,
@@ -288,20 +288,20 @@ func (d *ConnectDialog) providerListDialog(width int, palette theme.Palette) Ele
 			},
 		}
 	}
-	body := []Child{
-		Fixed(linesBlock(lines...)),
-		Fixed(list),
+	body := []ui.Child{
+		ui.Fixed(linesBlock(lines...)),
+		ui.Fixed(list),
 	}
 	if status := strings.TrimSpace(d.status); status != "" {
-		body = append(body, Fixed(Spacer{H: 1}), Fixed(Label{Text: status}))
+		body = append(body, ui.Fixed(ui.Spacer{H: 1}), ui.Fixed(ui.Label{Text: status}))
 	}
-	return WindowFrame{
+	return ui.WindowFrame{
 		Title: "Connect Provider",
 		Width: dialogWidth,
-		Content: Column{
-			Children: []Child{
-				Fixed(Column{Children: body, Spacing: 1}),
-				Fixed(Static{Content: "Enter choose provider  Esc cancel"}),
+		Content: ui.Column{
+			Children: []ui.Child{
+				ui.Fixed(ui.Column{Children: body, Spacing: 1}),
+				ui.Fixed(ui.Static{Content: "Enter choose provider  Esc cancel"}),
 			},
 			Spacing: 2,
 		},
@@ -309,31 +309,31 @@ func (d *ConnectDialog) providerListDialog(width int, palette theme.Palette) Ele
 	}
 }
 
-func (d *ConnectDialog) authPickerDialog(width int, palette theme.Palette) Element {
+func (d *ConnectDialog) authPickerDialog(width int, palette theme.Palette) ui.Element {
 	dialogWidth := clampWidth(width, 68, 88)
 	lines := []string{
 		d.selected.Title,
 		d.selected.Description,
 		"",
 	}
-	items := make([]ListItem, 0, len(d.selected.AuthMethods))
+	items := make([]ui.ListItem, 0, len(d.selected.AuthMethods))
 	for _, method := range d.selected.AuthMethods {
-		items = append(items, ListItem{
+		items = append(items, ui.ListItem{
 			Primary:   method.Title,
 			Secondary: method.Description,
 		})
 	}
-	return WindowFrame{
+	return ui.WindowFrame{
 		Title: "Choose Auth Method",
 		Width: dialogWidth,
-		Content: Column{
-			Children: []Child{
-				Fixed(Column{
-					Children: []Child{
-						Fixed(linesBlock(lines...)),
-						Fixed(Section{
+		Content: ui.Column{
+			Children: []ui.Child{
+				ui.Fixed(ui.Column{
+					Children: []ui.Child{
+						ui.Fixed(linesBlock(lines...)),
+						ui.Fixed(ui.Section{
 							Width: dialogWidth - 8,
-							Child: List{
+							Child: ui.List{
 								Items:    items,
 								Width:    dialogWidth - 8,
 								Selected: d.authIndex,
@@ -343,7 +343,7 @@ func (d *ConnectDialog) authPickerDialog(width int, palette theme.Palette) Eleme
 					},
 					Spacing: 1,
 				}),
-				Fixed(Static{Content: "Enter continue  Esc back"}),
+				ui.Fixed(ui.Static{Content: "Enter continue  Esc back"}),
 			},
 			Spacing: 2,
 		},
@@ -351,53 +351,53 @@ func (d *ConnectDialog) authPickerDialog(width int, palette theme.Palette) Eleme
 	}
 }
 
-func (d *ConnectDialog) formDialog(width int, palette theme.Palette) Element {
+func (d *ConnectDialog) formDialog(width int, palette theme.Palette) ui.Element {
 	dialogWidth := clampWidth(width, 76, 100)
-	fieldChildren := make([]Child, 0, len(d.formFields()))
+	fieldChildren := make([]ui.Child, 0, len(d.formFields()))
 	for idx, field := range d.formFields() {
 		active := d.focus == connectFocusFields && d.fieldIndex == idx
-		fieldChildren = append(fieldChildren, Fixed(d.renderFormField(field, dialogWidth-10, palette, active)))
+		fieldChildren = append(fieldChildren, ui.Fixed(d.renderFormField(field, dialogWidth-10, palette, active)))
 	}
 
-	bodyChildren := []Child{
-		Fixed(Section{
+	bodyChildren := []ui.Child{
+		ui.Fixed(ui.Section{
 			Title:       "Provider",
-			Padding:     Insets{Left: 1, Right: 1, Bottom: 1},
+			Padding:     ui.Insets{Left: 1, Right: 1, Bottom: 1},
 			Background:  palette.SidebarBackground,
 			Foreground:  palette.SidebarForeground,
 			BorderColor: palette.SidebarBorder,
-			Child: Column{
-				Children: []Child{
-					Fixed(Static{Content: d.selected.Title}),
-					Fixed(Static{Content: compactInlineText(d.selected.Description)}),
+			Child: ui.Column{
+				Children: []ui.Child{
+					ui.Fixed(ui.Static{Content: d.selected.Title}),
+					ui.Fixed(ui.Static{Content: compactInlineText(d.selected.Description)}),
 				},
 				Spacing: 0,
 			},
 		}),
-		Fixed(Section{
+		ui.Fixed(ui.Section{
 			Title:       "Configuration",
-			Padding:     Insets{Left: 1, Right: 1, Bottom: 1},
+			Padding:     ui.Insets{Left: 1, Right: 1, Bottom: 1},
 			Background:  palette.SidebarBackground,
 			Foreground:  palette.SidebarForeground,
 			BorderColor: palette.SidebarBorder,
-			Child: Column{
+			Child: ui.Column{
 				Children: fieldChildren,
 				Spacing:  1,
 			},
 		}),
 	}
 	if strings.TrimSpace(d.status) != "" {
-		auxChildren := make([]Child, 0, 2)
+		auxChildren := make([]ui.Child, 0, 2)
 		if status := strings.TrimSpace(d.status); status != "" {
-			auxChildren = append(auxChildren, Fixed(d.renderStatusElement(palette)))
+			auxChildren = append(auxChildren, ui.Fixed(d.renderStatusElement(palette)))
 		}
-		bodyChildren = append(bodyChildren, Fixed(Section{
+		bodyChildren = append(bodyChildren, ui.Fixed(ui.Section{
 			Title:       "Connection",
-			Padding:     Insets{Left: 1, Right: 1, Bottom: 1},
+			Padding:     ui.Insets{Left: 1, Right: 1, Bottom: 1},
 			Background:  palette.SidebarBackground,
 			Foreground:  palette.SidebarForeground,
 			BorderColor: palette.SidebarBorder,
-			Child: Column{
+			Child: ui.Column{
 				Children: auxChildren,
 				Spacing:  1,
 			},
@@ -406,14 +406,14 @@ func (d *ConnectDialog) formDialog(width int, palette theme.Palette) Element {
 	buttons := d.formButtons()
 	buttons.Index = d.buttonIdx
 	buttons.Width = maxInt(0, dialogWidth-6)
-	return WindowFrame{
+	return ui.WindowFrame{
 		Title: "Connect Provider",
 		Width: dialogWidth,
-		Content: Column{
-			Children: []Child{
-				Fixed(Column{Children: bodyChildren, Spacing: 1}),
-				Fixed(buttons),
-				Fixed(Static{Content: "Type to edit  Ctrl+T test  Enter select  Esc cancel"}),
+		Content: ui.Column{
+			Children: []ui.Child{
+				ui.Fixed(ui.Column{Children: bodyChildren, Spacing: 1}),
+				ui.Fixed(buttons),
+				ui.Fixed(ui.Static{Content: "Type to edit  Ctrl+T test  Enter select  Esc cancel"}),
 			},
 			Spacing: 2,
 		},
@@ -421,37 +421,37 @@ func (d *ConnectDialog) formDialog(width int, palette theme.Palette) Element {
 	}
 }
 
-func (d ConnectDialog) formButtons() ButtonRow {
-	return ButtonRow{
-		Buttons: []Button{
+func (d ConnectDialog) formButtons() ui.ButtonRow {
+	return ui.ButtonRow{
+		Buttons: []ui.Button{
 			{ID: "test", Label: "Test", Hotkey: 't'},
 			{ID: "save", Label: "Save", Hotkey: 's', Primary: true},
 			{ID: "cancel", Label: "Cancel", Hotkey: 'c'},
 		},
-		Align: HorizontalAlignRight,
+		Align: ui.HorizontalAlignRight,
 	}
 }
 
-func (d ConnectDialog) renderFormField(field connectField, width int, palette theme.Palette, active bool) Element {
+func (d ConnectDialog) renderFormField(field connectField, width int, palette theme.Palette, active bool) ui.Element {
 	fieldWidth := maxInt(18, width)
-	hintWidth := maxInt(16, width-PlainWidth(field.Label)-3)
+	hintWidth := maxInt(16, width-ui.PlainWidth(field.Label)-3)
 	hint := truncateText(field.Description, hintWidth)
-	return Column{
-		Children: []Child{
-			Fixed(Row{
-				Children: []Child{
-					Fixed(Static{Content: field.Label}),
-					Flex(Spacer{}, 1),
-					Fixed(Static{Content: hint}),
+	return ui.Column{
+		Children: []ui.Child{
+			ui.Fixed(ui.Row{
+				Children: []ui.Child{
+					ui.Fixed(ui.Static{Content: field.Label}),
+					ui.Flex(ui.Spacer{}, 1),
+					ui.Fixed(ui.Static{Content: hint}),
 				},
 			}),
-			Fixed(d.renderInputField(field.ID, fieldWidth, palette, active)),
+			ui.Fixed(d.renderInputField(field.ID, fieldWidth, palette, active)),
 		},
 		Spacing: 1,
 	}
 }
 
-func (d ConnectDialog) renderInputField(fieldID string, width int, palette theme.Palette, active bool) Element {
+func (d ConnectDialog) renderInputField(fieldID string, width int, palette theme.Palette, active bool) ui.Element {
 	editor := d.editor(fieldID)
 	line := editor.VisibleLine()
 	before, cursor, after := line.Before(), line.Cursor(), line.After()
@@ -472,7 +472,7 @@ func (d ConnectDialog) renderInputField(fieldID string, width int, palette theme
 		background = palette.UserTextBackground
 		borderColor = firstNonEmptyColor(palette.SelectionBackground, palette.ActivityText, palette.SidebarBorder)
 	}
-	return InputField{
+	return ui.InputField{
 		Width:         width,
 		Value:         value,
 		Placeholder:   d.placeholderValue(fieldID),
@@ -703,7 +703,7 @@ func windowBounds(index, total, visible int) (int, int) {
 	return start, end
 }
 
-func (d *ConnectDialog) updateCurrentEditor(msg KeyMsg) {
+func (d *ConnectDialog) updateCurrentEditor(msg ui.KeyMsg) {
 	if d.focus != connectFocusFields {
 		return
 	}
@@ -773,10 +773,10 @@ func maskVisible(input string) string {
 	return strings.Repeat("•", len([]rune(input)))
 }
 
-func (d ConnectDialog) renderStatusElement(palette theme.Palette) Element {
+func (d ConnectDialog) renderStatusElement(palette theme.Palette) ui.Element {
 	status := strings.TrimSpace(d.status)
 	if status == "" {
-		return Static{}
+		return ui.Static{}
 	}
 	label := "WAIT"
 	labelColor := palette.ActivityText
@@ -789,5 +789,5 @@ func (d ConnectDialog) renderStatusElement(palette theme.Palette) Element {
 		labelColor = palette.DiffDeletedText
 	}
 	_ = labelColor
-	return Static{Content: "[" + label + "] " + status}
+	return ui.Static{Content: "[" + label + "] " + status}
 }

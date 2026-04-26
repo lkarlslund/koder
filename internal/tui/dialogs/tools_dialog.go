@@ -6,7 +6,7 @@ import (
 
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/theme"
-	. "github.com/lkarlslund/koder/internal/ui"
+	"github.com/lkarlslund/koder/internal/ui"
 )
 
 type ToolToggleItem struct {
@@ -41,19 +41,19 @@ type ToolsDialog struct {
 	original map[domain.ToolKind]bool
 	index    int
 	focus    toolsDialogFocus
-	buttons  ButtonRow
+	buttons  ui.ButtonRow
 }
 
 func NewToolsDialog(items []ToolToggleItem) ToolsDialog {
 	dialog := ToolsDialog{
 		items:    append([]ToolToggleItem(nil), items...),
 		original: map[domain.ToolKind]bool{},
-		buttons: ButtonRow{
-			Buttons: []Button{
+		buttons: ui.ButtonRow{
+			Buttons: []ui.Button{
 				{ID: "ok", Label: "OK", Hotkey: 'o', Primary: true},
 				{ID: "cancel", Label: "Cancel", Hotkey: 'c'},
 			},
-			Align: HorizontalAlignRight,
+			Align: ui.HorizontalAlignRight,
 		},
 	}
 	for _, item := range dialog.items {
@@ -62,7 +62,7 @@ func NewToolsDialog(items []ToolToggleItem) ToolsDialog {
 	return dialog
 }
 
-func (d *ToolsDialog) Update(msg KeyMsg) ToolsDialogAction {
+func (d *ToolsDialog) Update(msg ui.KeyMsg) ToolsDialogAction {
 	var action ToolsDialogAction
 	d.buttons.Buttons[0].OnClick = func() {
 		action = ToolsDialogAction{Kind: ToolsDialogActionApply, States: d.States()}
@@ -113,33 +113,33 @@ func (d *ToolsDialog) Update(msg KeyMsg) ToolsDialogAction {
 	return action
 }
 
-func (d ToolsDialog) Measure(ctx *Context, constraints Constraints) Size {
+func (d ToolsDialog) Measure(ctx *ui.Context, constraints ui.Constraints) ui.Size {
 	width := constraints.MaxW
 	if width <= 0 {
 		width = 88
 	}
-	return constraints.Clamp(d.dialog(width, ctx.Palette).Measure(ctx, Constraints{MaxW: width, MaxH: constraints.MaxH}))
+	return constraints.Clamp(d.dialog(width, ctx.Palette).Measure(ctx, ui.Constraints{MaxW: width, MaxH: constraints.MaxH}))
 }
 
-func (d ToolsDialog) Render(ctx *Context, bounds Rect) Surface {
+func (d ToolsDialog) Render(ctx *ui.Context, bounds ui.Rect) ui.Surface {
 	maxWidth := dialogRenderWidth(bounds, 88)
 	element := d.dialog(maxWidth, ctx.Palette)
-	size := element.Measure(ctx, Constraints{MaxW: maxWidth, MaxH: bounds.H})
-	return element.Render(ctx, Rect{X: bounds.X, Y: bounds.Y, W: size.W, H: bounds.H})
+	size := element.Measure(ctx, ui.Constraints{MaxW: maxWidth, MaxH: bounds.H})
+	return element.Render(ctx, ui.Rect{X: bounds.X, Y: bounds.Y, W: size.W, H: bounds.H})
 }
 
-func (d ToolsDialog) dialog(width int, palette theme.Palette) Element {
+func (d ToolsDialog) dialog(width int, palette theme.Palette) ui.Element {
 	dialogWidth := width
 	if dialogWidth <= 0 {
 		dialogWidth = 88
 	}
 	dialogWidth = maxInt(72, dialogWidth)
 	rowWidth := maxInt(56, dialogWidth-6)
-	rows := make([]Child, 0, len(d.items))
+	rows := make([]ui.Child, 0, len(d.items))
 	for idx, item := range d.items {
-		rows = append(rows, Fixed(HitBox{
+		rows = append(rows, ui.Fixed(ui.HitBox{
 			ID: "tool-row-" + strconv.Itoa(idx),
-			Child: CheckboxRow{
+			Child: ui.CheckboxRow{
 				Label:       item.Label,
 				Description: item.Description,
 				Checked:     item.Enabled,
@@ -152,15 +152,15 @@ func (d ToolsDialog) dialog(width int, palette theme.Palette) Element {
 	}
 	buttons := d.buttonRow(dialogWidth)
 	buttons.Width = maxInt(0, dialogWidth-6)
-	return WindowFrame{
+	return ui.WindowFrame{
 		Title: "Tools",
 		Width: dialogWidth,
-		Content: Column{
-			Children: []Child{
-				Fixed(Static{Content: "Per-session tool access. Space toggles the current tool."}),
-				Fixed(Column{Children: rows}),
-				Fixed(buttons),
-				Fixed(Static{Content: "Enter toggles a tool or activates the focused button. Esc cancels."}),
+		Content: ui.Column{
+			Children: []ui.Child{
+				ui.Fixed(ui.Static{Content: "Per-session tool access. Space toggles the current tool."}),
+				ui.Fixed(ui.Column{Children: rows}),
+				ui.Fixed(buttons),
+				ui.Fixed(ui.Static{Content: "Enter toggles a tool or activates the focused button. Esc cancels."}),
 			},
 			Spacing: 2,
 		},
@@ -238,9 +238,9 @@ func (d *ToolsDialog) toggleCurrent() {
 	d.items[d.index].Enabled = !d.items[d.index].Enabled
 }
 
-func (d ToolsDialog) buttonRow(width int) ButtonRow {
+func (d ToolsDialog) buttonRow(width int) ui.ButtonRow {
 	buttons := d.buttons
 	buttons.Width = maxInt(0, width-4)
-	buttons.Align = HorizontalAlignRight
+	buttons.Align = ui.HorizontalAlignRight
 	return buttons
 }

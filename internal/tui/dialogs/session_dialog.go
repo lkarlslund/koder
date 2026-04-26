@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/lkarlslund/koder/internal/theme"
-	. "github.com/lkarlslund/koder/internal/ui"
+	"github.com/lkarlslund/koder/internal/ui"
 )
 
 type SessionItem struct {
@@ -41,23 +41,23 @@ type SessionDialog struct {
 	ShowCWD bool
 	view    []SessionItem
 	focus   pickerDialogFocus
-	buttons ButtonRow
+	buttons ui.ButtonRow
 }
 
 func NewSessionDialog(items []SessionItem, showCWD bool) SessionDialog {
 	d := SessionDialog{Items: items, ShowCWD: showCWD}
-	d.buttons = ButtonRow{
-		Buttons: []Button{
+	d.buttons = ui.ButtonRow{
+		Buttons: []ui.Button{
 			{ID: "ok", Label: "OK", Hotkey: 'o', Primary: true},
 			{ID: "cancel", Label: "Cancel", Hotkey: 'c'},
 		},
-		Align: HorizontalAlignRight,
+		Align: ui.HorizontalAlignRight,
 	}
 	d.refilter()
 	return d
 }
 
-func (d *SessionDialog) Update(msg KeyMsg) SessionDialogAction {
+func (d *SessionDialog) Update(msg ui.KeyMsg) SessionDialogAction {
 	d.ensureButtons()
 	var action SessionDialogAction
 	d.buttons.Buttons[0].OnClick = func() { action = d.selectCurrent() }
@@ -104,7 +104,7 @@ func (d *SessionDialog) Update(msg KeyMsg) SessionDialogAction {
 			d.refilter()
 		}
 	default:
-		if d.focus == pickerDialogFocusList && msg.Type == KeyRunes {
+		if d.focus == pickerDialogFocusList && msg.Type == ui.KeyRunes {
 			d.Query += msg.String()
 			d.refilter()
 		}
@@ -112,22 +112,22 @@ func (d *SessionDialog) Update(msg KeyMsg) SessionDialogAction {
 	return SessionDialogAction{}
 }
 
-func (d SessionDialog) Measure(ctx *Context, constraints Constraints) Size {
+func (d SessionDialog) Measure(ctx *ui.Context, constraints ui.Constraints) ui.Size {
 	width := constraints.MaxW
 	if width <= 0 {
 		width = 110
 	}
-	return constraints.Clamp(d.dialog(width, ctx.Palette).Measure(ctx, Constraints{MaxW: width, MaxH: constraints.MaxH}))
+	return constraints.Clamp(d.dialog(width, ctx.Palette).Measure(ctx, ui.Constraints{MaxW: width, MaxH: constraints.MaxH}))
 }
 
-func (d SessionDialog) Render(ctx *Context, bounds Rect) Surface {
+func (d SessionDialog) Render(ctx *ui.Context, bounds ui.Rect) ui.Surface {
 	maxWidth := dialogRenderWidth(bounds, 110)
 	element := d.dialog(maxWidth, ctx.Palette)
-	size := element.Measure(ctx, Constraints{MaxW: maxWidth, MaxH: bounds.H})
-	return element.Render(ctx, Rect{X: bounds.X, Y: bounds.Y, W: size.W, H: bounds.H})
+	size := element.Measure(ctx, ui.Constraints{MaxW: maxWidth, MaxH: bounds.H})
+	return element.Render(ctx, ui.Rect{X: bounds.X, Y: bounds.Y, W: size.W, H: bounds.H})
 }
 
-func (d SessionDialog) dialog(width int, palette theme.Palette) Element {
+func (d SessionDialog) dialog(width int, palette theme.Palette) ui.Element {
 	dialogWidth := width
 	if dialogWidth <= 0 {
 		dialogWidth = 110
@@ -149,18 +149,18 @@ func (d SessionDialog) dialog(width int, palette theme.Palette) Element {
 		gapCount = 5
 	}
 	titleWidth := maxInt(8, contentWidth-idWidth-timeWidth-timeWidth-tokensWidth-cwdWidth-(gapCount*2))
-	columns := []TableColumn{
+	columns := []ui.TableColumn{
 		{Title: "ID", Width: idWidth},
 		{Title: "Created", Width: timeWidth},
 		{Title: "Modified", Width: timeWidth},
 		{Title: "Tokens", Width: tokensWidth},
 	}
 	if d.ShowCWD {
-		columns = append(columns, TableColumn{Title: "CWD", Width: cwdWidth})
+		columns = append(columns, ui.TableColumn{Title: "CWD", Width: cwdWidth})
 	}
-	columns = append(columns, TableColumn{Title: "Title", Width: titleWidth})
+	columns = append(columns, ui.TableColumn{Title: "Title", Width: titleWidth})
 
-	rows := []TableRow{}
+	rows := []ui.TableRow{}
 	if len(d.view) > 0 {
 		start := 0
 		if d.Index >= 5 {
@@ -177,7 +177,7 @@ func (d SessionDialog) dialog(width int, palette theme.Palette) Element {
 				cells = append(cells, item.CWD)
 			}
 			cells = append(cells, item.Title)
-			rows = append(rows, TableRow{
+			rows = append(rows, ui.TableRow{
 				ControlID: "session-row-" + strconv.Itoa(idx),
 				Cells:     cells,
 				Selected:  idx == d.Index,
@@ -191,9 +191,9 @@ func (d SessionDialog) dialog(width int, palette theme.Palette) Element {
 		details = d.clampPreviewLines(d.previewText(item, contentWidth), 10)
 	}
 
-	list := Element(staticBlock("No matches"))
+	list := ui.Element(staticBlock("No matches"))
 	if len(rows) > 0 {
-		list = Table{
+		list = ui.Table{
 			Width:      contentWidth,
 			Columns:    columns,
 			Rows:       rows,
@@ -203,30 +203,30 @@ func (d SessionDialog) dialog(width int, palette theme.Palette) Element {
 
 	buttons := d.buttonRow(contentWidth)
 	buttons.Width = maxInt(0, dialogWidth-6)
-	return WindowFrame{
+	return ui.WindowFrame{
 		Title: "Resume Session",
 		Width: dialogWidth,
-		Content: Column{
-			Children: []Child{
-				Fixed(Column{
-					Children: []Child{
-						Fixed(staticBlock(fmt.Sprintf("Filter: %s", d.Query))),
-						Fixed(Spacer{H: 1}),
-						Fixed(Section{Width: contentWidth, Child: list}),
-						Fixed(Spacer{H: 1}),
-						Fixed(Section{
+		Content: ui.Column{
+			Children: []ui.Child{
+				ui.Fixed(ui.Column{
+					Children: []ui.Child{
+						ui.Fixed(staticBlock(fmt.Sprintf("Filter: %s", d.Query))),
+						ui.Fixed(ui.Spacer{H: 1}),
+						ui.Fixed(ui.Section{Width: contentWidth, Child: list}),
+						ui.Fixed(ui.Spacer{H: 1}),
+						ui.Fixed(ui.Section{
 							Title:       "Preview",
 							Width:       contentWidth,
-							Padding:     Insets{Top: 1, Left: 1, Right: 1},
+							Padding:     ui.Insets{Top: 1, Left: 1, Right: 1},
 							Background:  palette.ScreenBackground,
 							Foreground:  palette.SidebarForeground,
 							BorderColor: palette.SidebarBorder,
-							Child:       TextPane{Content: details},
+							Child:       ui.TextPane{Content: details},
 						}),
 					},
 				}),
-				Fixed(buttons),
-				Fixed(Static{Content: "Enter resumes the highlighted session. Esc creates a new session."}),
+				ui.Fixed(buttons),
+				ui.Fixed(ui.Static{Content: "Enter resumes the highlighted session. Esc creates a new session."}),
 			},
 			Spacing: 2,
 		},
@@ -321,19 +321,19 @@ func (d *SessionDialog) ensureButtons() {
 	if len(d.buttons.Buttons) != 0 {
 		return
 	}
-	d.buttons = ButtonRow{
-		Buttons: []Button{
+	d.buttons = ui.ButtonRow{
+		Buttons: []ui.Button{
 			{ID: "ok", Label: "OK", Hotkey: 'o', Primary: true},
 			{ID: "cancel", Label: "Cancel", Hotkey: 'c'},
 		},
-		Align: HorizontalAlignRight,
+		Align: ui.HorizontalAlignRight,
 	}
 }
 
-func (d SessionDialog) buttonRow(width int) ButtonRow {
+func (d SessionDialog) buttonRow(width int) ui.ButtonRow {
 	buttons := d.buttons
 	buttons.Width = maxInt(0, width)
-	buttons.Align = HorizontalAlignRight
+	buttons.Align = ui.HorizontalAlignRight
 	return buttons
 }
 

@@ -5,10 +5,10 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
-	. "github.com/lkarlslund/koder/internal/ui"
+	"github.com/lkarlslund/koder/internal/ui"
 )
 
-func dialogRenderWidth(bounds Rect, fallback int) int {
+func dialogRenderWidth(bounds ui.Rect, fallback int) int {
 	width := bounds.W
 	if width <= 0 {
 		width = fallback
@@ -19,20 +19,20 @@ func dialogRenderWidth(bounds Rect, fallback int) int {
 	return width
 }
 
-func staticBlock(text string) Element {
-	return Static{Content: strings.TrimRight(text, "\n")}
+func staticBlock(text string) ui.Element {
+	return ui.Static{Content: strings.TrimRight(text, "\n")}
 }
 
-func linesBlock(lines ...string) Element {
-	children := make([]Child, 0, len(lines))
+func linesBlock(lines ...string) ui.Element {
+	children := make([]ui.Child, 0, len(lines))
 	for _, line := range lines {
 		if line == "" {
-			children = append(children, Fixed(Spacer{H: 1}))
+			children = append(children, ui.Fixed(ui.Spacer{H: 1}))
 			continue
 		}
-		children = append(children, Fixed(Static{Content: line}))
+		children = append(children, ui.Fixed(ui.Static{Content: line}))
 	}
-	return Column{Children: children}
+	return ui.Column{Children: children}
 }
 
 type pickerDialogFocus int
@@ -61,13 +61,13 @@ func truncateText(input string, width int) string {
 		return ""
 	}
 	plain := compactInlineText(input)
-	if PlainWidth(plain) <= width {
+	if ui.PlainWidth(plain) <= width {
 		return plain
 	}
 	if width == 1 {
 		return "…"
 	}
-	return PlainTruncate(plain, width-1, "") + "…"
+	return ui.PlainTruncate(plain, width-1, "") + "…"
 }
 
 func compactInlineText(input string) string {
@@ -107,22 +107,22 @@ func wrapPlain(input string, width int) string {
 }
 
 func wrapWords(line string, width int) []string {
-	if PlainWidth(line) <= width {
+	if ui.PlainWidth(line) <= width {
 		return []string{line}
 	}
 	var lines []string
 	remaining := line
 	for remaining != "" {
-		if PlainWidth(remaining) <= width {
+		if ui.PlainWidth(remaining) <= width {
 			lines = append(lines, remaining)
 			break
 		}
-		segment := PlainTruncate(remaining, width, "")
+		segment := ui.PlainTruncate(remaining, width, "")
 		if idx := strings.LastIndex(segment, " "); idx > 0 {
 			segment = strings.TrimRight(segment[:idx], " ")
 		}
 		if segment == "" {
-			segment = PlainTruncate(remaining, width, "")
+			segment = ui.PlainTruncate(remaining, width, "")
 		}
 		lines = append(lines, segment)
 		remaining = strings.TrimSpace(strings.TrimPrefix(remaining, segment))

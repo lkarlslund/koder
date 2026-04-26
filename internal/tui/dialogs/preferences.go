@@ -6,7 +6,7 @@ import (
 
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/theme"
-	. "github.com/lkarlslund/koder/internal/ui"
+	"github.com/lkarlslund/koder/internal/ui"
 )
 
 type PreferencesActionKind int
@@ -57,7 +57,7 @@ type PreferencesDialog struct {
 	themeNames   []string
 	spinnerFrame int
 	tabs         []preferencesTab
-	tabList      VerticalTabs
+	tabList      ui.VerticalTabs
 	focus        preferencesFocus
 	fieldIndex   int
 	buttonIndex  int
@@ -97,7 +97,7 @@ func NewPreferencesDialog(current config.UI, themeNames []string) PreferencesDia
 		draft:      current,
 		themeNames: themeNames,
 		tabs:       tabs,
-		tabList: VerticalTabs{
+		tabList: ui.VerticalTabs{
 			Tabs: tabNames,
 		},
 		focus: preferencesFocusFields,
@@ -116,7 +116,7 @@ func (d PreferencesDialog) Original() config.UI {
 	return d.original
 }
 
-func (d *PreferencesDialog) Update(msg KeyMsg) PreferencesAction {
+func (d *PreferencesDialog) Update(msg ui.KeyMsg) PreferencesAction {
 	switch msg.String() {
 	case "esc":
 		return PreferencesAction{Kind: PreferencesActionCancel, UI: d.original}
@@ -238,8 +238,8 @@ func (d *PreferencesDialog) adjustField(delta int) PreferencesAction {
 		}
 		d.draft.Theme = d.themeNames[idx]
 	case preferencesFieldSpinner:
-		names := SpinnerNames()
-		idx := SpinnerIndex(d.draft.Spinner)
+		names := ui.SpinnerNames()
+		idx := ui.SpinnerIndex(d.draft.Spinner)
 		if idx < 0 {
 			idx = 0
 		}
@@ -259,22 +259,22 @@ func (d *PreferencesDialog) adjustField(delta int) PreferencesAction {
 	return PreferencesAction{Kind: PreferencesActionChanged, UI: d.draft}
 }
 
-func (d PreferencesDialog) Measure(ctx *Context, constraints Constraints) Size {
+func (d PreferencesDialog) Measure(ctx *ui.Context, constraints ui.Constraints) ui.Size {
 	width := constraints.MaxW
 	if width <= 0 {
 		width = 84
 	}
-	return constraints.Clamp(d.dialog(width, ctx.Palette).Measure(ctx, Constraints{MaxW: width, MaxH: constraints.MaxH}))
+	return constraints.Clamp(d.dialog(width, ctx.Palette).Measure(ctx, ui.Constraints{MaxW: width, MaxH: constraints.MaxH}))
 }
 
-func (d PreferencesDialog) Render(ctx *Context, bounds Rect) Surface {
+func (d PreferencesDialog) Render(ctx *ui.Context, bounds ui.Rect) ui.Surface {
 	maxWidth := dialogRenderWidth(bounds, 84)
 	element := d.dialog(maxWidth, ctx.Palette)
-	size := element.Measure(ctx, Constraints{MaxW: maxWidth, MaxH: bounds.H})
-	return element.Render(ctx, Rect{X: bounds.X, Y: bounds.Y, W: size.W, H: bounds.H})
+	size := element.Measure(ctx, ui.Constraints{MaxW: maxWidth, MaxH: bounds.H})
+	return element.Render(ctx, ui.Rect{X: bounds.X, Y: bounds.Y, W: size.W, H: bounds.H})
 }
 
-func (d PreferencesDialog) dialog(width int, palette theme.Palette) Element {
+func (d PreferencesDialog) dialog(width int, palette theme.Palette) ui.Element {
 	dialogWidth := width
 	if dialogWidth <= 0 {
 		dialogWidth = 84
@@ -283,12 +283,12 @@ func (d PreferencesDialog) dialog(width int, palette theme.Palette) Element {
 	tabWidth := 18
 	fieldWidth := maxInt(40, dialogWidth-tabWidth-9)
 
-	fieldRows := make([]Child, 0, len(d.currentFields()))
+	fieldRows := make([]ui.Child, 0, len(d.currentFields()))
 	for idx, field := range d.currentFields() {
 		focused := d.focus == preferencesFocusFields && idx == d.fieldIndex
 		switch field.Kind {
 		case preferencesFieldTheme:
-			fieldRows = append(fieldRows, Fixed(ChoiceRow{
+			fieldRows = append(fieldRows, ui.Fixed(ui.ChoiceRow{
 				Label:       field.Label,
 				Description: field.Description,
 				Value:       d.draft.Theme,
@@ -296,9 +296,9 @@ func (d PreferencesDialog) dialog(width int, palette theme.Palette) Element {
 				Focused:     focused,
 			}))
 		case preferencesFieldSpinner:
-			style := SpinnerStyleByID(d.draft.Spinner)
-			value := SpinnerFrame(d.draft.Spinner, d.spinnerFrame) + " " + style.Label
-			fieldRows = append(fieldRows, Fixed(ChoiceRow{
+			style := ui.SpinnerStyleByID(d.draft.Spinner)
+			value := ui.SpinnerFrame(d.draft.Spinner, d.spinnerFrame) + " " + style.Label
+			fieldRows = append(fieldRows, ui.Fixed(ui.ChoiceRow{
 				Label:       field.Label,
 				Description: field.Description,
 				Value:       value,
@@ -306,7 +306,7 @@ func (d PreferencesDialog) dialog(width int, palette theme.Palette) Element {
 				Focused:     focused,
 			}))
 		case preferencesFieldToggle:
-			fieldRows = append(fieldRows, Fixed(CheckboxRow{
+			fieldRows = append(fieldRows, ui.Fixed(ui.CheckboxRow{
 				Label:       field.Label,
 				Description: field.Description,
 				Checked:     d.toggleValue(field.ID),
@@ -317,49 +317,49 @@ func (d PreferencesDialog) dialog(width int, palette theme.Palette) Element {
 			}))
 		}
 	}
-	fields := Inset{
-		Padding: Insets{Left: 1},
-		Child:   Column{Children: fieldRows},
+	fields := ui.Inset{
+		Padding: ui.Insets{Left: 1},
+		Child:   ui.Column{Children: fieldRows},
 	}
 
-	buttons := ButtonRow{
-		Buttons: []Button{
+	buttons := ui.ButtonRow{
+		Buttons: []ui.Button{
 			{Label: "OK", Primary: true, Focused: d.focus == preferencesFocusButtons && d.buttonIndex == 0},
 			{Label: "Cancel", Focused: d.focus == preferencesFocusButtons && d.buttonIndex == 1},
 		},
-		Align: HorizontalAlignRight,
+		Align: ui.HorizontalAlignRight,
 		Width: dialogWidth - 4,
 	}
 
 	buttons.Width = maxInt(0, dialogWidth-6)
-	return WindowFrame{
+	return ui.WindowFrame{
 		Title: "Preferences",
 		Width: dialogWidth,
-		Content: Column{
-			Children: []Child{
-				Fixed(Static{Content: "Tab/Shift+Tab moves focus. Enter or arrows change values."}),
-				Fixed(Split{
-					Direction: SplitHorizontal,
-					First: Section{
+		Content: ui.Column{
+			Children: []ui.Child{
+				ui.Fixed(ui.Static{Content: "Tab/Shift+Tab moves focus. Enter or arrows change values."}),
+				ui.Fixed(ui.Split{
+					Direction: ui.SplitHorizontal,
+					First: ui.Section{
 						Title: "Tabs",
 						Width: tabWidth,
-						Child: VerticalTabs{
+						Child: ui.VerticalTabs{
 							Tabs:    d.tabList.Tabs,
 							Active:  d.tabList.Active,
 							Width:   tabWidth - 2,
 							Focused: d.focus == preferencesFocusTabs,
 						},
 					},
-					Second: Section{
+					Second: ui.Section{
 						Title:   "Options",
 						Width:   fieldWidth + 1,
-						Padding: Insets{Left: 1},
+						Padding: ui.Insets{Left: 1},
 						Child:   fields,
 					},
 					Gap: 1,
 				}),
-				Fixed(buttons),
-				Fixed(Static{Content: fmt.Sprintf("Theme: %s  Spinner: %s", strings.TrimSpace(d.draft.Theme), SpinnerStyleByID(d.draft.Spinner).Label)}),
+				ui.Fixed(buttons),
+				ui.Fixed(ui.Static{Content: fmt.Sprintf("Theme: %s  Spinner: %s", strings.TrimSpace(d.draft.Theme), ui.SpinnerStyleByID(d.draft.Spinner).Label)}),
 			},
 			Spacing: 2,
 		},

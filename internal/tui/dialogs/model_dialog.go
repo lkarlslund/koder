@@ -6,7 +6,7 @@ import (
 
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/theme"
-	. "github.com/lkarlslund/koder/internal/ui"
+	"github.com/lkarlslund/koder/internal/ui"
 )
 
 type ModelDialogActionKind int
@@ -29,7 +29,7 @@ type ModelDialog struct {
 	Models     []domain.Model
 	view       []domain.Model
 	focus      pickerDialogFocus
-	buttons    ButtonRow
+	buttons    ui.ButtonRow
 }
 
 func NewModelDialog(providerID string, models []domain.Model, current string) ModelDialog {
@@ -37,12 +37,12 @@ func NewModelDialog(providerID string, models []domain.Model, current string) Mo
 		ProviderID: providerID,
 		Models:     models,
 	}
-	d.buttons = ButtonRow{
-		Buttons: []Button{
+	d.buttons = ui.ButtonRow{
+		Buttons: []ui.Button{
 			{ID: "ok", Label: "OK", Hotkey: 'o', Primary: true},
 			{ID: "cancel", Label: "Cancel", Hotkey: 'c'},
 		},
-		Align: HorizontalAlignRight,
+		Align: ui.HorizontalAlignRight,
 	}
 	d.refilter()
 	for idx, item := range d.view {
@@ -54,7 +54,7 @@ func NewModelDialog(providerID string, models []domain.Model, current string) Mo
 	return d
 }
 
-func (d *ModelDialog) Update(msg KeyMsg) ModelDialogAction {
+func (d *ModelDialog) Update(msg ui.KeyMsg) ModelDialogAction {
 	d.ensureButtons()
 	var action ModelDialogAction
 	d.buttons.Buttons[0].OnClick = func() { action = d.selectCurrent() }
@@ -100,7 +100,7 @@ func (d *ModelDialog) Update(msg KeyMsg) ModelDialogAction {
 			d.refilter()
 		}
 	default:
-		if d.focus == pickerDialogFocusList && msg.Type == KeyRunes {
+		if d.focus == pickerDialogFocusList && msg.Type == ui.KeyRunes {
 			d.Query += msg.String()
 			d.refilter()
 		}
@@ -108,22 +108,22 @@ func (d *ModelDialog) Update(msg KeyMsg) ModelDialogAction {
 	return ModelDialogAction{}
 }
 
-func (d ModelDialog) Measure(ctx *Context, constraints Constraints) Size {
+func (d ModelDialog) Measure(ctx *ui.Context, constraints ui.Constraints) ui.Size {
 	width := constraints.MaxW
 	if width <= 0 {
 		width = 84
 	}
-	return constraints.Clamp(d.dialog(width, ctx.Palette).Measure(ctx, Constraints{MaxW: width, MaxH: constraints.MaxH}))
+	return constraints.Clamp(d.dialog(width, ctx.Palette).Measure(ctx, ui.Constraints{MaxW: width, MaxH: constraints.MaxH}))
 }
 
-func (d ModelDialog) Render(ctx *Context, bounds Rect) Surface {
+func (d ModelDialog) Render(ctx *ui.Context, bounds ui.Rect) ui.Surface {
 	maxWidth := dialogRenderWidth(bounds, 84)
 	element := d.dialog(maxWidth, ctx.Palette)
-	size := element.Measure(ctx, Constraints{MaxW: maxWidth, MaxH: bounds.H})
-	return element.Render(ctx, Rect{X: bounds.X, Y: bounds.Y, W: size.W, H: bounds.H})
+	size := element.Measure(ctx, ui.Constraints{MaxW: maxWidth, MaxH: bounds.H})
+	return element.Render(ctx, ui.Rect{X: bounds.X, Y: bounds.Y, W: size.W, H: bounds.H})
 }
 
-func (d ModelDialog) dialog(width int, palette theme.Palette) Element {
+func (d ModelDialog) dialog(width int, palette theme.Palette) ui.Element {
 	dialogWidth := width
 	if dialogWidth <= 0 {
 		dialogWidth = 72
@@ -136,11 +136,11 @@ func (d ModelDialog) dialog(width int, palette theme.Palette) Element {
 		tertiaryWidth = minInt(10, maxInt(5, listWidth/8))
 	}
 	secondaryWidth := maxInt(6, listWidth-primaryWidth-tertiaryWidth-4)
-	rows := []TableRow{}
+	rows := []ui.TableRow{}
 	start, end := windowBounds(d.Index, len(d.view), 10)
 	for idx := start; idx < end; idx++ {
 		item := d.view[idx]
-		rows = append(rows, TableRow{
+		rows = append(rows, ui.TableRow{
 			ControlID: "model-row-" + strconv.Itoa(idx),
 			Cells: []string{
 				item.ID,
@@ -152,13 +152,13 @@ func (d ModelDialog) dialog(width int, palette theme.Palette) Element {
 		})
 	}
 
-	var list Element
+	var list ui.Element
 	if len(rows) == 0 {
 		list = staticBlock("No matches")
 	} else {
-		list = Table{
+		list = ui.Table{
 			Width: listWidth,
-			Columns: []TableColumn{
+			Columns: []ui.TableColumn{
 				{Title: "Model", Width: primaryWidth},
 				{Title: "Owner", Width: secondaryWidth},
 				{Title: "Caps", Width: tertiaryWidth, AlignRight: tertiaryWidth > 0},
@@ -170,20 +170,20 @@ func (d ModelDialog) dialog(width int, palette theme.Palette) Element {
 
 	buttons := d.buttonRow(dialogWidth)
 	buttons.Width = maxInt(0, dialogWidth-6)
-	return WindowFrame{
+	return ui.WindowFrame{
 		Title: "Select Model",
 		Width: dialogWidth,
-		Content: Column{
-			Children: []Child{
-				Fixed(Column{
-					Children: []Child{
-						Fixed(staticBlock("Filter: " + d.Query)),
-						Fixed(Spacer{H: 1}),
-						Fixed(Section{Width: listWidth, Child: list}),
+		Content: ui.Column{
+			Children: []ui.Child{
+				ui.Fixed(ui.Column{
+					Children: []ui.Child{
+						ui.Fixed(staticBlock("Filter: " + d.Query)),
+						ui.Fixed(ui.Spacer{H: 1}),
+						ui.Fixed(ui.Section{Width: listWidth, Child: list}),
 					},
 				}),
-				Fixed(buttons),
-				Fixed(Static{Content: "Enter to select, Esc to cancel"}),
+				ui.Fixed(buttons),
+				ui.Fixed(ui.Static{Content: "Enter to select, Esc to cancel"}),
 			},
 			Spacing: 2,
 		},
@@ -292,19 +292,19 @@ func (d *ModelDialog) ensureButtons() {
 	if len(d.buttons.Buttons) != 0 {
 		return
 	}
-	d.buttons = ButtonRow{
-		Buttons: []Button{
+	d.buttons = ui.ButtonRow{
+		Buttons: []ui.Button{
 			{ID: "ok", Label: "OK", Hotkey: 'o', Primary: true},
 			{ID: "cancel", Label: "Cancel", Hotkey: 'c'},
 		},
-		Align: HorizontalAlignRight,
+		Align: ui.HorizontalAlignRight,
 	}
 }
 
-func (d ModelDialog) buttonRow(width int) ButtonRow {
+func (d ModelDialog) buttonRow(width int) ui.ButtonRow {
 	buttons := d.buttons
 	buttons.Width = maxInt(0, width)
-	buttons.Align = HorizontalAlignRight
+	buttons.Align = ui.HorizontalAlignRight
 	return buttons
 }
 
