@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -209,6 +210,114 @@ func ValidateMilestoneProgress(items []store.Milestone) error {
 		return errors.New("milestones may contain at most one in_progress item")
 	}
 	return nil
+}
+
+func RequireSessionStore(runtime Runtime) (*store.Store, error) {
+	if runtime.Store == nil || runtime.SessionID == 0 {
+		return nil, errors.New("planning tools require a persisted session")
+	}
+	return runtime.Store, nil
+}
+
+func PersistedTodoBucket(ctx context.Context, st *store.Store, sessionID int64, ref string) (store.MilestonePlan, []store.TodoItem, string, error) {
+	plan, err := st.GetMilestonePlan(ctx, sessionID)
+	if err != nil {
+		return store.MilestonePlan{}, nil, "", err
+	}
+	if ref == "" {
+		active, ok := ActiveMilestone(plan)
+		if !ok {
+			return store.MilestonePlan{}, nil, "", errors.New("no active milestone; read milestones first or provide milestone_ref")
+		}
+		ref = active.Ref
+	}
+	todos, err := st.ListTodos(ctx, sessionID, ref)
+	if err != nil {
+		return store.MilestonePlan{}, nil, "", err
+	}
+	return plan, todos, ref, nil
+}
+
+func MilestoneStoredResult(plan store.MilestonePlan) MilestonePlanStoredResult {
+	items := make([]MilestoneStoredItem, 0, len(plan.Milestones))
+	for _, item := range plan.Milestones {
+		items = append(items, MilestoneStoredItem{
+			Ref:    item.Ref,
+			Title:  item.Title,
+			Status: string(item.Status),
+			Notes:  item.Notes,
+		})
+	}
+	return MilestonePlanStoredResult{
+		Summary:    plan.Summary,
+		Milestones: items,
+	}
+}
+
+func TodoStoredResult(plan store.MilestonePlan, ref string, todos []store.TodoItem, message string) TodoListStoredResult {
+	items := make([]TodoStoredItem, 0, len(todos))
+	for _, item := range todos {
+		items = append(items, TodoStoredItem{
+			ID:      item.ID,
+			Content: item.Content,
+			Status:  string(item.Status),
+		})
+	}
+	return TodoListStoredResult{
+		MilestoneRef:   ref,
+		MilestoneTitle: MilestoneTitle(plan, ref),
+		Message:        message,
+		Items:          items,
+	}
+}
+
+func MilestonePlanResult(plan store.MilestonePlan) Result {
+	stored := MilestoneStoredResult(plan)
+	output := FormatMilestoneOutput(stored)
+	if strings.TrimSpace(output) == "" {
+		output = "No milestones defined."
+	}
+	return Result{
+		Output: output,
+		Meta:   map[string]string{"milestone_count": fmt.Sprintf("%d", len(stored.Milestones))},
+		Stored: stored,
+	}
+}
+
+func TodoBucketResult(plan store.MilestonePlan, ref string, todos []store.TodoItem, message string) Result {
+	return TodoBucketResultWithTitle(ref, MilestoneTitle(plan, ref), todos, message)
+}
+
+func TodoBucketResultWithTitle(ref, title string, todos []store.TodoItem, message string) Result {
+	stored := TodoStoredResult(store.MilestonePlan{Milestones: []store.Milestone{{Ref: ref, Title: title}}}, ref, todos, message)
+	output := FormatTodoOutput(stored)
+	if strings.TrimSpace(output) == "" {
+		output = "No todo items found."
+	}
+	return Result{
+		Output: output,
+		Meta: map[string]string{
+			"milestone_ref": ref,
+			"todo_count":    fmt.Sprintf("%d", len(stored.Items)),
+		},
+		Stored: stored,
+	}
+}
+
+func FormatMilestoneOutput(result MilestonePlanStoredResult) string {
+	text, _ := DisplayTextForPart(domain.Part{
+		Kind:     domain.PartKindToolOutput,
+		MetaJSON: JSONMeta(MetaWithStoredResult(nil, domain.PartKindToolOutput, domain.ToolKindMilestoneList, StoredResultStatusOK, result)),
+	})
+	return text
+}
+
+func FormatTodoOutput(result TodoListStoredResult) string {
+	text, _ := DisplayTextForPart(domain.Part{
+		Kind:     domain.PartKindToolOutput,
+		MetaJSON: JSONMeta(MetaWithStoredResult(nil, domain.PartKindToolOutput, domain.ToolKindTodoList, StoredResultStatusOK, result)),
+	})
+	return text
 }
 
 func FormatTodoID(id int64) string { return strconv.FormatInt(id, 10) }

@@ -1,4 +1,4 @@
-package planningtools_test
+package todotool_test
 
 import (
 	"context"
