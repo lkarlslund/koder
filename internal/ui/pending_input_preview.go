@@ -26,7 +26,7 @@ func (p PendingInputPreview) render(palette theme.Palette) Surface {
 
 	rows := make([]Surface, 0, 8)
 	if len(p.PendingSteers) > 0 {
-		rows = append(rows, p.renderHeader("Messages to be submitted after next tool call", mutedFG, bg))
+		rows = append(rows, p.renderHeader("Messages to be submitted when current run finishes", mutedFG, bg))
 		rows = append(rows, p.renderPreviewRows(p.PendingSteers, mutedFG, bg, true)...)
 	}
 	if len(p.RejectedSteers) > 0 {

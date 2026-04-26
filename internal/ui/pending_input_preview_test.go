@@ -40,7 +40,7 @@ func TestPendingInputPreviewShowsPendingSteersBeforeQueuedMessages(t *testing.T)
 	}.render(palette))
 	plain := got
 
-	steerIdx := strings.Index(plain, "Messages to be submitted after next tool call")
+	steerIdx := strings.Index(plain, "Messages to be submitted when current run finishes")
 	queueIdx := strings.Index(plain, "Queued follow-up inputs")
 	if steerIdx == -1 || queueIdx == -1 {
 		t.Fatalf("expected both preview sections, got %q", plain)
