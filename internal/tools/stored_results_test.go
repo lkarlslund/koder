@@ -71,12 +71,7 @@ func TestDisplayTextForPartFormatsEditHunks(t *testing.T) {
 	}, domain.PartKindToolOutput, domain.ToolKindEdit, tools.StoredResultStatusOK, tools.EditStoredResult{
 		Path:    "game/map.go",
 		Summary: "Edited game/map.go (replaced 1 occurrence)",
-		Hunks: []tools.EditStoredHunk{{
-			OldStart: 12,
-			NewStart: 12,
-			OldLines: []string{"if oldCondition {"},
-			NewLines: []string{"if newCondition {"},
-		}},
+		Diff:    "--- game/map.go\n+++ game/map.go\n@@ -12,1 +12,1 @@\n-if oldCondition {\n+if newCondition {",
 	}))
 	if err != nil {
 		t.Fatalf("marshal meta: %v", err)
@@ -91,10 +86,11 @@ func TestDisplayTextForPartFormatsEditHunks(t *testing.T) {
 		t.Fatal("expected display text")
 	}
 	for _, want := range []string{
-		"Edited game/map.go (replaced 1 occurrence)",
+		"--- game/map.go",
+		"+++ game/map.go",
 		"@@ -12,1 +12,1 @@",
-		"-12 if oldCondition {",
-		"+12 if newCondition {",
+		"-if oldCondition {",
+		"+if newCondition {",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("expected %q in %q", want, text)

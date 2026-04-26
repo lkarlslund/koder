@@ -73,6 +73,7 @@ type EditStoredResult struct {
 	ReplaceAll  bool             `json:"replace_all,omitempty"`
 	Occurrences int              `json:"occurrences,omitempty"`
 	Summary     string           `json:"summary,omitempty"`
+	Diff        string           `json:"diff,omitempty"`
 	Hunks       []EditStoredHunk `json:"hunks,omitempty"`
 	Truncated   bool             `json:"truncated,omitempty"`
 }
@@ -536,6 +537,13 @@ func formatWriteStoredResultForDisplay(result WriteStoredResult) string {
 }
 
 func formatEditStoredResultForDisplay(result EditStoredResult) string {
+	if diff := strings.TrimSpace(result.Diff); diff != "" {
+		return diff
+	}
+	return formatLegacyEditStoredResultForDisplay(result)
+}
+
+func formatLegacyEditStoredResultForDisplay(result EditStoredResult) string {
 	lines := []string{strings.TrimSpace(result.Summary)}
 	for _, hunk := range result.Hunks {
 		oldCount := max(1, len(hunk.OldLines))

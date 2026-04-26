@@ -113,6 +113,7 @@ func (tool) Execute(_ context.Context, runtime tools.Runtime, req tools.Request)
 			ReplaceAll:  replaceAll,
 			Occurrences: occurrences,
 			Summary:     summary,
+			Diff:        buildUnifiedStoredDiff(rel, before, after),
 			Hunks:       hunks,
 			Truncated:   truncated,
 		},
@@ -168,6 +169,140 @@ func splitStoredLines(input string) []string {
 	out := make([]string, 0, len(lines))
 	for _, line := range lines {
 		out = append(out, strings.ReplaceAll(line, "\t", "    "))
+	}
+	return out
+}
+
+func buildUnifiedStoredDiff(path, before, after string) string {
+	dmp := diffmatchpatch.New()
+	chars1, chars2, lineArray := dmp.DiffLinesToChars(before, after)
+	diffs := dmp.DiffMain(chars1, chars2, false)
+	diffs = dmp.DiffCharsToLines(diffs, lineArray)
+
+	const contextLines = 2
+	type hunk struct {
+		oldStart int
+		newStart int
+		oldCount int
+		newCount int
+		lines    []string
+	}
+
+	oldLine := 1
+	newLine := 1
+	prefix := []string{}
+	var current *hunk
+	var hunks []hunk
+
+	startHunk := func() {
+		current = &hunk{
+			oldStart: max(1, oldLine-len(prefix)),
+			newStart: max(1, newLine-len(prefix)),
+			oldCount: len(prefix),
+			newCount: len(prefix),
+			lines:    prefixedLines(prefix, " "),
+		}
+	}
+	flushHunk := func() {
+		if current == nil {
+			return
+		}
+		hunks = append(hunks, *current)
+		current = nil
+	}
+	addEqualToHunk := func(lines []string) {
+		for _, line := range lines {
+			current.lines = append(current.lines, " "+line)
+			current.oldCount++
+			current.newCount++
+			oldLine++
+			newLine++
+		}
+	}
+
+	for _, diff := range diffs {
+		lines := splitDiffLines(diff.Text)
+		switch diff.Type {
+		case diffmatchpatch.DiffEqual:
+			if current == nil {
+				prefix = append(prefix, lines...)
+				if len(prefix) > contextLines {
+					prefix = prefix[len(prefix)-contextLines:]
+				}
+				oldLine += len(lines)
+				newLine += len(lines)
+				continue
+			}
+			if len(lines) <= contextLines {
+				addEqualToHunk(lines)
+				continue
+			}
+			addEqualToHunk(lines[:contextLines])
+			oldLine += len(lines) - contextLines
+			newLine += len(lines) - contextLines
+			prefix = append([]string(nil), lines[len(lines)-contextLines:]...)
+			flushHunk()
+		case diffmatchpatch.DiffDelete:
+			if current == nil {
+				startHunk()
+			}
+			prefix = nil
+			for _, line := range lines {
+				current.lines = append(current.lines, "-"+line)
+				current.oldCount++
+				oldLine++
+			}
+		case diffmatchpatch.DiffInsert:
+			if current == nil {
+				startHunk()
+			}
+			prefix = nil
+			for _, line := range lines {
+				current.lines = append(current.lines, "+"+line)
+				current.newCount++
+				newLine++
+			}
+		}
+	}
+	flushHunk()
+	if len(hunks) == 0 {
+		return ""
+	}
+
+	var lines []string
+	path = strings.TrimSpace(path)
+	if path != "" {
+		lines = append(lines, "--- "+path, "+++ "+path)
+	}
+	for _, hunk := range hunks {
+		lines = append(lines, fmt.Sprintf("@@ -%d,%d +%d,%d @@", hunk.oldStart, hunk.oldCount, hunk.newStart, hunk.newCount))
+		lines = append(lines, hunk.lines...)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func splitDiffLines(input string) []string {
+	if input == "" {
+		return nil
+	}
+	raw := strings.SplitAfter(input, "\n")
+	lines := make([]string, 0, len(raw))
+	for _, line := range raw {
+		if line == "" {
+			continue
+		}
+		lines = append(lines, strings.TrimSuffix(line, "\n"))
+	}
+	return lines
+}
+
+func prefixedLines(lines []string, prefix string) []string {
+	if len(lines) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		out = append(out, prefix+line)
 	}
 	return out
 }
