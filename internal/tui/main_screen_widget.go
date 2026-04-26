@@ -233,7 +233,7 @@ func (w *mainScreenWidget) Surface(ctx *ui.Context, bounds ui.Rect) ui.Surface {
 			},
 		}),
 	}
-	mainColumn := ui.VBox{Children: mainChildren}
+	mainColumn := ui.FlexBox{Direction: ui.DirectionVertical, Children: mainChildren}
 	sidebarElement := ui.VisibleElement{
 		BoxProps: ui.BoxProps{
 			Hidden: !w.model.showSidebar || sidebarSurface.Size().W == 0,
@@ -241,7 +241,8 @@ func (w *mainScreenWidget) Surface(ctx *ui.Context, bounds ui.Rect) ui.Surface {
 		Child: ui.SurfaceBox{Surface: sidebarSurface},
 	}
 	rootChildren := []ui.Child{
-		ui.Flex(ui.HBox{
+		ui.Flex(ui.FlexBox{
+			Direction: ui.DirectionHorizontal,
 			Children: []ui.Child{
 				ui.Flex(ui.Inset{Padding: ui.SymmetricInsets(mainScreenVerticalInset, 0), Child: mainColumn}, 1),
 				ui.Fixed(ui.Spacer{W: 1}),
@@ -255,7 +256,7 @@ func (w *mainScreenWidget) Surface(ctx *ui.Context, bounds ui.Rect) ui.Surface {
 			},
 		}),
 	}
-	surface := ui.VBox{Children: rootChildren}.Render(ctx, bounds)
+	surface := ui.FlexBox{Direction: ui.DirectionVertical, Children: rootChildren}.Render(ctx, bounds)
 	w.bounds = bounds
 	w.surface = surface
 	w.valid = true

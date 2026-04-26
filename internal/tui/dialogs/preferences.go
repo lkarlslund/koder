@@ -319,7 +319,7 @@ func (d PreferencesDialog) dialog(width int, palette theme.Palette) ui.Element {
 	}
 	fields := ui.Inset{
 		Padding: ui.Insets{Left: 1},
-		Child:   ui.Column{Children: fieldRows},
+		Child:   ui.FlexBox{Direction: ui.DirectionVertical, Children: fieldRows},
 	}
 
 	buttons := ui.ButtonRow{
@@ -335,28 +335,34 @@ func (d PreferencesDialog) dialog(width int, palette theme.Palette) ui.Element {
 	return ui.WindowFrame{
 		Title: "Preferences",
 		Width: dialogWidth,
-		Content: ui.Column{
+		Content: ui.FlexBox{
+			Direction: ui.DirectionVertical,
 			Children: []ui.Child{
 				ui.Fixed(ui.Static{Content: "Tab/Shift+Tab moves focus. Enter or arrows change values."}),
-				ui.Fixed(ui.Split{
-					Direction: ui.SplitHorizontal,
-					First: ui.Section{
-						Title: "Tabs",
-						Width: tabWidth,
-						Child: ui.VerticalTabs{
-							Tabs:    d.tabList.Tabs,
-							Active:  d.tabList.Active,
-							Width:   tabWidth - 2,
-							Focused: d.focus == preferencesFocusTabs,
+				ui.Fixed(ui.FlexBox{
+					Direction: ui.DirectionHorizontal,
+					Spacing:   1,
+					Children: []ui.Child{
+						{
+							Element: ui.Section{
+								Title: "Tabs",
+								Width: tabWidth,
+								Child: ui.VerticalTabs{
+									Tabs:    d.tabList.Tabs,
+									Active:  d.tabList.Active,
+									Width:   tabWidth - 2,
+									Focused: d.focus == preferencesFocusTabs,
+								},
+							},
+							Basis: tabWidth,
 						},
+						ui.Flex(ui.Section{
+							Title:   "Options",
+							Width:   fieldWidth + 1,
+							Padding: ui.Insets{Left: 1},
+							Child:   fields,
+						}, 1),
 					},
-					Second: ui.Section{
-						Title:   "Options",
-						Width:   fieldWidth + 1,
-						Padding: ui.Insets{Left: 1},
-						Child:   fields,
-					},
-					Gap: 1,
 				}),
 				ui.Fixed(buttons),
 				ui.Fixed(ui.Static{Content: fmt.Sprintf("Theme: %s  Spinner: %s", strings.TrimSpace(d.draft.Theme), ui.SpinnerStyleByID(d.draft.Spinner).Label)}),

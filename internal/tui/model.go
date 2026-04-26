@@ -1368,7 +1368,7 @@ func (m *Model) transcriptPaneHeight() int {
 }
 
 func (m *Model) renderTranscriptPaneElement(transcript ui.Element) ui.Element {
-	return ui.Panel{
+	return ui.Border{
 		Child:      transcript,
 		Background: m.palette.ScreenBackground,
 	}
@@ -1411,7 +1411,7 @@ func (m *Model) renderComposerAreaElement() ui.Element {
 		}
 		children = append(children, ui.Fixed(element))
 	}
-	return ui.VBox{Children: children}
+	return ui.FlexBox{Direction: ui.DirectionVertical, Children: children}
 }
 
 func (m *Model) shouldShowComposerArea() bool {
@@ -1471,7 +1471,7 @@ func (m *Model) renderMainScreenElement() ui.Element {
 		ui.Flex(m.renderTranscriptPaneElement(transcript), 1),
 		ui.Fixed(m.renderComposerAreaElement()),
 	}
-	mainColumn := ui.VBox{Children: mainChildren}
+	mainColumn := ui.FlexBox{Direction: ui.DirectionVertical, Children: mainChildren}
 	sidebar := ui.VisibleElement{
 		BoxProps: ui.BoxProps{
 			Hidden: !m.showSidebar,
@@ -1483,7 +1483,8 @@ func (m *Model) renderMainScreenElement() ui.Element {
 		},
 	}
 	rootChildren := []ui.Child{
-		ui.Flex(ui.HBox{
+		ui.Flex(ui.FlexBox{
+			Direction: ui.DirectionHorizontal,
 			Children: []ui.Child{
 				ui.Flex(ui.Inset{Padding: ui.SymmetricInsets(mainScreenVerticalInset, 0), Child: mainColumn}, 1),
 				ui.Fixed(ui.Spacer{W: 1}),
@@ -1492,7 +1493,7 @@ func (m *Model) renderMainScreenElement() ui.Element {
 		}, 1),
 		ui.Fixed(m.renderStatusPaneElement()),
 	}
-	return ui.VBox{Children: rootChildren}
+	return ui.FlexBox{Direction: ui.DirectionVertical, Children: rootChildren}
 }
 
 func (m *Model) renderComposerElement() ui.Element {

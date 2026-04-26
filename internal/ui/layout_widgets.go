@@ -8,170 +8,6 @@ import (
 	"github.com/lkarlslund/koder/internal/theme"
 )
 
-type SplitDirection int
-
-const (
-	SplitHorizontal SplitDirection = iota
-	SplitVertical
-)
-
-type Split struct {
-	Direction   SplitDirection
-	First       Element
-	Second      Element
-	FirstFixed  int
-	SecondFixed int
-	Gap         int
-}
-
-func (s Split) WalkChildren(_ *Context, visit func(Element)) {
-	if visit == nil {
-		return
-	}
-	if s.First != nil {
-		visit(s.First)
-	}
-	if s.Second != nil {
-		visit(s.Second)
-	}
-}
-
-func (s Split) Measure(ctx *Context, constraints Constraints) Size {
-	switch s.Direction {
-	case SplitVertical:
-		return s.measureVertical(ctx, constraints)
-	default:
-		return s.measureHorizontal(ctx, constraints)
-	}
-}
-
-func (s Split) Render(ctx *Context, bounds Rect) Surface {
-	switch s.Direction {
-	case SplitVertical:
-		return s.renderVertical(ctx, bounds)
-	default:
-		return s.renderHorizontal(ctx, bounds)
-	}
-}
-
-func (s Split) measureHorizontal(ctx *Context, constraints Constraints) Size {
-	firstW, secondW := s.horizontalWidths(ctx, constraints.maxWidth())
-	firstSize := Size{}
-	secondSize := Size{}
-	if s.First != nil {
-		firstSize = s.First.Measure(ctx, Constraints{MaxW: firstW, MaxH: constraints.MaxH})
-	}
-	if s.Second != nil {
-		secondSize = s.Second.Measure(ctx, Constraints{MaxW: secondW, MaxH: constraints.MaxH})
-	}
-	width := firstSize.W + secondSize.W
-	if s.First != nil && s.Second != nil {
-		width += s.Gap
-	}
-	return constraints.Clamp(Size{W: width, H: max(firstSize.H, secondSize.H)})
-}
-
-func (s Split) measureVertical(ctx *Context, constraints Constraints) Size {
-	firstH, secondH := s.verticalHeights(ctx, constraints.maxHeight())
-	firstSize := Size{}
-	secondSize := Size{}
-	if s.First != nil {
-		firstSize = s.First.Measure(ctx, Constraints{MaxW: constraints.MaxW, MaxH: firstH})
-	}
-	if s.Second != nil {
-		secondSize = s.Second.Measure(ctx, Constraints{MaxW: constraints.MaxW, MaxH: secondH})
-	}
-	height := firstSize.H + secondSize.H
-	if s.First != nil && s.Second != nil {
-		height += s.Gap
-	}
-	return constraints.Clamp(Size{W: max(firstSize.W, secondSize.W), H: height})
-}
-
-func (s Split) renderHorizontal(ctx *Context, bounds Rect) Surface {
-	base := TransparentSurface(bounds.W, bounds.H)
-	firstW, secondW := s.horizontalWidths(ctx, bounds.W)
-	if s.First != nil {
-		base = base.placeAt(0, 0, s.First.Render(ctx, Rect{X: bounds.X, Y: bounds.Y, W: firstW, H: bounds.H}))
-	}
-	if s.Second != nil {
-		secondX := firstW
-		if s.First != nil {
-			secondX += s.Gap
-		}
-		base = base.placeAt(secondX, 0, s.Second.Render(ctx, Rect{X: bounds.X + secondX, Y: bounds.Y, W: secondW, H: bounds.H}))
-	}
-	return base
-}
-
-func (s Split) renderVertical(ctx *Context, bounds Rect) Surface {
-	base := TransparentSurface(bounds.W, bounds.H)
-	firstH, secondH := s.verticalHeights(ctx, bounds.H)
-	if s.First != nil {
-		base = base.placeAt(0, 0, s.First.Render(ctx, Rect{X: bounds.X, Y: bounds.Y, W: bounds.W, H: firstH}))
-	}
-	if s.Second != nil {
-		secondY := firstH
-		if s.First != nil {
-			secondY += s.Gap
-		}
-		base = base.placeAt(0, secondY, s.Second.Render(ctx, Rect{X: bounds.X, Y: bounds.Y + secondY, W: bounds.W, H: secondH}))
-	}
-	return base
-}
-
-func (s Split) horizontalWidths(ctx *Context, width int) (int, int) {
-	width = max(0, width)
-	if s.First == nil {
-		return 0, width
-	}
-	if s.Second == nil {
-		return width, 0
-	}
-	gap := max(0, s.Gap)
-	available := max(0, width-gap)
-	switch {
-	case s.FirstFixed > 0:
-		return min(s.FirstFixed, available), max(0, available-min(s.FirstFixed, available))
-	case s.SecondFixed > 0:
-		second := min(s.SecondFixed, available)
-		return max(0, available-second), second
-	default:
-		first := s.First.Measure(ctx, Constraints{MaxW: available, MaxH: 0}).W
-		if first <= 0 {
-			first = available / 2
-		}
-		first = min(first, available)
-		return first, max(0, available-first)
-	}
-}
-
-func (s Split) verticalHeights(ctx *Context, height int) (int, int) {
-	height = max(0, height)
-	if s.First == nil {
-		return 0, height
-	}
-	if s.Second == nil {
-		return height, 0
-	}
-	gap := max(0, s.Gap)
-	available := max(0, height-gap)
-	switch {
-	case s.FirstFixed > 0:
-		return min(s.FirstFixed, available), max(0, available-min(s.FirstFixed, available))
-	case s.SecondFixed > 0:
-		second := min(s.SecondFixed, available)
-		return max(0, available-second), second
-	default:
-		first := s.First.Measure(ctx, Constraints{MaxW: 0, MaxH: available}).H
-		if first <= 0 {
-			first = available / 2
-		}
-		first = min(first, available)
-		return first, max(0, available-first)
-	}
-}
-
 type Section struct {
 	Title       string
 	Child       Element
@@ -227,7 +63,8 @@ func (s Section) children(ctx *Context) Element {
 	if strings.TrimSpace(s.Title) == "" {
 		return body
 	}
-	return Column{
+	return FlexBox{
+		Direction: DirectionVertical,
 		Children: []Child{
 			Fixed(Label{
 				Text: s.Title,
@@ -318,7 +155,7 @@ func (l List) Render(ctx *Context, bounds Rect) Surface {
 			Focused:        l.Focused && idx == l.Selected,
 		}))
 	}
-	return Column{Children: children}.Render(ctx, Rect{X: bounds.X, Y: bounds.Y, W: width, H: bounds.H})
+	return FlexBox{Direction: DirectionVertical, Children: children}.Render(ctx, Rect{X: bounds.X, Y: bounds.Y, W: width, H: bounds.H})
 }
 
 func (l *List) Move(delta int) bool {
@@ -410,7 +247,7 @@ func (t Table) Render(ctx *Context, bounds Rect) Surface {
 			},
 		}))
 	}
-	return Column{Children: children}.Render(ctx, Rect{X: bounds.X, Y: bounds.Y, W: width, H: bounds.H})
+	return FlexBox{Direction: DirectionVertical, Children: children}.Render(ctx, Rect{X: bounds.X, Y: bounds.Y, W: width, H: bounds.H})
 }
 
 func (t Table) width(fallback int) int {

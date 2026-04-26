@@ -9,12 +9,13 @@ import (
 	"github.com/lkarlslund/koder/internal/theme"
 )
 
-func TestSplitRendersFixedSidebarOnRight(t *testing.T) {
-	got := RenderElement(nil, Split{
-		Direction:   SplitHorizontal,
-		First:       Static{Content: "MAIN"},
-		Second:      Static{Content: "SIDE"},
-		SecondFixed: 4,
+func TestFlexBoxRendersFixedSidebarOnRight(t *testing.T) {
+	got := RenderElement(nil, FlexBox{
+		Direction: DirectionHorizontal,
+		Children: []Child{
+			Flex(Static{Content: "MAIN"}, 1),
+			{Element: Static{Content: "SIDE"}, Basis: 4},
+		},
 	}, 8, 1)
 
 	if got != "MAINSIDE" {

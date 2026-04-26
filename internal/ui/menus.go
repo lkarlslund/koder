@@ -80,8 +80,8 @@ func (m SlashMenu) element(contentWidth int) Element {
 			Focused:        idx == m.Selected,
 		}))
 	}
-	return Panel{
-		Child:        Column{Children: children},
+	return Border{
+		Child:        FlexBox{Direction: DirectionVertical, Children: children},
 		Padding:      SymmetricInsets(1, 0),
 		BorderLeft:   true,
 		BorderRight:  true,
@@ -149,8 +149,8 @@ func (m HistoryMenu) element() Element {
 			Style: muted,
 		}),
 	)
-	return Panel{
-		Child:        Column{Children: children},
+	return Border{
+		Child:        FlexBox{Direction: DirectionVertical, Children: children},
 		Width:        width,
 		Padding:      SymmetricInsets(1, 0),
 		BorderLeft:   true,
@@ -199,8 +199,9 @@ func (p ApprovalPrompt) element() Element {
 		Index: p.focusedIndex(),
 		Align: HorizontalAlignLeft,
 	}
-	return Panel{
-		Child: Column{
+	return Border{
+		Child: FlexBox{
+			Direction: DirectionVertical,
 			Children: []Child{
 				Fixed(Label{Text: p.Title, Style: lipgloss.NewStyle().Bold(true)}),
 				Fixed(Paragraph{Text: p.Body}),
@@ -287,9 +288,10 @@ func (d MenuPickerDialog) element() Element {
 	return WindowFrame{
 		Title: strings.TrimSpace(d.Title),
 		Width: width,
-		Content: Column{
+		Content: FlexBox{
+			Direction: DirectionVertical,
 			Children: []Child{
-				Fixed(Column{Children: children}),
+				Fixed(FlexBox{Direction: DirectionVertical, Children: children}),
 				Fixed(buttons),
 				Fixed(Static{Content: "Enter applies the highlighted row. Esc cancels."}),
 			},

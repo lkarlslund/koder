@@ -955,23 +955,65 @@ func (s Spacer) Render(_ *Context, bounds Rect) Surface {
 	return TransparentSurface(bounds.W, bounds.H)
 }
 
-type Column struct {
-	Children []Child
-	Spacing  int
+type FlexDirection int
+
+const (
+	DirectionHorizontal FlexDirection = iota
+	DirectionVertical
+)
+
+type FlexBox struct {
+	Direction FlexDirection
+	Children  []Child
+	Spacing   int
 }
 
-func (c Column) Measure(ctx *Context, constraints Constraints) Size {
-	plan := c.layoutPlan(ctx, constraints, constraints.maxHeight())
-	return constraints.Clamp(Size{W: plan.cross, H: plan.main})
+func (b FlexBox) Measure(ctx *Context, constraints Constraints) Size {
+	axis := b.axis()
+	targetMain := constraints.maxWidth()
+	if axis == AxisVertical {
+		targetMain = constraints.maxHeight()
+	}
+	plan := b.layoutPlan(ctx, constraints, targetMain)
+	size := Size{W: plan.main, H: plan.cross}
+	if axis == AxisVertical {
+		size = Size{W: plan.cross, H: plan.main}
+	}
+	return constraints.Clamp(size)
 }
 
-func (c Column) Render(ctx *Context, bounds Rect) Surface {
+func (b FlexBox) Render(ctx *Context, bounds Rect) Surface {
+	if b.axis() == AxisVertical {
+		return b.renderVertical(ctx, bounds)
+	}
+	return b.renderHorizontal(ctx, bounds)
+}
+
+func (b FlexBox) WalkChildren(_ *Context, visit func(Element)) {
+	if visit == nil {
+		return
+	}
+	for _, child := range b.Children {
+		if child.Element != nil {
+			visit(child.Element)
+		}
+	}
+}
+
+func (b FlexBox) axis() Axis {
+	if b.Direction == DirectionVertical {
+		return AxisVertical
+	}
+	return AxisHorizontal
+}
+
+func (b FlexBox) renderVertical(ctx *Context, bounds Rect) Surface {
 	base := TransparentSurface(bounds.W, bounds.H)
-	plan := c.layoutPlan(ctx, NewConstraints(bounds.W, bounds.H), bounds.H)
+	plan := b.layoutPlan(ctx, NewConstraints(bounds.W, bounds.H), bounds.H)
 	y := 0
 	for idx, item := range plan.items {
 		if idx > 0 {
-			y += c.Spacing
+			y += b.Spacing
 		}
 		slotH := max(0, item.main)
 		slotW := bounds.W
@@ -991,34 +1033,13 @@ func (c Column) Render(ctx *Context, bounds Rect) Surface {
 	return base
 }
 
-func (c Column) WalkChildren(_ *Context, visit func(Element)) {
-	if visit == nil {
-		return
-	}
-	for _, child := range c.Children {
-		if child.Element != nil {
-			visit(child.Element)
-		}
-	}
-}
-
-type Row struct {
-	Children []Child
-	Spacing  int
-}
-
-func (r Row) Measure(ctx *Context, constraints Constraints) Size {
-	plan := r.layoutPlan(ctx, constraints, constraints.maxWidth())
-	return constraints.Clamp(Size{W: plan.main, H: plan.cross})
-}
-
-func (r Row) Render(ctx *Context, bounds Rect) Surface {
+func (b FlexBox) renderHorizontal(ctx *Context, bounds Rect) Surface {
 	base := TransparentSurface(bounds.W, bounds.H)
-	plan := r.layoutPlan(ctx, NewConstraints(bounds.W, bounds.H), bounds.W)
+	plan := b.layoutPlan(ctx, NewConstraints(bounds.W, bounds.H), bounds.W)
 	x := 0
 	for idx, item := range plan.items {
 		if idx > 0 {
-			x += r.Spacing
+			x += b.Spacing
 		}
 		slotW := max(0, item.main)
 		slotH := bounds.H
@@ -1036,17 +1057,6 @@ func (r Row) Render(ctx *Context, bounds Rect) Surface {
 		x += slotW
 	}
 	return base
-}
-
-func (r Row) WalkChildren(_ *Context, visit func(Element)) {
-	if visit == nil {
-		return
-	}
-	for _, child := range r.Children {
-		if child.Element != nil {
-			visit(child.Element)
-		}
-	}
 }
 
 type Inset struct {
@@ -1154,40 +1164,6 @@ func (s Stack) WalkChildren(_ *Context, visit func(Element)) {
 	}
 }
 
-type VBox struct {
-	Children []Child
-	Spacing  int
-}
-
-func (b VBox) Measure(ctx *Context, constraints Constraints) Size {
-	return Column(b).Measure(ctx, constraints)
-}
-
-func (b VBox) Render(ctx *Context, bounds Rect) Surface {
-	return Column(b).Render(ctx, bounds)
-}
-
-func (b VBox) WalkChildren(ctx *Context, visit func(Element)) {
-	Column(b).WalkChildren(ctx, visit)
-}
-
-type HBox struct {
-	Children []Child
-	Spacing  int
-}
-
-func (b HBox) Measure(ctx *Context, constraints Constraints) Size {
-	return Row(b).Measure(ctx, constraints)
-}
-
-func (b HBox) Render(ctx *Context, bounds Rect) Surface {
-	return Row(b).Render(ctx, bounds)
-}
-
-func (b HBox) WalkChildren(ctx *Context, visit func(Element)) {
-	Row(b).WalkChildren(ctx, visit)
-}
-
 type Alignment int
 
 const (
@@ -1267,12 +1243,8 @@ type flexPlan struct {
 	cross int
 }
 
-func (c Column) layoutPlan(ctx *Context, constraints Constraints, targetMain int) flexPlan {
-	return computeFlexPlan(ctx, c.Children, c.Spacing, AxisVertical, constraints, targetMain)
-}
-
-func (r Row) layoutPlan(ctx *Context, constraints Constraints, targetMain int) flexPlan {
-	return computeFlexPlan(ctx, r.Children, r.Spacing, AxisHorizontal, constraints, targetMain)
+func (b FlexBox) layoutPlan(ctx *Context, constraints Constraints, targetMain int) flexPlan {
+	return computeFlexPlan(ctx, b.Children, b.Spacing, b.axis(), constraints, targetMain)
 }
 
 func computeFlexPlan(ctx *Context, children []Child, spacing int, axis Axis, constraints Constraints, targetMain int) flexPlan {

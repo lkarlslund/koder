@@ -29,8 +29,9 @@ func (f fillBox) Render(_ *Context, bounds Rect) Surface {
 	return surface.normalize(bounds.W, bounds.H)
 }
 
-func TestRowRenderPlacesChildrenHorizontally(t *testing.T) {
-	got := RenderElement(nil, Row{
+func TestFlexBoxRenderPlacesChildrenHorizontally(t *testing.T) {
+	got := RenderElement(nil, FlexBox{
+		Direction: DirectionHorizontal,
 		Children: []Child{
 			Fixed(Static{Content: "A"}),
 			Fixed(Static{Content: "B"}),
@@ -43,8 +44,9 @@ func TestRowRenderPlacesChildrenHorizontally(t *testing.T) {
 	}
 }
 
-func TestColumnRenderPlacesChildrenVertically(t *testing.T) {
-	got := RenderElement(nil, Column{
+func TestFlexBoxRenderPlacesChildrenVertically(t *testing.T) {
+	got := RenderElement(nil, FlexBox{
+		Direction: DirectionVertical,
 		Children: []Child{
 			Fixed(Static{Content: "A"}),
 			Fixed(Static{Content: "B"}),
@@ -57,8 +59,9 @@ func TestColumnRenderPlacesChildrenVertically(t *testing.T) {
 	}
 }
 
-func TestVBoxFlexChildFillsAllocatedHeight(t *testing.T) {
-	got := RenderElement(nil, VBox{
+func TestFlexBoxVerticalFlexChildFillsAllocatedHeight(t *testing.T) {
+	got := RenderElement(nil, FlexBox{
+		Direction: DirectionVertical,
 		Children: []Child{
 			Flex(fillBox{mark: "A"}, 1),
 			Fixed(Static{Content: "B"}),
@@ -71,8 +74,9 @@ func TestVBoxFlexChildFillsAllocatedHeight(t *testing.T) {
 	}
 }
 
-func TestHBoxFlexChildFillsAllocatedWidth(t *testing.T) {
-	got := RenderElement(nil, HBox{
+func TestFlexBoxHorizontalFlexChildFillsAllocatedWidth(t *testing.T) {
+	got := RenderElement(nil, FlexBox{
+		Direction: DirectionHorizontal,
 		Children: []Child{
 			Flex(fillBox{mark: "A"}, 1),
 			Fixed(Static{Content: "B"}),
@@ -85,8 +89,9 @@ func TestHBoxFlexChildFillsAllocatedWidth(t *testing.T) {
 	}
 }
 
-func TestVBoxFlexChildrenShareHeightEquallyByDefault(t *testing.T) {
-	got := RenderElement(nil, VBox{
+func TestFlexBoxVerticalFlexChildrenShareHeightEquallyByDefault(t *testing.T) {
+	got := RenderElement(nil, FlexBox{
+		Direction: DirectionVertical,
 		Children: []Child{
 			Flex(fillBox{mark: "A"}, 1),
 			Flex(fillBox{mark: "B"}, 1),
@@ -98,8 +103,9 @@ func TestVBoxFlexChildrenShareHeightEquallyByDefault(t *testing.T) {
 	}
 }
 
-func TestHBoxFlexChildrenShareWidthEquallyByDefault(t *testing.T) {
-	got := RenderElement(nil, HBox{
+func TestFlexBoxHorizontalFlexChildrenShareWidthEquallyByDefault(t *testing.T) {
+	got := RenderElement(nil, FlexBox{
+		Direction: DirectionHorizontal,
 		Children: []Child{
 			Flex(fillBox{mark: "A"}, 1),
 			Flex(fillBox{mark: "B"}, 1),
@@ -111,8 +117,9 @@ func TestHBoxFlexChildrenShareWidthEquallyByDefault(t *testing.T) {
 	}
 }
 
-func TestHBoxFlexChildrenRespectShareWeights(t *testing.T) {
-	got := RenderElement(nil, HBox{
+func TestFlexBoxHorizontalFlexChildrenRespectShareWeights(t *testing.T) {
+	got := RenderElement(nil, FlexBox{
+		Direction: DirectionHorizontal,
 		Children: []Child{
 			Flex(fillBox{mark: "A"}, 1),
 			Flex(fillBox{mark: "B"}, 2),
@@ -124,8 +131,9 @@ func TestHBoxFlexChildrenRespectShareWeights(t *testing.T) {
 	}
 }
 
-func TestVBoxAlignmentCanOptOutOfFill(t *testing.T) {
-	got := RenderElement(nil, VBox{
+func TestFlexBoxVerticalAlignmentCanOptOutOfFill(t *testing.T) {
+	got := RenderElement(nil, FlexBox{
+		Direction: DirectionVertical,
 		Children: []Child{
 			Flex(VisibleElement{
 				BoxProps: BoxProps{VAlign: AlignCenter},
@@ -139,8 +147,9 @@ func TestVBoxAlignmentCanOptOutOfFill(t *testing.T) {
 	}
 }
 
-func TestHBoxMaxWidthCanOptOutOfFill(t *testing.T) {
-	got := RenderElement(nil, HBox{
+func TestFlexBoxHorizontalMaxWidthCanOptOutOfFill(t *testing.T) {
+	got := RenderElement(nil, FlexBox{
+		Direction: DirectionHorizontal,
 		Children: []Child{
 			Flex(fillBox{
 				BoxProps: BoxProps{MaxW: 2},

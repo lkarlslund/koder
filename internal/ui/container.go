@@ -58,7 +58,7 @@ func (c *RetainedColumn) Measure(ctx *Context, constraints Constraints) Size {
 			items = append(items, Fixed(child))
 		}
 	}
-	return Column{Children: items, Spacing: c.spacing}.Measure(ctx, constraints)
+	return FlexBox{Direction: DirectionVertical, Children: items, Spacing: c.spacing}.Measure(ctx, constraints)
 }
 
 func (c *RetainedColumn) Render(ctx *Context, bounds Rect) Surface {
@@ -68,5 +68,5 @@ func (c *RetainedColumn) Render(ctx *Context, bounds Rect) Surface {
 			items = append(items, Fixed(child))
 		}
 	}
-	return Column{Children: items, Spacing: c.spacing}.Render(ctx, bounds)
+	return FlexBox{Direction: DirectionVertical, Children: items, Spacing: c.spacing}.Render(ctx, bounds)
 }

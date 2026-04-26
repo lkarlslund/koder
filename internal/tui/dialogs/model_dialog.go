@@ -173,9 +173,11 @@ func (d ModelDialog) dialog(width int, palette theme.Palette) ui.Element {
 	return ui.WindowFrame{
 		Title: "Select Model",
 		Width: dialogWidth,
-		Content: ui.Column{
+		Content: ui.FlexBox{
+			Direction: ui.DirectionVertical,
 			Children: []ui.Child{
-				ui.Fixed(ui.Column{
+				ui.Fixed(ui.FlexBox{
+					Direction: ui.DirectionVertical,
 					Children: []ui.Child{
 						ui.Fixed(staticBlock("Filter: " + d.Query)),
 						ui.Fixed(ui.Spacer{H: 1}),

@@ -162,7 +162,7 @@ func (d DisconnectDialog) dialog(width int, palette theme.Palette) ui.Element {
 		if desc := strings.TrimSpace(item.Description); desc != "" {
 			blocks = append(blocks, ui.Fixed(ui.Spacer{H: 1}), ui.Fixed(ui.Paragraph{Text: truncateText(desc, detailWidth)}))
 		}
-		detailsElement = ui.Column{Children: blocks}
+		detailsElement = ui.FlexBox{Direction: ui.DirectionVertical, Children: blocks}
 	}
 
 	buttons := d.buttonRow(dialogWidth)
@@ -170,40 +170,47 @@ func (d DisconnectDialog) dialog(width int, palette theme.Palette) ui.Element {
 	return ui.WindowFrame{
 		Title: "Disconnect Provider",
 		Width: dialogWidth,
-		Content: ui.Column{
+		Content: ui.FlexBox{
+			Direction: ui.DirectionVertical,
 			Children: []ui.Child{
-				ui.Fixed(ui.Column{
+				ui.Fixed(ui.FlexBox{
+					Direction: ui.DirectionVertical,
 					Children: []ui.Child{
 						ui.Fixed(staticBlock(fmt.Sprintf("Filter: %s", d.Query))),
 						ui.Fixed(ui.Spacer{H: 1}),
-						ui.Fixed(ui.Split{
-							Direction: ui.SplitHorizontal,
-							First: ui.Section{
-								Title:   "Providers",
-								Width:   listWidth + 2,
-								Padding: ui.Insets{Right: 1},
-								Child: func() ui.Element {
-									if len(items) == 0 {
-										return staticBlock("No matches")
-									}
-									return ui.List{
-										Items:    items,
-										Width:    listWidth,
-										Selected: d.Index - start,
-										Focused:  d.focus == pickerDialogFocusList,
-									}
-								}(),
+						ui.Fixed(ui.FlexBox{
+							Direction: ui.DirectionHorizontal,
+							Spacing:   1,
+							Children: []ui.Child{
+								{
+									Element: ui.Section{
+										Title:   "Providers",
+										Width:   listWidth + 2,
+										Padding: ui.Insets{Right: 1},
+										Child: func() ui.Element {
+											if len(items) == 0 {
+												return staticBlock("No matches")
+											}
+											return ui.List{
+												Items:    items,
+												Width:    listWidth,
+												Selected: d.Index - start,
+												Focused:  d.focus == pickerDialogFocusList,
+											}
+										}(),
+									},
+									Basis: listWidth + 2,
+								},
+								ui.Flex(ui.Section{
+									Title:       "Details",
+									Width:       detailWidth + 1,
+									Padding:     ui.Insets{Left: 1},
+									Background:  palette.SidebarBackground,
+									Foreground:  palette.SidebarForeground,
+									BorderColor: palette.SidebarBorder,
+									Child:       detailsElement,
+								}, 1),
 							},
-							Second: ui.Section{
-								Title:       "Details",
-								Width:       detailWidth + 1,
-								Padding:     ui.Insets{Left: 1},
-								Background:  palette.SidebarBackground,
-								Foreground:  palette.SidebarForeground,
-								BorderColor: palette.SidebarBorder,
-								Child:       detailsElement,
-							},
-							Gap: 1,
 						}),
 					},
 				}),

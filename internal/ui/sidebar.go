@@ -77,11 +77,15 @@ func (l BodyLayout) element() Element {
 	if !l.ShowSidebar || l.SidebarElement == nil {
 		return main
 	}
-	return Split{
-		Direction:   SplitHorizontal,
-		First:       main,
-		Second:      l.SidebarElement,
-		SecondFixed: l.sidebarWidth(),
+	return FlexBox{
+		Direction: DirectionHorizontal,
+		Children: []Child{
+			Flex(main, 1),
+			{
+				Element: l.SidebarElement,
+				Basis:   l.sidebarWidth(),
+			},
+		},
 	}
 }
 
@@ -103,22 +107,22 @@ func (f Footer) render() Surface {
 	for _, part := range f.Parts {
 		children = append(children, Fixed(Label{Text: part}))
 	}
-	return f.renderContent(&Context{}, Column{Children: children})
+	return f.renderContent(&Context{}, FlexBox{Direction: DirectionVertical, Children: children})
 }
 
 func (f Footer) Measure(ctx *Context, constraints Constraints) Size {
 	if len(f.Elements) == 0 {
 		return constraints.Clamp(f.render().Size())
 	}
-	content := Column{Children: f.children()}
+	content := FlexBox{Direction: DirectionVertical, Children: f.children()}
 	size := content.Measure(ctx, constraints)
 	return constraints.Clamp(Size{W: size.W + 2, H: size.H + 1})
 }
 
 func (f Footer) Render(ctx *Context, bounds Rect) Surface {
-	content := Column{Children: f.children()}
+	content := FlexBox{Direction: DirectionVertical, Children: f.children()}
 	if len(f.Elements) == 0 {
-		content = Column{Children: make([]Child, 0, len(f.Parts))}
+		content = FlexBox{Direction: DirectionVertical, Children: make([]Child, 0, len(f.Parts))}
 		for _, part := range f.Parts {
 			content.Children = append(content.Children, Fixed(Label{Text: part}))
 		}

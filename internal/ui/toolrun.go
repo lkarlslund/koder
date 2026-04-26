@@ -212,8 +212,8 @@ func (d ToolRunDock) element() Element {
 			Style: lipgloss.NewStyle().Foreground(d.Palette.AssistantTimestampText),
 		}),
 	)
-	return Panel{
-		Child:        Column{Children: children, Spacing: 1},
+	return Border{
+		Child:        FlexBox{Direction: DirectionVertical, Children: children, Spacing: 1},
 		Width:        d.width(),
 		Padding:      SymmetricInsets(1, 0),
 		BorderLeft:   true,

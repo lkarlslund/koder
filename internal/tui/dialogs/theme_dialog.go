@@ -192,7 +192,8 @@ func (d ThemeDialog) dialog(width int) ui.Element {
 	return ui.WindowFrame{
 		Title: "Themes",
 		Width: dialogWidth,
-		Content: ui.Column{
+		Content: ui.FlexBox{
+			Direction: ui.DirectionVertical,
 			Children: []ui.Child{
 				ui.Fixed(staticBlock("Filter: " + d.Query)),
 				ui.Fixed(chooser),

@@ -32,7 +32,7 @@ func linesBlock(lines ...string) ui.Element {
 		}
 		children = append(children, ui.Fixed(ui.Static{Content: line}))
 	}
-	return ui.Column{Children: children}
+	return ui.FlexBox{Direction: ui.DirectionVertical, Children: children}
 }
 
 type pickerDialogFocus int

@@ -153,7 +153,8 @@ func (c selectionGridCard) Render(ctx *Context, bounds Rect) Surface {
 		}
 		return FilledLineSurface(bounds.W, text, fillStyle, textStyle).normalize(bounds.W, bounds.H)
 	}
-	content := Column{
+	content := FlexBox{
+		Direction: DirectionVertical,
 		Children: []Child{
 			Fixed(Label{Text: truncateText(strings.TrimSpace(c.Item.Title), max(1, bounds.W-4)), Style: titleStyle}),
 			Fixed(Paragraph{Text: truncateText(strings.TrimSpace(c.Item.Description), max(1, (bounds.W-4)*2)), Style: descriptionStyle}),

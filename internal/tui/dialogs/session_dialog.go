@@ -206,9 +206,11 @@ func (d SessionDialog) dialog(width int, palette theme.Palette) ui.Element {
 	return ui.WindowFrame{
 		Title: "Resume Session",
 		Width: dialogWidth,
-		Content: ui.Column{
+		Content: ui.FlexBox{
+			Direction: ui.DirectionVertical,
 			Children: []ui.Child{
-				ui.Fixed(ui.Column{
+				ui.Fixed(ui.FlexBox{
+					Direction: ui.DirectionVertical,
 					Children: []ui.Child{
 						ui.Fixed(staticBlock(fmt.Sprintf("Filter: %s", d.Query))),
 						ui.Fixed(ui.Spacer{H: 1}),

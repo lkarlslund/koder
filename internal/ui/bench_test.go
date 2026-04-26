@@ -105,7 +105,7 @@ func BenchmarkRenderElementTableAndList(b *testing.B) {
 			Tertiary:  "meta",
 		})
 	}
-	element := Column{Children: []Child{
+	element := FlexBox{Direction: DirectionVertical, Children: []Child{
 		Fixed(Table{
 			Columns: []TableColumn{
 				{Title: "Model", Width: 32},
@@ -205,9 +205,9 @@ func BenchmarkMenuRenderCell(b *testing.B) {
 	}
 }
 
-func BenchmarkPanelRenderCell(b *testing.B) {
+func BenchmarkBorderRenderCell(b *testing.B) {
 	ctx := benchmarkContext()
-	panel := Panel{
+	panel := Border{
 		Width:        72,
 		Padding:      SymmetricInsets(1, 1),
 		Background:   benchmarkPalette().SidebarBackground,

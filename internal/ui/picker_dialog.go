@@ -225,7 +225,7 @@ func (d PickerDialog) element(width int, palette theme.Palette) Element {
 	children = append(children, Fixed(Spacer{H: 1}))
 	return Modal{
 		Title:       d.Title,
-		BodyElement: Column{Children: append(children, Fixed(d.buttonRow(width)))},
+		BodyElement: FlexBox{Direction: DirectionVertical, Children: append(children, Fixed(d.buttonRow(width)))},
 		Footer:      "Enter selects. Tab switches focus. Esc cancels.",
 		Width:       80,
 	}

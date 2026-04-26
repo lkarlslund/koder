@@ -70,51 +70,6 @@ func (h HitBox) WalkChildren(_ *Context, visit func(Element)) {
 	visit(h.Child)
 }
 
-type Panel struct {
-	Child        Element
-	Width        int
-	Height       int
-	Padding      Insets
-	Background   lipgloss.Color
-	Foreground   lipgloss.Color
-	BorderLeft   bool
-	BorderRight  bool
-	BorderTop    bool
-	BorderBottom bool
-	BorderColor  lipgloss.Color
-}
-
-func (p Panel) WalkChildren(ctx *Context, visit func(Element)) {
-	if visit == nil {
-		return
-	}
-	visit(p.border())
-}
-
-func (p Panel) Measure(ctx *Context, constraints Constraints) Size {
-	return p.border().Measure(ctx, constraints)
-}
-
-func (p Panel) Render(ctx *Context, bounds Rect) Surface {
-	return p.border().Render(ctx, bounds)
-}
-
-func (p Panel) border() Border {
-	return Border{
-		Child:        p.Child,
-		Width:        p.Width,
-		Height:       p.Height,
-		Padding:      p.Padding,
-		Background:   p.Background,
-		Foreground:   p.Foreground,
-		BorderColor:  p.BorderColor,
-		BorderLeft:   p.BorderLeft,
-		BorderRight:  p.BorderRight,
-		BorderTop:    p.BorderTop,
-		BorderBottom: p.BorderBottom,
-	}
-}
-
 type Divider struct {
 	Text  string
 	Style lipgloss.Style
@@ -249,7 +204,7 @@ func (m ModalFrame) contentElement(palette theme.Palette) Element {
 	if len(children) == 0 {
 		return nil
 	}
-	return Column{Children: children}
+	return FlexBox{Direction: DirectionVertical, Children: children}
 }
 
 func (m ModalFrame) window(ctx *Context) WindowFrame {
