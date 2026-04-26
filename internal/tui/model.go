@@ -3935,7 +3935,7 @@ func (m Model) syncDebugRuntime() {
 	if m.debug == nil {
 		return
 	}
-	renderedBlocks := len(m.messages)
+	transcriptItems := m.debugTranscriptItems()
 	m.debug.UpdateRuntime(debugsrv.RuntimeSnapshot{
 		DebugAPI:           m.debugAPIAddr(),
 		Build:              version.Current(),
@@ -3955,9 +3955,10 @@ func (m Model) syncDebugRuntime() {
 		ViewportHeight:     m.viewport.Height,
 		ViewportYOffset:    m.viewport.YOffset,
 		MessageCount:       len(m.messages),
-		RenderBlockCount:   renderedBlocks,
+		RenderBlockCount:   len(transcriptItems),
 		ViewportPreview:    "",
 		ViewportContentLen: m.viewport.VisibleSurface().SurfaceHeight(),
+		TranscriptItems:    transcriptItems,
 	})
 }
 
@@ -3981,6 +3982,62 @@ func (m Model) syncDebugFrame(surface ui.Surface) {
 	snapshot.FrameLines = lines
 	snapshot.TranscriptControls = controls
 	m.debug.UpdateRuntime(snapshot)
+}
+
+func (m Model) debugTranscriptItems() []debugsrv.TranscriptItemRef {
+	retained := m.syncRetainedTranscript()
+	if retained == nil {
+		return nil
+	}
+	items := retained.Items()
+	blocks := m.transcriptBlocks()
+	ctx := &ui.Context{Palette: m.palette}
+	width := max(0, m.viewport.Width)
+	out := make([]debugsrv.TranscriptItemRef, 0, len(items))
+	for idx, item := range items {
+		ref := debugsrv.TranscriptItemRef{
+			Index:     idx,
+			Key:       item.Key,
+			GapBefore: item.GapBefore,
+		}
+		if idx < len(blocks) {
+			block := blocks[idx]
+			switch block.Kind {
+			case transcriptBlockToolRun:
+				ref.Kind = "toolrun"
+				ref.Tool = block.ToolRun.Tool
+				ref.ToolRunID = block.ToolRun.ID
+				ref.Title = strings.TrimSpace(block.ToolRun.Title)
+			default:
+				ref.Kind = "message"
+				ref.MessageID = block.Message.ID
+				ref.Role = string(block.Message.Role)
+				ref.Summary = strings.TrimSpace(block.Message.Summary)
+			}
+			if cached, ok := m.transcriptCache[item.Key]; ok {
+				ref.ControlID = strings.TrimSpace(cached.controlID)
+			}
+		}
+		if item.Element != nil {
+			size := item.Element.Measure(ctx, ui.NewConstraints(width, 0))
+			ref.Height = size.H
+			surface := item.Element.Render(ctx, ui.Rect{W: width, H: size.H})
+			ref.BlankRows = countBlankSurfaceRows(surface)
+		}
+		out = append(out, ref)
+	}
+	return out
+}
+
+func countBlankSurfaceRows(surface ui.Surface) int {
+	lines := surface.Lines()
+	blank := 0
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			blank++
+		}
+	}
+	return blank
 }
 
 func (m Model) currentError() string {

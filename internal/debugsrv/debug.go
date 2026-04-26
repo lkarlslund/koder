@@ -52,30 +52,31 @@ type HTTPTrace struct {
 }
 
 type RuntimeSnapshot struct {
-	Timestamp          time.Time    `json:"timestamp"`
-	DebugAPI           string       `json:"debug_api"`
-	Build              version.Info `json:"build"`
-	CurrentSession     int64        `json:"current_session"`
-	SessionTitle       string       `json:"session_title"`
-	ProviderID         string       `json:"provider_id"`
-	ModelID            string       `json:"model_id"`
-	Status             string       `json:"status"`
-	Busy               bool         `json:"busy"`
-	BusyStatus         string       `json:"busy_status,omitempty"`
-	OpenDialog         string       `json:"open_dialog,omitempty"`
-	ShowSidebar        bool         `json:"show_sidebar"`
-	ShowReasoning      bool         `json:"show_reasoning"`
-	ShowSystem         bool         `json:"show_system"`
-	LastError          string       `json:"last_error,omitempty"`
-	ViewportWidth      int          `json:"viewport_width"`
-	ViewportHeight     int          `json:"viewport_height"`
-	ViewportYOffset    int          `json:"viewport_y_offset"`
-	MessageCount       int          `json:"message_count"`
-	RenderBlockCount   int          `json:"render_block_count"`
-	ViewportPreview    string       `json:"viewport_preview,omitempty"`
-	ViewportContentLen int          `json:"viewport_content_len"`
-	FrameLines         []string     `json:"frame_lines,omitempty"`
-	TranscriptControls []ControlRef `json:"transcript_controls,omitempty"`
+	Timestamp          time.Time           `json:"timestamp"`
+	DebugAPI           string              `json:"debug_api"`
+	Build              version.Info        `json:"build"`
+	CurrentSession     int64               `json:"current_session"`
+	SessionTitle       string              `json:"session_title"`
+	ProviderID         string              `json:"provider_id"`
+	ModelID            string              `json:"model_id"`
+	Status             string              `json:"status"`
+	Busy               bool                `json:"busy"`
+	BusyStatus         string              `json:"busy_status,omitempty"`
+	OpenDialog         string              `json:"open_dialog,omitempty"`
+	ShowSidebar        bool                `json:"show_sidebar"`
+	ShowReasoning      bool                `json:"show_reasoning"`
+	ShowSystem         bool                `json:"show_system"`
+	LastError          string              `json:"last_error,omitempty"`
+	ViewportWidth      int                 `json:"viewport_width"`
+	ViewportHeight     int                 `json:"viewport_height"`
+	ViewportYOffset    int                 `json:"viewport_y_offset"`
+	MessageCount       int                 `json:"message_count"`
+	RenderBlockCount   int                 `json:"render_block_count"`
+	ViewportPreview    string              `json:"viewport_preview,omitempty"`
+	ViewportContentLen int                 `json:"viewport_content_len"`
+	FrameLines         []string            `json:"frame_lines,omitempty"`
+	TranscriptControls []ControlRef        `json:"transcript_controls,omitempty"`
+	TranscriptItems    []TranscriptItemRef `json:"transcript_items,omitempty"`
 }
 
 type ControlRef struct {
@@ -85,6 +86,22 @@ type ControlRef struct {
 	W       int    `json:"w"`
 	H       int    `json:"h"`
 	Enabled bool   `json:"enabled"`
+}
+
+type TranscriptItemRef struct {
+	Index     int             `json:"index"`
+	Key       string          `json:"key"`
+	Kind      string          `json:"kind"`
+	GapBefore int             `json:"gap_before"`
+	Height    int             `json:"height"`
+	BlankRows int             `json:"blank_rows"`
+	MessageID int64           `json:"message_id,omitempty"`
+	Role      string          `json:"role,omitempty"`
+	Summary   string          `json:"summary,omitempty"`
+	Tool      domain.ToolKind `json:"tool,omitempty"`
+	ToolRunID string          `json:"tool_run_id,omitempty"`
+	Title     string          `json:"title,omitempty"`
+	ControlID string          `json:"control_id,omitempty"`
 }
 
 type InputRequest struct {
