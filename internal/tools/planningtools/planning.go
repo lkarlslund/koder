@@ -14,6 +14,8 @@ import (
 
 func init() {
 	tools.Register(milestoneListTool{})
+	tools.Register(milestoneAddItemsTool{})
+	tools.Register(milestoneUpdateItemTool{})
 	tools.Register(milestoneWriteTool{})
 	tools.Register(todoListTool{})
 	tools.Register(todoAddItemsTool{})
@@ -22,19 +24,29 @@ func init() {
 }
 
 type milestoneListTool struct{}
+type milestoneAddItemsTool struct{}
+type milestoneUpdateItemTool struct{}
 type milestoneWriteTool struct{}
 type todoListTool struct{}
 type todoAddItemsTool struct{}
 type todoUpdateItemTool struct{}
 type todoFetchNextTool struct{}
 
-func (milestoneListTool) Kind() domain.ToolKind     { return domain.ToolKindMilestoneList }
-func (milestoneWriteTool) Kind() domain.ToolKind    { return domain.ToolKindMilestoneWrite }
-func (todoListTool) Kind() domain.ToolKind          { return domain.ToolKindTodoList }
-func (todoAddItemsTool) Kind() domain.ToolKind      { return domain.ToolKindTodoAddItems }
-func (todoUpdateItemTool) Kind() domain.ToolKind    { return domain.ToolKindTodoUpdateItem }
-func (todoFetchNextTool) Kind() domain.ToolKind     { return domain.ToolKindTodoFetchNext }
-func (milestoneListTool) BypassesPermission() bool  { return true }
+func (milestoneListTool) Kind() domain.ToolKind       { return domain.ToolKindMilestoneList }
+func (milestoneAddItemsTool) Kind() domain.ToolKind   { return domain.ToolKindMilestoneAdd }
+func (milestoneUpdateItemTool) Kind() domain.ToolKind { return domain.ToolKindMilestoneUpdate }
+func (milestoneWriteTool) Kind() domain.ToolKind      { return domain.ToolKindMilestoneWrite }
+func (todoListTool) Kind() domain.ToolKind            { return domain.ToolKindTodoList }
+func (todoAddItemsTool) Kind() domain.ToolKind        { return domain.ToolKindTodoAddItems }
+func (todoUpdateItemTool) Kind() domain.ToolKind      { return domain.ToolKindTodoUpdateItem }
+func (todoFetchNextTool) Kind() domain.ToolKind       { return domain.ToolKindTodoFetchNext }
+func (milestoneListTool) BypassesPermission() bool    { return true }
+func (milestoneAddItemsTool) BypassesPermission() bool {
+	return true
+}
+func (milestoneUpdateItemTool) BypassesPermission() bool {
+	return true
+}
 func (milestoneWriteTool) BypassesPermission() bool { return true }
 func (todoListTool) BypassesPermission() bool       { return true }
 func (todoAddItemsTool) BypassesPermission() bool   { return true }
@@ -45,8 +57,16 @@ func (milestoneListTool) Definition(tools.Runtime) (provider.ToolDefinition, boo
 	return tools.FunctionDefinition(domain.ToolKindMilestoneList, "Read the current session milestone plan. Use this to understand the long-horizon plan before choosing or breaking down work.", `{"type":"object","properties":{},"additionalProperties":false}`), true
 }
 
+func (milestoneAddItemsTool) Definition(tools.Runtime) (provider.ToolDefinition, bool) {
+	return tools.FunctionDefinition(domain.ToolKindMilestoneAdd, "Append new pending milestones to the current session plan. Use milestones for larger chunks of work. Each milestone requires a stable ref so its todo bucket can be tracked separately.", `{"type":"object","properties":{"items":{"type":"array","description":"New milestones to append as pending","items":{"type":"object","properties":{"ref":{"type":"string"},"title":{"type":"string"},"notes":{"type":"string"}},"required":["ref","title"]}}},"required":["items"],"additionalProperties":false}`), true
+}
+
+func (milestoneUpdateItemTool) Definition(tools.Runtime) (provider.ToolDefinition, bool) {
+	return tools.FunctionDefinition(domain.ToolKindMilestoneUpdate, "Update one milestone's status, and optionally its title or notes. Keep at most one milestone in_progress in the plan.", `{"type":"object","properties":{"ref":{"type":"string","description":"Milestone ref"},"status":{"type":"string","enum":["pending","in_progress","completed","blocked"]},"title":{"type":"string","description":"Optional replacement title"},"notes":{"type":"string","description":"Optional replacement notes"}},"required":["ref","status"],"additionalProperties":false}`), true
+}
+
 func (milestoneWriteTool) Definition(tools.Runtime) (provider.ToolDefinition, bool) {
-	return tools.FunctionDefinition(domain.ToolKindMilestoneWrite, "Replace the current session milestone plan. Use milestones for larger chunks of work and keep at most one milestone in_progress. Each milestone requires a stable ref so its todo bucket can be tracked separately.", `{"type":"object","properties":{"summary":{"type":"string","description":"Optional summary of the overall plan"},"milestones":{"type":"array","description":"Ordered milestone list","items":{"type":"object","properties":{"ref":{"type":"string"},"title":{"type":"string"},"status":{"type":"string","enum":["pending","in_progress","completed","blocked"]},"notes":{"type":"string"}},"required":["ref","title","status"]}}},"required":["milestones"],"additionalProperties":false}`), true
+	return provider.ToolDefinition{}, false
 }
 
 func (todoListTool) Definition(tools.Runtime) (provider.ToolDefinition, bool) {
@@ -67,6 +87,39 @@ func (todoFetchNextTool) Definition(tools.Runtime) (provider.ToolDefinition, boo
 
 func (milestoneListTool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 	return map[string]string{}, nil
+}
+
+func (milestoneAddItemsTool) NormalizeArgs(args map[string]string) (map[string]string, error) {
+	raw := strings.TrimSpace(tools.FirstArg(args, "items"))
+	if raw == "" {
+		return nil, errors.New("items is empty")
+	}
+	if _, err := tools.ParseMilestoneAddItems(raw); err != nil {
+		return nil, err
+	}
+	return map[string]string{"items": raw}, nil
+}
+
+func (milestoneUpdateItemTool) NormalizeArgs(args map[string]string) (map[string]string, error) {
+	ref, err := tools.ParseMilestoneRef(tools.FirstArg(args, "ref"))
+	if err != nil {
+		return nil, err
+	}
+	status, err := tools.ParseMilestoneStatus(tools.FirstArg(args, "status"))
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]string{
+		"ref":    ref,
+		"status": string(status),
+	}
+	if title := strings.TrimSpace(tools.FirstArg(args, "title")); title != "" {
+		out["title"] = title
+	}
+	if notes, ok := args["notes"]; ok {
+		out["notes"] = strings.TrimSpace(notes)
+	}
+	return out, nil
 }
 
 func (milestoneWriteTool) NormalizeArgs(args map[string]string) (map[string]string, error) {
@@ -131,6 +184,12 @@ func (todoFetchNextTool) NormalizeArgs(args map[string]string) (map[string]strin
 }
 
 func (milestoneListTool) LegacyArgs(raw string) map[string]string { return map[string]string{} }
+func (milestoneAddItemsTool) LegacyArgs(raw string) map[string]string {
+	return map[string]string{"items": raw}
+}
+func (milestoneUpdateItemTool) LegacyArgs(raw string) map[string]string {
+	return map[string]string{"ref": raw}
+}
 func (milestoneWriteTool) LegacyArgs(raw string) map[string]string {
 	return map[string]string{"milestones": raw}
 }
@@ -147,7 +206,11 @@ func (todoFetchNextTool) LegacyArgs(raw string) map[string]string {
 	return map[string]string{"milestone_ref": raw}
 }
 
-func (milestoneListTool) Preview(req tools.Request) string  { return "Read milestones" }
+func (milestoneListTool) Preview(req tools.Request) string     { return "Read milestones" }
+func (milestoneAddItemsTool) Preview(req tools.Request) string { return "Add milestones" }
+func (milestoneUpdateItemTool) Preview(req tools.Request) string {
+	return "Update milestone " + req.Args["ref"]
+}
 func (milestoneWriteTool) Preview(req tools.Request) string { return "Replace milestones" }
 func (todoListTool) Preview(req tools.Request) string {
 	return milestonePreview(req.Args["milestone_ref"], "List todos")
@@ -162,6 +225,14 @@ func (todoFetchNextTool) Preview(req tools.Request) string {
 
 func (milestoneListTool) PresentationForPreview(preview string) tools.Presentation {
 	return tools.Presentation{Title: "List milestones", Preview: preview}
+}
+
+func (milestoneAddItemsTool) PresentationForPreview(preview string) tools.Presentation {
+	return tools.Presentation{Title: "Added milestones", Preview: preview}
+}
+
+func (milestoneUpdateItemTool) PresentationForPreview(preview string) tools.Presentation {
+	return tools.Presentation{Title: "Updated milestone", Preview: preview}
 }
 
 func (milestoneWriteTool) PresentationForPreview(preview string) tools.Presentation {
@@ -186,6 +257,12 @@ func (todoFetchNextTool) PresentationForPreview(preview string) tools.Presentati
 
 func (milestoneListTool) Presentation(req tools.Request) tools.Presentation {
 	return milestoneListTool{}.PresentationForPreview(milestoneListTool{}.Preview(req))
+}
+func (milestoneAddItemsTool) Presentation(req tools.Request) tools.Presentation {
+	return milestoneAddItemsTool{}.PresentationForPreview(milestoneAddItemsTool{}.Preview(req))
+}
+func (milestoneUpdateItemTool) Presentation(req tools.Request) tools.Presentation {
+	return milestoneUpdateItemTool{}.PresentationForPreview(milestoneUpdateItemTool{}.Preview(req))
 }
 func (milestoneWriteTool) Presentation(req tools.Request) tools.Presentation {
 	return milestoneWriteTool{}.PresentationForPreview(milestoneWriteTool{}.Preview(req))
@@ -213,6 +290,45 @@ func (milestoneListTool) Execute(ctx context.Context, runtime tools.Runtime, req
 		return tools.Result{}, err
 	}
 	return milestonePlanResult(plan), nil
+}
+
+func (milestoneAddItemsTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
+	items, err := tools.ParseMilestoneAddItems(req.Args["items"])
+	if err != nil {
+		return tools.Result{}, err
+	}
+	st, err := requireSessionStore(runtime)
+	if err != nil {
+		return tools.Result{}, err
+	}
+	plan, err := st.GetMilestonePlan(ctx, runtime.SessionID)
+	if err != nil {
+		return tools.Result{}, err
+	}
+	if err := ensureMilestoneRefsAvailable(plan.Milestones, items); err != nil {
+		return tools.Result{}, err
+	}
+	appended := appendMilestones(plan.Milestones, items)
+	return milestonePlanResult(store.MilestonePlan{
+		Summary:    plan.Summary,
+		Milestones: appended,
+	}), nil
+}
+
+func (milestoneUpdateItemTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
+	st, err := requireSessionStore(runtime)
+	if err != nil {
+		return tools.Result{}, err
+	}
+	plan, err := st.GetMilestonePlan(ctx, runtime.SessionID)
+	if err != nil {
+		return tools.Result{}, err
+	}
+	updated, err := updatedMilestonePlan(plan, req)
+	if err != nil {
+		return tools.Result{}, err
+	}
+	return milestonePlanResult(updated), nil
 }
 
 func (milestoneWriteTool) Execute(_ context.Context, _ tools.Runtime, req tools.Request) (tools.Result, error) {
@@ -339,6 +455,12 @@ func (todoFetchNextTool) Execute(ctx context.Context, runtime tools.Runtime, req
 func (milestoneListTool) SummarizeResult(req tools.Request, result tools.Result) (string, string) {
 	return "Listed milestones", result.Output
 }
+func (milestoneAddItemsTool) SummarizeResult(req tools.Request, result tools.Result) (string, string) {
+	return "Added milestones", result.Output
+}
+func (milestoneUpdateItemTool) SummarizeResult(req tools.Request, result tools.Result) (string, string) {
+	return "Updated milestone", result.Output
+}
 func (milestoneWriteTool) SummarizeResult(req tools.Request, result tools.Result) (string, string) {
 	return "Updated milestones", result.Output
 }
@@ -364,6 +486,43 @@ func (milestoneListTool) PersistResult(ctx context.Context, st *store.Store, ses
 	return tools.PersistStandardResult(ctx, st, sessionID, req, result)
 }
 
+func (milestoneAddItemsTool) PersistResult(ctx context.Context, st *store.Store, sessionID int64, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
+	items, err := tools.ParseMilestoneAddItems(req.Args["items"])
+	if err != nil {
+		return nil, err
+	}
+	plan, err := st.GetMilestonePlan(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if err := ensureMilestoneRefsAvailable(plan.Milestones, items); err != nil {
+		return nil, err
+	}
+	plan, err = st.SetMilestonePlan(ctx, sessionID, plan.Summary, appendMilestones(plan.Milestones, items))
+	if err != nil {
+		return nil, err
+	}
+	result.Stored = milestoneStoredResult(plan)
+	return tools.PersistStandardResult(ctx, st, sessionID, req, result)
+}
+
+func (milestoneUpdateItemTool) PersistResult(ctx context.Context, st *store.Store, sessionID int64, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
+	plan, err := st.GetMilestonePlan(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	updated, err := updatedMilestonePlan(plan, req)
+	if err != nil {
+		return nil, err
+	}
+	plan, err = st.SetMilestonePlan(ctx, sessionID, updated.Summary, updated.Milestones)
+	if err != nil {
+		return nil, err
+	}
+	result.Stored = milestoneStoredResult(plan)
+	return tools.PersistStandardResult(ctx, st, sessionID, req, result)
+}
+
 func (milestoneWriteTool) PersistResult(ctx context.Context, st *store.Store, sessionID int64, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
 	milestones, err := tools.ParseMilestones(req.Args["milestones"])
 	if err != nil {
@@ -375,6 +534,64 @@ func (milestoneWriteTool) PersistResult(ctx context.Context, st *store.Store, se
 	}
 	result.Stored = milestoneStoredResult(plan)
 	return tools.PersistStandardResult(ctx, st, sessionID, req, result)
+}
+
+func appendMilestones(existing, added []store.Milestone) []store.Milestone {
+	out := make([]store.Milestone, 0, len(existing)+len(added))
+	for _, item := range existing {
+		item.Position = len(out)
+		out = append(out, item)
+	}
+	for _, item := range added {
+		item.Position = len(out)
+		out = append(out, item)
+	}
+	return out
+}
+
+func ensureMilestoneRefsAvailable(existing, added []store.Milestone) error {
+	seenRefs := make(map[string]struct{}, len(existing)+len(added))
+	for _, item := range existing {
+		seenRefs[item.Ref] = struct{}{}
+	}
+	for _, item := range added {
+		if _, exists := seenRefs[item.Ref]; exists {
+			return fmt.Errorf("duplicate milestone ref %q", item.Ref)
+		}
+		seenRefs[item.Ref] = struct{}{}
+	}
+	return nil
+}
+
+func updatedMilestonePlan(plan store.MilestonePlan, req tools.Request) (store.MilestonePlan, error) {
+	ref := req.Args["ref"]
+	status := domain.MilestoneStatus(req.Args["status"])
+	milestones := append([]store.Milestone(nil), plan.Milestones...)
+	found := false
+	for idx := range milestones {
+		if milestones[idx].Ref != ref {
+			continue
+		}
+		found = true
+		milestones[idx].Status = status
+		if title := strings.TrimSpace(req.Args["title"]); title != "" {
+			milestones[idx].Title = title
+		}
+		if notes, ok := req.Args["notes"]; ok {
+			milestones[idx].Notes = strings.TrimSpace(notes)
+		}
+		break
+	}
+	if !found {
+		return store.MilestonePlan{}, fmt.Errorf("milestone %q not found", ref)
+	}
+	if err := tools.ValidateMilestoneProgress(milestones); err != nil {
+		return store.MilestonePlan{}, err
+	}
+	return store.MilestonePlan{
+		Summary:    plan.Summary,
+		Milestones: milestones,
+	}, nil
 }
 
 func (todoListTool) PersistResult(ctx context.Context, st *store.Store, sessionID int64, req tools.Request, result tools.Result) (<-chan domain.Event, error) {

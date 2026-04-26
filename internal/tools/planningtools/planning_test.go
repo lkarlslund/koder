@@ -21,13 +21,24 @@ func TestMilestoneAndTodoWorkflow(t *testing.T) {
 	registry := tools.NewRegistry(t.TempDir())
 
 	_, err = executeAndPersist(ctx, t, registry, st, session.ID, tools.Request{
-		Tool: domain.ToolKindMilestoneWrite,
+		Tool: domain.ToolKindMilestoneAdd,
 		Args: map[string]string{
-			"summary":    "Ship feature",
-			"milestones": `[{"ref":"investigate","title":"Investigate","status":"completed"},{"ref":"implement","title":"Implement","status":"in_progress"}]`,
+			"items": `[{"ref":"investigate","title":"Investigate"},{"ref":"implement","title":"Implement"}]`,
 		},
 	})
 	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := executeAndPersist(ctx, t, registry, st, session.ID, tools.Request{
+		Tool: domain.ToolKindMilestoneUpdate,
+		Args: map[string]string{"ref": "investigate", "status": "completed"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := executeAndPersist(ctx, t, registry, st, session.ID, tools.Request{
+		Tool: domain.ToolKindMilestoneUpdate,
+		Args: map[string]string{"ref": "implement", "status": "in_progress"},
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -88,6 +99,28 @@ func TestMilestoneAndTodoWorkflow(t *testing.T) {
 	}
 	if !strings.Contains(done.Output, "All todo items for this milestone are done") {
 		t.Fatalf("expected done coercion message, got %q", done.Output)
+	}
+}
+
+func TestMilestoneWriteHiddenFromDefinitions(t *testing.T) {
+	defs := tools.Definitions(tools.Runtime{})
+	for _, def := range defs {
+		if def.Function.Name == string(domain.ToolKindMilestoneWrite) {
+			t.Fatalf("milestone_write should not be exposed to the model")
+		}
+	}
+	foundAdd := false
+	foundUpdate := false
+	for _, def := range defs {
+		switch def.Function.Name {
+		case string(domain.ToolKindMilestoneAdd):
+			foundAdd = true
+		case string(domain.ToolKindMilestoneUpdate):
+			foundUpdate = true
+		}
+	}
+	if !foundAdd || !foundUpdate {
+		t.Fatalf("expected milestone add/update tools, got add=%v update=%v", foundAdd, foundUpdate)
 	}
 }
 

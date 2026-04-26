@@ -350,7 +350,7 @@ func formatStoredToolOutput(env storedResultEnvelope) (string, bool) {
 		})
 	case domain.ToolKindWebSearch:
 		return decodeAndFormat[WebSearchStoredResult](env.Payload, formatWebSearchStoredResult)
-	case domain.ToolKindMilestoneList, domain.ToolKindMilestoneWrite:
+	case domain.ToolKindMilestoneList, domain.ToolKindMilestoneAdd, domain.ToolKindMilestoneUpdate, domain.ToolKindMilestoneWrite:
 		return decodeAndFormat[MilestonePlanStoredResult](env.Payload, formatMilestonePlanStoredResult)
 	case domain.ToolKindTodoList, domain.ToolKindTodoAddItems, domain.ToolKindTodoUpdateItem, domain.ToolKindTodoFetchNext:
 		return decodeAndFormat[TodoListStoredResult](env.Payload, formatTodoListStoredResult)

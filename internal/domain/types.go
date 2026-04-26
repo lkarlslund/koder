@@ -33,25 +33,27 @@ const (
 type ToolKind string
 
 const (
-	ToolKindRead           ToolKind = "read"
-	ToolKindGlob           ToolKind = "glob"
-	ToolKindGrep           ToolKind = "grep"
-	ToolKindBash           ToolKind = "bash"
-	ToolKindApplyPatch     ToolKind = "apply_patch"
-	ToolKindEdit           ToolKind = "edit"
-	ToolKindWrite          ToolKind = "write"
-	ToolKindTask           ToolKind = "task"
-	ToolKindQuestion       ToolKind = "question"
-	ToolKindUpdatePlan     ToolKind = "update_plan"
-	ToolKindMilestoneList  ToolKind = "milestone_list"
-	ToolKindMilestoneWrite ToolKind = "milestone_write"
-	ToolKindTodoList       ToolKind = "todo_list"
-	ToolKindTodoAddItems   ToolKind = "todo_add_items"
-	ToolKindTodoUpdateItem ToolKind = "todo_update_item"
-	ToolKindTodoFetchNext  ToolKind = "todo_fetch_next"
-	ToolKindSkill          ToolKind = "skill"
-	ToolKindWebFetch       ToolKind = "webfetch"
-	ToolKindWebSearch      ToolKind = "websearch"
+	ToolKindRead            ToolKind = "read"
+	ToolKindGlob            ToolKind = "glob"
+	ToolKindGrep            ToolKind = "grep"
+	ToolKindBash            ToolKind = "bash"
+	ToolKindApplyPatch      ToolKind = "apply_patch"
+	ToolKindEdit            ToolKind = "edit"
+	ToolKindWrite           ToolKind = "write"
+	ToolKindTask            ToolKind = "task"
+	ToolKindQuestion        ToolKind = "question"
+	ToolKindUpdatePlan      ToolKind = "update_plan"
+	ToolKindMilestoneList   ToolKind = "milestone_list"
+	ToolKindMilestoneAdd    ToolKind = "milestone_add_items"
+	ToolKindMilestoneUpdate ToolKind = "milestone_update_item"
+	ToolKindMilestoneWrite  ToolKind = "milestone_write"
+	ToolKindTodoList        ToolKind = "todo_list"
+	ToolKindTodoAddItems    ToolKind = "todo_add_items"
+	ToolKindTodoUpdateItem  ToolKind = "todo_update_item"
+	ToolKindTodoFetchNext   ToolKind = "todo_fetch_next"
+	ToolKindSkill           ToolKind = "skill"
+	ToolKindWebFetch        ToolKind = "webfetch"
+	ToolKindWebSearch       ToolKind = "websearch"
 )
 
 func AllToolKinds() []ToolKind {
@@ -67,6 +69,8 @@ func AllToolKinds() []ToolKind {
 		ToolKindQuestion,
 		ToolKindUpdatePlan,
 		ToolKindMilestoneList,
+		ToolKindMilestoneAdd,
+		ToolKindMilestoneUpdate,
 		ToolKindMilestoneWrite,
 		ToolKindTodoList,
 		ToolKindTodoAddItems,
