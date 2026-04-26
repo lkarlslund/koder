@@ -152,7 +152,11 @@ func (listTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Re
 	if err != nil {
 		return tools.Result{}, err
 	}
-	plan, todos, ref, err := tools.PersistedTodoBucket(ctx, st, runtime.SessionID, req.Args["milestone_ref"])
+	ref, err := tools.AllowedMilestoneRef(runtime, req.Args["milestone_ref"])
+	if err != nil {
+		return tools.Result{}, err
+	}
+	plan, todos, ref, err := tools.PersistedTodoBucket(ctx, st, runtime.SessionID, ref)
 	if err != nil {
 		return tools.Result{}, err
 	}
@@ -164,6 +168,10 @@ func (addItemsTool) Execute(ctx context.Context, runtime tools.Runtime, req tool
 	if err != nil {
 		return tools.Result{}, err
 	}
+	ref, err := tools.AllowedMilestoneRef(runtime, req.Args["milestone_ref"])
+	if err != nil {
+		return tools.Result{}, err
+	}
 	st, err := tools.RequireSessionStore(runtime)
 	if err != nil {
 		return tools.Result{}, err
@@ -172,7 +180,7 @@ func (addItemsTool) Execute(ctx context.Context, runtime tools.Runtime, req tool
 	if err != nil {
 		return tools.Result{}, err
 	}
-	title := tools.MilestoneTitle(plan, req.Args["milestone_ref"])
+	title := tools.MilestoneTitle(plan, ref)
 	todos := make([]store.TodoItem, 0, len(items))
 	for _, content := range items {
 		todos = append(todos, store.TodoItem{
@@ -180,7 +188,7 @@ func (addItemsTool) Execute(ctx context.Context, runtime tools.Runtime, req tool
 			Status:  domain.TodoStatusPending,
 		})
 	}
-	return tools.TodoBucketResultWithTitle(req.Args["milestone_ref"], title, todos, ""), nil
+	return tools.TodoBucketResultWithTitle(ref, title, todos, ""), nil
 }
 
 func (updateItemTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
@@ -193,7 +201,14 @@ func (updateItemTool) Execute(ctx context.Context, runtime tools.Runtime, req to
 	if err != nil {
 		return tools.Result{}, err
 	}
+	allowedRef, err := tools.AllowedMilestoneRef(runtime, "")
+	if err != nil {
+		return tools.Result{}, err
+	}
 	for _, milestone := range plan.Milestones {
+		if allowedRef != "" && milestone.Ref != allowedRef {
+			continue
+		}
 		todos, err := st.ListTodos(ctx, runtime.SessionID, milestone.Ref)
 		if err != nil {
 			return tools.Result{}, err
@@ -227,7 +242,11 @@ func (fetchNextTool) Execute(ctx context.Context, runtime tools.Runtime, req too
 	if err != nil {
 		return tools.Result{}, err
 	}
-	plan, todos, ref, err := tools.PersistedTodoBucket(ctx, st, runtime.SessionID, req.Args["milestone_ref"])
+	ref, err := tools.AllowedMilestoneRef(runtime, req.Args["milestone_ref"])
+	if err != nil {
+		return tools.Result{}, err
+	}
+	plan, todos, ref, err := tools.PersistedTodoBucket(ctx, st, runtime.SessionID, ref)
 	if err != nil {
 		return tools.Result{}, err
 	}

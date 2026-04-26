@@ -3,6 +3,7 @@ package all
 import (
 	_ "github.com/lkarlslund/koder/internal/tools/applypatchtool"
 	_ "github.com/lkarlslund/koder/internal/tools/bashtool"
+	_ "github.com/lkarlslund/koder/internal/tools/chattool"
 	_ "github.com/lkarlslund/koder/internal/tools/edittool"
 	_ "github.com/lkarlslund/koder/internal/tools/globtool"
 	_ "github.com/lkarlslund/koder/internal/tools/greptool"

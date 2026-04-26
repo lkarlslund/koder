@@ -116,7 +116,7 @@ func (b *pebbleBackend) CreateSession(ctx context.Context, title, providerID, mo
 		ID:           meta.NextChatID,
 		SessionID:    session.ID,
 		Title:        "Main",
-		WorkflowRole: domain.WorkflowRoleGeneral,
+		WorkflowRole: domain.WorkflowRoleOrchestrator,
 		ToolStates:   map[domain.ToolKind]bool{},
 		CreatedAt:    now,
 		UpdatedAt:    now,
@@ -243,7 +243,34 @@ func (b *pebbleBackend) DefaultChat(ctx context.Context, sessionID int64) (domai
 	if len(chats) == 0 {
 		return domain.Chat{}, fmt.Errorf("no chat for session %d", sessionID)
 	}
-	return chats[len(chats)-1], nil
+	return chats[0], nil
+}
+
+func (b *pebbleBackend) UpdateChat(ctx context.Context, chat domain.Chat) error {
+	if err := ensureContext(ctx); err != nil {
+		return err
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	existing, err := b.readChat(chat.ID)
+	if err != nil {
+		return err
+	}
+	updated := chat
+	updated.SessionID = existing.SessionID
+	updated.CreatedAt = existing.CreatedAt
+	if updated.UpdatedAt.IsZero() {
+		updated.UpdatedAt = time.Now().UTC()
+	}
+	batch := b.db.NewBatch()
+	defer batch.Close()
+	if err := b.putChat(batch, updated); err != nil {
+		return err
+	}
+	if err := batch.Commit(pebble.Sync); err != nil {
+		return fmt.Errorf("commit update chat: %w", err)
+	}
+	return nil
 }
 
 func (b *pebbleBackend) AddMessage(ctx context.Context, sessionID int64, role domain.MessageRole, summary string) (domain.Message, error) {
@@ -1220,7 +1247,7 @@ func messageChatIndexKey(chatID, messageID int64) string {
 	return messageChatIndexPrefix(chatID) + "/" + strconvID(messageID)
 }
 func messageChatIndexPrefix(chatID int64) string { return "chat-message/" + strconvID(chatID) }
-func partKey(id int64) string { return "part/" + strconvID(id) }
+func partKey(id int64) string                    { return "part/" + strconvID(id) }
 func partMessageIndexKey(messageID, partID int64) string {
 	return partMessageIndexPrefix(messageID) + "/" + strconvID(partID)
 }

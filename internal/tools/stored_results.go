@@ -139,6 +139,19 @@ type MilestonePlanStoredResult struct {
 	Milestones []MilestoneStoredItem `json:"milestones,omitempty"`
 }
 
+type ChatStoredItem struct {
+	ID                 int64  `json:"id"`
+	Title              string `json:"title"`
+	Role               string `json:"role,omitempty"`
+	State              string `json:"state,omitempty"`
+	ActiveMilestoneRef string `json:"active_milestone_ref,omitempty"`
+	StatusText         string `json:"status_text,omitempty"`
+}
+
+type ChatListStoredResult struct {
+	Items []ChatStoredItem `json:"items,omitempty"`
+}
+
 type TodoStoredItem struct {
 	ID      int64  `json:"id"`
 	Content string `json:"content"`
@@ -201,6 +214,7 @@ func (QuestionStoredResult) storedResultPayload()      {}
 func (TaskStoredResult) storedResultPayload()          {}
 func (UpdatePlanStoredResult) storedResultPayload()    {}
 func (MilestonePlanStoredResult) storedResultPayload() {}
+func (ChatListStoredResult) storedResultPayload()      {}
 func (TodoListStoredResult) storedResultPayload()      {}
 func (SkillStoredResult) storedResultPayload()         {}
 func (WebFetchStoredResult) storedResultPayload()      {}
@@ -248,6 +262,19 @@ func DisplayTextForPart(part domain.Part) (string, bool) {
 		return "", false
 	}
 	return text, true
+}
+
+func DisplayTextForStored(tool domain.ToolKind, payload StoredResultPayload) string {
+	raw, err := marshalStoredResult(domain.PartKindToolOutput, tool, StoredResultStatusOK, payload)
+	if err != nil {
+		return ""
+	}
+	var env storedResultEnvelope
+	if err := json.Unmarshal([]byte(raw), &env); err != nil {
+		return ""
+	}
+	text, _ := formatStoredResultForDisplay(env)
+	return text
 }
 
 func marshalStoredResult(partKind domain.PartKind, tool domain.ToolKind, status StoredResultStatus, payload StoredResultPayload) (string, error) {
@@ -350,8 +377,10 @@ func formatStoredToolOutput(env storedResultEnvelope) (string, bool) {
 		})
 	case domain.ToolKindWebSearch:
 		return decodeAndFormat[WebSearchStoredResult](env.Payload, formatWebSearchStoredResult)
-	case domain.ToolKindMilestoneList, domain.ToolKindMilestoneAdd, domain.ToolKindMilestoneUpdate, domain.ToolKindMilestoneWrite:
+	case domain.ToolKindMilestoneList, domain.ToolKindMilestoneAdd, domain.ToolKindMilestoneUpdate, domain.ToolKindMilestoneWrite, domain.ToolKindMilestonePlan:
 		return decodeAndFormat[MilestonePlanStoredResult](env.Payload, formatMilestonePlanStoredResult)
+	case domain.ToolKindChatList, domain.ToolKindChatStartDecomp, domain.ToolKindChatStartExec, domain.ToolKindChatPoll:
+		return decodeAndFormat[ChatListStoredResult](env.Payload, formatChatListStoredResult)
 	case domain.ToolKindTodoList, domain.ToolKindTodoAddItems, domain.ToolKindTodoUpdateItem, domain.ToolKindTodoFetchNext:
 		return decodeAndFormat[TodoListStoredResult](env.Payload, formatTodoListStoredResult)
 	default:
@@ -467,6 +496,30 @@ func formatTodoListStoredResult(result TodoListStoredResult) string {
 	}
 	if message := strings.TrimSpace(result.Message); message != "" {
 		lines = append(lines, message)
+	}
+	return strings.TrimSpace(strings.Join(lines, "\n"))
+}
+
+func formatChatListStoredResult(result ChatListStoredResult) string {
+	lines := make([]string, 0, len(result.Items))
+	for _, item := range result.Items {
+		if item.ID == 0 {
+			continue
+		}
+		line := fmt.Sprintf("#%d %s", item.ID, strings.TrimSpace(item.Title))
+		if role := strings.TrimSpace(item.Role); role != "" {
+			line += " [" + role + "]"
+		}
+		if state := strings.TrimSpace(item.State); state != "" {
+			line += " {" + state + "}"
+		}
+		lines = append(lines, line)
+		if ref := strings.TrimSpace(item.ActiveMilestoneRef); ref != "" {
+			lines = append(lines, "milestone: "+ref)
+		}
+		if status := strings.TrimSpace(item.StatusText); status != "" {
+			lines = append(lines, status)
+		}
 	}
 	return strings.TrimSpace(strings.Join(lines, "\n"))
 }

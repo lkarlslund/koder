@@ -98,7 +98,7 @@ func (b *jsonfsBackend) CreateSession(ctx context.Context, title, providerID, mo
 		ID:           meta.NextChatID,
 		SessionID:    session.ID,
 		Title:        "Main",
-		WorkflowRole: domain.WorkflowRoleGeneral,
+		WorkflowRole: domain.WorkflowRoleOrchestrator,
 		ToolStates:   map[domain.ToolKind]bool{},
 		CreatedAt:    now,
 		UpdatedAt:    now,
@@ -205,7 +205,26 @@ func (b *jsonfsBackend) DefaultChat(ctx context.Context, sessionID int64) (domai
 	if len(chats) == 0 {
 		return domain.Chat{}, fmt.Errorf("no chat for session %d", sessionID)
 	}
-	return chats[len(chats)-1], nil
+	return chats[0], nil
+}
+
+func (b *jsonfsBackend) UpdateChat(ctx context.Context, chat domain.Chat) error {
+	if err := ensureContext(ctx); err != nil {
+		return err
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	existing, err := b.readChat(chat.ID)
+	if err != nil {
+		return err
+	}
+	updated := chat
+	updated.SessionID = existing.SessionID
+	updated.CreatedAt = existing.CreatedAt
+	if updated.UpdatedAt.IsZero() {
+		updated.UpdatedAt = time.Now().UTC()
+	}
+	return b.writeChat(updated)
 }
 
 func (b *jsonfsBackend) ListSessions(ctx context.Context) ([]domain.Session, error) {

@@ -46,11 +46,16 @@ const (
 	ToolKindMilestoneList   ToolKind = "milestone_list"
 	ToolKindMilestoneAdd    ToolKind = "milestone_add_items"
 	ToolKindMilestoneUpdate ToolKind = "milestone_update_item"
+	ToolKindMilestonePlan   ToolKind = "milestone_plan_and_decompose"
 	ToolKindMilestoneWrite  ToolKind = "milestone_write"
 	ToolKindTodoList        ToolKind = "todo_list"
 	ToolKindTodoAddItems    ToolKind = "todo_add_items"
 	ToolKindTodoUpdateItem  ToolKind = "todo_update_item"
 	ToolKindTodoFetchNext   ToolKind = "todo_fetch_next"
+	ToolKindChatList        ToolKind = "chat_list"
+	ToolKindChatStartDecomp ToolKind = "chat_start_decomposition"
+	ToolKindChatStartExec   ToolKind = "chat_start_execution"
+	ToolKindChatPoll        ToolKind = "chat_poll"
 	ToolKindSkill           ToolKind = "skill"
 	ToolKindWebFetch        ToolKind = "webfetch"
 	ToolKindWebSearch       ToolKind = "websearch"
@@ -71,11 +76,16 @@ func AllToolKinds() []ToolKind {
 		ToolKindMilestoneList,
 		ToolKindMilestoneAdd,
 		ToolKindMilestoneUpdate,
+		ToolKindMilestonePlan,
 		ToolKindMilestoneWrite,
 		ToolKindTodoList,
 		ToolKindTodoAddItems,
 		ToolKindTodoUpdateItem,
 		ToolKindTodoFetchNext,
+		ToolKindChatList,
+		ToolKindChatStartDecomp,
+		ToolKindChatStartExec,
+		ToolKindChatPoll,
 		ToolKindSkill,
 		ToolKindWebFetch,
 		ToolKindWebSearch,
@@ -110,10 +120,12 @@ const (
 type MilestoneStatus string
 
 const (
-	MilestoneStatusPending    MilestoneStatus = "pending"
-	MilestoneStatusInProgress MilestoneStatus = "in_progress"
-	MilestoneStatusCompleted  MilestoneStatus = "completed"
-	MilestoneStatusBlocked    MilestoneStatus = "blocked"
+	MilestoneStatusPending     MilestoneStatus = "pending"
+	MilestoneStatusInProgress  MilestoneStatus = "in_progress"
+	MilestoneStatusDecomposing MilestoneStatus = "decomposing"
+	MilestoneStatusExecuting   MilestoneStatus = "executing"
+	MilestoneStatusCompleted   MilestoneStatus = "completed"
+	MilestoneStatusBlocked     MilestoneStatus = "blocked"
 )
 
 type TodoStatus string
@@ -165,26 +177,27 @@ type WorkflowRole string
 
 const (
 	WorkflowRoleGeneral       WorkflowRole = "general"
+	WorkflowRoleOrchestrator  WorkflowRole = "orchestrator"
 	WorkflowRolePlanning      WorkflowRole = "planning"
 	WorkflowRoleDecomposition WorkflowRole = "decomposition"
 	WorkflowRoleExecution     WorkflowRole = "execution"
 )
 
 type Chat struct {
-	ID                int64
-	SessionID         int64
-	ParentChatID      *int64
-	Title             string
-	WorkflowRole      WorkflowRole
-	ProviderID        string
-	ModelID           string
-	PermissionProfile string
-	ToolStates        map[ToolKind]bool
-	ActiveMilestoneRef string
+	ID                    int64
+	SessionID             int64
+	ParentChatID          *int64
+	Title                 string
+	WorkflowRole          WorkflowRole
+	ProviderID            string
+	ModelID               string
+	PermissionProfile     string
+	ToolStates            map[ToolKind]bool
+	ActiveMilestoneRef    string
 	AssignedTodoBucketRef string
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
-	LastMessage       string
+	CreatedAt             time.Time
+	UpdatedAt             time.Time
+	LastMessage           string
 }
 
 type AgentsFile struct {

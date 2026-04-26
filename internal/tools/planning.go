@@ -50,11 +50,11 @@ func ParseMilestones(raw string) ([]store.Milestone, error) {
 		}
 		seenRefs[ref] = struct{}{}
 		switch status {
-		case domain.MilestoneStatusPending, domain.MilestoneStatusInProgress, domain.MilestoneStatusCompleted, domain.MilestoneStatusBlocked:
+		case domain.MilestoneStatusPending, domain.MilestoneStatusInProgress, domain.MilestoneStatusDecomposing, domain.MilestoneStatusExecuting, domain.MilestoneStatusCompleted, domain.MilestoneStatusBlocked:
 		default:
 			return nil, fmt.Errorf("invalid milestone status %q", item.Status)
 		}
-		if status == domain.MilestoneStatusInProgress {
+		if milestoneStatusCountsAsActive(status) {
 			inProgress++
 		}
 		out = append(out, store.Milestone{
@@ -116,7 +116,7 @@ func ParseMilestoneRef(raw string) (string, error) {
 func ParseMilestoneStatus(raw string) (domain.MilestoneStatus, error) {
 	status := domain.MilestoneStatus(strings.TrimSpace(raw))
 	switch status {
-	case domain.MilestoneStatusPending, domain.MilestoneStatusInProgress, domain.MilestoneStatusCompleted, domain.MilestoneStatusBlocked:
+	case domain.MilestoneStatusPending, domain.MilestoneStatusInProgress, domain.MilestoneStatusDecomposing, domain.MilestoneStatusExecuting, domain.MilestoneStatusCompleted, domain.MilestoneStatusBlocked:
 		return status, nil
 	default:
 		return "", fmt.Errorf("invalid milestone status %q", raw)
@@ -162,6 +162,16 @@ func ParseTodoStatus(raw string) (domain.TodoStatus, error) {
 
 func ActiveMilestone(plan store.MilestonePlan) (store.Milestone, bool) {
 	for _, item := range plan.Milestones {
+		if item.Status == domain.MilestoneStatusExecuting {
+			return item, true
+		}
+	}
+	for _, item := range plan.Milestones {
+		if item.Status == domain.MilestoneStatusDecomposing {
+			return item, true
+		}
+	}
+	for _, item := range plan.Milestones {
 		if item.Status == domain.MilestoneStatusInProgress {
 			return item, true
 		}
@@ -202,14 +212,23 @@ func ValidateMilestoneProgress(items []store.Milestone) error {
 			return fmt.Errorf("duplicate milestone ref %q", item.Ref)
 		}
 		seenRefs[item.Ref] = struct{}{}
-		if item.Status == domain.MilestoneStatusInProgress {
+		if milestoneStatusCountsAsActive(item.Status) {
 			inProgress++
 		}
 	}
 	if inProgress > 1 {
-		return errors.New("milestones may contain at most one in_progress item")
+		return errors.New("milestones may contain at most one active item (in_progress, decomposing, or executing)")
 	}
 	return nil
+}
+
+func milestoneStatusCountsAsActive(status domain.MilestoneStatus) bool {
+	switch status {
+	case domain.MilestoneStatusInProgress, domain.MilestoneStatusDecomposing, domain.MilestoneStatusExecuting:
+		return true
+	default:
+		return false
+	}
 }
 
 func RequireSessionStore(runtime Runtime) (*store.Store, error) {
@@ -217,6 +236,26 @@ func RequireSessionStore(runtime Runtime) (*store.Store, error) {
 		return nil, errors.New("planning tools require a persisted session")
 	}
 	return runtime.Store, nil
+}
+
+func AllowedMilestoneRef(runtime Runtime, requested string) (string, error) {
+	requested = strings.TrimSpace(requested)
+	switch runtime.ChatRole {
+	case domain.WorkflowRoleDecomposition, domain.WorkflowRoleExecution:
+		assigned := strings.TrimSpace(runtime.ActiveMilestoneRef)
+		if assigned == "" {
+			assigned = strings.TrimSpace(runtime.AssignedTodoBucketRef)
+		}
+		if assigned == "" {
+			return requested, nil
+		}
+		if requested == "" || requested == assigned {
+			return assigned, nil
+		}
+		return "", fmt.Errorf("chat is scoped to milestone %q", assigned)
+	default:
+		return requested, nil
+	}
 }
 
 func PersistedTodoBucket(ctx context.Context, st *store.Store, sessionID int64, ref string) (store.MilestonePlan, []store.TodoItem, string, error) {
@@ -269,6 +308,21 @@ func TodoStoredResult(plan store.MilestonePlan, ref string, todos []store.TodoIt
 		Message:        message,
 		Items:          items,
 	}
+}
+
+func ChatListStored(statuses []ChatStatus) ChatListStoredResult {
+	items := make([]ChatStoredItem, 0, len(statuses))
+	for _, status := range statuses {
+		items = append(items, ChatStoredItem{
+			ID:                 status.Chat.ID,
+			Title:              status.Chat.Title,
+			Role:               string(status.Chat.WorkflowRole),
+			State:              string(status.State),
+			ActiveMilestoneRef: status.Chat.ActiveMilestoneRef,
+			StatusText:         status.StatusText,
+		})
+	}
+	return ChatListStoredResult{Items: items}
 }
 
 func MilestonePlanResult(plan store.MilestonePlan) Result {

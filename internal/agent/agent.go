@@ -181,7 +181,7 @@ func (e *Engine) PreviewNextRequestForChat(ctx context.Context, session domain.S
 	return provider.ChatRequest{
 		Model:      session.ModelID,
 		Messages:   messages,
-		Tools:      tools.Definitions(tools.Runtime{Workdir: e.workdir}),
+		Tools:      tools.Definitions(e.toolRuntime(session, chat)),
 		ToolChoice: "auto",
 		Stream:     false,
 	}, nil
@@ -432,7 +432,7 @@ func (e *Engine) continueModelTurn(ctx context.Context, session domain.Session, 
 		req := provider.ChatRequest{
 			Model:      session.ModelID,
 			Messages:   messages,
-			Tools:      tools.Definitions(tools.Runtime{Workdir: e.workdir}),
+			Tools:      tools.Definitions(e.toolRuntime(session, chat)),
 			ToolChoice: "auto",
 			Stream:     false,
 		}
@@ -752,7 +752,11 @@ func (e *Engine) approve(ctx context.Context, sessionID, chatID int64, rawID str
 		return nil, err
 	}
 	e.recordLifecycle(sessionID, "tool_execution_started", item.Command, map[string]string{"tool": string(item.Tool), "approval_id": strconv.FormatInt(id, 10)})
-	result, execErr := e.registry.ExecuteWithSession(ctx, e.store, sessionID, req)
+	chat, chatErr := e.store.GetChat(ctx, item.ChatID)
+	if chatErr != nil {
+		return nil, chatErr
+	}
+	result, execErr := e.registry.ExecuteWithChat(ctx, e.store, sessionID, chat, req)
 	if execErr != nil {
 		e.recordLifecycle(sessionID, "tool_execution_failed", execErr.Error(), map[string]string{"tool": string(item.Tool), "approval_id": strconv.FormatInt(id, 10)})
 		if interruptedErr(execErr) {
@@ -787,7 +791,7 @@ func (e *Engine) approve(ctx context.Context, sessionID, chatID int64, rawID str
 				out <- domain.Event{Kind: domain.EventKindError, Err: err}
 				return
 			}
-			if err := e.continueModelTurn(ctx, session, domain.Chat{ID: item.ChatID}, client, out, nil); err != nil {
+			if err := e.continueModelTurn(ctx, session, chat, client, out, nil); err != nil {
 				if interruptedErr(err) {
 					e.emitInterrupted(out, item.ChatID, session.ID)
 					return
@@ -881,7 +885,7 @@ func (e *Engine) deny(ctx context.Context, _, _ int64, rawID string) (<-chan dom
 }
 
 func (e *Engine) persistToolResult(ctx context.Context, chatID, sessionID int64, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
-	events, err := e.registry.PersistResult(ctx, e.store, sessionID, req, result)
+	events, err := e.registry.PersistResultInChat(ctx, e.store, sessionID, chatID, req, result)
 	if err != nil {
 		return nil, err
 	}
@@ -1248,8 +1252,16 @@ func (e *Engine) buildConversationPreview(ctx context.Context, session domain.Se
 }
 
 func (e *Engine) buildPromptEnvelopePreview(ctx context.Context, session domain.Session, chatID int64, prompt string, drafts []attachment.Draft, refs []reference.Draft, transient []provider.InstructionBlock) (provider.PromptEnvelope, error) {
+	chat := domain.Chat{WorkflowRole: domain.WorkflowRoleGeneral}
+	if chatID > 0 {
+		stored, err := e.store.GetChat(ctx, chatID)
+		if err != nil {
+			return provider.PromptEnvelope{}, err
+		}
+		chat = stored
+	}
 	envelope := provider.PromptEnvelope{
-		Instructions: e.baseInstructions(session),
+		Instructions: e.baseInstructionsForChat(session, chat),
 	}
 	if chatID > 0 {
 		messages, partsByMessage, err := e.store.PartsForChat(ctx, chatID)
@@ -1258,7 +1270,7 @@ func (e *Engine) buildPromptEnvelopePreview(ctx context.Context, session domain.
 		}
 		for _, msg := range messages {
 			if summary, ok := compactionSummary(partsByMessage[msg.ID]); ok {
-				envelope.Instructions = e.baseInstructions(session)
+				envelope.Instructions = e.baseInstructionsForChat(session, chat)
 				envelope.Items = append(envelope.Items[:0], compactedHistoryMessage(summary))
 				continue
 			}
@@ -1282,11 +1294,17 @@ func (e *Engine) buildPromptEnvelopePreview(ctx context.Context, session domain.
 	return envelope, nil
 }
 
-func (e *Engine) baseInstructions(session domain.Session) []provider.InstructionBlock {
+func (e *Engine) baseInstructionsForChat(session domain.Session, chat domain.Chat) []provider.InstructionBlock {
 	instructions := []provider.InstructionBlock{{
 		Kind: provider.InstructionKindBaseSystem,
 		Text: systemPrompt(),
 	}}
+	if roleText := strings.TrimSpace(chatRoleInstructions(chat)); roleText != "" {
+		instructions = append(instructions, provider.InstructionBlock{
+			Kind: provider.InstructionKindProjectInstructions,
+			Text: roleText,
+		})
+	}
 	if agentsText := strings.TrimSpace(session.AgentsResolved); agentsText != "" {
 		instructions = append(instructions, provider.InstructionBlock{
 			Kind: provider.InstructionKindProjectInstructions,
@@ -1300,6 +1318,46 @@ func (e *Engine) baseInstructions(session domain.Session) []provider.Instruction
 		})
 	}
 	return instructions
+}
+
+func chatRoleInstructions(chat domain.Chat) string {
+	switch chat.WorkflowRole {
+	case domain.WorkflowRoleDecomposition:
+		return strings.TrimSpace(`This chat is a decomposition worker.
+
+Focus on one assigned milestone and its todo bucket.
+- Break that milestone into concrete todo items.
+- Update only that milestone and its todo bucket.
+- Do not edit code in this chat unless the user explicitly changes the workflow.`)
+	case domain.WorkflowRoleExecution:
+		return strings.TrimSpace(`This chat is an execution worker.
+
+Focus only on the assigned milestone and todo bucket.
+- Implement the work using available coding tools.
+- Keep todo item status updated as you progress.
+- Do not rewrite unrelated milestones or todo buckets.`)
+	case domain.WorkflowRoleOrchestrator, domain.WorkflowRoleGeneral, domain.WorkflowRolePlanning:
+		return strings.TrimSpace(`This chat is the main orchestration thread.
+
+You may discuss, ask clarifying questions, manage milestones, decompose work inline, and start background decomposition or execution chats when helpful.
+- Use milestones for longer-horizon work.
+- Use todos for concrete execution steps.
+- For small changes, inline decomposition is fine; a separate decomposition chat is optional.`)
+	default:
+		return ""
+	}
+}
+
+func (e *Engine) toolRuntime(session domain.Session, chat domain.Chat) tools.Runtime {
+	return tools.Runtime{
+		Workdir:               e.workdir,
+		Store:                 e.store,
+		SessionID:             session.ID,
+		ChatID:                chat.ID,
+		ChatRole:              chat.WorkflowRole,
+		ActiveMilestoneRef:    chat.ActiveMilestoneRef,
+		AssignedTodoBucketRef: chat.AssignedTodoBucketRef,
+	}
 }
 
 func compactedHistoryMessage(summary string) provider.Message {
@@ -1908,7 +1966,7 @@ func (e *Engine) handleModelToolCall(ctx context.Context, session domain.Session
 			},
 		}, nil
 	}
-	result, err := e.registry.ExecuteWithSession(ctx, e.store, sessionID, req)
+	result, err := e.registry.ExecuteWithChat(ctx, e.store, sessionID, chat, req)
 	if err != nil {
 		events, persistErr := e.persistToolFailure(ctx, chat.ID, sessionID, req, err)
 		if persistErr != nil {
@@ -2177,7 +2235,11 @@ func toolEnabledForSession(cfg config.Config, session domain.Session, kind domai
 
 func (e *Engine) executePreparedToolCall(ctx context.Context, chatID, sessionID int64, req tools.Request) ([]domain.Event, error) {
 	e.recordLifecycle(sessionID, "tool_execution_started", req.ContextString(), map[string]string{"tool": string(req.Tool), "tool_call_id": req.ToolCallID})
-	result, err := e.registry.ExecuteWithSession(ctx, e.store, sessionID, req)
+	chat, chatErr := e.store.GetChat(ctx, chatID)
+	if chatErr != nil {
+		return nil, chatErr
+	}
+	result, err := e.registry.ExecuteWithChat(ctx, e.store, sessionID, chat, req)
 	if err != nil {
 		e.recordLifecycle(sessionID, "tool_execution_failed", err.Error(), map[string]string{"tool": string(req.Tool), "tool_call_id": req.ToolCallID})
 		events, persistErr := e.persistToolFailure(ctx, chatID, sessionID, req, err)

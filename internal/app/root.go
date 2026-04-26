@@ -15,6 +15,7 @@ import (
 
 	"github.com/lkarlslund/koder/internal/agent"
 	"github.com/lkarlslund/koder/internal/agents"
+	"github.com/lkarlslund/koder/internal/chatruntime"
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/debugsrv"
 	"github.com/lkarlslund/koder/internal/domain"
@@ -109,6 +110,7 @@ func runTUI(ctx context.Context, mode tui.StartupMode, workdir string, startupOp
 	}
 	registry := tools.NewRegistry(agents.FindProjectRoot(workdir))
 	engine := agent.New(cfg, st, registry, recorder, workdir)
+	registry.SetChatControl(chatruntime.New(engine, st))
 	return tui.RunWithWorkdir(cfg, st, engine, mode, recorder, debugServer, workdir, startupOpts)
 }
 

@@ -32,6 +32,7 @@ type backend interface {
 	ListChats(context.Context, int64) ([]domain.Chat, error)
 	GetChat(context.Context, int64) (domain.Chat, error)
 	DefaultChat(context.Context, int64) (domain.Chat, error)
+	UpdateChat(context.Context, domain.Chat) error
 	UpdateSessionWorkspace(context.Context, int64, string, string) error
 	SetSessionPermissionProfile(context.Context, int64, string) error
 	SetSessionToolStates(context.Context, int64, map[domain.ToolKind]bool) error
@@ -177,6 +178,10 @@ func (s *Store) GetChat(ctx context.Context, chatID int64) (domain.Chat, error) 
 
 func (s *Store) DefaultChat(ctx context.Context, sessionID int64) (domain.Chat, error) {
 	return s.backend.DefaultChat(ctx, sessionID)
+}
+
+func (s *Store) UpdateChat(ctx context.Context, chat domain.Chat) error {
+	return s.backend.UpdateChat(ctx, chat)
 }
 
 func (s *Store) UpdateSessionWorkspace(ctx context.Context, sessionID int64, cwd, projectRoot string) error {
