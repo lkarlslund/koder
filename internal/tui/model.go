@@ -120,6 +120,7 @@ func (b busyModel) sidebarActive() bool {
 }
 
 type eventMsg struct {
+	chatID int64
 	event  domain.Event
 	events <-chan domain.Event
 }
@@ -144,6 +145,8 @@ type StartupOptions struct {
 
 type newSessionMsg struct {
 	session   domain.Session
+	chat      domain.Chat
+	chats     []domain.Chat
 	sessions  []domain.Session
 	messages  []domain.Message
 	parts     map[int64][]domain.Part
@@ -175,6 +178,7 @@ type pickerModel struct {
 
 type runPromptMsg struct {
 	session        domain.Session
+	chat           domain.Chat
 	events         <-chan domain.Event
 	err            error
 	providerID     string
@@ -288,7 +292,9 @@ type Model struct {
 	renderer           *markdown.Renderer
 	palette            theme.Palette
 	sessions           []domain.Session
+	chats              []domain.Chat
 	currentSession     domain.Session
+	currentChat        domain.Chat
 	messages           []domain.Message
 	parts              map[int64][]domain.Part
 	milestonePlan      store.MilestonePlan
@@ -310,6 +316,7 @@ type Model struct {
 	status             string
 	loading            bool
 	busy               busyModel
+	chatBusy           map[int64]busyModel
 	showSidebar        bool
 	showReasoning      bool
 	showSystem         bool
@@ -353,6 +360,7 @@ type Model struct {
 	caps               *provider.CapabilityStore
 	runtimeCtxChecked  map[string]bool
 	activeOpCancel     context.CancelFunc
+	activeOpCancels    map[int64]context.CancelFunc
 	queuedPrompt       *queuedPrompt
 	pendingModelNote   string
 	draftAttachments   []attachment.Draft
@@ -521,7 +529,7 @@ func (m Model) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 			return m.finishOperationWithError(msg.err)
 		}
 		m.startBusy(m.busy.scopeOrDefault(busyScopeTranscript), m.busy.statusOrDefault("Working ..."))
-		return m, ui.Batch(nextEventCmd(msg.events), m.spinnerCmdIfNeeded(), m.syncWindowTitleCmd())
+		return m, ui.Batch(nextEventCmd(m.currentChat.ID, msg.events), m.spinnerCmdIfNeeded(), m.syncWindowTitleCmd())
 	case runPromptMsg:
 		m.invalidateBodyCache()
 		if msg.err != nil {
@@ -541,9 +549,10 @@ func (m Model) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 			}
 		}
 		m.currentSession = msg.session
+		m.currentChat = msg.chat
 		m.pendingModelNote = ""
 		m.startBusy(m.busy.scopeOrDefault(busyScopeTranscript), "Working ...")
-		return m, ui.Batch(nextEventCmd(msg.events), m.spinnerCmdIfNeeded(), m.syncWindowTitleCmd())
+		return m, ui.Batch(nextEventCmd(msg.chat.ID, msg.events), m.spinnerCmdIfNeeded(), m.syncWindowTitleCmd())
 	case kickoffPromptMsg:
 		return m, ui.Batch(m.promptCmd(m.beginActiveOperation(), msg.Prompt, msg.Attachments, msg.References), m.spinnerCmdIfNeeded(), m.syncWindowTitleCmd())
 	case llmPreviewMsg:
@@ -555,13 +564,25 @@ func (m Model) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 		return m, m.syncWindowTitleCmd()
 	case eventMsg:
 		m.invalidateBodyCache()
-		m.recordEvent(msg.event)
-		m.applyEvent(msg.event)
-		if msg.events != nil {
-			return m, ui.Batch(m.reloadDetailsCmd(), nextEventCmd(msg.events), m.syncWindowTitleCmd())
+		m.recordEvent(msg.chatID, msg.event)
+		if msg.chatID == 0 || msg.chatID == m.currentChat.ID {
+			m.applyEvent(msg.event)
 		}
-		m.stopBusy()
-		return m, ui.Batch(m.reloadDetailsCmd(), m.syncWindowTitleCmd())
+		if msg.events != nil {
+			var refresh ui.Cmd
+			if msg.chatID == 0 || msg.chatID == m.currentChat.ID {
+				refresh = m.reloadDetailsCmd()
+			}
+			return m, ui.Batch(refresh, nextEventCmd(msg.chatID, msg.events), m.syncWindowTitleCmd())
+		}
+		if msg.chatID == 0 || msg.chatID == m.currentChat.ID {
+			m.stopBusy()
+			return m, ui.Batch(m.reloadDetailsCmd(), m.syncWindowTitleCmd())
+		}
+		if m.chatBusy != nil {
+			delete(m.chatBusy, msg.chatID)
+		}
+		return m, m.syncWindowTitleCmd()
 	case loadMsg:
 		m.invalidateTranscript()
 		m = m.UpdateLoad(msg)
@@ -604,7 +625,9 @@ func (m Model) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 	case newSessionMsg:
 		m.invalidateTranscript()
 		m.sessions = msg.sessions
+		m.chats = msg.chats
 		m.currentSession = msg.session
+		m.currentChat = msg.chat
 		m.messages = msg.messages
 		m.parts = msg.parts
 		m.approvals = msg.approvals
@@ -621,6 +644,7 @@ func (m Model) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 		m.closeModelDialog()
 		m.closeAgentsModal()
 		m.agentsDrift = false
+		m.syncCurrentChatBusy()
 		m.stopBusy()
 		if msg.session.ID > 0 {
 			m.status = fmt.Sprintf("Started session %d", msg.session.ID)
@@ -1605,6 +1629,22 @@ func (m *Model) renderSidebar() string {
 		lines = append(lines, fmt.Sprintf("  %s", m.queuedPrompt.modeLabel()))
 		lines = append(lines, fmt.Sprintf("  %s", truncate(m.queuedPrompt.Text, 24)))
 	}
+	lines = append(lines, "")
+	lines = append(lines, "Chats")
+	if len(m.chats) == 0 {
+		lines = append(lines, "  none")
+	}
+	for _, item := range m.chats {
+		prefix := " "
+		if item.ID == m.currentChat.ID {
+			prefix = "*"
+		}
+		label := item.Title
+		if strings.TrimSpace(label) == "" {
+			label = fmt.Sprintf("Chat %d", item.ID)
+		}
+		lines = append(lines, fmt.Sprintf(" %s %s", prefix, truncate(label, 21)))
+	}
 	if metrics, ok := sessionctx.FromMessages(m.cfg, m.currentSession, m.messages, m.parts); ok {
 		lines = append(lines, "")
 		lines = append(lines, "Context")
@@ -1954,7 +1994,20 @@ func (m *Model) sessionUsageSummary(sessionID int64) (domain.Usage, bool) {
 	if m.store == nil {
 		return domain.Usage{}, false
 	}
-	messages, parts, err := m.store.PartsForSession(context.Background(), sessionID)
+	chatID := int64(0)
+	if m.currentSession.ID == sessionID {
+		chatID = m.currentChat.ID
+	}
+	var (
+		messages []domain.Message
+		parts    map[int64][]domain.Part
+		err      error
+	)
+	if chatID > 0 {
+		messages, parts, err = m.store.PartsForChat(context.Background(), chatID)
+	} else {
+		messages, parts, err = m.store.PartsForSession(context.Background(), sessionID)
+	}
 	if err != nil {
 		return domain.Usage{}, false
 	}
@@ -2355,11 +2408,23 @@ func (m Model) loadCmd() ui.Cmd {
 			return m.newSessionCmd()()
 		}
 		current := sessions[0]
-		messages, parts, err := m.store.PartsForSession(ctx, current.ID)
+		chats, err := m.store.ListChats(ctx, current.ID)
 		if err != nil {
 			return promptDoneMsg{err: err}
 		}
-		approvals, err := m.store.PendingApprovals(ctx, current.ID)
+		currentChat := newestChat(chats)
+		if currentChat.ID == 0 {
+			currentChat, err = m.store.DefaultChat(ctx, current.ID)
+			if err != nil {
+				return promptDoneMsg{err: err}
+			}
+			chats = append(chats, currentChat)
+		}
+		messages, parts, err := m.store.PartsForChat(ctx, currentChat.ID)
+		if err != nil {
+			return promptDoneMsg{err: err}
+		}
+		approvals, err := m.store.PendingApprovalsForChat(ctx, currentChat.ID)
 		if err != nil {
 			return promptDoneMsg{err: err}
 		}
@@ -2373,7 +2438,9 @@ func (m Model) loadCmd() ui.Cmd {
 		}
 		return loadMsg{
 			sessions:  sessions,
+			chats:     chats,
 			current:   current,
+			chat:      currentChat,
 			messages:  messages,
 			parts:     parts,
 			approvals: approvals,
@@ -2386,7 +2453,9 @@ func (m Model) loadCmd() ui.Cmd {
 
 type loadMsg struct {
 	sessions     []domain.Session
+	chats        []domain.Chat
 	current      domain.Session
+	chat         domain.Chat
 	messages     []domain.Message
 	parts        map[int64][]domain.Part
 	approvals    []store.Approval
@@ -2412,12 +2481,30 @@ func (m Model) loadPlanningState(ctx context.Context, sessionID int64) (store.Mi
 	return plan, todos, nil
 }
 
+func newestChat(chats []domain.Chat) domain.Chat {
+	var best domain.Chat
+	for _, item := range chats {
+		if item.ID == 0 {
+			continue
+		}
+		if best.ID == 0 || item.UpdatedAt.After(best.UpdatedAt) || (item.UpdatedAt.Equal(best.UpdatedAt) && item.ID > best.ID) {
+			best = item
+		}
+	}
+	return best
+}
+
 func (m Model) promptCmd(ctx context.Context, prompt string, drafts []attachment.Draft, refs []reference.Draft) ui.Cmd {
 	return func() ui.Msg {
 		session := m.currentSession
+		chat := m.currentChat
 		if session.ID == 0 {
 			var err error
 			session, err = m.persistDraftSession(ctx)
+			if err != nil {
+				return runPromptMsg{err: err}
+			}
+			chat, err = m.store.DefaultChat(ctx, session.ID)
 			if err != nil {
 				return runPromptMsg{err: err}
 			}
@@ -2426,9 +2513,10 @@ func (m Model) promptCmd(ctx context.Context, prompt string, drafts []attachment
 		if err != nil {
 			return runPromptMsg{err: err}
 		}
-		events, err := m.agent.RunPromptWithInputs(ctx, session, prompt, drafts, refs, m.pendingModelNote)
+		events, err := m.agent.RunPromptInChat(ctx, session, chat, prompt, drafts, refs, m.pendingModelNote)
 		return runPromptMsg{
 			session:        session,
+			chat:           chat,
 			events:         events,
 			err:            err,
 			providerID:     providerID,
@@ -2441,6 +2529,7 @@ func (m Model) promptCmd(ctx context.Context, prompt string, drafts []attachment
 func (m Model) continueCmd(ctx context.Context) ui.Cmd {
 	return func() ui.Msg {
 		session := m.currentSession
+		chat := m.currentChat
 		if session.ID == 0 {
 			return runPromptMsg{err: fmt.Errorf("no saved session to continue")}
 		}
@@ -2448,9 +2537,10 @@ func (m Model) continueCmd(ctx context.Context) ui.Cmd {
 		if err != nil {
 			return runPromptMsg{err: err}
 		}
-		events, err := m.agent.RunContinue(ctx, session, m.pendingModelNote)
+		events, err := m.agent.RunContinueInChat(ctx, session, chat, m.pendingModelNote)
 		return runPromptMsg{
 			session:        session,
+			chat:           chat,
 			events:         events,
 			err:            err,
 			providerID:     providerID,
@@ -2474,6 +2564,8 @@ func (m Model) newSessionCmd() ui.Cmd {
 		}
 		return newSessionMsg{
 			session:   m.draftSession(),
+			chat:      domain.Chat{},
+			chats:     nil,
 			sessions:  sessions,
 			messages:  nil,
 			parts:     map[int64][]domain.Part{},
@@ -2517,11 +2609,23 @@ func (m Model) loadSessionCmd(sessionID int64) ui.Cmd {
 		if session.ID == 0 {
 			return promptDoneMsg{err: fmt.Errorf("session %d not found", sessionID)}
 		}
-		messages, parts, err := m.store.PartsForSession(ctx, session.ID)
+		chats, err := m.store.ListChats(ctx, session.ID)
 		if err != nil {
 			return promptDoneMsg{err: err}
 		}
-		approvals, err := m.store.PendingApprovals(ctx, session.ID)
+		currentChat := newestChat(chats)
+		if currentChat.ID == 0 {
+			currentChat, err = m.store.DefaultChat(ctx, session.ID)
+			if err != nil {
+				return promptDoneMsg{err: err}
+			}
+			chats = append(chats, currentChat)
+		}
+		messages, parts, err := m.store.PartsForChat(ctx, currentChat.ID)
+		if err != nil {
+			return promptDoneMsg{err: err}
+		}
+		approvals, err := m.store.PendingApprovalsForChat(ctx, currentChat.ID)
 		if err != nil {
 			return promptDoneMsg{err: err}
 		}
@@ -2535,7 +2639,9 @@ func (m Model) loadSessionCmd(sessionID int64) ui.Cmd {
 		}
 		return loadMsg{
 			sessions:  sessions,
+			chats:     chats,
 			current:   session,
+			chat:      currentChat,
 			messages:  messages,
 			parts:     parts,
 			approvals: approvals,
@@ -2543,6 +2649,77 @@ func (m Model) loadSessionCmd(sessionID int64) ui.Cmd {
 			todos:     todos,
 			workspace: workspaceStatus,
 		}
+	}
+}
+
+func (m Model) loadChatCmd(sessionID, chatID int64) ui.Cmd {
+	return func() ui.Msg {
+		if sessionID == 0 || chatID == 0 {
+			return nil
+		}
+		ctx := context.Background()
+		allSessions, err := m.store.ListSessions(ctx)
+		if err != nil {
+			return promptDoneMsg{err: err}
+		}
+		sessions := m.visibleSessions(allSessions)
+		var session domain.Session
+		for _, item := range sessions {
+			if item.ID == sessionID {
+				session = item
+				break
+			}
+		}
+		if session.ID == 0 {
+			return promptDoneMsg{err: fmt.Errorf("session %d not found", sessionID)}
+		}
+		chats, err := m.store.ListChats(ctx, sessionID)
+		if err != nil {
+			return promptDoneMsg{err: err}
+		}
+		currentChat, err := m.store.GetChat(ctx, chatID)
+		if err != nil {
+			return promptDoneMsg{err: err}
+		}
+		messages, parts, err := m.store.PartsForChat(ctx, currentChat.ID)
+		if err != nil {
+			return promptDoneMsg{err: err}
+		}
+		approvals, err := m.store.PendingApprovalsForChat(ctx, currentChat.ID)
+		if err != nil {
+			return promptDoneMsg{err: err}
+		}
+		plan, todos, err := m.loadPlanningState(ctx, session.ID)
+		if err != nil {
+			return promptDoneMsg{err: err}
+		}
+		workspaceStatus, err := workspace.Snapshot(ctx, m.workdir)
+		if err != nil {
+			return promptDoneMsg{err: err}
+		}
+		return loadMsg{
+			sessions:  sessions,
+			chats:     chats,
+			current:   session,
+			chat:      currentChat,
+			messages:  messages,
+			parts:     parts,
+			approvals: approvals,
+			plan:      plan,
+			todos:     todos,
+			workspace: workspaceStatus,
+		}
+	}
+}
+
+func (m Model) createChatCmd(sessionID int64, role domain.WorkflowRole, title string) ui.Cmd {
+	return func() ui.Msg {
+		ctx := context.Background()
+		chat, err := m.store.CreateChat(ctx, sessionID, title, role, nil)
+		if err != nil {
+			return promptDoneMsg{err: err}
+		}
+		return m.loadChatCmd(sessionID, chat.ID)()
 	}
 }
 
@@ -2561,11 +2738,26 @@ func (m Model) agentsRefreshCmd(sessionID int64) ui.Cmd {
 		if err != nil {
 			return agentsRefreshMsg{err: err}
 		}
-		messages, parts, err := m.store.PartsForSession(ctx, session.ID)
+		chats, err := m.store.ListChats(ctx, session.ID)
 		if err != nil {
 			return agentsRefreshMsg{err: err}
 		}
-		approvals, err := m.store.PendingApprovals(ctx, session.ID)
+		currentChat := m.currentChat
+		if currentChat.ID == 0 || currentChat.SessionID != session.ID {
+			currentChat = newestChat(chats)
+		}
+		if currentChat.ID == 0 {
+			currentChat, err = m.store.DefaultChat(ctx, session.ID)
+			if err != nil {
+				return agentsRefreshMsg{err: err}
+			}
+			chats = append(chats, currentChat)
+		}
+		messages, parts, err := m.store.PartsForChat(ctx, currentChat.ID)
+		if err != nil {
+			return agentsRefreshMsg{err: err}
+		}
+		approvals, err := m.store.PendingApprovalsForChat(ctx, currentChat.ID)
 		if err != nil {
 			return agentsRefreshMsg{err: err}
 		}
@@ -2580,7 +2772,9 @@ func (m Model) agentsRefreshCmd(sessionID int64) ui.Cmd {
 		return agentsRefreshMsg{
 			load: loadMsg{
 				sessions:  sessions,
+				chats:     chats,
 				current:   session,
+				chat:      currentChat,
 				messages:  messages,
 				parts:     parts,
 				approvals: approvals,
@@ -2604,7 +2798,19 @@ func (m Model) forkSessionCmd(sourceSessionID int64) ui.Cmd {
 			return forkSessionMsg{err: err}
 		}
 		sessions := m.visibleSessions(allSessions)
-		messages, parts, err := m.store.PartsForSession(ctx, forked.ID)
+		chats, err := m.store.ListChats(ctx, forked.ID)
+		if err != nil {
+			return forkSessionMsg{err: err}
+		}
+		currentChat := newestChat(chats)
+		if currentChat.ID == 0 {
+			currentChat, err = m.store.DefaultChat(ctx, forked.ID)
+			if err != nil {
+				return forkSessionMsg{err: err}
+			}
+			chats = append(chats, currentChat)
+		}
+		messages, parts, err := m.store.PartsForChat(ctx, currentChat.ID)
 		if err != nil {
 			return forkSessionMsg{err: err}
 		}
@@ -2632,7 +2838,7 @@ func (m Model) forkSessionCmd(sourceSessionID int64) ui.Cmd {
 				parts[msg.ID][i] = part
 			}
 		}
-		approvals, err := m.store.PendingApprovals(ctx, forked.ID)
+		approvals, err := m.store.PendingApprovalsForChat(ctx, currentChat.ID)
 		if err != nil {
 			return forkSessionMsg{err: err}
 		}
@@ -2649,7 +2855,9 @@ func (m Model) forkSessionCmd(sourceSessionID int64) ui.Cmd {
 			forkedID: forked.ID,
 			load: loadMsg{
 				sessions:  sessions,
+				chats:     chats,
 				current:   forked,
+				chat:      currentChat,
 				messages:  messages,
 				parts:     parts,
 				approvals: approvals,
@@ -2663,7 +2871,12 @@ func (m Model) forkSessionCmd(sourceSessionID int64) ui.Cmd {
 
 func (m Model) reloadDetailsCmd() ui.Cmd {
 	return func() ui.Msg {
-		msg := m.loadSessionCmd(m.currentSession.ID)()
+		var msg ui.Msg
+		if m.currentChat.ID != 0 {
+			msg = m.loadChatCmd(m.currentSession.ID, m.currentChat.ID)()
+		} else {
+			msg = m.loadSessionCmd(m.currentSession.ID)()
+		}
 		load, ok := msg.(loadMsg)
 		if !ok {
 			return msg
@@ -2673,13 +2886,13 @@ func (m Model) reloadDetailsCmd() ui.Cmd {
 	}
 }
 
-func nextEventCmd(events <-chan domain.Event) ui.Cmd {
+func nextEventCmd(chatID int64, events <-chan domain.Event) ui.Cmd {
 	return func() ui.Msg {
 		evt, ok := <-events
 		if !ok {
 			return eventMsg{}
 		}
-		return eventMsg{event: evt, events: events}
+		return eventMsg{chatID: chatID, event: evt, events: events}
 	}
 }
 
@@ -2808,7 +3021,13 @@ func (m Model) UpdateLoad(msg loadMsg) Model {
 	for _, session := range msg.sessions {
 		m.sessions = append(m.sessions, m.normalizeSessionToolStates(session))
 	}
+	if len(msg.chats) > 0 || m.currentSession.ID != msg.current.ID {
+		m.chats = slices.Clone(msg.chats)
+	}
 	m.currentSession = m.normalizeSessionToolStates(msg.current)
+	if msg.chat.ID != 0 {
+		m.currentChat = msg.chat
+	}
 	m.messages = msg.messages
 	m.parts = msg.parts
 	m.approvals = msg.approvals
@@ -2833,6 +3052,7 @@ func (m Model) UpdateLoad(msg loadMsg) Model {
 	m.transcriptCache = nil
 	m.ensureRetainedTranscript().Clear()
 	m.transcriptDirty = true
+	m.syncCurrentChatBusy()
 	m.refreshViewport()
 	return m
 }
@@ -2852,6 +3072,47 @@ func (m *Model) handleLocalCommand(prompt string) (ui.Model, ui.Cmd, bool) {
 		m.resetComposerInput()
 		model, cmd := m.quit()
 		return model, cmd, true
+	case trimmed == "/chat new":
+		m.resetComposerInput()
+		if m.currentSession.ID == 0 {
+			m.status = "Save the session with a prompt before creating chats"
+			return m, m.syncWindowTitleCmd(), true
+		}
+		title := fmt.Sprintf("Chat %d", len(m.chats)+1)
+		m.startBusy(busyScopeSidebar, "Creating chat…")
+		return m, ui.Batch(m.createChatCmd(m.currentSession.ID, domain.WorkflowRoleGeneral, title), m.spinnerCmdIfNeeded()), true
+	case trimmed == "/chat next":
+		m.resetComposerInput()
+		if len(m.chats) <= 1 {
+			m.status = "No other chats in this session"
+			return m, m.syncWindowTitleCmd(), true
+		}
+		idx := 0
+		for i, item := range m.chats {
+			if item.ID == m.currentChat.ID {
+				idx = i
+				break
+			}
+		}
+		next := m.chats[(idx+1)%len(m.chats)]
+		m.startBusy(busyScopeSidebar, fmt.Sprintf("Switching to chat %d…", next.ID))
+		return m, ui.Batch(m.loadChatCmd(next.SessionID, next.ID), m.spinnerCmdIfNeeded()), true
+	case trimmed == "/chat prev":
+		m.resetComposerInput()
+		if len(m.chats) <= 1 {
+			m.status = "No other chats in this session"
+			return m, m.syncWindowTitleCmd(), true
+		}
+		idx := 0
+		for i, item := range m.chats {
+			if item.ID == m.currentChat.ID {
+				idx = i
+				break
+			}
+		}
+		prev := m.chats[(idx-1+len(m.chats))%len(m.chats)]
+		m.startBusy(busyScopeSidebar, fmt.Sprintf("Switching to chat %d…", prev.ID))
+		return m, ui.Batch(m.loadChatCmd(prev.SessionID, prev.ID), m.spinnerCmdIfNeeded()), true
 	case trimmed == "/mouse on":
 		m.resetComposerInput()
 		m.mouseEnabled = true
@@ -2961,17 +3222,31 @@ func (m Model) approvalPermissionProfileCmd(ctx context.Context, approvalID int6
 }
 
 func (m *Model) beginActiveOperation() context.Context {
-	if m.activeOpCancel != nil {
-		m.activeOpCancel()
+	chatID := m.currentChatID()
+	if chatID == 0 {
+		if m.activeOpCancel != nil {
+			m.activeOpCancel()
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		m.activeOpCancel = cancel
+		m.interruptArmedAt = time.Time{}
+		return ctx
+	}
+	if m.activeOpCancels == nil {
+		m.activeOpCancels = map[int64]context.CancelFunc{}
+	}
+	if cancel := m.activeOpCancels[chatID]; cancel != nil {
+		cancel()
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	m.activeOpCancel = cancel
+	m.activeOpCancels[chatID] = cancel
 	m.interruptArmedAt = time.Time{}
 	return ctx
 }
 
 func (m *Model) handleInterruptKey() (ui.Model, ui.Cmd) {
-	if m.activeOpCancel == nil {
+	if m.activeOpCancel == nil && (m.activeOpCancels == nil || m.activeOpCancels[m.currentChatID()] == nil) {
 		return m, nil
 	}
 	now := time.Now()
@@ -2982,7 +3257,9 @@ func (m *Model) handleInterruptKey() (ui.Model, ui.Cmd) {
 	}
 	m.interruptArmedAt = time.Time{}
 	m.status = "Interrupting…"
-	m.activeOpCancel()
+	if cancel := m.activeOpCancel; cancel != nil {
+		cancel()
+	}
 	return m, m.syncWindowTitleCmd()
 }
 
@@ -3311,21 +3588,21 @@ func (m *Model) finishOperationWithError(err error) (ui.Model, ui.Cmd) {
 
 func (m Model) compactCmd(ctx context.Context) ui.Cmd {
 	return func() ui.Msg {
-		events, err := m.agent.Compact(ctx, m.currentSession.ID)
+		events, err := m.agent.CompactChat(ctx, m.currentSession.ID, m.currentChat.ID)
 		return promptDoneMsg{events: events, err: err}
 	}
 }
 
 func (m Model) approveCmd(ctx context.Context, approvalID int64) ui.Cmd {
 	return func() ui.Msg {
-		events, err := m.agent.Approve(ctx, m.currentSession.ID, approvalID)
+		events, err := m.agent.ApproveInChat(ctx, m.currentSession.ID, m.currentChat.ID, approvalID)
 		return promptDoneMsg{events: events, err: err}
 	}
 }
 
 func (m Model) denyCmd(ctx context.Context, approvalID int64) ui.Cmd {
 	return func() ui.Msg {
-		events, err := m.agent.Deny(ctx, m.currentSession.ID, approvalID)
+		events, err := m.agent.DenyInChat(ctx, m.currentSession.ID, m.currentChat.ID, approvalID)
 		return promptDoneMsg{events: events, err: err}
 	}
 }
@@ -3344,6 +3621,7 @@ func (m *Model) appendLocalUserPrompt(prompt string, drafts []attachment.Draft, 
 	m.messages = append(m.messages, domain.Message{
 		ID:        messageID,
 		SessionID: m.currentSession.ID,
+		ChatID:    m.currentChat.ID,
 		Role:      domain.MessageRoleUser,
 		Summary:   prompt,
 		CreatedAt: now,
@@ -3407,6 +3685,7 @@ func (m *Model) appendLocalAssistantError(err error) {
 	m.messages = append(m.messages, domain.Message{
 		ID:        messageID,
 		SessionID: m.currentSession.ID,
+		ChatID:    m.currentChat.ID,
 		Role:      domain.MessageRoleAssistant,
 		Summary:   body,
 		CreatedAt: now,
@@ -3579,10 +3858,39 @@ func (m *Model) nextPendingID() int64 {
 	return m.pendingPartID
 }
 
+func (m *Model) currentChatID() int64 {
+	if m.currentChat.ID > 0 {
+		return m.currentChat.ID
+	}
+	return 0
+}
+
+func (m *Model) syncCurrentChatBusy() {
+	chatID := m.currentChatID()
+	if chatID == 0 {
+		return
+	}
+	if m.chatBusy == nil {
+		m.chatBusy = map[int64]busyModel{}
+	}
+	m.busy = m.chatBusy[chatID]
+	if m.activeOpCancels != nil {
+		m.activeOpCancel = m.activeOpCancels[chatID]
+	} else {
+		m.activeOpCancel = nil
+	}
+}
+
 func (m *Model) startBusy(scope busyScope, status string) {
 	m.loading = true
 	m.status = status
 	m.busy.start(scope, status)
+	if chatID := m.currentChatID(); chatID > 0 {
+		if m.chatBusy == nil {
+			m.chatBusy = map[int64]busyModel{}
+		}
+		m.chatBusy[chatID] = m.busy
+	}
 	if m.width <= 0 || m.height <= 0 {
 		m.invalidateMainSurface()
 		return
@@ -3594,7 +3902,13 @@ func (m *Model) startBusy(scope busyScope, status string) {
 func (m *Model) stopBusy() {
 	m.loading = false
 	m.busy.stop()
+	if chatID := m.currentChatID(); chatID > 0 && m.chatBusy != nil {
+		m.chatBusy[chatID] = m.busy
+	}
 	m.activeOpCancel = nil
+	if chatID := m.currentChatID(); chatID > 0 && m.activeOpCancels != nil {
+		delete(m.activeOpCancels, chatID)
+	}
 	m.interruptArmedAt = time.Time{}
 	if m.width <= 0 || m.height <= 0 {
 		m.invalidateMainSurface()
@@ -3696,11 +4010,20 @@ func (m Model) openDialogName() string {
 	}
 }
 
-func (m Model) recordEvent(evt domain.Event) {
+func (m Model) recordEvent(chatID int64, evt domain.Event) {
 	if m.debug == nil {
 		return
 	}
-	m.debug.RecordEvent(m.currentSession.ID, evt)
+	sessionID := m.currentSession.ID
+	if chatID > 0 {
+		for _, item := range m.chats {
+			if item.ID == chatID {
+				sessionID = item.SessionID
+				break
+			}
+		}
+	}
+	m.debug.RecordEvent(sessionID, evt)
 }
 
 func (m *Model) spinnerCmdIfNeeded() ui.Cmd {
@@ -4461,6 +4784,9 @@ func internalSlashCommands() []slashCommand {
 	return []slashCommand{
 		{Name: "/agents", Description: "Show resolved project instructions"},
 		{Name: "/agents refresh", Description: "Re-resolve project instructions"},
+		{Name: "/chat new", Description: "Start a new chat in this session"},
+		{Name: "/chat next", Description: "Switch to the next chat in this session"},
+		{Name: "/chat prev", Description: "Switch to the previous chat in this session"},
 		{Name: "/compact", Description: "Summarize old context"},
 		{Name: "/connect", Description: "Configure a provider"},
 		{Name: "/disconnect", Description: "Remove a configured provider"},
@@ -5036,7 +5362,7 @@ func (m *Model) renderHelpModalElement() ui.Element {
 
 func (m Model) previewLLMRequestCmd(ctx context.Context, prompt string, drafts []attachment.Draft, refs []reference.Draft) ui.Cmd {
 	return func() ui.Msg {
-		req, err := m.agent.PreviewNextRequest(ctx, m.currentSession, prompt, drafts, refs, m.pendingModelNote)
+		req, err := m.agent.PreviewNextRequestForChat(ctx, m.currentSession, m.currentChat, prompt, drafts, refs, m.pendingModelNote)
 		if err != nil {
 			return llmPreviewMsg{err: err}
 		}

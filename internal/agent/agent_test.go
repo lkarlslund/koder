@@ -42,6 +42,15 @@ func testConfig(t *testing.T) config.Config {
 	return config.Default().WithStateDir(t.TempDir())
 }
 
+func defaultChatForSession(t *testing.T, st *store.Store, sessionID int64) domain.Chat {
+	t.Helper()
+	chat, err := st.DefaultChat(context.Background(), sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return chat
+}
+
 func TestSystemPromptDoesNotMentionInternalSlashCommands(t *testing.T) {
 	prompt := systemPrompt()
 	for _, command := range []string{"/new", "/quit", "/permissions", "/mouse", "/approve", "/deny"} {
@@ -106,8 +115,9 @@ func TestHandleModelToolCallDeniesDisabledSessionTool(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	chat := defaultChatForSession(t, st, session.ID)
 
-	evt, err := engine.handleModelToolCall(context.Background(), session, tools.Request{
+	evt, err := engine.handleModelToolCall(context.Background(), session, chat, tools.Request{
 		Tool: domain.ToolKindRead,
 		Args: map[string]string{"path": "README.md"},
 	})
@@ -135,8 +145,9 @@ func TestHandleModelToolCallPersistsNormalizationFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	chat := defaultChatForSession(t, st, session.ID)
 
-	evt, err := engine.handleModelToolCall(context.Background(), session, tools.Request{
+	evt, err := engine.handleModelToolCall(context.Background(), session, chat, tools.Request{
 		Tool: domain.ToolKindRead,
 		Args: map[string]string{
 			"path":   "README.md",
@@ -195,13 +206,14 @@ func TestPersistAssistantToolCallsStoresNarrationAsText(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	chat := defaultChatForSession(t, st, session.ID)
 
 	call := tools.Request{
 		Tool:       domain.ToolKindRead,
 		ToolCallID: "call_1",
 		Args:       map[string]string{"path": "README.md"},
 	}
-	if err := engine.persistAssistantToolCalls(context.Background(), session.ID, []tools.Request{call}, "Let me inspect that file first.", domain.Usage{TotalTokens: 10}); err != nil {
+	if err := engine.persistAssistantToolCalls(context.Background(), chat.ID, session.ID, []tools.Request{call}, "Let me inspect that file first.", domain.Usage{TotalTokens: 10}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -240,6 +252,7 @@ func TestBuildConversationIncludesAssistantNarrationAlongsideToolCalls(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
+	chat := defaultChatForSession(t, st, session.ID)
 
 	assistantMsg, err := st.AddMessage(context.Background(), session.ID, domain.MessageRoleAssistant, "tool:read")
 	if err != nil {
@@ -258,7 +271,7 @@ func TestBuildConversationIncludesAssistantNarrationAlongsideToolCalls(t *testin
 		t.Fatal(err)
 	}
 
-	conversation, err := engine.buildConversation(context.Background(), session.ID)
+	conversation, err := engine.buildConversation(context.Background(), session.ID, chat.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -290,6 +303,7 @@ func TestBuildConversationResetsAtCompactionBoundary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	chat := defaultChatForSession(t, st, session.ID)
 	before, err := st.AddMessage(context.Background(), session.ID, domain.MessageRoleUser, "before")
 	if err != nil {
 		t.Fatal(err)
@@ -312,7 +326,7 @@ func TestBuildConversationResetsAtCompactionBoundary(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	conversation, err := engine.buildConversation(context.Background(), session.ID)
+	conversation, err := engine.buildConversation(context.Background(), session.ID, chat.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -361,8 +375,9 @@ func TestBuildConversationIncludesSkillPromptContext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	chat := defaultChatForSession(t, st, session.ID)
 
-	conversation, err := engine.buildConversation(context.Background(), session.ID)
+	conversation, err := engine.buildConversation(context.Background(), session.ID, chat.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -404,6 +419,7 @@ func TestBuildConversationUsesStructuredToolMessages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	chat := defaultChatForSession(t, st, session.ID)
 	assistantMsg, err := st.AddMessage(context.Background(), session.ID, domain.MessageRoleAssistant, "tool:bash")
 	if err != nil {
 		t.Fatal(err)
@@ -429,7 +445,7 @@ func TestBuildConversationUsesStructuredToolMessages(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	conversation, err := engine.buildConversation(context.Background(), session.ID)
+	conversation, err := engine.buildConversation(context.Background(), session.ID, chat.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -484,6 +500,7 @@ func TestBuildConversationIncludesImageAndTextAttachments(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	chat := defaultChatForSession(t, st, session.ID)
 
 	msg, err := st.AddMessage(context.Background(), session.ID, domain.MessageRoleUser, "inspect these")
 	if err != nil {
@@ -527,7 +544,7 @@ func TestBuildConversationIncludesImageAndTextAttachments(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	conversation, err := engine.buildConversation(context.Background(), session.ID)
+	conversation, err := engine.buildConversation(context.Background(), session.ID, chat.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -812,7 +829,7 @@ func TestApproveContinuesModelWithToolOutput(t *testing.T) {
 		t.Fatal("expected approval request")
 	}
 
-	approvedEvents, err := engine.approve(context.Background(), session.ID, strconv.FormatInt(approvalID, 10))
+	approvedEvents, err := engine.approve(context.Background(), session.ID, 0, strconv.FormatInt(approvalID, 10))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1121,7 +1138,8 @@ func TestHandleModelToolCallAsksForOutsideProjectRead(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	evt, err := engine.handleModelToolCall(context.Background(), session, tools.Request{
+	chat := defaultChatForSession(t, st, session.ID)
+	evt, err := engine.handleModelToolCall(context.Background(), session, chat, tools.Request{
 		Tool: domain.ToolKindRead,
 		Args: map[string]string{"path": outsidePath},
 	})
@@ -1158,7 +1176,8 @@ func TestHandleModelToolCallAllowsProjectReadInReadAskMode(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	evt, err := engine.handleModelToolCall(context.Background(), session, tools.Request{
+	chat := defaultChatForSession(t, st, session.ID)
+	evt, err := engine.handleModelToolCall(context.Background(), session, chat, tools.Request{
 		Tool: domain.ToolKindRead,
 		Args: map[string]string{"path": "inside.txt"},
 	})
@@ -1254,7 +1273,7 @@ func TestApproveContinuesAfterOutsideWorkspaceRead(t *testing.T) {
 		t.Fatal("expected approval request")
 	}
 
-	approvedEvents, err := engine.approve(context.Background(), session.ID, strconv.FormatInt(approvalID, 10))
+	approvedEvents, err := engine.approve(context.Background(), session.ID, 0, strconv.FormatInt(approvalID, 10))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1347,7 +1366,7 @@ func TestApproveAutoCompactContinuesFromCompactedHistory(t *testing.T) {
 		t.Fatal("expected approval request")
 	}
 
-	approvedEvents, err := engine.approve(context.Background(), session.ID, strconv.FormatInt(approvalID, 10))
+	approvedEvents, err := engine.approve(context.Background(), session.ID, 0, strconv.FormatInt(approvalID, 10))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1451,7 +1470,7 @@ func TestApproveContinuesAfterApprovedToolFailure(t *testing.T) {
 		t.Fatal("expected approval request")
 	}
 
-	approvedEvents, err := engine.approve(context.Background(), session.ID, strconv.FormatInt(approvalID, 10))
+	approvedEvents, err := engine.approve(context.Background(), session.ID, 0, strconv.FormatInt(approvalID, 10))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1504,7 +1523,8 @@ func TestHandleModelToolCallBypassesApprovalForSkill(t *testing.T) {
 	session.PermissionProfile = permission.ProfileAsk
 	session.ProjectRoot = workdir
 
-	evt, err := engine.handleModelToolCall(context.Background(), session, tools.Request{
+	chat := defaultChatForSession(t, st, session.ID)
+	evt, err := engine.handleModelToolCall(context.Background(), session, chat, tools.Request{
 		Tool: domain.ToolKindSkill,
 		Args: map[string]string{"name": "review"},
 	})
@@ -1536,7 +1556,8 @@ func TestHandleModelToolCallAllowsProjectWriteInWriteAskMode(t *testing.T) {
 	session.PermissionProfile = permission.ProfileWriteAsk
 	session.ProjectRoot = workdir
 
-	evt, err := engine.handleModelToolCall(context.Background(), session, tools.Request{
+	chat := defaultChatForSession(t, st, session.ID)
+	evt, err := engine.handleModelToolCall(context.Background(), session, chat, tools.Request{
 		Tool: domain.ToolKindWrite,
 		Args: map[string]string{"path": "note.txt", "content": "hello"},
 	})
@@ -1568,7 +1589,8 @@ func TestHandleModelToolCallAsksForBashInWriteAskMode(t *testing.T) {
 	session.PermissionProfile = permission.ProfileWriteAsk
 	session.ProjectRoot = workdir
 
-	evt, err := engine.handleModelToolCall(context.Background(), session, tools.Request{
+	chat := defaultChatForSession(t, st, session.ID)
+	evt, err := engine.handleModelToolCall(context.Background(), session, chat, tools.Request{
 		Tool: domain.ToolKindBash,
 		Args: map[string]string{"command": "pwd"},
 	})
@@ -1762,7 +1784,8 @@ func TestModelTaskPersistsTranscriptUpdate(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	evt, err := engine.handleModelToolCall(context.Background(), session, tools.Request{
+	chat := defaultChatForSession(t, st, session.ID)
+	evt, err := engine.handleModelToolCall(context.Background(), session, chat, tools.Request{
 		Tool: domain.ToolKindTask,
 		Args: map[string]string{"body": "write docs"},
 	})
@@ -2328,7 +2351,8 @@ func TestPersistToolResultSynthesizesVisibleOutputWhenToolReturnsNothing(t *test
 		t.Fatal(err)
 	}
 
-	events, err := engine.persistToolResult(context.Background(), session.ID, tools.Request{Tool: domain.ToolKindBash}, tools.Result{})
+	chat := defaultChatForSession(t, st, session.ID)
+	events, err := engine.persistToolResult(context.Background(), chat.ID, session.ID, tools.Request{Tool: domain.ToolKindBash}, tools.Result{})
 	if err != nil {
 		t.Fatal(err)
 	}

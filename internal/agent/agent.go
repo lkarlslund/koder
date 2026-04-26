@@ -76,7 +76,15 @@ func (e *Engine) RunPromptWithAttachments(ctx context.Context, session domain.Se
 }
 
 func (e *Engine) RunPromptWithInputs(ctx context.Context, session domain.Session, prompt string, drafts []attachment.Draft, refs []reference.Draft, note string) (<-chan domain.Event, error) {
-	return e.runModelPrompt(ctx, session, prompt, drafts, refs, note)
+	chat, err := e.store.DefaultChat(ctx, session.ID)
+	if err != nil {
+		return nil, err
+	}
+	return e.RunPromptInChat(ctx, session, chat, prompt, drafts, refs, note)
+}
+
+func (e *Engine) RunPromptInChat(ctx context.Context, session domain.Session, chat domain.Chat, prompt string, drafts []attachment.Draft, refs []reference.Draft, note string) (<-chan domain.Event, error) {
+	return e.runModelPrompt(ctx, session, chat, prompt, drafts, refs, note)
 }
 
 func (e *Engine) SetPermissionProfile(ctx context.Context, sessionID int64, profile string) (<-chan domain.Event, error) {
@@ -88,14 +96,30 @@ func (e *Engine) SetPermissionProfileAndReevaluateApproval(ctx context.Context, 
 }
 
 func (e *Engine) Approve(ctx context.Context, sessionID, approvalID int64) (<-chan domain.Event, error) {
-	return e.approve(ctx, sessionID, strconv.FormatInt(approvalID, 10))
+	return e.approve(ctx, sessionID, 0, strconv.FormatInt(approvalID, 10))
+}
+
+func (e *Engine) ApproveInChat(ctx context.Context, sessionID, chatID, approvalID int64) (<-chan domain.Event, error) {
+	return e.approve(ctx, sessionID, chatID, strconv.FormatInt(approvalID, 10))
 }
 
 func (e *Engine) Deny(ctx context.Context, sessionID, approvalID int64) (<-chan domain.Event, error) {
-	return e.deny(ctx, sessionID, strconv.FormatInt(approvalID, 10))
+	return e.deny(ctx, sessionID, 0, strconv.FormatInt(approvalID, 10))
+}
+
+func (e *Engine) DenyInChat(ctx context.Context, sessionID, chatID, approvalID int64) (<-chan domain.Event, error) {
+	return e.deny(ctx, sessionID, chatID, strconv.FormatInt(approvalID, 10))
 }
 
 func (e *Engine) Compact(ctx context.Context, sessionID int64) (<-chan domain.Event, error) {
+	chat, err := e.store.DefaultChat(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	return e.CompactChat(ctx, sessionID, chat.ID)
+}
+
+func (e *Engine) CompactChat(ctx context.Context, sessionID, chatID int64) (<-chan domain.Event, error) {
 	session, err := e.store.GetSession(ctx, sessionID)
 	if err != nil {
 		return nil, err
@@ -112,12 +136,12 @@ func (e *Engine) Compact(ctx context.Context, sessionID int64) (<-chan domain.Ev
 	go func() {
 		defer close(out)
 		out <- domain.Event{Kind: domain.EventKindStatus, Text: "Compacting session..."}
-		if err := e.compactSession(ctx, session, client, "manual", out); err != nil {
+		if err := e.compactSession(ctx, session, chatID, client, "manual", out); err != nil {
 			if interruptedErr(err) {
-				e.emitInterrupted(out, session.ID)
+				e.emitInterrupted(out, chatID, session.ID)
 				return
 			}
-			e.recordAssistantError(ctx, session.ID, err)
+			e.recordAssistantError(ctx, chatID, session.ID, err)
 			out <- domain.Event{Kind: domain.EventKindError, Err: err}
 			return
 		}
@@ -127,14 +151,30 @@ func (e *Engine) Compact(ctx context.Context, sessionID int64) (<-chan domain.Ev
 }
 
 func (e *Engine) RunContinue(ctx context.Context, session domain.Session, note string) (<-chan domain.Event, error) {
-	return e.runContinue(ctx, session, note)
+	chat, err := e.store.DefaultChat(ctx, session.ID)
+	if err != nil {
+		return nil, err
+	}
+	return e.RunContinueInChat(ctx, session, chat, note)
+}
+
+func (e *Engine) RunContinueInChat(ctx context.Context, session domain.Session, chat domain.Chat, note string) (<-chan domain.Event, error) {
+	return e.runContinue(ctx, session, chat, note)
 }
 
 func (e *Engine) PreviewNextRequest(ctx context.Context, session domain.Session, prompt string, drafts []attachment.Draft, refs []reference.Draft, note string) (provider.ChatRequest, error) {
+	chat, err := e.store.DefaultChat(ctx, session.ID)
+	if err != nil {
+		return provider.ChatRequest{}, err
+	}
+	return e.PreviewNextRequestForChat(ctx, session, chat, prompt, drafts, refs, note)
+}
+
+func (e *Engine) PreviewNextRequestForChat(ctx context.Context, session domain.Session, chat domain.Chat, prompt string, drafts []attachment.Draft, refs []reference.Draft, note string) (provider.ChatRequest, error) {
 	if err := e.validatePromptAttachments(session, drafts); err != nil {
 		return provider.ChatRequest{}, err
 	}
-	messages, err := e.buildConversationPreview(ctx, session, prompt, drafts, refs, transientTurnMessages(note, ""))
+	messages, err := e.buildConversationPreview(ctx, session, chat.ID, prompt, drafts, refs, transientTurnMessages(note, ""))
 	if err != nil {
 		return provider.ChatRequest{}, err
 	}
@@ -147,7 +187,7 @@ func (e *Engine) PreviewNextRequest(ctx context.Context, session domain.Session,
 	}, nil
 }
 
-func (e *Engine) runModelPrompt(ctx context.Context, session domain.Session, prompt string, drafts []attachment.Draft, refs []reference.Draft, note string) (<-chan domain.Event, error) {
+func (e *Engine) runModelPrompt(ctx context.Context, session domain.Session, chat domain.Chat, prompt string, drafts []attachment.Draft, refs []reference.Draft, note string) (<-chan domain.Event, error) {
 	if err := e.validatePromptAttachments(session, drafts); err != nil {
 		return nil, err
 	}
@@ -169,10 +209,10 @@ func (e *Engine) runModelPrompt(ctx context.Context, session domain.Session, pro
 		session, err = e.ensureSessionAgents(ctx, session, client)
 		if err != nil {
 			if interruptedErr(err) {
-				e.emitInterrupted(out, session.ID)
+				e.emitInterrupted(out, chat.ID, session.ID)
 				return
 			}
-			e.recordAssistantError(ctx, session.ID, err)
+			e.recordAssistantError(ctx, chat.ID, session.ID, err)
 			out <- domain.Event{Kind: domain.EventKindError, Err: err}
 			return
 		}
@@ -180,10 +220,10 @@ func (e *Engine) runModelPrompt(ctx context.Context, session domain.Session, pro
 		compacted, err := e.autoCompactIfNeeded(ctx, session, client, out)
 		if err != nil {
 			if interruptedErr(err) {
-				e.emitInterrupted(out, session.ID)
+				e.emitInterrupted(out, chat.ID, session.ID)
 				return
 			}
-			e.recordAssistantError(ctx, session.ID, err)
+			e.recordAssistantError(ctx, chat.ID, session.ID, err)
 			out <- domain.Event{Kind: domain.EventKindError, Err: err}
 			return
 		}
@@ -191,29 +231,29 @@ func (e *Engine) runModelPrompt(ctx context.Context, session domain.Session, pro
 			session, err = e.store.GetSession(ctx, session.ID)
 			if err != nil {
 				if interruptedErr(err) {
-					e.emitInterrupted(out, session.ID)
+					e.emitInterrupted(out, chat.ID, session.ID)
 					return
 				}
 				out <- domain.Event{Kind: domain.EventKindError, Err: err}
 				return
 			}
 		}
-		userMsg, err := e.persistUserPrompt(ctx, session, prompt, drafts, refs)
+		userMsg, err := e.persistUserPrompt(ctx, session, chat.ID, prompt, drafts, refs)
 		if err != nil {
 			if interruptedErr(err) {
-				e.emitInterrupted(out, session.ID)
+				e.emitInterrupted(out, chat.ID, session.ID)
 				return
 			}
 			out <- domain.Event{Kind: domain.EventKindError, Err: err}
 			return
 		}
 		e.recordLifecycle(session.ID, "user_message_persisted", prompt, map[string]string{"message_id": strconv.FormatInt(userMsg.ID, 10)})
-		if err := e.continueModelTurn(ctx, session, client, out, transientTurnMessages(note, "")); err != nil {
+		if err := e.continueModelTurn(ctx, session, chat, client, out, transientTurnMessages(note, "")); err != nil {
 			if interruptedErr(err) {
-				e.emitInterrupted(out, session.ID)
+				e.emitInterrupted(out, chat.ID, session.ID)
 				return
 			}
-			e.recordAssistantError(ctx, session.ID, err)
+			e.recordAssistantError(ctx, chat.ID, session.ID, err)
 			out <- domain.Event{Kind: domain.EventKindError, Err: err}
 			return
 		}
@@ -221,7 +261,7 @@ func (e *Engine) runModelPrompt(ctx context.Context, session domain.Session, pro
 	return out, nil
 }
 
-func (e *Engine) runContinue(ctx context.Context, session domain.Session, note string) (<-chan domain.Event, error) {
+func (e *Engine) runContinue(ctx context.Context, session domain.Session, chat domain.Chat, note string) (<-chan domain.Event, error) {
 	providerCfg, ok := e.cfg.Provider(session.ProviderID)
 	if !ok {
 		return nil, fmt.Errorf("provider %q not found", session.ProviderID)
@@ -239,10 +279,10 @@ func (e *Engine) runContinue(ctx context.Context, session domain.Session, note s
 		session, err = e.ensureSessionAgents(ctx, session, client)
 		if err != nil {
 			if interruptedErr(err) {
-				e.emitInterrupted(out, session.ID)
+				e.emitInterrupted(out, chat.ID, session.ID)
 				return
 			}
-			e.recordAssistantError(ctx, session.ID, err)
+			e.recordAssistantError(ctx, chat.ID, session.ID, err)
 			out <- domain.Event{Kind: domain.EventKindError, Err: err}
 			return
 		}
@@ -254,10 +294,10 @@ func (e *Engine) runContinue(ctx context.Context, session domain.Session, note s
 		compacted, err := e.autoCompactIfNeeded(ctx, session, client, out)
 		if err != nil {
 			if interruptedErr(err) {
-				e.emitInterrupted(out, session.ID)
+				e.emitInterrupted(out, chat.ID, session.ID)
 				return
 			}
-			e.recordAssistantError(ctx, session.ID, err)
+			e.recordAssistantError(ctx, chat.ID, session.ID, err)
 			out <- domain.Event{Kind: domain.EventKindError, Err: err}
 			return
 		}
@@ -265,19 +305,19 @@ func (e *Engine) runContinue(ctx context.Context, session domain.Session, note s
 			session, err = e.store.GetSession(ctx, session.ID)
 			if err != nil {
 				if interruptedErr(err) {
-					e.emitInterrupted(out, session.ID)
+					e.emitInterrupted(out, chat.ID, session.ID)
 					return
 				}
 				out <- domain.Event{Kind: domain.EventKindError, Err: err}
 				return
 			}
 		}
-		if err := e.continueModelTurn(ctx, session, client, out, transientTurnMessages(note, "Continue from where you left off.")); err != nil {
+		if err := e.continueModelTurn(ctx, session, chat, client, out, transientTurnMessages(note, "Continue from where you left off.")); err != nil {
 			if interruptedErr(err) {
-				e.emitInterrupted(out, session.ID)
+				e.emitInterrupted(out, chat.ID, session.ID)
 				return
 			}
-			e.recordAssistantError(ctx, session.ID, err)
+			e.recordAssistantError(ctx, chat.ID, session.ID, err)
 			out <- domain.Event{Kind: domain.EventKindError, Err: err}
 			return
 		}
@@ -344,8 +384,8 @@ func (e *Engine) refreshSessionAgents(ctx context.Context, session domain.Sessio
 	return e.store.GetSession(ctx, session.ID)
 }
 
-func (e *Engine) persistUserPrompt(ctx context.Context, session domain.Session, prompt string, drafts []attachment.Draft, refs []reference.Draft) (domain.Message, error) {
-	userMsg, err := e.store.AddMessage(ctx, session.ID, domain.MessageRoleUser, prompt)
+func (e *Engine) persistUserPrompt(ctx context.Context, session domain.Session, chatID int64, prompt string, drafts []attachment.Draft, refs []reference.Draft) (domain.Message, error) {
+	userMsg, err := e.store.AddChatMessage(ctx, chatID, domain.MessageRoleUser, prompt)
 	if err != nil {
 		return domain.Message{}, err
 	}
@@ -379,11 +419,11 @@ func (e *Engine) persistUserPrompt(ctx context.Context, session domain.Session, 
 	return userMsg, nil
 }
 
-func (e *Engine) continueModelTurn(ctx context.Context, session domain.Session, client *provider.Client, out chan<- domain.Event, transient []provider.InstructionBlock) error {
+func (e *Engine) continueModelTurn(ctx context.Context, session domain.Session, chat domain.Chat, client *provider.Client, out chan<- domain.Event, transient []provider.InstructionBlock) error {
 	tracker := toolLoopTracker{}
 	for steps := 0; steps < e.maxToolLoopSteps(); steps++ {
 		e.recordLifecycle(session.ID, "model_turn_started", "", map[string]string{"step": strconv.Itoa(steps + 1)})
-		messages, buildErr := e.buildConversationPreview(ctx, session, "", nil, nil, transient)
+		messages, buildErr := e.buildConversationPreview(ctx, session, chat.ID, "", nil, nil, transient)
 		if buildErr != nil {
 			return buildErr
 		}
@@ -406,17 +446,17 @@ func (e *Engine) continueModelTurn(ctx context.Context, session domain.Session, 
 			if err != nil {
 				return err
 			}
-			if err := e.persistAssistantToolCalls(ctx, session.ID, calls, strings.TrimSpace(resp.Text), resp.Usage); err != nil {
+			if err := e.persistAssistantToolCalls(ctx, chat.ID, session.ID, calls, strings.TrimSpace(resp.Text), resp.Usage); err != nil {
 				return err
 			}
 			if resp.Usage.TotalTokens > 0 {
 				out <- domain.Event{Kind: domain.EventKindUsage, Usage: resp.Usage}
 			}
 			if pause, ok := tracker.trackCalls(calls); ok {
-				e.pauseContinuation(ctx, session.ID, pause, out)
+				e.pauseContinuation(ctx, chat.ID, session.ID, pause, out)
 				return nil
 			}
-			needsApproval, handledErr := e.handleModelToolCalls(ctx, session, calls, out)
+			needsApproval, handledErr := e.handleModelToolCalls(ctx, session, chat, calls, out)
 			if handledErr != nil {
 				return handledErr
 			}
@@ -430,7 +470,7 @@ func (e *Engine) continueModelTurn(ctx context.Context, session domain.Session, 
 		call, plain := parseToolCall(text)
 		if call != nil {
 			e.recordLifecycle(session.ID, "tool_call_parsed", call.ContextString(), map[string]string{"tool": string(call.Tool), "tool_call_id": call.ToolCallID})
-			assistantMsg, err := e.store.AddMessage(ctx, session.ID, domain.MessageRoleAssistant, fmt.Sprintf("tool:%s", call.Tool))
+			assistantMsg, err := e.store.AddChatMessage(ctx, chat.ID, domain.MessageRoleAssistant, fmt.Sprintf("tool:%s", call.Tool))
 			if err != nil {
 				return err
 			}
@@ -444,11 +484,11 @@ func (e *Engine) continueModelTurn(ctx context.Context, session domain.Session, 
 				}
 			}
 			if pause, ok := tracker.trackCalls([]tools.Request{*call}); ok {
-				e.pauseContinuation(ctx, session.ID, pause, out)
+				e.pauseContinuation(ctx, chat.ID, session.ID, pause, out)
 				return nil
 			}
 
-			evt, handledErr := e.handleModelToolCall(ctx, session, *call)
+			evt, handledErr := e.handleModelToolCall(ctx, session, chat, *call)
 			if handledErr != nil {
 				return handledErr
 			}
@@ -461,14 +501,14 @@ func (e *Engine) continueModelTurn(ctx context.Context, session domain.Session, 
 		tracker.reset()
 
 		if steps > 0 && strings.TrimSpace(text) == "" && len(resp.ToolCalls) == 0 {
-			e.pauseContinuation(ctx, session.ID, continuationPause{
+			e.pauseContinuation(ctx, chat.ID, session.ID, continuationPause{
 				Reason: continuationPauseReasonProviderRefusal,
 				Body:   providerRefusalPauseBody(reasoning),
 			}, out)
 			return nil
 		}
 
-		assistantMsg, err := e.store.AddMessage(ctx, session.ID, domain.MessageRoleAssistant, strings.TrimSpace(text))
+		assistantMsg, err := e.store.AddChatMessage(ctx, chat.ID, domain.MessageRoleAssistant, strings.TrimSpace(text))
 		if err != nil {
 			return err
 		}
@@ -510,7 +550,7 @@ func (e *Engine) continueModelTurn(ctx context.Context, session domain.Session, 
 		out <- domain.Event{Kind: domain.EventKindMessageDone}
 		return nil
 	}
-	e.pauseContinuation(ctx, session.ID, continuationPause{
+	e.pauseContinuation(ctx, chat.ID, session.ID, continuationPause{
 		Reason: continuationPauseReasonTurnLimit,
 		Limit:  e.maxToolLoopSteps(),
 		Body:   fmt.Sprintf("Paused continuation after reaching the model tool-turn limit (%d).", e.maxToolLoopSteps()),
@@ -662,9 +702,9 @@ func (e *Engine) setPermissionProfileAndReevaluateApproval(ctx context.Context, 
 	var next <-chan domain.Event
 	switch decision.Mode {
 	case domain.PermissionModeAllow:
-		next, err = e.approve(ctx, item.SessionID, strconv.FormatInt(approvalID, 10))
+		next, err = e.approve(ctx, item.SessionID, item.ChatID, strconv.FormatInt(approvalID, 10))
 	case domain.PermissionModeDeny:
-		next, err = e.deny(ctx, item.SessionID, strconv.FormatInt(approvalID, 10))
+		next, err = e.deny(ctx, item.SessionID, item.ChatID, strconv.FormatInt(approvalID, 10))
 	default:
 		status := fmt.Sprintf("%s still requires approval", item.Tool)
 		if strings.TrimSpace(decision.Reason) != "" {
@@ -678,7 +718,7 @@ func (e *Engine) setPermissionProfileAndReevaluateApproval(ctx context.Context, 
 	return concatEvents(setEvents, next), nil
 }
 
-func (e *Engine) approve(ctx context.Context, sessionID int64, rawID string) (<-chan domain.Event, error) {
+func (e *Engine) approve(ctx context.Context, sessionID, chatID int64, rawID string) (<-chan domain.Event, error) {
 	id, err := strconv.ParseInt(strings.TrimSpace(rawID), 10, 64)
 	if err != nil {
 		return nil, fmt.Errorf("parse approval id: %w", err)
@@ -703,12 +743,12 @@ func (e *Engine) approve(ctx context.Context, sessionID int64, rawID string) (<-
 			return nil, err
 		}
 		text := fmt.Sprintf("%s disabled for this session", req.Tool)
-		if err := e.recordApprovalReply(ctx, item.SessionID, item.Tool, id, "denied", text, req.ToolCallID); err != nil {
+		if err := e.recordApprovalReply(ctx, item.ChatID, item.SessionID, item.Tool, id, "denied", text, req.ToolCallID); err != nil {
 			return nil, err
 		}
 		return emitOnce(domain.Event{Kind: domain.EventKindApprovalReply, Text: text, Tool: req.Tool}), nil
 	}
-	if err := e.recordApprovalReply(ctx, sessionID, item.Tool, id, "approved", tools.Preview(req), req.ToolCallID); err != nil {
+	if err := e.recordApprovalReply(ctx, item.ChatID, sessionID, item.Tool, id, "approved", tools.Preview(req), req.ToolCallID); err != nil {
 		return nil, err
 	}
 	e.recordLifecycle(sessionID, "tool_execution_started", item.Command, map[string]string{"tool": string(item.Tool), "approval_id": strconv.FormatInt(id, 10)})
@@ -718,7 +758,7 @@ func (e *Engine) approve(ctx context.Context, sessionID int64, rawID string) (<-
 		if interruptedErr(execErr) {
 			return emitOnce(domain.Event{Kind: domain.EventKindStatus, Text: "Interrupted"}), nil
 		}
-		toolEvents, err := e.persistToolFailure(ctx, sessionID, req, execErr)
+		toolEvents, err := e.persistToolFailure(ctx, item.ChatID, sessionID, req, execErr)
 		if err != nil {
 			return nil, err
 		}
@@ -731,7 +771,7 @@ func (e *Engine) approve(ctx context.Context, sessionID int64, rawID string) (<-
 			session, err = e.store.GetSession(ctx, sessionID)
 			if err != nil {
 				if interruptedErr(err) {
-					e.emitInterrupted(out, sessionID)
+					e.emitInterrupted(out, item.ChatID, sessionID)
 					return
 				}
 				out <- domain.Event{Kind: domain.EventKindError, Err: err}
@@ -747,19 +787,19 @@ func (e *Engine) approve(ctx context.Context, sessionID int64, rawID string) (<-
 				out <- domain.Event{Kind: domain.EventKindError, Err: err}
 				return
 			}
-			if err := e.continueModelTurn(ctx, session, client, out, nil); err != nil {
+			if err := e.continueModelTurn(ctx, session, domain.Chat{ID: item.ChatID}, client, out, nil); err != nil {
 				if interruptedErr(err) {
-					e.emitInterrupted(out, session.ID)
+					e.emitInterrupted(out, item.ChatID, session.ID)
 					return
 				}
-				e.recordAssistantError(ctx, session.ID, err)
+				e.recordAssistantError(ctx, item.ChatID, session.ID, err)
 				out <- domain.Event{Kind: domain.EventKindError, Err: err}
 			}
 		}()
 		return out, nil
 	}
 	e.recordLifecycle(sessionID, "tool_execution_finished", item.Command, map[string]string{"tool": string(item.Tool), "approval_id": strconv.FormatInt(id, 10)})
-	toolEvents, err := e.persistToolResult(ctx, sessionID, req, result)
+	toolEvents, err := e.persistToolResult(ctx, item.ChatID, sessionID, req, result)
 	if err != nil {
 		return nil, err
 	}
@@ -781,13 +821,13 @@ func (e *Engine) approve(ctx context.Context, sessionID int64, rawID string) (<-
 		for evt := range toolEvents {
 			out <- evt
 		}
-		compacted, err := e.autoCompactIfNeeded(ctx, session, client, out)
+		compacted, err := e.autoCompactChatIfNeeded(ctx, session, item.ChatID, client, out)
 		if err != nil {
 			if interruptedErr(err) {
-				e.emitInterrupted(out, session.ID)
+				e.emitInterrupted(out, item.ChatID, session.ID)
 				return
 			}
-			e.recordAssistantError(ctx, session.ID, err)
+			e.recordAssistantError(ctx, item.ChatID, session.ID, err)
 			out <- domain.Event{Kind: domain.EventKindError, Err: err}
 			return
 		}
@@ -795,7 +835,7 @@ func (e *Engine) approve(ctx context.Context, sessionID int64, rawID string) (<-
 			session, err = e.store.GetSession(ctx, session.ID)
 			if err != nil {
 				if interruptedErr(err) {
-					e.emitInterrupted(out, session.ID)
+					e.emitInterrupted(out, item.ChatID, session.ID)
 					return
 				}
 				out <- domain.Event{Kind: domain.EventKindError, Err: err}
@@ -806,19 +846,19 @@ func (e *Engine) approve(ctx context.Context, sessionID int64, rawID string) (<-
 		if compacted {
 			transient = transientTurnMessages("", "Continue from the compacted session summary. Do not restart, greet, or restate the summary. Continue the pending task from the latest tool result.")
 		}
-		if err := e.continueModelTurn(ctx, session, client, out, transient); err != nil {
+		if err := e.continueModelTurn(ctx, session, domain.Chat{ID: item.ChatID}, client, out, transient); err != nil {
 			if interruptedErr(err) {
-				e.emitInterrupted(out, session.ID)
+				e.emitInterrupted(out, item.ChatID, session.ID)
 				return
 			}
-			e.recordAssistantError(ctx, session.ID, err)
+			e.recordAssistantError(ctx, item.ChatID, session.ID, err)
 			out <- domain.Event{Kind: domain.EventKindError, Err: err}
 		}
 	}()
 	return out, nil
 }
 
-func (e *Engine) deny(ctx context.Context, _ int64, rawID string) (<-chan domain.Event, error) {
+func (e *Engine) deny(ctx context.Context, _, _ int64, rawID string) (<-chan domain.Event, error) {
 	id, err := strconv.ParseInt(strings.TrimSpace(rawID), 10, 64)
 	if err != nil {
 		return nil, fmt.Errorf("parse approval id: %w", err)
@@ -834,13 +874,13 @@ func (e *Engine) deny(ctx context.Context, _ int64, rawID string) (<-chan domain
 	if req, err := requestFromStoredApproval(item.Tool, item.Command); err == nil {
 		toolCallID = req.ToolCallID
 	}
-	if err := e.recordApprovalReply(ctx, item.SessionID, item.Tool, id, "denied", approvalPreviewFromStored(item.Tool, item.Command), toolCallID); err != nil {
+	if err := e.recordApprovalReply(ctx, item.ChatID, item.SessionID, item.Tool, id, "denied", approvalPreviewFromStored(item.Tool, item.Command), toolCallID); err != nil {
 		return nil, err
 	}
 	return emitOnce(domain.Event{Kind: domain.EventKindApprovalReply, Text: fmt.Sprintf("approval %d denied", id)}), nil
 }
 
-func (e *Engine) persistToolResult(ctx context.Context, sessionID int64, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
+func (e *Engine) persistToolResult(ctx context.Context, chatID, sessionID int64, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
 	events, err := e.registry.PersistResult(ctx, e.store, sessionID, req, result)
 	if err != nil {
 		return nil, err
@@ -850,7 +890,7 @@ func (e *Engine) persistToolResult(ctx context.Context, sessionID int64, req too
 	return events, nil
 }
 
-func (e *Engine) persistToolFailure(ctx context.Context, sessionID int64, req tools.Request, execErr error) (<-chan domain.Event, error) {
+func (e *Engine) persistToolFailure(ctx context.Context, chatID, sessionID int64, req tools.Request, execErr error) (<-chan domain.Event, error) {
 	if execErr == nil {
 		return nil, errors.New("tool failure error is nil")
 	}
@@ -858,7 +898,7 @@ func (e *Engine) persistToolFailure(ctx context.Context, sessionID int64, req to
 	if sessionID == 0 {
 		return emitOnce(domain.Event{Kind: domain.EventKindToolResult, Tool: req.Tool, Text: text}), nil
 	}
-	msg, err := e.store.AddMessage(ctx, sessionID, domain.MessageRoleTool, string(req.Tool))
+	msg, err := e.store.AddChatMessage(ctx, chatID, domain.MessageRoleTool, string(req.Tool))
 	if err != nil {
 		return nil, err
 	}
@@ -895,7 +935,7 @@ func concatEvents(streams ...<-chan domain.Event) <-chan domain.Event {
 	return out
 }
 
-func (e *Engine) recordAssistantError(ctx context.Context, sessionID int64, err error) {
+func (e *Engine) recordAssistantError(ctx context.Context, chatID, sessionID int64, err error) {
 	if err == nil || sessionID == 0 {
 		return
 	}
@@ -903,7 +943,7 @@ func (e *Engine) recordAssistantError(ctx context.Context, sessionID int64, err 
 		return
 	}
 	e.recordLifecycle(sessionID, "assistant_error", err.Error(), nil)
-	e.persistTranscriptNotice(ctx, sessionID, errorSummary(err), transcriptNotice{
+	e.persistTranscriptNotice(ctx, chatID, sessionID, errorSummary(err), transcriptNotice{
 		Kind:     "model_error",
 		Severity: "error",
 	})
@@ -916,9 +956,9 @@ func (e *Engine) recordLifecycle(sessionID int64, kind, text string, meta map[st
 	e.debug.RecordLifecycle(sessionID, kind, text, meta)
 }
 
-func (e *Engine) emitInterrupted(out chan<- domain.Event, sessionID int64) {
+func (e *Engine) emitInterrupted(out chan<- domain.Event, chatID, sessionID int64) {
 	e.recordLifecycle(sessionID, "interrupted", "Interrupted", nil)
-	e.persistTranscriptNotice(context.Background(), sessionID, "Interrupted", transcriptNotice{
+	e.persistTranscriptNotice(context.Background(), chatID, sessionID, "Interrupted", transcriptNotice{
 		Kind:     "interrupted",
 		Severity: "warning",
 	})
@@ -1020,7 +1060,7 @@ func providerRefusalPauseBody(reasoning string) string {
 	return body + "\n\nProvider reasoning:\n" + strings.TrimSpace(reasoning)
 }
 
-func (e *Engine) pauseContinuation(ctx context.Context, sessionID int64, pause continuationPause, out chan<- domain.Event) {
+func (e *Engine) pauseContinuation(ctx context.Context, chatID, sessionID int64, pause continuationPause, out chan<- domain.Event) {
 	body := strings.TrimSpace(pause.Body)
 	if body == "" {
 		body = "Paused continuation."
@@ -1036,7 +1076,7 @@ func (e *Engine) pauseContinuation(ctx context.Context, sessionID int64, pause c
 		"count":  strconv.Itoa(pause.Count),
 		"limit":  strconv.Itoa(pause.Limit),
 	})
-	e.persistTranscriptNotice(ctx, sessionID, body, transcriptNotice{
+	e.persistTranscriptNotice(ctx, chatID, sessionID, body, transcriptNotice{
 		Kind:     "loop_pause",
 		Severity: "warning",
 		Reason:   string(pause.Reason),
@@ -1071,15 +1111,15 @@ func continuationPauseSubtitle(pause continuationPause) string {
 	}
 }
 
-func (e *Engine) persistTranscriptNotice(ctx context.Context, sessionID int64, body string, meta transcriptNotice) {
-	if sessionID == 0 || e.store == nil {
+func (e *Engine) persistTranscriptNotice(ctx context.Context, chatID, sessionID int64, body string, meta transcriptNotice) {
+	if sessionID == 0 || chatID == 0 || e.store == nil {
 		return
 	}
 	body = strings.TrimSpace(body)
 	if body == "" {
 		return
 	}
-	msg, err := e.store.AddMessage(ctx, sessionID, domain.MessageRoleAssistant, body)
+	msg, err := e.store.AddChatMessage(ctx, chatID, domain.MessageRoleAssistant, body)
 	if err != nil {
 		return
 	}
@@ -1191,28 +1231,28 @@ func transientTurnMessages(note string, continuePrompt string) []provider.Instru
 	return out
 }
 
-func (e *Engine) buildConversation(ctx context.Context, sessionID int64) ([]provider.Message, error) {
+func (e *Engine) buildConversation(ctx context.Context, sessionID, chatID int64) ([]provider.Message, error) {
 	session, err := e.store.GetSession(ctx, sessionID)
 	if err != nil {
 		return nil, err
 	}
-	return e.buildConversationPreview(ctx, session, "", nil, nil, nil)
+	return e.buildConversationPreview(ctx, session, chatID, "", nil, nil, nil)
 }
 
-func (e *Engine) buildConversationPreview(ctx context.Context, session domain.Session, prompt string, drafts []attachment.Draft, refs []reference.Draft, transient []provider.InstructionBlock) ([]provider.Message, error) {
-	envelope, err := e.buildPromptEnvelopePreview(ctx, session, prompt, drafts, refs, transient)
+func (e *Engine) buildConversationPreview(ctx context.Context, session domain.Session, chatID int64, prompt string, drafts []attachment.Draft, refs []reference.Draft, transient []provider.InstructionBlock) ([]provider.Message, error) {
+	envelope, err := e.buildPromptEnvelopePreview(ctx, session, chatID, prompt, drafts, refs, transient)
 	if err != nil {
 		return nil, err
 	}
 	return provider.SerializePromptEnvelope(envelope), nil
 }
 
-func (e *Engine) buildPromptEnvelopePreview(ctx context.Context, session domain.Session, prompt string, drafts []attachment.Draft, refs []reference.Draft, transient []provider.InstructionBlock) (provider.PromptEnvelope, error) {
+func (e *Engine) buildPromptEnvelopePreview(ctx context.Context, session domain.Session, chatID int64, prompt string, drafts []attachment.Draft, refs []reference.Draft, transient []provider.InstructionBlock) (provider.PromptEnvelope, error) {
 	envelope := provider.PromptEnvelope{
 		Instructions: e.baseInstructions(session),
 	}
-	if session.ID > 0 {
-		messages, partsByMessage, err := e.store.PartsForSession(ctx, session.ID)
+	if chatID > 0 {
+		messages, partsByMessage, err := e.store.PartsForChat(ctx, chatID)
 		if err != nil {
 			return provider.PromptEnvelope{}, err
 		}
@@ -1704,7 +1744,15 @@ func parseToolCall(text string) (*tools.Request, string) {
 }
 
 func (e *Engine) autoCompactIfNeeded(ctx context.Context, session domain.Session, client *provider.Client, out chan<- domain.Event) (bool, error) {
-	messages, parts, err := e.store.PartsForSession(ctx, session.ID)
+	chat, err := e.store.DefaultChat(ctx, session.ID)
+	if err != nil {
+		return false, err
+	}
+	return e.autoCompactChatIfNeeded(ctx, session, chat.ID, client, out)
+}
+
+func (e *Engine) autoCompactChatIfNeeded(ctx context.Context, session domain.Session, chatID int64, client *provider.Client, out chan<- domain.Event) (bool, error) {
+	messages, parts, err := e.store.PartsForChat(ctx, chatID)
 	if err != nil {
 		return false, err
 	}
@@ -1726,14 +1774,14 @@ func (e *Engine) autoCompactIfNeeded(ctx context.Context, session domain.Session
 	if out != nil {
 		out <- domain.Event{Kind: domain.EventKindStatus, Text: fmt.Sprintf("Auto-compacting at %d%% context used", metrics.UsagePercent)}
 	}
-	if err := e.compactSession(ctx, session, client, "auto", out); err != nil {
+	if err := e.compactSession(ctx, session, chatID, client, "auto", out); err != nil {
 		return false, err
 	}
 	return true, nil
 }
 
-func (e *Engine) compactSession(ctx context.Context, session domain.Session, client *provider.Client, trigger string, out chan<- domain.Event) error {
-	messages, err := e.buildConversation(ctx, session.ID)
+func (e *Engine) compactSession(ctx context.Context, session domain.Session, chatID int64, client *provider.Client, trigger string, out chan<- domain.Event) error {
+	messages, err := e.buildConversation(ctx, session.ID, chatID)
 	if err != nil {
 		return err
 	}
@@ -1756,7 +1804,7 @@ func (e *Engine) compactSession(ctx context.Context, session domain.Session, cli
 	if summary == "" {
 		return nil
 	}
-	msg, err := e.store.AddMessage(ctx, session.ID, domain.MessageRoleAssistant, "Compacted session summary")
+	msg, err := e.store.AddChatMessage(ctx, chatID, domain.MessageRoleAssistant, "Compacted session summary")
 	if err != nil {
 		return err
 	}
@@ -1779,7 +1827,7 @@ func (e *Engine) compactSession(ctx context.Context, session domain.Session, cli
 	return nil
 }
 
-func (e *Engine) handleModelToolCall(ctx context.Context, session domain.Session, req tools.Request) (domain.Event, error) {
+func (e *Engine) handleModelToolCall(ctx context.Context, session domain.Session, chat domain.Chat, req tools.Request) (domain.Event, error) {
 	sessionID := session.ID
 	if sessionID > 0 {
 		if latest, err := e.store.GetSession(ctx, sessionID); err == nil {
@@ -1794,7 +1842,7 @@ func (e *Engine) handleModelToolCall(ctx context.Context, session domain.Session
 	}
 	req, err := tools.Normalize(req)
 	if err != nil {
-		events, persistErr := e.persistToolFailure(ctx, sessionID, req, err)
+		events, persistErr := e.persistToolFailure(ctx, chat.ID, sessionID, req, err)
 		if persistErr != nil {
 			return domain.Event{}, persistErr
 		}
@@ -1806,7 +1854,7 @@ func (e *Engine) handleModelToolCall(ctx context.Context, session domain.Session
 		return domain.Event{}, fmt.Errorf("unsupported model tool %q", req.Tool)
 	}
 	if !toolEnabledForSession(e.cfg, session, req.Tool) {
-		return e.recordDisabledToolResult(ctx, sessionID, req)
+		return e.recordDisabledToolResult(ctx, chat.ID, sessionID, req)
 	}
 
 	decision := permission.Decision{Mode: domain.PermissionModeAllow}
@@ -1818,7 +1866,7 @@ func (e *Engine) handleModelToolCall(ctx context.Context, session domain.Session
 		if strings.TrimSpace(decision.Reason) != "" {
 			text = fmt.Sprintf("%s denied by policy: %s", req.Tool, decision.Reason)
 		}
-		msg, err := e.store.AddMessage(ctx, sessionID, domain.MessageRoleTool, string(req.Tool))
+		msg, err := e.store.AddChatMessage(ctx, chat.ID, domain.MessageRoleTool, string(req.Tool))
 		if err != nil {
 			return domain.Event{}, err
 		}
@@ -1835,12 +1883,12 @@ func (e *Engine) handleModelToolCall(ctx context.Context, session domain.Session
 		if err != nil {
 			return domain.Event{}, err
 		}
-		approval, err := e.store.CreateApproval(ctx, sessionID, req.Tool, storedArgs)
+		approval, err := e.store.CreateChatApproval(ctx, chat.ID, req.Tool, storedArgs)
 		if err != nil {
 			return domain.Event{}, err
 		}
 		preview := tools.Preview(req)
-		if err := e.recordApprovalRequest(ctx, sessionID, req.Tool, approval.ID, preview, req.ToolCallID); err != nil {
+		if err := e.recordApprovalRequest(ctx, chat.ID, sessionID, req.Tool, approval.ID, preview, req.ToolCallID); err != nil {
 			return domain.Event{}, err
 		}
 		text := fmt.Sprintf("%s requires approval", req.Tool)
@@ -1862,14 +1910,14 @@ func (e *Engine) handleModelToolCall(ctx context.Context, session domain.Session
 	}
 	result, err := e.registry.ExecuteWithSession(ctx, e.store, sessionID, req)
 	if err != nil {
-		events, persistErr := e.persistToolFailure(ctx, sessionID, req, err)
+		events, persistErr := e.persistToolFailure(ctx, chat.ID, sessionID, req, err)
 		if persistErr != nil {
 			return domain.Event{}, persistErr
 		}
 		final := <-events
 		return final, nil
 	}
-	evt, err := e.persistToolResult(ctx, sessionID, req, result)
+	evt, err := e.persistToolResult(ctx, chat.ID, sessionID, req, result)
 	if err != nil {
 		return domain.Event{}, err
 	}
@@ -1901,14 +1949,14 @@ func (e *Engine) parseProviderToolCalls(raw []provider.ToolCall, sessionID int64
 	return calls, nil
 }
 
-func (e *Engine) persistAssistantToolCalls(ctx context.Context, sessionID int64, calls []tools.Request, text string, usage domain.Usage) error {
+func (e *Engine) persistAssistantToolCalls(ctx context.Context, chatID, sessionID int64, calls []tools.Request, text string, usage domain.Usage) error {
 	summary := "tool"
 	if len(calls) == 1 {
 		summary = fmt.Sprintf("tool:%s", calls[0].Tool)
 	} else if len(calls) > 1 {
 		summary = fmt.Sprintf("tools:%d", len(calls))
 	}
-	assistantMsg, err := e.store.AddMessage(ctx, sessionID, domain.MessageRoleAssistant, summary)
+	assistantMsg, err := e.store.AddChatMessage(ctx, chatID, domain.MessageRoleAssistant, summary)
 	if err != nil {
 		return err
 	}
@@ -1933,14 +1981,14 @@ func (e *Engine) persistAssistantToolCalls(ctx context.Context, sessionID int64,
 	return nil
 }
 
-func (e *Engine) handleModelToolCalls(ctx context.Context, session domain.Session, calls []tools.Request, out chan<- domain.Event) (bool, error) {
+func (e *Engine) handleModelToolCalls(ctx context.Context, session domain.Session, chat domain.Chat, calls []tools.Request, out chan<- domain.Event) (bool, error) {
 	if len(calls) == 0 {
 		return false, nil
 	}
 	prepared := make([]preparedToolCall, 0, len(calls))
 	needsApproval := false
 	for _, call := range calls {
-		next, err := e.prepareModelToolCall(ctx, session, call)
+		next, err := e.prepareModelToolCall(ctx, session, chat, call)
 		if err != nil {
 			return false, err
 		}
@@ -1970,7 +2018,7 @@ func (e *Engine) handleModelToolCalls(ctx context.Context, session domain.Sessio
 		}
 		out <- domain.Event{Kind: domain.EventKindToolStart, Tool: item.req.Tool, Text: tools.Preview(item.req)}
 		go func(req tools.Request) {
-			events, err := e.executePreparedToolCall(ctx, session.ID, req)
+			events, err := e.executePreparedToolCall(ctx, chat.ID, session.ID, req)
 			results <- completedToolCall{events: events, err: err}
 		}(item.req)
 	}
@@ -1997,7 +2045,7 @@ func (e *Engine) handleModelToolCalls(ctx context.Context, session domain.Sessio
 	return needsApproval, nil
 }
 
-func (e *Engine) prepareModelToolCall(ctx context.Context, session domain.Session, req tools.Request) (preparedToolCall, error) {
+func (e *Engine) prepareModelToolCall(ctx context.Context, session domain.Session, chat domain.Chat, req tools.Request) (preparedToolCall, error) {
 	sessionID := session.ID
 	if sessionID > 0 {
 		if latest, err := e.store.GetSession(ctx, sessionID); err == nil {
@@ -2012,7 +2060,7 @@ func (e *Engine) prepareModelToolCall(ctx context.Context, session domain.Sessio
 	}
 	req, err := tools.Normalize(req)
 	if err != nil {
-		events, persistErr := e.persistToolFailure(ctx, sessionID, req, err)
+		events, persistErr := e.persistToolFailure(ctx, chat.ID, sessionID, req, err)
 		if persistErr != nil {
 			return preparedToolCall{}, persistErr
 		}
@@ -2028,7 +2076,7 @@ func (e *Engine) prepareModelToolCall(ctx context.Context, session domain.Sessio
 		return preparedToolCall{}, fmt.Errorf("unsupported model tool %q", req.Tool)
 	}
 	if !toolEnabledForSession(e.cfg, session, req.Tool) {
-		evt, err := e.recordDisabledToolResult(ctx, sessionID, req)
+		evt, err := e.recordDisabledToolResult(ctx, chat.ID, sessionID, req)
 		if err != nil {
 			return preparedToolCall{}, err
 		}
@@ -2048,7 +2096,7 @@ func (e *Engine) prepareModelToolCall(ctx context.Context, session domain.Sessio
 		if strings.TrimSpace(decision.Reason) != "" {
 			text = fmt.Sprintf("%s denied by policy: %s", req.Tool, decision.Reason)
 		}
-		msg, err := e.store.AddMessage(ctx, sessionID, domain.MessageRoleTool, string(req.Tool))
+		msg, err := e.store.AddChatMessage(ctx, chat.ID, domain.MessageRoleTool, string(req.Tool))
 		if err != nil {
 			return preparedToolCall{}, err
 		}
@@ -2068,12 +2116,12 @@ func (e *Engine) prepareModelToolCall(ctx context.Context, session domain.Sessio
 		if err != nil {
 			return preparedToolCall{}, err
 		}
-		approval, err := e.store.CreateApproval(ctx, sessionID, req.Tool, storedArgs)
+		approval, err := e.store.CreateChatApproval(ctx, chat.ID, req.Tool, storedArgs)
 		if err != nil {
 			return preparedToolCall{}, err
 		}
 		preview := tools.Preview(req)
-		if err := e.recordApprovalRequest(ctx, sessionID, req.Tool, approval.ID, preview, req.ToolCallID); err != nil {
+		if err := e.recordApprovalRequest(ctx, chat.ID, sessionID, req.Tool, approval.ID, preview, req.ToolCallID); err != nil {
 			return preparedToolCall{}, err
 		}
 		text := fmt.Sprintf("%s requires approval", req.Tool)
@@ -2099,12 +2147,12 @@ func (e *Engine) prepareModelToolCall(ctx context.Context, session domain.Sessio
 	return preparedToolCall{req: req, run: true}, nil
 }
 
-func (e *Engine) recordDisabledToolResult(ctx context.Context, sessionID int64, req tools.Request) (domain.Event, error) {
+func (e *Engine) recordDisabledToolResult(ctx context.Context, chatID, sessionID int64, req tools.Request) (domain.Event, error) {
 	text := fmt.Sprintf("%s disabled for this session", req.Tool)
 	if sessionID == 0 {
 		return domain.Event{Kind: domain.EventKindToolResult, Tool: req.Tool, Text: text}, nil
 	}
-	msg, err := e.store.AddMessage(ctx, sessionID, domain.MessageRoleTool, string(req.Tool))
+	msg, err := e.store.AddChatMessage(ctx, chatID, domain.MessageRoleTool, string(req.Tool))
 	if err != nil {
 		return domain.Event{}, err
 	}
@@ -2127,12 +2175,12 @@ func toolEnabledForSession(cfg config.Config, session domain.Session, kind domai
 	return true
 }
 
-func (e *Engine) executePreparedToolCall(ctx context.Context, sessionID int64, req tools.Request) ([]domain.Event, error) {
+func (e *Engine) executePreparedToolCall(ctx context.Context, chatID, sessionID int64, req tools.Request) ([]domain.Event, error) {
 	e.recordLifecycle(sessionID, "tool_execution_started", req.ContextString(), map[string]string{"tool": string(req.Tool), "tool_call_id": req.ToolCallID})
 	result, err := e.registry.ExecuteWithSession(ctx, e.store, sessionID, req)
 	if err != nil {
 		e.recordLifecycle(sessionID, "tool_execution_failed", err.Error(), map[string]string{"tool": string(req.Tool), "tool_call_id": req.ToolCallID})
-		events, persistErr := e.persistToolFailure(ctx, sessionID, req, err)
+		events, persistErr := e.persistToolFailure(ctx, chatID, sessionID, req, err)
 		if persistErr != nil {
 			return nil, persistErr
 		}
@@ -2143,7 +2191,7 @@ func (e *Engine) executePreparedToolCall(ctx context.Context, sessionID int64, r
 		return out, nil
 	}
 	e.recordLifecycle(sessionID, "tool_execution_finished", req.ContextString(), map[string]string{"tool": string(req.Tool), "tool_call_id": req.ToolCallID})
-	events, err := e.persistToolResult(ctx, sessionID, req, result)
+	events, err := e.persistToolResult(ctx, chatID, sessionID, req, result)
 	if err != nil {
 		return nil, err
 	}
@@ -2288,8 +2336,8 @@ func max(a, b int) int {
 	return slices.Max([]int{a, b})
 }
 
-func (e *Engine) recordApprovalRequest(ctx context.Context, sessionID int64, tool domain.ToolKind, approvalID int64, preview, toolCallID string) error {
-	msg, err := e.store.AddMessage(ctx, sessionID, domain.MessageRoleTool, fmt.Sprintf("approval:%s", tool))
+func (e *Engine) recordApprovalRequest(ctx context.Context, chatID, sessionID int64, tool domain.ToolKind, approvalID int64, preview, toolCallID string) error {
+	msg, err := e.store.AddChatMessage(ctx, chatID, domain.MessageRoleTool, fmt.Sprintf("approval:%s", tool))
 	if err != nil {
 		return err
 	}
@@ -2308,8 +2356,8 @@ func (e *Engine) recordApprovalRequest(ctx context.Context, sessionID int64, too
 	return err
 }
 
-func (e *Engine) recordApprovalReply(ctx context.Context, sessionID int64, tool domain.ToolKind, approvalID int64, status, preview, toolCallID string) error {
-	msg, err := e.store.AddMessage(ctx, sessionID, domain.MessageRoleTool, fmt.Sprintf("approval:%s:%s", tool, status))
+func (e *Engine) recordApprovalReply(ctx context.Context, chatID, sessionID int64, tool domain.ToolKind, approvalID int64, status, preview, toolCallID string) error {
+	msg, err := e.store.AddChatMessage(ctx, chatID, domain.MessageRoleTool, fmt.Sprintf("approval:%s:%s", tool, status))
 	if err != nil {
 		return err
 	}
