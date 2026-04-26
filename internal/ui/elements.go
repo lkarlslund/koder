@@ -314,6 +314,7 @@ type Surface struct {
 	w     int
 	h     int
 	cells []Cell
+	ctrls []Control
 }
 
 func BlankSurface(width, height int) Surface {
@@ -385,6 +386,26 @@ func (s Surface) PlaceAt(x, y int, child Surface) Surface {
 	return s.placeAt(x, y, child)
 }
 
+func (s Surface) Controls() []Control {
+	if len(s.ctrls) == 0 {
+		return nil
+	}
+	out := make([]Control, len(s.ctrls))
+	copy(out, s.ctrls)
+	return out
+}
+
+func (s Surface) RegisterControls(runtime *Runtime, dx, dy int) {
+	if runtime == nil || len(s.ctrls) == 0 {
+		return
+	}
+	for _, control := range s.ctrls {
+		control.Rect.X += dx
+		control.Rect.Y += dy
+		runtime.Register(control)
+	}
+}
+
 func (s Surface) SurfaceWidth() int {
 	if s.isCellBuffer() {
 		return s.w
@@ -453,6 +474,7 @@ func (s Surface) normalize(width, height int) Surface {
 				out.setCell(x, y, s.cellAt(x, y))
 			}
 		}
+		out.ctrls = clipControlsToSurface(s.ctrls, width, height)
 		return out
 	}
 	if width < 0 {
@@ -576,6 +598,15 @@ func (s Surface) blitAt(x, y int, child Surface) Surface {
 			out.setCell(targetX, targetY, compositeCell(out.cellAt(targetX, targetY), child.cellAt(cx, cy)))
 		}
 	}
+	if len(child.ctrls) > 0 {
+		for _, control := range child.ctrls {
+			control.Rect.X += x
+			control.Rect.Y += y
+			if clipped, ok := clipControlRect(control, out.w, out.h); ok {
+				out.ctrls = append(out.ctrls, clipped)
+			}
+		}
+	}
 	return out
 }
 
@@ -613,6 +644,7 @@ func (s *Surface) WriteStyledSpans(x, y int, spans []StyledSpan, base CellStyle)
 			continue
 		}
 		style := base.Merge(span.Style)
+		startCol := col
 		for _, r := range span.Text {
 			grapheme := string(r)
 			width := PlainWidth(grapheme)
@@ -630,7 +662,45 @@ func (s *Surface) WriteStyledSpans(x, y int, spans []StyledSpan, base CellStyle)
 			}
 			col += width
 		}
+		if strings.TrimSpace(span.ControlID) == "" || !span.Enabled {
+			continue
+		}
+		left := max(0, startCol)
+		right := min(s.w, col)
+		if right <= left {
+			continue
+		}
+		s.ctrls = append(s.ctrls, Control{
+			ID:      span.ControlID,
+			Rect:    Rect{X: left, Y: y, W: right - left, H: 1},
+			Enabled: true,
+		})
 	}
+}
+
+func clipControlsToSurface(controls []Control, width, height int) []Control {
+	if len(controls) == 0 {
+		return nil
+	}
+	out := make([]Control, 0, len(controls))
+	for _, control := range controls {
+		if clipped, ok := clipControlRect(control, width, height); ok {
+			out = append(out, clipped)
+		}
+	}
+	return out
+}
+
+func clipControlRect(control Control, width, height int) (Control, bool) {
+	x1 := max(0, control.Rect.X)
+	y1 := max(0, control.Rect.Y)
+	x2 := min(width, control.Rect.X+control.Rect.W)
+	y2 := min(height, control.Rect.Y+control.Rect.H)
+	if x2 <= x1 || y2 <= y1 {
+		return Control{}, false
+	}
+	control.Rect = Rect{X: x1, Y: y1, W: x2 - x1, H: y2 - y1}
+	return control, true
 }
 
 func FilledLineSurface(width int, text string, fillStyle, textStyle CellStyle) Surface {

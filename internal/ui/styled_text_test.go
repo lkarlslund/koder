@@ -54,6 +54,27 @@ func TestRenderStyledTextANSIIncludesStrikethrough(t *testing.T) {
 	}
 }
 
+func TestLayoutStyledTextRegistersWrappedInteractiveFragments(t *testing.T) {
+	surface := LayoutStyledText([]StyledSpan{
+		{Text: "Edited file game/sim_test.go", Style: CellStyle{Bold: true}},
+		{Text: "  ", Style: CellStyle{}},
+		{Text: "Expand (14 lines)", Style: CellStyle{Italic: true}, ControlID: "toolrun:edit:output", Enabled: true},
+	}, 18, CellStyle{})
+
+	controls := surface.Controls()
+	if len(controls) < 2 {
+		t.Fatalf("expected wrapped interactive fragments, got %#v", controls)
+	}
+	for _, control := range controls {
+		if control.ID != "toolrun:edit:output" {
+			t.Fatalf("unexpected control id %#v", controls)
+		}
+		if control.Rect.W <= 0 || control.Rect.H != 1 {
+			t.Fatalf("unexpected control rect %#v", control.Rect)
+		}
+	}
+}
+
 func TestAssistantMessageStyledBodyUsesBaseAndSpanStyles(t *testing.T) {
 	palette := theme.Default().Palette
 	msg := AssistantMessage{

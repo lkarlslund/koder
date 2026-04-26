@@ -6,19 +6,29 @@ import (
 )
 
 type StyledSpan struct {
-	Text  string
-	Style CellStyle
+	Text      string
+	Style     CellStyle
+	ControlID string
+	Enabled   bool
 }
 
 func AppendStyledSpan(dst []StyledSpan, text string, style CellStyle) []StyledSpan {
 	if text == "" {
 		return dst
 	}
-	if len(dst) > 0 && dst[len(dst)-1].Style.equal(style) {
+	if len(dst) > 0 && dst[len(dst)-1].Style.equal(style) && dst[len(dst)-1].ControlID == "" && !dst[len(dst)-1].Enabled {
 		dst[len(dst)-1].Text += text
 		return dst
 	}
 	return append(dst, StyledSpan{Text: text, Style: style})
+}
+
+func AppendInteractiveStyledSpan(dst []StyledSpan, text string, style CellStyle, controlID string, enabled bool) []StyledSpan {
+	if text == "" {
+		return dst
+	}
+	span := StyledSpan{Text: text, Style: style, ControlID: controlID, Enabled: enabled}
+	return appendStyledText(dst, span)
 }
 
 func PlainStyledText(spans []StyledSpan) string {
@@ -33,6 +43,19 @@ func StyledTextWidth(spans []StyledSpan) int {
 	return PlainWidth(PlainStyledText(spans))
 }
 
+func LayoutStyledText(spans []StyledSpan, width int, base CellStyle) Surface {
+	lines := WrapStyledText(spans, width)
+	maxWidth := 0
+	for _, line := range lines {
+		maxWidth = max(maxWidth, StyledTextWidth(line))
+	}
+	s := BlankSurface(maxWidth, len(lines))
+	for y, line := range lines {
+		s.WriteStyledSpans(0, y, line, base)
+	}
+	return s
+}
+
 func SplitStyledLines(spans []StyledSpan) [][]StyledSpan {
 	lines := make([][]StyledSpan, 1)
 	for _, span := range spans {
@@ -42,7 +65,12 @@ func SplitStyledLines(spans []StyledSpan) [][]StyledSpan {
 		parts := strings.Split(span.Text, "\n")
 		for idx, part := range parts {
 			if part != "" {
-				lines[len(lines)-1] = AppendStyledSpan(lines[len(lines)-1], part, span.Style)
+				lines[len(lines)-1] = appendStyledText(lines[len(lines)-1], StyledSpan{
+					Text:      part,
+					Style:     span.Style,
+					ControlID: span.ControlID,
+					Enabled:   span.Enabled,
+				})
 			}
 			if idx < len(parts)-1 {
 				lines = append(lines, nil)
@@ -147,11 +175,16 @@ func tokenizeStyledLine(spans []StyledSpan) []styledToken {
 			if width <= 0 {
 				continue
 			}
-			if len(current.spans) > 0 && current.whitespace != isSpace {
+			if len(current.spans) > 0 && (current.whitespace != isSpace || !styledSpanMetaEqual(current.spans[len(current.spans)-1], span)) {
 				flush()
 			}
 			current.whitespace = isSpace
-			current.spans = AppendStyledSpan(current.spans, string(r), span.Style)
+			current.spans = appendStyledText(current.spans, StyledSpan{
+				Text:      string(r),
+				Style:     span.Style,
+				ControlID: span.ControlID,
+				Enabled:   span.Enabled,
+			})
 			current.width += width
 		}
 	}
@@ -186,7 +219,12 @@ func splitStyledToken(token styledToken, width int) [][]StyledSpan {
 			if used > 0 && used+graphemeWidth > width {
 				flush()
 			}
-			current = AppendStyledSpan(current, grapheme, span.Style)
+			current = appendStyledText(current, StyledSpan{
+				Text:      grapheme,
+				Style:     span.Style,
+				ControlID: span.ControlID,
+				Enabled:   span.Enabled,
+			})
 			used += graphemeWidth
 		}
 	}
@@ -195,4 +233,19 @@ func splitStyledToken(token styledToken, width int) [][]StyledSpan {
 		return [][]StyledSpan{{}}
 	}
 	return parts
+}
+
+func appendStyledText(dst []StyledSpan, span StyledSpan) []StyledSpan {
+	if span.Text == "" {
+		return dst
+	}
+	if len(dst) > 0 && styledSpanMetaEqual(dst[len(dst)-1], span) {
+		dst[len(dst)-1].Text += span.Text
+		return dst
+	}
+	return append(dst, span)
+}
+
+func styledSpanMetaEqual(a, b StyledSpan) bool {
+	return a.Style.equal(b.Style) && a.ControlID == b.ControlID && a.Enabled == b.Enabled
 }

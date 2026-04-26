@@ -113,25 +113,6 @@ func (r ToolRun) renderCard(palette theme.Palette, width int, expandedOutput, ex
 		return r.renderBashCard(palette, width, expandedOutput, expandedCommand)
 	}
 	headerWidth := innerCardWidth(width)
-	headerParts := []string{r.Title}
-	if label := r.OutputToggleLabel(width, expandedOutput); label != "" {
-		headerParts = append(headerParts, label)
-	}
-	lines := []string{strings.Join(headerParts, "  ")}
-	if subtitle := strings.TrimSpace(r.Subtitle); subtitle != "" {
-		lines = append(lines, subtitle)
-	}
-	if preview := r.visiblePreview(expandedOutput); preview != "" {
-		lines = append(lines, renderToolRunPreview(preview, r, lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle(), headerWidth, expandedOutput))
-	}
-	cardWidth := 0
-	for _, line := range lines {
-		for _, sub := range strings.Split(line, "\n") {
-			cardWidth = maxInt(cardWidth, PlainWidth(sub))
-		}
-	}
-	s := BlankSurface(cardWidth, strings.Count(strings.Join(lines, "\n"), "\n")+1)
-	row := 0
 	titleStyle := CellStyle{FG: cellColor(palette.MarkdownText), Bold: true, Italic: true}
 	toggleStyle := CellStyle{FG: cellColor(palette.UserAccentBar), Bold: true}
 	subtitleStyle := CellStyle{FG: cellColor(palette.ComposerMutedText)}
@@ -139,41 +120,38 @@ func (r ToolRun) renderCard(palette theme.Palette, width int, expandedOutput, ex
 	addedStyle := CellStyle{FG: cellColor(palette.DiffAddedText)}
 	deletedStyle := CellStyle{FG: cellColor(palette.DiffDeletedText)}
 	metaStyle := CellStyle{FG: cellColor(palette.ComposerMutedText)}
-	for _, header := range lines[:1] {
-		headerCols := strings.Split(header, "  ")
-		col := 0
-		if len(headerCols) > 0 {
-			s.WriteText(col, row, headerCols[0], titleStyle)
-			col += PlainWidth(headerCols[0])
-		}
-		for _, extra := range headerCols[1:] {
-			s.WriteText(col, row, "  ", bodyStyle)
-			col += 2
-			s.WriteText(col, row, extra, toggleStyle)
-			col += PlainWidth(extra)
-		}
-		row++
+	lines := make([]Surface, 0, 4)
+
+	headerSpans := []StyledSpan{{Text: r.Title, Style: titleStyle}}
+	if label := r.OutputToggleLabel(width, expandedOutput); label != "" {
+		headerSpans = append(headerSpans,
+			StyledSpan{Text: "  ", Style: bodyStyle},
+			StyledSpan{Text: label, Style: toggleStyle, ControlID: controlIDForToolRunPart(r.ID, "output"), Enabled: strings.TrimSpace(r.ID) != ""},
+		)
 	}
-	if len(lines) > 1 {
-		for _, line := range lines[1:] {
-			for _, sub := range strings.Split(line, "\n") {
-				style := bodyStyle
-				trimmed := strings.TrimLeft(sub, " ")
-				if strings.HasPrefix(trimmed, "+") {
-					style = addedStyle
-				} else if strings.HasPrefix(trimmed, "-") {
-					style = deletedStyle
-				} else if strings.HasPrefix(trimmed, "@@") {
-					style = metaStyle
-				} else if row == 1 && strings.TrimSpace(r.Subtitle) != "" {
-					style = subtitleStyle
-				}
-				s.WriteText(0, row, sub, style)
-				row++
+	lines = append(lines, LayoutStyledText(headerSpans, headerWidth, CellStyle{}))
+	if subtitle := strings.TrimSpace(r.Subtitle); subtitle != "" {
+		lines = append(lines, LayoutStyledText([]StyledSpan{{Text: subtitle, Style: subtitleStyle}}, headerWidth, CellStyle{}))
+	}
+	if preview := r.visiblePreview(expandedOutput); preview != "" {
+		rendered := renderToolRunPreview(preview, r, lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle(), headerWidth, expandedOutput)
+		previewLines := strings.Split(rendered, "\n")
+		surface := BlankSurface(maxLineWidth(previewLines), len(previewLines))
+		for y, line := range previewLines {
+			style := bodyStyle
+			trimmed := strings.TrimLeft(line, " ")
+			if strings.HasPrefix(trimmed, "+") {
+				style = addedStyle
+			} else if strings.HasPrefix(trimmed, "-") {
+				style = deletedStyle
+			} else if strings.HasPrefix(trimmed, "@@") {
+				style = metaStyle
 			}
+			surface.WriteText(0, y, line, style)
 		}
+		lines = append(lines, surface)
 	}
-	return s
+	return stackSurfaces(lines)
 }
 
 func (r ToolRun) renderBashCard(palette theme.Palette, width int, expandedOutput, expandedCommand bool) Surface {
@@ -182,76 +160,51 @@ func (r ToolRun) renderBashCard(palette theme.Palette, width int, expandedOutput
 	if title == "" {
 		title = "Ran command"
 	}
-	headerParts := []string{title}
-	if label := r.CommandToggleLabel(width, expandedCommand); label != "" {
-		headerParts = append(headerParts, label)
-	}
-	lines := []string{strings.Join(headerParts, "  ")}
-	if command := r.visibleCommand(headerWidth, expandedCommand); command != "" {
-		lines = append(lines, command)
-	}
-	if output := r.visiblePreview(expandedOutput); output != "" {
-		first := firstPreviewLine(output)
-		lines = append(lines, first)
-		if expandedOutput {
-			rest := remainingPreviewLines(output)
-			if rest != "" {
-				lines = append(lines, renderToolRunPreview(rest, r, lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle(), headerWidth, true))
-			}
-		}
-	}
-	cardWidth := 0
-	for _, line := range lines {
-		for _, sub := range strings.Split(line, "\n") {
-			cardWidth = maxInt(cardWidth, PlainWidth(sub))
-		}
-	}
-	s := BlankSurface(cardWidth, strings.Count(strings.Join(lines, "\n"), "\n")+1)
-	row := 0
 	titleStyle := CellStyle{FG: cellColor(palette.MarkdownText), Bold: true, Italic: true}
 	toggleStyle := CellStyle{FG: cellColor(palette.UserAccentBar), Bold: true}
 	bodyStyle := CellStyle{FG: cellColor(palette.MarkdownText)}
-	for _, header := range lines[:1] {
-		writeLineWithOptionalToggle(s, row, header, r.CommandToggleLabel(width, expandedCommand), titleStyle, toggleStyle, bodyStyle)
-		row++
+	lines := make([]Surface, 0, 4)
+
+	headerSpans := []StyledSpan{{Text: title, Style: titleStyle}}
+	if label := r.CommandToggleLabel(width, expandedCommand); label != "" {
+		headerSpans = append(headerSpans,
+			StyledSpan{Text: "  ", Style: bodyStyle},
+			StyledSpan{Text: label, Style: toggleStyle, ControlID: controlIDForToolRunPart(r.ID, "command"), Enabled: strings.TrimSpace(r.ID) != ""},
+		)
 	}
-	for _, line := range lines[1:] {
-		for _, sub := range strings.Split(line, "\n") {
-			if row == 1 && strings.TrimSpace(r.visibleCommand(headerWidth, expandedCommand)) != "" {
-				s.WriteText(0, row, sub, CellStyle{FG: cellColor(palette.ComposerMutedText)})
-			} else {
-				writeLineWithOptionalToggle(s, row, sub, firstOutputToggleLabel(r, width, expandedOutput, row, expandedCommand), bodyStyle, toggleStyle, bodyStyle)
+	lines = append(lines, LayoutStyledText(headerSpans, headerWidth, CellStyle{}))
+	if command := r.visibleCommand(headerWidth, expandedCommand); command != "" {
+		commandLines := strings.Split(command, "\n")
+		s := BlankSurface(maxLineWidth(commandLines), len(commandLines))
+		for y, line := range commandLines {
+			s.WriteText(0, y, line, CellStyle{FG: cellColor(palette.ComposerMutedText)})
+		}
+		lines = append(lines, s)
+	}
+	if output := r.visiblePreview(expandedOutput); output != "" {
+		first := firstPreviewLine(output)
+		outputSpans := []StyledSpan{{Text: first, Style: bodyStyle}}
+		if label := r.OutputToggleLabel(width, expandedOutput); label != "" {
+			outputSpans = append(outputSpans,
+				StyledSpan{Text: "  ", Style: bodyStyle},
+				StyledSpan{Text: label, Style: toggleStyle, ControlID: controlIDForToolRunPart(r.ID, "output"), Enabled: strings.TrimSpace(r.ID) != ""},
+			)
+		}
+		lines = append(lines, LayoutStyledText(outputSpans, headerWidth, CellStyle{}))
+		if expandedOutput {
+			rest := remainingPreviewLines(output)
+			if rest != "" {
+				rendered := renderToolRunPreview(rest, r, lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle(), headerWidth, true)
+				restLines := strings.Split(rendered, "\n")
+				s := BlankSurface(maxLineWidth(restLines), len(restLines))
+				for y, line := range restLines {
+					s.WriteText(0, y, line, bodyStyle)
+				}
+				lines = append(lines, s)
 			}
-			row++
 		}
 	}
-	return s
-}
-
-func writeLineWithOptionalToggle(s Surface, row int, text, label string, textStyle, toggleStyle, gapStyle CellStyle) {
-	s.WriteText(0, row, text, textStyle)
-	if strings.TrimSpace(label) == "" {
-		return
-	}
-	col := PlainWidth(text)
-	s.WriteText(col, row, "  ", gapStyle)
-	col += 2
-	s.WriteText(col, row, label, toggleStyle)
-}
-
-func firstOutputToggleLabel(r ToolRun, width int, expandedOutput bool, row int, expandedCommand bool) string {
-	label := r.OutputToggleLabel(width, expandedOutput)
-	if strings.TrimSpace(label) == "" {
-		return ""
-	}
-	outputRow := 1
-	if strings.TrimSpace(r.visibleCommand(innerCardWidth(width), expandedCommand)) != "" {
-		outputRow++
-	}
-	if row != outputRow {
-		return ""
-	}
-	return label
+	return stackSurfaces(lines)
 }
 
 func (r ToolRun) visiblePreview(expanded bool) string {
@@ -277,6 +230,43 @@ func (r ToolRun) visibleCommand(width int, expanded bool) string {
 		return renderToolRunPreview(command, r, lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle(), width, true)
 	}
 	return ""
+}
+
+func stackSurfaces(lines []Surface) Surface {
+	if len(lines) == 0 {
+		return Surface{}
+	}
+	width := 0
+	height := 0
+	for _, line := range lines {
+		size := line.Size()
+		width = maxInt(width, size.W)
+		height += size.H
+	}
+	s := BlankSurface(width, height)
+	row := 0
+	for _, line := range lines {
+		s = s.placeAt(0, row, line)
+		row += line.Size().H
+	}
+	return s
+}
+
+func maxLineWidth(lines []string) int {
+	width := 0
+	for _, line := range lines {
+		width = maxInt(width, PlainWidth(line))
+	}
+	return width
+}
+
+func controlIDForToolRunPart(runID, part string) string {
+	runID = strings.TrimSpace(runID)
+	part = strings.TrimSpace(part)
+	if runID == "" || part == "" {
+		return ""
+	}
+	return "toolrun:" + runID + ":" + part
 }
 
 type ToolRunDock struct {

@@ -4577,6 +4577,72 @@ func TestMouseClickTogglesEditToolRunExpansion(t *testing.T) {
 	}
 }
 
+func TestMouseClickTogglesWrappedEditToolRunExpansion(t *testing.T) {
+	m := Model{
+		mouseEnabled:     true,
+		currentSession:   domain.Session{ID: 1},
+		viewport:         newTranscriptViewport(28, 10),
+		parts:            map[int64][]domain.Part{},
+		expandedToolRuns: map[string]bool{},
+		palette:          theme.Resolve("tokyonight").Palette,
+	}
+
+	meta := mustMarshalMeta(t, tools.MetaWithStoredResult(map[string]string{
+		"tool":         "edit",
+		"path":         "game/sim_test.go",
+		"tool_call_id": "call_edit_wrap_1",
+	}, domain.PartKindToolOutput, domain.ToolKindEdit, tools.StoredResultStatusOK, tools.EditStoredResult{
+		Path:    "game/sim_test.go",
+		Summary: "Edited game/sim_test.go (replaced 1 occurrence)",
+		Diff:    "--- game/sim_test.go\n+++ game/sim_test.go\n@@ -1,1 +1,1 @@\n-old\n+new",
+	}))
+
+	m.messages = []domain.Message{
+		{ID: 1, Role: domain.MessageRoleTool, Summary: "edit"},
+	}
+	m.parts[1] = []domain.Part{{
+		Kind:     domain.PartKindToolOutput,
+		Body:     "Edited game/sim_test.go (replaced 1 occurrence)",
+		MetaJSON: meta,
+	}}
+
+	m.refreshViewport()
+	_ = m.viewSurface()
+	var wrappedControl *ui.Control
+	for i := range m.transcriptControls {
+		control := &m.transcriptControls[i]
+		if control.ID == "toolrun:call_edit_wrap_1:output" {
+			wrappedControl = control
+			break
+		}
+	}
+	if wrappedControl == nil {
+		t.Fatalf("expected wrapped edit toolrun control to be registered, got %#v", m.transcriptControls)
+	}
+
+	updated, cmd := m.Update(ui.MouseMsg{
+		Action: ui.MouseActionPress,
+		Button: ui.MouseButtonLeft,
+		X:      wrappedControl.Rect.X + 1,
+		Y:      wrappedControl.Rect.Y,
+	})
+	var next Model
+	switch typed := updated.(type) {
+	case Model:
+		next = typed
+	case *Model:
+		next = *typed
+	default:
+		t.Fatalf("unexpected model type %T", updated)
+	}
+	if cmd != nil {
+		t.Fatal("expected no command from wrapped edit tool run mouse toggle")
+	}
+	if !strings.Contains(next.viewport.View(), "--- game/sim_test.go") {
+		t.Fatalf("expected expanded wrapped edit output, got %q", next.viewport.View())
+	}
+}
+
 func TestWriteToolRunUsesStoredContentForExpansion(t *testing.T) {
 	m := Model{
 		currentSession:   domain.Session{ID: 1},

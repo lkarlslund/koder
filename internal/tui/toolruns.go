@@ -585,44 +585,11 @@ func (e toolRunCardElement) Render(ctx *ui.Context, bounds ui.Rect) ui.Surface {
 	if width <= 0 {
 		width = bounds.W
 	}
-	if ctx != nil && ctx.Runtime != nil && strings.TrimSpace(e.Run.ID) != "" {
-		commandLabel := e.Run.CommandToggleLabel(width, e.ExpandedCommand)
-		if commandLabel != "" {
-			titleWidth := ui.PlainWidth(e.Run.Title)
-			labelWidth := ui.PlainWidth(commandLabel)
-			x := bounds.X + titleWidth + 2
-			if labelWidth > 0 {
-				ctx.Runtime.Register(ui.Control{
-					ID:      "toolrun:" + e.Run.ID + ":command",
-					Rect:    ui.Rect{X: x, Y: bounds.Y, W: labelWidth, H: 1},
-					Enabled: true,
-				})
-			}
-		}
-		outputLabel := e.Run.OutputToggleLabel(width, e.ExpandedOutput)
-		if outputLabel != "" {
-			outputLineY := bounds.Y
-			outputWidth := ui.PlainWidth(e.Run.Title)
-			if e.Run.Tool == domain.ToolKindBash {
-				outputLineY = bounds.Y + 1
-				if strings.TrimSpace(e.Run.Command) != "" && e.ExpandedCommand {
-					outputLineY++
-					if command := strings.TrimSpace(e.Run.Command); command != "" {
-						outputLineY += strings.Count(command, "\n")
-					}
-				}
-				outputText := firstNonEmptyCommandLine(e.Run.PreviewText())
-				outputWidth = ui.PlainWidth(outputText)
-			}
-			labelWidth := ui.PlainWidth(outputLabel)
-			ctx.Runtime.Register(ui.Control{
-				ID:      "toolrun:" + e.Run.ID + ":output",
-				Rect:    ui.Rect{X: bounds.X + outputWidth + 2, Y: outputLineY, W: labelWidth, H: 1},
-				Enabled: true,
-			})
-		}
+	surface := e.Run.CardSurface(e.Palette, width, e.ExpandedOutput, e.ExpandedCommand)
+	if ctx != nil && ctx.Runtime != nil {
+		surface.RegisterControls(ctx.Runtime, bounds.X, bounds.Y)
 	}
-	return e.Run.CardSurface(e.Palette, width, e.ExpandedOutput, e.ExpandedCommand)
+	return surface
 }
 
 func (m *Model) approvalToolRun(item store.Approval) ui.ToolRun {
