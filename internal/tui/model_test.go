@@ -1243,8 +1243,8 @@ func TestRefreshViewportGroupsToolRunMessagesIntoCard(t *testing.T) {
 	if strings.Contains(got, "│") || strings.Contains(got, "╭") || strings.Contains(got, "╰") {
 		t.Fatalf("expected compact tool row without border chrome, got %q", got)
 	}
-	if !strings.Contains(got, " On branch main") {
-		t.Fatalf("expected indented tool output preview, got %q", got)
+	if !strings.Contains(got, "On branch main") {
+		t.Fatalf("expected tool output preview, got %q", got)
 	}
 	if strings.Contains(got, `"tool":"bash"`) || strings.Contains(got, "Approval required for bash") {
 		t.Fatalf("expected compact tool card instead of raw transcript blobs, got %q", got)
@@ -4158,7 +4158,7 @@ func TestRenderMessagePartsShowsAssistantNarrationWithoutSystemPrefix(t *testing
 func TestTranscriptRendersCompactionAsExpandableCard(t *testing.T) {
 	m := Model{
 		currentSession:   domain.Session{ID: 1},
-		viewport:         newTranscriptViewport(80, 8),
+		viewport:         newTranscriptViewport(120, 8),
 		parts:            map[int64][]domain.Part{},
 		expandedToolRuns: map[string]bool{},
 		palette:          theme.Resolve("tokyonight").Palette,
@@ -4409,12 +4409,13 @@ func TestMouseWheelScrollCanReturnToTrueTranscriptBottom(t *testing.T) {
 
 func TestMouseClickTogglesToolRunExpansion(t *testing.T) {
 	m := Model{
-		mouseEnabled:     true,
-		currentSession:   domain.Session{ID: 1},
-		viewport:         newTranscriptViewport(80, 8),
-		parts:            map[int64][]domain.Part{},
-		expandedToolRuns: map[string]bool{},
-		palette:          theme.Resolve("tokyonight").Palette,
+		mouseEnabled:            true,
+		currentSession:          domain.Session{ID: 1},
+		viewport:                newTranscriptViewport(80, 8),
+		parts:                   map[int64][]domain.Part{},
+		expandedToolRuns:        map[string]bool{},
+		expandedToolRunCommands: map[string]bool{},
+		palette:                 theme.Resolve("tokyonight").Palette,
 	}
 	m.messages = []domain.Message{
 		{ID: 1, Role: domain.MessageRoleTool, Summary: "bash"},
@@ -4429,7 +4430,7 @@ func TestMouseClickTogglesToolRunExpansion(t *testing.T) {
 	if strings.Contains(m.viewport.View(), "line one\nline two") {
 		t.Fatalf("expected collapsed tool output, got %q", m.viewport.View())
 	}
-	if !strings.Contains(m.viewport.View(), "Expand (1 line)") {
+	if !strings.Contains(m.viewport.View(), "Expand ou") {
 		t.Fatalf("expected expand indicator, got %q", m.viewport.View())
 	}
 
@@ -4438,7 +4439,7 @@ func TestMouseClickTogglesToolRunExpansion(t *testing.T) {
 	clickY := -1
 	controlWidth := -1
 	for _, control := range m.transcriptControls {
-		if control.ID != "toolrun:call_bash_1" {
+		if control.ID != "toolrun:call_bash_1:output" {
 			continue
 		}
 		clickX = control.Rect.X + 1
@@ -4449,8 +4450,8 @@ func TestMouseClickTogglesToolRunExpansion(t *testing.T) {
 	if clickX < 0 || clickY < 0 {
 		t.Fatalf("expected toolrun control to be registered, got %#v", m.transcriptControls)
 	}
-	if controlWidth != ui.PlainWidth("Expand (1 line)") {
-		t.Fatalf("expected expand control width %d, got %d", ui.PlainWidth("Expand (1 line)"), controlWidth)
+	if controlWidth != ui.PlainWidth("Expand output (1 line)") {
+		t.Fatalf("expected expand control width %d, got %d", ui.PlainWidth("Expand output (1 line)"), controlWidth)
 	}
 
 	updated, cmd := m.Update(ui.MouseMsg{
@@ -4471,7 +4472,7 @@ func TestMouseClickTogglesToolRunExpansion(t *testing.T) {
 	if cmd != nil {
 		t.Fatal("expected no command from tool run mouse toggle")
 	}
-	if !strings.Contains(next.viewport.View(), " line one") {
+	if !strings.Contains(next.viewport.View(), "line one") {
 		t.Fatalf("expected expanded tool output, got %q", next.viewport.View())
 	}
 	if !strings.Contains(next.viewport.View(), "Collapse") {
@@ -4591,19 +4592,20 @@ func TestEditToolRunShowsStoredHunkDetails(t *testing.T) {
 
 func TestBashToolRunUsesRanCommandTitleAndCollapsedFirstOutputLine(t *testing.T) {
 	m := Model{
-		currentSession:   domain.Session{ID: 1},
-		viewport:         newTranscriptViewport(100, 8),
-		parts:            map[int64][]domain.Part{},
-		expandedToolRuns: map[string]bool{},
-		palette:          theme.Resolve("tokyonight").Palette,
+		currentSession:          domain.Session{ID: 1},
+		viewport:                newTranscriptViewport(100, 8),
+		parts:                   map[int64][]domain.Part{},
+		expandedToolRuns:        map[string]bool{},
+		expandedToolRunCommands: map[string]bool{},
+		palette:                 theme.Resolve("tokyonight").Palette,
 	}
 
 	meta := mustMarshalMeta(t, tools.MetaWithStoredResult(map[string]string{
 		"tool":         "bash",
-		"command":      "printf 'line one\\nline two\\n'",
+		"command":      "printf 'hello\\nworld\\n'",
 		"tool_call_id": "call_bash_1",
 	}, domain.PartKindToolOutput, domain.ToolKindBash, tools.StoredResultStatusOK, tools.BashStoredResult{
-		Command: "printf 'line one\\nline two\\n'",
+		Command: "printf 'hello\\nworld\\n'",
 		Output:  "line one\nline two\n",
 	}))
 
@@ -4618,24 +4620,31 @@ func TestBashToolRunUsesRanCommandTitleAndCollapsedFirstOutputLine(t *testing.T)
 
 	m.refreshViewport()
 	got := m.viewport.View()
-	if !strings.Contains(got, "Ran command printf 'line one\\nline two\\n'") {
+	if !strings.Contains(got, "Ran command printf 'hello\\nworld\\n'") {
 		t.Fatalf("expected bash title to include command, got %q", got)
 	}
-	if !strings.Contains(got, " line one") {
+	if strings.Contains(got, "world\\n'  Expand command") {
+		t.Fatalf("expected multiline command to stay out of collapsed header, got %q", got)
+	}
+	if !strings.Contains(got, "line one") {
 		t.Fatalf("expected collapsed bash card to show first output line, got %q", got)
 	}
-	if strings.Contains(got, " line two") {
+	if strings.Contains(got, "line two") {
 		t.Fatalf("expected collapsed bash card to hide later output lines, got %q", got)
+	}
+	if !strings.Contains(got, "Expand output (1 line)") {
+		t.Fatalf("expected output expand label, got %q", got)
 	}
 }
 
 func TestResumedBashToolRunReplacesRequestTitleWithCompletedTitle(t *testing.T) {
 	m := Model{
-		currentSession:   domain.Session{ID: 1},
-		viewport:         newTranscriptViewport(100, 8),
-		parts:            map[int64][]domain.Part{},
-		expandedToolRuns: map[string]bool{},
-		palette:          theme.Resolve("tokyonight").Palette,
+		currentSession:          domain.Session{ID: 1},
+		viewport:                newTranscriptViewport(100, 8),
+		parts:                   map[int64][]domain.Part{},
+		expandedToolRuns:        map[string]bool{},
+		expandedToolRunCommands: map[string]bool{},
+		palette:                 theme.Resolve("tokyonight").Palette,
 	}
 
 	callMeta := mustMarshalMeta(t, map[string]string{

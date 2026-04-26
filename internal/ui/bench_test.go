@@ -241,6 +241,6 @@ func BenchmarkToolRunCardRender(b *testing.B) {
 	palette := benchmarkPalette()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		_ = run.CardSurface(palette, 92, false)
+		_ = run.CardSurface(palette, 92, false, false)
 	}
 }

@@ -286,90 +286,91 @@ type modelRenderCache struct {
 }
 
 type Model struct {
-	cfg                config.Config
-	store              *store.Store
-	agent              *agent.Engine
-	renderer           *markdown.Renderer
-	palette            theme.Palette
-	sessions           []domain.Session
-	chats              []domain.Chat
-	currentSession     domain.Session
-	currentChat        domain.Chat
-	messages           []domain.Message
-	parts              map[int64][]domain.Part
-	milestonePlan      store.MilestonePlan
-	todos              []store.TodoItem
-	approvals          []store.Approval
-	viewport           transcriptViewport
-	transcriptControls []ui.Control
-	transcriptCache    map[string]cachedTranscriptBlock
-	retainedTranscript *ui.RetainedTranscript
-	transcriptDirty    bool
-	mainScreen         *mainScreenWidget
-	renderCache        *modelRenderCache
-	expandedToolRuns   map[string]bool
-	composer           textarea.Model
-	composerQueries    composerQueryState
-	composerHistory    composerHistoryState
-	width              int
-	height             int
-	status             string
-	loading            bool
-	busy               busyModel
-	chatBusy           map[int64]busyModel
-	showSidebar        bool
-	showReasoning      bool
-	showSystem         bool
-	slashMatches       []slashCommand
-	slashIndex         int
-	skillMatches       []skills.Skill
-	skillIndex         int
-	mentionMatches     []reference.Entry
-	mentionIndex       int
-	mentionCatalog     []reference.Entry
-	approvalDialog     *dialogs.ApprovalDialog
-	workdir            string
-	workspace          workspace.Status
-	agentsDrift        bool
-	startupMode        StartupMode
-	startupOptions     StartupOptions
-	picker             pickerModel
-	pendingPartID      int64
-	mouseEnabled       bool
-	sessionDialog      *dialogs.SessionDialog
-	preferences        *dialogs.PreferencesDialog
-	agentsModal        *ui.Modal
-	helpModal          *ui.Modal
-	llmPreviewTitle    string
-	llmPreviewBody     string
-	llmPreviewYOffset  int
-	llmPreviewWidth    int
-	llmPreviewHeight   int
-	connectDialog      *dialogs.ConnectDialog
-	disconnectDialog   *dialogs.DisconnectDialog
-	modelDialog        *dialogs.ModelDialog
-	toolsDialog        *dialogs.ToolsDialog
-	themeDialog        *dialogs.ThemeDialog
-	themeDialogInitial string
-	mainWindowView     *modelWindow
-	debug              *debugsrv.Recorder
-	uiRoot             *ui.Root
-	rootTimerSeq       uint64
-	rootTimerPending   bool
-	rootTimerPendingAt time.Time
-	caps               *provider.CapabilityStore
-	runtimeCtxChecked  map[string]bool
-	activeOpCancel     context.CancelFunc
-	activeOpCancels    map[int64]context.CancelFunc
-	queuedPrompt       *queuedPrompt
-	pendingModelNote   string
-	draftAttachments   []attachment.Draft
-	draftReferences    []reference.Draft
-	attachmentFiles    *attachment.Manager
-	interruptArmedAt   time.Time
-	readClipboardText  func() (string, error)
-	readClipboardImage func() ([]byte, error)
-	writeClipboardText func(string) error
+	cfg                     config.Config
+	store                   *store.Store
+	agent                   *agent.Engine
+	renderer                *markdown.Renderer
+	palette                 theme.Palette
+	sessions                []domain.Session
+	chats                   []domain.Chat
+	currentSession          domain.Session
+	currentChat             domain.Chat
+	messages                []domain.Message
+	parts                   map[int64][]domain.Part
+	milestonePlan           store.MilestonePlan
+	todos                   []store.TodoItem
+	approvals               []store.Approval
+	viewport                transcriptViewport
+	transcriptControls      []ui.Control
+	transcriptCache         map[string]cachedTranscriptBlock
+	retainedTranscript      *ui.RetainedTranscript
+	transcriptDirty         bool
+	mainScreen              *mainScreenWidget
+	renderCache             *modelRenderCache
+	expandedToolRuns        map[string]bool
+	expandedToolRunCommands map[string]bool
+	composer                textarea.Model
+	composerQueries         composerQueryState
+	composerHistory         composerHistoryState
+	width                   int
+	height                  int
+	status                  string
+	loading                 bool
+	busy                    busyModel
+	chatBusy                map[int64]busyModel
+	showSidebar             bool
+	showReasoning           bool
+	showSystem              bool
+	slashMatches            []slashCommand
+	slashIndex              int
+	skillMatches            []skills.Skill
+	skillIndex              int
+	mentionMatches          []reference.Entry
+	mentionIndex            int
+	mentionCatalog          []reference.Entry
+	approvalDialog          *dialogs.ApprovalDialog
+	workdir                 string
+	workspace               workspace.Status
+	agentsDrift             bool
+	startupMode             StartupMode
+	startupOptions          StartupOptions
+	picker                  pickerModel
+	pendingPartID           int64
+	mouseEnabled            bool
+	sessionDialog           *dialogs.SessionDialog
+	preferences             *dialogs.PreferencesDialog
+	agentsModal             *ui.Modal
+	helpModal               *ui.Modal
+	llmPreviewTitle         string
+	llmPreviewBody          string
+	llmPreviewYOffset       int
+	llmPreviewWidth         int
+	llmPreviewHeight        int
+	connectDialog           *dialogs.ConnectDialog
+	disconnectDialog        *dialogs.DisconnectDialog
+	modelDialog             *dialogs.ModelDialog
+	toolsDialog             *dialogs.ToolsDialog
+	themeDialog             *dialogs.ThemeDialog
+	themeDialogInitial      string
+	mainWindowView          *modelWindow
+	debug                   *debugsrv.Recorder
+	uiRoot                  *ui.Root
+	rootTimerSeq            uint64
+	rootTimerPending        bool
+	rootTimerPendingAt      time.Time
+	caps                    *provider.CapabilityStore
+	runtimeCtxChecked       map[string]bool
+	activeOpCancel          context.CancelFunc
+	activeOpCancels         map[int64]context.CancelFunc
+	queuedPrompt            *queuedPrompt
+	pendingModelNote        string
+	draftAttachments        []attachment.Draft
+	draftReferences         []reference.Draft
+	attachmentFiles         *attachment.Manager
+	interruptArmedAt        time.Time
+	readClipboardText       func() (string, error)
+	readClipboardImage      func() ([]byte, error)
+	writeClipboardText      func(string) error
 }
 
 type composerHistoryState struct {
@@ -429,29 +430,30 @@ func NewWithWorkdir(cfg config.Config, st *store.Store, a *agent.Engine, mode St
 	vp.SetContent("Loading…")
 
 	model := Model{
-		cfg:               cfg,
-		store:             st,
-		agent:             a,
-		renderer:          renderer,
-		palette:           tuiTheme.Palette,
-		viewport:          vp,
-		renderCache:       &modelRenderCache{},
-		composer:          composer,
-		showSidebar:       cfg.UI.ShowSidebar,
-		showReasoning:     cfg.UI.ShowReasoning,
-		showSystem:        cfg.UI.ShowSystem,
-		expandedToolRuns:  make(map[string]bool),
-		transcriptDirty:   true,
-		parts:             make(map[int64][]domain.Part),
-		status:            "Ready",
-		workdir:           workdir,
-		startupMode:       mode,
-		startupOptions:    startupOpts,
-		mouseEnabled:      cfg.UI.Mouse,
-		debug:             debug,
-		caps:              provider.NewCapabilityStore(cfg.StateDir()),
-		runtimeCtxChecked: map[string]bool{},
-		attachmentFiles:   attachment.NewManager(cfg.StateDir()),
+		cfg:                     cfg,
+		store:                   st,
+		agent:                   a,
+		renderer:                renderer,
+		palette:                 tuiTheme.Palette,
+		viewport:                vp,
+		renderCache:             &modelRenderCache{},
+		composer:                composer,
+		showSidebar:             cfg.UI.ShowSidebar,
+		showReasoning:           cfg.UI.ShowReasoning,
+		showSystem:              cfg.UI.ShowSystem,
+		expandedToolRuns:        make(map[string]bool),
+		expandedToolRunCommands: make(map[string]bool),
+		transcriptDirty:         true,
+		parts:                   make(map[int64][]domain.Part),
+		status:                  "Ready",
+		workdir:                 workdir,
+		startupMode:             mode,
+		startupOptions:          startupOpts,
+		mouseEnabled:            cfg.UI.Mouse,
+		debug:                   debug,
+		caps:                    provider.NewCapabilityStore(cfg.StateDir()),
+		runtimeCtxChecked:       map[string]bool{},
+		attachmentFiles:         attachment.NewManager(cfg.StateDir()),
 	}
 	model.syncComposerVisibility()
 	return model, nil
@@ -1085,14 +1087,30 @@ func (m *Model) handleMouse(msg ui.MouseMsg) (ui.Model, ui.Cmd, bool) {
 			continue
 		}
 		if strings.HasPrefix(control.ID, "toolrun:") {
-			runID := strings.TrimPrefix(control.ID, "toolrun:")
+			target := strings.TrimPrefix(control.ID, "toolrun:")
+			part := "output"
+			runID := target
+			if strings.HasSuffix(target, ":command") {
+				part = "command"
+				runID = strings.TrimSuffix(target, ":command")
+			} else if strings.HasSuffix(target, ":output") {
+				runID = strings.TrimSuffix(target, ":output")
+			}
 			if strings.TrimSpace(runID) == "" {
 				return m, nil, true
 			}
-			if m.expandedToolRuns == nil {
-				m.expandedToolRuns = make(map[string]bool)
+			switch part {
+			case "command":
+				if m.expandedToolRunCommands == nil {
+					m.expandedToolRunCommands = make(map[string]bool)
+				}
+				m.expandedToolRunCommands[runID] = !m.expandedToolRunCommands[runID]
+			default:
+				if m.expandedToolRuns == nil {
+					m.expandedToolRuns = make(map[string]bool)
+				}
+				m.expandedToolRuns[runID] = !m.expandedToolRuns[runID]
 			}
-			m.expandedToolRuns[runID] = !m.expandedToolRuns[runID]
 			m.invalidateTranscript()
 			m.refreshViewportPreserve()
 			return m, nil, true
@@ -1712,6 +1730,11 @@ func (m *Model) refreshViewportAt(offset int) {
 
 func (m *Model) hasExpandedToolRuns() bool {
 	for _, expanded := range m.expandedToolRuns {
+		if expanded {
+			return true
+		}
+	}
+	for _, expanded := range m.expandedToolRunCommands {
 		if expanded {
 			return true
 		}

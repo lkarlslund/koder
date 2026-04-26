@@ -135,7 +135,7 @@ func (d *ApprovalDialog) Render(palette theme.Palette, bounds ui.Rect) ui.Elemen
 	}
 	width := dialogRenderWidth(bounds, 112)
 	cardWidth := maxInt(48, width-8)
-	card := strings.Join(d.run.CardSurface(palette, cardWidth, true).Lines(), "\n")
+	card := strings.Join(d.run.CardSurface(palette, cardWidth, true, true).Lines(), "\n")
 	buttons := d.buttons
 	buttons.Width = maxInt(buttons.Width, ui.PlainWidth(card))
 	body := ui.FlexBox{

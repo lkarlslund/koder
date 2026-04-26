@@ -228,11 +228,20 @@ func toolRunsFromAssistantMessage(parts []domain.Part) []ui.ToolRun {
 			continue
 		}
 		presentation := tools.PresentationForRequest(req)
+		command := ""
+		if req.Tool == domain.ToolKindBash {
+			command = strings.TrimSpace(req.Args["command"])
+			if command != "" {
+				presentation.Title = "Ran command " + firstNonEmptyCommandLine(command)
+				presentation.Subtitle = ""
+			}
+		}
 		runs = append(runs, ui.ToolRun{
 			ID:         firstNonEmptyString(strings.TrimSpace(req.ToolCallID), toolRunFallbackID(req.Tool, presentation.Preview)),
 			Tool:       req.Tool,
 			ToolCallID: strings.TrimSpace(req.ToolCallID),
 			Title:      presentation.Title,
+			Command:    command,
 			Subtitle:   presentation.Subtitle,
 			Preview:    presentation.Preview,
 			Status:     ui.ToolRunStatusRequested,
@@ -347,8 +356,21 @@ func toolRunOutput(part domain.Part, parts []domain.Part, msg domain.Message) ui
 	case domain.ToolKindBash:
 		command := firstNonEmptyString(strings.TrimSpace(req.Args["command"]), strings.TrimSpace(meta["command"]))
 		if command != "" {
-			presentation.Title = "Ran command " + command
+			presentation.Title = "Ran command " + firstNonEmptyCommandLine(command)
 			presentation.Subtitle = ""
+			presentation.Preview = output
+			return ui.ToolRun{
+				ID:         firstNonEmptyString(req.ToolCallID, toolRunFallbackID(req.Tool, presentation.Preview), msg.Summary),
+				Tool:       req.Tool,
+				ToolCallID: req.ToolCallID,
+				Title:      presentation.Title,
+				Command:    command,
+				Subtitle:   presentation.Subtitle,
+				Preview:    presentation.Preview,
+				Output:     output,
+				Diff:       diff,
+				Status:     status,
+			}
 		}
 	case domain.ToolKindEdit:
 		path := firstNonEmptyString(strings.TrimSpace(req.Args["path"]), strings.TrimSpace(meta["path"]))
@@ -483,11 +505,13 @@ func (m *Model) transcriptBlockCacheKey(block transcriptBlock) string {
 			"toolrun",
 			strconv.Itoa(width),
 			strconv.FormatBool(m.expandedToolRuns[block.ToolRun.ID]),
+			strconv.FormatBool(m.expandedToolRunCommands[block.ToolRun.ID]),
 			string(block.ToolRun.Tool),
 			block.ToolRun.ID,
 			block.ToolRun.ToolCallID,
 			strconv.FormatInt(block.ToolRun.ApprovalID, 10),
 			block.ToolRun.Title,
+			block.ToolRun.Command,
 			block.ToolRun.Subtitle,
 			block.ToolRun.Preview,
 			block.ToolRun.Output,
@@ -529,10 +553,11 @@ func (m *Model) renderTranscriptBlockElement(block transcriptBlock) ui.Element {
 	switch block.Kind {
 	case transcriptBlockToolRun:
 		return toolRunCardElement{
-			Run:      block.ToolRun,
-			Palette:  m.palette,
-			Width:    m.viewport.Width,
-			Expanded: m.expandedToolRuns[block.ToolRun.ID],
+			Run:             block.ToolRun,
+			Palette:         m.palette,
+			Width:           m.viewport.Width,
+			ExpandedOutput:  m.expandedToolRuns[block.ToolRun.ID],
+			ExpandedCommand: m.expandedToolRunCommands[block.ToolRun.ID],
 		}
 	default:
 		return m.renderTranscriptMessageElement(block.Message)
@@ -540,10 +565,11 @@ func (m *Model) renderTranscriptBlockElement(block transcriptBlock) ui.Element {
 }
 
 type toolRunCardElement struct {
-	Run      ui.ToolRun
-	Palette  theme.Palette
-	Width    int
-	Expanded bool
+	Run             ui.ToolRun
+	Palette         theme.Palette
+	Width           int
+	ExpandedOutput  bool
+	ExpandedCommand bool
 }
 
 func (e toolRunCardElement) Measure(_ *ui.Context, constraints ui.Constraints) ui.Size {
@@ -551,7 +577,7 @@ func (e toolRunCardElement) Measure(_ *ui.Context, constraints ui.Constraints) u
 	if width <= 0 {
 		width = constraints.MaxW
 	}
-	return constraints.Clamp(e.Run.CardSurface(e.Palette, width, e.Expanded).Size())
+	return constraints.Clamp(e.Run.CardSurface(e.Palette, width, e.ExpandedOutput, e.ExpandedCommand).Size())
 }
 
 func (e toolRunCardElement) Render(ctx *ui.Context, bounds ui.Rect) ui.Surface {
@@ -560,21 +586,39 @@ func (e toolRunCardElement) Render(ctx *ui.Context, bounds ui.Rect) ui.Surface {
 		width = bounds.W
 	}
 	if ctx != nil && ctx.Runtime != nil && strings.TrimSpace(e.Run.ID) != "" {
-		label := e.Run.ToggleLabel(width, e.Expanded)
-		if label != "" {
+		commandLabel := e.Run.CommandToggleLabel(width, e.ExpandedCommand)
+		if commandLabel != "" {
 			titleWidth := ui.PlainWidth(e.Run.Title)
-			labelWidth := ui.PlainWidth(label)
+			labelWidth := ui.PlainWidth(commandLabel)
 			x := bounds.X + titleWidth + 2
 			if labelWidth > 0 {
 				ctx.Runtime.Register(ui.Control{
-					ID:      "toolrun:" + e.Run.ID,
+					ID:      "toolrun:" + e.Run.ID + ":command",
 					Rect:    ui.Rect{X: x, Y: bounds.Y, W: labelWidth, H: 1},
 					Enabled: true,
 				})
 			}
 		}
+		outputLabel := e.Run.OutputToggleLabel(width, e.ExpandedOutput)
+		if outputLabel != "" {
+			outputLineY := bounds.Y + 1
+			if e.Run.Tool == domain.ToolKindBash && strings.TrimSpace(e.Run.Command) != "" && e.ExpandedCommand {
+				outputLineY++
+				if command := strings.TrimSpace(e.Run.Command); command != "" {
+					outputLineY += strings.Count(command, "\n")
+				}
+			}
+			outputText := firstNonEmptyCommandLine(e.Run.PreviewText())
+			outputWidth := ui.PlainWidth(outputText)
+			labelWidth := ui.PlainWidth(outputLabel)
+			ctx.Runtime.Register(ui.Control{
+				ID:      "toolrun:" + e.Run.ID + ":output",
+				Rect:    ui.Rect{X: bounds.X + outputWidth + 2, Y: outputLineY, W: labelWidth, H: 1},
+				Enabled: true,
+			})
+		}
 	}
-	return e.Run.CardSurface(e.Palette, width, e.Expanded)
+	return e.Run.CardSurface(e.Palette, width, e.ExpandedOutput, e.ExpandedCommand)
 }
 
 func (m *Model) approvalToolRun(item store.Approval) ui.ToolRun {
@@ -622,6 +666,20 @@ func stringMeta(raw string) map[string]string {
 		return nil
 	}
 	return meta
+}
+
+func firstNonEmptyCommandLine(input string) string {
+	input = strings.TrimSpace(input)
+	if input == "" {
+		return ""
+	}
+	for _, line := range strings.Split(input, "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			return line
+		}
+	}
+	return ""
 }
 
 func toolRunFallbackID(tool domain.ToolKind, preview string) string {
