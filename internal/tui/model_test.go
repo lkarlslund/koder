@@ -4499,6 +4499,84 @@ func TestMouseClickTogglesToolRunExpansion(t *testing.T) {
 	}
 }
 
+func TestMouseClickTogglesEditToolRunExpansion(t *testing.T) {
+	m := Model{
+		mouseEnabled:     true,
+		currentSession:   domain.Session{ID: 1},
+		viewport:         newTranscriptViewport(80, 8),
+		parts:            map[int64][]domain.Part{},
+		expandedToolRuns: map[string]bool{},
+		palette:          theme.Resolve("tokyonight").Palette,
+	}
+
+	meta := mustMarshalMeta(t, tools.MetaWithStoredResult(map[string]string{
+		"tool":         "edit",
+		"path":         "game/sim_test.go",
+		"tool_call_id": "call_edit_1",
+	}, domain.PartKindToolOutput, domain.ToolKindEdit, tools.StoredResultStatusOK, tools.EditStoredResult{
+		Path:    "game/sim_test.go",
+		Summary: "Edited game/sim_test.go (replaced 1 occurrence)",
+		Diff:    "--- game/sim_test.go\n+++ game/sim_test.go\n@@ -1,1 +1,1 @@\n-old\n+new",
+	}))
+
+	m.messages = []domain.Message{
+		{ID: 1, Role: domain.MessageRoleTool, Summary: "edit"},
+	}
+	m.parts[1] = []domain.Part{{
+		Kind:     domain.PartKindToolOutput,
+		Body:     "Edited game/sim_test.go (replaced 1 occurrence)",
+		MetaJSON: meta,
+	}}
+
+	m.refreshViewport()
+	if strings.Contains(m.viewport.View(), "--- game/sim_test.go") {
+		t.Fatalf("expected collapsed edit output, got %q", m.viewport.View())
+	}
+	if !strings.Contains(m.viewport.View(), "Expand (4 lines)") {
+		t.Fatalf("expected expand indicator, got %q", m.viewport.View())
+	}
+
+	_ = m.viewSurface()
+	clickX := -1
+	clickY := -1
+	for _, control := range m.transcriptControls {
+		if control.ID != "toolrun:call_edit_1:output" {
+			continue
+		}
+		clickX = control.Rect.X + 1
+		clickY = control.Rect.Y
+		break
+	}
+	if clickX < 0 || clickY < 0 {
+		t.Fatalf("expected edit toolrun control to be registered, got %#v", m.transcriptControls)
+	}
+
+	updated, cmd := m.Update(ui.MouseMsg{
+		Action: ui.MouseActionPress,
+		Button: ui.MouseButtonLeft,
+		X:      clickX,
+		Y:      clickY,
+	})
+	var next Model
+	switch typed := updated.(type) {
+	case Model:
+		next = typed
+	case *Model:
+		next = *typed
+	default:
+		t.Fatalf("unexpected model type %T", updated)
+	}
+	if cmd != nil {
+		t.Fatal("expected no command from edit tool run mouse toggle")
+	}
+	if !strings.Contains(next.viewport.View(), "--- game/sim_test.go") {
+		t.Fatalf("expected expanded edit output, got %q", next.viewport.View())
+	}
+	if !strings.Contains(next.viewport.View(), "Collapse") {
+		t.Fatalf("expected collapse indicator, got %q", next.viewport.View())
+	}
+}
+
 func TestWriteToolRunUsesStoredContentForExpansion(t *testing.T) {
 	m := Model{
 		currentSession:   domain.Session{ID: 1},

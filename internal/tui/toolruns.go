@@ -601,15 +601,19 @@ func (e toolRunCardElement) Render(ctx *ui.Context, bounds ui.Rect) ui.Surface {
 		}
 		outputLabel := e.Run.OutputToggleLabel(width, e.ExpandedOutput)
 		if outputLabel != "" {
-			outputLineY := bounds.Y + 1
-			if e.Run.Tool == domain.ToolKindBash && strings.TrimSpace(e.Run.Command) != "" && e.ExpandedCommand {
-				outputLineY++
-				if command := strings.TrimSpace(e.Run.Command); command != "" {
-					outputLineY += strings.Count(command, "\n")
+			outputLineY := bounds.Y
+			outputWidth := ui.PlainWidth(e.Run.Title)
+			if e.Run.Tool == domain.ToolKindBash {
+				outputLineY = bounds.Y + 1
+				if strings.TrimSpace(e.Run.Command) != "" && e.ExpandedCommand {
+					outputLineY++
+					if command := strings.TrimSpace(e.Run.Command); command != "" {
+						outputLineY += strings.Count(command, "\n")
+					}
 				}
+				outputText := firstNonEmptyCommandLine(e.Run.PreviewText())
+				outputWidth = ui.PlainWidth(outputText)
 			}
-			outputText := firstNonEmptyCommandLine(e.Run.PreviewText())
-			outputWidth := ui.PlainWidth(outputText)
 			labelWidth := ui.PlainWidth(outputLabel)
 			ctx.Runtime.Register(ui.Control{
 				ID:      "toolrun:" + e.Run.ID + ":output",
