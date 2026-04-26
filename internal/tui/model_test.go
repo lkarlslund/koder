@@ -14,7 +14,6 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/muesli/termenv"
 
 	"github.com/lkarlslund/koder/internal/agent"
 	"github.com/lkarlslund/koder/internal/attachment"
@@ -3329,29 +3328,25 @@ func TestAltRTogglesReasoningOutput(t *testing.T) {
 }
 
 func TestRenderAgentsSidebarStatusColors(t *testing.T) {
-	prev := lipgloss.ColorProfile()
-	lipgloss.SetColorProfile(termenv.TrueColor)
-	defer lipgloss.SetColorProfile(prev)
-
 	none := Model{}.renderAgentsSidebarStatus()
-	if !strings.Contains(none, "None") || !strings.Contains(none, "38;2;224;175;104") {
-		t.Fatalf("expected yellow None status, got %q", none)
+	if none != "None" {
+		t.Fatalf("expected plain None status, got %q", none)
 	}
 
 	upToDate := Model{
 		currentSession: domain.Session{ProjectChecksum: "abc"},
 		workspace:      workspace.Status{AgentsFiles: 1, AgentsChecksum: "abc"},
 	}.renderAgentsSidebarStatus()
-	if !strings.Contains(upToDate, "Up to date") || !strings.Contains(upToDate, "38;2;152;195;121") {
-		t.Fatalf("expected green Up to date status, got %q", upToDate)
+	if upToDate != "Up to date" {
+		t.Fatalf("expected plain Up to date status, got %q", upToDate)
 	}
 
 	changed := Model{
 		currentSession: domain.Session{ProjectChecksum: "abc"},
 		workspace:      workspace.Status{AgentsFiles: 1, AgentsChecksum: "def"},
 	}.renderAgentsSidebarStatus()
-	if !strings.Contains(changed, "Changed") || !strings.Contains(changed, "38;2;224;108;117") {
-		t.Fatalf("expected red Changed status, got %q", changed)
+	if changed != "Changed" {
+		t.Fatalf("expected plain Changed status, got %q", changed)
 	}
 }
 

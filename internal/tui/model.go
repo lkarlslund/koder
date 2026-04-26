@@ -5478,14 +5478,7 @@ func (m Model) agentsStatusLabel() string {
 }
 
 func (m Model) renderAgentsSidebarStatus() string {
-	color := lipgloss.Color("#e06c75")
-	switch m.agentsStatusLabel() {
-	case "None":
-		color = lipgloss.Color("#e0af68")
-	case "Up to date":
-		color = lipgloss.Color("#98c379")
-	}
-	return lipgloss.NewStyle().Foreground(color).Render(m.agentsStatusLabel())
+	return m.agentsStatusLabel()
 }
 
 func (m Model) probeProviderCmd(draft provider.ConnectDraft) ui.Cmd {
