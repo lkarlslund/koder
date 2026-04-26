@@ -86,6 +86,8 @@ type Presentation struct {
 type Runtime struct {
 	Workdir    string
 	HTTPClient *http.Client
+	Store      *store.Store
+	SessionID  int64
 }
 
 type Tool interface {
@@ -148,6 +150,17 @@ func (r *Registry) Execute(ctx context.Context, req Request) (Result, error) {
 		return Result{}, err
 	}
 	return tool.Execute(ctx, r.runtime, req)
+}
+
+func (r *Registry) ExecuteWithSession(ctx context.Context, st *store.Store, sessionID int64, req Request) (Result, error) {
+	req, tool, err := normalizeRequest(req)
+	if err != nil {
+		return Result{}, err
+	}
+	runtime := r.runtime
+	runtime.Store = st
+	runtime.SessionID = sessionID
+	return tool.Execute(ctx, runtime, req)
 }
 
 func (r *Registry) PersistResult(ctx context.Context, st *store.Store, sessionID int64, req Request, result Result) (<-chan domain.Event, error) {

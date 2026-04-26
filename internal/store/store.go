@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/lkarlslund/koder/internal/domain"
@@ -45,6 +46,11 @@ type backend interface {
 	AddTask(context.Context, int64, string, domain.TaskStatus) (Task, error)
 	UpdateTask(context.Context, int64, domain.TaskStatus) error
 	ListTasks(context.Context, int64) ([]Task, error)
+	SetMilestonePlan(context.Context, int64, string, []Milestone) (MilestonePlan, error)
+	GetMilestonePlan(context.Context, int64) (MilestonePlan, error)
+	AddTodoItems(context.Context, int64, string, []string) ([]TodoItem, error)
+	UpdateTodoItem(context.Context, int64, domain.TodoStatus, string) (TodoItem, error)
+	ListTodos(context.Context, int64, string) ([]TodoItem, error)
 	GetApproval(context.Context, int64) (Approval, error)
 }
 
@@ -63,6 +69,32 @@ type Task struct {
 	Body      string
 	Status    domain.TaskStatus
 	CreatedAt time.Time
+}
+
+type MilestonePlan struct {
+	SessionID  int64
+	Summary    string
+	Milestones []Milestone
+	UpdatedAt  time.Time
+}
+
+type Milestone struct {
+	Ref      string
+	Title    string
+	Status   domain.MilestoneStatus
+	Notes    string
+	Position int
+}
+
+type TodoItem struct {
+	ID           int64
+	SessionID    int64
+	MilestoneRef string
+	Content      string
+	Status       domain.TodoStatus
+	Position     int
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
 }
 
 func cloneToolStates(src map[domain.ToolKind]bool) map[domain.ToolKind]bool {
@@ -203,6 +235,26 @@ func (s *Store) ListTasks(ctx context.Context, sessionID int64) ([]Task, error) 
 	return s.backend.ListTasks(ctx, sessionID)
 }
 
+func (s *Store) SetMilestonePlan(ctx context.Context, sessionID int64, summary string, milestones []Milestone) (MilestonePlan, error) {
+	return s.backend.SetMilestonePlan(ctx, sessionID, summary, milestones)
+}
+
+func (s *Store) GetMilestonePlan(ctx context.Context, sessionID int64) (MilestonePlan, error) {
+	return s.backend.GetMilestonePlan(ctx, sessionID)
+}
+
+func (s *Store) AddTodoItems(ctx context.Context, sessionID int64, milestoneRef string, contents []string) ([]TodoItem, error) {
+	return s.backend.AddTodoItems(ctx, sessionID, milestoneRef, contents)
+}
+
+func (s *Store) UpdateTodoItem(ctx context.Context, todoID int64, status domain.TodoStatus, content string) (TodoItem, error) {
+	return s.backend.UpdateTodoItem(ctx, todoID, status, content)
+}
+
+func (s *Store) ListTodos(ctx context.Context, sessionID int64, milestoneRef string) ([]TodoItem, error) {
+	return s.backend.ListTodos(ctx, sessionID, milestoneRef)
+}
+
 func (s *Store) GetApproval(ctx context.Context, approvalID int64) (Approval, error) {
 	return s.backend.GetApproval(ctx, approvalID)
 }
@@ -231,6 +283,40 @@ func (s *Store) ForkSession(ctx context.Context, sourceSessionID int64) (domain.
 	if len(source.ToolStates) != 0 {
 		if err := s.SetSessionToolStates(ctx, forked.ID, source.ToolStates); err != nil {
 			return domain.Session{}, err
+		}
+	}
+	plan, err := s.GetMilestonePlan(ctx, sourceSessionID)
+	if err != nil {
+		return domain.Session{}, err
+	}
+	if len(plan.Milestones) > 0 || strings.TrimSpace(plan.Summary) != "" {
+		if _, err := s.SetMilestonePlan(ctx, forked.ID, plan.Summary, plan.Milestones); err != nil {
+			return domain.Session{}, err
+		}
+		for _, milestone := range plan.Milestones {
+			todos, err := s.ListTodos(ctx, sourceSessionID, milestone.Ref)
+			if err != nil {
+				return domain.Session{}, err
+			}
+			if len(todos) == 0 {
+				continue
+			}
+			contents := make([]string, 0, len(todos))
+			for _, todo := range todos {
+				contents = append(contents, todo.Content)
+			}
+			created, err := s.AddTodoItems(ctx, forked.ID, milestone.Ref, contents)
+			if err != nil {
+				return domain.Session{}, err
+			}
+			for idx, todo := range todos {
+				if idx >= len(created) {
+					break
+				}
+				if _, err := s.UpdateTodoItem(ctx, created[idx].ID, todo.Status, todo.Content); err != nil {
+					return domain.Session{}, err
+				}
+			}
 		}
 	}
 	for _, msg := range messages {

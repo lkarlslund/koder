@@ -27,6 +27,7 @@ type metaRecord struct {
 	NextPartID     int64  `json:"next_part_id"`
 	NextApprovalID int64  `json:"next_approval_id"`
 	NextTaskID     int64  `json:"next_task_id"`
+	NextTodoID     int64  `json:"next_todo_id"`
 }
 
 func defaultMeta(backend string) metaRecord {
@@ -39,6 +40,7 @@ func defaultMeta(backend string) metaRecord {
 		NextPartID:     1,
 		NextApprovalID: 1,
 		NextTaskID:     1,
+		NextTodoID:     1,
 	}
 }
 

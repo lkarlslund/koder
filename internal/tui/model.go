@@ -148,7 +148,8 @@ type newSessionMsg struct {
 	messages  []domain.Message
 	parts     map[int64][]domain.Part
 	approvals []store.Approval
-	tasks     []store.Task
+	plan      store.MilestonePlan
+	todos     []store.TodoItem
 	workspace workspace.Status
 }
 
@@ -290,7 +291,8 @@ type Model struct {
 	currentSession     domain.Session
 	messages           []domain.Message
 	parts              map[int64][]domain.Part
-	tasks              []store.Task
+	milestonePlan      store.MilestonePlan
+	todos              []store.TodoItem
 	approvals          []store.Approval
 	viewport           transcriptViewport
 	transcriptControls []ui.Control
@@ -606,7 +608,8 @@ func (m Model) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 		m.messages = msg.messages
 		m.parts = msg.parts
 		m.approvals = msg.approvals
-		m.tasks = msg.tasks
+		m.milestonePlan = msg.plan
+		m.todos = msg.todos
 		m.workspace = msg.workspace
 		m.resetComposerInput()
 		m.draftAttachments = nil
@@ -1644,12 +1647,20 @@ func (m *Model) renderSidebar() string {
 		}
 	}
 	lines = append(lines, "")
-	lines = append(lines, "Tasks")
-	if len(m.tasks) == 0 {
+	lines = append(lines, "Milestones")
+	if len(m.milestonePlan.Milestones) == 0 {
 		lines = append(lines, "  none")
 	}
-	for _, item := range m.tasks {
-		lines = append(lines, fmt.Sprintf("  [%s] %s", item.Status, truncate(item.Body, 18)))
+	for _, item := range m.milestonePlan.Milestones {
+		lines = append(lines, fmt.Sprintf("  [%s] %s", item.Status, truncate(item.Title, 18)))
+	}
+	lines = append(lines, "")
+	lines = append(lines, "Todos")
+	if len(m.todos) == 0 {
+		lines = append(lines, "  none")
+	}
+	for _, item := range m.todos {
+		lines = append(lines, fmt.Sprintf("  [%s] %s", item.Status, truncate(item.Content, 18)))
 	}
 	if debugAddr := m.debugAPIAddr(); debugAddr != "" {
 		lines = append(lines, "")
@@ -2351,7 +2362,7 @@ func (m Model) loadCmd() ui.Cmd {
 		if err != nil {
 			return promptDoneMsg{err: err}
 		}
-		tasks, err := m.store.ListTasks(ctx, current.ID)
+		plan, todos, err := m.loadPlanningState(ctx, current.ID)
 		if err != nil {
 			return promptDoneMsg{err: err}
 		}
@@ -2365,7 +2376,8 @@ func (m Model) loadCmd() ui.Cmd {
 			messages:  messages,
 			parts:     parts,
 			approvals: approvals,
-			tasks:     tasks,
+			plan:      plan,
+			todos:     todos,
 			workspace: workspaceStatus,
 		}
 	}
@@ -2377,9 +2389,26 @@ type loadMsg struct {
 	messages     []domain.Message
 	parts        map[int64][]domain.Part
 	approvals    []store.Approval
-	tasks        []store.Task
+	plan         store.MilestonePlan
+	todos        []store.TodoItem
 	workspace    workspace.Status
 	preserveBusy bool
+}
+
+func (m Model) loadPlanningState(ctx context.Context, sessionID int64) (store.MilestonePlan, []store.TodoItem, error) {
+	plan, err := m.store.GetMilestonePlan(ctx, sessionID)
+	if err != nil {
+		return store.MilestonePlan{}, nil, err
+	}
+	active, ok := tools.ActiveMilestone(plan)
+	if !ok {
+		return plan, nil, nil
+	}
+	todos, err := m.store.ListTodos(ctx, sessionID, active.Ref)
+	if err != nil {
+		return store.MilestonePlan{}, nil, err
+	}
+	return plan, todos, nil
 }
 
 func (m Model) promptCmd(ctx context.Context, prompt string, drafts []attachment.Draft, refs []reference.Draft) ui.Cmd {
@@ -2448,7 +2477,8 @@ func (m Model) newSessionCmd() ui.Cmd {
 			messages:  nil,
 			parts:     map[int64][]domain.Part{},
 			approvals: nil,
-			tasks:     nil,
+			plan:      store.MilestonePlan{},
+			todos:     nil,
 			workspace: workspaceStatus,
 		}
 	}
@@ -2494,7 +2524,7 @@ func (m Model) loadSessionCmd(sessionID int64) ui.Cmd {
 		if err != nil {
 			return promptDoneMsg{err: err}
 		}
-		tasks, err := m.store.ListTasks(ctx, session.ID)
+		plan, todos, err := m.loadPlanningState(ctx, session.ID)
 		if err != nil {
 			return promptDoneMsg{err: err}
 		}
@@ -2508,7 +2538,8 @@ func (m Model) loadSessionCmd(sessionID int64) ui.Cmd {
 			messages:  messages,
 			parts:     parts,
 			approvals: approvals,
-			tasks:     tasks,
+			plan:      plan,
+			todos:     todos,
 			workspace: workspaceStatus,
 		}
 	}
@@ -2537,7 +2568,7 @@ func (m Model) agentsRefreshCmd(sessionID int64) ui.Cmd {
 		if err != nil {
 			return agentsRefreshMsg{err: err}
 		}
-		tasks, err := m.store.ListTasks(ctx, session.ID)
+		plan, todos, err := m.loadPlanningState(ctx, session.ID)
 		if err != nil {
 			return agentsRefreshMsg{err: err}
 		}
@@ -2552,7 +2583,8 @@ func (m Model) agentsRefreshCmd(sessionID int64) ui.Cmd {
 				messages:  messages,
 				parts:     parts,
 				approvals: approvals,
-				tasks:     tasks,
+				plan:      plan,
+				todos:     todos,
 				workspace: workspaceStatus,
 			},
 		}
@@ -2603,7 +2635,7 @@ func (m Model) forkSessionCmd(sourceSessionID int64) ui.Cmd {
 		if err != nil {
 			return forkSessionMsg{err: err}
 		}
-		tasks, err := m.store.ListTasks(ctx, forked.ID)
+		plan, todos, err := m.loadPlanningState(ctx, forked.ID)
 		if err != nil {
 			return forkSessionMsg{err: err}
 		}
@@ -2620,7 +2652,8 @@ func (m Model) forkSessionCmd(sourceSessionID int64) ui.Cmd {
 				messages:  messages,
 				parts:     parts,
 				approvals: approvals,
-				tasks:     tasks,
+				plan:      plan,
+				todos:     todos,
 				workspace: workspaceStatus,
 			},
 		}
@@ -2778,7 +2811,8 @@ func (m Model) UpdateLoad(msg loadMsg) Model {
 	m.messages = msg.messages
 	m.parts = msg.parts
 	m.approvals = msg.approvals
-	m.tasks = msg.tasks
+	m.milestonePlan = msg.plan
+	m.todos = msg.todos
 	m.workspace = msg.workspace
 	m.resetComposerHistory()
 	m.approvalButtons.Index = 0

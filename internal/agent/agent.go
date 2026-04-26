@@ -718,7 +718,7 @@ func (e *Engine) approve(ctx context.Context, sessionID int64, rawID string) (<-
 		return nil, err
 	}
 	e.recordLifecycle(sessionID, "tool_execution_started", item.Command, map[string]string{"tool": string(item.Tool), "approval_id": strconv.FormatInt(id, 10)})
-	result, execErr := e.registry.Execute(ctx, req)
+	result, execErr := e.registry.ExecuteWithSession(ctx, e.store, sessionID, req)
 	if execErr != nil {
 		e.recordLifecycle(sessionID, "tool_execution_failed", execErr.Error(), map[string]string{"tool": string(item.Tool), "approval_id": strconv.FormatInt(id, 10)})
 		if interruptedErr(execErr) {
@@ -1872,7 +1872,7 @@ func (e *Engine) handleModelToolCall(ctx context.Context, session domain.Session
 			},
 		}, nil
 	}
-	result, err := e.registry.Execute(ctx, req)
+	result, err := e.registry.ExecuteWithSession(ctx, e.store, sessionID, req)
 	if err != nil {
 		events, persistErr := e.persistToolFailure(ctx, sessionID, req, err)
 		if persistErr != nil {
@@ -2141,7 +2141,7 @@ func toolEnabledForSession(cfg config.Config, session domain.Session, kind domai
 
 func (e *Engine) executePreparedToolCall(ctx context.Context, sessionID int64, req tools.Request) ([]domain.Event, error) {
 	e.recordLifecycle(sessionID, "tool_execution_started", req.ContextString(), map[string]string{"tool": string(req.Tool), "tool_call_id": req.ToolCallID})
-	result, err := e.registry.Execute(ctx, req)
+	result, err := e.registry.ExecuteWithSession(ctx, e.store, sessionID, req)
 	if err != nil {
 		e.recordLifecycle(sessionID, "tool_execution_failed", err.Error(), map[string]string{"tool": string(req.Tool), "tool_call_id": req.ToolCallID})
 		events, persistErr := e.persistToolFailure(ctx, sessionID, req, err)

@@ -503,8 +503,12 @@ func (s *Server) handleSessionRoutes(w http.ResponseWriter, r *http.Request) {
 		s.handleEvents(w, r, sessionID)
 	case "approvals":
 		s.handleApprovals(w, r, sessionID)
+	case "milestones":
+		s.handleMilestones(w, r, sessionID)
 	case "tasks":
 		s.handleTasks(w, r, sessionID)
+	case "todos":
+		s.handleTodos(w, r, sessionID)
 	default:
 		http.NotFound(w, r)
 	}
@@ -526,18 +530,28 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request, sessionID
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	tasks, err := s.store.ListTasks(r.Context(), sessionID)
+	plan, err := s.store.GetMilestonePlan(r.Context(), sessionID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+	var todos []store.TodoItem
+	for _, milestone := range plan.Milestones {
+		items, err := s.store.ListTodos(r.Context(), sessionID, milestone.Ref)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		todos = append(todos, items...)
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"session":   session,
-		"messages":  messages,
-		"parts":     parts,
-		"approvals": approvals,
-		"tasks":     tasks,
-		"events":    s.recorder.Events(sessionID),
+		"session":        session,
+		"messages":       messages,
+		"parts":          parts,
+		"approvals":      approvals,
+		"milestone_plan": plan,
+		"todos":          todos,
+		"events":         s.recorder.Events(sessionID),
 	})
 }
 
@@ -589,6 +603,39 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request, sessionID i
 	writeJSON(w, http.StatusOK, map[string]any{
 		"session_id": sessionID,
 		"tasks":      tasks,
+	})
+}
+
+func (s *Server) handleMilestones(w http.ResponseWriter, r *http.Request, sessionID int64) {
+	plan, err := s.store.GetMilestonePlan(r.Context(), sessionID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"session_id": sessionID,
+		"plan":       plan,
+	})
+}
+
+func (s *Server) handleTodos(w http.ResponseWriter, r *http.Request, sessionID int64) {
+	plan, err := s.store.GetMilestonePlan(r.Context(), sessionID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	var todos []store.TodoItem
+	for _, milestone := range plan.Milestones {
+		items, err := s.store.ListTodos(r.Context(), sessionID, milestone.Ref)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		todos = append(todos, items...)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"session_id": sessionID,
+		"todos":      todos,
 	})
 }
 

@@ -6,6 +6,7 @@ import (
 	_ "github.com/lkarlslund/koder/internal/tools/edittool"
 	_ "github.com/lkarlslund/koder/internal/tools/globtool"
 	_ "github.com/lkarlslund/koder/internal/tools/greptool"
+	_ "github.com/lkarlslund/koder/internal/tools/planningtools"
 	_ "github.com/lkarlslund/koder/internal/tools/questiontool"
 	_ "github.com/lkarlslund/koder/internal/tools/readtool"
 	_ "github.com/lkarlslund/koder/internal/tools/skilltool"

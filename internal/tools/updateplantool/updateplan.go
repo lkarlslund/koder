@@ -25,7 +25,7 @@ func init() { tools.Register(tool{}) }
 func (tool) Kind() domain.ToolKind    { return domain.ToolKindUpdatePlan }
 func (tool) BypassesPermission() bool { return true }
 func (tool) Definition(tools.Runtime) (provider.ToolDefinition, bool) {
-	return tools.FunctionDefinition(domain.ToolKindUpdatePlan, "Update the current multi-step plan", `{"type":"object","properties":{"explanation":{"type":"string","description":"Optional explanation for the plan update"},"plan":{"type":"array","description":"Ordered plan steps with step and status fields","items":{"type":"object","properties":{"step":{"type":"string"},"status":{"type":"string","enum":["pending","in_progress","completed"]}},"required":["step","status"]}}},"required":["plan"],"additionalProperties":false}`), true
+	return provider.ToolDefinition{}, false
 }
 func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 	plan := strings.TrimSpace(tools.FirstArg(args, "plan", "steps"))

@@ -581,11 +581,164 @@ func (b *pebbleBackend) ListTasks(ctx context.Context, sessionID int64) ([]Task,
 	return tasks, iter.Error()
 }
 
+func (b *pebbleBackend) SetMilestonePlan(ctx context.Context, sessionID int64, summary string, milestones []Milestone) (MilestonePlan, error) {
+	if err := ensureContext(ctx); err != nil {
+		return MilestonePlan{}, err
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if _, err := b.readSession(sessionID); err != nil {
+		return MilestonePlan{}, err
+	}
+	plan := MilestonePlan{
+		SessionID:  sessionID,
+		Summary:    summary,
+		Milestones: append([]Milestone(nil), milestones...),
+		UpdatedAt:  time.Now().UTC(),
+	}
+	batch := b.db.NewBatch()
+	defer batch.Close()
+	if err := b.putMilestonePlan(batch, plan); err != nil {
+		return MilestonePlan{}, err
+	}
+	if err := batch.Commit(pebble.Sync); err != nil {
+		return MilestonePlan{}, fmt.Errorf("commit milestone plan: %w", err)
+	}
+	return plan, nil
+}
+
+func (b *pebbleBackend) GetMilestonePlan(ctx context.Context, sessionID int64) (MilestonePlan, error) {
+	if err := ensureContext(ctx); err != nil {
+		return MilestonePlan{}, err
+	}
+	plan, err := b.readMilestonePlan(sessionID)
+	if err == nil {
+		return plan, nil
+	}
+	if errors.Is(err, pebble.ErrNotFound) {
+		return MilestonePlan{SessionID: sessionID}, nil
+	}
+	if strings.Contains(err.Error(), "not found") {
+		return MilestonePlan{SessionID: sessionID}, nil
+	}
+	return MilestonePlan{}, err
+}
+
+func (b *pebbleBackend) AddTodoItems(ctx context.Context, sessionID int64, milestoneRef string, contents []string) ([]TodoItem, error) {
+	if err := ensureContext(ctx); err != nil {
+		return nil, err
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if _, err := b.readSession(sessionID); err != nil {
+		return nil, err
+	}
+	existing, err := b.listTodosLocked(sessionID, milestoneRef)
+	if err != nil {
+		return nil, err
+	}
+	meta, err := b.readMeta()
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now().UTC()
+	created := make([]TodoItem, 0, len(contents))
+	batch := b.db.NewBatch()
+	defer batch.Close()
+	for _, content := range contents {
+		item := TodoItem{
+			ID:           meta.NextTodoID,
+			SessionID:    sessionID,
+			MilestoneRef: milestoneRef,
+			Content:      content,
+			Status:       domain.TodoStatusPending,
+			Position:     len(existing) + len(created),
+			CreatedAt:    now,
+			UpdatedAt:    now,
+		}
+		meta.NextTodoID++
+		if err := b.putTodoItem(batch, item); err != nil {
+			return nil, err
+		}
+		if err := batch.Set([]byte(todoSessionIndexKey(sessionID, item.ID)), nil, nil); err != nil {
+			return nil, fmt.Errorf("index todo by session: %w", err)
+		}
+		created = append(created, item)
+	}
+	if err := b.putMeta(batch, meta); err != nil {
+		return nil, err
+	}
+	if err := batch.Commit(pebble.Sync); err != nil {
+		return nil, fmt.Errorf("commit add todos: %w", err)
+	}
+	return created, nil
+}
+
+func (b *pebbleBackend) UpdateTodoItem(ctx context.Context, todoID int64, status domain.TodoStatus, content string) (TodoItem, error) {
+	if err := ensureContext(ctx); err != nil {
+		return TodoItem{}, err
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	item, err := b.readTodoItem(todoID)
+	if err != nil {
+		return TodoItem{}, err
+	}
+	item.Status = status
+	if strings.TrimSpace(content) != "" {
+		item.Content = content
+	}
+	item.UpdatedAt = time.Now().UTC()
+	batch := b.db.NewBatch()
+	defer batch.Close()
+	if err := b.putTodoItem(batch, item); err != nil {
+		return TodoItem{}, err
+	}
+	if err := batch.Commit(pebble.Sync); err != nil {
+		return TodoItem{}, fmt.Errorf("commit todo update: %w", err)
+	}
+	return item, nil
+}
+
+func (b *pebbleBackend) ListTodos(ctx context.Context, sessionID int64, milestoneRef string) ([]TodoItem, error) {
+	if err := ensureContext(ctx); err != nil {
+		return nil, err
+	}
+	return b.listTodosLocked(sessionID, milestoneRef)
+}
+
 func (b *pebbleBackend) GetApproval(ctx context.Context, approvalID int64) (Approval, error) {
 	if err := ensureContext(ctx); err != nil {
 		return Approval{}, err
 	}
 	return b.readApproval(approvalID)
+}
+
+func (b *pebbleBackend) listTodosLocked(sessionID int64, milestoneRef string) ([]TodoItem, error) {
+	iter, err := b.db.NewIter(&pebble.IterOptions{
+		LowerBound: []byte(todoSessionIndexPrefix(sessionID)),
+		UpperBound: nextPrefix([]byte(todoSessionIndexPrefix(sessionID))),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("new todo iterator: %w", err)
+	}
+	defer iter.Close()
+	var items []TodoItem
+	for ok := iter.First(); ok; ok = iter.Next() {
+		todoID, err := todoIDFromSessionIndex(iter.Key())
+		if err != nil {
+			return nil, err
+		}
+		item, err := b.readTodoItem(todoID)
+		if err != nil {
+			return nil, err
+		}
+		if milestoneRef != "" && item.MilestoneRef != milestoneRef {
+			continue
+		}
+		items = append(items, item)
+	}
+	return items, iter.Error()
 }
 
 func (b *pebbleBackend) updateSession(ctx context.Context, sessionID int64, update func(*domain.Session)) error {
@@ -620,6 +773,12 @@ func (b *pebbleBackend) readMeta() (metaRecord, error) {
 	var meta metaRecord
 	if err := decodeJSON(cloneBytes(data), &meta); err != nil {
 		return metaRecord{}, fmt.Errorf("decode pebble metadata: %w", err)
+	}
+	if meta.NextTaskID <= 0 {
+		meta.NextTaskID = 1
+	}
+	if meta.NextTodoID <= 0 {
+		meta.NextTodoID = 1
 	}
 	return meta, nil
 }
@@ -713,6 +872,28 @@ func (b *pebbleBackend) putTask(batch *pebble.Batch, task Task) error {
 	return nil
 }
 
+func (b *pebbleBackend) putMilestonePlan(batch *pebble.Batch, plan MilestonePlan) error {
+	data, err := encodeJSON(plan)
+	if err != nil {
+		return fmt.Errorf("encode milestone plan: %w", err)
+	}
+	if err := batch.Set([]byte(milestonePlanKey(plan.SessionID)), data, nil); err != nil {
+		return fmt.Errorf("write milestone plan: %w", err)
+	}
+	return nil
+}
+
+func (b *pebbleBackend) putTodoItem(batch *pebble.Batch, item TodoItem) error {
+	data, err := encodeJSON(item)
+	if err != nil {
+		return fmt.Errorf("encode todo item: %w", err)
+	}
+	if err := batch.Set([]byte(todoItemKey(item.ID)), data, nil); err != nil {
+		return fmt.Errorf("write todo item: %w", err)
+	}
+	return nil
+}
+
 func (b *pebbleBackend) readSession(sessionID int64) (domain.Session, error) {
 	var session domain.Session
 	if err := b.readRecord(sessionKey(sessionID), &session); err != nil {
@@ -751,6 +932,22 @@ func (b *pebbleBackend) readTask(taskID int64) (Task, error) {
 		return Task{}, fmt.Errorf("get task: %w", err)
 	}
 	return task, nil
+}
+
+func (b *pebbleBackend) readMilestonePlan(sessionID int64) (MilestonePlan, error) {
+	var plan MilestonePlan
+	if err := b.readRecord(milestonePlanKey(sessionID), &plan); err != nil {
+		return MilestonePlan{}, fmt.Errorf("get milestone plan: %w", err)
+	}
+	return plan, nil
+}
+
+func (b *pebbleBackend) readTodoItem(todoID int64) (TodoItem, error) {
+	var item TodoItem
+	if err := b.readRecord(todoItemKey(todoID), &item); err != nil {
+		return TodoItem{}, fmt.Errorf("get todo item: %w", err)
+	}
+	return item, nil
 }
 
 func (b *pebbleBackend) readRecord(key string, dst any) error {
@@ -843,6 +1040,12 @@ func taskSessionIndexKey(sessionID, taskID int64) string {
 	return taskSessionIndexPrefix(sessionID) + "/" + strconvID(taskID)
 }
 func taskSessionIndexPrefix(sessionID int64) string { return "session-task/" + strconvID(sessionID) }
+func milestonePlanKey(sessionID int64) string       { return "milestone-plan/" + strconvID(sessionID) }
+func todoItemKey(id int64) string                   { return "todo/" + strconvID(id) }
+func todoSessionIndexKey(sessionID, todoID int64) string {
+	return todoSessionIndexPrefix(sessionID) + "/" + strconvID(todoID)
+}
+func todoSessionIndexPrefix(sessionID int64) string { return "session-todo/" + strconvID(sessionID) }
 func strconvID(id int64) string                     { return formatID(id) }
 
 func sessionIDFromUpdatedIndex(key []byte) (int64, error) {
@@ -881,6 +1084,14 @@ func taskIDFromSessionIndex(key []byte) (int64, error) {
 	parts := bytes.Split(key, []byte("/"))
 	if len(parts) != 3 {
 		return 0, fmt.Errorf("invalid session task index key %q", string(key))
+	}
+	return parseID(parts[2])
+}
+
+func todoIDFromSessionIndex(key []byte) (int64, error) {
+	parts := bytes.Split(key, []byte("/"))
+	if len(parts) != 3 {
+		return 0, fmt.Errorf("invalid session todo index key %q", string(key))
 	}
 	return parseID(parts[2])
 }

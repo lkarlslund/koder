@@ -127,6 +127,31 @@ type UpdatePlanStoredResult struct {
 	Steps       []PlanStoredStep `json:"steps"`
 }
 
+type MilestoneStoredItem struct {
+	Ref    string `json:"ref"`
+	Title  string `json:"title"`
+	Status string `json:"status"`
+	Notes  string `json:"notes,omitempty"`
+}
+
+type MilestonePlanStoredResult struct {
+	Summary    string                `json:"summary,omitempty"`
+	Milestones []MilestoneStoredItem `json:"milestones,omitempty"`
+}
+
+type TodoStoredItem struct {
+	ID      int64  `json:"id"`
+	Content string `json:"content"`
+	Status  string `json:"status"`
+}
+
+type TodoListStoredResult struct {
+	MilestoneRef   string           `json:"milestone_ref,omitempty"`
+	MilestoneTitle string           `json:"milestone_title,omitempty"`
+	Message        string           `json:"message,omitempty"`
+	Items          []TodoStoredItem `json:"items,omitempty"`
+}
+
 type SkillStoredResult struct {
 	Name      string `json:"name"`
 	Path      string `json:"path"`
@@ -165,21 +190,23 @@ type ErrorStoredResult struct {
 	Message string `json:"message"`
 }
 
-func (ReadStoredResult) storedResultPayload()       {}
-func (BashStoredResult) storedResultPayload()       {}
-func (ApplyPatchStoredResult) storedResultPayload() {}
-func (EditStoredResult) storedResultPayload()       {}
-func (WriteStoredResult) storedResultPayload()      {}
-func (GlobStoredResult) storedResultPayload()       {}
-func (GrepStoredResult) storedResultPayload()       {}
-func (QuestionStoredResult) storedResultPayload()   {}
-func (TaskStoredResult) storedResultPayload()       {}
-func (UpdatePlanStoredResult) storedResultPayload() {}
-func (SkillStoredResult) storedResultPayload()      {}
-func (WebFetchStoredResult) storedResultPayload()   {}
-func (WebSearchStoredResult) storedResultPayload()  {}
-func (DeniedStoredResult) storedResultPayload()     {}
-func (ErrorStoredResult) storedResultPayload()      {}
+func (ReadStoredResult) storedResultPayload()          {}
+func (BashStoredResult) storedResultPayload()          {}
+func (ApplyPatchStoredResult) storedResultPayload()    {}
+func (EditStoredResult) storedResultPayload()          {}
+func (WriteStoredResult) storedResultPayload()         {}
+func (GlobStoredResult) storedResultPayload()          {}
+func (GrepStoredResult) storedResultPayload()          {}
+func (QuestionStoredResult) storedResultPayload()      {}
+func (TaskStoredResult) storedResultPayload()          {}
+func (UpdatePlanStoredResult) storedResultPayload()    {}
+func (MilestonePlanStoredResult) storedResultPayload() {}
+func (TodoListStoredResult) storedResultPayload()      {}
+func (SkillStoredResult) storedResultPayload()         {}
+func (WebFetchStoredResult) storedResultPayload()      {}
+func (WebSearchStoredResult) storedResultPayload()     {}
+func (DeniedStoredResult) storedResultPayload()        {}
+func (ErrorStoredResult) storedResultPayload()         {}
 
 func MetaWithStoredResult(meta map[string]string, partKind domain.PartKind, tool domain.ToolKind, status StoredResultStatus, payload StoredResultPayload) map[string]string {
 	if payload == nil {
@@ -323,6 +350,10 @@ func formatStoredToolOutput(env storedResultEnvelope) (string, bool) {
 		})
 	case domain.ToolKindWebSearch:
 		return decodeAndFormat[WebSearchStoredResult](env.Payload, formatWebSearchStoredResult)
+	case domain.ToolKindMilestoneList, domain.ToolKindMilestoneWrite:
+		return decodeAndFormat[MilestonePlanStoredResult](env.Payload, formatMilestonePlanStoredResult)
+	case domain.ToolKindTodoList, domain.ToolKindTodoAddItems, domain.ToolKindTodoUpdateItem, domain.ToolKindTodoFetchNext:
+		return decodeAndFormat[TodoListStoredResult](env.Payload, formatTodoListStoredResult)
 	default:
 		return "", false
 	}
@@ -395,6 +426,47 @@ func formatUpdatePlanStoredResult(result UpdatePlanStoredResult) string {
 			continue
 		}
 		lines = append(lines, "["+strings.TrimSpace(step.Status)+"] "+strings.TrimSpace(step.Step))
+	}
+	return strings.TrimSpace(strings.Join(lines, "\n"))
+}
+
+func formatMilestonePlanStoredResult(result MilestonePlanStoredResult) string {
+	lines := make([]string, 0, len(result.Milestones)+1)
+	if summary := strings.TrimSpace(result.Summary); summary != "" {
+		lines = append(lines, summary)
+	}
+	for _, item := range result.Milestones {
+		if strings.TrimSpace(item.Title) == "" {
+			continue
+		}
+		line := "[" + strings.TrimSpace(item.Status) + "] " + strings.TrimSpace(item.Title)
+		if ref := strings.TrimSpace(item.Ref); ref != "" {
+			line += " (" + ref + ")"
+		}
+		lines = append(lines, line)
+		if notes := strings.TrimSpace(item.Notes); notes != "" {
+			lines = append(lines, notes)
+		}
+	}
+	return strings.TrimSpace(strings.Join(lines, "\n"))
+}
+
+func formatTodoListStoredResult(result TodoListStoredResult) string {
+	lines := make([]string, 0, len(result.Items)+2)
+	if title := strings.TrimSpace(result.MilestoneTitle); title != "" {
+		lines = append(lines, "Milestone: "+title)
+	}
+	if ref := strings.TrimSpace(result.MilestoneRef); ref != "" {
+		lines = append(lines, "Ref: "+ref)
+	}
+	for _, item := range result.Items {
+		if strings.TrimSpace(item.Content) == "" {
+			continue
+		}
+		lines = append(lines, fmt.Sprintf("[%s] #%d %s", strings.TrimSpace(item.Status), item.ID, strings.TrimSpace(item.Content)))
+	}
+	if message := strings.TrimSpace(result.Message); message != "" {
+		lines = append(lines, message)
 	}
 	return strings.TrimSpace(strings.Join(lines, "\n"))
 }

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -26,6 +27,8 @@ func openJSONFSBackend(stateDir string) (*jsonfsBackend, error) {
 		filepath.Join(root, "parts"),
 		filepath.Join(root, "approvals"),
 		filepath.Join(root, "tasks"),
+		filepath.Join(root, "milestone-plans"),
+		filepath.Join(root, "todos"),
 	} {
 		if err := ensureDir(dir); err != nil {
 			return nil, fmt.Errorf("create jsonfs store dir: %w", err)
@@ -490,6 +493,108 @@ func (b *jsonfsBackend) ListTasks(ctx context.Context, sessionID int64) ([]Task,
 	return tasks, nil
 }
 
+func (b *jsonfsBackend) SetMilestonePlan(ctx context.Context, sessionID int64, summary string, milestones []Milestone) (MilestonePlan, error) {
+	if err := ensureContext(ctx); err != nil {
+		return MilestonePlan{}, err
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if _, err := b.readSession(sessionID); err != nil {
+		return MilestonePlan{}, err
+	}
+	plan := MilestonePlan{
+		SessionID:  sessionID,
+		Summary:    summary,
+		Milestones: append([]Milestone(nil), milestones...),
+		UpdatedAt:  time.Now().UTC(),
+	}
+	if err := b.writeMilestonePlan(plan); err != nil {
+		return MilestonePlan{}, err
+	}
+	return plan, nil
+}
+
+func (b *jsonfsBackend) GetMilestonePlan(ctx context.Context, sessionID int64) (MilestonePlan, error) {
+	if err := ensureContext(ctx); err != nil {
+		return MilestonePlan{}, err
+	}
+	plan, err := b.readMilestonePlan(sessionID)
+	if err != nil {
+		if os.IsNotExist(err) || strings.Contains(err.Error(), "no such file or directory") {
+			return MilestonePlan{SessionID: sessionID}, nil
+		}
+		return MilestonePlan{}, err
+	}
+	return plan, nil
+}
+
+func (b *jsonfsBackend) AddTodoItems(ctx context.Context, sessionID int64, milestoneRef string, contents []string) ([]TodoItem, error) {
+	if err := ensureContext(ctx); err != nil {
+		return nil, err
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	meta, err := b.readMeta()
+	if err != nil {
+		return nil, err
+	}
+	existing, err := b.listTodosLocked(sessionID, milestoneRef)
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now().UTC()
+	items := make([]TodoItem, 0, len(contents))
+	for _, content := range contents {
+		item := TodoItem{
+			ID:           meta.NextTodoID,
+			SessionID:    sessionID,
+			MilestoneRef: milestoneRef,
+			Content:      content,
+			Status:       domain.TodoStatusPending,
+			Position:     len(existing) + len(items),
+			CreatedAt:    now,
+			UpdatedAt:    now,
+		}
+		meta.NextTodoID++
+		if err := b.writeTodoItem(item); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	if err := b.writeMeta(meta); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+func (b *jsonfsBackend) UpdateTodoItem(ctx context.Context, todoID int64, status domain.TodoStatus, content string) (TodoItem, error) {
+	if err := ensureContext(ctx); err != nil {
+		return TodoItem{}, err
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	item, err := b.readTodoItem(todoID)
+	if err != nil {
+		return TodoItem{}, err
+	}
+	item.Status = status
+	if strings.TrimSpace(content) != "" {
+		item.Content = content
+	}
+	item.UpdatedAt = time.Now().UTC()
+	if err := b.writeTodoItem(item); err != nil {
+		return TodoItem{}, err
+	}
+	return item, nil
+}
+
+func (b *jsonfsBackend) ListTodos(ctx context.Context, sessionID int64, milestoneRef string) ([]TodoItem, error) {
+	if err := ensureContext(ctx); err != nil {
+		return nil, err
+	}
+	return b.listTodosLocked(sessionID, milestoneRef)
+}
+
 func (b *jsonfsBackend) GetApproval(ctx context.Context, approvalID int64) (Approval, error) {
 	if err := ensureContext(ctx); err != nil {
 		return Approval{}, err
@@ -516,6 +621,12 @@ func (b *jsonfsBackend) readMeta() (metaRecord, error) {
 	var meta metaRecord
 	if err := readJSONFile(filepath.Join(b.root, "meta.json"), &meta); err != nil {
 		return metaRecord{}, fmt.Errorf("read jsonfs metadata: %w", err)
+	}
+	if meta.NextTaskID <= 0 {
+		meta.NextTaskID = 1
+	}
+	if meta.NextTodoID <= 0 {
+		meta.NextTodoID = 1
 	}
 	return meta, nil
 }
@@ -611,6 +722,86 @@ func (b *jsonfsBackend) writeTask(task Task) error {
 		return fmt.Errorf("write task: %w", err)
 	}
 	return nil
+}
+
+func (b *jsonfsBackend) readMilestonePlan(sessionID int64) (MilestonePlan, error) {
+	var plan MilestonePlan
+	path := filepath.Join(b.root, "milestone-plans", formatID(sessionID)+".json")
+	if err := readJSONFile(path, &plan); err != nil {
+		return MilestonePlan{}, fmt.Errorf("read milestone plan: %w", err)
+	}
+	return plan, nil
+}
+
+func (b *jsonfsBackend) writeMilestonePlan(plan MilestonePlan) error {
+	if err := writeJSONFile(filepath.Join(b.root, "milestone-plans", formatID(plan.SessionID)+".json"), plan); err != nil {
+		return fmt.Errorf("write milestone plan: %w", err)
+	}
+	return nil
+}
+
+func (b *jsonfsBackend) readTodoItem(todoID int64) (TodoItem, error) {
+	var item TodoItem
+	path := filepath.Join(b.root, "todos", formatID(todoID)+".json")
+	if err := readJSONFile(path, &item); err != nil {
+		return TodoItem{}, fmt.Errorf("read todo item: %w", err)
+	}
+	return item, nil
+}
+
+func (b *jsonfsBackend) writeTodoItem(item TodoItem) error {
+	if err := writeJSONFile(filepath.Join(b.root, "todos", formatID(item.ID)+".json"), item); err != nil {
+		return fmt.Errorf("write todo item: %w", err)
+	}
+	return nil
+}
+
+func (b *jsonfsBackend) allTodoItems() ([]TodoItem, error) {
+	paths, err := sortedJSONPaths(filepath.Join(b.root, "todos"))
+	if err != nil {
+		return nil, err
+	}
+	items := make([]TodoItem, 0, len(paths))
+	for _, path := range paths {
+		var item TodoItem
+		if err := readJSONFile(path, &item); err != nil {
+			return nil, fmt.Errorf("read todo file: %w", err)
+		}
+		items = append(items, item)
+	}
+	return items, nil
+}
+
+func (b *jsonfsBackend) listTodosLocked(sessionID int64, milestoneRef string) ([]TodoItem, error) {
+	items, err := b.allTodoItems()
+	if err != nil {
+		return nil, err
+	}
+	var todos []TodoItem
+	for _, item := range items {
+		if item.SessionID != sessionID {
+			continue
+		}
+		if milestoneRef != "" && item.MilestoneRef != milestoneRef {
+			continue
+		}
+		todos = append(todos, item)
+	}
+	slices.SortFunc(todos, func(a, c TodoItem) int {
+		switch {
+		case a.Position < c.Position:
+			return -1
+		case a.Position > c.Position:
+			return 1
+		case a.ID < c.ID:
+			return -1
+		case a.ID > c.ID:
+			return 1
+		default:
+			return 0
+		}
+	})
+	return todos, nil
 }
 
 func (b *jsonfsBackend) sessionMessages(sessionID int64) ([]domain.Message, error) {
