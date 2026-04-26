@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -23,6 +24,7 @@ func openJSONFSBackend(stateDir string) (*jsonfsBackend, error) {
 	for _, dir := range []string{
 		root,
 		filepath.Join(root, "sessions"),
+		filepath.Join(root, "chats"),
 		filepath.Join(root, "messages"),
 		filepath.Join(root, "parts"),
 		filepath.Join(root, "approvals"),
@@ -92,7 +94,118 @@ func (b *jsonfsBackend) CreateSession(ctx context.Context, title, providerID, mo
 	if err := b.writeSession(session); err != nil {
 		return domain.Session{}, err
 	}
+	chat := domain.Chat{
+		ID:           meta.NextChatID,
+		SessionID:    session.ID,
+		Title:        "Main",
+		WorkflowRole: domain.WorkflowRoleGeneral,
+		ToolStates:   map[domain.ToolKind]bool{},
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}
+	meta.NextChatID++
+	if err := b.writeMeta(meta); err != nil {
+		return domain.Session{}, err
+	}
+	if err := b.writeChat(chat); err != nil {
+		return domain.Session{}, err
+	}
 	return session, nil
+}
+
+func (b *jsonfsBackend) CreateChat(ctx context.Context, sessionID int64, title string, role domain.WorkflowRole, parentChatID *int64) (domain.Chat, error) {
+	if err := ensureContext(ctx); err != nil {
+		return domain.Chat{}, err
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	meta, err := b.readMeta()
+	if err != nil {
+		return domain.Chat{}, err
+	}
+	if _, err := b.readSession(sessionID); err != nil {
+		return domain.Chat{}, err
+	}
+	now := time.Now().UTC()
+	chat := domain.Chat{
+		ID:           meta.NextChatID,
+		SessionID:    sessionID,
+		ParentChatID: parentChatID,
+		Title:        strings.TrimSpace(title),
+		WorkflowRole: role,
+		ToolStates:   map[domain.ToolKind]bool{},
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}
+	if chat.Title == "" {
+		chat.Title = "Chat " + strconv.FormatInt(chat.ID, 10)
+	}
+	meta.NextChatID++
+	if err := b.writeMeta(meta); err != nil {
+		return domain.Chat{}, err
+	}
+	if err := b.writeChat(chat); err != nil {
+		return domain.Chat{}, err
+	}
+	return chat, nil
+}
+
+func (b *jsonfsBackend) ListChats(ctx context.Context, sessionID int64) ([]domain.Chat, error) {
+	if err := ensureContext(ctx); err != nil {
+		return nil, err
+	}
+	if _, err := b.readSession(sessionID); err != nil {
+		return nil, err
+	}
+	paths, err := sortedJSONPaths(filepath.Join(b.root, "chats"))
+	if err != nil {
+		return nil, err
+	}
+	var chats []domain.Chat
+	for _, path := range paths {
+		var chat domain.Chat
+		if err := readJSONFile(path, &chat); err != nil {
+			return nil, err
+		}
+		if chat.SessionID == sessionID {
+			chats = append(chats, chat)
+		}
+	}
+	slices.SortFunc(chats, func(a, c domain.Chat) int {
+		if a.UpdatedAt.Equal(c.UpdatedAt) {
+			switch {
+			case a.ID > c.ID:
+				return -1
+			case a.ID < c.ID:
+				return 1
+			default:
+				return 0
+			}
+		}
+		if a.UpdatedAt.After(c.UpdatedAt) {
+			return -1
+		}
+		return 1
+	})
+	return chats, nil
+}
+
+func (b *jsonfsBackend) GetChat(ctx context.Context, chatID int64) (domain.Chat, error) {
+	if err := ensureContext(ctx); err != nil {
+		return domain.Chat{}, err
+	}
+	return b.readChat(chatID)
+}
+
+func (b *jsonfsBackend) DefaultChat(ctx context.Context, sessionID int64) (domain.Chat, error) {
+	chats, err := b.ListChats(ctx, sessionID)
+	if err != nil {
+		return domain.Chat{}, err
+	}
+	if len(chats) == 0 {
+		return domain.Chat{}, fmt.Errorf("no chat for session %d", sessionID)
+	}
+	return chats[len(chats)-1], nil
 }
 
 func (b *jsonfsBackend) ListSessions(ctx context.Context) ([]domain.Session, error) {
@@ -218,6 +331,14 @@ func (b *jsonfsBackend) SetSessionModel(ctx context.Context, sessionID int64, pr
 }
 
 func (b *jsonfsBackend) AddMessage(ctx context.Context, sessionID int64, role domain.MessageRole, summary string) (domain.Message, error) {
+	chat, err := b.DefaultChat(ctx, sessionID)
+	if err != nil {
+		return domain.Message{}, err
+	}
+	return b.AddChatMessage(ctx, chat.ID, role, summary)
+}
+
+func (b *jsonfsBackend) AddChatMessage(ctx context.Context, chatID int64, role domain.MessageRole, summary string) (domain.Message, error) {
 	if err := ensureContext(ctx); err != nil {
 		return domain.Message{}, err
 	}
@@ -228,20 +349,28 @@ func (b *jsonfsBackend) AddMessage(ctx context.Context, sessionID int64, role do
 	if err != nil {
 		return domain.Message{}, err
 	}
-	session, err := b.readSession(sessionID)
+	chat, err := b.readChat(chatID)
+	if err != nil {
+		return domain.Message{}, err
+	}
+	session, err := b.readSession(chat.SessionID)
 	if err != nil {
 		return domain.Message{}, err
 	}
 	now := time.Now().UTC()
 	message := domain.Message{
 		ID:        meta.NextMessageID,
-		SessionID: sessionID,
+		SessionID: chat.SessionID,
+		ChatID:    chatID,
 		Role:      role,
 		Summary:   summary,
 		CreatedAt: now,
 	}
 	meta.NextMessageID++
 	session.UpdatedAt = now
+	session.LastMessage = summary
+	chat.UpdatedAt = now
+	chat.LastMessage = summary
 
 	if err := b.writeMeta(meta); err != nil {
 		return domain.Message{}, err
@@ -250,6 +379,9 @@ func (b *jsonfsBackend) AddMessage(ctx context.Context, sessionID int64, role do
 		return domain.Message{}, err
 	}
 	if err := b.writeSession(session); err != nil {
+		return domain.Message{}, err
+	}
+	if err := b.writeChat(chat); err != nil {
 		return domain.Message{}, err
 	}
 	return message, nil
@@ -318,10 +450,18 @@ func (b *jsonfsBackend) UpdatePartMetaJSON(ctx context.Context, partID int64, me
 }
 
 func (b *jsonfsBackend) PartsForSession(ctx context.Context, sessionID int64) ([]domain.Message, map[int64][]domain.Part, error) {
+	chat, err := b.DefaultChat(ctx, sessionID)
+	if err != nil {
+		return nil, nil, err
+	}
+	return b.PartsForChat(ctx, chat.ID)
+}
+
+func (b *jsonfsBackend) PartsForChat(ctx context.Context, chatID int64) ([]domain.Message, map[int64][]domain.Part, error) {
 	if err := ensureContext(ctx); err != nil {
 		return nil, nil, err
 	}
-	messages, err := b.sessionMessages(sessionID)
+	messages, err := b.chatMessages(chatID)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -349,6 +489,14 @@ func (b *jsonfsBackend) PartsForSession(ctx context.Context, sessionID int64) ([
 }
 
 func (b *jsonfsBackend) CreateApproval(ctx context.Context, sessionID int64, tool domain.ToolKind, command string) (Approval, error) {
+	chat, err := b.DefaultChat(ctx, sessionID)
+	if err != nil {
+		return Approval{}, err
+	}
+	return b.CreateChatApproval(ctx, chat.ID, tool, command)
+}
+
+func (b *jsonfsBackend) CreateChatApproval(ctx context.Context, chatID int64, tool domain.ToolKind, command string) (Approval, error) {
 	if err := ensureContext(ctx); err != nil {
 		return Approval{}, err
 	}
@@ -359,12 +507,14 @@ func (b *jsonfsBackend) CreateApproval(ctx context.Context, sessionID int64, too
 	if err != nil {
 		return Approval{}, err
 	}
-	if _, err := b.readSession(sessionID); err != nil {
+	chat, err := b.readChat(chatID)
+	if err != nil {
 		return Approval{}, err
 	}
 	approval := Approval{
 		ID:        meta.NextApprovalID,
-		SessionID: sessionID,
+		SessionID: chat.SessionID,
+		ChatID:    chatID,
 		Tool:      tool,
 		Command:   command,
 		Status:    domain.ApprovalStatusPending,
@@ -395,6 +545,14 @@ func (b *jsonfsBackend) UpdateApproval(ctx context.Context, approvalID int64, st
 }
 
 func (b *jsonfsBackend) PendingApprovals(ctx context.Context, sessionID int64) ([]Approval, error) {
+	chat, err := b.DefaultChat(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	return b.PendingApprovalsForChat(ctx, chat.ID)
+}
+
+func (b *jsonfsBackend) PendingApprovalsForChat(ctx context.Context, chatID int64) ([]Approval, error) {
 	if err := ensureContext(ctx); err != nil {
 		return nil, err
 	}
@@ -404,7 +562,7 @@ func (b *jsonfsBackend) PendingApprovals(ctx context.Context, sessionID int64) (
 	}
 	var approvals []Approval
 	for _, approval := range items {
-		if approval.SessionID == sessionID && approval.Status == domain.ApprovalStatusPending {
+		if approval.ChatID == chatID && approval.Status == domain.ApprovalStatusPending {
 			approvals = append(approvals, approval)
 		}
 	}
@@ -625,6 +783,9 @@ func (b *jsonfsBackend) readMeta() (metaRecord, error) {
 	if meta.NextTaskID <= 0 {
 		meta.NextTaskID = 1
 	}
+	if meta.NextChatID <= 0 {
+		meta.NextChatID = 1
+	}
 	if meta.NextTodoID <= 0 {
 		meta.NextTodoID = 1
 	}
@@ -733,6 +894,22 @@ func (b *jsonfsBackend) readMilestonePlan(sessionID int64) (MilestonePlan, error
 	return plan, nil
 }
 
+func (b *jsonfsBackend) readChat(chatID int64) (domain.Chat, error) {
+	var chat domain.Chat
+	path := filepath.Join(b.root, "chats", formatID(chatID)+".json")
+	if err := readJSONFile(path, &chat); err != nil {
+		return domain.Chat{}, fmt.Errorf("read chat: %w", err)
+	}
+	return chat, nil
+}
+
+func (b *jsonfsBackend) writeChat(chat domain.Chat) error {
+	if err := writeJSONFile(filepath.Join(b.root, "chats", formatID(chat.ID)+".json"), chat); err != nil {
+		return fmt.Errorf("write chat: %w", err)
+	}
+	return nil
+}
+
 func (b *jsonfsBackend) writeMilestonePlan(plan MilestonePlan) error {
 	if err := writeJSONFile(filepath.Join(b.root, "milestone-plans", formatID(plan.SessionID)+".json"), plan); err != nil {
 		return fmt.Errorf("write milestone plan: %w", err)
@@ -823,6 +1000,37 @@ func (b *jsonfsBackend) sessionMessages(sessionID int64) ([]domain.Message, erro
 			return nil, fmt.Errorf("read message file: %w", err)
 		}
 		if message.SessionID == sessionID {
+			messages = append(messages, message)
+		}
+	}
+	slices.SortFunc(messages, func(a, c domain.Message) int {
+		switch {
+		case a.ID < c.ID:
+			return -1
+		case a.ID > c.ID:
+			return 1
+		default:
+			return 0
+		}
+	})
+	return messages, nil
+}
+
+func (b *jsonfsBackend) chatMessages(chatID int64) ([]domain.Message, error) {
+	if _, err := b.readChat(chatID); err != nil {
+		return nil, err
+	}
+	paths, err := sortedJSONPaths(filepath.Join(b.root, "messages"))
+	if err != nil {
+		return nil, fmt.Errorf("list message files: %w", err)
+	}
+	var messages []domain.Message
+	for _, path := range paths {
+		var message domain.Message
+		if err := readJSONFile(path, &message); err != nil {
+			return nil, fmt.Errorf("read message file: %w", err)
+		}
+		if message.ChatID == chatID {
 			messages = append(messages, message)
 		}
 	}

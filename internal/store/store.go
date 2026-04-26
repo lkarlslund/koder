@@ -28,6 +28,10 @@ type backend interface {
 	CreateSession(context.Context, string, string, string, *int64) (domain.Session, error)
 	ListSessions(context.Context) ([]domain.Session, error)
 	GetSession(context.Context, int64) (domain.Session, error)
+	CreateChat(context.Context, int64, string, domain.WorkflowRole, *int64) (domain.Chat, error)
+	ListChats(context.Context, int64) ([]domain.Chat, error)
+	GetChat(context.Context, int64) (domain.Chat, error)
+	DefaultChat(context.Context, int64) (domain.Chat, error)
 	UpdateSessionWorkspace(context.Context, int64, string, string) error
 	SetSessionPermissionProfile(context.Context, int64, string) error
 	SetSessionToolStates(context.Context, int64, map[domain.ToolKind]bool) error
@@ -36,13 +40,17 @@ type backend interface {
 	CountMessagesByRole(context.Context, int64, domain.MessageRole) (int, error)
 	SetSessionModel(context.Context, int64, string, string) error
 	AddMessage(context.Context, int64, domain.MessageRole, string) (domain.Message, error)
+	AddChatMessage(context.Context, int64, domain.MessageRole, string) (domain.Message, error)
 	UpdateMessageSummary(context.Context, int64, string) error
 	AddPart(context.Context, int64, domain.PartKind, string, string) (domain.Part, error)
 	UpdatePartMetaJSON(context.Context, int64, string) error
 	PartsForSession(context.Context, int64) ([]domain.Message, map[int64][]domain.Part, error)
+	PartsForChat(context.Context, int64) ([]domain.Message, map[int64][]domain.Part, error)
 	CreateApproval(context.Context, int64, domain.ToolKind, string) (Approval, error)
+	CreateChatApproval(context.Context, int64, domain.ToolKind, string) (Approval, error)
 	UpdateApproval(context.Context, int64, domain.ApprovalStatus) error
 	PendingApprovals(context.Context, int64) ([]Approval, error)
+	PendingApprovalsForChat(context.Context, int64) ([]Approval, error)
 	AddTask(context.Context, int64, string, domain.TaskStatus) (Task, error)
 	UpdateTask(context.Context, int64, domain.TaskStatus) error
 	ListTasks(context.Context, int64) ([]Task, error)
@@ -57,6 +65,7 @@ type backend interface {
 type Approval struct {
 	ID        int64
 	SessionID int64
+	ChatID    int64
 	Tool      domain.ToolKind
 	Command   string
 	Status    domain.ApprovalStatus
@@ -146,12 +155,28 @@ func (s *Store) CreateSession(ctx context.Context, title, providerID, modelID st
 	return s.backend.CreateSession(ctx, title, providerID, modelID, parentID)
 }
 
+func (s *Store) CreateChat(ctx context.Context, sessionID int64, title string, role domain.WorkflowRole, parentChatID *int64) (domain.Chat, error) {
+	return s.backend.CreateChat(ctx, sessionID, title, role, parentChatID)
+}
+
 func (s *Store) ListSessions(ctx context.Context) ([]domain.Session, error) {
 	return s.backend.ListSessions(ctx)
 }
 
 func (s *Store) GetSession(ctx context.Context, sessionID int64) (domain.Session, error) {
 	return s.backend.GetSession(ctx, sessionID)
+}
+
+func (s *Store) ListChats(ctx context.Context, sessionID int64) ([]domain.Chat, error) {
+	return s.backend.ListChats(ctx, sessionID)
+}
+
+func (s *Store) GetChat(ctx context.Context, chatID int64) (domain.Chat, error) {
+	return s.backend.GetChat(ctx, chatID)
+}
+
+func (s *Store) DefaultChat(ctx context.Context, sessionID int64) (domain.Chat, error) {
+	return s.backend.DefaultChat(ctx, sessionID)
 }
 
 func (s *Store) UpdateSessionWorkspace(ctx context.Context, sessionID int64, cwd, projectRoot string) error {
@@ -195,6 +220,10 @@ func (s *Store) AddMessage(ctx context.Context, sessionID int64, role domain.Mes
 	return s.backend.AddMessage(ctx, sessionID, role, summary)
 }
 
+func (s *Store) AddChatMessage(ctx context.Context, chatID int64, role domain.MessageRole, summary string) (domain.Message, error) {
+	return s.backend.AddChatMessage(ctx, chatID, role, summary)
+}
+
 func (s *Store) UpdateMessageSummary(ctx context.Context, messageID int64, summary string) error {
 	return s.backend.UpdateMessageSummary(ctx, messageID, summary)
 }
@@ -211,8 +240,16 @@ func (s *Store) PartsForSession(ctx context.Context, sessionID int64) ([]domain.
 	return s.backend.PartsForSession(ctx, sessionID)
 }
 
+func (s *Store) PartsForChat(ctx context.Context, chatID int64) ([]domain.Message, map[int64][]domain.Part, error) {
+	return s.backend.PartsForChat(ctx, chatID)
+}
+
 func (s *Store) CreateApproval(ctx context.Context, sessionID int64, tool domain.ToolKind, command string) (Approval, error) {
 	return s.backend.CreateApproval(ctx, sessionID, tool, command)
+}
+
+func (s *Store) CreateChatApproval(ctx context.Context, chatID int64, tool domain.ToolKind, command string) (Approval, error) {
+	return s.backend.CreateChatApproval(ctx, chatID, tool, command)
 }
 
 func (s *Store) UpdateApproval(ctx context.Context, approvalID int64, status domain.ApprovalStatus) error {
@@ -221,6 +258,10 @@ func (s *Store) UpdateApproval(ctx context.Context, approvalID int64, status dom
 
 func (s *Store) PendingApprovals(ctx context.Context, sessionID int64) ([]Approval, error) {
 	return s.backend.PendingApprovals(ctx, sessionID)
+}
+
+func (s *Store) PendingApprovalsForChat(ctx context.Context, chatID int64) ([]Approval, error) {
+	return s.backend.PendingApprovalsForChat(ctx, chatID)
 }
 
 func (s *Store) AddTask(ctx context.Context, sessionID int64, body string, status domain.TaskStatus) (Task, error) {

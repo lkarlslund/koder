@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"log"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -102,10 +104,213 @@ func (b *pebbleBackend) CreateSession(ctx context.Context, title, providerID, mo
 	}
 	meta.NextSessionID++
 
-	if err := b.writeSessionBatch(meta, nil, session); err != nil {
+	batch := b.db.NewBatch()
+	defer batch.Close()
+	if err := b.putMeta(batch, meta); err != nil {
 		return domain.Session{}, err
 	}
+	if err := b.putSession(batch, nil, &session); err != nil {
+		return domain.Session{}, err
+	}
+	chat := domain.Chat{
+		ID:           meta.NextChatID,
+		SessionID:    session.ID,
+		Title:        "Main",
+		WorkflowRole: domain.WorkflowRoleGeneral,
+		ToolStates:   map[domain.ToolKind]bool{},
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}
+	meta.NextChatID++
+	if err := b.putMeta(batch, meta); err != nil {
+		return domain.Session{}, err
+	}
+	if err := b.putChat(batch, chat); err != nil {
+		return domain.Session{}, err
+	}
+	if err := batch.Set([]byte(chatSessionIndexKey(session.ID, chat.ID)), nil, nil); err != nil {
+		return domain.Session{}, fmt.Errorf("index chat by session: %w", err)
+	}
+	if err := batch.Commit(pebble.Sync); err != nil {
+		return domain.Session{}, fmt.Errorf("commit create session: %w", err)
+	}
 	return session, nil
+}
+
+func (b *pebbleBackend) CreateChat(ctx context.Context, sessionID int64, title string, role domain.WorkflowRole, parentChatID *int64) (domain.Chat, error) {
+	if err := ensureContext(ctx); err != nil {
+		return domain.Chat{}, err
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	meta, err := b.readMeta()
+	if err != nil {
+		return domain.Chat{}, err
+	}
+	if _, err := b.readSession(sessionID); err != nil {
+		return domain.Chat{}, err
+	}
+	now := time.Now().UTC()
+	chat := domain.Chat{
+		ID:           meta.NextChatID,
+		SessionID:    sessionID,
+		ParentChatID: parentChatID,
+		Title:        strings.TrimSpace(title),
+		WorkflowRole: role,
+		ToolStates:   map[domain.ToolKind]bool{},
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}
+	if chat.Title == "" {
+		chat.Title = "Chat " + strconv.FormatInt(chat.ID, 10)
+	}
+	meta.NextChatID++
+	batch := b.db.NewBatch()
+	defer batch.Close()
+	if err := b.putMeta(batch, meta); err != nil {
+		return domain.Chat{}, err
+	}
+	if err := b.putChat(batch, chat); err != nil {
+		return domain.Chat{}, err
+	}
+	if err := batch.Set([]byte(chatSessionIndexKey(sessionID, chat.ID)), nil, nil); err != nil {
+		return domain.Chat{}, fmt.Errorf("index chat by session: %w", err)
+	}
+	if err := batch.Commit(pebble.Sync); err != nil {
+		return domain.Chat{}, fmt.Errorf("commit create chat: %w", err)
+	}
+	return chat, nil
+}
+
+func (b *pebbleBackend) ListChats(ctx context.Context, sessionID int64) ([]domain.Chat, error) {
+	if err := ensureContext(ctx); err != nil {
+		return nil, err
+	}
+	if _, err := b.readSession(sessionID); err != nil {
+		return nil, err
+	}
+	iter, err := b.db.NewIter(&pebble.IterOptions{
+		LowerBound: []byte(chatSessionIndexPrefix(sessionID)),
+		UpperBound: nextPrefix([]byte(chatSessionIndexPrefix(sessionID))),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("new chat iterator: %w", err)
+	}
+	defer iter.Close()
+	var chats []domain.Chat
+	for ok := iter.First(); ok; ok = iter.Next() {
+		chatID, err := chatIDFromSessionIndex(iter.Key())
+		if err != nil {
+			return nil, err
+		}
+		chat, err := b.readChat(chatID)
+		if err != nil {
+			return nil, err
+		}
+		chats = append(chats, chat)
+	}
+	slices.SortFunc(chats, func(a, c domain.Chat) int {
+		if a.UpdatedAt.Equal(c.UpdatedAt) {
+			switch {
+			case a.ID > c.ID:
+				return -1
+			case a.ID < c.ID:
+				return 1
+			default:
+				return 0
+			}
+		}
+		if a.UpdatedAt.After(c.UpdatedAt) {
+			return -1
+		}
+		return 1
+	})
+	return chats, iter.Error()
+}
+
+func (b *pebbleBackend) GetChat(ctx context.Context, chatID int64) (domain.Chat, error) {
+	if err := ensureContext(ctx); err != nil {
+		return domain.Chat{}, err
+	}
+	return b.readChat(chatID)
+}
+
+func (b *pebbleBackend) DefaultChat(ctx context.Context, sessionID int64) (domain.Chat, error) {
+	chats, err := b.ListChats(ctx, sessionID)
+	if err != nil {
+		return domain.Chat{}, err
+	}
+	if len(chats) == 0 {
+		return domain.Chat{}, fmt.Errorf("no chat for session %d", sessionID)
+	}
+	return chats[len(chats)-1], nil
+}
+
+func (b *pebbleBackend) AddMessage(ctx context.Context, sessionID int64, role domain.MessageRole, summary string) (domain.Message, error) {
+	chat, err := b.DefaultChat(ctx, sessionID)
+	if err != nil {
+		return domain.Message{}, err
+	}
+	return b.AddChatMessage(ctx, chat.ID, role, summary)
+}
+
+func (b *pebbleBackend) AddChatMessage(ctx context.Context, chatID int64, role domain.MessageRole, summary string) (domain.Message, error) {
+	if err := ensureContext(ctx); err != nil {
+		return domain.Message{}, err
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	meta, err := b.readMeta()
+	if err != nil {
+		return domain.Message{}, err
+	}
+	chat, err := b.readChat(chatID)
+	if err != nil {
+		return domain.Message{}, err
+	}
+	session, err := b.readSession(chat.SessionID)
+	if err != nil {
+		return domain.Message{}, err
+	}
+	previousSession := session
+	now := time.Now().UTC()
+	message := domain.Message{
+		ID:        meta.NextMessageID,
+		SessionID: chat.SessionID,
+		ChatID:    chatID,
+		Role:      role,
+		Summary:   summary,
+		CreatedAt: now,
+	}
+	meta.NextMessageID++
+
+	session.UpdatedAt = now
+	session.LastMessage = summary
+	chat.UpdatedAt = now
+	chat.LastMessage = summary
+
+	batch := b.db.NewBatch()
+	defer batch.Close()
+	if err := b.putMeta(batch, meta); err != nil {
+		return domain.Message{}, err
+	}
+	if err := b.putMessage(batch, message); err != nil {
+		return domain.Message{}, err
+	}
+	if err := batch.Set([]byte(messageChatIndexKey(chatID, message.ID)), nil, nil); err != nil {
+		return domain.Message{}, fmt.Errorf("index message by chat: %w", err)
+	}
+	if err := b.putSession(batch, &previousSession, &session); err != nil {
+		return domain.Message{}, err
+	}
+	if err := b.putChat(batch, chat); err != nil {
+		return domain.Message{}, err
+	}
+	if err := batch.Commit(pebble.Sync); err != nil {
+		return domain.Message{}, fmt.Errorf("commit add message: %w", err)
+	}
+	return message, nil
 }
 
 func (b *pebbleBackend) ListSessions(ctx context.Context) ([]domain.Session, error) {
@@ -209,55 +414,6 @@ func (b *pebbleBackend) SetSessionModel(ctx context.Context, sessionID int64, pr
 	})
 }
 
-func (b *pebbleBackend) AddMessage(ctx context.Context, sessionID int64, role domain.MessageRole, summary string) (domain.Message, error) {
-	if err := ensureContext(ctx); err != nil {
-		return domain.Message{}, err
-	}
-	b.mu.Lock()
-	defer b.mu.Unlock()
-
-	meta, err := b.readMeta()
-	if err != nil {
-		return domain.Message{}, err
-	}
-	session, err := b.readSession(sessionID)
-	if err != nil {
-		return domain.Message{}, err
-	}
-	previousSession := session
-	now := time.Now().UTC()
-	message := domain.Message{
-		ID:        meta.NextMessageID,
-		SessionID: sessionID,
-		Role:      role,
-		Summary:   summary,
-		CreatedAt: now,
-	}
-	meta.NextMessageID++
-
-	session.UpdatedAt = now
-	session.LastMessage = summary
-
-	batch := b.db.NewBatch()
-	defer batch.Close()
-	if err := b.putMeta(batch, meta); err != nil {
-		return domain.Message{}, err
-	}
-	if err := b.putMessage(batch, message); err != nil {
-		return domain.Message{}, err
-	}
-	if err := batch.Set([]byte(messageSessionIndexKey(sessionID, message.ID)), nil, nil); err != nil {
-		return domain.Message{}, fmt.Errorf("index message by session: %w", err)
-	}
-	if err := b.putSession(batch, &previousSession, &session); err != nil {
-		return domain.Message{}, err
-	}
-	if err := batch.Commit(pebble.Sync); err != nil {
-		return domain.Message{}, fmt.Errorf("commit add message: %w", err)
-	}
-	return message, nil
-}
-
 func (b *pebbleBackend) UpdateMessageSummary(ctx context.Context, messageID int64, summary string) error {
 	if err := ensureContext(ctx); err != nil {
 		return err
@@ -273,6 +429,10 @@ func (b *pebbleBackend) UpdateMessageSummary(ctx context.Context, messageID int6
 	if err != nil {
 		return err
 	}
+	chat, err := b.readChat(message.ChatID)
+	if err != nil {
+		return err
+	}
 
 	oldSummary := message.Summary
 	message.Summary = summary
@@ -284,6 +444,12 @@ func (b *pebbleBackend) UpdateMessageSummary(ctx context.Context, messageID int6
 	if session.LastMessage == "" || session.LastMessage == oldSummary {
 		session.LastMessage = summary
 		if err := b.putSession(batch, &session, &session); err != nil {
+			return err
+		}
+	}
+	if chat.LastMessage == "" || chat.LastMessage == oldSummary {
+		chat.LastMessage = summary
+		if err := b.putChat(batch, chat); err != nil {
 			return err
 		}
 	}
@@ -354,26 +520,32 @@ func (b *pebbleBackend) UpdatePartMetaJSON(ctx context.Context, partID int64, me
 }
 
 func (b *pebbleBackend) PartsForSession(ctx context.Context, sessionID int64) ([]domain.Message, map[int64][]domain.Part, error) {
+	chat, err := b.DefaultChat(ctx, sessionID)
+	if err != nil {
+		return nil, nil, err
+	}
+	return b.PartsForChat(ctx, chat.ID)
+}
+
+func (b *pebbleBackend) PartsForChat(ctx context.Context, chatID int64) ([]domain.Message, map[int64][]domain.Part, error) {
 	if err := ensureContext(ctx); err != nil {
 		return nil, nil, err
 	}
-	if _, err := b.readSession(sessionID); err != nil {
+	if _, err := b.readChat(chatID); err != nil {
 		return nil, nil, err
 	}
-
 	iter, err := b.db.NewIter(&pebble.IterOptions{
-		LowerBound: []byte(messageSessionIndexPrefix(sessionID)),
-		UpperBound: nextPrefix([]byte(messageSessionIndexPrefix(sessionID))),
+		LowerBound: []byte(messageChatIndexPrefix(chatID)),
+		UpperBound: nextPrefix([]byte(messageChatIndexPrefix(chatID))),
 	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("new message iterator: %w", err)
 	}
 	defer iter.Close()
-
 	var messages []domain.Message
 	partsByMessage := make(map[int64][]domain.Part)
 	for ok := iter.First(); ok; ok = iter.Next() {
-		messageID, err := messageIDFromSessionIndex(iter.Key())
+		messageID, err := messageIDFromChatIndex(iter.Key())
 		if err != nil {
 			return nil, nil, err
 		}
@@ -392,6 +564,14 @@ func (b *pebbleBackend) PartsForSession(ctx context.Context, sessionID int64) ([
 }
 
 func (b *pebbleBackend) CreateApproval(ctx context.Context, sessionID int64, tool domain.ToolKind, command string) (Approval, error) {
+	chat, err := b.DefaultChat(ctx, sessionID)
+	if err != nil {
+		return Approval{}, err
+	}
+	return b.CreateChatApproval(ctx, chat.ID, tool, command)
+}
+
+func (b *pebbleBackend) CreateChatApproval(ctx context.Context, chatID int64, tool domain.ToolKind, command string) (Approval, error) {
 	if err := ensureContext(ctx); err != nil {
 		return Approval{}, err
 	}
@@ -402,12 +582,14 @@ func (b *pebbleBackend) CreateApproval(ctx context.Context, sessionID int64, too
 	if err != nil {
 		return Approval{}, err
 	}
-	if _, err := b.readSession(sessionID); err != nil {
+	chat, err := b.readChat(chatID)
+	if err != nil {
 		return Approval{}, err
 	}
 	approval := Approval{
 		ID:        meta.NextApprovalID,
-		SessionID: sessionID,
+		SessionID: chat.SessionID,
+		ChatID:    chatID,
 		Tool:      tool,
 		Command:   command,
 		Status:    domain.ApprovalStatusPending,
@@ -423,10 +605,10 @@ func (b *pebbleBackend) CreateApproval(ctx context.Context, sessionID int64, too
 	if err := b.putApproval(batch, approval); err != nil {
 		return Approval{}, err
 	}
-	if err := batch.Set([]byte(approvalSessionIndexKey(sessionID, approval.ID)), nil, nil); err != nil {
-		return Approval{}, fmt.Errorf("index approval by session: %w", err)
+	if err := batch.Set([]byte(approvalChatIndexKey(chatID, approval.ID)), nil, nil); err != nil {
+		return Approval{}, fmt.Errorf("index approval by chat: %w", err)
 	}
-	if err := batch.Set([]byte(approvalPendingIndexKey(sessionID, approval.ID)), nil, nil); err != nil {
+	if err := batch.Set([]byte(approvalPendingIndexKey(chatID, approval.ID)), nil, nil); err != nil {
 		return Approval{}, fmt.Errorf("index pending approval: %w", err)
 	}
 	if err := batch.Commit(pebble.Sync); err != nil {
@@ -453,7 +635,7 @@ func (b *pebbleBackend) UpdateApproval(ctx context.Context, approvalID int64, st
 	if err := b.putApproval(batch, approval); err != nil {
 		return err
 	}
-	pendingKey := []byte(approvalPendingIndexKey(approval.SessionID, approval.ID))
+	pendingKey := []byte(approvalPendingIndexKey(approval.ChatID, approval.ID))
 	if status == domain.ApprovalStatusPending {
 		if err := batch.Set(pendingKey, nil, nil); err != nil {
 			return fmt.Errorf("restore pending approval index: %w", err)
@@ -465,12 +647,20 @@ func (b *pebbleBackend) UpdateApproval(ctx context.Context, approvalID int64, st
 }
 
 func (b *pebbleBackend) PendingApprovals(ctx context.Context, sessionID int64) ([]Approval, error) {
+	chat, err := b.DefaultChat(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	return b.PendingApprovalsForChat(ctx, chat.ID)
+}
+
+func (b *pebbleBackend) PendingApprovalsForChat(ctx context.Context, chatID int64) ([]Approval, error) {
 	if err := ensureContext(ctx); err != nil {
 		return nil, err
 	}
 	iter, err := b.db.NewIter(&pebble.IterOptions{
-		LowerBound: []byte(approvalPendingIndexPrefix(sessionID)),
-		UpperBound: nextPrefix([]byte(approvalPendingIndexPrefix(sessionID))),
+		LowerBound: []byte(approvalPendingIndexPrefix(chatID)),
+		UpperBound: nextPrefix([]byte(approvalPendingIndexPrefix(chatID))),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("new pending approvals iterator: %w", err)
@@ -777,6 +967,9 @@ func (b *pebbleBackend) readMeta() (metaRecord, error) {
 	if meta.NextTaskID <= 0 {
 		meta.NextTaskID = 1
 	}
+	if meta.NextChatID <= 0 {
+		meta.NextChatID = 1
+	}
 	if meta.NextTodoID <= 0 {
 		meta.NextTodoID = 1
 	}
@@ -790,21 +983,6 @@ func (b *pebbleBackend) putMeta(batch *pebble.Batch, meta metaRecord) error {
 	}
 	if err := batch.Set([]byte("meta/store"), data, nil); err != nil {
 		return fmt.Errorf("write pebble metadata: %w", err)
-	}
-	return nil
-}
-
-func (b *pebbleBackend) writeSessionBatch(meta metaRecord, previous *domain.Session, session domain.Session) error {
-	batch := b.db.NewBatch()
-	defer batch.Close()
-	if err := b.putMeta(batch, meta); err != nil {
-		return err
-	}
-	if err := b.putSession(batch, previous, &session); err != nil {
-		return err
-	}
-	if err := batch.Commit(pebble.Sync); err != nil {
-		return fmt.Errorf("commit session batch: %w", err)
 	}
 	return nil
 }
@@ -824,6 +1002,17 @@ func (b *pebbleBackend) putSession(batch *pebble.Batch, previous, session *domai
 	}
 	if err := batch.Set([]byte(sessionUpdatedIndexKey(session.UpdatedAt, session.ID)), nil, nil); err != nil {
 		return fmt.Errorf("write session index: %w", err)
+	}
+	return nil
+}
+
+func (b *pebbleBackend) putChat(batch *pebble.Batch, chat domain.Chat) error {
+	data, err := encodeJSON(chat)
+	if err != nil {
+		return fmt.Errorf("encode chat: %w", err)
+	}
+	if err := batch.Set([]byte(chatKey(chat.ID)), data, nil); err != nil {
+		return fmt.Errorf("write chat: %w", err)
 	}
 	return nil
 }
@@ -900,6 +1089,14 @@ func (b *pebbleBackend) readSession(sessionID int64) (domain.Session, error) {
 		return domain.Session{}, fmt.Errorf("get session: %w", err)
 	}
 	return session, nil
+}
+
+func (b *pebbleBackend) readChat(chatID int64) (domain.Chat, error) {
+	var chat domain.Chat
+	if err := b.readRecord(chatKey(chatID), &chat); err != nil {
+		return domain.Chat{}, fmt.Errorf("get chat: %w", err)
+	}
+	return chat, nil
 }
 
 func (b *pebbleBackend) readMessage(messageID int64) (domain.Message, error) {
@@ -1010,30 +1207,33 @@ func nextPrefix(prefix []byte) []byte {
 }
 
 func sessionKey(id int64) string { return "session/" + strconvID(id) }
+func chatKey(id int64) string    { return "chat/" + strconvID(id) }
 func sessionUpdatedIndexKey(updatedAt time.Time, id int64) string {
 	return "session-updated/" + formatUnixNanos(updatedAt) + "/" + strconvID(id)
 }
 func messageKey(id int64) string { return "message/" + strconvID(id) }
-func messageSessionIndexKey(sessionID, messageID int64) string {
-	return messageSessionIndexPrefix(sessionID) + "/" + strconvID(messageID)
+func chatSessionIndexKey(sessionID, chatID int64) string {
+	return chatSessionIndexPrefix(sessionID) + "/" + strconvID(chatID)
 }
-func messageSessionIndexPrefix(sessionID int64) string {
-	return "session-message/" + strconvID(sessionID)
+func chatSessionIndexPrefix(sessionID int64) string { return "session-chat/" + strconvID(sessionID) }
+func messageChatIndexKey(chatID, messageID int64) string {
+	return messageChatIndexPrefix(chatID) + "/" + strconvID(messageID)
 }
+func messageChatIndexPrefix(chatID int64) string { return "chat-message/" + strconvID(chatID) }
 func partKey(id int64) string { return "part/" + strconvID(id) }
 func partMessageIndexKey(messageID, partID int64) string {
 	return partMessageIndexPrefix(messageID) + "/" + strconvID(partID)
 }
 func partMessageIndexPrefix(messageID int64) string { return "message-part/" + strconvID(messageID) }
 func approvalKey(id int64) string                   { return "approval/" + strconvID(id) }
-func approvalSessionIndexKey(sessionID, approvalID int64) string {
-	return "session-approval/" + strconvID(sessionID) + "/" + strconvID(approvalID)
+func approvalChatIndexKey(chatID, approvalID int64) string {
+	return "chat-approval/" + strconvID(chatID) + "/" + strconvID(approvalID)
 }
-func approvalPendingIndexKey(sessionID, approvalID int64) string {
-	return approvalPendingIndexPrefix(sessionID) + "/" + strconvID(approvalID)
+func approvalPendingIndexKey(chatID, approvalID int64) string {
+	return approvalPendingIndexPrefix(chatID) + "/" + strconvID(approvalID)
 }
-func approvalPendingIndexPrefix(sessionID int64) string {
-	return "approval-pending/" + strconvID(sessionID)
+func approvalPendingIndexPrefix(chatID int64) string {
+	return "approval-pending/" + strconvID(chatID)
 }
 func taskKey(id int64) string { return "task/" + strconvID(id) }
 func taskSessionIndexKey(sessionID, taskID int64) string {
@@ -1056,10 +1256,18 @@ func sessionIDFromUpdatedIndex(key []byte) (int64, error) {
 	return parseID(parts[2])
 }
 
-func messageIDFromSessionIndex(key []byte) (int64, error) {
+func chatIDFromSessionIndex(key []byte) (int64, error) {
 	parts := bytes.Split(key, []byte("/"))
 	if len(parts) != 3 {
-		return 0, fmt.Errorf("invalid session message index key %q", string(key))
+		return 0, fmt.Errorf("invalid session chat index key %q", string(key))
+	}
+	return parseID(parts[2])
+}
+
+func messageIDFromChatIndex(key []byte) (int64, error) {
+	parts := bytes.Split(key, []byte("/"))
+	if len(parts) != 3 {
+		return 0, fmt.Errorf("invalid chat message index key %q", string(key))
 	}
 	return parseID(parts[2])
 }

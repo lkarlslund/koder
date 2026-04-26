@@ -23,6 +23,7 @@ type metaRecord struct {
 	Encoding       string `json:"encoding"`
 	Backend        string `json:"backend"`
 	NextSessionID  int64  `json:"next_session_id"`
+	NextChatID     int64  `json:"next_chat_id"`
 	NextMessageID  int64  `json:"next_message_id"`
 	NextPartID     int64  `json:"next_part_id"`
 	NextApprovalID int64  `json:"next_approval_id"`
@@ -36,6 +37,7 @@ func defaultMeta(backend string) metaRecord {
 		Encoding:       encodingJSON,
 		Backend:        backend,
 		NextSessionID:  1,
+		NextChatID:     1,
 		NextMessageID:  1,
 		NextPartID:     1,
 		NextApprovalID: 1,

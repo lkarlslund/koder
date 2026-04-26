@@ -161,6 +161,32 @@ type Session struct {
 	LastMessage       string
 }
 
+type WorkflowRole string
+
+const (
+	WorkflowRoleGeneral       WorkflowRole = "general"
+	WorkflowRolePlanning      WorkflowRole = "planning"
+	WorkflowRoleDecomposition WorkflowRole = "decomposition"
+	WorkflowRoleExecution     WorkflowRole = "execution"
+)
+
+type Chat struct {
+	ID                int64
+	SessionID         int64
+	ParentChatID      *int64
+	Title             string
+	WorkflowRole      WorkflowRole
+	ProviderID        string
+	ModelID           string
+	PermissionProfile string
+	ToolStates        map[ToolKind]bool
+	ActiveMilestoneRef string
+	AssignedTodoBucketRef string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+	LastMessage       string
+}
+
 type AgentsFile struct {
 	Path         string
 	Kind         string
@@ -174,6 +200,7 @@ type AgentsFile struct {
 type Message struct {
 	ID        int64
 	SessionID int64
+	ChatID    int64
 	Role      MessageRole
 	Summary   string
 	CreatedAt time.Time
