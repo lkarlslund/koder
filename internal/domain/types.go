@@ -100,6 +100,12 @@ const (
 	PermissionModeDeny  PermissionMode = "deny"
 )
 
+type PermissionOverride struct {
+	Tool    ToolKind
+	Pattern string
+	Action  PermissionMode
+}
+
 type ApprovalStatus string
 
 const (
@@ -160,6 +166,7 @@ type Session struct {
 	ProviderID        string
 	ModelID           string
 	PermissionProfile string
+	PermissionRules   []PermissionOverride
 	ToolStates        map[ToolKind]bool
 	CWD               string
 	ProjectRoot       string

@@ -85,6 +85,7 @@ func (b *jsonfsBackend) CreateSession(ctx context.Context, title, providerID, mo
 		CreatedAt:         now,
 		UpdatedAt:         now,
 		PermissionProfile: "",
+		PermissionRules:   nil,
 		ToolStates:        map[domain.ToolKind]bool{},
 	}
 	meta.NextSessionID++
@@ -95,13 +96,14 @@ func (b *jsonfsBackend) CreateSession(ctx context.Context, title, providerID, mo
 		return domain.Session{}, err
 	}
 	chat := domain.Chat{
-		ID:           meta.NextChatID,
-		SessionID:    session.ID,
-		Title:        "Main",
-		WorkflowRole: domain.WorkflowRoleOrchestrator,
-		ToolStates:   map[domain.ToolKind]bool{},
-		CreatedAt:    now,
-		UpdatedAt:    now,
+		ID:                meta.NextChatID,
+		SessionID:         session.ID,
+		Title:             "Main",
+		WorkflowRole:      domain.WorkflowRoleOrchestrator,
+		PermissionProfile: session.PermissionProfile,
+		ToolStates:        map[domain.ToolKind]bool{},
+		CreatedAt:         now,
+		UpdatedAt:         now,
 	}
 	meta.NextChatID++
 	if err := b.writeMeta(meta); err != nil {
@@ -126,16 +128,32 @@ func (b *jsonfsBackend) CreateChat(ctx context.Context, sessionID int64, title s
 	if _, err := b.readSession(sessionID); err != nil {
 		return domain.Chat{}, err
 	}
+	parentProfile := ""
+	if parentChatID != nil && *parentChatID > 0 {
+		parent, err := b.readChat(*parentChatID)
+		if err != nil {
+			return domain.Chat{}, err
+		}
+		parentProfile = strings.TrimSpace(parent.PermissionProfile)
+		if parentProfile == "" {
+			session, err := b.readSession(sessionID)
+			if err != nil {
+				return domain.Chat{}, err
+			}
+			parentProfile = strings.TrimSpace(session.PermissionProfile)
+		}
+	}
 	now := time.Now().UTC()
 	chat := domain.Chat{
-		ID:           meta.NextChatID,
-		SessionID:    sessionID,
-		ParentChatID: parentChatID,
-		Title:        strings.TrimSpace(title),
-		WorkflowRole: role,
-		ToolStates:   map[domain.ToolKind]bool{},
-		CreatedAt:    now,
-		UpdatedAt:    now,
+		ID:                meta.NextChatID,
+		SessionID:         sessionID,
+		ParentChatID:      parentChatID,
+		Title:             strings.TrimSpace(title),
+		WorkflowRole:      role,
+		PermissionProfile: parentProfile,
+		ToolStates:        map[domain.ToolKind]bool{},
+		CreatedAt:         now,
+		UpdatedAt:         now,
 	}
 	if chat.Title == "" {
 		chat.Title = "Chat " + strconv.FormatInt(chat.ID, 10)
@@ -293,6 +311,12 @@ func (b *jsonfsBackend) GetSession(ctx context.Context, sessionID int64) (domain
 func (b *jsonfsBackend) SetSessionPermissionProfile(ctx context.Context, sessionID int64, profile string) error {
 	return b.updateSession(ctx, sessionID, func(session *domain.Session) {
 		session.PermissionProfile = profile
+	})
+}
+
+func (b *jsonfsBackend) AddSessionPermissionRule(ctx context.Context, sessionID int64, rule domain.PermissionOverride) error {
+	return b.updateSession(ctx, sessionID, func(session *domain.Session) {
+		session.PermissionRules = appendPermissionRule(session.PermissionRules, rule)
 	})
 }
 

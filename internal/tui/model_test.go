@@ -1252,7 +1252,7 @@ func TestRefreshViewportGroupsToolRunMessagesIntoCard(t *testing.T) {
 	}
 }
 
-func TestRenderApprovalPromptUsesToolRunDock(t *testing.T) {
+func TestRenderApprovalPromptUsesApprovalDialog(t *testing.T) {
 	cfg := testConfig(t)
 	m := Model{
 		cfg:       cfg,
@@ -1262,14 +1262,14 @@ func TestRenderApprovalPromptUsesToolRunDock(t *testing.T) {
 	}
 
 	got := m.renderApprovalPrompt()
-	if !strings.Contains(got, "Run command") || !strings.Contains(got, "Needs approval #9") {
-		t.Fatalf("expected typed approval dock, got %q", got)
+	if !strings.Contains(got, "Approval required") || !strings.Contains(got, "Run command") {
+		t.Fatalf("expected typed approval dialog, got %q", got)
 	}
-	if !strings.Contains(got, "Permissions") {
-		t.Fatalf("expected permission action in approval dock, got %q", got)
+	if !strings.Contains(got, "Approve this time") || !strings.Contains(got, "Deny") {
+		t.Fatalf("expected approval actions in dialog, got %q", got)
 	}
 	if strings.Contains(got, `{"command":"git status"`) {
-		t.Fatalf("expected approval dock to avoid raw JSON, got %q", got)
+		t.Fatalf("expected approval dialog to avoid raw JSON, got %q", got)
 	}
 }
 
@@ -1550,7 +1550,7 @@ func TestToolLikeSlashCommandIsRejectedLocally(t *testing.T) {
 	}
 }
 
-func TestApprovalPromptConsumesEnter(t *testing.T) {
+func TestApprovalDialogConsumesEnter(t *testing.T) {
 	m := Model{
 		composer:  textarea.New(),
 		approvals: []store.Approval{{ID: 7}},
@@ -1566,13 +1566,14 @@ func TestApprovalPromptConsumesEnter(t *testing.T) {
 	}
 }
 
-func TestApprovalPromptOpensPermissionsPicker(t *testing.T) {
+func TestApprovalDialogOpensPermissionsPicker(t *testing.T) {
 	m := Model{
 		cfg:       testConfig(t),
 		composer:  textarea.New(),
 		approvals: []store.Approval{{ID: 7, Tool: domain.ToolKindBash, Command: `{"command":"git status"}`}},
 	}
-	m.approvalButtons.Index = 1
+	m.ensureApprovalDialog()
+	m.approvalDialog.SetButtonIndex(4)
 
 	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
 	next := updated.(*Model)
@@ -1580,7 +1581,7 @@ func TestApprovalPromptOpensPermissionsPicker(t *testing.T) {
 		t.Fatal("expected sync title command")
 	}
 	if !next.hasPicker() {
-		t.Fatal("expected permission picker to open from approval prompt")
+		t.Fatal("expected permission picker to open from approval dialog")
 	}
 	if next.picker.mode != pickerModePermissions {
 		t.Fatalf("expected permissions picker mode, got %v", next.picker.mode)
@@ -1593,20 +1594,28 @@ func TestApprovalPromptOpensPermissionsPicker(t *testing.T) {
 	}
 }
 
-func TestApprovalPromptArrowNavigationThenEnterOpensPermissionsPicker(t *testing.T) {
+func TestApprovalDialogArrowNavigationThenEnterOpensPermissionsPicker(t *testing.T) {
 	m := Model{
 		cfg:       testConfig(t),
 		composer:  textarea.New(),
 		approvals: []store.Approval{{ID: 7, Tool: domain.ToolKindBash, Command: `{"command":"git status"}`}},
 	}
 
-	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyRight})
-	next := updated.(*Model)
-	if cmd != nil {
-		t.Fatal("expected navigation to avoid starting a command")
+	var updated ui.Model = &m
+	var cmd ui.Cmd
+	for i := 0; i < 4; i++ {
+		updated, cmd = updated.(*Model).handleKey(ui.KeyMsg{Type: ui.KeyRight})
+		next := updated.(*Model)
+		if cmd != nil {
+			t.Fatal("expected navigation to avoid starting a command")
+		}
+		if !next.hasApprovalDialog() {
+			t.Fatal("expected approval dialog to remain open")
+		}
 	}
-	if next.approvalButtons.Index != 1 {
-		t.Fatalf("expected right arrow to focus permissions button, got %d", next.approvalButtons.Index)
+	next := updated.(*Model)
+	if next.approvalDialog.ButtonIndex() != 4 {
+		t.Fatalf("expected right arrow to focus permissions button, got %d", next.approvalDialog.ButtonIndex())
 	}
 
 	updated, cmd = next.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
@@ -1615,7 +1624,7 @@ func TestApprovalPromptArrowNavigationThenEnterOpensPermissionsPicker(t *testing
 		t.Fatal("expected sync title command")
 	}
 	if !next.hasPicker() {
-		t.Fatal("expected permission picker to open from approval prompt")
+		t.Fatal("expected permission picker to open from approval dialog")
 	}
 	if next.picker.mode != pickerModePermissions {
 		t.Fatalf("expected permissions picker mode, got %v", next.picker.mode)
@@ -1625,20 +1634,20 @@ func TestApprovalPromptArrowNavigationThenEnterOpensPermissionsPicker(t *testing
 	}
 }
 
-func TestApprovalPromptAltHotkeys(t *testing.T) {
+func TestApprovalDialogAltHotkeys(t *testing.T) {
 	m := Model{
 		cfg:       testConfig(t),
 		composer:  textarea.New(),
 		approvals: []store.Approval{{ID: 7, Tool: domain.ToolKindBash, Command: `{"command":"git status"}`}},
 	}
 
-	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyRunes, Alt: true, Runes: []rune("p")})
+	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyRunes, Alt: true, Runes: []rune("s")})
 	next := updated.(*Model)
 	if cmd == nil {
 		t.Fatal("expected sync title command")
 	}
 	if !next.hasPicker() || next.picker.approvalID != 7 {
-		t.Fatalf("expected alt+p to open permission picker for approval, got %#v", next.picker)
+		t.Fatalf("expected alt+s to open permission picker for approval, got %#v", next.picker)
 	}
 
 	m = Model{
@@ -1646,13 +1655,13 @@ func TestApprovalPromptAltHotkeys(t *testing.T) {
 		composer:  textarea.New(),
 		approvals: []store.Approval{{ID: 7, Tool: domain.ToolKindBash, Command: `{"command":"git status"}`}},
 	}
-	updated, cmd = m.handleKey(ui.KeyMsg{Type: ui.KeyRunes, Alt: true, Runes: []rune("a")})
+	updated, cmd = m.handleKey(ui.KeyMsg{Type: ui.KeyRunes, Alt: true, Runes: []rune("t")})
 	next = updated.(*Model)
 	if cmd == nil {
-		t.Fatal("expected alt+a to trigger approval command")
+		t.Fatal("expected alt+t to trigger approval command")
 	}
 	if !next.loading {
-		t.Fatal("expected alt+a to start approval flow")
+		t.Fatal("expected alt+t to start approval flow")
 	}
 
 	m = Model{
@@ -4727,7 +4736,7 @@ func TestResumedEditToolRunReplacesRequestTitleWithCompletedTitle(t *testing.T) 
 func TestMouseClickOnApprovalPromptPermissionsOpensPicker(t *testing.T) {
 	m := Model{
 		mouseEnabled: true,
-		width:        100,
+		width:        160,
 		height:       28,
 		palette:      theme.Resolve("tokyonight").Palette,
 		composer:     textarea.New(),
@@ -4737,7 +4746,6 @@ func TestMouseClickOnApprovalPromptPermissionsOpensPicker(t *testing.T) {
 			Command: `{"path":"README.md"}`,
 		}},
 	}
-	m.ensureApprovalButtons()
 
 	prompt := m.renderApprovalPrompt()
 	lines := strings.Split(prompt, "\n")
@@ -4745,30 +4753,30 @@ func TestMouseClickOnApprovalPromptPermissionsOpensPicker(t *testing.T) {
 	buttonX := -1
 	for idx, line := range lines {
 		stripped := ansi.Strip(line)
-		if !strings.Contains(stripped, "Approve") || !strings.Contains(stripped, "Permissions") || !strings.Contains(stripped, "Deny") {
+		if !strings.Contains(stripped, "Switch permissions") {
 			continue
 		}
 		buttonLine = idx
-		buttonX = strings.Index(stripped, "Permissions") + 1
+		buttonX = strings.Index(stripped, "Switch permissions") + 1
 		break
 	}
 	if buttonLine < 0 || buttonX < 0 {
-		t.Fatalf("failed to find approval prompt buttons in view: %q", prompt)
+		t.Fatalf("failed to find approval dialog buttons in view: %q", prompt)
 	}
 
-	startY := m.height - m.footerHeight()
+	bounds := m.centeredWindowBounds(m.renderApprovalDialogElement())
 	updated, cmd := m.Update(ui.MouseMsg{
 		Action: ui.MouseActionPress,
 		Button: ui.MouseButtonLeft,
-		X:      buttonX,
-		Y:      startY + buttonLine,
+		X:      bounds.X + buttonX,
+		Y:      bounds.Y + buttonLine,
 	})
 	next := updated.(*Model)
 	if cmd == nil {
 		t.Fatal("expected title sync command when opening permissions picker")
 	}
 	if !next.hasPicker() {
-		t.Fatal("expected permissions picker to open from approval prompt mouse click")
+		t.Fatal("expected permissions picker to open from approval dialog mouse click")
 	}
 	if next.picker.mode != pickerModePermissions {
 		t.Fatalf("expected permissions picker mode, got %v", next.picker.mode)

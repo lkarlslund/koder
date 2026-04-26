@@ -39,17 +39,25 @@ type Decision struct {
 	Reason string
 }
 
-func Evaluate(cfg config.PermissionRules, profileName string, req Request) Decision {
+func Evaluate(cfg config.PermissionRules, profileName string, overrides []domain.PermissionOverride, req Request) Decision {
+	pattern := req.Pattern
+	if pattern == "" {
+		pattern = "*"
+	}
+	for _, rule := range slices.Backward(overrides) {
+		if rule.Tool != req.Tool {
+			continue
+		}
+		if wildcardMatch(rule.Pattern, pattern) {
+			return Decision{Mode: rule.Action}
+		}
+	}
 	if IsBuiltinProfile(profileName) {
 		return evaluateBuiltin(profileName, req)
 	}
 	profile, ok := cfg.Profiles[profileName]
 	if !ok {
 		profile = cfg.Profiles[cfg.Profile]
-	}
-	pattern := req.Pattern
-	if pattern == "" {
-		pattern = "*"
 	}
 
 	for _, rule := range slices.Backward(profile.Rules) {

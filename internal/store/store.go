@@ -35,6 +35,7 @@ type backend interface {
 	UpdateChat(context.Context, domain.Chat) error
 	UpdateSessionWorkspace(context.Context, int64, string, string) error
 	SetSessionPermissionProfile(context.Context, int64, string) error
+	AddSessionPermissionRule(context.Context, int64, domain.PermissionOverride) error
 	SetSessionToolStates(context.Context, int64, map[domain.ToolKind]bool) error
 	UpdateSessionTitle(context.Context, int64, string) error
 	UpdateSessionAgents(context.Context, int64, string, string, string, string, []domain.AgentsFile, time.Time) error
@@ -118,6 +119,21 @@ func cloneToolStates(src map[domain.ToolKind]bool) map[domain.ToolKind]bool {
 	return dst
 }
 
+func appendPermissionRule(rules []domain.PermissionOverride, rule domain.PermissionOverride) []domain.PermissionOverride {
+	rule.Pattern = strings.TrimSpace(rule.Pattern)
+	if rule.Pattern == "" {
+		rule.Pattern = "*"
+	}
+	next := make([]domain.PermissionOverride, 0, len(rules)+1)
+	for _, existing := range rules {
+		if existing.Tool == rule.Tool && strings.TrimSpace(existing.Pattern) == rule.Pattern {
+			continue
+		}
+		next = append(next, existing)
+	}
+	return append(next, rule)
+}
+
 func Open(stateDir string) (*Store, error) {
 	return OpenWithOptions(stateDir, Options{Backend: BackendPebble})
 }
@@ -190,6 +206,10 @@ func (s *Store) UpdateSessionWorkspace(ctx context.Context, sessionID int64, cwd
 
 func (s *Store) SetSessionPermissionProfile(ctx context.Context, sessionID int64, profile string) error {
 	return s.backend.SetSessionPermissionProfile(ctx, sessionID, profile)
+}
+
+func (s *Store) AddSessionPermissionRule(ctx context.Context, sessionID int64, rule domain.PermissionOverride) error {
+	return s.backend.AddSessionPermissionRule(ctx, sessionID, rule)
 }
 
 func (s *Store) SetSessionToolStates(ctx context.Context, sessionID int64, states map[domain.ToolKind]bool) error {

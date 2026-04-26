@@ -327,7 +327,7 @@ type Model struct {
 	mentionMatches     []reference.Entry
 	mentionIndex       int
 	mentionCatalog     []reference.Entry
-	approvalButtons    ui.ButtonRow
+	approvalDialog     *dialogs.ApprovalDialog
 	workdir            string
 	workspace          workspace.Status
 	agentsDrift        bool
@@ -807,38 +807,6 @@ func (m *Model) handleKey(msg ui.KeyMsg) (ui.Model, ui.Cmd) {
 }
 
 func (m *Model) handleMainWindowKey(msg ui.KeyMsg) (bool, ui.Cmd) {
-	if m.hasApprovalPrompt() {
-		m.ensureApprovalButtons()
-		if idx, ok := m.approvalButtons.HotkeyIndex(msg); ok {
-			m.invalidateFooterCache()
-			_, cmd := m.activateApprovalButton(idx)
-			return true, cmd
-		}
-		switch msg.String() {
-		case "left", "up", "shift+tab":
-			m.approvalButtons.Move(-1)
-			m.invalidateFooterCache()
-			return true, nil
-		case "right", "down", "tab":
-			m.approvalButtons.Move(1)
-			m.invalidateFooterCache()
-			return true, nil
-		case "y":
-			_, cmd := m.submitApprovalChoice(true)
-			return true, cmd
-		case "p":
-			m.openApprovalPermissionsPicker()
-			m.invalidateFooterCache()
-			return true, m.syncWindowTitleCmd()
-		case "n", "esc":
-			_, cmd := m.submitApprovalChoice(false)
-			return true, cmd
-		case "enter":
-			_, cmd := m.activateApprovalButton(m.approvalButtons.Index)
-			return true, cmd
-		}
-	}
-
 	if m.hasComposerHistoryMenu() {
 		switch msg.String() {
 		case "ctrl+c":
@@ -1134,31 +1102,6 @@ func (m *Model) handleMouse(msg ui.MouseMsg) (ui.Model, ui.Cmd, bool) {
 }
 
 func (m *Model) handleMainWindowMouse(msg ui.MouseMsg) (bool, ui.Cmd) {
-	if m.hasApprovalPrompt() && m.mouseEnabled && msg.Action == ui.MouseActionPress && msg.Button == ui.MouseButtonLeft {
-		if msg.Y >= 0 && msg.Y < m.height {
-			element := m.renderApprovalPromptElement()
-			if element != nil {
-				promptHeight := element.Measure(&ui.Context{Palette: m.palette}, ui.NewConstraints(m.width, 0)).H
-				startY := m.height - m.composerAreaHeight()
-				if msg.Y >= startY && msg.Y < startY+promptHeight {
-					runtime := ui.Runtime{}
-					ctx := &ui.Context{Palette: m.palette, Runtime: &runtime}
-					element.Render(ctx, ui.Rect{X: 0, Y: startY, W: element.Measure(ctx, ui.NewConstraints(m.width, 0)).W, H: promptHeight})
-					if control, ok := runtime.Hit(ui.Point{X: msg.X, Y: msg.Y}); ok {
-						for idx, button := range m.approvalButtons.Buttons {
-							if button.ID != control.ID {
-								continue
-							}
-							m.approvalButtons.Index = idx
-							_, cmd := m.activateApprovalButton(idx)
-							return true, cmd
-						}
-					}
-					return true, nil
-				}
-			}
-		}
-	}
 	if _, cmd, ok := m.handleMouse(msg); ok {
 		return true, cmd
 	}
@@ -1413,9 +1356,6 @@ func (m *Model) renderComposerAreaElement() ui.Element {
 		return ui.VisibleElement{}
 	}
 	elements := []ui.Element{}
-	if prompt := m.renderApprovalPromptElement(); prompt != nil {
-		elements = append(elements, prompt)
-	}
 	if menu := m.renderComposerHistoryMenuElement(); menu != nil {
 		elements = append(elements, menu)
 	} else if menu := m.renderSlashMenuElement(); menu != nil {
@@ -1453,8 +1393,7 @@ func (m *Model) composerAreaHasContent() bool {
 	if len(m.draftAttachments) > 0 || m.queuedPrompt != nil {
 		return true
 	}
-	if m.renderApprovalPromptElement() != nil ||
-		m.renderComposerHistoryMenuElement() != nil ||
+	if m.renderComposerHistoryMenuElement() != nil ||
 		m.renderSlashMenuElement() != nil ||
 		m.renderMentionMenuElement() != nil ||
 		m.renderSkillMenuElement() != nil {
@@ -2755,7 +2694,11 @@ func (m Model) createChatCmd(sessionID int64, role domain.WorkflowRole, title st
 	return func() ui.Msg {
 		ctx := context.Background()
 		start := time.Now()
-		chat, err := m.store.CreateChat(ctx, sessionID, title, role, nil)
+		var parentChatID *int64
+		if m.currentChat.ID > 0 && m.currentChat.SessionID == sessionID {
+			parentChatID = &m.currentChat.ID
+		}
+		chat, err := m.store.CreateChat(ctx, sessionID, title, role, parentChatID)
 		if err != nil {
 			return promptDoneMsg{err: err}
 		}
@@ -3093,7 +3036,7 @@ func (m Model) UpdateLoad(msg loadMsg) Model {
 	m.todos = msg.todos
 	m.workspace = msg.workspace
 	m.resetComposerHistory()
-	m.approvalButtons.Index = 0
+	m.approvalDialog = nil
 	m.draftAttachments = nil
 	m.draftReferences = nil
 	m.closePicker()
@@ -3274,7 +3217,7 @@ func (m *Model) handleLocalCommand(prompt string) (ui.Model, ui.Cmd, bool) {
 
 func (m Model) approvalPermissionProfileCmd(ctx context.Context, approvalID int64, profile string) ui.Cmd {
 	return func() ui.Msg {
-		events, err := m.agent.SetPermissionProfileAndReevaluateApproval(ctx, m.currentSession.ID, approvalID, profile)
+		events, err := m.agent.SetPermissionProfileInChatAndReevaluateApproval(ctx, m.currentSession.ID, m.currentChat.ID, approvalID, profile)
 		return promptDoneMsg{events: events, err: err}
 	}
 }
@@ -3654,6 +3597,13 @@ func (m Model) compactCmd(ctx context.Context) ui.Cmd {
 func (m Model) approveCmd(ctx context.Context, approvalID int64) ui.Cmd {
 	return func() ui.Msg {
 		events, err := m.agent.ApproveInChat(ctx, m.currentSession.ID, m.currentChat.ID, approvalID)
+		return promptDoneMsg{events: events, err: err}
+	}
+}
+
+func (m Model) approveWithRuleCmd(ctx context.Context, approvalID int64, rule domain.PermissionOverride) ui.Cmd {
+	return func() ui.Msg {
+		events, err := m.agent.ApproveInChatWithRule(ctx, m.currentSession.ID, m.currentChat.ID, approvalID, rule)
 		return promptDoneMsg{events: events, err: err}
 	}
 }
@@ -4177,7 +4127,7 @@ func (m Model) draftSession() domain.Session {
 	if modelID == "" {
 		modelID = m.cfg.DefaultModel
 	}
-	profile := m.currentSession.PermissionProfile
+	profile := m.permissionProfile()
 	if profile == "" {
 		profile = m.cfg.Permissions.Profile
 	}
@@ -4757,85 +4707,72 @@ func (m *Model) hasApprovalPrompt() bool {
 	return !m.loading && len(m.approvals) > 0
 }
 
-func (m *Model) submitApprovalChoice(approve bool) (ui.Model, ui.Cmd) {
-	if !m.hasApprovalPrompt() {
-		return m, nil
-	}
-	id := m.approvals[0].ID
-	if approve {
-		m.startBusy(busyScopeTranscript, fmt.Sprintf("Approving approval %d…", id))
-		return m, ui.Batch(m.approveCmd(m.beginActiveOperation(), id), m.spinnerCmdIfNeeded())
-	}
-	m.startBusy(busyScopeSidebar, fmt.Sprintf("Denying approval %d…", id))
-	return m, ui.Batch(m.denyCmd(m.beginActiveOperation(), id), m.spinnerCmdIfNeeded())
+func (m *Model) hasApprovalDialog() bool {
+	return m.hasApprovalPrompt()
 }
 
-func (m *Model) activateApprovalButton(index int) (ui.Model, ui.Cmd) {
-	switch index {
-	case 0:
-		return m.submitApprovalChoice(true)
-	case 1:
-		m.openApprovalPermissionsPicker()
-		return m, m.syncWindowTitleCmd()
-	default:
-		return m.submitApprovalChoice(false)
+func (m *Model) ensureApprovalDialog() {
+	if !m.hasApprovalDialog() {
+		m.approvalDialog = nil
+		return
 	}
+	item := m.approvals[0]
+	run := m.approvalToolRun(item)
+	index := 0
+	if m.approvalDialog != nil {
+		index = m.approvalDialog.ButtonIndex()
+	}
+	m.approvalDialog = dialogs.NewApprovalDialog(run, approvalToolScopeLabel(item.Tool), approvalPatternScopeLabel(item.Tool, run.PreviewText()))
+	m.approvalDialog.SetButtonIndex(index)
+}
+
+func (m *Model) renderApprovalDialogElement() ui.Element {
+	if !m.hasApprovalDialog() {
+		return nil
+	}
+	m.ensureApprovalDialog()
+	return m.approvalDialog.Render(m.palette, ui.Rect{W: max(0, m.width), H: max(0, m.height)})
 }
 
 func (m *Model) renderApprovalPrompt() string {
-	if element := m.renderApprovalPromptElement(); element != nil {
+	if element := m.renderApprovalDialogElement(); element != nil {
 		return m.renderElementText(element, 0, 0)
 	}
 	return ""
 }
 
-func (m *Model) renderApprovalPromptElement() ui.Element {
-	if !m.hasApprovalPrompt() {
+func (m *Model) handleApprovalDialogAction(action dialogs.ApprovalDialogAction) ui.Cmd {
+	if !m.hasApprovalDialog() || action.Kind == dialogs.ApprovalDialogActionNone {
 		return nil
 	}
-	m.ensureApprovalButtons()
-	return ui.ToolRunDock{
-		Palette: m.palette,
-		Run:     m.approvalToolRun(m.approvals[0]),
-		Buttons: m.approvalButtonRow(),
-		Hints:   "enter select  tab switch  p permissions  y approve  n deny",
+	item := m.approvals[0]
+	switch action.Kind {
+	case dialogs.ApprovalDialogActionApproveOnce:
+		m.startBusy(busyScopeTranscript, fmt.Sprintf("Approving approval %d…", item.ID))
+		return ui.Batch(m.approveCmd(m.beginActiveOperation(), item.ID), m.spinnerCmdIfNeeded())
+	case dialogs.ApprovalDialogActionApproveAllTool:
+		m.startBusy(busyScopeTranscript, fmt.Sprintf("Approving all %s commands…", approvalToolScopeLabel(item.Tool)))
+		return ui.Batch(m.approveWithRuleCmd(m.beginActiveOperation(), item.ID, domain.PermissionOverride{
+			Tool:    item.Tool,
+			Pattern: "*",
+			Action:  domain.PermissionModeAllow,
+		}), m.spinnerCmdIfNeeded())
+	case dialogs.ApprovalDialogActionApproveMatching:
+		m.startBusy(busyScopeTranscript, fmt.Sprintf("Approving matching %s commands…", approvalToolScopeLabel(item.Tool)))
+		return ui.Batch(m.approveWithRuleCmd(m.beginActiveOperation(), item.ID, domain.PermissionOverride{
+			Tool:    item.Tool,
+			Pattern: approvalPatternScope(item.Tool, m.approvalToolRun(item).PreviewText()),
+			Action:  domain.PermissionModeAllow,
+		}), m.spinnerCmdIfNeeded())
+	case dialogs.ApprovalDialogActionDeny:
+		m.startBusy(busyScopeSidebar, fmt.Sprintf("Denying approval %d…", item.ID))
+		return ui.Batch(m.denyCmd(m.beginActiveOperation(), item.ID), m.spinnerCmdIfNeeded())
+	case dialogs.ApprovalDialogActionPermissions:
+		m.openApprovalPermissionsPicker()
+		return m.syncWindowTitleCmd()
+	default:
+		return nil
 	}
-}
-
-func (m *Model) ensureApprovalButtons() {
-	if len(m.approvalButtons.Buttons) != 0 {
-		return
-	}
-	index := m.approvalButtons.Index
-	m.approvalButtons = ui.ButtonRow{
-		Buttons: []ui.Button{
-			{ID: "approve", Label: "Approve", Hotkey: 'a', Primary: true},
-			{ID: "permissions", Label: "Permissions", Hotkey: 'p'},
-			{ID: "deny", Label: "Deny", Hotkey: 'd'},
-		},
-		Index: index,
-		Align: ui.HorizontalAlignRight,
-	}
-}
-
-func (m *Model) approvalButtonRow() ui.ButtonRow {
-	buttons := m.approvalButtons
-	buttons.Align = ui.HorizontalAlignRight
-	run := m.approvalToolRun(m.approvals[0])
-	title := run.Title + "  " + run.StatusLabel()
-	width := lipgloss.Width(title)
-	if subtitle := strings.TrimSpace(run.Subtitle); subtitle != "" {
-		width = max(width, lipgloss.Width(subtitle))
-	}
-	if preview := firstNonEmptyString(strings.TrimSpace(run.Preview), strings.TrimSpace(run.Output), strings.TrimSpace(run.ErrorText)); preview != "" {
-		for _, line := range strings.Split(preview, "\n") {
-			width = max(width, lipgloss.Width(line))
-		}
-	}
-	width = max(width, ui.RenderSurface(&ui.Context{Palette: m.palette}, buttons, 0, 0).SurfaceWidth())
-	width = max(width, lipgloss.Width("enter select  tab switch  p permissions  y approve  n deny"))
-	buttons.Width = width
-	return buttons
 }
 
 func internalSlashCommands() []slashCommand {
@@ -4862,7 +4799,42 @@ func internalSlashCommands() []slashCommand {
 	}
 }
 
+func approvalToolScopeLabel(tool domain.ToolKind) string {
+	return strings.TrimSpace(string(tool))
+}
+
+func approvalPatternScope(tool domain.ToolKind, preview string) string {
+	preview = strings.Join(strings.Fields(strings.TrimSpace(preview)), " ")
+	if preview == "" {
+		return "*"
+	}
+	switch tool {
+	case domain.ToolKindBash:
+		fields := strings.Fields(preview)
+		if len(fields) == 0 {
+			return "*"
+		}
+		if len(fields) == 1 {
+			return fields[0]
+		}
+		return fields[0] + " *"
+	default:
+		return preview
+	}
+}
+
+func approvalPatternScopeLabel(tool domain.ToolKind, preview string) string {
+	pattern := approvalPatternScope(tool, preview)
+	if strings.TrimSpace(pattern) == "" || pattern == "*" {
+		return "matching"
+	}
+	return strings.TrimSpace(strings.TrimSuffix(pattern, " *"))
+}
+
 func (m *Model) permissionProfile() string {
+	if strings.TrimSpace(m.currentChat.PermissionProfile) != "" {
+		return m.currentChat.PermissionProfile
+	}
 	if strings.TrimSpace(m.currentSession.PermissionProfile) != "" {
 		return m.currentSession.PermissionProfile
 	}
@@ -4990,17 +4962,18 @@ func (m *Model) hasModalOverlay() bool {
 		m.hasHelpModal() ||
 		m.hasLLMPreview() ||
 		m.hasPreferencesDialog() ||
+		m.hasApprovalDialog() ||
 		m.hasPicker()
 }
 
 func (m *Model) composerShouldBlink() bool {
-	return m.composer.BlinkEnabled && !m.hasModalOverlay() && !m.hasApprovalPrompt()
+	return m.composer.BlinkEnabled && !m.hasModalOverlay()
 }
 
 func (m *Model) syncComposerVisibility() {
 	beforeFocus := m.composer.Focused()
 	beforeCursorVisible := m.composer.CursorVisible()
-	shouldFocus := !m.hasModalOverlay() && !m.hasApprovalPrompt() && (beforeFocus || m.composer.BlinkEnabled || m.composerAreaHasContent())
+	shouldFocus := !m.hasModalOverlay() && (beforeFocus || m.composer.BlinkEnabled || m.composerAreaHasContent())
 	if shouldFocus {
 		if !m.composer.Focused() {
 			m.composer.Focus()
@@ -5894,16 +5867,30 @@ func (m *Model) selectPermissionProfile(profile string) error {
 			return fmt.Errorf("unknown permission profile %q", profile)
 		}
 	}
-	if m.currentSession.ID != 0 {
+	if m.currentChat.ID != 0 {
+		next := m.currentChat
+		next.PermissionProfile = profile
+		if err := m.store.UpdateChat(context.Background(), next); err != nil {
+			return err
+		}
+		m.currentChat = next
+		for idx := range m.chats {
+			if m.chats[idx].ID == next.ID {
+				m.chats[idx].PermissionProfile = profile
+			}
+		}
+	} else if m.currentSession.ID != 0 {
 		if err := m.store.SetSessionPermissionProfile(context.Background(), m.currentSession.ID, profile); err != nil {
 			return err
 		}
-	}
-	m.currentSession.PermissionProfile = profile
-	for idx := range m.sessions {
-		if m.sessions[idx].ID == m.currentSession.ID {
-			m.sessions[idx].PermissionProfile = profile
+		m.currentSession.PermissionProfile = profile
+		for idx := range m.sessions {
+			if m.sessions[idx].ID == m.currentSession.ID {
+				m.sessions[idx].PermissionProfile = profile
+			}
 		}
+	} else {
+		m.currentSession.PermissionProfile = profile
 	}
 	m.queuePermissionChangeNote()
 	return nil

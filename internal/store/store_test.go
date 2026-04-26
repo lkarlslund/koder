@@ -156,6 +156,83 @@ func TestUpdateSessionWorkspacePersistsCWD(t *testing.T) {
 	}
 }
 
+func TestCreateChatInheritsParentPermissionProfile(t *testing.T) {
+	for _, backend := range []string{BackendPebble, BackendJSONFS} {
+		t.Run(backend, func(t *testing.T) {
+			st := openTestStore(t, backend)
+
+			session, err := st.CreateSession(context.Background(), "test", "provider", "model", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := st.SetSessionPermissionProfile(context.Background(), session.ID, "readonly"); err != nil {
+				t.Fatal(err)
+			}
+			mainChat, err := st.DefaultChat(context.Background(), session.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			child, err := st.CreateChat(context.Background(), session.ID, "child", domain.WorkflowRoleExecution, &mainChat.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if child.PermissionProfile != "readonly" {
+				t.Fatalf("expected child chat to inherit session fallback profile, got %q", child.PermissionProfile)
+			}
+
+			mainChat.PermissionProfile = "full-access"
+			if err := st.UpdateChat(context.Background(), mainChat); err != nil {
+				t.Fatal(err)
+			}
+			secondChild, err := st.CreateChat(context.Background(), session.ID, "child 2", domain.WorkflowRoleExecution, &mainChat.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if secondChild.PermissionProfile != "full-access" {
+				t.Fatalf("expected child chat to inherit parent chat profile, got %q", secondChild.PermissionProfile)
+			}
+		})
+	}
+}
+
+func TestAddSessionPermissionRulePersistsAndReplacesByKey(t *testing.T) {
+	for _, backend := range []string{BackendPebble, BackendJSONFS} {
+		t.Run(backend, func(t *testing.T) {
+			st := openTestStore(t, backend)
+
+			session, err := st.CreateSession(context.Background(), "test", "provider", "model", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := st.AddSessionPermissionRule(context.Background(), session.ID, domain.PermissionOverride{
+				Tool:    domain.ToolKindBash,
+				Pattern: "git *",
+				Action:  domain.PermissionModeAllow,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if err := st.AddSessionPermissionRule(context.Background(), session.ID, domain.PermissionOverride{
+				Tool:    domain.ToolKindBash,
+				Pattern: "git *",
+				Action:  domain.PermissionModeAllow,
+			}); err != nil {
+				t.Fatal(err)
+			}
+
+			updated, err := st.GetSession(context.Background(), session.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(updated.PermissionRules) != 1 {
+				t.Fatalf("expected one deduplicated permission rule, got %#v", updated.PermissionRules)
+			}
+			if updated.PermissionRules[0].Tool != domain.ToolKindBash || updated.PermissionRules[0].Pattern != "git *" {
+				t.Fatalf("unexpected stored permission rule: %#v", updated.PermissionRules[0])
+			}
+		})
+	}
+}
+
 func TestMilestonePlanAndTodosRoundTrip(t *testing.T) {
 	for _, backend := range []string{BackendPebble, BackendJSONFS} {
 		t.Run(backend, func(t *testing.T) {

@@ -1,8 +1,8 @@
 package tui
 
-import "fmt"
-
 import (
+	"fmt"
+
 	"github.com/lkarlslund/koder/internal/tui/dialogs"
 	"github.com/lkarlslund/koder/internal/ui"
 )
@@ -20,6 +20,7 @@ const (
 	helpWindowID        ui.WindowID = "help-modal"
 	llmPreviewWindowID  ui.WindowID = "llm-preview"
 	pickerWindowID      ui.WindowID = "picker-dialog"
+	approvalWindowID    ui.WindowID = "approval-dialog"
 )
 
 type modelWindow struct {
@@ -434,6 +435,15 @@ func (m *Model) overlayWindows() []ui.Window {
 				m.previewSelectedTheme()
 				return nil
 			}
+		}))
+	}
+	if m.hasApprovalDialog() {
+		windows = append(windows, m.centeredWindow(approvalWindowID, 90, m.renderApprovalDialogElement(), func(m *Model, msg ui.KeyMsg) ui.Cmd {
+			action := m.approvalDialog.Update(msg)
+			return m.handleApprovalDialogAction(action)
+		}, func(m *Model, controlID string) ui.Cmd {
+			action := m.approvalDialog.ActivateControl(controlID)
+			return m.handleApprovalDialogAction(action)
 		}))
 	}
 	if m.hasPicker() {

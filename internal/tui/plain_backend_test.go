@@ -23,10 +23,6 @@ func (m *Model) renderFooter() string {
 	return strings.Join(m.renderComposerAreaSurface().Lines(), "\n")
 }
 
-func (m *Model) footerHeight() int {
-	return m.composerAreaHeight()
-}
-
 func (m *Model) renderComposer() string {
 	element := m.renderComposerElement()
 	ctx := &ui.Context{Palette: m.palette}
