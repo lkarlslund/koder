@@ -810,21 +810,25 @@ func (m *Model) handleMainWindowKey(msg ui.KeyMsg) (bool, ui.Cmd) {
 	if m.hasApprovalPrompt() {
 		m.ensureApprovalButtons()
 		if idx, ok := m.approvalButtons.HotkeyIndex(msg); ok {
+			m.invalidateFooterCache()
 			_, cmd := m.activateApprovalButton(idx)
 			return true, cmd
 		}
 		switch msg.String() {
 		case "left", "up", "shift+tab":
 			m.approvalButtons.Move(-1)
+			m.invalidateFooterCache()
 			return true, nil
 		case "right", "down", "tab":
 			m.approvalButtons.Move(1)
+			m.invalidateFooterCache()
 			return true, nil
 		case "y":
 			_, cmd := m.submitApprovalChoice(true)
 			return true, cmd
 		case "p":
 			m.openApprovalPermissionsPicker()
+			m.invalidateFooterCache()
 			return true, m.syncWindowTitleCmd()
 		case "n", "esc":
 			_, cmd := m.submitApprovalChoice(false)

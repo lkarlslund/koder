@@ -1593,6 +1593,38 @@ func TestApprovalPromptOpensPermissionsPicker(t *testing.T) {
 	}
 }
 
+func TestApprovalPromptArrowNavigationThenEnterOpensPermissionsPicker(t *testing.T) {
+	m := Model{
+		cfg:       testConfig(t),
+		composer:  textarea.New(),
+		approvals: []store.Approval{{ID: 7, Tool: domain.ToolKindBash, Command: `{"command":"git status"}`}},
+	}
+
+	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyRight})
+	next := updated.(*Model)
+	if cmd != nil {
+		t.Fatal("expected navigation to avoid starting a command")
+	}
+	if next.approvalButtons.Index != 1 {
+		t.Fatalf("expected right arrow to focus permissions button, got %d", next.approvalButtons.Index)
+	}
+
+	updated, cmd = next.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
+	next = updated.(*Model)
+	if cmd == nil {
+		t.Fatal("expected sync title command")
+	}
+	if !next.hasPicker() {
+		t.Fatal("expected permission picker to open from approval prompt")
+	}
+	if next.picker.mode != pickerModePermissions {
+		t.Fatalf("expected permissions picker mode, got %v", next.picker.mode)
+	}
+	if next.picker.approvalID != 7 {
+		t.Fatalf("expected approval id to be preserved, got %d", next.picker.approvalID)
+	}
+}
+
 func TestApprovalPromptAltHotkeys(t *testing.T) {
 	m := Model{
 		cfg:       testConfig(t),
