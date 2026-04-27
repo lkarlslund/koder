@@ -301,6 +301,7 @@ func Start(bind string, st *store.Store, recorder *Recorder) (*Server, error) {
 	mux.HandleFunc("/debug/health", s.handleHealth)
 	mux.HandleFunc("/debug/runtime", s.handleRuntime)
 	mux.HandleFunc("/debug/http", s.handleHTTP)
+	mux.HandleFunc("/debug/events", s.handleGlobalEvents)
 	mux.HandleFunc("/debug/sessions", s.handleSessions)
 	mux.HandleFunc("/debug/sessions/", s.handleSessionRoutes)
 	mux.HandleFunc("/debug/input", s.handleInput)
@@ -596,6 +597,13 @@ func (s *Server) handleEvents(w http.ResponseWriter, _ *http.Request, sessionID 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"session_id": sessionID,
 		"events":     s.recorder.Events(sessionID),
+	})
+}
+
+func (s *Server) handleGlobalEvents(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"session_id": 0,
+		"events":     s.recorder.Events(0),
 	})
 }
 

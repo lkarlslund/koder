@@ -59,6 +59,7 @@ func TestServerExposesTranscriptAndEvents(t *testing.T) {
 	}
 
 	rec := NewRecorder()
+	rec.RecordLifecycle(0, "startup_timing", "list_sessions", map[string]string{"duration_ms": "42"})
 	rec.RecordEvent(session.ID, domain.Event{Kind: domain.EventKindMessageDelta, Text: "hello"})
 
 	srv, err := Start("127.0.0.1:0", st, rec)
@@ -104,6 +105,31 @@ func TestServerExposesTranscriptAndEvents(t *testing.T) {
 	}
 	if len(events.Events) != 1 || events.Events[0].Text != "hello" {
 		t.Fatalf("unexpected events payload: %#v", events)
+	}
+
+	resp, err = http.Get("http://" + srv.Addr() + "/debug/events")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected global events status: %d", resp.StatusCode)
+	}
+	var global struct {
+		SessionID int64           `json:"session_id"`
+		Events    []RecordedEvent `json:"events"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&global); err != nil {
+		t.Fatal(err)
+	}
+	if global.SessionID != 0 {
+		t.Fatalf("expected global session id 0, got %d", global.SessionID)
+	}
+	if len(global.Events) != 2 {
+		t.Fatalf("expected 2 global events, got %#v", global)
+	}
+	if global.Events[0].Kind != "startup_timing" {
+		t.Fatalf("expected startup timing event in global stream, got %#v", global.Events[0])
 	}
 }
 
