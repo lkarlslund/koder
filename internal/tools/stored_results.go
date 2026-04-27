@@ -56,6 +56,7 @@ type ReadStoredResult struct {
 	Total          int              `json:"total,omitempty"`
 	NextOffset     int              `json:"next_offset,omitempty"`
 	EffectiveLimit int              `json:"effective_limit,omitempty"`
+	AutoCapped     bool             `json:"auto_capped,omitempty"`
 	ByteCapped     bool             `json:"byte_capped,omitempty"`
 	HasMore        bool             `json:"has_more,omitempty"`
 	Truncated      bool             `json:"truncated,omitempty"`
@@ -476,12 +477,15 @@ func readStoredFooter(result ReadStoredResult) string {
 	}
 	if result.ByteCapped {
 		if result.Total > 0 {
-			return fmt.Sprintf("Output capped at 64 KiB. Showing %s %d-%d of %d. Use offset=%d limit=%d to continue.", label, result.Start, result.End, result.Total, result.NextOffset, effectiveReadLimit(result))
+			return fmt.Sprintf("(showing %s %d-%d of %d, output capped at 64 KiB; use offset=%d limit=%d to continue)", label, result.Start, result.End, result.Total, result.NextOffset, effectiveReadLimit(result))
 		}
-		return fmt.Sprintf("Output capped at 64 KiB. Showing %s %d-%d. Use offset=%d limit=%d to continue.", label, result.Start, result.End, result.NextOffset, effectiveReadLimit(result))
+		return fmt.Sprintf("(showing %s %d-%d, output capped at 64 KiB; use offset=%d limit=%d to continue)", label, result.Start, result.End, result.NextOffset, effectiveReadLimit(result))
 	}
 	if result.HasMore {
-		return fmt.Sprintf("Showing %s %d-%d of %d. Use offset=%d limit=%d to continue.", label, result.Start, result.End, result.Total, result.NextOffset, effectiveReadLimit(result))
+		if result.AutoCapped {
+			return fmt.Sprintf("(showing %s %d-%d of %d, auto-capped; use offset=%d limit=%d to continue)", label, result.Start, result.End, result.Total, result.NextOffset, effectiveReadLimit(result))
+		}
+		return fmt.Sprintf("(showing %s %d-%d of %d; use offset=%d limit=%d to continue)", label, result.Start, result.End, result.Total, result.NextOffset, effectiveReadLimit(result))
 	}
 	if result.Mode == ReadStoredModeDirectory {
 		return fmt.Sprintf("End of directory - total %d entries.", result.Total)

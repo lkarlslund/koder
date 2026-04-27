@@ -74,7 +74,7 @@ func TestExecutePagesLargeFilesWithContinuationHint(t *testing.T) {
 	if strings.Contains(result.Output, "2001: line2001") {
 		t.Fatalf("expected first page to stop before line 2001")
 	}
-	wantFooter := "Showing lines 1-2000 of 2505. Use offset=2001 limit=2000 to continue."
+	wantFooter := "(showing lines 1-2000 of 2505, auto-capped; use offset=2001 limit=2000 to continue)"
 	if !strings.Contains(result.Output, wantFooter) {
 		t.Fatalf("expected continuation footer %q, got %q", wantFooter, result.Output)
 	}
@@ -138,7 +138,7 @@ func TestExecuteRespectsExplicitLimitAndNextOffset(t *testing.T) {
 	if strings.Contains(result.Output, "11: line11") {
 		t.Fatalf("expected output to stop before line 11")
 	}
-	wantFooter := "Showing lines 1-10 of 100. Use offset=11 limit=10 to continue."
+	wantFooter := "(showing lines 1-10 of 100; use offset=11 limit=10 to continue)"
 	if !strings.Contains(result.Output, wantFooter) {
 		t.Fatalf("expected explicit-limit footer %q, got %q", wantFooter, result.Output)
 	}
@@ -228,7 +228,7 @@ func TestExecutePagesDirectories(t *testing.T) {
 	if strings.Contains(result.Output, names[10]) {
 		t.Fatalf("expected directory page to exclude next entry %q", names[10])
 	}
-	wantFooter := "Showing entries 6-10 of 12. Use offset=11 limit=5 to continue."
+	wantFooter := "(showing entries 6-10 of 12; use offset=11 limit=5 to continue)"
 	if !strings.Contains(result.Output, wantFooter) {
 		t.Fatalf("expected directory continuation footer %q, got %q", wantFooter, result.Output)
 	}
@@ -271,10 +271,10 @@ func TestExecuteReportsByteCapWithContinuationHint(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(result.Output, "Output capped at 64 KiB.") {
+	if !strings.Contains(result.Output, "output capped at 64 KiB") {
 		t.Fatalf("expected byte-cap footer, got %q", result.Output)
 	}
-	if !strings.Contains(result.Output, "Use offset=") {
+	if !strings.Contains(result.Output, "use offset=") {
 		t.Fatalf("expected continuation hint in byte-capped output, got %q", result.Output)
 	}
 	if got := result.Meta["byte_capped"]; got != "true" {
@@ -282,6 +282,48 @@ func TestExecuteReportsByteCapWithContinuationHint(t *testing.T) {
 	}
 	if got := result.Meta["truncated"]; got != "true" {
 		t.Fatalf("expected truncated=true, got %q", got)
+	}
+}
+
+func TestExecutePagesDirectoriesInStableSortedOrder(t *testing.T) {
+	workspace := t.TempDir()
+	dir := filepath.Join(workspace, "sorted")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"z-last.txt", "a-first.txt", "m-middle.txt", "b-dir"} {
+		target := filepath.Join(dir, name)
+		if strings.HasSuffix(name, "-dir") {
+			if err := os.MkdirAll(target, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
+		if err := os.WriteFile(target, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	result, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: workspace}, tools.Request{
+		Args: map[string]string{
+			"path":  "sorted",
+			"limit": "4",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantOrder := []string{"a-first.txt", "b-dir/", "m-middle.txt", "z-last.txt"}
+	lastIndex := -1
+	for _, want := range wantOrder {
+		idx := strings.Index(result.Output, want)
+		if idx == -1 {
+			t.Fatalf("expected sorted directory output to include %q in %q", want, result.Output)
+		}
+		if idx <= lastIndex {
+			t.Fatalf("expected %q to appear after prior entries in %q", want, result.Output)
+		}
+		lastIndex = idx
 	}
 }
 

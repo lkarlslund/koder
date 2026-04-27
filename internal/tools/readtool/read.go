@@ -76,6 +76,7 @@ func (tool) Execute(_ context.Context, runtime tools.Runtime, req tools.Request)
 	if err != nil {
 		return tools.Result{}, err
 	}
+	autoCapped := strings.TrimSpace(req.Args["limit"]) == ""
 	offset, err := parseOptionalInt(req.Args["offset"])
 	if err != nil {
 		return tools.Result{}, errors.New("offset must be a positive integer")
@@ -103,7 +104,7 @@ func (tool) Execute(_ context.Context, runtime tools.Runtime, req tools.Request)
 			Path:           rel,
 			Mode:           tools.ReadStoredModeDirectory,
 			Entries:        append([]string(nil), page.Entries...),
-			Footer:         directoryReadFooter(page, limit),
+			Footer:         directoryReadFooter(page, limit, autoCapped),
 			Offset:         strconv.Itoa(offset),
 			Limit:          strconv.Itoa(limit),
 			Start:          page.Start,
@@ -111,6 +112,7 @@ func (tool) Execute(_ context.Context, runtime tools.Runtime, req tools.Request)
 			Total:          page.Total,
 			NextOffset:     page.NextOffset,
 			EffectiveLimit: limit,
+			AutoCapped:     autoCapped,
 			ByteCapped:     page.ByteCapped,
 			HasMore:        page.HasMore,
 			Truncated:      page.HasMore || page.ByteCapped,
@@ -161,7 +163,7 @@ func (tool) Execute(_ context.Context, runtime tools.Runtime, req tools.Request)
 		Path:           rel,
 		Mode:           tools.ReadStoredModeFile,
 		Lines:          append([]tools.ReadStoredLine(nil), page.Lines...),
-		Footer:         fileReadFooter(page, limit),
+		Footer:         fileReadFooter(page, limit, autoCapped),
 		Offset:         strconv.Itoa(offset),
 		Limit:          strconv.Itoa(limit),
 		Start:          page.Start,
@@ -169,6 +171,7 @@ func (tool) Execute(_ context.Context, runtime tools.Runtime, req tools.Request)
 		Total:          page.Total,
 		NextOffset:     page.NextOffset,
 		EffectiveLimit: limit,
+		AutoCapped:     autoCapped,
 		ByteCapped:     page.ByteCapped,
 		HasMore:        page.HasMore,
 		Truncated:      page.HasMore || page.ByteCapped,
@@ -391,28 +394,29 @@ func truncateReadLine(line string) string {
 	return string(runes[:maxReadLineChars]) + maxReadLineTruncSuffix
 }
 
-func fileReadFooter(page filePage, limit int) string {
-	switch {
-	case page.Total == 0:
-		return "End of file - total 0 lines."
-	case page.ByteCapped:
-		return fmt.Sprintf("Output capped at 64 KiB. Showing lines %d-%d of %d. Use offset=%d limit=%d to continue.", page.Start, page.End, page.Total, page.NextOffset, limit)
-	case page.HasMore:
-		return fmt.Sprintf("Showing lines %d-%d of %d. Use offset=%d limit=%d to continue.", page.Start, page.End, page.Total, page.NextOffset, limit)
-	default:
-		return fmt.Sprintf("End of file - total %d lines.", page.Total)
-	}
+func fileReadFooter(page filePage, limit int, autoCapped bool) string {
+	return readPageFooter("lines", page.Start, page.End, page.Total, page.NextOffset, limit, page.HasMore, autoCapped, page.ByteCapped)
 }
 
-func directoryReadFooter(page directoryPage, limit int) string {
+func directoryReadFooter(page directoryPage, limit int, autoCapped bool) string {
+	return readPageFooter("entries", page.Start, page.End, page.Total, page.NextOffset, limit, page.HasMore, autoCapped, page.ByteCapped)
+}
+
+func readPageFooter(label string, start, end, total, nextOffset, limit int, hasMore, autoCapped, byteCapped bool) string {
 	switch {
-	case page.Total == 0:
+	case total == 0 && label == "lines":
+		return "End of file - total 0 lines."
+	case total == 0 && label == "entries":
 		return "End of directory - total 0 entries."
-	case page.ByteCapped:
-		return fmt.Sprintf("Output capped at 64 KiB. Showing entries %d-%d of %d. Use offset=%d limit=%d to continue.", page.Start, page.End, page.Total, page.NextOffset, limit)
-	case page.HasMore:
-		return fmt.Sprintf("Showing entries %d-%d of %d. Use offset=%d limit=%d to continue.", page.Start, page.End, page.Total, page.NextOffset, limit)
+	case byteCapped:
+		return fmt.Sprintf("(showing %s %d-%d of %d, output capped at 64 KiB; use offset=%d limit=%d to continue)", label, start, end, total, nextOffset, limit)
+	case hasMore && autoCapped:
+		return fmt.Sprintf("(showing %s %d-%d of %d, auto-capped; use offset=%d limit=%d to continue)", label, start, end, total, nextOffset, limit)
+	case hasMore:
+		return fmt.Sprintf("(showing %s %d-%d of %d; use offset=%d limit=%d to continue)", label, start, end, total, nextOffset, limit)
+	case label == "entries":
+		return fmt.Sprintf("End of directory - total %d entries.", total)
 	default:
-		return fmt.Sprintf("End of directory - total %d entries.", page.Total)
+		return fmt.Sprintf("End of file - total %d lines.", total)
 	}
 }

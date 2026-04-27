@@ -194,7 +194,7 @@ func TestReadWholeFloatStringOffsetAndLimitAreAccepted(t *testing.T) {
 	if strings.Contains(result.Output, "1: 1") || strings.Contains(result.Output, "6: 6") {
 		t.Fatalf("expected read window to apply, got %q", result.Output)
 	}
-	if !strings.Contains(result.Output, "Showing lines 3-4 of 6. Use offset=5 limit=2 to continue.") {
+	if !strings.Contains(result.Output, "(showing lines 3-4 of 6; use offset=5 limit=2 to continue)") {
 		t.Fatalf("expected continuation footer, got %q", result.Output)
 	}
 	if got := result.Meta["offset"]; got != "3" {
