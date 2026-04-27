@@ -259,34 +259,26 @@ type CellStyle struct {
 	FG            CellColor
 	BG            CellColor
 	Bold          bool
-	BoldSet       bool
 	Italic        bool
-	ItalicSet     bool
 	Underline     bool
-	UnderlineSet  bool
 	Strikethrough bool
-	StrikeSet     bool
 }
 
 func (s CellStyle) isZero() bool {
 	return !s.FG.Valid() && !s.BG.Valid() &&
-		!s.hasBold() &&
-		!s.hasItalic() &&
-		!s.hasUnderline() &&
-		!s.hasStrikethrough()
+		!s.Bold &&
+		!s.Italic &&
+		!s.Underline &&
+		!s.Strikethrough
 }
 
 func (s CellStyle) equal(other CellStyle) bool {
 	return s.FG == other.FG &&
 		s.BG == other.BG &&
 		s.Bold == other.Bold &&
-		s.BoldSet == other.BoldSet &&
 		s.Italic == other.Italic &&
-		s.ItalicSet == other.ItalicSet &&
 		s.Underline == other.Underline &&
-		s.UnderlineSet == other.UnderlineSet &&
-		s.Strikethrough == other.Strikethrough &&
-		s.StrikeSet == other.StrikeSet
+		s.Strikethrough == other.Strikethrough
 }
 
 func (s CellStyle) Merge(overlay CellStyle) CellStyle {
@@ -297,39 +289,19 @@ func (s CellStyle) Merge(overlay CellStyle) CellStyle {
 	if overlay.BG.Valid() {
 		out.BG = overlay.BG
 	}
-	if overlay.hasBold() {
+	if overlay.Bold {
 		out.Bold = overlay.Bold
-		out.BoldSet = overlay.BoldSet || overlay.Bold
 	}
-	if overlay.hasItalic() {
+	if overlay.Italic {
 		out.Italic = overlay.Italic
-		out.ItalicSet = overlay.ItalicSet || overlay.Italic
 	}
-	if overlay.hasUnderline() {
+	if overlay.Underline {
 		out.Underline = overlay.Underline
-		out.UnderlineSet = overlay.UnderlineSet || overlay.Underline
 	}
-	if overlay.hasStrikethrough() {
+	if overlay.Strikethrough {
 		out.Strikethrough = overlay.Strikethrough
-		out.StrikeSet = overlay.StrikeSet || overlay.Strikethrough
 	}
 	return out
-}
-
-func (s CellStyle) hasBold() bool {
-	return s.BoldSet || s.Bold
-}
-
-func (s CellStyle) hasItalic() bool {
-	return s.ItalicSet || s.Italic
-}
-
-func (s CellStyle) hasUnderline() bool {
-	return s.UnderlineSet || s.Underline
-}
-
-func (s CellStyle) hasStrikethrough() bool {
-	return s.StrikeSet || s.Strikethrough
 }
 
 type Cell struct {
