@@ -19,8 +19,13 @@ const (
 )
 
 type PreferencesAction struct {
-	Kind PreferencesActionKind
-	UI   config.UI
+	Kind   PreferencesActionKind
+	Values PreferencesValues
+}
+
+type PreferencesValues struct {
+	UI               config.UI
+	MaxToolLoopSteps int
 }
 
 type preferencesFocus int
@@ -37,6 +42,7 @@ const (
 	preferencesFieldTheme preferencesFieldKind = iota
 	preferencesFieldSpinner
 	preferencesFieldToggle
+	preferencesFieldInteger
 )
 
 type preferencesField struct {
@@ -52,8 +58,8 @@ type preferencesTab struct {
 }
 
 type PreferencesDialog struct {
-	original     config.UI
-	draft        config.UI
+	original     PreferencesValues
+	draft        PreferencesValues
 	themeNames   []string
 	spinnerFrame int
 	tabs         []preferencesTab
@@ -63,11 +69,17 @@ type PreferencesDialog struct {
 	buttonIndex  int
 }
 
-func NewPreferencesDialog(current config.UI, themeNames []string) PreferencesDialog {
+func NewPreferencesDialog(current PreferencesValues, themeNames []string) PreferencesDialog {
 	if len(themeNames) == 0 {
 		themeNames = []string{theme.Default().Name}
 	}
 	tabs := []preferencesTab{
+		{
+			Title: "General",
+			Fields: []preferencesField{
+				{Kind: preferencesFieldInteger, ID: "max_tool_loop_steps", Label: "Tool Turns", Description: "Maximum model tool turns before continuation pauses"},
+			},
+		},
 		{
 			Title: "Appearance",
 			Fields: []preferencesField{
@@ -109,17 +121,25 @@ func (d *PreferencesDialog) Tick() {
 }
 
 func (d PreferencesDialog) Draft() config.UI {
-	return d.draft
+	return d.draft.UI
 }
 
 func (d PreferencesDialog) Original() config.UI {
+	return d.original.UI
+}
+
+func (d PreferencesDialog) DraftValues() PreferencesValues {
+	return d.draft
+}
+
+func (d PreferencesDialog) OriginalValues() PreferencesValues {
 	return d.original
 }
 
 func (d *PreferencesDialog) Update(msg ui.KeyMsg) PreferencesAction {
 	switch msg.String() {
 	case "esc":
-		return PreferencesAction{Kind: PreferencesActionCancel, UI: d.original}
+		return PreferencesAction{Kind: PreferencesActionCancel, Values: d.original}
 	case "tab":
 		d.focus = (d.focus + 1) % 3
 		return PreferencesAction{}
@@ -205,9 +225,9 @@ func (d *PreferencesDialog) activate() PreferencesAction {
 		return d.adjustField(1)
 	case preferencesFocusButtons:
 		if d.buttonIndex == 0 {
-			return PreferencesAction{Kind: PreferencesActionApply, UI: d.draft}
+			return PreferencesAction{Kind: PreferencesActionApply, Values: d.draft}
 		}
-		return PreferencesAction{Kind: PreferencesActionCancel, UI: d.original}
+		return PreferencesAction{Kind: PreferencesActionCancel, Values: d.original}
 	default:
 		return PreferencesAction{}
 	}
@@ -222,7 +242,7 @@ func (d *PreferencesDialog) adjustField(delta int) PreferencesAction {
 	switch field.Kind {
 	case preferencesFieldTheme:
 		idx := 0
-		current := strings.TrimSpace(d.draft.Theme)
+		current := strings.TrimSpace(d.draft.UI.Theme)
 		for i, name := range d.themeNames {
 			if name == current {
 				idx = i
@@ -236,10 +256,10 @@ func (d *PreferencesDialog) adjustField(delta int) PreferencesAction {
 		if idx >= len(d.themeNames) {
 			idx = 0
 		}
-		d.draft.Theme = d.themeNames[idx]
+		d.draft.UI.Theme = d.themeNames[idx]
 	case preferencesFieldSpinner:
 		names := ui.SpinnerNames()
-		idx := ui.SpinnerIndex(d.draft.Spinner)
+		idx := ui.SpinnerIndex(d.draft.UI.Spinner)
 		if idx < 0 {
 			idx = 0
 		}
@@ -250,13 +270,23 @@ func (d *PreferencesDialog) adjustField(delta int) PreferencesAction {
 		if idx >= len(names) {
 			idx = 0
 		}
-		d.draft.Spinner = names[idx]
+		d.draft.UI.Spinner = names[idx]
 	case preferencesFieldToggle:
 		d.setToggle(field.ID, !d.toggleValue(field.ID))
+	case preferencesFieldInteger:
+		switch field.ID {
+		case "max_tool_loop_steps":
+			d.draft.MaxToolLoopSteps += delta
+			if d.draft.MaxToolLoopSteps < 1 {
+				d.draft.MaxToolLoopSteps = 1
+			}
+		default:
+			return PreferencesAction{}
+		}
 	default:
 		return PreferencesAction{}
 	}
-	return PreferencesAction{Kind: PreferencesActionChanged, UI: d.draft}
+	return PreferencesAction{Kind: PreferencesActionChanged, Values: d.draft}
 }
 
 func (d PreferencesDialog) Measure(ctx *ui.Context, constraints ui.Constraints) ui.Size {
@@ -287,17 +317,26 @@ func (d PreferencesDialog) dialog(width int, palette theme.Palette) ui.Element {
 	for idx, field := range d.currentFields() {
 		focused := d.focus == preferencesFocusFields && idx == d.fieldIndex
 		switch field.Kind {
+		case preferencesFieldInteger:
+			value := fmt.Sprintf("%d", d.draft.MaxToolLoopSteps)
+			fieldRows = append(fieldRows, ui.Fixed(ui.ChoiceRow{
+				Label:       field.Label,
+				Description: field.Description,
+				Value:       value,
+				Width:       fieldWidth,
+				Focused:     focused,
+			}))
 		case preferencesFieldTheme:
 			fieldRows = append(fieldRows, ui.Fixed(ui.ChoiceRow{
 				Label:       field.Label,
 				Description: field.Description,
-				Value:       d.draft.Theme,
+				Value:       d.draft.UI.Theme,
 				Width:       fieldWidth,
 				Focused:     focused,
 			}))
 		case preferencesFieldSpinner:
-			style := ui.SpinnerStyleByID(d.draft.Spinner)
-			value := ui.SpinnerFrame(d.draft.Spinner, d.spinnerFrame) + " " + style.Label
+			style := ui.SpinnerStyleByID(d.draft.UI.Spinner)
+			value := ui.SpinnerFrame(d.draft.UI.Spinner, d.spinnerFrame) + " " + style.Label
 			fieldRows = append(fieldRows, ui.Fixed(ui.ChoiceRow{
 				Label:       field.Label,
 				Description: field.Description,
@@ -365,7 +404,7 @@ func (d PreferencesDialog) dialog(width int, palette theme.Palette) ui.Element {
 					},
 				}),
 				ui.Fixed(buttons),
-				ui.Fixed(ui.Static{Content: fmt.Sprintf("Theme: %s  Spinner: %s", strings.TrimSpace(d.draft.Theme), ui.SpinnerStyleByID(d.draft.Spinner).Label)}),
+				ui.Fixed(ui.Static{Content: fmt.Sprintf("Theme: %s  Spinner: %s  Tool Turns: %d", strings.TrimSpace(d.draft.UI.Theme), ui.SpinnerStyleByID(d.draft.UI.Spinner).Label, d.draft.MaxToolLoopSteps)}),
 			},
 			Spacing: 2,
 		},
@@ -387,19 +426,19 @@ func (d PreferencesDialog) currentFields() []preferencesField {
 func (d PreferencesDialog) toggleValue(id string) bool {
 	switch id {
 	case "cursor_blink":
-		return d.draft.CursorBlink
+		return d.draft.UI.CursorBlink
 	case "half_blocks":
-		return d.draft.HalfBlocks
+		return d.draft.UI.HalfBlocks
 	case "show_sidebar":
-		return d.draft.ShowSidebar
+		return d.draft.UI.ShowSidebar
 	case "show_timestamps":
-		return d.draft.ShowTimestamps
+		return d.draft.UI.ShowTimestamps
 	case "show_reasoning":
-		return d.draft.ShowReasoning
+		return d.draft.UI.ShowReasoning
 	case "show_system":
-		return d.draft.ShowSystem
+		return d.draft.UI.ShowSystem
 	case "mouse":
-		return d.draft.Mouse
+		return d.draft.UI.Mouse
 	default:
 		return false
 	}
@@ -408,18 +447,18 @@ func (d PreferencesDialog) toggleValue(id string) bool {
 func (d *PreferencesDialog) setToggle(id string, value bool) {
 	switch id {
 	case "cursor_blink":
-		d.draft.CursorBlink = value
+		d.draft.UI.CursorBlink = value
 	case "half_blocks":
-		d.draft.HalfBlocks = value
+		d.draft.UI.HalfBlocks = value
 	case "show_sidebar":
-		d.draft.ShowSidebar = value
+		d.draft.UI.ShowSidebar = value
 	case "show_timestamps":
-		d.draft.ShowTimestamps = value
+		d.draft.UI.ShowTimestamps = value
 	case "show_reasoning":
-		d.draft.ShowReasoning = value
+		d.draft.UI.ShowReasoning = value
 	case "show_system":
-		d.draft.ShowSystem = value
+		d.draft.UI.ShowSystem = value
 	case "mouse":
-		d.draft.Mouse = value
+		d.draft.UI.Mouse = value
 	}
 }

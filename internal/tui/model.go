@@ -5515,14 +5515,14 @@ func (m *Model) handlePreferencesKey(msg ui.KeyMsg) ui.Cmd {
 	action := m.preferences.Update(msg)
 	switch action.Kind {
 	case dialogs.PreferencesActionChanged:
-		cmd, err := m.applyUIConfig(action.UI, false)
+		cmd, err := m.applyPreferences(action.Values, false)
 		if err != nil {
 			m.status = fmt.Sprintf("preferences preview failed: %v", err)
 			return m.syncWindowTitleCmd()
 		}
 		return ui.Batch(cmd, m.syncWindowTitleCmd())
 	case dialogs.PreferencesActionApply:
-		cmd, err := m.applyUIConfig(action.UI, true)
+		cmd, err := m.applyPreferences(action.Values, true)
 		if err != nil {
 			m.status = fmt.Sprintf("preferences save failed: %v", err)
 			return m.syncWindowTitleCmd()
@@ -5531,7 +5531,7 @@ func (m *Model) handlePreferencesKey(msg ui.KeyMsg) ui.Cmd {
 		m.status = "Preferences saved"
 		return ui.Batch(cmd, m.syncWindowTitleCmd())
 	case dialogs.PreferencesActionCancel:
-		cmd, err := m.applyUIConfig(action.UI, false)
+		cmd, err := m.applyPreferences(action.Values, false)
 		if err != nil {
 			m.status = fmt.Sprintf("preferences restore failed: %v", err)
 			return m.syncWindowTitleCmd()
@@ -6138,7 +6138,10 @@ func sessionTokenSummary(m *Model, sessionID int64) string {
 }
 
 func (m *Model) openPreferencesDialog() {
-	dialog := dialogs.NewPreferencesDialog(m.cfg.UI, theme.Names())
+	dialog := dialogs.NewPreferencesDialog(dialogs.PreferencesValues{
+		UI:               m.cfg.UI,
+		MaxToolLoopSteps: m.cfg.MaxToolLoopSteps,
+	}, theme.Names())
 	m.preferences = &dialog
 	m.syncComposerVisibility()
 }
@@ -6984,6 +6987,23 @@ func (m *Model) applyUIConfig(next config.UI, save bool) (ui.Cmd, error) {
 	}
 	cmds = append(cmds, func() ui.Msg { return ui.DisableMouse() })
 	return ui.Batch(cmds...), nil
+}
+
+func (m *Model) applyPreferences(next dialogs.PreferencesValues, save bool) (ui.Cmd, error) {
+	cmd, err := m.applyUIConfig(next.UI, false)
+	if err != nil {
+		return nil, err
+	}
+	if next.MaxToolLoopSteps <= 0 {
+		next.MaxToolLoopSteps = config.Default().MaxToolLoopSteps
+	}
+	m.cfg.MaxToolLoopSteps = next.MaxToolLoopSteps
+	if save {
+		if err := m.cfg.Save(); err != nil {
+			return nil, err
+		}
+	}
+	return cmd, nil
 }
 
 func spinnerTickCmd() ui.Cmd {

@@ -20,8 +20,8 @@ func TestLoadWritesDefaultConfig(t *testing.T) {
 	if cfg.DefaultProvider != "" {
 		t.Fatalf("expected no default provider, got %q", cfg.DefaultProvider)
 	}
-	if cfg.MaxToolLoopSteps != 50 {
-		t.Fatalf("expected default max tool loop steps 50, got %d", cfg.MaxToolLoopSteps)
+	if cfg.MaxToolLoopSteps != 500 {
+		t.Fatalf("expected default max tool loop steps 500, got %d", cfg.MaxToolLoopSteps)
 	}
 	if cfg.Permissions.Profile != "default" {
 		t.Fatalf("unexpected permission profile: %s", cfg.Permissions.Profile)
@@ -127,7 +127,7 @@ func TestApplyDefaultsFillsMissingMaxToolLoopSteps(t *testing.T) {
 
 	cfg.applyDefaults()
 
-	if cfg.MaxToolLoopSteps != 50 {
+	if cfg.MaxToolLoopSteps != 500 {
 		t.Fatalf("expected default max tool loop steps applied, got %d", cfg.MaxToolLoopSteps)
 	}
 }

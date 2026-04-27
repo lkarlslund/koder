@@ -3448,8 +3448,14 @@ func TestPreferencesDialogCancelRestoresOriginalUI(t *testing.T) {
 	}
 	m.openPreferencesDialog()
 
-	updated, _ := m.handleKey(ui.KeyMsg{Type: ui.KeyRight})
+	updated, _ := m.handleKey(ui.KeyMsg{Type: ui.KeyShiftTab})
 	next := updated.(*Model)
+	updated, _ = next.handleKey(ui.KeyMsg{Type: ui.KeyRight})
+	next = updated.(*Model)
+	updated, _ = next.handleKey(ui.KeyMsg{Type: ui.KeyTab})
+	next = updated.(*Model)
+	updated, _ = next.handleKey(ui.KeyMsg{Type: ui.KeyRight})
+	next = updated.(*Model)
 	if next.cfg.UI.Theme == "flexoki" {
 		t.Fatal("expected preferences preview to change current theme")
 	}
@@ -3478,6 +3484,60 @@ func TestPreferencesDialogApplySavesUIConfig(t *testing.T) {
 	}
 	cfg.UI.Theme = "flexoki"
 	cfg.UI.ShowSidebar = true
+	cfg.MaxToolLoopSteps = 500
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	m, err := New(cfg, nil, nil, StartupModeNew, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.openPreferencesDialog()
+
+	updated, _ := m.handleKey(ui.KeyMsg{Type: ui.KeyShiftTab})
+	next := updated.(*Model)
+	updated, _ = next.handleKey(ui.KeyMsg{Type: ui.KeyRight})
+	next = updated.(*Model)
+	updated, _ = next.handleKey(ui.KeyMsg{Type: ui.KeyTab})
+	next = updated.(*Model)
+	updated, _ = next.handleKey(ui.KeyMsg{Type: ui.KeyRight})
+	next = updated.(*Model)
+	updated, _ = next.handleKey(ui.KeyMsg{Type: ui.KeyTab})
+	next = updated.(*Model)
+	updated, _ = next.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
+	next = updated.(*Model)
+
+	if next.hasPreferencesDialog() {
+		t.Fatal("expected preferences dialog to close after apply")
+	}
+	if next.cfg.UI.Theme == "flexoki" {
+		t.Fatal("expected preferences apply to persist a different theme")
+	}
+	if next.cfg.MaxToolLoopSteps != 500 {
+		t.Fatalf("expected tool loop limit unchanged, got %d", next.cfg.MaxToolLoopSteps)
+	}
+	reloaded, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.UI.Theme != next.cfg.UI.Theme {
+		t.Fatalf("expected saved theme %q, got %q", next.cfg.UI.Theme, reloaded.UI.Theme)
+	}
+	if reloaded.MaxToolLoopSteps != next.cfg.MaxToolLoopSteps {
+		t.Fatalf("expected saved tool loop limit %d, got %d", next.cfg.MaxToolLoopSteps, reloaded.MaxToolLoopSteps)
+	}
+}
+
+func TestPreferencesDialogApplySavesToolLoopLimit(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := cfg.Save(); err != nil {
 		t.Fatal(err)
 	}
@@ -3495,18 +3555,15 @@ func TestPreferencesDialogApplySavesUIConfig(t *testing.T) {
 	updated, _ = next.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
 	next = updated.(*Model)
 
-	if next.hasPreferencesDialog() {
-		t.Fatal("expected preferences dialog to close after apply")
-	}
-	if next.cfg.UI.Theme == "flexoki" {
-		t.Fatal("expected preferences apply to persist a different theme")
+	if next.cfg.MaxToolLoopSteps != 501 {
+		t.Fatalf("expected tool loop limit incremented to 501, got %d", next.cfg.MaxToolLoopSteps)
 	}
 	reloaded, err := config.Load()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if reloaded.UI.Theme != next.cfg.UI.Theme {
-		t.Fatalf("expected saved theme %q, got %q", next.cfg.UI.Theme, reloaded.UI.Theme)
+	if reloaded.MaxToolLoopSteps != 501 {
+		t.Fatalf("expected saved tool loop limit 501, got %d", reloaded.MaxToolLoopSteps)
 	}
 }
 

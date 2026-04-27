@@ -63,8 +63,8 @@ func TestSystemPromptDoesNotMentionInternalSlashCommands(t *testing.T) {
 
 func TestMaxToolLoopStepsDefaultsToTwenty(t *testing.T) {
 	engine := New(testConfig(t), nil, nil, nil, t.TempDir())
-	if got := engine.maxToolLoopSteps(); got != 50 {
-		t.Fatalf("expected default max tool loop steps 50, got %d", got)
+	if got := engine.maxToolLoopSteps(); got != 500 {
+		t.Fatalf("expected default max tool loop steps 500, got %d", got)
 	}
 }
 
