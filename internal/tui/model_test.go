@@ -4573,7 +4573,7 @@ func TestRenderUserMessageUsesAccentBarOnAllLines(t *testing.T) {
 		},
 	}
 
-	got := m.renderUserMessage("hello", "")
+	got := newTranscriptRenderer(&m).renderUserMessage("hello", "")
 	lines := strings.Split(got, "\n")
 	if len(lines) != 3 {
 		t.Fatalf("expected 3 user message lines, got %d in %q", len(lines), got)
@@ -4600,7 +4600,7 @@ func TestRenderUserMessageCanDisableHalfBlocks(t *testing.T) {
 		},
 	}
 
-	got := m.renderUserMessage("hello", "")
+	got := newTranscriptRenderer(&m).renderUserMessage("hello", "")
 	if strings.Contains(got, "▄") || strings.Contains(got, "▀") || strings.Contains(got, "█") {
 		t.Fatalf("expected classic user message rendering when half blocks disabled, got %q", got)
 	}
@@ -4787,7 +4787,7 @@ func TestRenderMessagePartsShowsReasoningBeforeText(t *testing.T) {
 		showReasoning: true,
 	}
 
-	got := m.renderMessageParts([]domain.Part{
+	got := newTranscriptRenderer(&m).renderMessageParts([]domain.Part{
 		{Kind: domain.PartKindText, Body: "final answer"},
 		{Kind: domain.PartKindReasoning, Body: "thinking first"},
 	})
@@ -4815,7 +4815,7 @@ func TestRenderStyledMessagePartsShowsReasoningBeforeText(t *testing.T) {
 	m.showReasoning = true
 	m.viewport.Width = 60
 
-	got := ui.PlainStyledText(m.renderStyledMessageParts([]domain.Part{
+	got := ui.PlainStyledText(newTranscriptRenderer(&m).renderStyledMessageParts([]domain.Part{
 		{Kind: domain.PartKindText, Body: "final answer"},
 		{Kind: domain.PartKindReasoning, Body: "thinking first"},
 	}))
@@ -4854,7 +4854,7 @@ func TestTranscriptBlocksIncludePendingAssistantTurn(t *testing.T) {
 	if blocks[0].Message.Role != domain.MessageRoleAssistant {
 		t.Fatalf("expected assistant pending block, got %#v", blocks[0].Message)
 	}
-	got := ui.PlainStyledText(m.renderStyledMessageParts(blocks[0].Parts))
+	got := ui.PlainStyledText(newTranscriptRenderer(&m).renderStyledMessageParts(blocks[0].Parts))
 	if !strings.Contains(got, "partial answer") || !strings.Contains(got, "thinking first") {
 		t.Fatalf("expected pending assistant content, got %q", got)
 	}
@@ -4863,7 +4863,7 @@ func TestTranscriptBlocksIncludePendingAssistantTurn(t *testing.T) {
 func TestRenderMessagePartsSkipsSystemNotice(t *testing.T) {
 	m := Model{}
 
-	got := m.renderMessageParts([]domain.Part{
+	got := newTranscriptRenderer(&m).renderMessageParts([]domain.Part{
 		{Kind: domain.PartKindText, Body: "final answer"},
 		{Kind: domain.PartKindSystemNotice, Body: "usage", MetaJSON: `{"PromptTokens":1}`},
 	})
@@ -4884,7 +4884,7 @@ func TestRenderMessagePartsShowsSystemNoticeWhenEnabled(t *testing.T) {
 	}
 	m.showSystem = true
 
-	got := m.renderMessageParts([]domain.Part{
+	got := newTranscriptRenderer(&m).renderMessageParts([]domain.Part{
 		{Kind: domain.PartKindText, Body: "final answer"},
 		{Kind: domain.PartKindSystemNotice, Body: "usage", MetaJSON: `{"PromptTokens":1}`},
 	})
@@ -4905,7 +4905,7 @@ func TestRenderMessagePartsShowsNonUsageSystemNoticeWhenEnabled(t *testing.T) {
 	}
 	m.showSystem = true
 
-	got := m.renderMessageParts([]domain.Part{
+	got := newTranscriptRenderer(&m).renderMessageParts([]domain.Part{
 		{Kind: domain.PartKindText, Body: "final answer"},
 		{Kind: domain.PartKindSystemNotice, Body: "provider warning", MetaJSON: `{"detail":"retry suggested"}`},
 	})
@@ -4921,7 +4921,7 @@ func TestRenderMessagePartsShowsNonUsageSystemNoticeWhenEnabled(t *testing.T) {
 func TestRenderMessagePartsShowsEventNotice(t *testing.T) {
 	m := Model{}
 
-	got := m.renderMessageParts([]domain.Part{
+	got := newTranscriptRenderer(&m).renderMessageParts([]domain.Part{
 		{Kind: domain.PartKindText, Body: "final answer"},
 		{Kind: domain.PartKindEventNotice, Body: "Error: chat status 429"},
 	})
@@ -4937,7 +4937,7 @@ func TestRenderMessagePartsShowsEventNotice(t *testing.T) {
 func TestRenderMessagePartsSkipsLoopPauseEventNotice(t *testing.T) {
 	m := Model{}
 
-	got := m.renderMessageParts([]domain.Part{
+	got := newTranscriptRenderer(&m).renderMessageParts([]domain.Part{
 		{Kind: domain.PartKindText, Body: "final answer"},
 		{Kind: domain.PartKindEventNotice, Body: "Paused continuation after repeated identical read calls.", MetaJSON: `{"kind":"loop_pause","reason":"repeated_tool","tool":"read"}`},
 	})
@@ -4953,7 +4953,7 @@ func TestRenderMessagePartsSkipsLoopPauseEventNotice(t *testing.T) {
 func TestRenderMessagePartsShowsAssistantNarrationWithoutSystemPrefix(t *testing.T) {
 	m := Model{}
 
-	got := m.renderMessageParts([]domain.Part{
+	got := newTranscriptRenderer(&m).renderMessageParts([]domain.Part{
 		{Kind: domain.PartKindText, Body: "There are two main functions. Let me check and remove the duplicate:"},
 		{Kind: domain.PartKindToolCall, Body: `{"path":"main.go","tool":"read","tool_call_id":"call_1"}`, MetaJSON: `{"path":"main.go","tool":"read","tool_call_id":"call_1"}`},
 	})
@@ -5035,7 +5035,7 @@ func TestTranscriptRendersLoopPauseAsCard(t *testing.T) {
 func TestRenderReasoningBlockStartsWithoutBlankLine(t *testing.T) {
 	m := Model{}
 
-	got := m.renderReasoningBlock("thinking first")
+	got := newTranscriptRenderer(&m).renderReasoningBlock("thinking first")
 	lines := strings.Split(got, "\n")
 	if len(lines) < 1 {
 		t.Fatalf("expected reasoning output, got %q", got)

@@ -78,11 +78,12 @@ func (i *userMessageTranscriptItem) Update(msg domain.Message, parts []domain.Pa
 }
 
 func (i *userMessageTranscriptItem) Refresh(m *Model) {
-	body := m.renderUserMessageParts(i.parts)
+	renderer := newTranscriptRenderer(m)
+	body := renderer.renderUserMessageParts(i.parts)
 	if strings.TrimSpace(body) == "" {
 		body = strings.TrimSpace(i.message.Summary)
 	}
-	i.setElement(m.renderUserMessageElement(body, timestamp(i.message.CreatedAt, m.cfg.UI.ShowTimestamps)))
+	i.setElement(renderer.renderUserMessageElement(body, timestamp(i.message.CreatedAt, m.cfg.UI.ShowTimestamps)))
 }
 
 type assistantMessageTranscriptItem struct {
@@ -112,12 +113,10 @@ func (i *assistantMessageTranscriptItem) SetReasoningVisible(v bool) { i.showRea
 func (i *assistantMessageTranscriptItem) SetSystemVisible(v bool)    { i.showSystem = v }
 
 func (i *assistantMessageTranscriptItem) Refresh(m *Model) {
-	origReasoning, origSystem := m.showReasoning, m.showSystem
-	m.showReasoning, m.showSystem = i.showReasoning, i.showSystem
-	defer func() {
-		m.showReasoning, m.showSystem = origReasoning, origSystem
-	}()
-	i.setElement(m.renderTranscriptMessageElement(i.message, i.parts))
+	renderer := newTranscriptRenderer(m)
+	renderer.showReasoning = i.showReasoning
+	renderer.showSystem = i.showSystem
+	i.setElement(renderer.renderTranscriptMessageElement(i.message, i.parts))
 }
 
 type pendingAssistantTranscriptItem struct {
@@ -162,10 +161,9 @@ func (i *pendingAssistantTranscriptItem) Parts() []domain.Part {
 func (i *pendingAssistantTranscriptItem) Refresh(m *Model) {
 	msg := domain.Message{Role: domain.MessageRoleAssistant, CreatedAt: i.createdAt}
 	parts := i.Parts()
-	origReasoning := m.showReasoning
-	m.showReasoning = i.showReasoning
-	defer func() { m.showReasoning = origReasoning }()
-	i.setElement(m.renderTranscriptMessageElement(msg, parts))
+	renderer := newTranscriptRenderer(m)
+	renderer.showReasoning = i.showReasoning
+	i.setElement(renderer.renderTranscriptMessageElement(msg, parts))
 }
 
 type toolRunTranscriptItem interface {
