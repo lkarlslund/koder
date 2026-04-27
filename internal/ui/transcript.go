@@ -623,7 +623,6 @@ func renderHalfBlockSurface(width int, char string, palette theme.Palette) Surfa
 	if width <= 0 {
 		return Surface{}
 	}
-	char = invertedHalfBlockChar(char)
 	s := BlankSurface(width, 1)
 	s.WriteText(0, 0, char, CellStyle{FG: cellColor(palette.UserAccentBar)})
 	if width > 1 {
@@ -633,17 +632,6 @@ func renderHalfBlockSurface(width int, char string, palette theme.Palette) Surfa
 		}
 	}
 	return s
-}
-
-func invertedHalfBlockChar(char string) string {
-	switch char {
-	case "▄":
-		return "▀"
-	case "▀":
-		return "▄"
-	default:
-		return char
-	}
 }
 
 func appendSurfaceRows(dst Surface, y int, src Surface) Surface {
