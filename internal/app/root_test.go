@@ -1,9 +1,16 @@
 package app
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/spf13/cobra"
+
+	"github.com/lkarlslund/koder/internal/debugsrv"
+	"github.com/lkarlslund/koder/internal/version"
 )
 
 func TestStartupOptionsResolveDefaultsToCurrentDirectory(t *testing.T) {
@@ -92,5 +99,192 @@ func TestStartupOptionsResolveRejectsFilePath(t *testing.T) {
 	_, err := (startupOptions{cwd: file}).resolve()
 	if err == nil {
 		t.Fatal("expected directory error")
+	}
+}
+
+func TestBindStartupFlagsRegistersAliases(t *testing.T) {
+	var opts startupOptions
+	cmd := &cobra.Command{}
+	bindStartupFlags(cmd, &opts)
+
+	cwdFlag := cmd.PersistentFlags().Lookup("cwd")
+	if cwdFlag == nil {
+		t.Fatal("expected cwd flag to be registered")
+	}
+	projectRootFlag := cmd.PersistentFlags().Lookup("project-root")
+	if projectRootFlag == nil {
+		t.Fatal("expected project-root flag to be registered")
+	}
+}
+
+func TestNewRootCommandRegistersSubcommands(t *testing.T) {
+	cmd := NewRootCommand()
+	want := []string{"doctor", "version", "resume", "session", "debug"}
+	for _, name := range want {
+		if child, _, err := cmd.Find([]string{name}); err != nil || child == nil || child.Name() != name {
+			t.Fatalf("expected subcommand %q to be registered, child=%v err=%v", name, child, err)
+		}
+	}
+}
+
+func TestDebugInfoReportsUnsetEnv(t *testing.T) {
+	t.Setenv(debugsrv.EnvDebugAPI, "")
+	cmd := newDebugCommand()
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{"info"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute debug info: %v", err)
+	}
+	if got := buf.String(); !strings.Contains(got, debugsrv.EnvDebugAPI+" is not set") {
+		t.Fatalf("expected unset message, got %q", got)
+	}
+}
+
+func TestDebugInfoReportsConfiguredAddress(t *testing.T) {
+	t.Setenv(debugsrv.EnvDebugAPI, "127.0.0.1:61347")
+	cmd := newDebugCommand()
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{"info"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute debug info: %v", err)
+	}
+	if got := buf.String(); !strings.Contains(got, debugsrv.EnvDebugAPI+"=127.0.0.1:61347") {
+		t.Fatalf("expected configured address, got %q", got)
+	}
+}
+
+func TestDebugInfoReportsEphemeralAddressHint(t *testing.T) {
+	t.Setenv(debugsrv.EnvDebugAPI, "127.0.0.1:0")
+	cmd := newDebugCommand()
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{"info"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute debug info: %v", err)
+	}
+	got := buf.String()
+	if !strings.Contains(got, "resolved address is only known while koder is running") {
+		t.Fatalf("expected ephemeral address hint, got %q", got)
+	}
+}
+
+func TestVersionCommandPrintsBuildInfo(t *testing.T) {
+	originalName := version.Name
+	originalVersion := version.Version
+	originalCommit := version.Commit
+	originalDirty := version.Dirty
+	originalBuildTime := version.BuildTime
+	t.Cleanup(func() {
+		version.Name = originalName
+		version.Version = originalVersion
+		version.Commit = originalCommit
+		version.Dirty = originalDirty
+		version.BuildTime = originalBuildTime
+	})
+
+	version.Name = "koder-test"
+	version.Version = "1.2.3"
+	version.Commit = " abc123 "
+	version.Dirty = " false "
+	version.BuildTime = " 2026-04-27T12:00:00Z "
+
+	cmd := newVersionCommand()
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute version: %v", err)
+	}
+	got := buf.String()
+	for _, want := range []string{
+		"koder-test 1.2.3",
+		"commit: abc123",
+		"dirty: false",
+		"build_time: 2026-04-27T12:00:00Z",
+		"go_version: ",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected output to contain %q, got %q", want, got)
+		}
+	}
+}
+
+func TestDoctorCommandRejectsMissingProviderConfig(t *testing.T) {
+	configRoot := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", configRoot)
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+
+	cmd := newDoctorCommand()
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected missing provider config error")
+	}
+	if !strings.Contains(err.Error(), "configure at least one provider") {
+		t.Fatalf("expected provider config hint, got %v", err)
+	}
+}
+
+func TestDoctorCommandRejectsMissingDefaultProviderEntry(t *testing.T) {
+	configRoot := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", configRoot)
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+
+	configDir := filepath.Join(configRoot, "koder")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	configBody := strings.Join([]string{
+		"default_provider = \"ghost\"",
+		"",
+		"[providers.other]",
+		"name = \"Other\"",
+		"base_url = \"http://127.0.0.1:1/v1\"",
+		"default_model = \"test\"",
+	}, "\n")
+	if err := os.WriteFile(filepath.Join(configDir, "config.toml"), []byte(configBody), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cmd := newDoctorCommand()
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected missing default provider error")
+	}
+	if !strings.Contains(err.Error(), `default provider "ghost" not configured`) {
+		t.Fatalf("expected missing default provider error, got %v", err)
+	}
+}
+
+func TestSessionDumpCommandRejectsMissingID(t *testing.T) {
+	cmd := newSessionDumpCommand()
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected missing id error")
+	}
+	if !strings.Contains(err.Error(), "--id must be greater than zero") {
+		t.Fatalf("expected id validation error, got %v", err)
 	}
 }

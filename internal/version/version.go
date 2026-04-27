@@ -14,6 +14,8 @@ var (
 	Dirty     = "unknown"
 	BuildTime = "unknown"
 	startedAt = time.Now().UTC()
+
+	executableFunc = os.Executable
 )
 
 type Info struct {
@@ -43,7 +45,7 @@ func Current() Info {
 }
 
 func executablePath() string {
-	path, err := os.Executable()
+	path, err := executableFunc()
 	if err != nil {
 		return ""
 	}
