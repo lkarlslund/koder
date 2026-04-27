@@ -216,15 +216,15 @@ func TestDetectContextWindowFallsBackWhenCompatibleEndpointHasNoProps(t *testing
 	}
 }
 
-func TestSupportsContextWindowDetectionUsesLoopbackCompatibleAPIKeyProvider(t *testing.T) {
+func TestSupportsContextWindowDetectionUsesCompatibleAPIKeyProvider(t *testing.T) {
 	cfg := config.Provider{
 		Kind:       ProviderKindCompatible,
 		AuthMethod: string(AuthMethodAPIKey),
-		BaseURL:    "http://127.0.0.1:8000/v1",
+		BaseURL:    "https://api.example.com/v1",
 	}
 
 	if !SupportsContextWindowDetection(cfg) {
-		t.Fatal("expected loopback compatible api-key provider to support context window detection")
+		t.Fatal("expected compatible api-key provider to support context window detection")
 	}
 }
 

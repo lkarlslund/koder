@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -381,33 +380,8 @@ func DetectContextWindow(ctx context.Context, providerID string, cfg config.Prov
 }
 
 func SupportsContextWindowDetection(cfg config.Provider) bool {
-	if strings.TrimSpace(cfg.Kind) != ProviderKindCompatible {
-		return false
-	}
-	baseURL := strings.TrimSpace(cfg.BaseURL)
-	if baseURL == "" {
-		return false
-	}
-	if strings.TrimSpace(cfg.AuthMethod) == string(AuthMethodLocal) {
-		return true
-	}
-	return isLocalCompatibleBaseURL(baseURL)
-}
-
-func isLocalCompatibleBaseURL(raw string) bool {
-	parsed, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil {
-		return false
-	}
-	host := strings.TrimSpace(parsed.Hostname())
-	if host == "" {
-		return false
-	}
-	if strings.EqualFold(host, "localhost") {
-		return true
-	}
-	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback()
+	return strings.TrimSpace(cfg.Kind) == ProviderKindCompatible &&
+		strings.TrimSpace(cfg.BaseURL) != ""
 }
 
 func contextWindowProbeBaseURLs(baseURL string) []string {
