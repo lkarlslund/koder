@@ -1212,7 +1212,14 @@ func (s Static) Measure(_ *Context, constraints Constraints) Size {
 }
 
 func (s Static) Render(_ *Context, bounds Rect) Surface {
-	return SurfaceFromString(s.Content).normalize(bounds.W, bounds.H)
+	return renderOwnedSurface(nil, bounds, s.RenderTo)
+}
+
+func (s Static) RenderTo(_ *Context, bounds Rect, dst *Surface) {
+	if dst == nil || bounds.W <= 0 || bounds.H <= 0 {
+		return
+	}
+	*dst = dst.placeAt(bounds.X, bounds.Y, SurfaceFromString(s.Content).normalize(bounds.W, bounds.H))
 }
 
 type SurfaceBox struct {

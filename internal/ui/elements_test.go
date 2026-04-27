@@ -3,6 +3,8 @@ package ui
 import (
 	"strings"
 	"testing"
+
+	"github.com/charmbracelet/lipgloss"
 )
 
 type fillBox struct {
@@ -209,6 +211,43 @@ func TestConstrainedClampsChildSize(t *testing.T) {
 
 	if got != "WI  " {
 		t.Fatalf("unexpected constrained render: %q", got)
+	}
+}
+
+func TestStaticRenderMatchesRenderTo(t *testing.T) {
+	assertRenderMatchesRenderTo(t, nil, Static{Content: "A\nB"}, Rect{W: 2, H: 2})
+}
+
+func TestLabelRenderMatchesRenderTo(t *testing.T) {
+	element := Label{Text: "hello", Style: lipgloss.NewStyle().Bold(true)}
+	assertRenderMatchesRenderTo(t, &Context{Runtime: &Runtime{}}, element, Rect{W: 8, H: 1})
+}
+
+func TestParagraphRenderMatchesRenderTo(t *testing.T) {
+	element := Paragraph{Text: "wrapped paragraph text"}
+	assertRenderMatchesRenderTo(t, nil, element, Rect{W: 8, H: 4})
+}
+
+func TestHitBoxRenderMatchesRenderTo(t *testing.T) {
+	ctx := &Context{Runtime: &Runtime{}}
+	element := HitBox{ID: "hit", Child: Static{Content: "X"}}
+	assertRenderMatchesRenderTo(t, ctx, element, Rect{W: 2, H: 1})
+}
+
+func TestSimpleWidgetRenderToAvoidsOwnerSurfaceAllocation(t *testing.T) {
+	element := Paragraph{Text: "alpha beta gamma"}
+
+	ResetSurfaceAllocationStats()
+	_ = element.Render(nil, Rect{W: 8, H: 3})
+	renderStats := SurfaceAllocationStatsSnapshot()
+
+	dst := TransparentSurface(8, 3)
+	ResetSurfaceAllocationStats()
+	element.RenderTo(nil, Rect{W: 8, H: 3}, &dst)
+	renderToStats := SurfaceAllocationStatsSnapshot()
+
+	if renderStats.Transparent <= renderToStats.Transparent {
+		t.Fatalf("expected Render to allocate at least one additional transparent owner surface, got render=%#v renderTo=%#v", renderStats, renderToStats)
 	}
 }
 

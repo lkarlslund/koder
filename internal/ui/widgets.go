@@ -18,11 +18,18 @@ func (l Label) Measure(_ *Context, constraints Constraints) Size {
 	return constraints.Clamp(Size{W: lipgloss.Width(l.Text), H: 1})
 }
 
-func (l Label) Render(_ *Context, bounds Rect) Surface {
+func (l Label) Render(ctx *Context, bounds Rect) Surface {
+	return renderOwnedSurface(ctx, bounds, l.RenderTo)
+}
+
+func (l Label) RenderTo(_ *Context, bounds Rect, dst *Surface) {
+	if dst == nil || bounds.W <= 0 || bounds.H <= 0 {
+		return
+	}
 	width := max(1, bounds.W)
-	s := TransparentSurface(width, max(1, bounds.H))
-	s.WriteText(0, 0, PlainTruncate(l.Text, width, ""), lipglossToCellStyle(l.Style))
-	return s.normalize(bounds.W, bounds.H)
+	surface := TransparentSurface(width, max(1, bounds.H))
+	surface.WriteText(0, 0, PlainTruncate(l.Text, width, ""), lipglossToCellStyle(l.Style))
+	*dst = dst.placeAt(bounds.X, bounds.Y, surface.normalize(bounds.W, bounds.H))
 }
 
 type TextPane struct {
@@ -33,8 +40,15 @@ func (t TextPane) Measure(_ *Context, constraints Constraints) Size {
 	return constraints.Clamp(SurfaceFromString(t.Content).Size())
 }
 
-func (t TextPane) Render(_ *Context, bounds Rect) Surface {
-	return SurfaceFromString(t.Content).normalize(bounds.W, bounds.H)
+func (t TextPane) Render(ctx *Context, bounds Rect) Surface {
+	return renderOwnedSurface(ctx, bounds, t.RenderTo)
+}
+
+func (t TextPane) RenderTo(_ *Context, bounds Rect, dst *Surface) {
+	if dst == nil || bounds.W <= 0 || bounds.H <= 0 {
+		return
+	}
+	*dst = dst.placeAt(bounds.X, bounds.Y, SurfaceFromString(t.Content).normalize(bounds.W, bounds.H))
 }
 
 type HitBox struct {
@@ -50,6 +64,13 @@ func (h HitBox) Measure(ctx *Context, constraints Constraints) Size {
 }
 
 func (h HitBox) Render(ctx *Context, bounds Rect) Surface {
+	return renderOwnedSurface(ctx, bounds, h.RenderTo)
+}
+
+func (h HitBox) RenderTo(ctx *Context, bounds Rect, dst *Surface) {
+	if dst == nil || bounds.W <= 0 || bounds.H <= 0 {
+		return
+	}
 	if ctx != nil && ctx.Runtime != nil && strings.TrimSpace(h.ID) != "" {
 		ctx.Runtime.Register(Control{
 			ID:      h.ID,
@@ -58,9 +79,9 @@ func (h HitBox) Render(ctx *Context, bounds Rect) Surface {
 		})
 	}
 	if h.Child == nil {
-		return TransparentSurface(bounds.W, bounds.H)
+		return
 	}
-	return h.Child.Render(ctx, bounds)
+	renderElementInto(ctx, h.Child, bounds, dst)
 }
 
 func (h HitBox) WalkChildren(_ *Context, visit func(Element)) {
@@ -86,7 +107,14 @@ func (d Divider) Measure(_ *Context, constraints Constraints) Size {
 	return constraints.Clamp(Size{W: width, H: 1})
 }
 
-func (d Divider) Render(_ *Context, bounds Rect) Surface {
+func (d Divider) Render(ctx *Context, bounds Rect) Surface {
+	return renderOwnedSurface(ctx, bounds, d.RenderTo)
+}
+
+func (d Divider) RenderTo(_ *Context, bounds Rect, dst *Surface) {
+	if dst == nil || bounds.W <= 0 || bounds.H <= 0 {
+		return
+	}
 	width := bounds.W
 	if width <= 0 {
 		width = max(1, lipgloss.Width(d.Text))
@@ -97,9 +125,9 @@ func (d Divider) Render(_ *Context, bounds Rect) Surface {
 	} else if lipgloss.Width(text) < width {
 		text += strings.Repeat("─", width-lipgloss.Width(text))
 	}
-	s := TransparentSurface(width, max(1, bounds.H))
-	s.WriteText(0, 0, PlainTruncate(text, width, ""), lipglossToCellStyle(d.Style))
-	return s.normalize(width, bounds.H)
+	surface := TransparentSurface(width, max(1, bounds.H))
+	surface.WriteText(0, 0, PlainTruncate(text, width, ""), lipglossToCellStyle(d.Style))
+	*dst = dst.placeAt(bounds.X, bounds.Y, surface.normalize(width, bounds.H))
 }
 
 type Paragraph struct {
@@ -116,22 +144,29 @@ func (p Paragraph) Measure(_ *Context, constraints Constraints) Size {
 	return constraints.Clamp(Size{W: width, H: len(lines)})
 }
 
-func (p Paragraph) Render(_ *Context, bounds Rect) Surface {
+func (p Paragraph) Render(ctx *Context, bounds Rect) Surface {
+	return renderOwnedSurface(ctx, bounds, p.RenderTo)
+}
+
+func (p Paragraph) RenderTo(_ *Context, bounds Rect, dst *Surface) {
+	if dst == nil || bounds.W <= 0 || bounds.H <= 0 {
+		return
+	}
 	text := strings.TrimSpace(p.Text)
 	if text == "" {
-		return TransparentSurface(max(0, bounds.W), max(0, bounds.H))
+		return
 	}
 	width := bounds.W
 	if width <= 0 {
 		width = lipgloss.Width(text)
 	}
 	lines := p.lines(width)
-	s := TransparentSurface(width, len(lines))
+	surface := TransparentSurface(width, len(lines))
 	style := lipglossToCellStyle(p.Style)
 	for y, line := range lines {
-		s.WriteText(0, y, PlainTruncate(line, width, ""), style)
+		surface.WriteText(0, y, PlainTruncate(line, width, ""), style)
 	}
-	return s.normalize(bounds.W, bounds.H)
+	*dst = dst.placeAt(bounds.X, bounds.Y, surface.normalize(bounds.W, bounds.H))
 }
 
 func (p Paragraph) lines(width int) []string {
