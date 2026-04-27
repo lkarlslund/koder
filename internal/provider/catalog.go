@@ -161,9 +161,6 @@ func ValidateDraft(draft ConnectDraft) error {
 	if strings.TrimSpace(draft.BaseURL) == "" {
 		return fmt.Errorf("base url is required")
 	}
-	if draft.AuthMethod == AuthMethodAPIKey && strings.TrimSpace(draft.APIKey) == "" {
-		return fmt.Errorf("api key is required")
-	}
 	if strings.TrimSpace(draft.Model) == "" {
 		return fmt.Errorf("model is required")
 	}

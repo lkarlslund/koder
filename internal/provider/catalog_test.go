@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -84,7 +85,7 @@ func TestConnectDraftToConfigClearsAPIKeyForLocalEndpoints(t *testing.T) {
 	}
 }
 
-func TestValidateDraftRequiresAPIKeyForRemoteProviders(t *testing.T) {
+func TestValidateDraftAllowsEmptyAPIKeyForRemoteProviders(t *testing.T) {
 	err := ValidateDraft(ConnectDraft{
 		ProviderID: "openai",
 		Kind:       ProviderKindCompatible,
@@ -92,8 +93,8 @@ func TestValidateDraftRequiresAPIKeyForRemoteProviders(t *testing.T) {
 		BaseURL:    "https://api.openai.com/v1",
 		Model:      "gpt-5.4",
 	})
-	if err == nil {
-		t.Fatal("expected validation error")
+	if err != nil {
+		t.Fatalf("expected draft validation to allow empty api key, got %v", err)
 	}
 }
 
@@ -116,6 +117,31 @@ func TestProbeUsesValidProviderConfig(t *testing.T) {
 	}, nil)
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestProbeSurfacesUnauthorizedWhenAPIKeyMissing(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "" {
+			t.Fatalf("expected no auth header, got %q", got)
+		}
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"error":{"message":"missing api key"}}`))
+	}))
+	defer server.Close()
+
+	_, err := Probe(context.Background(), ConnectDraft{
+		ProviderID: "openai",
+		Kind:       ProviderKindCompatible,
+		AuthMethod: AuthMethodAPIKey,
+		BaseURL:    server.URL,
+		Model:      "model-a",
+	}, nil)
+	if err == nil {
+		t.Fatal("expected unauthorized probe error")
+	}
+	if got := err.Error(); got == "" || !strings.Contains(got, "401") {
+		t.Fatalf("expected unauthorized error, got %v", err)
 	}
 }
 

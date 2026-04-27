@@ -499,7 +499,7 @@ func (d ConnectDialog) renderInputField(fieldID string, width int, palette theme
 func (d ConnectDialog) placeholderValue(fieldID string) string {
 	switch fieldID {
 	case "api_key":
-		return "(required)"
+		return "(optional)"
 	default:
 		return ""
 	}

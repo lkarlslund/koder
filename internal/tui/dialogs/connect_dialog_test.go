@@ -177,6 +177,9 @@ func TestConnectDialogFormSeparatesLabelsDescriptionsAndInputs(t *testing.T) {
 	if strings.Contains(got, "Model") {
 		t.Fatalf("expected connect dialog to omit model field, got %q", got)
 	}
+	if !strings.Contains(got, "(optional)") {
+		t.Fatalf("expected API key field to show optional placeholder, got %q", got)
+	}
 }
 
 func TestConnectDialogMovesCursorAndInsertsAtCursor(t *testing.T) {
