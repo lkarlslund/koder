@@ -97,11 +97,23 @@ func TestUserMessageHalfBlocksKeepAccentTopAndBottomRows(t *testing.T) {
 
 	top := surface.Lines()[0]
 	bottom := surface.Lines()[2]
-	if !strings.Contains(top, "▄") {
+	if !strings.Contains(top, "▀") {
 		t.Fatalf("expected half-block accent on top row, got %q", top)
 	}
-	if !strings.Contains(bottom, "▀") {
+	if !strings.Contains(bottom, "▄") {
 		t.Fatalf("expected half-block accent on bottom row, got %q", bottom)
+	}
+}
+
+func TestInvertedHalfBlockChar(t *testing.T) {
+	if got := invertedHalfBlockChar("▄"); got != "▀" {
+		t.Fatalf("expected top half block, got %q", got)
+	}
+	if got := invertedHalfBlockChar("▀"); got != "▄" {
+		t.Fatalf("expected bottom half block, got %q", got)
+	}
+	if got := invertedHalfBlockChar("x"); got != "x" {
+		t.Fatalf("expected non-half-block glyph to pass through, got %q", got)
 	}
 }
 

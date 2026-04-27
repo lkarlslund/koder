@@ -4320,10 +4320,10 @@ func TestRenderComposerUsesThreeLineBoxAndFullWidth(t *testing.T) {
 		t.Fatalf("expected 3-line composer box, got %d lines in %q", lipgloss.Height(got), got)
 	}
 	lines := strings.Split(got, "\n")
-	if !strings.Contains(lines[0], "▄") || !strings.Contains(lines[len(lines)-1], "▀") {
+	if !strings.Contains(lines[0], "▀") || !strings.Contains(lines[len(lines)-1], "▄") {
 		t.Fatalf("expected half-block top and bottom lines, got %q", got)
 	}
-	if !strings.HasPrefix(lines[0], "▄") || !strings.HasPrefix(lines[len(lines)-1], "▀") {
+	if !strings.HasPrefix(lines[0], "▀") || !strings.HasPrefix(lines[len(lines)-1], "▄") {
 		t.Fatalf("expected half-height accent strip on separator rows, got %q", got)
 	}
 	if !strings.Contains(lines[1], "█") {
@@ -4351,10 +4351,10 @@ func TestRenderUserMessageUsesAccentBarOnAllLines(t *testing.T) {
 	if len(lines) != 3 {
 		t.Fatalf("expected 3 user message lines, got %d in %q", len(lines), got)
 	}
-	if !strings.Contains(lines[0], "▄") || !strings.Contains(lines[2], "▀") {
+	if !strings.Contains(lines[0], "▀") || !strings.Contains(lines[2], "▄") {
 		t.Fatalf("expected half-block separator rows, got %q", got)
 	}
-	if !strings.HasPrefix(lines[0], "▄") || !strings.HasPrefix(lines[2], "▀") {
+	if !strings.HasPrefix(lines[0], "▀") || !strings.HasPrefix(lines[2], "▄") {
 		t.Fatalf("expected half-height accent strip on separator rows, got %q", got)
 	}
 	if !strings.Contains(lines[1], "█") {
@@ -5586,13 +5586,13 @@ func TestRenderTranscriptMessageUserBubbleHasBlankPaddingLines(t *testing.T) {
 	if len(lines) < 3 {
 		t.Fatalf("expected padded user bubble, got %q", got)
 	}
-	if !strings.Contains(lines[0], "▄") {
+	if !strings.Contains(lines[0], "▀") {
 		t.Fatalf("expected half-block top line, got %q", lines[0])
 	}
 	if !strings.Contains(lines[1], "█") || strings.TrimSpace(strings.ReplaceAll(lines[1], "█", "")) != "hello world" {
 		t.Fatalf("expected padded body line, got %q", lines[1])
 	}
-	if !strings.Contains(lines[len(lines)-1], "▀") {
+	if !strings.Contains(lines[len(lines)-1], "▄") {
 		t.Fatalf("expected half-block bottom line, got %q", lines[len(lines)-1])
 	}
 	wantWidth := lipgloss.Width(lines[1])
@@ -5740,10 +5740,10 @@ func TestRefreshViewportUsesSingleNewlineBetweenBlocksWithHalfBlocks(t *testing.
 
 	m.refreshViewport()
 	got := m.viewport.View()
-	if strings.Contains(got, "▀\n\nreply") {
+	if strings.Contains(got, "▄\n\nreply") {
 		t.Fatalf("expected no extra blank line between user bubble and assistant reply, got %q", got)
 	}
-	if !strings.Contains(got, "▀\nreply") {
+	if !strings.Contains(got, "▄\nreply") {
 		t.Fatalf("expected single newline between user bubble and assistant reply, got %q", got)
 	}
 }
