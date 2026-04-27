@@ -1396,6 +1396,46 @@ func TestSlashSelectionExecutesNoArgsCommandDirectly(t *testing.T) {
 	}
 }
 
+func TestPermissionsPickerApplyAfterSlashCommandInvalidatesComposerArea(t *testing.T) {
+	m := Model{
+		cfg:         testConfig(t),
+		palette:     theme.Default().Palette,
+		composer:    textarea.New(),
+		viewport:    newTranscriptViewport(80, 20),
+		renderCache: &modelRenderCache{},
+		width:       80,
+		height:      24,
+	}
+	m.composer.SetValue("/per")
+	m.updateComposerMenus()
+
+	_ = m.ViewLines()
+	if !m.ensureRenderCache().composerAreaValid {
+		t.Fatal("expected composer area cache to be primed")
+	}
+
+	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
+	next := updated.(*Model)
+	if cmd == nil {
+		t.Fatal("expected direct command execution")
+	}
+	if !next.hasPicker() {
+		t.Fatal("expected /permissions to open immediately from slash menu")
+	}
+
+	updated, cmd = next.submitPickerSelection(permission.ProfileAsk)
+	final := updated.(*Model)
+	if cmd == nil {
+		t.Fatal("expected title sync command after applying permission profile")
+	}
+	if final.composer.Value() != "" {
+		t.Fatalf("expected empty composer after applying permission profile, got %q", final.composer.Value())
+	}
+	if final.ensureRenderCache().composerAreaValid {
+		t.Fatal("expected composer area cache invalidated after clearing slash command")
+	}
+}
+
 func TestRunPromptErrorAppendsAssistantErrorToTranscript(t *testing.T) {
 	m := Model{
 		composer: textarea.New(),

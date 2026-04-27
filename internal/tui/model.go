@@ -3619,13 +3619,17 @@ func (m *Model) resetComposerHistory() {
 func (m *Model) resetComposerInput() {
 	m.composer.Reset()
 	m.resetComposerHistory()
+	m.composerQueries = composerQueryState{}
 	m.updateComposerMenus()
+	m.invalidateFooterCache()
 }
 
 func (m *Model) setComposerValue(value string) {
 	m.composer.SetValue(value)
 	m.composer.SetCursor(len(value))
+	m.composerQueries = composerQueryState{}
 	m.updateComposerMenus()
+	m.invalidateFooterCache()
 }
 
 func (m Model) composerPromptHistory() []string {
