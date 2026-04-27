@@ -19,9 +19,10 @@ const (
 )
 
 type ModelDialogAction struct {
-	Kind     ModelDialogActionKind
-	ModelID  string
-	PresetID string
+	Kind       ModelDialogActionKind
+	ProviderID string
+	ModelID    string
+	PresetID   string
 }
 
 type ModelDialog struct {
@@ -201,6 +202,8 @@ func (d ModelDialog) dialog(width int, palette theme.Palette) ui.Element {
 				ui.Fixed(ui.FlexBox{
 					Direction: ui.DirectionVertical,
 					Children: []ui.Child{
+						ui.Fixed(staticBlock("Provider: " + d.ProviderID)),
+						ui.Fixed(ui.Spacer{H: 1}),
 						ui.Fixed(staticBlock("Filter: " + d.Query)),
 						ui.Fixed(ui.Spacer{H: 1}),
 						ui.Fixed(ui.Section{Width: listWidth, Child: list}),
@@ -316,7 +319,12 @@ func (d ModelDialog) selectCurrent() ModelDialogAction {
 	if !ok {
 		return ModelDialogAction{Kind: ModelDialogActionCancel}
 	}
-	return ModelDialogAction{Kind: ModelDialogActionSelect, ModelID: item.ID, PresetID: provider.NormalizePresetSelection(d.PresetID)}
+	return ModelDialogAction{
+		Kind:       ModelDialogActionSelect,
+		ProviderID: d.ProviderID,
+		ModelID:    item.ID,
+		PresetID:   provider.NormalizePresetSelection(d.PresetID),
+	}
 }
 
 func (d *ModelDialog) ensureButtons() {

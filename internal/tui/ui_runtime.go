@@ -228,12 +228,12 @@ func (m *Model) overlayWindows() []ui.Window {
 			action := m.modelDialog.ActivateControl(controlID)
 			switch action.Kind {
 			case dialogs.ModelDialogActionSelect:
-				if err := m.selectModel(action.ModelID, action.PresetID); err != nil {
+				if err := m.selectModel(action.ProviderID, action.ModelID, action.PresetID); err != nil {
 					m.status = err.Error()
 					return m.syncWindowTitleCmd()
 				}
 				m.closeModelDialog()
-				m.status = "Selected model " + action.ModelID
+				m.status = "Selected " + action.ProviderID + " / " + action.ModelID
 				m.refreshViewport()
 				return m.syncWindowTitleCmd()
 			case dialogs.ModelDialogActionCancel:

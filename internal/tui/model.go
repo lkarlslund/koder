@@ -5104,12 +5104,12 @@ func (m *Model) handleModelDialogKey(msg ui.KeyMsg) ui.Cmd {
 	action := m.modelDialog.Update(msg)
 	switch action.Kind {
 	case dialogs.ModelDialogActionSelect:
-		if err := m.selectModel(action.ModelID, action.PresetID); err != nil {
+		if err := m.selectModel(action.ProviderID, action.ModelID, action.PresetID); err != nil {
 			m.status = err.Error()
 			return m.syncWindowTitleCmd()
 		}
 		m.closeModelDialog()
-		m.status = fmt.Sprintf("Selected model %s", action.ModelID)
+		m.status = fmt.Sprintf("Selected %s / %s", action.ProviderID, action.ModelID)
 		m.invalidateTranscript()
 		m.refreshViewport()
 		return m.syncWindowTitleCmd()
@@ -5687,9 +5687,16 @@ func (m *Model) openDisconnectDialog() {
 }
 
 func (m *Model) openModelDialog(providerID string, models []domain.Model) {
-	current := m.currentSession.ModelID
+	current := ""
+	if m.currentSession.ProviderID == providerID || strings.TrimSpace(m.currentSession.ProviderID) == "" {
+		current = m.currentSession.ModelID
+	}
 	if strings.TrimSpace(current) == "" {
-		current = m.cfg.DefaultModel
+		if providerCfg, ok := m.cfg.Provider(providerID); ok {
+			current = providerCfg.DefaultModel
+		} else {
+			current = m.cfg.DefaultModel
+		}
 	}
 	dialog := dialogs.NewModelDialog(providerID, models, current, m.providerModelPreset(providerID))
 	m.modelDialog = &dialog
@@ -6077,12 +6084,16 @@ func (m *Model) disconnectProvider(providerID string) error {
 	return nil
 }
 
-func (m *Model) selectModel(modelID string, presetID string) error {
+func (m *Model) selectModel(providerID string, modelID string, presetID string) error {
+	providerID = strings.TrimSpace(providerID)
 	modelID = strings.TrimSpace(modelID)
+	presetID = provider.NormalizePresetSelection(presetID)
+	if providerID == "" {
+		providerID = m.activeProviderID()
+	}
 	if modelID == "" {
 		return fmt.Errorf("model id is required")
 	}
-	providerID := m.activeProviderID()
 	if providerID == "" || !m.cfg.HasUsableProvider(providerID) {
 		return fmt.Errorf("provider is not configured")
 	}
@@ -6091,26 +6102,23 @@ func (m *Model) selectModel(modelID string, presetID string) error {
 		return fmt.Errorf("provider %q not configured", providerID)
 	}
 	providerCfg.DefaultModel = modelID
-	providerCfg.ModelPreset = provider.NormalizePresetSelection(presetID)
+	providerCfg.ModelPreset = presetID
 	m.cfg.Providers[providerID] = providerCfg
-	if providerID == m.cfg.DefaultProvider {
-		m.cfg.DefaultModel = modelID
-	}
+	m.cfg.DefaultProvider = providerID
+	m.cfg.DefaultModel = modelID
 	if err := m.cfg.Save(); err != nil {
 		return err
 	}
 	if m.agent != nil {
 		m.agent.UpdateConfig(m.cfg)
 	}
-	if m.currentSession.ID != 0 && (m.currentSession.ProviderID == providerID || m.currentSession.ProviderID == "") && m.store != nil {
+	if m.currentSession.ID != 0 && m.store != nil {
 		if err := m.store.SetSessionModel(context.Background(), m.currentSession.ID, providerID, modelID); err != nil {
 			return err
 		}
 	}
-	if m.currentSession.ProviderID == providerID || strings.TrimSpace(m.currentSession.ProviderID) == "" {
-		m.currentSession.ProviderID = providerID
-		m.currentSession.ModelID = modelID
-	}
+	m.currentSession.ProviderID = providerID
+	m.currentSession.ModelID = modelID
 	return nil
 }
 

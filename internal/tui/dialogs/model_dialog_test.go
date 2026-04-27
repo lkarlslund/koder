@@ -21,7 +21,7 @@ func renderModelDialog(dialog ModelDialog, width int, palette theme.Palette) str
 func TestModelDialogSelectsModel(t *testing.T) {
 	dialog := NewModelDialog("openai", []domain.Model{{ID: "gpt-5.4"}}, "gpt-5.4", provider.ModelPresetAuto)
 	action := dialog.Update(ui.KeyMsg{Type: ui.KeyEnter})
-	if action.Kind != ModelDialogActionSelect || action.ModelID != "gpt-5.4" || action.PresetID != provider.ModelPresetAuto {
+	if action.Kind != ModelDialogActionSelect || action.ProviderID != "openai" || action.ModelID != "gpt-5.4" || action.PresetID != provider.ModelPresetAuto {
 		t.Fatalf("unexpected action: %#v", action)
 	}
 }
@@ -40,7 +40,7 @@ func TestModelDialogFiltersModels(t *testing.T) {
 func TestModelDialogRenderShowsProvider(t *testing.T) {
 	dialog := NewModelDialog("openai", []domain.Model{{ID: "gpt-5.4", OwnedBy: "openai", SupportsImages: true, CapabilitiesKnown: true}}, "gpt-5.4", provider.ModelPresetAuto)
 	got := renderModelDialog(dialog, 84, theme.Resolve("tokyonight").Palette)
-	if !strings.Contains(got, "Select Model") || !strings.Contains(got, "gpt-5.4") || !strings.Contains(got, "openai") || !strings.Contains(got, "image") {
+	if !strings.Contains(got, "Select Model") || !strings.Contains(got, "Provider: openai") || !strings.Contains(got, "gpt-5.4") || !strings.Contains(got, "openai") || !strings.Contains(got, "image") {
 		t.Fatalf("unexpected render: %q", got)
 	}
 }

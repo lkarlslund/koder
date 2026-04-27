@@ -2982,11 +2982,11 @@ func TestSelectModelUpdatesConfigAndCurrentSession(t *testing.T) {
 		currentSession: session,
 	}
 
-	if err := m.selectModel("gpt-4.1-mini", provider.ModelPresetDefault); err != nil {
+	if err := m.selectModel("openai", "gpt-4.1-mini", provider.ModelPresetDefault); err != nil {
 		t.Fatal(err)
 	}
-	if m.cfg.DefaultModel != "gpt-4.1-mini" || m.currentSession.ModelID != "gpt-4.1-mini" {
-		t.Fatalf("unexpected model selection state: cfg=%q session=%q", m.cfg.DefaultModel, m.currentSession.ModelID)
+	if m.cfg.DefaultProvider != "openai" || m.cfg.DefaultModel != "gpt-4.1-mini" || m.currentSession.ProviderID != "openai" || m.currentSession.ModelID != "gpt-4.1-mini" {
+		t.Fatalf("unexpected model selection state: provider=%q cfg=%q sessionProvider=%q sessionModel=%q", m.cfg.DefaultProvider, m.cfg.DefaultModel, m.currentSession.ProviderID, m.currentSession.ModelID)
 	}
 	if got := m.cfg.Providers["openai"].ModelPreset; got != provider.ModelPresetDefault {
 		t.Fatalf("expected model preset to persist, got %q", got)
@@ -2997,6 +2997,69 @@ func TestSelectModelUpdatesConfigAndCurrentSession(t *testing.T) {
 	}
 	if reloaded.ModelID != "gpt-4.1-mini" {
 		t.Fatalf("expected persisted session model, got %q", reloaded.ModelID)
+	}
+}
+
+func TestSelectModelSwitchesCurrentSessionProvider(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.DefaultProvider = "openai"
+	cfg.DefaultModel = "gpt-5.4"
+	cfg.Providers = map[string]config.Provider{
+		"openai": {
+			Name:         "OpenAI",
+			Kind:         "openai-compatible",
+			AuthMethod:   "api_key",
+			BaseURL:      "https://api.openai.com/v1",
+			DefaultModel: "gpt-5.4",
+		},
+		"groq": {
+			Name:         "Groq",
+			Kind:         "openai-compatible",
+			AuthMethod:   "api_key",
+			BaseURL:      "https://api.groq.com/openai/v1",
+			DefaultModel: "llama-3.3-70b-versatile",
+		},
+	}
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	session, err := st.CreateSession(context.Background(), "test", "openai", "gpt-5.4", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := Model{
+		cfg:            cfg,
+		store:          st,
+		currentSession: session,
+	}
+
+	if err := m.selectModel("groq", "llama-3.3-70b-versatile", provider.ModelPresetDefault); err != nil {
+		t.Fatal(err)
+	}
+	if m.currentSession.ProviderID != "groq" || m.currentSession.ModelID != "llama-3.3-70b-versatile" {
+		t.Fatalf("expected session provider/model switch, got provider=%q model=%q", m.currentSession.ProviderID, m.currentSession.ModelID)
+	}
+	if m.cfg.DefaultProvider != "groq" || m.cfg.DefaultModel != "llama-3.3-70b-versatile" {
+		t.Fatalf("expected default provider/model switch, got provider=%q model=%q", m.cfg.DefaultProvider, m.cfg.DefaultModel)
+	}
+	reloaded, err := st.GetSession(context.Background(), session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.ProviderID != "groq" || reloaded.ModelID != "llama-3.3-70b-versatile" {
+		t.Fatalf("expected persisted session provider/model switch, got provider=%q model=%q", reloaded.ProviderID, reloaded.ModelID)
 	}
 }
 
