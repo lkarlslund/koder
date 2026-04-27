@@ -994,7 +994,6 @@ func (m *Model) viewSurface() ui.Surface {
 	if m.width <= 0 || m.height <= 0 {
 		return ui.Surface{}
 	}
-	m.syncDebugRuntime()
 	root := m.syncUIRoot()
 	surface := root.RenderFrame()
 	m.syncDebugFrame(surface)
@@ -4913,10 +4912,19 @@ func (m Model) syncDebugRuntime() {
 	if m.debug == nil {
 		return
 	}
-	transcriptItems := m.debugTranscriptItems()
+	deepDebug := m.debug.DeepDebug()
+	var transcriptItems []debugsrv.TranscriptItemRef
+	if deepDebug {
+		transcriptItems = m.debugTranscriptItems()
+	}
+	renderBlockCount := len(m.transcriptItems)
+	if deepDebug {
+		renderBlockCount = len(transcriptItems)
+	}
 	m.debug.UpdateRuntime(debugsrv.RuntimeSnapshot{
 		DebugAPI:           m.debugAPIAddr(),
 		Build:              version.Current(),
+		DeepDebug:          deepDebug,
 		CurrentSession:     m.currentSession.ID,
 		SessionTitle:       strings.TrimSpace(m.currentSession.Title),
 		ProviderID:         strings.TrimSpace(m.currentSession.ProviderID),
@@ -4933,7 +4941,7 @@ func (m Model) syncDebugRuntime() {
 		ViewportHeight:     m.viewport.Height,
 		ViewportYOffset:    m.viewport.YOffset,
 		MessageCount:       len(m.messages),
-		RenderBlockCount:   len(transcriptItems),
+		RenderBlockCount:   renderBlockCount,
 		ViewportPreview:    "",
 		ViewportContentLen: m.viewport.VisibleSurface().SurfaceHeight(),
 		TranscriptItems:    transcriptItems,
@@ -4941,7 +4949,7 @@ func (m Model) syncDebugRuntime() {
 }
 
 func (m Model) syncDebugFrame(surface ui.Surface) {
-	if m.debug == nil {
+	if m.debug == nil || !m.debug.DeepDebug() {
 		return
 	}
 	snapshot := m.debug.Runtime()

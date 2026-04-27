@@ -315,6 +315,11 @@ type Surface struct {
 	h     int
 	cells []Cell
 	ctrls []Control
+	dirty struct {
+		valid bool
+		start int
+		end   int
+	}
 }
 
 func BlankSurface(width, height int) Surface {
@@ -393,6 +398,39 @@ func (s Surface) Controls() []Control {
 	out := make([]Control, len(s.ctrls))
 	copy(out, s.ctrls)
 	return out
+}
+
+func (s Surface) WithDirtyRows(start, end int) Surface {
+	if start < 0 {
+		start = 0
+	}
+	height := s.SurfaceHeight()
+	if height <= 0 || end < start {
+		s.dirty.valid = false
+		s.dirty.start = 0
+		s.dirty.end = 0
+		return s
+	}
+	if end >= height {
+		end = height - 1
+	}
+	if start >= height {
+		s.dirty.valid = false
+		s.dirty.start = 0
+		s.dirty.end = 0
+		return s
+	}
+	s.dirty.valid = true
+	s.dirty.start = start
+	s.dirty.end = end
+	return s
+}
+
+func (s Surface) DirtyRowRange() (start int, end int, ok bool) {
+	if !s.dirty.valid {
+		return 0, 0, false
+	}
+	return s.dirty.start, s.dirty.end, true
 }
 
 func (s Surface) RegisterControls(runtime *Runtime, dx, dy int) {

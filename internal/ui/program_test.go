@@ -94,6 +94,42 @@ func TestDiffFrameSurfaceClearsRemovedRows(t *testing.T) {
 	}
 }
 
+func TestDiffFrameSurfaceRowsUsesDirtyRange(t *testing.T) {
+	previous := fakeSurface{
+		w: 4,
+		h: 3,
+		cells: []fakeCell{
+			{text: "a"}, {text: "a"}, {text: "a"}, {text: "a"},
+			{text: "b"}, {text: "b"}, {text: "b"}, {text: "b"},
+			{text: "c"}, {text: "c"}, {text: "c"}, {text: "c"},
+		},
+	}
+	current := fakeSurface{
+		w:          4,
+		h:          3,
+		dirtyStart: 1,
+		dirtyEnd:   1,
+		dirty:      true,
+		cells: []fakeCell{
+			{text: "a"}, {text: "a"}, {text: "a"}, {text: "a"},
+			{text: "B"}, {text: "B"}, {text: "B"}, {text: "B"},
+			{text: "c"}, {text: "c"}, {text: "c"}, {text: "c"},
+		},
+	}
+
+	start, end, ok := dirtyRowRange(current, previous)
+	if !ok || start != 1 || end != 1 {
+		t.Fatalf("unexpected dirty row range: %v %d %d", ok, start, end)
+	}
+	got := diffFrameSurfaceRows(previous, current, start, end)
+	if !strings.Contains(got, "\x1b[2;1H") {
+		t.Fatalf("expected dirty row to be updated, got %q", got)
+	}
+	if strings.Contains(got, "\x1b[1;1H") || strings.Contains(got, "\x1b[3;1H") {
+		t.Fatalf("expected unchanged rows outside dirty range to be skipped, got %q", got)
+	}
+}
+
 func TestWindowSizeInvalidatesRenderCache(t *testing.T) {
 	model := &fakeModel{
 		surface: fakeSurface{
@@ -284,9 +320,12 @@ func (f *fakeModel) Update(Msg) (Model, Cmd)  { return f, nil }
 func (f *fakeModel) ViewSurface() SurfaceView { return f.surface }
 
 type fakeSurface struct {
-	w     int
-	h     int
-	cells []fakeCell
+	w          int
+	h          int
+	cells      []fakeCell
+	dirty      bool
+	dirtyStart int
+	dirtyEnd   int
 }
 
 func (f fakeSurface) SurfaceWidth() int               { return f.w }
@@ -313,4 +352,10 @@ func (f fakeSurface) SurfaceCellItalic(x, y int) bool    { return f.cells[y*f.w+
 func (f fakeSurface) SurfaceCellUnderline(x, y int) bool { return f.cells[y*f.w+x].underline }
 func (f fakeSurface) SurfaceCellStrikethrough(x, y int) bool {
 	return f.cells[y*f.w+x].strike
+}
+func (f fakeSurface) DirtyRowRange() (start int, end int, ok bool) {
+	if !f.dirty {
+		return 0, 0, false
+	}
+	return f.dirtyStart, f.dirtyEnd, true
 }

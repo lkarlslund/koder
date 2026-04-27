@@ -209,6 +209,10 @@ func (w *mainScreenWidget) Surface(ctx *ui.Context, bounds ui.Rect) ui.Surface {
 	if w.valid && w.bounds == bounds && !w.dirty() {
 		return w.surface
 	}
+	transcriptDirty := w.transcript.Dirty()
+	composerDirty := w.composer.Dirty()
+	sidebarDirty := w.sidebar.Dirty()
+	statusDirty := w.statusPane.Dirty()
 	transcriptBounds := ui.Rect{W: max(0, w.model.viewport.Width), H: max(0, w.model.transcriptViewportHeight())}
 	composerBounds := ui.Rect{W: max(0, w.model.composerWidth())}
 	composerSurface := w.composer.Surface(ctx, composerBounds)
@@ -257,6 +261,45 @@ func (w *mainScreenWidget) Surface(ctx *ui.Context, bounds ui.Rect) ui.Surface {
 		}),
 	}
 	surface := ui.FlexBox{Direction: ui.DirectionVertical, Children: rootChildren}.Render(ctx, bounds)
+	bodyHeight := max(0, surface.Size().H-statusSurface.Size().H)
+	dirtyStart := 0
+	dirtyEnd := -1
+	if transcriptDirty && transcriptSurface.Size().H > 0 {
+		dirtyStart = 0
+		dirtyEnd = transcriptSurface.Size().H - 1
+	}
+	if composerDirty && composerSurface.Size().H > 0 {
+		start := max(0, bodyHeight-composerSurface.Size().H)
+		end := start + composerSurface.Size().H - 1
+		if dirtyEnd < dirtyStart {
+			dirtyStart, dirtyEnd = start, end
+		} else {
+			dirtyStart = min(dirtyStart, start)
+			dirtyEnd = max(dirtyEnd, end)
+		}
+	}
+	if statusDirty && statusSurface.Size().H > 0 {
+		start := max(0, surface.Size().H-statusSurface.Size().H)
+		end := surface.Size().H - 1
+		if dirtyEnd < dirtyStart {
+			dirtyStart, dirtyEnd = start, end
+		} else {
+			dirtyStart = min(dirtyStart, start)
+			dirtyEnd = max(dirtyEnd, end)
+		}
+	}
+	if sidebarDirty && bodyHeight > 0 {
+		start, end := 0, bodyHeight-1
+		if dirtyEnd < dirtyStart {
+			dirtyStart, dirtyEnd = start, end
+		} else {
+			dirtyStart = min(dirtyStart, start)
+			dirtyEnd = max(dirtyEnd, end)
+		}
+	}
+	if dirtyEnd >= dirtyStart {
+		surface = surface.WithDirtyRows(dirtyStart, dirtyEnd)
+	}
 	w.bounds = bounds
 	w.surface = surface
 	w.valid = true

@@ -28,6 +28,10 @@ type SurfaceView interface {
 	SurfaceCellStrikethrough(x, y int) bool
 }
 
+type DirtyRowRangeProvider interface {
+	DirtyRowRange() (start int, end int, ok bool)
+}
+
 type Cmd func() Msg
 
 type BatchMsg []Cmd

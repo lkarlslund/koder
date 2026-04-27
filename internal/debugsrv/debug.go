@@ -55,6 +55,7 @@ type HTTPTrace struct {
 type RuntimeSnapshot struct {
 	Timestamp          time.Time           `json:"timestamp"`
 	DebugAPI           string              `json:"debug_api"`
+	DeepDebug          bool                `json:"deep_debug"`
 	Build              version.Info        `json:"build"`
 	CurrentSession     int64               `json:"current_session"`
 	SessionTitle       string              `json:"session_title"`
@@ -127,6 +128,7 @@ type KeyInput struct {
 type Recorder struct {
 	mu            sync.RWMutex
 	debugAPI      string
+	deepDebug     bool
 	maxEvents     int
 	maxHTTP       int
 	runtime       RuntimeSnapshot
@@ -155,6 +157,25 @@ func (r *Recorder) SetDebugAPI(addr string) {
 	defer r.mu.Unlock()
 	r.debugAPI = strings.TrimSpace(addr)
 	r.runtime.DebugAPI = r.debugAPI
+}
+
+func (r *Recorder) SetDeepDebug(enabled bool) {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.deepDebug = enabled
+	r.runtime.DeepDebug = enabled
+}
+
+func (r *Recorder) DeepDebug() bool {
+	if r == nil {
+		return false
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.deepDebug
 }
 
 func (r *Recorder) RecordEvent(sessionID int64, evt domain.Event) {
@@ -233,6 +254,7 @@ func (r *Recorder) UpdateRuntime(snapshot RuntimeSnapshot) {
 	if snapshot.DebugAPI == "" {
 		snapshot.DebugAPI = r.debugAPI
 	}
+	snapshot.DeepDebug = r.deepDebug
 	if snapshot.LastError == "" {
 		snapshot.LastError = r.runtime.LastError
 	}
@@ -360,8 +382,24 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	})
 }
 
-func (s *Server) handleRuntime(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, s.recorder.Runtime())
+func (s *Server) handleRuntime(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		writeJSON(w, http.StatusOK, s.recorder.Runtime())
+	case http.MethodPost:
+		var req struct {
+			DeepDebug bool `json:"deep_debug"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		s.recorder.SetDeepDebug(req.DeepDebug)
+		writeJSON(w, http.StatusOK, s.recorder.Runtime())
+	default:
+		w.Header().Set("Allow", "GET, POST")
+		writeError(w, http.StatusMethodNotAllowed, fmt.Errorf("method not allowed"))
+	}
 }
 
 func (s *Server) handleHTTP(w http.ResponseWriter, _ *http.Request) {

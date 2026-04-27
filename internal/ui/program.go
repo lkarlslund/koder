@@ -168,7 +168,11 @@ func (p *Program) render(out io.Writer) error {
 		frame = renderFrameSurface(surface)
 		p.didRender = true
 	} else {
-		frame = diffFrameSurface(p.rendered, surface)
+		if start, end, ok := dirtyRowRange(surface, p.rendered); ok {
+			frame = diffFrameSurfaceRows(p.rendered, surface, start, end)
+		} else {
+			frame = diffFrameSurface(p.rendered, surface)
+		}
 	}
 	p.rendered = surface
 	p.renderedRows = nil
@@ -240,6 +244,12 @@ func diffFrameLines(previous, current []string) string {
 }
 
 func diffFrameSurface(previous, current SurfaceView) string {
+	start := 0
+	end := max(surfaceHeight(previous), surfaceHeight(current)) - 1
+	return diffFrameSurfaceRows(previous, current, start, end)
+}
+
+func diffFrameSurfaceRows(previous, current SurfaceView, start, end int) string {
 	var buf strings.Builder
 	prevRows := 0
 	currRows := 0
@@ -249,7 +259,20 @@ func diffFrameSurface(previous, current SurfaceView) string {
 	if current != nil {
 		currRows = current.SurfaceHeight()
 	}
-	for idx := 0; idx < currRows; idx++ {
+	maxRows := max(prevRows, currRows)
+	if maxRows <= 0 {
+		return ""
+	}
+	if start < 0 {
+		start = 0
+	}
+	if end >= maxRows {
+		end = maxRows - 1
+	}
+	if end < start {
+		return ""
+	}
+	for idx := start; idx <= end && idx < currRows; idx++ {
 		if surfaceRowsEqual(previous, current, idx) {
 			continue
 		}
@@ -259,10 +282,32 @@ func diffFrameSurface(previous, current SurfaceView) string {
 		}
 		buf.WriteString("\x1b[K")
 	}
-	for idx := currRows; idx < prevRows; idx++ {
+	clearStart := max(currRows, start)
+	for idx := clearStart; idx <= end && idx < prevRows; idx++ {
 		fmt.Fprintf(&buf, "\x1b[%d;1H\x1b[2K", idx+1)
 	}
 	return buf.String()
+}
+
+func surfaceHeight(surface SurfaceView) int {
+	if surface == nil {
+		return 0
+	}
+	return surface.SurfaceHeight()
+}
+
+func dirtyRowRange(current, previous SurfaceView) (start, end int, ok bool) {
+	if current == nil || previous == nil {
+		return 0, 0, false
+	}
+	if current.SurfaceWidth() != previous.SurfaceWidth() || current.SurfaceHeight() != previous.SurfaceHeight() {
+		return 0, 0, false
+	}
+	provider, ok := current.(DirtyRowRangeProvider)
+	if !ok {
+		return 0, 0, false
+	}
+	return provider.DirtyRowRange()
 }
 
 func surfaceRowsEqual(previous, current SurfaceView, y int) bool {

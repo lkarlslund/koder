@@ -1534,6 +1534,39 @@ func TestSyncDebugRuntimeIncludesViewportState(t *testing.T) {
 	if got.MessageCount != 2 {
 		t.Fatalf("expected message count 2, got %#v", got)
 	}
+	if len(got.TranscriptItems) != 0 {
+		t.Fatalf("expected transcript items omitted without deep debug, got %#v", got)
+	}
+}
+
+func TestSyncDebugRuntimeIncludesTranscriptItemsInDeepDebug(t *testing.T) {
+	rec := debugsrv.NewRecorder()
+	rec.SetDeepDebug(true)
+	m := Model{
+		debug:          rec,
+		status:         "Ready",
+		currentSession: domain.Session{ID: 7, Title: "Debug Session", ProviderID: "test", ModelID: "model"},
+		viewport:       newTranscriptViewport(40, 6),
+		messages: []domain.Message{{
+			ID:   1,
+			Role: domain.MessageRoleAssistant,
+		}},
+		parts: map[int64][]domain.Part{
+			1: {{Kind: domain.PartKindText, Body: "hello"}},
+		},
+		transcriptDirty: true,
+	}
+	m.viewport.SetContent("line one\nline two")
+
+	m.syncDebugRuntime()
+
+	got := rec.Runtime()
+	if !got.DeepDebug {
+		t.Fatalf("expected deep debug enabled, got %#v", got)
+	}
+	if len(got.TranscriptItems) != 1 {
+		t.Fatalf("expected transcript items in deep debug, got %#v", got)
+	}
 }
 
 func TestRenderTranscriptToolMessageFallsBackToSummaryWhenBodyMissing(t *testing.T) {

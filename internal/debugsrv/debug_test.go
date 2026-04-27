@@ -35,6 +35,9 @@ func TestRecorderTracksSessionEventsAndRuntime(t *testing.T) {
 	if rec.Runtime().Build.Version != version.Version {
 		t.Fatalf("expected runtime build version %q, got %#v", version.Version, rec.Runtime().Build)
 	}
+	if rec.Runtime().DeepDebug {
+		t.Fatalf("expected deep debug off by default, got %#v", rec.Runtime())
+	}
 }
 
 func TestServerExposesTranscriptAndEvents(t *testing.T) {
@@ -207,5 +210,47 @@ func TestServerAcceptsLiveInput(t *testing.T) {
 		}
 	default:
 		t.Fatal("expected live input sink to receive a message")
+	}
+}
+
+func TestServerRuntimeCanToggleDeepDebug(t *testing.T) {
+	t.Parallel()
+
+	st, err := store.OpenWithOptions(t.TempDir(), store.Options{Backend: store.BackendJSONFS})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	srv, err := Start("127.0.0.1:0", st, NewRecorder())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer srv.Close()
+
+	reqBody := strings.NewReader(`{"deep_debug":true}`)
+	req, err := http.NewRequest(http.MethodPost, "http://"+srv.Addr()+"/debug/runtime", reqBody)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		data, _ := io.ReadAll(resp.Body)
+		t.Fatalf("unexpected runtime status %d: %s", resp.StatusCode, string(data))
+	}
+	var runtime RuntimeSnapshot
+	if err := json.NewDecoder(resp.Body).Decode(&runtime); err != nil {
+		t.Fatal(err)
+	}
+	if !runtime.DeepDebug {
+		t.Fatalf("expected deep debug enabled, got %#v", runtime)
+	}
+	if !srv.Recorder().DeepDebug() {
+		t.Fatal("expected recorder deep debug flag to be enabled")
 	}
 }

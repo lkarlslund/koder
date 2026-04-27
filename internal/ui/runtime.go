@@ -524,6 +524,9 @@ func (r *Root) RenderFrame() Surface {
 	}
 	root := BlankSurface(max(0, r.bounds.W), max(0, r.bounds.H))
 	ctx := &Context{Palette: r.palette}
+	dirtyStart := 0
+	dirtyEnd := -1
+	dirtyKnown := false
 	for _, window := range r.allWindows() {
 		if window == nil || !window.Visible() {
 			continue
@@ -532,8 +535,36 @@ func (r *Root) RenderFrame() Surface {
 		if bounds.W <= 0 || bounds.H <= 0 {
 			continue
 		}
-		root = root.PlaceAt(bounds.X-r.bounds.X, bounds.Y-r.bounds.Y, window.Render(ctx, Rect{W: bounds.W, H: bounds.H}).Normalize(bounds.W, bounds.H))
+		windowDirty := window.NeedsRedraw()
+		child := window.Render(ctx, Rect{W: bounds.W, H: bounds.H}).Normalize(bounds.W, bounds.H)
+		root = root.PlaceAt(bounds.X-r.bounds.X, bounds.Y-r.bounds.Y, child)
+		if windowDirty {
+			if start, end, ok := child.DirtyRowRange(); ok {
+				start += bounds.Y - r.bounds.Y
+				end += bounds.Y - r.bounds.Y
+				if !dirtyKnown || start < dirtyStart {
+					dirtyStart = start
+				}
+				if !dirtyKnown || end > dirtyEnd {
+					dirtyEnd = end
+				}
+				dirtyKnown = true
+			} else {
+				start := bounds.Y - r.bounds.Y
+				end := start + bounds.H - 1
+				if !dirtyKnown || start < dirtyStart {
+					dirtyStart = start
+				}
+				if !dirtyKnown || end > dirtyEnd {
+					dirtyEnd = end
+				}
+				dirtyKnown = true
+			}
+		}
 		window.ClearRedraw()
+	}
+	if dirtyKnown {
+		root = root.WithDirtyRows(dirtyStart, dirtyEnd)
 	}
 	r.previous = root
 	r.dirty = false
