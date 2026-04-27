@@ -464,6 +464,10 @@ type Model struct {
 	preferences             *dialogs.PreferencesDialog
 	agentsModal             *ui.Modal
 	helpModal               *ui.Modal
+	helpBody                string
+	helpYOffset             int
+	helpWidth               int
+	helpHeight              int
 	llmPreviewTitle         string
 	llmPreviewBody          string
 	llmPreviewYOffset       int
@@ -989,6 +993,11 @@ func (m *Model) handleKey(msg ui.KeyMsg) (ui.Model, ui.Cmd) {
 	if msg.String() != "esc" {
 		m.interruptArmedAt = time.Time{}
 	}
+	if m.hasHelpModal() {
+		if handled, cmd := m.handleMainWindowKey(msg); handled {
+			return m, cmd
+		}
+	}
 	root := m.syncUIRoot()
 	if handled, cmd := root.HandleEvent(ui.KeyEvent(msg)); handled {
 		return m, cmd
@@ -1001,6 +1010,17 @@ func (m *Model) handleKey(msg ui.KeyMsg) (ui.Model, ui.Cmd) {
 }
 
 func (m *Model) handleMainWindowKey(msg ui.KeyMsg) (bool, ui.Cmd) {
+	if m.hasHelpModal() {
+		switch msg.String() {
+		case "alt+h", "enter", "esc":
+			m.closeHelpModal()
+			return true, m.syncWindowTitleCmd()
+		default:
+			if m.handleHelpKey(msg) {
+				return true, nil
+			}
+		}
+	}
 	if m.hasComposerHistoryMenu() {
 		switch msg.String() {
 		case "ctrl+c":
@@ -1375,6 +1395,9 @@ func (m *Model) handleMainWindowMouse(msg ui.MouseMsg) (bool, ui.Cmd) {
 	if _, cmd, ok := m.handleMouse(msg); ok {
 		return true, cmd
 	}
+	if m.handleHelpMouse(msg) {
+		return true, nil
+	}
 	if m.handleTranscriptMouse(msg) {
 		return true, nil
 	}
@@ -1413,6 +1436,53 @@ func (m *Model) handleLLMPreviewMouse(msg ui.MouseMsg) bool {
 	return false
 }
 
+func (m *Model) handleHelpMouse(msg ui.MouseMsg) bool {
+	if !m.hasHelpModal() {
+		return false
+	}
+	switch msg.Button {
+	case ui.MouseButtonWheelUp:
+		if msg.Action == ui.MouseActionPress {
+			m.scrollHelp(-3)
+			return true
+		}
+	case ui.MouseButtonWheelDown:
+		if msg.Action == ui.MouseActionPress {
+			m.scrollHelp(3)
+			return true
+		}
+	}
+	return false
+}
+
+func (m *Model) handleHelpKey(msg ui.KeyMsg) bool {
+	if !m.hasHelpModal() {
+		return false
+	}
+	switch msg.String() {
+	case "up":
+		m.scrollHelp(-1)
+		return true
+	case "down":
+		m.scrollHelp(1)
+		return true
+	case "pgup":
+		m.scrollHelp(-max(1, m.helpHeight))
+		return true
+	case "pgdown":
+		m.scrollHelp(max(1, m.helpHeight))
+		return true
+	case "home":
+		m.helpYOffset = 0
+		return true
+	case "end":
+		m.helpYOffset = m.helpMaxOffset()
+		return true
+	default:
+		return false
+	}
+}
+
 func (m *Model) handleLLMPreviewKey(msg ui.KeyMsg) bool {
 	switch msg.String() {
 	case "up":
@@ -1442,6 +1512,10 @@ func (m *Model) scrollLLMPreview(delta int) {
 	m.llmPreviewYOffset = min(max(0, m.llmPreviewYOffset+delta), m.llmPreviewMaxOffset())
 }
 
+func (m *Model) scrollHelp(delta int) {
+	m.helpYOffset = min(max(0, m.helpYOffset+delta), m.helpMaxOffset())
+}
+
 func (m *Model) scrollTranscript(delta int) {
 	target := m.viewport.YOffset + delta
 	if target < 0 {
@@ -1464,6 +1538,11 @@ func (m *Model) scrollTranscript(delta int) {
 func (m *Model) llmPreviewMaxOffset() int {
 	contentHeight := lipgloss.Height(m.llmPreviewBody)
 	return max(0, contentHeight-max(0, m.llmPreviewHeight))
+}
+
+func (m *Model) helpMaxOffset() int {
+	contentHeight := lipgloss.Height(m.helpBody)
+	return max(0, contentHeight-max(0, m.helpHeight))
 }
 
 func (m *Model) applyEvent(evt domain.Event) {
@@ -1542,6 +1621,7 @@ func (m *Model) resize() {
 	m.viewport.Width = max(0, bodyWidth)
 	m.viewport.Height = bodyHeight
 	m.viewport.SetWindowHeight(m.transcriptViewportHeight())
+	m.resizeHelpModal()
 	m.resizeLLMPreview()
 	m.invalidateTranscript()
 }
@@ -5964,6 +6044,7 @@ func (m *Model) hasHelpModal() bool {
 
 func (m *Model) closeHelpModal() {
 	m.helpModal = nil
+	m.helpYOffset = 0
 	m.syncComposerVisibility()
 }
 
@@ -6201,6 +6282,7 @@ func (m *Model) openHelpModal() {
 	hotkeys := []string{
 		"Hotkeys",
 		"Alt-H               show or close help",
+		"Alt-Q               toggle queue edit mode",
 		"Enter               send prompt or confirm selection",
 		"Esc                 cancel dialog or interrupt active run",
 		"Tab                 autocomplete, or queue steering while running",
@@ -6232,16 +6314,30 @@ func (m *Model) openHelpModal() {
 		"/skills             insert a discovered skill mention",
 		"/theme              preview and select theme",
 	}
+	queueEditing := []string{
+		"Queue Edit Mode",
+		"Alt-Q               enter or leave queue edit mode",
+		"Up/Down             select queued item",
+		"Enter               restore selected queued prompt to composer",
+		"Alt-Up/Alt-Down     reorder selected queued item",
+		"H                   hold or unhold selected queued item",
+		"Backspace/Delete    delete selected queued item",
+		"Esc                 leave queue edit mode",
+	}
 	lines := append([]string{}, hotkeys...)
 	lines = append(lines, "")
 	lines = append(lines, commands...)
+	lines = append(lines, "")
+	lines = append(lines, queueEditing...)
+	m.helpBody = strings.Join(lines, "\n")
+	m.helpYOffset = 0
 	modal := ui.Modal{
-		Title:       "Help",
-		BodyElement: ui.TextPane{Content: strings.Join(lines, "\n")},
-		Footer:      "Alt-H, Enter, or Esc closes this help dialog",
-		Width:       min(104, max(84, m.width-8)),
+		Title:  "Help",
+		Footer: "Alt-H, Enter, or Esc closes  •  Use arrows, PgUp/PgDn, Home/End, or wheel to scroll",
+		Width:  min(104, max(84, m.width-8)),
 	}
 	m.helpModal = &modal
+	m.resizeHelpModal()
 	m.syncComposerVisibility()
 }
 
@@ -6249,7 +6345,31 @@ func (m *Model) renderHelpModalElement() ui.Element {
 	if m.helpModal == nil {
 		return nil
 	}
-	return *m.helpModal
+	return ui.Modal{
+		Title: m.helpModal.Title,
+		BodyElement: ui.ScrollFrame{
+			Child:   ui.TextPane{Content: m.helpBody},
+			OffsetY: m.helpYOffset,
+			Width:   m.helpWidth,
+			Height:  m.helpHeight,
+		},
+		Footer: m.helpModal.Footer,
+		Width:  m.helpModal.Width,
+	}
+}
+
+func (m *Model) resizeHelpModal() {
+	if !m.hasHelpModal() {
+		return
+	}
+	width := min(104, max(84, m.width-8))
+	height := min(24, max(8, m.height-8))
+	m.helpWidth = max(40, width-6)
+	m.helpHeight = height
+	m.helpYOffset = min(max(0, m.helpYOffset), m.helpMaxOffset())
+	if m.helpModal != nil {
+		m.helpModal.Width = width
+	}
 }
 
 func (m Model) previewLLMRequestCmd(ctx context.Context, prompt string, drafts []attachment.Draft, refs []reference.Draft) ui.Cmd {

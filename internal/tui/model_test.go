@@ -3635,6 +3635,21 @@ func TestAltHTogglesHelpDialog(t *testing.T) {
 	if !strings.Contains(view, "Help") || !strings.Contains(view, "/connect") || !strings.Contains(view, "Ctrl-V") || !strings.Contains(view, "Alt-P") || !strings.Contains(view, "Ctrl-R") {
 		t.Fatalf("expected help dialog content, got %q", view)
 	}
+	if !strings.Contains(view, "PgUp/PgDn") {
+		t.Fatalf("expected help dialog scroll footer, got %q", view)
+	}
+	if !strings.Contains(next.helpBody, "Queue Edit Mode") || !strings.Contains(next.helpBody, "restore selected queued prompt to composer") {
+		t.Fatalf("expected queue editing help body content, got %q", next.helpBody)
+	}
+
+	updated, cmd = next.handleKey(ui.KeyMsg{Type: ui.KeyEnd})
+	next = updated.(*Model)
+	if cmd != nil {
+		t.Fatal("expected scroll key to update modal in place")
+	}
+	if next.helpYOffset == 0 {
+		t.Fatal("expected help modal to become scrollable")
+	}
 
 	updated, cmd = next.handleKey(ui.KeyMsg{Type: ui.KeyRunes, Alt: true, Runes: []rune("h")})
 	next = updated.(*Model)
