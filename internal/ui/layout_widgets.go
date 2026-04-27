@@ -41,6 +41,13 @@ func (s Section) Measure(ctx *Context, constraints Constraints) Size {
 }
 
 func (s Section) Render(ctx *Context, bounds Rect) Surface {
+	return renderOwnedSurface(ctx, bounds, s.RenderTo)
+}
+
+func (s Section) RenderTo(ctx *Context, bounds Rect, dst *Surface) {
+	if dst == nil {
+		return
+	}
 	width := bounds.W
 	if width <= 0 {
 		width = s.Width
@@ -48,7 +55,7 @@ func (s Section) Render(ctx *Context, bounds Rect) Surface {
 	if width <= 0 {
 		width = 40
 	}
-	return s.children(ctx).Render(ctx, Rect{X: bounds.X, Y: bounds.Y, W: width, H: bounds.H})
+	renderElementInto(ctx, s.children(ctx), Rect{X: bounds.X, Y: bounds.Y, W: width, H: bounds.H}, dst)
 }
 
 func (s Section) children(ctx *Context) Element {
@@ -133,6 +140,13 @@ func (l List) Measure(ctx *Context, constraints Constraints) Size {
 }
 
 func (l List) Render(ctx *Context, bounds Rect) Surface {
+	return renderOwnedSurface(ctx, bounds, l.RenderTo)
+}
+
+func (l List) RenderTo(ctx *Context, bounds Rect, dst *Surface) {
+	if dst == nil {
+		return
+	}
 	width := bounds.W
 	if width <= 0 {
 		width = l.Width
@@ -155,7 +169,7 @@ func (l List) Render(ctx *Context, bounds Rect) Surface {
 			Focused:        l.Focused && idx == l.Selected,
 		}))
 	}
-	return FlexBox{Direction: DirectionVertical, Children: children}.Render(ctx, Rect{X: bounds.X, Y: bounds.Y, W: width, H: bounds.H})
+	renderElementInto(ctx, FlexBox{Direction: DirectionVertical, Children: children}, Rect{X: bounds.X, Y: bounds.Y, W: width, H: bounds.H}, dst)
 }
 
 func (l *List) Move(delta int) bool {
@@ -227,6 +241,13 @@ func (t Table) Measure(ctx *Context, constraints Constraints) Size {
 }
 
 func (t Table) Render(ctx *Context, bounds Rect) Surface {
+	return renderOwnedSurface(ctx, bounds, t.RenderTo)
+}
+
+func (t Table) RenderTo(ctx *Context, bounds Rect, dst *Surface) {
+	if dst == nil {
+		return
+	}
 	width := t.width(bounds.W)
 	children := make([]Child, 0, len(t.Rows)+1)
 	if t.ShowHeader {
@@ -247,7 +268,7 @@ func (t Table) Render(ctx *Context, bounds Rect) Surface {
 			},
 		}))
 	}
-	return FlexBox{Direction: DirectionVertical, Children: children}.Render(ctx, Rect{X: bounds.X, Y: bounds.Y, W: width, H: bounds.H})
+	renderElementInto(ctx, FlexBox{Direction: DirectionVertical, Children: children}, Rect{X: bounds.X, Y: bounds.Y, W: width, H: bounds.H}, dst)
 }
 
 func (t Table) width(fallback int) int {

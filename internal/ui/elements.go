@@ -3,6 +3,7 @@ package ui
 import (
 	"strconv"
 	"strings"
+	"sync/atomic"
 
 	"github.com/charmbracelet/lipgloss"
 
@@ -445,6 +446,28 @@ func continuationCell(style CellStyle) Cell {
 	return cell
 }
 
+type SurfaceAllocationStats struct {
+	Blank       uint64
+	Transparent uint64
+}
+
+var surfaceAllocationCounters struct {
+	blank       atomic.Uint64
+	transparent atomic.Uint64
+}
+
+func ResetSurfaceAllocationStats() {
+	surfaceAllocationCounters.blank.Store(0)
+	surfaceAllocationCounters.transparent.Store(0)
+}
+
+func SurfaceAllocationStatsSnapshot() SurfaceAllocationStats {
+	return SurfaceAllocationStats{
+		Blank:       surfaceAllocationCounters.blank.Load(),
+		Transparent: surfaceAllocationCounters.transparent.Load(),
+	}
+}
+
 type Surface struct {
 	lines []string
 	w     int
@@ -459,6 +482,7 @@ type Surface struct {
 }
 
 func BlankSurface(width, height int) Surface {
+	surfaceAllocationCounters.blank.Add(1)
 	if width < 0 {
 		width = 0
 	}
@@ -473,6 +497,7 @@ func BlankSurface(width, height int) Surface {
 }
 
 func TransparentSurface(width, height int) Surface {
+	surfaceAllocationCounters.transparent.Add(1)
 	if width < 0 {
 		width = 0
 	}
@@ -994,6 +1019,9 @@ type Element interface {
 }
 
 type SurfaceRenderer interface {
+	// RenderTo draws into a caller-owned destination surface.
+	// Container and layout widgets should prefer this path over allocating a
+	// fresh intermediate surface per render.
 	RenderTo(ctx *Context, bounds Rect, dst *Surface)
 }
 

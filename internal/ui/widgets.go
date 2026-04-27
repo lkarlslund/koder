@@ -173,7 +173,14 @@ func (m ModalFrame) Measure(ctx *Context, constraints Constraints) Size {
 }
 
 func (m ModalFrame) Render(ctx *Context, bounds Rect) Surface {
-	return m.window(ctx).Render(ctx, bounds)
+	return renderOwnedSurface(ctx, bounds, m.RenderTo)
+}
+
+func (m ModalFrame) RenderTo(ctx *Context, bounds Rect, dst *Surface) {
+	if dst == nil || bounds.W <= 0 || bounds.H <= 0 {
+		return
+	}
+	renderElementInto(ctx, m.window(ctx), bounds, dst)
 }
 
 func (m ModalFrame) contentElement(palette theme.Palette) Element {
