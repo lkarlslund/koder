@@ -238,6 +238,21 @@ func MetaWithStoredResult(meta map[string]string, partKind domain.PartKind, tool
 	return meta
 }
 
+func BuildStoredMeta(meta map[string]string, partKind domain.PartKind, tool domain.ToolKind, status StoredResultStatus, payload StoredResultPayload) (map[string]string, error) {
+	if payload == nil {
+		return meta, nil
+	}
+	body, err := marshalStoredResult(partKind, tool, status, payload)
+	if err != nil {
+		return nil, err
+	}
+	if meta == nil {
+		meta = map[string]string{}
+	}
+	meta[storedResultMetaKey] = body
+	return meta, nil
+}
+
 func ModelTextForPart(part domain.Part, diff string) (string, bool) {
 	env, ok := storedResultFromPart(part)
 	if !ok {

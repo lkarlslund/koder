@@ -2,7 +2,6 @@ package tasktool
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -53,13 +52,16 @@ func (tool) PersistResult(ctx context.Context, st *store.Store, sessionID int64,
 	if err != nil {
 		return nil, err
 	}
-	meta, _ := json.Marshal(tools.MetaWithStoredResult(map[string]string{
+	meta, err := tools.BuildStoredMeta(map[string]string{
 		"status": string(task.Status),
 	}, domain.PartKindTaskUpdate, req.Tool, tools.StoredResultStatusOK, tools.TaskStoredResult{
 		Body:   task.Body,
 		Status: task.Status,
-	}))
-	if _, err := st.AddPart(ctx, msg.ID, domain.PartKindTaskUpdate, task.Body, string(meta)); err != nil {
+	})
+	if err != nil {
+		return nil, err
+	}
+	if _, err := st.AddPart(ctx, msg.ID, domain.PartKindTaskUpdate, task.Body, tools.JSONMeta(meta)); err != nil {
 		return nil, err
 	}
 	out := make(chan domain.Event, 1)

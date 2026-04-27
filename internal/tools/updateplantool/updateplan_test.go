@@ -75,3 +75,29 @@ func TestPersistResultStoresPlanUpdate(t *testing.T) {
 		t.Fatalf("unexpected stored plan output: %#v %#v", messages, partsByMessage)
 	}
 }
+
+func TestPersistResultRejectsInvalidPlanBeforeWriting(t *testing.T) {
+	st := openPlanStore(t)
+	session, err := st.CreateSession(context.Background(), "test", "provider", "model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = tool{}.PersistResult(context.Background(), st, session.ID, tools.Request{
+		Tool: domain.ToolKindUpdatePlan,
+		Args: map[string]string{
+			"plan": `[{"step":"one","status":"in_progress"},{"step":"two","status":"in_progress"}]`,
+		},
+	}, tools.Result{})
+	if err == nil {
+		t.Fatal("expected invalid plan error")
+	}
+
+	messages, partsByMessage, err := st.PartsForSession(context.Background(), session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 0 || len(partsByMessage) != 0 {
+		t.Fatalf("expected no partial plan message on error, got %#v %#v", messages, partsByMessage)
+	}
+}

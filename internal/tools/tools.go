@@ -396,8 +396,14 @@ func PersistStandardResult(ctx context.Context, st *store.Store, sessionID int64
 		}
 		payload[key] = value
 	}
-	payload = MetaWithStoredResult(payload, domain.PartKindToolOutput, req.Tool, StoredResultStatusOK, result.Stored)
-	meta, _ := json.Marshal(payload)
+	payload, err = BuildStoredMeta(payload, domain.PartKindToolOutput, req.Tool, StoredResultStatusOK, result.Stored)
+	if err != nil {
+		return nil, err
+	}
+	meta, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
 	if _, err := st.AddPart(ctx, msg.ID, domain.PartKindToolOutput, body, string(meta)); err != nil {
 		return nil, err
 	}

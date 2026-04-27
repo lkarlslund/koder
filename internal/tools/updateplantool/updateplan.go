@@ -81,11 +81,11 @@ func (tool) SummarizeResult(req tools.Request, result tools.Result) (string, str
 	return "plan", result.Output
 }
 func (tool) PersistResult(ctx context.Context, st *store.Store, sessionID int64, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
-	msg, err := st.AddMessage(ctx, sessionID, domain.MessageRoleTool, "plan")
+	steps, err := normalizePlan(req.Args["plan"])
 	if err != nil {
 		return nil, err
 	}
-	steps, err := normalizePlan(req.Args["plan"])
+	msg, err := st.AddMessage(ctx, sessionID, domain.MessageRoleTool, "plan")
 	if err != nil {
 		return nil, err
 	}
@@ -96,10 +96,13 @@ func (tool) PersistResult(ctx context.Context, st *store.Store, sessionID int64,
 			Status: item.Status,
 		})
 	}
-	meta := tools.MetaWithStoredResult(result.Meta, domain.PartKindPlanUpdate, req.Tool, tools.StoredResultStatusOK, tools.UpdatePlanStoredResult{
+	meta, err := tools.BuildStoredMeta(result.Meta, domain.PartKindPlanUpdate, req.Tool, tools.StoredResultStatusOK, tools.UpdatePlanStoredResult{
 		Explanation: req.Args["explanation"],
 		Steps:       storedSteps,
 	})
+	if err != nil {
+		return nil, err
+	}
 	if _, err := st.AddPart(ctx, msg.ID, domain.PartKindPlanUpdate, result.Output, tools.JSONMeta(meta)); err != nil {
 		return nil, err
 	}
