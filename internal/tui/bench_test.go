@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"strings"
@@ -112,6 +113,39 @@ func BenchmarkRefreshViewportLargeTranscript(b *testing.B) {
 	}
 }
 
+func BenchmarkApplyEventStreamLargeTranscript(b *testing.B) {
+	textChunks := benchmarkNonsenseChunks(32, 24, 1)
+	reasoningChunks := benchmarkNonsenseChunks(24, 20, 2)
+
+	b.Run("message_delta", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			b.StopTimer()
+			m := benchmarkModel(b, 220)
+			b.StartTimer()
+			for _, chunk := range textChunks {
+				m.applyEvent(domain.Event{Kind: domain.EventKindMessageDelta, Text: chunk})
+			}
+		}
+	})
+
+	b.Run("reasoning_then_text", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			b.StopTimer()
+			m := benchmarkModel(b, 220)
+			m.showReasoning = true
+			b.StartTimer()
+			for _, chunk := range reasoningChunks {
+				m.applyEvent(domain.Event{Kind: domain.EventKindReasoning, Text: chunk})
+			}
+			for _, chunk := range textChunks {
+				m.applyEvent(domain.Event{Kind: domain.EventKindMessageDelta, Text: chunk})
+			}
+		}
+	})
+}
+
 func BenchmarkHandleKeyTyping(b *testing.B) {
 	m := benchmarkModel(b, 40)
 	msg := ui.KeyMsg{Type: ui.KeyRunes, Runes: []rune("x")}
@@ -218,4 +252,28 @@ func BenchmarkViewLinesFooterOnlyInvalidation(b *testing.B) {
 		m.invalidateFooterCache()
 		_ = m.ViewLines()
 	}
+}
+
+func benchmarkNonsenseChunks(chunkCount, wordsPerChunk int, seed int64) []string {
+	rng := rand.New(rand.NewSource(seed))
+	syllables := []string{
+		"zor", "vek", "tal", "mur", "qen", "lix", "dra", "som", "pel", "nuv",
+		"kir", "bex", "wom", "caz", "tir", "yul", "fex", "rav", "min", "glo",
+	}
+	chunks := make([]string, 0, chunkCount)
+	for i := 0; i < chunkCount; i++ {
+		var line strings.Builder
+		for j := 0; j < wordsPerChunk; j++ {
+			if j > 0 {
+				line.WriteByte(' ')
+			}
+			parts := 2 + rng.Intn(3)
+			for k := 0; k < parts; k++ {
+				line.WriteString(syllables[rng.Intn(len(syllables))])
+			}
+		}
+		line.WriteString(". ")
+		chunks = append(chunks, line.String())
+	}
+	return chunks
 }
