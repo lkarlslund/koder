@@ -95,7 +95,7 @@ func TestUserMessageFillsEntireRowBackground(t *testing.T) {
 		if !ok {
 			t.Fatalf("expected background color at x=%d", x)
 		}
-		if !want.Valid || r != want.R || g != want.G || b != want.B {
+		if !want.Valid() || r != want.R() || g != want.G() || b != want.B() {
 			t.Fatalf("expected row background %v at x=%d, got %d %d %d", want, x, r, g, b)
 		}
 	}

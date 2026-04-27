@@ -189,31 +189,62 @@ type Context struct {
 	Runtime *Runtime
 }
 
-type CellColor struct {
-	R     uint8
-	G     uint8
-	B     uint8
-	Valid bool
+type CellColor uint32
+
+func NewCellColorRGB(r, g, b uint8) CellColor {
+	return NewCellColorRGBA(r, g, b, 0xff)
+}
+
+func NewCellColorRGBA(r, g, b, a uint8) CellColor {
+	return CellColor(uint32(a)<<24 | uint32(r)<<16 | uint32(g)<<8 | uint32(b))
+}
+
+func (c CellColor) Valid() bool {
+	return c.A() != 0
+}
+
+func (c CellColor) A() uint8 {
+	return uint8(uint32(c) >> 24)
+}
+
+func (c CellColor) R() uint8 {
+	return uint8(uint32(c) >> 16)
+}
+
+func (c CellColor) G() uint8 {
+	return uint8(uint32(c) >> 8)
+}
+
+func (c CellColor) B() uint8 {
+	return uint8(c)
 }
 
 func ParseCellColor(value string) CellColor {
 	value = strings.TrimSpace(value)
-	if len(value) != 7 || value[0] != '#' {
-		return CellColor{}
+	if len(value) != 7 && len(value) != 9 || value[0] != '#' {
+		return 0
 	}
 	r, err := strconv.ParseUint(value[1:3], 16, 8)
 	if err != nil {
-		return CellColor{}
+		return 0
 	}
 	g, err := strconv.ParseUint(value[3:5], 16, 8)
 	if err != nil {
-		return CellColor{}
+		return 0
 	}
 	b, err := strconv.ParseUint(value[5:7], 16, 8)
 	if err != nil {
-		return CellColor{}
+		return 0
 	}
-	return CellColor{R: uint8(r), G: uint8(g), B: uint8(b), Valid: true}
+	a := uint8(0xff)
+	if len(value) == 9 {
+		parsedAlpha, err := strconv.ParseUint(value[7:9], 16, 8)
+		if err != nil {
+			return 0
+		}
+		a = uint8(parsedAlpha)
+	}
+	return NewCellColorRGBA(uint8(r), uint8(g), uint8(b), a)
 }
 
 func CellColorFromLipgloss(value lipgloss.Color) CellColor {
@@ -238,7 +269,7 @@ type CellStyle struct {
 }
 
 func (s CellStyle) isZero() bool {
-	return !s.FG.Valid && !s.BG.Valid &&
+	return !s.FG.Valid() && !s.BG.Valid() &&
 		!s.hasBold() &&
 		!s.hasItalic() &&
 		!s.hasUnderline() &&
@@ -260,10 +291,10 @@ func (s CellStyle) equal(other CellStyle) bool {
 
 func (s CellStyle) Merge(overlay CellStyle) CellStyle {
 	out := s
-	if overlay.FG.Valid {
+	if overlay.FG.Valid() {
 		out.FG = overlay.FG
 	}
-	if overlay.BG.Valid {
+	if overlay.BG.Valid() {
 		out.BG = overlay.BG
 	}
 	if overlay.hasBold() {
@@ -472,18 +503,18 @@ func (s Surface) SurfaceCellContinuation(x, y int) bool {
 
 func (s Surface) SurfaceCellFG(x, y int) (uint8, uint8, uint8, bool) {
 	cell := s.cellAt(x, y).Style.FG
-	if !cell.Valid {
+	if !cell.Valid() {
 		return 0, 0, 0, false
 	}
-	return cell.R, cell.G, cell.B, true
+	return cell.R(), cell.G(), cell.B(), true
 }
 
 func (s Surface) SurfaceCellBG(x, y int) (uint8, uint8, uint8, bool) {
 	cell := s.cellAt(x, y).Style.BG
-	if !cell.Valid {
+	if !cell.Valid() {
 		return 0, 0, 0, false
 	}
-	return cell.R, cell.G, cell.B, true
+	return cell.R(), cell.G(), cell.B(), true
 }
 
 func (s Surface) SurfaceCellBold(x, y int) bool {

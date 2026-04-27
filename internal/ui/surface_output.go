@@ -25,18 +25,18 @@ func applyCellStyle(style CellStyle, text string) string {
 	if style.Strikethrough {
 		params = append(params, "9")
 	}
-	if style.FG.Valid {
+	if style.FG.Valid() {
 		params = append(params, "38", "2",
-			strconv.Itoa(int(style.FG.R)),
-			strconv.Itoa(int(style.FG.G)),
-			strconv.Itoa(int(style.FG.B)),
+			strconv.Itoa(int(style.FG.R())),
+			strconv.Itoa(int(style.FG.G())),
+			strconv.Itoa(int(style.FG.B())),
 		)
 	}
-	if style.BG.Valid {
+	if style.BG.Valid() {
 		params = append(params, "48", "2",
-			strconv.Itoa(int(style.BG.R)),
-			strconv.Itoa(int(style.BG.G)),
-			strconv.Itoa(int(style.BG.B)),
+			strconv.Itoa(int(style.BG.R())),
+			strconv.Itoa(int(style.BG.G())),
+			strconv.Itoa(int(style.BG.B())),
 		)
 	}
 	if len(params) == 0 {
