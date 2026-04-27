@@ -33,6 +33,32 @@ scripts/build-koder
 
 That injects version, commit, dirty state, and build time into the binary via Go `-ldflags -X`.
 
+## Testing
+
+This repo does not currently provide a root `Makefile` or `Taskfile` wrapper for validation. Run the Go checks directly:
+
+```bash
+go test ./...
+go test -race ./...
+go vet ./...
+go test -cover ./...
+```
+
+When available locally, run deeper checks as well:
+
+```bash
+staticcheck ./...
+golangci-lint run
+govulncheck ./...
+```
+
+Test conventions for this repo:
+
+- Prefer table-driven tests with `t.Run`.
+- Prefer deterministic tests built around temp dirs and local fakes.
+- Add coverage for validation and error branches, not only happy paths.
+- Keep production refactors narrow and behavior-preserving when they only improve testability.
+
 ## Live Debug API
 
 Set `KODER_DEBUG_API` before launching `koder` to expose a read-only local debug API from the running process:

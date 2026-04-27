@@ -1,5 +1,9 @@
 # Update: 2026-04-19 uncommitted
 
+## Later corrections
+
+- This note reflects the repository state as of 2026-04-19. Current `koder` no longer uses SQLite for persistence; the active store layer supports `pebble` and `jsonfs`, with `pebble` as the default backend.
+
 ## Goal
 
 Create the first working implementation of `koder` from the approved plan.

@@ -4,7 +4,7 @@
 
 - Bootstrapped the `koder` Go module and CLI entrypoints.
 - Added config, provider, store, tool, agent, and TUI packages.
-- Added SQLite persistence and OpenAI-compatible chat/model client support.
+- Added Pebble and JSONFS persistence backends plus OpenAI-compatible chat/model client support.
 - Added docs structure and initial implementation notes.
 - Replaced fixed per-tool approval modes with switchable permission profiles and rule evaluation.
 - Added session-level permission profile persistence and a `/perm` command.
@@ -48,10 +48,34 @@
 - Added explicit sidebar theme tokens and applied them to the right-hand status panel so the sidebar now renders with a visible themed background instead of blending into the terminal default.
 - Fixed slash-menu `Enter` handling for commands that require arguments, so exact matches like `/perm` now autocomplete to `/perm ` instead of getting swallowed as a no-op.
 - Replaced the small hardcoded theme set with an embedded full OpenCode theme registry, and added Claude-derived `dark`, `light`, and daltonized palette variants as additional selectable themes.
-- Verified `go test ./...`, `go vet ./...`, `staticcheck ./...`, and `golangci-lint run`.
+- Verified the repo with direct Go commands instead of a root task wrapper.
 
 ## Current gaps
 
 - Tool execution is slash-command driven; LLM-native tool calling is not wired yet.
 - `websearch` is stubbed.
 - The TUI is functional but still early compared to Codex/OpenCode depth.
+
+## Contributor testing workflow
+
+This repo does not currently define a root `Makefile` or `Taskfile` for validation. Use direct Go commands instead.
+
+Recommended verification order:
+
+1. `go test ./...`
+2. `go test -race ./...`
+3. `go vet ./...`
+4. `go test -cover ./...`
+
+Optional deeper checks when available on your machine:
+
+1. `staticcheck ./...`
+2. `golangci-lint run`
+3. `govulncheck ./...`
+
+Test-writing defaults for this repo:
+
+- Prefer table-driven tests with `t.Run`.
+- Prefer deterministic tests using temp dirs, in-memory state, and local fakes over networked or time-sensitive flows.
+- Add regression coverage for validation branches and error paths, not only happy paths.
+- Keep testability refactors narrow and behavior-preserving.
