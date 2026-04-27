@@ -427,6 +427,10 @@ type Model struct {
 	transcriptControls      []ui.Control
 	transcriptCache         map[string]cachedTranscriptBlock
 	retainedTranscript      *ui.RetainedTranscript
+	transcriptItems         []ui.TranscriptItem
+	transcriptBlocksState   []transcriptBlock
+	transcriptRenderKeys    []string
+	pendingTranscriptIndex  int
 	transcriptDirty         bool
 	mainScreen              *mainScreenWidget
 	renderCache             *modelRenderCache
@@ -505,6 +509,7 @@ type Model struct {
 type pendingAssistantTurn struct {
 	Text      string
 	Reasoning string
+	CreatedAt time.Time
 }
 
 type composerHistoryState struct {
@@ -577,6 +582,7 @@ func NewWithWorkdir(cfg config.Config, st *store.Store, a *agent.Engine, mode St
 		showSystem:              cfg.UI.ShowSystem,
 		expandedToolRuns:        make(map[string]bool),
 		expandedToolRunCommands: make(map[string]bool),
+		pendingTranscriptIndex:  -1,
 		transcriptDirty:         true,
 		parts:                   make(map[int64][]domain.Part),
 		status:                  "Ready",
@@ -1202,13 +1208,21 @@ func (m *Model) handleMainWindowKey(msg ui.KeyMsg) (bool, ui.Cmd) {
 	case "alt+r":
 		anchor := m.captureTranscriptViewportAnchor()
 		m.showReasoning = !m.showReasoning
-		m.invalidateTranscript()
+		if !m.replaceTranscriptItemsInPlace(func(block transcriptBlock) bool {
+			return block.Kind == transcriptBlockMessage
+		}) {
+			m.invalidateTranscript()
+		}
 		m.refreshViewportAnchored(anchor)
 		return true, nil
 	case "alt+p":
 		anchor := m.captureTranscriptViewportAnchor()
 		m.showSystem = !m.showSystem
-		m.invalidateTranscript()
+		if !m.replaceTranscriptItemsInPlace(func(block transcriptBlock) bool {
+			return block.Kind == transcriptBlockMessage
+		}) {
+			m.invalidateTranscript()
+		}
 		m.refreshViewportAnchored(anchor)
 		return true, nil
 	case "alt+o":
@@ -1396,7 +1410,11 @@ func (m *Model) handleMouse(msg ui.MouseMsg) (ui.Model, ui.Cmd, bool) {
 				}
 				m.expandedToolRuns[runID] = !m.expandedToolRuns[runID]
 			}
-			m.invalidateTranscript()
+			if !m.replaceTranscriptItemsInPlace(func(block transcriptBlock) bool {
+				return block.Kind == transcriptBlockToolRun && block.ToolRun.ID == runID
+			}) {
+				m.invalidateTranscript()
+			}
 			m.refreshViewportPreserve()
 			return m, nil, true
 		}
@@ -1561,10 +1579,16 @@ func (m *Model) helpMaxOffset() int {
 func (m *Model) applyEvent(evt domain.Event) {
 	switch evt.Kind {
 	case domain.EventKindMessageDelta:
+		if m.pendingAssistant.CreatedAt.IsZero() {
+			m.pendingAssistant.CreatedAt = time.Now().UTC()
+		}
 		m.pendingAssistant.Text += evt.Text
 		m.startBusy(busyScopeTranscript, "Working ...")
 		m.refreshTranscriptForPendingTurn()
 	case domain.EventKindReasoning:
+		if m.pendingAssistant.CreatedAt.IsZero() {
+			m.pendingAssistant.CreatedAt = time.Now().UTC()
+		}
 		m.pendingAssistant.Reasoning += evt.Text
 		m.startBusy(busyScopeTranscript, "Working ...")
 		m.refreshTranscriptForPendingTurn()
@@ -1640,7 +1664,9 @@ func shouldRefreshDetailsAfterEvent(evt domain.Event) bool {
 }
 
 func (m *Model) refreshTranscriptForPendingTurn() {
-	m.invalidateTranscript()
+	if !m.syncPendingTranscriptItem() {
+		m.invalidateTranscript()
+	}
 	if m.viewport.AtBottom() {
 		m.refreshViewport()
 		return
@@ -2249,9 +2275,6 @@ func (m *Model) refreshViewportAnchored(anchor transcriptViewportAnchor) {
 
 func (m *Model) refreshViewportAt(offset int) {
 	m.invalidateMainSurface()
-	if m.hasExpandedToolRuns() {
-		m.transcriptDirty = true
-	}
 	m.transcriptControls = nil
 	retained := m.syncRetainedTranscript()
 	if retained == nil {
@@ -2281,20 +2304,6 @@ func (m *Model) refreshViewportAt(offset int) {
 	if main := m.ensureMainScreenWidget(); main != nil {
 		main.transcript.Invalidate()
 	}
-}
-
-func (m *Model) hasExpandedToolRuns() bool {
-	for _, expanded := range m.expandedToolRuns {
-		if expanded {
-			return true
-		}
-	}
-	for _, expanded := range m.expandedToolRunCommands {
-		if expanded {
-			return true
-		}
-	}
-	return false
 }
 
 func (m *Model) invalidateBodyCache() {
@@ -2351,6 +2360,164 @@ func (m *Model) invalidateTranscript() {
 	m.invalidateBodyCache()
 }
 
+func (m *Model) transcriptPlaceholderItems() []ui.TranscriptItem {
+	if m.currentSession.ID == 0 && len(m.messages) == 0 && !m.cfg.HasUsableDefaultProvider() {
+		return []ui.TranscriptItem{{
+			Key:     "no-provider",
+			Element: ui.NewCachedElement(ui.Paragraph{Text: "No provider configured.\n\nType /connect to add one before sending prompts."}, 3),
+		}}
+	}
+	if m.currentSession.ID == 0 && len(m.messages) == 0 {
+		return []ui.TranscriptItem{{
+			Key:     "empty",
+			Element: ui.NewCachedElement(ui.Paragraph{Text: "Start by asking a question or type / for commands."}, 1),
+		}}
+	}
+	return nil
+}
+
+func (m *Model) rebuildTranscriptState() []ui.TranscriptItem {
+	if items := m.transcriptPlaceholderItems(); len(items) > 0 {
+		m.transcriptBlocksState = nil
+		m.transcriptItems = items
+		m.transcriptRenderKeys = nil
+		m.pendingTranscriptIndex = -1
+		return items
+	}
+	blocks := m.transcriptBlocks()
+	items := make([]ui.TranscriptItem, 0, len(blocks))
+	renderKeys := make([]string, 0, len(blocks))
+	pendingIndex := -1
+	for idx, block := range blocks {
+		if block.Pending {
+			pendingIndex = idx
+		}
+		items = append(items, m.transcriptItemFromBlocks(blocks, idx))
+		renderKeys = append(renderKeys, m.transcriptBlockCacheKey(block))
+	}
+	m.transcriptBlocksState = blocks
+	m.transcriptItems = items
+	m.transcriptRenderKeys = renderKeys
+	m.pendingTranscriptIndex = pendingIndex
+	return items
+}
+
+func (m *Model) transcriptItemFromBlocks(blocks []transcriptBlock, index int) ui.TranscriptItem {
+	block := blocks[index]
+	gap := 0
+	if index > 0 {
+		gap = renderedSeparatorHeight(m.transcriptSeparator(blocks[index-1], block))
+	}
+	cached := m.cachedTranscriptBlock(block)
+	return ui.TranscriptItem{
+		Key:       m.transcriptBlockIdentityKey(block),
+		Element:   cached.element,
+		GapBefore: gap,
+	}
+}
+
+func (m *Model) replaceTranscriptItemAt(index int) bool {
+	if m.transcriptDirty || index < 0 || index >= len(m.transcriptBlocksState) || index >= len(m.transcriptItems) {
+		return false
+	}
+	retained := m.ensureRetainedTranscript()
+	if len(retained.Items()) == 0 {
+		return false
+	}
+	item := m.transcriptItemFromBlocks(m.transcriptBlocksState, index)
+	m.transcriptItems[index] = item
+	if index < len(m.transcriptRenderKeys) {
+		m.transcriptRenderKeys[index] = m.transcriptBlockCacheKey(m.transcriptBlocksState[index])
+	}
+	retained.Replace(index, item)
+	return true
+}
+
+func (m *Model) replaceTranscriptItemsInPlace(match func(transcriptBlock) bool) bool {
+	if m.transcriptDirty {
+		return false
+	}
+	retained := m.ensureRetainedTranscript()
+	if len(retained.Items()) == 0 {
+		return false
+	}
+	updated := false
+	for idx, block := range m.transcriptBlocksState {
+		if match != nil && !match(block) {
+			continue
+		}
+		item := m.transcriptItemFromBlocks(m.transcriptBlocksState, idx)
+		m.transcriptItems[idx] = item
+		retained.Replace(idx, item)
+		updated = true
+	}
+	return updated
+}
+
+func (m *Model) syncPendingTranscriptItem() bool {
+	if m.transcriptDirty {
+		return false
+	}
+	retained := m.ensureRetainedTranscript()
+	if len(retained.Items()) == 0 {
+		return false
+	}
+	parts := m.pendingAssistantParts()
+	if len(parts) == 0 {
+		if m.pendingTranscriptIndex < 0 || m.pendingTranscriptIndex >= len(m.transcriptBlocksState) {
+			return false
+		}
+		retained.Remove(m.pendingTranscriptIndex)
+		m.transcriptBlocksState = append(m.transcriptBlocksState[:m.pendingTranscriptIndex], m.transcriptBlocksState[m.pendingTranscriptIndex+1:]...)
+		m.transcriptItems = append(m.transcriptItems[:m.pendingTranscriptIndex], m.transcriptItems[m.pendingTranscriptIndex+1:]...)
+		if m.pendingTranscriptIndex < len(m.transcriptRenderKeys) {
+			m.transcriptRenderKeys = append(m.transcriptRenderKeys[:m.pendingTranscriptIndex], m.transcriptRenderKeys[m.pendingTranscriptIndex+1:]...)
+		}
+		m.pendingTranscriptIndex = -1
+		return true
+	}
+	if m.pendingAssistant.CreatedAt.IsZero() {
+		m.pendingAssistant.CreatedAt = time.Now().UTC()
+	}
+	block := transcriptBlock{
+		Kind:    transcriptBlockMessage,
+		Pending: true,
+		Message: domain.Message{
+			Role:      domain.MessageRoleAssistant,
+			CreatedAt: m.pendingAssistant.CreatedAt,
+		},
+		Parts: parts,
+	}
+	if m.pendingTranscriptIndex >= 0 && m.pendingTranscriptIndex < len(m.transcriptBlocksState) {
+		m.transcriptBlocksState[m.pendingTranscriptIndex] = block
+		return m.replaceTranscriptItemAt(m.pendingTranscriptIndex)
+	}
+	m.transcriptBlocksState = append(m.transcriptBlocksState, block)
+	item := m.transcriptItemFromBlocks(m.transcriptBlocksState, len(m.transcriptBlocksState)-1)
+	m.transcriptItems = append(m.transcriptItems, item)
+	m.transcriptRenderKeys = append(m.transcriptRenderKeys, m.transcriptBlockCacheKey(block))
+	retained.Add(item)
+	m.pendingTranscriptIndex = len(m.transcriptItems) - 1
+	return true
+}
+
+func (m *Model) syncTranscriptPresentation() {
+	if m.transcriptDirty || len(m.transcriptBlocksState) == 0 || len(m.transcriptBlocksState) != len(m.transcriptItems) {
+		return
+	}
+	if len(m.transcriptRenderKeys) != len(m.transcriptBlocksState) {
+		m.transcriptRenderKeys = make([]string, len(m.transcriptBlocksState))
+	}
+	for idx, block := range m.transcriptBlocksState {
+		key := m.transcriptBlockCacheKey(block)
+		if m.transcriptRenderKeys[idx] == key {
+			continue
+		}
+		m.transcriptRenderKeys[idx] = key
+		_ = m.replaceTranscriptItemAt(idx)
+	}
+}
+
 func (m *Model) transcriptElement(runtime *ui.Runtime) ui.Element {
 	retained := m.syncRetainedTranscript()
 	if retained == nil {
@@ -2373,14 +2540,10 @@ func (m *Model) syncRetainedTranscript() *ui.RetainedTranscript {
 	retained := m.ensureRetainedTranscript()
 	if m.transcriptDirty || len(retained.Items()) == 0 {
 		items := m.buildTranscriptItems()
-		if m.currentSession.ID == 0 && len(m.messages) == 0 && !m.cfg.HasUsableDefaultProvider() {
-			items = []ui.TranscriptItem{{
-				Key:     "no-provider",
-				Element: ui.NewCachedElement(ui.Paragraph{Text: "No provider configured.\n\nType /connect to add one before sending prompts."}, 3),
-			}}
-		}
 		m.syncRetainedTranscriptItems(retained, items)
 		m.transcriptDirty = false
+	} else {
+		m.syncTranscriptPresentation()
 	}
 	return retained
 }
@@ -2456,10 +2619,19 @@ func (m *Model) renderTranscriptMessageElement(msg domain.Message, parts []domai
 		if strings.TrimSpace(userBody) == "" {
 			userBody = strings.TrimSpace(msg.Summary)
 		}
+		if strings.TrimSpace(userBody) == "" {
+			return nil
+		}
 		return m.renderUserMessageElement(userBody, stamp)
 	default:
 		if strings.TrimSpace(body) == "" {
 			body = strings.TrimSpace(msg.Summary)
+		}
+		if isSyntheticToolSummary(body) {
+			body = ""
+		}
+		if len(styledBody) == 0 && strings.TrimSpace(body) == "" {
+			return nil
 		}
 		if len(styledBody) == 0 && body != "" {
 			styledBody = []ui.StyledSpan{{Text: body}}
@@ -5029,7 +5201,7 @@ func (m Model) debugTranscriptItems() []debugsrv.TranscriptItemRef {
 		return nil
 	}
 	items := retained.Items()
-	blocks := m.transcriptBlocks()
+	blocks := m.transcriptBlocksState
 	ctx := &ui.Context{Palette: m.palette}
 	width := max(0, m.viewport.Width)
 	out := make([]debugsrv.TranscriptItemRef, 0, len(items))
@@ -6121,27 +6293,7 @@ func (m *Model) rootTimerCmd() ui.Cmd {
 }
 
 func (m *Model) buildTranscriptItems() []ui.TranscriptItem {
-	if m.currentSession.ID == 0 && len(m.messages) == 0 {
-		return []ui.TranscriptItem{{
-			Key:     "empty",
-			Element: ui.NewCachedElement(ui.Paragraph{Text: "Start by asking a question or type / for commands."}, 1),
-		}}
-	}
-	var items []ui.TranscriptItem
-	transcriptBlocks := m.transcriptBlocks()
-	for i, block := range transcriptBlocks {
-		gap := 0
-		if i > 0 {
-			gap = renderedSeparatorHeight(m.transcriptSeparator(transcriptBlocks[i-1], block))
-		}
-		cached := m.cachedTranscriptBlock(block)
-		items = append(items, ui.TranscriptItem{
-			Key:       m.transcriptBlockCacheKey(block),
-			Element:   cached.element,
-			GapBefore: gap,
-		})
-	}
-	return items
+	return m.rebuildTranscriptState()
 }
 
 func (m *Model) withRootTimers(cmd ui.Cmd) ui.Cmd {

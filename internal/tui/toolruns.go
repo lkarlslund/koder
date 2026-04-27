@@ -3,12 +3,9 @@ package tui
 import (
 	"encoding/json"
 	"fmt"
-	"hash"
-	"hash/fnv"
 	"path/filepath"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/store"
@@ -30,6 +27,7 @@ type transcriptBlock struct {
 	Message domain.Message
 	Parts   []domain.Part
 	ToolRun ui.ToolRun
+	Pending bool
 }
 
 func (m *Model) transcriptBlocks() []transcriptBlock {
@@ -48,24 +46,7 @@ func (m *Model) transcriptBlocks() []transcriptBlock {
 		parts := m.parts[msg.ID]
 		switch msg.Role {
 		case domain.MessageRoleAssistant:
-			hasSpecialCard := false
-			if _, ok := compactionToolRun(parts, msg); ok {
-				hasSpecialCard = true
-			}
-			for _, part := range parts {
-				if run := eventNoticeToolRun(part); strings.TrimSpace(run.ID) != "" {
-					hasSpecialCard = true
-					break
-				}
-			}
-			body := m.renderMessageParts(parts)
-			if strings.TrimSpace(body) == "" && !hasSpecialCard {
-				body = strings.TrimSpace(msg.Summary)
-			}
-			if isSyntheticToolSummary(body) {
-				body = ""
-			}
-			if strings.TrimSpace(body) != "" {
+			if m.assistantMessageShouldExist(msg, parts) {
 				appendMessage(msg)
 			}
 			if run, ok := compactionToolRun(parts, msg); ok {
@@ -94,16 +75,48 @@ func (m *Model) transcriptBlocks() []transcriptBlock {
 	}
 	if pending := m.pendingAssistantParts(); len(pending) > 0 {
 		blocks = append(blocks, transcriptBlock{
-			Kind: transcriptBlockMessage,
+			Kind:    transcriptBlockMessage,
+			Pending: true,
 			Message: domain.Message{
-				ID:        -1,
 				Role:      domain.MessageRoleAssistant,
-				CreatedAt: time.Now().UTC(),
+				CreatedAt: m.pendingAssistant.CreatedAt,
 			},
 			Parts: pending,
 		})
 	}
 	return blocks
+}
+
+func (m *Model) assistantMessageShouldExist(msg domain.Message, parts []domain.Part) bool {
+	summary := strings.TrimSpace(msg.Summary)
+	if summary != "" && !isSyntheticToolSummary(summary) {
+		return true
+	}
+	for _, part := range parts {
+		switch part.Kind {
+		case domain.PartKindText,
+			domain.PartKindReasoning,
+			domain.PartKindSystemNotice,
+			domain.PartKindAttachment:
+			return true
+		case domain.PartKindEventNotice:
+			if eventNoticeToolRun(part).ID == "" {
+				return true
+			}
+		case domain.PartKindCompaction,
+			domain.PartKindToolCall,
+			domain.PartKindToolOutput,
+			domain.PartKindDiff,
+			domain.PartKindApprovalRequest,
+			domain.PartKindReference:
+			continue
+		default:
+			if strings.TrimSpace(part.Body) != "" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 type toolRunTracker struct {
@@ -509,55 +522,45 @@ func (m *Model) estimateTranscriptBlockHeight(block transcriptBlock) int {
 }
 
 func (m *Model) transcriptBlockCacheKey(block transcriptBlock) string {
-	width := max(0, m.viewport.Width)
-	hasher := fnv.New64a()
 	switch block.Kind {
 	case transcriptBlockToolRun:
-		writeHashStrings(hasher,
+		return strings.Join([]string{
 			"toolrun",
-			strconv.Itoa(width),
+			m.transcriptBlockIdentityKey(block),
+			strconv.Itoa(max(0, m.viewport.Width)),
 			strconv.FormatBool(m.expandedToolRuns[block.ToolRun.ID]),
 			strconv.FormatBool(m.expandedToolRunCommands[block.ToolRun.ID]),
-			string(block.ToolRun.Tool),
-			block.ToolRun.ID,
-			block.ToolRun.ToolCallID,
-			strconv.FormatInt(block.ToolRun.ApprovalID, 10),
-			block.ToolRun.Title,
-			block.ToolRun.Command,
-			block.ToolRun.Subtitle,
-			block.ToolRun.Preview,
-			block.ToolRun.Output,
-			block.ToolRun.Diff,
-			block.ToolRun.ErrorText,
-			string(block.ToolRun.Status),
-		)
+		}, ":")
 	default:
-		writeHashStrings(hasher,
+		return strings.Join([]string{
 			"message",
-			strconv.Itoa(width),
-			string(block.Message.Role),
+			m.transcriptBlockIdentityKey(block),
+			strconv.Itoa(max(0, m.viewport.Width)),
 			strconv.FormatBool(m.showReasoning),
 			strconv.FormatBool(m.showSystem),
 			strconv.FormatBool(m.halfBlocksEnabled()),
-			block.Message.Summary,
-			block.Message.CreatedAt.UTC().Format(time.RFC3339Nano),
-		)
-		for _, part := range block.Parts {
-			writeHashStrings(hasher,
-				strconv.FormatInt(part.ID, 10),
-				string(part.Kind),
-				part.Body,
-				part.MetaJSON,
-			)
-		}
+		}, ":")
 	}
-	return fmt.Sprintf("%d:%x", block.Message.ID+int64(block.ToolRun.ApprovalID), hasher.Sum64())
 }
 
-func writeHashStrings(hasher hash.Hash64, values ...string) {
-	for _, value := range values {
-		_, _ = hasher.Write([]byte(value))
-		_, _ = hasher.Write([]byte{0})
+func (m *Model) transcriptBlockIdentityKey(block transcriptBlock) string {
+	switch block.Kind {
+	case transcriptBlockToolRun:
+		if strings.TrimSpace(block.ToolRun.ID) != "" {
+			return "toolrun:" + block.ToolRun.ID
+		}
+		if block.ToolRun.ApprovalID > 0 {
+			return fmt.Sprintf("toolrun-approval:%d", block.ToolRun.ApprovalID)
+		}
+		if strings.TrimSpace(block.ToolRun.ToolCallID) != "" {
+			return "toolrun-call:" + block.ToolRun.ToolCallID
+		}
+		return "toolrun-fallback:" + toolRunFallbackID(block.ToolRun.Tool, block.ToolRun.Preview)
+	default:
+		if block.Pending {
+			return "pending-assistant"
+		}
+		return fmt.Sprintf("msg:%d", block.Message.ID)
 	}
 }
 
@@ -621,7 +624,11 @@ func (m *Model) approvalToolRun(item store.Approval) ui.ToolRun {
 		run.Subtitle = presentation.Subtitle
 		run.Preview = firstNonEmptyString(presentation.Preview, run.Preview)
 	}
-	for _, block := range m.transcriptBlocks() {
+	blocks := m.transcriptBlocksState
+	if len(blocks) == 0 {
+		blocks = m.transcriptBlocks()
+	}
+	for _, block := range blocks {
 		if block.Kind != transcriptBlockToolRun {
 			continue
 		}
