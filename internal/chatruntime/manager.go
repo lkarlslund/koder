@@ -7,13 +7,19 @@ import (
 	"sync"
 
 	"github.com/lkarlslund/koder/internal/agent"
+	"github.com/lkarlslund/koder/internal/attachment"
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/reference"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools"
 )
 
+type promptRunner interface {
+	RunPromptInChat(context.Context, domain.Session, domain.Chat, string, []attachment.Draft, []reference.Draft, string) (<-chan domain.Event, error)
+}
+
 type Manager struct {
-	engine *agent.Engine
+	engine promptRunner
 	store  *store.Store
 
 	mu   sync.RWMutex
