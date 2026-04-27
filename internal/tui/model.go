@@ -504,6 +504,8 @@ type Model struct {
 	readClipboardText       func() (string, error)
 	readClipboardImage      func() ([]byte, error)
 	writeClipboardText      func(string) error
+	debugRuntimeHash        uint64
+	debugFrameLastSync      time.Time
 }
 
 type pendingAssistantTurn struct {
@@ -4908,7 +4910,7 @@ func (m *Model) stopBusyWithStatus(status string) {
 	m.status = status
 }
 
-func (m Model) syncDebugRuntime() {
+func (m *Model) syncDebugRuntime() {
 	if m.debug == nil {
 		return
 	}
@@ -4920,6 +4922,50 @@ func (m Model) syncDebugRuntime() {
 	renderBlockCount := len(m.transcriptItems)
 	if deepDebug {
 		renderBlockCount = len(transcriptItems)
+	}
+	hashValues := []string{
+		strconv.FormatBool(deepDebug),
+		strconv.FormatInt(m.currentSession.ID, 10),
+		strings.TrimSpace(m.currentSession.Title),
+		strings.TrimSpace(m.currentSession.ProviderID),
+		strings.TrimSpace(m.currentSession.ModelID),
+		strings.TrimSpace(m.status),
+		strconv.FormatBool(m.busy.active),
+		strings.TrimSpace(m.busy.status),
+		m.openDialogName(),
+		strconv.FormatBool(m.showSidebar),
+		strconv.FormatBool(m.showReasoning),
+		strconv.FormatBool(m.showSystem),
+		m.currentError(),
+		strconv.Itoa(m.viewport.Width),
+		strconv.Itoa(m.viewport.Height),
+		strconv.Itoa(m.viewport.YOffset),
+		strconv.Itoa(len(m.messages)),
+		strconv.Itoa(renderBlockCount),
+		strconv.Itoa(m.viewport.VisibleSurface().SurfaceHeight()),
+	}
+	if deepDebug {
+		for _, item := range transcriptItems {
+			hashValues = append(hashValues,
+				strconv.Itoa(item.Index),
+				item.Key,
+				item.Kind,
+				strconv.Itoa(item.GapBefore),
+				strconv.Itoa(item.Height),
+				strconv.Itoa(item.BlankRows),
+				strconv.FormatInt(item.MessageID, 10),
+				item.Role,
+				item.Summary,
+				string(item.Tool),
+				item.ToolRunID,
+				item.Title,
+				item.ControlID,
+			)
+		}
+	}
+	runtimeHash := hashStrings(hashValues...)
+	if runtimeHash == m.debugRuntimeHash {
+		return
 	}
 	m.debug.UpdateRuntime(debugsrv.RuntimeSnapshot{
 		DebugAPI:           m.debugAPIAddr(),
@@ -4946,10 +4992,14 @@ func (m Model) syncDebugRuntime() {
 		ViewportContentLen: m.viewport.VisibleSurface().SurfaceHeight(),
 		TranscriptItems:    transcriptItems,
 	})
+	m.debugRuntimeHash = runtimeHash
 }
 
-func (m Model) syncDebugFrame(surface ui.Surface) {
+func (m *Model) syncDebugFrame(surface ui.Surface) {
 	if m.debug == nil || !m.debug.DeepDebug() {
+		return
+	}
+	if !m.debugFrameLastSync.IsZero() && time.Since(m.debugFrameLastSync) < 250*time.Millisecond {
 		return
 	}
 	snapshot := m.debug.Runtime()
@@ -4968,6 +5018,7 @@ func (m Model) syncDebugFrame(surface ui.Surface) {
 	snapshot.FrameLines = lines
 	snapshot.TranscriptControls = controls
 	m.debug.UpdateRuntime(snapshot)
+	m.debugFrameLastSync = time.Now()
 }
 
 func (m Model) debugTranscriptItems() []debugsrv.TranscriptItemRef {

@@ -1539,6 +1539,26 @@ func TestSyncDebugRuntimeIncludesViewportState(t *testing.T) {
 	}
 }
 
+func TestSyncDebugRuntimeSkipsIdenticalSnapshots(t *testing.T) {
+	rec := debugsrv.NewRecorder()
+	m := Model{
+		debug:          rec,
+		status:         "Ready",
+		currentSession: domain.Session{ID: 7, Title: "Debug Session", ProviderID: "test", ModelID: "model"},
+		messages:       []domain.Message{{ID: 1}, {ID: 2}},
+		viewport:       newTranscriptViewport(40, 6),
+	}
+	m.viewport.SetContent("line one\nline two")
+
+	m.syncDebugRuntime()
+	first := rec.Runtime().Timestamp
+	m.syncDebugRuntime()
+	second := rec.Runtime().Timestamp
+	if !second.Equal(first) {
+		t.Fatalf("expected identical runtime snapshot to be skipped, got timestamps %v then %v", first, second)
+	}
+}
+
 func TestSyncDebugRuntimeIncludesTranscriptItemsInDeepDebug(t *testing.T) {
 	rec := debugsrv.NewRecorder()
 	rec.SetDeepDebug(true)
