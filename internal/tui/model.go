@@ -3235,10 +3235,18 @@ func (m Model) loadSessionCmd(sessionID int64) ui.Cmd {
 			return nil
 		}
 		ctx := context.Background()
+		totalStart := time.Now()
+		if m.debug != nil {
+			m.debug.RecordLifecycle(sessionID, "chat_load_started", "resume session", nil)
+		}
+		stepStart := time.Now()
 		allSessions, err := m.store.ListSessions(ctx)
 		if err != nil {
 			return promptDoneMsg{err: err}
 		}
+		m.recordLoadTiming(sessionID, 0, "list_sessions", stepStart, map[string]string{
+			"count": strconv.Itoa(len(allSessions)),
+		})
 		sessions := m.visibleSessions(allSessions)
 		var session domain.Session
 		for _, item := range sessions {
@@ -3250,34 +3258,59 @@ func (m Model) loadSessionCmd(sessionID int64) ui.Cmd {
 		if session.ID == 0 {
 			return promptDoneMsg{err: fmt.Errorf("session %d not found", sessionID)}
 		}
+		stepStart = time.Now()
 		chats, err := m.store.ListChats(ctx, session.ID)
 		if err != nil {
 			return promptDoneMsg{err: err}
 		}
+		m.recordLoadTiming(sessionID, 0, "list_chats", stepStart, map[string]string{
+			"count": strconv.Itoa(len(chats)),
+		})
 		currentChat := newestChat(chats)
 		if currentChat.ID == 0 {
+			stepStart = time.Now()
 			currentChat, err = m.store.DefaultChat(ctx, session.ID)
 			if err != nil {
 				return promptDoneMsg{err: err}
 			}
 			chats = append(chats, currentChat)
+			m.recordLoadTiming(sessionID, currentChat.ID, "default_chat", stepStart, nil)
 		}
+		stepStart = time.Now()
 		messages, parts, err := m.store.PartsForChat(ctx, currentChat.ID)
 		if err != nil {
 			return promptDoneMsg{err: err}
 		}
+		m.recordLoadTiming(sessionID, currentChat.ID, "parts_for_chat", stepStart, map[string]string{
+			"messages": strconv.Itoa(len(messages)),
+			"parts":    strconv.Itoa(len(parts)),
+		})
+		stepStart = time.Now()
 		approvals, err := m.store.PendingApprovalsForChat(ctx, currentChat.ID)
 		if err != nil {
 			return promptDoneMsg{err: err}
 		}
+		m.recordLoadTiming(sessionID, currentChat.ID, "pending_approvals", stepStart, map[string]string{
+			"count": strconv.Itoa(len(approvals)),
+		})
+		stepStart = time.Now()
 		plan, todos, err := m.loadPlanningState(ctx, session.ID)
 		if err != nil {
 			return promptDoneMsg{err: err}
 		}
+		m.recordLoadTiming(sessionID, currentChat.ID, "planning_state", stepStart, map[string]string{
+			"milestones": strconv.Itoa(len(plan.Milestones)),
+			"todos":      strconv.Itoa(len(todos)),
+		})
+		stepStart = time.Now()
 		workspaceStatus, err := workspace.Snapshot(ctx, m.workdir)
 		if err != nil {
 			return promptDoneMsg{err: err}
 		}
+		m.recordLoadTiming(sessionID, currentChat.ID, "workspace_snapshot", stepStart, map[string]string{
+			"files": strconv.Itoa(len(workspaceStatus.Files)),
+		})
+		m.recordLoadTiming(sessionID, currentChat.ID, "load_chat_total", totalStart, nil)
 		return loadMsg{
 			sessions:  sessions,
 			chats:     chats,

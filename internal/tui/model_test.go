@@ -3323,6 +3323,56 @@ func TestEnsureRuntimeContextWindowRecordsTiming(t *testing.T) {
 	t.Fatal("expected context_window_timing lifecycle event")
 }
 
+func TestLoadSessionCmdRecordsChatLoadTiming(t *testing.T) {
+	st, err := store.OpenWithOptions(t.TempDir(), store.Options{Backend: store.BackendJSONFS})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	session, err := st.CreateSession(context.Background(), "test", "provider", "model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	msg, err := st.AddMessage(context.Background(), session.ID, domain.MessageRoleAssistant, "hello")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.AddPart(context.Background(), msg.ID, domain.PartKindText, "hello", ""); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := debugsrv.NewRecorder()
+	m := Model{
+		store:          st,
+		debug:          rec,
+		workdir:        t.TempDir(),
+		startupOptions: StartupOptions{ShowAllSessions: true},
+	}
+
+	got := m.loadSessionCmd(session.ID)()
+	if got == nil {
+		t.Fatal("expected loadSessionCmd to return a message")
+	}
+
+	events := rec.Events(session.ID)
+	var sawLoadTotal bool
+	for _, evt := range events {
+		if evt.Source != "lifecycle" || evt.Kind != "chat_load_timing" {
+			continue
+		}
+		if evt.Meta["duration_ms"] == "" {
+			t.Fatalf("expected duration_ms in chat load timing event: %#v", evt)
+		}
+		if evt.Text == "load_chat_total" {
+			sawLoadTotal = true
+		}
+	}
+	if !sawLoadTotal {
+		t.Fatalf("expected loadSessionCmd to record chat_load_timing events, got %#v", events)
+	}
+}
+
 func TestUpdateLoadSchedulesContextWindowDetectionForCurrentSession(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
