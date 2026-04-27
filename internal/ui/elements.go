@@ -832,6 +832,10 @@ type Element interface {
 	Render(ctx *Context, bounds Rect) Surface
 }
 
+type SurfaceRenderer interface {
+	RenderTo(ctx *Context, bounds Rect, dst *Surface)
+}
+
 type TreeWalker interface {
 	WalkChildren(ctx *Context, visit func(Element))
 }
@@ -845,6 +849,59 @@ func InvalidateElementCaches(ctx *Context, element Element) {
 		return
 	}
 	invalidateElementCaches(ctx, element)
+}
+
+func renderElementCapturedSurface(ctx *Context, element Element, bounds Rect) Surface {
+	if element == nil || bounds.W <= 0 || bounds.H <= 0 {
+		return Surface{}
+	}
+	shadow := &Runtime{}
+	copyCtx := Context{}
+	if ctx != nil {
+		copyCtx = *ctx
+	}
+	copyCtx.Runtime = shadow
+	surface := element.Render(&copyCtx, Rect{W: bounds.W, H: bounds.H})
+	if controls := shadow.Controls(); len(controls) > 0 {
+		surface.ctrls = append(surface.ctrls[:0], controls...)
+	}
+	return surface
+}
+
+func renderElementInto(ctx *Context, element Element, bounds Rect, dst *Surface) {
+	if element == nil || dst == nil || bounds.W <= 0 || bounds.H <= 0 {
+		return
+	}
+	if renderer, ok := element.(SurfaceRenderer); ok {
+		renderer.RenderTo(ctx, bounds, dst)
+		return
+	}
+	surface := renderElementCapturedSurface(ctx, element, bounds)
+	*dst = dst.placeAt(bounds.X, bounds.Y, surface)
+	if ctx != nil && ctx.Runtime != nil {
+		surface.RegisterControls(ctx.Runtime, bounds.X, bounds.Y)
+	}
+}
+
+func renderOwnedSurface(ctx *Context, bounds Rect, draw func(ctx *Context, bounds Rect, dst *Surface)) Surface {
+	base := TransparentSurface(bounds.W, bounds.H)
+	if draw == nil {
+		return base
+	}
+	localBounds := Rect{W: bounds.W, H: bounds.H}
+	if ctx == nil || ctx.Runtime == nil {
+		draw(ctx, localBounds, &base)
+		return base
+	}
+	shadow := &Runtime{}
+	copyCtx := *ctx
+	copyCtx.Runtime = shadow
+	draw(&copyCtx, localBounds, &base)
+	if controls := shadow.Controls(); len(controls) > 0 {
+		base.ctrls = append(base.ctrls[:0], controls...)
+		base.RegisterControls(ctx.Runtime, bounds.X, bounds.Y)
+	}
+	return base
 }
 
 func invalidateElementCaches(ctx *Context, element Element) {
@@ -981,6 +1038,13 @@ func (b SurfaceBox) Render(_ *Context, bounds Rect) Surface {
 	return b.Surface.normalize(bounds.W, bounds.H)
 }
 
+func (b SurfaceBox) RenderTo(_ *Context, bounds Rect, dst *Surface) {
+	if dst == nil || bounds.W <= 0 || bounds.H <= 0 {
+		return
+	}
+	*dst = dst.placeAt(bounds.X, bounds.Y, b.Surface.normalize(bounds.W, bounds.H))
+}
+
 type VisibleElement struct {
 	BoxProps
 	Child Element
@@ -998,11 +1062,16 @@ func (e VisibleElement) Measure(ctx *Context, constraints Constraints) Size {
 }
 
 func (e VisibleElement) Render(ctx *Context, bounds Rect) Surface {
-	if !e.Visible() {
-		return Surface{}
+	return renderOwnedSurface(ctx, bounds, e.RenderTo)
+}
+
+func (e VisibleElement) RenderTo(ctx *Context, bounds Rect, dst *Surface) {
+	if !e.Visible() || dst == nil || bounds.W <= 0 || bounds.H <= 0 {
+		return
 	}
 	if e.HAlign == AlignStart && e.VAlign == AlignStart {
-		return e.Child.Render(ctx, bounds)
+		renderElementInto(ctx, e.Child, bounds, dst)
+		return
 	}
 	size := e.Child.Measure(ctx, NewConstraints(bounds.W, bounds.H))
 	x := 0
@@ -1019,9 +1088,7 @@ func (e VisibleElement) Render(ctx *Context, bounds Rect) Surface {
 	case AlignEnd:
 		y = max(0, bounds.H-size.H)
 	}
-	base := TransparentSurface(bounds.W, bounds.H)
-	child := e.Child.Render(ctx, Rect{X: bounds.X + x, Y: bounds.Y + y, W: min(bounds.W, size.W), H: min(bounds.H, size.H)})
-	return base.placeAt(x, y, child)
+	renderElementInto(ctx, e.Child, Rect{X: bounds.X + x, Y: bounds.Y + y, W: min(bounds.W, size.W), H: min(bounds.H, size.H)}, dst)
 }
 
 func (e VisibleElement) WalkChildren(_ *Context, visit func(Element)) {
@@ -1112,10 +1179,18 @@ func (b FlexBox) Measure(ctx *Context, constraints Constraints) Size {
 }
 
 func (b FlexBox) Render(ctx *Context, bounds Rect) Surface {
-	if b.axis() == AxisVertical {
-		return b.renderVertical(ctx, bounds)
+	return renderOwnedSurface(ctx, bounds, b.RenderTo)
+}
+
+func (b FlexBox) RenderTo(ctx *Context, bounds Rect, dst *Surface) {
+	if dst == nil || bounds.W <= 0 || bounds.H <= 0 {
+		return
 	}
-	return b.renderHorizontal(ctx, bounds)
+	if b.axis() == AxisVertical {
+		b.renderVerticalTo(ctx, bounds, dst)
+		return
+	}
+	b.renderHorizontalTo(ctx, bounds, dst)
 }
 
 func (b FlexBox) WalkChildren(_ *Context, visit func(Element)) {
@@ -1136,8 +1211,10 @@ func (b FlexBox) axis() Axis {
 	return AxisHorizontal
 }
 
-func (b FlexBox) renderVertical(ctx *Context, bounds Rect) Surface {
-	base := TransparentSurface(bounds.W, bounds.H)
+func (b FlexBox) renderVerticalTo(ctx *Context, bounds Rect, dst *Surface) {
+	if dst == nil {
+		return
+	}
 	plan := b.layoutPlan(ctx, NewConstraints(bounds.W, bounds.H), bounds.H)
 	y := 0
 	for idx, item := range plan.items {
@@ -1150,20 +1227,20 @@ func (b FlexBox) renderVertical(ctx *Context, bounds Rect) Surface {
 		childH := item.box.constrained(AxisVertical, slotH)
 		x := alignedOffset(item.box.HAlign, slotW, childW)
 		dy := alignedOffset(item.box.VAlign, slotH, childH)
-		childSurface := item.child.Element.Render(ctx, Rect{
+		renderElementInto(ctx, item.child.Element, Rect{
 			X: bounds.X + x,
 			Y: bounds.Y + y + dy,
 			W: childW,
 			H: childH,
-		})
-		base = base.placeAt(x, y+dy, childSurface)
+		}, dst)
 		y += slotH
 	}
-	return base
 }
 
-func (b FlexBox) renderHorizontal(ctx *Context, bounds Rect) Surface {
-	base := TransparentSurface(bounds.W, bounds.H)
+func (b FlexBox) renderHorizontalTo(ctx *Context, bounds Rect, dst *Surface) {
+	if dst == nil {
+		return
+	}
 	plan := b.layoutPlan(ctx, NewConstraints(bounds.W, bounds.H), bounds.W)
 	x := 0
 	for idx, item := range plan.items {
@@ -1176,16 +1253,14 @@ func (b FlexBox) renderHorizontal(ctx *Context, bounds Rect) Surface {
 		childH := item.box.constrained(AxisVertical, slotH)
 		dx := alignedOffset(item.box.HAlign, slotW, childW)
 		y := alignedOffset(item.box.VAlign, slotH, childH)
-		childSurface := item.child.Element.Render(ctx, Rect{
+		renderElementInto(ctx, item.child.Element, Rect{
 			X: bounds.X + x + dx,
 			Y: bounds.Y + y,
 			W: childW,
 			H: childH,
-		})
-		base = base.placeAt(x+dx, y, childSurface)
+		}, dst)
 		x += slotW
 	}
-	return base
 }
 
 type Inset struct {
@@ -1205,13 +1280,15 @@ func (i Inset) Measure(ctx *Context, constraints Constraints) Size {
 }
 
 func (i Inset) Render(ctx *Context, bounds Rect) Surface {
-	base := TransparentSurface(bounds.W, bounds.H)
-	if !elementVisible(i.Child) {
-		return base
+	return renderOwnedSurface(ctx, bounds, i.RenderTo)
+}
+
+func (i Inset) RenderTo(ctx *Context, bounds Rect, dst *Surface) {
+	if dst == nil || !elementVisible(i.Child) {
+		return
 	}
-	childBounds := bounds.Inset(i.Padding)
-	childSurface := i.Child.Render(ctx, Rect{X: childBounds.X, Y: childBounds.Y, W: childBounds.W, H: childBounds.H})
-	return base.placeAt(i.Padding.Left, i.Padding.Top, childSurface)
+	childBounds := Rect{X: bounds.X + i.Padding.Left, Y: bounds.Y + i.Padding.Top, W: max(0, bounds.W-i.Padding.Left-i.Padding.Right), H: max(0, bounds.H-i.Padding.Top-i.Padding.Bottom)}
+	renderElementInto(ctx, i.Child, childBounds, dst)
 }
 
 func (i Inset) WalkChildren(_ *Context, visit func(Element)) {
@@ -1240,11 +1317,15 @@ func (c Constrained) Measure(ctx *Context, constraints Constraints) Size {
 }
 
 func (c Constrained) Render(ctx *Context, bounds Rect) Surface {
-	if !elementVisible(c.Child) {
-		return TransparentSurface(bounds.W, bounds.H)
+	return renderOwnedSurface(ctx, bounds, c.RenderTo)
+}
+
+func (c Constrained) RenderTo(ctx *Context, bounds Rect, dst *Surface) {
+	if dst == nil || !elementVisible(c.Child) {
+		return
 	}
 	size := c.Measure(ctx, NewConstraints(bounds.W, bounds.H))
-	return c.Child.Render(ctx, Rect{X: bounds.X, Y: bounds.Y, W: size.W, H: size.H}).normalize(bounds.W, bounds.H)
+	renderElementInto(ctx, c.Child, Rect{X: bounds.X, Y: bounds.Y, W: size.W, H: size.H}, dst)
 }
 
 func (c Constrained) WalkChildren(_ *Context, visit func(Element)) {
@@ -1272,14 +1353,19 @@ func (s Stack) Measure(ctx *Context, constraints Constraints) Size {
 }
 
 func (s Stack) Render(ctx *Context, bounds Rect) Surface {
-	base := TransparentSurface(bounds.W, bounds.H)
+	return renderOwnedSurface(ctx, bounds, s.RenderTo)
+}
+
+func (s Stack) RenderTo(ctx *Context, bounds Rect, dst *Surface) {
+	if dst == nil {
+		return
+	}
 	for _, child := range s.Children {
 		if !elementVisible(child) {
 			continue
 		}
-		base = base.placeAt(0, 0, child.Render(ctx, bounds))
+		renderElementInto(ctx, child, bounds, dst)
 	}
-	return base
 }
 
 func (s Stack) WalkChildren(_ *Context, visit func(Element)) {
@@ -1315,9 +1401,12 @@ func (a Align) Measure(ctx *Context, constraints Constraints) Size {
 }
 
 func (a Align) Render(ctx *Context, bounds Rect) Surface {
-	base := TransparentSurface(bounds.W, bounds.H)
-	if a.Child == nil {
-		return base
+	return renderOwnedSurface(ctx, bounds, a.RenderTo)
+}
+
+func (a Align) RenderTo(ctx *Context, bounds Rect, dst *Surface) {
+	if dst == nil || a.Child == nil {
+		return
 	}
 	size := a.Child.Measure(ctx, NewConstraints(bounds.W, bounds.H))
 	size = NewConstraints(bounds.W, bounds.H).Clamp(size)
@@ -1335,8 +1424,7 @@ func (a Align) Render(ctx *Context, bounds Rect) Surface {
 	case AlignEnd:
 		y = max(0, bounds.H-size.H)
 	}
-	childSurface := a.Child.Render(ctx, Rect{X: bounds.X + x, Y: bounds.Y + y, W: size.W, H: size.H})
-	return base.placeAt(x, y, childSurface)
+	renderElementInto(ctx, a.Child, Rect{X: bounds.X + x, Y: bounds.Y + y, W: size.W, H: size.H}, dst)
 }
 
 func clampInt(value, low, high int) int {

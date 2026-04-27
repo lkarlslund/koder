@@ -72,7 +72,10 @@ func (e *CachedElement) RenderCached(ctx *Context, width int) Surface {
 		return e.surface
 	}
 	size := e.Child.Measure(ctx, NewConstraints(width, 0))
-	surface := renderElementWithCapturedControls(ctx, e.Child, Rect{W: width, H: size.H})
+	surface := renderElementCapturedSurface(ctx, e.Child, Rect{W: width, H: size.H})
+	if ctx != nil && ctx.Runtime != nil {
+		surface.RegisterControls(ctx.Runtime, 0, 0)
+	}
 	e.width = width
 	e.surface = surface
 	e.cached = true
@@ -212,11 +215,26 @@ func (t *RetainedTranscript) ContentHeight(width int) int {
 }
 
 func (t *RetainedTranscript) RenderVisible(ctx *Context, width, height, offset int) (Surface, int, int) {
+	base := BlankSurface(width, height)
+	totalHeight, appliedOffset := t.RenderVisibleInto(ctx, width, height, offset, &base)
+	return base, totalHeight, appliedOffset
+}
+
+func (t *RetainedTranscript) RenderBottom(ctx *Context, width, height int) (Surface, int, int) {
+	measureCtx := withoutRuntime(ctx)
+	base := BlankSurface(width, height)
+	totalHeight, offset := t.RenderBottomInto(measureCtx, width, height, &base)
+	return base, totalHeight, offset
+}
+
+func (t *RetainedTranscript) RenderVisibleInto(ctx *Context, width, height, offset int, dst *Surface) (int, int) {
 	measureCtx := withoutRuntime(ctx)
 	totalHeight := t.exactContentHeight(measureCtx, width)
 	maxOffset := max(0, totalHeight-max(0, height))
 	offset = min(max(0, offset), maxOffset)
-	base := BlankSurface(width, height)
+	if dst == nil {
+		return totalHeight, offset
+	}
 	y := 0
 	for idx, item := range t.items {
 		gap := max(0, item.GapBefore)
@@ -225,29 +243,28 @@ func (t *RetainedTranscript) RenderVisible(ctx *Context, width, height, offset i
 		exactHeight := surface.Size().H
 		bottom := top + exactHeight
 		y = bottom
-		if item.Element == nil || bottom <= offset || top >= offset+height {
-			continue
-		}
-		if exactHeight <= 0 {
+		if item.Element == nil || bottom <= offset || top >= offset+height || exactHeight <= 0 {
 			continue
 		}
 		renderY := top - offset
 		if ctx != nil && ctx.Runtime != nil {
 			surface.RegisterControls(ctx.Runtime, 0, renderY)
 		}
-		base = base.placeAt(0, renderY, surface)
+		*dst = dst.placeAt(0, renderY, surface)
 	}
-	return base, totalHeight, offset
+	return totalHeight, offset
 }
 
-func (t *RetainedTranscript) RenderBottom(ctx *Context, width, height int) (Surface, int, int) {
+func (t *RetainedTranscript) RenderBottomInto(ctx *Context, width, height int, dst *Surface) (int, int) {
 	if len(t.items) == 0 {
-		return BlankSurface(width, height), 0, 0
+		return 0, 0
 	}
 	measureCtx := withoutRuntime(ctx)
 	totalHeight := t.exactContentHeight(measureCtx, width)
 	offset := max(0, totalHeight-max(0, height))
-	base := BlankSurface(width, height)
+	if dst == nil {
+		return totalHeight, offset
+	}
 	y := 0
 	for idx, item := range t.items {
 		gap := max(0, item.GapBefore)
@@ -263,9 +280,9 @@ func (t *RetainedTranscript) RenderBottom(ctx *Context, width, height int) (Surf
 		if ctx != nil && ctx.Runtime != nil {
 			surface.RegisterControls(ctx.Runtime, 0, renderY)
 		}
-		base = base.placeAt(0, renderY, surface)
+		*dst = dst.placeAt(0, renderY, surface)
 	}
-	return base, totalHeight, offset
+	return totalHeight, offset
 }
 
 func (t *RetainedTranscript) exactContentHeight(ctx *Context, width int) int {
@@ -295,26 +312,6 @@ func withoutRuntime(ctx *Context) *Context {
 	return &copy
 }
 
-func renderElementWithCapturedControls(ctx *Context, child Element, bounds Rect) Surface {
-	if child == nil {
-		return Surface{}
-	}
-	shadow := &Runtime{}
-	copyCtx := Context{}
-	if ctx != nil {
-		copyCtx = *ctx
-	}
-	copyCtx.Runtime = shadow
-	surface := child.Render(&copyCtx, bounds)
-	if controls := shadow.Controls(); len(controls) > 0 {
-		surface.ctrls = append(surface.ctrls[:0], controls...)
-		if ctx != nil && ctx.Runtime != nil {
-			surface.RegisterControls(ctx.Runtime, 0, 0)
-		}
-	}
-	return surface
-}
-
 func (t *RetainedTranscript) itemApproxHeight(item TranscriptItem, width int) int {
 	if item.Element == nil {
 		return 0
@@ -338,7 +335,7 @@ func (t *RetainedTranscript) itemSurfaceAt(ctx *Context, index int, item Transcr
 		return surface
 	}
 	size := item.Element.Measure(ctx, NewConstraints(width, 0))
-	surface := renderElementWithCapturedControls(ctx, item.Element, Rect{W: width, H: size.H})
+	surface := renderElementCapturedSurface(ctx, item.Element, Rect{W: width, H: size.H})
 	if index >= 0 && index < len(t.itemHeights) {
 		t.itemHeights[index] = surface.Size().H
 	}

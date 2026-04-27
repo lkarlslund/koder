@@ -370,8 +370,8 @@ func firstColor(values ...lipgloss.Color) lipgloss.Color {
 }
 
 type scrollWindowRenderer interface {
-	RenderVisible(ctx *Context, width, height, offset int) (Surface, int, int)
-	RenderBottom(ctx *Context, width, height int) (Surface, int, int)
+	RenderVisibleInto(ctx *Context, width, height, offset int, dst *Surface) (int, int)
+	RenderBottomInto(ctx *Context, width, height int, dst *Surface) (int, int)
 }
 
 type ScrollBox struct {
@@ -414,20 +414,21 @@ func (s ScrollBox) RenderVisible(ctx *Context, width, height, offset int) (Surfa
 		return base, 0, 0
 	}
 	if child, ok := s.Child.(scrollWindowRenderer); ok {
-		return child.RenderVisible(ctx, width, height, offset)
+		totalHeight, appliedOffset := child.RenderVisibleInto(ctx, width, height, offset, &base)
+		return base, totalHeight, appliedOffset
 	}
 	childSize := s.Child.Measure(ctx, Constraints{MaxW: width, MaxH: 0})
 	totalHeight := childSize.H
 	maxOffset := max(0, totalHeight-height)
 	offset = min(max(0, offset), maxOffset)
 	childHeight := max(height, totalHeight)
-	childSurface := s.Child.Render(ctx, Rect{
+	renderElementInto(ctx, s.Child, Rect{
 		X: 0,
 		Y: -offset,
 		W: width,
 		H: childHeight,
-	})
-	return base.placeAt(0, -offset, childSurface), totalHeight, offset
+	}, &base)
+	return base, totalHeight, offset
 }
 
 func (s ScrollBox) RenderBottom(ctx *Context, width, height int) (Surface, int, int) {
@@ -436,19 +437,20 @@ func (s ScrollBox) RenderBottom(ctx *Context, width, height int) (Surface, int, 
 		return base, 0, 0
 	}
 	if child, ok := s.Child.(scrollWindowRenderer); ok {
-		return child.RenderBottom(ctx, width, height)
+		totalHeight, appliedOffset := child.RenderBottomInto(ctx, width, height, &base)
+		return base, totalHeight, appliedOffset
 	}
 	childSize := s.Child.Measure(ctx, Constraints{MaxW: width, MaxH: 0})
 	totalHeight := childSize.H
 	offset := max(0, totalHeight-height)
 	childHeight := max(height, totalHeight)
-	childSurface := s.Child.Render(ctx, Rect{
+	renderElementInto(ctx, s.Child, Rect{
 		X: 0,
 		Y: -offset,
 		W: width,
 		H: childHeight,
-	})
-	return base.placeAt(0, -offset, childSurface), totalHeight, offset
+	}, &base)
+	return base, totalHeight, offset
 }
 
 type ScrollFrame = ScrollBox
