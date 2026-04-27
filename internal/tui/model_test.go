@@ -805,6 +805,343 @@ func TestEnterWhileBusyQueuesSteeringPrompt(t *testing.T) {
 	}
 }
 
+func TestParseBangPrompt(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  string
+		want   bangPrompt
+		wantOK bool
+	}{
+		{name: "single", input: "!ls -l", want: bangPrompt{Command: "ls -l"}, wantOK: true},
+		{name: "double", input: "  !!pwd  ", want: bangPrompt{Double: true, Command: "pwd"}, wantOK: true},
+		{name: "empty single", input: "!", want: bangPrompt{}, wantOK: true},
+		{name: "empty double", input: "!!", want: bangPrompt{Double: true}, wantOK: true},
+		{name: "not bang", input: "echo !ls", want: bangPrompt{}, wantOK: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := parseBangPrompt(tt.input)
+			if ok != tt.wantOK {
+				t.Fatalf("unexpected ok=%v want %v", ok, tt.wantOK)
+			}
+			if got != tt.want {
+				t.Fatalf("unexpected bang prompt %#v want %#v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestFormatBangFollowupPrompt(t *testing.T) {
+	got := formatBangFollowupPrompt("ls", tools.Result{
+		Output: "",
+		Meta:   map[string]string{"exit_code": "7"},
+	})
+	if !strings.Contains(got, "```bash\nls\n```") {
+		t.Fatalf("expected command block, got %q", got)
+	}
+	if !strings.Contains(got, "Exit code: 7") {
+		t.Fatalf("expected exit code, got %q", got)
+	}
+	if !strings.Contains(got, "```text\n(no output)\n```") {
+		t.Fatalf("expected explicit empty output placeholder, got %q", got)
+	}
+}
+
+func TestBangPromptWithoutProviderRunsShellOnly(t *testing.T) {
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	m := Model{
+		cfg:      testConfig(t),
+		store:    st,
+		composer: textarea.New(),
+		workdir:  t.TempDir(),
+		parts:    map[int64][]domain.Part{},
+	}
+	m.composer.SetValue("!printf hi")
+
+	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
+	next := updated.(*Model)
+	if cmd == nil {
+		t.Fatal("expected shell command execution")
+	}
+	if !next.loading {
+		t.Fatal("expected busy state while shell command runs")
+	}
+	if next.composer.Value() != "" {
+		t.Fatalf("expected composer reset, got %q", next.composer.Value())
+	}
+
+	msgAny := cmd()
+	bangMsg, ok := msgAny.(bangCommandMsg)
+	if !ok {
+		t.Fatalf("expected bangCommandMsg, got %T", msgAny)
+	}
+	if bangMsg.err != nil {
+		t.Fatal(bangMsg.err)
+	}
+	if bangMsg.followupMode != bangFollowupNone {
+		t.Fatalf("expected no llm follow-up, got %v", bangMsg.followupMode)
+	}
+
+	updated, cmd = next.Update(bangMsg)
+	done := updated.(Model)
+	if cmd == nil {
+		t.Fatal("expected transcript reload command")
+	}
+	if done.loading {
+		t.Fatal("expected shell-only bang command to clear busy state")
+	}
+	if done.currentSession.ID == 0 || done.currentChat.ID == 0 {
+		t.Fatalf("expected draft session/chat to be created, got session=%d chat=%d", done.currentSession.ID, done.currentChat.ID)
+	}
+	if len(done.messages) != 0 {
+		t.Fatalf("expected no synthetic user message, got %#v", done.messages)
+	}
+
+	messages, parts, err := st.PartsForChat(context.Background(), done.currentChat.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 1 {
+		t.Fatalf("expected one persisted tool message, got %d", len(messages))
+	}
+	if messages[0].Role != domain.MessageRoleTool {
+		t.Fatalf("expected tool message role, got %q", messages[0].Role)
+	}
+	partList := parts[messages[0].ID]
+	if len(partList) == 0 {
+		t.Fatal("expected persisted tool parts")
+	}
+	foundOutput := false
+	for _, part := range partList {
+		if part.Kind == domain.PartKindToolOutput && strings.TrimSpace(part.Body) == "hi" {
+			foundOutput = true
+		}
+	}
+	if !foundOutput {
+		t.Fatalf("expected bash output part, got %#v", partList)
+	}
+}
+
+func TestDoubleBangWithoutProviderOpensConnectDialogBeforeRunningShell(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "blocked.txt")
+	m := Model{
+		cfg:      testConfig(t),
+		composer: textarea.New(),
+	}
+	m.composer.SetValue("!!touch " + path)
+
+	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
+	next := updated.(*Model)
+	if cmd == nil {
+		t.Fatal("expected title sync command when opening connect dialog")
+	}
+	if !next.hasConnectDialog() {
+		t.Fatal("expected connect dialog to open")
+	}
+	if next.composer.Value() != "!!touch "+path {
+		t.Fatalf("expected composer to remain intact, got %q", next.composer.Value())
+	}
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected shell command not to run, stat err=%v", err)
+	}
+}
+
+func TestDoubleBangIdleCreatesSynthesizedPrompt(t *testing.T) {
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	cfg := testConfig(t)
+	cfg.DefaultProvider = "openai"
+	cfg.DefaultModel = "gpt-5.4"
+	cfg.Providers = map[string]config.Provider{
+		"openai": {
+			BaseURL:      "https://api.openai.com/v1",
+			APIKey:       "secret",
+			DefaultModel: "gpt-5.4",
+		},
+	}
+	m := Model{
+		cfg:      cfg,
+		store:    st,
+		composer: textarea.New(),
+		workdir:  t.TempDir(),
+		parts:    map[int64][]domain.Part{},
+	}
+	m.composer.SetValue("!!printf hi")
+
+	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
+	next := updated.(*Model)
+	if cmd == nil {
+		t.Fatal("expected shell command execution")
+	}
+
+	msgAny := cmd()
+	bangMsg, ok := msgAny.(bangCommandMsg)
+	if !ok {
+		t.Fatalf("expected bangCommandMsg, got %T", msgAny)
+	}
+	if bangMsg.err != nil {
+		t.Fatal(bangMsg.err)
+	}
+	if bangMsg.followupMode != bangFollowupPrompt {
+		t.Fatalf("expected immediate llm follow-up, got %v", bangMsg.followupMode)
+	}
+	if !strings.Contains(bangMsg.followupPrompt, "```bash\nprintf hi\n```") || !strings.Contains(bangMsg.followupPrompt, "hi") {
+		t.Fatalf("expected synthesized prompt to include command and output, got %q", bangMsg.followupPrompt)
+	}
+
+	updated, cmd = next.Update(bangMsg)
+	done := updated.(Model)
+	if cmd == nil {
+		t.Fatal("expected batched reload and prompt kickoff")
+	}
+	if len(done.messages) != 1 || done.messages[0].Role != domain.MessageRoleUser {
+		t.Fatalf("expected optimistic user prompt, got %#v", done.messages)
+	}
+	if got := done.messages[0].Summary; !strings.Contains(got, "User-requested shell command:") || !strings.Contains(got, "printf hi") {
+		t.Fatalf("unexpected optimistic summary %q", got)
+	}
+
+	msgBatch, ok := cmd().(ui.BatchMsg)
+	if !ok {
+		t.Fatalf("expected batched commands, got %T", cmd())
+	}
+	if len(msgBatch) < 2 {
+		t.Fatalf("expected reload and prompt commands, got %d batched commands", len(msgBatch))
+	}
+}
+
+func TestDoubleBangWhileBusyQueuesSynthesizedPrompt(t *testing.T) {
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	cfg := testConfig(t)
+	cfg.DefaultProvider = "openai"
+	cfg.DefaultModel = "gpt-5.4"
+	cfg.Providers = map[string]config.Provider{
+		"openai": {
+			BaseURL:      "https://api.openai.com/v1",
+			APIKey:       "secret",
+			DefaultModel: "gpt-5.4",
+		},
+	}
+	m := Model{
+		cfg:      cfg,
+		store:    st,
+		composer: textarea.New(),
+		workdir:  t.TempDir(),
+		parts:    map[int64][]domain.Part{},
+		loading:  true,
+		busy: busyModel{
+			active: true,
+			scope:  busyScopeTranscript,
+		},
+	}
+	m.composer.SetValue("!!printf hi")
+
+	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
+	next := updated.(*Model)
+	if cmd == nil {
+		t.Fatal("expected shell command execution while busy")
+	}
+	msgAny := cmd()
+	bangMsg, ok := msgAny.(bangCommandMsg)
+	if !ok {
+		t.Fatalf("expected bangCommandMsg, got %T", msgAny)
+	}
+	if bangMsg.followupMode != bangFollowupQueue {
+		t.Fatalf("expected queued follow-up, got %v", bangMsg.followupMode)
+	}
+
+	updated, cmd = next.Update(bangMsg)
+	done := updated.(Model)
+	if cmd == nil {
+		t.Fatal("expected queue persistence command")
+	}
+	if !done.loading {
+		t.Fatal("expected active model turn to remain busy")
+	}
+	if len(done.currentChat.QueuedInputs) != 1 {
+		t.Fatalf("expected one queued follow-up, got %#v", done.currentChat.QueuedInputs)
+	}
+	item := done.currentChat.QueuedInputs[0]
+	if item.Kind != domain.QueuedInputKindQueued {
+		t.Fatalf("expected queued follow-up kind, got %v", item.Kind)
+	}
+	if !strings.Contains(item.Text, "User-requested shell command:") || !strings.Contains(item.Text, "printf hi") {
+		t.Fatalf("expected synthesized queued prompt, got %q", item.Text)
+	}
+}
+
+func TestDoubleBangWhileBusyTabQueuesSteeringPrompt(t *testing.T) {
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	cfg := testConfig(t)
+	cfg.DefaultProvider = "openai"
+	cfg.DefaultModel = "gpt-5.4"
+	cfg.Providers = map[string]config.Provider{
+		"openai": {
+			BaseURL:      "https://api.openai.com/v1",
+			APIKey:       "secret",
+			DefaultModel: "gpt-5.4",
+		},
+	}
+	m := Model{
+		cfg:      cfg,
+		store:    st,
+		composer: textarea.New(),
+		workdir:  t.TempDir(),
+		parts:    map[int64][]domain.Part{},
+		loading:  true,
+		busy: busyModel{
+			active: true,
+			scope:  busyScopeTranscript,
+		},
+	}
+	m.composer.SetValue("!!printf hi")
+
+	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyTab})
+	next := updated.(*Model)
+	if cmd == nil {
+		t.Fatal("expected shell command execution while busy")
+	}
+	msgAny := cmd()
+	bangMsg, ok := msgAny.(bangCommandMsg)
+	if !ok {
+		t.Fatalf("expected bangCommandMsg, got %T", msgAny)
+	}
+	if bangMsg.followupMode != bangFollowupSteer {
+		t.Fatalf("expected steer follow-up, got %v", bangMsg.followupMode)
+	}
+
+	updated, cmd = next.Update(bangMsg)
+	done := updated.(Model)
+	if cmd == nil {
+		t.Fatal("expected queue persistence command")
+	}
+	if len(done.currentChat.QueuedInputs) != 1 {
+		t.Fatalf("expected one queued steering follow-up, got %#v", done.currentChat.QueuedInputs)
+	}
+	if done.currentChat.QueuedInputs[0].Kind != domain.QueuedInputKindSteer {
+		t.Fatalf("expected steering follow-up kind, got %v", done.currentChat.QueuedInputs[0].Kind)
+	}
+}
+
 func TestUpDownBrowseComposerPromptHistory(t *testing.T) {
 	m := Model{
 		composer: textarea.New(),

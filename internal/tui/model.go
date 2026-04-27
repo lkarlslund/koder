@@ -192,6 +192,26 @@ type kickoffPromptMsg struct {
 	References  []reference.Draft
 }
 
+type bangFollowupMode int
+
+const (
+	bangFollowupNone bangFollowupMode = iota
+	bangFollowupPrompt
+	bangFollowupQueue
+	bangFollowupSteer
+)
+
+type bangCommandMsg struct {
+	session        domain.Session
+	chat           domain.Chat
+	command        string
+	events         []domain.Event
+	err            error
+	followupMode   bangFollowupMode
+	followupPrompt string
+	preserveBusy   bool
+}
+
 type queuedContinueDispatchMsg struct{}
 
 type queuePersistMsg struct {
@@ -660,6 +680,58 @@ func (m Model) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 		m.pendingModelNote = ""
 		m.startBusy(m.busy.scopeOrDefault(busyScopeTranscript), "Working ...")
 		return m, ui.Batch(nextEventCmd(msg.chat.ID, msg.events), m.spinnerCmdIfNeeded(), m.syncWindowTitleCmd())
+	case bangCommandMsg:
+		m.invalidateBodyCache()
+		if msg.err != nil {
+			if msg.preserveBusy {
+				m.status = msg.err.Error()
+				m.appendLocalAssistantError(msg.err)
+				return m, ui.Batch(m.reloadDetailsCmd(), m.syncWindowTitleCmd())
+			}
+			return m.finishOperationWithError(msg.err)
+		}
+		if msg.session.ID != 0 {
+			m.currentSession = msg.session
+		}
+		if msg.chat.ID != 0 {
+			m.currentChat = msg.chat
+			m.clampQueueSelection()
+		}
+		for _, evt := range msg.events {
+			m.recordEvent(msg.chat.ID, evt)
+			if !msg.preserveBusy {
+				m.applyEvent(evt)
+			}
+		}
+		reload := m.reloadDetailsCmd()
+		switch msg.followupMode {
+		case bangFollowupPrompt:
+			m.appendLocalUserPrompt(msg.followupPrompt, nil, nil)
+			m.startBusy(busyScopeTranscript, "Running…")
+			return m, ui.Batch(reload, m.promptCmd(m.beginActiveOperation(), msg.followupPrompt, nil, nil), m.spinnerCmdIfNeeded(), m.syncWindowTitleCmd())
+		case bangFollowupQueue, bangFollowupSteer:
+			kind := domain.QueuedInputKindQueued
+			if msg.followupMode == bangFollowupSteer {
+				kind = domain.QueuedInputKindSteer
+			}
+			items := cloneQueuedInputs(m.currentChat.QueuedInputs)
+			items = append(items, domain.QueuedInput{
+				ID:        nextQueuedInputID(),
+				Kind:      kind,
+				Text:      msg.followupPrompt,
+				CreatedAt: time.Now().UTC(),
+			})
+			m.setQueuedInputs(items)
+			m.status = queuedInputStatusText(kind, false)
+			return m, ui.Batch(reload, m.saveQueuedInputsCmd(m.currentChat.ID, items), m.syncWindowTitleCmd())
+		default:
+			if msg.preserveBusy {
+				m.status = "Command finished"
+				return m, ui.Batch(reload, m.syncWindowTitleCmd())
+			}
+			m.stopBusyWithStatus("Command finished")
+			return m, ui.Batch(reload, m.syncWindowTitleCmd())
+		}
 	case kickoffPromptMsg:
 		return m, ui.Batch(m.promptCmd(m.beginActiveOperation(), msg.Prompt, msg.Attachments, msg.References), m.spinnerCmdIfNeeded(), m.syncWindowTitleCmd())
 	case queuedContinueDispatchMsg:
@@ -1166,6 +1238,13 @@ func (m *Model) handleMainWindowKey(msg ui.KeyMsg) (bool, ui.Cmd) {
 		}
 	case "tab":
 		if m.loading && !m.hasSlashMenu() {
+			prompt := strings.TrimSpace(m.composer.Value())
+			if bang, ok := parseBangPrompt(prompt); ok {
+				if bang.Double {
+					return true, m.submitBangPrompt(bang, bangFollowupSteer)
+				}
+				return true, m.submitBangPrompt(bang, bangFollowupNone)
+			}
 			_, cmd := m.queueComposerPrompt(domain.QueuedInputKindSteer)
 			return true, cmd
 		}
@@ -1177,6 +1256,15 @@ func (m *Model) handleMainWindowKey(msg ui.KeyMsg) (bool, ui.Cmd) {
 		prompt := strings.TrimSpace(m.composer.Value())
 		if prompt == "" && len(m.draftAttachments) == 0 && len(m.draftReferences) == 0 {
 			return false, nil
+		}
+		if bang, ok := parseBangPrompt(prompt); ok {
+			if m.loading {
+				if bang.Double {
+					return true, m.submitBangPrompt(bang, bangFollowupQueue)
+				}
+				return true, m.submitBangPrompt(bang, bangFollowupNone)
+			}
+			return true, m.submitBangPrompt(bang, bangFollowupPrompt)
 		}
 		if m.loading {
 			_, cmd := m.queueComposerPrompt(domain.QueuedInputKindQueued)
@@ -2882,6 +2970,95 @@ func (m Model) promptCmd(ctx context.Context, prompt string, drafts []attachment
 	}
 }
 
+func (m *Model) submitBangPrompt(bang bangPrompt, followup bangFollowupMode) ui.Cmd {
+	if len(m.draftAttachments) > 0 || len(m.draftReferences) > 0 {
+		m.status = "Bang commands do not support attachments or references"
+		return m.syncWindowTitleCmd()
+	}
+	if bang.Command == "" {
+		m.status = "Command is empty"
+		return m.syncWindowTitleCmd()
+	}
+	if !bang.Double {
+		followup = bangFollowupNone
+	}
+	if bang.Double {
+		if ok, status := m.canSendPrompt(); !ok {
+			m.openConnectDialog()
+			m.status = status
+			return m.syncWindowTitleCmd()
+		}
+	}
+	preserveBusy := m.loading
+	m.resetComposerInput()
+	m.draftAttachments = nil
+	m.draftReferences = nil
+	if !preserveBusy {
+		m.startBusy(busyScopeTranscript, fmt.Sprintf("Running %s…", bang.Command))
+	} else {
+		m.status = fmt.Sprintf("Running %s…", bang.Command)
+	}
+	return m.runBangPromptCmd(context.Background(), bang, followup, preserveBusy)
+}
+
+func (m Model) runBangPromptCmd(ctx context.Context, bang bangPrompt, followup bangFollowupMode, preserveBusy bool) ui.Cmd {
+	return func() ui.Msg {
+		session := m.currentSession
+		chat := m.currentChat
+		if m.store == nil {
+			return bangCommandMsg{err: errors.New("store is not available"), preserveBusy: preserveBusy}
+		}
+		if session.ID == 0 {
+			var err error
+			session, err = m.persistDraftSession(ctx)
+			if err != nil {
+				return bangCommandMsg{err: err, preserveBusy: preserveBusy}
+			}
+		}
+		if chat.ID == 0 || chat.SessionID != session.ID {
+			var err error
+			chat, err = m.store.DefaultChat(ctx, session.ID)
+			if err != nil {
+				return bangCommandMsg{err: err, preserveBusy: preserveBusy}
+			}
+		}
+		req := tools.Request{
+			Tool: domain.ToolKindBash,
+			Args: map[string]string{"command": bang.Command},
+		}
+		registry := tools.NewRegistry(m.workdir)
+		result, err := registry.ExecuteWithChat(ctx, m.store, session.ID, chat, req)
+		if err != nil && result.Meta["exit_code"] == "" {
+			return bangCommandMsg{session: session, chat: chat, err: err, preserveBusy: preserveBusy}
+		}
+		persistCtx := tools.WithChatID(ctx, chat.ID)
+		events, persistErr := registry.PersistResultInChat(persistCtx, m.store, session.ID, chat.ID, req, result)
+		if persistErr != nil {
+			return bangCommandMsg{session: session, chat: chat, err: persistErr, preserveBusy: preserveBusy}
+		}
+		collected := []domain.Event{{
+			Kind: domain.EventKindToolStart,
+			Tool: req.Tool,
+			Text: tools.Preview(req),
+		}}
+		for evt := range events {
+			collected = append(collected, evt)
+		}
+		msg := bangCommandMsg{
+			session:      session,
+			chat:         chat,
+			command:      bang.Command,
+			events:       collected,
+			preserveBusy: preserveBusy,
+		}
+		if bang.Double {
+			msg.followupMode = followup
+			msg.followupPrompt = formatBangFollowupPrompt(bang.Command, result)
+		}
+		return msg
+	}
+}
+
 func (m Model) continueCmd(ctx context.Context) ui.Cmd {
 	return func() ui.Msg {
 		session := m.currentSession
@@ -3308,6 +3485,41 @@ func nextEventCmd(chatID int64, events <-chan domain.Event) ui.Cmd {
 		}
 		return eventMsg{chatID: chatID, event: evt, events: events}
 	}
+}
+
+type bangPrompt struct {
+	Double  bool
+	Command string
+}
+
+func parseBangPrompt(prompt string) (bangPrompt, bool) {
+	trimmed := strings.TrimSpace(prompt)
+	if strings.HasPrefix(trimmed, "!!") {
+		command := strings.TrimSpace(strings.TrimPrefix(trimmed, "!!"))
+		return bangPrompt{Double: true, Command: command}, true
+	}
+	if strings.HasPrefix(trimmed, "!") {
+		command := strings.TrimSpace(strings.TrimPrefix(trimmed, "!"))
+		return bangPrompt{Command: command}, true
+	}
+	return bangPrompt{}, false
+}
+
+func formatBangFollowupPrompt(command string, result tools.Result) string {
+	output := strings.TrimSpace(result.Output)
+	if output == "" {
+		output = "(no output)"
+	}
+	exitCode := strings.TrimSpace(result.Meta["exit_code"])
+	if exitCode == "" {
+		exitCode = "0"
+	}
+	return fmt.Sprintf(
+		"User-requested shell command:\n\n```bash\n%s\n```\n\nExit code: %s\n\nShell result:\n\n```text\n%s\n```\n\nUse this shell result as context. Do not rerun the command unless needed.",
+		command,
+		exitCode,
+		output,
+	)
 }
 
 func Run(cfg config.Config, st *store.Store, a *agent.Engine, mode StartupMode, debug *debugsrv.Recorder, debugServer *debugsrv.Server) error {
