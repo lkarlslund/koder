@@ -282,7 +282,7 @@ func (t *RetainedTranscript) exactContentHeight(ctx *Context, width int) int {
 	total := 0
 	for idx, item := range t.items {
 		total += max(0, item.GapBefore)
-		total += t.itemSurfaceAt(ctx, idx, item, width).Size().H
+		total += t.itemHeightAt(ctx, idx, item, width)
 	}
 	t.totalHeight = total
 	t.totalHeightValid = true
@@ -311,17 +311,6 @@ func (t *RetainedTranscript) itemApproxHeight(item TranscriptItem, width int) in
 	return item.Element.Measure(nil, NewConstraints(width, 0)).H
 }
 
-func (t *RetainedTranscript) itemExactHeight(item TranscriptItem, width int) int {
-	if item.Element == nil {
-		return 0
-	}
-	if cached, ok := item.Element.(transcriptViewportElement); ok {
-		return cached.RenderCached(nil, width).Size().H
-	}
-	size := item.Element.Measure(nil, NewConstraints(width, 0))
-	return item.Element.Render(nil, Rect{W: width, H: size.H}).Size().H
-}
-
 func (t *RetainedTranscript) itemSurfaceAt(ctx *Context, index int, item TranscriptItem, width int) Surface {
 	t.ensureWidth(width)
 	if item.Element == nil {
@@ -340,6 +329,14 @@ func (t *RetainedTranscript) itemSurfaceAt(ctx *Context, index int, item Transcr
 		t.itemHeights[index] = surface.Size().H
 	}
 	return surface
+}
+
+func (t *RetainedTranscript) itemHeightAt(ctx *Context, index int, item TranscriptItem, width int) int {
+	t.ensureWidth(width)
+	if index >= 0 && index < len(t.itemHeights) && t.itemHeights[index] >= 0 {
+		return t.itemHeights[index]
+	}
+	return t.itemSurfaceAt(ctx, index, item, width).Size().H
 }
 
 func (t *RetainedTranscript) ensureWidth(width int) {
@@ -371,9 +368,8 @@ func (t *RetainedTranscript) appendHeight(item TranscriptItem) {
 		t.invalidateLayout()
 		return
 	}
-	height := t.itemExactHeight(item, t.layoutWidth)
-	t.itemHeights = append(t.itemHeights, height)
-	t.totalHeight += max(0, item.GapBefore) + height
+	t.itemHeights = append(t.itemHeights, -1)
+	t.totalHeightValid = false
 }
 
 func (t *RetainedTranscript) insertHeight(index int, item TranscriptItem) {
@@ -381,11 +377,10 @@ func (t *RetainedTranscript) insertHeight(index int, item TranscriptItem) {
 		t.invalidateLayout()
 		return
 	}
-	height := t.itemExactHeight(item, t.layoutWidth)
 	t.itemHeights = append(t.itemHeights, 0)
 	copy(t.itemHeights[index+1:], t.itemHeights[index:])
-	t.itemHeights[index] = height
-	t.totalHeight += max(0, item.GapBefore) + height
+	t.itemHeights[index] = -1
+	t.totalHeightValid = false
 }
 
 func (t *RetainedTranscript) removeHeight(index int) {
@@ -408,15 +403,9 @@ func (t *RetainedTranscript) replaceHeight(index int, item TranscriptItem) {
 		t.invalidateLayout()
 		return
 	}
-	prev := t.items[index]
-	prevHeight := t.itemHeights[index]
-	if prevHeight < 0 {
-		prevHeight = t.itemExactHeight(prev, t.layoutWidth)
-	}
 	InvalidateElementCaches(nil, item.Element)
-	nextHeight := t.itemExactHeight(item, t.layoutWidth)
-	t.itemHeights[index] = nextHeight
-	t.totalHeight += (max(0, item.GapBefore) + nextHeight) - (max(0, prev.GapBefore) + prevHeight)
+	t.itemHeights[index] = -1
+	t.totalHeightValid = false
 }
 
 type TranscriptViewport struct {

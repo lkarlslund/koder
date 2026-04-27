@@ -13,6 +13,22 @@ type controlProbeElement struct {
 	height int
 }
 
+type countingElement struct {
+	height      int
+	renderCalls *int
+}
+
+func (e countingElement) Measure(_ *Context, constraints Constraints) Size {
+	return constraints.Clamp(Size{W: 8, H: e.height})
+}
+
+func (e countingElement) Render(_ *Context, bounds Rect) Surface {
+	if e.renderCalls != nil {
+		*e.renderCalls = *e.renderCalls + 1
+	}
+	return BlankSurface(bounds.W, bounds.H)
+}
+
 func (e controlProbeElement) Measure(_ *Context, constraints Constraints) Size {
 	return constraints.Clamp(Size{W: e.width, H: e.height})
 }
@@ -233,5 +249,64 @@ func TestRetainedTranscriptContentHeightTracksItemMutations(t *testing.T) {
 	transcript.Remove(1)
 	if got := transcript.ContentHeight(12); got != 6 {
 		t.Fatalf("expected remove to delta-update total height back to 6, got %d", got)
+	}
+}
+
+func TestRetainedTranscriptReusesCachedHeightWhenItemIsUnchanged(t *testing.T) {
+	transcript := NewRetainedTranscript()
+	renders := 0
+	transcript.Add(TranscriptItem{
+		Element: NewCachedElement(countingElement{height: 3, renderCalls: &renders}, 1),
+	})
+
+	if got := transcript.ContentHeight(12); got != 3 {
+		t.Fatalf("expected content height 3, got %d", got)
+	}
+	if renders != 1 {
+		t.Fatalf("expected first height read to render once, got %d", renders)
+	}
+
+	if got := transcript.ContentHeight(12); got != 3 {
+		t.Fatalf("expected cached content height 3, got %d", got)
+	}
+	if renders != 1 {
+		t.Fatalf("expected unchanged item height to stay cached, got %d renders", renders)
+	}
+}
+
+func TestRetainedTranscriptReplaceInvalidatesHeightWithoutImmediateRerender(t *testing.T) {
+	transcript := NewRetainedTranscript()
+	firstRenders := 0
+	secondRenders := 0
+	transcript.Add(TranscriptItem{
+		Element: NewCachedElement(countingElement{height: 2, renderCalls: &firstRenders}, 1),
+	})
+
+	if got := transcript.ContentHeight(12); got != 2 {
+		t.Fatalf("expected initial content height 2, got %d", got)
+	}
+	if firstRenders != 1 {
+		t.Fatalf("expected initial render count 1, got %d", firstRenders)
+	}
+
+	transcript.Replace(0, TranscriptItem{
+		Element: NewCachedElement(countingElement{height: 4, renderCalls: &secondRenders}, 1),
+	})
+	if secondRenders != 0 {
+		t.Fatalf("expected replace to invalidate without immediate rerender, got %d renders", secondRenders)
+	}
+
+	if got := transcript.ContentHeight(12); got != 4 {
+		t.Fatalf("expected replaced content height 4, got %d", got)
+	}
+	if secondRenders != 1 {
+		t.Fatalf("expected replaced item to render once when height is requested, got %d", secondRenders)
+	}
+
+	if got := transcript.ContentHeight(12); got != 4 {
+		t.Fatalf("expected cached replaced content height 4, got %d", got)
+	}
+	if secondRenders != 1 {
+		t.Fatalf("expected replaced item cached height to be reused, got %d renders", secondRenders)
 	}
 }
