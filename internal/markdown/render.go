@@ -41,13 +41,21 @@ func (r *Renderer) Render(input string) string {
 }
 
 func (r *Renderer) RenderPlain(input string) string {
+	return r.RenderPlainWidth(input, 0)
+}
+
+func (r *Renderer) RenderPlainWidth(input string, width int) string {
 	if r == nil {
 		return strings.TrimSpace(input)
 	}
-	return strings.TrimSpace(ui.PlainStyledText(r.RenderStyled(input)))
+	return strings.TrimSpace(ui.PlainStyledText(r.RenderStyledWidth(input, width)))
 }
 
 func (r *Renderer) RenderStyled(input string) []ui.StyledSpan {
+	return r.RenderStyledWidth(input, 0)
+}
+
+func (r *Renderer) RenderStyledWidth(input string, width int) []ui.StyledSpan {
 	if r == nil {
 		return []ui.StyledSpan{{Text: strings.TrimSpace(input)}}
 	}
@@ -56,14 +64,14 @@ func (r *Renderer) RenderStyled(input string) []ui.StyledSpan {
 		return nil
 	}
 	doc := r.md.Parser().Parse(text.NewReader(source))
-	return r.renderStyledBlockChildren(doc, source)
+	return r.renderStyledBlockChildren(doc, source, width)
 }
 
-func (r *Renderer) renderStyledBlockChildren(parent ast.Node, source []byte) []ui.StyledSpan {
+func (r *Renderer) renderStyledBlockChildren(parent ast.Node, source []byte, width int) []ui.StyledSpan {
 	var out []ui.StyledSpan
 	first := true
 	for child := parent.FirstChild(); child != nil; child = child.NextSibling() {
-		block := r.renderStyledBlock(child, source)
+		block := r.renderStyledBlock(child, source, width)
 		if len(block) == 0 {
 			continue
 		}
@@ -76,7 +84,7 @@ func (r *Renderer) renderStyledBlockChildren(parent ast.Node, source []byte) []u
 	return out
 }
 
-func (r *Renderer) renderStyledBlock(node ast.Node, source []byte) []ui.StyledSpan {
+func (r *Renderer) renderStyledBlock(node ast.Node, source []byte, width int) []ui.StyledSpan {
 	switch typed := node.(type) {
 	case *ast.Paragraph, *ast.TextBlock:
 		return r.renderStyledInlineChildren(node, source, ui.CellStyle{})
@@ -92,7 +100,7 @@ func (r *Renderer) renderStyledBlock(node ast.Node, source []byte) []ui.StyledSp
 		}
 		return r.renderStyledInlineChildren(node, source, style)
 	case *ast.Blockquote:
-		inner := ui.SplitStyledLines(r.renderStyledBlockChildren(node, source))
+		inner := ui.SplitStyledLines(r.renderStyledBlockChildren(node, source, width))
 		return prefixStyledLines(
 			inner,
 			[]ui.StyledSpan{{Text: "│ ", Style: ui.CellStyle{FG: ui.CellColorFromLipgloss(r.palette.MarkdownQuoteBorder)}}},
@@ -103,19 +111,19 @@ func (r *Renderer) renderStyledBlock(node ast.Node, source []byte) []ui.StyledSp
 	case *ast.CodeBlock:
 		return r.renderStyledCodeBlock("", typed.Lines(), source)
 	case *ast.List:
-		return r.renderStyledList(typed, source)
+		return r.renderStyledList(typed, source, width)
 	case *ast.ThematicBreak:
 		return []ui.StyledSpan{{
 			Text:  strings.Repeat("─", 32),
 			Style: ui.CellStyle{FG: ui.CellColorFromLipgloss(r.palette.MarkdownRule)},
 		}}
 	case *extensionast.Table:
-		return r.renderStyledTable(typed, source)
+		return r.renderStyledTable(typed, source, width)
 	case *ast.HTMLBlock:
 		return nil
 	default:
 		if node.HasChildren() {
-			return r.renderStyledBlockChildren(node, source)
+			return r.renderStyledBlockChildren(node, source, width)
 		}
 		return nil
 	}
@@ -215,7 +223,7 @@ func (r *Renderer) renderStyledCodeBlock(lang string, lines *text.Segments, sour
 	return out
 }
 
-func (r *Renderer) renderStyledList(node *ast.List, source []byte) []ui.StyledSpan {
+func (r *Renderer) renderStyledList(node *ast.List, source []byte, width int) []ui.StyledSpan {
 	var out []ui.StyledSpan
 	itemNumber := node.Start
 	first := true
@@ -231,7 +239,7 @@ func (r *Renderer) renderStyledList(node *ast.List, source []byte) []ui.StyledSp
 			markerStyle = ui.CellStyle{FG: ui.CellColorFromLipgloss(r.palette.MarkdownListEnumeration)}
 			itemNumber++
 		}
-		lines := ui.SplitStyledLines(r.renderStyledListItem(listItem, source))
+		lines := ui.SplitStyledLines(r.renderStyledListItem(listItem, source, width))
 		block := prefixStyledLines(
 			lines,
 			[]ui.StyledSpan{{Text: marker + " ", Style: markerStyle}},
@@ -246,11 +254,11 @@ func (r *Renderer) renderStyledList(node *ast.List, source []byte) []ui.StyledSp
 	return out
 }
 
-func (r *Renderer) renderStyledListItem(item *ast.ListItem, source []byte) []ui.StyledSpan {
+func (r *Renderer) renderStyledListItem(item *ast.ListItem, source []byte, width int) []ui.StyledSpan {
 	var out []ui.StyledSpan
 	first := true
 	for child := item.FirstChild(); child != nil; child = child.NextSibling() {
-		block := r.renderStyledBlock(child, source)
+		block := r.renderStyledBlock(child, source, width)
 		if len(block) == 0 {
 			continue
 		}
@@ -263,7 +271,7 @@ func (r *Renderer) renderStyledListItem(item *ast.ListItem, source []byte) []ui.
 	return out
 }
 
-func (r *Renderer) renderStyledTable(node *extensionast.Table, source []byte) []ui.StyledSpan {
+func (r *Renderer) renderStyledTable(node *extensionast.Table, source []byte, widthHint int) []ui.StyledSpan {
 	var rows [][]string
 	for row := node.FirstChild(); row != nil; row = row.NextSibling() {
 		switch typed := row.(type) {
@@ -285,6 +293,7 @@ func (r *Renderer) renderStyledTable(node *extensionast.Table, source []byte) []
 			widths[idx] = max(widths[idx], runewidth.StringWidth(cell))
 		}
 	}
+	widths = fitTableWidths(widths, widthHint)
 	var out []ui.StyledSpan
 	borderStyle := ui.CellStyle{FG: ui.CellColorFromLipgloss(r.palette.MarkdownTableBorder)}
 	for rowIndex, row := range rows {
@@ -302,22 +311,39 @@ func (r *Renderer) renderStyledTable(node *extensionast.Table, source []byte) []
 
 func (r *Renderer) renderStyledTableRow(row []string, widths []int, borderStyle ui.CellStyle, header bool) []ui.StyledSpan {
 	var out []ui.StyledSpan
-	out = ui.AppendStyledSpan(out, "| ", borderStyle)
+	cellLines := make([][]string, len(widths))
+	rowHeight := 1
 	for idx, width := range widths {
 		cell := ""
 		if idx < len(row) {
-			cell = padRight(row[idx], width)
+			cell = row[idx]
 		}
-		cellStyle := ui.CellStyle{}
-		if header {
-			cellStyle.Bold = true
+		cellLines[idx] = wrapTableCell(cell, width)
+		rowHeight = max(rowHeight, len(cellLines[idx]))
+	}
+	cellStyle := ui.CellStyle{}
+	if header {
+		cellStyle.Bold = true
+	}
+	for lineIndex := 0; lineIndex < rowHeight; lineIndex++ {
+		if lineIndex > 0 {
+			out = ui.AppendStyledSpan(out, "\n", ui.CellStyle{})
 		}
-		out = ui.AppendStyledSpan(out, cell, cellStyle)
-		if idx == len(widths)-1 {
-			out = ui.AppendStyledSpan(out, " |", borderStyle)
-			break
+		out = ui.AppendStyledSpan(out, "| ", borderStyle)
+		for idx, width := range widths {
+			cellLine := ""
+			if idx < len(cellLines) && lineIndex < len(cellLines[idx]) {
+				cellLine = padRight(cellLines[idx][lineIndex], width)
+			} else {
+				cellLine = strings.Repeat(" ", width)
+			}
+			out = ui.AppendStyledSpan(out, cellLine, cellStyle)
+			if idx == len(widths)-1 {
+				out = ui.AppendStyledSpan(out, " |", borderStyle)
+				break
+			}
+			out = ui.AppendStyledSpan(out, " | ", borderStyle)
 		}
-		out = ui.AppendStyledSpan(out, " | ", borderStyle)
 	}
 	return out
 }
@@ -376,4 +402,59 @@ func max(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func fitTableWidths(widths []int, widthHint int) []int {
+	if len(widths) == 0 || widthHint <= 0 {
+		return widths
+	}
+	available := widthHint - (3*len(widths) + 1)
+	if available <= 0 {
+		available = len(widths)
+	}
+	fitted := append([]int(nil), widths...)
+	for i := range fitted {
+		if fitted[i] < 1 {
+			fitted[i] = 1
+		}
+	}
+	for sumInts(fitted) > available {
+		widest := 0
+		for i := 1; i < len(fitted); i++ {
+			if fitted[i] > fitted[widest] {
+				widest = i
+			}
+		}
+		if fitted[widest] <= 1 {
+			break
+		}
+		fitted[widest]--
+	}
+	return fitted
+}
+
+func sumInts(values []int) int {
+	total := 0
+	for _, value := range values {
+		total += value
+	}
+	return total
+}
+
+func wrapTableCell(input string, width int) []string {
+	if width <= 0 {
+		return []string{strings.TrimSpace(input)}
+	}
+	var wrapped []string
+	for _, line := range strings.Split(strings.TrimSpace(input), "\n") {
+		if strings.TrimSpace(line) == "" {
+			wrapped = append(wrapped, "")
+			continue
+		}
+		wrapped = append(wrapped, strings.Split(ui.PlainWordWrap(line, width), "\n")...)
+	}
+	if len(wrapped) == 0 {
+		return []string{""}
+	}
+	return wrapped
 }

@@ -156,6 +156,38 @@ func TestRenderFormatsTableAndTaskList(t *testing.T) {
 	}
 }
 
+func TestRenderPlainWidthWrapsTablesWithinHint(t *testing.T) {
+	renderer, err := New(theme.Default().Palette)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	input := strings.Join([]string{
+		"| File | Description |",
+		"| --- | --- |",
+		"| pacman.go | Compiled binary for the game |",
+		"| test-project | Another compiled binary |",
+		"| go.mod / go.sum | Go module files with dependencies (Ebitenengine v2.9.9, gomobile, etc.) |",
+	}, "\n")
+
+	got := renderer.RenderPlainWidth(input, 48)
+	lines := strings.Split(got, "\n")
+	if len(lines) < 5 {
+		t.Fatalf("expected wrapped table output, got %q", got)
+	}
+	for _, line := range lines {
+		if ansi.StringWidth(line) > 48 {
+			t.Fatalf("expected line width <= 48, got %d in %q", ansi.StringWidth(line), line)
+		}
+	}
+	if strings.Contains(got, "-----------------\n") {
+		t.Fatalf("expected divider row to stay on one line, got %q", got)
+	}
+	if !strings.Contains(got, "| File") || !strings.Contains(got, "| pacman.go") {
+		t.Fatalf("expected table content to remain intact, got %q", got)
+	}
+}
+
 func TestRenderStyledTracksInlineAttributes(t *testing.T) {
 	renderer, err := New(theme.Default().Palette)
 	if err != nil {

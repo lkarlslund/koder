@@ -2536,7 +2536,7 @@ func (m *Model) renderMessageParts(parts []domain.Part) string {
 		if textBuf.Len() == 0 {
 			return
 		}
-		textBlocks = append(textBlocks, m.renderer.RenderPlain(textBuf.String()))
+		textBlocks = append(textBlocks, m.renderer.RenderPlainWidth(textBuf.String(), m.markdownRenderWidth()))
 		textBuf.Reset()
 	}
 	flushReasoning := func() {
@@ -2631,7 +2631,7 @@ func (m *Model) renderStyledMessageParts(parts []domain.Part) []ui.StyledSpan {
 		if textBuf.Len() == 0 {
 			return
 		}
-		block := m.renderer.RenderStyled(textBuf.String())
+		block := m.renderer.RenderStyledWidth(textBuf.String(), m.markdownRenderWidth())
 		if len(block) > 0 {
 			textBlocks = append(textBlocks, block)
 		}
@@ -2739,7 +2739,7 @@ func (m *Model) renderSystemNoticeBlock(part domain.Part) string {
 		body.WriteString(meta)
 		body.WriteString("\n```")
 	}
-	return m.renderer.RenderPlain(body.String())
+	return m.renderer.RenderPlainWidth(body.String(), m.markdownRenderWidth())
 }
 
 func (m *Model) renderStyledSystemNoticeBlock(part domain.Part) []ui.StyledSpan {
@@ -2761,7 +2761,7 @@ func (m *Model) renderStyledSystemNoticeBlock(part domain.Part) []ui.StyledSpan 
 		body.WriteString(meta)
 		body.WriteString("\n```")
 	}
-	return m.renderer.RenderStyled(body.String())
+	return m.renderer.RenderStyledWidth(body.String(), m.markdownRenderWidth())
 }
 
 type eventNoticeMeta struct {
@@ -2787,7 +2787,7 @@ func (m *Model) renderEventNoticeBlock(part domain.Part) string {
 		text.WriteString("\n\n")
 		text.WriteString(body)
 	}
-	return m.renderer.RenderPlain(text.String())
+	return m.renderer.RenderPlainWidth(text.String(), m.markdownRenderWidth())
 }
 
 func (m *Model) renderStyledEventNoticeBlock(part domain.Part) []ui.StyledSpan {
@@ -2802,7 +2802,14 @@ func (m *Model) renderStyledEventNoticeBlock(part domain.Part) []ui.StyledSpan {
 		text.WriteString("\n\n")
 		text.WriteString(body)
 	}
-	return m.renderer.RenderStyled(text.String())
+	return m.renderer.RenderStyledWidth(text.String(), m.markdownRenderWidth())
+}
+
+func (m *Model) markdownRenderWidth() int {
+	if m.viewport.Width > 0 {
+		return m.viewport.Width
+	}
+	return 0
 }
 
 func eventNoticePresentation(part domain.Part) (string, string) {
