@@ -2,11 +2,13 @@ package dialogs
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/theme"
 	"github.com/lkarlslund/koder/internal/ui"
+	"github.com/lkarlslund/koder/internal/ui/textarea"
 )
 
 type PreferencesActionKind int
@@ -67,6 +69,7 @@ type PreferencesDialog struct {
 	focus        preferencesFocus
 	fieldIndex   int
 	buttonIndex  int
+	editors      map[string]textarea.Model
 }
 
 func NewPreferencesDialog(current PreferencesValues, themeNames []string) PreferencesDialog {
@@ -113,6 +116,9 @@ func NewPreferencesDialog(current PreferencesValues, themeNames []string) Prefer
 			Tabs: tabNames,
 		},
 		focus: preferencesFocusFields,
+		editors: map[string]textarea.Model{
+			"max_tool_loop_steps": newPreferencesEditor(strconv.Itoa(current.MaxToolLoopSteps)),
+		},
 	}
 }
 
@@ -150,8 +156,14 @@ func (d *PreferencesDialog) Update(msg ui.KeyMsg) PreferencesAction {
 		}
 		return PreferencesAction{}
 	case "up":
+		if action, ok := d.handleFieldStep(1); ok {
+			return action
+		}
 		return d.moveVertical(-1)
 	case "down":
+		if action, ok := d.handleFieldStep(-1); ok {
+			return action
+		}
 		return d.moveVertical(1)
 	case "left":
 		return d.moveHorizontal(-1)
@@ -160,6 +172,11 @@ func (d *PreferencesDialog) Update(msg ui.KeyMsg) PreferencesAction {
 	case " ", "enter":
 		return d.activate()
 	default:
+		if d.focus == preferencesFocusFields && d.currentFieldKind() == preferencesFieldInteger {
+			if action, ok := d.updateCurrentIntegerEditor(msg); ok {
+				return action
+			}
+		}
 		return PreferencesAction{}
 	}
 }
@@ -280,6 +297,7 @@ func (d *PreferencesDialog) adjustField(delta int) PreferencesAction {
 			if d.draft.MaxToolLoopSteps < 1 {
 				d.draft.MaxToolLoopSteps = 1
 			}
+			d.setIntegerEditorValue(field.ID, d.draft.MaxToolLoopSteps)
 		default:
 			return PreferencesAction{}
 		}
@@ -318,14 +336,7 @@ func (d PreferencesDialog) dialog(width int, palette theme.Palette) ui.Element {
 		focused := d.focus == preferencesFocusFields && idx == d.fieldIndex
 		switch field.Kind {
 		case preferencesFieldInteger:
-			value := fmt.Sprintf("%d", d.draft.MaxToolLoopSteps)
-			fieldRows = append(fieldRows, ui.Fixed(ui.ChoiceRow{
-				Label:       field.Label,
-				Description: field.Description,
-				Value:       value,
-				Width:       fieldWidth,
-				Focused:     focused,
-			}))
+			fieldRows = append(fieldRows, ui.Fixed(d.renderIntegerField(field, fieldWidth, palette, focused)))
 		case preferencesFieldTheme:
 			fieldRows = append(fieldRows, ui.Fixed(ui.ChoiceRow{
 				Label:       field.Label,
@@ -460,5 +471,150 @@ func (d *PreferencesDialog) setToggle(id string, value bool) {
 		d.draft.UI.ShowSystem = value
 	case "mouse":
 		d.draft.UI.Mouse = value
+	}
+}
+
+func (d PreferencesDialog) currentFieldKind() preferencesFieldKind {
+	fields := d.currentFields()
+	if len(fields) == 0 || d.fieldIndex < 0 || d.fieldIndex >= len(fields) {
+		return preferencesFieldToggle
+	}
+	return fields[d.fieldIndex].Kind
+}
+
+func (d *PreferencesDialog) handleFieldStep(delta int) (PreferencesAction, bool) {
+	if d.focus != preferencesFocusFields || d.currentFieldKind() != preferencesFieldInteger {
+		return PreferencesAction{}, false
+	}
+	fields := d.currentFields()
+	if d.fieldIndex < 0 || d.fieldIndex >= len(fields) {
+		return PreferencesAction{}, false
+	}
+	editor := d.integerEditor(fields[d.fieldIndex].ID)
+	value, err := strconv.Atoi(strings.TrimSpace(editor.Value()))
+	if err != nil {
+		return PreferencesAction{}, false
+	}
+	value += delta
+	if value < 1 {
+		value = 1
+	}
+	d.draft.MaxToolLoopSteps = value
+	d.setIntegerEditorValue(fields[d.fieldIndex].ID, value)
+	return PreferencesAction{Kind: PreferencesActionChanged, Values: d.draft}, true
+}
+
+func (d *PreferencesDialog) updateCurrentIntegerEditor(msg ui.KeyMsg) (PreferencesAction, bool) {
+	fields := d.currentFields()
+	if len(fields) == 0 || d.fieldIndex < 0 || d.fieldIndex >= len(fields) {
+		return PreferencesAction{}, false
+	}
+	field := fields[d.fieldIndex]
+	if field.Kind != preferencesFieldInteger {
+		return PreferencesAction{}, false
+	}
+	if !preferencesIntegerKeyAllowed(msg) {
+		return PreferencesAction{}, false
+	}
+	editor := d.integerEditor(field.ID)
+	updated, _ := editor.Update(msg)
+	d.storeIntegerEditor(field.ID, updated)
+	if value, err := strconv.Atoi(strings.TrimSpace(updated.Value())); err == nil && value > 0 {
+		d.draft.MaxToolLoopSteps = value
+	}
+	return PreferencesAction{Kind: PreferencesActionChanged, Values: d.draft}, true
+}
+
+func preferencesIntegerKeyAllowed(msg ui.KeyMsg) bool {
+	switch msg.Type {
+	case ui.KeyBackspace, ui.KeyDelete, ui.KeyLeft, ui.KeyRight, ui.KeyHome, ui.KeyEnd:
+		return true
+	case ui.KeyRunes:
+		for _, r := range msg.Runes {
+			if r < '0' || r > '9' {
+				return false
+			}
+		}
+		return len(msg.Runes) > 0
+	default:
+		switch msg.String() {
+		case "ctrl+a", "ctrl+e":
+			return true
+		default:
+			return false
+		}
+	}
+}
+
+func newPreferencesEditor(value string) textarea.Model {
+	editor := textarea.New()
+	editor.BlinkEnabled = false
+	editor.Focus()
+	editor.SetHeight(1)
+	editor.SetWidth(32)
+	editor.SetValue(value)
+	return editor
+}
+
+func (d PreferencesDialog) integerEditor(id string) textarea.Model {
+	if d.editors == nil {
+		return newPreferencesEditor("")
+	}
+	editor, ok := d.editors[id]
+	if !ok {
+		return newPreferencesEditor("")
+	}
+	return editor
+}
+
+func (d *PreferencesDialog) storeIntegerEditor(id string, editor textarea.Model) {
+	if d.editors == nil {
+		d.editors = map[string]textarea.Model{}
+	}
+	d.editors[id] = editor
+}
+
+func (d *PreferencesDialog) setIntegerEditorValue(id string, value int) {
+	editor := d.integerEditor(id)
+	editor.SetValue(strconv.Itoa(value))
+	d.storeIntegerEditor(id, editor)
+}
+
+func (d PreferencesDialog) renderIntegerField(field preferencesField, width int, palette theme.Palette, active bool) ui.Element {
+	editor := d.integerEditor(field.ID)
+	line := editor.VisibleLine()
+	foreground := palette.MarkdownText
+	background := palette.ScreenBackground
+	borderColor := palette.SidebarBorder
+	if active {
+		foreground = palette.UserTextForeground
+		background = palette.UserTextBackground
+		borderColor = firstNonEmptyColor(palette.SelectionBackground, palette.ActivityText, palette.SidebarBorder)
+	}
+	return ui.FlexBox{
+		Direction: ui.DirectionVertical,
+		Children: []ui.Child{
+			ui.Fixed(ui.FlexBox{
+				Direction: ui.DirectionHorizontal,
+				Children: []ui.Child{
+					ui.Fixed(ui.Static{Content: field.Label}),
+					ui.Flex(ui.Spacer{}, 1),
+					ui.Fixed(ui.Static{Content: truncateText(field.Description, maxInt(16, width-ui.PlainWidth(field.Label)-3))}),
+				},
+			}),
+			ui.Fixed(ui.InputField{
+				Width:         maxInt(18, width),
+				Value:         editor.Value(),
+				ContentBefore: line.Before(),
+				ContentCursor: line.Cursor(),
+				ContentAfter:  line.After(),
+				CursorVisible: active && editor.CursorVisible(),
+				Foreground:    foreground,
+				Background:    background,
+				PlaceholderFG: palette.ComposerMutedText,
+				BorderColor:   borderColor,
+			}),
+		},
+		Spacing: 1,
 	}
 }

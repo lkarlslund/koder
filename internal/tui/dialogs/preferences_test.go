@@ -129,3 +129,31 @@ func TestPreferencesDialogSpinnerPreviewAnimates(t *testing.T) {
 		t.Fatalf("expected animated spinner preview to change view")
 	}
 }
+
+func TestPreferencesDialogToolTurnsEditorSupportsTypingAndStepping(t *testing.T) {
+	dialog := NewPreferencesDialog(defaultPreferencesValues(), []string{"tokyonight", "gruvbox"})
+	editor := dialog.editors["max_tool_loop_steps"]
+	editor.SetValue("20")
+	dialog.editors["max_tool_loop_steps"] = editor
+
+	action := dialog.Update(ui.KeyMsg{Type: ui.KeyBackspace})
+	if action.Kind != PreferencesActionChanged {
+		t.Fatalf("expected backspace edit change, got %#v", action)
+	}
+	action = dialog.Update(ui.KeyMsg{Type: ui.KeyRunes, Runes: []rune("5")})
+	if action.Kind != PreferencesActionChanged {
+		t.Fatalf("expected digit edit change, got %#v", action)
+	}
+	if action.Values.MaxToolLoopSteps != 25 {
+		t.Fatalf("expected typed value 25, got %#v", action.Values)
+	}
+
+	action = dialog.Update(ui.KeyMsg{Type: ui.KeyDown})
+	if action.Values.MaxToolLoopSteps != 24 {
+		t.Fatalf("expected down to decrement to 24, got %#v", action.Values)
+	}
+	action = dialog.Update(ui.KeyMsg{Type: ui.KeyUp})
+	if action.Values.MaxToolLoopSteps != 25 {
+		t.Fatalf("expected up to increment to 25, got %#v", action.Values)
+	}
+}
