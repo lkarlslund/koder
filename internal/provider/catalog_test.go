@@ -22,16 +22,12 @@ func TestBuildDraftUsesDescriptorDefaults(t *testing.T) {
 	if draft.BaseURL != "https://api.openai.com/v1" {
 		t.Fatalf("unexpected base url: %q", draft.BaseURL)
 	}
-	if draft.AuthMethod != AuthMethodAPIKey {
-		t.Fatalf("unexpected auth method: %q", draft.AuthMethod)
-	}
 }
 
 func TestBuildDraftPrefillsExistingProvider(t *testing.T) {
 	draft, err := BuildDraft("openrouter", map[string]config.Provider{
 		"openrouter": {
 			Kind:         "openai-compatible",
-			AuthMethod:   "api_key",
 			Name:         "OpenRouter",
 			BaseURL:      "https://example.com/v1",
 			APIKey:       "secret",
@@ -58,7 +54,6 @@ func TestProbeReturnsSortedModels(t *testing.T) {
 	result, err := Probe(context.Background(), ConnectDraft{
 		ProviderID: "test",
 		Kind:       ProviderKindCompatible,
-		AuthMethod: AuthMethodLocal,
 		BaseURL:    server.URL + "/v1",
 		Model:      "a-model",
 		Headers:    map[string]string{},
@@ -71,17 +66,16 @@ func TestProbeReturnsSortedModels(t *testing.T) {
 	}
 }
 
-func TestConnectDraftToConfigClearsAPIKeyForLocalEndpoints(t *testing.T) {
+func TestConnectDraftToConfigPersistsAPIKeyWhenSet(t *testing.T) {
 	cfg := ConnectDraft{
 		ProviderID: "ollama",
 		Kind:       ProviderKindCompatible,
-		AuthMethod: AuthMethodLocal,
 		BaseURL:    "http://127.0.0.1:11434/v1",
-		APIKey:     "should-not-persist",
+		APIKey:     "persist-me",
 		Model:      "qwen",
 	}.ToConfig()
-	if cfg.APIKey != "" {
-		t.Fatalf("expected API key to be cleared for local providers, got %q", cfg.APIKey)
+	if cfg.APIKey != "persist-me" {
+		t.Fatalf("expected API key to be preserved, got %q", cfg.APIKey)
 	}
 }
 
@@ -89,7 +83,6 @@ func TestValidateDraftAllowsEmptyAPIKeyForRemoteProviders(t *testing.T) {
 	err := ValidateDraft(ConnectDraft{
 		ProviderID: "openai",
 		Kind:       ProviderKindCompatible,
-		AuthMethod: AuthMethodAPIKey,
 		BaseURL:    "https://api.openai.com/v1",
 		Model:      "gpt-5.4",
 	})
@@ -110,7 +103,6 @@ func TestProbeUsesValidProviderConfig(t *testing.T) {
 	_, err := Probe(context.Background(), ConnectDraft{
 		ProviderID: "openai",
 		Kind:       ProviderKindCompatible,
-		AuthMethod: AuthMethodAPIKey,
 		BaseURL:    server.URL,
 		APIKey:     "secret",
 		Model:      "model-a",
@@ -133,7 +125,6 @@ func TestProbeSurfacesUnauthorizedWhenAPIKeyMissing(t *testing.T) {
 	_, err := Probe(context.Background(), ConnectDraft{
 		ProviderID: "openai",
 		Kind:       ProviderKindCompatible,
-		AuthMethod: AuthMethodAPIKey,
 		BaseURL:    server.URL,
 		Model:      "model-a",
 	}, nil)
@@ -149,7 +140,6 @@ func TestClientStillSupportsConfigFromDraft(t *testing.T) {
 	client, err := New("test", ConnectDraft{
 		ProviderID: "test",
 		Kind:       ProviderKindCompatible,
-		AuthMethod: AuthMethodAPIKey,
 		BaseURL:    "https://example.com/v1",
 		APIKey:     "secret",
 		Model:      "model-a",

@@ -61,7 +61,7 @@ func TestRequireProviderRejectsMissingProviderConfiguration(t *testing.T) {
 	}
 }
 
-func TestApplyDefaultsInfersProviderKindAndAuthMethod(t *testing.T) {
+func TestApplyDefaultsInfersProviderKindAndContextWindow(t *testing.T) {
 	cfg := Default()
 	cfg.Providers["remote"] = Provider{
 		BaseURL:      "https://example.com/v1",
@@ -78,11 +78,11 @@ func TestApplyDefaultsInfersProviderKindAndAuthMethod(t *testing.T) {
 	if got := cfg.Providers["remote"].Kind; got != "openai-compatible" {
 		t.Fatalf("expected inferred provider kind, got %q", got)
 	}
-	if got := cfg.Providers["remote"].AuthMethod; got != "api_key" {
-		t.Fatalf("expected api_key auth method, got %q", got)
+	if got := cfg.Providers["remote"].ContextWindow; got != 32768 {
+		t.Fatalf("expected default context window, got %d", got)
 	}
-	if got := cfg.Providers["local"].AuthMethod; got != "local_endpoint" {
-		t.Fatalf("expected local endpoint auth method, got %q", got)
+	if got := cfg.Providers["local"].ContextWindow; got != 32768 {
+		t.Fatalf("expected default context window for local provider, got %d", got)
 	}
 }
 
@@ -132,18 +132,17 @@ func TestApplyDefaultsFillsMissingMaxToolLoopSteps(t *testing.T) {
 	}
 }
 
-func TestApplyDefaultsKeepsCompatibleLocalContextWindowUnset(t *testing.T) {
+func TestApplyDefaultsFillsMissingCompatibleContextWindow(t *testing.T) {
 	cfg := Default()
 	cfg.Providers["compatible"] = Provider{
 		Kind:         "openai-compatible",
 		BaseURL:      "http://127.0.0.1:8888/v1",
-		AuthMethod:   "local_endpoint",
 		DefaultModel: "coder.gguf",
 	}
 
 	cfg.applyDefaults()
 
-	if got := cfg.Providers["compatible"].ContextWindow; got != 0 {
-		t.Fatalf("expected compatible local context window to stay unset, got %d", got)
+	if got := cfg.Providers["compatible"].ContextWindow; got != 32768 {
+		t.Fatalf("expected compatible context window default, got %d", got)
 	}
 }

@@ -29,7 +29,6 @@ type connectStage int
 
 const (
 	connectStageProvider connectStage = iota
-	connectStageAuth
 	connectStageForm
 )
 
@@ -57,7 +56,6 @@ type ConnectDialog struct {
 	view       []provider.Descriptor
 	configured map[string]config.Provider
 	selected   provider.Descriptor
-	authIndex  int
 	draft      provider.ConnectDraft
 	status     string
 	statusKind connectStatusKind
@@ -109,8 +107,6 @@ func (d *ConnectDialog) Update(msg ui.KeyMsg) ProviderConnectAction {
 	switch d.stage {
 	case connectStageProvider:
 		return d.updateProviderList(msg)
-	case connectStageAuth:
-		return d.updateAuthPicker(msg)
 	case connectStageForm:
 		return d.updateForm(msg)
 	default:
@@ -137,8 +133,6 @@ func (d ConnectDialog) dialog(width int, palette theme.Palette) ui.Element {
 	switch d.stage {
 	case connectStageProvider:
 		return d.providerListDialog(width, palette)
-	case connectStageAuth:
-		return d.authPickerDialog(width, palette)
 	case connectStageForm:
 		return d.formDialog(width, palette)
 	default:
@@ -170,24 +164,6 @@ func (d *ConnectDialog) updateProviderList(msg ui.KeyMsg) ProviderConnectAction 
 			d.query += msg.String()
 			d.refilter()
 		}
-	}
-	return ProviderConnectAction{}
-}
-
-func (d *ConnectDialog) updateAuthPicker(msg ui.KeyMsg) ProviderConnectAction {
-	switch msg.String() {
-	case "esc":
-		d.stage = connectStageProvider
-	case "up":
-		if d.authIndex > 0 {
-			d.authIndex--
-		}
-	case "down":
-		if d.authIndex < len(d.selected.AuthMethods)-1 {
-			d.authIndex++
-		}
-	case "enter":
-		d.chooseAuthMethod()
 	}
 	return ProviderConnectAction{}
 }
@@ -303,50 +279,6 @@ func (d *ConnectDialog) providerListDialog(width int, palette theme.Palette) ui.
 			Children: []ui.Child{
 				ui.Fixed(ui.FlexBox{Direction: ui.DirectionVertical, Children: body, Spacing: 1}),
 				ui.Fixed(ui.Static{Content: "Enter choose provider  Esc cancel"}),
-			},
-			Spacing: 2,
-		},
-		ShowClose: true,
-	}
-}
-
-func (d *ConnectDialog) authPickerDialog(width int, palette theme.Palette) ui.Element {
-	dialogWidth := clampWidth(width, 68, 88)
-	lines := []string{
-		d.selected.Title,
-		d.selected.Description,
-		"",
-	}
-	items := make([]ui.ListItem, 0, len(d.selected.AuthMethods))
-	for _, method := range d.selected.AuthMethods {
-		items = append(items, ui.ListItem{
-			Primary:   method.Title,
-			Secondary: method.Description,
-		})
-	}
-	return ui.WindowFrame{
-		Title: "Choose Auth Method",
-		Width: dialogWidth,
-		Content: ui.FlexBox{
-			Direction: ui.DirectionVertical,
-			Children: []ui.Child{
-				ui.Fixed(ui.FlexBox{
-					Direction: ui.DirectionVertical,
-					Children: []ui.Child{
-						ui.Fixed(linesBlock(lines...)),
-						ui.Fixed(ui.Section{
-							Width: dialogWidth - 8,
-							Child: ui.List{
-								Items:    items,
-								Width:    dialogWidth - 8,
-								Selected: d.authIndex,
-								Focused:  d.stage == connectStageAuth,
-							},
-						}),
-					},
-					Spacing: 1,
-				}),
-				ui.Fixed(ui.Static{Content: "Enter continue  Esc back"}),
 			},
 			Spacing: 2,
 		},
@@ -514,28 +446,9 @@ func (d *ConnectDialog) currentProvider() (provider.Descriptor, bool) {
 
 func (d *ConnectDialog) selectProvider(item provider.Descriptor) {
 	d.selected = item
-	d.authIndex = 0
 	d.status = ""
 	d.statusKind = connectStatusNone
 	d.draft, _ = provider.BuildDraft(item.ID, d.configured)
-	d.resetEditors()
-	if len(item.AuthMethods) > 1 {
-		d.stage = connectStageAuth
-		return
-	}
-	d.draft = d.draft.WithAuthMethod(item.AuthMethods[0].ID, item)
-	d.stage = connectStageForm
-	d.focus = connectFocusFields
-	d.fieldIndex = 0
-	d.buttonIdx = 1
-}
-
-func (d *ConnectDialog) chooseAuthMethod() {
-	if len(d.selected.AuthMethods) == 0 {
-		return
-	}
-	method := d.selected.AuthMethods[d.authIndex].ID
-	d.draft = d.draft.WithAuthMethod(method, d.selected)
 	d.resetEditors()
 	d.stage = connectStageForm
 	d.focus = connectFocusFields
@@ -581,9 +494,7 @@ func (d ConnectDialog) formFields() []connectField {
 	fields := []connectField{
 		{ID: "name", Label: "Name", Description: "Stored label for this provider entry"},
 		{ID: "base_url", Label: "Base URL", Description: "OpenAI-compatible API endpoint"},
-	}
-	if d.draft.AuthMethod == provider.AuthMethodAPIKey {
-		fields = append(fields, connectField{ID: "api_key", Label: "API Key", Description: "Stored in config.toml for now"})
+		{ID: "api_key", Label: "API Key", Description: "Optional; leave blank for unauthenticated backends"},
 	}
 	return fields
 }

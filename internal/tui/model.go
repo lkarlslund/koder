@@ -6198,7 +6198,6 @@ func (m *Model) openDisconnectDialog() {
 		details := []string{
 			fmt.Sprintf("Provider ID: %s", id),
 			fmt.Sprintf("Kind:        %s", blankAsDash(p.Kind)),
-			fmt.Sprintf("Auth:        %s", blankAsDash(p.AuthMethod)),
 			fmt.Sprintf("Base URL:    %s", blankAsDash(p.BaseURL)),
 			fmt.Sprintf("Model:       %s", blankAsDash(p.DefaultModel)),
 		}
@@ -6580,7 +6579,7 @@ func (m *Model) saveProviderDraft(draft provider.ConnectDraft) error {
 		next.Stream = existing.Stream
 		next.Disabled = false
 	} else {
-		if next.ContextWindow == 0 && !(next.Kind == provider.ProviderKindCompatible && next.AuthMethod == string(provider.AuthMethodLocal)) {
+		if next.ContextWindow == 0 {
 			next.ContextWindow = 32768
 		}
 		next.AutoCompactAt = 85

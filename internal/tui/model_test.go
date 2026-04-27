@@ -3110,7 +3110,7 @@ func TestSaveProviderDraftPersistsDefaults(t *testing.T) {
 	}
 }
 
-func TestSaveProviderDraftLeavesCompatibleLocalContextWindowUnset(t *testing.T) {
+func TestSaveProviderDraftDefaultsContextWindowWhenUnset(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
@@ -3123,7 +3123,6 @@ func TestSaveProviderDraftLeavesCompatibleLocalContextWindowUnset(t *testing.T) 
 	draft := provider.ConnectDraft{
 		ProviderID: "openai-compatible",
 		Kind:       provider.ProviderKindCompatible,
-		AuthMethod: provider.AuthMethodLocal,
 		Name:       "Compatible",
 		BaseURL:    "http://127.0.0.1:8888/v1",
 		Model:      "coder.gguf",
@@ -3136,8 +3135,8 @@ func TestSaveProviderDraftLeavesCompatibleLocalContextWindowUnset(t *testing.T) 
 	if !ok {
 		t.Fatal("expected provider config to be saved")
 	}
-	if providerCfg.ContextWindow != 0 {
-		t.Fatalf("expected local compatible context window to stay unset, got %d", providerCfg.ContextWindow)
+	if providerCfg.ContextWindow != 32768 {
+		t.Fatalf("expected default context window 32768, got %d", providerCfg.ContextWindow)
 	}
 }
 

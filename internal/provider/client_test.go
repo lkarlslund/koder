@@ -87,10 +87,9 @@ func TestPropsUsesModelQueryAndParsesContextWindow(t *testing.T) {
 	defer server.Close()
 
 	client, err := New("openai-compatible", config.Provider{
-		Kind:       ProviderKindCompatible,
-		AuthMethod: string(AuthMethodLocal),
-		BaseURL:    server.URL,
-		Timeout:    time.Second,
+		Kind:    ProviderKindCompatible,
+		BaseURL: server.URL,
+		Timeout: time.Second,
 	}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -122,10 +121,9 @@ func TestDetectContextWindowUsesCompatibleLocalProps(t *testing.T) {
 	defer server.Close()
 
 	got, err := DetectContextWindow(context.Background(), "openai-compatible", config.Provider{
-		Kind:       ProviderKindCompatible,
-		AuthMethod: string(AuthMethodLocal),
-		BaseURL:    server.URL,
-		Timeout:    time.Second,
+		Kind:    ProviderKindCompatible,
+		BaseURL: server.URL,
+		Timeout: time.Second,
 	}, "model-a", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -152,10 +150,9 @@ func TestDetectContextWindowUsesCompatibleLocalPropsWithoutV1(t *testing.T) {
 	defer server.Close()
 
 	got, err := DetectContextWindow(context.Background(), "openai-compatible", config.Provider{
-		Kind:       ProviderKindCompatible,
-		AuthMethod: string(AuthMethodLocal),
-		BaseURL:    server.URL + "/v1",
-		Timeout:    time.Second,
+		Kind:    ProviderKindCompatible,
+		BaseURL: server.URL + "/v1",
+		Timeout: time.Second,
 	}, "model-a", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -182,10 +179,9 @@ func TestDetectContextWindowFallsBackToPropsWhenModelListLacksContext(t *testing
 	defer server.Close()
 
 	got, err := DetectContextWindow(context.Background(), "openai-compatible", config.Provider{
-		Kind:       ProviderKindCompatible,
-		AuthMethod: string(AuthMethodLocal),
-		BaseURL:    server.URL + "/v1",
-		Timeout:    time.Second,
+		Kind:    ProviderKindCompatible,
+		BaseURL: server.URL + "/v1",
+		Timeout: time.Second,
 	}, "model-a", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -203,7 +199,6 @@ func TestDetectContextWindowFallsBackWhenCompatibleEndpointHasNoProps(t *testing
 
 	got, err := DetectContextWindow(context.Background(), "openai-compatible", config.Provider{
 		Kind:          ProviderKindCompatible,
-		AuthMethod:    string(AuthMethodLocal),
 		BaseURL:       server.URL + "/v1",
 		ContextWindow: 32768,
 		Timeout:       time.Second,
@@ -218,9 +213,8 @@ func TestDetectContextWindowFallsBackWhenCompatibleEndpointHasNoProps(t *testing
 
 func TestSupportsContextWindowDetectionUsesCompatibleAPIKeyProvider(t *testing.T) {
 	cfg := config.Provider{
-		Kind:       ProviderKindCompatible,
-		AuthMethod: string(AuthMethodAPIKey),
-		BaseURL:    "https://api.example.com/v1",
+		Kind:    ProviderKindCompatible,
+		BaseURL: "https://api.example.com/v1",
 	}
 
 	if !SupportsContextWindowDetection(cfg) {
@@ -238,10 +232,9 @@ func TestListModelsUsesConfiguredV1BaseURL(t *testing.T) {
 	defer server.Close()
 
 	client, err := New("openai-compatible", config.Provider{
-		Kind:       ProviderKindCompatible,
-		AuthMethod: string(AuthMethodLocal),
-		BaseURL:    server.URL + "/v1",
-		Timeout:    time.Second,
+		Kind:    ProviderKindCompatible,
+		BaseURL: server.URL + "/v1",
+		Timeout: time.Second,
 	}, nil)
 	if err != nil {
 		t.Fatal(err)

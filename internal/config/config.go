@@ -280,17 +280,10 @@ func (c *Config) applyDefaults() {
 		if provider.Kind == "" {
 			provider.Kind = "openai-compatible"
 		}
-		if provider.AuthMethod == "" {
-			if strings.TrimSpace(provider.APIKey) != "" || strings.TrimSpace(provider.APIKeyEnv) != "" {
-				provider.AuthMethod = "api_key"
-			} else {
-				provider.AuthMethod = "local_endpoint"
-			}
-		}
 		if provider.Timeout == 0 {
 			provider.Timeout = fallbackProvider.Timeout
 		}
-		if provider.ContextWindow == 0 && !(provider.Kind == "openai-compatible" && provider.AuthMethod == "local_endpoint") {
+		if provider.ContextWindow == 0 {
 			provider.ContextWindow = fallbackProvider.ContextWindow
 		}
 		if provider.AutoCompactAt == 0 {
