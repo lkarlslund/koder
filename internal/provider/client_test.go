@@ -359,6 +359,58 @@ func TestStreamChatReasoningFallbackField(t *testing.T) {
 	}
 }
 
+func TestStreamChatResponseAggregatesToolCallsAndDeltas(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"hel\",\"reasoning\":\"trace-\",\"tool_calls\":[{\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"bash\",\"arguments\":\"{\\\"command\\\":\\\"pri\"}}]}}]}\n\n"))
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"lo\",\"reasoning\":\"ace\",\"tool_calls\":[{\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"arguments\":\"ntf hello\\\"}\"}}]}}],\"usage\":{\"total_tokens\":3}}\n\n"))
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer server.Close()
+
+	client, err := New("test", config.Provider{
+		BaseURL: server.URL,
+		Timeout: time.Second,
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var deltas []string
+	var sawDone bool
+	resp, err := client.StreamChatResponse(context.Background(), ChatRequest{Model: "test"}, func(evt domain.Event) {
+		switch evt.Kind {
+		case domain.EventKindMessageDelta:
+			deltas = append(deltas, evt.Text)
+		case domain.EventKindMessageDone:
+			sawDone = true
+		}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(deltas, "") != "hello" {
+		t.Fatalf("expected streamed deltas to form hello, got %#v", deltas)
+	}
+	if resp.Text != "hello" {
+		t.Fatalf("expected aggregated text hello, got %#v", resp)
+	}
+	if resp.Reasoning != "trace-ace" {
+		t.Fatalf("expected aggregated reasoning, got %#v", resp)
+	}
+	if len(resp.ToolCalls) != 1 {
+		t.Fatalf("expected one aggregated tool call, got %#v", resp.ToolCalls)
+	}
+	if resp.ToolCalls[0].Function.Name != "bash" || resp.ToolCalls[0].Function.Arguments != "{\"command\":\"printf hello\"}" {
+		t.Fatalf("unexpected aggregated tool call: %#v", resp.ToolCalls[0])
+	}
+	if resp.Usage.TotalTokens != 3 {
+		t.Fatalf("expected usage tokens, got %#v", resp.Usage)
+	}
+	if !sawDone {
+		t.Fatal("expected message done event")
+	}
+}
+
 func TestCompleteChatReturnsAPIErrorWithRetryAfter(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Retry-After", "7")

@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -192,30 +193,16 @@ type propsResponse struct {
 type chatChunk struct {
 	Choices []struct {
 		Delta struct {
-			Content          string `json:"content"`
-			Reasoning        string `json:"reasoning"`
-			ReasoningContent string `json:"reasoning_content"`
-			ToolCalls        []struct {
-				ID       string `json:"id"`
-				Type     string `json:"type"`
-				Function struct {
-					Name      string `json:"name"`
-					Arguments string `json:"arguments"`
-				} `json:"function"`
-			} `json:"tool_calls"`
+			Content          string        `json:"content"`
+			Reasoning        string        `json:"reasoning"`
+			ReasoningContent string        `json:"reasoning_content"`
+			ToolCalls        []rawToolCall `json:"tool_calls"`
 		} `json:"delta"`
 		Message struct {
-			Content          string `json:"content"`
-			Reasoning        string `json:"reasoning"`
-			ReasoningContent string `json:"reasoning_content"`
-			ToolCalls        []struct {
-				ID       string `json:"id"`
-				Type     string `json:"type"`
-				Function struct {
-					Name      string `json:"name"`
-					Arguments string `json:"arguments"`
-				} `json:"function"`
-			} `json:"tool_calls"`
+			Content          string        `json:"content"`
+			Reasoning        string        `json:"reasoning"`
+			ReasoningContent string        `json:"reasoning_content"`
+			ToolCalls        []rawToolCall `json:"tool_calls"`
 		} `json:"message"`
 		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
@@ -224,6 +211,16 @@ type chatChunk struct {
 		CompletionTokens int `json:"completion_tokens"`
 		TotalTokens      int `json:"total_tokens"`
 	} `json:"usage"`
+}
+
+type rawToolCall struct {
+	ID       string `json:"id"`
+	Index    *int   `json:"index,omitempty"`
+	Type     string `json:"type"`
+	Function struct {
+		Name      string `json:"name"`
+		Arguments string `json:"arguments"`
+	} `json:"function"`
 }
 
 type Client struct {
@@ -494,99 +491,124 @@ func (c *Client) CompleteChat(ctx context.Context, input ChatRequest) (ChatRespo
 }
 
 func (c *Client) StreamChat(ctx context.Context, input ChatRequest) (<-chan domain.Event, error) {
+	events := make(chan domain.Event)
+	go func() {
+		defer close(events)
+		_, err := c.StreamChatResponse(ctx, input, func(evt domain.Event) {
+			events <- evt
+		})
+		if err != nil {
+			events <- domain.Event{Kind: domain.EventKindError, Err: err}
+		}
+	}()
+	return events, nil
+}
+
+func (c *Client) StreamChatResponse(ctx context.Context, input ChatRequest, onEvent func(domain.Event)) (ChatResponse, error) {
 	input.Stream = true
 	var body bytes.Buffer
 	if err := json.NewEncoder(&body).Encode(input); err != nil {
-		return nil, fmt.Errorf("encode chat request: %w", err)
+		return ChatResponse{}, fmt.Errorf("encode chat request: %w", err)
 	}
 	req, err := c.newRequest(ctx, http.MethodPost, c.apiPath("/chat/completions"), &body)
 	if err != nil {
-		return nil, err
+		return ChatResponse{}, err
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("stream chat: %w", err)
+		return ChatResponse{}, fmt.Errorf("stream chat: %w", err)
 	}
+	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
-		defer resp.Body.Close()
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
-		return nil, &APIError{
+		return ChatResponse{}, &APIError{
 			Operation:  "chat",
 			StatusCode: resp.StatusCode,
 			Body:       strings.TrimSpace(string(body)),
 			RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After"), time.Now()),
 		}
 	}
-
-	events := make(chan domain.Event)
-	go func() {
-		defer close(events)
-		defer resp.Body.Close()
-
-		reader := bufio.NewReader(resp.Body)
-		for {
-			line, err := reader.ReadString('\n')
-			if err != nil && !errors.Is(err, io.EOF) {
-				events <- domain.Event{Kind: domain.EventKindError, Err: err}
-				return
+	if !strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream") {
+		var payload chatChunk
+		if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+			return ChatResponse{}, fmt.Errorf("decode chat response: %w", err)
+		}
+		result := streamedChatResponse{}
+		result.Apply(payload)
+		if onEvent != nil {
+			if text := result.text.String(); strings.TrimSpace(text) != "" {
+				onEvent(domain.Event{Kind: domain.EventKindMessageDelta, Text: text})
 			}
-
-			line = strings.TrimSpace(line)
-			if strings.HasPrefix(line, "data:") {
-				payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-				if payload == "[DONE]" {
-					events <- domain.Event{Kind: domain.EventKindMessageDone}
-					return
-				}
-				var chunk chatChunk
-				if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
-					events <- domain.Event{Kind: domain.EventKindError, Err: fmt.Errorf("decode sse chunk: %w", err), RawJSON: payload}
-					return
-				}
-				c.emitChunk(events, chunk, payload)
+			if reasoning := result.reasoning.String(); strings.TrimSpace(reasoning) != "" {
+				onEvent(domain.Event{Kind: domain.EventKindReasoning, Text: reasoning})
 			}
+			if result.usage.TotalTokens > 0 {
+				onEvent(domain.Event{Kind: domain.EventKindUsage, Usage: result.usage})
+			}
+			onEvent(domain.Event{Kind: domain.EventKindMessageDone})
+		}
+		return result.Response(), nil
+	}
 
-			if errors.Is(err, io.EOF) {
-				return
+	var aggregated streamedChatResponse
+	reader := bufio.NewReader(resp.Body)
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil && !errors.Is(err, io.EOF) {
+			return ChatResponse{}, err
+		}
+
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "data:") {
+			payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+			if payload == "[DONE]" {
+				if onEvent != nil {
+					onEvent(domain.Event{Kind: domain.EventKindMessageDone})
+				}
+				return aggregated.Response(), nil
+			}
+			var chunk chatChunk
+			if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
+				return ChatResponse{}, fmt.Errorf("decode sse chunk: %w", err)
+			}
+			aggregated.Apply(chunk)
+			if onEvent != nil {
+				c.emitChunk(onEvent, chunk, payload)
 			}
 		}
-	}()
-	return events, nil
+
+		if errors.Is(err, io.EOF) {
+			return aggregated.Response(), nil
+		}
+	}
 }
 
-func (c *Client) emitChunk(events chan<- domain.Event, chunk chatChunk, raw string) {
+func (c *Client) emitChunk(emit func(domain.Event), chunk chatChunk, raw string) {
 	if len(chunk.Choices) > 0 {
 		choice := chunk.Choices[0]
 		if choice.Delta.Content != "" {
-			events <- domain.Event{Kind: domain.EventKindMessageDelta, Text: choice.Delta.Content, RawJSON: raw}
+			emit(domain.Event{Kind: domain.EventKindMessageDelta, Text: choice.Delta.Content, RawJSON: raw})
 		}
 		if reasoning := firstNonEmptyString(choice.Delta.ReasoningContent, choice.Delta.Reasoning); reasoning != "" {
-			events <- domain.Event{Kind: domain.EventKindReasoning, Text: reasoning, RawJSON: raw}
+			emit(domain.Event{Kind: domain.EventKindReasoning, Text: reasoning, RawJSON: raw})
 		}
 		if choice.FinishReason != "" {
-			events <- domain.Event{Kind: domain.EventKindStatus, Text: choice.FinishReason}
+			emit(domain.Event{Kind: domain.EventKindStatus, Text: choice.FinishReason})
 		}
 	}
 	if chunk.Usage.TotalTokens > 0 {
-		events <- domain.Event{
+		emit(domain.Event{
 			Kind: domain.EventKindUsage,
 			Usage: domain.Usage{
 				PromptTokens:     chunk.Usage.PromptTokens,
 				CompletionTokens: chunk.Usage.CompletionTokens,
 				TotalTokens:      chunk.Usage.TotalTokens,
 			},
-		}
+		})
 	}
 }
 
-func convertToolCalls(raw []struct {
-	ID       string `json:"id"`
-	Type     string `json:"type"`
-	Function struct {
-		Name      string `json:"name"`
-		Arguments string `json:"arguments"`
-	} `json:"function"`
-}) []ToolCall {
+func convertToolCalls(raw []rawToolCall) []ToolCall {
 	if len(raw) == 0 {
 		return nil
 	}
@@ -602,6 +624,91 @@ func convertToolCalls(raw []struct {
 		})
 	}
 	return calls
+}
+
+type streamedChatResponse struct {
+	text      strings.Builder
+	reasoning strings.Builder
+	usage     domain.Usage
+	toolCalls []ToolCall
+}
+
+func (r *streamedChatResponse) Apply(chunk chatChunk) {
+	if len(chunk.Choices) > 0 {
+		choice := chunk.Choices[0]
+		if choice.Delta.Content != "" {
+			r.text.WriteString(choice.Delta.Content)
+		} else if choice.Message.Content != "" {
+			r.text.WriteString(choice.Message.Content)
+		}
+		if reasoning := firstNonEmptyString(choice.Delta.ReasoningContent, choice.Delta.Reasoning); reasoning != "" {
+			r.reasoning.WriteString(reasoning)
+		} else if reasoning := firstNonEmptyString(choice.Message.ReasoningContent, choice.Message.Reasoning); reasoning != "" {
+			r.reasoning.WriteString(reasoning)
+		}
+		r.toolCalls = mergeToolCalls(r.toolCalls, convertToolCalls(choice.Delta.ToolCalls))
+		r.toolCalls = mergeToolCalls(r.toolCalls, convertToolCalls(choice.Message.ToolCalls))
+	}
+	if chunk.Usage.TotalTokens > 0 {
+		r.usage = domain.Usage{
+			PromptTokens:     chunk.Usage.PromptTokens,
+			CompletionTokens: chunk.Usage.CompletionTokens,
+			TotalTokens:      chunk.Usage.TotalTokens,
+		}
+	}
+}
+
+func (r streamedChatResponse) Response() ChatResponse {
+	return ChatResponse{
+		Text:      r.text.String(),
+		Reasoning: r.reasoning.String(),
+		Usage:     r.usage,
+		ToolCalls: r.toolCalls,
+	}
+}
+
+func mergeToolCalls(existing, incoming []ToolCall) []ToolCall {
+	if len(incoming) == 0 {
+		return existing
+	}
+	if len(existing) == 0 {
+		return slices.Clone(incoming)
+	}
+	merged := slices.Clone(existing)
+	for _, next := range incoming {
+		index := -1
+		for i, current := range merged {
+			if next.ID != "" && current.ID == next.ID {
+				index = i
+				break
+			}
+		}
+		if index < 0 {
+			for i, current := range merged {
+				if current.ID == "" && current.Function.Name == next.Function.Name {
+					index = i
+					break
+				}
+			}
+		}
+		if index < 0 {
+			merged = append(merged, next)
+			continue
+		}
+		if strings.TrimSpace(next.ID) != "" {
+			merged[index].ID = next.ID
+		}
+		if strings.TrimSpace(next.Type) != "" {
+			merged[index].Type = next.Type
+		}
+		if strings.TrimSpace(next.Function.Name) != "" {
+			merged[index].Function.Name = next.Function.Name
+		}
+		if strings.TrimSpace(next.Function.Arguments) != "" {
+			merged[index].Function.Arguments += next.Function.Arguments
+		}
+	}
+	return merged
 }
 
 func firstNonEmptyString(values ...string) string {

@@ -1133,6 +1133,84 @@ func TestRunPromptExecutesMultipleToolCallsInParallel(t *testing.T) {
 	}
 }
 
+func TestRunPromptStreamsAssistantResponseWhenEnabled(t *testing.T) {
+	t.Parallel()
+
+	var requests []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read body: %v", err)
+		}
+		requests = append(requests, string(body))
+		switch len(requests) {
+		case 1:
+			if !strings.Contains(string(body), `"stream":true`) {
+				t.Fatalf("expected streaming request body, got %s", string(body))
+			}
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"hel\"}}]}\n\n"))
+			_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"lo\"}}],\"usage\":{\"total_tokens\":1}}\n\n"))
+			_, _ = w.Write([]byte("data: [DONE]\n\n"))
+		default:
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ignored title"}}],"usage":{"total_tokens":1}}`))
+		}
+	}))
+	defer server.Close()
+
+	cfg := testConfig(t)
+	cfg.Providers = map[string]config.Provider{
+		"test": {
+			BaseURL: server.URL + "/v1",
+			Timeout: time.Second,
+			Stream:  true,
+		},
+	}
+	cfg.DefaultProvider = "test"
+	cfg.DefaultModel = "test-model"
+
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	workdir := t.TempDir()
+	engine := New(cfg, st, tools.NewRegistry(workdir), nil, workdir)
+	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	events, err := engine.RunPrompt(context.Background(), session, "say hello")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var deltas []string
+	var sawDone bool
+	for evt := range events {
+		if evt.Kind == domain.EventKindMessageDelta {
+			deltas = append(deltas, evt.Text)
+		}
+		if evt.Kind == domain.EventKindMessageDone {
+			sawDone = true
+		}
+	}
+	if strings.Join(deltas, "") != "hello" {
+		t.Fatalf("expected streamed deltas hello, got %#v", deltas)
+	}
+	if !sawDone {
+		t.Fatal("expected message done event")
+	}
+	if len(requests) == 0 {
+		t.Fatal("expected provider request")
+	}
+}
+
 func TestRunPromptPersistsAssistantErrorOnBackendFailure(t *testing.T) {
 	cfg := testConfig(t)
 	cfg.Providers = map[string]config.Provider{

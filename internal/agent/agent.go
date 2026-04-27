@@ -506,8 +506,9 @@ func (e *Engine) continueModelTurn(ctx context.Context, session domain.Session, 
 		}
 		transient = nil
 
-		req := e.chatRequest(session, chat, messages, false)
-		resp, completeErr := e.completeChatWithRetry(ctx, session.ID, client, out, req)
+		stream := e.providerStreamingEnabled(session)
+		req := e.chatRequest(session, chat, messages, stream)
+		resp, streamed, completeErr := e.chatWithRetry(ctx, session.ID, client, out, req)
 		if completeErr != nil {
 			return completeErr
 		}
@@ -598,12 +599,14 @@ func (e *Engine) continueModelTurn(ctx context.Context, session domain.Session, 
 			if _, err := e.store.AddPart(ctx, assistantMsg.ID, domain.PartKindSystemNotice, "usage", string(meta)); err != nil {
 				return err
 			}
-			out <- domain.Event{Kind: domain.EventKindUsage, Usage: usage}
+			if !streamed {
+				out <- domain.Event{Kind: domain.EventKindUsage, Usage: usage}
+			}
 		}
-		if strings.TrimSpace(text) != "" {
+		if !streamed && strings.TrimSpace(text) != "" {
 			out <- domain.Event{Kind: domain.EventKindMessageDelta, Text: text}
 		}
-		if strings.TrimSpace(reasoning) != "" {
+		if !streamed && strings.TrimSpace(reasoning) != "" {
 			out <- domain.Event{Kind: domain.EventKindReasoning, Text: reasoning}
 		}
 		e.recordLifecycle(session.ID, "assistant_message_persisted", strings.TrimSpace(text), map[string]string{"message_id": strconv.FormatInt(assistantMsg.ID, 10)})
@@ -683,6 +686,10 @@ func (e *Engine) providerConfigForSession(session domain.Session) config.Provide
 
 func (e *Engine) modelPresetForSession(session domain.Session) string {
 	return e.providerConfigForSession(session).ModelPreset
+}
+
+func (e *Engine) providerStreamingEnabled(session domain.Session) bool {
+	return e.providerConfigForSession(session).Stream
 }
 
 func (e *Engine) preserveThinkingEnabled(session domain.Session) bool {
@@ -1336,15 +1343,29 @@ func waitForRetry(ctx context.Context, delay time.Duration, onTick func(time.Dur
 	}
 }
 
-func (e *Engine) completeChatWithRetry(ctx context.Context, sessionID int64, client *provider.Client, out chan<- domain.Event, req provider.ChatRequest) (provider.ChatResponse, error) {
+func (e *Engine) chatWithRetry(ctx context.Context, sessionID int64, client *provider.Client, out chan<- domain.Event, req provider.ChatRequest) (provider.ChatResponse, bool, error) {
 	for attempt := 0; ; attempt++ {
-		resp, err := client.CompleteChat(ctx, req)
+		var (
+			resp     provider.ChatResponse
+			err      error
+			streamed bool
+		)
+		if req.Stream {
+			resp, err = client.StreamChatResponse(ctx, req, func(evt domain.Event) {
+				if out != nil {
+					out <- evt
+				}
+			})
+			streamed = true
+		} else {
+			resp, err = client.CompleteChat(ctx, req)
+		}
 		if err == nil {
-			return resp, nil
+			return resp, streamed, nil
 		}
 		var apiErr *provider.APIError
 		if !errors.As(err, &apiErr) || apiErr.StatusCode != 429 || attempt >= maxRateLimitRetries {
-			return provider.ChatResponse{}, err
+			return provider.ChatResponse{}, streamed, err
 		}
 		delay := apiErr.RetryAfter
 		if delay <= 0 {
@@ -1366,7 +1387,7 @@ func (e *Engine) completeChatWithRetry(ctx context.Context, sessionID int64, cli
 				out <- domain.Event{Kind: domain.EventKindStatus, Text: formatRateLimitRetryStatus(remaining, retryNumber)}
 			}
 		}); err != nil {
-			return provider.ChatResponse{}, err
+			return provider.ChatResponse{}, streamed, err
 		}
 	}
 }
