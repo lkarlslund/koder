@@ -20,7 +20,11 @@ type Transcript struct {
 }
 
 type RetainedTranscript struct {
-	items []TranscriptItem
+	items            []TranscriptItem
+	layoutWidth      int
+	itemHeights      []int
+	totalHeight      int
+	totalHeightValid bool
 }
 
 type transcriptViewportElement interface {
@@ -31,7 +35,9 @@ type transcriptViewportElement interface {
 type CachedElement struct {
 	Child      Element
 	HeightHint int
-	surfaces   map[int]Surface
+	width      int
+	surface    Surface
+	cached     bool
 }
 
 func NewCachedElement(child Element, heightHint int) *CachedElement {
@@ -42,8 +48,8 @@ func (e *CachedElement) ApproxHeight(width int) int {
 	if e == nil {
 		return 0
 	}
-	if cached, ok := e.surfaces[width]; ok {
-		return cached.Size().H
+	if e.cached && e.width == width {
+		return e.surface.Size().H
 	}
 	if e.HeightHint > 0 {
 		return e.HeightHint
@@ -59,20 +65,19 @@ func (e *CachedElement) RenderCached(ctx *Context, width int) Surface {
 		size := e.Child.Measure(ctx, Constraints{})
 		width = size.W
 	}
-	if cached, ok := e.surfaces[width]; ok {
+	if e.cached && e.width == width {
 		if ctx != nil && ctx.Runtime != nil {
 			// Cached surfaces still need a render pass so interactive children can
 			// register fresh controls for the current frame.
-			_ = e.Child.Render(ctx, Rect{W: width, H: cached.Size().H})
+			_ = e.Child.Render(ctx, Rect{W: width, H: e.surface.Size().H})
 		}
-		return cached
+		return e.surface
 	}
 	size := e.Child.Measure(ctx, NewConstraints(width, 0))
 	surface := e.Child.Render(ctx, Rect{W: width, H: size.H})
-	if e.surfaces == nil {
-		e.surfaces = make(map[int]Surface)
-	}
-	e.surfaces[width] = surface
+	e.width = width
+	e.surface = surface
+	e.cached = true
 	return surface
 }
 
@@ -89,7 +94,9 @@ func (e *CachedElement) InvalidateCache() {
 	if e == nil {
 		return
 	}
-	clear(e.surfaces)
+	e.width = 0
+	e.surface = Surface{}
+	e.cached = false
 }
 
 func (e *CachedElement) SetChild(child Element) {
@@ -113,6 +120,7 @@ func NewRetainedTranscript() *RetainedTranscript {
 
 func (t *RetainedTranscript) SetItems(items []TranscriptItem) {
 	t.items = append(t.items[:0], items...)
+	t.invalidateLayout()
 }
 
 func (t *RetainedTranscript) Reconcile(items []TranscriptItem) {
@@ -121,6 +129,7 @@ func (t *RetainedTranscript) Reconcile(items []TranscriptItem) {
 	}
 	if len(items) == 0 {
 		t.items = nil
+		t.invalidateLayout()
 		return
 	}
 	if len(t.items) == 0 {
@@ -147,21 +156,25 @@ func (t *RetainedTranscript) Reconcile(items []TranscriptItem) {
 		next = append(next, item)
 	}
 	t.items = next
+	t.invalidateLayout()
 }
 
 func (t *RetainedTranscript) Add(item TranscriptItem) {
 	t.items = append(t.items, item)
+	t.appendHeight(item)
 }
 
 func (t *RetainedTranscript) Insert(index int, item TranscriptItem) {
 	index = max(0, min(index, len(t.items)))
 	t.items = append(t.items[:index], append([]TranscriptItem{item}, t.items[index:]...)...)
+	t.insertHeight(index, item)
 }
 
 func (t *RetainedTranscript) Remove(index int) {
 	if index < 0 || index >= len(t.items) {
 		return
 	}
+	t.removeHeight(index)
 	t.items = append(t.items[:index], t.items[index+1:]...)
 }
 
@@ -169,11 +182,13 @@ func (t *RetainedTranscript) Replace(index int, item TranscriptItem) {
 	if index < 0 || index >= len(t.items) {
 		return
 	}
+	t.replaceHeight(index, item)
 	t.items[index] = item
 }
 
 func (t *RetainedTranscript) Clear() {
 	t.items = nil
+	t.invalidateLayout()
 }
 
 func (t *RetainedTranscript) Items() []TranscriptItem {
@@ -183,7 +198,11 @@ func (t *RetainedTranscript) Items() []TranscriptItem {
 }
 
 func (t *RetainedTranscript) Measure(ctx *Context, constraints Constraints) Size {
-	return Transcript{Items: t.items}.Measure(ctx, constraints)
+	width := constraints.MaxW
+	if width <= 0 {
+		return Transcript{Items: t.items}.Measure(ctx, constraints)
+	}
+	return constraints.Clamp(Size{W: width, H: t.ContentHeight(width)})
 }
 
 func (t *RetainedTranscript) Render(ctx *Context, bounds Rect) Surface {
@@ -191,12 +210,7 @@ func (t *RetainedTranscript) Render(ctx *Context, bounds Rect) Surface {
 }
 
 func (t *RetainedTranscript) ContentHeight(width int) int {
-	total := 0
-	for _, item := range t.items {
-		total += max(0, item.GapBefore)
-		total += t.itemApproxHeight(item, width)
-	}
-	return total
+	return t.exactContentHeight(nil, width)
 }
 
 func (t *RetainedTranscript) RenderVisible(ctx *Context, width, height, offset int) (Surface, int, int) {
@@ -206,10 +220,10 @@ func (t *RetainedTranscript) RenderVisible(ctx *Context, width, height, offset i
 	offset = min(max(0, offset), maxOffset)
 	base := BlankSurface(width, height)
 	y := 0
-	for _, item := range t.items {
+	for idx, item := range t.items {
 		gap := max(0, item.GapBefore)
 		top := y + gap
-		surface := t.itemSurface(measureCtx, item, width)
+		surface := t.itemSurfaceAt(measureCtx, idx, item, width)
 		exactHeight := surface.Size().H
 		bottom := top + exactHeight
 		y = bottom
@@ -222,7 +236,7 @@ func (t *RetainedTranscript) RenderVisible(ctx *Context, width, height, offset i
 		renderY := top - offset
 		if ctx != nil && ctx.Runtime != nil {
 			start := ctx.Runtime.Len()
-			surface = t.itemSurface(ctx, item, width)
+			surface = t.itemSurfaceAt(ctx, idx, item, width)
 			ctx.Runtime.OffsetFrom(start, 0, renderY)
 		}
 		base = base.placeAt(0, renderY, surface)
@@ -239,10 +253,10 @@ func (t *RetainedTranscript) RenderBottom(ctx *Context, width, height int) (Surf
 	offset := max(0, totalHeight-max(0, height))
 	base := BlankSurface(width, height)
 	y := 0
-	for _, item := range t.items {
+	for idx, item := range t.items {
 		gap := max(0, item.GapBefore)
 		top := y + gap
-		surface := t.itemSurface(measureCtx, item, width)
+		surface := t.itemSurfaceAt(measureCtx, idx, item, width)
 		exactHeight := surface.Size().H
 		bottom := top + exactHeight
 		y = bottom
@@ -252,7 +266,7 @@ func (t *RetainedTranscript) RenderBottom(ctx *Context, width, height int) (Surf
 		renderY := top - offset
 		if ctx != nil && ctx.Runtime != nil {
 			start := ctx.Runtime.Len()
-			surface = t.itemSurface(ctx, item, width)
+			surface = t.itemSurfaceAt(ctx, idx, item, width)
 			ctx.Runtime.OffsetFrom(start, 0, renderY)
 		}
 		base = base.placeAt(0, renderY, surface)
@@ -261,11 +275,17 @@ func (t *RetainedTranscript) RenderBottom(ctx *Context, width, height int) (Surf
 }
 
 func (t *RetainedTranscript) exactContentHeight(ctx *Context, width int) int {
-	total := 0
-	for _, item := range t.items {
-		total += max(0, item.GapBefore)
-		total += t.itemSurface(ctx, item, width).Size().H
+	t.ensureWidth(width)
+	if t.totalHeightValid {
+		return t.totalHeight
 	}
+	total := 0
+	for idx, item := range t.items {
+		total += max(0, item.GapBefore)
+		total += t.itemSurfaceAt(ctx, idx, item, width).Size().H
+	}
+	t.totalHeight = total
+	t.totalHeightValid = true
 	return total
 }
 
@@ -291,15 +311,112 @@ func (t *RetainedTranscript) itemApproxHeight(item TranscriptItem, width int) in
 	return item.Element.Measure(nil, NewConstraints(width, 0)).H
 }
 
-func (t *RetainedTranscript) itemSurface(ctx *Context, item TranscriptItem, width int) Surface {
+func (t *RetainedTranscript) itemExactHeight(item TranscriptItem, width int) int {
+	if item.Element == nil {
+		return 0
+	}
+	if cached, ok := item.Element.(transcriptViewportElement); ok {
+		return cached.RenderCached(nil, width).Size().H
+	}
+	size := item.Element.Measure(nil, NewConstraints(width, 0))
+	return item.Element.Render(nil, Rect{W: width, H: size.H}).Size().H
+}
+
+func (t *RetainedTranscript) itemSurfaceAt(ctx *Context, index int, item TranscriptItem, width int) Surface {
+	t.ensureWidth(width)
 	if item.Element == nil {
 		return Surface{}
 	}
 	if cached, ok := item.Element.(transcriptViewportElement); ok {
-		return cached.RenderCached(ctx, width)
+		surface := cached.RenderCached(ctx, width)
+		if index >= 0 && index < len(t.itemHeights) {
+			t.itemHeights[index] = surface.Size().H
+		}
+		return surface
 	}
 	size := item.Element.Measure(ctx, NewConstraints(width, 0))
-	return item.Element.Render(ctx, Rect{W: width, H: size.H})
+	surface := item.Element.Render(ctx, Rect{W: width, H: size.H})
+	if index >= 0 && index < len(t.itemHeights) {
+		t.itemHeights[index] = surface.Size().H
+	}
+	return surface
+}
+
+func (t *RetainedTranscript) ensureWidth(width int) {
+	width = max(0, width)
+	if t.layoutWidth == width && len(t.itemHeights) == len(t.items) {
+		return
+	}
+	t.layoutWidth = width
+	t.itemHeights = make([]int, len(t.items))
+	for i := range t.itemHeights {
+		t.itemHeights[i] = -1
+	}
+	t.totalHeight = 0
+	t.totalHeightValid = false
+	for _, item := range t.items {
+		InvalidateElementCaches(nil, item.Element)
+	}
+}
+
+func (t *RetainedTranscript) invalidateLayout() {
+	t.layoutWidth = 0
+	t.itemHeights = nil
+	t.totalHeight = 0
+	t.totalHeightValid = false
+}
+
+func (t *RetainedTranscript) appendHeight(item TranscriptItem) {
+	if !t.totalHeightValid || len(t.itemHeights) != len(t.items)-1 {
+		t.invalidateLayout()
+		return
+	}
+	height := t.itemExactHeight(item, t.layoutWidth)
+	t.itemHeights = append(t.itemHeights, height)
+	t.totalHeight += max(0, item.GapBefore) + height
+}
+
+func (t *RetainedTranscript) insertHeight(index int, item TranscriptItem) {
+	if !t.totalHeightValid || index < 0 || index > len(t.itemHeights) || len(t.itemHeights) != len(t.items)-1 {
+		t.invalidateLayout()
+		return
+	}
+	height := t.itemExactHeight(item, t.layoutWidth)
+	t.itemHeights = append(t.itemHeights, 0)
+	copy(t.itemHeights[index+1:], t.itemHeights[index:])
+	t.itemHeights[index] = height
+	t.totalHeight += max(0, item.GapBefore) + height
+}
+
+func (t *RetainedTranscript) removeHeight(index int) {
+	if !t.totalHeightValid || index < 0 || index >= len(t.items) || len(t.itemHeights) != len(t.items) {
+		t.invalidateLayout()
+		return
+	}
+	height := 0
+	height = t.itemHeights[index]
+	if height < 0 {
+		height = t.itemApproxHeight(t.items[index], t.layoutWidth)
+	}
+	copy(t.itemHeights[index:], t.itemHeights[index+1:])
+	t.itemHeights = t.itemHeights[:len(t.itemHeights)-1]
+	t.totalHeight -= max(0, t.items[index].GapBefore) + max(0, height)
+}
+
+func (t *RetainedTranscript) replaceHeight(index int, item TranscriptItem) {
+	if !t.totalHeightValid || index < 0 || index >= len(t.items) || index >= len(t.itemHeights) {
+		t.invalidateLayout()
+		return
+	}
+	prev := t.items[index]
+	prevHeight := t.itemHeights[index]
+	if prevHeight < 0 {
+		prevHeight = t.itemExactHeight(prev, t.layoutWidth)
+	}
+	InvalidateElementCaches(nil, item.Element)
+	nextHeight := t.itemExactHeight(item, t.layoutWidth)
+	t.itemHeights[index] = nextHeight
+	t.totalHeight += (max(0, item.GapBefore) + nextHeight) - (max(0, prev.GapBefore) + prevHeight)
 }
 
 type TranscriptViewport struct {

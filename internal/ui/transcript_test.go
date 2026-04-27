@@ -210,3 +210,28 @@ func TestRetainedTranscriptDoesNotBottomAlignShortContent(t *testing.T) {
 		t.Fatalf("expected short transcript to start at top, got %#v", lines)
 	}
 }
+
+func TestRetainedTranscriptContentHeightTracksItemMutations(t *testing.T) {
+	transcript := NewRetainedTranscript()
+	transcript.Add(TranscriptItem{Element: NewCachedElement(Paragraph{Text: "one\ntwo"}, 2)})
+	transcript.Add(TranscriptItem{Element: NewCachedElement(Paragraph{Text: "tail"}, 1), GapBefore: 1})
+
+	if got := transcript.ContentHeight(12); got != 4 {
+		t.Fatalf("expected initial total height 4, got %d", got)
+	}
+
+	transcript.Replace(1, TranscriptItem{Element: NewCachedElement(Paragraph{Text: "tail\nmore\nlast"}, 3), GapBefore: 1})
+	if got := transcript.ContentHeight(12); got != 6 {
+		t.Fatalf("expected replace to delta-update total height to 6, got %d", got)
+	}
+
+	transcript.Insert(1, TranscriptItem{Element: NewCachedElement(Paragraph{Text: "mid"}, 1), GapBefore: 2})
+	if got := transcript.ContentHeight(12); got != 9 {
+		t.Fatalf("expected insert to delta-update total height to 9, got %d", got)
+	}
+
+	transcript.Remove(1)
+	if got := transcript.ContentHeight(12); got != 6 {
+		t.Fatalf("expected remove to delta-update total height back to 6, got %d", got)
+	}
+}
