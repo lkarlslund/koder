@@ -1,0 +1,176 @@
+package milestonetool
+
+import (
+	"context"
+	"strings"
+	"testing"
+
+	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/store"
+	"github.com/lkarlslund/koder/internal/tools"
+)
+
+func openMilestoneStore(t *testing.T) *store.Store {
+	t.Helper()
+	st, err := store.OpenWithOptions(t.TempDir(), store.Options{Backend: store.BackendJSONFS})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	return st
+}
+
+func newMilestoneRuntime(t *testing.T) (tools.Runtime, *store.Store, domain.Session) {
+	t.Helper()
+	st := openMilestoneStore(t)
+	session, err := st.CreateSession(context.Background(), "test", "provider", "model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return tools.Runtime{Store: st, SessionID: session.ID, ChatRole: domain.WorkflowRoleOrchestrator}, st, session
+}
+
+func seedPlan(t *testing.T, st *store.Store, sessionID int64) {
+	t.Helper()
+	if _, err := st.SetMilestonePlan(context.Background(), sessionID, "Ship it", []store.Milestone{
+		{Ref: "alpha", Title: "Alpha", Status: domain.MilestoneStatusPending, Position: 0},
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestNormalizeArgsAndDefinitions(t *testing.T) {
+	if _, err := (addItemsTool{}).NormalizeArgs(map[string]string{}); err == nil {
+		t.Fatal("expected empty items error")
+	}
+	if _, err := (updateItemTool{}).NormalizeArgs(map[string]string{"ref": "alpha"}); err == nil {
+		t.Fatal("expected missing status error")
+	}
+	args, err := (planTool{}).NormalizeArgs(map[string]string{
+		"ref":   "alpha",
+		"title": "Alpha",
+		"items": `[{"content":"one"},{"content":"two"}]`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if args["ref"] != "alpha" || args["title"] != "Alpha" {
+		t.Fatalf("unexpected normalized args: %#v", args)
+	}
+	if _, enabled := (addItemsTool{}).Definition(tools.Runtime{ChatRole: domain.WorkflowRoleExecution}); enabled {
+		t.Fatal("expected add-items definition to be disabled in execution chats")
+	}
+	if _, enabled := (planTool{}).Definition(tools.Runtime{ChatRole: domain.WorkflowRoleDecomposition}); enabled {
+		t.Fatal("expected plan definition to be disabled in decomposition chats")
+	}
+}
+
+func TestAppendAndValidationHelpers(t *testing.T) {
+	existing := []store.Milestone{{Ref: "alpha", Title: "Alpha", Position: 0}}
+	added := []store.Milestone{{Ref: "beta", Title: "Beta"}}
+	got := appendMilestones(existing, added)
+	if len(got) != 2 || got[1].Position != 1 {
+		t.Fatalf("unexpected appended milestones: %#v", got)
+	}
+	if err := ensureMilestoneRefsAvailable(existing, added); err != nil {
+		t.Fatal(err)
+	}
+	if err := ensureMilestoneRefsAvailable(existing, []store.Milestone{{Ref: "alpha", Title: "dup"}}); err == nil {
+		t.Fatal("expected duplicate ref error")
+	}
+}
+
+func TestUpsertAndUpdatedPlanHelpers(t *testing.T) {
+	items := upsertMilestone([]store.Milestone{{Ref: "alpha", Title: "Alpha", Position: 0}}, store.Milestone{
+		Ref:    "alpha",
+		Title:  "Alpha updated",
+		Status: domain.MilestoneStatusInProgress,
+	})
+	if items[0].Title != "Alpha updated" || items[0].Position != 0 {
+		t.Fatalf("unexpected updated milestone: %#v", items[0])
+	}
+	items = upsertMilestone(items, store.Milestone{Ref: "beta", Title: "Beta"})
+	if len(items) != 2 || items[1].Position != 1 {
+		t.Fatalf("unexpected appended milestone: %#v", items)
+	}
+
+	plan, err := updatedMilestonePlan(store.MilestonePlan{
+		Summary: "Ship it",
+		Milestones: []store.Milestone{
+			{Ref: "alpha", Title: "Alpha", Status: domain.MilestoneStatusPending, Position: 0},
+		},
+	}, tools.Request{Args: map[string]string{"ref": "alpha", "status": "completed", "notes": "done"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Milestones[0].Status != domain.MilestoneStatusCompleted || plan.Milestones[0].Notes != "done" {
+		t.Fatalf("unexpected updated plan: %#v", plan)
+	}
+	if _, err := updatedMilestonePlan(plan, tools.Request{Args: map[string]string{"ref": "missing", "status": "completed"}}); err == nil {
+		t.Fatal("expected missing milestone error")
+	}
+}
+
+func TestListAndAddExecute(t *testing.T) {
+	runtime, st, session := newMilestoneRuntime(t)
+	seedPlan(t, st, session.ID)
+
+	result, err := (listTool{}).Execute(context.Background(), runtime, tools.Request{Tool: domain.ToolKindMilestoneList})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result.Output, "Alpha") {
+		t.Fatalf("expected list output to contain milestone title, got %q", result.Output)
+	}
+
+	result, err = (addItemsTool{}).Execute(context.Background(), runtime, tools.Request{
+		Tool: domain.ToolKindMilestoneAdd,
+		Args: map[string]string{"items": `[{"ref":"beta","title":"Beta"}]`},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result.Output, "Beta") {
+		t.Fatalf("expected add output to contain new milestone, got %q", result.Output)
+	}
+}
+
+func TestPlanAndWritePersist(t *testing.T) {
+	_, st, session := newMilestoneRuntime(t)
+	seedPlan(t, st, session.ID)
+
+	if _, err := (planTool{}).PersistResult(context.Background(), st, session.ID, tools.Request{
+		Tool: domain.ToolKindMilestonePlan,
+		Args: map[string]string{
+			"ref":   "alpha",
+			"title": "Alpha",
+			"items": `[{"content":"one"},{"content":"two"}]`,
+		},
+	}, tools.Result{Output: "planned"}); err != nil {
+		t.Fatal(err)
+	}
+	todos, err := st.ListTodos(context.Background(), session.ID, "alpha")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(todos) != 2 {
+		t.Fatalf("expected todo items to be created, got %#v", todos)
+	}
+
+	if _, err := (writeTool{}).PersistResult(context.Background(), st, session.ID, tools.Request{
+		Tool: domain.ToolKindMilestoneWrite,
+		Args: map[string]string{
+			"summary":    "New plan",
+			"milestones": `[{"ref":"gamma","title":"Gamma","status":"pending"}]`,
+		},
+	}, tools.Result{Output: "rewritten"}); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := st.GetMilestonePlan(context.Background(), session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Summary != "New plan" || len(plan.Milestones) != 1 || plan.Milestones[0].Ref != "gamma" {
+		t.Fatalf("unexpected persisted plan: %#v", plan)
+	}
+}
