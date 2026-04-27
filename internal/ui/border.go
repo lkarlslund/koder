@@ -79,7 +79,7 @@ func (b Border) Render(ctx *Context, bounds Rect) Surface {
 	fillStyle := CellStyle{FG: cellColor(b.Foreground), BG: cellColor(b.Background)}
 	for y := 0; y < height; y++ {
 		for x := 0; x < width; x++ {
-			s.setCell(x, y, Cell{Text: " ", Width: 1, Style: fillStyle})
+			s.setCell(x, y, Cell{Glyph: SpaceGlyph, Width: 1, Style: fillStyle})
 		}
 	}
 	border := b.borderStyle()
@@ -100,12 +100,12 @@ func (b Border) Render(ctx *Context, bounds Rect) Surface {
 	}
 	if b.BorderLeft {
 		for y := borderVerticalStart(b.BorderTop); y < borderVerticalEnd(height, b.BorderBottom); y++ {
-			s.setCell(0, y, Cell{Text: border.Left, Width: 1, Style: borderStyle})
+			s.setCell(0, y, Cell{Glyph: GlyphFromString(border.Left), Width: 1, Style: borderStyle})
 		}
 	}
 	if b.BorderRight && width > 1 {
 		for y := borderVerticalStart(b.BorderTop); y < borderVerticalEnd(height, b.BorderBottom); y++ {
-			s.setCell(width-1, y, Cell{Text: border.Right, Width: 1, Style: borderStyle})
+			s.setCell(width-1, y, Cell{Glyph: GlyphFromString(border.Right), Width: 1, Style: borderStyle})
 		}
 	}
 	if b.Child != nil {
@@ -148,7 +148,7 @@ func (b Border) borderStyle() lipgloss.Border {
 func (b Border) renderTopBorder(width int, border lipgloss.Border, borderStyle CellStyle) (Surface, int, int) {
 	s := BlankSurface(width, 1)
 	for x := 0; x < width; x++ {
-		s.setCell(x, 0, Cell{Text: " ", Width: 1, Style: borderStyle})
+		s.setCell(x, 0, Cell{Glyph: SpaceGlyph, Width: 1, Style: borderStyle})
 	}
 	if width <= 0 {
 		return s, 0, 0
@@ -200,7 +200,7 @@ func (b Border) renderTopBorder(width int, border lipgloss.Border, borderStyle C
 func (b Border) renderBottomBorder(width int, border lipgloss.Border, borderStyle CellStyle) Surface {
 	s := BlankSurface(width, 1)
 	for x := 0; x < width; x++ {
-		s.setCell(x, 0, Cell{Text: " ", Width: 1, Style: borderStyle})
+		s.setCell(x, 0, Cell{Glyph: SpaceGlyph, Width: 1, Style: borderStyle})
 	}
 	if width <= 0 {
 		return s

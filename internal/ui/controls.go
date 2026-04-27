@@ -109,7 +109,7 @@ func (r SelectableRow) render(palette theme.Palette) Surface {
 		fillStyle = CellStyle{}
 	}
 	for x := 0; x < width; x++ {
-		s.setCell(x, 0, Cell{Text: " ", Width: 1, Style: fillStyle})
+		s.setCell(x, 0, Cell{Glyph: SpaceGlyph, Width: 1, Style: fillStyle})
 	}
 	col := 0
 	s.WriteText(col, 0, truncateText(strings.TrimSpace(primary), primaryWidth), primaryStyle)
@@ -239,7 +239,7 @@ func (v VerticalTabs) render(width int, palette theme.Palette, focused bool) Sur
 			style = activeStyle
 		}
 		for x := 0; x < width; x++ {
-			s.setCell(x, idx, Cell{Text: " ", Width: 1, Style: style})
+			s.setCell(x, idx, Cell{Glyph: SpaceGlyph, Width: 1, Style: style})
 		}
 		s.WriteText(0, idx, PlainTruncate(label, width, ""), style)
 	}
@@ -429,7 +429,7 @@ func (b Button) renderSurface(palette theme.Palette) Surface {
 	}
 	s := BlankSurface(width, 1)
 	for x := 0; x < width; x++ {
-		s.setCell(x, 0, Cell{Text: " ", Width: 1, Style: style})
+		s.setCell(x, 0, Cell{Glyph: SpaceGlyph, Width: 1, Style: style})
 	}
 	col := 2
 	for _, part := range parts {

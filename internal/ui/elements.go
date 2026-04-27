@@ -304,8 +304,26 @@ func (s CellStyle) Merge(overlay CellStyle) CellStyle {
 	return out
 }
 
+type Glyph rune
+
+const SpaceGlyph = Glyph(' ')
+
+func GlyphFromString(value string) Glyph {
+	for _, r := range value {
+		return Glyph(r)
+	}
+	return 0
+}
+
+func (g Glyph) String() string {
+	if g == 0 {
+		return ""
+	}
+	return string(rune(g))
+}
+
 type Cell struct {
-	Text         string
+	Glyph        Glyph
 	Width        int
 	Style        CellStyle
 	Continuation bool
@@ -334,7 +352,7 @@ func BlankSurface(width, height int) Surface {
 	}
 	cells := make([]Cell, width*height)
 	for i := range cells {
-		cells[i] = Cell{Text: " ", Width: 1, Painted: true}
+		cells[i] = Cell{Glyph: SpaceGlyph, Width: 1, Painted: true}
 	}
 	return Surface{w: width, h: height, cells: cells}
 }
@@ -462,7 +480,7 @@ func (s Surface) SurfaceHeight() int {
 }
 
 func (s Surface) SurfaceCellText(x, y int) string {
-	return s.cellAt(x, y).Text
+	return s.cellAt(x, y).Glyph.String()
 }
 
 func (s Surface) SurfaceCellWidth(x, y int) int {
@@ -594,7 +612,7 @@ func (s *Surface) setCell(x, y int, cell Cell) {
 	if x < 0 || y < 0 || x >= s.w || y >= s.h || len(s.cells) == 0 {
 		return
 	}
-	if !cell.Painted && (cell.Text != "" || cell.Width > 0 || cell.Continuation || !cell.Style.isZero()) {
+	if !cell.Painted && (cell.Glyph != 0 || cell.Width > 0 || cell.Continuation || !cell.Style.isZero()) {
 		cell.Painted = true
 	}
 	s.cells[s.cellIndex(x, y)] = cell
@@ -616,7 +634,7 @@ func (s Surface) cellLines() []string {
 				b.WriteString(" ")
 				continue
 			}
-			text := cell.Text
+			text := cell.Glyph.String()
 			if text == "" {
 				text = " "
 			}
@@ -672,7 +690,7 @@ func (s *Surface) WriteText(x, y int, text string, style CellStyle) {
 			break
 		}
 		if col >= 0 {
-			s.setCell(col, y, Cell{Text: grapheme, Width: width, Style: style, Painted: true})
+			s.setCell(col, y, Cell{Glyph: Glyph(r), Width: width, Style: style, Painted: true})
 			for extra := 1; extra < width && col+extra < s.w; extra++ {
 				s.setCell(col+extra, y, Cell{Continuation: true, Style: style, Painted: true})
 			}
@@ -702,7 +720,7 @@ func (s *Surface) WriteStyledSpans(x, y int, spans []StyledSpan, base CellStyle)
 				return
 			}
 			if col >= 0 {
-				s.setCell(col, y, Cell{Text: grapheme, Width: width, Style: style, Painted: true})
+				s.setCell(col, y, Cell{Glyph: Glyph(r), Width: width, Style: style, Painted: true})
 				for extra := 1; extra < width && col+extra < s.w; extra++ {
 					s.setCell(col+extra, y, Cell{Continuation: true, Style: style, Painted: true})
 				}
@@ -768,7 +786,7 @@ func clipControlRect(control Control, width, height int) (Control, bool) {
 func FilledLineSurface(width int, text string, fillStyle, textStyle CellStyle) Surface {
 	s := BlankSurface(width, 1)
 	for x := 0; x < width; x++ {
-		s.setCell(x, 0, Cell{Text: " ", Width: 1, Style: fillStyle})
+		s.setCell(x, 0, Cell{Glyph: SpaceGlyph, Width: 1, Style: fillStyle})
 	}
 	s.WriteText(0, 0, PlainTruncate(text, width, ""), textStyle)
 	return s
@@ -780,7 +798,7 @@ func compositeCell(base, overlay Cell) Cell {
 	}
 	out := base
 	if overlay.paintsGlyph() {
-		out.Text = overlay.Text
+		out.Glyph = overlay.Glyph
 		out.Width = overlay.Width
 		out.Continuation = overlay.Continuation
 	}
@@ -790,7 +808,7 @@ func compositeCell(base, overlay Cell) Cell {
 }
 
 func (c Cell) paintsGlyph() bool {
-	return c.Continuation || c.Width > 0 || c.Text != ""
+	return c.Continuation || c.Width > 0 || c.Glyph != 0
 }
 
 func overlayLine(base, overlay string, offset int) string {

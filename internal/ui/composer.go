@@ -144,7 +144,7 @@ func (c Composer) renderLineSurface(prompt string, promptStyle lipgloss.Style, b
 	s.WriteText(0, 0, prompt, promptCellStyle)
 	offset := PlainWidth(prompt)
 	for x := offset; x < width; x++ {
-		s.setCell(x, 0, Cell{Text: " ", Width: 1, Style: contentStyle})
+		s.setCell(x, 0, Cell{Glyph: SpaceGlyph, Width: 1, Style: contentStyle})
 	}
 	s.WriteText(offset, 0, before, contentStyle)
 	s.WriteText(offset+PlainWidth(before), 0, cursor, cursorStyle)
@@ -181,7 +181,7 @@ func (c Composer) renderPlaceholder(prompt string, promptStyle lipgloss.Style, b
 	s.WriteText(0, 0, prompt, promptCellStyle)
 	offset := PlainWidth(prompt)
 	for x := offset; x < width; x++ {
-		s.setCell(x, 0, Cell{Text: " ", Width: 1, Style: beforeStyle})
+		s.setCell(x, 0, Cell{Glyph: SpaceGlyph, Width: 1, Style: beforeStyle})
 	}
 	s.WriteText(offset, 0, before, beforeStyle)
 	s.WriteText(offset+PlainWidth(before), 0, cursor, cursorStyle)
@@ -240,7 +240,7 @@ func (l AttachmentList) render(palette theme.Palette) Surface {
 	style := CellStyle{FG: cellColor(palette.MarkdownText), BG: cellColor(palette.UserTextBackground)}
 	for y, item := range l.Items {
 		for x := 0; x < l.Width; x++ {
-			s.setCell(x, y, Cell{Text: " ", Width: 1, Style: style})
+			s.setCell(x, y, Cell{Glyph: SpaceGlyph, Width: 1, Style: style})
 		}
 		s.WriteText(1, y, PlainTruncate(item.Label, maxInt(1, l.Width-2), ""), style)
 	}

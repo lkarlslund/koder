@@ -311,6 +311,21 @@ func dirtyRowRange(current, previous SurfaceView) (start, end int, ok bool) {
 }
 
 func surfaceRowsEqual(previous, current SurfaceView, y int) bool {
+	if prevSurface, ok := previous.(Surface); ok {
+		if currSurface, ok := current.(Surface); ok && prevSurface.isCellBuffer() && currSurface.isCellBuffer() &&
+			y >= 0 && y < prevSurface.h && y < currSurface.h && prevSurface.w == currSurface.w {
+			start := y * prevSurface.w
+			end := start + prevSurface.w
+			prevRow := prevSurface.cells[start:end]
+			currRow := currSurface.cells[start:end]
+			for idx := range prevRow {
+				if prevRow[idx] != currRow[idx] {
+					return false
+				}
+			}
+			return true
+		}
+	}
 	prevWidth := 0
 	currWidth := 0
 	if previous != nil && y < previous.SurfaceHeight() {

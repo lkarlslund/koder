@@ -334,7 +334,7 @@ func (r tableRow) Render(_ *Context, bounds Rect) Surface {
 	}
 	s := BlankSurface(width, 1)
 	for x := 0; x < width; x++ {
-		s.setCell(x, 0, Cell{Text: " ", Width: 1, Style: rowStyle})
+		s.setCell(x, 0, Cell{Glyph: SpaceGlyph, Width: 1, Style: rowStyle})
 	}
 	colX := 0
 	for idx, col := range r.Columns {

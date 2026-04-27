@@ -86,7 +86,7 @@ func (p PendingInputPreview) renderHeader(text string, fg, bg lipgloss.Color) Su
 	surface := BlankSurface(width, 1)
 	style := CellStyle{FG: cellColor(fg), BG: cellColor(bg)}
 	for x := 0; x < width; x++ {
-		surface.setCell(x, 0, Cell{Text: " ", Width: 1, Style: style})
+		surface.setCell(x, 0, Cell{Glyph: SpaceGlyph, Width: 1, Style: style})
 	}
 	surface.WriteText(0, 0, prefix+label, style)
 	return surface
@@ -134,7 +134,7 @@ func renderPendingPreviewLine(prefix, text string, width int, fg, bg lipgloss.Co
 		textStyle.Italic = true
 	}
 	for x := 0; x < width; x++ {
-		surface.setCell(x, 0, Cell{Text: " ", Width: 1, Style: baseStyle})
+		surface.setCell(x, 0, Cell{Glyph: SpaceGlyph, Width: 1, Style: baseStyle})
 	}
 	surface.WriteText(0, 0, prefix, baseStyle)
 	surface.WriteText(PlainWidth(prefix), 0, text, textStyle)
