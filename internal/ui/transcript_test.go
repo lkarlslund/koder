@@ -105,6 +105,26 @@ func TestUserMessageHalfBlocksKeepAccentTopAndBottomRows(t *testing.T) {
 	}
 }
 
+func TestUserMessageHalfBlocksLeaveSeparatorRowsTransparent(t *testing.T) {
+	palette := theme.Resolve("tokyonight").Palette
+	surface := NewUserMessage(UserMessageProps{
+		Palette:     palette,
+		Body:        "hello",
+		Width:       12,
+		HalfBlocks:  true,
+		PromptGlyph: "┃",
+	}).Render(&Context{Palette: palette}, Rect{W: 12, H: 3})
+
+	for _, pos := range [][2]int{{0, 0}, {5, 0}, {0, 2}, {5, 2}} {
+		if _, _, _, ok := surface.SurfaceCellBG(pos[0], pos[1]); ok {
+			t.Fatalf("expected transparent separator row background at (%d,%d)", pos[0], pos[1])
+		}
+	}
+	if _, _, _, ok := surface.SurfaceCellBG(0, 1); !ok {
+		t.Fatal("expected body row to keep bubble background")
+	}
+}
+
 func TestRetainedTranscriptMaintainsChildItems(t *testing.T) {
 	transcript := NewRetainedTranscript()
 	transcript.Add(TranscriptItem{Element: Paragraph{Text: "first"}})

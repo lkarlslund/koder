@@ -474,7 +474,13 @@ func (m UserMessage) render() Surface {
 	height := len(lines) + 2
 	rendered := BlankSurface(width, height)
 	fillStyle := CellStyle{BG: cellColor(m.Palette.UserTextBackground)}
-	for y := 0; y < height; y++ {
+	startRow := 0
+	endRow := height
+	if m.HalfBlocks {
+		startRow = 1
+		endRow = max(startRow, height-1)
+	}
+	for y := startRow; y < endRow; y++ {
 		for x := 0; x < width; x++ {
 			rendered.setCell(x, y, Cell{Text: " ", Width: 1, Style: fillStyle})
 		}
