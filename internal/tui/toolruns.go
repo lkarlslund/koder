@@ -28,6 +28,7 @@ const (
 type transcriptBlock struct {
 	Kind    transcriptBlockKind
 	Message domain.Message
+	Parts   []domain.Part
 	ToolRun ui.ToolRun
 }
 
@@ -35,7 +36,7 @@ func (m *Model) transcriptBlocks() []transcriptBlock {
 	var blocks []transcriptBlock
 
 	appendMessage := func(msg domain.Message) {
-		blocks = append(blocks, transcriptBlock{Kind: transcriptBlockMessage, Message: msg})
+		blocks = append(blocks, transcriptBlock{Kind: transcriptBlockMessage, Message: msg, Parts: m.parts[msg.ID]})
 	}
 	appendRun := func(run ui.ToolRun) *ui.ToolRun {
 		blocks = append(blocks, transcriptBlock{Kind: transcriptBlockToolRun, ToolRun: run})
@@ -90,6 +91,17 @@ func (m *Model) transcriptBlocks() []transcriptBlock {
 		default:
 			appendMessage(msg)
 		}
+	}
+	if pending := m.pendingAssistantParts(); len(pending) > 0 {
+		blocks = append(blocks, transcriptBlock{
+			Kind: transcriptBlockMessage,
+			Message: domain.Message{
+				ID:        -1,
+				Role:      domain.MessageRoleAssistant,
+				CreatedAt: time.Now().UTC(),
+			},
+			Parts: pending,
+		})
 	}
 	return blocks
 }
@@ -530,7 +542,7 @@ func (m *Model) transcriptBlockCacheKey(block transcriptBlock) string {
 			block.Message.Summary,
 			block.Message.CreatedAt.UTC().Format(time.RFC3339Nano),
 		)
-		for _, part := range m.parts[block.Message.ID] {
+		for _, part := range block.Parts {
 			writeHashStrings(hasher,
 				strconv.FormatInt(part.ID, 10),
 				string(part.Kind),
@@ -560,7 +572,7 @@ func (m *Model) renderTranscriptBlockElement(block transcriptBlock) ui.Element {
 			ExpandedCommand: m.expandedToolRunCommands[block.ToolRun.ID],
 		}
 	default:
-		return m.renderTranscriptMessageElement(block.Message)
+		return m.renderTranscriptMessageElement(block.Message, block.Parts)
 	}
 }
 

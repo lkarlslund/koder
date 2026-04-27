@@ -492,6 +492,7 @@ type Model struct {
 	queueEditMode           bool
 	queueSelection          int
 	pendingModelNote        string
+	pendingAssistant        pendingAssistantTurn
 	draftAttachments        []attachment.Draft
 	draftReferences         []reference.Draft
 	attachmentFiles         *attachment.Manager
@@ -499,6 +500,11 @@ type Model struct {
 	readClipboardText       func() (string, error)
 	readClipboardImage      func() ([]byte, error)
 	writeClipboardText      func(string) error
+}
+
+type pendingAssistantTurn struct {
+	Text      string
+	Reasoning string
 }
 
 type composerHistoryState struct {
@@ -654,6 +660,7 @@ func (m Model) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 		}
 		return m, ui.Batch(spinnerTickCmd(), m.syncWindowTitleCmd())
 	case promptDoneMsg:
+		m.pendingAssistant = pendingAssistantTurn{}
 		m.invalidateBodyCache()
 		if msg.err != nil {
 			return m.finishOperationWithError(msg.err)
@@ -661,6 +668,7 @@ func (m Model) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 		m.startBusy(m.busy.scopeOrDefault(busyScopeTranscript), m.busy.statusOrDefault("Working ..."))
 		return m, ui.Batch(nextEventCmd(m.currentChat.ID, msg.events), m.spinnerCmdIfNeeded(), m.syncWindowTitleCmd())
 	case runPromptMsg:
+		m.pendingAssistant = pendingAssistantTurn{}
 		m.invalidateBodyCache()
 		if msg.err != nil {
 			return m.finishOperationWithError(msg.err)
@@ -781,6 +789,7 @@ func (m Model) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 		}
 		return m, m.syncWindowTitleCmd()
 	case loadMsg:
+		m.pendingAssistant = pendingAssistantTurn{}
 		m.invalidateTranscript()
 		m = m.UpdateLoad(msg)
 		if m.debug != nil && m.currentSession.ID > 0 {
@@ -1552,9 +1561,13 @@ func (m *Model) helpMaxOffset() int {
 func (m *Model) applyEvent(evt domain.Event) {
 	switch evt.Kind {
 	case domain.EventKindMessageDelta:
+		m.pendingAssistant.Text += evt.Text
 		m.startBusy(busyScopeTranscript, "Working ...")
+		m.refreshTranscriptForPendingTurn()
 	case domain.EventKindReasoning:
+		m.pendingAssistant.Reasoning += evt.Text
 		m.startBusy(busyScopeTranscript, "Working ...")
+		m.refreshTranscriptForPendingTurn()
 	case domain.EventKindToolStart:
 		status := strings.TrimSpace(evt.Text)
 		if status == "" {
@@ -1605,10 +1618,29 @@ func (m *Model) applyEvent(evt domain.Event) {
 		if evt.Err != nil {
 			m.status = evt.Err.Error()
 		}
+		m.clearPendingAssistantTurn()
 		m.stopBusy()
 	case domain.EventKindMessageDone:
+		m.clearPendingAssistantTurn()
 		m.stopBusyWithStatus("Ready")
 	}
+}
+
+func (m *Model) refreshTranscriptForPendingTurn() {
+	m.invalidateTranscript()
+	if m.viewport.AtBottom() {
+		m.refreshViewport()
+		return
+	}
+	m.refreshViewportPreserve()
+}
+
+func (m *Model) clearPendingAssistantTurn() {
+	if strings.TrimSpace(m.pendingAssistant.Text) == "" && strings.TrimSpace(m.pendingAssistant.Reasoning) == "" {
+		return
+	}
+	m.pendingAssistant = pendingAssistantTurn{}
+	m.refreshTranscriptForPendingTurn()
 }
 
 func (m *Model) resize() {
@@ -2401,13 +2433,13 @@ func (m *Model) renderTranscriptActivityElement() ui.Element {
 	}
 }
 
-func (m *Model) renderTranscriptMessageElement(msg domain.Message) ui.Element {
-	body := m.renderMessageParts(m.parts[msg.ID])
-	styledBody := m.renderStyledMessageParts(m.parts[msg.ID])
+func (m *Model) renderTranscriptMessageElement(msg domain.Message, parts []domain.Part) ui.Element {
+	body := m.renderMessageParts(parts)
+	styledBody := m.renderStyledMessageParts(parts)
 	stamp := timestamp(msg.CreatedAt, m.cfg.UI.ShowTimestamps)
 	switch msg.Role {
 	case domain.MessageRoleUser:
-		userBody := m.renderUserMessageParts(m.parts[msg.ID])
+		userBody := m.renderUserMessageParts(parts)
 		if strings.TrimSpace(userBody) == "" {
 			userBody = strings.TrimSpace(msg.Summary)
 		}
@@ -2526,6 +2558,20 @@ func (m *Model) attachmentLabel(meta attachment.Metadata) string {
 	default:
 		return "[File] " + meta.Name
 	}
+}
+
+func (m Model) pendingAssistantParts() []domain.Part {
+	if strings.TrimSpace(m.pendingAssistant.Text) == "" && strings.TrimSpace(m.pendingAssistant.Reasoning) == "" {
+		return nil
+	}
+	parts := make([]domain.Part, 0, 2)
+	if strings.TrimSpace(m.pendingAssistant.Reasoning) != "" {
+		parts = append(parts, domain.Part{ID: -1, Kind: domain.PartKindReasoning, Body: m.pendingAssistant.Reasoning})
+	}
+	if strings.TrimSpace(m.pendingAssistant.Text) != "" {
+		parts = append(parts, domain.Part{ID: -2, Kind: domain.PartKindText, Body: m.pendingAssistant.Text})
+	}
+	return parts
 }
 
 func (m *Model) renderMessageParts(parts []domain.Part) string {

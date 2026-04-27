@@ -4755,6 +4755,32 @@ func TestRenderStyledMessagePartsShowsReasoningBeforeText(t *testing.T) {
 	}
 }
 
+func TestTranscriptBlocksIncludePendingAssistantTurn(t *testing.T) {
+	cfg := testConfig(t)
+	m, err := New(cfg, nil, nil, StartupModeNew, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.currentSession = domain.Session{ID: 1}
+	m.showReasoning = true
+	m.pendingAssistant = pendingAssistantTurn{
+		Text:      "partial answer",
+		Reasoning: "thinking first",
+	}
+
+	blocks := m.transcriptBlocks()
+	if len(blocks) != 1 {
+		t.Fatalf("expected one pending block, got %d", len(blocks))
+	}
+	if blocks[0].Message.Role != domain.MessageRoleAssistant {
+		t.Fatalf("expected assistant pending block, got %#v", blocks[0].Message)
+	}
+	got := ui.PlainStyledText(m.renderStyledMessageParts(blocks[0].Parts))
+	if !strings.Contains(got, "partial answer") || !strings.Contains(got, "thinking first") {
+		t.Fatalf("expected pending assistant content, got %q", got)
+	}
+}
+
 func TestRenderMessagePartsSkipsSystemNotice(t *testing.T) {
 	m := Model{}
 
