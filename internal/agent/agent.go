@@ -513,32 +513,38 @@ func (e *Engine) continueModelTurn(ctx context.Context, session domain.Session, 
 			return completeErr
 		}
 
+		text, reasoning, usage := resp.Text, resp.Reasoning, resp.Usage
 		if len(resp.ToolCalls) > 0 {
 			calls, err := e.parseProviderToolCalls(resp.ToolCalls, session.ID)
 			if err != nil {
-				return err
+				if strings.TrimSpace(text) == "" && strings.TrimSpace(reasoning) == "" {
+					return err
+				}
+				e.recordLifecycle(session.ID, "provider_tool_call_parse_ignored", err.Error(), map[string]string{
+					"tool_calls": strconv.Itoa(len(resp.ToolCalls)),
+				})
+			} else if len(calls) > 0 {
+				if err := e.persistAssistantToolCalls(ctx, chat.ID, session.ID, calls, strings.TrimSpace(resp.Text), resp.Usage); err != nil {
+					return err
+				}
+				if resp.Usage.TotalTokens > 0 {
+					out <- domain.Event{Kind: domain.EventKindUsage, Usage: resp.Usage}
+				}
+				if pause, ok := tracker.trackCalls(calls); ok {
+					e.pauseContinuation(ctx, chat.ID, session.ID, pause, out)
+					return nil
+				}
+				needsApproval, handledErr := e.handleModelToolCalls(ctx, session, chat, calls, out)
+				if handledErr != nil {
+					return handledErr
+				}
+				if needsApproval {
+					return nil
+				}
+				continue
 			}
-			if err := e.persistAssistantToolCalls(ctx, chat.ID, session.ID, calls, strings.TrimSpace(resp.Text), resp.Usage); err != nil {
-				return err
-			}
-			if resp.Usage.TotalTokens > 0 {
-				out <- domain.Event{Kind: domain.EventKindUsage, Usage: resp.Usage}
-			}
-			if pause, ok := tracker.trackCalls(calls); ok {
-				e.pauseContinuation(ctx, chat.ID, session.ID, pause, out)
-				return nil
-			}
-			needsApproval, handledErr := e.handleModelToolCalls(ctx, session, chat, calls, out)
-			if handledErr != nil {
-				return handledErr
-			}
-			if needsApproval {
-				return nil
-			}
-			continue
 		}
 
-		text, reasoning, usage := resp.Text, resp.Reasoning, resp.Usage
 		call, plain := parseToolCall(text)
 		if call != nil {
 			e.recordLifecycle(session.ID, "tool_call_parsed", call.ContextString(), map[string]string{"tool": string(call.Tool), "tool_call_id": call.ToolCallID})
@@ -2225,13 +2231,24 @@ type completedToolCall struct {
 
 func (e *Engine) parseProviderToolCalls(raw []provider.ToolCall, sessionID int64) ([]tools.Request, error) {
 	calls := make([]tools.Request, 0, len(raw))
+	var parseErr error
 	for _, item := range raw {
 		call, err := tools.ParseProviderCall(item)
 		if err != nil {
-			return nil, err
+			if parseErr == nil {
+				parseErr = err
+			}
+			e.recordLifecycle(sessionID, "provider_tool_call_parse_error", err.Error(), map[string]string{
+				"tool_call_id": strings.TrimSpace(item.ID),
+				"tool_type":    strings.TrimSpace(item.Type),
+			})
+			continue
 		}
 		e.recordLifecycle(sessionID, "tool_call_parsed", call.ContextString(), map[string]string{"tool": string(call.Tool), "tool_call_id": call.ToolCallID})
 		calls = append(calls, call)
+	}
+	if len(calls) == 0 {
+		return nil, parseErr
 	}
 	return calls, nil
 }

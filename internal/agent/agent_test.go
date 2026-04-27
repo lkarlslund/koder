@@ -1211,6 +1211,178 @@ func TestRunPromptStreamsAssistantResponseWhenEnabled(t *testing.T) {
 	}
 }
 
+func TestRunPromptIgnoresMalformedProviderToolCallsWhenTextIsPresent(t *testing.T) {
+	t.Parallel()
+
+	var requests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		requests++
+		switch requests {
+		case 1:
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"reasoning\":\"Thinking\"}}]}\n\n"))
+			_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"hello\",\"tool_calls\":[{\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"arguments\":\"{}\"}}]}}]}\n\n"))
+			_, _ = w.Write([]byte("data: [DONE]\n\n"))
+		default:
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ignored title"}}],"usage":{"total_tokens":1}}`))
+		}
+	}))
+	defer server.Close()
+
+	cfg := testConfig(t)
+	cfg.Providers = map[string]config.Provider{
+		"test": {
+			BaseURL: server.URL + "/v1",
+			Timeout: time.Second,
+			Stream:  true,
+		},
+	}
+	cfg.DefaultProvider = "test"
+	cfg.DefaultModel = "test-model"
+
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	engine := New(cfg, st, tools.NewRegistry(t.TempDir()), nil, t.TempDir())
+	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	events, err := engine.RunPrompt(context.Background(), session, "say hello")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sawDone, sawError bool
+	for evt := range events {
+		if evt.Kind == domain.EventKindMessageDone {
+			sawDone = true
+		}
+		if evt.Kind == domain.EventKindError {
+			sawError = true
+		}
+	}
+	if !sawDone {
+		t.Fatal("expected streamed turn to complete")
+	}
+	if sawError {
+		t.Fatal("did not expect malformed provider tool call to surface as turn error when text is present")
+	}
+
+	messages, parts, err := st.PartsForSession(context.Background(), session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 2 {
+		t.Fatalf("expected user and assistant messages, got %d", len(messages))
+	}
+	assistantParts := parts[messages[1].ID]
+	var sawText bool
+	for _, part := range assistantParts {
+		if part.Kind == domain.PartKindText && part.Body == "hello" {
+			sawText = true
+		}
+	}
+	if !sawText {
+		t.Fatalf("expected assistant text to be persisted despite malformed tool call, got %#v", assistantParts)
+	}
+}
+
+func TestRunPromptStreamsToolCallArgumentsAcrossChunks(t *testing.T) {
+	t.Parallel()
+
+	var requests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		requests++
+		switch requests {
+		case 1:
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"id\":\"call_read\",\"type\":\"function\",\"index\":0,\"function\":{\"name\":\"read\",\"arguments\":\"\"}}]}}]}\n\n"))
+			_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"{\"}}]}}]}\n\n"))
+			_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\\\"path\\\":\\\"note.txt\\\"\"}}]}}]}\n\n"))
+			_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n"))
+			_, _ = w.Write([]byte("data: [DONE]\n\n"))
+		case 2:
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"done"}}],"usage":{"total_tokens":1}}`))
+		default:
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ignored title"}}],"usage":{"total_tokens":1}}`))
+		}
+	}))
+	defer server.Close()
+
+	cfg := testConfig(t)
+	cfg.Providers = map[string]config.Provider{
+		"test": {
+			BaseURL: server.URL + "/v1",
+			Timeout: time.Second,
+			Stream:  true,
+		},
+	}
+	cfg.DefaultProvider = "test"
+	cfg.DefaultModel = "test-model"
+
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	workdir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workdir, "note.txt"), []byte("hello\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	engine := New(cfg, st, tools.NewRegistry(workdir), nil, workdir)
+	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	events, err := engine.RunPrompt(context.Background(), session, "read the note")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sawError bool
+	for evt := range events {
+		if evt.Kind == domain.EventKindError {
+			sawError = true
+		}
+	}
+	if sawError {
+		t.Fatal("did not expect streamed tool call arguments to fail")
+	}
+
+	messages, parts, err := st.PartsForSession(context.Background(), session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sawReadOutput bool
+	for _, msg := range messages {
+		for _, part := range parts[msg.ID] {
+			if part.Kind == domain.PartKindToolOutput && strings.Contains(part.Body, "hello") {
+				sawReadOutput = true
+			}
+			if part.Kind == domain.PartKindToolOutput && strings.Contains(part.Body, "path is empty") {
+				t.Fatalf("unexpected empty-path tool output: %#v", part)
+			}
+		}
+	}
+	if !sawReadOutput {
+		t.Fatalf("expected read tool output to be persisted, got %#v", parts)
+	}
+}
+
 func TestRunPromptPersistsAssistantErrorOnBackendFailure(t *testing.T) {
 	cfg := testConfig(t)
 	cfg.Providers = map[string]config.Provider{

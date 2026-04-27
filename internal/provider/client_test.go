@@ -378,10 +378,16 @@ func TestStreamChatResponseAggregatesToolCallsAndDeltas(t *testing.T) {
 	}
 	var deltas []string
 	var sawDone bool
+	var sawToolCallDelta bool
 	resp, err := client.StreamChatResponse(context.Background(), ChatRequest{Model: "test"}, func(evt domain.Event) {
 		switch evt.Kind {
 		case domain.EventKindMessageDelta:
 			deltas = append(deltas, evt.Text)
+		case domain.EventKindToolCallDelta:
+			sawToolCallDelta = true
+			if !strings.Contains(evt.RawJSON, "\"tool_calls\"") {
+				t.Fatalf("expected raw tool call payload, got %q", evt.RawJSON)
+			}
 		case domain.EventKindMessageDone:
 			sawDone = true
 		}
@@ -409,6 +415,44 @@ func TestStreamChatResponseAggregatesToolCallsAndDeltas(t *testing.T) {
 	}
 	if !sawDone {
 		t.Fatal("expected message done event")
+	}
+	if !sawToolCallDelta {
+		t.Fatal("expected streamed tool call delta event")
+	}
+}
+
+func TestStreamChatResponseMergesToolCallsByIndexAcrossArgumentChunks(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"id\":\"call_read\",\"type\":\"function\",\"index\":0,\"function\":{\"name\":\"read\",\"arguments\":\"\"}}]}}]}\n\n"))
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"{\"}}]}}]}\n\n"))
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\\\"path\\\":\\\".\\\"\"}}]}}]}\n\n"))
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n"))
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer server.Close()
+
+	client, err := New("test", config.Provider{
+		BaseURL: server.URL,
+		Timeout: time.Second,
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resp, err := client.StreamChatResponse(context.Background(), ChatRequest{Model: "test"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.ToolCalls) != 1 {
+		t.Fatalf("expected one aggregated tool call, got %#v", resp.ToolCalls)
+	}
+	got := resp.ToolCalls[0]
+	if got.Function.Name != "read" {
+		t.Fatalf("expected tool name read, got %#v", got)
+	}
+	if got.Function.Arguments != "{\"path\":\".\"}" {
+		t.Fatalf("expected merged arguments, got %#v", got)
 	}
 }
 

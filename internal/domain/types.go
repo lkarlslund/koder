@@ -148,6 +148,7 @@ const (
 	EventKindMessageDelta  EventKind = "message_delta"
 	EventKindMessageDone   EventKind = "message_done"
 	EventKindReasoning     EventKind = "reasoning"
+	EventKindToolCallDelta EventKind = "tool_call_delta"
 	EventKindUsage         EventKind = "usage"
 	EventKindToolStart     EventKind = "tool_start"
 	EventKindToolResult    EventKind = "tool_result"

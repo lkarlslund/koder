@@ -137,6 +137,7 @@ type FunctionDefinition struct {
 
 type ToolCall struct {
 	ID       string       `json:"id,omitempty"`
+	Index    *int         `json:"index,omitempty"`
 	Type     string       `json:"type,omitempty"`
 	Function FunctionCall `json:"function"`
 }
@@ -592,6 +593,9 @@ func (c *Client) emitChunk(emit func(domain.Event), chunk chatChunk, raw string)
 		if reasoning := firstNonEmptyString(choice.Delta.ReasoningContent, choice.Delta.Reasoning); reasoning != "" {
 			emit(domain.Event{Kind: domain.EventKindReasoning, Text: reasoning, RawJSON: raw})
 		}
+		if len(choice.Delta.ToolCalls) > 0 || len(choice.Message.ToolCalls) > 0 {
+			emit(domain.Event{Kind: domain.EventKindToolCallDelta, Text: "provider tool call delta", RawJSON: raw})
+		}
 		if choice.FinishReason != "" {
 			emit(domain.Event{Kind: domain.EventKindStatus, Text: choice.FinishReason})
 		}
@@ -615,8 +619,9 @@ func convertToolCalls(raw []rawToolCall) []ToolCall {
 	calls := make([]ToolCall, 0, len(raw))
 	for _, item := range raw {
 		calls = append(calls, ToolCall{
-			ID:   item.ID,
-			Type: firstNonEmptyString(item.Type, "function"),
+			ID:    item.ID,
+			Index: item.Index,
+			Type:  firstNonEmptyString(item.Type, "function"),
 			Function: FunctionCall{
 				Name:      item.Function.Name,
 				Arguments: item.Function.Arguments,
@@ -677,6 +682,17 @@ func mergeToolCalls(existing, incoming []ToolCall) []ToolCall {
 	merged := slices.Clone(existing)
 	for _, next := range incoming {
 		index := -1
+		if next.Index != nil {
+			for i, current := range merged {
+				if current.Index != nil && *current.Index == *next.Index {
+					index = i
+					break
+				}
+			}
+		}
+		if index >= 0 {
+			goto merge
+		}
 		for i, current := range merged {
 			if next.ID != "" && current.ID == next.ID {
 				index = i
@@ -695,8 +711,12 @@ func mergeToolCalls(existing, incoming []ToolCall) []ToolCall {
 			merged = append(merged, next)
 			continue
 		}
+	merge:
 		if strings.TrimSpace(next.ID) != "" {
 			merged[index].ID = next.ID
+		}
+		if next.Index != nil {
+			merged[index].Index = next.Index
 		}
 		if strings.TrimSpace(next.Type) != "" {
 			merged[index].Type = next.Type
