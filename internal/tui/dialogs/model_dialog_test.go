@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/theme"
 	"github.com/lkarlslund/koder/internal/ui"
 	"github.com/lkarlslund/koder/internal/ui/uitest"
@@ -18,15 +19,15 @@ func renderModelDialog(dialog ModelDialog, width int, palette theme.Palette) str
 }
 
 func TestModelDialogSelectsModel(t *testing.T) {
-	dialog := NewModelDialog("openai", []domain.Model{{ID: "gpt-5.4"}}, "gpt-5.4")
+	dialog := NewModelDialog("openai", []domain.Model{{ID: "gpt-5.4"}}, "gpt-5.4", provider.ModelPresetAuto)
 	action := dialog.Update(ui.KeyMsg{Type: ui.KeyEnter})
-	if action.Kind != ModelDialogActionSelect || action.ModelID != "gpt-5.4" {
+	if action.Kind != ModelDialogActionSelect || action.ModelID != "gpt-5.4" || action.PresetID != provider.ModelPresetAuto {
 		t.Fatalf("unexpected action: %#v", action)
 	}
 }
 
 func TestModelDialogFiltersModels(t *testing.T) {
-	dialog := NewModelDialog("openai", []domain.Model{{ID: "gpt-5.4"}, {ID: "gpt-4.1-mini"}}, "")
+	dialog := NewModelDialog("openai", []domain.Model{{ID: "gpt-5.4"}, {ID: "gpt-4.1-mini"}}, "", provider.ModelPresetAuto)
 	dialog.Update(ui.KeyMsg{Type: ui.KeyRunes, Runes: []rune("m")})
 	dialog.Update(ui.KeyMsg{Type: ui.KeyRunes, Runes: []rune("i")})
 	dialog.Update(ui.KeyMsg{Type: ui.KeyRunes, Runes: []rune("n")})
@@ -37,7 +38,7 @@ func TestModelDialogFiltersModels(t *testing.T) {
 }
 
 func TestModelDialogRenderShowsProvider(t *testing.T) {
-	dialog := NewModelDialog("openai", []domain.Model{{ID: "gpt-5.4", OwnedBy: "openai", SupportsImages: true, CapabilitiesKnown: true}}, "gpt-5.4")
+	dialog := NewModelDialog("openai", []domain.Model{{ID: "gpt-5.4", OwnedBy: "openai", SupportsImages: true, CapabilitiesKnown: true}}, "gpt-5.4", provider.ModelPresetAuto)
 	got := renderModelDialog(dialog, 84, theme.Resolve("tokyonight").Palette)
 	if !strings.Contains(got, "Select Model") || !strings.Contains(got, "gpt-5.4") || !strings.Contains(got, "openai") || !strings.Contains(got, "image") {
 		t.Fatalf("unexpected render: %q", got)
@@ -48,7 +49,7 @@ func TestModelDialogRenderUsesSingleLineTableRows(t *testing.T) {
 	dialog := NewModelDialog("openai", []domain.Model{
 		{ID: "gpt-5.4", OwnedBy: "openai", SupportsImages: true, CapabilitiesKnown: true},
 		{ID: "gpt-4.1-mini", OwnedBy: "openai"},
-	}, "gpt-5.4")
+	}, "gpt-5.4", provider.ModelPresetAuto)
 	got := renderModelDialog(dialog, 84, theme.Resolve("tokyonight").Palette)
 	if !strings.Contains(got, "Model") || !strings.Contains(got, "Owner") {
 		t.Fatalf("expected table header row, got %q", got)
@@ -75,7 +76,7 @@ func TestModelDialogRenderUsesSingleLineTableRows(t *testing.T) {
 func TestModelDialogRenderFallsBackToProviderWhenOwnerBlank(t *testing.T) {
 	dialog := NewModelDialog("ollama", []domain.Model{
 		{ID: "qwen2.5-coder:32b", OwnedBy: "", SupportsImages: true, CapabilitiesKnown: true},
-	}, "qwen2.5-coder:32b")
+	}, "qwen2.5-coder:32b", provider.ModelPresetAuto)
 	got := renderModelDialog(dialog, 84, theme.Resolve("tokyonight").Palette)
 	if !strings.Contains(got, "ollama") {
 		t.Fatalf("expected provider fallback in owner column, got %q", got)
@@ -85,7 +86,7 @@ func TestModelDialogRenderFallsBackToProviderWhenOwnerBlank(t *testing.T) {
 func TestModelDialogRenderPreservesLongModelNames(t *testing.T) {
 	dialog := NewModelDialog("openrouter", []domain.Model{
 		{ID: "anthropic/claude-sonnet-4-20250514", OwnedBy: "openrouter", SupportsImages: true, CapabilitiesKnown: true},
-	}, "anthropic/claude-sonnet-4-20250514")
+	}, "anthropic/claude-sonnet-4-20250514", provider.ModelPresetAuto)
 	got := renderModelDialog(dialog, 96, theme.Resolve("tokyonight").Palette)
 	if !strings.Contains(got, "anthropic/claude-sonnet-4-20250514") {
 		t.Fatalf("expected long model id to stay visible at reasonable widths, got %q", got)
@@ -93,7 +94,8 @@ func TestModelDialogRenderPreservesLongModelNames(t *testing.T) {
 }
 
 func TestModelDialogTabThenEnterCancels(t *testing.T) {
-	dialog := NewModelDialog("openai", []domain.Model{{ID: "gpt-5.4"}}, "gpt-5.4")
+	dialog := NewModelDialog("openai", []domain.Model{{ID: "gpt-5.4"}}, "gpt-5.4", provider.ModelPresetAuto)
+	dialog.Update(ui.KeyMsg{Type: ui.KeyTab})
 	dialog.Update(ui.KeyMsg{Type: ui.KeyTab})
 	dialog.Update(ui.KeyMsg{Type: ui.KeyRight})
 	action := dialog.Update(ui.KeyMsg{Type: ui.KeyEnter})
@@ -107,7 +109,7 @@ func TestModelDialogKeepsFullWindowNearListEnd(t *testing.T) {
 	for i := range models {
 		models[i] = domain.Model{ID: "model-" + strconv.Itoa(i)}
 	}
-	dialog := NewModelDialog("openai", models, "")
+	dialog := NewModelDialog("openai", models, "", provider.ModelPresetAuto)
 	for range 11 {
 		dialog.Update(ui.KeyMsg{Type: ui.KeyDown})
 	}
@@ -134,11 +136,24 @@ func TestModelDialogKeepsFullWindowNearListEnd(t *testing.T) {
 }
 
 func TestModelDialogUsesTighterWidthBudget(t *testing.T) {
-	dialog := NewModelDialog("ollama", []domain.Model{{ID: "qwen2.5-coder:32b", OwnedBy: "", SupportsImages: true, CapabilitiesKnown: true}}, "")
+	dialog := NewModelDialog("ollama", []domain.Model{{ID: "qwen2.5-coder:32b", OwnedBy: "", SupportsImages: true, CapabilitiesKnown: true}}, "", provider.ModelPresetAuto)
 	got := renderModelDialog(dialog, 120, theme.Resolve("tokyonight").Palette)
 	for _, line := range strings.Split(got, "\n") {
 		if ansi.StringWidth(line) > 76 {
 			t.Fatalf("expected model dialog to stay compact, got width %d in %q", ansi.StringWidth(line), line)
 		}
+	}
+}
+
+func TestModelDialogPresetCyclesAndAutoMatches(t *testing.T) {
+	dialog := NewModelDialog("openai", []domain.Model{{ID: "Qwen/Qwen3.6-35B-A3B"}}, "Qwen/Qwen3.6-35B-A3B", provider.ModelPresetAuto)
+	dialog.Update(ui.KeyMsg{Type: ui.KeyTab})
+	dialog.Update(ui.KeyMsg{Type: ui.KeyRight})
+	if dialog.PresetID != provider.ModelPresetDefault {
+		t.Fatalf("expected preset cycle to land on default, got %q", dialog.PresetID)
+	}
+	dialog.Update(ui.KeyMsg{Type: ui.KeyLeft})
+	if got := dialog.presetValue(); !strings.Contains(got, "Qwen 3.6 Preserve Thinking") {
+		t.Fatalf("expected auto preset display to show resolved qwen preset, got %q", got)
 	}
 }

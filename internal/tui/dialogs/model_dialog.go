@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/theme"
 	"github.com/lkarlslund/koder/internal/ui"
 )
@@ -18,24 +19,37 @@ const (
 )
 
 type ModelDialogAction struct {
-	Kind    ModelDialogActionKind
-	ModelID string
+	Kind     ModelDialogActionKind
+	ModelID  string
+	PresetID string
 }
 
 type ModelDialog struct {
 	ProviderID string
 	Query      string
 	Index      int
+	PresetID   string
 	Models     []domain.Model
 	view       []domain.Model
-	focus      pickerDialogFocus
+	presets    []provider.ModelPreset
+	focus      modelDialogFocus
 	buttons    ui.ButtonRow
 }
 
-func NewModelDialog(providerID string, models []domain.Model, current string) ModelDialog {
+type modelDialogFocus int
+
+const (
+	modelDialogFocusList modelDialogFocus = iota
+	modelDialogFocusPreset
+	modelDialogFocusButtons
+)
+
+func NewModelDialog(providerID string, models []domain.Model, current string, presetID string) ModelDialog {
 	d := ModelDialog{
 		ProviderID: providerID,
 		Models:     models,
+		PresetID:   provider.NormalizePresetSelection(presetID),
+		presets:    provider.Presets(),
 	}
 	d.buttons = ui.ButtonRow{
 		Buttons: []ui.Button{
@@ -66,41 +80,49 @@ func (d *ModelDialog) Update(msg ui.KeyMsg) ModelDialogAction {
 	case "esc":
 		return ModelDialogAction{Kind: ModelDialogActionCancel}
 	case "tab":
-		d.focus = (d.focus + 1) % 2
+		d.focus = (d.focus + 1) % 3
 	case "shift+tab":
 		d.focus--
 		if d.focus < 0 {
-			d.focus = pickerDialogFocusButtons
+			d.focus = modelDialogFocusButtons
 		}
 	case "enter":
-		if d.focus == pickerDialogFocusButtons {
+		if d.focus == modelDialogFocusButtons {
 			d.buttons.ActivateFocused()
 			return action
 		}
+		if d.focus == modelDialogFocusPreset {
+			d.movePreset(1)
+			return ModelDialogAction{}
+		}
 		return d.selectCurrent()
 	case "up":
-		if d.focus == pickerDialogFocusList {
+		if d.focus == modelDialogFocusList {
 			d.move(-1)
 		}
 	case "down":
-		if d.focus == pickerDialogFocusList {
+		if d.focus == modelDialogFocusList {
 			d.move(1)
 		}
 	case "left":
-		if d.focus == pickerDialogFocusButtons {
+		if d.focus == modelDialogFocusButtons {
 			d.buttons.Move(-1)
+		} else if d.focus == modelDialogFocusPreset {
+			d.movePreset(-1)
 		}
 	case "right":
-		if d.focus == pickerDialogFocusButtons {
+		if d.focus == modelDialogFocusButtons {
 			d.buttons.Move(1)
+		} else if d.focus == modelDialogFocusPreset {
+			d.movePreset(1)
 		}
 	case "backspace":
-		if d.focus == pickerDialogFocusList && d.Query != "" {
+		if d.focus == modelDialogFocusList && d.Query != "" {
 			d.Query = d.Query[:len(d.Query)-1]
 			d.refilter()
 		}
 	default:
-		if d.focus == pickerDialogFocusList && msg.Type == ui.KeyRunes {
+		if d.focus == modelDialogFocusList && msg.Type == ui.KeyRunes {
 			d.Query += msg.String()
 			d.refilter()
 		}
@@ -148,7 +170,7 @@ func (d ModelDialog) dialog(width int, palette theme.Palette) ui.Element {
 				capabilityBadges(item),
 			},
 			Selected: idx == d.Index,
-			Focused:  idx == d.Index && d.focus == pickerDialogFocusList,
+			Focused:  idx == d.Index && d.focus == modelDialogFocusList,
 		})
 	}
 
@@ -182,10 +204,17 @@ func (d ModelDialog) dialog(width int, palette theme.Palette) ui.Element {
 						ui.Fixed(staticBlock("Filter: " + d.Query)),
 						ui.Fixed(ui.Spacer{H: 1}),
 						ui.Fixed(ui.Section{Width: listWidth, Child: list}),
+						ui.Fixed(ui.ChoiceRow{
+							Label:       "Preset",
+							Description: "Request options",
+							Value:       d.presetValue(),
+							Width:       listWidth,
+							Focused:     d.focus == modelDialogFocusPreset,
+						}),
 					},
 				}),
 				ui.Fixed(buttons),
-				ui.Fixed(ui.Static{Content: "Enter to select, Esc to cancel"}),
+				ui.Fixed(ui.Static{Content: "Tab moves focus. Left/Right changes preset. Enter selects model."}),
 			},
 			Spacing: 2,
 		},
@@ -218,7 +247,7 @@ func (d *ModelDialog) ActivateControl(controlID string) ModelDialogAction {
 	d.buttons.Buttons[1].OnClick = func() { action = ModelDialogAction{Kind: ModelDialogActionCancel} }
 	switch controlID {
 	case "ok", "cancel":
-		d.focus = pickerDialogFocusButtons
+		d.focus = modelDialogFocusButtons
 		for idx, button := range d.buttons.Buttons {
 			if button.ID == controlID {
 				d.buttons.Index = idx
@@ -233,7 +262,7 @@ func (d *ModelDialog) ActivateControl(controlID string) ModelDialogAction {
 				return ModelDialogAction{}
 			}
 			d.Index = idx
-			d.focus = pickerDialogFocusList
+			d.focus = modelDialogFocusList
 			return d.selectCurrent()
 		}
 	}
@@ -287,7 +316,7 @@ func (d ModelDialog) selectCurrent() ModelDialogAction {
 	if !ok {
 		return ModelDialogAction{Kind: ModelDialogActionCancel}
 	}
-	return ModelDialogAction{Kind: ModelDialogActionSelect, ModelID: item.ID}
+	return ModelDialogAction{Kind: ModelDialogActionSelect, ModelID: item.ID, PresetID: provider.NormalizePresetSelection(d.PresetID)}
 }
 
 func (d *ModelDialog) ensureButtons() {
@@ -308,6 +337,40 @@ func (d ModelDialog) buttonRow(width int) ui.ButtonRow {
 	buttons.Width = maxInt(0, width)
 	buttons.Align = ui.HorizontalAlignRight
 	return buttons
+}
+
+func (d *ModelDialog) movePreset(delta int) {
+	if len(d.presets) == 0 {
+		d.PresetID = provider.ModelPresetAuto
+		return
+	}
+	index := 0
+	for idx, preset := range d.presets {
+		if preset.ID == provider.NormalizePresetSelection(d.PresetID) {
+			index = idx
+			break
+		}
+	}
+	index += delta
+	if index < 0 {
+		index = len(d.presets) - 1
+	}
+	if index >= len(d.presets) {
+		index = 0
+	}
+	d.PresetID = d.presets[index].ID
+}
+
+func (d ModelDialog) presetValue() string {
+	selected := provider.NormalizePresetSelection(d.PresetID)
+	current, _ := d.current()
+	resolved := provider.ResolvePresetID(current.ID, selected)
+	selectedPreset, _ := provider.LookupPreset(selected)
+	resolvedPreset, _ := provider.LookupPreset(resolved)
+	if selected == provider.ModelPresetAuto {
+		return selectedPreset.Title + " -> " + resolvedPreset.Title
+	}
+	return resolvedPreset.Title
 }
 
 func capabilityBadges(model domain.Model) string {

@@ -37,6 +37,7 @@ type Provider struct {
 	APIKeyEnv     string            `toml:"api_key_env"`
 	Headers       map[string]string `toml:"headers"`
 	DefaultModel  string            `toml:"default_model"`
+	ModelPreset   string            `toml:"model_preset"`
 	ContextWindow int               `toml:"context_window"`
 	AutoCompactAt int               `toml:"auto_compact_at"`
 	Stream        bool              `toml:"stream"`

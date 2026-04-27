@@ -19,6 +19,7 @@ import (
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/permission"
+	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/reference"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools"
@@ -184,7 +185,7 @@ func TestStringifyPartsExcludesSystemNotice(t *testing.T) {
 	got := stringifyParts([]domain.Part{
 		{Kind: domain.PartKindText, Body: "answer"},
 		{Kind: domain.PartKindSystemNotice, Body: "usage", MetaJSON: `{"PromptTokens":1}`},
-	})
+	}, false)
 	if strings.Contains(got, "PromptTokens") || strings.Contains(got, "usage") {
 		t.Fatalf("expected system notices to stay out of model context, got %q", got)
 	}
@@ -397,7 +398,7 @@ func TestStringifyPartsNormalizesToolCallFromMetadata(t *testing.T) {
 		Kind:     domain.PartKindToolCall,
 		Body:     "Tool call:\n<koder_tool>\n{\"tool\":\"read\",\"path\":\"README.md\"}\n</koder_tool>",
 		MetaJSON: `{"tool":"read","path":"README.md"}`,
-	}})
+	}}, false)
 	if !strings.Contains(got, `"tool":"read"`) || !strings.Contains(got, `"path":"README.md"`) {
 		t.Fatalf("expected structured tool call in model context, got %q", got)
 	}
@@ -478,7 +479,7 @@ func TestStringifyPartsFormatsStoredTaskAndPlanUpdates(t *testing.T) {
 	got := stringifyParts([]domain.Part{
 		{Kind: domain.PartKindTaskUpdate, Body: "stale task body", MetaJSON: tools.JSONMeta(taskMeta)},
 		{Kind: domain.PartKindPlanUpdate, Body: "stale plan body", MetaJSON: tools.JSONMeta(planMeta)},
-	})
+	}, false)
 	if !strings.Contains(got, "Task update:\nwrite docs") {
 		t.Fatalf("expected task update from stored result, got %q", got)
 	}
@@ -739,6 +740,81 @@ func TestPreviewNextRequestIncludesStructuredFileReference(t *testing.T) {
 	}
 	if !strings.Contains(userMsg.ContentParts[1].Text, "Referenced file README.md") || !strings.Contains(userMsg.ContentParts[1].Text, "hello refs") {
 		t.Fatalf("expected resolved file reference content, got %#v", userMsg.ContentParts[1])
+	}
+}
+
+func TestPreviewNextRequestIncludesQwenPresetExtraBody(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.Providers = map[string]config.Provider{
+		"test": {
+			BaseURL:      "http://127.0.0.1:8000/v1",
+			DefaultModel: "Qwen/Qwen3.6-35B-A3B",
+			ModelPreset:  provider.ModelPresetAuto,
+		},
+	}
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	engine := New(cfg, st, tools.NewRegistry(t.TempDir()), nil, t.TempDir())
+	session, err := st.CreateSession(context.Background(), "test", "test", "Qwen/Qwen3.6-35B-A3B", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, err := engine.PreviewNextRequest(context.Background(), session, "continue", nil, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, ok := req.ExtraBody["chat_template_kwargs"].(map[string]any)
+	if !ok || got["preserve_thinking"] != true || got["enable_thinking"] != true {
+		t.Fatalf("expected qwen preserve-thinking kwargs, got %#v", req.ExtraBody)
+	}
+}
+
+func TestBuildConversationPreservesThinkingBlockForQwenPreset(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.Providers = map[string]config.Provider{
+		"test": {
+			BaseURL:      "http://127.0.0.1:8000/v1",
+			DefaultModel: "Qwen/Qwen3.6-35B-A3B",
+			ModelPreset:  provider.ModelPresetQwen36PreserveThinking,
+		},
+	}
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	engine := New(cfg, st, tools.NewRegistry(t.TempDir()), nil, t.TempDir())
+	session, err := st.CreateSession(context.Background(), "test", "test", "Qwen/Qwen3.6-35B-A3B", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chat := defaultChatForSession(t, st, session.ID)
+	msg, err := st.AddChatMessage(context.Background(), chat.ID, domain.MessageRoleAssistant, "done")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.AddPart(context.Background(), msg.ID, domain.PartKindReasoning, "hidden trace", ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.AddPart(context.Background(), msg.ID, domain.PartKindText, "done", ""); err != nil {
+		t.Fatal(err)
+	}
+
+	conversation, err := engine.buildConversation(context.Background(), session.ID, chat.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(conversation) == 0 {
+		t.Fatalf("expected assistant message, got %#v", conversation)
+	}
+	assistant := conversation[len(conversation)-1]
+	if !strings.Contains(assistant.Content, "<think>\nhidden trace\n</think>") || !strings.Contains(assistant.Content, "done") {
+		t.Fatalf("expected preserved thinking block, got %#v", assistant)
 	}
 }
 

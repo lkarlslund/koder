@@ -190,13 +190,7 @@ func (e *Engine) PreviewNextRequestForChat(ctx context.Context, session domain.S
 	if err != nil {
 		return provider.ChatRequest{}, err
 	}
-	return provider.ChatRequest{
-		Model:      session.ModelID,
-		Messages:   messages,
-		Tools:      tools.Definitions(e.toolRuntime(session, chat)),
-		ToolChoice: "auto",
-		Stream:     false,
-	}, nil
+	return e.chatRequest(session, chat, messages, false), nil
 }
 
 func (e *Engine) runModelPrompt(ctx context.Context, session domain.Session, chat domain.Chat, prompt string, drafts []attachment.Draft, refs []reference.Draft, note string) (<-chan domain.Event, error) {
@@ -512,13 +506,7 @@ func (e *Engine) continueModelTurn(ctx context.Context, session domain.Session, 
 		}
 		transient = nil
 
-		req := provider.ChatRequest{
-			Model:      session.ModelID,
-			Messages:   messages,
-			Tools:      tools.Definitions(e.toolRuntime(session, chat)),
-			ToolChoice: "auto",
-			Stream:     false,
-		}
+		req := e.chatRequest(session, chat, messages, false)
 		resp, completeErr := e.completeChatWithRetry(ctx, session.ID, client, out, req)
 		if completeErr != nil {
 			return completeErr
@@ -660,11 +648,7 @@ func (e *Engine) maybeUpdateSessionTitle(ctx context.Context, session domain.Ses
 	if err != nil {
 		return "", err
 	}
-	resp, err := client.CompleteChat(ctx, provider.ChatRequest{
-		Model:    session.ModelID,
-		Messages: messages,
-		Stream:   false,
-	})
+	resp, err := client.CompleteChat(ctx, e.chatRequest(session, domain.Chat{}, messages, false))
 	if err != nil {
 		return "", err
 	}
@@ -676,6 +660,33 @@ func (e *Engine) maybeUpdateSessionTitle(ctx context.Context, session domain.Ses
 		return "", err
 	}
 	return title, nil
+}
+
+func (e *Engine) chatRequest(session domain.Session, chat domain.Chat, messages []provider.Message, stream bool) provider.ChatRequest {
+	req := provider.ChatRequest{
+		Model:     session.ModelID,
+		Messages:  messages,
+		Stream:    stream,
+		ExtraBody: provider.RequestExtraBody(e.providerConfigForSession(session), session.ModelID, e.modelPresetForSession(session)),
+	}
+	if len(messages) > 0 && (chat.ID != 0 || chat.WorkflowRole != "") {
+		req.Tools = tools.Definitions(e.toolRuntime(session, chat))
+		req.ToolChoice = "auto"
+	}
+	return req
+}
+
+func (e *Engine) providerConfigForSession(session domain.Session) config.Provider {
+	cfg, _ := e.cfg.Provider(session.ProviderID)
+	return cfg
+}
+
+func (e *Engine) modelPresetForSession(session domain.Session) string {
+	return e.providerConfigForSession(session).ModelPreset
+}
+
+func (e *Engine) preserveThinkingEnabled(session domain.Session) bool {
+	return provider.PreserveThinkingEnabled(session.ModelID, e.modelPresetForSession(session))
 }
 
 func shouldRefreshSessionTitle(promptCount int) bool {
@@ -690,7 +701,7 @@ func (e *Engine) titleSummaryMessages(ctx context.Context, sessionID int64) ([]p
 	start := max(0, len(messages)-8)
 	var transcript []string
 	for _, msg := range messages[start:] {
-		content := stringifyParts(partsByMessage[msg.ID])
+		content := stringifyParts(partsByMessage[msg.ID], false)
 		if strings.TrimSpace(content) == "" {
 			content = msg.Summary
 		}
@@ -1434,7 +1445,7 @@ func (e *Engine) buildPromptEnvelopePreview(ctx context.Context, session domain.
 				envelope.Items = append(envelope.Items[:0], compactedHistoryMessage(summary))
 				continue
 			}
-			items, err := e.conversationMessagesForStoredMessage(msg, partsByMessage[msg.ID])
+			items, err := e.conversationMessagesForStoredMessage(msg, partsByMessage[msg.ID], e.preserveThinkingEnabled(session))
 			if err != nil {
 				return provider.PromptEnvelope{}, err
 			}
@@ -1570,10 +1581,10 @@ func (e *Engine) previewUserMessage(prompt string, drafts []attachment.Draft, re
 	}, true, nil
 }
 
-func (e *Engine) conversationMessagesForStoredMessage(msg domain.Message, parts []domain.Part) ([]provider.Message, error) {
+func (e *Engine) conversationMessagesForStoredMessage(msg domain.Message, parts []domain.Part, preserveThinking bool) ([]provider.Message, error) {
 	switch msg.Role {
 	case domain.MessageRoleAssistant:
-		if assistantMsg, ok := structuredAssistantMessage(parts); ok {
+		if assistantMsg, ok := structuredAssistantMessage(parts, preserveThinking); ok {
 			return []provider.Message{assistantMsg}, nil
 		}
 	case domain.MessageRoleTool:
@@ -1589,7 +1600,7 @@ func (e *Engine) conversationMessagesForStoredMessage(msg domain.Message, parts 
 			return []provider.Message{msg}, nil
 		}
 	}
-	content := stringifyParts(parts)
+	content := stringifyParts(parts, preserveThinking)
 	if strings.TrimSpace(content) == "" {
 		if msg.Role == domain.MessageRoleAssistant && assistantSummaryExcludedFromModel(parts) {
 			return nil, nil
@@ -1716,9 +1727,10 @@ func (e *Engine) resolveReference(meta reference.Metadata) (string, error) {
 	}
 }
 
-func structuredAssistantMessage(parts []domain.Part) (provider.Message, bool) {
+func structuredAssistantMessage(parts []domain.Part, preserveThinking bool) (provider.Message, bool) {
 	var toolCalls []provider.ToolCall
 	textChunks := make([]string, 0, 2)
+	reasoningChunks := make([]string, 0, 1)
 	for _, part := range parts {
 		switch part.Kind {
 		case domain.PartKindToolCall:
@@ -1730,6 +1742,10 @@ func structuredAssistantMessage(parts []domain.Part) (provider.Message, bool) {
 		case domain.PartKindText:
 			if strings.TrimSpace(part.Body) != "" {
 				textChunks = append(textChunks, strings.TrimSpace(part.Body))
+			}
+		case domain.PartKindReasoning:
+			if preserveThinking && strings.TrimSpace(part.Body) != "" {
+				reasoningChunks = append(reasoningChunks, strings.TrimSpace(part.Body))
 			}
 		case domain.PartKindSystemNotice:
 			if strings.TrimSpace(part.Body) != "" && strings.TrimSpace(part.Body) != "usage" {
@@ -1744,7 +1760,7 @@ func structuredAssistantMessage(parts []domain.Part) (provider.Message, bool) {
 	}
 	return provider.Message{
 		Role:      domain.MessageRoleAssistant,
-		Content:   strings.Join(textChunks, "\n\n"),
+		Content:   assistantConversationContent(textChunks, reasoningChunks, preserveThinking),
 		ToolCalls: toolCalls,
 	}, true
 }
@@ -1787,8 +1803,9 @@ func diffBody(parts []domain.Part) string {
 	return ""
 }
 
-func stringifyParts(parts []domain.Part) string {
+func stringifyParts(parts []domain.Part, preserveThinking bool) string {
 	var chunks []string
+	var reasoningChunks []string
 	for _, part := range parts {
 		switch part.Kind {
 		case domain.PartKindCompaction:
@@ -1798,6 +1815,10 @@ func stringifyParts(parts []domain.Part) string {
 		case domain.PartKindReference:
 			continue
 		case domain.PartKindReasoning:
+			if preserveThinking && strings.TrimSpace(part.Body) != "" {
+				reasoningChunks = append(reasoningChunks, strings.TrimSpace(part.Body))
+				continue
+			}
 			chunks = append(chunks, "Reasoning:\n"+part.Body)
 		case domain.PartKindToolCall:
 			if callText := toolCallContext(part); callText != "" {
@@ -1829,7 +1850,30 @@ func stringifyParts(parts []domain.Part) string {
 			chunks = append(chunks, part.Body)
 		}
 	}
+	if preserveThinking && len(reasoningChunks) > 0 {
+		chunks = append([]string{formatThinkingBlock(strings.Join(reasoningChunks, "\n\n"))}, chunks...)
+	}
 	return strings.TrimSpace(strings.Join(chunks, "\n\n"))
+}
+
+func assistantConversationContent(textChunks, reasoningChunks []string, preserveThinking bool) string {
+	body := strings.TrimSpace(strings.Join(textChunks, "\n\n"))
+	if !preserveThinking || len(reasoningChunks) == 0 {
+		return body
+	}
+	thinking := formatThinkingBlock(strings.Join(reasoningChunks, "\n\n"))
+	if body == "" {
+		return thinking
+	}
+	return thinking + "\n\n" + body
+}
+
+func formatThinkingBlock(reasoning string) string {
+	reasoning = strings.TrimSpace(reasoning)
+	if reasoning == "" {
+		return ""
+	}
+	return "<think>\n" + reasoning + "\n</think>"
 }
 
 func (e *Engine) validatePromptAttachments(session domain.Session, drafts []attachment.Draft) error {
@@ -2006,14 +2050,10 @@ func (e *Engine) compactSession(ctx context.Context, session domain.Session, cha
 	if len(messages) <= 1 {
 		return nil
 	}
-	resp, err := client.CompleteChat(ctx, provider.ChatRequest{
-		Model: session.ModelID,
-		Messages: append(messages, provider.Message{
-			Role:    domain.MessageRoleUser,
-			Content: compactPrompt(),
-		}),
-		Stream: false,
-	})
+	resp, err := client.CompleteChat(ctx, e.chatRequest(session, domain.Chat{}, append(messages, provider.Message{
+		Role:    domain.MessageRoleUser,
+		Content: compactPrompt(),
+	}), false))
 	if err != nil {
 		return err
 	}

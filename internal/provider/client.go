@@ -151,6 +151,28 @@ type ChatRequest struct {
 	Tools      []ToolDefinition `json:"tools,omitempty"`
 	ToolChoice string           `json:"tool_choice,omitempty"`
 	Stream     bool             `json:"stream"`
+	ExtraBody  map[string]any   `json:"-"`
+}
+
+func (r ChatRequest) MarshalJSON() ([]byte, error) {
+	body := map[string]any{
+		"model":    r.Model,
+		"messages": r.Messages,
+		"stream":   r.Stream,
+	}
+	if len(r.Tools) > 0 {
+		body["tools"] = r.Tools
+	}
+	if strings.TrimSpace(r.ToolChoice) != "" {
+		body["tool_choice"] = r.ToolChoice
+	}
+	for key, value := range r.ExtraBody {
+		if strings.TrimSpace(key) == "" {
+			continue
+		}
+		body[key] = value
+	}
+	return json.Marshal(body)
 }
 
 type modelsResponse struct {

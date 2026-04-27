@@ -2942,11 +2942,14 @@ func TestSelectModelUpdatesConfigAndCurrentSession(t *testing.T) {
 		currentSession: session,
 	}
 
-	if err := m.selectModel("gpt-4.1-mini"); err != nil {
+	if err := m.selectModel("gpt-4.1-mini", provider.ModelPresetDefault); err != nil {
 		t.Fatal(err)
 	}
 	if m.cfg.DefaultModel != "gpt-4.1-mini" || m.currentSession.ModelID != "gpt-4.1-mini" {
 		t.Fatalf("unexpected model selection state: cfg=%q session=%q", m.cfg.DefaultModel, m.currentSession.ModelID)
+	}
+	if got := m.cfg.Providers["openai"].ModelPreset; got != provider.ModelPresetDefault {
+		t.Fatalf("expected model preset to persist, got %q", got)
 	}
 	reloaded, err := st.GetSession(context.Background(), session.ID)
 	if err != nil {
@@ -2969,6 +2972,29 @@ func TestModelListMsgOpensModelDialog(t *testing.T) {
 	next := updated.(Model)
 	if !next.hasModelDialog() {
 		t.Fatal("expected model dialog to open")
+	}
+}
+
+func TestOpenModelDialogUsesProviderPreset(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.Providers = map[string]config.Provider{
+		"openai": {
+			BaseURL:      "https://api.openai.com/v1",
+			APIKey:       "secret",
+			DefaultModel: "Qwen/Qwen3.6-35B-A3B",
+			ModelPreset:  provider.ModelPresetQwen36PreserveThinking,
+		},
+	}
+	cfg.DefaultProvider = "openai"
+	cfg.DefaultModel = "Qwen/Qwen3.6-35B-A3B"
+
+	m := Model{cfg: cfg}
+	m.openModelDialog("openai", []domain.Model{{ID: "Qwen/Qwen3.6-35B-A3B"}})
+	if m.modelDialog == nil {
+		t.Fatal("expected model dialog")
+	}
+	if m.modelDialog.PresetID != provider.ModelPresetQwen36PreserveThinking {
+		t.Fatalf("expected persisted provider preset, got %q", m.modelDialog.PresetID)
 	}
 }
 

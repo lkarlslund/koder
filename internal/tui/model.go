@@ -5100,7 +5100,7 @@ func (m *Model) handleModelDialogKey(msg ui.KeyMsg) ui.Cmd {
 	action := m.modelDialog.Update(msg)
 	switch action.Kind {
 	case dialogs.ModelDialogActionSelect:
-		if err := m.selectModel(action.ModelID); err != nil {
+		if err := m.selectModel(action.ModelID, action.PresetID); err != nil {
 			m.status = err.Error()
 			return m.syncWindowTitleCmd()
 		}
@@ -5687,7 +5687,7 @@ func (m *Model) openModelDialog(providerID string, models []domain.Model) {
 	if strings.TrimSpace(current) == "" {
 		current = m.cfg.DefaultModel
 	}
-	dialog := dialogs.NewModelDialog(providerID, models, current)
+	dialog := dialogs.NewModelDialog(providerID, models, current, m.providerModelPreset(providerID))
 	m.modelDialog = &dialog
 	m.syncComposerVisibility()
 }
@@ -5986,6 +5986,9 @@ func (m *Model) saveProviderDraft(draft provider.ConnectDraft) error {
 		if next.ContextWindow == 0 {
 			next.ContextWindow = existing.ContextWindow
 		}
+		if strings.TrimSpace(next.ModelPreset) == "" {
+			next.ModelPreset = existing.ModelPreset
+		}
 		if next.AutoCompactAt == 0 {
 			next.AutoCompactAt = existing.AutoCompactAt
 		}
@@ -6070,7 +6073,7 @@ func (m *Model) disconnectProvider(providerID string) error {
 	return nil
 }
 
-func (m *Model) selectModel(modelID string) error {
+func (m *Model) selectModel(modelID string, presetID string) error {
 	modelID = strings.TrimSpace(modelID)
 	if modelID == "" {
 		return fmt.Errorf("model id is required")
@@ -6084,6 +6087,7 @@ func (m *Model) selectModel(modelID string) error {
 		return fmt.Errorf("provider %q not configured", providerID)
 	}
 	providerCfg.DefaultModel = modelID
+	providerCfg.ModelPreset = provider.NormalizePresetSelection(presetID)
 	m.cfg.Providers[providerID] = providerCfg
 	if providerID == m.cfg.DefaultProvider {
 		m.cfg.DefaultModel = modelID
@@ -6104,6 +6108,13 @@ func (m *Model) selectModel(modelID string) error {
 		m.currentSession.ModelID = modelID
 	}
 	return nil
+}
+
+func (m *Model) providerModelPreset(providerID string) string {
+	if providerCfg, ok := m.cfg.Provider(providerID); ok {
+		return provider.NormalizePresetSelection(providerCfg.ModelPreset)
+	}
+	return provider.ModelPresetAuto
 }
 
 func (m *Model) activeProviderID() string {

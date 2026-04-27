@@ -378,6 +378,28 @@ func TestMessageMarshalJSONWithContentParts(t *testing.T) {
 	}
 }
 
+func TestChatRequestMarshalJSONMergesExtraBody(t *testing.T) {
+	buf, err := json.Marshal(ChatRequest{
+		Model:  "Qwen/Qwen3.6-35B-A3B",
+		Stream: false,
+		ExtraBody: map[string]any{
+			"chat_template_kwargs": map[string]any{
+				"preserve_thinking": true,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := string(buf)
+	if !strings.Contains(raw, `"chat_template_kwargs":{"preserve_thinking":true}`) {
+		t.Fatalf("expected merged extra body, got %s", raw)
+	}
+	if strings.Contains(raw, `"extra_body"`) {
+		t.Fatalf("expected extra body to be flattened into the request, got %s", raw)
+	}
+}
+
 func TestCapabilityStoreEnrichesAndCachesModels(t *testing.T) {
 	store := NewCapabilityStore(t.TempDir())
 	cfg := config.Provider{BaseURL: "https://api.openai.com/v1"}
