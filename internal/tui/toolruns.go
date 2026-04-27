@@ -9,7 +9,6 @@ import (
 
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/store"
-	"github.com/lkarlslund/koder/internal/theme"
 	"github.com/lkarlslund/koder/internal/tools"
 	_ "github.com/lkarlslund/koder/internal/tools/all"
 	"github.com/lkarlslund/koder/internal/ui"
@@ -463,86 +462,6 @@ func toolRunHasTerminalStatus(status ui.ToolRunStatus) bool {
 	}
 }
 
-func (m *Model) cachedTranscriptBlock(block transcriptBlock) cachedTranscriptBlock {
-	if m.transcriptCache == nil {
-		m.transcriptCache = make(map[string]cachedTranscriptBlock)
-	}
-	key := m.transcriptBlockCacheKey(block)
-	element := m.renderTranscriptBlockElement(block)
-	lineCount := m.estimateTranscriptBlockHeight(block)
-	if cached, ok := m.transcriptCache[key]; ok {
-		if reusable, ok := cached.element.(*ui.CachedElement); ok {
-			reusable.SetChild(element)
-		} else {
-			cached.element = element
-		}
-		cached.lineCount = lineCount
-		if block.Kind == transcriptBlockToolRun && strings.TrimSpace(block.ToolRun.ID) != "" {
-			cached.controlID = "toolrun:" + block.ToolRun.ID
-		}
-		m.transcriptCache[key] = cached
-		return cached
-	}
-	if element != nil {
-		element = ui.NewCachedElement(element, lineCount)
-	}
-	cached := cachedTranscriptBlock{
-		element:   element,
-		lineCount: lineCount,
-	}
-	if block.Kind == transcriptBlockToolRun && strings.TrimSpace(block.ToolRun.ID) != "" {
-		cached.controlID = "toolrun:" + block.ToolRun.ID
-	}
-	m.transcriptCache[key] = cached
-	return cached
-}
-
-func (m *Model) estimateTranscriptBlockHeight(block transcriptBlock) int {
-	width := max(1, m.viewport.Width)
-	switch block.Kind {
-	case transcriptBlockToolRun:
-		lines := 3
-		lines += strings.Count(block.ToolRun.Title, "\n")
-		lines += strings.Count(block.ToolRun.Subtitle, "\n")
-		lines += strings.Count(block.ToolRun.Preview, "\n")
-		lines += strings.Count(block.ToolRun.Output, "\n")
-		lines += strings.Count(block.ToolRun.Diff, "\n")
-		lines += strings.Count(block.ToolRun.ErrorText, "\n")
-		return max(3, lines)
-	case transcriptBlockMessage:
-		summary := strings.TrimSpace(block.Message.Summary)
-		if summary == "" {
-			summary = "message"
-		}
-		lines := strings.Count(summary, "\n") + 1
-		return max(1, lines+(len([]rune(summary))/max(24, width)))
-	default:
-		return 1
-	}
-}
-
-func (m *Model) transcriptBlockCacheKey(block transcriptBlock) string {
-	switch block.Kind {
-	case transcriptBlockToolRun:
-		return strings.Join([]string{
-			"toolrun",
-			m.transcriptBlockIdentityKey(block),
-			strconv.Itoa(max(0, m.viewport.Width)),
-			strconv.FormatBool(m.expandedToolRuns[block.ToolRun.ID]),
-			strconv.FormatBool(m.expandedToolRunCommands[block.ToolRun.ID]),
-		}, ":")
-	default:
-		return strings.Join([]string{
-			"message",
-			m.transcriptBlockIdentityKey(block),
-			strconv.Itoa(max(0, m.viewport.Width)),
-			strconv.FormatBool(m.showReasoning),
-			strconv.FormatBool(m.showSystem),
-			strconv.FormatBool(m.halfBlocksEnabled()),
-		}, ":")
-	}
-}
-
 func (m *Model) transcriptBlockIdentityKey(block transcriptBlock) string {
 	switch block.Kind {
 	case transcriptBlockToolRun:
@@ -564,49 +483,6 @@ func (m *Model) transcriptBlockIdentityKey(block transcriptBlock) string {
 	}
 }
 
-func (m *Model) renderTranscriptBlockElement(block transcriptBlock) ui.Element {
-	switch block.Kind {
-	case transcriptBlockToolRun:
-		return toolRunCardElement{
-			Run:             block.ToolRun,
-			Palette:         m.palette,
-			Width:           m.viewport.Width,
-			ExpandedOutput:  m.expandedToolRuns[block.ToolRun.ID],
-			ExpandedCommand: m.expandedToolRunCommands[block.ToolRun.ID],
-		}
-	default:
-		return m.renderTranscriptMessageElement(block.Message, block.Parts)
-	}
-}
-
-type toolRunCardElement struct {
-	Run             ui.ToolRun
-	Palette         theme.Palette
-	Width           int
-	ExpandedOutput  bool
-	ExpandedCommand bool
-}
-
-func (e toolRunCardElement) Measure(_ *ui.Context, constraints ui.Constraints) ui.Size {
-	width := e.Width
-	if width <= 0 {
-		width = constraints.MaxW
-	}
-	return constraints.Clamp(e.Run.CardSurface(e.Palette, width, e.ExpandedOutput, e.ExpandedCommand).Size())
-}
-
-func (e toolRunCardElement) Render(ctx *ui.Context, bounds ui.Rect) ui.Surface {
-	width := e.Width
-	if width <= 0 {
-		width = bounds.W
-	}
-	surface := e.Run.CardSurface(e.Palette, width, e.ExpandedOutput, e.ExpandedCommand)
-	if ctx != nil && ctx.Runtime != nil {
-		surface.RegisterControls(ctx.Runtime, bounds.X, bounds.Y)
-	}
-	return surface
-}
-
 func (m *Model) approvalToolRun(item store.Approval) ui.ToolRun {
 	run := ui.ToolRun{
 		ID:         approvalFallbackID(item.ID, item.Tool, item.Command),
@@ -624,15 +500,24 @@ func (m *Model) approvalToolRun(item store.Approval) ui.ToolRun {
 		run.Subtitle = presentation.Subtitle
 		run.Preview = firstNonEmptyString(presentation.Preview, run.Preview)
 	}
-	blocks := m.transcriptBlocksState
-	if len(blocks) == 0 {
-		blocks = m.transcriptBlocks()
-	}
-	for _, block := range blocks {
-		if block.Kind != transcriptBlockToolRun {
+	for _, itemController := range m.transcriptItems {
+		candidateItem, ok := itemController.(toolRunTranscriptItem)
+		if !ok {
 			continue
 		}
-		candidate := block.ToolRun
+		var candidate ui.ToolRun
+		switch concrete := candidateItem.(type) {
+		case *bashToolRunTranscriptItem:
+			candidate = concrete.run
+		case *readToolRunTranscriptItem:
+			candidate = concrete.run
+		case *writeToolRunTranscriptItem:
+			candidate = concrete.run
+		case *editToolRunTranscriptItem:
+			candidate = concrete.run
+		case *genericToolRunTranscriptItem:
+			candidate = concrete.run
+		}
 		if candidate.ApprovalID == item.ID {
 			mergeToolRun(&run, candidate)
 			run.Status = ui.ToolRunStatusPendingApproval

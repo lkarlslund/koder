@@ -425,11 +425,11 @@ type Model struct {
 	approvals               []store.Approval
 	viewport                transcriptViewport
 	transcriptControls      []ui.Control
-	transcriptCache         map[string]cachedTranscriptBlock
 	retainedTranscript      *ui.RetainedTranscript
-	transcriptItems         []ui.TranscriptItem
-	transcriptBlocksState   []transcriptBlock
-	transcriptRenderKeys    []string
+	transcriptItems         []transcriptItemController
+	messageItemIndexByID    map[int64]int
+	toolRunItemIndexByID    map[string]int
+	toolRunItemIndexByAppr  map[int64]int
 	pendingTranscriptIndex  int
 	transcriptDirty         bool
 	mainScreen              *mainScreenWidget
@@ -535,12 +535,6 @@ type composerQueryState struct {
 	hasMentionQuery bool
 }
 
-type cachedTranscriptBlock struct {
-	element   ui.Element
-	lineCount int
-	controlID string
-}
-
 func New(cfg config.Config, st *store.Store, a *agent.Engine, mode StartupMode, debug *debugsrv.Recorder) (Model, error) {
 	workdir, err := os.Getwd()
 	if err != nil {
@@ -583,6 +577,9 @@ func NewWithWorkdir(cfg config.Config, st *store.Store, a *agent.Engine, mode St
 		expandedToolRuns:        make(map[string]bool),
 		expandedToolRunCommands: make(map[string]bool),
 		pendingTranscriptIndex:  -1,
+		messageItemIndexByID:    make(map[int64]int),
+		toolRunItemIndexByID:    make(map[string]int),
+		toolRunItemIndexByAppr:  make(map[int64]int),
 		transcriptDirty:         true,
 		parts:                   make(map[int64][]domain.Part),
 		status:                  "Ready",
@@ -1208,8 +1205,17 @@ func (m *Model) handleMainWindowKey(msg ui.KeyMsg) (bool, ui.Cmd) {
 	case "alt+r":
 		anchor := m.captureTranscriptViewportAnchor()
 		m.showReasoning = !m.showReasoning
-		if !m.replaceTranscriptItemsInPlace(func(block transcriptBlock) bool {
-			return block.Kind == transcriptBlockMessage
+		if !m.replaceTranscriptItemsInPlace(func(item transcriptItemController) bool {
+			switch typed := item.(type) {
+			case *assistantMessageTranscriptItem:
+				typed.SetReasoningVisible(m.showReasoning)
+				return true
+			case *pendingAssistantTranscriptItem:
+				typed.SetReasoningVisible(m.showReasoning)
+				return true
+			default:
+				return false
+			}
 		}) {
 			m.invalidateTranscript()
 		}
@@ -1218,8 +1224,12 @@ func (m *Model) handleMainWindowKey(msg ui.KeyMsg) (bool, ui.Cmd) {
 	case "alt+p":
 		anchor := m.captureTranscriptViewportAnchor()
 		m.showSystem = !m.showSystem
-		if !m.replaceTranscriptItemsInPlace(func(block transcriptBlock) bool {
-			return block.Kind == transcriptBlockMessage
+		if !m.replaceTranscriptItemsInPlace(func(item transcriptItemController) bool {
+			if typed, ok := item.(*assistantMessageTranscriptItem); ok {
+				typed.SetSystemVisible(m.showSystem)
+				return true
+			}
+			return false
 		}) {
 			m.invalidateTranscript()
 		}
@@ -1410,9 +1420,39 @@ func (m *Model) handleMouse(msg ui.MouseMsg) (ui.Model, ui.Cmd, bool) {
 				}
 				m.expandedToolRuns[runID] = !m.expandedToolRuns[runID]
 			}
-			if !m.replaceTranscriptItemsInPlace(func(block transcriptBlock) bool {
-				return block.Kind == transcriptBlockToolRun && block.ToolRun.ID == runID
-			}) {
+			updated := false
+			if idx, ok := m.toolRunItemIndexByID[runID]; ok && idx >= 0 && idx < len(m.transcriptItems) {
+				if item, ok := m.transcriptItems[idx].(toolRunTranscriptItem); ok {
+					switch part {
+					case "command":
+						item.ToggleCommand()
+						m.expandedToolRunCommands[runID] = false
+						switch concrete := item.(type) {
+						case *bashToolRunTranscriptItem:
+							m.expandedToolRunCommands[runID] = concrete.expandedCommand
+						case *genericToolRunTranscriptItem:
+							m.expandedToolRunCommands[runID] = concrete.expandedCommand
+						}
+					default:
+						item.ToggleOutput()
+						m.expandedToolRuns[runID] = false
+						switch concrete := item.(type) {
+						case *bashToolRunTranscriptItem:
+							m.expandedToolRuns[runID] = concrete.expandedOutput
+						case *readToolRunTranscriptItem:
+							m.expandedToolRuns[runID] = concrete.expandedOutput
+						case *writeToolRunTranscriptItem:
+							m.expandedToolRuns[runID] = concrete.expandedOutput
+						case *editToolRunTranscriptItem:
+							m.expandedToolRuns[runID] = concrete.expandedOutput
+						case *genericToolRunTranscriptItem:
+							m.expandedToolRuns[runID] = concrete.expandedOutput
+						}
+					}
+					updated = m.replaceTranscriptItemAt(idx)
+				}
+			}
+			if !updated {
 				m.invalidateTranscript()
 			}
 			m.refreshViewportPreserve()
@@ -2360,80 +2400,168 @@ func (m *Model) invalidateTranscript() {
 	m.invalidateBodyCache()
 }
 
-func (m *Model) transcriptPlaceholderItems() []ui.TranscriptItem {
+func (m *Model) transcriptPlaceholderItems() []transcriptItemController {
 	if m.currentSession.ID == 0 && len(m.messages) == 0 && !m.cfg.HasUsableDefaultProvider() {
-		return []ui.TranscriptItem{{
-			Key:     "no-provider",
-			Element: ui.NewCachedElement(ui.Paragraph{Text: "No provider configured.\n\nType /connect to add one before sending prompts."}, 3),
-		}}
+		item := newPlaceholderTranscriptItem("no-provider", 0, "No provider configured.\n\nType /connect to add one before sending prompts.")
+		item.Refresh(m)
+		return []transcriptItemController{item}
 	}
 	if m.currentSession.ID == 0 && len(m.messages) == 0 {
-		return []ui.TranscriptItem{{
-			Key:     "empty",
-			Element: ui.NewCachedElement(ui.Paragraph{Text: "Start by asking a question or type / for commands."}, 1),
-		}}
+		item := newPlaceholderTranscriptItem("empty", 0, "Start by asking a question or type / for commands.")
+		item.Refresh(m)
+		return []transcriptItemController{item}
 	}
 	return nil
 }
 
 func (m *Model) rebuildTranscriptState() []ui.TranscriptItem {
 	if items := m.transcriptPlaceholderItems(); len(items) > 0 {
-		m.transcriptBlocksState = nil
 		m.transcriptItems = items
-		m.transcriptRenderKeys = nil
+		m.messageItemIndexByID = make(map[int64]int)
+		m.toolRunItemIndexByID = make(map[string]int)
+		m.toolRunItemIndexByAppr = make(map[int64]int)
 		m.pendingTranscriptIndex = -1
-		return items
+		return m.uiTranscriptItems()
+	}
+	prevByKey := make(map[string]transcriptItemController, len(m.transcriptItems))
+	for _, item := range m.transcriptItems {
+		prevByKey[item.Key()] = item
 	}
 	blocks := m.transcriptBlocks()
-	items := make([]ui.TranscriptItem, 0, len(blocks))
-	renderKeys := make([]string, 0, len(blocks))
+	controllers := make([]transcriptItemController, 0, len(blocks))
+	messageIdx := make(map[int64]int)
+	toolIdx := make(map[string]int)
+	toolAppr := make(map[int64]int)
 	pendingIndex := -1
 	for idx, block := range blocks {
-		if block.Pending {
-			pendingIndex = idx
+		gap := 0
+		if idx > 0 {
+			gap = renderedSeparatorHeight(m.transcriptSeparator(blocks[idx-1], block))
 		}
-		items = append(items, m.transcriptItemFromBlocks(blocks, idx))
-		renderKeys = append(renderKeys, m.transcriptBlockCacheKey(block))
+		controller := m.transcriptControllerFromBlock(prevByKey, block, gap)
+		controller.Refresh(m)
+		controllers = append(controllers, controller)
+		switch typed := controller.(type) {
+		case *pendingAssistantTranscriptItem:
+			pendingIndex = idx
+		case *userMessageTranscriptItem:
+			messageIdx[typed.message.ID] = idx
+		case *assistantMessageTranscriptItem:
+			messageIdx[typed.message.ID] = idx
+		case toolRunTranscriptItem:
+			if id := strings.TrimSpace(typed.RunID()); id != "" {
+				toolIdx[id] = idx
+			}
+			switch concrete := typed.(type) {
+			case *bashToolRunTranscriptItem:
+				if concrete.run.ApprovalID > 0 {
+					toolAppr[concrete.run.ApprovalID] = idx
+				}
+			case *readToolRunTranscriptItem:
+				if concrete.run.ApprovalID > 0 {
+					toolAppr[concrete.run.ApprovalID] = idx
+				}
+			case *writeToolRunTranscriptItem:
+				if concrete.run.ApprovalID > 0 {
+					toolAppr[concrete.run.ApprovalID] = idx
+				}
+			case *editToolRunTranscriptItem:
+				if concrete.run.ApprovalID > 0 {
+					toolAppr[concrete.run.ApprovalID] = idx
+				}
+			case *genericToolRunTranscriptItem:
+				if concrete.run.ApprovalID > 0 {
+					toolAppr[concrete.run.ApprovalID] = idx
+				}
+			}
+		}
 	}
-	m.transcriptBlocksState = blocks
-	m.transcriptItems = items
-	m.transcriptRenderKeys = renderKeys
+	m.transcriptItems = controllers
+	m.messageItemIndexByID = messageIdx
+	m.toolRunItemIndexByID = toolIdx
+	m.toolRunItemIndexByAppr = toolAppr
 	m.pendingTranscriptIndex = pendingIndex
+	return m.uiTranscriptItems()
+}
+
+func (m *Model) transcriptControllerFromBlock(prevByKey map[string]transcriptItemController, block transcriptBlock, gap int) transcriptItemController {
+	key := m.transcriptBlockIdentityKey(block)
+	if existing := prevByKey[key]; existing != nil {
+		existing.SetGapBefore(gap)
+		switch typed := existing.(type) {
+		case *userMessageTranscriptItem:
+			if block.Kind == transcriptBlockMessage {
+				typed.Update(block.Message, block.Parts)
+				return typed
+			}
+		case *assistantMessageTranscriptItem:
+			if block.Kind == transcriptBlockMessage && !block.Pending {
+				typed.Update(block.Message, block.Parts)
+				typed.SetReasoningVisible(m.showReasoning)
+				typed.SetSystemVisible(m.showSystem)
+				return typed
+			}
+		case *pendingAssistantTranscriptItem:
+			if block.Kind == transcriptBlockMessage && block.Pending {
+				typed.Reset(block.Message.CreatedAt, firstPartBody(block.Parts, domain.PartKindText), firstPartBody(block.Parts, domain.PartKindReasoning))
+				typed.SetReasoningVisible(m.showReasoning)
+				return typed
+			}
+		case toolRunTranscriptItem:
+			if block.Kind == transcriptBlockToolRun {
+				typed.UpdateRun(block.ToolRun)
+				return typed
+			}
+		case *placeholderTranscriptItem:
+			return typed
+		}
+	}
+	switch {
+	case block.Kind == transcriptBlockToolRun:
+		return newToolRunTranscriptItem(gap, block.ToolRun, m.expandedToolRuns[block.ToolRun.ID], m.expandedToolRunCommands[block.ToolRun.ID])
+	case block.Pending:
+		item := newPendingAssistantTranscriptItem(gap, block.Message.CreatedAt, m.showReasoning)
+		item.Reset(block.Message.CreatedAt, firstPartBody(block.Parts, domain.PartKindText), firstPartBody(block.Parts, domain.PartKindReasoning))
+		return item
+	case block.Message.Role == domain.MessageRoleUser:
+		return newUserMessageTranscriptItem(key, gap, block.Message, block.Parts)
+	default:
+		return newAssistantMessageTranscriptItem(key, gap, block.Message, block.Parts, m.showReasoning, m.showSystem)
+	}
+}
+
+func firstPartBody(parts []domain.Part, kind domain.PartKind) string {
+	for _, part := range parts {
+		if part.Kind == kind {
+			return part.Body
+		}
+	}
+	return ""
+}
+
+func (m *Model) uiTranscriptItems() []ui.TranscriptItem {
+	items := make([]ui.TranscriptItem, 0, len(m.transcriptItems))
+	for _, item := range m.transcriptItems {
+		items = append(items, item.UIItem())
+	}
 	return items
 }
 
-func (m *Model) transcriptItemFromBlocks(blocks []transcriptBlock, index int) ui.TranscriptItem {
-	block := blocks[index]
-	gap := 0
-	if index > 0 {
-		gap = renderedSeparatorHeight(m.transcriptSeparator(blocks[index-1], block))
-	}
-	cached := m.cachedTranscriptBlock(block)
-	return ui.TranscriptItem{
-		Key:       m.transcriptBlockIdentityKey(block),
-		Element:   cached.element,
-		GapBefore: gap,
-	}
-}
-
 func (m *Model) replaceTranscriptItemAt(index int) bool {
-	if m.transcriptDirty || index < 0 || index >= len(m.transcriptBlocksState) || index >= len(m.transcriptItems) {
+	if m.transcriptDirty || index < 0 || index >= len(m.transcriptItems) {
 		return false
 	}
 	retained := m.ensureRetainedTranscript()
 	if len(retained.Items()) == 0 {
 		return false
 	}
-	item := m.transcriptItemFromBlocks(m.transcriptBlocksState, index)
-	m.transcriptItems[index] = item
-	if index < len(m.transcriptRenderKeys) {
-		m.transcriptRenderKeys[index] = m.transcriptBlockCacheKey(m.transcriptBlocksState[index])
-	}
-	retained.Replace(index, item)
+	item := m.transcriptItems[index]
+	item.Refresh(m)
+	retained.Replace(index, item.UIItem())
 	return true
 }
 
-func (m *Model) replaceTranscriptItemsInPlace(match func(transcriptBlock) bool) bool {
+func (m *Model) replaceTranscriptItemsInPlace(match func(transcriptItemController) bool) bool {
 	if m.transcriptDirty {
 		return false
 	}
@@ -2442,13 +2570,12 @@ func (m *Model) replaceTranscriptItemsInPlace(match func(transcriptBlock) bool) 
 		return false
 	}
 	updated := false
-	for idx, block := range m.transcriptBlocksState {
-		if match != nil && !match(block) {
+	for idx, item := range m.transcriptItems {
+		if match != nil && !match(item) {
 			continue
 		}
-		item := m.transcriptItemFromBlocks(m.transcriptBlocksState, idx)
-		m.transcriptItems[idx] = item
-		retained.Replace(idx, item)
+		item.Refresh(m)
+		retained.Replace(idx, item.UIItem())
 		updated = true
 	}
 	return updated
@@ -2462,60 +2589,112 @@ func (m *Model) syncPendingTranscriptItem() bool {
 	if len(retained.Items()) == 0 {
 		return false
 	}
-	parts := m.pendingAssistantParts()
-	if len(parts) == 0 {
-		if m.pendingTranscriptIndex < 0 || m.pendingTranscriptIndex >= len(m.transcriptBlocksState) {
+	if strings.TrimSpace(m.pendingAssistant.Text) == "" && strings.TrimSpace(m.pendingAssistant.Reasoning) == "" {
+		if m.pendingTranscriptIndex < 0 || m.pendingTranscriptIndex >= len(m.transcriptItems) {
 			return false
 		}
 		retained.Remove(m.pendingTranscriptIndex)
-		m.transcriptBlocksState = append(m.transcriptBlocksState[:m.pendingTranscriptIndex], m.transcriptBlocksState[m.pendingTranscriptIndex+1:]...)
 		m.transcriptItems = append(m.transcriptItems[:m.pendingTranscriptIndex], m.transcriptItems[m.pendingTranscriptIndex+1:]...)
-		if m.pendingTranscriptIndex < len(m.transcriptRenderKeys) {
-			m.transcriptRenderKeys = append(m.transcriptRenderKeys[:m.pendingTranscriptIndex], m.transcriptRenderKeys[m.pendingTranscriptIndex+1:]...)
-		}
+		m.reindexTranscriptControllers()
 		m.pendingTranscriptIndex = -1
 		return true
 	}
 	if m.pendingAssistant.CreatedAt.IsZero() {
 		m.pendingAssistant.CreatedAt = time.Now().UTC()
 	}
-	block := transcriptBlock{
-		Kind:    transcriptBlockMessage,
-		Pending: true,
-		Message: domain.Message{
-			Role:      domain.MessageRoleAssistant,
-			CreatedAt: m.pendingAssistant.CreatedAt,
-		},
-		Parts: parts,
+	if m.pendingTranscriptIndex >= 0 && m.pendingTranscriptIndex < len(m.transcriptItems) {
+		if item, ok := m.transcriptItems[m.pendingTranscriptIndex].(*pendingAssistantTranscriptItem); ok {
+			item.Reset(m.pendingAssistant.CreatedAt, m.pendingAssistant.Text, m.pendingAssistant.Reasoning)
+			item.SetReasoningVisible(m.showReasoning)
+			return m.replaceTranscriptItemAt(m.pendingTranscriptIndex)
+		}
 	}
-	if m.pendingTranscriptIndex >= 0 && m.pendingTranscriptIndex < len(m.transcriptBlocksState) {
-		m.transcriptBlocksState[m.pendingTranscriptIndex] = block
-		return m.replaceTranscriptItemAt(m.pendingTranscriptIndex)
+	gap := 0
+	if len(m.transcriptItems) > 0 {
+		prevBlock := m.transcriptBlockForController(m.transcriptItems[len(m.transcriptItems)-1])
+		nextBlock := transcriptBlock{Kind: transcriptBlockMessage, Pending: true, Message: domain.Message{Role: domain.MessageRoleAssistant, CreatedAt: m.pendingAssistant.CreatedAt}}
+		gap = renderedSeparatorHeight(m.transcriptSeparator(prevBlock, nextBlock))
 	}
-	m.transcriptBlocksState = append(m.transcriptBlocksState, block)
-	item := m.transcriptItemFromBlocks(m.transcriptBlocksState, len(m.transcriptBlocksState)-1)
+	item := newPendingAssistantTranscriptItem(gap, m.pendingAssistant.CreatedAt, m.showReasoning)
+	item.Reset(m.pendingAssistant.CreatedAt, m.pendingAssistant.Text, m.pendingAssistant.Reasoning)
+	item.Refresh(m)
 	m.transcriptItems = append(m.transcriptItems, item)
-	m.transcriptRenderKeys = append(m.transcriptRenderKeys, m.transcriptBlockCacheKey(block))
-	retained.Add(item)
-	m.pendingTranscriptIndex = len(m.transcriptItems) - 1
+	retained.Add(item.UIItem())
+	m.reindexTranscriptControllers()
 	return true
 }
 
-func (m *Model) syncTranscriptPresentation() {
-	if m.transcriptDirty || len(m.transcriptBlocksState) == 0 || len(m.transcriptBlocksState) != len(m.transcriptItems) {
-		return
-	}
-	if len(m.transcriptRenderKeys) != len(m.transcriptBlocksState) {
-		m.transcriptRenderKeys = make([]string, len(m.transcriptBlocksState))
-	}
-	for idx, block := range m.transcriptBlocksState {
-		key := m.transcriptBlockCacheKey(block)
-		if m.transcriptRenderKeys[idx] == key {
-			continue
+func (m *Model) reindexTranscriptControllers() {
+	m.messageItemIndexByID = make(map[int64]int)
+	m.toolRunItemIndexByID = make(map[string]int)
+	m.toolRunItemIndexByAppr = make(map[int64]int)
+	m.pendingTranscriptIndex = -1
+	for idx, item := range m.transcriptItems {
+		switch typed := item.(type) {
+		case *userMessageTranscriptItem:
+			m.messageItemIndexByID[typed.message.ID] = idx
+		case *assistantMessageTranscriptItem:
+			m.messageItemIndexByID[typed.message.ID] = idx
+		case *pendingAssistantTranscriptItem:
+			m.pendingTranscriptIndex = idx
+		case toolRunTranscriptItem:
+			if id := strings.TrimSpace(typed.RunID()); id != "" {
+				m.toolRunItemIndexByID[id] = idx
+			}
+			switch concrete := typed.(type) {
+			case *bashToolRunTranscriptItem:
+				if concrete.run.ApprovalID > 0 {
+					m.toolRunItemIndexByAppr[concrete.run.ApprovalID] = idx
+				}
+			case *readToolRunTranscriptItem:
+				if concrete.run.ApprovalID > 0 {
+					m.toolRunItemIndexByAppr[concrete.run.ApprovalID] = idx
+				}
+			case *writeToolRunTranscriptItem:
+				if concrete.run.ApprovalID > 0 {
+					m.toolRunItemIndexByAppr[concrete.run.ApprovalID] = idx
+				}
+			case *editToolRunTranscriptItem:
+				if concrete.run.ApprovalID > 0 {
+					m.toolRunItemIndexByAppr[concrete.run.ApprovalID] = idx
+				}
+			case *genericToolRunTranscriptItem:
+				if concrete.run.ApprovalID > 0 {
+					m.toolRunItemIndexByAppr[concrete.run.ApprovalID] = idx
+				}
+			}
 		}
-		m.transcriptRenderKeys[idx] = key
-		_ = m.replaceTranscriptItemAt(idx)
 	}
+}
+
+func (m *Model) transcriptBlockForController(item transcriptItemController) transcriptBlock {
+	switch typed := item.(type) {
+	case *userMessageTranscriptItem:
+		return transcriptBlock{Kind: transcriptBlockMessage, Message: typed.message, Parts: typed.parts}
+	case *assistantMessageTranscriptItem:
+		return transcriptBlock{Kind: transcriptBlockMessage, Message: typed.message, Parts: typed.parts}
+	case *pendingAssistantTranscriptItem:
+		return transcriptBlock{
+			Kind:    transcriptBlockMessage,
+			Pending: true,
+			Message: domain.Message{Role: domain.MessageRoleAssistant, CreatedAt: typed.createdAt},
+			Parts:   typed.Parts(),
+		}
+	case toolRunTranscriptItem:
+		switch concrete := typed.(type) {
+		case *bashToolRunTranscriptItem:
+			return transcriptBlock{Kind: transcriptBlockToolRun, ToolRun: concrete.run}
+		case *readToolRunTranscriptItem:
+			return transcriptBlock{Kind: transcriptBlockToolRun, ToolRun: concrete.run}
+		case *writeToolRunTranscriptItem:
+			return transcriptBlock{Kind: transcriptBlockToolRun, ToolRun: concrete.run}
+		case *editToolRunTranscriptItem:
+			return transcriptBlock{Kind: transcriptBlockToolRun, ToolRun: concrete.run}
+		case *genericToolRunTranscriptItem:
+			return transcriptBlock{Kind: transcriptBlockToolRun, ToolRun: concrete.run}
+		}
+	}
+	return transcriptBlock{}
 }
 
 func (m *Model) transcriptElement(runtime *ui.Runtime) ui.Element {
@@ -2543,9 +2722,76 @@ func (m *Model) syncRetainedTranscript() *ui.RetainedTranscript {
 		m.syncRetainedTranscriptItems(retained, items)
 		m.transcriptDirty = false
 	} else {
-		m.syncTranscriptPresentation()
+		m.syncTranscriptControllerState()
 	}
 	return retained
+}
+
+func (m *Model) syncTranscriptControllerState() {
+	if len(m.transcriptItems) == 0 {
+		return
+	}
+	for idx, item := range m.transcriptItems {
+		changed := false
+		switch typed := item.(type) {
+		case *assistantMessageTranscriptItem:
+			if typed.showReasoning != m.showReasoning {
+				typed.SetReasoningVisible(m.showReasoning)
+				changed = true
+			}
+			if typed.showSystem != m.showSystem {
+				typed.SetSystemVisible(m.showSystem)
+				changed = true
+			}
+		case *pendingAssistantTranscriptItem:
+			if typed.showReasoning != m.showReasoning {
+				typed.SetReasoningVisible(m.showReasoning)
+				changed = true
+			}
+		case toolRunTranscriptItem:
+			wantOut := m.expandedToolRuns[typed.RunID()]
+			switch concrete := typed.(type) {
+			case *bashToolRunTranscriptItem:
+				wantCmd := m.expandedToolRunCommands[typed.RunID()]
+				if concrete.expandedOutput != wantOut {
+					concrete.SetExpandedOutput(wantOut)
+					changed = true
+				}
+				if concrete.expandedCommand != wantCmd {
+					concrete.SetExpandedCommand(wantCmd)
+					changed = true
+				}
+			case *genericToolRunTranscriptItem:
+				wantCmd := m.expandedToolRunCommands[typed.RunID()]
+				if concrete.expandedOutput != wantOut {
+					concrete.SetExpandedOutput(wantOut)
+					changed = true
+				}
+				if concrete.expandedCommand != wantCmd {
+					concrete.SetExpandedCommand(wantCmd)
+					changed = true
+				}
+			case *readToolRunTranscriptItem:
+				if concrete.expandedOutput != wantOut {
+					concrete.SetExpandedOutput(wantOut)
+					changed = true
+				}
+			case *writeToolRunTranscriptItem:
+				if concrete.expandedOutput != wantOut {
+					concrete.SetExpandedOutput(wantOut)
+					changed = true
+				}
+			case *editToolRunTranscriptItem:
+				if concrete.expandedOutput != wantOut {
+					concrete.SetExpandedOutput(wantOut)
+					changed = true
+				}
+			}
+		}
+		if changed {
+			_ = m.replaceTranscriptItemAt(idx)
+		}
+	}
 }
 
 func (m *Model) syncRetainedTranscriptItems(retained *ui.RetainedTranscript, items []ui.TranscriptItem) {
@@ -4073,7 +4319,6 @@ func (m Model) UpdateLoad(msg loadMsg) Model {
 	m.agentsDrift = m.currentSession.ProjectChecksum != "" &&
 		m.workspace.AgentsChecksum != "" &&
 		m.currentSession.ProjectChecksum != m.workspace.AgentsChecksum
-	m.transcriptCache = nil
 	m.ensureRetainedTranscript().Clear()
 	m.transcriptDirty = true
 	m.syncCurrentChatBusy()
@@ -5201,7 +5446,6 @@ func (m Model) debugTranscriptItems() []debugsrv.TranscriptItemRef {
 		return nil
 	}
 	items := retained.Items()
-	blocks := m.transcriptBlocksState
 	ctx := &ui.Context{Palette: m.palette}
 	width := max(0, m.viewport.Width)
 	out := make([]debugsrv.TranscriptItemRef, 0, len(items))
@@ -5211,22 +5455,43 @@ func (m Model) debugTranscriptItems() []debugsrv.TranscriptItemRef {
 			Key:       item.Key,
 			GapBefore: item.GapBefore,
 		}
-		if idx < len(blocks) {
-			block := blocks[idx]
-			switch block.Kind {
-			case transcriptBlockToolRun:
-				ref.Kind = "toolrun"
-				ref.Tool = block.ToolRun.Tool
-				ref.ToolRunID = block.ToolRun.ID
-				ref.Title = strings.TrimSpace(block.ToolRun.Title)
-			default:
+		if idx < len(m.transcriptItems) {
+			switch typed := m.transcriptItems[idx].(type) {
+			case *userMessageTranscriptItem:
 				ref.Kind = "message"
-				ref.MessageID = block.Message.ID
-				ref.Role = string(block.Message.Role)
-				ref.Summary = strings.TrimSpace(block.Message.Summary)
-			}
-			if cached, ok := m.transcriptCache[item.Key]; ok {
-				ref.ControlID = strings.TrimSpace(cached.controlID)
+				ref.MessageID = typed.message.ID
+				ref.Role = string(typed.message.Role)
+				ref.Summary = strings.TrimSpace(typed.message.Summary)
+			case *assistantMessageTranscriptItem:
+				ref.Kind = "message"
+				ref.MessageID = typed.message.ID
+				ref.Role = string(typed.message.Role)
+				ref.Summary = strings.TrimSpace(typed.message.Summary)
+			case *pendingAssistantTranscriptItem:
+				ref.Kind = "message"
+				ref.Role = string(domain.MessageRoleAssistant)
+				ref.Summary = strings.TrimSpace(typed.text)
+			case toolRunTranscriptItem:
+				ref.Kind = "toolrun"
+				ref.ToolRunID = typed.RunID()
+				switch concrete := typed.(type) {
+				case *bashToolRunTranscriptItem:
+					ref.Tool = concrete.run.Tool
+					ref.Title = strings.TrimSpace(concrete.run.Title)
+				case *readToolRunTranscriptItem:
+					ref.Tool = concrete.run.Tool
+					ref.Title = strings.TrimSpace(concrete.run.Title)
+				case *writeToolRunTranscriptItem:
+					ref.Tool = concrete.run.Tool
+					ref.Title = strings.TrimSpace(concrete.run.Title)
+				case *editToolRunTranscriptItem:
+					ref.Tool = concrete.run.Tool
+					ref.Title = strings.TrimSpace(concrete.run.Title)
+				case *genericToolRunTranscriptItem:
+					ref.Tool = concrete.run.Tool
+					ref.Title = strings.TrimSpace(concrete.run.Title)
+				}
+				ref.ControlID = "toolrun:" + ref.ToolRunID
 			}
 		}
 		if item.Element != nil {
