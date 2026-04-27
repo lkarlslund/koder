@@ -318,6 +318,7 @@ func runRipgrep(ctx context.Context, rootAbs, searchTarget string, options searc
 		if len(output) == 0 {
 			return "", err
 		}
+		return "", fmt.Errorf("rg failed: %s", strings.TrimSpace(string(output)))
 	}
 	return string(output), nil
 }
@@ -378,7 +379,11 @@ func fallbackFiles(rootAbs, searchTarget string, singleFile bool, options search
 			return err
 		}
 		rel = filepath.ToSlash(rel)
-		if !matchesType(rel, options.Type) || !matchesInclude(rel, options.Include) {
+		includeMatches, err := matchesInclude(rel, options.Include)
+		if err != nil {
+			return err
+		}
+		if !matchesType(rel, options.Type) || !includeMatches {
 			return nil
 		}
 		files = append(files, candidateFile{Abs: path, Display: rel})
@@ -393,20 +398,26 @@ func fallbackFiles(rootAbs, searchTarget string, singleFile bool, options search
 	return files, nil
 }
 
-func matchesInclude(rel, include string) bool {
+func matchesInclude(rel, include string) (bool, error) {
 	include = strings.TrimSpace(include)
 	if include == "" {
-		return true
+		return true, nil
 	}
 	match, err := filepath.Match(include, rel)
 	if err == nil && match {
-		return true
+		return true, nil
 	}
 	if !strings.Contains(include, "/") {
 		match, err = filepath.Match(include, filepath.Base(rel))
-		return err == nil && match
+		if err != nil {
+			return false, fmt.Errorf("invalid include glob %q: %w", include, err)
+		}
+		return match, nil
 	}
-	return false
+	if err != nil {
+		return false, fmt.Errorf("invalid include glob %q: %w", include, err)
+	}
+	return false, nil
 }
 
 func matchesType(rel, kind string) bool {

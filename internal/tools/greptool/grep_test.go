@@ -217,3 +217,59 @@ func TestExecuteFallsBackWithoutRipgrep(t *testing.T) {
 		t.Fatalf("expected fallback matches in output, got %q", result.Output)
 	}
 }
+
+func TestExecuteReturnsErrorWhenRipgrepFails(t *testing.T) {
+	workdir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workdir, "file.txt"), []byte("needle\n"), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	binDir := t.TempDir()
+	rgPath := filepath.Join(binDir, "rg")
+	script := "#!/bin/sh\n" +
+		"echo 'regex parse failure' >&2\n" +
+		"exit 2\n"
+	if err := os.WriteFile(rgPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake rg: %v", err)
+	}
+	t.Setenv("PATH", binDir)
+
+	_, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: workdir}, tools.Request{
+		Tool: domain.ToolKindGrep,
+		Args: map[string]string{
+			"pattern": "needle",
+		},
+	})
+	if err == nil {
+		t.Fatal("expected ripgrep failure to be returned")
+	}
+	if !strings.Contains(err.Error(), "regex parse failure") {
+		t.Fatalf("expected ripgrep stderr in error, got %v", err)
+	}
+}
+
+func TestExecuteFallbackReturnsErrorForInvalidIncludeGlob(t *testing.T) {
+	t.Setenv("PATH", "")
+	workdir := t.TempDir()
+	target := filepath.Join(workdir, "pkg", "file.go")
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatalf("mkdir target dir: %v", err)
+	}
+	if err := os.WriteFile(target, []byte("needle\n"), 0o644); err != nil {
+		t.Fatalf("write target file: %v", err)
+	}
+
+	_, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: workdir}, tools.Request{
+		Tool: domain.ToolKindGrep,
+		Args: map[string]string{
+			"pattern": "needle",
+			"include": "[",
+		},
+	})
+	if err == nil {
+		t.Fatal("expected invalid include glob error")
+	}
+	if !strings.Contains(err.Error(), "invalid include glob") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
