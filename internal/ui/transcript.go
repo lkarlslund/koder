@@ -67,14 +67,12 @@ func (e *CachedElement) RenderCached(ctx *Context, width int) Surface {
 	}
 	if e.cached && e.width == width {
 		if ctx != nil && ctx.Runtime != nil {
-			// Cached surfaces still need a render pass so interactive children can
-			// register fresh controls for the current frame.
-			_ = e.Child.Render(ctx, Rect{W: width, H: e.surface.Size().H})
+			e.surface.RegisterControls(ctx.Runtime, 0, 0)
 		}
 		return e.surface
 	}
 	size := e.Child.Measure(ctx, NewConstraints(width, 0))
-	surface := e.Child.Render(ctx, Rect{W: width, H: size.H})
+	surface := renderElementWithCapturedControls(ctx, e.Child, Rect{W: width, H: size.H})
 	e.width = width
 	e.surface = surface
 	e.cached = true
@@ -235,9 +233,7 @@ func (t *RetainedTranscript) RenderVisible(ctx *Context, width, height, offset i
 		}
 		renderY := top - offset
 		if ctx != nil && ctx.Runtime != nil {
-			start := ctx.Runtime.Len()
-			surface = t.itemSurfaceAt(ctx, idx, item, width)
-			ctx.Runtime.OffsetFrom(start, 0, renderY)
+			surface.RegisterControls(ctx.Runtime, 0, renderY)
 		}
 		base = base.placeAt(0, renderY, surface)
 	}
@@ -265,9 +261,7 @@ func (t *RetainedTranscript) RenderBottom(ctx *Context, width, height int) (Surf
 		}
 		renderY := top - offset
 		if ctx != nil && ctx.Runtime != nil {
-			start := ctx.Runtime.Len()
-			surface = t.itemSurfaceAt(ctx, idx, item, width)
-			ctx.Runtime.OffsetFrom(start, 0, renderY)
+			surface.RegisterControls(ctx.Runtime, 0, renderY)
 		}
 		base = base.placeAt(0, renderY, surface)
 	}
@@ -301,6 +295,26 @@ func withoutRuntime(ctx *Context) *Context {
 	return &copy
 }
 
+func renderElementWithCapturedControls(ctx *Context, child Element, bounds Rect) Surface {
+	if child == nil {
+		return Surface{}
+	}
+	shadow := &Runtime{}
+	copyCtx := Context{}
+	if ctx != nil {
+		copyCtx = *ctx
+	}
+	copyCtx.Runtime = shadow
+	surface := child.Render(&copyCtx, bounds)
+	if controls := shadow.Controls(); len(controls) > 0 {
+		surface.ctrls = append(surface.ctrls[:0], controls...)
+		if ctx != nil && ctx.Runtime != nil {
+			surface.RegisterControls(ctx.Runtime, 0, 0)
+		}
+	}
+	return surface
+}
+
 func (t *RetainedTranscript) itemApproxHeight(item TranscriptItem, width int) int {
 	if item.Element == nil {
 		return 0
@@ -324,7 +338,7 @@ func (t *RetainedTranscript) itemSurfaceAt(ctx *Context, index int, item Transcr
 		return surface
 	}
 	size := item.Element.Measure(ctx, NewConstraints(width, 0))
-	surface := item.Element.Render(ctx, Rect{W: width, H: size.H})
+	surface := renderElementWithCapturedControls(ctx, item.Element, Rect{W: width, H: size.H})
 	if index >= 0 && index < len(t.itemHeights) {
 		t.itemHeights[index] = surface.Size().H
 	}

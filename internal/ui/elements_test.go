@@ -226,6 +226,19 @@ func TestNormalizeConvertsPlainStringSurfaceToCells(t *testing.T) {
 	}
 }
 
+func TestNormalizeReturnsSameCellSurfaceWhenAlreadySized(t *testing.T) {
+	surface := BlankSurface(4, 2)
+	surface.WriteText(0, 0, "test", CellStyle{})
+	got := surface.normalize(4, 2)
+
+	if len(surface.cells) == 0 || len(got.cells) == 0 {
+		t.Fatal("expected cell-backed surfaces")
+	}
+	if &got.cells[0] != &surface.cells[0] {
+		t.Fatal("expected already-sized normalize to reuse the existing cell buffer")
+	}
+}
+
 func TestPlaceAtBlitsPlainStringChildOntoCellSurface(t *testing.T) {
 	base := BlankSurface(6, 2)
 	got := base.placeAt(1, 0, SurfaceFromString("abc"))

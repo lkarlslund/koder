@@ -318,11 +318,34 @@ type controlElement struct {
 	id string
 }
 
+type countingControlElement struct {
+	id          string
+	renderCalls *int
+}
+
 func (e controlElement) Measure(_ *Context, constraints Constraints) Size {
 	return constraints.Clamp(Size{W: 4, H: 1})
 }
 
 func (e controlElement) Render(ctx *Context, bounds Rect) Surface {
+	if ctx != nil && ctx.Runtime != nil {
+		ctx.Runtime.Register(Control{
+			ID:      e.id,
+			Rect:    Rect{X: bounds.X, Y: bounds.Y, W: max(1, bounds.W), H: max(1, bounds.H)},
+			Enabled: true,
+		})
+	}
+	return SurfaceFromString("test").normalize(bounds.W, bounds.H)
+}
+
+func (e countingControlElement) Measure(_ *Context, constraints Constraints) Size {
+	return constraints.Clamp(Size{W: 4, H: 1})
+}
+
+func (e countingControlElement) Render(ctx *Context, bounds Rect) Surface {
+	if e.renderCalls != nil {
+		*e.renderCalls = *e.renderCalls + 1
+	}
 	if ctx != nil && ctx.Runtime != nil {
 		ctx.Runtime.Register(Control{
 			ID:      e.id,
@@ -352,5 +375,28 @@ func TestCachedElementReRegistersControlsOnCachedRender(t *testing.T) {
 	}
 	if secondRuntime.Controls()[0].ID != "cached-control" {
 		t.Fatalf("unexpected control on cached render: %#v", secondRuntime.Controls()[0])
+	}
+}
+
+func TestCachedElementCacheHitDoesNotReRenderChild(t *testing.T) {
+	renderCalls := 0
+	cached := NewCachedElement(countingControlElement{id: "cached-control", renderCalls: &renderCalls}, 1)
+	ctx := &Context{Palette: theme.Resolve("tokyonight").Palette}
+
+	firstRuntime := &Runtime{}
+	ctx.Runtime = firstRuntime
+	_ = cached.RenderCached(ctx, 8)
+	if renderCalls != 1 {
+		t.Fatalf("expected first render call count 1, got %d", renderCalls)
+	}
+
+	secondRuntime := &Runtime{}
+	ctx.Runtime = secondRuntime
+	_ = cached.RenderCached(ctx, 8)
+	if renderCalls != 1 {
+		t.Fatalf("expected cached render hit to avoid child rerender, got %d calls", renderCalls)
+	}
+	if len(secondRuntime.Controls()) != 1 {
+		t.Fatalf("expected cached render to still register one control, got %d", len(secondRuntime.Controls()))
 	}
 }

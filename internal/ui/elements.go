@@ -504,15 +504,21 @@ func (s Surface) SurfaceCellStrikethrough(x, y int) bool {
 
 func (s Surface) normalize(width, height int) Surface {
 	if s.isCellBuffer() {
+		if width == s.w && height == s.h {
+			if controlsFitSurface(s.ctrls, width, height) {
+				return s
+			}
+		}
 		out := TransparentSurface(width, height)
 		copyH := min(height, s.h)
 		copyW := min(width, s.w)
 		for y := 0; y < copyH; y++ {
-			for x := 0; x < copyW; x++ {
-				out.setCell(x, y, s.cellAt(x, y))
-			}
+			srcStart := y * s.w
+			dstStart := y * out.w
+			copy(out.cells[dstStart:dstStart+copyW], s.cells[srcStart:srcStart+copyW])
 		}
 		out.ctrls = clipControlsToSurface(s.ctrls, width, height)
+		out.dirty = s.dirty
 		return out
 	}
 	if width < 0 {
@@ -727,6 +733,21 @@ func clipControlsToSurface(controls []Control, width, height int) []Control {
 		}
 	}
 	return out
+}
+
+func controlsFitSurface(controls []Control, width, height int) bool {
+	if len(controls) == 0 {
+		return true
+	}
+	for _, control := range controls {
+		if _, ok := clipControlRect(control, width, height); !ok {
+			return false
+		}
+		if control.Rect.X < 0 || control.Rect.Y < 0 || control.Rect.X+control.Rect.W > width || control.Rect.Y+control.Rect.H > height {
+			return false
+		}
+	}
+	return true
 }
 
 func clipControlRect(control Control, width, height int) (Control, bool) {
