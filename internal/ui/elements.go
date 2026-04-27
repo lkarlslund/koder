@@ -766,17 +766,42 @@ func (s Surface) blitAt(x, y int, child Surface) Surface {
 		return s
 	}
 	out := s
+	defaultBlank := blankCell(CellStyle{})
 	for cy := 0; cy < child.h; cy++ {
 		targetY := y + cy
 		if targetY < 0 || targetY >= out.h {
 			continue
 		}
-		for cx := 0; cx < child.w; cx++ {
-			targetX := x + cx
-			if targetX < 0 || targetX >= out.w {
+		srcStartX := 0
+		dstStartX := x
+		if dstStartX < 0 {
+			srcStartX = -dstStartX
+			dstStartX = 0
+		}
+		spanWidth := min(child.w-srcStartX, out.w-dstStartX)
+		if spanWidth <= 0 {
+			continue
+		}
+		srcBase := cy*child.w + srcStartX
+		dstBase := targetY*out.w + dstStartX
+		srcRow := child.cells[srcBase : srcBase+spanWidth]
+		dstRow := out.cells[dstBase : dstBase+spanWidth]
+		for cx := 0; cx < spanWidth; {
+			if !srcRow[cx].Painted() {
+				cx++
 				continue
 			}
-			out.setCell(targetX, targetY, compositeCell(out.cellAt(targetX, targetY), child.cellAt(cx, cy)))
+			if dstRow[cx] == defaultBlank {
+				end := cx + 1
+				for end < spanWidth && srcRow[end].Painted() && dstRow[end] == defaultBlank {
+					end++
+				}
+				copy(dstRow[cx:end], srcRow[cx:end])
+				cx = end
+				continue
+			}
+			dstRow[cx] = compositeCell(dstRow[cx], srcRow[cx])
+			cx++
 		}
 	}
 	if len(child.ctrls) > 0 {
