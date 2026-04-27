@@ -2611,6 +2611,9 @@ func (m *Model) renderMessageParts(parts []domain.Part) string {
 
 	blocks = append(blocks, systemBlocks...)
 	blocks = append(blocks, reasoningBlocks...)
+	if len(reasoningBlocks) > 0 && len(textBlocks) > 0 {
+		blocks = append(blocks, "")
+	}
 	blocks = append(blocks, textBlocks...)
 
 	return strings.TrimSpace(strings.Join(blocks, "\n"))
@@ -2702,6 +2705,9 @@ func (m *Model) renderStyledMessageParts(parts []domain.Part) []ui.StyledSpan {
 	flushReasoning()
 	blocks = append(blocks, systemBlocks...)
 	blocks = append(blocks, reasoningBlocks...)
+	if len(reasoningBlocks) > 0 && len(textBlocks) > 0 {
+		blocks = append(blocks, nil)
+	}
 	blocks = append(blocks, textBlocks...)
 
 	var out []ui.StyledSpan

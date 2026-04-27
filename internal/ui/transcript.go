@@ -597,8 +597,7 @@ func (b ReasoningBlock) render() Surface {
 	if content == "" {
 		return Surface{}
 	}
-	lines := []string{""}
-	lines = append(lines, wrapStyledLines(content, b.Width)...)
+	lines := wrapStyledLines(content, b.Width)
 	width := 0
 	for _, line := range lines {
 		width = maxInt(width, PlainWidth(line))

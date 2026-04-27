@@ -4571,6 +4571,12 @@ func TestRenderMessagePartsShowsReasoningBeforeText(t *testing.T) {
 	if strings.Index(got, "thinking first") > strings.Index(got, "final answer") {
 		t.Fatalf("expected reasoning before text, got %q", got)
 	}
+	if strings.Contains(got, "\n\nthinking first") {
+		t.Fatalf("expected no blank line before reasoning, got %q", got)
+	}
+	if !strings.Contains(got, "\n\nfinal answer") {
+		t.Fatalf("expected blank line after reasoning before final answer, got %q", got)
+	}
 }
 
 func TestRenderStyledMessagePartsShowsReasoningBeforeText(t *testing.T) {
@@ -4592,6 +4598,12 @@ func TestRenderStyledMessagePartsShowsReasoningBeforeText(t *testing.T) {
 	}
 	if strings.Index(got, "thinking first") > strings.Index(got, "final answer") {
 		t.Fatalf("expected reasoning before text, got %q", got)
+	}
+	if strings.Contains(got, "\n\nthinking first") {
+		t.Fatalf("expected no blank line before reasoning, got %q", got)
+	}
+	if !strings.Contains(got, "\n\nfinal answer") {
+		t.Fatalf("expected blank line after reasoning before final answer, got %q", got)
 	}
 }
 
@@ -4767,19 +4779,19 @@ func TestTranscriptRendersLoopPauseAsCard(t *testing.T) {
 	}
 }
 
-func TestRenderReasoningBlockStartsWithBlankStyledLine(t *testing.T) {
+func TestRenderReasoningBlockStartsWithoutBlankLine(t *testing.T) {
 	m := Model{}
 
 	got := m.renderReasoningBlock("thinking first")
 	lines := strings.Split(got, "\n")
-	if len(lines) < 2 {
-		t.Fatalf("expected multiple lines, got %q", got)
+	if len(lines) < 1 {
+		t.Fatalf("expected reasoning output, got %q", got)
 	}
-	if lines[0] != "" {
-		t.Fatalf("expected blank first line, got %q", got)
+	if lines[0] == "" {
+		t.Fatalf("expected first line to contain reasoning text, got %q", got)
 	}
-	if !strings.Contains(lines[1], "thinking first") {
-		t.Fatalf("expected reasoning text on second line, got %q", got)
+	if !strings.Contains(lines[0], "thinking first") {
+		t.Fatalf("expected reasoning text on first line, got %q", got)
 	}
 }
 
