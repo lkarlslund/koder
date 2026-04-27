@@ -3267,6 +3267,62 @@ func TestEnsureRuntimeContextWindowDetectsAndPersistsCompatibleAPIKeyProvider(t 
 	}
 }
 
+func TestEnsureRuntimeContextWindowRecordsTiming(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/models", "/v1/models":
+			_, _ = w.Write([]byte(`{"data":[{"id":"model-a","max_model_len":16384}]}`))
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	cfg.Providers = map[string]config.Provider{
+		"openai": {
+			Name:          "OpenAI Compatible",
+			Kind:          "openai-compatible",
+			BaseURL:       server.URL + "/v1",
+			DefaultModel:  "model-a",
+			ContextWindow: 4096,
+		},
+	}
+	rec := debugsrv.NewRecorder()
+	m := Model{cfg: cfg, runtimeCtxChecked: map[string]bool{}, debug: rec}
+	session := domain.Session{ID: 42, ProviderID: "openai", ModelID: "model-a"}
+
+	_, _, _, err = m.ensureRuntimeContextWindow(context.Background(), session)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	events := rec.Events(session.ID)
+	for _, evt := range events {
+		if evt.Source == "lifecycle" && evt.Kind == "context_window_timing" {
+			if evt.Text != "ensure_runtime_context_window" {
+				t.Fatalf("unexpected timing text: %#v", evt)
+			}
+			if evt.Meta["provider_id"] != "openai" || evt.Meta["model_id"] != "model-a" {
+				t.Fatalf("unexpected timing meta: %#v", evt.Meta)
+			}
+			if evt.Meta["duration_ms"] == "" {
+				t.Fatalf("expected duration_ms in timing meta: %#v", evt.Meta)
+			}
+			return
+		}
+	}
+	t.Fatal("expected context_window_timing lifecycle event")
+}
+
 func TestUpdateLoadSchedulesContextWindowDetectionForCurrentSession(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("XDG_STATE_HOME", t.TempDir())

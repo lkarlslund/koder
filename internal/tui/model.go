@@ -2990,15 +2990,29 @@ func (m *Model) renderStyledReasoningBlock(input string) []ui.StyledSpan {
 func (m Model) loadCmd() ui.Cmd {
 	return func() ui.Msg {
 		ctx := context.Background()
+		totalStart := time.Now()
+		stepStart := time.Now()
 		allSessions, err := m.store.ListSessions(ctx)
 		if err != nil {
 			return promptDoneMsg{err: err}
 		}
+		m.recordStartupTiming(0, "list_sessions", stepStart, map[string]string{
+			"count": strconv.Itoa(len(allSessions)),
+			"mode":  startupModeLabel(m.startupMode),
+		})
+		stepStart = time.Now()
 		sessions := m.visibleSessions(allSessions)
+		m.recordStartupTiming(0, "visible_sessions", stepStart, map[string]string{
+			"count": strconv.Itoa(len(sessions)),
+			"mode":  startupModeLabel(m.startupMode),
+		})
 		if m.startupMode == StartupModeResume {
 			if len(sessions) == 0 {
 				return m.newSessionCmd()()
 			}
+			m.recordStartupTiming(0, "resume_picker_ready", totalStart, map[string]string{
+				"count": strconv.Itoa(len(sessions)),
+			})
 			return sessionPickerMsg{sessions: sessions}
 		}
 		if m.startupMode == StartupModeNew {
@@ -3008,34 +3022,66 @@ func (m Model) loadCmd() ui.Cmd {
 			return m.newSessionCmd()()
 		}
 		current := sessions[0]
+		stepStart = time.Now()
 		chats, err := m.store.ListChats(ctx, current.ID)
 		if err != nil {
 			return promptDoneMsg{err: err}
 		}
+		m.recordStartupTiming(current.ID, "list_chats", stepStart, map[string]string{
+			"count": strconv.Itoa(len(chats)),
+		})
 		currentChat := newestChat(chats)
 		if currentChat.ID == 0 {
+			stepStart = time.Now()
 			currentChat, err = m.store.DefaultChat(ctx, current.ID)
 			if err != nil {
 				return promptDoneMsg{err: err}
 			}
 			chats = append(chats, currentChat)
+			m.recordStartupTiming(current.ID, "default_chat", stepStart, map[string]string{
+				"chat_id": strconv.FormatInt(currentChat.ID, 10),
+			})
 		}
+		stepStart = time.Now()
 		messages, parts, err := m.store.PartsForChat(ctx, currentChat.ID)
 		if err != nil {
 			return promptDoneMsg{err: err}
 		}
+		m.recordStartupTiming(current.ID, "parts_for_chat", stepStart, map[string]string{
+			"chat_id":  strconv.FormatInt(currentChat.ID, 10),
+			"messages": strconv.Itoa(len(messages)),
+			"parts":    strconv.Itoa(len(parts)),
+		})
+		stepStart = time.Now()
 		approvals, err := m.store.PendingApprovalsForChat(ctx, currentChat.ID)
 		if err != nil {
 			return promptDoneMsg{err: err}
 		}
+		m.recordStartupTiming(current.ID, "pending_approvals", stepStart, map[string]string{
+			"chat_id": strconv.FormatInt(currentChat.ID, 10),
+			"count":   strconv.Itoa(len(approvals)),
+		})
+		stepStart = time.Now()
 		plan, todos, err := m.loadPlanningState(ctx, current.ID)
 		if err != nil {
 			return promptDoneMsg{err: err}
 		}
+		m.recordStartupTiming(current.ID, "planning_state", stepStart, map[string]string{
+			"milestones": strconv.Itoa(len(plan.Milestones)),
+			"todos":      strconv.Itoa(len(todos)),
+		})
+		stepStart = time.Now()
 		workspaceStatus, err := workspace.Snapshot(ctx, m.workdir)
 		if err != nil {
 			return promptDoneMsg{err: err}
 		}
+		m.recordStartupTiming(current.ID, "workspace_snapshot", stepStart, map[string]string{
+			"files": strconv.Itoa(len(workspaceStatus.Files)),
+		})
+		m.recordStartupTiming(current.ID, "startup_load_total", totalStart, map[string]string{
+			"chat_id": strconv.FormatInt(currentChat.ID, 10),
+			"mode":    startupModeLabel(m.startupMode),
+		})
 		return loadMsg{
 			sessions:  sessions,
 			chats:     chats,
@@ -3468,6 +3514,29 @@ func (m Model) recordLoadTiming(sessionID, chatID int64, step string, started ti
 		meta["chat_id"] = strconv.FormatInt(chatID, 10)
 	}
 	m.debug.RecordLifecycle(sessionID, "chat_load_timing", step, meta)
+}
+
+func (m Model) recordStartupTiming(sessionID int64, step string, started time.Time, meta map[string]string) {
+	if m.debug == nil || started.IsZero() {
+		return
+	}
+	if meta == nil {
+		meta = map[string]string{}
+	}
+	meta["step"] = step
+	meta["duration_ms"] = strconv.FormatInt(time.Since(started).Milliseconds(), 10)
+	m.debug.RecordLifecycle(sessionID, "startup_timing", step, meta)
+}
+
+func startupModeLabel(mode StartupMode) string {
+	switch mode {
+	case StartupModeNew:
+		return "new"
+	case StartupModeResume:
+		return "resume"
+	default:
+		return "auto"
+	}
 }
 
 func (m Model) agentsRefreshCmd(sessionID int64) ui.Cmd {
@@ -4156,35 +4225,57 @@ func (m *Model) dequeuePromptCmd() ui.Cmd {
 }
 
 func (m Model) ensureRuntimeContextWindow(ctx context.Context, session domain.Session) (string, int, bool, error) {
+	start := time.Now()
 	providerID := strings.TrimSpace(session.ProviderID)
 	providerCfg, ok := m.cfg.Provider(providerID)
 	if !ok {
 		return "", 0, false, fmt.Errorf("provider %q not configured", providerID)
 	}
-	if !provider.SupportsContextWindowDetection(providerCfg) {
-		return "", 0, false, nil
-	}
-	if m.runtimeCtxChecked != nil && m.runtimeCtxChecked[providerID] {
-		return providerID, providerCfg.ContextWindow, false, nil
-	}
 	modelID := strings.TrimSpace(session.ModelID)
 	if modelID == "" {
 		modelID = strings.TrimSpace(providerCfg.DefaultModel)
 	}
+	recordTiming := func(result string, contextWindow int, checked bool) {
+		if m.debug == nil {
+			return
+		}
+		meta := map[string]string{
+			"provider_id": providerID,
+			"model_id":    modelID,
+			"result":      result,
+			"checked":     strconv.FormatBool(checked),
+			"duration_ms": strconv.FormatInt(time.Since(start).Milliseconds(), 10),
+		}
+		if contextWindow > 0 {
+			meta["context_window"] = strconv.Itoa(contextWindow)
+		}
+		m.debug.RecordLifecycle(session.ID, "context_window_timing", "ensure_runtime_context_window", meta)
+	}
+	if !provider.SupportsContextWindowDetection(providerCfg) {
+		recordTiming("unsupported", providerCfg.ContextWindow, false)
+		return "", 0, false, nil
+	}
+	if m.runtimeCtxChecked != nil && m.runtimeCtxChecked[providerID] {
+		recordTiming("cached", providerCfg.ContextWindow, false)
+		return providerID, providerCfg.ContextWindow, false, nil
+	}
 	contextWindow, err := provider.DetectContextWindow(ctx, providerID, providerCfg, modelID, m.debug)
 	if err != nil {
+		recordTiming("error:"+err.Error(), 0, false)
 		return providerID, 0, false, err
 	}
 	if contextWindow > 0 && providerCfg.ContextWindow != contextWindow {
 		providerCfg.ContextWindow = contextWindow
 		m.cfg.Providers[providerID] = providerCfg
 		if err := m.cfg.Save(); err != nil {
+			recordTiming("save_error:"+err.Error(), 0, false)
 			return providerID, 0, false, err
 		}
 		if m.agent != nil {
 			m.agent.UpdateConfig(m.cfg)
 		}
 	}
+	recordTiming("detected", contextWindow, true)
 	return providerID, contextWindow, true, nil
 }
 
