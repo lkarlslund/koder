@@ -12,6 +12,7 @@ import (
 
 	"github.com/lkarlslund/koder/internal/attachment"
 	"github.com/lkarlslund/koder/internal/config"
+	"github.com/lkarlslund/koder/internal/debugsrv"
 	"github.com/lkarlslund/koder/internal/domain"
 )
 
@@ -408,6 +409,78 @@ func TestStreamChatResponseAggregatesToolCallsAndDeltas(t *testing.T) {
 	}
 	if !sawDone {
 		t.Fatal("expected message done event")
+	}
+}
+
+func TestStreamChatWithRecorderDoesNotBufferEventStream(t *testing.T) {
+	firstChunkSent := make(chan struct{}, 1)
+	releaseDone := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			t.Fatal("expected flusher")
+		}
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"hel\"}}]}\n\n"))
+		flusher.Flush()
+		firstChunkSent <- struct{}{}
+		<-releaseDone
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"lo\"},\"finish_reason\":\"stop\"}]}\n\n"))
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+		flusher.Flush()
+	}))
+	defer server.Close()
+
+	recorder := debugsrv.NewRecorder()
+	client, err := New("test", config.Provider{
+		BaseURL: server.URL,
+		Timeout: time.Second,
+	}, recorder)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	events, err := client.StreamChat(context.Background(), ChatRequest{Model: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case <-firstChunkSent:
+	case <-time.After(time.Second):
+		t.Fatal("expected server to flush first chunk")
+	}
+
+	select {
+	case evt := <-events:
+		if evt.Kind != domain.EventKindMessageDelta || evt.Text != "hel" {
+			t.Fatalf("expected first streamed delta before stream completion, got %#v", evt)
+		}
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("expected first streamed delta without waiting for stream completion")
+	}
+
+	close(releaseDone)
+
+	var combined strings.Builder
+	for evt := range events {
+		if evt.Kind == domain.EventKindMessageDelta {
+			combined.WriteString(evt.Text)
+		}
+		if evt.Err != nil {
+			t.Fatal(evt.Err)
+		}
+	}
+	if combined.String() != "lo" {
+		t.Fatalf("expected remaining streamed delta after release, got %q", combined.String())
+	}
+
+	traces := recorder.HTTPTraces()
+	if len(traces) != 1 {
+		t.Fatalf("expected one recorded trace, got %d", len(traces))
+	}
+	if traces[0].ResponseBody != "[stream omitted]" {
+		t.Fatalf("expected stream body omission marker, got %q", traces[0].ResponseBody)
 	}
 }
 

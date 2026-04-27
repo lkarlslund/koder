@@ -759,9 +759,13 @@ func (t *tracingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 	trace.Status = resp.StatusCode
 	trace.ResponseHdrs = redactHeaders(resp.Header)
 	if resp.Body != nil {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
-		trace.ResponseBody = redactBody(string(body))
-		resp.Body = io.NopCloser(io.MultiReader(bytes.NewReader(body), resp.Body))
+		if strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream") {
+			trace.ResponseBody = "[stream omitted]"
+		} else {
+			body, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
+			trace.ResponseBody = redactBody(string(body))
+			resp.Body = io.NopCloser(io.MultiReader(bytes.NewReader(body), resp.Body))
+		}
 	}
 	t.recorder.RecordHTTP(trace)
 	return resp, nil
