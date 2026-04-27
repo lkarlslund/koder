@@ -182,8 +182,8 @@ func TestResolveFileAndDirectory(t *testing.T) {
 
 func TestResolveFileTruncatesLongContent(t *testing.T) {
 	root := t.TempDir()
-	lines := make([]string, 0, 405)
-	for i := 0; i < 405; i++ {
+	lines := make([]string, 0, 2005)
+	for i := 0; i < 2005; i++ {
 		lines = append(lines, "line")
 	}
 	path := filepath.Join(root, "big.txt")
@@ -195,11 +195,11 @@ func TestResolveFileTruncatesLongContent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(body, "400: line") {
-		t.Fatalf("expected truncated output to include line 400, got %q", body)
+	if !strings.Contains(body, "2000: line") {
+		t.Fatalf("expected truncated output to include line 2000, got %q", body)
 	}
-	if strings.Contains(body, "401: line") {
-		t.Fatalf("expected output to be truncated before line 401, got %q", body)
+	if strings.Contains(body, "2001: line") {
+		t.Fatalf("expected output to be truncated before line 2001, got %q", body)
 	}
 }
 

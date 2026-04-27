@@ -1,15 +1,18 @@
 package readtool
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/provider"
@@ -18,6 +21,11 @@ import (
 )
 
 type tool struct{}
+
+const (
+	maxReadLineChars       = 2000
+	maxReadLineTruncSuffix = "... (line truncated to 2000 chars)"
+)
 
 func init() { tools.Register(tool{}) }
 
@@ -68,36 +76,61 @@ func (tool) Execute(_ context.Context, runtime tools.Runtime, req tools.Request)
 	if err != nil {
 		return tools.Result{}, err
 	}
+	offset, err := parseOptionalInt(req.Args["offset"])
+	if err != nil {
+		return tools.Result{}, errors.New("offset must be a positive integer")
+	}
+	if offset <= 0 {
+		offset = 1
+	}
+	limit, err := parseOptionalInt(req.Args["limit"])
+	if err != nil {
+		return tools.Result{}, errors.New("limit must be a positive integer")
+	}
+	if limit <= 0 {
+		limit = tools.DefaultReadLineLimit
+	}
 	info, err := os.Stat(abs)
 	if err != nil {
 		return tools.Result{}, err
 	}
 	if info.IsDir() {
-		items, err := tools.ListDirectory(abs)
+		page, err := readDirectoryPage(abs, offset, limit, tools.DefaultToolOutputLimit)
 		if err != nil {
 			return tools.Result{}, err
 		}
-		body := strings.Join(items, "\n")
-		body, truncated := tools.TruncateText(body, tools.DefaultToolOutputLimit)
-		storedEntries := append([]string(nil), items...)
-		footer := ""
-		if truncated {
-			storedEntries, footer = splitDirectoryOutput(body)
+		stored := tools.ReadStoredResult{
+			Path:           rel,
+			Mode:           tools.ReadStoredModeDirectory,
+			Entries:        append([]string(nil), page.Entries...),
+			Footer:         directoryReadFooter(page, limit),
+			Offset:         strconv.Itoa(offset),
+			Limit:          strconv.Itoa(limit),
+			Start:          page.Start,
+			End:            page.End,
+			Total:          page.Total,
+			NextOffset:     page.NextOffset,
+			EffectiveLimit: limit,
+			ByteCapped:     page.ByteCapped,
+			HasMore:        page.HasMore,
+			Truncated:      page.HasMore || page.ByteCapped,
 		}
+		body := tools.DisplayTextForStored(domain.ToolKindRead, stored)
 		return tools.Result{
 			Output: body,
 			Meta: map[string]string{
-				"path":      rel,
-				"mode":      "dir",
-				"truncated": tools.BoolString(truncated),
+				"path":        rel,
+				"mode":        "dir",
+				"offset":      strconv.Itoa(offset),
+				"limit":       strconv.Itoa(limit),
+				"total":       strconv.Itoa(page.Total),
+				"start":       strconv.Itoa(page.Start),
+				"end":         strconv.Itoa(page.End),
+				"next_offset": strconv.Itoa(page.NextOffset),
+				"truncated":   tools.BoolString(page.HasMore || page.ByteCapped),
+				"byte_capped": tools.BoolString(page.ByteCapped),
 			},
-			Stored: tools.ReadStoredResult{
-				Path:      rel,
-				Mode:      tools.ReadStoredModeDirectory,
-				Entries:   storedEntries,
-				Footer:    footer,
-				Truncated: truncated,
-			},
+			Stored: stored,
 		}, nil
 	}
 	header := make([]byte, 512)
@@ -107,7 +140,7 @@ func (tool) Execute(_ context.Context, runtime tools.Runtime, req tools.Request)
 	}
 	n, readErr := file.Read(header)
 	_ = file.Close()
-	if readErr != nil {
+	if readErr != nil && !errors.Is(readErr, io.EOF) {
 		return tools.Result{}, readErr
 	}
 	contentType := http.DetectContentType(header[:n])
@@ -120,38 +153,42 @@ func (tool) Execute(_ context.Context, runtime tools.Runtime, req tools.Request)
 	if strings.HasPrefix(contentType, "application/octet-stream") && !isTextHeader(header[:n]) {
 		return tools.Result{}, fmt.Errorf("%s appears to be a binary file", rel)
 	}
-	text, truncated, err := tools.ReadTextFile(abs, tools.DefaultReadLineLimit, tools.DefaultReadByteLimit)
+	page, err := readFilePage(abs, offset, limit, tools.DefaultReadByteLimit)
 	if err != nil {
 		return tools.Result{}, err
 	}
-	offset, err := parseOptionalInt(req.Args["offset"])
-	if err != nil {
-		return tools.Result{}, errors.New("offset must be a positive integer")
+	stored := tools.ReadStoredResult{
+		Path:           rel,
+		Mode:           tools.ReadStoredModeFile,
+		Lines:          append([]tools.ReadStoredLine(nil), page.Lines...),
+		Footer:         fileReadFooter(page, limit),
+		Offset:         strconv.Itoa(offset),
+		Limit:          strconv.Itoa(limit),
+		Start:          page.Start,
+		End:            page.End,
+		Total:          page.Total,
+		NextOffset:     page.NextOffset,
+		EffectiveLimit: limit,
+		ByteCapped:     page.ByteCapped,
+		HasMore:        page.HasMore,
+		Truncated:      page.HasMore || page.ByteCapped,
 	}
-	limit, err := parseOptionalInt(req.Args["limit"])
-	if err != nil {
-		return tools.Result{}, errors.New("limit must be a positive integer")
-	}
-	text = applyReadWindow(text, offset, limit)
-	lines, footer := tools.ParseReadStoredLines(text)
+	text := tools.DisplayTextForStored(domain.ToolKindRead, stored)
 	return tools.Result{
 		Output: text,
 		Meta: map[string]string{
-			"path":      rel,
-			"mode":      "file",
-			"offset":    strings.TrimSpace(req.Args["offset"]),
-			"limit":     strings.TrimSpace(req.Args["limit"]),
-			"truncated": tools.BoolString(truncated),
+			"path":        rel,
+			"mode":        "file",
+			"offset":      strconv.Itoa(offset),
+			"limit":       strconv.Itoa(limit),
+			"total":       strconv.Itoa(page.Total),
+			"start":       strconv.Itoa(page.Start),
+			"end":         strconv.Itoa(page.End),
+			"next_offset": strconv.Itoa(page.NextOffset),
+			"truncated":   tools.BoolString(page.HasMore || page.ByteCapped),
+			"byte_capped": tools.BoolString(page.ByteCapped),
 		},
-		Stored: tools.ReadStoredResult{
-			Path:      rel,
-			Mode:      tools.ReadStoredModeFile,
-			Lines:     lines,
-			Footer:    footer,
-			Offset:    strings.TrimSpace(req.Args["offset"]),
-			Limit:     strings.TrimSpace(req.Args["limit"]),
-			Truncated: truncated,
-		},
+		Stored: stored,
 	}, nil
 }
 func (tool) SummarizeResult(req tools.Request, result tools.Result) (string, string) {
@@ -169,42 +206,11 @@ func parseOptionalInt(raw string) (int, error) {
 	return tools.ParseFlexibleInt(value)
 }
 
-func applyReadWindow(text string, offset int, limit int) string {
-	if offset <= 1 && limit <= 0 {
-		return text
-	}
-	lines := strings.Split(text, "\n")
-	start := 0
-	if offset > 1 {
-		start = offset - 1
-		if start > len(lines) {
-			start = len(lines)
-		}
-	}
-	end := len(lines)
-	if limit > 0 && start+limit < end {
-		end = start + limit
-	}
-	return strings.Join(lines[start:end], "\n")
-}
-
 func isTextHeader(header []byte) bool {
 	if len(header) == 0 {
 		return true
 	}
 	return bytes.IndexByte(header, 0) == -1
-}
-
-func splitDirectoryOutput(body string) ([]string, string) {
-	lines := strings.Split(strings.TrimSpace(body), "\n")
-	if len(lines) == 0 {
-		return nil, ""
-	}
-	last := strings.TrimSpace(lines[len(lines)-1])
-	if !strings.HasPrefix(last, "... truncated") {
-		return lines, ""
-	}
-	return lines[:len(lines)-1], last
 }
 
 func readPresentationTitle(pathValue, offsetValue, limitValue string) string {
@@ -234,4 +240,179 @@ func readPresentationLineRange(offsetValue, limitValue string) string {
 		return ""
 	}
 	return fmt.Sprintf("lines %d-%d", offset, end)
+}
+
+type filePage struct {
+	Lines      []tools.ReadStoredLine
+	Start      int
+	End        int
+	Total      int
+	NextOffset int
+	HasMore    bool
+	ByteCapped bool
+}
+
+type directoryPage struct {
+	Entries    []string
+	Start      int
+	End        int
+	Total      int
+	NextOffset int
+	HasMore    bool
+	ByteCapped bool
+}
+
+func readFilePage(abs string, offset, limit, byteLimit int) (filePage, error) {
+	file, err := os.Open(abs)
+	if err != nil {
+		return filePage{}, err
+	}
+	defer file.Close()
+
+	reader := bufio.NewReader(file)
+	lines := make([]tools.ReadStoredLine, 0, limit)
+	var (
+		lineNo    int
+		bytesUsed int
+		pageCut   bool
+	)
+	start := max(1, offset)
+
+	for {
+		raw, err := reader.ReadString('\n')
+		if err != nil && !errors.Is(err, io.EOF) {
+			return filePage{}, err
+		}
+		if errors.Is(err, io.EOF) && raw == "" {
+			break
+		}
+		lineNo++
+		line := strings.TrimSuffix(raw, "\n")
+		line = strings.TrimSuffix(line, "\r")
+		if lineNo < start {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			continue
+		}
+		if len(lines) >= limit {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			continue
+		}
+		line = truncateReadLine(line)
+		rendered := fmt.Sprintf("%d: %s", lineNo, line)
+		addition := len(rendered)
+		if len(lines) > 0 {
+			addition++
+		}
+		if byteLimit > 0 && bytesUsed+addition > byteLimit {
+			pageCut = true
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			continue
+		}
+		lines = append(lines, tools.ReadStoredLine{Number: lineNo, Text: line})
+		bytesUsed += addition
+		if errors.Is(err, io.EOF) {
+			break
+		}
+	}
+
+	if lineNo < start && !(lineNo == 0 && start == 1) {
+		return filePage{}, fmt.Errorf("offset %d is out of range for this file (%d lines)", start, lineNo)
+	}
+	page := filePage{
+		Lines:      lines,
+		Total:      lineNo,
+		ByteCapped: pageCut,
+	}
+	if len(lines) > 0 {
+		page.Start = lines[0].Number
+		page.End = lines[len(lines)-1].Number
+	}
+	if pageCut || len(lines) >= limit {
+		page.HasMore = page.End < page.Total
+	}
+	if page.HasMore && page.End > 0 {
+		page.NextOffset = page.End + 1
+	}
+	return page, nil
+}
+
+func readDirectoryPage(abs string, offset, limit, byteLimit int) (directoryPage, error) {
+	items, err := tools.ListDirectory(abs)
+	if err != nil {
+		return directoryPage{}, err
+	}
+	start := max(1, offset)
+	total := len(items)
+	if total < start && !(total == 0 && start == 1) {
+		return directoryPage{}, fmt.Errorf("offset %d is out of range for this directory (%d entries)", start, total)
+	}
+	page := directoryPage{Total: total}
+	if total == 0 {
+		return page, nil
+	}
+	selected := make([]string, 0, limit)
+	bytesUsed := 0
+	for idx := start - 1; idx < total && len(selected) < limit; idx++ {
+		entry := items[idx]
+		addition := len(entry)
+		if len(selected) > 0 {
+			addition++
+		}
+		if byteLimit > 0 && bytesUsed+addition > byteLimit {
+			page.ByteCapped = true
+			break
+		}
+		selected = append(selected, entry)
+		bytesUsed += addition
+	}
+	page.Entries = selected
+	if len(selected) > 0 {
+		page.Start = start
+		page.End = start + len(selected) - 1
+	}
+	page.HasMore = page.End < total
+	if page.HasMore && page.End > 0 {
+		page.NextOffset = page.End + 1
+	}
+	return page, nil
+}
+
+func truncateReadLine(line string) string {
+	if utf8.RuneCountInString(line) <= maxReadLineChars {
+		return line
+	}
+	runes := []rune(line)
+	return string(runes[:maxReadLineChars]) + maxReadLineTruncSuffix
+}
+
+func fileReadFooter(page filePage, limit int) string {
+	switch {
+	case page.Total == 0:
+		return "End of file - total 0 lines."
+	case page.ByteCapped:
+		return fmt.Sprintf("Output capped at 64 KiB. Showing lines %d-%d of %d. Use offset=%d limit=%d to continue.", page.Start, page.End, page.Total, page.NextOffset, limit)
+	case page.HasMore:
+		return fmt.Sprintf("Showing lines %d-%d of %d. Use offset=%d limit=%d to continue.", page.Start, page.End, page.Total, page.NextOffset, limit)
+	default:
+		return fmt.Sprintf("End of file - total %d lines.", page.Total)
+	}
+}
+
+func directoryReadFooter(page directoryPage, limit int) string {
+	switch {
+	case page.Total == 0:
+		return "End of directory - total 0 entries."
+	case page.ByteCapped:
+		return fmt.Sprintf("Output capped at 64 KiB. Showing entries %d-%d of %d. Use offset=%d limit=%d to continue.", page.Start, page.End, page.Total, page.NextOffset, limit)
+	case page.HasMore:
+		return fmt.Sprintf("Showing entries %d-%d of %d. Use offset=%d limit=%d to continue.", page.Start, page.End, page.Total, page.NextOffset, limit)
+	default:
+		return fmt.Sprintf("End of directory - total %d entries.", page.Total)
+	}
 }

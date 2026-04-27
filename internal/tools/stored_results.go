@@ -44,14 +44,21 @@ type ReadStoredLine struct {
 }
 
 type ReadStoredResult struct {
-	Path      string           `json:"path"`
-	Mode      ReadStoredMode   `json:"mode"`
-	Lines     []ReadStoredLine `json:"lines,omitempty"`
-	Entries   []string         `json:"entries,omitempty"`
-	Footer    string           `json:"footer,omitempty"`
-	Offset    string           `json:"offset,omitempty"`
-	Limit     string           `json:"limit,omitempty"`
-	Truncated bool             `json:"truncated,omitempty"`
+	Path           string           `json:"path"`
+	Mode           ReadStoredMode   `json:"mode"`
+	Lines          []ReadStoredLine `json:"lines,omitempty"`
+	Entries        []string         `json:"entries,omitempty"`
+	Footer         string           `json:"footer,omitempty"`
+	Offset         string           `json:"offset,omitempty"`
+	Limit          string           `json:"limit,omitempty"`
+	Start          int              `json:"start,omitempty"`
+	End            int              `json:"end,omitempty"`
+	Total          int              `json:"total,omitempty"`
+	NextOffset     int              `json:"next_offset,omitempty"`
+	EffectiveLimit int              `json:"effective_limit,omitempty"`
+	ByteCapped     bool             `json:"byte_capped,omitempty"`
+	HasMore        bool             `json:"has_more,omitempty"`
+	Truncated      bool             `json:"truncated,omitempty"`
 }
 
 type BashStoredResult struct {
@@ -443,10 +450,53 @@ func formatReadStoredResult(result ReadStoredResult) string {
 			lines = append(lines, strconv.Itoa(line.Number)+": "+line.Text)
 		}
 	}
-	if footer := strings.TrimSpace(result.Footer); footer != "" {
+	footer := strings.TrimSpace(result.Footer)
+	if footer == "" {
+		footer = readStoredFooter(result)
+	}
+	if footer != "" {
 		lines = append(lines, footer)
 	}
 	return strings.TrimSpace(strings.Join(lines, "\n"))
+}
+
+func readStoredFooter(result ReadStoredResult) string {
+	if result.Total == 0 && result.Mode == ReadStoredModeFile {
+		return "End of file - total 0 lines."
+	}
+	if result.Total == 0 && result.Mode == ReadStoredModeDirectory {
+		return "End of directory - total 0 entries."
+	}
+	if result.Start == 0 || result.End == 0 {
+		return ""
+	}
+	label := "lines"
+	if result.Mode == ReadStoredModeDirectory {
+		label = "entries"
+	}
+	if result.ByteCapped {
+		if result.Total > 0 {
+			return fmt.Sprintf("Output capped at 64 KiB. Showing %s %d-%d of %d. Use offset=%d limit=%d to continue.", label, result.Start, result.End, result.Total, result.NextOffset, effectiveReadLimit(result))
+		}
+		return fmt.Sprintf("Output capped at 64 KiB. Showing %s %d-%d. Use offset=%d limit=%d to continue.", label, result.Start, result.End, result.NextOffset, effectiveReadLimit(result))
+	}
+	if result.HasMore {
+		return fmt.Sprintf("Showing %s %d-%d of %d. Use offset=%d limit=%d to continue.", label, result.Start, result.End, result.Total, result.NextOffset, effectiveReadLimit(result))
+	}
+	if result.Mode == ReadStoredModeDirectory {
+		return fmt.Sprintf("End of directory - total %d entries.", result.Total)
+	}
+	return fmt.Sprintf("End of file - total %d lines.", result.Total)
+}
+
+func effectiveReadLimit(result ReadStoredResult) int {
+	if result.EffectiveLimit > 0 {
+		return result.EffectiveLimit
+	}
+	if limit, err := strconv.Atoi(strings.TrimSpace(result.Limit)); err == nil && limit > 0 {
+		return limit
+	}
+	return DefaultReadLineLimit
 }
 
 func formatGlobStoredResult(result GlobStoredResult) string {

@@ -2,8 +2,10 @@ package readtool
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -48,4 +50,249 @@ func TestPresentationIncludesPathAndLineRange(t *testing.T) {
 	if got.Subtitle != "" {
 		t.Fatalf("expected empty subtitle, got %q", got.Subtitle)
 	}
+}
+
+func TestExecutePagesLargeFilesWithContinuationHint(t *testing.T) {
+	workspace := t.TempDir()
+	target := filepath.Join(workspace, "long.txt")
+	if err := os.WriteFile(target, []byte(numberedLines(2505)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: workspace}, tools.Request{
+		Args: map[string]string{"path": "long.txt"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result.Output, "1: line1") {
+		t.Fatalf("expected first line, got %q", result.Output)
+	}
+	if !strings.Contains(result.Output, "2000: line2000") {
+		t.Fatalf("expected page to include line 2000")
+	}
+	if strings.Contains(result.Output, "2001: line2001") {
+		t.Fatalf("expected first page to stop before line 2001")
+	}
+	wantFooter := "Showing lines 1-2000 of 2505. Use offset=2001 limit=2000 to continue."
+	if !strings.Contains(result.Output, wantFooter) {
+		t.Fatalf("expected continuation footer %q, got %q", wantFooter, result.Output)
+	}
+	if got := result.Meta["next_offset"]; got != "2001" {
+		t.Fatalf("expected next_offset 2001, got %q", got)
+	}
+	if got := result.Meta["total"]; got != "2505" {
+		t.Fatalf("expected total 2505, got %q", got)
+	}
+}
+
+func TestExecuteReadsSecondPageAndReportsEOF(t *testing.T) {
+	workspace := t.TempDir()
+	target := filepath.Join(workspace, "long.txt")
+	if err := os.WriteFile(target, []byte(numberedLines(2505)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: workspace}, tools.Request{
+		Args: map[string]string{
+			"path":   "long.txt",
+			"offset": "2001",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result.Output, "2001: line2001") {
+		t.Fatalf("expected second page to start at line 2001")
+	}
+	if !strings.Contains(result.Output, "2505: line2505") {
+		t.Fatalf("expected second page to include final line")
+	}
+	if !strings.Contains(result.Output, "End of file - total 2505 lines.") {
+		t.Fatalf("expected eof footer, got %q", result.Output)
+	}
+	if got := result.Meta["truncated"]; got != "false" {
+		t.Fatalf("expected truncated=false, got %q", got)
+	}
+}
+
+func TestExecuteRespectsExplicitLimitAndNextOffset(t *testing.T) {
+	workspace := t.TempDir()
+	target := filepath.Join(workspace, "limited.txt")
+	if err := os.WriteFile(target, []byte(numberedLines(100)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: workspace}, tools.Request{
+		Args: map[string]string{
+			"path":  "limited.txt",
+			"limit": "10",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result.Output, "10: line10") {
+		t.Fatalf("expected tenth line in page")
+	}
+	if strings.Contains(result.Output, "11: line11") {
+		t.Fatalf("expected output to stop before line 11")
+	}
+	wantFooter := "Showing lines 1-10 of 100. Use offset=11 limit=10 to continue."
+	if !strings.Contains(result.Output, wantFooter) {
+		t.Fatalf("expected explicit-limit footer %q, got %q", wantFooter, result.Output)
+	}
+}
+
+func TestExecuteRejectsOutOfRangeOffsets(t *testing.T) {
+	workspace := t.TempDir()
+	target := filepath.Join(workspace, "small.txt")
+	if err := os.WriteFile(target, []byte(numberedLines(3)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: workspace}, tools.Request{
+		Args: map[string]string{
+			"path":   "small.txt",
+			"offset": "4",
+			"limit":  "5",
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "offset 4 is out of range for this file (3 lines)") {
+		t.Fatalf("expected out-of-range file error, got %v", err)
+	}
+}
+
+func TestExecuteHandlesEmptyFileOffsets(t *testing.T) {
+	workspace := t.TempDir()
+	target := filepath.Join(workspace, "empty.txt")
+	if err := os.WriteFile(target, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: workspace}, tools.Request{
+		Args: map[string]string{"path": "empty.txt"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result.Output, "End of file - total 0 lines.") {
+		t.Fatalf("expected empty-file eof footer, got %q", result.Output)
+	}
+
+	_, err = tool{}.Execute(context.Background(), tools.Runtime{Workdir: workspace}, tools.Request{
+		Args: map[string]string{
+			"path":   "empty.txt",
+			"offset": "2",
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "offset 2 is out of range for this file (0 lines)") {
+		t.Fatalf("expected out-of-range empty-file error, got %v", err)
+	}
+}
+
+func TestExecutePagesDirectories(t *testing.T) {
+	workspace := t.TempDir()
+	dir := filepath.Join(workspace, "entries")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	names := make([]string, 0, 12)
+	for i := 1; i <= 12; i++ {
+		name := fileName(i)
+		names = append(names, name)
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	slices.Sort(names)
+
+	result, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: workspace}, tools.Request{
+		Args: map[string]string{
+			"path":   "entries",
+			"offset": "6",
+			"limit":  "5",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range names[5:10] {
+		if !strings.Contains(result.Output, want) {
+			t.Fatalf("expected directory page to include %q", want)
+		}
+	}
+	if strings.Contains(result.Output, names[4]) {
+		t.Fatalf("expected directory page to exclude prior entry %q", names[4])
+	}
+	if strings.Contains(result.Output, names[10]) {
+		t.Fatalf("expected directory page to exclude next entry %q", names[10])
+	}
+	wantFooter := "Showing entries 6-10 of 12. Use offset=11 limit=5 to continue."
+	if !strings.Contains(result.Output, wantFooter) {
+		t.Fatalf("expected directory continuation footer %q, got %q", wantFooter, result.Output)
+	}
+
+	finalPage, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: workspace}, tools.Request{
+		Args: map[string]string{
+			"path":   "entries",
+			"offset": "11",
+			"limit":  "5",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(finalPage.Output, "End of directory - total 12 entries.") {
+		t.Fatalf("expected directory eof footer, got %q", finalPage.Output)
+	}
+	if got := finalPage.Meta["truncated"]; got != "false" {
+		t.Fatalf("expected truncated=false for final directory page, got %q", got)
+	}
+}
+
+func TestExecuteReportsByteCapWithContinuationHint(t *testing.T) {
+	workspace := t.TempDir()
+	target := filepath.Join(workspace, "wide.txt")
+	var builder strings.Builder
+	for i := 1; i <= 80; i++ {
+		builder.WriteString(strings.Repeat("x", 1000))
+		if i < 80 {
+			builder.WriteByte('\n')
+		}
+	}
+	if err := os.WriteFile(target, []byte(builder.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: workspace}, tools.Request{
+		Args: map[string]string{"path": "wide.txt"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result.Output, "Output capped at 64 KiB.") {
+		t.Fatalf("expected byte-cap footer, got %q", result.Output)
+	}
+	if !strings.Contains(result.Output, "Use offset=") {
+		t.Fatalf("expected continuation hint in byte-capped output, got %q", result.Output)
+	}
+	if got := result.Meta["byte_capped"]; got != "true" {
+		t.Fatalf("expected byte_capped=true, got %q", got)
+	}
+	if got := result.Meta["truncated"]; got != "true" {
+		t.Fatalf("expected truncated=true, got %q", got)
+	}
+}
+
+func numberedLines(count int) string {
+	lines := make([]string, 0, count)
+	for i := 1; i <= count; i++ {
+		lines = append(lines, fmt.Sprintf("line%d", i))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func fileName(i int) string {
+	return fmt.Sprintf("file-%02d.txt", i)
 }

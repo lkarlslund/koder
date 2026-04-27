@@ -16,7 +16,7 @@ import (
 )
 
 const (
-	DefaultReadLineLimit   = 400
+	DefaultReadLineLimit   = 2000
 	DefaultReadByteLimit   = 64 * 1024
 	DefaultToolOutputLimit = 64 * 1024
 	DefaultBashTimeout     = 2 * time.Minute
