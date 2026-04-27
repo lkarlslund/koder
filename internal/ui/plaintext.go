@@ -86,8 +86,6 @@ func wrapWordsPlain(line string, width int) []string {
 		if wordWidth > width {
 			if current != "" {
 				lines = append(lines, current)
-				current = ""
-				currentWidth = 0
 			}
 			parts := splitLongWordPlain(word, width)
 			lines = append(lines, parts[:len(parts)-1]...)

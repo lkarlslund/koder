@@ -83,7 +83,7 @@ func (tool) Execute(_ context.Context, runtime tools.Runtime, req tools.Request)
 	if !replaceAll && occurrences != 1 {
 		return tools.Result{}, fmt.Errorf("target text occurs %d times in %s; use replace_all to replace every occurrence", occurrences, rel)
 	}
-	after := before
+	var after string
 	if replaceAll {
 		after = strings.ReplaceAll(before, oldString, newString)
 	} else {

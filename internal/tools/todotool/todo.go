@@ -348,18 +348,15 @@ func (fetchNextTool) PersistResult(ctx context.Context, st *store.Store, session
 		return nil, err
 	}
 	message := ""
-	display := todos
 	for _, item := range todos {
 		if item.Status == domain.TodoStatusInProgress {
-			display = []store.TodoItem{item}
-			result.Stored = tools.TodoStoredResult(plan, ref, display, message)
+			result.Stored = tools.TodoStoredResult(plan, ref, []store.TodoItem{item}, message)
 			return tools.PersistStandardResult(ctx, st, sessionID, req, result)
 		}
 	}
 	for _, item := range todos {
 		if item.Status == domain.TodoStatusPending {
-			display = []store.TodoItem{item}
-			result.Stored = tools.TodoStoredResult(plan, ref, display, message)
+			result.Stored = tools.TodoStoredResult(plan, ref, []store.TodoItem{item}, message)
 			return tools.PersistStandardResult(ctx, st, sessionID, req, result)
 		}
 	}

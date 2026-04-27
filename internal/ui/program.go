@@ -69,7 +69,9 @@ func (p *Program) Run() (Model, error) {
 	if err != nil {
 		return p.model, err
 	}
-	defer term.Restore(in.Fd(), oldState)
+	defer func() {
+		_ = term.Restore(in.Fd(), oldState)
+	}()
 
 	if p.altScreen {
 		writeString(out, "\x1b[?1049h")
@@ -246,10 +248,6 @@ func diffFrameSurface(previous, current SurfaceView) string {
 	}
 	if current != nil {
 		currRows = current.SurfaceHeight()
-	}
-	maxRows := prevRows
-	if currRows > maxRows {
-		maxRows = currRows
 	}
 	for idx := 0; idx < currRows; idx++ {
 		if surfaceRowsEqual(previous, current, idx) {
