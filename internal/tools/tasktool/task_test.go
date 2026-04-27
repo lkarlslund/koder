@@ -1,0 +1,63 @@
+package tasktool
+
+import (
+	"context"
+	"testing"
+
+	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/store"
+	"github.com/lkarlslund/koder/internal/tools"
+)
+
+func openTaskStore(t *testing.T) *store.Store {
+	t.Helper()
+	st, err := store.OpenWithOptions(t.TempDir(), store.Options{Backend: store.BackendJSONFS})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	return st
+}
+
+func TestNormalizeAndExecute(t *testing.T) {
+	if _, err := (tool{}).NormalizeArgs(map[string]string{}); err == nil {
+		t.Fatal("expected empty body error")
+	}
+	req, err := (tool{}).NormalizeArgs(map[string]string{"body": " Ship it "})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := tool{}.Execute(context.Background(), tools.Runtime{}, tools.Request{Args: req})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Output != "Ship it" {
+		t.Fatalf("unexpected output: %q", result.Output)
+	}
+}
+
+func TestPersistResultCreatesPendingTask(t *testing.T) {
+	st := openTaskStore(t)
+	session, err := st.CreateSession(context.Background(), "test", "provider", "model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	events, err := tool{}.PersistResult(context.Background(), st, session.ID, tools.Request{
+		Tool: domain.ToolKindTask,
+		Args: map[string]string{"body": "Ship it"},
+	}, tools.Result{Output: "Ship it"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	evt := <-events
+	if evt.Kind != domain.EventKindTaskUpdate {
+		t.Fatalf("unexpected event: %#v", evt)
+	}
+	tasks, err := st.ListTasks(context.Background(), session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tasks) != 1 || tasks[0].Status != domain.TaskStatusPending || tasks[0].Body != "Ship it" {
+		t.Fatalf("unexpected tasks: %#v", tasks)
+	}
+}
