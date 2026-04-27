@@ -99,6 +99,8 @@ const (
 	KeyRight
 	KeyUp
 	KeyDown
+	KeyPgUp
+	KeyPgDown
 	KeyHome
 	KeyEnd
 	KeyBackspace
@@ -111,6 +113,8 @@ const (
 	KeyCtrlC
 	KeyCtrlE
 	KeyCtrlG
+	KeyCtrlPgUp
+	KeyCtrlPgDown
 	KeyCtrlR
 	KeyCtrlV
 	KeyCtrlY
@@ -137,6 +141,10 @@ func (k KeyMsg) String() string {
 		base = "up"
 	case KeyDown:
 		base = "down"
+	case KeyPgUp:
+		base = "pgup"
+	case KeyPgDown:
+		base = "pgdown"
 	case KeyHome:
 		base = "home"
 	case KeyEnd:
@@ -161,6 +169,10 @@ func (k KeyMsg) String() string {
 		base = "ctrl+e"
 	case KeyCtrlG:
 		base = "ctrl+g"
+	case KeyCtrlPgUp:
+		base = "ctrl+pgup"
+	case KeyCtrlPgDown:
+		base = "ctrl+pgdown"
 	case KeyCtrlR:
 		base = "ctrl+r"
 	case KeyCtrlV:

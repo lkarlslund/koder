@@ -224,6 +224,25 @@ func TestConvertKeyPressMapsCtrlCombosByCodeWhenTextEmpty(t *testing.T) {
 	}
 }
 
+func TestConvertKeyPressMapsPageKeysAndCtrlPageKeys(t *testing.T) {
+	got := convertKeyPress(input.KeyPressEvent{Code: input.KeyPgUp})
+	if got.Type != KeyPgUp {
+		t.Fatalf("expected pgup to map to KeyPgUp, got %#v", got)
+	}
+	got = convertKeyPress(input.KeyPressEvent{Code: input.KeyPgDown})
+	if got.Type != KeyPgDown {
+		t.Fatalf("expected pgdown to map to KeyPgDown, got %#v", got)
+	}
+	got = convertKeyPress(input.KeyPressEvent{Code: input.KeyPgUp, Mod: input.ModCtrl})
+	if got.Type != KeyCtrlPgUp {
+		t.Fatalf("expected ctrl+pgup to map to KeyCtrlPgUp, got %#v", got)
+	}
+	got = convertKeyPress(input.KeyPressEvent{Code: input.KeyPgDown, Mod: input.ModCtrl})
+	if got.Type != KeyCtrlPgDown {
+		t.Fatalf("expected ctrl+pgdown to map to KeyCtrlPgDown, got %#v", got)
+	}
+}
+
 func TestConvertKeyPressMapsPrintableRunesFromCodeFallback(t *testing.T) {
 	got := convertKeyPress(input.KeyPressEvent{Code: 'i'})
 	if got.Type != KeyRunes || string(got.Runes) != "i" {

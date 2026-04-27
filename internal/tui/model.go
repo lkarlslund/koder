@@ -1147,6 +1147,10 @@ func (m *Model) handleMainWindowKey(msg ui.KeyMsg) (bool, ui.Cmd) {
 	case "ctrl+c":
 		_, cmd := m.quit()
 		return true, cmd
+	case "ctrl+pgup":
+		return true, m.switchChatByDelta(-1)
+	case "ctrl+pgdown":
+		return true, m.switchChatByDelta(1)
 	case "alt+q":
 		m.queueEditMode = !m.queueEditMode
 		if m.queueEditMode && len(m.currentChat.QueuedInputs) > 0 {
@@ -3803,36 +3807,10 @@ func (m *Model) handleLocalCommand(prompt string) (ui.Model, ui.Cmd, bool) {
 		return m, ui.Batch(m.createChatCmd(m.currentSession.ID, domain.WorkflowRoleGeneral, title), m.spinnerCmdIfNeeded()), true
 	case trimmed == "/chat next":
 		m.resetComposerInput()
-		if len(m.chats) <= 1 {
-			m.status = "No other chats in this session"
-			return m, m.syncWindowTitleCmd(), true
-		}
-		idx := 0
-		for i, item := range m.chats {
-			if item.ID == m.currentChat.ID {
-				idx = i
-				break
-			}
-		}
-		next := m.chats[(idx+1)%len(m.chats)]
-		m.startBusy(busyScopeSidebar, fmt.Sprintf("Switching to chat %d…", next.ID))
-		return m, ui.Batch(m.loadChatCmd(next.SessionID, next.ID), m.spinnerCmdIfNeeded()), true
+		return m, m.switchChatByDelta(1), true
 	case trimmed == "/chat prev":
 		m.resetComposerInput()
-		if len(m.chats) <= 1 {
-			m.status = "No other chats in this session"
-			return m, m.syncWindowTitleCmd(), true
-		}
-		idx := 0
-		for i, item := range m.chats {
-			if item.ID == m.currentChat.ID {
-				idx = i
-				break
-			}
-		}
-		prev := m.chats[(idx-1+len(m.chats))%len(m.chats)]
-		m.startBusy(busyScopeSidebar, fmt.Sprintf("Switching to chat %d…", prev.ID))
-		return m, ui.Batch(m.loadChatCmd(prev.SessionID, prev.ID), m.spinnerCmdIfNeeded()), true
+		return m, m.switchChatByDelta(-1), true
 	case trimmed == "/mouse on":
 		m.resetComposerInput()
 		m.mouseEnabled = true
@@ -3932,6 +3910,27 @@ func (m *Model) handleLocalCommand(prompt string) (ui.Model, ui.Cmd, bool) {
 	default:
 		return nil, nil, false
 	}
+}
+
+func (m *Model) switchChatByDelta(delta int) ui.Cmd {
+	if len(m.chats) <= 1 {
+		m.status = "No other chats in this session"
+		return m.syncWindowTitleCmd()
+	}
+	idx := 0
+	for i, item := range m.chats {
+		if item.ID == m.currentChat.ID {
+			idx = i
+			break
+		}
+	}
+	nextIdx := (idx + delta) % len(m.chats)
+	if nextIdx < 0 {
+		nextIdx += len(m.chats)
+	}
+	next := m.chats[nextIdx]
+	m.startBusy(busyScopeSidebar, fmt.Sprintf("Switching to chat %d…", next.ID))
+	return ui.Batch(m.loadChatCmd(next.SessionID, next.ID), m.spinnerCmdIfNeeded())
 }
 
 func (m Model) approvalPermissionProfileCmd(ctx context.Context, approvalID int64, profile string) ui.Cmd {
@@ -6296,6 +6295,7 @@ func (m *Model) openHelpModal() {
 		"Hotkeys",
 		"Alt-H               show or close help",
 		"Alt-Q               toggle queue edit mode",
+		"Ctrl-PgUp/PgDn      switch to previous or next chat",
 		"Enter               send prompt or confirm selection",
 		"Esc                 cancel dialog or interrupt active run",
 		"Tab                 autocomplete, or queue steering while running",

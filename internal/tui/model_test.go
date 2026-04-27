@@ -3635,6 +3635,9 @@ func TestAltHTogglesHelpDialog(t *testing.T) {
 	if !strings.Contains(view, "Help") || !strings.Contains(view, "/connect") || !strings.Contains(view, "Ctrl-V") || !strings.Contains(view, "Alt-P") || !strings.Contains(view, "Ctrl-R") {
 		t.Fatalf("expected help dialog content, got %q", view)
 	}
+	if !strings.Contains(view, "Ctrl-PgUp/PgDn") {
+		t.Fatalf("expected chat navigation hotkey in help dialog, got %q", view)
+	}
 	if !strings.Contains(view, "PgUp/PgDn") {
 		t.Fatalf("expected help dialog scroll footer, got %q", view)
 	}
@@ -3658,6 +3661,41 @@ func TestAltHTogglesHelpDialog(t *testing.T) {
 	}
 	if next.hasHelpModal() {
 		t.Fatal("expected help dialog to close")
+	}
+}
+
+func TestCtrlPageKeysSwitchChats(t *testing.T) {
+	m := Model{
+		cfg:            testConfig(t),
+		composer:       textarea.New(),
+		currentSession: domain.Session{ID: 7},
+		currentChat:    domain.Chat{ID: 11, SessionID: 7},
+		chats: []domain.Chat{
+			{ID: 11, SessionID: 7},
+			{ID: 12, SessionID: 7},
+			{ID: 13, SessionID: 7},
+		},
+	}
+
+	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyCtrlPgDown})
+	next := updated.(*Model)
+	if cmd == nil {
+		t.Fatal("expected chat switch command for ctrl+pgdown")
+	}
+	if !next.loading {
+		t.Fatal("expected chat switch to enter busy state")
+	}
+	if next.status != "Switching to chat 12…" {
+		t.Fatalf("expected next-chat status, got %q", next.status)
+	}
+
+	updated, cmd = m.handleKey(ui.KeyMsg{Type: ui.KeyCtrlPgUp})
+	next = updated.(*Model)
+	if cmd == nil {
+		t.Fatal("expected chat switch command for ctrl+pgup")
+	}
+	if next.status != "Switching to chat 13…" {
+		t.Fatalf("expected previous-chat wrap status, got %q", next.status)
 	}
 }
 

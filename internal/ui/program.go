@@ -649,6 +649,18 @@ func convertKeyPress(ev input.KeyPressEvent) KeyMsg {
 		msg.Type = KeyUp
 	case input.KeyDown:
 		msg.Type = KeyDown
+	case input.KeyPgUp:
+		if key.Mod.Contains(input.ModCtrl) {
+			msg.Type = KeyCtrlPgUp
+		} else {
+			msg.Type = KeyPgUp
+		}
+	case input.KeyPgDown:
+		if key.Mod.Contains(input.ModCtrl) {
+			msg.Type = KeyCtrlPgDown
+		} else {
+			msg.Type = KeyPgDown
+		}
 	case input.KeyHome:
 		msg.Type = KeyHome
 	case input.KeyEnd:
