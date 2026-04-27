@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -590,6 +591,60 @@ func TestCompleteChatReturnsAPIErrorWithRetryAfter(t *testing.T) {
 	}
 	if !strings.Contains(apiErr.Error(), "chat status 429") {
 		t.Fatalf("expected formatted error message, got %q", apiErr.Error())
+	}
+}
+
+func TestStreamChatResponseRecordsReadFailureAfterHeaders(t *testing.T) {
+	recorder := debugsrv.NewRecorder()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		_ = r.Body.Close()
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			t.Fatal("expected flusher")
+		}
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hel\"}}]}\n\n"))
+		flusher.Flush()
+		time.Sleep(250 * time.Millisecond)
+	}))
+	defer server.Close()
+
+	client, err := New("test", config.Provider{
+		BaseURL: server.URL,
+		Timeout: 100 * time.Millisecond,
+	}, recorder)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = client.StreamChatResponse(context.Background(), ChatRequest{Model: "test"}, nil)
+	if err == nil {
+		t.Fatal("expected stream read failure")
+	}
+
+	traces := recorder.HTTPTraces()
+	if len(traces) != 2 {
+		t.Fatalf("expected initial request trace plus failure trace, got %#v", traces)
+	}
+	failure := traces[1]
+	if failure.Status != http.StatusOK {
+		t.Fatalf("expected failure trace to preserve response status, got %#v", failure)
+	}
+	if failure.Meta["phase"] != "read_stream" {
+		t.Fatalf("expected read_stream phase meta, got %#v", failure)
+	}
+	if failure.Meta["chunk_count"] != "1" {
+		t.Fatalf("expected chunk_count=1, got %#v", failure)
+	}
+	if !strings.Contains(failure.Meta["last_payload"], "\"hel\"") {
+		t.Fatalf("expected last payload in failure trace, got %#v", failure)
+	}
+	if failure.Error == "" {
+		t.Fatalf("expected failure error in trace, got %#v", failure)
+	}
+	if failure.ResponseBody != "[stream/body read failed after headers]" {
+		t.Fatalf("unexpected failure response body marker: %#v", failure)
 	}
 }
 

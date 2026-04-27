@@ -234,6 +234,7 @@ type Client struct {
 	apiKey   string
 	headers  map[string]string
 	provider string
+	recorder *debugsrv.Recorder
 }
 
 type ChatResponse struct {
@@ -272,6 +273,7 @@ func New(id string, cfg config.Provider, recorder *debugsrv.Recorder) (*Client, 
 		apiKey:   cfg.APIKey,
 		headers:  cfg.Headers,
 		provider: id,
+		recorder: recorder,
 	}, nil
 }
 
@@ -455,6 +457,7 @@ func (c *Client) CompleteChat(ctx context.Context, input ChatRequest) (ChatRespo
 	if err := json.NewEncoder(&body).Encode(input); err != nil {
 		return ChatResponse{}, fmt.Errorf("encode chat request: %w", err)
 	}
+	requestBody := body.String()
 	req, err := c.newRequest(ctx, http.MethodPost, c.apiPath("/chat/completions"), &body)
 	if err != nil {
 		return ChatResponse{}, err
@@ -476,6 +479,7 @@ func (c *Client) CompleteChat(ctx context.Context, input ChatRequest) (ChatRespo
 
 	var payload chatChunk
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		c.recordBodyFailure(http.MethodPost, req.URL.Path, requestBody, resp, "decode_chat_response", err, nil)
 		return ChatResponse{}, fmt.Errorf("decode chat response: %w", err)
 	}
 	if len(payload.Choices) == 0 {
@@ -515,6 +519,7 @@ func (c *Client) StreamChatResponse(ctx context.Context, input ChatRequest, onEv
 	if err := json.NewEncoder(&body).Encode(input); err != nil {
 		return ChatResponse{}, fmt.Errorf("encode chat request: %w", err)
 	}
+	requestBody := body.String()
 	req, err := c.newRequest(ctx, http.MethodPost, c.apiPath("/chat/completions"), &body)
 	if err != nil {
 		return ChatResponse{}, err
@@ -536,6 +541,7 @@ func (c *Client) StreamChatResponse(ctx context.Context, input ChatRequest, onEv
 	if !strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream") {
 		var payload chatChunk
 		if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+			c.recordBodyFailure(http.MethodPost, req.URL.Path, requestBody, resp, "decode_chat_response", err, nil)
 			return ChatResponse{}, fmt.Errorf("decode chat response: %w", err)
 		}
 		result := streamedChatResponse{}
@@ -557,15 +563,26 @@ func (c *Client) StreamChatResponse(ctx context.Context, input ChatRequest, onEv
 
 	var aggregated streamedChatResponse
 	reader := bufio.NewReader(resp.Body)
+	chunkCount := 0
+	lastPayload := ""
 	for {
 		line, err := reader.ReadString('\n')
 		if err != nil && !errors.Is(err, io.EOF) {
+			meta := map[string]string{
+				"phase":       "read_stream",
+				"chunk_count": strconv.Itoa(chunkCount),
+			}
+			if strings.TrimSpace(lastPayload) != "" {
+				meta["last_payload"] = debugTruncate(strings.TrimSpace(lastPayload), 4096)
+			}
+			c.recordBodyFailure(http.MethodPost, req.URL.Path, requestBody, resp, "read_stream", err, meta)
 			return ChatResponse{}, err
 		}
 
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "data:") {
 			payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+			lastPayload = payload
 			if payload == "[DONE]" {
 				if onEvent != nil {
 					onEvent(domain.Event{Kind: domain.EventKindMessageDone})
@@ -574,8 +591,17 @@ func (c *Client) StreamChatResponse(ctx context.Context, input ChatRequest, onEv
 			}
 			var chunk chatChunk
 			if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
+				meta := map[string]string{
+					"phase":       "decode_sse_chunk",
+					"chunk_count": strconv.Itoa(chunkCount),
+				}
+				if strings.TrimSpace(payload) != "" {
+					meta["last_payload"] = debugTruncate(payload, 4096)
+				}
+				c.recordBodyFailure(http.MethodPost, req.URL.Path, requestBody, resp, "decode_sse_chunk", err, meta)
 				return ChatResponse{}, fmt.Errorf("decode sse chunk: %w", err)
 			}
+			chunkCount++
 			aggregated.Apply(chunk)
 			if onEvent != nil {
 				c.emitChunk(onEvent, chunk, payload)
@@ -586,6 +612,44 @@ func (c *Client) StreamChatResponse(ctx context.Context, input ChatRequest, onEv
 			return aggregated.Response(), nil
 		}
 	}
+}
+
+func (c *Client) recordBodyFailure(method, path, requestBody string, resp *http.Response, phase string, err error, meta map[string]string) {
+	if c == nil || c.recorder == nil || resp == nil || err == nil {
+		return
+	}
+	if meta == nil {
+		meta = map[string]string{}
+	}
+	meta["phase"] = phase
+	var requestHeaders map[string]string
+	if resp.Request != nil {
+		requestHeaders = redactHeaders(resp.Request.Header)
+	}
+	trace := debugsrv.HTTPTrace{
+		ProviderID:   c.provider,
+		Method:       method,
+		Path:         path,
+		Status:       resp.StatusCode,
+		RequestBody:  redactBody(requestBody),
+		RequestHdrs:  requestHeaders,
+		ResponseHdrs: redactHeaders(resp.Header),
+		ResponseBody: "[stream/body read failed after headers]",
+		Meta:         meta,
+		Error:        err.Error(),
+	}
+	if !strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream") {
+		trace.ResponseBody = "[body read failed after headers]"
+	}
+	c.recorder.RecordHTTP(trace)
+}
+
+func debugTruncate(value string, max int) string {
+	value = strings.TrimSpace(value)
+	if len(value) <= max {
+		return value
+	}
+	return value[:max-1] + "…"
 }
 
 func (c *Client) emitChunk(emit func(domain.Event), chunk chatChunk, raw string) {

@@ -48,6 +48,7 @@ type HTTPTrace struct {
 	ResponseBody string            `json:"response_body,omitempty"`
 	RequestHdrs  map[string]string `json:"request_headers,omitempty"`
 	ResponseHdrs map[string]string `json:"response_headers,omitempty"`
+	Meta         map[string]string `json:"meta,omitempty"`
 	Error        string            `json:"error,omitempty"`
 }
 
@@ -723,7 +724,12 @@ func cloneHTTPTraces(src []HTTPTrace) []HTTPTrace {
 		return nil
 	}
 	dst := make([]HTTPTrace, len(src))
-	copy(dst, src)
+	for i, item := range src {
+		dst[i] = item
+		dst[i].RequestHdrs = cloneMeta(item.RequestHdrs)
+		dst[i].ResponseHdrs = cloneMeta(item.ResponseHdrs)
+		dst[i].Meta = cloneMeta(item.Meta)
+	}
 	return dst
 }
 
