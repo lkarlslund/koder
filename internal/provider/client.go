@@ -93,7 +93,11 @@ func (m Message) MarshalJSON() ([]byte, error) {
 		ToolCallID string             `json:"tool_call_id,omitempty"`
 		ToolCalls  []ToolCall         `json:"tool_calls,omitempty"`
 	}
-	content := any(strings.TrimSpace(m.Content))
+	var content any
+	trimmed := strings.TrimSpace(m.Content)
+	if trimmed != "" {
+		content = trimmed
+	}
 	if len(m.ContentParts) > 0 {
 		items := make([]any, 0, len(m.ContentParts))
 		for _, part := range m.ContentParts {

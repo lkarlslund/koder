@@ -75,6 +75,32 @@ func TestSerializePromptEnvelopeCollapsesInstructionsIntoSingleSystemMessage(t *
 	}
 }
 
+func TestMessageMarshalJSONOmitsEmptyAssistantToolCallContent(t *testing.T) {
+	data, err := json.Marshal(Message{
+		Role: domain.MessageRoleAssistant,
+		ToolCalls: []ToolCall{
+			{
+				ID:   "call_1",
+				Type: "function",
+				Function: FunctionCall{
+					Name:      "read",
+					Arguments: "{\"path\":\".\"}",
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(data)
+	if strings.Contains(got, `"content":""`) {
+		t.Fatalf("expected empty content to be omitted, got %s", got)
+	}
+	if !strings.Contains(got, `"tool_calls"`) {
+		t.Fatalf("expected tool calls to be preserved, got %s", got)
+	}
+}
+
 func TestPropsUsesModelQueryAndParsesContextWindow(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/props" {
