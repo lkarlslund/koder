@@ -285,7 +285,14 @@ func (d ToolRunDock) Measure(_ *Context, constraints Constraints) Size {
 }
 
 func (d ToolRunDock) Render(ctx *Context, bounds Rect) Surface {
-	return d.element().Render(ctx, bounds)
+	return renderOwnedSurface(ctx, bounds, d.RenderTo)
+}
+
+func (d ToolRunDock) RenderTo(ctx *Context, bounds Rect, dst *Surface) {
+	if dst == nil || bounds.W <= 0 || bounds.H <= 0 {
+		return
+	}
+	renderElementInto(ctx, d.element(), bounds, dst)
 }
 
 func (d ToolRunDock) element() Element {
