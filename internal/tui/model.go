@@ -1095,14 +1095,16 @@ func (m *Model) handleMainWindowKey(msg ui.KeyMsg) (bool, ui.Cmd) {
 		m.refreshViewport()
 		return true, nil
 	case "alt+r":
+		anchor := m.captureTranscriptViewportAnchor()
 		m.showReasoning = !m.showReasoning
 		m.invalidateTranscript()
-		m.refreshViewport()
+		m.refreshViewportAnchored(anchor)
 		return true, nil
 	case "alt+p":
+		anchor := m.captureTranscriptViewportAnchor()
 		m.showSystem = !m.showSystem
 		m.invalidateTranscript()
-		m.refreshViewport()
+		m.refreshViewportAnchored(anchor)
 		return true, nil
 	case "alt+o":
 		prompt := strings.TrimSpace(m.composer.Value())
@@ -1859,6 +1861,175 @@ func (m *Model) refreshViewportPreserve() {
 	m.refreshViewportAt(m.viewport.YOffset)
 }
 
+type transcriptViewportAnchor struct {
+	index        int
+	key          string
+	offsetWithin int
+	lines        []string
+	line         string
+	lineOffset   int
+	fallback     int
+	valid        bool
+}
+
+func (m *Model) captureTranscriptViewportAnchor() transcriptViewportAnchor {
+	retained := m.syncRetainedTranscript()
+	if retained == nil {
+		return transcriptViewportAnchor{}
+	}
+	items := retained.Items()
+	if len(items) == 0 {
+		return transcriptViewportAnchor{fallback: m.viewport.YOffset}
+	}
+	width := max(0, m.viewport.Width)
+	offset := max(0, m.viewport.YOffset)
+	visibleLines := m.viewport.VisibleSurface().Lines()
+	if len(visibleLines) > 3 {
+		visibleLines = slices.Clone(visibleLines[:3])
+	} else {
+		visibleLines = slices.Clone(visibleLines)
+	}
+	anchorLine, anchorLineOffset := transcriptAnchorPreferredLine(visibleLines)
+	ctx := &ui.Context{Palette: m.palette}
+	y := 0
+	for idx, item := range items {
+		regionStart := y
+		regionHeight := max(0, item.GapBefore)
+		if item.Element != nil {
+			size := item.Element.Measure(ctx, ui.NewConstraints(width, 0))
+			regionHeight += max(0, size.H)
+		}
+		if regionHeight > 0 && offset < regionStart+regionHeight {
+			return transcriptViewportAnchor{
+				index:        idx,
+				key:          item.Key,
+				offsetWithin: offset - regionStart,
+				lines:        visibleLines,
+				line:         anchorLine,
+				lineOffset:   anchorLineOffset,
+				fallback:     offset,
+				valid:        strings.TrimSpace(item.Key) != "",
+			}
+		}
+		y += regionHeight
+	}
+	return transcriptViewportAnchor{fallback: offset}
+}
+
+func (m *Model) resolveTranscriptViewportAnchor(anchor transcriptViewportAnchor) int {
+	if !anchor.valid {
+		return anchor.fallback
+	}
+	retained := m.syncRetainedTranscript()
+	if retained == nil {
+		return anchor.fallback
+	}
+	items := retained.Items()
+	if len(items) == 0 {
+		return anchor.fallback
+	}
+	width := max(0, m.viewport.Width)
+	ctx := &ui.Context{Palette: m.palette}
+	if lineIdx := m.resolveTranscriptAnchorFromFullSurface(retained, ctx, width, anchor); lineIdx >= 0 {
+		return lineIdx
+	}
+	y := 0
+	for idx, item := range items {
+		regionStart := y
+		regionHeight := max(0, item.GapBefore)
+		regionLines := make([]string, 0, regionHeight)
+		for range max(0, item.GapBefore) {
+			regionLines = append(regionLines, "")
+		}
+		if item.Element != nil {
+			size := item.Element.Measure(ctx, ui.NewConstraints(width, 0))
+			regionHeight += max(0, size.H)
+			surface := item.Element.Render(ctx, ui.Rect{W: width, H: size.H})
+			regionLines = append(regionLines, surface.Lines()...)
+		}
+		if idx == anchor.index || item.Key == anchor.key {
+			if regionHeight <= 0 {
+				return regionStart
+			}
+			if lineIdx := transcriptAnchorSingleLineIndex(regionLines, anchor.line); lineIdx >= 0 {
+				return regionStart + max(0, lineIdx-anchor.lineOffset)
+			}
+			if idx := transcriptAnchorLineIndex(regionLines, anchor.lines); idx >= 0 {
+				return regionStart + idx
+			}
+			return regionStart + min(anchor.offsetWithin, regionHeight-1)
+		}
+		y += regionHeight
+	}
+	return anchor.fallback
+}
+
+func (m *Model) resolveTranscriptAnchorFromFullSurface(retained *ui.RetainedTranscript, ctx *ui.Context, width int, anchor transcriptViewportAnchor) int {
+	if retained == nil || strings.TrimSpace(anchor.line) == "" {
+		return -1
+	}
+	size := retained.Measure(ctx, ui.NewConstraints(width, 0))
+	surface := retained.Render(ctx, ui.Rect{W: width, H: size.H})
+	lines := surface.Lines()
+	lineIdx := transcriptAnchorSingleLineIndex(lines, anchor.line)
+	if lineIdx < 0 {
+		return -1
+	}
+	return max(0, lineIdx-anchor.lineOffset)
+}
+
+func transcriptAnchorLineIndex(haystack, needle []string) int {
+	if len(needle) == 0 || len(haystack) == 0 {
+		return -1
+	}
+	maxStart := len(haystack) - len(needle)
+	for start := 0; start <= maxStart; start++ {
+		match := true
+		for idx := range needle {
+			if strings.TrimRight(haystack[start+idx], " ") != strings.TrimRight(needle[idx], " ") {
+				match = false
+				break
+			}
+		}
+		if match {
+			return start
+		}
+	}
+	return -1
+}
+
+func transcriptAnchorPreferredLine(lines []string) (string, int) {
+	for idx, line := range lines {
+		trimmed := strings.TrimRight(line, " ")
+		if trimmed != "" {
+			return trimmed, idx
+		}
+	}
+	return "", 0
+}
+
+func transcriptAnchorSingleLineIndex(lines []string, needle string) int {
+	needle = strings.TrimRight(needle, " ")
+	if needle == "" {
+		return -1
+	}
+	for idx, line := range lines {
+		candidate := strings.TrimRight(line, " ")
+		if candidate == "" {
+			continue
+		}
+		if candidate == needle || strings.Contains(candidate, needle) || strings.Contains(needle, candidate) {
+			return idx
+		}
+	}
+	return -1
+}
+
+func (m *Model) refreshViewportAnchored(anchor transcriptViewportAnchor) {
+	m.invalidateMainSurface()
+	m.refreshViewportAt(m.resolveTranscriptViewportAnchor(anchor))
+}
+
 func (m *Model) refreshViewportAt(offset int) {
 	m.invalidateMainSurface()
 	if m.hasExpandedToolRuns() {
@@ -2279,7 +2450,11 @@ func (m *Model) renderMessageParts(parts []domain.Part) string {
 
 func (m *Model) renderStyledMessageParts(parts []domain.Part) []ui.StyledSpan {
 	var blocks [][]ui.StyledSpan
+	var reasoningBlocks [][]ui.StyledSpan
+	var systemBlocks [][]ui.StyledSpan
+	var textBlocks [][]ui.StyledSpan
 	var textBuf strings.Builder
+	var reasoningBuf strings.Builder
 
 	flushText := func() {
 		if textBuf.Len() == 0 {
@@ -2287,37 +2462,57 @@ func (m *Model) renderStyledMessageParts(parts []domain.Part) []ui.StyledSpan {
 		}
 		block := m.renderer.RenderStyled(textBuf.String())
 		if len(block) > 0 {
-			blocks = append(blocks, block)
+			textBlocks = append(textBlocks, block)
 		}
 		textBuf.Reset()
+	}
+	flushReasoning := func() {
+		if reasoningBuf.Len() == 0 {
+			return
+		}
+		if m.showReasoning {
+			if block := m.renderStyledReasoningBlock(reasoningBuf.String()); len(block) > 0 {
+				reasoningBlocks = append(reasoningBlocks, block)
+			}
+		}
+		reasoningBuf.Reset()
 	}
 
 	for _, part := range parts {
 		switch part.Kind {
 		case domain.PartKindText:
+			flushReasoning()
 			textBuf.WriteString(part.Body)
+		case domain.PartKindReasoning:
+			flushText()
+			reasoningBuf.WriteString(part.Body)
 		case domain.PartKindCompaction:
 			flushText()
+			flushReasoning()
 			continue
 		case domain.PartKindSystemNotice:
 			flushText()
+			flushReasoning()
 			if m.showSystem {
 				if block := m.renderStyledSystemNoticeBlock(part); len(block) > 0 {
-					blocks = append(blocks, block)
+					systemBlocks = append(systemBlocks, block)
 				}
 			}
 		case domain.PartKindEventNotice:
 			flushText()
+			flushReasoning()
 			if eventNoticeToolRun(part).ID != "" {
 				continue
 			}
 			if block := m.renderStyledEventNoticeBlock(part); len(block) > 0 {
-				blocks = append(blocks, block)
+				systemBlocks = append(systemBlocks, block)
 			}
-		case domain.PartKindReasoning, domain.PartKindToolCall, domain.PartKindToolOutput, domain.PartKindDiff, domain.PartKindApprovalRequest, domain.PartKindReference:
+		case domain.PartKindToolCall, domain.PartKindToolOutput, domain.PartKindDiff, domain.PartKindApprovalRequest, domain.PartKindReference:
 			flushText()
+			flushReasoning()
 		case domain.PartKindAttachment:
 			flushText()
+			flushReasoning()
 			meta, err := attachment.DecodeMeta(part.MetaJSON)
 			if err != nil {
 				if body := strings.TrimSpace(part.Body); body != "" {
@@ -2328,6 +2523,7 @@ func (m *Model) renderStyledMessageParts(parts []domain.Part) []ui.StyledSpan {
 			blocks = append(blocks, []ui.StyledSpan{{Text: m.attachmentLabel(meta)}})
 		default:
 			flushText()
+			flushReasoning()
 			if body := strings.TrimSpace(part.Body); body != "" {
 				blocks = append(blocks, []ui.StyledSpan{{Text: body}})
 			}
@@ -2335,6 +2531,10 @@ func (m *Model) renderStyledMessageParts(parts []domain.Part) []ui.StyledSpan {
 	}
 
 	flushText()
+	flushReasoning()
+	blocks = append(blocks, systemBlocks...)
+	blocks = append(blocks, reasoningBlocks...)
+	blocks = append(blocks, textBlocks...)
 
 	var out []ui.StyledSpan
 	for idx, block := range blocks {
@@ -2518,6 +2718,29 @@ func (m *Model) renderReasoningBlockElement(input string) ui.Element {
 		Width:   m.viewport.Width,
 		Palette: m.palette,
 	}
+}
+
+func (m *Model) renderStyledReasoningBlock(input string) []ui.StyledSpan {
+	rendered := m.renderReasoningBlock(input)
+	if strings.TrimSpace(rendered) == "" {
+		return nil
+	}
+	style := ui.CellStyle{
+		BG:     ui.CellColorFromLipgloss(m.palette.ReasoningBackground),
+		FG:     ui.CellColorFromLipgloss(m.palette.ReasoningText),
+		Italic: true,
+	}
+	lines := strings.Split(rendered, "\n")
+	out := make([]ui.StyledSpan, 0, len(lines)*2)
+	for idx, line := range lines {
+		if idx > 0 {
+			out = ui.AppendStyledSpan(out, "\n", ui.CellStyle{})
+		}
+		if line != "" {
+			out = ui.AppendStyledSpan(out, line, style)
+		}
+	}
+	return out
 }
 
 func (m Model) loadCmd() ui.Cmd {

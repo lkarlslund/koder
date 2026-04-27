@@ -3445,6 +3445,56 @@ func TestAltRTogglesReasoningOutput(t *testing.T) {
 	}
 }
 
+func TestAltRPreservesVisibleTopLine(t *testing.T) {
+	cfg := testConfig(t)
+	m, err := New(cfg, nil, nil, StartupModeNew, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	m.currentSession = domain.Session{ID: 1}
+	m.width = 24
+	m.height = 12
+	m.viewport = newTranscriptViewport(24, 4)
+	m.messages = []domain.Message{
+		{ID: 1, SessionID: 1, Role: domain.MessageRoleAssistant},
+	}
+	m.parts = map[int64][]domain.Part{
+		1: {
+			{Kind: domain.PartKindReasoning, Body: "thinking line 1\nthinking line 2\nthinking line 3"},
+			{Kind: domain.PartKindText, Body: strings.Repeat("text line ", 40)},
+		},
+	}
+
+	m.resize()
+	m.refreshViewport()
+	m.viewport.SetYOffset(2)
+	m.refreshViewportPreserve()
+
+	beforeLines := m.viewport.VisibleSurface().Lines()
+	if len(beforeLines) == 0 {
+		t.Fatal("expected visible transcript lines before toggle")
+	}
+	beforeTop := strings.TrimRight(ansi.Strip(beforeLines[0]), " ")
+	if beforeTop == "" {
+		t.Fatalf("expected non-empty top line before toggle, got %q", beforeTop)
+	}
+
+	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyRunes, Alt: true, Runes: []rune("r")})
+	next := updated.(*Model)
+	if cmd != nil {
+		t.Fatalf("expected no command, got %v", cmd)
+	}
+	afterLines := next.viewport.VisibleSurface().Lines()
+	if len(afterLines) == 0 {
+		t.Fatal("expected visible transcript lines after toggle")
+	}
+	afterTop := strings.TrimRight(ansi.Strip(afterLines[0]), " ")
+	if afterTop != beforeTop {
+		t.Fatalf("expected top line %q to remain visible after toggle, got %q", beforeTop, afterTop)
+	}
+}
+
 func TestRenderAgentsSidebarStatusColors(t *testing.T) {
 	none := Model{}.renderAgentsSidebarStatus()
 	if none != "None" {
@@ -4162,6 +4212,28 @@ func TestRenderMessagePartsShowsReasoningBeforeText(t *testing.T) {
 		{Kind: domain.PartKindText, Body: "final answer"},
 		{Kind: domain.PartKindReasoning, Body: "thinking first"},
 	})
+
+	if !strings.Contains(got, "thinking first") || !strings.Contains(got, "final answer") {
+		t.Fatalf("expected both reasoning and text, got %q", got)
+	}
+	if strings.Index(got, "thinking first") > strings.Index(got, "final answer") {
+		t.Fatalf("expected reasoning before text, got %q", got)
+	}
+}
+
+func TestRenderStyledMessagePartsShowsReasoningBeforeText(t *testing.T) {
+	cfg := testConfig(t)
+	m, err := New(cfg, nil, nil, StartupModeNew, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.showReasoning = true
+	m.viewport.Width = 60
+
+	got := ui.PlainStyledText(m.renderStyledMessageParts([]domain.Part{
+		{Kind: domain.PartKindText, Body: "final answer"},
+		{Kind: domain.PartKindReasoning, Body: "thinking first"},
+	}))
 
 	if !strings.Contains(got, "thinking first") || !strings.Contains(got, "final answer") {
 		t.Fatalf("expected both reasoning and text, got %q", got)

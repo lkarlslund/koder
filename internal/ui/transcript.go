@@ -598,7 +598,7 @@ func (b ReasoningBlock) render() Surface {
 		width = maxInt(width, PlainWidth(line))
 	}
 	s := BlankSurface(width, len(lines))
-	style := CellStyle{BG: cellColor(b.Palette.ReasoningBackground), FG: cellColor(b.Palette.ReasoningText)}
+	style := CellStyle{BG: cellColor(b.Palette.ReasoningBackground), FG: cellColor(b.Palette.ReasoningText), Italic: true}
 	for y, line := range lines {
 		for x := 0; x < width; x++ {
 			s.setCell(x, y, Cell{Text: " ", Width: 1, Style: style})
