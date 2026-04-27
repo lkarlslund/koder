@@ -3152,13 +3152,17 @@ func TestEnsureRuntimeContextWindowDetectsAndPersistsCompatibleLocalProvider(t *
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/props" {
+		switch r.URL.Path {
+		case "/models":
+			_, _ = w.Write([]byte(`{"data":[{"id":"coder.gguf","max_model_len":131072}]}`))
+		case "/props":
+			if got := r.URL.Query().Get("model"); got != "coder.gguf" {
+				t.Fatalf("unexpected model query: %q", got)
+			}
+			_, _ = w.Write([]byte(`{"default_generation_settings":{"n_ctx":131072}}`))
+		default:
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
-		if got := r.URL.Query().Get("model"); got != "coder.gguf" {
-			t.Fatalf("unexpected model query: %q", got)
-		}
-		_, _ = w.Write([]byte(`{"default_generation_settings":{"n_ctx":131072}}`))
 	}))
 	defer server.Close()
 
@@ -3187,6 +3191,56 @@ func TestEnsureRuntimeContextWindowDetectsAndPersistsCompatibleLocalProvider(t *
 	}
 	providerCfg, ok := m.cfg.Provider("openai-compatible")
 	if !ok || providerCfg.ContextWindow != 131072 {
+		t.Fatalf("expected detected context window to persist, got %#v", providerCfg)
+	}
+}
+
+func TestEnsureRuntimeContextWindowDetectsAndPersistsCompatibleLoopbackAPIKeyProvider(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/models", "/v1/models":
+			_, _ = w.Write([]byte(`{"data":[{"id":"Lorbus/Qwen3.6-27B-int4-AutoRound","max_model_len":262144}]}`))
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	cfg.Providers = map[string]config.Provider{
+		"openai": {
+			Name:          "OpenAI Compatible",
+			Kind:          "openai-compatible",
+			AuthMethod:    "api_key",
+			BaseURL:       server.URL + "/v1",
+			APIKey:        "test-key",
+			DefaultModel:  "Lorbus/Qwen3.6-27B-int4-AutoRound",
+			ContextWindow: 32768,
+		},
+	}
+	m := Model{cfg: cfg, runtimeCtxChecked: map[string]bool{}}
+	session := domain.Session{ProviderID: "openai", ModelID: "Lorbus/Qwen3.6-27B-int4-AutoRound"}
+
+	providerID, contextWindow, checked, err := m.ensureRuntimeContextWindow(context.Background(), session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if providerID != "openai" || !checked {
+		t.Fatalf("unexpected runtime detection result: provider=%q checked=%v", providerID, checked)
+	}
+	if contextWindow != 262144 {
+		t.Fatalf("expected detected context window 262144, got %d", contextWindow)
+	}
+	providerCfg, ok := m.cfg.Provider("openai")
+	if !ok || providerCfg.ContextWindow != 262144 {
 		t.Fatalf("expected detected context window to persist, got %#v", providerCfg)
 	}
 }

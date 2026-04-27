@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -177,8 +178,9 @@ func (r ChatRequest) MarshalJSON() ([]byte, error) {
 
 type modelsResponse struct {
 	Data []struct {
-		ID      string `json:"id"`
-		OwnedBy string `json:"owned_by"`
+		ID          string `json:"id"`
+		OwnedBy     string `json:"owned_by"`
+		MaxModelLen int    `json:"max_model_len"`
 	} `json:"data"`
 }
 
@@ -305,6 +307,38 @@ func (c *Client) ListModels(ctx context.Context) ([]domain.Model, error) {
 	return models, nil
 }
 
+func (c *Client) DetectModelContextWindow(ctx context.Context, modelID string) (int, error) {
+	req, err := c.newRequest(ctx, http.MethodGet, c.apiPath("/models"), nil)
+	if err != nil {
+		return 0, err
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return 0, fmt.Errorf("list models: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
+		return 0, &APIError{
+			Operation:  "list models",
+			StatusCode: resp.StatusCode,
+			Body:       strings.TrimSpace(string(body)),
+			RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After"), time.Now()),
+		}
+	}
+	var payload modelsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return 0, fmt.Errorf("decode model list: %w", err)
+	}
+	modelID = strings.TrimSpace(modelID)
+	for _, item := range payload.Data {
+		if strings.TrimSpace(item.ID) == modelID && item.MaxModelLen > 0 {
+			return item.MaxModelLen, nil
+		}
+	}
+	return 0, nil
+}
+
 func (c *Client) Props(ctx context.Context, modelID string) (propsResponse, error) {
 	path := "/props"
 	if trimmed := strings.TrimSpace(modelID); trimmed != "" {
@@ -324,6 +358,14 @@ func DetectContextWindow(ctx context.Context, providerID string, cfg config.Prov
 		if err != nil {
 			return 0, err
 		}
+		maxModelLen, err := client.DetectModelContextWindow(ctx, modelID)
+		if err == nil {
+			if maxModelLen > 0 {
+				return maxModelLen, nil
+			}
+		} else if !isOptionalContextWindowProbeError(err) {
+			return 0, err
+		}
 		props, err := client.Props(ctx, modelID)
 		if err == nil {
 			if props.DefaultGenerationSettings.NCtx > 0 {
@@ -339,9 +381,33 @@ func DetectContextWindow(ctx context.Context, providerID string, cfg config.Prov
 }
 
 func SupportsContextWindowDetection(cfg config.Provider) bool {
-	return strings.TrimSpace(cfg.Kind) == ProviderKindCompatible &&
-		strings.TrimSpace(cfg.AuthMethod) == string(AuthMethodLocal) &&
-		strings.TrimSpace(cfg.BaseURL) != ""
+	if strings.TrimSpace(cfg.Kind) != ProviderKindCompatible {
+		return false
+	}
+	baseURL := strings.TrimSpace(cfg.BaseURL)
+	if baseURL == "" {
+		return false
+	}
+	if strings.TrimSpace(cfg.AuthMethod) == string(AuthMethodLocal) {
+		return true
+	}
+	return isLocalCompatibleBaseURL(baseURL)
+}
+
+func isLocalCompatibleBaseURL(raw string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return false
+	}
+	host := strings.TrimSpace(parsed.Hostname())
+	if host == "" {
+		return false
+	}
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 func contextWindowProbeBaseURLs(baseURL string) []string {

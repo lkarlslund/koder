@@ -107,13 +107,17 @@ func TestPropsUsesModelQueryAndParsesContextWindow(t *testing.T) {
 
 func TestDetectContextWindowUsesCompatibleLocalProps(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/props" {
+		switch r.URL.Path {
+		case "/models":
+			_, _ = w.Write([]byte(`{"data":[{"id":"model-a","max_model_len":16384}]}`))
+		case "/props":
+			if got := r.URL.Query().Get("model"); got != "model-a" {
+				t.Fatalf("unexpected model query: %q", got)
+			}
+			_, _ = w.Write([]byte(`{"default_generation_settings":{"n_ctx":8192}}`))
+		default:
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
-		if got := r.URL.Query().Get("model"); got != "model-a" {
-			t.Fatalf("unexpected model query: %q", got)
-		}
-		_, _ = w.Write([]byte(`{"default_generation_settings":{"n_ctx":16384}}`))
 	}))
 	defer server.Close()
 
@@ -133,13 +137,17 @@ func TestDetectContextWindowUsesCompatibleLocalProps(t *testing.T) {
 
 func TestDetectContextWindowUsesCompatibleLocalPropsWithoutV1(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/props" {
+		switch r.URL.Path {
+		case "/models":
+			_, _ = w.Write([]byte(`{"data":[{"id":"model-a","max_model_len":65536}]}`))
+		case "/props":
+			if got := r.URL.Query().Get("model"); got != "model-a" {
+				t.Fatalf("unexpected model query: %q", got)
+			}
+			_, _ = w.Write([]byte(`{"default_generation_settings":{"n_ctx":2048}}`))
+		default:
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
-		if got := r.URL.Query().Get("model"); got != "model-a" {
-			t.Fatalf("unexpected model query: %q", got)
-		}
-		_, _ = w.Write([]byte(`{"default_generation_settings":{"n_ctx":65536}}`))
 	}))
 	defer server.Close()
 
@@ -153,6 +161,36 @@ func TestDetectContextWindowUsesCompatibleLocalPropsWithoutV1(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got != 65536 {
+		t.Fatalf("unexpected detected context window: %d", got)
+	}
+}
+
+func TestDetectContextWindowFallsBackToPropsWhenModelListLacksContext(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/models":
+			_, _ = w.Write([]byte(`{"data":[{"id":"model-a"}]}`))
+		case "/props":
+			if got := r.URL.Query().Get("model"); got != "model-a" {
+				t.Fatalf("unexpected model query: %q", got)
+			}
+			_, _ = w.Write([]byte(`{"default_generation_settings":{"n_ctx":49152}}`))
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	got, err := DetectContextWindow(context.Background(), "openai-compatible", config.Provider{
+		Kind:       ProviderKindCompatible,
+		AuthMethod: string(AuthMethodLocal),
+		BaseURL:    server.URL + "/v1",
+		Timeout:    time.Second,
+	}, "model-a", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != 49152 {
 		t.Fatalf("unexpected detected context window: %d", got)
 	}
 }
@@ -175,6 +213,18 @@ func TestDetectContextWindowFallsBackWhenCompatibleEndpointHasNoProps(t *testing
 	}
 	if got != 32768 {
 		t.Fatalf("unexpected fallback context window: %d", got)
+	}
+}
+
+func TestSupportsContextWindowDetectionUsesLoopbackCompatibleAPIKeyProvider(t *testing.T) {
+	cfg := config.Provider{
+		Kind:       ProviderKindCompatible,
+		AuthMethod: string(AuthMethodAPIKey),
+		BaseURL:    "http://127.0.0.1:8000/v1",
+	}
+
+	if !SupportsContextWindowDetection(cfg) {
+		t.Fatal("expected loopback compatible api-key provider to support context window detection")
 	}
 }
 
