@@ -220,11 +220,10 @@ func (m ModalFrame) window(ctx *Context) WindowFrame {
 }
 
 func lipglossToCellStyle(style lipgloss.Style) CellStyle {
-	cell := CellStyle{
-		Bold:      style.GetBold(),
-		Italic:    style.GetItalic(),
-		Underline: style.GetUnderline(),
-	}
+	cell := CellStyle{}.
+		WithBold(style.GetBold()).
+		WithItalic(style.GetItalic()).
+		WithUnderline(style.GetUnderline())
 	if fg := style.GetForeground(); fg != nil {
 		cell.FG = ParseCellColor(fmt.Sprint(fg))
 	}

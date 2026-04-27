@@ -13,16 +13,16 @@ func applyCellStyle(style CellStyle, text string) string {
 		return text
 	}
 	params := make([]string, 0, 10)
-	if style.Bold {
+	if style.Bold() {
 		params = append(params, "1")
 	}
-	if style.Italic {
+	if style.Italic() {
 		params = append(params, "3")
 	}
-	if style.Underline {
+	if style.Underline() {
 		params = append(params, "4")
 	}
-	if style.Strikethrough {
+	if style.Strikethrough() {
 		params = append(params, "9")
 	}
 	if style.FG.Valid() {

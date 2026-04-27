@@ -27,7 +27,7 @@ func (s Sidebar) render(ctx *Context, width int) Surface {
 	fillStyle := CellStyle{FG: cellColor(ctx.Palette.SidebarForeground), BG: cellColor(ctx.Palette.SidebarBackground)}
 	for y := 0; y < height; y++ {
 		for x := 0; x < width; x++ {
-			surface.setCell(x, y, Cell{Glyph: SpaceGlyph, Width: 1, Style: fillStyle})
+			surface.setCell(x, y, blankCell(fillStyle))
 		}
 	}
 	if s.Child != nil && width > 0 {

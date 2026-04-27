@@ -256,29 +256,19 @@ func cellColor(value lipgloss.Color) CellColor {
 }
 
 type CellStyle struct {
-	FG            CellColor
-	BG            CellColor
-	Bold          bool
-	Italic        bool
-	Underline     bool
-	Strikethrough bool
+	FG    CellColor
+	BG    CellColor
+	flags uint8
 }
 
 func (s CellStyle) isZero() bool {
-	return !s.FG.Valid() && !s.BG.Valid() &&
-		!s.Bold &&
-		!s.Italic &&
-		!s.Underline &&
-		!s.Strikethrough
+	return !s.FG.Valid() && !s.BG.Valid() && s.flags == 0
 }
 
 func (s CellStyle) equal(other CellStyle) bool {
 	return s.FG == other.FG &&
 		s.BG == other.BG &&
-		s.Bold == other.Bold &&
-		s.Italic == other.Italic &&
-		s.Underline == other.Underline &&
-		s.Strikethrough == other.Strikethrough
+		s.flags == other.flags
 }
 
 func (s CellStyle) Merge(overlay CellStyle) CellStyle {
@@ -289,19 +279,70 @@ func (s CellStyle) Merge(overlay CellStyle) CellStyle {
 	if overlay.BG.Valid() {
 		out.BG = overlay.BG
 	}
-	if overlay.Bold {
-		out.Bold = overlay.Bold
+	if overlay.Bold() {
+		out = out.WithBold(true)
 	}
-	if overlay.Italic {
-		out.Italic = overlay.Italic
+	if overlay.Italic() {
+		out = out.WithItalic(true)
 	}
-	if overlay.Underline {
-		out.Underline = overlay.Underline
+	if overlay.Underline() {
+		out = out.WithUnderline(true)
 	}
-	if overlay.Strikethrough {
-		out.Strikethrough = overlay.Strikethrough
+	if overlay.Strikethrough() {
+		out = out.WithStrikethrough(true)
 	}
 	return out
+}
+
+const (
+	cellFlagWidthMask     uint8 = 0b00000011
+	cellFlagBold          uint8 = 1 << 2
+	cellFlagItalic        uint8 = 1 << 3
+	cellFlagUnderline     uint8 = 1 << 4
+	cellFlagStrikethrough uint8 = 1 << 5
+	cellFlagPainted       uint8 = 1 << 6
+	cellStyleFlagMask           = cellFlagBold | cellFlagItalic | cellFlagUnderline | cellFlagStrikethrough
+)
+
+func (s CellStyle) Bold() bool {
+	return s.flags&cellFlagBold != 0
+}
+
+func (s CellStyle) Italic() bool {
+	return s.flags&cellFlagItalic != 0
+}
+
+func (s CellStyle) Underline() bool {
+	return s.flags&cellFlagUnderline != 0
+}
+
+func (s CellStyle) Strikethrough() bool {
+	return s.flags&cellFlagStrikethrough != 0
+}
+
+func (s CellStyle) WithBold(enabled bool) CellStyle {
+	return s.withFlag(cellFlagBold, enabled)
+}
+
+func (s CellStyle) WithItalic(enabled bool) CellStyle {
+	return s.withFlag(cellFlagItalic, enabled)
+}
+
+func (s CellStyle) WithUnderline(enabled bool) CellStyle {
+	return s.withFlag(cellFlagUnderline, enabled)
+}
+
+func (s CellStyle) WithStrikethrough(enabled bool) CellStyle {
+	return s.withFlag(cellFlagStrikethrough, enabled)
+}
+
+func (s CellStyle) withFlag(flag uint8, enabled bool) CellStyle {
+	if enabled {
+		s.flags |= flag
+	} else {
+		s.flags &^= flag
+	}
+	return s
 }
 
 type Glyph rune
@@ -323,11 +364,85 @@ func (g Glyph) String() string {
 }
 
 type Cell struct {
-	Glyph        Glyph
-	Width        int
-	Style        CellStyle
-	Continuation bool
-	Painted      bool
+	Glyph Glyph
+	FG    CellColor
+	BG    CellColor
+	flags uint8
+}
+
+func (c Cell) Width() int {
+	return int(c.flags & cellFlagWidthMask)
+}
+
+func (c *Cell) SetWidth(width int) {
+	if width < 0 {
+		width = 0
+	}
+	if width > 2 {
+		width = 2
+	}
+	c.flags = (c.flags &^ cellFlagWidthMask) | uint8(width)
+}
+
+func (c Cell) Painted() bool {
+	return c.flags&cellFlagPainted != 0
+}
+
+func (c *Cell) SetPainted(enabled bool) {
+	if enabled {
+		c.flags |= cellFlagPainted
+	} else {
+		c.flags &^= cellFlagPainted
+	}
+}
+
+func (c Cell) Bold() bool {
+	return c.flags&cellFlagBold != 0
+}
+
+func (c Cell) Italic() bool {
+	return c.flags&cellFlagItalic != 0
+}
+
+func (c Cell) Underline() bool {
+	return c.flags&cellFlagUnderline != 0
+}
+
+func (c Cell) Strikethrough() bool {
+	return c.flags&cellFlagStrikethrough != 0
+}
+
+func (c *Cell) SetStyle(style CellStyle) {
+	c.FG = style.FG
+	c.BG = style.BG
+	c.flags = (c.flags &^ cellStyleFlagMask) | (style.flags & cellStyleFlagMask)
+}
+
+func (c Cell) Style() CellStyle {
+	return CellStyle{
+		FG:    c.FG,
+		BG:    c.BG,
+		flags: c.flags & cellStyleFlagMask,
+	}
+}
+
+func newCell(glyph Glyph, width int, style CellStyle) Cell {
+	cell := Cell{Glyph: glyph}
+	cell.SetWidth(width)
+	cell.SetStyle(style)
+	cell.SetPainted(true)
+	return cell
+}
+
+func blankCell(style CellStyle) Cell {
+	return newCell(SpaceGlyph, 1, style)
+}
+
+func continuationCell(style CellStyle) Cell {
+	cell := Cell{}
+	cell.SetStyle(style)
+	cell.SetPainted(true)
+	return cell
 }
 
 type Surface struct {
@@ -352,7 +467,7 @@ func BlankSurface(width, height int) Surface {
 	}
 	cells := make([]Cell, width*height)
 	for i := range cells {
-		cells[i] = Cell{Glyph: SpaceGlyph, Width: 1, Painted: true}
+		cells[i] = blankCell(CellStyle{})
 	}
 	return Surface{w: width, h: height, cells: cells}
 }
@@ -484,15 +599,16 @@ func (s Surface) SurfaceCellText(x, y int) string {
 }
 
 func (s Surface) SurfaceCellWidth(x, y int) int {
-	return s.cellAt(x, y).Width
+	return s.cellAt(x, y).Width()
 }
 
 func (s Surface) SurfaceCellContinuation(x, y int) bool {
-	return s.cellAt(x, y).Continuation
+	cell := s.cellAt(x, y)
+	return cell.Painted() && cell.Width() == 0
 }
 
 func (s Surface) SurfaceCellFG(x, y int) (uint8, uint8, uint8, bool) {
-	cell := s.cellAt(x, y).Style.FG
+	cell := s.cellAt(x, y).FG
 	if !cell.Valid() {
 		return 0, 0, 0, false
 	}
@@ -500,7 +616,7 @@ func (s Surface) SurfaceCellFG(x, y int) (uint8, uint8, uint8, bool) {
 }
 
 func (s Surface) SurfaceCellBG(x, y int) (uint8, uint8, uint8, bool) {
-	cell := s.cellAt(x, y).Style.BG
+	cell := s.cellAt(x, y).BG
 	if !cell.Valid() {
 		return 0, 0, 0, false
 	}
@@ -508,19 +624,19 @@ func (s Surface) SurfaceCellBG(x, y int) (uint8, uint8, uint8, bool) {
 }
 
 func (s Surface) SurfaceCellBold(x, y int) bool {
-	return s.cellAt(x, y).Style.Bold
+	return s.cellAt(x, y).Bold()
 }
 
 func (s Surface) SurfaceCellItalic(x, y int) bool {
-	return s.cellAt(x, y).Style.Italic
+	return s.cellAt(x, y).Italic()
 }
 
 func (s Surface) SurfaceCellUnderline(x, y int) bool {
-	return s.cellAt(x, y).Style.Underline
+	return s.cellAt(x, y).Underline()
 }
 
 func (s Surface) SurfaceCellStrikethrough(x, y int) bool {
-	return s.cellAt(x, y).Style.Strikethrough
+	return s.cellAt(x, y).Strikethrough()
 }
 
 func (s Surface) normalize(width, height int) Surface {
@@ -612,8 +728,8 @@ func (s *Surface) setCell(x, y int, cell Cell) {
 	if x < 0 || y < 0 || x >= s.w || y >= s.h || len(s.cells) == 0 {
 		return
 	}
-	if !cell.Painted && (cell.Glyph != 0 || cell.Width > 0 || cell.Continuation || !cell.Style.isZero()) {
-		cell.Painted = true
+	if !cell.Painted() && (cell.Glyph != 0 || cell.Width() > 0 || !cell.Style().isZero()) {
+		cell.SetPainted(true)
 	}
 	s.cells[s.cellIndex(x, y)] = cell
 }
@@ -627,10 +743,10 @@ func (s Surface) cellLines() []string {
 		var b strings.Builder
 		for x := 0; x < s.w; x++ {
 			cell := s.cellAt(x, y)
-			if cell.Continuation {
+			if cell.Painted() && cell.Width() == 0 {
 				continue
 			}
-			if !cell.Painted {
+			if !cell.Painted() {
 				b.WriteString(" ")
 				continue
 			}
@@ -690,9 +806,9 @@ func (s *Surface) WriteText(x, y int, text string, style CellStyle) {
 			break
 		}
 		if col >= 0 {
-			s.setCell(col, y, Cell{Glyph: Glyph(r), Width: width, Style: style, Painted: true})
+			s.setCell(col, y, newCell(Glyph(r), width, style))
 			for extra := 1; extra < width && col+extra < s.w; extra++ {
-				s.setCell(col+extra, y, Cell{Continuation: true, Style: style, Painted: true})
+				s.setCell(col+extra, y, continuationCell(style))
 			}
 		}
 		col += width
@@ -720,9 +836,9 @@ func (s *Surface) WriteStyledSpans(x, y int, spans []StyledSpan, base CellStyle)
 				return
 			}
 			if col >= 0 {
-				s.setCell(col, y, Cell{Glyph: Glyph(r), Width: width, Style: style, Painted: true})
+				s.setCell(col, y, newCell(Glyph(r), width, style))
 				for extra := 1; extra < width && col+extra < s.w; extra++ {
-					s.setCell(col+extra, y, Cell{Continuation: true, Style: style, Painted: true})
+					s.setCell(col+extra, y, continuationCell(style))
 				}
 			}
 			col += width
@@ -786,29 +902,28 @@ func clipControlRect(control Control, width, height int) (Control, bool) {
 func FilledLineSurface(width int, text string, fillStyle, textStyle CellStyle) Surface {
 	s := BlankSurface(width, 1)
 	for x := 0; x < width; x++ {
-		s.setCell(x, 0, Cell{Glyph: SpaceGlyph, Width: 1, Style: fillStyle})
+		s.setCell(x, 0, blankCell(fillStyle))
 	}
 	s.WriteText(0, 0, PlainTruncate(text, width, ""), textStyle)
 	return s
 }
 
 func compositeCell(base, overlay Cell) Cell {
-	if !overlay.Painted {
+	if !overlay.Painted() {
 		return base
 	}
 	out := base
 	if overlay.paintsGlyph() {
 		out.Glyph = overlay.Glyph
-		out.Width = overlay.Width
-		out.Continuation = overlay.Continuation
+		out.SetWidth(overlay.Width())
 	}
-	out.Style = base.Style.Merge(overlay.Style)
-	out.Painted = true
+	out.SetStyle(base.Style().Merge(overlay.Style()))
+	out.SetPainted(true)
 	return out
 }
 
 func (c Cell) paintsGlyph() bool {
-	return c.Continuation || c.Width > 0 || c.Glyph != 0
+	return c.Glyph != 0 || c.Width() > 0 || (c.Painted() && c.Width() == 0)
 }
 
 func overlayLine(base, overlay string, offset int) string {

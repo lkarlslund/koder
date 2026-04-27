@@ -10,8 +10,8 @@ import (
 func TestWrapStyledTextPreservesInlineStyles(t *testing.T) {
 	spans := []StyledSpan{
 		{Text: "alpha "},
-		{Text: "beta", Style: CellStyle{Bold: true}},
-		{Text: " gamma", Style: CellStyle{Italic: true}},
+		{Text: "beta", Style: CellStyle{}.WithBold(true)},
+		{Text: " gamma", Style: CellStyle{}.WithItalic(true)},
 	}
 
 	lines := WrapStyledText(spans, 10)
@@ -26,7 +26,7 @@ func TestWrapStyledTextPreservesInlineStyles(t *testing.T) {
 	}
 	foundBold := false
 	for _, span := range lines[0] {
-		if strings.Contains(span.Text, "beta") && span.Style.Bold {
+		if strings.Contains(span.Text, "beta") && span.Style.Bold() {
 			foundBold = true
 		}
 	}
@@ -35,7 +35,7 @@ func TestWrapStyledTextPreservesInlineStyles(t *testing.T) {
 	}
 	foundItalic := false
 	for _, span := range lines[1] {
-		if strings.Contains(span.Text, "gamma") && span.Style.Italic {
+		if strings.Contains(span.Text, "gamma") && span.Style.Italic() {
 			foundItalic = true
 		}
 	}
@@ -47,7 +47,7 @@ func TestWrapStyledTextPreservesInlineStyles(t *testing.T) {
 func TestRenderStyledTextANSIIncludesStrikethrough(t *testing.T) {
 	got := RenderStyledTextANSI([]StyledSpan{{
 		Text:  "gone",
-		Style: CellStyle{Strikethrough: true},
+		Style: CellStyle{}.WithStrikethrough(true),
 	}})
 	if !strings.Contains(got, "\x1b[9m") {
 		t.Fatalf("expected strikethrough SGR, got %q", got)
@@ -56,9 +56,9 @@ func TestRenderStyledTextANSIIncludesStrikethrough(t *testing.T) {
 
 func TestLayoutStyledTextRegistersWrappedInteractiveFragments(t *testing.T) {
 	surface := LayoutStyledText([]StyledSpan{
-		{Text: "Edited file game/sim_test.go", Style: CellStyle{Bold: true}},
+		{Text: "Edited file game/sim_test.go", Style: CellStyle{}.WithBold(true)},
 		{Text: "  ", Style: CellStyle{}},
-		{Text: "Expand (14 lines)", Style: CellStyle{Italic: true}, ControlID: "toolrun:edit:output", Enabled: true},
+		{Text: "Expand (14 lines)", Style: CellStyle{}.WithItalic(true), ControlID: "toolrun:edit:output", Enabled: true},
 	}, 18, CellStyle{})
 
 	controls := surface.Controls()

@@ -277,7 +277,7 @@ func (h tableHeader) Render(_ *Context, bounds Rect) Surface {
 		width = bounds.W
 	}
 	s := BlankSurface(width, 1)
-	style := CellStyle{FG: cellColor(h.Palette.AssistantTimestampText), Bold: true}
+	style := CellStyle{FG: cellColor(h.Palette.AssistantTimestampText)}.WithBold(true)
 	colX := 0
 	for idx, col := range h.Columns {
 		text := truncateText(strings.TrimSpace(col.Title), col.Width)
@@ -319,22 +319,22 @@ func (r tableRow) Render(_ *Context, bounds Rect) Surface {
 		selectionForeground = r.Palette.UserTextForeground
 	}
 	rowStyle := CellStyle{}
-	primaryStyle := CellStyle{Bold: true}
+	primaryStyle := CellStyle{}.WithBold(true)
 	cellStyle := CellStyle{FG: cellColor(r.Palette.AssistantTimestampText)}
 	if r.Row.Selected {
 		rowStyle = CellStyle{BG: cellColor(selectionBackground), FG: cellColor(selectionForeground)}
-		primaryStyle = CellStyle{BG: cellColor(selectionBackground), FG: cellColor(selectionForeground), Bold: true}
+		primaryStyle = CellStyle{BG: cellColor(selectionBackground), FG: cellColor(selectionForeground)}.WithBold(true)
 		cellStyle = CellStyle{BG: cellColor(selectionBackground), FG: cellColor(selectionForeground)}
 	}
 	if r.Row.Focused {
 		focusedBackground := deriveFocusedBackground(selectionBackground, firstNonEmptyColor(r.Palette.ScreenBackground, r.Palette.SidebarBackground, r.Palette.UserTextBackground))
 		rowStyle = CellStyle{BG: cellColor(focusedBackground), FG: cellColor(selectionForeground)}
-		primaryStyle = CellStyle{BG: cellColor(focusedBackground), FG: cellColor(selectionForeground), Bold: true}
+		primaryStyle = CellStyle{BG: cellColor(focusedBackground), FG: cellColor(selectionForeground)}.WithBold(true)
 		cellStyle = CellStyle{BG: cellColor(focusedBackground), FG: cellColor(selectionForeground)}
 	}
 	s := BlankSurface(width, 1)
 	for x := 0; x < width; x++ {
-		s.setCell(x, 0, Cell{Glyph: SpaceGlyph, Width: 1, Style: rowStyle})
+		s.setCell(x, 0, blankCell(rowStyle))
 	}
 	colX := 0
 	for idx, col := range r.Columns {

@@ -113,8 +113,8 @@ func (r ToolRun) renderCard(palette theme.Palette, width int, expandedOutput, ex
 		return r.renderBashCard(palette, width, expandedOutput, expandedCommand)
 	}
 	headerWidth := innerCardWidth(width)
-	titleStyle := CellStyle{FG: cellColor(palette.MarkdownText), Bold: true, Italic: true}
-	toggleStyle := CellStyle{FG: cellColor(palette.UserAccentBar), Bold: true}
+	titleStyle := CellStyle{FG: cellColor(palette.MarkdownText)}.WithBold(true).WithItalic(true)
+	toggleStyle := CellStyle{FG: cellColor(palette.UserAccentBar)}.WithBold(true)
 	subtitleStyle := CellStyle{FG: cellColor(palette.ComposerMutedText)}
 	bodyStyle := CellStyle{FG: cellColor(palette.MarkdownText)}
 	addedStyle := CellStyle{FG: cellColor(palette.DiffAddedText)}
@@ -160,8 +160,8 @@ func (r ToolRun) renderBashCard(palette theme.Palette, width int, expandedOutput
 	if title == "" {
 		title = "Ran command"
 	}
-	titleStyle := CellStyle{FG: cellColor(palette.MarkdownText), Bold: true, Italic: true}
-	toggleStyle := CellStyle{FG: cellColor(palette.UserAccentBar), Bold: true}
+	titleStyle := CellStyle{FG: cellColor(palette.MarkdownText)}.WithBold(true).WithItalic(true)
+	toggleStyle := CellStyle{FG: cellColor(palette.UserAccentBar)}.WithBold(true)
 	bodyStyle := CellStyle{FG: cellColor(palette.MarkdownText)}
 	lines := make([]Surface, 0, 4)
 
@@ -477,8 +477,8 @@ func (t toolRunDockTitle) Render(_ *Context, bounds Rect) Surface {
 		width = bounds.W
 	}
 	s := BlankSurface(width, 1)
-	s.WriteText(0, 0, t.Title, CellStyle{FG: cellColor(t.Palette.MarkdownText), Bold: true})
-	s.WriteText(PlainWidth(t.Title)+2, 0, t.Status, CellStyle{FG: cellColor(t.Color), Bold: true})
+	s.WriteText(0, 0, t.Title, CellStyle{FG: cellColor(t.Palette.MarkdownText)}.WithBold(true))
+	s.WriteText(PlainWidth(t.Title)+2, 0, t.Status, CellStyle{FG: cellColor(t.Color)}.WithBold(true))
 	return s.normalize(bounds.W, bounds.H)
 }
 

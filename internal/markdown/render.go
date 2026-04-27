@@ -89,7 +89,7 @@ func (r *Renderer) renderStyledBlock(node ast.Node, source []byte, width int) []
 	case *ast.Paragraph, *ast.TextBlock:
 		return r.renderStyledInlineChildren(node, source, ui.CellStyle{})
 	case *ast.Heading:
-		style := ui.CellStyle{Bold: true}
+		style := ui.CellStyle{}.WithBold(true)
 		switch typed.Level {
 		case 1:
 			style.FG = ui.CellColorFromLipgloss(r.palette.MarkdownHeadingPrimary)
@@ -159,23 +159,20 @@ func (r *Renderer) renderStyledInline(node ast.Node, source []byte, style ui.Cel
 		emphasisStyle := style
 		if typed.Level >= 2 {
 			emphasisStyle = emphasisStyle.Merge(ui.CellStyle{
-				FG:   ui.CellColorFromLipgloss(r.palette.MarkdownStrongText),
-				Bold: true,
-			})
+				FG: ui.CellColorFromLipgloss(r.palette.MarkdownStrongText),
+			}.WithBold(true))
 		} else {
 			emphasisStyle = emphasisStyle.Merge(ui.CellStyle{
-				FG:     ui.CellColorFromLipgloss(r.palette.MarkdownEmphasisText),
-				Italic: true,
-			})
+				FG: ui.CellColorFromLipgloss(r.palette.MarkdownEmphasisText),
+			}.WithItalic(true))
 		}
 		return r.renderStyledInlineChildren(node, source, emphasisStyle)
 	case *extensionast.Strikethrough:
-		return r.renderStyledInlineChildren(node, source, style.Merge(ui.CellStyle{Strikethrough: true}))
+		return r.renderStyledInlineChildren(node, source, style.Merge(ui.CellStyle{}.WithStrikethrough(true)))
 	case *ast.Link:
 		labelStyle := style.Merge(ui.CellStyle{
-			FG:        ui.CellColorFromLipgloss(r.palette.MarkdownLinkText),
-			Underline: true,
-		})
+			FG: ui.CellColorFromLipgloss(r.palette.MarkdownLinkText),
+		}.WithUnderline(true))
 		targetStyle := style.Merge(ui.CellStyle{FG: ui.CellColorFromLipgloss(r.palette.MarkdownLinkTargetText)})
 		out := r.renderStyledInlineChildren(node, source, labelStyle)
 		target := strings.TrimSpace(string(typed.Destination))
@@ -186,7 +183,7 @@ func (r *Renderer) renderStyledInline(node ast.Node, source []byte, style ui.Cel
 	case *ast.AutoLink:
 		return []ui.StyledSpan{{
 			Text:  string(typed.URL(source)),
-			Style: style.Merge(ui.CellStyle{FG: ui.CellColorFromLipgloss(r.palette.MarkdownLinkTargetText), Underline: true}),
+			Style: style.Merge(ui.CellStyle{FG: ui.CellColorFromLipgloss(r.palette.MarkdownLinkTargetText)}.WithUnderline(true)),
 		}}
 	case *ast.RawHTML:
 		return nil
@@ -323,7 +320,7 @@ func (r *Renderer) renderStyledTableRow(row []string, widths []int, borderStyle 
 	}
 	cellStyle := ui.CellStyle{}
 	if header {
-		cellStyle.Bold = true
+		cellStyle = cellStyle.WithBold(true)
 	}
 	for lineIndex := 0; lineIndex < rowHeight; lineIndex++ {
 		if lineIndex > 0 {

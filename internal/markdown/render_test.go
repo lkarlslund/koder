@@ -204,13 +204,13 @@ func TestRenderStyledTracksInlineAttributes(t *testing.T) {
 	for _, span := range got {
 		switch strings.TrimSpace(span.Text) {
 		case "bold":
-			sawBold = span.Style.Bold
+			sawBold = span.Style.Bold()
 		case "italic":
-			sawItalic = span.Style.Italic
+			sawItalic = span.Style.Italic()
 		case "gone":
-			sawStrike = span.Style.Strikethrough
+			sawStrike = span.Style.Strikethrough()
 		case "link":
-			sawLink = span.Style.Underline
+			sawLink = span.Style.Underline()
 		}
 	}
 	if !sawBold || !sawItalic || !sawStrike || !sawLink {

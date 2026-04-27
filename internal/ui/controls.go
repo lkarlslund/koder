@@ -45,7 +45,7 @@ func (h SelectableHeader) render(palette theme.Palette) Surface {
 		width += gapWidth
 	}
 	s := TransparentSurface(width, 1)
-	style := CellStyle{FG: cellColor(palette.AssistantTimestampText), Bold: true}
+	style := CellStyle{FG: cellColor(palette.AssistantTimestampText)}.WithBold(true)
 	col := 0
 	s.WriteText(col, 0, truncateText(strings.TrimSpace(h.Primary), primaryWidth), style)
 	col += primaryWidth + gapWidth
@@ -86,22 +86,22 @@ func (r SelectableRow) render(palette theme.Palette) Surface {
 		selectionForeground = palette.UserTextForeground
 	}
 	rowStyle := CellStyle{}
-	primaryStyle := CellStyle{Bold: true}
+	primaryStyle := CellStyle{}.WithBold(true)
 	secondaryStyle := CellStyle{FG: cellColor(palette.AssistantTimestampText)}
 	tertiaryStyle := CellStyle{FG: cellColor(palette.ActivityText)}
 	if selected {
 		rowStyle = CellStyle{BG: cellColor(selectionBackground), FG: cellColor(selectionForeground)}
-		primaryStyle = CellStyle{BG: cellColor(selectionBackground), FG: cellColor(selectionForeground), Bold: true}
+		primaryStyle = CellStyle{BG: cellColor(selectionBackground), FG: cellColor(selectionForeground)}.WithBold(true)
 		secondaryStyle = CellStyle{BG: cellColor(selectionBackground), FG: cellColor(selectionForeground)}
-		tertiaryStyle = CellStyle{BG: cellColor(selectionBackground), FG: cellColor(selectionForeground), Bold: true}
+		tertiaryStyle = CellStyle{BG: cellColor(selectionBackground), FG: cellColor(selectionForeground)}.WithBold(true)
 	}
 	if focused {
 		focusedBackground := deriveFocusedBackground(selectionBackground, firstNonEmptyColor(palette.ScreenBackground, palette.SidebarBackground, palette.UserTextBackground))
 		focusedForeground := selectionForeground
 		rowStyle = CellStyle{BG: cellColor(focusedBackground), FG: cellColor(focusedForeground)}
-		primaryStyle = CellStyle{BG: cellColor(focusedBackground), FG: cellColor(focusedForeground), Bold: true}
+		primaryStyle = CellStyle{BG: cellColor(focusedBackground), FG: cellColor(focusedForeground)}.WithBold(true)
 		secondaryStyle = CellStyle{BG: cellColor(focusedBackground), FG: cellColor(focusedForeground)}
-		tertiaryStyle = CellStyle{BG: cellColor(focusedBackground), FG: cellColor(focusedForeground), Bold: true}
+		tertiaryStyle = CellStyle{BG: cellColor(focusedBackground), FG: cellColor(focusedForeground)}.WithBold(true)
 	}
 	s := BlankSurface(width, 1)
 	fillStyle := rowStyle
@@ -109,7 +109,7 @@ func (r SelectableRow) render(palette theme.Palette) Surface {
 		fillStyle = CellStyle{}
 	}
 	for x := 0; x < width; x++ {
-		s.setCell(x, 0, Cell{Glyph: SpaceGlyph, Width: 1, Style: fillStyle})
+		s.setCell(x, 0, blankCell(fillStyle))
 	}
 	col := 0
 	s.WriteText(col, 0, truncateText(strings.TrimSpace(primary), primaryWidth), primaryStyle)
@@ -224,13 +224,12 @@ func (v VerticalTabs) render(width int, palette theme.Palette, focused bool) Sur
 	}
 	s := BlankSurface(width, len(v.Tabs))
 	baseStyle := CellStyle{FG: cellColor(palette.SidebarForeground)}
-	activeStyle := CellStyle{BG: cellColor(palette.SelectionBackground), FG: cellColor(palette.SelectionForeground), Bold: true}
+	activeStyle := CellStyle{BG: cellColor(palette.SelectionBackground), FG: cellColor(palette.SelectionForeground)}.WithBold(true)
 	if focused {
 		activeStyle = CellStyle{
-			BG:   cellColor(deriveFocusedBackground(firstNonEmptyColor(palette.SelectionBackground, palette.UserTextBackground), firstNonEmptyColor(palette.ScreenBackground, palette.SidebarBackground, palette.UserTextBackground))),
-			FG:   cellColor(firstNonEmptyColor(palette.SelectionForeground, palette.UserTextForeground)),
-			Bold: true,
-		}
+			BG: cellColor(deriveFocusedBackground(firstNonEmptyColor(palette.SelectionBackground, palette.UserTextBackground), firstNonEmptyColor(palette.ScreenBackground, palette.SidebarBackground, palette.UserTextBackground))),
+			FG: cellColor(firstNonEmptyColor(palette.SelectionForeground, palette.UserTextForeground)),
+		}.WithBold(true)
 	}
 	for idx, tab := range v.Tabs {
 		label := fmt.Sprintf(" %s ", strings.TrimSpace(tab))
@@ -239,7 +238,7 @@ func (v VerticalTabs) render(width int, palette theme.Palette, focused bool) Sur
 			style = activeStyle
 		}
 		for x := 0; x < width; x++ {
-			s.setCell(x, idx, Cell{Glyph: SpaceGlyph, Width: 1, Style: style})
+			s.setCell(x, idx, blankCell(style))
 		}
 		s.WriteText(0, idx, PlainTruncate(label, width, ""), style)
 	}
@@ -419,7 +418,7 @@ func (b Button) renderSurface(palette theme.Palette) Surface {
 		foreground = firstNonEmptyColor(palette.SelectionForeground, palette.UserTextForeground)
 		bold = true
 	}
-	style := CellStyle{FG: cellColor(foreground), BG: cellColor(background), Bold: bold}
+	style := CellStyle{FG: cellColor(foreground), BG: cellColor(background)}.WithBold(bold)
 	hotStyle := style
 	hotStyle.FG = cellColor(palette.ActivityText)
 	parts := buttonLabelParts(b.Label, b.Hotkey)
@@ -429,7 +428,7 @@ func (b Button) renderSurface(palette theme.Palette) Surface {
 	}
 	s := BlankSurface(width, 1)
 	for x := 0; x < width; x++ {
-		s.setCell(x, 0, Cell{Glyph: SpaceGlyph, Width: 1, Style: style})
+		s.setCell(x, 0, blankCell(style))
 	}
 	col := 2
 	for _, part := range parts {

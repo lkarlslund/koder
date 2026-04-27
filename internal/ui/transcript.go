@@ -522,7 +522,7 @@ func (i ActivityIndicator) render() Surface {
 		return Surface{}
 	}
 	line := BlankSurface(PlainWidth(i.Indicator), 1)
-	line.WriteText(0, 0, i.Indicator, CellStyle{FG: cellColor(i.Palette.ActivityText), Bold: true})
+	line.WriteText(0, 0, i.Indicator, CellStyle{FG: cellColor(i.Palette.ActivityText)}.WithBold(true))
 	return line
 }
 
@@ -599,7 +599,7 @@ func (m UserMessage) render() Surface {
 	}
 	for y := startRow; y < endRow; y++ {
 		for x := 0; x < width; x++ {
-			rendered.setCell(x, y, Cell{Glyph: SpaceGlyph, Width: 1, Style: fillStyle})
+			rendered.setCell(x, y, blankCell(fillStyle))
 		}
 	}
 	if m.HalfBlocks {
@@ -720,10 +720,10 @@ func (b ReasoningBlock) render() Surface {
 		width = maxInt(width, PlainWidth(line))
 	}
 	s := BlankSurface(width, len(lines))
-	style := CellStyle{BG: cellColor(b.Palette.ReasoningBackground), FG: cellColor(b.Palette.ReasoningText), Italic: true}
+	style := CellStyle{BG: cellColor(b.Palette.ReasoningBackground), FG: cellColor(b.Palette.ReasoningText)}.WithItalic(true)
 	for y, line := range lines {
 		for x := 0; x < width; x++ {
-			s.setCell(x, y, Cell{Glyph: SpaceGlyph, Width: 1, Style: style})
+			s.setCell(x, y, blankCell(style))
 		}
 		s.WriteText(0, y, line, style)
 	}
@@ -750,7 +750,7 @@ func renderHalfBlockSurface(width int, char string, palette theme.Palette) Surfa
 	if width > 1 {
 		fillStyle := CellStyle{FG: cellColor(palette.UserTextBackground)}
 		for x := 1; x < width; x++ {
-			s.setCell(x, 0, Cell{Glyph: GlyphFromString(char), Width: 1, Style: fillStyle})
+			s.setCell(x, 0, newCell(GlyphFromString(char), 1, fillStyle))
 		}
 	}
 	return s

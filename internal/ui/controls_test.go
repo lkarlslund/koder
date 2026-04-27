@@ -25,7 +25,7 @@ func TestRenderSelectableRowSelectedUsesDistinctHighlightColors(t *testing.T) {
 	base.Focused = true
 	focused := base.render(palette)
 
-	if SurfaceText(selected) == SurfaceText(unselected) && selected.cellAt(0, 0).Style.equal(unselected.cellAt(0, 0).Style) {
+	if SurfaceText(selected) == SurfaceText(unselected) && selected.cellAt(0, 0).Style().equal(unselected.cellAt(0, 0).Style()) {
 		t.Fatal("expected selected row styling to differ from unselected row")
 	}
 	r, g, b, ok := selected.SurfaceCellBG(0, 0)
@@ -45,7 +45,7 @@ func TestRenderSelectableRowSelectedUsesDistinctHighlightColors(t *testing.T) {
 	if !ok || r != 0x07 || g != 0x08 || b != 0x09 {
 		t.Fatalf("expected selected row tertiary text to use the shared selection foreground, got (%d,%d,%d,%v)", r, g, b, ok)
 	}
-	if focused.cellAt(0, 0).Style.equal(selected.cellAt(0, 0).Style) {
+	if focused.cellAt(0, 0).Style().equal(selected.cellAt(0, 0).Style()) {
 		t.Fatal("expected focused row styling to differ from merely selected row")
 	}
 }

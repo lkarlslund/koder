@@ -44,7 +44,7 @@ func (i InputField) render(width int) Surface {
 	fg := cellColor(i.Foreground)
 	borderStyle := CellStyle{FG: cellColor(i.BorderColor), BG: bg}
 	contentStyle := CellStyle{FG: fg, BG: bg}
-	placeholderStyle := CellStyle{FG: cellColor(i.PlaceholderFG), BG: bg, Italic: true}
+	placeholderStyle := CellStyle{FG: cellColor(i.PlaceholderFG), BG: bg}.WithItalic(true)
 	cursorStyle := CellStyle{FG: bg, BG: fg}
 
 	border := lipgloss.NormalBorder()
@@ -53,13 +53,13 @@ func (i InputField) render(width int) Surface {
 	s.WriteText(0, 2, border.BottomLeft, borderStyle)
 	s.WriteText(width-1, 2, border.BottomRight, borderStyle)
 	for x := 1; x < width-1; x++ {
-		s.setCell(x, 0, Cell{Glyph: GlyphFromString(border.Top), Width: 1, Style: borderStyle})
-		s.setCell(x, 2, Cell{Glyph: GlyphFromString(border.Bottom), Width: 1, Style: borderStyle})
+		s.setCell(x, 0, newCell(GlyphFromString(border.Top), 1, borderStyle))
+		s.setCell(x, 2, newCell(GlyphFromString(border.Bottom), 1, borderStyle))
 	}
-	s.setCell(0, 1, Cell{Glyph: GlyphFromString(border.Left), Width: 1, Style: borderStyle})
-	s.setCell(width-1, 1, Cell{Glyph: GlyphFromString(border.Right), Width: 1, Style: borderStyle})
+	s.setCell(0, 1, newCell(GlyphFromString(border.Left), 1, borderStyle))
+	s.setCell(width-1, 1, newCell(GlyphFromString(border.Right), 1, borderStyle))
 	for x := 1; x < width-1; x++ {
-		s.setCell(x, 1, Cell{Glyph: SpaceGlyph, Width: 1, Style: contentStyle})
+		s.setCell(x, 1, blankCell(contentStyle))
 	}
 
 	innerWidth := maxInt(1, width-2)

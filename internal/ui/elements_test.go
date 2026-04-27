@@ -255,7 +255,7 @@ func TestPlaceAtInheritsParentBackgroundForSparseChild(t *testing.T) {
 	base := BlankSurface(4, 1)
 	bg := cellColor("#112233")
 	for x := 0; x < 4; x++ {
-		base.setCell(x, 0, Cell{Glyph: SpaceGlyph, Width: 1, Style: CellStyle{BG: bg}})
+		base.setCell(x, 0, blankCell(CellStyle{BG: bg}))
 	}
 
 	child := TransparentSurface(4, 1)
