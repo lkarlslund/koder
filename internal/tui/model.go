@@ -775,7 +775,7 @@ func (m Model) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 		}
 		if msg.events != nil {
 			var refresh ui.Cmd
-			if msg.chatID == 0 || msg.chatID == m.currentChat.ID {
+			if (msg.chatID == 0 || msg.chatID == m.currentChat.ID) && shouldRefreshDetailsAfterEvent(msg.event) {
 				refresh = m.reloadDetailsCmd()
 			}
 			return m, ui.Batch(refresh, nextEventCmd(msg.chatID, msg.events), m.syncWindowTitleCmd())
@@ -1623,6 +1623,19 @@ func (m *Model) applyEvent(evt domain.Event) {
 	case domain.EventKindMessageDone:
 		m.clearPendingAssistantTurn()
 		m.stopBusyWithStatus("Ready")
+	}
+}
+
+func shouldRefreshDetailsAfterEvent(evt domain.Event) bool {
+	switch evt.Kind {
+	case domain.EventKindMessageDelta,
+		domain.EventKindReasoning,
+		domain.EventKindUsage,
+		domain.EventKindStatus,
+		domain.EventKindSessionTitle:
+		return false
+	default:
+		return true
 	}
 }
 

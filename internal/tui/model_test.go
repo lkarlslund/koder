@@ -128,6 +128,29 @@ func TestComposerUpdatesKeepMainScreenCacheAndInvalidateComposerArea(t *testing.
 	}
 }
 
+func TestShouldRefreshDetailsAfterEvent(t *testing.T) {
+	cases := []struct {
+		name string
+		evt  domain.Event
+		want bool
+	}{
+		{name: "message delta", evt: domain.Event{Kind: domain.EventKindMessageDelta}, want: false},
+		{name: "reasoning", evt: domain.Event{Kind: domain.EventKindReasoning}, want: false},
+		{name: "usage", evt: domain.Event{Kind: domain.EventKindUsage}, want: false},
+		{name: "status", evt: domain.Event{Kind: domain.EventKindStatus}, want: false},
+		{name: "session title", evt: domain.Event{Kind: domain.EventKindSessionTitle}, want: false},
+		{name: "tool result", evt: domain.Event{Kind: domain.EventKindToolResult}, want: true},
+		{name: "approval ask", evt: domain.Event{Kind: domain.EventKindApprovalAsk}, want: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := shouldRefreshDetailsAfterEvent(tc.evt); got != tc.want {
+				t.Fatalf("shouldRefreshDetailsAfterEvent(%q) = %v, want %v", tc.evt.Kind, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestSkillQuery(t *testing.T) {
 	query, start, ok := skillQuery("Investigate $rev")
 	if !ok || query != "rev" {
