@@ -1346,7 +1346,7 @@ func (e VisibleElement) Measure(ctx *Context, constraints Constraints) Size {
 }
 
 func (e VisibleElement) Render(ctx *Context, bounds Rect) Surface {
-	return renderOwnedSurface(ctx, bounds, e.RenderTo)
+	return renderOwnedCanvas(ctx, bounds, e)
 }
 
 func (e VisibleElement) RenderTo(ctx *Context, bounds Rect, dst *Surface) {
@@ -1380,6 +1380,37 @@ func (e VisibleElement) WalkChildren(_ *Context, visit func(Element)) {
 		return
 	}
 	visit(e.Child)
+}
+
+func (e VisibleElement) Paint(ctx *Context, canvas Canvas) {
+	if !e.Visible() || canvas.Width() <= 0 || canvas.Height() <= 0 {
+		return
+	}
+	if e.HAlign == AlignStart && e.VAlign == AlignStart {
+		renderElementInto(ctx, e.Child, Rect{X: canvas.origin.X, Y: canvas.origin.Y, W: canvas.Width(), H: canvas.Height()}, canvas.surface)
+		return
+	}
+	size := e.Child.Measure(ctx, NewConstraints(canvas.Width(), canvas.Height()))
+	x := 0
+	y := 0
+	switch e.HAlign {
+	case AlignCenter:
+		x = max(0, (canvas.Width()-size.W)/2)
+	case AlignEnd:
+		x = max(0, canvas.Width()-size.W)
+	}
+	switch e.VAlign {
+	case AlignCenter:
+		y = max(0, (canvas.Height()-size.H)/2)
+	case AlignEnd:
+		y = max(0, canvas.Height()-size.H)
+	}
+	renderElementInto(ctx, e.Child, Rect{
+		X: canvas.origin.X + x,
+		Y: canvas.origin.Y + y,
+		W: min(canvas.Width(), size.W),
+		H: min(canvas.Height(), size.H),
+	}, canvas.surface)
 }
 
 type Child struct {
@@ -1463,7 +1494,7 @@ func (b FlexBox) Measure(ctx *Context, constraints Constraints) Size {
 }
 
 func (b FlexBox) Render(ctx *Context, bounds Rect) Surface {
-	return renderOwnedSurface(ctx, bounds, b.RenderTo)
+	return renderOwnedCanvas(ctx, bounds, b)
 }
 
 func (b FlexBox) RenderTo(ctx *Context, bounds Rect, dst *Surface) {
@@ -1486,6 +1517,18 @@ func (b FlexBox) WalkChildren(_ *Context, visit func(Element)) {
 			visit(child.Element)
 		}
 	}
+}
+
+func (b FlexBox) Paint(ctx *Context, canvas Canvas) {
+	if canvas.Width() <= 0 || canvas.Height() <= 0 {
+		return
+	}
+	bounds := Rect{X: canvas.origin.X, Y: canvas.origin.Y, W: canvas.Width(), H: canvas.Height()}
+	if b.axis() == AxisVertical {
+		b.renderVerticalTo(ctx, bounds, canvas.surface)
+		return
+	}
+	b.renderHorizontalTo(ctx, bounds, canvas.surface)
 }
 
 func (b FlexBox) axis() Axis {
@@ -1564,7 +1607,7 @@ func (i Inset) Measure(ctx *Context, constraints Constraints) Size {
 }
 
 func (i Inset) Render(ctx *Context, bounds Rect) Surface {
-	return renderOwnedSurface(ctx, bounds, i.RenderTo)
+	return renderOwnedCanvas(ctx, bounds, i)
 }
 
 func (i Inset) RenderTo(ctx *Context, bounds Rect, dst *Surface) {
@@ -1580,6 +1623,18 @@ func (i Inset) WalkChildren(_ *Context, visit func(Element)) {
 		return
 	}
 	visit(i.Child)
+}
+
+func (i Inset) Paint(ctx *Context, canvas Canvas) {
+	if !elementVisible(i.Child) || canvas.Width() <= 0 || canvas.Height() <= 0 {
+		return
+	}
+	renderElementInto(ctx, i.Child, Rect{
+		X: canvas.origin.X + i.Padding.Left,
+		Y: canvas.origin.Y + i.Padding.Top,
+		W: max(0, canvas.Width()-i.Padding.Left-i.Padding.Right),
+		H: max(0, canvas.Height()-i.Padding.Top-i.Padding.Bottom),
+	}, canvas.surface)
 }
 
 type Constrained struct {
@@ -1601,7 +1656,7 @@ func (c Constrained) Measure(ctx *Context, constraints Constraints) Size {
 }
 
 func (c Constrained) Render(ctx *Context, bounds Rect) Surface {
-	return renderOwnedSurface(ctx, bounds, c.RenderTo)
+	return renderOwnedCanvas(ctx, bounds, c)
 }
 
 func (c Constrained) RenderTo(ctx *Context, bounds Rect, dst *Surface) {
@@ -1617,6 +1672,19 @@ func (c Constrained) WalkChildren(_ *Context, visit func(Element)) {
 		return
 	}
 	visit(c.Child)
+}
+
+func (c Constrained) Paint(ctx *Context, canvas Canvas) {
+	if !elementVisible(c.Child) || canvas.Width() <= 0 || canvas.Height() <= 0 {
+		return
+	}
+	size := c.Measure(ctx, NewConstraints(canvas.Width(), canvas.Height()))
+	renderElementInto(ctx, c.Child, Rect{
+		X: canvas.origin.X,
+		Y: canvas.origin.Y,
+		W: size.W,
+		H: size.H,
+	}, canvas.surface)
 }
 
 type Stack struct {
@@ -1637,7 +1705,7 @@ func (s Stack) Measure(ctx *Context, constraints Constraints) Size {
 }
 
 func (s Stack) Render(ctx *Context, bounds Rect) Surface {
-	return renderOwnedSurface(ctx, bounds, s.RenderTo)
+	return renderOwnedCanvas(ctx, bounds, s)
 }
 
 func (s Stack) RenderTo(ctx *Context, bounds Rect, dst *Surface) {
@@ -1663,6 +1731,19 @@ func (s Stack) WalkChildren(_ *Context, visit func(Element)) {
 	}
 }
 
+func (s Stack) Paint(ctx *Context, canvas Canvas) {
+	if canvas.Width() <= 0 || canvas.Height() <= 0 {
+		return
+	}
+	bounds := Rect{X: canvas.origin.X, Y: canvas.origin.Y, W: canvas.Width(), H: canvas.Height()}
+	for _, child := range s.Children {
+		if !elementVisible(child) {
+			continue
+		}
+		renderElementInto(ctx, child, bounds, canvas.surface)
+	}
+}
+
 type Alignment int
 
 const (
@@ -1685,7 +1766,7 @@ func (a Align) Measure(ctx *Context, constraints Constraints) Size {
 }
 
 func (a Align) Render(ctx *Context, bounds Rect) Surface {
-	return renderOwnedSurface(ctx, bounds, a.RenderTo)
+	return renderOwnedCanvas(ctx, bounds, a)
 }
 
 func (a Align) RenderTo(ctx *Context, bounds Rect, dst *Surface) {
@@ -1709,6 +1790,34 @@ func (a Align) RenderTo(ctx *Context, bounds Rect, dst *Surface) {
 		y = max(0, bounds.H-size.H)
 	}
 	renderElementInto(ctx, a.Child, Rect{X: bounds.X + x, Y: bounds.Y + y, W: size.W, H: size.H}, dst)
+}
+
+func (a Align) Paint(ctx *Context, canvas Canvas) {
+	if a.Child == nil || canvas.Width() <= 0 || canvas.Height() <= 0 {
+		return
+	}
+	size := a.Child.Measure(ctx, NewConstraints(canvas.Width(), canvas.Height()))
+	size = NewConstraints(canvas.Width(), canvas.Height()).Clamp(size)
+	x := 0
+	y := 0
+	switch a.Horizontal {
+	case AlignCenter:
+		x = max(0, (canvas.Width()-size.W)/2)
+	case AlignEnd:
+		x = max(0, canvas.Width()-size.W)
+	}
+	switch a.Vertical {
+	case AlignCenter:
+		y = max(0, (canvas.Height()-size.H)/2)
+	case AlignEnd:
+		y = max(0, canvas.Height()-size.H)
+	}
+	renderElementInto(ctx, a.Child, Rect{
+		X: canvas.origin.X + x,
+		Y: canvas.origin.Y + y,
+		W: size.W,
+		H: size.H,
+	}, canvas.surface)
 }
 
 func clampInt(value, low, high int) int {
