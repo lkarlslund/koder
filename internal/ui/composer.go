@@ -50,6 +50,92 @@ func (c Composer) Render(_ *Context, bounds Rect) Surface {
 	return c.render().normalize(bounds.W, bounds.H)
 }
 
+func (c Composer) Paint(_ *Context, canvas Canvas) {
+	width := canvas.Width()
+	height := canvas.Height()
+	if width <= 0 || height <= 0 {
+		return
+	}
+	prompt := c.PromptGlyph + " "
+	promptWidth := PlainWidth(prompt)
+	if promptWidth >= width {
+		prompt = PlainTruncate(prompt, maxInt(1, width-1), "")
+		promptWidth = PlainWidth(prompt)
+	}
+	contentWidth := maxInt(0, width-promptWidth)
+	promptStyle := CellStyle{BG: cellColor(c.Palette.UserTextBackground), FG: cellColor(c.Palette.UserAccentBar)}
+	contentStyle := CellStyle{FG: cellColor(c.Palette.UserTextForeground), BG: cellColor(c.Palette.UserTextBackground)}
+	mutedStyle := CellStyle{FG: cellColor(c.Palette.ComposerMutedText), BG: cellColor(c.Palette.UserTextBackground)}
+
+	paintHalfBlock := func(y int, char string) {
+		if y < 0 || y >= height || width <= 0 {
+			return
+		}
+		canvas.SetCell(0, y, newCell(GlyphFromString(char), 1, CellStyle{FG: cellColor(c.Palette.UserAccentBar)}))
+		for x := 1; x < width; x++ {
+			canvas.SetCell(x, y, newCell(GlyphFromString(char), 1, CellStyle{FG: cellColor(c.Palette.UserTextBackground)}))
+		}
+	}
+	paintBlankLine := func(y int) {
+		if y < 0 || y >= height {
+			return
+		}
+		canvas.Fill(Rect{Y: y, W: width, H: 1}, contentStyle)
+		canvas.WriteText(0, y, PlainTruncate(prompt, width, ""), promptStyle)
+	}
+	paintLine := func(y int, before, cursor, after string, beforeStyle, afterStyle CellStyle) {
+		if y < 0 || y >= height {
+			return
+		}
+		canvas.Fill(Rect{Y: y, W: width, H: 1}, contentStyle)
+		canvas.WriteText(0, y, PlainTruncate(prompt, width, ""), promptStyle)
+		if contentWidth <= 0 {
+			return
+		}
+		before = PlainTruncate(before, contentWidth, "")
+		cursor = PlainTruncate(cursor, maxInt(1, contentWidth-PlainWidth(before)), "")
+		remaining := maxInt(0, contentWidth-PlainWidth(before)-PlainWidth(cursor))
+		after = PlainTruncate(after, remaining, "")
+		offset := promptWidth
+		cursorStyle := contentStyle
+		if c.CursorVisible {
+			cursorStyle = CellStyle{FG: cellColor(c.Palette.UserTextBackground), BG: cellColor(c.Palette.UserTextForeground)}
+		}
+		canvas.WriteText(offset, y, before, beforeStyle)
+		canvas.WriteText(offset+PlainWidth(before), y, cursor, cursorStyle)
+		canvas.WriteText(offset+PlainWidth(before)+PlainWidth(cursor), y, after, afterStyle)
+	}
+
+	middleY := 1
+	if c.HalfBlocks {
+		paintHalfBlock(0, "▄")
+		paintHalfBlock(2, "▀")
+	} else {
+		paintBlankLine(0)
+		paintBlankLine(2)
+	}
+	if strings.TrimSpace(c.Value) == "" {
+		placeholder := PlainTruncate(c.Placeholder, contentWidth, "")
+		cursor := ""
+		after := ""
+		if placeholder != "" {
+			runes := []rune(placeholder)
+			cursor = string(runes[0])
+			if strings.TrimSpace(c.ContentCursor) != "" {
+				cursor = c.ContentCursor
+			}
+			if len(runes) > 1 {
+				after = string(runes[1:])
+			}
+		} else {
+			cursor = c.ContentCursor
+		}
+		paintLine(middleY, "", cursor, after, contentStyle, mutedStyle)
+		return
+	}
+	paintLine(middleY, c.ContentBefore, c.ContentCursor, c.ContentAfter, contentStyle, contentStyle)
+}
+
 func (c Composer) render() Surface {
 	width := maxInt(1, c.Width)
 	prompt := c.PromptGlyph + " "
@@ -230,6 +316,23 @@ func (l AttachmentList) Render(ctx *Context, bounds Rect) Surface {
 		width = bounds.W
 	}
 	return AttachmentList{Items: l.Items, Width: width}.render(ctx.Palette).normalize(bounds.W, bounds.H)
+}
+
+func (l AttachmentList) Paint(ctx *Context, canvas Canvas) {
+	width := canvas.Width()
+	if width <= 0 || canvas.Height() <= 0 || len(l.Items) == 0 {
+		return
+	}
+	style := CellStyle{FG: cellColor(ctx.Palette.MarkdownText), BG: cellColor(ctx.Palette.UserTextBackground)}
+	for y, item := range l.Items {
+		if y >= canvas.Height() {
+			break
+		}
+		canvas.Fill(Rect{Y: y, W: width, H: 1}, style)
+		if width > 1 {
+			canvas.WriteText(1, y, PlainTruncate(item.Label, maxInt(1, width-2), ""), style)
+		}
+	}
 }
 
 func (l AttachmentList) render(palette theme.Palette) Surface {

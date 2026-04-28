@@ -24,15 +24,16 @@ const (
 )
 
 type modelWindow struct {
-	base       ui.BaseWindow
-	model      *Model
-	bounds     func(*Model, ui.Rect) ui.Rect
-	element    func(*Model) ui.Element
-	render     func(*Model, ui.Rect) ui.Surface
-	invalidate func(*Model, *ui.Context)
-	key        func(*Model, ui.KeyMsg) (bool, ui.Cmd)
-	mouse      func(*Model, ui.MouseMsg) (bool, ui.Cmd)
-	timer      func(*Model, ui.TimerEvent) (bool, ui.Cmd)
+	base        ui.BaseWindow
+	model       *Model
+	bounds      func(*Model, ui.Rect) ui.Rect
+	element     func(*Model) ui.Element
+	render      func(*Model, ui.Rect) ui.Surface
+	invalidate  func(*Model, *ui.Context)
+	needsRedraw func(*Model) bool
+	key         func(*Model, ui.KeyMsg) (bool, ui.Cmd)
+	mouse       func(*Model, ui.MouseMsg) (bool, ui.Cmd)
+	timer       func(*Model, ui.TimerEvent) (bool, ui.Cmd)
 }
 
 func (w *modelWindow) ID() ui.WindowID {
@@ -63,6 +64,9 @@ func (w *modelWindow) Modal() bool {
 }
 
 func (w *modelWindow) NeedsRedraw() bool {
+	if w != nil && w.needsRedraw != nil && w.needsRedraw(w.model) {
+		return true
+	}
 	return w.base.NeedsRedraw()
 }
 
@@ -169,6 +173,12 @@ func (m *Model) mainWindow() ui.Window {
 			invalidate: func(m *Model, ctx *ui.Context) {
 				ui.InvalidateElementCaches(ctx, m.renderBodyElement())
 				m.invalidateBodyCache()
+			},
+			needsRedraw: func(m *Model) bool {
+				if m == nil || m.mainScreen == nil {
+					return false
+				}
+				return m.mainScreen.dirty()
 			},
 			key: func(m *Model, msg ui.KeyMsg) (bool, ui.Cmd) {
 				return m.handleMainWindowKey(msg)

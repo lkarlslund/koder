@@ -535,6 +535,13 @@ func (i ActivityIndicator) RenderTo(_ *Context, bounds Rect, dst *Surface) {
 	*dst = dst.placeAt(bounds.X, bounds.Y, i.render().normalize(bounds.W, bounds.H))
 }
 
+func (i ActivityIndicator) Paint(_ *Context, canvas Canvas) {
+	if canvas.Width() <= 0 || canvas.Height() <= 0 || strings.TrimSpace(i.Indicator) == "" {
+		return
+	}
+	canvas.WriteText(0, 0, PlainTruncate(i.Indicator, canvas.Width(), ""), CellStyle{FG: cellColor(i.Palette.ActivityText)}.WithBold(true))
+}
+
 func (i ActivityIndicator) render() Surface {
 	if strings.TrimSpace(i.Indicator) == "" {
 		return Surface{}

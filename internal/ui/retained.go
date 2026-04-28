@@ -76,6 +76,12 @@ type SurfaceNode struct {
 	surface   Surface
 }
 
+type ElementNode struct {
+	BaseNode
+	MeasureFn func(ctx *Context, constraints Constraints) Size
+	ElementFn func(ctx *Context) Element
+}
+
 func (n *SurfaceNode) Measure(ctx *Context, constraints Constraints) Size {
 	if n == nil {
 		return Size{}
@@ -112,4 +118,37 @@ func (n *SurfaceNode) Paint(ctx *Context, canvas Canvas) {
 	}
 	canvas.BlitSurface(0, 0, next)
 	n.surface = next
+}
+
+func (n *ElementNode) Measure(ctx *Context, constraints Constraints) Size {
+	if n == nil {
+		return Size{}
+	}
+	if n.MeasureFn != nil {
+		return n.MeasureFn(ctx, constraints)
+	}
+	if n.ElementFn == nil {
+		return constraints.Clamp(Size{})
+	}
+	element := n.ElementFn(ctx)
+	if element == nil {
+		return constraints.Clamp(Size{})
+	}
+	return constraints.Clamp(element.Measure(ctx, constraints))
+}
+
+func (n *ElementNode) Paint(ctx *Context, canvas Canvas) {
+	if n == nil || n.ElementFn == nil {
+		return
+	}
+	element := n.ElementFn(ctx)
+	if element == nil {
+		return
+	}
+	renderElementInto(ctx, element, Rect{
+		X: canvas.origin.X,
+		Y: canvas.origin.Y,
+		W: canvas.Width(),
+		H: canvas.Height(),
+	}, canvas.surface)
 }

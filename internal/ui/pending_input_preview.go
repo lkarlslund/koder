@@ -78,6 +78,78 @@ func (p PendingInputPreview) Render(ctx *Context, bounds Rect) Surface {
 	}.render(ctx.Palette).normalize(bounds.W, bounds.H)
 }
 
+func (p PendingInputPreview) Paint(ctx *Context, canvas Canvas) {
+	width := canvas.Width()
+	height := canvas.Height()
+	if width <= 0 || height <= 0 || len(p.Items) == 0 {
+		return
+	}
+	mutedFG := ctx.Palette.ComposerMutedText
+	selectedFG := ctx.Palette.SelectionForeground
+	bg := ctx.Palette.UserTextBackground
+	y := 0
+	header := "Queued inputs"
+	if p.EditingMode {
+		header = "Queued inputs • edit mode"
+	}
+	paintLine := func(prefix, text string, fg lipgloss.Color, italic bool) {
+		if y >= height {
+			return
+		}
+		baseStyle := CellStyle{FG: cellColor(fg), BG: cellColor(bg)}
+		textStyle := baseStyle
+		if italic {
+			textStyle = textStyle.WithItalic(true)
+		}
+		canvas.Fill(Rect{Y: y, W: width, H: 1}, baseStyle)
+		prefix = PlainTruncate(prefix, width, "")
+		canvas.WriteText(0, y, prefix, baseStyle)
+		if available := maxInt(0, width-PlainWidth(prefix)); available > 0 {
+			canvas.WriteText(PlainWidth(prefix), y, PlainTruncate(text, available, ""), textStyle)
+		}
+		y++
+	}
+	paintLine("• ", header, mutedFG, false)
+	for _, item := range p.Items {
+		if y >= height {
+			break
+		}
+		if item.Held && strings.TrimSpace(item.Badge) != "HELD" {
+			item.Badge = "HELD " + strings.TrimSpace(item.Badge)
+		}
+		fg := mutedFG
+		if item.Selected {
+			fg = selectedFG
+		}
+		label := strings.TrimSpace(item.Badge)
+		if label == "" {
+			label = "ITEM"
+		}
+		lines := strings.Split(strings.ReplaceAll(item.Text, "\r\n", "\n"), "\n")
+		rendered := 0
+		limitWidth := maxInt(1, width-8-PlainWidth(label))
+		for _, line := range lines {
+			for _, wrapped := range wrapPreviewLine(line, limitWidth) {
+				prefix := "  " + label + " "
+				if rendered > 0 {
+					prefix = strings.Repeat(" ", maxInt(2, PlainWidth(prefix)))
+				}
+				paintLine(prefix, wrapped, fg, true)
+				rendered++
+				if rendered >= pendingInputPreviewLineLimit || y >= height {
+					break
+				}
+			}
+			if rendered >= pendingInputPreviewLineLimit || y >= height {
+				break
+			}
+		}
+		if y < height && countWrappedPreviewLines(lines, limitWidth) > pendingInputPreviewLineLimit {
+			paintLine(strings.Repeat(" ", maxInt(2, PlainWidth("  "+label+" "))), "…", fg, true)
+		}
+	}
+}
+
 func (p PendingInputPreview) renderHeader(text string, fg, bg lipgloss.Color) Surface {
 	width := maxInt(1, p.Width)
 	prefix := "• "

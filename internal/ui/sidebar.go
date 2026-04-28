@@ -58,6 +58,25 @@ func (s Sidebar) Render(ctx *Context, bounds Rect) Surface {
 	return s.render(ctx, width).normalize(bounds.W, bounds.H)
 }
 
+func (s Sidebar) Paint(ctx *Context, canvas Canvas) {
+	width := canvas.Width()
+	height := canvas.Height()
+	if width <= 0 || height <= 0 {
+		return
+	}
+	fillStyle := CellStyle{FG: cellColor(ctx.Palette.SidebarForeground), BG: cellColor(ctx.Palette.SidebarBackground)}
+	canvas.Fill(Rect{W: width, H: height}, fillStyle)
+	if s.Child == nil || width <= 1 {
+		return
+	}
+	renderElementInto(ctx, s.Child, Rect{
+		X: canvas.origin.X + 1,
+		Y: canvas.origin.Y,
+		W: max(0, width-1),
+		H: height,
+	}, canvas.surface)
+}
+
 type BodyLayout struct {
 	MainElement    Element
 	SidebarElement Element
