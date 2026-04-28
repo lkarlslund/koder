@@ -48,10 +48,10 @@ type SlashMenu struct {
 }
 
 func (m SlashMenu) Measure(ctx *Context, constraints Constraints) Size {
-	return constraints.Clamp(m.element(m.contentWidth()).Measure(ctx, constraints))
+	return constraints.Clamp(m.node(m.contentWidth()).Measure(ctx, constraints))
 }
 
-func (m SlashMenu) element(contentWidth int) Element {
+func (m SlashMenu) node(contentWidth int) Node {
 	if len(m.Items) == 0 {
 		return nil
 	}
@@ -72,14 +72,14 @@ func (m SlashMenu) element(contentWidth int) Element {
 			Focused:        idx == m.Selected,
 		}))
 	}
-	return Border{
-		Child:        FlexBox{Direction: DirectionVertical, Children: children},
+	return AsNode(Border{
+		Child:        AsNode(FlexBox{Direction: DirectionVertical, Children: children}),
 		Padding:      SymmetricInsets(1, 0),
 		BorderLeft:   true,
 		BorderRight:  true,
 		BorderTop:    true,
 		BorderBottom: true,
-	}
+	})
 }
 
 func (m SlashMenu) contentWidth() int {
@@ -105,7 +105,7 @@ func (m SlashMenu) Paint(ctx *Context, canvas Canvas) {
 	if canvas.Width() > 0 {
 		width = min(width, canvas.Width())
 	}
-	renderElementInto(ctx, m.element(max(0, width-4)), Rect{
+	paintNodeInto(ctx, m.node(max(0, width-4)), Rect{
 		X: canvas.origin.X,
 		Y: canvas.origin.Y,
 		W: width,
@@ -114,10 +114,10 @@ func (m SlashMenu) Paint(ctx *Context, canvas Canvas) {
 }
 
 func (m HistoryMenu) Measure(ctx *Context, constraints Constraints) Size {
-	return constraints.Clamp(m.element().Measure(ctx, constraints))
+	return constraints.Clamp(m.node().Measure(ctx, constraints))
 }
 
-func (m HistoryMenu) element() Element {
+func (m HistoryMenu) node() Node {
 	width := m.width()
 	contentWidth := max(1, width-4)
 	muted := lipgloss.NewStyle().Foreground(m.Palette.AssistantTimestampText)
@@ -149,15 +149,15 @@ func (m HistoryMenu) element() Element {
 			Style: muted,
 		}),
 	)
-	return Border{
-		Child:        FlexBox{Direction: DirectionVertical, Children: children},
+	return AsNode(Border{
+		Child:        AsNode(FlexBox{Direction: DirectionVertical, Children: children}),
 		Width:        width,
 		Padding:      SymmetricInsets(1, 0),
 		BorderLeft:   true,
 		BorderRight:  true,
 		BorderTop:    true,
 		BorderBottom: true,
-	}
+	})
 }
 
 func (m HistoryMenu) width() int {
@@ -175,7 +175,7 @@ func (m HistoryMenu) Paint(ctx *Context, canvas Canvas) {
 	if canvas.Width() > 0 {
 		width = min(width, canvas.Width())
 	}
-	renderElementInto(ctx, m.element(), Rect{
+	paintNodeInto(ctx, m.node(), Rect{
 		X: canvas.origin.X,
 		Y: canvas.origin.Y,
 		W: width,
@@ -199,10 +199,10 @@ func NewApprovalPrompt(props ApprovalPromptProps) ApprovalPrompt {
 }
 
 func (p ApprovalPrompt) Measure(ctx *Context, constraints Constraints) Size {
-	return constraints.Clamp(p.element().Measure(ctx, constraints))
+	return constraints.Clamp(p.node().Measure(ctx, constraints))
 }
 
-func (p ApprovalPrompt) element() Element {
+func (p ApprovalPrompt) node() Node {
 	buttons := ButtonRow{
 		Buttons: []Button{
 			{Label: p.ApproveLabel, Primary: true, Focused: p.ApproveFocus},
@@ -211,8 +211,8 @@ func (p ApprovalPrompt) element() Element {
 		Index: p.focusedIndex(),
 		Align: HorizontalAlignLeft,
 	}
-	return Border{
-		Child: FlexBox{
+	return AsNode(Border{
+		Child: AsNode(FlexBox{
 			Direction: DirectionVertical,
 			Children: []Child{
 				Fixed(Label{Text: p.Title, Style: lipgloss.NewStyle().Bold(true)}),
@@ -224,13 +224,13 @@ func (p ApprovalPrompt) element() Element {
 				}),
 			},
 			Spacing: 1,
-		},
+		}),
 		Padding:      SymmetricInsets(1, 0),
 		BorderLeft:   true,
 		BorderRight:  true,
 		BorderTop:    true,
 		BorderBottom: true,
-	}
+	})
 }
 
 func (p ApprovalPrompt) focusedIndex() int {
@@ -244,7 +244,7 @@ func (p ApprovalPrompt) Paint(ctx *Context, canvas Canvas) {
 	if canvas.Width() <= 0 || canvas.Height() <= 0 {
 		return
 	}
-	renderElementInto(ctx, p.element(), Rect{
+	paintNodeInto(ctx, p.node(), Rect{
 		X: canvas.origin.X,
 		Y: canvas.origin.Y,
 		W: canvas.Width(),
@@ -266,10 +266,10 @@ func NewMenuPickerDialog(props PickerDialogProps) MenuPickerDialog {
 }
 
 func (d MenuPickerDialog) Measure(ctx *Context, constraints Constraints) Size {
-	return constraints.Clamp(d.element().Measure(ctx, constraints))
+	return constraints.Clamp(d.node().Measure(ctx, constraints))
 }
 
-func (d MenuPickerDialog) element() Element {
+func (d MenuPickerDialog) node() Node {
 	width := 80
 	listWidth := width - 6
 	children := make([]Child, 0, len(d.Items)+5)
@@ -305,27 +305,27 @@ func (d MenuPickerDialog) element() Element {
 		Width: maxInt(0, width-6),
 		Align: HorizontalAlignRight,
 	}
-	return WindowFrame{
+	return AsNode(WindowFrame{
 		Title: strings.TrimSpace(d.Title),
 		Width: width,
-		Content: FlexBox{
+		Content: AsNode(FlexBox{
 			Direction: DirectionVertical,
 			Children: []Child{
-				Fixed(FlexBox{Direction: DirectionVertical, Children: children}),
+				Fixed(AsNode(FlexBox{Direction: DirectionVertical, Children: children})),
 				Fixed(buttons),
 				Fixed(Static{Content: "Enter applies the highlighted row. Esc cancels."}),
 			},
 			Spacing: 2,
-		},
+		}),
 		ShowClose: true,
-	}
+	})
 }
 
 func (d MenuPickerDialog) Paint(ctx *Context, canvas Canvas) {
 	if canvas.Width() <= 0 || canvas.Height() <= 0 {
 		return
 	}
-	renderElementInto(ctx, d.element(), Rect{
+	paintNodeInto(ctx, d.node(), Rect{
 		X: canvas.origin.X,
 		Y: canvas.origin.Y,
 		W: canvas.Width(),

@@ -129,7 +129,7 @@ func (d *ApprovalDialog) activateButton(index int) ApprovalDialogAction {
 	return d.ActivateControl(d.buttons.Buttons[index].ID)
 }
 
-func (d *ApprovalDialog) Element(palette theme.Palette, bounds ui.Rect) ui.Element {
+func (d *ApprovalDialog) Element(palette theme.Palette, bounds ui.Rect) ui.Node {
 	if d == nil {
 		return nil
 	}
@@ -138,19 +138,19 @@ func (d *ApprovalDialog) Element(palette theme.Palette, bounds ui.Rect) ui.Eleme
 	card := strings.Join(d.run.CardSurface(palette, cardWidth, true, true).Lines(), "\n")
 	buttons := d.buttons
 	buttons.Width = maxInt(buttons.Width, ui.PlainWidth(card))
-	body := ui.FlexBox{
+	body := ui.AsNode(ui.FlexBox{
 		Direction: ui.DirectionVertical,
 		Children: []ui.Child{
 			ui.Fixed(ui.Static{Content: card}),
 			ui.Fixed(ui.Spacer{H: 1}),
 			ui.Fixed(buttons),
 		},
-	}
-	return ui.ModalFrame{
+	})
+	return ui.AsNode(ui.ModalFrame{
 		Title:    "Approval required",
 		Subtitle: "Choose how to handle this tool request",
 		Body:     body,
 		Footer:   "enter select  tab/arrow switch  esc deny  alt+hotkey shortcut",
 		Width:    maxInt(88, minInt(width, 132)),
-	}
+	})
 }

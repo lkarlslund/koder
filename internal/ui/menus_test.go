@@ -33,7 +33,7 @@ func TestSlashMenuWrapperMatchesInnerElement(t *testing.T) {
 		Selected: 1,
 	}
 	width := element.panelWidth(element.contentWidth())
-	assertElementRenderMatchesWrapper(t, &Context{Palette: palette, Runtime: &Runtime{}}, element, element.element(max(0, width-4)), Rect{W: width, H: 4})
+	assertElementRenderMatchesWrapper(t, &Context{Palette: palette, Runtime: &Runtime{}}, element, element.node(max(0, width-4)), Rect{W: width, H: 4})
 }
 
 func TestHistoryMenuWrapperMatchesInnerElement(t *testing.T) {
@@ -48,7 +48,7 @@ func TestHistoryMenuWrapperMatchesInnerElement(t *testing.T) {
 		Selected: 1,
 		Width:    40,
 	}
-	assertElementRenderMatchesWrapper(t, &Context{Palette: palette, Runtime: &Runtime{}}, element, element.element(), Rect{W: 40, H: 8})
+	assertElementRenderMatchesWrapper(t, &Context{Palette: palette, Runtime: &Runtime{}}, element, element.node(), Rect{W: 40, H: 8})
 }
 
 func TestApprovalPromptWrapperMatchesInnerElement(t *testing.T) {
@@ -62,7 +62,7 @@ func TestApprovalPromptWrapperMatchesInnerElement(t *testing.T) {
 		ApproveFocus: true,
 		Hints:        "Enter approves",
 	})
-	assertElementRenderMatchesWrapper(t, &Context{Palette: palette, Runtime: &Runtime{}}, element, element.element(), Rect{W: 28, H: 8})
+	assertElementRenderMatchesWrapper(t, &Context{Palette: palette, Runtime: &Runtime{}}, element, element.node(), Rect{W: 28, H: 8})
 }
 
 func TestMenuPickerDialogWrapperMatchesInnerElement(t *testing.T) {
@@ -80,7 +80,7 @@ func TestMenuPickerDialogWrapperMatchesInnerElement(t *testing.T) {
 	})
 	ctx := &Context{Palette: palette, Runtime: &Runtime{}}
 	got := PaintElementSurface(ctx, element, Rect{W: 80, H: 10})
-	want := PaintElementSurface(&Context{Palette: palette}, element.element(), Rect{W: 80, H: 10})
+	want := PaintElementSurface(&Context{Palette: palette}, element.node(), Rect{W: 80, H: 10})
 	if got.Size() != want.Size() {
 		t.Fatalf("size mismatch: got %#v want %#v", got.Size(), want.Size())
 	}

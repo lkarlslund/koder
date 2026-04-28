@@ -3,7 +3,8 @@ package ui
 import "strings"
 
 type Sidebar struct {
-	Child  Element
+	BaseNode
+	Child  Node
 	Height int
 	Width  int
 }
@@ -18,7 +19,7 @@ func (s Sidebar) render(ctx *Context, width int) Surface {
 			contentHeight = s.Child.Measure(ctx, NewConstraints(contentBounds.W, 0)).H
 			contentBounds.H = contentHeight
 		}
-		content = PaintElementSurface(ctx, s.Child, contentBounds)
+		content = PaintNodeSurface(ctx, s.Child, contentBounds)
 	}
 	if height <= 0 {
 		height = max(1, contentHeight)
@@ -58,7 +59,7 @@ func (s Sidebar) Paint(ctx *Context, canvas Canvas) {
 	if s.Child == nil || width <= 1 {
 		return
 	}
-	renderElementInto(ctx, s.Child, Rect{
+	paintNodeInto(ctx, s.Child, Rect{
 		X: canvas.origin.X + 1,
 		Y: canvas.origin.Y,
 		W: max(0, width-1),
@@ -67,34 +68,39 @@ func (s Sidebar) Paint(ctx *Context, canvas Canvas) {
 }
 
 type BodyLayout struct {
-	MainElement    Element
-	SidebarElement Element
+	BaseNode
+	MainElement    Node
+	SidebarElement Node
 	ShowSidebar    bool
 }
 
 func (l BodyLayout) Measure(ctx *Context, constraints Constraints) Size {
-	return constraints.Clamp(l.element().Measure(ctx, constraints))
+	return constraints.Clamp(l.node().Measure(ctx, constraints))
 }
 
-func (l BodyLayout) element() Element {
+func (l BodyLayout) node() Node {
 	main := Inset{Padding: SymmetricInsets(1, 0), Child: l.MainElement}
 	if !l.ShowSidebar || l.SidebarElement == nil {
-		return main
+		return AsNode(main)
 	}
-	return FlexBox{
+	return AsNode(FlexBox{
 		Direction: DirectionHorizontal,
 		Children: []Child{
 			Flex(main, 1),
 			{
-				Element: l.SidebarElement,
-				Basis:   l.sidebarWidth(),
+				Node:  l.SidebarElement,
+				Basis: l.sidebarWidth(),
 			},
 		},
-	}
+	})
 }
 
 func (l BodyLayout) sidebarWidth() int {
-	sidebar, ok := l.SidebarElement.(Sidebar)
+	sidebarNode, ok := l.SidebarElement.(*LeafNode)
+	if !ok {
+		return 0
+	}
+	sidebar, ok := sidebarNode.Content.(Sidebar)
 	if !ok {
 		return 0
 	}
@@ -105,7 +111,7 @@ func (l BodyLayout) Paint(ctx *Context, canvas Canvas) {
 	if canvas.Width() <= 0 || canvas.Height() <= 0 {
 		return
 	}
-	renderElementInto(ctx, l.element(), Rect{
+	paintNodeInto(ctx, l.node(), Rect{
 		X: canvas.origin.X,
 		Y: canvas.origin.Y,
 		W: canvas.Width(),
@@ -114,8 +120,9 @@ func (l BodyLayout) Paint(ctx *Context, canvas Canvas) {
 }
 
 type Footer struct {
+	BaseNode
 	Parts    []string
-	Elements []Element
+	Elements []Node
 }
 
 func (f Footer) render() Surface {
@@ -123,14 +130,14 @@ func (f Footer) render() Surface {
 	for _, part := range f.Parts {
 		children = append(children, Fixed(Label{Text: part}))
 	}
-	return f.renderContent(&Context{}, FlexBox{Direction: DirectionVertical, Children: children})
+	return f.renderContent(&Context{}, AsNode(FlexBox{Direction: DirectionVertical, Children: children}))
 }
 
 func (f Footer) Measure(ctx *Context, constraints Constraints) Size {
 	if len(f.Elements) == 0 {
 		return constraints.Clamp(f.render().Size())
 	}
-	content := FlexBox{Direction: DirectionVertical, Children: f.children()}
+	content := AsNode(FlexBox{Direction: DirectionVertical, Children: f.children()})
 	size := content.Measure(ctx, constraints)
 	return constraints.Clamp(Size{W: size.W + 2, H: size.H + 1})
 }
@@ -146,7 +153,7 @@ func (f Footer) children() []Child {
 	return children
 }
 
-func (f Footer) renderContent(ctx *Context, content Element) Surface {
+func (f Footer) renderContent(ctx *Context, content Node) Surface {
 	width := 0
 	height := 1
 	if content != nil {
@@ -163,7 +170,7 @@ func (f Footer) renderContent(ctx *Context, content Element) Surface {
 		surface.WriteText(0, 0, strings.Repeat("─", width), borderStyle)
 	}
 	if content != nil {
-		rendered := PaintElementSurface(ctx, content, Rect{W: max(0, width-2), H: max(0, height-1)})
+		rendered := PaintNodeSurface(ctx, content, Rect{W: max(0, width-2), H: max(0, height-1)})
 		surface = surface.placeAt(1, 1, rendered)
 	}
 	return surface
@@ -173,12 +180,13 @@ func (f Footer) Paint(ctx *Context, canvas Canvas) {
 	if canvas.Width() <= 0 || canvas.Height() <= 0 {
 		return
 	}
-	content := FlexBox{Direction: DirectionVertical, Children: f.children()}
+	content := AsNode(FlexBox{Direction: DirectionVertical, Children: f.children()})
 	if len(f.Elements) == 0 {
-		content = FlexBox{Direction: DirectionVertical, Children: make([]Child, 0, len(f.Parts))}
+		children := make([]Child, 0, len(f.Parts))
 		for _, part := range f.Parts {
-			content.Children = append(content.Children, Fixed(Label{Text: part}))
+			children = append(children, Fixed(Label{Text: part}))
 		}
+		content = AsNode(FlexBox{Direction: DirectionVertical, Children: children})
 	}
 	canvas.BlitSurface(0, 0, f.renderContent(ctx, content).normalize(canvas.Width(), canvas.Height()))
 }

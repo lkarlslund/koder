@@ -37,7 +37,7 @@ func newTranscriptRenderer(m *Model) transcriptRenderer {
 	}
 }
 
-func (r transcriptRenderer) renderTranscriptMessageElement(msg domain.Message, parts []domain.Part) ui.Element {
+func (r transcriptRenderer) renderTranscriptMessageElement(msg domain.Message, parts []domain.Part) ui.Node {
 	body := r.renderMessageParts(parts)
 	styledBody := r.renderStyledMessageParts(parts)
 	stamp := timestamp(msg.CreatedAt, r.showTimestamps)
@@ -74,15 +74,15 @@ func (r transcriptRenderer) renderUserMessage(body, stamp string) string {
 	return strings.Join(ui.RenderSurface(ctx, element, r.userMessageWidth(body, stamp), 0).Lines(), "\n")
 }
 
-func (r transcriptRenderer) renderUserMessageElement(body, stamp string) ui.Element {
-	return ui.NewUserMessage(ui.UserMessageProps{
+func (r transcriptRenderer) renderUserMessageElement(body, stamp string) ui.Node {
+	return ui.AsNode(ui.NewUserMessage(ui.UserMessageProps{
 		Palette:     r.palette,
 		Body:        body,
 		Stamp:       stamp,
 		Width:       r.userMessageWidth(body, stamp),
 		HalfBlocks:  r.halfBlocks,
 		PromptGlyph: r.promptGlyph,
-	})
+	}))
 }
 
 func (r transcriptRenderer) userMessageWidth(body, stamp string) int {
@@ -100,14 +100,14 @@ func (r transcriptRenderer) userMessageWidth(body, stamp string) int {
 	return ui.UserMessageWidth(lines)
 }
 
-func (r transcriptRenderer) renderStyledAssistantMessageElement(body []ui.StyledSpan, stamp string) ui.Element {
-	return ui.AssistantMessage{
+func (r transcriptRenderer) renderStyledAssistantMessageElement(body []ui.StyledSpan, stamp string) ui.Node {
+	return ui.AsNode(ui.AssistantMessage{
 		StyledBody: body,
 		BaseStyle:  ui.CellStyle{FG: ui.CellColorFromLipgloss(r.palette.MarkdownText)},
 		Stamp:      stamp,
 		Width:      r.width,
 		Palette:    r.palette,
-	}
+	})
 }
 
 func (r transcriptRenderer) attachmentLabel(meta attachment.Metadata) string {
@@ -496,12 +496,12 @@ func (r transcriptRenderer) renderReasoningBlock(input string) string {
 	return strings.Join(lines, "\n")
 }
 
-func (r transcriptRenderer) renderReasoningBlockElement(input string) ui.Element {
-	return ui.ReasoningBlock{
+func (r transcriptRenderer) renderReasoningBlockElement(input string) ui.Node {
+	return ui.AsNode(ui.ReasoningBlock{
 		Body:    input,
 		Width:   r.width,
 		Palette: r.palette,
-	}
+	})
 }
 
 func (r transcriptRenderer) renderStyledReasoningBlock(input string) []ui.StyledSpan {

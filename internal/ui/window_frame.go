@@ -9,8 +9,9 @@ import (
 )
 
 type WindowFrame struct {
+	BaseNode
 	Title       string
-	Content     Element
+	Content     Node
 	Width       int
 	Height      int
 	Padding     Insets
@@ -22,13 +23,6 @@ type WindowFrame struct {
 	ShowClose   bool
 	CloseLabel  string
 	CloseID     string
-}
-
-func (w WindowFrame) WalkChildren(ctx *Context, visit func(Element)) {
-	if visit == nil {
-		return
-	}
-	visit(w.border(ctx))
 }
 
 func (w WindowFrame) Measure(ctx *Context, constraints Constraints) Size {
@@ -88,7 +82,7 @@ func (w WindowFrame) Paint(ctx *Context, canvas Canvas) {
 	if canvas.Width() <= 0 || canvas.Height() <= 0 {
 		return
 	}
-	renderElementInto(ctx, w.border(ctx), Rect{
+	paintNodeInto(ctx, AsNode(w.border(ctx)), Rect{
 		X: canvas.origin.X,
 		Y: canvas.origin.Y,
 		W: canvas.Width(),

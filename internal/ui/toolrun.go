@@ -277,7 +277,7 @@ type ToolRunDock struct {
 }
 
 func (d ToolRunDock) render() Surface {
-	return PaintElementSurface(&Context{Palette: d.Palette}, d.element(), Rect{W: d.width()})
+	return PaintNodeSurface(&Context{Palette: d.Palette}, d.node(), Rect{W: d.width()})
 }
 
 func (d ToolRunDock) Measure(_ *Context, constraints Constraints) Size {
@@ -288,7 +288,7 @@ func (d ToolRunDock) Paint(ctx *Context, canvas Canvas) {
 	if canvas.Width() <= 0 || canvas.Height() <= 0 {
 		return
 	}
-	renderElementInto(ctx, d.element(), Rect{
+	paintNodeInto(ctx, d.node(), Rect{
 		X: canvas.origin.X,
 		Y: canvas.origin.Y,
 		W: canvas.Width(),
@@ -296,7 +296,7 @@ func (d ToolRunDock) Paint(ctx *Context, canvas Canvas) {
 	}, canvas.surface)
 }
 
-func (d ToolRunDock) element() Element {
+func (d ToolRunDock) node() Node {
 	children := []Child{
 		Fixed(toolRunDockTitle{
 			Palette: d.Palette,
@@ -330,8 +330,8 @@ func (d ToolRunDock) element() Element {
 			Style: lipgloss.NewStyle().Foreground(d.Palette.AssistantTimestampText),
 		}),
 	)
-	return Border{
-		Child:        FlexBox{Direction: DirectionVertical, Children: children, Spacing: 1},
+	return AsNode(Border{
+		Child:        AsNode(FlexBox{Direction: DirectionVertical, Children: children, Spacing: 1}),
 		Width:        d.width(),
 		Padding:      SymmetricInsets(1, 0),
 		BorderLeft:   true,
@@ -339,7 +339,7 @@ func (d ToolRunDock) element() Element {
 		BorderTop:    true,
 		BorderBottom: true,
 		BorderColor:  toolRunStatusColor(d.Run.Status, d.Palette),
-	}
+	})
 }
 
 func (d ToolRunDock) contentWidth() int {

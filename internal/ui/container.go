@@ -1,16 +1,17 @@
 package ui
 
 type Container interface {
-	Add(child Element)
-	Insert(index int, child Element)
+	Add(child Node)
+	Insert(index int, child Node)
 	Remove(index int)
-	Replace(index int, child Element)
+	Replace(index int, child Node)
 	Clear()
-	Children() []Element
+	Children() []Node
 }
 
 type RetainedColumn struct {
-	children []Element
+	BaseNode
+	children []Node
 	spacing  int
 }
 
@@ -18,13 +19,13 @@ func NewRetainedColumn(spacing int) *RetainedColumn {
 	return &RetainedColumn{spacing: max(0, spacing)}
 }
 
-func (c *RetainedColumn) Add(child Element) {
+func (c *RetainedColumn) Add(child Node) {
 	c.children = append(c.children, child)
 }
 
-func (c *RetainedColumn) Insert(index int, child Element) {
+func (c *RetainedColumn) Insert(index int, child Node) {
 	index = max(0, min(index, len(c.children)))
-	c.children = append(c.children[:index], append([]Element{child}, c.children[index:]...)...)
+	c.children = append(c.children[:index], append([]Node{child}, c.children[index:]...)...)
 }
 
 func (c *RetainedColumn) Remove(index int) {
@@ -34,7 +35,7 @@ func (c *RetainedColumn) Remove(index int) {
 	c.children = append(c.children[:index], c.children[index+1:]...)
 }
 
-func (c *RetainedColumn) Replace(index int, child Element) {
+func (c *RetainedColumn) Replace(index int, child Node) {
 	if index < 0 || index >= len(c.children) {
 		return
 	}
@@ -45,8 +46,8 @@ func (c *RetainedColumn) Clear() {
 	c.children = nil
 }
 
-func (c *RetainedColumn) Children() []Element {
-	out := make([]Element, len(c.children))
+func (c *RetainedColumn) Children() []Node {
+	out := make([]Node, len(c.children))
 	copy(out, c.children)
 	return out
 }
@@ -71,7 +72,7 @@ func (c *RetainedColumn) Paint(ctx *Context, canvas Canvas) {
 			items = append(items, Fixed(child))
 		}
 	}
-	renderElementInto(ctx, FlexBox{Direction: DirectionVertical, Children: items, Spacing: c.spacing}, Rect{
+	paintNodeInto(ctx, AsNode(FlexBox{Direction: DirectionVertical, Children: items, Spacing: c.spacing}), Rect{
 		X: canvas.origin.X,
 		Y: canvas.origin.Y,
 		W: canvas.Width(),

@@ -54,7 +54,7 @@ func benchmarkTranscript(width, items int) Transcript {
 				Width:   width,
 			}
 		}
-		entries = append(entries, TranscriptItem{Element: element, GapBefore: 2})
+		entries = append(entries, TranscriptItem{Node: AsNode(element), GapBefore: 2})
 	}
 	return Transcript{Items: entries}
 }
@@ -306,11 +306,11 @@ func BenchmarkBorderRenderCell(b *testing.B) {
 		BorderTop:    true,
 		BorderBottom: true,
 		BorderColor:  benchmarkPalette().SidebarBorder,
-		Child: Paragraph{
+		Child: AsNode(Paragraph{
 			Text: strings.Repeat("panel paragraph content ", 12),
 			Style: lipgloss.NewStyle().
 				Foreground(benchmarkPalette().MarkdownText),
-		},
+		}),
 	}
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {

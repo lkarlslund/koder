@@ -33,13 +33,13 @@ func newTranscriptItemBase(key string, gap int) transcriptItemBase {
 	}
 }
 
-func (b *transcriptItemBase) Key() string             { return b.key }
-func (b *transcriptItemBase) GapBefore() int          { return b.gap }
-func (b *transcriptItemBase) SetGapBefore(gap int)    { b.gap = max(0, gap) }
-func (b *transcriptItemBase) Invalidate()             { b.cache.InvalidateCache() }
-func (b *transcriptItemBase) setElement(e ui.Element) { b.cache.SetChild(e) }
+func (b *transcriptItemBase) Key() string          { return b.key }
+func (b *transcriptItemBase) GapBefore() int       { return b.gap }
+func (b *transcriptItemBase) SetGapBefore(gap int) { b.gap = max(0, gap) }
+func (b *transcriptItemBase) Invalidate()          { b.cache.InvalidateCache() }
+func (b *transcriptItemBase) setElement(e ui.Node) { b.cache.SetChild(e) }
 func (b *transcriptItemBase) UIItem() ui.TranscriptItem {
-	return ui.TranscriptItem{Key: b.key, Element: b.cache, GapBefore: b.gap}
+	return ui.TranscriptItem{Key: b.key, Node: b.cache, GapBefore: b.gap}
 }
 
 type placeholderTranscriptItem struct {
@@ -55,7 +55,7 @@ func newPlaceholderTranscriptItem(key string, gap int, text string) *placeholder
 }
 
 func (i *placeholderTranscriptItem) Refresh(_ *Model) {
-	i.setElement(ui.Paragraph{Text: i.text})
+	i.setElement(ui.AsNode(ui.Paragraph{Text: i.text}))
 }
 
 type userMessageTranscriptItem struct {
@@ -363,19 +363,19 @@ func (e genericToolRunCardElement) Paint(_ *ui.Context, canvas ui.Canvas) {
 }
 
 func (i *bashToolRunTranscriptItem) Refresh(m *Model) {
-	i.setElement(bashToolRunCardElement{Run: i.run, Palette: m.palette, Width: m.viewport.Width, ExpandedOutput: i.expandedOutput, ExpandedCommand: i.expandedCommand})
+	i.setElement(ui.AsNode(bashToolRunCardElement{Run: i.run, Palette: m.palette, Width: m.viewport.Width, ExpandedOutput: i.expandedOutput, ExpandedCommand: i.expandedCommand}))
 }
 func (i *readToolRunTranscriptItem) Refresh(m *Model) {
-	i.setElement(readToolRunCardElement{Run: i.run, Palette: m.palette, Width: m.viewport.Width, ExpandedOutput: i.expandedOutput})
+	i.setElement(ui.AsNode(readToolRunCardElement{Run: i.run, Palette: m.palette, Width: m.viewport.Width, ExpandedOutput: i.expandedOutput}))
 }
 func (i *writeToolRunTranscriptItem) Refresh(m *Model) {
-	i.setElement(writeToolRunCardElement{Run: i.run, Palette: m.palette, Width: m.viewport.Width, ExpandedOutput: i.expandedOutput})
+	i.setElement(ui.AsNode(writeToolRunCardElement{Run: i.run, Palette: m.palette, Width: m.viewport.Width, ExpandedOutput: i.expandedOutput}))
 }
 func (i *editToolRunTranscriptItem) Refresh(m *Model) {
-	i.setElement(editToolRunCardElement{Run: i.run, Palette: m.palette, Width: m.viewport.Width, ExpandedOutput: i.expandedOutput})
+	i.setElement(ui.AsNode(editToolRunCardElement{Run: i.run, Palette: m.palette, Width: m.viewport.Width, ExpandedOutput: i.expandedOutput}))
 }
 func (i *genericToolRunTranscriptItem) Refresh(m *Model) {
-	i.setElement(genericToolRunCardElement{Run: i.run, Palette: m.palette, Width: m.viewport.Width, ExpandedOutput: i.expandedOutput, ExpandedCommand: i.expandedCommand})
+	i.setElement(ui.AsNode(genericToolRunCardElement{Run: i.run, Palette: m.palette, Width: m.viewport.Width, ExpandedOutput: i.expandedOutput, ExpandedCommand: i.expandedCommand}))
 }
 
 func cloneParts(parts []domain.Part) []domain.Part {

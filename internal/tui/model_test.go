@@ -2808,14 +2808,14 @@ func TestAppendingPromptPreservesRetainedTranscriptPrefix(t *testing.T) {
 	if len(items) != 1 {
 		t.Fatalf("expected one retained transcript item, got %d", len(items))
 	}
-	first := items[0].Element
+	first := items[0].Node
 
 	m.appendLocalUserPrompt("second", nil, nil)
 	items = retained.Items()
 	if len(items) != 2 {
 		t.Fatalf("expected two retained transcript items, got %d", len(items))
 	}
-	if items[0].Element != first {
+	if items[0].Node != first {
 		t.Fatal("expected appending a prompt to preserve the existing retained transcript element")
 	}
 	if m.transcriptDirty {
@@ -3022,7 +3022,7 @@ func TestMouseClickOnThemePickerOKAppliesSelection(t *testing.T) {
 	if element == nil {
 		t.Fatal("expected theme dialog element")
 	}
-	_ = ui.PaintElementSurface(ctx, element, ui.Rect{W: bounds.W, H: bounds.H})
+	_ = ui.PaintNodeSurface(ctx, element, ui.Rect{W: bounds.W, H: bounds.H})
 	var okControl ui.Control
 	found := false
 	for _, control := range runtime.Controls() {
@@ -4360,19 +4360,19 @@ func TestRenderBodyUsesTranscriptElementInsteadOfViewportString(t *testing.T) {
 func TestSyncRetainedTranscriptItemsReplacesMatchingKeys(t *testing.T) {
 	retained := ui.NewRetainedTranscript()
 	first := ui.TranscriptItem{
-		Key:     "same",
-		Element: ui.NewCachedElement(ui.Paragraph{Text: "before"}, 1),
+		Key:  "same",
+		Node: ui.NewCachedElement(ui.AsNode(ui.Paragraph{Text: "before"}), 1),
 	}
 	second := ui.TranscriptItem{
-		Key:     "same",
-		Element: ui.NewCachedElement(ui.Paragraph{Text: "after"}, 1),
+		Key:  "same",
+		Node: ui.NewCachedElement(ui.AsNode(ui.Paragraph{Text: "after"}), 1),
 	}
 
 	m := Model{}
 	m.syncRetainedTranscriptItems(retained, []ui.TranscriptItem{first})
 	m.syncRetainedTranscriptItems(retained, []ui.TranscriptItem{second})
 
-	rendered := ui.PaintElementSurface(&ui.Context{}, retained, ui.Rect{W: 16, H: 1})
+	rendered := ui.PaintNodeSurface(&ui.Context{}, ui.AsNode(retained), ui.Rect{W: 16, H: 1})
 	got := strings.Join(rendered.Lines(), "\n")
 	if !strings.Contains(got, "after") {
 		t.Fatalf("expected retained transcript item to be replaced, got %q", got)

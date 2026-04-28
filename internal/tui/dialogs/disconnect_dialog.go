@@ -115,9 +115,9 @@ func (d DisconnectDialog) Measure(ctx *ui.Context, constraints ui.Constraints) u
 
 func (d DisconnectDialog) Surface(ctx *ui.Context, bounds ui.Rect) ui.Surface {
 	maxWidth := dialogRenderWidth(bounds, 84)
-	element := d.dialog(maxWidth, ctx.Palette)
-	size := element.Measure(ctx, ui.Constraints{MaxW: maxWidth, MaxH: bounds.H})
-	return ui.PaintElementSurface(ctx, element, ui.Rect{W: size.W, H: bounds.H})
+	node := d.dialog(maxWidth, ctx.Palette)
+	size := node.Measure(ctx, ui.Constraints{MaxW: maxWidth, MaxH: bounds.H})
+	return ui.PaintNodeSurface(ctx, node, ui.Rect{W: size.W, H: bounds.H})
 }
 
 func (d DisconnectDialog) Paint(ctx *ui.Context, canvas ui.Canvas) {
@@ -127,7 +127,7 @@ func (d DisconnectDialog) Paint(ctx *ui.Context, canvas ui.Canvas) {
 	canvas.BlitSurface(0, 0, d.Surface(ctx, ui.Rect{W: canvas.Width(), H: canvas.Height()}))
 }
 
-func (d DisconnectDialog) dialog(width int, palette theme.Palette) ui.Element {
+func (d DisconnectDialog) dialog(width int, palette theme.Palette) ui.Node {
 	dialogWidth := width
 	if dialogWidth <= 0 {
 		dialogWidth = 84
@@ -154,7 +154,7 @@ func (d DisconnectDialog) dialog(width int, palette theme.Palette) ui.Element {
 		})
 	}
 
-	var detailsElement ui.Element = staticBlock("No provider selected")
+	var detailsElement ui.Node = staticBlock("No provider selected")
 	if item, ok := d.current(); ok {
 		blocks := []ui.Child{
 			ui.Fixed(ui.Label{Text: item.Title}),
@@ -169,46 +169,46 @@ func (d DisconnectDialog) dialog(width int, palette theme.Palette) ui.Element {
 		if desc := strings.TrimSpace(item.Description); desc != "" {
 			blocks = append(blocks, ui.Fixed(ui.Spacer{H: 1}), ui.Fixed(ui.Paragraph{Text: truncateText(desc, detailWidth)}))
 		}
-		detailsElement = ui.FlexBox{Direction: ui.DirectionVertical, Children: blocks}
+		detailsElement = ui.AsNode(ui.FlexBox{Direction: ui.DirectionVertical, Children: blocks})
 	}
 
 	buttons := d.buttonRow(dialogWidth)
 	buttons.Width = maxInt(0, dialogWidth-6)
-	return ui.WindowFrame{
+	return ui.AsNode(ui.WindowFrame{
 		Title: "Disconnect Provider",
 		Width: dialogWidth,
-		Content: ui.FlexBox{
+		Content: ui.AsNode(ui.FlexBox{
 			Direction: ui.DirectionVertical,
 			Children: []ui.Child{
-				ui.Fixed(ui.FlexBox{
+				ui.Fixed(ui.AsNode(ui.FlexBox{
 					Direction: ui.DirectionVertical,
 					Children: []ui.Child{
 						ui.Fixed(staticBlock(fmt.Sprintf("Filter: %s", d.Query))),
 						ui.Fixed(ui.Spacer{H: 1}),
-						ui.Fixed(ui.FlexBox{
+						ui.Fixed(ui.AsNode(ui.FlexBox{
 							Direction: ui.DirectionHorizontal,
 							Spacing:   1,
 							Children: []ui.Child{
 								{
-									Element: ui.Section{
+									Node: ui.AsNode(ui.Section{
 										Title:   "Providers",
 										Width:   listWidth + 2,
 										Padding: ui.Insets{Right: 1},
-										Child: func() ui.Element {
+										Child: func() ui.Node {
 											if len(items) == 0 {
 												return staticBlock("No matches")
 											}
-											return ui.List{
+											return ui.AsNode(ui.List{
 												Items:    items,
 												Width:    listWidth,
 												Selected: d.Index - start,
 												Focused:  d.focus == pickerDialogFocusList,
-											}
+											})
 										}(),
-									},
+									}),
 									Basis: listWidth + 2,
 								},
-								ui.Flex(ui.Section{
+								ui.Flex(ui.AsNode(ui.Section{
 									Title:       "Details",
 									Width:       detailWidth + 1,
 									Padding:     ui.Insets{Left: 1},
@@ -216,18 +216,18 @@ func (d DisconnectDialog) dialog(width int, palette theme.Palette) ui.Element {
 									Foreground:  palette.SidebarForeground,
 									BorderColor: palette.SidebarBorder,
 									Child:       detailsElement,
-								}, 1),
+								}), 1),
 							},
-						}),
+						})),
 					},
-				}),
+				})),
 				ui.Fixed(buttons),
 				ui.Fixed(ui.Static{Content: "Enter to disconnect, Esc to cancel"}),
 			},
 			Spacing: 2,
-		},
+		}),
 		ShowClose: true,
-	}
+	})
 }
 
 func (d *DisconnectDialog) ActivateControl(controlID string) DisconnectDialogAction {

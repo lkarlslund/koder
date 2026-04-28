@@ -160,9 +160,9 @@ func (d ThemeDialog) Measure(ctx *ui.Context, constraints ui.Constraints) ui.Siz
 
 func (d ThemeDialog) Surface(ctx *ui.Context, bounds ui.Rect) ui.Surface {
 	maxWidth := dialogRenderWidth(bounds, 84)
-	element := d.dialog(maxWidth)
-	size := element.Measure(ctx, ui.Constraints{MaxW: maxWidth, MaxH: bounds.H})
-	return ui.PaintElementSurface(ctx, element, ui.Rect{W: size.W, H: bounds.H})
+	node := d.dialog(maxWidth)
+	size := node.Measure(ctx, ui.Constraints{MaxW: maxWidth, MaxH: bounds.H})
+	return ui.PaintNodeSurface(ctx, node, ui.Rect{W: size.W, H: bounds.H})
 }
 
 func (d ThemeDialog) Paint(ctx *ui.Context, canvas ui.Canvas) {
@@ -172,7 +172,7 @@ func (d ThemeDialog) Paint(ctx *ui.Context, canvas ui.Canvas) {
 	canvas.BlitSurface(0, 0, d.Surface(ctx, ui.Rect{W: canvas.Width(), H: canvas.Height()}))
 }
 
-func (d ThemeDialog) dialog(width int) ui.Element {
+func (d ThemeDialog) dialog(width int) ui.Node {
 	dialogWidth := minInt(84, maxInt(68, width))
 	buttons := d.buttonRow(dialogWidth)
 	buttons.Width = maxInt(0, dialogWidth-6)
@@ -183,23 +183,23 @@ func (d ThemeDialog) dialog(width int) ui.Element {
 			Title:     item,
 		})
 	}
-	var chooser ui.Element
+	var chooser ui.Node
 	if len(gridItems) == 0 {
 		chooser = staticBlock("No matches")
 	} else {
-		chooser = ui.SelectionGrid{
+		chooser = ui.AsNode(ui.SelectionGrid{
 			Items:      gridItems,
 			Width:      dialogWidth - 4,
 			Columns:    4,
 			Selected:   d.Index,
 			Focused:    d.focus == pickerDialogFocusList,
 			CellHeight: 1,
-		}
+		})
 	}
-	return ui.WindowFrame{
+	return ui.AsNode(ui.WindowFrame{
 		Title: "Themes",
 		Width: dialogWidth,
-		Content: ui.FlexBox{
+		Content: ui.AsNode(ui.FlexBox{
 			Direction: ui.DirectionVertical,
 			Children: []ui.Child{
 				ui.Fixed(staticBlock("Filter: " + d.Query)),
@@ -207,9 +207,9 @@ func (d ThemeDialog) dialog(width int) ui.Element {
 				ui.Fixed(buttons),
 			},
 			Spacing: 1,
-		},
+		}),
 		ShowClose: true,
-	}
+	})
 }
 
 func (d ThemeDialog) buttonRow(width int) ui.ButtonRow {

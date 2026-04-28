@@ -149,7 +149,7 @@ func TestFlexBoxVerticalAlignmentCanOptOutOfFill(t *testing.T) {
 		Children: []Child{
 			Flex(VisibleElement{
 				BoxProps: BoxProps{VAlign: AlignCenter},
-				Child:    Static{Content: "A"},
+				Child:    AsNode(Static{Content: "A"}),
 			}, 1),
 		},
 	}, 3, 3)
@@ -179,7 +179,7 @@ func TestAlignCentersChildWithinBounds(t *testing.T) {
 	got := RenderElement(nil, Align{
 		Horizontal: AlignCenter,
 		Vertical:   AlignCenter,
-		Child:      Static{Content: "X"},
+		Child:      AsNode(Static{Content: "X"}),
 	}, 3, 3)
 
 	lines := strings.Split(got, "\n")
@@ -191,7 +191,7 @@ func TestAlignCentersChildWithinBounds(t *testing.T) {
 func TestInsetAddsPadding(t *testing.T) {
 	got := RenderElement(nil, Inset{
 		Padding: UniformInsets(1),
-		Child:   Static{Content: "X"},
+		Child:   AsNode(Static{Content: "X"}),
 	}, 3, 3)
 
 	lines := strings.Split(got, "\n")
@@ -202,9 +202,9 @@ func TestInsetAddsPadding(t *testing.T) {
 
 func TestStackOverlaysLaterChildren(t *testing.T) {
 	got := RenderElement(nil, Stack{
-		Children: []Element{
-			Static{Content: "AAAA"},
-			Static{Content: " BB "},
+		Children: []Node{
+			AsNode(Static{Content: "AAAA"}),
+			AsNode(Static{Content: " BB "}),
 		},
 	}, 4, 1)
 
@@ -216,7 +216,7 @@ func TestStackOverlaysLaterChildren(t *testing.T) {
 func TestConstrainedClampsChildSize(t *testing.T) {
 	got := RenderElement(nil, Constrained{
 		Constraints: Constraints{MaxW: 2, MaxH: 1},
-		Child:       Static{Content: "WIDE"},
+		Child:       AsNode(Static{Content: "WIDE"}),
 	}, 4, 1)
 
 	if got != "WI  " {
@@ -240,7 +240,7 @@ func TestParagraphRenderMatchesPaint(t *testing.T) {
 
 func TestHitBoxRenderMatchesPaint(t *testing.T) {
 	ctx := &Context{Runtime: &Runtime{}}
-	element := HitBox{ID: "hit", Child: Static{Content: "X"}}
+	element := HitBox{ID: "hit", Child: AsNode(Static{Content: "X"})}
 	assertRenderMatchesPaint(t, ctx, element, Rect{W: 2, H: 1})
 }
 

@@ -177,10 +177,10 @@ func (d PickerDialog) Measure(ctx *Context, constraints Constraints) Size {
 	if width == int(^uint(0)>>1) || width <= 0 {
 		width = 80
 	}
-	return constraints.Clamp(d.element(width, ctx.Palette).Measure(ctx, Constraints{MaxW: width, MaxH: constraints.MaxH}))
+	return constraints.Clamp(d.node(width, ctx.Palette).Measure(ctx, Constraints{MaxW: width, MaxH: constraints.MaxH}))
 }
 
-func (d PickerDialog) element(width int, palette theme.Palette) Element {
+func (d PickerDialog) node(width int, palette theme.Palette) Node {
 	children := []Child{}
 	if hint := strings.TrimSpace(d.Hint); hint != "" {
 		children = append(children, Fixed(Label{
@@ -204,23 +204,23 @@ func (d PickerDialog) element(width int, palette theme.Palette) Element {
 				Secondary: item.Description,
 			})
 		}
-		children = append(children, Fixed(Section{
+		children = append(children, Fixed(AsNode(Section{
 			Width: 72,
-			Child: List{
+			Child: AsNode(List{
 				Items:    items,
 				Width:    72,
 				Selected: d.Index - start,
 				Focused:  d.Focus == pickerDialogFocusList,
-			},
-		}))
+			}),
+		})))
 	}
 	children = append(children, Fixed(Spacer{H: 1}))
-	return Modal{
+	return AsNode(Modal{
 		Title:       d.Title,
-		BodyElement: FlexBox{Direction: DirectionVertical, Children: append(children, Fixed(d.buttonRow(width)))},
+		BodyElement: AsNode(FlexBox{Direction: DirectionVertical, Children: append(children, Fixed(d.buttonRow(width)))}),
 		Footer:      "Enter selects. Tab switches focus. Esc cancels.",
 		Width:       80,
-	}
+	})
 }
 
 func (d PickerDialog) buttonRow(width int) ButtonRow {
@@ -238,7 +238,7 @@ func (d PickerDialog) Paint(ctx *Context, canvas Canvas) {
 	if width <= 0 {
 		width = 80
 	}
-	renderElementInto(ctx, d.element(width, ctx.Palette), Rect{
+	paintNodeInto(ctx, d.node(width, ctx.Palette), Rect{
 		X: canvas.origin.X,
 		Y: canvas.origin.Y,
 		W: width,

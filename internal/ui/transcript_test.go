@@ -179,15 +179,15 @@ func TestUserMessageHalfBlocksLeaveSeparatorRowsTransparent(t *testing.T) {
 
 func TestRetainedTranscriptMaintainsChildItems(t *testing.T) {
 	transcript := NewRetainedTranscript()
-	transcript.Add(TranscriptItem{Element: Paragraph{Text: "first"}})
-	transcript.Add(TranscriptItem{Element: Paragraph{Text: "second"}, GapBefore: 1})
+	transcript.Add(TranscriptItem{Node: AsNode(Paragraph{Text: "first"})})
+	transcript.Add(TranscriptItem{Node: AsNode(Paragraph{Text: "second"}), GapBefore: 1})
 
 	got := RenderElement(nil, transcript, 0, 0)
 	if !strings.Contains(got, "first") || !strings.Contains(got, "second") {
 		t.Fatalf("expected retained transcript to render added items, got %q", got)
 	}
 
-	transcript.Replace(1, TranscriptItem{Element: Paragraph{Text: "updated"}, GapBefore: 1})
+	transcript.Replace(1, TranscriptItem{Node: AsNode(Paragraph{Text: "updated"}), GapBefore: 1})
 	got = RenderElement(nil, transcript, 0, 0)
 	if strings.Contains(got, "second") || !strings.Contains(got, "updated") {
 		t.Fatalf("expected retained transcript replace to update content, got %q", got)
@@ -201,16 +201,16 @@ func TestRetainedTranscriptMaintainsChildItems(t *testing.T) {
 
 func TestTranscriptRenderMatchesPaint(t *testing.T) {
 	transcript := Transcript{Items: []TranscriptItem{
-		{Element: Paragraph{Text: "first"}},
-		{GapBefore: 1, Element: Paragraph{Text: "second"}},
+		{Node: AsNode(Paragraph{Text: "first"})},
+		{GapBefore: 1, Node: AsNode(Paragraph{Text: "second"})},
 	}}
 	assertRenderMatchesPaint(t, nil, transcript, Rect{W: 12, H: 4})
 }
 
 func TestTranscriptViewportRenderMatchesPaint(t *testing.T) {
 	transcript := NewRetainedTranscript()
-	transcript.Add(TranscriptItem{Element: Paragraph{Text: "first"}})
-	transcript.Add(TranscriptItem{GapBefore: 1, Element: Paragraph{Text: "second\nthird"}})
+	transcript.Add(TranscriptItem{Node: AsNode(Paragraph{Text: "first"})})
+	transcript.Add(TranscriptItem{GapBefore: 1, Node: AsNode(Paragraph{Text: "second\nthird"})})
 	element := TranscriptViewport{Transcript: transcript, Width: 12, Height: 2, OffsetY: 1}
 	assertRenderMatchesPaint(t, nil, element, Rect{W: 12, H: 2})
 }
@@ -218,10 +218,10 @@ func TestTranscriptViewportRenderMatchesPaint(t *testing.T) {
 func TestRetainedTranscriptRenderBottomUsesExactCachedHeights(t *testing.T) {
 	transcript := NewRetainedTranscript()
 	transcript.Add(TranscriptItem{
-		Element: NewCachedElement(Paragraph{Text: "one\ntwo\nthree\nfour"}, 1),
+		Node: NewCachedElement(AsNode(Paragraph{Text: "one\ntwo\nthree\nfour"}), 1),
 	})
 	transcript.Add(TranscriptItem{
-		Element: NewCachedElement(Paragraph{Text: "tail"}, 1),
+		Node: NewCachedElement(AsNode(Paragraph{Text: "tail"}), 1),
 	})
 
 	surface, totalHeight, offset := transcript.RenderBottom(nil, 10, 2)
@@ -240,8 +240,8 @@ func TestRetainedTranscriptRenderBottomUsesExactCachedHeights(t *testing.T) {
 
 func TestRetainedTranscriptOffsetsVisibleControls(t *testing.T) {
 	transcript := NewRetainedTranscript()
-	transcript.Add(TranscriptItem{Key: "one", Element: controlProbeElement{id: "first", width: 8, height: 2}})
-	transcript.Add(TranscriptItem{Key: "two", GapBefore: 1, Element: controlProbeElement{id: "second", width: 8, height: 3}})
+	transcript.Add(TranscriptItem{Key: "one", Node: AsNode(controlProbeElement{id: "first", width: 8, height: 2})})
+	transcript.Add(TranscriptItem{Key: "two", GapBefore: 1, Node: AsNode(controlProbeElement{id: "second", width: 8, height: 3})})
 
 	runtime := &Runtime{}
 	ctx := &Context{Palette: theme.Resolve("tokyonight").Palette, Runtime: runtime}
@@ -262,7 +262,7 @@ func TestRetainedTranscriptOffsetsVisibleControls(t *testing.T) {
 func TestRetainedTranscriptDoesNotBottomAlignShortContent(t *testing.T) {
 	transcript := NewRetainedTranscript()
 	transcript.Add(TranscriptItem{
-		Element: NewCachedElement(Paragraph{Text: "top\nnext"}, 2),
+		Node: NewCachedElement(AsNode(Paragraph{Text: "top\nnext"}), 2),
 	})
 
 	surface, totalHeight, offset := transcript.RenderBottom(nil, 8, 5)
@@ -319,19 +319,19 @@ func TestTranscriptLeafRenderAvoidsExtraOwnerSurfaceAllocation(t *testing.T) {
 
 func TestRetainedTranscriptContentHeightTracksItemMutations(t *testing.T) {
 	transcript := NewRetainedTranscript()
-	transcript.Add(TranscriptItem{Element: NewCachedElement(Paragraph{Text: "one\ntwo"}, 2)})
-	transcript.Add(TranscriptItem{Element: NewCachedElement(Paragraph{Text: "tail"}, 1), GapBefore: 1})
+	transcript.Add(TranscriptItem{Node: NewCachedElement(AsNode(Paragraph{Text: "one\ntwo"}), 2)})
+	transcript.Add(TranscriptItem{Node: NewCachedElement(AsNode(Paragraph{Text: "tail"}), 1), GapBefore: 1})
 
 	if got := transcript.ContentHeight(12); got != 4 {
 		t.Fatalf("expected initial total height 4, got %d", got)
 	}
 
-	transcript.Replace(1, TranscriptItem{Element: NewCachedElement(Paragraph{Text: "tail\nmore\nlast"}, 3), GapBefore: 1})
+	transcript.Replace(1, TranscriptItem{Node: NewCachedElement(AsNode(Paragraph{Text: "tail\nmore\nlast"}), 3), GapBefore: 1})
 	if got := transcript.ContentHeight(12); got != 6 {
 		t.Fatalf("expected replace to delta-update total height to 6, got %d", got)
 	}
 
-	transcript.Insert(1, TranscriptItem{Element: NewCachedElement(Paragraph{Text: "mid"}, 1), GapBefore: 2})
+	transcript.Insert(1, TranscriptItem{Node: NewCachedElement(AsNode(Paragraph{Text: "mid"}), 1), GapBefore: 2})
 	if got := transcript.ContentHeight(12); got != 9 {
 		t.Fatalf("expected insert to delta-update total height to 9, got %d", got)
 	}
@@ -346,7 +346,7 @@ func TestRetainedTranscriptReusesCachedHeightWhenItemIsUnchanged(t *testing.T) {
 	transcript := NewRetainedTranscript()
 	renders := 0
 	transcript.Add(TranscriptItem{
-		Element: NewCachedElement(countingElement{height: 3, renderCalls: &renders}, 1),
+		Node: NewCachedElement(AsNode(countingElement{height: 3, renderCalls: &renders}), 1),
 	})
 
 	if got := transcript.ContentHeight(12); got != 3 {
@@ -369,7 +369,7 @@ func TestRetainedTranscriptReplaceInvalidatesHeightWithoutImmediateRerender(t *t
 	firstRenders := 0
 	secondRenders := 0
 	transcript.Add(TranscriptItem{
-		Element: NewCachedElement(countingElement{height: 2, renderCalls: &firstRenders}, 1),
+		Node: NewCachedElement(AsNode(countingElement{height: 2, renderCalls: &firstRenders}), 1),
 	})
 
 	if got := transcript.ContentHeight(12); got != 2 {
@@ -380,7 +380,7 @@ func TestRetainedTranscriptReplaceInvalidatesHeightWithoutImmediateRerender(t *t
 	}
 
 	transcript.Replace(0, TranscriptItem{
-		Element: NewCachedElement(countingElement{height: 4, renderCalls: &secondRenders}, 1),
+		Node: NewCachedElement(AsNode(countingElement{height: 4, renderCalls: &secondRenders}), 1),
 	})
 	if secondRenders != 0 {
 		t.Fatalf("expected replace to invalidate without immediate rerender, got %d renders", secondRenders)

@@ -29,5 +29,5 @@ func TestPickerDialogRenderMatchesInnerElement(t *testing.T) {
 		{Title: "Tokyo Night", Description: "Dark", Value: "tokyonight"},
 		{Title: "Gruvbox", Description: "Warm", Value: "gruvbox"},
 	})
-	assertElementRenderMatchesWrapper(t, &Context{Palette: palette, Runtime: &Runtime{}}, dialog, dialog.element(80, palette), Rect{W: 80, H: 10})
+	assertElementRenderMatchesWrapper(t, &Context{Palette: palette, Runtime: &Runtime{}}, dialog, dialog.node(80, palette), Rect{W: 80, H: 10})
 }

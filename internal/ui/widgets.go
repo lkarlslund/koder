@@ -44,8 +44,9 @@ func (t TextPane) Paint(_ *Context, canvas Canvas) {
 }
 
 type HitBox struct {
+	BaseNode
 	ID    string
-	Child Element
+	Child Node
 }
 
 func (h HitBox) Measure(ctx *Context, constraints Constraints) Size {
@@ -53,13 +54,6 @@ func (h HitBox) Measure(ctx *Context, constraints Constraints) Size {
 		return constraints.Clamp(Size{})
 	}
 	return constraints.Clamp(h.Child.Measure(ctx, constraints))
-}
-
-func (h HitBox) WalkChildren(_ *Context, visit func(Element)) {
-	if h.Child == nil || visit == nil {
-		return
-	}
-	visit(h.Child)
 }
 
 func (h HitBox) Paint(ctx *Context, canvas Canvas) {
@@ -76,7 +70,7 @@ func (h HitBox) Paint(ctx *Context, canvas Canvas) {
 	if h.Child == nil {
 		return
 	}
-	renderElementInto(ctx, h.Child, Rect{
+	paintNodeInto(ctx, h.Child, Rect{
 		X: canvas.origin.X,
 		Y: canvas.origin.Y,
 		W: canvas.Width(),
@@ -159,18 +153,12 @@ func (p Paragraph) lines(width int) []string {
 }
 
 type ModalFrame struct {
+	BaseNode
 	Title    string
 	Subtitle string
-	Body     Element
+	Body     Node
 	Footer   string
 	Width    int
-}
-
-func (m ModalFrame) WalkChildren(ctx *Context, visit func(Element)) {
-	if visit == nil {
-		return
-	}
-	visit(m.window(ctx))
 }
 
 func (m ModalFrame) Measure(ctx *Context, constraints Constraints) Size {
@@ -181,7 +169,7 @@ func (m ModalFrame) Paint(ctx *Context, canvas Canvas) {
 	if canvas.Width() <= 0 || canvas.Height() <= 0 {
 		return
 	}
-	renderElementInto(ctx, m.window(ctx), Rect{
+	paintNodeInto(ctx, AsNode(m.window(ctx)), Rect{
 		X: canvas.origin.X,
 		Y: canvas.origin.Y,
 		W: canvas.Width(),
@@ -189,7 +177,7 @@ func (m ModalFrame) Paint(ctx *Context, canvas Canvas) {
 	}, canvas.surface)
 }
 
-func (m ModalFrame) contentElement(palette theme.Palette) Element {
+func (m ModalFrame) contentNode(palette theme.Palette) Node {
 	children := []Child{}
 	if subtitle := strings.TrimSpace(m.Subtitle); subtitle != "" {
 		children = append(children, Fixed(Label{
@@ -217,13 +205,13 @@ func (m ModalFrame) contentElement(palette theme.Palette) Element {
 	if len(children) == 0 {
 		return nil
 	}
-	return FlexBox{Direction: DirectionVertical, Children: children}
+	return AsNode(FlexBox{Direction: DirectionVertical, Children: children})
 }
 
 func (m ModalFrame) window(ctx *Context) WindowFrame {
 	return WindowFrame{
 		Title:       m.Title,
-		Content:     m.contentElement(themePalette(ctx)),
+		Content:     m.contentNode(themePalette(ctx)),
 		Width:       m.Width,
 		Background:  themePalette(ctx).SidebarBackground,
 		Foreground:  themePalette(ctx).SidebarForeground,

@@ -11,7 +11,7 @@ import (
 
 func TestBorderWrapsChildWithoutNestedFrameArtifacts(t *testing.T) {
 	got := RenderElement(nil, Border{
-		Child:        Static{Content: "Body"},
+		Child:        AsNode(Static{Content: "Body"}),
 		Padding:      Insets{Left: 1, Right: 1},
 		BorderLeft:   true,
 		BorderRight:  true,
@@ -35,7 +35,7 @@ func TestWindowFrameRendersTitleAndCloseInBorder(t *testing.T) {
 	palette := theme.Default().Palette
 	got := RenderElement(&Context{Palette: palette}, WindowFrame{
 		Title:     "Connect Provider",
-		Content:   Static{Content: "Body"},
+		Content:   AsNode(Static{Content: "Body"}),
 		Width:     32,
 		ShowClose: true,
 	}, 32, 4)
@@ -53,7 +53,7 @@ func TestWindowFrameContentInheritsFrameBackground(t *testing.T) {
 	palette := theme.Default().Palette
 	surface := PaintElementSurface(&Context{Palette: palette}, WindowFrame{
 		Title:   "Help",
-		Content: TextPane{Content: "Hotkeys"},
+		Content: AsNode(TextPane{Content: "Hotkeys"}),
 		Width:   24,
 	}, Rect{W: 24, H: 5})
 
@@ -76,7 +76,7 @@ func TestWindowFrameRenderMatchesInnerBorder(t *testing.T) {
 	ctx := &Context{Palette: palette, Runtime: &Runtime{}}
 	element := WindowFrame{
 		Title:     "Help",
-		Content:   HitBox{ID: "body", Child: TextPane{Content: "Hotkeys"}},
+		Content:   AsNode(HitBox{ID: "body", Child: AsNode(TextPane{Content: "Hotkeys"})}),
 		Width:     24,
 		ShowClose: true,
 	}
@@ -96,9 +96,9 @@ func TestWindowFrameRenderMatchesInnerBorder(t *testing.T) {
 func TestBodyLayoutWrapperMatchesInnerElement(t *testing.T) {
 	palette := theme.Default().Palette
 	element := BodyLayout{
-		MainElement:    Static{Content: "main"},
-		SidebarElement: Sidebar{Child: Static{Content: "side"}, Width: 20, Height: 4},
+		MainElement:    AsNode(Static{Content: "main"}),
+		SidebarElement: AsNode(Sidebar{Child: AsNode(Static{Content: "side"}), Width: 20, Height: 4}),
 		ShowSidebar:    true,
 	}
-	assertElementRenderMatchesWrapper(t, &Context{Palette: palette, Runtime: &Runtime{}}, element, element.element(), Rect{W: 40, H: 4})
+	assertElementRenderMatchesWrapper(t, &Context{Palette: palette, Runtime: &Runtime{}}, element, element.node(), Rect{W: 40, H: 4})
 }

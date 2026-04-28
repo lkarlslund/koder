@@ -51,7 +51,7 @@ func TestFlexBoxRendersFixedSidebarOnRight(t *testing.T) {
 		Direction: DirectionHorizontal,
 		Children: []Child{
 			Flex(Static{Content: "MAIN"}, 1),
-			{Element: Static{Content: "SIDE"}, Basis: 4},
+			{Node: AsNode(Static{Content: "SIDE"}), Basis: 4},
 		},
 	}, 8, 1)
 
@@ -91,7 +91,7 @@ func TestSectionRendersTitleAbovePanel(t *testing.T) {
 	got := RenderElement(&Context{Palette: palette}, Section{
 		Title: "Preview",
 		Width: 18,
-		Child: Static{Content: "Body"},
+		Child: AsNode(Static{Content: "Body"}),
 	}, 18, 3)
 
 	lines := strings.Split(ansi.Strip(got), "\n")
@@ -112,7 +112,7 @@ func TestSectionRenderMatchesPaint(t *testing.T) {
 	element := Section{
 		Title: "Preview",
 		Width: 24,
-		Child: HitBox{ID: "body", Child: Static{Content: "Body"}},
+		Child: AsNode(HitBox{ID: "body", Child: AsNode(Static{Content: "Body"})}),
 	}
 	assertRenderMatchesPaint(t, ctx, element, Rect{W: 24, H: 4})
 }
@@ -179,7 +179,7 @@ func TestModalFrameRenderMatchesPaint(t *testing.T) {
 	element := ModalFrame{
 		Title:    "Connect",
 		Subtitle: "Configure provider",
-		Body:     HitBox{ID: "body", Child: Static{Content: "Fields"}},
+		Body:     AsNode(HitBox{ID: "body", Child: AsNode(Static{Content: "Fields"})}),
 		Footer:   "Enter to submit",
 		Width:    28,
 	}
@@ -215,7 +215,7 @@ func TestContainerPaintAvoidsOwnerSurfaceAllocation(t *testing.T) {
 
 func TestScrollFrameRendersVisibleWindowAtOffset(t *testing.T) {
 	got := RenderElement(nil, ScrollFrame{
-		Child:   Static{Content: "line1\nline2\nline3\nline4"},
+		Child:   AsNode(Static{Content: "line1\nline2\nline3\nline4"}),
 		OffsetY: 1,
 		Width:   5,
 		Height:  2,
@@ -232,7 +232,7 @@ func TestScrollFrameRendersVisibleWindowAtOffset(t *testing.T) {
 
 func TestScrollBoxClampsOffsetToContentBottom(t *testing.T) {
 	box := ScrollBox{
-		Child:   Static{Content: "line1\nline2\nline3"},
+		Child:   AsNode(Static{Content: "line1\nline2\nline3"}),
 		OffsetY: 99,
 		Width:   5,
 		Height:  2,

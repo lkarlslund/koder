@@ -7,5 +7,5 @@ func SurfaceText(s Surface) string {
 }
 
 func RenderElement(ctx *Context, element Element, width, height int) string {
-	return SurfaceText(RenderSurface(ctx, element, width, height))
+	return SurfaceText(RenderSurface(ctx, AsNode(element), width, height))
 }

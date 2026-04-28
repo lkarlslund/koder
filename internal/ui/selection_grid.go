@@ -170,8 +170,8 @@ func (p selectionGridCardPainter) Paint(ctx *Context, canvas Canvas) {
 		},
 		Spacing: 1,
 	}
-	renderElementInto(ctx, Border{
-		Child:        content,
+	paintNodeInto(ctx, AsNode(Border{
+		Child:        AsNode(content),
 		Width:        canvas.Width(),
 		Height:       canvas.Height(),
 		Padding:      UniformInsets(1),
@@ -182,7 +182,7 @@ func (p selectionGridCardPainter) Paint(ctx *Context, canvas Canvas) {
 		BorderTop:    true,
 		BorderBottom: true,
 		BorderColor:  borderColor,
-	}, Rect{
+	}), Rect{
 		X: canvas.origin.X,
 		Y: canvas.origin.Y,
 		W: canvas.Width(),

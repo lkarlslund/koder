@@ -124,9 +124,9 @@ func (d ConnectDialog) Measure(ctx *ui.Context, constraints ui.Constraints) ui.S
 
 func (d ConnectDialog) Surface(ctx *ui.Context, bounds ui.Rect) ui.Surface {
 	maxWidth := dialogRenderWidth(bounds, 88)
-	element := d.dialog(maxWidth, ctx.Palette)
-	size := element.Measure(ctx, ui.Constraints{MaxW: maxWidth, MaxH: bounds.H})
-	return ui.PaintElementSurface(ctx, element, ui.Rect{W: size.W, H: bounds.H})
+	node := d.dialog(maxWidth, ctx.Palette)
+	size := node.Measure(ctx, ui.Constraints{MaxW: maxWidth, MaxH: bounds.H})
+	return ui.PaintNodeSurface(ctx, node, ui.Rect{W: size.W, H: bounds.H})
 }
 
 func (d ConnectDialog) Paint(ctx *ui.Context, canvas ui.Canvas) {
@@ -136,14 +136,14 @@ func (d ConnectDialog) Paint(ctx *ui.Context, canvas ui.Canvas) {
 	canvas.BlitSurface(0, 0, d.Surface(ctx, ui.Rect{W: canvas.Width(), H: canvas.Height()}))
 }
 
-func (d ConnectDialog) dialog(width int, palette theme.Palette) ui.Element {
+func (d ConnectDialog) dialog(width int, palette theme.Palette) ui.Node {
 	switch d.stage {
 	case connectStageProvider:
 		return d.providerListDialog(width, palette)
 	case connectStageForm:
 		return d.formDialog(width, palette)
 	default:
-		return ui.Static{}
+		return ui.AsNode(ui.Static{})
 	}
 }
 
@@ -240,10 +240,10 @@ func (d *ConnectDialog) updateForm(msg ui.KeyMsg) ProviderConnectAction {
 	return ProviderConnectAction{}
 }
 
-func (d *ConnectDialog) providerListDialog(width int, palette theme.Palette) ui.Element {
+func (d *ConnectDialog) providerListDialog(width int, palette theme.Palette) ui.Node {
 	dialogWidth := clampWidth(width, 72, 96)
 	lines := []string{fmt.Sprintf("Filter: %s", d.query), ""}
-	var list ui.Element = staticBlock("No providers match your filter.")
+	var list ui.Node = staticBlock("No providers match your filter.")
 	if len(d.view) > 0 {
 		start, end := windowBounds(d.index, len(d.view), 10)
 		items := make([]ui.ListItem, 0, end-start)
@@ -261,15 +261,15 @@ func (d *ConnectDialog) providerListDialog(width int, palette theme.Palette) ui.
 				Tertiary:  tertiary,
 			})
 		}
-		list = ui.Section{
+		list = ui.AsNode(ui.Section{
 			Width: dialogWidth - 8,
-			Child: ui.List{
+			Child: ui.AsNode(ui.List{
 				Items:    items,
 				Width:    dialogWidth - 8,
 				Selected: d.index - start,
 				Focused:  d.stage == connectStageProvider,
-			},
-		}
+			}),
+		})
 	}
 	body := []ui.Child{
 		ui.Fixed(linesBlock(lines...)),
@@ -278,22 +278,22 @@ func (d *ConnectDialog) providerListDialog(width int, palette theme.Palette) ui.
 	if status := strings.TrimSpace(d.status); status != "" {
 		body = append(body, ui.Fixed(ui.Spacer{H: 1}), ui.Fixed(ui.Label{Text: status}))
 	}
-	return ui.WindowFrame{
+	return ui.AsNode(ui.WindowFrame{
 		Title: "Connect Provider",
 		Width: dialogWidth,
-		Content: ui.FlexBox{
+		Content: ui.AsNode(ui.FlexBox{
 			Direction: ui.DirectionVertical,
 			Children: []ui.Child{
-				ui.Fixed(ui.FlexBox{Direction: ui.DirectionVertical, Children: body, Spacing: 1}),
+				ui.Fixed(ui.AsNode(ui.FlexBox{Direction: ui.DirectionVertical, Children: body, Spacing: 1})),
 				ui.Fixed(ui.Static{Content: "Enter choose provider  Esc cancel"}),
 			},
 			Spacing: 2,
-		},
+		}),
 		ShowClose: true,
-	}
+	})
 }
 
-func (d *ConnectDialog) formDialog(width int, palette theme.Palette) ui.Element {
+func (d *ConnectDialog) formDialog(width int, palette theme.Palette) ui.Node {
 	dialogWidth := clampWidth(width, 76, 100)
 	fieldChildren := make([]ui.Child, 0, len(d.formFields()))
 	for idx, field := range d.formFields() {
@@ -302,69 +302,69 @@ func (d *ConnectDialog) formDialog(width int, palette theme.Palette) ui.Element 
 	}
 
 	bodyChildren := []ui.Child{
-		ui.Fixed(ui.Section{
+		ui.Fixed(ui.AsNode(ui.Section{
 			Title:       "Provider",
 			Padding:     ui.Insets{Left: 1, Right: 1, Bottom: 1},
 			Background:  palette.SidebarBackground,
 			Foreground:  palette.SidebarForeground,
 			BorderColor: palette.SidebarBorder,
-			Child: ui.FlexBox{
+			Child: ui.AsNode(ui.FlexBox{
 				Direction: ui.DirectionVertical,
 				Children: []ui.Child{
 					ui.Fixed(ui.Static{Content: d.selected.Title}),
 					ui.Fixed(ui.Static{Content: compactInlineText(d.selected.Description)}),
 				},
 				Spacing: 0,
-			},
-		}),
-		ui.Fixed(ui.Section{
+			}),
+		})),
+		ui.Fixed(ui.AsNode(ui.Section{
 			Title:       "Configuration",
 			Padding:     ui.Insets{Left: 1, Right: 1, Bottom: 1},
 			Background:  palette.SidebarBackground,
 			Foreground:  palette.SidebarForeground,
 			BorderColor: palette.SidebarBorder,
-			Child: ui.FlexBox{
+			Child: ui.AsNode(ui.FlexBox{
 				Direction: ui.DirectionVertical,
 				Children:  fieldChildren,
 				Spacing:   1,
-			},
-		}),
+			}),
+		})),
 	}
 	if strings.TrimSpace(d.status) != "" {
 		auxChildren := make([]ui.Child, 0, 2)
 		if status := strings.TrimSpace(d.status); status != "" {
 			auxChildren = append(auxChildren, ui.Fixed(d.renderStatusElement(palette)))
 		}
-		bodyChildren = append(bodyChildren, ui.Fixed(ui.Section{
+		bodyChildren = append(bodyChildren, ui.Fixed(ui.AsNode(ui.Section{
 			Title:       "Connection",
 			Padding:     ui.Insets{Left: 1, Right: 1, Bottom: 1},
 			Background:  palette.SidebarBackground,
 			Foreground:  palette.SidebarForeground,
 			BorderColor: palette.SidebarBorder,
-			Child: ui.FlexBox{
+			Child: ui.AsNode(ui.FlexBox{
 				Direction: ui.DirectionVertical,
 				Children:  auxChildren,
 				Spacing:   1,
-			},
-		}))
+			}),
+		})))
 	}
 	buttons := d.formButtons()
 	buttons.Index = d.buttonIdx
 	buttons.Width = maxInt(0, dialogWidth-6)
-	return ui.WindowFrame{
+	return ui.AsNode(ui.WindowFrame{
 		Title: "Connect Provider",
 		Width: dialogWidth,
-		Content: ui.FlexBox{
+		Content: ui.AsNode(ui.FlexBox{
 			Direction: ui.DirectionVertical,
 			Children: []ui.Child{
-				ui.Fixed(ui.FlexBox{Direction: ui.DirectionVertical, Children: bodyChildren, Spacing: 1}),
+				ui.Fixed(ui.AsNode(ui.FlexBox{Direction: ui.DirectionVertical, Children: bodyChildren, Spacing: 1})),
 				ui.Fixed(buttons),
 				ui.Fixed(ui.Static{Content: "Type to edit  Ctrl+T test  Enter select  Esc cancel"}),
 			},
 			Spacing: 2,
-		},
+		}),
 		ShowClose: true,
-	}
+	})
 }
 
 func (d ConnectDialog) formButtons() ui.ButtonRow {
@@ -378,28 +378,28 @@ func (d ConnectDialog) formButtons() ui.ButtonRow {
 	}
 }
 
-func (d ConnectDialog) renderFormField(field connectField, width int, palette theme.Palette, active bool) ui.Element {
+func (d ConnectDialog) renderFormField(field connectField, width int, palette theme.Palette, active bool) ui.Node {
 	fieldWidth := maxInt(18, width)
 	hintWidth := maxInt(16, width-ui.PlainWidth(field.Label)-3)
 	hint := truncateText(field.Description, hintWidth)
-	return ui.FlexBox{
+	return ui.AsNode(ui.FlexBox{
 		Direction: ui.DirectionVertical,
 		Children: []ui.Child{
-			ui.Fixed(ui.FlexBox{
+			ui.Fixed(ui.AsNode(ui.FlexBox{
 				Direction: ui.DirectionHorizontal,
 				Children: []ui.Child{
 					ui.Fixed(ui.Static{Content: field.Label}),
 					ui.Flex(ui.Spacer{}, 1),
 					ui.Fixed(ui.Static{Content: hint}),
 				},
-			}),
+			})),
 			ui.Fixed(d.renderInputField(field.ID, fieldWidth, palette, active)),
 		},
 		Spacing: 1,
-	}
+	})
 }
 
-func (d ConnectDialog) renderInputField(fieldID string, width int, palette theme.Palette, active bool) ui.Element {
+func (d ConnectDialog) renderInputField(fieldID string, width int, palette theme.Palette, active bool) ui.Node {
 	editor := d.editor(fieldID)
 	line := editor.VisibleLine()
 	before, cursor, after := line.Before(), line.Cursor(), line.After()
@@ -420,7 +420,7 @@ func (d ConnectDialog) renderInputField(fieldID string, width int, palette theme
 		background = palette.UserTextBackground
 		borderColor = firstNonEmptyColor(palette.SelectionBackground, palette.ActivityText, palette.SidebarBorder)
 	}
-	return ui.InputField{
+	return ui.AsNode(ui.InputField{
 		Width:         width,
 		Value:         value,
 		Placeholder:   d.placeholderValue(fieldID),
@@ -432,7 +432,7 @@ func (d ConnectDialog) renderInputField(fieldID string, width int, palette theme
 		Background:    background,
 		PlaceholderFG: palette.ComposerMutedText,
 		BorderColor:   borderColor,
-	}
+	})
 }
 
 func (d ConnectDialog) placeholderValue(fieldID string) string {
@@ -700,10 +700,10 @@ func maskVisible(input string) string {
 	return strings.Repeat("•", len([]rune(input)))
 }
 
-func (d ConnectDialog) renderStatusElement(palette theme.Palette) ui.Element {
+func (d ConnectDialog) renderStatusElement(palette theme.Palette) ui.Node {
 	status := strings.TrimSpace(d.status)
 	if status == "" {
-		return ui.Static{}
+		return ui.AsNode(ui.Static{})
 	}
 	label := "WAIT"
 	labelColor := palette.ActivityText
@@ -716,5 +716,5 @@ func (d ConnectDialog) renderStatusElement(palette theme.Palette) ui.Element {
 		labelColor = palette.DiffDeletedText
 	}
 	_ = labelColor
-	return ui.Static{Content: "[" + label + "] " + status}
+	return ui.AsNode(ui.Static{Content: "[" + label + "] " + status})
 }

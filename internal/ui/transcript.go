@@ -11,7 +11,7 @@ import (
 
 type TranscriptItem struct {
 	Key       string
-	Element   Element
+	Node      Node
 	GapBefore int
 }
 
@@ -27,20 +27,21 @@ type RetainedTranscript struct {
 	totalHeightValid bool
 }
 
-type transcriptViewportElement interface {
+type transcriptViewportNode interface {
 	ApproxHeight(width int) int
 	RenderCached(ctx *Context, width int) Surface
 }
 
 type CachedElement struct {
-	Child      Element
+	BaseNode
+	Child      Node
 	HeightHint int
 	width      int
 	surface    Surface
 	cached     bool
 }
 
-func NewCachedElement(child Element, heightHint int) *CachedElement {
+func NewCachedElement(child Node, heightHint int) *CachedElement {
 	return &CachedElement{Child: child, HeightHint: max(0, heightHint)}
 }
 
@@ -72,7 +73,7 @@ func (e *CachedElement) RenderCached(ctx *Context, width int) Surface {
 		return e.surface
 	}
 	size := e.Child.Measure(ctx, NewConstraints(width, 0))
-	surface := PaintElementSurface(withoutRuntime(ctx), e.Child, Rect{W: width, H: size.H})
+	surface := PaintNodeSurface(withoutRuntime(ctx), e.Child, Rect{W: width, H: size.H})
 	if ctx != nil && ctx.Runtime != nil {
 		surface.RegisterControls(ctx.Runtime, 0, 0)
 	}
@@ -103,7 +104,7 @@ func (e *CachedElement) InvalidateCache() {
 	e.cached = false
 }
 
-func (e *CachedElement) SetChild(child Element) {
+func (e *CachedElement) SetChild(child Node) {
 	if e == nil {
 		return
 	}
@@ -111,11 +112,11 @@ func (e *CachedElement) SetChild(child Element) {
 	e.InvalidateCache()
 }
 
-func (e *CachedElement) WalkChildren(_ *Context, visit func(Element)) {
-	if e == nil || e.Child == nil || visit == nil {
-		return
+func (e *CachedElement) ChildNodes() []Node {
+	if e == nil || e.Child == nil {
+		return nil
 	}
-	visit(e.Child)
+	return []Node{e.Child}
 }
 
 func NewRetainedTranscript() *RetainedTranscript {
@@ -150,8 +151,8 @@ func (t *RetainedTranscript) Reconcile(items []TranscriptItem) {
 	next := make([]TranscriptItem, 0, len(items))
 	for _, item := range items {
 		if existing, ok := prevByKey[item.Key]; ok {
-			if item.Element == nil {
-				item.Element = existing.Element
+			if item.Node == nil {
+				item.Node = existing.Node
 			}
 			if item.GapBefore == 0 {
 				item.GapBefore = existing.GapBefore
@@ -249,7 +250,7 @@ func (t *RetainedTranscript) RenderVisibleInto(ctx *Context, width, height, offs
 		exactHeight := surface.Size().H
 		bottom := top + exactHeight
 		y = bottom
-		if item.Element == nil || bottom <= offset || top >= offset+height || exactHeight <= 0 {
+		if item.Node == nil || bottom <= offset || top >= offset+height || exactHeight <= 0 {
 			continue
 		}
 		renderY := top - offset
@@ -279,7 +280,7 @@ func (t *RetainedTranscript) RenderBottomInto(ctx *Context, width, height int, d
 		exactHeight := surface.Size().H
 		bottom := top + exactHeight
 		y = bottom
-		if item.Element == nil || exactHeight <= 0 || bottom <= offset || top >= offset+height {
+		if item.Node == nil || exactHeight <= 0 || bottom <= offset || top >= offset+height {
 			continue
 		}
 		renderY := top - offset
@@ -319,29 +320,29 @@ func withoutRuntime(ctx *Context) *Context {
 }
 
 func (t *RetainedTranscript) itemApproxHeight(item TranscriptItem, width int) int {
-	if item.Element == nil {
+	if item.Node == nil {
 		return 0
 	}
-	if cached, ok := item.Element.(transcriptViewportElement); ok {
+	if cached, ok := item.Node.(transcriptViewportNode); ok {
 		return cached.ApproxHeight(width)
 	}
-	return item.Element.Measure(nil, NewConstraints(width, 0)).H
+	return item.Node.Measure(nil, NewConstraints(width, 0)).H
 }
 
 func (t *RetainedTranscript) itemSurfaceAt(ctx *Context, index int, item TranscriptItem, width int) Surface {
 	t.ensureWidth(width)
-	if item.Element == nil {
+	if item.Node == nil {
 		return Surface{}
 	}
-	if cached, ok := item.Element.(transcriptViewportElement); ok {
+	if cached, ok := item.Node.(transcriptViewportNode); ok {
 		surface := cached.RenderCached(ctx, width)
 		if index >= 0 && index < len(t.itemHeights) {
 			t.itemHeights[index] = surface.Size().H
 		}
 		return surface
 	}
-	size := item.Element.Measure(ctx, NewConstraints(width, 0))
-	surface := PaintElementSurface(withoutRuntime(ctx), item.Element, Rect{W: width, H: size.H})
+	size := item.Node.Measure(ctx, NewConstraints(width, 0))
+	surface := PaintNodeSurface(withoutRuntime(ctx), item.Node, Rect{W: width, H: size.H})
 	if index >= 0 && index < len(t.itemHeights) {
 		t.itemHeights[index] = surface.Size().H
 	}
@@ -369,7 +370,7 @@ func (t *RetainedTranscript) ensureWidth(width int) {
 	t.totalHeight = 0
 	t.totalHeightValid = false
 	for _, item := range t.items {
-		InvalidateElementCaches(nil, item.Element)
+		InvalidateNodeCaches(nil, item.Node)
 	}
 }
 
@@ -420,12 +421,13 @@ func (t *RetainedTranscript) replaceHeight(index int, item TranscriptItem) {
 		t.invalidateLayout()
 		return
 	}
-	InvalidateElementCaches(nil, item.Element)
+	InvalidateNodeCaches(nil, item.Node)
 	t.itemHeights[index] = -1
 	t.totalHeightValid = false
 }
 
 type TranscriptViewport struct {
+	BaseNode
 	Transcript *RetainedTranscript
 	OffsetY    int
 	Width      int
@@ -444,17 +446,6 @@ func (v TranscriptViewport) Measure(_ *Context, constraints Constraints) Size {
 	return constraints.Clamp(Size{W: width, H: height})
 }
 
-func (v TranscriptViewport) WalkChildren(_ *Context, visit func(Element)) {
-	if v.Transcript == nil || visit == nil {
-		return
-	}
-	for _, item := range v.Transcript.items {
-		if item.Element != nil {
-			visit(item.Element)
-		}
-	}
-}
-
 func (v TranscriptViewport) Paint(ctx *Context, canvas Canvas) {
 	if canvas.Width() <= 0 || canvas.Height() <= 0 || v.Transcript == nil {
 		return
@@ -470,10 +461,10 @@ func (t Transcript) Measure(ctx *Context, constraints Constraints) Size {
 		if item.GapBefore > 0 {
 			totalH += item.GapBefore
 		}
-		if item.Element == nil {
+		if item.Node == nil {
 			continue
 		}
-		size := item.Element.Measure(ctx, constraints)
+		size := item.Node.Measure(ctx, constraints)
 		if size.W > maxW {
 			maxW = size.W
 		}
@@ -489,14 +480,14 @@ func (t Transcript) Paint(ctx *Context, canvas Canvas) {
 	y := 0
 	for _, item := range t.Items {
 		y += max(0, item.GapBefore)
-		if item.Element == nil || y >= canvas.Height() {
+		if item.Node == nil || y >= canvas.Height() {
 			continue
 		}
-		size := item.Element.Measure(ctx, NewConstraints(canvas.Width(), max(0, canvas.Height()-y)))
+		size := item.Node.Measure(ctx, NewConstraints(canvas.Width(), max(0, canvas.Height()-y)))
 		if size.H <= 0 {
 			continue
 		}
-		renderElementInto(ctx, item.Element, Rect{
+		paintNodeInto(ctx, item.Node, Rect{
 			X: canvas.origin.X,
 			Y: canvas.origin.Y + y,
 			W: canvas.Width(),

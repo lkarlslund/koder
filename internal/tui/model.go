@@ -964,21 +964,21 @@ func (m Model) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 	return m, nextCmd
 }
 
-func (m Model) centeredModal(element ui.Element) ui.Element {
-	if element == nil {
+func (m Model) centeredModal(node ui.Node) ui.Node {
+	if node == nil {
 		return nil
 	}
-	return ui.Align{
+	return ui.AsNode(ui.Align{
 		Horizontal: ui.AlignCenter,
 		Vertical:   ui.AlignCenter,
-		Child: ui.Constrained{
+		Child: ui.AsNode(ui.Constrained{
 			Constraints: ui.Constraints{
 				MaxW: max(1, m.width-3),
 				MaxH: max(1, m.height-2),
 			},
-			Child: element,
-		},
-	}
+			Child: node,
+		}),
+	})
 }
 
 func (m Model) ViewLines() []string {
@@ -989,8 +989,8 @@ func (m Model) ViewSurface() ui.SurfaceView {
 	return m.viewSurface()
 }
 
-func (m *Model) renderElementText(element ui.Element, width, height int) string {
-	return strings.Join(ui.RenderSurface(&ui.Context{Palette: m.palette}, element, width, height).Lines(), "\n")
+func (m *Model) renderElementText(node ui.Node, width, height int) string {
+	return strings.Join(ui.RenderSurface(&ui.Context{Palette: m.palette}, node, width, height).Lines(), "\n")
 }
 
 func (m *Model) viewSurface() ui.Surface {
@@ -1775,7 +1775,7 @@ func (m *Model) renderBodySurface() ui.Surface {
 	return m.ensureMainScreenWidget().Surface(ctx, ui.Rect{W: width, H: height})
 }
 
-func (m *Model) renderBodyElement() ui.Element {
+func (m *Model) renderBodyElement() ui.Node {
 	return m.renderMainScreenElement()
 }
 
@@ -1809,11 +1809,11 @@ func (m *Model) transcriptPaneHeight() int {
 	return max(0, height)
 }
 
-func (m *Model) renderTranscriptPaneElement(transcript ui.Element) ui.Element {
-	return ui.Border{
+func (m *Model) renderTranscriptPaneElement(transcript ui.Node) ui.Node {
+	return ui.AsNode(ui.Border{
 		Child:      transcript,
 		Background: m.palette.ScreenBackground,
-	}
+	})
 }
 
 func (m *Model) renderComposerAreaSurface() ui.Surface {
@@ -1822,11 +1822,11 @@ func (m *Model) renderComposerAreaSurface() ui.Surface {
 	return m.ensureMainScreenWidget().composer.Surface(ctx, ui.Rect{W: width})
 }
 
-func (m *Model) renderComposerAreaElement() ui.Element {
+func (m *Model) renderComposerAreaElement() ui.Node {
 	if !m.shouldShowComposerArea() {
-		return ui.VisibleElement{}
+		return ui.AsNode(ui.VisibleElement{})
 	}
-	elements := []ui.Element{}
+	elements := []ui.Node{}
 	if menu := m.renderComposerHistoryMenuElement(); menu != nil {
 		elements = append(elements, menu)
 	} else if menu := m.renderSlashMenuElement(); menu != nil {
@@ -1850,7 +1850,7 @@ func (m *Model) renderComposerAreaElement() ui.Element {
 		}
 		children = append(children, ui.Fixed(element))
 	}
-	return ui.FlexBox{Direction: ui.DirectionVertical, Children: children}
+	return ui.AsNode(ui.FlexBox{Direction: ui.DirectionVertical, Children: children})
 }
 
 func (m *Model) shouldShowComposerArea() bool {
@@ -1882,26 +1882,26 @@ func (m *Model) composerAreaHeight() int {
 	return cache.composerAreaHeight
 }
 
-func (m *Model) renderStatusPaneElement() ui.Element {
+func (m *Model) renderStatusPaneElement() ui.Node {
 	if !m.busy.transcriptActive() {
-		return ui.VisibleElement{}
+		return ui.AsNode(ui.VisibleElement{})
 	}
-	return ui.ActivityIndicator{
+	return ui.AsNode(ui.ActivityIndicator{
 		Indicator: ui.WorkingIndicatorLine(m.workingIndicator(), m.busy.statusOrDefault("Working ...")),
 		Palette:   m.palette,
-	}
+	})
 }
 
 func (m *Model) statusPaneHeight() int {
 	element := m.renderStatusPaneElement()
-	if !ui.ElementVisible(element) {
+	if !ui.NodeVisible(element) {
 		return 0
 	}
 	return element.Measure(&ui.Context{Palette: m.palette}, ui.NewConstraints(max(0, m.width), 0)).H
 }
 
-func (m *Model) renderMainScreenElement() ui.Element {
-	var transcript ui.Element = ui.SurfaceBox{Surface: m.viewport.VisibleSurface()}
+func (m *Model) renderMainScreenElement() ui.Node {
+	var transcript ui.Node = ui.AsNode(ui.SurfaceBox{Surface: m.viewport.VisibleSurface()})
 	if retained := m.transcriptElement(nil); retained != nil {
 		transcript = retained
 	}
@@ -1909,35 +1909,35 @@ func (m *Model) renderMainScreenElement() ui.Element {
 		ui.Flex(m.renderTranscriptPaneElement(transcript), 1),
 		ui.Fixed(m.renderComposerAreaElement()),
 	}
-	mainColumn := ui.FlexBox{Direction: ui.DirectionVertical, Children: mainChildren}
-	sidebar := ui.VisibleElement{
+	mainColumn := ui.AsNode(ui.FlexBox{Direction: ui.DirectionVertical, Children: mainChildren})
+	sidebar := ui.AsNode(ui.VisibleElement{
 		BoxProps: ui.BoxProps{
 			Hidden: !m.showSidebar,
 		},
-		Child: ui.Sidebar{
-			Child:  ui.TextPane{Content: m.renderSidebar()},
+		Child: ui.AsNode(ui.Sidebar{
+			Child:  ui.AsNode(ui.TextPane{Content: m.renderSidebar()}),
 			Height: m.viewport.Height,
 			Width:  m.sidebarWidth(),
-		},
-	}
+		}),
+	})
 	rootChildren := []ui.Child{
-		ui.Flex(ui.FlexBox{
+		ui.Flex(ui.AsNode(ui.FlexBox{
 			Direction: ui.DirectionHorizontal,
 			Children: []ui.Child{
-				ui.Flex(ui.Inset{Padding: ui.SymmetricInsets(mainScreenVerticalInset, 0), Child: mainColumn}, 1),
+				ui.Flex(ui.AsNode(ui.Inset{Padding: ui.SymmetricInsets(mainScreenVerticalInset, 0), Child: mainColumn}), 1),
 				ui.Fixed(ui.Spacer{W: 1}),
 				ui.Fixed(sidebar),
 			},
-		}, 1),
+		}), 1),
 		ui.Fixed(m.renderStatusPaneElement()),
 	}
-	return ui.FlexBox{Direction: ui.DirectionVertical, Children: rootChildren}
+	return ui.AsNode(ui.FlexBox{Direction: ui.DirectionVertical, Children: rootChildren})
 }
 
-func (m *Model) renderComposerElement() ui.Element {
+func (m *Model) renderComposerElement() ui.Node {
 	m.composer.Prompt = m.promptGlyph() + " "
 	line := m.composer.VisibleLine()
-	return ui.NewComposer(ui.ComposerProps{
+	return ui.AsNode(ui.NewComposer(ui.ComposerProps{
 		Palette:       m.palette,
 		Width:         m.composerWidth(),
 		HalfBlocks:    m.halfBlocksEnabled(),
@@ -1948,10 +1948,10 @@ func (m *Model) renderComposerElement() ui.Element {
 		ContentCursor: line.Cursor(),
 		ContentAfter:  line.After(),
 		CursorVisible: m.composer.CursorVisible(),
-	})
+	}))
 }
 
-func (m *Model) renderDraftAttachmentsElement() ui.Element {
+func (m *Model) renderDraftAttachmentsElement() ui.Node {
 	if len(m.draftAttachments) == 0 {
 		return nil
 	}
@@ -1959,10 +1959,10 @@ func (m *Model) renderDraftAttachmentsElement() ui.Element {
 	for _, draft := range m.draftAttachments {
 		items = append(items, ui.AttachmentItem{Label: attachmentLabel(draft.Metadata)})
 	}
-	return ui.AttachmentList{Items: items, Width: m.composerWidth()}
+	return ui.AsNode(ui.AttachmentList{Items: items, Width: m.composerWidth()})
 }
 
-func (m *Model) renderQueuedPromptPreviewElement() ui.Element {
+func (m *Model) renderQueuedPromptPreviewElement() ui.Node {
 	if len(m.currentChat.QueuedInputs) == 0 {
 		return nil
 	}
@@ -1979,11 +1979,11 @@ func (m *Model) renderQueuedPromptPreviewElement() ui.Element {
 			Selected: m.queueEditMode && idx == m.selectedQueuedInputIndex(),
 		})
 	}
-	return ui.PendingInputPreview{
+	return ui.AsNode(ui.PendingInputPreview{
 		Width:       m.composerWidth(),
 		Items:       rows,
 		EditingMode: m.queueEditMode,
-	}
+	})
 }
 
 func (m *Model) composerWidth() int {
@@ -2184,8 +2184,8 @@ func (m *Model) captureTranscriptViewportAnchor() transcriptViewportAnchor {
 	for idx, item := range items {
 		regionStart := y
 		regionHeight := max(0, item.GapBefore)
-		if item.Element != nil {
-			size := item.Element.Measure(ctx, ui.NewConstraints(width, 0))
+		if item.Node != nil {
+			size := item.Node.Measure(ctx, ui.NewConstraints(width, 0))
 			regionHeight += max(0, size.H)
 		}
 		if regionHeight > 0 && offset < regionStart+regionHeight {
@@ -2230,10 +2230,10 @@ func (m *Model) resolveTranscriptViewportAnchor(anchor transcriptViewportAnchor)
 		for range max(0, item.GapBefore) {
 			regionLines = append(regionLines, "")
 		}
-		if item.Element != nil {
-			size := item.Element.Measure(ctx, ui.NewConstraints(width, 0))
+		if item.Node != nil {
+			size := item.Node.Measure(ctx, ui.NewConstraints(width, 0))
 			regionHeight += max(0, size.H)
-			surface := ui.PaintElementSurface(ctx, item.Element, ui.Rect{W: width, H: size.H})
+			surface := ui.PaintNodeSurface(ctx, item.Node, ui.Rect{W: width, H: size.H})
 			regionLines = append(regionLines, surface.Lines()...)
 		}
 		if idx == anchor.index || item.Key == anchor.key {
@@ -2258,7 +2258,7 @@ func (m *Model) resolveTranscriptAnchorFromFullSurface(retained *ui.RetainedTran
 		return -1
 	}
 	size := retained.Measure(ctx, ui.NewConstraints(width, 0))
-	surface := ui.PaintElementSurface(ctx, retained, ui.Rect{W: width, H: size.H})
+	surface := ui.PaintNodeSurface(ctx, ui.AsNode(retained), ui.Rect{W: width, H: size.H})
 	lines := surface.Lines()
 	lineIdx := transcriptAnchorSingleLineIndex(lines, anchor.line)
 	if lineIdx < 0 {
@@ -2337,10 +2337,10 @@ func (m *Model) refreshViewportAt(offset int) {
 	viewportHeight := max(0, m.transcriptViewportHeight())
 	m.viewport.SetWindowHeight(viewportHeight)
 	if offset >= 0 {
-		scroll := ui.ScrollBox{Child: retained, OffsetY: offset, Width: max(0, m.viewport.Width), Height: viewportHeight}
+		scroll := ui.ScrollBox{Child: ui.AsNode(retained), OffsetY: offset, Width: max(0, m.viewport.Width), Height: viewportHeight}
 		surface, totalHeight, appliedY = scroll.RenderVisible(ctx, max(0, m.viewport.Width), viewportHeight, offset)
 	} else {
-		scroll := ui.ScrollBox{Child: retained, Width: max(0, m.viewport.Width), Height: viewportHeight}
+		scroll := ui.ScrollBox{Child: ui.AsNode(retained), Width: max(0, m.viewport.Width), Height: viewportHeight}
 		surface, totalHeight, appliedY = scroll.RenderBottom(ctx, max(0, m.viewport.Width), viewportHeight)
 	}
 	m.viewport.SetContentHeight(totalHeight)
@@ -2713,7 +2713,7 @@ func (m *Model) transcriptBlockForController(item transcriptItemController) tran
 	return transcriptBlock{}
 }
 
-func (m *Model) transcriptElement(runtime *ui.Runtime) ui.Element {
+func (m *Model) transcriptElement(runtime *ui.Runtime) ui.Node {
 	retained := m.syncRetainedTranscript()
 	if retained == nil {
 		return nil
@@ -2723,12 +2723,12 @@ func (m *Model) transcriptElement(runtime *ui.Runtime) ui.Element {
 	if runtime != nil {
 		runtime.BeginFrame()
 	}
-	return ui.ScrollBox{
-		Child:   retained,
+	return ui.AsNode(ui.ScrollBox{
+		Child:   ui.AsNode(retained),
 		OffsetY: max(0, m.viewport.YOffset),
 		Width:   width,
 		Height:  height,
-	}
+	})
 }
 
 func (m *Model) syncRetainedTranscript() *ui.RetainedTranscript {
@@ -2861,14 +2861,14 @@ func renderedSeparatorHeight(separator string) int {
 	return max(0, lipgloss.Height("x"+separator+"x")-2)
 }
 
-func (m *Model) renderTranscriptActivityElement() ui.Element {
+func (m *Model) renderTranscriptActivityElement() ui.Node {
 	if !m.busy.transcriptActive() {
 		return nil
 	}
-	return ui.ActivityIndicator{
+	return ui.AsNode(ui.ActivityIndicator{
 		Indicator: ui.WorkingIndicatorLine(m.workingIndicator(), m.busy.statusOrDefault("Working ...")),
 		Palette:   m.palette,
-	}
+	})
 }
 
 func (m *Model) sessionUsageSummary(sessionID int64) (domain.Usage, bool) {
@@ -5090,10 +5090,10 @@ func (m Model) debugTranscriptItems() []debugsrv.TranscriptItemRef {
 				ref.ControlID = "toolrun:" + ref.ToolRunID
 			}
 		}
-		if item.Element != nil {
-			size := item.Element.Measure(ctx, ui.NewConstraints(width, 0))
+		if item.Node != nil {
+			size := item.Node.Measure(ctx, ui.NewConstraints(width, 0))
 			ref.Height = size.H
-			surface := ui.PaintElementSurface(ctx, item.Element, ui.Rect{W: width, H: size.H})
+			surface := ui.PaintNodeSurface(ctx, item.Node, ui.Rect{W: width, H: size.H})
 			ref.BlankRows = countBlankSurfaceRows(surface)
 		}
 		out = append(out, ref)
@@ -5486,7 +5486,7 @@ func (m *Model) acceptMentionSelection() {
 	m.status = fmt.Sprintf("Inserted %s", display)
 }
 
-func (m *Model) renderSlashMenuElement() ui.Element {
+func (m *Model) renderSlashMenuElement() ui.Node {
 	if len(m.slashMatches) == 0 {
 		return nil
 	}
@@ -5501,10 +5501,10 @@ func (m *Model) renderSlashMenuElement() ui.Element {
 		items = append(items, ui.MenuItem{Title: item.Name, Description: item.Description})
 	}
 	selected := m.slashIndex - start
-	return ui.SlashMenu{Title: "Commands", Items: items, Selected: selected}
+	return ui.AsNode(ui.SlashMenu{Title: "Commands", Items: items, Selected: selected})
 }
 
-func (m *Model) renderSkillMenuElement() ui.Element {
+func (m *Model) renderSkillMenuElement() ui.Node {
 	if len(m.skillMatches) == 0 {
 		return nil
 	}
@@ -5522,10 +5522,10 @@ func (m *Model) renderSkillMenuElement() ui.Element {
 		})
 	}
 	selected := m.skillIndex - start
-	return ui.SlashMenu{Title: "Skills", Items: items, Selected: selected}
+	return ui.AsNode(ui.SlashMenu{Title: "Skills", Items: items, Selected: selected})
 }
 
-func (m *Model) renderMentionMenuElement() ui.Element {
+func (m *Model) renderMentionMenuElement() ui.Node {
 	if len(m.mentionMatches) == 0 {
 		return nil
 	}
@@ -5543,10 +5543,10 @@ func (m *Model) renderMentionMenuElement() ui.Element {
 		})
 	}
 	selected := m.mentionIndex - start
-	return ui.SlashMenu{Title: "References", Items: items, Selected: selected}
+	return ui.AsNode(ui.SlashMenu{Title: "References", Items: items, Selected: selected})
 }
 
-func (m *Model) renderComposerHistoryMenuElement() ui.Element {
+func (m *Model) renderComposerHistoryMenuElement() ui.Node {
 	if !m.hasComposerHistoryMenu() {
 		return nil
 	}
@@ -5554,11 +5554,11 @@ func (m *Model) renderComposerHistoryMenuElement() ui.Element {
 	width := max(48, min(88, m.composerWidth()))
 	var items []ui.MenuItem
 	if len(matches) == 0 {
-		return ui.HistoryMenu{
+		return ui.AsNode(ui.HistoryMenu{
 			Palette: m.palette,
 			Query:   m.composerHistory.SearchQuery,
 			Width:   width,
-		}
+		})
 	} else {
 		start := 0
 		if m.composerHistory.SearchIndex >= 6 {
@@ -5572,13 +5572,13 @@ func (m *Model) renderComposerHistoryMenuElement() ui.Element {
 				Description: historySummary(entry),
 			})
 		}
-		return ui.HistoryMenu{
+		return ui.AsNode(ui.HistoryMenu{
 			Palette:  m.palette,
 			Query:    m.composerHistory.SearchQuery,
 			Items:    items,
 			Selected: m.composerHistory.SearchIndex - start,
 			Width:    width,
-		}
+		})
 	}
 }
 
@@ -5607,18 +5607,18 @@ func historySummary(input string) string {
 	return summary
 }
 
-func (m *Model) renderPickerElement() ui.Element {
+func (m *Model) renderPickerElement() ui.Node {
 	if !m.hasPicker() {
 		return nil
 	}
-	return m.picker.dialog
+	return ui.AsNode(m.picker.dialog)
 }
 
-func (m *Model) renderThemeDialogElement() ui.Element {
+func (m *Model) renderThemeDialogElement() ui.Node {
 	if !m.hasThemeDialog() {
 		return nil
 	}
-	return m.themeDialog
+	return ui.AsNode(m.themeDialog)
 }
 
 func (m *Model) renderSessionDialog() string {
@@ -5632,46 +5632,46 @@ func (m *Model) renderSessionDialog() string {
 	return ""
 }
 
-func (m *Model) renderSessionDialogElement() ui.Element {
+func (m *Model) renderSessionDialogElement() ui.Node {
 	if !m.hasSessionDialog() {
 		return nil
 	}
-	return m.sessionDialog
+	return ui.AsNode(m.sessionDialog)
 }
 
-func (m *Model) renderPreferencesDialogElement() ui.Element {
+func (m *Model) renderPreferencesDialogElement() ui.Node {
 	if !m.hasPreferencesDialog() {
 		return nil
 	}
-	return m.preferences
+	return ui.AsNode(m.preferences)
 }
 
-func (m *Model) renderToolsDialogElement() ui.Element {
+func (m *Model) renderToolsDialogElement() ui.Node {
 	if !m.hasToolsDialog() {
 		return nil
 	}
-	return m.toolsDialog
+	return ui.AsNode(m.toolsDialog)
 }
 
-func (m *Model) renderConnectDialogElement() ui.Element {
+func (m *Model) renderConnectDialogElement() ui.Node {
 	if !m.hasConnectDialog() {
 		return nil
 	}
-	return m.connectDialog
+	return ui.AsNode(m.connectDialog)
 }
 
-func (m *Model) renderDisconnectDialogElement() ui.Element {
+func (m *Model) renderDisconnectDialogElement() ui.Node {
 	if !m.hasDisconnectDialog() {
 		return nil
 	}
-	return m.disconnectDialog
+	return ui.AsNode(m.disconnectDialog)
 }
 
-func (m *Model) renderModelDialogElement() ui.Element {
+func (m *Model) renderModelDialogElement() ui.Node {
 	if !m.hasModelDialog() {
 		return nil
 	}
-	return m.modelDialog
+	return ui.AsNode(m.modelDialog)
 }
 
 func (m *Model) handleSessionDialogKey(msg ui.KeyMsg) ui.Cmd {
@@ -5855,7 +5855,7 @@ func (m *Model) ensureApprovalDialog() {
 	m.approvalDialog.SetButtonIndex(index)
 }
 
-func (m *Model) renderApprovalDialogElement() ui.Element {
+func (m *Model) renderApprovalDialogElement() ui.Node {
 	if !m.hasApprovalDialog() {
 		return nil
 	}
@@ -6440,7 +6440,7 @@ func (m *Model) openAgentsModal() {
 	modal := ui.Modal{
 		Title:       "Resolved AGENTS",
 		Subtitle:    fmt.Sprintf("Project root: %s", blankAsDash(m.currentProjectRoot())),
-		BodyElement: ui.TextPane{Content: strings.Join(lines, "\n")},
+		BodyElement: ui.AsNode(ui.TextPane{Content: strings.Join(lines, "\n")}),
 		Footer:      "enter or esc close  /agents refresh recomputes and updates the session snapshot",
 		Width:       min(110, max(72, m.width-8)),
 	}
@@ -6448,11 +6448,11 @@ func (m *Model) openAgentsModal() {
 	m.syncComposerVisibility()
 }
 
-func (m *Model) renderAgentsModalElement() ui.Element {
+func (m *Model) renderAgentsModalElement() ui.Node {
 	if m.agentsModal == nil {
 		return nil
 	}
-	return *m.agentsModal
+	return ui.AsNode(*m.agentsModal)
 }
 
 func (m *Model) openHelpModal() {
@@ -6519,21 +6519,21 @@ func (m *Model) openHelpModal() {
 	m.syncComposerVisibility()
 }
 
-func (m *Model) renderHelpModalElement() ui.Element {
+func (m *Model) renderHelpModalElement() ui.Node {
 	if m.helpModal == nil {
 		return nil
 	}
-	return ui.Modal{
+	return ui.AsNode(ui.Modal{
 		Title: m.helpModal.Title,
-		BodyElement: ui.ScrollFrame{
-			Child:   ui.TextPane{Content: m.helpBody},
+		BodyElement: ui.AsNode(ui.ScrollFrame{
+			Child:   ui.AsNode(ui.TextPane{Content: m.helpBody}),
 			OffsetY: m.helpYOffset,
 			Width:   m.helpWidth,
 			Height:  m.helpHeight,
-		},
+		}),
 		Footer: m.helpModal.Footer,
 		Width:  m.helpModal.Width,
-	}
+	})
 }
 
 func (m *Model) resizeHelpModal() {
@@ -6595,7 +6595,7 @@ func (m *Model) renderLLMPreview() string {
 	return ""
 }
 
-func (m *Model) renderLLMPreviewElement() ui.Element {
+func (m *Model) renderLLMPreviewElement() ui.Node {
 	if !m.hasLLMPreview() {
 		return nil
 	}
@@ -6603,17 +6603,17 @@ func (m *Model) renderLLMPreviewElement() ui.Element {
 	if title == "" {
 		title = "Next LLM Request"
 	}
-	return ui.Modal{
+	return ui.AsNode(ui.Modal{
 		Title: title,
-		BodyElement: ui.ScrollFrame{
-			Child:   ui.TextPane{Content: m.llmPreviewBody},
+		BodyElement: ui.AsNode(ui.ScrollFrame{
+			Child:   ui.AsNode(ui.TextPane{Content: m.llmPreviewBody}),
 			OffsetY: m.llmPreviewYOffset,
 			Width:   m.llmPreviewWidth,
 			Height:  m.llmPreviewHeight,
-		},
+		}),
 		Footer: "Alt-O, Enter, or Esc closes  •  Use arrows, PgUp/PgDn, Home/End, or wheel to scroll",
 		Width:  max(40, m.width-4),
-	}
+	})
 }
 
 func (m Model) currentProjectRoot() string {
@@ -7070,7 +7070,7 @@ func (m *Model) setTheme(name string, save bool) error {
 	m.palette = selected.Palette
 	m.renderer = renderer
 	applyComposerTheme(&m.composer, selected.Palette)
-	ui.InvalidateElementCaches(&ui.Context{Palette: m.palette}, m.renderBodyElement())
+	ui.InvalidateNodeCaches(&ui.Context{Palette: m.palette}, m.renderBodyElement())
 	m.invalidateTranscript()
 	m.refreshViewport()
 	if save {

@@ -141,9 +141,9 @@ func (d ModelDialog) Measure(ctx *ui.Context, constraints ui.Constraints) ui.Siz
 
 func (d ModelDialog) Surface(ctx *ui.Context, bounds ui.Rect) ui.Surface {
 	maxWidth := dialogRenderWidth(bounds, 84)
-	element := d.dialog(maxWidth, ctx.Palette)
-	size := element.Measure(ctx, ui.Constraints{MaxW: maxWidth, MaxH: bounds.H})
-	return ui.PaintElementSurface(ctx, element, ui.Rect{W: size.W, H: bounds.H})
+	node := d.dialog(maxWidth, ctx.Palette)
+	size := node.Measure(ctx, ui.Constraints{MaxW: maxWidth, MaxH: bounds.H})
+	return ui.PaintNodeSurface(ctx, node, ui.Rect{W: size.W, H: bounds.H})
 }
 
 func (d ModelDialog) Paint(ctx *ui.Context, canvas ui.Canvas) {
@@ -153,7 +153,7 @@ func (d ModelDialog) Paint(ctx *ui.Context, canvas ui.Canvas) {
 	canvas.BlitSurface(0, 0, d.Surface(ctx, ui.Rect{W: canvas.Width(), H: canvas.Height()}))
 }
 
-func (d ModelDialog) dialog(width int, palette theme.Palette) ui.Element {
+func (d ModelDialog) dialog(width int, palette theme.Palette) ui.Node {
 	dialogWidth := width
 	if dialogWidth <= 0 {
 		dialogWidth = 72
@@ -182,11 +182,11 @@ func (d ModelDialog) dialog(width int, palette theme.Palette) ui.Element {
 		})
 	}
 
-	var list ui.Element
+	var list ui.Node
 	if len(rows) == 0 {
 		list = staticBlock("No matches")
 	} else {
-		list = ui.Table{
+		list = ui.AsNode(ui.Table{
 			Width: listWidth,
 			Columns: []ui.TableColumn{
 				{Title: "Model", Width: primaryWidth},
@@ -195,25 +195,25 @@ func (d ModelDialog) dialog(width int, palette theme.Palette) ui.Element {
 			},
 			ShowHeader: true,
 			Rows:       rows,
-		}
+		})
 	}
 
 	buttons := d.buttonRow(dialogWidth)
 	buttons.Width = maxInt(0, dialogWidth-6)
-	return ui.WindowFrame{
+	return ui.AsNode(ui.WindowFrame{
 		Title: "Select Model",
 		Width: dialogWidth,
-		Content: ui.FlexBox{
+		Content: ui.AsNode(ui.FlexBox{
 			Direction: ui.DirectionVertical,
 			Children: []ui.Child{
-				ui.Fixed(ui.FlexBox{
+				ui.Fixed(ui.AsNode(ui.FlexBox{
 					Direction: ui.DirectionVertical,
 					Children: []ui.Child{
 						ui.Fixed(staticBlock("Provider: " + d.ProviderID)),
 						ui.Fixed(ui.Spacer{H: 1}),
 						ui.Fixed(staticBlock("Filter: " + d.Query)),
 						ui.Fixed(ui.Spacer{H: 1}),
-						ui.Fixed(ui.Section{Width: listWidth, Child: list}),
+						ui.Fixed(ui.AsNode(ui.Section{Width: listWidth, Child: list})),
 						ui.Fixed(ui.ChoiceRow{
 							Label:       "Preset",
 							Description: "Request options",
@@ -222,14 +222,14 @@ func (d ModelDialog) dialog(width int, palette theme.Palette) ui.Element {
 							Focused:     d.focus == modelDialogFocusPreset,
 						}),
 					},
-				}),
+				})),
 				ui.Fixed(buttons),
 				ui.Fixed(ui.Static{Content: "Tab moves focus. Left/Right changes preset. Enter selects model."}),
 			},
 			Spacing: 2,
-		},
+		}),
 		ShowClose: true,
-	}
+	})
 }
 
 func anyModelHasCapabilities(models []domain.Model) bool {

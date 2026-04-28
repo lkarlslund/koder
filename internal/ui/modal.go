@@ -1,9 +1,10 @@
 package ui
 
 type Modal struct {
+	BaseNode
 	Title       string
 	Subtitle    string
-	BodyElement Element
+	BodyElement Node
 	Footer      string
 	Width       int
 }
@@ -22,13 +23,13 @@ func (m Modal) Paint(ctx *Context, canvas Canvas) {
 	if canvas.Width() <= 0 || canvas.Height() <= 0 {
 		return
 	}
-	renderElementInto(ctx, ModalFrame{
+	paintNodeInto(ctx, AsNode(ModalFrame{
 		Title:    m.Title,
 		Subtitle: m.Subtitle,
 		Body:     m.BodyElement,
 		Footer:   m.Footer,
 		Width:    m.Width,
-	}, Rect{
+	}), Rect{
 		X: canvas.origin.X,
 		Y: canvas.origin.Y,
 		W: canvas.Width(),

@@ -27,7 +27,7 @@ type modelWindow struct {
 	base        ui.BaseWindow
 	model       *Model
 	bounds      func(*Model, ui.Rect) ui.Rect
-	element     func(*Model) ui.Element
+	element     func(*Model) ui.Node
 	render      func(*Model, ui.Rect) ui.Surface
 	paint       func(*Model, *ui.Context, ui.Rect, *ui.Surface) []ui.Rect
 	frameDirty  []ui.Rect
@@ -149,7 +149,7 @@ func (w *modelWindow) InvalidateCaches(ctx *ui.Context) {
 		return
 	}
 	if w.element != nil {
-		ui.InvalidateElementCaches(ctx, w.element(w.model))
+		ui.InvalidateNodeCaches(ctx, w.element(w.model))
 	}
 	w.base.Dirty = true
 }
@@ -200,14 +200,14 @@ func (m *Model) mainWindow() ui.Window {
 				},
 			},
 			model: m,
-			element: func(m *Model) ui.Element {
+			element: func(m *Model) ui.Node {
 				return m.renderBodyElement()
 			},
 			render: func(m *Model, bounds ui.Rect) ui.Surface {
 				return m.renderBodySurface().Normalize(max(0, bounds.W), max(0, bounds.H))
 			},
 			invalidate: func(m *Model, ctx *ui.Context) {
-				ui.InvalidateElementCaches(ctx, m.renderBodyElement())
+				ui.InvalidateNodeCaches(ctx, m.renderBodyElement())
 				m.invalidateBodyCache()
 			},
 			needsRedraw: func(m *Model) bool {
@@ -526,7 +526,7 @@ func (m *Model) overlayWindows() []ui.Window {
 	return windows
 }
 
-func (m *Model) centeredWindow(id ui.WindowID, z int, element ui.Element, onKey func(*Model, ui.KeyMsg) ui.Cmd, onControl func(*Model, string) ui.Cmd) ui.Window {
+func (m *Model) centeredWindow(id ui.WindowID, z int, element ui.Node, onKey func(*Model, ui.KeyMsg) ui.Cmd, onControl func(*Model, string) ui.Cmd) ui.Window {
 	return &modelWindow{
 		base: ui.BaseWindow{
 			WindowID:      id,
@@ -537,7 +537,7 @@ func (m *Model) centeredWindow(id ui.WindowID, z int, element ui.Element, onKey 
 			Dirty:         true,
 		},
 		model:   m,
-		element: func(*Model) ui.Element { return element },
+		element: func(*Model) ui.Node { return element },
 		bounds: func(m *Model, root ui.Rect) ui.Rect {
 			if element == nil {
 				return ui.Rect{}
@@ -555,7 +555,7 @@ func (m *Model) centeredWindow(id ui.WindowID, z int, element ui.Element, onKey 
 			if element == nil {
 				return ui.Surface{}
 			}
-			return ui.PaintElementSurface(&ui.Context{Palette: m.palette}, element, ui.Rect{W: bounds.W, H: bounds.H}).Normalize(bounds.W, bounds.H)
+			return ui.PaintNodeSurface(&ui.Context{Palette: m.palette}, element, ui.Rect{W: bounds.W, H: bounds.H}).Normalize(bounds.W, bounds.H)
 		},
 		key: func(m *Model, msg ui.KeyMsg) (bool, ui.Cmd) {
 			return true, onKey(m, msg)
@@ -571,7 +571,7 @@ func (m *Model) centeredWindow(id ui.WindowID, z int, element ui.Element, onKey 
 			}
 			bounds := m.centeredWindowBounds(element)
 			local := ui.Point{X: max(0, msg.X-1-bounds.X), Y: msg.Y - bounds.Y}
-			surface := ui.PaintElementSurface(&ui.Context{Palette: m.palette}, element, ui.Rect{W: bounds.W, H: bounds.H})
+			surface := ui.PaintNodeSurface(&ui.Context{Palette: m.palette}, element, ui.Rect{W: bounds.W, H: bounds.H})
 			controls := surface.Controls()
 			for idx := len(controls) - 1; idx >= 0; idx-- {
 				control := controls[idx]
@@ -584,7 +584,7 @@ func (m *Model) centeredWindow(id ui.WindowID, z int, element ui.Element, onKey 
 	}
 }
 
-func (m *Model) centeredWindowBounds(element ui.Element) ui.Rect {
+func (m *Model) centeredWindowBounds(element ui.Node) ui.Rect {
 	if element == nil {
 		return ui.Rect{}
 	}

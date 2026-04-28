@@ -317,9 +317,9 @@ func (d PreferencesDialog) Measure(ctx *ui.Context, constraints ui.Constraints) 
 
 func (d PreferencesDialog) Surface(ctx *ui.Context, bounds ui.Rect) ui.Surface {
 	maxWidth := dialogRenderWidth(bounds, 84)
-	element := d.dialog(maxWidth, ctx.Palette)
-	size := element.Measure(ctx, ui.Constraints{MaxW: maxWidth, MaxH: bounds.H})
-	return ui.PaintElementSurface(ctx, element, ui.Rect{W: size.W, H: bounds.H})
+	node := d.dialog(maxWidth, ctx.Palette)
+	size := node.Measure(ctx, ui.Constraints{MaxW: maxWidth, MaxH: bounds.H})
+	return ui.PaintNodeSurface(ctx, node, ui.Rect{W: size.W, H: bounds.H})
 }
 
 func (d PreferencesDialog) Paint(ctx *ui.Context, canvas ui.Canvas) {
@@ -329,7 +329,7 @@ func (d PreferencesDialog) Paint(ctx *ui.Context, canvas ui.Canvas) {
 	canvas.BlitSurface(0, 0, d.Surface(ctx, ui.Rect{W: canvas.Width(), H: canvas.Height()}))
 }
 
-func (d PreferencesDialog) dialog(width int, palette theme.Palette) ui.Element {
+func (d PreferencesDialog) dialog(width int, palette theme.Palette) ui.Node {
 	dialogWidth := width
 	if dialogWidth <= 0 {
 		dialogWidth = 84
@@ -374,10 +374,10 @@ func (d PreferencesDialog) dialog(width int, palette theme.Palette) ui.Element {
 			}))
 		}
 	}
-	fields := ui.Inset{
+	fields := ui.AsNode(ui.Inset{
 		Padding: ui.Insets{Left: 1},
-		Child:   ui.FlexBox{Direction: ui.DirectionVertical, Children: fieldRows},
-	}
+		Child:   ui.AsNode(ui.FlexBox{Direction: ui.DirectionVertical, Children: fieldRows}),
+	})
 
 	buttons := ui.ButtonRow{
 		Buttons: []ui.Button{
@@ -389,45 +389,45 @@ func (d PreferencesDialog) dialog(width int, palette theme.Palette) ui.Element {
 	}
 
 	buttons.Width = maxInt(0, dialogWidth-6)
-	return ui.WindowFrame{
+	return ui.AsNode(ui.WindowFrame{
 		Title: "Preferences",
 		Width: dialogWidth,
-		Content: ui.FlexBox{
+		Content: ui.AsNode(ui.FlexBox{
 			Direction: ui.DirectionVertical,
 			Children: []ui.Child{
 				ui.Fixed(ui.Static{Content: "Tab/Shift+Tab moves focus. Enter or arrows change values."}),
-				ui.Fixed(ui.FlexBox{
+				ui.Fixed(ui.AsNode(ui.FlexBox{
 					Direction: ui.DirectionHorizontal,
 					Spacing:   1,
 					Children: []ui.Child{
 						{
-							Element: ui.Section{
+							Node: ui.AsNode(ui.Section{
 								Title: "Tabs",
 								Width: tabWidth,
-								Child: ui.VerticalTabs{
+								Child: ui.AsNode(ui.VerticalTabs{
 									Tabs:    d.tabList.Tabs,
 									Active:  d.tabList.Active,
 									Width:   tabWidth - 2,
 									Focused: d.focus == preferencesFocusTabs,
-								},
-							},
+								}),
+							}),
 							Basis: tabWidth,
 						},
-						ui.Flex(ui.Section{
+						ui.Flex(ui.AsNode(ui.Section{
 							Title:   "Options",
 							Width:   fieldWidth + 1,
 							Padding: ui.Insets{Left: 1},
 							Child:   fields,
-						}, 1),
+						}), 1),
 					},
-				}),
+				})),
 				ui.Fixed(buttons),
 				ui.Fixed(ui.Static{Content: fmt.Sprintf("Theme: %s  Spinner: %s  Tool Turns: %d", strings.TrimSpace(d.draft.UI.Theme), ui.SpinnerStyleByID(d.draft.UI.Spinner).Label, d.draft.MaxToolLoopSteps)}),
 			},
 			Spacing: 2,
-		},
+		}),
 		ShowClose: true,
-	}
+	})
 }
 
 func (d PreferencesDialog) currentFields() []preferencesField {
@@ -587,7 +587,7 @@ func (d *PreferencesDialog) setIntegerEditorValue(id string, value int) {
 	d.storeIntegerEditor(id, editor)
 }
 
-func (d PreferencesDialog) renderIntegerField(field preferencesField, width int, palette theme.Palette, active bool) ui.Element {
+func (d PreferencesDialog) renderIntegerField(field preferencesField, width int, palette theme.Palette, active bool) ui.Node {
 	editor := d.integerEditor(field.ID)
 	line := editor.VisibleLine()
 	foreground := palette.MarkdownText
@@ -598,17 +598,17 @@ func (d PreferencesDialog) renderIntegerField(field preferencesField, width int,
 		background = palette.UserTextBackground
 		borderColor = firstNonEmptyColor(palette.SelectionBackground, palette.ActivityText, palette.SidebarBorder)
 	}
-	return ui.FlexBox{
+	return ui.AsNode(ui.FlexBox{
 		Direction: ui.DirectionVertical,
 		Children: []ui.Child{
-			ui.Fixed(ui.FlexBox{
+			ui.Fixed(ui.AsNode(ui.FlexBox{
 				Direction: ui.DirectionHorizontal,
 				Children: []ui.Child{
 					ui.Fixed(ui.Static{Content: field.Label}),
 					ui.Flex(ui.Spacer{}, 1),
 					ui.Fixed(ui.Static{Content: truncateText(field.Description, maxInt(16, width-ui.PlainWidth(field.Label)-3))}),
 				},
-			}),
+			})),
 			ui.Fixed(ui.InputField{
 				Width:         maxInt(18, width),
 				Value:         editor.Value(),
@@ -623,5 +623,5 @@ func (d PreferencesDialog) renderIntegerField(field preferencesField, width int,
 			}),
 		},
 		Spacing: 1,
-	}
+	})
 }

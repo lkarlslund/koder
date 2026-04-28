@@ -123,9 +123,9 @@ func (d ToolsDialog) Measure(ctx *ui.Context, constraints ui.Constraints) ui.Siz
 
 func (d ToolsDialog) Surface(ctx *ui.Context, bounds ui.Rect) ui.Surface {
 	maxWidth := dialogRenderWidth(bounds, 88)
-	element := d.dialog(maxWidth, ctx.Palette)
-	size := element.Measure(ctx, ui.Constraints{MaxW: maxWidth, MaxH: bounds.H})
-	return ui.PaintElementSurface(ctx, element, ui.Rect{W: size.W, H: bounds.H})
+	node := d.dialog(maxWidth, ctx.Palette)
+	size := node.Measure(ctx, ui.Constraints{MaxW: maxWidth, MaxH: bounds.H})
+	return ui.PaintNodeSurface(ctx, node, ui.Rect{W: size.W, H: bounds.H})
 }
 
 func (d ToolsDialog) Paint(ctx *ui.Context, canvas ui.Canvas) {
@@ -135,7 +135,7 @@ func (d ToolsDialog) Paint(ctx *ui.Context, canvas ui.Canvas) {
 	canvas.BlitSurface(0, 0, d.Surface(ctx, ui.Rect{W: canvas.Width(), H: canvas.Height()}))
 }
 
-func (d ToolsDialog) dialog(width int, palette theme.Palette) ui.Element {
+func (d ToolsDialog) dialog(width int, palette theme.Palette) ui.Node {
 	dialogWidth := width
 	if dialogWidth <= 0 {
 		dialogWidth = 88
@@ -144,9 +144,9 @@ func (d ToolsDialog) dialog(width int, palette theme.Palette) ui.Element {
 	rowWidth := maxInt(56, dialogWidth-6)
 	rows := make([]ui.Child, 0, len(d.items))
 	for idx, item := range d.items {
-		rows = append(rows, ui.Fixed(ui.HitBox{
+		rows = append(rows, ui.Fixed(ui.AsNode(ui.HitBox{
 			ID: "tool-row-" + strconv.Itoa(idx),
-			Child: ui.CheckboxRow{
+			Child: ui.AsNode(ui.CheckboxRow{
 				Label:       item.Label,
 				Description: item.Description,
 				Checked:     item.Enabled,
@@ -154,26 +154,26 @@ func (d ToolsDialog) dialog(width int, palette theme.Palette) ui.Element {
 				OffLabel:    "Disabled",
 				Width:       rowWidth,
 				Focused:     d.focus == toolsDialogFocusList && idx == d.index,
-			},
-		}))
+			}),
+		})))
 	}
 	buttons := d.buttonRow(dialogWidth)
 	buttons.Width = maxInt(0, dialogWidth-6)
-	return ui.WindowFrame{
+	return ui.AsNode(ui.WindowFrame{
 		Title: "Tools",
 		Width: dialogWidth,
-		Content: ui.FlexBox{
+		Content: ui.AsNode(ui.FlexBox{
 			Direction: ui.DirectionVertical,
 			Children: []ui.Child{
 				ui.Fixed(ui.Static{Content: "Per-session tool access. Space toggles the current tool."}),
-				ui.Fixed(ui.FlexBox{Direction: ui.DirectionVertical, Children: rows}),
+				ui.Fixed(ui.AsNode(ui.FlexBox{Direction: ui.DirectionVertical, Children: rows})),
 				ui.Fixed(buttons),
 				ui.Fixed(ui.Static{Content: "Enter toggles a tool or activates the focused button. Esc cancels."}),
 			},
 			Spacing: 2,
-		},
+		}),
 		ShowClose: true,
-	}
+	})
 }
 
 func (d *ToolsDialog) ActivateControl(controlID string) ToolsDialogAction {

@@ -1057,45 +1057,8 @@ func substringByWidth(input string, start, end int) string {
 	return strings.TrimPrefix(truncated, PlainTruncate(input, start, ""))
 }
 
-type Element interface {
-	Measure(ctx *Context, constraints Constraints) Size
-}
-
-type TreeWalker interface {
-	WalkChildren(ctx *Context, visit func(Element))
-}
-
 type CacheInvalidator interface {
 	InvalidateCache()
-}
-
-func InvalidateElementCaches(ctx *Context, element Element) {
-	if element == nil {
-		return
-	}
-	invalidateElementCaches(ctx, element)
-}
-
-func renderElementInto(ctx *Context, element Element, bounds Rect, dst *Surface) {
-	if element == nil || dst == nil || bounds.W <= 0 || bounds.H <= 0 {
-		return
-	}
-	painter, ok := element.(Painter)
-	if !ok {
-		return
-	}
-	painter.Paint(ctx, NewCanvas(dst, bounds))
-}
-
-func PaintElementSurface(ctx *Context, element Element, bounds Rect) Surface {
-	if element == nil || bounds.W <= 0 || bounds.H <= 0 {
-		return Surface{}
-	}
-	painter, ok := element.(Painter)
-	if !ok {
-		return Surface{}
-	}
-	return renderOwnedCanvas(ctx, bounds, painter)
 }
 
 func renderOwnedCanvas(ctx *Context, bounds Rect, painter Painter) Surface {
@@ -1126,17 +1089,17 @@ func renderOwnedCanvas(ctx *Context, bounds Rect, painter Painter) Surface {
 	return base
 }
 
-func invalidateElementCaches(ctx *Context, element Element) {
-	if element == nil {
+func InvalidateNodeCaches(ctx *Context, node Node) {
+	if node == nil {
 		return
 	}
-	if invalidator, ok := element.(CacheInvalidator); ok {
+	if invalidator, ok := node.(CacheInvalidator); ok {
 		invalidator.InvalidateCache()
 	}
-	if walker, ok := element.(TreeWalker); ok {
-		walker.WalkChildren(ctx, func(child Element) {
-			invalidateElementCaches(ctx, child)
-		})
+	if walker, ok := node.(NodeChildren); ok {
+		for _, child := range walker.ChildNodes() {
+			InvalidateNodeCaches(ctx, child)
+		}
 	}
 }
 
@@ -1206,26 +1169,22 @@ func clampBoxDimension(size, minValue, maxValue int) int {
 	return size
 }
 
-func elementVisible(element Element) bool {
-	if element == nil {
+func NodeVisible(node Node) bool {
+	if node == nil {
 		return false
 	}
-	visible, ok := element.(Visibility)
+	visible, ok := node.(Visibility)
 	if !ok {
 		return true
 	}
 	return visible.Visible()
 }
 
-func ElementVisible(element Element) bool {
-	return elementVisible(element)
-}
-
-func elementBox(element Element) BoxProps {
-	if element == nil {
+func nodeBox(node Node) BoxProps {
+	if node == nil {
 		return BoxProps{}
 	}
-	box, ok := element.(BoxModel)
+	box, ok := node.(BoxModel)
 	if !ok {
 		return BoxProps{Display: DisplayFlex, VisibleFlag: true}
 	}
@@ -1270,8 +1229,9 @@ func (b SurfaceBox) Paint(_ *Context, canvas Canvas) {
 }
 
 type VisibleElement struct {
+	BaseNode
 	BoxProps
-	Child Element
+	Child Node
 }
 
 func (e VisibleElement) Visible() bool {
@@ -1285,11 +1245,11 @@ func (e VisibleElement) Measure(ctx *Context, constraints Constraints) Size {
 	return constraints.Clamp(e.Child.Measure(ctx, constraints))
 }
 
-func (e VisibleElement) WalkChildren(_ *Context, visit func(Element)) {
-	if e.Child == nil || visit == nil {
-		return
+func (e VisibleElement) ChildNodes() []Node {
+	if e.Child == nil {
+		return nil
 	}
-	visit(e.Child)
+	return []Node{e.Child}
 }
 
 func (e VisibleElement) Paint(ctx *Context, canvas Canvas) {
@@ -1297,7 +1257,7 @@ func (e VisibleElement) Paint(ctx *Context, canvas Canvas) {
 		return
 	}
 	if e.HAlign == AlignStart && e.VAlign == AlignStart {
-		renderElementInto(ctx, e.Child, Rect{X: canvas.origin.X, Y: canvas.origin.Y, W: canvas.Width(), H: canvas.Height()}, canvas.surface)
+		paintNodeInto(ctx, e.Child, Rect{X: canvas.origin.X, Y: canvas.origin.Y, W: canvas.Width(), H: canvas.Height()}, canvas.surface)
 		return
 	}
 	size := e.Child.Measure(ctx, NewConstraints(canvas.Width(), canvas.Height()))
@@ -1315,7 +1275,7 @@ func (e VisibleElement) Paint(ctx *Context, canvas Canvas) {
 	case AlignEnd:
 		y = max(0, canvas.Height()-size.H)
 	}
-	renderElementInto(ctx, e.Child, Rect{
+	paintNodeInto(ctx, e.Child, Rect{
 		X: canvas.origin.X + x,
 		Y: canvas.origin.Y + y,
 		W: min(canvas.Width(), size.W),
@@ -1324,26 +1284,26 @@ func (e VisibleElement) Paint(ctx *Context, canvas Canvas) {
 }
 
 type Child struct {
-	Element Element
-	Flex    int
-	Grow    int
-	Shrink  int
-	Basis   int
+	Node   Node
+	Flex   int
+	Grow   int
+	Shrink int
+	Basis  int
 }
 
-func Fixed(element Element) Child {
-	return Child{Element: element}
+func Fixed(node any) Child {
+	return Child{Node: AsNode(node)}
 }
 
-func Flex(element Element, weight int) Child {
+func Flex(node any, weight int) Child {
 	if weight <= 0 {
 		weight = 1
 	}
-	return Child{Element: element, Flex: weight, Grow: weight, Shrink: 1}
+	return Child{Node: AsNode(node), Flex: weight, Grow: weight, Shrink: 1}
 }
 
 func (c Child) effectiveBox() BoxProps {
-	props := elementBox(c.Element)
+	props := nodeBox(c.Node)
 	if c.Basis > 0 {
 		props.Basis = c.Basis
 	}
@@ -1383,6 +1343,7 @@ const (
 )
 
 type FlexBox struct {
+	BaseNode
 	Direction FlexDirection
 	Children  []Child
 	Spacing   int
@@ -1402,15 +1363,14 @@ func (b FlexBox) Measure(ctx *Context, constraints Constraints) Size {
 	return constraints.Clamp(size)
 }
 
-func (b FlexBox) WalkChildren(_ *Context, visit func(Element)) {
-	if visit == nil {
-		return
-	}
+func (b FlexBox) ChildNodes() []Node {
+	out := make([]Node, 0, len(b.Children))
 	for _, child := range b.Children {
-		if child.Element != nil {
-			visit(child.Element)
+		if child.Node != nil {
+			out = append(out, child.Node)
 		}
 	}
+	return out
 }
 
 func (b FlexBox) Paint(ctx *Context, canvas Canvas) {
@@ -1448,7 +1408,7 @@ func (b FlexBox) renderVerticalTo(ctx *Context, bounds Rect, dst *Surface) {
 		childH := item.box.constrained(AxisVertical, slotH)
 		x := alignedOffset(item.box.HAlign, slotW, childW)
 		dy := alignedOffset(item.box.VAlign, slotH, childH)
-		renderElementInto(ctx, item.child.Element, Rect{
+		paintNodeInto(ctx, item.child.Node, Rect{
 			X: bounds.X + x,
 			Y: bounds.Y + y + dy,
 			W: childW,
@@ -1474,7 +1434,7 @@ func (b FlexBox) renderHorizontalTo(ctx *Context, bounds Rect, dst *Surface) {
 		childH := item.box.constrained(AxisVertical, slotH)
 		dx := alignedOffset(item.box.HAlign, slotW, childW)
 		y := alignedOffset(item.box.VAlign, slotH, childH)
-		renderElementInto(ctx, item.child.Element, Rect{
+		paintNodeInto(ctx, item.child.Node, Rect{
 			X: bounds.X + x + dx,
 			Y: bounds.Y + y,
 			W: childW,
@@ -1485,12 +1445,13 @@ func (b FlexBox) renderHorizontalTo(ctx *Context, bounds Rect, dst *Surface) {
 }
 
 type Inset struct {
+	BaseNode
 	Padding Insets
-	Child   Element
+	Child   Node
 }
 
 func (i Inset) Measure(ctx *Context, constraints Constraints) Size {
-	if !elementVisible(i.Child) {
+	if !NodeVisible(i.Child) {
 		return constraints.Clamp(Size{})
 	}
 	childSize := i.Child.Measure(ctx, constraints.Deflate(i.Padding))
@@ -1500,18 +1461,18 @@ func (i Inset) Measure(ctx *Context, constraints Constraints) Size {
 	})
 }
 
-func (i Inset) WalkChildren(_ *Context, visit func(Element)) {
-	if i.Child == nil || visit == nil {
-		return
+func (i Inset) ChildNodes() []Node {
+	if i.Child == nil {
+		return nil
 	}
-	visit(i.Child)
+	return []Node{i.Child}
 }
 
 func (i Inset) Paint(ctx *Context, canvas Canvas) {
-	if !elementVisible(i.Child) || canvas.Width() <= 0 || canvas.Height() <= 0 {
+	if !NodeVisible(i.Child) || canvas.Width() <= 0 || canvas.Height() <= 0 {
 		return
 	}
-	renderElementInto(ctx, i.Child, Rect{
+	paintNodeInto(ctx, i.Child, Rect{
 		X: canvas.origin.X + i.Padding.Left,
 		Y: canvas.origin.Y + i.Padding.Top,
 		W: max(0, canvas.Width()-i.Padding.Left-i.Padding.Right),
@@ -1520,12 +1481,13 @@ func (i Inset) Paint(ctx *Context, canvas Canvas) {
 }
 
 type Constrained struct {
+	BaseNode
 	Constraints Constraints
-	Child       Element
+	Child       Node
 }
 
 func (c Constrained) Measure(ctx *Context, constraints Constraints) Size {
-	if !elementVisible(c.Child) {
+	if !NodeVisible(c.Child) {
 		return constraints.Clamp(Size{})
 	}
 	merged := Constraints{
@@ -1537,19 +1499,19 @@ func (c Constrained) Measure(ctx *Context, constraints Constraints) Size {
 	return constraints.Clamp(c.Child.Measure(ctx, merged))
 }
 
-func (c Constrained) WalkChildren(_ *Context, visit func(Element)) {
-	if c.Child == nil || visit == nil {
-		return
+func (c Constrained) ChildNodes() []Node {
+	if c.Child == nil {
+		return nil
 	}
-	visit(c.Child)
+	return []Node{c.Child}
 }
 
 func (c Constrained) Paint(ctx *Context, canvas Canvas) {
-	if !elementVisible(c.Child) || canvas.Width() <= 0 || canvas.Height() <= 0 {
+	if !NodeVisible(c.Child) || canvas.Width() <= 0 || canvas.Height() <= 0 {
 		return
 	}
 	size := c.Measure(ctx, NewConstraints(canvas.Width(), canvas.Height()))
-	renderElementInto(ctx, c.Child, Rect{
+	paintNodeInto(ctx, c.Child, Rect{
 		X: canvas.origin.X,
 		Y: canvas.origin.Y,
 		W: size.W,
@@ -1558,13 +1520,14 @@ func (c Constrained) Paint(ctx *Context, canvas Canvas) {
 }
 
 type Stack struct {
-	Children []Element
+	BaseNode
+	Children []Node
 }
 
 func (s Stack) Measure(ctx *Context, constraints Constraints) Size {
 	size := Size{}
 	for _, child := range s.Children {
-		if !elementVisible(child) {
+		if !NodeVisible(child) {
 			continue
 		}
 		childSize := child.Measure(ctx, constraints)
@@ -1574,15 +1537,8 @@ func (s Stack) Measure(ctx *Context, constraints Constraints) Size {
 	return constraints.Clamp(size)
 }
 
-func (s Stack) WalkChildren(_ *Context, visit func(Element)) {
-	if visit == nil {
-		return
-	}
-	for _, child := range s.Children {
-		if child != nil {
-			visit(child)
-		}
-	}
+func (s Stack) ChildNodes() []Node {
+	return append([]Node(nil), s.Children...)
 }
 
 func (s Stack) Paint(ctx *Context, canvas Canvas) {
@@ -1591,10 +1547,10 @@ func (s Stack) Paint(ctx *Context, canvas Canvas) {
 	}
 	bounds := Rect{X: canvas.origin.X, Y: canvas.origin.Y, W: canvas.Width(), H: canvas.Height()}
 	for _, child := range s.Children {
-		if !elementVisible(child) {
+		if !NodeVisible(child) {
 			continue
 		}
-		renderElementInto(ctx, child, bounds, canvas.surface)
+		paintNodeInto(ctx, child, bounds, canvas.surface)
 	}
 }
 
@@ -1607,9 +1563,10 @@ const (
 )
 
 type Align struct {
+	BaseNode
 	Horizontal Alignment
 	Vertical   Alignment
-	Child      Element
+	Child      Node
 }
 
 func (a Align) Measure(ctx *Context, constraints Constraints) Size {
@@ -1639,7 +1596,7 @@ func (a Align) Paint(ctx *Context, canvas Canvas) {
 	case AlignEnd:
 		y = max(0, canvas.Height()-size.H)
 	}
-	renderElementInto(ctx, a.Child, Rect{
+	paintNodeInto(ctx, a.Child, Rect{
 		X: canvas.origin.X + x,
 		Y: canvas.origin.Y + y,
 		W: size.W,
@@ -1689,11 +1646,11 @@ func computeFlexPlan(ctx *Context, children []Child, spacing int, axis Axis, con
 	mainUsed := 0
 	cross := 0
 	for _, child := range children {
-		if !elementVisible(child.Element) {
+		if !NodeVisible(child.Node) {
 			continue
 		}
 		box := child.effectiveBox()
-		size := child.Element.Measure(ctx, constraintsForAxis(axis, constraints, 0))
+		size := child.Node.Measure(ctx, constraintsForAxis(axis, constraints, 0))
 		mainSize := axisMain(axis, size)
 		if box.Basis > 0 {
 			mainSize = box.Basis
@@ -1810,19 +1767,19 @@ func alignedOffset(alignment Alignment, outer, inner int) int {
 	}
 }
 
-func RenderSurface(ctx *Context, element Element, width, height int) Surface {
-	if element == nil {
+func RenderSurface(ctx *Context, node Node, width, height int) Surface {
+	if node == nil {
 		return Surface{}
 	}
 	if ctx == nil {
 		ctx = &Context{}
 	}
-	size := element.Measure(ctx, Constraints{MaxW: width, MaxH: height})
+	size := node.Measure(ctx, Constraints{MaxW: width, MaxH: height})
 	if width > 0 {
 		size.W = width
 	}
 	if height > 0 {
 		size.H = height
 	}
-	return PaintElementSurface(ctx, element, Rect{W: size.W, H: size.H})
+	return PaintNodeSurface(ctx, node, Rect{W: size.W, H: size.H})
 }

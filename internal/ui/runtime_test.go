@@ -344,12 +344,12 @@ func TestInvalidateElementCachesReachesNestedCachedChild(t *testing.T) {
 	first := theme.Resolve("tokyonight").Palette
 	second := theme.Resolve("flexoki").Palette
 
-	cached := NewCachedElement(paletteElement{}, 1)
+	cached := NewCachedElement(AsNode(paletteElement{}), 1)
 	element := Inset{
 		Padding: UniformInsets(1),
-		Child: VisibleElement{
+		Child: AsNode(VisibleElement{
 			Child: cached,
-		},
+		}),
 	}
 
 	before := PaintElementSurface(&Context{Palette: first}, element, Rect{W: 4, H: 3})
@@ -379,9 +379,9 @@ func TestRootSetPaletteInvalidatesCachedDescendants(t *testing.T) {
 		bounds:     Rect{W: 6, H: 4},
 		element: Inset{
 			Padding: UniformInsets(1),
-			Child: VisibleElement{
-				Child: NewCachedElement(paletteElement{}, 1),
-			},
+			Child: AsNode(VisibleElement{
+				Child: NewCachedElement(AsNode(paletteElement{}), 1),
+			}),
 		},
 	})
 
@@ -470,7 +470,7 @@ func (e countingControlElement) Paint(ctx *Context, canvas Canvas) {
 }
 
 func TestCachedElementReRegistersControlsOnCachedRender(t *testing.T) {
-	cached := NewCachedElement(controlElement{id: "cached-control"}, 1)
+	cached := NewCachedElement(AsNode(controlElement{id: "cached-control"}), 1)
 	ctx := &Context{Palette: theme.Resolve("tokyonight").Palette}
 
 	firstRuntime := &Runtime{}
@@ -493,7 +493,7 @@ func TestCachedElementReRegistersControlsOnCachedRender(t *testing.T) {
 
 func TestCachedElementCacheHitDoesNotReRenderChild(t *testing.T) {
 	renderCalls := 0
-	cached := NewCachedElement(countingControlElement{id: "cached-control", renderCalls: &renderCalls}, 1)
+	cached := NewCachedElement(AsNode(countingControlElement{id: "cached-control", renderCalls: &renderCalls}), 1)
 	ctx := &Context{Palette: theme.Resolve("tokyonight").Palette}
 
 	firstRuntime := &Runtime{}

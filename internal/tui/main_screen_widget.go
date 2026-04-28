@@ -43,7 +43,7 @@ func (w *transcriptWidget) Surface(bounds ui.Rect) ui.Surface {
 		return surface
 	}
 	scroll := ui.ScrollBox{
-		Child:   retained,
+		Child:   ui.AsNode(retained),
 		OffsetY: max(0, w.model.viewport.YOffset),
 		Width:   max(0, bounds.W),
 		Height:  max(0, bounds.H),
@@ -774,7 +774,7 @@ func (m *Model) ensureMainScreenWidget() *mainScreenWidget {
 					return nil
 				}
 				return ui.Sidebar{
-					Child:  ui.TextPane{Content: m.renderSidebar()},
+					Child:  ui.AsNode(ui.TextPane{Content: m.renderSidebar()}),
 					Height: m.viewport.Height,
 					Width:  m.sidebarWidth(),
 				}
@@ -800,11 +800,11 @@ func (w *mainScreenWidget) ensureRetainedRoot() *mainScreenRetainedRoot {
 	return w.retained
 }
 
-func measuredPainterFromElement(element ui.Element) measuredPainter {
-	if element == nil {
+func measuredPainterFromElement(node ui.Node) measuredPainter {
+	if node == nil {
 		return nil
 	}
-	painter, ok := element.(measuredPainter)
+	painter, ok := node.(measuredPainter)
 	if !ok {
 		return nil
 	}

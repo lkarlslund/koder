@@ -9,23 +9,14 @@ import (
 )
 
 type Section struct {
+	BaseNode
 	Title       string
-	Child       Element
+	Child       Node
 	Width       int
 	Padding     Insets
 	Background  lipgloss.Color
 	Foreground  lipgloss.Color
 	BorderColor lipgloss.Color
-}
-
-func (s Section) WalkChildren(ctx *Context, visit func(Element)) {
-	if visit == nil {
-		return
-	}
-	child := s.children(ctx)
-	if child != nil {
-		visit(child)
-	}
 }
 
 func (s Section) Measure(ctx *Context, constraints Constraints) Size {
@@ -51,10 +42,10 @@ func (s Section) Paint(ctx *Context, canvas Canvas) {
 	if width <= 0 {
 		width = 40
 	}
-	renderElementInto(ctx, s.children(ctx), Rect{X: canvas.origin.X, Y: canvas.origin.Y, W: width, H: canvas.Height()}, canvas.surface)
+	paintNodeInto(ctx, s.children(ctx), Rect{X: canvas.origin.X, Y: canvas.origin.Y, W: width, H: canvas.Height()}, canvas.surface)
 }
 
-func (s Section) children(ctx *Context) Element {
+func (s Section) children(ctx *Context) Node {
 	body := Border{
 		Child:       s.Child,
 		Width:       s.Width,
@@ -64,9 +55,9 @@ func (s Section) children(ctx *Context) Element {
 		BorderColor: firstColor(s.BorderColor, ctx.Palette.SidebarBorder),
 	}
 	if strings.TrimSpace(s.Title) == "" {
-		return body
+		return AsNode(body)
 	}
-	return FlexBox{
+	return AsNode(FlexBox{
 		Direction: DirectionVertical,
 		Children: []Child{
 			Fixed(Label{
@@ -78,7 +69,7 @@ func (s Section) children(ctx *Context) Element {
 			Fixed(body),
 		},
 		Spacing: 1,
-	}
+	})
 }
 
 type ListItem struct {
@@ -98,30 +89,6 @@ type List struct {
 	Focused            bool
 	OnSelectionChanged func(index int, item ListItem)
 	OnActivate         func(index int, item ListItem)
-}
-
-func (l List) WalkChildren(ctx *Context, visit func(Element)) {
-	if visit == nil {
-		return
-	}
-	width := l.Width
-	if width <= 0 && ctx != nil {
-		width = 72
-	}
-	for idx, item := range l.Items {
-		visit(SelectableRow{
-			ControlID:      item.ControlID,
-			Primary:        item.Primary,
-			Secondary:      item.Secondary,
-			Tertiary:       item.Tertiary,
-			Width:          width,
-			PrimaryWidth:   item.PrimaryWidth,
-			SecondaryWidth: item.SecondaryWidth,
-			TertiaryWidth:  item.TertiaryWidth,
-			Selected:       idx == l.Selected,
-			Focused:        l.Focused && idx == l.Selected,
-		})
-	}
 }
 
 func (l List) Measure(ctx *Context, constraints Constraints) Size {
@@ -161,7 +128,7 @@ func (l List) Paint(ctx *Context, canvas Canvas) {
 			Focused:        l.Focused && idx == l.Selected,
 		}))
 	}
-	renderElementInto(ctx, FlexBox{Direction: DirectionVertical, Children: children}, Rect{X: canvas.origin.X, Y: canvas.origin.Y, W: width, H: canvas.Height()}, canvas.surface)
+	paintNodeInto(ctx, AsNode(FlexBox{Direction: DirectionVertical, Children: children}), Rect{X: canvas.origin.X, Y: canvas.origin.Y, W: width, H: canvas.Height()}, canvas.surface)
 }
 
 func (l *List) Move(delta int) bool {
@@ -248,15 +215,15 @@ func (t Table) Paint(ctx *Context, canvas Canvas) {
 	for _, row := range t.Rows {
 		children = append(children, Fixed(HitBox{
 			ID: row.ControlID,
-			Child: tableRow{
+			Child: AsNode(tableRow{
 				Palette: ctx.Palette,
 				Columns: t.Columns,
 				Width:   width,
 				Row:     row,
-			},
+			}),
 		}))
 	}
-	renderElementInto(ctx, FlexBox{Direction: DirectionVertical, Children: children}, Rect{X: canvas.origin.X, Y: canvas.origin.Y, W: width, H: canvas.Height()}, canvas.surface)
+	paintNodeInto(ctx, AsNode(FlexBox{Direction: DirectionVertical, Children: children}), Rect{X: canvas.origin.X, Y: canvas.origin.Y, W: width, H: canvas.Height()}, canvas.surface)
 }
 
 func (t Table) width(fallback int) int {
@@ -378,7 +345,8 @@ type scrollWindowRenderer interface {
 }
 
 type ScrollBox struct {
-	Child   Element
+	BaseNode
+	Child   Node
 	OffsetY int
 	Width   int
 	Height  int
@@ -428,7 +396,7 @@ func (s ScrollBox) RenderVisible(ctx *Context, width, height, offset int) (Surfa
 	maxOffset := max(0, totalHeight-height)
 	offset = min(max(0, offset), maxOffset)
 	childHeight := max(height, totalHeight)
-	renderElementInto(ctx, s.Child, Rect{
+	paintNodeInto(ctx, s.Child, Rect{
 		X: 0,
 		Y: -offset,
 		W: width,
@@ -450,7 +418,7 @@ func (s ScrollBox) RenderBottom(ctx *Context, width, height int) (Surface, int, 
 	totalHeight := childSize.H
 	offset := max(0, totalHeight-height)
 	childHeight := max(height, totalHeight)
-	renderElementInto(ctx, s.Child, Rect{
+	paintNodeInto(ctx, s.Child, Rect{
 		X: 0,
 		Y: -offset,
 		W: width,

@@ -7,7 +7,8 @@ import (
 )
 
 type Border struct {
-	Child         Element
+	BaseNode
+	Child         Node
 	Width         int
 	Height        int
 	Padding       Insets
@@ -24,13 +25,6 @@ type Border struct {
 	BorderRight   bool
 	BorderTop     bool
 	BorderBottom  bool
-}
-
-func (b Border) WalkChildren(_ *Context, visit func(Element)) {
-	if b.Child == nil || visit == nil {
-		return
-	}
-	visit(b.Child)
 }
 
 func (b Border) Measure(ctx *Context, constraints Constraints) Size {
@@ -108,7 +102,7 @@ func (p borderPainter) Paint(_ *Context, canvas Canvas) {
 		}
 	}
 	if b.Child != nil {
-		renderElementInto(p.ctx, b.Child, Rect{
+		paintNodeInto(p.ctx, b.Child, Rect{
 			X: p.bounds.X + inset.Left,
 			Y: p.bounds.Y + inset.Top,
 			W: max(0, width-inset.Left-inset.Right),

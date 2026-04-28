@@ -19,11 +19,11 @@ func dialogRenderWidth(bounds ui.Rect, fallback int) int {
 	return width
 }
 
-func staticBlock(text string) ui.Element {
-	return ui.Static{Content: strings.TrimRight(text, "\n")}
+func staticBlock(text string) ui.Node {
+	return ui.AsNode(ui.Static{Content: strings.TrimRight(text, "\n")})
 }
 
-func linesBlock(lines ...string) ui.Element {
+func linesBlock(lines ...string) ui.Node {
 	children := make([]ui.Child, 0, len(lines))
 	for _, line := range lines {
 		if line == "" {
@@ -32,7 +32,7 @@ func linesBlock(lines ...string) ui.Element {
 		}
 		children = append(children, ui.Fixed(ui.Static{Content: line}))
 	}
-	return ui.FlexBox{Direction: ui.DirectionVertical, Children: children}
+	return ui.AsNode(ui.FlexBox{Direction: ui.DirectionVertical, Children: children})
 }
 
 type pickerDialogFocus int

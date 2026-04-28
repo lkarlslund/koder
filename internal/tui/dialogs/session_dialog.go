@@ -122,9 +122,9 @@ func (d SessionDialog) Measure(ctx *ui.Context, constraints ui.Constraints) ui.S
 
 func (d SessionDialog) Surface(ctx *ui.Context, bounds ui.Rect) ui.Surface {
 	maxWidth := dialogRenderWidth(bounds, 110)
-	element := d.dialog(maxWidth, ctx.Palette)
-	size := element.Measure(ctx, ui.Constraints{MaxW: maxWidth, MaxH: bounds.H})
-	return ui.PaintElementSurface(ctx, element, ui.Rect{W: size.W, H: bounds.H})
+	node := d.dialog(maxWidth, ctx.Palette)
+	size := node.Measure(ctx, ui.Constraints{MaxW: maxWidth, MaxH: bounds.H})
+	return ui.PaintNodeSurface(ctx, node, ui.Rect{W: size.W, H: bounds.H})
 }
 
 func (d SessionDialog) Paint(ctx *ui.Context, canvas ui.Canvas) {
@@ -134,7 +134,7 @@ func (d SessionDialog) Paint(ctx *ui.Context, canvas ui.Canvas) {
 	canvas.BlitSurface(0, 0, d.Surface(ctx, ui.Rect{W: canvas.Width(), H: canvas.Height()}))
 }
 
-func (d SessionDialog) dialog(width int, palette theme.Palette) ui.Element {
+func (d SessionDialog) dialog(width int, palette theme.Palette) ui.Node {
 	dialogWidth := width
 	if dialogWidth <= 0 {
 		dialogWidth = 110
@@ -198,49 +198,49 @@ func (d SessionDialog) dialog(width int, palette theme.Palette) ui.Element {
 		details = d.clampPreviewLines(d.previewText(item, contentWidth), 10)
 	}
 
-	list := ui.Element(staticBlock("No matches"))
+	list := staticBlock("No matches")
 	if len(rows) > 0 {
-		list = ui.Table{
+		list = ui.AsNode(ui.Table{
 			Width:      contentWidth,
 			Columns:    columns,
 			Rows:       rows,
 			ShowHeader: true,
-		}
+		})
 	}
 
 	buttons := d.buttonRow(contentWidth)
 	buttons.Width = maxInt(0, dialogWidth-6)
-	return ui.WindowFrame{
+	return ui.AsNode(ui.WindowFrame{
 		Title: "Resume Session",
 		Width: dialogWidth,
-		Content: ui.FlexBox{
+		Content: ui.AsNode(ui.FlexBox{
 			Direction: ui.DirectionVertical,
 			Children: []ui.Child{
-				ui.Fixed(ui.FlexBox{
+				ui.Fixed(ui.AsNode(ui.FlexBox{
 					Direction: ui.DirectionVertical,
 					Children: []ui.Child{
 						ui.Fixed(staticBlock(fmt.Sprintf("Filter: %s", d.Query))),
 						ui.Fixed(ui.Spacer{H: 1}),
-						ui.Fixed(ui.Section{Width: contentWidth, Child: list}),
+						ui.Fixed(ui.AsNode(ui.Section{Width: contentWidth, Child: list})),
 						ui.Fixed(ui.Spacer{H: 1}),
-						ui.Fixed(ui.Section{
+						ui.Fixed(ui.AsNode(ui.Section{
 							Title:       "Preview",
 							Width:       contentWidth,
 							Padding:     ui.Insets{Top: 1, Left: 1, Right: 1},
 							Background:  palette.ScreenBackground,
 							Foreground:  palette.SidebarForeground,
 							BorderColor: palette.SidebarBorder,
-							Child:       ui.TextPane{Content: details},
-						}),
+							Child:       ui.AsNode(ui.TextPane{Content: details}),
+						})),
 					},
-				}),
+				})),
 				ui.Fixed(buttons),
 				ui.Fixed(ui.Static{Content: "Enter resumes the highlighted session. Esc creates a new session."}),
 			},
 			Spacing: 2,
-		},
+		}),
 		ShowClose: true,
-	}
+	})
 }
 
 func (d *SessionDialog) ActivateControl(controlID string) SessionDialogAction {
