@@ -117,6 +117,7 @@ func runTUI(ctx context.Context, mode tui.StartupMode, workdir string, startupOp
 		_ = mcpManager.ConnectAll(context.Background())
 	}()
 	registry := tools.NewRegistry(agents.FindProjectRoot(workdir))
+	registry.SetEditForgiveness(cfg.UI.EditForgiveness)
 	engine := agent.New(cfg, st, registry, recorder, workdir, mcpManager)
 	registry.SetChatControl(chatruntime.New(engine, st))
 	return tui.RunWithWorkdir(cfg, st, engine, mode, recorder, debugServer, workdir, startupOpts)

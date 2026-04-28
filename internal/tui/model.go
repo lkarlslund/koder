@@ -3221,6 +3221,7 @@ func (m Model) runBangPromptCmd(ctx context.Context, bang bangPrompt, followup b
 			Args: map[string]string{"command": bang.Command},
 		}
 		registry := tools.NewRegistry(m.workdir)
+		registry.SetEditForgiveness(m.cfg.UI.EditForgiveness)
 		result, err := registry.ExecuteWithChat(ctx, m.store, session.ID, chat, req)
 		if err != nil && result.Meta["exit_code"] == "" {
 			return bangCommandMsg{session: session, chat: chat, err: err, preserveBusy: preserveBusy}
@@ -7536,6 +7537,7 @@ func (m *Model) applyUIConfig(next config.UI, save bool) (ui.Cmd, error) {
 
 	next.Theme = selected.Name
 	next.Spinner = ui.NormalizeSpinner(next.Spinner)
+	next.EditForgiveness = config.NormalizeEditForgiveness(next.EditForgiveness)
 	m.cfg.UI = next
 	m.palette = selected.Palette
 	m.renderer = renderer
@@ -7581,6 +7583,9 @@ func (m *Model) applyPreferences(next dialogs.PreferencesValues, save bool) (ui.
 	if save {
 		if err := m.cfg.Save(); err != nil {
 			return nil, err
+		}
+		if m.agent != nil {
+			m.agent.UpdateConfig(m.cfg)
 		}
 	}
 	return cmd, nil

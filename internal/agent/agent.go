@@ -57,6 +57,7 @@ func New(cfg config.Config, st *store.Store, registry *tools.Registry, debug *de
 	}
 	if registry != nil {
 		registry.SetMCP(mcpManager)
+		registry.SetEditForgiveness(cfg.UI.EditForgiveness)
 	}
 	return &Engine{
 		cfg:        cfg,
@@ -75,6 +76,9 @@ func New(cfg config.Config, st *store.Store, registry *tools.Registry, debug *de
 func (e *Engine) UpdateConfig(cfg config.Config) {
 	e.cfg = cfg
 	e.agents = agents.NewManager(cfg.StateDir(), filepath.Join(filepath.Dir(cfg.Path()), "AGENTS.md"))
+	if e.registry != nil {
+		e.registry.SetEditForgiveness(cfg.UI.EditForgiveness)
+	}
 	if e.mcp != nil {
 		_ = e.mcp.LoadConfig(cfg.MCPServers)
 		go func() {

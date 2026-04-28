@@ -53,6 +53,15 @@ func TestPreferencesDialogThemeAndToggleEmitDraftChanges(t *testing.T) {
 	dialog.Update(ui.KeyMsg{Type: ui.KeyDown})
 	action = dialog.Update(ui.KeyMsg{Type: ui.KeyRight})
 	if action.Kind != PreferencesActionChanged {
+		t.Fatalf("expected edit forgiveness change action, got %#v", action)
+	}
+	if action.Values.UI.EditForgiveness != 2 {
+		t.Fatalf("expected edit forgiveness to advance, got %#v", action.Values)
+	}
+
+	dialog.Update(ui.KeyMsg{Type: ui.KeyDown})
+	action = dialog.Update(ui.KeyMsg{Type: ui.KeyRight})
+	if action.Kind != PreferencesActionChanged {
 		t.Fatalf("expected spinner change action, got %#v", action)
 	}
 	if action.Values.UI.Spinner == "dots" {
@@ -115,7 +124,7 @@ func TestPreferencesDialogRenderShowsTabsAndButtons(t *testing.T) {
 	}
 	dialog.tabList.Active = 1
 	view = renderPreferencesDialog(dialog, 84, theme.Default().Palette)
-	if !strings.Contains(view, "Code Style") {
+	if !strings.Contains(view, "Code Style") || !strings.Contains(view, "Edit Forgiveness") {
 		t.Fatalf("expected appearance tab to show code style, got %q", view)
 	}
 

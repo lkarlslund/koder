@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/store"
@@ -123,6 +124,7 @@ type Runtime struct {
 	AssignedTodoBucketRef string
 	ChatControl           ChatControl
 	MCP                   MCPExecutor
+	EditForgiveness       int
 }
 
 type MCPExecutor interface {
@@ -177,8 +179,9 @@ func Lookup(kind domain.ToolKind) (Tool, bool) {
 func NewRegistry(workdir string) *Registry {
 	return &Registry{
 		runtime: Runtime{
-			Workdir:    workdir,
-			HTTPClient: &http.Client{},
+			Workdir:         workdir,
+			HTTPClient:      &http.Client{},
+			EditForgiveness: config.Default().UI.EditForgiveness,
 		},
 	}
 }
@@ -189,6 +192,10 @@ func (r *Registry) SetChatControl(control ChatControl) {
 
 func (r *Registry) SetMCP(executor MCPExecutor) {
 	r.runtime.MCP = executor
+}
+
+func (r *Registry) SetEditForgiveness(level int) {
+	r.runtime.EditForgiveness = config.NormalizeEditForgiveness(level)
 }
 
 func (r *Registry) Execute(ctx context.Context, req Request) (Result, error) {

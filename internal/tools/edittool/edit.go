@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 
 	"github.com/sergi/go-diff/diffmatchpatch"
@@ -16,6 +17,20 @@ import (
 )
 
 type tool struct{}
+
+type editMatch struct {
+	stage     string
+	oldString string
+	newString string
+}
+
+type editMatcher struct {
+	content    string
+	oldString  string
+	newString  string
+	replaceAll bool
+	level      int
+}
 
 func init() { tools.Register(tool{}) }
 
@@ -73,21 +88,23 @@ func (tool) Execute(_ context.Context, runtime tools.Runtime, req tools.Request)
 		return tools.Result{}, err
 	}
 	before := string(beforeBytes)
-	oldString := req.Args["old_string"]
-	newString := req.Args["new_string"]
-	occurrences := strings.Count(before, oldString)
-	if occurrences == 0 {
-		return tools.Result{}, fmt.Errorf("target text not found in %s", rel)
-	}
 	replaceAll := strings.EqualFold(strings.TrimSpace(req.Args["replace_all"]), "true")
-	if !replaceAll && occurrences != 1 {
-		return tools.Result{}, fmt.Errorf("target text occurs %d times in %s; use replace_all to replace every occurrence", occurrences, rel)
+	match, err := editMatcher{
+		content:    before,
+		oldString:  req.Args["old_string"],
+		newString:  req.Args["new_string"],
+		replaceAll: replaceAll,
+		level:      reqLevel(runtime.EditForgiveness),
+	}.Resolve()
+	if err != nil {
+		return tools.Result{}, fmt.Errorf("%w in %s", err, rel)
 	}
+	occurrences := strings.Count(before, match.oldString)
 	var after string
 	if replaceAll {
-		after = strings.ReplaceAll(before, oldString, newString)
+		after = strings.ReplaceAll(before, match.oldString, match.newString)
 	} else {
-		after = strings.Replace(before, oldString, newString, 1)
+		after = strings.Replace(before, match.oldString, match.newString, 1)
 	}
 	if err := tools.WriteTextFile(abs, after, info.Mode().Perm()); err != nil {
 		return tools.Result{}, err
@@ -99,7 +116,7 @@ func (tool) Execute(_ context.Context, runtime tools.Runtime, req tools.Request)
 		mode = fmt.Sprintf("replaced %d occurrences", occurrences)
 	}
 	summary := fmt.Sprintf("Edited %s (%s)", rel, mode)
-	hunks, truncated := buildStoredHunks(before, oldString, newString, replaceAll)
+	hunks, truncated := buildStoredHunks(before, match.oldString, match.newString, replaceAll)
 	return tools.Result{
 		Output:   summary,
 		DiffText: dmp.DiffPrettyText(diffs),
@@ -107,6 +124,7 @@ func (tool) Execute(_ context.Context, runtime tools.Runtime, req tools.Request)
 			"path":        rel,
 			"replace_all": tools.BoolString(replaceAll),
 			"occurrences": fmt.Sprintf("%d", occurrences),
+			"matcher":     match.stage,
 		},
 		Stored: tools.EditStoredResult{
 			Path:        rel,
@@ -127,6 +145,417 @@ func (tool) PersistResult(ctx context.Context, st *store.Store, sessionID int64,
 }
 
 const maxStoredHunks = 8
+
+func reqLevel(level int) int {
+	if level < 1 {
+		return 1
+	}
+	if level > 5 {
+		return 5
+	}
+	return level
+}
+
+func (m editMatcher) Resolve() (editMatch, error) {
+	stages := []struct {
+		name string
+		run  func() []string
+	}{
+		{name: "exact", run: m.findExact},
+	}
+	if m.level >= 2 {
+		stages = append(stages, struct {
+			name string
+			run  func() []string
+		}{name: "line_endings", run: m.findLineEndingNormalized})
+	}
+	if m.level >= 3 {
+		stages = append(stages,
+			struct {
+				name string
+				run  func() []string
+			}{name: "quotes", run: m.findQuoteNormalized},
+			struct {
+				name string
+				run  func() []string
+			}{name: "trimmed_boundary", run: m.findTrimmedBoundary},
+		)
+	}
+	if m.level >= 4 {
+		stages = append(stages,
+			struct {
+				name string
+				run  func() []string
+			}{name: "line_trimmed", run: m.findLineTrimmed},
+			struct {
+				name string
+				run  func() []string
+			}{name: "indentation_flexible", run: m.findIndentationFlexible},
+			struct {
+				name string
+				run  func() []string
+			}{name: "whitespace_normalized", run: m.findWhitespaceNormalized},
+		)
+	}
+	if m.level >= 5 {
+		stages = append(stages,
+			struct {
+				name string
+				run  func() []string
+			}{name: "escape_normalized", run: m.findEscapeNormalized},
+			struct {
+				name string
+				run  func() []string
+			}{name: "block_anchor", run: m.findBlockAnchor},
+			struct {
+				name string
+				run  func() []string
+			}{name: "context_aware", run: m.findContextAware},
+		)
+	}
+
+	for _, stage := range stages {
+		candidates := uniqueStrings(stage.run())
+		if len(candidates) == 0 {
+			continue
+		}
+		if len(candidates) > 1 {
+			return editMatch{}, fmt.Errorf("target text matched multiple regions via %s; provide more surrounding context", stage.name)
+		}
+		candidate := candidates[0]
+		occurrences := strings.Count(m.content, candidate)
+		if !m.replaceAll && occurrences != 1 {
+			return editMatch{}, fmt.Errorf("target text occurs %d times; use replace_all to replace every occurrence", occurrences)
+		}
+		return editMatch{
+			stage:     stage.name,
+			oldString: candidate,
+			newString: m.rewriteNewString(stage.name),
+		}, nil
+	}
+	return editMatch{}, errors.New("target text not found")
+}
+
+func (m editMatcher) rewriteNewString(stage string) string {
+	switch stage {
+	case "line_endings":
+		return convertLineEndings(normalizeLineEndings(m.newString), detectLineEnding(m.content))
+	default:
+		return m.newString
+	}
+}
+
+func (m editMatcher) findExact() []string {
+	if strings.Contains(m.content, m.oldString) {
+		return []string{m.oldString}
+	}
+	return nil
+}
+
+func (m editMatcher) findLineEndingNormalized() []string {
+	ending := detectLineEnding(m.content)
+	candidate := convertLineEndings(normalizeLineEndings(m.oldString), ending)
+	if candidate != m.oldString && strings.Contains(m.content, candidate) {
+		return []string{candidate}
+	}
+	return nil
+}
+
+func (m editMatcher) findQuoteNormalized() []string {
+	actual := findQuoteNormalizedString(m.content, m.oldString)
+	if actual == "" {
+		return nil
+	}
+	return []string{actual}
+}
+
+func (m editMatcher) findTrimmedBoundary() []string {
+	trimmed := strings.TrimSpace(m.oldString)
+	if trimmed == "" || trimmed == m.oldString {
+		return nil
+	}
+	var out []string
+	if strings.Contains(m.content, trimmed) {
+		out = append(out, trimmed)
+	}
+	lines := strings.Split(m.content, "\n")
+	findLines := strings.Split(m.oldString, "\n")
+	for i := 0; i <= len(lines)-len(findLines); i++ {
+		block := strings.Join(lines[i:i+len(findLines)], "\n")
+		if strings.TrimSpace(block) == trimmed {
+			out = append(out, block)
+		}
+	}
+	return out
+}
+
+func (m editMatcher) findLineTrimmed() []string {
+	originalLines := strings.Split(m.content, "\n")
+	searchLines := trimTrailingEmptyLine(strings.Split(m.oldString, "\n"))
+	if len(searchLines) == 0 || len(originalLines) < len(searchLines) {
+		return nil
+	}
+	var out []string
+	for i := 0; i <= len(originalLines)-len(searchLines); i++ {
+		matches := true
+		for j := range searchLines {
+			if strings.TrimSpace(originalLines[i+j]) != strings.TrimSpace(searchLines[j]) {
+				matches = false
+				break
+			}
+		}
+		if matches {
+			out = append(out, strings.Join(originalLines[i:i+len(searchLines)], "\n"))
+		}
+	}
+	return out
+}
+
+func (m editMatcher) findIndentationFlexible() []string {
+	contentLines := strings.Split(m.content, "\n")
+	findLines := strings.Split(m.oldString, "\n")
+	if len(findLines) == 0 || len(contentLines) < len(findLines) {
+		return nil
+	}
+	normalizedFind := removeCommonIndentation(m.oldString)
+	var out []string
+	for i := 0; i <= len(contentLines)-len(findLines); i++ {
+		block := strings.Join(contentLines[i:i+len(findLines)], "\n")
+		if removeCommonIndentation(block) == normalizedFind {
+			out = append(out, block)
+		}
+	}
+	return out
+}
+
+func (m editMatcher) findWhitespaceNormalized() []string {
+	normalize := func(text string) string {
+		return strings.Join(strings.Fields(text), " ")
+	}
+	normalizedFind := normalize(m.oldString)
+	if normalizedFind == "" {
+		return nil
+	}
+	var out []string
+	lines := strings.Split(m.content, "\n")
+	for _, line := range lines {
+		if normalize(line) == normalizedFind {
+			out = append(out, line)
+			continue
+		}
+		if normalize(line) != "" && strings.Contains(normalize(line), normalizedFind) {
+			reWords := regexp.QuoteMeta(strings.TrimSpace(m.oldString))
+			reWords = strings.Join(strings.Fields(reWords), `\s+`)
+			re := regexp.MustCompile(reWords)
+			if match := re.FindString(line); match != "" {
+				out = append(out, match)
+			}
+		}
+	}
+	findLines := strings.Split(m.oldString, "\n")
+	if len(findLines) > 1 {
+		for i := 0; i <= len(lines)-len(findLines); i++ {
+			block := strings.Join(lines[i:i+len(findLines)], "\n")
+			if normalize(block) == normalizedFind {
+				out = append(out, block)
+			}
+		}
+	}
+	return out
+}
+
+func (m editMatcher) findEscapeNormalized() []string {
+	unescaped := unescapeString(m.oldString)
+	if unescaped == m.oldString {
+		return nil
+	}
+	if strings.Contains(m.content, unescaped) {
+		return []string{unescaped}
+	}
+	lines := strings.Split(m.content, "\n")
+	findLines := strings.Split(unescaped, "\n")
+	var out []string
+	for i := 0; i <= len(lines)-len(findLines); i++ {
+		block := strings.Join(lines[i:i+len(findLines)], "\n")
+		if unescapeString(block) == unescaped {
+			out = append(out, block)
+		}
+	}
+	return out
+}
+
+func (m editMatcher) findBlockAnchor() []string {
+	searchLines := trimTrailingEmptyLine(strings.Split(m.oldString, "\n"))
+	originalLines := strings.Split(m.content, "\n")
+	if len(searchLines) < 3 || len(originalLines) < len(searchLines) {
+		return nil
+	}
+	first := strings.TrimSpace(searchLines[0])
+	last := strings.TrimSpace(searchLines[len(searchLines)-1])
+	var out []string
+	for i := 0; i < len(originalLines); i++ {
+		if strings.TrimSpace(originalLines[i]) != first {
+			continue
+		}
+		for j := i + 2; j < len(originalLines); j++ {
+			if strings.TrimSpace(originalLines[j]) != last {
+				continue
+			}
+			block := originalLines[i : j+1]
+			if blockSimilarity(block, searchLines) >= 0.5 {
+				out = append(out, strings.Join(block, "\n"))
+			}
+			break
+		}
+	}
+	return out
+}
+
+func (m editMatcher) findContextAware() []string {
+	searchLines := trimTrailingEmptyLine(strings.Split(m.oldString, "\n"))
+	contentLines := strings.Split(m.content, "\n")
+	if len(searchLines) < 3 || len(contentLines) < len(searchLines) {
+		return nil
+	}
+	first := strings.TrimSpace(searchLines[0])
+	last := strings.TrimSpace(searchLines[len(searchLines)-1])
+	var out []string
+	for i := 0; i < len(contentLines); i++ {
+		if strings.TrimSpace(contentLines[i]) != first {
+			continue
+		}
+		for j := i + 2; j < len(contentLines); j++ {
+			if strings.TrimSpace(contentLines[j]) != last {
+				continue
+			}
+			block := contentLines[i : j+1]
+			if len(block) == len(searchLines) && blockSimilarity(block, searchLines) >= 0.5 {
+				out = append(out, strings.Join(block, "\n"))
+				break
+			}
+			break
+		}
+	}
+	return out
+}
+
+func normalizeLineEndings(input string) string {
+	input = strings.ReplaceAll(input, "\r\n", "\n")
+	return strings.ReplaceAll(input, "\r", "\n")
+}
+
+func detectLineEnding(input string) string {
+	if strings.Contains(input, "\r\n") {
+		return "\r\n"
+	}
+	return "\n"
+}
+
+func convertLineEndings(input, ending string) string {
+	if ending == "\n" {
+		return input
+	}
+	return strings.ReplaceAll(input, "\n", ending)
+}
+
+func normalizeQuotes(input string) string {
+	replacer := strings.NewReplacer("‘", "'", "’", "'", "“", `"`, "”", `"`)
+	return replacer.Replace(input)
+}
+
+func findQuoteNormalizedString(content, search string) string {
+	if strings.Contains(content, search) {
+		return search
+	}
+	normalizedContent := normalizeQuotes(content)
+	normalizedSearch := normalizeQuotes(search)
+	idx := strings.Index(normalizedContent, normalizedSearch)
+	if idx < 0 {
+		return ""
+	}
+	return content[idx : idx+len(search)]
+}
+
+func removeCommonIndentation(input string) string {
+	lines := strings.Split(input, "\n")
+	minIndent := -1
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		indent := len(line) - len(strings.TrimLeft(line, " \t"))
+		if minIndent < 0 || indent < minIndent {
+			minIndent = indent
+		}
+	}
+	if minIndent <= 0 {
+		return input
+	}
+	for i, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		if len(line) >= minIndent {
+			lines[i] = line[minIndent:]
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+func unescapeString(input string) string {
+	replacer := strings.NewReplacer("\\n", "\n", "\\t", "\t", "\\r", "\r", "\\'", "'", "\\\"", `"`, "\\`", "`", "\\\\", "\\", "\\$", "$")
+	return replacer.Replace(input)
+}
+
+func trimTrailingEmptyLine(lines []string) []string {
+	if len(lines) > 0 && lines[len(lines)-1] == "" {
+		return lines[:len(lines)-1]
+	}
+	return lines
+}
+
+func blockSimilarity(actual, search []string) float64 {
+	if len(actual) < 2 || len(search) < 2 {
+		return 0
+	}
+	total := 0
+	matches := 0
+	limit := min(len(actual), len(search)) - 1
+	for i := 1; i < limit; i++ {
+		actualLine := strings.TrimSpace(actual[i])
+		searchLine := strings.TrimSpace(search[i])
+		if actualLine == "" && searchLine == "" {
+			continue
+		}
+		total++
+		if actualLine == searchLine {
+			matches++
+		}
+	}
+	if total == 0 {
+		return 1
+	}
+	return float64(matches) / float64(total)
+}
+
+func uniqueStrings(input []string) []string {
+	if len(input) == 0 {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(input))
+	for _, item := range input {
+		if item == "" {
+			continue
+		}
+		if _, ok := seen[item]; ok {
+			continue
+		}
+		seen[item] = struct{}{}
+		out = append(out, item)
+	}
+	return out
+}
 
 func buildStoredHunks(before, oldString, newString string, replaceAll bool) ([]tools.EditStoredHunk, bool) {
 	if strings.TrimSpace(oldString) == "" {

@@ -43,6 +43,7 @@ type preferencesFieldKind int
 const (
 	preferencesFieldTheme preferencesFieldKind = iota
 	preferencesFieldCodeStyle
+	preferencesFieldEditForgiveness
 	preferencesFieldSpinner
 	preferencesFieldToggle
 	preferencesFieldInteger
@@ -87,6 +88,7 @@ func NewPreferencesDialog(current PreferencesValues, themeNames, codeStyles []st
 	if strings.TrimSpace(current.UI.CodeStyle) == "" {
 		current.UI.CodeStyle = codeStyles[0]
 	}
+	current.UI.EditForgiveness = config.NormalizeEditForgiveness(current.UI.EditForgiveness)
 	tabs := []preferencesTab{
 		{
 			Title: "General",
@@ -99,6 +101,7 @@ func NewPreferencesDialog(current PreferencesValues, themeNames, codeStyles []st
 			Fields: []preferencesField{
 				{Kind: preferencesFieldTheme, ID: "theme", Label: "Theme", Description: "Choose the active color theme"},
 				{Kind: preferencesFieldCodeStyle, ID: "code_style", Label: "Code Style", Description: "Choose syntax colors for markdown code blocks"},
+				{Kind: preferencesFieldEditForgiveness, ID: "edit_forgiveness", Label: "Edit Forgiveness", Description: "Choose how flexible the edit tool is when matching old_string"},
 				{Kind: preferencesFieldSpinner, ID: "spinner", Label: "Spinner", Description: "Choose the activity spinner style"},
 				{Kind: preferencesFieldToggle, ID: "half_blocks", Label: "Half Blocks", Description: "Use half-block separators for boxed user text"},
 				{Kind: preferencesFieldToggle, ID: "show_sidebar", Label: "Sidebar", Description: "Show the session sidebar"},
@@ -304,6 +307,8 @@ func (d *PreferencesDialog) adjustField(delta int) PreferencesAction {
 			idx = 0
 		}
 		d.draft.UI.CodeStyle = d.codeStyles[idx]
+	case preferencesFieldEditForgiveness:
+		d.draft.UI.EditForgiveness = config.NormalizeEditForgiveness(d.draft.UI.EditForgiveness + delta)
 	case preferencesFieldSpinner:
 		names := ui.SpinnerNames()
 		idx := ui.SpinnerIndex(d.draft.UI.Spinner)
@@ -390,6 +395,14 @@ func (d PreferencesDialog) dialog(width int, palette theme.Palette) ui.Node {
 				Width:       fieldWidth,
 				Focused:     focused,
 			}))
+		case preferencesFieldEditForgiveness:
+			fieldRows = append(fieldRows, ui.Fixed(ui.ChoiceRow{
+				Label:       field.Label,
+				Description: field.Description,
+				Value:       editForgivenessLabel(d.draft.UI.EditForgiveness),
+				Width:       fieldWidth,
+				Focused:     focused,
+			}))
 		case preferencesFieldSpinner:
 			style := ui.SpinnerStyleByID(d.draft.UI.Spinner)
 			value := ui.SpinnerFrame(d.draft.UI.Spinner, d.spinnerFrame) + " " + style.Label
@@ -460,7 +473,7 @@ func (d PreferencesDialog) dialog(width int, palette theme.Palette) ui.Node {
 					},
 				})),
 				ui.Fixed(buttons),
-				ui.Fixed(ui.Static{Content: fmt.Sprintf("Theme: %s  Code: %s  Spinner: %s  Tool Turns: %d", strings.TrimSpace(d.draft.UI.Theme), strings.TrimSpace(d.draft.UI.CodeStyle), ui.SpinnerStyleByID(d.draft.UI.Spinner).Label, d.draft.MaxToolLoopSteps)}),
+				ui.Fixed(ui.Static{Content: fmt.Sprintf("Theme: %s  Code: %s  Edit: %s  Spinner: %s  Tool Turns: %d", strings.TrimSpace(d.draft.UI.Theme), strings.TrimSpace(d.draft.UI.CodeStyle), editForgivenessShortLabel(d.draft.UI.EditForgiveness), ui.SpinnerStyleByID(d.draft.UI.Spinner).Label, d.draft.MaxToolLoopSteps)}),
 			},
 			Spacing: 2,
 		}),
@@ -517,6 +530,30 @@ func (d *PreferencesDialog) setToggle(id string, value bool) {
 	case "mouse":
 		d.draft.UI.Mouse = value
 	}
+}
+
+func editForgivenessLabel(level int) string {
+	switch config.NormalizeEditForgiveness(level) {
+	case 1:
+		return "1 Very strict"
+	case 2:
+		return "2 Line endings"
+	case 3:
+		return "3 Quotes and trims"
+	case 4:
+		return "4 Whitespace tolerant"
+	default:
+		return "5 Most forgiving"
+	}
+}
+
+func editForgivenessShortLabel(level int) string {
+	label := editForgivenessLabel(level)
+	parts := strings.SplitN(label, " ", 2)
+	if len(parts) == 2 {
+		return parts[1]
+	}
+	return label
 }
 
 func (d PreferencesDialog) currentFieldKind() preferencesFieldKind {
