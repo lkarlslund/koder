@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/lkarlslund/koder/internal/domain"
 )
@@ -115,7 +116,8 @@ func TestUpdateSessionTitleAndCountMessagesByRole(t *testing.T) {
 			if count != 1 {
 				t.Fatalf("unexpected user message count: %d", count)
 			}
-			if err := st.UpdateSessionTitle(context.Background(), session.ID, "Short Helpful Session Title"); err != nil {
+			generatedAt := time.Now().UTC().Truncate(time.Second)
+			if err := st.UpdateSessionTitle(context.Background(), session.ID, "Short Helpful Session Title", generatedAt, 1); err != nil {
 				t.Fatal(err)
 			}
 			sessions, err := st.ListSessions(context.Background())
@@ -124,6 +126,12 @@ func TestUpdateSessionTitleAndCountMessagesByRole(t *testing.T) {
 			}
 			if got := sessions[0].Title; got != "Short Helpful Session Title" {
 				t.Fatalf("unexpected title: %q", got)
+			}
+			if got := sessions[0].TitleRefreshCount; got != 1 {
+				t.Fatalf("unexpected title refresh count: %d", got)
+			}
+			if got := sessions[0].TitleGeneratedAt; !got.Equal(generatedAt) {
+				t.Fatalf("unexpected title generated at: %v", got)
 			}
 		})
 	}

@@ -38,7 +38,7 @@ type backend interface {
 	SetSessionPermissionProfile(context.Context, int64, string) error
 	AddSessionPermissionRule(context.Context, int64, domain.PermissionOverride) error
 	SetSessionToolStates(context.Context, int64, map[domain.ToolKind]bool) error
-	UpdateSessionTitle(context.Context, int64, string) error
+	UpdateSessionTitle(context.Context, int64, string, time.Time, int) error
 	UpdateSessionAgents(context.Context, int64, string, string, string, string, []domain.AgentsFile, time.Time) error
 	CountMessagesByRole(context.Context, int64, domain.MessageRole) (int, error)
 	SetSessionModel(context.Context, int64, string, string) error
@@ -235,8 +235,8 @@ func (s *Store) SetSessionToolStates(ctx context.Context, sessionID int64, state
 	return s.backend.SetSessionToolStates(ctx, sessionID, states)
 }
 
-func (s *Store) UpdateSessionTitle(ctx context.Context, sessionID int64, title string) error {
-	return s.backend.UpdateSessionTitle(ctx, sessionID, title)
+func (s *Store) UpdateSessionTitle(ctx context.Context, sessionID int64, title string, generatedAt time.Time, refreshCount int) error {
+	return s.backend.UpdateSessionTitle(ctx, sessionID, title, generatedAt, refreshCount)
 }
 
 func (s *Store) UpdateSessionAgents(

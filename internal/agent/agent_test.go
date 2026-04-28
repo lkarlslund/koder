@@ -2296,6 +2296,77 @@ func TestRunPromptRateLimitStatusCountsDown(t *testing.T) {
 	}
 }
 
+func TestRunPromptIgnoresSessionTitleRefreshFailure(t *testing.T) {
+	t.Parallel()
+
+	var requests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests++
+		switch requests {
+		case 1:
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"done"}}],"usage":{"total_tokens":1}}`))
+		case 2:
+			time.Sleep(100 * time.Millisecond)
+		default:
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ignored"}}],"usage":{"total_tokens":1}}`))
+		}
+	}))
+	defer server.Close()
+
+	cfg := testConfig(t)
+	cfg.Providers = map[string]config.Provider{
+		"test": {
+			BaseURL: server.URL + "/v1",
+			Timeout: 50 * time.Millisecond,
+		},
+	}
+	cfg.DefaultProvider = "test"
+	cfg.DefaultModel = "test-model"
+
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	engine := New(cfg, st, tools.NewRegistry(t.TempDir()), nil, t.TempDir())
+	session, err := st.CreateSession(context.Background(), "New Session", "test", "test-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	events, err := engine.RunPrompt(context.Background(), session, "hello")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var sawDone bool
+	for evt := range events {
+		if evt.Kind == domain.EventKindError {
+			t.Fatalf("expected title refresh timeout to stay internal, got %#v", evt)
+		}
+		if evt.Kind == domain.EventKindMessageDelta && evt.Text == "done" {
+			sawDone = true
+		}
+	}
+	if !sawDone {
+		t.Fatal("expected visible assistant response")
+	}
+
+	messages, parts, err := st.PartsForSession(context.Background(), session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	last := messages[len(messages)-1]
+	if last.Role != domain.MessageRoleAssistant {
+		t.Fatalf("expected assistant message, got %#v", last)
+	}
+	got := parts[last.ID]
+	if len(got) == 0 || got[0].Kind != domain.PartKindText || got[0].Body != "done" {
+		t.Fatalf("expected stored assistant text, got %#v", got)
+	}
+}
+
 func TestRunPromptPausesRepeatedIdenticalToolCalls(t *testing.T) {
 	t.Parallel()
 

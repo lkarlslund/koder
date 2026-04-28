@@ -166,6 +166,8 @@ type Session struct {
 	ID                int64
 	ParentID          *int64
 	Title             string
+	TitleGeneratedAt  time.Time
+	TitleRefreshCount int
 	ProviderID        string
 	ModelID           string
 	PermissionProfile string

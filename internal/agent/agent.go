@@ -655,9 +655,10 @@ func (e *Engine) continueModelTurn(ctx context.Context, session domain.Session, 
 		e.recordLifecycle(session.ID, "assistant_message_persisted", strings.TrimSpace(text), map[string]string{"message_id": strconv.FormatInt(assistantMsg.ID, 10)})
 		title, titleErr := e.maybeUpdateSessionTitle(ctx, session, client)
 		if titleErr != nil {
-			return titleErr
+			e.recordLifecycle(session.ID, "session_title_update_failed", titleErr.Error(), nil)
 		}
 		if strings.TrimSpace(title) != "" {
+			e.recordLifecycle(session.ID, "session_title_updated", title, nil)
 			out <- domain.Event{
 				Kind: domain.EventKindSessionTitle,
 				Text: title,
@@ -683,18 +684,15 @@ func (e *Engine) maxToolLoopSteps() int {
 }
 
 func (e *Engine) maybeUpdateSessionTitle(ctx context.Context, session domain.Session, client *provider.Client) (string, error) {
-	count, err := e.store.CountMessagesByRole(ctx, session.ID, domain.MessageRoleUser)
+	now := time.Now().UTC()
+	messages, prompt, err := e.titleSummaryMessages(ctx, session.ID)
 	if err != nil {
 		return "", err
 	}
-	if !shouldRefreshSessionTitle(count) {
+	if !shouldRefreshSessionTitle(session, messages, now) {
 		return "", nil
 	}
-	messages, err := e.titleSummaryMessages(ctx, session.ID)
-	if err != nil {
-		return "", err
-	}
-	resp, err := client.CompleteChat(ctx, e.chatRequest(session, domain.Chat{}, messages, false))
+	resp, err := client.CompleteChat(ctx, e.chatRequest(session, domain.Chat{}, prompt, false))
 	if err != nil {
 		return "", err
 	}
@@ -702,7 +700,8 @@ func (e *Engine) maybeUpdateSessionTitle(ctx context.Context, session domain.Ses
 	if title == "" {
 		return "", nil
 	}
-	if err := e.store.UpdateSessionTitle(ctx, session.ID, title); err != nil {
+	refreshCount, _ := sessionTitleRefreshState(session)
+	if err := e.store.UpdateSessionTitle(ctx, session.ID, title, now, refreshCount+1); err != nil {
 		return "", err
 	}
 	return title, nil
@@ -742,14 +741,59 @@ func (e *Engine) preserveThinkingEnabled(session domain.Session) bool {
 	return provider.PreserveThinkingEnabled(session.ModelID, e.modelPresetForSession(session))
 }
 
-func shouldRefreshSessionTitle(promptCount int) bool {
-	return promptCount == 1 || promptCount == 3 || promptCount == 10
+func shouldRefreshSessionTitle(session domain.Session, messages []domain.Message, now time.Time) bool {
+	refreshCount, generatedAt := sessionTitleRefreshState(session)
+	if refreshCount == 0 {
+		return hasCompletedUserAssistantExchange(messages)
+	}
+	if refreshCount == 1 && len(messages) > 5 {
+		if generatedAt.IsZero() {
+			return true
+		}
+		return now.Sub(generatedAt) >= time.Minute
+	}
+	return false
 }
 
-func (e *Engine) titleSummaryMessages(ctx context.Context, sessionID int64) ([]provider.Message, error) {
+func sessionTitleRefreshState(session domain.Session) (int, time.Time) {
+	if session.TitleRefreshCount > 0 {
+		return session.TitleRefreshCount, session.TitleGeneratedAt
+	}
+	if hasCustomSessionTitle(session.Title) {
+		generatedAt := session.TitleGeneratedAt
+		if generatedAt.IsZero() {
+			generatedAt = session.UpdatedAt
+		}
+		return 1, generatedAt
+	}
+	return 0, time.Time{}
+}
+
+func hasCompletedUserAssistantExchange(messages []domain.Message) bool {
+	var sawUser, sawAssistant bool
+	for _, msg := range messages {
+		switch msg.Role {
+		case domain.MessageRoleUser:
+			sawUser = true
+		case domain.MessageRoleAssistant:
+			sawAssistant = true
+		}
+		if sawUser && sawAssistant {
+			return true
+		}
+	}
+	return false
+}
+
+func hasCustomSessionTitle(title string) bool {
+	title = strings.TrimSpace(title)
+	return title != "" && title != "New Session"
+}
+
+func (e *Engine) titleSummaryMessages(ctx context.Context, sessionID int64) ([]domain.Message, []provider.Message, error) {
 	messages, partsByMessage, err := e.store.PartsForSession(ctx, sessionID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	start := max(0, len(messages)-8)
 	var transcript []string
@@ -763,7 +807,7 @@ func (e *Engine) titleSummaryMessages(ctx context.Context, sessionID int64) ([]p
 		}
 		transcript = append(transcript, fmt.Sprintf("%s: %s", msg.Role, content))
 	}
-	return []provider.Message{
+	return messages, []provider.Message{
 		{
 			Role: domain.MessageRoleSystem,
 			Content: "Write a concise session title of exactly 5 or 6 words. " +

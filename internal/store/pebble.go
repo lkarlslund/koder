@@ -418,9 +418,11 @@ func (b *pebbleBackend) SetSessionToolStates(ctx context.Context, sessionID int6
 	})
 }
 
-func (b *pebbleBackend) UpdateSessionTitle(ctx context.Context, sessionID int64, title string) error {
+func (b *pebbleBackend) UpdateSessionTitle(ctx context.Context, sessionID int64, title string, generatedAt time.Time, refreshCount int) error {
 	return b.updateSession(ctx, sessionID, func(session *domain.Session) {
 		session.Title = title
+		session.TitleGeneratedAt = generatedAt
+		session.TitleRefreshCount = refreshCount
 	})
 }
 
