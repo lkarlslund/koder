@@ -2352,7 +2352,6 @@ func (m *Model) invalidateBodyCache() {
 	cache.bodyValid = false
 	cache.renderedBodySurface = ui.Surface{}
 	if main := m.ensureMainScreenWidget(); main != nil {
-		main.Invalidate()
 		main.transcript.Invalidate()
 		main.composer.Invalidate()
 		main.sidebar.Invalidate()

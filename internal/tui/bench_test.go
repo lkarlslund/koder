@@ -254,6 +254,35 @@ func BenchmarkViewLinesFooterOnlyInvalidation(b *testing.B) {
 	}
 }
 
+func BenchmarkViewSurfaceComposerCursorDamage(b *testing.B) {
+	m := benchmarkModel(b, 140)
+	m.composer.SetValue("draft text")
+	_ = m.viewSurface()
+	msg := ui.KeyMsg{Type: ui.KeyLeft}
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		next, _ := m.handleKey(msg)
+		m = *next.(*Model)
+		_ = m.viewSurface()
+	}
+}
+
+func BenchmarkViewSurfaceStatusDamage(b *testing.B) {
+	m := benchmarkModel(b, 140)
+	m.busy.start(busyScopeTranscript, "Working ...")
+	_ = m.viewSurface()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		if i%2 == 0 {
+			m.busy.updateStatus("Working ...")
+		} else {
+			m.busy.updateStatus("Still working ...")
+		}
+		m.invalidateBodyCache()
+		_ = m.viewSurface()
+	}
+}
+
 func benchmarkNonsenseChunks(chunkCount, wordsPerChunk int, seed int64) []string {
 	rng := rand.New(rand.NewSource(seed))
 	syllables := []string{

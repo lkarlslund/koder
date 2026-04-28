@@ -128,6 +128,64 @@ func TestComposerUpdatesKeepMainScreenCacheAndInvalidateComposerArea(t *testing.
 	}
 }
 
+func TestComposerCursorMoveProducesBottomOnlyDamage(t *testing.T) {
+	m := Model{
+		cfg:         config.Default().WithStateDir(t.TempDir()),
+		palette:     theme.Default().Palette,
+		viewport:    newTranscriptViewport(80, 20),
+		renderCache: &modelRenderCache{},
+		composer:    textarea.New(),
+		width:       80,
+		height:      24,
+	}
+	m.composer.SetValue("draft text")
+
+	_ = m.viewSurface()
+	nextModel, _ := m.handleKey(ui.KeyMsg{Type: ui.KeyLeft})
+	next := nextModel.(*Model)
+
+	surface := next.viewSurface()
+	rects, ok := surface.DirtyRects()
+	if !ok || len(rects) == 0 {
+		t.Fatal("expected dirty rects after composer cursor move")
+	}
+	damageStart := surface.SurfaceHeight() - next.statusPaneHeight() - next.composerAreaHeight()
+	for _, rect := range rects {
+		if rect.Y < damageStart {
+			t.Fatalf("expected composer damage to stay near footer, got rect %#v with damage start %d", rect, damageStart)
+		}
+	}
+}
+
+func TestStatusUpdateProducesBottomOnlyDamage(t *testing.T) {
+	m := Model{
+		cfg:         config.Default().WithStateDir(t.TempDir()),
+		palette:     theme.Default().Palette,
+		viewport:    newTranscriptViewport(80, 20),
+		renderCache: &modelRenderCache{},
+		composer:    textarea.New(),
+		width:       80,
+		height:      24,
+	}
+	m.busy.start(busyScopeTranscript, "Working ...")
+
+	_ = m.viewSurface()
+	m.busy.updateStatus("Still working ...")
+	m.invalidateBodyCache()
+
+	surface := m.viewSurface()
+	rects, ok := surface.DirtyRects()
+	if !ok || len(rects) == 0 {
+		t.Fatal("expected dirty rects after status update")
+	}
+	damageStart := surface.SurfaceHeight() - m.statusPaneHeight()
+	for _, rect := range rects {
+		if rect.Y < damageStart {
+			t.Fatalf("expected status damage to stay on status rows, got rect %#v with damage start %d", rect, damageStart)
+		}
+	}
+}
+
 func TestShouldRefreshDetailsAfterEvent(t *testing.T) {
 	cases := []struct {
 		name string

@@ -13,6 +13,8 @@ type transcriptWidget struct {
 	model   *Model
 	bounds  ui.Rect
 	surface ui.Surface
+	damage  []ui.Rect
+	layout  bool
 	dirty   bool
 	valid   bool
 }
@@ -56,11 +58,25 @@ func (w *transcriptWidget) Surface(_ *ui.Context, bounds ui.Rect) ui.Surface {
 			_, _, _ = scroll.RenderVisible(&ui.Context{Palette: w.model.palette}, max(0, bounds.W), max(0, bounds.H), max(0, w.model.viewport.YOffset))
 		}
 	}
+	w.layout = !w.valid || w.bounds != bounds
+	if !w.layout {
+		w.damage = ui.DiffSurfaceDamage(w.surface, surface)
+	} else {
+		w.damage = fullSurfaceDamage(surface)
+	}
 	w.bounds = bounds
 	w.surface = surface
 	w.valid = true
 	w.dirty = false
 	return surface
+}
+
+func (w *transcriptWidget) DirtyRects() []ui.Rect {
+	return copyRects(w.damage)
+}
+
+func (w *transcriptWidget) LayoutChanged() bool {
+	return w != nil && w.layout
 }
 
 type composerAreaWidget struct {
@@ -70,6 +86,8 @@ type composerAreaWidget struct {
 	measureSize  ui.Size
 	measureValid bool
 	surface      ui.Surface
+	damage       []ui.Rect
+	layout       bool
 	dirty        bool
 	valid        bool
 }
@@ -118,7 +136,14 @@ func (w *composerAreaWidget) Surface(ctx *ui.Context, bounds ui.Rect) ui.Surface
 	}
 	element := w.model.renderComposerAreaElement()
 	surface := element.Render(ctx, ui.Rect{W: width, H: size.H})
-	w.bounds = ui.Rect{W: width, H: size.H}
+	nextBounds := ui.Rect{W: width, H: size.H}
+	w.layout = !w.valid || w.bounds != nextBounds
+	if !w.layout {
+		w.damage = ui.DiffSurfaceDamage(w.surface, surface)
+	} else {
+		w.damage = fullSurfaceDamage(surface)
+	}
+	w.bounds = nextBounds
 	w.surface = surface
 	w.valid = true
 	w.dirty = false
@@ -128,12 +153,22 @@ func (w *composerAreaWidget) Surface(ctx *ui.Context, bounds ui.Rect) ui.Surface
 	return surface
 }
 
+func (w *composerAreaWidget) DirtyRects() []ui.Rect {
+	return copyRects(w.damage)
+}
+
+func (w *composerAreaWidget) LayoutChanged() bool {
+	return w != nil && w.layout
+}
+
 type hashedElementWidget struct {
 	model    *Model
 	build    func(*Model) ui.Element
 	hash     func(*Model, ui.Rect) uint64
 	bounds   ui.Rect
 	surface  ui.Surface
+	damage   []ui.Rect
+	layout   bool
 	lastHash uint64
 	dirty    bool
 	valid    bool
@@ -169,12 +204,26 @@ func (w *hashedElementWidget) Surface(ctx *ui.Context, bounds ui.Rect) ui.Surfac
 		}
 	}
 	surface := element.Render(ctx, bounds)
+	w.layout = !w.valid || w.bounds != bounds
+	if !w.layout {
+		w.damage = ui.DiffSurfaceDamage(w.surface, surface)
+	} else {
+		w.damage = fullSurfaceDamage(surface)
+	}
 	w.bounds = bounds
 	w.surface = surface
 	w.lastHash = currentHash
 	w.valid = true
 	w.dirty = false
 	return surface
+}
+
+func (w *hashedElementWidget) DirtyRects() []ui.Rect {
+	return copyRects(w.damage)
+}
+
+func (w *hashedElementWidget) LayoutChanged() bool {
+	return w != nil && w.layout
 }
 
 type mainScreenWidget struct {
@@ -261,10 +310,31 @@ func (w *mainScreenWidget) Surface(ctx *ui.Context, bounds ui.Rect) ui.Surface {
 		}),
 	}
 	surface := ui.FlexBox{Direction: ui.DirectionVertical, Children: rootChildren}.Render(ctx, bounds)
-	if w.valid {
-		if rects := ui.DiffSurfaceDamage(w.surface, surface); len(rects) > 0 {
-			surface = surface.WithDirtyRects(rects...)
+	layoutChanged := !w.valid || w.bounds != bounds ||
+		w.transcript.LayoutChanged() || w.composer.LayoutChanged() ||
+		w.sidebar.LayoutChanged() || w.statusPane.LayoutChanged()
+	bodyRects := collectMainScreenDamage(
+		transcriptDirty, transcriptSurface, ui.Rect{W: transcriptBounds.W, H: transcriptBounds.H},
+		w.transcript.DirtyRects(),
+		composerDirty, composerSurface, ui.Rect{Y: max(0, surface.Size().H-statusSurface.Size().H-composerSurface.Size().H), W: composerBounds.W, H: composerSurface.Size().H},
+		w.composer.DirtyRects(),
+		sidebarDirty, sidebarSurface, ui.Rect{X: max(0, bounds.W-sidebarSurface.Size().W), W: sidebarSurface.Size().W, H: sidebarSurface.Size().H},
+		w.sidebar.DirtyRects(),
+		statusDirty, statusSurface, ui.Rect{Y: max(0, surface.Size().H-statusSurface.Size().H), W: statusSurface.Size().W, H: statusSurface.Size().H},
+		w.statusPane.DirtyRects(),
+	)
+	if layoutChanged {
+		if w.valid {
+			if rects := ui.DiffSurfaceDamage(w.surface, surface); len(rects) > 0 {
+				surface = surface.WithDirtyRects(rects...)
+			} else {
+				surface = surface.WithDirtyRects(ui.Rect{W: surface.SurfaceWidth(), H: surface.SurfaceHeight()})
+			}
+		} else if transcriptDirty || composerDirty || sidebarDirty || statusDirty {
+			surface = surface.WithDirtyRects(ui.Rect{W: surface.SurfaceWidth(), H: surface.SurfaceHeight()})
 		}
+	} else if len(bodyRects) > 0 {
+		surface = surface.WithDirtyRects(bodyRects...)
 	} else if transcriptDirty || composerDirty || sidebarDirty || statusDirty {
 		surface = surface.WithDirtyRects(ui.Rect{W: surface.SurfaceWidth(), H: surface.SurfaceHeight()})
 	}
@@ -275,6 +345,59 @@ func (w *mainScreenWidget) Surface(ctx *ui.Context, bounds ui.Rect) ui.Surface {
 	cache.renderedBodySurface = surface
 	cache.bodyValid = true
 	return surface
+}
+
+func fullSurfaceDamage(surface ui.Surface) []ui.Rect {
+	if surface.SurfaceWidth() <= 0 || surface.SurfaceHeight() <= 0 {
+		return nil
+	}
+	return []ui.Rect{{W: surface.SurfaceWidth(), H: surface.SurfaceHeight()}}
+}
+
+func copyRects(rects []ui.Rect) []ui.Rect {
+	if len(rects) == 0 {
+		return nil
+	}
+	out := make([]ui.Rect, len(rects))
+	copy(out, rects)
+	return out
+}
+
+func translateRects(rects []ui.Rect, dx, dy int) []ui.Rect {
+	if len(rects) == 0 {
+		return nil
+	}
+	out := make([]ui.Rect, 0, len(rects))
+	for _, rect := range rects {
+		if rect.Empty() {
+			continue
+		}
+		out = append(out, rect.Translate(dx, dy))
+	}
+	return out
+}
+
+func collectMainScreenDamage(
+	transcriptDirty bool, transcriptSurface ui.Surface, transcriptRect ui.Rect, transcriptRects []ui.Rect,
+	composerDirty bool, composerSurface ui.Surface, composerRect ui.Rect, composerRects []ui.Rect,
+	sidebarDirty bool, sidebarSurface ui.Surface, sidebarRect ui.Rect, sidebarRects []ui.Rect,
+	statusDirty bool, statusSurface ui.Surface, statusRect ui.Rect, statusRects []ui.Rect,
+) []ui.Rect {
+	damage := ui.DamageSet{}
+	addWidgetDamage := func(widgetDirty bool, surface ui.Surface, rect ui.Rect, rects []ui.Rect) {
+		if !widgetDirty {
+			return
+		}
+		if len(rects) == 0 {
+			rects = fullSurfaceDamage(surface)
+		}
+		damage.AddAll(translateRects(rects, rect.X, rect.Y))
+	}
+	addWidgetDamage(transcriptDirty, transcriptSurface, transcriptRect, transcriptRects)
+	addWidgetDamage(composerDirty, composerSurface, composerRect, composerRects)
+	addWidgetDamage(sidebarDirty, sidebarSurface, sidebarRect, sidebarRects)
+	addWidgetDamage(statusDirty, statusSurface, statusRect, statusRects)
+	return damage.Rects()
 }
 
 func sidebarWidgetHash(m *Model, bounds ui.Rect) uint64 {
