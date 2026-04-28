@@ -1109,6 +1109,16 @@ func renderElementInto(ctx *Context, element Element, bounds Rect, dst *Surface)
 	}
 }
 
+func PaintElementSurface(ctx *Context, element Element, bounds Rect) Surface {
+	if element == nil || bounds.W <= 0 || bounds.H <= 0 {
+		return Surface{}
+	}
+	if painter, ok := element.(Painter); ok {
+		return renderOwnedCanvas(ctx, bounds, painter)
+	}
+	return renderElementCapturedSurface(ctx, element, bounds)
+}
+
 func renderOwnedCanvas(ctx *Context, bounds Rect, painter Painter) Surface {
 	base := TransparentSurface(bounds.W, bounds.H)
 	if painter == nil {
@@ -1863,5 +1873,5 @@ func RenderSurface(ctx *Context, element Element, width, height int) Surface {
 	if height > 0 {
 		size.H = height
 	}
-	return element.Render(ctx, Rect{W: size.W, H: size.H})
+	return PaintElementSurface(ctx, element, Rect{W: size.W, H: size.H})
 }

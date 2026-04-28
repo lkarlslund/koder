@@ -209,7 +209,7 @@ func (w *composerAreaWidget) Surface(ctx *ui.Context, bounds ui.Rect) ui.Surface
 		return w.surface
 	}
 	w.Prepare(ctx, bounds)
-	surface := w.Element().Render(ctx, w.bounds)
+	surface := ui.PaintElementSurface(ctx, w.Element(), w.bounds)
 	w.surface = surface
 	cache := w.model.ensureRenderCache()
 	cache.composerAreaValid = true
@@ -311,7 +311,7 @@ func (w *hashedElementWidget) Surface(ctx *ui.Context, bounds ui.Rect) ui.Surfac
 	}
 	w.Prepare(bounds)
 	element := w.Element()
-	surface := element.Render(ctx, bounds)
+	surface := ui.PaintElementSurface(ctx, element, bounds)
 	w.surface = surface
 	return surface
 }
