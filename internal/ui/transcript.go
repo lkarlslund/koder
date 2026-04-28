@@ -91,6 +91,13 @@ func (e *CachedElement) Render(ctx *Context, bounds Rect) Surface {
 	return e.RenderCached(ctx, bounds.W).normalize(bounds.W, bounds.H)
 }
 
+func (e *CachedElement) Paint(ctx *Context, canvas Canvas) {
+	if e == nil || canvas.Width() <= 0 || canvas.Height() <= 0 {
+		return
+	}
+	canvas.BlitSurface(0, 0, e.RenderCached(ctx, canvas.Width()).normalize(canvas.Width(), canvas.Height()))
+}
+
 func (e *CachedElement) InvalidateCache() {
 	if e == nil {
 		return
@@ -208,6 +215,13 @@ func (t *RetainedTranscript) Measure(ctx *Context, constraints Constraints) Size
 
 func (t *RetainedTranscript) Render(ctx *Context, bounds Rect) Surface {
 	return PaintElementSurface(ctx, Transcript{Items: t.items}, bounds)
+}
+
+func (t *RetainedTranscript) Paint(ctx *Context, canvas Canvas) {
+	if t == nil || canvas.Width() <= 0 || canvas.Height() <= 0 {
+		return
+	}
+	t.RenderVisibleInto(ctx, canvas.Width(), canvas.Height(), 0, canvas.surface)
 }
 
 func (t *RetainedTranscript) ContentHeight(width int) int {

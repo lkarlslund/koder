@@ -1409,6 +1409,9 @@ func (s Spacer) Render(_ *Context, bounds Rect) Surface {
 	return TransparentSurface(bounds.W, bounds.H)
 }
 
+func (s Spacer) Paint(_ *Context, canvas Canvas) {
+}
+
 type FlexDirection int
 
 const (

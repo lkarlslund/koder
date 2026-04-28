@@ -291,6 +291,17 @@ func (e bashToolRunCardElement) Render(ctx *ui.Context, bounds ui.Rect) ui.Surfa
 	return surface
 }
 
+func (e bashToolRunCardElement) Paint(_ *ui.Context, canvas ui.Canvas) {
+	if canvas.Width() <= 0 || canvas.Height() <= 0 {
+		return
+	}
+	width := e.Width
+	if width <= 0 {
+		width = canvas.Width()
+	}
+	canvas.BlitSurface(0, 0, e.Run.CardSurface(e.Palette, width, e.ExpandedOutput, e.ExpandedCommand).Normalize(canvas.Width(), canvas.Height()))
+}
+
 func (e readToolRunCardElement) Measure(_ *ui.Context, c ui.Constraints) ui.Size {
 	width := e.Width
 	if width <= 0 {
@@ -308,6 +319,17 @@ func (e readToolRunCardElement) Render(ctx *ui.Context, bounds ui.Rect) ui.Surfa
 		surface.RegisterControls(ctx.Runtime, bounds.X, bounds.Y)
 	}
 	return surface
+}
+
+func (e readToolRunCardElement) Paint(_ *ui.Context, canvas ui.Canvas) {
+	if canvas.Width() <= 0 || canvas.Height() <= 0 {
+		return
+	}
+	width := e.Width
+	if width <= 0 {
+		width = canvas.Width()
+	}
+	canvas.BlitSurface(0, 0, e.Run.CardSurface(e.Palette, width, e.ExpandedOutput, false).Normalize(canvas.Width(), canvas.Height()))
 }
 
 func (e writeToolRunCardElement) Measure(_ *ui.Context, c ui.Constraints) ui.Size {
@@ -329,6 +351,17 @@ func (e writeToolRunCardElement) Render(ctx *ui.Context, bounds ui.Rect) ui.Surf
 	return surface
 }
 
+func (e writeToolRunCardElement) Paint(_ *ui.Context, canvas ui.Canvas) {
+	if canvas.Width() <= 0 || canvas.Height() <= 0 {
+		return
+	}
+	width := e.Width
+	if width <= 0 {
+		width = canvas.Width()
+	}
+	canvas.BlitSurface(0, 0, e.Run.CardSurface(e.Palette, width, e.ExpandedOutput, false).Normalize(canvas.Width(), canvas.Height()))
+}
+
 func (e editToolRunCardElement) Measure(_ *ui.Context, c ui.Constraints) ui.Size {
 	width := e.Width
 	if width <= 0 {
@@ -348,6 +381,17 @@ func (e editToolRunCardElement) Render(ctx *ui.Context, bounds ui.Rect) ui.Surfa
 	return surface
 }
 
+func (e editToolRunCardElement) Paint(_ *ui.Context, canvas ui.Canvas) {
+	if canvas.Width() <= 0 || canvas.Height() <= 0 {
+		return
+	}
+	width := e.Width
+	if width <= 0 {
+		width = canvas.Width()
+	}
+	canvas.BlitSurface(0, 0, e.Run.CardSurface(e.Palette, width, e.ExpandedOutput, false).Normalize(canvas.Width(), canvas.Height()))
+}
+
 func (e genericToolRunCardElement) Measure(_ *ui.Context, c ui.Constraints) ui.Size {
 	width := e.Width
 	if width <= 0 {
@@ -365,6 +409,17 @@ func (e genericToolRunCardElement) Render(ctx *ui.Context, bounds ui.Rect) ui.Su
 		surface.RegisterControls(ctx.Runtime, bounds.X, bounds.Y)
 	}
 	return surface
+}
+
+func (e genericToolRunCardElement) Paint(_ *ui.Context, canvas ui.Canvas) {
+	if canvas.Width() <= 0 || canvas.Height() <= 0 {
+		return
+	}
+	width := e.Width
+	if width <= 0 {
+		width = canvas.Width()
+	}
+	canvas.BlitSurface(0, 0, e.Run.CardSurface(e.Palette, width, e.ExpandedOutput, e.ExpandedCommand).Normalize(canvas.Width(), canvas.Height()))
 }
 
 func (i *bashToolRunTranscriptItem) Refresh(m *Model) {

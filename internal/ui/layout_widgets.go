@@ -431,6 +431,14 @@ func (s ScrollBox) Render(ctx *Context, bounds Rect) Surface {
 	return surface.normalize(bounds.W, bounds.H)
 }
 
+func (s ScrollBox) Paint(ctx *Context, canvas Canvas) {
+	if canvas.Width() <= 0 || canvas.Height() <= 0 {
+		return
+	}
+	surface, _, _ := s.RenderVisible(ctx, canvas.Width(), canvas.Height(), s.OffsetY)
+	canvas.BlitSurface(0, 0, surface)
+}
+
 func (s ScrollBox) RenderVisible(ctx *Context, width, height, offset int) (Surface, int, int) {
 	base := TransparentSurface(width, height)
 	if s.Child == nil || width <= 0 || height <= 0 {
