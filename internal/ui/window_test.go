@@ -92,3 +92,13 @@ func TestWindowFrameRenderMatchesInnerBorder(t *testing.T) {
 		t.Fatal("expected window frame render to preserve controls")
 	}
 }
+
+func TestBodyLayoutWrapperMatchesInnerElement(t *testing.T) {
+	palette := theme.Default().Palette
+	element := BodyLayout{
+		MainElement:    Static{Content: "main"},
+		SidebarElement: Sidebar{Child: Static{Content: "side"}, Width: 20, Height: 4},
+		ShowSidebar:    true,
+	}
+	assertElementRenderMatchesWrapper(t, &Context{Palette: palette, Runtime: &Runtime{}}, element, element.element(), Rect{W: 40, H: 4})
+}

@@ -32,7 +32,7 @@ func (i InputField) Measure(_ *Context, constraints Constraints) Size {
 }
 
 func (i InputField) Render(_ *Context, bounds Rect) Surface {
-	return i.render(maxInt(1, bounds.W)).normalize(bounds.W, bounds.H)
+	return renderOwnedCanvas(nil, bounds, i)
 }
 
 func (i InputField) render(width int) Surface {
@@ -111,4 +111,11 @@ func cursorDisplay(input string, visible bool) string {
 		return " "
 	}
 	return input
+}
+
+func (i InputField) Paint(_ *Context, canvas Canvas) {
+	if canvas.Width() <= 0 || canvas.Height() <= 0 {
+		return
+	}
+	canvas.BlitSurface(0, 0, i.render(maxInt(1, canvas.Width())).normalize(canvas.Width(), canvas.Height()))
 }

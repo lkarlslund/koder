@@ -62,11 +62,23 @@ func (c *RetainedColumn) Measure(ctx *Context, constraints Constraints) Size {
 }
 
 func (c *RetainedColumn) Render(ctx *Context, bounds Rect) Surface {
+	return renderOwnedCanvas(ctx, bounds, c)
+}
+
+func (c *RetainedColumn) Paint(ctx *Context, canvas Canvas) {
+	if c == nil || canvas.Width() <= 0 || canvas.Height() <= 0 {
+		return
+	}
 	items := make([]Child, 0, len(c.children))
 	for _, child := range c.children {
 		if child != nil {
 			items = append(items, Fixed(child))
 		}
 	}
-	return FlexBox{Direction: DirectionVertical, Children: items, Spacing: c.spacing}.Render(ctx, bounds)
+	renderElementInto(ctx, FlexBox{Direction: DirectionVertical, Children: items, Spacing: c.spacing}, Rect{
+		X: canvas.origin.X,
+		Y: canvas.origin.Y,
+		W: canvas.Width(),
+		H: canvas.Height(),
+	}, canvas.surface)
 }

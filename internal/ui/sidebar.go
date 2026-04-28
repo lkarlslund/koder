@@ -88,7 +88,7 @@ func (l BodyLayout) Measure(ctx *Context, constraints Constraints) Size {
 }
 
 func (l BodyLayout) Render(ctx *Context, bounds Rect) Surface {
-	return l.element().Render(ctx, bounds)
+	return renderOwnedCanvas(ctx, bounds, l)
 }
 
 func (l BodyLayout) element() Element {
@@ -116,6 +116,18 @@ func (l BodyLayout) sidebarWidth() int {
 	return sidebar.Width
 }
 
+func (l BodyLayout) Paint(ctx *Context, canvas Canvas) {
+	if canvas.Width() <= 0 || canvas.Height() <= 0 {
+		return
+	}
+	renderElementInto(ctx, l.element(), Rect{
+		X: canvas.origin.X,
+		Y: canvas.origin.Y,
+		W: canvas.Width(),
+		H: canvas.Height(),
+	}, canvas.surface)
+}
+
 type Footer struct {
 	Parts    []string
 	Elements []Element
@@ -139,14 +151,7 @@ func (f Footer) Measure(ctx *Context, constraints Constraints) Size {
 }
 
 func (f Footer) Render(ctx *Context, bounds Rect) Surface {
-	content := FlexBox{Direction: DirectionVertical, Children: f.children()}
-	if len(f.Elements) == 0 {
-		content = FlexBox{Direction: DirectionVertical, Children: make([]Child, 0, len(f.Parts))}
-		for _, part := range f.Parts {
-			content.Children = append(content.Children, Fixed(Label{Text: part}))
-		}
-	}
-	return f.renderContent(ctx, content).normalize(bounds.W, bounds.H)
+	return renderOwnedCanvas(ctx, bounds, f)
 }
 
 func (f Footer) children() []Child {
@@ -181,4 +186,18 @@ func (f Footer) renderContent(ctx *Context, content Element) Surface {
 		surface = surface.placeAt(1, 1, rendered)
 	}
 	return surface
+}
+
+func (f Footer) Paint(ctx *Context, canvas Canvas) {
+	if canvas.Width() <= 0 || canvas.Height() <= 0 {
+		return
+	}
+	content := FlexBox{Direction: DirectionVertical, Children: f.children()}
+	if len(f.Elements) == 0 {
+		content = FlexBox{Direction: DirectionVertical, Children: make([]Child, 0, len(f.Parts))}
+		for _, part := range f.Parts {
+			content.Children = append(content.Children, Fixed(Label{Text: part}))
+		}
+	}
+	canvas.BlitSurface(0, 0, f.renderContent(ctx, content).normalize(canvas.Width(), canvas.Height()))
 }

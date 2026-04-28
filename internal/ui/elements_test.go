@@ -234,6 +234,24 @@ func TestHitBoxRenderMatchesRenderTo(t *testing.T) {
 	assertRenderMatchesRenderTo(t, ctx, element, Rect{W: 2, H: 1})
 }
 
+func TestInputFieldRendersExpectedFrame(t *testing.T) {
+	element := InputField{
+		Value:         "draft",
+		ContentBefore: "dra",
+		ContentCursor: "f",
+		ContentAfter:  "t",
+		CursorVisible: true,
+		Width:         10,
+	}
+	got := element.Render(nil, Rect{W: 10, H: 3})
+	if got.SurfaceWidth() != 10 || got.SurfaceHeight() != 3 {
+		t.Fatalf("expected 10x3 input field, got %dx%d", got.SurfaceWidth(), got.SurfaceHeight())
+	}
+	if text := got.SurfaceCellText(0, 0); text == "" {
+		t.Fatal("expected top border glyph")
+	}
+}
+
 func TestSimpleWidgetRenderToAvoidsOwnerSurfaceAllocation(t *testing.T) {
 	element := Paragraph{Text: "alpha beta gamma"}
 
