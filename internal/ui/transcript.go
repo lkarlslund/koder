@@ -569,7 +569,7 @@ func (m UserMessage) Measure(_ *Context, constraints Constraints) Size {
 }
 
 func (m UserMessage) Render(_ *Context, bounds Rect) Surface {
-	return renderOwnedSurface(nil, bounds, m.RenderTo)
+	return renderOwnedCanvas(nil, bounds, m)
 }
 
 func (m UserMessage) RenderTo(_ *Context, bounds Rect, dst *Surface) {
@@ -577,6 +577,73 @@ func (m UserMessage) RenderTo(_ *Context, bounds Rect, dst *Surface) {
 		return
 	}
 	*dst = dst.placeAt(bounds.X, bounds.Y, m.render().normalize(bounds.W, bounds.H))
+}
+
+func (m UserMessage) Paint(_ *Context, canvas Canvas) {
+	if canvas.Width() <= 0 || canvas.Height() <= 0 {
+		return
+	}
+	bar := m.PromptGlyph + " "
+	bg := cellColor(m.Palette.UserTextBackground)
+	barStyle := CellStyle{BG: bg, FG: cellColor(m.Palette.UserAccentBar)}
+	textStyle := CellStyle{BG: bg, FG: cellColor(m.Palette.UserTextForeground)}
+	timestampStyle := CellStyle{BG: bg, FG: cellColor(m.Palette.UserTimestampForeground)}
+	content := strings.TrimSpace(m.Body)
+	contentWidth := maxInt(1, canvas.Width()-lipgloss.Width(bar))
+	lines := []string{}
+	if content != "" {
+		for _, line := range strings.Split(content, "\n") {
+			lines = append(lines, WrapUserMessageLine(line, contentWidth)...)
+		}
+	}
+	stampStart := -1
+	if m.Stamp != "" {
+		stampLines := WrapUserMessageLine(m.Stamp, contentWidth)
+		stampStart = len(lines)
+		lines = append(lines, stampLines...)
+	}
+	paintBarLine := func(y int, half string) {
+		if y < 0 || y >= canvas.Height() {
+			return
+		}
+		if m.HalfBlocks {
+			if half == "" {
+				return
+			}
+			canvas.SetCell(0, y, newCell(GlyphFromString(half), 1, CellStyle{FG: cellColor(m.Palette.UserAccentBar)}))
+			for x := 1; x < canvas.Width(); x++ {
+				canvas.SetCell(x, y, newCell(GlyphFromString(half), 1, CellStyle{FG: cellColor(m.Palette.UserTextBackground)}))
+			}
+			return
+		}
+		canvas.Fill(Rect{Y: y, W: canvas.Width(), H: 1}, CellStyle{BG: bg})
+		canvas.WriteText(0, y, PlainTruncate(bar, canvas.Width(), ""), barStyle)
+	}
+	startRow := 0
+	endRow := canvas.Height()
+	if m.HalfBlocks {
+		startRow = 1
+		endRow = max(startRow, canvas.Height()-1)
+	}
+	for y := startRow; y < endRow; y++ {
+		canvas.Fill(Rect{Y: y, W: canvas.Width(), H: 1}, CellStyle{BG: bg})
+	}
+	paintBarLine(0, "▄")
+	for idx, line := range lines {
+		row := idx + 1
+		if row >= canvas.Height() {
+			break
+		}
+		canvas.WriteText(0, row, PlainTruncate(bar, canvas.Width(), ""), barStyle)
+		style := textStyle
+		if stampStart >= 0 && idx >= stampStart {
+			style = timestampStyle
+		}
+		if lipgloss.Width(bar) < canvas.Width() {
+			canvas.WriteText(lipgloss.Width(bar), row, PlainTruncate(line, canvas.Width()-lipgloss.Width(bar), ""), style)
+		}
+	}
+	paintBarLine(canvas.Height()-1, "▀")
 }
 
 func (m UserMessage) render() Surface {
