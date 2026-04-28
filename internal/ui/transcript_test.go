@@ -278,7 +278,7 @@ func TestAssistantAndReasoningRenderMatchRenderTo(t *testing.T) {
 	}, Rect{W: 18, H: 3})
 }
 
-func TestTranscriptLeafRenderToAvoidsOwnerSurfaceAllocation(t *testing.T) {
+func TestTranscriptLeafRenderAvoidsExtraOwnerSurfaceAllocation(t *testing.T) {
 	palette := theme.Default().Palette
 	element := AssistantMessage{
 		Palette: palette,
@@ -296,8 +296,8 @@ func TestTranscriptLeafRenderToAvoidsOwnerSurfaceAllocation(t *testing.T) {
 	element.RenderTo(&Context{Palette: palette}, Rect{W: 18, H: 3}, &dst)
 	renderToStats := SurfaceAllocationStatsSnapshot()
 
-	if renderStats.Transparent <= renderToStats.Transparent {
-		t.Fatalf("expected Render to allocate at least one additional transparent owner surface, got render=%#v renderTo=%#v", renderStats, renderToStats)
+	if renderStats.Transparent > renderToStats.Transparent {
+		t.Fatalf("expected Render to avoid allocating more transparent owner surfaces than RenderTo, got render=%#v renderTo=%#v", renderStats, renderToStats)
 	}
 }
 

@@ -763,7 +763,7 @@ func (m AssistantMessage) Measure(_ *Context, constraints Constraints) Size {
 }
 
 func (m AssistantMessage) Render(_ *Context, bounds Rect) Surface {
-	return renderOwnedSurface(nil, bounds, m.RenderTo)
+	return renderOwnedCanvas(nil, bounds, m)
 }
 
 func (m AssistantMessage) RenderTo(_ *Context, bounds Rect, dst *Surface) {
@@ -771,6 +771,56 @@ func (m AssistantMessage) RenderTo(_ *Context, bounds Rect, dst *Surface) {
 		return
 	}
 	*dst = dst.placeAt(bounds.X, bounds.Y, m.render().normalize(bounds.W, bounds.H))
+}
+
+func (m AssistantMessage) Paint(ctx *Context, canvas Canvas) {
+	if canvas.Width() <= 0 || canvas.Height() <= 0 {
+		return
+	}
+	lines := make([][]StyledSpan, 0, 1)
+	if m.Stamp != "" {
+		lines = append(lines, []StyledSpan{{
+			Text:  m.Stamp,
+			Style: CellStyle{FG: cellColor(m.Palette.AssistantTimestampText)},
+		}})
+	}
+	body := m.StyledBody
+	if len(body) == 0 {
+		body = []StyledSpan{{Text: strings.TrimSpace(m.Body)}}
+	}
+	baseStyle := m.BaseStyle
+	if baseStyle.isZero() {
+		baseStyle = CellStyle{FG: cellColor(m.Palette.MarkdownText)}
+	}
+	lines = append(lines, WrapStyledText(body, m.Width)...)
+	for y, line := range lines {
+		if y >= canvas.Height() {
+			break
+		}
+		col := 0
+		for _, span := range line {
+			if span.Text == "" {
+				continue
+			}
+			style := baseStyle.Merge(span.Style)
+			startCol := col
+			canvas.WriteText(col, y, span.Text, style)
+			col += PlainWidth(span.Text)
+			if ctx == nil || ctx.Runtime == nil || strings.TrimSpace(span.ControlID) == "" || !span.Enabled {
+				continue
+			}
+			left := max(0, startCol)
+			right := min(canvas.Width(), col)
+			if right <= left {
+				continue
+			}
+			ctx.Runtime.Register(Control{
+				ID:      span.ControlID,
+				Rect:    Rect{X: canvas.origin.X + left, Y: canvas.origin.Y + y, W: right - left, H: 1},
+				Enabled: true,
+			})
+		}
+	}
 }
 
 func (m AssistantMessage) render() Surface {
@@ -812,7 +862,7 @@ func (b ReasoningBlock) Measure(_ *Context, constraints Constraints) Size {
 }
 
 func (b ReasoningBlock) Render(_ *Context, bounds Rect) Surface {
-	return renderOwnedSurface(nil, bounds, b.RenderTo)
+	return renderOwnedCanvas(nil, bounds, b)
 }
 
 func (b ReasoningBlock) RenderTo(_ *Context, bounds Rect, dst *Surface) {
@@ -820,6 +870,25 @@ func (b ReasoningBlock) RenderTo(_ *Context, bounds Rect, dst *Surface) {
 		return
 	}
 	*dst = dst.placeAt(bounds.X, bounds.Y, b.render().normalize(bounds.W, bounds.H))
+}
+
+func (b ReasoningBlock) Paint(_ *Context, canvas Canvas) {
+	if canvas.Width() <= 0 || canvas.Height() <= 0 {
+		return
+	}
+	content := strings.TrimSpace(b.Body)
+	if content == "" {
+		return
+	}
+	style := CellStyle{BG: cellColor(b.Palette.ReasoningBackground), FG: cellColor(b.Palette.ReasoningText)}.WithItalic(true)
+	lines := wrapStyledLines(content, b.Width)
+	for y, line := range lines {
+		if y >= canvas.Height() {
+			break
+		}
+		canvas.Fill(Rect{Y: y, W: canvas.Width(), H: 1}, style)
+		canvas.WriteText(0, y, PlainTruncate(line, canvas.Width(), ""), style)
+	}
 }
 
 func (b ReasoningBlock) render() Surface {
