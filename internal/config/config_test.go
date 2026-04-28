@@ -35,6 +35,9 @@ func TestLoadWritesDefaultConfig(t *testing.T) {
 	if cfg.UI.Spinner != "dots" {
 		t.Fatalf("expected default spinner dots, got %q", cfg.UI.Spinner)
 	}
+	if cfg.UI.CodeStyle != "github" {
+		t.Fatalf("expected default code style github, got %q", cfg.UI.CodeStyle)
+	}
 	if !cfg.UI.CursorBlink {
 		t.Fatal("expected cursor blinking enabled by default")
 	}
@@ -89,11 +92,15 @@ func TestApplyDefaultsInfersProviderKindAndContextWindow(t *testing.T) {
 func TestApplyDefaultsFillsMissingUISpinner(t *testing.T) {
 	cfg := Default()
 	cfg.UI.Spinner = ""
+	cfg.UI.CodeStyle = ""
 
 	cfg.applyDefaults()
 
 	if cfg.UI.Spinner != "dots" {
 		t.Fatalf("expected spinner default applied, got %q", cfg.UI.Spinner)
+	}
+	if cfg.UI.CodeStyle != "github" {
+		t.Fatalf("expected code style default applied, got %q", cfg.UI.CodeStyle)
 	}
 }
 

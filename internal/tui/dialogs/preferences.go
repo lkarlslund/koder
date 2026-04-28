@@ -42,6 +42,7 @@ type preferencesFieldKind int
 
 const (
 	preferencesFieldTheme preferencesFieldKind = iota
+	preferencesFieldCodeStyle
 	preferencesFieldSpinner
 	preferencesFieldToggle
 	preferencesFieldInteger
@@ -63,6 +64,7 @@ type PreferencesDialog struct {
 	original     PreferencesValues
 	draft        PreferencesValues
 	themeNames   []string
+	codeStyles   []string
 	spinnerFrame int
 	tabs         []preferencesTab
 	tabList      ui.VerticalTabs
@@ -72,9 +74,18 @@ type PreferencesDialog struct {
 	editors      map[string]textarea.Model
 }
 
-func NewPreferencesDialog(current PreferencesValues, themeNames []string) PreferencesDialog {
+func NewPreferencesDialog(current PreferencesValues, themeNames, codeStyles []string) PreferencesDialog {
 	if len(themeNames) == 0 {
 		themeNames = []string{theme.Default().Name}
+	}
+	if len(codeStyles) == 0 {
+		codeStyles = []string{"github"}
+	}
+	if strings.TrimSpace(current.UI.Theme) == "" {
+		current.UI.Theme = themeNames[0]
+	}
+	if strings.TrimSpace(current.UI.CodeStyle) == "" {
+		current.UI.CodeStyle = codeStyles[0]
 	}
 	tabs := []preferencesTab{
 		{
@@ -87,6 +98,7 @@ func NewPreferencesDialog(current PreferencesValues, themeNames []string) Prefer
 			Title: "Appearance",
 			Fields: []preferencesField{
 				{Kind: preferencesFieldTheme, ID: "theme", Label: "Theme", Description: "Choose the active color theme"},
+				{Kind: preferencesFieldCodeStyle, ID: "code_style", Label: "Code Style", Description: "Choose syntax colors for markdown code blocks"},
 				{Kind: preferencesFieldSpinner, ID: "spinner", Label: "Spinner", Description: "Choose the activity spinner style"},
 				{Kind: preferencesFieldToggle, ID: "half_blocks", Label: "Half Blocks", Description: "Use half-block separators for boxed user text"},
 				{Kind: preferencesFieldToggle, ID: "show_sidebar", Label: "Sidebar", Description: "Show the session sidebar"},
@@ -111,6 +123,7 @@ func NewPreferencesDialog(current PreferencesValues, themeNames []string) Prefer
 		original:   current,
 		draft:      current,
 		themeNames: themeNames,
+		codeStyles: codeStyles,
 		tabs:       tabs,
 		tabList: ui.VerticalTabs{
 			Tabs: tabNames,
@@ -274,6 +287,23 @@ func (d *PreferencesDialog) adjustField(delta int) PreferencesAction {
 			idx = 0
 		}
 		d.draft.UI.Theme = d.themeNames[idx]
+	case preferencesFieldCodeStyle:
+		idx := 0
+		current := strings.TrimSpace(d.draft.UI.CodeStyle)
+		for i, name := range d.codeStyles {
+			if name == current {
+				idx = i
+				break
+			}
+		}
+		idx += delta
+		if idx < 0 {
+			idx = len(d.codeStyles) - 1
+		}
+		if idx >= len(d.codeStyles) {
+			idx = 0
+		}
+		d.draft.UI.CodeStyle = d.codeStyles[idx]
 	case preferencesFieldSpinner:
 		names := ui.SpinnerNames()
 		idx := ui.SpinnerIndex(d.draft.UI.Spinner)
@@ -352,6 +382,14 @@ func (d PreferencesDialog) dialog(width int, palette theme.Palette) ui.Node {
 				Width:       fieldWidth,
 				Focused:     focused,
 			}))
+		case preferencesFieldCodeStyle:
+			fieldRows = append(fieldRows, ui.Fixed(ui.ChoiceRow{
+				Label:       field.Label,
+				Description: field.Description,
+				Value:       d.draft.UI.CodeStyle,
+				Width:       fieldWidth,
+				Focused:     focused,
+			}))
 		case preferencesFieldSpinner:
 			style := ui.SpinnerStyleByID(d.draft.UI.Spinner)
 			value := ui.SpinnerFrame(d.draft.UI.Spinner, d.spinnerFrame) + " " + style.Label
@@ -422,7 +460,7 @@ func (d PreferencesDialog) dialog(width int, palette theme.Palette) ui.Node {
 					},
 				})),
 				ui.Fixed(buttons),
-				ui.Fixed(ui.Static{Content: fmt.Sprintf("Theme: %s  Spinner: %s  Tool Turns: %d", strings.TrimSpace(d.draft.UI.Theme), ui.SpinnerStyleByID(d.draft.UI.Spinner).Label, d.draft.MaxToolLoopSteps)}),
+				ui.Fixed(ui.Static{Content: fmt.Sprintf("Theme: %s  Code: %s  Spinner: %s  Tool Turns: %d", strings.TrimSpace(d.draft.UI.Theme), strings.TrimSpace(d.draft.UI.CodeStyle), ui.SpinnerStyleByID(d.draft.UI.Spinner).Label, d.draft.MaxToolLoopSteps)}),
 			},
 			Spacing: 2,
 		}),

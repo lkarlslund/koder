@@ -6,10 +6,20 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 	"github.com/lkarlslund/koder/internal/theme"
+	"github.com/lkarlslund/koder/internal/ui"
 )
 
+func findSpanWithText(spans []ui.StyledSpan, needle string) (ui.StyledSpan, bool) {
+	for _, span := range spans {
+		if strings.Contains(span.Text, needle) {
+			return span, true
+		}
+	}
+	return ui.StyledSpan{}, false
+}
+
 func TestRenderFormatsHeadingsAndLists(t *testing.T) {
-	renderer, err := New(theme.Default().Palette)
+	renderer, err := New(theme.Default().Palette, "")
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -31,7 +41,7 @@ func TestRenderFormatsHeadingsAndLists(t *testing.T) {
 }
 
 func TestRenderKeepsConsecutiveBulletItemsTight(t *testing.T) {
-	renderer, err := New(theme.Default().Palette)
+	renderer, err := New(theme.Default().Palette, "")
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -47,7 +57,7 @@ func TestRenderKeepsConsecutiveBulletItemsTight(t *testing.T) {
 }
 
 func TestRenderKeepsConsecutiveOrderedItemsTight(t *testing.T) {
-	renderer, err := New(theme.Default().Palette)
+	renderer, err := New(theme.Default().Palette, "")
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -63,7 +73,7 @@ func TestRenderKeepsConsecutiveOrderedItemsTight(t *testing.T) {
 }
 
 func TestRenderFormatsFencedCodeBlock(t *testing.T) {
-	renderer, err := New(theme.Default().Palette)
+	renderer, err := New(theme.Default().Palette, "")
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -81,8 +91,64 @@ func TestRenderFormatsFencedCodeBlock(t *testing.T) {
 	}
 }
 
+func TestRenderHighlightsCodeWithConfiguredChromaStyle(t *testing.T) {
+	githubRenderer, err := New(theme.Default().Palette, "github")
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	monokaiRenderer, err := New(theme.Default().Palette, "monokai")
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	input := "```go\nconst answer = 42\n```"
+
+	githubSpan, ok := findSpanWithText(githubRenderer.RenderStyled(input), "const")
+	if !ok || !githubSpan.Style.FG.Valid() {
+		t.Fatalf("expected highlighted const span, got %#v", githubRenderer.RenderStyled(input))
+	}
+	monokaiSpan, ok := findSpanWithText(monokaiRenderer.RenderStyled(input), "const")
+	if !ok || !monokaiSpan.Style.FG.Valid() {
+		t.Fatalf("expected highlighted const span, got %#v", monokaiRenderer.RenderStyled(input))
+	}
+	if githubSpan.Style.FG == monokaiSpan.Style.FG {
+		t.Fatalf("expected different chroma styles to produce different colors, got %#v and %#v", githubSpan.Style, monokaiSpan.Style)
+	}
+
+	invalidRenderer, err := New(theme.Default().Palette, "not-a-style")
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if invalidRenderer.codeStyle != "github" {
+		t.Fatalf("expected invalid style to normalize to github, got %q", invalidRenderer.codeStyle)
+	}
+}
+
+func TestRenderFormatsAnnotatedCodeBlock(t *testing.T) {
+	renderer, err := New(theme.Default().Palette, "")
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	input := strings.Join([]string{
+		"```go {linenums highlight=2 focus=2-3}",
+		"const answer = 42 // [!1]",
+		"fmt.Println(answer)",
+		"```",
+		"[!1]: shared answer value",
+	}, "\n")
+
+	got := ansi.Strip(renderer.Render(input))
+	for _, want := range []string{"┌─ go", "1 ", "2 ", "fmt.Println(answer)", "Notes", "shared answer value"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected %q in rendered output, got %q", want, got)
+		}
+	}
+	if strings.Contains(got, "[!1]") {
+		t.Fatalf("expected inline note marker to be normalized, got %q", got)
+	}
+}
+
 func TestRenderFormatsInlineMarkdown(t *testing.T) {
-	renderer, err := New(theme.Default().Palette)
+	renderer, err := New(theme.Default().Palette, "")
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -97,7 +163,7 @@ func TestRenderFormatsInlineMarkdown(t *testing.T) {
 }
 
 func TestRenderRestoresBaseColorAfterStrongText(t *testing.T) {
-	renderer, err := New(theme.Default().Palette)
+	renderer, err := New(theme.Default().Palette, "")
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -110,7 +176,7 @@ func TestRenderRestoresBaseColorAfterStrongText(t *testing.T) {
 }
 
 func TestRenderFormatsNestedLists(t *testing.T) {
-	renderer, err := New(theme.Default().Palette)
+	renderer, err := New(theme.Default().Palette, "")
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -126,7 +192,7 @@ func TestRenderFormatsNestedLists(t *testing.T) {
 }
 
 func TestRenderFormatsBlockquoteAndLink(t *testing.T) {
-	renderer, err := New(theme.Default().Palette)
+	renderer, err := New(theme.Default().Palette, "")
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -142,7 +208,7 @@ func TestRenderFormatsBlockquoteAndLink(t *testing.T) {
 }
 
 func TestRenderFormatsTableAndTaskList(t *testing.T) {
-	renderer, err := New(theme.Default().Palette)
+	renderer, err := New(theme.Default().Palette, "")
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -157,7 +223,7 @@ func TestRenderFormatsTableAndTaskList(t *testing.T) {
 }
 
 func TestRenderPlainWidthWrapsTablesWithinHint(t *testing.T) {
-	renderer, err := New(theme.Default().Palette)
+	renderer, err := New(theme.Default().Palette, "")
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -189,7 +255,7 @@ func TestRenderPlainWidthWrapsTablesWithinHint(t *testing.T) {
 }
 
 func TestRenderStyledTracksInlineAttributes(t *testing.T) {
-	renderer, err := New(theme.Default().Palette)
+	renderer, err := New(theme.Default().Palette, "")
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -219,7 +285,7 @@ func TestRenderStyledTracksInlineAttributes(t *testing.T) {
 }
 
 func TestRenderFormatsImagesFootnotesMathAndDefinitionLists(t *testing.T) {
-	renderer, err := New(theme.Default().Palette)
+	renderer, err := New(theme.Default().Palette, "")
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -261,7 +327,7 @@ func TestRenderFormatsImagesFootnotesMathAndDefinitionLists(t *testing.T) {
 }
 
 func TestRenderFormatsCalloutsAndSafeHTML(t *testing.T) {
-	renderer, err := New(theme.Default().Palette)
+	renderer, err := New(theme.Default().Palette, "")
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -285,7 +351,7 @@ func TestRenderFormatsCalloutsAndSafeHTML(t *testing.T) {
 }
 
 func TestRenderFormatsHighlightWithBackground(t *testing.T) {
-	renderer, err := New(theme.Default().Palette)
+	renderer, err := New(theme.Default().Palette, "")
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -306,7 +372,7 @@ func TestRenderFormatsHighlightWithBackground(t *testing.T) {
 }
 
 func TestRenderUltimateMarkdownDemoCoverage(t *testing.T) {
-	renderer, err := New(theme.Default().Palette)
+	renderer, err := New(theme.Default().Palette, "")
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}

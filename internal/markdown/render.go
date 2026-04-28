@@ -20,9 +20,11 @@ type Renderer struct {
 	palette   theme.Palette
 	graphics  ui.GraphicsCapability
 	imageMode ImageRenderMode
+	codeStyle string
 }
 
-func New(palette theme.Palette) (*Renderer, error) {
+func New(palette theme.Palette, codeStyle string) (*Renderer, error) {
+	codeStyle, _ = resolveCodeStyle(codeStyle)
 	return &Renderer{
 		md: goldmark.New(goldmark.WithExtensions(
 			extension.GFM,
@@ -32,6 +34,7 @@ func New(palette theme.Palette) (*Renderer, error) {
 		palette:   palette,
 		graphics:  ui.GraphicsNone,
 		imageMode: ImageRenderTextOnly,
+		codeStyle: codeStyle,
 	}, nil
 }
 
@@ -79,9 +82,16 @@ func (r *Renderer) RenderStyledWidth(input string, width int) []ui.StyledSpan {
 func (r *Renderer) renderStyledBlockChildren(parent ast.Node, source []byte, width int) []ui.StyledSpan {
 	var out []ui.StyledSpan
 	first := true
-	for child := parent.FirstChild(); child != nil; child = child.NextSibling() {
-		block := r.renderStyledBlock(child, source, width)
+	for child := parent.FirstChild(); child != nil; {
+		next := child.NextSibling()
+		block, consumedNext, handled := r.renderStyledCodeBlockBundle(child, source)
+		if handled {
+			next = consumedNext
+		} else {
+			block = r.renderStyledBlock(child, source, width)
+		}
 		if len(block) == 0 {
+			child = next
 			continue
 		}
 		if !first {
@@ -89,6 +99,7 @@ func (r *Renderer) renderStyledBlockChildren(parent ast.Node, source []byte, wid
 		}
 		out = append(out, block...)
 		first = false
+		child = next
 	}
 	return out
 }
@@ -117,9 +128,9 @@ func (r *Renderer) renderStyledBlock(node ast.Node, source []byte, width int) []
 			[]ui.StyledSpan{{Text: "│ ", Style: ui.CellStyle{FG: r.palette.MarkdownQuoteBorder}}},
 		)
 	case *ast.FencedCodeBlock:
-		return r.renderStyledCodeBlock(string(typed.Language(source)), typed.Lines(), source)
+		return r.renderStyledFencedCodeBlock(typed, source, nil)
 	case *ast.CodeBlock:
-		return r.renderStyledCodeBlock("", typed.Lines(), source)
+		return r.renderStyledCodeBlock("", extractCodeLines(typed.Lines(), source))
 	case *ast.List:
 		return r.renderStyledList(typed, source, width)
 	case *ast.ThematicBreak:
@@ -362,7 +373,7 @@ func (r *Renderer) renderRawHTML(node *ast.RawHTML, source []byte, style ui.Cell
 	}
 }
 
-func (r *Renderer) renderStyledCodeBlock(lang string, lines *text.Segments, source []byte) []ui.StyledSpan {
+func (r *Renderer) renderStyledCodeBlock(lang string, lines []string) []ui.StyledSpan {
 	label := strings.TrimSpace(lang)
 	if label == "" {
 		label = "code"
@@ -373,9 +384,7 @@ func (r *Renderer) renderStyledCodeBlock(lang string, lines *text.Segments, sour
 		BG: r.palette.MarkdownInlineCodeBackground.WithAlpha(72),
 	}
 	out := []ui.StyledSpan{{Text: "┌─ " + label, Style: borderStyle}}
-	for i := 0; i < lines.Len(); i++ {
-		segment := lines.At(i)
-		line := strings.TrimRight(string(segment.Value(source)), "\n")
+	for _, line := range lines {
 		out = ui.AppendStyledSpan(out, "\n", ui.CellStyle{})
 		out = ui.AppendStyledSpan(out, "  "+line, bodyStyle)
 	}

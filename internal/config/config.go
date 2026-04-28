@@ -14,6 +14,7 @@ import (
 
 type UI struct {
 	Theme          string `toml:"theme"`
+	CodeStyle      string `toml:"code_style"`
 	Spinner        string `toml:"spinner"`
 	CursorBlink    bool   `toml:"cursor_blink"`
 	HalfBlocks     bool   `toml:"half_blocks"`
@@ -226,6 +227,7 @@ func Default() Config {
 		},
 		UI: UI{
 			Theme:          "tokyonight",
+			CodeStyle:      "github",
 			Spinner:        "dots",
 			CursorBlink:    true,
 			HalfBlocks:     true,
@@ -274,6 +276,9 @@ func (c *Config) applyDefaults() {
 	}
 	if c.UI.Spinner == "" {
 		c.UI.Spinner = def.UI.Spinner
+	}
+	if c.UI.CodeStyle == "" {
+		c.UI.CodeStyle = def.UI.CodeStyle
 	}
 	fallbackProvider := providerDefaults()
 	for id, provider := range c.Providers {

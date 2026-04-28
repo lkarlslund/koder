@@ -20,7 +20,7 @@ func defaultPreferencesValues() PreferencesValues {
 }
 
 func TestPreferencesDialogThemeAndToggleEmitDraftChanges(t *testing.T) {
-	dialog := NewPreferencesDialog(defaultPreferencesValues(), []string{"tokyonight", "gruvbox"})
+	dialog := NewPreferencesDialog(defaultPreferencesValues(), []string{"tokyonight", "gruvbox"}, []string{"github", "monokai"})
 
 	action := dialog.Update(ui.KeyMsg{Type: ui.KeyRight})
 	if action.Kind != PreferencesActionChanged {
@@ -44,6 +44,15 @@ func TestPreferencesDialogThemeAndToggleEmitDraftChanges(t *testing.T) {
 	dialog.Update(ui.KeyMsg{Type: ui.KeyDown})
 	action = dialog.Update(ui.KeyMsg{Type: ui.KeyRight})
 	if action.Kind != PreferencesActionChanged {
+		t.Fatalf("expected code style change action, got %#v", action)
+	}
+	if action.Values.UI.CodeStyle != "monokai" {
+		t.Fatalf("expected code style to advance, got %q", action.Values.UI.CodeStyle)
+	}
+
+	dialog.Update(ui.KeyMsg{Type: ui.KeyDown})
+	action = dialog.Update(ui.KeyMsg{Type: ui.KeyRight})
+	if action.Kind != PreferencesActionChanged {
 		t.Fatalf("expected spinner change action, got %#v", action)
 	}
 	if action.Values.UI.Spinner == "dots" {
@@ -59,7 +68,7 @@ func TestPreferencesDialogThemeAndToggleEmitDraftChanges(t *testing.T) {
 		t.Fatalf("expected half blocks toggled off, got %#v", action.Values)
 	}
 
-	dialog = NewPreferencesDialog(defaultPreferencesValues(), []string{"tokyonight", "gruvbox"})
+	dialog = NewPreferencesDialog(defaultPreferencesValues(), []string{"tokyonight", "gruvbox"}, []string{"github", "monokai"})
 	dialog.tabList.Active = 2
 	dialog.focus = preferencesFocusFields
 	dialog.fieldIndex = 0
@@ -83,7 +92,7 @@ func TestPreferencesDialogThemeAndToggleEmitDraftChanges(t *testing.T) {
 
 func TestPreferencesDialogCancelReturnsOriginalUI(t *testing.T) {
 	original := defaultPreferencesValues()
-	dialog := NewPreferencesDialog(original, []string{"tokyonight", "gruvbox"})
+	dialog := NewPreferencesDialog(original, []string{"tokyonight", "gruvbox"}, []string{"github", "monokai"})
 	dialog.Update(ui.KeyMsg{Type: ui.KeyRight})
 
 	action := dialog.Update(ui.KeyMsg{Type: ui.KeyEsc})
@@ -96,13 +105,18 @@ func TestPreferencesDialogCancelReturnsOriginalUI(t *testing.T) {
 }
 
 func TestPreferencesDialogRenderShowsTabsAndButtons(t *testing.T) {
-	dialog := NewPreferencesDialog(defaultPreferencesValues(), []string{"tokyonight", "gruvbox"})
+	dialog := NewPreferencesDialog(defaultPreferencesValues(), []string{"tokyonight", "gruvbox"}, []string{"github", "monokai"})
 
 	view := renderPreferencesDialog(dialog, 84, theme.Default().Palette)
 	for _, needle := range []string{"Preferences", "General", "Appearance", "Behavior", "Tool Turns", "OK", "Cancel"} {
 		if !strings.Contains(view, needle) {
 			t.Fatalf("expected %q in preferences dialog, got %q", needle, view)
 		}
+	}
+	dialog.tabList.Active = 1
+	view = renderPreferencesDialog(dialog, 84, theme.Default().Palette)
+	if !strings.Contains(view, "Code Style") {
+		t.Fatalf("expected appearance tab to show code style, got %q", view)
 	}
 
 	dialog.Update(ui.KeyMsg{Type: ui.KeyShiftTab})
@@ -118,7 +132,7 @@ func TestPreferencesDialogRenderShowsTabsAndButtons(t *testing.T) {
 }
 
 func TestPreferencesDialogSpinnerPreviewAnimates(t *testing.T) {
-	dialog := NewPreferencesDialog(defaultPreferencesValues(), []string{"tokyonight", "gruvbox"})
+	dialog := NewPreferencesDialog(defaultPreferencesValues(), []string{"tokyonight", "gruvbox"}, []string{"github", "monokai"})
 	dialog.tabList.Active = 1
 
 	before := renderPreferencesDialog(dialog, 84, theme.Default().Palette)
@@ -131,7 +145,7 @@ func TestPreferencesDialogSpinnerPreviewAnimates(t *testing.T) {
 }
 
 func TestPreferencesDialogToolTurnsEditorSupportsTypingAndStepping(t *testing.T) {
-	dialog := NewPreferencesDialog(defaultPreferencesValues(), []string{"tokyonight", "gruvbox"})
+	dialog := NewPreferencesDialog(defaultPreferencesValues(), []string{"tokyonight", "gruvbox"}, []string{"github", "monokai"})
 	editor := dialog.editors["max_tool_loop_steps"]
 	editor.SetValue("20")
 	dialog.editors["max_tool_loop_steps"] = editor

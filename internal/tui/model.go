@@ -551,7 +551,7 @@ func New(cfg config.Config, st *store.Store, a *agent.Engine, mode StartupMode, 
 
 func NewWithWorkdir(cfg config.Config, st *store.Store, a *agent.Engine, mode StartupMode, debug *debugsrv.Recorder, workdir string, startupOpts StartupOptions) (Model, error) {
 	tuiTheme := theme.Resolve(cfg.UI.Theme)
-	renderer, err := markdown.New(tuiTheme.Palette)
+	renderer, err := markdown.New(tuiTheme.Palette, cfg.UI.CodeStyle)
 	if err != nil {
 		return Model{}, err
 	}
@@ -6328,7 +6328,7 @@ func (m *Model) openPreferencesDialog() {
 	dialog := dialogs.NewPreferencesDialog(dialogs.PreferencesValues{
 		UI:               m.cfg.UI,
 		MaxToolLoopSteps: m.cfg.MaxToolLoopSteps,
-	}, theme.Names())
+	}, theme.Names(), markdown.CodeStyleNames())
 	m.preferences = &dialog
 	m.syncComposerVisibility()
 }
@@ -7086,7 +7086,7 @@ func (m *Model) selectPermissionProfile(profile string) error {
 
 func (m *Model) setTheme(name string, save bool) error {
 	selected := theme.Resolve(name)
-	renderer, err := markdown.New(selected.Palette)
+	renderer, err := markdown.New(selected.Palette, m.cfg.UI.CodeStyle)
 	if err != nil {
 		return err
 	}
@@ -7135,7 +7135,8 @@ func (m *Model) applyUIConfig(next config.UI, save bool) (ui.Cmd, error) {
 	prevMouse := m.mouseEnabled
 
 	selected := theme.Resolve(next.Theme)
-	renderer, err := markdown.New(selected.Palette)
+	next.CodeStyle = markdown.NormalizeCodeStyle(next.CodeStyle)
+	renderer, err := markdown.New(selected.Palette, next.CodeStyle)
 	if err != nil {
 		return nil, err
 	}

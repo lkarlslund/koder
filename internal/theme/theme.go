@@ -21,6 +21,13 @@ type Palette struct {
 	DiffDeletedText              colorx.Color
 	MarkdownCodeBlockBorder      colorx.Color
 	MarkdownCodeBlockText        colorx.Color
+	MarkdownCodeLineNumber       colorx.Color
+	MarkdownCodeHighlightBG      colorx.Color
+	MarkdownCodeDiffAddedBG      colorx.Color
+	MarkdownCodeDiffDeletedBG    colorx.Color
+	MarkdownCodeFocusDim         colorx.Color
+	MarkdownCodeAnnotationBadge  colorx.Color
+	MarkdownCodeAnnotationText   colorx.Color
 	MarkdownEmphasisText         colorx.Color
 	MarkdownHeadingPrimary       colorx.Color
 	MarkdownHeadingSecondary     colorx.Color
@@ -180,6 +187,13 @@ func buildOpenCodePalette(src opencodeThemeFile) Palette {
 		DiffDeletedText:              resolve("diffRemoved"),
 		MarkdownCodeBlockBorder:      firstNonEmpty(resolve("border"), resolve("borderSubtle")),
 		MarkdownCodeBlockText:        firstNonEmpty(resolve("markdownCodeBlock"), resolve("markdownText")),
+		MarkdownCodeLineNumber:       firstNonEmpty(resolve("textMuted"), resolve("markdownBlockQuote"), resolve("text")),
+		MarkdownCodeHighlightBG:      withAlpha(firstNonEmpty(resolve("secondary"), resolve("primary"), resolve("info")), 56),
+		MarkdownCodeDiffAddedBG:      withAlpha(firstNonEmpty(resolve("diffAdded"), resolve("primary")), 48),
+		MarkdownCodeDiffDeletedBG:    withAlpha(firstNonEmpty(resolve("diffRemoved"), resolve("primary")), 48),
+		MarkdownCodeFocusDim:         firstNonEmpty(resolve("textMuted"), resolve("markdownBlockQuote"), resolve("text")),
+		MarkdownCodeAnnotationBadge:  firstNonEmpty(resolve("primary"), resolve("info"), resolve("secondary")),
+		MarkdownCodeAnnotationText:   firstNonEmpty(resolve("text"), resolve("markdownText")),
 		MarkdownEmphasisText:         resolve("markdownEmph"),
 		MarkdownHeadingPrimary:       resolve("markdownHeading"),
 		MarkdownHeadingSecondary:     resolve("markdownLink"),
@@ -257,6 +271,13 @@ func claudeThemes() map[string]Theme {
 				DiffDeletedText:              color("#ff6b80"),
 				MarkdownCodeBlockBorder:      color("#888888"),
 				MarkdownCodeBlockText:        color("#ffffff"),
+				MarkdownCodeLineNumber:       color("#999999"),
+				MarkdownCodeHighlightBG:      color("#b1b9f9").WithAlpha(56),
+				MarkdownCodeDiffAddedBG:      color("#4eba65").WithAlpha(48),
+				MarkdownCodeDiffDeletedBG:    color("#ff6b80").WithAlpha(48),
+				MarkdownCodeFocusDim:         color("#999999"),
+				MarkdownCodeAnnotationBadge:  color("#b1b9f9"),
+				MarkdownCodeAnnotationText:   color("#ffffff"),
 				MarkdownEmphasisText:         color("#ffc107"),
 				MarkdownHeadingPrimary:       color("#af87ff"),
 				MarkdownHeadingSecondary:     color("#b1b9f9"),
@@ -298,6 +319,13 @@ func claudeThemes() map[string]Theme {
 				DiffDeletedText:              color("#ab2b3f"),
 				MarkdownCodeBlockBorder:      color("#999999"),
 				MarkdownCodeBlockText:        color("#000000"),
+				MarkdownCodeLineNumber:       color("#666666"),
+				MarkdownCodeHighlightBG:      color("#5769f7").WithAlpha(48),
+				MarkdownCodeDiffAddedBG:      color("#2c7a39").WithAlpha(40),
+				MarkdownCodeDiffDeletedBG:    color("#ab2b3f").WithAlpha(40),
+				MarkdownCodeFocusDim:         color("#666666"),
+				MarkdownCodeAnnotationBadge:  color("#5769f7"),
+				MarkdownCodeAnnotationText:   color("#000000"),
 				MarkdownEmphasisText:         color("#966c1e"),
 				MarkdownHeadingPrimary:       color("#8700ff"),
 				MarkdownHeadingSecondary:     color("#5769f7"),
@@ -339,6 +367,13 @@ func claudeThemes() map[string]Theme {
 				DiffDeletedText:              color("#ff6666"),
 				MarkdownCodeBlockBorder:      color("#888888"),
 				MarkdownCodeBlockText:        color("#ffffff"),
+				MarkdownCodeLineNumber:       color("#999999"),
+				MarkdownCodeHighlightBG:      color("#99ccff").WithAlpha(56),
+				MarkdownCodeDiffAddedBG:      color("#0077b3").WithAlpha(48),
+				MarkdownCodeDiffDeletedBG:    color("#ff6666").WithAlpha(48),
+				MarkdownCodeFocusDim:         color("#999999"),
+				MarkdownCodeAnnotationBadge:  color("#99ccff"),
+				MarkdownCodeAnnotationText:   color("#ffffff"),
 				MarkdownEmphasisText:         color("#ffcc00"),
 				MarkdownHeadingPrimary:       color("#af87ff"),
 				MarkdownHeadingSecondary:     color("#99ccff"),
@@ -380,6 +415,13 @@ func claudeThemes() map[string]Theme {
 				DiffDeletedText:              color("#cc0000"),
 				MarkdownCodeBlockBorder:      color("#999999"),
 				MarkdownCodeBlockText:        color("#000000"),
+				MarkdownCodeLineNumber:       color("#666666"),
+				MarkdownCodeHighlightBG:      color("#3366ff").WithAlpha(48),
+				MarkdownCodeDiffAddedBG:      color("#006699").WithAlpha(40),
+				MarkdownCodeDiffDeletedBG:    color("#cc0000").WithAlpha(40),
+				MarkdownCodeFocusDim:         color("#666666"),
+				MarkdownCodeAnnotationBadge:  color("#3366ff"),
+				MarkdownCodeAnnotationText:   color("#000000"),
 				MarkdownEmphasisText:         color("#ff9900"),
 				MarkdownHeadingPrimary:       color("#8700ff"),
 				MarkdownHeadingSecondary:     color("#3366ff"),
