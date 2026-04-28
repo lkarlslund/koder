@@ -52,11 +52,7 @@ func (m SlashMenu) Measure(ctx *Context, constraints Constraints) Size {
 }
 
 func (m SlashMenu) Render(ctx *Context, bounds Rect) Surface {
-	width := m.panelWidth(m.contentWidth())
-	if bounds.W > 0 {
-		width = min(width, bounds.W)
-	}
-	return m.element(max(0, width-4)).Render(ctx, Rect{X: bounds.X, Y: bounds.Y, W: width, H: bounds.H})
+	return renderOwnedCanvas(ctx, bounds, m)
 }
 
 func (m SlashMenu) element(contentWidth int) Element {
@@ -105,16 +101,28 @@ func (m SlashMenu) panelWidth(contentWidth int) int {
 	return max(0, contentWidth) + 4
 }
 
+func (m SlashMenu) Paint(ctx *Context, canvas Canvas) {
+	if canvas.Width() <= 0 || canvas.Height() <= 0 {
+		return
+	}
+	width := m.panelWidth(m.contentWidth())
+	if canvas.Width() > 0 {
+		width = min(width, canvas.Width())
+	}
+	renderElementInto(ctx, m.element(max(0, width-4)), Rect{
+		X: canvas.origin.X,
+		Y: canvas.origin.Y,
+		W: width,
+		H: canvas.Height(),
+	}, canvas.surface)
+}
+
 func (m HistoryMenu) Measure(ctx *Context, constraints Constraints) Size {
 	return constraints.Clamp(m.element().Measure(ctx, constraints))
 }
 
 func (m HistoryMenu) Render(ctx *Context, bounds Rect) Surface {
-	width := m.width()
-	if bounds.W > 0 {
-		width = min(width, bounds.W)
-	}
-	return m.element().Render(ctx, Rect{X: bounds.X, Y: bounds.Y, W: width, H: bounds.H})
+	return renderOwnedCanvas(ctx, bounds, m)
 }
 
 func (m HistoryMenu) element() Element {
@@ -167,6 +175,22 @@ func (m HistoryMenu) width() int {
 	return 72
 }
 
+func (m HistoryMenu) Paint(ctx *Context, canvas Canvas) {
+	if canvas.Width() <= 0 || canvas.Height() <= 0 {
+		return
+	}
+	width := m.width()
+	if canvas.Width() > 0 {
+		width = min(width, canvas.Width())
+	}
+	renderElementInto(ctx, m.element(), Rect{
+		X: canvas.origin.X,
+		Y: canvas.origin.Y,
+		W: width,
+		H: canvas.Height(),
+	}, canvas.surface)
+}
+
 type ApprovalPrompt struct {
 	Palette      theme.Palette
 	Title        string
@@ -187,7 +211,7 @@ func (p ApprovalPrompt) Measure(ctx *Context, constraints Constraints) Size {
 }
 
 func (p ApprovalPrompt) Render(ctx *Context, bounds Rect) Surface {
-	return p.element().Render(ctx, bounds)
+	return renderOwnedCanvas(ctx, bounds, p)
 }
 
 func (p ApprovalPrompt) element() Element {
@@ -228,6 +252,18 @@ func (p ApprovalPrompt) focusedIndex() int {
 	return 0
 }
 
+func (p ApprovalPrompt) Paint(ctx *Context, canvas Canvas) {
+	if canvas.Width() <= 0 || canvas.Height() <= 0 {
+		return
+	}
+	renderElementInto(ctx, p.element(), Rect{
+		X: canvas.origin.X,
+		Y: canvas.origin.Y,
+		W: canvas.Width(),
+		H: canvas.Height(),
+	}, canvas.surface)
+}
+
 type MenuPickerDialog struct {
 	Palette theme.Palette
 	Title   string
@@ -246,7 +282,7 @@ func (d MenuPickerDialog) Measure(ctx *Context, constraints Constraints) Size {
 }
 
 func (d MenuPickerDialog) Render(ctx *Context, bounds Rect) Surface {
-	return d.element().Render(ctx, bounds)
+	return renderOwnedCanvas(ctx, bounds, d)
 }
 
 func (d MenuPickerDialog) element() Element {
@@ -299,4 +335,16 @@ func (d MenuPickerDialog) element() Element {
 		},
 		ShowClose: true,
 	}
+}
+
+func (d MenuPickerDialog) Paint(ctx *Context, canvas Canvas) {
+	if canvas.Width() <= 0 || canvas.Height() <= 0 {
+		return
+	}
+	renderElementInto(ctx, d.element(), Rect{
+		X: canvas.origin.X,
+		Y: canvas.origin.Y,
+		W: canvas.Width(),
+		H: canvas.Height(),
+	}, canvas.surface)
 }
