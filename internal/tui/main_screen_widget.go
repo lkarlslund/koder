@@ -449,11 +449,51 @@ type mainScreenRetainedRoot struct {
 	composerWidget     *composerAreaWidget
 	sidebarWidget      *hashedElementWidget
 	statusWidget       *hashedElementWidget
-	transcriptNode     *ui.ElementNode
-	composerNode       *ui.ElementNode
-	sidebarNode        *ui.ElementNode
-	statusNode         *ui.ElementNode
+	transcriptNode     *mainScreenChildNode
+	composerNode       *mainScreenChildNode
+	sidebarNode        *mainScreenChildNode
+	statusNode         *mainScreenChildNode
 	transcriptPaneRect ui.Rect
+}
+
+type mainScreenChildNode struct {
+	ui.ElementNode
+	prepare       func(*ui.Context, ui.Rect)
+	dirty         func() bool
+	dirtyRects    func() []ui.Rect
+	layoutChanged func() bool
+	clear         func()
+}
+
+func (n *mainScreenChildNode) PrepareDirty(ctx *ui.Context) {
+	if n == nil || n.prepare == nil {
+		return
+	}
+	n.prepare(ctx, n.Rect())
+	if n.layoutChanged != nil && n.layoutChanged() {
+		n.MarkLayoutDirty()
+	}
+	if n.dirty != nil && n.dirty() {
+		if n.dirtyRects != nil {
+			if rects := n.dirtyRects(); len(rects) > 0 {
+				for _, rect := range rects {
+					n.MarkDirtyLocal(rect)
+				}
+				return
+			}
+		}
+		n.MarkDirtyLocal(ui.Rect{})
+	}
+}
+
+func (n *mainScreenChildNode) ClearFrameDirty() {
+	if n == nil {
+		return
+	}
+	n.ClearDirty()
+	if n.clear != nil {
+		n.clear()
+	}
 }
 
 func newMainScreenRetainedRoot(m *Model, transcript *transcriptWidget, composer *composerAreaWidget, sidebar, status *hashedElementWidget) *mainScreenRetainedRoot {
@@ -464,37 +504,71 @@ func newMainScreenRetainedRoot(m *Model, transcript *transcriptWidget, composer 
 		sidebarWidget:    sidebar,
 		statusWidget:     status,
 	}
-	root.transcriptNode = &ui.ElementNode{
-		MeasureFn: func(_ *ui.Context, constraints ui.Constraints) ui.Size {
-			return constraints.Clamp(ui.Size{W: max(0, m.viewport.Width), H: max(0, m.viewport.Height)})
+	root.transcriptNode = &mainScreenChildNode{
+		ElementNode: ui.ElementNode{
+			MeasureFn: func(_ *ui.Context, constraints ui.Constraints) ui.Size {
+				return constraints.Clamp(ui.Size{W: max(0, m.viewport.Width), H: max(0, m.viewport.Height)})
+			},
+			ElementFn: func(ctx *ui.Context) ui.Element {
+				return transcript.Element()
+			},
 		},
-		ElementFn: func(ctx *ui.Context) ui.Element {
-			return transcript.Element()
+		prepare: func(_ *ui.Context, rect ui.Rect) {
+			transcript.Prepare(rect)
 		},
+		dirty:         transcript.Dirty,
+		dirtyRects:    transcript.DirtyRects,
+		layoutChanged: transcript.LayoutChanged,
+		clear:         transcript.ClearDirty,
 	}
-	root.composerNode = &ui.ElementNode{
-		MeasureFn: func(ctx *ui.Context, constraints ui.Constraints) ui.Size {
-			return composer.measure(ctx, constraints.MaxW)
+	root.composerNode = &mainScreenChildNode{
+		ElementNode: ui.ElementNode{
+			MeasureFn: func(ctx *ui.Context, constraints ui.Constraints) ui.Size {
+				return composer.measure(ctx, constraints.MaxW)
+			},
+			ElementFn: func(ctx *ui.Context) ui.Element {
+				return composer.Element()
+			},
 		},
-		ElementFn: func(ctx *ui.Context) ui.Element {
-			return composer.Element()
-		},
+		prepare:       composer.Prepare,
+		dirty:         composer.Dirty,
+		dirtyRects:    composer.DirtyRects,
+		layoutChanged: composer.LayoutChanged,
+		clear:         composer.ClearDirty,
 	}
-	root.sidebarNode = &ui.ElementNode{
-		MeasureFn: func(_ *ui.Context, constraints ui.Constraints) ui.Size {
-			return constraints.Clamp(ui.Size{W: max(0, m.sidebarWidth()), H: max(0, m.viewport.Height)})
+	root.sidebarNode = &mainScreenChildNode{
+		ElementNode: ui.ElementNode{
+			MeasureFn: func(_ *ui.Context, constraints ui.Constraints) ui.Size {
+				return constraints.Clamp(ui.Size{W: max(0, m.sidebarWidth()), H: max(0, m.viewport.Height)})
+			},
+			ElementFn: func(ctx *ui.Context) ui.Element {
+				return sidebar.Element()
+			},
 		},
-		ElementFn: func(ctx *ui.Context) ui.Element {
-			return sidebar.Element()
+		prepare: func(_ *ui.Context, rect ui.Rect) {
+			sidebar.Prepare(rect)
 		},
+		dirty:         sidebar.Dirty,
+		dirtyRects:    sidebar.DirtyRects,
+		layoutChanged: sidebar.LayoutChanged,
+		clear:         sidebar.ClearDirty,
 	}
-	root.statusNode = &ui.ElementNode{
-		MeasureFn: func(_ *ui.Context, constraints ui.Constraints) ui.Size {
-			return constraints.Clamp(ui.Size{W: constraints.MaxW, H: max(0, m.statusPaneHeight())})
+	root.statusNode = &mainScreenChildNode{
+		ElementNode: ui.ElementNode{
+			MeasureFn: func(_ *ui.Context, constraints ui.Constraints) ui.Size {
+				return constraints.Clamp(ui.Size{W: constraints.MaxW, H: max(0, m.statusPaneHeight())})
+			},
+			ElementFn: func(ctx *ui.Context) ui.Element {
+				return status.Element()
+			},
 		},
-		ElementFn: func(ctx *ui.Context) ui.Element {
-			return status.Element()
+		prepare: func(_ *ui.Context, rect ui.Rect) {
+			status.Prepare(rect)
 		},
+		dirty:         status.Dirty,
+		dirtyRects:    status.DirtyRects,
+		layoutChanged: status.LayoutChanged,
+		clear:         status.ClearDirty,
 	}
 	return root
 }
@@ -535,10 +609,9 @@ func (r *mainScreenRetainedRoot) Paint(ctx *ui.Context, canvas ui.Canvas) {
 }
 
 func (r *mainScreenRetainedRoot) PrepareDirty(ctx *ui.Context) {
-	r.transcriptWidget.Prepare(r.transcriptNode.Rect())
-	r.composerWidget.Prepare(ctx, r.composerNode.Rect())
-	r.sidebarWidget.Prepare(r.sidebarNode.Rect())
-	r.statusWidget.Prepare(r.statusNode.Rect())
+	r.forEachNode(func(node *mainScreenChildNode) {
+		node.PrepareDirty(ctx)
+	})
 }
 
 func (r *mainScreenRetainedRoot) PaintAll(ctx *ui.Context, canvas ui.Canvas) {
@@ -552,25 +625,15 @@ func (r *mainScreenRetainedRoot) PaintAll(ctx *ui.Context, canvas ui.Canvas) {
 
 func (r *mainScreenRetainedRoot) PaintDirty(ctx *ui.Context, canvas ui.Canvas) {
 	palette := r.model.palette
-	if r.transcriptWidget.Dirty() {
+	if r.transcriptNode.NeedsPaint() {
 		canvas.Fill(r.transcriptPaneRect, ui.CellStyle{BG: ui.CellColorFromLipgloss(palette.ScreenBackground)})
 	}
-	if r.transcriptWidget.Dirty() && !r.transcriptNode.Rect().Empty() {
-		r.markNodeDirty(r.transcriptNode, r.transcriptWidget.DirtyRects())
-		r.transcriptNode.Paint(ctx, canvas.Subrect(r.transcriptNode.Rect()))
-	}
-	if r.composerWidget.Dirty() && !r.composerNode.Rect().Empty() {
-		r.markNodeDirty(r.composerNode, r.composerWidget.DirtyRects())
-		r.composerNode.Paint(ctx, canvas.Subrect(r.composerNode.Rect()))
-	}
-	if r.model.showSidebar && r.sidebarWidget.Dirty() && !r.sidebarNode.Rect().Empty() {
-		r.markNodeDirty(r.sidebarNode, r.sidebarWidget.DirtyRects())
-		r.sidebarNode.Paint(ctx, canvas.Subrect(r.sidebarNode.Rect()))
-	}
-	if r.statusWidget.Dirty() && !r.statusNode.Rect().Empty() {
-		r.markNodeDirty(r.statusNode, r.statusWidget.DirtyRects())
-		r.statusNode.Paint(ctx, canvas.Subrect(r.statusNode.Rect()))
-	}
+	r.forEachNode(func(node *mainScreenChildNode) {
+		if !node.NeedsPaint() || node.Rect().Empty() {
+			return
+		}
+		node.Paint(ctx, canvas.Subrect(node.Rect()))
+	})
 }
 
 func (r *mainScreenRetainedRoot) paintNode(ctx *ui.Context, canvas ui.Canvas, node ui.Node) {
@@ -581,36 +644,30 @@ func (r *mainScreenRetainedRoot) paintNode(ctx *ui.Context, canvas ui.Canvas, no
 	node.Paint(ctx, canvas.Subrect(rect))
 }
 
-func (r *mainScreenRetainedRoot) markNodeDirty(node interface {
-	Rect() ui.Rect
-	MarkDirtyLocal(ui.Rect)
-}, rects []ui.Rect) {
-	if node.Rect().Empty() {
-		return
-	}
-	if len(rects) == 0 {
-		node.MarkDirtyLocal(ui.Rect{})
-		return
-	}
-	for _, rect := range rects {
-		node.MarkDirtyLocal(rect)
-	}
-}
-
 func (r *mainScreenRetainedRoot) DirtyRects() []ui.Rect {
 	damage := ui.DamageSet{}
 	damage.AddAll(r.BaseNode.DirtyRects())
-	for _, node := range []ui.Node{r.transcriptNode, r.composerNode, r.sidebarNode, r.statusNode} {
+	r.forEachNode(func(node *mainScreenChildNode) {
 		damage.AddAll(node.DirtyRects())
-	}
+	})
 	return damage.Rects()
 }
 
 func (r *mainScreenRetainedRoot) ClearDirty() {
 	r.BaseNode.ClearDirty()
-	for _, node := range []ui.Node{r.transcriptNode, r.composerNode, r.sidebarNode, r.statusNode} {
-		node.ClearDirty()
+	r.forEachNode(func(node *mainScreenChildNode) {
+		node.ClearFrameDirty()
+	})
+}
+
+func (r *mainScreenRetainedRoot) forEachNode(visit func(*mainScreenChildNode)) {
+	if r == nil || visit == nil {
+		return
 	}
+	visit(r.transcriptNode)
+	visit(r.composerNode)
+	visit(r.sidebarNode)
+	visit(r.statusNode)
 }
 
 func fullSurfaceDamage(surface ui.Surface) []ui.Rect {
