@@ -204,6 +204,22 @@ type WebSearchStoredResult struct {
 	Items          []WebSearchStoredItem `json:"items,omitempty"`
 }
 
+type MCPStoredContentItem struct {
+	Type     string `json:"type"`
+	Text     string `json:"text,omitempty"`
+	URI      string `json:"uri,omitempty"`
+	MIMEType string `json:"mime_type,omitempty"`
+}
+
+type MCPStoredResult struct {
+	ServerID          string                 `json:"server_id"`
+	ServerName        string                 `json:"server_name,omitempty"`
+	ToolName          string                 `json:"tool_name"`
+	StructuredContent string                 `json:"structured_content,omitempty"`
+	IsError           bool                   `json:"is_error,omitempty"`
+	Content           []MCPStoredContentItem `json:"content,omitempty"`
+}
+
 type DeniedStoredResult struct {
 	Message string `json:"message"`
 }
@@ -228,6 +244,7 @@ func (TodoListStoredResult) storedResultPayload()      {}
 func (SkillStoredResult) storedResultPayload()         {}
 func (WebFetchStoredResult) storedResultPayload()      {}
 func (WebSearchStoredResult) storedResultPayload()     {}
+func (MCPStoredResult) storedResultPayload()           {}
 func (DeniedStoredResult) storedResultPayload()        {}
 func (ErrorStoredResult) storedResultPayload()         {}
 

@@ -19,6 +19,7 @@ import (
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/debugsrv"
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/mcp"
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools"
@@ -108,8 +109,15 @@ func runTUI(ctx context.Context, mode tui.StartupMode, workdir string, startupOp
 	if debugServer != nil {
 		recorder = debugServer.Recorder()
 	}
+	mcpManager, err := mcp.NewManager(cfg.MCPServers)
+	if err != nil {
+		return err
+	}
+	go func() {
+		_ = mcpManager.ConnectAll(context.Background())
+	}()
 	registry := tools.NewRegistry(agents.FindProjectRoot(workdir))
-	engine := agent.New(cfg, st, registry, recorder, workdir)
+	engine := agent.New(cfg, st, registry, recorder, workdir, mcpManager)
 	registry.SetChatControl(chatruntime.New(engine, st))
 	return tui.RunWithWorkdir(cfg, st, engine, mode, recorder, debugServer, workdir, startupOpts)
 }

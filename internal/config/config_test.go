@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestLoadWritesDefaultConfig(t *testing.T) {
@@ -151,5 +152,42 @@ func TestApplyDefaultsFillsMissingCompatibleContextWindow(t *testing.T) {
 
 	if got := cfg.Providers["compatible"].ContextWindow; got != 32768 {
 		t.Fatalf("expected compatible context window default, got %d", got)
+	}
+}
+
+func TestApplyDefaultsFillsMissingMCPServerDefaults(t *testing.T) {
+	cfg := Default()
+	cfg.MCPServers["docs"] = MCPServer{
+		URL: "https://mcp.example.com",
+	}
+
+	cfg.applyDefaults()
+
+	server := cfg.MCPServers["docs"]
+	if server.StartupTimeout != 10*time.Second {
+		t.Fatalf("expected startup timeout default, got %s", server.StartupTimeout)
+	}
+	if server.RequestTimeout != 30*time.Second {
+		t.Fatalf("expected request timeout default, got %s", server.RequestTimeout)
+	}
+	if server.Headers == nil {
+		t.Fatal("expected headers map to be initialized")
+	}
+}
+
+func TestMCPServerResolvesBearerTokenEnv(t *testing.T) {
+	t.Setenv("MCP_TOKEN", "secret")
+	cfg := Default()
+	cfg.MCPServers["docs"] = MCPServer{
+		URL:            "https://mcp.example.com",
+		BearerTokenEnv: "MCP_TOKEN",
+	}
+
+	server, ok := cfg.MCPServer("docs")
+	if !ok {
+		t.Fatal("expected MCP server lookup to succeed")
+	}
+	if server.BearerToken != "secret" {
+		t.Fatalf("expected bearer token from env, got %q", server.BearerToken)
 	}
 }

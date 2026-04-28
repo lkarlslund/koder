@@ -19,6 +19,7 @@ import (
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/debugsrv"
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/mcp"
 	"github.com/lkarlslund/koder/internal/permission"
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/reference"
@@ -37,6 +38,7 @@ type Engine struct {
 	files      *attachment.Manager
 	caps       *provider.CapabilityStore
 	agents     *agents.Manager
+	mcp        *mcp.Manager
 	workdir    string
 	retryPause func(context.Context, time.Duration, func(time.Duration)) error
 }
@@ -48,7 +50,11 @@ const (
 	defaultRateLimitRetryWait = 5 * time.Second
 )
 
-func New(cfg config.Config, st *store.Store, registry *tools.Registry, debug *debugsrv.Recorder, workdir string) *Engine {
+func New(cfg config.Config, st *store.Store, registry *tools.Registry, debug *debugsrv.Recorder, workdir string, mcpManagers ...*mcp.Manager) *Engine {
+	var mcpManager *mcp.Manager
+	if len(mcpManagers) > 0 {
+		mcpManager = mcpManagers[0]
+	}
 	return &Engine{
 		cfg:        cfg,
 		store:      st,
@@ -57,6 +63,7 @@ func New(cfg config.Config, st *store.Store, registry *tools.Registry, debug *de
 		files:      attachment.NewManager(cfg.StateDir()),
 		caps:       provider.NewCapabilityStore(cfg.StateDir()),
 		agents:     agents.NewManager(cfg.StateDir(), filepath.Join(filepath.Dir(cfg.Path()), "AGENTS.md")),
+		mcp:        mcpManager,
 		workdir:    workdir,
 		retryPause: waitForRetry,
 	}
@@ -65,6 +72,12 @@ func New(cfg config.Config, st *store.Store, registry *tools.Registry, debug *de
 func (e *Engine) UpdateConfig(cfg config.Config) {
 	e.cfg = cfg
 	e.agents = agents.NewManager(cfg.StateDir(), filepath.Join(filepath.Dir(cfg.Path()), "AGENTS.md"))
+	if e.mcp != nil {
+		_ = e.mcp.LoadConfig(cfg.MCPServers)
+		go func() {
+			_ = e.mcp.ConnectAll(context.Background())
+		}()
+	}
 }
 
 func (e *Engine) RunPrompt(ctx context.Context, session domain.Session, prompt string) (<-chan domain.Event, error) {
@@ -684,6 +697,9 @@ func (e *Engine) chatRequest(session domain.Session, chat domain.Chat, messages 
 	}
 	if len(messages) > 0 && (chat.ID != 0 || chat.WorkflowRole != "") {
 		req.Tools = tools.Definitions(e.toolRuntime(session, chat))
+		if e.mcp != nil {
+			req.Tools = append(req.Tools, e.mcp.ToolDefinitions()...)
+		}
 		req.ToolChoice = "auto"
 	}
 	return req
@@ -1559,6 +1575,7 @@ func (e *Engine) toolRuntime(session domain.Session, chat domain.Chat) tools.Run
 		ChatRole:              chat.WorkflowRole,
 		ActiveMilestoneRef:    chat.ActiveMilestoneRef,
 		AssignedTodoBucketRef: chat.AssignedTodoBucketRef,
+		MCP:                   e.mcp,
 	}
 }
 
@@ -2239,7 +2256,7 @@ func (e *Engine) parseProviderToolCalls(raw []provider.ToolCall, sessionID int64
 	calls := make([]tools.Request, 0, len(raw))
 	var parseErr error
 	for _, item := range raw {
-		call, err := tools.ParseProviderCall(item)
+		call, err := e.parseProviderToolCall(item)
 		if err != nil {
 			if parseErr == nil {
 				parseErr = err
@@ -2257,6 +2274,35 @@ func (e *Engine) parseProviderToolCalls(raw []provider.ToolCall, sessionID int64
 		return nil, parseErr
 	}
 	return calls, nil
+}
+
+func (e *Engine) parseProviderToolCall(item provider.ToolCall) (tools.Request, error) {
+	name := strings.TrimSpace(item.Function.Name)
+	serverID, toolName, ok := mcp.ParseToolName(name)
+	if !ok {
+		return tools.ParseProviderCall(item)
+	}
+	rawArgs := strings.TrimSpace(item.Function.Arguments)
+	if rawArgs == "" {
+		rawArgs = "{}"
+	}
+	var parsed map[string]any
+	if err := json.Unmarshal([]byte(rawArgs), &parsed); err != nil {
+		return tools.Request{}, fmt.Errorf("decode mcp tool arguments for %s: %w", name, err)
+	}
+	req := tools.Request{
+		Tool:       domain.ToolKindMCP,
+		ToolCallID: strings.TrimSpace(item.ID),
+		Args: map[string]string{
+			"server":        serverID,
+			"tool":          toolName,
+			"arguments_raw": rawArgs,
+		},
+	}
+	if req.ToolCallID == "" {
+		req.ToolCallID = "call_mcp"
+	}
+	return tools.Normalize(req)
 }
 
 func (e *Engine) persistAssistantToolCalls(ctx context.Context, chatID, sessionID int64, calls []tools.Request, text string, usage domain.Usage) error {
@@ -2539,10 +2585,14 @@ func (e *Engine) permissionRequest(session domain.Session, req tools.Request) pe
 	if projectRoot == "" {
 		projectRoot = agents.FindProjectRoot(e.workdir)
 	}
+	pattern := tools.Preview(req)
+	if req.Tool == domain.ToolKindMCP {
+		pattern = strings.TrimSpace(req.Args["server"]) + "/" + strings.TrimSpace(req.Args["tool"])
+	}
 	targets, outsideProject, ambiguous := e.resolvePermissionTargets(projectRoot, req)
 	return permission.Request{
 		Tool:           req.Tool,
-		Pattern:        tools.Preview(req),
+		Pattern:        pattern,
 		ProjectRoot:    projectRoot,
 		Targets:        targets,
 		OutsideProject: outsideProject,

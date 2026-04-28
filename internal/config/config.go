@@ -46,6 +46,18 @@ type Provider struct {
 	Disabled      bool              `toml:"disabled"`
 }
 
+type MCPServer struct {
+	Name                 string            `toml:"name"`
+	URL                  string            `toml:"url"`
+	Headers              map[string]string `toml:"headers"`
+	Disabled             bool              `toml:"disabled"`
+	StartupTimeout       time.Duration     `toml:"startup_timeout"`
+	RequestTimeout       time.Duration     `toml:"request_timeout"`
+	DisableStandaloneSSE bool              `toml:"disable_standalone_sse"`
+	BearerToken          string            `toml:"bearer_token"`
+	BearerTokenEnv       string            `toml:"bearer_token_env"`
+}
+
 type PermissionRules struct {
 	Profile  string                       `toml:"profile"`
 	Profiles map[string]PermissionProfile `toml:"profiles"`
@@ -77,6 +89,7 @@ type Config struct {
 	MaxToolLoopSteps int                      `toml:"max_tool_loop_steps"`
 	ToolDefaults     map[domain.ToolKind]bool `toml:"tool_defaults"`
 	Providers        map[string]Provider      `toml:"providers"`
+	MCPServers       map[string]MCPServer     `toml:"mcp_servers"`
 	Permissions      PermissionRules          `toml:"permissions"`
 	Store            Store                    `toml:"store"`
 	UI               UI                       `toml:"ui"`
@@ -142,6 +155,7 @@ func Default() Config {
 		MaxToolLoopSteps: defaultMaxToolLoopSteps,
 		ToolDefaults:     toolDefaults,
 		Providers:        map[string]Provider{},
+		MCPServers:       map[string]MCPServer{},
 		Permissions: PermissionRules{
 			Profile: "default",
 			Profiles: map[string]PermissionProfile{
@@ -168,6 +182,7 @@ func Default() Config {
 						{Tool: domain.ToolKindSkill, Pattern: "*", Action: domain.PermissionModeAsk},
 						{Tool: domain.ToolKindWebFetch, Pattern: "*", Action: domain.PermissionModeAsk},
 						{Tool: domain.ToolKindWebSearch, Pattern: "*", Action: domain.PermissionModeAsk},
+						{Tool: domain.ToolKindMCP, Pattern: "*", Action: domain.PermissionModeAsk},
 					},
 				},
 				"readonly": {
@@ -193,6 +208,7 @@ func Default() Config {
 						{Tool: domain.ToolKindSkill, Pattern: "*", Action: domain.PermissionModeAsk},
 						{Tool: domain.ToolKindWebFetch, Pattern: "*", Action: domain.PermissionModeAsk},
 						{Tool: domain.ToolKindWebSearch, Pattern: "*", Action: domain.PermissionModeAsk},
+						{Tool: domain.ToolKindMCP, Pattern: "*", Action: domain.PermissionModeAsk},
 					},
 				},
 				"auto": {
@@ -218,6 +234,7 @@ func Default() Config {
 						{Tool: domain.ToolKindSkill, Pattern: "*", Action: domain.PermissionModeAllow},
 						{Tool: domain.ToolKindWebFetch, Pattern: "*", Action: domain.PermissionModeAllow},
 						{Tool: domain.ToolKindWebSearch, Pattern: "*", Action: domain.PermissionModeAsk},
+						{Tool: domain.ToolKindMCP, Pattern: "*", Action: domain.PermissionModeAsk},
 					},
 				},
 			},
@@ -247,6 +264,9 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Providers == nil {
 		c.Providers = def.Providers
+	}
+	if c.MCPServers == nil {
+		c.MCPServers = def.MCPServers
 	}
 	if c.ToolDefaults == nil {
 		c.ToolDefaults = cloneToolDefaults(def.ToolDefaults)
@@ -299,6 +319,18 @@ func (c *Config) applyDefaults() {
 		}
 		c.Providers[id] = provider
 	}
+	for id, server := range c.MCPServers {
+		if server.Headers == nil {
+			server.Headers = map[string]string{}
+		}
+		if server.StartupTimeout <= 0 {
+			server.StartupTimeout = mcpServerDefaults().StartupTimeout
+		}
+		if server.RequestTimeout <= 0 {
+			server.RequestTimeout = mcpServerDefaults().RequestTimeout
+		}
+		c.MCPServers[id] = server
+	}
 }
 
 func (c Config) Save() error {
@@ -344,6 +376,21 @@ func (c Config) Provider(id string) (Provider, bool) {
 	return p, true
 }
 
+func (c Config) MCPServer(id string) (MCPServer, bool) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return MCPServer{}, false
+	}
+	server, ok := c.MCPServers[id]
+	if !ok {
+		return MCPServer{}, false
+	}
+	if server.BearerToken == "" && server.BearerTokenEnv != "" {
+		server.BearerToken = strings.TrimSpace(os.Getenv(server.BearerTokenEnv))
+	}
+	return server, true
+}
+
 func (c Config) RequireProvider() error {
 	if len(c.Providers) == 0 {
 		return fmt.Errorf("no providers configured; %s", providerConfigurationHint)
@@ -377,6 +424,15 @@ func providerDefaults() Provider {
 		Stream:        true,
 		Timeout:       2 * time.Minute,
 		Disabled:      false,
+	}
+}
+
+func mcpServerDefaults() MCPServer {
+	return MCPServer{
+		Headers:        map[string]string{},
+		StartupTimeout: 10 * time.Second,
+		RequestTimeout: 30 * time.Second,
+		Disabled:       false,
 	}
 }
 

@@ -59,6 +59,7 @@ const (
 	ToolKindSkill           ToolKind = "skill"
 	ToolKindWebFetch        ToolKind = "webfetch"
 	ToolKindWebSearch       ToolKind = "websearch"
+	ToolKindMCP             ToolKind = "mcp"
 )
 
 func AllToolKinds() []ToolKind {
@@ -89,6 +90,7 @@ func AllToolKinds() []ToolKind {
 		ToolKindSkill,
 		ToolKindWebFetch,
 		ToolKindWebSearch,
+		ToolKindMCP,
 	}
 }
 

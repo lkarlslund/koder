@@ -122,6 +122,11 @@ type Runtime struct {
 	ActiveMilestoneRef    string
 	AssignedTodoBucketRef string
 	ChatControl           ChatControl
+	MCP                   MCPExecutor
+}
+
+type MCPExecutor interface {
+	ExecuteTool(context.Context, string, string, map[string]any) (Result, error)
 }
 
 type Tool interface {
