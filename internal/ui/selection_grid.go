@@ -29,8 +29,12 @@ func (g SelectionGrid) Measure(ctx *Context, constraints Constraints) Size {
 }
 
 func (g SelectionGrid) Render(ctx *Context, bounds Rect) Surface {
-	width, cellWidth, rows, cellHeight, rowGap := g.layout(bounds.W)
-	s := TransparentSurface(width, rows*cellHeight+max(0, rows-1)*rowGap)
+	return renderOwnedCanvas(ctx, bounds, g)
+}
+
+func (g SelectionGrid) Paint(ctx *Context, canvas Canvas) {
+	width, cellWidth, rows, cellHeight, rowGap := g.layout(canvas.Width())
+	_ = rows
 	for idx, item := range g.Items {
 		col := idx % g.columns(width)
 		row := idx / g.columns(width)
@@ -43,11 +47,10 @@ func (g SelectionGrid) Render(ctx *Context, bounds Rect) Surface {
 			Focused:  g.Focused && idx == g.Selected,
 		}
 		if ctx != nil && ctx.Runtime != nil && strings.TrimSpace(item.ControlID) != "" {
-			ctx.Runtime.Register(Control{ID: item.ControlID, Rect: cardBounds, Enabled: true})
+			ctx.Runtime.Register(Control{ID: item.ControlID, Rect: cardBounds.Translate(canvas.origin.X, canvas.origin.Y), Enabled: true})
 		}
-		s = s.PlaceAt(x, y, card.Render(ctx, Rect{W: cellWidth, H: cellHeight}))
+		card.Paint(ctx, canvas.Subrect(cardBounds))
 	}
-	return s.normalize(bounds.W, bounds.H)
 }
 
 func (g SelectionGrid) layout(fallbackWidth int) (width, cellWidth, rows, cellHeight, rowGap int) {
@@ -102,6 +105,19 @@ type selectionGridCard struct {
 }
 
 func (c selectionGridCard) Render(ctx *Context, bounds Rect) Surface {
+	return renderOwnedCanvas(ctx, bounds, selectionGridCardPainter{card: c})
+}
+
+func (c selectionGridCard) Paint(ctx *Context, canvas Canvas) {
+	selectionGridCardPainter{card: c}.Paint(ctx, canvas)
+}
+
+type selectionGridCardPainter struct {
+	card selectionGridCard
+}
+
+func (p selectionGridCardPainter) Paint(ctx *Context, canvas Canvas) {
+	c := p.card
 	palette := theme.Palette{}
 	if ctx != nil {
 		palette = ctx.Palette
@@ -133,7 +149,7 @@ func (c selectionGridCard) Render(ctx *Context, bounds Rect) Surface {
 		titleStyle = lipgloss.NewStyle().Bold(true).Foreground(foreground)
 		descriptionStyle = lipgloss.NewStyle().Foreground(foreground)
 	}
-	if bounds.H <= 1 {
+	if canvas.Height() <= 1 {
 		fillStyle := CellStyle{}
 		if background != "" {
 			fillStyle.BG = cellColor(background)
@@ -145,26 +161,27 @@ func (c selectionGridCard) Render(ctx *Context, bounds Rect) Surface {
 		if background != "" {
 			textStyle.BG = cellColor(background)
 		}
-		text := truncateText(strings.TrimSpace(c.Item.Title), max(1, bounds.W))
-		if pad := max(0, bounds.W-PlainWidth(text)); pad > 0 {
+		text := truncateText(strings.TrimSpace(c.Item.Title), max(1, canvas.Width()))
+		if pad := max(0, canvas.Width()-PlainWidth(text)); pad > 0 {
 			left := pad / 2
 			right := pad - left
 			text = strings.Repeat(" ", left) + text + strings.Repeat(" ", right)
 		}
-		return FilledLineSurface(bounds.W, text, fillStyle, textStyle).normalize(bounds.W, bounds.H)
+		canvas.BlitSurface(0, 0, FilledLineSurface(canvas.Width(), text, fillStyle, textStyle).normalize(canvas.Width(), canvas.Height()))
+		return
 	}
 	content := FlexBox{
 		Direction: DirectionVertical,
 		Children: []Child{
-			Fixed(Label{Text: truncateText(strings.TrimSpace(c.Item.Title), max(1, bounds.W-4)), Style: titleStyle}),
-			Fixed(Paragraph{Text: truncateText(strings.TrimSpace(c.Item.Description), max(1, (bounds.W-4)*2)), Style: descriptionStyle}),
+			Fixed(Label{Text: truncateText(strings.TrimSpace(c.Item.Title), max(1, canvas.Width()-4)), Style: titleStyle}),
+			Fixed(Paragraph{Text: truncateText(strings.TrimSpace(c.Item.Description), max(1, (canvas.Width()-4)*2)), Style: descriptionStyle}),
 		},
 		Spacing: 1,
 	}
-	return Border{
+	renderElementInto(ctx, Border{
 		Child:        content,
-		Width:        bounds.W,
-		Height:       bounds.H,
+		Width:        canvas.Width(),
+		Height:       canvas.Height(),
 		Padding:      UniformInsets(1),
 		Background:   background,
 		Foreground:   foreground,
@@ -173,5 +190,10 @@ func (c selectionGridCard) Render(ctx *Context, bounds Rect) Surface {
 		BorderTop:    true,
 		BorderBottom: true,
 		BorderColor:  borderColor,
-	}.Render(ctx, bounds)
+	}, Rect{
+		X: canvas.origin.X,
+		Y: canvas.origin.Y,
+		W: canvas.Width(),
+		H: canvas.Height(),
+	}, canvas.surface)
 }
