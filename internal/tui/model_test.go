@@ -731,6 +731,7 @@ func TestCtrlVPastesClipboardText(t *testing.T) {
 	m := Model{
 		composer:          textarea.New(),
 		attachmentFiles:   attachment.NewManager(t.TempDir()),
+		readClipboardImage: func() ([]byte, error) { return nil, nil },
 		readClipboardText: func() (string, error) { return "pasted text", nil },
 	}
 	m.composer.SetValue("hello ")
