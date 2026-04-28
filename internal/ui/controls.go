@@ -127,10 +127,6 @@ func (r SelectableRow) Measure(ctx *Context, constraints Constraints) Size {
 	return constraints.Clamp(r.render(ctx.Palette).Size())
 }
 
-func (r SelectableRow) Render(ctx *Context, bounds Rect) Surface {
-	return renderOwnedCanvas(ctx, bounds, selectableRowPainter{row: r})
-}
-
 func (r SelectableRow) Paint(ctx *Context, canvas Canvas) {
 	selectableRowPainter{row: r}.Paint(ctx, canvas)
 }
@@ -224,10 +220,6 @@ func (v VerticalTabs) Measure(ctx *Context, constraints Constraints) Size {
 	return constraints.Clamp(Size{W: width, H: len(v.Tabs)})
 }
 
-func (v VerticalTabs) Render(ctx *Context, bounds Rect) Surface {
-	return renderOwnedCanvas(ctx, bounds, verticalTabsPainter{tabs: v})
-}
-
 func (v VerticalTabs) Paint(ctx *Context, canvas Canvas) {
 	verticalTabsPainter{tabs: v}.Paint(ctx, canvas)
 }
@@ -297,10 +289,6 @@ func (r CheckboxRow) Measure(ctx *Context, constraints Constraints) Size {
 		width = 1
 	}
 	return constraints.Clamp(Size{W: width, H: 1})
-}
-
-func (r CheckboxRow) Render(ctx *Context, bounds Rect) Surface {
-	return renderOwnedCanvas(ctx, bounds, checkboxRowPainter{row: r})
 }
 
 func (r CheckboxRow) Paint(ctx *Context, canvas Canvas) {
@@ -395,10 +383,6 @@ func (r ChoiceRow) Measure(ctx *Context, constraints Constraints) Size {
 		width = 1
 	}
 	return constraints.Clamp(Size{W: width, H: 1})
-}
-
-func (r ChoiceRow) Render(ctx *Context, bounds Rect) Surface {
-	return renderOwnedCanvas(ctx, bounds, choiceRowPainter{row: r})
 }
 
 func (r ChoiceRow) Paint(ctx *Context, canvas Canvas) {
@@ -635,10 +619,6 @@ func (r ButtonRow) render(palette theme.Palette) Surface {
 
 func (r ButtonRow) Measure(ctx *Context, constraints Constraints) Size {
 	return constraints.Clamp(r.render(ctx.Palette).Size())
-}
-
-func (r ButtonRow) Render(ctx *Context, bounds Rect) Surface {
-	return renderOwnedCanvas(ctx, bounds, buttonRowPainter{row: r})
 }
 
 func (r ButtonRow) Paint(ctx *Context, canvas Canvas) {

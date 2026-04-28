@@ -31,10 +31,6 @@ func (i InputField) Measure(_ *Context, constraints Constraints) Size {
 	return constraints.Clamp(Size{W: width, H: 3})
 }
 
-func (i InputField) Render(_ *Context, bounds Rect) Surface {
-	return renderOwnedCanvas(nil, bounds, i)
-}
-
 func (i InputField) render(width int) Surface {
 	if width <= 0 {
 		width = maxInt(1, i.Width)

@@ -18,10 +18,6 @@ func (l Label) Measure(_ *Context, constraints Constraints) Size {
 	return constraints.Clamp(Size{W: lipgloss.Width(l.Text), H: 1})
 }
 
-func (l Label) Render(ctx *Context, bounds Rect) Surface {
-	return renderOwnedCanvas(ctx, bounds, l)
-}
-
 func (l Label) Paint(_ *Context, canvas Canvas) {
 	if canvas.Width() <= 0 || canvas.Height() <= 0 {
 		return
@@ -35,10 +31,6 @@ type TextPane struct {
 
 func (t TextPane) Measure(_ *Context, constraints Constraints) Size {
 	return constraints.Clamp(SurfaceFromString(t.Content).Size())
-}
-
-func (t TextPane) Render(ctx *Context, bounds Rect) Surface {
-	return renderOwnedCanvas(ctx, bounds, t)
 }
 
 func (t TextPane) Paint(_ *Context, canvas Canvas) {
@@ -61,10 +53,6 @@ func (h HitBox) Measure(ctx *Context, constraints Constraints) Size {
 		return constraints.Clamp(Size{})
 	}
 	return constraints.Clamp(h.Child.Measure(ctx, constraints))
-}
-
-func (h HitBox) Render(ctx *Context, bounds Rect) Surface {
-	return renderOwnedCanvas(ctx, bounds, h)
 }
 
 func (h HitBox) WalkChildren(_ *Context, visit func(Element)) {
@@ -112,10 +100,6 @@ func (d Divider) Measure(_ *Context, constraints Constraints) Size {
 	return constraints.Clamp(Size{W: width, H: 1})
 }
 
-func (d Divider) Render(ctx *Context, bounds Rect) Surface {
-	return renderOwnedCanvas(ctx, bounds, d)
-}
-
 func (d Divider) Paint(_ *Context, canvas Canvas) {
 	if canvas.Width() <= 0 || canvas.Height() <= 0 {
 		return
@@ -142,10 +126,6 @@ func (p Paragraph) Measure(_ *Context, constraints Constraints) Size {
 		width = max(width, PlainWidth(line))
 	}
 	return constraints.Clamp(Size{W: width, H: len(lines)})
-}
-
-func (p Paragraph) Render(ctx *Context, bounds Rect) Surface {
-	return renderOwnedCanvas(ctx, bounds, p)
 }
 
 func (p Paragraph) Paint(_ *Context, canvas Canvas) {
@@ -195,10 +175,6 @@ func (m ModalFrame) WalkChildren(ctx *Context, visit func(Element)) {
 
 func (m ModalFrame) Measure(ctx *Context, constraints Constraints) Size {
 	return m.window(ctx).Measure(ctx, constraints)
-}
-
-func (m ModalFrame) Render(ctx *Context, bounds Rect) Surface {
-	return renderOwnedCanvas(ctx, bounds, m)
 }
 
 func (m ModalFrame) Paint(ctx *Context, canvas Canvas) {

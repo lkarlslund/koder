@@ -35,10 +35,6 @@ func (w WindowFrame) Measure(ctx *Context, constraints Constraints) Size {
 	return w.border(ctx).Measure(ctx, constraints)
 }
 
-func (w WindowFrame) Render(ctx *Context, bounds Rect) Surface {
-	return renderOwnedCanvas(ctx, bounds, w)
-}
-
 func (w WindowFrame) border(ctx *Context) Border {
 	palette := themePalette(ctx)
 	background := firstColor(w.Background, palette.SidebarBackground)

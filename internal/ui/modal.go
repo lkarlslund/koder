@@ -18,10 +18,6 @@ func (m Modal) Measure(ctx *Context, constraints Constraints) Size {
 	}.Measure(ctx, constraints)
 }
 
-func (m Modal) Render(ctx *Context, bounds Rect) Surface {
-	return renderOwnedCanvas(ctx, bounds, m)
-}
-
 func (m Modal) Paint(ctx *Context, canvas Canvas) {
 	if canvas.Width() <= 0 || canvas.Height() <= 0 {
 		return

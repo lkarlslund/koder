@@ -61,10 +61,6 @@ func (c *RetainedColumn) Measure(ctx *Context, constraints Constraints) Size {
 	return FlexBox{Direction: DirectionVertical, Children: items, Spacing: c.spacing}.Measure(ctx, constraints)
 }
 
-func (c *RetainedColumn) Render(ctx *Context, bounds Rect) Surface {
-	return renderOwnedCanvas(ctx, bounds, c)
-}
-
 func (c *RetainedColumn) Paint(ctx *Context, canvas Canvas) {
 	if c == nil || canvas.Width() <= 0 || canvas.Height() <= 0 {
 		return

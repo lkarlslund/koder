@@ -1244,10 +1244,6 @@ func (s Static) Measure(_ *Context, constraints Constraints) Size {
 	return constraints.Clamp(SurfaceFromString(s.Content).Size())
 }
 
-func (s Static) Render(_ *Context, bounds Rect) Surface {
-	return renderOwnedCanvas(nil, bounds, s)
-}
-
 func (s Static) Paint(_ *Context, canvas Canvas) {
 	if canvas.Width() <= 0 || canvas.Height() <= 0 {
 		return
@@ -1264,10 +1260,6 @@ type SurfaceBox struct {
 
 func (b SurfaceBox) Measure(_ *Context, constraints Constraints) Size {
 	return constraints.Clamp(b.Surface.Size())
-}
-
-func (b SurfaceBox) Render(_ *Context, bounds Rect) Surface {
-	return b.Surface.normalize(bounds.W, bounds.H)
 }
 
 func (b SurfaceBox) Paint(_ *Context, canvas Canvas) {
@@ -1291,10 +1283,6 @@ func (e VisibleElement) Measure(ctx *Context, constraints Constraints) Size {
 		return Size{}
 	}
 	return constraints.Clamp(e.Child.Measure(ctx, constraints))
-}
-
-func (e VisibleElement) Render(ctx *Context, bounds Rect) Surface {
-	return renderOwnedCanvas(ctx, bounds, e)
 }
 
 func (e VisibleElement) WalkChildren(_ *Context, visit func(Element)) {
@@ -1384,10 +1372,6 @@ func (s Spacer) Measure(_ *Context, constraints Constraints) Size {
 	return constraints.Clamp(Size(s))
 }
 
-func (s Spacer) Render(_ *Context, bounds Rect) Surface {
-	return TransparentSurface(bounds.W, bounds.H)
-}
-
 func (s Spacer) Paint(_ *Context, canvas Canvas) {
 }
 
@@ -1416,10 +1400,6 @@ func (b FlexBox) Measure(ctx *Context, constraints Constraints) Size {
 		size = Size{W: plan.cross, H: plan.main}
 	}
 	return constraints.Clamp(size)
-}
-
-func (b FlexBox) Render(ctx *Context, bounds Rect) Surface {
-	return renderOwnedCanvas(ctx, bounds, b)
 }
 
 func (b FlexBox) WalkChildren(_ *Context, visit func(Element)) {
@@ -1520,10 +1500,6 @@ func (i Inset) Measure(ctx *Context, constraints Constraints) Size {
 	})
 }
 
-func (i Inset) Render(ctx *Context, bounds Rect) Surface {
-	return renderOwnedCanvas(ctx, bounds, i)
-}
-
 func (i Inset) WalkChildren(_ *Context, visit func(Element)) {
 	if i.Child == nil || visit == nil {
 		return
@@ -1561,10 +1537,6 @@ func (c Constrained) Measure(ctx *Context, constraints Constraints) Size {
 	return constraints.Clamp(c.Child.Measure(ctx, merged))
 }
 
-func (c Constrained) Render(ctx *Context, bounds Rect) Surface {
-	return renderOwnedCanvas(ctx, bounds, c)
-}
-
 func (c Constrained) WalkChildren(_ *Context, visit func(Element)) {
 	if c.Child == nil || visit == nil {
 		return
@@ -1600,10 +1572,6 @@ func (s Stack) Measure(ctx *Context, constraints Constraints) Size {
 		size.H = max(size.H, childSize.H)
 	}
 	return constraints.Clamp(size)
-}
-
-func (s Stack) Render(ctx *Context, bounds Rect) Surface {
-	return renderOwnedCanvas(ctx, bounds, s)
 }
 
 func (s Stack) WalkChildren(_ *Context, visit func(Element)) {
@@ -1649,10 +1617,6 @@ func (a Align) Measure(ctx *Context, constraints Constraints) Size {
 		return constraints.Clamp(Size{})
 	}
 	return constraints.Clamp(a.Child.Measure(ctx, constraints))
-}
-
-func (a Align) Render(ctx *Context, bounds Rect) Surface {
-	return renderOwnedCanvas(ctx, bounds, a)
 }
 
 func (a Align) Paint(ctx *Context, canvas Canvas) {

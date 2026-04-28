@@ -59,10 +59,6 @@ func (b Border) Measure(ctx *Context, constraints Constraints) Size {
 	return constraints.Clamp(size)
 }
 
-func (b Border) Render(ctx *Context, bounds Rect) Surface {
-	return renderOwnedCanvas(ctx, bounds, borderPainter{border: b, ctx: ctx, bounds: bounds})
-}
-
 func (b Border) Paint(ctx *Context, canvas Canvas) {
 	borderPainter{
 		border: b,
