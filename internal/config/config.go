@@ -247,7 +247,7 @@ func Default() Config {
 		UI: UI{
 			Theme:           "tokyonight",
 			CodeStyle:       "github",
-			EditForgiveness: 1,
+			EditForgiveness: 3,
 			Spinner:         "dots",
 			CursorBlink:     true,
 			HalfBlocks:      true,
@@ -314,7 +314,11 @@ func (c *Config) applyDefaults() {
 	if c.UI.CodeStyle == "" {
 		c.UI.CodeStyle = def.UI.CodeStyle
 	}
-	c.UI.EditForgiveness = NormalizeEditForgiveness(c.UI.EditForgiveness)
+	if c.UI.EditForgiveness == 0 {
+		c.UI.EditForgiveness = def.UI.EditForgiveness
+	} else {
+		c.UI.EditForgiveness = NormalizeEditForgiveness(c.UI.EditForgiveness)
+	}
 	fallbackProvider := providerDefaults()
 	for id, provider := range c.Providers {
 		if provider.Kind == "" {

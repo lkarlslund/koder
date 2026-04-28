@@ -55,7 +55,7 @@ func TestPreferencesDialogThemeAndToggleEmitDraftChanges(t *testing.T) {
 	if action.Kind != PreferencesActionChanged {
 		t.Fatalf("expected edit forgiveness change action, got %#v", action)
 	}
-	if action.Values.UI.EditForgiveness != 2 {
+	if action.Values.UI.EditForgiveness != 4 {
 		t.Fatalf("expected edit forgiveness to advance, got %#v", action.Values)
 	}
 

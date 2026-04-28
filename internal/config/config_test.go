@@ -39,8 +39,8 @@ func TestLoadWritesDefaultConfig(t *testing.T) {
 	if cfg.UI.CodeStyle != "github" {
 		t.Fatalf("expected default code style github, got %q", cfg.UI.CodeStyle)
 	}
-	if cfg.UI.EditForgiveness != 1 {
-		t.Fatalf("expected default edit forgiveness 1, got %d", cfg.UI.EditForgiveness)
+	if cfg.UI.EditForgiveness != 3 {
+		t.Fatalf("expected default edit forgiveness 3, got %d", cfg.UI.EditForgiveness)
 	}
 	if !cfg.UI.CursorBlink {
 		t.Fatal("expected cursor blinking enabled by default")
@@ -107,7 +107,7 @@ func TestApplyDefaultsFillsMissingUISpinner(t *testing.T) {
 	if cfg.UI.CodeStyle != "github" {
 		t.Fatalf("expected code style default applied, got %q", cfg.UI.CodeStyle)
 	}
-	if cfg.UI.EditForgiveness != 1 {
+	if cfg.UI.EditForgiveness != 3 {
 		t.Fatalf("expected edit forgiveness default applied, got %d", cfg.UI.EditForgiveness)
 	}
 }
