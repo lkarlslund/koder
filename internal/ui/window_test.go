@@ -10,7 +10,7 @@ import (
 )
 
 func TestBorderWrapsChildWithoutNestedFrameArtifacts(t *testing.T) {
-	got := RenderElement(nil, Border{
+	got := RenderNode(nil, Border{
 		Child:        AsNode(Static{Content: "Body"}),
 		Padding:      Insets{Left: 1, Right: 1},
 		BorderLeft:   true,
@@ -33,7 +33,7 @@ func TestBorderWrapsChildWithoutNestedFrameArtifacts(t *testing.T) {
 
 func TestWindowFrameRendersTitleAndCloseInBorder(t *testing.T) {
 	palette := theme.Default().Palette
-	got := RenderElement(&Context{Palette: palette}, WindowFrame{
+	got := RenderNode(&Context{Palette: palette}, WindowFrame{
 		Title:     "Connect Provider",
 		Content:   AsNode(Static{Content: "Body"}),
 		Width:     32,
@@ -51,11 +51,11 @@ func TestWindowFrameRendersTitleAndCloseInBorder(t *testing.T) {
 
 func TestWindowFrameContentInheritsFrameBackground(t *testing.T) {
 	palette := theme.Default().Palette
-	surface := PaintElementSurface(&Context{Palette: palette}, WindowFrame{
+	surface := PaintNodeSurface(&Context{Palette: palette}, AsNode(WindowFrame{
 		Title:   "Help",
 		Content: AsNode(TextPane{Content: "Hotkeys"}),
 		Width:   24,
-	}, Rect{W: 24, H: 5})
+	}), Rect{W: 24, H: 5})
 
 	x := strings.Index(surface.Lines()[2], "Hotkeys")
 	if x < 0 {
@@ -80,8 +80,8 @@ func TestWindowFrameRenderMatchesInnerBorder(t *testing.T) {
 		Width:     24,
 		ShowClose: true,
 	}
-	got := PaintElementSurface(ctx, element, Rect{W: 24, H: 5})
-	want := PaintElementSurface(&Context{Palette: palette}, element.border(ctx), Rect{W: 24, H: 5})
+	got := PaintNodeSurface(ctx, AsNode(element), Rect{W: 24, H: 5})
+	want := PaintNodeSurface(&Context{Palette: palette}, AsNode(element.border(ctx)), Rect{W: 24, H: 5})
 	if got.Size() != want.Size() {
 		t.Fatalf("size mismatch: got %#v want %#v", got.Size(), want.Size())
 	}
@@ -100,5 +100,5 @@ func TestBodyLayoutWrapperMatchesInnerElement(t *testing.T) {
 		SidebarElement: AsNode(Sidebar{Child: AsNode(Static{Content: "side"}), Width: 20, Height: 4}),
 		ShowSidebar:    true,
 	}
-	assertElementRenderMatchesWrapper(t, &Context{Palette: palette, Runtime: &Runtime{}}, element, element.node(), Rect{W: 40, H: 4})
+	assertNodeRenderMatchesWrapper(t, &Context{Palette: palette, Runtime: &Runtime{}}, AsNode(element), element.node(), Rect{W: 40, H: 4})
 }

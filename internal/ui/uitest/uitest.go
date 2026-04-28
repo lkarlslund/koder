@@ -10,6 +10,6 @@ func SurfaceText(s ui.Surface) string {
 	return strings.Join(s.Lines(), "\n")
 }
 
-func RenderElementText(ctx *ui.Context, element ui.Element, width, height int) string {
-	return SurfaceText(ui.RenderSurface(ctx, element, width, height))
+func RenderNodeText(ctx *ui.Context, node ui.Node, width, height int) string {
+	return SurfaceText(ui.RenderSurface(ctx, node, width, height))
 }

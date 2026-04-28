@@ -16,7 +16,7 @@ func TestSelectionGridSelectedCellUsesDistinctBackground(t *testing.T) {
 		CellHeight: 1,
 	}
 
-	surface := PaintElementSurface(&Context{Palette: palette}, grid, Rect{W: 40, H: 1})
+	surface := PaintNodeSurface(&Context{Palette: palette}, AsNode(grid), Rect{W: 40, H: 1})
 	unselectedX := 1
 	selectedX := 22
 

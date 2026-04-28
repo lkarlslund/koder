@@ -10,11 +10,12 @@ import (
 	"github.com/lkarlslund/koder/internal/theme"
 )
 
-func renderViaPaintForTest(ctx *Context, element Element, bounds Rect) Surface {
+func renderViaPaintForTest(ctx *Context, node any, bounds Rect) Surface {
 	surface := TransparentSurface(bounds.W, bounds.H)
-	painter, ok := element.(Painter)
+	typed := AsNode(node)
+	painter, ok := typed.(Painter)
 	if !ok {
-		panic("element does not implement Painter")
+		panic("node does not implement Painter")
 	}
 	if ctx != nil && ctx.Runtime != nil {
 		shadow := &Runtime{}
@@ -31,10 +32,10 @@ func renderViaPaintForTest(ctx *Context, element Element, bounds Rect) Surface {
 	return surface
 }
 
-func assertRenderMatchesPaint(t *testing.T, ctx *Context, element Element, bounds Rect) {
+func assertRenderMatchesPaint(t *testing.T, ctx *Context, node any, bounds Rect) {
 	t.Helper()
-	gotRender := PaintElementSurface(ctx, element, bounds)
-	gotPaint := renderViaPaintForTest(ctx, element, bounds)
+	gotRender := PaintNodeSurface(ctx, AsNode(node), bounds)
+	gotPaint := renderViaPaintForTest(ctx, node, bounds)
 	if gotRender.Size() != gotPaint.Size() {
 		t.Fatalf("render/paint size mismatch: %#v vs %#v", gotRender.Size(), gotPaint.Size())
 	}
@@ -47,7 +48,7 @@ func assertRenderMatchesPaint(t *testing.T, ctx *Context, element Element, bound
 }
 
 func TestFlexBoxRendersFixedSidebarOnRight(t *testing.T) {
-	got := RenderElement(nil, FlexBox{
+	got := RenderNode(nil, FlexBox{
 		Direction: DirectionHorizontal,
 		Children: []Child{
 			Flex(Static{Content: "MAIN"}, 1),
@@ -62,7 +63,7 @@ func TestFlexBoxRendersFixedSidebarOnRight(t *testing.T) {
 
 func TestTableRendersHeaderAndRows(t *testing.T) {
 	palette := theme.Default().Palette
-	got := RenderElement(&Context{Palette: palette}, Table{
+	got := RenderNode(&Context{Palette: palette}, Table{
 		Width: 20,
 		Columns: []TableColumn{
 			{Title: "Name", Width: 10},
@@ -88,7 +89,7 @@ func TestTableRendersHeaderAndRows(t *testing.T) {
 
 func TestSectionRendersTitleAbovePanel(t *testing.T) {
 	palette := theme.Default().Palette
-	got := RenderElement(&Context{Palette: palette}, Section{
+	got := RenderNode(&Context{Palette: palette}, Section{
 		Title: "Preview",
 		Width: 18,
 		Child: AsNode(Static{Content: "Body"}),
@@ -200,7 +201,7 @@ func TestContainerPaintAvoidsOwnerSurfaceAllocation(t *testing.T) {
 	}
 
 	ResetSurfaceAllocationStats()
-	_ = PaintElementSurface(ctx, element, Rect{W: 24, H: 2})
+	_ = PaintNodeSurface(ctx, AsNode(element), Rect{W: 24, H: 2})
 	renderStats := SurfaceAllocationStatsSnapshot()
 
 	dst := TransparentSurface(24, 2)
@@ -214,7 +215,7 @@ func TestContainerPaintAvoidsOwnerSurfaceAllocation(t *testing.T) {
 }
 
 func TestScrollFrameRendersVisibleWindowAtOffset(t *testing.T) {
-	got := RenderElement(nil, ScrollFrame{
+	got := RenderNode(nil, ScrollFrame{
 		Child:   AsNode(Static{Content: "line1\nline2\nline3\nline4"}),
 		OffsetY: 1,
 		Width:   5,

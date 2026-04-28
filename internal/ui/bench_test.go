@@ -22,7 +22,7 @@ func benchmarkTranscript(width, items int) Transcript {
 	palette := benchmarkPalette()
 	entries := make([]TranscriptItem, 0, items)
 	for i := 0; i < items; i++ {
-		var element Element
+		var element any
 		switch i % 4 {
 		case 0:
 			element = UserMessage{
@@ -59,16 +59,16 @@ func benchmarkTranscript(width, items int) Transcript {
 	return Transcript{Items: entries}
 }
 
-func BenchmarkRenderElementTranscriptLarge(b *testing.B) {
+func BenchmarkRenderNodeTranscriptLarge(b *testing.B) {
 	ctx := benchmarkContext()
 	transcript := benchmarkTranscript(100, 120)
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		_ = RenderElement(ctx, transcript, 100, 0)
+		_ = RenderNode(ctx, transcript, 100, 0)
 	}
 }
 
-func BenchmarkRenderElementComposer(b *testing.B) {
+func BenchmarkRenderNodeComposer(b *testing.B) {
 	ctx := benchmarkContext()
 	composer := Composer{
 		Palette:       benchmarkPalette(),
@@ -83,11 +83,11 @@ func BenchmarkRenderElementComposer(b *testing.B) {
 	}
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		_ = RenderElement(ctx, composer, 100, 3)
+		_ = RenderNode(ctx, composer, 100, 3)
 	}
 }
 
-func BenchmarkRenderElementTableAndList(b *testing.B) {
+func BenchmarkRenderNodeTableAndList(b *testing.B) {
 	ctx := benchmarkContext()
 	rows := make([]TableRow, 0, 40)
 	items := make([]ListItem, 0, 40)
@@ -121,7 +121,7 @@ func BenchmarkRenderElementTableAndList(b *testing.B) {
 	}}
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		_ = RenderElement(ctx, element, 72, 0)
+		_ = RenderNode(ctx, element, 72, 0)
 	}
 }
 
@@ -290,7 +290,7 @@ func BenchmarkMenuRenderCell(b *testing.B) {
 	}
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		_ = PaintElementSurface(ctx, menu, Rect{W: 72})
+		_ = PaintNodeSurface(ctx, AsNode(menu), Rect{W: 72})
 	}
 }
 
@@ -314,7 +314,7 @@ func BenchmarkBorderRenderCell(b *testing.B) {
 	}
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		_ = PaintElementSurface(ctx, panel, Rect{W: 72, H: panel.Measure(ctx, NewConstraints(72, 0)).H})
+		_ = PaintNodeSurface(ctx, AsNode(panel), Rect{W: 72, H: panel.Measure(ctx, NewConstraints(72, 0)).H})
 	}
 }
 

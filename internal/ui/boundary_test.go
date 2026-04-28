@@ -139,6 +139,45 @@ func TestNoLegacyRenderMethodsOrCallsInProductionUIOrTUI(t *testing.T) {
 	}
 }
 
+func TestNoElementBridgeInProductionUIOrTUI(t *testing.T) {
+	root := repoRoot(t)
+	paths := []string{
+		filepath.Join(root, "internal/ui"),
+		filepath.Join(root, "internal/tui"),
+	}
+	forbidden := []string{
+		"type Element interface",
+		"ui.Element",
+		"PaintElementSurface(",
+		"renderElementInto(",
+		"InvalidateElementCaches(",
+	}
+	for _, base := range paths {
+		err := filepath.WalkDir(base, func(path string, d os.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+				return nil
+			}
+			raw, readErr := os.ReadFile(path)
+			if readErr != nil {
+				return readErr
+			}
+			text := string(raw)
+			for _, token := range forbidden {
+				if strings.Contains(text, token) {
+					t.Fatalf("unexpected %q in %s", token, path)
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 func TestNoStyledStringRenderingInTextarea(t *testing.T) {
 	root := repoRoot(t)
 	path := filepath.Join(root, "internal/ui/textarea/textarea.go")

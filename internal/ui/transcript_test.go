@@ -62,7 +62,7 @@ func (e controlProbeElement) Paint(ctx *Context, canvas Canvas) {
 
 func TestUserMessageClassicViewDoesNotAddLeadingSpaceBeforeBody(t *testing.T) {
 	palette := theme.Resolve("tokyonight").Palette
-	got := RenderElement(&Context{Palette: palette}, NewUserMessage(UserMessageProps{
+	got := RenderNode(&Context{Palette: palette}, NewUserMessage(UserMessageProps{
 		Palette:     palette,
 		Body:        "hello",
 		Width:       12,
@@ -85,7 +85,7 @@ func TestUserMessageClassicViewDoesNotAddLeadingSpaceBeforeBody(t *testing.T) {
 
 func TestActivityIndicatorViewDoesNotAddLeadingSpace(t *testing.T) {
 	palette := theme.Resolve("tokyonight").Palette
-	got := RenderElement(&Context{Palette: palette}, ActivityIndicator{
+	got := RenderNode(&Context{Palette: palette}, ActivityIndicator{
 		Indicator: "x Working ...",
 		Palette:   palette,
 	}, 0, 0)
@@ -105,13 +105,13 @@ func TestActivityIndicatorRenderMatchesPaint(t *testing.T) {
 
 func TestUserMessageFillsEntireRowBackground(t *testing.T) {
 	palette := theme.Resolve("tokyonight").Palette
-	surface := PaintElementSurface(&Context{Palette: palette}, NewUserMessage(UserMessageProps{
+	surface := PaintNodeSurface(&Context{Palette: palette}, AsNode(NewUserMessage(UserMessageProps{
 		Palette:     palette,
 		Body:        "hello",
 		Width:       12,
 		HalfBlocks:  false,
 		PromptGlyph: "┃",
-	}), Rect{W: 12, H: 3})
+	})), Rect{W: 12, H: 3})
 
 	want := ParseCellColor(string(palette.UserTextBackground))
 	for x := 0; x < 12; x++ {
@@ -139,13 +139,13 @@ func TestUserMessageRenderMatchesPaint(t *testing.T) {
 
 func TestUserMessageHalfBlocksKeepAccentTopAndBottomRows(t *testing.T) {
 	palette := theme.Resolve("tokyonight").Palette
-	surface := PaintElementSurface(&Context{Palette: palette}, NewUserMessage(UserMessageProps{
+	surface := PaintNodeSurface(&Context{Palette: palette}, AsNode(NewUserMessage(UserMessageProps{
 		Palette:     palette,
 		Body:        "hello",
 		Width:       12,
 		HalfBlocks:  true,
 		PromptGlyph: "┃",
-	}), Rect{W: 12, H: 3})
+	})), Rect{W: 12, H: 3})
 
 	top := surface.Lines()[0]
 	bottom := surface.Lines()[2]
@@ -159,13 +159,13 @@ func TestUserMessageHalfBlocksKeepAccentTopAndBottomRows(t *testing.T) {
 
 func TestUserMessageHalfBlocksLeaveSeparatorRowsTransparent(t *testing.T) {
 	palette := theme.Resolve("tokyonight").Palette
-	surface := PaintElementSurface(&Context{Palette: palette}, NewUserMessage(UserMessageProps{
+	surface := PaintNodeSurface(&Context{Palette: palette}, AsNode(NewUserMessage(UserMessageProps{
 		Palette:     palette,
 		Body:        "hello",
 		Width:       12,
 		HalfBlocks:  true,
 		PromptGlyph: "┃",
-	}), Rect{W: 12, H: 3})
+	})), Rect{W: 12, H: 3})
 
 	for _, pos := range [][2]int{{0, 0}, {5, 0}, {0, 2}, {5, 2}} {
 		if _, _, _, ok := surface.SurfaceCellBG(pos[0], pos[1]); ok {
@@ -182,13 +182,13 @@ func TestRetainedTranscriptMaintainsChildItems(t *testing.T) {
 	transcript.Add(TranscriptItem{Node: AsNode(Paragraph{Text: "first"})})
 	transcript.Add(TranscriptItem{Node: AsNode(Paragraph{Text: "second"}), GapBefore: 1})
 
-	got := RenderElement(nil, transcript, 0, 0)
+	got := RenderNode(nil, transcript, 0, 0)
 	if !strings.Contains(got, "first") || !strings.Contains(got, "second") {
 		t.Fatalf("expected retained transcript to render added items, got %q", got)
 	}
 
 	transcript.Replace(1, TranscriptItem{Node: AsNode(Paragraph{Text: "updated"}), GapBefore: 1})
-	got = RenderElement(nil, transcript, 0, 0)
+	got = RenderNode(nil, transcript, 0, 0)
 	if strings.Contains(got, "second") || !strings.Contains(got, "updated") {
 		t.Fatalf("expected retained transcript replace to update content, got %q", got)
 	}
@@ -304,7 +304,7 @@ func TestTranscriptLeafRenderAvoidsExtraOwnerSurfaceAllocation(t *testing.T) {
 	}
 
 	ResetSurfaceAllocationStats()
-	_ = PaintElementSurface(&Context{Palette: palette}, element, Rect{W: 18, H: 3})
+	_ = PaintNodeSurface(&Context{Palette: palette}, AsNode(element), Rect{W: 18, H: 3})
 	renderStats := SurfaceAllocationStatsSnapshot()
 
 	dst := TransparentSurface(18, 3)

@@ -122,7 +122,7 @@ func (paletteElement) Paint(ctx *Context, canvas Canvas) {
 type elementWindow struct {
 	BaseWindow
 	bounds  Rect
-	element Element
+	element Node
 }
 
 func (w *elementWindow) Bounds(Rect) Rect {
@@ -133,7 +133,7 @@ func (w *elementWindow) PaintWindow(ctx *Context, bounds Rect, dst *Surface) {
 	if w.element == nil {
 		return
 	}
-	renderElementInto(ctx, w.element, bounds, dst)
+	paintNodeInto(ctx, w.element, bounds, dst)
 }
 
 func (w *elementWindow) WindowDirtyRects() []Rect {
@@ -145,7 +145,7 @@ func (w *elementWindow) CanPaintWindow() bool {
 }
 
 func (w *elementWindow) InvalidateCaches(ctx *Context) {
-	InvalidateElementCaches(ctx, w.element)
+	InvalidateNodeCaches(ctx, w.element)
 	w.Dirty = true
 }
 
@@ -340,7 +340,7 @@ func TestRootSetPaletteUpdatesRenderContext(t *testing.T) {
 	}
 }
 
-func TestInvalidateElementCachesReachesNestedCachedChild(t *testing.T) {
+func TestInvalidateNodeCachesReachesNestedCachedChild(t *testing.T) {
 	first := theme.Resolve("tokyonight").Palette
 	second := theme.Resolve("flexoki").Palette
 
@@ -352,14 +352,14 @@ func TestInvalidateElementCachesReachesNestedCachedChild(t *testing.T) {
 		}),
 	}
 
-	before := PaintElementSurface(&Context{Palette: first}, element, Rect{W: 4, H: 3})
+	before := PaintNodeSurface(&Context{Palette: first}, AsNode(element), Rect{W: 4, H: 3})
 	beforeR, beforeG, beforeB, beforeOK := before.SurfaceCellFG(1, 1)
 	if !beforeOK {
 		t.Fatal("expected foreground color before invalidation")
 	}
 
-	InvalidateElementCaches(&Context{Palette: first}, element)
-	after := PaintElementSurface(&Context{Palette: second}, element, Rect{W: 4, H: 3})
+	InvalidateNodeCaches(&Context{Palette: first}, AsNode(element))
+	after := PaintNodeSurface(&Context{Palette: second}, AsNode(element), Rect{W: 4, H: 3})
 	afterR, afterG, afterB, afterOK := after.SurfaceCellFG(1, 1)
 	if !afterOK {
 		t.Fatal("expected foreground color after invalidation")
@@ -377,12 +377,12 @@ func TestRootSetPaletteInvalidatesCachedDescendants(t *testing.T) {
 	root.SetMainWindow(&elementWindow{
 		BaseWindow: BaseWindow{WindowID: "main", VisibleFlag: true, Dirty: true},
 		bounds:     Rect{W: 6, H: 4},
-		element: Inset{
+		element: AsNode(Inset{
 			Padding: UniformInsets(1),
 			Child: AsNode(VisibleElement{
 				Child: NewCachedElement(AsNode(paletteElement{}), 1),
 			}),
-		},
+		}),
 	})
 
 	before := root.RenderFrame()

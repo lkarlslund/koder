@@ -42,7 +42,7 @@ func (f fillBox) Paint(_ *Context, canvas Canvas) {
 }
 
 func TestFlexBoxRenderPlacesChildrenHorizontally(t *testing.T) {
-	got := RenderElement(nil, FlexBox{
+	got := RenderNode(nil, FlexBox{
 		Direction: DirectionHorizontal,
 		Children: []Child{
 			Fixed(Static{Content: "A"}),
@@ -57,7 +57,7 @@ func TestFlexBoxRenderPlacesChildrenHorizontally(t *testing.T) {
 }
 
 func TestFlexBoxRenderPlacesChildrenVertically(t *testing.T) {
-	got := RenderElement(nil, FlexBox{
+	got := RenderNode(nil, FlexBox{
 		Direction: DirectionVertical,
 		Children: []Child{
 			Fixed(Static{Content: "A"}),
@@ -72,7 +72,7 @@ func TestFlexBoxRenderPlacesChildrenVertically(t *testing.T) {
 }
 
 func TestFlexBoxVerticalFlexChildFillsAllocatedHeight(t *testing.T) {
-	got := RenderElement(nil, FlexBox{
+	got := RenderNode(nil, FlexBox{
 		Direction: DirectionVertical,
 		Children: []Child{
 			Flex(fillBox{mark: "A"}, 1),
@@ -87,7 +87,7 @@ func TestFlexBoxVerticalFlexChildFillsAllocatedHeight(t *testing.T) {
 }
 
 func TestFlexBoxHorizontalFlexChildFillsAllocatedWidth(t *testing.T) {
-	got := RenderElement(nil, FlexBox{
+	got := RenderNode(nil, FlexBox{
 		Direction: DirectionHorizontal,
 		Children: []Child{
 			Flex(fillBox{mark: "A"}, 1),
@@ -102,7 +102,7 @@ func TestFlexBoxHorizontalFlexChildFillsAllocatedWidth(t *testing.T) {
 }
 
 func TestFlexBoxVerticalFlexChildrenShareHeightEquallyByDefault(t *testing.T) {
-	got := RenderElement(nil, FlexBox{
+	got := RenderNode(nil, FlexBox{
 		Direction: DirectionVertical,
 		Children: []Child{
 			Flex(fillBox{mark: "A"}, 1),
@@ -116,7 +116,7 @@ func TestFlexBoxVerticalFlexChildrenShareHeightEquallyByDefault(t *testing.T) {
 }
 
 func TestFlexBoxHorizontalFlexChildrenShareWidthEquallyByDefault(t *testing.T) {
-	got := RenderElement(nil, FlexBox{
+	got := RenderNode(nil, FlexBox{
 		Direction: DirectionHorizontal,
 		Children: []Child{
 			Flex(fillBox{mark: "A"}, 1),
@@ -130,7 +130,7 @@ func TestFlexBoxHorizontalFlexChildrenShareWidthEquallyByDefault(t *testing.T) {
 }
 
 func TestFlexBoxHorizontalFlexChildrenRespectShareWeights(t *testing.T) {
-	got := RenderElement(nil, FlexBox{
+	got := RenderNode(nil, FlexBox{
 		Direction: DirectionHorizontal,
 		Children: []Child{
 			Flex(fillBox{mark: "A"}, 1),
@@ -144,7 +144,7 @@ func TestFlexBoxHorizontalFlexChildrenRespectShareWeights(t *testing.T) {
 }
 
 func TestFlexBoxVerticalAlignmentCanOptOutOfFill(t *testing.T) {
-	got := RenderElement(nil, FlexBox{
+	got := RenderNode(nil, FlexBox{
 		Direction: DirectionVertical,
 		Children: []Child{
 			Flex(VisibleElement{
@@ -160,7 +160,7 @@ func TestFlexBoxVerticalAlignmentCanOptOutOfFill(t *testing.T) {
 }
 
 func TestFlexBoxHorizontalMaxWidthCanOptOutOfFill(t *testing.T) {
-	got := RenderElement(nil, FlexBox{
+	got := RenderNode(nil, FlexBox{
 		Direction: DirectionHorizontal,
 		Children: []Child{
 			Flex(fillBox{
@@ -176,7 +176,7 @@ func TestFlexBoxHorizontalMaxWidthCanOptOutOfFill(t *testing.T) {
 }
 
 func TestAlignCentersChildWithinBounds(t *testing.T) {
-	got := RenderElement(nil, Align{
+	got := RenderNode(nil, Align{
 		Horizontal: AlignCenter,
 		Vertical:   AlignCenter,
 		Child:      AsNode(Static{Content: "X"}),
@@ -189,7 +189,7 @@ func TestAlignCentersChildWithinBounds(t *testing.T) {
 }
 
 func TestInsetAddsPadding(t *testing.T) {
-	got := RenderElement(nil, Inset{
+	got := RenderNode(nil, Inset{
 		Padding: UniformInsets(1),
 		Child:   AsNode(Static{Content: "X"}),
 	}, 3, 3)
@@ -201,7 +201,7 @@ func TestInsetAddsPadding(t *testing.T) {
 }
 
 func TestStackOverlaysLaterChildren(t *testing.T) {
-	got := RenderElement(nil, Stack{
+	got := RenderNode(nil, Stack{
 		Children: []Node{
 			AsNode(Static{Content: "AAAA"}),
 			AsNode(Static{Content: " BB "}),
@@ -214,7 +214,7 @@ func TestStackOverlaysLaterChildren(t *testing.T) {
 }
 
 func TestConstrainedClampsChildSize(t *testing.T) {
-	got := RenderElement(nil, Constrained{
+	got := RenderNode(nil, Constrained{
 		Constraints: Constraints{MaxW: 2, MaxH: 1},
 		Child:       AsNode(Static{Content: "WIDE"}),
 	}, 4, 1)
@@ -253,7 +253,7 @@ func TestInputFieldRendersExpectedFrame(t *testing.T) {
 		CursorVisible: true,
 		Width:         10,
 	}
-	got := PaintElementSurface(nil, element, Rect{W: 10, H: 3})
+	got := PaintNodeSurface(nil, AsNode(element), Rect{W: 10, H: 3})
 	if got.SurfaceWidth() != 10 || got.SurfaceHeight() != 3 {
 		t.Fatalf("expected 10x3 input field, got %dx%d", got.SurfaceWidth(), got.SurfaceHeight())
 	}
@@ -266,7 +266,7 @@ func TestSimpleWidgetPaintAvoidsOwnerSurfaceAllocation(t *testing.T) {
 	element := Paragraph{Text: "alpha beta gamma"}
 
 	ResetSurfaceAllocationStats()
-	_ = PaintElementSurface(nil, element, Rect{W: 8, H: 3})
+	_ = PaintNodeSurface(nil, AsNode(element), Rect{W: 8, H: 3})
 	renderStats := SurfaceAllocationStatsSnapshot()
 
 	dst := TransparentSurface(8, 3)
