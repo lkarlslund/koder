@@ -24,7 +24,7 @@ func init() { tools.Register(tool{}) }
 func (tool) Kind() domain.ToolKind    { return domain.ToolKindWrite }
 func (tool) BypassesPermission() bool { return false }
 func (tool) Definition(tools.Runtime) (provider.ToolDefinition, bool) {
-	return tools.FunctionDefinition(domain.ToolKindWrite, "Write a full file in the workspace", `{"type":"object","properties":{"path":{"type":"string","description":"File to create or overwrite"},"content":{"type":"string","description":"Full file contents"}},"required":["path","content"],"additionalProperties":false}`), true
+	return tools.FunctionDefinition(domain.ToolKindWrite, "Create a new file or completely overwrite a file in the workspace. For existing files, prefer Edit or apply_patch whenever possible. Use this tool for new files or intentional full rewrites only. Do not use Write as a fallback just because an Edit or apply_patch attempt failed; first retry with more precise context.", `{"type":"object","properties":{"path":{"type":"string","description":"File to create or completely overwrite"},"content":{"type":"string","description":"Complete contents of the file after overwrite. Use only for new files or intentional full rewrites."}},"required":["path","content"],"additionalProperties":false}`), true
 }
 func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 	path := tools.NormalizePathInput(tools.FirstArg(args, "path", "file", "file_path", "filepath"))
