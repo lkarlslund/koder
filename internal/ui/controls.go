@@ -128,14 +128,27 @@ func (r SelectableRow) Measure(ctx *Context, constraints Constraints) Size {
 }
 
 func (r SelectableRow) Render(ctx *Context, bounds Rect) Surface {
+	return renderOwnedCanvas(ctx, bounds, selectableRowPainter{row: r})
+}
+
+type selectableRowPainter struct {
+	row SelectableRow
+}
+
+func (p selectableRowPainter) Paint(ctx *Context, canvas Canvas) {
+	if canvas.Width() <= 0 || canvas.Height() <= 0 {
+		return
+	}
+	r := p.row
 	if ctx != nil && ctx.Runtime != nil && strings.TrimSpace(r.ControlID) != "" {
 		ctx.Runtime.Register(Control{
 			ID:      r.ControlID,
-			Rect:    Rect{X: bounds.X, Y: bounds.Y, W: bounds.W, H: max(1, bounds.H)},
+			Rect:    Rect{X: canvas.origin.X, Y: canvas.origin.Y, W: canvas.Width(), H: max(1, canvas.Height())},
 			Enabled: true,
 		})
 	}
-	return r.render(ctx.Palette).normalize(bounds.W, bounds.H)
+	rendered := r.render(ctx.Palette)
+	canvas.BlitSurface(0, 0, rendered.normalize(canvas.Width(), canvas.Height()))
 }
 
 func selectableColumnWidths(width int, primary, secondary, tertiary string, primaryWidth, secondaryWidth, tertiaryWidth int) (int, int, int) {
@@ -208,14 +221,22 @@ func (v VerticalTabs) Measure(ctx *Context, constraints Constraints) Size {
 }
 
 func (v VerticalTabs) Render(ctx *Context, bounds Rect) Surface {
-	width := v.Width
+	return renderOwnedCanvas(ctx, bounds, verticalTabsPainter{tabs: v})
+}
+
+type verticalTabsPainter struct {
+	tabs VerticalTabs
+}
+
+func (p verticalTabsPainter) Paint(ctx *Context, canvas Canvas) {
+	width := p.tabs.Width
 	if width <= 0 {
-		width = bounds.W
+		width = canvas.Width()
 	}
 	if width <= 0 {
 		width = 1
 	}
-	return v.render(width, ctx.Palette, v.Focused).normalize(bounds.W, bounds.H)
+	canvas.BlitSurface(0, 0, p.tabs.render(width, ctx.Palette, p.tabs.Focused).normalize(canvas.Width(), canvas.Height()))
 }
 
 func (v VerticalTabs) render(width int, palette theme.Palette, focused bool) Surface {
@@ -271,9 +292,18 @@ func (r CheckboxRow) Measure(ctx *Context, constraints Constraints) Size {
 }
 
 func (r CheckboxRow) Render(ctx *Context, bounds Rect) Surface {
+	return renderOwnedCanvas(ctx, bounds, checkboxRowPainter{row: r})
+}
+
+type checkboxRowPainter struct {
+	row CheckboxRow
+}
+
+func (p checkboxRowPainter) Paint(ctx *Context, canvas Canvas) {
+	r := p.row
 	width := r.Width
 	if width <= 0 {
-		width = bounds.W
+		width = canvas.Width()
 	}
 	if width <= 0 {
 		width = 1
@@ -291,14 +321,14 @@ func (r CheckboxRow) Render(ctx *Context, bounds Rect) Surface {
 			label = "Off"
 		}
 	}
-	return SelectableRow{
+	canvas.BlitSurface(0, 0, SelectableRow{
 		Primary:   r.Label,
 		Secondary: r.Description,
 		Tertiary:  glyph + " " + label,
 		Width:     width,
 		Selected:  r.Focused,
 		Focused:   r.Focused,
-	}.render(ctx.Palette).normalize(bounds.W, bounds.H)
+	}.render(ctx.Palette).normalize(canvas.Width(), canvas.Height()))
 }
 
 func (r CheckboxRow) render(width int, palette theme.Palette, focused bool) string {
@@ -356,21 +386,30 @@ func (r ChoiceRow) Measure(ctx *Context, constraints Constraints) Size {
 }
 
 func (r ChoiceRow) Render(ctx *Context, bounds Rect) Surface {
+	return renderOwnedCanvas(ctx, bounds, choiceRowPainter{row: r})
+}
+
+type choiceRowPainter struct {
+	row ChoiceRow
+}
+
+func (p choiceRowPainter) Paint(ctx *Context, canvas Canvas) {
+	r := p.row
 	width := r.Width
 	if width <= 0 {
-		width = bounds.W
+		width = canvas.Width()
 	}
 	if width <= 0 {
 		width = 1
 	}
-	return SelectableRow{
+	canvas.BlitSurface(0, 0, SelectableRow{
 		Primary:   r.Label,
 		Secondary: r.Description,
 		Tertiary:  r.Value,
 		Width:     width,
 		Selected:  r.Focused,
 		Focused:   r.Focused,
-	}.render(ctx.Palette).normalize(bounds.W, bounds.H)
+	}.render(ctx.Palette).normalize(canvas.Width(), canvas.Height()))
 }
 
 func (r ChoiceRow) render(width int, palette theme.Palette, focused bool) string {
@@ -583,16 +622,25 @@ func (r ButtonRow) Measure(ctx *Context, constraints Constraints) Size {
 }
 
 func (r ButtonRow) Render(ctx *Context, bounds Rect) Surface {
+	return renderOwnedCanvas(ctx, bounds, buttonRowPainter{row: r})
+}
+
+type buttonRowPainter struct {
+	row ButtonRow
+}
+
+func (p buttonRowPainter) Paint(ctx *Context, canvas Canvas) {
+	r := p.row
 	rendered := r.render(ctx.Palette)
 	rowWidth := rendered.Size().W
 	lineWidth := r.lineWidth(ctx.Palette)
 	startX := 0
-	if bounds.W > lineWidth {
+	if canvas.Width() > lineWidth {
 		switch r.Align {
 		case HorizontalAlignCenter:
-			startX = max(0, (bounds.W-lineWidth)/2)
+			startX = max(0, (canvas.Width()-lineWidth)/2)
 		case HorizontalAlignRight:
-			startX = max(0, bounds.W-lineWidth)
+			startX = max(0, canvas.Width()-lineWidth)
 		}
 	}
 	offset := 0
@@ -601,13 +649,13 @@ func (r ButtonRow) Render(ctx *Context, bounds Rect) Surface {
 			buttonWidth := button.renderSurface(ctx.Palette).Size().W
 			ctx.Runtime.Register(Control{
 				ID:      button.ID,
-				Rect:    Rect{X: bounds.X + startX + offset, Y: bounds.Y, W: buttonWidth, H: 1},
+				Rect:    Rect{X: canvas.origin.X + startX + offset, Y: canvas.origin.Y, W: buttonWidth, H: 1},
 				Enabled: true,
 			})
 			offset += buttonWidth + r.gap()
 		}
 	}
-	return rendered.normalize(max(bounds.W, rowWidth), bounds.H)
+	canvas.BlitSurface(0, 0, rendered.normalize(max(canvas.Width(), rowWidth), canvas.Height()))
 }
 
 func (r ButtonRow) line(palette theme.Palette) string {
