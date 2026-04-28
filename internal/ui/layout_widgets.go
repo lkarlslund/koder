@@ -41,7 +41,7 @@ func (s Section) Measure(ctx *Context, constraints Constraints) Size {
 }
 
 func (s Section) Render(ctx *Context, bounds Rect) Surface {
-	return renderOwnedSurface(ctx, bounds, s.RenderTo)
+	return renderOwnedCanvas(ctx, bounds, s)
 }
 
 func (s Section) RenderTo(ctx *Context, bounds Rect, dst *Surface) {
@@ -56,6 +56,20 @@ func (s Section) RenderTo(ctx *Context, bounds Rect, dst *Surface) {
 		width = 40
 	}
 	renderElementInto(ctx, s.children(ctx), Rect{X: bounds.X, Y: bounds.Y, W: width, H: bounds.H}, dst)
+}
+
+func (s Section) Paint(ctx *Context, canvas Canvas) {
+	if canvas.Width() <= 0 || canvas.Height() <= 0 {
+		return
+	}
+	width := canvas.Width()
+	if width <= 0 {
+		width = s.Width
+	}
+	if width <= 0 {
+		width = 40
+	}
+	renderElementInto(ctx, s.children(ctx), Rect{X: canvas.origin.X, Y: canvas.origin.Y, W: width, H: canvas.Height()}, canvas.surface)
 }
 
 func (s Section) children(ctx *Context) Element {
@@ -140,7 +154,7 @@ func (l List) Measure(ctx *Context, constraints Constraints) Size {
 }
 
 func (l List) Render(ctx *Context, bounds Rect) Surface {
-	return renderOwnedSurface(ctx, bounds, l.RenderTo)
+	return renderOwnedCanvas(ctx, bounds, l)
 }
 
 func (l List) RenderTo(ctx *Context, bounds Rect, dst *Surface) {
@@ -170,6 +184,35 @@ func (l List) RenderTo(ctx *Context, bounds Rect, dst *Surface) {
 		}))
 	}
 	renderElementInto(ctx, FlexBox{Direction: DirectionVertical, Children: children}, Rect{X: bounds.X, Y: bounds.Y, W: width, H: bounds.H}, dst)
+}
+
+func (l List) Paint(ctx *Context, canvas Canvas) {
+	if canvas.Width() <= 0 || canvas.Height() <= 0 {
+		return
+	}
+	width := canvas.Width()
+	if width <= 0 {
+		width = l.Width
+	}
+	if width <= 0 {
+		width = 72
+	}
+	children := make([]Child, 0, len(l.Items))
+	for idx, item := range l.Items {
+		children = append(children, Fixed(SelectableRow{
+			ControlID:      item.ControlID,
+			Primary:        item.Primary,
+			Secondary:      item.Secondary,
+			Tertiary:       item.Tertiary,
+			Width:          width,
+			PrimaryWidth:   item.PrimaryWidth,
+			SecondaryWidth: item.SecondaryWidth,
+			TertiaryWidth:  item.TertiaryWidth,
+			Selected:       idx == l.Selected,
+			Focused:        l.Focused && idx == l.Selected,
+		}))
+	}
+	renderElementInto(ctx, FlexBox{Direction: DirectionVertical, Children: children}, Rect{X: canvas.origin.X, Y: canvas.origin.Y, W: width, H: canvas.Height()}, canvas.surface)
 }
 
 func (l *List) Move(delta int) bool {
@@ -241,7 +284,7 @@ func (t Table) Measure(ctx *Context, constraints Constraints) Size {
 }
 
 func (t Table) Render(ctx *Context, bounds Rect) Surface {
-	return renderOwnedSurface(ctx, bounds, t.RenderTo)
+	return renderOwnedCanvas(ctx, bounds, t)
 }
 
 func (t Table) RenderTo(ctx *Context, bounds Rect, dst *Surface) {
@@ -271,6 +314,33 @@ func (t Table) RenderTo(ctx *Context, bounds Rect, dst *Surface) {
 	renderElementInto(ctx, FlexBox{Direction: DirectionVertical, Children: children}, Rect{X: bounds.X, Y: bounds.Y, W: width, H: bounds.H}, dst)
 }
 
+func (t Table) Paint(ctx *Context, canvas Canvas) {
+	if canvas.Width() <= 0 || canvas.Height() <= 0 {
+		return
+	}
+	width := t.width(canvas.Width())
+	children := make([]Child, 0, len(t.Rows)+1)
+	if t.ShowHeader {
+		children = append(children, Fixed(tableHeader{
+			Palette: ctx.Palette,
+			Columns: t.Columns,
+			Width:   width,
+		}))
+	}
+	for _, row := range t.Rows {
+		children = append(children, Fixed(HitBox{
+			ID: row.ControlID,
+			Child: tableRow{
+				Palette: ctx.Palette,
+				Columns: t.Columns,
+				Width:   width,
+				Row:     row,
+			},
+		}))
+	}
+	renderElementInto(ctx, FlexBox{Direction: DirectionVertical, Children: children}, Rect{X: canvas.origin.X, Y: canvas.origin.Y, W: width, H: canvas.Height()}, canvas.surface)
+}
+
 func (t Table) width(fallback int) int {
 	width := t.Width
 	if width <= 0 {
@@ -293,11 +363,14 @@ func (h tableHeader) Measure(_ *Context, constraints Constraints) Size {
 }
 
 func (h tableHeader) Render(_ *Context, bounds Rect) Surface {
+	return renderOwnedCanvas(nil, bounds, h)
+}
+
+func (h tableHeader) Paint(_ *Context, canvas Canvas) {
 	width := h.Width
 	if width <= 0 {
-		width = bounds.W
+		width = canvas.Width()
 	}
-	s := BlankSurface(width, 1)
 	style := CellStyle{FG: cellColor(h.Palette.AssistantTimestampText)}.WithBold(true)
 	colX := 0
 	for idx, col := range h.Columns {
@@ -306,13 +379,12 @@ func (h tableHeader) Render(_ *Context, bounds Rect) Surface {
 		if col.AlignRight {
 			writeX += max(0, col.Width-PlainWidth(text))
 		}
-		s.WriteText(writeX, 0, text, style)
+		canvas.WriteText(writeX, 0, text, style)
 		colX += col.Width
 		if idx < len(h.Columns)-1 {
 			colX += 2
 		}
 	}
-	return s.normalize(bounds.W, bounds.H)
 }
 
 type tableRow struct {
@@ -327,9 +399,13 @@ func (r tableRow) Measure(_ *Context, constraints Constraints) Size {
 }
 
 func (r tableRow) Render(_ *Context, bounds Rect) Surface {
+	return renderOwnedCanvas(nil, bounds, r)
+}
+
+func (r tableRow) Paint(_ *Context, canvas Canvas) {
 	width := r.Width
 	if width <= 0 {
-		width = bounds.W
+		width = canvas.Width()
 	}
 	selectionBackground := r.Palette.SelectionBackground
 	selectionForeground := r.Palette.SelectionForeground
@@ -353,10 +429,7 @@ func (r tableRow) Render(_ *Context, bounds Rect) Surface {
 		primaryStyle = CellStyle{BG: cellColor(focusedBackground), FG: cellColor(selectionForeground)}.WithBold(true)
 		cellStyle = CellStyle{BG: cellColor(focusedBackground), FG: cellColor(selectionForeground)}
 	}
-	s := BlankSurface(width, 1)
-	for x := 0; x < width; x++ {
-		s.setCell(x, 0, blankCell(rowStyle))
-	}
+	canvas.Fill(Rect{W: width, H: 1}, rowStyle)
 	colX := 0
 	for idx, col := range r.Columns {
 		value := ""
@@ -372,13 +445,12 @@ func (r tableRow) Render(_ *Context, bounds Rect) Surface {
 		if idx == 0 {
 			style = primaryStyle
 		}
-		s.WriteText(writeX, 0, value, style)
+		canvas.WriteText(writeX, 0, value, style)
 		colX += col.Width
 		if idx < len(r.Columns)-1 {
 			colX += 2
 		}
 	}
-	return s.normalize(bounds.W, bounds.H)
 }
 
 func firstColor(values ...lipgloss.Color) lipgloss.Color {
