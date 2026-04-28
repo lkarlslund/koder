@@ -5,13 +5,17 @@ type Node interface {
 	Layout(ctx *Context, rect Rect)
 	Paint(ctx *Context, canvas Canvas)
 	Rect() Rect
+	NeedsLayout() bool
+	NeedsPaint() bool
 	DirtyRects() []Rect
 	ClearDirty()
 }
 
 type BaseNode struct {
-	rect   Rect
-	damage DamageSet
+	rect        Rect
+	damage      DamageSet
+	layoutDirty bool
+	paintDirty  bool
 }
 
 func (n *BaseNode) Rect() Rect {
@@ -26,6 +30,7 @@ func (n *BaseNode) Layout(_ *Context, rect Rect) {
 		return
 	}
 	if n.rect == rect {
+		n.layoutDirty = false
 		return
 	}
 	if !n.rect.Empty() {
@@ -35,12 +40,15 @@ func (n *BaseNode) Layout(_ *Context, rect Rect) {
 	if !n.rect.Empty() {
 		n.damage.Add(n.rect)
 	}
+	n.layoutDirty = false
+	n.paintDirty = true
 }
 
 func (n *BaseNode) MarkDirtyLocal(rect Rect) {
 	if n == nil || n.rect.Empty() {
 		return
 	}
+	n.paintDirty = true
 	if rect.Empty() {
 		n.damage.Add(n.rect)
 		return
@@ -52,7 +60,27 @@ func (n *BaseNode) MarkDirtyAbsolute(rect Rect) {
 	if n == nil || rect.Empty() {
 		return
 	}
+	n.paintDirty = true
 	n.damage.Add(rect)
+}
+
+func (n *BaseNode) MarkLayoutDirty() {
+	if n == nil {
+		return
+	}
+	n.layoutDirty = true
+	n.paintDirty = true
+	if !n.rect.Empty() {
+		n.damage.Add(n.rect)
+	}
+}
+
+func (n *BaseNode) NeedsLayout() bool {
+	return n != nil && n.layoutDirty
+}
+
+func (n *BaseNode) NeedsPaint() bool {
+	return n != nil && n.paintDirty
 }
 
 func (n *BaseNode) DirtyRects() []Rect {
@@ -67,6 +95,8 @@ func (n *BaseNode) ClearDirty() {
 		return
 	}
 	n.damage.Reset()
+	n.layoutDirty = false
+	n.paintDirty = false
 }
 
 type SurfaceNode struct {

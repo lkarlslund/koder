@@ -32,6 +32,51 @@ func TestBaseNodeMarkDirtyLocalTranslatesToAbsolute(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("dirty rects mismatch:\n got %#v\nwant %#v", got, want)
 	}
+	if node.NeedsLayout() {
+		t.Fatal("expected paint-only dirty state")
+	}
+	if !node.NeedsPaint() {
+		t.Fatal("expected paint dirty state after local invalidation")
+	}
+}
+
+func TestBaseNodeMarkLayoutDirtyAlsoMarksPaintDirty(t *testing.T) {
+	var node BaseNode
+	node.Layout(nil, Rect{X: 1, Y: 1, W: 4, H: 2})
+	node.ClearDirty()
+
+	node.MarkLayoutDirty()
+
+	if !node.NeedsLayout() {
+		t.Fatal("expected layout dirty state")
+	}
+	if !node.NeedsPaint() {
+		t.Fatal("expected paint dirty state with layout dirty")
+	}
+	got := node.DirtyRects()
+	want := []Rect{{X: 1, Y: 1, W: 4, H: 2}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("dirty rects mismatch:\n got %#v\nwant %#v", got, want)
+	}
+}
+
+func TestBaseNodeClearDirtyResetsLayoutAndPaintFlags(t *testing.T) {
+	var node BaseNode
+	node.Layout(nil, Rect{X: 0, Y: 0, W: 2, H: 1})
+	node.ClearDirty()
+	node.MarkLayoutDirty()
+
+	node.ClearDirty()
+
+	if node.NeedsLayout() {
+		t.Fatal("expected layout dirty flag to clear")
+	}
+	if node.NeedsPaint() {
+		t.Fatal("expected paint dirty flag to clear")
+	}
+	if got := node.DirtyRects(); len(got) != 0 {
+		t.Fatalf("expected dirty rects to clear, got %#v", got)
+	}
 }
 
 func TestSurfaceNodePaintUsesSurfaceDirtyRects(t *testing.T) {
