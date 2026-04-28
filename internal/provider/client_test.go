@@ -550,8 +550,14 @@ func TestStreamChatWithRecorderDoesNotBufferEventStream(t *testing.T) {
 	if len(traces) != 1 {
 		t.Fatalf("expected one recorded trace, got %d", len(traces))
 	}
-	if traces[0].ResponseBody != "[stream omitted]" {
-		t.Fatalf("expected stream body omission marker, got %q", traces[0].ResponseBody)
+	if strings.Contains(traces[0].ResponseBody, "[stream omitted]") {
+		t.Fatalf("expected real stream body capture, got %q", traces[0].ResponseBody)
+	}
+	if !strings.Contains(traces[0].ResponseBody, `"content":"hel"`) {
+		t.Fatalf("expected first SSE chunk in response body, got %q", traces[0].ResponseBody)
+	}
+	if !strings.Contains(traces[0].ResponseBody, "[DONE]") {
+		t.Fatalf("expected done marker in response body, got %q", traces[0].ResponseBody)
 	}
 }
 
@@ -624,10 +630,10 @@ func TestStreamChatResponseRecordsReadFailureAfterHeaders(t *testing.T) {
 	}
 
 	traces := recorder.HTTPTraces()
-	if len(traces) != 2 {
-		t.Fatalf("expected initial request trace plus failure trace, got %#v", traces)
+	if len(traces) != 1 {
+		t.Fatalf("expected one stream failure trace, got %#v", traces)
 	}
-	failure := traces[1]
+	failure := traces[0]
 	if failure.Status != http.StatusOK {
 		t.Fatalf("expected failure trace to preserve response status, got %#v", failure)
 	}
@@ -643,8 +649,8 @@ func TestStreamChatResponseRecordsReadFailureAfterHeaders(t *testing.T) {
 	if failure.Error == "" {
 		t.Fatalf("expected failure error in trace, got %#v", failure)
 	}
-	if failure.ResponseBody != "[stream/body read failed after headers]" {
-		t.Fatalf("unexpected failure response body marker: %#v", failure)
+	if !strings.Contains(failure.ResponseBody, `"content":"hel"`) {
+		t.Fatalf("expected captured partial stream body, got %#v", failure)
 	}
 }
 

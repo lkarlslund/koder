@@ -491,7 +491,7 @@ func (c *Client) CompleteChat(ctx context.Context, input ChatRequest) (ChatRespo
 
 	var payload chatChunk
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		c.recordBodyFailure(http.MethodPost, req.URL.Path, requestBody, resp, "decode_chat_response", err, nil)
+		c.recordBodyFailure(http.MethodPost, req.URL.Path, requestBody, resp, "decode_chat_response", err, nil, "")
 		return ChatResponse{}, fmt.Errorf("decode chat response: %w", err)
 	}
 	if len(payload.Choices) == 0 {
@@ -517,8 +517,8 @@ func (c *Client) ProbeImageSupport(ctx context.Context, modelID string) (bool, e
 		Messages: []Message{{
 			Role: domain.MessageRoleUser,
 			ContentParts: []ContentPart{
-				TextPart("Reply with OK."),
 				ImagePart("image/png", probePNG),
+				TextPart("Reply with OK."),
 			},
 		}},
 		Stream: false,
@@ -579,6 +579,7 @@ func isImageSupportProbeUnsupported(err error) bool {
 
 func (c *Client) StreamChatResponse(ctx context.Context, input ChatRequest, onEvent func(domain.Event)) (ChatResponse, error) {
 	input.Stream = true
+	start := time.Now()
 	var body bytes.Buffer
 	if err := json.NewEncoder(&body).Encode(input); err != nil {
 		return ChatResponse{}, fmt.Errorf("encode chat request: %w", err)
@@ -605,7 +606,7 @@ func (c *Client) StreamChatResponse(ctx context.Context, input ChatRequest, onEv
 	if !strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream") {
 		var payload chatChunk
 		if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-			c.recordBodyFailure(http.MethodPost, req.URL.Path, requestBody, resp, "decode_chat_response", err, nil)
+			c.recordBodyFailure(http.MethodPost, req.URL.Path, requestBody, resp, "decode_chat_response", err, nil, "")
 			return ChatResponse{}, fmt.Errorf("decode chat response: %w", err)
 		}
 		result := streamedChatResponse{}
@@ -629,6 +630,30 @@ func (c *Client) StreamChatResponse(ctx context.Context, input ChatRequest, onEv
 	reader := bufio.NewReader(resp.Body)
 	chunkCount := 0
 	lastPayload := ""
+	capture := newDebugStreamCapture(8192)
+	recordTrace := func(errText string, meta map[string]string) {
+		if c == nil || c.recorder == nil {
+			return
+		}
+		var requestHeaders map[string]string
+		if resp.Request != nil {
+			requestHeaders = redactHeaders(resp.Request.Header)
+		}
+		trace := debugsrv.HTTPTrace{
+			ProviderID:   c.provider,
+			Method:       http.MethodPost,
+			Path:         req.URL.Path,
+			Status:       resp.StatusCode,
+			DurationMS:   time.Since(start).Milliseconds(),
+			RequestBody:  redactBody(requestBody),
+			RequestHdrs:  requestHeaders,
+			ResponseHdrs: redactHeaders(resp.Header),
+			ResponseBody: capture.String(),
+			Meta:         meta,
+			Error:        errText,
+		}
+		c.recorder.RecordHTTP(trace)
+	}
 	for {
 		line, err := reader.ReadString('\n')
 		if err != nil && !errors.Is(err, io.EOF) {
@@ -639,10 +664,11 @@ func (c *Client) StreamChatResponse(ctx context.Context, input ChatRequest, onEv
 			if strings.TrimSpace(lastPayload) != "" {
 				meta["last_payload"] = debugTruncate(strings.TrimSpace(lastPayload), 4096)
 			}
-			c.recordBodyFailure(http.MethodPost, req.URL.Path, requestBody, resp, "read_stream", err, meta)
+			c.recordBodyFailure(http.MethodPost, req.URL.Path, requestBody, resp, "read_stream", err, meta, capture.String())
 			return ChatResponse{}, err
 		}
 
+		capture.Append(line)
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "data:") {
 			payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
@@ -651,6 +677,10 @@ func (c *Client) StreamChatResponse(ctx context.Context, input ChatRequest, onEv
 				if onEvent != nil {
 					onEvent(domain.Event{Kind: domain.EventKindMessageDone})
 				}
+				recordTrace("", map[string]string{
+					"phase":       "stream_complete",
+					"chunk_count": strconv.Itoa(chunkCount),
+				})
 				return aggregated.Response(), nil
 			}
 			var chunk chatChunk
@@ -662,7 +692,7 @@ func (c *Client) StreamChatResponse(ctx context.Context, input ChatRequest, onEv
 				if strings.TrimSpace(payload) != "" {
 					meta["last_payload"] = debugTruncate(payload, 4096)
 				}
-				c.recordBodyFailure(http.MethodPost, req.URL.Path, requestBody, resp, "decode_sse_chunk", err, meta)
+				c.recordBodyFailure(http.MethodPost, req.URL.Path, requestBody, resp, "decode_sse_chunk", err, meta, capture.String())
 				return ChatResponse{}, fmt.Errorf("decode sse chunk: %w", err)
 			}
 			chunkCount++
@@ -673,12 +703,16 @@ func (c *Client) StreamChatResponse(ctx context.Context, input ChatRequest, onEv
 		}
 
 		if errors.Is(err, io.EOF) {
+			recordTrace("", map[string]string{
+				"phase":       "stream_eof",
+				"chunk_count": strconv.Itoa(chunkCount),
+			})
 			return aggregated.Response(), nil
 		}
 	}
 }
 
-func (c *Client) recordBodyFailure(method, path, requestBody string, resp *http.Response, phase string, err error, meta map[string]string) {
+func (c *Client) recordBodyFailure(method, path, requestBody string, resp *http.Response, phase string, err error, meta map[string]string, responseBody string) {
 	if c == nil || c.recorder == nil || resp == nil || err == nil {
 		return
 	}
@@ -698,9 +732,12 @@ func (c *Client) recordBodyFailure(method, path, requestBody string, resp *http.
 		RequestBody:  redactBody(requestBody),
 		RequestHdrs:  requestHeaders,
 		ResponseHdrs: redactHeaders(resp.Header),
-		ResponseBody: "[stream/body read failed after headers]",
+		ResponseBody: strings.TrimSpace(responseBody),
 		Meta:         meta,
 		Error:        err.Error(),
+	}
+	if trace.ResponseBody == "" {
+		trace.ResponseBody = "[stream/body read failed after headers]"
 	}
 	if !strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream") {
 		trace.ResponseBody = "[body read failed after headers]"
@@ -911,16 +948,60 @@ func (t *tracingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 	trace.Status = resp.StatusCode
 	trace.ResponseHdrs = redactHeaders(resp.Header)
 	if resp.Body != nil {
-		if strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream") {
-			trace.ResponseBody = "[stream omitted]"
-		} else {
+		if !strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream") {
 			body, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
 			trace.ResponseBody = redactBody(string(body))
 			resp.Body = io.NopCloser(io.MultiReader(bytes.NewReader(body), resp.Body))
 		}
 	}
-	t.recorder.RecordHTTP(trace)
+	if !strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream") {
+		t.recorder.RecordHTTP(trace)
+	}
 	return resp, nil
+}
+
+type debugStreamCapture struct {
+	builder   strings.Builder
+	limit     int
+	truncated bool
+}
+
+func newDebugStreamCapture(limit int) *debugStreamCapture {
+	if limit <= 0 {
+		limit = 8192
+	}
+	return &debugStreamCapture{limit: limit}
+}
+
+func (c *debugStreamCapture) Append(text string) {
+	if c == nil || text == "" || c.limit <= 0 {
+		return
+	}
+	if c.truncated {
+		return
+	}
+	remaining := c.limit - c.builder.Len()
+	if remaining <= 0 {
+		c.truncated = true
+		return
+	}
+	if len(text) <= remaining {
+		c.builder.WriteString(text)
+		return
+	}
+	c.builder.WriteString(text[:remaining])
+	c.truncated = true
+}
+
+func (c *debugStreamCapture) String() string {
+	if c == nil {
+		return ""
+	}
+	out := c.builder.String()
+	if c.truncated {
+		out += "…"
+	}
+	return redactBody(out)
 }
 
 func redactHeaders(headers http.Header) map[string]string {
