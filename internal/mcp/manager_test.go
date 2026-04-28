@@ -4,10 +4,12 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/lkarlslund/koder/internal/config"
+	"github.com/lkarlslund/koder/internal/provider"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -109,7 +111,7 @@ func TestManagerConnectsDiscoversAndExecutes(t *testing.T) {
 	if len(defs) != 1 {
 		t.Fatalf("expected 1 dynamic tool definition, got %d", len(defs))
 	}
-	if defs[0].Function.Name != ToolName("docs", "greet") {
+	if defs[0].Function.Name != "greet" {
 		t.Fatalf("unexpected tool definition name: %s", defs[0].Function.Name)
 	}
 
@@ -138,12 +140,60 @@ func TestManagerConnectsDiscoversAndExecutes(t *testing.T) {
 	}
 }
 
-func TestParseToolName(t *testing.T) {
-	serverID, toolName, ok := ParseToolName("mcp__docs__search")
+func TestResolveToolNameUsesPlainNameWhenUnique(t *testing.T) {
+	manager := &Manager{
+		state: map[string]*serverState{
+			"docs": {tools: []ToolDescriptor{{ServerID: "docs", Name: "search"}}},
+		},
+	}
+	serverID, toolName, ok := manager.ResolveToolName("search", nil)
 	if !ok {
-		t.Fatal("expected parse success")
+		t.Fatal("expected resolve success")
 	}
 	if serverID != "docs" || toolName != "search" {
-		t.Fatalf("unexpected parsed name: %q %q", serverID, toolName)
+		t.Fatalf("unexpected resolved name: %q %q", serverID, toolName)
+	}
+}
+
+func TestToolDefinitionsFallbackOnCollision(t *testing.T) {
+	manager := &Manager{
+		state: map[string]*serverState{
+			"docs": {tools: []ToolDescriptor{{ServerID: "docs", Name: "search"}}},
+			"exa":  {tools: []ToolDescriptor{{ServerID: "exa", Name: "search"}}},
+		},
+	}
+	defs := manager.ToolDefinitions()
+	got := []string{defs[0].Function.Name, defs[1].Function.Name}
+	slices.Sort(got)
+	want := []string{"_docs_search", "_exa_search"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("unexpected fallback names: got=%v want=%v", got, want)
+	}
+}
+
+func TestToolDefinitionsFallbackOnLocalCollision(t *testing.T) {
+	manager := &Manager{
+		state: map[string]*serverState{
+			"exa": {tools: []ToolDescriptor{{ServerID: "exa", Name: "read"}}},
+		},
+	}
+	defs := manager.ToolDefinitionsWithReserved([]provider.ToolDefinition{{
+		Type: "function",
+		Function: provider.FunctionDefinition{
+			Name: "read",
+		},
+	}})
+	if len(defs) != 1 {
+		t.Fatalf("expected 1 dynamic tool definition, got %d", len(defs))
+	}
+	if defs[0].Function.Name != "_exa_read" {
+		t.Fatalf("unexpected fallback name: %s", defs[0].Function.Name)
+	}
+	serverID, toolName, ok := manager.ResolveToolName("_exa_read", []provider.ToolDefinition{{
+		Type:     "function",
+		Function: provider.FunctionDefinition{Name: "read"},
+	}})
+	if !ok || serverID != "exa" || toolName != "read" {
+		t.Fatalf("unexpected resolved fallback: ok=%v server=%q tool=%q", ok, serverID, toolName)
 	}
 }

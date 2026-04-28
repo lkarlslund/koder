@@ -19,8 +19,6 @@ import (
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-const toolPrefix = "mcp__"
-
 type ServerStatus string
 
 const (
@@ -53,13 +51,13 @@ type ResourceDescriptor struct {
 }
 
 type ResourceTemplateDescriptor struct {
-	ServerID     string
-	ServerName   string
-	URITemplate  string
-	Name         string
-	Title        string
-	Description  string
-	MIMEType     string
+	ServerID    string
+	ServerName  string
+	URITemplate string
+	Name        string
+	Title       string
+	Description string
+	MIMEType    string
 }
 
 type PromptArgumentDescriptor struct {
@@ -118,17 +116,17 @@ type Manager struct {
 }
 
 type serverState struct {
-	id                string
-	config            config.MCPServer
-	status            ServerStatus
-	lastErr           string
-	session           *sdkmcp.ClientSession
-	client            *sdkmcp.Client
+	id                 string
+	config             config.MCPServer
+	status             ServerStatus
+	lastErr            string
+	session            *sdkmcp.ClientSession
+	client             *sdkmcp.Client
 	serverInstructions string
-	tools             []ToolDescriptor
-	resources         []ResourceDescriptor
-	resourceTemplates []ResourceTemplateDescriptor
-	prompts           []PromptDescriptor
+	tools              []ToolDescriptor
+	resources          []ResourceDescriptor
+	resourceTemplates  []ResourceTemplateDescriptor
+	prompts            []PromptDescriptor
 }
 
 func NewManager(cfgs map[string]config.MCPServer) (*Manager, error) {
@@ -355,11 +353,16 @@ func (m *Manager) ListPrompts(serverID string) []PromptDescriptor {
 }
 
 func (m *Manager) ToolDefinitions() []provider.ToolDefinition {
+	return m.ToolDefinitionsWithReserved(nil)
+}
+
+func (m *Manager) ToolDefinitionsWithReserved(reserved []provider.ToolDefinition) []provider.ToolDefinition {
 	descriptors := m.ListTools()
+	nameMap := buildToolNameMap(descriptors, reservedToolNames(reserved))
 	out := make([]provider.ToolDefinition, 0, len(descriptors))
 	for _, desc := range descriptors {
 		schema := normalizeSchema(desc.InputSchema)
-		name := ToolName(desc.ServerID, desc.Name)
+		name := nameMap[toolKey(desc.ServerID, desc.Name)]
 		description := strings.TrimSpace(desc.Description)
 		if description == "" {
 			description = strings.TrimSpace(desc.Title)
@@ -377,6 +380,21 @@ func (m *Manager) ToolDefinitions() []provider.ToolDefinition {
 		})
 	}
 	return out
+}
+
+func (m *Manager) ResolveToolName(name string, reserved []provider.ToolDefinition) (serverID, toolName string, ok bool) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "", "", false
+	}
+	descriptors := m.ListTools()
+	nameMap := buildToolNameMap(descriptors, reservedToolNames(reserved))
+	for _, desc := range descriptors {
+		if nameMap[toolKey(desc.ServerID, desc.Name)] == name {
+			return desc.ServerID, desc.Name, true
+		}
+	}
+	return "", "", false
 }
 
 func (m *Manager) ExecuteTool(ctx context.Context, serverID, toolName string, args map[string]any) (tools.Result, error) {
@@ -454,24 +472,104 @@ func (m *Manager) GetPrompt(ctx context.Context, serverID, name string, args map
 }
 
 func ToolName(serverID, toolName string) string {
-	return toolPrefix + strings.TrimSpace(serverID) + "__" + strings.TrimSpace(toolName)
+	toolName = strings.TrimSpace(toolName)
+	if toolName == "" {
+		return ""
+	}
+	serverID = sanitizeToolSegment(serverID)
+	if serverID == "" {
+		return toolName
+	}
+	return "_" + serverID + "_" + sanitizeToolSegment(toolName)
 }
 
-func ParseToolName(name string) (serverID, toolName string, ok bool) {
-	if !strings.HasPrefix(strings.TrimSpace(name), toolPrefix) {
-		return "", "", false
+func reservedToolNames(defs []provider.ToolDefinition) map[string]struct{} {
+	reserved := make(map[string]struct{}, len(defs))
+	for _, def := range defs {
+		name := strings.TrimSpace(def.Function.Name)
+		if name == "" {
+			continue
+		}
+		reserved[name] = struct{}{}
 	}
-	rest := strings.TrimPrefix(strings.TrimSpace(name), toolPrefix)
-	parts := strings.SplitN(rest, "__", 2)
-	if len(parts) != 2 {
-		return "", "", false
+	return reserved
+}
+
+func buildToolNameMap(descriptors []ToolDescriptor, reserved map[string]struct{}) map[string]string {
+	reserved = cloneStringSet(reserved)
+	counts := make(map[string]int, len(descriptors))
+	for _, desc := range descriptors {
+		name := strings.TrimSpace(desc.Name)
+		if name == "" {
+			continue
+		}
+		counts[name]++
 	}
-	serverID = strings.TrimSpace(parts[0])
-	toolName = strings.TrimSpace(parts[1])
-	if serverID == "" || toolName == "" {
-		return "", "", false
+	resolved := make(map[string]string, len(descriptors))
+	for _, desc := range descriptors {
+		name := strings.TrimSpace(desc.Name)
+		if name == "" {
+			continue
+		}
+		key := toolKey(desc.ServerID, desc.Name)
+		if counts[name] == 1 {
+			if _, collision := reserved[name]; !collision {
+				resolved[key] = name
+				reserved[name] = struct{}{}
+				continue
+			}
+		}
+		fallback := ToolName(desc.ServerID, desc.Name)
+		if fallback == "" {
+			continue
+		}
+		resolved[key] = fallback
+		reserved[fallback] = struct{}{}
 	}
-	return serverID, toolName, true
+	return resolved
+}
+
+func toolKey(serverID, toolName string) string {
+	return strings.TrimSpace(serverID) + "\x00" + strings.TrimSpace(toolName)
+}
+
+func cloneStringSet(in map[string]struct{}) map[string]struct{} {
+	if len(in) == 0 {
+		return map[string]struct{}{}
+	}
+	out := make(map[string]struct{}, len(in))
+	for key := range in {
+		out[key] = struct{}{}
+	}
+	return out
+}
+
+func sanitizeToolSegment(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	var b strings.Builder
+	b.Grow(len(value))
+	lastUnderscore := false
+	for _, r := range value {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+			lastUnderscore = false
+		case r == '_':
+			if !lastUnderscore {
+				b.WriteByte('_')
+				lastUnderscore = true
+			}
+		default:
+			if !lastUnderscore {
+				b.WriteByte('_')
+				lastUnderscore = true
+			}
+		}
+	}
+	return strings.Trim(b.String(), "_")
 }
 
 func ValidateServerConfig(id string, cfg config.MCPServer) error {
@@ -691,13 +789,13 @@ func collectResourceTemplates(ctx context.Context, serverID string, cfg config.M
 			continue
 		}
 		out = append(out, ResourceTemplateDescriptor{
-			ServerID:     serverID,
-			ServerName:   strings.TrimSpace(cfg.Name),
-			URITemplate:  strings.TrimSpace(item.URITemplate),
-			Name:         strings.TrimSpace(item.Name),
-			Title:        strings.TrimSpace(item.Title),
-			Description:  strings.TrimSpace(item.Description),
-			MIMEType:     strings.TrimSpace(item.MIMEType),
+			ServerID:    serverID,
+			ServerName:  strings.TrimSpace(cfg.Name),
+			URITemplate: strings.TrimSpace(item.URITemplate),
+			Name:        strings.TrimSpace(item.Name),
+			Title:       strings.TrimSpace(item.Title),
+			Description: strings.TrimSpace(item.Description),
+			MIMEType:    strings.TrimSpace(item.MIMEType),
 		})
 	}
 	return out, nil

@@ -715,7 +715,7 @@ func (e *Engine) chatRequest(session domain.Session, chat domain.Chat, messages 
 	if len(messages) > 0 && (chat.ID != 0 || chat.WorkflowRole != "") {
 		req.Tools = tools.Definitions(e.toolRuntime(session, chat))
 		if e.mcp != nil && toolEnabledForSession(e.cfg, session, domain.ToolKindMCP) {
-			req.Tools = append(req.Tools, e.mcp.ToolDefinitions()...)
+			req.Tools = append(req.Tools, e.mcp.ToolDefinitionsWithReserved(req.Tools)...)
 		}
 		req.ToolChoice = "auto"
 	}
@@ -2295,7 +2295,12 @@ func (e *Engine) parseProviderToolCalls(raw []provider.ToolCall, sessionID int64
 
 func (e *Engine) parseProviderToolCall(item provider.ToolCall) (tools.Request, error) {
 	name := strings.TrimSpace(item.Function.Name)
-	serverID, toolName, ok := mcp.ParseToolName(name)
+	ok := false
+	serverID, toolName := "", ""
+	if e.mcp != nil {
+		localDefs := tools.Definitions(e.toolRuntime(domain.Session{}, domain.Chat{}))
+		serverID, toolName, ok = e.mcp.ResolveToolName(name, localDefs)
+	}
 	if !ok {
 		return tools.ParseProviderCall(item)
 	}
