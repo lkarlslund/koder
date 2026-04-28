@@ -63,6 +63,14 @@ func (b Border) Render(ctx *Context, bounds Rect) Surface {
 	return renderOwnedCanvas(ctx, bounds, borderPainter{border: b, ctx: ctx, bounds: bounds})
 }
 
+func (b Border) Paint(ctx *Context, canvas Canvas) {
+	borderPainter{
+		border: b,
+		ctx:    ctx,
+		bounds: Rect{X: canvas.origin.X, Y: canvas.origin.Y, W: canvas.Width(), H: canvas.Height()},
+	}.Paint(ctx, canvas)
+}
+
 type borderPainter struct {
 	border Border
 	ctx    *Context

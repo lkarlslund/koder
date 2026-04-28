@@ -29,6 +29,12 @@ func (e countingElement) Render(_ *Context, bounds Rect) Surface {
 	return BlankSurface(bounds.W, bounds.H)
 }
 
+func (e countingElement) Paint(_ *Context, canvas Canvas) {
+	if e.renderCalls != nil {
+		*e.renderCalls = *e.renderCalls + 1
+	}
+}
+
 func (e controlProbeElement) Measure(_ *Context, constraints Constraints) Size {
 	return constraints.Clamp(Size{W: e.width, H: e.height})
 }
@@ -42,6 +48,16 @@ func (e controlProbeElement) Render(ctx *Context, bounds Rect) Surface {
 		})
 	}
 	return BlankSurface(bounds.W, bounds.H)
+}
+
+func (e controlProbeElement) Paint(ctx *Context, canvas Canvas) {
+	if ctx != nil && ctx.Runtime != nil {
+		ctx.Runtime.Register(Control{
+			ID:      e.id,
+			Rect:    Rect{X: canvas.origin.X, Y: canvas.origin.Y, W: max(1, canvas.Width()), H: max(1, canvas.Height())},
+			Enabled: true,
+		})
+	}
 }
 
 func TestUserMessageClassicViewDoesNotAddLeadingSpaceBeforeBody(t *testing.T) {
@@ -89,13 +105,13 @@ func TestActivityIndicatorRenderMatchesPaint(t *testing.T) {
 
 func TestUserMessageFillsEntireRowBackground(t *testing.T) {
 	palette := theme.Resolve("tokyonight").Palette
-	surface := NewUserMessage(UserMessageProps{
+	surface := PaintElementSurface(&Context{Palette: palette}, NewUserMessage(UserMessageProps{
 		Palette:     palette,
 		Body:        "hello",
 		Width:       12,
 		HalfBlocks:  false,
 		PromptGlyph: "┃",
-	}).Render(&Context{Palette: palette}, Rect{W: 12, H: 3})
+	}), Rect{W: 12, H: 3})
 
 	want := ParseCellColor(string(palette.UserTextBackground))
 	for x := 0; x < 12; x++ {
@@ -123,13 +139,13 @@ func TestUserMessageRenderMatchesPaint(t *testing.T) {
 
 func TestUserMessageHalfBlocksKeepAccentTopAndBottomRows(t *testing.T) {
 	palette := theme.Resolve("tokyonight").Palette
-	surface := NewUserMessage(UserMessageProps{
+	surface := PaintElementSurface(&Context{Palette: palette}, NewUserMessage(UserMessageProps{
 		Palette:     palette,
 		Body:        "hello",
 		Width:       12,
 		HalfBlocks:  true,
 		PromptGlyph: "┃",
-	}).Render(&Context{Palette: palette}, Rect{W: 12, H: 3})
+	}), Rect{W: 12, H: 3})
 
 	top := surface.Lines()[0]
 	bottom := surface.Lines()[2]
@@ -143,13 +159,13 @@ func TestUserMessageHalfBlocksKeepAccentTopAndBottomRows(t *testing.T) {
 
 func TestUserMessageHalfBlocksLeaveSeparatorRowsTransparent(t *testing.T) {
 	palette := theme.Resolve("tokyonight").Palette
-	surface := NewUserMessage(UserMessageProps{
+	surface := PaintElementSurface(&Context{Palette: palette}, NewUserMessage(UserMessageProps{
 		Palette:     palette,
 		Body:        "hello",
 		Width:       12,
 		HalfBlocks:  true,
 		PromptGlyph: "┃",
-	}).Render(&Context{Palette: palette}, Rect{W: 12, H: 3})
+	}), Rect{W: 12, H: 3})
 
 	for _, pos := range [][2]int{{0, 0}, {5, 0}, {0, 2}, {5, 2}} {
 		if _, _, _, ok := surface.SurfaceCellBG(pos[0], pos[1]); ok {
@@ -288,7 +304,7 @@ func TestTranscriptLeafRenderAvoidsExtraOwnerSurfaceAllocation(t *testing.T) {
 	}
 
 	ResetSurfaceAllocationStats()
-	_ = element.Render(&Context{Palette: palette}, Rect{W: 18, H: 3})
+	_ = PaintElementSurface(&Context{Palette: palette}, element, Rect{W: 18, H: 3})
 	renderStats := SurfaceAllocationStatsSnapshot()
 
 	dst := TransparentSurface(18, 3)

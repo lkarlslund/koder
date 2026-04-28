@@ -3022,7 +3022,7 @@ func TestMouseClickOnThemePickerOKAppliesSelection(t *testing.T) {
 	if element == nil {
 		t.Fatal("expected theme dialog element")
 	}
-	_ = element.Render(ctx, ui.Rect{W: bounds.W, H: bounds.H})
+	_ = ui.PaintElementSurface(ctx, element, ui.Rect{W: bounds.W, H: bounds.H})
 	var okControl ui.Control
 	found := false
 	for _, control := range runtime.Controls() {

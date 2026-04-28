@@ -93,7 +93,7 @@ func TestAssistantMessageStyledBodyUsesBaseAndSpanStyles(t *testing.T) {
 		},
 	}
 
-	surface := msg.Render(&Context{Palette: palette}, Rect{W: 40, H: 1})
+	surface := PaintElementSurface(&Context{Palette: palette}, msg, Rect{W: 40, H: 1})
 	if line := strings.TrimSpace(strings.Join(surface.Lines(), "\n")); !strings.Contains(line, "plain code") {
 		t.Fatalf("unexpected rendered assistant message %q", line)
 	}

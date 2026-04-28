@@ -115,6 +115,10 @@ func (paletteElement) Render(ctx *Context, bounds Rect) Surface {
 	return s.normalize(bounds.W, bounds.H)
 }
 
+func (paletteElement) Paint(ctx *Context, canvas Canvas) {
+	canvas.WriteText(0, 0, "x", CellStyle{FG: cellColor(ctx.Palette.MarkdownText)})
+}
+
 type elementWindow struct {
 	BaseWindow
 	bounds  Rect
@@ -348,14 +352,14 @@ func TestInvalidateElementCachesReachesNestedCachedChild(t *testing.T) {
 		},
 	}
 
-	before := element.Render(&Context{Palette: first}, Rect{W: 4, H: 3})
+	before := PaintElementSurface(&Context{Palette: first}, element, Rect{W: 4, H: 3})
 	beforeR, beforeG, beforeB, beforeOK := before.SurfaceCellFG(1, 1)
 	if !beforeOK {
 		t.Fatal("expected foreground color before invalidation")
 	}
 
 	InvalidateElementCaches(&Context{Palette: first}, element)
-	after := element.Render(&Context{Palette: second}, Rect{W: 4, H: 3})
+	after := PaintElementSurface(&Context{Palette: second}, element, Rect{W: 4, H: 3})
 	afterR, afterG, afterB, afterOK := after.SurfaceCellFG(1, 1)
 	if !afterOK {
 		t.Fatal("expected foreground color after invalidation")
@@ -422,6 +426,17 @@ func (e controlElement) Render(ctx *Context, bounds Rect) Surface {
 	return SurfaceFromString("test").normalize(bounds.W, bounds.H)
 }
 
+func (e controlElement) Paint(ctx *Context, canvas Canvas) {
+	if ctx != nil && ctx.Runtime != nil {
+		ctx.Runtime.Register(Control{
+			ID:      e.id,
+			Rect:    Rect{X: canvas.origin.X, Y: canvas.origin.Y, W: max(1, canvas.Width()), H: max(1, canvas.Height())},
+			Enabled: true,
+		})
+	}
+	canvas.WriteText(0, 0, "test", CellStyle{})
+}
+
 func (e countingControlElement) Measure(_ *Context, constraints Constraints) Size {
 	return constraints.Clamp(Size{W: 4, H: 1})
 }
@@ -438,6 +453,20 @@ func (e countingControlElement) Render(ctx *Context, bounds Rect) Surface {
 		})
 	}
 	return SurfaceFromString("test").normalize(bounds.W, bounds.H)
+}
+
+func (e countingControlElement) Paint(ctx *Context, canvas Canvas) {
+	if e.renderCalls != nil {
+		*e.renderCalls = *e.renderCalls + 1
+	}
+	if ctx != nil && ctx.Runtime != nil {
+		ctx.Runtime.Register(Control{
+			ID:      e.id,
+			Rect:    Rect{X: canvas.origin.X, Y: canvas.origin.Y, W: max(1, canvas.Width()), H: max(1, canvas.Height())},
+			Enabled: true,
+		})
+	}
+	canvas.WriteText(0, 0, "test", CellStyle{})
 }
 
 func TestCachedElementReRegistersControlsOnCachedRender(t *testing.T) {

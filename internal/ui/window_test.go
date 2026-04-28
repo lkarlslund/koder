@@ -51,11 +51,11 @@ func TestWindowFrameRendersTitleAndCloseInBorder(t *testing.T) {
 
 func TestWindowFrameContentInheritsFrameBackground(t *testing.T) {
 	palette := theme.Default().Palette
-	surface := WindowFrame{
+	surface := PaintElementSurface(&Context{Palette: palette}, WindowFrame{
 		Title:   "Help",
 		Content: TextPane{Content: "Hotkeys"},
 		Width:   24,
-	}.Render(&Context{Palette: palette}, Rect{W: 24, H: 5})
+	}, Rect{W: 24, H: 5})
 
 	x := strings.Index(surface.Lines()[2], "Hotkeys")
 	if x < 0 {
@@ -80,8 +80,8 @@ func TestWindowFrameRenderMatchesInnerBorder(t *testing.T) {
 		Width:     24,
 		ShowClose: true,
 	}
-	got := element.Render(ctx, Rect{W: 24, H: 5})
-	want := element.border(ctx).Render(&Context{Palette: palette}, Rect{W: 24, H: 5})
+	got := PaintElementSurface(ctx, element, Rect{W: 24, H: 5})
+	want := PaintElementSurface(&Context{Palette: palette}, element.border(ctx), Rect{W: 24, H: 5})
 	if got.Size() != want.Size() {
 		t.Fatalf("size mismatch: got %#v want %#v", got.Size(), want.Size())
 	}

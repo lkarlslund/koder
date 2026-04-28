@@ -131,6 +131,10 @@ func (r SelectableRow) Render(ctx *Context, bounds Rect) Surface {
 	return renderOwnedCanvas(ctx, bounds, selectableRowPainter{row: r})
 }
 
+func (r SelectableRow) Paint(ctx *Context, canvas Canvas) {
+	selectableRowPainter{row: r}.Paint(ctx, canvas)
+}
+
 type selectableRowPainter struct {
 	row SelectableRow
 }
@@ -224,6 +228,10 @@ func (v VerticalTabs) Render(ctx *Context, bounds Rect) Surface {
 	return renderOwnedCanvas(ctx, bounds, verticalTabsPainter{tabs: v})
 }
 
+func (v VerticalTabs) Paint(ctx *Context, canvas Canvas) {
+	verticalTabsPainter{tabs: v}.Paint(ctx, canvas)
+}
+
 type verticalTabsPainter struct {
 	tabs VerticalTabs
 }
@@ -293,6 +301,10 @@ func (r CheckboxRow) Measure(ctx *Context, constraints Constraints) Size {
 
 func (r CheckboxRow) Render(ctx *Context, bounds Rect) Surface {
 	return renderOwnedCanvas(ctx, bounds, checkboxRowPainter{row: r})
+}
+
+func (r CheckboxRow) Paint(ctx *Context, canvas Canvas) {
+	checkboxRowPainter{row: r}.Paint(ctx, canvas)
 }
 
 type checkboxRowPainter struct {
@@ -387,6 +399,10 @@ func (r ChoiceRow) Measure(ctx *Context, constraints Constraints) Size {
 
 func (r ChoiceRow) Render(ctx *Context, bounds Rect) Surface {
 	return renderOwnedCanvas(ctx, bounds, choiceRowPainter{row: r})
+}
+
+func (r ChoiceRow) Paint(ctx *Context, canvas Canvas) {
+	choiceRowPainter{row: r}.Paint(ctx, canvas)
 }
 
 type choiceRowPainter struct {
@@ -623,6 +639,10 @@ func (r ButtonRow) Measure(ctx *Context, constraints Constraints) Size {
 
 func (r ButtonRow) Render(ctx *Context, bounds Rect) Surface {
 	return renderOwnedCanvas(ctx, bounds, buttonRowPainter{row: r})
+}
+
+func (r ButtonRow) Paint(ctx *Context, canvas Canvas) {
+	buttonRowPainter{row: r}.Paint(ctx, canvas)
 }
 
 type buttonRowPainter struct {

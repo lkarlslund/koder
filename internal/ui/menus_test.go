@@ -9,8 +9,8 @@ import (
 
 func assertElementRenderMatchesWrapper(t *testing.T, ctx *Context, wrapper Element, inner Element, bounds Rect) {
 	t.Helper()
-	got := wrapper.Render(ctx, bounds)
-	want := inner.Render(ctx, bounds)
+	got := PaintElementSurface(ctx, wrapper, bounds)
+	want := PaintElementSurface(ctx, inner, bounds)
 	if got.Size() != want.Size() {
 		t.Fatalf("size mismatch: got %#v want %#v", got.Size(), want.Size())
 	}
@@ -79,8 +79,8 @@ func TestMenuPickerDialogWrapperMatchesInnerElement(t *testing.T) {
 		Index: 1,
 	})
 	ctx := &Context{Palette: palette, Runtime: &Runtime{}}
-	got := element.Render(ctx, Rect{W: 80, H: 10})
-	want := element.element().Render(&Context{Palette: palette}, Rect{W: 80, H: 10})
+	got := PaintElementSurface(ctx, element, Rect{W: 80, H: 10})
+	want := PaintElementSurface(&Context{Palette: palette}, element.element(), Rect{W: 80, H: 10})
 	if got.Size() != want.Size() {
 		t.Fatalf("size mismatch: got %#v want %#v", got.Size(), want.Size())
 	}

@@ -9,11 +9,11 @@ import (
 
 	"github.com/lkarlslund/koder/internal/theme"
 	"github.com/lkarlslund/koder/internal/ui"
-	"github.com/lkarlslund/koder/internal/ui/uitest"
 )
 
 func renderSessionDialog(dialog SessionDialog, width int, palette theme.Palette) string {
-	return uitest.RenderElementText(&ui.Context{Palette: palette}, dialog, width, 0)
+	size := dialog.Measure(&ui.Context{Palette: palette}, ui.Constraints{MaxW: width})
+	return strings.Join(dialog.Render(&ui.Context{Palette: palette}, ui.Rect{W: maxInt(width, size.W), H: size.H}).Lines(), "\n")
 }
 
 func TestSessionDialogSelectsCurrentSession(t *testing.T) {

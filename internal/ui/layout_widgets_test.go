@@ -33,7 +33,7 @@ func renderViaPaintForTest(ctx *Context, element Element, bounds Rect) Surface {
 
 func assertRenderMatchesPaint(t *testing.T, ctx *Context, element Element, bounds Rect) {
 	t.Helper()
-	gotRender := element.Render(ctx, bounds)
+	gotRender := PaintElementSurface(ctx, element, bounds)
 	gotPaint := renderViaPaintForTest(ctx, element, bounds)
 	if gotRender.Size() != gotPaint.Size() {
 		t.Fatalf("render/paint size mismatch: %#v vs %#v", gotRender.Size(), gotPaint.Size())
@@ -200,7 +200,7 @@ func TestContainerPaintAvoidsOwnerSurfaceAllocation(t *testing.T) {
 	}
 
 	ResetSurfaceAllocationStats()
-	_ = element.Render(ctx, Rect{W: 24, H: 2})
+	_ = PaintElementSurface(ctx, element, Rect{W: 24, H: 2})
 	renderStats := SurfaceAllocationStatsSnapshot()
 
 	dst := TransparentSurface(24, 2)

@@ -267,7 +267,7 @@ func BenchmarkMenuRenderCell(b *testing.B) {
 	}
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		_ = menu.Render(ctx, Rect{W: 72})
+		_ = PaintElementSurface(ctx, menu, Rect{W: 72})
 	}
 }
 
@@ -291,7 +291,7 @@ func BenchmarkBorderRenderCell(b *testing.B) {
 	}
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		_ = panel.Render(ctx, Rect{W: 72, H: panel.Measure(ctx, NewConstraints(72, 0)).H})
+		_ = PaintElementSurface(ctx, panel, Rect{W: 72, H: panel.Measure(ctx, NewConstraints(72, 0)).H})
 	}
 }
 

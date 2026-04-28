@@ -128,6 +128,13 @@ func (d ToolsDialog) Render(ctx *ui.Context, bounds ui.Rect) ui.Surface {
 	return ui.PaintElementSurface(ctx, element, ui.Rect{W: size.W, H: bounds.H})
 }
 
+func (d ToolsDialog) Paint(ctx *ui.Context, canvas ui.Canvas) {
+	if canvas.Width() <= 0 || canvas.Height() <= 0 {
+		return
+	}
+	canvas.BlitSurface(0, 0, d.Render(ctx, ui.Rect{W: canvas.Width(), H: canvas.Height()}))
+}
+
 func (d ToolsDialog) dialog(width int, palette theme.Palette) ui.Element {
 	dialogWidth := width
 	if dialogWidth <= 0 {

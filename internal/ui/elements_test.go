@@ -31,6 +31,16 @@ func (f fillBox) Render(_ *Context, bounds Rect) Surface {
 	return surface.normalize(bounds.W, bounds.H)
 }
 
+func (f fillBox) Paint(_ *Context, canvas Canvas) {
+	mark := f.mark
+	if mark == "" {
+		mark = "x"
+	}
+	for y := 0; y < max(1, canvas.Height()); y++ {
+		canvas.WriteText(0, y, strings.Repeat(mark, max(1, canvas.Width())), CellStyle{})
+	}
+}
+
 func TestFlexBoxRenderPlacesChildrenHorizontally(t *testing.T) {
 	got := RenderElement(nil, FlexBox{
 		Direction: DirectionHorizontal,
@@ -243,7 +253,7 @@ func TestInputFieldRendersExpectedFrame(t *testing.T) {
 		CursorVisible: true,
 		Width:         10,
 	}
-	got := element.Render(nil, Rect{W: 10, H: 3})
+	got := PaintElementSurface(nil, element, Rect{W: 10, H: 3})
 	if got.SurfaceWidth() != 10 || got.SurfaceHeight() != 3 {
 		t.Fatalf("expected 10x3 input field, got %dx%d", got.SurfaceWidth(), got.SurfaceHeight())
 	}
@@ -256,7 +266,7 @@ func TestSimpleWidgetPaintAvoidsOwnerSurfaceAllocation(t *testing.T) {
 	element := Paragraph{Text: "alpha beta gamma"}
 
 	ResetSurfaceAllocationStats()
-	_ = element.Render(nil, Rect{W: 8, H: 3})
+	_ = PaintElementSurface(nil, element, Rect{W: 8, H: 3})
 	renderStats := SurfaceAllocationStatsSnapshot()
 
 	dst := TransparentSurface(8, 3)

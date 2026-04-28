@@ -1059,7 +1059,6 @@ func substringByWidth(input string, start, end int) string {
 
 type Element interface {
 	Measure(ctx *Context, constraints Constraints) Size
-	Render(ctx *Context, bounds Rect) Surface
 }
 
 type TreeWalker interface {
@@ -1077,46 +1076,26 @@ func InvalidateElementCaches(ctx *Context, element Element) {
 	invalidateElementCaches(ctx, element)
 }
 
-func renderElementCapturedSurface(ctx *Context, element Element, bounds Rect) Surface {
-	if element == nil || bounds.W <= 0 || bounds.H <= 0 {
-		return Surface{}
-	}
-	shadow := &Runtime{}
-	copyCtx := Context{}
-	if ctx != nil {
-		copyCtx = *ctx
-	}
-	copyCtx.Runtime = shadow
-	surface := element.Render(&copyCtx, Rect{W: bounds.W, H: bounds.H})
-	if controls := shadow.Controls(); len(controls) > 0 {
-		surface.ctrls = append(surface.ctrls[:0], controls...)
-	}
-	return surface
-}
-
 func renderElementInto(ctx *Context, element Element, bounds Rect, dst *Surface) {
 	if element == nil || dst == nil || bounds.W <= 0 || bounds.H <= 0 {
 		return
 	}
-	if painter, ok := element.(Painter); ok {
-		painter.Paint(ctx, NewCanvas(dst, bounds))
+	painter, ok := element.(Painter)
+	if !ok {
 		return
 	}
-	surface := renderElementCapturedSurface(ctx, element, bounds)
-	*dst = dst.placeAt(bounds.X, bounds.Y, surface)
-	if ctx != nil && ctx.Runtime != nil {
-		surface.RegisterControls(ctx.Runtime, bounds.X, bounds.Y)
-	}
+	painter.Paint(ctx, NewCanvas(dst, bounds))
 }
 
 func PaintElementSurface(ctx *Context, element Element, bounds Rect) Surface {
 	if element == nil || bounds.W <= 0 || bounds.H <= 0 {
 		return Surface{}
 	}
-	if painter, ok := element.(Painter); ok {
-		return renderOwnedCanvas(ctx, bounds, painter)
+	painter, ok := element.(Painter)
+	if !ok {
+		return Surface{}
 	}
-	return renderElementCapturedSurface(ctx, element, bounds)
+	return renderOwnedCanvas(ctx, bounds, painter)
 }
 
 func renderOwnedCanvas(ctx *Context, bounds Rect, painter Painter) Surface {

@@ -72,7 +72,7 @@ func (e *CachedElement) RenderCached(ctx *Context, width int) Surface {
 		return e.surface
 	}
 	size := e.Child.Measure(ctx, NewConstraints(width, 0))
-	surface := renderElementCapturedSurface(ctx, e.Child, Rect{W: width, H: size.H})
+	surface := PaintElementSurface(withoutRuntime(ctx), e.Child, Rect{W: width, H: size.H})
 	if ctx != nil && ctx.Runtime != nil {
 		surface.RegisterControls(ctx.Runtime, 0, 0)
 	}
@@ -349,7 +349,7 @@ func (t *RetainedTranscript) itemSurfaceAt(ctx *Context, index int, item Transcr
 		return surface
 	}
 	size := item.Element.Measure(ctx, NewConstraints(width, 0))
-	surface := renderElementCapturedSurface(ctx, item.Element, Rect{W: width, H: size.H})
+	surface := PaintElementSurface(withoutRuntime(ctx), item.Element, Rect{W: width, H: size.H})
 	if index >= 0 && index < len(t.itemHeights) {
 		t.itemHeights[index] = surface.Size().H
 	}
