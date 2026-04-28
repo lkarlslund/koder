@@ -15,7 +15,7 @@ import (
 
 func renderModelDialog(dialog ModelDialog, width int, palette theme.Palette) string {
 	size := dialog.Measure(&ui.Context{Palette: palette}, ui.Constraints{MaxW: width})
-	return strings.Join(dialog.Render(&ui.Context{Palette: palette}, ui.Rect{W: maxInt(width, size.W), H: size.H}).Lines(), "\n")
+	return strings.Join(dialog.Surface(&ui.Context{Palette: palette}, ui.Rect{W: maxInt(width, size.W), H: size.H}).Lines(), "\n")
 }
 
 func TestModelDialogSelectsModel(t *testing.T) {

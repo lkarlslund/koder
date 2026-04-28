@@ -12,7 +12,7 @@ import (
 
 func renderConnectDialog(dialog ConnectDialog, width int, palette theme.Palette) string {
 	size := dialog.Measure(&ui.Context{Palette: palette}, ui.Constraints{MaxW: width})
-	return strings.Join(dialog.Render(&ui.Context{Palette: palette}, ui.Rect{W: maxInt(width, size.W), H: size.H}).Lines(), "\n")
+	return strings.Join(dialog.Surface(&ui.Context{Palette: palette}, ui.Rect{W: maxInt(width, size.W), H: size.H}).Lines(), "\n")
 }
 
 func TestConnectDialogSelectsProviderAndSavesDraft(t *testing.T) {
@@ -105,7 +105,7 @@ func TestConnectDialogRenderRegistersButtonControls(t *testing.T) {
 	runtime := &ui.Runtime{}
 	ctx := &ui.Context{Palette: theme.Resolve("tokyonight").Palette, Runtime: runtime}
 	size := dialog.Measure(ctx, ui.Constraints{MaxW: 90, MaxH: 40})
-	_ = dialog.Render(ctx, ui.Rect{W: size.W, H: size.H})
+	_ = dialog.Surface(ctx, ui.Rect{W: size.W, H: size.H})
 
 	controls := runtime.Controls()
 	ids := map[string]bool{}

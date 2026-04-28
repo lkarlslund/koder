@@ -4372,7 +4372,7 @@ func TestSyncRetainedTranscriptItemsReplacesMatchingKeys(t *testing.T) {
 	m.syncRetainedTranscriptItems(retained, []ui.TranscriptItem{first})
 	m.syncRetainedTranscriptItems(retained, []ui.TranscriptItem{second})
 
-	rendered := retained.Render(&ui.Context{}, ui.Rect{W: 16, H: 1})
+	rendered := ui.PaintElementSurface(&ui.Context{}, retained, ui.Rect{W: 16, H: 1})
 	got := strings.Join(rendered.Lines(), "\n")
 	if !strings.Contains(got, "after") {
 		t.Fatalf("expected retained transcript item to be replaced, got %q", got)

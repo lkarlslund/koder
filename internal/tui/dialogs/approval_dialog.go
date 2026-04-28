@@ -129,7 +129,7 @@ func (d *ApprovalDialog) activateButton(index int) ApprovalDialogAction {
 	return d.ActivateControl(d.buttons.Buttons[index].ID)
 }
 
-func (d *ApprovalDialog) Render(palette theme.Palette, bounds ui.Rect) ui.Element {
+func (d *ApprovalDialog) Element(palette theme.Palette, bounds ui.Rect) ui.Element {
 	if d == nil {
 		return nil
 	}

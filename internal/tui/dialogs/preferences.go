@@ -315,7 +315,7 @@ func (d PreferencesDialog) Measure(ctx *ui.Context, constraints ui.Constraints) 
 	return constraints.Clamp(d.dialog(width, ctx.Palette).Measure(ctx, ui.Constraints{MaxW: width, MaxH: constraints.MaxH}))
 }
 
-func (d PreferencesDialog) Render(ctx *ui.Context, bounds ui.Rect) ui.Surface {
+func (d PreferencesDialog) Surface(ctx *ui.Context, bounds ui.Rect) ui.Surface {
 	maxWidth := dialogRenderWidth(bounds, 84)
 	element := d.dialog(maxWidth, ctx.Palette)
 	size := element.Measure(ctx, ui.Constraints{MaxW: maxWidth, MaxH: bounds.H})
@@ -326,7 +326,7 @@ func (d PreferencesDialog) Paint(ctx *ui.Context, canvas ui.Canvas) {
 	if canvas.Width() <= 0 || canvas.Height() <= 0 {
 		return
 	}
-	canvas.BlitSurface(0, 0, d.Render(ctx, ui.Rect{W: canvas.Width(), H: canvas.Height()}))
+	canvas.BlitSurface(0, 0, d.Surface(ctx, ui.Rect{W: canvas.Width(), H: canvas.Height()}))
 }
 
 func (d PreferencesDialog) dialog(width int, palette theme.Palette) ui.Element {

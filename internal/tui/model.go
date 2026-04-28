@@ -5860,7 +5860,7 @@ func (m *Model) renderApprovalDialogElement() ui.Element {
 		return nil
 	}
 	m.ensureApprovalDialog()
-	return m.approvalDialog.Render(m.palette, ui.Rect{W: max(0, m.width), H: max(0, m.height)})
+	return m.approvalDialog.Element(m.palette, ui.Rect{W: max(0, m.width), H: max(0, m.height)})
 }
 
 func (m *Model) renderApprovalPrompt() string {
