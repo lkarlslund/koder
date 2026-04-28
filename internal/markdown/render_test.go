@@ -217,3 +217,150 @@ func TestRenderStyledTracksInlineAttributes(t *testing.T) {
 		t.Fatalf("expected inline styles in spans, got %#v", got)
 	}
 }
+
+func TestRenderFormatsImagesFootnotesMathAndDefinitionLists(t *testing.T) {
+	renderer, err := New(theme.Default().Palette)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	input := strings.Join([]string{
+		"![Demo Image](https://example.com/demo.png \"hero\")",
+		"",
+		"Term",
+		": Definition value",
+		"",
+		"Inline math $E = mc^2$ and ref[^1].",
+		"",
+		"$$",
+		"a+b",
+		"$$",
+		"",
+		"[^1]: Footnote body",
+	}, "\n")
+
+	got := ansi.Strip(renderer.Render(input))
+	for _, want := range []string{
+		"🖼 Image",
+		"Alt: Demo Image",
+		"Src: https://example.com/demo.png",
+		"Title: hero",
+		"Term",
+		": Definition value",
+		"⟪E = mc^2⟫",
+		"[1]",
+		"┌─ math",
+		"a+b",
+		"Footnotes",
+		"[^1] Footnote body",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected %q in rendered output, got %q", want, got)
+		}
+	}
+}
+
+func TestRenderFormatsCalloutsAndSafeHTML(t *testing.T) {
+	renderer, err := New(theme.Default().Palette)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	input := strings.Join([]string{
+		"> [!NOTE]",
+		"> This is a **note**.",
+		"",
+		"H<sup>2</sup>O and CO<sub>2</sub> plus <abbr title=\"HyperText Markup Language\">HTML</abbr>.",
+	}, "\n")
+
+	got := ansi.Strip(renderer.Render(input))
+	for _, want := range []string{"ℹ NOTE", "This is a note.", "H^(2)O", "CO_(2)", "HTML (HyperText Markup Language)"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected %q in rendered output, got %q", want, got)
+		}
+	}
+	if strings.Contains(got, "[!NOTE]") {
+		t.Fatalf("expected callout marker to be normalized, got %q", got)
+	}
+}
+
+func TestRenderFormatsHighlightWithBackground(t *testing.T) {
+	renderer, err := New(theme.Default().Palette)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	got := renderer.RenderStyled("plain ==mark== plain")
+	found := false
+	for _, span := range got {
+		if span.Text == "mark" {
+			found = true
+			if !span.Style.BG.Valid() || span.Style.BG.A() == 0xff {
+				t.Fatalf("expected translucent background for highlight, got %#v", span.Style)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("expected highlight span in %#v", got)
+	}
+}
+
+func TestRenderUltimateMarkdownDemoCoverage(t *testing.T) {
+	renderer, err := New(theme.Default().Palette)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	input := strings.Join([]string{
+		"# 📘 The Ultimate Markdown Demo",
+		"",
+		"This is **bold** and this is *italic* and this is ***bold italic***.",
+		"",
+		"You can use ~~strikethrough~~ for deleted text and ==highlighted== for emphasis.",
+		"",
+		"Superscript: H<sup>2</sup>O. Abbreviation: <abbr title=\"HyperText Markup Language\">HTML</abbr>.",
+		"",
+		"> [!WARNING]",
+		"> This is a **warning** — something that could cause problems.",
+		"",
+		"![Alt Text](https://via.placeholder.com/400x200?text=Demo+Image)",
+		"",
+		"- [x] Create project structure",
+		"",
+		"Here is a sentence with a footnote[^1].",
+		"",
+		"[^1]: This is the first footnote.",
+		"",
+		"**Markdown**",
+		": A lightweight markup language for creating formatted text.",
+		"",
+		"The equation $E = mc^2$ is one of the most famous in physics.",
+		"",
+		"$$",
+		"\\int_{-\\infty}^{\\infty} e^{-x^2} dx = \\sqrt{\\pi}",
+		"$$",
+	}, "\n")
+
+	got := ansi.Strip(renderer.Render(input))
+	for _, want := range []string{
+		"highlighted",
+		"⚠ WARNING",
+		"🖼 Image",
+		"Alt: Alt Text",
+		"footnote[1]",
+		"Footnotes",
+		"[^1] This is the first footnote.",
+		": A lightweight markup language",
+		"⟪E = mc^2⟫",
+		"┌─ math",
+		"H^(2)O",
+		"HTML (HyperText Markup Language)",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected %q in rendered output, got %q", want, got)
+		}
+	}
+	if strings.Contains(got, "[!WARNING]") {
+		t.Fatalf("expected callout marker to be normalized, got %q", got)
+	}
+}

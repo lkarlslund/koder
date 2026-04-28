@@ -1,6 +1,7 @@
 package markdown
 
 import (
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -15,14 +16,22 @@ import (
 )
 
 type Renderer struct {
-	md      goldmark.Markdown
-	palette theme.Palette
+	md        goldmark.Markdown
+	palette   theme.Palette
+	graphics  ui.GraphicsCapability
+	imageMode ImageRenderMode
 }
 
 func New(palette theme.Palette) (*Renderer, error) {
 	return &Renderer{
-		md:      goldmark.New(goldmark.WithExtensions(extension.GFM)),
-		palette: palette,
+		md: goldmark.New(goldmark.WithExtensions(
+			extension.GFM,
+			extension.Footnote,
+			extension.DefinitionList,
+		)),
+		palette:   palette,
+		graphics:  ui.GraphicsNone,
+		imageMode: ImageRenderTextOnly,
 	}, nil
 }
 
@@ -87,19 +96,20 @@ func (r *Renderer) renderStyledBlockChildren(parent ast.Node, source []byte, wid
 func (r *Renderer) renderStyledBlock(node ast.Node, source []byte, width int) []ui.StyledSpan {
 	switch typed := node.(type) {
 	case *ast.Paragraph, *ast.TextBlock:
+		if desc, ok := r.standaloneImageDescriptor(node, source); ok {
+			return r.renderImage(desc)
+		}
+		if mathBody, ok := extractDisplayMath(node, source); ok {
+			return r.renderDisplayMath(mathBody)
+		}
 		return r.renderStyledInlineChildren(node, source, ui.CellStyle{})
 	case *ast.Heading:
-		style := ui.CellStyle{}.WithBold(true)
-		switch typed.Level {
-		case 1:
-			style.FG = r.palette.MarkdownHeadingPrimary
-		case 2:
-			style.FG = r.palette.MarkdownHeadingSecondary
-		default:
-			style.FG = r.palette.MarkdownHeadingTertiary
-		}
-		return r.renderStyledInlineChildren(node, source, style)
+		return r.renderStyledHeading(typed, source)
 	case *ast.Blockquote:
+		if kind, body, ok := r.renderCalloutBlock(typed, source, width); ok {
+			_ = kind
+			return body
+		}
 		inner := ui.SplitStyledLines(r.renderStyledBlockChildren(node, source, width))
 		return prefixStyledLines(
 			inner,
@@ -119,8 +129,12 @@ func (r *Renderer) renderStyledBlock(node ast.Node, source []byte, width int) []
 		}}
 	case *extensionast.Table:
 		return r.renderStyledTable(typed, source, width)
+	case *extensionast.DefinitionList:
+		return r.renderStyledDefinitionList(typed, source, width)
+	case *extensionast.FootnoteList:
+		return r.renderStyledFootnoteList(typed, source, width)
 	case *ast.HTMLBlock:
-		return nil
+		return r.renderHTMLBlock(node, source)
 	default:
 		if node.HasChildren() {
 			return r.renderStyledBlockChildren(node, source, width)
@@ -129,26 +143,55 @@ func (r *Renderer) renderStyledBlock(node ast.Node, source []byte, width int) []
 	}
 }
 
+func (r *Renderer) renderStyledHeading(node *ast.Heading, source []byte) []ui.StyledSpan {
+	style := ui.CellStyle{}
+	switch node.Level {
+	case 1:
+		style = style.Merge(ui.CellStyle{FG: r.palette.MarkdownHeadingPrimary}.WithBold(true))
+	case 2:
+		style = style.Merge(ui.CellStyle{FG: r.palette.MarkdownHeadingSecondary}.WithBold(true))
+	case 3:
+		style = style.Merge(ui.CellStyle{FG: r.palette.MarkdownHeadingTertiary}.WithBold(true))
+	case 4:
+		style = style.Merge(ui.CellStyle{FG: r.palette.MarkdownHeadingTertiary}.WithBold(true).WithUnderline(true))
+	case 5:
+		style = style.Merge(ui.CellStyle{FG: r.palette.MarkdownQuoteText}.WithBold(true).WithItalic(true))
+	default:
+		style = style.Merge(ui.CellStyle{FG: r.palette.MarkdownQuoteText}.WithItalic(true))
+	}
+	return r.renderStyledInlineChildren(node, source, style)
+}
+
+type inlineHTMLState struct {
+	abbrTitles []string
+}
+
 func (r *Renderer) renderStyledInlineChildren(parent ast.Node, source []byte, style ui.CellStyle) []ui.StyledSpan {
 	var output []ui.StyledSpan
+	state := &inlineHTMLState{}
 	for child := parent.FirstChild(); child != nil; child = child.NextSibling() {
-		output = append(output, r.renderStyledInline(child, source, style)...)
+		switch typed := child.(type) {
+		case *ast.Text:
+			value := string(typed.Segment.Value(source))
+			if typed.HardLineBreak() {
+				value += "\n"
+			} else if typed.SoftLineBreak() {
+				value += " "
+			}
+			output = append(output, r.renderStyledTextFragments(value, style)...)
+		case *ast.String:
+			output = append(output, r.renderStyledTextFragments(string(typed.Value), style)...)
+		case *ast.RawHTML:
+			output = append(output, r.renderRawHTML(typed, source, style, state)...)
+		default:
+			output = append(output, r.renderStyledInline(child, source, style)...)
+		}
 	}
 	return output
 }
 
 func (r *Renderer) renderStyledInline(node ast.Node, source []byte, style ui.CellStyle) []ui.StyledSpan {
 	switch typed := node.(type) {
-	case *ast.Text:
-		value := string(typed.Segment.Value(source))
-		if typed.HardLineBreak() {
-			value += "\n"
-		} else if typed.SoftLineBreak() {
-			value += " "
-		}
-		return []ui.StyledSpan{{Text: value, Style: style}}
-	case *ast.String:
-		return []ui.StyledSpan{{Text: string(typed.Value), Style: style}}
 	case *ast.CodeSpan:
 		codeStyle := style.Merge(ui.CellStyle{
 			FG: r.palette.MarkdownInlineCodeText,
@@ -180,23 +223,141 @@ func (r *Renderer) renderStyledInline(node ast.Node, source []byte, style ui.Cel
 			out = ui.AppendStyledSpan(out, " ("+target+")", targetStyle)
 		}
 		return out
+	case *ast.Image:
+		return r.renderInlineImage(imageDescriptorFromNode(typed, source, true, ""))
 	case *ast.AutoLink:
 		return []ui.StyledSpan{{
 			Text:  string(typed.URL(source)),
 			Style: style.Merge(ui.CellStyle{FG: r.palette.MarkdownLinkTargetText}.WithUnderline(true)),
 		}}
-	case *ast.RawHTML:
-		return nil
 	case *extensionast.TaskCheckBox:
 		label := "[ ] "
 		if typed.IsChecked {
 			label = "[x] "
 		}
 		return []ui.StyledSpan{{Text: label, Style: style}}
+	case *extensionast.FootnoteLink:
+		return []ui.StyledSpan{{
+			Text:  "[" + strconv.Itoa(typed.Index) + "]",
+			Style: style.Merge(ui.CellStyle{FG: r.palette.MarkdownLinkTargetText}.WithUnderline(true)),
+		}}
+	case *extensionast.FootnoteBacklink:
+		return nil
 	default:
 		if node.HasChildren() {
 			return r.renderStyledInlineChildren(node, source, style)
 		}
+		return nil
+	}
+}
+
+func (r *Renderer) renderStyledTextFragments(value string, style ui.CellStyle) []ui.StyledSpan {
+	var out []ui.StyledSpan
+	for len(value) > 0 {
+		idx, token := nextInlineToken(value)
+		if idx < 0 {
+			out = appendStyled(out, value, style)
+			break
+		}
+		if idx > 0 {
+			out = appendStyled(out, value[:idx], style)
+			value = value[idx:]
+		}
+		switch token {
+		case "mark":
+			end := strings.Index(value[2:], "==")
+			if end <= 0 || strings.Contains(value[2:2+end], "\n") {
+				out = appendStyled(out, value[:2], style)
+				value = value[2:]
+				continue
+			}
+			markStyle := style.Merge(ui.CellStyle{
+				BG: firstColor(r.palette.MarkdownMarkBackground, r.palette.MarkdownLinkText.WithAlpha(72)),
+			})
+			out = appendStyled(out, value[2:2+end], markStyle)
+			value = value[2+end+2:]
+		case "math":
+			end := findInlineMathEnd(value[1:])
+			if end <= 0 || strings.Contains(value[1:1+end], "\n") {
+				out = appendStyled(out, value[:1], style)
+				value = value[1:]
+				continue
+			}
+			out = append(out, r.renderInlineMath(value[1:1+end], style)...)
+			value = value[1+end+1:]
+		default:
+			out = appendStyled(out, value[:1], style)
+			value = value[1:]
+		}
+	}
+	return out
+}
+
+func nextInlineToken(value string) (int, string) {
+	bestIdx := -1
+	bestToken := ""
+	if idx := strings.Index(value, "=="); idx >= 0 {
+		bestIdx, bestToken = idx, "mark"
+	}
+	for i := 0; i < len(value); i++ {
+		if value[i] != '$' {
+			continue
+		}
+		if (i > 0 && value[i-1] == '\\') || (i+1 < len(value) && value[i+1] == '$') {
+			continue
+		}
+		if bestIdx == -1 || i < bestIdx {
+			bestIdx, bestToken = i, "math"
+		}
+		break
+	}
+	return bestIdx, bestToken
+}
+
+func findInlineMathEnd(value string) int {
+	for i := 0; i < len(value); i++ {
+		if value[i] == '$' && (i == 0 || value[i-1] != '\\') {
+			return i
+		}
+	}
+	return -1
+}
+
+func (r *Renderer) renderRawHTML(node *ast.RawHTML, source []byte, style ui.CellStyle, state *inlineHTMLState) []ui.StyledSpan {
+	raw := strings.TrimSpace(string(node.Text(source)))
+	lower := strings.ToLower(raw)
+	switch {
+	case lower == "<sup>":
+		return []ui.StyledSpan{{Text: "^(", Style: style.Merge(ui.CellStyle{FG: r.palette.MarkdownEmphasisText}.WithBold(true))}}
+	case lower == "</sup>":
+		return []ui.StyledSpan{{Text: ")", Style: style.Merge(ui.CellStyle{FG: r.palette.MarkdownEmphasisText}.WithBold(true))}}
+	case lower == "<sub>":
+		return []ui.StyledSpan{{Text: "_(", Style: style.Merge(ui.CellStyle{FG: r.palette.MarkdownEmphasisText}.WithBold(true))}}
+	case lower == "</sub>":
+		return []ui.StyledSpan{{Text: ")", Style: style.Merge(ui.CellStyle{FG: r.palette.MarkdownEmphasisText}.WithBold(true))}}
+	case strings.HasPrefix(lower, "<abbr"):
+		if title := parseHTMLAttr(raw, "title"); title != "" {
+			state.abbrTitles = append(state.abbrTitles, title)
+		} else {
+			state.abbrTitles = append(state.abbrTitles, "")
+		}
+		return nil
+	case lower == "</abbr>":
+		if len(state.abbrTitles) == 0 {
+			return nil
+		}
+		title := state.abbrTitles[len(state.abbrTitles)-1]
+		state.abbrTitles = state.abbrTitles[:len(state.abbrTitles)-1]
+		if strings.TrimSpace(title) == "" {
+			return nil
+		}
+		return []ui.StyledSpan{{
+			Text:  " (" + title + ")",
+			Style: style.Merge(ui.CellStyle{FG: r.palette.MarkdownQuoteText}.WithItalic(true)),
+		}}
+	case lower == "<br>" || lower == "<br/>" || lower == "<br />":
+		return []ui.StyledSpan{{Text: "\n", Style: style}}
+	default:
 		return nil
 	}
 }
@@ -207,7 +368,10 @@ func (r *Renderer) renderStyledCodeBlock(lang string, lines *text.Segments, sour
 		label = "code"
 	}
 	borderStyle := ui.CellStyle{FG: r.palette.MarkdownCodeBlockBorder}
-	bodyStyle := ui.CellStyle{FG: r.palette.MarkdownCodeBlockText}
+	bodyStyle := ui.CellStyle{
+		FG: r.palette.MarkdownCodeBlockText,
+		BG: r.palette.MarkdownInlineCodeBackground.WithAlpha(72),
+	}
 	out := []ui.StyledSpan{{Text: "┌─ " + label, Style: borderStyle}}
 	for i := 0; i < lines.Len(); i++ {
 		segment := lines.At(i)
@@ -358,6 +522,331 @@ func (r *Renderer) renderStyledTableDivider(widths []int, borderStyle ui.CellSty
 	return out
 }
 
+func (r *Renderer) renderStyledDefinitionList(node *extensionast.DefinitionList, source []byte, width int) []ui.StyledSpan {
+	var out []ui.StyledSpan
+	first := true
+	for child := node.FirstChild(); child != nil; {
+		term, ok := child.(*extensionast.DefinitionTerm)
+		if !ok {
+			child = child.NextSibling()
+			continue
+		}
+		if !first {
+			out = ui.AppendStyledSpan(out, "\n", ui.CellStyle{})
+		}
+		out = append(out, r.renderStyledInlineChildren(term, source, ui.CellStyle{FG: r.palette.MarkdownHeadingSecondary}.WithBold(true))...)
+		descNode := child.NextSibling()
+		for descNode != nil {
+			desc, ok := descNode.(*extensionast.DefinitionDescription)
+			if !ok {
+				break
+			}
+			lines := ui.SplitStyledLines(r.renderStyledBlockChildren(desc, source, width))
+			out = ui.AppendStyledSpan(out, "\n", ui.CellStyle{})
+			out = append(out, prefixStyledLines(
+				lines,
+				[]ui.StyledSpan{{Text: "  : ", Style: ui.CellStyle{FG: r.palette.MarkdownListEnumeration}}},
+				[]ui.StyledSpan{{Text: "    ", Style: ui.CellStyle{}}},
+			)...)
+			descNode = descNode.NextSibling()
+			if descNode != nil {
+				out = ui.AppendStyledSpan(out, "\n", ui.CellStyle{})
+			}
+		}
+		child = descNode
+		first = false
+	}
+	return out
+}
+
+func (r *Renderer) renderStyledFootnoteList(node *extensionast.FootnoteList, source []byte, width int) []ui.StyledSpan {
+	var out []ui.StyledSpan
+	out = ui.AppendStyledSpan(out, "Footnotes", ui.CellStyle{FG: r.palette.MarkdownHeadingSecondary}.WithBold(true))
+	first := true
+	for child := node.FirstChild(); child != nil; child = child.NextSibling() {
+		footnote, ok := child.(*extensionast.Footnote)
+		if !ok {
+			continue
+		}
+		if first {
+			out = ui.AppendStyledSpan(out, "\n", ui.CellStyle{})
+			first = false
+		} else {
+			out = ui.AppendStyledSpan(out, "\n", ui.CellStyle{})
+		}
+		lines := ui.SplitStyledLines(r.renderStyledBlockChildren(footnote, source, width))
+		out = append(out, prefixStyledLines(
+			lines,
+			[]ui.StyledSpan{{Text: "[^" + string(footnote.Ref) + "] ", Style: ui.CellStyle{FG: r.palette.MarkdownLinkTargetText}.WithBold(true)}},
+			[]ui.StyledSpan{{Text: "     ", Style: ui.CellStyle{}}},
+		)...)
+	}
+	return out
+}
+
+func (r *Renderer) renderHTMLBlock(node ast.Node, source []byte) []ui.StyledSpan {
+	text := strings.TrimSpace(string(node.Text(source)))
+	if text == "" {
+		return nil
+	}
+	text = safeHTMLPlainText(text)
+	if strings.TrimSpace(text) == "" {
+		return nil
+	}
+	return []ui.StyledSpan{{Text: text, Style: ui.CellStyle{FG: r.palette.MarkdownQuoteText}.WithItalic(true)}}
+}
+
+type calloutKind string
+
+const (
+	calloutNote      calloutKind = "NOTE"
+	calloutTip       calloutKind = "TIP"
+	calloutImportant calloutKind = "IMPORTANT"
+	calloutWarning   calloutKind = "WARNING"
+	calloutCaution   calloutKind = "CAUTION"
+)
+
+var calloutPattern = regexp.MustCompile(`^\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]\s*`)
+
+func (r *Renderer) renderCalloutBlock(node *ast.Blockquote, source []byte, width int) (calloutKind, []ui.StyledSpan, bool) {
+	firstParagraph, ok := node.FirstChild().(*ast.Paragraph)
+	if !ok {
+		return "", nil, false
+	}
+	firstLine := strings.TrimSpace(strings.SplitN(inlinePlainText(firstParagraph, source), "\n", 2)[0])
+	match := calloutPattern.FindStringSubmatch(firstLine)
+	if len(match) != 2 {
+		return "", nil, false
+	}
+	kind := calloutKind(match[1])
+	inner := ui.SplitStyledLines(r.renderStyledBlockChildren(node, source, width))
+	if len(inner) == 0 {
+		return kind, nil, true
+	}
+	inner[0] = trimStyledLinePrefix(inner[0], calloutPattern.FindString(firstLine))
+	headerGlyph, borderColor, wash := r.calloutStyle(kind)
+	header := []ui.StyledSpan{{
+		Text:  "┌─ " + headerGlyph + " " + string(kind),
+		Style: ui.CellStyle{FG: borderColor}.WithBold(true),
+	}}
+	header = mergeLineStyle(header, ui.CellStyle{BG: wash})
+	body := prefixStyledLines(
+		mergeLineStyles(inner, ui.CellStyle{BG: wash}),
+		[]ui.StyledSpan{{Text: "│ ", Style: ui.CellStyle{FG: borderColor, BG: wash}}},
+		[]ui.StyledSpan{{Text: "│ ", Style: ui.CellStyle{FG: borderColor, BG: wash}}},
+	)
+	footer := []ui.StyledSpan{{
+		Text:  "└" + strings.Repeat("─", max(8, len(string(kind))+4)),
+		Style: ui.CellStyle{FG: borderColor, BG: wash},
+	}}
+	var out []ui.StyledSpan
+	out = append(out, header...)
+	out = ui.AppendStyledSpan(out, "\n", ui.CellStyle{})
+	out = append(out, body...)
+	out = ui.AppendStyledSpan(out, "\n", ui.CellStyle{})
+	out = append(out, footer...)
+	return kind, out, true
+}
+
+func (r *Renderer) calloutStyle(kind calloutKind) (string, ui.CellColor, ui.CellColor) {
+	switch kind {
+	case calloutTip:
+		return "💡", firstColor(r.palette.DiffAddedText, r.palette.MarkdownLinkText), firstColor(r.palette.DiffAddedText.WithAlpha(44), r.palette.MarkdownLinkText.WithAlpha(44))
+	case calloutImportant:
+		return "✱", firstColor(r.palette.MarkdownHeadingPrimary, r.palette.MarkdownStrongText), firstColor(r.palette.MarkdownHeadingPrimary.WithAlpha(52), r.palette.MarkdownStrongText.WithAlpha(52))
+	case calloutWarning:
+		return "⚠", firstColor(r.palette.MarkdownEmphasisText, r.palette.DiffDeletedText), firstColor(r.palette.MarkdownEmphasisText.WithAlpha(52), r.palette.DiffDeletedText.WithAlpha(52))
+	case calloutCaution:
+		return "⛔", firstColor(r.palette.DiffDeletedText, r.palette.MarkdownStrongText), firstColor(r.palette.DiffDeletedText.WithAlpha(52), r.palette.MarkdownStrongText.WithAlpha(52))
+	default:
+		return "ℹ", firstColor(r.palette.MarkdownLinkText, r.palette.MarkdownHeadingSecondary), firstColor(r.palette.MarkdownLinkText.WithAlpha(40), r.palette.MarkdownHeadingSecondary.WithAlpha(40))
+	}
+}
+
+func (r *Renderer) renderDisplayMath(body string) []ui.StyledSpan {
+	body = strings.TrimSpace(body)
+	labelStyle := ui.CellStyle{FG: r.palette.MarkdownEmphasisText}.WithBold(true)
+	bodyStyle := ui.CellStyle{
+		FG: r.palette.MarkdownInlineCodeText,
+		BG: r.palette.MarkdownInlineCodeBackground.WithAlpha(72),
+	}
+	out := []ui.StyledSpan{{Text: "┌─ math", Style: labelStyle}}
+	for _, line := range strings.Split(body, "\n") {
+		out = ui.AppendStyledSpan(out, "\n", ui.CellStyle{})
+		out = ui.AppendStyledSpan(out, "  "+line, bodyStyle)
+	}
+	out = ui.AppendStyledSpan(out, "\n", ui.CellStyle{})
+	out = ui.AppendStyledSpan(out, "└──────", labelStyle)
+	return out
+}
+
+func (r *Renderer) renderInlineMath(body string, style ui.CellStyle) []ui.StyledSpan {
+	return []ui.StyledSpan{{
+		Text:  "⟪" + strings.TrimSpace(body) + "⟫",
+		Style: style.Merge(ui.CellStyle{FG: r.palette.MarkdownInlineCodeText, BG: r.palette.MarkdownInlineCodeBackground.WithAlpha(64)}),
+	}}
+}
+
+func (r *Renderer) renderImage(desc ImageDescriptor) []ui.StyledSpan {
+	switch r.imageMode {
+	case ImageRenderReserved:
+		return renderTextOnlyImage(desc, r.palette)
+	default:
+		return renderTextOnlyImage(desc, r.palette)
+	}
+}
+
+func (r *Renderer) renderInlineImage(desc ImageDescriptor) []ui.StyledSpan {
+	desc.Inline = true
+	return r.renderImage(desc)
+}
+
+func (r *Renderer) standaloneImageDescriptor(node ast.Node, source []byte) (ImageDescriptor, bool) {
+	first := node.FirstChild()
+	if first == nil || first.NextSibling() != nil {
+		return ImageDescriptor{}, false
+	}
+	switch typed := first.(type) {
+	case *ast.Image:
+		desc := imageDescriptorFromNode(typed, source, false, "")
+		return desc, true
+	case *ast.Link:
+		img, ok := typed.FirstChild().(*ast.Image)
+		if !ok || typed.FirstChild().NextSibling() != nil {
+			return ImageDescriptor{}, false
+		}
+		desc := imageDescriptorFromNode(img, source, false, string(typed.Destination))
+		return desc, true
+	default:
+		return ImageDescriptor{}, false
+	}
+}
+
+func imageDescriptorFromNode(node *ast.Image, source []byte, inline bool, linked string) ImageDescriptor {
+	alt := strings.TrimSpace(inlinePlainText(node, source))
+	if alt == "" {
+		alt = "image"
+	}
+	desc := ImageDescriptor{
+		Alt:               alt,
+		Destination:       strings.TrimSpace(string(node.Destination)),
+		Title:             strings.TrimSpace(string(node.Title)),
+		LinkedDestination: strings.TrimSpace(linked),
+		Inline:            inline,
+	}
+	desc.SourceKind = classifyImageSource(desc.Destination)
+	return desc
+}
+
+func renderInlineImageText(desc ImageDescriptor, palette theme.Palette) []ui.StyledSpan {
+	labelStyle := ui.CellStyle{FG: palette.MarkdownHeadingSecondary}.WithBold(true)
+	metaStyle := ui.CellStyle{FG: palette.MarkdownQuoteText}.WithItalic(true)
+	var out []ui.StyledSpan
+	out = appendStyled(out, "🖼 "+desc.Alt, labelStyle)
+	if desc.Destination != "" {
+		out = appendStyled(out, " ("+desc.Destination+")", metaStyle)
+	}
+	if desc.LinkedDestination != "" && desc.LinkedDestination != desc.Destination {
+		out = appendStyled(out, " ↗ "+desc.LinkedDestination, metaStyle)
+	}
+	return out
+}
+
+func renderBlockImageText(desc ImageDescriptor, palette theme.Palette) []ui.StyledSpan {
+	borderStyle := ui.CellStyle{FG: palette.MarkdownHeadingSecondary}.WithBold(true)
+	bodyStyle := ui.CellStyle{FG: palette.MarkdownText, BG: firstColor(palette.MarkdownMarkBackground, palette.MarkdownLinkText.WithAlpha(40))}
+	metaStyle := ui.CellStyle{FG: palette.MarkdownQuoteText, BG: bodyStyle.BG}.WithItalic(true)
+	var out []ui.StyledSpan
+	out = appendStyled(out, "┌─ 🖼 Image", borderStyle)
+	out = ui.AppendStyledSpan(out, "\n", ui.CellStyle{})
+	out = appendStyled(out, "│ Alt: "+desc.Alt, bodyStyle)
+	if desc.Destination != "" {
+		out = ui.AppendStyledSpan(out, "\n", ui.CellStyle{})
+		out = appendStyled(out, "│ Src: "+desc.Destination, metaStyle)
+	}
+	if desc.Title != "" {
+		out = ui.AppendStyledSpan(out, "\n", ui.CellStyle{})
+		out = appendStyled(out, "│ Title: "+desc.Title, metaStyle)
+	}
+	if desc.LinkedDestination != "" && desc.LinkedDestination != desc.Destination {
+		out = ui.AppendStyledSpan(out, "\n", ui.CellStyle{})
+		out = appendStyled(out, "│ Link: "+desc.LinkedDestination, metaStyle)
+	}
+	out = ui.AppendStyledSpan(out, "\n", ui.CellStyle{})
+	out = appendStyled(out, "└────────", borderStyle)
+	return out
+}
+
+func inlinePlainText(node ast.Node, source []byte) string {
+	var b strings.Builder
+	for child := node.FirstChild(); child != nil; child = child.NextSibling() {
+		switch typed := child.(type) {
+		case *ast.Text:
+			b.Write(typed.Segment.Value(source))
+			if typed.HardLineBreak() || typed.SoftLineBreak() {
+				b.WriteByte('\n')
+			}
+		case *ast.String:
+			b.Write(typed.Value)
+		default:
+			if child.HasChildren() {
+				b.WriteString(inlinePlainText(child, source))
+			}
+		}
+	}
+	return strings.TrimSpace(b.String())
+}
+
+func extractDisplayMath(node ast.Node, source []byte) (string, bool) {
+	text := inlinePlainText(node, source)
+	text = strings.TrimSpace(text)
+	if !strings.HasPrefix(text, "$$") || !strings.HasSuffix(text, "$$") || len(text) < 4 {
+		return "", false
+	}
+	return strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(text, "$$"), "$$")), true
+}
+
+func parseHTMLAttr(tag, attr string) string {
+	re := regexp.MustCompile(`(?i)` + regexp.QuoteMeta(attr) + `\s*=\s*\"([^\"]+)\"`)
+	match := re.FindStringSubmatch(tag)
+	if len(match) == 2 {
+		return htmlEntityDecode(match[1])
+	}
+	re = regexp.MustCompile(`(?i)` + regexp.QuoteMeta(attr) + `\s*=\s*'([^']+)'`)
+	match = re.FindStringSubmatch(tag)
+	if len(match) == 2 {
+		return htmlEntityDecode(match[1])
+	}
+	return ""
+}
+
+func safeHTMLPlainText(value string) string {
+	replacer := strings.NewReplacer(
+		"<sup>", "^(",
+		"</sup>", ")",
+		"<sub>", "_(",
+		"</sub>", ")",
+		"<br>", "\n",
+		"<br/>", "\n",
+		"<br />", "\n",
+	)
+	value = replacer.Replace(value)
+	value = regexp.MustCompile(`(?i)<abbr[^>]*title=\"([^\"]+)\"[^>]*>([^<]+)</abbr>`).ReplaceAllString(value, `$2 ($1)`)
+	value = regexp.MustCompile(`<[^>]+>`).ReplaceAllString(value, "")
+	return htmlEntityDecode(strings.TrimSpace(value))
+}
+
+func htmlEntityDecode(value string) string {
+	replacer := strings.NewReplacer(
+		"&lt;", "<",
+		"&gt;", ">",
+		"&amp;", "&",
+		"&quot;", "\"",
+		"&#39;", "'",
+	)
+	return replacer.Replace(value)
+}
+
 func prefixStyledLines(lines [][]ui.StyledSpan, firstPrefix, continuationPrefix []ui.StyledSpan) []ui.StyledSpan {
 	var out []ui.StyledSpan
 	for idx, line := range lines {
@@ -454,4 +943,68 @@ func wrapTableCell(input string, width int) []string {
 		return []string{""}
 	}
 	return wrapped
+}
+
+func appendStyled(out []ui.StyledSpan, text string, style ui.CellStyle) []ui.StyledSpan {
+	if text == "" {
+		return out
+	}
+	return append(out, ui.StyledSpan{Text: text, Style: style})
+}
+
+func firstColor(values ...ui.CellColor) ui.CellColor {
+	for _, value := range values {
+		if value.Valid() {
+			return value
+		}
+	}
+	return ui.CellColor{}
+}
+
+func mergeLineStyles(lines [][]ui.StyledSpan, overlay ui.CellStyle) [][]ui.StyledSpan {
+	out := make([][]ui.StyledSpan, len(lines))
+	for idx, line := range lines {
+		out[idx] = mergeLineStyle(line, overlay)
+	}
+	return out
+}
+
+func mergeLineStyle(line []ui.StyledSpan, overlay ui.CellStyle) []ui.StyledSpan {
+	if len(line) == 0 {
+		return []ui.StyledSpan{{Text: "", Style: overlay}}
+	}
+	out := make([]ui.StyledSpan, 0, len(line))
+	for _, span := range line {
+		span.Style = span.Style.Merge(overlay)
+		out = append(out, span)
+	}
+	return out
+}
+
+func trimStyledLinePrefix(line []ui.StyledSpan, prefix string) []ui.StyledSpan {
+	if prefix == "" || len(line) == 0 {
+		return line
+	}
+	remaining := prefix
+	out := make([]ui.StyledSpan, 0, len(line))
+	for _, span := range line {
+		if remaining == "" {
+			out = append(out, span)
+			continue
+		}
+		if strings.HasPrefix(remaining, span.Text) {
+			remaining = strings.TrimPrefix(remaining, span.Text)
+			continue
+		}
+		if strings.HasPrefix(span.Text, remaining) {
+			span.Text = strings.TrimPrefix(span.Text, remaining)
+			remaining = ""
+			if span.Text != "" {
+				out = append(out, span)
+			}
+			continue
+		}
+		out = append(out, span)
+	}
+	return out
 }

@@ -27,6 +27,7 @@ type Palette struct {
 	MarkdownHeadingTertiary      colorx.Color
 	MarkdownInlineCodeBackground colorx.Color
 	MarkdownInlineCodeText       colorx.Color
+	MarkdownMarkBackground       colorx.Color
 	MarkdownLinkTargetText       colorx.Color
 	MarkdownLinkText             colorx.Color
 	MarkdownListEnumeration      colorx.Color
@@ -185,6 +186,7 @@ func buildOpenCodePalette(src opencodeThemeFile) Palette {
 		MarkdownHeadingTertiary:      resolve("markdownText"),
 		MarkdownInlineCodeBackground: resolve("backgroundElement"),
 		MarkdownInlineCodeText:       resolve("markdownCode"),
+		MarkdownMarkBackground:       withAlpha(firstNonEmpty(resolve("secondary"), resolve("primary"), resolve("info")), 96),
 		MarkdownLinkTargetText:       resolve("markdownLinkText"),
 		MarkdownLinkText:             resolve("markdownLink"),
 		MarkdownListEnumeration:      resolve("markdownListEnumeration"),
@@ -261,6 +263,7 @@ func claudeThemes() map[string]Theme {
 				MarkdownHeadingTertiary:      color("#ffffff"),
 				MarkdownInlineCodeBackground: color("#373737"),
 				MarkdownInlineCodeText:       color("#4eba65"),
+				MarkdownMarkBackground:       color("#b1b9f9").WithAlpha(96),
 				MarkdownLinkTargetText:       color("#b1b9f9"),
 				MarkdownLinkText:             color("#b1b9f9"),
 				MarkdownListEnumeration:      color("#7ab4e8"),
@@ -301,6 +304,7 @@ func claudeThemes() map[string]Theme {
 				MarkdownHeadingTertiary:      color("#000000"),
 				MarkdownInlineCodeBackground: color("#f0f0f0"),
 				MarkdownInlineCodeText:       color("#2c7a39"),
+				MarkdownMarkBackground:       color("#5769f7").WithAlpha(72),
 				MarkdownLinkTargetText:       color("#5769f7"),
 				MarkdownLinkText:             color("#5769f7"),
 				MarkdownListEnumeration:      color("#4782c8"),
@@ -341,6 +345,7 @@ func claudeThemes() map[string]Theme {
 				MarkdownHeadingTertiary:      color("#ffffff"),
 				MarkdownInlineCodeBackground: color("#373737"),
 				MarkdownInlineCodeText:       color("#3399ff"),
+				MarkdownMarkBackground:       color("#99ccff").WithAlpha(96),
 				MarkdownLinkTargetText:       color("#99ccff"),
 				MarkdownLinkText:             color("#99ccff"),
 				MarkdownListEnumeration:      color("#66b2ff"),
@@ -381,6 +386,7 @@ func claudeThemes() map[string]Theme {
 				MarkdownHeadingTertiary:      color("#000000"),
 				MarkdownInlineCodeBackground: color("#ececec"),
 				MarkdownInlineCodeText:       color("#3366cc"),
+				MarkdownMarkBackground:       color("#3366ff").WithAlpha(72),
 				MarkdownLinkTargetText:       color("#3366ff"),
 				MarkdownLinkText:             color("#3366ff"),
 				MarkdownListEnumeration:      color("#0066cc"),
@@ -419,4 +425,11 @@ func firstNonEmpty(values ...colorx.Color) colorx.Color {
 
 func color(value string) colorx.Color {
 	return colorx.ParseCSSColor(value)
+}
+
+func withAlpha(value colorx.Color, alpha uint8) colorx.Color {
+	if !value.Valid() {
+		return value
+	}
+	return value.WithAlpha(alpha)
 }
