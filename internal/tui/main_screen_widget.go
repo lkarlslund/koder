@@ -31,12 +31,14 @@ func (w *transcriptWidget) Invalidate() {
 	w.valid = false
 }
 
-func (w *transcriptWidget) Surface(_ *ui.Context, bounds ui.Rect) ui.Surface {
+func (w *transcriptWidget) Prepare(bounds ui.Rect) {
 	if w == nil {
-		return ui.Surface{}
+		return
 	}
 	if w.valid && !w.dirty && w.bounds == bounds {
-		return w.surface
+		w.layout = false
+		w.damage = nil
+		return
 	}
 	retained := w.model.syncRetainedTranscript()
 	raw := w.model.viewport.VisibleSurface()
@@ -68,7 +70,21 @@ func (w *transcriptWidget) Surface(_ *ui.Context, bounds ui.Rect) ui.Surface {
 	w.surface = surface
 	w.valid = true
 	w.dirty = false
-	return surface
+}
+
+func (w *transcriptWidget) Element() ui.Element {
+	if w == nil {
+		return ui.VisibleElement{}
+	}
+	return ui.SurfaceBox{Surface: w.surface}
+}
+
+func (w *transcriptWidget) Surface(_ *ui.Context, bounds ui.Rect) ui.Surface {
+	if w == nil {
+		return ui.Surface{}
+	}
+	w.Prepare(bounds)
+	return w.surface
 }
 
 func (w *transcriptWidget) DirtyRects() []ui.Rect {
@@ -387,7 +403,7 @@ type mainScreenRetainedRoot struct {
 	composerWidget     *composerAreaWidget
 	sidebarWidget      *hashedElementWidget
 	statusWidget       *hashedElementWidget
-	transcriptNode     *ui.SurfaceNode
+	transcriptNode     *ui.ElementNode
 	composerNode       *ui.ElementNode
 	sidebarNode        *ui.ElementNode
 	statusNode         *ui.ElementNode
@@ -402,12 +418,12 @@ func newMainScreenRetainedRoot(m *Model, transcript *transcriptWidget, composer 
 		sidebarWidget:    sidebar,
 		statusWidget:     status,
 	}
-	root.transcriptNode = &ui.SurfaceNode{
+	root.transcriptNode = &ui.ElementNode{
 		MeasureFn: func(_ *ui.Context, constraints ui.Constraints) ui.Size {
 			return constraints.Clamp(ui.Size{W: max(0, m.viewport.Width), H: max(0, m.viewport.Height)})
 		},
-		RenderFn: func(ctx *ui.Context, bounds ui.Rect) ui.Surface {
-			return transcript.Surface(ctx, ui.Rect{W: bounds.W, H: bounds.H})
+		ElementFn: func(ctx *ui.Context) ui.Element {
+			return transcript.Element()
 		},
 	}
 	root.composerNode = &ui.ElementNode{
@@ -473,6 +489,7 @@ func (r *mainScreenRetainedRoot) Paint(ctx *ui.Context, canvas ui.Canvas) {
 }
 
 func (r *mainScreenRetainedRoot) PrepareDirty(ctx *ui.Context) {
+	r.transcriptWidget.Prepare(r.transcriptNode.Rect())
 	r.composerWidget.Prepare(ctx, r.composerNode.Rect())
 	r.sidebarWidget.Prepare(r.sidebarNode.Rect())
 	r.statusWidget.Prepare(r.statusNode.Rect())
@@ -493,6 +510,7 @@ func (r *mainScreenRetainedRoot) PaintDirty(ctx *ui.Context, canvas ui.Canvas) {
 		canvas.Fill(r.transcriptPaneRect, ui.CellStyle{BG: ui.CellColorFromLipgloss(palette.ScreenBackground)})
 	}
 	if r.transcriptWidget.Dirty() && !r.transcriptNode.Rect().Empty() {
+		r.markNodeDirty(r.transcriptNode, r.transcriptWidget.DirtyRects())
 		r.transcriptNode.Paint(ctx, canvas.Subrect(r.transcriptNode.Rect()))
 	}
 	if r.composerWidget.Dirty() && !r.composerNode.Rect().Empty() {
