@@ -59,6 +59,52 @@ func benchmarkTranscript(width, items int) Transcript {
 	return Transcript{Items: entries}
 }
 
+type benchmarkFixedNode struct {
+	BaseNode
+	size Size
+}
+
+func (n *benchmarkFixedNode) Measure(_ *Context, constraints Constraints) Size {
+	return constraints.Clamp(n.size)
+}
+
+func (n *benchmarkFixedNode) Prepare(_ *Context) {}
+
+func (n *benchmarkFixedNode) Paint(_ *Context, _ Canvas) {}
+
+func benchmarkFlexNode(childCount int, direction FlexDirection, mixedFlex bool) *FlexNode {
+	children := make([]FlexNodeChild, 0, childCount)
+	for i := 0; i < childCount; i++ {
+		child := &benchmarkFixedNode{size: Size{W: 8 + (i % 5), H: 1 + (i % 3)}}
+		item := FlexNodeChild{Node: child}
+		if mixedFlex && i%2 == 1 {
+			item.Flex = 1 + (i % 3)
+		}
+		children = append(children, item)
+	}
+	return &FlexNode{
+		Direction: direction,
+		Spacing:   1,
+		Children:  children,
+	}
+}
+
+func benchmarkRetainedTranscript(width, items int) *RetainedTranscript {
+	transcript := NewRetainedTranscript()
+	entries := make([]TranscriptItem, 0, items)
+	for i := 0; i < items; i++ {
+		body := fmt.Sprintf("row %03d %s", i, strings.Repeat("content ", 6+(i%4)))
+		entries = append(entries, TranscriptItem{
+			Key:       fmt.Sprintf("row-%03d", i),
+			Node:      NewCachedElement(AsNode(Paragraph{Text: body}), 1),
+			GapBefore: i % 3,
+		})
+	}
+	transcript.SetItems(entries)
+	_ = transcript.ContentHeight(width)
+	return transcript
+}
+
 func BenchmarkRenderNodeTranscriptLarge(b *testing.B) {
 	ctx := benchmarkContext()
 	transcript := benchmarkTranscript(100, 120)
@@ -123,6 +169,185 @@ func BenchmarkRenderNodeTableAndList(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		_ = RenderNode(ctx, element, 72, 0)
 	}
+}
+
+func BenchmarkFlexNodeMeasure(b *testing.B) {
+	for _, direction := range []FlexDirection{DirectionHorizontal, DirectionVertical} {
+		for _, count := range []int{2, 10, 50} {
+			for _, mixed := range []bool{false, true} {
+				name := fmt.Sprintf("%s/%d/%s", map[FlexDirection]string{
+					DirectionHorizontal: "horizontal",
+					DirectionVertical:   "vertical",
+				}[direction], count, map[bool]string{false: "fixed", true: "mixed"}[mixed])
+				b.Run(name, func(b *testing.B) {
+					node := benchmarkFlexNode(count, direction, mixed)
+					ctx := benchmarkContext()
+					constraints := NewConstraints(120, 40)
+					b.ReportAllocs()
+					for i := 0; i < b.N; i++ {
+						_ = node.Measure(ctx, constraints)
+					}
+				})
+			}
+		}
+	}
+}
+
+func BenchmarkFlexNodeLayout(b *testing.B) {
+	for _, direction := range []FlexDirection{DirectionHorizontal, DirectionVertical} {
+		for _, count := range []int{2, 10, 50} {
+			for _, mixed := range []bool{false, true} {
+				name := fmt.Sprintf("%s/%d/%s", map[FlexDirection]string{
+					DirectionHorizontal: "horizontal",
+					DirectionVertical:   "vertical",
+				}[direction], count, map[bool]string{false: "fixed", true: "mixed"}[mixed])
+				b.Run(name, func(b *testing.B) {
+					node := benchmarkFlexNode(count, direction, mixed)
+					ctx := benchmarkContext()
+					rect := Rect{W: 120, H: 40}
+					b.ReportAllocs()
+					for i := 0; i < b.N; i++ {
+						node.Layout(ctx, rect)
+						node.ClearDirty()
+					}
+				})
+			}
+		}
+	}
+}
+
+func BenchmarkFlexNodePrepareUnchanged(b *testing.B) {
+	for _, direction := range []FlexDirection{DirectionHorizontal, DirectionVertical} {
+		for _, count := range []int{2, 10, 50} {
+			for _, mixed := range []bool{false, true} {
+				name := fmt.Sprintf("%s/%d/%s", map[FlexDirection]string{
+					DirectionHorizontal: "horizontal",
+					DirectionVertical:   "vertical",
+				}[direction], count, map[bool]string{false: "fixed", true: "mixed"}[mixed])
+				b.Run(name, func(b *testing.B) {
+					node := benchmarkFlexNode(count, direction, mixed)
+					ctx := benchmarkContext()
+					node.Layout(ctx, Rect{W: 120, H: 40})
+					node.ClearDirty()
+					b.ReportAllocs()
+					for i := 0; i < b.N; i++ {
+						node.Prepare(ctx)
+					}
+				})
+			}
+		}
+	}
+}
+
+func BenchmarkFlexNodePaintClean(b *testing.B) {
+	for _, direction := range []FlexDirection{DirectionHorizontal, DirectionVertical} {
+		for _, count := range []int{2, 10, 50} {
+			for _, mixed := range []bool{false, true} {
+				name := fmt.Sprintf("%s/%d/%s", map[FlexDirection]string{
+					DirectionHorizontal: "horizontal",
+					DirectionVertical:   "vertical",
+				}[direction], count, map[bool]string{false: "fixed", true: "mixed"}[mixed])
+				b.Run(name, func(b *testing.B) {
+					node := benchmarkFlexNode(count, direction, mixed)
+					ctx := benchmarkContext()
+					rect := Rect{W: 120, H: 40}
+					node.Layout(ctx, rect)
+					surface := TransparentSurface(rect.W, rect.H)
+					canvas := NewCanvas(&surface, rect)
+					b.ReportAllocs()
+					for i := 0; i < b.N; i++ {
+						node.Paint(ctx, canvas)
+					}
+				})
+			}
+		}
+	}
+}
+
+func BenchmarkRetainedContainerTree(b *testing.B) {
+	ctx := benchmarkContext()
+	node := AsNode(Border{
+		Padding:      UniformInsets(1),
+		BorderLeft:   true,
+		BorderRight:  true,
+		BorderTop:    true,
+		BorderBottom: true,
+		Child: AsNode(Inset{
+			Padding: SymmetricInsets(2, 1),
+			Child: AsNode(Align{
+				Horizontal: AlignCenter,
+				Vertical:   AlignCenter,
+				Child: AsNode(Stack{
+					Children: []Node{
+						AsNode(Paragraph{Text: strings.Repeat("nested content ", 10)}),
+						AsNode(Label{Text: "overlay"}),
+					},
+				}),
+			}),
+		}),
+	})
+	rect := Rect{W: 96, H: 18}
+	b.Run("measure", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			_ = node.Measure(ctx, NewConstraints(rect.W, rect.H))
+		}
+	})
+	b.Run("paint", func(b *testing.B) {
+		surface := TransparentSurface(rect.W, rect.H)
+		canvas := NewCanvas(&surface, rect)
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			node.Layout(ctx, rect)
+			node.Prepare(ctx)
+			node.Paint(ctx, canvas)
+		}
+	})
+}
+
+func BenchmarkRetainedTranscriptOperations(b *testing.B) {
+	ctx := benchmarkContext()
+	b.Run("append_one_item", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			transcript := benchmarkRetainedTranscript(96, 100)
+			transcript.Add(TranscriptItem{
+				Key:  "append",
+				Node: NewCachedElement(AsNode(Paragraph{Text: "new appended content"}), 1),
+			})
+		}
+	})
+	b.Run("replace_visible_item", func(b *testing.B) {
+		transcript := benchmarkRetainedTranscript(96, 100)
+		item := TranscriptItem{Key: "row-005", Node: NewCachedElement(AsNode(Paragraph{Text: "updated visible content"}), 1)}
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			transcript.Replace(5, item)
+		}
+	})
+	b.Run("replace_offscreen_item", func(b *testing.B) {
+		transcript := benchmarkRetainedTranscript(96, 100)
+		item := TranscriptItem{Key: "row-095", Node: NewCachedElement(AsNode(Paragraph{Text: "updated offscreen content"}), 1)}
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			transcript.Replace(95, item)
+		}
+	})
+	b.Run("render_visible_top", func(b *testing.B) {
+		transcript := benchmarkRetainedTranscript(96, 100)
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			_, _, _ = transcript.RenderVisible(ctx, 96, 16, 0)
+		}
+	})
+	b.Run("render_visible_mid", func(b *testing.B) {
+		transcript := benchmarkRetainedTranscript(96, 100)
+		offset := transcript.ContentHeight(96) / 2
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			_, _, _ = transcript.RenderVisible(ctx, 96, 16, offset)
+		}
+	})
 }
 
 func BenchmarkSurfaceNormalizeLarge(b *testing.B) {

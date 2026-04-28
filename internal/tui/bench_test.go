@@ -282,6 +282,90 @@ func BenchmarkViewSurfaceStatusDamage(b *testing.B) {
 	}
 }
 
+func BenchmarkViewSurfaceSidebarToggle(b *testing.B) {
+	m := benchmarkModel(b, 140)
+	_ = m.viewSurface()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		m.showSidebar = i%2 == 0
+		m.resize()
+		m.refreshViewportPreserve()
+		_ = m.viewSurface()
+	}
+}
+
+func BenchmarkViewSurfaceComposerMultilineGrowth(b *testing.B) {
+	m := benchmarkModel(b, 140)
+	_ = m.viewSurface()
+	values := []string{
+		"one line",
+		"one line\ntwo line",
+		"one line\ntwo line\nthree line",
+		"one line\ntwo line\nthree line\nfour line",
+	}
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		m.composer.SetValue(values[i%len(values)])
+		m.updateComposerMenus()
+		m.invalidateFooterCache()
+		_ = m.viewSurface()
+	}
+}
+
+func BenchmarkViewSurfaceTranscriptAppendSidebarVisible(b *testing.B) {
+	m := benchmarkModel(b, 140)
+	m.showSidebar = true
+	m.resize()
+	m.refreshViewport()
+	_ = m.viewSurface()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		m.appendLocalUserPrompt(fmt.Sprintf("benchmark append %d", i), nil, nil)
+		m.refreshViewport()
+		_ = m.viewSurface()
+	}
+}
+
+func BenchmarkViewSurfaceMainResize(b *testing.B) {
+	m := benchmarkModel(b, 140)
+	_ = m.viewSurface()
+	sizes := [][2]int{
+		{120, 42},
+		{132, 46},
+		{96, 36},
+		{140, 50},
+	}
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		size := sizes[i%len(sizes)]
+		m.width = size[0]
+		m.height = size[1]
+		m.resize()
+		m.refreshViewportPreserve()
+		_ = m.viewSurface()
+	}
+}
+
+func BenchmarkMainScreenRetainedPrepareIdle(b *testing.B) {
+	m := benchmarkModel(b, 140)
+	screen := m.ensureMainScreenWidget()
+	ctx := &ui.Context{Palette: m.palette}
+	bounds := ui.Rect{W: m.width, H: m.height}
+	root := screen.ensureRetainedRoot()
+	root.model = &m
+	root.Layout(ctx, bounds)
+	root.Prepare(ctx)
+	root.ClearDirty()
+	screen.transcript.ClearDirty()
+	screen.composer.ClearDirty()
+	screen.sidebar.ClearDirty()
+	screen.statusPane.ClearDirty()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		root.Prepare(ctx)
+	}
+}
+
 func benchmarkNonsenseChunks(chunkCount, wordsPerChunk int, seed int64) []string {
 	rng := rand.New(rand.NewSource(seed))
 	syllables := []string{
