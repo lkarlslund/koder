@@ -2233,7 +2233,7 @@ func (m *Model) resolveTranscriptViewportAnchor(anchor transcriptViewportAnchor)
 		if item.Element != nil {
 			size := item.Element.Measure(ctx, ui.NewConstraints(width, 0))
 			regionHeight += max(0, size.H)
-			surface := item.Element.Render(ctx, ui.Rect{W: width, H: size.H})
+			surface := ui.PaintElementSurface(ctx, item.Element, ui.Rect{W: width, H: size.H})
 			regionLines = append(regionLines, surface.Lines()...)
 		}
 		if idx == anchor.index || item.Key == anchor.key {
@@ -2258,7 +2258,7 @@ func (m *Model) resolveTranscriptAnchorFromFullSurface(retained *ui.RetainedTran
 		return -1
 	}
 	size := retained.Measure(ctx, ui.NewConstraints(width, 0))
-	surface := retained.Render(ctx, ui.Rect{W: width, H: size.H})
+	surface := ui.PaintElementSurface(ctx, retained, ui.Rect{W: width, H: size.H})
 	lines := surface.Lines()
 	lineIdx := transcriptAnchorSingleLineIndex(lines, anchor.line)
 	if lineIdx < 0 {
@@ -5093,7 +5093,7 @@ func (m Model) debugTranscriptItems() []debugsrv.TranscriptItemRef {
 		if item.Element != nil {
 			size := item.Element.Measure(ctx, ui.NewConstraints(width, 0))
 			ref.Height = size.H
-			surface := item.Element.Render(ctx, ui.Rect{W: width, H: size.H})
+			surface := ui.PaintElementSurface(ctx, item.Element, ui.Rect{W: width, H: size.H})
 			ref.BlankRows = countBlankSurfaceRows(surface)
 		}
 		out = append(out, ref)

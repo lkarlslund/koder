@@ -18,7 +18,7 @@ func (s Sidebar) render(ctx *Context, width int) Surface {
 			contentHeight = s.Child.Measure(ctx, NewConstraints(contentBounds.W, 0)).H
 			contentBounds.H = contentHeight
 		}
-		content = s.Child.Render(ctx, contentBounds)
+		content = PaintElementSurface(ctx, s.Child, contentBounds)
 	}
 	if height <= 0 {
 		height = max(1, contentHeight)
@@ -182,7 +182,7 @@ func (f Footer) renderContent(ctx *Context, content Element) Surface {
 		surface.WriteText(0, 0, strings.Repeat("─", width), borderStyle)
 	}
 	if content != nil {
-		rendered := content.Render(ctx, Rect{W: max(0, width-2), H: max(0, height-1)})
+		rendered := PaintElementSurface(ctx, content, Rect{W: max(0, width-2), H: max(0, height-1)})
 		surface = surface.placeAt(1, 1, rendered)
 	}
 	return surface

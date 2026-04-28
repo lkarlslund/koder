@@ -207,7 +207,7 @@ func (t *RetainedTranscript) Measure(ctx *Context, constraints Constraints) Size
 }
 
 func (t *RetainedTranscript) Render(ctx *Context, bounds Rect) Surface {
-	return Transcript{Items: t.items}.Render(ctx, bounds)
+	return PaintElementSurface(ctx, Transcript{Items: t.items}, bounds)
 }
 
 func (t *RetainedTranscript) ContentHeight(width int) int {

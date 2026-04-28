@@ -277,7 +277,7 @@ type ToolRunDock struct {
 }
 
 func (d ToolRunDock) render() Surface {
-	return d.element().Render(&Context{Palette: d.Palette}, Rect{W: d.width()})
+	return PaintElementSurface(&Context{Palette: d.Palette}, d.element(), Rect{W: d.width()})
 }
 
 func (d ToolRunDock) Measure(_ *Context, constraints Constraints) Size {
