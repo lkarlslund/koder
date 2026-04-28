@@ -175,6 +175,36 @@ func TestApplyDefaultsFillsMissingMCPServerDefaults(t *testing.T) {
 	}
 }
 
+func TestApplyDefaultsBackfillsMissingBuiltinPermissionRules(t *testing.T) {
+	cfg := Config{
+		Permissions: PermissionRules{
+			Profile: "default",
+			Profiles: map[string]PermissionProfile{
+				"default": {
+					Rules: []PermissionRule{
+						{Tool: "read", Pattern: "*", Action: "allow"},
+						{Tool: "websearch", Pattern: "*", Action: "ask"},
+					},
+				},
+			},
+		},
+	}
+
+	cfg.applyDefaults()
+
+	profile := cfg.Permissions.Profiles["default"]
+	var foundMCP bool
+	for _, rule := range profile.Rules {
+		if rule.Tool == "mcp" && rule.Pattern == "*" && rule.Action == "ask" {
+			foundMCP = true
+			break
+		}
+	}
+	if !foundMCP {
+		t.Fatalf("expected default profile to gain MCP ask rule, got %#v", profile.Rules)
+	}
+}
+
 func TestMCPServerResolvesBearerTokenEnv(t *testing.T) {
 	t.Setenv("MCP_TOKEN", "secret")
 	cfg := Default()

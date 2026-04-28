@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -288,6 +289,7 @@ func (c *Config) applyDefaults() {
 	if hasLegacyPermissions(c.Permissions) {
 		c.Permissions.Profiles["default"] = legacyPermissionProfile(c.Permissions)
 	}
+	mergeBuiltinPermissionProfileDefaults(c.Permissions.Profiles, def.Permissions.Profiles)
 	if _, ok := c.Permissions.Profiles[c.Permissions.Profile]; !ok {
 		c.Permissions.Profile = def.Permissions.Profile
 	}
@@ -480,6 +482,41 @@ func legacyPermissionProfile(rules PermissionRules) PermissionProfile {
 			{Tool: domain.ToolKindWebSearch, Pattern: "*", Action: firstPermission(rules.WebSearch, domain.PermissionModeAsk)},
 		},
 	}
+}
+
+func mergeBuiltinPermissionProfileDefaults(dst map[string]PermissionProfile, defaults map[string]PermissionProfile) {
+	for name, defProfile := range defaults {
+		existing, ok := dst[name]
+		if !ok {
+			dst[name] = PermissionProfile{Rules: slices.Clone(defProfile.Rules)}
+			continue
+		}
+		existing.Rules = mergeMissingPermissionRules(existing.Rules, defProfile.Rules)
+		dst[name] = existing
+	}
+}
+
+func mergeMissingPermissionRules(existing, defaults []PermissionRule) []PermissionRule {
+	if len(defaults) == 0 {
+		return slices.Clone(existing)
+	}
+	out := slices.Clone(existing)
+	for _, candidate := range defaults {
+		if hasPermissionRule(out, candidate) {
+			continue
+		}
+		out = append(out, candidate)
+	}
+	return out
+}
+
+func hasPermissionRule(rules []PermissionRule, candidate PermissionRule) bool {
+	for _, rule := range rules {
+		if rule.Tool == candidate.Tool && strings.TrimSpace(rule.Pattern) == strings.TrimSpace(candidate.Pattern) {
+			return true
+		}
+	}
+	return false
 }
 
 func firstPermission(got, fallback domain.PermissionMode) domain.PermissionMode {
