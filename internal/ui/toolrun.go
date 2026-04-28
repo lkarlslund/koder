@@ -284,10 +284,6 @@ func (d ToolRunDock) Measure(_ *Context, constraints Constraints) Size {
 	return constraints.Clamp(d.render().Size())
 }
 
-func (d ToolRunDock) Render(ctx *Context, bounds Rect) Surface {
-	return renderOwnedCanvas(ctx, bounds, d)
-}
-
 func (d ToolRunDock) Paint(ctx *Context, canvas Canvas) {
 	if canvas.Width() <= 0 || canvas.Height() <= 0 {
 		return
@@ -483,17 +479,6 @@ func (t toolRunDockTitle) Measure(_ *Context, constraints Constraints) Size {
 	return constraints.Clamp(Size{W: t.Width, H: 1})
 }
 
-func (t toolRunDockTitle) Render(_ *Context, bounds Rect) Surface {
-	width := t.Width
-	if width <= 0 {
-		width = bounds.W
-	}
-	s := BlankSurface(width, 1)
-	s.WriteText(0, 0, t.Title, CellStyle{FG: cellColor(t.Palette.MarkdownText)}.WithBold(true))
-	s.WriteText(PlainWidth(t.Title)+2, 0, t.Status, CellStyle{FG: cellColor(t.Color)}.WithBold(true))
-	return s.normalize(bounds.W, bounds.H)
-}
-
 func (t toolRunDockTitle) Paint(_ *Context, canvas Canvas) {
 	if canvas.Width() <= 0 || canvas.Height() <= 0 {
 		return
@@ -524,23 +509,6 @@ func (p toolRunDockPreview) Measure(_ *Context, constraints Constraints) Size {
 		width = min(width, p.Width)
 	}
 	return constraints.Clamp(Size{W: width, H: len(lines)})
-}
-
-func (p toolRunDockPreview) Render(_ *Context, bounds Rect) Surface {
-	lines := strings.Split(strings.TrimRight(p.Text, "\n"), "\n")
-	if len(lines) == 0 {
-		lines = []string{""}
-	}
-	width := p.Width
-	if width <= 0 {
-		width = bounds.W
-	}
-	s := BlankSurface(width, len(lines))
-	style := CellStyle{FG: cellColor(p.Palette.MarkdownText)}
-	for y, line := range lines {
-		s.WriteText(0, y, PlainTruncate(line, width, ""), style)
-	}
-	return s.normalize(bounds.W, bounds.H)
 }
 
 func (p toolRunDockPreview) Paint(_ *Context, canvas Canvas) {

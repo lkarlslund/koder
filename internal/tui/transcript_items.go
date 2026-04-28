@@ -279,18 +279,6 @@ func (e bashToolRunCardElement) Measure(_ *ui.Context, c ui.Constraints) ui.Size
 	}
 	return c.Clamp(e.Run.CardSurface(e.Palette, width, e.ExpandedOutput, e.ExpandedCommand).Size())
 }
-func (e bashToolRunCardElement) Render(ctx *ui.Context, bounds ui.Rect) ui.Surface {
-	width := e.Width
-	if width <= 0 {
-		width = bounds.W
-	}
-	surface := e.Run.CardSurface(e.Palette, width, e.ExpandedOutput, e.ExpandedCommand)
-	if ctx != nil && ctx.Runtime != nil {
-		surface.RegisterControls(ctx.Runtime, bounds.X, bounds.Y)
-	}
-	return surface
-}
-
 func (e bashToolRunCardElement) Paint(_ *ui.Context, canvas ui.Canvas) {
 	if canvas.Width() <= 0 || canvas.Height() <= 0 {
 		return
@@ -309,18 +297,6 @@ func (e readToolRunCardElement) Measure(_ *ui.Context, c ui.Constraints) ui.Size
 	}
 	return c.Clamp(e.Run.CardSurface(e.Palette, width, e.ExpandedOutput, false).Size())
 }
-func (e readToolRunCardElement) Render(ctx *ui.Context, bounds ui.Rect) ui.Surface {
-	width := e.Width
-	if width <= 0 {
-		width = bounds.W
-	}
-	surface := e.Run.CardSurface(e.Palette, width, e.ExpandedOutput, false)
-	if ctx != nil && ctx.Runtime != nil {
-		surface.RegisterControls(ctx.Runtime, bounds.X, bounds.Y)
-	}
-	return surface
-}
-
 func (e readToolRunCardElement) Paint(_ *ui.Context, canvas ui.Canvas) {
 	if canvas.Width() <= 0 || canvas.Height() <= 0 {
 		return
@@ -339,18 +315,6 @@ func (e writeToolRunCardElement) Measure(_ *ui.Context, c ui.Constraints) ui.Siz
 	}
 	return c.Clamp(e.Run.CardSurface(e.Palette, width, e.ExpandedOutput, false).Size())
 }
-func (e writeToolRunCardElement) Render(ctx *ui.Context, bounds ui.Rect) ui.Surface {
-	width := e.Width
-	if width <= 0 {
-		width = bounds.W
-	}
-	surface := e.Run.CardSurface(e.Palette, width, e.ExpandedOutput, false)
-	if ctx != nil && ctx.Runtime != nil {
-		surface.RegisterControls(ctx.Runtime, bounds.X, bounds.Y)
-	}
-	return surface
-}
-
 func (e writeToolRunCardElement) Paint(_ *ui.Context, canvas ui.Canvas) {
 	if canvas.Width() <= 0 || canvas.Height() <= 0 {
 		return
@@ -369,18 +333,6 @@ func (e editToolRunCardElement) Measure(_ *ui.Context, c ui.Constraints) ui.Size
 	}
 	return c.Clamp(e.Run.CardSurface(e.Palette, width, e.ExpandedOutput, false).Size())
 }
-func (e editToolRunCardElement) Render(ctx *ui.Context, bounds ui.Rect) ui.Surface {
-	width := e.Width
-	if width <= 0 {
-		width = bounds.W
-	}
-	surface := e.Run.CardSurface(e.Palette, width, e.ExpandedOutput, false)
-	if ctx != nil && ctx.Runtime != nil {
-		surface.RegisterControls(ctx.Runtime, bounds.X, bounds.Y)
-	}
-	return surface
-}
-
 func (e editToolRunCardElement) Paint(_ *ui.Context, canvas ui.Canvas) {
 	if canvas.Width() <= 0 || canvas.Height() <= 0 {
 		return
@@ -399,18 +351,6 @@ func (e genericToolRunCardElement) Measure(_ *ui.Context, c ui.Constraints) ui.S
 	}
 	return c.Clamp(e.Run.CardSurface(e.Palette, width, e.ExpandedOutput, e.ExpandedCommand).Size())
 }
-func (e genericToolRunCardElement) Render(ctx *ui.Context, bounds ui.Rect) ui.Surface {
-	width := e.Width
-	if width <= 0 {
-		width = bounds.W
-	}
-	surface := e.Run.CardSurface(e.Palette, width, e.ExpandedOutput, e.ExpandedCommand)
-	if ctx != nil && ctx.Runtime != nil {
-		surface.RegisterControls(ctx.Runtime, bounds.X, bounds.Y)
-	}
-	return surface
-}
-
 func (e genericToolRunCardElement) Paint(_ *ui.Context, canvas ui.Canvas) {
 	if canvas.Width() <= 0 || canvas.Height() <= 0 {
 		return

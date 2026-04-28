@@ -87,10 +87,6 @@ func (e *CachedElement) Measure(ctx *Context, constraints Constraints) Size {
 	return constraints.Clamp(surface.Size())
 }
 
-func (e *CachedElement) Render(ctx *Context, bounds Rect) Surface {
-	return e.RenderCached(ctx, bounds.W).normalize(bounds.W, bounds.H)
-}
-
 func (e *CachedElement) Paint(ctx *Context, canvas Canvas) {
 	if e == nil || canvas.Width() <= 0 || canvas.Height() <= 0 {
 		return
@@ -211,10 +207,6 @@ func (t *RetainedTranscript) Measure(ctx *Context, constraints Constraints) Size
 		return Transcript{Items: t.items}.Measure(ctx, constraints)
 	}
 	return constraints.Clamp(Size{W: width, H: t.ContentHeight(width)})
-}
-
-func (t *RetainedTranscript) Render(ctx *Context, bounds Rect) Surface {
-	return PaintElementSurface(ctx, Transcript{Items: t.items}, bounds)
 }
 
 func (t *RetainedTranscript) Paint(ctx *Context, canvas Canvas) {
@@ -452,10 +444,6 @@ func (v TranscriptViewport) Measure(_ *Context, constraints Constraints) Size {
 	return constraints.Clamp(Size{W: width, H: height})
 }
 
-func (v TranscriptViewport) Render(ctx *Context, bounds Rect) Surface {
-	return renderOwnedCanvas(ctx, bounds, v)
-}
-
 func (v TranscriptViewport) WalkChildren(_ *Context, visit func(Element)) {
 	if v.Transcript == nil || visit == nil {
 		return
@@ -492,10 +480,6 @@ func (t Transcript) Measure(ctx *Context, constraints Constraints) Size {
 		totalH += size.H
 	}
 	return constraints.Clamp(Size{W: maxW, H: totalH})
-}
-
-func (t Transcript) Render(ctx *Context, bounds Rect) Surface {
-	return renderOwnedCanvas(ctx, bounds, t)
 }
 
 func (t Transcript) Paint(ctx *Context, canvas Canvas) {
@@ -540,10 +524,6 @@ func (i ActivityIndicator) Measure(_ *Context, constraints Constraints) Size {
 	return constraints.Clamp(i.render().Size())
 }
 
-func (i ActivityIndicator) Render(_ *Context, bounds Rect) Surface {
-	return renderOwnedCanvas(nil, bounds, i)
-}
-
 func (i ActivityIndicator) Paint(_ *Context, canvas Canvas) {
 	if canvas.Width() <= 0 || canvas.Height() <= 0 || strings.TrimSpace(i.Indicator) == "" {
 		return
@@ -575,10 +555,6 @@ func NewUserMessage(props UserMessageProps) UserMessage {
 
 func (m UserMessage) Measure(_ *Context, constraints Constraints) Size {
 	return constraints.Clamp(m.render().Size())
-}
-
-func (m UserMessage) Render(_ *Context, bounds Rect) Surface {
-	return renderOwnedCanvas(nil, bounds, m)
 }
 
 func (m UserMessage) Paint(_ *Context, canvas Canvas) {
@@ -764,10 +740,6 @@ func (m AssistantMessage) Measure(_ *Context, constraints Constraints) Size {
 	return constraints.Clamp(m.render().Size())
 }
 
-func (m AssistantMessage) Render(_ *Context, bounds Rect) Surface {
-	return renderOwnedCanvas(nil, bounds, m)
-}
-
 func (m AssistantMessage) Paint(ctx *Context, canvas Canvas) {
 	if canvas.Width() <= 0 || canvas.Height() <= 0 {
 		return
@@ -854,10 +826,6 @@ type ReasoningBlock struct {
 
 func (b ReasoningBlock) Measure(_ *Context, constraints Constraints) Size {
 	return constraints.Clamp(b.render().Size())
-}
-
-func (b ReasoningBlock) Render(_ *Context, bounds Rect) Surface {
-	return renderOwnedCanvas(nil, bounds, b)
 }
 
 func (b ReasoningBlock) Paint(_ *Context, canvas Canvas) {
