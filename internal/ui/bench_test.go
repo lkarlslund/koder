@@ -188,6 +188,23 @@ func BenchmarkDiffSurfaceDamageFooterRow(b *testing.B) {
 	}
 }
 
+func BenchmarkCanvasWriteTextComposite(b *testing.B) {
+	surface := BlankSurface(120, 4)
+	base := CellStyle{BG: cellColor(benchmarkPalette().SidebarBackground)}
+	for y := 0; y < surface.SurfaceHeight(); y++ {
+		for x := 0; x < surface.SurfaceWidth(); x++ {
+			surface.setCell(x, y, blankCell(base))
+		}
+	}
+	textStyle := CellStyle{FG: cellColor(benchmarkPalette().MarkdownText)}
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		s := surface
+		canvas := NewCanvas(&s, Rect{W: s.SurfaceWidth(), H: s.SurfaceHeight()})
+		canvas.WriteText(8, 2, strings.Repeat("overlay ", 8), textStyle)
+	}
+}
+
 func BenchmarkButtonRowRender(b *testing.B) {
 	row := ButtonRow{
 		Buttons: []Button{

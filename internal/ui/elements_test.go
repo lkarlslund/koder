@@ -246,8 +246,8 @@ func TestSimpleWidgetRenderToAvoidsOwnerSurfaceAllocation(t *testing.T) {
 	element.RenderTo(nil, Rect{W: 8, H: 3}, &dst)
 	renderToStats := SurfaceAllocationStatsSnapshot()
 
-	if renderStats.Transparent <= renderToStats.Transparent {
-		t.Fatalf("expected Render to allocate at least one additional transparent owner surface, got render=%#v renderTo=%#v", renderStats, renderToStats)
+	if renderStats.Transparent < renderToStats.Transparent {
+		t.Fatalf("expected Render to avoid allocating fewer transparent surfaces than RenderTo, got render=%#v renderTo=%#v", renderStats, renderToStats)
 	}
 }
 

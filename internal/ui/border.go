@@ -60,64 +60,73 @@ func (b Border) Measure(ctx *Context, constraints Constraints) Size {
 }
 
 func (b Border) Render(ctx *Context, bounds Rect) Surface {
-	width := bounds.W
+	return renderOwnedCanvas(ctx, bounds, borderPainter{border: b, ctx: ctx, bounds: bounds})
+}
+
+type borderPainter struct {
+	border Border
+	ctx    *Context
+	bounds Rect
+}
+
+func (p borderPainter) Paint(_ *Context, canvas Canvas) {
+	b := p.border
+	width := canvas.Width()
 	if width <= 0 {
 		width = b.Width
 	}
-	if width <= 0 {
-		width = b.Measure(ctx, NewConstraints(bounds.W, bounds.H)).W
-	}
-	height := bounds.H
+	height := canvas.Height()
 	if height <= 0 {
 		height = b.Height
 	}
-	if height <= 0 {
-		height = b.Measure(ctx, NewConstraints(width, bounds.H)).H
+	if width <= 0 || height <= 0 {
+		return
 	}
 	inset := b.insets()
-	s := BlankSurface(width, height)
 	fillStyle := CellStyle{FG: cellColor(b.Foreground), BG: cellColor(b.Background)}
-	for y := 0; y < height; y++ {
-		for x := 0; x < width; x++ {
-			s.setCell(x, y, blankCell(fillStyle))
-		}
-	}
+	canvas.Fill(Rect{W: width, H: height}, fillStyle)
 	border := b.borderStyle()
 	borderStyle := CellStyle{FG: cellColor(b.BorderColor), BG: cellColor(b.Background)}
 	if b.BorderTop && height > 0 {
-		top, endStart, endWidth := b.renderTopBorder(width, border, borderStyle)
-		s = s.placeAt(0, 0, top)
-		if ctx != nil && ctx.Runtime != nil && endWidth > 0 && b.EndControlID != "" {
-			ctx.Runtime.Register(Control{
-				ID:      b.EndControlID,
-				Rect:    Rect{X: bounds.X + endStart, Y: bounds.Y, W: endWidth, H: 1},
-				Enabled: true,
-			})
-		}
+		p.paintTopBorder(canvas, width, border, borderStyle)
 	}
 	if b.BorderBottom && height > 1 {
-		s = s.placeAt(0, height-1, b.renderBottomBorder(width, border, borderStyle))
+		p.paintBottomBorder(canvas, width, height, border, borderStyle)
 	}
 	if b.BorderLeft {
 		for y := borderVerticalStart(b.BorderTop); y < borderVerticalEnd(height, b.BorderBottom); y++ {
-			s.setCell(0, y, newCell(GlyphFromString(border.Left), 1, borderStyle))
+			canvas.SetCell(0, y, newCell(GlyphFromString(border.Left), 1, borderStyle))
 		}
 	}
 	if b.BorderRight && width > 1 {
 		for y := borderVerticalStart(b.BorderTop); y < borderVerticalEnd(height, b.BorderBottom); y++ {
-			s.setCell(width-1, y, newCell(GlyphFromString(border.Right), 1, borderStyle))
+			canvas.SetCell(width-1, y, newCell(GlyphFromString(border.Right), 1, borderStyle))
 		}
 	}
 	if b.Child != nil {
-		childBounds := Rect{
-			X: bounds.X + inset.Left,
-			Y: bounds.Y + inset.Top,
+		renderElementInto(p.ctx, b.Child, Rect{
+			X: p.bounds.X + inset.Left,
+			Y: p.bounds.Y + inset.Top,
 			W: max(0, width-inset.Left-inset.Right),
 			H: max(0, height-inset.Top-inset.Bottom),
-		}
-		s = s.placeAt(inset.Left, inset.Top, b.Child.Render(ctx, childBounds))
+		}, canvas.surface)
 	}
-	return s.normalize(width, height)
+}
+
+func (p borderPainter) paintTopBorder(canvas Canvas, width int, border lipgloss.Border, borderStyle CellStyle) {
+	top, endStart, endWidth := p.border.renderTopBorder(width, border, borderStyle)
+	canvas.BlitSurface(0, 0, top)
+	if p.ctx != nil && p.ctx.Runtime != nil && endWidth > 0 && p.border.EndControlID != "" {
+		p.ctx.Runtime.Register(Control{
+			ID:      p.border.EndControlID,
+			Rect:    Rect{X: p.bounds.X + endStart, Y: p.bounds.Y, W: endWidth, H: 1},
+			Enabled: true,
+		})
+	}
+}
+
+func (p borderPainter) paintBottomBorder(canvas Canvas, width, height int, border lipgloss.Border, borderStyle CellStyle) {
+	canvas.BlitSurface(0, height-1, p.border.renderBottomBorder(width, border, borderStyle))
 }
 
 func (b Border) insets() Insets {

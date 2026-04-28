@@ -1105,6 +1105,10 @@ func renderElementInto(ctx *Context, element Element, bounds Rect, dst *Surface)
 	if element == nil || dst == nil || bounds.W <= 0 || bounds.H <= 0 {
 		return
 	}
+	if painter, ok := element.(Painter); ok {
+		painter.Paint(ctx, NewCanvas(dst, bounds))
+		return
+	}
 	if renderer, ok := element.(SurfaceRenderer); ok {
 		renderer.RenderTo(ctx, bounds, dst)
 		return
@@ -1130,6 +1134,29 @@ func renderOwnedSurface(ctx *Context, bounds Rect, draw func(ctx *Context, bound
 	copyCtx := *ctx
 	copyCtx.Runtime = shadow
 	draw(&copyCtx, localBounds, &base)
+	if controls := shadow.Controls(); len(controls) > 0 {
+		base.ctrls = append(base.ctrls[:0], controls...)
+		base.RegisterControls(ctx.Runtime, bounds.X, bounds.Y)
+	}
+	return base
+}
+
+func renderOwnedCanvas(ctx *Context, bounds Rect, painter Painter) Surface {
+	base := TransparentSurface(bounds.W, bounds.H)
+	if painter == nil {
+		return base
+	}
+	localBounds := Rect{W: bounds.W, H: bounds.H}
+	if ctx == nil || ctx.Runtime == nil {
+		canvas := NewCanvas(&base, localBounds)
+		painter.Paint(ctx, canvas)
+		return base
+	}
+	shadow := &Runtime{}
+	copyCtx := *ctx
+	copyCtx.Runtime = shadow
+	canvas := NewCanvas(&base, localBounds)
+	painter.Paint(&copyCtx, canvas)
 	if controls := shadow.Controls(); len(controls) > 0 {
 		base.ctrls = append(base.ctrls[:0], controls...)
 		base.RegisterControls(ctx.Runtime, bounds.X, bounds.Y)
@@ -1256,7 +1283,7 @@ func (s Static) Measure(_ *Context, constraints Constraints) Size {
 }
 
 func (s Static) Render(_ *Context, bounds Rect) Surface {
-	return renderOwnedSurface(nil, bounds, s.RenderTo)
+	return renderOwnedCanvas(nil, bounds, s)
 }
 
 func (s Static) RenderTo(_ *Context, bounds Rect, dst *Surface) {
@@ -1264,6 +1291,16 @@ func (s Static) RenderTo(_ *Context, bounds Rect, dst *Surface) {
 		return
 	}
 	*dst = dst.placeAt(bounds.X, bounds.Y, SurfaceFromString(s.Content).normalize(bounds.W, bounds.H))
+}
+
+func (s Static) Paint(_ *Context, canvas Canvas) {
+	if canvas.Width() <= 0 || canvas.Height() <= 0 {
+		return
+	}
+	lines := strings.Split(s.Content, "\n")
+	for y, line := range lines {
+		canvas.WriteText(0, y, PlainTruncate(line, canvas.Width(), ""), CellStyle{})
+	}
 }
 
 type SurfaceBox struct {
@@ -1283,6 +1320,13 @@ func (b SurfaceBox) RenderTo(_ *Context, bounds Rect, dst *Surface) {
 		return
 	}
 	*dst = dst.placeAt(bounds.X, bounds.Y, b.Surface.normalize(bounds.W, bounds.H))
+}
+
+func (b SurfaceBox) Paint(_ *Context, canvas Canvas) {
+	if canvas.Width() <= 0 || canvas.Height() <= 0 {
+		return
+	}
+	canvas.BlitSurface(0, 0, b.Surface.normalize(canvas.Width(), canvas.Height()))
 }
 
 type VisibleElement struct {
