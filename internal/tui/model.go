@@ -22,6 +22,7 @@ import (
 	"github.com/lkarlslund/koder/internal/debugsrv"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/markdown"
+	kodermcp "github.com/lkarlslund/koder/internal/mcp"
 	"github.com/lkarlslund/koder/internal/permission"
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/reference"
@@ -215,6 +216,11 @@ type bangCommandMsg struct {
 }
 
 type queuedContinueDispatchMsg struct{}
+
+type mcpReloadMsg struct {
+	servers []kodermcp.ServerState
+	err     error
+}
 
 type queuePersistMsg struct {
 	chatID int64
@@ -521,6 +527,7 @@ type Model struct {
 	connectDialog           *dialogs.ConnectDialog
 	disconnectDialog        *dialogs.DisconnectDialog
 	modelDialog             *dialogs.ModelDialog
+	mcpDialog               *dialogs.MCPDialog
 	toolsDialog             *dialogs.ToolsDialog
 	themeDialog             *dialogs.ThemeDialog
 	themeDialogInitial      string
@@ -905,6 +912,7 @@ func (m Model) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 		m.closePicker()
 		m.closeSessionDialog()
 		m.closeConnectDialog()
+		m.closeMCPDialog()
 		m.closeDisconnectDialog()
 		m.closeModelDialog()
 		m.closeAgentsModal()
@@ -927,6 +935,20 @@ func (m Model) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 		m.sessions = msg.sessions
 		m.openSessionPicker()
 		m.stopBusyWithStatus("Select a session to resume")
+		return m, m.syncWindowTitleCmd()
+	case mcpReloadMsg:
+		if msg.err != nil {
+			m.status = msg.err.Error()
+			if m.hasMCPDialog() {
+				m.mcpDialog.SetStatus("Reload failed: " + msg.err.Error())
+			}
+			return m, m.syncWindowTitleCmd()
+		}
+		if m.hasMCPDialog() {
+			m.mcpDialog.SetServers(msg.servers)
+			m.mcpDialog.SetStatus("MCP servers refreshed")
+		}
+		m.status = m.mcpStatusSummary()
 		return m, m.syncWindowTitleCmd()
 	case providerProbeMsg:
 		m.invalidateBodyCache()
@@ -3898,6 +3920,7 @@ func (m Model) UpdateLoad(msg loadMsg) Model {
 	m.closePreferencesDialog()
 	m.closeToolsDialog()
 	m.closeConnectDialog()
+	m.closeMCPDialog()
 	m.closeDisconnectDialog()
 	m.closeModelDialog()
 	m.closeAgentsModal()
@@ -3958,6 +3981,18 @@ func (m *Model) handleLocalCommand(prompt string) (ui.Model, ui.Cmd, bool) {
 	case trimmed == "/connect":
 		m.resetComposerInput()
 		m.openConnectDialog()
+		return m, m.syncWindowTitleCmd(), true
+	case trimmed == "/mcp":
+		m.resetComposerInput()
+		m.openMCPDialog()
+		return m, m.syncWindowTitleCmd(), true
+	case trimmed == "/mcp-reload":
+		m.resetComposerInput()
+		m.status = "Reloading MCP servers…"
+		return m, ui.Batch(m.mcpReloadCmd(), m.syncWindowTitleCmd()), true
+	case trimmed == "/mcp-status":
+		m.resetComposerInput()
+		m.status = m.mcpStatusSummary()
 		return m, m.syncWindowTitleCmd(), true
 	case trimmed == "/disconnect":
 		m.resetComposerInput()
@@ -5342,6 +5377,8 @@ func (m Model) openDialogName() string {
 		return "disconnect"
 	case m.hasConnectDialog():
 		return "connect"
+	case m.hasMCPDialog():
+		return "mcp"
 	case m.hasSessionDialog():
 		return "session"
 	case m.hasPreferencesDialog():
@@ -5884,6 +5921,13 @@ func (m *Model) renderConnectDialogElement() ui.Node {
 	return ui.AsNode(m.connectDialog)
 }
 
+func (m *Model) renderMCPDialogElement() ui.Node {
+	if !m.hasMCPDialog() {
+		return nil
+	}
+	return ui.AsNode(m.mcpDialog)
+}
+
 func (m *Model) renderDisconnectDialogElement() ui.Node {
 	if !m.hasDisconnectDialog() {
 		return nil
@@ -6004,6 +6048,59 @@ func (m *Model) handleConnectDialogKey(msg ui.KeyMsg) ui.Cmd {
 	default:
 		return nil
 	}
+}
+
+func (m *Model) handleMCPDialogKey(msg ui.KeyMsg) ui.Cmd {
+	if !m.hasMCPDialog() {
+		return nil
+	}
+	action := m.mcpDialog.Update(msg)
+	switch action.Kind {
+	case dialogs.MCPDialogActionSave:
+		if err := kodermcp.ValidateServerConfig(action.ServerID, action.Config); err != nil {
+			m.mcpDialog.SetStatus("Save failed: " + err.Error())
+			m.status = err.Error()
+			return m.syncWindowTitleCmd()
+		}
+		oldID := m.mcpDialogEditID()
+		if m.cfg.MCPServers == nil {
+			m.cfg.MCPServers = map[string]config.MCPServer{}
+		}
+		if oldID != "" && oldID != action.ServerID {
+			delete(m.cfg.MCPServers, oldID)
+		}
+		m.cfg.MCPServers[action.ServerID] = action.Config
+		if err := m.cfg.Save(); err != nil {
+			m.mcpDialog.SetStatus("Save failed: " + err.Error())
+			m.status = err.Error()
+			return m.syncWindowTitleCmd()
+		}
+		m.agent.UpdateConfig(m.cfg)
+		m.closeMCPDialog()
+		m.status = fmt.Sprintf("Saved MCP server %s", action.ServerID)
+		return ui.Batch(m.mcpReloadCmd(), m.syncWindowTitleCmd())
+	case dialogs.MCPDialogActionRemove:
+		if id := strings.TrimSpace(action.ServerID); id != "" {
+			delete(m.cfg.MCPServers, id)
+			if err := m.cfg.Save(); err != nil {
+				m.mcpDialog.SetStatus("Remove failed: " + err.Error())
+				m.status = err.Error()
+				return m.syncWindowTitleCmd()
+			}
+			m.agent.UpdateConfig(m.cfg)
+			m.closeMCPDialog()
+			m.status = fmt.Sprintf("Removed MCP server %s", id)
+			return ui.Batch(m.mcpReloadCmd(), m.syncWindowTitleCmd())
+		}
+	case dialogs.MCPDialogActionReconnect:
+		m.status = fmt.Sprintf("Reloading MCP server %s…", action.ServerID)
+		return ui.Batch(m.mcpReloadCmd(), m.syncWindowTitleCmd())
+	case dialogs.MCPDialogActionCancel:
+		m.closeMCPDialog()
+		m.status = "MCP dialog closed"
+		return m.syncWindowTitleCmd()
+	}
+	return nil
 }
 
 func (m *Model) handleDisconnectDialogKey(msg ui.KeyMsg) ui.Cmd {
@@ -6139,6 +6236,9 @@ func internalSlashCommands() []slashCommand {
 		{Name: "/connect", Description: "Configure a provider"},
 		{Name: "/disconnect", Description: "Remove a configured provider"},
 		{Name: "/fork", Description: "Branch from the current session"},
+		{Name: "/mcp", Description: "Manage remote MCP servers"},
+		{Name: "/mcp-reload", Description: "Reconnect configured MCP servers"},
+		{Name: "/mcp-status", Description: "Show MCP server status"},
 		{Name: "/model", Description: "Choose a model for the active provider"},
 		{Name: "/new", Description: "Start a new session"},
 		{Name: "/mouse", Description: "Toggle mouse capture", NeedsArgs: true, Autocomplete: "/mouse "},
@@ -6307,6 +6407,7 @@ func (m *Model) hasModalOverlay() bool {
 		m.hasDisconnectDialog() ||
 		m.hasToolsDialog() ||
 		m.hasConnectDialog() ||
+		m.hasMCPDialog() ||
 		m.hasThemeDialog() ||
 		m.hasSessionDialog() ||
 		m.hasAgentsModal() ||
@@ -6474,6 +6575,15 @@ func (m *Model) closeConnectDialog() {
 	m.syncComposerVisibility()
 }
 
+func (m *Model) hasMCPDialog() bool {
+	return m.mcpDialog != nil
+}
+
+func (m *Model) closeMCPDialog() {
+	m.mcpDialog = nil
+	m.syncComposerVisibility()
+}
+
 func (m *Model) hasDisconnectDialog() bool {
 	return m.disconnectDialog != nil
 }
@@ -6568,6 +6678,44 @@ func (m *Model) openConnectDialog() {
 	dialog := dialogs.NewConnectDialog(provider.Catalog(), m.cfg.Providers)
 	m.connectDialog = &dialog
 	m.syncComposerVisibility()
+}
+
+func (m *Model) openMCPDialog() {
+	dialog := dialogs.NewMCPDialog(m.agent.ListMCPServers(), m.cfg.MCPServers)
+	m.mcpDialog = &dialog
+	m.syncComposerVisibility()
+}
+
+func (m *Model) mcpReloadCmd() ui.Cmd {
+	return func() ui.Msg {
+		err := m.agent.ReloadMCP(context.Background())
+		return mcpReloadMsg{
+			servers: m.agent.ListMCPServers(),
+			err:     err,
+		}
+	}
+}
+
+func (m *Model) mcpStatusSummary() string {
+	servers := m.agent.ListMCPServers()
+	if len(servers) == 0 {
+		if len(m.cfg.MCPServers) == 0 {
+			return "No MCP servers configured"
+		}
+		return "No MCP servers connected"
+	}
+	statuses := make([]string, 0, len(servers))
+	for _, item := range servers {
+		statuses = append(statuses, fmt.Sprintf("%s=%s", item.ID, item.Status))
+	}
+	return "MCP: " + strings.Join(statuses, ", ")
+}
+
+func (m *Model) mcpDialogEditID() string {
+	if m.mcpDialog == nil {
+		return ""
+	}
+	return m.mcpDialog.EditID()
 }
 
 func (m *Model) openDisconnectDialog() {
@@ -6712,6 +6860,9 @@ func (m *Model) openHelpModal() {
 		"/connect            configure a provider",
 		"/disconnect         remove a configured provider",
 		"/fork               fork current session",
+		"/mcp                manage remote MCP servers",
+		"/mcp-reload         reconnect MCP servers",
+		"/mcp-status         show MCP status",
 		"/model              choose a model",
 		"/new                create a new session",
 		"/permissions        change permission mode",

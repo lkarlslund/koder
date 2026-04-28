@@ -142,7 +142,7 @@ func NewManager(cfgs map[string]config.MCPServer) (*Manager, error) {
 func (m *Manager) LoadConfig(cfgs map[string]config.MCPServer) error {
 	next := make(map[string]config.MCPServer, len(cfgs))
 	for id, cfg := range cfgs {
-		if err := validateServerConfig(id, cfg); err != nil {
+		if err := ValidateServerConfig(id, cfg); err != nil {
 			return err
 		}
 		next[strings.TrimSpace(id)] = cloneServerConfig(cfg)
@@ -474,7 +474,7 @@ func ParseToolName(name string) (serverID, toolName string, ok bool) {
 	return serverID, toolName, true
 }
 
-func validateServerConfig(id string, cfg config.MCPServer) error {
+func ValidateServerConfig(id string, cfg config.MCPServer) error {
 	id = strings.TrimSpace(id)
 	if id == "" {
 		return errors.New("mcp server id is empty")

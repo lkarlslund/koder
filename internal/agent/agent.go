@@ -80,6 +80,23 @@ func (e *Engine) UpdateConfig(cfg config.Config) {
 	}
 }
 
+func (e *Engine) ListMCPServers() []mcp.ServerState {
+	if e.mcp == nil {
+		return nil
+	}
+	return e.mcp.ListServers()
+}
+
+func (e *Engine) ReloadMCP(ctx context.Context) error {
+	if e.mcp == nil {
+		return nil
+	}
+	if err := e.mcp.LoadConfig(e.cfg.MCPServers); err != nil {
+		return err
+	}
+	return e.mcp.ConnectAll(ctx)
+}
+
 func (e *Engine) RunPrompt(ctx context.Context, session domain.Session, prompt string) (<-chan domain.Event, error) {
 	return e.RunPromptWithInputs(ctx, session, prompt, nil, nil, "")
 }
@@ -697,7 +714,7 @@ func (e *Engine) chatRequest(session domain.Session, chat domain.Chat, messages 
 	}
 	if len(messages) > 0 && (chat.ID != 0 || chat.WorkflowRole != "") {
 		req.Tools = tools.Definitions(e.toolRuntime(session, chat))
-		if e.mcp != nil {
+		if e.mcp != nil && toolEnabledForSession(e.cfg, session, domain.ToolKindMCP) {
 			req.Tools = append(req.Tools, e.mcp.ToolDefinitions()...)
 		}
 		req.ToolChoice = "auto"
