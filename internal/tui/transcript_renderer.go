@@ -13,6 +13,8 @@ import (
 	"github.com/lkarlslund/koder/internal/ui"
 )
 
+const reasoningOnlyPlaceholder = "<no text from LLM, only reasoning>"
+
 type transcriptRenderer struct {
 	palette        theme.Palette
 	width          int
@@ -146,9 +148,7 @@ func (r transcriptRenderer) renderMessageParts(parts []domain.Part) string {
 		if reasoningBuf.Len() == 0 {
 			return
 		}
-		if r.showReasoning {
-			reasoningBlocks = append(reasoningBlocks, r.renderReasoningBlock(reasoningBuf.String()))
-		}
+		reasoningBlocks = append(reasoningBlocks, r.renderReasoningBlock(reasoningBuf.String()))
 		reasoningBuf.Reset()
 	}
 
@@ -213,8 +213,15 @@ func (r transcriptRenderer) renderMessageParts(parts []domain.Part) string {
 	flushReasoning()
 
 	blocks = append(blocks, systemBlocks...)
-	blocks = append(blocks, reasoningBlocks...)
-	if len(reasoningBlocks) > 0 && len(textBlocks) > 0 {
+	visibleReasoning := reasoningBlocks
+	if !r.showReasoning && len(textBlocks) > 0 {
+		visibleReasoning = nil
+	}
+	if len(textBlocks) == 0 && len(reasoningBlocks) > 0 {
+		textBlocks = append(textBlocks, reasoningOnlyPlaceholder)
+	}
+	blocks = append(blocks, visibleReasoning...)
+	if len(visibleReasoning) > 0 && len(textBlocks) > 0 {
 		blocks = append(blocks, "")
 	}
 	blocks = append(blocks, textBlocks...)
@@ -244,10 +251,8 @@ func (r transcriptRenderer) renderStyledMessageParts(parts []domain.Part) []ui.S
 		if reasoningBuf.Len() == 0 {
 			return
 		}
-		if r.showReasoning {
-			if block := r.renderStyledReasoningBlock(reasoningBuf.String()); len(block) > 0 {
-				reasoningBlocks = append(reasoningBlocks, block)
-			}
+		if block := r.renderStyledReasoningBlock(reasoningBuf.String()); len(block) > 0 {
+			reasoningBlocks = append(reasoningBlocks, block)
 		}
 		reasoningBuf.Reset()
 	}
@@ -307,8 +312,18 @@ func (r transcriptRenderer) renderStyledMessageParts(parts []domain.Part) []ui.S
 	flushText()
 	flushReasoning()
 	blocks = append(blocks, systemBlocks...)
-	blocks = append(blocks, reasoningBlocks...)
-	if len(reasoningBlocks) > 0 && len(textBlocks) > 0 {
+	visibleReasoning := reasoningBlocks
+	if !r.showReasoning && len(textBlocks) > 0 {
+		visibleReasoning = nil
+	}
+	if len(textBlocks) == 0 && len(reasoningBlocks) > 0 {
+		textBlocks = append(textBlocks, []ui.StyledSpan{{
+			Text:  reasoningOnlyPlaceholder,
+			Style: ui.CellStyle{FG: r.palette.ReasoningText}.WithItalic(true),
+		}})
+	}
+	blocks = append(blocks, visibleReasoning...)
+	if len(visibleReasoning) > 0 && len(textBlocks) > 0 {
 		blocks = append(blocks, nil)
 	}
 	blocks = append(blocks, textBlocks...)

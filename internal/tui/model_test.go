@@ -5329,6 +5329,68 @@ func TestRenderStyledMessagePartsShowsReasoningBeforeText(t *testing.T) {
 	}
 }
 
+func TestRenderMessagePartsReasoningOnlyShowsReasoningWhenHidden(t *testing.T) {
+	m := Model{
+		showReasoning: false,
+	}
+
+	got := newTranscriptRenderer(&m).renderMessageParts([]domain.Part{
+		{Kind: domain.PartKindReasoning, Body: "thinking first"},
+	})
+
+	if !strings.Contains(got, "thinking first") {
+		t.Fatalf("expected reasoning-only turn to stay visible, got %q", got)
+	}
+	if !strings.Contains(got, reasoningOnlyPlaceholder) {
+		t.Fatalf("expected reasoning-only placeholder, got %q", got)
+	}
+	if strings.Index(got, "thinking first") > strings.Index(got, reasoningOnlyPlaceholder) {
+		t.Fatalf("expected reasoning before placeholder, got %q", got)
+	}
+}
+
+func TestRenderMessagePartsHidesReasoningWhenTextExistsAndReasoningHidden(t *testing.T) {
+	m := Model{
+		showReasoning: false,
+	}
+
+	got := newTranscriptRenderer(&m).renderMessageParts([]domain.Part{
+		{Kind: domain.PartKindReasoning, Body: "thinking first"},
+		{Kind: domain.PartKindText, Body: "final answer"},
+	})
+
+	if strings.Contains(got, "thinking first") {
+		t.Fatalf("expected reasoning hidden when final text exists, got %q", got)
+	}
+	if strings.Contains(got, reasoningOnlyPlaceholder) {
+		t.Fatalf("expected no reasoning-only placeholder when final text exists, got %q", got)
+	}
+	if !strings.Contains(got, "final answer") {
+		t.Fatalf("expected final answer to remain visible, got %q", got)
+	}
+}
+
+func TestRenderStyledMessagePartsReasoningOnlyShowsReasoningWhenHidden(t *testing.T) {
+	cfg := testConfig(t)
+	m, err := New(cfg, nil, nil, StartupModeNew, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.showReasoning = false
+	m.viewport.Width = 60
+
+	got := ui.PlainStyledText(newTranscriptRenderer(&m).renderStyledMessageParts([]domain.Part{
+		{Kind: domain.PartKindReasoning, Body: "thinking first"},
+	}))
+
+	if !strings.Contains(got, "thinking first") {
+		t.Fatalf("expected reasoning-only styled turn to stay visible, got %q", got)
+	}
+	if !strings.Contains(got, reasoningOnlyPlaceholder) {
+		t.Fatalf("expected reasoning-only placeholder, got %q", got)
+	}
+}
+
 func TestTranscriptBlocksIncludePendingAssistantTurn(t *testing.T) {
 	cfg := testConfig(t)
 	m, err := New(cfg, nil, nil, StartupModeNew, nil)
