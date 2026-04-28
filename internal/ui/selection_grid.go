@@ -3,8 +3,6 @@ package ui
 import (
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
-
 	"github.com/lkarlslund/koder/internal/theme"
 )
 
@@ -119,38 +117,38 @@ func (p selectionGridCardPainter) Paint(ctx *Context, canvas Canvas) {
 	borderColor := palette.SidebarBorder
 	background := baseBackground
 	foreground := firstNonEmptyColor(palette.SidebarForeground, palette.MarkdownText)
-	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(foreground)
-	descriptionStyle := lipgloss.NewStyle().Foreground(firstNonEmptyColor(palette.AssistantTimestampText, palette.ComposerMutedText))
+	titleStyle := NewStyle().Bold(true).Foreground(foreground)
+	descriptionStyle := NewStyle().Foreground(firstNonEmptyColor(palette.AssistantTimestampText, palette.ComposerMutedText))
 	if c.Selected {
 		background = selectedBackground
 		foreground = firstNonEmptyColor(palette.SelectionForeground, palette.UserTextForeground, foreground)
 		borderColor = firstNonEmptyColor(selectedBackground, palette.ActivityText, borderColor)
-		titleStyle = lipgloss.NewStyle().Bold(true).Foreground(foreground)
-		descriptionStyle = lipgloss.NewStyle().Foreground(foreground)
+		titleStyle = NewStyle().Bold(true).Foreground(foreground)
+		descriptionStyle = NewStyle().Foreground(foreground)
 	}
 	if c.Focused {
 		background = deriveFocusedBackground(
 			selectedBackground,
 			firstNonEmptyColor(palette.ScreenBackground, palette.SidebarBackground, palette.UserTextBackground),
 		)
-		if strings.TrimSpace(string(background)) == "" || background == baseBackground {
+		if !background.Valid() || background == baseBackground {
 			background = selectedBackground
 		}
 		foreground = firstNonEmptyColor(palette.SelectionForeground, palette.UserTextForeground, foreground)
 		borderColor = firstNonEmptyColor(palette.SelectionForeground, palette.UserTextForeground, borderColor)
-		titleStyle = lipgloss.NewStyle().Bold(true).Foreground(foreground)
-		descriptionStyle = lipgloss.NewStyle().Foreground(foreground)
+		titleStyle = NewStyle().Bold(true).Foreground(foreground)
+		descriptionStyle = NewStyle().Foreground(foreground)
 	}
 	if canvas.Height() <= 1 {
 		fillStyle := CellStyle{}
-		if background != "" {
+		if background.Valid() {
 			fillStyle.BG = cellColor(background)
 		}
-		if foreground != "" {
+		if foreground.Valid() {
 			fillStyle.FG = cellColor(foreground)
 		}
-		textStyle := lipglossToCellStyle(titleStyle)
-		if background != "" {
+		textStyle := titleStyle.CellStyle()
+		if background.Valid() {
 			textStyle.BG = cellColor(background)
 		}
 		text := truncateText(strings.TrimSpace(c.Item.Title), max(1, canvas.Width()))

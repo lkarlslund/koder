@@ -1,12 +1,10 @@
 package ui
 
 import (
-	"strconv"
 	"strings"
 	"sync/atomic"
 
-	"github.com/charmbracelet/lipgloss"
-
+	"github.com/lkarlslund/koder/internal/colorx"
 	"github.com/lkarlslund/koder/internal/theme"
 )
 
@@ -201,70 +199,22 @@ type Context struct {
 	Runtime *Runtime
 }
 
-type CellColor uint32
+type CellColor = colorx.Color
 
 func NewCellColorRGB(r, g, b uint8) CellColor {
-	return NewCellColorRGBA(r, g, b, 0xff)
+	return colorx.RGB(r, g, b)
 }
 
 func NewCellColorRGBA(r, g, b, a uint8) CellColor {
-	return CellColor(uint32(a)<<24 | uint32(r)<<16 | uint32(g)<<8 | uint32(b))
-}
-
-func (c CellColor) Valid() bool {
-	return c.A() != 0
-}
-
-func (c CellColor) A() uint8 {
-	return uint8(uint32(c) >> 24)
-}
-
-func (c CellColor) R() uint8 {
-	return uint8(uint32(c) >> 16)
-}
-
-func (c CellColor) G() uint8 {
-	return uint8(uint32(c) >> 8)
-}
-
-func (c CellColor) B() uint8 {
-	return uint8(c)
+	return colorx.RGBA(r, g, b, a)
 }
 
 func ParseCellColor(value string) CellColor {
-	value = strings.TrimSpace(value)
-	if len(value) != 7 && len(value) != 9 || value[0] != '#' {
-		return 0
-	}
-	r, err := strconv.ParseUint(value[1:3], 16, 8)
-	if err != nil {
-		return 0
-	}
-	g, err := strconv.ParseUint(value[3:5], 16, 8)
-	if err != nil {
-		return 0
-	}
-	b, err := strconv.ParseUint(value[5:7], 16, 8)
-	if err != nil {
-		return 0
-	}
-	a := uint8(0xff)
-	if len(value) == 9 {
-		parsedAlpha, err := strconv.ParseUint(value[7:9], 16, 8)
-		if err != nil {
-			return 0
-		}
-		a = uint8(parsedAlpha)
-	}
-	return NewCellColorRGBA(uint8(r), uint8(g), uint8(b), a)
+	return colorx.ParseCSSColor(value)
 }
 
-func CellColorFromLipgloss(value lipgloss.Color) CellColor {
-	return ParseCellColor(string(value))
-}
-
-func cellColor(value lipgloss.Color) CellColor {
-	return CellColorFromLipgloss(value)
+func cellColor(value CellColor) CellColor {
+	return value
 }
 
 type CellStyle struct {
@@ -286,10 +236,10 @@ func (s CellStyle) equal(other CellStyle) bool {
 func (s CellStyle) Merge(overlay CellStyle) CellStyle {
 	out := s
 	if overlay.FG.Valid() {
-		out.FG = overlay.FG
+		out.FG = compositeColor(out.FG, overlay.FG)
 	}
 	if overlay.BG.Valid() {
-		out.BG = overlay.BG
+		out.BG = compositeColor(out.BG, overlay.BG)
 	}
 	if overlay.Bold() {
 		out = out.WithBold(true)
@@ -1014,6 +964,26 @@ func compositeCell(base, overlay Cell) Cell {
 	out.SetStyle(base.Style().Merge(overlay.Style()))
 	out.SetPainted(true)
 	return out
+}
+
+func compositeColor(base, overlay CellColor) CellColor {
+	if !overlay.Valid() {
+		return base
+	}
+	if !base.Valid() || overlay.A() == 0xff {
+		return overlay
+	}
+	if overlay.A() == 0 {
+		return base
+	}
+	alpha := float64(overlay.A()) / 255.0
+	invAlpha := 1 - alpha
+	return NewCellColorRGBA(
+		uint8(float64(overlay.R())*alpha+float64(base.R())*invAlpha+0.5),
+		uint8(float64(overlay.G())*alpha+float64(base.G())*invAlpha+0.5),
+		uint8(float64(overlay.B())*alpha+float64(base.B())*invAlpha+0.5),
+		uint8(float64(overlay.A())+float64(base.A())*invAlpha+0.5),
+	)
 }
 
 func (c Cell) paintsGlyph() bool {

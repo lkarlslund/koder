@@ -339,7 +339,7 @@ func (n *transcriptRetainedNode) Paint(_ *ui.Context, canvas ui.Canvas) {
 	}
 	if n.widget != nil && n.widget.model != nil {
 		canvas.Fill(ui.Rect{W: canvas.Width(), H: canvas.Height()}, ui.CellStyle{
-			BG: ui.CellColorFromLipgloss(n.widget.model.palette.ScreenBackground),
+			BG: n.widget.model.palette.ScreenBackground,
 		})
 	}
 	canvas.BlitSurface(0, 0, n.surface.Normalize(canvas.Width(), canvas.Height()))

@@ -3,8 +3,6 @@ package ui
 import (
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
-
 	"github.com/lkarlslund/koder/internal/theme"
 )
 
@@ -80,7 +78,7 @@ func (p PendingInputPreview) Paint(ctx *Context, canvas Canvas) {
 	if p.EditingMode {
 		header = "Queued inputs • edit mode"
 	}
-	paintLine := func(prefix, text string, fg lipgloss.Color, italic bool) {
+	paintLine := func(prefix, text string, fg CellColor, italic bool) {
 		if y >= height {
 			return
 		}
@@ -138,7 +136,7 @@ func (p PendingInputPreview) Paint(ctx *Context, canvas Canvas) {
 	}
 }
 
-func (p PendingInputPreview) renderHeader(text string, fg, bg lipgloss.Color) Surface {
+func (p PendingInputPreview) renderHeader(text string, fg, bg CellColor) Surface {
 	width := maxInt(1, p.Width)
 	prefix := "• "
 	available := maxInt(1, width-PlainWidth(prefix))
@@ -152,7 +150,7 @@ func (p PendingInputPreview) renderHeader(text string, fg, bg lipgloss.Color) Su
 	return surface
 }
 
-func (p PendingInputPreview) renderPreviewRows(item PendingInputRow, fg, bg lipgloss.Color) []Surface {
+func (p PendingInputPreview) renderPreviewRows(item PendingInputRow, fg, bg CellColor) []Surface {
 	rows := make([]Surface, 0, pendingInputPreviewLineLimit)
 	label := strings.TrimSpace(item.Badge)
 	if label == "" {
@@ -182,7 +180,7 @@ func (p PendingInputPreview) renderPreviewRows(item PendingInputRow, fg, bg lipg
 	return rows
 }
 
-func renderPendingPreviewLine(prefix, text string, width int, fg, bg lipgloss.Color, italic bool) Surface {
+func renderPendingPreviewLine(prefix, text string, width int, fg, bg CellColor, italic bool) Surface {
 	width = maxInt(1, width)
 	prefix = PlainTruncate(prefix, width, "")
 	available := maxInt(0, width-PlainWidth(prefix))

@@ -1,28 +1,25 @@
 package ui
 
 import (
-	"fmt"
 	"strings"
-
-	"github.com/charmbracelet/lipgloss"
 
 	"github.com/lkarlslund/koder/internal/theme"
 )
 
 type Label struct {
 	Text  string
-	Style lipgloss.Style
+	Style Style
 }
 
 func (l Label) Measure(_ *Context, constraints Constraints) Size {
-	return constraints.Clamp(Size{W: lipgloss.Width(l.Text), H: 1})
+	return constraints.Clamp(Size{W: TextWidth(l.Text), H: 1})
 }
 
 func (l Label) Paint(_ *Context, canvas Canvas) {
 	if canvas.Width() <= 0 || canvas.Height() <= 0 {
 		return
 	}
-	canvas.WriteText(0, 0, PlainTruncate(l.Text, max(1, canvas.Width()), ""), lipglossToCellStyle(l.Style))
+	canvas.WriteText(0, 0, PlainTruncate(l.Text, max(1, canvas.Width()), ""), l.Style.CellStyle())
 }
 
 type TextPane struct {
@@ -80,13 +77,13 @@ func (h HitBox) Paint(ctx *Context, canvas Canvas) {
 
 type Divider struct {
 	Text  string
-	Style lipgloss.Style
+	Style Style
 }
 
 func (d Divider) Measure(_ *Context, constraints Constraints) Size {
 	width := constraints.MaxW
 	if width <= 0 {
-		width = lipgloss.Width(d.Text)
+		width = TextWidth(d.Text)
 	}
 	if width <= 0 {
 		width = 1
@@ -102,15 +99,15 @@ func (d Divider) Paint(_ *Context, canvas Canvas) {
 	text := strings.TrimSpace(d.Text)
 	if text == "" {
 		text = strings.Repeat("─", width)
-	} else if lipgloss.Width(text) < width {
-		text += strings.Repeat("─", width-lipgloss.Width(text))
+	} else if TextWidth(text) < width {
+		text += strings.Repeat("─", width-TextWidth(text))
 	}
-	canvas.WriteText(0, 0, PlainTruncate(text, width, ""), lipglossToCellStyle(d.Style))
+	canvas.WriteText(0, 0, PlainTruncate(text, width, ""), d.Style.CellStyle())
 }
 
 type Paragraph struct {
 	Text  string
-	Style lipgloss.Style
+	Style Style
 }
 
 func (p Paragraph) Measure(_ *Context, constraints Constraints) Size {
@@ -127,7 +124,7 @@ func (p Paragraph) Paint(_ *Context, canvas Canvas) {
 		return
 	}
 	lines := p.lines(canvas.Width())
-	style := lipglossToCellStyle(p.Style)
+	style := p.Style.CellStyle()
 	for y, line := range lines {
 		canvas.WriteText(0, y, PlainTruncate(line, canvas.Width(), ""), style)
 	}
@@ -181,9 +178,8 @@ func (m ModalFrame) contentNode(palette theme.Palette) Node {
 	children := []Child{}
 	if subtitle := strings.TrimSpace(m.Subtitle); subtitle != "" {
 		children = append(children, Fixed(Label{
-			Text: subtitle,
-			Style: lipgloss.NewStyle().
-				Foreground(palette.AssistantTimestampText),
+			Text:  subtitle,
+			Style: NewStyle().Foreground(palette.AssistantTimestampText),
 		}))
 	}
 	if m.Body != nil {
@@ -197,9 +193,8 @@ func (m ModalFrame) contentNode(palette theme.Palette) Node {
 			children = append(children, Fixed(Spacer{H: 1}))
 		}
 		children = append(children, Fixed(Label{
-			Text: footer,
-			Style: lipgloss.NewStyle().
-				Foreground(palette.AssistantTimestampText),
+			Text:  footer,
+			Style: NewStyle().Foreground(palette.AssistantTimestampText),
 		}))
 	}
 	if len(children) == 0 {
@@ -218,18 +213,4 @@ func (m ModalFrame) window(ctx *Context) WindowFrame {
 		BorderColor: themePalette(ctx).SidebarBorder,
 		ShowClose:   true,
 	}
-}
-
-func lipglossToCellStyle(style lipgloss.Style) CellStyle {
-	cell := CellStyle{}.
-		WithBold(style.GetBold()).
-		WithItalic(style.GetItalic()).
-		WithUnderline(style.GetUnderline())
-	if fg := style.GetForeground(); fg != nil {
-		cell.FG = ParseCellColor(fmt.Sprint(fg))
-	}
-	if bg := style.GetBackground(); bg != nil {
-		cell.BG = ParseCellColor(fmt.Sprint(bg))
-	}
-	return cell
 }

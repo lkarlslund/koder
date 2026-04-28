@@ -5,7 +5,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/theme"
 )
@@ -533,7 +532,7 @@ func BenchmarkBorderRenderCell(b *testing.B) {
 		BorderColor:  benchmarkPalette().SidebarBorder,
 		Child: AsNode(Paragraph{
 			Text: strings.Repeat("panel paragraph content ", 12),
-			Style: lipgloss.NewStyle().
+			Style: NewStyle().
 				Foreground(benchmarkPalette().MarkdownText),
 		}),
 	}

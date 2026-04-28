@@ -15,8 +15,6 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/charmbracelet/lipgloss"
-
 	"github.com/lkarlslund/koder/internal/agent"
 	"github.com/lkarlslund/koder/internal/attachment"
 	kclipboard "github.com/lkarlslund/koder/internal/clipboard"
@@ -1613,12 +1611,12 @@ func (m *Model) scrollTranscript(delta int) {
 }
 
 func (m *Model) llmPreviewMaxOffset() int {
-	contentHeight := lipgloss.Height(m.llmPreviewBody)
+	contentHeight := ui.TextHeight(m.llmPreviewBody)
 	return max(0, contentHeight-max(0, m.llmPreviewHeight))
 }
 
 func (m *Model) helpMaxOffset() int {
-	contentHeight := lipgloss.Height(m.helpBody)
+	contentHeight := ui.TextHeight(m.helpBody)
 	return max(0, contentHeight-max(0, m.helpHeight))
 }
 
@@ -2858,7 +2856,7 @@ func renderedSeparatorHeight(separator string) int {
 	if separator == "" {
 		return 0
 	}
-	return max(0, lipgloss.Height("x"+separator+"x")-2)
+	return max(0, ui.TextHeight("x"+separator+"x")-2)
 }
 
 func (m *Model) renderTranscriptActivityElement() ui.Node {
@@ -6036,9 +6034,7 @@ func (m *Model) renderChangedFile(item workspace.FileStatus) string {
 	if item.Additions == 0 && item.Deletions == 0 {
 		return base
 	}
-	added := lipgloss.NewStyle().Foreground(m.palette.DiffAddedText).Render(fmt.Sprintf("+%d", item.Additions))
-	deleted := lipgloss.NewStyle().Foreground(m.palette.DiffDeletedText).Render(fmt.Sprintf("-%d", item.Deletions))
-	return base + " " + added + " " + deleted
+	return fmt.Sprintf("%s +%d -%d", base, item.Additions, item.Deletions)
 }
 
 func applyComposerTheme(composer *textarea.Model, palette theme.Palette) {
@@ -6067,7 +6063,7 @@ func applyComposerTheme(composer *textarea.Model, palette theme.Palette) {
 	applyTextareaStyle(&blurred)
 	composer.FocusedStyle = focused
 	composer.BlurredStyle = blurred
-	composer.Cursor.TextStyle = lipgloss.NewStyle().
+	composer.Cursor.TextStyle = ui.NewStyle().
 		Background(palette.UserTextForeground).
 		Foreground(palette.UserTextBackground)
 }

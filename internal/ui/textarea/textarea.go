@@ -4,7 +4,6 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/lkarlslund/koder/internal/ui"
 	"github.com/mattn/go-runewidth"
 )
@@ -22,7 +21,7 @@ type blinkTickMsg struct {
 
 type Cursor struct {
 	char      string
-	TextStyle lipgloss.Style
+	TextStyle ui.Style
 }
 
 func (c *Cursor) SetChar(char string) {
@@ -37,12 +36,12 @@ func (c Cursor) View() string {
 }
 
 type Style struct {
-	Base        lipgloss.Style
-	CursorLine  lipgloss.Style
-	Text        lipgloss.Style
-	Prompt      lipgloss.Style
-	Placeholder lipgloss.Style
-	EndOfBuffer lipgloss.Style
+	Base        ui.Style
+	CursorLine  ui.Style
+	Text        ui.Style
+	Prompt      ui.Style
+	Placeholder ui.Style
+	EndOfBuffer ui.Style
 }
 
 func DefaultStyles() (Style, Style) {

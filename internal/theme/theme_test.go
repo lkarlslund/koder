@@ -48,7 +48,7 @@ func TestResolveThemeProducesUsablePalette(t *testing.T) {
 	if got.Name != "dracula" {
 		t.Fatalf("expected dracula theme, got %q", got.Name)
 	}
-	if got.Palette.MarkdownText == "" || got.Palette.SidebarBackground == "" || got.Palette.UserTextBackground == "" {
+	if !got.Palette.MarkdownText.Valid() || !got.Palette.SidebarBackground.Valid() || !got.Palette.UserTextBackground.Valid() {
 		t.Fatalf("expected populated palette, got %#v", got.Palette)
 	}
 }

@@ -54,9 +54,6 @@ func TestNoStyledStringRenderingInDialogs(t *testing.T) {
 		text := string(raw)
 		for _, forbidden := range []string{
 			".View(",
-			"lipgloss.JoinHorizontal(",
-			"lipgloss.JoinVertical(",
-			"lipgloss.NewStyle().",
 		} {
 			if strings.Contains(text, forbidden) {
 				t.Fatalf("unexpected %q usage in %s", forbidden, path)
@@ -126,9 +123,6 @@ func TestNoLegacyRenderMethodsOrCallsInProductionUIOrTUI(t *testing.T) {
 				if !strings.Contains(trimmed, ".Render(") {
 					continue
 				}
-				if strings.Contains(trimmed, "lipgloss.NewStyle().") {
-					continue
-				}
 				t.Fatalf("unexpected legacy Render call in %s: %s", path, trimmed)
 			}
 			return nil
@@ -188,10 +182,41 @@ func TestNoStyledStringRenderingInTextarea(t *testing.T) {
 	text := string(raw)
 	for _, forbidden := range []string{
 		".Render(",
-		"lipgloss.NewStyle().Render(",
 	} {
 		if strings.Contains(text, forbidden) {
 			t.Fatalf("unexpected %q usage in %s", forbidden, path)
+		}
+	}
+}
+
+func TestNoLipglossInProductionUIOrTUI(t *testing.T) {
+	root := repoRoot(t)
+	paths := []string{
+		filepath.Join(root, "internal/ui"),
+		filepath.Join(root, "internal/tui"),
+		filepath.Join(root, "internal/theme"),
+		filepath.Join(root, "internal/markdown"),
+	}
+	for _, base := range paths {
+		err := filepath.WalkDir(base, func(path string, d os.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+				return nil
+			}
+			raw, readErr := os.ReadFile(path)
+			if readErr != nil {
+				return readErr
+			}
+			text := string(raw)
+			if strings.Contains(text, "github.com/charmbracelet/lipgloss") || strings.Contains(text, "lipgloss.") {
+				t.Fatalf("unexpected lipgloss usage in %s", path)
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
 		}
 	}
 }

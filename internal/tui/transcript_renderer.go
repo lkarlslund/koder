@@ -103,7 +103,7 @@ func (r transcriptRenderer) userMessageWidth(body, stamp string) int {
 func (r transcriptRenderer) renderStyledAssistantMessageElement(body []ui.StyledSpan, stamp string) ui.Node {
 	return ui.AsNode(ui.AssistantMessage{
 		StyledBody: body,
-		BaseStyle:  ui.CellStyle{FG: ui.CellColorFromLipgloss(r.palette.MarkdownText)},
+		BaseStyle:  ui.CellStyle{FG: r.palette.MarkdownText},
 		Stamp:      stamp,
 		Width:      r.width,
 		Palette:    r.palette,
@@ -510,8 +510,8 @@ func (r transcriptRenderer) renderStyledReasoningBlock(input string) []ui.Styled
 		return nil
 	}
 	style := ui.CellStyle{
-		BG: ui.CellColorFromLipgloss(r.palette.ReasoningBackground),
-		FG: ui.CellColorFromLipgloss(r.palette.ReasoningText),
+		BG: r.palette.ReasoningBackground,
+		FG: r.palette.ReasoningText,
 	}.WithItalic(true)
 	lines := strings.Split(rendered, "\n")
 	out := make([]ui.StyledSpan, 0, len(lines)*2)

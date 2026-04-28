@@ -113,7 +113,7 @@ func TestUserMessageFillsEntireRowBackground(t *testing.T) {
 		PromptGlyph: "┃",
 	})), Rect{W: 12, H: 3})
 
-	want := ParseCellColor(string(palette.UserTextBackground))
+	want := palette.UserTextBackground
 	for x := 0; x < 12; x++ {
 		r, g, b, ok := surface.SurfaceCellBG(x, 1)
 		if !ok {

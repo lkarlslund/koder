@@ -5,8 +5,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
-
 	"github.com/lkarlslund/koder/internal/theme"
 )
 
@@ -185,7 +183,7 @@ func (d PickerDialog) node(width int, palette theme.Palette) Node {
 	if hint := strings.TrimSpace(d.Hint); hint != "" {
 		children = append(children, Fixed(Label{
 			Text:  hint,
-			Style: lipgloss.NewStyle().Foreground(palette.AssistantTimestampText),
+			Style: NewStyle().Foreground(palette.AssistantTimestampText),
 		}))
 		children = append(children, Fixed(Spacer{H: 1}))
 	}

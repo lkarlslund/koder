@@ -3,8 +3,6 @@ package ui
 import (
 	"strings"
 	"testing"
-
-	"github.com/charmbracelet/lipgloss"
 )
 
 type fillBox struct {
@@ -229,7 +227,7 @@ func TestStaticRenderMatchesPaint(t *testing.T) {
 }
 
 func TestLabelRenderMatchesPaint(t *testing.T) {
-	element := Label{Text: "hello", Style: lipgloss.NewStyle().Bold(true)}
+	element := Label{Text: "hello", Style: NewStyle().Bold(true)}
 	assertRenderMatchesPaint(t, &Context{Runtime: &Runtime{}}, element, Rect{W: 8, H: 1})
 }
 
@@ -320,13 +318,13 @@ func TestPlaceAtBlitsPlainStringChildOntoCellSurface(t *testing.T) {
 
 func TestPlaceAtInheritsParentBackgroundForSparseChild(t *testing.T) {
 	base := BlankSurface(4, 1)
-	bg := cellColor("#112233")
+	bg := cellColor(ParseCellColor("#112233"))
 	for x := 0; x < 4; x++ {
 		base.setCell(x, 0, blankCell(CellStyle{BG: bg}))
 	}
 
 	child := TransparentSurface(4, 1)
-	child.WriteText(1, 0, "x", CellStyle{FG: cellColor("#ffffff")})
+	child.WriteText(1, 0, "x", CellStyle{FG: cellColor(ParseCellColor("#ffffff"))})
 	got := base.placeAt(0, 0, child)
 
 	if text := got.SurfaceCellText(1, 0); text != "x" {

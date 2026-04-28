@@ -3,8 +3,6 @@ package ui
 import (
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
-
 	"github.com/lkarlslund/koder/internal/theme"
 )
 
@@ -141,10 +139,10 @@ func (c Composer) render() Surface {
 		promptWidth = PlainWidth(prompt)
 	}
 	contentWidth := maxInt(0, width-promptWidth)
-	promptStyle := lipgloss.NewStyle().
+	promptStyle := NewStyle().
 		Background(c.Palette.UserTextBackground).
 		Foreground(c.Palette.UserAccentBar)
-	contentStyle := lipgloss.NewStyle().
+	contentStyle := NewStyle().
 		Background(c.Palette.UserTextBackground).
 		Foreground(c.Palette.UserTextForeground)
 
@@ -181,11 +179,11 @@ func (c Composer) render() Surface {
 	return s
 }
 
-func (c Composer) renderPlaceholderLine(promptStyle, contentStyle lipgloss.Style, prompt string, contentWidth int, placeholder string, cursorChar string) string {
+func (c Composer) renderPlaceholderLine(promptStyle, contentStyle Style, prompt string, contentWidth int, placeholder string, cursorChar string) string {
 	return strings.Join(c.renderPlaceholderSurface(promptStyle, contentStyle, prompt, contentWidth, placeholder, cursorChar).Lines(), "\n")
 }
 
-func (c Composer) renderPlaceholderSurface(promptStyle, contentStyle lipgloss.Style, prompt string, contentWidth int, placeholder string, cursorChar string) Surface {
+func (c Composer) renderPlaceholderSurface(promptStyle, contentStyle Style, prompt string, contentWidth int, placeholder string, cursorChar string) Surface {
 	placeholder = PlainTruncate(placeholder, contentWidth, "")
 	if placeholder == "" {
 		return c.renderPlaceholder(prompt, promptStyle, "", cursorChar, "", contentWidth, c.CursorVisible, c.Palette.UserTextForeground, c.Palette.UserTextBackground, c.Palette.ComposerMutedText)
@@ -202,7 +200,7 @@ func (c Composer) renderPlaceholderSurface(promptStyle, contentStyle lipgloss.St
 	return c.renderPlaceholder(prompt, promptStyle, "", cursor, rest, contentWidth, c.CursorVisible, c.Palette.UserTextForeground, c.Palette.UserTextBackground, c.Palette.ComposerMutedText)
 }
 
-func (c Composer) renderLineSurface(prompt string, promptStyle lipgloss.Style, before, cursor, after string, contentWidth int, cursorVisible bool, textFG, textBG lipgloss.Color) Surface {
+func (c Composer) renderLineSurface(prompt string, promptStyle Style, before, cursor, after string, contentWidth int, cursorVisible bool, textFG, textBG CellColor) Surface {
 	width := PlainWidth(prompt) + maxInt(0, contentWidth)
 	if width <= 0 {
 		width = PlainWidth(prompt)
@@ -238,7 +236,7 @@ func (c Composer) renderLineSurface(prompt string, promptStyle lipgloss.Style, b
 	return s
 }
 
-func (c Composer) renderPlaceholder(prompt string, promptStyle lipgloss.Style, before, cursor, after string, contentWidth int, cursorVisible bool, textFG, textBG, muted lipgloss.Color) Surface {
+func (c Composer) renderPlaceholder(prompt string, promptStyle Style, before, cursor, after string, contentWidth int, cursorVisible bool, textFG, textBG, muted CellColor) Surface {
 	width := PlainWidth(prompt) + maxInt(0, contentWidth)
 	if width <= 0 {
 		width = PlainWidth(prompt)
@@ -283,14 +281,10 @@ func renderHalfBlockLine(width int, char string, palette theme.Palette) string {
 	if width <= 0 {
 		return ""
 	}
-	bar := lipgloss.NewStyle().
-		Foreground(palette.UserAccentBar).
-		Render(char)
-	fill := lipgloss.NewStyle().
-		Width(maxInt(0, width-1)).
-		Foreground(palette.UserTextBackground).
-		Render(strings.Repeat(char, maxInt(1, width-1)))
-	return bar + fill
+	if width <= 1 {
+		return PlainTruncate(char, width, "")
+	}
+	return char + strings.Repeat(char, maxInt(1, width-1))
 }
 
 type AttachmentList struct {

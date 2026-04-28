@@ -2,8 +2,6 @@ package ui
 
 import (
 	"strings"
-
-	"github.com/charmbracelet/lipgloss"
 )
 
 type Border struct {
@@ -12,15 +10,15 @@ type Border struct {
 	Width         int
 	Height        int
 	Padding       Insets
-	Background    lipgloss.Color
-	Foreground    lipgloss.Color
-	BorderColor   lipgloss.Color
+	Background    CellColor
+	Foreground    CellColor
+	BorderColor   CellColor
 	TopLabel      string
 	EndLabel      string
 	EndControlID  string
 	TopLabelStyle CellStyle
 	EndLabelStyle CellStyle
-	Style         lipgloss.Border
+	Style         BorderGlyphs
 	BorderLeft    bool
 	BorderRight   bool
 	BorderTop     bool
@@ -111,7 +109,7 @@ func (p borderPainter) Paint(_ *Context, canvas Canvas) {
 	}
 }
 
-func (p borderPainter) paintTopBorder(canvas Canvas, width int, border lipgloss.Border, borderStyle CellStyle) {
+func (p borderPainter) paintTopBorder(canvas Canvas, width int, border BorderGlyphs, borderStyle CellStyle) {
 	top, endStart, endWidth := p.border.renderTopBorder(width, border, borderStyle)
 	canvas.BlitSurface(0, 0, top)
 	if p.ctx != nil && p.ctx.Runtime != nil && endWidth > 0 && p.border.EndControlID != "" {
@@ -123,7 +121,7 @@ func (p borderPainter) paintTopBorder(canvas Canvas, width int, border lipgloss.
 	}
 }
 
-func (p borderPainter) paintBottomBorder(canvas Canvas, width, height int, border lipgloss.Border, borderStyle CellStyle) {
+func (p borderPainter) paintBottomBorder(canvas Canvas, width, height int, border BorderGlyphs, borderStyle CellStyle) {
 	canvas.BlitSurface(0, height-1, p.border.renderBottomBorder(width, border, borderStyle))
 }
 
@@ -144,15 +142,15 @@ func (b Border) insets() Insets {
 	return inset
 }
 
-func (b Border) borderStyle() lipgloss.Border {
+func (b Border) borderStyle() BorderGlyphs {
 	if b.Style.Top == "" && b.Style.Bottom == "" && b.Style.Left == "" && b.Style.Right == "" &&
 		b.Style.TopLeft == "" && b.Style.TopRight == "" && b.Style.BottomLeft == "" && b.Style.BottomRight == "" {
-		return lipgloss.NormalBorder()
+		return NormalBorder()
 	}
 	return b.Style
 }
 
-func (b Border) renderTopBorder(width int, border lipgloss.Border, borderStyle CellStyle) (Surface, int, int) {
+func (b Border) renderTopBorder(width int, border BorderGlyphs, borderStyle CellStyle) (Surface, int, int) {
 	s := BlankSurface(width, 1)
 	for x := 0; x < width; x++ {
 		s.setCell(x, 0, blankCell(borderStyle))
@@ -204,7 +202,7 @@ func (b Border) renderTopBorder(width int, border lipgloss.Border, borderStyle C
 	return s, endStart, endWidth
 }
 
-func (b Border) renderBottomBorder(width int, border lipgloss.Border, borderStyle CellStyle) Surface {
+func (b Border) renderBottomBorder(width int, border BorderGlyphs, borderStyle CellStyle) Surface {
 	s := BlankSurface(width, 1)
 	for x := 0; x < width; x++ {
 		s.setCell(x, 0, blankCell(borderStyle))

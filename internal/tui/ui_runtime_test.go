@@ -77,7 +77,7 @@ func TestHelpModalContentUsesWindowBackground(t *testing.T) {
 	if !ok {
 		t.Fatal("expected help modal text to inherit a background")
 	}
-	want := ui.ParseCellColor(string(m.palette.SidebarBackground))
+	want := m.palette.SidebarBackground
 	if !want.Valid() || r != want.R() || g != want.G() || b != want.B() {
 		t.Fatalf("expected inherited help background %v, got %d %d %d", want, r, g, b)
 	}

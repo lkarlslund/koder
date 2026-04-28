@@ -2,8 +2,6 @@ package ui
 
 import (
 	"strings"
-
-	"github.com/charmbracelet/lipgloss"
 )
 
 type InputField struct {
@@ -14,10 +12,10 @@ type InputField struct {
 	ContentCursor string
 	ContentAfter  string
 	CursorVisible bool
-	Foreground    lipgloss.Color
-	Background    lipgloss.Color
-	PlaceholderFG lipgloss.Color
-	BorderColor   lipgloss.Color
+	Foreground    CellColor
+	Background    CellColor
+	PlaceholderFG CellColor
+	BorderColor   CellColor
 }
 
 func (i InputField) Measure(_ *Context, constraints Constraints) Size {
@@ -43,7 +41,7 @@ func (i InputField) render(width int) Surface {
 	placeholderStyle := CellStyle{FG: cellColor(i.PlaceholderFG), BG: bg}.WithItalic(true)
 	cursorStyle := CellStyle{FG: bg, BG: fg}
 
-	border := lipgloss.NormalBorder()
+	border := NormalBorder()
 	s.WriteText(0, 0, border.TopLeft, borderStyle)
 	s.WriteText(width-1, 0, border.TopRight, borderStyle)
 	s.WriteText(0, 2, border.BottomLeft, borderStyle)

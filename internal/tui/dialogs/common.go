@@ -3,8 +3,6 @@ package dialogs
 import (
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
-
 	"github.com/lkarlslund/koder/internal/ui"
 )
 
@@ -75,13 +73,13 @@ func compactInlineText(input string) string {
 	return strings.Join(fields, " ")
 }
 
-func firstNonEmptyColor(values ...lipgloss.Color) lipgloss.Color {
+func firstNonEmptyColor(values ...ui.CellColor) ui.CellColor {
 	for _, value := range values {
-		if strings.TrimSpace(string(value)) != "" {
+		if value.Valid() {
 			return value
 		}
 	}
-	return ""
+	return ui.CellColor{}
 }
 
 func wrapPlain(input string, width int) string {

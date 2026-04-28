@@ -30,7 +30,7 @@ func (r *Renderer) Render(input string) string {
 	spans := r.RenderStyled(input)
 	base := ui.CellStyle{}
 	if r != nil {
-		base.FG = ui.CellColorFromLipgloss(r.palette.MarkdownText)
+		base.FG = r.palette.MarkdownText
 	}
 	merged := make([]ui.StyledSpan, 0, len(spans))
 	for _, span := range spans {
@@ -92,19 +92,19 @@ func (r *Renderer) renderStyledBlock(node ast.Node, source []byte, width int) []
 		style := ui.CellStyle{}.WithBold(true)
 		switch typed.Level {
 		case 1:
-			style.FG = ui.CellColorFromLipgloss(r.palette.MarkdownHeadingPrimary)
+			style.FG = r.palette.MarkdownHeadingPrimary
 		case 2:
-			style.FG = ui.CellColorFromLipgloss(r.palette.MarkdownHeadingSecondary)
+			style.FG = r.palette.MarkdownHeadingSecondary
 		default:
-			style.FG = ui.CellColorFromLipgloss(r.palette.MarkdownHeadingTertiary)
+			style.FG = r.palette.MarkdownHeadingTertiary
 		}
 		return r.renderStyledInlineChildren(node, source, style)
 	case *ast.Blockquote:
 		inner := ui.SplitStyledLines(r.renderStyledBlockChildren(node, source, width))
 		return prefixStyledLines(
 			inner,
-			[]ui.StyledSpan{{Text: "│ ", Style: ui.CellStyle{FG: ui.CellColorFromLipgloss(r.palette.MarkdownQuoteBorder)}}},
-			[]ui.StyledSpan{{Text: "│ ", Style: ui.CellStyle{FG: ui.CellColorFromLipgloss(r.palette.MarkdownQuoteBorder)}}},
+			[]ui.StyledSpan{{Text: "│ ", Style: ui.CellStyle{FG: r.palette.MarkdownQuoteBorder}}},
+			[]ui.StyledSpan{{Text: "│ ", Style: ui.CellStyle{FG: r.palette.MarkdownQuoteBorder}}},
 		)
 	case *ast.FencedCodeBlock:
 		return r.renderStyledCodeBlock(string(typed.Language(source)), typed.Lines(), source)
@@ -115,7 +115,7 @@ func (r *Renderer) renderStyledBlock(node ast.Node, source []byte, width int) []
 	case *ast.ThematicBreak:
 		return []ui.StyledSpan{{
 			Text:  strings.Repeat("─", 32),
-			Style: ui.CellStyle{FG: ui.CellColorFromLipgloss(r.palette.MarkdownRule)},
+			Style: ui.CellStyle{FG: r.palette.MarkdownRule},
 		}}
 	case *extensionast.Table:
 		return r.renderStyledTable(typed, source, width)
@@ -151,19 +151,19 @@ func (r *Renderer) renderStyledInline(node ast.Node, source []byte, style ui.Cel
 		return []ui.StyledSpan{{Text: string(typed.Value), Style: style}}
 	case *ast.CodeSpan:
 		codeStyle := style.Merge(ui.CellStyle{
-			FG: ui.CellColorFromLipgloss(r.palette.MarkdownInlineCodeText),
-			BG: ui.CellColorFromLipgloss(r.palette.MarkdownInlineCodeBackground),
+			FG: r.palette.MarkdownInlineCodeText,
+			BG: r.palette.MarkdownInlineCodeBackground,
 		})
 		return r.renderStyledInlineChildren(node, source, codeStyle)
 	case *ast.Emphasis:
 		emphasisStyle := style
 		if typed.Level >= 2 {
 			emphasisStyle = emphasisStyle.Merge(ui.CellStyle{
-				FG: ui.CellColorFromLipgloss(r.palette.MarkdownStrongText),
+				FG: r.palette.MarkdownStrongText,
 			}.WithBold(true))
 		} else {
 			emphasisStyle = emphasisStyle.Merge(ui.CellStyle{
-				FG: ui.CellColorFromLipgloss(r.palette.MarkdownEmphasisText),
+				FG: r.palette.MarkdownEmphasisText,
 			}.WithItalic(true))
 		}
 		return r.renderStyledInlineChildren(node, source, emphasisStyle)
@@ -171,9 +171,9 @@ func (r *Renderer) renderStyledInline(node ast.Node, source []byte, style ui.Cel
 		return r.renderStyledInlineChildren(node, source, style.Merge(ui.CellStyle{}.WithStrikethrough(true)))
 	case *ast.Link:
 		labelStyle := style.Merge(ui.CellStyle{
-			FG: ui.CellColorFromLipgloss(r.palette.MarkdownLinkText),
+			FG: r.palette.MarkdownLinkText,
 		}.WithUnderline(true))
-		targetStyle := style.Merge(ui.CellStyle{FG: ui.CellColorFromLipgloss(r.palette.MarkdownLinkTargetText)})
+		targetStyle := style.Merge(ui.CellStyle{FG: r.palette.MarkdownLinkTargetText})
 		out := r.renderStyledInlineChildren(node, source, labelStyle)
 		target := strings.TrimSpace(string(typed.Destination))
 		if target != "" {
@@ -183,7 +183,7 @@ func (r *Renderer) renderStyledInline(node ast.Node, source []byte, style ui.Cel
 	case *ast.AutoLink:
 		return []ui.StyledSpan{{
 			Text:  string(typed.URL(source)),
-			Style: style.Merge(ui.CellStyle{FG: ui.CellColorFromLipgloss(r.palette.MarkdownLinkTargetText)}.WithUnderline(true)),
+			Style: style.Merge(ui.CellStyle{FG: r.palette.MarkdownLinkTargetText}.WithUnderline(true)),
 		}}
 	case *ast.RawHTML:
 		return nil
@@ -206,8 +206,8 @@ func (r *Renderer) renderStyledCodeBlock(lang string, lines *text.Segments, sour
 	if label == "" {
 		label = "code"
 	}
-	borderStyle := ui.CellStyle{FG: ui.CellColorFromLipgloss(r.palette.MarkdownCodeBlockBorder)}
-	bodyStyle := ui.CellStyle{FG: ui.CellColorFromLipgloss(r.palette.MarkdownCodeBlockText)}
+	borderStyle := ui.CellStyle{FG: r.palette.MarkdownCodeBlockBorder}
+	bodyStyle := ui.CellStyle{FG: r.palette.MarkdownCodeBlockText}
 	out := []ui.StyledSpan{{Text: "┌─ " + label, Style: borderStyle}}
 	for i := 0; i < lines.Len(); i++ {
 		segment := lines.At(i)
@@ -230,10 +230,10 @@ func (r *Renderer) renderStyledList(node *ast.List, source []byte, width int) []
 			continue
 		}
 		marker := "•"
-		markerStyle := ui.CellStyle{FG: ui.CellColorFromLipgloss(r.palette.MarkdownListMarker)}
+		markerStyle := ui.CellStyle{FG: r.palette.MarkdownListMarker}
 		if node.IsOrdered() {
 			marker = strconv.Itoa(itemNumber) + "."
-			markerStyle = ui.CellStyle{FG: ui.CellColorFromLipgloss(r.palette.MarkdownListEnumeration)}
+			markerStyle = ui.CellStyle{FG: r.palette.MarkdownListEnumeration}
 			itemNumber++
 		}
 		lines := ui.SplitStyledLines(r.renderStyledListItem(listItem, source, width))
@@ -292,7 +292,7 @@ func (r *Renderer) renderStyledTable(node *extensionast.Table, source []byte, wi
 	}
 	widths = fitTableWidths(widths, widthHint)
 	var out []ui.StyledSpan
-	borderStyle := ui.CellStyle{FG: ui.CellColorFromLipgloss(r.palette.MarkdownTableBorder)}
+	borderStyle := ui.CellStyle{FG: r.palette.MarkdownTableBorder}
 	for rowIndex, row := range rows {
 		if rowIndex > 0 {
 			out = ui.AppendStyledSpan(out, "\n", ui.CellStyle{})

@@ -10,45 +10,45 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/charmbracelet/lipgloss"
+	"github.com/lkarlslund/koder/internal/colorx"
 )
 
 type Palette struct {
-	ActivityText                 lipgloss.Color
-	AssistantTimestampText       lipgloss.Color
-	ComposerMutedText            lipgloss.Color
-	DiffAddedText                lipgloss.Color
-	DiffDeletedText              lipgloss.Color
-	MarkdownCodeBlockBorder      lipgloss.Color
-	MarkdownCodeBlockText        lipgloss.Color
-	MarkdownEmphasisText         lipgloss.Color
-	MarkdownHeadingPrimary       lipgloss.Color
-	MarkdownHeadingSecondary     lipgloss.Color
-	MarkdownHeadingTertiary      lipgloss.Color
-	MarkdownInlineCodeBackground lipgloss.Color
-	MarkdownInlineCodeText       lipgloss.Color
-	MarkdownLinkTargetText       lipgloss.Color
-	MarkdownLinkText             lipgloss.Color
-	MarkdownListEnumeration      lipgloss.Color
-	MarkdownListMarker           lipgloss.Color
-	MarkdownQuoteBorder          lipgloss.Color
-	MarkdownQuoteText            lipgloss.Color
-	MarkdownRule                 lipgloss.Color
-	MarkdownStrongText           lipgloss.Color
-	MarkdownTableBorder          lipgloss.Color
-	MarkdownText                 lipgloss.Color
-	ReasoningBackground          lipgloss.Color
-	ReasoningText                lipgloss.Color
-	ScreenBackground             lipgloss.Color
-	SelectionBackground          lipgloss.Color
-	SelectionForeground          lipgloss.Color
-	SidebarBackground            lipgloss.Color
-	SidebarBorder                lipgloss.Color
-	SidebarForeground            lipgloss.Color
-	UserAccentBar                lipgloss.Color
-	UserTextBackground           lipgloss.Color
-	UserTextForeground           lipgloss.Color
-	UserTimestampForeground      lipgloss.Color
+	ActivityText                 colorx.Color
+	AssistantTimestampText       colorx.Color
+	ComposerMutedText            colorx.Color
+	DiffAddedText                colorx.Color
+	DiffDeletedText              colorx.Color
+	MarkdownCodeBlockBorder      colorx.Color
+	MarkdownCodeBlockText        colorx.Color
+	MarkdownEmphasisText         colorx.Color
+	MarkdownHeadingPrimary       colorx.Color
+	MarkdownHeadingSecondary     colorx.Color
+	MarkdownHeadingTertiary      colorx.Color
+	MarkdownInlineCodeBackground colorx.Color
+	MarkdownInlineCodeText       colorx.Color
+	MarkdownLinkTargetText       colorx.Color
+	MarkdownLinkText             colorx.Color
+	MarkdownListEnumeration      colorx.Color
+	MarkdownListMarker           colorx.Color
+	MarkdownQuoteBorder          colorx.Color
+	MarkdownQuoteText            colorx.Color
+	MarkdownRule                 colorx.Color
+	MarkdownStrongText           colorx.Color
+	MarkdownTableBorder          colorx.Color
+	MarkdownText                 colorx.Color
+	ReasoningBackground          colorx.Color
+	ReasoningText                colorx.Color
+	ScreenBackground             colorx.Color
+	SelectionBackground          colorx.Color
+	SelectionForeground          colorx.Color
+	SidebarBackground            colorx.Color
+	SidebarBorder                colorx.Color
+	SidebarForeground            colorx.Color
+	UserAccentBar                colorx.Color
+	UserTextBackground           colorx.Color
+	UserTextForeground           colorx.Color
+	UserTimestampForeground      colorx.Color
 }
 
 type Theme struct {
@@ -167,7 +167,7 @@ func loadOpenCodeThemes() map[string]Theme {
 }
 
 func buildOpenCodePalette(src opencodeThemeFile) Palette {
-	resolve := func(key string) lipgloss.Color {
+	resolve := func(key string) colorx.Color {
 		return color(resolveOpenCodeValue(src, key))
 	}
 
@@ -408,15 +408,15 @@ func claudeThemes() map[string]Theme {
 	}
 }
 
-func firstNonEmpty(values ...lipgloss.Color) lipgloss.Color {
+func firstNonEmpty(values ...colorx.Color) colorx.Color {
 	for _, value := range values {
-		if strings.TrimSpace(string(value)) != "" {
+		if value.Valid() {
 			return value
 		}
 	}
-	return lipgloss.Color("")
+	return colorx.Invalid()
 }
 
-func color(value string) lipgloss.Color {
-	return lipgloss.Color(value)
+func color(value string) colorx.Color {
+	return colorx.ParseCSSColor(value)
 }

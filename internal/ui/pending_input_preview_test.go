@@ -9,8 +9,8 @@ import (
 
 func TestPendingInputPreviewShowsQueueRowsInMutedStyle(t *testing.T) {
 	palette := theme.Palette{
-		ComposerMutedText:  "#112233",
-		UserTextBackground: "#445566",
+		ComposerMutedText:  ParseCellColor("#112233"),
+		UserTextBackground: ParseCellColor("#445566"),
 	}
 
 	got := PendingInputPreview{

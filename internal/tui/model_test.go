@@ -12,7 +12,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/lkarlslund/koder/internal/agent"
@@ -4287,7 +4286,7 @@ func TestRenderBodyClipsSidebarToViewportHeight(t *testing.T) {
 
 	got := m.renderBody()
 	want := m.viewport.Height + (mainScreenVerticalInset * 2)
-	if h := lipgloss.Height(got); h != want {
+	if h := ui.TextHeight(got); h != want {
 		t.Fatalf("expected body height %d, got %d from %q", want, h, got)
 	}
 }
@@ -4399,7 +4398,7 @@ func TestViewUsesFullTerminalWidthWithSidebar(t *testing.T) {
 		t.Fatalf("expected rendered view, got empty output")
 	}
 	for _, line := range lines {
-		if w := lipgloss.Width(line); w != m.width {
+		if w := ui.TextWidth(line); w != m.width {
 			t.Fatalf("expected rendered line width %d, got %d from %q", m.width, w, got)
 		}
 	}
@@ -4477,7 +4476,7 @@ func TestRenderFooterOnlyUsesComposerHeightWhenNoAuxiliaryContent(t *testing.T) 
 	}
 
 	got := ansi.Strip(m.renderFooter())
-	if height := lipgloss.Height(got); height != composerHeight {
+	if height := ui.TextHeight(got); height != composerHeight {
 		t.Fatalf("expected footer height %d with only composer visible, got %d in %q", composerHeight, height, got)
 	}
 }
@@ -4708,8 +4707,8 @@ func TestRenderComposerUsesThreeLineBoxAndFullWidth(t *testing.T) {
 	applyComposerTheme(&m.composer, palette)
 
 	got := m.renderComposer()
-	if lipgloss.Height(got) != 3 {
-		t.Fatalf("expected 3-line composer box, got %d lines in %q", lipgloss.Height(got), got)
+	if ui.TextHeight(got) != 3 {
+		t.Fatalf("expected 3-line composer box, got %d lines in %q", ui.TextHeight(got), got)
 	}
 	lines := strings.Split(got, "\n")
 	if !strings.Contains(lines[0], "▄") || !strings.Contains(lines[len(lines)-1], "▀") {
@@ -4722,8 +4721,8 @@ func TestRenderComposerUsesThreeLineBoxAndFullWidth(t *testing.T) {
 		t.Fatalf("expected block accent glyph on content line, got %q", lines[1])
 	}
 	for _, line := range lines {
-		if lipgloss.Width(line) != m.composerWidth() {
-			t.Fatalf("expected composer line width %d, got %d in %q", m.composerWidth(), lipgloss.Width(line), line)
+		if ui.TextWidth(line) != m.composerWidth() {
+			t.Fatalf("expected composer line width %d, got %d in %q", m.composerWidth(), ui.TextWidth(line), line)
 		}
 	}
 }
@@ -6025,14 +6024,14 @@ func TestRenderTranscriptMessageUserBubbleHasBlankPaddingLines(t *testing.T) {
 	if !strings.Contains(lines[len(lines)-1], "▀") {
 		t.Fatalf("expected half-block bottom line, got %q", lines[len(lines)-1])
 	}
-	wantWidth := lipgloss.Width(lines[1])
+	wantWidth := ui.TextWidth(lines[1])
 	if wantWidth <= 2 {
 		t.Fatalf("expected padded width, got %d from %q", wantWidth, lines[1])
 	}
-	if got := lipgloss.Width(lines[0]); got != wantWidth {
+	if got := ui.TextWidth(lines[0]); got != wantWidth {
 		t.Fatalf("expected blank top line width %d, got %d", wantWidth, got)
 	}
-	if got := lipgloss.Width(lines[len(lines)-1]); got != wantWidth {
+	if got := ui.TextWidth(lines[len(lines)-1]); got != wantWidth {
 		t.Fatalf("expected blank bottom line width %d, got %d", wantWidth, got)
 	}
 }
@@ -6056,9 +6055,9 @@ func TestRenderTranscriptMessageUserBubbleUsesConsistentWidthForMultilineInput(t
 	if len(lines) < 4 {
 		t.Fatalf("expected multiline bubble, got %q", got)
 	}
-	wantWidth := lipgloss.Width(lines[1])
+	wantWidth := ui.TextWidth(lines[1])
 	for idx, line := range lines {
-		if gotWidth := lipgloss.Width(line); gotWidth != wantWidth {
+		if gotWidth := ui.TextWidth(line); gotWidth != wantWidth {
 			t.Fatalf("expected consistent line width %d at line %d, got %d from %q", wantWidth, idx, gotWidth, line)
 		}
 	}
@@ -6083,9 +6082,9 @@ func TestRenderTranscriptMessageUserBubbleWrapsToViewportWidth(t *testing.T) {
 	if len(lines) < 4 {
 		t.Fatalf("expected wrapped bubble lines, got %q", got)
 	}
-	wantWidth := lipgloss.Width(lines[0])
+	wantWidth := ui.TextWidth(lines[0])
 	for idx, line := range lines {
-		if gotWidth := lipgloss.Width(line); gotWidth != wantWidth {
+		if gotWidth := ui.TextWidth(line); gotWidth != wantWidth {
 			t.Fatalf("expected wrapped line width %d at line %d, got %d from %q", wantWidth, idx, gotWidth, line)
 		}
 	}
@@ -6129,7 +6128,7 @@ func TestRenderTranscriptMessageAssistantWrapsToViewportWidth(t *testing.T) {
 		t.Fatalf("expected wrapped assistant lines, got %q", got)
 	}
 	for idx, line := range lines {
-		if gotWidth := lipgloss.Width(line); gotWidth > m.viewport.Width {
+		if gotWidth := ui.TextWidth(line); gotWidth > m.viewport.Width {
 			t.Fatalf("expected line width <= %d at line %d, got %d from %q", m.viewport.Width, idx, gotWidth, line)
 		}
 	}

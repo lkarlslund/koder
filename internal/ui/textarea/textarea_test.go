@@ -4,7 +4,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/lkarlslund/koder/internal/ui"
 )
 
@@ -243,7 +242,7 @@ func newTestModel() Model {
 	m := New()
 	m.Prompt = "> "
 	m.SetWidth(20)
-	m.Cursor.TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("0")).Background(lipgloss.Color("15"))
+	m.Cursor.TextStyle = ui.NewStyle().Foreground(ui.ParseCellColor("black")).Background(ui.ParseCellColor("white"))
 	return m
 }
 

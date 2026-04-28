@@ -3,8 +3,6 @@ package ui
 import (
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
-
 	"github.com/lkarlslund/koder/internal/theme"
 )
 
@@ -15,9 +13,9 @@ type WindowFrame struct {
 	Width       int
 	Height      int
 	Padding     Insets
-	Background  lipgloss.Color
-	Foreground  lipgloss.Color
-	BorderColor lipgloss.Color
+	Background  CellColor
+	Foreground  CellColor
+	BorderColor CellColor
 	TitleStyle  CellStyle
 	CloseStyle  CellStyle
 	ShowClose   bool
@@ -62,7 +60,7 @@ func (w WindowFrame) border(ctx *Context) Border {
 			FG: cellColor(palette.AssistantTimestampText),
 			BG: cellColor(background),
 		}.WithBold(true).Merge(w.CloseStyle),
-		Style:        lipgloss.RoundedBorder(),
+		Style:        RoundedBorder(),
 		BorderLeft:   true,
 		BorderRight:  true,
 		BorderTop:    true,

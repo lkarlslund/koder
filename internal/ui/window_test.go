@@ -65,7 +65,7 @@ func TestWindowFrameContentInheritsFrameBackground(t *testing.T) {
 	if !ok {
 		t.Fatal("expected text cell to inherit window background")
 	}
-	want := ParseCellColor(string(palette.SidebarBackground))
+	want := palette.SidebarBackground
 	if !want.Valid() || r != want.R() || g != want.G() || b != want.B() {
 		t.Fatalf("expected inherited background %v, got %d %d %d", want, r, g, b)
 	}

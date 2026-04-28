@@ -10,6 +10,17 @@ func PlainWidth(input string) int {
 	return runewidth.StringWidth(input)
 }
 
+func TextWidth(input string) int {
+	return PlainWidth(input)
+}
+
+func TextHeight(input string) int {
+	if input == "" {
+		return 0
+	}
+	return strings.Count(input, "\n") + 1
+}
+
 func PlainTruncate(input string, width int, tail string) string {
 	if width <= 0 {
 		return ""

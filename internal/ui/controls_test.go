@@ -7,15 +7,19 @@ import (
 	"github.com/lkarlslund/koder/internal/theme"
 )
 
+func testColor(value string) CellColor {
+	return ParseCellColor(value)
+}
+
 func TestRenderSelectableRowSelectedUsesDistinctHighlightColors(t *testing.T) {
 	palette := theme.Palette{
-		ActivityText:           "#0a0b0c",
-		AssistantTimestampText: "#010203",
-		SelectionBackground:    "#040506",
-		SelectionForeground:    "#070809",
-		UserAccentBar:          "#0d0e0f",
-		UserTextBackground:     "#040506",
-		UserTextForeground:     "#070809",
+		ActivityText:           testColor("#0a0b0c"),
+		AssistantTimestampText: testColor("#010203"),
+		SelectionBackground:    testColor("#040506"),
+		SelectionForeground:    testColor("#070809"),
+		UserAccentBar:          testColor("#0d0e0f"),
+		UserTextBackground:     testColor("#040506"),
+		UserTextForeground:     testColor("#070809"),
 	}
 
 	base := SelectableRow{Primary: "write", Secondary: "Allow writes after approval", Tertiary: "active", Width: 48}
@@ -52,11 +56,11 @@ func TestRenderSelectableRowSelectedUsesDistinctHighlightColors(t *testing.T) {
 
 func TestFocusedButtonUsesFocusColors(t *testing.T) {
 	palette := theme.Palette{
-		SelectionBackground: "#101112",
-		SelectionForeground: "#f1f2f3",
-		UserTextBackground:  "#040506",
-		UserTextForeground:  "#070809",
-		UserAccentBar:       "#0d0e0f",
+		SelectionBackground: testColor("#101112"),
+		SelectionForeground: testColor("#f1f2f3"),
+		UserTextBackground:  testColor("#040506"),
+		UserTextForeground:  testColor("#070809"),
+		UserAccentBar:       testColor("#0d0e0f"),
 	}
 
 	view := Button{Label: "Approve", Focused: true}.renderSurface(palette)

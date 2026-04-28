@@ -4,8 +4,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
-
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/theme"
 )
@@ -134,7 +132,7 @@ func (r ToolRun) renderCard(palette theme.Palette, width int, expandedOutput, ex
 		lines = append(lines, LayoutStyledText([]StyledSpan{{Text: subtitle, Style: subtitleStyle}}, headerWidth, CellStyle{}))
 	}
 	if preview := r.visiblePreview(expandedOutput); preview != "" {
-		rendered := renderToolRunPreview(preview, r, lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle(), headerWidth, expandedOutput)
+		rendered := renderToolRunPreview(preview, r, headerWidth, expandedOutput)
 		previewLines := strings.Split(rendered, "\n")
 		surface := BlankSurface(maxLineWidth(previewLines), len(previewLines))
 		for y, line := range previewLines {
@@ -194,7 +192,7 @@ func (r ToolRun) renderBashCard(palette theme.Palette, width int, expandedOutput
 		if expandedOutput {
 			rest := remainingPreviewLines(output)
 			if rest != "" {
-				rendered := renderToolRunPreview(rest, r, lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle(), headerWidth, true)
+				rendered := renderToolRunPreview(rest, r, headerWidth, true)
 				restLines := strings.Split(rendered, "\n")
 				s := BlankSurface(maxLineWidth(restLines), len(restLines))
 				for y, line := range restLines {
@@ -227,7 +225,7 @@ func (r ToolRun) visibleCommand(width int, expanded bool) string {
 		return ""
 	}
 	if expanded {
-		return renderToolRunPreview(command, r, lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle(), width, true)
+		return renderToolRunPreview(command, r, width, true)
 	}
 	return ""
 }
@@ -308,9 +306,8 @@ func (d ToolRunDock) node() Node {
 	}
 	if subtitle := strings.TrimSpace(d.Run.Subtitle); subtitle != "" {
 		children = append(children, Fixed(Label{
-			Text: subtitle,
-			Style: lipgloss.NewStyle().
-				Foreground(d.Palette.ComposerMutedText),
+			Text:  subtitle,
+			Style: NewStyle().Foreground(d.Palette.ComposerMutedText),
 		}))
 	}
 	if preview := firstNonEmpty(strings.TrimSpace(d.Run.Preview), strings.TrimSpace(d.Run.Output), strings.TrimSpace(d.Run.ErrorText)); preview != "" {
@@ -327,7 +324,7 @@ func (d ToolRunDock) node() Node {
 		Fixed(buttons),
 		Fixed(Label{
 			Text:  d.Hints,
-			Style: lipgloss.NewStyle().Foreground(d.Palette.AssistantTimestampText),
+			Style: NewStyle().Foreground(d.Palette.AssistantTimestampText),
 		}),
 	)
 	return AsNode(Border{
@@ -406,7 +403,7 @@ func (r ToolRun) CommandHiddenLineCount(width int) int {
 	return expandedLines - collapsedLines
 }
 
-func renderToolRunPreview(preview string, run ToolRun, _ lipgloss.Style, _ lipgloss.Style, _ lipgloss.Style, _ lipgloss.Style, width int, expanded bool) string {
+func renderToolRunPreview(preview string, run ToolRun, width int, expanded bool) string {
 	preview = strings.TrimSpace(preview)
 	if preview == "" {
 		return ""
@@ -456,7 +453,7 @@ func renderToolRunPreview(preview string, run ToolRun, _ lipgloss.Style, _ lipgl
 	return renderIndented(firstPreviewLine(preview))
 }
 
-func toolRunStatusColor(status ToolRunStatus, palette theme.Palette) lipgloss.Color {
+func toolRunStatusColor(status ToolRunStatus, palette theme.Palette) CellColor {
 	switch status {
 	case ToolRunStatusPendingApproval, ToolRunStatusApproved, ToolRunStatusPaused:
 		return palette.ActivityText
@@ -471,7 +468,7 @@ type toolRunDockTitle struct {
 	Palette theme.Palette
 	Title   string
 	Status  string
-	Color   lipgloss.Color
+	Color   CellColor
 	Width   int
 }
 
@@ -546,7 +543,7 @@ func singleLineSummary(input string) string {
 		return ""
 	}
 	summary := strings.Join(lines, " ")
-	if lipgloss.Width(summary) <= 90 {
+	if TextWidth(summary) <= 90 {
 		return summary
 	}
 	return PlainTruncate(summary, 90, "…")

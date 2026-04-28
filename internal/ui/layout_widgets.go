@@ -3,8 +3,6 @@ package ui
 import (
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
-
 	"github.com/lkarlslund/koder/internal/theme"
 )
 
@@ -14,9 +12,9 @@ type Section struct {
 	Child       Node
 	Width       int
 	Padding     Insets
-	Background  lipgloss.Color
-	Foreground  lipgloss.Color
-	BorderColor lipgloss.Color
+	Background  CellColor
+	Foreground  CellColor
+	BorderColor CellColor
 }
 
 func (s Section) Measure(ctx *Context, constraints Constraints) Size {
@@ -62,7 +60,7 @@ func (s Section) children(ctx *Context) Node {
 		Children: []Child{
 			Fixed(Label{
 				Text: s.Title,
-				Style: lipgloss.NewStyle().
+				Style: NewStyle().
 					Bold(true).
 					Foreground(ctx.Palette.AssistantTimestampText),
 			}),
@@ -286,10 +284,10 @@ func (r tableRow) Paint(_ *Context, canvas Canvas) {
 	}
 	selectionBackground := r.Palette.SelectionBackground
 	selectionForeground := r.Palette.SelectionForeground
-	if strings.TrimSpace(string(selectionBackground)) == "" {
+	if !selectionBackground.Valid() {
 		selectionBackground = r.Palette.UserTextBackground
 	}
-	if strings.TrimSpace(string(selectionForeground)) == "" {
+	if !selectionForeground.Valid() {
 		selectionForeground = r.Palette.UserTextForeground
 	}
 	rowStyle := CellStyle{}
@@ -330,13 +328,13 @@ func (r tableRow) Paint(_ *Context, canvas Canvas) {
 	}
 }
 
-func firstColor(values ...lipgloss.Color) lipgloss.Color {
+func firstColor(values ...CellColor) CellColor {
 	for _, value := range values {
-		if strings.TrimSpace(string(value)) != "" {
+		if value.Valid() {
 			return value
 		}
 	}
-	return ""
+	return CellColor{}
 }
 
 type scrollWindowRenderer interface {

@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
-
 	"github.com/lkarlslund/koder/internal/theme"
 )
 
@@ -558,7 +556,7 @@ func (m UserMessage) Paint(_ *Context, canvas Canvas) {
 	textStyle := CellStyle{BG: bg, FG: cellColor(m.Palette.UserTextForeground)}
 	timestampStyle := CellStyle{BG: bg, FG: cellColor(m.Palette.UserTimestampForeground)}
 	content := strings.TrimSpace(m.Body)
-	contentWidth := maxInt(1, canvas.Width()-lipgloss.Width(bar))
+	contentWidth := maxInt(1, canvas.Width()-TextWidth(bar))
 	lines := []string{}
 	if content != "" {
 		for _, line := range strings.Split(content, "\n") {
@@ -608,8 +606,8 @@ func (m UserMessage) Paint(_ *Context, canvas Canvas) {
 		if stampStart >= 0 && idx >= stampStart {
 			style = timestampStyle
 		}
-		if lipgloss.Width(bar) < canvas.Width() {
-			canvas.WriteText(lipgloss.Width(bar), row, PlainTruncate(line, canvas.Width()-lipgloss.Width(bar), ""), style)
+		if TextWidth(bar) < canvas.Width() {
+			canvas.WriteText(TextWidth(bar), row, PlainTruncate(line, canvas.Width()-TextWidth(bar), ""), style)
 		}
 	}
 	paintBarLine(canvas.Height()-1, "▀")
@@ -631,16 +629,8 @@ func (m UserMessage) render() Surface {
 		width = UserMessageWidth(baseLines)
 	}
 	bar := m.PromptGlyph + " "
-	contentWidth := maxInt(1, width-lipgloss.Width(bar))
+	contentWidth := maxInt(1, width-TextWidth(bar))
 	innerWidth := contentWidth
-	barStyle := lipgloss.NewStyle().
-		Background(m.Palette.UserTextBackground).
-		Foreground(m.Palette.UserAccentBar)
-	contentStyle := lipgloss.NewStyle().
-		Background(m.Palette.UserTextBackground).
-		Foreground(m.Palette.UserTextForeground).
-		Width(contentWidth)
-	timestampStyle := contentStyle.Foreground(m.Palette.UserTimestampForeground)
 
 	lines := []string{}
 	if content != "" {
@@ -679,19 +669,16 @@ func (m UserMessage) render() Surface {
 		row := idx + 1
 		rendered.WriteText(0, row, bar, CellStyle{BG: cellColor(m.Palette.UserTextBackground), FG: cellColor(m.Palette.UserAccentBar)})
 		if stampStart >= 0 && idx >= stampStart {
-			rendered.WriteText(lipgloss.Width(bar), row, line, CellStyle{BG: cellColor(m.Palette.UserTextBackground), FG: cellColor(m.Palette.UserTimestampForeground)})
+			rendered.WriteText(TextWidth(bar), row, line, CellStyle{BG: cellColor(m.Palette.UserTextBackground), FG: cellColor(m.Palette.UserTimestampForeground)})
 			continue
 		}
-		rendered.WriteText(lipgloss.Width(bar), row, line, CellStyle{BG: cellColor(m.Palette.UserTextBackground), FG: cellColor(m.Palette.UserTextForeground)})
+		rendered.WriteText(TextWidth(bar), row, line, CellStyle{BG: cellColor(m.Palette.UserTextBackground), FG: cellColor(m.Palette.UserTextForeground)})
 	}
 	if m.HalfBlocks {
 		rendered = appendSurfaceRows(rendered, height-1, renderHalfBlockSurface(width, "▀", m.Palette))
 	} else {
 		rendered = appendSurfaceRows(rendered, height-1, FilledLineSurface(width, bar, CellStyle{BG: cellColor(m.Palette.UserTextBackground), FG: cellColor(m.Palette.UserAccentBar)}, CellStyle{BG: cellColor(m.Palette.UserTextBackground)}))
 	}
-	_ = barStyle
-	_ = contentStyle
-	_ = timestampStyle
 	return rendered
 }
 
@@ -711,9 +698,9 @@ func WrapUserMessageLine(line string, width int) []string {
 }
 
 func UserMessageWidth(lines []string) int {
-	width := lipgloss.Width("┃ ") + 2
+	width := TextWidth("┃ ") + 2
 	for _, line := range lines {
-		width = maxInt(width, lipgloss.Width(line)+lipgloss.Width("┃ ")+2)
+		width = maxInt(width, TextWidth(line)+TextWidth("┃ ")+2)
 	}
 	return width
 }

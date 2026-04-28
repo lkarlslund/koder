@@ -2,10 +2,7 @@ package ui
 
 import (
 	"fmt"
-	"strconv"
 	"strings"
-
-	"github.com/charmbracelet/lipgloss"
 
 	"github.com/lkarlslund/koder/internal/theme"
 )
@@ -79,10 +76,10 @@ func (r SelectableRow) render(palette theme.Palette) Surface {
 	gapWidth := 2
 	selectionBackground := palette.SelectionBackground
 	selectionForeground := palette.SelectionForeground
-	if strings.TrimSpace(string(selectionBackground)) == "" {
+	if !selectionBackground.Valid() {
 		selectionBackground = palette.UserTextBackground
 	}
-	if strings.TrimSpace(string(selectionForeground)) == "" {
+	if !selectionForeground.Valid() {
 		selectionForeground = palette.UserTextForeground
 	}
 	rowStyle := CellStyle{}
@@ -439,8 +436,8 @@ func (b Button) View(palette theme.Palette) string {
 }
 
 func (b Button) renderSurface(palette theme.Palette) Surface {
-	background := lipgloss.Color("")
-	foreground := lipgloss.Color("")
+	background := CellColor{}
+	foreground := CellColor{}
 	bold := false
 	if b.Primary {
 		background = firstNonEmptyColor(palette.SelectionBackground, palette.UserTextBackground)
@@ -718,57 +715,30 @@ func buttonLabelParts(label string, hotkey rune) []buttonLabelPart {
 	return parts
 }
 
-func firstNonEmptyColor(values ...lipgloss.Color) lipgloss.Color {
+func firstNonEmptyColor(values ...CellColor) CellColor {
 	for _, value := range values {
-		if strings.TrimSpace(string(value)) != "" {
+		if value.Valid() {
 			return value
 		}
 	}
-	return lipgloss.Color("")
+	return CellColor{}
 }
 
-func deriveFocusedBackground(base lipgloss.Color, screen lipgloss.Color) lipgloss.Color {
-	rawBase := strings.TrimSpace(string(base))
-	rawScreen := strings.TrimSpace(string(screen))
-	if len(rawBase) != 7 || rawBase[0] != '#' {
-		return base
-	}
-	r, errR := strconv.ParseInt(rawBase[1:3], 16, 64)
-	g, errG := strconv.ParseInt(rawBase[3:5], 16, 64)
-	b, errB := strconv.ParseInt(rawBase[5:7], 16, 64)
-	if errR != nil || errG != nil || errB != nil {
+func deriveFocusedBackground(base CellColor, screen CellColor) CellColor {
+	if !base.Valid() {
 		return base
 	}
 	screenLuminance := 255.0
-	if len(rawScreen) == 7 && rawScreen[0] == '#' {
-		sr, errSR := strconv.ParseInt(rawScreen[1:3], 16, 64)
-		sg, errSG := strconv.ParseInt(rawScreen[3:5], 16, 64)
-		sb, errSB := strconv.ParseInt(rawScreen[5:7], 16, 64)
-		if errSR == nil && errSG == nil && errSB == nil {
-			screenLuminance = 0.2126*float64(sr) + 0.7152*float64(sg) + 0.0722*float64(sb)
-		}
+	if screen.Valid() {
+		screenLuminance = 0.2126*float64(screen.R()) + 0.7152*float64(screen.G()) + 0.0722*float64(screen.B())
 	}
-	adjust := func(v int64) int64 {
+	adjust := func(v uint8) uint8 {
 		if screenLuminance < 140 {
-			return minInt64(255, v+28)
+			return uint8(minInt(255, int(v)+28))
 		}
-		return maxInt64(0, v-28)
+		return uint8(max(0, int(v)-28))
 	}
-	return lipgloss.Color(fmt.Sprintf("#%02x%02x%02x", adjust(r), adjust(g), adjust(b)))
-}
-
-func minInt64(a, b int64) int64 {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-func maxInt64(a, b int64) int64 {
-	if a > b {
-		return a
-	}
-	return b
+	return NewCellColorRGBA(adjust(base.R()), adjust(base.G()), adjust(base.B()), base.A())
 }
 
 func truncateText(input string, width int) string {

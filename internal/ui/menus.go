@@ -3,8 +3,6 @@ package ui
 import (
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
-
 	"github.com/lkarlslund/koder/internal/theme"
 )
 
@@ -58,7 +56,7 @@ func (m SlashMenu) node(contentWidth int) Node {
 	children := make([]Child, 0, len(m.Items)+1)
 	children = append(children, Fixed(Label{
 		Text: m.Title,
-		Style: lipgloss.NewStyle().
+		Style: NewStyle().
 			Bold(true),
 	}))
 	for idx, item := range m.Items {
@@ -120,9 +118,9 @@ func (m HistoryMenu) Measure(ctx *Context, constraints Constraints) Size {
 func (m HistoryMenu) node() Node {
 	width := m.width()
 	contentWidth := max(1, width-4)
-	muted := lipgloss.NewStyle().Foreground(m.Palette.AssistantTimestampText)
+	muted := NewStyle().Foreground(m.Palette.AssistantTimestampText)
 	children := []Child{
-		Fixed(Label{Text: "History", Style: lipgloss.NewStyle().Bold(true)}),
+		Fixed(Label{Text: "History", Style: NewStyle().Bold(true)}),
 		Fixed(Label{Text: "filter: " + m.Query, Style: muted}),
 	}
 	if len(m.Items) == 0 {
@@ -215,12 +213,12 @@ func (p ApprovalPrompt) node() Node {
 		Child: AsNode(FlexBox{
 			Direction: DirectionVertical,
 			Children: []Child{
-				Fixed(Label{Text: p.Title, Style: lipgloss.NewStyle().Bold(true)}),
+				Fixed(Label{Text: p.Title, Style: NewStyle().Bold(true)}),
 				Fixed(Paragraph{Text: p.Body}),
 				Fixed(buttons),
 				Fixed(Label{
 					Text:  p.Hints,
-					Style: lipgloss.NewStyle().Foreground(p.Palette.AssistantTimestampText),
+					Style: NewStyle().Foreground(p.Palette.AssistantTimestampText),
 				}),
 			},
 			Spacing: 1,
@@ -276,7 +274,7 @@ func (d MenuPickerDialog) node() Node {
 	if hint := strings.TrimSpace(d.Hint); hint != "" {
 		children = append(children, Fixed(Label{
 			Text:  hint,
-			Style: lipgloss.NewStyle().Foreground(d.Palette.AssistantTimestampText),
+			Style: NewStyle().Foreground(d.Palette.AssistantTimestampText),
 		}))
 	}
 	if len(children) > 0 {

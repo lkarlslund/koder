@@ -4,15 +4,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/lipgloss"
-
 	"github.com/lkarlslund/koder/internal/theme"
 )
 
 func TestRenderComposerPlaceholderLineShowsCursorAndFirstPlaceholderCharacter(t *testing.T) {
 	palette := theme.Default().Palette
-	promptStyle := lipgloss.NewStyle()
-	contentStyle := lipgloss.NewStyle()
+	promptStyle := NewStyle()
+	contentStyle := NewStyle()
 
 	line := Composer{Palette: palette, CursorVisible: true}.renderPlaceholderLine(promptStyle, contentStyle, "> ", 24, "Ask koder", "A")
 	if !strings.Contains(line, "Ask koder") {
@@ -22,8 +20,8 @@ func TestRenderComposerPlaceholderLineShowsCursorAndFirstPlaceholderCharacter(t 
 
 func TestRenderComposerPlaceholderLineDoesNotAddExtraCursorCell(t *testing.T) {
 	palette := theme.Default().Palette
-	promptStyle := lipgloss.NewStyle()
-	contentStyle := lipgloss.NewStyle()
+	promptStyle := NewStyle()
+	contentStyle := NewStyle()
 
 	line := Composer{Palette: palette, CursorVisible: true}.renderPlaceholderLine(promptStyle, contentStyle, "> ", 12, "Hello", "H")
 	if strings.Contains(line, "HHello") {
@@ -35,8 +33,8 @@ func TestRenderComposerPlaceholderLineDoesNotAddExtraCursorCell(t *testing.T) {
 }
 
 func TestRenderComposerLineKeepsTypedTextAfterCursorAtNormalColor(t *testing.T) {
-	promptStyle := lipgloss.NewStyle()
-	surface := Composer{}.renderLineSurface("> ", promptStyle, "ab", "c", "def", 16, true, lipgloss.Color("#112233"), lipgloss.Color("#445566"))
+	promptStyle := NewStyle()
+	surface := Composer{}.renderLineSurface("> ", promptStyle, "ab", "c", "def", 16, true, ParseCellColor("#112233"), ParseCellColor("#445566"))
 	rendered := SurfaceText(surface)
 	start := strings.Index(rendered, "def")
 	if start == -1 {
