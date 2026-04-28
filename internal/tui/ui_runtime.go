@@ -107,8 +107,24 @@ func (w *modelWindow) Render(ctx *ui.Context, bounds ui.Rect) ui.Surface {
 }
 
 func (w *modelWindow) PaintWindow(ctx *ui.Context, bounds ui.Rect, dst *ui.Surface) {
-	if w == nil || w.paint == nil || dst == nil {
+	if w == nil || dst == nil {
 		if w != nil {
+			w.frameDirty = nil
+		}
+		return
+	}
+	if w.paint == nil {
+		if w.render == nil {
+			w.frameDirty = nil
+			return
+		}
+		surface := w.render(w.model, bounds).Normalize(bounds.W, bounds.H)
+		*dst = dst.PlaceAt(bounds.X, bounds.Y, surface)
+		if rects, ok := surface.DirtyRects(); ok {
+			w.frameDirty = append(w.frameDirty[:0], rects...)
+		} else if bounds.W > 0 && bounds.H > 0 {
+			w.frameDirty = []ui.Rect{{W: bounds.W, H: bounds.H}}
+		} else {
 			w.frameDirty = nil
 		}
 		return
@@ -127,7 +143,7 @@ func (w *modelWindow) WindowDirtyRects() []ui.Rect {
 }
 
 func (w *modelWindow) CanPaintWindow() bool {
-	return w != nil && w.paint != nil
+	return w != nil && (w.paint != nil || w.render != nil)
 }
 
 func (w *modelWindow) InvalidateCaches(ctx *ui.Context) {
