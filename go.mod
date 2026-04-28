@@ -3,6 +3,9 @@ module github.com/lkarlslund/koder
 go 1.26.0
 
 require (
+	codeberg.org/tesselslate/wl v0.3.24
+	codeberg.org/tesselslate/wl-protocols v0.3.47
+	github.com/alecthomas/chroma/v2 v2.23.1
 	github.com/charmbracelet/x/input v0.3.7
 	github.com/pelletier/go-toml/v2 v2.3.0
 	github.com/sergi/go-diff v1.4.0
@@ -13,7 +16,6 @@ require (
 
 require (
 	github.com/DataDog/zstd v1.4.5 // indirect
-	github.com/alecthomas/chroma/v2 v2.23.1 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.2.0 // indirect
 	github.com/charmbracelet/x/windows v0.2.1 // indirect
