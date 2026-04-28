@@ -64,6 +64,11 @@ type composerAreaWidget struct {
 	invalidated  bool
 }
 
+type measuredPainter interface {
+	Measure(*ui.Context, ui.Constraints) ui.Size
+	Paint(*ui.Context, ui.Canvas)
+}
+
 func (w *composerAreaWidget) Dirty() bool {
 	return w == nil || w.invalidated || w.model.composerCursorDirty
 }
@@ -83,8 +88,11 @@ func (w *composerAreaWidget) measure(ctx *ui.Context, width int) ui.Size {
 	if w == nil {
 		return ui.Size{}
 	}
-	element := w.model.renderComposerAreaElement()
-	size := element.Measure(ctx, ui.NewConstraints(width, 0))
+	content := w.content()
+	if content == nil {
+		return ui.Size{}
+	}
+	size := content.Measure(ctx, ui.NewConstraints(width, 0))
 	w.measureWidth = width
 	w.measureSize = size
 	w.measureValid = true
@@ -100,11 +108,11 @@ func (w *composerAreaWidget) ClearDirty() {
 	w.invalidated = false
 }
 
-func (w *composerAreaWidget) Element() ui.Element {
-	if w == nil {
-		return ui.VisibleElement{}
+func (w *composerAreaWidget) content() measuredPainter {
+	if w == nil || w.model == nil {
+		return nil
 	}
-	return w.model.renderComposerAreaElement()
+	return measuredPainterFromElement(w.model.renderComposerAreaElement())
 }
 
 func (w *composerAreaWidget) Surface(ctx *ui.Context, bounds ui.Rect) ui.Surface {
@@ -117,7 +125,7 @@ func (w *composerAreaWidget) Surface(ctx *ui.Context, bounds ui.Rect) ui.Surface
 		width = size.W
 	}
 	rect := ui.Rect{W: width, H: size.H}
-	surface := ui.PaintElementSurface(ctx, w.Element(), rect)
+	surface := paintMeasuredSurface(ctx, w.content(), rect)
 	cache := w.model.ensureRenderCache()
 	cache.composerAreaValid = rect.H > 0
 	cache.renderedComposerAreaSurface = surface
@@ -126,7 +134,7 @@ func (w *composerAreaWidget) Surface(ctx *ui.Context, bounds ui.Rect) ui.Surface
 
 type hashedElementWidget struct {
 	model       *Model
-	build       func(*Model) ui.Element
+	build       func(*Model) measuredPainter
 	hash        func(*Model, ui.Rect) uint64
 	invalidated bool
 }
@@ -149,14 +157,11 @@ func (w *hashedElementWidget) ClearDirty() {
 	w.invalidated = false
 }
 
-func (w *hashedElementWidget) Element() ui.Element {
+func (w *hashedElementWidget) content() measuredPainter {
 	if w == nil || w.build == nil {
-		return ui.VisibleElement{}
+		return nil
 	}
-	if built := w.build(w.model); built != nil {
-		return ui.VisibleElement{Child: built}
-	}
-	return ui.VisibleElement{}
+	return w.build(w.model)
 }
 
 type mainScreenWidget struct {
@@ -372,7 +377,7 @@ func (n *composerRetainedNode) Prepare(ctx *ui.Context) {
 		return
 	}
 	element := m.renderComposerAreaElement()
-	next := ui.PaintElementSurface(ctx, element, rect)
+	next := paintMeasuredSurface(ctx, measuredPainterFromElement(element), rect)
 	nextCursorRect, nextCursorOK := composerCursorRectForBounds(m, rect)
 	if !n.NeedsLayout() {
 		switch {
@@ -458,14 +463,7 @@ func (n *hashedElementRetainedNode) Prepare(ctx *ui.Context) {
 	if !needsSync {
 		return
 	}
-	var element ui.Element
-	if n.widget.build != nil {
-		element = n.widget.build(n.widget.model)
-	}
-	if element == nil {
-		element = ui.VisibleElement{}
-	}
-	next := ui.PaintElementSurface(ctx, ui.VisibleElement{Child: element}, rect)
+	next := paintMeasuredSurface(ctx, n.widget.content(), rect)
 	if !n.NeedsLayout() && (n.widget.invalidated || currentHash != n.lastHash) {
 		n.MarkDirtyLocalRects(ui.DiffSurfaceDamage(n.surface, next))
 	}
@@ -771,7 +769,7 @@ func (m *Model) ensureMainScreenWidget() *mainScreenWidget {
 		composer:   &composerAreaWidget{model: m, invalidated: true},
 		sidebar: &hashedElementWidget{
 			model: m,
-			build: func(m *Model) ui.Element {
+			build: func(m *Model) measuredPainter {
 				if !m.showSidebar {
 					return nil
 				}
@@ -786,7 +784,7 @@ func (m *Model) ensureMainScreenWidget() *mainScreenWidget {
 		},
 		statusPane: &hashedElementWidget{
 			model:       m,
-			build:       func(m *Model) ui.Element { return m.renderStatusPaneElement() },
+			build:       func(m *Model) measuredPainter { return measuredPainterFromElement(m.renderStatusPaneElement()) },
 			hash:        statusPaneWidgetHash,
 			invalidated: true,
 		},
@@ -800,4 +798,26 @@ func (w *mainScreenWidget) ensureRetainedRoot() *mainScreenRetainedRoot {
 		w.retained = newMainScreenRetainedRoot(w.model, w.transcript, w.composer, w.sidebar, w.statusPane)
 	}
 	return w.retained
+}
+
+func measuredPainterFromElement(element ui.Element) measuredPainter {
+	if element == nil {
+		return nil
+	}
+	painter, ok := element.(measuredPainter)
+	if !ok {
+		return nil
+	}
+	return painter
+}
+
+func paintMeasuredSurface(ctx *ui.Context, painter measuredPainter, bounds ui.Rect) ui.Surface {
+	width := max(0, bounds.W)
+	height := max(0, bounds.H)
+	if painter == nil || width <= 0 || height <= 0 {
+		return ui.TransparentSurface(width, height)
+	}
+	surface := ui.TransparentSurface(width, height)
+	painter.Paint(ctx, ui.NewCanvas(&surface, ui.Rect{W: width, H: height}))
+	return surface
 }
