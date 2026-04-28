@@ -278,7 +278,6 @@ func BenchmarkViewSurfaceStatusDamage(b *testing.B) {
 		} else {
 			m.busy.updateStatus("Still working ...")
 		}
-		m.invalidateBodyCache()
 		_ = m.viewSurface()
 	}
 }

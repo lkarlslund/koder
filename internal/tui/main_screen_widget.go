@@ -175,7 +175,13 @@ type hashedElementWidget struct {
 }
 
 func (w *hashedElementWidget) Dirty() bool {
-	return w == nil || w.dirty || !w.valid
+	if w == nil || w.dirty || !w.valid {
+		return true
+	}
+	if w.hash == nil {
+		return false
+	}
+	return w.hash(w.model, w.bounds) != w.lastHash
 }
 
 func (w *hashedElementWidget) Invalidate() {

@@ -171,7 +171,6 @@ func TestStatusUpdateProducesBottomOnlyDamage(t *testing.T) {
 
 	_ = m.viewSurface()
 	m.busy.updateStatus("Still working ...")
-	m.invalidateBodyCache()
 
 	surface := m.viewSurface()
 	rects, ok := surface.DirtyRects()
