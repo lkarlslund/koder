@@ -701,16 +701,16 @@ func TestCapabilityStoreEnrichesAndCachesModels(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !model.SupportsImages || !model.CapabilitiesKnown {
-		t.Fatalf("expected enriched image capability, got %#v", model)
+	if model.SupportsImages || model.CapabilitiesKnown {
+		t.Fatalf("expected unprobed capabilities to remain unknown, got %#v", model)
 	}
 
 	models, err := store.EnrichModels("openai", cfg, []domain.Model{{ID: "gpt-5.4"}, {ID: "gpt-4.1-mini"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(models) != 2 || !models[0].SupportsImages || !models[1].SupportsImages {
-		t.Fatalf("expected cached enriched models, got %#v", models)
+	if len(models) != 2 || models[0].CapabilitiesKnown || models[1].CapabilitiesKnown {
+		t.Fatalf("expected unprobed models to remain unknown, got %#v", models)
 	}
 }
 
@@ -723,7 +723,7 @@ func TestCapabilityStoreSupportsAttachment(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !ok {
-		t.Fatal("expected gpt-5.4 image support")
+		t.Fatal("expected unknown image support to stay permissive")
 	}
 
 	ok, err = store.SupportsAttachment("openai", cfg, "gpt-5.4", attachment.KindPDF)
@@ -732,19 +732,6 @@ func TestCapabilityStoreSupportsAttachment(t *testing.T) {
 	}
 	if ok {
 		t.Fatal("expected pdf support to remain disabled")
-	}
-}
-
-func TestCapabilityStoreSupportsAttachmentForQwen36ImageModel(t *testing.T) {
-	store := NewCapabilityStore(t.TempDir())
-	cfg := config.Provider{BaseURL: "http://127.0.0.1:8000/v1"}
-
-	ok, err := store.SupportsAttachment("openai-compatible", cfg, "Lorbus/Qwen3.6-27B-int4-AutoRound", attachment.KindImage)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !ok {
-		t.Fatal("expected qwen3.6 image support")
 	}
 }
 
@@ -841,6 +828,14 @@ func TestCapabilityStoreSupportsAttachmentCachesProbeResult(t *testing.T) {
 	if calls != 1 {
 		t.Fatalf("expected one probe request, got %d", calls)
 	}
+
+	model, err := store.EnrichModel("openai-compatible", cfg, domain.Model{ID: "custom-vision-model"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !model.SupportsImages || !model.CapabilitiesKnown || model.CapabilitySource != "probe" {
+		t.Fatalf("expected probed image capability to enrich models, got %#v", model)
+	}
 }
 
 func TestCapabilityStoreInvalidateForcesReprobe(t *testing.T) {
@@ -877,5 +872,45 @@ func TestCapabilityStoreInvalidateForcesReprobe(t *testing.T) {
 	}
 	if calls != 2 {
 		t.Fatalf("expected invalidate to force reprobe, got %d probe requests", calls)
+	}
+}
+
+func TestCapabilityStoreIgnoresStaleHeuristicFalseWhenProbeIsInconclusive(t *testing.T) {
+	store := NewCapabilityStore(t.TempDir())
+	cfg := config.Provider{
+		BaseURL: "http://127.0.0.1:1/v1",
+	}
+	cache, err := store.load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cache.Entries[capabilityKey("openai", cfg.BaseURL, "Lorbus/Qwen3.6-27B-int4-AutoRound")] = capabilityEntry{
+		ProviderID:        "openai",
+		BaseURL:           cfg.BaseURL,
+		ModelID:           "Lorbus/Qwen3.6-27B-int4-AutoRound",
+		SupportsImages:    false,
+		SupportsPDFs:      false,
+		CapabilitySource:  "heuristic",
+		CapabilitiesKnown: true,
+		DetectedAt:        time.Now().UTC(),
+	}
+	if err := store.save(cache); err != nil {
+		t.Fatal(err)
+	}
+
+	ok, err := store.SupportsAttachment("openai", cfg, "Lorbus/Qwen3.6-27B-int4-AutoRound", attachment.KindImage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("expected inconclusive probe to remain permissive")
+	}
+
+	model, err := store.EnrichModel("openai", cfg, domain.Model{ID: "Lorbus/Qwen3.6-27B-int4-AutoRound"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if model.CapabilitiesKnown {
+		t.Fatalf("expected stale heuristic entry to be ignored for model enrichment, got %#v", model)
 	}
 }

@@ -66,23 +66,11 @@ func (s *CapabilityStore) EnrichModel(providerID string, cfg config.Provider, mo
 	}
 	key := capabilityKey(providerID, cfg.BaseURL, model.ID)
 	if entry, ok := cache.Entries[key]; ok && time.Since(entry.DetectedAt) < capabilityCacheTTL {
-		return applyEntry(model, entry), nil
+		if strings.TrimSpace(entry.CapabilitySource) == "probe" {
+			return applyEntry(model, entry), nil
+		}
 	}
-	inferred := inferCapabilities(providerID, cfg, model)
-	cache.Entries[key] = capabilityEntry{
-		ProviderID:        providerID,
-		BaseURL:           strings.TrimSpace(cfg.BaseURL),
-		ModelID:           model.ID,
-		SupportsImages:    inferred.SupportsImages,
-		SupportsPDFs:      inferred.SupportsPDFs,
-		CapabilitySource:  inferred.CapabilitySource,
-		CapabilitiesKnown: inferred.CapabilitiesKnown,
-		DetectedAt:        time.Now().UTC(),
-	}
-	if err := s.save(cache); err != nil {
-		return domain.Model{}, err
-	}
-	return inferred, nil
+	return inferCapabilities(providerID, cfg, model), nil
 }
 
 func (s *CapabilityStore) SupportsAttachment(providerID string, cfg config.Provider, modelID string, kind attachment.Kind) (bool, error) {
@@ -104,7 +92,7 @@ func (s *CapabilityStore) SupportsAttachment(providerID string, cfg config.Provi
 
 func (s *CapabilityStore) supportsImageAttachment(providerID string, cfg config.Provider, modelID string) (bool, error) {
 	if s == nil {
-		return inferCapabilities(providerID, cfg, domain.Model{ID: modelID}).SupportsImages, nil
+		return true, nil
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -116,8 +104,8 @@ func (s *CapabilityStore) supportsImageAttachment(providerID string, cfg config.
 	key := capabilityKey(providerID, cfg.BaseURL, modelID)
 	current := inferCapabilities(providerID, cfg, domain.Model{ID: modelID})
 	if entry, ok := cache.Entries[key]; ok && time.Since(entry.DetectedAt) < capabilityCacheTTL {
-		current = applyEntry(current, entry)
 		if strings.TrimSpace(entry.CapabilitySource) == "probe" {
+			current = applyEntry(current, entry)
 			return current.SupportsImages, nil
 		}
 	}
@@ -143,20 +131,7 @@ func (s *CapabilityStore) supportsImageAttachment(providerID string, cfg config.
 		}
 	}
 
-	cache.Entries[key] = capabilityEntry{
-		ProviderID:        providerID,
-		BaseURL:           strings.TrimSpace(cfg.BaseURL),
-		ModelID:           modelID,
-		SupportsImages:    current.SupportsImages,
-		SupportsPDFs:      current.SupportsPDFs,
-		CapabilitySource:  current.CapabilitySource,
-		CapabilitiesKnown: current.CapabilitiesKnown,
-		DetectedAt:        time.Now().UTC(),
-	}
-	if err := s.save(cache); err != nil {
-		return false, err
-	}
-	return current.SupportsImages, nil
+	return true, nil
 }
 
 func (s *CapabilityStore) Invalidate(providerID string, cfg config.Provider, modelID string) error {
@@ -174,21 +149,11 @@ func (s *CapabilityStore) Invalidate(providerID string, cfg config.Provider, mod
 }
 
 func inferCapabilities(providerID string, cfg config.Provider, model domain.Model) domain.Model {
-	desc, hasDesc := Lookup(providerID)
-	supportsImages := false
-	if (hasDesc && desc.SupportsImages) || strings.TrimSpace(providerID) == ProviderKindCompatible {
-		supportsImages = modelLikelySupportsImages(model.ID)
-	}
 	supportsPDFs := false
-	source := "heuristic"
-	known := true
-	if strings.TrimSpace(model.ID) == "" {
-		known = false
-	}
-	model.SupportsImages = supportsImages
+	model.SupportsImages = false
 	model.SupportsPDFs = supportsPDFs
-	model.CapabilitySource = source
-	model.CapabilitiesKnown = known
+	model.CapabilitySource = ""
+	model.CapabilitiesKnown = false
 	return model
 }
 

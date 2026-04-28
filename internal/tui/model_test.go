@@ -824,11 +824,17 @@ func TestCtrlVPastesClipboardImageAsAttachment(t *testing.T) {
 }
 
 func TestCtrlVPastesClipboardImageWarnsWhenModelDoesNotSupportImages(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":"image content part unsupported for this model"}`))
+	}))
+	defer server.Close()
+
 	cfg := testConfig(t)
 	cfg.DefaultProvider = "openai-compatible"
 	cfg.DefaultModel = "text-only-model"
 	cfg.Providers = map[string]config.Provider{
-		"openai-compatible": {Kind: provider.ProviderKindCompatible, BaseURL: "http://127.0.0.1:1/v1", DefaultModel: "text-only-model"},
+		"openai-compatible": {Kind: provider.ProviderKindCompatible, BaseURL: server.URL + "/v1", DefaultModel: "text-only-model"},
 	}
 	m := Model{
 		cfg:               cfg,

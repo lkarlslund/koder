@@ -145,41 +145,12 @@ func SupportsAttachment(providerID, modelID string, kind attachment.Kind) bool {
 	case attachment.KindPDF:
 		return false
 	case attachment.KindImage:
-		if desc, ok := Lookup(providerID); ok && desc.SupportsImages {
-			return modelLikelySupportsImages(modelID)
-		}
-		return modelLikelySupportsImages(modelID)
+		_ = providerID
+		_ = modelID
+		return false
 	default:
 		return false
 	}
-}
-
-func modelLikelySupportsImages(modelID string) bool {
-	model := strings.ToLower(strings.TrimSpace(modelID))
-	if model == "" {
-		return false
-	}
-	hints := []string{
-		"vision",
-		"gpt-4o",
-		"gpt-4.1",
-		"gpt-5",
-		"gemini",
-		"claude",
-		"llava",
-		"vl",
-		"pixtral",
-		"multimodal",
-		"omni",
-		"minicpm-v",
-		"qwen3.6",
-	}
-	for _, hint := range hints {
-		if strings.Contains(model, hint) {
-			return true
-		}
-	}
-	return false
 }
 
 func cloneHeaders(src map[string]string) map[string]string {
