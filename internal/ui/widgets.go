@@ -81,7 +81,7 @@ func (h HitBox) Measure(ctx *Context, constraints Constraints) Size {
 }
 
 func (h HitBox) Render(ctx *Context, bounds Rect) Surface {
-	return renderOwnedSurface(ctx, bounds, h.RenderTo)
+	return renderOwnedCanvas(ctx, bounds, h)
 }
 
 func (h HitBox) RenderTo(ctx *Context, bounds Rect, dst *Surface) {
@@ -106,6 +106,28 @@ func (h HitBox) WalkChildren(_ *Context, visit func(Element)) {
 		return
 	}
 	visit(h.Child)
+}
+
+func (h HitBox) Paint(ctx *Context, canvas Canvas) {
+	if canvas.Width() <= 0 || canvas.Height() <= 0 {
+		return
+	}
+	if ctx != nil && ctx.Runtime != nil && strings.TrimSpace(h.ID) != "" {
+		ctx.Runtime.Register(Control{
+			ID:      h.ID,
+			Rect:    Rect{X: canvas.origin.X, Y: canvas.origin.Y, W: canvas.Width(), H: max(1, canvas.Height())},
+			Enabled: true,
+		})
+	}
+	if h.Child == nil {
+		return
+	}
+	renderElementInto(ctx, h.Child, Rect{
+		X: canvas.origin.X,
+		Y: canvas.origin.Y,
+		W: canvas.Width(),
+		H: canvas.Height(),
+	}, canvas.surface)
 }
 
 type Divider struct {
@@ -250,7 +272,7 @@ func (m ModalFrame) Measure(ctx *Context, constraints Constraints) Size {
 }
 
 func (m ModalFrame) Render(ctx *Context, bounds Rect) Surface {
-	return renderOwnedSurface(ctx, bounds, m.RenderTo)
+	return renderOwnedCanvas(ctx, bounds, m)
 }
 
 func (m ModalFrame) RenderTo(ctx *Context, bounds Rect, dst *Surface) {
@@ -258,6 +280,18 @@ func (m ModalFrame) RenderTo(ctx *Context, bounds Rect, dst *Surface) {
 		return
 	}
 	renderElementInto(ctx, m.window(ctx), bounds, dst)
+}
+
+func (m ModalFrame) Paint(ctx *Context, canvas Canvas) {
+	if canvas.Width() <= 0 || canvas.Height() <= 0 {
+		return
+	}
+	renderElementInto(ctx, m.window(ctx), Rect{
+		X: canvas.origin.X,
+		Y: canvas.origin.Y,
+		W: canvas.Width(),
+		H: canvas.Height(),
+	}, canvas.surface)
 }
 
 func (m ModalFrame) contentElement(palette theme.Palette) Element {
