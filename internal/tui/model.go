@@ -303,6 +303,44 @@ func queuedAttachmentDrafts(src []domain.QueuedAttachment) []attachment.Draft {
 	return dst
 }
 
+func draftAttachmentToken(draft attachment.Draft) string {
+	if strings.TrimSpace(draft.Token) != "" {
+		return draft.Token
+	}
+	switch {
+	case draft.Source == attachment.SourceClipboardImage || attachment.ClassifyMIME(draft.MIME) == attachment.KindImage:
+		return "[clipboard image]"
+	case attachment.ClassifyMIME(draft.MIME) == attachment.KindPDF:
+		return "[pdf]"
+	case attachment.ClassifyMIME(draft.MIME) == attachment.KindText:
+		return "[file]"
+	default:
+		return "[file]"
+	}
+}
+
+func numberDraftAttachmentTokens(drafts []attachment.Draft) {
+	imageCount := 0
+	fileCount := 0
+	pdfCount := 0
+	for i := range drafts {
+		if strings.TrimSpace(drafts[i].Token) != "" {
+			continue
+		}
+		switch {
+		case drafts[i].Source == attachment.SourceClipboardImage || attachment.ClassifyMIME(drafts[i].MIME) == attachment.KindImage:
+			imageCount++
+			drafts[i].Token = fmt.Sprintf("[clipboard image #%d]", imageCount)
+		case attachment.ClassifyMIME(drafts[i].MIME) == attachment.KindPDF:
+			pdfCount++
+			drafts[i].Token = fmt.Sprintf("[pdf #%d]", pdfCount)
+		default:
+			fileCount++
+			drafts[i].Token = fmt.Sprintf("[file #%d]", fileCount)
+		}
+	}
+}
+
 func queuedReferenceDrafts(src []domain.QueuedReference) []reference.Draft {
 	if len(src) == 0 {
 		return nil
@@ -1203,10 +1241,6 @@ func (m *Model) handleMainWindowKey(msg ui.KeyMsg) (bool, ui.Cmd) {
 		if m.queueEditMode && len(m.currentChat.QueuedInputs) > 0 {
 			return true, m.deleteSelectedQueuedInput()
 		}
-		if m.removeDraftAttachmentForComposerKey(msg) {
-			m.invalidateFooterCache()
-			return true, m.syncWindowTitleCmd()
-		}
 	case "esc":
 		if m.queueEditMode {
 			m.queueEditMode = false
@@ -1373,10 +1407,6 @@ func (m *Model) handleMainWindowKey(msg ui.KeyMsg) (bool, ui.Cmd) {
 	case "delete":
 		if m.queueEditMode && len(m.currentChat.QueuedInputs) > 0 {
 			return true, m.deleteSelectedQueuedInput()
-		}
-		if m.removeDraftAttachmentForComposerKey(msg) {
-			m.invalidateFooterCache()
-			return true, m.syncWindowTitleCmd()
 		}
 	}
 
@@ -1959,9 +1989,14 @@ func (m *Model) renderMainScreenElement() ui.Node {
 func (m *Model) renderComposerElement() ui.Node {
 	m.composer.Prompt = m.promptGlyph() + " "
 	line := m.composer.VisibleLine()
+	tokenRanges := make([]ui.TokenRange, 0, len(line.Tokens()))
+	for _, token := range line.Tokens() {
+		tokenRanges = append(tokenRanges, ui.TokenRange{Start: token.Start, End: token.End})
+	}
 	return ui.AsNode(ui.NewComposer(ui.ComposerProps{
 		Palette:       m.palette,
 		Width:         m.composerWidth(),
+		TokenRanges:   tokenRanges,
 		HalfBlocks:    m.halfBlocksEnabled(),
 		PromptGlyph:   m.promptGlyph(),
 		Value:         m.composer.Value(),
@@ -4280,7 +4315,9 @@ func (m *Model) setComposerValue(value string) {
 }
 
 func (m *Model) setComposerDraftValue(value string) {
+	numberDraftAttachmentTokens(m.draftAttachments)
 	m.setComposerValue(m.decorateComposerTextWithAttachments(value, m.draftAttachments))
+	m.hydrateComposerTokens()
 }
 
 func (m Model) composerPromptHistory() []string {
@@ -4647,7 +4684,7 @@ func (m *Model) poppedLastDraftAttachment() bool {
 	}
 	last := m.draftAttachments[len(m.draftAttachments)-1]
 	m.draftAttachments = m.draftAttachments[:len(m.draftAttachments)-1]
-	m.removeAttachmentPlaceholder(last.Metadata)
+	m.removeAttachmentPlaceholder(last)
 	m.status = fmt.Sprintf("Removed attachment %s", last.Name)
 	return true
 }
@@ -4696,6 +4733,36 @@ func (m *Model) syncDraftReferencesFromComposer() {
 	m.draftReferences = synced
 }
 
+func (m *Model) hydrateComposerTokens() {
+	value := m.composer.Value()
+	for _, draft := range m.draftAttachments {
+		token := draftAttachmentToken(draft)
+		if token == "" {
+			continue
+		}
+		if idx := strings.Index(value, token); idx >= 0 {
+			end := idx + len(token)
+			if end < len(value) && value[end] == ' ' {
+				end++
+			}
+			m.composer.RegisterToken(idx, end)
+		}
+	}
+	for _, draft := range m.draftReferences {
+		if strings.TrimSpace(draft.Display) == "" {
+			continue
+		}
+		start := draft.Start
+		if start < 0 || start+len(draft.Display) > len(value) || value[start:start+len(draft.Display)] != draft.Display {
+			start = strings.Index(value, draft.Display)
+			if start < 0 {
+				continue
+			}
+		}
+		m.composer.RegisterToken(start, start+len(draft.Display))
+	}
+}
+
 func (m *Model) syncDraftAttachmentsFromComposer() {
 	if len(m.draftAttachments) == 0 {
 		return
@@ -4703,7 +4770,7 @@ func (m *Model) syncDraftAttachmentsFromComposer() {
 	remaining := m.composer.Value()
 	synced := make([]attachment.Draft, 0, len(m.draftAttachments))
 	for _, draft := range m.draftAttachments {
-		placeholder := attachmentLabel(draft.Metadata)
+		placeholder := draftAttachmentToken(draft)
 		idx := strings.Index(remaining, placeholder)
 		if idx < 0 {
 			continue
@@ -4716,20 +4783,22 @@ func (m *Model) syncDraftAttachmentsFromComposer() {
 
 func (m *Model) insertDraftAttachment(draft attachment.Draft) {
 	m.draftAttachments = append(m.draftAttachments, draft)
-	insert := attachmentLabel(draft.Metadata) + " "
+	numberDraftAttachmentTokens(m.draftAttachments)
+	draft = m.draftAttachments[len(m.draftAttachments)-1]
+	insert := draftAttachmentToken(draft) + " "
 	if cursor := m.composer.CursorIndex(); cursor > 0 {
 		if r, ok := m.composer.RuneAt(cursor - 1); ok && r != ' ' && r != '\n' {
 			insert = " " + insert
 		}
 	}
-	m.composer.InsertString(insert)
+	m.composer.InsertToken(insert)
 	m.updateComposerMenus()
 	m.invalidateFooterCache()
 }
 
-func (m *Model) removeAttachmentPlaceholder(meta attachment.Metadata) {
+func (m *Model) removeAttachmentPlaceholder(draft attachment.Draft) {
 	value := m.composer.Value()
-	placeholder := attachmentLabel(meta)
+	placeholder := draftAttachmentToken(draft)
 	idx := strings.LastIndex(value, placeholder)
 	if idx < 0 {
 		return
@@ -4743,6 +4812,7 @@ func (m *Model) removeAttachmentPlaceholder(meta attachment.Metadata) {
 	next := value[:idx] + value[end:]
 	m.composer.SetValue(next)
 	m.composer.SetCursor(min(idx, len(next)))
+	m.hydrateComposerTokens()
 	m.updateComposerMenus()
 	m.invalidateFooterCache()
 }
@@ -4753,7 +4823,7 @@ func (m Model) decorateComposerTextWithAttachments(text string, drafts []attachm
 	}
 	prefixes := make([]string, 0, len(drafts))
 	for _, draft := range drafts {
-		prefixes = append(prefixes, attachmentLabel(draft.Metadata))
+		prefixes = append(prefixes, draftAttachmentToken(draft))
 	}
 	prefix := strings.Join(prefixes, " ")
 	if strings.TrimSpace(text) == "" {
@@ -4769,7 +4839,7 @@ func (m Model) submissionPromptText() string {
 func stripAttachmentPlaceholders(value string, drafts []attachment.Draft) string {
 	trimmed := value
 	for _, draft := range drafts {
-		trimmed = strings.Replace(trimmed, attachmentLabel(draft.Metadata), "", 1)
+		trimmed = strings.Replace(trimmed, draftAttachmentToken(draft), "", 1)
 	}
 	for {
 		next := strings.ReplaceAll(trimmed, "  ", " ")
@@ -5596,10 +5666,8 @@ func (m *Model) acceptSkillSelection() {
 	if !queries.hasSkillQuery {
 		return
 	}
-	value := m.composer.Value()
-	next := value[:queries.skillStart] + "$" + selected.Name
-	m.composer.SetValue(next)
-	m.composer.SetCursor(len(next))
+	token := "$" + selected.Name
+	m.composer.ReplaceRangeWithToken(queries.skillStart, m.composer.CursorIndex(), token)
 	m.updateComposerMenus()
 }
 
@@ -5612,11 +5680,8 @@ func (m *Model) acceptMentionSelection() {
 	if !queries.hasMentionQuery {
 		return
 	}
-	value := m.composer.Value()
 	display := reference.DisplayToken(selected.Path)
-	next := value[:queries.mentionStart] + display + value[queries.mentionEnd:]
-	m.composer.SetValue(next)
-	m.composer.SetCursor(queries.mentionStart + len(display))
+	m.composer.ReplaceRangeWithToken(queries.mentionStart, queries.mentionEnd, display)
 	m.draftReferences = append(m.draftReferences, reference.Draft{
 		Kind:    selected.Kind,
 		Path:    selected.Path,
@@ -7116,7 +7181,7 @@ func (m *Model) submitPickerSelection(value string) (ui.Model, ui.Cmd) {
 			return m, nil
 		}
 		m.closePicker()
-		m.composer.InsertString("$" + value)
+		m.composer.InsertToken("$" + value)
 		m.updateComposerMenus()
 		m.status = fmt.Sprintf("Inserted $%s", value)
 		return m, m.syncWindowTitleCmd()

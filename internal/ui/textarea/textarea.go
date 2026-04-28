@@ -67,6 +67,12 @@ type Model struct {
 	blink           bool
 	blinkGeneration int
 	revision        uint64
+	tokens          []Token
+}
+
+type Token struct {
+	Start int
+	End   int
 }
 
 func New() Model {
@@ -115,6 +121,7 @@ func (m *Model) SetValue(value string) {
 	m.valueDirty = true
 	m.cachedValue = ""
 	m.cursor = len(m.value)
+	m.tokens = nil
 	m.revision++
 }
 
@@ -123,6 +130,7 @@ func (m *Model) Reset() {
 	m.valueDirty = true
 	m.cachedValue = ""
 	m.cursor = 0
+	m.tokens = nil
 	m.revision++
 }
 
@@ -149,6 +157,15 @@ func (m Model) Runes() []rune {
 	return m.value
 }
 
+func (m Model) Tokens() []Token {
+	if len(m.tokens) == 0 {
+		return nil
+	}
+	out := make([]Token, len(m.tokens))
+	copy(out, m.tokens)
+	return out
+}
+
 func (m *Model) SetCursor(offset int) {
 	if offset < 0 {
 		offset = 0
@@ -165,6 +182,41 @@ func (m *Model) InsertRune(r rune) {
 
 func (m *Model) InsertString(s string) {
 	m.insertRunes([]rune(s))
+}
+
+func (m *Model) InsertToken(text string) {
+	m.insertTokenRunes([]rune(text))
+}
+
+func (m *Model) ReplaceRangeWithToken(start int, end int, text string) {
+	if start < 0 {
+		start = 0
+	}
+	if end < start {
+		end = start
+	}
+	if end > len(m.value) {
+		end = len(m.value)
+	}
+	m.removeRange(start, end)
+	m.cursor = start
+	m.insertTokenRunes([]rune(text))
+}
+
+func (m *Model) RegisterToken(start int, end int) {
+	if start < 0 {
+		start = 0
+	}
+	if end < start {
+		end = start
+	}
+	if end > len(m.value) {
+		end = len(m.value)
+	}
+	if start == end {
+		return
+	}
+	m.tokens = append(m.tokens, Token{Start: start, End: end})
 }
 
 func (m Model) BlinkCmd() ui.Cmd {
@@ -206,30 +258,26 @@ func (m *Model) Update(msg ui.Msg) (Model, ui.Cmd) {
 		}
 		switch msg.Type {
 		case ui.KeyLeft:
-			if m.cursor > 0 {
-				m.cursor--
-			}
+			m.cursor = m.moveCursorLeft()
 		case ui.KeyRight:
-			if m.cursor < len(m.value) {
-				m.cursor++
-			}
+			m.cursor = m.moveCursorRight()
 		case ui.KeyHome:
 			m.cursor = 0
 		case ui.KeyEnd:
 			m.cursor = len(m.value)
 		case ui.KeyBackspace:
-			if m.cursor > 0 {
-				m.value = append(m.value[:m.cursor-1], m.value[m.cursor:]...)
-				m.valueDirty = true
-				m.cachedValue = ""
+			if m.deleteTokenForBackspace() {
+				m.revision++
+			} else if m.cursor > 0 {
+				m.removeRange(m.cursor-1, m.cursor)
 				m.cursor--
 				m.revision++
 			}
 		case ui.KeyDelete:
-			if m.cursor < len(m.value) {
-				m.value = append(m.value[:m.cursor], m.value[m.cursor+1:]...)
-				m.valueDirty = true
-				m.cachedValue = ""
+			if m.deleteTokenForDelete() {
+				m.revision++
+			} else if m.cursor < len(m.value) {
+				m.removeRange(m.cursor, m.cursor+1)
 				m.revision++
 			}
 		case ui.KeySpace:
@@ -284,6 +332,7 @@ type VisibleLine struct {
 	cursor string
 	after  string
 	plain  string
+	tokens []Token
 }
 
 func (m Model) VisibleLine() VisibleLine {
@@ -293,6 +342,7 @@ func (m Model) VisibleLine() VisibleLine {
 		cursor: line.cursor,
 		after:  line.after,
 		plain:  line.plain,
+		tokens: line.tokens,
 	}
 }
 
@@ -300,6 +350,14 @@ func (l VisibleLine) Before() string { return l.before }
 func (l VisibleLine) Cursor() string { return l.cursor }
 func (l VisibleLine) After() string  { return l.after }
 func (l VisibleLine) Plain() string  { return l.plain }
+func (l VisibleLine) Tokens() []Token {
+	if len(l.tokens) == 0 {
+		return nil
+	}
+	out := make([]Token, len(l.tokens))
+	copy(out, l.tokens)
+	return out
+}
 
 func (m Model) visibleLine() VisibleLine {
 	runes := m.value
@@ -344,13 +402,20 @@ func (m Model) visibleLine() VisibleLine {
 	if localCursor < len(lineRunes) {
 		after = string(lineRunes[localCursor+1:])
 	}
-	return VisibleLine{before: before, cursor: char, after: after, plain: string(lineRunes)}
+	return VisibleLine{
+		before: before,
+		cursor: char,
+		after:  after,
+		plain:  string(lineRunes),
+		tokens: m.visibleTokens(lineStart+start, lineStart+end),
+	}
 }
 
 func (m *Model) insertRunes(runes []rune) {
 	if len(runes) == 0 {
 		return
 	}
+	m.cursor = m.cursorForInsertion()
 	if m.cursor >= len(m.value) {
 		m.value = append(m.value, runes...)
 	} else {
@@ -363,7 +428,171 @@ func (m *Model) insertRunes(runes []rune) {
 	m.valueDirty = true
 	m.cachedValue = ""
 	m.cursor += len(runes)
+	m.shiftTokens(m.cursor-len(runes), len(runes))
 	m.revision++
+}
+
+func (m *Model) insertTokenRunes(runes []rune) {
+	if len(runes) == 0 {
+		return
+	}
+	start := m.cursorForInsertion()
+	m.cursor = start
+	m.insertRunes(runes)
+	m.tokens = append(m.tokens, Token{Start: start, End: start + len(runes)})
+}
+
+func (m Model) visibleTokens(start int, end int) []Token {
+	if len(m.tokens) == 0 || end <= start {
+		return nil
+	}
+	var out []Token
+	for _, token := range m.tokens {
+		if token.End <= start || token.Start >= end {
+			continue
+		}
+		visible := Token{
+			Start: max(start, token.Start) - start,
+			End:   min(end, token.End) - start,
+		}
+		if visible.End > visible.Start {
+			out = append(out, visible)
+		}
+	}
+	return out
+}
+
+func (m *Model) moveCursorLeft() int {
+	if m.cursor <= 0 {
+		return 0
+	}
+	next := m.cursor - 1
+	if token, ok := m.tokenContaining(next); ok {
+		return token.Start
+	}
+	return next
+}
+
+func (m *Model) moveCursorRight() int {
+	if m.cursor >= len(m.value) {
+		return len(m.value)
+	}
+	next := m.cursor + 1
+	if token, ok := m.tokenContaining(next); ok {
+		return token.End
+	}
+	return next
+}
+
+func (m *Model) normalizeCursor(cursor int) int {
+	if token, ok := m.tokenContaining(cursor); ok {
+		return token.End
+	}
+	return cursor
+}
+
+func (m *Model) cursorForInsertion() int {
+	return m.normalizeCursor(m.cursor)
+}
+
+func (m *Model) tokenContaining(pos int) (Token, bool) {
+	for _, token := range m.tokens {
+		if pos > token.Start && pos < token.End {
+			return token, true
+		}
+	}
+	return Token{}, false
+}
+
+func (m *Model) tokenForBackspace() (Token, bool) {
+	if m.cursor <= 0 {
+		return Token{}, false
+	}
+	for _, token := range m.tokens {
+		if m.cursor > token.Start && m.cursor <= token.End {
+			return token, true
+		}
+	}
+	return Token{}, false
+}
+
+func (m *Model) tokenForDelete() (Token, bool) {
+	if m.cursor >= len(m.value) {
+		return Token{}, false
+	}
+	for _, token := range m.tokens {
+		if m.cursor >= token.Start && m.cursor < token.End {
+			return token, true
+		}
+	}
+	return Token{}, false
+}
+
+func (m *Model) deleteTokenForBackspace() bool {
+	token, ok := m.tokenForBackspace()
+	if !ok {
+		return false
+	}
+	m.removeRange(token.Start, token.End)
+	m.cursor = token.Start
+	return true
+}
+
+func (m *Model) deleteTokenForDelete() bool {
+	token, ok := m.tokenForDelete()
+	if !ok {
+		return false
+	}
+	m.removeRange(token.Start, token.End)
+	m.cursor = token.Start
+	return true
+}
+
+func (m *Model) removeRange(start int, end int) {
+	if start < 0 {
+		start = 0
+	}
+	if end < start {
+		end = start
+	}
+	if end > len(m.value) {
+		end = len(m.value)
+	}
+	if start == end {
+		return
+	}
+	delta := end - start
+	m.value = append(m.value[:start], m.value[end:]...)
+	m.valueDirty = true
+	m.cachedValue = ""
+	m.rewriteTokensAfterRemoval(start, end, delta)
+}
+
+func (m *Model) shiftTokens(at int, delta int) {
+	if delta == 0 {
+		return
+	}
+	for i := range m.tokens {
+		if m.tokens[i].Start >= at {
+			m.tokens[i].Start += delta
+			m.tokens[i].End += delta
+		}
+	}
+}
+
+func (m *Model) rewriteTokensAfterRemoval(start int, end int, delta int) {
+	filtered := m.tokens[:0]
+	for _, token := range m.tokens {
+		switch {
+		case token.End <= start:
+			filtered = append(filtered, token)
+		case token.Start >= end:
+			token.Start -= delta
+			token.End -= delta
+			filtered = append(filtered, token)
+		}
+	}
+	m.tokens = filtered
 }
 
 func byteOffsetToRuneIndex(s string, offset int) int {
@@ -394,6 +623,13 @@ func windowAroundCursor(runes []rune, cursor int, width int) (int, int) {
 
 func max(a, b int) int {
 	if a > b {
+		return a
+	}
+	return b
+}
+
+func min(a, b int) int {
+	if a < b {
 		return a
 	}
 	return b

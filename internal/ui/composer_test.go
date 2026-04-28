@@ -34,7 +34,7 @@ func TestRenderComposerPlaceholderLineDoesNotAddExtraCursorCell(t *testing.T) {
 
 func TestRenderComposerLineKeepsTypedTextAfterCursorAtNormalColor(t *testing.T) {
 	promptStyle := NewStyle()
-	surface := Composer{}.renderLineSurface("> ", promptStyle, "ab", "c", "def", 16, true, ParseCellColor("#112233"), ParseCellColor("#445566"))
+	surface := Composer{}.renderLineSurface("> ", promptStyle, "ab", "c", "def", nil, 16, true, ParseCellColor("#112233"), ParseCellColor("#445566"))
 	rendered := SurfaceText(surface)
 	start := strings.Index(rendered, "def")
 	if start == -1 {
@@ -48,5 +48,31 @@ func TestRenderComposerLineKeepsTypedTextAfterCursorAtNormalColor(t *testing.T) 
 	r, g, b, ok = surface.SurfaceCellBG(x, 0)
 	if !ok || r != 0x44 || g != 0x55 || b != 0x66 {
 		t.Fatalf("expected typed text after cursor to keep the normal background color, got (%d,%d,%d,%v)", r, g, b, ok)
+	}
+}
+
+func TestRenderComposerLineHighlightsTokenRanges(t *testing.T) {
+	palette := theme.Default().Palette
+	promptStyle := NewStyle()
+	surface := Composer{Palette: palette}.renderLineSurface(
+		"> ",
+		promptStyle,
+		"",
+		"@",
+		"README.md rest",
+		[]TokenRange{{Start: 0, End: len("@README.md")}},
+		24,
+		false,
+		ParseCellColor("#112233"),
+		ParseCellColor("#445566"),
+	)
+	x := strings.Index(SurfaceText(surface), "@README.md")
+	if x == -1 {
+		t.Fatalf("expected token text in rendered surface, got %q", SurfaceText(surface))
+	}
+	r, g, b, ok := surface.SurfaceCellBG(x, 0)
+	want := palette.MarkdownMarkBackground
+	if !ok || r != want.R() || g != want.G() || b != want.B() {
+		t.Fatalf("expected token highlight background (%d,%d,%d), got (%d,%d,%d,%v)", want.R(), want.G(), want.B(), r, g, b, ok)
 	}
 }

@@ -30,6 +30,7 @@ type Metadata struct {
 
 type Draft struct {
 	Metadata
+	Token string
 }
 
 type Manager struct {

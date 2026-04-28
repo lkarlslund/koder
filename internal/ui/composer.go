@@ -10,6 +10,7 @@ type ComposerProps struct {
 	Palette       theme.Palette
 	Width         int
 	Attachments   []AttachmentItem
+	TokenRanges   []TokenRange
 	HalfBlocks    bool
 	PromptGlyph   string
 	Value         string
@@ -28,6 +29,7 @@ type Composer struct {
 	Palette       theme.Palette
 	Width         int
 	Attachments   []AttachmentItem
+	TokenRanges   []TokenRange
 	HalfBlocks    bool
 	PromptGlyph   string
 	Value         string
@@ -36,6 +38,11 @@ type Composer struct {
 	ContentCursor string
 	ContentAfter  string
 	CursorVisible bool
+}
+
+type TokenRange struct {
+	Start int
+	End   int
 }
 
 func NewComposer(props ComposerProps) Composer {
@@ -72,7 +79,7 @@ func (c Composer) render() Surface {
 	attachmentHeight := attachmentRows.SurfaceHeight()
 
 	renderBlankLine := func() Surface {
-		return c.renderLineSurface(prompt, promptStyle, "", "", "", contentWidth, false, c.Palette.UserTextForeground, c.Palette.UserTextBackground)
+		return c.renderLineSurface(prompt, promptStyle, "", "", "", nil, contentWidth, false, c.Palette.UserTextForeground, c.Palette.UserTextBackground)
 	}
 
 	middle := c.renderLineSurface(
@@ -81,6 +88,7 @@ func (c Composer) render() Surface {
 		c.ContentBefore,
 		c.ContentCursor,
 		c.ContentAfter,
+		c.TokenRanges,
 		contentWidth,
 		c.CursorVisible,
 		c.Palette.UserTextForeground,
@@ -138,7 +146,7 @@ func (c Composer) renderPlaceholderSurface(promptStyle, contentStyle Style, prom
 	return c.renderPlaceholder(prompt, promptStyle, "", cursor, rest, contentWidth, c.CursorVisible, c.Palette.UserTextForeground, c.Palette.UserTextBackground, c.Palette.ComposerMutedText)
 }
 
-func (c Composer) renderLineSurface(prompt string, promptStyle Style, before, cursor, after string, contentWidth int, cursorVisible bool, textFG, textBG CellColor) Surface {
+func (c Composer) renderLineSurface(prompt string, promptStyle Style, before, cursor, after string, tokenRanges []TokenRange, contentWidth int, cursorVisible bool, textFG, textBG CellColor) Surface {
 	width := PlainWidth(prompt) + maxInt(0, contentWidth)
 	if width <= 0 {
 		width = PlainWidth(prompt)
@@ -155,23 +163,44 @@ func (c Composer) renderLineSurface(prompt string, promptStyle Style, before, cu
 	after = PlainTruncate(after, remaining, "")
 	remaining = maxInt(0, contentWidth-PlainWidth(before)-PlainWidth(cursor)-PlainWidth(after))
 	contentStyle := CellStyle{FG: cellColor(textFG), BG: cellColor(textBG)}
-	cursorStyle := contentStyle
-	if cursorVisible {
-		cursorStyle = CellStyle{FG: cellColor(textBG), BG: cellColor(textFG)}
-	}
 	s.WriteText(0, 0, prompt, promptCellStyle)
 	offset := PlainWidth(prompt)
 	for x := offset; x < width; x++ {
 		s.setCell(x, 0, blankCell(contentStyle))
 	}
-	s.WriteText(offset, 0, before, contentStyle)
-	s.WriteText(offset+PlainWidth(before), 0, cursor, cursorStyle)
-	s.WriteText(offset+PlainWidth(before)+PlainWidth(cursor), 0, after, contentStyle)
+	tokenStyle := CellStyle{
+		FG: firstNonEmptyColor(cellColor(c.Palette.MarkdownStrongText), cellColor(textFG)),
+		BG: firstNonEmptyColor(cellColor(c.Palette.MarkdownMarkBackground), cellColor(textBG)),
+	}
+	contentRunes := []rune(before + cursor + after)
+	cursorPos := len([]rune(before))
+	x := offset
+	for i, r := range contentRunes {
+		style := contentStyle
+		if rangeContainsToken(tokenRanges, i) {
+			style = tokenStyle
+		}
+		if cursorVisible && i == cursorPos {
+			style = CellStyle{FG: style.BG, BG: style.FG}
+		}
+		char := string(r)
+		s.WriteText(x, 0, char, style)
+		x += PlainWidth(char)
+	}
 	if remaining > 0 {
 		s.WriteText(offset+PlainWidth(before)+PlainWidth(cursor)+PlainWidth(after), 0, strings.Repeat(" ", remaining), contentStyle)
 	}
 	_ = promptStyle
 	return s
+}
+
+func rangeContainsToken(ranges []TokenRange, pos int) bool {
+	for _, rng := range ranges {
+		if pos >= rng.Start && pos < rng.End {
+			return true
+		}
+	}
+	return false
 }
 
 func (c Composer) renderPlaceholder(prompt string, promptStyle Style, before, cursor, after string, contentWidth int, cursorVisible bool, textFG, textBG, muted CellColor) Surface {

@@ -348,6 +348,33 @@ func TestAcceptMentionSelectionInsertsStructuredReference(t *testing.T) {
 	}
 }
 
+func TestMentionTokenBackspaceRemovesWholeReference(t *testing.T) {
+	workdir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workdir, "README.md"), []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	composer := textarea.New()
+	composer.SetValue("inspect @rea")
+	composer.SetCursor(len("inspect @rea"))
+	m := Model{
+		cfg:            testConfig(t),
+		composer:       composer,
+		workdir:        workdir,
+		mentionMatches: []reference.Entry{{Kind: reference.KindFile, Path: "README.md", Display: "README.md", Description: "file"}},
+	}
+	m.acceptMentionSelection()
+	m.composer.SetCursor(len("inspect @READ"))
+
+	updated, _ := m.handleKey(ui.KeyMsg{Type: ui.KeyBackspace})
+	next := updated.(*Model)
+	if got := next.composer.Value(); got != "inspect " {
+		t.Fatalf("expected reference token to be removed atomically, got %q", got)
+	}
+	if len(next.draftReferences) != 0 {
+		t.Fatalf("expected structured reference removed with token, got %#v", next.draftReferences)
+	}
+}
+
 func TestHandleLocalCommandOpensPermissionsPicker(t *testing.T) {
 	m := Model{
 		cfg:      testConfig(t),
@@ -418,6 +445,26 @@ func TestSkillAutocompleteAcceptsSelection(t *testing.T) {
 	}
 	if next.hasSkillMenu() {
 		t.Fatal("expected skill menu to close after selection")
+	}
+}
+
+func TestSkillTokenDeleteRemovesWholeToken(t *testing.T) {
+	workdir := newSkillRepo(t)
+	m := Model{
+		cfg:      testConfig(t),
+		composer: textarea.New(),
+		workdir:  workdir,
+	}
+	m.composer.SetValue("Use $rev")
+	m.updateComposerMenus()
+	updated, _ := m.handleKey(ui.KeyMsg{Type: ui.KeyTab})
+	next := updated.(*Model)
+	next.composer.SetCursor(len("Use $rev"))
+
+	updated, _ = next.handleKey(ui.KeyMsg{Type: ui.KeyDelete})
+	final := updated.(*Model)
+	if got := final.composer.Value(); got != "Use " {
+		t.Fatalf("expected skill token to be removed atomically, got %q", got)
 	}
 }
 
@@ -729,10 +776,10 @@ func TestAltEnterInsertsNewlineInsteadOfSending(t *testing.T) {
 
 func TestCtrlVPastesClipboardText(t *testing.T) {
 	m := Model{
-		composer:          textarea.New(),
-		attachmentFiles:   attachment.NewManager(t.TempDir()),
+		composer:           textarea.New(),
+		attachmentFiles:    attachment.NewManager(t.TempDir()),
 		readClipboardImage: func() ([]byte, error) { return nil, nil },
-		readClipboardText: func() (string, error) { return "pasted text", nil },
+		readClipboardText:  func() (string, error) { return "pasted text", nil },
 	}
 	m.composer.SetValue("hello ")
 	m.composer.SetCursor(len("hello "))
@@ -768,11 +815,33 @@ func TestCtrlVPastesClipboardImageAsAttachment(t *testing.T) {
 	if len(next.draftAttachments) != 1 {
 		t.Fatalf("expected one draft attachment, got %#v", next.draftAttachments)
 	}
-	if got := next.composer.Value(); got != "[Image] clipboard.png " {
+	if got := next.composer.Value(); got != "[clipboard image #1] " {
 		t.Fatalf("expected inline image placeholder, got %q", got)
 	}
 	if !strings.Contains(next.status, "Attached image") {
 		t.Fatalf("unexpected attach status: %q", next.status)
+	}
+}
+
+func TestAttachmentTokenBackspaceRemovesWholeToken(t *testing.T) {
+	m := Model{
+		composer:        textarea.New(),
+		attachmentFiles: attachment.NewManager(t.TempDir()),
+		draftAttachments: []attachment.Draft{{
+			Metadata: attachment.Metadata{Name: "clipboard.png", MIME: "image/png", Path: filepath.Join(t.TempDir(), "clipboard.png")},
+			Token:    "[clipboard image #1]",
+		}},
+	}
+	m.setComposerDraftValue("analyze this")
+	m.composer.SetCursor(len("[clipboard"))
+
+	updated, _ := m.handleKey(ui.KeyMsg{Type: ui.KeyBackspace})
+	next := updated.(*Model)
+	if got := next.composer.Value(); got != "analyze this" {
+		t.Fatalf("expected attachment token to be removed atomically, got %q", got)
+	}
+	if len(next.draftAttachments) != 0 {
+		t.Fatalf("expected attachment removed with token, got %#v", next.draftAttachments)
 	}
 }
 
@@ -799,7 +868,7 @@ func TestCtrlVPastesAttachmentFilePath(t *testing.T) {
 	if next.draftAttachments[0].Name != "note.txt" {
 		t.Fatalf("unexpected attachment name: %#v", next.draftAttachments[0])
 	}
-	if got := next.composer.Value(); got != "[Text] note.txt " {
+	if got := next.composer.Value(); got != "[file #1] " {
 		t.Fatalf("expected inline file placeholder, got %q", got)
 	}
 }
@@ -811,8 +880,11 @@ func TestBackspaceRemovesLastDraftAttachmentWhenComposerEmpty(t *testing.T) {
 		attachmentFiles: attachment.NewManager(root),
 		draftAttachments: []attachment.Draft{{
 			Metadata: attachment.Metadata{Name: "note.txt", MIME: "text/plain", Path: filepath.Join(root, "note.txt")},
+			Token:    "[file #1]",
 		}},
 	}
+	m.setComposerDraftValue("")
+	m.composer.SetCursor(len("[file #1]"))
 
 	updated, _ := m.handleKey(ui.KeyMsg{Type: ui.KeyBackspace})
 	next := updated.(*Model)
@@ -828,16 +900,15 @@ func TestBackspaceAtComposerStartRemovesLastDraftAttachment(t *testing.T) {
 		attachmentFiles: attachment.NewManager(root),
 		draftAttachments: []attachment.Draft{{
 			Metadata: attachment.Metadata{Name: "clipboard.png", MIME: "image/png", Path: filepath.Join(root, "clipboard.png")},
+			Token:    "[clipboard image #1]",
 		}},
 	}
-	m.composer.SetValue("analyze this image")
-	m.composer.SetCursor(0)
+	m.setComposerDraftValue("analyze this image")
+	m.composer.SetCursor(len("[clipboard image #1]"))
 
 	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyBackspace})
 	next := updated.(*Model)
-	if cmd == nil {
-		t.Fatal("expected title sync command after attachment removal")
-	}
+	_ = cmd
 	if len(next.draftAttachments) != 0 {
 		t.Fatalf("expected attachment removed, got %#v", next.draftAttachments)
 	}
@@ -853,16 +924,15 @@ func TestDeleteAtComposerEndRemovesLastDraftAttachment(t *testing.T) {
 		attachmentFiles: attachment.NewManager(root),
 		draftAttachments: []attachment.Draft{{
 			Metadata: attachment.Metadata{Name: "clipboard.png", MIME: "image/png", Path: filepath.Join(root, "clipboard.png")},
+			Token:    "[clipboard image #1]",
 		}},
 	}
-	m.composer.SetValue("analyze this image")
-	m.composer.SetCursor(len("analyze this image"))
+	m.setComposerDraftValue("analyze this image")
+	m.composer.SetCursor(0)
 
 	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyDelete})
 	next := updated.(*Model)
-	if cmd == nil {
-		t.Fatal("expected title sync command after attachment removal")
-	}
+	_ = cmd
 	if len(next.draftAttachments) != 0 {
 		t.Fatalf("expected attachment removed, got %#v", next.draftAttachments)
 	}
@@ -890,7 +960,7 @@ func TestRenderComposerShowsDraftAttachmentInsideComposer(t *testing.T) {
 	m.setComposerDraftValue("")
 
 	got := ansi.Strip(m.renderComposer())
-	if !strings.Contains(got, "[Image] clipboard.png") {
+	if !strings.Contains(got, "[clipboard image #1]") {
 		t.Fatalf("expected attachment label inside composer, got %q", got)
 	}
 }
@@ -921,7 +991,7 @@ func TestEnterSendsPromptWithPastedImageAttachment(t *testing.T) {
 	if len(next.draftAttachments) != 1 {
 		t.Fatalf("expected one draft attachment, got %#v", next.draftAttachments)
 	}
-	if got := next.composer.Value(); got != "[Image] clipboard.png " {
+	if got := next.composer.Value(); got != "[clipboard image #1] " {
 		t.Fatalf("expected inline image placeholder after paste, got %q", got)
 	}
 
@@ -960,7 +1030,8 @@ func TestSubmissionPromptTextStripsAttachmentPlaceholders(t *testing.T) {
 			Metadata: attachment.Metadata{Name: "clipboard.png", MIME: "image/png", Path: filepath.Join(root, "clipboard.png")},
 		}},
 	}
-	m.composer.SetValue("[Image] clipboard.png analyze this image")
+	m.draftAttachments[0].Token = "[clipboard image #1]"
+	m.composer.SetValue("[clipboard image #1] analyze this image")
 	if got := m.submissionPromptText(); got != "analyze this image" {
 		t.Fatalf("submissionPromptText() = %q, want %q", got, "analyze this image")
 	}

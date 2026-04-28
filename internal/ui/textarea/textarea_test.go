@@ -238,6 +238,53 @@ func TestResetClearsValueAndCursor(t *testing.T) {
 	}
 }
 
+func TestTokenBackspaceRemovesWholeToken(t *testing.T) {
+	m := newTestModel()
+	m.SetValue("look [clipboard image #1] now")
+	start := len("look ")
+	end := start + len("[clipboard image #1]")
+	m.RegisterToken(start, end)
+	m.SetCursor(start + len("[clipboard"))
+
+	next, _ := m.Update(ui.KeyMsg{Type: ui.KeyBackspace})
+	if got := next.Value(); got != "look  now" {
+		t.Fatalf("expected backspace inside token to remove whole token, got %q", got)
+	}
+}
+
+func TestTokenDeleteRemovesWholeToken(t *testing.T) {
+	m := newTestModel()
+	m.SetValue("look @README.md now")
+	start := len("look ")
+	end := start + len("@README.md")
+	m.RegisterToken(start, end)
+	m.SetCursor(start + 2)
+
+	next, _ := m.Update(ui.KeyMsg{Type: ui.KeyDelete})
+	if got := next.Value(); got != "look  now" {
+		t.Fatalf("expected delete inside token to remove whole token, got %q", got)
+	}
+}
+
+func TestTokenArrowKeysSkipAcrossWholeToken(t *testing.T) {
+	m := newTestModel()
+	m.SetValue("a $review z")
+	start := len("a ")
+	end := start + len("$review")
+	m.RegisterToken(start, end)
+	m.SetCursor(start)
+
+	next, _ := m.Update(ui.KeyMsg{Type: ui.KeyRight})
+	if got := next.CursorIndex(); got != end {
+		t.Fatalf("expected right arrow to skip token, got %d want %d", got, end)
+	}
+
+	next, _ = next.Update(ui.KeyMsg{Type: ui.KeyLeft})
+	if got := next.CursorIndex(); got != start {
+		t.Fatalf("expected left arrow to skip token, got %d want %d", got, start)
+	}
+}
+
 func newTestModel() Model {
 	m := New()
 	m.Prompt = "> "
