@@ -336,6 +336,13 @@ type mainScreenWidget struct {
 	valid      bool
 }
 
+func (w *mainScreenWidget) DirtyRects() []ui.Rect {
+	if w == nil || w.retained == nil {
+		return nil
+	}
+	return copyRects(w.retained.DirtyRects())
+}
+
 func (w *mainScreenWidget) Invalidate() {
 	if w == nil {
 		return
@@ -364,14 +371,19 @@ func (w *mainScreenWidget) Surface(ctx *ui.Context, bounds ui.Rect) ui.Surface {
 	layoutChanged := !w.valid || w.bounds != bounds ||
 		w.transcript.LayoutChanged() || w.composer.LayoutChanged() ||
 		w.sidebar.LayoutChanged() || w.statusPane.LayoutChanged()
-	surface := w.prepareRetainedSurface(bounds, layoutChanged)
+	surface := ui.TransparentSurface(bounds.W, bounds.H)
+	if !layoutChanged && w.valid && w.bounds == bounds &&
+		w.surface.SurfaceWidth() == bounds.W && w.surface.SurfaceHeight() == bounds.H {
+		surface = surface.PlaceAt(0, 0, w.surface)
+	}
 	canvas := ui.NewCanvas(&surface, bounds)
 	if layoutChanged {
 		root.PaintAll(ctx, canvas)
 	} else {
 		root.PaintDirty(ctx, canvas)
 	}
-	if rects := root.DirtyRects(); len(rects) > 0 {
+	rects := root.DirtyRects()
+	if len(rects) > 0 {
 		surface = surface.WithDirtyRects(rects...)
 	}
 	root.ClearDirty()
@@ -388,12 +400,46 @@ func (w *mainScreenWidget) Surface(ctx *ui.Context, bounds ui.Rect) ui.Surface {
 	return surface
 }
 
-func (w *mainScreenWidget) prepareRetainedSurface(bounds ui.Rect, layoutChanged bool) ui.Surface {
-	if !w.valid || layoutChanged || w.surface.SurfaceWidth() != bounds.W || w.surface.SurfaceHeight() != bounds.H {
-		return ui.TransparentSurface(bounds.W, bounds.H)
+func (w *mainScreenWidget) PaintInto(ctx *ui.Context, bounds ui.Rect, dst *ui.Surface) []ui.Rect {
+	if w == nil || dst == nil {
+		return nil
 	}
-	base := ui.TransparentSurface(bounds.W, bounds.H)
-	return base.PlaceAt(0, 0, w.surface)
+	return w.paintIntoCanvas(ctx, ui.Rect{W: bounds.W, H: bounds.H}, ui.NewCanvas(dst, bounds))
+}
+
+func (w *mainScreenWidget) paintIntoCanvas(ctx *ui.Context, bounds ui.Rect, canvas ui.Canvas) []ui.Rect {
+	if w == nil {
+		return nil
+	}
+	root := w.ensureRetainedRoot()
+	root.model = w.model
+	root.Layout(ctx, bounds)
+	root.PrepareDirty(ctx)
+	layoutChanged := !w.valid || w.bounds != bounds ||
+		w.transcript.LayoutChanged() || w.composer.LayoutChanged() ||
+		w.sidebar.LayoutChanged() || w.statusPane.LayoutChanged()
+	if !layoutChanged && w.valid && w.bounds == bounds &&
+		w.surface.SurfaceWidth() == bounds.W && w.surface.SurfaceHeight() == bounds.H {
+		canvas.BlitSurface(0, 0, w.surface)
+	}
+	if layoutChanged {
+		root.PaintAll(ctx, canvas)
+	} else {
+		root.PaintDirty(ctx, canvas)
+	}
+	rects := root.DirtyRects()
+	root.ClearDirty()
+	w.transcript.ClearDirty()
+	w.composer.ClearDirty()
+	w.sidebar.ClearDirty()
+	w.statusPane.ClearDirty()
+	w.bounds = bounds
+	w.surface = canvas.Snapshot()
+	w.valid = true
+	cache := w.model.ensureRenderCache()
+	cache.renderedBodySurface = w.surface
+	cache.bodyValid = true
+	return rects
 }
 
 type mainScreenRetainedRoot struct {

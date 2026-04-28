@@ -113,6 +113,32 @@ func (w *elementWindow) InvalidateCaches(ctx *Context) {
 	w.Dirty = true
 }
 
+type paintedWindow struct {
+	BaseWindow
+	bounds     Rect
+	fill       string
+	dirtyRects []Rect
+	painted    int
+}
+
+func (w *paintedWindow) Bounds(Rect) Rect {
+	return w.bounds
+}
+
+func (w *paintedWindow) CanPaintWindow() bool {
+	return true
+}
+
+func (w *paintedWindow) PaintWindow(_ *Context, bounds Rect, dst *Surface) {
+	w.painted++
+	canvas := NewCanvas(dst, bounds)
+	canvas.WriteText(0, 0, w.fill, CellStyle{})
+}
+
+func (w *paintedWindow) WindowDirtyRects() []Rect {
+	return append([]Rect(nil), w.dirtyRects...)
+}
+
 func TestRootRoutesKeysToFocusedWindow(t *testing.T) {
 	root := NewRoot(theme.Default().Palette, Rect{W: 20, H: 10})
 	main := newStubWindow("main", 0, Rect{W: 20, H: 10})
@@ -192,6 +218,32 @@ func TestRootComposesWindowsInZOrder(t *testing.T) {
 	}
 	if got := frame.SurfaceCellText(5, 3); got != "o" {
 		t.Fatalf("expected modal overlay at 5,3, got %q", got)
+	}
+}
+
+func TestRootPaintsWindowPainterIntoFrame(t *testing.T) {
+	root := NewRoot(theme.Default().Palette, Rect{W: 10, H: 4})
+	main := &paintedWindow{
+		BaseWindow: BaseWindow{WindowID: "main", VisibleFlag: true, Dirty: true},
+		bounds:     Rect{X: 2, Y: 1, W: 4, H: 2},
+		fill:       "p",
+		dirtyRects: []Rect{{X: 0, Y: 0, W: 1, H: 1}},
+	}
+	root.SetMainWindow(main)
+
+	frame := root.RenderFrame()
+	if main.painted != 1 {
+		t.Fatalf("expected painted window to paint once, got %d", main.painted)
+	}
+	if got := frame.SurfaceCellText(2, 1); got != "p" {
+		t.Fatalf("expected painted cell at translated window origin, got %q", got)
+	}
+	rects, ok := frame.DirtyRects()
+	if !ok || len(rects) != 1 {
+		t.Fatalf("expected one translated dirty rect, got %#v", rects)
+	}
+	if rects[0] != (Rect{X: 2, Y: 1, W: 1, H: 1}) {
+		t.Fatalf("unexpected translated dirty rect: %#v", rects[0])
 	}
 }
 

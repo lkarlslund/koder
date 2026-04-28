@@ -29,8 +29,11 @@ type modelWindow struct {
 	bounds      func(*Model, ui.Rect) ui.Rect
 	element     func(*Model) ui.Element
 	render      func(*Model, ui.Rect) ui.Surface
+	paint       func(*Model, *ui.Context, ui.Rect, *ui.Surface) []ui.Rect
+	frameDirty  []ui.Rect
 	invalidate  func(*Model, *ui.Context)
 	needsRedraw func(*Model) bool
+	dirtyRects  func(*Model) []ui.Rect
 	key         func(*Model, ui.KeyMsg) (bool, ui.Cmd)
 	mouse       func(*Model, ui.MouseMsg) (bool, ui.Cmd)
 	timer       func(*Model, ui.TimerEvent) (bool, ui.Cmd)
@@ -101,6 +104,30 @@ func (w *modelWindow) Render(ctx *ui.Context, bounds ui.Rect) ui.Surface {
 		return ui.BlankSurface(bounds.W, bounds.H)
 	}
 	return w.render(w.model, bounds)
+}
+
+func (w *modelWindow) PaintWindow(ctx *ui.Context, bounds ui.Rect, dst *ui.Surface) {
+	if w == nil || w.paint == nil || dst == nil {
+		if w != nil {
+			w.frameDirty = nil
+		}
+		return
+	}
+	w.frameDirty = w.paint(w.model, ctx, bounds, dst)
+}
+
+func (w *modelWindow) WindowDirtyRects() []ui.Rect {
+	if w != nil && len(w.frameDirty) > 0 {
+		return append([]ui.Rect(nil), w.frameDirty...)
+	}
+	if w == nil || w.dirtyRects == nil {
+		return nil
+	}
+	return w.dirtyRects(w.model)
+}
+
+func (w *modelWindow) CanPaintWindow() bool {
+	return w != nil && w.paint != nil
 }
 
 func (w *modelWindow) InvalidateCaches(ctx *ui.Context) {

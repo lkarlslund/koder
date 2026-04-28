@@ -153,6 +153,15 @@ type Window interface {
 	Render(ctx *Context, bounds Rect) Surface
 }
 
+type WindowPainter interface {
+	PaintWindow(ctx *Context, bounds Rect, dst *Surface)
+	WindowDirtyRects() []Rect
+}
+
+type OptionalWindowPainter interface {
+	CanPaintWindow() bool
+}
+
 type TimerHandler interface {
 	HandleTimer(TimerEvent) (bool, Cmd)
 }
@@ -534,15 +543,34 @@ func (r *Root) RenderFrame() Surface {
 			continue
 		}
 		windowDirty := window.NeedsRedraw()
+		localBounds := Rect{X: bounds.X - r.bounds.X, Y: bounds.Y - r.bounds.Y, W: bounds.W, H: bounds.H}
+		if painter, ok := window.(WindowPainter); ok {
+			if optional, ok := window.(OptionalWindowPainter); ok && !optional.CanPaintWindow() {
+				goto renderSurface
+			}
+			painter.PaintWindow(ctx, localBounds, &root)
+			if windowDirty {
+				if rects := painter.WindowDirtyRects(); len(rects) > 0 {
+					for _, rect := range rects {
+						damage.Add(rect.Translate(localBounds.X, localBounds.Y))
+					}
+				} else {
+					damage.Add(localBounds)
+				}
+			}
+			window.ClearRedraw()
+			continue
+		}
+	renderSurface:
 		child := window.Render(ctx, Rect{W: bounds.W, H: bounds.H}).Normalize(bounds.W, bounds.H)
-		root = root.PlaceAt(bounds.X-r.bounds.X, bounds.Y-r.bounds.Y, child)
+		root = root.PlaceAt(localBounds.X, localBounds.Y, child)
 		if windowDirty {
 			if dirtyRects, ok := child.DirtyRects(); ok {
 				for _, rect := range dirtyRects {
-					damage.Add(rect.Translate(bounds.X-r.bounds.X, bounds.Y-r.bounds.Y))
+					damage.Add(rect.Translate(localBounds.X, localBounds.Y))
 				}
 			} else {
-				damage.Add(Rect{X: bounds.X - r.bounds.X, Y: bounds.Y - r.bounds.Y, W: bounds.W, H: bounds.H})
+				damage.Add(localBounds)
 			}
 		}
 		window.ClearRedraw()

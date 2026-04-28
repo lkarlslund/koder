@@ -115,6 +115,19 @@ func (c Canvas) BlitSurface(x, y int, child Surface) {
 	*c.surface = c.surface.placeAt(c.origin.X+x, c.origin.Y+y, child)
 }
 
+func (c Canvas) Snapshot() Surface {
+	if c.surface == nil || c.clip.Empty() {
+		return Surface{}
+	}
+	out := TransparentSurface(c.clip.W, c.clip.H)
+	for y := 0; y < c.clip.H; y++ {
+		for x := 0; x < c.clip.W; x++ {
+			out.setCell(x, y, c.surface.cellAt(c.clip.X+x, c.clip.Y+y))
+		}
+	}
+	return out
+}
+
 type Painter interface {
 	Paint(ctx *Context, canvas Canvas)
 }
