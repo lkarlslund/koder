@@ -215,10 +215,13 @@ func TestRenderFormatsTableAndTaskList(t *testing.T) {
 
 	got := ansi.Strip(renderer.Render("| Name | Value |\n| --- | --- |\n| one | two |\n\n- [x] done\n- [ ] todo"))
 
-	for _, want := range []string{"| Name", "| one", "[x] done", "[ ] todo"} {
+	for _, want := range []string{"| Name", "| one", "✓ done", "☐ todo"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("expected %q in rendered output, got %q", want, got)
 		}
+	}
+	if strings.Contains(got, "• ✓") || strings.Contains(got, "• ☐") {
+		t.Fatalf("expected task list items without extra bullet markers, got %q", got)
 	}
 }
 
@@ -413,6 +416,7 @@ func TestRenderUltimateMarkdownDemoCoverage(t *testing.T) {
 		"⚠ WARNING",
 		"🖼 Image",
 		"Alt: Alt Text",
+		"✓ Create project structure",
 		"footnote[1]",
 		"Footnotes",
 		"[^1] This is the first footnote.",

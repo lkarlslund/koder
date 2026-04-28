@@ -242,11 +242,13 @@ func (r *Renderer) renderStyledInline(node ast.Node, source []byte, style ui.Cel
 			Style: style.Merge(ui.CellStyle{FG: r.palette.MarkdownLinkTargetText}.WithUnderline(true)),
 		}}
 	case *extensionast.TaskCheckBox:
-		label := "[ ] "
+		label := "☐ "
+		checkboxStyle := style.Merge(ui.CellStyle{FG: r.palette.MarkdownListMarker})
 		if typed.IsChecked {
-			label = "[x] "
+			label = "✓ "
+			checkboxStyle = checkboxStyle.Merge(ui.CellStyle{FG: firstColor(r.palette.DiffAddedText, r.palette.MarkdownListMarker)}.WithBold(true))
 		}
-		return []ui.StyledSpan{{Text: label, Style: style}}
+		return []ui.StyledSpan{{Text: label, Style: checkboxStyle}}
 	case *extensionast.FootnoteLink:
 		return []ui.StyledSpan{{
 			Text:  "[" + strconv.Itoa(typed.Index) + "]",
@@ -402,6 +404,15 @@ func (r *Renderer) renderStyledList(node *ast.List, source []byte, width int) []
 		if !ok {
 			continue
 		}
+		lines := ui.SplitStyledLines(r.renderStyledListItem(listItem, source, width))
+		if !node.IsOrdered() && renderedTaskListItem(lines) {
+			if !first {
+				out = ui.AppendStyledSpan(out, "\n", ui.CellStyle{})
+			}
+			out = append(out, linesToSpans(lines)...)
+			first = false
+			continue
+		}
 		marker := "•"
 		markerStyle := ui.CellStyle{FG: r.palette.MarkdownListMarker}
 		if node.IsOrdered() {
@@ -409,7 +420,6 @@ func (r *Renderer) renderStyledList(node *ast.List, source []byte, width int) []
 			markerStyle = ui.CellStyle{FG: r.palette.MarkdownListEnumeration}
 			itemNumber++
 		}
-		lines := ui.SplitStyledLines(r.renderStyledListItem(listItem, source, width))
 		block := prefixStyledLines(
 			lines,
 			[]ui.StyledSpan{{Text: marker + " ", Style: markerStyle}},
@@ -420,6 +430,25 @@ func (r *Renderer) renderStyledList(node *ast.List, source []byte, width int) []
 		}
 		out = append(out, block...)
 		first = false
+	}
+	return out
+}
+
+func renderedTaskListItem(lines [][]ui.StyledSpan) bool {
+	if len(lines) == 0 {
+		return false
+	}
+	firstLine := strings.TrimSpace(ui.PlainStyledText(lines[0]))
+	return strings.HasPrefix(firstLine, "✓ ") || strings.HasPrefix(firstLine, "☐ ")
+}
+
+func linesToSpans(lines [][]ui.StyledSpan) []ui.StyledSpan {
+	var out []ui.StyledSpan
+	for idx, line := range lines {
+		if idx > 0 {
+			out = ui.AppendStyledSpan(out, "\n", ui.CellStyle{})
+		}
+		out = append(out, line...)
 	}
 	return out
 }
