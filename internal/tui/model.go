@@ -5925,7 +5925,14 @@ func (m *Model) renderMCPDialogElement() ui.Node {
 	if !m.hasMCPDialog() {
 		return nil
 	}
-	return ui.AsNode(m.mcpDialog)
+	return m.mcpDialog.ListNode(max(0, m.width), m.palette)
+}
+
+func (m *Model) renderMCPEditDialogElement() ui.Node {
+	if !m.hasMCPEditDialog() {
+		return nil
+	}
+	return m.mcpDialog.EditorNode(max(0, m.width), m.palette)
 }
 
 func (m *Model) renderDisconnectDialogElement() ui.Node {
@@ -6054,7 +6061,17 @@ func (m *Model) handleMCPDialogKey(msg ui.KeyMsg) ui.Cmd {
 	if !m.hasMCPDialog() {
 		return nil
 	}
-	action := m.mcpDialog.Update(msg)
+	return m.applyMCPDialogAction(m.mcpDialog.UpdateList(msg), false)
+}
+
+func (m *Model) handleMCPEditDialogKey(msg ui.KeyMsg) ui.Cmd {
+	if !m.hasMCPEditDialog() {
+		return nil
+	}
+	return m.applyMCPDialogAction(m.mcpDialog.UpdateEditor(msg), true)
+}
+
+func (m *Model) applyMCPDialogAction(action dialogs.MCPDialogAction, fromEditor bool) ui.Cmd {
 	switch action.Kind {
 	case dialogs.MCPDialogActionSave:
 		if err := kodermcp.ValidateServerConfig(action.ServerID, action.Config); err != nil {
@@ -6076,7 +6093,9 @@ func (m *Model) handleMCPDialogKey(msg ui.KeyMsg) ui.Cmd {
 			return m.syncWindowTitleCmd()
 		}
 		m.agent.UpdateConfig(m.cfg)
-		m.closeMCPDialog()
+		if fromEditor {
+			m.mcpDialog.CloseEditor()
+		}
 		m.status = fmt.Sprintf("Saved MCP server %s", action.ServerID)
 		return ui.Batch(m.mcpReloadCmd(), m.syncWindowTitleCmd())
 	case dialogs.MCPDialogActionRemove:
@@ -6088,7 +6107,9 @@ func (m *Model) handleMCPDialogKey(msg ui.KeyMsg) ui.Cmd {
 				return m.syncWindowTitleCmd()
 			}
 			m.agent.UpdateConfig(m.cfg)
-			m.closeMCPDialog()
+			if fromEditor {
+				m.mcpDialog.CloseEditor()
+			}
 			m.status = fmt.Sprintf("Removed MCP server %s", id)
 			return ui.Batch(m.mcpReloadCmd(), m.syncWindowTitleCmd())
 		}
@@ -6096,6 +6117,11 @@ func (m *Model) handleMCPDialogKey(msg ui.KeyMsg) ui.Cmd {
 		m.status = fmt.Sprintf("Reloading MCP server %s…", action.ServerID)
 		return ui.Batch(m.mcpReloadCmd(), m.syncWindowTitleCmd())
 	case dialogs.MCPDialogActionCancel:
+		if fromEditor {
+			m.mcpDialog.CloseEditor()
+			m.status = "MCP editor closed"
+			return m.syncWindowTitleCmd()
+		}
 		m.closeMCPDialog()
 		m.status = "MCP dialog closed"
 		return m.syncWindowTitleCmd()
@@ -6577,6 +6603,10 @@ func (m *Model) closeConnectDialog() {
 
 func (m *Model) hasMCPDialog() bool {
 	return m.mcpDialog != nil
+}
+
+func (m *Model) hasMCPEditDialog() bool {
+	return m.mcpDialog != nil && m.mcpDialog.HasEditor()
 }
 
 func (m *Model) closeMCPDialog() {

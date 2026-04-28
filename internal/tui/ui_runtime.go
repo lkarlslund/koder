@@ -2,10 +2,7 @@ package tui
 
 import (
 	"fmt"
-	"strings"
 
-	"github.com/lkarlslund/koder/internal/config"
-	kodermcp "github.com/lkarlslund/koder/internal/mcp"
 	"github.com/lkarlslund/koder/internal/tui/dialogs"
 	"github.com/lkarlslund/koder/internal/ui"
 )
@@ -17,6 +14,7 @@ const (
 	toolsWindowID       ui.WindowID = "tools-dialog"
 	connectWindowID     ui.WindowID = "connect-dialog"
 	mcpWindowID         ui.WindowID = "mcp-dialog"
+	mcpEditWindowID     ui.WindowID = "mcp-edit-dialog"
 	disconnectWindowID  ui.WindowID = "disconnect-dialog"
 	modelWindowID       ui.WindowID = "model-dialog"
 	themeWindowID       ui.WindowID = "theme-dialog"
@@ -388,60 +386,14 @@ func (m *Model) overlayWindows() []ui.Window {
 		windows = append(windows, m.centeredWindow(mcpWindowID, 55, m.renderMCPDialogElement(), func(m *Model, msg ui.KeyMsg) ui.Cmd {
 			return m.handleMCPDialogKey(msg)
 		}, func(m *Model, controlID string) ui.Cmd {
-			if controlID == "window-close" {
-				m.closeMCPDialog()
-				m.status = "MCP dialog closed"
-				return m.syncWindowTitleCmd()
-			}
-			action := m.mcpDialog.ActivateControl(controlID)
-			switch action.Kind {
-			case dialogs.MCPDialogActionSave:
-				if err := kodermcp.ValidateServerConfig(action.ServerID, action.Config); err != nil {
-					m.mcpDialog.SetStatus("Save failed: " + err.Error())
-					m.status = err.Error()
-					return m.syncWindowTitleCmd()
-				}
-				oldID := m.mcpDialogEditID()
-				if m.cfg.MCPServers == nil {
-					m.cfg.MCPServers = map[string]config.MCPServer{}
-				}
-				if oldID != "" && oldID != action.ServerID {
-					delete(m.cfg.MCPServers, oldID)
-				}
-				m.cfg.MCPServers[action.ServerID] = action.Config
-				if err := m.cfg.Save(); err != nil {
-					m.mcpDialog.SetStatus("Save failed: " + err.Error())
-					m.status = err.Error()
-					return m.syncWindowTitleCmd()
-				}
-				m.agent.UpdateConfig(m.cfg)
-				m.closeMCPDialog()
-				m.status = fmt.Sprintf("Saved MCP server %s", action.ServerID)
-				return ui.Batch(m.mcpReloadCmd(), m.syncWindowTitleCmd())
-			case dialogs.MCPDialogActionRemove:
-				if id := strings.TrimSpace(action.ServerID); id != "" {
-					delete(m.cfg.MCPServers, id)
-					if err := m.cfg.Save(); err != nil {
-						m.mcpDialog.SetStatus("Remove failed: " + err.Error())
-						m.status = err.Error()
-						return m.syncWindowTitleCmd()
-					}
-					m.agent.UpdateConfig(m.cfg)
-					m.closeMCPDialog()
-					m.status = fmt.Sprintf("Removed MCP server %s", id)
-					return ui.Batch(m.mcpReloadCmd(), m.syncWindowTitleCmd())
-				}
-				return nil
-			case dialogs.MCPDialogActionReconnect:
-				m.status = fmt.Sprintf("Reloading MCP server %s…", action.ServerID)
-				return ui.Batch(m.mcpReloadCmd(), m.syncWindowTitleCmd())
-			case dialogs.MCPDialogActionCancel:
-				m.closeMCPDialog()
-				m.status = "MCP dialog closed"
-				return m.syncWindowTitleCmd()
-			default:
-				return nil
-			}
+			return m.applyMCPDialogAction(m.mcpDialog.ActivateListControl(controlID), false)
+		}))
+	}
+	if m.hasMCPEditDialog() {
+		windows = append(windows, m.centeredWindow(mcpEditWindowID, 56, m.renderMCPEditDialogElement(), func(m *Model, msg ui.KeyMsg) ui.Cmd {
+			return m.handleMCPEditDialogKey(msg)
+		}, func(m *Model, controlID string) ui.Cmd {
+			return m.applyMCPDialogAction(m.mcpDialog.ActivateEditorControl(controlID), true)
 		}))
 	}
 	if m.hasAgentsModal() {
