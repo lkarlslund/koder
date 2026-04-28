@@ -99,13 +99,6 @@ func (w *modelWindow) HandleMouse(msg ui.MouseMsg) (bool, ui.Cmd) {
 	return w.mouse(w.model, msg)
 }
 
-func (w *modelWindow) Render(ctx *ui.Context, bounds ui.Rect) ui.Surface {
-	if w.render == nil {
-		return ui.BlankSurface(bounds.W, bounds.H)
-	}
-	return w.render(w.model, bounds)
-}
-
 func (w *modelWindow) PaintWindow(ctx *ui.Context, bounds ui.Rect, dst *ui.Surface) {
 	if w == nil || dst == nil {
 		if w != nil {

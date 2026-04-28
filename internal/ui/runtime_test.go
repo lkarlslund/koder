@@ -54,6 +54,23 @@ func (w *stubWindow) HandleTimer(TimerEvent) (bool, Cmd) {
 	return true, nil
 }
 
+func (w *stubWindow) PaintWindow(_ *Context, bounds Rect, dst *Surface) {
+	canvas := NewCanvas(dst, bounds)
+	for y := 0; y < bounds.H; y++ {
+		for x := 0; x < bounds.W; x++ {
+			canvas.WriteText(x, y, w.fill, CellStyle{})
+		}
+	}
+}
+
+func (w *stubWindow) WindowDirtyRects() []Rect {
+	return []Rect{{W: w.bounds.W, H: w.bounds.H}}
+}
+
+func (w *stubWindow) CanPaintWindow() bool {
+	return true
+}
+
 func (w *stubWindow) Render(*Context, Rect) Surface {
 	s := BlankSurface(w.bounds.W, w.bounds.H)
 	for y := 0; y < w.bounds.H; y++ {
@@ -73,10 +90,17 @@ func (w *paletteWindow) Bounds(Rect) Rect {
 	return w.bounds
 }
 
-func (w *paletteWindow) Render(ctx *Context, bounds Rect) Surface {
-	s := BlankSurface(bounds.W, bounds.H)
-	s.WriteText(0, 0, "x", CellStyle{FG: cellColor(ctx.Palette.MarkdownText)})
-	return s
+func (w *paletteWindow) PaintWindow(ctx *Context, bounds Rect, dst *Surface) {
+	canvas := NewCanvas(dst, bounds)
+	canvas.WriteText(0, 0, "x", CellStyle{FG: cellColor(ctx.Palette.MarkdownText)})
+}
+
+func (w *paletteWindow) WindowDirtyRects() []Rect {
+	return []Rect{{W: w.bounds.W, H: w.bounds.H}}
+}
+
+func (w *paletteWindow) CanPaintWindow() bool {
+	return true
 }
 
 type paletteElement struct{}
@@ -101,11 +125,19 @@ func (w *elementWindow) Bounds(Rect) Rect {
 	return w.bounds
 }
 
-func (w *elementWindow) Render(ctx *Context, bounds Rect) Surface {
+func (w *elementWindow) PaintWindow(ctx *Context, bounds Rect, dst *Surface) {
 	if w.element == nil {
-		return BlankSurface(bounds.W, bounds.H)
+		return
 	}
-	return w.element.Render(ctx, bounds)
+	renderElementInto(ctx, w.element, bounds, dst)
+}
+
+func (w *elementWindow) WindowDirtyRects() []Rect {
+	return []Rect{{W: w.bounds.W, H: w.bounds.H}}
+}
+
+func (w *elementWindow) CanPaintWindow() bool {
+	return true
 }
 
 func (w *elementWindow) InvalidateCaches(ctx *Context) {

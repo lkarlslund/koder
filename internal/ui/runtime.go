@@ -2,6 +2,7 @@ package ui
 
 import (
 	"cmp"
+	"fmt"
 	"github.com/lkarlslund/koder/internal/theme"
 	"slices"
 	"time"
@@ -150,7 +151,6 @@ type Window interface {
 	Blur()
 	HandleKey(KeyEvent) (bool, Cmd)
 	HandleMouse(MouseEvent) (bool, Cmd)
-	Render(ctx *Context, bounds Rect) Surface
 }
 
 type WindowPainter interface {
@@ -233,10 +233,6 @@ func (w *BaseWindow) HandleKey(KeyEvent) (bool, Cmd) {
 
 func (w *BaseWindow) HandleMouse(MouseEvent) (bool, Cmd) {
 	return false, nil
-}
-
-func (w *BaseWindow) Render(*Context, Rect) Surface {
-	return Surface{}
 }
 
 type Root struct {
@@ -544,29 +540,17 @@ func (r *Root) RenderFrame() Surface {
 		}
 		windowDirty := window.NeedsRedraw()
 		localBounds := Rect{X: bounds.X - r.bounds.X, Y: bounds.Y - r.bounds.Y, W: bounds.W, H: bounds.H}
-		if painter, ok := window.(WindowPainter); ok {
-			if optional, ok := window.(OptionalWindowPainter); ok && !optional.CanPaintWindow() {
-				goto renderSurface
-			}
-			painter.PaintWindow(ctx, localBounds, &root)
-			if windowDirty {
-				if rects := painter.WindowDirtyRects(); len(rects) > 0 {
-					for _, rect := range rects {
-						damage.Add(rect.Translate(localBounds.X, localBounds.Y))
-					}
-				} else {
-					damage.Add(localBounds)
-				}
-			}
-			window.ClearRedraw()
-			continue
+		painter, ok := window.(WindowPainter)
+		if !ok {
+			panic(fmt.Sprintf("ui.Window %T must implement ui.WindowPainter", window))
 		}
-	renderSurface:
-		child := window.Render(ctx, Rect{W: bounds.W, H: bounds.H}).Normalize(bounds.W, bounds.H)
-		root = root.PlaceAt(localBounds.X, localBounds.Y, child)
+		if optional, ok := window.(OptionalWindowPainter); ok && !optional.CanPaintWindow() {
+			panic(fmt.Sprintf("ui.Window %T cannot paint its frame", window))
+		}
+		painter.PaintWindow(ctx, localBounds, &root)
 		if windowDirty {
-			if dirtyRects, ok := child.DirtyRects(); ok {
-				for _, rect := range dirtyRects {
+			if rects := painter.WindowDirtyRects(); len(rects) > 0 {
+				for _, rect := range rects {
 					damage.Add(rect.Translate(localBounds.X, localBounds.Y))
 				}
 			} else {
