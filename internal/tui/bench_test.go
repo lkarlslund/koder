@@ -11,6 +11,7 @@ import (
 
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/ui"
 	"github.com/lkarlslund/koder/internal/workspace"
 )
@@ -366,6 +367,89 @@ func BenchmarkMainScreenRetainedPrepareIdle(b *testing.B) {
 	}
 }
 
+func BenchmarkCenteredModalOpen(b *testing.B) {
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		m := benchmarkModel(b, 80)
+		_ = m.viewSurface()
+		m.openHelpModal()
+		_ = m.viewSurface()
+	}
+}
+
+func BenchmarkCenteredModalClose(b *testing.B) {
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		m := benchmarkModel(b, 80)
+		m.openHelpModal()
+		_ = m.viewSurface()
+		m.closeHelpModal()
+		_ = m.viewSurface()
+	}
+}
+
+func BenchmarkMainWindowRetainedFullPaint(b *testing.B) {
+	m := benchmarkModel(b, 140)
+	_ = m.viewSurface()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		m.invalidateBodyCache()
+		_ = m.viewSurface()
+	}
+}
+
+func BenchmarkOverlayStackRepaint(b *testing.B) {
+	m := benchmarkModel(b, 80)
+	m.openHelpModal()
+	m.openThemePicker()
+	_ = m.viewSurface()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		m.themeDialog.Update(ui.KeyMsg{Type: ui.KeyRight})
+		m.previewSelectedTheme()
+		_ = m.viewSurface()
+	}
+}
+
+func BenchmarkThemeSwitchRepaint(b *testing.B) {
+	m := benchmarkModel(b, 80)
+	_ = m.viewSurface()
+	themes := []string{"tokyonight", "gruvbox"}
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		if err := m.setTheme(themes[i%len(themes)], false); err != nil {
+			b.Fatalf("set theme: %v", err)
+		}
+		_ = m.viewSurface()
+	}
+}
+
+func BenchmarkDialogPaint(b *testing.B) {
+	benchmarkDialogPaint(b, "connect", benchmarkConnectDialogModel, func(m *Model) {
+		m.connectDialog.Update(ui.KeyMsg{Type: ui.KeyDown})
+	})
+	benchmarkDialogPaint(b, "model", benchmarkModelDialogModel, func(m *Model) {
+		m.modelDialog.Update(ui.KeyMsg{Type: ui.KeyDown})
+	})
+	benchmarkDialogPaint(b, "preferences", benchmarkPreferencesDialogModel, func(m *Model) {
+		m.preferences.Update(ui.KeyMsg{Type: ui.KeyRight})
+	})
+	benchmarkDialogPaint(b, "tools", benchmarkToolsDialogModel, func(m *Model) {
+		m.toolsDialog.Update(ui.KeyMsg{Type: ui.KeyDown})
+	})
+	benchmarkDialogPaint(b, "theme", benchmarkThemeDialogModel, func(m *Model) {
+		m.themeDialog.Update(ui.KeyMsg{Type: ui.KeyRight})
+		m.previewSelectedTheme()
+	})
+	benchmarkDialogPaint(b, "picker", benchmarkPickerDialogModel, func(m *Model) {
+		m.picker.dialog.Update(ui.KeyMsg{Type: ui.KeyDown})
+	})
+	benchmarkDialogPaint(b, "approval", benchmarkApprovalDialogModel, func(m *Model) {
+		m.ensureApprovalDialog()
+		m.approvalDialog.Update(ui.KeyMsg{Type: ui.KeyRight})
+	})
+}
+
 func benchmarkNonsenseChunks(chunkCount, wordsPerChunk int, seed int64) []string {
 	rng := rand.New(rand.NewSource(seed))
 	syllables := []string{
@@ -388,4 +472,92 @@ func benchmarkNonsenseChunks(chunkCount, wordsPerChunk int, seed int64) []string
 		chunks = append(chunks, line.String())
 	}
 	return chunks
+}
+
+func benchmarkDialogPaint(b *testing.B, name string, setup func(*testing.B) Model, interact func(*Model)) {
+	b.Helper()
+	b.Run(name+"/initial_full_paint", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			m := setup(b)
+			_ = m.viewSurface()
+		}
+	})
+	b.Run(name+"/steady_state", func(b *testing.B) {
+		m := setup(b)
+		_ = m.viewSurface()
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			_ = m.viewSurface()
+		}
+	})
+	b.Run(name+"/interaction_repaint", func(b *testing.B) {
+		m := setup(b)
+		_ = m.viewSurface()
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			interact(&m)
+			_ = m.viewSurface()
+		}
+	})
+}
+
+func benchmarkConnectDialogModel(b *testing.B) Model {
+	b.Helper()
+	m := benchmarkModel(b, 40)
+	m.openConnectDialog()
+	return m
+}
+
+func benchmarkModelDialogModel(b *testing.B) Model {
+	b.Helper()
+	m := benchmarkModel(b, 40)
+	models := make([]domain.Model, 0, 120)
+	for i := 0; i < 120; i++ {
+		models = append(models, domain.Model{
+			ID:      fmt.Sprintf("benchmark-model-%03d-long-name", i),
+			OwnedBy: "provider",
+		})
+	}
+	m.openModelDialog("benchmark", models)
+	return m
+}
+
+func benchmarkPreferencesDialogModel(b *testing.B) Model {
+	b.Helper()
+	m := benchmarkModel(b, 40)
+	m.openPreferencesDialog()
+	return m
+}
+
+func benchmarkToolsDialogModel(b *testing.B) Model {
+	b.Helper()
+	m := benchmarkModel(b, 40)
+	m.openToolsDialog()
+	return m
+}
+
+func benchmarkThemeDialogModel(b *testing.B) Model {
+	b.Helper()
+	m := benchmarkModel(b, 40)
+	m.openThemePicker()
+	return m
+}
+
+func benchmarkPickerDialogModel(b *testing.B) Model {
+	b.Helper()
+	m := benchmarkModel(b, 40)
+	m.openPermissionsPicker()
+	return m
+}
+
+func benchmarkApprovalDialogModel(b *testing.B) Model {
+	b.Helper()
+	m := benchmarkModel(b, 40)
+	m.approvals = []store.Approval{{
+		ID:      7,
+		Tool:    domain.ToolKindBash,
+		Command: `{"command":"git status","tool_call_id":"call_1"}`,
+	}}
+	return m
 }

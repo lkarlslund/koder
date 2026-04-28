@@ -163,3 +163,139 @@ func TestSyncUIRootNoopKeepsRootClean(t *testing.T) {
 		t.Fatal("expected repeated sync to avoid marking the root dirty")
 	}
 }
+
+func TestViewSurfaceSidebarToggleDirtyRectsCoverDiff(t *testing.T) {
+	m := newRuntimeTestModel(t)
+	m.status = "Ready"
+	m.resize()
+	m.refreshViewport()
+
+	before := m.viewSurface()
+	m.showSidebar = false
+	m.resize()
+	m.refreshViewportPreserve()
+	after := m.viewSurface()
+
+	assertDirtyRectsCoverSurfaceDiff(t, before, after)
+}
+
+func TestViewSurfaceResizeDirtyRectsCoverDiff(t *testing.T) {
+	m := newRuntimeTestModel(t)
+	m.status = "Ready"
+	m.resize()
+	m.refreshViewport()
+
+	before := m.viewSurface()
+	m.width = 96
+	m.height = 28
+	m.resize()
+	m.refreshViewportPreserve()
+	after := m.viewSurface()
+
+	assertDirtyRectsCoverSurfaceDiff(t, before, after)
+}
+
+func TestViewSurfaceModalOpenCloseDirtyRectsCoverDiff(t *testing.T) {
+	m := newRuntimeTestModel(t)
+	m.resize()
+	m.refreshViewport()
+
+	before := m.viewSurface()
+	m.openHelpModal()
+	withModal := m.viewSurface()
+	assertDirtyRectsCoverSurfaceDiff(t, before, withModal)
+
+	m.closeHelpModal()
+	afterClose := m.viewSurface()
+	assertDirtyRectsCoverSurfaceDiff(t, withModal, afterClose)
+}
+
+func TestViewSurfaceThemeChangeDirtyRectsCoverDiff(t *testing.T) {
+	m := newRuntimeTestModel(t)
+	m.status = "Ready"
+	m.resize()
+	m.refreshViewport()
+
+	before := m.viewSurface()
+	if err := m.setTheme("gruvbox", false); err != nil {
+		t.Fatalf("set theme: %v", err)
+	}
+	after := m.viewSurface()
+
+	assertDirtyRectsCoverSurfaceDiff(t, before, after)
+}
+
+func TestViewSurfaceTranscriptAppendWithSidebarDirtyRectsCoverDiff(t *testing.T) {
+	m := newRuntimeTestModel(t)
+	m.currentSession = domain.Session{ID: 1, Title: "Session 1"}
+	m.appendLocalUserPrompt("first message", nil, nil)
+	m.resize()
+	m.refreshViewport()
+
+	before := m.viewSurface()
+	m.appendLocalUserPrompt("second message that should append below the existing content", nil, nil)
+	after := m.viewSurface()
+
+	assertDirtyRectsCoverSurfaceDiff(t, before, after)
+}
+
+func assertDirtyRectsCoverSurfaceDiff(t *testing.T, before, after ui.Surface) {
+	t.Helper()
+	rects, ok := after.DirtyRects()
+	if !ok || len(rects) == 0 {
+		t.Fatal("expected dirty rects on updated frame")
+	}
+	width := max(before.SurfaceWidth(), after.SurfaceWidth())
+	height := max(before.SurfaceHeight(), after.SurfaceHeight())
+	before = before.Normalize(width, height)
+	after = after.Normalize(width, height)
+	diff := ui.DiffSurfaceDamage(before, after)
+	if len(diff) == 0 {
+		t.Fatal("expected frame diff after runtime update")
+	}
+	for _, rect := range rects {
+		if rect.X < 0 || rect.Y < 0 || rect.X+rect.W > width || rect.Y+rect.H > height {
+			t.Fatalf("dirty rect %v exceeds normalized frame %dx%d", rect, width, height)
+		}
+	}
+	if !rectsCoverDamage(rects, diff, width, height) {
+		t.Fatalf("dirty rects %v did not cover frame diff %v", rects, diff)
+	}
+}
+
+func rectsCoverDamage(rects, diff []ui.Rect, width, height int) bool {
+	if len(diff) == 0 {
+		return true
+	}
+	covered := make([]bool, width*height)
+	mark := func(rect ui.Rect) {
+		startX := max(0, rect.X)
+		startY := max(0, rect.Y)
+		endX := min(width, rect.X+rect.W)
+		endY := min(height, rect.Y+rect.H)
+		for y := startY; y < endY; y++ {
+			row := y * width
+			for x := startX; x < endX; x++ {
+				covered[row+x] = true
+			}
+		}
+	}
+	for _, rect := range rects {
+		mark(rect)
+	}
+	for _, rect := range diff {
+		startX := max(0, rect.X)
+		startY := max(0, rect.Y)
+		endX := min(width, rect.X+rect.W)
+		endY := min(height, rect.Y+rect.H)
+		for y := startY; y < endY; y++ {
+			row := y * width
+			for x := startX; x < endX; x++ {
+				if !covered[row+x] {
+					return false
+				}
+			}
+		}
+	}
+	return true
+}

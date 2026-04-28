@@ -243,6 +243,7 @@ type Root struct {
 	focused       WindowID
 	dirty         bool
 	previous      Surface
+	pendingDamage DamageSet
 	timerSchedule TimerScheduler
 }
 
@@ -261,6 +262,7 @@ func (r *Root) SetBounds(bounds Rect) {
 	if r.bounds == bounds {
 		return
 	}
+	r.pendingDamage.Add(Rect{W: max(r.bounds.W, bounds.W), H: max(r.bounds.H, bounds.H)})
 	r.bounds = bounds
 	r.RequestRedraw()
 }
@@ -289,6 +291,7 @@ func (r *Root) InvalidateAll() {
 			invalidator.InvalidateCaches(ctx)
 		}
 	}
+	r.pendingDamage.Add(r.bounds)
 	r.RequestRedraw()
 }
 
@@ -306,7 +309,13 @@ func (r *Root) SetMainWindow(window Window) {
 	if r.main == window {
 		return
 	}
+	if r.main != nil {
+		r.pendingDamage.Add(clipRect(r.main.Bounds(r.bounds), r.bounds))
+	}
 	r.main = window
+	if window != nil {
+		r.pendingDamage.Add(clipRect(window.Bounds(r.bounds), r.bounds))
+	}
 	r.RequestRedraw()
 	if window != nil && window.Focusable() && r.focused == "" {
 		r.FocusWindow(window.ID())
@@ -354,6 +363,7 @@ func (r *Root) SetWindows(windows []Window) {
 		if _, ok := desired[existing.ID()]; ok {
 			continue
 		}
+		r.pendingDamage.Add(clipRect(existing.Bounds(r.bounds), r.bounds))
 		r.timerSchedule.StopOwnerTimers(string(existing.ID()))
 		if r.focused == existing.ID() {
 			existing.Blur()
@@ -530,6 +540,8 @@ func (r *Root) RenderFrame() Surface {
 	root := BlankSurface(max(0, r.bounds.W), max(0, r.bounds.H))
 	ctx := &Context{Palette: r.palette}
 	damage := DamageSet{}
+	damage.AddAll(r.pendingDamage.Rects())
+	r.pendingDamage.Reset()
 	for _, window := range r.allWindows() {
 		if window == nil || !window.Visible() {
 			continue

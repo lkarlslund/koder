@@ -291,6 +291,8 @@ type mainScreenRetainedRoot struct {
 	mainColumnNode *ui.FlexNode
 	bodyNode       *ui.FlexNode
 	layoutRootNode *ui.FlexNode
+	bodyChildren   [2]ui.FlexNodeChild
+	bodySlices     [2][]ui.FlexNodeChild
 }
 
 type transcriptRetainedNode struct {
@@ -526,6 +528,10 @@ func newMainScreenRetainedRoot(m *Model, transcript *transcriptWidget, composer 
 			{Node: root.statusNode},
 		},
 	}
+	root.bodyChildren[0] = ui.FlexNodeChild{Node: root.mainColumnNode, Flex: 1}
+	root.bodyChildren[1] = ui.FlexNodeChild{Node: root.sidebarNode}
+	root.bodySlices[0] = root.bodyChildren[:1]
+	root.bodySlices[1] = root.bodyChildren[:2]
 	return root
 }
 
@@ -580,23 +586,23 @@ func (r *mainScreenRetainedRoot) syncLayoutTree() {
 	if r == nil || r.bodyNode == nil || r.layoutRootNode == nil {
 		return
 	}
-	bodyChildren := []ui.FlexNodeChild{{Node: r.mainColumnNode, Flex: 1}}
 	if r.model != nil && r.model.showSidebar {
-		bodyChildren = append(bodyChildren, ui.FlexNodeChild{Node: r.sidebarNode})
-	} else if r.sidebarNode != nil {
+		r.bodyNode.Children = r.bodySlices[1]
+		return
+	}
+	r.bodyNode.Children = r.bodySlices[0]
+	if r.sidebarNode != nil {
 		r.sidebarNode.Layout(nil, ui.Rect{})
 	}
-	r.bodyNode.Children = bodyChildren
 }
 
 func paintDirtyNode(ctx *ui.Context, canvas ui.Canvas, node ui.Node) {
 	if node == nil || node.Rect().Empty() {
 		return
 	}
-	if group, ok := node.(ui.NodeChildren); ok {
-		for _, child := range group.ChildNodes() {
-			paintDirtyNode(ctx, canvas, child)
-		}
+	if walkChildNodes(node, func(child ui.Node) {
+		paintDirtyNode(ctx, canvas, child)
+	}) {
 		return
 	}
 	if !node.NeedsPaint() {
@@ -610,13 +616,9 @@ func collectNodeDamage(damage *ui.DamageSet, node ui.Node) {
 		return
 	}
 	damage.AddAll(node.DirtyRects())
-	group, ok := node.(ui.NodeChildren)
-	if !ok {
-		return
-	}
-	for _, child := range group.ChildNodes() {
+	walkChildNodes(node, func(child ui.Node) {
 		collectNodeDamage(damage, child)
-	}
+	})
 }
 
 func clearNodeDirty(node ui.Node) {
@@ -624,12 +626,32 @@ func clearNodeDirty(node ui.Node) {
 		return
 	}
 	node.ClearDirty()
-	group, ok := node.(ui.NodeChildren)
-	if !ok {
-		return
-	}
-	for _, child := range group.ChildNodes() {
+	walkChildNodes(node, func(child ui.Node) {
 		clearNodeDirty(child)
+	})
+}
+
+func walkChildNodes(node ui.Node, visit func(ui.Node)) bool {
+	if node == nil || visit == nil {
+		return false
+	}
+	switch typed := node.(type) {
+	case *ui.FlexNode:
+		for _, child := range typed.Children {
+			if child.Node != nil {
+				visit(child.Node)
+			}
+		}
+		return true
+	case interface{ ChildNodes() []ui.Node }:
+		for _, child := range typed.ChildNodes() {
+			if child != nil {
+				visit(child)
+			}
+		}
+		return true
+	default:
+		return false
 	}
 }
 

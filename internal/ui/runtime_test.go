@@ -275,11 +275,19 @@ func TestRootPaintsWindowPainterIntoFrame(t *testing.T) {
 		t.Fatalf("expected painted cell at translated window origin, got %q", got)
 	}
 	rects, ok := frame.DirtyRects()
-	if !ok || len(rects) != 1 {
-		t.Fatalf("expected one translated dirty rect, got %#v", rects)
+	if !ok || len(rects) == 0 {
+		t.Fatalf("expected translated dirty rects, got %#v", rects)
 	}
-	if rects[0] != (Rect{X: 2, Y: 1, W: 1, H: 1}) {
-		t.Fatalf("unexpected translated dirty rect: %#v", rects[0])
+	want := Rect{X: 2, Y: 1, W: 1, H: 1}
+	found := false
+	for _, rect := range rects {
+		if rect == want {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected translated dirty rect %v in %#v", want, rects)
 	}
 }
 
