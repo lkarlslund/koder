@@ -439,7 +439,7 @@ func (v TranscriptViewport) Measure(_ *Context, constraints Constraints) Size {
 }
 
 func (v TranscriptViewport) Render(ctx *Context, bounds Rect) Surface {
-	return renderOwnedSurface(ctx, bounds, v.RenderTo)
+	return renderOwnedCanvas(ctx, bounds, v)
 }
 
 func (v TranscriptViewport) RenderTo(ctx *Context, bounds Rect, dst *Surface) {
@@ -464,6 +464,14 @@ func (v TranscriptViewport) WalkChildren(_ *Context, visit func(Element)) {
 	}
 }
 
+func (v TranscriptViewport) Paint(ctx *Context, canvas Canvas) {
+	if canvas.Width() <= 0 || canvas.Height() <= 0 || v.Transcript == nil {
+		return
+	}
+	surface, _, _ := v.Transcript.RenderVisible(ctx, canvas.Width(), canvas.Height(), v.OffsetY)
+	canvas.BlitSurface(0, 0, surface.Normalize(canvas.Width(), canvas.Height()))
+}
+
 func (t Transcript) Measure(ctx *Context, constraints Constraints) Size {
 	maxW := 0
 	totalH := 0
@@ -484,7 +492,7 @@ func (t Transcript) Measure(ctx *Context, constraints Constraints) Size {
 }
 
 func (t Transcript) Render(ctx *Context, bounds Rect) Surface {
-	return renderOwnedSurface(ctx, bounds, t.RenderTo)
+	return renderOwnedCanvas(ctx, bounds, t)
 }
 
 func (t Transcript) RenderTo(ctx *Context, bounds Rect, dst *Surface) {
@@ -502,6 +510,30 @@ func (t Transcript) RenderTo(ctx *Context, bounds Rect, dst *Surface) {
 			continue
 		}
 		renderElementInto(ctx, item.Element, Rect{X: bounds.X, Y: bounds.Y + y, W: bounds.W, H: size.H}, dst)
+		y += size.H
+	}
+}
+
+func (t Transcript) Paint(ctx *Context, canvas Canvas) {
+	if canvas.Width() <= 0 || canvas.Height() <= 0 {
+		return
+	}
+	y := 0
+	for _, item := range t.Items {
+		y += max(0, item.GapBefore)
+		if item.Element == nil || y >= canvas.Height() {
+			continue
+		}
+		size := item.Element.Measure(ctx, NewConstraints(canvas.Width(), max(0, canvas.Height()-y)))
+		if size.H <= 0 {
+			continue
+		}
+		renderElementInto(ctx, item.Element, Rect{
+			X: canvas.origin.X,
+			Y: canvas.origin.Y + y,
+			W: canvas.Width(),
+			H: size.H,
+		}, canvas.surface)
 		y += size.H
 	}
 }
