@@ -546,7 +546,7 @@ func (m *Model) centeredWindow(id ui.WindowID, z int, element ui.Element, onKey 
 			if element == nil {
 				return ui.Surface{}
 			}
-			return element.Render(&ui.Context{Palette: m.palette}, ui.Rect{W: bounds.W, H: bounds.H}).Normalize(bounds.W, bounds.H)
+			return ui.PaintElementSurface(&ui.Context{Palette: m.palette}, element, ui.Rect{W: bounds.W, H: bounds.H}).Normalize(bounds.W, bounds.H)
 		},
 		key: func(m *Model, msg ui.KeyMsg) (bool, ui.Cmd) {
 			return true, onKey(m, msg)
