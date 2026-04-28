@@ -205,6 +205,33 @@ func BenchmarkCanvasWriteTextComposite(b *testing.B) {
 	}
 }
 
+func BenchmarkSurfaceNodePaintDiff(b *testing.B) {
+	toggle := false
+	node := &SurfaceNode{
+		MeasureFn: func(_ *Context, constraints Constraints) Size {
+			return constraints.Clamp(Size{W: 40, H: 1})
+		},
+		RenderFn: func(_ *Context, bounds Rect) Surface {
+			surface := BlankSurface(bounds.W, bounds.H)
+			text := "ready"
+			if toggle {
+				text = "busy "
+			}
+			surface.WriteText(2, 0, text, CellStyle{FG: cellColor(benchmarkPalette().MarkdownText)})
+			return surface
+		},
+	}
+	node.Layout(nil, Rect{W: 40, H: 1})
+	root := BlankSurface(40, 1)
+	canvas := NewCanvas(&root, Rect{W: 40, H: 1})
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		toggle = !toggle
+		node.Paint(nil, canvas)
+		node.ClearDirty()
+	}
+}
+
 func BenchmarkButtonRowRender(b *testing.B) {
 	row := ButtonRow{
 		Buttons: []Button{

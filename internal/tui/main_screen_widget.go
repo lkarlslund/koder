@@ -249,6 +249,7 @@ type mainScreenWidget struct {
 	composer   *composerAreaWidget
 	sidebar    *hashedElementWidget
 	statusPane *hashedElementWidget
+	retained   *mainScreenRetainedRoot
 	bounds     ui.Rect
 	surface    ui.Surface
 	valid      bool
@@ -275,86 +276,15 @@ func (w *mainScreenWidget) Surface(ctx *ui.Context, bounds ui.Rect) ui.Surface {
 	if w.valid && w.bounds == bounds && !w.dirty() {
 		return w.surface
 	}
-	transcriptDirty := w.transcript.Dirty()
-	composerDirty := w.composer.Dirty()
-	sidebarDirty := w.sidebar.Dirty()
-	statusDirty := w.statusPane.Dirty()
-	transcriptBounds := ui.Rect{W: max(0, w.model.viewport.Width), H: max(0, w.model.transcriptViewportHeight())}
-	composerBounds := ui.Rect{W: max(0, w.model.composerWidth())}
-	composerSurface := w.composer.Surface(ctx, composerBounds)
-	composerBounds.H = composerSurface.Size().H
-	sidebarBounds := ui.Rect{W: max(0, w.model.sidebarWidth()), H: max(0, w.model.viewport.Height)}
-	statusBounds := ui.Rect{W: max(0, bounds.W), H: max(0, w.model.statusPaneHeight())}
-
-	transcriptSurface := w.transcript.Surface(ctx, transcriptBounds)
-	sidebarSurface := w.sidebar.Surface(ctx, sidebarBounds)
-	statusSurface := w.statusPane.Surface(ctx, statusBounds)
-
-	var transcriptElement ui.Element = w.model.renderTranscriptPaneElement(ui.Align{
-		Vertical: ui.AlignEnd,
-		Child:    ui.SurfaceBox{Surface: transcriptSurface},
-	})
-	mainChildren := []ui.Child{
-		ui.Flex(transcriptElement, 1),
-		ui.Fixed(ui.VisibleElement{
-			Child: ui.SurfaceBox{Surface: composerSurface},
-			BoxProps: ui.BoxProps{
-				Hidden: composerSurface.Size().H == 0,
-			},
-		}),
+	root := w.ensureRetainedRoot()
+	root.model = w.model
+	surface := ui.TransparentSurface(bounds.W, bounds.H)
+	root.Layout(ctx, bounds)
+	root.Paint(ctx, ui.NewCanvas(&surface, bounds))
+	if rects := root.DirtyRects(); len(rects) > 0 {
+		surface = surface.WithDirtyRects(rects...)
 	}
-	mainColumn := ui.FlexBox{Direction: ui.DirectionVertical, Children: mainChildren}
-	sidebarElement := ui.VisibleElement{
-		BoxProps: ui.BoxProps{
-			Hidden: !w.model.showSidebar || sidebarSurface.Size().W == 0,
-		},
-		Child: ui.SurfaceBox{Surface: sidebarSurface},
-	}
-	rootChildren := []ui.Child{
-		ui.Flex(ui.FlexBox{
-			Direction: ui.DirectionHorizontal,
-			Children: []ui.Child{
-				ui.Flex(ui.Inset{Padding: ui.SymmetricInsets(mainScreenVerticalInset, 0), Child: mainColumn}, 1),
-				ui.Fixed(ui.Spacer{W: 1}),
-				ui.Fixed(sidebarElement),
-			},
-		}, 1),
-		ui.Fixed(ui.VisibleElement{
-			Child: ui.SurfaceBox{Surface: statusSurface},
-			BoxProps: ui.BoxProps{
-				Hidden: statusSurface.Size().H == 0,
-			},
-		}),
-	}
-	surface := ui.FlexBox{Direction: ui.DirectionVertical, Children: rootChildren}.Render(ctx, bounds)
-	layoutChanged := !w.valid || w.bounds != bounds ||
-		w.transcript.LayoutChanged() || w.composer.LayoutChanged() ||
-		w.sidebar.LayoutChanged() || w.statusPane.LayoutChanged()
-	bodyRects := collectMainScreenDamage(
-		transcriptDirty, transcriptSurface, ui.Rect{W: transcriptBounds.W, H: transcriptBounds.H},
-		w.transcript.DirtyRects(),
-		composerDirty, composerSurface, ui.Rect{Y: max(0, surface.Size().H-statusSurface.Size().H-composerSurface.Size().H), W: composerBounds.W, H: composerSurface.Size().H},
-		w.composer.DirtyRects(),
-		sidebarDirty, sidebarSurface, ui.Rect{X: max(0, bounds.W-sidebarSurface.Size().W), W: sidebarSurface.Size().W, H: sidebarSurface.Size().H},
-		w.sidebar.DirtyRects(),
-		statusDirty, statusSurface, ui.Rect{Y: max(0, surface.Size().H-statusSurface.Size().H), W: statusSurface.Size().W, H: statusSurface.Size().H},
-		w.statusPane.DirtyRects(),
-	)
-	if layoutChanged {
-		if w.valid {
-			if rects := ui.DiffSurfaceDamage(w.surface, surface); len(rects) > 0 {
-				surface = surface.WithDirtyRects(rects...)
-			} else {
-				surface = surface.WithDirtyRects(ui.Rect{W: surface.SurfaceWidth(), H: surface.SurfaceHeight()})
-			}
-		} else if transcriptDirty || composerDirty || sidebarDirty || statusDirty {
-			surface = surface.WithDirtyRects(ui.Rect{W: surface.SurfaceWidth(), H: surface.SurfaceHeight()})
-		}
-	} else if len(bodyRects) > 0 {
-		surface = surface.WithDirtyRects(bodyRects...)
-	} else if transcriptDirty || composerDirty || sidebarDirty || statusDirty {
-		surface = surface.WithDirtyRects(ui.Rect{W: surface.SurfaceWidth(), H: surface.SurfaceHeight()})
-	}
+	root.ClearDirty()
 	w.bounds = bounds
 	w.surface = surface
 	w.valid = true
@@ -362,6 +292,122 @@ func (w *mainScreenWidget) Surface(ctx *ui.Context, bounds ui.Rect) ui.Surface {
 	cache.renderedBodySurface = surface
 	cache.bodyValid = true
 	return surface
+}
+
+type mainScreenRetainedRoot struct {
+	ui.BaseNode
+	model              *Model
+	transcriptWidget   *transcriptWidget
+	composerWidget     *composerAreaWidget
+	sidebarWidget      *hashedElementWidget
+	statusWidget       *hashedElementWidget
+	transcriptNode     *ui.SurfaceNode
+	composerNode       *ui.SurfaceNode
+	sidebarNode        *ui.SurfaceNode
+	statusNode         *ui.SurfaceNode
+	transcriptPaneRect ui.Rect
+}
+
+func newMainScreenRetainedRoot(m *Model, transcript *transcriptWidget, composer *composerAreaWidget, sidebar, status *hashedElementWidget) *mainScreenRetainedRoot {
+	root := &mainScreenRetainedRoot{
+		model:            m,
+		transcriptWidget: transcript,
+		composerWidget:   composer,
+		sidebarWidget:    sidebar,
+		statusWidget:     status,
+	}
+	root.transcriptNode = &ui.SurfaceNode{
+		MeasureFn: func(_ *ui.Context, constraints ui.Constraints) ui.Size {
+			return constraints.Clamp(ui.Size{W: max(0, m.viewport.Width), H: max(0, m.transcriptViewportHeight())})
+		},
+		RenderFn: func(ctx *ui.Context, bounds ui.Rect) ui.Surface {
+			return transcript.Surface(ctx, ui.Rect{W: bounds.W, H: bounds.H})
+		},
+	}
+	root.composerNode = &ui.SurfaceNode{
+		MeasureFn: func(ctx *ui.Context, constraints ui.Constraints) ui.Size {
+			return composer.measure(ctx, constraints.MaxW)
+		},
+		RenderFn: func(ctx *ui.Context, bounds ui.Rect) ui.Surface {
+			return composer.Surface(ctx, ui.Rect{W: bounds.W})
+		},
+	}
+	root.sidebarNode = &ui.SurfaceNode{
+		MeasureFn: func(_ *ui.Context, constraints ui.Constraints) ui.Size {
+			return constraints.Clamp(ui.Size{W: max(0, m.sidebarWidth()), H: max(0, m.viewport.Height)})
+		},
+		RenderFn: func(ctx *ui.Context, bounds ui.Rect) ui.Surface {
+			return sidebar.Surface(ctx, bounds)
+		},
+	}
+	root.statusNode = &ui.SurfaceNode{
+		MeasureFn: func(_ *ui.Context, constraints ui.Constraints) ui.Size {
+			return constraints.Clamp(ui.Size{W: constraints.MaxW, H: max(0, m.statusPaneHeight())})
+		},
+		RenderFn: func(ctx *ui.Context, bounds ui.Rect) ui.Surface {
+			return status.Surface(ctx, bounds)
+		},
+	}
+	return root
+}
+
+func (r *mainScreenRetainedRoot) Layout(ctx *ui.Context, rect ui.Rect) {
+	r.BaseNode.Layout(ctx, rect)
+	statusSize := r.statusNode.Measure(ctx, ui.NewConstraints(rect.W, 0))
+	statusH := max(0, min(rect.H, statusSize.H))
+	bodyH := max(0, rect.H-statusH)
+	sidebarW := 0
+	if r.model.showSidebar {
+		sidebarW = max(0, r.model.sidebarWidth())
+	}
+	gap := 0
+	if sidebarW > 0 {
+		gap = 1
+	}
+	mainW := max(0, rect.W-sidebarW-gap)
+	composerSize := r.composerNode.Measure(ctx, ui.NewConstraints(mainW, 0))
+	composerH := max(0, min(bodyH, composerSize.H))
+	transcriptPaneH := max(0, bodyH-composerH)
+	transcriptSize := r.transcriptNode.Measure(ctx, ui.NewConstraints(mainW, transcriptPaneH))
+	transcriptH := max(0, min(transcriptPaneH, transcriptSize.H))
+	transcriptY := max(0, transcriptPaneH-transcriptH)
+	r.transcriptPaneRect = ui.Rect{W: mainW, H: transcriptPaneH}
+	r.transcriptNode.Layout(ctx, ui.Rect{X: 0, Y: transcriptY, W: mainW, H: transcriptH})
+	r.composerNode.Layout(ctx, ui.Rect{X: 0, Y: transcriptPaneH, W: mainW, H: composerH})
+	if sidebarW > 0 {
+		r.sidebarNode.Layout(ctx, ui.Rect{X: mainW + gap, Y: 0, W: sidebarW, H: bodyH})
+	} else {
+		r.sidebarNode.Layout(ctx, ui.Rect{})
+	}
+	r.statusNode.Layout(ctx, ui.Rect{X: 0, Y: bodyH, W: rect.W, H: statusH})
+}
+
+func (r *mainScreenRetainedRoot) Paint(ctx *ui.Context, canvas ui.Canvas) {
+	palette := r.model.palette
+	canvas.Fill(r.transcriptPaneRect, ui.CellStyle{BG: ui.CellColorFromLipgloss(palette.ScreenBackground)})
+	for _, node := range []*ui.SurfaceNode{r.transcriptNode, r.composerNode, r.sidebarNode, r.statusNode} {
+		rect := node.Rect()
+		if rect.Empty() {
+			continue
+		}
+		node.Paint(ctx, canvas.Subrect(rect))
+	}
+}
+
+func (r *mainScreenRetainedRoot) DirtyRects() []ui.Rect {
+	damage := ui.DamageSet{}
+	damage.AddAll(r.BaseNode.DirtyRects())
+	for _, node := range []*ui.SurfaceNode{r.transcriptNode, r.composerNode, r.sidebarNode, r.statusNode} {
+		damage.AddAll(node.DirtyRects())
+	}
+	return damage.Rects()
+}
+
+func (r *mainScreenRetainedRoot) ClearDirty() {
+	r.BaseNode.ClearDirty()
+	for _, node := range []*ui.SurfaceNode{r.transcriptNode, r.composerNode, r.sidebarNode, r.statusNode} {
+		node.ClearDirty()
+	}
 }
 
 func fullSurfaceDamage(surface ui.Surface) []ui.Rect {
@@ -478,6 +524,9 @@ func (m *Model) ensureMainScreenWidget() *mainScreenWidget {
 		m.mainScreen.composer.model = m
 		m.mainScreen.sidebar.model = m
 		m.mainScreen.statusPane.model = m
+		if m.mainScreen.retained != nil {
+			m.mainScreen.retained.model = m
+		}
 		return m.mainScreen
 	}
 	m.mainScreen = &mainScreenWidget{
@@ -506,5 +555,13 @@ func (m *Model) ensureMainScreenWidget() *mainScreenWidget {
 			dirty: true,
 		},
 	}
+	m.mainScreen.retained = newMainScreenRetainedRoot(m, m.mainScreen.transcript, m.mainScreen.composer, m.mainScreen.sidebar, m.mainScreen.statusPane)
 	return m.mainScreen
+}
+
+func (w *mainScreenWidget) ensureRetainedRoot() *mainScreenRetainedRoot {
+	if w.retained == nil {
+		w.retained = newMainScreenRetainedRoot(w.model, w.transcript, w.composer, w.sidebar, w.statusPane)
+	}
+	return w.retained
 }

@@ -1,0 +1,59 @@
+package ui
+
+import (
+	"reflect"
+	"testing"
+)
+
+func TestBaseNodeLayoutMarksOldAndNewRectsDirty(t *testing.T) {
+	var node BaseNode
+	node.Layout(nil, Rect{X: 1, Y: 2, W: 3, H: 4})
+	node.ClearDirty()
+	node.Layout(nil, Rect{X: 2, Y: 3, W: 3, H: 4})
+
+	got := node.DirtyRects()
+	want := []Rect{
+		{X: 1, Y: 2, W: 3, H: 4},
+		{X: 2, Y: 3, W: 3, H: 4},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("dirty rects mismatch:\n got %#v\nwant %#v", got, want)
+	}
+}
+
+func TestBaseNodeMarkDirtyLocalTranslatesToAbsolute(t *testing.T) {
+	var node BaseNode
+	node.Layout(nil, Rect{X: 4, Y: 5, W: 10, H: 3})
+	node.ClearDirty()
+	node.MarkDirtyLocal(Rect{X: 2, Y: 1, W: 3, H: 1})
+
+	got := node.DirtyRects()
+	want := []Rect{{X: 6, Y: 6, W: 3, H: 1}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("dirty rects mismatch:\n got %#v\nwant %#v", got, want)
+	}
+}
+
+func TestSurfaceNodePaintUsesSurfaceDirtyRects(t *testing.T) {
+	node := &SurfaceNode{
+		RenderFn: func(_ *Context, bounds Rect) Surface {
+			surface := BlankSurface(bounds.W, bounds.H)
+			surface.WriteText(1, 0, "X", CellStyle{})
+			return surface.WithDirtyRects(Rect{X: 1, Y: 0, W: 1, H: 1})
+		},
+	}
+	node.Layout(nil, Rect{X: 3, Y: 4, W: 4, H: 1})
+	node.ClearDirty()
+
+	root := BlankSurface(10, 10)
+	node.Paint(nil, NewCanvas(&root, node.Rect()))
+
+	got := node.DirtyRects()
+	want := []Rect{{X: 4, Y: 4, W: 1, H: 1}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("dirty rects mismatch:\n got %#v\nwant %#v", got, want)
+	}
+	if text := root.SurfaceCellText(4, 4); text != "X" {
+		t.Fatalf("expected painted cell at 4,4, got %q", text)
+	}
+}

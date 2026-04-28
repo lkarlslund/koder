@@ -1,0 +1,115 @@
+package ui
+
+type Node interface {
+	Measure(ctx *Context, constraints Constraints) Size
+	Layout(ctx *Context, rect Rect)
+	Paint(ctx *Context, canvas Canvas)
+	Rect() Rect
+	DirtyRects() []Rect
+	ClearDirty()
+}
+
+type BaseNode struct {
+	rect   Rect
+	damage DamageSet
+}
+
+func (n *BaseNode) Rect() Rect {
+	if n == nil {
+		return Rect{}
+	}
+	return n.rect
+}
+
+func (n *BaseNode) Layout(_ *Context, rect Rect) {
+	if n == nil {
+		return
+	}
+	if n.rect == rect {
+		return
+	}
+	if !n.rect.Empty() {
+		n.damage.Add(n.rect)
+	}
+	n.rect = rect
+	if !n.rect.Empty() {
+		n.damage.Add(n.rect)
+	}
+}
+
+func (n *BaseNode) MarkDirtyLocal(rect Rect) {
+	if n == nil || n.rect.Empty() {
+		return
+	}
+	if rect.Empty() {
+		n.damage.Add(n.rect)
+		return
+	}
+	n.damage.Add(clipRect(rect.Translate(n.rect.X, n.rect.Y), n.rect))
+}
+
+func (n *BaseNode) MarkDirtyAbsolute(rect Rect) {
+	if n == nil || rect.Empty() {
+		return
+	}
+	n.damage.Add(rect)
+}
+
+func (n *BaseNode) DirtyRects() []Rect {
+	if n == nil {
+		return nil
+	}
+	return n.damage.Rects()
+}
+
+func (n *BaseNode) ClearDirty() {
+	if n == nil {
+		return
+	}
+	n.damage.Reset()
+}
+
+type SurfaceNode struct {
+	BaseNode
+	MeasureFn func(ctx *Context, constraints Constraints) Size
+	RenderFn  func(ctx *Context, bounds Rect) Surface
+	surface   Surface
+}
+
+func (n *SurfaceNode) Measure(ctx *Context, constraints Constraints) Size {
+	if n == nil {
+		return Size{}
+	}
+	if n.MeasureFn != nil {
+		return n.MeasureFn(ctx, constraints)
+	}
+	if n.RenderFn == nil {
+		return constraints.Clamp(Size{})
+	}
+	surface := n.RenderFn(ctx, Rect{W: constraints.MaxW, H: constraints.MaxH})
+	return constraints.Clamp(surface.Size())
+}
+
+func (n *SurfaceNode) Paint(ctx *Context, canvas Canvas) {
+	if n == nil || n.RenderFn == nil {
+		return
+	}
+	rect := n.Rect()
+	if rect.Empty() || canvas.Width() <= 0 || canvas.Height() <= 0 {
+		return
+	}
+	next := n.RenderFn(ctx, Rect{W: rect.W, H: rect.H}).Normalize(rect.W, rect.H)
+	if dirtyRects, ok := next.DirtyRects(); ok {
+		for _, dirty := range dirtyRects {
+			n.MarkDirtyAbsolute(dirty.Translate(rect.X, rect.Y))
+		}
+	} else if len(n.surface.cells) > 0 || n.surface.SurfaceWidth() > 0 || n.surface.SurfaceHeight() > 0 {
+		for _, dirty := range DiffSurfaceDamage(n.surface, next) {
+			n.MarkDirtyAbsolute(dirty.Translate(rect.X, rect.Y))
+		}
+	} else {
+		n.MarkDirtyAbsolute(rect)
+	}
+	canvas.BlitSurface(0, 0, next)
+	n.surface = next
+}
