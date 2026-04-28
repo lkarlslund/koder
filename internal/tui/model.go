@@ -1352,7 +1352,9 @@ func (m *Model) handleMainWindowKey(msg ui.KeyMsg) (bool, ui.Cmd) {
 			return true, cmd
 		}
 		if ok, status := m.canSendPrompt(); !ok {
-			m.openConnectDialog()
+			if m.shouldOpenConnectDialogForSendFailure() {
+				m.openConnectDialog()
+			}
 			m.status = status
 			return true, nil
 		}
@@ -3117,7 +3119,9 @@ func (m *Model) submitBangPrompt(bang bangPrompt, followup bangFollowupMode) ui.
 	}
 	if bang.Double {
 		if ok, status := m.canSendPrompt(); !ok {
-			m.openConnectDialog()
+			if m.shouldOpenConnectDialogForSendFailure() {
+				m.openConnectDialog()
+			}
 			m.status = status
 			return m.syncWindowTitleCmd()
 		}
@@ -4173,7 +4177,9 @@ func (m *Model) dequeuePromptCmd() ui.Cmd {
 	m.setQueuedInputs(items)
 	if ok, status := m.canSendPrompt(); !ok {
 		if item.Kind != domain.QueuedInputKindContinue {
-			m.openConnectDialog()
+			if m.shouldOpenConnectDialogForSendFailure() {
+				m.openConnectDialog()
+			}
 			m.status = status
 			m.draftAttachments = queuedAttachmentDrafts(item.Attachments)
 			m.draftReferences = queuedReferenceDrafts(item.References)
@@ -5334,6 +5340,20 @@ func (m *Model) canSendPrompt() (bool, string) {
 		return false, fmt.Sprintf("%s does not support %s attachments", session.ModelID, kind)
 	}
 	return true, ""
+}
+
+func (m Model) shouldOpenConnectDialogForSendFailure() bool {
+	session := m.draftSession()
+	if strings.TrimSpace(session.ProviderID) == "" {
+		return true
+	}
+	if !m.cfg.HasUsableProvider(session.ProviderID) {
+		return true
+	}
+	if strings.TrimSpace(session.ModelID) == "" {
+		return true
+	}
+	return false
 }
 
 func (m *Model) workingIndicator() string {

@@ -734,3 +734,16 @@ func TestCapabilityStoreSupportsAttachment(t *testing.T) {
 		t.Fatal("expected pdf support to remain disabled")
 	}
 }
+
+func TestCapabilityStoreSupportsAttachmentForQwen36ImageModel(t *testing.T) {
+	store := NewCapabilityStore(t.TempDir())
+	cfg := config.Provider{BaseURL: "http://127.0.0.1:8000/v1"}
+
+	ok, err := store.SupportsAttachment("openai-compatible", cfg, "Lorbus/Qwen3.6-27B-int4-AutoRound", attachment.KindImage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("expected qwen3.6 image support")
+	}
+}

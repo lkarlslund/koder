@@ -172,6 +172,7 @@ func modelLikelySupportsImages(modelID string) bool {
 		"multimodal",
 		"omni",
 		"minicpm-v",
+		"qwen3.6",
 	}
 	for _, hint := range hints {
 		if strings.Contains(model, hint) {
