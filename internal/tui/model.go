@@ -1256,7 +1256,7 @@ func (m *Model) handleMainWindowKey(msg ui.KeyMsg) (bool, ui.Cmd) {
 		m.refreshViewportAnchored(anchor)
 		return true, nil
 	case "alt+o":
-		prompt := strings.TrimSpace(m.composer.Value())
+		prompt := m.submissionPromptText()
 		if prompt == "" && len(m.draftAttachments) == 0 && len(m.draftReferences) == 0 {
 			m.status = "No draft prompt to preview"
 			return true, m.syncWindowTitleCmd()
@@ -1315,7 +1315,7 @@ func (m *Model) handleMainWindowKey(msg ui.KeyMsg) (bool, ui.Cmd) {
 		}
 	case "tab":
 		if m.loading && !m.hasSlashMenu() {
-			prompt := strings.TrimSpace(m.composer.Value())
+			prompt := m.submissionPromptText()
 			if bang, ok := parseBangPrompt(prompt); ok {
 				if bang.Double {
 					return true, m.submitBangPrompt(bang, bangFollowupSteer)
@@ -1330,7 +1330,7 @@ func (m *Model) handleMainWindowKey(msg ui.KeyMsg) (bool, ui.Cmd) {
 			_, cmd := m.popQueuedPromptForEditing()
 			return true, cmd
 		}
-		prompt := strings.TrimSpace(m.composer.Value())
+		prompt := m.submissionPromptText()
 		if prompt == "" && len(m.draftAttachments) == 0 && len(m.draftReferences) == 0 {
 			return false, nil
 		}
@@ -1960,7 +1960,6 @@ func (m *Model) renderComposerElement() ui.Node {
 	return ui.AsNode(ui.NewComposer(ui.ComposerProps{
 		Palette:       m.palette,
 		Width:         m.composerWidth(),
-		Attachments:   m.draftAttachmentItems(),
 		HalfBlocks:    m.halfBlocksEnabled(),
 		PromptGlyph:   m.promptGlyph(),
 		Value:         m.composer.Value(),
@@ -1970,17 +1969,6 @@ func (m *Model) renderComposerElement() ui.Node {
 		ContentAfter:  line.After(),
 		CursorVisible: m.composer.CursorVisible(),
 	}))
-}
-
-func (m *Model) draftAttachmentItems() []ui.AttachmentItem {
-	if len(m.draftAttachments) == 0 {
-		return nil
-	}
-	items := make([]ui.AttachmentItem, 0, len(m.draftAttachments))
-	for _, draft := range m.draftAttachments {
-		items = append(items, ui.AttachmentItem{Label: attachmentLabel(draft.Metadata)})
-	}
-	return items
 }
 
 func (m *Model) renderQueuedPromptPreviewElement() ui.Node {
@@ -4144,6 +4132,7 @@ func (m *Model) popQueuedPromptForEditing() (ui.Model, ui.Cmd) {
 		return m, ui.Batch(m.saveQueuedInputsCmd(m.currentChat.ID, items), m.syncWindowTitleCmd())
 	}
 	m.syncDraftReferencesFromComposer()
+	m.syncDraftAttachmentsFromComposer()
 	currentText := strings.TrimSpace(m.composer.Value())
 	hasCurrentDraft := currentText != "" || len(m.draftAttachments) > 0 || len(m.draftReferences) > 0
 	if hasCurrentDraft {
@@ -4161,9 +4150,9 @@ func (m *Model) popQueuedPromptForEditing() (ui.Model, ui.Cmd) {
 		m.status = "Restored queued prompt to composer"
 	}
 	m.setQueuedInputs(items)
-	m.setComposerValue(queued.Text)
 	m.draftAttachments = queuedAttachmentDrafts(queued.Attachments)
 	m.draftReferences = queuedReferenceDrafts(queued.References)
+	m.setComposerDraftValue(queued.Text)
 	return m, ui.Batch(m.saveQueuedInputsCmd(m.currentChat.ID, items), m.syncWindowTitleCmd())
 }
 
@@ -4186,9 +4175,9 @@ func (m *Model) dequeuePromptCmd() ui.Cmd {
 		if item.Kind != domain.QueuedInputKindContinue {
 			m.openConnectDialog()
 			m.status = status
-			m.setComposerValue(item.Text)
 			m.draftAttachments = queuedAttachmentDrafts(item.Attachments)
 			m.draftReferences = queuedReferenceDrafts(item.References)
+			m.setComposerDraftValue(item.Text)
 			return nil
 		}
 	}
@@ -4282,6 +4271,10 @@ func (m *Model) setComposerValue(value string) {
 	m.composerQueries = composerQueryState{}
 	m.updateComposerMenus()
 	m.invalidateFooterCache()
+}
+
+func (m *Model) setComposerDraftValue(value string) {
+	m.setComposerValue(m.decorateComposerTextWithAttachments(value, m.draftAttachments))
 }
 
 func (m Model) composerPromptHistory() []string {
@@ -4611,7 +4604,7 @@ func (m *Model) pasteClipboardText() (ui.Model, ui.Cmd) {
 			m.status = "Clipboard image paste failed: " + err.Error()
 			return m, m.syncWindowTitleCmd()
 		}
-		m.draftAttachments = append(m.draftAttachments, draft)
+		m.insertDraftAttachment(draft)
 		m.status = fmt.Sprintf("Attached image %s", draft.Name)
 		return m, m.syncWindowTitleCmd()
 	}
@@ -4631,7 +4624,7 @@ func (m *Model) pasteClipboardText() (ui.Model, ui.Cmd) {
 			m.status = "Attachment import failed: " + err.Error()
 			return m, m.syncWindowTitleCmd()
 		}
-		m.draftAttachments = append(m.draftAttachments, draft)
+		m.insertDraftAttachment(draft)
 		m.status = fmt.Sprintf("Attached %s", draft.Name)
 		return m, m.syncWindowTitleCmd()
 	}
@@ -4648,6 +4641,7 @@ func (m *Model) poppedLastDraftAttachment() bool {
 	}
 	last := m.draftAttachments[len(m.draftAttachments)-1]
 	m.draftAttachments = m.draftAttachments[:len(m.draftAttachments)-1]
+	m.removeAttachmentPlaceholder(last.Metadata)
 	m.status = fmt.Sprintf("Removed attachment %s", last.Name)
 	return true
 }
@@ -4694,6 +4688,93 @@ func (m *Model) syncDraftReferencesFromComposer() {
 		searchStart = draft.End
 	}
 	m.draftReferences = synced
+}
+
+func (m *Model) syncDraftAttachmentsFromComposer() {
+	if len(m.draftAttachments) == 0 {
+		return
+	}
+	remaining := m.composer.Value()
+	synced := make([]attachment.Draft, 0, len(m.draftAttachments))
+	for _, draft := range m.draftAttachments {
+		placeholder := attachmentLabel(draft.Metadata)
+		idx := strings.Index(remaining, placeholder)
+		if idx < 0 {
+			continue
+		}
+		synced = append(synced, draft)
+		remaining = remaining[:idx] + remaining[idx+len(placeholder):]
+	}
+	m.draftAttachments = synced
+}
+
+func (m *Model) insertDraftAttachment(draft attachment.Draft) {
+	m.draftAttachments = append(m.draftAttachments, draft)
+	insert := attachmentLabel(draft.Metadata) + " "
+	if cursor := m.composer.CursorIndex(); cursor > 0 {
+		if r, ok := m.composer.RuneAt(cursor - 1); ok && r != ' ' && r != '\n' {
+			insert = " " + insert
+		}
+	}
+	m.composer.InsertString(insert)
+	m.updateComposerMenus()
+	m.invalidateFooterCache()
+}
+
+func (m *Model) removeAttachmentPlaceholder(meta attachment.Metadata) {
+	value := m.composer.Value()
+	placeholder := attachmentLabel(meta)
+	idx := strings.LastIndex(value, placeholder)
+	if idx < 0 {
+		return
+	}
+	end := idx + len(placeholder)
+	if end < len(value) && value[end] == ' ' {
+		end++
+	} else if idx > 0 && value[idx-1] == ' ' {
+		idx--
+	}
+	next := value[:idx] + value[end:]
+	m.composer.SetValue(next)
+	m.composer.SetCursor(min(idx, len(next)))
+	m.updateComposerMenus()
+	m.invalidateFooterCache()
+}
+
+func (m Model) decorateComposerTextWithAttachments(text string, drafts []attachment.Draft) string {
+	if len(drafts) == 0 {
+		return text
+	}
+	prefixes := make([]string, 0, len(drafts))
+	for _, draft := range drafts {
+		prefixes = append(prefixes, attachmentLabel(draft.Metadata))
+	}
+	prefix := strings.Join(prefixes, " ")
+	if strings.TrimSpace(text) == "" {
+		return prefix + " "
+	}
+	return prefix + " " + text
+}
+
+func (m Model) submissionPromptText() string {
+	return stripAttachmentPlaceholders(m.composer.Value(), m.draftAttachments)
+}
+
+func stripAttachmentPlaceholders(value string, drafts []attachment.Draft) string {
+	trimmed := value
+	for _, draft := range drafts {
+		trimmed = strings.Replace(trimmed, attachmentLabel(draft.Metadata), "", 1)
+	}
+	for {
+		next := strings.ReplaceAll(trimmed, "  ", " ")
+		next = strings.ReplaceAll(next, " \n", "\n")
+		next = strings.ReplaceAll(next, "\n ", "\n")
+		if next == trimmed {
+			break
+		}
+		trimmed = next
+	}
+	return strings.TrimSpace(trimmed)
 }
 
 func (m Model) pastedAttachmentPath(text string) string {
@@ -5443,6 +5524,7 @@ func (m *Model) updateComposerMenus() {
 		m.mentionIndex = 0
 	}
 	m.syncDraftReferencesFromComposer()
+	m.syncDraftAttachmentsFromComposer()
 }
 
 func (m *Model) hasSlashMenu() bool {

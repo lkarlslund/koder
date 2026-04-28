@@ -768,8 +768,8 @@ func TestCtrlVPastesClipboardImageAsAttachment(t *testing.T) {
 	if len(next.draftAttachments) != 1 {
 		t.Fatalf("expected one draft attachment, got %#v", next.draftAttachments)
 	}
-	if next.composer.Value() != "" {
-		t.Fatalf("expected composer text to stay empty, got %q", next.composer.Value())
+	if got := next.composer.Value(); got != "[Image] clipboard.png " {
+		t.Fatalf("expected inline image placeholder, got %q", got)
 	}
 	if !strings.Contains(next.status, "Attached image") {
 		t.Fatalf("unexpected attach status: %q", next.status)
@@ -798,6 +798,9 @@ func TestCtrlVPastesAttachmentFilePath(t *testing.T) {
 	}
 	if next.draftAttachments[0].Name != "note.txt" {
 		t.Fatalf("unexpected attachment name: %#v", next.draftAttachments[0])
+	}
+	if got := next.composer.Value(); got != "[Text] note.txt " {
+		t.Fatalf("expected inline file placeholder, got %q", got)
 	}
 }
 
@@ -884,13 +887,11 @@ func TestRenderComposerShowsDraftAttachmentInsideComposer(t *testing.T) {
 			Metadata: attachment.Metadata{Name: "clipboard.png", MIME: "image/png", Path: filepath.Join(root, "clipboard.png")},
 		}},
 	}
+	m.setComposerDraftValue("")
 
 	got := ansi.Strip(m.renderComposer())
 	if !strings.Contains(got, "[Image] clipboard.png") {
 		t.Fatalf("expected attachment label inside composer, got %q", got)
-	}
-	if !strings.Contains(got, "Ask koder or type / for commands") {
-		t.Fatalf("expected composer prompt/placeholder to remain visible, got %q", got)
 	}
 }
 
@@ -920,6 +921,9 @@ func TestEnterSendsPromptWithPastedImageAttachment(t *testing.T) {
 	if len(next.draftAttachments) != 1 {
 		t.Fatalf("expected one draft attachment, got %#v", next.draftAttachments)
 	}
+	if got := next.composer.Value(); got != "[Image] clipboard.png " {
+		t.Fatalf("expected inline image placeholder after paste, got %q", got)
+	}
 
 	next.composer.SetValue("analyze this image")
 	updated, cmd = next.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
@@ -945,6 +949,20 @@ func TestEnterSendsPromptWithPastedImageAttachment(t *testing.T) {
 	}
 	if parts := final.parts[last.ID]; len(parts) == 0 {
 		t.Fatal("expected message parts for optimistic user prompt")
+	}
+}
+
+func TestSubmissionPromptTextStripsAttachmentPlaceholders(t *testing.T) {
+	root := t.TempDir()
+	m := Model{
+		composer: textarea.New(),
+		draftAttachments: []attachment.Draft{{
+			Metadata: attachment.Metadata{Name: "clipboard.png", MIME: "image/png", Path: filepath.Join(root, "clipboard.png")},
+		}},
+	}
+	m.composer.SetValue("[Image] clipboard.png analyze this image")
+	if got := m.submissionPromptText(); got != "analyze this image" {
+		t.Fatalf("submissionPromptText() = %q, want %q", got, "analyze this image")
 	}
 }
 
