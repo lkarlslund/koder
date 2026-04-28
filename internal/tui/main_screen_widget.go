@@ -367,7 +367,7 @@ func (w *mainScreenWidget) Surface(ctx *ui.Context, bounds ui.Rect) ui.Surface {
 	root := w.ensureRetainedRoot()
 	root.model = w.model
 	root.Layout(ctx, bounds)
-	root.PrepareDirty(ctx)
+	root.Prepare(ctx)
 	fullPaint := !w.valid || w.bounds != bounds
 	surface := ui.TransparentSurface(bounds.W, bounds.H)
 	if !fullPaint && w.valid && w.bounds == bounds &&
@@ -412,7 +412,7 @@ func (w *mainScreenWidget) paintIntoCanvas(ctx *ui.Context, bounds ui.Rect, canv
 	root := w.ensureRetainedRoot()
 	root.model = w.model
 	root.Layout(ctx, bounds)
-	root.PrepareDirty(ctx)
+	root.Prepare(ctx)
 	fullPaint := !w.valid || w.bounds != bounds
 	if !fullPaint && w.valid && w.bounds == bounds &&
 		w.surface.SurfaceWidth() == bounds.W && w.surface.SurfaceHeight() == bounds.H {
@@ -564,9 +564,9 @@ func (r *mainScreenRetainedRoot) Paint(ctx *ui.Context, canvas ui.Canvas) {
 	r.PaintAll(ctx, canvas)
 }
 
-func (r *mainScreenRetainedRoot) PrepareDirty(ctx *ui.Context) {
+func (r *mainScreenRetainedRoot) Prepare(ctx *ui.Context) {
 	r.forEachNode(func(node *ui.ManagedElementNode) {
-		node.PrepareDirty(ctx)
+		node.Prepare(ctx)
 	})
 }
 

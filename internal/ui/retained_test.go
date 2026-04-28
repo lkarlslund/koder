@@ -103,7 +103,7 @@ func TestSurfaceNodePaintUsesSurfaceDirtyRects(t *testing.T) {
 	}
 }
 
-func TestManagedElementNodePrepareDirtyMarksLayoutAndPaint(t *testing.T) {
+func TestManagedElementNodePrepareMarksLayoutAndPaint(t *testing.T) {
 	called := false
 	node := &ManagedElementNode{
 		PrepareFn: func(_ *Context, rect Rect) {
@@ -119,7 +119,7 @@ func TestManagedElementNodePrepareDirtyMarksLayoutAndPaint(t *testing.T) {
 	node.Layout(nil, Rect{X: 10, Y: 3, W: 8, H: 2})
 	node.ClearDirty()
 
-	node.PrepareDirty(nil)
+	node.Prepare(nil)
 
 	if !called {
 		t.Fatal("expected prepare to be called")

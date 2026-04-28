@@ -29,7 +29,7 @@ func TestMainScreenRetainedRootPrepareDirtyUsesNodeFlags(t *testing.T) {
 	root := w.ensureRetainedRoot()
 	root.model = &m
 	root.Layout(ctx, bounds)
-	root.PrepareDirty(ctx)
+	root.Prepare(ctx)
 
 	if !root.composerNode.NeedsPaint() {
 		t.Fatal("expected composer node to be paint-dirty")
@@ -64,7 +64,7 @@ func TestMainScreenRetainedRootLayoutChangeMarksNodesDirtyWithoutWidgetInvalidat
 	root := w.ensureRetainedRoot()
 	root.model = &m
 	root.Layout(ctx, ui.Rect{W: 90, H: 24})
-	root.PrepareDirty(ctx)
+	root.Prepare(ctx)
 
 	if !root.transcriptNode.NeedsPaint() {
 		t.Fatal("expected transcript node to be paint-dirty after layout change")
@@ -100,7 +100,7 @@ func TestMainScreenRetainedRootPaintDirtyMatchesFullPaintAfterComposerLayoutChan
 	root := w.ensureRetainedRoot()
 	root.model = &m
 	root.Layout(ctx, bounds)
-	root.PrepareDirty(ctx)
+	root.Prepare(ctx)
 
 	patched := ui.TransparentSurface(bounds.W, bounds.H).PlaceAt(0, 0, base)
 	root.PaintDirty(ctx, ui.NewCanvas(&patched, bounds))

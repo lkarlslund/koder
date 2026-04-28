@@ -3,6 +3,7 @@ package ui
 type Node interface {
 	Measure(ctx *Context, constraints Constraints) Size
 	Layout(ctx *Context, rect Rect)
+	Prepare(ctx *Context)
 	Paint(ctx *Context, canvas Canvas)
 	Rect() Rect
 	NeedsLayout() bool
@@ -42,6 +43,9 @@ func (n *BaseNode) Layout(_ *Context, rect Rect) {
 	}
 	n.layoutDirty = false
 	n.paintDirty = true
+}
+
+func (n *BaseNode) Prepare(_ *Context) {
 }
 
 func (n *BaseNode) MarkDirtyLocal(rect Rect) {
@@ -135,6 +139,9 @@ func (n *SurfaceNode) Measure(ctx *Context, constraints Constraints) Size {
 	return constraints.Clamp(surface.Size())
 }
 
+func (n *SurfaceNode) Prepare(_ *Context) {
+}
+
 func (n *SurfaceNode) Paint(ctx *Context, canvas Canvas) {
 	if n == nil || n.RenderFn == nil {
 		return
@@ -176,6 +183,9 @@ func (n *ElementNode) Measure(ctx *Context, constraints Constraints) Size {
 	return constraints.Clamp(element.Measure(ctx, constraints))
 }
 
+func (n *ElementNode) Prepare(_ *Context) {
+}
+
 func (n *ElementNode) Paint(ctx *Context, canvas Canvas) {
 	if n == nil || n.ElementFn == nil {
 		return
@@ -192,7 +202,7 @@ func (n *ElementNode) Paint(ctx *Context, canvas Canvas) {
 	}, canvas.surface)
 }
 
-func (n *ManagedElementNode) PrepareDirty(ctx *Context) {
+func (n *ManagedElementNode) Prepare(ctx *Context) {
 	if n == nil || n.PrepareFn == nil {
 		return
 	}
