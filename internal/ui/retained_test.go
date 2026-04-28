@@ -5,6 +5,96 @@ import (
 	"testing"
 )
 
+type testDiffNode struct {
+	BaseNode
+	measureFn func(*Context, Constraints) Size
+	paintFn   func(*Context, Rect) Surface
+	surface   Surface
+}
+
+func (n *testDiffNode) Measure(ctx *Context, constraints Constraints) Size {
+	if n.measureFn != nil {
+		return n.measureFn(ctx, constraints)
+	}
+	return constraints.Clamp(Size{})
+}
+
+func (n *testDiffNode) Prepare(*Context) {}
+
+func (n *testDiffNode) Paint(ctx *Context, canvas Canvas) {
+	if n.paintFn == nil || n.Rect().Empty() || canvas.Width() <= 0 || canvas.Height() <= 0 {
+		return
+	}
+	next := n.paintFn(ctx, n.Rect()).Normalize(canvas.Width(), canvas.Height())
+	if dirtyRects, ok := next.DirtyRects(); ok {
+		for _, dirty := range dirtyRects {
+			n.MarkDirtyAbsolute(dirty.Translate(n.Rect().X, n.Rect().Y))
+		}
+	} else if len(n.surface.cells) > 0 || n.surface.SurfaceWidth() > 0 || n.surface.SurfaceHeight() > 0 {
+		n.MarkDirtyLocalRects(DiffSurfaceDamage(n.surface, next))
+	} else {
+		n.MarkDirtyLocal(Rect{W: n.Rect().W, H: n.Rect().H})
+	}
+	canvas.BlitSurface(0, 0, next)
+	n.surface = next
+}
+
+type testManagedNode struct {
+	BaseNode
+	prepareFn    func(*Context, Rect)
+	dirtyFn      func() bool
+	dirtyRectsFn func() []Rect
+	layoutFn     func() bool
+	clearFn      func()
+}
+
+type testRectNode struct {
+	BaseNode
+	size Size
+}
+
+func (n *testRectNode) Measure(_ *Context, constraints Constraints) Size {
+	return constraints.Clamp(n.size)
+}
+
+func (n *testRectNode) Prepare(_ *Context) {
+}
+
+func (n *testRectNode) Paint(_ *Context, _ Canvas) {
+}
+
+func (n *testManagedNode) Measure(_ *Context, constraints Constraints) Size {
+	return constraints.Clamp(Size{W: n.Rect().W, H: n.Rect().H})
+}
+
+func (n *testManagedNode) Prepare(ctx *Context) {
+	if n.prepareFn != nil {
+		n.prepareFn(ctx, n.Rect())
+	}
+	if n.layoutFn != nil && n.layoutFn() {
+		n.MarkLayoutDirty()
+	}
+	if n.dirtyFn != nil && n.dirtyFn() {
+		if n.dirtyRectsFn != nil {
+			rects := n.dirtyRectsFn()
+			if len(rects) > 0 {
+				n.MarkDirtyLocalRects(rects)
+				return
+			}
+		}
+		n.MarkDirtyLocal(Rect{})
+	}
+}
+
+func (n *testManagedNode) Paint(_ *Context, _ Canvas) {}
+
+func (n *testManagedNode) ClearFrameDirty() {
+	n.ClearDirty()
+	if n.clearFn != nil {
+		n.clearFn()
+	}
+}
+
 func TestBaseNodeLayoutMarksOldAndNewRectsDirty(t *testing.T) {
 	var node BaseNode
 	node.Layout(nil, Rect{X: 1, Y: 2, W: 3, H: 4})
@@ -79,9 +169,9 @@ func TestBaseNodeClearDirtyResetsLayoutAndPaintFlags(t *testing.T) {
 	}
 }
 
-func TestSurfaceNodePaintUsesSurfaceDirtyRects(t *testing.T) {
-	node := &SurfaceNode{
-		RenderFn: func(_ *Context, bounds Rect) Surface {
+func TestNativeDiffNodePaintUsesSurfaceDirtyRects(t *testing.T) {
+	node := &testDiffNode{
+		paintFn: func(_ *Context, bounds Rect) Surface {
 			surface := BlankSurface(bounds.W, bounds.H)
 			surface.WriteText(1, 0, "X", CellStyle{})
 			return surface.WithDirtyRects(Rect{X: 1, Y: 0, W: 1, H: 1})
@@ -103,18 +193,18 @@ func TestSurfaceNodePaintUsesSurfaceDirtyRects(t *testing.T) {
 	}
 }
 
-func TestManagedElementNodePrepareMarksLayoutAndPaint(t *testing.T) {
+func TestNativeManagedNodePrepareMarksLayoutAndPaint(t *testing.T) {
 	called := false
-	node := &ManagedElementNode{
-		PrepareFn: func(_ *Context, rect Rect) {
+	node := &testManagedNode{
+		prepareFn: func(_ *Context, rect Rect) {
 			called = true
 			if rect != (Rect{X: 10, Y: 3, W: 8, H: 2}) {
 				t.Fatalf("prepare rect = %#v", rect)
 			}
 		},
-		DirtyFn:         func() bool { return true },
-		DirtyRectsFn:    func() []Rect { return []Rect{{X: 1, Y: 0, W: 2, H: 1}} },
-		LayoutChangedFn: func() bool { return true },
+		dirtyFn:      func() bool { return true },
+		dirtyRectsFn: func() []Rect { return []Rect{{X: 1, Y: 0, W: 2, H: 1}} },
+		layoutFn:     func() bool { return true },
 	}
 	node.Layout(nil, Rect{X: 10, Y: 3, W: 8, H: 2})
 	node.ClearDirty()
@@ -140,10 +230,10 @@ func TestManagedElementNodePrepareMarksLayoutAndPaint(t *testing.T) {
 	}
 }
 
-func TestManagedElementNodeClearFrameDirtyClearsNodeAndOwnerState(t *testing.T) {
+func TestNativeManagedNodeClearFrameDirtyClearsNodeAndOwnerState(t *testing.T) {
 	cleared := false
-	node := &ManagedElementNode{
-		ClearFn: func() { cleared = true },
+	node := &testManagedNode{
+		clearFn: func() { cleared = true },
 	}
 	node.Layout(nil, Rect{X: 1, Y: 2, W: 3, H: 1})
 	node.MarkLayoutDirty()
@@ -161,5 +251,58 @@ func TestManagedElementNodeClearFrameDirtyClearsNodeAndOwnerState(t *testing.T) 
 	}
 	if got := node.DirtyRects(); len(got) != 0 {
 		t.Fatalf("expected dirty rects to clear, got %#v", got)
+	}
+}
+
+func TestFlexNodeLayoutVerticalAllocatesFixedAndFlexChildren(t *testing.T) {
+	header := &testRectNode{size: Size{W: 20, H: 3}}
+	body := &testRectNode{size: Size{W: 20, H: 8}}
+	footer := &testRectNode{size: Size{W: 20, H: 2}}
+	node := &FlexNode{
+		Direction: DirectionVertical,
+		Children: []FlexNodeChild{
+			{Node: header},
+			{Node: body, Flex: 1},
+			{Node: footer},
+		},
+	}
+
+	node.Layout(nil, Rect{W: 20, H: 12})
+
+	if got := header.Rect(); got != (Rect{W: 20, H: 3}) {
+		t.Fatalf("header rect = %#v", got)
+	}
+	if got := body.Rect(); got != (Rect{Y: 3, W: 20, H: 7}) {
+		t.Fatalf("body rect = %#v", got)
+	}
+	if got := footer.Rect(); got != (Rect{Y: 10, W: 20, H: 2}) {
+		t.Fatalf("footer rect = %#v", got)
+	}
+}
+
+func TestFlexNodeLayoutHorizontalOmitsZeroWidthFixedChildren(t *testing.T) {
+	main := &testRectNode{size: Size{W: 10, H: 4}}
+	hidden := &testRectNode{size: Size{}}
+	sidebar := &testRectNode{size: Size{W: 5, H: 4}}
+	node := &FlexNode{
+		Direction: DirectionHorizontal,
+		Spacing:   1,
+		Children: []FlexNodeChild{
+			{Node: main, Flex: 1},
+			{Node: hidden},
+			{Node: sidebar},
+		},
+	}
+
+	node.Layout(nil, Rect{W: 20, H: 4})
+
+	if got := main.Rect(); got != (Rect{W: 14, H: 4}) {
+		t.Fatalf("main rect = %#v", got)
+	}
+	if got := hidden.Rect(); !got.Empty() {
+		t.Fatalf("hidden rect = %#v", got)
+	}
+	if got := sidebar.Rect(); got != (Rect{X: 15, W: 5, H: 4}) {
+		t.Fatalf("sidebar rect = %#v", got)
 	}
 }

@@ -10,123 +10,69 @@ import (
 const mainScreenVerticalInset = 0
 
 type transcriptWidget struct {
-	model   *Model
-	bounds  ui.Rect
-	surface ui.Surface
-	damage  []ui.Rect
-	layout  bool
-	dirty   bool
-	valid   bool
+	model       *Model
+	invalidated bool
 }
 
 func (w *transcriptWidget) Dirty() bool {
-	return w == nil || w.dirty || !w.valid
+	return w == nil || w.invalidated
 }
 
 func (w *transcriptWidget) Invalidate() {
 	if w == nil {
 		return
 	}
-	w.dirty = true
-	w.valid = false
-}
-
-func (w *transcriptWidget) Prepare(bounds ui.Rect) {
-	if w == nil {
-		return
-	}
-	if w.valid && !w.dirty && w.bounds == bounds {
-		w.layout = false
-		w.damage = nil
-		return
-	}
-	retained := w.model.syncRetainedTranscript()
-	raw := w.model.viewport.VisibleSurface()
-	surface := raw.Normalize(max(0, bounds.W), max(0, bounds.H))
-	if retained != nil {
-		scroll := ui.ScrollBox{
-			Child:   retained,
-			OffsetY: max(0, w.model.viewport.YOffset),
-			Width:   max(0, bounds.W),
-			Height:  max(0, bounds.H),
-		}
-		if raw.SurfaceWidth() != max(0, bounds.W) || raw.SurfaceHeight() != max(0, bounds.H) {
-			rendered, _, _ := scroll.RenderVisible(&ui.Context{Palette: w.model.palette}, max(0, bounds.W), max(0, bounds.H), max(0, w.model.viewport.YOffset))
-			surface = rendered
-		} else {
-			// Keep the already-computed viewport surface from refreshViewport* so
-			// the cached widget cannot drift from the model's chosen alignment.
-			// Re-render retained content only to refresh runtime controls for this frame.
-			_, _, _ = scroll.RenderVisible(&ui.Context{Palette: w.model.palette}, max(0, bounds.W), max(0, bounds.H), max(0, w.model.viewport.YOffset))
-		}
-	}
-	w.layout = !w.valid || w.bounds != bounds
-	if !w.layout {
-		w.damage = ui.DiffSurfaceDamage(w.surface, surface)
-	} else {
-		w.damage = fullSurfaceDamage(surface)
-	}
-	w.bounds = bounds
-	w.surface = surface
-	w.valid = true
-	w.dirty = false
-}
-
-func (w *transcriptWidget) Element() ui.Element {
-	if w == nil {
-		return ui.VisibleElement{}
-	}
-	return ui.SurfaceBox{Surface: w.surface}
-}
-
-func (w *transcriptWidget) Surface(_ *ui.Context, bounds ui.Rect) ui.Surface {
-	if w == nil {
-		return ui.Surface{}
-	}
-	w.Prepare(bounds)
-	return w.surface
-}
-
-func (w *transcriptWidget) DirtyRects() []ui.Rect {
-	return copyRects(w.damage)
-}
-
-func (w *transcriptWidget) LayoutChanged() bool {
-	return w != nil && w.layout
+	w.invalidated = true
 }
 
 func (w *transcriptWidget) ClearDirty() {
 	if w == nil {
 		return
 	}
-	w.damage = nil
-	w.layout = false
+	w.invalidated = false
+}
+
+func (w *transcriptWidget) Surface(bounds ui.Rect) ui.Surface {
+	if w == nil || w.model == nil {
+		return ui.Surface{}
+	}
+	retained := w.model.syncRetainedTranscript()
+	raw := w.model.viewport.VisibleSurface()
+	surface := raw.Normalize(max(0, bounds.W), max(0, bounds.H))
+	if retained == nil {
+		return surface
+	}
+	scroll := ui.ScrollBox{
+		Child:   retained,
+		OffsetY: max(0, w.model.viewport.YOffset),
+		Width:   max(0, bounds.W),
+		Height:  max(0, bounds.H),
+	}
+	if raw.SurfaceWidth() != max(0, bounds.W) || raw.SurfaceHeight() != max(0, bounds.H) {
+		rendered, _, _ := scroll.RenderVisible(&ui.Context{Palette: w.model.palette}, max(0, bounds.W), max(0, bounds.H), max(0, w.model.viewport.YOffset))
+		return rendered
+	}
+	_, _, _ = scroll.RenderVisible(&ui.Context{Palette: w.model.palette}, max(0, bounds.W), max(0, bounds.H), max(0, w.model.viewport.YOffset))
+	return surface
 }
 
 type composerAreaWidget struct {
 	model        *Model
-	bounds       ui.Rect
 	measureWidth int
 	measureSize  ui.Size
 	measureValid bool
-	surface      ui.Surface
-	damage       []ui.Rect
-	layout       bool
-	cursorRect   ui.Rect
-	cursorValid  bool
-	dirty        bool
-	valid        bool
+	invalidated  bool
 }
 
 func (w *composerAreaWidget) Dirty() bool {
-	return w == nil || w.dirty || !w.valid || len(w.damage) > 0
+	return w == nil || w.invalidated || w.model.composerCursorDirty
 }
 
 func (w *composerAreaWidget) Invalidate() {
 	if w == nil {
 		return
 	}
-	w.dirty = true
+	w.invalidated = true
 	w.measureValid = false
 }
 
@@ -147,43 +93,11 @@ func (w *composerAreaWidget) measure(ctx *ui.Context, width int) ui.Size {
 	return size
 }
 
-func (w *composerAreaWidget) Prepare(ctx *ui.Context, bounds ui.Rect) {
+func (w *composerAreaWidget) ClearDirty() {
 	if w == nil {
 		return
 	}
-	width := max(0, bounds.W)
-	size := w.measure(ctx, width)
-	if width <= 0 {
-		width = size.W
-	}
-	nextBounds := ui.Rect{W: width, H: size.H}
-	if w.valid && !w.dirty && !w.model.composerCursorDirty && w.bounds == nextBounds {
-		w.layout = false
-		w.damage = nil
-		return
-	}
-	nextCursorRect, nextCursorOK := composerCursorRectForBounds(w.model, nextBounds)
-	w.layout = !w.valid || w.bounds != nextBounds
-	switch {
-	case w.model.composerCursorDirty && !w.layout && w.cursorValid && nextCursorOK:
-		damage := ui.DamageSet{}
-		damage.Add(w.cursorRect)
-		damage.Add(nextCursorRect)
-		w.damage = damage.Rects()
-	case !w.layout:
-		w.damage = []ui.Rect{{W: nextBounds.W, H: nextBounds.H}}
-	default:
-		w.damage = fullRectDamage(nextBounds)
-	}
-	w.bounds = nextBounds
-	w.cursorRect = nextCursorRect
-	w.cursorValid = nextCursorOK
-	w.valid = true
-	w.dirty = false
-	cache := w.model.ensureRenderCache()
-	cache.composerAreaValid = nextBounds.H > 0
-	cache.renderedComposerAreaSurface = ui.Surface{}
-	w.model.composerCursorDirty = false
+	w.invalidated = false
 }
 
 func (w *composerAreaWidget) Element() ui.Element {
@@ -193,91 +107,46 @@ func (w *composerAreaWidget) Element() ui.Element {
 	return w.model.renderComposerAreaElement()
 }
 
-func (w *composerAreaWidget) ClearDirty() {
-	if w == nil {
-		return
-	}
-	w.damage = nil
-	w.layout = false
-}
-
 func (w *composerAreaWidget) Surface(ctx *ui.Context, bounds ui.Rect) ui.Surface {
 	if w == nil {
 		return ui.Surface{}
 	}
-	if w.valid && !w.dirty && w.bounds == bounds {
-		return w.surface
+	width := max(0, bounds.W)
+	size := w.measure(ctx, width)
+	if width <= 0 {
+		width = size.W
 	}
-	w.Prepare(ctx, bounds)
-	surface := ui.PaintElementSurface(ctx, w.Element(), w.bounds)
-	w.surface = surface
+	rect := ui.Rect{W: width, H: size.H}
+	surface := ui.PaintElementSurface(ctx, w.Element(), rect)
 	cache := w.model.ensureRenderCache()
-	cache.composerAreaValid = true
+	cache.composerAreaValid = rect.H > 0
 	cache.renderedComposerAreaSurface = surface
 	return surface
 }
 
-func (w *composerAreaWidget) DirtyRects() []ui.Rect {
-	return copyRects(w.damage)
-}
-
-func (w *composerAreaWidget) LayoutChanged() bool {
-	return w != nil && w.layout
-}
-
 type hashedElementWidget struct {
-	model    *Model
-	build    func(*Model) ui.Element
-	hash     func(*Model, ui.Rect) uint64
-	bounds   ui.Rect
-	surface  ui.Surface
-	damage   []ui.Rect
-	layout   bool
-	lastHash uint64
-	dirty    bool
-	valid    bool
+	model       *Model
+	build       func(*Model) ui.Element
+	hash        func(*Model, ui.Rect) uint64
+	invalidated bool
 }
 
 func (w *hashedElementWidget) Dirty() bool {
-	if w == nil || w.dirty || !w.valid || len(w.damage) > 0 {
-		return true
-	}
-	if w.hash == nil {
-		return false
-	}
-	return w.hash(w.model, w.bounds) != w.lastHash
+	return w == nil || w.invalidated
 }
 
 func (w *hashedElementWidget) Invalidate() {
 	if w == nil {
 		return
 	}
-	w.dirty = true
+	w.invalidated = true
 }
 
-func (w *hashedElementWidget) Prepare(bounds ui.Rect) {
+func (w *hashedElementWidget) ClearDirty() {
 	if w == nil {
 		return
 	}
-	currentHash := uint64(0)
-	if w.hash != nil {
-		currentHash = w.hash(w.model, bounds)
-	}
-	if w.valid && !w.dirty && w.bounds == bounds && currentHash == w.lastHash {
-		w.layout = false
-		w.damage = nil
-		return
-	}
-	w.layout = !w.valid || w.bounds != bounds
-	if !w.layout {
-		w.damage = fullRectDamage(bounds)
-	} else {
-		w.damage = fullRectDamage(bounds)
-	}
-	w.bounds = bounds
-	w.lastHash = currentHash
-	w.valid = true
-	w.dirty = false
+	w.invalidated = false
 }
 
 func (w *hashedElementWidget) Element() ui.Element {
@@ -288,40 +157,6 @@ func (w *hashedElementWidget) Element() ui.Element {
 		return ui.VisibleElement{Child: built}
 	}
 	return ui.VisibleElement{}
-}
-
-func (w *hashedElementWidget) ClearDirty() {
-	if w == nil {
-		return
-	}
-	w.damage = nil
-	w.layout = false
-}
-
-func (w *hashedElementWidget) Surface(ctx *ui.Context, bounds ui.Rect) ui.Surface {
-	if w == nil {
-		return ui.Surface{}
-	}
-	currentHash := uint64(0)
-	if w.hash != nil {
-		currentHash = w.hash(w.model, bounds)
-	}
-	if w.valid && !w.dirty && w.bounds == bounds && currentHash == w.lastHash {
-		return w.surface
-	}
-	w.Prepare(bounds)
-	element := w.Element()
-	surface := ui.PaintElementSurface(ctx, element, bounds)
-	w.surface = surface
-	return surface
-}
-
-func (w *hashedElementWidget) DirtyRects() []ui.Rect {
-	return copyRects(w.damage)
-}
-
-func (w *hashedElementWidget) LayoutChanged() bool {
-	return w != nil && w.layout
 }
 
 type mainScreenWidget struct {
@@ -353,6 +188,9 @@ func (w *mainScreenWidget) Invalidate() {
 func (w *mainScreenWidget) dirty() bool {
 	if w == nil || !w.valid {
 		return true
+	}
+	if w.retained != nil {
+		return w.retained.Pending()
 	}
 	return w.transcript.Dirty() || w.composer.Dirty() || w.sidebar.Dirty() || w.statusPane.Dirty()
 }
@@ -440,16 +278,207 @@ func (w *mainScreenWidget) paintIntoCanvas(ctx *ui.Context, bounds ui.Rect, canv
 
 type mainScreenRetainedRoot struct {
 	ui.BaseNode
-	model              *Model
-	transcriptWidget   *transcriptWidget
-	composerWidget     *composerAreaWidget
-	sidebarWidget      *hashedElementWidget
-	statusWidget       *hashedElementWidget
-	transcriptNode     *ui.ManagedElementNode
-	composerNode       *ui.ManagedElementNode
-	sidebarNode        *ui.ManagedElementNode
-	statusNode         *ui.ManagedElementNode
-	transcriptPaneRect ui.Rect
+	model          *Model
+	transcriptNode *transcriptRetainedNode
+	composerNode   *composerRetainedNode
+	sidebarNode    *hashedElementRetainedNode
+	statusNode     *hashedElementRetainedNode
+	mainColumnNode *ui.FlexNode
+	bodyNode       *ui.FlexNode
+	layoutRootNode *ui.FlexNode
+}
+
+type transcriptRetainedNode struct {
+	ui.BaseNode
+	widget  *transcriptWidget
+	surface ui.Surface
+}
+
+func (n *transcriptRetainedNode) Pending() bool {
+	return n == nil || n.widget == nil || n.widget.invalidated
+}
+
+func (n *transcriptRetainedNode) Measure(_ *ui.Context, constraints ui.Constraints) ui.Size {
+	if n == nil || n.widget == nil || n.widget.model == nil {
+		return constraints.Clamp(ui.Size{})
+	}
+	m := n.widget.model
+	return constraints.Clamp(ui.Size{W: max(0, m.viewport.Width), H: max(0, m.viewport.Height)})
+}
+
+func (n *transcriptRetainedNode) Prepare(ctx *ui.Context) {
+	if n == nil || n.widget == nil || n.widget.model == nil {
+		return
+	}
+	rect := n.Rect()
+	if rect.Empty() {
+		n.widget.ClearDirty()
+		return
+	}
+	if !n.widget.invalidated && !n.NeedsPaint() {
+		return
+	}
+	next := n.widget.Surface(rect)
+	if n.widget.invalidated && !n.NeedsLayout() {
+		n.MarkDirtyLocalRects(ui.DiffSurfaceDamage(n.surface, next))
+	}
+	n.surface = next
+	n.widget.ClearDirty()
+}
+
+func (n *transcriptRetainedNode) Paint(_ *ui.Context, canvas ui.Canvas) {
+	if n == nil || canvas.Width() <= 0 || canvas.Height() <= 0 {
+		return
+	}
+	if n.widget != nil && n.widget.model != nil {
+		canvas.Fill(ui.Rect{W: canvas.Width(), H: canvas.Height()}, ui.CellStyle{
+			BG: ui.CellColorFromLipgloss(n.widget.model.palette.ScreenBackground),
+		})
+	}
+	canvas.BlitSurface(0, 0, n.surface.Normalize(canvas.Width(), canvas.Height()))
+}
+
+type composerRetainedNode struct {
+	ui.BaseNode
+	widget      *composerAreaWidget
+	surface     ui.Surface
+	cursorRect  ui.Rect
+	cursorValid bool
+}
+
+func (n *composerRetainedNode) Pending() bool {
+	return n == nil || n.widget == nil || n.widget.invalidated || n.widget.model.composerCursorDirty
+}
+
+func (n *composerRetainedNode) Measure(ctx *ui.Context, constraints ui.Constraints) ui.Size {
+	if n == nil || n.widget == nil {
+		return constraints.Clamp(ui.Size{})
+	}
+	return n.widget.measure(ctx, constraints.MaxW)
+}
+
+func (n *composerRetainedNode) Prepare(ctx *ui.Context) {
+	if n == nil || n.widget == nil || n.widget.model == nil {
+		return
+	}
+	rect := n.Rect()
+	if rect.Empty() {
+		n.widget.ClearDirty()
+		return
+	}
+	m := n.widget.model
+	needsSync := n.widget.invalidated || m.composerCursorDirty || n.NeedsPaint()
+	if !needsSync {
+		return
+	}
+	element := m.renderComposerAreaElement()
+	next := ui.PaintElementSurface(ctx, element, rect)
+	nextCursorRect, nextCursorOK := composerCursorRectForBounds(m, rect)
+	if !n.NeedsLayout() {
+		switch {
+		case m.composerCursorDirty && n.cursorValid && nextCursorOK:
+			damage := ui.DamageSet{}
+			damage.Add(n.cursorRect)
+			damage.Add(nextCursorRect)
+			n.MarkDirtyLocalRects(damage.Rects())
+		default:
+			diff := ui.DiffSurfaceDamage(n.surface, next)
+			if len(diff) == 0 && n.widget.invalidated {
+				n.MarkDirtyLocal(ui.Rect{W: rect.W, H: rect.H})
+			} else {
+				n.MarkDirtyLocalRects(diff)
+			}
+		}
+	}
+	n.surface = next
+	n.cursorRect = nextCursorRect
+	n.cursorValid = nextCursorOK
+	cache := m.ensureRenderCache()
+	cache.composerAreaValid = rect.H > 0
+	cache.renderedComposerAreaSurface = next
+	m.composerCursorDirty = false
+	n.widget.ClearDirty()
+}
+
+func (n *composerRetainedNode) Paint(_ *ui.Context, canvas ui.Canvas) {
+	if n == nil || canvas.Width() <= 0 || canvas.Height() <= 0 {
+		return
+	}
+	canvas.BlitSurface(0, 0, n.surface.Normalize(canvas.Width(), canvas.Height()))
+}
+
+type hashedElementRetainedNode struct {
+	ui.BaseNode
+	widget   *hashedElementWidget
+	measure  func(*ui.Context, ui.Constraints) ui.Size
+	surface  ui.Surface
+	lastHash uint64
+}
+
+func (n *hashedElementRetainedNode) Pending() bool {
+	if n == nil || n.widget == nil {
+		return true
+	}
+	if n.widget.invalidated {
+		return true
+	}
+	if n.Rect().Empty() {
+		return false
+	}
+	if n.widget.hash == nil {
+		return false
+	}
+	return n.widget.hash(n.widget.model, n.Rect()) != n.lastHash
+}
+
+func (n *hashedElementRetainedNode) Measure(ctx *ui.Context, constraints ui.Constraints) ui.Size {
+	if n == nil {
+		return constraints.Clamp(ui.Size{})
+	}
+	if n.measure != nil {
+		return n.measure(ctx, constraints)
+	}
+	return constraints.Clamp(ui.Size{})
+}
+
+func (n *hashedElementRetainedNode) Prepare(ctx *ui.Context) {
+	if n == nil || n.widget == nil {
+		return
+	}
+	rect := n.Rect()
+	if rect.Empty() {
+		n.widget.ClearDirty()
+		return
+	}
+	currentHash := uint64(0)
+	if n.widget.hash != nil {
+		currentHash = n.widget.hash(n.widget.model, rect)
+	}
+	needsSync := n.widget.invalidated || currentHash != n.lastHash || n.NeedsPaint()
+	if !needsSync {
+		return
+	}
+	var element ui.Element
+	if n.widget.build != nil {
+		element = n.widget.build(n.widget.model)
+	}
+	if element == nil {
+		element = ui.VisibleElement{}
+	}
+	next := ui.PaintElementSurface(ctx, ui.VisibleElement{Child: element}, rect)
+	if !n.NeedsLayout() && (n.widget.invalidated || currentHash != n.lastHash) {
+		n.MarkDirtyLocalRects(ui.DiffSurfaceDamage(n.surface, next))
+	}
+	n.surface = next
+	n.lastHash = currentHash
+	n.widget.ClearDirty()
+}
+
+func (n *hashedElementRetainedNode) Paint(_ *ui.Context, canvas ui.Canvas) {
+	if n == nil || canvas.Width() <= 0 || canvas.Height() <= 0 {
+		return
+	}
+	canvas.BlitSurface(0, 0, n.surface.Normalize(canvas.Width(), canvas.Height()))
 }
 
 func (r *mainScreenRetainedRoot) Measure(_ *ui.Context, constraints ui.Constraints) ui.Size {
@@ -459,112 +488,53 @@ func (r *mainScreenRetainedRoot) Measure(_ *ui.Context, constraints ui.Constrain
 	return constraints.Clamp(ui.Size{W: constraints.MaxW, H: constraints.MaxH})
 }
 
+func (r *mainScreenRetainedRoot) Pending() bool {
+	if r == nil {
+		return true
+	}
+	return r.transcriptNode.Pending() || r.composerNode.Pending() || r.sidebarNode.Pending() || r.statusNode.Pending()
+}
+
 func newMainScreenRetainedRoot(m *Model, transcript *transcriptWidget, composer *composerAreaWidget, sidebar, status *hashedElementWidget) *mainScreenRetainedRoot {
 	root := &mainScreenRetainedRoot{
-		model:            m,
-		transcriptWidget: transcript,
-		composerWidget:   composer,
-		sidebarWidget:    sidebar,
-		statusWidget:     status,
+		model: m,
 	}
-	root.transcriptNode = &ui.ManagedElementNode{
-		ElementNode: ui.ElementNode{
-			MeasureFn: func(_ *ui.Context, constraints ui.Constraints) ui.Size {
-				return constraints.Clamp(ui.Size{W: max(0, m.viewport.Width), H: max(0, m.viewport.Height)})
-			},
-			ElementFn: func(ctx *ui.Context) ui.Element {
-				return transcript.Element()
-			},
+	root.transcriptNode = &transcriptRetainedNode{widget: transcript}
+	root.composerNode = &composerRetainedNode{widget: composer}
+	root.sidebarNode = &hashedElementRetainedNode{
+		widget: sidebar,
+		measure: func(_ *ui.Context, constraints ui.Constraints) ui.Size {
+			return constraints.Clamp(ui.Size{W: max(0, m.sidebarWidth()), H: max(0, m.viewport.Height)})
 		},
-		PrepareFn: func(_ *ui.Context, rect ui.Rect) {
-			transcript.Prepare(rect)
-		},
-		DirtyFn:         transcript.Dirty,
-		DirtyRectsFn:    transcript.DirtyRects,
-		LayoutChangedFn: transcript.LayoutChanged,
-		ClearFn:         transcript.ClearDirty,
 	}
-	root.composerNode = &ui.ManagedElementNode{
-		ElementNode: ui.ElementNode{
-			MeasureFn: func(ctx *ui.Context, constraints ui.Constraints) ui.Size {
-				return composer.measure(ctx, constraints.MaxW)
-			},
-			ElementFn: func(ctx *ui.Context) ui.Element {
-				return composer.Element()
-			},
+	root.statusNode = &hashedElementRetainedNode{
+		widget: status,
+		measure: func(_ *ui.Context, constraints ui.Constraints) ui.Size {
+			return constraints.Clamp(ui.Size{W: constraints.MaxW, H: max(0, m.statusPaneHeight())})
 		},
-		PrepareFn:       composer.Prepare,
-		DirtyFn:         composer.Dirty,
-		DirtyRectsFn:    composer.DirtyRects,
-		LayoutChangedFn: composer.LayoutChanged,
-		ClearFn:         composer.ClearDirty,
 	}
-	root.sidebarNode = &ui.ManagedElementNode{
-		ElementNode: ui.ElementNode{
-			MeasureFn: func(_ *ui.Context, constraints ui.Constraints) ui.Size {
-				return constraints.Clamp(ui.Size{W: max(0, m.sidebarWidth()), H: max(0, m.viewport.Height)})
-			},
-			ElementFn: func(ctx *ui.Context) ui.Element {
-				return sidebar.Element()
-			},
+	root.mainColumnNode = &ui.FlexNode{
+		Direction: ui.DirectionVertical,
+		Children: []ui.FlexNodeChild{
+			{Node: root.transcriptNode, Flex: 1},
+			{Node: root.composerNode},
 		},
-		PrepareFn: func(_ *ui.Context, rect ui.Rect) {
-			sidebar.Prepare(rect)
-		},
-		DirtyFn:         sidebar.Dirty,
-		DirtyRectsFn:    sidebar.DirtyRects,
-		LayoutChangedFn: sidebar.LayoutChanged,
-		ClearFn:         sidebar.ClearDirty,
 	}
-	root.statusNode = &ui.ManagedElementNode{
-		ElementNode: ui.ElementNode{
-			MeasureFn: func(_ *ui.Context, constraints ui.Constraints) ui.Size {
-				return constraints.Clamp(ui.Size{W: constraints.MaxW, H: max(0, m.statusPaneHeight())})
-			},
-			ElementFn: func(ctx *ui.Context) ui.Element {
-				return status.Element()
-			},
+	root.bodyNode = &ui.FlexNode{Direction: ui.DirectionHorizontal}
+	root.layoutRootNode = &ui.FlexNode{
+		Direction: ui.DirectionVertical,
+		Children: []ui.FlexNodeChild{
+			{Node: root.bodyNode, Flex: 1},
+			{Node: root.statusNode},
 		},
-		PrepareFn: func(_ *ui.Context, rect ui.Rect) {
-			status.Prepare(rect)
-		},
-		DirtyFn:         status.Dirty,
-		DirtyRectsFn:    status.DirtyRects,
-		LayoutChangedFn: status.LayoutChanged,
-		ClearFn:         status.ClearDirty,
 	}
 	return root
 }
 
 func (r *mainScreenRetainedRoot) Layout(ctx *ui.Context, rect ui.Rect) {
 	r.BaseNode.Layout(ctx, rect)
-	statusSize := r.statusNode.Measure(ctx, ui.NewConstraints(rect.W, 0))
-	statusH := max(0, min(rect.H, statusSize.H))
-	bodyH := max(0, rect.H-statusH)
-	sidebarW := 0
-	if r.model.showSidebar {
-		sidebarW = max(0, r.model.sidebarWidth())
-	}
-	gap := 0
-	if sidebarW > 0 {
-		gap = 1
-	}
-	mainW := max(0, rect.W-sidebarW-gap)
-	composerSize := r.composerNode.Measure(ctx, ui.NewConstraints(mainW, 0))
-	composerH := max(0, min(bodyH, composerSize.H))
-	transcriptPaneH := max(0, bodyH-composerH)
-	transcriptSize := r.transcriptNode.Measure(ctx, ui.NewConstraints(mainW, transcriptPaneH))
-	transcriptH := max(0, min(transcriptPaneH, transcriptSize.H))
-	transcriptY := max(0, transcriptPaneH-transcriptH)
-	r.transcriptPaneRect = ui.Rect{W: mainW, H: transcriptPaneH}
-	r.transcriptNode.Layout(ctx, ui.Rect{X: 0, Y: transcriptY, W: mainW, H: transcriptH})
-	r.composerNode.Layout(ctx, ui.Rect{X: 0, Y: transcriptPaneH, W: mainW, H: composerH})
-	if sidebarW > 0 {
-		r.sidebarNode.Layout(ctx, ui.Rect{X: mainW + gap, Y: 0, W: sidebarW, H: bodyH})
-	} else {
-		r.sidebarNode.Layout(ctx, ui.Rect{})
-	}
-	r.statusNode.Layout(ctx, ui.Rect{X: 0, Y: bodyH, W: rect.W, H: statusH})
+	r.syncLayoutTree()
+	r.layoutRootNode.Layout(ctx, rect)
 }
 
 func (r *mainScreenRetainedRoot) Paint(ctx *ui.Context, canvas ui.Canvas) {
@@ -572,58 +542,33 @@ func (r *mainScreenRetainedRoot) Paint(ctx *ui.Context, canvas ui.Canvas) {
 }
 
 func (r *mainScreenRetainedRoot) Prepare(ctx *ui.Context) {
-	r.forEachNode(func(node *ui.ManagedElementNode) {
-		node.Prepare(ctx)
-	})
+	r.syncLayoutTree()
+	r.layoutRootNode.Prepare(ctx)
 }
 
 func (r *mainScreenRetainedRoot) PaintAll(ctx *ui.Context, canvas ui.Canvas) {
-	palette := r.model.palette
-	canvas.Fill(r.transcriptPaneRect, ui.CellStyle{BG: ui.CellColorFromLipgloss(palette.ScreenBackground)})
-	r.paintNode(ctx, canvas, r.transcriptNode)
-	r.paintNode(ctx, canvas, r.composerNode)
-	r.paintNode(ctx, canvas, r.sidebarNode)
-	r.paintNode(ctx, canvas, r.statusNode)
+	r.syncLayoutTree()
+	r.layoutRootNode.Paint(ctx, canvas)
 }
 
 func (r *mainScreenRetainedRoot) PaintDirty(ctx *ui.Context, canvas ui.Canvas) {
-	palette := r.model.palette
-	if r.transcriptNode.NeedsPaint() {
-		canvas.Fill(r.transcriptPaneRect, ui.CellStyle{BG: ui.CellColorFromLipgloss(palette.ScreenBackground)})
-	}
-	r.forEachNode(func(node *ui.ManagedElementNode) {
-		if !node.NeedsPaint() || node.Rect().Empty() {
-			return
-		}
-		node.Paint(ctx, canvas.Subrect(node.Rect()))
-	})
-}
-
-func (r *mainScreenRetainedRoot) paintNode(ctx *ui.Context, canvas ui.Canvas, node ui.Node) {
-	rect := node.Rect()
-	if rect.Empty() {
-		return
-	}
-	node.Paint(ctx, canvas.Subrect(rect))
+	r.syncLayoutTree()
+	paintDirtyNode(ctx, canvas, r.layoutRootNode)
 }
 
 func (r *mainScreenRetainedRoot) DirtyRects() []ui.Rect {
 	damage := ui.DamageSet{}
 	damage.AddAll(r.BaseNode.DirtyRects())
-	r.forEachNode(func(node *ui.ManagedElementNode) {
-		damage.AddAll(node.DirtyRects())
-	})
+	collectNodeDamage(&damage, r.layoutRootNode)
 	return damage.Rects()
 }
 
 func (r *mainScreenRetainedRoot) ClearDirty() {
 	r.BaseNode.ClearDirty()
-	r.forEachNode(func(node *ui.ManagedElementNode) {
-		node.ClearFrameDirty()
-	})
+	clearNodeDirty(r.layoutRootNode)
 }
 
-func (r *mainScreenRetainedRoot) forEachNode(visit func(*ui.ManagedElementNode)) {
+func (r *mainScreenRetainedRoot) forEachNode(visit func(ui.Node)) {
 	if r == nil || visit == nil {
 		return
 	}
@@ -631,6 +576,63 @@ func (r *mainScreenRetainedRoot) forEachNode(visit func(*ui.ManagedElementNode))
 	visit(r.composerNode)
 	visit(r.sidebarNode)
 	visit(r.statusNode)
+}
+
+func (r *mainScreenRetainedRoot) syncLayoutTree() {
+	if r == nil || r.bodyNode == nil || r.layoutRootNode == nil {
+		return
+	}
+	bodyChildren := []ui.FlexNodeChild{{Node: r.mainColumnNode, Flex: 1}}
+	if r.model != nil && r.model.showSidebar {
+		bodyChildren = append(bodyChildren, ui.FlexNodeChild{Node: r.sidebarNode})
+	} else if r.sidebarNode != nil {
+		r.sidebarNode.Layout(nil, ui.Rect{})
+	}
+	r.bodyNode.Children = bodyChildren
+}
+
+func paintDirtyNode(ctx *ui.Context, canvas ui.Canvas, node ui.Node) {
+	if node == nil || node.Rect().Empty() {
+		return
+	}
+	if group, ok := node.(ui.NodeChildren); ok {
+		for _, child := range group.ChildNodes() {
+			paintDirtyNode(ctx, canvas, child)
+		}
+		return
+	}
+	if !node.NeedsPaint() {
+		return
+	}
+	node.Paint(ctx, canvas.Subrect(node.Rect()))
+}
+
+func collectNodeDamage(damage *ui.DamageSet, node ui.Node) {
+	if damage == nil || node == nil {
+		return
+	}
+	damage.AddAll(node.DirtyRects())
+	group, ok := node.(ui.NodeChildren)
+	if !ok {
+		return
+	}
+	for _, child := range group.ChildNodes() {
+		collectNodeDamage(damage, child)
+	}
+}
+
+func clearNodeDirty(node ui.Node) {
+	if node == nil {
+		return
+	}
+	node.ClearDirty()
+	group, ok := node.(ui.NodeChildren)
+	if !ok {
+		return
+	}
+	for _, child := range group.ChildNodes() {
+		clearNodeDirty(child)
+	}
 }
 
 func fullSurfaceDamage(surface ui.Surface) []ui.Rect {
@@ -765,8 +767,8 @@ func (m *Model) ensureMainScreenWidget() *mainScreenWidget {
 	}
 	m.mainScreen = &mainScreenWidget{
 		model:      m,
-		transcript: &transcriptWidget{model: m, dirty: true},
-		composer:   &composerAreaWidget{model: m, dirty: true},
+		transcript: &transcriptWidget{model: m, invalidated: true},
+		composer:   &composerAreaWidget{model: m, invalidated: true},
 		sidebar: &hashedElementWidget{
 			model: m,
 			build: func(m *Model) ui.Element {
@@ -779,14 +781,14 @@ func (m *Model) ensureMainScreenWidget() *mainScreenWidget {
 					Width:  m.sidebarWidth(),
 				}
 			},
-			hash:  sidebarWidgetHash,
-			dirty: true,
+			hash:        sidebarWidgetHash,
+			invalidated: true,
 		},
 		statusPane: &hashedElementWidget{
-			model: m,
-			build: func(m *Model) ui.Element { return m.renderStatusPaneElement() },
-			hash:  statusPaneWidgetHash,
-			dirty: true,
+			model:       m,
+			build:       func(m *Model) ui.Element { return m.renderStatusPaneElement() },
+			hash:        statusPaneWidgetHash,
+			invalidated: true,
 		},
 	}
 	m.mainScreen.retained = newMainScreenRetainedRoot(m, m.mainScreen.transcript, m.mainScreen.composer, m.mainScreen.sidebar, m.mainScreen.statusPane)

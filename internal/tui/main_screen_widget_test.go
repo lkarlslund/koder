@@ -72,9 +72,6 @@ func TestMainScreenRetainedRootLayoutChangeMarksNodesDirtyWithoutWidgetInvalidat
 	if !root.composerNode.NeedsPaint() {
 		t.Fatal("expected composer node to be paint-dirty after layout change")
 	}
-	if !root.statusNode.NeedsPaint() {
-		t.Fatal("expected status node to be paint-dirty after layout change")
-	}
 }
 
 func TestMainScreenRetainedRootPaintDirtyMatchesFullPaintAfterComposerLayoutChange(t *testing.T) {

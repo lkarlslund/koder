@@ -207,29 +207,52 @@ func BenchmarkCanvasWriteTextComposite(b *testing.B) {
 
 func BenchmarkSurfaceNodePaintDiff(b *testing.B) {
 	toggle := false
-	node := &SurfaceNode{
-		MeasureFn: func(_ *Context, constraints Constraints) Size {
-			return constraints.Clamp(Size{W: 40, H: 1})
-		},
-		RenderFn: func(_ *Context, bounds Rect) Surface {
-			surface := BlankSurface(bounds.W, bounds.H)
-			text := "ready"
-			if toggle {
-				text = "busy "
-			}
-			surface.WriteText(2, 0, text, CellStyle{FG: cellColor(benchmarkPalette().MarkdownText)})
-			return surface
-		},
-	}
+	node := &benchmarkDiffNode{}
 	node.Layout(nil, Rect{W: 40, H: 1})
 	root := BlankSurface(40, 1)
 	canvas := NewCanvas(&root, Rect{W: 40, H: 1})
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		toggle = !toggle
+		node.toggle = toggle
+		node.Prepare(nil)
 		node.Paint(nil, canvas)
 		node.ClearDirty()
 	}
+}
+
+type benchmarkDiffNode struct {
+	BaseNode
+	toggle  bool
+	surface Surface
+}
+
+func (n *benchmarkDiffNode) Measure(_ *Context, constraints Constraints) Size {
+	return constraints.Clamp(Size{W: 40, H: 1})
+}
+
+func (n *benchmarkDiffNode) Prepare(_ *Context) {
+	rect := n.Rect()
+	if rect.Empty() {
+		return
+	}
+	next := BlankSurface(rect.W, rect.H)
+	text := "ready"
+	if n.toggle {
+		text = "busy "
+	}
+	next.WriteText(2, 0, text, CellStyle{FG: cellColor(benchmarkPalette().MarkdownText)})
+	if !n.NeedsLayout() {
+		n.MarkDirtyLocalRects(DiffSurfaceDamage(n.surface, next))
+	}
+	n.surface = next
+}
+
+func (n *benchmarkDiffNode) Paint(_ *Context, canvas Canvas) {
+	if canvas.Width() <= 0 || canvas.Height() <= 0 {
+		return
+	}
+	canvas.BlitSurface(0, 0, n.surface.Normalize(canvas.Width(), canvas.Height()))
 }
 
 func BenchmarkButtonRowRender(b *testing.B) {
