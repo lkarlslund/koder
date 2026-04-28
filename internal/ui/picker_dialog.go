@@ -181,11 +181,7 @@ func (d PickerDialog) Measure(ctx *Context, constraints Constraints) Size {
 }
 
 func (d PickerDialog) Render(ctx *Context, bounds Rect) Surface {
-	width := bounds.W
-	if width <= 0 {
-		width = 80
-	}
-	return d.element(width, ctx.Palette).Render(ctx, Rect{W: width, H: bounds.H})
+	return renderOwnedCanvas(ctx, bounds, d)
 }
 
 func (d PickerDialog) element(width int, palette theme.Palette) Element {
@@ -236,6 +232,22 @@ func (d PickerDialog) buttonRow(width int) ButtonRow {
 	buttons.Width = maxInt(0, width-4)
 	buttons.Align = HorizontalAlignRight
 	return buttons
+}
+
+func (d PickerDialog) Paint(ctx *Context, canvas Canvas) {
+	if canvas.Width() <= 0 || canvas.Height() <= 0 {
+		return
+	}
+	width := canvas.Width()
+	if width <= 0 {
+		width = 80
+	}
+	renderElementInto(ctx, d.element(width, ctx.Palette), Rect{
+		X: canvas.origin.X,
+		Y: canvas.origin.Y,
+		W: width,
+		H: canvas.Height(),
+	}, canvas.surface)
 }
 
 func (d *PickerDialog) move(delta int) {

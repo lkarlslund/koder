@@ -36,7 +36,7 @@ func (w WindowFrame) Measure(ctx *Context, constraints Constraints) Size {
 }
 
 func (w WindowFrame) Render(ctx *Context, bounds Rect) Surface {
-	return w.border(ctx).Render(ctx, bounds)
+	return renderOwnedCanvas(ctx, bounds, w)
 }
 
 func (w WindowFrame) border(ctx *Context) Border {
@@ -86,6 +86,18 @@ func bracketLabel(title string) string {
 		return ""
 	}
 	return "[" + title + "]"
+}
+
+func (w WindowFrame) Paint(ctx *Context, canvas Canvas) {
+	if canvas.Width() <= 0 || canvas.Height() <= 0 {
+		return
+	}
+	renderElementInto(ctx, w.border(ctx), Rect{
+		X: canvas.origin.X,
+		Y: canvas.origin.Y,
+		W: canvas.Width(),
+		H: canvas.Height(),
+	}, canvas.surface)
 }
 
 func firstString(values ...string) string {

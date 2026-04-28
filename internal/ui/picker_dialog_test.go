@@ -2,6 +2,8 @@ package ui
 
 import (
 	"testing"
+
+	"github.com/lkarlslund/koder/internal/theme"
 )
 
 func TestPickerDialogAltOCSelectsCurrentItem(t *testing.T) {
@@ -19,4 +21,13 @@ func TestPickerDialogActivateCancelButton(t *testing.T) {
 	if action.Kind != PickerDialogActionCancel {
 		t.Fatalf("expected cancel action, got %#v", action)
 	}
+}
+
+func TestPickerDialogRenderMatchesInnerElement(t *testing.T) {
+	palette := theme.Default().Palette
+	dialog := NewPickerDialog("Themes", "Choose one", []PickerItem{
+		{Title: "Tokyo Night", Description: "Dark", Value: "tokyonight"},
+		{Title: "Gruvbox", Description: "Warm", Value: "gruvbox"},
+	})
+	assertElementRenderMatchesWrapper(t, &Context{Palette: palette, Runtime: &Runtime{}}, dialog, dialog.element(80, palette), Rect{W: 80, H: 10})
 }

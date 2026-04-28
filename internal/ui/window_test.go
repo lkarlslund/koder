@@ -70,3 +70,25 @@ func TestWindowFrameContentInheritsFrameBackground(t *testing.T) {
 		t.Fatalf("expected inherited background %v, got %d %d %d", want, r, g, b)
 	}
 }
+
+func TestWindowFrameRenderMatchesInnerBorder(t *testing.T) {
+	palette := theme.Default().Palette
+	ctx := &Context{Palette: palette, Runtime: &Runtime{}}
+	element := WindowFrame{
+		Title:     "Help",
+		Content:   HitBox{ID: "body", Child: TextPane{Content: "Hotkeys"}},
+		Width:     24,
+		ShowClose: true,
+	}
+	got := element.Render(ctx, Rect{W: 24, H: 5})
+	want := element.border(ctx).Render(&Context{Palette: palette}, Rect{W: 24, H: 5})
+	if got.Size() != want.Size() {
+		t.Fatalf("size mismatch: got %#v want %#v", got.Size(), want.Size())
+	}
+	if gotText, wantText := got.Lines(), want.Lines(); len(gotText) != len(wantText) || strings.Join(gotText, "\n") != strings.Join(wantText, "\n") {
+		t.Fatalf("line mismatch:\ngot=%q\nwant=%q", gotText, wantText)
+	}
+	if len(got.Controls()) == 0 {
+		t.Fatal("expected window frame render to preserve controls")
+	}
+}
