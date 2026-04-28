@@ -452,6 +452,13 @@ type mainScreenRetainedRoot struct {
 	transcriptPaneRect ui.Rect
 }
 
+func (r *mainScreenRetainedRoot) Measure(_ *ui.Context, constraints ui.Constraints) ui.Size {
+	if r == nil {
+		return ui.Size{}
+	}
+	return constraints.Clamp(ui.Size{W: constraints.MaxW, H: constraints.MaxH})
+}
+
 func newMainScreenRetainedRoot(m *Model, transcript *transcriptWidget, composer *composerAreaWidget, sidebar, status *hashedElementWidget) *mainScreenRetainedRoot {
 	root := &mainScreenRetainedRoot{
 		model:            m,
