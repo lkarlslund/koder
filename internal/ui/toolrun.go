@@ -285,7 +285,7 @@ func (d ToolRunDock) Measure(_ *Context, constraints Constraints) Size {
 }
 
 func (d ToolRunDock) Render(ctx *Context, bounds Rect) Surface {
-	return renderOwnedSurface(ctx, bounds, d.RenderTo)
+	return renderOwnedCanvas(ctx, bounds, d)
 }
 
 func (d ToolRunDock) RenderTo(ctx *Context, bounds Rect, dst *Surface) {
@@ -293,6 +293,18 @@ func (d ToolRunDock) RenderTo(ctx *Context, bounds Rect, dst *Surface) {
 		return
 	}
 	renderElementInto(ctx, d.element(), bounds, dst)
+}
+
+func (d ToolRunDock) Paint(ctx *Context, canvas Canvas) {
+	if canvas.Width() <= 0 || canvas.Height() <= 0 {
+		return
+	}
+	renderElementInto(ctx, d.element(), Rect{
+		X: canvas.origin.X,
+		Y: canvas.origin.Y,
+		W: canvas.Width(),
+		H: canvas.Height(),
+	}, canvas.surface)
 }
 
 func (d ToolRunDock) element() Element {
@@ -489,6 +501,17 @@ func (t toolRunDockTitle) Render(_ *Context, bounds Rect) Surface {
 	return s.normalize(bounds.W, bounds.H)
 }
 
+func (t toolRunDockTitle) Paint(_ *Context, canvas Canvas) {
+	if canvas.Width() <= 0 || canvas.Height() <= 0 {
+		return
+	}
+	canvas.WriteText(0, 0, PlainTruncate(t.Title, canvas.Width(), ""), CellStyle{FG: cellColor(t.Palette.MarkdownText)}.WithBold(true))
+	statusX := PlainWidth(t.Title) + 2
+	if statusX < canvas.Width() {
+		canvas.WriteText(statusX, 0, PlainTruncate(t.Status, canvas.Width()-statusX, ""), CellStyle{FG: cellColor(t.Color)}.WithBold(true))
+	}
+}
+
 type toolRunDockPreview struct {
 	Palette theme.Palette
 	Text    string
@@ -525,6 +548,23 @@ func (p toolRunDockPreview) Render(_ *Context, bounds Rect) Surface {
 		s.WriteText(0, y, PlainTruncate(line, width, ""), style)
 	}
 	return s.normalize(bounds.W, bounds.H)
+}
+
+func (p toolRunDockPreview) Paint(_ *Context, canvas Canvas) {
+	if canvas.Width() <= 0 || canvas.Height() <= 0 {
+		return
+	}
+	lines := strings.Split(strings.TrimRight(p.Text, "\n"), "\n")
+	if len(lines) == 0 {
+		lines = []string{""}
+	}
+	style := CellStyle{FG: cellColor(p.Palette.MarkdownText)}
+	for y, line := range lines {
+		if y >= canvas.Height() {
+			break
+		}
+		canvas.WriteText(0, y, PlainTruncate(line, canvas.Width(), ""), style)
+	}
 }
 
 func diffSummary(diff string) string {

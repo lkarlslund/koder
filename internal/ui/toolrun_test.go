@@ -156,3 +156,23 @@ func TestToolRunCardViewHidesEditPreviewUntilExpanded(t *testing.T) {
 		t.Fatalf("expected expanded edit card to show edit details, got %q", expanded)
 	}
 }
+
+func TestToolRunDockRenderMatchesRenderTo(t *testing.T) {
+	palette := theme.Resolve("tokyonight").Palette
+	element := ToolRunDock{
+		Palette: palette,
+		Run: ToolRun{
+			ID:       "run-1",
+			Title:    "Read file",
+			Subtitle: "README.md",
+			Preview:  "line 1\nline 2",
+			Status:   ToolRunStatusCompleted,
+		},
+		Buttons: ButtonRow{
+			Buttons: []Button{{ID: "expand", Label: "Expand"}},
+			Width:   32,
+		},
+		Hints: "Enter to expand",
+	}
+	assertRenderMatchesRenderTo(t, &Context{Palette: palette, Runtime: &Runtime{}}, element, Rect{W: 32, H: 6})
+}
