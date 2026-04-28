@@ -261,44 +261,12 @@ func (w *mainScreenWidget) Surface(ctx *ui.Context, bounds ui.Rect) ui.Surface {
 		}),
 	}
 	surface := ui.FlexBox{Direction: ui.DirectionVertical, Children: rootChildren}.Render(ctx, bounds)
-	bodyHeight := max(0, surface.Size().H-statusSurface.Size().H)
-	dirtyStart := 0
-	dirtyEnd := -1
-	if transcriptDirty && transcriptSurface.Size().H > 0 {
-		dirtyStart = 0
-		dirtyEnd = transcriptSurface.Size().H - 1
-	}
-	if composerDirty && composerSurface.Size().H > 0 {
-		start := max(0, bodyHeight-composerSurface.Size().H)
-		end := start + composerSurface.Size().H - 1
-		if dirtyEnd < dirtyStart {
-			dirtyStart, dirtyEnd = start, end
-		} else {
-			dirtyStart = min(dirtyStart, start)
-			dirtyEnd = max(dirtyEnd, end)
+	if w.valid {
+		if rects := ui.DiffSurfaceDamage(w.surface, surface); len(rects) > 0 {
+			surface = surface.WithDirtyRects(rects...)
 		}
-	}
-	if statusDirty && statusSurface.Size().H > 0 {
-		start := max(0, surface.Size().H-statusSurface.Size().H)
-		end := surface.Size().H - 1
-		if dirtyEnd < dirtyStart {
-			dirtyStart, dirtyEnd = start, end
-		} else {
-			dirtyStart = min(dirtyStart, start)
-			dirtyEnd = max(dirtyEnd, end)
-		}
-	}
-	if sidebarDirty && bodyHeight > 0 {
-		start, end := 0, bodyHeight-1
-		if dirtyEnd < dirtyStart {
-			dirtyStart, dirtyEnd = start, end
-		} else {
-			dirtyStart = min(dirtyStart, start)
-			dirtyEnd = max(dirtyEnd, end)
-		}
-	}
-	if dirtyEnd >= dirtyStart {
-		surface = surface.WithDirtyRows(dirtyStart, dirtyEnd)
+	} else if transcriptDirty || composerDirty || sidebarDirty || statusDirty {
+		surface = surface.WithDirtyRects(ui.Rect{W: surface.SurfaceWidth(), H: surface.SurfaceHeight()})
 	}
 	w.bounds = bounds
 	w.surface = surface

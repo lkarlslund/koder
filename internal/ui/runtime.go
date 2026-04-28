@@ -524,9 +524,7 @@ func (r *Root) RenderFrame() Surface {
 	}
 	root := BlankSurface(max(0, r.bounds.W), max(0, r.bounds.H))
 	ctx := &Context{Palette: r.palette}
-	dirtyStart := 0
-	dirtyEnd := -1
-	dirtyKnown := false
+	damage := DamageSet{}
 	for _, window := range r.allWindows() {
 		if window == nil || !window.Visible() {
 			continue
@@ -539,32 +537,18 @@ func (r *Root) RenderFrame() Surface {
 		child := window.Render(ctx, Rect{W: bounds.W, H: bounds.H}).Normalize(bounds.W, bounds.H)
 		root = root.PlaceAt(bounds.X-r.bounds.X, bounds.Y-r.bounds.Y, child)
 		if windowDirty {
-			if start, end, ok := child.DirtyRowRange(); ok {
-				start += bounds.Y - r.bounds.Y
-				end += bounds.Y - r.bounds.Y
-				if !dirtyKnown || start < dirtyStart {
-					dirtyStart = start
+			if dirtyRects, ok := child.DirtyRects(); ok {
+				for _, rect := range dirtyRects {
+					damage.Add(rect.Translate(bounds.X-r.bounds.X, bounds.Y-r.bounds.Y))
 				}
-				if !dirtyKnown || end > dirtyEnd {
-					dirtyEnd = end
-				}
-				dirtyKnown = true
 			} else {
-				start := bounds.Y - r.bounds.Y
-				end := start + bounds.H - 1
-				if !dirtyKnown || start < dirtyStart {
-					dirtyStart = start
-				}
-				if !dirtyKnown || end > dirtyEnd {
-					dirtyEnd = end
-				}
-				dirtyKnown = true
+				damage.Add(Rect{X: bounds.X - r.bounds.X, Y: bounds.Y - r.bounds.Y, W: bounds.W, H: bounds.H})
 			}
 		}
 		window.ClearRedraw()
 	}
-	if dirtyKnown {
-		root = root.WithDirtyRows(dirtyStart, dirtyEnd)
+	if rects := damage.Normalized(Rect{W: root.SurfaceWidth(), H: root.SurfaceHeight()}); len(rects) > 0 {
+		root = root.WithDirtyRects(rects...)
 	}
 	r.previous = root
 	r.dirty = false

@@ -117,16 +117,46 @@ func TestDiffFrameSurfaceRowsUsesDirtyRange(t *testing.T) {
 		},
 	}
 
-	start, end, ok := dirtyRowRange(current, previous)
-	if !ok || start != 1 || end != 1 {
-		t.Fatalf("unexpected dirty row range: %v %d %d", ok, start, end)
+	rows, ok := dirtyRows(current, previous)
+	if !ok || len(rows) != 1 || rows[0].Y != 1 || rows[0].StartX != 0 {
+		t.Fatalf("unexpected dirty rows: ok=%v rows=%v", ok, rows)
 	}
-	got := diffFrameSurfaceRows(previous, current, start, end)
+	got := diffFrameSurfaceRows(previous, current, rows)
 	if !strings.Contains(got, "\x1b[2;1H") {
 		t.Fatalf("expected dirty row to be updated, got %q", got)
 	}
 	if strings.Contains(got, "\x1b[1;1H") || strings.Contains(got, "\x1b[3;1H") {
 		t.Fatalf("expected unchanged rows outside dirty range to be skipped, got %q", got)
+	}
+}
+
+func TestDiffFrameSurfaceRowsStartsAtFirstDirtyColumn(t *testing.T) {
+	previous := fakeSurface{
+		w: 5,
+		h: 1,
+		cells: []fakeCell{
+			{text: "a"}, {text: "b"}, {text: "c"}, {text: "d"}, {text: "e"},
+		},
+	}
+	current := fakeSurface{
+		w:          5,
+		h:          1,
+		dirtyRects: []Rect{{X: 2, Y: 0, W: 1, H: 1}},
+		cells: []fakeCell{
+			{text: "a"}, {text: "b"}, {text: "Z"}, {text: "d"}, {text: "e"},
+		},
+	}
+
+	rows, ok := dirtyRows(current, previous)
+	if !ok || len(rows) != 1 || rows[0].StartX != 2 {
+		t.Fatalf("unexpected dirty rows: ok=%v rows=%v", ok, rows)
+	}
+	got := diffFrameSurfaceRows(previous, current, rows)
+	if !strings.Contains(got, "\x1b[1;3HZde\x1b[K") {
+		t.Fatalf("expected flush to begin at third column, got %q", got)
+	}
+	if strings.Contains(got, "\x1b[1;1H") {
+		t.Fatalf("expected no repaint from first column, got %q", got)
 	}
 }
 
@@ -326,6 +356,7 @@ type fakeSurface struct {
 	dirty      bool
 	dirtyStart int
 	dirtyEnd   int
+	dirtyRects []Rect
 }
 
 func (f fakeSurface) SurfaceWidth() int               { return f.w }
@@ -358,4 +389,13 @@ func (f fakeSurface) DirtyRowRange() (start int, end int, ok bool) {
 		return 0, 0, false
 	}
 	return f.dirtyStart, f.dirtyEnd, true
+}
+
+func (f fakeSurface) DirtyRects() ([]Rect, bool) {
+	if len(f.dirtyRects) == 0 {
+		return nil, false
+	}
+	out := make([]Rect, len(f.dirtyRects))
+	copy(out, f.dirtyRects)
+	return out, true
 }

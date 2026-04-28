@@ -27,6 +27,17 @@ type Rect struct {
 	H int
 }
 
+func (r Rect) Empty() bool {
+	return r.W <= 0 || r.H <= 0
+}
+
+func (r Rect) Translate(dx, dy int) Rect {
+	if r.Empty() {
+		return Rect{}
+	}
+	return Rect{X: r.X + dx, Y: r.Y + dy, W: r.W, H: r.H}
+}
+
 func (r Rect) Contains(p Point) bool {
 	return p.X >= r.X && p.X < r.X+r.W && p.Y >= r.Y && p.Y < r.Y+r.H
 }
@@ -474,11 +485,7 @@ type Surface struct {
 	h     int
 	cells []Cell
 	ctrls []Control
-	dirty struct {
-		valid bool
-		start int
-		end   int
-	}
+	dirty []Rect
 }
 
 func BlankSurface(width, height int) Surface {
@@ -562,36 +569,55 @@ func (s Surface) Controls() []Control {
 }
 
 func (s Surface) WithDirtyRows(start, end int) Surface {
-	if start < 0 {
-		start = 0
+	if start < 0 || end < start {
+		s.dirty = nil
+		return s
 	}
+	width := s.SurfaceWidth()
 	height := s.SurfaceHeight()
-	if height <= 0 || end < start {
-		s.dirty.valid = false
-		s.dirty.start = 0
-		s.dirty.end = 0
+	if width <= 0 || height <= 0 || start >= height {
+		s.dirty = nil
 		return s
 	}
 	if end >= height {
 		end = height - 1
 	}
-	if start >= height {
-		s.dirty.valid = false
-		s.dirty.start = 0
-		s.dirty.end = 0
-		return s
-	}
-	s.dirty.valid = true
-	s.dirty.start = start
-	s.dirty.end = end
+	s.dirty = []Rect{{X: 0, Y: start, W: width, H: end - start + 1}}
 	return s
 }
 
 func (s Surface) DirtyRowRange() (start int, end int, ok bool) {
-	if !s.dirty.valid {
+	rects, ok := s.DirtyRects()
+	if !ok {
 		return 0, 0, false
 	}
-	return s.dirty.start, s.dirty.end, true
+	start = rects[0].Y
+	end = rects[0].Y + rects[0].H - 1
+	for _, rect := range rects[1:] {
+		start = min(start, rect.Y)
+		end = max(end, rect.Y+rect.H-1)
+	}
+	return start, end, true
+}
+
+func (s Surface) WithDirtyRects(rects ...Rect) Surface {
+	if len(rects) == 0 {
+		s.dirty = nil
+		return s
+	}
+	damage := DamageSet{}
+	damage.AddAll(rects)
+	s.dirty = damage.Normalized(Rect{W: s.SurfaceWidth(), H: s.SurfaceHeight()})
+	return s
+}
+
+func (s Surface) DirtyRects() ([]Rect, bool) {
+	if len(s.dirty) == 0 {
+		return nil, false
+	}
+	out := make([]Rect, len(s.dirty))
+	copy(out, s.dirty)
+	return out, true
 }
 
 func (s Surface) RegisterControls(runtime *Runtime, dx, dy int) {
@@ -680,7 +706,7 @@ func (s Surface) normalize(width, height int) Surface {
 			copy(out.cells[dstStart:dstStart+copyW], s.cells[srcStart:srcStart+copyW])
 		}
 		out.ctrls = clipControlsToSurface(s.ctrls, width, height)
-		out.dirty = s.dirty
+		out.dirty = append(out.dirty[:0], s.dirty...)
 		return out
 	}
 	if width < 0 {
@@ -731,7 +757,15 @@ func (s Surface) placeAt(x, y int, child Surface) Surface {
 		}
 		base[targetY] = overlayLine(base[targetY], childLine, x)
 	}
-	return Surface{lines: base}
+	out := Surface{lines: base}
+	if rects, ok := child.DirtyRects(); ok {
+		damage := DamageSet{}
+		for _, rect := range rects {
+			damage.Add(rect.Translate(x, y))
+		}
+		out.dirty = damage.Normalized(Rect{W: out.SurfaceWidth(), H: out.SurfaceHeight()})
+	}
+	return out
 }
 
 func (s Surface) isCellBuffer() bool {
@@ -837,6 +871,16 @@ func (s Surface) blitAt(x, y int, child Surface) Surface {
 				out.ctrls = append(out.ctrls, clipped)
 			}
 		}
+	}
+	if rects, ok := child.DirtyRects(); ok {
+		damage := DamageSet{}
+		if existing, ok := out.DirtyRects(); ok {
+			damage.AddAll(existing)
+		}
+		for _, rect := range rects {
+			damage.Add(rect.Translate(x, y))
+		}
+		out.dirty = damage.Normalized(Rect{W: out.w, H: out.h})
 	}
 	return out
 }

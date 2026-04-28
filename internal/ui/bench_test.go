@@ -166,6 +166,28 @@ func BenchmarkCellSurfaceBlitLarge(b *testing.B) {
 	}
 }
 
+func BenchmarkDiffSurfaceDamageCursorBlink(b *testing.B) {
+	previous := BlankSurface(120, 40)
+	current := previous
+	previous.WriteText(10, 38, "x", CellStyle{})
+	current.WriteText(10, 38, "x", CellStyle{FG: NewCellColorRGB(255, 255, 255), BG: NewCellColorRGB(0, 0, 0)})
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		_ = DiffSurfaceDamage(previous, current)
+	}
+}
+
+func BenchmarkDiffSurfaceDamageFooterRow(b *testing.B) {
+	previous := BlankSurface(120, 40)
+	current := previous
+	previous.WriteText(0, 39, strings.Repeat("ready ", 10), CellStyle{})
+	current.WriteText(0, 39, strings.Repeat("busy ", 10), CellStyle{})
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		_ = DiffSurfaceDamage(previous, current)
+	}
+}
+
 func BenchmarkButtonRowRender(b *testing.B) {
 	row := ButtonRow{
 		Buttons: []Button{

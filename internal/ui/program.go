@@ -168,8 +168,8 @@ func (p *Program) render(out io.Writer) error {
 		frame = renderFrameSurface(surface)
 		p.didRender = true
 	} else {
-		if start, end, ok := dirtyRowRange(surface, p.rendered); ok {
-			frame = diffFrameSurfaceRows(p.rendered, surface, start, end)
+		if rows, ok := dirtyRows(surface, p.rendered); ok {
+			frame = diffFrameSurfaceRows(p.rendered, surface, rows)
 		} else {
 			frame = diffFrameSurface(p.rendered, surface)
 		}
@@ -246,10 +246,17 @@ func diffFrameLines(previous, current []string) string {
 func diffFrameSurface(previous, current SurfaceView) string {
 	start := 0
 	end := max(surfaceHeight(previous), surfaceHeight(current)) - 1
-	return diffFrameSurfaceRows(previous, current, start, end)
+	if end < start {
+		return ""
+	}
+	rows := make([]RowDamage, 0, end-start+1)
+	for y := start; y <= end; y++ {
+		rows = append(rows, RowDamage{Y: y, StartX: 0})
+	}
+	return diffFrameSurfaceRows(previous, current, rows)
 }
 
-func diffFrameSurfaceRows(previous, current SurfaceView, start, end int) string {
+func diffFrameSurfaceRows(previous, current SurfaceView, rows []RowDamage) string {
 	var buf strings.Builder
 	prevRows := 0
 	currRows := 0
@@ -263,28 +270,29 @@ func diffFrameSurfaceRows(previous, current SurfaceView, start, end int) string 
 	if maxRows <= 0 {
 		return ""
 	}
-	if start < 0 {
-		start = 0
-	}
-	if end >= maxRows {
-		end = maxRows - 1
-	}
-	if end < start {
+	if len(rows) == 0 {
 		return ""
 	}
-	for idx := start; idx <= end && idx < currRows; idx++ {
+	for _, row := range rows {
+		idx := row.Y
+		if idx < 0 || idx >= maxRows {
+			continue
+		}
 		if surfaceRowsEqual(previous, current, idx) {
 			continue
 		}
-		fmt.Fprintf(&buf, "\x1b[%d;1H", idx+1)
+		if idx >= currRows {
+			if idx < prevRows {
+				fmt.Fprintf(&buf, "\x1b[%d;1H\x1b[2K", idx+1)
+			}
+			continue
+		}
+		startX := max(0, row.StartX)
+		fmt.Fprintf(&buf, "\x1b[%d;%dH", idx+1, startX+1)
 		if current != nil && idx < current.SurfaceHeight() {
-			buf.WriteString(serializeSurfaceViewRow(current, idx))
+			buf.WriteString(serializeSurfaceViewRowSegment(current, idx, startX))
 		}
 		buf.WriteString("\x1b[K")
-	}
-	clearStart := max(currRows, start)
-	for idx := clearStart; idx <= end && idx < prevRows; idx++ {
-		fmt.Fprintf(&buf, "\x1b[%d;1H\x1b[2K", idx+1)
 	}
 	return buf.String()
 }
@@ -296,18 +304,34 @@ func surfaceHeight(surface SurfaceView) int {
 	return surface.SurfaceHeight()
 }
 
-func dirtyRowRange(current, previous SurfaceView) (start, end int, ok bool) {
+func dirtyRows(current, previous SurfaceView) ([]RowDamage, bool) {
 	if current == nil || previous == nil {
-		return 0, 0, false
+		return nil, false
 	}
 	if current.SurfaceWidth() != previous.SurfaceWidth() || current.SurfaceHeight() != previous.SurfaceHeight() {
-		return 0, 0, false
+		return nil, false
+	}
+	if provider, ok := current.(DirtyRectsProvider); ok {
+		if rects, ok := provider.DirtyRects(); ok {
+			rows := DamageRows(rects)
+			if len(rows) > 0 {
+				return rows, true
+			}
+		}
 	}
 	provider, ok := current.(DirtyRowRangeProvider)
 	if !ok {
-		return 0, 0, false
+		return nil, false
 	}
-	return provider.DirtyRowRange()
+	start, end, ok := provider.DirtyRowRange()
+	if !ok {
+		return nil, false
+	}
+	rows := make([]RowDamage, 0, end-start+1)
+	for y := start; y <= end; y++ {
+		rows = append(rows, RowDamage{Y: y, StartX: 0})
+	}
+	return rows, true
 }
 
 func surfaceRowsEqual(previous, current SurfaceView, y int) bool {
@@ -359,6 +383,10 @@ func surfaceCellsEqual(previous, current SurfaceView, x, y int) bool {
 }
 
 func serializeSurfaceViewRow(surface SurfaceView, y int) string {
+	return serializeSurfaceViewRowSegment(surface, y, 0)
+}
+
+func serializeSurfaceViewRowSegment(surface SurfaceView, y, startX int) string {
 	if surface == nil || y < 0 || y >= surface.SurfaceHeight() {
 		return ""
 	}
@@ -372,7 +400,10 @@ func serializeSurfaceViewRow(surface SurfaceView, y int) string {
 		b.WriteString(applyStyle(currentStyle, segment.String()))
 		segment.Reset()
 	}
-	for x := 0; x < surface.SurfaceWidth(); x++ {
+	if startX < 0 {
+		startX = 0
+	}
+	for x := startX; x < surface.SurfaceWidth(); x++ {
 		if surface.SurfaceCellContinuation(x, y) {
 			continue
 		}
