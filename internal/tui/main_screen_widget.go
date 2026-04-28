@@ -368,16 +368,14 @@ func (w *mainScreenWidget) Surface(ctx *ui.Context, bounds ui.Rect) ui.Surface {
 	root.model = w.model
 	root.Layout(ctx, bounds)
 	root.PrepareDirty(ctx)
-	layoutChanged := !w.valid || w.bounds != bounds ||
-		w.transcript.LayoutChanged() || w.composer.LayoutChanged() ||
-		w.sidebar.LayoutChanged() || w.statusPane.LayoutChanged()
+	fullPaint := !w.valid || w.bounds != bounds
 	surface := ui.TransparentSurface(bounds.W, bounds.H)
-	if !layoutChanged && w.valid && w.bounds == bounds &&
+	if !fullPaint && w.valid && w.bounds == bounds &&
 		w.surface.SurfaceWidth() == bounds.W && w.surface.SurfaceHeight() == bounds.H {
 		surface = surface.PlaceAt(0, 0, w.surface)
 	}
 	canvas := ui.NewCanvas(&surface, bounds)
-	if layoutChanged {
+	if fullPaint {
 		root.PaintAll(ctx, canvas)
 	} else {
 		root.PaintDirty(ctx, canvas)
@@ -415,14 +413,12 @@ func (w *mainScreenWidget) paintIntoCanvas(ctx *ui.Context, bounds ui.Rect, canv
 	root.model = w.model
 	root.Layout(ctx, bounds)
 	root.PrepareDirty(ctx)
-	layoutChanged := !w.valid || w.bounds != bounds ||
-		w.transcript.LayoutChanged() || w.composer.LayoutChanged() ||
-		w.sidebar.LayoutChanged() || w.statusPane.LayoutChanged()
-	if !layoutChanged && w.valid && w.bounds == bounds &&
+	fullPaint := !w.valid || w.bounds != bounds
+	if !fullPaint && w.valid && w.bounds == bounds &&
 		w.surface.SurfaceWidth() == bounds.W && w.surface.SurfaceHeight() == bounds.H {
 		canvas.BlitSurface(0, 0, w.surface)
 	}
-	if layoutChanged {
+	if fullPaint {
 		root.PaintAll(ctx, canvas)
 	} else {
 		root.PaintDirty(ctx, canvas)
