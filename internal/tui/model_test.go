@@ -817,6 +817,136 @@ func TestBackspaceRemovesLastDraftAttachmentWhenComposerEmpty(t *testing.T) {
 	}
 }
 
+func TestBackspaceAtComposerStartRemovesLastDraftAttachment(t *testing.T) {
+	root := t.TempDir()
+	m := Model{
+		composer:        textarea.New(),
+		attachmentFiles: attachment.NewManager(root),
+		draftAttachments: []attachment.Draft{{
+			Metadata: attachment.Metadata{Name: "clipboard.png", MIME: "image/png", Path: filepath.Join(root, "clipboard.png")},
+		}},
+	}
+	m.composer.SetValue("analyze this image")
+	m.composer.SetCursor(0)
+
+	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyBackspace})
+	next := updated.(*Model)
+	if cmd == nil {
+		t.Fatal("expected title sync command after attachment removal")
+	}
+	if len(next.draftAttachments) != 0 {
+		t.Fatalf("expected attachment removed, got %#v", next.draftAttachments)
+	}
+	if got := next.composer.Value(); got != "analyze this image" {
+		t.Fatalf("expected composer text unchanged, got %q", got)
+	}
+}
+
+func TestDeleteAtComposerEndRemovesLastDraftAttachment(t *testing.T) {
+	root := t.TempDir()
+	m := Model{
+		composer:        textarea.New(),
+		attachmentFiles: attachment.NewManager(root),
+		draftAttachments: []attachment.Draft{{
+			Metadata: attachment.Metadata{Name: "clipboard.png", MIME: "image/png", Path: filepath.Join(root, "clipboard.png")},
+		}},
+	}
+	m.composer.SetValue("analyze this image")
+	m.composer.SetCursor(len("analyze this image"))
+
+	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyDelete})
+	next := updated.(*Model)
+	if cmd == nil {
+		t.Fatal("expected title sync command after attachment removal")
+	}
+	if len(next.draftAttachments) != 0 {
+		t.Fatalf("expected attachment removed, got %#v", next.draftAttachments)
+	}
+	if got := next.composer.Value(); got != "analyze this image" {
+		t.Fatalf("expected composer text unchanged, got %q", got)
+	}
+}
+
+func TestRenderComposerShowsDraftAttachmentInsideComposer(t *testing.T) {
+	root := t.TempDir()
+	composer := textarea.New()
+	composer.Placeholder = "Ask koder or type / for commands"
+	composer.SetHeight(composerInputHeight)
+	composer.SetWidth(38)
+	composer.Focus()
+
+	m := Model{
+		width:    40,
+		palette:  theme.Default().Palette,
+		composer: composer,
+		draftAttachments: []attachment.Draft{{
+			Metadata: attachment.Metadata{Name: "clipboard.png", MIME: "image/png", Path: filepath.Join(root, "clipboard.png")},
+		}},
+	}
+
+	got := ansi.Strip(m.renderComposer())
+	if !strings.Contains(got, "[Image] clipboard.png") {
+		t.Fatalf("expected attachment label inside composer, got %q", got)
+	}
+	if !strings.Contains(got, "Ask koder or type / for commands") {
+		t.Fatalf("expected composer prompt/placeholder to remain visible, got %q", got)
+	}
+}
+
+func TestEnterSendsPromptWithPastedImageAttachment(t *testing.T) {
+	root := t.TempDir()
+	cfg := testConfig(t)
+	cfg.DefaultProvider = "openai"
+	cfg.DefaultModel = "gpt-5.4"
+	cfg.Providers = map[string]config.Provider{
+		"openai": {BaseURL: "https://api.openai.com/v1", APIKey: "secret", DefaultModel: "gpt-5.4"},
+	}
+	m, err := New(cfg, nil, nil, StartupModeNew, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.attachmentFiles = attachment.NewManager(root)
+	m.readClipboardImage = func() ([]byte, error) {
+		return []byte("\x89PNG\r\n\x1a\nfake"), nil
+	}
+	m.readClipboardText = func() (string, error) { return "", nil }
+
+	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyCtrlV})
+	next := updated.(*Model)
+	if cmd == nil {
+		t.Fatal("expected title sync command after image attach")
+	}
+	if len(next.draftAttachments) != 1 {
+		t.Fatalf("expected one draft attachment, got %#v", next.draftAttachments)
+	}
+
+	next.composer.SetValue("analyze this image")
+	updated, cmd = next.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
+	final := updated.(*Model)
+	if cmd == nil {
+		t.Fatal("expected prompt kickoff command after enter")
+	}
+	if !final.loading {
+		t.Fatal("expected enter to start loading")
+	}
+	if got := final.composer.Value(); got != "" {
+		t.Fatalf("expected composer reset after sending, got %q", got)
+	}
+	if len(final.draftAttachments) != 0 {
+		t.Fatalf("expected draft attachments cleared after sending, got %#v", final.draftAttachments)
+	}
+	if len(final.messages) == 0 {
+		t.Fatal("expected optimistic user message")
+	}
+	last := final.messages[len(final.messages)-1]
+	if last.Role != domain.MessageRoleUser {
+		t.Fatalf("expected user message, got %#v", last)
+	}
+	if parts := final.parts[last.ID]; len(parts) == 0 {
+		t.Fatal("expected message parts for optimistic user prompt")
+	}
+}
+
 func TestForkSessionCopiesAttachmentFiles(t *testing.T) {
 	root := t.TempDir()
 	st, err := store.OpenWithOptions(root, store.Options{Backend: store.BackendPebble})

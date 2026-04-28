@@ -1203,7 +1203,7 @@ func (m *Model) handleMainWindowKey(msg ui.KeyMsg) (bool, ui.Cmd) {
 		if m.queueEditMode && len(m.currentChat.QueuedInputs) > 0 {
 			return true, m.deleteSelectedQueuedInput()
 		}
-		if strings.TrimSpace(m.composer.Value()) == "" && m.poppedLastDraftAttachment() {
+		if m.removeDraftAttachmentForComposerKey(msg) {
 			m.invalidateFooterCache()
 			return true, m.syncWindowTitleCmd()
 		}
@@ -1371,6 +1371,10 @@ func (m *Model) handleMainWindowKey(msg ui.KeyMsg) (bool, ui.Cmd) {
 	case "delete":
 		if m.queueEditMode && len(m.currentChat.QueuedInputs) > 0 {
 			return true, m.deleteSelectedQueuedInput()
+		}
+		if m.removeDraftAttachmentForComposerKey(msg) {
+			m.invalidateFooterCache()
+			return true, m.syncWindowTitleCmd()
 		}
 	}
 
@@ -1855,9 +1859,6 @@ func (m *Model) renderComposerAreaElement() ui.Node {
 	} else if menu := m.renderSkillMenuElement(); menu != nil {
 		elements = append(elements, menu)
 	}
-	if attachments := m.renderDraftAttachmentsElement(); attachments != nil {
-		elements = append(elements, attachments)
-	}
 	if preview := m.renderQueuedPromptPreviewElement(); preview != nil {
 		elements = append(elements, preview)
 	}
@@ -1959,6 +1960,7 @@ func (m *Model) renderComposerElement() ui.Node {
 	return ui.AsNode(ui.NewComposer(ui.ComposerProps{
 		Palette:       m.palette,
 		Width:         m.composerWidth(),
+		Attachments:   m.draftAttachmentItems(),
 		HalfBlocks:    m.halfBlocksEnabled(),
 		PromptGlyph:   m.promptGlyph(),
 		Value:         m.composer.Value(),
@@ -1970,7 +1972,7 @@ func (m *Model) renderComposerElement() ui.Node {
 	}))
 }
 
-func (m *Model) renderDraftAttachmentsElement() ui.Node {
+func (m *Model) draftAttachmentItems() []ui.AttachmentItem {
 	if len(m.draftAttachments) == 0 {
 		return nil
 	}
@@ -1978,7 +1980,7 @@ func (m *Model) renderDraftAttachmentsElement() ui.Node {
 	for _, draft := range m.draftAttachments {
 		items = append(items, ui.AttachmentItem{Label: attachmentLabel(draft.Metadata)})
 	}
-	return ui.AsNode(ui.AttachmentList{Items: items, Width: m.composerWidth()})
+	return items
 }
 
 func (m *Model) renderQueuedPromptPreviewElement() ui.Node {
@@ -4650,6 +4652,23 @@ func (m *Model) poppedLastDraftAttachment() bool {
 	return true
 }
 
+func (m *Model) removeDraftAttachmentForComposerKey(msg ui.KeyMsg) bool {
+	if len(m.draftAttachments) == 0 {
+		return false
+	}
+	switch msg.Type {
+	case ui.KeyBackspace:
+		if m.composer.CursorIndex() == 0 {
+			return m.poppedLastDraftAttachment()
+		}
+	case ui.KeyDelete:
+		if m.composer.CursorIndex() >= m.composer.RuneCount() {
+			return m.poppedLastDraftAttachment()
+		}
+	}
+	return false
+}
+
 func (m *Model) syncDraftReferencesFromComposer() {
 	if len(m.draftReferences) == 0 {
 		return
@@ -6490,7 +6509,7 @@ func (m *Model) openHelpModal() {
 		"Tab                 autocomplete, or queue steering while running",
 		"Up/Down             browse session prompt history",
 		"Alt-Enter           insert newline",
-		"Ctrl-V              paste clipboard text",
+		"Ctrl-V              paste clipboard text or image",
 		"Ctrl-Y              copy last assistant message",
 		"Ctrl-R              search prompt history",
 		"Ctrl-S              toggle sidebar",

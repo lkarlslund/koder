@@ -9,6 +9,7 @@ import (
 type ComposerProps struct {
 	Palette       theme.Palette
 	Width         int
+	Attachments   []AttachmentItem
 	HalfBlocks    bool
 	PromptGlyph   string
 	Value         string
@@ -26,6 +27,7 @@ type AttachmentItem struct {
 type Composer struct {
 	Palette       theme.Palette
 	Width         int
+	Attachments   []AttachmentItem
 	HalfBlocks    bool
 	PromptGlyph   string
 	Value         string
@@ -45,89 +47,10 @@ func (c Composer) Measure(_ *Context, constraints Constraints) Size {
 }
 
 func (c Composer) Paint(_ *Context, canvas Canvas) {
-	width := canvas.Width()
-	height := canvas.Height()
-	if width <= 0 || height <= 0 {
+	if canvas.Width() <= 0 || canvas.Height() <= 0 {
 		return
 	}
-	prompt := c.PromptGlyph + " "
-	promptWidth := PlainWidth(prompt)
-	if promptWidth >= width {
-		prompt = PlainTruncate(prompt, maxInt(1, width-1), "")
-		promptWidth = PlainWidth(prompt)
-	}
-	contentWidth := maxInt(0, width-promptWidth)
-	promptStyle := CellStyle{BG: cellColor(c.Palette.UserTextBackground), FG: cellColor(c.Palette.UserAccentBar)}
-	contentStyle := CellStyle{FG: cellColor(c.Palette.UserTextForeground), BG: cellColor(c.Palette.UserTextBackground)}
-	mutedStyle := CellStyle{FG: cellColor(c.Palette.ComposerMutedText), BG: cellColor(c.Palette.UserTextBackground)}
-
-	paintHalfBlock := func(y int, char string) {
-		if y < 0 || y >= height || width <= 0 {
-			return
-		}
-		canvas.SetCell(0, y, newCell(GlyphFromString(char), 1, CellStyle{FG: cellColor(c.Palette.UserAccentBar)}))
-		for x := 1; x < width; x++ {
-			canvas.SetCell(x, y, newCell(GlyphFromString(char), 1, CellStyle{FG: cellColor(c.Palette.UserTextBackground)}))
-		}
-	}
-	paintBlankLine := func(y int) {
-		if y < 0 || y >= height {
-			return
-		}
-		canvas.Fill(Rect{Y: y, W: width, H: 1}, contentStyle)
-		canvas.WriteText(0, y, PlainTruncate(prompt, width, ""), promptStyle)
-	}
-	paintLine := func(y int, before, cursor, after string, beforeStyle, afterStyle CellStyle) {
-		if y < 0 || y >= height {
-			return
-		}
-		canvas.Fill(Rect{Y: y, W: width, H: 1}, contentStyle)
-		canvas.WriteText(0, y, PlainTruncate(prompt, width, ""), promptStyle)
-		if contentWidth <= 0 {
-			return
-		}
-		before = PlainTruncate(before, contentWidth, "")
-		cursor = PlainTruncate(cursor, maxInt(1, contentWidth-PlainWidth(before)), "")
-		remaining := maxInt(0, contentWidth-PlainWidth(before)-PlainWidth(cursor))
-		after = PlainTruncate(after, remaining, "")
-		offset := promptWidth
-		cursorStyle := contentStyle
-		if c.CursorVisible {
-			cursorStyle = CellStyle{FG: cellColor(c.Palette.UserTextBackground), BG: cellColor(c.Palette.UserTextForeground)}
-		}
-		canvas.WriteText(offset, y, before, beforeStyle)
-		canvas.WriteText(offset+PlainWidth(before), y, cursor, cursorStyle)
-		canvas.WriteText(offset+PlainWidth(before)+PlainWidth(cursor), y, after, afterStyle)
-	}
-
-	middleY := 1
-	if c.HalfBlocks {
-		paintHalfBlock(0, "▄")
-		paintHalfBlock(2, "▀")
-	} else {
-		paintBlankLine(0)
-		paintBlankLine(2)
-	}
-	if strings.TrimSpace(c.Value) == "" {
-		placeholder := PlainTruncate(c.Placeholder, contentWidth, "")
-		cursor := ""
-		after := ""
-		if placeholder != "" {
-			runes := []rune(placeholder)
-			cursor = string(runes[0])
-			if strings.TrimSpace(c.ContentCursor) != "" {
-				cursor = c.ContentCursor
-			}
-			if len(runes) > 1 {
-				after = string(runes[1:])
-			}
-		} else {
-			cursor = c.ContentCursor
-		}
-		paintLine(middleY, "", cursor, after, contentStyle, mutedStyle)
-		return
-	}
-	paintLine(middleY, c.ContentBefore, c.ContentCursor, c.ContentAfter, contentStyle, contentStyle)
+	canvas.BlitSurface(0, 0, c.render().Normalize(canvas.Width(), canvas.Height()))
 }
 
 func (c Composer) render() Surface {
@@ -145,6 +68,8 @@ func (c Composer) render() Surface {
 	contentStyle := NewStyle().
 		Background(c.Palette.UserTextBackground).
 		Foreground(c.Palette.UserTextForeground)
+	attachmentRows := c.renderAttachmentRows()
+	attachmentHeight := attachmentRows.SurfaceHeight()
 
 	renderBlankLine := func() Surface {
 		return c.renderLineSurface(prompt, promptStyle, "", "", "", contentWidth, false, c.Palette.UserTextForeground, c.Palette.UserTextBackground)
@@ -166,17 +91,30 @@ func (c Composer) render() Surface {
 	}
 
 	if c.HalfBlocks {
-		s := BlankSurface(width, 3)
+		s := BlankSurface(width, attachmentHeight+3)
 		s = s.placeAt(0, 0, renderHalfBlockSurface(width, "▄", c.Palette))
-		s = s.placeAt(0, 1, middle)
-		s = s.placeAt(0, 2, renderHalfBlockSurface(width, "▀", c.Palette))
+		if attachmentHeight > 0 {
+			s = s.placeAt(0, 1, attachmentRows)
+		}
+		s = s.placeAt(0, attachmentHeight+1, middle)
+		s = s.placeAt(0, attachmentHeight+2, renderHalfBlockSurface(width, "▀", c.Palette))
 		return s
 	}
-	s := BlankSurface(width, 3)
+	s := BlankSurface(width, attachmentHeight+3)
 	s = s.placeAt(0, 0, renderBlankLine())
-	s = s.placeAt(0, 1, middle)
-	s = s.placeAt(0, 2, renderBlankLine())
+	if attachmentHeight > 0 {
+		s = s.placeAt(0, 1, attachmentRows)
+	}
+	s = s.placeAt(0, attachmentHeight+1, middle)
+	s = s.placeAt(0, attachmentHeight+2, renderBlankLine())
 	return s
+}
+
+func (c Composer) renderAttachmentRows() Surface {
+	if len(c.Attachments) == 0 {
+		return Surface{}
+	}
+	return AttachmentList{Items: c.Attachments, Width: maxInt(1, c.Width)}.render(c.Palette)
 }
 
 func (c Composer) renderPlaceholderLine(promptStyle, contentStyle Style, prompt string, contentWidth int, placeholder string, cursorChar string) string {
