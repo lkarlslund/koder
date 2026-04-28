@@ -288,13 +288,6 @@ func (d ToolRunDock) Render(ctx *Context, bounds Rect) Surface {
 	return renderOwnedCanvas(ctx, bounds, d)
 }
 
-func (d ToolRunDock) RenderTo(ctx *Context, bounds Rect, dst *Surface) {
-	if dst == nil || bounds.W <= 0 || bounds.H <= 0 {
-		return
-	}
-	renderElementInto(ctx, d.element(), bounds, dst)
-}
-
 func (d ToolRunDock) Paint(ctx *Context, canvas Canvas) {
 	if canvas.Width() <= 0 || canvas.Height() <= 0 {
 		return

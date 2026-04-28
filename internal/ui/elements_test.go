@@ -214,24 +214,24 @@ func TestConstrainedClampsChildSize(t *testing.T) {
 	}
 }
 
-func TestStaticRenderMatchesRenderTo(t *testing.T) {
-	assertRenderMatchesRenderTo(t, nil, Static{Content: "A\nB"}, Rect{W: 2, H: 2})
+func TestStaticRenderMatchesPaint(t *testing.T) {
+	assertRenderMatchesPaint(t, nil, Static{Content: "A\nB"}, Rect{W: 2, H: 2})
 }
 
-func TestLabelRenderMatchesRenderTo(t *testing.T) {
+func TestLabelRenderMatchesPaint(t *testing.T) {
 	element := Label{Text: "hello", Style: lipgloss.NewStyle().Bold(true)}
-	assertRenderMatchesRenderTo(t, &Context{Runtime: &Runtime{}}, element, Rect{W: 8, H: 1})
+	assertRenderMatchesPaint(t, &Context{Runtime: &Runtime{}}, element, Rect{W: 8, H: 1})
 }
 
-func TestParagraphRenderMatchesRenderTo(t *testing.T) {
+func TestParagraphRenderMatchesPaint(t *testing.T) {
 	element := Paragraph{Text: "wrapped paragraph text"}
-	assertRenderMatchesRenderTo(t, nil, element, Rect{W: 8, H: 4})
+	assertRenderMatchesPaint(t, nil, element, Rect{W: 8, H: 4})
 }
 
-func TestHitBoxRenderMatchesRenderTo(t *testing.T) {
+func TestHitBoxRenderMatchesPaint(t *testing.T) {
 	ctx := &Context{Runtime: &Runtime{}}
 	element := HitBox{ID: "hit", Child: Static{Content: "X"}}
-	assertRenderMatchesRenderTo(t, ctx, element, Rect{W: 2, H: 1})
+	assertRenderMatchesPaint(t, ctx, element, Rect{W: 2, H: 1})
 }
 
 func TestInputFieldRendersExpectedFrame(t *testing.T) {
@@ -252,7 +252,7 @@ func TestInputFieldRendersExpectedFrame(t *testing.T) {
 	}
 }
 
-func TestSimpleWidgetRenderToAvoidsOwnerSurfaceAllocation(t *testing.T) {
+func TestSimpleWidgetPaintAvoidsOwnerSurfaceAllocation(t *testing.T) {
 	element := Paragraph{Text: "alpha beta gamma"}
 
 	ResetSurfaceAllocationStats()
@@ -261,11 +261,11 @@ func TestSimpleWidgetRenderToAvoidsOwnerSurfaceAllocation(t *testing.T) {
 
 	dst := TransparentSurface(8, 3)
 	ResetSurfaceAllocationStats()
-	element.RenderTo(nil, Rect{W: 8, H: 3}, &dst)
-	renderToStats := SurfaceAllocationStatsSnapshot()
+	element.Paint(nil, NewCanvas(&dst, Rect{W: 8, H: 3}))
+	paintStats := SurfaceAllocationStatsSnapshot()
 
-	if renderStats.Transparent < renderToStats.Transparent {
-		t.Fatalf("expected Render to avoid allocating fewer transparent surfaces than RenderTo, got render=%#v renderTo=%#v", renderStats, renderToStats)
+	if renderStats.Transparent < paintStats.Transparent {
+		t.Fatalf("expected Render to avoid allocating fewer transparent surfaces than Paint, got render=%#v paint=%#v", renderStats, paintStats)
 	}
 }
 

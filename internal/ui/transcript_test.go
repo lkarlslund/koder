@@ -79,9 +79,9 @@ func TestActivityIndicatorViewDoesNotAddLeadingSpace(t *testing.T) {
 	}
 }
 
-func TestActivityIndicatorRenderMatchesRenderTo(t *testing.T) {
+func TestActivityIndicatorRenderMatchesPaint(t *testing.T) {
 	palette := theme.Resolve("tokyonight").Palette
-	assertRenderMatchesRenderTo(t, nil, ActivityIndicator{
+	assertRenderMatchesPaint(t, nil, ActivityIndicator{
 		Indicator: "x Working ...",
 		Palette:   palette,
 	}, Rect{W: 20, H: 1})
@@ -109,9 +109,9 @@ func TestUserMessageFillsEntireRowBackground(t *testing.T) {
 	}
 }
 
-func TestUserMessageRenderMatchesRenderTo(t *testing.T) {
+func TestUserMessageRenderMatchesPaint(t *testing.T) {
 	palette := theme.Resolve("tokyonight").Palette
-	assertRenderMatchesRenderTo(t, nil, NewUserMessage(UserMessageProps{
+	assertRenderMatchesPaint(t, nil, NewUserMessage(UserMessageProps{
 		Palette:     palette,
 		Body:        "hello\nworld",
 		Stamp:       "12:34",
@@ -183,20 +183,20 @@ func TestRetainedTranscriptMaintainsChildItems(t *testing.T) {
 	}
 }
 
-func TestTranscriptRenderMatchesRenderTo(t *testing.T) {
+func TestTranscriptRenderMatchesPaint(t *testing.T) {
 	transcript := Transcript{Items: []TranscriptItem{
 		{Element: Paragraph{Text: "first"}},
 		{GapBefore: 1, Element: Paragraph{Text: "second"}},
 	}}
-	assertRenderMatchesRenderTo(t, nil, transcript, Rect{W: 12, H: 4})
+	assertRenderMatchesPaint(t, nil, transcript, Rect{W: 12, H: 4})
 }
 
-func TestTranscriptViewportRenderMatchesRenderTo(t *testing.T) {
+func TestTranscriptViewportRenderMatchesPaint(t *testing.T) {
 	transcript := NewRetainedTranscript()
 	transcript.Add(TranscriptItem{Element: Paragraph{Text: "first"}})
 	transcript.Add(TranscriptItem{GapBefore: 1, Element: Paragraph{Text: "second\nthird"}})
 	element := TranscriptViewport{Transcript: transcript, Width: 12, Height: 2, OffsetY: 1}
-	assertRenderMatchesRenderTo(t, nil, element, Rect{W: 12, H: 2})
+	assertRenderMatchesPaint(t, nil, element, Rect{W: 12, H: 2})
 }
 
 func TestRetainedTranscriptRenderBottomUsesExactCachedHeights(t *testing.T) {
@@ -263,15 +263,15 @@ func TestRetainedTranscriptDoesNotBottomAlignShortContent(t *testing.T) {
 	}
 }
 
-func TestAssistantAndReasoningRenderMatchRenderTo(t *testing.T) {
+func TestAssistantAndReasoningRenderMatchPaint(t *testing.T) {
 	palette := theme.Default().Palette
-	assertRenderMatchesRenderTo(t, &Context{Palette: palette}, AssistantMessage{
+	assertRenderMatchesPaint(t, &Context{Palette: palette}, AssistantMessage{
 		Palette: palette,
 		Body:    "assistant body text",
 		Stamp:   "12:34",
 		Width:   18,
 	}, Rect{W: 18, H: 3})
-	assertRenderMatchesRenderTo(t, &Context{Palette: palette}, ReasoningBlock{
+	assertRenderMatchesPaint(t, &Context{Palette: palette}, ReasoningBlock{
 		Palette: palette,
 		Body:    "reasoning line one\nreasoning line two",
 		Width:   18,
@@ -293,11 +293,11 @@ func TestTranscriptLeafRenderAvoidsExtraOwnerSurfaceAllocation(t *testing.T) {
 
 	dst := TransparentSurface(18, 3)
 	ResetSurfaceAllocationStats()
-	element.RenderTo(&Context{Palette: palette}, Rect{W: 18, H: 3}, &dst)
-	renderToStats := SurfaceAllocationStatsSnapshot()
+	element.Paint(&Context{Palette: palette}, NewCanvas(&dst, Rect{W: 18, H: 3}))
+	paintStats := SurfaceAllocationStatsSnapshot()
 
-	if renderStats.Transparent > renderToStats.Transparent {
-		t.Fatalf("expected Render to avoid allocating more transparent owner surfaces than RenderTo, got render=%#v renderTo=%#v", renderStats, renderToStats)
+	if renderStats.Transparent <= paintStats.Transparent {
+		t.Fatalf("expected Render to allocate at least one additional transparent owner surface, got render=%#v paint=%#v", renderStats, paintStats)
 	}
 }
 

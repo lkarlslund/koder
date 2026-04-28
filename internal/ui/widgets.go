@@ -22,16 +22,6 @@ func (l Label) Render(ctx *Context, bounds Rect) Surface {
 	return renderOwnedCanvas(ctx, bounds, l)
 }
 
-func (l Label) RenderTo(_ *Context, bounds Rect, dst *Surface) {
-	if dst == nil || bounds.W <= 0 || bounds.H <= 0 {
-		return
-	}
-	width := max(1, bounds.W)
-	surface := TransparentSurface(width, max(1, bounds.H))
-	surface.WriteText(0, 0, PlainTruncate(l.Text, width, ""), lipglossToCellStyle(l.Style))
-	*dst = dst.placeAt(bounds.X, bounds.Y, surface.normalize(bounds.W, bounds.H))
-}
-
 func (l Label) Paint(_ *Context, canvas Canvas) {
 	if canvas.Width() <= 0 || canvas.Height() <= 0 {
 		return
@@ -49,13 +39,6 @@ func (t TextPane) Measure(_ *Context, constraints Constraints) Size {
 
 func (t TextPane) Render(ctx *Context, bounds Rect) Surface {
 	return renderOwnedCanvas(ctx, bounds, t)
-}
-
-func (t TextPane) RenderTo(_ *Context, bounds Rect, dst *Surface) {
-	if dst == nil || bounds.W <= 0 || bounds.H <= 0 {
-		return
-	}
-	*dst = dst.placeAt(bounds.X, bounds.Y, SurfaceFromString(t.Content).normalize(bounds.W, bounds.H))
 }
 
 func (t TextPane) Paint(_ *Context, canvas Canvas) {
@@ -82,23 +65,6 @@ func (h HitBox) Measure(ctx *Context, constraints Constraints) Size {
 
 func (h HitBox) Render(ctx *Context, bounds Rect) Surface {
 	return renderOwnedCanvas(ctx, bounds, h)
-}
-
-func (h HitBox) RenderTo(ctx *Context, bounds Rect, dst *Surface) {
-	if dst == nil || bounds.W <= 0 || bounds.H <= 0 {
-		return
-	}
-	if ctx != nil && ctx.Runtime != nil && strings.TrimSpace(h.ID) != "" {
-		ctx.Runtime.Register(Control{
-			ID:      h.ID,
-			Rect:    Rect{X: bounds.X, Y: bounds.Y, W: bounds.W, H: max(1, bounds.H)},
-			Enabled: true,
-		})
-	}
-	if h.Child == nil {
-		return
-	}
-	renderElementInto(ctx, h.Child, bounds, dst)
 }
 
 func (h HitBox) WalkChildren(_ *Context, visit func(Element)) {
@@ -150,25 +116,6 @@ func (d Divider) Render(ctx *Context, bounds Rect) Surface {
 	return renderOwnedCanvas(ctx, bounds, d)
 }
 
-func (d Divider) RenderTo(_ *Context, bounds Rect, dst *Surface) {
-	if dst == nil || bounds.W <= 0 || bounds.H <= 0 {
-		return
-	}
-	width := bounds.W
-	if width <= 0 {
-		width = max(1, lipgloss.Width(d.Text))
-	}
-	text := strings.TrimSpace(d.Text)
-	if text == "" {
-		text = strings.Repeat("─", width)
-	} else if lipgloss.Width(text) < width {
-		text += strings.Repeat("─", width-lipgloss.Width(text))
-	}
-	surface := TransparentSurface(width, max(1, bounds.H))
-	surface.WriteText(0, 0, PlainTruncate(text, width, ""), lipglossToCellStyle(d.Style))
-	*dst = dst.placeAt(bounds.X, bounds.Y, surface.normalize(width, bounds.H))
-}
-
 func (d Divider) Paint(_ *Context, canvas Canvas) {
 	if canvas.Width() <= 0 || canvas.Height() <= 0 {
 		return
@@ -199,27 +146,6 @@ func (p Paragraph) Measure(_ *Context, constraints Constraints) Size {
 
 func (p Paragraph) Render(ctx *Context, bounds Rect) Surface {
 	return renderOwnedCanvas(ctx, bounds, p)
-}
-
-func (p Paragraph) RenderTo(_ *Context, bounds Rect, dst *Surface) {
-	if dst == nil || bounds.W <= 0 || bounds.H <= 0 {
-		return
-	}
-	text := strings.TrimSpace(p.Text)
-	if text == "" {
-		return
-	}
-	width := bounds.W
-	if width <= 0 {
-		width = lipgloss.Width(text)
-	}
-	lines := p.lines(width)
-	surface := TransparentSurface(width, len(lines))
-	style := lipglossToCellStyle(p.Style)
-	for y, line := range lines {
-		surface.WriteText(0, y, PlainTruncate(line, width, ""), style)
-	}
-	*dst = dst.placeAt(bounds.X, bounds.Y, surface.normalize(bounds.W, bounds.H))
 }
 
 func (p Paragraph) Paint(_ *Context, canvas Canvas) {
@@ -273,13 +199,6 @@ func (m ModalFrame) Measure(ctx *Context, constraints Constraints) Size {
 
 func (m ModalFrame) Render(ctx *Context, bounds Rect) Surface {
 	return renderOwnedCanvas(ctx, bounds, m)
-}
-
-func (m ModalFrame) RenderTo(ctx *Context, bounds Rect, dst *Surface) {
-	if dst == nil || bounds.W <= 0 || bounds.H <= 0 {
-		return
-	}
-	renderElementInto(ctx, m.window(ctx), bounds, dst)
 }
 
 func (m ModalFrame) Paint(ctx *Context, canvas Canvas) {

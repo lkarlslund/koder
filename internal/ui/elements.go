@@ -1062,13 +1062,6 @@ type Element interface {
 	Render(ctx *Context, bounds Rect) Surface
 }
 
-type SurfaceRenderer interface {
-	// RenderTo draws into a caller-owned destination surface.
-	// Container and layout widgets should prefer this path over allocating a
-	// fresh intermediate surface per render.
-	RenderTo(ctx *Context, bounds Rect, dst *Surface)
-}
-
 type TreeWalker interface {
 	WalkChildren(ctx *Context, visit func(Element))
 }
@@ -1107,10 +1100,6 @@ func renderElementInto(ctx *Context, element Element, bounds Rect, dst *Surface)
 	}
 	if painter, ok := element.(Painter); ok {
 		painter.Paint(ctx, NewCanvas(dst, bounds))
-		return
-	}
-	if renderer, ok := element.(SurfaceRenderer); ok {
-		renderer.RenderTo(ctx, bounds, dst)
 		return
 	}
 	surface := renderElementCapturedSurface(ctx, element, bounds)
@@ -1286,13 +1275,6 @@ func (s Static) Render(_ *Context, bounds Rect) Surface {
 	return renderOwnedCanvas(nil, bounds, s)
 }
 
-func (s Static) RenderTo(_ *Context, bounds Rect, dst *Surface) {
-	if dst == nil || bounds.W <= 0 || bounds.H <= 0 {
-		return
-	}
-	*dst = dst.placeAt(bounds.X, bounds.Y, SurfaceFromString(s.Content).normalize(bounds.W, bounds.H))
-}
-
 func (s Static) Paint(_ *Context, canvas Canvas) {
 	if canvas.Width() <= 0 || canvas.Height() <= 0 {
 		return
@@ -1313,13 +1295,6 @@ func (b SurfaceBox) Measure(_ *Context, constraints Constraints) Size {
 
 func (b SurfaceBox) Render(_ *Context, bounds Rect) Surface {
 	return b.Surface.normalize(bounds.W, bounds.H)
-}
-
-func (b SurfaceBox) RenderTo(_ *Context, bounds Rect, dst *Surface) {
-	if dst == nil || bounds.W <= 0 || bounds.H <= 0 {
-		return
-	}
-	*dst = dst.placeAt(bounds.X, bounds.Y, b.Surface.normalize(bounds.W, bounds.H))
 }
 
 func (b SurfaceBox) Paint(_ *Context, canvas Canvas) {
@@ -1347,32 +1322,6 @@ func (e VisibleElement) Measure(ctx *Context, constraints Constraints) Size {
 
 func (e VisibleElement) Render(ctx *Context, bounds Rect) Surface {
 	return renderOwnedCanvas(ctx, bounds, e)
-}
-
-func (e VisibleElement) RenderTo(ctx *Context, bounds Rect, dst *Surface) {
-	if !e.Visible() || dst == nil || bounds.W <= 0 || bounds.H <= 0 {
-		return
-	}
-	if e.HAlign == AlignStart && e.VAlign == AlignStart {
-		renderElementInto(ctx, e.Child, bounds, dst)
-		return
-	}
-	size := e.Child.Measure(ctx, NewConstraints(bounds.W, bounds.H))
-	x := 0
-	y := 0
-	switch e.HAlign {
-	case AlignCenter:
-		x = max(0, (bounds.W-size.W)/2)
-	case AlignEnd:
-		x = max(0, bounds.W-size.W)
-	}
-	switch e.VAlign {
-	case AlignCenter:
-		y = max(0, (bounds.H-size.H)/2)
-	case AlignEnd:
-		y = max(0, bounds.H-size.H)
-	}
-	renderElementInto(ctx, e.Child, Rect{X: bounds.X + x, Y: bounds.Y + y, W: min(bounds.W, size.W), H: min(bounds.H, size.H)}, dst)
 }
 
 func (e VisibleElement) WalkChildren(_ *Context, visit func(Element)) {
@@ -1497,17 +1446,6 @@ func (b FlexBox) Render(ctx *Context, bounds Rect) Surface {
 	return renderOwnedCanvas(ctx, bounds, b)
 }
 
-func (b FlexBox) RenderTo(ctx *Context, bounds Rect, dst *Surface) {
-	if dst == nil || bounds.W <= 0 || bounds.H <= 0 {
-		return
-	}
-	if b.axis() == AxisVertical {
-		b.renderVerticalTo(ctx, bounds, dst)
-		return
-	}
-	b.renderHorizontalTo(ctx, bounds, dst)
-}
-
 func (b FlexBox) WalkChildren(_ *Context, visit func(Element)) {
 	if visit == nil {
 		return
@@ -1610,14 +1548,6 @@ func (i Inset) Render(ctx *Context, bounds Rect) Surface {
 	return renderOwnedCanvas(ctx, bounds, i)
 }
 
-func (i Inset) RenderTo(ctx *Context, bounds Rect, dst *Surface) {
-	if dst == nil || !elementVisible(i.Child) {
-		return
-	}
-	childBounds := Rect{X: bounds.X + i.Padding.Left, Y: bounds.Y + i.Padding.Top, W: max(0, bounds.W-i.Padding.Left-i.Padding.Right), H: max(0, bounds.H-i.Padding.Top-i.Padding.Bottom)}
-	renderElementInto(ctx, i.Child, childBounds, dst)
-}
-
 func (i Inset) WalkChildren(_ *Context, visit func(Element)) {
 	if i.Child == nil || visit == nil {
 		return
@@ -1659,14 +1589,6 @@ func (c Constrained) Render(ctx *Context, bounds Rect) Surface {
 	return renderOwnedCanvas(ctx, bounds, c)
 }
 
-func (c Constrained) RenderTo(ctx *Context, bounds Rect, dst *Surface) {
-	if dst == nil || !elementVisible(c.Child) {
-		return
-	}
-	size := c.Measure(ctx, NewConstraints(bounds.W, bounds.H))
-	renderElementInto(ctx, c.Child, Rect{X: bounds.X, Y: bounds.Y, W: size.W, H: size.H}, dst)
-}
-
 func (c Constrained) WalkChildren(_ *Context, visit func(Element)) {
 	if c.Child == nil || visit == nil {
 		return
@@ -1706,18 +1628,6 @@ func (s Stack) Measure(ctx *Context, constraints Constraints) Size {
 
 func (s Stack) Render(ctx *Context, bounds Rect) Surface {
 	return renderOwnedCanvas(ctx, bounds, s)
-}
-
-func (s Stack) RenderTo(ctx *Context, bounds Rect, dst *Surface) {
-	if dst == nil {
-		return
-	}
-	for _, child := range s.Children {
-		if !elementVisible(child) {
-			continue
-		}
-		renderElementInto(ctx, child, bounds, dst)
-	}
 }
 
 func (s Stack) WalkChildren(_ *Context, visit func(Element)) {
@@ -1767,29 +1677,6 @@ func (a Align) Measure(ctx *Context, constraints Constraints) Size {
 
 func (a Align) Render(ctx *Context, bounds Rect) Surface {
 	return renderOwnedCanvas(ctx, bounds, a)
-}
-
-func (a Align) RenderTo(ctx *Context, bounds Rect, dst *Surface) {
-	if dst == nil || a.Child == nil {
-		return
-	}
-	size := a.Child.Measure(ctx, NewConstraints(bounds.W, bounds.H))
-	size = NewConstraints(bounds.W, bounds.H).Clamp(size)
-	x := 0
-	y := 0
-	switch a.Horizontal {
-	case AlignCenter:
-		x = max(0, (bounds.W-size.W)/2)
-	case AlignEnd:
-		x = max(0, bounds.W-size.W)
-	}
-	switch a.Vertical {
-	case AlignCenter:
-		y = max(0, (bounds.H-size.H)/2)
-	case AlignEnd:
-		y = max(0, bounds.H-size.H)
-	}
-	renderElementInto(ctx, a.Child, Rect{X: bounds.X + x, Y: bounds.Y + y, W: size.W, H: size.H}, dst)
 }
 
 func (a Align) Paint(ctx *Context, canvas Canvas) {

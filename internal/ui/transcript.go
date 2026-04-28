@@ -442,17 +442,6 @@ func (v TranscriptViewport) Render(ctx *Context, bounds Rect) Surface {
 	return renderOwnedCanvas(ctx, bounds, v)
 }
 
-func (v TranscriptViewport) RenderTo(ctx *Context, bounds Rect, dst *Surface) {
-	if dst == nil || bounds.W <= 0 || bounds.H <= 0 {
-		return
-	}
-	if v.Transcript == nil {
-		return
-	}
-	surface, _, _ := v.Transcript.RenderVisible(ctx, bounds.W, bounds.H, v.OffsetY)
-	*dst = dst.placeAt(bounds.X, bounds.Y, surface.normalize(bounds.W, bounds.H))
-}
-
 func (v TranscriptViewport) WalkChildren(_ *Context, visit func(Element)) {
 	if v.Transcript == nil || visit == nil {
 		return
@@ -493,25 +482,6 @@ func (t Transcript) Measure(ctx *Context, constraints Constraints) Size {
 
 func (t Transcript) Render(ctx *Context, bounds Rect) Surface {
 	return renderOwnedCanvas(ctx, bounds, t)
-}
-
-func (t Transcript) RenderTo(ctx *Context, bounds Rect, dst *Surface) {
-	if dst == nil || bounds.W <= 0 || bounds.H <= 0 {
-		return
-	}
-	y := 0
-	for _, item := range t.Items {
-		y += max(0, item.GapBefore)
-		if item.Element == nil || y >= bounds.H {
-			continue
-		}
-		size := item.Element.Measure(ctx, NewConstraints(bounds.W, max(0, bounds.H-y)))
-		if size.H <= 0 {
-			continue
-		}
-		renderElementInto(ctx, item.Element, Rect{X: bounds.X, Y: bounds.Y + y, W: bounds.W, H: size.H}, dst)
-		y += size.H
-	}
 }
 
 func (t Transcript) Paint(ctx *Context, canvas Canvas) {
@@ -557,14 +527,7 @@ func (i ActivityIndicator) Measure(_ *Context, constraints Constraints) Size {
 }
 
 func (i ActivityIndicator) Render(_ *Context, bounds Rect) Surface {
-	return renderOwnedSurface(nil, bounds, i.RenderTo)
-}
-
-func (i ActivityIndicator) RenderTo(_ *Context, bounds Rect, dst *Surface) {
-	if dst == nil || bounds.W <= 0 || bounds.H <= 0 {
-		return
-	}
-	*dst = dst.placeAt(bounds.X, bounds.Y, i.render().normalize(bounds.W, bounds.H))
+	return renderOwnedCanvas(nil, bounds, i)
 }
 
 func (i ActivityIndicator) Paint(_ *Context, canvas Canvas) {
@@ -602,13 +565,6 @@ func (m UserMessage) Measure(_ *Context, constraints Constraints) Size {
 
 func (m UserMessage) Render(_ *Context, bounds Rect) Surface {
 	return renderOwnedCanvas(nil, bounds, m)
-}
-
-func (m UserMessage) RenderTo(_ *Context, bounds Rect, dst *Surface) {
-	if dst == nil || bounds.W <= 0 || bounds.H <= 0 {
-		return
-	}
-	*dst = dst.placeAt(bounds.X, bounds.Y, m.render().normalize(bounds.W, bounds.H))
 }
 
 func (m UserMessage) Paint(_ *Context, canvas Canvas) {
@@ -798,13 +754,6 @@ func (m AssistantMessage) Render(_ *Context, bounds Rect) Surface {
 	return renderOwnedCanvas(nil, bounds, m)
 }
 
-func (m AssistantMessage) RenderTo(_ *Context, bounds Rect, dst *Surface) {
-	if dst == nil || bounds.W <= 0 || bounds.H <= 0 {
-		return
-	}
-	*dst = dst.placeAt(bounds.X, bounds.Y, m.render().normalize(bounds.W, bounds.H))
-}
-
 func (m AssistantMessage) Paint(ctx *Context, canvas Canvas) {
 	if canvas.Width() <= 0 || canvas.Height() <= 0 {
 		return
@@ -895,13 +844,6 @@ func (b ReasoningBlock) Measure(_ *Context, constraints Constraints) Size {
 
 func (b ReasoningBlock) Render(_ *Context, bounds Rect) Surface {
 	return renderOwnedCanvas(nil, bounds, b)
-}
-
-func (b ReasoningBlock) RenderTo(_ *Context, bounds Rect, dst *Surface) {
-	if dst == nil || bounds.W <= 0 || bounds.H <= 0 {
-		return
-	}
-	*dst = dst.placeAt(bounds.X, bounds.Y, b.render().normalize(bounds.W, bounds.H))
 }
 
 func (b ReasoningBlock) Paint(_ *Context, canvas Canvas) {

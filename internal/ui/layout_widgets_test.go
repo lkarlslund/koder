@@ -10,39 +10,39 @@ import (
 	"github.com/lkarlslund/koder/internal/theme"
 )
 
-func renderViaRenderToForTest(ctx *Context, element Element, bounds Rect) Surface {
+func renderViaPaintForTest(ctx *Context, element Element, bounds Rect) Surface {
 	surface := TransparentSurface(bounds.W, bounds.H)
-	renderer, ok := element.(SurfaceRenderer)
+	painter, ok := element.(Painter)
 	if !ok {
-		panic("element does not implement SurfaceRenderer")
+		panic("element does not implement Painter")
 	}
 	if ctx != nil && ctx.Runtime != nil {
 		shadow := &Runtime{}
 		copyCtx := *ctx
 		copyCtx.Runtime = shadow
-		renderer.RenderTo(&copyCtx, bounds, &surface)
+		painter.Paint(&copyCtx, NewCanvas(&surface, bounds))
 		if controls := shadow.Controls(); len(controls) > 0 {
 			surface.ctrls = append(surface.ctrls[:0], controls...)
 			surface.RegisterControls(ctx.Runtime, bounds.X, bounds.Y)
 		}
 		return surface
 	}
-	renderer.RenderTo(ctx, bounds, &surface)
+	painter.Paint(ctx, NewCanvas(&surface, bounds))
 	return surface
 }
 
-func assertRenderMatchesRenderTo(t *testing.T, ctx *Context, element Element, bounds Rect) {
+func assertRenderMatchesPaint(t *testing.T, ctx *Context, element Element, bounds Rect) {
 	t.Helper()
 	gotRender := element.Render(ctx, bounds)
-	gotRenderTo := renderViaRenderToForTest(ctx, element, bounds)
-	if gotRender.Size() != gotRenderTo.Size() {
-		t.Fatalf("render/renderTo size mismatch: %#v vs %#v", gotRender.Size(), gotRenderTo.Size())
+	gotPaint := renderViaPaintForTest(ctx, element, bounds)
+	if gotRender.Size() != gotPaint.Size() {
+		t.Fatalf("render/paint size mismatch: %#v vs %#v", gotRender.Size(), gotPaint.Size())
 	}
-	if !reflect.DeepEqual(gotRender.Lines(), gotRenderTo.Lines()) {
-		t.Fatalf("render/renderTo lines mismatch:\nrender=%q\nrenderTo=%q", gotRender.Lines(), gotRenderTo.Lines())
+	if !reflect.DeepEqual(gotRender.Lines(), gotPaint.Lines()) {
+		t.Fatalf("render/paint lines mismatch:\nrender=%q\npaint=%q", gotRender.Lines(), gotPaint.Lines())
 	}
-	if !reflect.DeepEqual(gotRender.Controls(), gotRenderTo.Controls()) {
-		t.Fatalf("render/renderTo controls mismatch:\nrender=%#v\nrenderTo=%#v", gotRender.Controls(), gotRenderTo.Controls())
+	if !reflect.DeepEqual(gotRender.Controls(), gotPaint.Controls()) {
+		t.Fatalf("render/paint controls mismatch:\nrender=%#v\npaint=%#v", gotRender.Controls(), gotPaint.Controls())
 	}
 }
 
@@ -106,7 +106,7 @@ func TestSectionRendersTitleAbovePanel(t *testing.T) {
 	}
 }
 
-func TestSectionRenderMatchesRenderTo(t *testing.T) {
+func TestSectionRenderMatchesPaint(t *testing.T) {
 	palette := theme.Default().Palette
 	ctx := &Context{Palette: palette, Runtime: &Runtime{}}
 	element := Section{
@@ -114,7 +114,7 @@ func TestSectionRenderMatchesRenderTo(t *testing.T) {
 		Width: 24,
 		Child: HitBox{ID: "body", Child: Static{Content: "Body"}},
 	}
-	assertRenderMatchesRenderTo(t, ctx, element, Rect{W: 24, H: 4})
+	assertRenderMatchesPaint(t, ctx, element, Rect{W: 24, H: 4})
 }
 
 func TestListSelectionChangedCallback(t *testing.T) {
@@ -138,7 +138,7 @@ func TestListSelectionChangedCallback(t *testing.T) {
 	}
 }
 
-func TestListRenderMatchesRenderTo(t *testing.T) {
+func TestListRenderMatchesPaint(t *testing.T) {
 	palette := theme.Default().Palette
 	ctx := &Context{Palette: palette, Runtime: &Runtime{}}
 	element := List{
@@ -150,10 +150,10 @@ func TestListRenderMatchesRenderTo(t *testing.T) {
 			{ControlID: "second", Primary: "B", Secondary: "beta"},
 		},
 	}
-	assertRenderMatchesRenderTo(t, ctx, element, Rect{W: 24, H: 2})
+	assertRenderMatchesPaint(t, ctx, element, Rect{W: 24, H: 2})
 }
 
-func TestTableRenderMatchesRenderTo(t *testing.T) {
+func TestTableRenderMatchesPaint(t *testing.T) {
 	palette := theme.Default().Palette
 	ctx := &Context{Palette: palette, Runtime: &Runtime{}}
 	element := Table{
@@ -170,10 +170,10 @@ func TestTableRenderMatchesRenderTo(t *testing.T) {
 			Focused:   true,
 		}},
 	}
-	assertRenderMatchesRenderTo(t, ctx, element, Rect{W: 20, H: 2})
+	assertRenderMatchesPaint(t, ctx, element, Rect{W: 20, H: 2})
 }
 
-func TestModalFrameRenderMatchesRenderTo(t *testing.T) {
+func TestModalFrameRenderMatchesPaint(t *testing.T) {
 	palette := theme.Default().Palette
 	ctx := &Context{Palette: palette, Runtime: &Runtime{}}
 	element := ModalFrame{
@@ -183,10 +183,10 @@ func TestModalFrameRenderMatchesRenderTo(t *testing.T) {
 		Footer:   "Enter to submit",
 		Width:    28,
 	}
-	assertRenderMatchesRenderTo(t, ctx, element, Rect{W: 28, H: 8})
+	assertRenderMatchesPaint(t, ctx, element, Rect{W: 28, H: 8})
 }
 
-func TestContainerRenderToAvoidsOwnerSurfaceAllocation(t *testing.T) {
+func TestContainerPaintAvoidsOwnerSurfaceAllocation(t *testing.T) {
 	palette := theme.Default().Palette
 	ctx := &Context{Palette: palette}
 	element := List{
@@ -205,11 +205,11 @@ func TestContainerRenderToAvoidsOwnerSurfaceAllocation(t *testing.T) {
 
 	dst := TransparentSurface(24, 2)
 	ResetSurfaceAllocationStats()
-	element.RenderTo(ctx, Rect{W: 24, H: 2}, &dst)
-	renderToStats := SurfaceAllocationStatsSnapshot()
+	element.Paint(ctx, NewCanvas(&dst, Rect{W: 24, H: 2}))
+	paintStats := SurfaceAllocationStatsSnapshot()
 
-	if renderStats.Transparent <= renderToStats.Transparent {
-		t.Fatalf("expected Render to allocate at least one additional transparent owner surface, got render=%#v renderTo=%#v", renderStats, renderToStats)
+	if renderStats.Transparent <= paintStats.Transparent {
+		t.Fatalf("expected Render to allocate at least one additional transparent owner surface, got render=%#v paint=%#v", renderStats, paintStats)
 	}
 }
 

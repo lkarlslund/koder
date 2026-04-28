@@ -157,7 +157,7 @@ func TestToolRunCardViewHidesEditPreviewUntilExpanded(t *testing.T) {
 	}
 }
 
-func TestToolRunDockRenderMatchesRenderTo(t *testing.T) {
+func TestToolRunDockRenderMatchesPaint(t *testing.T) {
 	palette := theme.Resolve("tokyonight").Palette
 	element := ToolRunDock{
 		Palette: palette,
@@ -174,5 +174,5 @@ func TestToolRunDockRenderMatchesRenderTo(t *testing.T) {
 		},
 		Hints: "Enter to expand",
 	}
-	assertRenderMatchesRenderTo(t, &Context{Palette: palette, Runtime: &Runtime{}}, element, Rect{W: 32, H: 6})
+	assertRenderMatchesPaint(t, &Context{Palette: palette, Runtime: &Runtime{}}, element, Rect{W: 32, H: 6})
 }

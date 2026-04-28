@@ -44,20 +44,6 @@ func (s Section) Render(ctx *Context, bounds Rect) Surface {
 	return renderOwnedCanvas(ctx, bounds, s)
 }
 
-func (s Section) RenderTo(ctx *Context, bounds Rect, dst *Surface) {
-	if dst == nil {
-		return
-	}
-	width := bounds.W
-	if width <= 0 {
-		width = s.Width
-	}
-	if width <= 0 {
-		width = 40
-	}
-	renderElementInto(ctx, s.children(ctx), Rect{X: bounds.X, Y: bounds.Y, W: width, H: bounds.H}, dst)
-}
-
 func (s Section) Paint(ctx *Context, canvas Canvas) {
 	if canvas.Width() <= 0 || canvas.Height() <= 0 {
 		return
@@ -155,35 +141,6 @@ func (l List) Measure(ctx *Context, constraints Constraints) Size {
 
 func (l List) Render(ctx *Context, bounds Rect) Surface {
 	return renderOwnedCanvas(ctx, bounds, l)
-}
-
-func (l List) RenderTo(ctx *Context, bounds Rect, dst *Surface) {
-	if dst == nil {
-		return
-	}
-	width := bounds.W
-	if width <= 0 {
-		width = l.Width
-	}
-	if width <= 0 {
-		width = 72
-	}
-	children := make([]Child, 0, len(l.Items))
-	for idx, item := range l.Items {
-		children = append(children, Fixed(SelectableRow{
-			ControlID:      item.ControlID,
-			Primary:        item.Primary,
-			Secondary:      item.Secondary,
-			Tertiary:       item.Tertiary,
-			Width:          width,
-			PrimaryWidth:   item.PrimaryWidth,
-			SecondaryWidth: item.SecondaryWidth,
-			TertiaryWidth:  item.TertiaryWidth,
-			Selected:       idx == l.Selected,
-			Focused:        l.Focused && idx == l.Selected,
-		}))
-	}
-	renderElementInto(ctx, FlexBox{Direction: DirectionVertical, Children: children}, Rect{X: bounds.X, Y: bounds.Y, W: width, H: bounds.H}, dst)
 }
 
 func (l List) Paint(ctx *Context, canvas Canvas) {
@@ -285,33 +242,6 @@ func (t Table) Measure(ctx *Context, constraints Constraints) Size {
 
 func (t Table) Render(ctx *Context, bounds Rect) Surface {
 	return renderOwnedCanvas(ctx, bounds, t)
-}
-
-func (t Table) RenderTo(ctx *Context, bounds Rect, dst *Surface) {
-	if dst == nil {
-		return
-	}
-	width := t.width(bounds.W)
-	children := make([]Child, 0, len(t.Rows)+1)
-	if t.ShowHeader {
-		children = append(children, Fixed(tableHeader{
-			Palette: ctx.Palette,
-			Columns: t.Columns,
-			Width:   width,
-		}))
-	}
-	for _, row := range t.Rows {
-		children = append(children, Fixed(HitBox{
-			ID: row.ControlID,
-			Child: tableRow{
-				Palette: ctx.Palette,
-				Columns: t.Columns,
-				Width:   width,
-				Row:     row,
-			},
-		}))
-	}
-	renderElementInto(ctx, FlexBox{Direction: DirectionVertical, Children: children}, Rect{X: bounds.X, Y: bounds.Y, W: width, H: bounds.H}, dst)
 }
 
 func (t Table) Paint(ctx *Context, canvas Canvas) {
