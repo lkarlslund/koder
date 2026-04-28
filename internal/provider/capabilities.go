@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -85,20 +86,91 @@ func (s *CapabilityStore) EnrichModel(providerID string, cfg config.Provider, mo
 }
 
 func (s *CapabilityStore) SupportsAttachment(providerID string, cfg config.Provider, modelID string, kind attachment.Kind) (bool, error) {
-	model, err := s.EnrichModel(providerID, cfg, domain.Model{ID: modelID})
-	if err != nil {
-		return false, err
-	}
 	switch kind {
 	case attachment.KindText:
 		return true, nil
 	case attachment.KindImage:
-		return model.SupportsImages, nil
+		return s.supportsImageAttachment(providerID, cfg, modelID)
 	case attachment.KindPDF:
+		model, err := s.EnrichModel(providerID, cfg, domain.Model{ID: modelID})
+		if err != nil {
+			return false, err
+		}
 		return model.SupportsPDFs, nil
 	default:
 		return false, nil
 	}
+}
+
+func (s *CapabilityStore) supportsImageAttachment(providerID string, cfg config.Provider, modelID string) (bool, error) {
+	if s == nil {
+		return inferCapabilities(providerID, cfg, domain.Model{ID: modelID}).SupportsImages, nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	cache, err := s.load()
+	if err != nil {
+		return false, err
+	}
+	key := capabilityKey(providerID, cfg.BaseURL, modelID)
+	current := inferCapabilities(providerID, cfg, domain.Model{ID: modelID})
+	if entry, ok := cache.Entries[key]; ok && time.Since(entry.DetectedAt) < capabilityCacheTTL {
+		current = applyEntry(current, entry)
+		if strings.TrimSpace(entry.CapabilitySource) == "probe" {
+			return current.SupportsImages, nil
+		}
+	}
+
+	client, err := New(providerID, cfg, nil)
+	if err == nil && client != nil {
+		supported, probeErr := client.ProbeImageSupport(context.Background(), modelID)
+		if probeErr == nil {
+			cache.Entries[key] = capabilityEntry{
+				ProviderID:        providerID,
+				BaseURL:           strings.TrimSpace(cfg.BaseURL),
+				ModelID:           modelID,
+				SupportsImages:    supported,
+				SupportsPDFs:      current.SupportsPDFs,
+				CapabilitySource:  "probe",
+				CapabilitiesKnown: true,
+				DetectedAt:        time.Now().UTC(),
+			}
+			if err := s.save(cache); err != nil {
+				return false, err
+			}
+			return supported, nil
+		}
+	}
+
+	cache.Entries[key] = capabilityEntry{
+		ProviderID:        providerID,
+		BaseURL:           strings.TrimSpace(cfg.BaseURL),
+		ModelID:           modelID,
+		SupportsImages:    current.SupportsImages,
+		SupportsPDFs:      current.SupportsPDFs,
+		CapabilitySource:  current.CapabilitySource,
+		CapabilitiesKnown: current.CapabilitiesKnown,
+		DetectedAt:        time.Now().UTC(),
+	}
+	if err := s.save(cache); err != nil {
+		return false, err
+	}
+	return current.SupportsImages, nil
+}
+
+func (s *CapabilityStore) Invalidate(providerID string, cfg config.Provider, modelID string) error {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cache, err := s.load()
+	if err != nil {
+		return err
+	}
+	delete(cache.Entries, capabilityKey(providerID, cfg.BaseURL, modelID))
+	return s.save(cache)
 }
 
 func inferCapabilities(providerID string, cfg config.Provider, model domain.Model) domain.Model {

@@ -4648,7 +4648,7 @@ func (m *Model) pasteClipboardText() (ui.Model, ui.Cmd) {
 			return m, m.syncWindowTitleCmd()
 		}
 		m.insertDraftAttachment(draft)
-		m.status = fmt.Sprintf("Attached image %s", draft.Name)
+		m.status = m.imageAttachmentStatus(draft)
 		return m, m.syncWindowTitleCmd()
 	}
 
@@ -4668,7 +4668,11 @@ func (m *Model) pasteClipboardText() (ui.Model, ui.Cmd) {
 			return m, m.syncWindowTitleCmd()
 		}
 		m.insertDraftAttachment(draft)
-		m.status = fmt.Sprintf("Attached %s", draft.Name)
+		if attachment.ClassifyMIME(draft.MIME) == attachment.KindImage {
+			m.status = m.imageAttachmentStatus(draft)
+		} else {
+			m.status = fmt.Sprintf("Attached %s", draft.Name)
+		}
 		return m, m.syncWindowTitleCmd()
 	}
 	m.composer.InsertString(text)
@@ -4676,6 +4680,21 @@ func (m *Model) pasteClipboardText() (ui.Model, ui.Cmd) {
 	m.invalidateFooterCache()
 	m.status = "Pasted from clipboard"
 	return m, m.syncWindowTitleCmd()
+}
+
+func (m *Model) imageAttachmentStatus(draft attachment.Draft) string {
+	session := m.draftSession()
+	if strings.TrimSpace(session.ProviderID) == "" || strings.TrimSpace(session.ModelID) == "" {
+		return fmt.Sprintf("Attached image %s", draft.Name)
+	}
+	supported, err := m.capabilityStore().SupportsAttachment(session.ProviderID, providerCfgForDraft(m.cfg, session.ProviderID), session.ModelID, attachment.KindImage)
+	if err != nil {
+		return fmt.Sprintf("Attached image %s", draft.Name)
+	}
+	if !supported {
+		return fmt.Sprintf("Attached image %s; warning: %s may not support image inputs", draft.Name, session.ModelID)
+	}
+	return fmt.Sprintf("Attached image %s", draft.Name)
 }
 
 func (m *Model) poppedLastDraftAttachment() bool {
@@ -7043,6 +7062,13 @@ func (m *Model) selectModel(providerID string, modelID string, presetID string) 
 	providerCfg, ok := m.cfg.Providers[providerID]
 	if !ok {
 		return fmt.Errorf("provider %q not configured", providerID)
+	}
+	sameSelection := strings.TrimSpace(m.currentSession.ProviderID) == providerID &&
+		strings.TrimSpace(m.currentSession.ModelID) == modelID
+	if sameSelection {
+		if err := m.capabilityStore().Invalidate(providerID, providerCfg, modelID); err != nil {
+			return err
+		}
 	}
 	providerCfg.DefaultModel = modelID
 	providerCfg.ModelPreset = presetID

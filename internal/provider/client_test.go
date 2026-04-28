@@ -747,3 +747,135 @@ func TestCapabilityStoreSupportsAttachmentForQwen36ImageModel(t *testing.T) {
 		t.Fatal("expected qwen3.6 image support")
 	}
 }
+
+func TestProbeImageSupportSuccess(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw := string(body)
+		if !strings.Contains(raw, `"type":"image_url"`) {
+			t.Fatalf("expected image part in probe request, got %s", raw)
+		}
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"OK"}}]}`))
+	}))
+	defer server.Close()
+
+	client, err := New("openai-compatible", config.Provider{
+		Kind:    ProviderKindCompatible,
+		BaseURL: server.URL + "/v1",
+		Timeout: time.Second,
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ok, err := client.ProbeImageSupport(context.Background(), "demo-model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("expected probe success to report image support")
+	}
+}
+
+func TestProbeImageSupportUnsupported(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":"image content part unsupported for this model"}`))
+	}))
+	defer server.Close()
+
+	client, err := New("openai-compatible", config.Provider{
+		Kind:    ProviderKindCompatible,
+		BaseURL: server.URL + "/v1",
+		Timeout: time.Second,
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ok, err := client.ProbeImageSupport(context.Background(), "demo-model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok {
+		t.Fatal("expected unsupported probe to report false")
+	}
+}
+
+func TestCapabilityStoreSupportsAttachmentCachesProbeResult(t *testing.T) {
+	var calls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"OK"}}]}`))
+	}))
+	defer server.Close()
+
+	store := NewCapabilityStore(t.TempDir())
+	cfg := config.Provider{
+		Kind:    ProviderKindCompatible,
+		BaseURL: server.URL + "/v1",
+		Timeout: time.Second,
+	}
+
+	ok, err := store.SupportsAttachment("openai-compatible", cfg, "custom-vision-model", attachment.KindImage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("expected probed image support")
+	}
+
+	ok, err = store.SupportsAttachment("openai-compatible", cfg, "custom-vision-model", attachment.KindImage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("expected cached probed image support")
+	}
+	if calls != 1 {
+		t.Fatalf("expected one probe request, got %d", calls)
+	}
+}
+
+func TestCapabilityStoreInvalidateForcesReprobe(t *testing.T) {
+	var calls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"OK"}}]}`))
+	}))
+	defer server.Close()
+
+	store := NewCapabilityStore(t.TempDir())
+	cfg := config.Provider{
+		Kind:    ProviderKindCompatible,
+		BaseURL: server.URL + "/v1",
+		Timeout: time.Second,
+	}
+
+	ok, err := store.SupportsAttachment("openai-compatible", cfg, "custom-vision-model", attachment.KindImage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("expected initial probed image support")
+	}
+	if err := store.Invalidate("openai-compatible", cfg, "custom-vision-model"); err != nil {
+		t.Fatal(err)
+	}
+	ok, err = store.SupportsAttachment("openai-compatible", cfg, "custom-vision-model", attachment.KindImage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("expected reprobed image support")
+	}
+	if calls != 2 {
+		t.Fatalf("expected invalidate to force reprobe, got %d probe requests", calls)
+	}
+}

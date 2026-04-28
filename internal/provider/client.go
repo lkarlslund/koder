@@ -86,6 +86,18 @@ func ImagePart(mimeType string, data []byte) ContentPart {
 	return ContentPart{Type: "image_url", MIMEType: mimeType, Data: data}
 }
 
+var probePNG = []byte{
+	0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+	0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+	0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+	0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4,
+	0x89, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x44, 0x41,
+	0x54, 0x78, 0x9c, 0x63, 0xf8, 0xcf, 0xc0, 0xf0,
+	0x1f, 0x00, 0x05, 0x00, 0x01, 0xff, 0x89, 0x99,
+	0x3d, 0x1d, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45,
+	0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+}
+
 func (m Message) MarshalJSON() ([]byte, error) {
 	type wireMessage struct {
 		Role       domain.MessageRole `json:"role"`
@@ -499,6 +511,30 @@ func (c *Client) CompleteChat(ctx context.Context, input ChatRequest) (ChatRespo
 	}, nil
 }
 
+func (c *Client) ProbeImageSupport(ctx context.Context, modelID string) (bool, error) {
+	_, err := c.CompleteChat(ctx, ChatRequest{
+		Model: modelID,
+		Messages: []Message{{
+			Role: domain.MessageRoleUser,
+			ContentParts: []ContentPart{
+				TextPart("Reply with OK."),
+				ImagePart("image/png", probePNG),
+			},
+		}},
+		Stream: false,
+		ExtraBody: map[string]any{
+			"max_tokens": 1,
+		},
+	})
+	if err == nil {
+		return true, nil
+	}
+	if isImageSupportProbeUnsupported(err) {
+		return false, nil
+	}
+	return false, err
+}
+
 func (c *Client) StreamChat(ctx context.Context, input ChatRequest) (<-chan domain.Event, error) {
 	events := make(chan domain.Event)
 	go func() {
@@ -511,6 +547,34 @@ func (c *Client) StreamChat(ctx context.Context, input ChatRequest) (<-chan doma
 		}
 	}()
 	return events, nil
+}
+
+func isImageSupportProbeUnsupported(err error) bool {
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		return false
+	}
+	switch apiErr.StatusCode {
+	case http.StatusBadRequest, http.StatusUnsupportedMediaType, http.StatusUnprocessableEntity:
+	default:
+		return false
+	}
+	body := strings.ToLower(apiErr.Body)
+	needles := []string{
+		"image",
+		"vision",
+		"multimodal",
+		"content part",
+		"input modality",
+		"unsupported",
+	}
+	matches := 0
+	for _, needle := range needles {
+		if strings.Contains(body, needle) {
+			matches++
+		}
+	}
+	return matches >= 2
 }
 
 func (c *Client) StreamChatResponse(ctx context.Context, input ChatRequest, onEvent func(domain.Event)) (ChatResponse, error) {

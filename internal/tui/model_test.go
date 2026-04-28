@@ -823,6 +823,35 @@ func TestCtrlVPastesClipboardImageAsAttachment(t *testing.T) {
 	}
 }
 
+func TestCtrlVPastesClipboardImageWarnsWhenModelDoesNotSupportImages(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.DefaultProvider = "openai-compatible"
+	cfg.DefaultModel = "text-only-model"
+	cfg.Providers = map[string]config.Provider{
+		"openai-compatible": {Kind: provider.ProviderKindCompatible, BaseURL: "http://127.0.0.1:1/v1", DefaultModel: "text-only-model"},
+	}
+	m := Model{
+		cfg:               cfg,
+		composer:          textarea.New(),
+		attachmentFiles:   attachment.NewManager(t.TempDir()),
+		readClipboardText: func() (string, error) { return "", nil },
+		readClipboardImage: func() ([]byte, error) {
+			return []byte("\x89PNG\r\n\x1a\nfake"), nil
+		},
+		caps: provider.NewCapabilityStore(t.TempDir()),
+		currentSession: domain.Session{
+			ProviderID: "openai-compatible",
+			ModelID:    "text-only-model",
+		},
+	}
+
+	updated, _ := m.handleKey(ui.KeyMsg{Type: ui.KeyCtrlV})
+	next := updated.(*Model)
+	if !strings.Contains(next.status, "warning: text-only-model may not support image inputs") {
+		t.Fatalf("expected unsupported image warning, got %q", next.status)
+	}
+}
+
 func TestAttachmentTokenBackspaceRemovesWholeToken(t *testing.T) {
 	m := Model{
 		composer:        textarea.New(),
