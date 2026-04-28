@@ -155,6 +155,11 @@ func globPatternToRegexp(pattern string) string {
 		switch ch {
 		case '*':
 			if idx+1 < len(pattern) && pattern[idx+1] == '*' {
+				if idx+2 < len(pattern) && pattern[idx+2] == '/' {
+					builder.WriteString(`(?:.*/)?`)
+					idx += 2
+					continue
+				}
 				builder.WriteString(".*")
 				idx++
 				continue

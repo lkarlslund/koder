@@ -13,6 +13,7 @@ import (
 
 func TestGlobSupportsRecursivePatternsAndLimit(t *testing.T) {
 	root := t.TempDir()
+	mustWriteFile(t, filepath.Join(root, "root.go"))
 	mustWriteFile(t, filepath.Join(root, "cmd", "one.go"))
 	mustWriteFile(t, filepath.Join(root, "internal", "app", "two.go"))
 	mustWriteFile(t, filepath.Join(root, "internal", "app", "three.txt"))
@@ -51,6 +52,22 @@ func TestGlobPatternToRegexp(t *testing.T) {
 	}
 	if !matched {
 		t.Fatal("expected recursive glob to match")
+	}
+
+	matched, err = matchGlobPattern("internal/**/two.go", "internal/two.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !matched {
+		t.Fatal("expected recursive glob to match zero nested directories")
+	}
+
+	matched, err = matchGlobPattern("**/*", "go.mod")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !matched {
+		t.Fatal("expected recursive glob to match root-level files")
 	}
 }
 
