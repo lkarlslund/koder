@@ -69,6 +69,35 @@ func TestNoStyledStringRenderingInDialogs(t *testing.T) {
 	}
 }
 
+func TestNoRenderToInProductionUIOrDialogs(t *testing.T) {
+	root := repoRoot(t)
+	paths := []string{
+		filepath.Join(root, "internal/ui"),
+		filepath.Join(root, "internal/tui/dialogs"),
+	}
+	for _, base := range paths {
+		err := filepath.WalkDir(base, func(path string, d os.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+				return nil
+			}
+			raw, readErr := os.ReadFile(path)
+			if readErr != nil {
+				return readErr
+			}
+			if strings.Contains(string(raw), "RenderTo(") {
+				t.Fatalf("unexpected RenderTo usage in %s", path)
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 func TestNoStyledStringRenderingInTextarea(t *testing.T) {
 	root := repoRoot(t)
 	path := filepath.Join(root, "internal/ui/textarea/textarea.go")

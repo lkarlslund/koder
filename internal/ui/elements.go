@@ -1109,27 +1109,6 @@ func renderElementInto(ctx *Context, element Element, bounds Rect, dst *Surface)
 	}
 }
 
-func renderOwnedSurface(ctx *Context, bounds Rect, draw func(ctx *Context, bounds Rect, dst *Surface)) Surface {
-	base := TransparentSurface(bounds.W, bounds.H)
-	if draw == nil {
-		return base
-	}
-	localBounds := Rect{W: bounds.W, H: bounds.H}
-	if ctx == nil || ctx.Runtime == nil {
-		draw(ctx, localBounds, &base)
-		return base
-	}
-	shadow := &Runtime{}
-	copyCtx := *ctx
-	copyCtx.Runtime = shadow
-	draw(&copyCtx, localBounds, &base)
-	if controls := shadow.Controls(); len(controls) > 0 {
-		base.ctrls = append(base.ctrls[:0], controls...)
-		base.RegisterControls(ctx.Runtime, bounds.X, bounds.Y)
-	}
-	return base
-}
-
 func renderOwnedCanvas(ctx *Context, bounds Rect, painter Painter) Surface {
 	base := TransparentSurface(bounds.W, bounds.H)
 	if painter == nil {
