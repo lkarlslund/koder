@@ -150,10 +150,15 @@ func TestComposerCursorMoveProducesBottomOnlyDamage(t *testing.T) {
 		t.Fatal("expected dirty rects after composer cursor move")
 	}
 	damageStart := surface.SurfaceHeight() - next.statusPaneHeight() - next.composerAreaHeight()
+	totalArea := 0
 	for _, rect := range rects {
 		if rect.Y < damageStart {
 			t.Fatalf("expected composer damage to stay near footer, got rect %#v with damage start %d", rect, damageStart)
 		}
+		totalArea += rect.W * rect.H
+	}
+	if totalArea > 4 {
+		t.Fatalf("expected cursor move to stay tightly localized, got rects %#v", rects)
 	}
 }
 

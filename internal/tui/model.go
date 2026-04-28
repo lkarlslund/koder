@@ -439,6 +439,7 @@ type Model struct {
 	composer                textarea.Model
 	composerQueries         composerQueryState
 	composerHistory         composerHistoryState
+	composerCursorDirty     bool
 	width                   int
 	height                  int
 	status                  string
@@ -1365,7 +1366,11 @@ func (m *Model) handleMainWindowKey(msg ui.KeyMsg) (bool, ui.Cmd) {
 	}
 	m.updateComposerMenus()
 	if beforeRevision != m.composer.Revision() || beforeCursorVisible != m.composer.CursorVisible() || beforeCursorIndex != m.composer.CursorIndex() {
-		m.invalidateFooterCache()
+		if beforeRevision == m.composer.Revision() {
+			m.invalidateFooterCursor()
+		} else {
+			m.invalidateFooterCache()
+		}
 	}
 	handled := beforeRevision != m.composer.Revision() ||
 		beforeCursorVisible != m.composer.CursorVisible() ||
@@ -2373,6 +2378,17 @@ func (m *Model) invalidateFooterCache() {
 	cache := m.ensureRenderCache()
 	cache.composerAreaValid = false
 	cache.renderedComposerAreaSurface = ui.Surface{}
+	m.composerCursorDirty = false
+	if main := m.ensureMainScreenWidget(); main != nil {
+		main.composer.Invalidate()
+	}
+}
+
+func (m *Model) invalidateFooterCursor() {
+	cache := m.ensureRenderCache()
+	cache.composerAreaValid = false
+	cache.renderedComposerAreaSurface = ui.Surface{}
+	m.composerCursorDirty = true
 	if main := m.ensureMainScreenWidget(); main != nil {
 		main.composer.Invalidate()
 	}
@@ -6099,7 +6115,7 @@ func (m *Model) syncComposerVisibility() {
 		m.syncComposerBlinkTimer()
 	}
 	if beforeFocus != m.composer.Focused() || beforeCursorVisible != m.composer.CursorVisible() {
-		m.invalidateFooterCache()
+		m.invalidateFooterCursor()
 	}
 }
 

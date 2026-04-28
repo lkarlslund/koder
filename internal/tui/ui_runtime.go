@@ -183,7 +183,7 @@ func (m *Model) mainWindow() ui.Window {
 				if !m.composer.ToggleBlink() {
 					return false, nil
 				}
-				m.invalidateFooterCache()
+				m.invalidateFooterCursor()
 				return true, nil
 			},
 		}

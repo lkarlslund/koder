@@ -88,6 +88,8 @@ type composerAreaWidget struct {
 	surface      ui.Surface
 	damage       []ui.Rect
 	layout       bool
+	cursorRect   ui.Rect
+	cursorValid  bool
 	dirty        bool
 	valid        bool
 }
@@ -137,19 +139,28 @@ func (w *composerAreaWidget) Surface(ctx *ui.Context, bounds ui.Rect) ui.Surface
 	element := w.model.renderComposerAreaElement()
 	surface := element.Render(ctx, ui.Rect{W: width, H: size.H})
 	nextBounds := ui.Rect{W: width, H: size.H}
+	nextCursorRect, nextCursorOK := composerCursorRect(w.model, surface)
 	w.layout = !w.valid || w.bounds != nextBounds
-	if !w.layout {
+	if w.model.composerCursorDirty && !w.layout && w.cursorValid && nextCursorOK {
+		damage := ui.DamageSet{}
+		damage.Add(w.cursorRect)
+		damage.Add(nextCursorRect)
+		w.damage = damage.Rects()
+	} else if !w.layout {
 		w.damage = ui.DiffSurfaceDamage(w.surface, surface)
 	} else {
 		w.damage = fullSurfaceDamage(surface)
 	}
 	w.bounds = nextBounds
 	w.surface = surface
+	w.cursorRect = nextCursorRect
+	w.cursorValid = nextCursorOK
 	w.valid = true
 	w.dirty = false
 	cache := w.model.ensureRenderCache()
 	cache.composerAreaValid = true
 	cache.renderedComposerAreaSurface = surface
+	w.model.composerCursorDirty = false
 	return surface
 }
 
@@ -404,6 +415,30 @@ func collectMainScreenDamage(
 	addWidgetDamage(sidebarDirty, sidebarSurface, sidebarRect, sidebarRects)
 	addWidgetDamage(statusDirty, statusSurface, statusRect, statusRects)
 	return damage.Rects()
+}
+
+func composerCursorRect(m *Model, surface ui.Surface) (ui.Rect, bool) {
+	if m == nil || surface.SurfaceHeight() < 2 || !m.shouldShowComposerArea() {
+		return ui.Rect{}, false
+	}
+	line := m.composer.VisibleLine()
+	promptWidth := ui.PlainWidth(m.promptGlyph() + " ")
+	x := promptWidth + ui.PlainWidth(line.Before())
+	width := ui.PlainWidth(line.Cursor())
+	if width <= 0 {
+		width = 1
+	}
+	y := max(0, surface.SurfaceHeight()-2)
+	if x >= surface.SurfaceWidth() || y >= surface.SurfaceHeight() {
+		return ui.Rect{}, false
+	}
+	if x+width > surface.SurfaceWidth() {
+		width = surface.SurfaceWidth() - x
+	}
+	if width <= 0 {
+		return ui.Rect{}, false
+	}
+	return ui.Rect{X: x, Y: y, W: width, H: 1}, true
 }
 
 func sidebarWidgetHash(m *Model, bounds ui.Rect) uint64 {
