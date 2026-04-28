@@ -579,6 +579,10 @@ func (e *Engine) continueModelTurn(ctx context.Context, session domain.Session, 
 		tracker.reset()
 
 		if steps > 0 && strings.TrimSpace(text) == "" && len(resp.ToolCalls) == 0 {
+			if strings.TrimSpace(reasoning) != "" {
+				transient = transientTurnMessages("", "Continue from the latest tool result. Do not stop at hidden reasoning. Either produce a visible answer for the user or make the next tool call.")
+				continue
+			}
 			e.pauseContinuation(ctx, chat.ID, session.ID, continuationPause{
 				Reason: continuationPauseReasonProviderRefusal,
 				Body:   providerRefusalPauseBody(reasoning),
@@ -1661,7 +1665,8 @@ func assistantSummaryExcludedFromModel(parts []domain.Part) bool {
 
 func (e *Engine) userMessageWithContext(parts []domain.Part) (provider.Message, bool, error) {
 	contentParts := make([]provider.ContentPart, 0, len(parts)+1)
-	attachmentParts := make([]provider.ContentPart, 0, len(parts))
+	imageParts := make([]provider.ContentPart, 0, len(parts))
+	attachmentTextParts := make([]provider.ContentPart, 0, len(parts))
 	var prompt string
 	var refs []reference.Metadata
 	var hasStructured bool
@@ -1690,18 +1695,19 @@ func (e *Engine) userMessageWithContext(parts []domain.Part) (provider.Message, 
 				if err != nil {
 					return provider.Message{}, false, err
 				}
-				attachmentParts = append(attachmentParts, provider.TextPart("Attached file "+meta.Name+":\n"+body))
+				attachmentTextParts = append(attachmentTextParts, provider.TextPart("Attached file "+meta.Name+":\n"+body))
 			case attachment.KindImage:
 				data, err := e.files.ReadBytes(meta)
 				if err != nil {
 					return provider.Message{}, false, err
 				}
-				attachmentParts = append(attachmentParts, provider.ImagePart(meta.MIME, data))
+				imageParts = append(imageParts, provider.ImagePart(meta.MIME, data))
 			default:
 				return provider.Message{}, false, fmt.Errorf("unsupported attachment in conversation: %s", meta.MIME)
 			}
 		}
 	}
+	contentParts = append(contentParts, imageParts...)
 	if len(refs) > 0 {
 		slices.SortFunc(refs, func(a, b reference.Metadata) int {
 			if a.Start != b.Start {
@@ -1732,7 +1738,7 @@ func (e *Engine) userMessageWithContext(parts []domain.Part) (provider.Message, 
 	} else if strings.TrimSpace(prompt) != "" {
 		contentParts = append(contentParts, provider.TextPart(prompt))
 	}
-	contentParts = append(contentParts, attachmentParts...)
+	contentParts = append(contentParts, attachmentTextParts...)
 	if !hasStructured {
 		return provider.Message{}, false, nil
 	}

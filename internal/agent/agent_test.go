@@ -554,10 +554,13 @@ func TestBuildConversationIncludesImageAndTextAttachments(t *testing.T) {
 	}
 	userMsg := conversation[len(conversation)-1]
 	if got := len(userMsg.ContentParts); got != 3 {
-		t.Fatalf("expected text + image + attached text content parts, got %#v", userMsg.ContentParts)
+		t.Fatalf("expected image + text + attached text content parts, got %#v", userMsg.ContentParts)
 	}
-	if userMsg.ContentParts[1].Type != "image_url" {
-		t.Fatalf("expected image attachment content part, got %#v", userMsg.ContentParts)
+	if userMsg.ContentParts[0].Type != "image_url" {
+		t.Fatalf("expected leading image attachment content part, got %#v", userMsg.ContentParts)
+	}
+	if userMsg.ContentParts[1].Type != "text" || strings.TrimSpace(userMsg.ContentParts[1].Text) == "" {
+		t.Fatalf("expected prompt text after image, got %#v", userMsg.ContentParts[1])
 	}
 	if userMsg.ContentParts[2].Type != "text" || !strings.Contains(userMsg.ContentParts[2].Text, "remember this") {
 		t.Fatalf("expected attached text file content, got %#v", userMsg.ContentParts[2])
@@ -2444,6 +2447,92 @@ func TestRunPromptPausesOnProviderRefusalAfterToolResult(t *testing.T) {
 		}
 	}
 	t.Fatal("expected persisted provider-refusal pause notice")
+}
+
+func TestRunPromptContinuesAfterReasoningOnlyTurnFollowingToolResult(t *testing.T) {
+	t.Parallel()
+
+	workdir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workdir, "note.txt"), []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var requests []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		requests = append(requests, string(body))
+		switch len(requests) {
+		case 1:
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"tool_calls":[{"id":"call_1","type":"function","function":{"name":"read","arguments":"{\"path\":\"note.txt\"}"}}]}}],"usage":{"total_tokens":1}}`))
+		case 2:
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"reasoning":"thinking only"}}],"usage":{"total_tokens":1}}`))
+		default:
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"final answer"}}],"usage":{"total_tokens":1}}`))
+		}
+	}))
+	defer server.Close()
+
+	cfg := testConfig(t)
+	cfg.Providers = map[string]config.Provider{
+		"test": {BaseURL: server.URL + "/v1", Timeout: time.Second},
+	}
+	cfg.DefaultProvider = "test"
+	cfg.DefaultModel = "test-model"
+
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	engine := New(cfg, st, tools.NewRegistry(workdir), nil, workdir)
+	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	events, err := engine.RunPrompt(context.Background(), session, "loop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for evt := range events {
+		if evt.Kind == domain.EventKindError {
+			t.Fatalf("expected continuation after reasoning-only turn, got %#v", evt)
+		}
+	}
+
+	if len(requests) < 3 {
+		t.Fatalf("expected at least 3 provider requests, got %d", len(requests))
+	}
+	var sawContinuationInstruction bool
+	for _, req := range requests {
+		if strings.Contains(req, "Do not stop at hidden reasoning") {
+			sawContinuationInstruction = true
+			break
+		}
+	}
+	if !sawContinuationInstruction {
+		t.Fatalf("expected continuation instruction after reasoning-only turn, got %v", requests)
+	}
+
+	messages, parts, err := st.PartsForSession(context.Background(), session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sawFinalText bool
+	for _, msg := range messages {
+		for _, part := range parts[msg.ID] {
+			if part.Kind == domain.PartKindEventNotice && strings.Contains(part.Body, "Paused continuation") {
+				t.Fatalf("unexpected pause notice after reasoning-only turn: %#v", part)
+			}
+			if part.Kind == domain.PartKindText && strings.TrimSpace(part.Body) == "final answer" {
+				sawFinalText = true
+			}
+		}
+	}
+	if !sawFinalText {
+		t.Fatal("expected final assistant answer after reasoning-only continuation")
+	}
 }
 
 func TestRunPromptPausesOnTurnLimit(t *testing.T) {
