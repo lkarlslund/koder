@@ -569,13 +569,15 @@ func (m *Model) centeredWindow(id ui.WindowID, z int, element ui.Element, onKey 
 				}
 				return true, nil
 			}
-			runtime := ui.Runtime{}
-			ctx := &ui.Context{Palette: m.palette, Runtime: &runtime}
 			bounds := m.centeredWindowBounds(element)
-			element.Render(ctx, ui.Rect{W: bounds.W, H: bounds.H})
 			local := ui.Point{X: max(0, msg.X-1-bounds.X), Y: msg.Y - bounds.Y}
-			if control, ok := runtime.Hit(local); ok {
-				return true, onControl(m, control.ID)
+			surface := ui.PaintElementSurface(&ui.Context{Palette: m.palette}, element, ui.Rect{W: bounds.W, H: bounds.H})
+			controls := surface.Controls()
+			for idx := len(controls) - 1; idx >= 0; idx-- {
+				control := controls[idx]
+				if control.Enabled && control.Rect.Contains(local) {
+					return true, onControl(m, control.ID)
+				}
 			}
 			return true, nil
 		},

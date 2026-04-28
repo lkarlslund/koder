@@ -1125,19 +1125,24 @@ func renderOwnedCanvas(ctx *Context, bounds Rect, painter Painter) Surface {
 		return base
 	}
 	localBounds := Rect{W: bounds.W, H: bounds.H}
-	if ctx == nil || ctx.Runtime == nil {
+	shadow := &Runtime{}
+	if ctx == nil {
 		canvas := NewCanvas(&base, localBounds)
-		painter.Paint(ctx, canvas)
+		painter.Paint(&Context{Runtime: shadow}, canvas)
+		if controls := shadow.Controls(); len(controls) > 0 {
+			base.ctrls = append(base.ctrls[:0], controls...)
+		}
 		return base
 	}
-	shadow := &Runtime{}
 	copyCtx := *ctx
 	copyCtx.Runtime = shadow
 	canvas := NewCanvas(&base, localBounds)
 	painter.Paint(&copyCtx, canvas)
 	if controls := shadow.Controls(); len(controls) > 0 {
 		base.ctrls = append(base.ctrls[:0], controls...)
-		base.RegisterControls(ctx.Runtime, bounds.X, bounds.Y)
+		if ctx.Runtime != nil {
+			base.RegisterControls(ctx.Runtime, bounds.X, bounds.Y)
+		}
 	}
 	return base
 }
