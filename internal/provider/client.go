@@ -266,19 +266,19 @@ func New(id string, cfg config.Provider, recorder *debugsrv.Recorder) (*Client, 
 	}
 	timeout := cfg.Timeout
 	if timeout == 0 {
-		timeout = 2 * time.Minute
+		timeout = 10 * time.Minute
 	}
-	transport := http.DefaultTransport
+	transport := defaultTransportWithHeaderTimeout(timeout)
 	if recorder != nil {
 		transport = &tracingTransport{
-			base:       http.DefaultTransport,
+			base:       transport,
 			recorder:   recorder,
 			providerID: id,
 		}
 	}
 	return &Client{
 		http: &http.Client{
-			Timeout:   timeout,
+			Timeout:   0,
 			Transport: transport,
 		},
 		baseURL:  baseURL,
@@ -287,6 +287,16 @@ func New(id string, cfg config.Provider, recorder *debugsrv.Recorder) (*Client, 
 		provider: id,
 		recorder: recorder,
 	}, nil
+}
+
+func defaultTransportWithHeaderTimeout(timeout time.Duration) http.RoundTripper {
+	base, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		return http.DefaultTransport
+	}
+	clone := base.Clone()
+	clone.ResponseHeaderTimeout = timeout
+	return clone
 }
 
 func (c *Client) ListModels(ctx context.Context) ([]domain.Model, error) {

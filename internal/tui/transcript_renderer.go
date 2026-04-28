@@ -16,14 +16,15 @@ import (
 const reasoningOnlyPlaceholder = "<no text from LLM, only reasoning>"
 
 type transcriptRenderer struct {
-	palette        theme.Palette
-	width          int
-	renderer       *markdown.Renderer
-	showReasoning  bool
-	showSystem     bool
-	showTimestamps bool
-	halfBlocks     bool
-	promptGlyph    string
+	palette              theme.Palette
+	width                int
+	renderer             *markdown.Renderer
+	showReasoning        bool
+	showSystem           bool
+	showTimestamps       bool
+	halfBlocks           bool
+	promptGlyph          string
+	pendingReasoningLine string
 }
 
 func newTranscriptRenderer(m *Model) transcriptRenderer {
@@ -218,7 +219,11 @@ func (r transcriptRenderer) renderMessageParts(parts []domain.Part) string {
 		visibleReasoning = nil
 	}
 	if len(textBlocks) == 0 && len(reasoningBlocks) > 0 {
-		textBlocks = append(textBlocks, reasoningOnlyPlaceholder)
+		if strings.TrimSpace(r.pendingReasoningLine) != "" {
+			textBlocks = append(textBlocks, strings.TrimSpace(r.pendingReasoningLine))
+		} else {
+			textBlocks = append(textBlocks, reasoningOnlyPlaceholder)
+		}
 	}
 	blocks = append(blocks, visibleReasoning...)
 	if len(visibleReasoning) > 0 && len(textBlocks) > 0 {
@@ -317,8 +322,12 @@ func (r transcriptRenderer) renderStyledMessageParts(parts []domain.Part) []ui.S
 		visibleReasoning = nil
 	}
 	if len(textBlocks) == 0 && len(reasoningBlocks) > 0 {
+		placeholder := reasoningOnlyPlaceholder
+		if strings.TrimSpace(r.pendingReasoningLine) != "" {
+			placeholder = strings.TrimSpace(r.pendingReasoningLine)
+		}
 		textBlocks = append(textBlocks, []ui.StyledSpan{{
-			Text:  reasoningOnlyPlaceholder,
+			Text:  placeholder,
 			Style: ui.CellStyle{FG: r.palette.ReasoningText}.WithItalic(true),
 		}})
 	}

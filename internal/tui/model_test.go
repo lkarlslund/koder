@@ -5391,6 +5391,32 @@ func TestRenderStyledMessagePartsReasoningOnlyShowsReasoningWhenHidden(t *testin
 	}
 }
 
+func TestPendingAssistantReasoningOnlyShowsThinkingIndicator(t *testing.T) {
+	cfg := testConfig(t)
+	m, err := New(cfg, nil, nil, StartupModeNew, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.currentSession = domain.Session{ID: 1}
+	m.viewport.Width = 60
+	m.showReasoning = false
+	m.startBusy(busyScopeTranscript, "Thinking ...")
+	m.pendingAssistant = pendingAssistantTurn{
+		CreatedAt: time.Unix(1, 0).UTC(),
+		Reasoning: "hidden chain of thought",
+	}
+
+	m.refreshViewport()
+	got := m.viewport.View()
+
+	if !strings.Contains(got, "Thinking ...") {
+		t.Fatalf("expected pending thinking indicator, got %q", got)
+	}
+	if strings.Contains(got, reasoningOnlyPlaceholder) {
+		t.Fatalf("expected thinking indicator to replace reasoning placeholder while pending, got %q", got)
+	}
+}
+
 func TestTranscriptBlocksIncludePendingAssistantTurn(t *testing.T) {
 	cfg := testConfig(t)
 	m, err := New(cfg, nil, nil, StartupModeNew, nil)

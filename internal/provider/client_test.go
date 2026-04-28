@@ -600,6 +600,44 @@ func TestCompleteChatReturnsAPIErrorWithRetryAfter(t *testing.T) {
 	}
 }
 
+func TestStreamChatResponseDoesNotTimeoutActiveBodyReadAfterHeaders(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		_ = r.Body.Close()
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			t.Fatal("expected flusher")
+		}
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"index\":0,\"delta\":{\"reasoning\":\"Thinking\"}}]}\n\n"))
+		flusher.Flush()
+		time.Sleep(150 * time.Millisecond)
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"done\"}}]}\n\n"))
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+		flusher.Flush()
+	}))
+	defer server.Close()
+
+	client, err := New("test", config.Provider{
+		BaseURL: server.URL,
+		Timeout: 100 * time.Millisecond,
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resp, err := client.StreamChatResponse(context.Background(), ChatRequest{Model: "test"}, nil)
+	if err != nil {
+		t.Fatalf("expected active stream to survive past header timeout, got %v", err)
+	}
+	if resp.Text != "done" {
+		t.Fatalf("unexpected response text: %#v", resp)
+	}
+	if resp.Reasoning != "Thinking" {
+		t.Fatalf("unexpected response reasoning: %#v", resp)
+	}
+}
+
 func TestStreamChatResponseRecordsReadFailureAfterHeaders(t *testing.T) {
 	recorder := debugsrv.NewRecorder()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -616,15 +654,18 @@ func TestStreamChatResponseRecordsReadFailureAfterHeaders(t *testing.T) {
 	}))
 	defer server.Close()
 
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
 	client, err := New("test", config.Provider{
 		BaseURL: server.URL,
-		Timeout: 100 * time.Millisecond,
+		Timeout: time.Second,
 	}, recorder)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	_, err = client.StreamChatResponse(context.Background(), ChatRequest{Model: "test"}, nil)
+	_, err = client.StreamChatResponse(ctx, ChatRequest{Model: "test"}, nil)
 	if err == nil {
 		t.Fatal("expected stream read failure")
 	}

@@ -1712,7 +1712,7 @@ func (m *Model) applyEvent(evt domain.Event) {
 			m.pendingAssistant.CreatedAt = time.Now().UTC()
 		}
 		m.pendingAssistant.Reasoning += evt.Text
-		m.startBusy(busyScopeTranscript, "Working ...")
+		m.startBusy(busyScopeTranscript, "Thinking ...")
 		m.refreshTranscriptForPendingTurn()
 	case domain.EventKindToolStart:
 		status := strings.TrimSpace(evt.Text)
@@ -2587,7 +2587,7 @@ func (m *Model) transcriptControllerFromBlock(prevByKey map[string]transcriptIte
 			}
 		case *pendingAssistantTranscriptItem:
 			if block.Kind == transcriptBlockMessage && block.Pending {
-				typed.Reset(block.Message.CreatedAt, firstPartBody(block.Parts, domain.PartKindText), firstPartBody(block.Parts, domain.PartKindReasoning))
+				typed.Reset(block.Message.CreatedAt, firstPartBody(block.Parts, domain.PartKindText), firstPartBody(block.Parts, domain.PartKindReasoning), m.pendingAssistantIndicatorLine())
 				typed.SetReasoningVisible(m.showReasoning)
 				return typed
 			}
@@ -2605,7 +2605,7 @@ func (m *Model) transcriptControllerFromBlock(prevByKey map[string]transcriptIte
 		return newToolRunTranscriptItem(gap, block.ToolRun, m.expandedToolRuns[block.ToolRun.ID], m.expandedToolRunCommands[block.ToolRun.ID])
 	case block.Pending:
 		item := newPendingAssistantTranscriptItem(gap, block.Message.CreatedAt, m.showReasoning)
-		item.Reset(block.Message.CreatedAt, firstPartBody(block.Parts, domain.PartKindText), firstPartBody(block.Parts, domain.PartKindReasoning))
+		item.Reset(block.Message.CreatedAt, firstPartBody(block.Parts, domain.PartKindText), firstPartBody(block.Parts, domain.PartKindReasoning), m.pendingAssistantIndicatorLine())
 		return item
 	case block.Message.Role == domain.MessageRoleUser:
 		return newUserMessageTranscriptItem(key, gap, block.Message, block.Parts)
@@ -2688,7 +2688,7 @@ func (m *Model) syncPendingTranscriptItem() bool {
 	}
 	if m.pendingTranscriptIndex >= 0 && m.pendingTranscriptIndex < len(m.transcriptItems) {
 		if item, ok := m.transcriptItems[m.pendingTranscriptIndex].(*pendingAssistantTranscriptItem); ok {
-			item.Reset(m.pendingAssistant.CreatedAt, m.pendingAssistant.Text, m.pendingAssistant.Reasoning)
+			item.Reset(m.pendingAssistant.CreatedAt, m.pendingAssistant.Text, m.pendingAssistant.Reasoning, m.pendingAssistantIndicatorLine())
 			item.SetReasoningVisible(m.showReasoning)
 			return m.replaceTranscriptItemAt(m.pendingTranscriptIndex)
 		}
@@ -2700,12 +2700,26 @@ func (m *Model) syncPendingTranscriptItem() bool {
 		gap = renderedSeparatorHeight(m.transcriptSeparator(prevBlock, nextBlock))
 	}
 	item := newPendingAssistantTranscriptItem(gap, m.pendingAssistant.CreatedAt, m.showReasoning)
-	item.Reset(m.pendingAssistant.CreatedAt, m.pendingAssistant.Text, m.pendingAssistant.Reasoning)
+	item.Reset(m.pendingAssistant.CreatedAt, m.pendingAssistant.Text, m.pendingAssistant.Reasoning, m.pendingAssistantIndicatorLine())
 	item.Refresh(m)
 	m.transcriptItems = append(m.transcriptItems, item)
 	retained.Add(item.UIItem())
 	m.reindexTranscriptControllers()
 	return true
+}
+
+func (m Model) pendingAssistantIndicatorLine() string {
+	if strings.TrimSpace(m.pendingAssistant.Text) != "" {
+		return ""
+	}
+	if strings.TrimSpace(m.pendingAssistant.Reasoning) == "" {
+		return ""
+	}
+	indicator := m.workingIndicator()
+	if strings.TrimSpace(indicator) == "" {
+		indicator = ui.SpinnerFrame(m.cfg.UI.Spinner, 0)
+	}
+	return ui.WorkingIndicatorLine(indicator, "Thinking ...")
 }
 
 func (m *Model) reindexTranscriptControllers() {

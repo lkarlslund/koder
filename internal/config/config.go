@@ -441,7 +441,7 @@ func providerDefaults() Provider {
 		ContextWindow: 32768,
 		AutoCompactAt: 85,
 		Stream:        true,
-		Timeout:       2 * time.Minute,
+		Timeout:       10 * time.Minute,
 		Disabled:      false,
 	}
 }

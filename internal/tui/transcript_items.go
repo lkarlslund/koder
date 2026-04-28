@@ -125,6 +125,7 @@ type pendingAssistantTranscriptItem struct {
 	text          string
 	reasoning     string
 	showReasoning bool
+	pendingLine   string
 }
 
 func newPendingAssistantTranscriptItem(gap int, createdAt time.Time, showReasoning bool) *pendingAssistantTranscriptItem {
@@ -141,10 +142,11 @@ func newPendingAssistantTranscriptItem(gap int, createdAt time.Time, showReasoni
 func (i *pendingAssistantTranscriptItem) SetReasoningVisible(v bool)  { i.showReasoning = v }
 func (i *pendingAssistantTranscriptItem) AppendText(text string)      { i.text += text }
 func (i *pendingAssistantTranscriptItem) AppendReasoning(text string) { i.reasoning += text }
-func (i *pendingAssistantTranscriptItem) Reset(createdAt time.Time, text, reasoning string) {
+func (i *pendingAssistantTranscriptItem) Reset(createdAt time.Time, text, reasoning, pendingLine string) {
 	i.createdAt = createdAt
 	i.text = text
 	i.reasoning = reasoning
+	i.pendingLine = pendingLine
 }
 
 func (i *pendingAssistantTranscriptItem) Parts() []domain.Part {
@@ -163,6 +165,7 @@ func (i *pendingAssistantTranscriptItem) Refresh(m *Model) {
 	parts := i.Parts()
 	renderer := newTranscriptRenderer(m)
 	renderer.showReasoning = i.showReasoning
+	renderer.pendingReasoningLine = i.pendingLine
 	i.setElement(renderer.renderTranscriptMessageElement(msg, parts))
 }
 

@@ -147,7 +147,14 @@ func TestClientStillSupportsConfigFromDraft(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if client.http.Timeout != 2*time.Minute {
+	if client.http.Timeout != 0 {
 		t.Fatalf("unexpected timeout: %v", client.http.Timeout)
+	}
+	transport, ok := client.http.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("expected *http.Transport, got %T", client.http.Transport)
+	}
+	if transport.ResponseHeaderTimeout != 10*time.Minute {
+		t.Fatalf("unexpected response header timeout: %v", transport.ResponseHeaderTimeout)
 	}
 }
