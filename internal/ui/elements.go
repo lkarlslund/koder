@@ -640,6 +640,21 @@ func (s Surface) SurfaceCellStrikethrough(x, y int) bool {
 	return s.cellAt(x, y).Strikethrough()
 }
 
+func (s *Surface) BlendStyleAt(x, y int, overlay CellStyle) {
+	if s == nil || !s.isCellBuffer() {
+		return
+	}
+	if x < 0 || y < 0 || x >= s.w || y >= s.h {
+		return
+	}
+	base := s.cellAt(x, y)
+	base.SetStyle(base.Style().Merge(overlay))
+	if !base.Painted() && !base.Style().isZero() {
+		base.SetPainted(true)
+	}
+	s.setCell(x, y, base)
+}
+
 func (s Surface) normalize(width, height int) Surface {
 	if s.isCellBuffer() {
 		if width == s.w && height == s.h {

@@ -43,6 +43,10 @@ type promptDoneMsg struct {
 }
 
 type spinnerTickMsg struct{}
+type bouncyBallsTickMsg struct {
+	At  time.Time
+	Seq uint64
+}
 type rootTimerMsg struct {
 	At  time.Time
 	Seq uint64
@@ -488,6 +492,7 @@ type Model struct {
 	rootTimerSeq            uint64
 	rootTimerPending        bool
 	rootTimerPendingAt      time.Time
+	bouncyBalls             bouncyBallsOverlay
 	caps                    *provider.CapabilityStore
 	runtimeCtxChecked       map[string]bool
 	activeOpCancel          context.CancelFunc
@@ -646,6 +651,17 @@ func (m Model) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 			}
 		}
 		return m, ui.Batch(cmds...)
+	case bouncyBallsTickMsg:
+		if msg.Seq != m.bouncyBalls.tickSeq {
+			return m, nil
+		}
+		m.bouncyBalls.tickPending = false
+		m.bouncyBalls.tickPendingAt = time.Time{}
+		if !m.bouncyBalls.Enabled {
+			return m, nil
+		}
+		_ = m.bouncyBalls.StepAt(msg.At, max(0, m.width), max(0, m.height))
+		return m, nil
 	case spinnerTickMsg:
 		m.invalidateBodyCache()
 		if !m.shouldAnimateSpinner() {
@@ -997,6 +1013,7 @@ func (m *Model) viewSurface() ui.Surface {
 	}
 	root := m.syncUIRoot()
 	surface := root.RenderFrame()
+	surface = m.bouncyBalls.Apply(surface)
 	m.syncDebugFrame(surface)
 	return surface
 }
@@ -1159,6 +1176,9 @@ func (m *Model) handleMainWindowKey(msg ui.KeyMsg) (bool, ui.Cmd) {
 	case "ctrl+c":
 		_, cmd := m.quit()
 		return true, cmd
+	case "ctrl+b":
+		m.toggleBouncyBalls()
+		return true, nil
 	case "ctrl+pgup":
 		return true, m.switchChatByDelta(-1)
 	case "ctrl+pgdown":
@@ -1742,6 +1762,7 @@ func (m *Model) resize() {
 	m.viewport.SetWindowHeight(m.transcriptViewportHeight())
 	m.resizeHelpModal()
 	m.resizeLLMPreview()
+	m.bouncyBalls.Resize(max(0, m.width), max(0, m.height))
 	m.invalidateTranscript()
 }
 
@@ -6155,11 +6176,18 @@ func (m *Model) buildTranscriptItems() []ui.TranscriptItem {
 
 func (m *Model) withRootTimers(cmd ui.Cmd) ui.Cmd {
 	m.syncComposerBlinkTimer()
+	animationCmd := m.bouncyBalls.TickCmd()
 	timerCmd := m.rootTimerCmd()
-	if timerCmd == nil {
+	if timerCmd == nil && animationCmd == nil {
 		return cmd
 	}
-	return ui.Batch(cmd, timerCmd)
+	if timerCmd == nil {
+		return ui.Batch(cmd, animationCmd)
+	}
+	if animationCmd == nil {
+		return ui.Batch(cmd, timerCmd)
+	}
+	return ui.Batch(cmd, timerCmd, animationCmd)
 }
 
 func (m *Model) closePicker() {

@@ -114,6 +114,7 @@ const (
 	KeyShiftTab
 	KeyEsc
 	KeyCtrlA
+	KeyCtrlB
 	KeyCtrlC
 	KeyCtrlE
 	KeyCtrlG
@@ -167,6 +168,8 @@ func (k KeyMsg) String() string {
 		base = "esc"
 	case KeyCtrlA:
 		base = "ctrl+a"
+	case KeyCtrlB:
+		base = "ctrl+b"
 	case KeyCtrlC:
 		base = "ctrl+c"
 	case KeyCtrlE:

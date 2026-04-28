@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -158,6 +159,81 @@ func TestComposerCursorMoveProducesBottomOnlyDamage(t *testing.T) {
 	}
 	if totalArea > 4 {
 		t.Fatalf("expected cursor move to stay tightly localized, got rects %#v", rects)
+	}
+}
+
+func TestCtrlBTogglesBouncyBallsAndSchedulesAnimation(t *testing.T) {
+	m := Model{
+		cfg:         config.Default().WithStateDir(t.TempDir()),
+		palette:     theme.Default().Palette,
+		viewport:    newTranscriptViewport(80, 20),
+		renderCache: &modelRenderCache{},
+		composer:    textarea.New(),
+		width:       80,
+		height:      24,
+	}
+
+	updated, cmd := m.Update(ui.KeyMsg{Type: ui.KeyCtrlB})
+	next := asModelPtr(t, updated)
+	if !next.bouncyBalls.Enabled {
+		t.Fatal("expected ctrl+b to enable bouncy balls")
+	}
+	if got := next.status; got != "Bouncy balls enabled" {
+		t.Fatalf("expected enable status, got %q", got)
+	}
+	if cmd == nil {
+		t.Fatal("expected bouncy balls to schedule an animation tick")
+	}
+	if len(next.bouncyBalls.balls) != 4 {
+		t.Fatalf("expected 4 balls, got %d", len(next.bouncyBalls.balls))
+	}
+	for _, ball := range next.bouncyBalls.balls {
+		if ball.x <= 0 || ball.x >= float64(next.width) || ball.y <= 0 || ball.y >= float64(next.height) {
+			t.Fatalf("expected randomized ball position within viewport, got (%f,%f) in %dx%d", ball.x, ball.y, next.width, next.height)
+		}
+	}
+	for idx, ball := range next.bouncyBalls.balls {
+		if ball.radius <= 0 {
+			t.Fatalf("expected positive radius for ball %d, got %f", idx, ball.radius)
+		}
+	}
+	if !(next.bouncyBalls.balls[0].radius < next.bouncyBalls.balls[1].radius &&
+		next.bouncyBalls.balls[1].radius < next.bouncyBalls.balls[2].radius &&
+		next.bouncyBalls.balls[2].radius < next.bouncyBalls.balls[3].radius) {
+		t.Fatalf("expected scaled radii to remain ordered, got %#v", next.bouncyBalls.balls)
+	}
+	uniqueSpeeds := map[string]struct{}{}
+	for _, ball := range next.bouncyBalls.balls {
+		key := fmt.Sprintf("%.3f:%.3f", ball.vx, ball.vy)
+		uniqueSpeeds[key] = struct{}{}
+	}
+	if len(uniqueSpeeds) < 4 {
+		t.Fatalf("expected individual randomized velocities, got %#v", next.bouncyBalls.balls)
+	}
+
+	beforeX, beforeY := next.bouncyBalls.balls[0].x, next.bouncyBalls.balls[0].y
+	seq := next.bouncyBalls.tickSeq
+	updated, cmd = next.Update(bouncyBallsTickMsg{Seq: next.bouncyBalls.tickSeq, At: time.Now()})
+	next = asModelPtr(t, updated)
+	if next.bouncyBalls.balls[0].x == beforeX && next.bouncyBalls.balls[0].y == beforeY {
+		t.Fatal("expected bouncy balls tick to move the overlay")
+	}
+	if cmd == nil {
+		t.Fatal("expected each bouncy balls tick to schedule the next tick")
+	}
+
+	updated, _ = next.Update(ui.KeyMsg{Type: ui.KeyCtrlB})
+	next = asModelPtr(t, updated)
+	if next.bouncyBalls.Enabled {
+		t.Fatal("expected second ctrl+b to disable bouncy balls")
+	}
+	if got := next.status; got != "Bouncy balls disabled" {
+		t.Fatalf("expected disable status, got %q", got)
+	}
+	updated, _ = next.Update(bouncyBallsTickMsg{Seq: seq, At: time.Now()})
+	next = asModelPtr(t, updated)
+	if next.bouncyBalls.tickPending {
+		t.Fatal("expected stale bouncy balls tick to be ignored after disable")
 	}
 }
 

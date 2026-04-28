@@ -774,6 +774,8 @@ func convertKeyPress(ev input.KeyPressEvent) KeyMsg {
 			switch ctrlKey {
 			case "a":
 				msg.Type = KeyCtrlA
+			case "b":
+				msg.Type = KeyCtrlB
 			case "c":
 				msg.Type = KeyCtrlC
 			case "e":

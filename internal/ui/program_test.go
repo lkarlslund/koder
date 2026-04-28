@@ -311,6 +311,10 @@ func TestConvertKeyPressMapsCtrlCombosByCodeWhenTextEmpty(t *testing.T) {
 	if got.Type != KeyCtrlC {
 		t.Fatalf("expected ctrl+c to map from code even without text, got %#v", got)
 	}
+	got = convertKeyPress(input.KeyPressEvent{Code: 'b', Mod: input.ModCtrl})
+	if got.Type != KeyCtrlB {
+		t.Fatalf("expected ctrl+b to map from code even without text, got %#v", got)
+	}
 }
 
 func TestConvertKeyPressMapsPageKeysAndCtrlPageKeys(t *testing.T) {

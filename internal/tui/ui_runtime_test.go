@@ -225,6 +225,40 @@ func TestViewSurfaceThemeChangeDirtyRectsCoverDiff(t *testing.T) {
 	assertDirtyRectsCoverSurfaceDiff(t, before, after)
 }
 
+func TestBouncyBallsOverlayTintsFrameAndTracksDamage(t *testing.T) {
+	m := newRuntimeTestModel(t)
+	m.resize()
+	m.refreshViewport()
+
+	before := m.viewSurface()
+	m.bouncyBalls.Enable(m.width, m.height)
+	withOverlay := m.viewSurface()
+	assertDirtyRectsCoverSurfaceDiff(t, before, withOverlay)
+
+	centerX := int(m.bouncyBalls.balls[0].x)
+	centerY := int(m.bouncyBalls.balls[0].y)
+	fgR, fgG, fgB, fgOK := withOverlay.SurfaceCellFG(centerX, centerY)
+	bgR, bgG, bgB, bgOK := withOverlay.SurfaceCellBG(centerX, centerY)
+	if !fgOK || !bgOK {
+		t.Fatal("expected overlay to tint both foreground and background at ball center")
+	}
+	if beforeR, beforeG, beforeB, beforeOK := before.SurfaceCellFG(centerX, centerY); beforeOK && beforeR == fgR && beforeG == fgG && beforeB == fgB {
+		t.Fatalf("expected overlay to change foreground color, before=(%d,%d,%d,%v) after=(%d,%d,%d,%v)", beforeR, beforeG, beforeB, beforeOK, fgR, fgG, fgB, fgOK)
+	}
+	if beforeR, beforeG, beforeB, beforeOK := before.SurfaceCellBG(centerX, centerY); beforeOK && beforeR == bgR && beforeG == bgG && beforeB == bgB {
+		t.Fatalf("expected overlay to change background color, before=(%d,%d,%d,%v) after=(%d,%d,%d,%v)", beforeR, beforeG, beforeB, beforeOK, bgR, bgG, bgB, bgOK)
+	}
+
+	movedBefore := withOverlay
+	m.bouncyBalls.Step(m.width, m.height)
+	moved := m.viewSurface()
+	assertDirtyRectsCoverSurfaceDiff(t, movedBefore, moved)
+
+	m.bouncyBalls.Disable()
+	afterDisable := m.viewSurface()
+	assertDirtyRectsCoverSurfaceDiff(t, moved, afterDisable)
+}
+
 func TestViewSurfaceTranscriptAppendWithSidebarDirtyRectsCoverDiff(t *testing.T) {
 	m := newRuntimeTestModel(t)
 	m.currentSession = domain.Session{ID: 1, Title: "Session 1"}
