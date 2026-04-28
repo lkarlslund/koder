@@ -319,7 +319,7 @@ func (d PreferencesDialog) Render(ctx *ui.Context, bounds ui.Rect) ui.Surface {
 	maxWidth := dialogRenderWidth(bounds, 84)
 	element := d.dialog(maxWidth, ctx.Palette)
 	size := element.Measure(ctx, ui.Constraints{MaxW: maxWidth, MaxH: bounds.H})
-	return element.Render(ctx, ui.Rect{X: bounds.X, Y: bounds.Y, W: size.W, H: bounds.H})
+	return ui.PaintElementSurface(ctx, element, ui.Rect{W: size.W, H: bounds.H})
 }
 
 func (d PreferencesDialog) dialog(width int, palette theme.Palette) ui.Element {
