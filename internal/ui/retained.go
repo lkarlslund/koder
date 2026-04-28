@@ -112,6 +112,15 @@ type ElementNode struct {
 	ElementFn func(ctx *Context) Element
 }
 
+type ManagedElementNode struct {
+	ElementNode
+	PrepareFn       func(*Context, Rect)
+	DirtyFn         func() bool
+	DirtyRectsFn    func() []Rect
+	LayoutChangedFn func() bool
+	ClearFn         func()
+}
+
 func (n *SurfaceNode) Measure(ctx *Context, constraints Constraints) Size {
 	if n == nil {
 		return Size{}
@@ -181,4 +190,35 @@ func (n *ElementNode) Paint(ctx *Context, canvas Canvas) {
 		W: canvas.Width(),
 		H: canvas.Height(),
 	}, canvas.surface)
+}
+
+func (n *ManagedElementNode) PrepareDirty(ctx *Context) {
+	if n == nil || n.PrepareFn == nil {
+		return
+	}
+	n.PrepareFn(ctx, n.Rect())
+	if n.LayoutChangedFn != nil && n.LayoutChangedFn() {
+		n.MarkLayoutDirty()
+	}
+	if n.DirtyFn != nil && n.DirtyFn() {
+		if n.DirtyRectsFn != nil {
+			if rects := n.DirtyRectsFn(); len(rects) > 0 {
+				for _, rect := range rects {
+					n.MarkDirtyLocal(rect)
+				}
+				return
+			}
+		}
+		n.MarkDirtyLocal(Rect{})
+	}
+}
+
+func (n *ManagedElementNode) ClearFrameDirty() {
+	if n == nil {
+		return
+	}
+	n.ClearDirty()
+	if n.ClearFn != nil {
+		n.ClearFn()
+	}
 }
