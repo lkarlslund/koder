@@ -236,3 +236,10 @@ func WithAltScreen() ProgramOption {
 func WithoutSignalHandler() ProgramOption {
 	return func(p *Program) { p.noSignalHandler = true }
 }
+
+func WithColorProfile(profile ColorProfile) ProgramOption {
+	return func(p *Program) {
+		p.colorProfile = profile
+		p.colorProfileSet = true
+	}
+}

@@ -1,14 +1,15 @@
 package ui
 
-import (
-	"strconv"
-	"strings"
-)
+import "strings"
 
 // This file is the ANSI output boundary for Surface serialization.
 // Widgets and dialogs should operate on plain text and cells only.
 
 func applyCellStyle(style CellStyle, text string) string {
+	return applyCellStyleWithProfile(ColorProfileTrueColor, style, text)
+}
+
+func applyCellStyleWithProfile(profile ColorProfile, style CellStyle, text string) string {
 	if style.isZero() || text == "" {
 		return text
 	}
@@ -25,20 +26,8 @@ func applyCellStyle(style CellStyle, text string) string {
 	if style.Strikethrough() {
 		params = append(params, "9")
 	}
-	if style.FG.Valid() {
-		params = append(params, "38", "2",
-			strconv.Itoa(int(style.FG.R())),
-			strconv.Itoa(int(style.FG.G())),
-			strconv.Itoa(int(style.FG.B())),
-		)
-	}
-	if style.BG.Valid() {
-		params = append(params, "48", "2",
-			strconv.Itoa(int(style.BG.R())),
-			strconv.Itoa(int(style.BG.G())),
-			strconv.Itoa(int(style.BG.B())),
-		)
-	}
+	params = appendTerminalColorSGR(params, profile, true, style.FG.R(), style.FG.G(), style.FG.B(), style.FG.Valid())
+	params = appendTerminalColorSGR(params, profile, false, style.BG.R(), style.BG.G(), style.BG.B(), style.BG.Valid())
 	if len(params) == 0 {
 		return text
 	}
@@ -46,9 +35,13 @@ func applyCellStyle(style CellStyle, text string) string {
 }
 
 func RenderStyledTextANSI(spans []StyledSpan) string {
+	return RenderStyledTextANSIWithProfile(spans, ColorProfileTrueColor)
+}
+
+func RenderStyledTextANSIWithProfile(spans []StyledSpan, profile ColorProfile) string {
 	var b strings.Builder
 	for _, span := range spans {
-		b.WriteString(applyCellStyle(span.Style, span.Text))
+		b.WriteString(applyCellStyleWithProfile(profile, span.Style, span.Text))
 	}
 	return b.String()
 }

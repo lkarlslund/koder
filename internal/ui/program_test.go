@@ -85,7 +85,7 @@ func TestDiffFrameSurfaceClearsRemovedRows(t *testing.T) {
 		},
 	}
 
-	got := diffFrameSurface(previous, current)
+	got := diffFrameSurface(previous, current, ColorProfileTrueColor)
 	if !strings.Contains(got, "\x1b[2;1H\x1b[2K") {
 		t.Fatalf("expected second removed row to be fully cleared, got %q", got)
 	}
@@ -121,7 +121,7 @@ func TestDiffFrameSurfaceRowsUsesDirtyRange(t *testing.T) {
 	if !ok || len(rows) != 1 || rows[0].Y != 1 || rows[0].StartX != 0 {
 		t.Fatalf("unexpected dirty rows: ok=%v rows=%v", ok, rows)
 	}
-	got := diffFrameSurfaceRows(previous, current, rows)
+	got := diffFrameSurfaceRows(previous, current, rows, ColorProfileTrueColor)
 	if !strings.Contains(got, "\x1b[2;1H") {
 		t.Fatalf("expected dirty row to be updated, got %q", got)
 	}
@@ -151,7 +151,7 @@ func TestDiffFrameSurfaceRowsStartsAtFirstDirtyColumn(t *testing.T) {
 	if !ok || len(rows) != 1 || rows[0].StartX != 2 {
 		t.Fatalf("unexpected dirty rows: ok=%v rows=%v", ok, rows)
 	}
-	got := diffFrameSurfaceRows(previous, current, rows)
+	got := diffFrameSurfaceRows(previous, current, rows, ColorProfileTrueColor)
 	if !strings.Contains(got, "\x1b[1;3HZde\x1b[K") {
 		t.Fatalf("expected flush to begin at third column, got %q", got)
 	}
@@ -204,12 +204,35 @@ func TestRenderFrameSurfaceEmitsRealSGRSequences(t *testing.T) {
 			{text: "o", fgr: [3]uint8{200, 211, 245}, fgv: true, bgr: [3]uint8{30, 32, 48}, bgv: true, bold: true},
 		},
 	}
-	got := renderFrameSurface(s)
+	got := renderFrameSurface(s, ColorProfileTrueColor)
 	if !strings.Contains(got, "\x1b[1;38;2;200;211;245") {
 		t.Fatalf("expected real SGR foreground sequence, got %q", got)
 	}
 	if strings.Contains(got, "[38;2;200;211;245") && !strings.Contains(got, "\x1b[1;38;2;200;211;245") {
 		t.Fatalf("expected no bare CSI tail without ESC, got %q", got)
+	}
+}
+
+func TestRenderFrameSurfaceUsesConfiguredColorProfile(t *testing.T) {
+	s := fakeSurface{
+		w: 1,
+		h: 1,
+		cells: []fakeCell{
+			{text: "X", fgr: [3]uint8{255, 0, 0}, fgv: true, bgr: [3]uint8{0, 0, 255}, bgv: true},
+		},
+	}
+
+	got16 := renderFrameSurface(s, ColorProfileANSI16)
+	if !strings.Contains(got16, "\x1b[1;1H\x1b[91;104mX\x1b[0m") {
+		t.Fatalf("expected ANSI16 render, got %q", got16)
+	}
+	if strings.Contains(got16, "38;2;") || strings.Contains(got16, "38;5;") {
+		t.Fatalf("expected downgraded color sequence, got %q", got16)
+	}
+
+	got256 := renderFrameSurface(s, ColorProfileANSI256)
+	if !strings.Contains(got256, "\x1b[1;1H\x1b[38;5;9;48;5;12mX\x1b[0m") {
+		t.Fatalf("expected ANSI256 render, got %q", got256)
 	}
 }
 

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -19,6 +18,8 @@ type Program struct {
 	model           Model
 	altScreen       bool
 	noSignalHandler bool
+	colorProfile    ColorProfile
+	colorProfileSet bool
 
 	mu           sync.Mutex
 	title        string
@@ -58,6 +59,10 @@ func (p *Program) Send(msg Msg) {
 func (p *Program) Run() (Model, error) {
 	in := os.Stdin
 	out := os.Stdout
+
+	if !p.colorProfileSet {
+		p.colorProfile = DetectColorProfileFromEnv(os.Getenv, term.IsTerminal(out.Fd()))
+	}
 
 	restoreVT, err := enableVirtualTerminalIO(in, out)
 	if err != nil {
@@ -165,13 +170,13 @@ func (p *Program) render(out io.Writer) error {
 	frame := ""
 	surface := p.model.ViewSurface()
 	if !p.didRender {
-		frame = renderFrameSurface(surface)
+		frame = renderFrameSurface(surface, p.colorProfile)
 		p.didRender = true
 	} else {
 		if rows, ok := dirtyRows(surface, p.rendered); ok {
-			frame = diffFrameSurfaceRows(p.rendered, surface, rows)
+			frame = diffFrameSurfaceRows(p.rendered, surface, rows, p.colorProfile)
 		} else {
-			frame = diffFrameSurface(p.rendered, surface)
+			frame = diffFrameSurface(p.rendered, surface, p.colorProfile)
 		}
 	}
 	p.rendered = surface
@@ -203,7 +208,7 @@ func renderFrameLines(lines []string) string {
 	return buf.String()
 }
 
-func renderFrameSurface(surface SurfaceView) string {
+func renderFrameSurface(surface SurfaceView, profile ColorProfile) string {
 	var buf strings.Builder
 	buf.WriteString("\x1b[H\x1b[2J")
 	height := 0
@@ -212,7 +217,7 @@ func renderFrameSurface(surface SurfaceView) string {
 	}
 	for idx := 0; idx < height; idx++ {
 		fmt.Fprintf(&buf, "\x1b[%d;1H", idx+1)
-		buf.WriteString(serializeSurfaceViewRow(surface, idx))
+		buf.WriteString(serializeSurfaceViewRow(surface, idx, profile))
 	}
 	return buf.String()
 }
@@ -243,7 +248,7 @@ func diffFrameLines(previous, current []string) string {
 	return buf.String()
 }
 
-func diffFrameSurface(previous, current SurfaceView) string {
+func diffFrameSurface(previous, current SurfaceView, profile ColorProfile) string {
 	start := 0
 	end := max(surfaceHeight(previous), surfaceHeight(current)) - 1
 	if end < start {
@@ -253,10 +258,10 @@ func diffFrameSurface(previous, current SurfaceView) string {
 	for y := start; y <= end; y++ {
 		rows = append(rows, RowDamage{Y: y, StartX: 0})
 	}
-	return diffFrameSurfaceRows(previous, current, rows)
+	return diffFrameSurfaceRows(previous, current, rows, profile)
 }
 
-func diffFrameSurfaceRows(previous, current SurfaceView, rows []RowDamage) string {
+func diffFrameSurfaceRows(previous, current SurfaceView, rows []RowDamage, profile ColorProfile) string {
 	var buf strings.Builder
 	prevRows := 0
 	currRows := 0
@@ -290,7 +295,7 @@ func diffFrameSurfaceRows(previous, current SurfaceView, rows []RowDamage) strin
 		startX := max(0, row.StartX)
 		fmt.Fprintf(&buf, "\x1b[%d;%dH", idx+1, startX+1)
 		if current != nil && idx < current.SurfaceHeight() {
-			buf.WriteString(serializeSurfaceViewRowSegment(current, idx, startX))
+			buf.WriteString(serializeSurfaceViewRowSegment(current, idx, startX, profile))
 		}
 		buf.WriteString("\x1b[K")
 	}
@@ -382,11 +387,11 @@ func surfaceCellsEqual(previous, current SurfaceView, x, y int) bool {
 		surfaceCellStrikethrough(previous, x, y) == surfaceCellStrikethrough(current, x, y)
 }
 
-func serializeSurfaceViewRow(surface SurfaceView, y int) string {
-	return serializeSurfaceViewRowSegment(surface, y, 0)
+func serializeSurfaceViewRow(surface SurfaceView, y int, profile ColorProfile) string {
+	return serializeSurfaceViewRowSegment(surface, y, 0, profile)
 }
 
-func serializeSurfaceViewRowSegment(surface SurfaceView, y, startX int) string {
+func serializeSurfaceViewRowSegment(surface SurfaceView, y, startX int, profile ColorProfile) string {
 	if surface == nil || y < 0 || y >= surface.SurfaceHeight() {
 		return ""
 	}
@@ -397,7 +402,7 @@ func serializeSurfaceViewRowSegment(surface SurfaceView, y, startX int) string {
 		if segment.Len() == 0 {
 			return
 		}
-		b.WriteString(applyStyle(currentStyle, segment.String()))
+		b.WriteString(applyStyle(profile, currentStyle, segment.String()))
 		segment.Reset()
 	}
 	if startX < 0 {
@@ -445,7 +450,7 @@ type rgbState struct {
 	valid bool
 }
 
-func applyStyle(style styleState, text string) string {
+func applyStyle(profile ColorProfile, style styleState, text string) string {
 	if text == "" || (style == styleState{}) {
 		return text
 	}
@@ -462,20 +467,8 @@ func applyStyle(style styleState, text string) string {
 	if style.strike {
 		params = append(params, "9")
 	}
-	if style.fg.valid {
-		params = append(params, "38", "2",
-			strconv.Itoa(int(style.fg.r)),
-			strconv.Itoa(int(style.fg.g)),
-			strconv.Itoa(int(style.fg.b)),
-		)
-	}
-	if style.bg.valid {
-		params = append(params, "48", "2",
-			strconv.Itoa(int(style.bg.r)),
-			strconv.Itoa(int(style.bg.g)),
-			strconv.Itoa(int(style.bg.b)),
-		)
-	}
+	params = appendTerminalColorSGR(params, profile, true, style.fg.r, style.fg.g, style.fg.b, style.fg.valid)
+	params = appendTerminalColorSGR(params, profile, false, style.bg.r, style.bg.g, style.bg.b, style.bg.valid)
 	if len(params) == 0 {
 		return text
 	}
