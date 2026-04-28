@@ -51,10 +51,6 @@ func (m SlashMenu) Measure(ctx *Context, constraints Constraints) Size {
 	return constraints.Clamp(m.element(m.contentWidth()).Measure(ctx, constraints))
 }
 
-func (m SlashMenu) Render(ctx *Context, bounds Rect) Surface {
-	return renderOwnedCanvas(ctx, bounds, m)
-}
-
 func (m SlashMenu) element(contentWidth int) Element {
 	if len(m.Items) == 0 {
 		return nil
@@ -119,10 +115,6 @@ func (m SlashMenu) Paint(ctx *Context, canvas Canvas) {
 
 func (m HistoryMenu) Measure(ctx *Context, constraints Constraints) Size {
 	return constraints.Clamp(m.element().Measure(ctx, constraints))
-}
-
-func (m HistoryMenu) Render(ctx *Context, bounds Rect) Surface {
-	return renderOwnedCanvas(ctx, bounds, m)
 }
 
 func (m HistoryMenu) element() Element {
@@ -210,10 +202,6 @@ func (p ApprovalPrompt) Measure(ctx *Context, constraints Constraints) Size {
 	return constraints.Clamp(p.element().Measure(ctx, constraints))
 }
 
-func (p ApprovalPrompt) Render(ctx *Context, bounds Rect) Surface {
-	return renderOwnedCanvas(ctx, bounds, p)
-}
-
 func (p ApprovalPrompt) element() Element {
 	buttons := ButtonRow{
 		Buttons: []Button{
@@ -279,10 +267,6 @@ func NewMenuPickerDialog(props PickerDialogProps) MenuPickerDialog {
 
 func (d MenuPickerDialog) Measure(ctx *Context, constraints Constraints) Size {
 	return constraints.Clamp(d.element().Measure(ctx, constraints))
-}
-
-func (d MenuPickerDialog) Render(ctx *Context, bounds Rect) Surface {
-	return renderOwnedCanvas(ctx, bounds, d)
 }
 
 func (d MenuPickerDialog) element() Element {

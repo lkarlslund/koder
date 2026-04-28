@@ -40,10 +40,6 @@ func (s Section) Measure(ctx *Context, constraints Constraints) Size {
 	return constraints.Clamp(children.Measure(ctx, Constraints{MaxW: width, MaxH: constraints.MaxH}))
 }
 
-func (s Section) Render(ctx *Context, bounds Rect) Surface {
-	return renderOwnedCanvas(ctx, bounds, s)
-}
-
 func (s Section) Paint(ctx *Context, canvas Canvas) {
 	if canvas.Width() <= 0 || canvas.Height() <= 0 {
 		return
@@ -137,10 +133,6 @@ func (l List) Measure(ctx *Context, constraints Constraints) Size {
 		width = 72
 	}
 	return constraints.Clamp(Size{W: width, H: len(l.Items)})
-}
-
-func (l List) Render(ctx *Context, bounds Rect) Surface {
-	return renderOwnedCanvas(ctx, bounds, l)
 }
 
 func (l List) Paint(ctx *Context, canvas Canvas) {
@@ -240,10 +232,6 @@ func (t Table) Measure(ctx *Context, constraints Constraints) Size {
 	return constraints.Clamp(Size{W: width, H: height})
 }
 
-func (t Table) Render(ctx *Context, bounds Rect) Surface {
-	return renderOwnedCanvas(ctx, bounds, t)
-}
-
 func (t Table) Paint(ctx *Context, canvas Canvas) {
 	if canvas.Width() <= 0 || canvas.Height() <= 0 {
 		return
@@ -292,10 +280,6 @@ func (h tableHeader) Measure(_ *Context, constraints Constraints) Size {
 	return constraints.Clamp(Size{W: h.Width, H: 1})
 }
 
-func (h tableHeader) Render(_ *Context, bounds Rect) Surface {
-	return renderOwnedCanvas(nil, bounds, h)
-}
-
 func (h tableHeader) Paint(_ *Context, canvas Canvas) {
 	width := h.Width
 	if width <= 0 {
@@ -326,10 +310,6 @@ type tableRow struct {
 
 func (r tableRow) Measure(_ *Context, constraints Constraints) Size {
 	return constraints.Clamp(Size{W: r.Width, H: 1})
-}
-
-func (r tableRow) Render(_ *Context, bounds Rect) Surface {
-	return renderOwnedCanvas(nil, bounds, r)
 }
 
 func (r tableRow) Paint(_ *Context, canvas Canvas) {
@@ -424,11 +404,6 @@ func (s ScrollBox) Measure(ctx *Context, constraints Constraints) Size {
 		height = childSize.H
 	}
 	return constraints.Clamp(Size{W: width, H: height})
-}
-
-func (s ScrollBox) Render(ctx *Context, bounds Rect) Surface {
-	surface, _, _ := s.RenderVisible(ctx, bounds.W, bounds.H, s.OffsetY)
-	return surface.normalize(bounds.W, bounds.H)
 }
 
 func (s ScrollBox) Paint(ctx *Context, canvas Canvas) {

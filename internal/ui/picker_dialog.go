@@ -180,10 +180,6 @@ func (d PickerDialog) Measure(ctx *Context, constraints Constraints) Size {
 	return constraints.Clamp(d.element(width, ctx.Palette).Measure(ctx, Constraints{MaxW: width, MaxH: constraints.MaxH}))
 }
 
-func (d PickerDialog) Render(ctx *Context, bounds Rect) Surface {
-	return renderOwnedCanvas(ctx, bounds, d)
-}
-
 func (d PickerDialog) element(width int, palette theme.Palette) Element {
 	children := []Child{}
 	if hint := strings.TrimSpace(d.Hint); hint != "" {

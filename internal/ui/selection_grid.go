@@ -28,10 +28,6 @@ func (g SelectionGrid) Measure(ctx *Context, constraints Constraints) Size {
 	return constraints.Clamp(Size{W: width, H: rows*cellHeight + max(0, rows-1)*rowGap})
 }
 
-func (g SelectionGrid) Render(ctx *Context, bounds Rect) Surface {
-	return renderOwnedCanvas(ctx, bounds, g)
-}
-
 func (g SelectionGrid) Paint(ctx *Context, canvas Canvas) {
 	width, cellWidth, rows, cellHeight, rowGap := g.layout(canvas.Width())
 	_ = rows
@@ -102,10 +98,6 @@ type selectionGridCard struct {
 	Item     SelectionGridItem
 	Selected bool
 	Focused  bool
-}
-
-func (c selectionGridCard) Render(ctx *Context, bounds Rect) Surface {
-	return renderOwnedCanvas(ctx, bounds, selectionGridCardPainter{card: c})
 }
 
 func (c selectionGridCard) Paint(ctx *Context, canvas Canvas) {

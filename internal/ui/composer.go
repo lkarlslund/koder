@@ -46,10 +46,6 @@ func (c Composer) Measure(_ *Context, constraints Constraints) Size {
 	return constraints.Clamp(c.render().Size())
 }
 
-func (c Composer) Render(_ *Context, bounds Rect) Surface {
-	return c.render().normalize(bounds.W, bounds.H)
-}
-
 func (c Composer) Paint(_ *Context, canvas Canvas) {
 	width := canvas.Width()
 	height := canvas.Height()
@@ -308,14 +304,6 @@ func (l AttachmentList) Measure(ctx *Context, constraints Constraints) Size {
 		width = constraints.maxWidth()
 	}
 	return constraints.Clamp(AttachmentList{Items: l.Items, Width: width}.render(ctx.Palette).Size())
-}
-
-func (l AttachmentList) Render(ctx *Context, bounds Rect) Surface {
-	width := l.Width
-	if width <= 0 {
-		width = bounds.W
-	}
-	return AttachmentList{Items: l.Items, Width: width}.render(ctx.Palette).normalize(bounds.W, bounds.H)
 }
 
 func (l AttachmentList) Paint(ctx *Context, canvas Canvas) {

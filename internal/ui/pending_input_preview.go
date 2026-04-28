@@ -66,18 +66,6 @@ func (p PendingInputPreview) Measure(ctx *Context, constraints Constraints) Size
 	}.render(ctx.Palette).Size())
 }
 
-func (p PendingInputPreview) Render(ctx *Context, bounds Rect) Surface {
-	width := p.Width
-	if width <= 0 {
-		width = bounds.W
-	}
-	return PendingInputPreview{
-		Width:       width,
-		Items:       p.Items,
-		EditingMode: p.EditingMode,
-	}.render(ctx.Palette).normalize(bounds.W, bounds.H)
-}
-
 func (p PendingInputPreview) Paint(ctx *Context, canvas Canvas) {
 	width := canvas.Width()
 	height := canvas.Height()

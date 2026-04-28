@@ -47,17 +47,6 @@ func (s Sidebar) Measure(ctx *Context, constraints Constraints) Size {
 	return constraints.Clamp(s.render(ctx, width).Size())
 }
 
-func (s Sidebar) Render(ctx *Context, bounds Rect) Surface {
-	width := s.Width
-	if width <= 0 {
-		width = bounds.W
-	}
-	if width <= 0 {
-		width = 30
-	}
-	return s.render(ctx, width).normalize(bounds.W, bounds.H)
-}
-
 func (s Sidebar) Paint(ctx *Context, canvas Canvas) {
 	width := canvas.Width()
 	height := canvas.Height()
@@ -85,10 +74,6 @@ type BodyLayout struct {
 
 func (l BodyLayout) Measure(ctx *Context, constraints Constraints) Size {
 	return constraints.Clamp(l.element().Measure(ctx, constraints))
-}
-
-func (l BodyLayout) Render(ctx *Context, bounds Rect) Surface {
-	return renderOwnedCanvas(ctx, bounds, l)
 }
 
 func (l BodyLayout) element() Element {
@@ -148,10 +133,6 @@ func (f Footer) Measure(ctx *Context, constraints Constraints) Size {
 	content := FlexBox{Direction: DirectionVertical, Children: f.children()}
 	size := content.Measure(ctx, constraints)
 	return constraints.Clamp(Size{W: size.W + 2, H: size.H + 1})
-}
-
-func (f Footer) Render(ctx *Context, bounds Rect) Surface {
-	return renderOwnedCanvas(ctx, bounds, f)
 }
 
 func (f Footer) children() []Child {
