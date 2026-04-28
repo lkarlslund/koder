@@ -187,6 +187,10 @@ func (r *Registry) SetChatControl(control ChatControl) {
 	r.runtime.ChatControl = control
 }
 
+func (r *Registry) SetMCP(executor MCPExecutor) {
+	r.runtime.MCP = executor
+}
+
 func (r *Registry) Execute(ctx context.Context, req Request) (Result, error) {
 	req, tool, err := normalizeRequest(req)
 	if err != nil {

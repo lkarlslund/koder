@@ -13,6 +13,20 @@ import (
 	_ "github.com/lkarlslund/koder/internal/tools/all"
 )
 
+type fakeMCPExecutor struct {
+	serverID string
+	toolName string
+	args     map[string]any
+	result   tools.Result
+}
+
+func (f *fakeMCPExecutor) ExecuteTool(_ context.Context, serverID, toolName string, args map[string]any) (tools.Result, error) {
+	f.serverID = serverID
+	f.toolName = toolName
+	f.args = args
+	return f.result, nil
+}
+
 func TestReadAndPatch(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "file.txt")
@@ -128,6 +142,35 @@ func TestBashZeroTimeoutUsesDefault(t *testing.T) {
 	}
 	if got := result.Meta["timeout_ms"]; got != "120000" {
 		t.Fatalf("expected default timeout metadata, got %q", got)
+	}
+}
+
+func TestMCPToolUsesRegistryMCPExecutor(t *testing.T) {
+	registry := tools.NewRegistry(t.TempDir())
+	fake := &fakeMCPExecutor{
+		result: tools.Result{Output: "mcp ok"},
+	}
+	registry.SetMCP(fake)
+
+	result, err := registry.Execute(context.Background(), tools.Request{
+		Tool: domain.ToolKindMCP,
+		Args: map[string]string{
+			"server":        "exa",
+			"tool":          "web_search_exa",
+			"arguments_raw": `{"query":"golang"}`,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Output != "mcp ok" {
+		t.Fatalf("unexpected mcp result: %#v", result)
+	}
+	if fake.serverID != "exa" || fake.toolName != "web_search_exa" {
+		t.Fatalf("unexpected mcp target: server=%q tool=%q", fake.serverID, fake.toolName)
+	}
+	if got := fake.args["query"]; got != "golang" {
+		t.Fatalf("unexpected mcp args: %#v", fake.args)
 	}
 }
 

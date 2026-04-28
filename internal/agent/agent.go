@@ -55,6 +55,9 @@ func New(cfg config.Config, st *store.Store, registry *tools.Registry, debug *de
 	if len(mcpManagers) > 0 {
 		mcpManager = mcpManagers[0]
 	}
+	if registry != nil {
+		registry.SetMCP(mcpManager)
+	}
 	return &Engine{
 		cfg:        cfg,
 		store:      st,
