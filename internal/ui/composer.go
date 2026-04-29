@@ -2,6 +2,7 @@ package ui
 
 import (
 	"strings"
+	"unicode"
 
 	"github.com/lkarlslund/koder/internal/theme"
 )
@@ -412,6 +413,63 @@ func wrapComposerRunes(runes []rune, width int) [][]rune {
 	if len(runes) == 0 {
 		return [][]rune{{}}
 	}
+	type token struct {
+		runes []rune
+		width int
+		space bool
+	}
+	tokenWidth := func(chunk []rune) int {
+		total := 0
+		for _, r := range chunk {
+			total += PlainWidth(string(r))
+		}
+		return total
+	}
+	splitChunk := func(chunk []rune) [][]rune {
+		if len(chunk) == 0 {
+			return [][]rune{{}}
+		}
+		var (
+			out  [][]rune
+			part []rune
+			used int
+		)
+		flush := func() {
+			out = append(out, append([]rune(nil), part...))
+			part = nil
+			used = 0
+		}
+		for _, r := range chunk {
+			rw := PlainWidth(string(r))
+			if rw <= 0 {
+				continue
+			}
+			if used > 0 && used+rw > width {
+				flush()
+			}
+			part = append(part, r)
+			used += rw
+		}
+		if len(part) > 0 {
+			flush()
+		}
+		if len(out) == 0 {
+			return [][]rune{{}}
+		}
+		return out
+	}
+	var tokens []token
+	start := 0
+	for start < len(runes) {
+		space := unicode.IsSpace(runes[start])
+		end := start + 1
+		for end < len(runes) && unicode.IsSpace(runes[end]) == space {
+			end++
+		}
+		chunk := append([]rune(nil), runes[start:end]...)
+		tokens = append(tokens, token{runes: chunk, width: tokenWidth(chunk), space: space})
+		start = end
+	}
 	var (
 		lines [][]rune
 		line  []rune
@@ -422,18 +480,45 @@ func wrapComposerRunes(runes []rune, width int) [][]rune {
 		line = nil
 		used = 0
 	}
-	for _, r := range runes {
-		rw := PlainWidth(string(r))
-		if rw <= 0 {
+	appendChunk := func(chunk []rune, chunkWidth int) {
+		line = append(line, chunk...)
+		used += chunkWidth
+	}
+	for idx := 0; idx < len(tokens); idx++ {
+		tok := tokens[idx]
+		if tok.width > width {
+			if used > 0 {
+				flush()
+			}
+			parts := splitChunk(tok.runes)
+			for partIdx, part := range parts {
+				partWidth := tokenWidth(part)
+				if partIdx == len(parts)-1 {
+					appendChunk(part, partWidth)
+				} else {
+					lines = append(lines, append([]rune(nil), part...))
+				}
+			}
 			continue
 		}
-		if used > 0 && used+rw > width {
-			flush()
+		if used+tok.width <= width {
+			appendChunk(tok.runes, tok.width)
+			continue
 		}
-		line = append(line, r)
-		used += rw
+		if tok.space {
+			flush()
+			appendChunk(tok.runes, tok.width)
+			continue
+		}
+		flush()
+		appendChunk(tok.runes, tok.width)
 	}
-	flush()
+	if len(line) > 0 {
+		flush()
+	}
+	if len(lines) == 0 {
+		return [][]rune{{}}
+	}
 	return lines
 }
 

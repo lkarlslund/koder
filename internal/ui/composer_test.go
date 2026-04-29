@@ -97,6 +97,49 @@ func TestComposerAutoWrapsIntoMultipleLines(t *testing.T) {
 	}
 }
 
+func TestComposerWrapsAtWordBoundaryWhenPossible(t *testing.T) {
+	palette := theme.Default().Palette
+	composer := NewComposer(ComposerProps{
+		Palette:       palette,
+		Width:         9,
+		PromptGlyph:   ">",
+		Value:         "hello world",
+		CursorIndex:   len("hello world"),
+		CursorVisible: true,
+	})
+
+	layout := composer.layout()
+	if got := len(layout.lines); got < 2 {
+		t.Fatalf("expected wrapped lines, got %d", got)
+	}
+	if got := layout.lines[0].before; got != "hello " {
+		t.Fatalf("expected first line to wrap after the whole word, got %q", got)
+	}
+	if got := strings.TrimSpace(layout.lines[1].before + layout.lines[1].cursor + layout.lines[1].after); got != "world" {
+		t.Fatalf("expected wrapped second line to contain whole next word, got %q", got)
+	}
+}
+
+func TestComposerHardSplitsSingleLongWord(t *testing.T) {
+	palette := theme.Default().Palette
+	composer := NewComposer(ComposerProps{
+		Palette:       palette,
+		Width:         8,
+		PromptGlyph:   ">",
+		Value:         "helloworld",
+		CursorIndex:   len("helloworld"),
+		CursorVisible: true,
+	})
+
+	layout := composer.layout()
+	if got := len(layout.lines); got < 2 {
+		t.Fatalf("expected long word to wrap, got %d lines", got)
+	}
+	if got := layout.lines[0].before; got == "helloworld" {
+		t.Fatalf("expected long word to split across lines, got %q", got)
+	}
+}
+
 func TestComposerCursorRectTracksWrappedLine(t *testing.T) {
 	palette := theme.Default().Palette
 	composer := NewComposer(ComposerProps{
