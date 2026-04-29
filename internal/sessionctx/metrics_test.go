@@ -40,3 +40,22 @@ func TestFromMessagesSkipsMissingContextWindow(t *testing.T) {
 		t.Fatal("expected missing metrics without context window")
 	}
 }
+
+func TestTotalUsageAccumulatesAllUsageNotices(t *testing.T) {
+	messages := []domain.Message{
+		{ID: 1},
+		{ID: 2},
+	}
+	parts := map[int64][]domain.Part{
+		1: {{Kind: domain.PartKindSystemNotice, Body: "usage", MetaJSON: `{"PromptTokens":100,"CompletionTokens":40,"CachedTokens":10,"TotalTokens":140}`}},
+		2: {{Kind: domain.PartKindSystemNotice, Body: "usage", MetaJSON: `{"PromptTokens":50,"CompletionTokens":25,"TotalTokens":75}`}},
+	}
+
+	got, ok := TotalUsage(messages, parts)
+	if !ok {
+		t.Fatal("expected total usage")
+	}
+	if got.PromptTokens != 150 || got.CompletionTokens != 65 || got.CachedTokens != 10 || got.TotalTokens != 215 {
+		t.Fatalf("unexpected total usage: %#v", got)
+	}
+}

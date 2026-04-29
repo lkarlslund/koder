@@ -306,6 +306,7 @@ type Model struct {
 type Usage struct {
 	PromptTokens     int
 	CompletionTokens int
+	CachedTokens     int
 	TotalTokens      int
 }
 

@@ -56,3 +56,28 @@ func LatestUsage(messages []domain.Message, parts map[int64][]domain.Part) (doma
 	}
 	return domain.Usage{}, false
 }
+
+func TotalUsage(messages []domain.Message, parts map[int64][]domain.Part) (domain.Usage, bool) {
+	var total domain.Usage
+	var found bool
+	for _, msg := range messages {
+		for _, part := range parts[msg.ID] {
+			if part.Kind != domain.PartKindSystemNotice || part.Body != "usage" || part.MetaJSON == "" {
+				continue
+			}
+			var usage domain.Usage
+			if err := json.Unmarshal([]byte(part.MetaJSON), &usage); err != nil {
+				continue
+			}
+			if usage.TotalTokens <= 0 && usage.PromptTokens <= 0 && usage.CompletionTokens <= 0 && usage.CachedTokens <= 0 {
+				continue
+			}
+			total.PromptTokens += usage.PromptTokens
+			total.CompletionTokens += usage.CompletionTokens
+			total.CachedTokens += usage.CachedTokens
+			total.TotalTokens += usage.TotalTokens
+			found = true
+		}
+	}
+	return total, found
+}

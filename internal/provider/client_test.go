@@ -326,6 +326,31 @@ func TestCompleteChatReasoningFallbackField(t *testing.T) {
 	}
 }
 
+func TestCompleteChatParsesCachedTokens(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"hello"}}],"usage":{"prompt_tokens":10,"completion_tokens":2,"total_tokens":12,"prompt_tokens_details":{"cached_tokens":6}}}`))
+	}))
+	defer server.Close()
+
+	client, err := New("test", config.Provider{
+		BaseURL: server.URL,
+		Timeout: time.Second,
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := client.CompleteChat(context.Background(), ChatRequest{
+		Model:  "test",
+		Stream: false,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Usage.CachedTokens != 6 {
+		t.Fatalf("expected cached tokens, got %#v", resp.Usage)
+	}
+}
+
 func TestCompleteChatToolCalls(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{"choices":[{"message":{"tool_calls":[{"id":"call_1","type":"function","function":{"name":"bash","arguments":"{\"command\":\"pwd\"}"}}]}}],"usage":{"total_tokens":3}}`))

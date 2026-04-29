@@ -4226,8 +4226,13 @@ func TestRenderHeaderIsEmpty(t *testing.T) {
 
 func TestRenderSidebarShowsStatusAndSessionInfo(t *testing.T) {
 	m := Model{
-		currentSession: domain.Session{ID: 2, ProviderID: "test", ModelID: "model", PermissionProfile: "default", ProjectChecksum: "agents-1"},
-		status:         "Working ...",
+		currentSession: domain.Session{ID: 2, Title: "Testing Session", ProviderID: "test", ModelID: "model", PermissionProfile: "default", ProjectChecksum: "agents-1"},
+		currentChat:    domain.Chat{ID: 7, Title: "Maze Fix", WorkflowRole: domain.WorkflowRoleExecution},
+		chats: []domain.Chat{
+			{ID: 7, Title: "Maze Fix", WorkflowRole: domain.WorkflowRoleExecution},
+			{ID: 8, Title: "Review"},
+		},
+		status: "Working ...",
 		debug: func() *debugsrv.Recorder {
 			rec := debugsrv.NewRecorder()
 			rec.SetDebugAPI("127.0.0.1:61347")
@@ -4252,30 +4257,36 @@ func TestRenderSidebarShowsStatusAndSessionInfo(t *testing.T) {
 		},
 		messages: []domain.Message{{ID: 1}},
 		parts: map[int64][]domain.Part{
-			1: {{Kind: domain.PartKindSystemNotice, Body: "usage", MetaJSON: `{"TotalTokens":8192}`}},
+			1: {{Kind: domain.PartKindSystemNotice, Body: "usage", MetaJSON: `{"PromptTokens":4096,"CompletionTokens":2048,"CachedTokens":1024,"TotalTokens":8192}`}},
 		},
 	}
 
 	got := m.renderSidebar()
-	if !strings.Contains(got, "Session 2") || !strings.Contains(got, "provider test") || !strings.Contains(got, "model   model") {
+	if !strings.Contains(got, "Session #2") || !strings.Contains(got, "Testing Session") || !strings.Contains(got, "Model  test / model") {
 		t.Fatalf("expected sidebar to include session details, got %q", got)
 	}
-	if !strings.Contains(got, "Status") || !strings.Contains(got, "Working ...") {
+	if !strings.Contains(got, "Chat    #7  1/2  execution  1 msg  Maze Fix") {
+		t.Fatalf("expected sidebar to include compact chat details, got %q", got)
+	}
+	if !strings.Contains(got, "Working ...") {
 		t.Fatalf("expected sidebar to include status, got %q", got)
 	}
-	if !strings.Contains(got, "Help") || !strings.Contains(got, "Alt-H  hotkeys and commands") {
+	if !strings.Contains(got, "Help    Alt-H help  Ctrl-S toggle  Alt-[ narrow  Alt-] wide") {
 		t.Fatalf("expected sidebar to include help hint, got %q", got)
 	}
 	if strings.Contains(got, "enter send/select") || strings.Contains(got, "/connect") {
 		t.Fatalf("expected sidebar to omit detailed hotkeys and commands, got %q", got)
 	}
-	if !strings.Contains(got, "Context") || !strings.Contains(got, "25% used") {
+	if !strings.Contains(got, "Context 8.2k / 32.8k (25%)") {
 		t.Fatalf("expected sidebar to include context usage, got %q", got)
 	}
-	if !strings.Contains(got, "Debug") || !strings.Contains(got, "127.0.0.1:61347") {
+	if !strings.Contains(got, "Tokens in 4.1k  out 2.0k  cache 1.0k") {
+		t.Fatalf("expected sidebar to include token totals, got %q", got)
+	}
+	if !strings.Contains(got, "Debug   127.0.0.1:61347") {
 		t.Fatalf("expected sidebar to include debug api status, got %q", got)
 	}
-	if !strings.Contains(got, "AGENTS") || !strings.Contains(got, "Up to date") {
+	if !strings.Contains(got, "AGENTS   Up to date") {
 		t.Fatalf("expected sidebar to include AGENTS summary, got %q", got)
 	}
 	if strings.Contains(got, "saved   ") || strings.Contains(got, "live    ") || strings.Contains(got, "files   ") {
@@ -4286,6 +4297,35 @@ func TestRenderSidebarShowsStatusAndSessionInfo(t *testing.T) {
 	}
 	if strings.Contains(got, "Profile ") || strings.Contains(got, "profile ") || strings.Contains(got, "mouse   ") {
 		t.Fatalf("expected sidebar to omit session profile and mouse status, got %q", got)
+	}
+}
+
+func TestSidebarWidthHotkeysAdjustWidth(t *testing.T) {
+	m := Model{
+		showSidebar: true,
+		width:       120,
+		height:      30,
+		viewport:    newTranscriptViewport(80, 10),
+	}
+
+	start := m.sidebarWidth()
+	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyRunes, Alt: true, Runes: []rune("[")})
+	if cmd != nil {
+		t.Fatalf("expected no command from sidebar shrink hotkey, got %#v", cmd)
+	}
+	next := updated.(*Model)
+	if next.sidebarWidth() >= start {
+		t.Fatalf("expected sidebar width to shrink, start=%d next=%d", start, next.sidebarWidth())
+	}
+	shrunk := next.sidebarWidth()
+
+	updated, cmd = next.handleKey(ui.KeyMsg{Type: ui.KeyRunes, Alt: true, Runes: []rune("]")})
+	if cmd != nil {
+		t.Fatalf("expected no command from sidebar grow hotkey, got %#v", cmd)
+	}
+	grown := updated.(*Model)
+	if grown.sidebarWidth() <= shrunk {
+		t.Fatalf("expected sidebar width to grow, prev=%d next=%d", shrunk, grown.sidebarWidth())
 	}
 }
 

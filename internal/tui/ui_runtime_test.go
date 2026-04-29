@@ -51,7 +51,7 @@ func TestViewSurfaceComposesMainWindowBehindModal(t *testing.T) {
 	if !strings.Contains(frame, "Help") || !strings.Contains(frame, "Hotkeys") {
 		t.Fatalf("expected help modal content in frame, got %q", frame)
 	}
-	if !strings.Contains(frame, "Session 0") {
+	if !strings.Contains(frame, "Session #0") {
 		t.Fatalf("expected main window content to remain in composed frame, got %q", frame)
 	}
 }

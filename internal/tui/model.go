@@ -501,6 +501,7 @@ type Model struct {
 	busy                    busyModel
 	chatBusy                map[int64]busyModel
 	showSidebar             bool
+	sidebarWidthOverride    int
 	showReasoning           bool
 	showSystem              bool
 	slashMatches            []slashCommand
@@ -1312,6 +1313,16 @@ func (m *Model) handleMainWindowKey(msg ui.KeyMsg) (bool, ui.Cmd) {
 		m.resize()
 		m.refreshViewport()
 		return true, nil
+	case "alt+[":
+		if m.showSidebar {
+			m.adjustSidebarWidth(-sidebarWidthStep)
+		}
+		return true, nil
+	case "alt+]":
+		if m.showSidebar {
+			m.adjustSidebarWidth(sidebarWidthStep)
+		}
+		return true, nil
 	case "alt+r":
 		anchor := m.captureTranscriptViewportAnchor()
 		m.showReasoning = !m.showReasoning
@@ -2101,7 +2112,13 @@ func (m *Model) sidebarWidth() int {
 	if !m.showSidebar {
 		return 0
 	}
-	return min(32, max(20, m.width/4))
+	minWidth := sidebarMinWidth
+	maxWidth := m.sidebarMaxWidth()
+	if m.sidebarWidthOverride > 0 {
+		return clampInt(m.sidebarWidthOverride, minWidth, maxWidth)
+	}
+	defaultWidth := min(32, max(20, m.width/4))
+	return clampInt(defaultWidth, minWidth, maxWidth)
 }
 
 func (m *Model) halfBlocksEnabled() bool {
@@ -2124,115 +2141,72 @@ func mPrompt(cfg config.Config) string {
 
 func (m *Model) renderSidebar() string {
 	var lines []string
-	lines = append(lines, fmt.Sprintf("Session %d", m.currentSession.ID))
-	provider := m.currentSession.ProviderID
+	lines = append(lines, m.renderSidebarSessionLine())
+	lines = append(lines, m.renderSidebarChatLine())
+	provider := firstNonEmptyString(strings.TrimSpace(m.currentChat.ProviderID), strings.TrimSpace(m.currentSession.ProviderID))
 	if provider == "" {
 		provider = "(unset)"
 	}
-	lines = append(lines, fmt.Sprintf("  provider %s", truncate(provider, 18)))
-	model := m.currentSession.ModelID
+	model := firstNonEmptyString(strings.TrimSpace(m.currentChat.ModelID), strings.TrimSpace(m.currentSession.ModelID))
 	if model == "" {
 		model = "(unset)"
 	}
-	lines = append(lines, fmt.Sprintf("  model   %s", truncate(model, 18)))
-	lines = append(lines, "")
-	lines = append(lines, "Status")
+	lines = append(lines, fmt.Sprintf("Model  %s / %s", provider, model))
 	status := strings.TrimSpace(m.status)
 	if status == "" {
 		status = "Ready"
 	}
 	if m.busy.sidebarActive() {
-		lines = append(lines, fmt.Sprintf("  %s %s", m.workingIndicator(), truncate(status, 22)))
+		lines = append(lines, fmt.Sprintf("Status %s %s", m.workingIndicator(), status))
 	} else {
-		lines = append(lines, fmt.Sprintf("  %s", truncate(status, 24)))
-	}
-	if len(m.currentChat.QueuedInputs) > 0 {
-		lines = append(lines, "")
-		lines = append(lines, "Queue")
-		lines = append(lines, fmt.Sprintf("  %d item(s)", len(m.currentChat.QueuedInputs)))
-	}
-	lines = append(lines, "")
-	lines = append(lines, "Chats")
-	if len(m.chats) == 0 {
-		lines = append(lines, "  none")
-	}
-	for _, item := range m.chats {
-		prefix := " "
-		if item.ID == m.currentChat.ID {
-			prefix = "*"
-		}
-		label := item.Title
-		if strings.TrimSpace(label) == "" {
-			label = fmt.Sprintf("Chat %d", item.ID)
-		}
-		lines = append(lines, fmt.Sprintf(" %s %s", prefix, truncate(label, 21)))
+		lines = append(lines, fmt.Sprintf("Status %s", status))
 	}
 	if metrics, ok := sessionctx.FromMessages(m.cfg, m.currentSession, m.messages, m.parts); ok {
-		lines = append(lines, "")
-		lines = append(lines, "Context")
-		lines = append(lines, fmt.Sprintf("  used   %s / %s", formatTokens(metrics.Used), formatTokens(metrics.Max)))
-		lines = append(lines, fmt.Sprintf("  usage  %d%% used", metrics.UsagePercent))
+		lines = append(lines, fmt.Sprintf("Context %s / %s (%d%%)", formatTokens(metrics.Used), formatTokens(metrics.Max), metrics.UsagePercent))
 	}
-	lines = append(lines, "")
-	lines = append(lines, "Workspace")
-	lines = append(lines, fmt.Sprintf("  cwd     %s", truncate(m.workdir, 20)))
-	lines = append(lines, fmt.Sprintf("  project %s", truncate(m.currentProjectRoot(), 20)))
-	lines = append(lines, "")
-	lines = append(lines, "AGENTS")
-	lines = append(lines, "  "+m.renderAgentsSidebarStatus())
-	lines = append(lines, "")
-	lines = append(lines, "Git")
+	if usage, ok := sessionctx.TotalUsage(m.messages, m.parts); ok {
+		tokenLine := fmt.Sprintf("Tokens in %s  out %s", formatTokens(usage.PromptTokens), formatTokens(usage.CompletionTokens))
+		if usage.CachedTokens > 0 {
+			tokenLine += "  cache " + formatTokens(usage.CachedTokens)
+		}
+		lines = append(lines, tokenLine)
+	}
+	lines = append(lines, "Workspace "+blankAsDash(m.workdir))
+	if projectRoot := strings.TrimSpace(m.currentProjectRoot()); projectRoot != "" && projectRoot != strings.TrimSpace(m.workdir) {
+		lines = append(lines, "Project  "+projectRoot)
+	}
+	lines = append(lines, "AGENTS   "+m.renderAgentsSidebarStatus())
 	if !m.workspace.Available {
-		lines = append(lines, "  no repository")
+		lines = append(lines, "Git      no repository")
 	} else {
 		branch := m.workspace.Branch
 		if branch == "" {
 			branch = "(detached)"
 		}
-		lines = append(lines, fmt.Sprintf("  branch  %s", truncate(branch, 19)))
-		if m.workspace.Upstream != "" {
-			lines = append(lines, fmt.Sprintf("  remote  %s", truncate(m.workspace.Upstream, 19)))
+		gitLine := fmt.Sprintf("Git      %s  %s", branch, m.workspace.SummaryLine())
+		if strings.TrimSpace(m.workspace.Summary) != "" {
+			gitLine += "  " + strings.TrimSpace(m.workspace.Summary)
 		}
-		if m.workspace.Summary != "" {
-			lines = append(lines, fmt.Sprintf("  sync    %s", truncate(m.workspace.Summary, 19)))
+		lines = append(lines, gitLine)
+	}
+	if milestoneSummary := m.sidebarMilestoneSummary(); milestoneSummary != "" {
+		lines = append(lines, milestoneSummary)
+	}
+	if todoSummary := m.sidebarTodoSummary(); todoSummary != "" {
+		lines = append(lines, todoSummary)
+	}
+	if len(m.chats) > 0 {
+		lines = append(lines, "")
+		lines = append(lines, "Chats")
+		for _, item := range m.chats {
+			lines = append(lines, m.renderSidebarChatListItem(item))
 		}
-		lines = append(lines, fmt.Sprintf("  diff    %s", m.workspace.SummaryLine()))
-		if len(m.workspace.Files) == 0 {
-			lines = append(lines, "  clean")
-		} else {
-			lines = append(lines, "Changed files")
-			for _, item := range m.workspace.Files[:min(8, len(m.workspace.Files))] {
-				lines = append(lines, m.renderChangedFile(item))
-			}
-			if len(m.workspace.Files) > 8 {
-				lines = append(lines, fmt.Sprintf("  … %d more", len(m.workspace.Files)-8))
-			}
-		}
-	}
-	lines = append(lines, "")
-	lines = append(lines, "Milestones")
-	if len(m.milestonePlan.Milestones) == 0 {
-		lines = append(lines, "  none")
-	}
-	for _, item := range m.milestonePlan.Milestones {
-		lines = append(lines, fmt.Sprintf("  [%s] %s", item.Status, truncate(item.Title, 18)))
-	}
-	lines = append(lines, "")
-	lines = append(lines, "Todos")
-	if len(m.todos) == 0 {
-		lines = append(lines, "  none")
-	}
-	for _, item := range m.todos {
-		lines = append(lines, fmt.Sprintf("  [%s] %s", item.Status, truncate(item.Content, 18)))
 	}
 	if debugAddr := m.debugAPIAddr(); debugAddr != "" {
-		lines = append(lines, "")
-		lines = append(lines, "Debug")
-		lines = append(lines, fmt.Sprintf("  api %s", truncate(debugAddr, 23)))
+		lines = append(lines, "Debug   "+debugAddr)
 	}
 	lines = append(lines, "")
-	lines = append(lines, "Help")
-	lines = append(lines, "  Alt-H  hotkeys and commands")
+	lines = append(lines, "Help    Alt-H help  Ctrl-S toggle  Alt-[ narrow  Alt-] wide")
 	return strings.Join(lines, "\n")
 }
 
@@ -2241,6 +2215,128 @@ func (m Model) debugAPIAddr() string {
 		return ""
 	}
 	return strings.TrimSpace(m.debug.Runtime().DebugAPI)
+}
+
+const (
+	sidebarMinWidth  = 24
+	sidebarMaxWidth  = 72
+	sidebarWidthStep = 4
+)
+
+func (m *Model) sidebarMaxWidth() int {
+	maxWidth := min(sidebarMaxWidth, max(sidebarMinWidth, m.width-40))
+	return max(sidebarMinWidth, maxWidth)
+}
+
+func (m *Model) adjustSidebarWidth(delta int) {
+	if delta == 0 {
+		return
+	}
+	current := m.sidebarWidth()
+	next := clampInt(current+delta, sidebarMinWidth, m.sidebarMaxWidth())
+	m.sidebarWidthOverride = next
+	m.resize()
+	m.refreshViewport()
+}
+
+func (m *Model) renderSidebarSessionLine() string {
+	id := fmt.Sprintf("#%d", m.currentSession.ID)
+	title := strings.TrimSpace(m.currentSession.Title)
+	if title == "" {
+		return "Session " + id
+	}
+	return "Session " + id + "  " + title
+}
+
+func (m *Model) renderSidebarChatLine() string {
+	id := fmt.Sprintf("#%d", m.currentChat.ID)
+	chatIndex := 0
+	for idx, item := range m.chats {
+		if item.ID == m.currentChat.ID {
+			chatIndex = idx + 1
+			break
+		}
+	}
+	label := "Chat    " + id
+	if chatIndex > 0 {
+		label += fmt.Sprintf("  %d/%d", chatIndex, len(m.chats))
+	}
+	role := strings.TrimSpace(string(m.currentChat.WorkflowRole))
+	if role == "" {
+		role = string(domain.WorkflowRoleGeneral)
+	}
+	label += "  " + role
+	label += fmt.Sprintf("  %d msg", len(m.messages))
+	if queued := len(m.currentChat.QueuedInputs); queued > 0 {
+		label += fmt.Sprintf("  %d queued", queued)
+	}
+	if title := strings.TrimSpace(m.currentChat.Title); title != "" {
+		label += "  " + title
+	}
+	return label
+}
+
+func (m *Model) renderSidebarChatListItem(item domain.Chat) string {
+	prefix := " "
+	if item.ID == m.currentChat.ID {
+		prefix = "*"
+	}
+	label := strings.TrimSpace(item.Title)
+	if label == "" {
+		label = fmt.Sprintf("Chat %d", item.ID)
+	}
+	role := strings.TrimSpace(string(item.WorkflowRole))
+	if role != "" && role != string(domain.WorkflowRoleGeneral) {
+		label += " [" + role + "]"
+	}
+	if queued := len(item.QueuedInputs); queued > 0 {
+		label += fmt.Sprintf(" (%d queued)", queued)
+	}
+	return fmt.Sprintf(" %s #%d %s", prefix, item.ID, label)
+}
+
+func (m *Model) sidebarMilestoneSummary() string {
+	if len(m.milestonePlan.Milestones) == 0 {
+		return ""
+	}
+	active := 0
+	completed := 0
+	for _, item := range m.milestonePlan.Milestones {
+		switch item.Status {
+		case domain.MilestoneStatusCompleted:
+			completed++
+		case domain.MilestoneStatusInProgress, domain.MilestoneStatusExecuting, domain.MilestoneStatusDecomposing, domain.MilestoneStatusBlocked:
+			active++
+		}
+	}
+	return fmt.Sprintf("Milestones %d total  %d active  %d done", len(m.milestonePlan.Milestones), active, completed)
+}
+
+func (m *Model) sidebarTodoSummary() string {
+	if len(m.todos) == 0 {
+		return ""
+	}
+	inProgress := 0
+	completed := 0
+	for _, item := range m.todos {
+		switch item.Status {
+		case domain.TodoStatusCompleted:
+			completed++
+		case domain.TodoStatusInProgress:
+			inProgress++
+		}
+	}
+	return fmt.Sprintf("Todos   %d total  %d active  %d done", len(m.todos), inProgress, completed)
+}
+
+func clampInt(value, low, high int) int {
+	if value < low {
+		return low
+	}
+	if value > high {
+		return high
+	}
+	return value
 }
 
 func (m *Model) refreshViewport() {
@@ -6927,6 +7023,7 @@ func (m *Model) openHelpModal() {
 		"Ctrl-Y              copy last assistant message",
 		"Ctrl-R              search prompt history",
 		"Ctrl-S              toggle sidebar",
+		"Alt-[ / Alt-]      narrow or widen the sidebar",
 		"Alt-R               toggle reasoning",
 		"Alt-P               toggle system output",
 		"Alt-O               preview the full next LLM request for the current draft",

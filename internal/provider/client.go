@@ -224,9 +224,15 @@ type chatChunk struct {
 		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
 	Usage struct {
-		PromptTokens     int `json:"prompt_tokens"`
-		CompletionTokens int `json:"completion_tokens"`
-		TotalTokens      int `json:"total_tokens"`
+		PromptTokens        int `json:"prompt_tokens"`
+		CompletionTokens    int `json:"completion_tokens"`
+		PromptTokensDetails struct {
+			CachedTokens int `json:"cached_tokens"`
+		} `json:"prompt_tokens_details"`
+		InputTokensDetails struct {
+			CachedTokens int `json:"cached_tokens"`
+		} `json:"input_tokens_details"`
+		TotalTokens int `json:"total_tokens"`
 	} `json:"usage"`
 }
 
@@ -511,6 +517,7 @@ func (c *Client) CompleteChat(ctx context.Context, input ChatRequest) (ChatRespo
 	usage := domain.Usage{
 		PromptTokens:     payload.Usage.PromptTokens,
 		CompletionTokens: payload.Usage.CompletionTokens,
+		CachedTokens:     cachedTokensFromUsage(payload.Usage.PromptTokensDetails.CachedTokens, payload.Usage.InputTokensDetails.CachedTokens),
 		TotalTokens:      payload.Usage.TotalTokens,
 	}
 	return ChatResponse{
@@ -785,6 +792,7 @@ func (c *Client) emitChunk(emit func(domain.Event), chunk chatChunk, raw string)
 			Usage: domain.Usage{
 				PromptTokens:     chunk.Usage.PromptTokens,
 				CompletionTokens: chunk.Usage.CompletionTokens,
+				CachedTokens:     cachedTokensFromUsage(chunk.Usage.PromptTokensDetails.CachedTokens, chunk.Usage.InputTokensDetails.CachedTokens),
 				TotalTokens:      chunk.Usage.TotalTokens,
 			},
 		})
@@ -837,9 +845,19 @@ func (r *streamedChatResponse) Apply(chunk chatChunk) {
 		r.usage = domain.Usage{
 			PromptTokens:     chunk.Usage.PromptTokens,
 			CompletionTokens: chunk.Usage.CompletionTokens,
+			CachedTokens:     cachedTokensFromUsage(chunk.Usage.PromptTokensDetails.CachedTokens, chunk.Usage.InputTokensDetails.CachedTokens),
 			TotalTokens:      chunk.Usage.TotalTokens,
 		}
 	}
+}
+
+func cachedTokensFromUsage(values ...int) int {
+	for _, value := range values {
+		if value > 0 {
+			return value
+		}
+	}
+	return 0
 }
 
 func (r streamedChatResponse) Response() ChatResponse {
