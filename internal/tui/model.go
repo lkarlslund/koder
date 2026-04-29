@@ -2055,10 +2055,8 @@ func (m *Model) renderMainScreenElement() ui.Node {
 }
 
 func (m *Model) renderComposerElement() ui.Node {
-	m.composer.Prompt = m.promptGlyph() + " "
-	line := m.composer.VisibleLine()
-	tokenRanges := make([]ui.TokenRange, 0, len(line.Tokens()))
-	for _, token := range line.Tokens() {
+	tokenRanges := make([]ui.TokenRange, 0, len(m.composer.Tokens()))
+	for _, token := range m.composer.Tokens() {
 		tokenRanges = append(tokenRanges, ui.TokenRange{Start: token.Start, End: token.End})
 	}
 	return ui.AsNode(ui.NewComposer(ui.ComposerProps{
@@ -2068,10 +2066,8 @@ func (m *Model) renderComposerElement() ui.Node {
 		HalfBlocks:    m.halfBlocksEnabled(),
 		PromptGlyph:   m.promptGlyph(),
 		Value:         m.composer.Value(),
+		CursorIndex:   m.composer.CursorIndex(),
 		Placeholder:   m.composer.Placeholder,
-		ContentBefore: line.Before(),
-		ContentCursor: line.Cursor(),
-		ContentAfter:  line.After(),
 		CursorVisible: m.composer.CursorVisible(),
 	}))
 }
@@ -2579,7 +2575,7 @@ func (m *Model) invalidateFooterCache() {
 	cache.renderedComposerAreaSurface = ui.Surface{}
 	m.composerCursorDirty = false
 	if main := m.ensureMainScreenWidget(); main != nil {
-		main.composer.Invalidate()
+		main.Invalidate()
 	}
 }
 

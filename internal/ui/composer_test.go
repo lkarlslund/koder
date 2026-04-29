@@ -76,3 +76,43 @@ func TestRenderComposerLineHighlightsTokenRanges(t *testing.T) {
 		t.Fatalf("expected token highlight background (%d,%d,%d), got (%d,%d,%d,%v)", want.R(), want.G(), want.B(), r, g, b, ok)
 	}
 }
+
+func TestComposerAutoWrapsIntoMultipleLines(t *testing.T) {
+	palette := theme.Default().Palette
+	surface := NewComposer(ComposerProps{
+		Palette:       palette,
+		Width:         12,
+		PromptGlyph:   ">",
+		Value:         "draft text wraps",
+		CursorIndex:   len("draft text wraps"),
+		CursorVisible: true,
+	}).render()
+
+	if surface.SurfaceHeight() <= 3 {
+		t.Fatalf("expected composer to grow beyond single-line height, got %d", surface.SurfaceHeight())
+	}
+	rendered := SurfaceText(surface)
+	if !strings.Contains(rendered, "draft text") || !strings.Contains(rendered, "wraps") {
+		t.Fatalf("expected wrapped composer text, got %q", rendered)
+	}
+}
+
+func TestComposerCursorRectTracksWrappedLine(t *testing.T) {
+	palette := theme.Default().Palette
+	composer := NewComposer(ComposerProps{
+		Palette:       palette,
+		Width:         12,
+		PromptGlyph:   ">",
+		Value:         "draft text wraps",
+		CursorIndex:   len("draft text wraps"),
+		CursorVisible: true,
+	})
+
+	rect, ok := composer.CursorRect()
+	if !ok {
+		t.Fatal("expected cursor rect")
+	}
+	if rect.Y <= 1 {
+		t.Fatalf("expected wrapped cursor to land on a later content row, got %#v", rect)
+	}
+}

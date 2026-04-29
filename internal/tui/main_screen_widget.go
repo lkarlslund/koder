@@ -322,12 +322,17 @@ func (n *transcriptRetainedNode) Prepare(ctx *ui.Context) {
 		n.widget.ClearDirty()
 		return
 	}
-	if !n.widget.invalidated && !n.NeedsPaint() {
+	if !n.widget.invalidated && !n.NeedsPaint() && !n.NeedsLayout() {
 		return
 	}
 	next := n.widget.Surface(rect)
-	if n.widget.invalidated && !n.NeedsLayout() {
-		n.MarkDirtyLocalRects(ui.DiffSurfaceDamage(n.surface, next))
+	if n.widget.invalidated {
+		diff := ui.DiffSurfaceDamage(n.surface, next)
+		if len(diff) == 0 && n.NeedsLayout() {
+			n.MarkDirtyLocal(ui.Rect{W: rect.W, H: rect.H})
+		} else {
+			n.MarkDirtyLocalRects(diff)
+		}
 	}
 	n.surface = next
 	n.widget.ClearDirty()
@@ -381,20 +386,18 @@ func (n *composerRetainedNode) Prepare(ctx *ui.Context) {
 	element := m.renderComposerAreaElement()
 	next := paintMeasuredSurface(ctx, measuredPainterFromElement(element), rect)
 	nextCursorRect, nextCursorOK := composerCursorRectForBounds(m, rect)
-	if !n.NeedsLayout() {
-		switch {
-		case m.composerCursorDirty && n.cursorValid && nextCursorOK:
-			damage := ui.DamageSet{}
-			damage.Add(n.cursorRect)
-			damage.Add(nextCursorRect)
-			n.MarkDirtyLocalRects(damage.Rects())
-		default:
-			diff := ui.DiffSurfaceDamage(n.surface, next)
-			if len(diff) == 0 && n.widget.invalidated {
-				n.MarkDirtyLocal(ui.Rect{W: rect.W, H: rect.H})
-			} else {
-				n.MarkDirtyLocalRects(diff)
-			}
+	switch {
+	case !n.NeedsLayout() && m.composerCursorDirty && n.cursorValid && nextCursorOK:
+		damage := ui.DamageSet{}
+		damage.Add(n.cursorRect)
+		damage.Add(nextCursorRect)
+		n.MarkDirtyLocalRects(damage.Rects())
+	default:
+		diff := ui.DiffSurfaceDamage(n.surface, next)
+		if len(diff) == 0 && (n.widget.invalidated || n.NeedsLayout()) {
+			n.MarkDirtyLocal(ui.Rect{W: rect.W, H: rect.H})
+		} else {
+			n.MarkDirtyLocalRects(diff)
 		}
 	}
 	n.surface = next
@@ -723,24 +726,28 @@ func composerCursorRectForBounds(m *Model, bounds ui.Rect) (ui.Rect, bool) {
 	if m == nil || bounds.H < 2 || !m.shouldShowComposerArea() {
 		return ui.Rect{}, false
 	}
-	line := m.composer.VisibleLine()
-	promptWidth := ui.PlainWidth(m.promptGlyph() + " ")
-	x := promptWidth + ui.PlainWidth(line.Before())
-	width := ui.PlainWidth(line.Cursor())
-	if width <= 0 {
-		width = 1
-	}
-	y := max(0, bounds.H-2)
-	if x >= bounds.W || y >= bounds.H {
+	element, ok := m.renderComposerElement().(*ui.LeafNode)
+	if !ok {
 		return ui.Rect{}, false
 	}
-	if x+width > bounds.W {
-		width = bounds.W - x
-	}
-	if width <= 0 {
+	composer, ok := element.Content.(ui.Composer)
+	if !ok {
 		return ui.Rect{}, false
 	}
-	return ui.Rect{X: x, Y: y, W: width, H: 1}, true
+	rect, ok := composer.CursorRect()
+	if !ok {
+		return ui.Rect{}, false
+	}
+	if rect.X >= bounds.W || rect.Y >= bounds.H {
+		return ui.Rect{}, false
+	}
+	if rect.X+rect.W > bounds.W {
+		rect.W = bounds.W - rect.X
+	}
+	if rect.W <= 0 {
+		return ui.Rect{}, false
+	}
+	return rect, true
 }
 
 func sidebarWidgetHash(m *Model, bounds ui.Rect) uint64 {

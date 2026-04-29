@@ -120,10 +120,8 @@ func BenchmarkRenderNodeComposer(b *testing.B) {
 		Width:         100,
 		HalfBlocks:    true,
 		PromptGlyph:   "┃",
-		Value:         "benchmark composer text",
-		ContentBefore: strings.Repeat("composed text ", 4),
-		ContentCursor: "x",
-		ContentAfter:  strings.Repeat(" trailing", 3),
+		Value:         strings.Repeat("composed text ", 4) + "x" + strings.Repeat(" trailing", 3),
+		CursorIndex:   len([]rune(strings.Repeat("composed text ", 4))),
 		CursorVisible: true,
 	}
 	b.ReportAllocs()

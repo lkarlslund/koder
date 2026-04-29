@@ -74,7 +74,7 @@ func TestMainScreenRetainedRootLayoutChangeMarksNodesDirtyWithoutWidgetInvalidat
 	}
 }
 
-func TestMainScreenRetainedRootPaintDirtyMatchesFullPaintAfterComposerLayoutChange(t *testing.T) {
+func TestMainScreenWidgetRepaintsFullyAfterComposerHeightChange(t *testing.T) {
 	m := Model{
 		cfg:         testConfig(t),
 		palette:     theme.Default().Palette,
@@ -90,22 +90,25 @@ func TestMainScreenRetainedRootPaintDirtyMatchesFullPaintAfterComposerLayoutChan
 	bounds := ui.Rect{W: 80, H: 24}
 
 	base := w.Surface(ctx, bounds)
+	if base.SurfaceHeight() != bounds.H {
+		t.Fatalf("expected initial surface height %d, got %d", bounds.H, base.SurfaceHeight())
+	}
 
 	m.composer.SetValue("draft text\nsecond line\nthird line")
 	m.invalidateFooterCache()
+	if !w.dirty() {
+		t.Fatal("expected composer height change to invalidate main screen widget")
+	}
+
+	next := w.Surface(ctx, bounds)
 
 	root := w.ensureRetainedRoot()
 	root.model = &m
 	root.Layout(ctx, bounds)
-	root.Prepare(ctx)
-
-	patched := ui.TransparentSurface(bounds.W, bounds.H).PlaceAt(0, 0, base)
-	root.PaintDirty(ctx, ui.NewCanvas(&patched, bounds))
-
 	full := ui.TransparentSurface(bounds.W, bounds.H)
 	root.PaintAll(ctx, ui.NewCanvas(&full, bounds))
 
-	if diff := ui.DiffSurfaceDamage(patched, full); len(diff) > 0 {
-		t.Fatalf("partial repaint diverged from full repaint: %#v", diff)
+	if diff := ui.DiffSurfaceDamage(next, full); len(diff) > 0 {
+		t.Fatalf("widget repaint diverged from full repaint: %#v", diff)
 	}
 }

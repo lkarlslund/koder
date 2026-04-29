@@ -4728,6 +4728,24 @@ func TestRenderBodyUsesTranscriptElementInsteadOfViewportString(t *testing.T) {
 	}
 }
 
+func TestComposerAreaAutoExpandsForMultilineDraft(t *testing.T) {
+	m := Model{
+		cfg:         testConfig(t),
+		palette:     theme.Default().Palette,
+		viewport:    newTranscriptViewport(40, 8),
+		renderCache: &modelRenderCache{},
+		composer:    textarea.New(),
+		width:       60,
+		height:      20,
+	}
+	m.composer.SetValue("draft text that wraps across multiple footer rows in the composer area")
+	m.refreshViewport()
+
+	if got := m.composerAreaHeight(); got <= composerHeight {
+		t.Fatalf("expected composer area to grow beyond %d, got %d", composerHeight, got)
+	}
+}
+
 func TestSyncRetainedTranscriptItemsReplacesMatchingKeys(t *testing.T) {
 	retained := ui.NewRetainedTranscript()
 	first := ui.TranscriptItem{
