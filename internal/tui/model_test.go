@@ -4337,7 +4337,7 @@ func TestRenderSidebarShowsStatusAndSessionInfo(t *testing.T) {
 	if !strings.Contains(got, "Working ...") {
 		t.Fatalf("expected sidebar to include status, got %q", got)
 	}
-	if !strings.Contains(got, "Help    Alt-H help  Ctrl-S toggle  Alt-[ narrow  Alt-] wide") {
+	if !strings.Contains(got, "Help    Alt-H help  Ctrl-S toggle  Alt+, narrow  Alt+. wide") {
 		t.Fatalf("expected sidebar to include help hint, got %q", got)
 	}
 	if strings.Contains(got, "enter send/select") || strings.Contains(got, "/connect") {
@@ -4368,10 +4368,11 @@ func TestRenderSidebarShowsStatusAndSessionInfo(t *testing.T) {
 
 func TestSidebarWidthHotkeysAdjustWidth(t *testing.T) {
 	m := Model{
-		showSidebar: true,
-		width:       120,
-		height:      30,
-		viewport:    newTranscriptViewport(80, 10),
+		showSidebar:          true,
+		width:                120,
+		height:               30,
+		sidebarWidthOverride: 34,
+		viewport:             newTranscriptViewport(80, 10),
 	}
 
 	start := m.sidebarWidth()
@@ -4392,6 +4393,26 @@ func TestSidebarWidthHotkeysAdjustWidth(t *testing.T) {
 	grown := updated.(*Model)
 	if grown.sidebarWidth() <= shrunk {
 		t.Fatalf("expected sidebar width to grow, prev=%d next=%d", shrunk, grown.sidebarWidth())
+	}
+
+	beforeNarrow := grown.sidebarWidth()
+	updated, cmd = grown.handleKey(ui.KeyMsg{Type: ui.KeyRunes, Alt: true, Runes: []rune(",")})
+	if cmd != nil {
+		t.Fatalf("expected no command from alternate sidebar shrink hotkey, got %#v", cmd)
+	}
+	narrowed := updated.(*Model)
+	if narrowed.sidebarWidth() >= beforeNarrow {
+		t.Fatalf("expected alt+, to shrink sidebar width, start=%d next=%d", beforeNarrow, narrowed.sidebarWidth())
+	}
+
+	beforeWiden := narrowed.sidebarWidth()
+	updated, cmd = narrowed.handleKey(ui.KeyMsg{Type: ui.KeyRunes, Alt: true, Runes: []rune(".")})
+	if cmd != nil {
+		t.Fatalf("expected no command from alternate sidebar grow hotkey, got %#v", cmd)
+	}
+	widened := updated.(*Model)
+	if widened.sidebarWidth() <= beforeWiden {
+		t.Fatalf("expected alt+. to grow sidebar width, prev=%d next=%d", beforeWiden, widened.sidebarWidth())
 	}
 }
 

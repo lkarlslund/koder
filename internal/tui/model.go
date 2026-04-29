@@ -1312,12 +1312,12 @@ func (m *Model) handleMainWindowKey(msg ui.KeyMsg) (bool, ui.Cmd) {
 		m.resize()
 		m.refreshViewport()
 		return true, nil
-	case "alt+[":
+	case "alt+[", "alt+,":
 		if m.showSidebar {
 			m.adjustSidebarWidth(-sidebarWidthStep)
 		}
 		return true, nil
-	case "alt+]":
+	case "alt+]", "alt+.":
 		if m.showSidebar {
 			m.adjustSidebarWidth(sidebarWidthStep)
 		}
@@ -2201,7 +2201,7 @@ func (m *Model) renderSidebar() string {
 		lines = append(lines, "Debug   "+debugAddr)
 	}
 	lines = append(lines, "")
-	lines = append(lines, "Help    Alt-H help  Ctrl-S toggle  Alt-[ narrow  Alt-] wide")
+	lines = append(lines, "Help    Alt-H help  Ctrl-S toggle  Alt+, narrow  Alt+. wide")
 	return strings.Join(lines, "\n")
 }
 
@@ -7007,7 +7007,7 @@ func (m *Model) openHelpModal() {
 		"Ctrl-Y              copy last assistant message",
 		"Ctrl-R              search prompt history",
 		"Ctrl-S              toggle sidebar",
-		"Alt-[ / Alt-]      narrow or widen the sidebar",
+		"Alt+, / Alt+.      narrow or widen the sidebar",
 		"Alt-R               toggle reasoning",
 		"Alt-P               toggle system output",
 		"Alt-O               preview the full next LLM request for the current draft",
