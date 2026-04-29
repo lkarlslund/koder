@@ -225,13 +225,13 @@ func (m *Model) mainWindow() ui.Window {
 				return m.handleMainWindowMouse(msg)
 			},
 			timer: func(m *Model, event ui.TimerEvent) (bool, ui.Cmd) {
-				if event.Owner != composerBlinkTimerOwner {
+				main := m.ensureMainScreenWidget()
+				if main == nil || main.composer == nil {
 					return false, nil
 				}
-				if !m.composer.ToggleBlink() {
+				if !main.composer.handleTimer(event) {
 					return false, nil
 				}
-				m.invalidateFooterCursor()
 				return true, nil
 			},
 		}

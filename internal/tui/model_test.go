@@ -3038,7 +3038,7 @@ func TestOpenSessionPickerStopsComposerBlinkTimer(t *testing.T) {
 		}},
 	}
 
-	m.syncComposerBlinkTimer()
+	m.ensureMainScreenWidget().composer.syncBlinkTimer(m.ensureUIRoot())
 	if timers := m.syncUIRoot().ActiveTimers(composerBlinkTimerOwner); len(timers) == 0 {
 		t.Fatal("expected focused composer to own a blink timer")
 	}

@@ -66,9 +66,8 @@ const (
 	busyScopeNone busyScope = iota
 	busyScopeSidebar
 	busyScopeTranscript
-	composerHeight          = 3
-	composerInputHeight     = 1
-	composerBlinkTimerOwner = "composer"
+	composerHeight      = 3
+	composerInputHeight = 1
 )
 
 type spinnerModel struct {
@@ -6596,28 +6595,17 @@ func (m *Model) syncComposerVisibility() {
 		if !m.composer.Focused() {
 			m.composer.Focus()
 		}
-		m.syncComposerBlinkTimer()
 	} else {
 		if m.composer.Focused() {
 			m.composer.Blur()
 		}
-		m.syncComposerBlinkTimer()
+	}
+	if main := m.ensureMainScreenWidget(); main != nil {
+		main.composer.syncBlinkTimer(m.ensureUIRoot())
 	}
 	if beforeFocus != m.composer.Focused() || beforeCursorVisible != m.composer.CursorVisible() {
 		m.invalidateFooterCursor()
 	}
-}
-
-func (m *Model) syncComposerBlinkTimer() {
-	root := m.ensureUIRoot()
-	root.StopOwnerTimers(composerBlinkTimerOwner)
-	if !m.composerShouldBlink() || !m.composer.Focused() {
-		return
-	}
-	root.StartTimer(composerBlinkTimerOwner, ui.TimerSpec{
-		Interval: textarea.BlinkInterval(),
-		Repeat:   true,
-	})
 }
 
 func (m *Model) rootTimerCmd() ui.Cmd {
@@ -6647,7 +6635,9 @@ func (m *Model) buildTranscriptItems() []ui.TranscriptItem {
 }
 
 func (m *Model) withRootTimers(cmd ui.Cmd) ui.Cmd {
-	m.syncComposerBlinkTimer()
+	if main := m.ensureMainScreenWidget(); main != nil {
+		main.composer.syncBlinkTimer(m.ensureUIRoot())
+	}
 	animationCmd := m.bouncyBalls.TickCmd()
 	timerCmd := m.rootTimerCmd()
 	if timerCmd == nil && animationCmd == nil {

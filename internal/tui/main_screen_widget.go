@@ -5,9 +5,11 @@ import (
 	"strconv"
 
 	"github.com/lkarlslund/koder/internal/ui"
+	"github.com/lkarlslund/koder/internal/ui/textarea"
 )
 
 const mainScreenVerticalInset = 0
+const composerBlinkTimerOwner = "composer"
 
 type transcriptWidget struct {
 	model       *Model
@@ -64,6 +66,7 @@ type composerAreaWidget struct {
 	measureRev   uint64
 	invalidated  bool
 	lastRevision uint64
+	blinkActive  bool
 }
 
 type measuredPainter interface {
@@ -124,6 +127,45 @@ func (w *composerAreaWidget) revisionChanged() bool {
 		return true
 	}
 	return w.lastRevision != w.currentRevision()
+}
+
+func (w *composerAreaWidget) shouldBlink() bool {
+	if w == nil || w.model == nil {
+		return false
+	}
+	return w.model.composerShouldBlink() && w.model.composer.Focused()
+}
+
+func (w *composerAreaWidget) syncBlinkTimer(root *ui.Root) {
+	if w == nil || root == nil {
+		return
+	}
+	if !w.shouldBlink() {
+		if w.blinkActive {
+			root.StopOwnerTimers(composerBlinkTimerOwner)
+			w.blinkActive = false
+		}
+		return
+	}
+	if w.blinkActive {
+		return
+	}
+	root.StartTimer(composerBlinkTimerOwner, ui.TimerSpec{
+		Interval: textarea.BlinkInterval(),
+		Repeat:   true,
+	})
+	w.blinkActive = true
+}
+
+func (w *composerAreaWidget) handleTimer(event ui.TimerEvent) bool {
+	if w == nil || event.Owner != composerBlinkTimerOwner {
+		return false
+	}
+	if !w.model.composer.ToggleBlink() {
+		return false
+	}
+	w.model.composerCursorDirty = true
+	return true
 }
 
 func (w *composerAreaWidget) content() measuredPainter {
@@ -397,6 +439,7 @@ func (n *composerRetainedNode) Prepare(ctx *ui.Context) {
 		return
 	}
 	m := n.widget.model
+	n.widget.syncBlinkTimer(m.ensureUIRoot())
 	needsSync := n.widget.Dirty() || n.NeedsPaint()
 	if !needsSync {
 		return
