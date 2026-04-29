@@ -20,6 +20,7 @@ import (
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/debugsrv"
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/execruntime"
 	"github.com/lkarlslund/koder/internal/permission"
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/reference"
@@ -7052,5 +7053,32 @@ func TestTranscriptBlocksKeepsRepeatedFailedToolRunsSeparate(t *testing.T) {
 	}
 	if lastKind != transcriptBlockToolRun {
 		t.Fatalf("expected tail block to remain the second tool run, got %#v", blocks[len(blocks)-1])
+	}
+}
+
+func TestTranscriptBlocksIncludeLiveExecRuns(t *testing.T) {
+	mgr := execruntime.NewManager()
+	snap, err := mgr.Start(context.Background(), execruntime.StartRequest{
+		SessionID: 1,
+		ChatID:    2,
+		Command:   "sleep 1",
+	})
+	if err != nil {
+		t.Fatalf("start exec session: %v", err)
+	}
+
+	m := Model{
+		exec:           mgr,
+		currentSession: domain.Session{ID: 1},
+		currentChat:    domain.Chat{ID: 2, SessionID: 1},
+		parts:          map[int64][]domain.Part{},
+	}
+	blocks := m.transcriptBlocks()
+	if len(blocks) != 1 || blocks[0].Kind != transcriptBlockToolRun {
+		t.Fatalf("expected one live tool run block, got %#v", blocks)
+	}
+	run := blocks[0].ToolRun
+	if run.ID != snap.ProcessID || run.Tool != domain.ToolKindExecCommand {
+		t.Fatalf("unexpected live exec tool run: %#v", run)
 	}
 }

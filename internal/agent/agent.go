@@ -20,6 +20,7 @@ import (
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/debugsrv"
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/execruntime"
 	"github.com/lkarlslund/koder/internal/mcp"
 	"github.com/lkarlslund/koder/internal/permission"
 	"github.com/lkarlslund/koder/internal/provider"
@@ -40,6 +41,7 @@ type Engine struct {
 	caps       *provider.CapabilityStore
 	agents     *agents.Manager
 	mcp        *mcp.Manager
+	exec       *execruntime.Manager
 	workdir    string
 	retryPause func(context.Context, time.Duration, func(time.Duration)) error
 }
@@ -63,6 +65,12 @@ func New(cfg config.Config, st *store.Store, registry *tools.Registry, debug *de
 		registry.SetMCP(mcpManager)
 		registry.SetEditForgiveness(cfg.UI.EditForgiveness)
 	}
+	var execManager *execruntime.Manager
+	if registry != nil {
+		if candidate, ok := registry.ExecControl().(*execruntime.Manager); ok {
+			execManager = candidate
+		}
+	}
 	return &Engine{
 		cfg:        cfg,
 		store:      st,
@@ -72,6 +80,7 @@ func New(cfg config.Config, st *store.Store, registry *tools.Registry, debug *de
 		caps:       provider.NewCapabilityStore(cfg.StateDir()),
 		agents:     agents.NewManager(cfg.StateDir(), filepath.Join(filepath.Dir(cfg.Path()), "AGENTS.md")),
 		mcp:        mcpManager,
+		exec:       execManager,
 		workdir:    workdir,
 		retryPause: waitForRetry,
 	}
@@ -106,6 +115,10 @@ func (e *Engine) ReloadMCP(ctx context.Context) error {
 		return err
 	}
 	return e.mcp.ConnectAll(ctx)
+}
+
+func (e *Engine) ExecManager() *execruntime.Manager {
+	return e.exec
 }
 
 func (e *Engine) RunPrompt(ctx context.Context, session domain.Session, prompt string) (<-chan domain.Event, error) {

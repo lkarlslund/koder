@@ -89,12 +89,12 @@ func (r ToolRun) OutputToggleLabel(width int, expanded bool) string {
 		return ""
 	}
 	if expanded {
-		if r.Tool == domain.ToolKindBash {
+		if r.Tool == domain.ToolKindBash || r.Tool == domain.ToolKindExecCommand {
 			return "Collapse output"
 		}
 		return "Collapse"
 	}
-	if r.Tool == domain.ToolKindBash {
+	if r.Tool == domain.ToolKindBash || r.Tool == domain.ToolKindExecCommand {
 		if hiddenLines == 1 {
 			return "Expand output (1 line)"
 		}
@@ -107,7 +107,7 @@ func (r ToolRun) OutputToggleLabel(width int, expanded bool) string {
 }
 
 func (r ToolRun) renderCard(palette theme.Palette, width int, expandedOutput, expandedCommand bool) Surface {
-	if r.Tool == domain.ToolKindBash {
+	if r.Tool == domain.ToolKindBash || r.Tool == domain.ToolKindExecCommand {
 		return r.renderBashCard(palette, width, expandedOutput, expandedCommand)
 	}
 	headerWidth := innerCardWidth(width)

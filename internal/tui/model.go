@@ -21,6 +21,7 @@ import (
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/debugsrv"
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/execruntime"
 	"github.com/lkarlslund/koder/internal/markdown"
 	kodermcp "github.com/lkarlslund/koder/internal/mcp"
 	"github.com/lkarlslund/koder/internal/permission"
@@ -44,6 +45,7 @@ type promptDoneMsg struct {
 }
 
 type spinnerTickMsg struct{}
+type execTickMsg struct{}
 type bouncyBallsTickMsg struct {
 	At  time.Time
 	Seq uint64
@@ -458,6 +460,7 @@ type Model struct {
 	cfg                     config.Config
 	store                   *store.Store
 	agent                   *agent.Engine
+	exec                    *execruntime.Manager
 	renderer                *markdown.Renderer
 	palette                 theme.Palette
 	sessions                []domain.Session
@@ -534,6 +537,7 @@ type Model struct {
 	mainWindowView          *modelWindow
 	debug                   *debugsrv.Recorder
 	uiRoot                  *ui.Root
+	execTickPending         bool
 	rootTimerSeq            uint64
 	rootTimerPending        bool
 	rootTimerPendingAt      time.Time
@@ -643,6 +647,9 @@ func NewWithWorkdir(cfg config.Config, st *store.Store, a *agent.Engine, mode St
 		runtimeCtxChecked:       map[string]bool{},
 		attachmentFiles:         attachment.NewManager(cfg.StateDir()),
 	}
+	if a != nil {
+		model.exec = a.ExecManager()
+	}
 	model.syncComposerVisibility()
 	return model, nil
 }
@@ -724,6 +731,23 @@ func (m Model) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 			m.refreshViewportAt(offset)
 		}
 		return m, ui.Batch(spinnerTickCmd(), m.syncWindowTitleCmd())
+	case execTickMsg:
+		m.execTickPending = false
+		if m.exec == nil || m.currentSession.ID == 0 || m.currentChat.ID == 0 {
+			return m, nil
+		}
+		wasAtBottom := m.viewport.AtBottom()
+		offset := m.viewport.YOffset
+		m.invalidateBodyCache()
+		if wasAtBottom {
+			m.refreshViewport()
+		} else {
+			m.refreshViewportAt(offset)
+		}
+		if !m.shouldPollExecSessions() {
+			return m, nil
+		}
+		return m, execTickCmd()
 	case promptDoneMsg:
 		m.pendingAssistant = pendingAssistantTurn{}
 		m.invalidateBodyCache()
@@ -6304,7 +6328,7 @@ func approvalPatternScope(tool domain.ToolKind, preview string) string {
 		return "*"
 	}
 	switch tool {
-	case domain.ToolKindBash:
+	case domain.ToolKindBash, domain.ToolKindExecCommand:
 		fields := strings.Fields(preview)
 		if len(fields) == 0 {
 			return "*"
@@ -6526,16 +6550,49 @@ func (m *Model) withRootTimers(cmd ui.Cmd) ui.Cmd {
 	m.syncComposerBlinkTimer()
 	animationCmd := m.bouncyBalls.TickCmd()
 	timerCmd := m.rootTimerCmd()
-	if timerCmd == nil && animationCmd == nil {
+	execCmd := m.execTickCmdIfNeeded()
+	if timerCmd == nil && animationCmd == nil && execCmd == nil {
 		return cmd
 	}
-	if timerCmd == nil {
+	if timerCmd == nil && animationCmd == nil {
+		return ui.Batch(cmd, execCmd)
+	}
+	if timerCmd == nil && execCmd == nil {
 		return ui.Batch(cmd, animationCmd)
 	}
-	if animationCmd == nil {
+	if animationCmd == nil && execCmd == nil {
 		return ui.Batch(cmd, timerCmd)
 	}
-	return ui.Batch(cmd, timerCmd, animationCmd)
+	return ui.Batch(cmd, timerCmd, animationCmd, execCmd)
+}
+
+func (m *Model) execTickCmdIfNeeded() ui.Cmd {
+	if m.execTickPending || !m.shouldPollExecSessions() {
+		return nil
+	}
+	m.execTickPending = true
+	return execTickCmd()
+}
+
+func (m *Model) shouldPollExecSessions() bool {
+	if m == nil || m.exec == nil || m.currentSession.ID == 0 || m.currentChat.ID == 0 {
+		return false
+	}
+	list, err := m.exec.List(context.Background(), execruntime.ListRequest{
+		SessionID: m.currentSession.ID,
+		ChatID:    m.currentChat.ID,
+		Scope:     execruntime.ScopeChat,
+		MaxBytes:  1024,
+	})
+	if err != nil {
+		return false
+	}
+	for _, item := range list {
+		if item.State == execruntime.StateRunning {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *Model) closePicker() {
@@ -7609,6 +7666,12 @@ func (m *Model) applyPreferences(next dialogs.PreferencesValues, save bool) (ui.
 func spinnerTickCmd() ui.Cmd {
 	return ui.Tick(120*time.Millisecond, func(time.Time) ui.Msg {
 		return spinnerTickMsg{}
+	})
+}
+
+func execTickCmd() ui.Cmd {
+	return ui.Tick(250*time.Millisecond, func(time.Time) ui.Msg {
+		return execTickMsg{}
 	})
 }
 

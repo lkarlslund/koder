@@ -212,7 +212,7 @@ func newToolRunTranscriptItem(gap int, run ui.ToolRun, expandedOutput, expandedC
 	key := "toolrun:" + firstNonEmptyToolRunKey(run)
 	base := newToolRunItemBase(key, gap, run, expandedOutput, expandedCommand)
 	switch run.Tool {
-	case domain.ToolKindBash:
+	case domain.ToolKindBash, domain.ToolKindExecCommand:
 		return &bashToolRunTranscriptItem{toolRunItemBase: base}
 	case domain.ToolKindRead:
 		return &readToolRunTranscriptItem{toolRunItemBase: base}

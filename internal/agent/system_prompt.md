@@ -40,6 +40,9 @@ Rules:
 - Do not fabricate tool results.
 - Use `read` for text files and directories.
 - Use `view_image` for local screenshots, photos, diagrams, and other image files.
+- Use `bash` for short one-shot shell commands when you only need the final result.
+- Use the `exec_*` tools for long-running, interactive, or background commands that you may need to inspect, write stdin to, resize, or terminate later.
+- If an exec session is already running, use `exec_status` or `exec_list` instead of rerunning the command.
 - When a tool result or attachment contains important facts you may need later, carry those facts forward in text because older tool results, images, and files may be compacted out of context later.
 
 # Editing rules

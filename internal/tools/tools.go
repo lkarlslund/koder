@@ -196,6 +196,10 @@ func (r *Registry) SetExecControl(control execruntime.Control) {
 	r.runtime.Exec = control
 }
 
+func (r *Registry) ExecControl() execruntime.Control {
+	return r.runtime.Exec
+}
+
 func (r *Registry) SetMCP(executor MCPExecutor) {
 	r.runtime.MCP = executor
 }

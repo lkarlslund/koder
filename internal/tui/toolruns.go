@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"path/filepath"
@@ -8,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/execruntime"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools"
 	_ "github.com/lkarlslund/koder/internal/tools/all"
@@ -72,6 +74,9 @@ func (m *Model) transcriptBlocks() []transcriptBlock {
 			appendMessage(msg)
 		}
 	}
+	for _, run := range m.currentLiveExecRuns() {
+		tracker.Upsert(run)
+	}
 	if pending := m.pendingAssistantParts(); len(pending) > 0 {
 		blocks = append(blocks, transcriptBlock{
 			Kind:    transcriptBlockMessage,
@@ -84,6 +89,26 @@ func (m *Model) transcriptBlocks() []transcriptBlock {
 		})
 	}
 	return blocks
+}
+
+func (m *Model) currentLiveExecRuns() []ui.ToolRun {
+	if m == nil || m.exec == nil || m.currentSession.ID == 0 || m.currentChat.ID == 0 {
+		return nil
+	}
+	snaps, err := m.exec.List(context.Background(), execruntime.ListRequest{
+		SessionID: m.currentSession.ID,
+		ChatID:    m.currentChat.ID,
+		Scope:     execruntime.ScopeChat,
+		MaxBytes:  4 * 1024,
+	})
+	if err != nil {
+		return nil
+	}
+	runs := make([]ui.ToolRun, 0, len(snaps))
+	for _, snap := range snaps {
+		runs = append(runs, liveExecToolRun(snap))
+	}
+	return runs
 }
 
 func (m *Model) assistantMessageShouldExist(msg domain.Message, parts []domain.Part) bool {
@@ -396,6 +421,26 @@ func toolRunOutput(part domain.Part, parts []domain.Part, msg domain.Message) ui
 				Status:     status,
 			}
 		}
+	case domain.ToolKindExecCommand, domain.ToolKindExecStatus, domain.ToolKindExecWriteStdin, domain.ToolKindExecResize, domain.ToolKindExecTerminate:
+		processID := strings.TrimSpace(meta["process_id"])
+		command := firstNonEmptyString(strings.TrimSpace(meta["command"]), strings.TrimSpace(req.Args["cmd"]))
+		state := strings.TrimSpace(meta["state"])
+		if command != "" {
+			presentation.Title = "Exec session " + firstNonEmptyCommandLine(command)
+			presentation.Subtitle = state
+			presentation.Preview = output
+			return ui.ToolRun{
+				ID:         firstNonEmptyString(processID, req.ToolCallID, toolRunFallbackID(req.Tool, command)),
+				Tool:       domain.ToolKindExecCommand,
+				ToolCallID: req.ToolCallID,
+				Title:      presentation.Title,
+				Command:    command,
+				Subtitle:   state,
+				Preview:    presentation.Preview,
+				Output:     output,
+				Status:     toolRunStatusFromExecState(state),
+			}
+		}
 	case domain.ToolKindEdit:
 		path := firstNonEmptyString(strings.TrimSpace(req.Args["path"]), strings.TrimSpace(meta["path"]))
 		if path != "" {
@@ -413,6 +458,31 @@ func toolRunOutput(part domain.Part, parts []domain.Part, msg domain.Message) ui
 		Output:     output,
 		Diff:       diff,
 		Status:     status,
+	}
+}
+
+func liveExecToolRun(snap execruntime.Snapshot) ui.ToolRun {
+	state := string(snap.State)
+	return ui.ToolRun{
+		ID:      strings.TrimSpace(snap.ProcessID),
+		Tool:    domain.ToolKindExecCommand,
+		Title:   "Exec session " + firstNonEmptyCommandLine(snap.Command),
+		Command: strings.TrimSpace(snap.Command),
+		Subtitle: strings.TrimSpace(state),
+		Preview: strings.TrimSpace(snap.Output),
+		Output:  strings.TrimSpace(snap.Output),
+		Status:  toolRunStatusFromExecState(state),
+	}
+}
+
+func toolRunStatusFromExecState(state string) ui.ToolRunStatus {
+	switch strings.TrimSpace(state) {
+	case string(execruntime.StateCompleted):
+		return ui.ToolRunStatusCompleted
+	case string(execruntime.StateFailed), string(execruntime.StateLost), string(execruntime.StateTerminated):
+		return ui.ToolRunStatusFailed
+	default:
+		return ui.ToolRunStatusRequested
 	}
 }
 
