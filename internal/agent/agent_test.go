@@ -835,11 +835,11 @@ func TestPreviewNextRequestIncludesQwenPresetExtraBody(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, ok := req.ExtraBody["chat_template_kwargs"].(map[string]any)
-	if !ok || got["preserve_thinking"] != true || got["enable_thinking"] != true {
-		t.Fatalf("expected qwen preserve-thinking kwargs, got %#v", req.ExtraBody)
+	if !ok || got["preserve_thinking"] != false || got["enable_thinking"] != false {
+		t.Fatalf("expected qwen non-thinking kwargs, got %#v", req.ExtraBody)
 	}
-	if got := req.ExtraBody["thinking_token_budget"]; got != 128 {
-		t.Fatalf("expected qwen thinking token budget, got %#v", req.ExtraBody)
+	if _, ok := req.ExtraBody["thinking_token_budget"]; ok {
+		t.Fatalf("expected qwen preset to omit thinking token budget, got %#v", req.ExtraBody)
 	}
 }
 

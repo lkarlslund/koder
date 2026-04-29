@@ -153,7 +153,7 @@ func TestModelDialogPresetCyclesAndAutoMatches(t *testing.T) {
 		t.Fatalf("expected preset cycle to land on default, got %q", dialog.PresetID)
 	}
 	dialog.Update(ui.KeyMsg{Type: ui.KeyLeft})
-	if got := dialog.presetValue(); !strings.Contains(got, "Qwen 3.6 Preserve Thinking") {
+	if got := dialog.presetValue(); !strings.Contains(got, "Qwen 3.6 No Thinking") {
 		t.Fatalf("expected auto preset display to show resolved qwen preset, got %q", got)
 	}
 }
