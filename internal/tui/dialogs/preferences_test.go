@@ -77,6 +77,16 @@ func TestPreferencesDialogThemeAndToggleEmitDraftChanges(t *testing.T) {
 		t.Fatalf("expected half blocks toggled off, got %#v", action.Values)
 	}
 
+	dialog.Update(ui.KeyMsg{Type: ui.KeyDown})
+	dialog.Update(ui.KeyMsg{Type: ui.KeyDown})
+	action = dialog.Update(ui.KeyMsg{Type: ui.KeyRight})
+	if action.Kind != PreferencesActionChanged {
+		t.Fatalf("expected sidebar width change action, got %#v", action)
+	}
+	if action.Values.UI.SidebarWidth != config.Default().UI.SidebarWidth+1 {
+		t.Fatalf("expected sidebar width to increment, got %#v", action.Values)
+	}
+
 	dialog = NewPreferencesDialog(defaultPreferencesValues(), []string{"tokyonight", "gruvbox"}, []string{"github", "monokai"})
 	dialog.tabList.Active = 2
 	dialog.focus = preferencesFocusFields
@@ -178,5 +188,23 @@ func TestPreferencesDialogToolTurnsEditorSupportsTypingAndStepping(t *testing.T)
 	action = dialog.Update(ui.KeyMsg{Type: ui.KeyUp})
 	if action.Values.MaxToolLoopSteps != 25 {
 		t.Fatalf("expected up to increment to 25, got %#v", action.Values)
+	}
+
+	dialog.tabList.Active = 1
+	dialog.fieldIndex = 6
+	editor = dialog.editors["sidebar_width"]
+	editor.SetValue("30")
+	dialog.editors["sidebar_width"] = editor
+
+	action = dialog.Update(ui.KeyMsg{Type: ui.KeyBackspace})
+	if action.Kind != PreferencesActionChanged {
+		t.Fatalf("expected sidebar width backspace edit change, got %#v", action)
+	}
+	action = dialog.Update(ui.KeyMsg{Type: ui.KeyRunes, Runes: []rune("5")})
+	if action.Kind != PreferencesActionChanged {
+		t.Fatalf("expected sidebar width digit edit change, got %#v", action)
+	}
+	if action.Values.UI.SidebarWidth != 35 {
+		t.Fatalf("expected typed sidebar width 35, got %#v", action.Values)
 	}
 }

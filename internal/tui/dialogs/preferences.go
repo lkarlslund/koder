@@ -105,6 +105,7 @@ func NewPreferencesDialog(current PreferencesValues, themeNames, codeStyles []st
 				{Kind: preferencesFieldSpinner, ID: "spinner", Label: "Spinner", Description: "Choose the activity spinner style"},
 				{Kind: preferencesFieldToggle, ID: "half_blocks", Label: "Half Blocks", Description: "Use half-block separators for boxed user text"},
 				{Kind: preferencesFieldToggle, ID: "show_sidebar", Label: "Sidebar", Description: "Show the session sidebar"},
+				{Kind: preferencesFieldInteger, ID: "sidebar_width", Label: "Sidebar Width", Description: "Preferred sidebar width in columns"},
 				{Kind: preferencesFieldToggle, ID: "show_timestamps", Label: "Timestamps", Description: "Show message timestamps in the transcript"},
 			},
 		},
@@ -134,6 +135,7 @@ func NewPreferencesDialog(current PreferencesValues, themeNames, codeStyles []st
 		focus: preferencesFocusFields,
 		editors: map[string]textarea.Model{
 			"max_tool_loop_steps": newPreferencesEditor(strconv.Itoa(current.MaxToolLoopSteps)),
+			"sidebar_width":       newPreferencesEditor(strconv.Itoa(current.UI.SidebarWidth)),
 		},
 	}
 }
@@ -333,6 +335,12 @@ func (d *PreferencesDialog) adjustField(delta int) PreferencesAction {
 				d.draft.MaxToolLoopSteps = 1
 			}
 			d.setIntegerEditorValue(field.ID, d.draft.MaxToolLoopSteps)
+		case "sidebar_width":
+			d.draft.UI.SidebarWidth += delta
+			if d.draft.UI.SidebarWidth < 1 {
+				d.draft.UI.SidebarWidth = 1
+			}
+			d.setIntegerEditorValue(field.ID, d.draft.UI.SidebarWidth)
 		default:
 			return PreferencesAction{}
 		}
@@ -473,7 +481,7 @@ func (d PreferencesDialog) dialog(width int, palette theme.Palette) ui.Node {
 					},
 				})),
 				ui.Fixed(buttons),
-				ui.Fixed(ui.Static{Content: fmt.Sprintf("Theme: %s  Code: %s  Edit: %s  Spinner: %s  Tool Turns: %d", strings.TrimSpace(d.draft.UI.Theme), strings.TrimSpace(d.draft.UI.CodeStyle), editForgivenessShortLabel(d.draft.UI.EditForgiveness), ui.SpinnerStyleByID(d.draft.UI.Spinner).Label, d.draft.MaxToolLoopSteps)}),
+				ui.Fixed(ui.Static{Content: fmt.Sprintf("Theme: %s  Code: %s  Edit: %s  Spinner: %s  Sidebar: %d  Tool Turns: %d", strings.TrimSpace(d.draft.UI.Theme), strings.TrimSpace(d.draft.UI.CodeStyle), editForgivenessShortLabel(d.draft.UI.EditForgiveness), ui.SpinnerStyleByID(d.draft.UI.Spinner).Label, d.draft.UI.SidebarWidth, d.draft.MaxToolLoopSteps)}),
 			},
 			Spacing: 2,
 		}),
@@ -581,7 +589,14 @@ func (d *PreferencesDialog) handleFieldStep(delta int) (PreferencesAction, bool)
 	if value < 1 {
 		value = 1
 	}
-	d.draft.MaxToolLoopSteps = value
+	switch fields[d.fieldIndex].ID {
+	case "max_tool_loop_steps":
+		d.draft.MaxToolLoopSteps = value
+	case "sidebar_width":
+		d.draft.UI.SidebarWidth = value
+	default:
+		return PreferencesAction{}, false
+	}
 	d.setIntegerEditorValue(fields[d.fieldIndex].ID, value)
 	return PreferencesAction{Kind: PreferencesActionChanged, Values: d.draft}, true
 }
@@ -602,7 +617,12 @@ func (d *PreferencesDialog) updateCurrentIntegerEditor(msg ui.KeyMsg) (Preferenc
 	updated, _ := editor.Update(msg)
 	d.storeIntegerEditor(field.ID, updated)
 	if value, err := strconv.Atoi(strings.TrimSpace(updated.Value())); err == nil && value > 0 {
-		d.draft.MaxToolLoopSteps = value
+		switch field.ID {
+		case "max_tool_loop_steps":
+			d.draft.MaxToolLoopSteps = value
+		case "sidebar_width":
+			d.draft.UI.SidebarWidth = value
+		}
 	}
 	return PreferencesAction{Kind: PreferencesActionChanged, Values: d.draft}, true
 }

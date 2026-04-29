@@ -4416,6 +4416,43 @@ func TestSidebarWidthHotkeysAdjustWidth(t *testing.T) {
 	}
 }
 
+func TestSidebarWidthHotkeysPersistPreference(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	m, err := New(cfg, nil, nil, StartupModeNew, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.showSidebar = true
+	m.width = 120
+	m.height = 30
+	m.viewport = newTranscriptViewport(80, 10)
+
+	updated, _ := m.handleKey(ui.KeyMsg{Type: ui.KeyRunes, Alt: true, Runes: []rune(",")})
+	next := updated.(*Model)
+	if next.cfg.UI.SidebarWidth != next.sidebarWidth() {
+		t.Fatalf("expected saved sidebar width to match live width, got saved=%d live=%d", next.cfg.UI.SidebarWidth, next.sidebarWidth())
+	}
+
+	reloaded, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.UI.SidebarWidth != next.sidebarWidth() {
+		t.Fatalf("expected reloaded sidebar width %d, got %d", next.sidebarWidth(), reloaded.UI.SidebarWidth)
+	}
+}
+
 func TestSidebarWidthHotkeysGrowRenderedSidebarColumn(t *testing.T) {
 	m := Model{
 		cfg:                  testConfig(t),
@@ -4437,6 +4474,55 @@ func TestSidebarWidthHotkeysGrowRenderedSidebarColumn(t *testing.T) {
 	_ = next.viewSurface()
 	if got := next.ensureMainScreenWidget().retained.bodyChildren[1].Basis; got != after {
 		t.Fatalf("expected sidebar flex basis to track width, got %d want %d", got, after)
+	}
+}
+
+func TestPreferencesDialogApplySavesSidebarWidth(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.UI.SidebarWidth = 30
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	m, err := New(cfg, nil, nil, StartupModeNew, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.openPreferencesDialog()
+
+	updated, _ := m.handleKey(ui.KeyMsg{Type: ui.KeyShiftTab})
+	next := updated.(*Model)
+	updated, _ = next.handleKey(ui.KeyMsg{Type: ui.KeyRight})
+	next = updated.(*Model)
+	updated, _ = next.handleKey(ui.KeyMsg{Type: ui.KeyTab})
+	next = updated.(*Model)
+	for i := 0; i < 6; i++ {
+		updated, _ = next.handleKey(ui.KeyMsg{Type: ui.KeyDown})
+		next = updated.(*Model)
+	}
+	updated, _ = next.handleKey(ui.KeyMsg{Type: ui.KeyRight})
+	next = updated.(*Model)
+	updated, _ = next.handleKey(ui.KeyMsg{Type: ui.KeyTab})
+	next = updated.(*Model)
+	updated, _ = next.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
+	next = updated.(*Model)
+
+	if next.cfg.UI.SidebarWidth != 31 {
+		t.Fatalf("expected sidebar width incremented to 31, got %d", next.cfg.UI.SidebarWidth)
+	}
+	reloaded, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.UI.SidebarWidth != 31 {
+		t.Fatalf("expected saved sidebar width 31, got %d", reloaded.UI.SidebarWidth)
 	}
 }
 

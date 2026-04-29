@@ -21,6 +21,7 @@ type UI struct {
 	CursorBlink     bool   `toml:"cursor_blink"`
 	HalfBlocks      bool   `toml:"half_blocks"`
 	ShowSidebar     bool   `toml:"show_sidebar"`
+	SidebarWidth    int    `toml:"sidebar_width"`
 	ShowTimestamps  bool   `toml:"show_timestamps"`
 	ShowReasoning   bool   `toml:"show_reasoning"`
 	ShowSystem      bool   `toml:"show_system"`

@@ -112,6 +112,30 @@ func TestApplyDefaultsFillsMissingUISpinner(t *testing.T) {
 	}
 }
 
+func TestSaveAndLoadRoundTripsSidebarWidthPreference(t *testing.T) {
+	temp := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", temp)
+	t.Setenv("XDG_STATE_HOME", temp)
+	t.Setenv("XDG_CACHE_HOME", temp)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.UI.SidebarWidth = 37
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	reloaded, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.UI.SidebarWidth != 37 {
+		t.Fatalf("expected sidebar width 37, got %d", reloaded.UI.SidebarWidth)
+	}
+}
+
 func TestNormalizeEditForgivenessClampsRange(t *testing.T) {
 	if got := NormalizeEditForgiveness(0); got != 1 {
 		t.Fatalf("expected low clamp to 1, got %d", got)

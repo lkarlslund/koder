@@ -635,6 +635,7 @@ func NewWithWorkdir(cfg config.Config, st *store.Store, a *agent.Engine, mode St
 		renderCache:             &modelRenderCache{},
 		composer:                composer,
 		showSidebar:             cfg.UI.ShowSidebar,
+		sidebarWidthOverride:    cfg.UI.SidebarWidth,
 		showReasoning:           cfg.UI.ShowReasoning,
 		showSystem:              cfg.UI.ShowSystem,
 		expandedToolRuns:        make(map[string]bool),
@@ -2230,8 +2231,14 @@ func (m *Model) adjustSidebarWidth(delta int) {
 	current := m.sidebarWidth()
 	next := clampInt(current+delta, sidebarMinWidth, m.sidebarMaxWidth())
 	m.sidebarWidthOverride = next
+	m.cfg.UI.SidebarWidth = next
 	m.resize()
 	m.refreshViewport()
+	if strings.TrimSpace(m.cfg.Path()) != "" {
+		if err := m.cfg.Save(); err != nil {
+			m.status = fmt.Sprintf("save sidebar width failed: %v", err)
+		}
+	}
 }
 
 func (m *Model) renderSidebarSessionLine() string {
@@ -7668,10 +7675,14 @@ func (m *Model) applyUIConfig(next config.UI, save bool) (ui.Cmd, error) {
 	next.Theme = selected.Name
 	next.Spinner = ui.NormalizeSpinner(next.Spinner)
 	next.EditForgiveness = config.NormalizeEditForgiveness(next.EditForgiveness)
+	if next.SidebarWidth > 0 {
+		next.SidebarWidth = max(sidebarMinWidth, next.SidebarWidth)
+	}
 	m.cfg.UI = next
 	m.palette = selected.Palette
 	m.renderer = renderer
 	m.showSidebar = next.ShowSidebar
+	m.sidebarWidthOverride = next.SidebarWidth
 	m.showReasoning = next.ShowReasoning
 	m.showSystem = next.ShowSystem
 	m.mouseEnabled = next.Mouse
