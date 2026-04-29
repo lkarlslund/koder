@@ -328,10 +328,22 @@ func ModelTextForPart(part domain.Part, diff string) (string, bool) {
 	if !ok || strings.TrimSpace(text) == "" {
 		return "", false
 	}
-	if part.Kind == domain.PartKindToolOutput && strings.TrimSpace(diff) != "" {
+	if shouldAppendDiffToModelText(env) && strings.TrimSpace(diff) != "" {
 		text += "\n\nDiff:\n" + diff
 	}
 	return text, true
+}
+
+func shouldAppendDiffToModelText(env storedResultEnvelope) bool {
+	if env.PartKind != domain.PartKindToolOutput {
+		return false
+	}
+	switch env.Tool {
+	case domain.ToolKindEdit, domain.ToolKindApplyPatch:
+		return false
+	default:
+		return true
+	}
 }
 
 func DisplayTextForPart(part domain.Part) (string, bool) {
