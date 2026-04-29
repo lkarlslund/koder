@@ -4337,7 +4337,7 @@ func TestRenderSidebarShowsStatusAndSessionInfo(t *testing.T) {
 	if !strings.Contains(got, "Working ...") {
 		t.Fatalf("expected sidebar to include status, got %q", got)
 	}
-	if !strings.Contains(got, "Help    Alt-H help  Ctrl-S toggle  Alt+, narrow  Alt+. wide") {
+	if !strings.Contains(got, "Help    Alt-H help  Ctrl-S toggle  Alt+, wide  Alt+. narrow") {
 		t.Fatalf("expected sidebar to include help hint, got %q", got)
 	}
 	if strings.Contains(got, "enter send/select") || strings.Contains(got, "/connect") {
@@ -4395,24 +4395,24 @@ func TestSidebarWidthHotkeysAdjustWidth(t *testing.T) {
 		t.Fatalf("expected sidebar width to grow, prev=%d next=%d", shrunk, grown.sidebarWidth())
 	}
 
-	beforeNarrow := grown.sidebarWidth()
+	beforeWidenAlt := grown.sidebarWidth()
 	updated, cmd = grown.handleKey(ui.KeyMsg{Type: ui.KeyRunes, Alt: true, Runes: []rune(",")})
-	if cmd != nil {
-		t.Fatalf("expected no command from alternate sidebar shrink hotkey, got %#v", cmd)
-	}
-	narrowed := updated.(*Model)
-	if narrowed.sidebarWidth() >= beforeNarrow {
-		t.Fatalf("expected alt+, to shrink sidebar width, start=%d next=%d", beforeNarrow, narrowed.sidebarWidth())
-	}
-
-	beforeWiden := narrowed.sidebarWidth()
-	updated, cmd = narrowed.handleKey(ui.KeyMsg{Type: ui.KeyRunes, Alt: true, Runes: []rune(".")})
 	if cmd != nil {
 		t.Fatalf("expected no command from alternate sidebar grow hotkey, got %#v", cmd)
 	}
-	widened := updated.(*Model)
-	if widened.sidebarWidth() <= beforeWiden {
-		t.Fatalf("expected alt+. to grow sidebar width, prev=%d next=%d", beforeWiden, widened.sidebarWidth())
+	widenedAlt := updated.(*Model)
+	if widenedAlt.sidebarWidth() <= beforeWidenAlt {
+		t.Fatalf("expected alt+, to grow sidebar width, start=%d next=%d", beforeWidenAlt, widenedAlt.sidebarWidth())
+	}
+
+	beforeNarrowAlt := widenedAlt.sidebarWidth()
+	updated, cmd = widenedAlt.handleKey(ui.KeyMsg{Type: ui.KeyRunes, Alt: true, Runes: []rune(".")})
+	if cmd != nil {
+		t.Fatalf("expected no command from alternate sidebar shrink hotkey, got %#v", cmd)
+	}
+	narrowedAlt := updated.(*Model)
+	if narrowedAlt.sidebarWidth() >= beforeNarrowAlt {
+		t.Fatalf("expected alt+. to shrink sidebar width, prev=%d next=%d", beforeNarrowAlt, narrowedAlt.sidebarWidth())
 	}
 }
 
@@ -4428,7 +4428,7 @@ func TestSidebarWidthHotkeysGrowRenderedSidebarColumn(t *testing.T) {
 	}
 
 	before := m.sidebarWidth()
-	updated, _ := m.handleKey(ui.KeyMsg{Type: ui.KeyRunes, Alt: true, Runes: []rune(".")})
+	updated, _ := m.handleKey(ui.KeyMsg{Type: ui.KeyRunes, Alt: true, Runes: []rune(",")})
 	next := updated.(*Model)
 	after := next.sidebarWidth()
 	if after <= before {
