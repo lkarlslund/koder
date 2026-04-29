@@ -12,9 +12,12 @@ type ToolRunStatus string
 
 const (
 	ToolRunStatusRequested       ToolRunStatus = "requested"
+	ToolRunStatusRunning         ToolRunStatus = "running"
 	ToolRunStatusPendingApproval ToolRunStatus = "pending_approval"
 	ToolRunStatusApproved        ToolRunStatus = "approved"
 	ToolRunStatusCompleted       ToolRunStatus = "completed"
+	ToolRunStatusTerminated      ToolRunStatus = "terminated"
+	ToolRunStatusLost            ToolRunStatus = "lost"
 	ToolRunStatusDenied          ToolRunStatus = "denied"
 	ToolRunStatusFailed          ToolRunStatus = "failed"
 	ToolRunStatusPaused          ToolRunStatus = "paused"
@@ -28,6 +31,9 @@ type ToolRun struct {
 	Title      string
 	Command    string
 	Subtitle   string
+	ProcessID  string
+	TTY        bool
+	ExitCode   *int
 	Preview    string
 	Status     ToolRunStatus
 	Output     string
@@ -41,6 +47,8 @@ func (r ToolRun) PreviewText() string {
 
 func (r ToolRun) StatusLabel() string {
 	switch r.Status {
+	case ToolRunStatusRunning:
+		return "Running"
 	case ToolRunStatusPendingApproval:
 		if r.ApprovalID > 0 {
 			return "Needs approval #" + strconv.FormatInt(r.ApprovalID, 10)
@@ -50,6 +58,10 @@ func (r ToolRun) StatusLabel() string {
 		return "Approved"
 	case ToolRunStatusCompleted:
 		return "Completed"
+	case ToolRunStatusTerminated:
+		return "Terminated"
+	case ToolRunStatusLost:
+		return "Lost"
 	case ToolRunStatusDenied:
 		return "Denied"
 	case ToolRunStatusFailed:
@@ -128,6 +140,9 @@ func (r ToolRun) renderCard(palette theme.Palette, width int, expandedOutput, ex
 		)
 	}
 	lines = append(lines, LayoutStyledText(headerSpans, headerWidth, CellStyle{}))
+	if status := r.inlineStatusLabel(); status != "" {
+		lines = append(lines, LayoutStyledText([]StyledSpan{{Text: status, Style: CellStyle{FG: cellColor(toolRunStatusColor(r.Status, palette))}.WithBold(true)}}, headerWidth, CellStyle{}))
+	}
 	if subtitle := strings.TrimSpace(r.Subtitle); subtitle != "" {
 		lines = append(lines, LayoutStyledText([]StyledSpan{{Text: subtitle, Style: subtitleStyle}}, headerWidth, CellStyle{}))
 	}
@@ -171,6 +186,9 @@ func (r ToolRun) renderBashCard(palette theme.Palette, width int, expandedOutput
 		)
 	}
 	lines = append(lines, LayoutStyledText(headerSpans, headerWidth, CellStyle{}))
+	if status := r.inlineStatusLabel(); status != "" {
+		lines = append(lines, LayoutStyledText([]StyledSpan{{Text: status, Style: CellStyle{FG: cellColor(toolRunStatusColor(r.Status, palette))}.WithBold(true)}}, headerWidth, CellStyle{}))
+	}
 	if command := r.visibleCommand(headerWidth, expandedCommand); command != "" {
 		commandLines := strings.Split(command, "\n")
 		s := BlankSurface(maxLineWidth(commandLines), len(commandLines))
@@ -178,6 +196,9 @@ func (r ToolRun) renderBashCard(palette theme.Palette, width int, expandedOutput
 			s.WriteText(0, y, line, CellStyle{FG: cellColor(palette.ComposerMutedText)})
 		}
 		lines = append(lines, s)
+	}
+	if meta := r.execMetadataLine(); meta != "" {
+		lines = append(lines, LayoutStyledText([]StyledSpan{{Text: meta, Style: CellStyle{FG: cellColor(palette.ComposerMutedText)}}}, headerWidth, CellStyle{}))
 	}
 	if output := r.visiblePreview(expandedOutput); output != "" {
 		first := firstPreviewLine(output)
@@ -455,13 +476,51 @@ func renderToolRunPreview(preview string, run ToolRun, width int, expanded bool)
 
 func toolRunStatusColor(status ToolRunStatus, palette theme.Palette) CellColor {
 	switch status {
-	case ToolRunStatusPendingApproval, ToolRunStatusApproved, ToolRunStatusPaused:
+	case ToolRunStatusRunning, ToolRunStatusPendingApproval, ToolRunStatusApproved, ToolRunStatusPaused:
 		return palette.ActivityText
+	case ToolRunStatusTerminated:
+		return palette.ActivityText
+	case ToolRunStatusLost:
+		return palette.DiffDeletedText
 	case ToolRunStatusDenied, ToolRunStatusFailed:
 		return palette.DiffDeletedText
 	default:
 		return palette.UserAccentBar
 	}
+}
+
+func (r ToolRun) execMetadataLine() string {
+	if r.Tool != domain.ToolKindBash && r.Tool != domain.ToolKindExecCommand {
+		return ""
+	}
+	if strings.TrimSpace(r.ProcessID) == "" && !r.TTY && r.ExitCode == nil {
+		return ""
+	}
+	parts := make([]string, 0, 3)
+	if id := strings.TrimSpace(r.ProcessID); id != "" {
+		parts = append(parts, "id "+id)
+	}
+	if r.TTY {
+		parts = append(parts, "tty")
+	}
+	if r.ExitCode != nil {
+		parts = append(parts, "exit "+strconv.Itoa(*r.ExitCode))
+	}
+	return strings.Join(parts, "  ")
+}
+
+func (r ToolRun) inlineStatusLabel() string {
+	switch r.Status {
+	case ToolRunStatusPendingApproval, ToolRunStatusDenied, ToolRunStatusFailed, ToolRunStatusPaused:
+		return r.StatusLabel()
+	}
+	if r.Tool == domain.ToolKindExecCommand {
+		switch r.Status {
+		case ToolRunStatusRunning, ToolRunStatusCompleted, ToolRunStatusTerminated, ToolRunStatusLost:
+			return r.StatusLabel()
+		}
+	}
+	return ""
 }
 
 type toolRunDockTitle struct {

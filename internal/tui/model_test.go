@@ -7081,6 +7081,15 @@ func TestTranscriptBlocksIncludeLiveExecRuns(t *testing.T) {
 	if run.ID != snap.ProcessID || run.Tool != domain.ToolKindExecCommand {
 		t.Fatalf("unexpected live exec tool run: %#v", run)
 	}
+	if run.Status != ui.ToolRunStatusRunning {
+		t.Fatalf("expected running live exec status, got %#v", run)
+	}
+	if run.ProcessID != snap.ProcessID {
+		t.Fatalf("expected process id on live exec run, got %#v", run)
+	}
+	if !strings.Contains(run.Subtitle, snap.ProcessID) {
+		t.Fatalf("expected live exec subtitle to include process id, got %#v", run)
+	}
 }
 
 func TestRefreshExecSubscriptionCmdReceivesExecEventsForCurrentChat(t *testing.T) {

@@ -137,6 +137,45 @@ func TestBashToolRunSeparatesCommandAndOutputExpansion(t *testing.T) {
 	}
 }
 
+func TestExecToolRunShowsProcessMetadataAndRunningState(t *testing.T) {
+	palette := theme.Resolve("tokyonight").Palette
+	run := ToolRun{
+		Tool:      domain.ToolKindExecCommand,
+		Title:     "Exec session npm run dev",
+		Command:   "npm run dev",
+		ProcessID: "exec_42",
+		TTY:       true,
+		Output:    "ready",
+		Status:    ToolRunStatusRunning,
+	}
+
+	got := SurfaceText(run.CardSurface(palette, 80, false, false))
+	if !strings.Contains(got, "Running") {
+		t.Fatalf("expected running status label, got %q", got)
+	}
+	if !strings.Contains(got, "id exec_42  tty") {
+		t.Fatalf("expected exec metadata line, got %q", got)
+	}
+}
+
+func TestExecToolRunStatusLabelsDistinguishTerminalStates(t *testing.T) {
+	tests := []struct {
+		status ToolRunStatus
+		want   string
+	}{
+		{status: ToolRunStatusRunning, want: "Running"},
+		{status: ToolRunStatusTerminated, want: "Terminated"},
+		{status: ToolRunStatusLost, want: "Lost"},
+	}
+
+	for _, tt := range tests {
+		run := ToolRun{Status: tt.status}
+		if got := run.StatusLabel(); got != tt.want {
+			t.Fatalf("status %q: expected %q, got %q", tt.status, tt.want, got)
+		}
+	}
+}
+
 func TestToolRunCardViewHidesEditPreviewUntilExpanded(t *testing.T) {
 	palette := theme.Resolve("tokyonight").Palette
 	run := ToolRun{

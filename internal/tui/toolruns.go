@@ -425,9 +425,11 @@ func toolRunOutput(part domain.Part, parts []domain.Part, msg domain.Message) ui
 		processID := strings.TrimSpace(meta["process_id"])
 		command := firstNonEmptyString(strings.TrimSpace(meta["command"]), strings.TrimSpace(req.Args["cmd"]))
 		state := strings.TrimSpace(meta["state"])
+		exitCode := optionalIntPtr(strings.TrimSpace(meta["exit_code"]))
+		tty := parseBoolString(strings.TrimSpace(meta["tty"]))
 		if command != "" {
 			presentation.Title = "Exec session " + firstNonEmptyCommandLine(command)
-			presentation.Subtitle = state
+			presentation.Subtitle = execToolRunSubtitle(processID, tty, exitCode)
 			presentation.Preview = output
 			return ui.ToolRun{
 				ID:         firstNonEmptyString(processID, req.ToolCallID, toolRunFallbackID(req.Tool, command)),
@@ -435,7 +437,10 @@ func toolRunOutput(part domain.Part, parts []domain.Part, msg domain.Message) ui
 				ToolCallID: req.ToolCallID,
 				Title:      presentation.Title,
 				Command:    command,
-				Subtitle:   state,
+				Subtitle:   presentation.Subtitle,
+				ProcessID:  processID,
+				TTY:        tty,
+				ExitCode:   exitCode,
 				Preview:    presentation.Preview,
 				Output:     output,
 				Status:     toolRunStatusFromExecState(state),
@@ -464,22 +469,31 @@ func toolRunOutput(part domain.Part, parts []domain.Part, msg domain.Message) ui
 func liveExecToolRun(snap execruntime.Snapshot) ui.ToolRun {
 	state := string(snap.State)
 	return ui.ToolRun{
-		ID:      strings.TrimSpace(snap.ProcessID),
-		Tool:    domain.ToolKindExecCommand,
-		Title:   "Exec session " + firstNonEmptyCommandLine(snap.Command),
-		Command: strings.TrimSpace(snap.Command),
-		Subtitle: strings.TrimSpace(state),
-		Preview: strings.TrimSpace(snap.Output),
-		Output:  strings.TrimSpace(snap.Output),
-		Status:  toolRunStatusFromExecState(state),
+		ID:        strings.TrimSpace(snap.ProcessID),
+		Tool:      domain.ToolKindExecCommand,
+		Title:     "Exec session " + firstNonEmptyCommandLine(snap.Command),
+		Command:   strings.TrimSpace(snap.Command),
+		Subtitle:  execToolRunSubtitle(snap.ProcessID, snap.TTY, snap.ExitCode),
+		ProcessID: strings.TrimSpace(snap.ProcessID),
+		TTY:       snap.TTY,
+		ExitCode:  snap.ExitCode,
+		Preview:   strings.TrimSpace(snap.Output),
+		Output:    strings.TrimSpace(snap.Output),
+		Status:    toolRunStatusFromExecState(state),
 	}
 }
 
 func toolRunStatusFromExecState(state string) ui.ToolRunStatus {
 	switch strings.TrimSpace(state) {
+	case string(execruntime.StateRunning):
+		return ui.ToolRunStatusRunning
 	case string(execruntime.StateCompleted):
 		return ui.ToolRunStatusCompleted
-	case string(execruntime.StateFailed), string(execruntime.StateLost), string(execruntime.StateTerminated):
+	case string(execruntime.StateTerminated):
+		return ui.ToolRunStatusTerminated
+	case string(execruntime.StateLost):
+		return ui.ToolRunStatusLost
+	case string(execruntime.StateFailed):
 		return ui.ToolRunStatusFailed
 	default:
 		return ui.ToolRunStatusRequested
@@ -525,7 +539,7 @@ func mergeToolRun(dst *ui.ToolRun, src ui.ToolRun) {
 
 func toolRunHasTerminalStatus(status ui.ToolRunStatus) bool {
 	switch status {
-	case ui.ToolRunStatusApproved, ui.ToolRunStatusCompleted, ui.ToolRunStatusDenied, ui.ToolRunStatusFailed:
+	case ui.ToolRunStatusApproved, ui.ToolRunStatusCompleted, ui.ToolRunStatusTerminated, ui.ToolRunStatusLost, ui.ToolRunStatusDenied, ui.ToolRunStatusFailed:
 		return true
 	default:
 		return false
@@ -666,4 +680,37 @@ func firstNonEmptyString(values ...string) string {
 
 func presentationFromPreview(tool domain.ToolKind, preview string) tools.Presentation {
 	return tools.PresentationForTool(tool, preview)
+}
+
+func execToolRunSubtitle(processID string, tty bool, exitCode *int) string {
+	parts := make([]string, 0, 3)
+	if id := strings.TrimSpace(processID); id != "" {
+		parts = append(parts, "id "+id)
+	}
+	if tty {
+		parts = append(parts, "tty")
+	}
+	if exitCode != nil {
+		parts = append(parts, fmt.Sprintf("exit %d", *exitCode))
+	}
+	return strings.Join(parts, "  ")
+}
+
+func optionalIntPtr(raw string) *int {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	value, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil {
+		return nil
+	}
+	return &value
+}
+
+func parseBoolString(raw string) bool {
+	value, err := strconv.ParseBool(strings.TrimSpace(raw))
+	if err != nil {
+		return false
+	}
+	return value
 }

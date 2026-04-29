@@ -174,21 +174,31 @@ func (cleanupTool) NormalizeArgs(args map[string]string) (map[string]string, err
 	return (listTool{}).NormalizeArgs(args)
 }
 
-func (commandTool) LegacyArgs(raw string) map[string]string    { return map[string]string{"cmd": raw} }
-func (statusTool) LegacyArgs(raw string) map[string]string     { return map[string]string{"process_id": raw} }
-func (listTool) LegacyArgs(string) map[string]string           { return map[string]string{} }
-func (writeStdinTool) LegacyArgs(raw string) map[string]string { return map[string]string{"process_id": raw} }
-func (resizeTool) LegacyArgs(raw string) map[string]string     { return map[string]string{"process_id": raw} }
-func (terminateTool) LegacyArgs(raw string) map[string]string  { return map[string]string{"process_id": raw} }
-func (cleanupTool) LegacyArgs(string) map[string]string        { return map[string]string{} }
+func (commandTool) LegacyArgs(raw string) map[string]string { return map[string]string{"cmd": raw} }
+func (statusTool) LegacyArgs(raw string) map[string]string {
+	return map[string]string{"process_id": raw}
+}
+func (listTool) LegacyArgs(string) map[string]string { return map[string]string{} }
+func (writeStdinTool) LegacyArgs(raw string) map[string]string {
+	return map[string]string{"process_id": raw}
+}
+func (resizeTool) LegacyArgs(raw string) map[string]string {
+	return map[string]string{"process_id": raw}
+}
+func (terminateTool) LegacyArgs(raw string) map[string]string {
+	return map[string]string{"process_id": raw}
+}
+func (cleanupTool) LegacyArgs(string) map[string]string { return map[string]string{} }
 
-func (commandTool) Preview(req tools.Request) string    { return req.Args["cmd"] }
-func (statusTool) Preview(req tools.Request) string     { return "Inspect " + req.Args["process_id"] }
-func (listTool) Preview(req tools.Request) string       { return "List exec sessions" }
-func (writeStdinTool) Preview(req tools.Request) string { return "Write stdin to " + req.Args["process_id"] }
-func (resizeTool) Preview(req tools.Request) string     { return "Resize " + req.Args["process_id"] }
-func (terminateTool) Preview(req tools.Request) string  { return "Terminate " + req.Args["process_id"] }
-func (cleanupTool) Preview(req tools.Request) string    { return "Cleanup exec sessions" }
+func (commandTool) Preview(req tools.Request) string { return req.Args["cmd"] }
+func (statusTool) Preview(req tools.Request) string  { return "Inspect " + req.Args["process_id"] }
+func (listTool) Preview(req tools.Request) string    { return "List exec sessions" }
+func (writeStdinTool) Preview(req tools.Request) string {
+	return "Write stdin to " + req.Args["process_id"]
+}
+func (resizeTool) Preview(req tools.Request) string    { return "Resize " + req.Args["process_id"] }
+func (terminateTool) Preview(req tools.Request) string { return "Terminate " + req.Args["process_id"] }
+func (cleanupTool) Preview(req tools.Request) string   { return "Cleanup exec sessions" }
 
 func (commandTool) PresentationForPreview(preview string) tools.Presentation {
 	return tools.Presentation{Title: "Start exec session", Subtitle: strings.TrimSpace(preview), Preview: strings.TrimSpace(preview)}
@@ -218,13 +228,27 @@ func (cleanupTool) PresentationForPreview(preview string) tools.Presentation {
 	return tools.Presentation{Title: "Cleanup exec sessions", Preview: strings.TrimSpace(preview)}
 }
 
-func (commandTool) Presentation(req tools.Request) tools.Presentation    { return (commandTool{}).PresentationForPreview((commandTool{}).Preview(req)) }
-func (statusTool) Presentation(req tools.Request) tools.Presentation     { return (statusTool{}).PresentationForPreview((statusTool{}).Preview(req)) }
-func (listTool) Presentation(req tools.Request) tools.Presentation       { return (listTool{}).PresentationForPreview((listTool{}).Preview(req)) }
-func (writeStdinTool) Presentation(req tools.Request) tools.Presentation { return (writeStdinTool{}).PresentationForPreview((writeStdinTool{}).Preview(req)) }
-func (resizeTool) Presentation(req tools.Request) tools.Presentation     { return (resizeTool{}).PresentationForPreview((resizeTool{}).Preview(req)) }
-func (terminateTool) Presentation(req tools.Request) tools.Presentation  { return (terminateTool{}).PresentationForPreview((terminateTool{}).Preview(req)) }
-func (cleanupTool) Presentation(req tools.Request) tools.Presentation    { return (cleanupTool{}).PresentationForPreview((cleanupTool{}).Preview(req)) }
+func (commandTool) Presentation(req tools.Request) tools.Presentation {
+	return (commandTool{}).PresentationForPreview((commandTool{}).Preview(req))
+}
+func (statusTool) Presentation(req tools.Request) tools.Presentation {
+	return (statusTool{}).PresentationForPreview((statusTool{}).Preview(req))
+}
+func (listTool) Presentation(req tools.Request) tools.Presentation {
+	return (listTool{}).PresentationForPreview((listTool{}).Preview(req))
+}
+func (writeStdinTool) Presentation(req tools.Request) tools.Presentation {
+	return (writeStdinTool{}).PresentationForPreview((writeStdinTool{}).Preview(req))
+}
+func (resizeTool) Presentation(req tools.Request) tools.Presentation {
+	return (resizeTool{}).PresentationForPreview((resizeTool{}).Preview(req))
+}
+func (terminateTool) Presentation(req tools.Request) tools.Presentation {
+	return (terminateTool{}).PresentationForPreview((terminateTool{}).Preview(req))
+}
+func (cleanupTool) Presentation(req tools.Request) tools.Presentation {
+	return (cleanupTool{}).PresentationForPreview((cleanupTool{}).Preview(req))
+}
 
 func (commandTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
 	control, err := tools.RequireExecControl(runtime)
@@ -256,13 +280,18 @@ func (commandTool) Execute(ctx context.Context, runtime tools.Runtime, req tools
 	}
 	stored := storedFromSnapshot(snap, "Started persistent exec session")
 	stored.Workdir = rel
+	meta := map[string]string{
+		"process_id": snap.ProcessID,
+		"command":    snap.Command,
+		"state":      string(snap.State),
+		"tty":        strconv.FormatBool(snap.TTY),
+	}
+	if snap.ExitCode != nil {
+		meta["exit_code"] = strconv.Itoa(*snap.ExitCode)
+	}
 	return tools.Result{
 		Output: stored.Message,
-		Meta: map[string]string{
-			"process_id": snap.ProcessID,
-			"command":    snap.Command,
-			"state":      string(snap.State),
-		},
+		Meta:   meta,
 		Stored: stored,
 	}, nil
 }
@@ -388,13 +417,27 @@ func (cleanupTool) Execute(ctx context.Context, runtime tools.Runtime, req tools
 	}, nil
 }
 
-func (commandTool) SummarizeResult(req tools.Request, result tools.Result) (string, string)    { return "Started exec session", tools.DisplayTextForStored(req.Tool, result.Stored) }
-func (statusTool) SummarizeResult(req tools.Request, result tools.Result) (string, string)     { return "Fetched exec status", tools.DisplayTextForStored(req.Tool, result.Stored) }
-func (listTool) SummarizeResult(req tools.Request, result tools.Result) (string, string)       { return "Listed exec sessions", result.Output }
-func (writeStdinTool) SummarizeResult(req tools.Request, result tools.Result) (string, string) { return "Updated exec stdin", tools.DisplayTextForStored(req.Tool, result.Stored) }
-func (resizeTool) SummarizeResult(req tools.Request, result tools.Result) (string, string)     { return "Resized exec tty", tools.DisplayTextForStored(req.Tool, result.Stored) }
-func (terminateTool) SummarizeResult(req tools.Request, result tools.Result) (string, string)  { return "Terminated exec session", tools.DisplayTextForStored(req.Tool, result.Stored) }
-func (cleanupTool) SummarizeResult(req tools.Request, result tools.Result) (string, string)    { return "Cleaned up exec sessions", result.Output }
+func (commandTool) SummarizeResult(req tools.Request, result tools.Result) (string, string) {
+	return "Started exec session", tools.DisplayTextForStored(req.Tool, result.Stored)
+}
+func (statusTool) SummarizeResult(req tools.Request, result tools.Result) (string, string) {
+	return "Fetched exec status", tools.DisplayTextForStored(req.Tool, result.Stored)
+}
+func (listTool) SummarizeResult(req tools.Request, result tools.Result) (string, string) {
+	return "Listed exec sessions", result.Output
+}
+func (writeStdinTool) SummarizeResult(req tools.Request, result tools.Result) (string, string) {
+	return "Updated exec stdin", tools.DisplayTextForStored(req.Tool, result.Stored)
+}
+func (resizeTool) SummarizeResult(req tools.Request, result tools.Result) (string, string) {
+	return "Resized exec tty", tools.DisplayTextForStored(req.Tool, result.Stored)
+}
+func (terminateTool) SummarizeResult(req tools.Request, result tools.Result) (string, string) {
+	return "Terminated exec session", tools.DisplayTextForStored(req.Tool, result.Stored)
+}
+func (cleanupTool) SummarizeResult(req tools.Request, result tools.Result) (string, string) {
+	return "Cleaned up exec sessions", result.Output
+}
 
 func (commandTool) PersistResult(ctx context.Context, st *store.Store, sessionID int64, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
 	return tools.PersistStandardResult(ctx, st, sessionID, req, result)
@@ -419,13 +462,18 @@ func (cleanupTool) PersistResult(ctx context.Context, st *store.Store, sessionID
 }
 
 func execResult(stored tools.ExecStoredResult) tools.Result {
+	meta := map[string]string{
+		"process_id": stored.ProcessID,
+		"state":      stored.State,
+		"command":    stored.Command,
+		"tty":        strconv.FormatBool(stored.TTY),
+	}
+	if stored.ExitCode != nil {
+		meta["exit_code"] = strconv.Itoa(*stored.ExitCode)
+	}
 	return tools.Result{
 		Output: tools.DisplayTextForStored(domain.ToolKindExecStatus, stored),
-		Meta: map[string]string{
-			"process_id": stored.ProcessID,
-			"state":      stored.State,
-			"command":    stored.Command,
-		},
+		Meta:   meta,
 		Stored: stored,
 	}
 }
