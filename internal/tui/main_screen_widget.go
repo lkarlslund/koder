@@ -61,7 +61,9 @@ type composerAreaWidget struct {
 	measureWidth int
 	measureSize  ui.Size
 	measureValid bool
+	measureRev   uint64
 	invalidated  bool
+	lastRevision uint64
 }
 
 type measuredPainter interface {
@@ -70,7 +72,7 @@ type measuredPainter interface {
 }
 
 func (w *composerAreaWidget) Dirty() bool {
-	return w == nil || w.invalidated || w.model.composerCursorDirty
+	return w == nil || w.invalidated || w.revisionChanged() || w.model.composerCursorDirty
 }
 
 func (w *composerAreaWidget) Invalidate() {
@@ -82,7 +84,7 @@ func (w *composerAreaWidget) Invalidate() {
 }
 
 func (w *composerAreaWidget) measure(ctx *ui.Context, width int) ui.Size {
-	if w != nil && w.measureValid && w.measureWidth == width {
+	if w != nil && w.measureValid && w.measureWidth == width && w.measureRev == w.currentRevision() {
 		return w.measureSize
 	}
 	if w == nil {
@@ -96,6 +98,7 @@ func (w *composerAreaWidget) measure(ctx *ui.Context, width int) ui.Size {
 	w.measureWidth = width
 	w.measureSize = size
 	w.measureValid = true
+	w.measureRev = w.currentRevision()
 	cache := w.model.ensureRenderCache()
 	cache.composerAreaHeight = size.H
 	return size
@@ -106,6 +109,21 @@ func (w *composerAreaWidget) ClearDirty() {
 		return
 	}
 	w.invalidated = false
+	w.lastRevision = w.currentRevision()
+}
+
+func (w *composerAreaWidget) currentRevision() uint64 {
+	if w == nil || w.model == nil {
+		return 0
+	}
+	return w.model.composer.Revision()
+}
+
+func (w *composerAreaWidget) revisionChanged() bool {
+	if w == nil {
+		return true
+	}
+	return w.lastRevision != w.currentRevision()
 }
 
 func (w *composerAreaWidget) content() measuredPainter {
@@ -359,7 +377,7 @@ type composerRetainedNode struct {
 }
 
 func (n *composerRetainedNode) Pending() bool {
-	return n == nil || n.widget == nil || n.widget.invalidated || n.widget.model.composerCursorDirty
+	return n == nil || n.widget == nil || n.widget.Dirty()
 }
 
 func (n *composerRetainedNode) Measure(ctx *ui.Context, constraints ui.Constraints) ui.Size {
@@ -379,7 +397,7 @@ func (n *composerRetainedNode) Prepare(ctx *ui.Context) {
 		return
 	}
 	m := n.widget.model
-	needsSync := n.widget.invalidated || m.composerCursorDirty || n.NeedsPaint()
+	needsSync := n.widget.Dirty() || n.NeedsPaint()
 	if !needsSync {
 		return
 	}

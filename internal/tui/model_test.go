@@ -149,6 +149,50 @@ func TestHandleKeyInsertsPlainRunesIntoComposer(t *testing.T) {
 	}
 }
 
+func TestTypingIntoPrimedComposerUpdatesRenderedView(t *testing.T) {
+	m := Model{
+		cfg:      config.Default().WithStateDir(t.TempDir()),
+		palette:  theme.Default().Palette,
+		viewport: newTranscriptViewport(80, 20),
+		composer: textarea.New(),
+		width:    80,
+		height:   24,
+	}
+
+	_ = m.ViewLines()
+	updated, _ := m.handleKey(ui.KeyMsg{Type: ui.KeyRunes, Runes: []rune("hello")})
+	next := *(updated.(*Model))
+	got := strings.Join(next.ViewLines(), "\n")
+	if !strings.Contains(got, "hello") {
+		t.Fatalf("expected typed composer text in rendered view, got %q", got)
+	}
+}
+
+func TestComposerRevisionChangeMarksRetainedFooterDirty(t *testing.T) {
+	m := Model{
+		cfg:      config.Default().WithStateDir(t.TempDir()),
+		palette:  theme.Default().Palette,
+		viewport: newTranscriptViewport(80, 20),
+		composer: textarea.New(),
+		width:    80,
+		height:   24,
+	}
+
+	ctx := &ui.Context{Palette: m.palette}
+	main := m.ensureMainScreenWidget()
+	_ = main.Surface(ctx, ui.Rect{W: m.width, H: m.height})
+
+	m.composer.InsertString("hello")
+	if !main.composer.Dirty() {
+		t.Fatal("expected composer widget to become dirty from textarea revision change")
+	}
+
+	got := strings.Join(main.Surface(ctx, ui.Rect{W: m.width, H: m.height}).Lines(), "\n")
+	if !strings.Contains(got, "hello") {
+		t.Fatalf("expected retained surface to repaint composer text, got %q", got)
+	}
+}
+
 func TestComposerCursorMoveProducesBottomOnlyDamage(t *testing.T) {
 	m := Model{
 		cfg:         config.Default().WithStateDir(t.TempDir()),
