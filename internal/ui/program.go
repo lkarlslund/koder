@@ -692,11 +692,23 @@ func decodeEscPrefixedAlt(events []input.Event, idx int) (Msg, int, bool) {
 		return nil, 0, false
 	}
 	msg := convertKeyPress(second)
-	if msg.Type == KeyUnknown || msg.Type == KeyEsc || msg.Alt {
+	if msg.Type == KeyUnknown || msg.Type == KeyEsc || msg.Alt || !shouldSynthesizeEscPrefixedAlt(msg) {
 		return nil, 0, false
 	}
 	msg.Alt = true
 	return msg, 2, true
+}
+
+func shouldSynthesizeEscPrefixedAlt(msg KeyMsg) bool {
+	switch msg.Type {
+	case KeyLeft, KeyRight, KeyUp, KeyDown, KeyPgUp, KeyPgDown, KeyHome, KeyEnd,
+		KeyBackspace, KeyDelete, KeyEnter, KeyTab, KeyShiftTab, KeySpace:
+		return true
+	case KeyRunes:
+		return len(msg.Runes) == 1 && (msg.Runes[0] == '[' || msg.Runes[0] == ']')
+	default:
+		return false
+	}
 }
 
 func convertSingleInputEvent(ev input.Event) []Msg {

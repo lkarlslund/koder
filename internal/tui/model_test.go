@@ -129,6 +129,26 @@ func TestComposerUpdatesKeepMainScreenCacheAndInvalidateComposerArea(t *testing.
 	}
 }
 
+func TestHandleKeyInsertsPlainRunesIntoComposer(t *testing.T) {
+	m := Model{
+		cfg:      config.Default().WithStateDir(t.TempDir()),
+		palette:  theme.Default().Palette,
+		viewport: newTranscriptViewport(80, 20),
+		composer: textarea.New(),
+		width:    80,
+		height:   24,
+	}
+
+	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyRunes, Runes: []rune("a")})
+	if cmd == nil {
+		t.Fatal("expected composer input to schedule blink command")
+	}
+	next := *(updated.(*Model))
+	if got := next.composer.Value(); got != "a" {
+		t.Fatalf("expected plain rune input to reach composer, got %q", got)
+	}
+}
+
 func TestComposerCursorMoveProducesBottomOnlyDamage(t *testing.T) {
 	m := Model{
 		cfg:         config.Default().WithStateDir(t.TempDir()),
