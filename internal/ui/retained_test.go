@@ -306,3 +306,24 @@ func TestFlexNodeLayoutHorizontalOmitsZeroWidthFixedChildren(t *testing.T) {
 		t.Fatalf("sidebar rect = %#v", got)
 	}
 }
+
+func TestFlexNodeLayoutHorizontalUsesChildBasis(t *testing.T) {
+	main := &testRectNode{size: Size{W: 10, H: 4}}
+	sidebar := &testRectNode{size: Size{W: 0, H: 4}}
+	node := &FlexNode{
+		Direction: DirectionHorizontal,
+		Children: []FlexNodeChild{
+			{Node: main, Flex: 1},
+			{Node: sidebar, Basis: 8},
+		},
+	}
+
+	node.Layout(nil, Rect{W: 20, H: 4})
+
+	if got := main.Rect(); got != (Rect{W: 12, H: 4}) {
+		t.Fatalf("main rect = %#v", got)
+	}
+	if got := sidebar.Rect(); got != (Rect{X: 12, W: 8, H: 4}) {
+		t.Fatalf("sidebar rect = %#v", got)
+	}
+}

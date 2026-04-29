@@ -1,8 +1,9 @@
 package ui
 
 type FlexNodeChild struct {
-	Node Node
-	Flex int
+	Node  Node
+	Flex  int
+	Basis int
 }
 
 type FlexNode struct {
@@ -37,7 +38,7 @@ func (n *FlexNode) Measure(ctx *Context, constraints Constraints) Size {
 			continue
 		}
 		size := n.measureChild(ctx, child.Node, constraints)
-		if size.W <= 0 && size.H <= 0 && child.Flex <= 0 {
+		if size.W <= 0 && size.H <= 0 && child.Flex <= 0 && child.Basis <= 0 {
 			continue
 		}
 		if visible > 0 {
@@ -52,7 +53,7 @@ func (n *FlexNode) Measure(ctx *Context, constraints Constraints) Size {
 			continue
 		}
 		if child.Flex <= 0 {
-			main += size.W
+			main += max(size.W, child.Basis)
 		}
 		cross = max(cross, size.H)
 	}
@@ -80,11 +81,10 @@ func (n *FlexNode) Layout(ctx *Context, rect Rect) {
 	remaining := max(0, availableMain-spacingTotal)
 	flexWeight := 0
 	for idx := range active {
+		remaining = max(0, remaining-active[idx].main)
 		if active[idx].flex > 0 {
 			flexWeight += active[idx].flex
-			continue
 		}
-		remaining = max(0, remaining-active[idx].main)
 	}
 
 	offset := 0
@@ -92,13 +92,13 @@ func (n *FlexNode) Layout(ctx *Context, rect Rect) {
 		mainSize := active[idx].main
 		if active[idx].flex > 0 {
 			if flexWeight <= 0 {
-				mainSize = 0
+				mainSize = active[idx].main
 			} else if idx == len(active)-1 {
-				mainSize = remaining
+				mainSize += remaining
 			} else {
-				mainSize = remaining * active[idx].flex / flexWeight
+				mainSize += remaining * active[idx].flex / flexWeight
 			}
-			remaining -= mainSize
+			remaining -= mainSize - active[idx].main
 			flexWeight -= active[idx].flex
 		}
 		childRect := Rect{X: rect.X, Y: rect.Y, W: rect.W, H: rect.H}
@@ -151,16 +151,21 @@ func (n *FlexNode) activeChildren(ctx *Context, rect Rect) []flexNodeLayoutChild
 		}
 		size := n.measureChild(ctx, child.Node, NewConstraints(rect.W, rect.H))
 		if child.Flex <= 0 {
-			if n.Direction == DirectionVertical && size.H <= 0 {
+			if n.Direction == DirectionVertical && max(size.H, child.Basis) <= 0 {
 				continue
 			}
-			if n.Direction == DirectionHorizontal && size.W <= 0 {
+			if n.Direction == DirectionHorizontal && max(size.W, child.Basis) <= 0 {
 				continue
 			}
 		}
-		main := size.W
-		if n.Direction == DirectionVertical {
-			main = size.H
+		main := child.Basis
+		if child.Flex <= 0 {
+			main = size.W
+			if n.Direction == DirectionVertical {
+				main = max(size.H, child.Basis)
+			} else {
+				main = max(size.W, child.Basis)
+			}
 		}
 		if main < 0 {
 			main = 0

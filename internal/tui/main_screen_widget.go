@@ -593,7 +593,7 @@ func newMainScreenRetainedRoot(m *Model, transcript *transcriptWidget, composer 
 		},
 	}
 	root.bodyChildren[0] = ui.FlexNodeChild{Node: root.mainColumnNode, Flex: 1}
-	root.bodyChildren[1] = ui.FlexNodeChild{Node: root.sidebarNode}
+	root.bodyChildren[1] = ui.FlexNodeChild{Node: root.sidebarNode, Basis: max(0, m.sidebarWidth())}
 	root.bodySlices[0] = root.bodyChildren[:1]
 	root.bodySlices[1] = root.bodyChildren[:2]
 	return root
@@ -651,6 +651,7 @@ func (r *mainScreenRetainedRoot) syncLayoutTree() {
 		return
 	}
 	if r.model != nil && r.model.showSidebar {
+		r.bodyChildren[1].Basis = max(0, r.model.sidebarWidth())
 		r.bodyNode.Children = r.bodySlices[1]
 		return
 	}

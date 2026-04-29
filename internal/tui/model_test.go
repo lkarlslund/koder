@@ -4416,6 +4416,30 @@ func TestSidebarWidthHotkeysAdjustWidth(t *testing.T) {
 	}
 }
 
+func TestSidebarWidthHotkeysGrowRenderedSidebarColumn(t *testing.T) {
+	m := Model{
+		cfg:                  testConfig(t),
+		composer:             textarea.New(),
+		showSidebar:          true,
+		width:                120,
+		height:               30,
+		sidebarWidthOverride: 30,
+		viewport:             newTranscriptViewport(80, 10),
+	}
+
+	before := m.sidebarWidth()
+	updated, _ := m.handleKey(ui.KeyMsg{Type: ui.KeyRunes, Alt: true, Runes: []rune(".")})
+	next := updated.(*Model)
+	after := next.sidebarWidth()
+	if after <= before {
+		t.Fatalf("expected sidebar width override to grow, before=%d after=%d", before, after)
+	}
+	_ = next.viewSurface()
+	if got := next.ensureMainScreenWidget().retained.bodyChildren[1].Basis; got != after {
+		t.Fatalf("expected sidebar flex basis to track width, got %d want %d", got, after)
+	}
+}
+
 func TestRefreshViewportShowsConnectHintWithoutProvider(t *testing.T) {
 	m := Model{
 		cfg:      config.Default(),
