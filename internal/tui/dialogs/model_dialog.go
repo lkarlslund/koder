@@ -117,9 +117,9 @@ func (d *ModelDialog) Update(msg ui.KeyMsg) ModelDialogAction {
 		} else if d.focus == modelDialogFocusPreset {
 			d.movePreset(1)
 		}
-	case "backspace":
+	case "backspace", "alt+backspace":
 		if d.focus == modelDialogFocusList && d.Query != "" {
-			d.Query = d.Query[:len(d.Query)-1]
+			d.Query, _ = ui.DeleteBeforeCursorString(d.Query, len([]rune(d.Query)), msg.Alt)
 			d.refilter()
 		}
 	default:

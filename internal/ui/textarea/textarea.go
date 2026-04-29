@@ -258,15 +258,27 @@ func (m *Model) Update(msg ui.Msg) (Model, ui.Cmd) {
 		}
 		switch msg.Type {
 		case ui.KeyLeft:
-			m.cursor = m.moveCursorLeft()
+			if msg.Alt {
+				m.cursor = m.moveCursorWordLeft()
+			} else {
+				m.cursor = m.moveCursorLeft()
+			}
 		case ui.KeyRight:
-			m.cursor = m.moveCursorRight()
+			if msg.Alt {
+				m.cursor = m.moveCursorWordRight()
+			} else {
+				m.cursor = m.moveCursorRight()
+			}
 		case ui.KeyHome:
 			m.cursor = 0
 		case ui.KeyEnd:
 			m.cursor = len(m.value)
 		case ui.KeyBackspace:
-			if m.deleteTokenForBackspace() {
+			if msg.Alt {
+				if m.deleteWordForBackspace() {
+					m.revision++
+				}
+			} else if m.deleteTokenForBackspace() {
 				m.revision++
 			} else if m.cursor > 0 {
 				m.removeRange(m.cursor-1, m.cursor)
@@ -274,7 +286,11 @@ func (m *Model) Update(msg ui.Msg) (Model, ui.Cmd) {
 				m.revision++
 			}
 		case ui.KeyDelete:
-			if m.deleteTokenForDelete() {
+			if msg.Alt {
+				if m.deleteWordForDelete() {
+					m.revision++
+				}
+			} else if m.deleteTokenForDelete() {
 				m.revision++
 			} else if m.cursor < len(m.value) {
 				m.removeRange(m.cursor, m.cursor+1)
@@ -484,6 +500,26 @@ func (m *Model) moveCursorRight() int {
 	return next
 }
 
+func (m *Model) moveCursorWordLeft() int {
+	if m.cursor <= 0 {
+		return 0
+	}
+	if token, ok := m.tokenForBackspace(); ok {
+		return token.Start
+	}
+	return ui.PrevWordBoundary(m.value, m.cursor)
+}
+
+func (m *Model) moveCursorWordRight() int {
+	if m.cursor >= len(m.value) {
+		return len(m.value)
+	}
+	if token, ok := m.tokenForDelete(); ok {
+		return token.End
+	}
+	return ui.NextWordBoundary(m.value, m.cursor)
+}
+
 func (m *Model) normalizeCursor(cursor int) int {
 	if token, ok := m.tokenContaining(cursor); ok {
 		return token.End
@@ -545,6 +581,31 @@ func (m *Model) deleteTokenForDelete() bool {
 	}
 	m.removeRange(token.Start, token.End)
 	m.cursor = token.Start
+	return true
+}
+
+func (m *Model) deleteWordForBackspace() bool {
+	if m.deleteTokenForBackspace() {
+		return true
+	}
+	start := ui.PrevWordBoundary(m.value, m.cursor)
+	if start >= m.cursor {
+		return false
+	}
+	m.removeRange(start, m.cursor)
+	m.cursor = start
+	return true
+}
+
+func (m *Model) deleteWordForDelete() bool {
+	if m.deleteTokenForDelete() {
+		return true
+	}
+	end := ui.NextWordBoundary(m.value, m.cursor)
+	if end <= m.cursor {
+		return false
+	}
+	m.removeRange(m.cursor, end)
 	return true
 }
 

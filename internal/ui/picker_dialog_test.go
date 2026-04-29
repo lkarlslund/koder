@@ -31,3 +31,12 @@ func TestPickerDialogRenderMatchesInnerElement(t *testing.T) {
 	})
 	assertNodeRenderMatchesWrapper(t, &Context{Palette: palette, Runtime: &Runtime{}}, AsNode(dialog), dialog.node(80, palette), Rect{W: 80, H: 10})
 }
+
+func TestPickerDialogAltBackspaceDeletesPreviousWord(t *testing.T) {
+	dialog := NewPickerDialog("Themes", "", []PickerItem{{Title: "Tokyo Night", Value: "tokyonight"}})
+	dialog.Query = "tokyo night"
+	dialog.Update(KeyMsg{Type: KeyBackspace, Alt: true})
+	if got := dialog.Query; got != "tokyo " {
+		t.Fatalf("expected alt+backspace to delete previous word, got %q", got)
+	}
+}

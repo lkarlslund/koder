@@ -155,9 +155,9 @@ func (d *ConnectDialog) updateProviderList(msg ui.KeyMsg) ProviderConnectAction 
 		d.move(-1)
 	case "down":
 		d.move(1)
-	case "backspace":
+	case "backspace", "alt+backspace":
 		if d.query != "" {
-			d.query = d.query[:len(d.query)-1]
+			d.query, _ = ui.DeleteBeforeCursorString(d.query, len([]rune(d.query)), msg.Alt)
 			d.refilter()
 		}
 	case "enter":
@@ -201,13 +201,13 @@ func (d *ConnectDialog) updateForm(msg ui.KeyMsg) ProviderConnectAction {
 		d.moveForm(-1)
 	case "down":
 		d.moveForm(1)
-	case "left":
+	case "left", "alt+left":
 		if d.focus == connectFocusButtons {
 			d.moveButtons(-1)
 		} else {
 			d.updateCurrentEditor(msg)
 		}
-	case "right":
+	case "right", "alt+right":
 		if d.focus == connectFocusButtons {
 			d.moveButtons(1)
 		} else {
@@ -217,7 +217,7 @@ func (d *ConnectDialog) updateForm(msg ui.KeyMsg) ProviderConnectAction {
 		d.updateCurrentEditor(msg)
 	case "end", "ctrl+e":
 		d.updateCurrentEditor(msg)
-	case "backspace":
+	case "backspace", "alt+backspace", "delete", "alt+delete":
 		d.updateCurrentEditor(msg)
 	case "ctrl+t":
 		return ProviderConnectAction{Kind: ProviderConnectActionTest, Draft: d.draft}

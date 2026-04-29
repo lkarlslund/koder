@@ -1169,8 +1169,8 @@ func (m *Model) handleMainWindowKey(msg ui.KeyMsg) (bool, ui.Cmd) {
 			m.moveComposerHistorySelection(1)
 			m.invalidateFooterCache()
 			return true, nil
-		case "backspace":
-			m.trimComposerHistoryQuery()
+		case "backspace", "alt+backspace":
+			m.trimComposerHistoryQuery(msg.Alt)
 			m.invalidateFooterCache()
 			return true, nil
 		default:
@@ -4632,11 +4632,11 @@ func (m *Model) appendComposerHistoryQuery(fragment string) {
 	m.composerHistory.SearchIndex = 0
 }
 
-func (m *Model) trimComposerHistoryQuery() {
+func (m *Model) trimComposerHistoryQuery(byWord bool) {
 	if m.composerHistory.SearchQuery == "" {
 		return
 	}
-	m.composerHistory.SearchQuery = m.composerHistory.SearchQuery[:len(m.composerHistory.SearchQuery)-1]
+	m.composerHistory.SearchQuery, _ = ui.DeleteBeforeCursorString(m.composerHistory.SearchQuery, len([]rune(m.composerHistory.SearchQuery)), byWord)
 	m.composerHistory.SearchIndex = 0
 }
 

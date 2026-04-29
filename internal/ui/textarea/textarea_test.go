@@ -285,6 +285,63 @@ func TestTokenArrowKeysSkipAcrossWholeToken(t *testing.T) {
 	}
 }
 
+func TestAltArrowKeysMoveByWord(t *testing.T) {
+	m := newTestModel()
+	m.SetValue("one two three")
+	m.SetCursor(0)
+
+	next, _ := m.Update(ui.KeyMsg{Type: ui.KeyRight, Alt: true})
+	if got := next.CursorIndex(); got != len([]rune("one ")) {
+		t.Fatalf("expected alt+right to jump to next word, got %d", got)
+	}
+
+	next, _ = next.Update(ui.KeyMsg{Type: ui.KeyRight, Alt: true})
+	if got := next.CursorIndex(); got != len([]rune("one two ")) {
+		t.Fatalf("expected second alt+right to jump again, got %d", got)
+	}
+
+	next, _ = next.Update(ui.KeyMsg{Type: ui.KeyLeft, Alt: true})
+	if got := next.CursorIndex(); got != len([]rune("one ")) {
+		t.Fatalf("expected alt+left to jump back a word, got %d", got)
+	}
+}
+
+func TestAltDeleteAndBackspaceOperateOnWords(t *testing.T) {
+	m := newTestModel()
+	m.SetValue("one two three")
+	m.SetCursor(len("one "))
+
+	next, _ := m.Update(ui.KeyMsg{Type: ui.KeyDelete, Alt: true})
+	if got := next.Value(); got != "one three" {
+		t.Fatalf("expected alt+delete to remove next word, got %q", got)
+	}
+
+	next.SetCursor(len("one three"))
+	next, _ = next.Update(ui.KeyMsg{Type: ui.KeyBackspace, Alt: true})
+	if got := next.Value(); got != "one " {
+		t.Fatalf("expected alt+backspace to remove previous word, got %q", got)
+	}
+}
+
+func TestAltWordOperationsTreatTokensAsAtomic(t *testing.T) {
+	m := newTestModel()
+	m.SetValue("x @README.md y")
+	start := len("x ")
+	end := start + len("@README.md")
+	m.RegisterToken(start, end)
+	m.SetCursor(start)
+
+	next, _ := m.Update(ui.KeyMsg{Type: ui.KeyRight, Alt: true})
+	if got := next.CursorIndex(); got != end {
+		t.Fatalf("expected alt+right to skip whole token, got %d want %d", got, end)
+	}
+
+	next, _ = next.Update(ui.KeyMsg{Type: ui.KeyBackspace, Alt: true})
+	if got := next.Value(); got != "x  y" {
+		t.Fatalf("expected alt+backspace to remove whole token, got %q", got)
+	}
+}
+
 func newTestModel() Model {
 	m := New()
 	m.Prompt = "> "

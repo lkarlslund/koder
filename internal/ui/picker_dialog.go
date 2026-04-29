@@ -128,9 +128,9 @@ func (d *PickerDialog) Update(msg KeyMsg) PickerDialogAction {
 			return action
 		}
 		return d.selectCurrent()
-	case "backspace":
+	case "backspace", "alt+backspace":
 		if d.Focus == pickerDialogFocusList && d.Query != "" {
-			d.Query = d.Query[:len(d.Query)-1]
+			d.Query, _ = DeleteBeforeCursorString(d.Query, len([]rune(d.Query)), msg.Alt)
 			d.refilter()
 		}
 	default:
