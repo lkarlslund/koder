@@ -2700,31 +2700,7 @@ func TestCtrlCUsesQuitPath(t *testing.T) {
 	}
 }
 
-func TestEscInterruptRequiresDoublePress(t *testing.T) {
-	m := Model{
-		composer: textarea.New(),
-		loading:  true,
-		busy: busyModel{
-			active: true,
-			scope:  busyScopeTranscript,
-		},
-		activeOpCancel: func() {},
-	}
-
-	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEsc})
-	next := updated.(*Model)
-	if cmd == nil {
-		t.Fatal("expected title sync command after first esc")
-	}
-	if next.status != "Press Esc again to interrupt" {
-		t.Fatalf("unexpected first esc status: %q", next.status)
-	}
-	if next.interruptArmedAt.IsZero() {
-		t.Fatal("expected interrupt to arm on first esc")
-	}
-}
-
-func TestEscInterruptCancelsActiveOperation(t *testing.T) {
+func TestEscInterruptCancelsActiveOperationImmediately(t *testing.T) {
 	cancelled := false
 	m := Model{
 		composer: textarea.New(),
@@ -2733,20 +2709,46 @@ func TestEscInterruptCancelsActiveOperation(t *testing.T) {
 			active: true,
 			scope:  busyScopeTranscript,
 		},
-		activeOpCancel:   func() { cancelled = true },
-		interruptArmedAt: time.Now(),
+		activeOpCancel: func() { cancelled = true },
 	}
 
 	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEsc})
 	next := updated.(*Model)
 	if cmd == nil {
-		t.Fatal("expected title sync command after second esc")
+		t.Fatal("expected title sync command after esc")
 	}
 	if !cancelled {
 		t.Fatal("expected active operation to be cancelled")
 	}
 	if next.status != "Interrupting…" {
-		t.Fatalf("unexpected second esc status: %q", next.status)
+		t.Fatalf("unexpected esc status: %q", next.status)
+	}
+	if !next.interruptArmedAt.IsZero() {
+		t.Fatal("expected interrupt arming to stay cleared")
+	}
+}
+
+func TestEscInterruptCancelsActiveOperationWhenNotLoading(t *testing.T) {
+	cancelled := false
+	m := Model{
+		composer: textarea.New(),
+		busy: busyModel{
+			active: true,
+			scope:  busyScopeTranscript,
+		},
+		activeOpCancel: func() { cancelled = true },
+	}
+
+	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEsc})
+	next := updated.(*Model)
+	if cmd == nil {
+		t.Fatal("expected title sync command after esc")
+	}
+	if !cancelled {
+		t.Fatal("expected active operation to be cancelled")
+	}
+	if next.status != "Interrupting…" {
+		t.Fatalf("unexpected esc status: %q", next.status)
 	}
 }
 

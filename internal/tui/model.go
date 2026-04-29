@@ -1304,7 +1304,7 @@ func (m *Model) handleMainWindowKey(msg ui.KeyMsg) (bool, ui.Cmd) {
 			m.invalidateFooterCache()
 			return true, m.syncWindowTitleCmd()
 		}
-		if m.loading {
+		if m.canInterruptActiveOperation() {
 			_, cmd := m.handleInterruptKey()
 			return true, cmd
 		}
@@ -4272,14 +4272,8 @@ func (m *Model) beginActiveOperation() context.Context {
 }
 
 func (m *Model) handleInterruptKey() (ui.Model, ui.Cmd) {
-	if m.activeOpCancel == nil && (m.activeOpCancels == nil || m.activeOpCancels[m.currentChatID()] == nil) {
+	if !m.canInterruptActiveOperation() {
 		return m, nil
-	}
-	now := time.Now()
-	if m.interruptArmedAt.IsZero() || now.Sub(m.interruptArmedAt) > 5*time.Second {
-		m.interruptArmedAt = now
-		m.status = "Press Esc again to interrupt"
-		return m, m.syncWindowTitleCmd()
 	}
 	m.interruptArmedAt = time.Time{}
 	m.status = "Interrupting…"
@@ -4287,6 +4281,10 @@ func (m *Model) handleInterruptKey() (ui.Model, ui.Cmd) {
 		cancel()
 	}
 	return m, m.syncWindowTitleCmd()
+}
+
+func (m *Model) canInterruptActiveOperation() bool {
+	return m.activeOpCancel != nil || (m.activeOpCancels != nil && m.activeOpCancels[m.currentChatID()] != nil)
 }
 
 func (m *Model) queueComposerPrompt(kind domain.QueuedInputKind) (ui.Model, ui.Cmd) {
