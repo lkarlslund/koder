@@ -40,6 +40,7 @@ Rules:
 - Do not fabricate tool results.
 - Use `read` for text files and directories.
 - Use `view_image` for local screenshots, photos, diagrams, and other image files.
+- When a tool result or attachment contains important facts you may need later, carry those facts forward in text because older tool results, images, and files may be compacted out of context later.
 
 # Editing rules
 
