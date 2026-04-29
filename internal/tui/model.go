@@ -5455,7 +5455,7 @@ func (m *Model) isWorking() bool {
 }
 
 func (m *Model) shouldAnimateSpinner() bool {
-	return m.isWorking() || m.hasPreferencesDialog()
+	return m.busy.spinner.active || m.hasPreferencesDialog()
 }
 
 func (m *Model) canSendPrompt() (bool, string) {

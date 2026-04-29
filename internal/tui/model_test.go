@@ -5277,6 +5277,42 @@ func TestSpinnerTickPreservesViewportOffsetWhenScrolledBack(t *testing.T) {
 	}
 }
 
+func TestSpinnerTickAnimatesSidebarBusyIndicator(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.UI.Spinner = "circles"
+	m := Model{
+		cfg: cfg,
+		busy: busyModel{
+			active: true,
+			scope:  busyScopeSidebar,
+			status: "Creating session…",
+			spinner: spinnerModel{
+				active: true,
+			},
+		},
+		status:         "Ready",
+		currentSession: domain.Session{Title: "Test"},
+		viewport:       newTranscriptViewport(40, 6),
+		composer:       textarea.New(),
+	}
+
+	before := m.renderSidebar()
+
+	updated, cmd := m.Update(spinnerTickMsg{})
+	next := updated.(Model)
+	after := next.renderSidebar()
+
+	if before == after {
+		t.Fatalf("expected sidebar busy indicator to animate, before=%q after=%q", before, after)
+	}
+	if cmd == nil {
+		t.Fatal("expected follow-up spinner tick command")
+	}
+	if next.busy.spinner.frame != 1 {
+		t.Fatalf("expected spinner frame to advance, got %d", next.busy.spinner.frame)
+	}
+}
+
 func TestRenderMessagePartsShowsReasoningBeforeText(t *testing.T) {
 	m := Model{
 		showReasoning: true,
