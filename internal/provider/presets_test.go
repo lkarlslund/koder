@@ -30,6 +30,7 @@ func TestRequestExtraBodyUsesDashScopeShape(t *testing.T) {
 func TestRequestExtraBodyUsesCompatibleChatTemplateKwargs(t *testing.T) {
 	got := RequestExtraBody(config.Provider{BaseURL: "http://127.0.0.1:8000/v1"}, "Qwen/Qwen3.6-35B-A3B", ModelPresetAuto)
 	want := map[string]any{
+		"thinking_token_budget": qwen36ThinkingTokenBudget,
 		"chat_template_kwargs": map[string]any{
 			"enable_thinking":   true,
 			"preserve_thinking": true,

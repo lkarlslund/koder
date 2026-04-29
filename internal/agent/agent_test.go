@@ -838,6 +838,9 @@ func TestPreviewNextRequestIncludesQwenPresetExtraBody(t *testing.T) {
 	if !ok || got["preserve_thinking"] != true || got["enable_thinking"] != true {
 		t.Fatalf("expected qwen preserve-thinking kwargs, got %#v", req.ExtraBody)
 	}
+	if got := req.ExtraBody["thinking_token_budget"]; got != 128 {
+		t.Fatalf("expected qwen thinking token budget, got %#v", req.ExtraBody)
+	}
 }
 
 func TestPreviewNextRequestKeepsStableMCPToolOrder(t *testing.T) {

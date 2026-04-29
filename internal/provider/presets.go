@@ -11,6 +11,7 @@ const (
 	ModelPresetAuto                   = "auto"
 	ModelPresetDefault                = "default"
 	ModelPresetQwen36PreserveThinking = "qwen3.6-preserve-thinking"
+	qwen36ThinkingTokenBudget         = 128
 )
 
 type ModelPreset struct {
@@ -22,7 +23,7 @@ type ModelPreset struct {
 var modelPresets = []ModelPreset{
 	{ID: ModelPresetAuto, Title: "Auto", Description: "Match a preset from the selected model name"},
 	{ID: ModelPresetDefault, Title: "Default", Description: "No model-specific request overrides"},
-	{ID: ModelPresetQwen36PreserveThinking, Title: "Qwen 3.6 Preserve Thinking", Description: "Enable Qwen 3.6 thinking preservation request options"},
+	{ID: ModelPresetQwen36PreserveThinking, Title: "Qwen 3.6 Preserve Thinking", Description: "Enable Qwen 3.6 thinking preservation request options with a 128-token reasoning budget on compatible servers"},
 }
 
 func Presets() []ModelPreset {
@@ -83,6 +84,7 @@ func RequestExtraBody(cfg config.Provider, modelID, selected string) map[string]
 		}
 	}
 	return map[string]any{
+		"thinking_token_budget": qwen36ThinkingTokenBudget,
 		"chat_template_kwargs": map[string]any{
 			"enable_thinking":   true,
 			"preserve_thinking": true,
