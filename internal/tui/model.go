@@ -1470,6 +1470,7 @@ func (m *Model) handleMouse(msg ui.MouseMsg) (ui.Model, ui.Cmd, bool) {
 	if msg.X < 0 || msg.X >= paneWidth {
 		return m, nil, false
 	}
+	m.refreshViewportAt(m.viewport.YOffset)
 	contentX := msg.X
 	contentY := msg.Y
 	for i := len(m.transcriptControls) - 1; i >= 0; i-- {

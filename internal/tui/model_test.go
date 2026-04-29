@@ -5841,6 +5841,8 @@ func TestMouseClickTogglesToolRunExpansion(t *testing.T) {
 	m := Model{
 		mouseEnabled:            true,
 		currentSession:          domain.Session{ID: 1},
+		width:                   100,
+		height:                  20,
 		viewport:                newTranscriptViewport(80, 8),
 		parts:                   map[int64][]domain.Part{},
 		expandedToolRuns:        map[string]bool{},
@@ -5926,6 +5928,186 @@ func TestMouseClickTogglesToolRunExpansion(t *testing.T) {
 	}
 	if strings.Contains(final.viewport.View(), "line one\nline two") {
 		t.Fatalf("expected collapsed tool output after second click, got %q", final.viewport.View())
+	}
+}
+
+func TestMouseClickTogglesToolRunExpansionWhileBusy(t *testing.T) {
+	m := Model{
+		mouseEnabled:            true,
+		currentSession:          domain.Session{ID: 1},
+		width:                   100,
+		height:                  20,
+		viewport:                newTranscriptViewport(80, 8),
+		parts:                   map[int64][]domain.Part{},
+		expandedToolRuns:        map[string]bool{},
+		expandedToolRunCommands: map[string]bool{},
+		palette:                 theme.Resolve("tokyonight").Palette,
+		loading:                 true,
+		busy: busyModel{
+			active: true,
+			scope:  busyScopeTranscript,
+			status: "Working ...",
+			spinner: spinnerModel{
+				active: true,
+			},
+		},
+		pendingAssistant: pendingAssistantTurn{
+			Text: "partial answer",
+		},
+	}
+	m.messages = []domain.Message{
+		{ID: 1, Role: domain.MessageRoleTool, Summary: "bash"},
+	}
+	m.parts[1] = []domain.Part{{
+		Kind:     domain.PartKindToolOutput,
+		Body:     "line one\nline two",
+		MetaJSON: `{"tool":"bash","command":"echo hi","tool_call_id":"call_bash_1"}`,
+	}}
+
+	m.refreshViewport()
+	beforeRendered := m.renderBody()
+
+	clickX := -1
+	clickY := -1
+	for _, control := range m.transcriptControls {
+		if control.ID != "toolrun:call_bash_1:output" {
+			continue
+		}
+		clickX = control.Rect.X + 1
+		clickY = control.Rect.Y
+		break
+	}
+	if clickX < 0 || clickY < 0 {
+		t.Fatalf("expected toolrun control to be registered, got %#v", m.transcriptControls)
+	}
+
+	before := m.viewport.View()
+	updated, cmd := m.Update(ui.MouseMsg{
+		Action: ui.MouseActionPress,
+		Button: ui.MouseButtonLeft,
+		X:      clickX,
+		Y:      clickY,
+	})
+	var next Model
+	switch typed := updated.(type) {
+	case Model:
+		next = typed
+	case *Model:
+		next = *typed
+	default:
+		t.Fatalf("unexpected model type %T", updated)
+	}
+	if cmd != nil {
+		t.Fatal("expected no command from tool run mouse toggle")
+	}
+	after := next.viewport.View()
+	if before == after {
+		t.Fatalf("expected click while busy to refresh viewport, before=%q after=%q", before, after)
+	}
+	if !strings.Contains(after, "line one") {
+		t.Fatalf("expected expanded tool output while busy, got %q", after)
+	}
+	afterRendered := next.renderBody()
+	if beforeRendered == afterRendered {
+		t.Fatalf("expected busy click to change rendered surface, before=%q after=%q", beforeRendered, afterRendered)
+	}
+
+	updated, cmd = next.Update(spinnerTickMsg{})
+	if cmd == nil {
+		t.Fatal("expected spinner tick command while busy")
+	}
+	switch typed := updated.(type) {
+	case Model:
+		next = typed
+	case *Model:
+		next = *typed
+	default:
+		t.Fatalf("unexpected model type after spinner tick %T", updated)
+	}
+	if !strings.Contains(next.viewport.View(), "line one") {
+		t.Fatalf("expected expanded tool output to persist across busy refresh, got %q", next.viewport.View())
+	}
+}
+
+func TestMouseClickResyncsTranscriptControlsDuringBusy(t *testing.T) {
+	m := Model{
+		mouseEnabled:            true,
+		currentSession:          domain.Session{ID: 1},
+		width:                   100,
+		height:                  20,
+		viewport:                newTranscriptViewport(80, 8),
+		parts:                   map[int64][]domain.Part{},
+		expandedToolRuns:        map[string]bool{},
+		expandedToolRunCommands: map[string]bool{},
+		palette:                 theme.Resolve("tokyonight").Palette,
+		loading:                 true,
+		busy: busyModel{
+			active: true,
+			scope:  busyScopeTranscript,
+			status: "Working ...",
+			spinner: spinnerModel{
+				active: true,
+			},
+		},
+	}
+	m.messages = []domain.Message{
+		{ID: 1, Role: domain.MessageRoleTool, Summary: "bash"},
+	}
+	m.parts[1] = []domain.Part{{
+		Kind:     domain.PartKindToolOutput,
+		Body:     "line one\nline two",
+		MetaJSON: `{"tool":"bash","command":"echo hi","tool_call_id":"call_bash_1"}`,
+	}}
+
+	m.refreshViewport()
+	_ = m.renderBody()
+	if len(m.transcriptControls) == 0 {
+		t.Fatal("expected initial transcript controls")
+	}
+
+	m.messages = append([]domain.Message{{ID: 2, Role: domain.MessageRoleAssistant, Summary: "lead in"}}, m.messages...)
+	m.parts[2] = []domain.Part{{
+		Kind: domain.PartKindText,
+		Body: "prepended line\nsecond line",
+	}}
+	m.invalidateTranscript()
+	rendered := m.renderBody()
+	lines := strings.Split(rendered, "\n")
+	clickX := -1
+	clickY := -1
+	for y, line := range lines {
+		idx := strings.Index(line, "Expand output (1 line)")
+		if idx < 0 {
+			continue
+		}
+		clickX = idx + 1
+		clickY = y
+		break
+	}
+	if clickX < 0 || clickY < 0 {
+		t.Fatalf("expected rendered body to include expand control, got %q", rendered)
+	}
+
+	updated, cmd := m.Update(ui.MouseMsg{
+		Action: ui.MouseActionPress,
+		Button: ui.MouseButtonLeft,
+		X:      clickX,
+		Y:      clickY,
+	})
+	var next Model
+	switch typed := updated.(type) {
+	case Model:
+		next = typed
+	case *Model:
+		next = *typed
+	default:
+		t.Fatalf("unexpected model type %T", updated)
+	}
+	if cmd != nil {
+		t.Fatal("expected no command from busy tool run mouse toggle")
+	}
+	if !strings.Contains(next.viewport.View(), "line one") {
+		t.Fatalf("expected resynced busy click to expand tool output, got %q", next.viewport.View())
 	}
 }
 
