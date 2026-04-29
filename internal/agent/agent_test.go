@@ -461,6 +461,67 @@ func TestBuildConversationUsesStructuredToolMessages(t *testing.T) {
 	}
 }
 
+func TestBuildConversationIncludesViewImageToolContentParts(t *testing.T) {
+	cfg := testConfig(t)
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	workdir := t.TempDir()
+	engine := New(cfg, st, tools.NewRegistry(workdir), nil, workdir)
+	session, err := st.CreateSession(context.Background(), "test", "openai", "gpt-5.4", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chat := defaultChatForSession(t, st, session.ID)
+	imagePath := filepath.Join(workdir, "screen.png")
+	if err := os.WriteFile(imagePath, []byte("\x89PNG\r\n\x1a\nfake"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	toolMsg, err := st.AddMessage(context.Background(), session.ID, domain.MessageRoleTool, "view_image")
+	if err != nil {
+		t.Fatal(err)
+	}
+	meta := tools.MetaWithStoredResult(map[string]string{
+		"tool":         "view_image",
+		"tool_call_id": "call_image",
+	}, domain.PartKindToolOutput, domain.ToolKindViewImage, tools.StoredResultStatusOK, tools.ViewImageStoredResult{
+		Path:       "screen.png",
+		SourcePath: imagePath,
+		MIMEType:   "image/png",
+		Summary:    "Viewed image screen.png",
+	})
+	if _, err := st.AddPart(context.Background(), toolMsg.ID, domain.PartKindToolOutput, "Viewed image screen.png", tools.JSONMeta(meta)); err != nil {
+		t.Fatal(err)
+	}
+
+	conversation, err := engine.buildConversation(context.Background(), session.ID, chat.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(conversation) < 2 {
+		t.Fatalf("expected tool message in conversation, got %#v", conversation)
+	}
+	msg := conversation[len(conversation)-1]
+	if msg.Role != domain.MessageRoleTool || msg.ToolCallID != "call_image" {
+		t.Fatalf("expected tool message with tool call id, got %#v", msg)
+	}
+	if got := len(msg.ContentParts); got != 2 {
+		t.Fatalf("expected text and image content parts, got %#v", msg.ContentParts)
+	}
+	if msg.ContentParts[0].Type != "text" || !strings.Contains(msg.ContentParts[0].Text, "Viewed image screen.png") {
+		t.Fatalf("expected leading text content part, got %#v", msg.ContentParts[0])
+	}
+	if msg.ContentParts[1].Type != "image_url" {
+		t.Fatalf("expected trailing image content part, got %#v", msg.ContentParts[1])
+	}
+	if len(msg.ContentParts[1].Data) == 0 {
+		t.Fatalf("expected image bytes in content part, got %#v", msg.ContentParts[1])
+	}
+}
+
 func TestStringifyPartsFormatsStoredTaskAndPlanUpdates(t *testing.T) {
 	taskMeta := tools.MetaWithStoredResult(map[string]string{
 		"status": "pending",

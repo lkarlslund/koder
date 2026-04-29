@@ -204,6 +204,14 @@ type WebSearchStoredResult struct {
 	Items          []WebSearchStoredItem `json:"items,omitempty"`
 }
 
+type ViewImageStoredResult struct {
+	Path       string `json:"path"`
+	SourcePath string `json:"source_path"`
+	MIMEType   string `json:"mime_type"`
+	Detail     string `json:"detail,omitempty"`
+	Summary    string `json:"summary,omitempty"`
+}
+
 type MCPStoredContentItem struct {
 	Type     string `json:"type"`
 	Text     string `json:"text,omitempty"`
@@ -244,6 +252,7 @@ func (TodoListStoredResult) storedResultPayload()      {}
 func (SkillStoredResult) storedResultPayload()         {}
 func (WebFetchStoredResult) storedResultPayload()      {}
 func (WebSearchStoredResult) storedResultPayload()     {}
+func (ViewImageStoredResult) storedResultPayload()     {}
 func (MCPStoredResult) storedResultPayload()           {}
 func (DeniedStoredResult) storedResultPayload()        {}
 func (ErrorStoredResult) storedResultPayload()         {}
@@ -316,6 +325,18 @@ func DisplayTextForStored(tool domain.ToolKind, payload StoredResultPayload) str
 	}
 	text, _ := formatStoredResultForDisplay(env)
 	return text
+}
+
+func ViewImageStoredResultForPart(part domain.Part) (ViewImageStoredResult, bool) {
+	env, ok := storedResultFromPart(part)
+	if !ok || env.PartKind != domain.PartKindToolOutput || env.Tool != domain.ToolKindViewImage {
+		return ViewImageStoredResult{}, false
+	}
+	var result ViewImageStoredResult
+	if err := json.Unmarshal(env.Payload, &result); err != nil {
+		return ViewImageStoredResult{}, false
+	}
+	return result, true
 }
 
 func marshalStoredResult(partKind domain.PartKind, tool domain.ToolKind, status StoredResultStatus, payload StoredResultPayload) (string, error) {
@@ -418,6 +439,8 @@ func formatStoredToolOutput(env storedResultEnvelope) (string, bool) {
 		})
 	case domain.ToolKindWebSearch:
 		return decodeAndFormat[WebSearchStoredResult](env.Payload, formatWebSearchStoredResult)
+	case domain.ToolKindViewImage:
+		return decodeAndFormat[ViewImageStoredResult](env.Payload, formatViewImageStoredResult)
 	case domain.ToolKindMilestoneList, domain.ToolKindMilestoneAdd, domain.ToolKindMilestoneUpdate, domain.ToolKindMilestoneWrite, domain.ToolKindMilestonePlan:
 		return decodeAndFormat[MilestonePlanStoredResult](env.Payload, formatMilestonePlanStoredResult)
 	case domain.ToolKindChatList, domain.ToolKindChatStartDecomp, domain.ToolKindChatStartExec, domain.ToolKindChatPoll:
@@ -662,6 +685,20 @@ func formatWebSearchStoredResult(result WebSearchStoredResult) string {
 		lines = append(lines, "")
 	}
 	return strings.TrimSpace(strings.Join(lines, "\n"))
+}
+
+func formatViewImageStoredResult(result ViewImageStoredResult) string {
+	if summary := strings.TrimSpace(result.Summary); summary != "" {
+		return summary
+	}
+	path := strings.TrimSpace(result.Path)
+	if path == "" {
+		path = strings.TrimSpace(result.SourcePath)
+	}
+	if path == "" {
+		return "Viewed image"
+	}
+	return "Viewed image " + path
 }
 
 func ParseReadStoredLines(output string) ([]ReadStoredLine, string) {

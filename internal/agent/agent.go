@@ -1564,7 +1564,7 @@ func (e *Engine) buildPromptEnvelopePreview(ctx context.Context, session domain.
 				envelope.Items = append(envelope.Items[:0], compactedHistoryMessage(summary))
 				continue
 			}
-			items, err := e.conversationMessagesForStoredMessage(msg, partsByMessage[msg.ID], e.preserveThinkingEnabled(session))
+			items, err := e.conversationMessagesForStoredMessage(session, msg, partsByMessage[msg.ID], e.preserveThinkingEnabled(session))
 			if err != nil {
 				return provider.PromptEnvelope{}, err
 			}
@@ -1701,14 +1701,14 @@ func (e *Engine) previewUserMessage(prompt string, drafts []attachment.Draft, re
 	}, true, nil
 }
 
-func (e *Engine) conversationMessagesForStoredMessage(msg domain.Message, parts []domain.Part, preserveThinking bool) ([]provider.Message, error) {
+func (e *Engine) conversationMessagesForStoredMessage(session domain.Session, msg domain.Message, parts []domain.Part, preserveThinking bool) ([]provider.Message, error) {
 	switch msg.Role {
 	case domain.MessageRoleAssistant:
 		if assistantMsg, ok := structuredAssistantMessage(parts, preserveThinking); ok {
 			return []provider.Message{assistantMsg}, nil
 		}
 	case domain.MessageRoleTool:
-		if toolMsg, ok := structuredToolMessage(parts); ok {
+		if toolMsg, ok := e.structuredToolMessage(session, parts); ok {
 			return []provider.Message{toolMsg}, nil
 		}
 	case domain.MessageRoleUser:
@@ -1887,7 +1887,7 @@ func structuredAssistantMessage(parts []domain.Part, preserveThinking bool) (pro
 	}, true
 }
 
-func structuredToolMessage(parts []domain.Part) (provider.Message, bool) {
+func (e *Engine) structuredToolMessage(session domain.Session, parts []domain.Part) (provider.Message, bool) {
 	for _, part := range parts {
 		if part.Kind != domain.PartKindToolOutput {
 			continue
@@ -1907,13 +1907,46 @@ func structuredToolMessage(parts []domain.Part) (provider.Message, bool) {
 				body = "Diff:\n" + diff
 			}
 		}
-		return provider.Message{
+		message := provider.Message{
 			Role:       domain.MessageRoleTool,
 			Content:    body,
 			ToolCallID: toolCallID,
-		}, true
+		}
+		if imageMsg, ok := e.toolImageMessage(session, part, toolCallID, body); ok {
+			return imageMsg, true
+		}
+		return message, true
 	}
 	return provider.Message{}, false
+}
+
+func (e *Engine) toolImageMessage(session domain.Session, part domain.Part, toolCallID string, body string) (provider.Message, bool) {
+	stored, ok := tools.ViewImageStoredResultForPart(part)
+	if !ok {
+		return provider.Message{}, false
+	}
+	if !e.sessionSupportsImageAttachments(session) {
+		return provider.Message{}, false
+	}
+	sourcePath := strings.TrimSpace(stored.SourcePath)
+	mimeType := strings.TrimSpace(stored.MIMEType)
+	if sourcePath == "" || mimeType == "" {
+		return provider.Message{}, false
+	}
+	data, err := os.ReadFile(sourcePath)
+	if err != nil || len(data) == 0 {
+		return provider.Message{}, false
+	}
+	contentParts := make([]provider.ContentPart, 0, 2)
+	if strings.TrimSpace(body) != "" {
+		contentParts = append(contentParts, provider.TextPart(body))
+	}
+	contentParts = append(contentParts, provider.ImagePart(mimeType, data))
+	return provider.Message{
+		Role:         domain.MessageRoleTool,
+		ContentParts: contentParts,
+		ToolCallID:   toolCallID,
+	}, true
 }
 
 func diffBody(parts []domain.Part) string {
@@ -2018,6 +2051,11 @@ func (e *Engine) validatePromptAttachments(session domain.Session, drafts []atta
 		}
 	}
 	return nil
+}
+
+func (e *Engine) sessionSupportsImageAttachments(session domain.Session) bool {
+	supported, err := e.caps.SupportsAttachment(session.ProviderID, providerCfgForSession(e.cfg, session), session.ModelID, attachment.KindImage)
+	return err == nil && supported
 }
 
 func providerCfgForSession(cfg config.Config, session domain.Session) config.Provider {
@@ -2688,7 +2726,7 @@ func (e *Engine) resolvePermissionTargets(projectRoot string, req tools.Request)
 	}
 	var raws []string
 	switch req.Tool {
-	case domain.ToolKindRead, domain.ToolKindEdit, domain.ToolKindWrite:
+	case domain.ToolKindRead, domain.ToolKindViewImage, domain.ToolKindEdit, domain.ToolKindWrite:
 		raws = append(raws, req.Args["path"])
 	case domain.ToolKindGlob, domain.ToolKindGrep:
 		if root := strings.TrimSpace(req.Args["path"]); root != "" {

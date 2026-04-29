@@ -38,6 +38,8 @@ Rules:
 - Run independent reads and searches in parallel when the tool system supports it.
 - If a tool returns useful output, incorporate it and continue the task.
 - Do not fabricate tool results.
+- Use `read` for text files and directories.
+- Use `view_image` for local screenshots, photos, diagrams, and other image files.
 
 # Editing rules
 
