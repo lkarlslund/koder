@@ -7082,3 +7082,84 @@ func TestTranscriptBlocksIncludeLiveExecRuns(t *testing.T) {
 		t.Fatalf("unexpected live exec tool run: %#v", run)
 	}
 }
+
+func TestRefreshExecSubscriptionCmdReceivesExecEventsForCurrentChat(t *testing.T) {
+	mgr := execruntime.NewManager()
+	m := Model{
+		exec:           mgr,
+		currentSession: domain.Session{ID: 1},
+		currentChat:    domain.Chat{ID: 2, SessionID: 1},
+	}
+
+	cmd := m.refreshExecSubscriptionCmd()
+	if cmd == nil {
+		t.Fatal("expected subscription command")
+	}
+
+	if _, err := mgr.Start(context.Background(), execruntime.StartRequest{
+		SessionID: 1,
+		ChatID:    2,
+		Command:   "printf hi",
+	}); err != nil {
+		t.Fatalf("start exec session: %v", err)
+	}
+
+	raw := cmd()
+	msg, ok := raw.(execEventMsg)
+	if !ok {
+		t.Fatalf("expected execEventMsg, got %T", raw)
+	}
+	if !msg.ok {
+		t.Fatal("expected live exec event")
+	}
+	if msg.chatID != 2 {
+		t.Fatalf("expected chat 2 event, got %d", msg.chatID)
+	}
+	if msg.seq != m.execSubscriptionSeq {
+		t.Fatalf("expected seq %d, got %d", m.execSubscriptionSeq, msg.seq)
+	}
+}
+
+func TestExecEventMsgIgnoresStaleSubscription(t *testing.T) {
+	mgr := execruntime.NewManager()
+	m := Model{
+		exec:           mgr,
+		currentSession: domain.Session{ID: 1},
+		currentChat:    domain.Chat{ID: 2, SessionID: 1},
+	}
+
+	oldCmd := m.refreshExecSubscriptionCmd()
+	if oldCmd == nil {
+		t.Fatal("expected initial subscription command")
+	}
+	oldSeq := m.execSubscriptionSeq
+
+	m.currentChat = domain.Chat{ID: 3, SessionID: 1}
+	if cmd := m.refreshExecSubscriptionCmd(); cmd == nil {
+		t.Fatal("expected refreshed subscription command")
+	}
+	if m.execSubscriptionSeq == oldSeq {
+		t.Fatal("expected subscription sequence to advance")
+	}
+
+	raw := oldCmd()
+	msg, ok := raw.(execEventMsg)
+	if !ok {
+		t.Fatalf("expected execEventMsg, got %T", raw)
+	}
+	if msg.ok {
+		t.Fatal("expected closed stale subscription")
+	}
+
+	nextModel, cmd := m.Update(msg)
+	updated, ok := nextModel.(Model)
+	if !ok {
+		t.Fatalf("expected Model, got %T", nextModel)
+	}
+	if cmd != nil {
+		t.Fatal("expected stale exec event to be ignored without scheduling follow-up work")
+	}
+	if updated.execSubscriptionSeq != m.execSubscriptionSeq {
+		t.Fatalf("expected seq %d to remain active, got %d", m.execSubscriptionSeq, updated.execSubscriptionSeq)
+	}
+}

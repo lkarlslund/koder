@@ -45,7 +45,12 @@ type promptDoneMsg struct {
 }
 
 type spinnerTickMsg struct{}
-type execTickMsg struct{}
+type execEventMsg struct {
+	chatID int64
+	seq    uint64
+	event  execruntime.Event
+	ok     bool
+}
 type bouncyBallsTickMsg struct {
 	At  time.Time
 	Seq uint64
@@ -537,7 +542,10 @@ type Model struct {
 	mainWindowView          *modelWindow
 	debug                   *debugsrv.Recorder
 	uiRoot                  *ui.Root
-	execTickPending         bool
+	execEvents              <-chan execruntime.Event
+	execCancel              func()
+	execSubscriptionChatID  int64
+	execSubscriptionSeq     uint64
 	rootTimerSeq            uint64
 	rootTimerPending        bool
 	rootTimerPendingAt      time.Time
@@ -731,10 +739,12 @@ func (m Model) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 			m.refreshViewportAt(offset)
 		}
 		return m, ui.Batch(spinnerTickCmd(), m.syncWindowTitleCmd())
-	case execTickMsg:
-		m.execTickPending = false
-		if m.exec == nil || m.currentSession.ID == 0 || m.currentChat.ID == 0 {
+	case execEventMsg:
+		if msg.seq != m.execSubscriptionSeq || msg.chatID != m.execSubscriptionChatID {
 			return m, nil
+		}
+		if !msg.ok {
+			return m, m.refreshExecSubscriptionCmd()
 		}
 		wasAtBottom := m.viewport.AtBottom()
 		offset := m.viewport.YOffset
@@ -744,10 +754,7 @@ func (m Model) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 		} else {
 			m.refreshViewportAt(offset)
 		}
-		if !m.shouldPollExecSessions() {
-			return m, nil
-		}
-		return m, execTickCmd()
+		return m, m.waitForExecEventCmd()
 	case promptDoneMsg:
 		m.pendingAssistant = pendingAssistantTurn{}
 		m.invalidateBodyCache()
@@ -780,7 +787,7 @@ func (m Model) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 		m.clampQueueSelection()
 		m.pendingModelNote = ""
 		m.startBusy(m.busy.scopeOrDefault(busyScopeTranscript), "Working ...")
-		return m, ui.Batch(nextEventCmd(msg.chat.ID, msg.events), m.spinnerCmdIfNeeded(), m.syncWindowTitleCmd())
+		return m, ui.Batch(nextEventCmd(msg.chat.ID, msg.events), m.spinnerCmdIfNeeded(), m.refreshExecSubscriptionCmd(), m.syncWindowTitleCmd())
 	case bangCommandMsg:
 		m.invalidateBodyCache()
 		if msg.err != nil {
@@ -828,10 +835,10 @@ func (m Model) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 		default:
 			if msg.preserveBusy {
 				m.status = "Command finished"
-				return m, ui.Batch(reload, m.syncWindowTitleCmd())
+				return m, ui.Batch(reload, m.refreshExecSubscriptionCmd(), m.syncWindowTitleCmd())
 			}
 			m.stopBusyWithStatus("Command finished")
-			return m, ui.Batch(reload, m.syncWindowTitleCmd())
+			return m, ui.Batch(reload, m.refreshExecSubscriptionCmd(), m.syncWindowTitleCmd())
 		}
 	case kickoffPromptMsg:
 		return m, ui.Batch(m.promptCmd(m.beginActiveOperation(), msg.Prompt, msg.Attachments, msg.References), m.spinnerCmdIfNeeded(), m.syncWindowTitleCmd())
@@ -894,6 +901,9 @@ func (m Model) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 		if cmd := m.detectSessionContextWindowCmd(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+		if cmd := m.refreshExecSubscriptionCmd(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 		return m, ui.Batch(cmds...)
 	case agentsRefreshMsg:
 		m.invalidateTranscript()
@@ -953,7 +963,7 @@ func (m Model) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 		}
 		m.updateComposerMenus()
 		m.refreshViewport()
-		return m, m.syncWindowTitleCmd()
+		return m, ui.Batch(m.refreshExecSubscriptionCmd(), m.syncWindowTitleCmd())
 	case sessionPickerMsg:
 		m.invalidateBodyCache()
 		m.sessions = msg.sessions
@@ -6550,49 +6560,16 @@ func (m *Model) withRootTimers(cmd ui.Cmd) ui.Cmd {
 	m.syncComposerBlinkTimer()
 	animationCmd := m.bouncyBalls.TickCmd()
 	timerCmd := m.rootTimerCmd()
-	execCmd := m.execTickCmdIfNeeded()
-	if timerCmd == nil && animationCmd == nil && execCmd == nil {
+	if timerCmd == nil && animationCmd == nil {
 		return cmd
 	}
-	if timerCmd == nil && animationCmd == nil {
-		return ui.Batch(cmd, execCmd)
-	}
-	if timerCmd == nil && execCmd == nil {
+	if timerCmd == nil {
 		return ui.Batch(cmd, animationCmd)
 	}
-	if animationCmd == nil && execCmd == nil {
+	if animationCmd == nil {
 		return ui.Batch(cmd, timerCmd)
 	}
-	return ui.Batch(cmd, timerCmd, animationCmd, execCmd)
-}
-
-func (m *Model) execTickCmdIfNeeded() ui.Cmd {
-	if m.execTickPending || !m.shouldPollExecSessions() {
-		return nil
-	}
-	m.execTickPending = true
-	return execTickCmd()
-}
-
-func (m *Model) shouldPollExecSessions() bool {
-	if m == nil || m.exec == nil || m.currentSession.ID == 0 || m.currentChat.ID == 0 {
-		return false
-	}
-	list, err := m.exec.List(context.Background(), execruntime.ListRequest{
-		SessionID: m.currentSession.ID,
-		ChatID:    m.currentChat.ID,
-		Scope:     execruntime.ScopeChat,
-		MaxBytes:  1024,
-	})
-	if err != nil {
-		return false
-	}
-	for _, item := range list {
-		if item.State == execruntime.StateRunning {
-			return true
-		}
-	}
-	return false
+	return ui.Batch(cmd, timerCmd, animationCmd)
 }
 
 func (m *Model) closePicker() {
@@ -7669,10 +7646,42 @@ func spinnerTickCmd() ui.Cmd {
 	})
 }
 
-func execTickCmd() ui.Cmd {
-	return ui.Tick(250*time.Millisecond, func(time.Time) ui.Msg {
-		return execTickMsg{}
-	})
+func waitForExecEventCmd(events <-chan execruntime.Event, chatID int64, seq uint64) ui.Cmd {
+	if events == nil {
+		return nil
+	}
+	return func() ui.Msg {
+		evt, ok := <-events
+		return execEventMsg{chatID: chatID, seq: seq, event: evt, ok: ok}
+	}
+}
+
+func (m *Model) waitForExecEventCmd() ui.Cmd {
+	if m == nil || m.execEvents == nil || m.execSubscriptionChatID == 0 || m.execSubscriptionSeq == 0 {
+		return nil
+	}
+	return waitForExecEventCmd(m.execEvents, m.execSubscriptionChatID, m.execSubscriptionSeq)
+}
+
+func (m *Model) refreshExecSubscriptionCmd() ui.Cmd {
+	if m == nil {
+		return nil
+	}
+	if m.execCancel != nil {
+		m.execCancel()
+		m.execCancel = nil
+	}
+	m.execEvents = nil
+	m.execSubscriptionChatID = 0
+	if m.exec == nil || m.currentSession.ID == 0 || m.currentChat.ID == 0 {
+		return nil
+	}
+	events, cancel := m.exec.Subscribe(m.currentChat.ID)
+	m.execEvents = events
+	m.execCancel = cancel
+	m.execSubscriptionChatID = m.currentChat.ID
+	m.execSubscriptionSeq++
+	return m.waitForExecEventCmd()
 }
 
 func slashQuery(value string) (string, bool) {
