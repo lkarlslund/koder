@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/lkarlslund/koder/internal/theme"
 	"github.com/lkarlslund/koder/internal/ui"
+	"github.com/yuin/goldmark/ast"
 )
 
 func findSpanWithText(spans []ui.StyledSpan, needle string) (ui.StyledSpan, bool) {
@@ -88,6 +89,23 @@ func TestRenderFormatsFencedCodeBlock(t *testing.T) {
 	}
 	if !strings.Contains(got, "└") {
 		t.Fatalf("expected code block footer, got %q", got)
+	}
+}
+
+func TestParseCodeFenceOptionsHandlesMissingInfo(t *testing.T) {
+	opts := parseCodeFenceOptions(&ast.FencedCodeBlock{}, nil)
+
+	if opts.Language != "" {
+		t.Fatalf("expected empty language, got %q", opts.Language)
+	}
+	if opts.ShowNumbers {
+		t.Fatal("expected line numbers to remain disabled")
+	}
+	if len(opts.Highlights) != 0 {
+		t.Fatalf("expected no highlights, got %#v", opts.Highlights)
+	}
+	if len(opts.Focus) != 0 {
+		t.Fatalf("expected no focus lines, got %#v", opts.Focus)
 	}
 }
 

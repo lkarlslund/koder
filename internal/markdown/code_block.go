@@ -117,11 +117,17 @@ func (r *Renderer) renderStyledFencedCodeBlock(node *ast.FencedCodeBlock, source
 }
 
 func parseCodeFenceOptions(node *ast.FencedCodeBlock, source []byte) codeFenceOptions {
-	rawInfo := strings.TrimSpace(string(node.Info.Text(source)))
 	opts := codeFenceOptions{
-		Language:   strings.TrimSpace(string(node.Language(source))),
 		Highlights: map[int]bool{},
 		Focus:      map[int]bool{},
+	}
+	if node == nil {
+		return opts
+	}
+	opts.Language = strings.TrimSpace(string(node.Language(source)))
+	var rawInfo string
+	if node.Info != nil {
+		rawInfo = strings.TrimSpace(string(node.Info.Text(source)))
 	}
 	match := codeFenceAttrPattern.FindStringSubmatch(rawInfo)
 	if len(match) != 2 {
