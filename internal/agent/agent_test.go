@@ -1949,6 +1949,101 @@ func TestApproveContinuesAfterApprovedToolFailure(t *testing.T) {
 	}
 }
 
+func TestContinueModelTurnAutoCompactsAfterToolResultChurn(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	largePath := filepath.Join(dir, "large.txt")
+	largeContent := strings.Repeat("tool output line\n", 3000)
+	if err := os.WriteFile(largePath, []byte(largeContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var requests []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read body: %v", err)
+		}
+		requests = append(requests, string(body))
+
+		switch len(requests) {
+		case 1:
+			args, err := json.Marshal(map[string]string{"path": largePath})
+			if err != nil {
+				t.Fatalf("marshal args: %v", err)
+			}
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"tool_calls":[{"id":"call_1","type":"function","function":{"name":"read","arguments":` + strconv.Quote(string(args)) + `}}]}}],"usage":{"total_tokens":1}}`))
+		case 2:
+			if !strings.Contains(string(body), "Summarize this coding session so another agent can continue it with minimal loss.") {
+				t.Fatalf("expected second request to be compaction prompt, got %s", string(body))
+			}
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"## Goal\ncontinue from tool output\n\n## Next Step\nuse the compacted summary and continue"}}],"usage":{"total_tokens":1}}`))
+		case 3:
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"done"}}],"usage":{"total_tokens":1}}`))
+		default:
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ignored"}}],"usage":{"total_tokens":1}}`))
+		}
+	}))
+	defer server.Close()
+
+	cfg := testConfig(t)
+	cfg.Providers = map[string]config.Provider{
+		"test": {
+			BaseURL:       server.URL + "/v1",
+			Timeout:       time.Second,
+			ContextWindow: 10000,
+			AutoCompactAt: 20,
+		},
+	}
+	cfg.DefaultProvider = "test"
+	cfg.DefaultModel = "test-model"
+
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	engine := New(cfg, st, tools.NewRegistry(dir), nil, dir)
+	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetSessionPermissionProfile(context.Background(), session.ID, "auto"); err != nil {
+		t.Fatal(err)
+	}
+
+	events, err := engine.RunPrompt(context.Background(), session, "inspect the file and continue")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sawFinalAnswer bool
+	var seen []domain.EventKind
+	for evt := range events {
+		seen = append(seen, evt.Kind)
+		if evt.Kind == domain.EventKindMessageDelta && evt.Text == "done" {
+			sawFinalAnswer = true
+		}
+	}
+	if !sawFinalAnswer {
+		t.Fatalf("expected final assistant answer after tool-result-triggered auto compact; requests=%d events=%v", len(requests), seen)
+	}
+	if len(requests) < 3 {
+		t.Fatalf("expected prompt, compact, and continuation requests, got %d", len(requests))
+	}
+	if !strings.Contains(requests[3-1], "Compacted session summary for continuation:") {
+		t.Fatalf("expected continuation request to include compacted history anchor, got %s", requests[2])
+	}
+	if !strings.Contains(requests[2], "Continue from the compacted session summary.") {
+		t.Fatalf("expected continuation request to include post-compact continue instruction, got %s", requests[2])
+	}
+}
+
 func TestHandleModelToolCallBypassesApprovalForSkill(t *testing.T) {
 	cfg := testConfig(t)
 	st, err := store.Open(t.TempDir())

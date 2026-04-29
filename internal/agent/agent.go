@@ -558,6 +558,20 @@ func (e *Engine) continueModelTurn(ctx context.Context, session domain.Session, 
 		if buildErr != nil {
 			return buildErr
 		}
+		if steps > 0 {
+			compacted, compactErr := e.autoCompactPreparedMessagesIfNeeded(ctx, session, chat.ID, client, messages, out)
+			if compactErr != nil {
+				return compactErr
+			}
+			if compacted {
+				session, buildErr = e.store.GetSession(ctx, session.ID)
+				if buildErr != nil {
+					return buildErr
+				}
+				transient = transientTurnMessages("", "Continue from the compacted session summary. Do not restart, greet, or restate the summary. Continue the pending task from the latest tool result.")
+				continue
+			}
+		}
 		transient = nil
 
 		stream := e.providerStreamingEnabled(session)
@@ -2178,6 +2192,28 @@ func (e *Engine) autoCompactIfNeeded(ctx context.Context, session domain.Session
 	return e.autoCompactChatIfNeeded(ctx, session, chat.ID, client, out)
 }
 
+func (e *Engine) autoCompactPreparedMessagesIfNeeded(ctx context.Context, session domain.Session, chatID int64, client *provider.Client, messages []provider.Message, out chan<- domain.Event) (bool, error) {
+	providerCfg, ok := e.cfg.Provider(session.ProviderID)
+	if !ok {
+		return false, nil
+	}
+	threshold := providerCfg.AutoCompactAt
+	if threshold <= 0 {
+		threshold = 85
+	}
+	estimated, ok := e.estimateRequestUsagePercent(session, domain.Chat{ID: chatID}, messages)
+	if !ok || estimated < threshold {
+		return false, nil
+	}
+	if out != nil {
+		out <- domain.Event{Kind: domain.EventKindStatus, Text: fmt.Sprintf("Auto-compacting at ~%d%% estimated context used", estimated)}
+	}
+	if err := e.compactSession(ctx, session, chatID, client, "auto", out); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 func (e *Engine) autoCompactChatIfNeeded(ctx context.Context, session domain.Session, chatID int64, client *provider.Client, out chan<- domain.Event) (bool, error) {
 	messages, parts, err := e.store.PartsForChat(ctx, chatID)
 	if err != nil {
@@ -2205,6 +2241,32 @@ func (e *Engine) autoCompactChatIfNeeded(ctx context.Context, session domain.Ses
 		return false, err
 	}
 	return true, nil
+}
+
+func (e *Engine) estimateRequestUsagePercent(session domain.Session, _ domain.Chat, messages []provider.Message) (int, bool) {
+	providerCfg, ok := e.cfg.Provider(session.ProviderID)
+	if !ok || providerCfg.ContextWindow <= 0 {
+		return 0, false
+	}
+	body, err := json.Marshal(messages)
+	if err != nil || len(body) == 0 {
+		return 0, false
+	}
+	// Rough byte-based estimate over the replayed conversation payload only.
+	// Ignore static request/tool schema overhead so auto-compaction reacts to
+	// message churn rather than repeatedly compacting tiny summaries.
+	estimatedTokens := len(body) / 4
+	if estimatedTokens <= 0 {
+		return 0, false
+	}
+	percent := (estimatedTokens * 100) / providerCfg.ContextWindow
+	if percent < 0 {
+		percent = 0
+	}
+	if percent > 100 {
+		percent = 100
+	}
+	return percent, true
 }
 
 func (e *Engine) compactSession(ctx context.Context, session domain.Session, chatID int64, client *provider.Client, trigger string, out chan<- domain.Event) error {
