@@ -161,7 +161,7 @@ func evaluateBuiltin(profileName string, req Request) Decision {
 	case ProfileAsk:
 		return Decision{Mode: domain.PermissionModeAsk, Reason: "this mode requires approval for all tool actions"}
 	case ProfileReadAsk:
-		if req.Tool == domain.ToolKindBash {
+		if req.Tool == domain.ToolKindBash || req.Tool == domain.ToolKindExecCommand {
 			return Decision{Mode: domain.PermissionModeAsk, Reason: "shell commands require approval in this mode"}
 		}
 		if isProjectReadTool(req.Tool) && requestTargetsProjectOnly(req) {
@@ -169,7 +169,7 @@ func evaluateBuiltin(profileName string, req Request) Decision {
 		}
 		return Decision{Mode: domain.PermissionModeAsk, Reason: reasonForRequest(req, "this mode only auto-allows reads in the current project")}
 	case ProfileWriteAsk:
-		if req.Tool == domain.ToolKindBash {
+		if req.Tool == domain.ToolKindBash || req.Tool == domain.ToolKindExecCommand {
 			return Decision{Mode: domain.PermissionModeAsk, Reason: "shell commands require approval in this mode"}
 		}
 		if isProjectReadOrWriteTool(req.Tool) && requestTargetsProjectOnly(req) {

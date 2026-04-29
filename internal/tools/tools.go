@@ -12,6 +12,7 @@ import (
 
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/execruntime"
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/store"
 )
@@ -123,6 +124,7 @@ type Runtime struct {
 	ActiveMilestoneRef    string
 	AssignedTodoBucketRef string
 	ChatControl           ChatControl
+	Exec                  execruntime.Control
 	MCP                   MCPExecutor
 	EditForgiveness       int
 }
@@ -188,6 +190,10 @@ func NewRegistry(workdir string) *Registry {
 
 func (r *Registry) SetChatControl(control ChatControl) {
 	r.runtime.ChatControl = control
+}
+
+func (r *Registry) SetExecControl(control execruntime.Control) {
+	r.runtime.Exec = control
 }
 
 func (r *Registry) SetMCP(executor MCPExecutor) {
@@ -454,6 +460,13 @@ func RequireChatControl(runtime Runtime) (ChatControl, error) {
 		return nil, errors.New("chat orchestration requires an active persisted chat")
 	}
 	return runtime.ChatControl, nil
+}
+
+func RequireExecControl(runtime Runtime) (execruntime.Control, error) {
+	if runtime.Exec == nil || runtime.SessionID == 0 || runtime.ChatID == 0 {
+		return nil, errors.New("exec sessions require an active persisted chat")
+	}
+	return runtime.Exec, nil
 }
 
 func DefaultSummarizeResult(req Request, result Result) (string, string) {

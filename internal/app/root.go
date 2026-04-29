@@ -19,6 +19,7 @@ import (
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/debugsrv"
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/execruntime"
 	"github.com/lkarlslund/koder/internal/mcp"
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/store"
@@ -118,6 +119,7 @@ func runTUI(ctx context.Context, mode tui.StartupMode, workdir string, startupOp
 	}()
 	registry := tools.NewRegistry(agents.FindProjectRoot(workdir))
 	registry.SetEditForgiveness(cfg.UI.EditForgiveness)
+	registry.SetExecControl(execruntime.NewManager())
 	engine := agent.New(cfg, st, registry, recorder, workdir, mcpManager)
 	registry.SetChatControl(chatruntime.New(engine, st))
 	return tui.RunWithWorkdir(cfg, st, engine, mode, recorder, debugServer, workdir, startupOpts)

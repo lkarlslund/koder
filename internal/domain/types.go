@@ -38,6 +38,13 @@ const (
 	ToolKindGlob            ToolKind = "glob"
 	ToolKindGrep            ToolKind = "grep"
 	ToolKindBash            ToolKind = "bash"
+	ToolKindExecCommand     ToolKind = "exec_command"
+	ToolKindExecStatus      ToolKind = "exec_status"
+	ToolKindExecList        ToolKind = "exec_list"
+	ToolKindExecWriteStdin  ToolKind = "exec_write_stdin"
+	ToolKindExecResize      ToolKind = "exec_resize"
+	ToolKindExecTerminate   ToolKind = "exec_terminate"
+	ToolKindExecCleanup     ToolKind = "exec_cleanup_background"
 	ToolKindApplyPatch      ToolKind = "apply_patch"
 	ToolKindEdit            ToolKind = "edit"
 	ToolKindWrite           ToolKind = "write"
@@ -70,6 +77,13 @@ func AllToolKinds() []ToolKind {
 		ToolKindGlob,
 		ToolKindGrep,
 		ToolKindBash,
+		ToolKindExecCommand,
+		ToolKindExecStatus,
+		ToolKindExecList,
+		ToolKindExecWriteStdin,
+		ToolKindExecResize,
+		ToolKindExecTerminate,
+		ToolKindExecCleanup,
 		ToolKindApplyPatch,
 		ToolKindEdit,
 		ToolKindWrite,

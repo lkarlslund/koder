@@ -1,0 +1,562 @@
+package exectool
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/execruntime"
+	"github.com/lkarlslund/koder/internal/provider"
+	"github.com/lkarlslund/koder/internal/store"
+	"github.com/lkarlslund/koder/internal/tools"
+)
+
+const (
+	defaultYieldTime = 250 * time.Millisecond
+)
+
+func init() {
+	tools.Register(commandTool{})
+	tools.Register(statusTool{})
+	tools.Register(listTool{})
+	tools.Register(writeStdinTool{})
+	tools.Register(resizeTool{})
+	tools.Register(terminateTool{})
+	tools.Register(cleanupTool{})
+}
+
+type commandTool struct{}
+type statusTool struct{}
+type listTool struct{}
+type writeStdinTool struct{}
+type resizeTool struct{}
+type terminateTool struct{}
+type cleanupTool struct{}
+
+func (commandTool) Kind() domain.ToolKind    { return domain.ToolKindExecCommand }
+func (statusTool) Kind() domain.ToolKind     { return domain.ToolKindExecStatus }
+func (listTool) Kind() domain.ToolKind       { return domain.ToolKindExecList }
+func (writeStdinTool) Kind() domain.ToolKind { return domain.ToolKindExecWriteStdin }
+func (resizeTool) Kind() domain.ToolKind     { return domain.ToolKindExecResize }
+func (terminateTool) Kind() domain.ToolKind  { return domain.ToolKindExecTerminate }
+func (cleanupTool) Kind() domain.ToolKind    { return domain.ToolKindExecCleanup }
+
+func (commandTool) BypassesPermission() bool    { return false }
+func (statusTool) BypassesPermission() bool     { return true }
+func (listTool) BypassesPermission() bool       { return true }
+func (writeStdinTool) BypassesPermission() bool { return true }
+func (resizeTool) BypassesPermission() bool     { return true }
+func (terminateTool) BypassesPermission() bool  { return true }
+func (cleanupTool) BypassesPermission() bool    { return true }
+
+func (commandTool) Definition(tools.Runtime) (provider.ToolDefinition, bool) {
+	return tools.FunctionDefinition(domain.ToolKindExecCommand, "Start a persistent shell command session for long-running, interactive, or background work. Use this instead of bash when you may need to inspect output later, write stdin, resize a tty, or terminate the process in a later turn.", `{"type":"object","properties":{"cmd":{"type":"string","description":"Shell command to execute"},"workdir":{"type":"string","description":"Optional workspace-relative working directory"},"timeout_ms":{"type":"integer","description":"Optional timeout in milliseconds; omit for no timeout"},"tty":{"type":"boolean","description":"Enable tty mode for interactive commands"},"shell":{"type":"string","description":"Optional shell binary name or path"},"login":{"type":"boolean","description":"Use login shell semantics; defaults to true"},"yield_time_ms":{"type":"integer","description":"Optional short wait before returning so initial output can be captured"}},"required":["cmd"],"additionalProperties":false}`), true
+}
+
+func (statusTool) Definition(tools.Runtime) (provider.ToolDefinition, bool) {
+	return tools.FunctionDefinition(domain.ToolKindExecStatus, "Get the latest state and recent output for one persistent exec session.", `{"type":"object","properties":{"process_id":{"type":"string","description":"Process id returned by exec_command"},"max_output_bytes":{"type":"integer","description":"Optional output tail size to return"}},"required":["process_id"],"additionalProperties":false}`), true
+}
+
+func (listTool) Definition(tools.Runtime) (provider.ToolDefinition, bool) {
+	return tools.FunctionDefinition(domain.ToolKindExecList, "List persistent exec sessions in the current chat or session.", `{"type":"object","properties":{"scope":{"type":"string","description":"Listing scope. Omit for current chat.","enum":["chat","session"]},"max_output_bytes":{"type":"integer","description":"Optional output tail size for each item"}},"additionalProperties":false}`), true
+}
+
+func (writeStdinTool) Definition(tools.Runtime) (provider.ToolDefinition, bool) {
+	return tools.FunctionDefinition(domain.ToolKindExecWriteStdin, "Write stdin text to a running persistent exec session and optionally close stdin.", `{"type":"object","properties":{"process_id":{"type":"string","description":"Process id returned by exec_command"},"chars":{"type":"string","description":"Text to write to stdin"},"close_stdin":{"type":"boolean","description":"Close stdin after writing"},"max_output_bytes":{"type":"integer","description":"Optional output tail size to return"}},"required":["process_id"],"additionalProperties":false}`), true
+}
+
+func (resizeTool) Definition(tools.Runtime) (provider.ToolDefinition, bool) {
+	return tools.FunctionDefinition(domain.ToolKindExecResize, "Resize a tty-backed persistent exec session.", `{"type":"object","properties":{"process_id":{"type":"string","description":"Process id returned by exec_command"},"rows":{"type":"integer","description":"Terminal rows"},"cols":{"type":"integer","description":"Terminal columns"},"max_output_bytes":{"type":"integer","description":"Optional output tail size to return"}},"required":["process_id","rows","cols"],"additionalProperties":false}`), true
+}
+
+func (terminateTool) Definition(tools.Runtime) (provider.ToolDefinition, bool) {
+	return tools.FunctionDefinition(domain.ToolKindExecTerminate, "Terminate a persistent exec session.", `{"type":"object","properties":{"process_id":{"type":"string","description":"Process id returned by exec_command"},"max_output_bytes":{"type":"integer","description":"Optional output tail size to return"}},"required":["process_id"],"additionalProperties":false}`), true
+}
+
+func (cleanupTool) Definition(tools.Runtime) (provider.ToolDefinition, bool) {
+	return tools.FunctionDefinition(domain.ToolKindExecCleanup, "Terminate running persistent exec sessions in the current chat or session and report their final states.", `{"type":"object","properties":{"scope":{"type":"string","description":"Cleanup scope. Omit for current chat.","enum":["chat","session"]},"max_output_bytes":{"type":"integer","description":"Optional output tail size for each item"}},"additionalProperties":false}`), true
+}
+
+func (commandTool) NormalizeArgs(args map[string]string) (map[string]string, error) {
+	cmd := strings.TrimSpace(tools.FirstArg(args, "cmd", "command"))
+	if cmd == "" {
+		return nil, errors.New("cmd is empty")
+	}
+	out := map[string]string{"cmd": cmd}
+	if workdir := tools.NormalizePathInput(tools.FirstArg(args, "workdir", "cwd", "dir")); workdir != "" {
+		out["workdir"] = workdir
+	}
+	if timeout := strings.TrimSpace(tools.FirstArg(args, "timeout_ms")); timeout != "" {
+		ms, err := tools.ParseFlexibleInt(timeout)
+		if err != nil || ms < 0 {
+			return nil, errors.New("timeout_ms must be a non-negative integer")
+		}
+		out["timeout_ms"] = strconv.Itoa(ms)
+	}
+	if tty := parseBoolArg(args, "tty"); tty != "" {
+		out["tty"] = tty
+	}
+	if shell := strings.TrimSpace(tools.FirstArg(args, "shell")); shell != "" {
+		out["shell"] = shell
+	}
+	if login := parseBoolArg(args, "login"); login != "" {
+		out["login"] = login
+	}
+	if yield := strings.TrimSpace(tools.FirstArg(args, "yield_time_ms")); yield != "" {
+		ms, err := tools.ParseFlexibleInt(yield)
+		if err != nil || ms < 0 {
+			return nil, errors.New("yield_time_ms must be a non-negative integer")
+		}
+		out["yield_time_ms"] = strconv.Itoa(ms)
+	}
+	return out, nil
+}
+
+func (statusTool) NormalizeArgs(args map[string]string) (map[string]string, error) {
+	return normalizeProcessArgs(args, false)
+}
+
+func (listTool) NormalizeArgs(args map[string]string) (map[string]string, error) {
+	out := map[string]string{}
+	if scope := normalizeScope(args); scope != "" {
+		out["scope"] = scope
+	}
+	if maxOutput := normalizeOptionalInt(args, "max_output_bytes"); maxOutput != "" {
+		out["max_output_bytes"] = maxOutput
+	}
+	return out, nil
+}
+
+func (writeStdinTool) NormalizeArgs(args map[string]string) (map[string]string, error) {
+	out, err := normalizeProcessArgs(args, false)
+	if err != nil {
+		return nil, err
+	}
+	if chars, ok := args["chars"]; ok {
+		out["chars"] = chars
+	}
+	if closeStdin := parseBoolArg(args, "close_stdin"); closeStdin != "" {
+		out["close_stdin"] = closeStdin
+	}
+	if out["chars"] == "" && out["close_stdin"] == "" {
+		return nil, errors.New("chars or close_stdin is required")
+	}
+	return out, nil
+}
+
+func (resizeTool) NormalizeArgs(args map[string]string) (map[string]string, error) {
+	out, err := normalizeProcessArgs(args, false)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := requirePositiveInt(args, "rows")
+	if err != nil {
+		return nil, err
+	}
+	cols, err := requirePositiveInt(args, "cols")
+	if err != nil {
+		return nil, err
+	}
+	out["rows"] = rows
+	out["cols"] = cols
+	return out, nil
+}
+
+func (terminateTool) NormalizeArgs(args map[string]string) (map[string]string, error) {
+	return normalizeProcessArgs(args, false)
+}
+
+func (cleanupTool) NormalizeArgs(args map[string]string) (map[string]string, error) {
+	return (listTool{}).NormalizeArgs(args)
+}
+
+func (commandTool) LegacyArgs(raw string) map[string]string    { return map[string]string{"cmd": raw} }
+func (statusTool) LegacyArgs(raw string) map[string]string     { return map[string]string{"process_id": raw} }
+func (listTool) LegacyArgs(string) map[string]string           { return map[string]string{} }
+func (writeStdinTool) LegacyArgs(raw string) map[string]string { return map[string]string{"process_id": raw} }
+func (resizeTool) LegacyArgs(raw string) map[string]string     { return map[string]string{"process_id": raw} }
+func (terminateTool) LegacyArgs(raw string) map[string]string  { return map[string]string{"process_id": raw} }
+func (cleanupTool) LegacyArgs(string) map[string]string        { return map[string]string{} }
+
+func (commandTool) Preview(req tools.Request) string    { return req.Args["cmd"] }
+func (statusTool) Preview(req tools.Request) string     { return "Inspect " + req.Args["process_id"] }
+func (listTool) Preview(req tools.Request) string       { return "List exec sessions" }
+func (writeStdinTool) Preview(req tools.Request) string { return "Write stdin to " + req.Args["process_id"] }
+func (resizeTool) Preview(req tools.Request) string     { return "Resize " + req.Args["process_id"] }
+func (terminateTool) Preview(req tools.Request) string  { return "Terminate " + req.Args["process_id"] }
+func (cleanupTool) Preview(req tools.Request) string    { return "Cleanup exec sessions" }
+
+func (commandTool) PresentationForPreview(preview string) tools.Presentation {
+	return tools.Presentation{Title: "Start exec session", Subtitle: strings.TrimSpace(preview), Preview: strings.TrimSpace(preview)}
+}
+
+func (statusTool) PresentationForPreview(preview string) tools.Presentation {
+	return tools.Presentation{Title: "Exec status", Preview: strings.TrimSpace(preview)}
+}
+
+func (listTool) PresentationForPreview(preview string) tools.Presentation {
+	return tools.Presentation{Title: "Exec sessions", Preview: strings.TrimSpace(preview)}
+}
+
+func (writeStdinTool) PresentationForPreview(preview string) tools.Presentation {
+	return tools.Presentation{Title: "Write exec stdin", Preview: strings.TrimSpace(preview)}
+}
+
+func (resizeTool) PresentationForPreview(preview string) tools.Presentation {
+	return tools.Presentation{Title: "Resize exec tty", Preview: strings.TrimSpace(preview)}
+}
+
+func (terminateTool) PresentationForPreview(preview string) tools.Presentation {
+	return tools.Presentation{Title: "Terminate exec session", Preview: strings.TrimSpace(preview)}
+}
+
+func (cleanupTool) PresentationForPreview(preview string) tools.Presentation {
+	return tools.Presentation{Title: "Cleanup exec sessions", Preview: strings.TrimSpace(preview)}
+}
+
+func (commandTool) Presentation(req tools.Request) tools.Presentation    { return (commandTool{}).PresentationForPreview((commandTool{}).Preview(req)) }
+func (statusTool) Presentation(req tools.Request) tools.Presentation     { return (statusTool{}).PresentationForPreview((statusTool{}).Preview(req)) }
+func (listTool) Presentation(req tools.Request) tools.Presentation       { return (listTool{}).PresentationForPreview((listTool{}).Preview(req)) }
+func (writeStdinTool) Presentation(req tools.Request) tools.Presentation { return (writeStdinTool{}).PresentationForPreview((writeStdinTool{}).Preview(req)) }
+func (resizeTool) Presentation(req tools.Request) tools.Presentation     { return (resizeTool{}).PresentationForPreview((resizeTool{}).Preview(req)) }
+func (terminateTool) Presentation(req tools.Request) tools.Presentation  { return (terminateTool{}).PresentationForPreview((terminateTool{}).Preview(req)) }
+func (cleanupTool) Presentation(req tools.Request) tools.Presentation    { return (cleanupTool{}).PresentationForPreview((cleanupTool{}).Preview(req)) }
+
+func (commandTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
+	control, err := tools.RequireExecControl(runtime)
+	if err != nil {
+		return tools.Result{}, err
+	}
+	workdir, rel, err := tools.WorkspaceDir(runtime.Workdir, req.Args["workdir"])
+	if err != nil && strings.TrimSpace(req.Args["workdir"]) != "" {
+		return tools.Result{}, err
+	}
+	if rel == "" {
+		rel = "."
+	}
+	snap, err := control.Start(ctx, execruntime.StartRequest{
+		SessionID:    runtime.SessionID,
+		ChatID:       runtime.ChatID,
+		ToolCallID:   req.ToolCallID,
+		Command:      req.Args["cmd"],
+		Workdir:      workdir,
+		Shell:        req.Args["shell"],
+		Login:        firstBool(req.Args["login"], true),
+		TTY:          firstBool(req.Args["tty"], false),
+		Timeout:      time.Duration(firstInt(req.Args["timeout_ms"])) * time.Millisecond,
+		YieldTime:    durationOrDefault(req.Args["yield_time_ms"], defaultYieldTime),
+		PreviewBytes: firstInt(req.Args["max_output_bytes"]),
+	})
+	if err != nil {
+		return tools.Result{}, err
+	}
+	stored := storedFromSnapshot(snap, "Started persistent exec session")
+	stored.Workdir = rel
+	return tools.Result{
+		Output: stored.Message,
+		Meta: map[string]string{
+			"process_id": snap.ProcessID,
+			"command":    snap.Command,
+			"state":      string(snap.State),
+		},
+		Stored: stored,
+	}, nil
+}
+
+func (statusTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
+	control, err := tools.RequireExecControl(runtime)
+	if err != nil {
+		return tools.Result{}, err
+	}
+	snap, err := control.Status(ctx, execruntime.StatusRequest{
+		SessionID: runtime.SessionID,
+		ChatID:    runtime.ChatID,
+		ProcessID: req.Args["process_id"],
+		MaxBytes:  firstInt(req.Args["max_output_bytes"]),
+	})
+	if err != nil {
+		return tools.Result{}, err
+	}
+	stored := storedFromSnapshot(snap, "Fetched exec session status")
+	return execResult(stored), nil
+}
+
+func (listTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
+	control, err := tools.RequireExecControl(runtime)
+	if err != nil {
+		return tools.Result{}, err
+	}
+	scope := execruntime.Scope(normalizeScope(req.Args))
+	snaps, err := control.List(ctx, execruntime.ListRequest{
+		SessionID: runtime.SessionID,
+		ChatID:    runtime.ChatID,
+		Scope:     scope,
+		MaxBytes:  firstInt(req.Args["max_output_bytes"]),
+	})
+	if err != nil {
+		return tools.Result{}, err
+	}
+	stored := storedListFromSnapshots(snaps, string(scope), "Listed exec sessions")
+	return tools.Result{
+		Output: tools.DisplayTextForStored(req.Tool, stored),
+		Stored: stored,
+	}, nil
+}
+
+func (writeStdinTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
+	control, err := tools.RequireExecControl(runtime)
+	if err != nil {
+		return tools.Result{}, err
+	}
+	snap, err := control.WriteStdin(ctx, execruntime.WriteStdinRequest{
+		SessionID:  runtime.SessionID,
+		ChatID:     runtime.ChatID,
+		ProcessID:  req.Args["process_id"],
+		Chars:      req.Args["chars"],
+		CloseStdin: firstBool(req.Args["close_stdin"], false),
+		MaxBytes:   firstInt(req.Args["max_output_bytes"]),
+	})
+	if err != nil {
+		return tools.Result{}, err
+	}
+	stored := storedFromSnapshot(snap, "Updated exec session stdin")
+	return execResult(stored), nil
+}
+
+func (resizeTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
+	control, err := tools.RequireExecControl(runtime)
+	if err != nil {
+		return tools.Result{}, err
+	}
+	rows, _ := strconv.Atoi(req.Args["rows"])
+	cols, _ := strconv.Atoi(req.Args["cols"])
+	snap, err := control.Resize(ctx, execruntime.ResizeRequest{
+		SessionID: runtime.SessionID,
+		ChatID:    runtime.ChatID,
+		ProcessID: req.Args["process_id"],
+		Size:      execruntime.TerminalSize{Rows: rows, Cols: cols},
+		MaxBytes:  firstInt(req.Args["max_output_bytes"]),
+	})
+	if err != nil {
+		return tools.Result{}, err
+	}
+	stored := storedFromSnapshot(snap, "Resized exec session tty")
+	return execResult(stored), nil
+}
+
+func (terminateTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
+	control, err := tools.RequireExecControl(runtime)
+	if err != nil {
+		return tools.Result{}, err
+	}
+	snap, err := control.Terminate(ctx, execruntime.TerminateRequest{
+		SessionID: runtime.SessionID,
+		ChatID:    runtime.ChatID,
+		ProcessID: req.Args["process_id"],
+		MaxBytes:  firstInt(req.Args["max_output_bytes"]),
+	})
+	if err != nil {
+		return tools.Result{}, err
+	}
+	stored := storedFromSnapshot(snap, "Terminated exec session")
+	return execResult(stored), nil
+}
+
+func (cleanupTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
+	control, err := tools.RequireExecControl(runtime)
+	if err != nil {
+		return tools.Result{}, err
+	}
+	scope := execruntime.Scope(normalizeScope(req.Args))
+	snaps, err := control.Cleanup(ctx, execruntime.CleanupRequest{
+		SessionID: runtime.SessionID,
+		ChatID:    runtime.ChatID,
+		Scope:     scope,
+		MaxBytes:  firstInt(req.Args["max_output_bytes"]),
+	})
+	if err != nil {
+		return tools.Result{}, err
+	}
+	stored := storedListFromSnapshots(snaps, string(scope), "Cleaned up exec sessions")
+	return tools.Result{
+		Output: tools.DisplayTextForStored(req.Tool, stored),
+		Stored: stored,
+	}, nil
+}
+
+func (commandTool) SummarizeResult(req tools.Request, result tools.Result) (string, string)    { return "Started exec session", tools.DisplayTextForStored(req.Tool, result.Stored) }
+func (statusTool) SummarizeResult(req tools.Request, result tools.Result) (string, string)     { return "Fetched exec status", tools.DisplayTextForStored(req.Tool, result.Stored) }
+func (listTool) SummarizeResult(req tools.Request, result tools.Result) (string, string)       { return "Listed exec sessions", result.Output }
+func (writeStdinTool) SummarizeResult(req tools.Request, result tools.Result) (string, string) { return "Updated exec stdin", tools.DisplayTextForStored(req.Tool, result.Stored) }
+func (resizeTool) SummarizeResult(req tools.Request, result tools.Result) (string, string)     { return "Resized exec tty", tools.DisplayTextForStored(req.Tool, result.Stored) }
+func (terminateTool) SummarizeResult(req tools.Request, result tools.Result) (string, string)  { return "Terminated exec session", tools.DisplayTextForStored(req.Tool, result.Stored) }
+func (cleanupTool) SummarizeResult(req tools.Request, result tools.Result) (string, string)    { return "Cleaned up exec sessions", result.Output }
+
+func (commandTool) PersistResult(ctx context.Context, st *store.Store, sessionID int64, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
+	return tools.PersistStandardResult(ctx, st, sessionID, req, result)
+}
+func (statusTool) PersistResult(ctx context.Context, st *store.Store, sessionID int64, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
+	return tools.PersistStandardResult(ctx, st, sessionID, req, result)
+}
+func (listTool) PersistResult(ctx context.Context, st *store.Store, sessionID int64, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
+	return tools.PersistStandardResult(ctx, st, sessionID, req, result)
+}
+func (writeStdinTool) PersistResult(ctx context.Context, st *store.Store, sessionID int64, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
+	return tools.PersistStandardResult(ctx, st, sessionID, req, result)
+}
+func (resizeTool) PersistResult(ctx context.Context, st *store.Store, sessionID int64, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
+	return tools.PersistStandardResult(ctx, st, sessionID, req, result)
+}
+func (terminateTool) PersistResult(ctx context.Context, st *store.Store, sessionID int64, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
+	return tools.PersistStandardResult(ctx, st, sessionID, req, result)
+}
+func (cleanupTool) PersistResult(ctx context.Context, st *store.Store, sessionID int64, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
+	return tools.PersistStandardResult(ctx, st, sessionID, req, result)
+}
+
+func execResult(stored tools.ExecStoredResult) tools.Result {
+	return tools.Result{
+		Output: tools.DisplayTextForStored(domain.ToolKindExecStatus, stored),
+		Meta: map[string]string{
+			"process_id": stored.ProcessID,
+			"state":      stored.State,
+			"command":    stored.Command,
+		},
+		Stored: stored,
+	}
+}
+
+func storedFromSnapshot(snap execruntime.Snapshot, message string) tools.ExecStoredResult {
+	return tools.ExecStoredResult{
+		ProcessID:   snap.ProcessID,
+		Command:     snap.Command,
+		Workdir:     snap.Workdir,
+		Shell:       snap.Shell,
+		TTY:         snap.TTY,
+		State:       string(snap.State),
+		ExitCode:    snap.ExitCode,
+		TimeoutMS:   snap.TimeoutMS,
+		Output:      snap.Output,
+		OutputBytes: snap.OutputBytes,
+		StdinClosed: snap.StdinClosed,
+		Message:     message,
+	}
+}
+
+func storedListFromSnapshots(snaps []execruntime.Snapshot, scope, message string) tools.ExecListStoredResult {
+	items := make([]tools.ExecListStoredItem, 0, len(snaps))
+	for _, snap := range snaps {
+		items = append(items, tools.ExecListStoredItem{
+			ProcessID: snap.ProcessID,
+			Command:   snap.Command,
+			State:     string(snap.State),
+			TTY:       snap.TTY,
+			ExitCode:  snap.ExitCode,
+			Output:    snap.Output,
+		})
+	}
+	return tools.ExecListStoredResult{
+		Scope:   scope,
+		Message: message,
+		Items:   items,
+	}
+}
+
+func normalizeProcessArgs(args map[string]string, allowScope bool) (map[string]string, error) {
+	id := strings.TrimSpace(tools.FirstArg(args, "process_id"))
+	if id == "" {
+		return nil, errors.New("process_id is empty")
+	}
+	out := map[string]string{"process_id": id}
+	if allowScope {
+		if scope := normalizeScope(args); scope != "" {
+			out["scope"] = scope
+		}
+	}
+	if maxOutput := normalizeOptionalInt(args, "max_output_bytes"); maxOutput != "" {
+		out["max_output_bytes"] = maxOutput
+	}
+	return out, nil
+}
+
+func normalizeScope(args map[string]string) string {
+	scope := strings.TrimSpace(tools.FirstArg(args, "scope"))
+	switch scope {
+	case "", string(execruntime.ScopeChat):
+		return string(execruntime.ScopeChat)
+	case string(execruntime.ScopeSession):
+		return string(execruntime.ScopeSession)
+	default:
+		return ""
+	}
+}
+
+func normalizeOptionalInt(args map[string]string, key string) string {
+	raw := strings.TrimSpace(tools.FirstArg(args, key))
+	if raw == "" {
+		return ""
+	}
+	ms, err := tools.ParseFlexibleInt(raw)
+	if err != nil || ms < 0 {
+		return ""
+	}
+	return strconv.Itoa(ms)
+}
+
+func parseBoolArg(args map[string]string, key string) string {
+	raw := strings.TrimSpace(args[key])
+	if raw == "" {
+		return ""
+	}
+	value, err := strconv.ParseBool(raw)
+	if err != nil {
+		return ""
+	}
+	return strconv.FormatBool(value)
+}
+
+func firstBool(raw string, fallback bool) bool {
+	if strings.TrimSpace(raw) == "" {
+		return fallback
+	}
+	value, err := strconv.ParseBool(raw)
+	if err != nil {
+		return fallback
+	}
+	return value
+}
+
+func firstInt(raw string) int {
+	if strings.TrimSpace(raw) == "" {
+		return 0
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0
+	}
+	return value
+}
+
+func requirePositiveInt(args map[string]string, key string) (string, error) {
+	raw := strings.TrimSpace(tools.FirstArg(args, key))
+	value, err := tools.ParseFlexibleInt(raw)
+	if err != nil || value <= 0 {
+		return "", fmt.Errorf("%s must be a positive integer", key)
+	}
+	return strconv.Itoa(value), nil
+}
+
+func durationOrDefault(raw string, fallback time.Duration) time.Duration {
+	if strings.TrimSpace(raw) == "" {
+		return fallback
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value < 0 {
+		return fallback
+	}
+	return time.Duration(value) * time.Millisecond
+}

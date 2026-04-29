@@ -70,6 +70,36 @@ type BashStoredResult struct {
 	Output    string `json:"output,omitempty"`
 }
 
+type ExecStoredResult struct {
+	ProcessID   string `json:"process_id"`
+	Command     string `json:"command"`
+	Workdir     string `json:"workdir,omitempty"`
+	Shell       string `json:"shell,omitempty"`
+	TTY         bool   `json:"tty,omitempty"`
+	State       string `json:"state"`
+	ExitCode    *int   `json:"exit_code,omitempty"`
+	TimeoutMS   int64  `json:"timeout_ms,omitempty"`
+	Output      string `json:"output,omitempty"`
+	OutputBytes int    `json:"output_bytes,omitempty"`
+	StdinClosed bool   `json:"stdin_closed,omitempty"`
+	Message     string `json:"message,omitempty"`
+}
+
+type ExecListStoredItem struct {
+	ProcessID string `json:"process_id"`
+	Command   string `json:"command"`
+	State     string `json:"state"`
+	TTY       bool   `json:"tty,omitempty"`
+	ExitCode  *int   `json:"exit_code,omitempty"`
+	Output    string `json:"output,omitempty"`
+}
+
+type ExecListStoredResult struct {
+	Scope   string               `json:"scope,omitempty"`
+	Message string               `json:"message,omitempty"`
+	Items   []ExecListStoredItem `json:"items,omitempty"`
+}
+
 type ApplyPatchStoredResult struct {
 	Summary      string   `json:"summary,omitempty"`
 	ChangedFiles []string `json:"changed_files,omitempty"`
@@ -238,6 +268,8 @@ type ErrorStoredResult struct {
 
 func (ReadStoredResult) storedResultPayload()          {}
 func (BashStoredResult) storedResultPayload()          {}
+func (ExecStoredResult) storedResultPayload()          {}
+func (ExecListStoredResult) storedResultPayload()      {}
 func (ApplyPatchStoredResult) storedResultPayload()    {}
 func (EditStoredResult) storedResultPayload()          {}
 func (WriteStoredResult) storedResultPayload()         {}
@@ -407,6 +439,10 @@ func formatStoredToolOutput(env storedResultEnvelope) (string, bool) {
 		return decodeAndFormat[BashStoredResult](env.Payload, func(result BashStoredResult) string {
 			return strings.TrimSpace(result.Output)
 		})
+	case domain.ToolKindExecCommand, domain.ToolKindExecStatus, domain.ToolKindExecWriteStdin, domain.ToolKindExecResize, domain.ToolKindExecTerminate:
+		return decodeAndFormat[ExecStoredResult](env.Payload, formatExecStoredResult)
+	case domain.ToolKindExecList, domain.ToolKindExecCleanup:
+		return decodeAndFormat[ExecListStoredResult](env.Payload, formatExecListStoredResult)
 	case domain.ToolKindApplyPatch:
 		return decodeAndFormat[ApplyPatchStoredResult](env.Payload, func(result ApplyPatchStoredResult) string {
 			return strings.TrimSpace(result.Summary)
@@ -497,6 +533,41 @@ func formatReadStoredResult(result ReadStoredResult) string {
 	}
 	if footer != "" {
 		lines = append(lines, footer)
+	}
+	return strings.TrimSpace(strings.Join(lines, "\n"))
+}
+
+func formatExecStoredResult(result ExecStoredResult) string {
+	lines := make([]string, 0, 4)
+	if msg := strings.TrimSpace(result.Message); msg != "" {
+		lines = append(lines, msg)
+	}
+	if id := strings.TrimSpace(result.ProcessID); id != "" {
+		lines = append(lines, "process_id: "+id)
+	}
+	if state := strings.TrimSpace(result.State); state != "" {
+		lines = append(lines, "state: "+state)
+	}
+	if result.ExitCode != nil {
+		lines = append(lines, fmt.Sprintf("exit_code: %d", *result.ExitCode))
+	}
+	if output := strings.TrimSpace(result.Output); output != "" {
+		lines = append(lines, output)
+	}
+	return strings.TrimSpace(strings.Join(lines, "\n"))
+}
+
+func formatExecListStoredResult(result ExecListStoredResult) string {
+	lines := make([]string, 0, len(result.Items)+1)
+	if msg := strings.TrimSpace(result.Message); msg != "" {
+		lines = append(lines, msg)
+	}
+	for _, item := range result.Items {
+		line := fmt.Sprintf("%s [%s] %s", strings.TrimSpace(item.ProcessID), strings.TrimSpace(item.State), strings.TrimSpace(item.Command))
+		if item.ExitCode != nil {
+			line += fmt.Sprintf(" (exit %d)", *item.ExitCode)
+		}
+		lines = append(lines, strings.TrimSpace(line))
 	}
 	return strings.TrimSpace(strings.Join(lines, "\n"))
 }
