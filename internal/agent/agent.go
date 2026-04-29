@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -42,6 +43,9 @@ type Engine struct {
 	workdir    string
 	retryPause func(context.Context, time.Duration, func(time.Duration)) error
 }
+
+//go:embed system_prompt.md
+var systemPromptAsset embed.FS
 
 var patchPathPattern = regexp.MustCompile(`(?m)^(?:\+\+\+|---)\s+(?:a/|b/)?([^\t\n]+)`)
 
@@ -2069,19 +2073,11 @@ func partMetaMap(part domain.Part) map[string]string {
 }
 
 func systemPrompt() string {
-	return strings.TrimSpace(`
-You are koder, a terminal coding agent.
-
-Use the provided tools whenever they are needed to inspect files, search the workspace, run commands, edit files, or fetch URLs.
-
-Rules:
-- Use tools instead of claiming you cannot run commands.
-- Use one tool call at a time.
-- After receiving tool output, continue the task.
-- If no tool is needed, answer normally.
-- Paths are relative to the current workspace.
-- Keep tool arguments precise and minimal.
-`)
+	data, err := systemPromptAsset.ReadFile("system_prompt.md")
+	if err != nil {
+		panic(err)
+	}
+	return strings.TrimSpace(string(data))
 }
 
 func compactPrompt() string {
