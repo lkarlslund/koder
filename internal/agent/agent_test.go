@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -18,11 +19,13 @@ import (
 	"github.com/lkarlslund/koder/internal/attachment"
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/mcp"
 	"github.com/lkarlslund/koder/internal/permission"
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/reference"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools"
+	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 func TestParseToolCall(t *testing.T) {
@@ -834,6 +837,67 @@ func TestPreviewNextRequestIncludesQwenPresetExtraBody(t *testing.T) {
 	got, ok := req.ExtraBody["chat_template_kwargs"].(map[string]any)
 	if !ok || got["preserve_thinking"] != true || got["enable_thinking"] != true {
 		t.Fatalf("expected qwen preserve-thinking kwargs, got %#v", req.ExtraBody)
+	}
+}
+
+func TestPreviewNextRequestKeepsStableMCPToolOrder(t *testing.T) {
+	cfg := testConfig(t)
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	server := sdkmcp.NewServer(&sdkmcp.Implementation{Name: "test-mcp", Version: "v1.0.0"}, nil)
+	server.AddTool(&sdkmcp.Tool{Name: "zeta", Description: "late tool", InputSchema: map[string]any{"type": "object"}}, func(_ context.Context, _ *sdkmcp.CallToolRequest) (*sdkmcp.CallToolResult, error) {
+		return &sdkmcp.CallToolResult{}, nil
+	})
+	server.AddTool(&sdkmcp.Tool{Name: "alpha", Description: "early tool", InputSchema: map[string]any{"type": "object"}}, func(_ context.Context, _ *sdkmcp.CallToolRequest) (*sdkmcp.CallToolResult, error) {
+		return &sdkmcp.CallToolResult{}, nil
+	})
+
+	handler := sdkmcp.NewStreamableHTTPHandler(func(*http.Request) *sdkmcp.Server { return server }, &sdkmcp.StreamableHTTPOptions{JSONResponse: true})
+	httpServer := httptest.NewServer(handler)
+	defer httpServer.Close()
+
+	manager, err := mcp.NewManager(map[string]config.MCPServer{
+		"docs": {URL: httpServer.URL},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.ConnectAll(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	workdir := t.TempDir()
+	registry := tools.NewRegistry(workdir)
+	engine := New(cfg, st, registry, nil, workdir, manager)
+	session, err := st.CreateSession(context.Background(), "test", cfg.DefaultProvider, "test-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetSessionToolStates(context.Background(), session.ID, map[domain.ToolKind]bool{
+		domain.ToolKindMCP: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	req, err := engine.PreviewNextRequest(context.Background(), session, "continue", nil, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mcpNames []string
+	for _, def := range req.Tools {
+		if strings.HasPrefix(def.Function.Name, "_docs_") || def.Function.Name == "alpha" || def.Function.Name == "zeta" {
+			mcpNames = append(mcpNames, def.Function.Name)
+		}
+	}
+	if len(mcpNames) != 2 {
+		t.Fatalf("expected 2 MCP tool definitions, got %v", mcpNames)
+	}
+	if !slices.Equal(mcpNames, []string{"alpha", "zeta"}) {
+		t.Fatalf("expected MCP tools sorted by name in request, got %v", mcpNames)
 	}
 }
 

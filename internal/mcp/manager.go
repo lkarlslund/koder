@@ -322,6 +322,7 @@ func (m *Manager) ListTools() []ToolDescriptor {
 	for _, id := range m.serverIDsLocked() {
 		out = append(out, slices.Clone(m.state[id].tools)...)
 	}
+	sortToolDescriptors(out)
 	return out
 }
 
@@ -527,6 +528,31 @@ func buildToolNameMap(descriptors []ToolDescriptor, reserved map[string]struct{}
 		reserved[fallback] = struct{}{}
 	}
 	return resolved
+}
+
+func sortToolDescriptors(items []ToolDescriptor) {
+	slices.SortFunc(items, func(a, b ToolDescriptor) int {
+		if cmp := strings.Compare(strings.TrimSpace(a.ServerID), strings.TrimSpace(b.ServerID)); cmp != 0 {
+			return cmp
+		}
+		if cmp := strings.Compare(strings.TrimSpace(a.Name), strings.TrimSpace(b.Name)); cmp != 0 {
+			return cmp
+		}
+		if cmp := strings.Compare(strings.TrimSpace(a.Title), strings.TrimSpace(b.Title)); cmp != 0 {
+			return cmp
+		}
+		if cmp := strings.Compare(strings.TrimSpace(a.Description), strings.TrimSpace(b.Description)); cmp != 0 {
+			return cmp
+		}
+		switch {
+		case a.ReadOnlyHint && !b.ReadOnlyHint:
+			return -1
+		case !a.ReadOnlyHint && b.ReadOnlyHint:
+			return 1
+		default:
+			return 0
+		}
+	})
 }
 
 func toolKey(serverID, toolName string) string {

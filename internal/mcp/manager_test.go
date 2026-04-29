@@ -197,3 +197,73 @@ func TestToolDefinitionsFallbackOnLocalCollision(t *testing.T) {
 		t.Fatalf("unexpected resolved fallback: ok=%v server=%q tool=%q", ok, serverID, toolName)
 	}
 }
+
+func TestListToolsSortsDescriptorsDeterministically(t *testing.T) {
+	manager := &Manager{
+		state: map[string]*serverState{
+			"b": {tools: []ToolDescriptor{
+				{ServerID: "b", Name: "zeta", Title: "Zeta"},
+				{ServerID: "b", Name: "alpha", Title: "Alpha"},
+			}},
+			"a": {tools: []ToolDescriptor{
+				{ServerID: "a", Name: "beta", Title: "Beta"},
+				{ServerID: "a", Name: "alpha", Title: "Alpha"},
+			}},
+		},
+	}
+
+	got := manager.ListTools()
+	names := make([]string, 0, len(got))
+	for _, item := range got {
+		names = append(names, item.ServerID+"/"+item.Name)
+	}
+	want := []string{"a/alpha", "a/beta", "b/alpha", "b/zeta"}
+	if !slices.Equal(names, want) {
+		t.Fatalf("unexpected sorted tools: got=%v want=%v", names, want)
+	}
+}
+
+func TestToolDefinitionsStableAcrossDiscoveryOrder(t *testing.T) {
+	left := []ToolDescriptor{
+		{ServerID: "docs", Name: "search"},
+		{ServerID: "exa", Name: "search"},
+		{ServerID: "docs", Name: "fetch"},
+	}
+	right := []ToolDescriptor{
+		{ServerID: "exa", Name: "search"},
+		{ServerID: "docs", Name: "fetch"},
+		{ServerID: "docs", Name: "search"},
+	}
+	managerA := &Manager{
+		state: map[string]*serverState{
+			"docs": {tools: []ToolDescriptor{left[0], left[2]}},
+			"exa":  {tools: []ToolDescriptor{left[1]}},
+		},
+	}
+	managerB := &Manager{
+		state: map[string]*serverState{
+			"exa":  {tools: []ToolDescriptor{right[0]}},
+			"docs": {tools: []ToolDescriptor{right[1], right[2]}},
+		},
+	}
+
+	defsA := managerA.ToolDefinitions()
+	defsB := managerB.ToolDefinitions()
+	if len(defsA) != len(defsB) {
+		t.Fatalf("tool definition count mismatch: %d vs %d", len(defsA), len(defsB))
+	}
+	namesA := make([]string, 0, len(defsA))
+	namesB := make([]string, 0, len(defsB))
+	for i := range defsA {
+		namesA = append(namesA, defsA[i].Function.Name)
+		namesB = append(namesB, defsB[i].Function.Name)
+	}
+	if !slices.Equal(namesA, namesB) {
+		t.Fatalf("tool names should be stable across discovery order: %v vs %v", namesA, namesB)
+	}
+	serverA, toolA, okA := managerA.ResolveToolName("_docs_search", nil)
+	serverB, toolB, okB := managerB.ResolveToolName("_docs_search", nil)
+	if !okA || !okB || serverA != "docs" || serverB != "docs" || toolA != "search" || toolB != "search" {
+		t.Fatalf("expected stable name resolution, got A=(%v,%q,%q) B=(%v,%q,%q)", okA, serverA, toolA, okB, serverB, toolB)
+	}
+}
