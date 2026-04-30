@@ -4470,6 +4470,40 @@ func TestSidebarUsageUpdatesFromLiveUsageEvent(t *testing.T) {
 	}
 }
 
+func TestSidebarUsageSynthesizesContextFromLiveUsageWithoutTotal(t *testing.T) {
+	m := Model{
+		width:  120,
+		height: 40,
+		currentSession: domain.Session{
+			ID:         2,
+			Title:      "Testing Session",
+			ProviderID: "test",
+			ModelID:    "model",
+		},
+		currentChat: domain.Chat{ID: 7, SessionID: 2},
+		showSidebar: true,
+		cfg: config.Config{
+			Providers: map[string]config.Provider{
+				"test": {ContextWindow: 32768},
+			},
+		},
+	}
+
+	m.applyEvent(domain.Event{Kind: domain.EventKindUsage, Usage: domain.Usage{
+		PromptTokens:     1200,
+		CompletionTokens: 300,
+		CachedTokens:     100,
+	}})
+
+	got := m.renderSidebar()
+	if !strings.Contains(got, "Context 1.5k / 32.8k (4%)") {
+		t.Fatalf("expected synthesized live context usage, got %q", got)
+	}
+	if !strings.Contains(got, "Tokens in 1.2k  out 300  cache 100") {
+		t.Fatalf("expected live token totals, got %q", got)
+	}
+}
+
 func TestSidebarMilestonesAndTodosRenderNoneWhenEmpty(t *testing.T) {
 	m := Model{}
 	got := m.renderSidebar()

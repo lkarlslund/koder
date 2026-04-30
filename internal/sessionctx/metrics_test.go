@@ -30,6 +30,25 @@ func TestFromMessagesUsesLatestUsageAndContextWindow(t *testing.T) {
 	}
 }
 
+func TestFromMessagesSynthesizesTotalFromPromptAndCompletion(t *testing.T) {
+	cfg := config.Default()
+	cfg.DefaultProvider = "test"
+	cfg.Providers["test"] = config.Provider{ContextWindow: 32768}
+	session := domain.Session{ProviderID: cfg.DefaultProvider}
+	messages := []domain.Message{{ID: 1}}
+	parts := map[int64][]domain.Part{
+		1: {{Kind: domain.PartKindSystemNotice, Body: "usage", MetaJSON: `{"PromptTokens":1200,"CompletionTokens":300}`}},
+	}
+
+	got, ok := FromMessages(cfg, session, messages, parts)
+	if !ok {
+		t.Fatal("expected metrics")
+	}
+	if got.Used != 1500 || got.Max != 32768 || got.UsagePercent != 4 {
+		t.Fatalf("unexpected metrics: %#v", got)
+	}
+}
+
 func TestFromMessagesSkipsMissingContextWindow(t *testing.T) {
 	cfg := config.Default()
 	cfg.DefaultProvider = "test"

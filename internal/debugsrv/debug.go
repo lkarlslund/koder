@@ -226,8 +226,8 @@ func (r *Recorder) RecordEvent(sessionID int64, evt domain.Event) {
 	if evt.Err != nil {
 		entry.Error = evt.Err.Error()
 	}
-	if evt.Usage.TotalTokens > 0 {
-		usage := evt.Usage
+	if evt.Usage.HasAnyTokens() {
+		usage := evt.Usage.Normalized()
 		entry.Usage = &usage
 	}
 	r.mu.Lock()

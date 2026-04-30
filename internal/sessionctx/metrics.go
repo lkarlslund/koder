@@ -19,6 +19,7 @@ func FromMessages(cfg config.Config, session domain.Session, messages []domain.M
 		return Metrics{}, false
 	}
 	usage, ok := LatestUsage(messages, parts)
+	usage = usage.Normalized()
 	if !ok || usage.TotalTokens <= 0 {
 		return Metrics{}, false
 	}
@@ -49,7 +50,8 @@ func LatestUsage(messages []domain.Message, parts map[int64][]domain.Part) (doma
 			if err := json.Unmarshal([]byte(part.MetaJSON), &usage); err != nil {
 				continue
 			}
-			if usage.TotalTokens > 0 {
+			usage = usage.Normalized()
+			if usage.HasAnyTokens() {
 				return usage, true
 			}
 		}
@@ -69,7 +71,8 @@ func TotalUsage(messages []domain.Message, parts map[int64][]domain.Part) (domai
 			if err := json.Unmarshal([]byte(part.MetaJSON), &usage); err != nil {
 				continue
 			}
-			if usage.TotalTokens <= 0 && usage.PromptTokens <= 0 && usage.CompletionTokens <= 0 && usage.CachedTokens <= 0 {
+			usage = usage.Normalized()
+			if !usage.HasAnyTokens() {
 				continue
 			}
 			total.PromptTokens += usage.PromptTokens

@@ -595,7 +595,7 @@ func (e *Engine) continueModelTurn(ctx context.Context, session domain.Session, 
 				if err := e.persistAssistantToolCalls(ctx, chat.ID, session.ID, calls, strings.TrimSpace(resp.Text), resp.Usage); err != nil {
 					return err
 				}
-				if resp.Usage.TotalTokens > 0 {
+				if resp.Usage.HasAnyTokens() {
 					out <- domain.Event{Kind: domain.EventKindUsage, Usage: resp.Usage}
 				}
 				if pause, ok := tracker.trackCalls(calls); ok {
@@ -672,7 +672,8 @@ func (e *Engine) continueModelTurn(ctx context.Context, session domain.Session, 
 				return err
 			}
 		}
-		if usage.TotalTokens > 0 {
+		usage = usage.Normalized()
+		if usage.HasAnyTokens() {
 			meta, _ := json.Marshal(usage)
 			if _, err := e.store.AddPart(ctx, assistantMsg.ID, domain.PartKindSystemNotice, "usage", string(meta)); err != nil {
 				return err
@@ -2297,7 +2298,8 @@ func (e *Engine) compactSession(ctx context.Context, session domain.Session, cha
 	if _, err := e.store.AddPart(ctx, msg.ID, domain.PartKindCompaction, summary, string(meta)); err != nil {
 		return err
 	}
-	if usage.TotalTokens > 0 {
+	usage = usage.Normalized()
+	if usage.HasAnyTokens() {
 		usageMeta, _ := json.Marshal(usage)
 		if _, err := e.store.AddPart(ctx, msg.ID, domain.PartKindSystemNotice, "usage", string(usageMeta)); err != nil {
 			return err
@@ -2510,7 +2512,8 @@ func (e *Engine) persistAssistantToolCalls(ctx context.Context, chatID, sessionI
 			return err
 		}
 	}
-	if usage.TotalTokens > 0 {
+	usage = usage.Normalized()
+	if usage.HasAnyTokens() {
 		usageMeta, _ := json.Marshal(usage)
 		if _, err := e.store.AddPart(ctx, assistantMsg.ID, domain.PartKindSystemNotice, "usage", string(usageMeta)); err != nil {
 			return err

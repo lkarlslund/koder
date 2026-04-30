@@ -519,7 +519,7 @@ func (c *Client) CompleteChat(ctx context.Context, input ChatRequest) (ChatRespo
 		CompletionTokens: payload.Usage.CompletionTokens,
 		CachedTokens:     cachedTokensFromUsage(payload.Usage.PromptTokensDetails.CachedTokens, payload.Usage.InputTokensDetails.CachedTokens),
 		TotalTokens:      payload.Usage.TotalTokens,
-	}
+	}.Normalized()
 	return ChatResponse{
 		Text:      choice.Message.Content,
 		Reasoning: firstNonEmptyString(choice.Message.ReasoningContent, choice.Message.Reasoning),
@@ -635,7 +635,7 @@ func (c *Client) StreamChatResponse(ctx context.Context, input ChatRequest, onEv
 			if reasoning := result.reasoning.String(); strings.TrimSpace(reasoning) != "" {
 				onEvent(domain.Event{Kind: domain.EventKindReasoning, Text: reasoning})
 			}
-			if result.usage.TotalTokens > 0 {
+			if result.usage.HasAnyTokens() {
 				onEvent(domain.Event{Kind: domain.EventKindUsage, Usage: result.usage})
 			}
 			onEvent(domain.Event{Kind: domain.EventKindMessageDone})
@@ -786,15 +786,16 @@ func (c *Client) emitChunk(emit func(domain.Event), chunk chatChunk, raw string)
 			emit(domain.Event{Kind: domain.EventKindStatus, Text: choice.FinishReason})
 		}
 	}
-	if chunk.Usage.TotalTokens > 0 {
+	usage := domain.Usage{
+		PromptTokens:     chunk.Usage.PromptTokens,
+		CompletionTokens: chunk.Usage.CompletionTokens,
+		CachedTokens:     cachedTokensFromUsage(chunk.Usage.PromptTokensDetails.CachedTokens, chunk.Usage.InputTokensDetails.CachedTokens),
+		TotalTokens:      chunk.Usage.TotalTokens,
+	}.Normalized()
+	if usage.HasAnyTokens() {
 		emit(domain.Event{
-			Kind: domain.EventKindUsage,
-			Usage: domain.Usage{
-				PromptTokens:     chunk.Usage.PromptTokens,
-				CompletionTokens: chunk.Usage.CompletionTokens,
-				CachedTokens:     cachedTokensFromUsage(chunk.Usage.PromptTokensDetails.CachedTokens, chunk.Usage.InputTokensDetails.CachedTokens),
-				TotalTokens:      chunk.Usage.TotalTokens,
-			},
+			Kind:  domain.EventKindUsage,
+			Usage: usage,
 		})
 	}
 }
@@ -841,13 +842,14 @@ func (r *streamedChatResponse) Apply(chunk chatChunk) {
 		r.toolCalls = mergeToolCalls(r.toolCalls, convertToolCalls(choice.Delta.ToolCalls))
 		r.toolCalls = mergeToolCalls(r.toolCalls, convertToolCalls(choice.Message.ToolCalls))
 	}
-	if chunk.Usage.TotalTokens > 0 {
-		r.usage = domain.Usage{
-			PromptTokens:     chunk.Usage.PromptTokens,
-			CompletionTokens: chunk.Usage.CompletionTokens,
-			CachedTokens:     cachedTokensFromUsage(chunk.Usage.PromptTokensDetails.CachedTokens, chunk.Usage.InputTokensDetails.CachedTokens),
-			TotalTokens:      chunk.Usage.TotalTokens,
-		}
+	usage := domain.Usage{
+		PromptTokens:     chunk.Usage.PromptTokens,
+		CompletionTokens: chunk.Usage.CompletionTokens,
+		CachedTokens:     cachedTokensFromUsage(chunk.Usage.PromptTokensDetails.CachedTokens, chunk.Usage.InputTokensDetails.CachedTokens),
+		TotalTokens:      chunk.Usage.TotalTokens,
+	}.Normalized()
+	if usage.HasAnyTokens() {
+		r.usage = usage
 	}
 }
 

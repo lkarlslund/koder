@@ -310,6 +310,17 @@ type Usage struct {
 	TotalTokens      int
 }
 
+func (u Usage) HasAnyTokens() bool {
+	return u.PromptTokens > 0 || u.CompletionTokens > 0 || u.CachedTokens > 0 || u.TotalTokens > 0
+}
+
+func (u Usage) Normalized() Usage {
+	if u.TotalTokens <= 0 && (u.PromptTokens > 0 || u.CompletionTokens > 0) {
+		u.TotalTokens = u.PromptTokens + u.CompletionTokens
+	}
+	return u
+}
+
 type Event struct {
 	Kind    EventKind
 	Text    string

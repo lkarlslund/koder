@@ -23,6 +23,7 @@ import (
 	"github.com/lkarlslund/koder/internal/permission"
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/reference"
+	"github.com/lkarlslund/koder/internal/sessionctx"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -2044,6 +2045,97 @@ func TestContinueModelTurnAutoCompactsAfterToolResultChurn(t *testing.T) {
 	}
 	if !strings.Contains(requests[2], "Continue from the compacted session summary.") {
 		t.Fatalf("expected continuation request to include post-compact continue instruction, got %s", requests[2])
+	}
+}
+
+func TestCompactSessionPersistsUsageWhenTotalTokensMissing(t *testing.T) {
+	t.Parallel()
+
+	var requests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		requests++
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"short compact summary"}}],"usage":{"prompt_tokens":1200,"completion_tokens":300}}`))
+	}))
+	defer server.Close()
+
+	cfg := testConfig(t)
+	cfg.Providers = map[string]config.Provider{
+		"test": {
+			BaseURL:       server.URL + "/v1",
+			Timeout:       time.Second,
+			ContextWindow: 32768,
+		},
+	}
+	cfg.DefaultProvider = "test"
+	cfg.DefaultModel = "test-model"
+
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	engine := New(cfg, st, tools.NewRegistry(t.TempDir()), nil, t.TempDir())
+	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chat := defaultChatForSession(t, st, session.ID)
+	userMsg, err := st.AddMessage(context.Background(), session.ID, domain.MessageRoleUser, "hello")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.AddPart(context.Background(), userMsg.ID, domain.PartKindText, "hello", ""); err != nil {
+		t.Fatal(err)
+	}
+	assistantMsg, err := st.AddMessage(context.Background(), session.ID, domain.MessageRoleAssistant, "world")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.AddPart(context.Background(), assistantMsg.ID, domain.PartKindText, "world", ""); err != nil {
+		t.Fatal(err)
+	}
+
+	client, err := provider.New("test", cfg.Providers["test"], nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := make(chan domain.Event, 4)
+	if err := engine.compactSession(context.Background(), session, chat.ID, client, "manual", events); err != nil {
+		t.Fatal(err)
+	}
+	close(events)
+
+	var sawUsage bool
+	for evt := range events {
+		if evt.Kind == domain.EventKindUsage {
+			sawUsage = true
+			if evt.Usage.TotalTokens != 1500 {
+				t.Fatalf("expected synthesized compact usage total, got %#v", evt.Usage)
+			}
+		}
+	}
+	if !sawUsage {
+		t.Fatal("expected compact session to emit usage event")
+	}
+
+	messages, parts, err := st.PartsForSession(context.Background(), session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	latestUsage, ok := sessionctx.LatestUsage(messages, parts)
+	if !ok {
+		t.Fatal("expected persisted compact usage")
+	}
+	if latestUsage.TotalTokens != 1500 || latestUsage.PromptTokens != 1200 || latestUsage.CompletionTokens != 300 {
+		t.Fatalf("unexpected latest usage: %#v", latestUsage)
+	}
+	if requests != 1 {
+		t.Fatalf("expected one compaction request, got %d", requests)
 	}
 }
 

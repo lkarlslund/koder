@@ -1797,9 +1797,9 @@ func (m *Model) applyEvent(evt domain.Event) {
 			}
 		}
 	case domain.EventKindUsage:
-		m.liveUsage = evt.Usage
-		m.liveUsageKnown = evt.Usage.TotalTokens > 0 || evt.Usage.PromptTokens > 0 || evt.Usage.CompletionTokens > 0 || evt.Usage.CachedTokens > 0
-		m.status = fmt.Sprintf("Usage total=%d", evt.Usage.TotalTokens)
+		m.liveUsage = evt.Usage.Normalized()
+		m.liveUsageKnown = m.liveUsage.HasAnyTokens()
+		m.status = fmt.Sprintf("Usage total=%d", m.liveUsage.TotalTokens)
 	case domain.EventKindStatus:
 		if evt.Text != "" {
 			m.status = evt.Text
@@ -3163,9 +3163,9 @@ func (m *Model) syncUsageFromHistory() {
 
 func (m Model) currentLatestUsage() (domain.Usage, bool) {
 	if m.liveUsageKnown {
-		return m.liveUsage, true
+		return m.liveUsage.Normalized(), true
 	}
-	return m.historyLatestUsage, m.historyLatestUsageKnown
+	return m.historyLatestUsage.Normalized(), m.historyLatestUsageKnown
 }
 
 func (m Model) currentTotalUsage() (domain.Usage, bool) {
@@ -3174,12 +3174,13 @@ func (m Model) currentTotalUsage() (domain.Usage, bool) {
 	}
 	total := m.historyTotalUsage
 	if m.liveUsageKnown {
-		total.PromptTokens += m.liveUsage.PromptTokens
-		total.CompletionTokens += m.liveUsage.CompletionTokens
-		total.CachedTokens += m.liveUsage.CachedTokens
-		total.TotalTokens += m.liveUsage.TotalTokens
+		live := m.liveUsage.Normalized()
+		total.PromptTokens += live.PromptTokens
+		total.CompletionTokens += live.CompletionTokens
+		total.CachedTokens += live.CachedTokens
+		total.TotalTokens += live.TotalTokens
 	}
-	return total, true
+	return total.Normalized(), true
 }
 
 func (m Model) currentContextMetrics() (sessionctx.Metrics, bool) {

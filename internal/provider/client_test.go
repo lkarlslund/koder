@@ -351,6 +351,31 @@ func TestCompleteChatParsesCachedTokens(t *testing.T) {
 	}
 }
 
+func TestCompleteChatSynthesizesTotalTokensWhenMissing(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"hello"}}],"usage":{"prompt_tokens":10,"completion_tokens":2}}`))
+	}))
+	defer server.Close()
+
+	client, err := New("test", config.Provider{
+		BaseURL: server.URL,
+		Timeout: time.Second,
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := client.CompleteChat(context.Background(), ChatRequest{
+		Model:  "test",
+		Stream: false,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Usage.TotalTokens != 12 {
+		t.Fatalf("expected synthesized total tokens, got %#v", resp.Usage)
+	}
+}
+
 func TestCompleteChatToolCalls(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{"choices":[{"message":{"tool_calls":[{"id":"call_1","type":"function","function":{"name":"bash","arguments":"{\"command\":\"pwd\"}"}}]}}],"usage":{"total_tokens":3}}`))
@@ -470,6 +495,41 @@ func TestStreamChatResponseAggregatesToolCallsAndDeltas(t *testing.T) {
 	}
 	if !sawToolCallDelta {
 		t.Fatal("expected streamed tool call delta event")
+	}
+}
+
+func TestStreamChatResponseEmitsUsageWhenTotalTokensMissing(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"hello\"}}],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":2}}\n\n"))
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer server.Close()
+
+	client, err := New("test", config.Provider{
+		BaseURL: server.URL,
+		Timeout: time.Second,
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var usageEvents []domain.Usage
+	resp, err := client.StreamChatResponse(context.Background(), ChatRequest{Model: "test"}, func(evt domain.Event) {
+		if evt.Kind == domain.EventKindUsage {
+			usageEvents = append(usageEvents, evt.Usage)
+		}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(usageEvents) != 1 {
+		t.Fatalf("expected one usage event, got %#v", usageEvents)
+	}
+	if usageEvents[0].TotalTokens != 12 {
+		t.Fatalf("expected synthesized total tokens in event, got %#v", usageEvents[0])
+	}
+	if resp.Usage.TotalTokens != 12 {
+		t.Fatalf("expected synthesized total tokens in response, got %#v", resp.Usage)
 	}
 }
 
