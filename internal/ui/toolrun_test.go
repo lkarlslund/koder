@@ -141,7 +141,7 @@ func TestExecToolRunShowsProcessMetadataAndRunningState(t *testing.T) {
 	palette := theme.Resolve("tokyonight").Palette
 	run := ToolRun{
 		Tool:      domain.ToolKindExecCommand,
-		Title:     "Exec session npm run dev",
+		Title:     "Running command npm run dev",
 		Command:   "npm run dev",
 		ProcessID: "exec_42",
 		TTY:       true,
@@ -152,6 +152,9 @@ func TestExecToolRunShowsProcessMetadataAndRunningState(t *testing.T) {
 	got := SurfaceText(run.CardSurface(palette, 80, false, false))
 	if !strings.Contains(got, "Running") {
 		t.Fatalf("expected running status label, got %q", got)
+	}
+	if !strings.Contains(got, "Running command npm run dev") {
+		t.Fatalf("expected running exec title, got %q", got)
 	}
 	if !strings.Contains(got, "id exec_42  tty") {
 		t.Fatalf("expected exec metadata line, got %q", got)

@@ -441,8 +441,9 @@ func toolRunOutput(part domain.Part, parts []domain.Part, msg domain.Message) ui
 		state := strings.TrimSpace(meta["state"])
 		exitCode := optionalIntPtr(strings.TrimSpace(meta["exit_code"]))
 		tty := parseBoolString(strings.TrimSpace(meta["tty"]))
+		runStatus := toolRunStatusFromExecState(state)
 		if command != "" {
-			presentation.Title = "Exec session " + firstNonEmptyCommandLine(command)
+			presentation.Title = execCommandTitle(command, runStatus)
 			presentation.Subtitle = execToolRunSubtitle(processID, tty, exitCode)
 			presentation.Preview = output
 			return ui.ToolRun{
@@ -457,7 +458,7 @@ func toolRunOutput(part domain.Part, parts []domain.Part, msg domain.Message) ui
 				ExitCode:   exitCode,
 				Preview:    presentation.Preview,
 				Output:     output,
-				Status:     toolRunStatusFromExecState(state),
+				Status:     runStatus,
 			}
 		}
 	case domain.ToolKindEdit:
@@ -495,7 +496,7 @@ func liveExecToolRun(snap execruntime.Snapshot) ui.ToolRun {
 	return ui.ToolRun{
 		ID:        strings.TrimSpace(snap.ProcessID),
 		Tool:      domain.ToolKindExecCommand,
-		Title:     "Exec session " + firstNonEmptyCommandLine(snap.Command),
+		Title:     execCommandTitle(snap.Command, toolRunStatusFromExecState(state)),
 		Command:   strings.TrimSpace(snap.Command),
 		Subtitle:  execToolRunSubtitle(snap.ProcessID, snap.TTY, snap.ExitCode),
 		ProcessID: strings.TrimSpace(snap.ProcessID),
@@ -504,6 +505,24 @@ func liveExecToolRun(snap execruntime.Snapshot) ui.ToolRun {
 		Preview:   strings.TrimSpace(snap.Output),
 		Output:    strings.TrimSpace(snap.Output),
 		Status:    toolRunStatusFromExecState(state),
+	}
+}
+
+func execCommandTitle(command string, status ui.ToolRunStatus) string {
+	command = firstNonEmptyCommandLine(command)
+	if command == "" {
+		switch status {
+		case ui.ToolRunStatusRunning:
+			return "Running command"
+		default:
+			return "Ran command"
+		}
+	}
+	switch status {
+	case ui.ToolRunStatusRunning:
+		return "Running command " + command
+	default:
+		return "Ran command " + command
 	}
 }
 

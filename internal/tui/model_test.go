@@ -7638,11 +7638,44 @@ func TestTranscriptBlocksIncludeLiveExecRuns(t *testing.T) {
 	if run.Status != ui.ToolRunStatusRunning {
 		t.Fatalf("expected running live exec status, got %#v", run)
 	}
+	if !strings.Contains(run.Title, "Running command sleep 1") {
+		t.Fatalf("expected running live exec title, got %#v", run)
+	}
 	if run.ProcessID != snap.ProcessID {
 		t.Fatalf("expected process id on live exec run, got %#v", run)
 	}
 	if !strings.Contains(run.Subtitle, snap.ProcessID) {
 		t.Fatalf("expected live exec subtitle to include process id, got %#v", run)
+	}
+}
+
+func TestToolRunOutputUsesPastTenseForCompletedExec(t *testing.T) {
+	exitCode := 0
+	msg := domain.Message{ID: 1, Role: domain.MessageRoleTool, Summary: "exec_command"}
+	part := domain.Part{
+		Kind: domain.PartKindToolOutput,
+		Body: "done",
+		MetaJSON: mustMarshalMeta(t, tools.MetaWithStoredResult(map[string]string{
+			"tool":       string(domain.ToolKindExecCommand),
+			"process_id": "exec_42",
+			"command":    "npm test",
+			"state":      "completed",
+			"exit_code":  "0",
+		}, domain.PartKindToolOutput, domain.ToolKindExecCommand, tools.StoredResultStatusOK, tools.ExecStoredResult{
+			ProcessID: "exec_42",
+			Command:   "npm test",
+			State:     "completed",
+			ExitCode:  &exitCode,
+			Output:    "done",
+		})),
+	}
+
+	run := toolRunOutput(part, nil, msg)
+	if run.Status != ui.ToolRunStatusCompleted {
+		t.Fatalf("expected completed exec status, got %#v", run)
+	}
+	if run.Title != "Ran command npm test" {
+		t.Fatalf("expected completed exec title, got %#v", run)
 	}
 }
 
