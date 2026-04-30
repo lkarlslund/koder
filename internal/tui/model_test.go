@@ -5634,6 +5634,51 @@ func TestLoadMsgPreserveBusyKeepsSpinnerActive(t *testing.T) {
 	}
 }
 
+func TestLoadMsgPreserveBusySameChatKeepsPendingAssistantStream(t *testing.T) {
+	m := Model{
+		cfg:            testConfig(t),
+		viewport:       newTranscriptViewport(60, 8),
+		currentSession: domain.Session{ID: 33, Title: "Refactor coordinates to use float tiles"},
+		currentChat:    domain.Chat{ID: 24, SessionID: 33},
+		busy: busyModel{
+			active: true,
+			scope:  busyScopeTranscript,
+			status: "Working ...",
+		},
+		parts: map[int64][]domain.Part{},
+	}
+
+	// Captured from the live session 33 stream around 11:40:08, where
+	// message deltas were interleaved with preserved chat reloads.
+	m.applyEvent(domain.Event{Kind: domain.EventKindMessageDelta, Text: "The"})
+	if got := m.pendingAssistant.Text; got != "The" {
+		t.Fatalf("expected initial pending assistant text, got %q", got)
+	}
+
+	updated, _ := m.Update(loadMsg{
+		current:      domain.Session{ID: 33, Title: "Refactor coordinates to use float tiles"},
+		chat:         domain.Chat{ID: 24, SessionID: 33},
+		parts:        map[int64][]domain.Part{},
+		workspace:    workspace.Status{},
+		preserveBusy: true,
+	})
+	m = updated.(Model)
+	if got := m.pendingAssistant.Text; got != "The" {
+		t.Fatalf("expected preserved pending assistant text after preserved reload, got %q", got)
+	}
+
+	m.applyEvent(domain.Event{Kind: domain.EventKindMessageDelta, Text: " `ts` is"})
+	m.applyEvent(domain.Event{Kind: domain.EventKindMessageDelta, Text: " now"})
+	if got := m.pendingAssistant.Text; got != "The `ts` is now" {
+		t.Fatalf("expected concatenated pending assistant text after reload interleaving, got %q", got)
+	}
+
+	rendered := m.renderBody()
+	if !strings.Contains(rendered, "The `ts` is now") {
+		t.Fatalf("expected rendered transcript to retain pending assistant stream, got %q", rendered)
+	}
+}
+
 func TestSpinnerTickPreservesViewportOffsetWhenScrolledBack(t *testing.T) {
 	m := Model{
 		cfg:            testConfig(t),

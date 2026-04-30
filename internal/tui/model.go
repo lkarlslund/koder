@@ -892,7 +892,12 @@ func (m Model) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 		}
 		return m, m.syncWindowTitleCmd()
 	case loadMsg:
-		m.pendingAssistant = pendingAssistantTurn{}
+		preservePendingAssistant := msg.preserveBusy &&
+			(msg.current.ID == 0 || msg.current.ID == m.currentSession.ID) &&
+			(msg.chat.ID == 0 || msg.chat.ID == m.currentChat.ID)
+		if !preservePendingAssistant {
+			m.pendingAssistant = pendingAssistantTurn{}
+		}
 		m.invalidateTranscript()
 		m = m.UpdateLoad(msg)
 		if m.debug != nil && m.currentSession.ID > 0 {
