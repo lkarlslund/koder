@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
+	"net"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -53,7 +55,9 @@ var patchPathPattern = regexp.MustCompile(`(?m)^(?:\+\+\+|---)\s+(?:a/|b/)?([^\t
 
 const (
 	maxRateLimitRetries       = 3
+	maxTransientChatRetries   = 3
 	defaultRateLimitRetryWait = 5 * time.Second
+	defaultTransientRetryWait = 250 * time.Millisecond
 )
 
 func New(cfg config.Config, st *store.Store, registry *tools.Registry, debug *debugsrv.Recorder, workdir string, mcpManagers ...*mcp.Manager) *Engine {
@@ -1472,12 +1476,14 @@ func waitForRetry(ctx context.Context, delay time.Duration, onTick func(time.Dur
 func (e *Engine) chatWithRetry(ctx context.Context, sessionID int64, client *provider.Client, out chan<- domain.Event, req provider.ChatRequest) (provider.ChatResponse, bool, error) {
 	for attempt := 0; ; attempt++ {
 		var (
-			resp     provider.ChatResponse
-			err      error
-			streamed bool
+			resp           provider.ChatResponse
+			err            error
+			streamed       bool
+			receivedStream bool
 		)
 		if req.Stream {
 			resp, err = client.StreamChatResponse(ctx, req, func(evt domain.Event) {
+				receivedStream = true
 				if out != nil {
 					out <- evt
 				}
@@ -1490,18 +1496,44 @@ func (e *Engine) chatWithRetry(ctx context.Context, sessionID int64, client *pro
 			return resp, streamed, nil
 		}
 		var apiErr *provider.APIError
-		if !errors.As(err, &apiErr) || apiErr.StatusCode != 429 || attempt >= maxRateLimitRetries {
+		if errors.As(err, &apiErr) && apiErr.StatusCode == 429 {
+			if attempt >= maxRateLimitRetries {
+				return provider.ChatResponse{}, streamed, err
+			}
+			delay := apiErr.RetryAfter
+			if delay <= 0 {
+				delay = defaultRateLimitRetryWait
+			}
+			retryNumber := attempt + 1
+			initialStatus := formatRateLimitRetryStatus(delay, retryNumber)
+			e.recordLifecycle(sessionID, "rate_limit_retry", initialStatus, map[string]string{
+				"retry":       strconv.Itoa(retryNumber),
+				"retry_after": delay.String(),
+			})
+			lastRemaining := time.Duration(-1)
+			if err := e.retryPause(ctx, delay, func(remaining time.Duration) {
+				if remaining == lastRemaining {
+					return
+				}
+				lastRemaining = remaining
+				if out != nil {
+					out <- domain.Event{Kind: domain.EventKindStatus, Text: formatRateLimitRetryStatus(remaining, retryNumber)}
+				}
+			}); err != nil {
+				return provider.ChatResponse{}, streamed, err
+			}
+			continue
+		}
+		if !shouldRetryTransientChatError(err, req.Stream, receivedStream) || attempt >= maxTransientChatRetries {
 			return provider.ChatResponse{}, streamed, err
 		}
-		delay := apiErr.RetryAfter
-		if delay <= 0 {
-			delay = defaultRateLimitRetryWait
-		}
+		delay := transientChatRetryDelay(attempt)
 		retryNumber := attempt + 1
-		initialStatus := formatRateLimitRetryStatus(delay, retryNumber)
-		e.recordLifecycle(sessionID, "rate_limit_retry", initialStatus, map[string]string{
+		initialStatus := formatTransientRetryStatus(delay, retryNumber)
+		e.recordLifecycle(sessionID, "transport_retry", initialStatus, map[string]string{
 			"retry":       strconv.Itoa(retryNumber),
 			"retry_after": delay.String(),
+			"error":       err.Error(),
 		})
 		lastRemaining := time.Duration(-1)
 		if err := e.retryPause(ctx, delay, func(remaining time.Duration) {
@@ -1510,7 +1542,7 @@ func (e *Engine) chatWithRetry(ctx context.Context, sessionID int64, client *pro
 			}
 			lastRemaining = remaining
 			if out != nil {
-				out <- domain.Event{Kind: domain.EventKindStatus, Text: formatRateLimitRetryStatus(remaining, retryNumber)}
+				out <- domain.Event{Kind: domain.EventKindStatus, Text: formatTransientRetryStatus(remaining, retryNumber)}
 			}
 		}); err != nil {
 			return provider.ChatResponse{}, streamed, err
@@ -1521,6 +1553,40 @@ func (e *Engine) chatWithRetry(ctx context.Context, sessionID int64, client *pro
 func formatRateLimitRetryStatus(delay time.Duration, retryNumber int) string {
 	delay = roundRetryDelay(delay)
 	return fmt.Sprintf("Working (rate limit hit, retrying in %s, retry %d)", delay, retryNumber)
+}
+
+func formatTransientRetryStatus(delay time.Duration, retryNumber int) string {
+	delay = roundRetryDelay(delay)
+	return fmt.Sprintf("Working (connection dropped, retrying in %s, retry %d)", delay, retryNumber)
+}
+
+func transientChatRetryDelay(attempt int) time.Duration {
+	delay := defaultTransientRetryWait
+	for i := 0; i < attempt; i++ {
+		delay *= 3
+	}
+	return delay
+}
+
+func shouldRetryTransientChatError(err error, stream bool, receivedStream bool) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	if stream && receivedStream {
+		return false
+	}
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return true
+	}
+	var apiErr *provider.APIError
+	if errors.As(err, &apiErr) {
+		return apiErr.StatusCode == 502 || apiErr.StatusCode == 503 || apiErr.StatusCode == 504
+	}
+	var netErr net.Error
+	return errors.As(err, &netErr) && netErr.Timeout()
 }
 
 func roundRetryDelay(delay time.Duration) time.Duration {

@@ -2610,6 +2610,169 @@ func TestRunPromptRateLimitStatusCountsDown(t *testing.T) {
 	}
 }
 
+func TestChatWithRetryRetriesTransientEOFBeforeStreamingStarts(t *testing.T) {
+	t.Parallel()
+
+	var requests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests++
+		switch requests {
+		case 1:
+			hj, ok := w.(http.Hijacker)
+			if !ok {
+				t.Fatal("response writer does not support hijacking")
+			}
+			conn, _, err := hj.Hijack()
+			if err != nil {
+				t.Fatalf("hijack: %v", err)
+			}
+			_ = conn.Close()
+		case 2:
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"hel\"}}]}\n\n"))
+			_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"lo\"}}],\"usage\":{\"total_tokens\":1}}\n\n"))
+			_, _ = w.Write([]byte("data: [DONE]\n\n"))
+		default:
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ignored title"}}],"usage":{"total_tokens":1}}`))
+		}
+	}))
+	defer server.Close()
+
+	cfg := testConfig(t)
+	cfg.Providers = map[string]config.Provider{
+		"test": {
+			BaseURL: server.URL + "/v1",
+			Timeout: time.Second,
+			Stream:  true,
+		},
+	}
+	cfg.DefaultProvider = "test"
+	cfg.DefaultModel = "test-model"
+
+	engine := New(cfg, nil, tools.NewRegistry(t.TempDir()), nil, t.TempDir())
+	var waited []time.Duration
+	engine.retryPause = func(_ context.Context, delay time.Duration, onTick func(time.Duration)) error {
+		if onTick != nil {
+			onTick(delay)
+		}
+		waited = append(waited, delay)
+		return nil
+	}
+	client, err := provider.New("test", cfg.Providers["test"], nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	events := make(chan domain.Event, 16)
+	resp, streamed, err := engine.chatWithRetry(context.Background(), 0, client, events, provider.ChatRequest{
+		Model: "test-model",
+		Messages: []provider.Message{{
+			Role:    domain.MessageRoleUser,
+			Content: "hello",
+		}},
+		Stream: true,
+	})
+	if err != nil {
+		t.Fatalf("expected transient retry to succeed, got %v", err)
+	}
+	close(events)
+	if !streamed {
+		t.Fatal("expected streaming request")
+	}
+	if resp.Text != "hello" {
+		t.Fatalf("expected final response text hello, got %#v", resp)
+	}
+	var sawRetry bool
+	for evt := range events {
+		if evt.Kind == domain.EventKindStatus && strings.Contains(evt.Text, "connection dropped") {
+			sawRetry = true
+		}
+	}
+	if len(waited) != 1 || waited[0] != defaultTransientRetryWait {
+		t.Fatalf("expected single transient retry wait of %s, got %#v", defaultTransientRetryWait, waited)
+	}
+	if !sawRetry {
+		t.Fatal("expected transient retry status event")
+	}
+	if requests < 2 {
+		t.Fatalf("expected retried provider request, got %d requests", requests)
+	}
+}
+
+func TestChatWithRetryDoesNotRetryAfterPartialStreamFailure(t *testing.T) {
+	t.Parallel()
+
+	var requests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests++
+		switch requests {
+		case 1:
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"hel\"}}]}\n\n"))
+			_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"broken\"}}\n\n"))
+		default:
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"should not retry"}}],"usage":{"total_tokens":1}}`))
+		}
+	}))
+	defer server.Close()
+
+	cfg := testConfig(t)
+	cfg.Providers = map[string]config.Provider{
+		"test": {
+			BaseURL: server.URL + "/v1",
+			Timeout: time.Second,
+			Stream:  true,
+		},
+	}
+	cfg.DefaultProvider = "test"
+	cfg.DefaultModel = "test-model"
+
+	engine := New(cfg, nil, tools.NewRegistry(t.TempDir()), nil, t.TempDir())
+	client, err := provider.New("test", cfg.Providers["test"], nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	events := make(chan domain.Event, 16)
+	_, streamed, err := engine.chatWithRetry(context.Background(), 0, client, events, provider.ChatRequest{
+		Model: "test-model",
+		Messages: []provider.Message{{
+			Role:    domain.MessageRoleUser,
+			Content: "hello",
+		}},
+		Stream: true,
+	})
+	close(events)
+	if err == nil {
+		t.Fatal("expected stream failure error")
+	}
+	if !streamed {
+		t.Fatal("expected streaming request")
+	}
+
+	var (
+		deltas   []string
+		sawRetry bool
+	)
+	for evt := range events {
+		if evt.Kind == domain.EventKindMessageDelta {
+			deltas = append(deltas, evt.Text)
+		}
+		if evt.Kind == domain.EventKindStatus && strings.Contains(evt.Text, "connection dropped") {
+			sawRetry = true
+		}
+	}
+	if strings.Join(deltas, "") != "hel" {
+		t.Fatalf("expected partial streamed delta before failure, got %#v", deltas)
+	}
+	if sawRetry {
+		t.Fatal("did not expect retry status after partial stream failure")
+	}
+	if requests != 1 {
+		t.Fatalf("expected no retry after partial stream failure, got %d requests", requests)
+	}
+}
+
 func TestRunPromptIgnoresSessionTitleRefreshFailure(t *testing.T) {
 	t.Parallel()
 
