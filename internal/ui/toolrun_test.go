@@ -187,10 +187,10 @@ func TestToolRunCardViewShowsShortEditDiffInline(t *testing.T) {
 	}
 
 	collapsed := SurfaceText(run.CardSurface(palette, 80, false, false))
-	if !strings.Contains(collapsed, "Edited game/map.go  -1 / +1") {
+	if !strings.Contains(collapsed, "Edited game/map.go  (-1 +1)") {
 		t.Fatalf("expected compact edit header, got %q", collapsed)
 	}
-	if !strings.Contains(collapsed, "-1 / +1") {
+	if !strings.Contains(collapsed, "(-1 +1)") {
 		t.Fatalf("expected collapsed edit card to show diff summary, got %q", collapsed)
 	}
 	if !strings.Contains(collapsed, "@@ -12,1 +12,1 @@") || !strings.Contains(collapsed, "+if newCondition {") {
@@ -224,10 +224,10 @@ func TestToolRunCardViewKeepsLargeEditDiffExpandable(t *testing.T) {
 	}
 
 	collapsed := SurfaceText(run.CardSurface(palette, 80, false, false))
-	if !strings.Contains(collapsed, "Edited game/map.go  -3 / +4  Expand (10 lines)") {
+	if !strings.Contains(collapsed, "Edited game/map.go  (-3 +4)  Expand (10 lines)") {
 		t.Fatalf("expected compact edit header with expand control, got %q", collapsed)
 	}
-	if !strings.Contains(collapsed, "-3 / +4") {
+	if !strings.Contains(collapsed, "(-3 +4)") {
 		t.Fatalf("expected collapsed edit card to show diff summary, got %q", collapsed)
 	}
 	if strings.Contains(collapsed, "@@ -12,4 +12,5 @@") || strings.Contains(collapsed, "+\tthird()") {

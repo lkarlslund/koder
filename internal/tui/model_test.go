@@ -6397,7 +6397,7 @@ func TestMouseClickTogglesEditToolRunExpansion(t *testing.T) {
 	}}
 
 	m.refreshViewport()
-	if !strings.Contains(m.viewport.View(), "-1 / +1") {
+	if !strings.Contains(m.viewport.View(), "(-1 +1)") {
 		t.Fatalf("expected collapsed edit summary, got %q", m.viewport.View())
 	}
 	if !strings.Contains(m.viewport.View(), "--- game/sim_test.go") || !strings.Contains(m.viewport.View(), "+new") {
@@ -6567,7 +6567,7 @@ func TestEditToolRunShowsStoredHunkDetails(t *testing.T) {
 	m.refreshViewport()
 	got := m.viewport.View()
 	for _, want := range []string{
-		"Edited game/map.go  -1 / +1",
+		"Edited game/map.go  (-1 +1)",
 		"--- game/map.go",
 		"+++ game/map.go",
 		"@@ -12,1 +12,1 @@",

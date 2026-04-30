@@ -184,11 +184,9 @@ func (r ToolRun) renderEditCard(palette theme.Palette, width int, expandedOutput
 	lines := make([]Surface, 0, 5)
 
 	headerSpans := []StyledSpan{{Text: r.Title, Style: titleStyle}}
-	if summary := strings.TrimSpace(firstNonEmpty(r.Output, r.Preview)); summary != "" {
-		headerSpans = append(headerSpans,
-			StyledSpan{Text: "  ", Style: bodyStyle},
-			StyledSpan{Text: summary, Style: bodyStyle},
-		)
+	if summarySpans := editSummarySpans(r, bodyStyle, deletedStyle, addedStyle); len(summarySpans) > 0 {
+		headerSpans = append(headerSpans, StyledSpan{Text: "  ", Style: bodyStyle})
+		headerSpans = append(headerSpans, summarySpans...)
 	}
 	if label := r.OutputToggleLabel(width, expandedOutput); label != "" {
 		headerSpans = append(headerSpans,
@@ -541,7 +539,7 @@ func renderToolRunPreview(preview string, run ToolRun, width int, expanded bool)
 
 func EditDiffSummary(diff string) string {
 	deleted, added := diffChangeCounts(diff)
-	return "-" + strconv.Itoa(deleted) + " / +" + strconv.Itoa(added)
+	return "(-" + strconv.Itoa(deleted) + " +" + strconv.Itoa(added) + ")"
 }
 
 func diffChangeCounts(diff string) (deleted, added int) {
@@ -572,6 +570,25 @@ func renderStyledDiffPreview(diff string, width int) string {
 		}
 	}
 	return strings.Join(rendered, "\n")
+}
+
+func editSummarySpans(run ToolRun, bodyStyle, deletedStyle, addedStyle CellStyle) []StyledSpan {
+	diff := strings.TrimSpace(run.Diff)
+	if diff != "" {
+		deleted, added := diffChangeCounts(diff)
+		return []StyledSpan{
+			{Text: "(", Style: bodyStyle},
+			{Text: "-" + strconv.Itoa(deleted), Style: deletedStyle},
+			{Text: " ", Style: bodyStyle},
+			{Text: "+" + strconv.Itoa(added), Style: addedStyle},
+			{Text: ")", Style: bodyStyle},
+		}
+	}
+	summary := strings.TrimSpace(firstNonEmpty(run.Output, run.Preview))
+	if summary == "" {
+		return nil
+	}
+	return []StyledSpan{{Text: summary, Style: bodyStyle}}
 }
 
 func toolRunStatusColor(status ToolRunStatus, palette theme.Palette) CellColor {

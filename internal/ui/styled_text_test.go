@@ -58,7 +58,7 @@ func TestLayoutStyledTextRegistersWrappedInteractiveFragments(t *testing.T) {
 	surface := LayoutStyledText([]StyledSpan{
 		{Text: "Edited game/sim_test.go", Style: CellStyle{}.WithBold(true)},
 		{Text: "  ", Style: CellStyle{}},
-		{Text: "-7 / +7", Style: CellStyle{}},
+		{Text: "(-7 +7)", Style: CellStyle{}},
 		{Text: "  ", Style: CellStyle{}},
 		{Text: "Expand (14 lines)", Style: CellStyle{}.WithItalic(true), ControlID: "toolrun:edit:output", Enabled: true},
 	}, 18, CellStyle{})
