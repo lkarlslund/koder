@@ -106,6 +106,37 @@ type TranscriptItemRef struct {
 	ControlID string          `json:"control_id,omitempty"`
 }
 
+type SessionAnalysis struct {
+	SessionID       int64                   `json:"session_id"`
+	ContinueCount   int                     `json:"continue_count"`
+	Continues       []SessionContinueRecord `json:"continues,omitempty"`
+	BadStopCount    int                     `json:"bad_stop_count"`
+	BadStops        []SessionBadStopRecord  `json:"bad_stops,omitempty"`
+	TranscriptCount int                     `json:"transcript_count"`
+}
+
+type SessionContinueRecord struct {
+	Timestamp time.Time         `json:"timestamp"`
+	Kind      string            `json:"kind"`
+	Text      string            `json:"text,omitempty"`
+	Meta      map[string]string `json:"meta,omitempty"`
+}
+
+type SessionBadStopRecord struct {
+	MessageID        int64     `json:"message_id"`
+	ChatID           int64     `json:"chat_id"`
+	CreatedAt        time.Time `json:"created_at"`
+	Summary          string    `json:"summary,omitempty"`
+	Text             string    `json:"text,omitempty"`
+	NextMessageID    int64     `json:"next_message_id,omitempty"`
+	NextRole         string    `json:"next_role,omitempty"`
+	NextKind         string    `json:"next_kind,omitempty"`
+	NextTool         string    `json:"next_tool,omitempty"`
+	NextSummary      string    `json:"next_summary,omitempty"`
+	NextText         string    `json:"next_text,omitempty"`
+	SameTurnToolCall bool      `json:"same_turn_tool_call,omitempty"`
+}
+
 type InputRequest struct {
 	Mouse *MouseInput `json:"mouse,omitempty"`
 	Key   *KeyInput   `json:"key,omitempty"`
@@ -558,6 +589,8 @@ func (s *Server) handleSessionRoutes(w http.ResponseWriter, r *http.Request) {
 		s.handleTranscript(w, r, sessionID)
 	case "events":
 		s.handleEvents(w, r, sessionID)
+	case "analysis":
+		s.handleAnalysis(w, r, sessionID)
 	case "approvals":
 		s.handleApprovals(w, r, sessionID)
 	case "milestones":
@@ -637,6 +670,15 @@ func (s *Server) handleEvents(w http.ResponseWriter, _ *http.Request, sessionID 
 		"session_id": sessionID,
 		"events":     s.recorder.Events(sessionID),
 	})
+}
+
+func (s *Server) handleAnalysis(w http.ResponseWriter, r *http.Request, sessionID int64) {
+	messages, parts, err := s.store.PartsForSession(r.Context(), sessionID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, analyzeSession(sessionID, messages, parts, s.recorder.Events(sessionID)))
 }
 
 func (s *Server) handleGlobalEvents(w http.ResponseWriter, _ *http.Request) {
@@ -777,4 +819,157 @@ func truncate(value string, max int) string {
 		return value
 	}
 	return value[:max-1] + "…"
+}
+
+type analyzedTranscriptMessage struct {
+	message     domain.Message
+	text        string
+	summary     string
+	kind        string
+	toolNames   []string
+	hasToolCall bool
+}
+
+func analyzeSession(sessionID int64, messages []domain.Message, parts map[int64][]domain.Part, events []RecordedEvent) SessionAnalysis {
+	transcript := make([]analyzedTranscriptMessage, 0, len(messages))
+	for _, msg := range messages {
+		transcript = append(transcript, analyzeTranscriptMessage(msg, parts[msg.ID]))
+	}
+	out := SessionAnalysis{
+		SessionID:       sessionID,
+		TranscriptCount: len(transcript),
+	}
+	for _, evt := range events {
+		if evt.Source != "lifecycle" {
+			continue
+		}
+		if evt.Kind != "continue" && evt.Kind != "continue_with_note" {
+			continue
+		}
+		out.Continues = append(out.Continues, SessionContinueRecord{
+			Timestamp: evt.Timestamp,
+			Kind:      evt.Kind,
+			Text:      evt.Text,
+			Meta:      cloneMeta(evt.Meta),
+		})
+	}
+	out.ContinueCount = len(out.Continues)
+	for i, msg := range transcript {
+		if !looksLikeBadStop(msg) {
+			continue
+		}
+		record := SessionBadStopRecord{
+			MessageID:        msg.message.ID,
+			ChatID:           msg.message.ChatID,
+			CreatedAt:        msg.message.CreatedAt,
+			Summary:          msg.summary,
+			Text:             msg.text,
+			SameTurnToolCall: msg.hasToolCall,
+		}
+		if i+1 < len(transcript) {
+			next := transcript[i+1]
+			record.NextMessageID = next.message.ID
+			record.NextRole = string(next.message.Role)
+			record.NextKind = next.kind
+			if len(next.toolNames) > 0 {
+				record.NextTool = next.toolNames[0]
+			}
+			record.NextSummary = next.summary
+			record.NextText = next.text
+		}
+		out.BadStops = append(out.BadStops, record)
+	}
+	out.BadStopCount = len(out.BadStops)
+	return out
+}
+
+func analyzeTranscriptMessage(msg domain.Message, parts []domain.Part) analyzedTranscriptMessage {
+	out := analyzedTranscriptMessage{
+		message: msg,
+		summary: strings.TrimSpace(msg.Summary),
+	}
+	var texts []string
+	for _, part := range parts {
+		switch part.Kind {
+		case domain.PartKindText:
+			text := strings.TrimSpace(part.Body)
+			if text != "" {
+				texts = append(texts, text)
+			}
+			if out.kind == "" {
+				out.kind = string(domain.PartKindText)
+			}
+		case domain.PartKindToolCall:
+			out.hasToolCall = true
+			name := firstLine(strings.TrimSpace(part.Body))
+			if name != "" {
+				out.toolNames = append(out.toolNames, name)
+			}
+			out.kind = string(domain.PartKindToolCall)
+		default:
+			if out.kind == "" {
+				out.kind = string(part.Kind)
+			}
+		}
+	}
+	if len(texts) > 0 {
+		out.text = strings.Join(texts, "\n\n")
+		if out.summary == "" {
+			out.summary = truncate(out.text, 120)
+		}
+	}
+	if out.kind == "" {
+		out.kind = "message"
+	}
+	return out
+}
+
+func looksLikeBadStop(msg analyzedTranscriptMessage) bool {
+	if msg.message.Role != domain.MessageRoleAssistant {
+		return false
+	}
+	if msg.hasToolCall {
+		return false
+	}
+	text := compactText(msg.text)
+	if text == "" {
+		return false
+	}
+	lower := strings.ToLower(text)
+	prefixes := []string{"now ", "now let me ", "let me ", "next ", "next, ", "i'll ", "i will "}
+	prefixMatch := false
+	for _, prefix := range prefixes {
+		if strings.HasPrefix(lower, prefix) {
+			prefixMatch = true
+			break
+		}
+	}
+	if !prefixMatch {
+		return false
+	}
+	if strings.Contains(text, "```") {
+		return false
+	}
+	verbs := []string{" update ", " update`", " check ", " fix ", " change ", " edit ", " adjust ", " inspect "}
+	verbMatch := strings.Contains(lower, ":")
+	if !verbMatch {
+		for _, verb := range verbs {
+			if strings.Contains(lower, verb) {
+				verbMatch = true
+				break
+			}
+		}
+	}
+	return verbMatch
+}
+
+func compactText(value string) string {
+	return strings.Join(strings.Fields(strings.TrimSpace(value)), " ")
+}
+
+func firstLine(value string) string {
+	if idx := strings.IndexByte(value, '\n'); idx >= 0 {
+		return strings.TrimSpace(value[:idx])
+	}
+	return strings.TrimSpace(value)
 }

@@ -136,6 +136,73 @@ func TestServerExposesTranscriptAndEvents(t *testing.T) {
 	}
 }
 
+func TestServerExposesSessionAnalysis(t *testing.T) {
+	t.Parallel()
+
+	st, err := store.OpenWithOptions(t.TempDir(), store.Options{Backend: store.BackendJSONFS})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	session, err := st.CreateSession(context.Background(), "debug", "provider", "model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assistantStop, err := st.AddMessage(context.Background(), session.ID, domain.MessageRoleAssistant, "Now update `CollidesWith`:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.AddPart(context.Background(), assistantStop.ID, domain.PartKindText, "Now update `CollidesWith`:", ""); err != nil {
+		t.Fatal(err)
+	}
+	toolMsg, err := st.AddMessage(context.Background(), session.ID, domain.MessageRoleAssistant, "edit")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.AddPart(context.Background(), toolMsg.ID, domain.PartKindToolCall, "edit\n{\"path\":\"main.go\"}", ""); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := NewRecorder()
+	rec.RecordLifecycle(session.ID, "continue", "", nil)
+
+	srv, err := Start("127.0.0.1:0", st, rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer srv.Close()
+
+	resp, err := http.Get("http://" + srv.Addr() + "/debug/sessions/1/analysis")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		data, _ := io.ReadAll(resp.Body)
+		t.Fatalf("unexpected analysis status %d: %s", resp.StatusCode, string(data))
+	}
+	var analysis SessionAnalysis
+	if err := json.NewDecoder(resp.Body).Decode(&analysis); err != nil {
+		t.Fatal(err)
+	}
+	if analysis.SessionID != session.ID {
+		t.Fatalf("expected session id %d, got %#v", session.ID, analysis)
+	}
+	if analysis.ContinueCount != 1 || len(analysis.Continues) != 1 || analysis.Continues[0].Kind != "continue" {
+		t.Fatalf("expected one continue event, got %#v", analysis)
+	}
+	if analysis.BadStopCount != 1 || len(analysis.BadStops) != 1 {
+		t.Fatalf("expected one bad stop, got %#v", analysis)
+	}
+	if analysis.BadStops[0].MessageID != assistantStop.ID || analysis.BadStops[0].NextMessageID != toolMsg.ID {
+		t.Fatalf("unexpected bad stop linkage %#v", analysis.BadStops[0])
+	}
+	if analysis.BadStops[0].NextTool != "edit" {
+		t.Fatalf("expected next tool edit, got %#v", analysis.BadStops[0])
+	}
+}
+
 func TestServerExposesPprofHandlers(t *testing.T) {
 	t.Parallel()
 
