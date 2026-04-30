@@ -148,3 +148,26 @@ func TestModelTextForPartUsesApplyPatchSummaryWithoutDiff(t *testing.T) {
 		t.Fatalf("unexpected model text: %q", text)
 	}
 }
+
+func TestDisplayTextForPartStripsRedundantToolFailurePrefix(t *testing.T) {
+	meta, err := json.Marshal(tools.MetaWithStoredResult(map[string]string{
+		"tool": "todo_update_item",
+	}, domain.PartKindToolOutput, domain.ToolKindTodoUpdateItem, tools.StoredResultStatusError, tools.ErrorStoredResult{
+		Message: "todo_update_item failed: id must be a non-negative integer",
+	}))
+	if err != nil {
+		t.Fatalf("marshal meta: %v", err)
+	}
+
+	text, ok := tools.DisplayTextForPart(domain.Part{
+		Kind:     domain.PartKindToolOutput,
+		Body:     "todo_update_item failed: id must be a non-negative integer",
+		MetaJSON: string(meta),
+	})
+	if !ok {
+		t.Fatal("expected display text")
+	}
+	if text != "id must be a non-negative integer" {
+		t.Fatalf("unexpected display text: %q", text)
+	}
+}

@@ -1871,7 +1871,7 @@ func TestApproveContinuesAfterApprovedToolFailure(t *testing.T) {
 		case 1:
 			_, _ = w.Write([]byte(fmt.Sprintf(`{"choices":[{"message":{"tool_calls":[{"id":"call_1","type":"function","function":{"name":"read","arguments":%q}}]}}],"usage":{"total_tokens":1}}`, string(args))))
 		case 2:
-			if !strings.Contains(requests[1], "read failed:") {
+			if !strings.Contains(requests[1], "no such file or directory") {
 				t.Fatalf("expected second request to include tool failure, got %s", requests[1])
 			}
 			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"handled failure"}}],"usage":{"total_tokens":1}}`))
@@ -1934,7 +1934,7 @@ func TestApproveContinuesAfterApprovedToolFailure(t *testing.T) {
 	var sawToolFailure bool
 	var sawFinalAnswer bool
 	for evt := range approvedEvents {
-		if evt.Kind == domain.EventKindToolResult && strings.Contains(evt.Text, "read failed:") {
+		if evt.Kind == domain.EventKindToolResult && strings.Contains(evt.Text, "no such file or directory") {
 			sawToolFailure = true
 		}
 		if evt.Kind == domain.EventKindMessageDelta && evt.Text == "handled failure" {

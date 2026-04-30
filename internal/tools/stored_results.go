@@ -358,6 +358,14 @@ func DisplayTextForPart(part domain.Part) (string, bool) {
 	return text, true
 }
 
+func StoredResultInfoForPart(part domain.Part) (domain.ToolKind, StoredResultStatus, bool) {
+	env, ok := storedResultFromPart(part)
+	if !ok {
+		return "", "", false
+	}
+	return env.Tool, env.Status, true
+}
+
 func DisplayTextForStored(tool domain.ToolKind, payload StoredResultPayload) string {
 	raw, err := marshalStoredResult(domain.PartKindToolOutput, tool, StoredResultStatusOK, payload)
 	if err != nil {
@@ -441,7 +449,7 @@ func formatStoredToolOutput(env storedResultEnvelope) (string, bool) {
 	}
 	if env.Status == StoredResultStatusError {
 		return decodeAndFormat[ErrorStoredResult](env.Payload, func(result ErrorStoredResult) string {
-			return strings.TrimSpace(result.Message)
+			return formatErrorStoredResult(env.Tool, result.Message)
 		})
 	}
 	switch env.Tool {
@@ -498,6 +506,18 @@ func formatStoredToolOutput(env storedResultEnvelope) (string, bool) {
 	default:
 		return "", false
 	}
+}
+
+func formatErrorStoredResult(tool domain.ToolKind, message string) string {
+	message = strings.TrimSpace(message)
+	if tool == "" || message == "" {
+		return message
+	}
+	prefix := string(tool) + " failed:"
+	if strings.HasPrefix(strings.ToLower(message), strings.ToLower(prefix)) {
+		return strings.TrimSpace(message[len(prefix):])
+	}
+	return message
 }
 
 func formatStoredResultForDisplay(env storedResultEnvelope) (string, bool) {

@@ -384,6 +384,16 @@ func toolRunOutput(part domain.Part, parts []domain.Part, msg domain.Message) ui
 	}
 	diff := toolRunDiffBody(parts)
 	status := ui.ToolRunStatusCompleted
+	storedTool, storedStatus, hasStored := tools.StoredResultInfoForPart(part)
+	if hasStored && req.Tool == "" {
+		req.Tool = storedTool
+	}
+	switch storedStatus {
+	case tools.StoredResultStatusDenied:
+		status = ui.ToolRunStatusDenied
+	case tools.StoredResultStatusError:
+		status = ui.ToolRunStatusFailed
+	}
 	if strings.Contains(strings.ToLower(output), "denied") {
 		status = ui.ToolRunStatusDenied
 	}
@@ -400,6 +410,10 @@ func toolRunOutput(part domain.Part, parts []domain.Part, msg domain.Message) ui
 	presentation := tools.PresentationForRequest(req)
 	if strings.TrimSpace(presentation.Preview) == "" {
 		presentation.Preview = firstNonEmptyString(strings.TrimSpace(msg.Summary), output)
+	}
+	if status == ui.ToolRunStatusFailed && req.Tool != "" {
+		presentation.Title = string(req.Tool)
+		presentation.Subtitle = ""
 	}
 	switch req.Tool {
 	case domain.ToolKindBash:
