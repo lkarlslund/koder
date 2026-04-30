@@ -1999,7 +1999,7 @@ func TestContinueModelTurnAutoCompactsAfterToolResultChurn(t *testing.T) {
 		"test": {
 			BaseURL:       server.URL + "/v1",
 			Timeout:       time.Second,
-			ContextWindow: 10000,
+			ContextWindow: 50000,
 			AutoCompactAt: 20,
 		},
 	}
