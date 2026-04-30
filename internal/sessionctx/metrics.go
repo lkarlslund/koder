@@ -11,6 +11,7 @@ type Metrics struct {
 	Used         int
 	Max          int
 	UsagePercent int
+	Estimated    bool
 }
 
 func FromMessages(cfg config.Config, session domain.Session, messages []domain.Message, parts map[int64][]domain.Part) (Metrics, bool) {

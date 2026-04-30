@@ -1569,6 +1569,21 @@ func (e *Engine) buildConversationPreview(ctx context.Context, session domain.Se
 	return provider.SerializePromptEnvelope(envelope), nil
 }
 
+func (e *Engine) EstimateContextTokensForState(session domain.Session, chat domain.Chat, messages []domain.Message, partsByMessage map[int64][]domain.Part) (int, error) {
+	envelope, err := e.buildPromptEnvelopeForState(session, chat, messages, partsByMessage, "", nil, nil, nil)
+	if err != nil {
+		return 0, err
+	}
+	payload, err := json.Marshal(provider.SerializePromptEnvelope(envelope))
+	if err != nil {
+		return 0, err
+	}
+	if len(payload) == 0 {
+		return 0, nil
+	}
+	return len(payload) / 4, nil
+}
+
 func (e *Engine) buildPromptEnvelopePreview(ctx context.Context, session domain.Session, chatID int64, prompt string, drafts []attachment.Draft, refs []reference.Draft, transient []provider.InstructionBlock) (provider.PromptEnvelope, error) {
 	chat := domain.Chat{WorkflowRole: domain.WorkflowRoleGeneral}
 	if chatID > 0 {
@@ -1578,26 +1593,35 @@ func (e *Engine) buildPromptEnvelopePreview(ctx context.Context, session domain.
 		}
 		chat = stored
 	}
-	envelope := provider.PromptEnvelope{
-		Instructions: e.baseInstructionsForChat(session, chat),
-	}
+	var (
+		messages       []domain.Message
+		partsByMessage map[int64][]domain.Part
+	)
 	if chatID > 0 {
-		messages, partsByMessage, err := e.store.PartsForChat(ctx, chatID)
+		var err error
+		messages, partsByMessage, err = e.store.PartsForChat(ctx, chatID)
 		if err != nil {
 			return provider.PromptEnvelope{}, err
 		}
-		for _, msg := range messages {
-			if summary, ok := compactionSummary(partsByMessage[msg.ID]); ok {
-				envelope.Instructions = e.baseInstructionsForChat(session, chat)
-				envelope.Items = append(envelope.Items[:0], compactedHistoryMessage(summary))
-				continue
-			}
-			items, err := e.conversationMessagesForStoredMessage(session, msg, partsByMessage[msg.ID], e.preserveThinkingEnabled(session))
-			if err != nil {
-				return provider.PromptEnvelope{}, err
-			}
-			envelope.Items = append(envelope.Items, items...)
+	}
+	return e.buildPromptEnvelopeForState(session, chat, messages, partsByMessage, prompt, drafts, refs, transient)
+}
+
+func (e *Engine) buildPromptEnvelopeForState(session domain.Session, chat domain.Chat, messages []domain.Message, partsByMessage map[int64][]domain.Part, prompt string, drafts []attachment.Draft, refs []reference.Draft, transient []provider.InstructionBlock) (provider.PromptEnvelope, error) {
+	envelope := provider.PromptEnvelope{
+		Instructions: e.baseInstructionsForChat(session, chat),
+	}
+	for _, msg := range messages {
+		if summary, ok := compactionSummary(partsByMessage[msg.ID]); ok {
+			envelope.Instructions = e.baseInstructionsForChat(session, chat)
+			envelope.Items = append(envelope.Items[:0], compactedHistoryMessage(summary))
+			continue
 		}
+		items, err := e.conversationMessagesForStoredMessage(session, msg, partsByMessage[msg.ID], e.preserveThinkingEnabled(session))
+		if err != nil {
+			return provider.PromptEnvelope{}, err
+		}
+		envelope.Items = append(envelope.Items, items...)
 	}
 	envelope.Instructions = append(envelope.Instructions, transient...)
 	if strings.TrimSpace(prompt) != "" || len(drafts) > 0 {

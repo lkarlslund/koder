@@ -4373,6 +4373,8 @@ func TestRenderSidebarShowsStatusAndSessionInfo(t *testing.T) {
 		parts: map[int64][]domain.Part{
 			1: {{Kind: domain.PartKindSystemNotice, Body: "usage", MetaJSON: `{"PromptTokens":4096,"CompletionTokens":2048,"CachedTokens":1024,"TotalTokens":8192}`}},
 		},
+		contextEstimateTokens: 8192,
+		contextEstimateKnown:  true,
 	}
 	m.syncUsageFromHistory()
 
@@ -4392,7 +4394,7 @@ func TestRenderSidebarShowsStatusAndSessionInfo(t *testing.T) {
 	if strings.Contains(got, "enter send/select") || strings.Contains(got, "/connect") {
 		t.Fatalf("expected sidebar to omit detailed hotkeys and commands, got %q", got)
 	}
-	if !strings.Contains(got, "Context 8.2k / 32.8k (25%)") {
+	if !strings.Contains(got, "Context ~8.2k / 32.8k (25%)") {
 		t.Fatalf("expected sidebar to include context usage, got %q", got)
 	}
 	if !strings.Contains(got, "Tokens in 4.1k  out 2.0k  cache 1.0k") {
@@ -4449,11 +4451,13 @@ func TestSidebarUsageUpdatesFromLiveUsageEvent(t *testing.T) {
 		parts: map[int64][]domain.Part{
 			1: {{Kind: domain.PartKindSystemNotice, Body: "usage", MetaJSON: `{"PromptTokens":1000,"CompletionTokens":500,"CachedTokens":100,"TotalTokens":1500}`}},
 		},
+		contextEstimateTokens: 1500,
+		contextEstimateKnown:  true,
 	}
 	m.syncUsageFromHistory()
 
 	before := m.renderSidebar()
-	if !strings.Contains(before, "Context 1.5k / 32.8k (4%)") {
+	if !strings.Contains(before, "Context ~1.5k / 32.8k (4%)") {
 		t.Fatalf("expected hydrated context usage before live event, got %q", before)
 	}
 	if !strings.Contains(before, "Tokens in 1.0k  out 500  cache 100") {
@@ -4468,15 +4472,15 @@ func TestSidebarUsageUpdatesFromLiveUsageEvent(t *testing.T) {
 	}})
 
 	after := m.renderSidebar()
-	if !strings.Contains(after, "Context 250 / 32.8k (0%)") {
-		t.Fatalf("expected live context usage after usage event, got %q", after)
+	if !strings.Contains(after, "Context ~1.5k / 32.8k (4%)") {
+		t.Fatalf("expected context estimate to remain stable after live usage event, got %q", after)
 	}
 	if !strings.Contains(after, "Tokens in 1.2k  out 550  cache 120") {
 		t.Fatalf("expected live token totals after usage event, got %q", after)
 	}
 }
 
-func TestSidebarUsageSynthesizesContextFromLiveUsageWithoutTotal(t *testing.T) {
+func TestSidebarUsageWithoutContextEstimateStillShowsLiveTotals(t *testing.T) {
 	m := Model{
 		width:  120,
 		height: 40,
@@ -4502,11 +4506,61 @@ func TestSidebarUsageSynthesizesContextFromLiveUsageWithoutTotal(t *testing.T) {
 	}})
 
 	got := m.renderSidebar()
-	if !strings.Contains(got, "Context 1.5k / 32.8k (4%)") {
-		t.Fatalf("expected synthesized live context usage, got %q", got)
+	if strings.Contains(got, "Context ") {
+		t.Fatalf("expected live usage to avoid changing context estimate, got %q", got)
 	}
 	if !strings.Contains(got, "Tokens in 1.2k  out 300  cache 100") {
 		t.Fatalf("expected live token totals, got %q", got)
+	}
+}
+
+func TestSidebarContextUsesCompactedChatEstimateNotCompactionRequestUsage(t *testing.T) {
+	workdir := t.TempDir()
+	engine := agent.New(testConfig(t), nil, tools.NewRegistry(workdir), nil, workdir)
+	m := Model{
+		width:  120,
+		height: 40,
+		agent:  engine,
+		currentSession: domain.Session{
+			ID:         33,
+			Title:      "Testing Session",
+			ProviderID: "test",
+			ModelID:    "model",
+		},
+		currentChat: domain.Chat{ID: 24, SessionID: 33, WorkflowRole: domain.WorkflowRoleGeneral},
+		showSidebar: true,
+		cfg: config.Config{
+			Providers: map[string]config.Provider{
+				"test": {ContextWindow: 32768},
+			},
+		},
+		messages: []domain.Message{{ID: 1, Role: domain.MessageRoleAssistant, Summary: "Compacted session summary"}},
+		parts: map[int64][]domain.Part{
+			1: {
+				{
+					Kind: domain.PartKindCompaction,
+					Body: "## Goal\nFix the centering bug.\n\n## Constraints\nKeep changes minimal.\n\n## Current State\nOnly the compacted summary remains.\n",
+				},
+				{
+					Kind:     domain.PartKindSystemNotice,
+					Body:     "usage",
+					MetaJSON: `{"PromptTokens":25023,"CompletionTokens":625,"CachedTokens":0,"TotalTokens":25648}`,
+				},
+			},
+		},
+	}
+	m.syncUsageFromHistory()
+	m.syncContextEstimate()
+
+	got := m.renderSidebar()
+	if !strings.Contains(got, "Context ") {
+		t.Fatalf("expected context estimate, got %q", got)
+	}
+	if strings.Contains(got, "Context ~25.6k") {
+		t.Fatalf("expected context estimate to ignore compaction-request usage, got %q", got)
+	}
+	if !strings.Contains(got, "Tokens in 25.0k  out 625") {
+		t.Fatalf("expected token totals to preserve compaction request accounting, got %q", got)
 	}
 }
 

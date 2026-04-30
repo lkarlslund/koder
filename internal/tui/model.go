@@ -479,6 +479,8 @@ type Model struct {
 	historyTotalUsageKnown  bool
 	liveUsage               domain.Usage
 	liveUsageKnown          bool
+	contextEstimateTokens   int
+	contextEstimateKnown    bool
 	milestonePlan           store.MilestonePlan
 	todos                   []store.TodoItem
 	approvals               []store.Approval
@@ -953,6 +955,7 @@ func (m Model) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 		m.todos = msg.todos
 		m.workspace = msg.workspace
 		m.syncUsageFromHistory()
+		m.syncContextEstimate()
 		m.resetComposerInput()
 		m.draftAttachments = nil
 		m.draftReferences = nil
@@ -2178,7 +2181,11 @@ func (m *Model) renderSidebar() string {
 		lines = append(lines, fmt.Sprintf("Status %s", status))
 	}
 	if metrics, ok := m.currentContextMetrics(); ok {
-		lines = append(lines, fmt.Sprintf("Context %s / %s (%d%%)", formatTokens(metrics.Used), formatTokens(metrics.Max), metrics.UsagePercent))
+		used := formatTokens(metrics.Used)
+		if metrics.Estimated {
+			used = "~" + used
+		}
+		lines = append(lines, fmt.Sprintf("Context %s / %s (%d%%)", used, formatTokens(metrics.Max), metrics.UsagePercent))
 	}
 	if usage, ok := m.currentTotalUsage(); ok {
 		tokenLine := fmt.Sprintf("Tokens in %s  out %s", formatTokens(usage.PromptTokens), formatTokens(usage.CompletionTokens))
@@ -3170,6 +3177,20 @@ func (m *Model) syncUsageFromHistory() {
 	m.liveUsageKnown = false
 }
 
+func (m *Model) syncContextEstimate() {
+	m.contextEstimateTokens = 0
+	m.contextEstimateKnown = false
+	if m.agent == nil {
+		return
+	}
+	used, err := m.agent.EstimateContextTokensForState(m.currentSession, m.currentChat, m.messages, m.parts)
+	if err != nil || used <= 0 {
+		return
+	}
+	m.contextEstimateTokens = used
+	m.contextEstimateKnown = true
+}
+
 func (m Model) currentLatestUsage() (domain.Usage, bool) {
 	if m.liveUsageKnown {
 		return m.liveUsage.Normalized(), true
@@ -3193,15 +3214,15 @@ func (m Model) currentTotalUsage() (domain.Usage, bool) {
 }
 
 func (m Model) currentContextMetrics() (sessionctx.Metrics, bool) {
-	providerCfg, ok := m.cfg.Provider(m.currentSession.ProviderID)
+	providerID := firstNonEmptyString(strings.TrimSpace(m.currentChat.ProviderID), strings.TrimSpace(m.currentSession.ProviderID))
+	providerCfg, ok := m.cfg.Provider(providerID)
 	if !ok || providerCfg.ContextWindow <= 0 {
 		return sessionctx.Metrics{}, false
 	}
-	usage, ok := m.currentLatestUsage()
-	if !ok || usage.TotalTokens <= 0 {
+	if !m.contextEstimateKnown || m.contextEstimateTokens <= 0 {
 		return sessionctx.Metrics{}, false
 	}
-	percent := (usage.TotalTokens * 100) / providerCfg.ContextWindow
+	percent := (m.contextEstimateTokens * 100) / providerCfg.ContextWindow
 	if percent < 0 {
 		percent = 0
 	}
@@ -3209,9 +3230,10 @@ func (m Model) currentContextMetrics() (sessionctx.Metrics, bool) {
 		percent = 100
 	}
 	return sessionctx.Metrics{
-		Used:         usage.TotalTokens,
+		Used:         m.contextEstimateTokens,
 		Max:          providerCfg.ContextWindow,
 		UsagePercent: percent,
+		Estimated:    true,
 	}, true
 }
 
@@ -4165,6 +4187,7 @@ func (m Model) UpdateLoad(msg loadMsg) Model {
 	m.todos = msg.todos
 	m.workspace = msg.workspace
 	m.syncUsageFromHistory()
+	m.syncContextEstimate()
 	m.resetComposerHistory()
 	m.approvalDialog = nil
 	m.draftAttachments = nil
@@ -4871,6 +4894,7 @@ func (m *Model) appendLocalUserPrompt(prompt string, drafts []attachment.Draft, 
 		m.debug.RecordLifecycle(m.currentSession.ID, "prompt_submitted", prompt, map[string]string{"optimistic": "true"})
 	}
 	m.transcriptDirty = true
+	m.syncContextEstimate()
 	m.refreshViewport()
 }
 
@@ -4903,6 +4927,7 @@ func (m *Model) appendLocalAssistantError(err error) {
 		m.debug.RecordLifecycle(m.currentSession.ID, "ui_error_appended", err.Error(), nil)
 	}
 	m.transcriptDirty = true
+	m.syncContextEstimate()
 	m.refreshViewport()
 }
 
@@ -4940,6 +4965,7 @@ func (m *Model) appendLocalTranscriptNotice(body, kind, severity string) {
 		m.debug.RecordLifecycle(m.currentSession.ID, "ui_notice_appended", body, map[string]string{"kind": kind, "severity": severity})
 	}
 	m.transcriptDirty = true
+	m.syncContextEstimate()
 	m.refreshViewport()
 }
 
