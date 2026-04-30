@@ -11,6 +11,16 @@ import (
 	_ "github.com/lkarlslund/koder/internal/tools/all"
 )
 
+func TestTodoUpdateItemAcceptsZeroID(t *testing.T) {
+	id, err := tools.ParseTodoID("0.00000")
+	if err != nil {
+		t.Fatalf("expected zero todo id to parse, got %v", err)
+	}
+	if id != 0 {
+		t.Fatalf("expected parsed todo id 0, got %d", id)
+	}
+}
+
 func TestMilestoneAndTodoWorkflow(t *testing.T) {
 	ctx := context.Background()
 	st := openPlanningTestStore(t)

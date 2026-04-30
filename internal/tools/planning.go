@@ -144,8 +144,8 @@ func ParseTodoAddItems(raw string) ([]string, error) {
 
 func ParseTodoID(raw string) (int64, error) {
 	value, err := ParseFlexibleInt(raw)
-	if err != nil || value <= 0 {
-		return 0, errors.New("id must be a positive integer")
+	if err != nil || value < 0 {
+		return 0, errors.New("id must be a non-negative integer")
 	}
 	return int64(value), nil
 }
