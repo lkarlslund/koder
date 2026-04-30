@@ -4373,8 +4373,8 @@ func TestRenderSidebarShowsStatusAndSessionInfo(t *testing.T) {
 		parts: map[int64][]domain.Part{
 			1: {{Kind: domain.PartKindSystemNotice, Body: "usage", MetaJSON: `{"PromptTokens":4096,"CompletionTokens":2048,"CachedTokens":1024,"TotalTokens":8192}`}},
 		},
-		contextEstimateTokens: 8192,
-		contextEstimateKnown:  true,
+		contextTokens:          8192,
+		contextTokensEstimated: true,
 	}
 	m.syncUsageFromHistory()
 
@@ -4451,8 +4451,8 @@ func TestSidebarUsageUpdatesFromLiveUsageEvent(t *testing.T) {
 		parts: map[int64][]domain.Part{
 			1: {{Kind: domain.PartKindSystemNotice, Body: "usage", MetaJSON: `{"PromptTokens":1000,"CompletionTokens":500,"CachedTokens":100,"TotalTokens":1500}`}},
 		},
-		contextEstimateTokens: 1500,
-		contextEstimateKnown:  true,
+		contextTokens:          1500,
+		contextTokensEstimated: true,
 	}
 	m.syncUsageFromHistory()
 
@@ -4472,15 +4472,15 @@ func TestSidebarUsageUpdatesFromLiveUsageEvent(t *testing.T) {
 	}})
 
 	after := m.renderSidebar()
-	if !strings.Contains(after, "Context ~1.5k / 32.8k (4%)") {
-		t.Fatalf("expected context estimate to remain stable after live usage event, got %q", after)
+	if !strings.Contains(after, "Context 200 / 32.8k (0%)") {
+		t.Fatalf("expected precise context after live usage event, got %q", after)
 	}
 	if !strings.Contains(after, "Tokens in 1.2k  out 550  cache 120") {
 		t.Fatalf("expected live token totals after usage event, got %q", after)
 	}
 }
 
-func TestSidebarUsageWithoutContextEstimateStillShowsLiveTotals(t *testing.T) {
+func TestSidebarUsageWithoutPromptTokensPreservesEstimate(t *testing.T) {
 	m := Model{
 		width:  120,
 		height: 40,
@@ -4497,19 +4497,20 @@ func TestSidebarUsageWithoutContextEstimateStillShowsLiveTotals(t *testing.T) {
 				"test": {ContextWindow: 32768},
 			},
 		},
+		contextTokens:          1500,
+		contextTokensEstimated: true,
 	}
 
 	m.applyEvent(domain.Event{Kind: domain.EventKindUsage, Usage: domain.Usage{
-		PromptTokens:     1200,
 		CompletionTokens: 300,
 		CachedTokens:     100,
 	}})
 
 	got := m.renderSidebar()
-	if strings.Contains(got, "Context ") {
-		t.Fatalf("expected live usage to avoid changing context estimate, got %q", got)
+	if !strings.Contains(got, "Context ~1.5k / 32.8k (4%)") {
+		t.Fatalf("expected missing prompt tokens to preserve estimate, got %q", got)
 	}
-	if !strings.Contains(got, "Tokens in 1.2k  out 300  cache 100") {
+	if !strings.Contains(got, "Tokens in 0  out 300  cache 100") {
 		t.Fatalf("expected live token totals, got %q", got)
 	}
 }

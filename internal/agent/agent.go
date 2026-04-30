@@ -2309,7 +2309,7 @@ func (e *Engine) compactSession(ctx context.Context, session domain.Session, cha
 	if err != nil {
 		return err
 	}
-	summary, usage := resp.Text, resp.Usage
+	summary := resp.Text
 	summary = strings.TrimSpace(summary)
 	if summary == "" {
 		return nil
@@ -2321,16 +2321,6 @@ func (e *Engine) compactSession(ctx context.Context, session domain.Session, cha
 	meta, _ := json.Marshal(map[string]string{"trigger": trigger})
 	if _, err := e.store.AddPart(ctx, msg.ID, domain.PartKindCompaction, summary, string(meta)); err != nil {
 		return err
-	}
-	usage = usage.Normalized()
-	if usage.HasAnyTokens() {
-		usageMeta, _ := json.Marshal(usage)
-		if _, err := e.store.AddPart(ctx, msg.ID, domain.PartKindSystemNotice, "usage", string(usageMeta)); err != nil {
-			return err
-		}
-		if out != nil {
-			out <- domain.Event{Kind: domain.EventKindUsage, Usage: usage}
-		}
 	}
 	if out != nil {
 		out <- domain.Event{Kind: domain.EventKindStatus, Text: "Session compacted"}

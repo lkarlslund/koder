@@ -23,7 +23,6 @@ import (
 	"github.com/lkarlslund/koder/internal/permission"
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/reference"
-	"github.com/lkarlslund/koder/internal/sessionctx"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -2048,7 +2047,7 @@ func TestContinueModelTurnAutoCompactsAfterToolResultChurn(t *testing.T) {
 	}
 }
 
-func TestCompactSessionPersistsUsageWhenTotalTokensMissing(t *testing.T) {
+func TestCompactSessionDoesNotPersistUsageOrEmitUsageEvent(t *testing.T) {
 	t.Parallel()
 
 	var requests int
@@ -2110,29 +2109,29 @@ func TestCompactSessionPersistsUsageWhenTotalTokensMissing(t *testing.T) {
 	}
 	close(events)
 
-	var sawUsage bool
+	var sawStatus bool
 	for evt := range events {
+		if evt.Kind == domain.EventKindStatus && evt.Text == "Session compacted" {
+			sawStatus = true
+		}
 		if evt.Kind == domain.EventKindUsage {
-			sawUsage = true
-			if evt.Usage.TotalTokens != 1500 {
-				t.Fatalf("expected synthesized compact usage total, got %#v", evt.Usage)
-			}
+			t.Fatalf("did not expect compaction to emit usage event, got %#v", evt)
 		}
 	}
-	if !sawUsage {
-		t.Fatal("expected compact session to emit usage event")
+	if !sawStatus {
+		t.Fatal("expected compact session status event")
 	}
 
 	messages, parts, err := st.PartsForSession(context.Background(), session.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	latestUsage, ok := sessionctx.LatestUsage(messages, parts)
-	if !ok {
-		t.Fatal("expected persisted compact usage")
-	}
-	if latestUsage.TotalTokens != 1500 || latestUsage.PromptTokens != 1200 || latestUsage.CompletionTokens != 300 {
-		t.Fatalf("unexpected latest usage: %#v", latestUsage)
+	for _, msg := range messages {
+		for _, part := range parts[msg.ID] {
+			if part.Kind == domain.PartKindSystemNotice && part.Body == "usage" {
+				t.Fatalf("did not expect compact session to persist usage notice, got %#v", part)
+			}
+		}
 	}
 	if requests != 1 {
 		t.Fatalf("expected one compaction request, got %d", requests)

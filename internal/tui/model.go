@@ -473,14 +473,12 @@ type Model struct {
 	currentChat             domain.Chat
 	messages                []domain.Message
 	parts                   map[int64][]domain.Part
-	historyLatestUsage      domain.Usage
-	historyLatestUsageKnown bool
 	historyTotalUsage       domain.Usage
 	historyTotalUsageKnown  bool
 	liveUsage               domain.Usage
 	liveUsageKnown          bool
-	contextEstimateTokens   int
-	contextEstimateKnown    bool
+	contextTokens           int
+	contextTokensEstimated  bool
 	milestonePlan           store.MilestonePlan
 	todos                   []store.TodoItem
 	approvals               []store.Approval
@@ -1772,6 +1770,7 @@ func (m *Model) applyEvent(evt domain.Event) {
 		}
 		m.pendingAssistant.Text += evt.Text
 		m.startBusy(busyScopeTranscript, "Working ...")
+		m.syncContextEstimate()
 		m.refreshTranscriptForPendingTurn()
 	case domain.EventKindReasoning:
 		if m.pendingAssistant.CreatedAt.IsZero() {
@@ -1779,6 +1778,7 @@ func (m *Model) applyEvent(evt domain.Event) {
 		}
 		m.pendingAssistant.Reasoning += evt.Text
 		m.startBusy(busyScopeTranscript, "Thinking ...")
+		m.syncContextEstimate()
 		m.refreshTranscriptForPendingTurn()
 	case domain.EventKindToolStart:
 		status := strings.TrimSpace(evt.Text)
@@ -1811,6 +1811,10 @@ func (m *Model) applyEvent(evt domain.Event) {
 	case domain.EventKindUsage:
 		m.liveUsage = evt.Usage.Normalized()
 		m.liveUsageKnown = m.liveUsage.HasAnyTokens()
+		if m.liveUsage.PromptTokens > 0 {
+			m.contextTokens = m.liveUsage.PromptTokens
+			m.contextTokensEstimated = false
+		}
 		m.status = fmt.Sprintf("Usage total=%d", m.liveUsage.TotalTokens)
 	case domain.EventKindStatus:
 		if evt.Text != "" {
@@ -3171,31 +3175,40 @@ func (m *Model) sessionUsageSummary(sessionID int64) (domain.Usage, bool) {
 }
 
 func (m *Model) syncUsageFromHistory() {
-	m.historyLatestUsage, m.historyLatestUsageKnown = sessionctx.LatestUsage(m.messages, m.parts)
 	m.historyTotalUsage, m.historyTotalUsageKnown = sessionctx.TotalUsage(m.messages, m.parts)
 	m.liveUsage = domain.Usage{}
 	m.liveUsageKnown = false
 }
 
 func (m *Model) syncContextEstimate() {
-	m.contextEstimateTokens = 0
-	m.contextEstimateKnown = false
+	m.contextTokens = 0
+	m.contextTokensEstimated = false
 	if m.agent == nil {
 		return
 	}
-	used, err := m.agent.EstimateContextTokensForState(m.currentSession, m.currentChat, m.messages, m.parts)
+	messages := slices.Clone(m.messages)
+	parts := make(map[int64][]domain.Part, len(m.parts)+1)
+	for id, messageParts := range m.parts {
+		parts[id] = slices.Clone(messageParts)
+	}
+	if pending := m.pendingAssistantParts(); len(pending) > 0 {
+		messageID := int64(-1)
+		messages = append(messages, domain.Message{
+			ID:        messageID,
+			SessionID: m.currentSession.ID,
+			ChatID:    m.currentChat.ID,
+			Role:      domain.MessageRoleAssistant,
+			Summary:   strings.TrimSpace(m.pendingAssistant.Text),
+			CreatedAt: m.pendingAssistant.CreatedAt,
+		})
+		parts[messageID] = pending
+	}
+	used, err := m.agent.EstimateContextTokensForState(m.currentSession, m.currentChat, messages, parts)
 	if err != nil || used <= 0 {
 		return
 	}
-	m.contextEstimateTokens = used
-	m.contextEstimateKnown = true
-}
-
-func (m Model) currentLatestUsage() (domain.Usage, bool) {
-	if m.liveUsageKnown {
-		return m.liveUsage.Normalized(), true
-	}
-	return m.historyLatestUsage.Normalized(), m.historyLatestUsageKnown
+	m.contextTokens = used
+	m.contextTokensEstimated = true
 }
 
 func (m Model) currentTotalUsage() (domain.Usage, bool) {
@@ -3219,10 +3232,10 @@ func (m Model) currentContextMetrics() (sessionctx.Metrics, bool) {
 	if !ok || providerCfg.ContextWindow <= 0 {
 		return sessionctx.Metrics{}, false
 	}
-	if !m.contextEstimateKnown || m.contextEstimateTokens <= 0 {
+	if m.contextTokens <= 0 {
 		return sessionctx.Metrics{}, false
 	}
-	percent := (m.contextEstimateTokens * 100) / providerCfg.ContextWindow
+	percent := (m.contextTokens * 100) / providerCfg.ContextWindow
 	if percent < 0 {
 		percent = 0
 	}
@@ -3230,10 +3243,10 @@ func (m Model) currentContextMetrics() (sessionctx.Metrics, bool) {
 		percent = 100
 	}
 	return sessionctx.Metrics{
-		Used:         m.contextEstimateTokens,
+		Used:         m.contextTokens,
 		Max:          providerCfg.ContextWindow,
 		UsagePercent: percent,
-		Estimated:    true,
+		Estimated:    m.contextTokensEstimated,
 	}, true
 }
 
