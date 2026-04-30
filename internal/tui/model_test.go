@@ -5636,9 +5636,23 @@ func TestLoadMsgPreserveBusyKeepsSpinnerActive(t *testing.T) {
 
 func TestLoadMsgPreserveBusySameChatKeepsPendingAssistantStream(t *testing.T) {
 	m := Model{
-		cfg:            testConfig(t),
+		cfg: func() config.Config {
+			cfg := testConfig(t)
+			cfg.DefaultProvider = "openai"
+			cfg.DefaultModel = "gpt-5.4"
+			cfg.Providers = map[string]config.Provider{
+				"openai": {
+					Kind:         "openai-compatible",
+					AuthMethod:   "api_key",
+					BaseURL:      "https://api.openai.com/v1",
+					APIKey:       "secret",
+					DefaultModel: "gpt-5.4",
+				},
+			}
+			return cfg
+		}(),
 		viewport:       newTranscriptViewport(60, 8),
-		currentSession: domain.Session{ID: 33, Title: "Refactor coordinates to use float tiles"},
+		currentSession: domain.Session{ID: 33, Title: "Refactor coordinates to use float tiles", ProviderID: "openai", ModelID: "gpt-5.4"},
 		currentChat:    domain.Chat{ID: 24, SessionID: 33},
 		busy: busyModel{
 			active: true,
@@ -5676,6 +5690,51 @@ func TestLoadMsgPreserveBusySameChatKeepsPendingAssistantStream(t *testing.T) {
 	rendered := m.renderBody()
 	if !strings.Contains(rendered, "The `ts` is now") {
 		t.Fatalf("expected rendered transcript to retain pending assistant stream, got %q", rendered)
+	}
+}
+
+func TestQueuedDispatchReloadKeepsPendingAssistantStream(t *testing.T) {
+	m := Model{
+		cfg:            testConfig(t),
+		viewport:       newTranscriptViewport(60, 8),
+		currentSession: domain.Session{ID: 33, Title: "Refactor coordinates to use float tiles"},
+		currentChat: domain.Chat{
+			ID:        24,
+			SessionID: 33,
+			QueuedInputs: []domain.QueuedInput{{
+				ID:   1,
+				Kind: domain.QueuedInputKindQueued,
+				Text: "after this, tighten the draw loop",
+			}},
+		},
+		busy: busyModel{
+			active: true,
+			scope:  busyScopeTranscript,
+			status: "Working ...",
+		},
+		parts: map[int64][]domain.Part{},
+	}
+
+	m.applyEvent(domain.Event{Kind: domain.EventKindMessageDelta, Text: "The"})
+	m.setQueuedInputs(nil)
+	m.appendLocalUserPrompt("after this, tighten the draw loop", nil, nil)
+	if got := m.pendingAssistant.Text; got != "The" {
+		t.Fatalf("expected pending assistant stream to survive queued dispatch setup, got %q", got)
+	}
+
+	updated, _ := m.Update(loadMsg{
+		current:      domain.Session{ID: 33, Title: "Refactor coordinates to use float tiles"},
+		chat:         domain.Chat{ID: 24, SessionID: 33},
+		parts:        map[int64][]domain.Part{},
+		workspace:    workspace.Status{},
+		preserveBusy: true,
+	})
+	m = updated.(Model)
+
+	m.applyEvent(domain.Event{Kind: domain.EventKindMessageDelta, Text: " `ts` is"})
+	m.applyEvent(domain.Event{Kind: domain.EventKindMessageDelta, Text: " now"})
+	if got := m.pendingAssistant.Text; got != "The `ts` is now" {
+		t.Fatalf("expected pending assistant stream to survive queued reload interleave, got %q", got)
 	}
 }
 
