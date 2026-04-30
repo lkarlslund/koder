@@ -4356,6 +4356,7 @@ func TestRenderSidebarShowsStatusAndSessionInfo(t *testing.T) {
 			1: {{Kind: domain.PartKindSystemNotice, Body: "usage", MetaJSON: `{"PromptTokens":4096,"CompletionTokens":2048,"CachedTokens":1024,"TotalTokens":8192}`}},
 		},
 	}
+	m.syncUsageFromHistory()
 
 	got := m.renderSidebar()
 	if !strings.Contains(got, "Session #2") || !strings.Contains(got, "Testing Session") || !strings.Contains(got, "Model  test / model") {
@@ -4393,6 +4394,54 @@ func TestRenderSidebarShowsStatusAndSessionInfo(t *testing.T) {
 	}
 	if strings.Contains(got, "Profile ") || strings.Contains(got, "profile ") || strings.Contains(got, "mouse   ") {
 		t.Fatalf("expected sidebar to omit session profile and mouse status, got %q", got)
+	}
+}
+
+func TestSidebarUsageUpdatesFromLiveUsageEvent(t *testing.T) {
+	m := Model{
+		width:  120,
+		height: 40,
+		currentSession: domain.Session{
+			ID:         2,
+			Title:      "Testing Session",
+			ProviderID: "test",
+			ModelID:    "model",
+		},
+		currentChat: domain.Chat{ID: 7, SessionID: 2},
+		showSidebar: true,
+		cfg: config.Config{
+			Providers: map[string]config.Provider{
+				"test": {ContextWindow: 32768},
+			},
+		},
+		messages: []domain.Message{{ID: 1}},
+		parts: map[int64][]domain.Part{
+			1: {{Kind: domain.PartKindSystemNotice, Body: "usage", MetaJSON: `{"PromptTokens":1000,"CompletionTokens":500,"CachedTokens":100,"TotalTokens":1500}`}},
+		},
+	}
+	m.syncUsageFromHistory()
+
+	before := m.renderSidebar()
+	if !strings.Contains(before, "Context 1.5k / 32.8k (4%)") {
+		t.Fatalf("expected hydrated context usage before live event, got %q", before)
+	}
+	if !strings.Contains(before, "Tokens in 1.0k  out 500  cache 100") {
+		t.Fatalf("expected hydrated token totals before live event, got %q", before)
+	}
+
+	m.applyEvent(domain.Event{Kind: domain.EventKindUsage, Usage: domain.Usage{
+		PromptTokens:     200,
+		CompletionTokens: 50,
+		CachedTokens:     20,
+		TotalTokens:      250,
+	}})
+
+	after := m.renderSidebar()
+	if !strings.Contains(after, "Context 250 / 32.8k (0%)") {
+		t.Fatalf("expected live context usage after usage event, got %q", after)
+	}
+	if !strings.Contains(after, "Tokens in 1.2k  out 550  cache 120") {
+		t.Fatalf("expected live token totals after usage event, got %q", after)
 	}
 }
 

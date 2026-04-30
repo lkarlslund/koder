@@ -473,6 +473,12 @@ type Model struct {
 	currentChat             domain.Chat
 	messages                []domain.Message
 	parts                   map[int64][]domain.Part
+	historyLatestUsage      domain.Usage
+	historyLatestUsageKnown bool
+	historyTotalUsage       domain.Usage
+	historyTotalUsageKnown  bool
+	liveUsage               domain.Usage
+	liveUsageKnown          bool
 	milestonePlan           store.MilestonePlan
 	todos                   []store.TodoItem
 	approvals               []store.Approval
@@ -941,6 +947,7 @@ func (m Model) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 		m.milestonePlan = msg.plan
 		m.todos = msg.todos
 		m.workspace = msg.workspace
+		m.syncUsageFromHistory()
 		m.resetComposerInput()
 		m.draftAttachments = nil
 		m.draftReferences = nil
@@ -954,6 +961,7 @@ func (m Model) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 		m.agentsDrift = false
 		m.syncCurrentChatBusy()
 		m.stopBusy()
+		m.invalidateBodyCache()
 		if msg.session.ID > 0 {
 			m.status = fmt.Sprintf("Started session %d", msg.session.ID)
 		} else {
@@ -1789,6 +1797,8 @@ func (m *Model) applyEvent(evt domain.Event) {
 			}
 		}
 	case domain.EventKindUsage:
+		m.liveUsage = evt.Usage
+		m.liveUsageKnown = evt.Usage.TotalTokens > 0 || evt.Usage.PromptTokens > 0 || evt.Usage.CompletionTokens > 0 || evt.Usage.CachedTokens > 0
 		m.status = fmt.Sprintf("Usage total=%d", evt.Usage.TotalTokens)
 	case domain.EventKindStatus:
 		if evt.Text != "" {
@@ -2157,10 +2167,10 @@ func (m *Model) renderSidebar() string {
 	} else {
 		lines = append(lines, fmt.Sprintf("Status %s", status))
 	}
-	if metrics, ok := sessionctx.FromMessages(m.cfg, m.currentSession, m.messages, m.parts); ok {
+	if metrics, ok := m.currentContextMetrics(); ok {
 		lines = append(lines, fmt.Sprintf("Context %s / %s (%d%%)", formatTokens(metrics.Used), formatTokens(metrics.Max), metrics.UsagePercent))
 	}
-	if usage, ok := sessionctx.TotalUsage(m.messages, m.parts); ok {
+	if usage, ok := m.currentTotalUsage(); ok {
 		tokenLine := fmt.Sprintf("Tokens in %s  out %s", formatTokens(usage.PromptTokens), formatTokens(usage.CompletionTokens))
 		if usage.CachedTokens > 0 {
 			tokenLine += "  cache " + formatTokens(usage.CachedTokens)
@@ -3108,6 +3118,57 @@ func (m *Model) sessionUsageSummary(sessionID int64) (domain.Usage, bool) {
 		return domain.Usage{}, false
 	}
 	return sessionctx.LatestUsage(messages, parts)
+}
+
+func (m *Model) syncUsageFromHistory() {
+	m.historyLatestUsage, m.historyLatestUsageKnown = sessionctx.LatestUsage(m.messages, m.parts)
+	m.historyTotalUsage, m.historyTotalUsageKnown = sessionctx.TotalUsage(m.messages, m.parts)
+	m.liveUsage = domain.Usage{}
+	m.liveUsageKnown = false
+}
+
+func (m Model) currentLatestUsage() (domain.Usage, bool) {
+	if m.liveUsageKnown {
+		return m.liveUsage, true
+	}
+	return m.historyLatestUsage, m.historyLatestUsageKnown
+}
+
+func (m Model) currentTotalUsage() (domain.Usage, bool) {
+	if !m.historyTotalUsageKnown && !m.liveUsageKnown {
+		return domain.Usage{}, false
+	}
+	total := m.historyTotalUsage
+	if m.liveUsageKnown {
+		total.PromptTokens += m.liveUsage.PromptTokens
+		total.CompletionTokens += m.liveUsage.CompletionTokens
+		total.CachedTokens += m.liveUsage.CachedTokens
+		total.TotalTokens += m.liveUsage.TotalTokens
+	}
+	return total, true
+}
+
+func (m Model) currentContextMetrics() (sessionctx.Metrics, bool) {
+	providerCfg, ok := m.cfg.Provider(m.currentSession.ProviderID)
+	if !ok || providerCfg.ContextWindow <= 0 {
+		return sessionctx.Metrics{}, false
+	}
+	usage, ok := m.currentLatestUsage()
+	if !ok || usage.TotalTokens <= 0 {
+		return sessionctx.Metrics{}, false
+	}
+	percent := (usage.TotalTokens * 100) / providerCfg.ContextWindow
+	if percent < 0 {
+		percent = 0
+	}
+	if percent > 100 {
+		percent = 100
+	}
+	return sessionctx.Metrics{
+		Used:         usage.TotalTokens,
+		Max:          providerCfg.ContextWindow,
+		UsagePercent: percent,
+	}, true
 }
 
 func (m Model) pendingAssistantParts() []domain.Part {
@@ -4059,6 +4120,7 @@ func (m Model) UpdateLoad(msg loadMsg) Model {
 	m.milestonePlan = msg.plan
 	m.todos = msg.todos
 	m.workspace = msg.workspace
+	m.syncUsageFromHistory()
 	m.resetComposerHistory()
 	m.approvalDialog = nil
 	m.draftAttachments = nil
