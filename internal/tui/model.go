@@ -1126,7 +1126,7 @@ func (m *Model) handleKey(msg ui.KeyMsg) (ui.Model, ui.Cmd) {
 	if handled, cmd := root.HandleEvent(ui.KeyEvent(msg)); handled {
 		return m, cmd
 	}
-	if root.FocusedWindow() != "" {
+	if focused := root.FocusedWindow(); focused != "" && focused != mainWindowID {
 		return m, nil
 	}
 	_, cmd := m.handleMainWindowKey(msg)

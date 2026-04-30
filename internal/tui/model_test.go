@@ -2816,6 +2816,36 @@ func TestEscInterruptCancelsActiveOperationWhenNotLoading(t *testing.T) {
 	}
 }
 
+func TestHandleKeyEscInterruptsWhileMainWindowFocused(t *testing.T) {
+	cancelled := false
+	m := Model{
+		composer: textarea.New(),
+		width:    100,
+		height:   30,
+		busy: busyModel{
+			active: true,
+			scope:  busyScopeTranscript,
+		},
+		activeOpCancel: func() { cancelled = true },
+	}
+	root := m.syncUIRoot()
+	if got := root.FocusedWindow(); got != mainWindowID {
+		t.Fatalf("expected focused main window, got %q", got)
+	}
+
+	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEsc})
+	next := updated.(*Model)
+	if cmd == nil {
+		t.Fatal("expected title sync command after esc")
+	}
+	if !cancelled {
+		t.Fatal("expected active operation to be cancelled")
+	}
+	if next.status != "Interrupting…" {
+		t.Fatalf("unexpected esc status: %q", next.status)
+	}
+}
+
 func TestExitSummaryIncludesSessionDetails(t *testing.T) {
 	m := Model{
 		currentSession: domain.Session{ID: 4, Title: "Testing Session Review Flow"},
