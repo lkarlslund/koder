@@ -4427,7 +4427,12 @@ func (m *Model) handleInterruptKey() (ui.Model, ui.Cmd) {
 	m.interruptArmedAt = time.Time{}
 	m.status = "Interrupting…"
 	m.appendLocalTranscriptNotice("Interrupted", "interrupted", "warning")
-	if cancel := m.activeOpCancel; cancel != nil {
+	cancel := m.activeOpCancel
+	if chatID := m.currentChatID(); chatID > 0 && m.activeOpCancels != nil && m.activeOpCancels[chatID] != nil {
+		cancel = m.activeOpCancels[chatID]
+		m.activeOpCancel = cancel
+	}
+	if cancel != nil {
 		cancel()
 	}
 	return m, m.syncWindowTitleCmd()
