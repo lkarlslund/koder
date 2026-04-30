@@ -258,6 +258,9 @@ func (updateItemTool) Execute(ctx context.Context, runtime tools.Runtime, req to
 	if err != nil {
 		return tools.Result{}, err
 	}
+	if err := validateCompletedMilestoneTodos(ctx, st, runtime.SessionID, updated.Milestones); err != nil {
+		return tools.Result{}, err
+	}
 	return tools.MilestonePlanResult(updated), nil
 }
 
@@ -287,6 +290,9 @@ func (planTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Re
 	if err := tools.ValidateMilestoneProgress(nextMilestones); err != nil {
 		return tools.Result{}, err
 	}
+	if err := validateCompletedMilestoneTodos(ctx, st, runtime.SessionID, nextMilestones); err != nil {
+		return tools.Result{}, err
+	}
 	items, err := tools.ParseTodoAddItems(req.Args["items"])
 	if err != nil {
 		return tools.Result{}, err
@@ -298,9 +304,16 @@ func (planTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Re
 	return tools.TodoBucketResultWithTitle(ref, strings.TrimSpace(req.Args["title"]), todos, "Updated milestone and appended todo items"), nil
 }
 
-func (writeTool) Execute(_ context.Context, _ tools.Runtime, req tools.Request) (tools.Result, error) {
+func (writeTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
 	milestones, err := tools.ParseMilestones(req.Args["milestones"])
 	if err != nil {
+		return tools.Result{}, err
+	}
+	st, err := tools.RequireSessionStore(runtime)
+	if err != nil {
+		return tools.Result{}, err
+	}
+	if err := validateCompletedMilestoneTodos(ctx, st, runtime.SessionID, milestones); err != nil {
 		return tools.Result{}, err
 	}
 	return tools.MilestonePlanResult(store.MilestonePlan{
@@ -367,6 +380,9 @@ func (updateItemTool) PersistResult(ctx context.Context, st *store.Store, sessio
 	if err != nil {
 		return nil, err
 	}
+	if err := validateCompletedMilestoneTodos(ctx, st, sessionID, updated.Milestones); err != nil {
+		return nil, err
+	}
 	plan, err = st.SetMilestonePlan(ctx, sessionID, updated.Summary, updated.Milestones)
 	if err != nil {
 		return nil, err
@@ -393,6 +409,9 @@ func (planTool) PersistResult(ctx context.Context, st *store.Store, sessionID in
 	if err := tools.ValidateMilestoneProgress(nextMilestones); err != nil {
 		return nil, err
 	}
+	if err := validateCompletedMilestoneTodos(ctx, st, sessionID, nextMilestones); err != nil {
+		return nil, err
+	}
 	if _, err := st.SetMilestonePlan(ctx, sessionID, plan.Summary, nextMilestones); err != nil {
 		return nil, err
 	}
@@ -414,6 +433,9 @@ func (planTool) PersistResult(ctx context.Context, st *store.Store, sessionID in
 func (writeTool) PersistResult(ctx context.Context, st *store.Store, sessionID int64, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
 	milestones, err := tools.ParseMilestones(req.Args["milestones"])
 	if err != nil {
+		return nil, err
+	}
+	if err := validateCompletedMilestoneTodos(ctx, st, sessionID, milestones); err != nil {
 		return nil, err
 	}
 	plan, err := st.SetMilestonePlan(ctx, sessionID, req.Args["summary"], milestones)
@@ -494,4 +516,27 @@ func updatedMilestonePlan(plan store.MilestonePlan, req tools.Request) (store.Mi
 		Summary:    plan.Summary,
 		Milestones: milestones,
 	}, nil
+}
+
+func validateCompletedMilestoneTodos(ctx context.Context, st *store.Store, sessionID int64, milestones []store.Milestone) error {
+	for _, milestone := range milestones {
+		if milestone.Status != domain.MilestoneStatusCompleted {
+			continue
+		}
+		todos, err := st.ListTodos(ctx, sessionID, milestone.Ref)
+		if err != nil {
+			return err
+		}
+		for _, todo := range todos {
+			if todo.Status == domain.TodoStatusCompleted {
+				continue
+			}
+			name := strings.TrimSpace(milestone.Title)
+			if name == "" {
+				name = milestone.Ref
+			}
+			return fmt.Errorf("cannot complete milestone %q while todo %d is %s", name, todo.ID, todo.Status)
+		}
+	}
+	return nil
 }

@@ -111,6 +111,52 @@ func TestUpsertAndUpdatedPlanHelpers(t *testing.T) {
 	}
 }
 
+func TestUpdateItemRefusesCompletedMilestoneWithIncompleteTodos(t *testing.T) {
+	runtime, st, session := newMilestoneRuntime(t)
+	seedPlan(t, st, session.ID)
+	if _, err := st.AddTodoItems(context.Background(), session.ID, "alpha", []string{"Write tests"}); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := (updateItemTool{}).Execute(context.Background(), runtime, tools.Request{
+		Tool: domain.ToolKindMilestoneUpdate,
+		Args: map[string]string{"ref": "alpha", "status": "completed"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "cannot complete milestone") {
+		t.Fatalf("expected completion guard error, got %v", err)
+	}
+
+	if _, err := (updateItemTool{}).PersistResult(context.Background(), st, session.ID, tools.Request{
+		Tool: domain.ToolKindMilestoneUpdate,
+		Args: map[string]string{"ref": "alpha", "status": "completed"},
+	}, tools.Result{Output: "done"}); err == nil || !strings.Contains(err.Error(), "cannot complete milestone") {
+		t.Fatalf("expected persist completion guard error, got %v", err)
+	}
+}
+
+func TestUpdateItemAllowsCompletedMilestoneWhenTodosAreComplete(t *testing.T) {
+	runtime, st, session := newMilestoneRuntime(t)
+	seedPlan(t, st, session.ID)
+	items, err := st.AddTodoItems(context.Background(), session.ID, "alpha", []string{"Write tests"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.UpdateTodoItem(context.Background(), items[0].ID, domain.TodoStatusCompleted, items[0].Content); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := (updateItemTool{}).Execute(context.Background(), runtime, tools.Request{
+		Tool: domain.ToolKindMilestoneUpdate,
+		Args: map[string]string{"ref": "alpha", "status": "completed"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result.Output, "completed") {
+		t.Fatalf("expected completed milestone output, got %q", result.Output)
+	}
+}
+
 func TestListAndAddExecute(t *testing.T) {
 	runtime, st, session := newMilestoneRuntime(t)
 	seedPlan(t, st, session.ID)
