@@ -560,6 +560,7 @@ type Model struct {
 	runtimeCtxChecked       map[string]bool
 	activeOpCancel          context.CancelFunc
 	activeOpCancels         map[int64]context.CancelFunc
+	activeEventStream       bool
 	queueEditMode           bool
 	queueSelection          int
 	pendingModelNote        string
@@ -768,6 +769,7 @@ func (m Model) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 		if msg.err != nil {
 			return m.finishOperationWithError(msg.err)
 		}
+		m.activeEventStream = msg.events != nil
 		m.startBusy(m.busy.scopeOrDefault(busyScopeTranscript), m.busy.statusOrDefault("Working ..."))
 		return m, ui.Batch(nextEventCmd(m.currentChat.ID, msg.events), m.spinnerCmdIfNeeded(), m.syncWindowTitleCmd())
 	case runPromptMsg:
@@ -793,6 +795,7 @@ func (m Model) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 		m.currentChat = msg.chat
 		m.clampQueueSelection()
 		m.pendingModelNote = ""
+		m.activeEventStream = msg.events != nil
 		m.startBusy(m.busy.scopeOrDefault(busyScopeTranscript), "Working ...")
 		return m, ui.Batch(nextEventCmd(msg.chat.ID, msg.events), m.spinnerCmdIfNeeded(), m.refreshExecSubscriptionCmd(), m.syncWindowTitleCmd())
 	case bangCommandMsg:
@@ -883,6 +886,7 @@ func (m Model) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 			}
 			return m, ui.Batch(refresh, nextEventCmd(msg.chatID, msg.events), m.syncWindowTitleCmd())
 		}
+		m.activeEventStream = false
 		if msg.chatID == 0 || msg.chatID == m.currentChat.ID {
 			m.stopBusy()
 			return m, ui.Batch(m.reloadDetailsCmd(), m.syncWindowTitleCmd())
@@ -4814,9 +4818,17 @@ func (m *Model) cancelComposerHistorySearch() {
 
 func (m *Model) finishOperationWithError(err error) (ui.Model, ui.Cmd) {
 	if errors.Is(err, context.Canceled) {
-		m.stopBusyWithStatus("Interrupted")
+		m.status = "Interrupted"
+		if m.busy.active {
+			m.busy.updateStatus("Interrupted")
+		}
+		if !m.activeEventStream {
+			m.stopBusy()
+			m.status = "Interrupted"
+		}
 		return *m, m.syncWindowTitleCmd()
 	}
+	m.activeEventStream = false
 	m.status = err.Error()
 	m.appendLocalAssistantError(err)
 	m.stopBusy()
@@ -5487,6 +5499,7 @@ func (m *Model) startBusy(scope busyScope, status string) {
 
 func (m *Model) stopBusy() {
 	m.loading = false
+	m.activeEventStream = false
 	m.busy.stop()
 	if chatID := m.currentChatID(); chatID > 0 && m.chatBusy != nil {
 		m.chatBusy[chatID] = m.busy

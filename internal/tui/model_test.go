@@ -2893,6 +2893,59 @@ func TestEscInterruptCancelsCurrentChatOperationFromMap(t *testing.T) {
 	}
 }
 
+func TestFinishOperationWithCanceledErrorKeepsBusyUntilActiveStreamEnds(t *testing.T) {
+	m := Model{
+		composer: textarea.New(),
+		loading:  true,
+		busy: busyModel{
+			active: true,
+			scope:  busyScopeTranscript,
+		},
+		activeEventStream: true,
+	}
+
+	updated, cmd := m.finishOperationWithError(context.Canceled)
+	next := updated.(Model)
+	if cmd == nil {
+		t.Fatal("expected title sync command after interrupted finish")
+	}
+	if !next.busy.active {
+		t.Fatal("expected busy state to remain active until stream end")
+	}
+	if !next.loading {
+		t.Fatal("expected loading to remain true until stream end")
+	}
+	if next.status != "Interrupted" {
+		t.Fatalf("unexpected status: %q", next.status)
+	}
+}
+
+func TestFinishOperationWithCanceledErrorStopsBusyWithoutActiveStream(t *testing.T) {
+	m := Model{
+		composer: textarea.New(),
+		loading:  true,
+		busy: busyModel{
+			active: true,
+			scope:  busyScopeTranscript,
+		},
+	}
+
+	updated, cmd := m.finishOperationWithError(context.Canceled)
+	next := updated.(Model)
+	if cmd == nil {
+		t.Fatal("expected title sync command after interrupted finish")
+	}
+	if next.busy.active {
+		t.Fatal("expected busy state to stop when no stream is active")
+	}
+	if next.loading {
+		t.Fatal("expected loading to stop when no stream is active")
+	}
+	if next.status != "Interrupted" {
+		t.Fatalf("unexpected status: %q", next.status)
+	}
+}
+
 func TestExitSummaryIncludesSessionDetails(t *testing.T) {
 	m := Model{
 		currentSession: domain.Session{ID: 4, Title: "Testing Session Review Flow"},
