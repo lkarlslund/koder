@@ -2149,6 +2149,7 @@ func (m *Model) renderSidebar() string {
 	var lines []string
 	lines = append(lines, m.renderSidebarSessionLine())
 	lines = append(lines, m.renderSidebarChatLine())
+	lines = appendSidebarSpacer(lines)
 	provider := firstNonEmptyString(strings.TrimSpace(m.currentChat.ProviderID), strings.TrimSpace(m.currentSession.ProviderID))
 	if provider == "" {
 		provider = "(unset)"
@@ -2177,6 +2178,7 @@ func (m *Model) renderSidebar() string {
 		}
 		lines = append(lines, tokenLine)
 	}
+	lines = appendSidebarSpacer(lines)
 	lines = append(lines, "Workspace "+blankAsDash(m.workdir))
 	if projectRoot := strings.TrimSpace(m.currentProjectRoot()); projectRoot != "" && projectRoot != strings.TrimSpace(m.workdir) {
 		lines = append(lines, "Project  "+projectRoot)
@@ -2195,23 +2197,22 @@ func (m *Model) renderSidebar() string {
 		}
 		lines = append(lines, gitLine)
 	}
-	if milestoneSummary := m.sidebarMilestoneSummary(); milestoneSummary != "" {
-		lines = append(lines, milestoneSummary)
-	}
-	if todoSummary := m.sidebarTodoSummary(); todoSummary != "" {
-		lines = append(lines, todoSummary)
-	}
+	lines = appendSidebarSpacer(lines)
+	lines = append(lines, m.sidebarMilestoneLines()...)
+	lines = appendSidebarSpacer(lines)
+	lines = append(lines, m.sidebarTodoLines()...)
 	if len(m.chats) > 0 {
-		lines = append(lines, "")
+		lines = appendSidebarSpacer(lines)
 		lines = append(lines, "Chats")
 		for _, item := range m.chats {
 			lines = append(lines, m.renderSidebarChatListItem(item))
 		}
 	}
 	if debugAddr := m.debugAPIAddr(); debugAddr != "" {
+		lines = appendSidebarSpacer(lines)
 		lines = append(lines, "Debug   "+debugAddr)
 	}
-	lines = append(lines, "")
+	lines = appendSidebarSpacer(lines)
 	lines = append(lines, "Help    Alt-H help  Ctrl-S toggle  Alt+, wide  Alt+. narrow")
 	return strings.Join(lines, "\n")
 }
@@ -2307,38 +2308,71 @@ func (m *Model) renderSidebarChatListItem(item domain.Chat) string {
 	return fmt.Sprintf(" %s #%d %s", prefix, item.ID, label)
 }
 
-func (m *Model) sidebarMilestoneSummary() string {
+func (m *Model) sidebarMilestoneLines() []string {
 	if len(m.milestonePlan.Milestones) == 0 {
-		return ""
+		return []string{"Milestones: None"}
 	}
-	active := 0
 	completed := 0
+	lines := make([]string, 0, len(m.milestonePlan.Milestones)+1)
 	for _, item := range m.milestonePlan.Milestones {
-		switch item.Status {
-		case domain.MilestoneStatusCompleted:
+		if item.Status == domain.MilestoneStatusCompleted {
 			completed++
-		case domain.MilestoneStatusInProgress, domain.MilestoneStatusExecuting, domain.MilestoneStatusDecomposing, domain.MilestoneStatusBlocked:
-			active++
 		}
 	}
-	return fmt.Sprintf("Milestones %d total  %d active  %d done", len(m.milestonePlan.Milestones), active, completed)
+	lines = append(lines, fmt.Sprintf("Milestones: %d/%d done", completed, len(m.milestonePlan.Milestones)))
+	for _, item := range m.milestonePlan.Milestones {
+		lines = append(lines, fmt.Sprintf("  %s %s", sidebarMilestoneStatusGlyph(item.Status), strings.TrimSpace(item.Title)))
+	}
+	return lines
 }
 
-func (m *Model) sidebarTodoSummary() string {
+func (m *Model) sidebarTodoLines() []string {
 	if len(m.todos) == 0 {
-		return ""
+		return []string{"Todos: None"}
 	}
-	inProgress := 0
 	completed := 0
+	lines := make([]string, 0, len(m.todos)+1)
 	for _, item := range m.todos {
-		switch item.Status {
-		case domain.TodoStatusCompleted:
+		if item.Status == domain.TodoStatusCompleted {
 			completed++
-		case domain.TodoStatusInProgress:
-			inProgress++
 		}
 	}
-	return fmt.Sprintf("Todos   %d total  %d active  %d done", len(m.todos), inProgress, completed)
+	lines = append(lines, fmt.Sprintf("Todos: %d/%d done", completed, len(m.todos)))
+	for _, item := range m.todos {
+		lines = append(lines, fmt.Sprintf("  %s %s", sidebarTodoStatusGlyph(item.Status), strings.TrimSpace(item.Content)))
+	}
+	return lines
+}
+
+func sidebarMilestoneStatusGlyph(status domain.MilestoneStatus) string {
+	switch status {
+	case domain.MilestoneStatusCompleted:
+		return "✓"
+	case domain.MilestoneStatusInProgress, domain.MilestoneStatusExecuting, domain.MilestoneStatusDecomposing:
+		return "◐"
+	case domain.MilestoneStatusBlocked:
+		return "!"
+	default:
+		return "○"
+	}
+}
+
+func sidebarTodoStatusGlyph(status domain.TodoStatus) string {
+	switch status {
+	case domain.TodoStatusCompleted:
+		return "✓"
+	case domain.TodoStatusInProgress:
+		return "◐"
+	default:
+		return "○"
+	}
+}
+
+func appendSidebarSpacer(lines []string) []string {
+	if len(lines) == 0 || lines[len(lines)-1] == "" {
+		return lines
+	}
+	return append(lines, "")
 }
 
 func clampInt(value, low, high int) int {

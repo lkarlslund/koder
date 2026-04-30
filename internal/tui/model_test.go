@@ -4351,6 +4351,18 @@ func TestRenderSidebarShowsStatusAndSessionInfo(t *testing.T) {
 				"test": {ContextWindow: 32768},
 			},
 		},
+		milestonePlan: store.MilestonePlan{
+			Milestones: []store.Milestone{
+				{Ref: "investigate", Title: "Investigate", Status: domain.MilestoneStatusCompleted, Position: 0},
+				{Ref: "implement", Title: "Implement", Status: domain.MilestoneStatusInProgress, Position: 1},
+				{Ref: "ship", Title: "Ship", Status: domain.MilestoneStatusPending, Position: 2},
+			},
+		},
+		todos: []store.TodoItem{
+			{ID: 1, Content: "Write tests", Status: domain.TodoStatusCompleted},
+			{ID: 2, Content: "Fix bug", Status: domain.TodoStatusInProgress},
+			{ID: 3, Content: "Polish copy", Status: domain.TodoStatusPending},
+		},
 		messages: []domain.Message{{ID: 1}},
 		parts: map[int64][]domain.Part{
 			1: {{Kind: domain.PartKindSystemNotice, Body: "usage", MetaJSON: `{"PromptTokens":4096,"CompletionTokens":2048,"CachedTokens":1024,"TotalTokens":8192}`}},
@@ -4385,6 +4397,19 @@ func TestRenderSidebarShowsStatusAndSessionInfo(t *testing.T) {
 	}
 	if !strings.Contains(got, "AGENTS   Up to date") {
 		t.Fatalf("expected sidebar to include AGENTS summary, got %q", got)
+	}
+	for _, needle := range []string{
+		"\n\nModel  test / model\nStatus ",
+		"\n\nWorkspace /tmp/project",
+		"\n\nMilestones: 1/3 done\n  ✓ Investigate\n  ◐ Implement\n  ○ Ship",
+		"\n\nTodos: 1/3 done\n  ✓ Write tests\n  ◐ Fix bug\n  ○ Polish copy",
+		"\n\nChats",
+		"\n\nDebug   127.0.0.1:61347",
+		"\n\nHelp    Alt-H help  Ctrl-S toggle  Alt+, wide  Alt+. narrow",
+	} {
+		if !strings.Contains(got, needle) {
+			t.Fatalf("expected sidebar to include %q, got %q", needle, got)
+		}
 	}
 	if strings.Contains(got, "saved   ") || strings.Contains(got, "live    ") || strings.Contains(got, "files   ") {
 		t.Fatalf("expected sidebar to omit AGENTS checksum details, got %q", got)
@@ -4442,6 +4467,17 @@ func TestSidebarUsageUpdatesFromLiveUsageEvent(t *testing.T) {
 	}
 	if !strings.Contains(after, "Tokens in 1.2k  out 550  cache 120") {
 		t.Fatalf("expected live token totals after usage event, got %q", after)
+	}
+}
+
+func TestSidebarMilestonesAndTodosRenderNoneWhenEmpty(t *testing.T) {
+	m := Model{}
+	got := m.renderSidebar()
+	if !strings.Contains(got, "Milestones: None") {
+		t.Fatalf("expected empty milestones line, got %q", got)
+	}
+	if !strings.Contains(got, "Todos: None") {
+		t.Fatalf("expected empty todos line, got %q", got)
 	}
 }
 
