@@ -181,8 +181,8 @@ func TestToolRunCardViewShowsShortEditDiffInline(t *testing.T) {
 	run := ToolRun{
 		Tool:   domain.ToolKindEdit,
 		Title:  "Edited game/map.go",
-		Output: EditDiffSummary("--- game/map.go\n+++ game/map.go\n@@ -12,1 +12,1 @@\n-if oldCondition {\n+if newCondition {"),
-		Diff:   "--- game/map.go\n+++ game/map.go\n@@ -12,1 +12,1 @@\n-if oldCondition {\n+if newCondition {",
+		Output: EditDiffSummary("--- game/map.go\n+++ game/map.go\n@@ -11,3 +11,3 @@\n before\n-if oldCondition {\n+if newCondition {\n after"),
+		Diff:   "--- game/map.go\n+++ game/map.go\n@@ -11,3 +11,3 @@\n before\n-if oldCondition {\n+if newCondition {\n after",
 		Status: ToolRunStatusCompleted,
 	}
 
@@ -193,11 +193,42 @@ func TestToolRunCardViewShowsShortEditDiffInline(t *testing.T) {
 	if !strings.Contains(collapsed, "(-1 +1)") {
 		t.Fatalf("expected collapsed edit card to show diff summary, got %q", collapsed)
 	}
-	if !strings.Contains(collapsed, "@@ -12,1 +12,1 @@") || !strings.Contains(collapsed, "+if newCondition {") {
-		t.Fatalf("expected collapsed short edit card to show inline diff, got %q", collapsed)
+	for _, want := range []string{
+		"11 | before",
+		"12 | if oldCondition {",
+		"12 | if newCondition {",
+		"13 | after",
+	} {
+		if !strings.Contains(collapsed, want) {
+			t.Fatalf("expected inline edit detail %q, got %q", want, collapsed)
+		}
+	}
+	if strings.Contains(collapsed, "--- game/map.go") || strings.Contains(collapsed, "+++ game/map.go") || strings.Contains(collapsed, "@@ -11,3 +11,3 @@") {
+		t.Fatalf("expected collapsed short edit card to omit diff headers, got %q", collapsed)
 	}
 	if strings.Contains(collapsed, "Expand") {
 		t.Fatalf("expected collapsed short edit card to avoid expansion controls, got %q", collapsed)
+	}
+	surface := run.CardSurface(palette, 80, false, false)
+	rows := strings.Split(SurfaceText(surface), "\n")
+	addedRow := -1
+	removedRow := -1
+	for y, row := range rows {
+		if strings.Contains(row, "12 | if newCondition {") {
+			addedRow = y
+		}
+		if strings.Contains(row, "12 | if oldCondition {") {
+			removedRow = y
+		}
+	}
+	if addedRow < 0 || removedRow < 0 {
+		t.Fatalf("expected diff rows in %q", collapsed)
+	}
+	if got := surface.cellAt(0, addedRow).Style().BG; got != cellColor(palette.MarkdownCodeDiffAddedBG) {
+		t.Fatalf("expected added row background %v, got %v", palette.MarkdownCodeDiffAddedBG, got)
+	}
+	if got := surface.cellAt(0, removedRow).Style().BG; got != cellColor(palette.MarkdownCodeDiffDeletedBG) {
+		t.Fatalf("expected removed row background %v, got %v", palette.MarkdownCodeDiffDeletedBG, got)
 	}
 }
 
@@ -206,14 +237,29 @@ func TestToolRunCardViewKeepsLargeEditDiffExpandable(t *testing.T) {
 	diff := strings.Join([]string{
 		"--- game/map.go",
 		"+++ game/map.go",
-		"@@ -12,4 +12,5 @@",
-		"-if oldCondition {",
-		"-\tfirst()",
-		"-\tsecond()",
-		"+if newCondition {",
-		"+\tfirst()",
-		"+\tsecond()",
-		"+\tthird()",
+		"@@ -10,22 +10,22 @@",
+		" before",
+		"-old1",
+		"-old2",
+		"-old3",
+		"-old4",
+		"-old5",
+		"-old6",
+		"-old7",
+		"-old8",
+		"-old9",
+		"-old10",
+		"+new1",
+		"+new2",
+		"+new3",
+		"+new4",
+		"+new5",
+		"+new6",
+		"+new7",
+		"+new8",
+		"+new9",
+		"+new10",
+		" after",
 	}, "\n")
 	run := ToolRun{
 		Tool:   domain.ToolKindEdit,
@@ -224,21 +270,29 @@ func TestToolRunCardViewKeepsLargeEditDiffExpandable(t *testing.T) {
 	}
 
 	collapsed := SurfaceText(run.CardSurface(palette, 80, false, false))
-	if !strings.Contains(collapsed, "Edited game/map.go  (-3 +4)  Expand (10 lines)") {
+	if !strings.Contains(collapsed, "Edited game/map.go  (-10 +10)  Expand (22 lines)") {
 		t.Fatalf("expected compact edit header with expand control, got %q", collapsed)
 	}
-	if !strings.Contains(collapsed, "(-3 +4)") {
+	if !strings.Contains(collapsed, "(-10 +10)") {
 		t.Fatalf("expected collapsed edit card to show diff summary, got %q", collapsed)
 	}
-	if strings.Contains(collapsed, "@@ -12,4 +12,5 @@") || strings.Contains(collapsed, "+\tthird()") {
+	if strings.Contains(collapsed, "10 | before") || strings.Contains(collapsed, "11 | old1") || strings.Contains(collapsed, "21 | new10") {
 		t.Fatalf("expected collapsed large edit card to hide diff details, got %q", collapsed)
 	}
-	if !strings.Contains(collapsed, "Expand (10 lines)") {
+	if !strings.Contains(collapsed, "Expand (22 lines)") {
 		t.Fatalf("expected collapsed large edit card to stay expandable, got %q", collapsed)
 	}
 
 	expanded := SurfaceText(run.CardSurface(palette, 80, true, false))
-	if !strings.Contains(expanded, "@@ -12,4 +12,5 @@") || !strings.Contains(expanded, "+third()") {
+	for _, want := range []string{"10 | before", "11 | old1", "20 | old10", "11 | new1", "20 | new10", "21 | after"} {
+		if !strings.Contains(expanded, want) {
+			t.Fatalf("expected expanded edit card detail %q, got %q", want, expanded)
+		}
+	}
+	if strings.Contains(expanded, "--- game/map.go") || strings.Contains(expanded, "@@ -10,22 +10,22 @@") {
+		t.Fatalf("expected expanded edit card to omit diff headers, got %q", expanded)
+	}
+	if strings.Contains(expanded, "Expand (22 lines)") {
 		t.Fatalf("expected expanded edit card to show full diff, got %q", expanded)
 	}
 }

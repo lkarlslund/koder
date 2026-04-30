@@ -6384,7 +6384,7 @@ func TestMouseClickTogglesEditToolRunExpansion(t *testing.T) {
 	}, domain.PartKindToolOutput, domain.ToolKindEdit, tools.StoredResultStatusOK, tools.EditStoredResult{
 		Path:    "game/sim_test.go",
 		Summary: "Edited game/sim_test.go (replaced 1 occurrence)",
-		Diff:    "--- game/sim_test.go\n+++ game/sim_test.go\n@@ -1,1 +1,1 @@\n-old\n+new",
+		Diff:    "--- game/sim_test.go\n+++ game/sim_test.go\n@@ -1,3 +1,3 @@\n before\n-old\n+new\n after",
 	}))
 
 	m.messages = []domain.Message{
@@ -6400,7 +6400,12 @@ func TestMouseClickTogglesEditToolRunExpansion(t *testing.T) {
 	if !strings.Contains(m.viewport.View(), "(-1 +1)") {
 		t.Fatalf("expected collapsed edit summary, got %q", m.viewport.View())
 	}
-	if !strings.Contains(m.viewport.View(), "--- game/sim_test.go") || !strings.Contains(m.viewport.View(), "+new") {
+	for _, want := range []string{"1 | before", "2 | old", "2 | new", "3 | after"} {
+		if !strings.Contains(m.viewport.View(), want) {
+			t.Fatalf("expected short edit diff inline detail %q, got %q", want, m.viewport.View())
+		}
+	}
+	if strings.Contains(m.viewport.View(), "--- game/sim_test.go") || strings.Contains(m.viewport.View(), "@@ -1,3 +1,3 @@") {
 		t.Fatalf("expected short edit diff inline, got %q", m.viewport.View())
 	}
 	if strings.Contains(m.viewport.View(), "Expand (") {
@@ -6427,7 +6432,7 @@ func TestMouseClickTogglesWrappedEditToolRunExpansion(t *testing.T) {
 	m := Model{
 		mouseEnabled:     true,
 		currentSession:   domain.Session{ID: 1},
-		viewport:         newTranscriptViewport(28, 10),
+		viewport:         newTranscriptViewport(28, 30),
 		parts:            map[int64][]domain.Part{},
 		expandedToolRuns: map[string]bool{},
 		palette:          theme.Resolve("tokyonight").Palette,
@@ -6440,7 +6445,7 @@ func TestMouseClickTogglesWrappedEditToolRunExpansion(t *testing.T) {
 	}, domain.PartKindToolOutput, domain.ToolKindEdit, tools.StoredResultStatusOK, tools.EditStoredResult{
 		Path:    "game/sim_test.go",
 		Summary: "Edited game/sim_test.go (replaced 1 occurrence)",
-		Diff:    "--- game/sim_test.go\n+++ game/sim_test.go\n@@ -1,4 +1,5 @@\n-old\n-old2\n-old3\n+new\n+new2\n+new3\n+new4",
+		Diff:    "--- game/sim_test.go\n+++ game/sim_test.go\n@@ -1,22 +1,22 @@\n before\n-old1\n-old2\n-old3\n-old4\n-old5\n-old6\n-old7\n-old8\n-old9\n-old10\n+new1\n+new2\n+new3\n+new4\n+new5\n+new6\n+new7\n+new8\n+new9\n+new10\n after",
 	}))
 
 	m.messages = []domain.Message{
@@ -6484,7 +6489,7 @@ func TestMouseClickTogglesWrappedEditToolRunExpansion(t *testing.T) {
 	if cmd != nil {
 		t.Fatal("expected no command from wrapped edit tool run mouse toggle")
 	}
-	if !strings.Contains(next.viewport.View(), "--- game/sim_test.go") {
+	if !strings.Contains(next.viewport.View(), "1 | before") || !strings.Contains(next.viewport.View(), "2 | old1") || !strings.Contains(next.viewport.View(), "11 | new10") {
 		t.Fatalf("expected expanded wrapped edit output, got %q", next.viewport.View())
 	}
 }
@@ -6552,7 +6557,7 @@ func TestEditToolRunShowsStoredHunkDetails(t *testing.T) {
 	}, domain.PartKindToolOutput, domain.ToolKindEdit, tools.StoredResultStatusOK, tools.EditStoredResult{
 		Path:    "game/map.go",
 		Summary: "Edited game/map.go (replaced 1 occurrence)",
-		Diff:    "--- game/map.go\n+++ game/map.go\n@@ -12,1 +12,1 @@\n-if oldCondition {\n+if newCondition {",
+		Diff:    "--- game/map.go\n+++ game/map.go\n@@ -11,3 +11,3 @@\n before\n-if oldCondition {\n+if newCondition {\n after",
 	}))
 
 	m.messages = []domain.Message{
@@ -6568,15 +6573,17 @@ func TestEditToolRunShowsStoredHunkDetails(t *testing.T) {
 	got := m.viewport.View()
 	for _, want := range []string{
 		"Edited game/map.go  (-1 +1)",
-		"--- game/map.go",
-		"+++ game/map.go",
-		"@@ -12,1 +12,1 @@",
-		"-if oldCondition {",
-		"+if newCondition {",
+		"11 | before",
+		"12 | if oldCondition {",
+		"12 | if newCondition {",
+		"13 | after",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("expected %q in %q", want, got)
 		}
+	}
+	if strings.Contains(got, "--- game/map.go") || strings.Contains(got, "@@ -11,3 +11,3 @@") {
+		t.Fatalf("expected edit detail to omit diff headers, got %q", got)
 	}
 }
 

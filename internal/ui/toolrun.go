@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -41,7 +42,23 @@ type ToolRun struct {
 	ErrorText  string
 }
 
-const editInlineDiffLineLimit = 8
+const editInlineDiffLineLimit = 20
+
+type editDetailKind uint8
+
+const (
+	editDetailContext editDetailKind = iota
+	editDetailAdded
+	editDetailRemoved
+)
+
+type editDetailLine struct {
+	Number int
+	Text   string
+	Kind   editDetailKind
+}
+
+var editHunkHeaderPattern = regexp.MustCompile(`^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@`)
 
 func (r ToolRun) PreviewText() string {
 	return firstNonEmpty(strings.TrimSpace(r.ErrorText), strings.TrimSpace(r.Output), strings.TrimSpace(r.Diff), strings.TrimSpace(r.Preview))
@@ -201,24 +218,11 @@ func (r ToolRun) renderEditCard(palette theme.Palette, width int, expandedOutput
 	if subtitle := strings.TrimSpace(r.Subtitle); subtitle != "" {
 		lines = append(lines, LayoutStyledText([]StyledSpan{{Text: subtitle, Style: subtitleStyle}}, headerWidth, CellStyle{}))
 	}
-	diff := strings.TrimSpace(r.Diff)
-	if diff != "" && (expandedOutput || !editDiffNeedsExpansion(diff, headerWidth)) {
-		rendered := renderStyledDiffPreview(diff, headerWidth)
-		diffLines := strings.Split(rendered, "\n")
-		surface := BlankSurface(maxLineWidth(diffLines), len(diffLines))
-		for y, line := range diffLines {
-			style := bodyStyle
-			trimmed := strings.TrimLeft(line, " ")
-			if strings.HasPrefix(trimmed, "+") {
-				style = addedStyle
-			} else if strings.HasPrefix(trimmed, "-") {
-				style = deletedStyle
-			} else if strings.HasPrefix(trimmed, "@@") || strings.HasPrefix(trimmed, "---") || strings.HasPrefix(trimmed, "+++") {
-				style = metaStyle
-			}
-			surface.WriteText(0, y, line, style)
+	detailLines := parseEditDetailLines(strings.TrimSpace(r.Diff))
+	if len(detailLines) > 0 && (expandedOutput || !editDiffNeedsExpansion(detailLines)) {
+		for _, line := range detailLines {
+			lines = append(lines, LayoutStyledText(editDetailSpans(line, bodyStyle, metaStyle, palette), headerWidth, CellStyle{}))
 		}
-		lines = append(lines, surface)
 	}
 	return stackSurfaces(lines)
 }
@@ -448,11 +452,11 @@ func (r ToolRun) CommandExpandable(width int) bool {
 
 func (r ToolRun) HiddenLineCount(width int) int {
 	if r.Tool == domain.ToolKindEdit {
-		diff := strings.TrimSpace(r.Diff)
-		if diff == "" || !editDiffNeedsExpansion(diff, width) {
+		detailLines := parseEditDetailLines(strings.TrimSpace(r.Diff))
+		if len(detailLines) == 0 || !editDiffNeedsExpansion(detailLines) {
 			return 0
 		}
-		return renderedLineCount(renderStyledDiffPreview(diff, width))
+		return len(detailLines)
 	}
 	preview := strings.TrimSpace(r.PreviewText())
 	if preview == "" {
@@ -556,22 +560,6 @@ func diffChangeCounts(diff string) (deleted, added int) {
 	return deleted, added
 }
 
-func editDiffNeedsExpansion(diff string, width int) bool {
-	return renderedLineCount(renderStyledDiffPreview(diff, width)) >= editInlineDiffLineLimit
-}
-
-func renderStyledDiffPreview(diff string, width int) string {
-	lines := strings.Split(strings.TrimSpace(diff), "\n")
-	rendered := make([]string, 0, len(lines))
-	for _, line := range lines {
-		wrapped := wrapPlain(line, max(1, width-1))
-		for _, wrappedLine := range strings.Split(wrapped, "\n") {
-			rendered = append(rendered, " "+wrappedLine)
-		}
-	}
-	return strings.Join(rendered, "\n")
-}
-
 func editSummarySpans(run ToolRun, bodyStyle, deletedStyle, addedStyle CellStyle) []StyledSpan {
 	diff := strings.TrimSpace(run.Diff)
 	if diff != "" {
@@ -589,6 +577,97 @@ func editSummarySpans(run ToolRun, bodyStyle, deletedStyle, addedStyle CellStyle
 		return nil
 	}
 	return []StyledSpan{{Text: summary, Style: bodyStyle}}
+}
+
+func editDiffNeedsExpansion(lines []editDetailLine) bool {
+	return len(lines) >= editInlineDiffLineLimit
+}
+
+func parseEditDetailLines(diff string) []editDetailLine {
+	diff = strings.TrimSpace(diff)
+	if diff == "" {
+		return nil
+	}
+	rawLines := strings.Split(diff, "\n")
+	var out []editDetailLine
+	for i := 0; i < len(rawLines); i++ {
+		line := rawLines[i]
+		if strings.HasPrefix(line, "--- ") || strings.HasPrefix(line, "+++ ") || strings.TrimSpace(line) == "" {
+			continue
+		}
+		match := editHunkHeaderPattern.FindStringSubmatch(line)
+		if len(match) != 3 {
+			continue
+		}
+		oldNum, _ := strconv.Atoi(match[1])
+		newNum, _ := strconv.Atoi(match[2])
+		var hunk []editDetailLine
+		for i++; i < len(rawLines); i++ {
+			line = rawLines[i]
+			if strings.HasPrefix(line, "@@ ") {
+				i--
+				break
+			}
+			if strings.HasPrefix(line, "\\ No newline") {
+				continue
+			}
+			switch {
+			case strings.HasPrefix(line, " "):
+				hunk = append(hunk, editDetailLine{Number: newNum, Text: line[1:], Kind: editDetailContext})
+				oldNum++
+				newNum++
+			case strings.HasPrefix(line, "-"):
+				hunk = append(hunk, editDetailLine{Number: oldNum, Text: line[1:], Kind: editDetailRemoved})
+				oldNum++
+			case strings.HasPrefix(line, "+"):
+				hunk = append(hunk, editDetailLine{Number: newNum, Text: line[1:], Kind: editDetailAdded})
+				newNum++
+			}
+		}
+		out = append(out, trimEditDetailContext(hunk)...)
+	}
+	return out
+}
+
+func trimEditDetailContext(lines []editDetailLine) []editDetailLine {
+	if len(lines) == 0 {
+		return nil
+	}
+	firstChanged := -1
+	lastChanged := -1
+	for i, line := range lines {
+		if line.Kind == editDetailContext {
+			continue
+		}
+		if firstChanged < 0 {
+			firstChanged = i
+		}
+		lastChanged = i
+	}
+	if firstChanged < 0 {
+		return nil
+	}
+	start := maxInt(0, firstChanged-1)
+	end := minInt(len(lines)-1, lastChanged+1)
+	return lines[start : end+1]
+}
+
+func editDetailSpans(line editDetailLine, bodyStyle, metaStyle CellStyle, palette theme.Palette) []StyledSpan {
+	lineStyle := bodyStyle
+	numberStyle := metaStyle
+	switch line.Kind {
+	case editDetailAdded:
+		lineStyle = CellStyle{FG: cellColor(palette.MarkdownText), BG: cellColor(palette.MarkdownCodeDiffAddedBG)}
+		numberStyle = CellStyle{FG: cellColor(palette.MarkdownCodeLineNumber), BG: cellColor(palette.MarkdownCodeDiffAddedBG)}
+	case editDetailRemoved:
+		lineStyle = CellStyle{FG: cellColor(palette.MarkdownText), BG: cellColor(palette.MarkdownCodeDiffDeletedBG)}
+		numberStyle = CellStyle{FG: cellColor(palette.MarkdownCodeLineNumber), BG: cellColor(palette.MarkdownCodeDiffDeletedBG)}
+	}
+	return []StyledSpan{
+		{Text: strconv.Itoa(line.Number), Style: numberStyle},
+		{Text: " | ", Style: numberStyle},
+		{Text: line.Text, Style: lineStyle},
+	}
 }
 
 func toolRunStatusColor(status ToolRunStatus, palette theme.Palette) CellColor {
