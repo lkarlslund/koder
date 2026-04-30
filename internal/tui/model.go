@@ -1136,6 +1136,10 @@ func (m *Model) handleKey(msg ui.KeyMsg) (ui.Model, ui.Cmd) {
 		}
 	}
 	root := m.syncUIRoot()
+	if msg.String() == "esc" && m.canInterruptActiveOperation() && root.FocusedWindow() == mainWindowID && !m.queueEditMode {
+		_, cmd := m.handleInterruptKey()
+		return m, cmd
+	}
 	if handled, cmd := root.HandleEvent(ui.KeyEvent(msg)); handled {
 		return m, cmd
 	}
@@ -4385,6 +4389,7 @@ func (m *Model) handleInterruptKey() (ui.Model, ui.Cmd) {
 	}
 	m.interruptArmedAt = time.Time{}
 	m.status = "Interrupting…"
+	m.appendLocalTranscriptNotice("Interrupted", "interrupted", "warning")
 	if cancel := m.activeOpCancel; cancel != nil {
 		cancel()
 	}
@@ -4896,6 +4901,43 @@ func (m *Model) appendLocalAssistantError(err error) {
 	}}
 	if m.debug != nil {
 		m.debug.RecordLifecycle(m.currentSession.ID, "ui_error_appended", err.Error(), nil)
+	}
+	m.transcriptDirty = true
+	m.refreshViewport()
+}
+
+func (m *Model) appendLocalTranscriptNotice(body, kind, severity string) {
+	body = strings.TrimSpace(body)
+	if body == "" {
+		return
+	}
+	now := time.Now().UTC()
+	if m.parts == nil {
+		m.parts = make(map[int64][]domain.Part)
+	}
+	messageID := m.nextPendingID()
+	meta, _ := json.Marshal(map[string]string{
+		"kind":     kind,
+		"severity": severity,
+	})
+	m.messages = append(m.messages, domain.Message{
+		ID:        messageID,
+		SessionID: m.currentSession.ID,
+		ChatID:    m.currentChat.ID,
+		Role:      domain.MessageRoleAssistant,
+		Summary:   body,
+		CreatedAt: now,
+	})
+	m.parts[messageID] = []domain.Part{{
+		ID:        m.nextPendingID(),
+		MessageID: messageID,
+		Kind:      domain.PartKindEventNotice,
+		Body:      body,
+		MetaJSON:  string(meta),
+		CreatedAt: now,
+	}}
+	if m.debug != nil {
+		m.debug.RecordLifecycle(m.currentSession.ID, "ui_notice_appended", body, map[string]string{"kind": kind, "severity": severity})
 	}
 	m.transcriptDirty = true
 	m.refreshViewport()

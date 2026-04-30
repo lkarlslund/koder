@@ -2844,6 +2844,12 @@ func TestHandleKeyEscInterruptsWhileMainWindowFocused(t *testing.T) {
 	if next.status != "Interrupting…" {
 		t.Fatalf("unexpected esc status: %q", next.status)
 	}
+	if len(next.messages) != 1 {
+		t.Fatalf("expected local interrupted notice message, got %#v", next.messages)
+	}
+	if got := next.parts[next.messages[0].ID]; len(got) != 1 || got[0].Kind != domain.PartKindEventNotice || got[0].Body != "Interrupted" {
+		t.Fatalf("expected interrupted event notice part, got %#v", got)
+	}
 }
 
 func TestExitSummaryIncludesSessionDetails(t *testing.T) {
