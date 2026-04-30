@@ -391,6 +391,18 @@ func ViewImageStoredResultForPart(part domain.Part) (ViewImageStoredResult, bool
 	return result, true
 }
 
+func EditStoredResultForPart(part domain.Part) (EditStoredResult, bool) {
+	env, ok := storedResultFromPart(part)
+	if !ok || env.PartKind != domain.PartKindToolOutput || env.Tool != domain.ToolKindEdit {
+		return EditStoredResult{}, false
+	}
+	var result EditStoredResult
+	if err := json.Unmarshal(env.Payload, &result); err != nil {
+		return EditStoredResult{}, false
+	}
+	return result, true
+}
+
 func marshalStoredResult(partKind domain.PartKind, tool domain.ToolKind, status StoredResultStatus, payload StoredResultPayload) (string, error) {
 	rawPayload, err := json.Marshal(payload)
 	if err != nil {

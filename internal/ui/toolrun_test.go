@@ -176,23 +176,64 @@ func TestExecToolRunStatusLabelsDistinguishTerminalStates(t *testing.T) {
 	}
 }
 
-func TestToolRunCardViewHidesEditPreviewUntilExpanded(t *testing.T) {
+func TestToolRunCardViewShowsShortEditDiffInline(t *testing.T) {
 	palette := theme.Resolve("tokyonight").Palette
 	run := ToolRun{
 		Tool:   domain.ToolKindEdit,
 		Title:  "Edited file game/map.go",
-		Output: "--- game/map.go\n+++ game/map.go\n@@ -12,1 +12,1 @@\n-if oldCondition {\n+if newCondition {",
+		Output: EditDiffSummary("--- game/map.go\n+++ game/map.go\n@@ -12,1 +12,1 @@\n-if oldCondition {\n+if newCondition {"),
+		Diff:   "--- game/map.go\n+++ game/map.go\n@@ -12,1 +12,1 @@\n-if oldCondition {\n+if newCondition {",
 		Status: ToolRunStatusCompleted,
 	}
 
 	collapsed := SurfaceText(run.CardSurface(palette, 80, false, false))
-	if strings.Contains(collapsed, "@@ -12,1 +12,1 @@") || strings.Contains(collapsed, "--- game/map.go") {
-		t.Fatalf("expected collapsed edit card to hide edit details, got %q", collapsed)
+	if !strings.Contains(collapsed, "-1 / +1") {
+		t.Fatalf("expected collapsed edit card to show diff summary, got %q", collapsed)
+	}
+	if !strings.Contains(collapsed, "@@ -12,1 +12,1 @@") || !strings.Contains(collapsed, "+if newCondition {") {
+		t.Fatalf("expected collapsed short edit card to show inline diff, got %q", collapsed)
+	}
+	if strings.Contains(collapsed, "Expand") {
+		t.Fatalf("expected collapsed short edit card to avoid expansion controls, got %q", collapsed)
+	}
+}
+
+func TestToolRunCardViewKeepsLargeEditDiffExpandable(t *testing.T) {
+	palette := theme.Resolve("tokyonight").Palette
+	diff := strings.Join([]string{
+		"--- game/map.go",
+		"+++ game/map.go",
+		"@@ -12,4 +12,5 @@",
+		"-if oldCondition {",
+		"-\tfirst()",
+		"-\tsecond()",
+		"+if newCondition {",
+		"+\tfirst()",
+		"+\tsecond()",
+		"+\tthird()",
+	}, "\n")
+	run := ToolRun{
+		Tool:   domain.ToolKindEdit,
+		Title:  "Edited file game/map.go",
+		Output: EditDiffSummary(diff),
+		Diff:   diff,
+		Status: ToolRunStatusCompleted,
+	}
+
+	collapsed := SurfaceText(run.CardSurface(palette, 80, false, false))
+	if !strings.Contains(collapsed, "-3 / +4") {
+		t.Fatalf("expected collapsed edit card to show diff summary, got %q", collapsed)
+	}
+	if strings.Contains(collapsed, "@@ -12,4 +12,5 @@") || strings.Contains(collapsed, "+\tthird()") {
+		t.Fatalf("expected collapsed large edit card to hide diff details, got %q", collapsed)
+	}
+	if !strings.Contains(collapsed, "Expand (10 lines)") {
+		t.Fatalf("expected collapsed large edit card to stay expandable, got %q", collapsed)
 	}
 
 	expanded := SurfaceText(run.CardSurface(palette, 80, true, false))
-	if !strings.Contains(expanded, "@@ -12,1 +12,1 @@") || !strings.Contains(expanded, "+if newCondition {") {
-		t.Fatalf("expected expanded edit card to show edit details, got %q", expanded)
+	if !strings.Contains(expanded, "@@ -12,4 +12,5 @@") || !strings.Contains(expanded, "+third()") {
+		t.Fatalf("expected expanded edit card to show full diff, got %q", expanded)
 	}
 }
 

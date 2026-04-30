@@ -6397,11 +6397,14 @@ func TestMouseClickTogglesEditToolRunExpansion(t *testing.T) {
 	}}
 
 	m.refreshViewport()
-	if strings.Contains(m.viewport.View(), "--- game/sim_test.go") {
-		t.Fatalf("expected collapsed edit output, got %q", m.viewport.View())
+	if !strings.Contains(m.viewport.View(), "-1 / +1") {
+		t.Fatalf("expected collapsed edit summary, got %q", m.viewport.View())
 	}
-	if !strings.Contains(m.viewport.View(), "Expand (4 lines)") {
-		t.Fatalf("expected expand indicator, got %q", m.viewport.View())
+	if !strings.Contains(m.viewport.View(), "--- game/sim_test.go") || !strings.Contains(m.viewport.View(), "+new") {
+		t.Fatalf("expected short edit diff inline, got %q", m.viewport.View())
+	}
+	if strings.Contains(m.viewport.View(), "Expand (") {
+		t.Fatalf("expected short edit to avoid expand control, got %q", m.viewport.View())
 	}
 
 	_ = m.viewSurface()
@@ -6415,33 +6418,8 @@ func TestMouseClickTogglesEditToolRunExpansion(t *testing.T) {
 		clickY = control.Rect.Y
 		break
 	}
-	if clickX < 0 || clickY < 0 {
-		t.Fatalf("expected edit toolrun control to be registered, got %#v", m.transcriptControls)
-	}
-
-	updated, cmd := m.Update(ui.MouseMsg{
-		Action: ui.MouseActionPress,
-		Button: ui.MouseButtonLeft,
-		X:      clickX,
-		Y:      clickY,
-	})
-	var next Model
-	switch typed := updated.(type) {
-	case Model:
-		next = typed
-	case *Model:
-		next = *typed
-	default:
-		t.Fatalf("unexpected model type %T", updated)
-	}
-	if cmd != nil {
-		t.Fatal("expected no command from edit tool run mouse toggle")
-	}
-	if !strings.Contains(next.viewport.View(), "--- game/sim_test.go") {
-		t.Fatalf("expected expanded edit output, got %q", next.viewport.View())
-	}
-	if !strings.Contains(next.viewport.View(), "Collapse") {
-		t.Fatalf("expected collapse indicator, got %q", next.viewport.View())
+	if clickX >= 0 || clickY >= 0 {
+		t.Fatalf("expected no expand control for short edit diff, got %#v", m.transcriptControls)
 	}
 }
 
@@ -6462,7 +6440,7 @@ func TestMouseClickTogglesWrappedEditToolRunExpansion(t *testing.T) {
 	}, domain.PartKindToolOutput, domain.ToolKindEdit, tools.StoredResultStatusOK, tools.EditStoredResult{
 		Path:    "game/sim_test.go",
 		Summary: "Edited game/sim_test.go (replaced 1 occurrence)",
-		Diff:    "--- game/sim_test.go\n+++ game/sim_test.go\n@@ -1,1 +1,1 @@\n-old\n+new",
+		Diff:    "--- game/sim_test.go\n+++ game/sim_test.go\n@@ -1,4 +1,5 @@\n-old\n-old2\n-old3\n+new\n+new2\n+new3\n+new4",
 	}))
 
 	m.messages = []domain.Message{

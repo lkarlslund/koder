@@ -462,6 +462,16 @@ func toolRunOutput(part domain.Part, parts []domain.Part, msg domain.Message) ui
 		}
 	case domain.ToolKindEdit:
 		path := firstNonEmptyString(strings.TrimSpace(req.Args["path"]), strings.TrimSpace(meta["path"]))
+		if stored, ok := tools.EditStoredResultForPart(part); ok {
+			if strings.TrimSpace(stored.Diff) != "" {
+				diff = strings.TrimSpace(stored.Diff)
+			}
+		}
+		if strings.TrimSpace(diff) != "" {
+			output = ui.EditDiffSummary(diff)
+		} else {
+			output = firstNonEmptyString(strings.TrimSpace(part.Body), output)
+		}
 		if path != "" {
 			presentation.Title = "Edited file " + filepath.ToSlash(path)
 			presentation.Subtitle = ""

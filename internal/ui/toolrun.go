@@ -41,6 +41,8 @@ type ToolRun struct {
 	ErrorText  string
 }
 
+const editInlineDiffLineLimit = 8
+
 func (r ToolRun) PreviewText() string {
 	return firstNonEmpty(strings.TrimSpace(r.ErrorText), strings.TrimSpace(r.Output), strings.TrimSpace(r.Diff), strings.TrimSpace(r.Preview))
 }
@@ -122,6 +124,9 @@ func (r ToolRun) renderCard(palette theme.Palette, width int, expandedOutput, ex
 	if r.Tool == domain.ToolKindBash || r.Tool == domain.ToolKindExecCommand {
 		return r.renderBashCard(palette, width, expandedOutput, expandedCommand)
 	}
+	if r.Tool == domain.ToolKindEdit {
+		return r.renderEditCard(palette, width, expandedOutput)
+	}
 	headerWidth := innerCardWidth(width)
 	titleStyle := CellStyle{FG: cellColor(palette.MarkdownText)}.WithBold(true).WithItalic(true)
 	toggleStyle := CellStyle{FG: cellColor(palette.UserAccentBar)}.WithBold(true)
@@ -158,6 +163,56 @@ func (r ToolRun) renderCard(palette theme.Palette, width int, expandedOutput, ex
 			} else if strings.HasPrefix(trimmed, "-") {
 				style = deletedStyle
 			} else if strings.HasPrefix(trimmed, "@@") {
+				style = metaStyle
+			}
+			surface.WriteText(0, y, line, style)
+		}
+		lines = append(lines, surface)
+	}
+	return stackSurfaces(lines)
+}
+
+func (r ToolRun) renderEditCard(palette theme.Palette, width int, expandedOutput bool) Surface {
+	headerWidth := innerCardWidth(width)
+	titleStyle := CellStyle{FG: cellColor(palette.MarkdownText)}.WithBold(true).WithItalic(true)
+	toggleStyle := CellStyle{FG: cellColor(palette.UserAccentBar)}.WithBold(true)
+	subtitleStyle := CellStyle{FG: cellColor(palette.ComposerMutedText)}
+	bodyStyle := CellStyle{FG: cellColor(palette.MarkdownText)}
+	addedStyle := CellStyle{FG: cellColor(palette.DiffAddedText)}
+	deletedStyle := CellStyle{FG: cellColor(palette.DiffDeletedText)}
+	metaStyle := CellStyle{FG: cellColor(palette.ComposerMutedText)}
+	lines := make([]Surface, 0, 5)
+
+	headerSpans := []StyledSpan{{Text: r.Title, Style: titleStyle}}
+	if label := r.OutputToggleLabel(width, expandedOutput); label != "" {
+		headerSpans = append(headerSpans,
+			StyledSpan{Text: "  ", Style: bodyStyle},
+			StyledSpan{Text: label, Style: toggleStyle, ControlID: controlIDForToolRunPart(r.ID, "output"), Enabled: strings.TrimSpace(r.ID) != ""},
+		)
+	}
+	lines = append(lines, LayoutStyledText(headerSpans, headerWidth, CellStyle{}))
+	if status := r.inlineStatusLabel(); status != "" {
+		lines = append(lines, LayoutStyledText([]StyledSpan{{Text: status, Style: CellStyle{FG: cellColor(toolRunStatusColor(r.Status, palette))}.WithBold(true)}}, headerWidth, CellStyle{}))
+	}
+	if subtitle := strings.TrimSpace(r.Subtitle); subtitle != "" {
+		lines = append(lines, LayoutStyledText([]StyledSpan{{Text: subtitle, Style: subtitleStyle}}, headerWidth, CellStyle{}))
+	}
+	if summary := strings.TrimSpace(firstNonEmpty(r.Output, r.Preview)); summary != "" {
+		lines = append(lines, LayoutStyledText([]StyledSpan{{Text: summary, Style: bodyStyle}}, headerWidth, CellStyle{}))
+	}
+	diff := strings.TrimSpace(r.Diff)
+	if diff != "" && (expandedOutput || !editDiffNeedsExpansion(diff, headerWidth)) {
+		rendered := renderStyledDiffPreview(diff, headerWidth)
+		diffLines := strings.Split(rendered, "\n")
+		surface := BlankSurface(maxLineWidth(diffLines), len(diffLines))
+		for y, line := range diffLines {
+			style := bodyStyle
+			trimmed := strings.TrimLeft(line, " ")
+			if strings.HasPrefix(trimmed, "+") {
+				style = addedStyle
+			} else if strings.HasPrefix(trimmed, "-") {
+				style = deletedStyle
+			} else if strings.HasPrefix(trimmed, "@@") || strings.HasPrefix(trimmed, "---") || strings.HasPrefix(trimmed, "+++") {
 				style = metaStyle
 			}
 			surface.WriteText(0, y, line, style)
@@ -391,6 +446,13 @@ func (r ToolRun) CommandExpandable(width int) bool {
 }
 
 func (r ToolRun) HiddenLineCount(width int) int {
+	if r.Tool == domain.ToolKindEdit {
+		diff := strings.TrimSpace(r.Diff)
+		if diff == "" || !editDiffNeedsExpansion(diff, width) {
+			return 0
+		}
+		return renderedLineCount(renderStyledDiffPreview(diff, width))
+	}
 	preview := strings.TrimSpace(r.PreviewText())
 	if preview == "" {
 		return 0
@@ -472,6 +534,41 @@ func renderToolRunPreview(preview string, run ToolRun, width int, expanded bool)
 		return renderIndented(preview)
 	}
 	return renderIndented(firstPreviewLine(preview))
+}
+
+func EditDiffSummary(diff string) string {
+	deleted, added := diffChangeCounts(diff)
+	return "-" + strconv.Itoa(deleted) + " / +" + strconv.Itoa(added)
+}
+
+func diffChangeCounts(diff string) (deleted, added int) {
+	for _, line := range strings.Split(strings.TrimSpace(diff), "\n") {
+		switch {
+		case strings.HasPrefix(line, "+++"), strings.HasPrefix(line, "---"):
+			continue
+		case strings.HasPrefix(line, "+"):
+			added++
+		case strings.HasPrefix(line, "-"):
+			deleted++
+		}
+	}
+	return deleted, added
+}
+
+func editDiffNeedsExpansion(diff string, width int) bool {
+	return renderedLineCount(renderStyledDiffPreview(diff, width)) >= editInlineDiffLineLimit
+}
+
+func renderStyledDiffPreview(diff string, width int) string {
+	lines := strings.Split(strings.TrimSpace(diff), "\n")
+	rendered := make([]string, 0, len(lines))
+	for _, line := range lines {
+		wrapped := wrapPlain(line, max(1, width-1))
+		for _, wrappedLine := range strings.Split(wrapped, "\n") {
+			rendered = append(rendered, " "+wrappedLine)
+		}
+	}
+	return strings.Join(rendered, "\n")
 }
 
 func toolRunStatusColor(status ToolRunStatus, palette theme.Palette) CellColor {
