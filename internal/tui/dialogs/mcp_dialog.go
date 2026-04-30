@@ -29,13 +29,13 @@ type MCPDialogAction struct {
 }
 
 type MCPDialog struct {
-	servers   []kodermcp.ServerState
-	configs   map[string]config.MCPServer
-	list      EntityListDialog
-	editor    *LabeledFormDialog
-	editID    string
-	status    string
-	selected  string
+	servers  []kodermcp.ServerState
+	configs  map[string]config.MCPServer
+	list     EntityListDialog
+	editor   *LabeledFormDialog
+	editID   string
+	status   string
+	selected string
 }
 
 func NewMCPDialog(servers []kodermcp.ServerState, current map[string]config.MCPServer) MCPDialog {

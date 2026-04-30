@@ -30,6 +30,7 @@ type DisconnectDialogAction struct {
 }
 
 type DisconnectDialog struct {
+	ui.PassiveNode
 	Query   string
 	Index   int
 	Items   []ProviderItem

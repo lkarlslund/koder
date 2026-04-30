@@ -8,6 +8,7 @@ import (
 )
 
 type SelectableRow struct {
+	PassiveNode
 	ControlID      string
 	Primary        string
 	Secondary      string
@@ -21,6 +22,7 @@ type SelectableRow struct {
 }
 
 type SelectableHeader struct {
+	PassiveNode
 	Primary        string
 	Secondary      string
 	Tertiary       string
@@ -169,6 +171,7 @@ func selectableColumnWidths(width int, primary, secondary, tertiary string, prim
 }
 
 type VerticalTabs struct {
+	PassiveNode
 	Tabs    []string
 	Active  int
 	Width   int
@@ -264,6 +267,7 @@ func (v VerticalTabs) render(width int, palette theme.Palette, focused bool) Sur
 }
 
 type CheckboxRow struct {
+	PassiveNode
 	Label       string
 	Description string
 	Checked     bool
@@ -360,6 +364,7 @@ func (r CheckboxRow) render(width int, palette theme.Palette, focused bool) stri
 }
 
 type ChoiceRow struct {
+	PassiveNode
 	Label       string
 	Description string
 	Value       string
@@ -496,6 +501,7 @@ const (
 )
 
 type ButtonRow struct {
+	PassiveNode
 	Buttons []Button
 	Index   int
 	Gap     int

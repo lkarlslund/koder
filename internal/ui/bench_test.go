@@ -21,7 +21,7 @@ func benchmarkTranscript(width, items int) Transcript {
 	palette := benchmarkPalette()
 	entries := make([]TranscriptItem, 0, items)
 	for i := 0; i < items; i++ {
-		var element any
+		var element Node
 		switch i % 4 {
 		case 0:
 			element = UserMessage{

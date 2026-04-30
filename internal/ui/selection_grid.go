@@ -13,6 +13,7 @@ type SelectionGridItem struct {
 }
 
 type SelectionGrid struct {
+	PassiveNode
 	Items      []SelectionGridItem
 	Width      int
 	Columns    int

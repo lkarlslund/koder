@@ -35,6 +35,7 @@ const (
 )
 
 type PickerDialog struct {
+	PassiveNode
 	Title   string
 	Hint    string
 	Query   string

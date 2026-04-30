@@ -14,10 +14,12 @@ type TranscriptItem struct {
 }
 
 type Transcript struct {
+	PassiveNode
 	Items []TranscriptItem
 }
 
 type RetainedTranscript struct {
+	PassiveNode
 	items            []TranscriptItem
 	layoutWidth      int
 	itemHeights      []int
@@ -425,7 +427,7 @@ func (t *RetainedTranscript) replaceHeight(index int, item TranscriptItem) {
 }
 
 type TranscriptViewport struct {
-	BaseNode
+	PassiveNode
 	Transcript *RetainedTranscript
 	OffsetY    int
 	Width      int
@@ -505,6 +507,7 @@ type UserMessageProps struct {
 }
 
 type ActivityIndicator struct {
+	PassiveNode
 	Indicator string
 	Palette   theme.Palette
 }
@@ -530,6 +533,7 @@ func (i ActivityIndicator) render() Surface {
 }
 
 type UserMessage struct {
+	PassiveNode
 	Palette     theme.Palette
 	Body        string
 	Stamp       string
@@ -538,8 +542,22 @@ type UserMessage struct {
 	PromptGlyph string
 }
 
+func (v TranscriptViewport) Children() []Node {
+	if v.Transcript == nil {
+		return nil
+	}
+	return []Node{v.Transcript}
+}
+
 func NewUserMessage(props UserMessageProps) UserMessage {
-	return UserMessage(props)
+	return UserMessage{
+		Palette:     props.Palette,
+		Body:        props.Body,
+		Stamp:       props.Stamp,
+		Width:       props.Width,
+		HalfBlocks:  props.HalfBlocks,
+		PromptGlyph: props.PromptGlyph,
+	}
 }
 
 func (m UserMessage) Measure(_ *Context, constraints Constraints) Size {
@@ -706,6 +724,7 @@ func UserMessageWidth(lines []string) int {
 }
 
 type AssistantMessage struct {
+	PassiveNode
 	Body       string
 	StyledBody []StyledSpan
 	BaseStyle  CellStyle
@@ -797,6 +816,7 @@ func (m AssistantMessage) render() Surface {
 }
 
 type ReasoningBlock struct {
+	PassiveNode
 	Body    string
 	Width   int
 	Palette theme.Palette

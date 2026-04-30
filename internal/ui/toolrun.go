@@ -349,6 +349,7 @@ func controlIDForToolRunPart(runID, part string) string {
 }
 
 type ToolRunDock struct {
+	PassiveNode
 	Palette theme.Palette
 	Run     ToolRun
 	Buttons ButtonRow
@@ -408,8 +409,8 @@ func (d ToolRunDock) node() Node {
 			Style: NewStyle().Foreground(d.Palette.AssistantTimestampText),
 		}),
 	)
-	return AsNode(Border{
-		Child:        AsNode(NewFlexBox(DirectionVertical, children, 1)),
+	return Border{
+		Child:        NewFlexBox(DirectionVertical, children, 1),
 		Width:        d.width(),
 		Padding:      SymmetricInsets(1, 0),
 		BorderLeft:   true,
@@ -417,7 +418,7 @@ func (d ToolRunDock) node() Node {
 		BorderTop:    true,
 		BorderBottom: true,
 		BorderColor:  toolRunStatusColor(d.Run.Status, d.Palette),
-	})
+	}
 }
 
 func (d ToolRunDock) contentWidth() int {
@@ -720,6 +721,7 @@ func (r ToolRun) inlineStatusLabel() string {
 }
 
 type toolRunDockTitle struct {
+	PassiveNode
 	Palette theme.Palette
 	Title   string
 	Status  string
@@ -743,6 +745,7 @@ func (t toolRunDockTitle) Paint(_ *Context, canvas Canvas) {
 }
 
 type toolRunDockPreview struct {
+	PassiveNode
 	Palette theme.Palette
 	Text    string
 	Width   int

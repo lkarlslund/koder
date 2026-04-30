@@ -35,6 +35,7 @@ type SessionDialogAction struct {
 }
 
 type SessionDialog struct {
+	ui.PassiveNode
 	Query   string
 	Index   int
 	Items   []SessionItem

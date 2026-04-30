@@ -12,6 +12,7 @@ type MenuItem struct {
 }
 
 type HistoryMenu struct {
+	PassiveNode
 	Palette  theme.Palette
 	Query    string
 	Items    []MenuItem
@@ -40,6 +41,7 @@ type PickerDialogProps struct {
 }
 
 type SlashMenu struct {
+	PassiveNode
 	Title    string
 	Items    []MenuItem
 	Selected int
@@ -70,14 +72,14 @@ func (m SlashMenu) node(contentWidth int) Node {
 			Focused:        idx == m.Selected,
 		}))
 	}
-	return AsNode(Border{
-		Child:        AsNode(NewFlexBox(DirectionVertical, children, 0)),
+	return Border{
+		Child:        NewFlexBox(DirectionVertical, children, 0),
 		Padding:      SymmetricInsets(1, 0),
 		BorderLeft:   true,
 		BorderRight:  true,
 		BorderTop:    true,
 		BorderBottom: true,
-	})
+	}
 }
 
 func (m SlashMenu) contentWidth() int {
@@ -147,15 +149,15 @@ func (m HistoryMenu) node() Node {
 			Style: muted,
 		}),
 	)
-	return AsNode(Border{
-		Child:        AsNode(NewFlexBox(DirectionVertical, children, 0)),
+	return Border{
+		Child:        NewFlexBox(DirectionVertical, children, 0),
 		Width:        width,
 		Padding:      SymmetricInsets(1, 0),
 		BorderLeft:   true,
 		BorderRight:  true,
 		BorderTop:    true,
 		BorderBottom: true,
-	})
+	}
 }
 
 func (m HistoryMenu) width() int {
@@ -182,6 +184,7 @@ func (m HistoryMenu) Paint(ctx *Context, canvas Canvas) {
 }
 
 type ApprovalPrompt struct {
+	PassiveNode
 	Palette      theme.Palette
 	Title        string
 	Body         string
@@ -193,7 +196,16 @@ type ApprovalPrompt struct {
 }
 
 func NewApprovalPrompt(props ApprovalPromptProps) ApprovalPrompt {
-	return ApprovalPrompt(props)
+	return ApprovalPrompt{
+		Palette:      props.Palette,
+		Title:        props.Title,
+		Body:         props.Body,
+		ApproveLabel: props.ApproveLabel,
+		DenyLabel:    props.DenyLabel,
+		ApproveFocus: props.ApproveFocus,
+		DenyFocus:    props.DenyFocus,
+		Hints:        props.Hints,
+	}
 }
 
 func (p ApprovalPrompt) Measure(ctx *Context, constraints Constraints) Size {
@@ -209,8 +221,8 @@ func (p ApprovalPrompt) node() Node {
 		Index: p.focusedIndex(),
 		Align: HorizontalAlignLeft,
 	}
-	return AsNode(Border{
-		Child: AsNode(NewFlexBox(
+	return Border{
+		Child: NewFlexBox(
 			DirectionVertical,
 			[]Child{
 				Fixed(Label{Text: p.Title, Style: NewStyle().Bold(true)}),
@@ -222,13 +234,13 @@ func (p ApprovalPrompt) node() Node {
 				}),
 			},
 			1,
-		)),
+		),
 		Padding:      SymmetricInsets(1, 0),
 		BorderLeft:   true,
 		BorderRight:  true,
 		BorderTop:    true,
 		BorderBottom: true,
-	})
+	}
 }
 
 func (p ApprovalPrompt) focusedIndex() int {
@@ -251,6 +263,7 @@ func (p ApprovalPrompt) Paint(ctx *Context, canvas Canvas) {
 }
 
 type MenuPickerDialog struct {
+	PassiveNode
 	Palette theme.Palette
 	Title   string
 	Hint    string
@@ -260,7 +273,14 @@ type MenuPickerDialog struct {
 }
 
 func NewMenuPickerDialog(props PickerDialogProps) MenuPickerDialog {
-	return MenuPickerDialog(props)
+	return MenuPickerDialog{
+		Palette: props.Palette,
+		Title:   props.Title,
+		Hint:    props.Hint,
+		Query:   props.Query,
+		Items:   props.Items,
+		Index:   props.Index,
+	}
 }
 
 func (d MenuPickerDialog) Measure(ctx *Context, constraints Constraints) Size {

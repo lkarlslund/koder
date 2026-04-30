@@ -1181,6 +1181,7 @@ func nodeBox(node Node) BoxProps {
 }
 
 type Static struct {
+	PassiveNode
 	Content string
 }
 
@@ -1199,6 +1200,7 @@ func (s Static) Paint(_ *Context, canvas Canvas) {
 }
 
 type SurfaceBox struct {
+	PassiveNode
 	Surface Surface
 }
 
@@ -1214,7 +1216,7 @@ func (b SurfaceBox) Paint(_ *Context, canvas Canvas) {
 }
 
 type VisibleElement struct {
-	BaseNode
+	PassiveNode
 	BoxProps
 	Child Node
 }
@@ -1276,15 +1278,15 @@ type Child struct {
 	Basis  int
 }
 
-func Fixed(node any) Child {
-	return Child{Node: AsNode(node)}
+func Fixed(node Node) Child {
+	return Child{Node: node}
 }
 
-func Flex(node any, weight int) Child {
+func Flex(node Node, weight int) Child {
 	if weight <= 0 {
 		weight = 1
 	}
-	return Child{Node: AsNode(node), Flex: weight, Grow: weight, Shrink: 1}
+	return Child{Node: node, Flex: weight, Grow: weight, Shrink: 1}
 }
 
 func (c Child) effectiveBox() BoxProps {
@@ -1309,12 +1311,13 @@ func (c Child) effectiveBox() BoxProps {
 }
 
 type Spacer struct {
+	PassiveNode
 	W int
 	H int
 }
 
 func (s Spacer) Measure(_ *Context, constraints Constraints) Size {
-	return constraints.Clamp(Size(s))
+	return constraints.Clamp(Size{W: s.W, H: s.H})
 }
 
 func (s Spacer) Paint(_ *Context, canvas Canvas) {
@@ -1328,7 +1331,7 @@ const (
 )
 
 type FlexBox struct {
-	BaseNode
+	PassiveNode
 	Direction FlexDirection
 	children  []Child
 	Spacing   int
@@ -1436,7 +1439,7 @@ func (b FlexBox) renderHorizontalTo(ctx *Context, bounds Rect, dst *Surface) {
 }
 
 type Inset struct {
-	BaseNode
+	PassiveNode
 	Padding Insets
 	Child   Node
 }
@@ -1472,7 +1475,7 @@ func (i Inset) Paint(ctx *Context, canvas Canvas) {
 }
 
 type Constrained struct {
-	BaseNode
+	PassiveNode
 	Constraints Constraints
 	Child       Node
 }
@@ -1511,7 +1514,7 @@ func (c Constrained) Paint(ctx *Context, canvas Canvas) {
 }
 
 type Stack struct {
-	BaseNode
+	PassiveNode
 	children []Node
 }
 
@@ -1566,7 +1569,7 @@ const (
 )
 
 type Align struct {
-	BaseNode
+	PassiveNode
 	Horizontal Alignment
 	Vertical   Alignment
 	Child      Node

@@ -25,6 +25,7 @@ type AttachmentItem struct {
 }
 
 type Composer struct {
+	PassiveNode
 	Palette       theme.Palette
 	Width         int
 	Attachments   []AttachmentItem
@@ -43,7 +44,18 @@ type TokenRange struct {
 }
 
 func NewComposer(props ComposerProps) Composer {
-	return Composer(props)
+	return Composer{
+		Palette:       props.Palette,
+		Width:         props.Width,
+		Attachments:   props.Attachments,
+		TokenRanges:   props.TokenRanges,
+		HalfBlocks:    props.HalfBlocks,
+		PromptGlyph:   props.PromptGlyph,
+		Value:         props.Value,
+		CursorIndex:   props.CursorIndex,
+		Placeholder:   props.Placeholder,
+		CursorVisible: props.CursorVisible,
+	}
 }
 
 func (c Composer) Measure(_ *Context, constraints Constraints) Size {

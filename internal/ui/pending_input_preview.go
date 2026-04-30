@@ -14,6 +14,7 @@ type PendingInputRow struct {
 }
 
 type PendingInputPreview struct {
+	PassiveNode
 	Width       int
 	Items       []PendingInputRow
 	EditingMode bool

@@ -37,6 +37,7 @@ const (
 )
 
 type ToolsDialog struct {
+	ui.PassiveNode
 	items    []ToolToggleItem
 	original map[domain.ToolKind]bool
 	index    int

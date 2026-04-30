@@ -8,12 +8,14 @@ import (
 )
 
 type controlProbeElement struct {
+	PassiveNode
 	id     string
 	width  int
 	height int
 }
 
 type countingElement struct {
+	PassiveNode
 	height      int
 	renderCalls *int
 }

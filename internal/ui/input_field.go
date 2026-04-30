@@ -5,6 +5,7 @@ import (
 )
 
 type InputField struct {
+	PassiveNode
 	Width         int
 	Value         string
 	Placeholder   string

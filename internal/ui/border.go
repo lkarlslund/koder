@@ -5,7 +5,7 @@ import (
 )
 
 type Border struct {
-	BaseNode
+	PassiveNode
 	Child         Node
 	Width         int
 	Height        int
@@ -23,6 +23,13 @@ type Border struct {
 	BorderRight   bool
 	BorderTop     bool
 	BorderBottom  bool
+}
+
+func (b Border) Children() []Node {
+	if b.Child == nil {
+		return nil
+	}
+	return []Node{b.Child}
 }
 
 func (b Border) Measure(ctx *Context, constraints Constraints) Size {

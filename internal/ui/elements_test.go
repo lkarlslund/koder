@@ -6,6 +6,7 @@ import (
 )
 
 type fillBox struct {
+	PassiveNode
 	BoxProps
 	mark string
 }

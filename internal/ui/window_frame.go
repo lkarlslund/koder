@@ -7,7 +7,7 @@ import (
 )
 
 type WindowFrame struct {
-	BaseNode
+	PassiveNode
 	Title       string
 	Content     Node
 	Width       int
@@ -80,12 +80,19 @@ func (w WindowFrame) Paint(ctx *Context, canvas Canvas) {
 	if canvas.Width() <= 0 || canvas.Height() <= 0 {
 		return
 	}
-	paintNodeInto(ctx, AsNode(w.border(ctx)), Rect{
+	paintNodeInto(ctx, w.border(ctx), Rect{
 		X: canvas.origin.X,
 		Y: canvas.origin.Y,
 		W: canvas.Width(),
 		H: canvas.Height(),
 	}, canvas.surface)
+}
+
+func (w WindowFrame) Children() []Node {
+	if w.Content == nil {
+		return nil
+	}
+	return []Node{w.Content}
 }
 
 func firstString(values ...string) string {

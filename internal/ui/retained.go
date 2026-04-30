@@ -1,20 +1,35 @@
 package ui
 
-type Node interface {
+type Measurer interface {
 	Measure(ctx *Context, constraints Constraints) Size
+}
+
+type Layouter interface {
 	Layout(ctx *Context, rect Rect)
-	Prepare(ctx *Context)
-	Paint(ctx *Context, canvas Canvas)
 	Rect() Rect
+}
+
+type Preparer interface {
+	Prepare(ctx *Context)
+}
+
+type CanvasPainter interface {
+	Paint(ctx *Context, canvas Canvas)
+}
+
+type DirtyTracker interface {
 	NeedsLayout() bool
 	NeedsPaint() bool
 	DirtyRects() []Rect
 	ClearDirty()
 }
 
-type MeasuredNode interface {
-	Measure(ctx *Context, constraints Constraints) Size
-	Paint(ctx *Context, canvas Canvas)
+type Node interface {
+	Measurer
+	Layouter
+	Preparer
+	CanvasPainter
+	DirtyTracker
 }
 
 type BaseNode struct {
@@ -117,69 +132,21 @@ func (n *BaseNode) ClearDirty() {
 	n.paintDirty = false
 }
 
-type LeafNode struct {
-	BaseNode
-	Content MeasuredNode
-}
+type PassiveNode struct{}
 
-func (n *LeafNode) Measure(ctx *Context, constraints Constraints) Size {
-	if n == nil || n.Content == nil {
-		return constraints.Clamp(Size{})
-	}
-	return constraints.Clamp(n.Content.Measure(ctx, constraints))
-}
+func (PassiveNode) Layout(_ *Context, _ Rect) {}
+func (PassiveNode) Prepare(_ *Context)        {}
+func (PassiveNode) Rect() Rect                { return Rect{} }
+func (PassiveNode) NeedsLayout() bool         { return false }
+func (PassiveNode) NeedsPaint() bool          { return false }
+func (PassiveNode) DirtyRects() []Rect        { return nil }
+func (PassiveNode) ClearDirty()               {}
 
-func (n *LeafNode) Paint(ctx *Context, canvas Canvas) {
-	if n == nil || n.Content == nil {
-		return
-	}
-	n.Content.Paint(ctx, canvas)
-}
-
-func (n *LeafNode) Children() []Node {
-	if n == nil || n.Content == nil {
-		return nil
-	}
-	if children, ok := n.Content.(Container); ok {
-		return children.Children()
-	}
-	return nil
-}
-
-func (n *LeafNode) Visible() bool {
-	if n == nil || n.Content == nil {
-		return false
-	}
-	if visible, ok := n.Content.(Visibility); ok {
-		return visible.Visible()
-	}
-	return true
-}
-
-func (n *LeafNode) Box() BoxProps {
-	if n == nil || n.Content == nil {
-		return BoxProps{}
-	}
-	if box, ok := n.Content.(BoxModel); ok {
-		return box.Box()
-	}
-	return BoxProps{Display: DisplayFlex, VisibleFlag: true}
-}
-
-func (n *LeafNode) InvalidateCache() {
-	if n == nil || n.Content == nil {
-		return
-	}
-	if invalidator, ok := n.Content.(CacheInvalidator); ok {
-		invalidator.InvalidateCache()
-	}
-}
-
-func (n *LeafNode) RenderVisibleInto(ctx *Context, width, height, offset int, dst *Surface) (int, int) {
-	if n == nil || n.Content == nil {
+func RenderVisibleIntoLeaf(ctx *Context, node Node, width, height, offset int, dst *Surface) (int, int) {
+	if node == nil {
 		return 0, 0
 	}
-	if renderer, ok := n.Content.(interface {
+	if renderer, ok := node.(interface {
 		RenderVisibleInto(ctx *Context, width, height, offset int, dst *Surface) (int, int)
 	}); ok {
 		return renderer.RenderVisibleInto(ctx, width, height, offset, dst)
@@ -187,7 +154,7 @@ func (n *LeafNode) RenderVisibleInto(ctx *Context, width, height, offset int, ds
 	if width <= 0 || height <= 0 {
 		return 0, 0
 	}
-	size := n.Content.Measure(ctx, Constraints{MaxW: width})
+	size := node.Measure(ctx, Constraints{MaxW: width})
 	totalHeight := size.H
 	maxOffset := max(0, totalHeight-height)
 	offset = min(max(0, offset), maxOffset)
@@ -195,64 +162,55 @@ func (n *LeafNode) RenderVisibleInto(ctx *Context, width, height, offset int, ds
 		return totalHeight, offset
 	}
 	childHeight := max(height, totalHeight)
-	paintNodeInto(ctx, n, Rect{X: 0, Y: -offset, W: width, H: childHeight}, dst)
+	paintNodeInto(ctx, node, Rect{X: 0, Y: -offset, W: width, H: childHeight}, dst)
 	return totalHeight, offset
 }
 
-func (n *LeafNode) RenderBottomInto(ctx *Context, width, height int, dst *Surface) (int, int) {
-	if n == nil || n.Content == nil {
+func RenderBottomIntoLeaf(ctx *Context, node Node, width, height int, dst *Surface) (int, int) {
+	if node == nil {
 		return 0, 0
 	}
-	if renderer, ok := n.Content.(interface {
+	if renderer, ok := node.(interface {
 		RenderBottomInto(ctx *Context, width, height int, dst *Surface) (int, int)
 	}); ok {
 		return renderer.RenderBottomInto(ctx, width, height, dst)
 	}
-	size := n.Content.Measure(ctx, Constraints{MaxW: width})
+	size := node.Measure(ctx, Constraints{MaxW: width})
 	totalHeight := size.H
 	offset := max(0, totalHeight-max(0, height))
 	if dst == nil {
 		return totalHeight, offset
 	}
 	childHeight := max(height, totalHeight)
-	paintNodeInto(ctx, n, Rect{X: 0, Y: -offset, W: width, H: childHeight}, dst)
+	paintNodeInto(ctx, node, Rect{X: 0, Y: -offset, W: width, H: childHeight}, dst)
 	return totalHeight, offset
 }
 
-func (n *LeafNode) ApproxHeight(width int) int {
-	if n == nil || n.Content == nil {
+func ApproxHeightLeaf(node Node, width int) int {
+	if node == nil {
 		return 0
 	}
-	if cached, ok := n.Content.(interface{ ApproxHeight(int) int }); ok {
+	if cached, ok := node.(interface{ ApproxHeight(int) int }); ok {
 		return cached.ApproxHeight(width)
 	}
-	return n.Content.Measure(nil, NewConstraints(width, 0)).H
+	return node.Measure(nil, NewConstraints(width, 0)).H
 }
 
-func (n *LeafNode) RenderCached(ctx *Context, width int) Surface {
-	if n == nil || n.Content == nil {
+func RenderCachedLeaf(ctx *Context, node Node, width int) Surface {
+	if node == nil {
 		return Surface{}
 	}
-	if cached, ok := n.Content.(interface {
+	if cached, ok := node.(interface {
 		RenderCached(ctx *Context, width int) Surface
 	}); ok {
 		return cached.RenderCached(ctx, width)
 	}
-	size := n.Content.Measure(ctx, NewConstraints(width, 0))
-	return PaintNodeSurface(withoutRuntime(ctx), n, Rect{W: width, H: size.H})
+	size := node.Measure(ctx, NewConstraints(width, 0))
+	return PaintNodeSurface(withoutRuntime(ctx), node, Rect{W: width, H: size.H})
 }
 
-func AsNode(value any) Node {
-	switch typed := value.(type) {
-	case nil:
-		return nil
-	case Node:
-		return typed
-	case MeasuredNode:
-		return &LeafNode{Content: typed}
-	default:
-		return nil
-	}
+func AsNode(node Node) Node {
+	return node
 }
 
 func PaintNodeSurface(ctx *Context, node Node, bounds Rect) Surface {

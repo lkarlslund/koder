@@ -3,7 +3,7 @@ package ui
 import "strings"
 
 type Sidebar struct {
-	BaseNode
+	PassiveNode
 	Child  Node
 	Height int
 	Width  int
@@ -68,7 +68,7 @@ func (s Sidebar) Paint(ctx *Context, canvas Canvas) {
 }
 
 type BodyLayout struct {
-	BaseNode
+	PassiveNode
 	MainElement    Node
 	SidebarElement Node
 	ShowSidebar    bool
@@ -81,9 +81,9 @@ func (l BodyLayout) Measure(ctx *Context, constraints Constraints) Size {
 func (l BodyLayout) node() Node {
 	main := Inset{Padding: SymmetricInsets(1, 0), Child: l.MainElement}
 	if !l.ShowSidebar || l.SidebarElement == nil {
-		return AsNode(main)
+		return main
 	}
-	return AsNode(NewFlexBox(
+	return NewFlexBox(
 		DirectionHorizontal,
 		[]Child{
 			Flex(main, 1),
@@ -93,19 +93,15 @@ func (l BodyLayout) node() Node {
 			},
 		},
 		0,
-	))
+	)
 }
 
 func (l BodyLayout) sidebarWidth() int {
-	sidebarNode, ok := l.SidebarElement.(*LeafNode)
+	sized, ok := l.SidebarElement.(interface{ SidebarWidth() int })
 	if !ok {
 		return 0
 	}
-	sidebar, ok := sidebarNode.Content.(Sidebar)
-	if !ok {
-		return 0
-	}
-	return sidebar.Width
+	return sized.SidebarWidth()
 }
 
 func (l BodyLayout) Paint(ctx *Context, canvas Canvas) {
@@ -121,7 +117,7 @@ func (l BodyLayout) Paint(ctx *Context, canvas Canvas) {
 }
 
 type Footer struct {
-	BaseNode
+	PassiveNode
 	Parts    []string
 	Elements []Node
 }
@@ -131,14 +127,14 @@ func (f Footer) render() Surface {
 	for _, part := range f.Parts {
 		children = append(children, Fixed(Label{Text: part}))
 	}
-	return f.renderContent(&Context{}, AsNode(NewFlexBox(DirectionVertical, children, 0)))
+	return f.renderContent(&Context{}, NewFlexBox(DirectionVertical, children, 0))
 }
 
 func (f Footer) Measure(ctx *Context, constraints Constraints) Size {
 	if len(f.Elements) == 0 {
 		return constraints.Clamp(f.render().Size())
 	}
-	content := AsNode(NewFlexBox(DirectionVertical, f.children(), 0))
+	content := NewFlexBox(DirectionVertical, f.children(), 0)
 	size := content.Measure(ctx, constraints)
 	return constraints.Clamp(Size{W: size.W + 2, H: size.H + 1})
 }
@@ -181,13 +177,15 @@ func (f Footer) Paint(ctx *Context, canvas Canvas) {
 	if canvas.Width() <= 0 || canvas.Height() <= 0 {
 		return
 	}
-	content := AsNode(NewFlexBox(DirectionVertical, f.children(), 0))
+	content := NewFlexBox(DirectionVertical, f.children(), 0)
 	if len(f.Elements) == 0 {
 		children := make([]Child, 0, len(f.Parts))
 		for _, part := range f.Parts {
 			children = append(children, Fixed(Label{Text: part}))
 		}
-		content = AsNode(NewFlexBox(DirectionVertical, children, 0))
+		content = NewFlexBox(DirectionVertical, children, 0)
 	}
 	canvas.BlitSurface(0, 0, f.renderContent(ctx, content).normalize(canvas.Width(), canvas.Height()))
 }
+
+func (s Sidebar) SidebarWidth() int { return s.Width }

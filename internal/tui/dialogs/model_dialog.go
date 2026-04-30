@@ -26,6 +26,7 @@ type ModelDialogAction struct {
 }
 
 type ModelDialog struct {
+	ui.PassiveNode
 	ProviderID string
 	Query      string
 	Index      int

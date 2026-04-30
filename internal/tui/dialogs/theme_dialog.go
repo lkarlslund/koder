@@ -21,6 +21,7 @@ type ThemeDialogAction struct {
 }
 
 type ThemeDialog struct {
+	ui.PassiveNode
 	Query   string
 	Index   int
 	Themes  []string

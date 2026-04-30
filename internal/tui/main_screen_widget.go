@@ -773,11 +773,7 @@ func composerCursorRectForBounds(m *Model, bounds ui.Rect) (ui.Rect, bool) {
 	if m == nil || bounds.H < 2 || !m.shouldShowComposerArea() {
 		return ui.Rect{}, false
 	}
-	element, ok := m.renderComposerElement().(*ui.LeafNode)
-	if !ok {
-		return ui.Rect{}, false
-	}
-	composer, ok := element.Content.(ui.Composer)
+	composer, ok := m.renderComposerElement().(ui.Composer)
 	if !ok {
 		return ui.Rect{}, false
 	}

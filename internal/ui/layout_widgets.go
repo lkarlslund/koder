@@ -7,7 +7,7 @@ import (
 )
 
 type Section struct {
-	BaseNode
+	PassiveNode
 	Title       string
 	Child       Node
 	Width       int
@@ -43,6 +43,13 @@ func (s Section) Paint(ctx *Context, canvas Canvas) {
 	paintNodeInto(ctx, s.children(ctx), Rect{X: canvas.origin.X, Y: canvas.origin.Y, W: width, H: canvas.Height()}, canvas.surface)
 }
 
+func (s Section) Children() []Node {
+	if s.Child == nil {
+		return nil
+	}
+	return []Node{s.Child}
+}
+
 func (s Section) children(ctx *Context) Node {
 	body := Border{
 		Child:       s.Child,
@@ -53,9 +60,9 @@ func (s Section) children(ctx *Context) Node {
 		BorderColor: firstColor(s.BorderColor, ctx.Palette.SidebarBorder),
 	}
 	if strings.TrimSpace(s.Title) == "" {
-		return AsNode(body)
+		return body
 	}
-	return AsNode(NewFlexBox(
+	return NewFlexBox(
 		DirectionVertical,
 		[]Child{
 			Fixed(Label{
@@ -67,7 +74,7 @@ func (s Section) children(ctx *Context) Node {
 			Fixed(body),
 		},
 		1,
-	))
+	)
 }
 
 type ListItem struct {
@@ -81,6 +88,7 @@ type ListItem struct {
 }
 
 type List struct {
+	PassiveNode
 	Items              []ListItem
 	Width              int
 	Selected           int
@@ -126,7 +134,7 @@ func (l List) Paint(ctx *Context, canvas Canvas) {
 			Focused:        l.Focused && idx == l.Selected,
 		}))
 	}
-	paintNodeInto(ctx, AsNode(NewFlexBox(DirectionVertical, children, 0)), Rect{X: canvas.origin.X, Y: canvas.origin.Y, W: width, H: canvas.Height()}, canvas.surface)
+	paintNodeInto(ctx, NewFlexBox(DirectionVertical, children, 0), Rect{X: canvas.origin.X, Y: canvas.origin.Y, W: width, H: canvas.Height()}, canvas.surface)
 }
 
 func (l *List) Move(delta int) bool {
@@ -182,6 +190,7 @@ type TableRow struct {
 }
 
 type Table struct {
+	PassiveNode
 	Columns    []TableColumn
 	Rows       []TableRow
 	Width      int
@@ -213,15 +222,15 @@ func (t Table) Paint(ctx *Context, canvas Canvas) {
 	for _, row := range t.Rows {
 		children = append(children, Fixed(HitBox{
 			ID: row.ControlID,
-			Child: AsNode(tableRow{
+			Child: tableRow{
 				Palette: ctx.Palette,
 				Columns: t.Columns,
 				Width:   width,
 				Row:     row,
-			}),
+			},
 		}))
 	}
-	paintNodeInto(ctx, AsNode(NewFlexBox(DirectionVertical, children, 0)), Rect{X: canvas.origin.X, Y: canvas.origin.Y, W: width, H: canvas.Height()}, canvas.surface)
+	paintNodeInto(ctx, NewFlexBox(DirectionVertical, children, 0), Rect{X: canvas.origin.X, Y: canvas.origin.Y, W: width, H: canvas.Height()}, canvas.surface)
 }
 
 func (t Table) width(fallback int) int {
@@ -236,6 +245,7 @@ func (t Table) width(fallback int) int {
 }
 
 type tableHeader struct {
+	PassiveNode
 	Palette theme.Palette
 	Columns []TableColumn
 	Width   int
@@ -267,6 +277,7 @@ func (h tableHeader) Paint(_ *Context, canvas Canvas) {
 }
 
 type tableRow struct {
+	PassiveNode
 	Palette theme.Palette
 	Columns []TableColumn
 	Width   int
@@ -343,7 +354,7 @@ type scrollWindowRenderer interface {
 }
 
 type ScrollBox struct {
-	BaseNode
+	PassiveNode
 	Child   Node
 	OffsetY int
 	Width   int

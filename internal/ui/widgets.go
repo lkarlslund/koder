@@ -7,6 +7,7 @@ import (
 )
 
 type Label struct {
+	PassiveNode
 	Text  string
 	Style Style
 }
@@ -23,6 +24,7 @@ func (l Label) Paint(_ *Context, canvas Canvas) {
 }
 
 type TextPane struct {
+	PassiveNode
 	Content string
 }
 
@@ -41,9 +43,16 @@ func (t TextPane) Paint(_ *Context, canvas Canvas) {
 }
 
 type HitBox struct {
-	BaseNode
+	PassiveNode
 	ID    string
 	Child Node
+}
+
+func (h HitBox) Children() []Node {
+	if h.Child == nil {
+		return nil
+	}
+	return []Node{h.Child}
 }
 
 func (h HitBox) Measure(ctx *Context, constraints Constraints) Size {
@@ -76,6 +85,7 @@ func (h HitBox) Paint(ctx *Context, canvas Canvas) {
 }
 
 type Divider struct {
+	PassiveNode
 	Text  string
 	Style Style
 }
@@ -106,6 +116,7 @@ func (d Divider) Paint(_ *Context, canvas Canvas) {
 }
 
 type Paragraph struct {
+	PassiveNode
 	Text  string
 	Style Style
 }
@@ -150,7 +161,7 @@ func (p Paragraph) lines(width int) []string {
 }
 
 type ModalFrame struct {
-	BaseNode
+	PassiveNode
 	Title    string
 	Subtitle string
 	Body     Node
@@ -166,7 +177,7 @@ func (m ModalFrame) Paint(ctx *Context, canvas Canvas) {
 	if canvas.Width() <= 0 || canvas.Height() <= 0 {
 		return
 	}
-	paintNodeInto(ctx, AsNode(m.window(ctx)), Rect{
+	paintNodeInto(ctx, m.window(ctx), Rect{
 		X: canvas.origin.X,
 		Y: canvas.origin.Y,
 		W: canvas.Width(),
@@ -200,7 +211,7 @@ func (m ModalFrame) contentNode(palette theme.Palette) Node {
 	if len(children) == 0 {
 		return nil
 	}
-	return AsNode(NewFlexBox(DirectionVertical, children, 0))
+	return NewFlexBox(DirectionVertical, children, 0)
 }
 
 func (m ModalFrame) window(ctx *Context) WindowFrame {
@@ -213,4 +224,11 @@ func (m ModalFrame) window(ctx *Context) WindowFrame {
 		BorderColor: themePalette(ctx).SidebarBorder,
 		ShowClose:   true,
 	}
+}
+
+func (m ModalFrame) Children() []Node {
+	if m.Body == nil {
+		return nil
+	}
+	return []Node{m.Body}
 }

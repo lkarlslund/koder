@@ -10,10 +10,9 @@ import (
 	"github.com/lkarlslund/koder/internal/theme"
 )
 
-func renderViaPaintForTest(ctx *Context, node any, bounds Rect) Surface {
+func renderViaPaintForTest(ctx *Context, node Node, bounds Rect) Surface {
 	surface := TransparentSurface(bounds.W, bounds.H)
-	typed := AsNode(node)
-	painter, ok := typed.(Painter)
+	painter, ok := node.(CanvasPainter)
 	if !ok {
 		panic("node does not implement Painter")
 	}
@@ -32,9 +31,9 @@ func renderViaPaintForTest(ctx *Context, node any, bounds Rect) Surface {
 	return surface
 }
 
-func assertRenderMatchesPaint(t *testing.T, ctx *Context, node any, bounds Rect) {
+func assertRenderMatchesPaint(t *testing.T, ctx *Context, node Node, bounds Rect) {
 	t.Helper()
-	gotRender := PaintNodeSurface(ctx, AsNode(node), bounds)
+	gotRender := PaintNodeSurface(ctx, node, bounds)
 	gotPaint := renderViaPaintForTest(ctx, node, bounds)
 	if gotRender.Size() != gotPaint.Size() {
 		t.Fatalf("render/paint size mismatch: %#v vs %#v", gotRender.Size(), gotPaint.Size())

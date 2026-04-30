@@ -62,6 +62,7 @@ type preferencesTab struct {
 }
 
 type PreferencesDialog struct {
+	ui.PassiveNode
 	original     PreferencesValues
 	draft        PreferencesValues
 	themeNames   []string

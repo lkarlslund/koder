@@ -239,6 +239,7 @@ func firstNonEmptyToolRunKey(run ui.ToolRun) string {
 }
 
 type bashToolRunCardElement struct {
+	ui.PassiveNode
 	Run             ui.ToolRun
 	Palette         theme.Palette
 	Width           int
@@ -247,6 +248,7 @@ type bashToolRunCardElement struct {
 }
 
 type readToolRunCardElement struct {
+	ui.PassiveNode
 	Run            ui.ToolRun
 	Palette        theme.Palette
 	Width          int
@@ -254,6 +256,7 @@ type readToolRunCardElement struct {
 }
 
 type writeToolRunCardElement struct {
+	ui.PassiveNode
 	Run            ui.ToolRun
 	Palette        theme.Palette
 	Width          int
@@ -261,6 +264,7 @@ type writeToolRunCardElement struct {
 }
 
 type editToolRunCardElement struct {
+	ui.PassiveNode
 	Run            ui.ToolRun
 	Palette        theme.Palette
 	Width          int
@@ -268,6 +272,7 @@ type editToolRunCardElement struct {
 }
 
 type genericToolRunCardElement struct {
+	ui.PassiveNode
 	Run             ui.ToolRun
 	Palette         theme.Palette
 	Width           int

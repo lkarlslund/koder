@@ -49,6 +49,7 @@ const (
 )
 
 type ConnectDialog struct {
+	ui.PassiveNode
 	stage      connectStage
 	query      string
 	index      int

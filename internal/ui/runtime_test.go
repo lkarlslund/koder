@@ -103,7 +103,7 @@ func (w *paletteWindow) CanPaintWindow() bool {
 	return true
 }
 
-type paletteElement struct{}
+type paletteElement struct{ PassiveNode }
 
 func (paletteElement) Measure(_ *Context, constraints Constraints) Size {
 	return constraints.Clamp(Size{W: 1, H: 1})
@@ -411,10 +411,12 @@ func TestRootSetPaletteInvalidatesCachedDescendants(t *testing.T) {
 }
 
 type controlElement struct {
+	PassiveNode
 	id string
 }
 
 type countingControlElement struct {
+	PassiveNode
 	id          string
 	renderCalls *int
 }
