@@ -435,7 +435,7 @@ func (d PreferencesDialog) dialog(width int, palette theme.Palette) ui.Node {
 	}
 	fields := ui.AsNode(ui.Inset{
 		Padding: ui.Insets{Left: 1},
-		Child:   ui.AsNode(ui.FlexBox{Direction: ui.DirectionVertical, Children: fieldRows}),
+		Child:   ui.AsNode(ui.NewFlexBox(ui.DirectionVertical, fieldRows, 0)),
 	})
 
 	buttons := ui.ButtonRow{
@@ -451,14 +451,13 @@ func (d PreferencesDialog) dialog(width int, palette theme.Palette) ui.Node {
 	return ui.AsNode(ui.WindowFrame{
 		Title: "Preferences",
 		Width: dialogWidth,
-		Content: ui.AsNode(ui.FlexBox{
-			Direction: ui.DirectionVertical,
-			Children: []ui.Child{
+		Content: ui.AsNode(ui.NewFlexBox(
+			ui.DirectionVertical,
+			[]ui.Child{
 				ui.Fixed(ui.Static{Content: "Tab/Shift+Tab moves focus. Enter or arrows change values."}),
-				ui.Fixed(ui.AsNode(ui.FlexBox{
-					Direction: ui.DirectionHorizontal,
-					Spacing:   1,
-					Children: []ui.Child{
+				ui.Fixed(ui.AsNode(ui.NewFlexBox(
+					ui.DirectionHorizontal,
+					[]ui.Child{
 						{
 							Node: ui.AsNode(ui.Section{
 								Title: "Tabs",
@@ -479,12 +478,13 @@ func (d PreferencesDialog) dialog(width int, palette theme.Palette) ui.Node {
 							Child:   fields,
 						}), 1),
 					},
-				})),
+					1,
+				))),
 				ui.Fixed(buttons),
 				ui.Fixed(ui.Static{Content: fmt.Sprintf("Theme: %s  Code: %s  Edit: %s  Spinner: %s  Sidebar: %d  Tool Turns: %d", strings.TrimSpace(d.draft.UI.Theme), strings.TrimSpace(d.draft.UI.CodeStyle), editForgivenessShortLabel(d.draft.UI.EditForgiveness), ui.SpinnerStyleByID(d.draft.UI.Spinner).Label, d.draft.UI.SidebarWidth, d.draft.MaxToolLoopSteps)}),
 			},
-			Spacing: 2,
-		}),
+			2,
+		)),
 		ShowClose: true,
 	})
 }
@@ -693,17 +693,18 @@ func (d PreferencesDialog) renderIntegerField(field preferencesField, width int,
 		background = palette.UserTextBackground
 		borderColor = firstNonEmptyColor(palette.SelectionBackground, palette.ActivityText, palette.SidebarBorder)
 	}
-	return ui.AsNode(ui.FlexBox{
-		Direction: ui.DirectionVertical,
-		Children: []ui.Child{
-			ui.Fixed(ui.AsNode(ui.FlexBox{
-				Direction: ui.DirectionHorizontal,
-				Children: []ui.Child{
+	return ui.AsNode(ui.NewFlexBox(
+		ui.DirectionVertical,
+		[]ui.Child{
+			ui.Fixed(ui.AsNode(ui.NewFlexBox(
+				ui.DirectionHorizontal,
+				[]ui.Child{
 					ui.Fixed(ui.Static{Content: field.Label}),
 					ui.Flex(ui.Spacer{}, 1),
 					ui.Fixed(ui.Static{Content: truncateText(field.Description, maxInt(16, width-ui.PlainWidth(field.Label)-3))}),
 				},
-			})),
+				0,
+			))),
 			ui.Fixed(ui.InputField{
 				Width:         maxInt(18, width),
 				Value:         editor.Value(),
@@ -717,6 +718,6 @@ func (d PreferencesDialog) renderIntegerField(field preferencesField, width int,
 				BorderColor:   borderColor,
 			}),
 		},
-		Spacing: 1,
-	})
+		1,
+	))
 }

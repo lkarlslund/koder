@@ -160,14 +160,14 @@ func (p selectionGridCardPainter) Paint(ctx *Context, canvas Canvas) {
 		canvas.BlitSurface(0, 0, FilledLineSurface(canvas.Width(), text, fillStyle, textStyle).normalize(canvas.Width(), canvas.Height()))
 		return
 	}
-	content := FlexBox{
-		Direction: DirectionVertical,
-		Children: []Child{
+	content := NewFlexBox(
+		DirectionVertical,
+		[]Child{
 			Fixed(Label{Text: truncateText(strings.TrimSpace(c.Item.Title), max(1, canvas.Width()-4)), Style: titleStyle}),
 			Fixed(Paragraph{Text: truncateText(strings.TrimSpace(c.Item.Description), max(1, (canvas.Width()-4)*2)), Style: descriptionStyle}),
 		},
-		Spacing: 1,
-	}
+		1,
+	)
 	paintNodeInto(ctx, AsNode(Border{
 		Child:        AsNode(content),
 		Width:        canvas.Width(),

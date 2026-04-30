@@ -162,16 +162,16 @@ func (d ToolsDialog) dialog(width int, palette theme.Palette) ui.Node {
 	return ui.AsNode(ui.WindowFrame{
 		Title: "Tools",
 		Width: dialogWidth,
-		Content: ui.AsNode(ui.FlexBox{
-			Direction: ui.DirectionVertical,
-			Children: []ui.Child{
+		Content: ui.AsNode(ui.NewFlexBox(
+			ui.DirectionVertical,
+			[]ui.Child{
 				ui.Fixed(ui.Static{Content: "Per-session tool access. Space toggles the current tool."}),
-				ui.Fixed(ui.AsNode(ui.FlexBox{Direction: ui.DirectionVertical, Children: rows})),
+				ui.Fixed(ui.AsNode(ui.NewFlexBox(ui.DirectionVertical, rows, 0))),
 				ui.Fixed(buttons),
 				ui.Fixed(ui.Static{Content: "Enter toggles a tool or activates the focused button. Esc cancels."}),
 			},
-			Spacing: 2,
-		}),
+			2,
+		)),
 		ShowClose: true,
 	})
 }

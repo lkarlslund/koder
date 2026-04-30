@@ -12,10 +12,6 @@ type Node interface {
 	ClearDirty()
 }
 
-type NodeChildren interface {
-	ChildNodes() []Node
-}
-
 type MeasuredNode interface {
 	Measure(ctx *Context, constraints Constraints) Size
 	Paint(ctx *Context, canvas Canvas)
@@ -140,12 +136,12 @@ func (n *LeafNode) Paint(ctx *Context, canvas Canvas) {
 	n.Content.Paint(ctx, canvas)
 }
 
-func (n *LeafNode) ChildNodes() []Node {
+func (n *LeafNode) Children() []Node {
 	if n == nil || n.Content == nil {
 		return nil
 	}
-	if children, ok := n.Content.(NodeChildren); ok {
-		return children.ChildNodes()
+	if children, ok := n.Content.(Container); ok {
+		return children.Children()
 	}
 	return nil
 }

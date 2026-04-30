@@ -157,17 +157,17 @@ func (d EntityListDialog) Node(width int, _ theme.Palette) ui.Node {
 	return ui.AsNode(ui.WindowFrame{
 		Title: d.Title,
 		Width: dialogWidth,
-		Content: ui.AsNode(ui.FlexBox{
-			Direction: ui.DirectionVertical,
-			Children: []ui.Child{
+		Content: ui.AsNode(ui.NewFlexBox(
+			ui.DirectionVertical,
+			[]ui.Child{
 				ui.Fixed(staticBlock(d.filterText())),
 				ui.Fixed(ui.AsNode(ui.Section{Title: "Items", Width: contentWidth, Child: list})),
 				ui.Fixed(ui.AsNode(ui.Section{Title: blankAsDash(d.DetailTitle), Width: contentWidth, Child: ui.AsNode(ui.TextPane{Content: details})})),
 				ui.Fixed(ui.AsNode(buttons)),
 				ui.Fixed(staticBlock(footer)),
 			},
-			Spacing: 1,
-		}),
+			1,
+		)),
 		ShowClose: true,
 	})
 }

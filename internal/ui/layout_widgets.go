@@ -55,9 +55,9 @@ func (s Section) children(ctx *Context) Node {
 	if strings.TrimSpace(s.Title) == "" {
 		return AsNode(body)
 	}
-	return AsNode(FlexBox{
-		Direction: DirectionVertical,
-		Children: []Child{
+	return AsNode(NewFlexBox(
+		DirectionVertical,
+		[]Child{
 			Fixed(Label{
 				Text: s.Title,
 				Style: NewStyle().
@@ -66,8 +66,8 @@ func (s Section) children(ctx *Context) Node {
 			}),
 			Fixed(body),
 		},
-		Spacing: 1,
-	})
+		1,
+	))
 }
 
 type ListItem struct {
@@ -126,7 +126,7 @@ func (l List) Paint(ctx *Context, canvas Canvas) {
 			Focused:        l.Focused && idx == l.Selected,
 		}))
 	}
-	paintNodeInto(ctx, AsNode(FlexBox{Direction: DirectionVertical, Children: children}), Rect{X: canvas.origin.X, Y: canvas.origin.Y, W: width, H: canvas.Height()}, canvas.surface)
+	paintNodeInto(ctx, AsNode(NewFlexBox(DirectionVertical, children, 0)), Rect{X: canvas.origin.X, Y: canvas.origin.Y, W: width, H: canvas.Height()}, canvas.surface)
 }
 
 func (l *List) Move(delta int) bool {
@@ -221,7 +221,7 @@ func (t Table) Paint(ctx *Context, canvas Canvas) {
 			}),
 		}))
 	}
-	paintNodeInto(ctx, AsNode(FlexBox{Direction: DirectionVertical, Children: children}), Rect{X: canvas.origin.X, Y: canvas.origin.Y, W: width, H: canvas.Height()}, canvas.surface)
+	paintNodeInto(ctx, AsNode(NewFlexBox(DirectionVertical, children, 0)), Rect{X: canvas.origin.X, Y: canvas.origin.Y, W: width, H: canvas.Height()}, canvas.surface)
 }
 
 func (t Table) width(fallback int) int {

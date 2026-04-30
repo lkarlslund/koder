@@ -258,14 +258,11 @@ func TestFlexNodeLayoutVerticalAllocatesFixedAndFlexChildren(t *testing.T) {
 	header := &testRectNode{size: Size{W: 20, H: 3}}
 	body := &testRectNode{size: Size{W: 20, H: 8}}
 	footer := &testRectNode{size: Size{W: 20, H: 2}}
-	node := &FlexNode{
-		Direction: DirectionVertical,
-		Children: []FlexNodeChild{
-			{Node: header},
-			{Node: body, Flex: 1},
-			{Node: footer},
-		},
-	}
+	node := NewFlexNode(DirectionVertical, []FlexNodeChild{
+		{Node: header},
+		{Node: body, Flex: 1},
+		{Node: footer},
+	}, 0)
 
 	node.Layout(nil, Rect{W: 20, H: 12})
 
@@ -284,15 +281,11 @@ func TestFlexNodeLayoutHorizontalOmitsZeroWidthFixedChildren(t *testing.T) {
 	main := &testRectNode{size: Size{W: 10, H: 4}}
 	hidden := &testRectNode{size: Size{}}
 	sidebar := &testRectNode{size: Size{W: 5, H: 4}}
-	node := &FlexNode{
-		Direction: DirectionHorizontal,
-		Spacing:   1,
-		Children: []FlexNodeChild{
-			{Node: main, Flex: 1},
-			{Node: hidden},
-			{Node: sidebar},
-		},
-	}
+	node := NewFlexNode(DirectionHorizontal, []FlexNodeChild{
+		{Node: main, Flex: 1},
+		{Node: hidden},
+		{Node: sidebar},
+	}, 1)
 
 	node.Layout(nil, Rect{W: 20, H: 4})
 
@@ -310,13 +303,10 @@ func TestFlexNodeLayoutHorizontalOmitsZeroWidthFixedChildren(t *testing.T) {
 func TestFlexNodeLayoutHorizontalUsesChildBasis(t *testing.T) {
 	main := &testRectNode{size: Size{W: 10, H: 4}}
 	sidebar := &testRectNode{size: Size{W: 0, H: 4}}
-	node := &FlexNode{
-		Direction: DirectionHorizontal,
-		Children: []FlexNodeChild{
-			{Node: main, Flex: 1},
-			{Node: sidebar, Basis: 8},
-		},
-	}
+	node := NewFlexNode(DirectionHorizontal, []FlexNodeChild{
+		{Node: main, Flex: 1},
+		{Node: sidebar, Basis: 8},
+	}, 0)
 
 	node.Layout(nil, Rect{W: 20, H: 4})
 

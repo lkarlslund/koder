@@ -110,7 +110,7 @@ func (e *CachedElement) SetChild(child Node) {
 	e.InvalidateCache()
 }
 
-func (e *CachedElement) ChildNodes() []Node {
+func (e *CachedElement) Children() []Node {
 	if e == nil || e.Child == nil {
 		return nil
 	}

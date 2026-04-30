@@ -215,7 +215,7 @@ func (d PickerDialog) node(width int, palette theme.Palette) Node {
 	children = append(children, Fixed(Spacer{H: 1}))
 	return AsNode(Modal{
 		Title:       d.Title,
-		BodyElement: AsNode(FlexBox{Direction: DirectionVertical, Children: append(children, Fixed(d.buttonRow(width)))}),
+		BodyElement: AsNode(NewFlexBox(DirectionVertical, append(children, Fixed(d.buttonRow(width))), 0)),
 		Footer:      "Enter selects. Tab switches focus. Esc cancels.",
 		Width:       80,
 	})

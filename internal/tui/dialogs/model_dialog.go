@@ -203,12 +203,12 @@ func (d ModelDialog) dialog(width int, palette theme.Palette) ui.Node {
 	return ui.AsNode(ui.WindowFrame{
 		Title: "Select Model",
 		Width: dialogWidth,
-		Content: ui.AsNode(ui.FlexBox{
-			Direction: ui.DirectionVertical,
-			Children: []ui.Child{
-				ui.Fixed(ui.AsNode(ui.FlexBox{
-					Direction: ui.DirectionVertical,
-					Children: []ui.Child{
+		Content: ui.AsNode(ui.NewFlexBox(
+			ui.DirectionVertical,
+			[]ui.Child{
+				ui.Fixed(ui.AsNode(ui.NewFlexBox(
+					ui.DirectionVertical,
+					[]ui.Child{
 						ui.Fixed(staticBlock("Provider: " + d.ProviderID)),
 						ui.Fixed(ui.Spacer{H: 1}),
 						ui.Fixed(staticBlock("Filter: " + d.Query)),
@@ -222,12 +222,13 @@ func (d ModelDialog) dialog(width int, palette theme.Palette) ui.Node {
 							Focused:     d.focus == modelDialogFocusPreset,
 						}),
 					},
-				})),
+					0,
+				))),
 				ui.Fixed(buttons),
 				ui.Fixed(ui.Static{Content: "Tab moves focus. Left/Right changes preset. Enter selects model."}),
 			},
-			Spacing: 2,
-		}),
+			2,
+		)),
 		ShowClose: true,
 	})
 }

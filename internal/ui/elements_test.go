@@ -40,14 +40,14 @@ func (f fillBox) Paint(_ *Context, canvas Canvas) {
 }
 
 func TestFlexBoxRenderPlacesChildrenHorizontally(t *testing.T) {
-	got := RenderNode(nil, FlexBox{
-		Direction: DirectionHorizontal,
-		Children: []Child{
+	got := RenderNode(nil, NewFlexBox(
+		DirectionHorizontal,
+		[]Child{
 			Fixed(Static{Content: "A"}),
 			Fixed(Static{Content: "B"}),
 		},
-		Spacing: 1,
-	}, 4, 1)
+		1,
+	), 4, 1)
 
 	if got != "A B " {
 		t.Fatalf("unexpected row render: %q", got)
@@ -55,14 +55,14 @@ func TestFlexBoxRenderPlacesChildrenHorizontally(t *testing.T) {
 }
 
 func TestFlexBoxRenderPlacesChildrenVertically(t *testing.T) {
-	got := RenderNode(nil, FlexBox{
-		Direction: DirectionVertical,
-		Children: []Child{
+	got := RenderNode(nil, NewFlexBox(
+		DirectionVertical,
+		[]Child{
 			Fixed(Static{Content: "A"}),
 			Fixed(Static{Content: "B"}),
 		},
-		Spacing: 1,
-	}, 1, 3)
+		1,
+	), 1, 3)
 
 	if got != "A\n \nB" {
 		t.Fatalf("unexpected column render: %q", got)
@@ -70,14 +70,14 @@ func TestFlexBoxRenderPlacesChildrenVertically(t *testing.T) {
 }
 
 func TestFlexBoxVerticalFlexChildFillsAllocatedHeight(t *testing.T) {
-	got := RenderNode(nil, FlexBox{
-		Direction: DirectionVertical,
-		Children: []Child{
+	got := RenderNode(nil, NewFlexBox(
+		DirectionVertical,
+		[]Child{
 			Flex(fillBox{mark: "A"}, 1),
 			Fixed(Static{Content: "B"}),
 		},
-		Spacing: 1,
-	}, 4, 5)
+		1,
+	), 4, 5)
 
 	if got != "AAAA\nAAAA\nAAAA\n    \nB   " {
 		t.Fatalf("expected flex child to fill remaining height, got %q", got)
@@ -85,14 +85,14 @@ func TestFlexBoxVerticalFlexChildFillsAllocatedHeight(t *testing.T) {
 }
 
 func TestFlexBoxHorizontalFlexChildFillsAllocatedWidth(t *testing.T) {
-	got := RenderNode(nil, FlexBox{
-		Direction: DirectionHorizontal,
-		Children: []Child{
+	got := RenderNode(nil, NewFlexBox(
+		DirectionHorizontal,
+		[]Child{
 			Flex(fillBox{mark: "A"}, 1),
 			Fixed(Static{Content: "B"}),
 		},
-		Spacing: 1,
-	}, 5, 2)
+		1,
+	), 5, 2)
 
 	if got != "AAA B\nAAA  " {
 		t.Fatalf("expected flex child to fill remaining width, got %q", got)
@@ -100,13 +100,14 @@ func TestFlexBoxHorizontalFlexChildFillsAllocatedWidth(t *testing.T) {
 }
 
 func TestFlexBoxVerticalFlexChildrenShareHeightEquallyByDefault(t *testing.T) {
-	got := RenderNode(nil, FlexBox{
-		Direction: DirectionVertical,
-		Children: []Child{
+	got := RenderNode(nil, NewFlexBox(
+		DirectionVertical,
+		[]Child{
 			Flex(fillBox{mark: "A"}, 1),
 			Flex(fillBox{mark: "B"}, 1),
 		},
-	}, 2, 4)
+		0,
+	), 2, 4)
 
 	if got != "AA\nAA\nBB\nBB" {
 		t.Fatalf("expected equal-height sharing for equal flex weights, got %q", got)
@@ -114,13 +115,14 @@ func TestFlexBoxVerticalFlexChildrenShareHeightEquallyByDefault(t *testing.T) {
 }
 
 func TestFlexBoxHorizontalFlexChildrenShareWidthEquallyByDefault(t *testing.T) {
-	got := RenderNode(nil, FlexBox{
-		Direction: DirectionHorizontal,
-		Children: []Child{
+	got := RenderNode(nil, NewFlexBox(
+		DirectionHorizontal,
+		[]Child{
 			Flex(fillBox{mark: "A"}, 1),
 			Flex(fillBox{mark: "B"}, 1),
 		},
-	}, 4, 1)
+		0,
+	), 4, 1)
 
 	if got != "AABB" {
 		t.Fatalf("expected equal-width sharing for equal flex weights, got %q", got)
@@ -128,13 +130,14 @@ func TestFlexBoxHorizontalFlexChildrenShareWidthEquallyByDefault(t *testing.T) {
 }
 
 func TestFlexBoxHorizontalFlexChildrenRespectShareWeights(t *testing.T) {
-	got := RenderNode(nil, FlexBox{
-		Direction: DirectionHorizontal,
-		Children: []Child{
+	got := RenderNode(nil, NewFlexBox(
+		DirectionHorizontal,
+		[]Child{
 			Flex(fillBox{mark: "A"}, 1),
 			Flex(fillBox{mark: "B"}, 2),
 		},
-	}, 6, 1)
+		0,
+	), 6, 1)
 
 	if got != "AABBBB" {
 		t.Fatalf("expected weighted width sharing, got %q", got)
@@ -142,15 +145,16 @@ func TestFlexBoxHorizontalFlexChildrenRespectShareWeights(t *testing.T) {
 }
 
 func TestFlexBoxVerticalAlignmentCanOptOutOfFill(t *testing.T) {
-	got := RenderNode(nil, FlexBox{
-		Direction: DirectionVertical,
-		Children: []Child{
+	got := RenderNode(nil, NewFlexBox(
+		DirectionVertical,
+		[]Child{
 			Flex(VisibleElement{
 				BoxProps: BoxProps{VAlign: AlignCenter},
 				Child:    AsNode(Static{Content: "A"}),
 			}, 1),
 		},
-	}, 3, 3)
+		0,
+	), 3, 3)
 
 	if got != "   \nA  \n   " {
 		t.Fatalf("expected aligned child to render smaller than slot, got %q", got)
@@ -158,15 +162,16 @@ func TestFlexBoxVerticalAlignmentCanOptOutOfFill(t *testing.T) {
 }
 
 func TestFlexBoxHorizontalMaxWidthCanOptOutOfFill(t *testing.T) {
-	got := RenderNode(nil, FlexBox{
-		Direction: DirectionHorizontal,
-		Children: []Child{
+	got := RenderNode(nil, NewFlexBox(
+		DirectionHorizontal,
+		[]Child{
 			Flex(fillBox{
 				BoxProps: BoxProps{MaxW: 2},
 				mark:     "A",
 			}, 1),
 		},
-	}, 4, 1)
+		0,
+	), 4, 1)
 
 	if got != "AA  " {
 		t.Fatalf("expected max width to cap child render width, got %q", got)
@@ -199,12 +204,10 @@ func TestInsetAddsPadding(t *testing.T) {
 }
 
 func TestStackOverlaysLaterChildren(t *testing.T) {
-	got := RenderNode(nil, Stack{
-		Children: []Node{
-			AsNode(Static{Content: "AAAA"}),
-			AsNode(Static{Content: " BB "}),
-		},
-	}, 4, 1)
+	got := RenderNode(nil, NewStack(
+		AsNode(Static{Content: "AAAA"}),
+		AsNode(Static{Content: " BB "}),
+	), 4, 1)
 
 	if got != " BB " {
 		t.Fatalf("unexpected stack render: %q", got)

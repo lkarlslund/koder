@@ -1996,7 +1996,7 @@ func (m *Model) renderComposerAreaElement() ui.Node {
 		}
 		children = append(children, ui.Fixed(element))
 	}
-	return ui.AsNode(ui.FlexBox{Direction: ui.DirectionVertical, Children: children})
+	return ui.AsNode(ui.NewFlexBox(ui.DirectionVertical, children, 0))
 }
 
 func (m *Model) shouldShowComposerArea() bool {
@@ -2055,7 +2055,7 @@ func (m *Model) renderMainScreenElement() ui.Node {
 		ui.Flex(m.renderTranscriptPaneElement(transcript), 1),
 		ui.Fixed(m.renderComposerAreaElement()),
 	}
-	mainColumn := ui.AsNode(ui.FlexBox{Direction: ui.DirectionVertical, Children: mainChildren})
+	mainColumn := ui.AsNode(ui.NewFlexBox(ui.DirectionVertical, mainChildren, 0))
 	sidebar := ui.AsNode(ui.VisibleElement{
 		BoxProps: ui.BoxProps{
 			Hidden: !m.showSidebar,
@@ -2067,17 +2067,18 @@ func (m *Model) renderMainScreenElement() ui.Node {
 		}),
 	})
 	rootChildren := []ui.Child{
-		ui.Flex(ui.AsNode(ui.FlexBox{
-			Direction: ui.DirectionHorizontal,
-			Children: []ui.Child{
+		ui.Flex(ui.AsNode(ui.NewFlexBox(
+			ui.DirectionHorizontal,
+			[]ui.Child{
 				ui.Flex(ui.AsNode(ui.Inset{Padding: ui.SymmetricInsets(mainScreenVerticalInset, 0), Child: mainColumn}), 1),
 				ui.Fixed(ui.Spacer{W: 1}),
 				ui.Fixed(sidebar),
 			},
-		}), 1),
+			0,
+		)), 1),
 		ui.Fixed(m.renderStatusPaneElement()),
 	}
-	return ui.AsNode(ui.FlexBox{Direction: ui.DirectionVertical, Children: rootChildren})
+	return ui.AsNode(ui.NewFlexBox(ui.DirectionVertical, rootChildren, 0))
 }
 
 func (m *Model) renderComposerElement() ui.Node {

@@ -577,21 +577,15 @@ func newMainScreenRetainedRoot(m *Model, transcript *transcriptWidget, composer 
 			return constraints.Clamp(ui.Size{W: constraints.MaxW, H: max(0, m.statusPaneHeight())})
 		},
 	}
-	root.mainColumnNode = &ui.FlexNode{
-		Direction: ui.DirectionVertical,
-		Children: []ui.FlexNodeChild{
-			{Node: root.transcriptNode, Flex: 1},
-			{Node: root.composerNode},
-		},
-	}
-	root.bodyNode = &ui.FlexNode{Direction: ui.DirectionHorizontal}
-	root.layoutRootNode = &ui.FlexNode{
-		Direction: ui.DirectionVertical,
-		Children: []ui.FlexNodeChild{
-			{Node: root.bodyNode, Flex: 1},
-			{Node: root.statusNode},
-		},
-	}
+	root.mainColumnNode = ui.NewFlexNode(ui.DirectionVertical, []ui.FlexNodeChild{
+		{Node: root.transcriptNode, Flex: 1},
+		{Node: root.composerNode},
+	}, 0)
+	root.bodyNode = ui.NewFlexNode(ui.DirectionHorizontal, nil, 0)
+	root.layoutRootNode = ui.NewFlexNode(ui.DirectionVertical, []ui.FlexNodeChild{
+		{Node: root.bodyNode, Flex: 1},
+		{Node: root.statusNode},
+	}, 0)
 	root.bodyChildren[0] = ui.FlexNodeChild{Node: root.mainColumnNode, Flex: 1}
 	root.bodyChildren[1] = ui.FlexNodeChild{Node: root.sidebarNode, Basis: max(0, m.sidebarWidth())}
 	root.bodySlices[0] = root.bodyChildren[:1]
@@ -652,10 +646,10 @@ func (r *mainScreenRetainedRoot) syncLayoutTree() {
 	}
 	if r.model != nil && r.model.showSidebar {
 		r.bodyChildren[1].Basis = max(0, r.model.sidebarWidth())
-		r.bodyNode.Children = r.bodySlices[1]
+		r.bodyNode.SetChildren(r.bodySlices[1])
 		return
 	}
-	r.bodyNode.Children = r.bodySlices[0]
+	r.bodyNode.SetChildren(r.bodySlices[0])
 	if r.sidebarNode != nil {
 		r.sidebarNode.Layout(nil, ui.Rect{})
 	}
@@ -700,24 +694,15 @@ func walkChildNodes(node ui.Node, visit func(ui.Node)) bool {
 	if node == nil || visit == nil {
 		return false
 	}
-	switch typed := node.(type) {
-	case *ui.FlexNode:
-		for _, child := range typed.Children {
-			if child.Node != nil {
-				visit(child.Node)
-			}
-		}
-		return true
-	case interface{ ChildNodes() []ui.Node }:
-		for _, child := range typed.ChildNodes() {
+	if typed, ok := node.(ui.Container); ok {
+		for _, child := range typed.Children() {
 			if child != nil {
 				visit(child)
 			}
 		}
 		return true
-	default:
-		return false
 	}
+	return false
 }
 
 func fullSurfaceDamage(surface ui.Surface) []ui.Rect {

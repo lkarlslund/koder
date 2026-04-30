@@ -48,13 +48,14 @@ func assertRenderMatchesPaint(t *testing.T, ctx *Context, node any, bounds Rect)
 }
 
 func TestFlexBoxRendersFixedSidebarOnRight(t *testing.T) {
-	got := RenderNode(nil, FlexBox{
-		Direction: DirectionHorizontal,
-		Children: []Child{
+	got := RenderNode(nil, NewFlexBox(
+		DirectionHorizontal,
+		[]Child{
 			Flex(Static{Content: "MAIN"}, 1),
 			{Node: AsNode(Static{Content: "SIDE"}), Basis: 4},
 		},
-	}, 8, 1)
+		0,
+	), 8, 1)
 
 	if got != "MAINSIDE" {
 		t.Fatalf("unexpected split render: %q", got)

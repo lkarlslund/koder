@@ -409,7 +409,7 @@ func (d ToolRunDock) node() Node {
 		}),
 	)
 	return AsNode(Border{
-		Child:        AsNode(FlexBox{Direction: DirectionVertical, Children: children, Spacing: 1}),
+		Child:        AsNode(NewFlexBox(DirectionVertical, children, 1)),
 		Width:        d.width(),
 		Padding:      SymmetricInsets(1, 0),
 		BorderLeft:   true,

@@ -81,11 +81,7 @@ func benchmarkFlexNode(childCount int, direction FlexDirection, mixedFlex bool) 
 		}
 		children = append(children, item)
 	}
-	return &FlexNode{
-		Direction: direction,
-		Spacing:   1,
-		Children:  children,
-	}
+	return NewFlexNode(direction, children, 1)
 }
 
 func benchmarkRetainedTranscript(width, items int) *RetainedTranscript {
@@ -148,7 +144,7 @@ func BenchmarkRenderNodeTableAndList(b *testing.B) {
 			Tertiary:  "meta",
 		})
 	}
-	element := FlexBox{Direction: DirectionVertical, Children: []Child{
+	element := NewFlexBox(DirectionVertical, []Child{
 		Fixed(Table{
 			Columns: []TableColumn{
 				{Title: "Model", Width: 32},
@@ -161,7 +157,7 @@ func BenchmarkRenderNodeTableAndList(b *testing.B) {
 		}),
 		Fixed(Spacer{H: 1}),
 		Fixed(List{Items: items, Width: 72, Selected: 12, Focused: true}),
-	}}
+	}, 0)
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		_ = RenderNode(ctx, element, 72, 0)
@@ -274,12 +270,10 @@ func BenchmarkRetainedContainerTree(b *testing.B) {
 			Child: AsNode(Align{
 				Horizontal: AlignCenter,
 				Vertical:   AlignCenter,
-				Child: AsNode(Stack{
-					Children: []Node{
-						AsNode(Paragraph{Text: strings.Repeat("nested content ", 10)}),
-						AsNode(Label{Text: "overlay"}),
-					},
-				}),
+				Child: AsNode(NewStack(
+					AsNode(Paragraph{Text: strings.Repeat("nested content ", 10)}),
+					AsNode(Label{Text: "overlay"}),
+				)),
 			}),
 		}),
 	})

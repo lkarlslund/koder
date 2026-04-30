@@ -213,12 +213,12 @@ func (d SessionDialog) dialog(width int, palette theme.Palette) ui.Node {
 	return ui.AsNode(ui.WindowFrame{
 		Title: "Resume Session",
 		Width: dialogWidth,
-		Content: ui.AsNode(ui.FlexBox{
-			Direction: ui.DirectionVertical,
-			Children: []ui.Child{
-				ui.Fixed(ui.AsNode(ui.FlexBox{
-					Direction: ui.DirectionVertical,
-					Children: []ui.Child{
+		Content: ui.AsNode(ui.NewFlexBox(
+			ui.DirectionVertical,
+			[]ui.Child{
+				ui.Fixed(ui.AsNode(ui.NewFlexBox(
+					ui.DirectionVertical,
+					[]ui.Child{
 						ui.Fixed(staticBlock(fmt.Sprintf("Filter: %s", d.Query))),
 						ui.Fixed(ui.Spacer{H: 1}),
 						ui.Fixed(ui.AsNode(ui.Section{Width: contentWidth, Child: list})),
@@ -233,12 +233,13 @@ func (d SessionDialog) dialog(width int, palette theme.Palette) ui.Node {
 							Child:       ui.AsNode(ui.TextPane{Content: details}),
 						})),
 					},
-				})),
+					0,
+				))),
 				ui.Fixed(buttons),
 				ui.Fixed(ui.Static{Content: "Enter resumes the highlighted session. Esc creates a new session."}),
 			},
-			Spacing: 2,
-		}),
+			2,
+		)),
 		ShowClose: true,
 	})
 }

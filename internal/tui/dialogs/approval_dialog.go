@@ -138,14 +138,15 @@ func (d *ApprovalDialog) Element(palette theme.Palette, bounds ui.Rect) ui.Node 
 	card := strings.Join(d.run.CardSurface(palette, cardWidth, true, true).Lines(), "\n")
 	buttons := d.buttons
 	buttons.Width = maxInt(buttons.Width, ui.PlainWidth(card))
-	body := ui.AsNode(ui.FlexBox{
-		Direction: ui.DirectionVertical,
-		Children: []ui.Child{
+	body := ui.AsNode(ui.NewFlexBox(
+		ui.DirectionVertical,
+		[]ui.Child{
 			ui.Fixed(ui.Static{Content: card}),
 			ui.Fixed(ui.Spacer{H: 1}),
 			ui.Fixed(buttons),
 		},
-	})
+		0,
+	))
 	return ui.AsNode(ui.ModalFrame{
 		Title:    "Approval required",
 		Subtitle: "Choose how to handle this tool request",

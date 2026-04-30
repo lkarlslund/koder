@@ -37,15 +37,15 @@ const (
 )
 
 type LabeledFormDialog struct {
-	Title       string
-	FooterText  string
-	Status      string
-	Fields      []LabeledFormField
-	Buttons     ui.ButtonRow
-	focus       labeledFormFocus
-	fieldIndex  int
-	editors     map[string]textarea.Model
-	toggles     map[string]bool
+	Title      string
+	FooterText string
+	Status     string
+	Fields     []LabeledFormField
+	Buttons    ui.ButtonRow
+	focus      labeledFormFocus
+	fieldIndex int
+	editors    map[string]textarea.Model
+	toggles    map[string]bool
 }
 
 func NewLabeledFormDialog(title string, fields []LabeledFormField, buttons []ui.Button) LabeledFormDialog {
@@ -164,15 +164,15 @@ func (d LabeledFormDialog) Node(width int, palette theme.Palette) ui.Node {
 	return ui.AsNode(ui.WindowFrame{
 		Title: d.Title,
 		Width: dialogWidth,
-		Content: ui.AsNode(ui.FlexBox{
-			Direction: ui.DirectionVertical,
-			Children: []ui.Child{
+		Content: ui.AsNode(ui.NewFlexBox(
+			ui.DirectionVertical,
+			[]ui.Child{
 				ui.Fixed(d.renderFields(contentWidth, palette)),
 				ui.Fixed(ui.AsNode(buttons)),
 				ui.Fixed(staticBlock(blankAsDash(status))),
 			},
-			Spacing: 1,
-		}),
+			1,
+		)),
 		ShowClose: true,
 	})
 }
@@ -191,7 +191,7 @@ func (d LabeledFormDialog) renderFields(width int, palette theme.Palette) ui.Nod
 			rows = append(rows, ui.Fixed(ui.Static{Content: strings.Repeat(" ", labelWidth+2) + truncateText(field.Description, maxInt(16, width-labelWidth-2))}))
 		}
 	}
-	return ui.AsNode(ui.Section{Width: width, Child: ui.AsNode(ui.FlexBox{Direction: ui.DirectionVertical, Children: rows, Spacing: 1})})
+	return ui.AsNode(ui.Section{Width: width, Child: ui.AsNode(ui.NewFlexBox(ui.DirectionVertical, rows, 1))})
 }
 
 func (d LabeledFormDialog) renderField(field LabeledFormField, labelWidth int, width int, palette theme.Palette, active bool) ui.Node {
@@ -215,11 +215,7 @@ func (d LabeledFormDialog) renderField(field LabeledFormField, labelWidth int, w
 			PlaceholderFG: palette.ComposerMutedText,
 			BorderColor:   chooseBorderColor(palette, active),
 		})
-		return ui.AsNode(ui.FlexBox{
-			Direction: ui.DirectionHorizontal,
-			Children:  []ui.Child{label, ui.Fixed(valueNode)},
-			Spacing:   1,
-		})
+		return ui.AsNode(ui.NewFlexBox(ui.DirectionHorizontal, []ui.Child{label, ui.Fixed(valueNode)}, 1))
 	default:
 		editor := d.editor(field.ID)
 		line := editor.VisibleLine()
@@ -246,11 +242,7 @@ func (d LabeledFormDialog) renderField(field LabeledFormField, labelWidth int, w
 			PlaceholderFG: palette.ComposerMutedText,
 			BorderColor:   chooseBorderColor(palette, active),
 		})
-		return ui.AsNode(ui.FlexBox{
-			Direction: ui.DirectionHorizontal,
-			Children:  []ui.Child{label, ui.Fixed(input)},
-			Spacing:   1,
-		})
+		return ui.AsNode(ui.NewFlexBox(ui.DirectionHorizontal, []ui.Child{label, ui.Fixed(input)}, 1))
 	}
 }
 

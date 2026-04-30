@@ -200,7 +200,7 @@ func (m ModalFrame) contentNode(palette theme.Palette) Node {
 	if len(children) == 0 {
 		return nil
 	}
-	return AsNode(FlexBox{Direction: DirectionVertical, Children: children})
+	return AsNode(NewFlexBox(DirectionVertical, children, 0))
 }
 
 func (m ModalFrame) window(ctx *Context) WindowFrame {

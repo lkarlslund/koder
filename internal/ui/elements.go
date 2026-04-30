@@ -1081,8 +1081,8 @@ func InvalidateNodeCaches(ctx *Context, node Node) {
 	if invalidator, ok := node.(CacheInvalidator); ok {
 		invalidator.InvalidateCache()
 	}
-	if walker, ok := node.(NodeChildren); ok {
-		for _, child := range walker.ChildNodes() {
+	if walker, ok := node.(Container); ok {
+		for _, child := range walker.Children() {
 			InvalidateNodeCaches(ctx, child)
 		}
 	}
@@ -1230,7 +1230,7 @@ func (e VisibleElement) Measure(ctx *Context, constraints Constraints) Size {
 	return constraints.Clamp(e.Child.Measure(ctx, constraints))
 }
 
-func (e VisibleElement) ChildNodes() []Node {
+func (e VisibleElement) Children() []Node {
 	if e.Child == nil {
 		return nil
 	}
@@ -1330,8 +1330,14 @@ const (
 type FlexBox struct {
 	BaseNode
 	Direction FlexDirection
-	Children  []Child
+	children  []Child
 	Spacing   int
+}
+
+func NewFlexBox(direction FlexDirection, children []Child, spacing int) FlexBox {
+	out := make([]Child, len(children))
+	copy(out, children)
+	return FlexBox{Direction: direction, children: out, Spacing: spacing}
 }
 
 func (b FlexBox) Measure(ctx *Context, constraints Constraints) Size {
@@ -1348,9 +1354,9 @@ func (b FlexBox) Measure(ctx *Context, constraints Constraints) Size {
 	return constraints.Clamp(size)
 }
 
-func (b FlexBox) ChildNodes() []Node {
-	out := make([]Node, 0, len(b.Children))
-	for _, child := range b.Children {
+func (b FlexBox) Children() []Node {
+	out := make([]Node, 0, len(b.children))
+	for _, child := range b.children {
 		if child.Node != nil {
 			out = append(out, child.Node)
 		}
@@ -1446,7 +1452,7 @@ func (i Inset) Measure(ctx *Context, constraints Constraints) Size {
 	})
 }
 
-func (i Inset) ChildNodes() []Node {
+func (i Inset) Children() []Node {
 	if i.Child == nil {
 		return nil
 	}
@@ -1484,7 +1490,7 @@ func (c Constrained) Measure(ctx *Context, constraints Constraints) Size {
 	return constraints.Clamp(c.Child.Measure(ctx, merged))
 }
 
-func (c Constrained) ChildNodes() []Node {
+func (c Constrained) Children() []Node {
 	if c.Child == nil {
 		return nil
 	}
@@ -1506,12 +1512,24 @@ func (c Constrained) Paint(ctx *Context, canvas Canvas) {
 
 type Stack struct {
 	BaseNode
-	Children []Node
+	children []Node
+}
+
+func NewStack(children ...Node) Stack {
+	out := make([]Node, len(children))
+	copy(out, children)
+	return Stack{children: out}
+}
+
+func NewStackFrom(children []Node) Stack {
+	out := make([]Node, len(children))
+	copy(out, children)
+	return Stack{children: out}
 }
 
 func (s Stack) Measure(ctx *Context, constraints Constraints) Size {
 	size := Size{}
-	for _, child := range s.Children {
+	for _, child := range s.children {
 		if !NodeVisible(child) {
 			continue
 		}
@@ -1522,8 +1540,8 @@ func (s Stack) Measure(ctx *Context, constraints Constraints) Size {
 	return constraints.Clamp(size)
 }
 
-func (s Stack) ChildNodes() []Node {
-	return append([]Node(nil), s.Children...)
+func (s Stack) Children() []Node {
+	return append([]Node(nil), s.children...)
 }
 
 func (s Stack) Paint(ctx *Context, canvas Canvas) {
@@ -1531,7 +1549,7 @@ func (s Stack) Paint(ctx *Context, canvas Canvas) {
 		return
 	}
 	bounds := Rect{X: canvas.origin.X, Y: canvas.origin.Y, W: canvas.Width(), H: canvas.Height()}
-	for _, child := range s.Children {
+	for _, child := range s.children {
 		if !NodeVisible(child) {
 			continue
 		}
@@ -1623,7 +1641,7 @@ type flexPlan struct {
 }
 
 func (b FlexBox) layoutPlan(ctx *Context, constraints Constraints, targetMain int) flexPlan {
-	return computeFlexPlan(ctx, b.Children, b.Spacing, b.axis(), constraints, targetMain)
+	return computeFlexPlan(ctx, b.children, b.Spacing, b.axis(), constraints, targetMain)
 }
 
 func computeFlexPlan(ctx *Context, children []Child, spacing int, axis Axis, constraints Constraints, targetMain int) flexPlan {

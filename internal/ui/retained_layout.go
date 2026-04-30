@@ -10,15 +10,28 @@ type FlexNode struct {
 	BaseNode
 	Direction FlexDirection
 	Spacing   int
-	Children  []FlexNodeChild
+	children  []FlexNodeChild
 }
 
-func (n *FlexNode) ChildNodes() []Node {
-	if n == nil || len(n.Children) == 0 {
+func NewFlexNode(direction FlexDirection, children []FlexNodeChild, spacing int) *FlexNode {
+	node := &FlexNode{Direction: direction, Spacing: spacing}
+	node.SetChildren(children)
+	return node
+}
+
+func (n *FlexNode) SetChildren(children []FlexNodeChild) {
+	if n == nil {
+		return
+	}
+	n.children = append(n.children[:0], children...)
+}
+
+func (n *FlexNode) Children() []Node {
+	if n == nil || len(n.children) == 0 {
 		return nil
 	}
-	out := make([]Node, 0, len(n.Children))
-	for _, child := range n.Children {
+	out := make([]Node, 0, len(n.children))
+	for _, child := range n.children {
 		if child.Node != nil {
 			out = append(out, child.Node)
 		}
@@ -33,7 +46,7 @@ func (n *FlexNode) Measure(ctx *Context, constraints Constraints) Size {
 	main := 0
 	cross := 0
 	visible := 0
-	for _, child := range n.Children {
+	for _, child := range n.children {
 		if child.Node == nil {
 			continue
 		}
@@ -118,7 +131,7 @@ func (n *FlexNode) Prepare(ctx *Context) {
 	if n == nil {
 		return
 	}
-	for _, child := range n.Children {
+	for _, child := range n.children {
 		if child.Node != nil {
 			child.Node.Prepare(ctx)
 		}
@@ -129,7 +142,7 @@ func (n *FlexNode) Paint(ctx *Context, canvas Canvas) {
 	if n == nil {
 		return
 	}
-	for _, child := range n.Children {
+	for _, child := range n.children {
 		if child.Node == nil || child.Node.Rect().Empty() {
 			continue
 		}
@@ -144,8 +157,8 @@ type flexNodeLayoutChild struct {
 }
 
 func (n *FlexNode) activeChildren(ctx *Context, rect Rect) []flexNodeLayoutChild {
-	active := make([]flexNodeLayoutChild, 0, len(n.Children))
-	for _, child := range n.Children {
+	active := make([]flexNodeLayoutChild, 0, len(n.children))
+	for _, child := range n.children {
 		if child.Node == nil {
 			continue
 		}

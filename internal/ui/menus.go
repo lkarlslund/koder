@@ -71,7 +71,7 @@ func (m SlashMenu) node(contentWidth int) Node {
 		}))
 	}
 	return AsNode(Border{
-		Child:        AsNode(FlexBox{Direction: DirectionVertical, Children: children}),
+		Child:        AsNode(NewFlexBox(DirectionVertical, children, 0)),
 		Padding:      SymmetricInsets(1, 0),
 		BorderLeft:   true,
 		BorderRight:  true,
@@ -148,7 +148,7 @@ func (m HistoryMenu) node() Node {
 		}),
 	)
 	return AsNode(Border{
-		Child:        AsNode(FlexBox{Direction: DirectionVertical, Children: children}),
+		Child:        AsNode(NewFlexBox(DirectionVertical, children, 0)),
 		Width:        width,
 		Padding:      SymmetricInsets(1, 0),
 		BorderLeft:   true,
@@ -210,9 +210,9 @@ func (p ApprovalPrompt) node() Node {
 		Align: HorizontalAlignLeft,
 	}
 	return AsNode(Border{
-		Child: AsNode(FlexBox{
-			Direction: DirectionVertical,
-			Children: []Child{
+		Child: AsNode(NewFlexBox(
+			DirectionVertical,
+			[]Child{
 				Fixed(Label{Text: p.Title, Style: NewStyle().Bold(true)}),
 				Fixed(Paragraph{Text: p.Body}),
 				Fixed(buttons),
@@ -221,8 +221,8 @@ func (p ApprovalPrompt) node() Node {
 					Style: NewStyle().Foreground(p.Palette.AssistantTimestampText),
 				}),
 			},
-			Spacing: 1,
-		}),
+			1,
+		)),
 		Padding:      SymmetricInsets(1, 0),
 		BorderLeft:   true,
 		BorderRight:  true,
@@ -306,15 +306,15 @@ func (d MenuPickerDialog) node() Node {
 	return AsNode(WindowFrame{
 		Title: strings.TrimSpace(d.Title),
 		Width: width,
-		Content: AsNode(FlexBox{
-			Direction: DirectionVertical,
-			Children: []Child{
-				Fixed(AsNode(FlexBox{Direction: DirectionVertical, Children: children})),
+		Content: AsNode(NewFlexBox(
+			DirectionVertical,
+			[]Child{
+				Fixed(AsNode(NewFlexBox(DirectionVertical, children, 0))),
 				Fixed(buttons),
 				Fixed(Static{Content: "Enter applies the highlighted row. Esc cancels."}),
 			},
-			Spacing: 2,
-		}),
+			2,
+		)),
 		ShowClose: true,
 	})
 }

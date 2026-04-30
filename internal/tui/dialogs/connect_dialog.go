@@ -281,14 +281,14 @@ func (d *ConnectDialog) providerListDialog(width int, palette theme.Palette) ui.
 	return ui.AsNode(ui.WindowFrame{
 		Title: "Connect Provider",
 		Width: dialogWidth,
-		Content: ui.AsNode(ui.FlexBox{
-			Direction: ui.DirectionVertical,
-			Children: []ui.Child{
-				ui.Fixed(ui.AsNode(ui.FlexBox{Direction: ui.DirectionVertical, Children: body, Spacing: 1})),
+		Content: ui.AsNode(ui.NewFlexBox(
+			ui.DirectionVertical,
+			[]ui.Child{
+				ui.Fixed(ui.AsNode(ui.NewFlexBox(ui.DirectionVertical, body, 1))),
 				ui.Fixed(ui.Static{Content: "Enter choose provider  Esc cancel"}),
 			},
-			Spacing: 2,
-		}),
+			2,
+		)),
 		ShowClose: true,
 	})
 }
@@ -308,14 +308,14 @@ func (d *ConnectDialog) formDialog(width int, palette theme.Palette) ui.Node {
 			Background:  palette.SidebarBackground,
 			Foreground:  palette.SidebarForeground,
 			BorderColor: palette.SidebarBorder,
-			Child: ui.AsNode(ui.FlexBox{
-				Direction: ui.DirectionVertical,
-				Children: []ui.Child{
+			Child: ui.AsNode(ui.NewFlexBox(
+				ui.DirectionVertical,
+				[]ui.Child{
 					ui.Fixed(ui.Static{Content: d.selected.Title}),
 					ui.Fixed(ui.Static{Content: compactInlineText(d.selected.Description)}),
 				},
-				Spacing: 0,
-			}),
+				0,
+			)),
 		})),
 		ui.Fixed(ui.AsNode(ui.Section{
 			Title:       "Configuration",
@@ -323,11 +323,7 @@ func (d *ConnectDialog) formDialog(width int, palette theme.Palette) ui.Node {
 			Background:  palette.SidebarBackground,
 			Foreground:  palette.SidebarForeground,
 			BorderColor: palette.SidebarBorder,
-			Child: ui.AsNode(ui.FlexBox{
-				Direction: ui.DirectionVertical,
-				Children:  fieldChildren,
-				Spacing:   1,
-			}),
+			Child:       ui.AsNode(ui.NewFlexBox(ui.DirectionVertical, fieldChildren, 1)),
 		})),
 	}
 	if strings.TrimSpace(d.status) != "" {
@@ -341,11 +337,7 @@ func (d *ConnectDialog) formDialog(width int, palette theme.Palette) ui.Node {
 			Background:  palette.SidebarBackground,
 			Foreground:  palette.SidebarForeground,
 			BorderColor: palette.SidebarBorder,
-			Child: ui.AsNode(ui.FlexBox{
-				Direction: ui.DirectionVertical,
-				Children:  auxChildren,
-				Spacing:   1,
-			}),
+			Child:       ui.AsNode(ui.NewFlexBox(ui.DirectionVertical, auxChildren, 1)),
 		})))
 	}
 	buttons := d.formButtons()
@@ -354,15 +346,15 @@ func (d *ConnectDialog) formDialog(width int, palette theme.Palette) ui.Node {
 	return ui.AsNode(ui.WindowFrame{
 		Title: "Connect Provider",
 		Width: dialogWidth,
-		Content: ui.AsNode(ui.FlexBox{
-			Direction: ui.DirectionVertical,
-			Children: []ui.Child{
-				ui.Fixed(ui.AsNode(ui.FlexBox{Direction: ui.DirectionVertical, Children: bodyChildren, Spacing: 1})),
+		Content: ui.AsNode(ui.NewFlexBox(
+			ui.DirectionVertical,
+			[]ui.Child{
+				ui.Fixed(ui.AsNode(ui.NewFlexBox(ui.DirectionVertical, bodyChildren, 1))),
 				ui.Fixed(buttons),
 				ui.Fixed(ui.Static{Content: "Type to edit  Ctrl+T test  Enter select  Esc cancel"}),
 			},
-			Spacing: 2,
-		}),
+			2,
+		)),
 		ShowClose: true,
 	})
 }
@@ -382,21 +374,22 @@ func (d ConnectDialog) renderFormField(field connectField, width int, palette th
 	fieldWidth := maxInt(18, width)
 	hintWidth := maxInt(16, width-ui.PlainWidth(field.Label)-3)
 	hint := truncateText(field.Description, hintWidth)
-	return ui.AsNode(ui.FlexBox{
-		Direction: ui.DirectionVertical,
-		Children: []ui.Child{
-			ui.Fixed(ui.AsNode(ui.FlexBox{
-				Direction: ui.DirectionHorizontal,
-				Children: []ui.Child{
+	return ui.AsNode(ui.NewFlexBox(
+		ui.DirectionVertical,
+		[]ui.Child{
+			ui.Fixed(ui.AsNode(ui.NewFlexBox(
+				ui.DirectionHorizontal,
+				[]ui.Child{
 					ui.Fixed(ui.Static{Content: field.Label}),
 					ui.Flex(ui.Spacer{}, 1),
 					ui.Fixed(ui.Static{Content: hint}),
 				},
-			})),
+				0,
+			))),
 			ui.Fixed(d.renderInputField(field.ID, fieldWidth, palette, active)),
 		},
-		Spacing: 1,
-	})
+		1,
+	))
 }
 
 func (d ConnectDialog) renderInputField(fieldID string, width int, palette theme.Palette, active bool) ui.Node {

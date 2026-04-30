@@ -63,7 +63,7 @@ func (c *RetainedColumn) Measure(ctx *Context, constraints Constraints) Size {
 			items = append(items, Fixed(child))
 		}
 	}
-	return FlexBox{Direction: DirectionVertical, Children: items, Spacing: c.spacing}.Measure(ctx, constraints)
+	return NewFlexBox(DirectionVertical, items, c.spacing).Measure(ctx, constraints)
 }
 
 func (c *RetainedColumn) Paint(ctx *Context, canvas Canvas) {
@@ -76,7 +76,7 @@ func (c *RetainedColumn) Paint(ctx *Context, canvas Canvas) {
 			items = append(items, Fixed(child))
 		}
 	}
-	paintNodeInto(ctx, AsNode(FlexBox{Direction: DirectionVertical, Children: items, Spacing: c.spacing}), Rect{
+	paintNodeInto(ctx, AsNode(NewFlexBox(DirectionVertical, items, c.spacing)), Rect{
 		X: canvas.origin.X,
 		Y: canvas.origin.Y,
 		W: canvas.Width(),

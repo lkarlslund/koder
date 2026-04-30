@@ -169,7 +169,7 @@ func (d DisconnectDialog) dialog(width int, palette theme.Palette) ui.Node {
 		if desc := strings.TrimSpace(item.Description); desc != "" {
 			blocks = append(blocks, ui.Fixed(ui.Spacer{H: 1}), ui.Fixed(ui.Paragraph{Text: truncateText(desc, detailWidth)}))
 		}
-		detailsElement = ui.AsNode(ui.FlexBox{Direction: ui.DirectionVertical, Children: blocks})
+		detailsElement = ui.AsNode(ui.NewFlexBox(ui.DirectionVertical, blocks, 0))
 	}
 
 	buttons := d.buttonRow(dialogWidth)
@@ -177,18 +177,17 @@ func (d DisconnectDialog) dialog(width int, palette theme.Palette) ui.Node {
 	return ui.AsNode(ui.WindowFrame{
 		Title: "Disconnect Provider",
 		Width: dialogWidth,
-		Content: ui.AsNode(ui.FlexBox{
-			Direction: ui.DirectionVertical,
-			Children: []ui.Child{
-				ui.Fixed(ui.AsNode(ui.FlexBox{
-					Direction: ui.DirectionVertical,
-					Children: []ui.Child{
+		Content: ui.AsNode(ui.NewFlexBox(
+			ui.DirectionVertical,
+			[]ui.Child{
+				ui.Fixed(ui.AsNode(ui.NewFlexBox(
+					ui.DirectionVertical,
+					[]ui.Child{
 						ui.Fixed(staticBlock(fmt.Sprintf("Filter: %s", d.Query))),
 						ui.Fixed(ui.Spacer{H: 1}),
-						ui.Fixed(ui.AsNode(ui.FlexBox{
-							Direction: ui.DirectionHorizontal,
-							Spacing:   1,
-							Children: []ui.Child{
+						ui.Fixed(ui.AsNode(ui.NewFlexBox(
+							ui.DirectionHorizontal,
+							[]ui.Child{
 								{
 									Node: ui.AsNode(ui.Section{
 										Title:   "Providers",
@@ -218,14 +217,16 @@ func (d DisconnectDialog) dialog(width int, palette theme.Palette) ui.Node {
 									Child:       detailsElement,
 								}), 1),
 							},
-						})),
+							1,
+						))),
 					},
-				})),
+					0,
+				))),
 				ui.Fixed(buttons),
 				ui.Fixed(ui.Static{Content: "Enter to disconnect, Esc to cancel"}),
 			},
-			Spacing: 2,
-		}),
+			2,
+		)),
 		ShowClose: true,
 	})
 }
