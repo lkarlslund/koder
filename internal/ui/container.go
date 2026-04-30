@@ -1,12 +1,16 @@
 package ui
 
 type Container interface {
+	Children() []Node
+}
+
+type MutableContainer interface {
+	Container
 	Add(child Node)
 	Insert(index int, child Node)
 	Remove(index int)
 	Replace(index int, child Node)
 	Clear()
-	Children() []Node
 }
 
 type RetainedColumn struct {
