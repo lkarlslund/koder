@@ -6567,7 +6567,7 @@ func TestEditToolRunShowsStoredHunkDetails(t *testing.T) {
 	m.refreshViewport()
 	got := m.viewport.View()
 	for _, want := range []string{
-		"Edited file game/map.go",
+		"Edited game/map.go  -1 / +1",
 		"--- game/map.go",
 		"+++ game/map.go",
 		"@@ -12,1 +12,1 @@",
@@ -6716,7 +6716,7 @@ func TestResumedEditToolRunReplacesRequestTitleWithCompletedTitle(t *testing.T) 
 
 	m.refreshViewport()
 	got := m.viewport.View()
-	if !strings.Contains(got, "Edited file game/map.go") {
+	if !strings.Contains(got, "Edited game/map.go") {
 		t.Fatalf("expected resumed edit title to include path, got %q", got)
 	}
 	if strings.Contains(got, "Edit file") {

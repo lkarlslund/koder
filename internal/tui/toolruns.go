@@ -473,7 +473,7 @@ func toolRunOutput(part domain.Part, parts []domain.Part, msg domain.Message) ui
 			output = firstNonEmptyString(strings.TrimSpace(part.Body), output)
 		}
 		if path != "" {
-			presentation.Title = "Edited file " + filepath.ToSlash(path)
+			presentation.Title = "Edited " + filepath.ToSlash(path)
 			presentation.Subtitle = ""
 		}
 	}

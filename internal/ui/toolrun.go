@@ -184,6 +184,12 @@ func (r ToolRun) renderEditCard(palette theme.Palette, width int, expandedOutput
 	lines := make([]Surface, 0, 5)
 
 	headerSpans := []StyledSpan{{Text: r.Title, Style: titleStyle}}
+	if summary := strings.TrimSpace(firstNonEmpty(r.Output, r.Preview)); summary != "" {
+		headerSpans = append(headerSpans,
+			StyledSpan{Text: "  ", Style: bodyStyle},
+			StyledSpan{Text: summary, Style: bodyStyle},
+		)
+	}
 	if label := r.OutputToggleLabel(width, expandedOutput); label != "" {
 		headerSpans = append(headerSpans,
 			StyledSpan{Text: "  ", Style: bodyStyle},
@@ -196,9 +202,6 @@ func (r ToolRun) renderEditCard(palette theme.Palette, width int, expandedOutput
 	}
 	if subtitle := strings.TrimSpace(r.Subtitle); subtitle != "" {
 		lines = append(lines, LayoutStyledText([]StyledSpan{{Text: subtitle, Style: subtitleStyle}}, headerWidth, CellStyle{}))
-	}
-	if summary := strings.TrimSpace(firstNonEmpty(r.Output, r.Preview)); summary != "" {
-		lines = append(lines, LayoutStyledText([]StyledSpan{{Text: summary, Style: bodyStyle}}, headerWidth, CellStyle{}))
 	}
 	diff := strings.TrimSpace(r.Diff)
 	if diff != "" && (expandedOutput || !editDiffNeedsExpansion(diff, headerWidth)) {
