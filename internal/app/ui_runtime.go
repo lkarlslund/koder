@@ -229,6 +229,10 @@ func (m *Model) mainWindow() ui.Window {
 				if main == nil || !main.HandleComposerTimer(event) {
 					return false, nil
 				}
+				if !m.composer.ToggleBlink() {
+					return false, nil
+				}
+				m.invalidateFooterCursor()
 				return true, nil
 			},
 		}

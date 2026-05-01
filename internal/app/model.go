@@ -488,7 +488,6 @@ type Model struct {
 	todos                       []store.TodoItem
 	approvals                   []store.Approval
 	viewport                    transcriptViewport
-	transcriptControls          []ui.Control
 	retainedTranscript          *ui.RetainedTranscript
 	transcriptItems             []transcriptItemController
 	messageItemIndexByID        map[int64]int
@@ -1548,11 +1547,9 @@ func (m *Model) handleMouse(msg ui.MouseMsg) (ui.Model, ui.Cmd, bool) {
 	m.refreshViewportAt(m.viewport.YOffset)
 	contentX := msg.X
 	contentY := msg.Y
-	for i := len(m.transcriptControls) - 1; i >= 0; i-- {
-		control := m.transcriptControls[i]
-		if !control.Enabled || !control.Rect.Contains(ui.Point{X: max(0, contentX), Y: contentY}) {
-			continue
-		}
+	main := m.ensureMainScreenWidget()
+	_ = main.Surface(&ui.Context{Palette: m.palette}, ui.Rect{W: max(0, m.width), H: max(0, m.height)})
+	if control, ok := main.TranscriptControlAt(ui.Point{X: max(0, contentX), Y: contentY}); ok {
 		if strings.HasPrefix(control.ID, "toolrun:") {
 			target := strings.TrimPrefix(control.ID, "toolrun:")
 			part := "output"
@@ -1937,6 +1934,9 @@ func (m *Model) renderHeader() string {
 func (m *Model) renderBodySurface() ui.Surface {
 	ctx := &ui.Context{Palette: m.palette}
 	width := max(0, m.width)
+	if width == 0 {
+		width = max(40, m.composerWidth())
+	}
 	height := max(0, m.height)
 	if width <= 0 || height <= 0 {
 		if width <= 0 {
@@ -1954,6 +1954,9 @@ func (m *Model) renderBodySurface() ui.Surface {
 				height = max(6, m.transcriptPaneHeight()+m.composerAreaHeight()+m.statusPaneHeight()+(mainScreenVerticalInset*2))
 			}
 		}
+	}
+	if !m.ensureRenderCache().composerAreaValid {
+		_ = m.renderComposerAreaSurface()
 	}
 	surface := m.ensureMainScreenWidget().Surface(ctx, ui.Rect{W: width, H: height})
 	cache := m.ensureRenderCache()
@@ -2006,7 +2009,18 @@ func (m *Model) renderTranscriptPaneElement(transcript ui.Node) ui.Node {
 func (m *Model) renderComposerAreaSurface() ui.Surface {
 	ctx := &ui.Context{Palette: m.palette}
 	width := max(0, m.width)
-	return m.ensureMainScreenWidget().ComposerSurface(ctx, ui.Rect{W: width})
+	if width == 0 {
+		width = max(40, m.composerWidth())
+	}
+	element := m.renderComposerAreaElement()
+	size := element.Measure(ctx, ui.NewConstraints(width, 0))
+	surface := ui.TransparentSurface(width, size.H)
+	element.Paint(ctx, ui.NewCanvas(&surface, ui.Rect{W: width, H: size.H}))
+	cache := m.ensureRenderCache()
+	cache.composerAreaHeight = size.H
+	cache.composerAreaValid = size.H > 0
+	cache.renderedComposerAreaSurface = surface
+	return surface
 }
 
 func (m *Model) renderComposerAreaElement() ui.Node {
@@ -2625,7 +2639,6 @@ func (m *Model) refreshViewportAnchored(anchor transcriptViewportAnchor) {
 
 func (m *Model) refreshViewportAt(offset int) {
 	m.invalidateMainSurface()
-	m.transcriptControls = nil
 	retained := m.syncRetainedTranscript()
 	if retained == nil {
 		m.viewport.SetContent("")
@@ -2643,33 +2656,22 @@ func (m *Model) refreshViewportAt(offset int) {
 	}
 	m.viewport.SetContentHeight(totalHeight)
 	m.viewport.SetYOffset(appliedY)
-	surface, totalHeight, appliedY := m.renderTranscriptViewportSurface(retained, width, viewportHeight, appliedY)
-	m.viewport.SetContentHeight(totalHeight)
-	m.viewport.SetYOffset(appliedY)
-	m.viewport.SetVisibleSurface(surface)
+	m.viewport.SetVisibleSurface(m.renderTranscriptVisibleSurface(retained, width, viewportHeight, appliedY))
 	if main := m.ensureMainScreenWidget(); main != nil {
 		main.InvalidateTranscript()
 	}
 }
 
-func (m *Model) renderTranscriptViewportSurface(retained *ui.RetainedTranscript, width, height, offset int) (ui.Surface, int, int) {
+func (m *Model) renderTranscriptVisibleSurface(retained *ui.RetainedTranscript, width, height, offset int) ui.Surface {
 	width = max(0, width)
 	height = max(0, height)
 	if retained == nil || width <= 0 || height <= 0 {
-		m.transcriptControls = nil
-		m.viewport.SetVisibleSurface(ui.Surface{})
-		return ui.Surface{}, 0, 0
+		return ui.Surface{}
 	}
-	runtime := ui.Runtime{}
-	ctx := &ui.Context{Palette: m.palette, Runtime: &runtime}
+	ctx := &ui.Context{Palette: m.palette}
 	surface := ui.BlankSurface(width, height)
-	totalHeight, appliedY := retained.RenderVisibleInto(ctx, width, height, offset, &surface)
-	m.viewport.SetWindowHeight(height)
-	m.viewport.SetContentHeight(totalHeight)
-	m.viewport.SetYOffset(appliedY)
-	m.transcriptControls = runtime.Controls()
-	m.viewport.SetVisibleSurface(surface)
-	return surface, totalHeight, appliedY
+	retained.RenderVisibleInto(ctx, width, height, offset, &surface)
+	return surface
 }
 
 func (m *Model) invalidateBodyCache() {
@@ -5694,8 +5696,12 @@ func (m *Model) syncDebugFrame(surface ui.Surface) {
 	}
 	snapshot := m.debug.Runtime()
 	lines := surface.Lines()
-	controls := make([]debugsrv.ControlRef, 0, len(m.transcriptControls))
-	for _, control := range m.transcriptControls {
+	var transcriptControls []ui.Control
+	if m.mainScreen != nil {
+		transcriptControls = m.mainScreen.TranscriptControls()
+	}
+	controls := make([]debugsrv.ControlRef, 0, len(transcriptControls))
+	for _, control := range transcriptControls {
 		controls = append(controls, debugsrv.ControlRef{
 			ID:      control.ID,
 			X:       control.Rect.X,

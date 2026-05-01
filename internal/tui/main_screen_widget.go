@@ -6,38 +6,61 @@ import (
 )
 
 const mainScreenVerticalInset = 0
+
+// ComposerBlinkTimerOwner identifies the composer cursor blink timer.
 const ComposerBlinkTimerOwner = "composer"
 const composerBlinkTimerOwner = ComposerBlinkTimerOwner
 
-type MainScreenDelegate interface {
-	SyncRetainedTranscript() *ui.RetainedTranscript
-	VisibleTranscriptSurface() ui.Surface
-	RenderTranscriptViewportSurface(*ui.RetainedTranscript, int, int, int) (ui.Surface, int, int)
-	ViewportSize() (int, int)
-	ViewportYOffset() int
-	ScreenBackground() ui.CellColor
-	ComposerCursorDirty() bool
-	ComposerRevision() uint64
-	ComposerShouldBlink() bool
-	ComposerFocused() bool
-	ToggleComposerBlink() bool
-	SetComposerCursorDirty(bool)
-	ComposerAreaElement() ui.Node
-	ComposerElement() ui.Node
-	ComposerCursorRect(ui.Rect) (ui.Rect, bool)
-	SetComposerAreaCache(ui.Size, ui.Surface)
-	EnsureUIRoot() *ui.Root
-	ShowSidebar() bool
-	SidebarWidth() int
-	StatusPaneHeight() int
-	SidebarElement() ui.Node
-	StatusPaneElement() ui.Node
-	SidebarHash(ui.Rect) uint64
-	StatusPaneHash(ui.Rect) uint64
+// MainScreenState is the display data used by MainScreenWidget.
+type MainScreenState struct {
+	Transcript TranscriptState
+	Composer   ComposerState
+	Sidebar    SidebarState
+	StatusPane StatusPaneState
+}
+
+// TranscriptState describes the current transcript viewport.
+type TranscriptState struct {
+	Retained   *ui.RetainedTranscript
+	Width      int
+	Height     int
+	YOffset    int
+	Background ui.CellColor
+}
+
+// ComposerState describes the current composer display.
+type ComposerState struct {
+	AreaElement ui.Node
+	Element     ui.Node
+	Revision    uint64
+	CursorDirty bool
+	Focused     bool
+	ShouldBlink bool
+}
+
+// SidebarState describes the optional right sidebar.
+type SidebarState struct {
+	Element ui.Node
+	Show    bool
+	Width   int
+	Height  int
+	Hash    uint64
+}
+
+// StatusPaneState describes the bottom status pane.
+type StatusPaneState struct {
+	Element ui.Node
+	Height  int
+	Hash    uint64
 }
 
 type transcriptWidget struct {
-	delegate    MainScreenDelegate
+	retained    *ui.RetainedTranscript
+	width       int
+	height      int
+	yOffset     int
+	background  ui.CellColor
+	controls    []ui.Control
 	invalidated bool
 }
 
@@ -59,24 +82,48 @@ func (w *transcriptWidget) ClearDirty() {
 	w.invalidated = false
 }
 
-func (w *transcriptWidget) Surface(bounds ui.Rect) ui.Surface {
-	if w == nil || w.delegate == nil {
+func (w *transcriptWidget) Surface(ctx *ui.Context, bounds ui.Rect) ui.Surface {
+	if w == nil || w.retained == nil {
 		return ui.Surface{}
 	}
-	retained := w.delegate.SyncRetainedTranscript()
-	if retained == nil {
+	width := max(0, bounds.W)
+	height := max(0, bounds.H)
+	if width <= 0 || height <= 0 {
+		w.controls = nil
 		return ui.Surface{}
 	}
-	raw := w.delegate.VisibleTranscriptSurface()
-	if raw.SurfaceWidth() == max(0, bounds.W) && raw.SurfaceHeight() == max(0, bounds.H) {
-		return raw
+	runtime := ui.Runtime{}
+	renderCtx := ui.Context{}
+	if ctx != nil {
+		renderCtx = *ctx
 	}
-	surface, _, _ := w.delegate.RenderTranscriptViewportSurface(retained, max(0, bounds.W), max(0, bounds.H), max(0, w.delegate.ViewportYOffset()))
+	renderCtx.Runtime = &runtime
+	surface := ui.BlankSurface(width, height)
+	w.retained.RenderVisibleInto(&renderCtx, width, height, max(0, w.yOffset), &surface)
+	w.controls = runtime.Controls()
 	return surface
 }
 
+func (w *transcriptWidget) controlAt(point ui.Point) (ui.Control, bool) {
+	if w == nil {
+		return ui.Control{}, false
+	}
+	for i := len(w.controls) - 1; i >= 0; i-- {
+		control := w.controls[i]
+		if control.Enabled && control.Rect.Contains(point) {
+			return control, true
+		}
+	}
+	return ui.Control{}, false
+}
+
 type composerAreaWidget struct {
-	delegate     MainScreenDelegate
+	areaElement  ui.Node
+	element      ui.Node
+	revision     uint64
+	cursorDirty  bool
+	focused      bool
+	blinkEnabled bool
 	measureWidth int
 	measureSize  ui.Size
 	measureValid bool
@@ -92,7 +139,7 @@ type measuredPainter interface {
 }
 
 func (w *composerAreaWidget) Dirty() bool {
-	return w == nil || w.delegate == nil || w.invalidated || w.revisionChanged() || w.delegate.ComposerCursorDirty()
+	return w == nil || w.invalidated || w.revisionChanged() || w.cursorDirty
 }
 
 func (w *composerAreaWidget) Invalidate() {
@@ -119,7 +166,6 @@ func (w *composerAreaWidget) measure(ctx *ui.Context, width int) ui.Size {
 	w.measureSize = size
 	w.measureValid = true
 	w.measureRev = w.currentRevision()
-	w.delegate.SetComposerAreaCache(size, ui.Surface{})
 	return size
 }
 
@@ -132,10 +178,10 @@ func (w *composerAreaWidget) ClearDirty() {
 }
 
 func (w *composerAreaWidget) currentRevision() uint64 {
-	if w == nil || w.delegate == nil {
+	if w == nil {
 		return 0
 	}
-	return w.delegate.ComposerRevision()
+	return w.revision
 }
 
 func (w *composerAreaWidget) revisionChanged() bool {
@@ -146,10 +192,10 @@ func (w *composerAreaWidget) revisionChanged() bool {
 }
 
 func (w *composerAreaWidget) shouldBlink() bool {
-	if w == nil || w.delegate == nil {
+	if w == nil {
 		return false
 	}
-	return w.delegate.ComposerShouldBlink() && w.delegate.ComposerFocused()
+	return w.blinkEnabled && w.focused
 }
 
 func (w *composerAreaWidget) syncBlinkTimer(root *ui.Root) {
@@ -177,18 +223,14 @@ func (w *composerAreaWidget) handleTimer(event ui.TimerEvent) bool {
 	if w == nil || event.Owner != composerBlinkTimerOwner {
 		return false
 	}
-	if !w.delegate.ToggleComposerBlink() {
-		return false
-	}
-	w.delegate.SetComposerCursorDirty(true)
-	return true
+	return w.shouldBlink()
 }
 
 func (w *composerAreaWidget) content() measuredPainter {
-	if w == nil || w.delegate == nil {
+	if w == nil {
 		return nil
 	}
-	return measuredPainterFromElement(w.delegate.ComposerAreaElement())
+	return measuredPainterFromElement(w.areaElement)
 }
 
 func (w *composerAreaWidget) Surface(ctx *ui.Context, bounds ui.Rect) ui.Surface {
@@ -202,14 +244,36 @@ func (w *composerAreaWidget) Surface(ctx *ui.Context, bounds ui.Rect) ui.Surface
 	}
 	rect := ui.Rect{W: width, H: size.H}
 	surface := paintMeasuredSurface(ctx, w.content(), rect)
-	w.delegate.SetComposerAreaCache(size, surface)
 	return surface
 }
 
+func (w *composerAreaWidget) cursorRect(bounds ui.Rect) (ui.Rect, bool) {
+	if w == nil || bounds.H < 2 {
+		return ui.Rect{}, false
+	}
+	composer, ok := w.element.(ui.Composer)
+	if !ok {
+		return ui.Rect{}, false
+	}
+	rect, ok := composer.CursorRect()
+	if !ok {
+		return ui.Rect{}, false
+	}
+	if rect.X >= bounds.W || rect.Y >= bounds.H {
+		return ui.Rect{}, false
+	}
+	if rect.X+rect.W > bounds.W {
+		rect.W = bounds.W - rect.X
+	}
+	if rect.W <= 0 {
+		return ui.Rect{}, false
+	}
+	return rect, true
+}
+
 type hashedElementWidget struct {
-	delegate    MainScreenDelegate
-	build       func(MainScreenDelegate) measuredPainter
-	hash        func(MainScreenDelegate, ui.Rect) uint64
+	element     measuredPainter
+	hash        uint64
 	invalidated bool
 }
 
@@ -232,22 +296,25 @@ func (w *hashedElementWidget) ClearDirty() {
 }
 
 func (w *hashedElementWidget) content() measuredPainter {
-	if w == nil || w.build == nil {
+	if w == nil {
 		return nil
 	}
-	return w.build(w.delegate)
+	return w.element
 }
 
+// MainScreenWidget renders the retained main application screen.
 type MainScreenWidget struct {
-	delegate   MainScreenDelegate
-	transcript *transcriptWidget
-	composer   *composerAreaWidget
-	sidebar    *hashedElementWidget
-	statusPane *hashedElementWidget
-	retained   *mainScreenRetainedRoot
-	bounds     ui.Rect
-	surface    ui.Surface
-	valid      bool
+	showSidebar      bool
+	sidebarWidth     int
+	statusPaneHeight int
+	transcript       *transcriptWidget
+	composer         *composerAreaWidget
+	sidebar          *hashedElementWidget
+	statusPane       *hashedElementWidget
+	retained         *mainScreenRetainedRoot
+	bounds           ui.Rect
+	surface          ui.Surface
+	valid            bool
 }
 
 func (w *MainScreenWidget) DirtyRects() []ui.Rect {
@@ -349,7 +416,7 @@ func (w *MainScreenWidget) paintIntoCanvas(ctx *ui.Context, bounds ui.Rect, canv
 
 type mainScreenRetainedRoot struct {
 	ui.BaseNode
-	delegate       MainScreenDelegate
+	widget         *MainScreenWidget
 	transcriptNode *chatViewportNode
 	composerNode   *composerRetainedNode
 	sidebarNode    *hashedElementRetainedNode
@@ -372,15 +439,14 @@ func (n *chatViewportNode) Pending() bool {
 }
 
 func (n *chatViewportNode) Measure(_ *ui.Context, constraints ui.Constraints) ui.Size {
-	if n == nil || n.widget == nil || n.widget.delegate == nil {
+	if n == nil || n.widget == nil {
 		return constraints.Clamp(ui.Size{})
 	}
-	width, height := n.widget.delegate.ViewportSize()
-	return constraints.Clamp(ui.Size{W: max(0, width), H: max(0, height)})
+	return constraints.Clamp(ui.Size{W: max(0, n.widget.width), H: max(0, n.widget.height)})
 }
 
-func (n *chatViewportNode) Prepare(_ *ui.Context) {
-	if n == nil || n.widget == nil || n.widget.delegate == nil {
+func (n *chatViewportNode) Prepare(ctx *ui.Context) {
+	if n == nil || n.widget == nil {
 		return
 	}
 	rect := n.Rect()
@@ -391,7 +457,7 @@ func (n *chatViewportNode) Prepare(_ *ui.Context) {
 	if !n.widget.invalidated && !n.NeedsPaint() && !n.NeedsLayout() {
 		return
 	}
-	next := n.widget.Surface(rect)
+	next := n.widget.Surface(ctx, rect)
 	if n.widget.invalidated {
 		diff := ui.DiffSurfaceDamage(n.surface, next)
 		if len(diff) == 0 && n.NeedsLayout() {
@@ -408,9 +474,9 @@ func (n *chatViewportNode) Paint(_ *ui.Context, canvas ui.Canvas) {
 	if n == nil || canvas.Width() <= 0 || canvas.Height() <= 0 {
 		return
 	}
-	if n.widget != nil && n.widget.delegate != nil {
+	if n.widget != nil {
 		canvas.Fill(ui.Rect{W: canvas.Width(), H: canvas.Height()}, ui.CellStyle{
-			BG: n.widget.delegate.ScreenBackground(),
+			BG: n.widget.background,
 		})
 	}
 	canvas.BlitSurface(0, 0, n.surface.Normalize(canvas.Width(), canvas.Height()))
@@ -436,7 +502,7 @@ func (n *composerRetainedNode) Measure(ctx *ui.Context, constraints ui.Constrain
 }
 
 func (n *composerRetainedNode) Prepare(ctx *ui.Context) {
-	if n == nil || n.widget == nil || n.widget.delegate == nil {
+	if n == nil || n.widget == nil {
 		return
 	}
 	rect := n.Rect()
@@ -444,17 +510,14 @@ func (n *composerRetainedNode) Prepare(ctx *ui.Context) {
 		n.widget.ClearDirty()
 		return
 	}
-	delegate := n.widget.delegate
-	n.widget.syncBlinkTimer(delegate.EnsureUIRoot())
 	needsSync := n.widget.Dirty() || n.NeedsPaint()
 	if !needsSync {
 		return
 	}
-	element := delegate.ComposerAreaElement()
-	next := paintMeasuredSurface(ctx, measuredPainterFromElement(element), rect)
-	nextCursorRect, nextCursorOK := delegate.ComposerCursorRect(rect)
+	next := paintMeasuredSurface(ctx, measuredPainterFromElement(n.widget.areaElement), rect)
+	nextCursorRect, nextCursorOK := n.widget.cursorRect(rect)
 	switch {
-	case !n.NeedsLayout() && delegate.ComposerCursorDirty() && n.cursorValid && nextCursorOK:
+	case !n.NeedsLayout() && n.widget.cursorDirty && n.cursorValid && nextCursorOK:
 		damage := ui.DamageSet{}
 		damage.Add(n.cursorRect)
 		damage.Add(nextCursorRect)
@@ -470,8 +533,7 @@ func (n *composerRetainedNode) Prepare(ctx *ui.Context) {
 	n.surface = next
 	n.cursorRect = nextCursorRect
 	n.cursorValid = nextCursorOK
-	delegate.SetComposerAreaCache(ui.Size{W: rect.W, H: rect.H}, next)
-	delegate.SetComposerCursorDirty(false)
+	n.widget.cursorDirty = false
 	n.widget.ClearDirty()
 }
 
@@ -500,10 +562,7 @@ func (n *hashedElementRetainedNode) Pending() bool {
 	if n.Rect().Empty() {
 		return false
 	}
-	if n.widget.hash == nil {
-		return false
-	}
-	return n.widget.hash(n.widget.delegate, n.Rect()) != n.lastHash
+	return n.widget.hash != n.lastHash
 }
 
 func (n *hashedElementRetainedNode) Measure(ctx *ui.Context, constraints ui.Constraints) ui.Size {
@@ -526,9 +585,7 @@ func (n *hashedElementRetainedNode) Prepare(ctx *ui.Context) {
 		return
 	}
 	currentHash := uint64(0)
-	if n.widget.hash != nil {
-		currentHash = n.widget.hash(n.widget.delegate, rect)
-	}
+	currentHash = n.widget.hash
 	needsSync := n.widget.invalidated || currentHash != n.lastHash || n.NeedsPaint()
 	if !needsSync {
 		return
@@ -563,23 +620,22 @@ func (r *mainScreenRetainedRoot) Pending() bool {
 	return r.transcriptNode.Pending() || r.composerNode.Pending() || r.sidebarNode.Pending() || r.statusNode.Pending()
 }
 
-func newMainScreenRetainedRoot(delegate MainScreenDelegate, transcript *transcriptWidget, composer *composerAreaWidget, sidebar, status *hashedElementWidget) *mainScreenRetainedRoot {
+func newMainScreenRetainedRoot(widget *MainScreenWidget, transcript *transcriptWidget, composer *composerAreaWidget, sidebar, status *hashedElementWidget) *mainScreenRetainedRoot {
 	root := &mainScreenRetainedRoot{
-		delegate: delegate,
+		widget: widget,
 	}
 	root.transcriptNode = &chatViewportNode{widget: transcript}
 	root.composerNode = &composerRetainedNode{widget: composer}
 	root.sidebarNode = &hashedElementRetainedNode{
 		widget: sidebar,
 		measure: func(_ *ui.Context, constraints ui.Constraints) ui.Size {
-			_, height := delegate.ViewportSize()
-			return constraints.Clamp(ui.Size{W: max(0, delegate.SidebarWidth()), H: max(0, height)})
+			return constraints.Clamp(ui.Size{W: max(0, widget.sidebarWidth), H: max(0, widget.transcript.height)})
 		},
 	}
 	root.statusNode = &hashedElementRetainedNode{
 		widget: status,
 		measure: func(_ *ui.Context, constraints ui.Constraints) ui.Size {
-			return constraints.Clamp(ui.Size{W: constraints.MaxW, H: max(0, delegate.StatusPaneHeight())})
+			return constraints.Clamp(ui.Size{W: constraints.MaxW, H: max(0, widget.statusPaneHeight)})
 		},
 	}
 	root.mainColumnNode = ui.NewFlexNode(ui.DirectionVertical, []ui.FlexNodeChild{
@@ -592,7 +648,7 @@ func newMainScreenRetainedRoot(delegate MainScreenDelegate, transcript *transcri
 		{Node: root.statusNode},
 	}, 0)
 	root.bodyChildren[0] = ui.FlexNodeChild{Node: root.mainColumnNode, Flex: 1}
-	root.bodyChildren[1] = ui.FlexNodeChild{Node: root.sidebarNode, Basis: max(0, delegate.SidebarWidth())}
+	root.bodyChildren[1] = ui.FlexNodeChild{Node: root.sidebarNode, Basis: max(0, widget.sidebarWidth)}
 	root.bodySlices[0] = root.bodyChildren[:1]
 	root.bodySlices[1] = root.bodyChildren[:2]
 	return root
@@ -649,8 +705,8 @@ func (r *mainScreenRetainedRoot) syncLayoutTree() {
 	if r == nil || r.bodyNode == nil || r.layoutRootNode == nil {
 		return
 	}
-	if r.delegate != nil && r.delegate.ShowSidebar() {
-		r.bodyChildren[1].Basis = max(0, r.delegate.SidebarWidth())
+	if r.widget != nil && r.widget.showSidebar {
+		r.bodyChildren[1].Basis = max(0, r.widget.sidebarWidth)
 		r.bodyNode.SetChildren(r.bodySlices[1])
 		return
 	}
@@ -770,58 +826,51 @@ func collectMainScreenDamage(
 	return damage.Rects()
 }
 
-func sidebarWidgetHash(delegate MainScreenDelegate, bounds ui.Rect) uint64 {
-	return delegate.SidebarHash(bounds)
-}
-
-func statusPaneWidgetHash(delegate MainScreenDelegate, bounds ui.Rect) uint64 {
-	return delegate.StatusPaneHash(bounds)
-}
-
-func NewMainScreenWidget(delegate MainScreenDelegate) *MainScreenWidget {
+// NewMainScreenWidget constructs the retained main-screen renderer.
+func NewMainScreenWidget() *MainScreenWidget {
 	widget := &MainScreenWidget{
-		delegate:   delegate,
-		transcript: &transcriptWidget{delegate: delegate, invalidated: true},
-		composer:   &composerAreaWidget{delegate: delegate, invalidated: true},
-		sidebar: &hashedElementWidget{
-			delegate: delegate,
-			build: func(delegate MainScreenDelegate) measuredPainter {
-				if !delegate.ShowSidebar() {
-					return nil
-				}
-				return ui.Sidebar{
-					Child:  delegate.SidebarElement(),
-					Height: viewportHeight(delegate),
-					Width:  delegate.SidebarWidth(),
-				}
-			},
-			hash:        sidebarWidgetHash,
-			invalidated: true,
-		},
-		statusPane: &hashedElementWidget{
-			delegate: delegate,
-			build: func(delegate MainScreenDelegate) measuredPainter {
-				return measuredPainterFromElement(delegate.StatusPaneElement())
-			},
-			hash:        statusPaneWidgetHash,
-			invalidated: true,
-		},
+		transcript: &transcriptWidget{invalidated: true},
+		composer:   &composerAreaWidget{invalidated: true},
+		sidebar:    &hashedElementWidget{invalidated: true},
+		statusPane: &hashedElementWidget{invalidated: true},
 	}
-	widget.retained = newMainScreenRetainedRoot(delegate, widget.transcript, widget.composer, widget.sidebar, widget.statusPane)
+	widget.retained = newMainScreenRetainedRoot(widget, widget.transcript, widget.composer, widget.sidebar, widget.statusPane)
 	return widget
 }
 
-func (w *MainScreenWidget) SetDelegate(delegate MainScreenDelegate) {
+// SetState replaces the display data rendered by MainScreenWidget.
+func (w *MainScreenWidget) SetState(state MainScreenState) {
 	if w == nil {
 		return
 	}
-	w.delegate = delegate
-	w.transcript.delegate = delegate
-	w.composer.delegate = delegate
-	w.sidebar.delegate = delegate
-	w.statusPane.delegate = delegate
+	w.showSidebar = state.Sidebar.Show
+	w.sidebarWidth = max(0, state.Sidebar.Width)
+	w.statusPaneHeight = max(0, state.StatusPane.Height)
+	w.transcript.retained = state.Transcript.Retained
+	w.transcript.width = max(0, state.Transcript.Width)
+	w.transcript.height = max(0, state.Transcript.Height)
+	w.transcript.yOffset = max(0, state.Transcript.YOffset)
+	w.transcript.background = state.Transcript.Background
+	w.composer.areaElement = state.Composer.AreaElement
+	w.composer.element = state.Composer.Element
+	w.composer.revision = state.Composer.Revision
+	w.composer.cursorDirty = state.Composer.CursorDirty
+	w.composer.focused = state.Composer.Focused
+	w.composer.blinkEnabled = state.Composer.ShouldBlink
+	if state.Sidebar.Show {
+		w.sidebar.element = ui.Sidebar{
+			Child:  state.Sidebar.Element,
+			Height: max(0, state.Sidebar.Height),
+			Width:  max(0, state.Sidebar.Width),
+		}
+	} else {
+		w.sidebar.element = nil
+	}
+	w.sidebar.hash = state.Sidebar.Hash
+	w.statusPane.element = measuredPainterFromElement(state.StatusPane.Element)
+	w.statusPane.hash = state.StatusPane.Hash
 	if w.retained != nil {
-		w.retained.delegate = delegate
+		w.retained.widget = w
 	}
 }
 
@@ -845,6 +894,24 @@ func (w *MainScreenWidget) ComposerSurface(ctx *ui.Context, bounds ui.Rect) ui.S
 func (w *MainScreenWidget) ClearStatusPaneDirty() {
 	w.statusPane.ClearDirty()
 }
+
+// TranscriptControlAt returns the topmost transcript control at point.
+func (w *MainScreenWidget) TranscriptControlAt(point ui.Point) (ui.Control, bool) {
+	if w == nil || w.transcript == nil {
+		return ui.Control{}, false
+	}
+	return w.transcript.controlAt(point)
+}
+
+// TranscriptControls returns the controls registered by the last transcript render.
+func (w *MainScreenWidget) TranscriptControls() []ui.Control {
+	if w == nil || w.transcript == nil || len(w.transcript.controls) == 0 {
+		return nil
+	}
+	out := make([]ui.Control, len(w.transcript.controls))
+	copy(out, w.transcript.controls)
+	return out
+}
 func (w *MainScreenWidget) SidebarBasis() int {
 	if w == nil || w.retained == nil {
 		return 0
@@ -854,14 +921,9 @@ func (w *MainScreenWidget) SidebarBasis() int {
 
 func (w *MainScreenWidget) ensureRetainedRoot() *mainScreenRetainedRoot {
 	if w.retained == nil {
-		w.retained = newMainScreenRetainedRoot(w.delegate, w.transcript, w.composer, w.sidebar, w.statusPane)
+		w.retained = newMainScreenRetainedRoot(w, w.transcript, w.composer, w.sidebar, w.statusPane)
 	}
 	return w.retained
-}
-
-func viewportHeight(delegate MainScreenDelegate) int {
-	_, height := delegate.ViewportSize()
-	return height
 }
 
 func measuredPainterFromElement(node ui.Node) measuredPainter {
