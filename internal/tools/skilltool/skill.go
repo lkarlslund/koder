@@ -11,7 +11,6 @@ import (
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/skills"
-	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools"
 )
 
@@ -68,9 +67,6 @@ func (tool) Execute(_ context.Context, runtime tools.Runtime, req tools.Request)
 }
 func (tool) SummarizeResult(req tools.Request, result tools.Result) (string, string) {
 	return "skill", result.Output
-}
-func (tool) PersistResult(ctx context.Context, st *store.Store, sessionID int64, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
-	return tools.PersistStandardResult(ctx, st, sessionID, req, result)
 }
 
 func skillNotFound(workdir string, name string) error {

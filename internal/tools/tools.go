@@ -143,7 +143,13 @@ type Tool interface {
 	PresentationForPreview(preview string) Presentation
 	Presentation(req Request) Presentation
 	Execute(ctx context.Context, runtime Runtime, req Request) (Result, error)
+}
+
+type resultSummarizer interface {
 	SummarizeResult(req Request, result Result) (summary string, body string)
+}
+
+type resultPersister interface {
 	PersistResult(ctx context.Context, st *store.Store, sessionID int64, req Request, result Result) (<-chan domain.Event, error)
 }
 
@@ -251,7 +257,10 @@ func (r *Registry) PersistResultInChat(ctx context.Context, st *store.Store, ses
 		req.Args = map[string]string{}
 	}
 	ctx = WithChatID(ctx, chatID)
-	return tool.PersistResult(ctx, st, sessionID, req, result)
+	if persister, ok := tool.(resultPersister); ok {
+		return persister.PersistResult(ctx, st, sessionID, req, result)
+	}
+	return PersistStandardResult(ctx, st, sessionID, req, result)
 }
 
 func Definitions(runtime Runtime) []provider.ToolDefinition {
@@ -375,7 +384,10 @@ func SummarizeResult(req Request, result Result) (string, string) {
 	if err != nil {
 		return defaultSummary(req.Tool, result)
 	}
-	return tool.SummarizeResult(req, result)
+	if summarizer, ok := tool.(resultSummarizer); ok {
+		return summarizer.SummarizeResult(req, result)
+	}
+	return defaultSummary(req.Tool, result)
 }
 
 func ToolCall(req Request) provider.ToolCall {

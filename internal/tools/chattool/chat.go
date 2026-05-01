@@ -8,7 +8,6 @@ import (
 
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/provider"
-	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools"
 )
 
@@ -183,22 +182,6 @@ func (startExecutionTool) SummarizeResult(req tools.Request, result tools.Result
 
 func (pollTool) SummarizeResult(req tools.Request, result tools.Result) (string, string) {
 	return "Polled chat", result.Output
-}
-
-func (listTool) PersistResult(ctx context.Context, st *store.Store, sessionID int64, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
-	return tools.PersistStandardResult(ctx, st, sessionID, req, result)
-}
-
-func (startDecompositionTool) PersistResult(ctx context.Context, st *store.Store, sessionID int64, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
-	return tools.PersistStandardResult(ctx, st, sessionID, req, result)
-}
-
-func (startExecutionTool) PersistResult(ctx context.Context, st *store.Store, sessionID int64, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
-	return tools.PersistStandardResult(ctx, st, sessionID, req, result)
-}
-
-func (pollTool) PersistResult(ctx context.Context, st *store.Store, sessionID int64, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
-	return tools.PersistStandardResult(ctx, st, sessionID, req, result)
 }
 
 func normalizeStartArgs(args map[string]string) (map[string]string, error) {

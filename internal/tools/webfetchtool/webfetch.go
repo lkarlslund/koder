@@ -16,7 +16,6 @@ import (
 
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/provider"
-	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools"
 )
 
@@ -153,14 +152,6 @@ func (tool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Reques
 	}
 	fetchCache.Store(cacheKey(req), result)
 	return result, nil
-}
-
-func (tool) SummarizeResult(req tools.Request, result tools.Result) (string, string) {
-	return tools.DefaultSummarizeResult(req, result)
-}
-
-func (tool) PersistResult(ctx context.Context, st *store.Store, sessionID int64, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
-	return tools.PersistStandardResult(ctx, st, sessionID, req, result)
 }
 
 func cacheKey(req tools.Request) string {

@@ -11,7 +11,6 @@ import (
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/execruntime"
 	"github.com/lkarlslund/koder/internal/provider"
-	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools"
 )
 
@@ -437,28 +436,6 @@ func (terminateTool) SummarizeResult(req tools.Request, result tools.Result) (st
 }
 func (cleanupTool) SummarizeResult(req tools.Request, result tools.Result) (string, string) {
 	return "Cleaned up exec sessions", result.Output
-}
-
-func (commandTool) PersistResult(ctx context.Context, st *store.Store, sessionID int64, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
-	return tools.PersistStandardResult(ctx, st, sessionID, req, result)
-}
-func (statusTool) PersistResult(ctx context.Context, st *store.Store, sessionID int64, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
-	return tools.PersistStandardResult(ctx, st, sessionID, req, result)
-}
-func (listTool) PersistResult(ctx context.Context, st *store.Store, sessionID int64, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
-	return tools.PersistStandardResult(ctx, st, sessionID, req, result)
-}
-func (writeStdinTool) PersistResult(ctx context.Context, st *store.Store, sessionID int64, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
-	return tools.PersistStandardResult(ctx, st, sessionID, req, result)
-}
-func (resizeTool) PersistResult(ctx context.Context, st *store.Store, sessionID int64, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
-	return tools.PersistStandardResult(ctx, st, sessionID, req, result)
-}
-func (terminateTool) PersistResult(ctx context.Context, st *store.Store, sessionID int64, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
-	return tools.PersistStandardResult(ctx, st, sessionID, req, result)
-}
-func (cleanupTool) PersistResult(ctx context.Context, st *store.Store, sessionID int64, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
-	return tools.PersistStandardResult(ctx, st, sessionID, req, result)
 }
 
 func execResult(stored tools.ExecStoredResult) tools.Result {
