@@ -195,6 +195,12 @@ func (v *mainScreenView) HandleComposerTimer(event ui.TimerEvent) bool {
 	return v.composer.HandleTimer(event)
 }
 func (v *mainScreenView) ComposerDirty() bool { return v.composer.Dirty() }
+func (v *mainScreenView) ComposerAreaHeight() int {
+	if v == nil || v.composer == nil {
+		return 0
+	}
+	return max(0, v.composer.Rect().H)
+}
 func (v *mainScreenView) FocusNext() bool {
 	return v != nil && v.root.FocusNext()
 }

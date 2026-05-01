@@ -214,7 +214,7 @@ func (m *Model) mainWindow() ui.Window {
 					return nil
 				}
 				rects := main.PaintInto(ctx, bounds, dst)
-				m.markMainScreenRendered()
+				m.markMainScreenRendered(main)
 				return rects
 			},
 			invalidate: func(m *Model, ctx *ui.Context) {

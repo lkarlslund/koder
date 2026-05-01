@@ -2111,9 +2111,16 @@ func (m *Model) composerAreaHeight() int {
 	return cache.composerAreaHeight
 }
 
-func (m *Model) markMainScreenRendered() {
+func (m *Model) markMainScreenRendered(main *mainScreenView) {
 	cache := m.ensureRenderCache()
 	cache.bodyValid = true
+	if main != nil {
+		if height := main.ComposerAreaHeight(); height > 0 {
+			cache.composerAreaHeight = height
+			cache.composerAreaValid = true
+			return
+		}
+	}
 	if !cache.composerAreaValid {
 		_ = m.measureComposerArea()
 	}
