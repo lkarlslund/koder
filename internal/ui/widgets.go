@@ -29,7 +29,7 @@ type TextPane struct {
 }
 
 func (t TextPane) Measure(_ *Context, constraints Constraints) Size {
-	return constraints.Clamp(SurfaceFromString(t.Content).Size())
+	return constraints.Clamp(measurePlainTextBlock(t.Content))
 }
 
 func (t TextPane) Paint(_ *Context, canvas Canvas) {
@@ -40,6 +40,25 @@ func (t TextPane) Paint(_ *Context, canvas Canvas) {
 	for y, line := range lines {
 		canvas.WriteText(0, y, PlainTruncate(line, canvas.Width(), ""), CellStyle{})
 	}
+}
+
+func measurePlainTextBlock(content string) Size {
+	if content == "" {
+		return Size{}
+	}
+	width := 0
+	height := 1
+	start := 0
+	for idx, r := range content {
+		if r != '\n' {
+			continue
+		}
+		width = max(width, PlainWidth(content[start:idx]))
+		height++
+		start = idx + 1
+	}
+	width = max(width, PlainWidth(content[start:]))
+	return Size{W: width, H: height}
 }
 
 type HitBox struct {

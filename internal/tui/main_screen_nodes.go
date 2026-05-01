@@ -152,37 +152,35 @@ func (n *ChatTranscriptNode) renderSurface(ctx *ui.Context, bounds ui.Rect) ui.S
 
 // ComposerState describes the current composer display.
 type ComposerState struct {
-	AreaElement       ui.Node
-	AreaElementHidden ui.Node
-	Element           ui.Node
-	ElementHidden     ui.Node
-	Revision          uint64
-	CursorDirty       bool
-	Focused           bool
-	BlinkEnabled      bool
+	AreaElement   ui.Node
+	Element       ui.Node
+	ElementHidden ui.Node
+	Revision      uint64
+	CursorDirty   bool
+	Focused       bool
+	BlinkEnabled  bool
 }
 
 // ComposerNode renders the composer area and tracks cursor damage.
 type ComposerNode struct {
 	ui.BaseNode
-	areaElement       ui.Node
-	areaElementHidden ui.Node
-	element           ui.Node
-	elementHidden     ui.Node
-	revision          uint64
-	cursorDirty       bool
-	focused           bool
-	blinkEnabled      bool
-	blinkVisible      bool
-	blinkActive       bool
-	measureWidth      int
-	measureSize       ui.Size
-	measureValid      bool
-	measureRev        uint64
-	lastRevision      uint64
-	surface           ui.Surface
-	cursorRect        ui.Rect
-	cursorValid       bool
+	areaElement   ui.Node
+	element       ui.Node
+	elementHidden ui.Node
+	revision      uint64
+	cursorDirty   bool
+	focused       bool
+	blinkEnabled  bool
+	blinkVisible  bool
+	blinkActive   bool
+	measureWidth  int
+	measureSize   ui.Size
+	measureValid  bool
+	measureRev    uint64
+	lastRevision  uint64
+	surface       ui.Surface
+	cursorRect    ui.Rect
+	cursorValid   bool
 }
 
 // NewComposerNode constructs a composer display node.
@@ -200,7 +198,6 @@ func (n *ComposerNode) SetState(state ComposerState) {
 	revisionChanged := n.revision != state.Revision
 	focusChanged := n.focused != state.Focused
 	n.areaElement = state.AreaElement
-	n.areaElementHidden = state.AreaElementHidden
 	n.element = state.Element
 	n.elementHidden = state.ElementHidden
 	n.revision = state.Revision
@@ -270,7 +267,7 @@ func (n *ComposerNode) Measure(ctx *ui.Context, constraints ui.Constraints) ui.S
 	if n.measureValid && n.measureWidth == constraints.MaxW && n.measureRev == n.revision {
 		return constraints.Clamp(n.measureSize)
 	}
-	painter := measuredPainterFromElement(n.currentAreaElement())
+	painter := measuredPainterFromElement(n.areaElement)
 	if painter == nil {
 		n.measureSize = ui.Size{}
 	} else {
@@ -294,7 +291,10 @@ func (n *ComposerNode) Prepare(ctx *ui.Context) {
 	if !n.Dirty() {
 		return
 	}
-	next := paintMeasuredSurface(ctx, measuredPainterFromElement(n.currentAreaElement()), rect)
+	next := paintMeasuredSurface(ctx, measuredPainterFromElement(n.areaElement), rect)
+	if !n.blinkVisible {
+		n.paintHiddenComposerCursor(ctx, &next, rect)
+	}
 	nextCursorRect, nextCursorOK := n.cursorRectForBounds(rect)
 	switch {
 	case !n.NeedsLayout() && n.cursorDirty && n.cursorValid && nextCursorOK:
@@ -367,21 +367,15 @@ func (n *ComposerNode) Surface(ctx *ui.Context, bounds ui.Rect) ui.Surface {
 	if n == nil {
 		return ui.Surface{}
 	}
-	return paintMeasuredSurface(ctx, measuredPainterFromElement(n.currentAreaElement()), bounds)
+	surface := paintMeasuredSurface(ctx, measuredPainterFromElement(n.areaElement), bounds)
+	if !n.blinkVisible {
+		n.paintHiddenComposerCursor(ctx, &surface, bounds)
+	}
+	return surface
 }
 
 func (n *ComposerNode) shouldBlink() bool {
 	return n != nil && n.focused && n.blinkEnabled
-}
-
-func (n *ComposerNode) currentAreaElement() ui.Node {
-	if n == nil {
-		return nil
-	}
-	if n.blinkVisible || n.areaElementHidden == nil {
-		return n.areaElement
-	}
-	return n.areaElementHidden
 }
 
 func (n *ComposerNode) currentElement() ui.Node {
@@ -392,6 +386,21 @@ func (n *ComposerNode) currentElement() ui.Node {
 		return n.element
 	}
 	return n.elementHidden
+}
+
+func (n *ComposerNode) paintHiddenComposerCursor(ctx *ui.Context, surface *ui.Surface, bounds ui.Rect) {
+	if n == nil || surface == nil || n.elementHidden == nil || bounds.W <= 0 || bounds.H <= 0 {
+		return
+	}
+	painter := measuredPainterFromElement(n.elementHidden)
+	if painter == nil {
+		return
+	}
+	composerRect := n.composerRect(ctx, bounds)
+	if composerRect.Empty() {
+		return
+	}
+	painter.Paint(ctx, ui.NewCanvas(surface, composerRect))
 }
 
 func (n *ComposerNode) cursorRectForBounds(bounds ui.Rect) (ui.Rect, bool) {
@@ -406,6 +415,12 @@ func (n *ComposerNode) cursorRectForBounds(bounds ui.Rect) (ui.Rect, bool) {
 	if !ok {
 		return ui.Rect{}, false
 	}
+	composerRect := n.composerRect(nil, bounds)
+	if composerRect.Empty() {
+		return ui.Rect{}, false
+	}
+	rect.X += composerRect.X
+	rect.Y += composerRect.Y
 	if rect.X >= bounds.W || rect.Y >= bounds.H {
 		return ui.Rect{}, false
 	}
@@ -416,6 +431,22 @@ func (n *ComposerNode) cursorRectForBounds(bounds ui.Rect) (ui.Rect, bool) {
 		return ui.Rect{}, false
 	}
 	return rect, true
+}
+
+func (n *ComposerNode) composerRect(ctx *ui.Context, bounds ui.Rect) ui.Rect {
+	if n == nil || n.element == nil || bounds.W <= 0 || bounds.H <= 0 {
+		return ui.Rect{}
+	}
+	painter := measuredPainterFromElement(n.element)
+	if painter == nil {
+		return ui.Rect{}
+	}
+	size := painter.Measure(ctx, ui.NewConstraints(bounds.W, 0))
+	height := min(bounds.H, max(0, size.H))
+	if height <= 0 {
+		return ui.Rect{}
+	}
+	return ui.Rect{Y: bounds.H - height, W: bounds.W, H: height}
 }
 
 type measuredPainter interface {

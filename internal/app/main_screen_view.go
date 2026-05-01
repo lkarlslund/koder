@@ -86,14 +86,13 @@ func (m *Model) syncMainScreenViewState() {
 		Background: m.palette.ScreenBackground,
 	})
 	m.mainScreen.SetComposerState(tui.ComposerState{
-		AreaElement:       m.renderComposerAreaElementWithCursor(true),
-		AreaElementHidden: m.renderComposerAreaElementWithCursor(false),
-		Element:           m.renderComposerElementWithCursor(true),
-		ElementHidden:     m.renderComposerElementWithCursor(false),
-		Revision:          m.composer.Revision(),
-		CursorDirty:       m.composerCursorDirty,
-		Focused:           m.composer.Focused(),
-		BlinkEnabled:      m.composer.BlinkEnabled && !m.hasModalOverlay(),
+		AreaElement:   m.renderComposerAreaElementWithCursor(true),
+		Element:       m.renderComposerElementWithCursor(true),
+		ElementHidden: m.renderComposerElementWithCursor(false),
+		Revision:      m.composer.Revision(),
+		CursorDirty:   m.composerCursorDirty,
+		Focused:       m.composer.Focused(),
+		BlinkEnabled:  m.composer.BlinkEnabled && !m.hasModalOverlay(),
 	})
 	sidebarNode := ui.Node(nil)
 	if m.showSidebar {

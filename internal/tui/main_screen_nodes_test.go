@@ -102,13 +102,12 @@ func TestComposerNodeOwnsBlinkAndInvalidatesCursor(t *testing.T) {
 	}))
 	node := NewComposerNode()
 	node.SetState(ComposerState{
-		AreaElement:       visible,
-		AreaElementHidden: hidden,
-		Element:           visible,
-		ElementHidden:     hidden,
-		Revision:          1,
-		Focused:           true,
-		BlinkEnabled:      true,
+		AreaElement:   visible,
+		Element:       visible,
+		ElementHidden: hidden,
+		Revision:      1,
+		Focused:       true,
+		BlinkEnabled:  true,
 	})
 	ctx := &ui.Context{Palette: palette}
 	node.Layout(ctx, ui.Rect{W: 20, H: 3})

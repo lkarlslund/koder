@@ -1289,7 +1289,7 @@ type Static struct {
 }
 
 func (s Static) Measure(_ *Context, constraints Constraints) Size {
-	return constraints.Clamp(SurfaceFromString(s.Content).Size())
+	return constraints.Clamp(measurePlainTextBlock(s.Content))
 }
 
 func (s Static) Paint(_ *Context, canvas Canvas) {
