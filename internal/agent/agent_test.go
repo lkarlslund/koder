@@ -123,6 +123,23 @@ func TestFormatEnvironmentPromptNonGit(t *testing.T) {
 	}
 }
 
+func TestSessionEnvironmentPromptBuildsOncePerSession(t *testing.T) {
+	cfg := testConfig(t)
+	workdir := t.TempDir()
+	engine := New(cfg, nil, tools.NewRegistry(workdir), nil, workdir)
+	session := domain.Session{ID: 42, ProjectRoot: workdir}
+
+	first := engine.sessionEnvironmentPrompt(session)
+	if first == "" {
+		t.Fatal("expected generated environment prompt")
+	}
+	engine.envPrompts[session.ID] = "cached prompt"
+	second := engine.sessionEnvironmentPrompt(session)
+	if second != "cached prompt" {
+		t.Fatalf("expected cached environment prompt, got %q", second)
+	}
+}
+
 func TestGitInfoDetectsRepositoryState(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")

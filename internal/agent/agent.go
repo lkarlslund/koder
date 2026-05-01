@@ -15,6 +15,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/lkarlslund/koder/internal/agents"
@@ -45,6 +46,8 @@ type Engine struct {
 	mcp        *mcp.Manager
 	exec       *execruntime.Manager
 	workdir    string
+	envMu      sync.Mutex
+	envPrompts map[int64]string
 	retryPause func(context.Context, time.Duration, func(time.Duration)) error
 }
 
@@ -1674,12 +1677,13 @@ func (e *Engine) buildPromptEnvelopePreview(ctx context.Context, session domain.
 }
 
 func (e *Engine) buildPromptEnvelopeForState(session domain.Session, chat domain.Chat, messages []domain.Message, partsByMessage map[int64][]domain.Part, prompt string, drafts []attachment.Draft, refs []reference.Draft, transient []provider.InstructionBlock) (provider.PromptEnvelope, error) {
+	baseInstructions := e.baseInstructionsForChat(session, chat)
 	envelope := provider.PromptEnvelope{
-		Instructions: e.baseInstructionsForChat(session, chat),
+		Instructions: baseInstructions,
 	}
 	for _, msg := range messages {
 		if summary, ok := compactionSummary(partsByMessage[msg.ID]); ok {
-			envelope.Instructions = e.baseInstructionsForChat(session, chat)
+			envelope.Instructions = baseInstructions
 			envelope.Items = append(envelope.Items[:0], compactedHistoryMessage(summary))
 			continue
 		}
@@ -1703,12 +1707,13 @@ func (e *Engine) buildPromptEnvelopeForState(session domain.Session, chat domain
 }
 
 func (e *Engine) baseInstructionsForChat(session domain.Session, chat domain.Chat) []provider.InstructionBlock {
+	environmentPrompt := e.sessionEnvironmentPrompt(session)
 	instructions := []provider.InstructionBlock{{
 		Kind: provider.InstructionKindBaseSystem,
 		Text: systemPrompt(),
 	}, {
 		Kind: provider.InstructionKindEnvironment,
-		Text: e.environmentPrompt(session),
+		Text: environmentPrompt,
 	}}
 	if roleText := strings.TrimSpace(chatRoleInstructions(chat)); roleText != "" {
 		instructions = append(instructions, provider.InstructionBlock{

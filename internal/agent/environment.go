@@ -53,6 +53,20 @@ func (e *Engine) environmentPrompt(session domain.Session) string {
 	return formatEnvironmentPrompt(snapshot)
 }
 
+func (e *Engine) sessionEnvironmentPrompt(session domain.Session) string {
+	e.envMu.Lock()
+	defer e.envMu.Unlock()
+	if e.envPrompts == nil {
+		e.envPrompts = map[int64]string{}
+	}
+	if text := e.envPrompts[session.ID]; text != "" {
+		return text
+	}
+	text := e.environmentPrompt(session)
+	e.envPrompts[session.ID] = text
+	return text
+}
+
 func formatEnvironmentPrompt(snapshot environmentSnapshot) string {
 	var b strings.Builder
 	b.WriteString("Runtime environment:")
