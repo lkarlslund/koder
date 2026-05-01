@@ -28,13 +28,6 @@ func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 }
 func (tool) LegacyArgs(raw string) map[string]string { return map[string]string{"question": raw} }
 func (tool) Preview(req tools.Request) string        { return req.Args["question"] }
-func (tool) PresentationForPreview(preview string) tools.Presentation {
-	preview = strings.TrimSpace(preview)
-	return tools.Presentation{Title: "Ask question", Subtitle: preview, Preview: preview}
-}
-func (tool) Presentation(req tools.Request) tools.Presentation {
-	return tool{}.PresentationForPreview(req.Args["question"])
-}
 func (tool) Execute(_ context.Context, _ tools.Runtime, req tools.Request) (tools.Result, error) {
 	return tools.Result{
 		Output: req.Args["question"],

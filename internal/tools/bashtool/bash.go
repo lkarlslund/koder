@@ -42,13 +42,6 @@ func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 }
 func (tool) LegacyArgs(raw string) map[string]string { return map[string]string{"command": raw} }
 func (tool) Preview(req tools.Request) string        { return req.Args["command"] }
-func (tool) PresentationForPreview(preview string) tools.Presentation {
-	preview = strings.TrimSpace(preview)
-	return tools.Presentation{Title: "Run command", Subtitle: preview, Preview: preview}
-}
-func (tool) Presentation(req tools.Request) tools.Presentation {
-	return tool{}.PresentationForPreview(req.Args["command"])
-}
 func (tool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
 	if _, err := exec.LookPath("bash"); err != nil {
 		return tools.Result{}, errors.New("bash is not available on this system")

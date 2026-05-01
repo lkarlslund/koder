@@ -30,13 +30,6 @@ func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 }
 func (tool) LegacyArgs(raw string) map[string]string { return map[string]string{"body": raw} }
 func (tool) Preview(req tools.Request) string        { return req.Args["body"] }
-func (tool) PresentationForPreview(preview string) tools.Presentation {
-	preview = strings.TrimSpace(preview)
-	return tools.Presentation{Title: "Create task", Subtitle: preview, Preview: preview}
-}
-func (tool) Presentation(req tools.Request) tools.Presentation {
-	return tool{}.PresentationForPreview(req.Args["body"])
-}
 func (tool) Execute(_ context.Context, _ tools.Runtime, req tools.Request) (tools.Result, error) {
 	return tools.Result{Output: req.Args["body"]}, nil
 }

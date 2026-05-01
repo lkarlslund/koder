@@ -92,11 +92,6 @@ func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 func (tool) LegacyArgs(raw string) map[string]string { return map[string]string{"pattern": raw} }
 func (tool) Preview(req tools.Request) string        { return req.Args["pattern"] }
 
-func (tool) PresentationForPreview(preview string) tools.Presentation {
-	preview = strings.TrimSpace(preview)
-	return tools.Presentation{Title: "Search text", Subtitle: preview, Preview: preview}
-}
-
 func (tool) Presentation(req tools.Request) tools.Presentation {
 	pattern := strings.TrimSpace(req.Args["pattern"])
 	subtitle := pattern

@@ -166,46 +166,6 @@ func (planTool) Preview(req tools.Request) string {
 }
 func (writeTool) Preview(req tools.Request) string { return "Replace milestones" }
 
-func (listTool) PresentationForPreview(preview string) tools.Presentation {
-	return tools.Presentation{Title: "List milestones", Preview: preview}
-}
-
-func (addItemsTool) PresentationForPreview(preview string) tools.Presentation {
-	return tools.Presentation{Title: "Added milestones", Preview: preview}
-}
-
-func (updateItemTool) PresentationForPreview(preview string) tools.Presentation {
-	return tools.Presentation{Title: "Updated milestone", Preview: preview}
-}
-
-func (planTool) PresentationForPreview(preview string) tools.Presentation {
-	return tools.Presentation{Title: "Planned and decomposed milestone", Preview: preview}
-}
-
-func (writeTool) PresentationForPreview(preview string) tools.Presentation {
-	return tools.Presentation{Title: "Updated milestones", Preview: preview}
-}
-
-func (listTool) Presentation(req tools.Request) tools.Presentation {
-	return listTool{}.PresentationForPreview(listTool{}.Preview(req))
-}
-
-func (addItemsTool) Presentation(req tools.Request) tools.Presentation {
-	return addItemsTool{}.PresentationForPreview(addItemsTool{}.Preview(req))
-}
-
-func (updateItemTool) Presentation(req tools.Request) tools.Presentation {
-	return updateItemTool{}.PresentationForPreview(updateItemTool{}.Preview(req))
-}
-
-func (planTool) Presentation(req tools.Request) tools.Presentation {
-	return planTool{}.PresentationForPreview(planTool{}.Preview(req))
-}
-
-func (writeTool) Presentation(req tools.Request) tools.Presentation {
-	return writeTool{}.PresentationForPreview(writeTool{}.Preview(req))
-}
-
 func (listTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
 	st, err := tools.RequireSessionStore(runtime)
 	if err != nil {

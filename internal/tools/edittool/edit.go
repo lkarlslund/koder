@@ -63,13 +63,6 @@ func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 }
 func (tool) LegacyArgs(raw string) map[string]string { return map[string]string{"path": raw} }
 func (tool) Preview(req tools.Request) string        { return req.Args["path"] }
-func (tool) PresentationForPreview(preview string) tools.Presentation {
-	preview = strings.TrimSpace(preview)
-	return tools.Presentation{Title: "Edit file", Subtitle: preview, Preview: preview}
-}
-func (tool) Presentation(req tools.Request) tools.Presentation {
-	return tool{}.PresentationForPreview(req.Args["path"])
-}
 func (tool) Execute(_ context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
 	abs, rel, err := tools.WorkspacePath(runtime.Workdir, req.Args["path"])
 	if err != nil {

@@ -33,13 +33,6 @@ func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 }
 func (tool) LegacyArgs(raw string) map[string]string { return map[string]string{"name": raw} }
 func (tool) Preview(req tools.Request) string        { return req.Args["name"] }
-func (tool) PresentationForPreview(preview string) tools.Presentation {
-	preview = strings.TrimSpace(preview)
-	return tools.Presentation{Title: "Load skill", Subtitle: preview, Preview: preview}
-}
-func (tool) Presentation(req tools.Request) tools.Presentation {
-	return tool{}.PresentationForPreview(req.Args["name"])
-}
 func (tool) Execute(_ context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
 	skill, ok := skills.Find(runtime.Workdir, req.Args["name"])
 	if !ok {

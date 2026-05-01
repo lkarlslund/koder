@@ -99,35 +99,6 @@ func (startExecutionTool) Preview(req tools.Request) string {
 }
 func (pollTool) Preview(req tools.Request) string { return "Poll chat #" + req.Args["chat_id"] }
 
-func (listTool) PresentationForPreview(preview string) tools.Presentation {
-	return tools.Presentation{Title: "Listed chats", Preview: preview}
-}
-
-func (startDecompositionTool) PresentationForPreview(preview string) tools.Presentation {
-	return tools.Presentation{Title: "Started decomposition chat", Preview: preview}
-}
-
-func (startExecutionTool) PresentationForPreview(preview string) tools.Presentation {
-	return tools.Presentation{Title: "Started execution chat", Preview: preview}
-}
-
-func (pollTool) PresentationForPreview(preview string) tools.Presentation {
-	return tools.Presentation{Title: "Polled chat", Preview: preview}
-}
-
-func (listTool) Presentation(req tools.Request) tools.Presentation {
-	return listTool{}.PresentationForPreview(listTool{}.Preview(req))
-}
-func (startDecompositionTool) Presentation(req tools.Request) tools.Presentation {
-	return startDecompositionTool{}.PresentationForPreview(startDecompositionTool{}.Preview(req))
-}
-func (startExecutionTool) Presentation(req tools.Request) tools.Presentation {
-	return startExecutionTool{}.PresentationForPreview(startExecutionTool{}.Preview(req))
-}
-func (pollTool) Presentation(req tools.Request) tools.Presentation {
-	return pollTool{}.PresentationForPreview(pollTool{}.Preview(req))
-}
-
 func (listTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
 	control, err := tools.RequireChatControl(runtime)
 	if err != nil {

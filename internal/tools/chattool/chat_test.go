@@ -10,12 +10,12 @@ import (
 )
 
 type fakeChatControl struct {
-	statuses []tools.ChatStatus
-	lastRef  string
-	lastTitle string
-	lastSessionID int64
+	statuses         []tools.ChatStatus
+	lastRef          string
+	lastTitle        string
+	lastSessionID    int64
 	lastParentChatID int64
-	lastChatID int64
+	lastChatID       int64
 }
 
 func (f *fakeChatControl) ListChats(context.Context, int64) ([]tools.ChatStatus, error) {

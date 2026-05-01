@@ -115,38 +115,6 @@ func (fetchNextTool) Preview(req tools.Request) string {
 	return milestonePreview(req.Args["milestone_ref"], "Fetch next todo")
 }
 
-func (listTool) PresentationForPreview(preview string) tools.Presentation {
-	return tools.Presentation{Title: "Listed todos", Preview: preview}
-}
-
-func (addItemsTool) PresentationForPreview(preview string) tools.Presentation {
-	return tools.Presentation{Title: "Added todo items", Preview: preview}
-}
-
-func (updateItemTool) PresentationForPreview(preview string) tools.Presentation {
-	return tools.Presentation{Title: "Updated todo item", Preview: preview}
-}
-
-func (fetchNextTool) PresentationForPreview(preview string) tools.Presentation {
-	return tools.Presentation{Title: "Fetched next todo", Preview: preview}
-}
-
-func (listTool) Presentation(req tools.Request) tools.Presentation {
-	return listTool{}.PresentationForPreview(listTool{}.Preview(req))
-}
-
-func (addItemsTool) Presentation(req tools.Request) tools.Presentation {
-	return addItemsTool{}.PresentationForPreview(addItemsTool{}.Preview(req))
-}
-
-func (updateItemTool) Presentation(req tools.Request) tools.Presentation {
-	return updateItemTool{}.PresentationForPreview(updateItemTool{}.Preview(req))
-}
-
-func (fetchNextTool) Presentation(req tools.Request) tools.Presentation {
-	return fetchNextTool{}.PresentationForPreview(fetchNextTool{}.Preview(req))
-}
-
 func (listTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
 	st, err := tools.RequireSessionStore(runtime)
 	if err != nil {

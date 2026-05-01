@@ -64,19 +64,6 @@ func (tool) Preview(req tools.Request) string {
 	}
 }
 
-func (tool) PresentationForPreview(preview string) tools.Presentation {
-	preview = strings.TrimSpace(preview)
-	return tools.Presentation{
-		Title:    "MCP",
-		Subtitle: preview,
-		Preview:  preview,
-	}
-}
-
-func (tool) Presentation(req tools.Request) tools.Presentation {
-	return tool{}.PresentationForPreview(tool{}.Preview(req))
-}
-
 func (tool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
 	if runtime.MCP == nil {
 		return tools.Result{}, errors.New("mcp manager is unavailable")

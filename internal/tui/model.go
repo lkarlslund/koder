@@ -7050,7 +7050,7 @@ func (m *Model) openToolsDialog() {
 		description := "Enable this tool for the current session"
 		label := string(kind)
 		if tool, ok := tools.Lookup(kind); ok {
-			presentation := tool.PresentationForPreview("")
+			presentation := tools.PresentationForTool(kind, "")
 			if strings.TrimSpace(presentation.Title) != "" {
 				label = presentation.Title
 			}

@@ -199,56 +199,6 @@ func (resizeTool) Preview(req tools.Request) string    { return "Resize " + req.
 func (terminateTool) Preview(req tools.Request) string { return "Terminate " + req.Args["process_id"] }
 func (cleanupTool) Preview(req tools.Request) string   { return "Cleanup exec sessions" }
 
-func (commandTool) PresentationForPreview(preview string) tools.Presentation {
-	return tools.Presentation{Title: "Start exec session", Subtitle: strings.TrimSpace(preview), Preview: strings.TrimSpace(preview)}
-}
-
-func (statusTool) PresentationForPreview(preview string) tools.Presentation {
-	return tools.Presentation{Title: "Exec status", Preview: strings.TrimSpace(preview)}
-}
-
-func (listTool) PresentationForPreview(preview string) tools.Presentation {
-	return tools.Presentation{Title: "Exec sessions", Preview: strings.TrimSpace(preview)}
-}
-
-func (writeStdinTool) PresentationForPreview(preview string) tools.Presentation {
-	return tools.Presentation{Title: "Write exec stdin", Preview: strings.TrimSpace(preview)}
-}
-
-func (resizeTool) PresentationForPreview(preview string) tools.Presentation {
-	return tools.Presentation{Title: "Resize exec tty", Preview: strings.TrimSpace(preview)}
-}
-
-func (terminateTool) PresentationForPreview(preview string) tools.Presentation {
-	return tools.Presentation{Title: "Terminate exec session", Preview: strings.TrimSpace(preview)}
-}
-
-func (cleanupTool) PresentationForPreview(preview string) tools.Presentation {
-	return tools.Presentation{Title: "Cleanup exec sessions", Preview: strings.TrimSpace(preview)}
-}
-
-func (commandTool) Presentation(req tools.Request) tools.Presentation {
-	return (commandTool{}).PresentationForPreview((commandTool{}).Preview(req))
-}
-func (statusTool) Presentation(req tools.Request) tools.Presentation {
-	return (statusTool{}).PresentationForPreview((statusTool{}).Preview(req))
-}
-func (listTool) Presentation(req tools.Request) tools.Presentation {
-	return (listTool{}).PresentationForPreview((listTool{}).Preview(req))
-}
-func (writeStdinTool) Presentation(req tools.Request) tools.Presentation {
-	return (writeStdinTool{}).PresentationForPreview((writeStdinTool{}).Preview(req))
-}
-func (resizeTool) Presentation(req tools.Request) tools.Presentation {
-	return (resizeTool{}).PresentationForPreview((resizeTool{}).Preview(req))
-}
-func (terminateTool) Presentation(req tools.Request) tools.Presentation {
-	return (terminateTool{}).PresentationForPreview((terminateTool{}).Preview(req))
-}
-func (cleanupTool) Presentation(req tools.Request) tools.Presentation {
-	return (cleanupTool{}).PresentationForPreview((cleanupTool{}).Preview(req))
-}
-
 func (commandTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
 	control, err := tools.RequireExecControl(runtime)
 	if err != nil {

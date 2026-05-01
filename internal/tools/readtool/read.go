@@ -57,10 +57,6 @@ func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 }
 func (tool) LegacyArgs(raw string) map[string]string { return map[string]string{"path": raw} }
 func (tool) Preview(req tools.Request) string        { return req.Args["path"] }
-func (tool) PresentationForPreview(preview string) tools.Presentation {
-	preview = strings.TrimSpace(preview)
-	return tools.Presentation{Title: readPresentationTitle(preview, "", ""), Preview: preview}
-}
 func (tool) Presentation(req tools.Request) tools.Presentation {
 	path := strings.TrimSpace(req.Args["path"])
 	offset := strings.TrimSpace(req.Args["offset"])

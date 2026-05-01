@@ -42,17 +42,6 @@ func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 }
 func (tool) LegacyArgs(raw string) map[string]string { return map[string]string{"path": raw} }
 func (tool) Preview(req tools.Request) string        { return req.Args["path"] }
-func (tool) PresentationForPreview(preview string) tools.Presentation {
-	preview = strings.TrimSpace(preview)
-	return tools.Presentation{Title: viewImagePresentationTitle(preview), Preview: preview}
-}
-func (tool) Presentation(req tools.Request) tools.Presentation {
-	path := strings.TrimSpace(req.Args["path"])
-	return tools.Presentation{
-		Title:   viewImagePresentationTitle(path),
-		Preview: path,
-	}
-}
 func (tool) Execute(_ context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
 	abs, rel, err := tools.ReadablePath(runtime.Workdir, req.Args["path"])
 	if err != nil {
@@ -94,15 +83,6 @@ func (tool) Execute(_ context.Context, runtime tools.Runtime, req tools.Request)
 }
 func (tool) SummarizeResult(req tools.Request, result tools.Result) (string, string) {
 	return "Viewed image", strings.TrimSpace(result.Output)
-}
-
-func viewImagePresentationTitle(pathValue string) string {
-	title := "View image"
-	pathValue = strings.TrimSpace(pathValue)
-	if pathValue == "" {
-		return title
-	}
-	return title + " " + filepath.ToSlash(pathValue)
 }
 
 func detectImageMIME(path string) (string, error) {

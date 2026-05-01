@@ -140,9 +140,11 @@ type Tool interface {
 	NormalizeArgs(map[string]string) (map[string]string, error)
 	LegacyArgs(raw string) map[string]string
 	Preview(req Request) string
-	PresentationForPreview(preview string) Presentation
-	Presentation(req Request) Presentation
 	Execute(ctx context.Context, runtime Runtime, req Request) (Result, error)
+}
+
+type Presenter interface {
+	Presentation(req Request) Presentation
 }
 
 type resultSummarizer interface {
@@ -368,15 +370,99 @@ func PresentationForRequest(req Request) Presentation {
 	if err != nil {
 		return PresentationForTool(req.Tool, Preview(req))
 	}
-	return tool.Presentation(req)
+	if presenter, ok := tool.(Presenter); ok {
+		return presenter.Presentation(req)
+	}
+	return SharedPresentation(req.Tool, tool.Preview(req))
 }
 
 func PresentationForTool(kind domain.ToolKind, preview string) Presentation {
-	tool, ok := Lookup(kind)
-	if !ok {
-		return Presentation{Title: "Tool", Subtitle: strings.TrimSpace(preview), Preview: strings.TrimSpace(preview)}
+	return SharedPresentation(kind, preview)
+}
+
+func SharedPresentation(kind domain.ToolKind, preview string) Presentation {
+	preview = strings.TrimSpace(preview)
+	return Presentation{Title: toolTitle(kind), Subtitle: preview, Preview: preview}
+}
+
+func toolTitle(kind domain.ToolKind) string {
+	switch kind {
+	case domain.ToolKindRead:
+		return "Read file"
+	case domain.ToolKindViewImage:
+		return "View image"
+	case domain.ToolKindGlob:
+		return "Find files"
+	case domain.ToolKindGrep:
+		return "Search text"
+	case domain.ToolKindBash:
+		return "Run command"
+	case domain.ToolKindExecCommand:
+		return "Start exec session"
+	case domain.ToolKindExecStatus:
+		return "Check exec status"
+	case domain.ToolKindExecList:
+		return "List exec sessions"
+	case domain.ToolKindExecWriteStdin:
+		return "Write exec stdin"
+	case domain.ToolKindExecResize:
+		return "Resize exec tty"
+	case domain.ToolKindExecTerminate:
+		return "Terminate exec session"
+	case domain.ToolKindExecCleanup:
+		return "Cleanup exec sessions"
+	case domain.ToolKindApplyPatch:
+		return "Apply patch"
+	case domain.ToolKindEdit:
+		return "Edit file"
+	case domain.ToolKindWrite:
+		return "Write file"
+	case domain.ToolKindTask:
+		return "Create task"
+	case domain.ToolKindQuestion:
+		return "Ask question"
+	case domain.ToolKindUpdatePlan:
+		return "Update plan"
+	case domain.ToolKindMilestoneList:
+		return "List milestones"
+	case domain.ToolKindMilestoneAdd:
+		return "Add milestones"
+	case domain.ToolKindMilestoneUpdate:
+		return "Update milestone"
+	case domain.ToolKindMilestonePlan:
+		return "Plan milestone"
+	case domain.ToolKindMilestoneWrite:
+		return "Updated milestones"
+	case domain.ToolKindTodoList:
+		return "List todos"
+	case domain.ToolKindTodoAddItems:
+		return "Add todo items"
+	case domain.ToolKindTodoUpdateItem:
+		return "Update todo item"
+	case domain.ToolKindTodoFetchNext:
+		return "Fetch next todo"
+	case domain.ToolKindChatList:
+		return "List chats"
+	case domain.ToolKindChatStartDecomp:
+		return "Start decomposition chat"
+	case domain.ToolKindChatStartExec:
+		return "Start execution chat"
+	case domain.ToolKindChatPoll:
+		return "Poll chat"
+	case domain.ToolKindSkill:
+		return "Load skill"
+	case domain.ToolKindWebFetch:
+		return "Fetch URL"
+	case domain.ToolKindWebSearch:
+		return "Search web"
+	case domain.ToolKindMCP:
+		return "MCP"
+	default:
+		if kind == "" {
+			return "Tool"
+		}
+		return strings.ReplaceAll(string(kind), "_", " ")
 	}
-	return tool.PresentationForPreview(preview)
 }
 
 func SummarizeResult(req Request, result Result) (string, string) {
@@ -450,7 +536,7 @@ func PersistStandardResult(ctx context.Context, st *store.Store, sessionID int64
 			return nil, err
 		}
 	}
-	return emitOnce(domain.Event{Kind: domain.EventKindToolResult, Text: body, Tool: req.Tool}), nil
+	return EmitOnce(domain.Event{Kind: domain.EventKindToolResult, Text: body, Tool: req.Tool}), nil
 }
 
 func WithChatID(ctx context.Context, chatID int64) context.Context {
@@ -489,15 +575,11 @@ func DefaultSummarizeResult(req Request, result Result) (string, string) {
 	return defaultSummary(req.Tool, result)
 }
 
-func emitOnce(evt domain.Event) <-chan domain.Event {
+func EmitOnce(evt domain.Event) <-chan domain.Event {
 	out := make(chan domain.Event, 1)
 	out <- evt
 	close(out)
 	return out
-}
-
-func EmitOnce(evt domain.Event) <-chan domain.Event {
-	return emitOnce(evt)
 }
 
 func normalizeRequest(req Request) (Request, Tool, error) {

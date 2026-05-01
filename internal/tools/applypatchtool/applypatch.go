@@ -44,13 +44,6 @@ func (tool) Preview(req tools.Request) string {
 	}
 	return tools.SummarizePaths(paths, 3)
 }
-func (tool) PresentationForPreview(preview string) tools.Presentation {
-	preview = strings.TrimSpace(preview)
-	return tools.Presentation{Title: "Apply patch", Subtitle: preview, Preview: preview}
-}
-func (tool) Presentation(req tools.Request) tools.Presentation {
-	return tool{}.PresentationForPreview(tool{}.Preview(req))
-}
 func (tool) Execute(_ context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
 	if _, err := exec.LookPath("git"); err != nil {
 		return tools.Result{}, errors.New("apply_patch requires git to be installed")

@@ -61,17 +61,6 @@ func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 }
 func (tool) LegacyArgs(raw string) map[string]string { return map[string]string{"query": raw} }
 func (tool) Preview(req tools.Request) string        { return req.Args["query"] }
-func (tool) PresentationForPreview(preview string) tools.Presentation {
-	preview = strings.TrimSpace(preview)
-	subtitle := preview
-	if subtitle != "" {
-		subtitle = "Query: " + subtitle
-	}
-	return tools.Presentation{Title: "Search web", Subtitle: subtitle, Preview: preview}
-}
-func (tool) Presentation(req tools.Request) tools.Presentation {
-	return tool{}.PresentationForPreview(req.Args["query"])
-}
 func (tool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
 	client := runtime.HTTPClient
 	if client == nil {
@@ -174,7 +163,7 @@ func parseResults(body string, limit int) []resultItem {
 		if len(match) < 6 {
 			continue
 		}
-		href := normalizeResultURL(htmlDecode(body[match[2]:match[3]]))
+		href := normalizeResultURL(html.UnescapeString(body[match[2]:match[3]]))
 		title := cleanHTML(body[match[4]:match[5]])
 		tail := body[match[1]:]
 		snippet := ""
@@ -192,11 +181,7 @@ func parseResults(body string, limit int) []resultItem {
 
 func cleanHTML(value string) string {
 	value = tagPattern.ReplaceAllString(value, " ")
-	return strings.TrimSpace(strings.Join(strings.Fields(htmlDecode(value)), " "))
-}
-
-func htmlDecode(value string) string {
-	return html.UnescapeString(value)
+	return strings.TrimSpace(strings.Join(strings.Fields(html.UnescapeString(value)), " "))
 }
 
 func normalizeDomainList(raw string) string {

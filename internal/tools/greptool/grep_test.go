@@ -11,8 +11,8 @@ import (
 	"github.com/lkarlslund/koder/internal/tools"
 )
 
-func TestPresentationForPreviewOmitsQueryPrefix(t *testing.T) {
-	got := tool{}.PresentationForPreview("needle")
+func TestSharedPresentationOmitsQueryPrefix(t *testing.T) {
+	got := tools.PresentationForTool(domain.ToolKindGrep, "needle")
 	if got.Title != "Search text" {
 		t.Fatalf("unexpected title: %#v", got)
 	}

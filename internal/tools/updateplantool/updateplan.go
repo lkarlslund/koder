@@ -49,13 +49,6 @@ func (tool) Preview(req tools.Request) string {
 	}
 	return steps[0].Step
 }
-func (tool) PresentationForPreview(preview string) tools.Presentation {
-	preview = strings.TrimSpace(preview)
-	return tools.Presentation{Title: "Update plan", Subtitle: preview, Preview: preview}
-}
-func (tool) Presentation(req tools.Request) tools.Presentation {
-	return tool{}.PresentationForPreview(tool{}.Preview(req))
-}
 func (tool) Execute(_ context.Context, _ tools.Runtime, req tools.Request) (tools.Result, error) {
 	steps, err := normalizePlan(req.Args["plan"])
 	if err != nil {
