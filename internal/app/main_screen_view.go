@@ -166,6 +166,13 @@ func (v *mainScreenView) Surface(ctx *ui.Context, bounds ui.Rect) ui.Surface {
 	return v.surface.Surface(ctx, bounds)
 }
 
+func (v *mainScreenView) PaintInto(ctx *ui.Context, bounds ui.Rect, dst *ui.Surface) []ui.Rect {
+	if v == nil || v.surface == nil || dst == nil {
+		return nil
+	}
+	return v.surface.PaintInto(ctx, bounds, dst)
+}
+
 func (v *mainScreenView) Dirty() bool {
 	return v == nil || v.surface == nil || v.surface.Dirty()
 }

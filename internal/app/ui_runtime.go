@@ -205,17 +205,27 @@ func (m *Model) mainWindow() ui.Window {
 			element: func(m *Model) ui.Node {
 				return m.renderBodyElement()
 			},
-			render: func(m *Model, bounds ui.Rect) ui.Surface {
-				return m.renderBodySurface().Normalize(max(0, bounds.W), max(0, bounds.H))
+			paint: func(m *Model, ctx *ui.Context, bounds ui.Rect, dst *ui.Surface) []ui.Rect {
+				main := m.mainScreen
+				if main == nil {
+					main = m.ensureMainScreenView()
+				}
+				if main == nil {
+					return nil
+				}
+				rects := main.PaintInto(ctx, bounds, dst)
+				m.markMainScreenRendered()
+				return rects
 			},
 			invalidate: func(m *Model, ctx *ui.Context) {
 				ui.InvalidateNodeCaches(ctx, m.renderBodyElement())
 				m.invalidateBodyCache()
 			},
 			needsRedraw: func(m *Model) bool {
-				if m == nil || m.mainScreen == nil {
+				if m == nil {
 					return false
 				}
+				m.ensureMainScreenView()
 				return m.mainScreen.Dirty()
 			},
 			key: func(m *Model, msg ui.KeyMsg) (bool, ui.Cmd) {

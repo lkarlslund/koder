@@ -2036,6 +2036,20 @@ func (m *Model) renderComposerAreaSurface() ui.Surface {
 	return surface
 }
 
+func (m *Model) measureComposerArea() int {
+	ctx := &ui.Context{Palette: m.palette}
+	width := max(0, m.width)
+	if width == 0 {
+		width = max(40, m.composerWidth())
+	}
+	element := m.renderComposerAreaElement()
+	size := element.Measure(ctx, ui.NewConstraints(width, 0))
+	cache := m.ensureRenderCache()
+	cache.composerAreaHeight = size.H
+	cache.composerAreaValid = size.H > 0
+	return size.H
+}
+
 func (m *Model) renderComposerAreaElement() ui.Node {
 	return m.renderComposerAreaElementWithCursor(m.composer.CursorVisible())
 }
@@ -2092,9 +2106,17 @@ func (m *Model) composerAreaHasContent() bool {
 func (m *Model) composerAreaHeight() int {
 	cache := m.ensureRenderCache()
 	if !cache.composerAreaValid {
-		_ = m.renderComposerAreaSurface()
+		return m.measureComposerArea()
 	}
 	return cache.composerAreaHeight
+}
+
+func (m *Model) markMainScreenRendered() {
+	cache := m.ensureRenderCache()
+	cache.bodyValid = true
+	if !cache.composerAreaValid {
+		_ = m.measureComposerArea()
+	}
 }
 
 func (m *Model) renderStatusPaneElement() ui.Node {

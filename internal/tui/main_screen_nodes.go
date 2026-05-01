@@ -209,10 +209,10 @@ func (n *ComposerNode) SetState(state ComposerState) {
 	if revisionChanged || focusChanged {
 		n.blinkVisible = true
 	}
-	if revisionChanged {
+	if revisionChanged && !state.CursorDirty {
 		n.measureValid = false
 	}
-	if revisionChanged {
+	if revisionChanged && !state.CursorDirty {
 		n.MarkDirtyLocal(ui.Rect{W: n.Rect().W, H: n.Rect().H})
 	}
 }
