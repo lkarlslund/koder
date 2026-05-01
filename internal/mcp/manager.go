@@ -270,10 +270,6 @@ func (m *Manager) ConnectServer(ctx context.Context, id string) error {
 	return nil
 }
 
-func (m *Manager) ReconnectServer(ctx context.Context, id string) error {
-	return m.ConnectServer(ctx, id)
-}
-
 func (m *Manager) DisconnectServer(id string) error {
 	id = strings.TrimSpace(id)
 	if id == "" {
@@ -704,7 +700,7 @@ func (m *Manager) refreshServerAsync(id string) {
 	go func() {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		_ = m.ReconnectServer(ctx, id)
+		_ = m.ConnectServer(ctx, id)
 	}()
 }
 

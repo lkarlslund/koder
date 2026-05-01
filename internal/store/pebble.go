@@ -3,6 +3,7 @@ package store
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -1034,7 +1035,7 @@ func (b *pebbleBackend) readMeta() (metaRecord, error) {
 	}
 	defer closer.Close()
 	var meta metaRecord
-	if err := decodeJSON(cloneBytes(data), &meta); err != nil {
+	if err := json.Unmarshal(cloneBytes(data), &meta); err != nil {
 		return metaRecord{}, fmt.Errorf("decode pebble metadata: %w", err)
 	}
 	if meta.NextTaskID <= 0 {
@@ -1237,7 +1238,7 @@ func (b *pebbleBackend) readRecord(key string, dst any) error {
 		return err
 	}
 	defer closer.Close()
-	return decodeJSON(cloneBytes(data), dst)
+	return json.Unmarshal(cloneBytes(data), dst)
 }
 
 func (b *pebbleBackend) partsForMessage(messageID int64) ([]domain.Part, error) {

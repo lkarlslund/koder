@@ -72,10 +72,6 @@ func encodeJSON(v any) ([]byte, error) {
 	return data, nil
 }
 
-func decodeJSON(data []byte, dst any) error {
-	return json.Unmarshal(data, dst)
-}
-
 func formatID(id int64) string {
 	return fmt.Sprintf("%020d", id)
 }
