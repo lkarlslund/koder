@@ -5842,9 +5842,41 @@ func TestLoadMsgPreserveBusySameChatKeepsPendingAssistantStream(t *testing.T) {
 		t.Fatalf("expected concatenated pending assistant text after reload interleaving, got %q", got)
 	}
 
+	m.prepareFrame()
 	rendered := m.renderBody()
 	if !strings.Contains(rendered, "The `ts` is now") {
 		t.Fatalf("expected rendered transcript to retain pending assistant stream, got %q", rendered)
+	}
+}
+
+func TestMessageDeltasRenderOnFrame(t *testing.T) {
+	m := Model{
+		cfg:            testConfig(t),
+		viewport:       newTranscriptViewport(60, 8),
+		currentSession: domain.Session{ID: 1, Title: "Test"},
+		currentChat:    domain.Chat{ID: 2, SessionID: 1},
+		parts:          map[int64][]domain.Part{},
+	}
+	m.refreshViewport()
+
+	m.applyEvent(domain.Event{Kind: domain.EventKindMessageDelta, Text: "The"})
+	m.applyEvent(domain.Event{Kind: domain.EventKindMessageDelta, Text: " stream"})
+	m.applyEvent(domain.Event{Kind: domain.EventKindMessageDelta, Text: " arrived"})
+
+	if got := strings.Join(m.viewport.VisibleSurface().Lines(), "\n"); strings.Contains(got, "The stream arrived") {
+		t.Fatalf("expected viewport not to refresh before frame, got %q", got)
+	}
+	if !m.pendingTranscriptFrameDirty {
+		t.Fatal("expected message deltas to mark pending transcript frame dirty")
+	}
+
+	m.prepareFrame()
+
+	if got := strings.Join(m.viewport.VisibleSurface().Lines(), "\n"); !strings.Contains(got, "The stream arrived") {
+		t.Fatalf("expected frame to render accumulated pending text, got %q", got)
+	}
+	if m.pendingTranscriptFrameDirty {
+		t.Fatal("expected frame to clear pending transcript dirty flag")
 	}
 }
 

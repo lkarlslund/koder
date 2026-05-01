@@ -192,6 +192,28 @@ func TestWindowSizeInvalidatesRenderCache(t *testing.T) {
 	}
 }
 
+func TestProgramRequestFrameCoalesces(t *testing.T) {
+	p := &Program{frameInterval: time.Millisecond}
+	out := make(chan Msg, 4)
+
+	p.requestFrame(out)
+	p.requestFrame(out)
+
+	select {
+	case msg := <-out:
+		if _, ok := msg.(FrameMsg); !ok {
+			t.Fatalf("expected frame message, got %#v", msg)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("expected frame message")
+	}
+	select {
+	case msg := <-out:
+		t.Fatalf("expected coalesced frame request, got extra %#v", msg)
+	case <-time.After(10 * time.Millisecond):
+	}
+}
+
 func TestRenderFrameSurfaceEmitsRealSGRSequences(t *testing.T) {
 	s := fakeSurface{
 		w: 5,

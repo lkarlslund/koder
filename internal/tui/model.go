@@ -461,119 +461,121 @@ type modelRenderCache struct {
 }
 
 type Model struct {
-	cfg                     config.Config
-	store                   *store.Store
-	agent                   *agent.Engine
-	exec                    *execruntime.Manager
-	renderer                *markdown.Renderer
-	palette                 theme.Palette
-	sessions                []domain.Session
-	chats                   []domain.Chat
-	currentSession          domain.Session
-	currentChat             domain.Chat
-	messages                []domain.Message
-	parts                   map[int64][]domain.Part
-	historyTotalUsage       domain.Usage
-	historyTotalUsageKnown  bool
-	liveUsage               domain.Usage
-	liveUsageKnown          bool
-	contextTokens           int
-	contextTokensEstimated  bool
-	milestonePlan           store.MilestonePlan
-	todos                   []store.TodoItem
-	approvals               []store.Approval
-	viewport                transcriptViewport
-	transcriptControls      []ui.Control
-	retainedTranscript      *ui.RetainedTranscript
-	transcriptItems         []transcriptItemController
-	messageItemIndexByID    map[int64]int
-	toolRunItemIndexByID    map[string]int
-	toolRunItemIndexByAppr  map[int64]int
-	pendingTranscriptIndex  int
-	transcriptDirty         bool
-	mainScreen              *mainScreenWidget
-	renderCache             *modelRenderCache
-	expandedToolRuns        map[string]bool
-	expandedToolRunCommands map[string]bool
-	composer                textarea.Model
-	composerQueries         composerQueryState
-	composerHistory         composerHistoryState
-	composerCursorDirty     bool
-	width                   int
-	height                  int
-	status                  string
-	loading                 bool
-	busy                    busyModel
-	chatBusy                map[int64]busyModel
-	showSidebar             bool
-	sidebarWidthOverride    int
-	showReasoning           bool
-	showSystem              bool
-	slashMatches            []slashCommand
-	slashIndex              int
-	skillMatches            []skills.Skill
-	skillIndex              int
-	mentionMatches          []reference.Entry
-	mentionIndex            int
-	mentionCatalog          []reference.Entry
-	approvalDialog          *dialogs.ApprovalDialog
-	workdir                 string
-	workspace               workspace.Status
-	agentsDrift             bool
-	startupMode             StartupMode
-	startupOptions          StartupOptions
-	picker                  pickerModel
-	pendingPartID           int64
-	mouseEnabled            bool
-	sessionDialog           *dialogs.SessionDialog
-	preferences             *dialogs.PreferencesDialog
-	agentsModal             *ui.Modal
-	helpModal               *ui.Modal
-	helpBody                string
-	helpYOffset             int
-	helpWidth               int
-	helpHeight              int
-	llmPreviewTitle         string
-	llmPreviewBody          string
-	llmPreviewYOffset       int
-	llmPreviewWidth         int
-	llmPreviewHeight        int
-	connectDialog           *dialogs.ConnectDialog
-	disconnectDialog        *dialogs.DisconnectDialog
-	modelDialog             *dialogs.ModelDialog
-	mcpDialog               *dialogs.MCPDialog
-	toolsDialog             *dialogs.ToolsDialog
-	themeDialog             *dialogs.ThemeDialog
-	themeDialogInitial      string
-	mainWindowView          *modelWindow
-	debug                   *debugsrv.Recorder
-	uiRoot                  *ui.Root
-	execEvents              <-chan execruntime.Event
-	execCancel              func()
-	execSubscriptionChatID  int64
-	execSubscriptionSeq     uint64
-	rootTimerSeq            uint64
-	rootTimerPending        bool
-	rootTimerPendingAt      time.Time
-	bouncyBalls             bouncyBallsOverlay
-	caps                    *provider.CapabilityStore
-	runtimeCtxChecked       map[string]bool
-	activeOpCancel          context.CancelFunc
-	activeOpCancels         map[int64]context.CancelFunc
-	activeEventStream       bool
-	queueEditMode           bool
-	queueSelection          int
-	pendingModelNote        string
-	pendingAssistant        pendingAssistantTurn
-	draftAttachments        []attachment.Draft
-	draftReferences         []reference.Draft
-	attachmentFiles         *attachment.Manager
-	interruptArmedAt        time.Time
-	readClipboardText       func() (string, error)
-	readClipboardImage      func() ([]byte, error)
-	writeClipboardText      func(string) error
-	debugRuntimeHash        uint64
-	debugFrameLastSync      time.Time
+	cfg                         config.Config
+	store                       *store.Store
+	agent                       *agent.Engine
+	exec                        *execruntime.Manager
+	renderer                    *markdown.Renderer
+	palette                     theme.Palette
+	sessions                    []domain.Session
+	chats                       []domain.Chat
+	currentSession              domain.Session
+	currentChat                 domain.Chat
+	messages                    []domain.Message
+	parts                       map[int64][]domain.Part
+	historyTotalUsage           domain.Usage
+	historyTotalUsageKnown      bool
+	liveUsage                   domain.Usage
+	liveUsageKnown              bool
+	contextTokens               int
+	contextTokensEstimated      bool
+	pendingTranscriptFrameDirty bool
+	pendingContextFrameDirty    bool
+	milestonePlan               store.MilestonePlan
+	todos                       []store.TodoItem
+	approvals                   []store.Approval
+	viewport                    transcriptViewport
+	transcriptControls          []ui.Control
+	retainedTranscript          *ui.RetainedTranscript
+	transcriptItems             []transcriptItemController
+	messageItemIndexByID        map[int64]int
+	toolRunItemIndexByID        map[string]int
+	toolRunItemIndexByAppr      map[int64]int
+	pendingTranscriptIndex      int
+	transcriptDirty             bool
+	mainScreen                  *mainScreenWidget
+	renderCache                 *modelRenderCache
+	expandedToolRuns            map[string]bool
+	expandedToolRunCommands     map[string]bool
+	composer                    textarea.Model
+	composerQueries             composerQueryState
+	composerHistory             composerHistoryState
+	composerCursorDirty         bool
+	width                       int
+	height                      int
+	status                      string
+	loading                     bool
+	busy                        busyModel
+	chatBusy                    map[int64]busyModel
+	showSidebar                 bool
+	sidebarWidthOverride        int
+	showReasoning               bool
+	showSystem                  bool
+	slashMatches                []slashCommand
+	slashIndex                  int
+	skillMatches                []skills.Skill
+	skillIndex                  int
+	mentionMatches              []reference.Entry
+	mentionIndex                int
+	mentionCatalog              []reference.Entry
+	approvalDialog              *dialogs.ApprovalDialog
+	workdir                     string
+	workspace                   workspace.Status
+	agentsDrift                 bool
+	startupMode                 StartupMode
+	startupOptions              StartupOptions
+	picker                      pickerModel
+	pendingPartID               int64
+	mouseEnabled                bool
+	sessionDialog               *dialogs.SessionDialog
+	preferences                 *dialogs.PreferencesDialog
+	agentsModal                 *ui.Modal
+	helpModal                   *ui.Modal
+	helpBody                    string
+	helpYOffset                 int
+	helpWidth                   int
+	helpHeight                  int
+	llmPreviewTitle             string
+	llmPreviewBody              string
+	llmPreviewYOffset           int
+	llmPreviewWidth             int
+	llmPreviewHeight            int
+	connectDialog               *dialogs.ConnectDialog
+	disconnectDialog            *dialogs.DisconnectDialog
+	modelDialog                 *dialogs.ModelDialog
+	mcpDialog                   *dialogs.MCPDialog
+	toolsDialog                 *dialogs.ToolsDialog
+	themeDialog                 *dialogs.ThemeDialog
+	themeDialogInitial          string
+	mainWindowView              *modelWindow
+	debug                       *debugsrv.Recorder
+	uiRoot                      *ui.Root
+	execEvents                  <-chan execruntime.Event
+	execCancel                  func()
+	execSubscriptionChatID      int64
+	execSubscriptionSeq         uint64
+	rootTimerSeq                uint64
+	rootTimerPending            bool
+	rootTimerPendingAt          time.Time
+	bouncyBalls                 bouncyBallsOverlay
+	caps                        *provider.CapabilityStore
+	runtimeCtxChecked           map[string]bool
+	activeOpCancel              context.CancelFunc
+	activeOpCancels             map[int64]context.CancelFunc
+	activeEventStream           bool
+	queueEditMode               bool
+	queueSelection              int
+	pendingModelNote            string
+	pendingAssistant            pendingAssistantTurn
+	draftAttachments            []attachment.Draft
+	draftReferences             []reference.Draft
+	attachmentFiles             *attachment.Manager
+	interruptArmedAt            time.Time
+	readClipboardText           func() (string, error)
+	readClipboardImage          func() ([]byte, error)
+	writeClipboardText          func(string) error
+	debugRuntimeHash            uint64
+	debugFrameLastSync          time.Time
 }
 
 type pendingAssistantTurn struct {
@@ -703,6 +705,9 @@ func (m Model) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 		m.height = msg.Height
 		m.resize()
 		m.refreshViewport()
+		return m, nil
+	case ui.FrameMsg:
+		m.prepareFrame()
 		return m, nil
 	case rootTimerMsg:
 		if msg.Seq != m.rootTimerSeq {
@@ -1774,16 +1779,18 @@ func (m *Model) applyEvent(evt domain.Event) {
 		}
 		m.pendingAssistant.Text += evt.Text
 		m.startBusy(busyScopeTranscript, "Working ...")
-		m.syncContextEstimate()
-		m.refreshTranscriptForPendingTurn()
+		m.pendingTranscriptFrameDirty = true
+		m.pendingContextFrameDirty = true
+		m.invalidatePendingTranscriptFrame()
 	case domain.EventKindReasoning:
 		if m.pendingAssistant.CreatedAt.IsZero() {
 			m.pendingAssistant.CreatedAt = time.Now().UTC()
 		}
 		m.pendingAssistant.Reasoning += evt.Text
 		m.startBusy(busyScopeTranscript, "Thinking ...")
-		m.syncContextEstimate()
-		m.refreshTranscriptForPendingTurn()
+		m.pendingTranscriptFrameDirty = true
+		m.pendingContextFrameDirty = true
+		m.invalidatePendingTranscriptFrame()
 	case domain.EventKindToolStart:
 		status := strings.TrimSpace(evt.Text)
 		if status == "" {
@@ -1872,11 +1879,31 @@ func (m *Model) refreshTranscriptForPendingTurn() {
 	m.refreshViewportPreserve()
 }
 
+func (m *Model) invalidatePendingTranscriptFrame() {
+	m.invalidateMainSurface()
+	if main := m.ensureMainScreenWidget(); main != nil {
+		main.transcript.Invalidate()
+	}
+}
+
+func (m *Model) prepareFrame() {
+	if m.pendingContextFrameDirty {
+		m.syncContextEstimate()
+		m.pendingContextFrameDirty = false
+	}
+	if m.pendingTranscriptFrameDirty {
+		m.pendingTranscriptFrameDirty = false
+		m.refreshTranscriptForPendingTurn()
+	}
+}
+
 func (m *Model) clearPendingAssistantTurn() {
 	if strings.TrimSpace(m.pendingAssistant.Text) == "" && strings.TrimSpace(m.pendingAssistant.Reasoning) == "" {
 		return
 	}
 	m.pendingAssistant = pendingAssistantTurn{}
+	m.pendingTranscriptFrameDirty = false
+	m.pendingContextFrameDirty = false
 	m.refreshTranscriptForPendingTurn()
 }
 

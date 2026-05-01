@@ -130,6 +130,19 @@ func BenchmarkApplyEventStreamLargeTranscript(b *testing.B) {
 		}
 	})
 
+	b.Run("message_delta_then_frame", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			b.StopTimer()
+			m := benchmarkModel(b, 220)
+			b.StartTimer()
+			for _, chunk := range textChunks {
+				m.applyEvent(domain.Event{Kind: domain.EventKindMessageDelta, Text: chunk})
+			}
+			m.prepareFrame()
+		}
+	})
+
 	b.Run("reasoning_then_text", func(b *testing.B) {
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {

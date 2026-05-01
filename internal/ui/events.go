@@ -43,6 +43,10 @@ type WindowSizeMsg struct {
 	Height int
 }
 
+type FrameMsg struct {
+	At time.Time
+}
+
 type mouseModeMsg struct {
 	enabled bool
 }

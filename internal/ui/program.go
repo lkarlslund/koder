@@ -21,13 +21,15 @@ type Program struct {
 	colorProfile    ColorProfile
 	colorProfileSet bool
 
-	mu           sync.Mutex
-	title        string
-	mouseEnabled bool
-	sent         chan Msg
-	renderedRows []string
-	rendered     SurfaceView
-	didRender    bool
+	mu            sync.Mutex
+	title         string
+	mouseEnabled  bool
+	sent          chan Msg
+	renderedRows  []string
+	rendered      SurfaceView
+	didRender     bool
+	framePending  bool
+	frameInterval time.Duration
 }
 
 type inputEventReader interface {
@@ -37,8 +39,9 @@ type inputEventReader interface {
 
 func NewProgram(model Model, opts ...ProgramOption) *Program {
 	p := &Program{
-		model: model,
-		sent:  make(chan Msg, 256),
+		model:         model,
+		sent:          make(chan Msg, 256),
+		frameInterval: time.Second / 30,
 	}
 	for _, opt := range opts {
 		if opt != nil {
@@ -114,6 +117,12 @@ func (p *Program) Run() (Model, error) {
 		if !ok {
 			return p.model, nil
 		}
+		frame, isFrame := msg.(FrameMsg)
+		if isFrame {
+			if !p.consumeFrame(frame) {
+				continue
+			}
+		}
 		if quit, err := p.handleRuntimeMsg(msg, out); quit || err != nil {
 			return p.model, err
 		}
@@ -122,10 +131,45 @@ func (p *Program) Run() (Model, error) {
 		if cmd != nil {
 			p.runCmd(cmd, events)
 		}
-		if err := p.render(out); err != nil {
-			return p.model, err
+		if isFrame || p.shouldRenderImmediately(msg) {
+			if err := p.render(out); err != nil {
+				return p.model, err
+			}
+			continue
 		}
+		p.requestFrame(events)
 	}
+}
+
+func (p *Program) shouldRenderImmediately(msg Msg) bool {
+	switch msg.(type) {
+	case WindowSizeMsg:
+		return true
+	default:
+		return false
+	}
+}
+
+func (p *Program) requestFrame(out chan<- Msg) {
+	if p == nil || out == nil || p.framePending {
+		return
+	}
+	delay := p.frameInterval
+	if delay <= 0 {
+		delay = time.Second / 30
+	}
+	p.framePending = true
+	p.runCmd(Tick(delay, func(t time.Time) Msg {
+		return FrameMsg{At: t}
+	}), out)
+}
+
+func (p *Program) consumeFrame(FrameMsg) bool {
+	if p == nil {
+		return false
+	}
+	p.framePending = false
+	return true
 }
 
 func (p *Program) handleRuntimeMsg(msg Msg, out io.Writer) (bool, error) {
