@@ -362,7 +362,7 @@ func BenchmarkViewSurfaceMainResize(b *testing.B) {
 
 func BenchmarkMainScreenRetainedPrepareIdle(b *testing.B) {
 	m := benchmarkModel(b, 140)
-	screen := m.ensureMainScreenWidget()
+	screen := m.ensureMainScreenView()
 	ctx := &ui.Context{Palette: m.palette}
 	bounds := ui.Rect{W: m.width, H: m.height}
 	_ = screen.Surface(ctx, bounds)

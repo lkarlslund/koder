@@ -225,7 +225,7 @@ func (m *Model) mainWindow() ui.Window {
 				return m.handleMainWindowMouse(msg)
 			},
 			timer: func(m *Model, event ui.TimerEvent) (bool, ui.Cmd) {
-				main := m.ensureMainScreenWidget()
+				main := m.ensureMainScreenView()
 				if main == nil || !main.HandleComposerTimer(event) {
 					return false, nil
 				}

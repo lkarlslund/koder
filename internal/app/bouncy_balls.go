@@ -56,7 +56,7 @@ func (o *bouncyBallsOverlay) Enable(width, height int) {
 	}
 	o.randomizePositions()
 	o.fitToBounds(o.viewportW, o.viewportH)
-	o.setDirtyFromCurrent()
+	o.dirtyRects = []ui.Rect{{W: o.viewportW, H: o.viewportH}}
 	o.lastStepAt = time.Time{}
 }
 
@@ -64,7 +64,7 @@ func (o *bouncyBallsOverlay) Disable() {
 	if !o.Enabled {
 		return
 	}
-	o.cleanupRects = append(o.cleanupRects[:0], o.currentBallRects()...)
+	o.cleanupRects = []ui.Rect{{W: o.viewportW, H: o.viewportH}}
 	o.Enabled = false
 	o.balls = nil
 	o.lastStepAt = time.Time{}
@@ -112,7 +112,6 @@ func (o *bouncyBallsOverlay) StepAt(now time.Time, width, height int) bool {
 	if !o.Enabled {
 		return false
 	}
-	before := o.currentBallRects()
 	o.viewportW = max(0, width)
 	o.viewportH = max(0, height)
 	o.fitToBounds(width, height)
@@ -164,7 +163,7 @@ func (o *bouncyBallsOverlay) StepAt(now time.Time, width, height int) bool {
 			}
 		}
 	}
-	o.setDirtyUnion(before, o.currentBallRects())
+	o.dirtyRects = []ui.Rect{{W: max(0, width), H: max(0, height)}}
 	return true
 }
 

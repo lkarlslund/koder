@@ -32,7 +32,6 @@ import (
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/theme"
 	"github.com/lkarlslund/koder/internal/tools"
-	apptui "github.com/lkarlslund/koder/internal/tui"
 	"github.com/lkarlslund/koder/internal/tui/dialogs"
 	"github.com/lkarlslund/koder/internal/ui"
 	"github.com/lkarlslund/koder/internal/ui/textarea"
@@ -495,7 +494,7 @@ type Model struct {
 	toolRunItemIndexByAppr      map[int64]int
 	pendingTranscriptIndex      int
 	transcriptDirty             bool
-	mainScreen                  *apptui.MainScreenWidget
+	mainScreen                  *mainScreenView
 	renderCache                 *modelRenderCache
 	expandedToolRuns            map[string]bool
 	expandedToolRunCommands     map[string]bool
@@ -1547,8 +1546,8 @@ func (m *Model) handleMouse(msg ui.MouseMsg) (ui.Model, ui.Cmd, bool) {
 	m.refreshViewportAt(m.viewport.YOffset)
 	contentX := msg.X
 	contentY := msg.Y
-	main := m.ensureMainScreenWidget()
-	_ = main.Surface(&ui.Context{Palette: m.palette}, ui.Rect{W: max(0, m.width), H: max(0, m.height)})
+	main := m.ensureMainScreenView()
+	_ = m.renderBodySurface()
 	if control, ok := main.TranscriptControlAt(ui.Point{X: max(0, contentX), Y: contentY}); ok {
 		if strings.HasPrefix(control.ID, "toolrun:") {
 			target := strings.TrimPrefix(control.ID, "toolrun:")
@@ -1753,7 +1752,7 @@ func (m *Model) scrollTranscript(delta int) {
 	if len(m.messages) == 0 && m.viewport.TotalLineCount() > 0 {
 		m.viewport.SetYOffset(target)
 		m.invalidateMainSurface()
-		if main := m.ensureMainScreenWidget(); main != nil {
+		if main := m.ensureMainScreenView(); main != nil {
 			main.InvalidateTranscript()
 		}
 		return
@@ -1881,7 +1880,7 @@ func (m *Model) refreshTranscriptForPendingTurn() {
 
 func (m *Model) invalidatePendingTranscriptFrame() {
 	m.invalidateMainSurface()
-	if main := m.ensureMainScreenWidget(); main != nil {
+	if main := m.ensureMainScreenView(); main != nil {
 		main.InvalidateTranscript()
 	}
 }
@@ -1958,7 +1957,7 @@ func (m *Model) renderBodySurface() ui.Surface {
 	if !m.ensureRenderCache().composerAreaValid {
 		_ = m.renderComposerAreaSurface()
 	}
-	surface := m.ensureMainScreenWidget().Surface(ctx, ui.Rect{W: width, H: height})
+	surface := m.ensureMainScreenView().Surface(ctx, ui.Rect{W: width, H: height})
 	cache := m.ensureRenderCache()
 	cache.renderedBodySurface = surface
 	cache.bodyValid = true
@@ -1966,7 +1965,7 @@ func (m *Model) renderBodySurface() ui.Surface {
 }
 
 func (m *Model) renderBodyElement() ui.Node {
-	return m.renderMainScreenElement()
+	return m.ensureMainScreenView().root
 }
 
 func (m *Model) transcriptViewportHeight() int {
@@ -1997,13 +1996,6 @@ func (m *Model) transcriptPaneHeight() int {
 		height -= composerHeight
 	}
 	return max(0, height)
-}
-
-func (m *Model) renderTranscriptPaneElement(transcript ui.Node) ui.Node {
-	return ui.AsNode(ui.Border{
-		Child:      transcript,
-		Background: m.palette.ScreenBackground,
-	})
 }
 
 func (m *Model) renderComposerAreaSurface() ui.Surface {
@@ -2096,41 +2088,6 @@ func (m *Model) statusPaneHeight() int {
 		return 0
 	}
 	return element.Measure(&ui.Context{Palette: m.palette}, ui.NewConstraints(max(0, m.width), 0)).H
-}
-
-func (m *Model) renderMainScreenElement() ui.Node {
-	var transcript ui.Node = ui.AsNode(ui.SurfaceBox{Surface: m.viewport.VisibleSurface()})
-	if retained := m.transcriptElement(nil); retained != nil {
-		transcript = retained
-	}
-	mainChildren := []ui.Child{
-		ui.Flex(m.renderTranscriptPaneElement(transcript), 1),
-		ui.Fixed(m.renderComposerAreaElement()),
-	}
-	mainColumn := ui.AsNode(ui.NewFlexBox(ui.DirectionVertical, mainChildren, 0))
-	sidebar := ui.AsNode(ui.VisibleElement{
-		BoxProps: ui.BoxProps{
-			Hidden: !m.showSidebar,
-		},
-		Child: ui.AsNode(ui.Sidebar{
-			Child:  ui.AsNode(ui.TextPane{Content: m.renderSidebar()}),
-			Height: m.viewport.Height,
-			Width:  m.sidebarWidth(),
-		}),
-	})
-	rootChildren := []ui.Child{
-		ui.Flex(ui.AsNode(ui.NewFlexBox(
-			ui.DirectionHorizontal,
-			[]ui.Child{
-				ui.Flex(ui.AsNode(ui.Inset{Padding: ui.SymmetricInsets(mainScreenVerticalInset, 0), Child: mainColumn}), 1),
-				ui.Fixed(ui.Spacer{W: 1}),
-				ui.Fixed(sidebar),
-			},
-			0,
-		)), 1),
-		ui.Fixed(m.renderStatusPaneElement()),
-	}
-	return ui.AsNode(ui.NewFlexBox(ui.DirectionVertical, rootChildren, 0))
 }
 
 func (m *Model) renderComposerElement() ui.Node {
@@ -2657,7 +2614,7 @@ func (m *Model) refreshViewportAt(offset int) {
 	m.viewport.SetContentHeight(totalHeight)
 	m.viewport.SetYOffset(appliedY)
 	m.viewport.SetVisibleSurface(m.renderTranscriptVisibleSurface(retained, width, viewportHeight, appliedY))
-	if main := m.ensureMainScreenWidget(); main != nil {
+	if main := m.ensureMainScreenView(); main != nil {
 		main.InvalidateTranscript()
 	}
 }
@@ -2678,7 +2635,7 @@ func (m *Model) invalidateBodyCache() {
 	cache := m.ensureRenderCache()
 	cache.bodyValid = false
 	cache.renderedBodySurface = ui.Surface{}
-	if main := m.ensureMainScreenWidget(); main != nil {
+	if main := m.ensureMainScreenView(); main != nil {
 		main.InvalidateTranscript()
 		main.InvalidateComposer()
 		main.InvalidateSidebar()
@@ -2691,7 +2648,7 @@ func (m *Model) invalidateMainSurface() {
 	cache := m.ensureRenderCache()
 	cache.bodyValid = false
 	cache.renderedBodySurface = ui.Surface{}
-	if main := m.ensureMainScreenWidget(); main != nil {
+	if main := m.ensureMainScreenView(); main != nil {
 		main.Invalidate()
 	}
 }
@@ -2701,7 +2658,7 @@ func (m *Model) invalidateFooterCache() {
 	cache.composerAreaValid = false
 	cache.renderedComposerAreaSurface = ui.Surface{}
 	m.composerCursorDirty = false
-	if main := m.ensureMainScreenWidget(); main != nil {
+	if main := m.ensureMainScreenView(); main != nil {
 		main.Invalidate()
 	}
 }
@@ -2711,9 +2668,6 @@ func (m *Model) invalidateFooterCursor() {
 	cache.composerAreaValid = false
 	cache.renderedComposerAreaSurface = ui.Surface{}
 	m.composerCursorDirty = true
-	if main := m.ensureMainScreenWidget(); main != nil {
-		main.InvalidateComposer()
-	}
 }
 
 func (m *Model) ensureRenderCache() *modelRenderCache {
@@ -2732,7 +2686,7 @@ func (m *Model) ensureRetainedTranscript() *ui.RetainedTranscript {
 
 func (m *Model) invalidateTranscript() {
 	m.transcriptDirty = true
-	if main := m.ensureMainScreenWidget(); main != nil {
+	if main := m.ensureMainScreenView(); main != nil {
 		main.InvalidateTranscript()
 	}
 	m.invalidateBodyCache()
@@ -6893,7 +6847,7 @@ func (m *Model) syncComposerVisibility() {
 			m.composer.Blur()
 		}
 	}
-	if main := m.ensureMainScreenWidget(); main != nil {
+	if main := m.ensureMainScreenView(); main != nil {
 		main.SyncComposerBlinkTimer(m.ensureUIRoot())
 	}
 	if beforeFocus != m.composer.Focused() || beforeCursorVisible != m.composer.CursorVisible() {
@@ -6928,7 +6882,7 @@ func (m *Model) buildTranscriptItems() []ui.TranscriptItem {
 }
 
 func (m *Model) withRootTimers(cmd ui.Cmd) ui.Cmd {
-	if main := m.ensureMainScreenWidget(); main != nil {
+	if main := m.ensureMainScreenView(); main != nil {
 		main.SyncComposerBlinkTimer(m.ensureUIRoot())
 	}
 	animationCmd := m.bouncyBalls.TickCmd()

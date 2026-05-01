@@ -179,11 +179,11 @@ func TestComposerRevisionChangeMarksRetainedFooterDirty(t *testing.T) {
 	}
 
 	ctx := &ui.Context{Palette: m.palette}
-	main := m.ensureMainScreenWidget()
+	main := m.ensureMainScreenView()
 	_ = main.Surface(ctx, ui.Rect{W: m.width, H: m.height})
 
 	m.composer.InsertString("hello")
-	m.syncMainScreenWidgetState()
+	m.syncMainScreenViewState()
 	if !main.ComposerDirty() {
 		t.Fatal("expected composer widget to become dirty from textarea revision change")
 	}
@@ -3169,7 +3169,7 @@ func TestOpenSessionPickerStopsComposerBlinkTimer(t *testing.T) {
 		}},
 	}
 
-	m.ensureMainScreenWidget().SyncComposerBlinkTimer(m.ensureUIRoot())
+	m.ensureMainScreenView().SyncComposerBlinkTimer(m.ensureUIRoot())
 	if timers := m.syncUIRoot().ActiveTimers(composerBlinkTimerOwner); len(timers) == 0 {
 		t.Fatal("expected focused composer to own a blink timer")
 	}
@@ -4777,7 +4777,7 @@ func TestSidebarWidthHotkeysGrowRenderedSidebarColumn(t *testing.T) {
 		t.Fatalf("expected sidebar width override to grow, before=%d after=%d", before, after)
 	}
 	_ = next.viewSurface()
-	if got := next.ensureMainScreenWidget().SidebarBasis(); got != after {
+	if got := next.ensureMainScreenView().SidebarBasis(); got != after {
 		t.Fatalf("expected sidebar flex basis to track width, got %d want %d", got, after)
 	}
 }
@@ -6567,7 +6567,7 @@ func TestMouseClickTogglesToolRunExpansion(t *testing.T) {
 	clickX := -1
 	clickY := -1
 	controlWidth := -1
-	for _, control := range m.ensureMainScreenWidget().TranscriptControls() {
+	for _, control := range m.ensureMainScreenView().TranscriptControls() {
 		if control.ID != "toolrun:call_bash_1:output" {
 			continue
 		}
@@ -6577,7 +6577,7 @@ func TestMouseClickTogglesToolRunExpansion(t *testing.T) {
 		break
 	}
 	if clickX < 0 || clickY < 0 {
-		t.Fatalf("expected toolrun control to be registered, got %#v", m.ensureMainScreenWidget().TranscriptControls())
+		t.Fatalf("expected toolrun control to be registered, got %#v", m.ensureMainScreenView().TranscriptControls())
 	}
 	if controlWidth != ui.PlainWidth("Expand output (1 line)") {
 		t.Fatalf("expected expand control width %d, got %d", ui.PlainWidth("Expand output (1 line)"), controlWidth)
@@ -6666,7 +6666,7 @@ func TestMouseClickTogglesToolRunExpansionWhileBusy(t *testing.T) {
 
 	clickX := -1
 	clickY := -1
-	for _, control := range m.ensureMainScreenWidget().TranscriptControls() {
+	for _, control := range m.ensureMainScreenView().TranscriptControls() {
 		if control.ID != "toolrun:call_bash_1:output" {
 			continue
 		}
@@ -6675,7 +6675,7 @@ func TestMouseClickTogglesToolRunExpansionWhileBusy(t *testing.T) {
 		break
 	}
 	if clickX < 0 || clickY < 0 {
-		t.Fatalf("expected toolrun control to be registered, got %#v", m.ensureMainScreenWidget().TranscriptControls())
+		t.Fatalf("expected toolrun control to be registered, got %#v", m.ensureMainScreenView().TranscriptControls())
 	}
 
 	before := m.renderBody()
@@ -6758,7 +6758,7 @@ func TestMouseClickResyncsTranscriptControlsDuringBusy(t *testing.T) {
 
 	m.refreshViewport()
 	_ = m.renderBody()
-	if len(m.ensureMainScreenWidget().TranscriptControls()) == 0 {
+	if len(m.ensureMainScreenView().TranscriptControls()) == 0 {
 		t.Fatal("expected initial transcript controls")
 	}
 
@@ -6856,7 +6856,7 @@ func TestMouseClickTogglesEditToolRunExpansion(t *testing.T) {
 	_ = m.renderBody()
 	clickX := -1
 	clickY := -1
-	for _, control := range m.ensureMainScreenWidget().TranscriptControls() {
+	for _, control := range m.ensureMainScreenView().TranscriptControls() {
 		if control.ID != "toolrun:call_edit_1:output" {
 			continue
 		}
@@ -6865,7 +6865,7 @@ func TestMouseClickTogglesEditToolRunExpansion(t *testing.T) {
 		break
 	}
 	if clickX >= 0 || clickY >= 0 {
-		t.Fatalf("expected no expand control for short edit diff, got %#v", m.ensureMainScreenWidget().TranscriptControls())
+		t.Fatalf("expected no expand control for short edit diff, got %#v", m.ensureMainScreenView().TranscriptControls())
 	}
 }
 
@@ -6902,7 +6902,7 @@ func TestMouseClickTogglesWrappedEditToolRunExpansion(t *testing.T) {
 	_ = m.renderBody()
 	var wrappedControl ui.Control
 	wrappedControlOK := false
-	for _, control := range m.ensureMainScreenWidget().TranscriptControls() {
+	for _, control := range m.ensureMainScreenView().TranscriptControls() {
 		if control.ID == "toolrun:call_edit_wrap_1:output" {
 			wrappedControl = control
 			wrappedControlOK = true
@@ -6910,7 +6910,7 @@ func TestMouseClickTogglesWrappedEditToolRunExpansion(t *testing.T) {
 		}
 	}
 	if !wrappedControlOK {
-		t.Fatalf("expected wrapped edit toolrun control to be registered, got %#v", m.ensureMainScreenWidget().TranscriptControls())
+		t.Fatalf("expected wrapped edit toolrun control to be registered, got %#v", m.ensureMainScreenView().TranscriptControls())
 	}
 
 	updated, cmd := m.Update(ui.MouseMsg{

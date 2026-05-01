@@ -1,0 +1,373 @@
+package tui
+
+import (
+	"github.com/lkarlslund/koder/internal/ui"
+	"github.com/lkarlslund/koder/internal/ui/textarea"
+)
+
+// ComposerBlinkTimerOwner identifies the composer cursor blink timer.
+const ComposerBlinkTimerOwner = "composer"
+
+// ChatTranscriptState describes the current transcript viewport.
+type ChatTranscriptState struct {
+	Retained   *ui.RetainedTranscript
+	Width      int
+	Height     int
+	YOffset    int
+	Background ui.CellColor
+}
+
+// ChatTranscriptNode renders a retained transcript viewport.
+type ChatTranscriptNode struct {
+	ui.BaseNode
+	retained   *ui.RetainedTranscript
+	width      int
+	height     int
+	yOffset    int
+	background ui.CellColor
+	controls   []ui.Control
+	surface    ui.Surface
+}
+
+// NewChatTranscriptNode constructs a transcript viewport node.
+func NewChatTranscriptNode() *ChatTranscriptNode {
+	node := &ChatTranscriptNode{}
+	node.MarkLayoutDirty()
+	return node
+}
+
+// SetState replaces the transcript display state.
+func (n *ChatTranscriptNode) SetState(state ChatTranscriptState) {
+	if n == nil {
+		return
+	}
+	if n.retained == state.Retained &&
+		n.width == max(0, state.Width) &&
+		n.height == max(0, state.Height) &&
+		n.yOffset == max(0, state.YOffset) &&
+		n.background == state.Background {
+		return
+	}
+	n.retained = state.Retained
+	n.width = max(0, state.Width)
+	n.height = max(0, state.Height)
+	n.yOffset = max(0, state.YOffset)
+	n.background = state.Background
+	n.MarkLayoutDirty()
+}
+
+// Invalidate marks the transcript for repaint.
+func (n *ChatTranscriptNode) Invalidate() {
+	if n == nil {
+		return
+	}
+	n.MarkDirtyLocal(ui.Rect{W: n.Rect().W, H: n.Rect().H})
+}
+
+// Measure returns the viewport size requested by app state.
+func (n *ChatTranscriptNode) Measure(_ *ui.Context, constraints ui.Constraints) ui.Size {
+	if n == nil {
+		return constraints.Clamp(ui.Size{})
+	}
+	return constraints.Clamp(ui.Size{W: n.width, H: n.height})
+}
+
+// Prepare renders the visible transcript and records damage.
+func (n *ChatTranscriptNode) Prepare(ctx *ui.Context) {
+	if n == nil {
+		return
+	}
+	rect := n.Rect()
+	if rect.Empty() {
+		n.controls = nil
+		return
+	}
+	if !n.NeedsPaint() && !n.NeedsLayout() {
+		return
+	}
+	next := n.renderSurface(ctx, rect)
+	diff := ui.DiffSurfaceDamage(n.surface, next)
+	if len(diff) == 0 && n.NeedsLayout() {
+		n.MarkDirtyLocal(ui.Rect{W: rect.W, H: rect.H})
+	} else {
+		n.MarkDirtyLocalRects(diff)
+	}
+	n.surface = next
+}
+
+// Paint paints the latest rendered transcript surface.
+func (n *ChatTranscriptNode) Paint(_ *ui.Context, canvas ui.Canvas) {
+	if n == nil || canvas.Width() <= 0 || canvas.Height() <= 0 {
+		return
+	}
+	canvas.Fill(ui.Rect{W: canvas.Width(), H: canvas.Height()}, ui.CellStyle{BG: n.background})
+	canvas.BlitSurface(0, 0, n.surface.Normalize(canvas.Width(), canvas.Height()))
+}
+
+// ControlAt returns the topmost transcript control at point.
+func (n *ChatTranscriptNode) ControlAt(point ui.Point) (ui.Control, bool) {
+	if n == nil {
+		return ui.Control{}, false
+	}
+	for idx := len(n.controls) - 1; idx >= 0; idx-- {
+		control := n.controls[idx]
+		if control.Enabled && control.Rect.Contains(point) {
+			return control, true
+		}
+	}
+	return ui.Control{}, false
+}
+
+// Controls returns the controls registered during the latest render.
+func (n *ChatTranscriptNode) Controls() []ui.Control {
+	if n == nil || len(n.controls) == 0 {
+		return nil
+	}
+	out := make([]ui.Control, len(n.controls))
+	copy(out, n.controls)
+	return out
+}
+
+func (n *ChatTranscriptNode) renderSurface(ctx *ui.Context, bounds ui.Rect) ui.Surface {
+	if n == nil || n.retained == nil || bounds.W <= 0 || bounds.H <= 0 {
+		n.controls = nil
+		return ui.Surface{}
+	}
+	runtime := ui.Runtime{}
+	renderCtx := ui.Context{}
+	if ctx != nil {
+		renderCtx = *ctx
+	}
+	renderCtx.Runtime = &runtime
+	surface := ui.BlankSurface(max(0, bounds.W), max(0, bounds.H))
+	n.retained.RenderVisibleInto(&renderCtx, max(0, bounds.W), max(0, bounds.H), max(0, n.yOffset), &surface)
+	n.controls = runtime.Controls()
+	return surface
+}
+
+// ComposerState describes the current composer display.
+type ComposerState struct {
+	AreaElement ui.Node
+	Element     ui.Node
+	Revision    uint64
+	CursorDirty bool
+	Focused     bool
+	ShouldBlink bool
+}
+
+// ComposerNode renders the composer area and tracks cursor damage.
+type ComposerNode struct {
+	ui.BaseNode
+	areaElement  ui.Node
+	element      ui.Node
+	revision     uint64
+	cursorDirty  bool
+	focused      bool
+	blinkEnabled bool
+	measureWidth int
+	measureSize  ui.Size
+	measureValid bool
+	measureRev   uint64
+	lastRevision uint64
+	blinkActive  bool
+	surface      ui.Surface
+	cursorRect   ui.Rect
+	cursorValid  bool
+}
+
+// NewComposerNode constructs a composer display node.
+func NewComposerNode() *ComposerNode {
+	node := &ComposerNode{}
+	node.MarkLayoutDirty()
+	return node
+}
+
+// SetState replaces the composer display state.
+func (n *ComposerNode) SetState(state ComposerState) {
+	if n == nil {
+		return
+	}
+	revisionChanged := n.revision != state.Revision
+	n.areaElement = state.AreaElement
+	n.element = state.Element
+	n.revision = state.Revision
+	n.cursorDirty = state.CursorDirty
+	n.focused = state.Focused
+	n.blinkEnabled = state.ShouldBlink
+	if revisionChanged {
+		n.measureValid = false
+	}
+	if revisionChanged {
+		n.MarkDirtyLocal(ui.Rect{W: n.Rect().W, H: n.Rect().H})
+	}
+}
+
+// Invalidate marks the composer for remeasure and repaint.
+func (n *ComposerNode) Invalidate() {
+	if n == nil {
+		return
+	}
+	n.measureValid = false
+	n.MarkLayoutDirty()
+}
+
+// Dirty reports whether the composer has pending state changes.
+func (n *ComposerNode) Dirty() bool {
+	return n == nil || n.NeedsLayout() || n.NeedsPaint() || n.lastRevision != n.revision || n.cursorDirty
+}
+
+// Measure returns the measured composer area size.
+func (n *ComposerNode) Measure(ctx *ui.Context, constraints ui.Constraints) ui.Size {
+	if n == nil {
+		return constraints.Clamp(ui.Size{})
+	}
+	if n.measureValid && n.measureWidth == constraints.MaxW && n.measureRev == n.revision {
+		return constraints.Clamp(n.measureSize)
+	}
+	painter := measuredPainterFromElement(n.areaElement)
+	if painter == nil {
+		n.measureSize = ui.Size{}
+	} else {
+		n.measureSize = painter.Measure(ctx, ui.NewConstraints(constraints.MaxW, 0))
+	}
+	n.measureWidth = constraints.MaxW
+	n.measureRev = n.revision
+	n.measureValid = true
+	return constraints.Clamp(n.measureSize)
+}
+
+// Prepare renders the composer area and records cursor-local damage.
+func (n *ComposerNode) Prepare(ctx *ui.Context) {
+	if n == nil {
+		return
+	}
+	rect := n.Rect()
+	if rect.Empty() {
+		return
+	}
+	if !n.Dirty() {
+		return
+	}
+	next := paintMeasuredSurface(ctx, measuredPainterFromElement(n.areaElement), rect)
+	nextCursorRect, nextCursorOK := n.cursorRectForBounds(rect)
+	switch {
+	case !n.NeedsLayout() && n.cursorDirty && n.cursorValid && nextCursorOK:
+		damage := ui.DamageSet{}
+		damage.Add(n.cursorRect)
+		damage.Add(nextCursorRect)
+		n.MarkDirtyLocalRects(damage.Rects())
+	default:
+		diff := ui.DiffSurfaceDamage(n.surface, next)
+		if len(diff) == 0 && n.NeedsLayout() {
+			n.MarkDirtyLocal(ui.Rect{W: rect.W, H: rect.H})
+		} else {
+			n.MarkDirtyLocalRects(diff)
+		}
+	}
+	n.surface = next
+	n.cursorRect = nextCursorRect
+	n.cursorValid = nextCursorOK
+	n.cursorDirty = false
+	n.lastRevision = n.revision
+}
+
+// Paint paints the latest composer surface.
+func (n *ComposerNode) Paint(_ *ui.Context, canvas ui.Canvas) {
+	if n == nil || canvas.Width() <= 0 || canvas.Height() <= 0 {
+		return
+	}
+	canvas.BlitSurface(0, 0, n.surface.Normalize(canvas.Width(), canvas.Height()))
+}
+
+// SyncBlinkTimer synchronizes the composer blink timer.
+func (n *ComposerNode) SyncBlinkTimer(root *ui.Root) {
+	if n == nil || root == nil {
+		return
+	}
+	if !n.shouldBlink() {
+		if n.blinkActive {
+			root.StopOwnerTimers(ComposerBlinkTimerOwner)
+			n.blinkActive = false
+		}
+		return
+	}
+	if n.blinkActive {
+		return
+	}
+	root.StartTimer(ComposerBlinkTimerOwner, ui.TimerSpec{
+		Interval: textarea.BlinkInterval(),
+		Repeat:   true,
+	})
+	n.blinkActive = true
+}
+
+// HandleTimer reports whether event is a relevant composer timer.
+func (n *ComposerNode) HandleTimer(event ui.TimerEvent) bool {
+	if n == nil || event.Owner != ComposerBlinkTimerOwner {
+		return false
+	}
+	return n.shouldBlink()
+}
+
+// Surface renders the composer area to a standalone surface.
+func (n *ComposerNode) Surface(ctx *ui.Context, bounds ui.Rect) ui.Surface {
+	if n == nil {
+		return ui.Surface{}
+	}
+	return paintMeasuredSurface(ctx, measuredPainterFromElement(n.areaElement), bounds)
+}
+
+func (n *ComposerNode) shouldBlink() bool {
+	return n != nil && n.blinkEnabled && n.focused
+}
+
+func (n *ComposerNode) cursorRectForBounds(bounds ui.Rect) (ui.Rect, bool) {
+	if n == nil || bounds.H < 2 {
+		return ui.Rect{}, false
+	}
+	composer, ok := n.element.(ui.Composer)
+	if !ok {
+		return ui.Rect{}, false
+	}
+	rect, ok := composer.CursorRect()
+	if !ok {
+		return ui.Rect{}, false
+	}
+	if rect.X >= bounds.W || rect.Y >= bounds.H {
+		return ui.Rect{}, false
+	}
+	if rect.X+rect.W > bounds.W {
+		rect.W = bounds.W - rect.X
+	}
+	if rect.W <= 0 {
+		return ui.Rect{}, false
+	}
+	return rect, true
+}
+
+type measuredPainter interface {
+	Measure(*ui.Context, ui.Constraints) ui.Size
+	Paint(*ui.Context, ui.Canvas)
+}
+
+func measuredPainterFromElement(node ui.Node) measuredPainter {
+	if node == nil {
+		return nil
+	}
+	painter, ok := node.(measuredPainter)
+	if !ok {
+		return nil
+	}
+	return painter
+}
+
+func paintMeasuredSurface(ctx *ui.Context, painter measuredPainter, bounds ui.Rect) ui.Surface {
+	width := max(0, bounds.W)
+	height := max(0, bounds.H)
+	if painter == nil || width <= 0 || height <= 0 {
+		return ui.TransparentSurface(width, height)
+	}
+	surface := ui.TransparentSurface(width, height)
+	painter.Paint(ctx, ui.NewCanvas(&surface, ui.Rect{W: width, H: height}))
+	return surface
+}

@@ -8,7 +8,7 @@ import (
 	"github.com/lkarlslund/koder/internal/ui/textarea"
 )
 
-func TestMainScreenRetainedRootPrepareDirtyUsesNodeFlags(t *testing.T) {
+func TestMainScreenViewPrepareDirtyUsesNodeFlags(t *testing.T) {
 	m := Model{
 		cfg:         testConfig(t),
 		palette:     theme.Default().Palette,
@@ -19,7 +19,7 @@ func TestMainScreenRetainedRootPrepareDirtyUsesNodeFlags(t *testing.T) {
 		height:      24,
 	}
 	m.composer.SetValue("draft text")
-	w := m.ensureMainScreenWidget()
+	w := m.ensureMainScreenView()
 	ctx := &ui.Context{Palette: m.palette}
 	bounds := ui.Rect{W: 80, H: 24}
 
@@ -36,7 +36,7 @@ func TestMainScreenRetainedRootPrepareDirtyUsesNodeFlags(t *testing.T) {
 	}
 }
 
-func TestMainScreenRetainedRootLayoutChangeMarksNodesDirtyWithoutWidgetInvalidation(t *testing.T) {
+func TestMainScreenViewLayoutChangeMarksNodesDirtyWithoutInvalidation(t *testing.T) {
 	m := Model{
 		cfg:         testConfig(t),
 		palette:     theme.Default().Palette,
@@ -47,7 +47,7 @@ func TestMainScreenRetainedRootLayoutChangeMarksNodesDirtyWithoutWidgetInvalidat
 		height:      24,
 	}
 	m.composer.SetValue("draft text")
-	w := m.ensureMainScreenWidget()
+	w := m.ensureMainScreenView()
 	ctx := &ui.Context{Palette: m.palette}
 
 	_ = w.Surface(ctx, ui.Rect{W: 80, H: 24})
@@ -62,7 +62,7 @@ func TestMainScreenRetainedRootLayoutChangeMarksNodesDirtyWithoutWidgetInvalidat
 	}
 }
 
-func TestMainScreenWidgetRepaintsFullyAfterComposerHeightChange(t *testing.T) {
+func TestMainScreenViewRepaintsFullyAfterComposerHeightChange(t *testing.T) {
 	m := Model{
 		cfg:         testConfig(t),
 		palette:     theme.Default().Palette,
@@ -73,7 +73,7 @@ func TestMainScreenWidgetRepaintsFullyAfterComposerHeightChange(t *testing.T) {
 		height:      24,
 	}
 	m.composer.SetValue("draft text")
-	w := m.ensureMainScreenWidget()
+	w := m.ensureMainScreenView()
 	ctx := &ui.Context{Palette: m.palette}
 	bounds := ui.Rect{W: 80, H: 24}
 
@@ -91,7 +91,7 @@ func TestMainScreenWidgetRepaintsFullyAfterComposerHeightChange(t *testing.T) {
 	next := w.Surface(ctx, bounds)
 
 	m.mainScreen = nil
-	fullWidget := m.ensureMainScreenWidget()
+	fullWidget := m.ensureMainScreenView()
 	fullWidget.Invalidate()
 	full := fullWidget.Surface(ctx, bounds)
 
