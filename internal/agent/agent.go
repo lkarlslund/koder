@@ -1706,6 +1706,9 @@ func (e *Engine) baseInstructionsForChat(session domain.Session, chat domain.Cha
 	instructions := []provider.InstructionBlock{{
 		Kind: provider.InstructionKindBaseSystem,
 		Text: systemPrompt(),
+	}, {
+		Kind: provider.InstructionKindEnvironment,
+		Text: e.environmentPrompt(session),
 	}}
 	if roleText := strings.TrimSpace(chatRoleInstructions(chat)); roleText != "" {
 		instructions = append(instructions, provider.InstructionBlock{

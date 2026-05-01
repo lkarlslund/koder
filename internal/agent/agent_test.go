@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -61,6 +62,109 @@ func TestSystemPromptDoesNotMentionInternalSlashCommands(t *testing.T) {
 		if strings.Contains(prompt, command) {
 			t.Fatalf("expected system prompt to exclude internal slash command %q", command)
 		}
+	}
+}
+
+func TestFormatEnvironmentPrompt(t *testing.T) {
+	when := time.Date(2026, 5, 1, 14, 3, 22, 0, time.FixedZone("CEST", 2*60*60))
+	got := formatEnvironmentPrompt(environmentSnapshot{
+		WorkspaceRoot: "/repo",
+		Workdir:       "/repo/pkg",
+		DateTime:      when,
+		Platform:      "linux/amd64",
+		OS:            "Linux 6.8.0",
+		Shell:         "/bin/zsh",
+		Git: gitSnapshot{
+			Repository: true,
+			Root:       "/repo",
+			Branch:     "main",
+			Commit:     "abc1234",
+			Upstream:   "origin/main",
+			Staged:     1,
+			Unstaged:   2,
+			Untracked:  3,
+		},
+	})
+	for _, want := range []string{
+		"Runtime environment:",
+		"- Workspace root: /repo",
+		"- Current working directory: /repo/pkg",
+		"- Current date and time: 2026-05-01 14:03:22 CEST (UTC+02:00)",
+		"- Platform: linux/amd64",
+		"- OS: Linux 6.8.0",
+		"- Shell: /bin/zsh",
+		"- Git repository: yes",
+		"- Git root: /repo",
+		"- Git branch: main",
+		"- Git commit: abc1234",
+		"- Git upstream: origin/main",
+		"- Git status: dirty (staged 1, unstaged 2, untracked 3)",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected %q in environment prompt, got %q", want, got)
+		}
+	}
+}
+
+func TestFormatEnvironmentPromptNonGit(t *testing.T) {
+	got := formatEnvironmentPrompt(environmentSnapshot{
+		WorkspaceRoot: "/repo",
+		Workdir:       "/repo",
+		DateTime:      time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC),
+		Platform:      "linux/amd64",
+		OS:            "Linux",
+		Shell:         "unknown",
+	})
+	if !strings.Contains(got, "- Git repository: no") {
+		t.Fatalf("expected non-git status, got %q", got)
+	}
+	if strings.Contains(got, "- Git root:") {
+		t.Fatalf("expected git details to be omitted for non-git workspace, got %q", got)
+	}
+}
+
+func TestGitInfoDetectsRepositoryState(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	repo := t.TempDir()
+	runGit(t, repo, "init")
+	runGit(t, repo, "config", "user.email", "test@example.com")
+	runGit(t, repo, "config", "user.name", "Test User")
+	if err := os.WriteFile(filepath.Join(repo, "tracked.txt"), []byte("one\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "add", "tracked.txt")
+	runGit(t, repo, "commit", "-m", "initial")
+	if err := os.WriteFile(filepath.Join(repo, "tracked.txt"), []byte("two\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "untracked.txt"), []byte("new\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got := gitInfo(repo)
+	if !got.Repository {
+		t.Fatalf("expected git repository, got %#v", got)
+	}
+	if got.Root != repo {
+		t.Fatalf("expected root %q, got %#v", repo, got)
+	}
+	if got.Branch == "" || got.Commit == "" {
+		t.Fatalf("expected branch and commit, got %#v", got)
+	}
+	if got.Unstaged != 1 || got.Untracked != 1 {
+		t.Fatalf("expected unstaged and untracked counts, got %#v", got)
+	}
+}
+
+func runGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v failed: %v\n%s", args, err, out)
 	}
 }
 
@@ -722,6 +826,8 @@ func TestPreviewNextRequestUsesSingleLeadingSystemMessage(t *testing.T) {
 	}
 	for _, want := range []string{
 		"You are koder, a terminal coding agent.",
+		"Runtime environment:",
+		"Current working directory: " + repo,
 		"Resolved project AGENTS.md instructions:\nFollow repository instructions.",
 		"$skill-name",
 		"Session update:\nPermission mode changed",

@@ -10,6 +10,7 @@ type InstructionKind string
 
 const (
 	InstructionKindBaseSystem          InstructionKind = "base_system"
+	InstructionKindEnvironment         InstructionKind = "environment"
 	InstructionKindProjectInstructions InstructionKind = "project_instructions"
 	InstructionKindSkills              InstructionKind = "skills"
 	InstructionKindSessionNote         InstructionKind = "session_note"
