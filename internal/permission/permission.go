@@ -164,18 +164,18 @@ func evaluateBuiltin(profileName string, req Request) Decision {
 		if req.Tool == domain.ToolKindBash || req.Tool == domain.ToolKindExecCommand {
 			return Decision{Mode: domain.PermissionModeAsk, Reason: "shell commands require approval in this mode"}
 		}
-		if isProjectReadTool(req.Tool) && requestTargetsProjectOnly(req) {
+		if isProjectReadTool(req.Tool) && req.targetsProjectOnly() {
 			return Decision{Mode: domain.PermissionModeAllow}
 		}
-		return Decision{Mode: domain.PermissionModeAsk, Reason: reasonForRequest(req, "this mode only auto-allows reads in the current project")}
+		return Decision{Mode: domain.PermissionModeAsk, Reason: req.reason("this mode only auto-allows reads in the current project")}
 	case ProfileWriteAsk:
 		if req.Tool == domain.ToolKindBash || req.Tool == domain.ToolKindExecCommand {
 			return Decision{Mode: domain.PermissionModeAsk, Reason: "shell commands require approval in this mode"}
 		}
-		if isProjectReadOrWriteTool(req.Tool) && requestTargetsProjectOnly(req) {
+		if isProjectReadOrWriteTool(req.Tool) && req.targetsProjectOnly() {
 			return Decision{Mode: domain.PermissionModeAllow}
 		}
-		return Decision{Mode: domain.PermissionModeAsk, Reason: reasonForRequest(req, "this mode only auto-allows reads and writes in the current project")}
+		return Decision{Mode: domain.PermissionModeAsk, Reason: req.reason("this mode only auto-allows reads and writes in the current project")}
 	case ProfileFullAccess:
 		return Decision{Mode: domain.PermissionModeAllow}
 	default:
@@ -204,7 +204,7 @@ func isProjectReadOrWriteTool(tool domain.ToolKind) bool {
 	}
 }
 
-func requestTargetsProjectOnly(req Request) bool {
+func (req Request) targetsProjectOnly() bool {
 	if strings.TrimSpace(req.ProjectRoot) == "" {
 		return false
 	}
@@ -228,7 +228,7 @@ func requestTargetsProjectOnly(req Request) bool {
 	return true
 }
 
-func reasonForRequest(req Request, fallback string) string {
+func (req Request) reason(fallback string) string {
 	switch {
 	case req.OutsideProject:
 		return "target is outside the current project folder"
