@@ -2624,29 +2624,45 @@ func (m *Model) refreshViewportAt(offset int) {
 		m.viewport.SetContent("")
 		return
 	}
-	runtime := ui.Runtime{}
-	ctx := &ui.Context{Palette: m.palette, Runtime: &runtime}
-	var (
-		surface     ui.Surface
-		totalHeight int
-		appliedY    int
-	)
+	width := max(0, m.viewport.Width)
 	viewportHeight := max(0, m.transcriptViewportHeight())
 	m.viewport.SetWindowHeight(viewportHeight)
-	if offset >= 0 {
-		scroll := ui.ScrollBox{Child: ui.AsNode(retained), OffsetY: offset, Width: max(0, m.viewport.Width), Height: viewportHeight}
-		surface, totalHeight, appliedY = scroll.RenderVisible(ctx, max(0, m.viewport.Width), viewportHeight, offset)
+	totalHeight := retained.ContentHeight(width)
+	var appliedY int
+	if offset < 0 {
+		appliedY = max(0, totalHeight-viewportHeight)
 	} else {
-		scroll := ui.ScrollBox{Child: ui.AsNode(retained), Width: max(0, m.viewport.Width), Height: viewportHeight}
-		surface, totalHeight, appliedY = scroll.RenderBottom(ctx, max(0, m.viewport.Width), viewportHeight)
+		appliedY = min(max(0, offset), max(0, totalHeight-viewportHeight))
 	}
 	m.viewport.SetContentHeight(totalHeight)
 	m.viewport.SetYOffset(appliedY)
-	m.transcriptControls = runtime.Controls()
+	surface, totalHeight, appliedY := m.renderTranscriptViewportSurface(retained, width, viewportHeight, appliedY)
+	m.viewport.SetContentHeight(totalHeight)
+	m.viewport.SetYOffset(appliedY)
 	m.viewport.SetVisibleSurface(surface)
 	if main := m.ensureMainScreenWidget(); main != nil {
 		main.transcript.Invalidate()
 	}
+}
+
+func (m *Model) renderTranscriptViewportSurface(retained *ui.RetainedTranscript, width, height, offset int) (ui.Surface, int, int) {
+	width = max(0, width)
+	height = max(0, height)
+	if retained == nil || width <= 0 || height <= 0 {
+		m.transcriptControls = nil
+		m.viewport.SetVisibleSurface(ui.Surface{})
+		return ui.Surface{}, 0, 0
+	}
+	runtime := ui.Runtime{}
+	ctx := &ui.Context{Palette: m.palette, Runtime: &runtime}
+	surface := ui.BlankSurface(width, height)
+	totalHeight, appliedY := retained.RenderVisibleInto(ctx, width, height, offset, &surface)
+	m.viewport.SetWindowHeight(height)
+	m.viewport.SetContentHeight(totalHeight)
+	m.viewport.SetYOffset(appliedY)
+	m.transcriptControls = runtime.Controls()
+	m.viewport.SetVisibleSurface(surface)
+	return surface, totalHeight, appliedY
 }
 
 func (m *Model) invalidateBodyCache() {
@@ -4951,9 +4967,37 @@ func (m *Model) appendLocalUserPrompt(prompt string, drafts []attachment.Draft, 
 	if m.debug != nil {
 		m.debug.RecordLifecycle(m.currentSession.ID, "prompt_submitted", prompt, map[string]string{"optimistic": "true"})
 	}
-	m.transcriptDirty = true
+	if !m.appendUserPromptTranscriptItem(m.messages[len(m.messages)-1], parts) {
+		m.transcriptDirty = true
+	}
 	m.syncContextEstimate()
 	m.refreshViewport()
+}
+
+func (m *Model) appendUserPromptTranscriptItem(msg domain.Message, parts []domain.Part) bool {
+	if m.transcriptDirty || len(m.transcriptItems) == 0 {
+		return false
+	}
+	retained := m.ensureRetainedTranscript()
+	if retained.Len() != len(m.transcriptItems) {
+		return false
+	}
+	if _, ok := m.transcriptItems[len(m.transcriptItems)-1].(*placeholderTranscriptItem); ok {
+		return false
+	}
+	block := transcriptBlock{Kind: transcriptBlockMessage, Message: msg, Parts: parts}
+	prev := m.transcriptBlockForController(m.transcriptItems[len(m.transcriptItems)-1])
+	gap := renderedSeparatorHeight(m.transcriptSeparator(prev, block))
+	item := newUserMessageTranscriptItem(m.transcriptBlockIdentityKey(block), gap, msg, parts)
+	item.Refresh(m)
+	index := len(m.transcriptItems)
+	m.transcriptItems = append(m.transcriptItems, item)
+	retained.Add(item.UIItem())
+	if m.messageItemIndexByID == nil {
+		m.messageItemIndexByID = map[int64]int{}
+	}
+	m.messageItemIndexByID[msg.ID] = index
+	return true
 }
 
 func (m *Model) appendLocalAssistantError(err error) {

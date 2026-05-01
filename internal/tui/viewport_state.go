@@ -67,10 +67,13 @@ func (v transcriptViewport) VisibleLineCount() int {
 	if height <= 0 {
 		height = v.Height
 	}
-	if height <= 0 || v.visible.SurfaceHeight() == 0 {
+	if height <= 0 {
 		return 0
 	}
-	return min(height, v.visible.SurfaceHeight())
+	if visibleHeight := v.visible.SurfaceHeight(); visibleHeight > 0 {
+		return min(height, visibleHeight)
+	}
+	return min(height, v.contentHeight)
 }
 
 func (v transcriptViewport) maxYOffset() int {

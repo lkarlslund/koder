@@ -202,6 +202,14 @@ func (t *RetainedTranscript) Items() []TranscriptItem {
 	return out
 }
 
+// Len returns the number of retained transcript items.
+func (t *RetainedTranscript) Len() int {
+	if t == nil {
+		return 0
+	}
+	return len(t.items)
+}
+
 func (t *RetainedTranscript) Measure(ctx *Context, constraints Constraints) Size {
 	width := constraints.MaxW
 	if width <= 0 {

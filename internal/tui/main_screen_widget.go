@@ -39,22 +39,14 @@ func (w *transcriptWidget) Surface(bounds ui.Rect) ui.Surface {
 		return ui.Surface{}
 	}
 	retained := w.model.syncRetainedTranscript()
-	raw := w.model.viewport.VisibleSurface()
-	surface := raw.Normalize(max(0, bounds.W), max(0, bounds.H))
 	if retained == nil {
-		return surface
+		return ui.Surface{}
 	}
-	scroll := ui.ScrollBox{
-		Child:   ui.AsNode(retained),
-		OffsetY: max(0, w.model.viewport.YOffset),
-		Width:   max(0, bounds.W),
-		Height:  max(0, bounds.H),
+	raw := w.model.viewport.VisibleSurface()
+	if raw.SurfaceWidth() == max(0, bounds.W) && raw.SurfaceHeight() == max(0, bounds.H) {
+		return raw
 	}
-	if raw.SurfaceWidth() != max(0, bounds.W) || raw.SurfaceHeight() != max(0, bounds.H) {
-		rendered, _, _ := scroll.RenderVisible(&ui.Context{Palette: w.model.palette}, max(0, bounds.W), max(0, bounds.H), max(0, w.model.viewport.YOffset))
-		return rendered
-	}
-	_, _, _ = scroll.RenderVisible(&ui.Context{Palette: w.model.palette}, max(0, bounds.W), max(0, bounds.H), max(0, w.model.viewport.YOffset))
+	surface, _, _ := w.model.renderTranscriptViewportSurface(retained, max(0, bounds.W), max(0, bounds.H), max(0, w.model.viewport.YOffset))
 	return surface
 }
 
@@ -344,7 +336,7 @@ func (w *mainScreenWidget) paintIntoCanvas(ctx *ui.Context, bounds ui.Rect, canv
 type mainScreenRetainedRoot struct {
 	ui.BaseNode
 	model          *Model
-	transcriptNode *transcriptRetainedNode
+	transcriptNode *chatViewportNode
 	composerNode   *composerRetainedNode
 	sidebarNode    *hashedElementRetainedNode
 	statusNode     *hashedElementRetainedNode
@@ -355,17 +347,17 @@ type mainScreenRetainedRoot struct {
 	bodySlices     [2][]ui.FlexNodeChild
 }
 
-type transcriptRetainedNode struct {
+type chatViewportNode struct {
 	ui.BaseNode
 	widget  *transcriptWidget
 	surface ui.Surface
 }
 
-func (n *transcriptRetainedNode) Pending() bool {
+func (n *chatViewportNode) Pending() bool {
 	return n == nil || n.widget == nil || n.widget.invalidated
 }
 
-func (n *transcriptRetainedNode) Measure(_ *ui.Context, constraints ui.Constraints) ui.Size {
+func (n *chatViewportNode) Measure(_ *ui.Context, constraints ui.Constraints) ui.Size {
 	if n == nil || n.widget == nil || n.widget.model == nil {
 		return constraints.Clamp(ui.Size{})
 	}
@@ -373,7 +365,7 @@ func (n *transcriptRetainedNode) Measure(_ *ui.Context, constraints ui.Constrain
 	return constraints.Clamp(ui.Size{W: max(0, m.viewport.Width), H: max(0, m.viewport.Height)})
 }
 
-func (n *transcriptRetainedNode) Prepare(ctx *ui.Context) {
+func (n *chatViewportNode) Prepare(_ *ui.Context) {
 	if n == nil || n.widget == nil || n.widget.model == nil {
 		return
 	}
@@ -398,7 +390,7 @@ func (n *transcriptRetainedNode) Prepare(ctx *ui.Context) {
 	n.widget.ClearDirty()
 }
 
-func (n *transcriptRetainedNode) Paint(_ *ui.Context, canvas ui.Canvas) {
+func (n *chatViewportNode) Paint(_ *ui.Context, canvas ui.Canvas) {
 	if n == nil || canvas.Width() <= 0 || canvas.Height() <= 0 {
 		return
 	}
@@ -563,7 +555,7 @@ func newMainScreenRetainedRoot(m *Model, transcript *transcriptWidget, composer 
 	root := &mainScreenRetainedRoot{
 		model: m,
 	}
-	root.transcriptNode = &transcriptRetainedNode{widget: transcript}
+	root.transcriptNode = &chatViewportNode{widget: transcript}
 	root.composerNode = &composerRetainedNode{widget: composer}
 	root.sidebarNode = &hashedElementRetainedNode{
 		widget: sidebar,
