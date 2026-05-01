@@ -59,19 +59,38 @@ func NewComposer(props ComposerProps) Composer {
 }
 
 func (c Composer) Measure(_ *Context, constraints Constraints) Size {
-	return constraints.Clamp(c.render().Size())
+	return constraints.Clamp(c.size())
 }
 
 func (c Composer) Paint(_ *Context, canvas Canvas) {
 	if canvas.Width() <= 0 || canvas.Height() <= 0 {
 		return
 	}
-	canvas.BlitSurface(0, 0, c.render().Normalize(canvas.Width(), canvas.Height()))
+	c.paint(canvas)
 }
 
 func (c Composer) render() Surface {
+	size := c.size()
+	if size.W <= 0 || size.H <= 0 {
+		return Surface{}
+	}
+	return PaintNodeSurface(nil, c, Rect{W: size.W, H: size.H})
+}
+
+func (c Composer) size() Size {
+	layout := c.layout()
+	return Size{
+		W: maxInt(1, c.Width),
+		H: len(c.Attachments) + len(layout.lines) + 2,
+	}
+}
+
+func (c Composer) paint(canvas Canvas) {
 	layout := c.layout()
 	width := maxInt(1, c.Width)
+	if canvas.Width() > 0 {
+		width = min(width, canvas.Width())
+	}
 	prompt := c.PromptGlyph + " "
 	promptWidth := PlainWidth(prompt)
 	if promptWidth >= width {
@@ -79,59 +98,36 @@ func (c Composer) render() Surface {
 		promptWidth = PlainWidth(prompt)
 	}
 	contentWidth := maxInt(0, width-promptWidth)
-	promptStyle := NewStyle().
-		Background(c.Palette.UserTextBackground).
-		Foreground(c.Palette.UserAccentBar)
-	attachmentRows := c.renderAttachmentRows()
-	attachmentHeight := attachmentRows.SurfaceHeight()
+	attachmentHeight := len(c.Attachments)
 
-	renderBlankLine := func() Surface {
-		return c.renderLineSurface(prompt, promptStyle, "", "", "", nil, contentWidth, false, c.Palette.UserTextForeground, c.Palette.UserTextBackground)
+	y := 0
+	if c.HalfBlocks {
+		c.paintHalfBlockLine(canvas, y, "▄", width)
+	} else {
+		c.paintLine(canvas, y, prompt, "", "", "", nil, contentWidth, false, c.Palette.UserTextForeground, c.Palette.UserTextBackground)
 	}
-
-	lineSurfaces := make([]Surface, 0, len(layout.lines))
+	y++
+	if attachmentHeight > 0 {
+		AttachmentList{Items: c.Attachments, Width: width}.Paint(&Context{Palette: c.Palette}, canvas.Subrect(Rect{Y: y, W: width, H: min(attachmentHeight, maxInt(0, canvas.Height()-y))}))
+		y += attachmentHeight
+	}
 	for idx, line := range layout.lines {
 		linePrompt := prompt
 		if idx > 0 {
 			linePrompt = strings.Repeat(" ", promptWidth)
 		}
 		if line.placeholder {
-			lineSurfaces = append(lineSurfaces, c.renderPlaceholder(linePrompt, promptStyle, line.before, line.cursor, line.after, contentWidth, line.cursorVisible, c.Palette.UserTextForeground, c.Palette.UserTextBackground, c.Palette.ComposerMutedText))
-			continue
+			c.paintPlaceholder(canvas, y, linePrompt, line.before, line.cursor, line.after, contentWidth, line.cursorVisible, c.Palette.UserTextForeground, c.Palette.UserTextBackground, c.Palette.ComposerMutedText)
+		} else {
+			c.paintLine(canvas, y, linePrompt, line.before, line.cursor, line.after, line.tokens, contentWidth, line.cursorVisible, c.Palette.UserTextForeground, c.Palette.UserTextBackground)
 		}
-		lineSurfaces = append(lineSurfaces, c.renderLineSurface(
-			linePrompt,
-			promptStyle,
-			line.before,
-			line.cursor,
-			line.after,
-			line.tokens,
-			contentWidth,
-			line.cursorVisible,
-			c.Palette.UserTextForeground,
-			c.Palette.UserTextBackground,
-		))
+		y++
 	}
-	middle := stackSurfaces(lineSurfaces)
-
 	if c.HalfBlocks {
-		s := BlankSurface(width, attachmentHeight+middle.SurfaceHeight()+2)
-		s = s.placeAt(0, 0, renderHalfBlockSurface(width, "▄", c.Palette))
-		if attachmentHeight > 0 {
-			s = s.placeAt(0, 1, attachmentRows)
-		}
-		s = s.placeAt(0, attachmentHeight+1, middle)
-		s = s.placeAt(0, attachmentHeight+1+middle.SurfaceHeight(), renderHalfBlockSurface(width, "▀", c.Palette))
-		return s
+		c.paintHalfBlockLine(canvas, y, "▀", width)
+	} else {
+		c.paintLine(canvas, y, prompt, "", "", "", nil, contentWidth, false, c.Palette.UserTextForeground, c.Palette.UserTextBackground)
 	}
-	s := BlankSurface(width, attachmentHeight+middle.SurfaceHeight()+2)
-	s = s.placeAt(0, 0, renderBlankLine())
-	if attachmentHeight > 0 {
-		s = s.placeAt(0, 1, attachmentRows)
-	}
-	s = s.placeAt(0, attachmentHeight+1, middle)
-	s = s.placeAt(0, attachmentHeight+1+middle.SurfaceHeight(), renderBlankLine())
-	return s
 }
 
 func (c Composer) renderAttachmentRows() Surface {
@@ -168,10 +164,23 @@ func (c Composer) renderLineSurface(prompt string, promptStyle Style, before, cu
 		width = PlainWidth(prompt)
 	}
 	s := BlankSurface(width, 1)
+	c.paintLine(NewCanvas(&s, Rect{W: width, H: 1}), 0, prompt, before, cursor, after, tokenRanges, contentWidth, cursorVisible, textFG, textBG)
+	_ = promptStyle
+	return s
+}
+
+func (c Composer) paintLine(canvas Canvas, y int, prompt, before, cursor, after string, tokenRanges []TokenRange, contentWidth int, cursorVisible bool, textFG, textBG CellColor) {
+	if y < 0 || y >= canvas.Height() {
+		return
+	}
+	width := min(canvas.Width(), PlainWidth(prompt)+maxInt(0, contentWidth))
+	if width <= 0 {
+		return
+	}
 	promptCellStyle := CellStyle{BG: cellColor(c.Palette.UserTextBackground), FG: cellColor(c.Palette.UserAccentBar)}
+	paintComposerText(canvas, 0, y, prompt, promptCellStyle)
 	if contentWidth <= 0 {
-		s.WriteText(0, 0, prompt, promptCellStyle)
-		return s
+		return
 	}
 	before = PlainTruncate(before, contentWidth, "")
 	cursor = PlainTruncate(cursor, maxInt(1, contentWidth-PlainWidth(before)), "")
@@ -179,10 +188,9 @@ func (c Composer) renderLineSurface(prompt string, promptStyle Style, before, cu
 	after = PlainTruncate(after, remaining, "")
 	remaining = maxInt(0, contentWidth-PlainWidth(before)-PlainWidth(cursor)-PlainWidth(after))
 	contentStyle := CellStyle{FG: cellColor(textFG), BG: cellColor(textBG)}
-	s.WriteText(0, 0, prompt, promptCellStyle)
 	offset := PlainWidth(prompt)
-	for x := offset; x < width; x++ {
-		s.setCell(x, 0, blankCell(contentStyle))
+	if offset < width {
+		canvas.Fill(Rect{X: offset, Y: y, W: width - offset, H: 1}, contentStyle)
 	}
 	tokenStyle := CellStyle{
 		FG: firstNonEmptyColor(cellColor(c.Palette.MarkdownStrongText), cellColor(textFG)),
@@ -200,14 +208,12 @@ func (c Composer) renderLineSurface(prompt string, promptStyle Style, before, cu
 			style = CellStyle{FG: style.BG, BG: style.FG}
 		}
 		char := string(r)
-		s.WriteText(x, 0, char, style)
+		paintComposerText(canvas, x, y, char, style)
 		x += PlainWidth(char)
 	}
 	if remaining > 0 {
-		s.WriteText(offset+PlainWidth(before)+PlainWidth(cursor)+PlainWidth(after), 0, strings.Repeat(" ", remaining), contentStyle)
+		paintComposerText(canvas, offset+PlainWidth(before)+PlainWidth(cursor)+PlainWidth(after), y, strings.Repeat(" ", remaining), contentStyle)
 	}
-	_ = promptStyle
-	return s
 }
 
 func rangeContainsToken(ranges []TokenRange, pos int) bool {
@@ -225,10 +231,23 @@ func (c Composer) renderPlaceholder(prompt string, promptStyle Style, before, cu
 		width = PlainWidth(prompt)
 	}
 	s := BlankSurface(width, 1)
+	c.paintPlaceholder(NewCanvas(&s, Rect{W: width, H: 1}), 0, prompt, before, cursor, after, contentWidth, cursorVisible, textFG, textBG, muted)
+	_ = promptStyle
+	return s
+}
+
+func (c Composer) paintPlaceholder(canvas Canvas, y int, prompt, before, cursor, after string, contentWidth int, cursorVisible bool, textFG, textBG, muted CellColor) {
+	if y < 0 || y >= canvas.Height() {
+		return
+	}
+	width := min(canvas.Width(), PlainWidth(prompt)+maxInt(0, contentWidth))
+	if width <= 0 {
+		return
+	}
 	promptCellStyle := CellStyle{BG: cellColor(c.Palette.UserTextBackground), FG: cellColor(c.Palette.UserAccentBar)}
+	paintComposerText(canvas, 0, y, prompt, promptCellStyle)
 	if contentWidth <= 0 {
-		s.WriteText(0, 0, prompt, promptCellStyle)
-		return s
+		return
 	}
 	before = PlainTruncate(before, contentWidth, "")
 	cursor = PlainTruncate(cursor, maxInt(1, contentWidth-PlainWidth(before)), "")
@@ -241,19 +260,45 @@ func (c Composer) renderPlaceholder(prompt string, promptStyle Style, before, cu
 		cursorStyle = CellStyle{FG: cellColor(textBG), BG: cellColor(textFG)}
 	}
 	afterStyle := CellStyle{FG: cellColor(muted), BG: cellColor(textBG)}
-	s.WriteText(0, 0, prompt, promptCellStyle)
 	offset := PlainWidth(prompt)
-	for x := offset; x < width; x++ {
-		s.setCell(x, 0, blankCell(beforeStyle))
+	if offset < width {
+		canvas.Fill(Rect{X: offset, Y: y, W: width - offset, H: 1}, beforeStyle)
 	}
-	s.WriteText(offset, 0, before, beforeStyle)
-	s.WriteText(offset+PlainWidth(before), 0, cursor, cursorStyle)
-	s.WriteText(offset+PlainWidth(before)+PlainWidth(cursor), 0, after, afterStyle)
+	paintComposerText(canvas, offset, y, before, beforeStyle)
+	paintComposerText(canvas, offset+PlainWidth(before), y, cursor, cursorStyle)
+	paintComposerText(canvas, offset+PlainWidth(before)+PlainWidth(cursor), y, after, afterStyle)
 	if remaining > 0 {
-		s.WriteText(offset+PlainWidth(before)+PlainWidth(cursor)+PlainWidth(after), 0, strings.Repeat(" ", remaining), beforeStyle)
+		paintComposerText(canvas, offset+PlainWidth(before)+PlainWidth(cursor)+PlainWidth(after), y, strings.Repeat(" ", remaining), beforeStyle)
 	}
-	_ = promptStyle
-	return s
+}
+
+func (c Composer) paintHalfBlockLine(canvas Canvas, y int, char string, width int) {
+	if y < 0 || y >= canvas.Height() || width <= 0 {
+		return
+	}
+	style := CellStyle{FG: cellColor(c.Palette.UserTextBackground)}
+	paintComposerText(canvas, 0, y, renderHalfBlockLine(width, char, c.Palette), style)
+}
+
+func paintComposerText(canvas Canvas, x, y int, text string, style CellStyle) {
+	col := x
+	for _, r := range text {
+		grapheme := string(r)
+		width := PlainWidth(grapheme)
+		if width <= 0 {
+			continue
+		}
+		if col >= canvas.Width() {
+			break
+		}
+		if col >= 0 {
+			canvas.SetCell(col, y, newCell(Glyph(r), width, style))
+			for extra := 1; extra < width && col+extra < canvas.Width(); extra++ {
+				canvas.SetCell(col+extra, y, continuationCell(style))
+			}
+		}
+		col += width
+	}
 }
 
 func (c Composer) CursorRect() (Rect, bool) {
@@ -294,7 +339,7 @@ func (c Composer) layout() composerLayout {
 		promptWidth = PlainWidth(prompt)
 	}
 	contentWidth := maxInt(1, width-promptWidth)
-	attachmentHeight := c.renderAttachmentRows().SurfaceHeight()
+	attachmentHeight := len(c.Attachments)
 	layout := composerLayout{}
 	if strings.TrimSpace(c.Value) == "" {
 		layout.lines = placeholderComposerLines(c.Placeholder, contentWidth, c.CursorVisible)
