@@ -8,7 +8,23 @@ import (
 
 // PlainWidth returns the terminal display width of input.
 func PlainWidth(input string) int {
-	return runewidth.StringWidth(input)
+	if input == "" {
+		return 0
+	}
+	asciiWidth := 0
+	for i := 0; i < len(input); i++ {
+		c := input[i]
+		if c < 0x20 || c >= 0x7f {
+			return runewidth.StringWidth(input)
+		}
+		asciiWidth++
+	}
+	return asciiWidth
+}
+
+// plainRuneWidth returns the terminal display width of one rune.
+func plainRuneWidth(r rune) int {
+	return runewidth.RuneWidth(r)
 }
 
 // TextWidth returns the terminal display width of input.

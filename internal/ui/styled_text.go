@@ -37,6 +37,11 @@ func AppendInteractiveStyledSpan(dst []StyledSpan, text string, style CellStyle,
 // PlainStyledText returns spans with style and control metadata removed.
 func PlainStyledText(spans []StyledSpan) string {
 	var b strings.Builder
+	totalLen := 0
+	for _, span := range spans {
+		totalLen += len(span.Text)
+	}
+	b.Grow(totalLen)
 	for _, span := range spans {
 		b.WriteString(span.Text)
 	}
@@ -45,7 +50,11 @@ func PlainStyledText(spans []StyledSpan) string {
 
 // StyledTextWidth returns the terminal display width of spans.
 func StyledTextWidth(spans []StyledSpan) int {
-	return PlainWidth(PlainStyledText(spans))
+	width := 0
+	for _, span := range spans {
+		width += PlainWidth(span.Text)
+	}
+	return width
 }
 
 // LayoutStyledText wraps spans and paints them into a Surface.
@@ -179,7 +188,7 @@ func tokenizeStyledLine(spans []StyledSpan) []styledToken {
 	for _, span := range spans {
 		for _, r := range span.Text {
 			isSpace := unicode.IsSpace(r)
-			width := PlainWidth(string(r))
+			width := plainRuneWidth(r)
 			if width <= 0 {
 				continue
 			}
@@ -220,7 +229,7 @@ func splitStyledToken(token styledToken, width int) [][]StyledSpan {
 	for _, span := range token.spans {
 		for _, r := range span.Text {
 			grapheme := string(r)
-			graphemeWidth := PlainWidth(grapheme)
+			graphemeWidth := plainRuneWidth(r)
 			if graphemeWidth <= 0 {
 				continue
 			}

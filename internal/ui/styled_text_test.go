@@ -44,6 +44,18 @@ func TestWrapStyledTextPreservesInlineStyles(t *testing.T) {
 	}
 }
 
+func TestStyledTextWidthMatchesPlainTextWidth(t *testing.T) {
+	spans := []StyledSpan{
+		{Text: "alpha "},
+		{Text: "表情", Style: CellStyle{}.WithBold(true)},
+		{Text: " beta"},
+		{Text: " gamma", ControlID: "control", Enabled: true},
+	}
+	if got, want := StyledTextWidth(spans), PlainWidth(PlainStyledText(spans)); got != want {
+		t.Fatalf("expected styled width %d, got %d", want, got)
+	}
+}
+
 func TestRenderStyledTextANSIIncludesStrikethrough(t *testing.T) {
 	got := RenderStyledTextANSI([]StyledSpan{{
 		Text:  "gone",
