@@ -19,13 +19,34 @@ const (
 )
 
 func init() {
-	tools.Register(commandTool{})
-	tools.Register(statusTool{})
-	tools.Register(listTool{})
-	tools.Register(writeStdinTool{})
-	tools.Register(resizeTool{})
-	tools.Register(terminateTool{})
-	tools.Register(cleanupTool{})
+	tools.Register(commandTool{}, tools.ToolInfo{
+		Title:       "Start exec session",
+		Description: "Start a persistent shell command session.",
+	})
+	tools.Register(statusTool{}, tools.ToolInfo{
+		Title:       "Exec status",
+		Description: "Get state and recent output for a persistent exec session.",
+	})
+	tools.Register(listTool{}, tools.ToolInfo{
+		Title:       "Exec sessions",
+		Description: "List persistent exec sessions.",
+	})
+	tools.Register(writeStdinTool{}, tools.ToolInfo{
+		Title:       "Write exec stdin",
+		Description: "Write stdin text to a running persistent exec session.",
+	})
+	tools.Register(resizeTool{}, tools.ToolInfo{
+		Title:       "Resize exec tty",
+		Description: "Resize a tty-backed persistent exec session.",
+	})
+	tools.Register(terminateTool{}, tools.ToolInfo{
+		Title:       "Terminate exec session",
+		Description: "Terminate a persistent exec session.",
+	})
+	tools.Register(cleanupTool{}, tools.ToolInfo{
+		Title:       "Cleanup exec sessions",
+		Description: "Terminate persistent exec sessions in scope.",
+	})
 }
 
 type commandTool struct{}

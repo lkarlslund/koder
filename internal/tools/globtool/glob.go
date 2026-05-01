@@ -18,7 +18,12 @@ import (
 
 type tool struct{}
 
-func init() { tools.Register(tool{}) }
+func init() {
+	tools.Register(tool{}, tools.ToolInfo{
+		Title:       "Find files",
+		Description: "Find workspace paths by glob pattern.",
+	})
+}
 
 func (tool) Kind() domain.ToolKind    { return domain.ToolKindGlob }
 func (tool) BypassesPermission() bool { return false }

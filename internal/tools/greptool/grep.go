@@ -38,7 +38,12 @@ type searchOptions struct {
 	HeadLimit  int
 }
 
-func init() { tools.Register(tool{}) }
+func init() {
+	tools.Register(tool{}, tools.ToolInfo{
+		Title:       "Search text",
+		Description: "Search workspace file contents with regular expressions.",
+	})
+}
 
 func (tool) Kind() domain.ToolKind    { return domain.ToolKindGrep }
 func (tool) BypassesPermission() bool { return false }

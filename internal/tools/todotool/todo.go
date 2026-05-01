@@ -12,10 +12,22 @@ import (
 )
 
 func init() {
-	tools.Register(listTool{})
-	tools.Register(addItemsTool{})
-	tools.Register(updateItemTool{})
-	tools.Register(fetchNextTool{})
+	tools.Register(listTool{}, tools.ToolInfo{
+		Title:       "List todos",
+		Description: "Read the todo bucket for a milestone.",
+	})
+	tools.Register(addItemsTool{}, tools.ToolInfo{
+		Title:       "Add todo items",
+		Description: "Append new pending todo items to a milestone.",
+	})
+	tools.Register(updateItemTool{}, tools.ToolInfo{
+		Title:       "Update todo item",
+		Description: "Update one todo item's status or content.",
+	})
+	tools.Register(fetchNextTool{}, tools.ToolInfo{
+		Title:       "Fetch next todo",
+		Description: "Find the next todo item to work on.",
+	})
 }
 
 type listTool struct{}

@@ -12,7 +12,12 @@ import (
 
 type tool struct{}
 
-func init() { tools.Register(tool{}) }
+func init() {
+	tools.Register(tool{}, tools.ToolInfo{
+		Title:       "Ask question",
+		Description: "Ask the user a clarification question.",
+	})
+}
 
 func (tool) Kind() domain.ToolKind    { return domain.ToolKindQuestion }
 func (tool) BypassesPermission() bool { return false }

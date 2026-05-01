@@ -14,7 +14,12 @@ import (
 
 type tool struct{}
 
-func init() { tools.Register(tool{}) }
+func init() {
+	tools.Register(tool{}, tools.ToolInfo{
+		Title:       "MCP",
+		Description: "Run a tool exposed by a connected MCP server.",
+	})
+}
 
 func (tool) Kind() domain.ToolKind    { return domain.ToolKindMCP }
 func (tool) BypassesPermission() bool { return false }

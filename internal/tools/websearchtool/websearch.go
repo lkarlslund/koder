@@ -27,7 +27,12 @@ type resultItem struct {
 	Snippet string
 }
 
-func init() { tools.Register(tool{}) }
+func init() {
+	tools.Register(tool{}, tools.ToolInfo{
+		Title:       "Search web",
+		Description: "Search the public web for current or external information.",
+	})
+}
 
 func (tool) Kind() domain.ToolKind    { return domain.ToolKindWebSearch }
 func (tool) BypassesPermission() bool { return false }

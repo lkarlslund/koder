@@ -31,7 +31,12 @@ type editMatcher struct {
 	level      int
 }
 
-func init() { tools.Register(tool{}) }
+func init() {
+	tools.Register(tool{}, tools.ToolInfo{
+		Title:       "Edit file",
+		Description: "Edit an existing text file by replacing exact text.",
+	})
+}
 
 func (tool) Kind() domain.ToolKind    { return domain.ToolKindEdit }
 func (tool) BypassesPermission() bool { return false }

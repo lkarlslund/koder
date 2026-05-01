@@ -20,7 +20,12 @@ type step struct {
 	Status string `json:"status"`
 }
 
-func init() { tools.Register(tool{}) }
+func init() {
+	tools.Register(tool{}, tools.ToolInfo{
+		Title:       "Update plan",
+		Description: "Update the current task plan.",
+	})
+}
 
 func (tool) Kind() domain.ToolKind    { return domain.ToolKindUpdatePlan }
 func (tool) BypassesPermission() bool { return true }

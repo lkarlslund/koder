@@ -16,7 +16,12 @@ import (
 
 type tool struct{}
 
-func init() { tools.Register(tool{}) }
+func init() {
+	tools.Register(tool{}, tools.ToolInfo{
+		Title:       "Load skill",
+		Description: "Load a reusable local skill by name.",
+	})
+}
 
 func (tool) Kind() domain.ToolKind    { return domain.ToolKindSkill }
 func (tool) BypassesPermission() bool { return true }

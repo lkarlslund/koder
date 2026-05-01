@@ -17,7 +17,12 @@ import (
 
 type tool struct{}
 
-func init() { tools.Register(tool{}) }
+func init() {
+	tools.Register(tool{}, tools.ToolInfo{
+		Title:       "Write file",
+		Description: "Create or completely overwrite a workspace file.",
+	})
+}
 
 func (tool) Kind() domain.ToolKind    { return domain.ToolKindWrite }
 func (tool) BypassesPermission() bool { return false }

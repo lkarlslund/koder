@@ -12,10 +12,22 @@ import (
 )
 
 func init() {
-	tools.Register(listTool{})
-	tools.Register(startDecompositionTool{})
-	tools.Register(startExecutionTool{})
-	tools.Register(pollTool{})
+	tools.Register(listTool{}, tools.ToolInfo{
+		Title:       "List chats",
+		Description: "List chats in the current session.",
+	})
+	tools.Register(startDecompositionTool{}, tools.ToolInfo{
+		Title:       "Start decomposition chat",
+		Description: "Start a background decomposition chat for one milestone.",
+	})
+	tools.Register(startExecutionTool{}, tools.ToolInfo{
+		Title:       "Start execution chat",
+		Description: "Start a background execution chat for one milestone.",
+	})
+	tools.Register(pollTool{}, tools.ToolInfo{
+		Title:       "Poll chat",
+		Description: "Read the latest runtime state for one chat.",
+	})
 }
 
 type listTool struct{}

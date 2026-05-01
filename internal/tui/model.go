@@ -7047,13 +7047,16 @@ func (m *Model) openPreferencesDialog() {
 func (m *Model) openToolsDialog() {
 	items := make([]dialogs.ToolToggleItem, 0, len(domain.AllToolKinds()))
 	for _, kind := range domain.AllToolKinds() {
-		description := "Enable this tool for the current session"
-		label := string(kind)
+		info := tools.Info(kind)
+		description := info.Description
+		if strings.TrimSpace(description) == "" {
+			description = "Enable this tool for the current session"
+		}
+		label := info.Title
+		if strings.TrimSpace(label) == "" {
+			label = string(kind)
+		}
 		if tool, ok := tools.Lookup(kind); ok {
-			presentation := tools.PresentationForTool(kind, "")
-			if strings.TrimSpace(presentation.Title) != "" {
-				label = presentation.Title
-			}
 			if def, enabled := tool.Definition(tools.Runtime{Workdir: m.workdir}); enabled && strings.TrimSpace(def.Function.Description) != "" {
 				description = def.Function.Description
 			}

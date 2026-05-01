@@ -31,7 +31,12 @@ const (
 
 var fetchCache sync.Map
 
-func init() { tools.Register(tool{}) }
+func init() {
+	tools.Register(tool{}, tools.ToolInfo{
+		Title:       "Fetch URL",
+		Description: "Fetch and render content from a URL.",
+	})
+}
 
 func (tool) Kind() domain.ToolKind    { return domain.ToolKindWebFetch }
 func (tool) BypassesPermission() bool { return false }

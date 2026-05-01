@@ -26,7 +26,12 @@ const (
 	maxReadLineTruncSuffix = "... (line truncated to 2000 chars)"
 )
 
-func init() { tools.Register(tool{}) }
+func init() {
+	tools.Register(tool{}, tools.ToolInfo{
+		Title:       "Read file",
+		Description: "Read a text file or list a directory from the workspace.",
+	})
+}
 
 func (tool) Kind() domain.ToolKind    { return domain.ToolKindRead }
 func (tool) BypassesPermission() bool { return false }

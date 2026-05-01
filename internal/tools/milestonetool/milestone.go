@@ -13,11 +13,26 @@ import (
 )
 
 func init() {
-	tools.Register(listTool{})
-	tools.Register(addItemsTool{})
-	tools.Register(updateItemTool{})
-	tools.Register(planTool{})
-	tools.Register(writeTool{})
+	tools.Register(listTool{}, tools.ToolInfo{
+		Title:       "List milestones",
+		Description: "Read the current session milestone plan.",
+	})
+	tools.Register(addItemsTool{}, tools.ToolInfo{
+		Title:       "Add milestones",
+		Description: "Append new pending milestones to the current plan.",
+	})
+	tools.Register(updateItemTool{}, tools.ToolInfo{
+		Title:       "Update milestone",
+		Description: "Update one milestone's status or details.",
+	})
+	tools.Register(planTool{}, tools.ToolInfo{
+		Title:       "Plan milestone",
+		Description: "Create or update a milestone and append todo items.",
+	})
+	tools.Register(writeTool{}, tools.ToolInfo{
+		Title:       "Updated milestones",
+		Description: "Replace the current milestone plan.",
+	})
 }
 
 type listTool struct{}

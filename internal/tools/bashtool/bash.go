@@ -15,7 +15,12 @@ import (
 
 type tool struct{}
 
-func init() { tools.Register(tool{}) }
+func init() {
+	tools.Register(tool{}, tools.ToolInfo{
+		Title:       "Run command",
+		Description: "Run a shell command in the workspace.",
+	})
+}
 
 func (tool) Kind() domain.ToolKind    { return domain.ToolKindBash }
 func (tool) BypassesPermission() bool { return false }

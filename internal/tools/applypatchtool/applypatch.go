@@ -16,7 +16,12 @@ import (
 
 type tool struct{}
 
-func init() { tools.Register(tool{}) }
+func init() {
+	tools.Register(tool{}, tools.ToolInfo{
+		Title:       "Apply patch",
+		Description: "Apply a unified diff patch to workspace files.",
+	})
+}
 
 func (tool) Kind() domain.ToolKind    { return domain.ToolKindApplyPatch }
 func (tool) BypassesPermission() bool { return false }

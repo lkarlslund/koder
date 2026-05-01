@@ -19,7 +19,12 @@ import (
 
 type tool struct{}
 
-func init() { tools.Register(tool{}) }
+func init() {
+	tools.Register(tool{}, tools.ToolInfo{
+		Title:       "View image",
+		Description: "Load a local image file into model context.",
+	})
+}
 
 func (tool) Kind() domain.ToolKind    { return domain.ToolKindViewImage }
 func (tool) BypassesPermission() bool { return false }

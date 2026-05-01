@@ -147,6 +147,11 @@ type Presenter interface {
 	Presentation(req Request) Presentation
 }
 
+type ToolInfo struct {
+	Title       string
+	Description string
+}
+
 type resultSummarizer interface {
 	SummarizeResult(req Request, result Result) (summary string, body string)
 }
@@ -162,10 +167,11 @@ type Registry struct {
 var (
 	regMu    sync.RWMutex
 	registry = map[domain.ToolKind]Tool{}
+	metadata = map[domain.ToolKind]ToolInfo{}
 	order    []domain.ToolKind
 )
 
-func Register(tool Tool) {
+func Register(tool Tool, info ToolInfo) {
 	regMu.Lock()
 	defer regMu.Unlock()
 	kind := tool.Kind()
@@ -176,6 +182,7 @@ func Register(tool Tool) {
 		panic(fmt.Sprintf("tools: duplicate tool registration %q", kind))
 	}
 	registry[kind] = tool
+	metadata[kind] = normalizeToolInfo(kind, info)
 	order = append(order, kind)
 }
 
@@ -184,6 +191,15 @@ func Lookup(kind domain.ToolKind) (Tool, bool) {
 	defer regMu.RUnlock()
 	tool, ok := registry[kind]
 	return tool, ok
+}
+
+func Info(kind domain.ToolKind) ToolInfo {
+	regMu.RLock()
+	defer regMu.RUnlock()
+	if info, ok := metadata[kind]; ok {
+		return info
+	}
+	return normalizeToolInfo(kind, ToolInfo{})
 }
 
 func NewRegistry(workdir string) *Registry {
@@ -382,87 +398,20 @@ func PresentationForTool(kind domain.ToolKind, preview string) Presentation {
 
 func SharedPresentation(kind domain.ToolKind, preview string) Presentation {
 	preview = strings.TrimSpace(preview)
-	return Presentation{Title: toolTitle(kind), Subtitle: preview, Preview: preview}
+	return Presentation{Title: Info(kind).Title, Subtitle: preview, Preview: preview}
 }
 
-func toolTitle(kind domain.ToolKind) string {
-	switch kind {
-	case domain.ToolKindRead:
-		return "Read file"
-	case domain.ToolKindViewImage:
-		return "View image"
-	case domain.ToolKindGlob:
-		return "Find files"
-	case domain.ToolKindGrep:
-		return "Search text"
-	case domain.ToolKindBash:
-		return "Run command"
-	case domain.ToolKindExecCommand:
-		return "Start exec session"
-	case domain.ToolKindExecStatus:
-		return "Check exec status"
-	case domain.ToolKindExecList:
-		return "List exec sessions"
-	case domain.ToolKindExecWriteStdin:
-		return "Write exec stdin"
-	case domain.ToolKindExecResize:
-		return "Resize exec tty"
-	case domain.ToolKindExecTerminate:
-		return "Terminate exec session"
-	case domain.ToolKindExecCleanup:
-		return "Cleanup exec sessions"
-	case domain.ToolKindApplyPatch:
-		return "Apply patch"
-	case domain.ToolKindEdit:
-		return "Edit file"
-	case domain.ToolKindWrite:
-		return "Write file"
-	case domain.ToolKindTask:
-		return "Create task"
-	case domain.ToolKindQuestion:
-		return "Ask question"
-	case domain.ToolKindUpdatePlan:
-		return "Update plan"
-	case domain.ToolKindMilestoneList:
-		return "List milestones"
-	case domain.ToolKindMilestoneAdd:
-		return "Add milestones"
-	case domain.ToolKindMilestoneUpdate:
-		return "Update milestone"
-	case domain.ToolKindMilestonePlan:
-		return "Plan milestone"
-	case domain.ToolKindMilestoneWrite:
-		return "Updated milestones"
-	case domain.ToolKindTodoList:
-		return "List todos"
-	case domain.ToolKindTodoAddItems:
-		return "Add todo items"
-	case domain.ToolKindTodoUpdateItem:
-		return "Update todo item"
-	case domain.ToolKindTodoFetchNext:
-		return "Fetch next todo"
-	case domain.ToolKindChatList:
-		return "List chats"
-	case domain.ToolKindChatStartDecomp:
-		return "Start decomposition chat"
-	case domain.ToolKindChatStartExec:
-		return "Start execution chat"
-	case domain.ToolKindChatPoll:
-		return "Poll chat"
-	case domain.ToolKindSkill:
-		return "Load skill"
-	case domain.ToolKindWebFetch:
-		return "Fetch URL"
-	case domain.ToolKindWebSearch:
-		return "Search web"
-	case domain.ToolKindMCP:
-		return "MCP"
-	default:
+func normalizeToolInfo(kind domain.ToolKind, info ToolInfo) ToolInfo {
+	info.Title = strings.TrimSpace(info.Title)
+	info.Description = strings.TrimSpace(info.Description)
+	if info.Title == "" {
 		if kind == "" {
-			return "Tool"
+			info.Title = "Tool"
+		} else {
+			info.Title = strings.ReplaceAll(string(kind), "_", " ")
 		}
-		return strings.ReplaceAll(string(kind), "_", " ")
 	}
+	return info
 }
 
 func SummarizeResult(req Request, result Result) (string, string) {
