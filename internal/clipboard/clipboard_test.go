@@ -16,8 +16,8 @@ type fakeWaylandReader struct {
 	imageErr  error
 }
 
-func (f fakeWaylandReader) Supported() bool         { return f.supported }
-func (f fakeWaylandReader) ReadText() (string, error) { return f.text, f.textErr }
+func (f fakeWaylandReader) Supported() bool            { return f.supported }
+func (f fakeWaylandReader) ReadText() (string, error)  { return f.text, f.textErr }
 func (f fakeWaylandReader) ReadImage() ([]byte, error) { return f.image, f.imageErr }
 
 func TestReadImagePrefersWaylandOnWayland(t *testing.T) {
@@ -130,7 +130,6 @@ func stubClipboardBackends(t *testing.T) func() {
 	oldRead := xclipboardRead
 	oldWrite := xclipboardWrite
 	oldInitErr := initErr
-	oldInitOnce := initOnce
 
 	initOnce = sync.Once{}
 	initErr = nil
@@ -141,6 +140,6 @@ func stubClipboardBackends(t *testing.T) func() {
 		xclipboardRead = oldRead
 		xclipboardWrite = oldWrite
 		initErr = oldInitErr
-		initOnce = oldInitOnce
+		initOnce = sync.Once{}
 	}
 }
