@@ -6,27 +6,38 @@ import (
 	"strings"
 
 	"github.com/lkarlslund/koder/internal/domain"
-	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools"
 )
 
 func init() {
-	tools.Register(listTool{}, tools.ToolInfo{
+	tools.Register(listTool{}, tools.ToolSpec{
 		Title:       "List todos",
 		Description: "Read the todo bucket for a milestone.",
+		Usage:       "Read the todo bucket for a milestone. If milestone_ref is omitted, this reads the current in_progress milestone's todos.",
+		Parameters:  `{"type":"object","properties":{"milestone_ref":{"type":"string","description":"Optional milestone ref; defaults to the in_progress milestone"}},"additionalProperties":false}`,
+		ExposeToLLM: true,
 	})
-	tools.Register(addItemsTool{}, tools.ToolInfo{
+	tools.Register(addItemsTool{}, tools.ToolSpec{
 		Title:       "Add todo items",
 		Description: "Append new pending todo items to a milestone.",
+		Usage:       "Append new pending todo items to a milestone's todo bucket. Use this to break down the current milestone into concrete execution steps.",
+		Parameters:  `{"type":"object","properties":{"milestone_ref":{"type":"string","description":"Milestone ref that owns these todo items"},"items":{"type":"array","description":"New todo items to append as pending","items":{"type":"object","properties":{"content":{"type":"string"}},"required":["content"]}}},"required":["milestone_ref","items"],"additionalProperties":false}`,
+		ExposeToLLM: true,
 	})
-	tools.Register(updateItemTool{}, tools.ToolInfo{
+	tools.Register(updateItemTool{}, tools.ToolSpec{
 		Title:       "Update todo item",
 		Description: "Update one todo item's status or content.",
+		Usage:       "Update one todo item's status, and optionally its content. Keep at most one todo item in_progress in a milestone bucket.",
+		Parameters:  `{"type":"object","properties":{"id":{"type":"integer","description":"Todo item id"},"status":{"type":"string","enum":["pending","in_progress","completed"]},"content":{"type":"string","description":"Optional replacement content"}},"required":["id","status"],"additionalProperties":false}`,
+		ExposeToLLM: true,
 	})
-	tools.Register(fetchNextTool{}, tools.ToolInfo{
+	tools.Register(fetchNextTool{}, tools.ToolSpec{
 		Title:       "Fetch next todo",
 		Description: "Find the next todo item to work on.",
+		Usage:       "Find the next todo item to work on for a milestone. If there is already an in_progress item, it is returned. Otherwise the first pending item is returned. If all items are done, this returns the finished bucket and a message telling you to move to the next milestone or break it down into todos.",
+		Parameters:  `{"type":"object","properties":{"milestone_ref":{"type":"string","description":"Optional milestone ref; defaults to the in_progress milestone"}},"additionalProperties":false}`,
+		ExposeToLLM: true,
 	})
 }
 
@@ -44,22 +55,6 @@ func (listTool) BypassesPermission() bool       { return true }
 func (addItemsTool) BypassesPermission() bool   { return true }
 func (updateItemTool) BypassesPermission() bool { return true }
 func (fetchNextTool) BypassesPermission() bool  { return true }
-
-func (listTool) Definition(tools.Runtime) (provider.ToolDefinition, bool) {
-	return tools.FunctionDefinition(domain.ToolKindTodoList, "Read the todo bucket for a milestone. If milestone_ref is omitted, this reads the current in_progress milestone's todos.", `{"type":"object","properties":{"milestone_ref":{"type":"string","description":"Optional milestone ref; defaults to the in_progress milestone"}},"additionalProperties":false}`), true
-}
-
-func (addItemsTool) Definition(tools.Runtime) (provider.ToolDefinition, bool) {
-	return tools.FunctionDefinition(domain.ToolKindTodoAddItems, "Append new pending todo items to a milestone's todo bucket. Use this to break down the current milestone into concrete execution steps.", `{"type":"object","properties":{"milestone_ref":{"type":"string","description":"Milestone ref that owns these todo items"},"items":{"type":"array","description":"New todo items to append as pending","items":{"type":"object","properties":{"content":{"type":"string"}},"required":["content"]}}},"required":["milestone_ref","items"],"additionalProperties":false}`), true
-}
-
-func (updateItemTool) Definition(tools.Runtime) (provider.ToolDefinition, bool) {
-	return tools.FunctionDefinition(domain.ToolKindTodoUpdateItem, "Update one todo item's status, and optionally its content. Keep at most one todo item in_progress in a milestone bucket.", `{"type":"object","properties":{"id":{"type":"integer","description":"Todo item id"},"status":{"type":"string","enum":["pending","in_progress","completed"]},"content":{"type":"string","description":"Optional replacement content"}},"required":["id","status"],"additionalProperties":false}`), true
-}
-
-func (fetchNextTool) Definition(tools.Runtime) (provider.ToolDefinition, bool) {
-	return tools.FunctionDefinition(domain.ToolKindTodoFetchNext, "Find the next todo item to work on for a milestone. If there is already an in_progress item, it is returned. Otherwise the first pending item is returned. If all items are done, this returns the finished bucket and a message telling you to move to the next milestone or break it down into todos.", `{"type":"object","properties":{"milestone_ref":{"type":"string","description":"Optional milestone ref; defaults to the in_progress milestone"}},"additionalProperties":false}`), true
-}
 
 func (listTool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 	out := map[string]string{}

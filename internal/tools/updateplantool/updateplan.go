@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/lkarlslund/koder/internal/domain"
-	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools"
 )
@@ -21,7 +20,7 @@ type step struct {
 }
 
 func init() {
-	tools.Register(tool{}, tools.ToolInfo{
+	tools.Register(tool{}, tools.ToolSpec{
 		Title:       "Update plan",
 		Description: "Update the current task plan.",
 	})
@@ -29,9 +28,6 @@ func init() {
 
 func (tool) Kind() domain.ToolKind    { return domain.ToolKindUpdatePlan }
 func (tool) BypassesPermission() bool { return true }
-func (tool) Definition(tools.Runtime) (provider.ToolDefinition, bool) {
-	return provider.ToolDefinition{}, false
-}
 func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 	plan := strings.TrimSpace(tools.FirstArg(args, "plan", "steps"))
 	if plan == "" {

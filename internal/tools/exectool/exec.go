@@ -10,7 +10,6 @@ import (
 
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/execruntime"
-	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/tools"
 )
 
@@ -19,33 +18,54 @@ const (
 )
 
 func init() {
-	tools.Register(commandTool{}, tools.ToolInfo{
+	tools.Register(commandTool{}, tools.ToolSpec{
 		Title:       "Start exec session",
 		Description: "Start a persistent shell command session.",
+		Usage:       "Start a persistent shell command session for long-running, interactive, or background work. Use this instead of bash when you may need to inspect output later, write stdin, resize a tty, or terminate the process in a later turn.",
+		Parameters:  `{"type":"object","properties":{"cmd":{"type":"string","description":"Shell command to execute"},"workdir":{"type":"string","description":"Optional workspace-relative working directory"},"timeout_ms":{"type":"integer","description":"Optional timeout in milliseconds; omit for no timeout"},"tty":{"type":"boolean","description":"Enable tty mode for interactive commands"},"shell":{"type":"string","description":"Optional shell binary name or path"},"login":{"type":"boolean","description":"Use login shell semantics; defaults to true"},"yield_time_ms":{"type":"integer","description":"Optional short wait before returning so initial output can be captured"}},"required":["cmd"],"additionalProperties":false}`,
+		ExposeToLLM: true,
 	})
-	tools.Register(statusTool{}, tools.ToolInfo{
+	tools.Register(statusTool{}, tools.ToolSpec{
 		Title:       "Exec status",
 		Description: "Get state and recent output for a persistent exec session.",
+		Usage:       "Get the latest state and recent output for one persistent exec session.",
+		Parameters:  `{"type":"object","properties":{"process_id":{"type":"string","description":"Process id returned by exec_command"},"max_output_bytes":{"type":"integer","description":"Optional output tail size to return"}},"required":["process_id"],"additionalProperties":false}`,
+		ExposeToLLM: true,
 	})
-	tools.Register(listTool{}, tools.ToolInfo{
+	tools.Register(listTool{}, tools.ToolSpec{
 		Title:       "Exec sessions",
 		Description: "List persistent exec sessions.",
+		Usage:       "List persistent exec sessions in the current chat or session.",
+		Parameters:  `{"type":"object","properties":{"scope":{"type":"string","description":"Listing scope. Omit for current chat.","enum":["chat","session"]},"max_output_bytes":{"type":"integer","description":"Optional output tail size for each item"}},"additionalProperties":false}`,
+		ExposeToLLM: true,
 	})
-	tools.Register(writeStdinTool{}, tools.ToolInfo{
+	tools.Register(writeStdinTool{}, tools.ToolSpec{
 		Title:       "Write exec stdin",
 		Description: "Write stdin text to a running persistent exec session.",
+		Usage:       "Write stdin text to a running persistent exec session and optionally close stdin.",
+		Parameters:  `{"type":"object","properties":{"process_id":{"type":"string","description":"Process id returned by exec_command"},"chars":{"type":"string","description":"Text to write to stdin"},"close_stdin":{"type":"boolean","description":"Close stdin after writing"},"max_output_bytes":{"type":"integer","description":"Optional output tail size to return"}},"required":["process_id"],"additionalProperties":false}`,
+		ExposeToLLM: true,
 	})
-	tools.Register(resizeTool{}, tools.ToolInfo{
+	tools.Register(resizeTool{}, tools.ToolSpec{
 		Title:       "Resize exec tty",
 		Description: "Resize a tty-backed persistent exec session.",
+		Usage:       "Resize a tty-backed persistent exec session.",
+		Parameters:  `{"type":"object","properties":{"process_id":{"type":"string","description":"Process id returned by exec_command"},"rows":{"type":"integer","description":"Terminal rows"},"cols":{"type":"integer","description":"Terminal columns"},"max_output_bytes":{"type":"integer","description":"Optional output tail size to return"}},"required":["process_id","rows","cols"],"additionalProperties":false}`,
+		ExposeToLLM: true,
 	})
-	tools.Register(terminateTool{}, tools.ToolInfo{
+	tools.Register(terminateTool{}, tools.ToolSpec{
 		Title:       "Terminate exec session",
 		Description: "Terminate a persistent exec session.",
+		Usage:       "Terminate a persistent exec session.",
+		Parameters:  `{"type":"object","properties":{"process_id":{"type":"string","description":"Process id returned by exec_command"},"max_output_bytes":{"type":"integer","description":"Optional output tail size to return"}},"required":["process_id"],"additionalProperties":false}`,
+		ExposeToLLM: true,
 	})
-	tools.Register(cleanupTool{}, tools.ToolInfo{
+	tools.Register(cleanupTool{}, tools.ToolSpec{
 		Title:       "Cleanup exec sessions",
 		Description: "Terminate persistent exec sessions in scope.",
+		Usage:       "Terminate running persistent exec sessions in the current chat or session and report their final states.",
+		Parameters:  `{"type":"object","properties":{"scope":{"type":"string","description":"Cleanup scope. Omit for current chat.","enum":["chat","session"]},"max_output_bytes":{"type":"integer","description":"Optional output tail size for each item"}},"additionalProperties":false}`,
+		ExposeToLLM: true,
 	})
 }
 
@@ -72,34 +92,6 @@ func (writeStdinTool) BypassesPermission() bool { return true }
 func (resizeTool) BypassesPermission() bool     { return true }
 func (terminateTool) BypassesPermission() bool  { return true }
 func (cleanupTool) BypassesPermission() bool    { return true }
-
-func (commandTool) Definition(tools.Runtime) (provider.ToolDefinition, bool) {
-	return tools.FunctionDefinition(domain.ToolKindExecCommand, "Start a persistent shell command session for long-running, interactive, or background work. Use this instead of bash when you may need to inspect output later, write stdin, resize a tty, or terminate the process in a later turn.", `{"type":"object","properties":{"cmd":{"type":"string","description":"Shell command to execute"},"workdir":{"type":"string","description":"Optional workspace-relative working directory"},"timeout_ms":{"type":"integer","description":"Optional timeout in milliseconds; omit for no timeout"},"tty":{"type":"boolean","description":"Enable tty mode for interactive commands"},"shell":{"type":"string","description":"Optional shell binary name or path"},"login":{"type":"boolean","description":"Use login shell semantics; defaults to true"},"yield_time_ms":{"type":"integer","description":"Optional short wait before returning so initial output can be captured"}},"required":["cmd"],"additionalProperties":false}`), true
-}
-
-func (statusTool) Definition(tools.Runtime) (provider.ToolDefinition, bool) {
-	return tools.FunctionDefinition(domain.ToolKindExecStatus, "Get the latest state and recent output for one persistent exec session.", `{"type":"object","properties":{"process_id":{"type":"string","description":"Process id returned by exec_command"},"max_output_bytes":{"type":"integer","description":"Optional output tail size to return"}},"required":["process_id"],"additionalProperties":false}`), true
-}
-
-func (listTool) Definition(tools.Runtime) (provider.ToolDefinition, bool) {
-	return tools.FunctionDefinition(domain.ToolKindExecList, "List persistent exec sessions in the current chat or session.", `{"type":"object","properties":{"scope":{"type":"string","description":"Listing scope. Omit for current chat.","enum":["chat","session"]},"max_output_bytes":{"type":"integer","description":"Optional output tail size for each item"}},"additionalProperties":false}`), true
-}
-
-func (writeStdinTool) Definition(tools.Runtime) (provider.ToolDefinition, bool) {
-	return tools.FunctionDefinition(domain.ToolKindExecWriteStdin, "Write stdin text to a running persistent exec session and optionally close stdin.", `{"type":"object","properties":{"process_id":{"type":"string","description":"Process id returned by exec_command"},"chars":{"type":"string","description":"Text to write to stdin"},"close_stdin":{"type":"boolean","description":"Close stdin after writing"},"max_output_bytes":{"type":"integer","description":"Optional output tail size to return"}},"required":["process_id"],"additionalProperties":false}`), true
-}
-
-func (resizeTool) Definition(tools.Runtime) (provider.ToolDefinition, bool) {
-	return tools.FunctionDefinition(domain.ToolKindExecResize, "Resize a tty-backed persistent exec session.", `{"type":"object","properties":{"process_id":{"type":"string","description":"Process id returned by exec_command"},"rows":{"type":"integer","description":"Terminal rows"},"cols":{"type":"integer","description":"Terminal columns"},"max_output_bytes":{"type":"integer","description":"Optional output tail size to return"}},"required":["process_id","rows","cols"],"additionalProperties":false}`), true
-}
-
-func (terminateTool) Definition(tools.Runtime) (provider.ToolDefinition, bool) {
-	return tools.FunctionDefinition(domain.ToolKindExecTerminate, "Terminate a persistent exec session.", `{"type":"object","properties":{"process_id":{"type":"string","description":"Process id returned by exec_command"},"max_output_bytes":{"type":"integer","description":"Optional output tail size to return"}},"required":["process_id"],"additionalProperties":false}`), true
-}
-
-func (cleanupTool) Definition(tools.Runtime) (provider.ToolDefinition, bool) {
-	return tools.FunctionDefinition(domain.ToolKindExecCleanup, "Terminate running persistent exec sessions in the current chat or session and report their final states.", `{"type":"object","properties":{"scope":{"type":"string","description":"Cleanup scope. Omit for current chat.","enum":["chat","session"]},"max_output_bytes":{"type":"integer","description":"Optional output tail size for each item"}},"additionalProperties":false}`), true
-}
 
 func (commandTool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 	cmd := strings.TrimSpace(tools.FirstArg(args, "cmd", "command"))

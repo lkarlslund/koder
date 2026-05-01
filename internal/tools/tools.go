@@ -135,7 +135,6 @@ type MCPExecutor interface {
 
 type Tool interface {
 	Kind() domain.ToolKind
-	Definition(Runtime) (provider.ToolDefinition, bool)
 	BypassesPermission() bool
 	NormalizeArgs(map[string]string) (map[string]string, error)
 	LegacyArgs(raw string) map[string]string
@@ -147,9 +146,17 @@ type Presenter interface {
 	Presentation(req Request) Presentation
 }
 
-type ToolInfo struct {
+// ToolSpec describes a registered tool for local presentation and LLM exposure.
+type ToolSpec struct {
 	Title       string
 	Description string
+	Usage       string
+	Parameters  string
+	ExposeToLLM bool
+}
+
+type definitionProvider interface {
+	Definition(Runtime, ToolSpec) (ToolSpec, bool)
 }
 
 type resultSummarizer interface {
@@ -167,11 +174,11 @@ type Registry struct {
 var (
 	regMu    sync.RWMutex
 	registry = map[domain.ToolKind]Tool{}
-	metadata = map[domain.ToolKind]ToolInfo{}
+	specs    = map[domain.ToolKind]ToolSpec{}
 	order    []domain.ToolKind
 )
 
-func Register(tool Tool, info ToolInfo) {
+func Register(tool Tool, spec ToolSpec) {
 	regMu.Lock()
 	defer regMu.Unlock()
 	kind := tool.Kind()
@@ -182,7 +189,7 @@ func Register(tool Tool, info ToolInfo) {
 		panic(fmt.Sprintf("tools: duplicate tool registration %q", kind))
 	}
 	registry[kind] = tool
-	metadata[kind] = normalizeToolInfo(kind, info)
+	specs[kind] = normalizeToolSpec(kind, spec)
 	order = append(order, kind)
 }
 
@@ -193,13 +200,24 @@ func Lookup(kind domain.ToolKind) (Tool, bool) {
 	return tool, ok
 }
 
-func Info(kind domain.ToolKind) ToolInfo {
+func lookupWithSpec(kind domain.ToolKind) (Tool, ToolSpec, bool) {
 	regMu.RLock()
 	defer regMu.RUnlock()
-	if info, ok := metadata[kind]; ok {
-		return info
+	tool, ok := registry[kind]
+	if !ok {
+		return nil, ToolSpec{}, false
 	}
-	return normalizeToolInfo(kind, ToolInfo{})
+	spec := specs[kind]
+	return tool, spec, true
+}
+
+func Info(kind domain.ToolKind) ToolSpec {
+	regMu.RLock()
+	defer regMu.RUnlock()
+	if spec, ok := specs[kind]; ok {
+		return spec
+	}
+	return normalizeToolSpec(kind, ToolSpec{})
 }
 
 func NewRegistry(workdir string) *Registry {
@@ -287,16 +305,30 @@ func Definitions(runtime Runtime) []provider.ToolDefinition {
 	regMu.RUnlock()
 	defs := make([]provider.ToolDefinition, 0, len(kinds))
 	for _, kind := range kinds {
-		tool, ok := Lookup(kind)
-		if !ok {
-			continue
-		}
-		def, enabled := tool.Definition(runtime)
+		def, enabled := DefinitionFor(kind, runtime)
 		if enabled {
 			defs = append(defs, def)
 		}
 	}
 	return defs
+}
+
+// DefinitionFor returns the provider tool definition for a registered tool.
+func DefinitionFor(kind domain.ToolKind, runtime Runtime) (provider.ToolDefinition, bool) {
+	tool, spec, ok := lookupWithSpec(kind)
+	if !ok {
+		return provider.ToolDefinition{}, false
+	}
+	if dynamic, ok := tool.(definitionProvider); ok {
+		var enabled bool
+		spec, enabled = dynamic.Definition(runtime, spec)
+		if !enabled {
+			return provider.ToolDefinition{}, false
+		}
+	} else if !spec.ExposeToLLM {
+		return provider.ToolDefinition{}, false
+	}
+	return providerDefinition(kind, spec), true
 }
 
 func ParseProviderCall(call provider.ToolCall) (Request, error) {
@@ -401,17 +433,19 @@ func SharedPresentation(kind domain.ToolKind, preview string) Presentation {
 	return Presentation{Title: Info(kind).Title, Subtitle: preview, Preview: preview}
 }
 
-func normalizeToolInfo(kind domain.ToolKind, info ToolInfo) ToolInfo {
-	info.Title = strings.TrimSpace(info.Title)
-	info.Description = strings.TrimSpace(info.Description)
-	if info.Title == "" {
+func normalizeToolSpec(kind domain.ToolKind, spec ToolSpec) ToolSpec {
+	spec.Title = strings.TrimSpace(spec.Title)
+	spec.Description = strings.TrimSpace(spec.Description)
+	spec.Usage = strings.TrimSpace(spec.Usage)
+	spec.Parameters = strings.TrimSpace(spec.Parameters)
+	if spec.Title == "" {
 		if kind == "" {
-			info.Title = "Tool"
+			spec.Title = "Tool"
 		} else {
-			info.Title = strings.ReplaceAll(string(kind), "_", " ")
+			spec.Title = strings.ReplaceAll(string(kind), "_", " ")
 		}
 	}
-	return info
+	return spec
 }
 
 func SummarizeResult(req Request, result Result) (string, string) {
@@ -436,13 +470,17 @@ func ToolCall(req Request) provider.ToolCall {
 	}
 }
 
-func FunctionDefinition(kind domain.ToolKind, description, schema string) provider.ToolDefinition {
+func providerDefinition(kind domain.ToolKind, spec ToolSpec) provider.ToolDefinition {
+	description := spec.Usage
+	if description == "" {
+		description = spec.Description
+	}
 	return provider.ToolDefinition{
 		Type: "function",
 		Function: provider.FunctionDefinition{
 			Name:        string(kind),
 			Description: description,
-			Parameters:  json.RawMessage(schema),
+			Parameters:  json.RawMessage(spec.Parameters),
 		},
 	}
 }

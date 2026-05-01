@@ -9,24 +9,23 @@ import (
 	"time"
 
 	"github.com/lkarlslund/koder/internal/domain"
-	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/tools"
 )
 
 type tool struct{}
 
 func init() {
-	tools.Register(tool{}, tools.ToolInfo{
+	tools.Register(tool{}, tools.ToolSpec{
 		Title:       "Run command",
 		Description: "Run a shell command in the workspace.",
+		Usage:       "Run a shell command in the workspace",
+		Parameters:  `{"type":"object","properties":{"command":{"type":"string","description":"Shell command to execute"},"workdir":{"type":"string","description":"Optional workspace-relative working directory"},"timeout_ms":{"type":"integer","description":"Optional timeout in milliseconds"}},"required":["command"],"additionalProperties":false}`,
+		ExposeToLLM: true,
 	})
 }
 
 func (tool) Kind() domain.ToolKind    { return domain.ToolKindBash }
 func (tool) BypassesPermission() bool { return false }
-func (tool) Definition(tools.Runtime) (provider.ToolDefinition, bool) {
-	return tools.FunctionDefinition(domain.ToolKindBash, "Run a shell command in the workspace", `{"type":"object","properties":{"command":{"type":"string","description":"Shell command to execute"},"workdir":{"type":"string","description":"Optional workspace-relative working directory"},"timeout_ms":{"type":"integer","description":"Optional timeout in milliseconds"}},"required":["command"],"additionalProperties":false}`), true
-}
 func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 	command := strings.TrimSpace(tools.FirstArg(args, "command", "cmd"))
 	if command == "" {

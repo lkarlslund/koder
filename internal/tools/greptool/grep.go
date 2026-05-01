@@ -14,7 +14,6 @@ import (
 	"strings"
 
 	"github.com/lkarlslund/koder/internal/domain"
-	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/tools"
 )
 
@@ -39,21 +38,17 @@ type searchOptions struct {
 }
 
 func init() {
-	tools.Register(tool{}, tools.ToolInfo{
+	tools.Register(tool{}, tools.ToolSpec{
 		Title:       "Search text",
 		Description: "Search workspace file contents with regular expressions.",
+		Usage:       "Search workspace file contents with ripgrep-compatible regular expressions. ALWAYS prefer this tool over running rg or grep through bash for code and text search, because this tool is permission-aware and returns structured search results. Use it to discover which files contain a pattern. Use glob to find files by name, and read to inspect a file once you know which one to open. Supports full regex syntax, file filtering with include globs or type names, output modes for matching lines, matching file paths, or per-file match counts, and optional case-insensitive search. If you need a broad exploratory search that will likely take several rounds, use the task tool instead.",
+		Parameters:  `{"type":"object","properties":{"pattern":{"type":"string","description":"Regular expression to search for in file contents. Uses ripgrep-compatible regex syntax."},"path":{"type":"string","description":"Optional workspace file or directory to search from. Defaults to the workspace root."},"include":{"type":"string","description":"Optional glob to filter searched files, for example \"*.go\" or \"**/*.{ts,tsx}\"."},"type":{"type":"string","description":"Optional ripgrep file type filter, for example \"go\", \"py\", or \"rust\"."},"output_mode":{"type":"string","enum":["content","files_with_matches","count"],"description":"How to return matches. \"content\" shows matching lines with file paths and line numbers. \"files_with_matches\" lists only matching file paths. \"count\" shows per-file matched line counts."},"ignore_case":{"type":"boolean","description":"Whether to search case-insensitively."},"head_limit":{"type":"integer","description":"Optional maximum number of output lines or entries to return."}},"required":["pattern"],"additionalProperties":false}`,
+		ExposeToLLM: true,
 	})
 }
 
 func (tool) Kind() domain.ToolKind    { return domain.ToolKindGrep }
 func (tool) BypassesPermission() bool { return false }
-func (tool) Definition(tools.Runtime) (provider.ToolDefinition, bool) {
-	return tools.FunctionDefinition(
-		domain.ToolKindGrep,
-		"Search workspace file contents with ripgrep-compatible regular expressions. ALWAYS prefer this tool over running rg or grep through bash for code and text search, because this tool is permission-aware and returns structured search results. Use it to discover which files contain a pattern. Use glob to find files by name, and read to inspect a file once you know which one to open. Supports full regex syntax, file filtering with include globs or type names, output modes for matching lines, matching file paths, or per-file match counts, and optional case-insensitive search. If you need a broad exploratory search that will likely take several rounds, use the task tool instead.",
-		`{"type":"object","properties":{"pattern":{"type":"string","description":"Regular expression to search for in file contents. Uses ripgrep-compatible regex syntax."},"path":{"type":"string","description":"Optional workspace file or directory to search from. Defaults to the workspace root."},"include":{"type":"string","description":"Optional glob to filter searched files, for example \"*.go\" or \"**/*.{ts,tsx}\"."},"type":{"type":"string","description":"Optional ripgrep file type filter, for example \"go\", \"py\", or \"rust\"."},"output_mode":{"type":"string","enum":["content","files_with_matches","count"],"description":"How to return matches. \"content\" shows matching lines with file paths and line numbers. \"files_with_matches\" lists only matching file paths. \"count\" shows per-file matched line counts."},"ignore_case":{"type":"boolean","description":"Whether to search case-insensitively."},"head_limit":{"type":"integer","description":"Optional maximum number of output lines or entries to return."}},"required":["pattern"],"additionalProperties":false}`,
-	), true
-}
 
 func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 	pattern := strings.TrimSpace(tools.FirstArg(args, "pattern", "query", "search"))

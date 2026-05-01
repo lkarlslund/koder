@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/lkarlslund/koder/internal/domain"
-	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/skills"
 	"github.com/lkarlslund/koder/internal/tools"
 )
@@ -17,17 +16,20 @@ import (
 type tool struct{}
 
 func init() {
-	tools.Register(tool{}, tools.ToolInfo{
+	tools.Register(tool{}, tools.ToolSpec{
 		Title:       "Load skill",
 		Description: "Load a reusable local skill by name.",
+		Usage:       "Load a reusable local skill by name",
+		Parameters:  `{"type":"object","properties":{"name":{"type":"string","description":"Skill name to load"}},"required":["name"],"additionalProperties":false}`,
+		ExposeToLLM: true,
 	})
 }
 
 func (tool) Kind() domain.ToolKind    { return domain.ToolKindSkill }
 func (tool) BypassesPermission() bool { return true }
-func (tool) Definition(runtime tools.Runtime) (provider.ToolDefinition, bool) {
-	description := skills.ToolDescription("Load a reusable local skill by name", runtime.Workdir)
-	return tools.FunctionDefinition(domain.ToolKindSkill, description, `{"type":"object","properties":{"name":{"type":"string","description":"Skill name to load"}},"required":["name"],"additionalProperties":false}`), true
+func (tool) Definition(runtime tools.Runtime, spec tools.ToolSpec) (tools.ToolSpec, bool) {
+	spec.Usage = skills.ToolDescription(spec.Usage, runtime.Workdir)
+	return spec, true
 }
 func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 	name := strings.TrimSpace(tools.FirstArg(args, "name", "skill_name", "skill"))

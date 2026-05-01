@@ -15,7 +15,6 @@ import (
 	"sync"
 
 	"github.com/lkarlslund/koder/internal/domain"
-	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/tools"
 )
 
@@ -32,21 +31,17 @@ const (
 var fetchCache sync.Map
 
 func init() {
-	tools.Register(tool{}, tools.ToolInfo{
+	tools.Register(tool{}, tools.ToolSpec{
 		Title:       "Fetch URL",
 		Description: "Fetch and render content from a URL.",
+		Usage:       "Retrieve a known public URL. Use this when you already know the URL and want its contents. Use websearch first if you need to discover relevant pages. Prefer this over ad hoc curl or wget for normal page retrieval. format controls the returned content: markdown is best for most pages, text is plain extracted text, and html returns the raw response body. max_chars limits the returned body size.",
+		Parameters:  `{"type":"object","properties":{"url":{"type":"string","description":"Fully qualified http or https URL to retrieve"},"format":{"type":"string","enum":["markdown","text","html"],"description":"Optional output format. markdown is best for most pages; text returns plain extracted text; html returns raw response text."},"max_chars":{"type":"integer","description":"Optional maximum number of characters to return"}},"required":["url"],"additionalProperties":false}`,
+		ExposeToLLM: true,
 	})
 }
 
 func (tool) Kind() domain.ToolKind    { return domain.ToolKindWebFetch }
 func (tool) BypassesPermission() bool { return false }
-func (tool) Definition(tools.Runtime) (provider.ToolDefinition, bool) {
-	return tools.FunctionDefinition(
-		domain.ToolKindWebFetch,
-		"Retrieve a known public URL. Use this when you already know the URL and want its contents. Use websearch first if you need to discover relevant pages. Prefer this over ad hoc curl or wget for normal page retrieval. format controls the returned content: markdown is best for most pages, text is plain extracted text, and html returns the raw response body. max_chars limits the returned body size.",
-		`{"type":"object","properties":{"url":{"type":"string","description":"Fully qualified http or https URL to retrieve"},"format":{"type":"string","enum":["markdown","text","html"],"description":"Optional output format. markdown is best for most pages; text returns plain extracted text; html returns raw response text."},"max_chars":{"type":"integer","description":"Optional maximum number of characters to return"}},"required":["url"],"additionalProperties":false}`,
-	), true
-}
 
 func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 	rawURL := strings.TrimSpace(tools.FirstArg(args, "url", "href"))

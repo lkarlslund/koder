@@ -6,14 +6,13 @@ import (
 	"strings"
 
 	"github.com/lkarlslund/koder/internal/domain"
-	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/tools"
 )
 
 type tool struct{}
 
 func init() {
-	tools.Register(tool{}, tools.ToolInfo{
+	tools.Register(tool{}, tools.ToolSpec{
 		Title:       "Ask question",
 		Description: "Ask the user a clarification question.",
 	})
@@ -21,9 +20,6 @@ func init() {
 
 func (tool) Kind() domain.ToolKind    { return domain.ToolKindQuestion }
 func (tool) BypassesPermission() bool { return false }
-func (tool) Definition(tools.Runtime) (provider.ToolDefinition, bool) {
-	return provider.ToolDefinition{}, false
-}
 func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 	question := strings.TrimSpace(args["question"])
 	if question == "" {

@@ -7,29 +7,40 @@ import (
 	"strings"
 
 	"github.com/lkarlslund/koder/internal/domain"
-	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools"
 )
 
 func init() {
-	tools.Register(listTool{}, tools.ToolInfo{
+	tools.Register(listTool{}, tools.ToolSpec{
 		Title:       "List milestones",
 		Description: "Read the current session milestone plan.",
+		Usage:       "Read the current session milestone plan. Use this to understand the long-horizon plan before choosing or breaking down work.",
+		Parameters:  `{"type":"object","properties":{},"additionalProperties":false}`,
+		ExposeToLLM: true,
 	})
-	tools.Register(addItemsTool{}, tools.ToolInfo{
+	tools.Register(addItemsTool{}, tools.ToolSpec{
 		Title:       "Add milestones",
 		Description: "Append new pending milestones to the current plan.",
+		Usage:       "Append new pending milestones to the current session plan. Use milestones for larger chunks of work. Each milestone requires a stable ref so its todo bucket can be tracked separately.",
+		Parameters:  `{"type":"object","properties":{"items":{"type":"array","description":"New milestones to append as pending","items":{"type":"object","properties":{"ref":{"type":"string"},"title":{"type":"string"},"notes":{"type":"string"}},"required":["ref","title"]}}},"required":["items"],"additionalProperties":false}`,
+		ExposeToLLM: true,
 	})
-	tools.Register(updateItemTool{}, tools.ToolInfo{
+	tools.Register(updateItemTool{}, tools.ToolSpec{
 		Title:       "Update milestone",
 		Description: "Update one milestone's status or details.",
+		Usage:       "Update one milestone's status, and optionally its title or notes. Keep at most one active milestone in the plan. Active statuses are in_progress, decomposing, and executing.",
+		Parameters:  `{"type":"object","properties":{"ref":{"type":"string","description":"Milestone ref"},"status":{"type":"string","enum":["pending","in_progress","decomposing","executing","completed","blocked"]},"title":{"type":"string","description":"Optional replacement title"},"notes":{"type":"string","description":"Optional replacement notes"}},"required":["ref","status"],"additionalProperties":false}`,
+		ExposeToLLM: true,
 	})
-	tools.Register(planTool{}, tools.ToolInfo{
+	tools.Register(planTool{}, tools.ToolSpec{
 		Title:       "Plan milestone",
 		Description: "Create or update a milestone and append todo items.",
+		Usage:       "Create or update one milestone and append concrete todo items for it in one step. Use this when the current discussion already contains enough detail and a separate decomposition chat would be overkill.",
+		Parameters:  `{"type":"object","properties":{"ref":{"type":"string","description":"Milestone ref"},"title":{"type":"string","description":"Milestone title"},"notes":{"type":"string","description":"Optional milestone notes"},"status":{"type":"string","enum":["pending","in_progress","decomposing","executing","completed","blocked"]},"items":{"type":"array","description":"Todo items to append for this milestone","items":{"type":"object","properties":{"content":{"type":"string"}},"required":["content"]}}},"required":["ref","title","items"],"additionalProperties":false}`,
+		ExposeToLLM: true,
 	})
-	tools.Register(writeTool{}, tools.ToolInfo{
+	tools.Register(writeTool{}, tools.ToolSpec{
 		Title:       "Updated milestones",
 		Description: "Replace the current milestone plan.",
 	})
@@ -53,30 +64,15 @@ func (updateItemTool) BypassesPermission() bool { return true }
 func (planTool) BypassesPermission() bool       { return true }
 func (writeTool) BypassesPermission() bool      { return true }
 
-func (listTool) Definition(tools.Runtime) (provider.ToolDefinition, bool) {
-	return tools.FunctionDefinition(domain.ToolKindMilestoneList, "Read the current session milestone plan. Use this to understand the long-horizon plan before choosing or breaking down work.", `{"type":"object","properties":{},"additionalProperties":false}`), true
-}
-
-func (addItemsTool) Definition(runtime tools.Runtime) (provider.ToolDefinition, bool) {
+func (addItemsTool) Definition(runtime tools.Runtime, spec tools.ToolSpec) (tools.ToolSpec, bool) {
 	if runtime.ChatRole == domain.WorkflowRoleDecomposition || runtime.ChatRole == domain.WorkflowRoleExecution {
-		return provider.ToolDefinition{}, false
+		return tools.ToolSpec{}, false
 	}
-	return tools.FunctionDefinition(domain.ToolKindMilestoneAdd, "Append new pending milestones to the current session plan. Use milestones for larger chunks of work. Each milestone requires a stable ref so its todo bucket can be tracked separately.", `{"type":"object","properties":{"items":{"type":"array","description":"New milestones to append as pending","items":{"type":"object","properties":{"ref":{"type":"string"},"title":{"type":"string"},"notes":{"type":"string"}},"required":["ref","title"]}}},"required":["items"],"additionalProperties":false}`), true
+	return spec, true
 }
 
-func (updateItemTool) Definition(tools.Runtime) (provider.ToolDefinition, bool) {
-	return tools.FunctionDefinition(domain.ToolKindMilestoneUpdate, "Update one milestone's status, and optionally its title or notes. Keep at most one active milestone in the plan. Active statuses are in_progress, decomposing, and executing.", `{"type":"object","properties":{"ref":{"type":"string","description":"Milestone ref"},"status":{"type":"string","enum":["pending","in_progress","decomposing","executing","completed","blocked"]},"title":{"type":"string","description":"Optional replacement title"},"notes":{"type":"string","description":"Optional replacement notes"}},"required":["ref","status"],"additionalProperties":false}`), true
-}
-
-func (planTool) Definition(runtime tools.Runtime) (provider.ToolDefinition, bool) {
-	if runtime.ChatRole == domain.WorkflowRoleDecomposition || runtime.ChatRole == domain.WorkflowRoleExecution {
-		return provider.ToolDefinition{}, false
-	}
-	return tools.FunctionDefinition(domain.ToolKindMilestonePlan, "Create or update one milestone and append concrete todo items for it in one step. Use this when the current discussion already contains enough detail and a separate decomposition chat would be overkill.", `{"type":"object","properties":{"ref":{"type":"string","description":"Milestone ref"},"title":{"type":"string","description":"Milestone title"},"notes":{"type":"string","description":"Optional milestone notes"},"status":{"type":"string","enum":["pending","in_progress","decomposing","executing","completed","blocked"]},"items":{"type":"array","description":"Todo items to append for this milestone","items":{"type":"object","properties":{"content":{"type":"string"}},"required":["content"]}}},"required":["ref","title","items"],"additionalProperties":false}`), true
-}
-
-func (writeTool) Definition(tools.Runtime) (provider.ToolDefinition, bool) {
-	return provider.ToolDefinition{}, false
+func (planTool) Definition(runtime tools.Runtime, spec tools.ToolSpec) (tools.ToolSpec, bool) {
+	return addItemsTool{}.Definition(runtime, spec)
 }
 
 func (listTool) NormalizeArgs(map[string]string) (map[string]string, error) {

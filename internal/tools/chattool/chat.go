@@ -7,26 +7,37 @@ import (
 	"strings"
 
 	"github.com/lkarlslund/koder/internal/domain"
-	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/tools"
 )
 
 func init() {
-	tools.Register(listTool{}, tools.ToolInfo{
+	tools.Register(listTool{}, tools.ToolSpec{
 		Title:       "List chats",
 		Description: "List chats in the current session.",
+		Usage:       "List chats in the current session, including worker chats started for decomposition or execution.",
+		Parameters:  `{"type":"object","properties":{},"additionalProperties":false}`,
+		ExposeToLLM: true,
 	})
-	tools.Register(startDecompositionTool{}, tools.ToolInfo{
+	tools.Register(startDecompositionTool{}, tools.ToolSpec{
 		Title:       "Start decomposition chat",
 		Description: "Start a background decomposition chat for one milestone.",
+		Usage:       "Start a new background decomposition chat for one milestone. Use this when a milestone needs dedicated todo synthesis instead of inline decomposition.",
+		Parameters:  `{"type":"object","properties":{"milestone_ref":{"type":"string","description":"Milestone ref to decompose"},"title":{"type":"string","description":"Optional chat title"}},"required":["milestone_ref"],"additionalProperties":false}`,
+		ExposeToLLM: true,
 	})
-	tools.Register(startExecutionTool{}, tools.ToolInfo{
+	tools.Register(startExecutionTool{}, tools.ToolSpec{
 		Title:       "Start execution chat",
 		Description: "Start a background execution chat for one milestone.",
+		Usage:       "Start a new background execution chat for one milestone. Use this after a milestone has enough todo context to implement independently.",
+		Parameters:  `{"type":"object","properties":{"milestone_ref":{"type":"string","description":"Milestone ref to execute"},"title":{"type":"string","description":"Optional chat title"}},"required":["milestone_ref"],"additionalProperties":false}`,
+		ExposeToLLM: true,
 	})
-	tools.Register(pollTool{}, tools.ToolInfo{
+	tools.Register(pollTool{}, tools.ToolSpec{
 		Title:       "Poll chat",
 		Description: "Read the latest runtime state for one chat.",
+		Usage:       "Read the latest runtime state for one chat by id, including whether it is running, waiting for approval, completed, or failed.",
+		Parameters:  `{"type":"object","properties":{"chat_id":{"type":"integer","description":"Chat id to inspect"}},"required":["chat_id"],"additionalProperties":false}`,
+		ExposeToLLM: true,
 	})
 }
 
@@ -45,32 +56,23 @@ func (startDecompositionTool) BypassesPermission() bool { return true }
 func (startExecutionTool) BypassesPermission() bool     { return true }
 func (pollTool) BypassesPermission() bool               { return true }
 
-func (listTool) Definition(runtime tools.Runtime) (provider.ToolDefinition, bool) {
+func (listTool) Definition(runtime tools.Runtime, spec tools.ToolSpec) (tools.ToolSpec, bool) {
 	if !chatToolAllowed(runtime.ChatRole) {
-		return provider.ToolDefinition{}, false
+		return tools.ToolSpec{}, false
 	}
-	return tools.FunctionDefinition(domain.ToolKindChatList, "List chats in the current session, including worker chats started for decomposition or execution.", `{"type":"object","properties":{},"additionalProperties":false}`), true
+	return spec, true
 }
 
-func (startDecompositionTool) Definition(runtime tools.Runtime) (provider.ToolDefinition, bool) {
-	if !chatToolAllowed(runtime.ChatRole) {
-		return provider.ToolDefinition{}, false
-	}
-	return tools.FunctionDefinition(domain.ToolKindChatStartDecomp, "Start a new background decomposition chat for one milestone. Use this when a milestone needs dedicated todo synthesis instead of inline decomposition.", `{"type":"object","properties":{"milestone_ref":{"type":"string","description":"Milestone ref to decompose"},"title":{"type":"string","description":"Optional chat title"}},"required":["milestone_ref"],"additionalProperties":false}`), true
+func (startDecompositionTool) Definition(runtime tools.Runtime, spec tools.ToolSpec) (tools.ToolSpec, bool) {
+	return listTool{}.Definition(runtime, spec)
 }
 
-func (startExecutionTool) Definition(runtime tools.Runtime) (provider.ToolDefinition, bool) {
-	if !chatToolAllowed(runtime.ChatRole) {
-		return provider.ToolDefinition{}, false
-	}
-	return tools.FunctionDefinition(domain.ToolKindChatStartExec, "Start a new background execution chat for one milestone. Use this after a milestone has enough todo context to implement independently.", `{"type":"object","properties":{"milestone_ref":{"type":"string","description":"Milestone ref to execute"},"title":{"type":"string","description":"Optional chat title"}},"required":["milestone_ref"],"additionalProperties":false}`), true
+func (startExecutionTool) Definition(runtime tools.Runtime, spec tools.ToolSpec) (tools.ToolSpec, bool) {
+	return listTool{}.Definition(runtime, spec)
 }
 
-func (pollTool) Definition(runtime tools.Runtime) (provider.ToolDefinition, bool) {
-	if !chatToolAllowed(runtime.ChatRole) {
-		return provider.ToolDefinition{}, false
-	}
-	return tools.FunctionDefinition(domain.ToolKindChatPoll, "Read the latest runtime state for one chat by id, including whether it is running, waiting for approval, completed, or failed.", `{"type":"object","properties":{"chat_id":{"type":"integer","description":"Chat id to inspect"}},"required":["chat_id"],"additionalProperties":false}`), true
+func (pollTool) Definition(runtime tools.Runtime, spec tools.ToolSpec) (tools.ToolSpec, bool) {
+	return listTool{}.Definition(runtime, spec)
 }
 
 func (listTool) NormalizeArgs(map[string]string) (map[string]string, error) {

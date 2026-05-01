@@ -57,10 +57,10 @@ func TestNormalizeArgsAndDefinitions(t *testing.T) {
 	if args["ref"] != "alpha" || args["title"] != "Alpha" {
 		t.Fatalf("unexpected normalized args: %#v", args)
 	}
-	if _, enabled := (addItemsTool{}).Definition(tools.Runtime{ChatRole: domain.WorkflowRoleExecution}); enabled {
+	if _, enabled := tools.DefinitionFor(domain.ToolKindMilestoneAdd, tools.Runtime{ChatRole: domain.WorkflowRoleExecution}); enabled {
 		t.Fatal("expected add-items definition to be disabled in execution chats")
 	}
-	if _, enabled := (planTool{}).Definition(tools.Runtime{ChatRole: domain.WorkflowRoleDecomposition}); enabled {
+	if _, enabled := tools.DefinitionFor(domain.ToolKindMilestonePlan, tools.Runtime{ChatRole: domain.WorkflowRoleDecomposition}); enabled {
 		t.Fatal("expected plan definition to be disabled in decomposition chats")
 	}
 }

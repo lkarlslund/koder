@@ -8,14 +8,13 @@ import (
 	"strings"
 
 	"github.com/lkarlslund/koder/internal/domain"
-	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/tools"
 )
 
 type tool struct{}
 
 func init() {
-	tools.Register(tool{}, tools.ToolInfo{
+	tools.Register(tool{}, tools.ToolSpec{
 		Title:       "MCP",
 		Description: "Run a tool exposed by a connected MCP server.",
 	})
@@ -23,10 +22,6 @@ func init() {
 
 func (tool) Kind() domain.ToolKind    { return domain.ToolKindMCP }
 func (tool) BypassesPermission() bool { return false }
-
-func (tool) Definition(tools.Runtime) (provider.ToolDefinition, bool) {
-	return provider.ToolDefinition{}, false
-}
 
 func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 	serverID := strings.TrimSpace(tools.FirstArg(args, "server", "server_id"))

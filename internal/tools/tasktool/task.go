@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/lkarlslund/koder/internal/domain"
-	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools"
 )
@@ -15,7 +14,7 @@ import (
 type tool struct{}
 
 func init() {
-	tools.Register(tool{}, tools.ToolInfo{
+	tools.Register(tool{}, tools.ToolSpec{
 		Title:       "Create task",
 		Description: "Create a pending background task.",
 	})
@@ -23,9 +22,6 @@ func init() {
 
 func (tool) Kind() domain.ToolKind    { return domain.ToolKindTask }
 func (tool) BypassesPermission() bool { return true }
-func (tool) Definition(tools.Runtime) (provider.ToolDefinition, bool) {
-	return provider.ToolDefinition{}, false
-}
 func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 	body := strings.TrimSpace(args["body"])
 	if body == "" {

@@ -7056,10 +7056,8 @@ func (m *Model) openToolsDialog() {
 		if strings.TrimSpace(label) == "" {
 			label = string(kind)
 		}
-		if tool, ok := tools.Lookup(kind); ok {
-			if def, enabled := tool.Definition(tools.Runtime{Workdir: m.workdir}); enabled && strings.TrimSpace(def.Function.Description) != "" {
-				description = def.Function.Description
-			}
+		if def, enabled := tools.DefinitionFor(kind, tools.Runtime{Workdir: m.workdir}); enabled && strings.TrimSpace(def.Function.Description) != "" {
+			description = def.Function.Description
 		}
 		items = append(items, dialogs.ToolToggleItem{
 			Tool:        kind,

@@ -13,24 +13,23 @@ import (
 
 	"github.com/lkarlslund/koder/internal/attachment"
 	"github.com/lkarlslund/koder/internal/domain"
-	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/tools"
 )
 
 type tool struct{}
 
 func init() {
-	tools.Register(tool{}, tools.ToolInfo{
+	tools.Register(tool{}, tools.ToolSpec{
 		Title:       "View image",
 		Description: "Load a local image file into model context.",
+		Usage:       "Load a local image file into model context so you can inspect it visually. Use this instead of read for screenshots, photos, diagrams, or other image files. Path may be relative to the workspace or absolute. Optional detail may be set to original or omitted.",
+		Parameters:  `{"type":"object","properties":{"path":{"type":"string","description":"Relative or absolute local image path"},"detail":{"type":"string","description":"Optional detail level. Use original to preserve original resolution; omit for default resized behavior.","enum":["original"]}},"required":["path"],"additionalProperties":false}`,
+		ExposeToLLM: true,
 	})
 }
 
 func (tool) Kind() domain.ToolKind    { return domain.ToolKindViewImage }
 func (tool) BypassesPermission() bool { return false }
-func (tool) Definition(tools.Runtime) (provider.ToolDefinition, bool) {
-	return tools.FunctionDefinition(domain.ToolKindViewImage, "Load a local image file into model context so you can inspect it visually. Use this instead of read for screenshots, photos, diagrams, or other image files. Path may be relative to the workspace or absolute. Optional detail may be set to original or omitted.", `{"type":"object","properties":{"path":{"type":"string","description":"Relative or absolute local image path"},"detail":{"type":"string","description":"Optional detail level. Use original to preserve original resolution; omit for default resized behavior.","enum":["original"]}},"required":["path"],"additionalProperties":false}`), true
-}
 func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 	path := tools.NormalizePathInput(tools.FirstArg(args, "path", "file", "file_path", "filepath"))
 	if path == "" {

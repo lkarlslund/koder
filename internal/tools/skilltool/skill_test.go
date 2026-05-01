@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/tools"
 )
 
@@ -25,7 +26,7 @@ func TestDefinitionIncludesAvailableSkills(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	def, enabled := tool{}.Definition(tools.Runtime{Workdir: repo})
+	def, enabled := tools.DefinitionFor(domain.ToolKindSkill, tools.Runtime{Workdir: repo})
 	if !enabled {
 		t.Fatal("expected skill tool definition to be enabled")
 	}

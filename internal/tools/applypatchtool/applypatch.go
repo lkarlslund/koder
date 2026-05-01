@@ -10,24 +10,23 @@ import (
 	"strings"
 
 	"github.com/lkarlslund/koder/internal/domain"
-	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/tools"
 )
 
 type tool struct{}
 
 func init() {
-	tools.Register(tool{}, tools.ToolInfo{
+	tools.Register(tool{}, tools.ToolSpec{
 		Title:       "Apply patch",
 		Description: "Apply a unified diff patch to workspace files.",
+		Usage:       "Apply a unified diff patch to workspace files. Prefer this for localized code changes when a patch is natural. If patch check fails, retry with more precise context or smaller hunks before falling back to Write. Do not rewrite an existing file solely because a patch failed to apply.",
+		Parameters:  `{"type":"object","properties":{"patch":{"type":"string","description":"Unified diff patch to apply"}},"required":["patch"],"additionalProperties":false}`,
+		ExposeToLLM: true,
 	})
 }
 
 func (tool) Kind() domain.ToolKind    { return domain.ToolKindApplyPatch }
 func (tool) BypassesPermission() bool { return false }
-func (tool) Definition(tools.Runtime) (provider.ToolDefinition, bool) {
-	return tools.FunctionDefinition(domain.ToolKindApplyPatch, "Apply a unified diff patch to workspace files. Prefer this for localized code changes when a patch is natural. If patch check fails, retry with more precise context or smaller hunks before falling back to Write. Do not rewrite an existing file solely because a patch failed to apply.", `{"type":"object","properties":{"patch":{"type":"string","description":"Unified diff patch to apply"}},"required":["patch"],"additionalProperties":false}`), true
-}
 func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 	patch := args["patch"]
 	if patch == "" {

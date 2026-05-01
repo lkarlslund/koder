@@ -15,7 +15,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/lkarlslund/koder/internal/domain"
-	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/tools"
 )
 
@@ -27,17 +26,17 @@ const (
 )
 
 func init() {
-	tools.Register(tool{}, tools.ToolInfo{
+	tools.Register(tool{}, tools.ToolSpec{
 		Title:       "Read file",
 		Description: "Read a text file or list a directory from the workspace.",
+		Usage:       "Read a text file or list a directory from the workspace. Path may be relative to the workspace or absolute. File results are returned with 1-indexed line numbers. Use offset and limit together to read a later section of a large file. Prefer grep to find specific content before reading narrow slices, and avoid many tiny repeated reads. Directories return direct child entries. Images and PDFs are not supported by this tool.",
+		Parameters:  `{"type":"object","properties":{"path":{"type":"string","description":"Relative or absolute workspace path to a text file or directory"},"offset":{"type":"integer","description":"Optional starting line number for text files (1-indexed). Use with limit to read a later section."},"limit":{"type":"integer","description":"Optional maximum number of lines to return for text files"}},"required":["path"],"additionalProperties":false}`,
+		ExposeToLLM: true,
 	})
 }
 
 func (tool) Kind() domain.ToolKind    { return domain.ToolKindRead }
 func (tool) BypassesPermission() bool { return false }
-func (tool) Definition(tools.Runtime) (provider.ToolDefinition, bool) {
-	return tools.FunctionDefinition(domain.ToolKindRead, "Read a text file or list a directory from the workspace. Path may be relative to the workspace or absolute. File results are returned with 1-indexed line numbers. Use offset and limit together to read a later section of a large file. Prefer grep to find specific content before reading narrow slices, and avoid many tiny repeated reads. Directories return direct child entries. Images and PDFs are not supported by this tool.", `{"type":"object","properties":{"path":{"type":"string","description":"Relative or absolute workspace path to a text file or directory"},"offset":{"type":"integer","description":"Optional starting line number for text files (1-indexed). Use with limit to read a later section."},"limit":{"type":"integer","description":"Optional maximum number of lines to return for text files"}},"required":["path"],"additionalProperties":false}`), true
-}
 func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 	path := tools.NormalizePathInput(tools.FirstArg(args, "path", "file", "file_path", "filepath"))
 	if path == "" {
