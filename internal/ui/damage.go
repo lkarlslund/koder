@@ -144,13 +144,16 @@ func DamageRows(rects []Rect) []RowDamage {
 
 // DiffSurfaceDamage returns exact damage between two surface snapshots.
 func DiffSurfaceDamage(previous, current SurfaceView) []Rect {
+	if rects, ok := diffCellSurfaceDamage(previous, current); ok {
+		return rects
+	}
 	prevRows := surfaceHeight(previous)
 	currRows := surfaceHeight(current)
 	maxRows := max(prevRows, currRows)
 	if maxRows <= 0 {
 		return nil
 	}
-	rects := make([]Rect, 0, maxRows)
+	var rects []Rect
 	for y := 0; y < maxRows; y++ {
 		prevWidth := 0
 		currWidth := 0
@@ -189,4 +192,52 @@ func DiffSurfaceDamage(previous, current SurfaceView) []Rect {
 		rects = append(rects, rect)
 	}
 	return rects
+}
+
+// diffCellSurfaceDamage compares same-sized cell-buffer surfaces directly.
+func diffCellSurfaceDamage(previous, current SurfaceView) ([]Rect, bool) {
+	prevSurface, ok := previous.(Surface)
+	if !ok || !prevSurface.isCellBuffer() {
+		return nil, false
+	}
+	currSurface, ok := current.(Surface)
+	if !ok || !currSurface.isCellBuffer() {
+		return nil, false
+	}
+	if prevSurface.w != currSurface.w || prevSurface.h != currSurface.h {
+		return nil, false
+	}
+	if prevSurface.w <= 0 || prevSurface.h <= 0 {
+		return nil, true
+	}
+	var rects []Rect
+	for y := 0; y < prevSurface.h; y++ {
+		rowStart := y * prevSurface.w
+		prevRow := prevSurface.cells[rowStart : rowStart+prevSurface.w]
+		currRow := currSurface.cells[rowStart : rowStart+currSurface.w]
+		start := -1
+		end := -1
+		for x := range prevRow {
+			if prevRow[x] == currRow[x] {
+				continue
+			}
+			if start < 0 {
+				start = x
+			}
+			end = x
+		}
+		if start < 0 {
+			continue
+		}
+		rect := Rect{X: start, Y: y, W: end - start + 1, H: 1}
+		if len(rects) > 0 {
+			last := rects[len(rects)-1]
+			if last.X == rect.X && last.W == rect.W && last.Y+last.H == rect.Y {
+				rects[len(rects)-1].H++
+				continue
+			}
+		}
+		rects = append(rects, rect)
+	}
+	return rects, true
 }

@@ -76,7 +76,11 @@ func (r *RetainedSurface) PaintInto(ctx *Context, bounds Rect, dst *Surface) []R
 	rects := CollectNodeDamage(r.node)
 	ClearNodeDirty(r.node)
 	r.bounds = local
-	r.surface = canvas.Snapshot()
+	if bounds.X == 0 && bounds.Y == 0 && dst.SurfaceWidth() == local.W && dst.SurfaceHeight() == local.H {
+		r.surface = *dst
+	} else {
+		r.surface = canvas.Snapshot()
+	}
 	r.valid = true
 	return rects
 }
