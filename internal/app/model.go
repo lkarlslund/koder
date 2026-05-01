@@ -1433,9 +1433,6 @@ func (m *Model) handleMainWindowKey(msg ui.KeyMsg) (bool, ui.Cmd) {
 		m.invalidateFooterCache()
 		return true, nil
 	case "alt+up":
-		if m.queueEditMode && len(m.currentChat.QueuedInputs) > 0 {
-			return true, m.reorderSelectedQueuedInput(-1)
-		}
 		_, cmd := m.popQueuedPromptForEditing()
 		return true, cmd
 	case "alt+down":
@@ -7246,9 +7243,10 @@ func (m *Model) openHelpModal() {
 		"Alt-H               show or close help",
 		"Alt-Q               toggle queue edit mode",
 		"Ctrl-PgUp/PgDn      switch to previous or next chat",
-		"Enter               send prompt or confirm selection",
+		"Enter               send prompt, steer while running, or confirm selection",
 		"Esc                 cancel dialog or interrupt active run",
-		"Tab                 autocomplete, or queue steering while running",
+		"Tab                 autocomplete, or queue while running",
+		"Alt-Up              restore next queued prompt to composer",
 		"Up/Down             browse session prompt history",
 		"Alt-Enter           insert newline",
 		"Ctrl-V              paste clipboard text or image",
@@ -7285,8 +7283,8 @@ func (m *Model) openHelpModal() {
 		"Queue Edit Mode",
 		"Alt-Q               enter or leave queue edit mode",
 		"Up/Down             select queued item",
-		"Enter               restore selected queued prompt to composer",
-		"Alt-Up/Alt-Down     reorder selected queued item",
+		"Enter/Alt-Up        restore selected queued prompt to composer",
+		"Alt-Down            move selected queued item down",
 		"H                   hold or unhold selected queued item",
 		"Backspace/Delete    delete selected queued item",
 		"Esc                 leave queue edit mode",

@@ -1892,6 +1892,71 @@ func TestQueueEditEnterRestoresQueuedPromptToComposer(t *testing.T) {
 	}
 }
 
+func TestAltUpRestoresQueuedPromptToComposer(t *testing.T) {
+	m := Model{
+		cfg:      testConfig(t),
+		palette:  theme.Default().Palette,
+		viewport: newTranscriptViewport(80, 20),
+		composer: textarea.New(),
+		width:    80,
+		height:   24,
+		currentChat: domain.Chat{QueuedInputs: []domain.QueuedInput{
+			{ID: 1, Text: "queued ask", Kind: domain.QueuedInputKindQueued},
+		}},
+	}
+
+	_ = m.ViewLines()
+	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyUp, Alt: true})
+	next := updated.(*Model)
+
+	_ = cmd
+	if len(next.currentChat.QueuedInputs) != 0 {
+		t.Fatalf("expected queued prompt cleared, got %#v", next.currentChat.QueuedInputs)
+	}
+	if next.composer.Value() != "queued ask" {
+		t.Fatalf("expected composer to contain restored queued prompt, got %q", next.composer.Value())
+	}
+	if got := strings.Join(next.ViewLines(), "\n"); !strings.Contains(got, "queued ask") {
+		t.Fatalf("expected rendered composer to contain restored queued prompt, got %q", got)
+	}
+}
+
+func TestQueueEditAltUpRestoresSelectedQueuedPromptToComposer(t *testing.T) {
+	m := Model{
+		cfg:      testConfig(t),
+		palette:  theme.Default().Palette,
+		viewport: newTranscriptViewport(80, 20),
+		composer: textarea.New(),
+		width:    80,
+		height:   24,
+		currentChat: domain.Chat{QueuedInputs: []domain.QueuedInput{
+			{ID: 1, Text: "first", Kind: domain.QueuedInputKindQueued},
+			{ID: 2, Text: "second", Kind: domain.QueuedInputKindSteer},
+		}},
+	}
+	m.queueEditMode = true
+	m.queueSelection = 1
+	m.setComposerValue("current draft")
+
+	_ = m.ViewLines()
+	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyUp, Alt: true})
+	next := updated.(*Model)
+
+	_ = cmd
+	if next.composer.Value() != "second" {
+		t.Fatalf("expected composer to contain selected queued prompt, got %q", next.composer.Value())
+	}
+	if len(next.currentChat.QueuedInputs) != 2 {
+		t.Fatalf("expected current draft to replace selected queue item, got %#v", next.currentChat.QueuedInputs)
+	}
+	if next.currentChat.QueuedInputs[0].Text != "first" || next.currentChat.QueuedInputs[1].Text != "current draft" {
+		t.Fatalf("expected selected queued prompt replaced with current draft, got %#v", next.currentChat.QueuedInputs)
+	}
+	if got := strings.Join(next.ViewLines(), "\n"); !strings.Contains(got, "second") {
+		t.Fatalf("expected rendered composer to contain selected queued prompt, got %q", got)
+	}
+}
+
 func TestQueueEditEnterSwapsQueuedPromptWithExistingDraft(t *testing.T) {
 	m := Model{
 		cfg:         testConfig(t),
