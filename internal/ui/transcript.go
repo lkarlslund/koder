@@ -222,7 +222,7 @@ func (t *RetainedTranscript) Paint(ctx *Context, canvas Canvas) {
 	if t == nil || canvas.Width() <= 0 || canvas.Height() <= 0 {
 		return
 	}
-	t.RenderVisibleInto(ctx, canvas.Width(), canvas.Height(), 0, canvas.surface)
+	t.PaintVisible(ctx, canvas, 0)
 }
 
 func (t *RetainedTranscript) ContentHeight(width int) int {
@@ -243,11 +243,23 @@ func (t *RetainedTranscript) RenderBottom(ctx *Context, width, height int) (Surf
 }
 
 func (t *RetainedTranscript) RenderVisibleInto(ctx *Context, width, height, offset int, dst *Surface) (int, int) {
+	return t.renderVisibleInto(ctx, width, height, offset, dst, 0, 0)
+}
+
+// PaintVisible renders a vertical viewport directly into canvas.
+func (t *RetainedTranscript) PaintVisible(ctx *Context, canvas Canvas, offset int) (int, int) {
+	if canvas.surface == nil {
+		return t.RenderVisibleInto(ctx, canvas.Width(), canvas.Height(), offset, nil)
+	}
+	return t.renderVisibleInto(ctx, canvas.Width(), canvas.Height(), offset, canvas.surface, canvas.origin.X, canvas.origin.Y)
+}
+
+func (t *RetainedTranscript) renderVisibleInto(ctx *Context, width, height, offset int, dst *Surface, dstX, dstY int) (int, int) {
 	measureCtx := withoutRuntime(ctx)
 	totalHeight := t.exactContentHeight(measureCtx, width)
 	maxOffset := max(0, totalHeight-max(0, height))
 	offset = min(max(0, offset), maxOffset)
-	if dst == nil {
+	if dst == nil && (ctx == nil || ctx.Runtime == nil) {
 		return totalHeight, offset
 	}
 	y := 0
@@ -265,7 +277,9 @@ func (t *RetainedTranscript) RenderVisibleInto(ctx *Context, width, height, offs
 		if ctx != nil && ctx.Runtime != nil {
 			surface.RegisterControls(ctx.Runtime, 0, renderY)
 		}
-		*dst = dst.placeAt(0, renderY, surface)
+		if dst != nil {
+			*dst = dst.placeAt(dstX, dstY+renderY, surface)
+		}
 	}
 	return totalHeight, offset
 }

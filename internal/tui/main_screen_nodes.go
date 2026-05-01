@@ -26,7 +26,6 @@ type ChatTranscriptNode struct {
 	yOffset    int
 	background ui.CellColor
 	controls   []ui.Control
-	surface    ui.Surface
 }
 
 // NewChatTranscriptNode constructs a transcript viewport node.
@@ -72,7 +71,7 @@ func (n *ChatTranscriptNode) Measure(_ *ui.Context, constraints ui.Constraints) 
 	return constraints.Clamp(ui.Size{W: n.width, H: n.height})
 }
 
-// Prepare renders the visible transcript and records damage.
+// Prepare records transcript damage and refreshes local controls.
 func (n *ChatTranscriptNode) Prepare(ctx *ui.Context) {
 	if n == nil {
 		return
@@ -85,23 +84,28 @@ func (n *ChatTranscriptNode) Prepare(ctx *ui.Context) {
 	if !n.NeedsPaint() && !n.NeedsLayout() {
 		return
 	}
-	next := n.renderSurface(ctx, rect)
-	diff := ui.DiffSurfaceDamage(n.surface, next)
-	if len(diff) == 0 && n.NeedsLayout() {
-		n.MarkDirtyLocal(ui.Rect{W: rect.W, H: rect.H})
-	} else {
-		n.MarkDirtyLocalRects(diff)
-	}
-	n.surface = next
+	n.refreshControls(ctx, rect)
+	n.MarkDirtyLocal(ui.Rect{W: rect.W, H: rect.H})
 }
 
-// Paint paints the latest rendered transcript surface.
-func (n *ChatTranscriptNode) Paint(_ *ui.Context, canvas ui.Canvas) {
+// Paint paints the visible transcript directly into canvas.
+func (n *ChatTranscriptNode) Paint(ctx *ui.Context, canvas ui.Canvas) {
 	if n == nil || canvas.Width() <= 0 || canvas.Height() <= 0 {
 		return
 	}
 	canvas.Fill(ui.Rect{W: canvas.Width(), H: canvas.Height()}, ui.CellStyle{BG: n.background})
-	canvas.BlitSurface(0, 0, n.surface.Normalize(canvas.Width(), canvas.Height()))
+	if n.retained == nil {
+		n.controls = nil
+		return
+	}
+	runtime := ui.Runtime{}
+	renderCtx := ui.Context{}
+	if ctx != nil {
+		renderCtx = *ctx
+	}
+	renderCtx.Runtime = &runtime
+	n.retained.PaintVisible(&renderCtx, canvas, max(0, n.yOffset))
+	n.controls = runtime.Controls()
 }
 
 // ControlAt returns the topmost transcript control at point.
@@ -133,10 +137,10 @@ func (n *ChatTranscriptNode) WantsWheel(point ui.Point) bool {
 	return n != nil && n.Rect().Contains(point)
 }
 
-func (n *ChatTranscriptNode) renderSurface(ctx *ui.Context, bounds ui.Rect) ui.Surface {
+func (n *ChatTranscriptNode) refreshControls(ctx *ui.Context, bounds ui.Rect) {
 	if n == nil || n.retained == nil || bounds.W <= 0 || bounds.H <= 0 {
 		n.controls = nil
-		return ui.Surface{}
+		return
 	}
 	runtime := ui.Runtime{}
 	renderCtx := ui.Context{}
@@ -144,10 +148,8 @@ func (n *ChatTranscriptNode) renderSurface(ctx *ui.Context, bounds ui.Rect) ui.S
 		renderCtx = *ctx
 	}
 	renderCtx.Runtime = &runtime
-	surface := ui.BlankSurface(max(0, bounds.W), max(0, bounds.H))
-	n.retained.RenderVisibleInto(&renderCtx, max(0, bounds.W), max(0, bounds.H), max(0, n.yOffset), &surface)
+	n.retained.RenderVisibleInto(&renderCtx, max(0, bounds.W), max(0, bounds.H), max(0, n.yOffset), nil)
 	n.controls = runtime.Controls()
-	return surface
 }
 
 // ComposerState describes the current composer display.
