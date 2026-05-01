@@ -5,13 +5,15 @@ import (
 	"unicode"
 )
 
+// StyledSpan is a run of text with one style and optional interactive control.
 type StyledSpan struct {
-	Text      string
-	Style     CellStyle
-	ControlID string
-	Enabled   bool
+	Text      string    // Text content for this run.
+	Style     CellStyle // Style merged with the base style at paint time.
+	ControlID string    // Optional control ID covering this span.
+	Enabled   bool      // Whether the control ID should participate in hit-testing.
 }
 
+// AppendStyledSpan appends text while merging adjacent spans with identical style.
 func AppendStyledSpan(dst []StyledSpan, text string, style CellStyle) []StyledSpan {
 	if text == "" {
 		return dst
@@ -23,6 +25,7 @@ func AppendStyledSpan(dst []StyledSpan, text string, style CellStyle) []StyledSp
 	return append(dst, StyledSpan{Text: text, Style: style})
 }
 
+// AppendInteractiveStyledSpan appends text with a hit-test control.
 func AppendInteractiveStyledSpan(dst []StyledSpan, text string, style CellStyle, controlID string, enabled bool) []StyledSpan {
 	if text == "" {
 		return dst
@@ -31,6 +34,7 @@ func AppendInteractiveStyledSpan(dst []StyledSpan, text string, style CellStyle,
 	return appendStyledText(dst, span)
 }
 
+// PlainStyledText returns spans with style and control metadata removed.
 func PlainStyledText(spans []StyledSpan) string {
 	var b strings.Builder
 	for _, span := range spans {
@@ -39,10 +43,12 @@ func PlainStyledText(spans []StyledSpan) string {
 	return b.String()
 }
 
+// StyledTextWidth returns the terminal display width of spans.
 func StyledTextWidth(spans []StyledSpan) int {
 	return PlainWidth(PlainStyledText(spans))
 }
 
+// LayoutStyledText wraps spans and paints them into a Surface.
 func LayoutStyledText(spans []StyledSpan, width int, base CellStyle) Surface {
 	lines := WrapStyledText(spans, width)
 	maxWidth := 0
@@ -56,6 +62,7 @@ func LayoutStyledText(spans []StyledSpan, width int, base CellStyle) Surface {
 	return s
 }
 
+// SplitStyledLines splits spans on newline characters while preserving style.
 func SplitStyledLines(spans []StyledSpan) [][]StyledSpan {
 	lines := make([][]StyledSpan, 1)
 	for _, span := range spans {
@@ -80,6 +87,7 @@ func SplitStyledLines(spans []StyledSpan) [][]StyledSpan {
 	return lines
 }
 
+// WrapStyledText wraps spans to width without dropping style metadata.
 func WrapStyledText(spans []StyledSpan, width int) [][]StyledSpan {
 	if width <= 0 {
 		return SplitStyledLines(spans)

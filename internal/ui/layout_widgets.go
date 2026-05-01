@@ -6,6 +6,7 @@ import (
 	"github.com/lkarlslund/koder/internal/theme"
 )
 
+// Section renders an optional title above a bordered child panel.
 type Section struct {
 	PassiveNode
 	Title       string
@@ -17,6 +18,7 @@ type Section struct {
 	BorderColor CellColor
 }
 
+// Measure returns the size of the section title and bordered child.
 func (s Section) Measure(ctx *Context, constraints Constraints) Size {
 	width := s.Width
 	if width <= 0 {
@@ -29,6 +31,7 @@ func (s Section) Measure(ctx *Context, constraints Constraints) Size {
 	return constraints.Clamp(children.Measure(ctx, Constraints{MaxW: width, MaxH: constraints.MaxH}))
 }
 
+// Paint renders the section title and child panel.
 func (s Section) Paint(ctx *Context, canvas Canvas) {
 	if canvas.Width() <= 0 || canvas.Height() <= 0 {
 		return
@@ -43,6 +46,7 @@ func (s Section) Paint(ctx *Context, canvas Canvas) {
 	paintNodeInto(ctx, s.children(ctx), Rect{X: canvas.origin.X, Y: canvas.origin.Y, W: width, H: canvas.Height()}, canvas.surface)
 }
 
+// Children returns the section child for retained traversal.
 func (s Section) Children() []Node {
 	if s.Child == nil {
 		return nil
@@ -77,6 +81,7 @@ func (s Section) children(ctx *Context) Node {
 	)
 }
 
+// ListItem is one row in a List.
 type ListItem struct {
 	ControlID      string
 	Primary        string
@@ -87,6 +92,7 @@ type ListItem struct {
 	TertiaryWidth  int
 }
 
+// List renders selectable rows and maintains a selected index.
 type List struct {
 	PassiveNode
 	Items              []ListItem
@@ -97,6 +103,7 @@ type List struct {
 	OnActivate         func(index int, item ListItem)
 }
 
+// Measure returns the list's fixed width and item count height.
 func (l List) Measure(ctx *Context, constraints Constraints) Size {
 	width := l.Width
 	if width <= 0 {
@@ -108,6 +115,7 @@ func (l List) Measure(ctx *Context, constraints Constraints) Size {
 	return constraints.Clamp(Size{W: width, H: len(l.Items)})
 }
 
+// Paint renders the list rows with selection and focus styling.
 func (l List) Paint(ctx *Context, canvas Canvas) {
 	if canvas.Width() <= 0 || canvas.Height() <= 0 {
 		return
@@ -137,6 +145,7 @@ func (l List) Paint(ctx *Context, canvas Canvas) {
 	paintNodeInto(ctx, NewFlexBox(DirectionVertical, children, 0), Rect{X: canvas.origin.X, Y: canvas.origin.Y, W: width, H: canvas.Height()}, canvas.surface)
 }
 
+// Move changes the selected index by delta.
 func (l *List) Move(delta int) bool {
 	if len(l.Items) == 0 {
 		return false
@@ -144,6 +153,7 @@ func (l *List) Move(delta int) bool {
 	return l.SetSelected(l.Selected + delta)
 }
 
+// SetSelected clamps and applies a selected index.
 func (l *List) SetSelected(index int) bool {
 	if len(l.Items) == 0 {
 		if l.Selected != 0 {
@@ -168,6 +178,7 @@ func (l *List) SetSelected(index int) bool {
 	return true
 }
 
+// ActivateSelected invokes the activation callback for the selected row.
 func (l *List) ActivateSelected() bool {
 	if len(l.Items) == 0 || l.Selected < 0 || l.Selected >= len(l.Items) || l.OnActivate == nil {
 		return false
@@ -176,12 +187,14 @@ func (l *List) ActivateSelected() bool {
 	return true
 }
 
+// TableColumn configures one table column.
 type TableColumn struct {
 	Title      string
 	Width      int
 	AlignRight bool
 }
 
+// TableRow is one rendered row in a Table.
 type TableRow struct {
 	ControlID string
 	Cells     []string
@@ -189,6 +202,7 @@ type TableRow struct {
 	Focused   bool
 }
 
+// Table renders fixed-width columns with optional header and selectable rows.
 type Table struct {
 	PassiveNode
 	Columns    []TableColumn
@@ -197,6 +211,7 @@ type Table struct {
 	ShowHeader bool
 }
 
+// Measure returns the table width and visible row count.
 func (t Table) Measure(ctx *Context, constraints Constraints) Size {
 	width := t.width(constraints.MaxW)
 	height := len(t.Rows)
@@ -206,6 +221,7 @@ func (t Table) Measure(ctx *Context, constraints Constraints) Size {
 	return constraints.Clamp(Size{W: width, H: height})
 }
 
+// Paint renders the table header and rows.
 func (t Table) Paint(ctx *Context, canvas Canvas) {
 	if canvas.Width() <= 0 || canvas.Height() <= 0 {
 		return
@@ -353,6 +369,7 @@ type scrollWindowRenderer interface {
 	RenderBottomInto(ctx *Context, width, height int, dst *Surface) (int, int)
 }
 
+// ScrollBox renders a vertical viewport over a child node.
 type ScrollBox struct {
 	PassiveNode
 	Child   Node
@@ -361,6 +378,7 @@ type ScrollBox struct {
 	Height  int
 }
 
+// Measure returns the configured viewport size or child-derived fallback size.
 func (s ScrollBox) Measure(ctx *Context, constraints Constraints) Size {
 	if s.Child == nil {
 		return constraints.Clamp(Size{})
@@ -383,6 +401,7 @@ func (s ScrollBox) Measure(ctx *Context, constraints Constraints) Size {
 	return constraints.Clamp(Size{W: width, H: height})
 }
 
+// Paint renders the visible viewport at OffsetY.
 func (s ScrollBox) Paint(ctx *Context, canvas Canvas) {
 	if canvas.Width() <= 0 || canvas.Height() <= 0 {
 		return
@@ -391,6 +410,7 @@ func (s ScrollBox) Paint(ctx *Context, canvas Canvas) {
 	canvas.BlitSurface(0, 0, surface)
 }
 
+// RenderVisible renders a viewport at offset and returns total height and applied offset.
 func (s ScrollBox) RenderVisible(ctx *Context, width, height, offset int) (Surface, int, int) {
 	base := TransparentSurface(width, height)
 	if s.Child == nil || width <= 0 || height <= 0 {
@@ -414,6 +434,7 @@ func (s ScrollBox) RenderVisible(ctx *Context, width, height, offset int) (Surfa
 	return base, totalHeight, offset
 }
 
+// RenderBottom renders the bottom-aligned viewport and returns total height and offset.
 func (s ScrollBox) RenderBottom(ctx *Context, width, height int) (Surface, int, int) {
 	base := TransparentSurface(width, height)
 	if s.Child == nil || width <= 0 || height <= 0 {
@@ -436,4 +457,5 @@ func (s ScrollBox) RenderBottom(ctx *Context, width, height int) (Surface, int, 
 	return base, totalHeight, offset
 }
 
+// ScrollFrame is the legacy name for ScrollBox.
 type ScrollFrame = ScrollBox

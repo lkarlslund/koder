@@ -6,14 +6,17 @@ import (
 	"github.com/mattn/go-runewidth"
 )
 
+// PlainWidth returns the terminal display width of input.
 func PlainWidth(input string) int {
 	return runewidth.StringWidth(input)
 }
 
+// TextWidth returns the terminal display width of input.
 func TextWidth(input string) int {
 	return PlainWidth(input)
 }
 
+// TextHeight returns the number of newline-delimited rows in input.
 func TextHeight(input string) int {
 	if input == "" {
 		return 0
@@ -21,6 +24,7 @@ func TextHeight(input string) int {
 	return strings.Count(input, "\n") + 1
 }
 
+// PlainTruncate truncates input to width cells and appends tail when truncated.
 func PlainTruncate(input string, width int, tail string) string {
 	if width <= 0 {
 		return ""
@@ -36,6 +40,7 @@ func PlainTruncate(input string, width int, tail string) string {
 	return truncateRunes(input, remaining) + tail
 }
 
+// PlainWordWrap wraps input to width cells using word boundaries when possible.
 func PlainWordWrap(input string, width int) string {
 	if width <= 0 {
 		return strings.TrimSpace(input)

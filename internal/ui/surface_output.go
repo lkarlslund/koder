@@ -34,10 +34,12 @@ func applyCellStyleWithProfile(profile ColorProfile, style CellStyle, text strin
 	return "\x1b[" + strings.Join(params, ";") + "m" + text + "\x1b[0m"
 }
 
+// RenderStyledTextANSI renders spans with true-color ANSI SGR sequences.
 func RenderStyledTextANSI(spans []StyledSpan) string {
 	return RenderStyledTextANSIWithProfile(spans, ColorProfileTrueColor)
 }
 
+// RenderStyledTextANSIWithProfile renders spans using profile's color depth.
 func RenderStyledTextANSIWithProfile(spans []StyledSpan, profile ColorProfile) string {
 	var b strings.Builder
 	for _, span := range spans {

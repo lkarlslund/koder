@@ -1,11 +1,13 @@
 package ui
 
+// FlexNodeChild describes one child in retained flex layout.
 type FlexNodeChild struct {
-	Node  Node
-	Flex  int
-	Basis int
+	Node  Node // Node to measure, lay out, and paint.
+	Flex  int  // Positive values receive a weighted share of remaining space.
+	Basis int  // Minimum main-axis size before flex space is distributed.
 }
 
+// FlexNode is a retained flex container with stable child node identities.
 type FlexNode struct {
 	BaseNode
 	Direction FlexDirection
@@ -13,12 +15,14 @@ type FlexNode struct {
 	children  []FlexNodeChild
 }
 
+// NewFlexNode constructs a retained flex container.
 func NewFlexNode(direction FlexDirection, children []FlexNodeChild, spacing int) *FlexNode {
 	node := &FlexNode{Direction: direction, Spacing: spacing}
 	node.SetChildren(children)
 	return node
 }
 
+// SetChildren replaces the child list while preserving the FlexNode instance.
 func (n *FlexNode) SetChildren(children []FlexNodeChild) {
 	if n == nil {
 		return
@@ -26,6 +30,7 @@ func (n *FlexNode) SetChildren(children []FlexNodeChild) {
 	n.children = append(n.children[:0], children...)
 }
 
+// Children returns the non-nil child nodes in layout order.
 func (n *FlexNode) Children() []Node {
 	if n == nil || len(n.children) == 0 {
 		return nil
@@ -39,6 +44,7 @@ func (n *FlexNode) Children() []Node {
 	return out
 }
 
+// Measure returns the space required by fixed children plus flex bases.
 func (n *FlexNode) Measure(ctx *Context, constraints Constraints) Size {
 	if n == nil {
 		return constraints.Clamp(Size{})
@@ -76,6 +82,7 @@ func (n *FlexNode) Measure(ctx *Context, constraints Constraints) Size {
 	return constraints.Clamp(Size{W: main, H: cross})
 }
 
+// Layout assigns child rectangles along the configured flex direction.
 func (n *FlexNode) Layout(ctx *Context, rect Rect) {
 	n.BaseNode.Layout(ctx, rect)
 	if n == nil {
@@ -127,6 +134,7 @@ func (n *FlexNode) Layout(ctx *Context, rect Rect) {
 	}
 }
 
+// Prepare forwards preparation to child nodes.
 func (n *FlexNode) Prepare(ctx *Context) {
 	if n == nil {
 		return
@@ -138,6 +146,7 @@ func (n *FlexNode) Prepare(ctx *Context) {
 	}
 }
 
+// Paint paints laid-out children into their assigned rectangles.
 func (n *FlexNode) Paint(ctx *Context, canvas Canvas) {
 	if n == nil {
 		return
