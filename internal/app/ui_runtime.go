@@ -216,7 +216,7 @@ func (m *Model) mainWindow() ui.Window {
 				if m == nil || m.mainScreen == nil {
 					return false
 				}
-				return m.mainScreen.dirty()
+				return m.mainScreen.Dirty()
 			},
 			key: func(m *Model, msg ui.KeyMsg) (bool, ui.Cmd) {
 				return m.handleMainWindowKey(msg)
@@ -226,10 +226,7 @@ func (m *Model) mainWindow() ui.Window {
 			},
 			timer: func(m *Model, event ui.TimerEvent) (bool, ui.Cmd) {
 				main := m.ensureMainScreenWidget()
-				if main == nil || main.composer == nil {
-					return false, nil
-				}
-				if !main.composer.handleTimer(event) {
+				if main == nil || !main.HandleComposerTimer(event) {
 					return false, nil
 				}
 				return true, nil

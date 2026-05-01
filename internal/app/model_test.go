@@ -183,7 +183,7 @@ func TestComposerRevisionChangeMarksRetainedFooterDirty(t *testing.T) {
 	_ = main.Surface(ctx, ui.Rect{W: m.width, H: m.height})
 
 	m.composer.InsertString("hello")
-	if !main.composer.Dirty() {
+	if !main.ComposerDirty() {
 		t.Fatal("expected composer widget to become dirty from textarea revision change")
 	}
 
@@ -3168,7 +3168,7 @@ func TestOpenSessionPickerStopsComposerBlinkTimer(t *testing.T) {
 		}},
 	}
 
-	m.ensureMainScreenWidget().composer.syncBlinkTimer(m.ensureUIRoot())
+	m.ensureMainScreenWidget().SyncComposerBlinkTimer(m.ensureUIRoot())
 	if timers := m.syncUIRoot().ActiveTimers(composerBlinkTimerOwner); len(timers) == 0 {
 		t.Fatal("expected focused composer to own a blink timer")
 	}
@@ -4776,7 +4776,7 @@ func TestSidebarWidthHotkeysGrowRenderedSidebarColumn(t *testing.T) {
 		t.Fatalf("expected sidebar width override to grow, before=%d after=%d", before, after)
 	}
 	_ = next.viewSurface()
-	if got := next.ensureMainScreenWidget().retained.bodyChildren[1].Basis; got != after {
+	if got := next.ensureMainScreenWidget().SidebarBasis(); got != after {
 		t.Fatalf("expected sidebar flex basis to track width, got %d want %d", got, after)
 	}
 }

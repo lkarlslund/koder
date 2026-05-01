@@ -365,18 +365,10 @@ func BenchmarkMainScreenRetainedPrepareIdle(b *testing.B) {
 	screen := m.ensureMainScreenWidget()
 	ctx := &ui.Context{Palette: m.palette}
 	bounds := ui.Rect{W: m.width, H: m.height}
-	root := screen.ensureRetainedRoot()
-	root.model = &m
-	root.Layout(ctx, bounds)
-	root.Prepare(ctx)
-	root.ClearDirty()
-	screen.transcript.ClearDirty()
-	screen.composer.ClearDirty()
-	screen.sidebar.ClearDirty()
-	screen.statusPane.ClearDirty()
+	_ = screen.Surface(ctx, bounds)
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		root.Prepare(ctx)
+		_ = screen.Surface(ctx, bounds)
 	}
 }
 

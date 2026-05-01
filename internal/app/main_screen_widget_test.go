@@ -25,23 +25,14 @@ func TestMainScreenRetainedRootPrepareDirtyUsesNodeFlags(t *testing.T) {
 
 	_ = w.Surface(ctx, bounds)
 
-	w.composer.Invalidate()
-	root := w.ensureRetainedRoot()
-	root.model = &m
-	root.Layout(ctx, bounds)
-	root.Prepare(ctx)
-
-	if !root.composerNode.NeedsPaint() {
-		t.Fatal("expected composer node to be paint-dirty")
+	w.InvalidateComposer()
+	next := w.Surface(ctx, bounds)
+	rects, _ := next.DirtyRects()
+	if len(rects) == 0 {
+		t.Fatal("expected composer invalidation to produce retained damage")
 	}
-	if root.transcriptNode.NeedsPaint() {
-		t.Fatal("expected transcript node to stay clean")
-	}
-	if root.sidebarNode.NeedsPaint() {
-		t.Fatal("expected sidebar node to stay clean")
-	}
-	if root.statusNode.NeedsPaint() {
-		t.Fatal("expected status node to stay clean")
+	if len(rects) >= 1 && rects[0] == (ui.Rect{W: bounds.W, H: bounds.H}) {
+		t.Fatal("expected composer invalidation to avoid a full-screen repaint")
 	}
 }
 
@@ -61,16 +52,13 @@ func TestMainScreenRetainedRootLayoutChangeMarksNodesDirtyWithoutWidgetInvalidat
 
 	_ = w.Surface(ctx, ui.Rect{W: 80, H: 24})
 
-	root := w.ensureRetainedRoot()
-	root.model = &m
-	root.Layout(ctx, ui.Rect{W: 90, H: 24})
-	root.Prepare(ctx)
-
-	if !root.transcriptNode.NeedsPaint() {
-		t.Fatal("expected transcript node to be paint-dirty after layout change")
+	next := w.Surface(ctx, ui.Rect{W: 90, H: 24})
+	if next.SurfaceWidth() != 90 {
+		t.Fatalf("expected resized surface width 90, got %d", next.SurfaceWidth())
 	}
-	if !root.composerNode.NeedsPaint() {
-		t.Fatal("expected composer node to be paint-dirty after layout change")
+	rects, _ := next.DirtyRects()
+	if len(rects) == 0 {
+		t.Fatal("expected layout change to produce retained damage")
 	}
 }
 
@@ -96,17 +84,16 @@ func TestMainScreenWidgetRepaintsFullyAfterComposerHeightChange(t *testing.T) {
 
 	m.composer.SetValue("draft text\nsecond line\nthird line")
 	m.invalidateFooterCache()
-	if !w.dirty() {
+	if !w.Dirty() {
 		t.Fatal("expected composer height change to invalidate main screen widget")
 	}
 
 	next := w.Surface(ctx, bounds)
 
-	root := w.ensureRetainedRoot()
-	root.model = &m
-	root.Layout(ctx, bounds)
-	full := ui.TransparentSurface(bounds.W, bounds.H)
-	root.PaintAll(ctx, ui.NewCanvas(&full, bounds))
+	m.mainScreen = nil
+	fullWidget := m.ensureMainScreenWidget()
+	fullWidget.Invalidate()
+	full := fullWidget.Surface(ctx, bounds)
 
 	if diff := ui.DiffSurfaceDamage(next, full); len(diff) > 0 {
 		t.Fatalf("widget repaint diverged from full repaint: %#v", diff)

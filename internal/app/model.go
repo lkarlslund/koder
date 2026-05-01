@@ -32,12 +32,15 @@ import (
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/theme"
 	"github.com/lkarlslund/koder/internal/tools"
+	apptui "github.com/lkarlslund/koder/internal/tui"
 	"github.com/lkarlslund/koder/internal/tui/dialogs"
 	"github.com/lkarlslund/koder/internal/ui"
 	"github.com/lkarlslund/koder/internal/ui/textarea"
 	"github.com/lkarlslund/koder/internal/version"
 	"github.com/lkarlslund/koder/internal/workspace"
 )
+
+const mainScreenVerticalInset = 0
 
 type promptDoneMsg struct {
 	events <-chan domain.Event
@@ -493,7 +496,7 @@ type Model struct {
 	toolRunItemIndexByAppr      map[int64]int
 	pendingTranscriptIndex      int
 	transcriptDirty             bool
-	mainScreen                  *mainScreenWidget
+	mainScreen                  *apptui.MainScreenWidget
 	renderCache                 *modelRenderCache
 	expandedToolRuns            map[string]bool
 	expandedToolRunCommands     map[string]bool
@@ -1754,7 +1757,7 @@ func (m *Model) scrollTranscript(delta int) {
 		m.viewport.SetYOffset(target)
 		m.invalidateMainSurface()
 		if main := m.ensureMainScreenWidget(); main != nil {
-			main.transcript.Invalidate()
+			main.InvalidateTranscript()
 		}
 		return
 	}
@@ -1882,7 +1885,7 @@ func (m *Model) refreshTranscriptForPendingTurn() {
 func (m *Model) invalidatePendingTranscriptFrame() {
 	m.invalidateMainSurface()
 	if main := m.ensureMainScreenWidget(); main != nil {
-		main.transcript.Invalidate()
+		main.InvalidateTranscript()
 	}
 }
 
@@ -1952,7 +1955,11 @@ func (m *Model) renderBodySurface() ui.Surface {
 			}
 		}
 	}
-	return m.ensureMainScreenWidget().Surface(ctx, ui.Rect{W: width, H: height})
+	surface := m.ensureMainScreenWidget().Surface(ctx, ui.Rect{W: width, H: height})
+	cache := m.ensureRenderCache()
+	cache.renderedBodySurface = surface
+	cache.bodyValid = true
+	return surface
 }
 
 func (m *Model) renderBodyElement() ui.Node {
@@ -1999,7 +2006,7 @@ func (m *Model) renderTranscriptPaneElement(transcript ui.Node) ui.Node {
 func (m *Model) renderComposerAreaSurface() ui.Surface {
 	ctx := &ui.Context{Palette: m.palette}
 	width := max(0, m.width)
-	return m.ensureMainScreenWidget().composer.Surface(ctx, ui.Rect{W: width})
+	return m.ensureMainScreenWidget().ComposerSurface(ctx, ui.Rect{W: width})
 }
 
 func (m *Model) renderComposerAreaElement() ui.Node {
@@ -2641,7 +2648,7 @@ func (m *Model) refreshViewportAt(offset int) {
 	m.viewport.SetYOffset(appliedY)
 	m.viewport.SetVisibleSurface(surface)
 	if main := m.ensureMainScreenWidget(); main != nil {
-		main.transcript.Invalidate()
+		main.InvalidateTranscript()
 	}
 }
 
@@ -2670,10 +2677,10 @@ func (m *Model) invalidateBodyCache() {
 	cache.bodyValid = false
 	cache.renderedBodySurface = ui.Surface{}
 	if main := m.ensureMainScreenWidget(); main != nil {
-		main.transcript.Invalidate()
-		main.composer.Invalidate()
-		main.sidebar.Invalidate()
-		main.statusPane.Invalidate()
+		main.InvalidateTranscript()
+		main.InvalidateComposer()
+		main.InvalidateSidebar()
+		main.InvalidateStatusPane()
 	}
 	m.invalidateFooterCache()
 }
@@ -2703,7 +2710,7 @@ func (m *Model) invalidateFooterCursor() {
 	cache.renderedComposerAreaSurface = ui.Surface{}
 	m.composerCursorDirty = true
 	if main := m.ensureMainScreenWidget(); main != nil {
-		main.composer.Invalidate()
+		main.InvalidateComposer()
 	}
 }
 
@@ -2724,7 +2731,7 @@ func (m *Model) ensureRetainedTranscript() *ui.RetainedTranscript {
 func (m *Model) invalidateTranscript() {
 	m.transcriptDirty = true
 	if main := m.ensureMainScreenWidget(); main != nil {
-		main.transcript.Invalidate()
+		main.InvalidateTranscript()
 	}
 	m.invalidateBodyCache()
 }
@@ -6881,7 +6888,7 @@ func (m *Model) syncComposerVisibility() {
 		}
 	}
 	if main := m.ensureMainScreenWidget(); main != nil {
-		main.composer.syncBlinkTimer(m.ensureUIRoot())
+		main.SyncComposerBlinkTimer(m.ensureUIRoot())
 	}
 	if beforeFocus != m.composer.Focused() || beforeCursorVisible != m.composer.CursorVisible() {
 		m.invalidateFooterCursor()
@@ -6916,7 +6923,7 @@ func (m *Model) buildTranscriptItems() []ui.TranscriptItem {
 
 func (m *Model) withRootTimers(cmd ui.Cmd) ui.Cmd {
 	if main := m.ensureMainScreenWidget(); main != nil {
-		main.composer.syncBlinkTimer(m.ensureUIRoot())
+		main.SyncComposerBlinkTimer(m.ensureUIRoot())
 	}
 	animationCmd := m.bouncyBalls.TickCmd()
 	timerCmd := m.rootTimerCmd()

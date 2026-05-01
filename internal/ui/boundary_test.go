@@ -172,6 +172,49 @@ func TestNoElementBridgeInProductionUIOrTUI(t *testing.T) {
 	}
 }
 
+func TestNoAppRuntimeImportsInProductionTUI(t *testing.T) {
+	root := repoRoot(t)
+	base := filepath.Join(root, "internal/tui")
+	forbidden := []string{
+		`github.com/lkarlslund/koder/internal/agent`,
+		`github.com/lkarlslund/koder/internal/app`,
+		`github.com/lkarlslund/koder/internal/chatruntime`,
+		`github.com/lkarlslund/koder/internal/clipboard`,
+		`github.com/lkarlslund/koder/internal/config`,
+		`github.com/lkarlslund/koder/internal/mcp`,
+		`github.com/lkarlslund/koder/internal/permission`,
+		`github.com/lkarlslund/koder/internal/provider`,
+		`github.com/lkarlslund/koder/internal/sessionctx`,
+		`github.com/lkarlslund/koder/internal/store`,
+		`github.com/lkarlslund/koder/internal/workspace`,
+	}
+	err := filepath.WalkDir(base, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() && path != base {
+			return filepath.SkipDir
+		}
+		if d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		raw, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return readErr
+		}
+		text := string(raw)
+		for _, token := range forbidden {
+			if strings.Contains(text, token) {
+				t.Fatalf("unexpected app/runtime import %q in %s", token, path)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestNoStyledStringRenderingInTextarea(t *testing.T) {
 	root := repoRoot(t)
 	path := filepath.Join(root, "internal/ui/textarea/textarea.go")
