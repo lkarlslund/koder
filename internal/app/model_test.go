@@ -1275,8 +1275,8 @@ func TestEnterWhileBusyQueuesSteeringPrompt(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("expected title sync command after queueing")
 	}
-	if len(next.currentChat.QueuedInputs) != 1 || next.currentChat.QueuedInputs[0].Text != "follow up" || next.currentChat.QueuedInputs[0].Kind != domain.QueuedInputKindQueued {
-		t.Fatalf("expected queued input, got %#v", next.currentChat.QueuedInputs)
+	if len(next.currentChat.QueuedInputs) != 1 || next.currentChat.QueuedInputs[0].Text != "follow up" || next.currentChat.QueuedInputs[0].Kind != domain.QueuedInputKindSteer {
+		t.Fatalf("expected steering input, got %#v", next.currentChat.QueuedInputs)
 	}
 	if next.composer.Value() != "" {
 		t.Fatalf("expected composer reset after queueing, got %q", next.composer.Value())
@@ -1500,7 +1500,7 @@ func TestDoubleBangIdleCreatesSynthesizedPrompt(t *testing.T) {
 	}
 }
 
-func TestDoubleBangWhileBusyQueuesSynthesizedPrompt(t *testing.T) {
+func TestDoubleBangWhileBusyEnterQueuesSteeringPrompt(t *testing.T) {
 	st, err := store.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -1541,8 +1541,8 @@ func TestDoubleBangWhileBusyQueuesSynthesizedPrompt(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected bangCommandMsg, got %T", msgAny)
 	}
-	if bangMsg.followupMode != bangFollowupQueue {
-		t.Fatalf("expected queued follow-up, got %v", bangMsg.followupMode)
+	if bangMsg.followupMode != bangFollowupSteer {
+		t.Fatalf("expected steer follow-up, got %v", bangMsg.followupMode)
 	}
 
 	updated, cmd = next.Update(bangMsg)
@@ -1557,15 +1557,15 @@ func TestDoubleBangWhileBusyQueuesSynthesizedPrompt(t *testing.T) {
 		t.Fatalf("expected one queued follow-up, got %#v", done.currentChat.QueuedInputs)
 	}
 	item := done.currentChat.QueuedInputs[0]
-	if item.Kind != domain.QueuedInputKindQueued {
-		t.Fatalf("expected queued follow-up kind, got %v", item.Kind)
+	if item.Kind != domain.QueuedInputKindSteer {
+		t.Fatalf("expected steering follow-up kind, got %v", item.Kind)
 	}
 	if !strings.Contains(item.Text, "User-requested shell command:") || !strings.Contains(item.Text, "printf hi") {
 		t.Fatalf("expected synthesized queued prompt, got %q", item.Text)
 	}
 }
 
-func TestDoubleBangWhileBusyTabQueuesSteeringPrompt(t *testing.T) {
+func TestDoubleBangWhileBusyTabQueuesSynthesizedPrompt(t *testing.T) {
 	st, err := store.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -1606,8 +1606,8 @@ func TestDoubleBangWhileBusyTabQueuesSteeringPrompt(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected bangCommandMsg, got %T", msgAny)
 	}
-	if bangMsg.followupMode != bangFollowupSteer {
-		t.Fatalf("expected steer follow-up, got %v", bangMsg.followupMode)
+	if bangMsg.followupMode != bangFollowupQueue {
+		t.Fatalf("expected queued follow-up, got %v", bangMsg.followupMode)
 	}
 
 	updated, cmd = next.Update(bangMsg)
@@ -1616,10 +1616,10 @@ func TestDoubleBangWhileBusyTabQueuesSteeringPrompt(t *testing.T) {
 		t.Fatal("expected queue persistence command")
 	}
 	if len(done.currentChat.QueuedInputs) != 1 {
-		t.Fatalf("expected one queued steering follow-up, got %#v", done.currentChat.QueuedInputs)
+		t.Fatalf("expected one queued follow-up, got %#v", done.currentChat.QueuedInputs)
 	}
-	if done.currentChat.QueuedInputs[0].Kind != domain.QueuedInputKindSteer {
-		t.Fatalf("expected steering follow-up kind, got %v", done.currentChat.QueuedInputs[0].Kind)
+	if done.currentChat.QueuedInputs[0].Kind != domain.QueuedInputKindQueued {
+		t.Fatalf("expected queued follow-up kind, got %v", done.currentChat.QueuedInputs[0].Kind)
 	}
 }
 
@@ -1734,7 +1734,7 @@ func TestComposerHistoryMenuFiltersWithoutMutatingComposer(t *testing.T) {
 	}
 }
 
-func TestTabWhileBusyQueuesSteeringPrompt(t *testing.T) {
+func TestTabWhileBusyQueuesPrompt(t *testing.T) {
 	cfg := testConfig(t)
 	cfg.DefaultProvider = "openai"
 	cfg.DefaultModel = "gpt-5.4"
@@ -1761,10 +1761,10 @@ func TestTabWhileBusyQueuesSteeringPrompt(t *testing.T) {
 	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyTab})
 	next := updated.(*Model)
 	if cmd == nil {
-		t.Fatal("expected title sync command after steering queue")
+		t.Fatal("expected title sync command after queueing")
 	}
-	if len(next.currentChat.QueuedInputs) != 1 || next.currentChat.QueuedInputs[0].Kind != domain.QueuedInputKindSteer {
-		t.Fatalf("expected steering queue, got %#v", next.currentChat.QueuedInputs)
+	if len(next.currentChat.QueuedInputs) != 1 || next.currentChat.QueuedInputs[0].Kind != domain.QueuedInputKindQueued {
+		t.Fatalf("expected queued input, got %#v", next.currentChat.QueuedInputs)
 	}
 }
 

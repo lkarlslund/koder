@@ -1447,11 +1447,11 @@ func (m *Model) handleMainWindowKey(msg ui.KeyMsg) (bool, ui.Cmd) {
 			prompt := m.submissionPromptText()
 			if bang, ok := parseBangPrompt(prompt); ok {
 				if bang.Double {
-					return true, m.submitBangPrompt(bang, bangFollowupSteer)
+					return true, m.submitBangPrompt(bang, bangFollowupQueue)
 				}
 				return true, m.submitBangPrompt(bang, bangFollowupNone)
 			}
-			_, cmd := m.queueComposerPrompt(domain.QueuedInputKindSteer)
+			_, cmd := m.queueComposerPrompt(domain.QueuedInputKindQueued)
 			return true, cmd
 		}
 	case "enter":
@@ -1466,14 +1466,14 @@ func (m *Model) handleMainWindowKey(msg ui.KeyMsg) (bool, ui.Cmd) {
 		if bang, ok := parseBangPrompt(prompt); ok {
 			if m.loading {
 				if bang.Double {
-					return true, m.submitBangPrompt(bang, bangFollowupQueue)
+					return true, m.submitBangPrompt(bang, bangFollowupSteer)
 				}
 				return true, m.submitBangPrompt(bang, bangFollowupNone)
 			}
 			return true, m.submitBangPrompt(bang, bangFollowupPrompt)
 		}
 		if m.loading {
-			_, cmd := m.queueComposerPrompt(domain.QueuedInputKindQueued)
+			_, cmd := m.queueComposerPrompt(domain.QueuedInputKindSteer)
 			return true, cmd
 		}
 		if handledModel, cmd, ok := m.handleLocalCommand(prompt); ok {
