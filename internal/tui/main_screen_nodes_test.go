@@ -83,3 +83,46 @@ func TestComposerNodeCursorDirtyIsLocalized(t *testing.T) {
 		}
 	}
 }
+
+func TestComposerNodeOwnsBlinkAndInvalidatesCursor(t *testing.T) {
+	palette := theme.Default().Palette
+	visible := ui.AsNode(ui.NewComposer(ui.ComposerProps{
+		Palette:       palette,
+		Width:         20,
+		Value:         "hello",
+		CursorIndex:   1,
+		CursorVisible: true,
+	}))
+	hidden := ui.AsNode(ui.NewComposer(ui.ComposerProps{
+		Palette:       palette,
+		Width:         20,
+		Value:         "hello",
+		CursorIndex:   1,
+		CursorVisible: false,
+	}))
+	node := NewComposerNode()
+	node.SetState(ComposerState{
+		AreaElement:       visible,
+		AreaElementHidden: hidden,
+		Element:           visible,
+		ElementHidden:     hidden,
+		Revision:          1,
+		Focused:           true,
+		BlinkEnabled:      true,
+	})
+	ctx := &ui.Context{Palette: palette}
+	node.Layout(ctx, ui.Rect{W: 20, H: 3})
+	node.Prepare(ctx)
+	node.ClearDirty()
+
+	if !node.HandleTimer(ui.TimerEvent{Owner: ComposerBlinkTimerOwner}) {
+		t.Fatal("expected composer node to handle its blink timer")
+	}
+	if rects := node.DirtyRects(); len(rects) == 0 {
+		t.Fatal("expected blink to self-invalidate cursor damage")
+	}
+	got := node.Surface(ctx, ui.Rect{W: 20, H: 3}).Lines()
+	if len(got) == 0 {
+		t.Fatalf("expected hidden cursor surface to render content, got %#v", got)
+	}
+}

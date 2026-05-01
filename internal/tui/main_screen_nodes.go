@@ -147,37 +147,42 @@ func (n *ChatTranscriptNode) renderSurface(ctx *ui.Context, bounds ui.Rect) ui.S
 
 // ComposerState describes the current composer display.
 type ComposerState struct {
-	AreaElement ui.Node
-	Element     ui.Node
-	Revision    uint64
-	CursorDirty bool
-	Focused     bool
-	ShouldBlink bool
+	AreaElement       ui.Node
+	AreaElementHidden ui.Node
+	Element           ui.Node
+	ElementHidden     ui.Node
+	Revision          uint64
+	CursorDirty       bool
+	Focused           bool
+	BlinkEnabled      bool
 }
 
 // ComposerNode renders the composer area and tracks cursor damage.
 type ComposerNode struct {
 	ui.BaseNode
-	areaElement  ui.Node
-	element      ui.Node
-	revision     uint64
-	cursorDirty  bool
-	focused      bool
-	blinkEnabled bool
-	measureWidth int
-	measureSize  ui.Size
-	measureValid bool
-	measureRev   uint64
-	lastRevision uint64
-	blinkActive  bool
-	surface      ui.Surface
-	cursorRect   ui.Rect
-	cursorValid  bool
+	areaElement       ui.Node
+	areaElementHidden ui.Node
+	element           ui.Node
+	elementHidden     ui.Node
+	revision          uint64
+	cursorDirty       bool
+	focused           bool
+	blinkEnabled      bool
+	blinkVisible      bool
+	blinkActive       bool
+	measureWidth      int
+	measureSize       ui.Size
+	measureValid      bool
+	measureRev        uint64
+	lastRevision      uint64
+	surface           ui.Surface
+	cursorRect        ui.Rect
+	cursorValid       bool
 }
 
 // NewComposerNode constructs a composer display node.
 func NewComposerNode() *ComposerNode {
-	node := &ComposerNode{}
+	node := &ComposerNode{blinkVisible: true}
 	node.MarkLayoutDirty()
 	return node
 }
@@ -188,12 +193,18 @@ func (n *ComposerNode) SetState(state ComposerState) {
 		return
 	}
 	revisionChanged := n.revision != state.Revision
+	focusChanged := n.focused != state.Focused
 	n.areaElement = state.AreaElement
+	n.areaElementHidden = state.AreaElementHidden
 	n.element = state.Element
+	n.elementHidden = state.ElementHidden
 	n.revision = state.Revision
 	n.cursorDirty = state.CursorDirty
 	n.focused = state.Focused
-	n.blinkEnabled = state.ShouldBlink
+	n.blinkEnabled = state.BlinkEnabled
+	if revisionChanged || focusChanged {
+		n.blinkVisible = true
+	}
 	if revisionChanged {
 		n.measureValid = false
 	}
@@ -224,7 +235,7 @@ func (n *ComposerNode) Measure(ctx *ui.Context, constraints ui.Constraints) ui.S
 	if n.measureValid && n.measureWidth == constraints.MaxW && n.measureRev == n.revision {
 		return constraints.Clamp(n.measureSize)
 	}
-	painter := measuredPainterFromElement(n.areaElement)
+	painter := measuredPainterFromElement(n.currentAreaElement())
 	if painter == nil {
 		n.measureSize = ui.Size{}
 	} else {
@@ -248,7 +259,7 @@ func (n *ComposerNode) Prepare(ctx *ui.Context) {
 	if !n.Dirty() {
 		return
 	}
-	next := paintMeasuredSurface(ctx, measuredPainterFromElement(n.areaElement), rect)
+	next := paintMeasuredSurface(ctx, measuredPainterFromElement(n.currentAreaElement()), rect)
 	nextCursorRect, nextCursorOK := n.cursorRectForBounds(rect)
 	switch {
 	case !n.NeedsLayout() && n.cursorDirty && n.cursorValid && nextCursorOK:
@@ -279,7 +290,7 @@ func (n *ComposerNode) Paint(_ *ui.Context, canvas ui.Canvas) {
 	canvas.BlitSurface(0, 0, n.surface.Normalize(canvas.Width(), canvas.Height()))
 }
 
-// SyncBlinkTimer synchronizes the composer blink timer.
+// SyncBlinkTimer synchronizes the composer-owned cursor blink timer.
 func (n *ComposerNode) SyncBlinkTimer(root *ui.Root) {
 	if n == nil || root == nil {
 		return
@@ -289,6 +300,7 @@ func (n *ComposerNode) SyncBlinkTimer(root *ui.Root) {
 			root.StopOwnerTimers(ComposerBlinkTimerOwner)
 			n.blinkActive = false
 		}
+		n.blinkVisible = true
 		return
 	}
 	if n.blinkActive {
@@ -301,12 +313,18 @@ func (n *ComposerNode) SyncBlinkTimer(root *ui.Root) {
 	n.blinkActive = true
 }
 
-// HandleTimer reports whether event is a relevant composer timer.
+// HandleTimer advances the composer cursor blink state and invalidates it.
 func (n *ComposerNode) HandleTimer(event ui.TimerEvent) bool {
-	if n == nil || event.Owner != ComposerBlinkTimerOwner {
+	if n == nil || event.Owner != ComposerBlinkTimerOwner || !n.shouldBlink() {
 		return false
 	}
-	return n.shouldBlink()
+	n.blinkVisible = !n.blinkVisible
+	if n.cursorValid {
+		n.MarkDirtyLocal(n.cursorRect)
+	} else {
+		n.MarkDirtyLocal(ui.Rect{W: n.Rect().W, H: n.Rect().H})
+	}
+	return true
 }
 
 // Surface renders the composer area to a standalone surface.
@@ -314,18 +332,38 @@ func (n *ComposerNode) Surface(ctx *ui.Context, bounds ui.Rect) ui.Surface {
 	if n == nil {
 		return ui.Surface{}
 	}
-	return paintMeasuredSurface(ctx, measuredPainterFromElement(n.areaElement), bounds)
+	return paintMeasuredSurface(ctx, measuredPainterFromElement(n.currentAreaElement()), bounds)
 }
 
 func (n *ComposerNode) shouldBlink() bool {
-	return n != nil && n.blinkEnabled && n.focused
+	return n != nil && n.focused && n.blinkEnabled
+}
+
+func (n *ComposerNode) currentAreaElement() ui.Node {
+	if n == nil {
+		return nil
+	}
+	if n.blinkVisible || n.areaElementHidden == nil {
+		return n.areaElement
+	}
+	return n.areaElementHidden
+}
+
+func (n *ComposerNode) currentElement() ui.Node {
+	if n == nil {
+		return nil
+	}
+	if n.blinkVisible || n.elementHidden == nil {
+		return n.element
+	}
+	return n.elementHidden
 }
 
 func (n *ComposerNode) cursorRectForBounds(bounds ui.Rect) (ui.Rect, bool) {
 	if n == nil || bounds.H < 2 {
 		return ui.Rect{}, false
 	}
-	composer, ok := n.element.(ui.Composer)
+	composer, ok := n.currentElement().(ui.Composer)
 	if !ok {
 		return ui.Rect{}, false
 	}

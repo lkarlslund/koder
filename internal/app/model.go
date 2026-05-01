@@ -1091,9 +1091,19 @@ func (m Model) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 		return m.handleKey(msg)
 	}
 
+	beforeRevision := m.composer.Revision()
+	beforeCursorVisible := m.composer.CursorVisible()
+	beforeCursorIndex := m.composer.CursorIndex()
 	var nextCmd ui.Cmd
 	m.composer, nextCmd = m.composer.Update(msg)
 	m.updateComposerMenus()
+	if beforeRevision != m.composer.Revision() || beforeCursorVisible != m.composer.CursorVisible() || beforeCursorIndex != m.composer.CursorIndex() {
+		if beforeRevision == m.composer.Revision() {
+			m.invalidateFooterCursor()
+		} else {
+			m.invalidateFooterCache()
+		}
+	}
 	return m, nextCmd
 }
 
@@ -2013,6 +2023,10 @@ func (m *Model) renderComposerAreaSurface() ui.Surface {
 }
 
 func (m *Model) renderComposerAreaElement() ui.Node {
+	return m.renderComposerAreaElementWithCursor(m.composer.CursorVisible())
+}
+
+func (m *Model) renderComposerAreaElementWithCursor(cursorVisible bool) ui.Node {
 	if !m.shouldShowComposerArea() {
 		return ui.AsNode(ui.VisibleElement{})
 	}
@@ -2029,7 +2043,7 @@ func (m *Model) renderComposerAreaElement() ui.Node {
 	if preview := m.renderQueuedPromptPreviewElement(); preview != nil {
 		elements = append(elements, preview)
 	}
-	elements = append(elements, m.renderComposerElement())
+	elements = append(elements, m.renderComposerElementWithCursor(cursorVisible))
 	children := make([]ui.Child, 0, len(elements))
 	for _, element := range elements {
 		if element == nil {
@@ -2088,6 +2102,10 @@ func (m *Model) statusPaneHeight() int {
 }
 
 func (m *Model) renderComposerElement() ui.Node {
+	return m.renderComposerElementWithCursor(m.composer.CursorVisible())
+}
+
+func (m *Model) renderComposerElementWithCursor(cursorVisible bool) ui.Node {
 	tokenRanges := make([]ui.TokenRange, 0, len(m.composer.Tokens()))
 	for _, token := range m.composer.Tokens() {
 		tokenRanges = append(tokenRanges, ui.TokenRange{Start: token.Start, End: token.End})
@@ -2101,7 +2119,7 @@ func (m *Model) renderComposerElement() ui.Node {
 		Value:         m.composer.Value(),
 		CursorIndex:   m.composer.CursorIndex(),
 		Placeholder:   m.composer.Placeholder,
-		CursorVisible: m.composer.CursorVisible(),
+		CursorVisible: cursorVisible && m.composer.Focused(),
 	}))
 }
 
@@ -6827,10 +6845,6 @@ func (m *Model) hasModalOverlay() bool {
 		m.hasPicker()
 }
 
-func (m *Model) composerShouldBlink() bool {
-	return m.composer.BlinkEnabled && !m.hasModalOverlay()
-}
-
 func (m *Model) syncComposerVisibility() {
 	beforeFocus := m.composer.Focused()
 	beforeCursorVisible := m.composer.CursorVisible()
@@ -6844,11 +6858,11 @@ func (m *Model) syncComposerVisibility() {
 			m.composer.Blur()
 		}
 	}
-	if main := m.ensureMainScreenView(); main != nil {
-		main.SyncComposerBlinkTimer(m.ensureUIRoot())
-	}
 	if beforeFocus != m.composer.Focused() || beforeCursorVisible != m.composer.CursorVisible() {
 		m.invalidateFooterCursor()
+	}
+	if main := m.ensureMainScreenView(); main != nil {
+		main.SyncComposerBlinkTimer(m.ensureUIRoot())
 	}
 }
 
