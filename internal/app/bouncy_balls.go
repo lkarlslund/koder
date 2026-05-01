@@ -171,7 +171,7 @@ func (o *bouncyBallsOverlay) Apply(surface ui.Surface) ui.Surface {
 	if !o.Enabled && len(o.cleanupRects) == 0 {
 		return surface
 	}
-	out := surface
+	out := surface.Clone()
 	rects := make([]ui.Rect, 0, len(o.dirtyRects)+len(o.cleanupRects))
 	if existing, ok := out.DirtyRects(); ok {
 		rects = append(rects, existing...)

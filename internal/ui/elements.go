@@ -581,6 +581,27 @@ func (s Surface) Size() Size {
 	return Size{W: width, H: len(s.lines)}
 }
 
+// Clone returns a deep copy of s.
+func (s Surface) Clone() Surface {
+	out := Surface{
+		w: s.w,
+		h: s.h,
+	}
+	if len(s.lines) > 0 {
+		out.lines = append([]string(nil), s.lines...)
+	}
+	if len(s.cells) > 0 {
+		out.cells = append([]Cell(nil), s.cells...)
+	}
+	if len(s.ctrls) > 0 {
+		out.ctrls = append([]Control(nil), s.ctrls...)
+	}
+	if len(s.dirty) > 0 {
+		out.dirty = append([]Rect(nil), s.dirty...)
+	}
+	return out
+}
+
 // Normalize returns s converted to an exact cell-buffer size.
 func (s Surface) Normalize(width, height int) Surface {
 	return s.normalize(width, height)
