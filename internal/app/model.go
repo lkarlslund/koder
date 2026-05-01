@@ -1461,6 +1461,15 @@ func (m *Model) handleMainWindowKey(msg ui.KeyMsg) (bool, ui.Cmd) {
 			_, cmd := m.queueComposerPrompt(domain.QueuedInputKindQueued)
 			return true, cmd
 		}
+		if main := m.ensureMainScreenView(); main != nil && main.FocusNext() {
+			m.syncComposerFocusFromMainScreen(main)
+			return true, nil
+		}
+	case "shift+tab":
+		if main := m.ensureMainScreenView(); main != nil && main.FocusPrev() {
+			m.syncComposerFocusFromMainScreen(main)
+			return true, nil
+		}
 	case "enter":
 		if m.queueEditMode && len(m.currentChat.QueuedInputs) > 0 {
 			_, cmd := m.popQueuedPromptForEditing()
@@ -1637,17 +1646,22 @@ func (m *Model) handleMainWindowMouse(msg ui.MouseMsg) (bool, ui.Cmd) {
 }
 
 func (m *Model) handleTranscriptMouse(msg ui.MouseMsg) bool {
+	if msg.Action != ui.MouseActionPress {
+		return false
+	}
+	point := ui.Point{X: max(0, msg.X-1), Y: msg.Y}
+	main := m.ensureMainScreenView()
+	_ = m.renderBodySurface()
+	if main == nil || !main.TranscriptWantsWheel(point) {
+		return false
+	}
 	switch msg.Button {
 	case ui.MouseButtonWheelUp:
-		if msg.Action == ui.MouseActionPress {
-			m.scrollTranscript(-3)
-			return true
-		}
+		m.scrollTranscript(-3)
+		return true
 	case ui.MouseButtonWheelDown:
-		if msg.Action == ui.MouseActionPress {
-			m.scrollTranscript(3)
-			return true
-		}
+		m.scrollTranscript(3)
+		return true
 	}
 	return false
 }
@@ -6862,6 +6876,22 @@ func (m *Model) syncComposerVisibility() {
 		m.invalidateFooterCursor()
 	}
 	if main := m.ensureMainScreenView(); main != nil {
+		main.SyncComposerBlinkTimer(m.ensureUIRoot())
+	}
+}
+
+func (m *Model) syncComposerFocusFromMainScreen(main *mainScreenView) {
+	if main == nil {
+		return
+	}
+	before := m.composer.Focused()
+	if main.ComposerFocused() {
+		m.composer.Focus()
+	} else {
+		m.composer.Blur()
+	}
+	if before != m.composer.Focused() {
+		m.invalidateFooterCursor()
 		main.SyncComposerBlinkTimer(m.ensureUIRoot())
 	}
 }

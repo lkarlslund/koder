@@ -149,6 +149,29 @@ func TestHandleKeyInsertsPlainRunesIntoComposer(t *testing.T) {
 	}
 }
 
+func TestTabFocusesComposerThroughMainScreenFocusScope(t *testing.T) {
+	composer := textarea.New()
+	composer.Blur()
+	m := Model{
+		cfg:      config.Default().WithStateDir(t.TempDir()),
+		palette:  theme.Default().Palette,
+		viewport: newTranscriptViewport(80, 20),
+		composer: composer,
+		width:    80,
+		height:   24,
+	}
+
+	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyTab})
+	next := updated.(*Model)
+
+	if cmd != nil {
+		t.Fatal("expected no command from focus traversal")
+	}
+	if !next.composer.Focused() {
+		t.Fatal("expected tab traversal to focus composer")
+	}
+}
+
 func TestTypingIntoPrimedComposerUpdatesRenderedView(t *testing.T) {
 	m := Model{
 		cfg:      config.Default().WithStateDir(t.TempDir()),
@@ -6430,8 +6453,17 @@ func TestRenderReasoningBlockStartsWithoutBlankLine(t *testing.T) {
 }
 
 func TestMouseWheelScrollsViewport(t *testing.T) {
+	composer := textarea.New()
+	composer.SetHeight(composerInputHeight)
+	composer.BlinkEnabled = false
 	m := Model{
-		viewport: newTranscriptViewport(40, 4),
+		cfg:          testConfig(t),
+		palette:      theme.Default().Palette,
+		width:        40,
+		height:       8,
+		composer:     composer,
+		mouseEnabled: true,
+		viewport:     newTranscriptViewport(40, 4),
 	}
 	m.viewport.SetContent(strings.Join([]string{
 		"line 1",
@@ -6447,6 +6479,8 @@ func TestMouseWheelScrollsViewport(t *testing.T) {
 	updated, cmd := m.Update(ui.MouseMsg{
 		Action: ui.MouseActionPress,
 		Button: ui.MouseButtonWheelDown,
+		X:      5,
+		Y:      1,
 	})
 	next := updated.(Model)
 	if cmd != nil {
@@ -6454,6 +6488,46 @@ func TestMouseWheelScrollsViewport(t *testing.T) {
 	}
 	if next.viewport.YOffset == 0 {
 		t.Fatalf("expected viewport to scroll, got y offset %d", next.viewport.YOffset)
+	}
+}
+
+func TestMouseWheelOverComposerDoesNotScrollTranscript(t *testing.T) {
+	composer := textarea.New()
+	composer.SetHeight(composerInputHeight)
+	composer.Focus()
+	composer.BlinkEnabled = false
+	m := Model{
+		cfg:          testConfig(t),
+		palette:      theme.Default().Palette,
+		width:        40,
+		height:       8,
+		composer:     composer,
+		mouseEnabled: true,
+		viewport:     newTranscriptViewport(40, 4),
+	}
+	m.viewport.SetContent(strings.Join([]string{
+		"line 1",
+		"line 2",
+		"line 3",
+		"line 4",
+		"line 5",
+		"line 6",
+		"line 7",
+		"line 8",
+	}, "\n"))
+	m.resize()
+	m.refreshViewport()
+	before := m.viewport.YOffset
+
+	updated, _ := m.Update(ui.MouseMsg{
+		Action: ui.MouseActionPress,
+		Button: ui.MouseButtonWheelUp,
+		X:      5,
+		Y:      m.height - 1,
+	})
+	next := updated.(Model)
+	if next.viewport.YOffset != before {
+		t.Fatalf("expected composer wheel to leave transcript offset %d, got %d", before, next.viewport.YOffset)
 	}
 }
 

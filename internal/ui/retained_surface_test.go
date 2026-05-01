@@ -18,6 +18,32 @@ func (n *retainedSurfaceTestNode) Paint(_ *Context, canvas Canvas) {
 	canvas.WriteText(0, 0, n.text, CellStyle{})
 }
 
+type retainedFocusTestNode struct {
+	retainedSurfaceTestNode
+	focused bool
+}
+
+func (n *retainedFocusTestNode) Focus() {
+	n.focused = true
+	n.MarkDirtyLocal(Rect{W: n.Rect().W, H: n.Rect().H})
+}
+
+func (n *retainedFocusTestNode) Blur() {
+	n.focused = false
+	n.MarkDirtyLocal(Rect{W: n.Rect().W, H: n.Rect().H})
+}
+
+func (n *retainedFocusTestNode) Focused() bool { return n.focused }
+
+func (n *retainedFocusTestNode) HandleKey(KeyMsg) (bool, Cmd) { return false, nil }
+
+type retainedWheelTestNode struct {
+	retainedSurfaceTestNode
+	wants bool
+}
+
+func (n *retainedWheelTestNode) WantsWheel(Point) bool { return n.wants }
+
 func TestRetainedSurfaceReusesCleanSurface(t *testing.T) {
 	node := &retainedSurfaceTestNode{text: "first"}
 	retained := NewRetainedSurface(node)
@@ -32,6 +58,45 @@ func TestRetainedSurfaceReusesCleanSurface(t *testing.T) {
 	second := retained.Surface(&Context{}, bounds)
 	if got := second.Lines()[0]; got != "first   " {
 		t.Fatalf("expected clean retained surface to be reused, got %q", got)
+	}
+}
+
+func TestFlexNodeFocusTraversalSkipsNonFocusableChildren(t *testing.T) {
+	first := &retainedFocusTestNode{retainedSurfaceTestNode: retainedSurfaceTestNode{text: "a"}}
+	passive := &retainedSurfaceTestNode{text: "b"}
+	second := &retainedFocusTestNode{retainedSurfaceTestNode: retainedSurfaceTestNode{text: "c"}}
+	flex := NewFlexNode(DirectionVertical, []FlexNodeChild{
+		{Node: first},
+		{Node: passive},
+		{Node: second},
+	}, 0)
+
+	if !flex.FocusFirst() || !first.Focused() {
+		t.Fatal("expected first focusable child to receive focus")
+	}
+	if !flex.FocusNext() || first.Focused() || !second.Focused() {
+		t.Fatal("expected focus to advance to second focusable child")
+	}
+	if !flex.FocusPrev() || !first.Focused() || second.Focused() {
+		t.Fatal("expected focus to move back to first focusable child")
+	}
+}
+
+func TestFlexNodeWheelNodeAtUsesHitTestAndInterest(t *testing.T) {
+	uninterested := &retainedWheelTestNode{retainedSurfaceTestNode: retainedSurfaceTestNode{text: "a"}, wants: false}
+	interested := &retainedWheelTestNode{retainedSurfaceTestNode: retainedSurfaceTestNode{text: "b"}, wants: true}
+	flex := NewFlexNode(DirectionVertical, []FlexNodeChild{
+		{Node: uninterested},
+		{Node: interested},
+	}, 0)
+	flex.Layout(&Context{}, Rect{W: 5, H: 2})
+
+	if _, ok := flex.WheelNodeAt(Point{X: 1, Y: 0}); ok {
+		t.Fatal("expected uninterested child not to receive wheel")
+	}
+	got, ok := flex.WheelNodeAt(Point{X: 1, Y: 1})
+	if !ok || got != interested {
+		t.Fatalf("expected interested child under pointer, got %#v ok=%v", got, ok)
 	}
 }
 

@@ -575,6 +575,11 @@ func (m *Model) centeredWindow(id ui.WindowID, z int, element ui.Node, onKey fun
 		},
 		mouse: func(m *Model, msg ui.MouseMsg) (bool, ui.Cmd) {
 			if msg.Action != ui.MouseActionPress || msg.Button != ui.MouseButtonLeft {
+				if id == helpWindowID {
+					if m.handleHelpMouse(msg) {
+						return true, nil
+					}
+				}
 				if id == llmPreviewWindowID {
 					if m.handleLLMPreviewMouse(msg) {
 						return true, nil

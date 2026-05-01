@@ -44,6 +44,57 @@ func (n *FlexNode) Children() []Node {
 	return out
 }
 
+// FocusFirst focuses the first focusable descendant in layout order.
+func (n *FlexNode) FocusFirst() bool {
+	return n.focusByDelta(1, true)
+}
+
+// FocusNext moves focus to the next focusable descendant in layout order.
+func (n *FlexNode) FocusNext() bool {
+	return n.focusByDelta(1, false)
+}
+
+// FocusPrev moves focus to the previous focusable descendant in layout order.
+func (n *FlexNode) FocusPrev() bool {
+	return n.focusByDelta(-1, false)
+}
+
+// FocusedNode returns the currently focused descendant, if any.
+func (n *FlexNode) FocusedNode() FocusableNode {
+	nodes := n.focusableNodes()
+	for _, node := range nodes {
+		if node.Focused() {
+			return node
+		}
+	}
+	return nil
+}
+
+// WheelNodeAt returns the deepest wheel-interested child under point.
+func (n *FlexNode) WheelNodeAt(point Point) (WheelNode, bool) {
+	if n == nil {
+		return nil, false
+	}
+	for idx := len(n.children) - 1; idx >= 0; idx-- {
+		child := n.children[idx].Node
+		if child == nil || !child.Rect().Contains(point) {
+			continue
+		}
+		if scope, ok := child.(interface {
+			WheelNodeAt(Point) (WheelNode, bool)
+		}); ok {
+			if node, found := scope.WheelNodeAt(point); found {
+				return node, true
+			}
+		}
+		wheel, ok := child.(WheelNode)
+		if ok && wheel.WantsWheel(point) {
+			return wheel, true
+		}
+	}
+	return nil, false
+}
+
 // Measure returns the space required by fixed children plus flex bases.
 func (n *FlexNode) Measure(ctx *Context, constraints Constraints) Size {
 	if n == nil {
@@ -209,4 +260,62 @@ func (n *FlexNode) measureChild(ctx *Context, child Node, constraints Constraint
 		return child.Measure(ctx, NewConstraints(constraints.MaxW, 0))
 	}
 	return child.Measure(ctx, NewConstraints(0, constraints.MaxH))
+}
+
+func (n *FlexNode) focusByDelta(delta int, first bool) bool {
+	nodes := n.focusableNodes()
+	if len(nodes) == 0 {
+		return false
+	}
+	current := -1
+	for idx, node := range nodes {
+		if node.Focused() {
+			current = idx
+			break
+		}
+	}
+	next := 0
+	if first {
+		next = 0
+	} else if current < 0 {
+		if delta < 0 {
+			next = len(nodes) - 1
+		}
+	} else {
+		next = (current + delta + len(nodes)) % len(nodes)
+	}
+	if current == next {
+		return true
+	}
+	if current >= 0 {
+		nodes[current].Blur()
+	}
+	nodes[next].Focus()
+	return true
+}
+
+func (n *FlexNode) focusableNodes() []FocusableNode {
+	if n == nil {
+		return nil
+	}
+	out := make([]FocusableNode, 0, len(n.children))
+	for _, child := range n.children {
+		collectFocusableNodes(child.Node, &out)
+	}
+	return out
+}
+
+func collectFocusableNodes(node Node, out *[]FocusableNode) {
+	if node == nil {
+		return
+	}
+	if focusable, ok := node.(FocusableNode); ok {
+		*out = append(*out, focusable)
+		return
+	}
+	if scope, ok := node.(interface{ Children() []Node }); ok {
+		for _, child := range scope.Children() {
+			collectFocusableNodes(child, out)
+		}
+	}
 }

@@ -128,6 +128,11 @@ func (n *ChatTranscriptNode) Controls() []ui.Control {
 	return out
 }
 
+// WantsWheel reports whether the transcript should receive wheel input.
+func (n *ChatTranscriptNode) WantsWheel(point ui.Point) bool {
+	return n != nil && n.Rect().Contains(point)
+}
+
 func (n *ChatTranscriptNode) renderSurface(ctx *ui.Context, bounds ui.Rect) ui.Surface {
 	if n == nil || n.retained == nil || bounds.W <= 0 || bounds.H <= 0 {
 		n.controls = nil
@@ -211,6 +216,36 @@ func (n *ComposerNode) SetState(state ComposerState) {
 	if revisionChanged {
 		n.MarkDirtyLocal(ui.Rect{W: n.Rect().W, H: n.Rect().H})
 	}
+}
+
+// Focus marks the composer node focused for retained UI traversal.
+func (n *ComposerNode) Focus() {
+	if n == nil || n.focused {
+		return
+	}
+	n.focused = true
+	n.blinkVisible = true
+	n.MarkDirtyLocal(ui.Rect{W: n.Rect().W, H: n.Rect().H})
+}
+
+// Blur marks the composer node unfocused for retained UI traversal.
+func (n *ComposerNode) Blur() {
+	if n == nil || !n.focused {
+		return
+	}
+	n.focused = false
+	n.blinkVisible = true
+	n.MarkDirtyLocal(ui.Rect{W: n.Rect().W, H: n.Rect().H})
+}
+
+// Focused reports whether the composer node currently holds focus.
+func (n *ComposerNode) Focused() bool {
+	return n != nil && n.focused
+}
+
+// HandleKey reports unhandled input; the app textarea owns editing state.
+func (n *ComposerNode) HandleKey(ui.KeyMsg) (bool, ui.Cmd) {
+	return false, nil
 }
 
 // Invalidate marks the composer for remeasure and repaint.

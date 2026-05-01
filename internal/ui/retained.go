@@ -38,6 +38,30 @@ type Node interface {
 	DirtyTracker
 }
 
+// FocusableNode is an opt-in retained node that can own keyboard focus.
+type FocusableNode interface {
+	Node
+	Focus()
+	Blur()
+	Focused() bool
+	HandleKey(KeyMsg) (bool, Cmd)
+}
+
+// FocusScope is an opt-in retained node that manages focus among descendants.
+type FocusScope interface {
+	Node
+	FocusFirst() bool
+	FocusNext() bool
+	FocusPrev() bool
+	FocusedNode() FocusableNode
+}
+
+// WheelNode is an opt-in retained node that wants mouse wheel events.
+type WheelNode interface {
+	Node
+	WantsWheel(Point) bool
+}
+
 // BaseNode provides common rectangle and dirty-region bookkeeping for nodes.
 type BaseNode struct {
 	rect        Rect

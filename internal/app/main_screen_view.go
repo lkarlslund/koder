@@ -189,6 +189,22 @@ func (v *mainScreenView) HandleComposerTimer(event ui.TimerEvent) bool {
 	return v.composer.HandleTimer(event)
 }
 func (v *mainScreenView) ComposerDirty() bool { return v.composer.Dirty() }
+func (v *mainScreenView) FocusNext() bool {
+	return v != nil && v.root.FocusNext()
+}
+func (v *mainScreenView) FocusPrev() bool {
+	return v != nil && v.root.FocusPrev()
+}
+func (v *mainScreenView) ComposerFocused() bool {
+	return v != nil && v.composer.Focused()
+}
+func (v *mainScreenView) TranscriptWantsWheel(point ui.Point) bool {
+	if v == nil {
+		return false
+	}
+	node, ok := v.root.WheelNodeAt(point)
+	return ok && node == v.transcript
+}
 func (v *mainScreenView) TranscriptControlAt(point ui.Point) (ui.Control, bool) {
 	return v.transcript.ControlAt(point)
 }
