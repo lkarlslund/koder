@@ -110,13 +110,16 @@ func runTUI(ctx context.Context, mode tui.StartupMode, workdir string, startupOp
 	if debugServer != nil {
 		recorder = debugServer.Recorder()
 	}
+
 	mcpManager, err := mcp.NewManager(cfg.MCPServers)
 	if err != nil {
 		return err
 	}
+
 	go func() {
 		_ = mcpManager.ConnectAll(context.Background())
 	}()
+
 	registry := tools.NewRegistry(agents.FindProjectRoot(workdir))
 	registry.SetEditForgiveness(cfg.UI.EditForgiveness)
 	registry.SetExecControl(execruntime.NewManager())
