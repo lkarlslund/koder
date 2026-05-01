@@ -15,6 +15,7 @@ import (
 
 	"github.com/lkarlslund/koder/internal/agent"
 	"github.com/lkarlslund/koder/internal/agents"
+	"github.com/lkarlslund/koder/internal/app"
 	"github.com/lkarlslund/koder/internal/chatruntime"
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/debugsrv"
@@ -24,7 +25,6 @@ import (
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools"
-	"github.com/lkarlslund/koder/internal/tui"
 	"github.com/lkarlslund/koder/internal/version"
 )
 
@@ -38,7 +38,7 @@ func NewRootCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return runTUI(cmd.Context(), tui.StartupModeNew, workdir, tui.StartupOptions{})
+			return runTUI(cmd.Context(), app.StartupModeNew, workdir, app.StartupOptions{})
 		},
 	}
 	bindStartupFlags(cmd, &opts)
@@ -87,7 +87,7 @@ func (o startupOptions) resolve() (string, error) {
 	return abs, nil
 }
 
-func runTUI(ctx context.Context, mode tui.StartupMode, workdir string, startupOpts tui.StartupOptions) error {
+func runTUI(ctx context.Context, mode app.StartupMode, workdir string, startupOpts app.StartupOptions) error {
 	cfg, err := config.Load()
 	if err != nil {
 		return err
@@ -125,7 +125,7 @@ func runTUI(ctx context.Context, mode tui.StartupMode, workdir string, startupOp
 	registry.SetExecControl(execruntime.NewManager())
 	engine := agent.New(cfg, st, registry, recorder, workdir, mcpManager)
 	registry.SetChatControl(chatruntime.New(engine, st))
-	return tui.RunWithWorkdir(cfg, st, engine, mode, recorder, debugServer, workdir, startupOpts)
+	return app.RunWithWorkdir(cfg, st, engine, mode, recorder, debugServer, workdir, startupOpts)
 }
 
 func newResumeCommand() *cobra.Command {
@@ -139,7 +139,7 @@ func newResumeCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return runTUI(cmd.Context(), tui.StartupModeResume, workdir, tui.StartupOptions{ShowAllSessions: showAllSessions})
+			return runTUI(cmd.Context(), app.StartupModeResume, workdir, app.StartupOptions{ShowAllSessions: showAllSessions})
 		},
 	}
 	bindStartupFlags(cmd, &opts)
