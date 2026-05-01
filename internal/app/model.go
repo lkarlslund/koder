@@ -8016,7 +8016,7 @@ func (m *Model) applyPreferences(next dialogs.PreferencesValues, save bool) (ui.
 }
 
 func spinnerTickCmd() ui.Cmd {
-	return ui.Tick(120*time.Millisecond, func(time.Time) ui.Msg {
+	return ui.Tick(250*time.Millisecond, func(time.Time) ui.Msg {
 		return spinnerTickMsg{}
 	})
 }
