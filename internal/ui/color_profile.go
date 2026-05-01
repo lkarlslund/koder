@@ -5,6 +5,7 @@ import (
 	"strings"
 )
 
+// ColorProfile describes the terminal color depth used when serializing cells.
 type ColorProfile int
 
 const (
@@ -14,6 +15,7 @@ const (
 	ColorProfileTrueColor
 )
 
+// String returns the stable configuration name for p.
 func (p ColorProfile) String() string {
 	switch p {
 	case ColorProfileNoColor:
@@ -29,6 +31,9 @@ func (p ColorProfile) String() string {
 	}
 }
 
+// ParseColorProfileOverride parses a user-provided color profile override.
+//
+// The boolean return is false for empty, "auto", or unrecognized values.
 func ParseColorProfileOverride(value string) (ColorProfile, bool) {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "", "auto":
@@ -46,6 +51,10 @@ func ParseColorProfileOverride(value string) (ColorProfile, bool) {
 	}
 }
 
+// DetectColorProfileFromEnv detects the best color profile from terminal env.
+//
+// getenv is injectable for tests. Non-TTY output and NO_COLOR force no-color
+// rendering; KODER_COLOR_PROFILE takes precedence over terminal heuristics.
 func DetectColorProfileFromEnv(getenv func(string) string, isTTY bool) ColorProfile {
 	if getenv == nil {
 		getenv = func(string) string { return "" }

@@ -1,22 +1,27 @@
 package ui
 
+// Measurer computes the size a node wants within constraints.
 type Measurer interface {
 	Measure(ctx *Context, constraints Constraints) Size
 }
 
+// Layouter assigns an absolute rectangle to a node.
 type Layouter interface {
 	Layout(ctx *Context, rect Rect)
 	Rect() Rect
 }
 
+// Preparer lets a node update cached state after layout and before paint.
 type Preparer interface {
 	Prepare(ctx *Context)
 }
 
+// CanvasPainter paints a node into a clipped Canvas.
 type CanvasPainter interface {
 	Paint(ctx *Context, canvas Canvas)
 }
 
+// DirtyTracker reports whether a node needs layout or paint work.
 type DirtyTracker interface {
 	NeedsLayout() bool
 	NeedsPaint() bool
@@ -24,6 +29,7 @@ type DirtyTracker interface {
 	ClearDirty()
 }
 
+// Node is the retained UI primitive understood by the layout and paint system.
 type Node interface {
 	Measurer
 	Layouter
@@ -32,6 +38,7 @@ type Node interface {
 	DirtyTracker
 }
 
+// BaseNode provides common rectangle and dirty-region bookkeeping for nodes.
 type BaseNode struct {
 	rect        Rect
 	damage      DamageSet
@@ -39,6 +46,7 @@ type BaseNode struct {
 	paintDirty  bool
 }
 
+// Rect returns the node's last assigned layout rectangle.
 func (n *BaseNode) Rect() Rect {
 	if n == nil {
 		return Rect{}
@@ -46,6 +54,7 @@ func (n *BaseNode) Rect() Rect {
 	return n.rect
 }
 
+// Layout records rect and marks old and new bounds as damaged when it changes.
 func (n *BaseNode) Layout(_ *Context, rect Rect) {
 	if n == nil {
 		return
@@ -65,9 +74,11 @@ func (n *BaseNode) Layout(_ *Context, rect Rect) {
 	n.paintDirty = true
 }
 
+// Prepare is a no-op default for nodes with no pre-paint work.
 func (n *BaseNode) Prepare(_ *Context) {
 }
 
+// MarkDirtyLocal marks a rectangle in the node's local coordinate space dirty.
 func (n *BaseNode) MarkDirtyLocal(rect Rect) {
 	if n == nil || n.rect.Empty() {
 		return
@@ -80,6 +91,7 @@ func (n *BaseNode) MarkDirtyLocal(rect Rect) {
 	n.damage.Add(clipRect(rect.Translate(n.rect.X, n.rect.Y), n.rect))
 }
 
+// MarkDirtyLocalRects marks multiple local rectangles dirty.
 func (n *BaseNode) MarkDirtyLocalRects(rects []Rect) {
 	if n == nil {
 		return
@@ -89,6 +101,7 @@ func (n *BaseNode) MarkDirtyLocalRects(rects []Rect) {
 	}
 }
 
+// MarkDirtyAbsolute marks an already-root-relative rectangle dirty.
 func (n *BaseNode) MarkDirtyAbsolute(rect Rect) {
 	if n == nil || rect.Empty() {
 		return
@@ -97,6 +110,7 @@ func (n *BaseNode) MarkDirtyAbsolute(rect Rect) {
 	n.damage.Add(rect)
 }
 
+// MarkLayoutDirty marks the node for re-layout and repaints its current bounds.
 func (n *BaseNode) MarkLayoutDirty() {
 	if n == nil {
 		return
@@ -108,14 +122,17 @@ func (n *BaseNode) MarkLayoutDirty() {
 	}
 }
 
+// NeedsLayout reports whether the node needs another layout pass.
 func (n *BaseNode) NeedsLayout() bool {
 	return n != nil && n.layoutDirty
 }
 
+// NeedsPaint reports whether the node has dirty paint regions.
 func (n *BaseNode) NeedsPaint() bool {
 	return n != nil && n.paintDirty
 }
 
+// DirtyRects returns a copy of the accumulated dirty rectangles.
 func (n *BaseNode) DirtyRects() []Rect {
 	if n == nil {
 		return nil
@@ -123,6 +140,7 @@ func (n *BaseNode) DirtyRects() []Rect {
 	return n.damage.Rects()
 }
 
+// ClearDirty clears layout and paint dirty state.
 func (n *BaseNode) ClearDirty() {
 	if n == nil {
 		return
@@ -132,6 +150,7 @@ func (n *BaseNode) ClearDirty() {
 	n.paintDirty = false
 }
 
+// PassiveNode implements the retained node lifecycle for stateless leaf nodes.
 type PassiveNode struct{}
 
 func (PassiveNode) Layout(_ *Context, _ Rect) {}
@@ -142,6 +161,10 @@ func (PassiveNode) NeedsPaint() bool          { return false }
 func (PassiveNode) DirtyRects() []Rect        { return nil }
 func (PassiveNode) ClearDirty()               {}
 
+// RenderVisibleIntoLeaf renders a vertical viewport of node into dst.
+//
+// It returns the node's total height and the clamped offset used. Nodes with a
+// custom RenderVisibleInto method can avoid rendering off-screen content.
 func RenderVisibleIntoLeaf(ctx *Context, node Node, width, height, offset int, dst *Surface) (int, int) {
 	if node == nil {
 		return 0, 0
@@ -166,6 +189,9 @@ func RenderVisibleIntoLeaf(ctx *Context, node Node, width, height, offset int, d
 	return totalHeight, offset
 }
 
+// RenderBottomIntoLeaf renders the bottom-aligned viewport of node into dst.
+//
+// It returns the node's total height and the offset of the visible window.
 func RenderBottomIntoLeaf(ctx *Context, node Node, width, height int, dst *Surface) (int, int) {
 	if node == nil {
 		return 0, 0
@@ -186,6 +212,9 @@ func RenderBottomIntoLeaf(ctx *Context, node Node, width, height int, dst *Surfa
 	return totalHeight, offset
 }
 
+// ApproxHeightLeaf returns a cheap height estimate when a node provides one.
+//
+// Nodes without an approximate-height hook are measured normally.
 func ApproxHeightLeaf(node Node, width int) int {
 	if node == nil {
 		return 0
@@ -196,6 +225,7 @@ func ApproxHeightLeaf(node Node, width int) int {
 	return node.Measure(nil, NewConstraints(width, 0)).H
 }
 
+// RenderCachedLeaf renders node to a surface, using a node cache when present.
 func RenderCachedLeaf(ctx *Context, node Node, width int) Surface {
 	if node == nil {
 		return Surface{}
@@ -209,10 +239,15 @@ func RenderCachedLeaf(ctx *Context, node Node, width int) Surface {
 	return PaintNodeSurface(withoutRuntime(ctx), node, Rect{W: width, H: size.H})
 }
 
+// AsNode returns node unchanged while documenting declarative node intent.
+//
+// It is useful at construction sites where the concrete value should be treated
+// as a retained Node without hiding any of the node's optional interfaces.
 func AsNode(node Node) Node {
 	return node
 }
 
+// PaintNodeSurface lays out and paints node into a new Surface.
 func PaintNodeSurface(ctx *Context, node Node, bounds Rect) Surface {
 	if node == nil || bounds.W <= 0 || bounds.H <= 0 {
 		return Surface{}

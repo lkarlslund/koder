@@ -8,16 +8,19 @@ import (
 	"github.com/lkarlslund/koder/internal/theme"
 )
 
+// Point is a terminal-cell coordinate.
 type Point struct {
 	X int
 	Y int
 }
 
+// Size is a width and height in terminal cells.
 type Size struct {
 	W int
 	H int
 }
 
+// Rect is an axis-aligned rectangle in terminal-cell coordinates.
 type Rect struct {
 	X int
 	Y int
@@ -25,10 +28,12 @@ type Rect struct {
 	H int
 }
 
+// Empty reports whether r has no drawable area.
 func (r Rect) Empty() bool {
 	return r.W <= 0 || r.H <= 0
 }
 
+// Translate returns r moved by dx and dy.
 func (r Rect) Translate(dx, dy int) Rect {
 	if r.Empty() {
 		return Rect{}
@@ -36,10 +41,12 @@ func (r Rect) Translate(dx, dy int) Rect {
 	return Rect{X: r.X + dx, Y: r.Y + dy, W: r.W, H: r.H}
 }
 
+// Contains reports whether p is inside r.
 func (r Rect) Contains(p Point) bool {
 	return p.X >= r.X && p.X < r.X+r.W && p.Y >= r.Y && p.Y < r.Y+r.H
 }
 
+// Inset returns r reduced by insets on each side.
 func (r Rect) Inset(in Insets) Rect {
 	x := r.X + in.Left
 	y := r.Y + in.Top
@@ -54,6 +61,7 @@ func (r Rect) Inset(in Insets) Rect {
 	return Rect{X: x, Y: y, W: w, H: h}
 }
 
+// Insets describes per-edge spacing in terminal cells.
 type Insets struct {
 	Top    int
 	Right  int
@@ -61,14 +69,17 @@ type Insets struct {
 	Left   int
 }
 
+// UniformInsets returns equal insets on every edge.
 func UniformInsets(v int) Insets {
 	return Insets{Top: v, Right: v, Bottom: v, Left: v}
 }
 
+// SymmetricInsets returns horizontal and vertical inset pairs.
 func SymmetricInsets(horizontal, vertical int) Insets {
 	return Insets{Top: vertical, Right: horizontal, Bottom: vertical, Left: horizontal}
 }
 
+// Constraints bounds the size a node may choose during measurement.
 type Constraints struct {
 	MinW int
 	MaxW int
@@ -76,20 +87,24 @@ type Constraints struct {
 	MaxH int
 }
 
+// NewConstraints returns constraints with only maximum width and height set.
 func NewConstraints(maxW, maxH int) Constraints {
 	return Constraints{MaxW: maxW, MaxH: maxH}
 }
 
+// Clamp confines size to the constraint range.
 func (c Constraints) Clamp(size Size) Size {
 	size.W = clampInt(size.W, c.MinW, c.maxWidth())
 	size.H = clampInt(size.H, c.MinH, c.maxHeight())
 	return size
 }
 
+// Tighten returns constraints that force exactly size.
 func (c Constraints) Tighten(size Size) Constraints {
 	return Constraints{MinW: size.W, MaxW: size.W, MinH: size.H, MaxH: size.H}
 }
 
+// Deflate subtracts insets from the available constraint area.
 func (c Constraints) Deflate(in Insets) Constraints {
 	maxW := c.maxWidth()
 	maxH := c.maxHeight()
@@ -122,16 +137,19 @@ func (c Constraints) maxHeight() int {
 	return c.MaxH
 }
 
+// Control is a clickable or otherwise addressable rectangle registered at paint time.
 type Control struct {
 	ID      string
 	Rect    Rect
 	Enabled bool
 }
 
+// Runtime stores per-frame UI metadata such as hit-test controls.
 type Runtime struct {
 	controls []Control
 }
 
+// BeginFrame clears frame-local runtime metadata.
 func (r *Runtime) BeginFrame() {
 	if r == nil {
 		return
@@ -139,6 +157,7 @@ func (r *Runtime) BeginFrame() {
 	r.controls = r.controls[:0]
 }
 
+// Register adds a control to the current frame.
 func (r *Runtime) Register(control Control) {
 	if r == nil {
 		return
@@ -146,6 +165,7 @@ func (r *Runtime) Register(control Control) {
 	r.controls = append(r.controls, control)
 }
 
+// Len returns the number of registered controls.
 func (r *Runtime) Len() int {
 	if r == nil {
 		return 0
@@ -153,6 +173,7 @@ func (r *Runtime) Len() int {
 	return len(r.controls)
 }
 
+// OffsetFrom translates controls starting at index start.
 func (r *Runtime) OffsetFrom(start, dx, dy int) {
 	if r == nil {
 		return
@@ -169,6 +190,7 @@ func (r *Runtime) OffsetFrom(start, dx, dy int) {
 	}
 }
 
+// Controls returns a copy of the registered controls.
 func (r *Runtime) Controls() []Control {
 	if r == nil {
 		return nil
@@ -178,6 +200,7 @@ func (r *Runtime) Controls() []Control {
 	return out
 }
 
+// Hit returns the topmost enabled control containing p.
 func (r *Runtime) Hit(p Point) (Control, bool) {
 	if r == nil {
 		return Control{}, false
@@ -194,21 +217,26 @@ func (r *Runtime) Hit(p Point) (Control, bool) {
 	return Control{}, false
 }
 
+// Context carries theme and frame runtime data through layout and paint.
 type Context struct {
 	Palette theme.Palette
 	Runtime *Runtime
 }
 
+// CellColor is the color representation used by UI cells.
 type CellColor = colorx.Color
 
+// NewCellColorRGB creates an opaque RGB cell color.
 func NewCellColorRGB(r, g, b uint8) CellColor {
 	return colorx.RGB(r, g, b)
 }
 
+// NewCellColorRGBA creates an RGBA cell color.
 func NewCellColorRGBA(r, g, b, a uint8) CellColor {
 	return colorx.RGBA(r, g, b, a)
 }
 
+// ParseCellColor parses a CSS-style color string.
 func ParseCellColor(value string) CellColor {
 	return colorx.ParseCSSColor(value)
 }
@@ -217,6 +245,7 @@ func cellColor(value CellColor) CellColor {
 	return value
 }
 
+// CellStyle stores the colors and text attributes for one terminal cell.
 type CellStyle struct {
 	FG    CellColor
 	BG    CellColor
@@ -233,6 +262,7 @@ func (s CellStyle) equal(other CellStyle) bool {
 		s.flags == other.flags
 }
 
+// Merge overlays style attributes on top of s.
 func (s CellStyle) Merge(overlay CellStyle) CellStyle {
 	out := s
 	if overlay.FG.Valid() {
@@ -266,34 +296,42 @@ const (
 	cellStyleFlagMask           = cellFlagBold | cellFlagItalic | cellFlagUnderline | cellFlagStrikethrough
 )
 
+// Bold reports whether bold text is enabled.
 func (s CellStyle) Bold() bool {
 	return s.flags&cellFlagBold != 0
 }
 
+// Italic reports whether italic text is enabled.
 func (s CellStyle) Italic() bool {
 	return s.flags&cellFlagItalic != 0
 }
 
+// Underline reports whether underline text is enabled.
 func (s CellStyle) Underline() bool {
 	return s.flags&cellFlagUnderline != 0
 }
 
+// Strikethrough reports whether strikethrough text is enabled.
 func (s CellStyle) Strikethrough() bool {
 	return s.flags&cellFlagStrikethrough != 0
 }
 
+// WithBold returns s with bold set to enabled.
 func (s CellStyle) WithBold(enabled bool) CellStyle {
 	return s.withFlag(cellFlagBold, enabled)
 }
 
+// WithItalic returns s with italic set to enabled.
 func (s CellStyle) WithItalic(enabled bool) CellStyle {
 	return s.withFlag(cellFlagItalic, enabled)
 }
 
+// WithUnderline returns s with underline set to enabled.
 func (s CellStyle) WithUnderline(enabled bool) CellStyle {
 	return s.withFlag(cellFlagUnderline, enabled)
 }
 
+// WithStrikethrough returns s with strikethrough set to enabled.
 func (s CellStyle) WithStrikethrough(enabled bool) CellStyle {
 	return s.withFlag(cellFlagStrikethrough, enabled)
 }
@@ -307,10 +345,13 @@ func (s CellStyle) withFlag(flag uint8, enabled bool) CellStyle {
 	return s
 }
 
+// Glyph is a single terminal glyph stored in a cell.
 type Glyph rune
 
+// SpaceGlyph is the standard painted blank glyph.
 const SpaceGlyph = Glyph(' ')
 
+// GlyphFromString returns the first rune in value as a Glyph.
 func GlyphFromString(value string) Glyph {
 	for _, r := range value {
 		return Glyph(r)
@@ -318,6 +359,7 @@ func GlyphFromString(value string) Glyph {
 	return 0
 }
 
+// String returns g as a string, or empty for the zero glyph.
 func (g Glyph) String() string {
 	if g == 0 {
 		return ""
@@ -325,6 +367,7 @@ func (g Glyph) String() string {
 	return string(rune(g))
 }
 
+// Cell is the styled terminal-cell primitive stored by Surface.
 type Cell struct {
 	Glyph Glyph
 	FG    CellColor
@@ -332,10 +375,12 @@ type Cell struct {
 	flags uint8
 }
 
+// Width returns the display width recorded for c.
 func (c Cell) Width() int {
 	return int(c.flags & cellFlagWidthMask)
 }
 
+// SetWidth records a display width clamped to the supported cell range.
 func (c *Cell) SetWidth(width int) {
 	if width < 0 {
 		width = 0
@@ -346,10 +391,12 @@ func (c *Cell) SetWidth(width int) {
 	c.flags = (c.flags &^ cellFlagWidthMask) | uint8(width)
 }
 
+// Painted reports whether c should visually overwrite lower layers.
 func (c Cell) Painted() bool {
 	return c.flags&cellFlagPainted != 0
 }
 
+// SetPainted toggles whether c visually overwrites lower layers.
 func (c *Cell) SetPainted(enabled bool) {
 	if enabled {
 		c.flags |= cellFlagPainted
@@ -358,28 +405,34 @@ func (c *Cell) SetPainted(enabled bool) {
 	}
 }
 
+// Bold reports whether c is bold.
 func (c Cell) Bold() bool {
 	return c.flags&cellFlagBold != 0
 }
 
+// Italic reports whether c is italic.
 func (c Cell) Italic() bool {
 	return c.flags&cellFlagItalic != 0
 }
 
+// Underline reports whether c is underlined.
 func (c Cell) Underline() bool {
 	return c.flags&cellFlagUnderline != 0
 }
 
+// Strikethrough reports whether c is struck through.
 func (c Cell) Strikethrough() bool {
 	return c.flags&cellFlagStrikethrough != 0
 }
 
+// SetStyle replaces c's visual style while preserving glyph metadata.
 func (c *Cell) SetStyle(style CellStyle) {
 	c.FG = style.FG
 	c.BG = style.BG
 	c.flags = (c.flags &^ cellStyleFlagMask) | (style.flags & cellStyleFlagMask)
 }
 
+// Style returns c's color and text attributes.
 func (c Cell) Style() CellStyle {
 	return CellStyle{
 		FG:    c.FG,
@@ -407,6 +460,7 @@ func continuationCell(style CellStyle) Cell {
 	return cell
 }
 
+// SurfaceAllocationStats reports allocation counts for surface constructors.
 type SurfaceAllocationStats struct {
 	Blank       uint64
 	Transparent uint64
@@ -417,11 +471,13 @@ var surfaceAllocationCounters struct {
 	transparent atomic.Uint64
 }
 
+// ResetSurfaceAllocationStats clears surface allocation counters.
 func ResetSurfaceAllocationStats() {
 	surfaceAllocationCounters.blank.Store(0)
 	surfaceAllocationCounters.transparent.Store(0)
 }
 
+// SurfaceAllocationStatsSnapshot returns current surface allocation counters.
 func SurfaceAllocationStatsSnapshot() SurfaceAllocationStats {
 	return SurfaceAllocationStats{
 		Blank:       surfaceAllocationCounters.blank.Load(),
@@ -429,6 +485,10 @@ func SurfaceAllocationStatsSnapshot() SurfaceAllocationStats {
 	}
 }
 
+// Surface is a drawable terminal-cell buffer plus frame metadata.
+//
+// Surfaces can represent either legacy line-oriented content or the newer cell
+// buffer. Rendering and diffing code consume Surface through SurfaceView.
 type Surface struct {
 	lines []string
 	w     int
@@ -438,6 +498,7 @@ type Surface struct {
 	dirty []Rect
 }
 
+// BlankSurface creates an opaque surface initialized with painted spaces.
 func BlankSurface(width, height int) Surface {
 	surfaceAllocationCounters.blank.Add(1)
 	if width < 0 {
@@ -453,6 +514,7 @@ func BlankSurface(width, height int) Surface {
 	return Surface{w: width, h: height, cells: cells}
 }
 
+// TransparentSurface creates a surface whose cells do not paint until written.
 func TransparentSurface(width, height int) Surface {
 	surfaceAllocationCounters.transparent.Add(1)
 	if width < 0 {
@@ -465,6 +527,7 @@ func TransparentSurface(width, height int) Surface {
 	return Surface{w: width, h: height, cells: cells}
 }
 
+// SurfaceFromString creates a transparent surface from newline-delimited text.
 func SurfaceFromString(input string) Surface {
 	if input == "" {
 		return Surface{}
@@ -481,6 +544,7 @@ func SurfaceFromString(input string) Surface {
 	return s
 }
 
+// Lines returns a plain-text view of the surface rows.
 func (s Surface) Lines() []string {
 	if s.isCellBuffer() {
 		return s.cellLines()
@@ -490,6 +554,7 @@ func (s Surface) Lines() []string {
 	return out
 }
 
+// Size returns the surface dimensions.
 func (s Surface) Size() Size {
 	if s.isCellBuffer() {
 		return Size{W: s.w, H: s.h}
@@ -501,14 +566,17 @@ func (s Surface) Size() Size {
 	return Size{W: width, H: len(s.lines)}
 }
 
+// Normalize returns s converted to an exact cell-buffer size.
 func (s Surface) Normalize(width, height int) Surface {
 	return s.normalize(width, height)
 }
 
+// PlaceAt composites child onto s at x,y and returns the result.
 func (s Surface) PlaceAt(x, y int, child Surface) Surface {
 	return s.placeAt(x, y, child)
 }
 
+// Controls returns a copy of controls embedded in the surface.
 func (s Surface) Controls() []Control {
 	if len(s.ctrls) == 0 {
 		return nil
@@ -518,6 +586,7 @@ func (s Surface) Controls() []Control {
 	return out
 }
 
+// WithDirtyRows returns s with a contiguous dirty row range attached.
 func (s Surface) WithDirtyRows(start, end int) Surface {
 	if start < 0 || end < start {
 		s.dirty = nil
@@ -536,6 +605,7 @@ func (s Surface) WithDirtyRows(start, end int) Surface {
 	return s
 }
 
+// DirtyRowRange returns the dirty row span attached to s.
 func (s Surface) DirtyRowRange() (start int, end int, ok bool) {
 	rects, ok := s.DirtyRects()
 	if !ok {
@@ -550,6 +620,7 @@ func (s Surface) DirtyRowRange() (start int, end int, ok bool) {
 	return start, end, true
 }
 
+// WithDirtyRects returns s with normalized dirty rectangles attached.
 func (s Surface) WithDirtyRects(rects ...Rect) Surface {
 	if len(rects) == 0 {
 		s.dirty = nil
@@ -561,6 +632,7 @@ func (s Surface) WithDirtyRects(rects ...Rect) Surface {
 	return s
 }
 
+// DirtyRects returns a copy of the dirty rectangles attached to s.
 func (s Surface) DirtyRects() ([]Rect, bool) {
 	if len(s.dirty) == 0 {
 		return nil, false
@@ -570,6 +642,7 @@ func (s Surface) DirtyRects() ([]Rect, bool) {
 	return out, true
 }
 
+// RegisterControls registers surface controls into runtime with an offset.
 func (s Surface) RegisterControls(runtime *Runtime, dx, dy int) {
 	if runtime == nil || len(s.ctrls) == 0 {
 		return
@@ -581,6 +654,7 @@ func (s Surface) RegisterControls(runtime *Runtime, dx, dy int) {
 	}
 }
 
+// SurfaceWidth returns the width required by SurfaceView.
 func (s Surface) SurfaceWidth() int {
 	if s.isCellBuffer() {
 		return s.w
@@ -588,6 +662,7 @@ func (s Surface) SurfaceWidth() int {
 	return s.Size().W
 }
 
+// SurfaceHeight returns the height required by SurfaceView.
 func (s Surface) SurfaceHeight() int {
 	if s.isCellBuffer() {
 		return s.h
@@ -595,19 +670,23 @@ func (s Surface) SurfaceHeight() int {
 	return s.Size().H
 }
 
+// SurfaceCellText returns the visible text at a cell.
 func (s Surface) SurfaceCellText(x, y int) string {
 	return s.cellAt(x, y).Glyph.String()
 }
 
+// SurfaceCellWidth returns the display width of a cell.
 func (s Surface) SurfaceCellWidth(x, y int) int {
 	return s.cellAt(x, y).Width()
 }
 
+// SurfaceCellContinuation reports whether a cell continues a wide glyph.
 func (s Surface) SurfaceCellContinuation(x, y int) bool {
 	cell := s.cellAt(x, y)
 	return cell.Painted() && cell.Width() == 0
 }
 
+// SurfaceCellFG returns the cell foreground RGB color when present.
 func (s Surface) SurfaceCellFG(x, y int) (uint8, uint8, uint8, bool) {
 	cell := s.cellAt(x, y).FG
 	if !cell.Valid() {
@@ -616,6 +695,7 @@ func (s Surface) SurfaceCellFG(x, y int) (uint8, uint8, uint8, bool) {
 	return cell.R(), cell.G(), cell.B(), true
 }
 
+// SurfaceCellBG returns the cell background RGB color when present.
 func (s Surface) SurfaceCellBG(x, y int) (uint8, uint8, uint8, bool) {
 	cell := s.cellAt(x, y).BG
 	if !cell.Valid() {
@@ -624,22 +704,27 @@ func (s Surface) SurfaceCellBG(x, y int) (uint8, uint8, uint8, bool) {
 	return cell.R(), cell.G(), cell.B(), true
 }
 
+// SurfaceCellBold reports whether a cell is bold.
 func (s Surface) SurfaceCellBold(x, y int) bool {
 	return s.cellAt(x, y).Bold()
 }
 
+// SurfaceCellItalic reports whether a cell is italic.
 func (s Surface) SurfaceCellItalic(x, y int) bool {
 	return s.cellAt(x, y).Italic()
 }
 
+// SurfaceCellUnderline reports whether a cell is underlined.
 func (s Surface) SurfaceCellUnderline(x, y int) bool {
 	return s.cellAt(x, y).Underline()
 }
 
+// SurfaceCellStrikethrough reports whether a cell is struck through.
 func (s Surface) SurfaceCellStrikethrough(x, y int) bool {
 	return s.cellAt(x, y).Strikethrough()
 }
 
+// BlendStyleAt merges overlay into the style at x,y.
 func (s *Surface) BlendStyleAt(x, y int, overlay CellStyle) {
 	if s == nil || !s.isCellBuffer() {
 		return
@@ -850,6 +935,7 @@ func (s Surface) blitAt(x, y int, child Surface) Surface {
 	return out
 }
 
+// WriteText writes styled text into a cell-buffer surface.
 func (s *Surface) WriteText(x, y int, text string, style CellStyle) {
 	if !s.isCellBuffer() || y < 0 || y >= s.h {
 		return
@@ -874,6 +960,7 @@ func (s *Surface) WriteText(x, y int, text string, style CellStyle) {
 	}
 }
 
+// WriteStyledSpans writes styled spans and registers span controls when present.
 func (s *Surface) WriteStyledSpans(x, y int, spans []StyledSpan, base CellStyle) {
 	if !s.isCellBuffer() || y < 0 || y >= s.h {
 		return
@@ -958,6 +1045,7 @@ func clipControlRect(control Control, width, height int) (Control, bool) {
 	return control, true
 }
 
+// FilledLineSurface creates a one-row surface with a filled background and text.
 func FilledLineSurface(width int, text string, fillStyle, textStyle CellStyle) Surface {
 	s := BlankSurface(width, 1)
 	for x := 0; x < width; x++ {

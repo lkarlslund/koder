@@ -2,14 +2,17 @@ package ui
 
 import "slices"
 
+// DirtyRectsProvider reports exact damaged rectangles for incremental painting.
 type DirtyRectsProvider interface {
 	DirtyRects() ([]Rect, bool)
 }
 
+// DamageSet accumulates dirty rectangles before normalizing them for repaint.
 type DamageSet struct {
 	rects []Rect
 }
 
+// Add records rect as damaged when it is non-empty.
 func (d *DamageSet) Add(rect Rect) {
 	if rect.Empty() {
 		return
@@ -17,20 +20,24 @@ func (d *DamageSet) Add(rect Rect) {
 	d.rects = append(d.rects, rect)
 }
 
+// AddAll records every non-empty rectangle in rects as damaged.
 func (d *DamageSet) AddAll(rects []Rect) {
 	for _, rect := range rects {
 		d.Add(rect)
 	}
 }
 
+// Reset clears all accumulated damage.
 func (d *DamageSet) Reset() {
 	d.rects = d.rects[:0]
 }
 
+// Empty reports whether no damage has been recorded.
 func (d DamageSet) Empty() bool {
 	return len(d.rects) == 0
 }
 
+// Rects returns a copy of the raw damage rectangles.
 func (d DamageSet) Rects() []Rect {
 	if len(d.rects) == 0 {
 		return nil
@@ -40,6 +47,7 @@ func (d DamageSet) Rects() []Rect {
 	return out
 }
 
+// Normalized clips, sorts, and merges damage rectangles within bounds.
 func (d DamageSet) Normalized(bounds Rect) []Rect {
 	if len(d.rects) == 0 {
 		return nil
@@ -101,11 +109,13 @@ func mergeDamageRects(a, b Rect) (Rect, bool) {
 	return Rect{}, false
 }
 
+// RowDamage identifies a damaged terminal row and first changed column.
 type RowDamage struct {
 	Y      int
 	StartX int
 }
 
+// DamageRows converts rectangles into sorted row damage entries.
 func DamageRows(rects []Rect) []RowDamage {
 	if len(rects) == 0 {
 		return nil
@@ -132,6 +142,7 @@ func DamageRows(rects []Rect) []RowDamage {
 	return rows
 }
 
+// DiffSurfaceDamage returns exact damage between two surface snapshots.
 func DiffSurfaceDamage(previous, current SurfaceView) []Rect {
 	prevRows := surfaceHeight(previous)
 	currRows := surfaceHeight(current)

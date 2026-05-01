@@ -14,29 +14,40 @@ import (
 	"github.com/charmbracelet/x/term"
 )
 
+// Program owns the terminal event loop, command execution, and frame rendering.
+//
+// The loop follows the same shape as Bubble Tea: messages update a Model,
+// commands produce more messages, and the model's SurfaceView is rendered back
+// to the terminal. Ordinary messages are coalesced behind FrameMsg so streaming
+// output does not repaint the terminal for every token chunk.
 type Program struct {
-	model           Model
-	altScreen       bool
-	noSignalHandler bool
-	colorProfile    ColorProfile
-	colorProfileSet bool
+	model           Model        // Current application state machine.
+	altScreen       bool         // Whether to use the terminal alternate screen buffer.
+	noSignalHandler bool         // Whether signal handling integration is disabled.
+	colorProfile    ColorProfile // Terminal color capability used when serializing styled cells.
+	colorProfileSet bool         // Whether colorProfile was explicitly configured.
 
-	mu            sync.Mutex
-	title         string
-	mouseEnabled  bool
-	sent          chan Msg
-	renderedRows  []string
-	rendered      SurfaceView
-	didRender     bool
-	framePending  bool
-	frameInterval time.Duration
+	mu            sync.Mutex    // Protects mutable terminal mode metadata below.
+	title         string        // Last title written to the terminal.
+	mouseEnabled  bool          // Last mouse tracking mode written to the terminal.
+	sent          chan Msg      // External message ingress used by Send and BatchMsg dispatch.
+	renderedRows  []string      // Legacy string-frame cache kept for tests and compatibility paths.
+	rendered      SurfaceView   // Previous surface rendered to the terminal.
+	didRender     bool          // Whether the terminal has received its initial full frame.
+	framePending  bool          // True when a coalescing FrameMsg has been scheduled.
+	frameInterval time.Duration // Minimum delay between ordinary updates and the next frame.
 }
 
+// inputEventReader is the subset of charmbracelet input.Reader used by Program.
+//
+// Tests implement this interface to exercise input decoding without requiring
+// a real terminal.
 type inputEventReader interface {
 	ReadEvents() ([]input.Event, error)
 	Close() error
 }
 
+// NewProgram constructs a terminal Program around model.
 func NewProgram(model Model, opts ...ProgramOption) *Program {
 	p := &Program{
 		model:         model,
@@ -51,6 +62,10 @@ func NewProgram(model Model, opts ...ProgramOption) *Program {
 	return p
 }
 
+// Send queues msg into the running Program from another goroutine.
+//
+// The channel is buffered for common cases. If the buffer is full, Send falls
+// back to a goroutine so callers are not blocked by the UI event loop.
 func (p *Program) Send(msg Msg) {
 	select {
 	case p.sent <- msg:
@@ -59,6 +74,10 @@ func (p *Program) Send(msg Msg) {
 	}
 }
 
+// Run starts terminal input, command processing, and rendering.
+//
+// Run returns the last model state and any terminal setup or rendering error.
+// It exits cleanly when a QuitMsg reaches the event loop.
 func (p *Program) Run() (Model, error) {
 	in := os.Stdin
 	out := os.Stdout
@@ -141,6 +160,10 @@ func (p *Program) Run() (Model, error) {
 	}
 }
 
+// shouldRenderImmediately reports whether msg must bypass frame coalescing.
+//
+// Structural terminal events need immediate repainting because stale geometry
+// makes later dirty rectangles invalid.
 func (p *Program) shouldRenderImmediately(msg Msg) bool {
 	switch msg.(type) {
 	case WindowSizeMsg:
@@ -150,6 +173,10 @@ func (p *Program) shouldRenderImmediately(msg Msg) bool {
 	}
 }
 
+// requestFrame schedules one future FrameMsg if no frame is already pending.
+//
+// This is the core render coalescing mechanism: fast streams can enqueue many
+// model updates, but only the first one starts the timer for the next paint.
 func (p *Program) requestFrame(out chan<- Msg) {
 	if p == nil || out == nil || p.framePending {
 		return
@@ -164,6 +191,7 @@ func (p *Program) requestFrame(out chan<- Msg) {
 	}), out)
 }
 
+// consumeFrame clears the pending-frame latch for an accepted FrameMsg.
 func (p *Program) consumeFrame(FrameMsg) bool {
 	if p == nil {
 		return false
@@ -172,6 +200,10 @@ func (p *Program) consumeFrame(FrameMsg) bool {
 	return true
 }
 
+// handleRuntimeMsg applies messages that are owned by Program itself.
+//
+// It returns true when the event loop should quit. Messages not handled here are
+// still passed to the application model.
 func (p *Program) handleRuntimeMsg(msg Msg, out io.Writer) (bool, error) {
 	switch typed := msg.(type) {
 	case nil:
@@ -197,6 +229,7 @@ func (p *Program) handleRuntimeMsg(msg Msg, out io.Writer) (bool, error) {
 	}
 }
 
+// runCmd executes cmd asynchronously and forwards its result to out.
 func (p *Program) runCmd(cmd Cmd, out chan<- Msg) {
 	if cmd == nil {
 		return
@@ -210,6 +243,8 @@ func (p *Program) runCmd(cmd Cmd, out chan<- Msg) {
 	}()
 }
 
+// render diffs the current model surface against the previous frame and writes
+// the minimal terminal escape sequence needed to update the display.
 func (p *Program) render(out io.Writer) error {
 	frame := ""
 	surface := p.model.ViewSurface()
@@ -232,16 +267,19 @@ func (p *Program) render(out io.Writer) error {
 	return err
 }
 
+// invalidateRenderCache forces the next render to repaint the full terminal.
 func (p *Program) invalidateRenderCache() {
 	p.rendered = nil
 	p.renderedRows = nil
 	p.didRender = false
 }
 
+// renderFrame renders a plain newline-delimited frame as a full-screen update.
 func renderFrame(view string) string {
 	return renderFrameLines(strings.Split(view, "\n"))
 }
 
+// renderFrameLines renders lines as a full-screen terminal update.
 func renderFrameLines(lines []string) string {
 	var buf strings.Builder
 	buf.WriteString("\x1b[H\x1b[2J")
@@ -252,6 +290,7 @@ func renderFrameLines(lines []string) string {
 	return buf.String()
 }
 
+// renderFrameSurface renders every row of surface as a full-screen update.
 func renderFrameSurface(surface SurfaceView, profile ColorProfile) string {
 	var buf strings.Builder
 	buf.WriteString("\x1b[H\x1b[2J")
@@ -266,6 +305,7 @@ func renderFrameSurface(surface SurfaceView, profile ColorProfile) string {
 	return buf.String()
 }
 
+// diffFrameLines returns terminal updates for changed rows in plain text frames.
 func diffFrameLines(previous, current []string) string {
 	var buf strings.Builder
 	maxRows := len(previous)
@@ -292,6 +332,7 @@ func diffFrameLines(previous, current []string) string {
 	return buf.String()
 }
 
+// diffFrameSurface returns terminal updates for changed rows in surface frames.
 func diffFrameSurface(previous, current SurfaceView, profile ColorProfile) string {
 	start := 0
 	end := max(surfaceHeight(previous), surfaceHeight(current)) - 1
@@ -305,6 +346,10 @@ func diffFrameSurface(previous, current SurfaceView, profile ColorProfile) strin
 	return diffFrameSurfaceRows(previous, current, rows, profile)
 }
 
+// diffFrameSurfaceRows returns terminal updates for the supplied damaged rows.
+//
+// Each RowDamage may begin at a non-zero column so retained widgets can repaint
+// only the changed tail of a row when that is safe.
 func diffFrameSurfaceRows(previous, current SurfaceView, rows []RowDamage, profile ColorProfile) string {
 	var buf strings.Builder
 	prevRows := 0
@@ -346,6 +391,7 @@ func diffFrameSurfaceRows(previous, current SurfaceView, rows []RowDamage, profi
 	return buf.String()
 }
 
+// surfaceHeight returns zero for a nil SurfaceView.
 func surfaceHeight(surface SurfaceView) int {
 	if surface == nil {
 		return 0
@@ -353,6 +399,10 @@ func surfaceHeight(surface SurfaceView) int {
 	return surface.SurfaceHeight()
 }
 
+// dirtyRows extracts row damage from current when dimensions match previous.
+//
+// Exact dirty rectangles are preferred; contiguous dirty row ranges are used as
+// a fallback. If neither is available, callers should do a full surface diff.
 func dirtyRows(current, previous SurfaceView) ([]RowDamage, bool) {
 	if current == nil || previous == nil {
 		return nil, false
@@ -383,6 +433,9 @@ func dirtyRows(current, previous SurfaceView) ([]RowDamage, bool) {
 	return rows, true
 }
 
+// surfaceRowsEqual compares all cells on row y.
+//
+// Concrete Surface values use direct cell-buffer comparison as a fast path.
 func surfaceRowsEqual(previous, current SurfaceView, y int) bool {
 	if prevSurface, ok := previous.(Surface); ok {
 		if currSurface, ok := current.(Surface); ok && prevSurface.isCellBuffer() && currSurface.isCellBuffer() &&
@@ -419,6 +472,7 @@ func surfaceRowsEqual(previous, current SurfaceView, y int) bool {
 	return true
 }
 
+// surfaceCellsEqual compares the visual state of one cell in two surfaces.
 func surfaceCellsEqual(previous, current SurfaceView, x, y int) bool {
 	return surfaceCellText(previous, x, y) == surfaceCellText(current, x, y) &&
 		surfaceCellWidth(previous, x, y) == surfaceCellWidth(current, x, y) &&
@@ -431,10 +485,15 @@ func surfaceCellsEqual(previous, current SurfaceView, x, y int) bool {
 		surfaceCellStrikethrough(previous, x, y) == surfaceCellStrikethrough(current, x, y)
 }
 
+// serializeSurfaceViewRow serializes a complete surface row with ANSI styling.
 func serializeSurfaceViewRow(surface SurfaceView, y int, profile ColorProfile) string {
 	return serializeSurfaceViewRowSegment(surface, y, 0, profile)
 }
 
+// serializeSurfaceViewRowSegment serializes a row from startX to the row end.
+//
+// Continuation cells from wide runes are skipped because their leading cell has
+// already emitted the visible glyph.
 func serializeSurfaceViewRowSegment(surface SurfaceView, y, startX int, profile ColorProfile) string {
 	if surface == nil || y < 0 || y >= surface.SurfaceHeight() {
 		return ""
@@ -478,6 +537,7 @@ func serializeSurfaceViewRowSegment(surface SurfaceView, y, startX int, profile 
 	return b.String()
 }
 
+// styleState is the comparable style key for a run of terminal cells.
 type styleState struct {
 	fg        rgbState
 	bg        rgbState
@@ -487,6 +547,7 @@ type styleState struct {
 	strike    bool
 }
 
+// rgbState stores an optional RGB color in a comparable form.
 type rgbState struct {
 	r     uint8
 	g     uint8
@@ -494,6 +555,7 @@ type rgbState struct {
 	valid bool
 }
 
+// applyStyle wraps text in ANSI SGR sequences for style.
 func applyStyle(profile ColorProfile, style styleState, text string) string {
 	if text == "" || (style == styleState{}) {
 		return text
@@ -519,6 +581,7 @@ func applyStyle(profile ColorProfile, style styleState, text string) string {
 	return "\x1b[" + strings.Join(params, ";") + "m" + text + "\x1b[0m"
 }
 
+// surfaceCellText safely reads a cell's text, returning a blank cell for out-of-bounds access.
 func surfaceCellText(surface SurfaceView, x, y int) string {
 	if surface == nil || y < 0 || y >= surface.SurfaceHeight() || x < 0 || x >= surface.SurfaceWidth() {
 		return " "
@@ -526,6 +589,7 @@ func surfaceCellText(surface SurfaceView, x, y int) string {
 	return surface.SurfaceCellText(x, y)
 }
 
+// surfaceCellWidth safely reads a cell's display width.
 func surfaceCellWidth(surface SurfaceView, x, y int) int {
 	if surface == nil || y < 0 || y >= surface.SurfaceHeight() || x < 0 || x >= surface.SurfaceWidth() {
 		return 1
@@ -533,6 +597,7 @@ func surfaceCellWidth(surface SurfaceView, x, y int) int {
 	return surface.SurfaceCellWidth(x, y)
 }
 
+// surfaceCellContinuation safely reads whether a cell continues a wide glyph.
 func surfaceCellContinuation(surface SurfaceView, x, y int) bool {
 	if surface == nil || y < 0 || y >= surface.SurfaceHeight() || x < 0 || x >= surface.SurfaceWidth() {
 		return false
@@ -540,6 +605,7 @@ func surfaceCellContinuation(surface SurfaceView, x, y int) bool {
 	return surface.SurfaceCellContinuation(x, y)
 }
 
+// surfaceCellFGState safely reads a cell's foreground color.
 func surfaceCellFGState(surface SurfaceView, x, y int) rgbState {
 	if surface == nil || y < 0 || y >= surface.SurfaceHeight() || x < 0 || x >= surface.SurfaceWidth() {
 		return rgbState{}
@@ -548,6 +614,7 @@ func surfaceCellFGState(surface SurfaceView, x, y int) rgbState {
 	return rgbState{r: r, g: g, b: b, valid: ok}
 }
 
+// surfaceCellBGState safely reads a cell's background color.
 func surfaceCellBGState(surface SurfaceView, x, y int) rgbState {
 	if surface == nil || y < 0 || y >= surface.SurfaceHeight() || x < 0 || x >= surface.SurfaceWidth() {
 		return rgbState{}
@@ -556,6 +623,7 @@ func surfaceCellBGState(surface SurfaceView, x, y int) rgbState {
 	return rgbState{r: r, g: g, b: b, valid: ok}
 }
 
+// surfaceCellBold safely reads whether a cell is bold.
 func surfaceCellBold(surface SurfaceView, x, y int) bool {
 	if surface == nil || y < 0 || y >= surface.SurfaceHeight() || x < 0 || x >= surface.SurfaceWidth() {
 		return false
@@ -563,6 +631,7 @@ func surfaceCellBold(surface SurfaceView, x, y int) bool {
 	return surface.SurfaceCellBold(x, y)
 }
 
+// surfaceCellItalic safely reads whether a cell is italic.
 func surfaceCellItalic(surface SurfaceView, x, y int) bool {
 	if surface == nil || y < 0 || y >= surface.SurfaceHeight() || x < 0 || x >= surface.SurfaceWidth() {
 		return false
@@ -570,6 +639,7 @@ func surfaceCellItalic(surface SurfaceView, x, y int) bool {
 	return surface.SurfaceCellItalic(x, y)
 }
 
+// surfaceCellUnderline safely reads whether a cell is underlined.
 func surfaceCellUnderline(surface SurfaceView, x, y int) bool {
 	if surface == nil || y < 0 || y >= surface.SurfaceHeight() || x < 0 || x >= surface.SurfaceWidth() {
 		return false
@@ -577,6 +647,7 @@ func surfaceCellUnderline(surface SurfaceView, x, y int) bool {
 	return surface.SurfaceCellUnderline(x, y)
 }
 
+// surfaceCellStrikethrough safely reads whether a cell is struck through.
 func surfaceCellStrikethrough(surface SurfaceView, x, y int) bool {
 	if surface == nil || y < 0 || y >= surface.SurfaceHeight() || x < 0 || x >= surface.SurfaceWidth() {
 		return false
@@ -584,6 +655,7 @@ func surfaceCellStrikethrough(surface SurfaceView, x, y int) bool {
 	return surface.SurfaceCellStrikethrough(x, y)
 }
 
+// setWindowTitle writes title to the terminal if it changed.
 func (p *Program) setWindowTitle(out io.Writer, title string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -594,6 +666,7 @@ func (p *Program) setWindowTitle(out io.Writer, title string) {
 	writeString(out, "\x1b]0;"+title+"\x07")
 }
 
+// setMouseMode enables or disables terminal mouse tracking if needed.
 func (p *Program) setMouseMode(out io.Writer, enabled bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -608,6 +681,7 @@ func (p *Program) setMouseMode(out io.Writer, enabled bool) {
 	writeString(out, "\x1b[?1002l\x1b[?1006l")
 }
 
+// forwardSent moves externally sent messages into the main event channel.
 func (p *Program) forwardSent(out chan<- Msg, done <-chan struct{}) {
 	for {
 		select {
@@ -619,6 +693,7 @@ func (p *Program) forwardSent(out chan<- Msg, done <-chan struct{}) {
 	}
 }
 
+// watchSize polls terminal dimensions and emits WindowSizeMsg when they change.
 func (p *Program) watchSize(in *os.File, out chan<- Msg, done <-chan struct{}) {
 	lastW, lastH := 0, 0
 	ticker := time.NewTicker(150 * time.Millisecond)
@@ -643,6 +718,7 @@ func (p *Program) watchSize(in *os.File, out chan<- Msg, done <-chan struct{}) {
 
 const idleInputPollDelay = 10 * time.Millisecond
 
+// readInput converts terminal input events into UI messages until done closes.
 func (p *Program) readInput(reader inputEventReader, out chan<- Msg, done <-chan struct{}) {
 	for {
 		select {
@@ -670,10 +746,12 @@ func (p *Program) readInput(reader inputEventReader, out chan<- Msg, done <-chan
 	}
 }
 
+// writeString writes terminal control strings and intentionally ignores errors.
 func writeString(w io.Writer, s string) {
 	_, _ = io.WriteString(w, s)
 }
 
+// convertInputEvents normalizes one raw input event into zero or more messages.
 func convertInputEvents(ev input.Event) []Msg {
 	switch typed := ev.(type) {
 	case input.MultiEvent:
@@ -698,6 +776,7 @@ func convertInputEvents(ev input.Event) []Msg {
 	}
 }
 
+// flattenInputEvents recursively expands nested input.MultiEvent values.
 func flattenInputEvents(events []input.Event) []input.Event {
 	flat := make([]input.Event, 0, len(events))
 	for _, ev := range events {
@@ -710,6 +789,10 @@ func flattenInputEvents(events []input.Event) []input.Event {
 	return flat
 }
 
+// convertEventSequence decodes an ordered batch of raw key events.
+//
+// Some terminals emit Alt combinations as ESC followed by another key press.
+// Looking at the sequence lets us preserve those shortcuts as a single KeyMsg.
 func convertEventSequence(events []input.Event) []Msg {
 	msgs := make([]Msg, 0, len(events))
 	for idx := 0; idx < len(events); idx++ {
@@ -723,6 +806,7 @@ func convertEventSequence(events []input.Event) []Msg {
 	return msgs
 }
 
+// decodeEscPrefixedAlt converts ESC-prefixed key pairs into Alt-modified keys.
 func decodeEscPrefixedAlt(events []input.Event, idx int) (Msg, int, bool) {
 	if idx+1 >= len(events) {
 		return nil, 0, false
@@ -743,6 +827,7 @@ func decodeEscPrefixedAlt(events []input.Event, idx int) (Msg, int, bool) {
 	return msg, 2, true
 }
 
+// shouldSynthesizeEscPrefixedAlt limits ESC-prefix synthesis to editor shortcuts.
 func shouldSynthesizeEscPrefixedAlt(msg KeyMsg) bool {
 	switch msg.Type {
 	case KeyLeft, KeyRight, KeyUp, KeyDown, KeyPgUp, KeyPgDown, KeyHome, KeyEnd,
@@ -755,6 +840,7 @@ func shouldSynthesizeEscPrefixedAlt(msg KeyMsg) bool {
 	}
 }
 
+// convertSingleInputEvent converts one raw event without cross-event decoding.
 func convertSingleInputEvent(ev input.Event) []Msg {
 	switch typed := ev.(type) {
 	case input.KeyPressEvent:
@@ -777,6 +863,7 @@ func convertSingleInputEvent(ev input.Event) []Msg {
 	}
 }
 
+// convertKeyPress normalizes a raw key press into KeyMsg.
 func convertKeyPress(ev input.KeyPressEvent) KeyMsg {
 	key := ev.Key()
 	msg := KeyMsg{Alt: key.Mod.Contains(input.ModAlt)}
@@ -864,6 +951,7 @@ func convertKeyPress(ev input.KeyPressEvent) KeyMsg {
 	return msg
 }
 
+// convertMouseButton maps charmbracelet mouse buttons to ui mouse buttons.
 func convertMouseButton(button input.MouseButton) MouseButton {
 	switch button {
 	case input.MouseLeft:

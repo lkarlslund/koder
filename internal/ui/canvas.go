@@ -1,11 +1,13 @@
 package ui
 
+// Canvas writes styled cells into a clipped region of a Surface.
 type Canvas struct {
 	surface *Surface
 	origin  Point
 	clip    Rect
 }
 
+// NewCanvas creates a canvas clipped to bounds inside surface.
 func NewCanvas(surface *Surface, bounds Rect) Canvas {
 	if surface == nil {
 		return Canvas{}
@@ -18,18 +20,22 @@ func NewCanvas(surface *Surface, bounds Rect) Canvas {
 	}
 }
 
+// Width returns the canvas clipping width.
 func (c Canvas) Width() int {
 	return c.clip.W
 }
 
+// Height returns the canvas clipping height.
 func (c Canvas) Height() int {
 	return c.clip.H
 }
 
+// Bounds returns the canvas-local bounds.
 func (c Canvas) Bounds() Rect {
 	return Rect{W: c.clip.W, H: c.clip.H}
 }
 
+// Subrect returns a child canvas clipped to bounds relative to this canvas.
 func (c Canvas) Subrect(bounds Rect) Canvas {
 	if c.surface == nil {
 		return Canvas{}
@@ -48,6 +54,7 @@ func (c Canvas) Subrect(bounds Rect) Canvas {
 	}
 }
 
+// WriteText writes styled text at a canvas-local position.
 func (c Canvas) WriteText(x, y int, text string, style CellStyle) {
 	if c.surface == nil {
 		return
@@ -78,6 +85,7 @@ func (c Canvas) WriteText(x, y int, text string, style CellStyle) {
 	}
 }
 
+// Fill fills rect with blank cells using style.
 func (c Canvas) Fill(rect Rect, style CellStyle) {
 	if c.surface == nil {
 		return
@@ -96,6 +104,7 @@ func (c Canvas) Fill(rect Rect, style CellStyle) {
 	}
 }
 
+// SetCell writes a single cell at a canvas-local position.
 func (c Canvas) SetCell(x, y int, cell Cell) {
 	if c.surface == nil {
 		return
@@ -108,6 +117,7 @@ func (c Canvas) SetCell(x, y int, cell Cell) {
 	c.surface.setCell(absX, absY, cell)
 }
 
+// BlitSurface composites child onto the canvas at a canvas-local position.
 func (c Canvas) BlitSurface(x, y int, child Surface) {
 	if c.surface == nil {
 		return
@@ -115,6 +125,7 @@ func (c Canvas) BlitSurface(x, y int, child Surface) {
 	*c.surface = c.surface.placeAt(c.origin.X+x, c.origin.Y+y, child)
 }
 
+// Snapshot copies the canvas clipping region into a new Surface.
 func (c Canvas) Snapshot() Surface {
 	if c.surface == nil || c.clip.Empty() {
 		return Surface{}
@@ -128,6 +139,7 @@ func (c Canvas) Snapshot() Surface {
 	return out
 }
 
+// Painter is implemented by values that can paint into a Canvas.
 type Painter interface {
 	Paint(ctx *Context, canvas Canvas)
 }
