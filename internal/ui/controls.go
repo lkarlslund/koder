@@ -531,7 +531,7 @@ func (r *ButtonRow) ActivateFocused() bool {
 	if len(r.Buttons) == 0 || r.Index < 0 || r.Index >= len(r.Buttons) {
 		return false
 	}
-	return triggerButton(r.Buttons[r.Index])
+	return r.Buttons[r.Index].trigger()
 }
 
 func (r *ButtonRow) ActivateHotkey(msg KeyMsg) bool {
@@ -552,14 +552,14 @@ func (r *ButtonRow) ActivateHotkey(msg KeyMsg) bool {
 			continue
 		}
 		r.Index = idx
-		if triggerButton(button) {
+		if button.trigger() {
 			return true
 		}
 	}
 	return false
 }
 
-func triggerButton(button Button) bool {
+func (button Button) trigger() bool {
 	if button.OnClick != nil {
 		button.OnClick()
 		return true

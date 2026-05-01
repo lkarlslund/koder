@@ -54,7 +54,7 @@ func (d DamageSet) Normalized(bounds Rect) []Rect {
 	}
 	rects := make([]Rect, 0, len(d.rects))
 	for _, rect := range d.rects {
-		clipped := clipRect(rect, bounds)
+		clipped := rect.Clip(bounds)
 		if clipped.Empty() {
 			continue
 		}
@@ -82,7 +82,7 @@ func (d DamageSet) Normalized(bounds Rect) []Rect {
 			continue
 		}
 		last := out[len(out)-1]
-		if merged, ok := mergeDamageRects(last, rect); ok {
+		if merged, ok := last.mergeDamage(rect); ok {
 			out[len(out)-1] = merged
 			continue
 		}
@@ -91,20 +91,20 @@ func (d DamageSet) Normalized(bounds Rect) []Rect {
 	return out
 }
 
-func mergeDamageRects(a, b Rect) (Rect, bool) {
-	if a.Empty() {
-		return b, !b.Empty()
+func (r Rect) mergeDamage(other Rect) (Rect, bool) {
+	if r.Empty() {
+		return other, !other.Empty()
 	}
-	if b.Empty() {
-		return a, true
+	if other.Empty() {
+		return r, true
 	}
-	if a.Y == b.Y && a.H == b.H && a.X+a.W >= b.X {
-		right := max(a.X+a.W, b.X+b.W)
-		return Rect{X: min(a.X, b.X), Y: a.Y, W: right - min(a.X, b.X), H: a.H}, true
+	if r.Y == other.Y && r.H == other.H && r.X+r.W >= other.X {
+		right := max(r.X+r.W, other.X+other.W)
+		return Rect{X: min(r.X, other.X), Y: r.Y, W: right - min(r.X, other.X), H: r.H}, true
 	}
-	if a.X == b.X && a.W == b.W && a.Y+a.H >= b.Y {
-		bottom := max(a.Y+a.H, b.Y+b.H)
-		return Rect{X: a.X, Y: min(a.Y, b.Y), W: a.W, H: bottom - min(a.Y, b.Y)}, true
+	if r.X == other.X && r.W == other.W && r.Y+r.H >= other.Y {
+		bottom := max(r.Y+r.H, other.Y+other.H)
+		return Rect{X: r.X, Y: min(r.Y, other.Y), W: r.W, H: bottom - min(r.Y, other.Y)}, true
 	}
 	return Rect{}, false
 }

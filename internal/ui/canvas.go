@@ -12,7 +12,7 @@ func NewCanvas(surface *Surface, bounds Rect) Canvas {
 	if surface == nil {
 		return Canvas{}
 	}
-	clip := clipRect(bounds, Rect{W: surface.SurfaceWidth(), H: surface.SurfaceHeight()})
+	clip := bounds.Clip(Rect{W: surface.SurfaceWidth(), H: surface.SurfaceHeight()})
 	return Canvas{
 		surface: surface,
 		origin:  Point{X: bounds.X, Y: bounds.Y},
@@ -46,7 +46,7 @@ func (c Canvas) Subrect(bounds Rect) Canvas {
 		W: bounds.W,
 		H: bounds.H,
 	}
-	clip := clipRect(abs, c.clip)
+	clip := abs.Clip(c.clip)
 	return Canvas{
 		surface: c.surface,
 		origin:  Point{X: abs.X, Y: abs.Y},
@@ -75,10 +75,10 @@ func (c Canvas) WriteText(x, y int, text string, style CellStyle) {
 		}
 		if col >= c.clip.X {
 			base := c.surface.cellAt(col, absY)
-			c.surface.setCell(col, absY, compositeCell(base, newCell(Glyph(r), width, style)))
+			c.surface.setCell(col, absY, base.composite(newCell(Glyph(r), width, style)))
 			for extra := 1; extra < width && col+extra < c.clip.X+c.clip.W; extra++ {
 				base := c.surface.cellAt(col+extra, absY)
-				c.surface.setCell(col+extra, absY, compositeCell(base, continuationCell(style)))
+				c.surface.setCell(col+extra, absY, base.composite(continuationCell(style)))
 			}
 		}
 		col += width
@@ -90,10 +90,7 @@ func (c Canvas) Fill(rect Rect, style CellStyle) {
 	if c.surface == nil {
 		return
 	}
-	clip := clipRect(
-		Rect{X: c.origin.X + rect.X, Y: c.origin.Y + rect.Y, W: rect.W, H: rect.H},
-		c.clip,
-	)
+	clip := Rect{X: c.origin.X + rect.X, Y: c.origin.Y + rect.Y, W: rect.W, H: rect.H}.Clip(c.clip)
 	if clip.Empty() {
 		return
 	}

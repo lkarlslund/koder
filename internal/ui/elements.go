@@ -61,6 +61,21 @@ func (r Rect) Inset(in Insets) Rect {
 	return Rect{X: x, Y: y, W: w, H: h}
 }
 
+// Clip returns the intersection of r and bounds.
+func (r Rect) Clip(bounds Rect) Rect {
+	if r.W <= 0 || r.H <= 0 || bounds.W <= 0 || bounds.H <= 0 {
+		return Rect{}
+	}
+	left := max(r.X, bounds.X)
+	top := max(r.Y, bounds.Y)
+	right := min(r.X+r.W, bounds.X+bounds.W)
+	bottom := min(r.Y+r.H, bounds.Y+bounds.H)
+	if right <= left || bottom <= top {
+		return Rect{}
+	}
+	return Rect{X: left, Y: top, W: right - left, H: bottom - top}
+}
+
 // Insets describes per-edge spacing in terminal cells.
 type Insets struct {
 	Top    int
@@ -909,7 +924,7 @@ func (s Surface) blitAt(x, y int, child Surface) Surface {
 				cx = end
 				continue
 			}
-			dstRow[cx] = compositeCell(dstRow[cx], srcRow[cx])
+			dstRow[cx] = dstRow[cx].composite(srcRow[cx])
 			cx++
 		}
 	}
@@ -917,7 +932,7 @@ func (s Surface) blitAt(x, y int, child Surface) Surface {
 		for _, control := range child.ctrls {
 			control.Rect.X += x
 			control.Rect.Y += y
-			if clipped, ok := clipControlRect(control, out.w, out.h); ok {
+			if clipped, ok := control.clipToSurface(out.w, out.h); ok {
 				out.ctrls = append(out.ctrls, clipped)
 			}
 		}
@@ -1011,7 +1026,7 @@ func clipControlsToSurface(controls []Control, width, height int) []Control {
 	}
 	out := make([]Control, 0, len(controls))
 	for _, control := range controls {
-		if clipped, ok := clipControlRect(control, width, height); ok {
+		if clipped, ok := control.clipToSurface(width, height); ok {
 			out = append(out, clipped)
 		}
 	}
@@ -1023,7 +1038,7 @@ func controlsFitSurface(controls []Control, width, height int) bool {
 		return true
 	}
 	for _, control := range controls {
-		if _, ok := clipControlRect(control, width, height); !ok {
+		if _, ok := control.clipToSurface(width, height); !ok {
 			return false
 		}
 		if control.Rect.X < 0 || control.Rect.Y < 0 || control.Rect.X+control.Rect.W > width || control.Rect.Y+control.Rect.H > height {
@@ -1033,7 +1048,7 @@ func controlsFitSurface(controls []Control, width, height int) bool {
 	return true
 }
 
-func clipControlRect(control Control, width, height int) (Control, bool) {
+func (control Control) clipToSurface(width, height int) (Control, bool) {
 	x1 := max(0, control.Rect.X)
 	y1 := max(0, control.Rect.Y)
 	x2 := min(width, control.Rect.X+control.Rect.W)
@@ -1055,7 +1070,7 @@ func FilledLineSurface(width int, text string, fillStyle, textStyle CellStyle) S
 	return s
 }
 
-func compositeCell(base, overlay Cell) Cell {
+func (base Cell) composite(overlay Cell) Cell {
 	if !overlay.Painted() {
 		return base
 	}

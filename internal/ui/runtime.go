@@ -310,11 +310,11 @@ func (r *Root) SetMainWindow(window Window) {
 		return
 	}
 	if r.main != nil {
-		r.pendingDamage.Add(clipRect(r.main.Bounds(r.bounds), r.bounds))
+		r.pendingDamage.Add(r.main.Bounds(r.bounds).Clip(r.bounds))
 	}
 	r.main = window
 	if window != nil {
-		r.pendingDamage.Add(clipRect(window.Bounds(r.bounds), r.bounds))
+		r.pendingDamage.Add(window.Bounds(r.bounds).Clip(r.bounds))
 	}
 	r.RequestRedraw()
 	if window != nil && window.Focusable() && r.focused == "" {
@@ -363,7 +363,7 @@ func (r *Root) SetWindows(windows []Window) {
 		if _, ok := desired[existing.ID()]; ok {
 			continue
 		}
-		r.pendingDamage.Add(clipRect(existing.Bounds(r.bounds), r.bounds))
+		r.pendingDamage.Add(existing.Bounds(r.bounds).Clip(r.bounds))
 		r.timerSchedule.StopOwnerTimers(string(existing.ID()))
 		if r.focused == existing.ID() {
 			existing.Blur()
@@ -546,7 +546,7 @@ func (r *Root) RenderFrame() Surface {
 		if window == nil || !window.Visible() {
 			continue
 		}
-		bounds := clipRect(window.Bounds(r.bounds), r.bounds)
+		bounds := window.Bounds(r.bounds).Clip(r.bounds)
 		if bounds.W <= 0 || bounds.H <= 0 {
 			continue
 		}
@@ -627,7 +627,7 @@ func (r *Root) windowAt(p Point) Window {
 		if window == nil || !window.Visible() {
 			continue
 		}
-		bounds := clipRect(window.Bounds(r.bounds), r.bounds)
+		bounds := window.Bounds(r.bounds).Clip(r.bounds)
 		if bounds.Contains(p) {
 			return window
 		}
@@ -639,18 +639,4 @@ func (r *Root) windowAt(p Point) Window {
 		}
 	}
 	return nil
-}
-
-func clipRect(rect, bounds Rect) Rect {
-	if rect.W <= 0 || rect.H <= 0 || bounds.W <= 0 || bounds.H <= 0 {
-		return Rect{}
-	}
-	left := max(rect.X, bounds.X)
-	top := max(rect.Y, bounds.Y)
-	right := min(rect.X+rect.W, bounds.X+bounds.W)
-	bottom := min(rect.Y+rect.H, bounds.Y+bounds.H)
-	if right <= left || bottom <= top {
-		return Rect{}
-	}
-	return Rect{X: left, Y: top, W: right - left, H: bottom - top}
 }

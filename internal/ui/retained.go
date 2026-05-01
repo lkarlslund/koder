@@ -88,7 +88,7 @@ func (n *BaseNode) MarkDirtyLocal(rect Rect) {
 		n.damage.Add(n.rect)
 		return
 	}
-	n.damage.Add(clipRect(rect.Translate(n.rect.X, n.rect.Y), n.rect))
+	n.damage.Add(rect.Translate(n.rect.X, n.rect.Y).Clip(n.rect))
 }
 
 // MarkDirtyLocalRects marks multiple local rectangles dirty.

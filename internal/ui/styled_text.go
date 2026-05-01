@@ -192,7 +192,7 @@ func tokenizeStyledLine(spans []StyledSpan) []styledToken {
 			if width <= 0 {
 				continue
 			}
-			if len(current.spans) > 0 && (current.whitespace != isSpace || !styledSpanMetaEqual(current.spans[len(current.spans)-1], span)) {
+			if len(current.spans) > 0 && (current.whitespace != isSpace || !current.spans[len(current.spans)-1].sameMeta(span)) {
 				flush()
 			}
 			current.whitespace = isSpace
@@ -256,13 +256,13 @@ func appendStyledText(dst []StyledSpan, span StyledSpan) []StyledSpan {
 	if span.Text == "" {
 		return dst
 	}
-	if len(dst) > 0 && styledSpanMetaEqual(dst[len(dst)-1], span) {
+	if len(dst) > 0 && dst[len(dst)-1].sameMeta(span) {
 		dst[len(dst)-1].Text += span.Text
 		return dst
 	}
 	return append(dst, span)
 }
 
-func styledSpanMetaEqual(a, b StyledSpan) bool {
-	return a.Style.equal(b.Style) && a.ControlID == b.ControlID && a.Enabled == b.Enabled
+func (span StyledSpan) sameMeta(other StyledSpan) bool {
+	return span.Style.equal(other.Style) && span.ControlID == other.ControlID && span.Enabled == other.Enabled
 }
