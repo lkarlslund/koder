@@ -3,7 +3,6 @@ package markdown
 import (
 	"fmt"
 	"regexp"
-	"slices"
 	"strconv"
 	"strings"
 
@@ -51,7 +50,7 @@ func collectCodeNoteDefinitions(start ast.Node, source []byte) (map[string]strin
 		if !ok {
 			break
 		}
-		textValue := strings.TrimSpace(string(paragraph.Text(source)))
+		textValue := strings.TrimSpace(string(paragraph.Lines().Value(source)))
 		if textValue == "" {
 			break
 		}
@@ -127,7 +126,7 @@ func parseCodeFenceOptions(node *ast.FencedCodeBlock, source []byte) codeFenceOp
 	opts.Language = strings.TrimSpace(string(node.Language(source)))
 	var rawInfo string
 	if node.Info != nil {
-		rawInfo = strings.TrimSpace(string(node.Info.Text(source)))
+		rawInfo = strings.TrimSpace(string(node.Info.Value(source)))
 	}
 	match := codeFenceAttrPattern.FindStringSubmatch(rawInfo)
 	if len(match) != 2 {
@@ -362,10 +361,4 @@ func (r *Renderer) renderCodeNotes(annotations []codeLineAnnotation, noteDefs ma
 	out = ui.AppendStyledSpan(out, "\n", ui.CellStyle{})
 	out = appendStyled(out, "└──────", borderStyle)
 	return out
-}
-
-func orderedCodeStylesForTests() []string {
-	names := CodeStyleNames()
-	slices.Sort(names)
-	return names
 }

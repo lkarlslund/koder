@@ -130,13 +130,6 @@ func (c Composer) paint(canvas Canvas) {
 	}
 }
 
-func (c Composer) renderAttachmentRows() Surface {
-	if len(c.Attachments) == 0 {
-		return Surface{}
-	}
-	return AttachmentList{Items: c.Attachments, Width: maxInt(1, c.Width)}.render(c.Palette)
-}
-
 func (c Composer) renderPlaceholderLine(promptStyle, contentStyle Style, prompt string, contentWidth int, placeholder string, cursorChar string) string {
 	return strings.Join(c.renderPlaceholderSurface(promptStyle, contentStyle, prompt, contentWidth, placeholder, cursorChar).Lines(), "\n")
 }

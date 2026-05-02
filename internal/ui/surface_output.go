@@ -5,10 +5,6 @@ import "strings"
 // This file is the ANSI output boundary for Surface serialization.
 // Widgets and dialogs should operate on plain text and cells only.
 
-func applyCellStyle(style CellStyle, text string) string {
-	return applyCellStyleWithProfile(ColorProfileTrueColor, style, text)
-}
-
 func applyCellStyleWithProfile(profile ColorProfile, style CellStyle, text string) string {
 	if style.isZero() || text == "" {
 		return text

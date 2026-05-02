@@ -135,10 +135,10 @@ func (n *FlexNode) Measure(ctx *Context, constraints Constraints) Size {
 
 // Layout assigns child rectangles along the configured flex direction.
 func (n *FlexNode) Layout(ctx *Context, rect Rect) {
-	n.BaseNode.Layout(ctx, rect)
 	if n == nil {
 		return
 	}
+	n.BaseNode.Layout(ctx, rect)
 	active := n.activeChildren(ctx, rect)
 	if len(active) == 0 {
 		return
@@ -233,7 +233,6 @@ func (n *FlexNode) activeChildren(ctx *Context, rect Rect) []flexNodeLayoutChild
 		}
 		main := child.Basis
 		if child.Flex <= 0 {
-			main = size.W
 			if n.Direction == DirectionVertical {
 				main = max(size.H, child.Basis)
 			} else {

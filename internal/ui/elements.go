@@ -1170,34 +1170,6 @@ type CacheInvalidator interface {
 	InvalidateCache()
 }
 
-func renderOwnedCanvas(ctx *Context, bounds Rect, painter Painter) Surface {
-	base := TransparentSurface(bounds.W, bounds.H)
-	if painter == nil {
-		return base
-	}
-	localBounds := Rect{W: bounds.W, H: bounds.H}
-	shadow := &Runtime{}
-	if ctx == nil {
-		canvas := NewCanvas(&base, localBounds)
-		painter.Paint(&Context{Runtime: shadow}, canvas)
-		if controls := shadow.Controls(); len(controls) > 0 {
-			base.ctrls = append(base.ctrls[:0], controls...)
-		}
-		return base
-	}
-	copyCtx := *ctx
-	copyCtx.Runtime = shadow
-	canvas := NewCanvas(&base, localBounds)
-	painter.Paint(&copyCtx, canvas)
-	if controls := shadow.Controls(); len(controls) > 0 {
-		base.ctrls = append(base.ctrls[:0], controls...)
-		if ctx.Runtime != nil {
-			base.RegisterControls(ctx.Runtime, bounds.X, bounds.Y)
-		}
-	}
-	return base
-}
-
 func InvalidateNodeCaches(ctx *Context, node Node) {
 	if node == nil {
 		return

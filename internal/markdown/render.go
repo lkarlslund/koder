@@ -337,7 +337,7 @@ func findInlineMathEnd(value string) int {
 }
 
 func (r *Renderer) renderRawHTML(node *ast.RawHTML, source []byte, style ui.CellStyle, state *inlineHTMLState) []ui.StyledSpan {
-	raw := strings.TrimSpace(string(node.Text(source)))
+	raw := strings.TrimSpace(string(node.Segments.Value(source)))
 	lower := strings.ToLower(raw)
 	switch {
 	case lower == "<sup>":
@@ -623,7 +623,11 @@ func (r *Renderer) renderStyledFootnoteList(node *extensionast.FootnoteList, sou
 }
 
 func (r *Renderer) renderHTMLBlock(node ast.Node, source []byte) []ui.StyledSpan {
-	text := strings.TrimSpace(string(node.Text(source)))
+	block, ok := node.(interface{ Lines() *text.Segments })
+	if !ok {
+		return nil
+	}
+	text := strings.TrimSpace(string(block.Lines().Value(source)))
 	if text == "" {
 		return nil
 	}

@@ -53,8 +53,11 @@ func (n *HashedNode) Children() []Node {
 
 // Layout assigns the wrapper bounds to the current child.
 func (n *HashedNode) Layout(ctx *Context, rect Rect) {
+	if n == nil {
+		return
+	}
 	n.BaseNode.Layout(ctx, rect)
-	if n == nil || n.child == nil {
+	if n.child == nil {
 		return
 	}
 	n.child.Layout(ctx, rect)

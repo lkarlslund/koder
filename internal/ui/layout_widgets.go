@@ -272,10 +272,6 @@ func (h tableHeader) Measure(_ *Context, constraints Constraints) Size {
 }
 
 func (h tableHeader) Paint(_ *Context, canvas Canvas) {
-	width := h.Width
-	if width <= 0 {
-		width = canvas.Width()
-	}
 	style := CellStyle{FG: cellColor(h.Palette.AssistantTimestampText)}.WithBold(true)
 	colX := 0
 	for idx, col := range h.Columns {

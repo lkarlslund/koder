@@ -3061,24 +3061,6 @@ func (m *Model) transcriptBlockForController(item transcriptItemController) tran
 	return transcriptBlock{}
 }
 
-func (m *Model) transcriptElement(runtime *ui.Runtime) ui.Node {
-	retained := m.syncRetainedTranscript()
-	if retained == nil {
-		return nil
-	}
-	width := max(0, m.viewport.Width)
-	height := max(0, m.transcriptViewportHeight())
-	if runtime != nil {
-		runtime.BeginFrame()
-	}
-	return ui.AsNode(ui.ScrollBox{
-		Child:   ui.AsNode(retained),
-		OffsetY: max(0, m.viewport.YOffset),
-		Width:   width,
-		Height:  height,
-	})
-}
-
 func (m *Model) syncRetainedTranscript() *ui.RetainedTranscript {
 	retained := m.ensureRetainedTranscript()
 	if m.transcriptDirty || len(retained.Items()) == 0 {
@@ -4202,13 +4184,6 @@ func timestamp(t time.Time, enabled bool) string {
 	return t.Format("15:04:05")
 }
 
-func truncate(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen-1] + "…"
-}
-
 func formatTokens(value int) string {
 	switch {
 	case value >= 1_000_000:
@@ -5171,34 +5146,6 @@ func (m *Model) imageAttachmentStatus(draft attachment.Draft) string {
 	return fmt.Sprintf("Attached image %s", draft.Name)
 }
 
-func (m *Model) poppedLastDraftAttachment() bool {
-	if len(m.draftAttachments) == 0 {
-		return false
-	}
-	last := m.draftAttachments[len(m.draftAttachments)-1]
-	m.draftAttachments = m.draftAttachments[:len(m.draftAttachments)-1]
-	m.removeAttachmentPlaceholder(last)
-	m.status = fmt.Sprintf("Removed attachment %s", last.Name)
-	return true
-}
-
-func (m *Model) removeDraftAttachmentForComposerKey(msg ui.KeyMsg) bool {
-	if len(m.draftAttachments) == 0 {
-		return false
-	}
-	switch msg.Type {
-	case ui.KeyBackspace:
-		if m.composer.CursorIndex() == 0 {
-			return m.poppedLastDraftAttachment()
-		}
-	case ui.KeyDelete:
-		if m.composer.CursorIndex() >= m.composer.RuneCount() {
-			return m.poppedLastDraftAttachment()
-		}
-	}
-	return false
-}
-
 func (m *Model) syncDraftReferencesFromComposer() {
 	if len(m.draftReferences) == 0 {
 		return
@@ -5285,27 +5232,6 @@ func (m *Model) insertDraftAttachment(draft attachment.Draft) {
 		}
 	}
 	m.composer.InsertToken(insert)
-	m.updateComposerMenus()
-	m.invalidateFooterCache()
-}
-
-func (m *Model) removeAttachmentPlaceholder(draft attachment.Draft) {
-	value := m.composer.Value()
-	placeholder := draftAttachmentToken(draft)
-	idx := strings.LastIndex(value, placeholder)
-	if idx < 0 {
-		return
-	}
-	end := idx + len(placeholder)
-	if end < len(value) && value[end] == ' ' {
-		end++
-	} else if idx > 0 && value[idx-1] == ' ' {
-		idx--
-	}
-	next := value[:idx] + value[end:]
-	m.composer.SetValue(next)
-	m.composer.SetCursor(min(idx, len(next)))
-	m.hydrateComposerTokens()
 	m.updateComposerMenus()
 	m.invalidateFooterCache()
 }
@@ -5877,10 +5803,6 @@ func (b busyModel) statusOrDefault(fallback string) string {
 		return b.status
 	}
 	return fallback
-}
-
-func (m *Model) isWorking() bool {
-	return m.busy.transcriptActive()
 }
 
 func (m *Model) shouldAnimateSpinner() bool {
@@ -6823,14 +6745,6 @@ func (m *Model) applySessionToolStates(states map[domain.ToolKind]bool) error {
 		}
 	}
 	return nil
-}
-
-func (m *Model) renderChangedFile(item workspace.FileStatus) string {
-	base := fmt.Sprintf("  %-2s %s", item.Code, truncate(item.Path, 16))
-	if item.Additions == 0 && item.Deletions == 0 {
-		return base
-	}
-	return fmt.Sprintf("%s +%d -%d", base, item.Additions, item.Deletions)
 }
 
 func applyComposerTheme(composer *textarea.Model, palette theme.Palette) {

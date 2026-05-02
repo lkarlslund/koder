@@ -267,10 +267,6 @@ func (o *bouncyBallsOverlay) currentBallRects() []ui.Rect {
 	return rects
 }
 
-func (o *bouncyBallsOverlay) setDirtyFromCurrent() {
-	o.dirtyRects = append(o.dirtyRects[:0], o.currentBallRects()...)
-}
-
 func (o *bouncyBallsOverlay) setDirtyUnion(before, after []ui.Rect) {
 	damage := ui.DamageSet{}
 	for idx := range before {
