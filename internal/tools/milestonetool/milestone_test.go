@@ -111,6 +111,29 @@ func TestUpsertAndUpdatedPlanHelpers(t *testing.T) {
 	}
 }
 
+func TestUpdateItemActiveMilestoneErrorExplainsSwitching(t *testing.T) {
+	plan := store.MilestonePlan{
+		Summary: "Ship it",
+		Milestones: []store.Milestone{
+			{Ref: "alpha", Title: "Alpha", Status: domain.MilestoneStatusInProgress, Position: 0},
+			{Ref: "beta", Title: "Beta", Status: domain.MilestoneStatusPending, Position: 1},
+		},
+	}
+
+	_, err := updatedMilestonePlan(plan, tools.Request{Args: map[string]string{"ref": "beta", "status": "in_progress"}})
+	if err == nil {
+		t.Fatal("expected active milestone error")
+	}
+	for _, want := range []string{
+		"active milestones: alpha (in_progress), beta (in_progress)",
+		"To switch milestones, first update the current active milestone to pending, blocked, or completed",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("expected %q in error %q", want, err.Error())
+		}
+	}
+}
+
 func TestUpdateItemRefusesCompletedMilestoneWithIncompleteTodos(t *testing.T) {
 	runtime, st, session := newMilestoneRuntime(t)
 	seedPlan(t, st, session.ID)
@@ -218,5 +241,53 @@ func TestPlanAndWritePersist(t *testing.T) {
 	}
 	if plan.Summary != "New plan" || len(plan.Milestones) != 1 || plan.Milestones[0].Ref != "gamma" {
 		t.Fatalf("unexpected persisted plan: %#v", plan)
+	}
+}
+
+func TestPlanPersistStoresRealTodoIDsInOutput(t *testing.T) {
+	_, st, session := newMilestoneRuntime(t)
+	seedPlan(t, st, session.ID)
+
+	result, err := (planTool{}).Execute(context.Background(), tools.Runtime{Store: st, SessionID: session.ID}, tools.Request{
+		Tool: domain.ToolKindMilestonePlan,
+		Args: map[string]string{
+			"ref":   "alpha",
+			"title": "Alpha",
+			"items": `[{"content":"one"},{"content":"two"}]`,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result.Output, "#0 one") {
+		t.Fatalf("expected execute preview to contain zero placeholder id, got %q", result.Output)
+	}
+
+	events, err := (planTool{}).PersistResult(context.Background(), st, session.ID, tools.Request{
+		Tool: domain.ToolKindMilestonePlan,
+		Args: map[string]string{
+			"ref":   "alpha",
+			"title": "Alpha",
+			"items": `[{"content":"one"},{"content":"two"}]`,
+		},
+	}, result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	event := <-events
+	if strings.Contains(event.Text, "#0") || !strings.Contains(event.Text, "#1 one") || !strings.Contains(event.Text, "#2 two") {
+		t.Fatalf("expected persisted event to contain real todo ids, got %q", event.Text)
+	}
+
+	messages, partsByMessage, err := st.PartsForSession(context.Background(), session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 1 {
+		t.Fatalf("expected one tool message, got %d", len(messages))
+	}
+	body := partsByMessage[messages[0].ID][0].Body
+	if strings.Contains(body, "#0") || !strings.Contains(body, "#1 one") || !strings.Contains(body, "#2 two") {
+		t.Fatalf("expected persisted body to contain real todo ids, got %q", body)
 	}
 }

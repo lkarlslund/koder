@@ -112,6 +112,45 @@ func TestMilestoneAndTodoWorkflow(t *testing.T) {
 	}
 }
 
+func TestTodoAddPersistReturnsRealTodoIDs(t *testing.T) {
+	ctx := context.Background()
+	st := openPlanningTestStore(t)
+	session, err := st.CreateSession(ctx, "test", "provider", "model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry := tools.NewRegistry(t.TempDir())
+
+	if _, err := executeAndPersist(ctx, t, registry, st, session.ID, tools.Request{
+		Tool: domain.ToolKindMilestoneAdd,
+		Args: map[string]string{"items": `[{"ref":"implement","title":"Implement"}]`},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	req := tools.Request{
+		Tool: domain.ToolKindTodoAddItems,
+		Args: map[string]string{
+			"milestone_ref": "implement",
+			"items":         `[{"content":"Write tests"},{"content":"Fix bug"}]`,
+		},
+	}
+	result, err := registry.ExecuteWithSession(ctx, st, session.ID, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result.Output, "#0 Write tests") {
+		t.Fatalf("expected execute preview to contain zero placeholder id, got %q", result.Output)
+	}
+	events, err := registry.PersistResult(ctx, st, session.ID, req, result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	event := <-events
+	if strings.Contains(event.Text, "#0") || !strings.Contains(event.Text, "#1 Write tests") || !strings.Contains(event.Text, "#2 Fix bug") {
+		t.Fatalf("expected persisted event to contain real todo ids, got %q", event.Text)
+	}
+}
+
 func TestMilestoneWriteHiddenFromDefinitions(t *testing.T) {
 	defs := tools.Definitions(tools.Runtime{})
 	for _, def := range defs {

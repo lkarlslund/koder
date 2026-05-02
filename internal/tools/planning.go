@@ -202,7 +202,7 @@ func ValidateTodoProgress(items []store.TodoItem) error {
 }
 
 func ValidateMilestoneProgress(items []store.Milestone) error {
-	inProgress := 0
+	active := make([]string, 0, 1)
 	seenRefs := make(map[string]struct{}, len(items))
 	for _, item := range items {
 		if item.Ref == "" {
@@ -213,11 +213,11 @@ func ValidateMilestoneProgress(items []store.Milestone) error {
 		}
 		seenRefs[item.Ref] = struct{}{}
 		if milestoneStatusCountsAsActive(item.Status) {
-			inProgress++
+			active = append(active, fmt.Sprintf("%s (%s)", item.Ref, item.Status))
 		}
 	}
-	if inProgress > 1 {
-		return errors.New("milestones may contain at most one active item (in_progress, decomposing, or executing)")
+	if len(active) > 1 {
+		return fmt.Errorf("milestones may contain at most one active item (in_progress, decomposing, or executing); active milestones: %s. To switch milestones, first update the current active milestone to pending, blocked, or completed, then update the next milestone to in_progress, decomposing, or executing", strings.Join(active, ", "))
 	}
 	return nil
 }

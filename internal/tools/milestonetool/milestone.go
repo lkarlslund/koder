@@ -397,7 +397,9 @@ func (planTool) PersistResult(ctx context.Context, st *store.Store, sessionID in
 	if err != nil {
 		return nil, err
 	}
-	result.Stored = tools.TodoStoredResult(store.MilestonePlan{Summary: plan.Summary, Milestones: nextMilestones}, req.Args["ref"], todos, "Updated milestone and appended todo items")
+	stored := tools.TodoStoredResult(store.MilestonePlan{Summary: plan.Summary, Milestones: nextMilestones}, req.Args["ref"], todos, "Updated milestone and appended todo items")
+	result.Stored = stored
+	result.Output = tools.FormatTodoOutput(stored)
 	return tools.PersistStandardResult(ctx, st, sessionID, req, result)
 }
 

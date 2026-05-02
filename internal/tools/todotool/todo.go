@@ -277,7 +277,9 @@ func (addItemsTool) PersistResult(ctx context.Context, st *store.Store, sessionI
 	if err != nil {
 		return nil, err
 	}
-	result.Stored = tools.TodoStoredResult(plan, req.Args["milestone_ref"], created, "")
+	stored := tools.TodoStoredResult(plan, req.Args["milestone_ref"], created, "")
+	result.Stored = stored
+	result.Output = tools.FormatTodoOutput(stored)
 	return tools.PersistStandardResult(ctx, st, sessionID, req, result)
 }
 
