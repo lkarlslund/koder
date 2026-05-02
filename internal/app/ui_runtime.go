@@ -91,14 +91,22 @@ func (w *modelWindow) HandleKey(msg ui.KeyMsg) (bool, ui.Cmd) {
 	if w.key == nil {
 		return false, nil
 	}
-	return w.key(w.model, msg)
+	handled, cmd := w.key(w.model, msg)
+	if handled {
+		w.base.Dirty = true
+	}
+	return handled, cmd
 }
 
 func (w *modelWindow) HandleMouse(msg ui.MouseMsg) (bool, ui.Cmd) {
 	if w.mouse == nil {
 		return false, nil
 	}
-	return w.mouse(w.model, msg)
+	handled, cmd := w.mouse(w.model, msg)
+	if handled {
+		w.base.Dirty = true
+	}
+	return handled, cmd
 }
 
 func (w *modelWindow) PaintWindow(ctx *ui.Context, bounds ui.Rect, dst *ui.Surface) {
@@ -160,7 +168,11 @@ func (w *modelWindow) HandleTimer(event ui.TimerEvent) (bool, ui.Cmd) {
 	if w.timer == nil {
 		return false, nil
 	}
-	return w.timer(w.model, event)
+	handled, cmd := w.timer(w.model, event)
+	if handled {
+		w.base.Dirty = true
+	}
+	return handled, cmd
 }
 
 func (m *Model) ensureUIRoot() *ui.Root {

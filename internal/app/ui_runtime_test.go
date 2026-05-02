@@ -1,6 +1,7 @@
 package app
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 
@@ -146,6 +147,34 @@ func TestMainWindowFocusSyncsComposerLifecycle(t *testing.T) {
 	}
 	if m.ensureRenderCache().composerAreaValid {
 		t.Fatal("expected focus transition to invalidate the composer area cache")
+	}
+}
+
+func TestSessionDialogScrollMarksWindowDirty(t *testing.T) {
+	m := newRuntimeTestModel(t)
+	m.width = 100
+	m.height = 32
+	for i := int64(1); i <= 14; i++ {
+		m.sessions = append(m.sessions, domain.Session{
+			ID:    i,
+			Title: "Session " + strconv.FormatInt(i, 10),
+		})
+	}
+	m.openSessionPicker()
+
+	root := m.syncUIRoot()
+	_ = root.RenderFrame()
+	handled, _ := root.HandleEvent(ui.KeyEvent{Type: ui.KeyDown})
+	if !handled {
+		t.Fatal("expected session dialog to handle down key")
+	}
+	frame := root.RenderFrame()
+	rects, ok := frame.DirtyRects()
+	if !ok || len(rects) == 0 {
+		t.Fatalf("expected session dialog scroll to report dirty rects, got ok=%v rects=%v", ok, rects)
+	}
+	if !strings.Contains(strings.Join(frame.Lines(), "\n"), "Session 2") {
+		t.Fatalf("expected scrolled dialog to repaint selected session, got %q", strings.Join(frame.Lines(), "\n"))
 	}
 }
 
