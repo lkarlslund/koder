@@ -45,6 +45,9 @@ func TestLoadWritesDefaultConfig(t *testing.T) {
 	if !cfg.UI.CursorBlink {
 		t.Fatal("expected cursor blinking enabled by default")
 	}
+	if !cfg.UI.AutoContinue {
+		t.Fatal("expected auto continue enabled by default")
+	}
 	if len(cfg.Permissions.Profiles) == 0 {
 		t.Fatal("expected permission profiles")
 	}
@@ -169,6 +172,30 @@ func TestLoadBackfillsMissingCursorBlinkSetting(t *testing.T) {
 	}
 	if !cfg.UI.CursorBlink {
 		t.Fatal("expected missing cursor_blink setting to default to true")
+	}
+}
+
+func TestLoadBackfillsMissingAutoContinueSetting(t *testing.T) {
+	temp := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", temp)
+	t.Setenv("XDG_STATE_HOME", temp)
+	t.Setenv("XDG_CACHE_HOME", temp)
+
+	configRoot := filepath.Join(temp, "koder")
+	if err := os.MkdirAll(configRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	raw := []byte("[ui]\ntheme = \"tokyonight\"\nspinner = \"dots\"\n")
+	if err := os.WriteFile(filepath.Join(configRoot, "config.toml"), raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.UI.AutoContinue {
+		t.Fatal("expected missing auto_continue setting to default to true")
 	}
 }
 

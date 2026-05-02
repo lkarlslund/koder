@@ -93,13 +93,22 @@ func TestPreferencesDialogThemeAndToggleEmitDraftChanges(t *testing.T) {
 	dialog.fieldIndex = 0
 	action = dialog.Update(ui.KeyMsg{Type: ui.KeySpace})
 	if action.Kind != PreferencesActionChanged {
+		t.Fatalf("expected auto continue toggle change action, got %#v", action)
+	}
+	if action.Values.UI.AutoContinue {
+		t.Fatalf("expected auto continue toggled off, got %#v", action.Values)
+	}
+
+	dialog.fieldIndex = 1
+	action = dialog.Update(ui.KeyMsg{Type: ui.KeySpace})
+	if action.Kind != PreferencesActionChanged {
 		t.Fatalf("expected cursor blink toggle change action, got %#v", action)
 	}
 	if action.Values.UI.CursorBlink {
 		t.Fatalf("expected cursor blink toggled off, got %#v", action.Values)
 	}
 
-	dialog.fieldIndex = 2
+	dialog.fieldIndex = 3
 	action = dialog.Update(ui.KeyMsg{Type: ui.KeySpace})
 	if action.Kind != PreferencesActionChanged {
 		t.Fatalf("expected system toggle change action, got %#v", action)
@@ -143,7 +152,7 @@ func TestPreferencesDialogRenderShowsTabsAndButtons(t *testing.T) {
 	dialog.Update(ui.KeyMsg{Type: ui.KeyRight})
 	dialog.Update(ui.KeyMsg{Type: ui.KeyTab})
 	view = renderPreferencesDialog(dialog, 84, theme.Default().Palette)
-	for _, needle := range []string{"Cursor Blink", "System"} {
+	for _, needle := range []string{"Auto Continue", "Cursor Blink", "System"} {
 		if !strings.Contains(view, needle) {
 			t.Fatalf("expected behavior tab to show %q, got %q", needle, view)
 		}

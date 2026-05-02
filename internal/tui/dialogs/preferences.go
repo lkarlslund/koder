@@ -113,6 +113,7 @@ func NewPreferencesDialog(current PreferencesValues, themeNames, codeStyles []st
 		{
 			Title: "Behavior",
 			Fields: []preferencesField{
+				{Kind: preferencesFieldToggle, ID: "auto_continue", Label: "Auto Continue", Description: "Continue when the model stops after saying it will use a tool"},
 				{Kind: preferencesFieldToggle, ID: "cursor_blink", Label: "Cursor Blink", Description: "Blink the composer cursor while the input is focused"},
 				{Kind: preferencesFieldToggle, ID: "show_reasoning", Label: "Reasoning", Description: "Render model reasoning blocks in the transcript"},
 				{Kind: preferencesFieldToggle, ID: "show_system", Label: "System", Description: "Render system prompts, internal notices, and skill output in the transcript"},
@@ -503,6 +504,8 @@ func (d PreferencesDialog) currentFields() []preferencesField {
 
 func (d PreferencesDialog) toggleValue(id string) bool {
 	switch id {
+	case "auto_continue":
+		return d.draft.UI.AutoContinue
 	case "cursor_blink":
 		return d.draft.UI.CursorBlink
 	case "half_blocks":
@@ -524,6 +527,8 @@ func (d PreferencesDialog) toggleValue(id string) bool {
 
 func (d *PreferencesDialog) setToggle(id string, value bool) {
 	switch id {
+	case "auto_continue":
+		d.draft.UI.AutoContinue = value
 	case "cursor_blink":
 		d.draft.UI.CursorBlink = value
 	case "half_blocks":

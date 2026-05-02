@@ -26,6 +26,7 @@ type UI struct {
 	ShowReasoning   bool   `toml:"show_reasoning"`
 	ShowSystem      bool   `toml:"show_system"`
 	Mouse           bool   `toml:"mouse"`
+	AutoContinue    bool   `toml:"auto_continue"`
 }
 
 type Store struct {
@@ -139,6 +140,9 @@ func Load() (Config, error) {
 	}
 	if !strings.Contains(string(data), "cursor_blink") {
 		cfg.UI.CursorBlink = true
+	}
+	if !strings.Contains(string(data), "auto_continue") {
+		cfg.UI.AutoContinue = true
 	}
 	cfg.configDir = configDir
 	cfg.stateDir = stateDir()
@@ -281,6 +285,7 @@ func Default() Config {
 			ShowReasoning:   false,
 			ShowSystem:      false,
 			Mouse:           true,
+			AutoContinue:    true,
 		},
 	}
 }

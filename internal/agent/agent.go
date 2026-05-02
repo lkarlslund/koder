@@ -554,6 +554,7 @@ func (e *Engine) applyQueuedSteer(ctx context.Context, session domain.Session, c
 
 func (e *Engine) continueModelTurn(ctx context.Context, session domain.Session, chat domain.Chat, client *provider.Client, out chan<- domain.Event, transient []provider.InstructionBlock) error {
 	tracker := toolLoopTracker{}
+	autoContinuedBadStop := false
 	for steps := 0; steps < e.maxToolLoopSteps(); steps++ {
 		e.recordLifecycle(session.ID, "model_turn_started", "", map[string]string{"step": strconv.Itoa(steps + 1)})
 		if applied, err := e.applyQueuedSteer(ctx, session, &chat, out); err != nil {
@@ -664,6 +665,13 @@ func (e *Engine) continueModelTurn(ctx context.Context, session domain.Session, 
 			}, out)
 			return nil
 		}
+		if steps > 0 && e.cfg.UI.AutoContinue && !autoContinuedBadStop && len(resp.ToolCalls) == 0 && shouldAutoContinueBadStop(text) {
+			autoContinuedBadStop = true
+			e.recordLifecycle(session.ID, "auto_continue_bad_stop", strings.TrimSpace(text), map[string]string{"step": strconv.Itoa(steps + 1)})
+			transient = transientTurnMessages("", "Continue by issuing the tool call now. Do not describe intent. If no tool call is needed, provide the final user-facing answer instead.")
+			continue
+		}
+		autoContinuedBadStop = false
 
 		assistantMsg, err := e.store.AddChatMessage(ctx, chat.ID, domain.MessageRoleAssistant, strings.TrimSpace(text))
 		if err != nil {
@@ -724,6 +732,30 @@ func (e *Engine) maxToolLoopSteps() int {
 		return e.cfg.MaxToolLoopSteps
 	}
 	return config.Default().MaxToolLoopSteps
+}
+
+func shouldAutoContinueBadStop(text string) bool {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" || !strings.HasSuffix(trimmed, ":") {
+		return false
+	}
+	lower := strings.ToLower(trimmed)
+	for _, marker := range []string{
+		"let me ",
+		"i need to ",
+		"i'll ",
+		"i will ",
+		"i am going to ",
+		"i'm going to ",
+		"i’m going to ",
+		"next i ",
+		"now i ",
+	} {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func (e *Engine) maybeUpdateSessionTitle(ctx context.Context, session domain.Session, client *provider.Client) (string, error) {
