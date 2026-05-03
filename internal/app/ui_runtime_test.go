@@ -239,6 +239,27 @@ func TestViewSurfaceModalOpenCloseDirtyRectsCoverDiff(t *testing.T) {
 	assertDirtyRectsCoverSurfaceDiff(t, withModal, afterClose)
 }
 
+func TestViewSurfacePermissionsPickerCloseDirtyRectsCoverDiff(t *testing.T) {
+	m := newRuntimeTestModel(t)
+	m.resize()
+	m.refreshViewport()
+
+	before := m.viewSurface()
+	m.openPermissionsPicker()
+	withPicker := m.viewSurface()
+	if !strings.Contains(strings.Join(withPicker.Lines(), "\n"), "Permissions") {
+		t.Fatalf("expected permissions picker in frame, got %q", strings.Join(withPicker.Lines(), "\n"))
+	}
+	assertDirtyRectsCoverSurfaceDiff(t, before, withPicker)
+
+	m.closePicker()
+	afterClose := m.viewSurface()
+	if strings.Contains(strings.Join(afterClose.Lines(), "\n"), "Permissions") {
+		t.Fatalf("expected permissions picker to be removed from frame, got %q", strings.Join(afterClose.Lines(), "\n"))
+	}
+	assertDirtyRectsCoverSurfaceDiff(t, withPicker, afterClose)
+}
+
 func TestViewSurfaceThemeChangeDirtyRectsCoverDiff(t *testing.T) {
 	m := newRuntimeTestModel(t)
 	m.status = "Ready"

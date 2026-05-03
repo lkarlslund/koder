@@ -5051,6 +5051,46 @@ func TestMouseClickOnHelpModalCloseIndicatorClosesModal(t *testing.T) {
 	}
 }
 
+func TestMouseClickOnPermissionsPickerCloseIndicatorClosesPicker(t *testing.T) {
+	m := Model{
+		cfg:          testConfig(t),
+		mouseEnabled: true,
+		width:        100,
+		height:       40,
+		palette:      theme.Resolve("tokyonight").Palette,
+		composer:     textarea.New(),
+	}
+	m.openPermissionsPicker()
+
+	view := m.View()
+	lines := strings.Split(ansi.Strip(view), "\n")
+	closeX, closeY := -1, -1
+	for y, line := range lines {
+		if idx := strings.Index(line, "[X]"); idx >= 0 {
+			closeX, closeY = ansi.StringWidth(line[:idx])+1, y
+			break
+		}
+	}
+	if closeX < 0 || closeY < 0 {
+		t.Fatalf("failed to find permissions picker close indicator in %q", view)
+	}
+
+	updated, cmd := m.Update(ui.MouseMsg{
+		Action: ui.MouseActionPress,
+		Button: ui.MouseButtonLeft,
+		X:      closeX,
+		Y:      closeY,
+	})
+	next := asModelPtr(t, updated)
+	_ = cmd
+	if next.hasPicker() {
+		t.Fatal("expected permissions picker to close from mouse click")
+	}
+	if next.status != "Permission mode selection cancelled" {
+		t.Fatalf("expected permission picker cancel status, got %q", next.status)
+	}
+}
+
 func TestMouseClickOnModelDialogCloseIndicatorCancelsDialog(t *testing.T) {
 	m := Model{
 		cfg:          testConfig(t),

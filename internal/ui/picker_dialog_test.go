@@ -23,6 +23,14 @@ func TestPickerDialogActivateCancelButton(t *testing.T) {
 	}
 }
 
+func TestPickerDialogActivateWindowCloseCancels(t *testing.T) {
+	dialog := NewPickerDialog("Permissions", "", []PickerItem{{Title: "Full Access", Value: "full-access"}})
+	action := dialog.ActivateControl("window-close")
+	if action.Kind != PickerDialogActionCancel {
+		t.Fatalf("expected window close to cancel, got %#v", action)
+	}
+}
+
 func TestPickerDialogRenderMatchesInnerElement(t *testing.T) {
 	palette := theme.Default().Palette
 	dialog := NewPickerDialog("Themes", "Choose one", []PickerItem{

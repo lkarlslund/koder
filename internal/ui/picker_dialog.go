@@ -148,6 +148,8 @@ func (d *PickerDialog) ActivateControl(controlID string) PickerDialogAction {
 	d.buttons.Buttons[0].OnClick = func() { action = d.selectCurrent() }
 	d.buttons.Buttons[1].OnClick = func() { action = PickerDialogAction{Kind: PickerDialogActionCancel} }
 	switch controlID {
+	case "window-close":
+		return PickerDialogAction{Kind: PickerDialogActionCancel}
 	case "ok", "cancel":
 		d.Focus = pickerDialogFocusButtons
 		for idx, button := range d.buttons.Buttons {
