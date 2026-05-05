@@ -2583,8 +2583,10 @@ func (e *Engine) compactSession(ctx context.Context, session domain.Session, cha
 		_ = updateCompactionState("", "failed", "Compaction failed")
 		return err
 	}
-	summary := resp.Text
-	summary = strings.TrimSpace(summary)
+	summary := strings.TrimSpace(resp.Text)
+	if summary == "" {
+		summary = strings.TrimSpace(resp.Reasoning)
+	}
 	if summary == "" {
 		_ = updateCompactionState("", "failed", "Compaction failed")
 		return fmt.Errorf("empty compaction summary")

@@ -2527,6 +2527,85 @@ func TestCompactSessionDoesNotPersistUsageOrEmitUsageEvent(t *testing.T) {
 	}
 }
 
+func TestCompactSessionAcceptsReasoningOnlySummary(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":null,"reasoning":"reasoning-only compact summary"}}]}`))
+	}))
+	defer server.Close()
+
+	cfg := testConfig(t)
+	cfg.Providers = map[string]config.Provider{
+		"test": {
+			BaseURL:       server.URL + "/v1",
+			Timeout:       time.Second,
+			ContextWindow: 32768,
+		},
+	}
+	cfg.DefaultProvider = "test"
+	cfg.DefaultModel = "test-model"
+
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	engine := New(cfg, st, tools.NewRegistry(t.TempDir()), nil, t.TempDir())
+	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chat := defaultChatForSession(t, st, session.ID)
+	userMsg, err := st.AddMessage(context.Background(), session.ID, domain.MessageRoleUser, "hello")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.AddPart(context.Background(), userMsg.ID, domain.TextPayload{Text: "hello"}); err != nil {
+		t.Fatal(err)
+	}
+
+	client, err := provider.New("test", cfg.Providers["test"], nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := engine.compactSession(context.Background(), session, chat.ID, client, "manual", nil); err != nil {
+		t.Fatal(err)
+	}
+
+	messages, parts, err := st.PartsForChat(context.Background(), chat.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, msg := range messages {
+		for _, part := range parts[msg.ID] {
+			if part.Kind != domain.PartKindCompaction {
+				continue
+			}
+			payload, ok := part.Payload.(domain.CompactionPayload)
+			if !ok {
+				t.Fatalf("expected typed compaction payload, got %#v", part.Payload)
+			}
+			if payload.Status != "completed" {
+				t.Fatalf("expected completed compaction payload, got %#v", payload)
+			}
+			if got := strings.TrimSpace(payload.Summary); got != "reasoning-only compact summary" {
+				t.Fatalf("summary = %q", got)
+			}
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("expected persisted compaction summary")
+	}
+}
+
 func TestHandleModelToolCallBypassesApprovalForSkill(t *testing.T) {
 	cfg := testConfig(t)
 	st, err := store.Open(t.TempDir())
