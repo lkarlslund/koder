@@ -2364,7 +2364,7 @@ func (e *Engine) autoCompactPreparedMessagesIfNeeded(ctx context.Context, sessio
 	}
 	threshold := providerCfg.AutoCompactAt
 	if threshold <= 0 {
-		threshold = 85
+		threshold = 80
 	}
 	estimated, ok := e.estimateRequestUsagePercent(session, domain.Chat{ID: chatID}, messages)
 	if !ok || estimated < threshold {
@@ -2394,7 +2394,7 @@ func (e *Engine) autoCompactChatIfNeeded(ctx context.Context, session domain.Ses
 	}
 	threshold := providerCfg.AutoCompactAt
 	if threshold <= 0 {
-		threshold = 85
+		threshold = 80
 	}
 	if metrics.UsagePercent < threshold {
 		return false, nil

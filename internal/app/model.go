@@ -7639,7 +7639,7 @@ func (m *Model) saveProviderDraft(draft provider.ConnectDraft) error {
 		if next.ContextWindow == 0 {
 			next.ContextWindow = 32768
 		}
-		next.AutoCompactAt = 85
+		next.AutoCompactAt = 80
 		next.Timeout = 2 * time.Minute
 		next.Stream = true
 		next.Disabled = false

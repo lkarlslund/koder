@@ -469,7 +469,7 @@ func providerDefaults() Provider {
 	return Provider{
 		Headers:       map[string]string{},
 		ContextWindow: 32768,
-		AutoCompactAt: 85,
+		AutoCompactAt: 80,
 		Stream:        true,
 		Timeout:       10 * time.Minute,
 		Disabled:      false,
