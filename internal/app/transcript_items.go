@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lkarlslund/koder/internal/appstate"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/theme"
 	"github.com/lkarlslund/koder/internal/ui"
@@ -60,63 +61,65 @@ func (i *placeholderTranscriptItem) Refresh(_ *Model) {
 
 type userMessageTranscriptItem struct {
 	transcriptItemBase
-	message domain.Message
-	parts   []domain.Part
+	record *appstate.MessageRecord
 }
 
-func newUserMessageTranscriptItem(key string, gap int, msg domain.Message, parts []domain.Part) *userMessageTranscriptItem {
+func newUserMessageTranscriptItem(key string, gap int, record *appstate.MessageRecord) *userMessageTranscriptItem {
 	return &userMessageTranscriptItem{
 		transcriptItemBase: newTranscriptItemBase(key, gap),
-		message:            msg,
-		parts:              cloneParts(parts),
+		record:             record,
 	}
 }
 
-func (i *userMessageTranscriptItem) Update(msg domain.Message, parts []domain.Part) {
-	i.message = msg
-	i.parts = cloneParts(parts)
-}
+func (i *userMessageTranscriptItem) Bind(record *appstate.MessageRecord) { i.record = record }
 
 func (i *userMessageTranscriptItem) Refresh(m *Model) {
-	renderer := newTranscriptRenderer(m)
-	body := renderer.renderUserMessageParts(i.parts)
-	if strings.TrimSpace(body) == "" {
-		body = strings.TrimSpace(i.message.Summary)
+	if i.record == nil {
+		i.setElement(ui.AsNode(ui.Paragraph{Text: ""}))
+		return
 	}
-	i.setElement(renderer.renderUserMessageElement(body, timestamp(i.message.CreatedAt, m.cfg.UI.ShowTimestamps)))
+	msg := i.record.MessageValue()
+	parts := i.record.PartSnapshots()
+	renderer := newTranscriptRenderer(m)
+	body := renderer.renderUserMessageParts(parts)
+	if strings.TrimSpace(body) == "" {
+		body = strings.TrimSpace(msg.Summary)
+	}
+	i.setElement(renderer.renderUserMessageElement(body, timestamp(msg.CreatedAt, m.cfg.UI.ShowTimestamps)))
 }
 
 type assistantMessageTranscriptItem struct {
 	transcriptItemBase
-	message       domain.Message
-	parts         []domain.Part
+	record        *appstate.MessageRecord
 	showReasoning bool
 	showSystem    bool
 }
 
-func newAssistantMessageTranscriptItem(key string, gap int, msg domain.Message, parts []domain.Part, showReasoning, showSystem bool) *assistantMessageTranscriptItem {
+func newAssistantMessageTranscriptItem(key string, gap int, record *appstate.MessageRecord, showReasoning, showSystem bool) *assistantMessageTranscriptItem {
 	return &assistantMessageTranscriptItem{
 		transcriptItemBase: newTranscriptItemBase(key, gap),
-		message:            msg,
-		parts:              cloneParts(parts),
+		record:             record,
 		showReasoning:      showReasoning,
 		showSystem:         showSystem,
 	}
 }
 
-func (i *assistantMessageTranscriptItem) Update(msg domain.Message, parts []domain.Part) {
-	i.message = msg
-	i.parts = cloneParts(parts)
-}
+func (i *assistantMessageTranscriptItem) Bind(record *appstate.MessageRecord) { i.record = record }
 
 func (i *assistantMessageTranscriptItem) SetReasoningVisible(v bool) { i.showReasoning = v }
 func (i *assistantMessageTranscriptItem) SetSystemVisible(v bool)    { i.showSystem = v }
 
 func (i *assistantMessageTranscriptItem) Refresh(m *Model) {
+	if i.record == nil {
+		i.setElement(ui.AsNode(ui.Paragraph{Text: ""}))
+		return
+	}
+	msg := i.record.MessageValue()
+	parts := i.record.PartSnapshots()
 	renderer := newTranscriptRenderer(m)
 	renderer.showReasoning = i.showReasoning
 	renderer.showSystem = i.showSystem
-	i.setElement(renderer.renderTranscriptMessageElement(i.message, i.parts))
+	i.setElement(renderer.renderTranscriptMessageElement(msg, parts))
 }
 
 type pendingAssistantTranscriptItem struct {
@@ -384,13 +387,4 @@ func (i *editToolRunTranscriptItem) Refresh(m *Model) {
 }
 func (i *genericToolRunTranscriptItem) Refresh(m *Model) {
 	i.setElement(ui.AsNode(genericToolRunCardElement{Run: i.run, Palette: m.palette, Width: m.viewport.Width, ExpandedOutput: i.expandedOutput, ExpandedCommand: i.expandedCommand}))
-}
-
-func cloneParts(parts []domain.Part) []domain.Part {
-	if len(parts) == 0 {
-		return nil
-	}
-	out := make([]domain.Part, len(parts))
-	copy(out, parts)
-	return out
 }

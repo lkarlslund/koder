@@ -16,6 +16,7 @@ import (
 	"unicode"
 
 	"github.com/lkarlslund/koder/internal/agent"
+	"github.com/lkarlslund/koder/internal/appstate"
 	"github.com/lkarlslund/koder/internal/attachment"
 	kclipboard "github.com/lkarlslund/koder/internal/clipboard"
 	"github.com/lkarlslund/koder/internal/config"
@@ -540,6 +541,8 @@ type Model struct {
 	chats                       []domain.Chat
 	currentSession              domain.Session
 	currentChat                 domain.Chat
+	chatState                   *appstate.ChatState
+	chatStateChatID             int64
 	messages                    []domain.Message
 	parts                       map[int64][]domain.Part
 	historyTotalUsage           domain.Usage
@@ -1028,9 +1031,7 @@ func (m Model) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 		m.currentSession = msg.session
 		m.currentChat = msg.chat
 		m.clampQueueSelection()
-		m.messages = msg.messages
-		m.parts = msg.parts
-		m.approvals = msg.approvals
+		m.loadChatState(m.currentChat, msg.messages, msg.parts, msg.approvals)
 		m.milestonePlan = msg.plan
 		m.todos = msg.todos
 		m.workspace = msg.workspace
@@ -2866,9 +2867,9 @@ func (m *Model) rebuildTranscriptState() []ui.TranscriptItem {
 		case *pendingAssistantTranscriptItem:
 			pendingIndex = idx
 		case *userMessageTranscriptItem:
-			messageIdx[typed.message.ID] = idx
+			messageIdx[typed.record.MessageValue().ID] = idx
 		case *assistantMessageTranscriptItem:
-			messageIdx[typed.message.ID] = idx
+			messageIdx[typed.record.MessageValue().ID] = idx
 		case toolRunTranscriptItem:
 			if id := strings.TrimSpace(typed.RunID()); id != "" {
 				toolIdx[id] = idx
@@ -2911,13 +2912,13 @@ func (m *Model) transcriptControllerFromBlock(prevByKey map[string]transcriptIte
 		existing.SetGapBefore(gap)
 		switch typed := existing.(type) {
 		case *userMessageTranscriptItem:
-			if block.Kind == transcriptBlockMessage {
-				typed.Update(block.Message, block.Parts)
+			if block.Kind == transcriptBlockMessage && block.Record != nil {
+				typed.Bind(block.Record)
 				return typed
 			}
 		case *assistantMessageTranscriptItem:
-			if block.Kind == transcriptBlockMessage && !block.Pending {
-				typed.Update(block.Message, block.Parts)
+			if block.Kind == transcriptBlockMessage && !block.Pending && block.Record != nil {
+				typed.Bind(block.Record)
 				typed.SetReasoningVisible(m.showReasoning)
 				typed.SetSystemVisible(m.showSystem)
 				return typed
@@ -2945,9 +2946,9 @@ func (m *Model) transcriptControllerFromBlock(prevByKey map[string]transcriptIte
 		item.Reset(block.Message.CreatedAt, firstPartBody(block.Parts, domain.PartKindText), firstPartBody(block.Parts, domain.PartKindReasoning), m.pendingAssistantIndicatorLine())
 		return item
 	case block.Message.Role == domain.MessageRoleUser:
-		return newUserMessageTranscriptItem(key, gap, block.Message, block.Parts)
+		return newUserMessageTranscriptItem(key, gap, block.Record)
 	default:
-		return newAssistantMessageTranscriptItem(key, gap, block.Message, block.Parts, m.showReasoning, m.showSystem)
+		return newAssistantMessageTranscriptItem(key, gap, block.Record, m.showReasoning, m.showSystem)
 	}
 }
 
@@ -3067,9 +3068,9 @@ func (m *Model) reindexTranscriptControllers() {
 	for idx, item := range m.transcriptItems {
 		switch typed := item.(type) {
 		case *userMessageTranscriptItem:
-			m.messageItemIndexByID[typed.message.ID] = idx
+			m.messageItemIndexByID[typed.record.MessageValue().ID] = idx
 		case *assistantMessageTranscriptItem:
-			m.messageItemIndexByID[typed.message.ID] = idx
+			m.messageItemIndexByID[typed.record.MessageValue().ID] = idx
 		case *pendingAssistantTranscriptItem:
 			m.pendingTranscriptIndex = idx
 		case toolRunTranscriptItem:
@@ -3105,9 +3106,9 @@ func (m *Model) reindexTranscriptControllers() {
 func (m *Model) transcriptBlockForController(item transcriptItemController) transcriptBlock {
 	switch typed := item.(type) {
 	case *userMessageTranscriptItem:
-		return transcriptBlock{Kind: transcriptBlockMessage, Message: typed.message, Parts: typed.parts}
+		return transcriptBlock{Kind: transcriptBlockMessage, Message: typed.record.MessageValue(), Parts: typed.record.PartSnapshots(), Record: typed.record}
 	case *assistantMessageTranscriptItem:
-		return transcriptBlock{Kind: transcriptBlockMessage, Message: typed.message, Parts: typed.parts}
+		return transcriptBlock{Kind: transcriptBlockMessage, Message: typed.record.MessageValue(), Parts: typed.record.PartSnapshots(), Record: typed.record}
 	case *pendingAssistantTranscriptItem:
 		return transcriptBlock{
 			Kind:    transcriptBlockMessage,
@@ -4324,6 +4325,45 @@ func mapsCloneToolStates(src map[domain.ToolKind]bool) map[domain.ToolKind]bool 
 	return dst
 }
 
+func (m *Model) loadChatState(chat domain.Chat, messages []domain.Message, parts map[int64][]domain.Part, approvals []store.Approval) {
+	if chat.ID == 0 && len(messages) == 0 && len(parts) == 0 && len(approvals) == 0 {
+		m.chatState = nil
+		m.chatStateChatID = 0
+		m.messages = nil
+		m.parts = nil
+		m.approvals = nil
+		return
+	}
+	if m.chatState != nil && m.chatStateChatID == chat.ID {
+		m.chatState.MergeLoaded(messages, parts, approvals)
+	} else {
+		m.chatState = appstate.NewChatState(messages, parts, approvals)
+	}
+	m.chatStateChatID = chat.ID
+	m.syncChatMirrorsFromState()
+}
+
+func (m *Model) ensureChatState() *appstate.ChatState {
+	if m.chatState == nil {
+		m.chatState = appstate.NewChatState(m.messages, m.parts, m.approvals)
+		m.chatStateChatID = m.currentChat.ID
+	}
+	return m.chatState
+}
+
+func (m *Model) syncChatMirrorsFromState() {
+	if m.chatState == nil {
+		m.chatStateChatID = 0
+		m.messages = nil
+		m.parts = nil
+		m.approvals = nil
+		return
+	}
+	m.messages = m.chatState.SnapshotMessages()
+	m.parts = m.chatState.SnapshotParts()
+	m.approvals = m.chatState.Approvals()
+}
+
 func min(a, b int) int {
 	if a < b {
 		return a
@@ -4351,9 +4391,7 @@ func (m Model) UpdateLoad(msg loadMsg) Model {
 		m.currentChat = msg.chat
 		m.clampQueueSelection()
 	}
-	m.messages = msg.messages
-	m.parts = msg.parts
-	m.approvals = msg.approvals
+	m.loadChatState(m.currentChat, msg.messages, msg.parts, msg.approvals)
 	m.milestonePlan = msg.plan
 	m.todos = msg.todos
 	m.workspace = msg.workspace
@@ -5024,18 +5062,15 @@ func (m *Model) quit() (ui.Model, ui.Cmd) {
 
 func (m *Model) appendLocalUserPrompt(prompt string, drafts []attachment.Draft, refs []reference.Draft) {
 	now := time.Now().UTC()
-	if m.parts == nil {
-		m.parts = make(map[int64][]domain.Part)
-	}
 	messageID := m.nextPendingID()
-	m.messages = append(m.messages, domain.Message{
+	message := domain.Message{
 		ID:        messageID,
 		SessionID: m.currentSession.ID,
 		ChatID:    m.currentChat.ID,
 		Role:      domain.MessageRoleUser,
 		Summary:   prompt,
 		CreatedAt: now,
-	})
+	}
 	var parts []domain.Part
 	if strings.TrimSpace(prompt) != "" {
 		parts = append(parts, domain.Part{
@@ -5071,18 +5106,22 @@ func (m *Model) appendLocalUserPrompt(prompt string, drafts []attachment.Draft, 
 			CreatedAt: now,
 		})
 	}
-	m.parts[messageID] = parts
+	record := m.ensureChatState().AppendMessage(message, parts)
+	m.syncChatMirrorsFromState()
 	if m.debug != nil {
 		m.debug.RecordLifecycle(m.currentSession.ID, "prompt_submitted", prompt, map[string]string{"optimistic": "true"})
 	}
-	if !m.appendUserPromptTranscriptItem(m.messages[len(m.messages)-1], parts) {
+	if !m.appendUserPromptTranscriptItem(record) {
 		m.transcriptDirty = true
 	}
 	m.addLiveContextEstimate(prompt)
 	m.refreshViewport()
 }
 
-func (m *Model) appendUserPromptTranscriptItem(msg domain.Message, parts []domain.Part) bool {
+func (m *Model) appendUserPromptTranscriptItem(record *appstate.MessageRecord) bool {
+	if record == nil {
+		return false
+	}
 	if m.transcriptDirty || len(m.transcriptItems) == 0 {
 		return false
 	}
@@ -5093,10 +5132,10 @@ func (m *Model) appendUserPromptTranscriptItem(msg domain.Message, parts []domai
 	if _, ok := m.transcriptItems[len(m.transcriptItems)-1].(*placeholderTranscriptItem); ok {
 		return false
 	}
-	block := transcriptBlock{Kind: transcriptBlockMessage, Message: msg, Parts: parts}
+	block := transcriptBlock{Kind: transcriptBlockMessage, Message: record.MessageValue(), Parts: record.PartSnapshots(), Record: record}
 	prev := m.transcriptBlockForController(m.transcriptItems[len(m.transcriptItems)-1])
 	gap := renderedSeparatorHeight(m.transcriptSeparator(prev, block))
-	item := newUserMessageTranscriptItem(m.transcriptBlockIdentityKey(block), gap, msg, parts)
+	item := newUserMessageTranscriptItem(m.transcriptBlockIdentityKey(block), gap, record)
 	item.Refresh(m)
 	index := len(m.transcriptItems)
 	m.transcriptItems = append(m.transcriptItems, item)
@@ -5104,7 +5143,7 @@ func (m *Model) appendUserPromptTranscriptItem(msg domain.Message, parts []domai
 	if m.messageItemIndexByID == nil {
 		m.messageItemIndexByID = map[int64]int{}
 	}
-	m.messageItemIndexByID[msg.ID] = index
+	m.messageItemIndexByID[record.MessageValue().ID] = index
 	return true
 }
 
@@ -5113,20 +5152,17 @@ func (m *Model) appendLocalAssistantError(err error) {
 		return
 	}
 	now := time.Now().UTC()
-	if m.parts == nil {
-		m.parts = make(map[int64][]domain.Part)
-	}
 	messageID := m.nextPendingID()
 	body := "Error: " + strings.TrimSpace(err.Error())
-	m.messages = append(m.messages, domain.Message{
+	message := domain.Message{
 		ID:        messageID,
 		SessionID: m.currentSession.ID,
 		ChatID:    m.currentChat.ID,
 		Role:      domain.MessageRoleAssistant,
 		Summary:   body,
 		CreatedAt: now,
-	})
-	m.parts[messageID] = []domain.Part{{
+	}
+	parts := []domain.Part{{
 		ID:        m.nextPendingID(),
 		MessageID: messageID,
 		Kind:      domain.PartKindText,
@@ -5134,6 +5170,8 @@ func (m *Model) appendLocalAssistantError(err error) {
 		Body:      body,
 		CreatedAt: now,
 	}}
+	m.ensureChatState().AppendMessage(message, parts)
+	m.syncChatMirrorsFromState()
 	if m.debug != nil {
 		m.debug.RecordLifecycle(m.currentSession.ID, "ui_error_appended", err.Error(), nil)
 	}
@@ -5148,19 +5186,16 @@ func (m *Model) appendLocalTranscriptNotice(body, kind, severity string) {
 		return
 	}
 	now := time.Now().UTC()
-	if m.parts == nil {
-		m.parts = make(map[int64][]domain.Part)
-	}
 	messageID := m.nextPendingID()
-	m.messages = append(m.messages, domain.Message{
+	message := domain.Message{
 		ID:        messageID,
 		SessionID: m.currentSession.ID,
 		ChatID:    m.currentChat.ID,
 		Role:      domain.MessageRoleAssistant,
 		Summary:   body,
 		CreatedAt: now,
-	})
-	m.parts[messageID] = []domain.Part{{
+	}
+	parts := []domain.Part{{
 		ID:        m.nextPendingID(),
 		MessageID: messageID,
 		Kind:      domain.PartKindEventNotice,
@@ -5168,6 +5203,8 @@ func (m *Model) appendLocalTranscriptNotice(body, kind, severity string) {
 		Body:      body,
 		CreatedAt: now,
 	}}
+	m.ensureChatState().AppendMessage(message, parts)
+	m.syncChatMirrorsFromState()
 	if m.debug != nil {
 		m.debug.RecordLifecycle(m.currentSession.ID, "ui_notice_appended", body, map[string]string{"kind": kind, "severity": severity})
 	}
@@ -5839,15 +5876,17 @@ func (m Model) debugTranscriptItems() []debugsrv.TranscriptItemRef {
 		if idx < len(m.transcriptItems) {
 			switch typed := m.transcriptItems[idx].(type) {
 			case *userMessageTranscriptItem:
+				msg := typed.record.MessageValue()
 				ref.Kind = "message"
-				ref.MessageID = typed.message.ID
-				ref.Role = string(typed.message.Role)
-				ref.Summary = strings.TrimSpace(typed.message.Summary)
+				ref.MessageID = msg.ID
+				ref.Role = string(msg.Role)
+				ref.Summary = strings.TrimSpace(msg.Summary)
 			case *assistantMessageTranscriptItem:
+				msg := typed.record.MessageValue()
 				ref.Kind = "message"
-				ref.MessageID = typed.message.ID
-				ref.Role = string(typed.message.Role)
-				ref.Summary = strings.TrimSpace(typed.message.Summary)
+				ref.MessageID = msg.ID
+				ref.Role = string(msg.Role)
+				ref.Summary = strings.TrimSpace(msg.Summary)
 			case *pendingAssistantTranscriptItem:
 				ref.Kind = "message"
 				ref.Role = string(domain.MessageRoleAssistant)

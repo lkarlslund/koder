@@ -3477,6 +3477,73 @@ func TestAppendingPromptPreservesRetainedTranscriptPrefix(t *testing.T) {
 	}
 }
 
+func TestUpdateLoadPreservesMessageRecordIdentityForSameChat(t *testing.T) {
+	m := Model{composer: textarea.New(), palette: theme.Default().Palette, width: 80, height: 24}
+	first := m.UpdateLoad(loadMsg{
+		current:  domain.Session{ID: 4},
+		chat:     domain.Chat{ID: 7, SessionID: 4},
+		messages: []domain.Message{{ID: 10, ChatID: 7, Role: domain.MessageRoleUser, Summary: "first"}},
+		parts: map[int64][]domain.Part{
+			10: {{ID: 11, MessageID: 10, Kind: domain.PartKindText, Payload: domain.TextPayload{Text: "first"}}},
+		},
+	})
+	if first.chatState == nil || len(first.chatState.Messages()) != 1 {
+		t.Fatalf("expected loaded chat state")
+	}
+	record := first.chatState.Messages()[0]
+	partRecord := record.Parts[0]
+
+	second := first.UpdateLoad(loadMsg{
+		current:  domain.Session{ID: 4},
+		chat:     domain.Chat{ID: 7, SessionID: 4},
+		messages: []domain.Message{{ID: 10, ChatID: 7, Role: domain.MessageRoleUser, Summary: "updated"}},
+		parts: map[int64][]domain.Part{
+			10: {{ID: 11, MessageID: 10, Kind: domain.PartKindText, Payload: domain.TextPayload{Text: "updated"}}},
+		},
+	})
+	if got := second.chatState.Messages()[0]; got != record {
+		t.Fatal("expected message record identity to be preserved")
+	}
+	if got := second.chatState.Messages()[0].Parts[0]; got != partRecord {
+		t.Fatal("expected part record identity to be preserved")
+	}
+	if got := second.chatState.Messages()[0].Message.Summary; got != "updated" {
+		t.Fatalf("summary = %q", got)
+	}
+}
+
+func TestAppendLocalUserPromptStoresSharedRecord(t *testing.T) {
+	m := Model{
+		cfg:              testConfig(t),
+		palette:          theme.Default().Palette,
+		viewport:         newTranscriptViewport(80, 18),
+		renderCache:      &modelRenderCache{},
+		composer:         textarea.New(),
+		width:            80,
+		height:           24,
+		expandedToolRuns: make(map[string]bool),
+		transcriptDirty:  true,
+	}
+
+	m.appendLocalUserPrompt("first", nil, nil)
+	m.syncRetainedTranscript()
+
+	if m.chatState == nil || len(m.chatState.Messages()) != 1 {
+		t.Fatalf("expected shared chat state to contain prompt")
+	}
+	record := m.chatState.Messages()[0]
+	if got := record.Message.Summary; got != "first" {
+		t.Fatalf("summary = %q", got)
+	}
+	item, ok := m.transcriptItems[0].(*userMessageTranscriptItem)
+	if !ok {
+		t.Fatalf("expected user transcript item, got %T", m.transcriptItems[0])
+	}
+	if item.record != record {
+		t.Fatal("expected transcript item to bind directly to shared message record")
+	}
+}
+
 func TestThemeCommandOpensFilterablePicker(t *testing.T) {
 	m := Model{
 		cfg:      config.Default(),
