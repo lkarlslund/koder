@@ -5600,10 +5600,19 @@ func (m *Model) syncCurrentChatBusy() {
 	}
 	m.busy = m.chatBusy[chatID]
 	if m.activeOpCancels != nil {
-		m.activeOpCancel = m.activeOpCancels[chatID]
-	} else {
-		m.activeOpCancel = nil
+		if cancel := m.activeOpCancels[chatID]; cancel != nil {
+			m.activeOpCancel = cancel
+			return
+		}
 	}
+	if m.busy.active && m.activeOpCancel != nil {
+		if m.activeOpCancels == nil {
+			m.activeOpCancels = map[int64]context.CancelFunc{}
+		}
+		m.activeOpCancels[chatID] = m.activeOpCancel
+		return
+	}
+	m.activeOpCancel = nil
 }
 
 func (m *Model) syncBusyState() {

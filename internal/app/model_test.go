@@ -3396,6 +3396,51 @@ func TestUpdateLoadHidesSessionPicker(t *testing.T) {
 	}
 }
 
+func TestUpdateLoadPreservesActiveInterruptForBusyChat(t *testing.T) {
+	cancelled := false
+	m := Model{
+		composer: textarea.New(),
+		palette:  theme.Default().Palette,
+		width:    80,
+		height:   24,
+		loading:  true,
+		busy: busyModel{
+			active: true,
+			scope:  busyScopeTranscript,
+		},
+		activeOpCancel: func() { cancelled = true },
+		chatBusy: map[int64]busyModel{
+			7: {active: true, scope: busyScopeTranscript},
+		},
+	}
+
+	updated := m.UpdateLoad(loadMsg{
+		current: domain.Session{ID: 4},
+		chat:    domain.Chat{ID: 7, SessionID: 4},
+	})
+	if !updated.canInterruptActiveOperation() {
+		t.Fatal("expected busy loaded chat to retain interrupt capability")
+	}
+
+	nextModel, cmd := updated.handleKey(ui.KeyMsg{Type: ui.KeyEsc})
+	next := nextModel.(*Model)
+	if cmd == nil {
+		t.Fatal("expected title sync command after esc")
+	}
+	if !cancelled {
+		t.Fatal("expected preserved active operation to be cancelled")
+	}
+	if next.status != "Interrupting…" {
+		t.Fatalf("unexpected esc status: %q", next.status)
+	}
+	if len(next.messages) != 1 {
+		t.Fatalf("expected local interrupted notice message, got %#v", next.messages)
+	}
+	if got := next.parts[next.messages[0].ID]; len(got) != 1 || got[0].Kind != domain.PartKindEventNotice || got[0].Body != "Interrupted" {
+		t.Fatalf("expected interrupted event notice part, got %#v", got)
+	}
+}
+
 func TestAppendingPromptPreservesRetainedTranscriptPrefix(t *testing.T) {
 	m := Model{
 		cfg:              testConfig(t),
