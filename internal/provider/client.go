@@ -178,6 +178,9 @@ func (r ChatRequest) MarshalJSON() ([]byte, error) {
 		"messages": r.Messages,
 		"stream":   r.Stream,
 	}
+	if r.Stream {
+		body["stream_options"] = map[string]any{"include_usage": true}
+	}
 	if len(r.Tools) > 0 {
 		body["tools"] = r.Tools
 	}

@@ -102,6 +102,20 @@ func TestMessageMarshalJSONOmitsEmptyAssistantToolCallContent(t *testing.T) {
 	}
 }
 
+func TestChatRequestMarshalJSONIncludesStreamUsageOptions(t *testing.T) {
+	data, err := json.Marshal(ChatRequest{
+		Model:  "test-model",
+		Stream: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(data)
+	if !strings.Contains(got, `"stream_options":{"include_usage":true}`) {
+		t.Fatalf("expected streamed requests to ask for usage, got %s", got)
+	}
+}
+
 func TestPropsUsesModelQueryAndParsesContextWindow(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/props" {

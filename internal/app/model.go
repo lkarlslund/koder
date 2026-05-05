@@ -3401,14 +3401,15 @@ func (m *Model) syncContextFromChat() {
 	if base <= 0 {
 		return
 	}
-	m.contextTokens = base + m.liveContextEstimatedTokens
-	m.contextTokensEstimated = !m.currentChat.ContextTokensKnown || m.liveContextEstimatedTokens > 0
+	tailEstimate, anchored := sessionctx.EstimateTailTokens(m.messages, m.parts)
+	m.contextTokens = base + tailEstimate + m.liveContextEstimatedTokens
+	m.contextTokensEstimated = !m.currentChat.ContextTokensKnown || tailEstimate > 0 || m.liveContextEstimatedTokens > 0
+	if !anchored {
+		m.contextTokensEstimated = true
+	}
 }
 
 func (m *Model) ensureContextEstimateFromState() {
-	if m.contextTokens > 0 {
-		return
-	}
 	if m.agent == nil {
 		return
 	}
@@ -3416,11 +3417,15 @@ func (m *Model) ensureContextEstimateFromState() {
 	if providerID == "" {
 		return
 	}
+	_, _, _, anchored := sessionctx.LatestUsageAnchor(m.messages, m.parts)
+	if m.contextTokens > 0 && anchored {
+		return
+	}
 	estimated, err := m.agent.EstimateContextTokensForState(m.currentSession, m.currentChat, m.messages, m.parts)
 	if err != nil || estimated <= 0 {
 		return
 	}
-	m.contextTokens = estimated
+	m.contextTokens = estimated + m.liveContextEstimatedTokens
 	m.contextTokensEstimated = true
 	if m.currentChat.LastKnownContextTokens <= 0 {
 		m.currentChat.LastKnownContextTokens = estimated

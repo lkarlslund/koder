@@ -2,9 +2,11 @@ package sessionctx
 
 import (
 	"encoding/json"
+	"strings"
 
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/tokenestimate"
 )
 
 type Metrics struct {
@@ -39,6 +41,13 @@ func FromMessages(cfg config.Config, session domain.Session, messages []domain.M
 }
 
 func LatestUsage(messages []domain.Message, parts map[int64][]domain.Part) (domain.Usage, bool) {
+	usage, _, _, ok := LatestUsageAnchor(messages, parts)
+	return usage, ok
+}
+
+// LatestUsageAnchor returns the latest usage payload together with its message
+// and part position in the chat history.
+func LatestUsageAnchor(messages []domain.Message, parts map[int64][]domain.Part) (domain.Usage, int64, int, bool) {
 	for msgIdx := len(messages) - 1; msgIdx >= 0; msgIdx-- {
 		msg := messages[msgIdx]
 		messageParts := parts[msg.ID]
@@ -50,11 +59,37 @@ func LatestUsage(messages []domain.Message, parts map[int64][]domain.Part) (doma
 			}
 			usage = usage.Normalized()
 			if usage.HasAnyTokens() {
-				return usage, true
+				return usage, msg.ID, partIdx, true
 			}
 		}
 	}
-	return domain.Usage{}, false
+	return domain.Usage{}, 0, 0, false
+}
+
+// EstimateTailTokens estimates the token cost of persisted chat content added
+// after the latest usage-bearing part.
+func EstimateTailTokens(messages []domain.Message, parts map[int64][]domain.Part) (int, bool) {
+	_, anchorMessageID, anchorPartIdx, ok := LatestUsageAnchor(messages, parts)
+	if !ok {
+		return 0, false
+	}
+	total := 0
+	afterAnchorMessage := false
+	for _, msg := range messages {
+		messageParts := parts[msg.ID]
+		switch {
+		case msg.ID == anchorMessageID:
+			if anchorPartIdx+1 >= len(messageParts) {
+				continue
+			}
+			total += estimateMessageTokens(msg, messageParts[anchorPartIdx+1:])
+			afterAnchorMessage = true
+		case afterAnchorMessage || msg.ID != anchorMessageID:
+			total += estimateMessageTokens(msg, messageParts)
+			afterAnchorMessage = true
+		}
+	}
+	return total, true
 }
 
 func TotalUsage(messages []domain.Message, parts map[int64][]domain.Part) (domain.Usage, bool) {
@@ -92,4 +127,25 @@ func usageFromPart(part domain.Part) (domain.Usage, bool) {
 		return domain.Usage{}, false
 	}
 	return usage, true
+}
+
+func estimateMessageTokens(msg domain.Message, parts []domain.Part) int {
+	texts := make([]string, 0, len(parts)+2)
+	if role := strings.TrimSpace(string(msg.Role)); role != "" {
+		texts = append(texts, role)
+	}
+	if len(parts) == 0 {
+		if summary := strings.TrimSpace(msg.Summary); summary != "" {
+			texts = append(texts, summary)
+		}
+	}
+	for _, part := range parts {
+		if part.Kind == domain.PartKindUsage {
+			continue
+		}
+		if text := strings.TrimSpace(part.Text()); text != "" {
+			texts = append(texts, text)
+		}
+	}
+	return tokenestimate.Text(strings.Join(texts, "\n"))
 }

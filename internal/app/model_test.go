@@ -5177,6 +5177,41 @@ func TestSidebarContextUsesCompactedChatEstimateNotCompactionRequestUsage(t *tes
 	}
 }
 
+func TestSidebarContextAnchorsOnLatestUsageAndEstimatesTail(t *testing.T) {
+	m := Model{
+		width:          120,
+		height:         40,
+		currentSession: domain.Session{ID: 2, ProviderID: "test", ModelID: "model"},
+		currentChat:    domain.Chat{ID: 7, SessionID: 2, LastKnownContextTokens: 3000, ContextTokensKnown: true},
+		showSidebar:    true,
+		cfg: config.Config{
+			Providers: map[string]config.Provider{
+				"test": {ContextWindow: 32768},
+			},
+		},
+		messages: []domain.Message{
+			{ID: 1, Role: domain.MessageRoleAssistant},
+			{ID: 2, Role: domain.MessageRoleUser},
+			{ID: 3, Role: domain.MessageRoleAssistant},
+		},
+		parts: map[int64][]domain.Part{
+			1: {{Kind: domain.PartKindUsage, Payload: domain.UsagePayload{Usage: domain.Usage{PromptTokens: 3000, CompletionTokens: 120, TotalTokens: 3120}}}},
+			2: {{Kind: domain.PartKindText, Payload: domain.TextPayload{Text: "please inspect these three files"}}},
+			3: {{Kind: domain.PartKindToolCall, Payload: domain.ToolCallPayload{Tool: domain.ToolKindRead, ToolCallID: "call_1", Args: map[string]string{"path": "cmd/app.go"}}}},
+		},
+	}
+
+	m.syncContextFromChat()
+
+	got := m.renderSidebar()
+	if !strings.Contains(got, "Context ~3.0k / 32.8k (9%)") {
+		t.Fatalf("expected anchored tail estimate in sidebar, got %q", got)
+	}
+	if m.contextTokens <= 3000 {
+		t.Fatalf("expected tail tokens added to anchor, got %d", m.contextTokens)
+	}
+}
+
 func TestSidebarMilestonesAndTodosRenderNoneWhenEmpty(t *testing.T) {
 	m := Model{}
 	got := m.renderSidebar()

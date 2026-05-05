@@ -78,3 +78,26 @@ func TestTotalUsageAccumulatesAllUsageNotices(t *testing.T) {
 		t.Fatalf("unexpected total usage: %#v", got)
 	}
 }
+
+func TestEstimateTailTokensUsesLatestUsageAnchor(t *testing.T) {
+	messages := []domain.Message{
+		{ID: 1, Role: domain.MessageRoleUser},
+		{ID: 2, Role: domain.MessageRoleAssistant},
+		{ID: 3, Role: domain.MessageRoleUser},
+		{ID: 4, Role: domain.MessageRoleAssistant},
+	}
+	parts := map[int64][]domain.Part{
+		1: {{Kind: domain.PartKindText, Payload: domain.TextPayload{Text: "old context should be ignored"}}},
+		2: {{Kind: domain.PartKindUsage, Payload: domain.UsagePayload{Usage: domain.Usage{PromptTokens: 1200, CompletionTokens: 40, TotalTokens: 1240}}}},
+		3: {{Kind: domain.PartKindText, Payload: domain.TextPayload{Text: "new prompt words"}}},
+		4: {{Kind: domain.PartKindReasoning, Payload: domain.ReasoningPayload{Text: "fresh thoughts only"}}},
+	}
+
+	got, ok := EstimateTailTokens(messages, parts)
+	if !ok {
+		t.Fatal("expected latest usage anchor")
+	}
+	if got != 14 {
+		t.Fatalf("expected tail-only estimate, got %d", got)
+	}
+}
