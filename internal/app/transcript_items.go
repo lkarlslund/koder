@@ -175,6 +175,7 @@ func (i *pendingAssistantTranscriptItem) Refresh(m *Model) {
 type toolRunTranscriptItem interface {
 	transcriptItemController
 	RunID() string
+	Bind(*appstate.ToolRunRecord)
 	UpdateRun(ui.ToolRun)
 	SetExpandedOutput(bool)
 	SetExpandedCommand(bool)
@@ -184,21 +185,29 @@ type toolRunTranscriptItem interface {
 
 type toolRunItemBase struct {
 	transcriptItemBase
+	record          *appstate.ToolRunRecord
 	run             ui.ToolRun
 	expandedOutput  bool
 	expandedCommand bool
 }
 
-func newToolRunItemBase(key string, gap int, run ui.ToolRun, expandedOutput, expandedCommand bool) toolRunItemBase {
+func newToolRunItemBase(key string, gap int, record *appstate.ToolRunRecord, run ui.ToolRun, expandedOutput, expandedCommand bool) toolRunItemBase {
 	return toolRunItemBase{
 		transcriptItemBase: newTranscriptItemBase(key, gap),
+		record:             record,
 		run:                run,
 		expandedOutput:     expandedOutput,
 		expandedCommand:    expandedCommand,
 	}
 }
 
-func (i *toolRunItemBase) RunID() string             { return i.run.ID }
+func (i *toolRunItemBase) RunID() string { return i.run.ID }
+func (i *toolRunItemBase) Bind(record *appstate.ToolRunRecord) {
+	i.record = record
+	if record != nil {
+		i.run = record.RunValue()
+	}
+}
 func (i *toolRunItemBase) UpdateRun(run ui.ToolRun)  { i.run = run }
 func (i *toolRunItemBase) SetExpandedOutput(v bool)  { i.expandedOutput = v }
 func (i *toolRunItemBase) SetExpandedCommand(v bool) { i.expandedCommand = v }
@@ -211,9 +220,9 @@ type writeToolRunTranscriptItem struct{ toolRunItemBase }
 type editToolRunTranscriptItem struct{ toolRunItemBase }
 type genericToolRunTranscriptItem struct{ toolRunItemBase }
 
-func newToolRunTranscriptItem(gap int, run ui.ToolRun, expandedOutput, expandedCommand bool) toolRunTranscriptItem {
+func newToolRunTranscriptItem(gap int, record *appstate.ToolRunRecord, run ui.ToolRun, expandedOutput, expandedCommand bool) toolRunTranscriptItem {
 	key := "toolrun:" + firstNonEmptyToolRunKey(run)
-	base := newToolRunItemBase(key, gap, run, expandedOutput, expandedCommand)
+	base := newToolRunItemBase(key, gap, record, run, expandedOutput, expandedCommand)
 	switch run.Tool {
 	case domain.ToolKindBash, domain.ToolKindExecCommand:
 		return &bashToolRunTranscriptItem{toolRunItemBase: base}
@@ -374,17 +383,32 @@ func (e genericToolRunCardElement) Paint(_ *ui.Context, canvas ui.Canvas) {
 }
 
 func (i *bashToolRunTranscriptItem) Refresh(m *Model) {
+	if i.record != nil {
+		i.run = i.record.RunValue()
+	}
 	i.setElement(ui.AsNode(bashToolRunCardElement{Run: i.run, Palette: m.palette, Width: m.viewport.Width, ExpandedOutput: i.expandedOutput, ExpandedCommand: i.expandedCommand}))
 }
 func (i *readToolRunTranscriptItem) Refresh(m *Model) {
+	if i.record != nil {
+		i.run = i.record.RunValue()
+	}
 	i.setElement(ui.AsNode(readToolRunCardElement{Run: i.run, Palette: m.palette, Width: m.viewport.Width, ExpandedOutput: i.expandedOutput}))
 }
 func (i *writeToolRunTranscriptItem) Refresh(m *Model) {
+	if i.record != nil {
+		i.run = i.record.RunValue()
+	}
 	i.setElement(ui.AsNode(writeToolRunCardElement{Run: i.run, Palette: m.palette, Width: m.viewport.Width, ExpandedOutput: i.expandedOutput}))
 }
 func (i *editToolRunTranscriptItem) Refresh(m *Model) {
+	if i.record != nil {
+		i.run = i.record.RunValue()
+	}
 	i.setElement(ui.AsNode(editToolRunCardElement{Run: i.run, Palette: m.palette, Width: m.viewport.Width, ExpandedOutput: i.expandedOutput}))
 }
 func (i *genericToolRunTranscriptItem) Refresh(m *Model) {
+	if i.record != nil {
+		i.run = i.record.RunValue()
+	}
 	i.setElement(ui.AsNode(genericToolRunCardElement{Run: i.run, Palette: m.palette, Width: m.viewport.Width, ExpandedOutput: i.expandedOutput, ExpandedCommand: i.expandedCommand}))
 }

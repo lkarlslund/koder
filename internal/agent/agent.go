@@ -614,10 +614,11 @@ func (e *Engine) continueModelTurn(ctx context.Context, session domain.Session, 
 					"tool_calls": strconv.Itoa(len(resp.ToolCalls)),
 				})
 			} else if len(calls) > 0 {
-				if err := e.persistAssistantToolCalls(ctx, chat.ID, session.ID, calls, strings.TrimSpace(resp.Text), resp.Usage); err != nil {
+				assistantMsg, assistantParts, err := e.persistAssistantToolCalls(ctx, chat.ID, session.ID, calls, strings.TrimSpace(resp.Text), resp.Usage)
+				if err != nil {
 					return err
 				}
-				out <- domain.Event{Kind: domain.EventKindToolCallDelta, Text: "tool calls persisted"}
+				out <- domain.Event{Kind: domain.EventKindToolCallDelta, Text: "tool calls persisted", Message: assistantMsg, Parts: assistantParts}
 				if resp.Usage.HasAnyTokens() {
 					if err := e.saveChatContextUsage(ctx, chat.ID, resp.Usage); err != nil {
 						return err
@@ -646,19 +647,24 @@ func (e *Engine) continueModelTurn(ctx context.Context, session domain.Session, 
 			if err != nil {
 				return err
 			}
-			if _, err := e.store.AddPart(ctx, assistantMsg.ID, domain.ToolCallPayload{
+			parts := make([]domain.Part, 0, 2)
+			toolPart, err := e.store.AddPart(ctx, assistantMsg.ID, domain.ToolCallPayload{
 				Tool:       call.Tool,
 				ToolCallID: call.ToolCallID,
 				Args:       call.Args,
-			}); err != nil {
+			})
+			if err != nil {
 				return err
 			}
+			parts = append(parts, toolPart)
 			if strings.TrimSpace(plain) != "" {
-				if _, err := e.store.AddPart(ctx, assistantMsg.ID, domain.TextPayload{Text: strings.TrimSpace(plain)}); err != nil {
+				textPart, err := e.store.AddPart(ctx, assistantMsg.ID, domain.TextPayload{Text: strings.TrimSpace(plain)})
+				if err != nil {
 					return err
 				}
+				parts = append(parts, textPart)
 			}
-			out <- domain.Event{Kind: domain.EventKindToolCallDelta, Text: "tool call persisted"}
+			out <- domain.Event{Kind: domain.EventKindToolCallDelta, Text: "tool call persisted", Message: assistantMsg, Parts: parts}
 			if pause, ok := tracker.trackCalls([]tools.Request{*call}); ok {
 				e.pauseContinuation(ctx, chat.ID, session.ID, pause, out)
 				return nil
@@ -1267,24 +1273,25 @@ func (e *Engine) persistToolFailure(ctx context.Context, chatID, sessionID int64
 	}
 	text := fmt.Sprintf("%s failed: %v", req.Tool, execErr)
 	if sessionID == 0 {
-		return emitOnce(domain.Event{Kind: domain.EventKindToolResult, Tool: req.Tool, Text: text}), nil
+		return emitOnce(domain.Event{Kind: domain.EventKindToolResult, Tool: req.Tool, ToolCallID: req.ToolCallID, Text: text}), nil
 	}
 	msg, err := e.store.AddChatMessage(ctx, chatID, domain.MessageRoleTool, string(req.Tool))
 	if err != nil {
 		return nil, err
 	}
-	if _, err := e.store.AddPart(ctx, msg.ID, domain.ToolOutputPayload{
+	part, err := e.store.AddPart(ctx, msg.ID, domain.ToolOutputPayload{
 		Tool:       req.Tool,
 		ToolCallID: req.ToolCallID,
 		Args:       req.Meta(),
 		Status:     domain.ToolResultStatusError,
 		Text:       text,
 		Result:     domain.ErrorStoredResult{Message: text},
-	}); err != nil {
+	})
+	if err != nil {
 		return nil, err
 	}
 	e.recordLifecycle(sessionID, "tool_result_persisted", text, map[string]string{"tool": string(req.Tool), "status": "error"})
-	return emitOnce(domain.Event{Kind: domain.EventKindToolResult, Tool: req.Tool, Text: text}), nil
+	return emitOnce(domain.Event{Kind: domain.EventKindToolResult, Tool: req.Tool, ToolCallID: req.ToolCallID, Text: text, Message: msg, Parts: []domain.Part{part}}), nil
 }
 
 func emitOnce(evt domain.Event) <-chan domain.Event {
@@ -2679,17 +2686,18 @@ func (e *Engine) handleModelToolCall(ctx context.Context, session domain.Session
 		if err != nil {
 			return domain.Event{}, err
 		}
-		if _, err := e.store.AddPart(ctx, msg.ID, domain.ToolOutputPayload{
+		part, err := e.store.AddPart(ctx, msg.ID, domain.ToolOutputPayload{
 			Tool:       req.Tool,
 			ToolCallID: req.ToolCallID,
 			Args:       req.Meta(),
 			Status:     domain.ToolResultStatusDenied,
 			Text:       text,
 			Result:     domain.DeniedStoredResult{Message: text},
-		}); err != nil {
+		})
+		if err != nil {
 			return domain.Event{}, err
 		}
-		return domain.Event{Kind: domain.EventKindToolResult, Tool: req.Tool, Text: text}, nil
+		return domain.Event{Kind: domain.EventKindToolResult, Tool: req.Tool, ToolCallID: req.ToolCallID, Text: text, Message: msg, Parts: []domain.Part{part}}, nil
 	}
 	if decision.Mode == domain.PermissionModeAsk {
 		storedArgs, err := serializeRequest(req)
@@ -2807,7 +2815,7 @@ func (e *Engine) parseProviderToolCall(item provider.ToolCall) (tools.Request, e
 	return tools.Normalize(req)
 }
 
-func (e *Engine) persistAssistantToolCalls(ctx context.Context, chatID, sessionID int64, calls []tools.Request, text string, usage domain.Usage) error {
+func (e *Engine) persistAssistantToolCalls(ctx context.Context, chatID, sessionID int64, calls []tools.Request, text string, usage domain.Usage) (domain.Message, []domain.Part, error) {
 	summary := "tool"
 	if len(calls) == 1 {
 		summary = fmt.Sprintf("tool:%s", calls[0].Tool)
@@ -2816,25 +2824,32 @@ func (e *Engine) persistAssistantToolCalls(ctx context.Context, chatID, sessionI
 	}
 	assistantMsg, err := e.store.AddChatMessage(ctx, chatID, domain.MessageRoleAssistant, summary)
 	if err != nil {
-		return err
+		return domain.Message{}, nil, err
 	}
+	parts := make([]domain.Part, 0, len(calls)+2)
 	for _, call := range calls {
-		if _, err := e.store.AddPart(ctx, assistantMsg.ID, domain.ToolCallPayload{Tool: call.Tool, ToolCallID: call.ToolCallID, Args: call.Args}); err != nil {
-			return err
+		part, err := e.store.AddPart(ctx, assistantMsg.ID, domain.ToolCallPayload{Tool: call.Tool, ToolCallID: call.ToolCallID, Args: call.Args})
+		if err != nil {
+			return domain.Message{}, nil, err
 		}
+		parts = append(parts, part)
 	}
 	if text != "" {
-		if _, err := e.store.AddPart(ctx, assistantMsg.ID, domain.TextPayload{Text: text}); err != nil {
-			return err
+		part, err := e.store.AddPart(ctx, assistantMsg.ID, domain.TextPayload{Text: text})
+		if err != nil {
+			return domain.Message{}, nil, err
 		}
+		parts = append(parts, part)
 	}
 	usage = usage.Normalized()
 	if usage.HasAnyTokens() {
-		if _, err := e.store.AddPart(ctx, assistantMsg.ID, domain.UsagePayload{Usage: usage}); err != nil {
-			return err
+		part, err := e.store.AddPart(ctx, assistantMsg.ID, domain.UsagePayload{Usage: usage})
+		if err != nil {
+			return domain.Message{}, nil, err
 		}
+		parts = append(parts, part)
 	}
-	return nil
+	return assistantMsg, parts, nil
 }
 
 func (e *Engine) saveChatContextUsage(ctx context.Context, chatID int64, usage domain.Usage) error {
@@ -2892,7 +2907,7 @@ func (e *Engine) handleModelToolCalls(ctx context.Context, session domain.Sessio
 		if !item.run {
 			continue
 		}
-		out <- domain.Event{Kind: domain.EventKindToolStart, Tool: item.req.Tool, Text: tools.Preview(item.req)}
+		out <- domain.Event{Kind: domain.EventKindToolStart, Tool: item.req.Tool, ToolCallID: item.req.ToolCallID, Text: tools.Preview(item.req)}
 		go func(req tools.Request) {
 			events, err := e.executePreparedToolCall(ctx, chat.ID, session.ID, req)
 			results <- completedToolCall{events: events, err: err}
@@ -2984,19 +2999,20 @@ func (e *Engine) prepareModelToolCall(ctx context.Context, session domain.Sessio
 		if err != nil {
 			return preparedToolCall{}, err
 		}
-		if _, err := e.store.AddPart(ctx, msg.ID, domain.ToolOutputPayload{
+		part, err := e.store.AddPart(ctx, msg.ID, domain.ToolOutputPayload{
 			Tool:       req.Tool,
 			ToolCallID: req.ToolCallID,
 			Args:       req.Meta(),
 			Status:     domain.ToolResultStatusDenied,
 			Text:       text,
 			Result:     domain.DeniedStoredResult{Message: text},
-		}); err != nil {
+		})
+		if err != nil {
 			return preparedToolCall{}, err
 		}
 		return preparedToolCall{
 			req:   req,
-			event: domain.Event{Kind: domain.EventKindToolResult, Tool: req.Tool, Text: text},
+			event: domain.Event{Kind: domain.EventKindToolResult, Tool: req.Tool, ToolCallID: req.ToolCallID, Text: text, Message: msg, Parts: []domain.Part{part}},
 		}, nil
 	}
 	if decision.Mode == domain.PermissionModeAsk {
@@ -3038,23 +3054,24 @@ func (e *Engine) prepareModelToolCall(ctx context.Context, session domain.Sessio
 func (e *Engine) recordDisabledToolResult(ctx context.Context, chatID, sessionID int64, req tools.Request) (domain.Event, error) {
 	text := fmt.Sprintf("%s disabled for this session", req.Tool)
 	if sessionID == 0 {
-		return domain.Event{Kind: domain.EventKindToolResult, Tool: req.Tool, Text: text}, nil
+		return domain.Event{Kind: domain.EventKindToolResult, Tool: req.Tool, ToolCallID: req.ToolCallID, Text: text}, nil
 	}
 	msg, err := e.store.AddChatMessage(ctx, chatID, domain.MessageRoleTool, string(req.Tool))
 	if err != nil {
 		return domain.Event{}, err
 	}
-	if _, err := e.store.AddPart(ctx, msg.ID, domain.ToolOutputPayload{
+	part, err := e.store.AddPart(ctx, msg.ID, domain.ToolOutputPayload{
 		Tool:       req.Tool,
 		ToolCallID: req.ToolCallID,
 		Args:       req.Meta(),
 		Status:     domain.ToolResultStatusDenied,
 		Text:       text,
 		Result:     domain.DeniedStoredResult{Message: text},
-	}); err != nil {
+	})
+	if err != nil {
 		return domain.Event{}, err
 	}
-	return domain.Event{Kind: domain.EventKindToolResult, Tool: req.Tool, Text: text}, nil
+	return domain.Event{Kind: domain.EventKindToolResult, Tool: req.Tool, ToolCallID: req.ToolCallID, Text: text, Message: msg, Parts: []domain.Part{part}}, nil
 }
 
 func toolEnabledForSession(cfg config.Config, session domain.Session, kind domain.ToolKind) bool {

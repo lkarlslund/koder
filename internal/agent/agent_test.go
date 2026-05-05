@@ -386,8 +386,12 @@ func TestPersistAssistantToolCallsStoresNarrationAsText(t *testing.T) {
 		ToolCallID: "call_1",
 		Args:       map[string]string{"path": "README.md"},
 	}
-	if err := engine.persistAssistantToolCalls(context.Background(), chat.ID, session.ID, []tools.Request{call}, "Let me inspect that file first.", domain.Usage{TotalTokens: 10}); err != nil {
+	msg, persistedParts, err := engine.persistAssistantToolCalls(context.Background(), chat.ID, session.ID, []tools.Request{call}, "Let me inspect that file first.", domain.Usage{TotalTokens: 10})
+	if err != nil {
 		t.Fatal(err)
+	}
+	if msg.ID == 0 || len(persistedParts) < 3 {
+		t.Fatalf("expected persisted message and parts, got msg=%#v parts=%#v", msg, persistedParts)
 	}
 
 	messages, parts, err := st.PartsForSession(context.Background(), session.ID)

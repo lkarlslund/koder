@@ -5,6 +5,7 @@ import (
 
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/store"
+	"github.com/lkarlslund/koder/internal/ui"
 )
 
 // ChatState owns the current chat's mutable in-memory records.
@@ -13,6 +14,11 @@ type ChatState struct {
 	byMessage map[int64]*MessageRecord
 	byPart    map[int64]*PartRecord
 	approvals []store.Approval
+	toolRuns  []*ToolRunRecord
+
+	byToolRunID      map[string]*ToolRunRecord
+	byToolCallID     map[string]*ToolRunRecord
+	byToolApprovalID map[int64]*ToolRunRecord
 }
 
 // MessageRecord stores one message and its ordered parts.
@@ -24,6 +30,11 @@ type MessageRecord struct {
 // PartRecord stores one mutable part.
 type PartRecord struct {
 	Part domain.Part
+}
+
+// ToolRunRecord stores one mutable tool run view model for the current chat.
+type ToolRunRecord struct {
+	Run ui.ToolRun
 }
 
 // NewChatState builds a chat state from persisted snapshots.
@@ -86,6 +97,63 @@ func (s *ChatState) Approvals() []store.Approval {
 	return slices.Clone(s.approvals)
 }
 
+// ReplaceToolRuns refreshes tool-run records while preserving identity by tool call, approval, or run ID.
+func (s *ChatState) ReplaceToolRuns(runs []ui.ToolRun) {
+	if s == nil {
+		return
+	}
+	if s.byToolRunID == nil {
+		s.byToolRunID = map[string]*ToolRunRecord{}
+	}
+	if s.byToolCallID == nil {
+		s.byToolCallID = map[string]*ToolRunRecord{}
+	}
+	if s.byToolApprovalID == nil {
+		s.byToolApprovalID = map[int64]*ToolRunRecord{}
+	}
+	nextRuns := make([]*ToolRunRecord, 0, len(runs))
+	nextByID := make(map[string]*ToolRunRecord, len(runs))
+	nextByCall := make(map[string]*ToolRunRecord, len(runs))
+	nextByApproval := make(map[int64]*ToolRunRecord, len(runs))
+	for _, run := range runs {
+		record := s.lookupToolRun(run)
+		if record == nil {
+			record = &ToolRunRecord{}
+		}
+		record.Run = run
+		nextRuns = append(nextRuns, record)
+		if run.ID != "" {
+			nextByID[run.ID] = record
+		}
+		if run.ToolCallID != "" {
+			nextByCall[run.ToolCallID] = record
+		}
+		if run.ApprovalID > 0 {
+			nextByApproval[run.ApprovalID] = record
+		}
+	}
+	s.toolRuns = nextRuns
+	s.byToolRunID = nextByID
+	s.byToolCallID = nextByCall
+	s.byToolApprovalID = nextByApproval
+}
+
+// ToolRuns returns the current ordered tool-run records for the current chat.
+func (s *ChatState) ToolRuns() []*ToolRunRecord {
+	if s == nil {
+		return nil
+	}
+	return s.toolRuns
+}
+
+// ToolRunByCallID returns the tool-run record for a tool call when present.
+func (s *ChatState) ToolRunByCallID(toolCallID string) *ToolRunRecord {
+	if s == nil || toolCallID == "" {
+		return nil
+	}
+	return s.byToolCallID[toolCallID]
+}
+
 // AppendMessage adds a new message record to the current chat state.
 func (s *ChatState) AppendMessage(message domain.Message, parts []domain.Part) *MessageRecord {
 	if s == nil {
@@ -106,6 +174,14 @@ func (s *ChatState) AppendMessage(message domain.Message, parts []domain.Part) *
 	s.messages = append(s.messages, record)
 	s.byMessage[message.ID] = record
 	return record
+}
+
+// MessageByID returns a message record by ID.
+func (s *ChatState) MessageByID(messageID int64) *MessageRecord {
+	if s == nil || messageID == 0 {
+		return nil
+	}
+	return s.byMessage[messageID]
 }
 
 // SnapshotMessages returns detached message values.
@@ -183,4 +259,42 @@ func (r *PartRecord) PartValue() domain.Part {
 		return domain.Part{}
 	}
 	return r.Part
+}
+
+// Update mutates a tool-run record in place.
+func (r *ToolRunRecord) Update(update func(*ui.ToolRun)) {
+	if r == nil || update == nil {
+		return
+	}
+	update(&r.Run)
+}
+
+// RunValue returns the current tool-run value.
+func (r *ToolRunRecord) RunValue() ui.ToolRun {
+	if r == nil {
+		return ui.ToolRun{}
+	}
+	return r.Run
+}
+
+func (s *ChatState) lookupToolRun(run ui.ToolRun) *ToolRunRecord {
+	if s == nil {
+		return nil
+	}
+	if run.ToolCallID != "" {
+		if record := s.byToolCallID[run.ToolCallID]; record != nil {
+			return record
+		}
+	}
+	if run.ApprovalID > 0 {
+		if record := s.byToolApprovalID[run.ApprovalID]; record != nil {
+			return record
+		}
+	}
+	if run.ID != "" {
+		if record := s.byToolRunID[run.ID]; record != nil {
+			return record
+		}
+	}
+	return nil
 }

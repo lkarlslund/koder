@@ -25,12 +25,13 @@ const (
 )
 
 type transcriptBlock struct {
-	Kind    transcriptBlockKind
-	Message domain.Message
-	Parts   []domain.Part
-	Record  *appstate.MessageRecord
-	ToolRun ui.ToolRun
-	Pending bool
+	Kind          transcriptBlockKind
+	Message       domain.Message
+	Parts         []domain.Part
+	Record        *appstate.MessageRecord
+	ToolRun       ui.ToolRun
+	ToolRunRecord *appstate.ToolRunRecord
+	Pending       bool
 }
 
 func (m *Model) transcriptBlocks() []transcriptBlock {
@@ -53,8 +54,8 @@ func (m *Model) transcriptBlocks() []transcriptBlock {
 	appendMessage := func(msg domain.Message) {
 		blocks = append(blocks, transcriptBlock{Kind: transcriptBlockMessage, Message: msg, Parts: m.parts[msg.ID]})
 	}
-	appendRun := func(run ui.ToolRun) *ui.ToolRun {
-		blocks = append(blocks, transcriptBlock{Kind: transcriptBlockToolRun, ToolRun: run})
+	appendRun := func(run ui.ToolRun, record *appstate.ToolRunRecord) *ui.ToolRun {
+		blocks = append(blocks, transcriptBlock{Kind: transcriptBlockToolRun, ToolRun: run, ToolRunRecord: record})
 		return &blocks[len(blocks)-1].ToolRun
 	}
 	tracker := newToolRunTracker(appendRun)
@@ -72,20 +73,28 @@ func (m *Model) transcriptBlocks() []transcriptBlock {
 					appendMessageRecord(record)
 				}
 				if run, ok := compactionToolRun(parts, msg); ok {
-					appendRun(run)
+					appendRun(run, nil)
 				}
 				for _, part := range parts {
 					if run := eventNoticeToolRun(part); strings.TrimSpace(run.ID) != "" {
-						appendRun(run)
+						appendRun(run, nil)
 					}
 				}
 				for _, run := range toolRunsFromAssistantMessage(parts) {
+					if record := m.chatState.ToolRunByCallID(run.ToolCallID); record != nil {
+						tracker.UpsertRecord(record)
+						continue
+					}
 					tracker.Upsert(run)
 				}
 			case domain.MessageRoleTool:
 				consumed := false
 				for _, run := range toolRunsFromToolMessage(parts, msg) {
-					tracker.Upsert(run)
+					if record := m.chatState.ToolRunByCallID(run.ToolCallID); record != nil {
+						tracker.UpsertRecord(record)
+					} else {
+						tracker.Upsert(run)
+					}
 					consumed = true
 				}
 				if !consumed {
@@ -104,11 +113,11 @@ func (m *Model) transcriptBlocks() []transcriptBlock {
 					appendMessage(msg)
 				}
 				if run, ok := compactionToolRun(parts, msg); ok {
-					appendRun(run)
+					appendRun(run, nil)
 				}
 				for _, part := range parts {
 					if run := eventNoticeToolRun(part); strings.TrimSpace(run.ID) != "" {
-						appendRun(run)
+						appendRun(run, nil)
 					}
 				}
 				for _, run := range toolRunsFromAssistantMessage(parts) {
@@ -143,6 +152,81 @@ func (m *Model) transcriptBlocks() []transcriptBlock {
 		})
 	}
 	return blocks
+}
+
+func (m *Model) rebuildChatToolRuns() {
+	if m == nil || m.chatState == nil {
+		return
+	}
+	var runs []ui.ToolRun
+	appendRun := func(run ui.ToolRun) {
+		if strings.TrimSpace(run.ID) == "" {
+			return
+		}
+		runs = append(runs, run)
+	}
+	tracker := newToolRunTracker(func(run ui.ToolRun, _ *appstate.ToolRunRecord) *ui.ToolRun {
+		runs = append(runs, run)
+		return &runs[len(runs)-1]
+	})
+	for _, record := range m.chatState.Messages() {
+		if record == nil {
+			continue
+		}
+		msg := record.MessageValue()
+		parts := record.PartSnapshots()
+		switch msg.Role {
+		case domain.MessageRoleAssistant:
+			for _, run := range toolRunsFromAssistantMessage(parts) {
+				tracker.Upsert(run)
+			}
+		case domain.MessageRoleTool:
+			for _, run := range toolRunsFromToolMessage(parts, msg) {
+				tracker.Upsert(run)
+			}
+		}
+	}
+	for _, approval := range m.chatState.Approvals() {
+		run := m.approvalToolRun(approval)
+		if strings.TrimSpace(run.ID) != "" {
+			appendRun(run)
+		}
+	}
+	m.chatState.ReplaceToolRuns(runs)
+}
+
+func (m *Model) applyCurrentChatEvent(evt domain.Event) {
+	if m == nil || m.currentChat.ID == 0 {
+		return
+	}
+	state := m.ensureChatState()
+	changed := false
+	if evt.Message.ID > 0 {
+		if state.MessageByID(evt.Message.ID) == nil {
+			state.AppendMessage(evt.Message, evt.Parts)
+			changed = true
+		}
+	}
+	switch evt.Kind {
+	case domain.EventKindToolCallDelta, domain.EventKindToolResult:
+		if changed || evt.Kind != domain.EventKindToolCallDelta {
+			m.rebuildChatToolRuns()
+			m.syncChatMirrorsFromState()
+			m.transcriptDirty = true
+			m.refreshViewport()
+		}
+	case domain.EventKindToolStart:
+		if record := state.ToolRunByCallID(strings.TrimSpace(evt.ToolCallID)); record != nil {
+			record.Update(func(run *ui.ToolRun) {
+				run.Status = ui.ToolRunStatusRunning
+			})
+			m.syncChatMirrorsFromState()
+			if !m.replaceToolRunRecordInTranscript(record) {
+				m.transcriptDirty = true
+			}
+			m.refreshViewport()
+		}
+	}
 }
 
 func (m *Model) currentLiveExecRuns() []ui.ToolRun {
@@ -198,18 +282,20 @@ func (m *Model) assistantMessageShouldExist(msg domain.Message, parts []domain.P
 }
 
 type toolRunTracker struct {
-	append       func(ui.ToolRun) *ui.ToolRun
+	append       func(ui.ToolRun, *appstate.ToolRunRecord) *ui.ToolRun
 	byID         map[string]*ui.ToolRun
 	byToolCallID map[string]*ui.ToolRun
 	byApprovalID map[int64]*ui.ToolRun
+	records      map[string]*appstate.ToolRunRecord
 }
 
-func newToolRunTracker(append func(ui.ToolRun) *ui.ToolRun) *toolRunTracker {
+func newToolRunTracker(append func(ui.ToolRun, *appstate.ToolRunRecord) *ui.ToolRun) *toolRunTracker {
 	return &toolRunTracker{
 		append:       append,
 		byID:         map[string]*ui.ToolRun{},
 		byToolCallID: map[string]*ui.ToolRun{},
 		byApprovalID: map[int64]*ui.ToolRun{},
+		records:      map[string]*appstate.ToolRunRecord{},
 	}
 }
 
@@ -222,7 +308,30 @@ func (t *toolRunTracker) Upsert(run ui.ToolRun) {
 		t.index(existing)
 		return
 	}
-	t.index(t.append(run))
+	t.index(t.append(run, nil))
+}
+
+func (t *toolRunTracker) UpsertRecord(record *appstate.ToolRunRecord) {
+	if t == nil || record == nil {
+		return
+	}
+	run := record.RunValue()
+	if strings.TrimSpace(run.ID) == "" {
+		return
+	}
+	if existing := t.lookup(run); existing != nil {
+		mergeToolRun(existing, run)
+		t.index(existing)
+		if id := strings.TrimSpace(existing.ID); id != "" {
+			t.records[id] = record
+		}
+		return
+	}
+	appended := t.append(run, record)
+	if id := strings.TrimSpace(appended.ID); id != "" {
+		t.records[id] = record
+	}
+	t.index(appended)
 }
 
 func (t *toolRunTracker) lookup(run ui.ToolRun) *ui.ToolRun {

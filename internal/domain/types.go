@@ -347,11 +347,15 @@ func (u Usage) ContextTokens() (int, bool) {
 }
 
 type Event struct {
-	Kind    EventKind
-	Text    string
-	Tool    ToolKind
-	Meta    map[string]string
-	Usage   Usage
-	Err     error
-	RawJSON string
+	Kind       EventKind
+	Text       string
+	Tool       ToolKind
+	ToolCallID string
+	ApprovalID int64
+	Message    Message
+	Parts      []Part
+	Meta       map[string]string
+	Usage      Usage
+	Err        error
+	RawJSON    string
 }

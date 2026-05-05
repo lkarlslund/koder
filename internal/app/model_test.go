@@ -360,8 +360,8 @@ func TestShouldRefreshDetailsAfterEvent(t *testing.T) {
 		{name: "usage", evt: domain.Event{Kind: domain.EventKindUsage}, want: false},
 		{name: "status", evt: domain.Event{Kind: domain.EventKindStatus}, want: false},
 		{name: "session title", evt: domain.Event{Kind: domain.EventKindSessionTitle}, want: false},
-		{name: "tool call delta", evt: domain.Event{Kind: domain.EventKindToolCallDelta}, want: true},
-		{name: "tool result", evt: domain.Event{Kind: domain.EventKindToolResult}, want: true},
+		{name: "tool call delta", evt: domain.Event{Kind: domain.EventKindToolCallDelta}, want: false},
+		{name: "tool result", evt: domain.Event{Kind: domain.EventKindToolResult}, want: false},
 		{name: "approval ask", evt: domain.Event{Kind: domain.EventKindApprovalAsk}, want: true},
 	}
 	for _, tc := range cases {
@@ -373,38 +373,31 @@ func TestShouldRefreshDetailsAfterEvent(t *testing.T) {
 	}
 }
 
-func TestToolCallDeltaRefreshesCurrentChatImmediately(t *testing.T) {
-	st, err := store.Open(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
+func TestToolCallDeltaAppendsCurrentChatImmediately(t *testing.T) {
+	now := time.Now().UTC()
+	msg := domain.Message{
+		ID:        10,
+		SessionID: 1,
+		ChatID:    2,
+		Role:      domain.MessageRoleAssistant,
+		Summary:   "tool:bash",
+		CreatedAt: now,
 	}
-	defer st.Close()
-
-	session, err := st.CreateSession(context.Background(), "test", "provider", "model", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	chat, err := st.DefaultChat(context.Background(), session.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	msg, err := st.AddChatMessage(context.Background(), chat.ID, domain.MessageRoleAssistant, "tool:bash")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.AddPart(context.Background(), msg.ID, domain.ToolCallPayload{
-		Tool:       domain.ToolKindBash,
-		ToolCallID: "call_1",
-		Args:       map[string]string{"command": "pwd"},
-	}); err != nil {
-		t.Fatal(err)
-	}
-
+	parts := []domain.Part{{
+		ID:        11,
+		MessageID: msg.ID,
+		Kind:      domain.PartKindToolCall,
+		Payload: domain.ToolCallPayload{
+			Tool:       domain.ToolKindBash,
+			ToolCallID: "call_1",
+			Args:       map[string]string{"command": "pwd"},
+		},
+		CreatedAt: now,
+	}}
 	m := Model{
-		store:          st,
 		cfg:            testConfig(t),
-		currentSession: session,
-		currentChat:    chat,
+		currentSession: domain.Session{ID: 1},
+		currentChat:    domain.Chat{ID: 2},
 		parts:          map[int64][]domain.Part{},
 		composer:       textarea.New(),
 	}
@@ -412,8 +405,13 @@ func TestToolCallDeltaRefreshesCurrentChatImmediately(t *testing.T) {
 	defer close(events)
 
 	updated, cmd := m.Update(eventMsg{
-		chatID: chat.ID,
-		event:  domain.Event{Kind: domain.EventKindToolCallDelta, Text: "tool calls persisted"},
+		chatID: 2,
+		event: domain.Event{
+			Kind:    domain.EventKindToolCallDelta,
+			Text:    "tool calls persisted",
+			Message: msg,
+			Parts:   parts,
+		},
 		events: events,
 	})
 	next := updated.(Model)
@@ -421,7 +419,7 @@ func TestToolCallDeltaRefreshesCurrentChatImmediately(t *testing.T) {
 		t.Fatal("expected follow-up command for remaining event stream")
 	}
 	if len(next.messages) != 1 {
-		t.Fatalf("expected current chat to refresh immediately, got %d messages", len(next.messages))
+		t.Fatalf("expected current chat to append immediately, got %d messages", len(next.messages))
 	}
 	blocks := next.transcriptBlocks()
 	if len(blocks) != 1 || blocks[0].Kind != transcriptBlockToolRun {
@@ -432,6 +430,73 @@ func TestToolCallDeltaRefreshesCurrentChatImmediately(t *testing.T) {
 	}
 	if blocks[0].ToolRun.ToolCallID != "call_1" {
 		t.Fatalf("unexpected tool call id: %#v", blocks[0].ToolRun)
+	}
+}
+
+func TestToolResultEventUpdatesRequestedRunInMemory(t *testing.T) {
+	now := time.Now().UTC()
+	callMsg := domain.Message{
+		ID:        10,
+		SessionID: 1,
+		ChatID:    2,
+		Role:      domain.MessageRoleAssistant,
+		Summary:   "tool:bash",
+		CreatedAt: now,
+	}
+	callParts := []domain.Part{{
+		ID:        11,
+		MessageID: callMsg.ID,
+		Kind:      domain.PartKindToolCall,
+		Payload: domain.ToolCallPayload{
+			Tool:       domain.ToolKindBash,
+			ToolCallID: "call_1",
+			Args:       map[string]string{"command": "pwd"},
+		},
+		CreatedAt: now,
+	}}
+	resultMsg := domain.Message{
+		ID:        12,
+		SessionID: 1,
+		ChatID:    2,
+		Role:      domain.MessageRoleTool,
+		Summary:   "bash",
+		CreatedAt: now.Add(time.Second),
+	}
+	resultParts := []domain.Part{{
+		ID:        13,
+		MessageID: resultMsg.ID,
+		Kind:      domain.PartKindToolOutput,
+		Payload: domain.ToolOutputPayload{
+			Tool:       domain.ToolKindBash,
+			ToolCallID: "call_1",
+			Status:     domain.ToolResultStatusOK,
+			Text:       "/tmp/project",
+			Result:     tools.BashStoredResult{Command: "pwd", Output: "/tmp/project"},
+		},
+		CreatedAt: now.Add(time.Second),
+	}}
+	m := Model{
+		cfg:            testConfig(t),
+		currentSession: domain.Session{ID: 1},
+		currentChat:    domain.Chat{ID: 2},
+		parts:          map[int64][]domain.Part{},
+		composer:       textarea.New(),
+	}
+	updated, _ := m.Update(eventMsg{chatID: 2, event: domain.Event{Kind: domain.EventKindToolCallDelta, Message: callMsg, Parts: callParts}, events: make(chan domain.Event)})
+	m = updated.(Model)
+	updated, _ = m.Update(eventMsg{chatID: 2, event: domain.Event{Kind: domain.EventKindToolResult, Tool: domain.ToolKindBash, ToolCallID: "call_1", Message: resultMsg, Parts: resultParts}, events: make(chan domain.Event)})
+	m = updated.(Model)
+
+	blocks := m.transcriptBlocks()
+	if len(blocks) != 1 || blocks[0].Kind != transcriptBlockToolRun {
+		t.Fatalf("expected one merged tool run block, got %#v", blocks)
+	}
+	run := blocks[0].ToolRun
+	if run.Status != ui.ToolRunStatusCompleted {
+		t.Fatalf("expected completed status, got %#v", run)
+	}
+	if run.Output != "/tmp/project" {
+		t.Fatalf("expected output to update in place, got %#v", run)
 	}
 }
 
@@ -7865,35 +7930,47 @@ func TestMouseClickOnApprovalPromptPermissionsOpensPicker(t *testing.T) {
 	}
 }
 
-func TestEventMsgReloadsTranscriptBeforeTurnCompletes(t *testing.T) {
-	st, err := store.Open(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
+func TestEventMsgAppendsToolResultBeforeTurnCompletes(t *testing.T) {
+	now := time.Now().UTC()
+	msg := domain.Message{
+		ID:        20,
+		SessionID: 1,
+		ChatID:    2,
+		Role:      domain.MessageRoleTool,
+		Summary:   "bash",
+		CreatedAt: now,
 	}
-	defer st.Close()
-
-	session, err := st.CreateSession(context.Background(), "test", "provider", "model", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	msg, err := st.AddMessage(context.Background(), session.ID, domain.MessageRoleTool, "bash")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.AddPart(context.Background(), msg.ID, domain.ToolOutputPayload{Tool: domain.ToolKindBash, Status: domain.ToolResultStatusOK, Text: "file-a\nfile-b"}); err != nil {
-		t.Fatal(err)
-	}
-
+	parts := []domain.Part{{
+		ID:        21,
+		MessageID: msg.ID,
+		Kind:      domain.PartKindToolOutput,
+		Payload: domain.ToolOutputPayload{
+			Tool:       domain.ToolKindBash,
+			ToolCallID: "call_1",
+			Status:     domain.ToolResultStatusOK,
+			Text:       "file-a\nfile-b",
+			Result:     tools.BashStoredResult{Command: "pwd", Output: "file-a\nfile-b"},
+		},
+		CreatedAt: now,
+	}}
 	m := Model{
-		store:          st,
-		currentSession: session,
+		currentSession: domain.Session{ID: 1},
+		currentChat:    domain.Chat{ID: 2},
 		parts:          map[int64][]domain.Part{},
 	}
 	events := make(chan domain.Event)
 	defer close(events)
 
 	updated, cmd := m.Update(eventMsg{
-		event:  domain.Event{Kind: domain.EventKindToolResult, Tool: domain.ToolKindBash, Text: "file-a\nfile-b"},
+		chatID: 2,
+		event: domain.Event{
+			Kind:       domain.EventKindToolResult,
+			Tool:       domain.ToolKindBash,
+			ToolCallID: "call_1",
+			Text:       "file-a\nfile-b",
+			Message:    msg,
+			Parts:      parts,
+		},
 		events: events,
 	})
 	next := updated.(Model)
@@ -7901,35 +7978,13 @@ func TestEventMsgReloadsTranscriptBeforeTurnCompletes(t *testing.T) {
 		t.Fatalf("unexpected status: %q", next.status)
 	}
 	if cmd == nil {
-		t.Fatal("expected reload command")
+		t.Fatal("expected follow-up command")
 	}
-	msgAny := cmd()
-	batch, ok := msgAny.(ui.BatchMsg)
-	if !ok {
-		t.Fatalf("expected ui.BatchMsg, got %T", msgAny)
+	if len(next.messages) != 1 {
+		t.Fatalf("expected one appended message, got %d", len(next.messages))
 	}
-	var load loadMsg
-	found := false
-	for _, cmd := range batch {
-		if cmd == nil {
-			continue
-		}
-		candidate, ok := cmd().(loadMsg)
-		if !ok {
-			continue
-		}
-		load = candidate
-		found = true
-		break
-	}
-	if !found {
-		t.Fatalf("expected batched loadMsg, got %#v", batch)
-	}
-	if len(load.messages) != 1 {
-		t.Fatalf("expected one reloaded message, got %d", len(load.messages))
-	}
-	if got := load.parts[load.messages[0].ID][0].Body; got != "file-a\nfile-b" {
-		t.Fatalf("unexpected reloaded tool output: %q", got)
+	if got := next.parts[next.messages[0].ID][0].Text(); got != "file-a\nfile-b" {
+		t.Fatalf("unexpected in-memory tool output: %q", got)
 	}
 }
 

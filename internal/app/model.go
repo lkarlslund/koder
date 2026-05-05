@@ -975,19 +975,12 @@ func (m Model) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 		m.invalidateBodyCache()
 		m.recordEvent(msg.chatID, msg.event)
 		if msg.chatID == 0 || msg.chatID == m.currentChat.ID {
+			m.applyCurrentChatEvent(msg.event)
 			m.applyEvent(msg.event)
-			if msg.event.Kind == domain.EventKindToolCallDelta {
-				if load, ok, err := m.loadCurrentDetailsSync(); err != nil {
-					m.status = err.Error()
-					return m, m.syncWindowTitleCmd()
-				} else if ok {
-					m = m.UpdateLoad(load)
-				}
-			}
 		}
 		if msg.events != nil {
 			var refresh ui.Cmd
-			if msg.event.Kind != domain.EventKindToolCallDelta && (msg.chatID == 0 || msg.chatID == m.currentChat.ID) && shouldRefreshDetailsAfterEvent(msg.event) {
+			if (msg.chatID == 0 || msg.chatID == m.currentChat.ID) && shouldRefreshDetailsAfterEvent(msg.event) {
 				refresh = m.reloadDetailsCmd()
 			}
 			return m, ui.Batch(refresh, nextEventCmd(msg.chatID, msg.events), m.syncWindowTitleCmd())
@@ -2022,7 +2015,10 @@ func shouldRefreshDetailsAfterEvent(evt domain.Event) bool {
 		domain.EventKindReasoning,
 		domain.EventKindUsage,
 		domain.EventKindStatus,
-		domain.EventKindSessionTitle:
+		domain.EventKindSessionTitle,
+		domain.EventKindToolCallDelta,
+		domain.EventKindToolStart,
+		domain.EventKindToolResult:
 		return false
 	default:
 		return true
@@ -2992,6 +2988,7 @@ func (m *Model) transcriptControllerFromBlock(prevByKey map[string]transcriptIte
 			}
 		case toolRunTranscriptItem:
 			if block.Kind == transcriptBlockToolRun {
+				typed.Bind(block.ToolRunRecord)
 				typed.UpdateRun(block.ToolRun)
 				return typed
 			}
@@ -3001,7 +2998,7 @@ func (m *Model) transcriptControllerFromBlock(prevByKey map[string]transcriptIte
 	}
 	switch {
 	case block.Kind == transcriptBlockToolRun:
-		return newToolRunTranscriptItem(gap, block.ToolRun, m.expandedToolRuns[block.ToolRun.ID], m.expandedToolRunCommands[block.ToolRun.ID])
+		return newToolRunTranscriptItem(gap, block.ToolRunRecord, block.ToolRun, m.expandedToolRuns[block.ToolRun.ID], m.expandedToolRunCommands[block.ToolRun.ID])
 	case block.Pending:
 		item := newPendingAssistantTranscriptItem(gap, block.Message.CreatedAt, m.showReasoning)
 		item.Reset(block.Message.CreatedAt, firstPartBody(block.Parts, domain.PartKindText), firstPartBody(block.Parts, domain.PartKindReasoning), m.pendingAssistantIndicatorLine())
@@ -3062,6 +3059,39 @@ func (m *Model) replaceTranscriptItemsInPlace(match func(transcriptItemControlle
 		updated = true
 	}
 	return updated
+}
+
+func (m *Model) replaceToolRunRecordInTranscript(record *appstate.ToolRunRecord) bool {
+	if record == nil {
+		return false
+	}
+	run := record.RunValue()
+	if idx, ok := m.toolRunItemIndexByID[strings.TrimSpace(run.ID)]; ok {
+		if idx >= 0 && idx < len(m.transcriptItems) {
+			if item, ok := m.transcriptItems[idx].(toolRunTranscriptItem); ok {
+				item.Bind(record)
+				item.UpdateRun(run)
+				return m.replaceTranscriptItemAt(idx)
+			}
+		}
+	}
+	if strings.TrimSpace(run.ToolCallID) == "" {
+		return false
+	}
+	for idx, item := range m.transcriptItems {
+		typed, ok := item.(toolRunTranscriptItem)
+		if !ok {
+			continue
+		}
+		block := m.transcriptBlockForController(item)
+		if block.ToolRun.ToolCallID != run.ToolCallID {
+			continue
+		}
+		typed.Bind(record)
+		typed.UpdateRun(run)
+		return m.replaceTranscriptItemAt(idx)
+	}
+	return false
 }
 
 func (m *Model) syncPendingTranscriptItem() bool {
@@ -4424,6 +4454,7 @@ func (m *Model) loadChatState(chat domain.Chat, messages []domain.Message, parts
 	} else {
 		m.chatState = appstate.NewChatState(messages, parts, approvals)
 	}
+	m.rebuildChatToolRuns()
 	m.chatStateChatID = chat.ID
 	m.syncChatMirrorsFromState()
 }
@@ -4431,6 +4462,7 @@ func (m *Model) loadChatState(chat domain.Chat, messages []domain.Message, parts
 func (m *Model) ensureChatState() *appstate.ChatState {
 	if m.chatState == nil {
 		m.chatState = appstate.NewChatState(m.messages, m.parts, m.approvals)
+		m.rebuildChatToolRuns()
 		m.chatStateChatID = m.currentChat.ID
 	}
 	return m.chatState

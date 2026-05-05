@@ -507,7 +507,7 @@ func PersistStandardResult(ctx context.Context, st *store.Store, sessionID int64
 		}
 		args[key] = value
 	}
-	if _, err := st.AddPart(ctx, msg.ID, domain.ToolOutputPayload{
+	part, err := st.AddPart(ctx, msg.ID, domain.ToolOutputPayload{
 		Tool:       req.Tool,
 		ToolCallID: req.ToolCallID,
 		Args:       args,
@@ -515,10 +515,11 @@ func PersistStandardResult(ctx context.Context, st *store.Store, sessionID int64
 		Text:       body,
 		Diff:       strings.TrimSpace(result.DiffText),
 		Result:     result.Stored,
-	}); err != nil {
+	})
+	if err != nil {
 		return nil, err
 	}
-	return EmitOnce(domain.Event{Kind: domain.EventKindToolResult, Text: body, Tool: req.Tool}), nil
+	return EmitOnce(domain.Event{Kind: domain.EventKindToolResult, Text: body, Tool: req.Tool, ToolCallID: req.ToolCallID, Message: msg, Parts: []domain.Part{part}}), nil
 }
 
 func WithChatID(ctx context.Context, chatID int64) context.Context {
