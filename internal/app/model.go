@@ -976,10 +976,18 @@ func (m Model) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 		m.recordEvent(msg.chatID, msg.event)
 		if msg.chatID == 0 || msg.chatID == m.currentChat.ID {
 			m.applyEvent(msg.event)
+			if msg.event.Kind == domain.EventKindToolCallDelta {
+				if load, ok, err := m.loadCurrentDetailsSync(); err != nil {
+					m.status = err.Error()
+					return m, m.syncWindowTitleCmd()
+				} else if ok {
+					m = m.UpdateLoad(load)
+				}
+			}
 		}
 		if msg.events != nil {
 			var refresh ui.Cmd
-			if (msg.chatID == 0 || msg.chatID == m.currentChat.ID) && shouldRefreshDetailsAfterEvent(msg.event) {
+			if msg.event.Kind != domain.EventKindToolCallDelta && (msg.chatID == 0 || msg.chatID == m.currentChat.ID) && shouldRefreshDetailsAfterEvent(msg.event) {
 				refresh = m.reloadDetailsCmd()
 			}
 			return m, ui.Batch(refresh, nextEventCmd(msg.chatID, msg.events), m.syncWindowTitleCmd())
@@ -4232,6 +4240,30 @@ func (m Model) reloadDetailsCmd() ui.Cmd {
 		load.preserveBusy = true
 		return load
 	}
+}
+
+func (m Model) loadCurrentDetailsSync() (loadMsg, bool, error) {
+	if m.currentSession.ID == 0 {
+		return loadMsg{}, false, nil
+	}
+	var msg ui.Msg
+	if m.currentChat.ID != 0 {
+		msg = m.loadChatCmd(m.currentSession.ID, m.currentChat.ID)()
+	} else {
+		msg = m.loadSessionCmd(m.currentSession.ID)()
+	}
+	load, ok := msg.(loadMsg)
+	if !ok {
+		if msg == nil {
+			return loadMsg{}, false, nil
+		}
+		if done, ok := msg.(promptDoneMsg); ok && done.err != nil {
+			return loadMsg{}, false, done.err
+		}
+		return loadMsg{}, false, fmt.Errorf("unexpected synchronous details load result %T", msg)
+	}
+	load.preserveBusy = true
+	return load, true, nil
 }
 
 func nextEventCmd(chatID int64, events <-chan domain.Event) ui.Cmd {

@@ -373,6 +373,68 @@ func TestShouldRefreshDetailsAfterEvent(t *testing.T) {
 	}
 }
 
+func TestToolCallDeltaRefreshesCurrentChatImmediately(t *testing.T) {
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	session, err := st.CreateSession(context.Background(), "test", "provider", "model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chat, err := st.DefaultChat(context.Background(), session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	msg, err := st.AddChatMessage(context.Background(), chat.ID, domain.MessageRoleAssistant, "tool:bash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.AddPart(context.Background(), msg.ID, domain.ToolCallPayload{
+		Tool:       domain.ToolKindBash,
+		ToolCallID: "call_1",
+		Args:       map[string]string{"command": "pwd"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	m := Model{
+		store:          st,
+		cfg:            testConfig(t),
+		currentSession: session,
+		currentChat:    chat,
+		parts:          map[int64][]domain.Part{},
+		composer:       textarea.New(),
+	}
+	events := make(chan domain.Event)
+	defer close(events)
+
+	updated, cmd := m.Update(eventMsg{
+		chatID: chat.ID,
+		event:  domain.Event{Kind: domain.EventKindToolCallDelta, Text: "tool calls persisted"},
+		events: events,
+	})
+	next := updated.(Model)
+	if cmd == nil {
+		t.Fatal("expected follow-up command for remaining event stream")
+	}
+	if len(next.messages) != 1 {
+		t.Fatalf("expected current chat to refresh immediately, got %d messages", len(next.messages))
+	}
+	blocks := next.transcriptBlocks()
+	if len(blocks) != 1 || blocks[0].Kind != transcriptBlockToolRun {
+		t.Fatalf("expected requested tool run block, got %#v", blocks)
+	}
+	if blocks[0].ToolRun.Status != ui.ToolRunStatusRequested {
+		t.Fatalf("expected requested status, got %#v", blocks[0].ToolRun)
+	}
+	if blocks[0].ToolRun.ToolCallID != "call_1" {
+		t.Fatalf("unexpected tool call id: %#v", blocks[0].ToolRun)
+	}
+}
+
 func TestSkillQuery(t *testing.T) {
 	query, start, ok := skillQuery("Investigate $rev")
 	if !ok || query != "rev" {
