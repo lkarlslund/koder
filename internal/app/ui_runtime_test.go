@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/theme"
 	"github.com/lkarlslund/koder/internal/ui"
 	"github.com/lkarlslund/koder/internal/ui/textarea"
@@ -256,6 +257,38 @@ func TestViewSurfacePermissionsPickerCloseDirtyRectsCoverDiff(t *testing.T) {
 	afterClose := m.viewSurface()
 	if strings.Contains(strings.Join(afterClose.Lines(), "\n"), "Permissions") {
 		t.Fatalf("expected permissions picker to be removed from frame, got %q", strings.Join(afterClose.Lines(), "\n"))
+	}
+	assertDirtyRectsCoverSurfaceDiff(t, withPicker, afterClose)
+}
+
+func TestViewSurfaceApprovalPermissionsPickerCloseRestoresApprovalDialog(t *testing.T) {
+	m := newRuntimeTestModel(t)
+	m.approvals = []store.Approval{{
+		ID:      7,
+		Tool:    domain.ToolKindBash,
+		Command: `{"command":"git status"}`,
+	}}
+	m.resize()
+	m.refreshViewport()
+
+	withApproval := m.viewSurface()
+	if !strings.Contains(strings.Join(withApproval.Lines(), "\n"), "Approve this time") {
+		t.Fatalf("expected approval dialog in frame, got %q", strings.Join(withApproval.Lines(), "\n"))
+	}
+
+	m.openApprovalPermissionsPicker()
+	withPicker := m.viewSurface()
+	if !strings.Contains(strings.Join(withPicker.Lines(), "\n"), "Permissions") {
+		t.Fatalf("expected permissions picker in frame, got %q", strings.Join(withPicker.Lines(), "\n"))
+	}
+
+	m.closePicker()
+	afterClose := m.viewSurface()
+	if strings.Contains(strings.Join(afterClose.Lines(), "\n"), "Permissions") {
+		t.Fatalf("expected permissions picker to be removed, got %q", strings.Join(afterClose.Lines(), "\n"))
+	}
+	if !strings.Contains(strings.Join(afterClose.Lines(), "\n"), "Approve this time") {
+		t.Fatalf("expected approval dialog to be visible again, got %q", strings.Join(afterClose.Lines(), "\n"))
 	}
 	assertDirtyRectsCoverSurfaceDiff(t, withPicker, afterClose)
 }

@@ -6889,6 +6889,7 @@ func (m *Model) withRootTimers(cmd ui.Cmd) ui.Cmd {
 func (m *Model) closePicker() {
 	m.picker = pickerModel{}
 	m.syncComposerVisibility()
+	m.invalidateMainSurface()
 }
 
 func (m *Model) closeThemeDialog() {
