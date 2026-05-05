@@ -7,9 +7,8 @@ func Text(text string) int {
 	if text == "" {
 		return 0
 	}
-	count := len(strings.Fields(text))
-	if count == 0 && strings.TrimSpace(text) != "" {
-		return 1
+	if strings.TrimSpace(text) == "" {
+		return 0
 	}
-	return count
+	return (len(text) + 3) / 4
 }

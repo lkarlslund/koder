@@ -97,7 +97,7 @@ func TestEstimateTailTokensUsesLatestUsageAnchor(t *testing.T) {
 	if !ok {
 		t.Fatal("expected latest usage anchor")
 	}
-	if got != 14 {
+	if got != 23 {
 		t.Fatalf("expected tail-only estimate, got %d", got)
 	}
 }

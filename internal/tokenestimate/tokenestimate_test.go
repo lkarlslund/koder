@@ -9,9 +9,10 @@ func TestText(t *testing.T) {
 		want int
 	}{
 		{name: "empty", text: "", want: 0},
-		{name: "words", text: "one two three", want: 3},
+		{name: "words", text: "one two three", want: 4},
 		{name: "punctuation", text: "...\n", want: 1},
 		{name: "spaces only", text: " \t\n", want: 0},
+		{name: "short text rounds up", text: "abcde", want: 2},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
