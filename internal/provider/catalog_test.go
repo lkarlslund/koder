@@ -24,20 +24,31 @@ func TestBuildDraftUsesDescriptorDefaults(t *testing.T) {
 	}
 }
 
-func TestBuildDraftPrefillsExistingProvider(t *testing.T) {
+func TestBuildDraftGeneratesUniqueProviderID(t *testing.T) {
 	draft, err := BuildDraft("openrouter", map[string]config.Provider{
-		"openrouter": {
-			Kind:         "openai-compatible",
-			Name:         "OpenRouter",
-			BaseURL:      "https://example.com/v1",
-			APIKey:       "secret",
-			DefaultModel: "model-x",
-		},
+		"openrouter": {},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if draft.BaseURL != "https://example.com/v1" || draft.APIKey != "secret" || draft.Model != "model-x" {
+	if draft.ProviderID != "openrouter-2" {
+		t.Fatalf("unexpected provider id: %q", draft.ProviderID)
+	}
+}
+
+func TestBuildDraftForExistingProvider(t *testing.T) {
+	draft, err := BuildDraftForExisting("openrouter-work", config.Provider{
+		TemplateID:   "openrouter",
+		Kind:         "openai-compatible",
+		Name:         "OpenRouter Work",
+		BaseURL:      "https://example.com/v1",
+		APIKey:       "secret",
+		DefaultModel: "model-x",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if draft.ProviderID != "openrouter-work" || draft.TemplateID != "openrouter" || draft.BaseURL != "https://example.com/v1" || draft.APIKey != "secret" || draft.Model != "model-x" {
 		t.Fatalf("expected existing provider values, got %#v", draft)
 	}
 }

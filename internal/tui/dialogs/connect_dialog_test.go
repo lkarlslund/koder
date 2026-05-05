@@ -146,7 +146,7 @@ func TestConnectDialogViewShowsEditorCursorAndTail(t *testing.T) {
 	dialog.selectProvider(provider.Catalog()[0])
 	dialog.draft.BaseURL = "https://example.com/very/long/path/that/should/show/the/end"
 	dialog.resetCursors()
-	dialog.fieldIndex = 1
+	dialog.fieldIndex = 2
 
 	got := renderConnectDialog(dialog, 90, theme.Resolve("tokyonight").Palette)
 	if !strings.Contains(got, "█") {
@@ -185,7 +185,7 @@ func TestConnectDialogFormSeparatesLabelsDescriptionsAndInputs(t *testing.T) {
 func TestConnectDialogMovesCursorAndInsertsAtCursor(t *testing.T) {
 	dialog := NewConnectDialog(provider.Catalog(), map[string]config.Provider{})
 	dialog.selectProvider(provider.Catalog()[0])
-	dialog.fieldIndex = 1
+	dialog.fieldIndex = 2
 	dialog.draft.BaseURL = "abcd"
 	dialog.resetCursors()
 	dialog.moveCursorTo(2)

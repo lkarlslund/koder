@@ -250,7 +250,7 @@ func BenchmarkViewWithModelDialog(b *testing.B) {
 			OwnedBy: "provider",
 		})
 	}
-	m.openModelDialog("benchmark", models)
+	m.openModelDialog(singleProviderModelEntries("benchmark", "benchmark", models))
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		_ = m.View()
@@ -524,7 +524,7 @@ func benchmarkModelDialogModel(b *testing.B) Model {
 			OwnedBy: "provider",
 		})
 	}
-	m.openModelDialog("benchmark", models)
+	m.openModelDialog(singleProviderModelEntries("benchmark", "benchmark", models))
 	return m
 }
 

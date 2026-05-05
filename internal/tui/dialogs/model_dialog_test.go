@@ -18,8 +18,16 @@ func renderModelDialog(dialog ModelDialog, width int, palette theme.Palette) str
 	return strings.Join(dialog.Surface(&ui.Context{Palette: palette}, ui.Rect{W: maxInt(width, size.W), H: size.H}).Lines(), "\n")
 }
 
+func modelEntries(providerID string, models []domain.Model) []ModelDialogEntry {
+	entries := make([]ModelDialogEntry, 0, len(models))
+	for _, model := range models {
+		entries = append(entries, ModelDialogEntry{ProviderID: providerID, ProviderLabel: providerID, Model: model})
+	}
+	return entries
+}
+
 func TestModelDialogSelectsModel(t *testing.T) {
-	dialog := NewModelDialog("openai", []domain.Model{{ID: "gpt-5.4"}}, "gpt-5.4", provider.ModelPresetAuto)
+	dialog := NewModelDialog(modelEntries("openai", []domain.Model{{ID: "gpt-5.4"}}), "openai", "gpt-5.4", provider.ModelPresetAuto)
 	action := dialog.Update(ui.KeyMsg{Type: ui.KeyEnter})
 	if action.Kind != ModelDialogActionSelect || action.ProviderID != "openai" || action.ModelID != "gpt-5.4" || action.PresetID != provider.ModelPresetAuto {
 		t.Fatalf("unexpected action: %#v", action)
@@ -27,31 +35,31 @@ func TestModelDialogSelectsModel(t *testing.T) {
 }
 
 func TestModelDialogFiltersModels(t *testing.T) {
-	dialog := NewModelDialog("openai", []domain.Model{{ID: "gpt-5.4"}, {ID: "gpt-4.1-mini"}}, "", provider.ModelPresetAuto)
+	dialog := NewModelDialog(modelEntries("openai", []domain.Model{{ID: "gpt-5.4"}, {ID: "gpt-4.1-mini"}}), "openai", "", provider.ModelPresetAuto)
 	dialog.Update(ui.KeyMsg{Type: ui.KeyRunes, Runes: []rune("m")})
 	dialog.Update(ui.KeyMsg{Type: ui.KeyRunes, Runes: []rune("i")})
 	dialog.Update(ui.KeyMsg{Type: ui.KeyRunes, Runes: []rune("n")})
 
-	if len(dialog.view) == 0 || dialog.view[0].ID != "gpt-4.1-mini" {
+	if len(dialog.view) == 0 || dialog.view[0].Model.ID != "gpt-4.1-mini" {
 		t.Fatalf("unexpected filtered models: %#v", dialog.view)
 	}
 }
 
 func TestModelDialogRenderShowsProvider(t *testing.T) {
-	dialog := NewModelDialog("openai", []domain.Model{{ID: "gpt-5.4", OwnedBy: "openai", SupportsImages: true, CapabilitiesKnown: true}}, "gpt-5.4", provider.ModelPresetAuto)
+	dialog := NewModelDialog(modelEntries("openai", []domain.Model{{ID: "gpt-5.4", OwnedBy: "openai", SupportsImages: true, CapabilitiesKnown: true}}), "openai", "gpt-5.4", provider.ModelPresetAuto)
 	got := renderModelDialog(dialog, 84, theme.Resolve("tokyonight").Palette)
-	if !strings.Contains(got, "Select Model") || !strings.Contains(got, "Provider: openai") || !strings.Contains(got, "gpt-5.4") || !strings.Contains(got, "openai") || !strings.Contains(got, "image") {
+	if !strings.Contains(got, "Select Model") || !strings.Contains(got, "gpt-5.4") || !strings.Contains(got, "openai") || !strings.Contains(got, "image") {
 		t.Fatalf("unexpected render: %q", got)
 	}
 }
 
 func TestModelDialogRenderUsesSingleLineTableRows(t *testing.T) {
-	dialog := NewModelDialog("openai", []domain.Model{
+	dialog := NewModelDialog(modelEntries("openai", []domain.Model{
 		{ID: "gpt-5.4", OwnedBy: "openai", SupportsImages: true, CapabilitiesKnown: true},
 		{ID: "gpt-4.1-mini", OwnedBy: "openai"},
-	}, "gpt-5.4", provider.ModelPresetAuto)
+	}), "openai", "gpt-5.4", provider.ModelPresetAuto)
 	got := renderModelDialog(dialog, 84, theme.Resolve("tokyonight").Palette)
-	if !strings.Contains(got, "Model") || !strings.Contains(got, "Owner") {
+	if !strings.Contains(got, "Model") || !strings.Contains(got, "Provider") || !strings.Contains(got, "Owner") {
 		t.Fatalf("expected table header row, got %q", got)
 	}
 	lines := strings.Split(got, "\n")
@@ -74,9 +82,9 @@ func TestModelDialogRenderUsesSingleLineTableRows(t *testing.T) {
 }
 
 func TestModelDialogRenderFallsBackToProviderWhenOwnerBlank(t *testing.T) {
-	dialog := NewModelDialog("ollama", []domain.Model{
+	dialog := NewModelDialog(modelEntries("ollama", []domain.Model{
 		{ID: "qwen2.5-coder:32b", OwnedBy: "", SupportsImages: true, CapabilitiesKnown: true},
-	}, "qwen2.5-coder:32b", provider.ModelPresetAuto)
+	}), "ollama", "qwen2.5-coder:32b", provider.ModelPresetAuto)
 	got := renderModelDialog(dialog, 84, theme.Resolve("tokyonight").Palette)
 	if !strings.Contains(got, "ollama") {
 		t.Fatalf("expected provider fallback in owner column, got %q", got)
@@ -84,9 +92,9 @@ func TestModelDialogRenderFallsBackToProviderWhenOwnerBlank(t *testing.T) {
 }
 
 func TestModelDialogRenderPreservesLongModelNames(t *testing.T) {
-	dialog := NewModelDialog("openrouter", []domain.Model{
+	dialog := NewModelDialog(modelEntries("openrouter", []domain.Model{
 		{ID: "anthropic/claude-sonnet-4-20250514", OwnedBy: "openrouter", SupportsImages: true, CapabilitiesKnown: true},
-	}, "anthropic/claude-sonnet-4-20250514", provider.ModelPresetAuto)
+	}), "openrouter", "anthropic/claude-sonnet-4-20250514", provider.ModelPresetAuto)
 	got := renderModelDialog(dialog, 96, theme.Resolve("tokyonight").Palette)
 	if !strings.Contains(got, "anthropic/claude-sonnet-4-20250514") {
 		t.Fatalf("expected long model id to stay visible at reasonable widths, got %q", got)
@@ -94,7 +102,7 @@ func TestModelDialogRenderPreservesLongModelNames(t *testing.T) {
 }
 
 func TestModelDialogTabThenEnterCancels(t *testing.T) {
-	dialog := NewModelDialog("openai", []domain.Model{{ID: "gpt-5.4"}}, "gpt-5.4", provider.ModelPresetAuto)
+	dialog := NewModelDialog(modelEntries("openai", []domain.Model{{ID: "gpt-5.4"}}), "openai", "gpt-5.4", provider.ModelPresetAuto)
 	dialog.Update(ui.KeyMsg{Type: ui.KeyTab})
 	dialog.Update(ui.KeyMsg{Type: ui.KeyTab})
 	dialog.Update(ui.KeyMsg{Type: ui.KeyRight})
@@ -109,7 +117,7 @@ func TestModelDialogKeepsFullWindowNearListEnd(t *testing.T) {
 	for i := range models {
 		models[i] = domain.Model{ID: "model-" + strconv.Itoa(i)}
 	}
-	dialog := NewModelDialog("openai", models, "", provider.ModelPresetAuto)
+	dialog := NewModelDialog(modelEntries("openai", models), "openai", "", provider.ModelPresetAuto)
 	for range 11 {
 		dialog.Update(ui.KeyMsg{Type: ui.KeyDown})
 	}
@@ -136,7 +144,7 @@ func TestModelDialogKeepsFullWindowNearListEnd(t *testing.T) {
 }
 
 func TestModelDialogUsesTighterWidthBudget(t *testing.T) {
-	dialog := NewModelDialog("ollama", []domain.Model{{ID: "qwen2.5-coder:32b", OwnedBy: "", SupportsImages: true, CapabilitiesKnown: true}}, "", provider.ModelPresetAuto)
+	dialog := NewModelDialog(modelEntries("ollama", []domain.Model{{ID: "qwen2.5-coder:32b", OwnedBy: "", SupportsImages: true, CapabilitiesKnown: true}}), "ollama", "", provider.ModelPresetAuto)
 	got := renderModelDialog(dialog, 120, theme.Resolve("tokyonight").Palette)
 	for _, line := range strings.Split(got, "\n") {
 		if ansi.StringWidth(line) > 76 {
@@ -146,7 +154,7 @@ func TestModelDialogUsesTighterWidthBudget(t *testing.T) {
 }
 
 func TestModelDialogPresetCyclesAndAutoMatches(t *testing.T) {
-	dialog := NewModelDialog("openai", []domain.Model{{ID: "Qwen/Qwen3.6-35B-A3B"}}, "Qwen/Qwen3.6-35B-A3B", provider.ModelPresetAuto)
+	dialog := NewModelDialog(modelEntries("openai", []domain.Model{{ID: "Qwen/Qwen3.6-35B-A3B"}}), "openai", "Qwen/Qwen3.6-35B-A3B", provider.ModelPresetAuto)
 	dialog.Update(ui.KeyMsg{Type: ui.KeyTab})
 	dialog.Update(ui.KeyMsg{Type: ui.KeyRight})
 	if dialog.PresetID != provider.ModelPresetDefault {

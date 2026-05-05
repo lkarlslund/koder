@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -497,6 +498,24 @@ type modelListMsg struct {
 	err         error
 }
 
+type modelCatalogMsg struct {
+	entries     []dialogs.ModelDialogEntry
+	preferredID string
+	postConnect bool
+	err         error
+}
+
+type providerInventoryItem struct {
+	Online     bool
+	ModelCount int
+	ErrorText  string
+}
+
+type providerInventoryMsg struct {
+	items map[string]providerInventoryItem
+	err   error
+}
+
 type contextWindowMsg struct {
 	providerID    string
 	contextWindow int
@@ -612,7 +631,7 @@ type Model struct {
 	llmPreviewWidth             int
 	llmPreviewHeight            int
 	connectDialog               *dialogs.ConnectDialog
-	disconnectDialog            *dialogs.DisconnectDialog
+	providerDialog              *dialogs.ProviderDialog
 	modelDialog                 *dialogs.ModelDialog
 	mcpDialog                   *dialogs.MCPDialog
 	toolsDialog                 *dialogs.ToolsDialog
@@ -647,6 +666,7 @@ type Model struct {
 	writeClipboardText          func(string) error
 	debugRuntimeHash            uint64
 	debugFrameLastSync          time.Time
+	providerInventory           map[string]providerInventoryItem
 }
 
 type pendingAssistantTurn struct {
@@ -1044,7 +1064,7 @@ func (m Model) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 		m.closeSessionDialog()
 		m.closeConnectDialog()
 		m.closeMCPDialog()
-		m.closeDisconnectDialog()
+		m.closeProviderDialog()
 		m.closeModelDialog()
 		m.closeAgentsModal()
 		m.agentsDrift = false
@@ -1101,6 +1121,18 @@ func (m Model) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 			m.status = fmt.Sprintf("Provider connected: %d models", modelCount)
 		}
 		return m, m.syncWindowTitleCmd()
+	case providerInventoryMsg:
+		m.invalidateBodyCache()
+		if msg.items != nil {
+			m.providerInventory = msg.items
+		}
+		if m.hasProviderDialog() {
+			m.providerDialog.SetItems(m.providerDialogItems())
+		}
+		if msg.err != nil {
+			m.status = msg.err.Error()
+		}
+		return m, m.syncWindowTitleCmd()
 	case modelListMsg:
 		m.invalidateBodyCache()
 		if msg.err != nil {
@@ -1111,11 +1143,32 @@ func (m Model) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 			m.status = "No models returned by provider"
 			return m, m.syncWindowTitleCmd()
 		}
-		m.openModelDialog(msg.providerID, msg.models)
+		label := msg.providerID
+		if cfg, ok := m.cfg.Provider(msg.providerID); ok {
+			label = providerEntryLabel(msg.providerID, cfg)
+		}
+		m.openModelDialog(singleProviderModelEntries(msg.providerID, label, msg.models))
 		if msg.postConnect {
 			m.status = "Choose an initial model"
 		} else {
 			m.status = fmt.Sprintf("Loaded %d models", len(msg.models))
+		}
+		return m, m.syncWindowTitleCmd()
+	case modelCatalogMsg:
+		m.invalidateBodyCache()
+		if msg.err != nil {
+			m.status = msg.err.Error()
+			return m, m.syncWindowTitleCmd()
+		}
+		if len(msg.entries) == 0 {
+			m.status = "No models returned by configured providers"
+			return m, m.syncWindowTitleCmd()
+		}
+		m.openModelDialog(msg.entries)
+		if msg.postConnect {
+			m.status = "Choose an initial model"
+		} else {
+			m.status = fmt.Sprintf("Loaded %d models", len(msg.entries))
 		}
 		return m, m.syncWindowTitleCmd()
 	case contextWindowMsg:
@@ -2824,7 +2877,7 @@ func (m *Model) invalidateTranscript() {
 
 func (m *Model) transcriptPlaceholderItems() []transcriptItemController {
 	if m.currentSession.ID == 0 && len(m.messages) == 0 && !m.cfg.HasUsableDefaultProvider() {
-		item := newPlaceholderTranscriptItem("no-provider", 0, "No provider configured.\n\nType /connect to add one before sending prompts.")
+		item := newPlaceholderTranscriptItem("no-provider", 0, "No provider configured.\n\nType /provider to add one before sending prompts.")
 		item.Refresh(m)
 		return []transcriptItemController{item}
 	}
@@ -4408,7 +4461,7 @@ func (m Model) UpdateLoad(msg loadMsg) Model {
 	m.closeToolsDialog()
 	m.closeConnectDialog()
 	m.closeMCPDialog()
-	m.closeDisconnectDialog()
+	m.closeProviderDialog()
 	m.closeModelDialog()
 	m.closeAgentsModal()
 	m.agentsDrift = m.currentSession.ProjectChecksum != "" &&
@@ -4465,10 +4518,10 @@ func (m *Model) handleLocalCommand(prompt string) (ui.Model, ui.Cmd, bool) {
 		m.resetComposerInput()
 		m.startBusy(busyScopeTranscript, "Compacting session...")
 		return m, ui.Batch(m.compactCmd(m.beginActiveOperation()), m.spinnerCmdIfNeeded()), true
-	case trimmed == "/connect":
+	case trimmed == "/connect", trimmed == "/disconnect", trimmed == "/provider":
 		m.resetComposerInput()
-		m.openConnectDialog()
-		return m, m.syncWindowTitleCmd(), true
+		m.openProviderDialog()
+		return m, ui.Batch(m.providerInventoryCmd(), m.syncWindowTitleCmd()), true
 	case trimmed == "/mcp":
 		m.resetComposerInput()
 		m.openMCPDialog()
@@ -4481,23 +4534,14 @@ func (m *Model) handleLocalCommand(prompt string) (ui.Model, ui.Cmd, bool) {
 		m.resetComposerInput()
 		m.status = m.mcpStatusSummary()
 		return m, m.syncWindowTitleCmd(), true
-	case trimmed == "/disconnect":
-		m.resetComposerInput()
-		if len(m.cfg.Providers) == 0 {
-			m.status = "No configured providers to disconnect"
-			return m, m.syncWindowTitleCmd(), true
-		}
-		m.openDisconnectDialog()
-		return m, m.syncWindowTitleCmd(), true
 	case trimmed == "/model":
 		m.resetComposerInput()
-		providerID := m.activeProviderID()
-		if providerID == "" || !m.cfg.HasUsableProvider(providerID) {
-			m.status = "Configure a provider first with /connect"
+		if len(m.cfg.Providers) == 0 {
+			m.status = "Configure a provider first with /provider"
 			return m, m.syncWindowTitleCmd(), true
 		}
-		m.status = fmt.Sprintf("Loading models for %s…", providerID)
-		return m, ui.Batch(m.loadModelsCmd(providerID, false), m.syncWindowTitleCmd()), true
+		m.status = "Loading models…"
+		return m, ui.Batch(m.loadAllModelsCmd("", false), m.syncWindowTitleCmd()), true
 	case trimmed == "/theme":
 		m.resetComposerInput()
 		m.openThemePicker()
@@ -5948,7 +5992,7 @@ func (m Model) openDialogName() string {
 	switch {
 	case m.hasModelDialog():
 		return "model"
-	case m.hasDisconnectDialog():
+	case m.hasProviderDialog():
 		return "disconnect"
 	case m.hasConnectDialog():
 		return "connect"
@@ -6032,13 +6076,13 @@ func (m *Model) shouldAnimateSpinner() bool {
 func (m *Model) canSendPrompt() (bool, string) {
 	session := m.draftSession()
 	if strings.TrimSpace(session.ProviderID) == "" {
-		return false, "Configure a provider first with /connect"
+		return false, "Configure a provider first with /provider"
 	}
 	if !m.cfg.HasUsableProvider(session.ProviderID) {
-		return false, fmt.Sprintf("Provider %q is not configured; use /connect", session.ProviderID)
+		return false, fmt.Sprintf("Provider %q is not configured; use /provider", session.ProviderID)
 	}
 	if strings.TrimSpace(session.ModelID) == "" {
-		return false, "Select a default model with /connect before sending prompts"
+		return false, "Select a default model with /model before sending prompts"
 	}
 	for _, draft := range m.draftAttachments {
 		kind := attachment.ClassifyMIME(draft.MIME)
@@ -6521,11 +6565,11 @@ func (m *Model) renderMCPEditDialogElement() ui.Node {
 	return m.mcpDialog.EditorNode(max(0, m.width), m.palette)
 }
 
-func (m *Model) renderDisconnectDialogElement() ui.Node {
-	if !m.hasDisconnectDialog() {
+func (m *Model) renderProviderDialogElement() ui.Node {
+	if !m.hasProviderDialog() {
 		return nil
 	}
-	return ui.AsNode(m.disconnectDialog)
+	return ui.AsNode(m.providerDialog)
 }
 
 func (m *Model) renderModelDialogElement() ui.Node {
@@ -6627,10 +6671,10 @@ func (m *Model) handleConnectDialogKey(msg ui.KeyMsg) ui.Cmd {
 			return m.syncWindowTitleCmd()
 		}
 		m.closeConnectDialog()
-		m.status = fmt.Sprintf("Connected provider %s", action.Draft.ProviderID)
+		m.status = fmt.Sprintf("Saved provider %s", action.Draft.ProviderID)
 		cfg, _ := m.cfg.Provider(action.Draft.ProviderID)
 		return ui.Batch(
-			m.loadModelsCmd(action.Draft.ProviderID, true),
+			m.loadAllModelsCmd(action.Draft.ProviderID, true),
 			m.detectContextWindowCmd(action.Draft.ProviderID, cfg, action.Draft.Model),
 			m.syncWindowTitleCmd(),
 		)
@@ -6715,25 +6759,40 @@ func (m *Model) applyMCPDialogAction(action dialogs.MCPDialogAction, fromEditor 
 	return nil
 }
 
-func (m *Model) handleDisconnectDialogKey(msg ui.KeyMsg) ui.Cmd {
-	if !m.hasDisconnectDialog() {
+func (m *Model) handleProviderDialogKey(msg ui.KeyMsg) ui.Cmd {
+	if !m.hasProviderDialog() {
 		return nil
 	}
-	action := m.disconnectDialog.Update(msg)
+	action := m.providerDialog.Update(msg)
 	switch action.Kind {
-	case dialogs.DisconnectDialogActionSelect:
+	case dialogs.ProviderDialogActionAdd:
+		m.closeProviderDialog()
+		m.openConnectDialog()
+		m.status = "Add provider"
+		return m.syncWindowTitleCmd()
+	case dialogs.ProviderDialogActionEdit:
+		m.closeProviderDialog()
+		if err := m.openEditProviderDialog(action.ProviderID); err != nil {
+			m.status = err.Error()
+			return m.syncWindowTitleCmd()
+		}
+		m.status = fmt.Sprintf("Editing provider %s", action.ProviderID)
+		return m.syncWindowTitleCmd()
+	case dialogs.ProviderDialogActionDelete:
 		if err := m.disconnectProvider(action.ProviderID); err != nil {
 			m.status = err.Error()
 			return m.syncWindowTitleCmd()
 		}
-		m.closeDisconnectDialog()
-		m.status = fmt.Sprintf("Disconnected provider %s", action.ProviderID)
+		if m.hasProviderDialog() {
+			m.providerDialog.SetItems(m.providerDialogItems())
+		}
+		m.status = fmt.Sprintf("Deleted provider %s", action.ProviderID)
 		m.invalidateTranscript()
 		m.refreshViewport()
 		return m.syncWindowTitleCmd()
-	case dialogs.DisconnectDialogActionCancel:
-		m.closeDisconnectDialog()
-		m.status = "Provider disconnect cancelled"
+	case dialogs.ProviderDialogActionCancel:
+		m.closeProviderDialog()
+		m.status = "Provider dialog closed"
 		return m.syncWindowTitleCmd()
 	default:
 		return nil
@@ -6845,8 +6904,7 @@ func internalSlashCommands() []slashCommand {
 		{Name: "/chat next", Description: "Switch to the next chat in this session"},
 		{Name: "/chat prev", Description: "Switch to the previous chat in this session"},
 		{Name: "/compact", Description: "Summarize old context"},
-		{Name: "/connect", Description: "Configure a provider"},
-		{Name: "/disconnect", Description: "Remove a configured provider"},
+		{Name: "/provider", Description: "Manage configured providers"},
 		{Name: "/fork", Description: "Branch from the current session"},
 		{Name: "/mcp", Description: "Manage remote MCP servers"},
 		{Name: "/mcp-reload", Description: "Reconnect configured MCP servers"},
@@ -7008,7 +7066,7 @@ func (m *Model) hasThemeDialog() bool {
 
 func (m *Model) hasModalOverlay() bool {
 	return m.hasModelDialog() ||
-		m.hasDisconnectDialog() ||
+		m.hasProviderDialog() ||
 		m.hasToolsDialog() ||
 		m.hasConnectDialog() ||
 		m.hasMCPDialog() ||
@@ -7196,12 +7254,12 @@ func (m *Model) closeMCPDialog() {
 	m.syncComposerVisibility()
 }
 
-func (m *Model) hasDisconnectDialog() bool {
-	return m.disconnectDialog != nil
+func (m *Model) hasProviderDialog() bool {
+	return m.providerDialog != nil
 }
 
-func (m *Model) closeDisconnectDialog() {
-	m.disconnectDialog = nil
+func (m *Model) closeProviderDialog() {
+	m.providerDialog = nil
 	m.syncComposerVisibility()
 }
 
@@ -7295,6 +7353,25 @@ func (m *Model) openConnectDialog() {
 	m.syncComposerVisibility()
 }
 
+func (m *Model) openEditProviderDialog(providerID string) error {
+	providerID = strings.TrimSpace(providerID)
+	if providerID == "" {
+		return fmt.Errorf("provider id is required")
+	}
+	providerCfg, ok := m.cfg.Provider(providerID)
+	if !ok {
+		return fmt.Errorf("provider %q not configured", providerID)
+	}
+	draft, err := provider.BuildDraftForExisting(providerID, providerCfg)
+	if err != nil {
+		return err
+	}
+	dialog := dialogs.NewConnectDialogForEdit(provider.Catalog(), m.cfg.Providers, draft)
+	m.connectDialog = &dialog
+	m.syncComposerVisibility()
+	return nil
+}
+
 func (m *Model) openMCPDialog() {
 	dialog := dialogs.NewMCPDialog(m.agent.ListMCPServers(), m.cfg.MCPServers)
 	m.mcpDialog = &dialog
@@ -7333,57 +7410,80 @@ func (m *Model) mcpDialogEditID() string {
 	return m.mcpDialog.EditID()
 }
 
-func (m *Model) openDisconnectDialog() {
-	items := make([]dialogs.ProviderItem, 0, len(m.cfg.Providers))
+func (m *Model) openProviderDialog() {
+	dialog := dialogs.NewProviderDialog(m.providerDialogItems())
+	m.providerDialog = &dialog
+	m.syncComposerVisibility()
+}
+
+func (m *Model) providerDialogItems() []dialogs.EntityListItem {
+	items := make([]dialogs.EntityListItem, 0, len(m.cfg.Providers))
 	ids := make([]string, 0, len(m.cfg.Providers))
 	for id := range m.cfg.Providers {
 		ids = append(ids, id)
 	}
 	slices.Sort(ids)
 	for _, id := range ids {
-		p := m.cfg.Providers[id]
-		title := id
-		if strings.TrimSpace(p.Name) != "" {
-			title = p.Name
+		cfg := m.cfg.Providers[id]
+		health := m.providerInventory[id]
+		status := "checking"
+		modelCount := "-"
+		if strings.TrimSpace(health.ErrorText) != "" {
+			status = "offline"
+		} else if health.Online {
+			status = "online"
+			modelCount = strconv.Itoa(health.ModelCount)
 		}
-		desc := strings.TrimSpace(p.BaseURL)
-		if desc == "" {
-			desc = p.Kind
-		}
+		name := providerEntryLabel(id, cfg)
+		template := providerTemplateLabel(cfg)
+		remote := providerRemoteAddr(cfg)
 		details := []string{
-			fmt.Sprintf("Provider ID: %s", id),
-			fmt.Sprintf("Kind:        %s", blankAsDash(p.Kind)),
-			fmt.Sprintf("Base URL:    %s", blankAsDash(p.BaseURL)),
-			fmt.Sprintf("Model:       %s", blankAsDash(p.DefaultModel)),
+			fmt.Sprintf("ID: %s", id),
+			fmt.Sprintf("Name: %s", blankAsDash(name)),
+			fmt.Sprintf("Type: %s", blankAsDash(template)),
+			fmt.Sprintf("Remote: %s", blankAsDash(remote)),
+			fmt.Sprintf("Default model: %s", blankAsDash(cfg.DefaultModel)),
+			fmt.Sprintf("Status: %s", status),
+		}
+		if health.Online {
+			details = append(details, fmt.Sprintf("Detected models: %d", health.ModelCount))
+		}
+		if strings.TrimSpace(health.ErrorText) != "" {
+			details = append(details, "Error: "+health.ErrorText)
 		}
 		if id == m.cfg.DefaultProvider {
-			details = append(details, "Default:     yes")
+			details = append(details, "Default provider: yes")
 		}
-		items = append(items, dialogs.ProviderItem{
-			ID:          id,
-			Title:       title,
-			Description: desc,
-			Details:     details,
+		items = append(items, dialogs.EntityListItem{
+			ID: id,
+			Cells: []string{
+				name,
+				status,
+				modelCount,
+				template,
+				remote,
+			},
+			Search:  strings.Join([]string{id, name, template, remote, status}, " "),
+			Details: strings.Join(details, "\n"),
 		})
 	}
-	dialog := dialogs.NewDisconnectDialog(items)
-	m.disconnectDialog = &dialog
-	m.syncComposerVisibility()
+	return items
 }
 
-func (m *Model) openModelDialog(providerID string, models []domain.Model) {
-	current := ""
-	if m.currentSession.ProviderID == providerID || strings.TrimSpace(m.currentSession.ProviderID) == "" {
-		current = m.currentSession.ModelID
+func (m *Model) openModelDialog(entries []dialogs.ModelDialogEntry) {
+	currentProviderID := strings.TrimSpace(m.currentSession.ProviderID)
+	if currentProviderID == "" {
+		currentProviderID = strings.TrimSpace(m.cfg.DefaultProvider)
 	}
-	if strings.TrimSpace(current) == "" {
-		if providerCfg, ok := m.cfg.Provider(providerID); ok {
-			current = providerCfg.DefaultModel
+	currentModelID := strings.TrimSpace(m.currentSession.ModelID)
+	if currentModelID == "" {
+		if providerCfg, ok := m.cfg.Provider(currentProviderID); ok {
+			currentModelID = providerCfg.DefaultModel
 		} else {
-			current = m.cfg.DefaultModel
+			currentModelID = m.cfg.DefaultModel
 		}
 	}
-	dialog := dialogs.NewModelDialog(providerID, models, current, m.providerModelPreset(providerID))
+	dialog := dialogs.NewModelDialog(entries, currentProviderID, currentModelID, m.providerModelPreset(currentProviderID))
 	m.modelDialog = &dialog
 	m.syncComposerVisibility()
 }
@@ -7474,13 +7574,12 @@ func (m *Model) openHelpModal() {
 		"/agents             show resolved AGENTS details",
 		"/agents refresh     recompute project instructions",
 		"/compact            compact session history",
-		"/connect            configure a provider",
-		"/disconnect         remove a configured provider",
+		"/provider           manage configured providers",
 		"/fork               fork current session",
 		"/mcp                manage remote MCP servers",
 		"/mcp-reload         reconnect MCP servers",
 		"/mcp-status         show MCP status",
-		"/model              choose a model",
+		"/model              choose a model from all providers",
 		"/new                create a new session",
 		"/permissions        change permission mode",
 		"/preferences        open UI preferences",
@@ -7700,6 +7799,88 @@ func (m Model) loadModelsCmd(providerID string, postConnect bool) ui.Cmd {
 	}
 }
 
+func (m Model) loadAllModelsCmd(preferredProviderID string, postConnect bool) ui.Cmd {
+	return func() ui.Msg {
+		ids := make([]string, 0, len(m.cfg.Providers))
+		for id := range m.cfg.Providers {
+			if m.cfg.HasUsableProvider(id) {
+				ids = append(ids, id)
+			}
+		}
+		slices.Sort(ids)
+		entries := make([]dialogs.ModelDialogEntry, 0, 32)
+		var failures []string
+		for _, providerID := range ids {
+			cfg, ok := m.cfg.Provider(providerID)
+			if !ok {
+				continue
+			}
+			client, err := provider.New(providerID, cfg, m.debug)
+			if err != nil {
+				failures = append(failures, providerID)
+				continue
+			}
+			models, err := client.ListModels(context.Background())
+			if err != nil {
+				failures = append(failures, providerID)
+				continue
+			}
+			models, err = m.capabilityStore().EnrichModels(providerID, cfg, models)
+			if err != nil {
+				failures = append(failures, providerID)
+				continue
+			}
+			label := providerEntryLabel(providerID, cfg)
+			for _, item := range models {
+				entries = append(entries, dialogs.ModelDialogEntry{
+					ProviderID:    providerID,
+					ProviderLabel: label,
+					Model:         item,
+				})
+			}
+		}
+		if len(entries) == 0 && len(failures) > 0 {
+			return modelCatalogMsg{err: fmt.Errorf("failed to load models from %s", strings.Join(failures, ", "))}
+		}
+		slices.SortFunc(entries, func(a, b dialogs.ModelDialogEntry) int {
+			if cmp := strings.Compare(a.ProviderLabel, b.ProviderLabel); cmp != 0 {
+				return cmp
+			}
+			return strings.Compare(a.Model.ID, b.Model.ID)
+		})
+		return modelCatalogMsg{entries: entries, preferredID: preferredProviderID, postConnect: postConnect}
+	}
+}
+
+func (m Model) providerInventoryCmd() ui.Cmd {
+	return func() ui.Msg {
+		items := make(map[string]providerInventoryItem, len(m.cfg.Providers))
+		ids := make([]string, 0, len(m.cfg.Providers))
+		for id := range m.cfg.Providers {
+			ids = append(ids, id)
+		}
+		slices.Sort(ids)
+		for _, id := range ids {
+			cfg, ok := m.cfg.Provider(id)
+			if !ok {
+				continue
+			}
+			draft, err := provider.BuildDraftForExisting(id, cfg)
+			if err != nil {
+				items[id] = providerInventoryItem{ErrorText: err.Error()}
+				continue
+			}
+			result, err := provider.Probe(context.Background(), draft, m.debug)
+			if err != nil {
+				items[id] = providerInventoryItem{ErrorText: err.Error()}
+				continue
+			}
+			items[id] = providerInventoryItem{Online: true, ModelCount: len(result.Models)}
+		}
+		return providerInventoryMsg{items: items}
+	}
+}
+
 func (m Model) capabilityStore() *provider.CapabilityStore {
 	if m.caps != nil {
 		return m.caps
@@ -7714,15 +7895,73 @@ func providerCfgForDraft(cfg config.Config, providerID string) config.Provider {
 	return config.Provider{}
 }
 
+func providerEntryLabel(providerID string, providerCfg config.Provider) string {
+	if strings.TrimSpace(providerCfg.Name) != "" {
+		return strings.TrimSpace(providerCfg.Name)
+	}
+	return strings.TrimSpace(providerID)
+}
+
+func singleProviderModelEntries(providerID, providerLabel string, models []domain.Model) []dialogs.ModelDialogEntry {
+	entries := make([]dialogs.ModelDialogEntry, 0, len(models))
+	for _, item := range models {
+		entries = append(entries, dialogs.ModelDialogEntry{
+			ProviderID:    providerID,
+			ProviderLabel: providerLabel,
+			Model:         item,
+		})
+	}
+	return entries
+}
+
+func providerTemplateLabel(providerCfg config.Provider) string {
+	if desc, ok := provider.Lookup(strings.TrimSpace(providerCfg.TemplateID)); ok {
+		return desc.Title
+	}
+	if desc, ok := provider.Lookup(strings.TrimSpace(providerCfg.Name)); ok {
+		return desc.Title
+	}
+	return firstNonEmptyString(strings.TrimSpace(providerCfg.TemplateID), strings.TrimSpace(providerCfg.Kind), "Compatible")
+}
+
+func providerRemoteAddr(providerCfg config.Provider) string {
+	raw := strings.TrimSpace(providerCfg.BaseURL)
+	if raw == "" {
+		return "-"
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return raw
+	}
+	if strings.TrimSpace(parsed.Host) != "" {
+		return parsed.Host
+	}
+	return raw
+}
+
 func (m *Model) saveProviderDraft(draft provider.ConnectDraft) error {
 	if err := provider.ValidateDraft(draft); err != nil {
 		return err
+	}
+	originalID := strings.TrimSpace(draft.OriginalProviderID)
+	draft.ProviderID = strings.TrimSpace(draft.ProviderID)
+	if draft.ProviderID == "" {
+		return fmt.Errorf("provider id is required")
+	}
+	if originalID != "" && originalID != draft.ProviderID {
+		if _, exists := m.cfg.Providers[draft.ProviderID]; exists {
+			return fmt.Errorf("provider %q already exists", draft.ProviderID)
+		}
 	}
 	if m.cfg.Providers == nil {
 		m.cfg.Providers = map[string]config.Provider{}
 	}
 	next := draft.ToConfig()
-	existing, ok := m.cfg.Providers[draft.ProviderID]
+	lookupID := draft.ProviderID
+	if originalID != "" {
+		lookupID = originalID
+	}
+	existing, ok := m.cfg.Providers[lookupID]
 	if ok {
 		if next.ContextWindow == 0 {
 			next.ContextWindow = existing.ContextWindow
@@ -7748,14 +7987,19 @@ func (m *Model) saveProviderDraft(draft provider.ConnectDraft) error {
 		next.Disabled = false
 	}
 	if strings.TrimSpace(next.Name) == "" {
-		if desc, found := provider.Lookup(draft.ProviderID); found {
+		if desc, found := provider.Lookup(draft.TemplateID); found {
 			next.Name = desc.Title
 		} else {
 			next.Name = draft.ProviderID
 		}
 	}
+	if originalID != "" && originalID != draft.ProviderID {
+		delete(m.cfg.Providers, originalID)
+	}
 	m.cfg.Providers[draft.ProviderID] = next
-	m.cfg.DefaultProvider = draft.ProviderID
+	if m.cfg.DefaultProvider == "" || m.cfg.DefaultProvider == originalID || m.cfg.DefaultProvider == draft.ProviderID {
+		m.cfg.DefaultProvider = draft.ProviderID
+	}
 	m.cfg.DefaultModel = draft.Model
 	if err := m.cfg.Save(); err != nil {
 		return err
@@ -7763,7 +8007,7 @@ func (m *Model) saveProviderDraft(draft provider.ConnectDraft) error {
 	if m.agent != nil {
 		m.agent.UpdateConfig(m.cfg)
 	}
-	if strings.TrimSpace(m.currentSession.ProviderID) == "" || !m.cfg.HasUsableProvider(m.currentSession.ProviderID) {
+	if strings.TrimSpace(m.currentSession.ProviderID) == "" || !m.cfg.HasUsableProvider(m.currentSession.ProviderID) || strings.TrimSpace(m.currentSession.ProviderID) == originalID {
 		m.currentSession.ProviderID = draft.ProviderID
 	}
 	if strings.TrimSpace(m.currentSession.ModelID) == "" {

@@ -34,6 +34,7 @@ type Store struct {
 }
 
 type Provider struct {
+	TemplateID    string            `toml:"template_id"`
 	Kind          string            `toml:"kind"`
 	AuthMethod    string            `toml:"auth_method"`
 	Name          string            `toml:"name"`

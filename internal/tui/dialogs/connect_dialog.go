@@ -50,6 +50,7 @@ const (
 
 type ConnectDialog struct {
 	ui.PassiveNode
+	title      string
 	stage      connectStage
 	query      string
 	index      int
@@ -68,12 +69,33 @@ type ConnectDialog struct {
 
 func NewConnectDialog(items []provider.Descriptor, configured map[string]config.Provider) ConnectDialog {
 	dialog := ConnectDialog{
+		title:      "Add Provider",
 		stage:      connectStageProvider,
 		items:      items,
 		configured: configured,
 		editors:    map[string]textarea.Model{},
 	}
 	dialog.refilter()
+	return dialog
+}
+
+func NewConnectDialogForEdit(items []provider.Descriptor, configured map[string]config.Provider, draft provider.ConnectDraft) ConnectDialog {
+	dialog := ConnectDialog{
+		title:      "Edit Provider",
+		stage:      connectStageForm,
+		items:      items,
+		configured: configured,
+		draft:      draft,
+		editors:    map[string]textarea.Model{},
+		focus:      connectFocusFields,
+		buttonIdx:  1,
+	}
+	if item, ok := provider.Lookup(draft.TemplateID); ok {
+		dialog.selected = item
+	} else if item, ok := provider.Lookup(draft.ProviderID); ok {
+		dialog.selected = item
+	}
+	dialog.resetEditors()
 	return dialog
 }
 
@@ -280,7 +302,7 @@ func (d *ConnectDialog) providerListDialog(width int, palette theme.Palette) ui.
 		body = append(body, ui.Fixed(ui.Spacer{H: 1}), ui.Fixed(ui.Label{Text: status}))
 	}
 	return ui.AsNode(ui.WindowFrame{
-		Title: "Connect Provider",
+		Title: d.dialogTitle(),
 		Width: dialogWidth,
 		Content: ui.AsNode(ui.NewFlexBox(
 			ui.DirectionVertical,
@@ -345,7 +367,7 @@ func (d *ConnectDialog) formDialog(width int, palette theme.Palette) ui.Node {
 	buttons.Index = d.buttonIdx
 	buttons.Width = maxInt(0, dialogWidth-6)
 	return ui.AsNode(ui.WindowFrame{
-		Title: "Connect Provider",
+		Title: d.dialogTitle(),
 		Width: dialogWidth,
 		Content: ui.AsNode(ui.NewFlexBox(
 			ui.DirectionVertical,
@@ -493,6 +515,7 @@ type connectField struct {
 
 func (d ConnectDialog) formFields() []connectField {
 	fields := []connectField{
+		{ID: "provider_id", Label: "ID", Description: "Unique identifier for this provider entry"},
 		{ID: "name", Label: "Name", Description: "Stored label for this provider entry"},
 		{ID: "base_url", Label: "Base URL", Description: "OpenAI-compatible API endpoint"},
 		{ID: "api_key", Label: "API Key", Description: "Optional; leave blank for unauthenticated backends"},
@@ -574,6 +597,8 @@ func (d *ConnectDialog) advanceFocus(delta int) {
 
 func (d ConnectDialog) fieldValue(id string) string {
 	switch id {
+	case "provider_id":
+		return d.draft.ProviderID
 	case "name":
 		return d.draft.Name
 	case "base_url":
@@ -587,6 +612,8 @@ func (d ConnectDialog) fieldValue(id string) string {
 
 func (d *ConnectDialog) setFieldValue(id, value string) {
 	switch id {
+	case "provider_id":
+		d.draft.ProviderID = value
 	case "name":
 		d.draft.Name = value
 	case "base_url":
@@ -711,4 +738,12 @@ func (d ConnectDialog) renderStatusElement(palette theme.Palette) ui.Node {
 	}
 	_ = labelColor
 	return ui.AsNode(ui.Static{Content: "[" + label + "] " + status})
+}
+
+func (d ConnectDialog) dialogTitle() string {
+	title := strings.TrimSpace(d.title)
+	if title == "" {
+		return "Provider"
+	}
+	return title
 }

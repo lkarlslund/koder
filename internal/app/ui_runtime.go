@@ -312,29 +312,44 @@ func (m *Model) overlayWindows() []ui.Window {
 			}
 		}))
 	}
-	if m.hasDisconnectDialog() {
-		windows = append(windows, m.centeredWindow(disconnectWindowID, 30, m.renderDisconnectDialogElement(), func(m *Model, msg ui.KeyMsg) ui.Cmd {
-			return m.handleDisconnectDialogKey(msg)
+	if m.hasProviderDialog() {
+		windows = append(windows, m.centeredWindow(disconnectWindowID, 30, m.renderProviderDialogElement(), func(m *Model, msg ui.KeyMsg) ui.Cmd {
+			return m.handleProviderDialogKey(msg)
 		}, func(m *Model, controlID string) ui.Cmd {
 			if controlID == "window-close" {
-				m.closeDisconnectDialog()
-				m.status = "Provider disconnect cancelled"
+				m.closeProviderDialog()
+				m.status = "Provider dialog closed"
 				return m.syncWindowTitleCmd()
 			}
-			action := m.disconnectDialog.ActivateControl(controlID)
+			action := m.providerDialog.ActivateControl(controlID)
 			switch action.Kind {
-			case dialogs.DisconnectDialogActionSelect:
+			case dialogs.ProviderDialogActionAdd:
+				m.closeProviderDialog()
+				m.openConnectDialog()
+				m.status = "Add provider"
+				return m.syncWindowTitleCmd()
+			case dialogs.ProviderDialogActionEdit:
+				m.closeProviderDialog()
+				if err := m.openEditProviderDialog(action.ProviderID); err != nil {
+					m.status = err.Error()
+					return m.syncWindowTitleCmd()
+				}
+				m.status = "Editing provider " + action.ProviderID
+				return m.syncWindowTitleCmd()
+			case dialogs.ProviderDialogActionDelete:
 				if err := m.disconnectProvider(action.ProviderID); err != nil {
 					m.status = err.Error()
 					return m.syncWindowTitleCmd()
 				}
-				m.closeDisconnectDialog()
-				m.status = "Disconnected provider " + action.ProviderID
+				if m.hasProviderDialog() {
+					m.providerDialog.SetItems(m.providerDialogItems())
+				}
+				m.status = "Deleted provider " + action.ProviderID
 				m.refreshViewport()
 				return m.syncWindowTitleCmd()
-			case dialogs.DisconnectDialogActionCancel:
-				m.closeDisconnectDialog()
-				m.status = "Provider disconnect cancelled"
+			case dialogs.ProviderDialogActionCancel:
+				m.closeProviderDialog()
+				m.status = "Provider dialog closed"
 				return m.syncWindowTitleCmd()
 			default:
 				return nil
@@ -390,8 +405,8 @@ func (m *Model) overlayWindows() []ui.Window {
 					return m.syncWindowTitleCmd()
 				}
 				m.closeConnectDialog()
-				m.status = fmt.Sprintf("Connected provider %s", action.Draft.ProviderID)
-				return ui.Batch(m.loadModelsCmd(action.Draft.ProviderID, true), m.syncWindowTitleCmd())
+				m.status = fmt.Sprintf("Saved provider %s", action.Draft.ProviderID)
+				return ui.Batch(m.loadAllModelsCmd(action.Draft.ProviderID, true), m.syncWindowTitleCmd())
 			case dialogs.ProviderConnectActionCancel:
 				m.closeConnectDialog()
 				m.status = "Provider connect cancelled"

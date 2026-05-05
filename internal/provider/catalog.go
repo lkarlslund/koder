@@ -31,13 +31,15 @@ type Descriptor struct {
 }
 
 type ConnectDraft struct {
-	ProviderID string
-	Kind       string
-	Name       string
-	BaseURL    string
-	APIKey     string
-	Model      string
-	Headers    map[string]string
+	OriginalProviderID string
+	ProviderID         string
+	TemplateID         string
+	Kind               string
+	Name               string
+	BaseURL            string
+	APIKey             string
+	Model              string
+	Headers            map[string]string
 }
 
 type ProbeResult struct {
@@ -79,26 +81,49 @@ func BuildDraft(id string, existing map[string]config.Provider) (ConnectDraft, e
 		return ConnectDraft{}, fmt.Errorf("provider %q not found", id)
 	}
 	draft := ConnectDraft{
-		ProviderID: desc.ID,
-		Kind:       ProviderKindCompatible,
-		Name:       desc.Title,
-		BaseURL:    desc.DefaultBaseURL,
-		Model:      desc.ModelHint,
-		Headers:    cloneHeaders(desc.Headers),
-	}
-	if existingCfg, ok := existing[desc.ID]; ok {
-		draft.Kind = firstNonEmpty(existingCfg.Kind, ProviderKindCompatible)
-		draft.Name = firstNonEmpty(existingCfg.Name, desc.Title)
-		draft.BaseURL = firstNonEmpty(existingCfg.BaseURL, desc.DefaultBaseURL)
-		draft.APIKey = existingCfg.APIKey
-		draft.Model = firstNonEmpty(existingCfg.DefaultModel, desc.ModelHint)
-		draft.Headers = cloneHeaders(existingCfg.Headers)
+		OriginalProviderID: uniqueProviderID(desc.ID, existing),
+		ProviderID:         uniqueProviderID(desc.ID, existing),
+		TemplateID:         desc.ID,
+		Kind:               ProviderKindCompatible,
+		Name:               desc.Title,
+		BaseURL:            desc.DefaultBaseURL,
+		Model:              desc.ModelHint,
+		Headers:            cloneHeaders(desc.Headers),
 	}
 	return draft, nil
 }
 
+func BuildDraftForExisting(id string, existing config.Provider) (ConnectDraft, error) {
+	templateID := strings.TrimSpace(existing.TemplateID)
+	if templateID == "" {
+		templateID = inferTemplateID(id, existing)
+	}
+	desc, ok := Lookup(templateID)
+	if !ok {
+		desc = Descriptor{
+			ID:             templateID,
+			Title:          firstNonEmpty(existing.Name, id),
+			Description:    "Configured provider",
+			DefaultBaseURL: existing.BaseURL,
+			ModelHint:      existing.DefaultModel,
+		}
+	}
+	return ConnectDraft{
+		OriginalProviderID: id,
+		ProviderID:         id,
+		TemplateID:         templateID,
+		Kind:               firstNonEmpty(existing.Kind, ProviderKindCompatible),
+		Name:               firstNonEmpty(existing.Name, desc.Title),
+		BaseURL:            firstNonEmpty(existing.BaseURL, desc.DefaultBaseURL),
+		APIKey:             existing.APIKey,
+		Model:              firstNonEmpty(existing.DefaultModel, desc.ModelHint),
+		Headers:            cloneHeaders(existing.Headers),
+	}, nil
+}
+
 func (d ConnectDraft) ToConfig() config.Provider {
 	cfg := config.Provider{
+		TemplateID:   strings.TrimSpace(d.TemplateID),
 		Kind:         firstNonEmpty(d.Kind, ProviderKindCompatible),
 		Name:         strings.TrimSpace(d.Name),
 		BaseURL:      strings.TrimSpace(d.BaseURL),
@@ -171,4 +196,38 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func uniqueProviderID(base string, existing map[string]config.Provider) string {
+	base = strings.TrimSpace(base)
+	if base == "" {
+		base = "provider"
+	}
+	if len(existing) == 0 {
+		return base
+	}
+	if _, ok := existing[base]; !ok {
+		return base
+	}
+	for idx := 2; ; idx++ {
+		candidate := fmt.Sprintf("%s-%d", base, idx)
+		if _, ok := existing[candidate]; !ok {
+			return candidate
+		}
+	}
+}
+
+func inferTemplateID(id string, existing config.Provider) string {
+	if desc, ok := Lookup(id); ok {
+		return desc.ID
+	}
+	for _, desc := range Catalog() {
+		if strings.EqualFold(strings.TrimSpace(existing.Name), desc.Title) {
+			return desc.ID
+		}
+		if strings.EqualFold(strings.TrimSpace(existing.BaseURL), desc.DefaultBaseURL) {
+			return desc.ID
+		}
+	}
+	return ProviderKindCompatible
 }

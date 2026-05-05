@@ -57,14 +57,9 @@ func TestMatchingSlashCommands(t *testing.T) {
 		t.Fatalf("expected /compact, got %#v", matches)
 	}
 
-	matches = matchingSlashCommands("conn")
-	if len(matches) != 1 || matches[0].Name != "/connect" {
-		t.Fatalf("expected /connect, got %#v", matches)
-	}
-
-	matches = matchingSlashCommands("disc")
-	if len(matches) != 1 || matches[0].Name != "/disconnect" {
-		t.Fatalf("expected /disconnect, got %#v", matches)
+	matches = matchingSlashCommands("pro")
+	if len(matches) != 1 || matches[0].Name != "/provider" {
+		t.Fatalf("expected /provider, got %#v", matches)
 	}
 
 	matches = matchingSlashCommands("fork")
@@ -3832,24 +3827,24 @@ func TestApplySessionToolStatesUpdatesDraftSession(t *testing.T) {
 	}
 }
 
-func TestConnectCommandOpensConnectDialog(t *testing.T) {
+func TestProviderCommandOpensProviderDialog(t *testing.T) {
 	m := Model{
 		cfg:      config.Default(),
 		composer: textarea.New(),
 	}
-	m.composer.SetValue("/connect")
+	m.composer.SetValue("/provider")
 
 	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
 	next := updated.(*Model)
 	if cmd == nil {
-		t.Fatal("expected title sync command when opening connect dialog")
+		t.Fatal("expected title sync command when opening provider dialog")
 	}
-	if !next.hasConnectDialog() {
-		t.Fatal("expected connect dialog to open")
+	if !next.hasProviderDialog() {
+		t.Fatal("expected provider dialog to open")
 	}
 }
 
-func TestDisconnectCommandOpensDisconnectDialog(t *testing.T) {
+func TestDisconnectAliasOpensProviderDialog(t *testing.T) {
 	m := Model{
 		cfg: config.Config{
 			Providers: map[string]config.Provider{
@@ -3863,27 +3858,27 @@ func TestDisconnectCommandOpensDisconnectDialog(t *testing.T) {
 	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
 	next := updated.(*Model)
 	if cmd == nil {
-		t.Fatal("expected title sync command when opening disconnect dialog")
+		t.Fatal("expected title sync command when opening provider dialog")
 	}
-	if !next.hasDisconnectDialog() {
-		t.Fatal("expected disconnect dialog to open")
+	if !next.hasProviderDialog() {
+		t.Fatal("expected provider dialog to open")
 	}
 }
 
-func TestDisconnectCommandWithoutProvidersShowsStatus(t *testing.T) {
+func TestConnectAliasOpensProviderDialog(t *testing.T) {
 	m := Model{
 		cfg:      config.Default(),
 		composer: textarea.New(),
 	}
-	m.composer.SetValue("/disconnect")
+	m.composer.SetValue("/connect")
 
 	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
 	next := updated.(*Model)
 	if cmd == nil {
 		t.Fatal("expected title sync command")
 	}
-	if next.status != "No configured providers to disconnect" {
-		t.Fatalf("unexpected status: %q", next.status)
+	if !next.hasProviderDialog() {
+		t.Fatal("expected provider dialog to open")
 	}
 }
 
@@ -3899,12 +3894,12 @@ func TestModelCommandWithoutProviderShowsStatus(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("expected title sync command")
 	}
-	if next.status != "Configure a provider first with /connect" {
+	if next.status != "Configure a provider first with /provider" {
 		t.Fatalf("unexpected status: %q", next.status)
 	}
 }
 
-func TestModelCommandLoadsModelsForActiveProvider(t *testing.T) {
+func TestModelCommandLoadsModelsAcrossProviders(t *testing.T) {
 	cfg := testConfig(t)
 	cfg.DefaultProvider = "openai"
 	cfg.DefaultModel = "gpt-5.4"
@@ -3929,7 +3924,7 @@ func TestModelCommandLoadsModelsForActiveProvider(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("expected async model load command")
 	}
-	if next.status != "Loading models for openai…" {
+	if next.status != "Loading models…" {
 		t.Fatalf("unexpected status: %q", next.status)
 	}
 }
@@ -4447,7 +4442,7 @@ func TestOpenModelDialogUsesProviderPreset(t *testing.T) {
 	cfg.DefaultModel = "Qwen/Qwen3.6-35B-A3B"
 
 	m := Model{cfg: cfg}
-	m.openModelDialog("openai", []domain.Model{{ID: "Qwen/Qwen3.6-35B-A3B"}})
+	m.openModelDialog(singleProviderModelEntries("openai", "openai", []domain.Model{{ID: "Qwen/Qwen3.6-35B-A3B"}}))
 	if m.modelDialog == nil {
 		t.Fatal("expected model dialog")
 	}
@@ -4727,7 +4722,7 @@ func TestRenderSidebarShowsStatusAndSessionInfo(t *testing.T) {
 	if !strings.Contains(got, "Help    Alt-H help  Ctrl-S toggle  Alt+, wide  Alt+. narrow") {
 		t.Fatalf("expected sidebar to include help hint, got %q", got)
 	}
-	if strings.Contains(got, "enter send/select") || strings.Contains(got, "/connect") {
+	if strings.Contains(got, "enter send/select") || strings.Contains(got, "/provider") {
 		t.Fatalf("expected sidebar to omit detailed hotkeys and commands, got %q", got)
 	}
 	if !strings.Contains(got, "Context ~8.2k / 32.8k (25%)") {
@@ -5187,14 +5182,14 @@ func TestPreferencesDialogApplySavesSidebarWidth(t *testing.T) {
 	}
 }
 
-func TestRefreshViewportShowsConnectHintWithoutProvider(t *testing.T) {
+func TestRefreshViewportShowsProviderHintWithoutProvider(t *testing.T) {
 	m := Model{
 		cfg:      config.Default(),
 		viewport: newTranscriptViewport(40, 6),
 	}
 	m.refreshViewport()
-	if got := m.viewport.View(); !strings.Contains(got, "/connect") {
-		t.Fatalf("expected connect hint in empty viewport, got %q", got)
+	if got := m.viewport.View(); !strings.Contains(got, "/provider") {
+		t.Fatalf("expected provider hint in empty viewport, got %q", got)
 	}
 }
 
@@ -5215,7 +5210,7 @@ func TestAltHTogglesHelpDialog(t *testing.T) {
 		t.Fatal("expected help dialog to open")
 	}
 	view := next.View()
-	if !strings.Contains(view, "Help") || !strings.Contains(view, "/connect") || !strings.Contains(view, "Ctrl-V") || !strings.Contains(view, "Alt-P") || !strings.Contains(view, "Ctrl-R") {
+	if !strings.Contains(view, "Help") || !strings.Contains(view, "/provider") || !strings.Contains(view, "Ctrl-V") || !strings.Contains(view, "Alt-P") || !strings.Contains(view, "Ctrl-R") {
 		t.Fatalf("expected help dialog content, got %q", view)
 	}
 	if !strings.Contains(view, "Ctrl-PgUp/PgDn") {

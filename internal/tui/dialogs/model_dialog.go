@@ -25,17 +25,22 @@ type ModelDialogAction struct {
 	PresetID   string
 }
 
+type ModelDialogEntry struct {
+	ProviderID    string
+	ProviderLabel string
+	Model         domain.Model
+}
+
 type ModelDialog struct {
 	ui.PassiveNode
-	ProviderID string
-	Query      string
-	Index      int
-	PresetID   string
-	Models     []domain.Model
-	view       []domain.Model
-	presets    []provider.ModelPreset
-	focus      modelDialogFocus
-	buttons    ui.ButtonRow
+	Query    string
+	Index    int
+	PresetID string
+	Entries  []ModelDialogEntry
+	view     []ModelDialogEntry
+	presets  []provider.ModelPreset
+	focus    modelDialogFocus
+	buttons  ui.ButtonRow
 }
 
 type modelDialogFocus int
@@ -46,12 +51,11 @@ const (
 	modelDialogFocusButtons
 )
 
-func NewModelDialog(providerID string, models []domain.Model, current string, presetID string) ModelDialog {
+func NewModelDialog(entries []ModelDialogEntry, currentProviderID, currentModelID string, presetID string) ModelDialog {
 	d := ModelDialog{
-		ProviderID: providerID,
-		Models:     models,
-		PresetID:   provider.NormalizePresetSelection(presetID),
-		presets:    provider.Presets(),
+		Entries:  entries,
+		PresetID: provider.NormalizePresetSelection(presetID),
+		presets:  provider.Presets(),
 	}
 	d.buttons = ui.ButtonRow{
 		Buttons: []ui.Button{
@@ -62,7 +66,7 @@ func NewModelDialog(providerID string, models []domain.Model, current string, pr
 	}
 	d.refilter()
 	for idx, item := range d.view {
-		if item.ID == strings.TrimSpace(current) {
+		if item.ProviderID == strings.TrimSpace(currentProviderID) && item.Model.ID == strings.TrimSpace(currentModelID) {
 			d.Index = idx
 			break
 		}
@@ -166,7 +170,8 @@ func (d ModelDialog) dialog(width int, palette theme.Palette) ui.Node {
 	if anyModelHasCapabilities(d.view) {
 		tertiaryWidth = minInt(10, maxInt(5, listWidth/8))
 	}
-	secondaryWidth := maxInt(6, listWidth-primaryWidth-tertiaryWidth-4)
+	providerWidth := minInt(18, maxInt(10, listWidth/5))
+	secondaryWidth := maxInt(6, listWidth-primaryWidth-providerWidth-tertiaryWidth-6)
 	rows := []ui.TableRow{}
 	start, end := windowBounds(d.Index, len(d.view), 10)
 	for idx := start; idx < end; idx++ {
@@ -174,9 +179,10 @@ func (d ModelDialog) dialog(width int, palette theme.Palette) ui.Node {
 		rows = append(rows, ui.TableRow{
 			ControlID: "model-row-" + strconv.Itoa(idx),
 			Cells: []string{
-				item.ID,
-				firstNonEmptyModelValue(strings.TrimSpace(item.OwnedBy), strings.TrimSpace(d.ProviderID)),
-				capabilityBadges(item),
+				item.Model.ID,
+				firstNonEmptyModelValue(strings.TrimSpace(item.ProviderLabel), strings.TrimSpace(item.ProviderID)),
+				firstNonEmptyModelValue(strings.TrimSpace(item.Model.OwnedBy), strings.TrimSpace(item.ProviderID)),
+				capabilityBadges(item.Model),
 			},
 			Selected: idx == d.Index,
 			Focused:  idx == d.Index && d.focus == modelDialogFocusList,
@@ -191,6 +197,7 @@ func (d ModelDialog) dialog(width int, palette theme.Palette) ui.Node {
 			Width: listWidth,
 			Columns: []ui.TableColumn{
 				{Title: "Model", Width: primaryWidth},
+				{Title: "Provider", Width: providerWidth},
 				{Title: "Owner", Width: secondaryWidth},
 				{Title: "Caps", Width: tertiaryWidth, AlignRight: tertiaryWidth > 0},
 			},
@@ -210,7 +217,7 @@ func (d ModelDialog) dialog(width int, palette theme.Palette) ui.Node {
 				ui.Fixed(ui.AsNode(ui.NewFlexBox(
 					ui.DirectionVertical,
 					[]ui.Child{
-						ui.Fixed(staticBlock("Provider: " + d.ProviderID)),
+						ui.Fixed(staticBlock("Providers: all configured")),
 						ui.Fixed(ui.Spacer{H: 1}),
 						ui.Fixed(staticBlock("Filter: " + d.Query)),
 						ui.Fixed(ui.Spacer{H: 1}),
@@ -234,9 +241,9 @@ func (d ModelDialog) dialog(width int, palette theme.Palette) ui.Node {
 	})
 }
 
-func anyModelHasCapabilities(models []domain.Model) bool {
+func anyModelHasCapabilities(models []ModelDialogEntry) bool {
 	for _, model := range models {
-		if strings.TrimSpace(capabilityBadges(model)) != "" {
+		if strings.TrimSpace(capabilityBadges(model.Model)) != "" {
 			return true
 		}
 	}
@@ -298,8 +305,8 @@ func (d *ModelDialog) move(delta int) {
 func (d *ModelDialog) refilter() {
 	query := strings.ToLower(strings.TrimSpace(d.Query))
 	d.view = d.view[:0]
-	for _, item := range d.Models {
-		haystack := strings.ToLower(item.ID + " " + item.OwnedBy)
+	for _, item := range d.Entries {
+		haystack := strings.ToLower(item.Model.ID + " " + item.Model.OwnedBy + " " + item.ProviderID + " " + item.ProviderLabel)
 		if query == "" || strings.Contains(haystack, query) {
 			d.view = append(d.view, item)
 		}
@@ -316,9 +323,9 @@ func (d *ModelDialog) refilter() {
 	}
 }
 
-func (d ModelDialog) current() (domain.Model, bool) {
+func (d ModelDialog) current() (ModelDialogEntry, bool) {
 	if len(d.view) == 0 || d.Index < 0 || d.Index >= len(d.view) {
-		return domain.Model{}, false
+		return ModelDialogEntry{}, false
 	}
 	return d.view[d.Index], true
 }
@@ -330,8 +337,8 @@ func (d ModelDialog) selectCurrent() ModelDialogAction {
 	}
 	return ModelDialogAction{
 		Kind:       ModelDialogActionSelect,
-		ProviderID: d.ProviderID,
-		ModelID:    item.ID,
+		ProviderID: item.ProviderID,
+		ModelID:    item.Model.ID,
 		PresetID:   provider.NormalizePresetSelection(d.PresetID),
 	}
 }
@@ -381,7 +388,7 @@ func (d *ModelDialog) movePreset(delta int) {
 func (d ModelDialog) presetValue() string {
 	selected := provider.NormalizePresetSelection(d.PresetID)
 	current, _ := d.current()
-	resolved := provider.ResolvePresetID(current.ID, selected)
+	resolved := provider.ResolvePresetID(current.Model.ID, selected)
 	selectedPreset, _ := provider.LookupPreset(selected)
 	resolvedPreset, _ := provider.LookupPreset(resolved)
 	if selected == provider.ModelPresetAuto {
