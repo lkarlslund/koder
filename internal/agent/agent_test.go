@@ -560,7 +560,7 @@ func TestBuildConversationKeepsRecentToolBatchAfterCompactionBoundary(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.AddPart(context.Background(), compactMsg.ID, domain.CompactionPayload{Summary: "summary block"}); err != nil {
+	if _, err := st.AddPart(context.Background(), compactMsg.ID, domain.CompactionPayload{Summary: "summary block", FirstKeptMessageID: toolCallMsg.ID}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -582,6 +582,88 @@ func TestBuildConversationKeepsRecentToolBatchAfterCompactionBoundary(t *testing
 	}
 	if strings.Contains(conversation[len(conversation)-3].Content, "old question") {
 		t.Fatalf("expected pre-tool history summarized away, got %#v", conversation[len(conversation)-3])
+	}
+}
+
+func TestBuildConversationAfterCompactionKeepsEntireSuffixFromSavedBoundary(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.CompactionKeepToolBatches = 1
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	engine := New(cfg, st, tools.NewRegistry(t.TempDir()), nil, t.TempDir())
+	session, err := st.CreateSession(context.Background(), "test", cfg.DefaultProvider, "test-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chat := defaultChatForSession(t, st, session.ID)
+
+	before, err := st.AddMessage(context.Background(), session.ID, domain.MessageRoleUser, "before")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.AddPart(context.Background(), before.ID, domain.TextPayload{Text: "summarize this away"}); err != nil {
+		t.Fatal(err)
+	}
+	toolCallMsg, err := st.AddMessage(context.Background(), session.ID, domain.MessageRoleAssistant, "tool:bash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.AddPart(context.Background(), toolCallMsg.ID, domain.ToolCallPayload{Tool: domain.ToolKindBash, ToolCallID: "call_1", Args: map[string]string{"command": "pwd"}}); err != nil {
+		t.Fatal(err)
+	}
+	toolMsg, err := st.AddMessage(context.Background(), session.ID, domain.MessageRoleTool, "bash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.AddPart(context.Background(), toolMsg.ID, domain.ToolOutputPayload{Tool: domain.ToolKindBash, ToolCallID: "call_1", Status: domain.ToolResultStatusOK, Text: "/tmp/project", Result: tools.BashStoredResult{Command: "pwd", Output: "/tmp/project"}}); err != nil {
+		t.Fatal(err)
+	}
+	afterUser, err := st.AddMessage(context.Background(), session.ID, domain.MessageRoleUser, "after")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.AddPart(context.Background(), afterUser.ID, domain.TextPayload{Text: "keep this question raw"}); err != nil {
+		t.Fatal(err)
+	}
+	afterAssistant, err := st.AddMessage(context.Background(), session.ID, domain.MessageRoleAssistant, "after-answer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.AddPart(context.Background(), afterAssistant.ID, domain.TextPayload{Text: "keep this answer raw"}); err != nil {
+		t.Fatal(err)
+	}
+	compactMsg, err := st.AddMessage(context.Background(), session.ID, domain.MessageRoleAssistant, "compact")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.AddPart(context.Background(), compactMsg.ID, domain.CompactionPayload{
+		Summary:            "summary block",
+		FirstKeptMessageID: toolCallMsg.ID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	conversation, err := engine.buildConversation(context.Background(), session.ID, chat.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rendered strings.Builder
+	for _, msg := range conversation {
+		rendered.WriteString(msg.Content)
+		rendered.WriteString("\n")
+	}
+	got := rendered.String()
+	if strings.Contains(got, "summarize this away") {
+		t.Fatalf("expected messages before saved boundary to be removed from replay, got %#v", conversation)
+	}
+	for _, want := range []string{"/tmp/project", "keep this question raw", "keep this answer raw"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected replay to keep entire suffix after boundary including %q, got %#v", want, conversation)
+		}
 	}
 }
 
@@ -627,12 +709,15 @@ func TestBuildCompactionConversationExcludesPreservedToolTail(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	conversation, err := engine.buildCompactionConversation(session, chat, messages, partsByMessage)
+	conversation, firstKeptMessageID, err := engine.buildCompactionConversation(session, chat, messages, partsByMessage)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(conversation) == 0 {
 		t.Fatal("expected compaction source conversation")
+	}
+	if firstKeptMessageID != toolCallMsg.ID {
+		t.Fatalf("expected compaction boundary at tool call message, got %d want %d", firstKeptMessageID, toolCallMsg.ID)
 	}
 	last := conversation[len(conversation)-1]
 	if strings.Contains(last.Content, "/tmp/project") || len(last.ToolCalls) != 0 {

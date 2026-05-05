@@ -1754,11 +1754,11 @@ func (e *Engine) buildPromptEnvelopeForState(session domain.Session, chat domain
 	}
 	segmentStart := 0
 	for idx, msg := range messages {
-		if summary, ok := compactionSummary(partsByMessage[msg.ID]); ok {
+		if payload, ok := compactionPayload(partsByMessage[msg.ID]); ok {
 			envelope.Instructions = baseInstructions
-			envelope.Items = append(envelope.Items[:0], compactedHistoryMessage(summary))
+			envelope.Items = append(envelope.Items[:0], compactedHistoryMessage(payload.Summary))
 			if segmentStart < idx {
-				preserved, err := e.messagesForPreservedToolTail(session, messages[segmentStart:idx], partsByMessage)
+				preserved, err := e.messagesForCompactionTail(session, messages[segmentStart:idx], partsByMessage, payload.FirstKeptMessageID)
 				if err != nil {
 					return provider.PromptEnvelope{}, err
 				}
@@ -1786,8 +1786,11 @@ func (e *Engine) buildPromptEnvelopeForState(session domain.Session, chat domain
 	return envelope, nil
 }
 
-func (e *Engine) messagesForPreservedToolTail(session domain.Session, messages []domain.Message, partsByMessage map[int64][]domain.Part) ([]provider.Message, error) {
-	start := preservedToolTailStart(messages, partsByMessage, e.compactionKeepToolBatches())
+func (e *Engine) messagesForCompactionTail(session domain.Session, messages []domain.Message, partsByMessage map[int64][]domain.Part, firstKeptMessageID int64) ([]provider.Message, error) {
+	start := firstKeptMessageIndex(messages, firstKeptMessageID)
+	if start < 0 {
+		start = preservedToolTailStart(messages, partsByMessage, e.compactionKeepToolBatches())
+	}
 	if start >= len(messages) {
 		return nil, nil
 	}
@@ -1800,6 +1803,18 @@ func (e *Engine) messagesForPreservedToolTail(session domain.Session, messages [
 		out = append(out, items...)
 	}
 	return out, nil
+}
+
+func firstKeptMessageIndex(messages []domain.Message, firstKeptMessageID int64) int {
+	if firstKeptMessageID <= 0 {
+		return -1
+	}
+	for idx, msg := range messages {
+		if msg.ID == firstKeptMessageID {
+			return idx
+		}
+	}
+	return -1
 }
 
 func preservedToolTailStart(messages []domain.Message, partsByMessage map[int64][]domain.Part, keepBatches int) int {
@@ -2321,13 +2336,25 @@ func (e *Engine) compactionKeepToolBatches() int {
 	return config.NormalizeCompactionKeepToolBatches(e.cfg.CompactionKeepToolBatches)
 }
 
-func compactionSummary(parts []domain.Part) (string, bool) {
+func compactionPayload(parts []domain.Part) (domain.CompactionPayload, bool) {
 	for _, part := range parts {
-		if part.Kind == domain.PartKindCompaction && strings.TrimSpace(part.Text()) != "" {
-			return strings.TrimSpace(part.Text()), true
+		if part.Kind != domain.PartKindCompaction {
+			continue
+		}
+		payload, ok := part.Payload.(domain.CompactionPayload)
+		if !ok {
+			summary := strings.TrimSpace(part.Text())
+			if summary == "" {
+				return domain.CompactionPayload{}, false
+			}
+			return domain.CompactionPayload{Summary: summary}, true
+		}
+		payload.Summary = strings.TrimSpace(payload.Summary)
+		if payload.Summary != "" {
+			return payload, true
 		}
 	}
-	return "", false
+	return domain.CompactionPayload{}, false
 }
 
 func toolCallContext(part domain.Part) string {
@@ -2504,7 +2531,7 @@ func (e *Engine) compactSession(ctx context.Context, session domain.Session, cha
 	if err != nil {
 		return err
 	}
-	messages, err := e.buildCompactionConversation(session, chat, storedMessages, partsByMessage)
+	messages, firstKeptMessageID, err := e.buildCompactionConversation(session, chat, storedMessages, partsByMessage)
 	if err != nil {
 		return err
 	}
@@ -2515,15 +2542,20 @@ func (e *Engine) compactSession(ctx context.Context, session domain.Session, cha
 	if err != nil {
 		return err
 	}
-	part, err := e.store.AddPart(ctx, msg.ID, domain.CompactionPayload{Trigger: trigger, Status: "pending"})
+	part, err := e.store.AddPart(ctx, msg.ID, domain.CompactionPayload{
+		Trigger:            trigger,
+		Status:             "pending",
+		FirstKeptMessageID: firstKeptMessageID,
+	})
 	if err != nil {
 		return err
 	}
 	updateCompactionState := func(summary, status, messageSummary string) error {
 		if err := e.store.UpdatePartPayload(ctx, part.ID, domain.CompactionPayload{
-			Summary: summary,
-			Trigger: trigger,
-			Status:  status,
+			Summary:            summary,
+			Trigger:            trigger,
+			Status:             status,
+			FirstKeptMessageID: firstKeptMessageID,
 		}); err != nil {
 			return err
 		}
@@ -2577,17 +2609,19 @@ func (e *Engine) compactSession(ctx context.Context, session domain.Session, cha
 	return nil
 }
 
-func (e *Engine) buildCompactionConversation(session domain.Session, chat domain.Chat, messages []domain.Message, partsByMessage map[int64][]domain.Part) ([]provider.Message, error) {
+func (e *Engine) buildCompactionConversation(session domain.Session, chat domain.Chat, messages []domain.Message, partsByMessage map[int64][]domain.Part) ([]provider.Message, int64, error) {
 	keepStart := preservedToolTailStart(messages, partsByMessage, e.compactionKeepToolBatches())
 	head := messages
+	firstKeptMessageID := int64(0)
 	if keepStart < len(messages) {
 		head = messages[:keepStart]
+		firstKeptMessageID = messages[keepStart].ID
 	}
 	envelope, err := e.buildPromptEnvelopeForState(session, chat, head, partsByMessage, "", nil, nil, nil)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	return provider.SerializePromptEnvelope(envelope), nil
+	return provider.SerializePromptEnvelope(envelope), firstKeptMessageID, nil
 }
 
 func (e *Engine) handleModelToolCall(ctx context.Context, session domain.Session, chat domain.Chat, req tools.Request) (domain.Event, error) {

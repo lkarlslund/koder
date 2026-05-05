@@ -231,9 +231,10 @@ func (ApprovalRequestPayload) PartKind() PartKind { return PartKindApprovalReque
 
 // CompactionPayload stores a compacted conversation summary.
 type CompactionPayload struct {
-	Summary string `json:"summary"`
-	Trigger string `json:"trigger,omitempty"`
-	Status  string `json:"status,omitempty"`
+	Summary            string `json:"summary"`
+	Trigger            string `json:"trigger,omitempty"`
+	Status             string `json:"status,omitempty"`
+	FirstKeptMessageID int64  `json:"first_kept_message_id,omitempty"`
 }
 
 // PartKind returns the payload part kind.
