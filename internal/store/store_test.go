@@ -23,7 +23,7 @@ func TestSessionMessageRoundTrip(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := st.AddPart(context.Background(), msg.ID, domain.PartKindText, "hello", ""); err != nil {
+			if _, err := st.AddPart(context.Background(), msg.ID, domain.TextPayload{Text: "hello"}); err != nil {
 				t.Fatal(err)
 			}
 
@@ -34,7 +34,7 @@ func TestSessionMessageRoundTrip(t *testing.T) {
 			if len(messages) != 1 {
 				t.Fatalf("unexpected message count: %d", len(messages))
 			}
-			if got := parts[msg.ID][0].Body; got != "hello" {
+			if got := parts[msg.ID][0].Text(); got != "hello" {
 				t.Fatalf("unexpected part body: %q", got)
 			}
 		})
@@ -355,7 +355,7 @@ func TestForkSessionCopiesTranscriptAndParent(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := st.AddPart(context.Background(), msg.ID, domain.PartKindText, "hello", ""); err != nil {
+			if _, err := st.AddPart(context.Background(), msg.ID, domain.TextPayload{Text: "hello"}); err != nil {
 				t.Fatal(err)
 			}
 
@@ -400,14 +400,14 @@ func TestForkSessionCopiesTranscriptAndParent(t *testing.T) {
 			if len(messages) != 1 || messages[0].Summary != "hello" {
 				t.Fatalf("unexpected forked messages: %#v", messages)
 			}
-			if got := parts[messages[0].ID][0].Body; got != "hello" {
+			if got := parts[messages[0].ID][0].Text(); got != "hello" {
 				t.Fatalf("unexpected forked part body: %q", got)
 			}
 		})
 	}
 }
 
-func TestUpdatePartMetaJSON(t *testing.T) {
+func TestUpdatePartPayload(t *testing.T) {
 	for _, backend := range []string{BackendPebble, BackendJSONFS} {
 		t.Run(backend, func(t *testing.T) {
 			st := openTestStore(t, backend)
@@ -420,19 +420,20 @@ func TestUpdatePartMetaJSON(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			part, err := st.AddPart(context.Background(), msg.ID, domain.PartKindAttachment, "note.txt", `{"path":"old"}`)
+			part, err := st.AddPart(context.Background(), msg.ID, domain.AttachmentPayload{Name: "note.txt", Path: "old"})
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := st.UpdatePartMetaJSON(context.Background(), part.ID, `{"path":"new"}`); err != nil {
+			if err := st.UpdatePartPayload(context.Background(), part.ID, domain.AttachmentPayload{Name: "note.txt", Path: "new"}); err != nil {
 				t.Fatal(err)
 			}
 			_, parts, err := st.PartsForSession(context.Background(), session.ID)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got := parts[msg.ID][0].MetaJSON; got != `{"path":"new"}` {
-				t.Fatalf("unexpected updated part metadata: %q", got)
+			payload, ok := parts[msg.ID][0].Payload.(domain.AttachmentPayload)
+			if !ok || payload.Path != "new" {
+				t.Fatalf("unexpected updated part payload: %#v", parts[msg.ID][0].Payload)
 			}
 		})
 	}
@@ -450,7 +451,7 @@ func TestJSONFSWritesInspectableFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(root, "store-jsonfs", "sessions", formatID(session.ID)+".json")); err != nil {
+	if _, err := os.Stat(filepath.Join(root, "store-jsonfs-v2", "sessions", formatID(session.ID)+".json")); err != nil {
 		t.Fatalf("expected inspectable session JSON file: %v", err)
 	}
 }

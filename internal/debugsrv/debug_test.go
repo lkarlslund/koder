@@ -57,7 +57,7 @@ func TestServerExposesTranscriptAndEvents(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.AddPart(context.Background(), msg.ID, domain.PartKindText, "hello", ""); err != nil {
+	if _, err := st.AddPart(context.Background(), msg.ID, domain.TextPayload{Text: "hello"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -153,14 +153,14 @@ func TestServerExposesSessionAnalysis(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.AddPart(context.Background(), assistantStop.ID, domain.PartKindText, "Now update `CollidesWith`:", ""); err != nil {
+	if _, err := st.AddPart(context.Background(), assistantStop.ID, domain.TextPayload{Text: "Now update `CollidesWith`:"}); err != nil {
 		t.Fatal(err)
 	}
 	toolMsg, err := st.AddMessage(context.Background(), session.ID, domain.MessageRoleAssistant, "edit")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.AddPart(context.Background(), toolMsg.ID, domain.PartKindToolCall, "edit\n{\"path\":\"main.go\"}", ""); err != nil {
+	if _, err := st.AddPart(context.Background(), toolMsg.ID, domain.ToolCallPayload{Tool: domain.ToolKindEdit, Args: map[string]string{"path": "main.go"}}); err != nil {
 		t.Fatal(err)
 	}
 

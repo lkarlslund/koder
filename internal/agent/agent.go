@@ -458,7 +458,7 @@ func (e *Engine) persistUserPrompt(ctx context.Context, session domain.Session, 
 		return domain.Message{}, err
 	}
 	if strings.TrimSpace(prompt) != "" {
-		if _, err := e.store.AddPart(ctx, userMsg.ID, domain.PartKindText, prompt, ""); err != nil {
+		if _, err := e.store.AddPart(ctx, userMsg.ID, domain.TextPayload{Text: prompt}); err != nil {
 			return domain.Message{}, err
 		}
 	}
@@ -467,20 +467,26 @@ func (e *Engine) persistUserPrompt(ctx context.Context, session domain.Session, 
 		if err != nil {
 			return domain.Message{}, err
 		}
-		raw, err := attachment.EncodeMeta(meta)
-		if err != nil {
-			return domain.Message{}, err
-		}
-		if _, err := e.store.AddPart(ctx, userMsg.ID, domain.PartKindAttachment, meta.Name, raw); err != nil {
+		if _, err := e.store.AddPart(ctx, userMsg.ID, domain.AttachmentPayload{
+			ID:       meta.ID,
+			Name:     meta.Name,
+			MIME:     meta.MIME,
+			Path:     meta.Path,
+			Size:     meta.Size,
+			Source:   meta.Source,
+			Original: meta.Original,
+		}); err != nil {
 			return domain.Message{}, err
 		}
 	}
 	for _, ref := range refs {
-		raw, err := reference.EncodeMeta(reference.Metadata(ref))
-		if err != nil {
-			return domain.Message{}, err
-		}
-		if _, err := e.store.AddPart(ctx, userMsg.ID, domain.PartKindReference, ref.Display, raw); err != nil {
+		if _, err := e.store.AddPart(ctx, userMsg.ID, domain.ReferencePayload{
+			Kind:    string(ref.Kind),
+			Path:    ref.Path,
+			Display: ref.Display,
+			Start:   ref.Start,
+			End:     ref.End,
+		}); err != nil {
 			return domain.Message{}, err
 		}
 	}
@@ -632,12 +638,15 @@ func (e *Engine) continueModelTurn(ctx context.Context, session domain.Session, 
 			if err != nil {
 				return err
 			}
-			meta, _ := json.Marshal(call)
-			if _, err := e.store.AddPart(ctx, assistantMsg.ID, domain.PartKindToolCall, strings.TrimSpace(text), string(meta)); err != nil {
+			if _, err := e.store.AddPart(ctx, assistantMsg.ID, domain.ToolCallPayload{
+				Tool:       call.Tool,
+				ToolCallID: call.ToolCallID,
+				Args:       call.Args,
+			}); err != nil {
 				return err
 			}
 			if strings.TrimSpace(plain) != "" {
-				if _, err := e.store.AddPart(ctx, assistantMsg.ID, domain.PartKindText, strings.TrimSpace(plain), ""); err != nil {
+				if _, err := e.store.AddPart(ctx, assistantMsg.ID, domain.TextPayload{Text: strings.TrimSpace(plain)}); err != nil {
 					return err
 				}
 			}
@@ -682,19 +691,18 @@ func (e *Engine) continueModelTurn(ctx context.Context, session domain.Session, 
 			return err
 		}
 		if strings.TrimSpace(text) != "" {
-			if _, err := e.store.AddPart(ctx, assistantMsg.ID, domain.PartKindText, text, ""); err != nil {
+			if _, err := e.store.AddPart(ctx, assistantMsg.ID, domain.TextPayload{Text: text}); err != nil {
 				return err
 			}
 		}
 		if strings.TrimSpace(reasoning) != "" {
-			if _, err := e.store.AddPart(ctx, assistantMsg.ID, domain.PartKindReasoning, reasoning, ""); err != nil {
+			if _, err := e.store.AddPart(ctx, assistantMsg.ID, domain.ReasoningPayload{Text: reasoning}); err != nil {
 				return err
 			}
 		}
 		usage = usage.Normalized()
 		if usage.HasAnyTokens() {
-			meta, _ := json.Marshal(usage)
-			if _, err := e.store.AddPart(ctx, assistantMsg.ID, domain.PartKindSystemNotice, "usage", string(meta)); err != nil {
+			if _, err := e.store.AddPart(ctx, assistantMsg.ID, domain.UsagePayload{Usage: usage}); err != nil {
 				return err
 			}
 			if err := e.saveChatContextUsage(ctx, chat.ID, usage); err != nil {
@@ -1256,10 +1264,14 @@ func (e *Engine) persistToolFailure(ctx context.Context, chatID, sessionID int64
 	if err != nil {
 		return nil, err
 	}
-	meta, _ := json.Marshal(tools.MetaWithStoredResult(req.Meta(), domain.PartKindToolOutput, req.Tool, tools.StoredResultStatusError, tools.ErrorStoredResult{
-		Message: text,
-	}))
-	if _, err := e.store.AddPart(ctx, msg.ID, domain.PartKindToolOutput, text, string(meta)); err != nil {
+	if _, err := e.store.AddPart(ctx, msg.ID, domain.ToolOutputPayload{
+		Tool:       req.Tool,
+		ToolCallID: req.ToolCallID,
+		Args:       req.Meta(),
+		Status:     domain.ToolResultStatusError,
+		Text:       text,
+		Result:     domain.ErrorStoredResult{Message: text},
+	}); err != nil {
 		return nil, err
 	}
 	e.recordLifecycle(sessionID, "tool_result_persisted", text, map[string]string{"tool": string(req.Tool), "status": "error"})
@@ -1477,8 +1489,21 @@ func (e *Engine) persistTranscriptNotice(ctx context.Context, chatID, sessionID 
 	if err != nil {
 		return
 	}
-	raw, _ := json.Marshal(meta)
-	_, _ = e.store.AddPart(ctx, msg.ID, domain.PartKindEventNotice, body, string(raw))
+	part, _ := e.store.AddPart(ctx, msg.ID, domain.EventNoticePayload{
+		Text:     body,
+		Kind:     meta.Kind,
+		Severity: meta.Severity,
+		Reason:   meta.Reason,
+		Title:    meta.Title,
+		Subtitle: meta.Subtitle,
+		Tool:     domain.ToolKind(meta.Tool),
+		Count:    meta.Count,
+		Limit:    meta.Limit,
+	})
+	if part.ID > 0 {
+		raw, _ := json.Marshal(meta)
+		part.MetaJSON = string(raw)
+	}
 }
 
 func waitForRetry(ctx context.Context, delay time.Duration, onTick func(time.Duration)) error {
@@ -1830,28 +1855,22 @@ func compactedHistoryMessage(summary string) provider.Message {
 func (e *Engine) previewUserMessage(prompt string, drafts []attachment.Draft, refs []reference.Draft) (provider.Message, bool, error) {
 	parts := make([]domain.Part, 0, len(drafts)+len(refs)+1)
 	if strings.TrimSpace(prompt) != "" {
-		parts = append(parts, domain.Part{Kind: domain.PartKindText, Body: prompt})
+		parts = append(parts, domain.Part{Kind: domain.PartKindText, Payload: domain.TextPayload{Text: prompt}})
 	}
 	for _, draft := range drafts {
-		raw, err := attachment.EncodeMeta(draft.Metadata)
-		if err != nil {
-			return provider.Message{}, false, err
-		}
 		parts = append(parts, domain.Part{
-			Kind:     domain.PartKindAttachment,
-			Body:     draft.Name,
-			MetaJSON: raw,
+			Kind: domain.PartKindAttachment,
+			Payload: domain.AttachmentPayload{
+				ID: draft.ID, Name: draft.Name, MIME: draft.MIME, Path: draft.Path, Size: draft.Size, Source: draft.Source, Original: draft.Original,
+			},
 		})
 	}
 	for _, ref := range refs {
-		raw, err := reference.EncodeMeta(reference.Metadata(ref))
-		if err != nil {
-			return provider.Message{}, false, err
-		}
 		parts = append(parts, domain.Part{
-			Kind:     domain.PartKindReference,
-			Body:     ref.Display,
-			MetaJSON: raw,
+			Kind: domain.PartKindReference,
+			Payload: domain.ReferencePayload{
+				Kind: string(ref.Kind), Path: ref.Path, Display: ref.Display, Start: ref.Start, End: ref.End,
+			},
 		})
 	}
 	if msg, ok, err := e.userMessageWithContext(parts); ok || err != nil {
@@ -1927,21 +1946,24 @@ func (e *Engine) userMessageWithContext(parts []domain.Part) (provider.Message, 
 	for _, part := range parts {
 		switch part.Kind {
 		case domain.PartKindText:
-			if strings.TrimSpace(part.Body) != "" {
-				prompt = part.Body
+			if text := strings.TrimSpace(part.Text()); text != "" {
+				prompt = part.Text()
 			}
 		case domain.PartKindReference:
 			hasStructured = true
-			meta, err := reference.DecodeMeta(part.MetaJSON)
-			if err != nil {
-				return provider.Message{}, false, err
+			if payload, ok := part.Payload.(domain.ReferencePayload); ok {
+				refs = append(refs, reference.Metadata{
+					Kind: reference.Kind(payload.Kind), Path: payload.Path, Display: payload.Display, Start: payload.Start, End: payload.End,
+				})
 			}
-			refs = append(refs, meta)
 		case domain.PartKindAttachment:
 			hasStructured = true
-			meta, err := attachment.DecodeMeta(part.MetaJSON)
-			if err != nil {
-				return provider.Message{}, false, err
+			payload, ok := part.Payload.(domain.AttachmentPayload)
+			if !ok {
+				return provider.Message{}, false, fmt.Errorf("attachment part has %T payload", part.Payload)
+			}
+			meta := attachment.Metadata{
+				ID: payload.ID, Name: payload.Name, MIME: payload.MIME, Path: payload.Path, Size: payload.Size, Source: payload.Source, Original: payload.Original,
 			}
 			switch attachment.ClassifyMIME(meta.MIME) {
 			case attachment.KindText:
@@ -2027,18 +2049,18 @@ func structuredAssistantMessage(parts []domain.Part, preserveThinking bool) (pro
 			}
 			toolCalls = append(toolCalls, tools.ToolCall(call))
 		case domain.PartKindText:
-			if strings.TrimSpace(part.Body) != "" {
-				textChunks = append(textChunks, strings.TrimSpace(part.Body))
+			if text := strings.TrimSpace(part.Text()); text != "" {
+				textChunks = append(textChunks, text)
 			}
 		case domain.PartKindReasoning:
-			if preserveThinking && strings.TrimSpace(part.Body) != "" {
-				reasoningChunks = append(reasoningChunks, strings.TrimSpace(part.Body))
+			if preserveThinking && strings.TrimSpace(part.Text()) != "" {
+				reasoningChunks = append(reasoningChunks, strings.TrimSpace(part.Text()))
 			}
 		case domain.PartKindSystemNotice:
-			if strings.TrimSpace(part.Body) != "" && strings.TrimSpace(part.Body) != "usage" {
-				textChunks = append(textChunks, strings.TrimSpace(part.Body))
+			if text := strings.TrimSpace(part.Text()); text != "" {
+				textChunks = append(textChunks, text)
 			}
-		case domain.PartKindEventNotice:
+		case domain.PartKindUsage, domain.PartKindEventNotice:
 			continue
 		}
 	}
@@ -2057,15 +2079,18 @@ func (e *Engine) structuredToolMessage(session domain.Session, parts []domain.Pa
 		if part.Kind != domain.PartKindToolOutput {
 			continue
 		}
-		meta := partMetaMap(part)
-		toolCallID := strings.TrimSpace(meta["tool_call_id"])
+		payload, ok := part.Payload.(domain.ToolOutputPayload)
+		if !ok {
+			return provider.Message{}, false
+		}
+		toolCallID := strings.TrimSpace(payload.ToolCallID)
 		if toolCallID == "" {
 			return provider.Message{}, false
 		}
-		body := strings.TrimSpace(part.Body)
-		if formatted, ok := tools.ModelTextForPart(part, diffBody(parts)); ok {
+		body := strings.TrimSpace(part.Text())
+		if formatted, ok := tools.ModelTextForPart(part, payload.Diff); ok {
 			body = strings.TrimSpace(formatted)
-		} else if diff := diffBody(parts); diff != "" {
+		} else if diff := payload.Diff; diff != "" {
 			if body != "" {
 				body += "\n\nDiff:\n" + diff
 			} else {
@@ -2116,8 +2141,8 @@ func (e *Engine) toolImageMessage(session domain.Session, part domain.Part, tool
 
 func diffBody(parts []domain.Part) string {
 	for _, part := range parts {
-		if part.Kind == domain.PartKindDiff && strings.TrimSpace(part.Body) != "" {
-			return part.Body
+		if payload, ok := part.Payload.(domain.ToolOutputPayload); ok && strings.TrimSpace(payload.Diff) != "" {
+			return payload.Diff
 		}
 	}
 	return ""
@@ -2135,39 +2160,37 @@ func stringifyParts(parts []domain.Part, preserveThinking bool) string {
 		case domain.PartKindReference:
 			continue
 		case domain.PartKindReasoning:
-			if preserveThinking && strings.TrimSpace(part.Body) != "" {
-				reasoningChunks = append(reasoningChunks, strings.TrimSpace(part.Body))
+			if preserveThinking && strings.TrimSpace(part.Text()) != "" {
+				reasoningChunks = append(reasoningChunks, strings.TrimSpace(part.Text()))
 				continue
 			}
-			chunks = append(chunks, "Reasoning:\n"+part.Body)
+			chunks = append(chunks, "Reasoning:\n"+part.Text())
 		case domain.PartKindToolCall:
 			if callText := toolCallContext(part); callText != "" {
 				chunks = append(chunks, callText)
 			}
 		case domain.PartKindToolOutput:
-			body := part.Body
+			body := part.Text()
 			if formatted, ok := tools.ModelTextForPart(part, ""); ok {
 				body = formatted
 			}
 			chunks = append(chunks, "Tool output:\n"+body)
-		case domain.PartKindDiff:
-			chunks = append(chunks, "Diff:\n"+part.Body)
 		case domain.PartKindTaskUpdate:
-			body := part.Body
+			body := part.Text()
 			if formatted, ok := tools.ModelTextForPart(part, ""); ok {
 				body = formatted
 			}
 			chunks = append(chunks, "Task update:\n"+body)
 		case domain.PartKindPlanUpdate:
-			body := part.Body
+			body := part.Text()
 			if formatted, ok := tools.ModelTextForPart(part, ""); ok {
 				body = formatted
 			}
 			chunks = append(chunks, "Plan update:\n"+body)
-		case domain.PartKindApprovalRequest, domain.PartKindSystemNotice, domain.PartKindEventNotice:
+		case domain.PartKindApprovalRequest, domain.PartKindUsage, domain.PartKindSystemNotice, domain.PartKindEventNotice:
 			continue
 		default:
-			chunks = append(chunks, part.Body)
+			chunks = append(chunks, part.Text())
 		}
 	}
 	if preserveThinking && len(reasoningChunks) > 0 {
@@ -2232,8 +2255,8 @@ func providerCfgForSession(cfg config.Config, session domain.Session) config.Pro
 
 func compactionSummary(parts []domain.Part) (string, bool) {
 	for _, part := range parts {
-		if part.Kind == domain.PartKindCompaction && strings.TrimSpace(part.Body) != "" {
-			return strings.TrimSpace(part.Body), true
+		if part.Kind == domain.PartKindCompaction && strings.TrimSpace(part.Text()) != "" {
+			return strings.TrimSpace(part.Text()), true
 		}
 	}
 	return "", false
@@ -2243,36 +2266,33 @@ func toolCallContext(part domain.Part) string {
 	if call, ok := storedToolCall(part); ok {
 		return "Tool call:\n" + call.ContextString()
 	}
-	if call, _ := parseToolCall(part.Body); call != nil {
-		return "Tool call:\n" + call.ContextString()
-	}
-	body := strings.TrimSpace(part.Body)
+	body := strings.TrimSpace(part.Text())
 	if body == "" {
 		return ""
+	}
+	if call, _ := parseToolCall(body); call != nil {
+		return "Tool call:\n" + call.ContextString()
 	}
 	return "Tool call:\n" + body
 }
 
 func storedToolCall(part domain.Part) (tools.Request, bool) {
-	if strings.TrimSpace(part.MetaJSON) == "" {
+	payload, ok := part.Payload.(domain.ToolCallPayload)
+	if !ok || payload.Tool == "" {
+		if strings.TrimSpace(part.MetaJSON) == "" {
+			return tools.Request{}, false
+		}
+		call, err := tools.RequestFromMeta(part.MetaJSON)
+		if err != nil || call.Tool == "" {
+			return tools.Request{}, false
+		}
+		return call, true
+	}
+	if payload.Tool == "" {
 		return tools.Request{}, false
 	}
-	call, err := tools.RequestFromMeta(part.MetaJSON)
-	if err != nil || call.Tool == "" {
-		return tools.Request{}, false
-	}
-	return call, true
-}
-
-func partMetaMap(part domain.Part) map[string]string {
-	if strings.TrimSpace(part.MetaJSON) == "" {
-		return nil
-	}
-	var meta map[string]string
-	if err := json.Unmarshal([]byte(part.MetaJSON), &meta); err != nil {
-		return nil
-	}
-	return meta
+	req, err := tools.Normalize(tools.Request{Tool: payload.Tool, ToolCallID: payload.ToolCallID, Args: payload.Args})
+	return req, err == nil
 }
 
 func systemPrompt() string {
@@ -2431,8 +2451,7 @@ func (e *Engine) compactSession(ctx context.Context, session domain.Session, cha
 	if err != nil {
 		return err
 	}
-	meta, _ := json.Marshal(map[string]string{"trigger": trigger})
-	if _, err := e.store.AddPart(ctx, msg.ID, domain.PartKindCompaction, summary, string(meta)); err != nil {
+	if _, err := e.store.AddPart(ctx, msg.ID, domain.CompactionPayload{Summary: summary, Trigger: trigger}); err != nil {
 		return err
 	}
 	if chat, err := e.store.GetChat(ctx, chatID); err == nil {
@@ -2501,10 +2520,14 @@ func (e *Engine) handleModelToolCall(ctx context.Context, session domain.Session
 		if err != nil {
 			return domain.Event{}, err
 		}
-		meta, _ := json.Marshal(tools.MetaWithStoredResult(req.Meta(), domain.PartKindToolOutput, req.Tool, tools.StoredResultStatusDenied, tools.DeniedStoredResult{
-			Message: text,
-		}))
-		if _, err := e.store.AddPart(ctx, msg.ID, domain.PartKindToolOutput, text, string(meta)); err != nil {
+		if _, err := e.store.AddPart(ctx, msg.ID, domain.ToolOutputPayload{
+			Tool:       req.Tool,
+			ToolCallID: req.ToolCallID,
+			Args:       req.Meta(),
+			Status:     domain.ToolResultStatusDenied,
+			Text:       text,
+			Result:     domain.DeniedStoredResult{Message: text},
+		}); err != nil {
 			return domain.Event{}, err
 		}
 		return domain.Event{Kind: domain.EventKindToolResult, Tool: req.Tool, Text: text}, nil
@@ -2637,21 +2660,18 @@ func (e *Engine) persistAssistantToolCalls(ctx context.Context, chatID, sessionI
 		return err
 	}
 	for _, call := range calls {
-		meta, _ := json.Marshal(call)
-		body := call.ContextString()
-		if _, err := e.store.AddPart(ctx, assistantMsg.ID, domain.PartKindToolCall, body, string(meta)); err != nil {
+		if _, err := e.store.AddPart(ctx, assistantMsg.ID, domain.ToolCallPayload{Tool: call.Tool, ToolCallID: call.ToolCallID, Args: call.Args}); err != nil {
 			return err
 		}
 	}
 	if text != "" {
-		if _, err := e.store.AddPart(ctx, assistantMsg.ID, domain.PartKindText, text, ""); err != nil {
+		if _, err := e.store.AddPart(ctx, assistantMsg.ID, domain.TextPayload{Text: text}); err != nil {
 			return err
 		}
 	}
 	usage = usage.Normalized()
 	if usage.HasAnyTokens() {
-		usageMeta, _ := json.Marshal(usage)
-		if _, err := e.store.AddPart(ctx, assistantMsg.ID, domain.PartKindSystemNotice, "usage", string(usageMeta)); err != nil {
+		if _, err := e.store.AddPart(ctx, assistantMsg.ID, domain.UsagePayload{Usage: usage}); err != nil {
 			return err
 		}
 	}
@@ -2805,10 +2825,14 @@ func (e *Engine) prepareModelToolCall(ctx context.Context, session domain.Sessio
 		if err != nil {
 			return preparedToolCall{}, err
 		}
-		meta, _ := json.Marshal(tools.MetaWithStoredResult(req.Meta(), domain.PartKindToolOutput, req.Tool, tools.StoredResultStatusDenied, tools.DeniedStoredResult{
-			Message: text,
-		}))
-		if _, err := e.store.AddPart(ctx, msg.ID, domain.PartKindToolOutput, text, string(meta)); err != nil {
+		if _, err := e.store.AddPart(ctx, msg.ID, domain.ToolOutputPayload{
+			Tool:       req.Tool,
+			ToolCallID: req.ToolCallID,
+			Args:       req.Meta(),
+			Status:     domain.ToolResultStatusDenied,
+			Text:       text,
+			Result:     domain.DeniedStoredResult{Message: text},
+		}); err != nil {
 			return preparedToolCall{}, err
 		}
 		return preparedToolCall{
@@ -2861,10 +2885,14 @@ func (e *Engine) recordDisabledToolResult(ctx context.Context, chatID, sessionID
 	if err != nil {
 		return domain.Event{}, err
 	}
-	meta, _ := json.Marshal(tools.MetaWithStoredResult(req.Meta(), domain.PartKindToolOutput, req.Tool, tools.StoredResultStatusDenied, tools.DeniedStoredResult{
-		Message: text,
-	}))
-	if _, err := e.store.AddPart(ctx, msg.ID, domain.PartKindToolOutput, text, string(meta)); err != nil {
+	if _, err := e.store.AddPart(ctx, msg.ID, domain.ToolOutputPayload{
+		Tool:       req.Tool,
+		ToolCallID: req.ToolCallID,
+		Args:       req.Meta(),
+		Status:     domain.ToolResultStatusDenied,
+		Text:       text,
+		Result:     domain.DeniedStoredResult{Message: text},
+	}); err != nil {
 		return domain.Event{}, err
 	}
 	return domain.Event{Kind: domain.EventKindToolResult, Tool: req.Tool, Text: text}, nil
@@ -3066,9 +3094,16 @@ func (e *Engine) recordApprovalRequest(ctx context.Context, chatID, sessionID in
 	if strings.TrimSpace(toolCallID) != "" {
 		payload["tool_call_id"] = toolCallID
 	}
-	meta, _ := json.Marshal(payload)
 	body := fmt.Sprintf("Approval required for %s: %s", tool, preview)
-	_, err = e.store.AddPart(ctx, msg.ID, domain.PartKindApprovalRequest, body, string(meta))
+	approvalStatus := domain.ApprovalStatusPending
+	_, err = e.store.AddPart(ctx, msg.ID, domain.ApprovalRequestPayload{
+		ApprovalID: approvalID,
+		Tool:       tool,
+		ToolCallID: toolCallID,
+		Command:    preview,
+		Status:     approvalStatus,
+		Body:       body,
+	})
 	return err
 }
 
@@ -3088,16 +3123,17 @@ func (e *Engine) recordApprovalReply(ctx context.Context, chatID, sessionID int6
 		payload["tool_call_id"] = toolCallID
 	}
 	if status == "denied" {
-		payload = tools.MetaWithStoredResult(payload, domain.PartKindToolOutput, tool, tools.StoredResultStatusDenied, tools.DeniedStoredResult{
-			Message: body,
+		_, err = e.store.AddPart(ctx, msg.ID, domain.ToolOutputPayload{
+			Tool:       tool,
+			ToolCallID: toolCallID,
+			Args:       payload,
+			Status:     domain.ToolResultStatusDenied,
+			Text:       body,
+			Result:     domain.DeniedStoredResult{Message: body},
 		})
-	}
-	meta, _ := json.Marshal(payload)
-	if status == "denied" {
-		_, err = e.store.AddPart(ctx, msg.ID, domain.PartKindToolOutput, body, string(meta))
 		return err
 	}
-	_, err = e.store.AddPart(ctx, msg.ID, domain.PartKindSystemNotice, body, string(meta))
+	_, err = e.store.AddPart(ctx, msg.ID, domain.SystemNoticePayload{Text: body})
 	return err
 }
 

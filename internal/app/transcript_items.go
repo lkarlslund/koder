@@ -152,10 +152,10 @@ func (i *pendingAssistantTranscriptItem) Reset(createdAt time.Time, text, reason
 func (i *pendingAssistantTranscriptItem) Parts() []domain.Part {
 	var parts []domain.Part
 	if strings.TrimSpace(i.reasoning) != "" {
-		parts = append(parts, domain.Part{ID: -1, Kind: domain.PartKindReasoning, Body: i.reasoning})
+		parts = append(parts, domain.Part{ID: -1, Kind: domain.PartKindReasoning, Payload: domain.ReasoningPayload{Text: i.reasoning}, Body: i.reasoning})
 	}
 	if strings.TrimSpace(i.text) != "" {
-		parts = append(parts, domain.Part{ID: -2, Kind: domain.PartKindText, Body: i.text})
+		parts = append(parts, domain.Part{ID: -2, Kind: domain.PartKindText, Payload: domain.TextPayload{Text: i.text}, Body: i.text})
 	}
 	return parts
 }

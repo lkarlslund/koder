@@ -130,12 +130,12 @@ func (m *Model) assistantMessageShouldExist(msg domain.Message, parts []domain.P
 		case domain.PartKindCompaction,
 			domain.PartKindToolCall,
 			domain.PartKindToolOutput,
-			domain.PartKindDiff,
 			domain.PartKindApprovalRequest,
-			domain.PartKindReference:
+			domain.PartKindReference,
+			domain.PartKindUsage:
 			continue
 		default:
-			if strings.TrimSpace(part.Body) != "" {
+			if strings.TrimSpace(part.Text()) != "" {
 				return true
 			}
 		}
@@ -211,7 +211,7 @@ func compactionToolRun(parts []domain.Part, msg domain.Message) (ui.ToolRun, boo
 		if part.Kind != domain.PartKindCompaction {
 			continue
 		}
-		body := strings.TrimSpace(part.Body)
+		body := strings.TrimSpace(part.Text())
 		if body == "" {
 			continue
 		}
@@ -230,8 +230,17 @@ func eventNoticeToolRun(part domain.Part) ui.ToolRun {
 	if part.Kind != domain.PartKindEventNotice {
 		return ui.ToolRun{}
 	}
-	var meta eventNoticeMeta
-	_ = json.Unmarshal([]byte(part.MetaJSON), &meta)
+	payload, ok := part.Payload.(domain.EventNoticePayload)
+	if !ok && strings.TrimSpace(part.MetaJSON) == "" {
+		return ui.ToolRun{}
+	}
+	meta := eventNoticeMeta{
+		Kind: payload.Kind, Severity: payload.Severity, Reason: payload.Reason, Title: payload.Title,
+		Subtitle: payload.Subtitle, Tool: string(payload.Tool), Count: payload.Count, Limit: payload.Limit,
+	}
+	if !ok {
+		_ = json.Unmarshal([]byte(part.MetaJSON), &meta)
+	}
 	if strings.TrimSpace(meta.Kind) != "loop_pause" {
 		return ui.ToolRun{}
 	}
@@ -242,7 +251,7 @@ func eventNoticeToolRun(part domain.Part) ui.ToolRun {
 		Tool:     domain.ToolKind(strings.TrimSpace(meta.Tool)),
 		Title:    title,
 		Subtitle: subtitle,
-		Preview:  strings.TrimSpace(part.Body),
+		Preview:  strings.TrimSpace(part.Text()),
 		Status:   ui.ToolRunStatusPaused,
 	}
 }
@@ -272,9 +281,20 @@ func toolRunsFromAssistantMessage(parts []domain.Part) []ui.ToolRun {
 		if part.Kind != domain.PartKindToolCall {
 			continue
 		}
-		req, err := tools.RequestFromMeta(part.MetaJSON)
-		if err != nil {
-			continue
+		var req tools.Request
+		payload, ok := part.Payload.(domain.ToolCallPayload)
+		if ok {
+			var err error
+			req, err = tools.Normalize(tools.Request{Tool: payload.Tool, ToolCallID: payload.ToolCallID, Args: payload.Args})
+			if err != nil {
+				continue
+			}
+		} else {
+			var err error
+			req, err = tools.RequestFromMeta(part.MetaJSON)
+			if err != nil {
+				continue
+			}
 		}
 		presentation := tools.PresentationForRequest(req)
 		command := ""
@@ -322,15 +342,35 @@ func toolRunApprovalRequest(part domain.Part) (ui.ToolRun, bool) {
 	if part.Kind != domain.PartKindApprovalRequest {
 		return ui.ToolRun{}, false
 	}
-	meta := stringMeta(part.MetaJSON)
-	approvalID, _ := strconv.ParseInt(strings.TrimSpace(meta["approval_id"]), 10, 64)
-	tool := domain.ToolKind(strings.TrimSpace(meta["tool"]))
-	preview := strings.TrimSpace(meta["command"])
+	payload, ok := part.Payload.(domain.ApprovalRequestPayload)
+	if !ok {
+		meta := stringMeta(part.MetaJSON)
+		if len(meta) == 0 {
+			return ui.ToolRun{}, false
+		}
+		approvalID, _ := strconv.ParseInt(strings.TrimSpace(meta["approval_id"]), 10, 64)
+		tool := domain.ToolKind(strings.TrimSpace(meta["tool"]))
+		preview := strings.TrimSpace(meta["command"])
+		presentation := presentationFromPreview(tool, preview)
+		return ui.ToolRun{
+			ID:         approvalFallbackID(approvalID, tool, preview),
+			Tool:       tool,
+			ToolCallID: strings.TrimSpace(meta["tool_call_id"]),
+			ApprovalID: approvalID,
+			Title:      presentation.Title,
+			Subtitle:   presentation.Subtitle,
+			Preview:    preview,
+			Status:     ui.ToolRunStatusPendingApproval,
+		}, tool != ""
+	}
+	approvalID := payload.ApprovalID
+	tool := payload.Tool
+	preview := strings.TrimSpace(payload.Command)
 	presentation := presentationFromPreview(tool, preview)
 	run := ui.ToolRun{
 		ID:         approvalFallbackID(approvalID, tool, preview),
 		Tool:       tool,
-		ToolCallID: strings.TrimSpace(meta["tool_call_id"]),
+		ToolCallID: strings.TrimSpace(payload.ToolCallID),
 		ApprovalID: approvalID,
 		Title:      presentation.Title,
 		Subtitle:   presentation.Subtitle,
@@ -344,27 +384,45 @@ func toolRunApprovalReply(part domain.Part) (ui.ToolRun, bool) {
 	if part.Kind != domain.PartKindSystemNotice && part.Kind != domain.PartKindToolOutput {
 		return ui.ToolRun{}, false
 	}
-	meta := stringMeta(part.MetaJSON)
-	if strings.TrimSpace(meta["approval_id"]) == "" || strings.TrimSpace(meta["status"]) == "" {
+	var approvalID int64
+	var tool domain.ToolKind
+	var toolCallID string
+	var preview string
+	statusText := ""
+	if payload, ok := part.Payload.(domain.ToolOutputPayload); ok {
+		tool = payload.Tool
+		toolCallID = payload.ToolCallID
+		preview = strings.TrimSpace(payload.Args["command"])
+		statusText = string(payload.Status)
+		approvalID, _ = strconv.ParseInt(strings.TrimSpace(payload.Args["approval_id"]), 10, 64)
+	} else {
+		meta := stringMeta(part.MetaJSON)
+		if strings.TrimSpace(meta["approval_id"]) == "" || strings.TrimSpace(meta["status"]) == "" {
+			return ui.ToolRun{}, false
+		}
+		approvalID, _ = strconv.ParseInt(strings.TrimSpace(meta["approval_id"]), 10, 64)
+		tool = domain.ToolKind(strings.TrimSpace(meta["tool"]))
+		toolCallID = strings.TrimSpace(meta["tool_call_id"])
+		preview = strings.TrimSpace(meta["command"])
+		statusText = strings.TrimSpace(meta["status"])
+	}
+	if approvalID == 0 || strings.TrimSpace(statusText) == "" {
 		return ui.ToolRun{}, false
 	}
-	if strings.EqualFold(strings.TrimSpace(meta["status"]), "pending") {
+	if strings.EqualFold(strings.TrimSpace(statusText), "pending") {
 		return ui.ToolRun{}, false
 	}
-	approvalID, _ := strconv.ParseInt(strings.TrimSpace(meta["approval_id"]), 10, 64)
-	tool := domain.ToolKind(strings.TrimSpace(meta["tool"]))
-	preview := strings.TrimSpace(meta["command"])
 	presentation := presentationFromPreview(tool, preview)
 	status := ui.ToolRunStatusApproved
 	output := ""
-	if strings.EqualFold(strings.TrimSpace(meta["status"]), "denied") {
+	if strings.EqualFold(strings.TrimSpace(statusText), "denied") {
 		status = ui.ToolRunStatusDenied
-		output = strings.TrimSpace(part.Body)
+		output = strings.TrimSpace(part.Text())
 	}
 	run := ui.ToolRun{
 		ID:         approvalFallbackID(approvalID, tool, preview),
 		Tool:       tool,
-		ToolCallID: strings.TrimSpace(meta["tool_call_id"]),
+		ToolCallID: strings.TrimSpace(toolCallID),
 		ApprovalID: approvalID,
 		Title:      presentation.Title,
 		Subtitle:   presentation.Subtitle,
@@ -376,13 +434,23 @@ func toolRunApprovalReply(part domain.Part) (ui.ToolRun, bool) {
 }
 
 func toolRunOutput(part domain.Part, parts []domain.Part, msg domain.Message) ui.ToolRun {
-	meta := stringMeta(part.MetaJSON)
-	req, err := tools.RequestFromMetaMap(meta)
-	output := strings.TrimSpace(part.Body)
+	payload, _ := part.Payload.(domain.ToolOutputPayload)
+	req := tools.Request{Tool: payload.Tool, ToolCallID: payload.ToolCallID, Args: payload.Args}
+	if req.Args == nil {
+		req.Args = map[string]string{}
+	}
+	var err error
+	req, err = tools.Normalize(req)
+	meta := map[string]string{}
+	if part.Payload == nil {
+		meta = stringMeta(part.MetaJSON)
+		req, err = tools.RequestFromMetaMap(meta)
+	}
+	output := strings.TrimSpace(part.Text())
 	if display, ok := tools.DisplayTextForPart(part); ok {
 		output = strings.TrimSpace(display)
 	}
-	diff := toolRunDiffBody(parts)
+	diff := strings.TrimSpace(payload.Diff)
 	status := ui.ToolRunStatusCompleted
 	storedTool, storedStatus, hasStored := tools.StoredResultInfoForPart(part)
 	if hasStored && req.Tool == "" {
@@ -402,9 +470,9 @@ func toolRunOutput(part domain.Part, parts []domain.Part, msg domain.Message) ui
 	}
 	if err != nil {
 		req = tools.Request{
-			Tool:       domain.ToolKind(strings.TrimSpace(meta["tool"])),
-			ToolCallID: strings.TrimSpace(meta["tool_call_id"]),
-			Args:       map[string]string{},
+			Tool:       firstNonEmptyTool(payload.Tool, domain.ToolKind(strings.TrimSpace(meta["tool"]))),
+			ToolCallID: firstNonEmptyString(strings.TrimSpace(payload.ToolCallID), strings.TrimSpace(meta["tool_call_id"])),
+			Args:       meta,
 		}
 	}
 	presentation := tools.PresentationForRequest(req)
@@ -417,7 +485,7 @@ func toolRunOutput(part domain.Part, parts []domain.Part, msg domain.Message) ui
 	}
 	switch req.Tool {
 	case domain.ToolKindBash:
-		command := firstNonEmptyString(strings.TrimSpace(req.Args["command"]), strings.TrimSpace(meta["command"]))
+		command := strings.TrimSpace(req.Args["command"])
 		if command != "" {
 			presentation.Title = "Ran command " + firstNonEmptyCommandLine(command)
 			presentation.Subtitle = ""
@@ -436,11 +504,17 @@ func toolRunOutput(part domain.Part, parts []domain.Part, msg domain.Message) ui
 			}
 		}
 	case domain.ToolKindExecCommand, domain.ToolKindExecStatus, domain.ToolKindExecWriteStdin, domain.ToolKindExecResize, domain.ToolKindExecTerminate:
-		processID := strings.TrimSpace(meta["process_id"])
-		command := firstNonEmptyString(strings.TrimSpace(meta["command"]), strings.TrimSpace(req.Args["cmd"]))
-		state := strings.TrimSpace(meta["state"])
-		exitCode := optionalIntPtr(strings.TrimSpace(meta["exit_code"]))
+		processID, command, state := strings.TrimSpace(meta["process_id"]), firstNonEmptyString(strings.TrimSpace(meta["command"]), strings.TrimSpace(req.Args["cmd"])), strings.TrimSpace(meta["state"])
+		var exitCode *int
+		exitCode = optionalIntPtr(strings.TrimSpace(meta["exit_code"]))
 		tty := parseBoolString(strings.TrimSpace(meta["tty"]))
+		if stored, ok := payload.Result.(domain.ExecStoredResult); ok {
+			processID = strings.TrimSpace(stored.ProcessID)
+			command = firstNonEmptyString(strings.TrimSpace(stored.Command), command)
+			state = strings.TrimSpace(stored.State)
+			exitCode = stored.ExitCode
+			tty = stored.TTY
+		}
 		runStatus := toolRunStatusFromExecState(state)
 		if command != "" {
 			presentation.Title = execCommandTitle(command, runStatus)
@@ -462,7 +536,7 @@ func toolRunOutput(part domain.Part, parts []domain.Part, msg domain.Message) ui
 			}
 		}
 	case domain.ToolKindEdit:
-		path := firstNonEmptyString(strings.TrimSpace(req.Args["path"]), strings.TrimSpace(meta["path"]))
+		path := strings.TrimSpace(req.Args["path"])
 		if stored, ok := tools.EditStoredResultForPart(part); ok {
 			if strings.TrimSpace(stored.Diff) != "" {
 				diff = strings.TrimSpace(stored.Diff)
@@ -471,7 +545,7 @@ func toolRunOutput(part domain.Part, parts []domain.Part, msg domain.Message) ui
 		if strings.TrimSpace(diff) != "" {
 			output = ui.EditDiffSummary(diff)
 		} else {
-			output = firstNonEmptyString(strings.TrimSpace(part.Body), output)
+			output = firstNonEmptyString(strings.TrimSpace(part.Text()), output)
 		}
 		if path != "" {
 			presentation.Title = "Edited " + filepath.ToSlash(path)
@@ -705,8 +779,8 @@ func isSyntheticToolSummary(input string) bool {
 
 func toolRunDiffBody(parts []domain.Part) string {
 	for _, part := range parts {
-		if part.Kind == domain.PartKindDiff && strings.TrimSpace(part.Body) != "" {
-			return part.Body
+		if payload, ok := part.Payload.(domain.ToolOutputPayload); ok && strings.TrimSpace(payload.Diff) != "" {
+			return payload.Diff
 		}
 	}
 	return ""
@@ -715,6 +789,15 @@ func toolRunDiffBody(parts []domain.Part) string {
 func firstNonEmptyString(values ...string) string {
 	for _, value := range values {
 		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func firstNonEmptyTool(values ...domain.ToolKind) domain.ToolKind {
+	for _, value := range values {
+		if strings.TrimSpace(string(value)) != "" {
 			return value
 		}
 	}

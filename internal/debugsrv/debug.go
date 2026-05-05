@@ -892,7 +892,7 @@ func analyzeTranscriptMessage(msg domain.Message, parts []domain.Part) analyzedT
 	for _, part := range parts {
 		switch part.Kind {
 		case domain.PartKindText:
-			text := strings.TrimSpace(part.Body)
+			text := strings.TrimSpace(part.Text())
 			if text != "" {
 				texts = append(texts, text)
 			}
@@ -901,7 +901,10 @@ func analyzeTranscriptMessage(msg domain.Message, parts []domain.Part) analyzedT
 			}
 		case domain.PartKindToolCall:
 			out.hasToolCall = true
-			name := firstLine(strings.TrimSpace(part.Body))
+			name := ""
+			if payload, ok := part.Payload.(domain.ToolCallPayload); ok {
+				name = string(payload.Tool)
+			}
 			if name != "" {
 				out.toolNames = append(out.toolNames, name)
 			}

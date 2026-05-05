@@ -1,7 +1,6 @@
 package tools_test
 
 import (
-	"encoding/json"
 	"strings"
 	"testing"
 
@@ -10,24 +9,12 @@ import (
 )
 
 func TestDisplayTextForPartUsesWriteContent(t *testing.T) {
-	meta, err := json.Marshal(tools.MetaWithStoredResult(map[string]string{
-		"tool": "write",
-		"path": "note.txt",
-	}, domain.PartKindToolOutput, domain.ToolKindWrite, tools.StoredResultStatusOK, tools.WriteStoredResult{
+	text, ok := tools.DisplayTextForPart(toolOutputPart(domain.ToolKindWrite, tools.StoredResultStatusOK, "Created note.txt", tools.WriteStoredResult{
 		Path:    "note.txt",
 		Action:  "created",
 		Summary: "Created note.txt",
 		Content: "first line\nsecond line",
 	}))
-	if err != nil {
-		t.Fatalf("marshal meta: %v", err)
-	}
-
-	text, ok := tools.DisplayTextForPart(domain.Part{
-		Kind:     domain.PartKindToolOutput,
-		Body:     "Created note.txt",
-		MetaJSON: string(meta),
-	})
 	if !ok {
 		t.Fatal("expected display text")
 	}
@@ -37,25 +24,13 @@ func TestDisplayTextForPartUsesWriteContent(t *testing.T) {
 }
 
 func TestDisplayTextForPartIncludesWriteTruncationNotice(t *testing.T) {
-	meta, err := json.Marshal(tools.MetaWithStoredResult(map[string]string{
-		"tool": "write",
-		"path": "note.txt",
-	}, domain.PartKindToolOutput, domain.ToolKindWrite, tools.StoredResultStatusOK, tools.WriteStoredResult{
+	text, ok := tools.DisplayTextForPart(toolOutputPart(domain.ToolKindWrite, tools.StoredResultStatusOK, "Created note.txt", tools.WriteStoredResult{
 		Path:      "note.txt",
 		Action:    "created",
 		Summary:   "Created note.txt",
 		Content:   "first line",
 		Truncated: true,
 	}))
-	if err != nil {
-		t.Fatalf("marshal meta: %v", err)
-	}
-
-	text, ok := tools.DisplayTextForPart(domain.Part{
-		Kind:     domain.PartKindToolOutput,
-		Body:     "Created note.txt",
-		MetaJSON: string(meta),
-	})
 	if !ok {
 		t.Fatal("expected display text")
 	}
@@ -65,33 +40,15 @@ func TestDisplayTextForPartIncludesWriteTruncationNotice(t *testing.T) {
 }
 
 func TestDisplayTextForPartFormatsEditHunks(t *testing.T) {
-	meta, err := json.Marshal(tools.MetaWithStoredResult(map[string]string{
-		"tool": "edit",
-		"path": "game/map.go",
-	}, domain.PartKindToolOutput, domain.ToolKindEdit, tools.StoredResultStatusOK, tools.EditStoredResult{
+	text, ok := tools.DisplayTextForPart(toolOutputPart(domain.ToolKindEdit, tools.StoredResultStatusOK, "Edited game/map.go", tools.EditStoredResult{
 		Path:    "game/map.go",
 		Summary: "Edited game/map.go (replaced 1 occurrence)",
 		Diff:    "--- game/map.go\n+++ game/map.go\n@@ -12,1 +12,1 @@\n-if oldCondition {\n+if newCondition {",
 	}))
-	if err != nil {
-		t.Fatalf("marshal meta: %v", err)
-	}
-
-	text, ok := tools.DisplayTextForPart(domain.Part{
-		Kind:     domain.PartKindToolOutput,
-		Body:     "Edited game/map.go (replaced 1 occurrence)",
-		MetaJSON: string(meta),
-	})
 	if !ok {
 		t.Fatal("expected display text")
 	}
-	for _, want := range []string{
-		"--- game/map.go",
-		"+++ game/map.go",
-		"@@ -12,1 +12,1 @@",
-		"-if oldCondition {",
-		"+if newCondition {",
-	} {
+	for _, want := range []string{"--- game/map.go", "+++ game/map.go", "@@ -12,1 +12,1 @@", "-if oldCondition {", "+if newCondition {"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("expected %q in %q", want, text)
 		}
@@ -99,23 +56,11 @@ func TestDisplayTextForPartFormatsEditHunks(t *testing.T) {
 }
 
 func TestModelTextForPartUsesEditSummaryWithoutDiff(t *testing.T) {
-	meta, err := json.Marshal(tools.MetaWithStoredResult(map[string]string{
-		"tool": "edit",
-		"path": "game/map.go",
-	}, domain.PartKindToolOutput, domain.ToolKindEdit, tools.StoredResultStatusOK, tools.EditStoredResult{
+	text, ok := tools.ModelTextForPart(toolOutputPart(domain.ToolKindEdit, tools.StoredResultStatusOK, "Edited game/map.go", tools.EditStoredResult{
 		Path:    "game/map.go",
 		Summary: "Edited game/map.go (replaced 1 occurrence)",
 		Diff:    "--- game/map.go\n+++ game/map.go\n@@ -12,1 +12,1 @@\n-if oldCondition {\n+if newCondition {",
-	}))
-	if err != nil {
-		t.Fatalf("marshal meta: %v", err)
-	}
-
-	text, ok := tools.ModelTextForPart(domain.Part{
-		Kind:     domain.PartKindToolOutput,
-		Body:     "Edited game/map.go (replaced 1 occurrence)",
-		MetaJSON: string(meta),
-	}, "--- ignored diff")
+	}), "--- ignored diff")
 	if !ok {
 		t.Fatal("expected model text")
 	}
@@ -125,22 +70,11 @@ func TestModelTextForPartUsesEditSummaryWithoutDiff(t *testing.T) {
 }
 
 func TestModelTextForPartUsesApplyPatchSummaryWithoutDiff(t *testing.T) {
-	meta, err := json.Marshal(tools.MetaWithStoredResult(map[string]string{
-		"tool": "apply_patch",
-	}, domain.PartKindToolOutput, domain.ToolKindApplyPatch, tools.StoredResultStatusOK, tools.ApplyPatchStoredResult{
+	text, ok := tools.ModelTextForPart(toolOutputPart(domain.ToolKindApplyPatch, tools.StoredResultStatusOK, "Applied patch", tools.ApplyPatchStoredResult{
 		Summary:      "Applied patch to game/map.go",
 		ChangedFiles: []string{"game/map.go"},
 		FileCount:    1,
-	}))
-	if err != nil {
-		t.Fatalf("marshal meta: %v", err)
-	}
-
-	text, ok := tools.ModelTextForPart(domain.Part{
-		Kind:     domain.PartKindToolOutput,
-		Body:     "Applied patch to game/map.go",
-		MetaJSON: string(meta),
-	}, "--- ignored diff")
+	}), "--- ignored diff")
 	if !ok {
 		t.Fatal("expected model text")
 	}
@@ -150,24 +84,25 @@ func TestModelTextForPartUsesApplyPatchSummaryWithoutDiff(t *testing.T) {
 }
 
 func TestDisplayTextForPartStripsRedundantToolFailurePrefix(t *testing.T) {
-	meta, err := json.Marshal(tools.MetaWithStoredResult(map[string]string{
-		"tool": "todo_update_item",
-	}, domain.PartKindToolOutput, domain.ToolKindTodoUpdateItem, tools.StoredResultStatusError, tools.ErrorStoredResult{
+	text, ok := tools.DisplayTextForPart(toolOutputPart(domain.ToolKindTodoUpdateItem, tools.StoredResultStatusError, "todo_update_item failed: id must be a non-negative integer", tools.ErrorStoredResult{
 		Message: "todo_update_item failed: id must be a non-negative integer",
 	}))
-	if err != nil {
-		t.Fatalf("marshal meta: %v", err)
-	}
-
-	text, ok := tools.DisplayTextForPart(domain.Part{
-		Kind:     domain.PartKindToolOutput,
-		Body:     "todo_update_item failed: id must be a non-negative integer",
-		MetaJSON: string(meta),
-	})
 	if !ok {
 		t.Fatal("expected display text")
 	}
 	if text != "id must be a non-negative integer" {
 		t.Fatalf("unexpected display text: %q", text)
+	}
+}
+
+func toolOutputPart(tool domain.ToolKind, status tools.StoredResultStatus, text string, result any) domain.Part {
+	return domain.Part{
+		Kind: domain.PartKindToolOutput,
+		Payload: domain.ToolOutputPayload{
+			Tool:   tool,
+			Status: domain.ToolResultStatus(status),
+			Text:   text,
+			Result: result,
+		},
 	}
 }

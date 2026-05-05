@@ -20,7 +20,7 @@ type jsonfsBackend struct {
 }
 
 func openJSONFSBackend(stateDir string) (*jsonfsBackend, error) {
-	root := filepath.Join(stateDir, "store-jsonfs")
+	root := filepath.Join(stateDir, "store-jsonfs-v2")
 	for _, dir := range []string{
 		root,
 		filepath.Join(root, "sessions"),
@@ -462,7 +462,7 @@ func (b *jsonfsBackend) UpdateMessageSummary(ctx context.Context, messageID int6
 	return b.writeMessage(message)
 }
 
-func (b *jsonfsBackend) AddPart(ctx context.Context, messageID int64, kind domain.PartKind, body, metaJSON string) (domain.Part, error) {
+func (b *jsonfsBackend) AddPart(ctx context.Context, messageID int64, payload domain.PartPayload) (domain.Part, error) {
 	if err := ensureContext(ctx); err != nil {
 		return domain.Part{}, err
 	}
@@ -479,9 +479,10 @@ func (b *jsonfsBackend) AddPart(ctx context.Context, messageID int64, kind domai
 	part := domain.Part{
 		ID:        meta.NextPartID,
 		MessageID: messageID,
-		Kind:      kind,
-		Body:      body,
-		MetaJSON:  metaJSON,
+		Kind:      payload.PartKind(),
+		Payload:   payload,
+		Body:      domain.Part{Payload: payload}.Text(),
+		MetaJSON:  domain.Part{Payload: payload}.LegacyMetaJSON(),
 		CreatedAt: time.Now().UTC(),
 	}
 	meta.NextPartID++
@@ -494,7 +495,7 @@ func (b *jsonfsBackend) AddPart(ctx context.Context, messageID int64, kind domai
 	return part, nil
 }
 
-func (b *jsonfsBackend) UpdatePartMetaJSON(ctx context.Context, partID int64, metaJSON string) error {
+func (b *jsonfsBackend) UpdatePartPayload(ctx context.Context, partID int64, payload domain.PartPayload) error {
 	if err := ensureContext(ctx); err != nil {
 		return err
 	}
@@ -505,7 +506,10 @@ func (b *jsonfsBackend) UpdatePartMetaJSON(ctx context.Context, partID int64, me
 	if err != nil {
 		return err
 	}
-	part.MetaJSON = metaJSON
+	part.Kind = payload.PartKind()
+	part.Payload = payload
+	part.Body = domain.Part{Payload: payload}.Text()
+	part.MetaJSON = domain.Part{Payload: payload}.LegacyMetaJSON()
 	return b.writePart(part)
 }
 

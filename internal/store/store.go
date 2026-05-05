@@ -45,8 +45,8 @@ type backend interface {
 	AddMessage(context.Context, int64, domain.MessageRole, string) (domain.Message, error)
 	AddChatMessage(context.Context, int64, domain.MessageRole, string) (domain.Message, error)
 	UpdateMessageSummary(context.Context, int64, string) error
-	AddPart(context.Context, int64, domain.PartKind, string, string) (domain.Part, error)
-	UpdatePartMetaJSON(context.Context, int64, string) error
+	AddPart(context.Context, int64, domain.PartPayload) (domain.Part, error)
+	UpdatePartPayload(context.Context, int64, domain.PartPayload) error
 	PartsForSession(context.Context, int64) ([]domain.Message, map[int64][]domain.Part, error)
 	PartsForChat(context.Context, int64) ([]domain.Message, map[int64][]domain.Part, error)
 	CreateApproval(context.Context, int64, domain.ToolKind, string) (Approval, error)
@@ -272,12 +272,12 @@ func (s *Store) UpdateMessageSummary(ctx context.Context, messageID int64, summa
 	return s.backend.UpdateMessageSummary(ctx, messageID, summary)
 }
 
-func (s *Store) AddPart(ctx context.Context, messageID int64, kind domain.PartKind, body, metaJSON string) (domain.Part, error) {
-	return s.backend.AddPart(ctx, messageID, kind, body, metaJSON)
+func (s *Store) AddPart(ctx context.Context, messageID int64, payload domain.PartPayload) (domain.Part, error) {
+	return s.backend.AddPart(ctx, messageID, payload)
 }
 
-func (s *Store) UpdatePartMetaJSON(ctx context.Context, partID int64, metaJSON string) error {
-	return s.backend.UpdatePartMetaJSON(ctx, partID, metaJSON)
+func (s *Store) UpdatePartPayload(ctx context.Context, partID int64, payload domain.PartPayload) error {
+	return s.backend.UpdatePartPayload(ctx, partID, payload)
 }
 
 func (s *Store) PartsForSession(ctx context.Context, sessionID int64) ([]domain.Message, map[int64][]domain.Part, error) {
@@ -410,7 +410,7 @@ func (s *Store) ForkSession(ctx context.Context, sourceSessionID int64) (domain.
 			return domain.Session{}, err
 		}
 		for _, part := range partsByMessage[msg.ID] {
-			if _, err := s.AddPart(ctx, next.ID, part.Kind, part.Body, part.MetaJSON); err != nil {
+			if _, err := s.AddPart(ctx, next.ID, part.Payload); err != nil {
 				return domain.Session{}, err
 			}
 		}

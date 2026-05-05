@@ -20,12 +20,12 @@ const (
 	PartKindReasoning       PartKind = "reasoning"
 	PartKindToolCall        PartKind = "tool_call"
 	PartKindToolOutput      PartKind = "tool_output"
-	PartKindDiff            PartKind = "diff"
 	PartKindCompaction      PartKind = "compaction"
 	PartKindApprovalRequest PartKind = "approval_request"
 	PartKindQuestion        PartKind = "question"
 	PartKindTaskUpdate      PartKind = "task_update"
 	PartKindPlanUpdate      PartKind = "plan_update"
+	PartKindUsage           PartKind = "usage"
 	PartKindSystemNotice    PartKind = "system_notice"
 	PartKindEventNotice     PartKind = "event_notice"
 )
@@ -291,8 +291,9 @@ type Part struct {
 	ID        int64
 	MessageID int64
 	Kind      PartKind
-	Body      string
-	MetaJSON  string
+	Payload   PartPayload
+	Body      string `json:"-"`
+	MetaJSON  string `json:"-"`
 	CreatedAt time.Time
 }
 

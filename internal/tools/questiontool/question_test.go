@@ -2,7 +2,6 @@ package questiontool
 
 import (
 	"context"
-	"strings"
 	"testing"
 
 	"github.com/lkarlslund/koder/internal/domain"
@@ -64,7 +63,8 @@ func TestPersistResult(t *testing.T) {
 	if len(messages) != 1 || len(partsByMessage[messages[0].ID]) != 1 {
 		t.Fatalf("unexpected stored output: %#v %#v", messages, partsByMessage)
 	}
-	if !strings.Contains(partsByMessage[messages[0].ID][0].MetaJSON, `"tool":"question"`) {
-		t.Fatalf("expected stored metadata to mention question tool, got %q", partsByMessage[messages[0].ID][0].MetaJSON)
+	payload, ok := partsByMessage[messages[0].ID][0].Payload.(domain.ToolOutputPayload)
+	if !ok || payload.Tool != domain.ToolKindQuestion {
+		t.Fatalf("expected typed question tool payload, got %#v", partsByMessage[messages[0].ID][0].Payload)
 	}
 }

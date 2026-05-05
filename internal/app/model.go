@@ -2892,7 +2892,7 @@ func (m *Model) transcriptControllerFromBlock(prevByKey map[string]transcriptIte
 func firstPartBody(parts []domain.Part, kind domain.PartKind) string {
 	for _, part := range parts {
 		if part.Kind == kind {
-			return part.Body
+			return part.Text()
 		}
 	}
 	return ""
@@ -3310,10 +3310,10 @@ func (m Model) pendingAssistantParts() []domain.Part {
 	}
 	parts := make([]domain.Part, 0, 2)
 	if strings.TrimSpace(m.pendingAssistant.Reasoning) != "" {
-		parts = append(parts, domain.Part{ID: -1, Kind: domain.PartKindReasoning, Body: m.pendingAssistant.Reasoning})
+		parts = append(parts, domain.Part{ID: -1, Kind: domain.PartKindReasoning, Payload: domain.ReasoningPayload{Text: m.pendingAssistant.Reasoning}, Body: m.pendingAssistant.Reasoning})
 	}
 	if strings.TrimSpace(m.pendingAssistant.Text) != "" {
-		parts = append(parts, domain.Part{ID: -2, Kind: domain.PartKindText, Body: m.pendingAssistant.Text})
+		parts = append(parts, domain.Part{ID: -2, Kind: domain.PartKindText, Payload: domain.TextPayload{Text: m.pendingAssistant.Text}, Body: m.pendingAssistant.Text})
 	}
 	return parts
 }
@@ -4002,22 +4002,28 @@ func (m Model) forkSessionCmd(sourceSessionID int64) ui.Cmd {
 				if part.Kind != domain.PartKindAttachment {
 					continue
 				}
-				meta, err := attachment.DecodeMeta(part.MetaJSON)
-				if err != nil {
-					return forkSessionMsg{err: err}
+				payload, ok := part.Payload.(domain.AttachmentPayload)
+				if !ok {
+					return forkSessionMsg{err: fmt.Errorf("attachment part has %T payload", part.Payload)}
+				}
+				meta := attachment.Metadata{
+					ID: payload.ID, Name: payload.Name, MIME: payload.MIME, Path: payload.Path, Size: payload.Size, Source: payload.Source, Original: payload.Original,
 				}
 				rewritten, err := m.attachmentFiles.CopyToSession(meta, forked.ID)
 				if err != nil {
 					return forkSessionMsg{err: err}
 				}
-				raw, err := attachment.EncodeMeta(rewritten)
-				if err != nil {
+				payload.ID = rewritten.ID
+				payload.Name = rewritten.Name
+				payload.MIME = rewritten.MIME
+				payload.Path = rewritten.Path
+				payload.Size = rewritten.Size
+				payload.Source = rewritten.Source
+				payload.Original = rewritten.Original
+				if err := m.store.UpdatePartPayload(ctx, part.ID, payload); err != nil {
 					return forkSessionMsg{err: err}
 				}
-				if err := m.store.UpdatePartMetaJSON(ctx, part.ID, raw); err != nil {
-					return forkSessionMsg{err: err}
-				}
-				part.MetaJSON = raw
+				part.Payload = payload
 				parts[msg.ID][i] = part
 			}
 		}
@@ -4716,7 +4722,7 @@ func (m Model) messagePromptText(messageID int64, fallback string) string {
 		if part.Kind != domain.PartKindText {
 			continue
 		}
-		body.WriteString(part.Body)
+		body.WriteString(part.Text())
 	}
 	if text := strings.TrimSpace(body.String()); text != "" {
 		return text
@@ -4930,35 +4936,32 @@ func (m *Model) appendLocalUserPrompt(prompt string, drafts []attachment.Draft, 
 			ID:        m.nextPendingID(),
 			MessageID: messageID,
 			Kind:      domain.PartKindText,
+			Payload:   domain.TextPayload{Text: prompt},
 			Body:      prompt,
 			CreatedAt: now,
 		})
 	}
 	for _, draft := range drafts {
-		raw, err := attachment.EncodeMeta(draft.Metadata)
-		if err != nil {
-			continue
-		}
 		parts = append(parts, domain.Part{
 			ID:        m.nextPendingID(),
 			MessageID: messageID,
 			Kind:      domain.PartKindAttachment,
+			Payload: domain.AttachmentPayload{
+				ID: draft.ID, Name: draft.Name, MIME: draft.MIME, Path: draft.Path, Size: draft.Size, Source: draft.Source, Original: draft.Original,
+			},
 			Body:      draft.Name,
-			MetaJSON:  raw,
 			CreatedAt: now,
 		})
 	}
 	for _, ref := range refs {
-		raw, err := reference.EncodeMeta(reference.Metadata(ref))
-		if err != nil {
-			continue
-		}
 		parts = append(parts, domain.Part{
 			ID:        m.nextPendingID(),
 			MessageID: messageID,
 			Kind:      domain.PartKindReference,
+			Payload: domain.ReferencePayload{
+				Kind: string(ref.Kind), Path: ref.Path, Display: ref.Display, Start: ref.Start, End: ref.End,
+			},
 			Body:      ref.Display,
-			MetaJSON:  raw,
 			CreatedAt: now,
 		})
 	}
@@ -5021,6 +5024,7 @@ func (m *Model) appendLocalAssistantError(err error) {
 		ID:        m.nextPendingID(),
 		MessageID: messageID,
 		Kind:      domain.PartKindText,
+		Payload:   domain.TextPayload{Text: body},
 		Body:      body,
 		CreatedAt: now,
 	}}
@@ -5042,10 +5046,6 @@ func (m *Model) appendLocalTranscriptNotice(body, kind, severity string) {
 		m.parts = make(map[int64][]domain.Part)
 	}
 	messageID := m.nextPendingID()
-	meta, _ := json.Marshal(map[string]string{
-		"kind":     kind,
-		"severity": severity,
-	})
 	m.messages = append(m.messages, domain.Message{
 		ID:        messageID,
 		SessionID: m.currentSession.ID,
@@ -5058,8 +5058,8 @@ func (m *Model) appendLocalTranscriptNotice(body, kind, severity string) {
 		ID:        m.nextPendingID(),
 		MessageID: messageID,
 		Kind:      domain.PartKindEventNotice,
+		Payload:   domain.EventNoticePayload{Text: body, Kind: kind, Severity: severity},
 		Body:      body,
-		MetaJSON:  string(meta),
 		CreatedAt: now,
 	}}
 	if m.debug != nil {

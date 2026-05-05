@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	schemaVersion = 1
+	schemaVersion = 2
 	encodingJSON  = "json"
 )
 

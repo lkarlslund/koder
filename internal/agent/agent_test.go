@@ -359,8 +359,8 @@ func TestPersistAssistantToolCallsStoresNarrationAsText(t *testing.T) {
 	if got[1].Kind != domain.PartKindText || !strings.Contains(got[1].Body, "inspect that file") {
 		t.Fatalf("expected narration to be stored as text, got %#v", got[1])
 	}
-	if got[2].Kind != domain.PartKindSystemNotice || got[2].Body != "usage" {
-		t.Fatalf("expected usage to remain a system notice, got %#v", got[2])
+	if got[2].Kind != domain.PartKindUsage {
+		t.Fatalf("expected usage to be stored as typed usage part, got %#v", got[2])
 	}
 }
 
@@ -388,11 +388,10 @@ func TestBuildConversationIncludesAssistantNarrationAlongsideToolCalls(t *testin
 		ToolCallID: "call_1",
 		Args:       map[string]string{"path": "README.md"},
 	}
-	meta, _ := json.Marshal(req)
-	if _, err := st.AddPart(context.Background(), assistantMsg.ID, domain.PartKindToolCall, req.ContextString(), string(meta)); err != nil {
+	if _, err := st.AddPart(context.Background(), assistantMsg.ID, domain.ToolCallPayload{Tool: req.Tool, ToolCallID: req.ToolCallID, Args: req.Args}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.AddPart(context.Background(), assistantMsg.ID, domain.PartKindText, "Let me inspect that file first.", ""); err != nil {
+	if _, err := st.AddPart(context.Background(), assistantMsg.ID, domain.TextPayload{Text: "Let me inspect that file first."}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -433,21 +432,21 @@ func TestBuildConversationResetsAtCompactionBoundary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.AddPart(context.Background(), before.ID, domain.PartKindText, "old question", ""); err != nil {
+	if _, err := st.AddPart(context.Background(), before.ID, domain.TextPayload{Text: "old question"}); err != nil {
 		t.Fatal(err)
 	}
 	compactMsg, err := st.AddMessage(context.Background(), session.ID, domain.MessageRoleAssistant, "compact")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.AddPart(context.Background(), compactMsg.ID, domain.PartKindCompaction, "summary block", ""); err != nil {
+	if _, err := st.AddPart(context.Background(), compactMsg.ID, domain.CompactionPayload{Summary: "summary block"}); err != nil {
 		t.Fatal(err)
 	}
 	after, err := st.AddMessage(context.Background(), session.ID, domain.MessageRoleUser, "after")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.AddPart(context.Background(), after.ID, domain.PartKindText, "new question", ""); err != nil {
+	if _, err := st.AddPart(context.Background(), after.ID, domain.TextPayload{Text: "new question"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -549,24 +548,20 @@ func TestBuildConversationUsesStructuredToolMessages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.AddPart(context.Background(), assistantMsg.ID, domain.PartKindToolCall, `{"tool":"bash","command":"pwd"}`, `{"tool_call_id":"call_1","tool":"bash","command":"pwd"}`); err != nil {
+	if _, err := st.AddPart(context.Background(), assistantMsg.ID, domain.ToolCallPayload{Tool: domain.ToolKindBash, ToolCallID: "call_1", Args: map[string]string{"command": "pwd"}}); err != nil {
 		t.Fatal(err)
 	}
 	toolMsg, err := st.AddMessage(context.Background(), session.ID, domain.MessageRoleTool, "bash")
 	if err != nil {
 		t.Fatal(err)
 	}
-	meta := tools.MetaWithStoredResult(map[string]string{
-		"tool":         "bash",
-		"tool_call_id": "call_1",
-	}, domain.PartKindToolOutput, domain.ToolKindBash, tools.StoredResultStatusOK, tools.BashStoredResult{
+	if _, err := st.AddPart(context.Background(), toolMsg.ID, domain.ToolOutputPayload{Tool: domain.ToolKindBash, ToolCallID: "call_1", Status: domain.ToolResultStatusOK, Text: "/stale/body", Result: tools.BashStoredResult{
 		Command:   "pwd",
 		Workdir:   ".",
 		TimeoutMS: 1000,
 		ExitCode:  0,
 		Output:    "/typed/output",
-	})
-	if _, err := st.AddPart(context.Background(), toolMsg.ID, domain.PartKindToolOutput, "/stale/body", tools.JSONMeta(meta)); err != nil {
+	}}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -608,16 +603,12 @@ func TestBuildConversationIncludesViewImageToolContentParts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	meta := tools.MetaWithStoredResult(map[string]string{
-		"tool":         "view_image",
-		"tool_call_id": "call_image",
-	}, domain.PartKindToolOutput, domain.ToolKindViewImage, tools.StoredResultStatusOK, tools.ViewImageStoredResult{
+	if _, err := st.AddPart(context.Background(), toolMsg.ID, domain.ToolOutputPayload{Tool: domain.ToolKindViewImage, ToolCallID: "call_image", Status: domain.ToolResultStatusOK, Text: "Viewed image screen.png", Result: tools.ViewImageStoredResult{
 		Path:       "screen.png",
 		SourcePath: imagePath,
 		MIMEType:   "image/png",
 		Summary:    "Viewed image screen.png",
-	})
-	if _, err := st.AddPart(context.Background(), toolMsg.ID, domain.PartKindToolOutput, "Viewed image screen.png", tools.JSONMeta(meta)); err != nil {
+	}}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -692,7 +683,7 @@ func TestBuildConversationIncludesImageAndTextAttachments(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.AddPart(context.Background(), msg.ID, domain.PartKindText, "inspect these", ""); err != nil {
+	if _, err := st.AddPart(context.Background(), msg.ID, domain.TextPayload{Text: "inspect these"}); err != nil {
 		t.Fatal(err)
 	}
 	imageDraft, err := engine.files.ImportClipboardImage([]byte("\x89PNG\r\n\x1a\nfake"))
@@ -703,11 +694,7 @@ func TestBuildConversationIncludesImageAndTextAttachments(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	imageRaw, err := attachment.EncodeMeta(imageMeta)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.AddPart(context.Background(), msg.ID, domain.PartKindAttachment, imageMeta.Name, imageRaw); err != nil {
+	if _, err := st.AddPart(context.Background(), msg.ID, domain.AttachmentPayload{ID: imageMeta.ID, Name: imageMeta.Name, MIME: imageMeta.MIME, Path: imageMeta.Path, Size: imageMeta.Size, Source: imageMeta.Source, Original: imageMeta.Original}); err != nil {
 		t.Fatal(err)
 	}
 	textPath := filepath.Join(t.TempDir(), "note.txt")
@@ -722,11 +709,7 @@ func TestBuildConversationIncludesImageAndTextAttachments(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	textRaw, err := attachment.EncodeMeta(textMeta)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.AddPart(context.Background(), msg.ID, domain.PartKindAttachment, textMeta.Name, textRaw); err != nil {
+	if _, err := st.AddPart(context.Background(), msg.ID, domain.AttachmentPayload{ID: textMeta.ID, Name: textMeta.Name, MIME: textMeta.MIME, Path: textMeta.Path, Size: textMeta.Size, Source: textMeta.Source, Original: textMeta.Original}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -770,7 +753,7 @@ func TestPreviewNextRequestIncludesUnsentDraftMessage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.AddPart(context.Background(), msg.ID, domain.PartKindText, "saved prompt", ""); err != nil {
+	if _, err := st.AddPart(context.Background(), msg.ID, domain.TextPayload{Text: "saved prompt"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1052,10 +1035,10 @@ func TestBuildConversationPreservesThinkingBlockForQwenPreset(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.AddPart(context.Background(), msg.ID, domain.PartKindReasoning, "hidden trace", ""); err != nil {
+	if _, err := st.AddPart(context.Background(), msg.ID, domain.ReasoningPayload{Text: "hidden trace"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.AddPart(context.Background(), msg.ID, domain.PartKindText, "done", ""); err != nil {
+	if _, err := st.AddPart(context.Background(), msg.ID, domain.TextPayload{Text: "done"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2211,14 +2194,14 @@ func TestCompactSessionDoesNotPersistUsageOrEmitUsageEvent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.AddPart(context.Background(), userMsg.ID, domain.PartKindText, "hello", ""); err != nil {
+	if _, err := st.AddPart(context.Background(), userMsg.ID, domain.TextPayload{Text: "hello"}); err != nil {
 		t.Fatal(err)
 	}
 	assistantMsg, err := st.AddMessage(context.Background(), session.ID, domain.MessageRoleAssistant, "world")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.AddPart(context.Background(), assistantMsg.ID, domain.PartKindText, "world", ""); err != nil {
+	if _, err := st.AddPart(context.Background(), assistantMsg.ID, domain.TextPayload{Text: "world"}); err != nil {
 		t.Fatal(err)
 	}
 

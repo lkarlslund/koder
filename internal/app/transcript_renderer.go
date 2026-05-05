@@ -117,6 +117,22 @@ func (r transcriptRenderer) attachmentLabel(meta attachment.Metadata) string {
 	return attachmentLabel(meta)
 }
 
+func attachmentPayloadMetadata(part domain.Part) (attachment.Metadata, bool) {
+	payload, ok := part.Payload.(domain.AttachmentPayload)
+	if !ok {
+		return attachment.Metadata{}, false
+	}
+	return attachment.Metadata{
+		ID:       payload.ID,
+		Name:     payload.Name,
+		MIME:     payload.MIME,
+		Path:     payload.Path,
+		Size:     payload.Size,
+		Source:   payload.Source,
+		Original: payload.Original,
+	}, true
+}
+
 func attachmentLabel(meta attachment.Metadata) string {
 	switch attachment.ClassifyMIME(meta.MIME) {
 	case attachment.KindImage:
@@ -157,10 +173,10 @@ func (r transcriptRenderer) renderMessageParts(parts []domain.Part) string {
 		switch part.Kind {
 		case domain.PartKindText:
 			flushReasoning()
-			textBuf.WriteString(part.Body)
+			textBuf.WriteString(part.Text())
 		case domain.PartKindReasoning:
 			flushText()
-			reasoningBuf.WriteString(part.Body)
+			reasoningBuf.WriteString(part.Text())
 		case domain.PartKindCompaction:
 			flushText()
 			flushReasoning()
@@ -184,16 +200,16 @@ func (r transcriptRenderer) renderMessageParts(parts []domain.Part) string {
 				systemBlocks = append(systemBlocks, block)
 			}
 			continue
-		case domain.PartKindToolCall, domain.PartKindToolOutput, domain.PartKindDiff, domain.PartKindApprovalRequest:
+		case domain.PartKindToolCall, domain.PartKindToolOutput, domain.PartKindApprovalRequest, domain.PartKindUsage:
 			flushText()
 			flushReasoning()
 			continue
 		case domain.PartKindAttachment:
 			flushText()
 			flushReasoning()
-			meta, err := attachment.DecodeMeta(part.MetaJSON)
-			if err != nil {
-				if body := strings.TrimSpace(part.Body); body != "" {
+			meta, ok := attachmentPayloadMetadata(part)
+			if !ok {
+				if body := strings.TrimSpace(part.Text()); body != "" {
 					blocks = append(blocks, body)
 				}
 				continue
@@ -206,7 +222,7 @@ func (r transcriptRenderer) renderMessageParts(parts []domain.Part) string {
 		default:
 			flushText()
 			flushReasoning()
-			blocks = append(blocks, part.Body)
+			blocks = append(blocks, part.Text())
 		}
 	}
 
@@ -266,10 +282,10 @@ func (r transcriptRenderer) renderStyledMessageParts(parts []domain.Part) []ui.S
 		switch part.Kind {
 		case domain.PartKindText:
 			flushReasoning()
-			textBuf.WriteString(part.Body)
+			textBuf.WriteString(part.Text())
 		case domain.PartKindReasoning:
 			flushText()
-			reasoningBuf.WriteString(part.Body)
+			reasoningBuf.WriteString(part.Text())
 		case domain.PartKindCompaction:
 			flushText()
 			flushReasoning()
@@ -291,15 +307,15 @@ func (r transcriptRenderer) renderStyledMessageParts(parts []domain.Part) []ui.S
 			if block := r.renderStyledEventNoticeBlock(part); len(block) > 0 {
 				systemBlocks = append(systemBlocks, block)
 			}
-		case domain.PartKindToolCall, domain.PartKindToolOutput, domain.PartKindDiff, domain.PartKindApprovalRequest, domain.PartKindReference:
+		case domain.PartKindToolCall, domain.PartKindToolOutput, domain.PartKindApprovalRequest, domain.PartKindReference, domain.PartKindUsage:
 			flushText()
 			flushReasoning()
 		case domain.PartKindAttachment:
 			flushText()
 			flushReasoning()
-			meta, err := attachment.DecodeMeta(part.MetaJSON)
-			if err != nil {
-				if body := strings.TrimSpace(part.Body); body != "" {
+			meta, ok := attachmentPayloadMetadata(part)
+			if !ok {
+				if body := strings.TrimSpace(part.Text()); body != "" {
 					blocks = append(blocks, []ui.StyledSpan{{Text: body}})
 				}
 				continue
@@ -308,7 +324,7 @@ func (r transcriptRenderer) renderStyledMessageParts(parts []domain.Part) []ui.S
 		default:
 			flushText()
 			flushReasoning()
-			if body := strings.TrimSpace(part.Body); body != "" {
+			if body := strings.TrimSpace(part.Text()); body != "" {
 				blocks = append(blocks, []ui.StyledSpan{{Text: body}})
 			}
 		}
@@ -348,20 +364,20 @@ func (r transcriptRenderer) renderStyledMessageParts(parts []domain.Part) []ui.S
 }
 
 func (r transcriptRenderer) renderSystemNoticeBlock(part domain.Part) string {
-	title := strings.TrimSpace(part.Body)
-	if strings.EqualFold(title, "usage") {
+	title := strings.TrimSpace(part.Text())
+	if strings.EqualFold(title, "usage") || part.Kind == domain.PartKindUsage {
 		return ""
 	}
-	switch {
-	case title == "" && strings.TrimSpace(part.MetaJSON) == "":
-		return ""
-	case title == "":
+	if title == "" {
 		title = "system notice"
 	}
 	var body strings.Builder
 	body.WriteString("### System\n\n")
 	body.WriteString(title)
-	if meta := strings.TrimSpace(part.MetaJSON); meta != "" {
+	if payload, ok := part.Payload.(domain.SystemNoticePayload); ok && strings.TrimSpace(payload.Detail) != "" {
+		body.WriteString("\n\n")
+		body.WriteString(strings.TrimSpace(payload.Detail))
+	} else if meta := strings.TrimSpace(part.MetaJSON); meta != "" {
 		body.WriteString("\n\n```json\n")
 		body.WriteString(meta)
 		body.WriteString("\n```")
@@ -370,20 +386,20 @@ func (r transcriptRenderer) renderSystemNoticeBlock(part domain.Part) string {
 }
 
 func (r transcriptRenderer) renderStyledSystemNoticeBlock(part domain.Part) []ui.StyledSpan {
-	title := strings.TrimSpace(part.Body)
-	if strings.EqualFold(title, "usage") {
+	title := strings.TrimSpace(part.Text())
+	if strings.EqualFold(title, "usage") || part.Kind == domain.PartKindUsage {
 		return nil
 	}
-	switch {
-	case title == "" && strings.TrimSpace(part.MetaJSON) == "":
-		return nil
-	case title == "":
+	if title == "" {
 		title = "system notice"
 	}
 	var body strings.Builder
 	body.WriteString("### System\n\n")
 	body.WriteString(title)
-	if meta := strings.TrimSpace(part.MetaJSON); meta != "" {
+	if payload, ok := part.Payload.(domain.SystemNoticePayload); ok && strings.TrimSpace(payload.Detail) != "" {
+		body.WriteString("\n\n")
+		body.WriteString(strings.TrimSpace(payload.Detail))
+	} else if meta := strings.TrimSpace(part.MetaJSON); meta != "" {
 		body.WriteString("\n\n```json\n")
 		body.WriteString(meta)
 		body.WriteString("\n```")
@@ -440,12 +456,15 @@ func (r transcriptRenderer) markdownRenderWidth() int {
 }
 
 func eventNoticePresentation(part domain.Part) (string, string) {
-	body := strings.TrimSpace(part.Body)
+	body := strings.TrimSpace(part.Text())
 	if body == "" {
 		return "", ""
 	}
-	var meta eventNoticeMeta
-	_ = json.Unmarshal([]byte(part.MetaJSON), &meta)
+	payload, _ := part.Payload.(domain.EventNoticePayload)
+	meta := eventNoticeMeta{Kind: payload.Kind, Severity: payload.Severity}
+	if part.Payload == nil && strings.TrimSpace(part.MetaJSON) != "" {
+		_ = json.Unmarshal([]byte(part.MetaJSON), &meta)
+	}
 	switch strings.TrimSpace(meta.Kind) {
 	case "interrupted":
 		return "Interrupted", body
@@ -475,12 +494,12 @@ func (r transcriptRenderer) renderUserMessageParts(parts []domain.Part) string {
 	for _, part := range parts {
 		switch part.Kind {
 		case domain.PartKindText:
-			textBuf.WriteString(part.Body)
+			textBuf.WriteString(part.Text())
 		case domain.PartKindAttachment:
 			flushText()
-			meta, err := attachment.DecodeMeta(part.MetaJSON)
-			if err != nil {
-				if body := strings.TrimSpace(part.Body); body != "" {
+			meta, ok := attachmentPayloadMetadata(part)
+			if !ok {
+				if body := strings.TrimSpace(part.Text()); body != "" {
 					blocks = append(blocks, body)
 				}
 				continue
@@ -490,7 +509,7 @@ func (r transcriptRenderer) renderUserMessageParts(parts []domain.Part) string {
 			continue
 		default:
 			flushText()
-			if body := strings.TrimSpace(part.Body); body != "" {
+			if body := strings.TrimSpace(part.Text()); body != "" {
 				blocks = append(blocks, body)
 			}
 		}

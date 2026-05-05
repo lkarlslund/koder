@@ -1203,11 +1203,7 @@ func TestForkSessionCopiesAttachmentFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw, err := attachment.EncodeMeta(meta)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.AddPart(context.Background(), msg.ID, domain.PartKindAttachment, meta.Name, raw); err != nil {
+	if _, err := st.AddPart(context.Background(), msg.ID, domain.AttachmentPayload{ID: meta.ID, Name: meta.Name, MIME: meta.MIME, Path: meta.Path, Size: meta.Size, Source: meta.Source, Original: meta.Original}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1226,10 +1222,7 @@ func TestForkSessionCopiesAttachmentFiles(t *testing.T) {
 	if len(forkParts) != 1 {
 		t.Fatalf("unexpected forked parts: %#v", forkParts)
 	}
-	forkMeta, err := attachment.DecodeMeta(forkParts[0].MetaJSON)
-	if err != nil {
-		t.Fatal(err)
-	}
+	forkMeta := forkParts[0].Payload.(domain.AttachmentPayload)
 	if forkMeta.Path == meta.Path {
 		t.Fatalf("expected copied attachment path, got %q", forkMeta.Path)
 	}
@@ -2473,7 +2466,7 @@ func TestForkCommandCreatesForkedSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.AddPart(context.Background(), msg.ID, domain.PartKindText, "hello", ""); err != nil {
+	if _, err := st.AddPart(context.Background(), msg.ID, domain.TextPayload{Text: "hello"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -3080,8 +3073,7 @@ func TestSessionPickerRendersCenteredDialogWithPreview(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	usage, _ := json.Marshal(domain.Usage{PromptTokens: 123, CompletionTokens: 456, TotalTokens: 579})
-	if _, err := st.AddPart(context.Background(), msg.ID, domain.PartKindSystemNotice, "usage", string(usage)); err != nil {
+	if _, err := st.AddPart(context.Background(), msg.ID, domain.UsagePayload{Usage: domain.Usage{PromptTokens: 123, CompletionTokens: 456, TotalTokens: 579}}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -4069,7 +4061,7 @@ func TestLoadSessionCmdRecordsChatLoadTiming(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.AddPart(context.Background(), msg.ID, domain.PartKindText, "hello", ""); err != nil {
+	if _, err := st.AddPart(context.Background(), msg.ID, domain.TextPayload{Text: "hello"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -7453,7 +7445,7 @@ func TestEventMsgReloadsTranscriptBeforeTurnCompletes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.AddPart(context.Background(), msg.ID, domain.PartKindToolOutput, "file-a\nfile-b", ""); err != nil {
+	if _, err := st.AddPart(context.Background(), msg.ID, domain.ToolOutputPayload{Tool: domain.ToolKindBash, Status: domain.ToolResultStatusOK, Text: "file-a\nfile-b"}); err != nil {
 		t.Fatal(err)
 	}
 

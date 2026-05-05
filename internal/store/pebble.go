@@ -25,7 +25,7 @@ type pebbleBackend struct {
 }
 
 func openPebbleBackend(stateDir string) (*pebbleBackend, error) {
-	dir := filepath.Join(stateDir, "store-pebble")
+	dir := filepath.Join(stateDir, "store-pebble-v2")
 	if err := ensureDir(dir); err != nil {
 		return nil, fmt.Errorf("create pebble store dir: %w", err)
 	}
@@ -530,7 +530,7 @@ func (b *pebbleBackend) SetChatQueuedInputs(ctx context.Context, chatID int64, i
 	return batch.Commit(pebble.Sync)
 }
 
-func (b *pebbleBackend) AddPart(ctx context.Context, messageID int64, kind domain.PartKind, body, metaJSON string) (domain.Part, error) {
+func (b *pebbleBackend) AddPart(ctx context.Context, messageID int64, payload domain.PartPayload) (domain.Part, error) {
 	if err := ensureContext(ctx); err != nil {
 		return domain.Part{}, err
 	}
@@ -548,9 +548,10 @@ func (b *pebbleBackend) AddPart(ctx context.Context, messageID int64, kind domai
 	part := domain.Part{
 		ID:        meta.NextPartID,
 		MessageID: messageID,
-		Kind:      kind,
-		Body:      body,
-		MetaJSON:  metaJSON,
+		Kind:      payload.PartKind(),
+		Payload:   payload,
+		Body:      domain.Part{Payload: payload}.Text(),
+		MetaJSON:  domain.Part{Payload: payload}.LegacyMetaJSON(),
 		CreatedAt: now,
 	}
 	meta.NextPartID++
@@ -572,7 +573,7 @@ func (b *pebbleBackend) AddPart(ctx context.Context, messageID int64, kind domai
 	return part, nil
 }
 
-func (b *pebbleBackend) UpdatePartMetaJSON(ctx context.Context, partID int64, metaJSON string) error {
+func (b *pebbleBackend) UpdatePartPayload(ctx context.Context, partID int64, payload domain.PartPayload) error {
 	if err := ensureContext(ctx); err != nil {
 		return err
 	}
@@ -583,7 +584,10 @@ func (b *pebbleBackend) UpdatePartMetaJSON(ctx context.Context, partID int64, me
 	if err != nil {
 		return err
 	}
-	part.MetaJSON = metaJSON
+	part.Kind = payload.PartKind()
+	part.Payload = payload
+	part.Body = domain.Part{Payload: payload}.Text()
+	part.MetaJSON = domain.Part{Payload: payload}.LegacyMetaJSON()
 
 	batch := b.db.NewBatch()
 	defer batch.Close()

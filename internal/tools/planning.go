@@ -360,16 +360,24 @@ func TodoBucketResultWithTitle(ref, title string, todos []store.TodoItem, messag
 
 func FormatMilestoneOutput(result MilestonePlanStoredResult) string {
 	text, _ := DisplayTextForPart(domain.Part{
-		Kind:     domain.PartKindToolOutput,
-		MetaJSON: JSONMeta(MetaWithStoredResult(nil, domain.PartKindToolOutput, domain.ToolKindMilestoneList, StoredResultStatusOK, result)),
+		Kind: domain.PartKindToolOutput,
+		Payload: domain.ToolOutputPayload{
+			Tool:   domain.ToolKindMilestoneList,
+			Status: domain.ToolResultStatusOK,
+			Result: result,
+		},
 	})
 	return text
 }
 
 func FormatTodoOutput(result TodoListStoredResult) string {
 	text, _ := DisplayTextForPart(domain.Part{
-		Kind:     domain.PartKindToolOutput,
-		MetaJSON: JSONMeta(MetaWithStoredResult(nil, domain.PartKindToolOutput, domain.ToolKindTodoList, StoredResultStatusOK, result)),
+		Kind: domain.PartKindToolOutput,
+		Payload: domain.ToolOutputPayload{
+			Tool:   domain.ToolKindTodoList,
+			Status: domain.ToolResultStatusOK,
+			Result: result,
+		},
 	})
 	return text
 }

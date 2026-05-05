@@ -44,11 +44,8 @@ func LatestUsage(messages []domain.Message, parts map[int64][]domain.Part) (doma
 		messageParts := parts[msg.ID]
 		for partIdx := len(messageParts) - 1; partIdx >= 0; partIdx-- {
 			part := messageParts[partIdx]
-			if part.Kind != domain.PartKindSystemNotice || part.Body != "usage" || part.MetaJSON == "" {
-				continue
-			}
-			var usage domain.Usage
-			if err := json.Unmarshal([]byte(part.MetaJSON), &usage); err != nil {
+			usage, ok := usageFromPart(part)
+			if !ok {
 				continue
 			}
 			usage = usage.Normalized()
@@ -65,11 +62,8 @@ func TotalUsage(messages []domain.Message, parts map[int64][]domain.Part) (domai
 	var found bool
 	for _, msg := range messages {
 		for _, part := range parts[msg.ID] {
-			if part.Kind != domain.PartKindSystemNotice || part.Body != "usage" || part.MetaJSON == "" {
-				continue
-			}
-			var usage domain.Usage
-			if err := json.Unmarshal([]byte(part.MetaJSON), &usage); err != nil {
+			usage, ok := usageFromPart(part)
+			if !ok {
 				continue
 			}
 			usage = usage.Normalized()
@@ -84,4 +78,18 @@ func TotalUsage(messages []domain.Message, parts map[int64][]domain.Part) (domai
 		}
 	}
 	return total, found
+}
+
+func usageFromPart(part domain.Part) (domain.Usage, bool) {
+	if payload, ok := part.Payload.(domain.UsagePayload); ok {
+		return payload.Usage, true
+	}
+	if part.Kind != domain.PartKindSystemNotice || part.Body != "usage" || part.MetaJSON == "" {
+		return domain.Usage{}, false
+	}
+	var usage domain.Usage
+	if err := json.Unmarshal([]byte(part.MetaJSON), &usage); err != nil {
+		return domain.Usage{}, false
+	}
+	return usage, true
 }

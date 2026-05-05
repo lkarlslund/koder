@@ -46,16 +46,7 @@ func (tool) PersistResult(ctx context.Context, st *store.Store, sessionID int64,
 	if err != nil {
 		return nil, err
 	}
-	meta, err := tools.BuildStoredMeta(map[string]string{
-		"status": string(task.Status),
-	}, domain.PartKindTaskUpdate, req.Tool, tools.StoredResultStatusOK, tools.TaskStoredResult{
-		Body:   task.Body,
-		Status: task.Status,
-	})
-	if err != nil {
-		return nil, err
-	}
-	if _, err := st.AddPart(ctx, msg.ID, domain.PartKindTaskUpdate, task.Body, tools.JSONMeta(meta)); err != nil {
+	if _, err := st.AddPart(ctx, msg.ID, domain.TaskUpdatePayload{Body: task.Body, Status: task.Status}); err != nil {
 		return nil, err
 	}
 	out := make(chan domain.Event, 1)

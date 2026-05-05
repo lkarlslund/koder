@@ -122,16 +122,14 @@ func TestPersistStandardResultPersistsMessagePartAndDiff(t *testing.T) {
 		t.Fatalf("expected one stored message, got %d", len(messages))
 	}
 	parts := partsByMessage[messages[0].ID]
-	if len(parts) != 2 {
-		t.Fatalf("expected tool output and diff parts, got %#v", parts)
+	if len(parts) != 1 {
+		t.Fatalf("expected tool output part, got %#v", parts)
 	}
 	if parts[0].Kind != domain.PartKindToolOutput {
 		t.Fatalf("expected tool output part, got %s", parts[0].Kind)
 	}
-	if !strings.Contains(parts[0].MetaJSON, `"tool":"write"`) {
-		t.Fatalf("expected stored meta to include tool kind, got %q", parts[0].MetaJSON)
-	}
-	if parts[1].Kind != domain.PartKindDiff {
-		t.Fatalf("expected diff part, got %s", parts[1].Kind)
+	payload, ok := parts[0].Payload.(domain.ToolOutputPayload)
+	if !ok || payload.Tool != domain.ToolKindWrite || strings.TrimSpace(payload.Diff) == "" {
+		t.Fatalf("expected typed write payload with diff, got %#v", parts[0].Payload)
 	}
 }

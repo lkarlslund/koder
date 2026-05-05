@@ -366,7 +366,7 @@ func StoredResultInfoForPart(part domain.Part) (domain.ToolKind, StoredResultSta
 	return env.Tool, env.Status, true
 }
 
-func DisplayTextForStored(tool domain.ToolKind, payload StoredResultPayload) string {
+func DisplayTextForStored(tool domain.ToolKind, payload any) string {
 	raw, err := marshalStoredResult(domain.PartKindToolOutput, tool, StoredResultStatusOK, payload)
 	if err != nil {
 		return ""
@@ -403,7 +403,7 @@ func EditStoredResultForPart(part domain.Part) (EditStoredResult, bool) {
 	return result, true
 }
 
-func marshalStoredResult(partKind domain.PartKind, tool domain.ToolKind, status StoredResultStatus, payload StoredResultPayload) (string, error) {
+func marshalStoredResult(partKind domain.PartKind, tool domain.ToolKind, status StoredResultStatus, payload any) (string, error) {
 	rawPayload, err := json.Marshal(payload)
 	if err != nil {
 		return "", err
@@ -422,22 +422,65 @@ func marshalStoredResult(partKind domain.PartKind, tool domain.ToolKind, status 
 }
 
 func storedResultFromPart(part domain.Part) (storedResultEnvelope, bool) {
-	if strings.TrimSpace(part.MetaJSON) == "" {
+	switch payload := part.Payload.(type) {
+	case domain.ToolOutputPayload:
+		raw, err := json.Marshal(payload.Result)
+		if err != nil {
+			return storedResultEnvelope{}, false
+		}
+		return storedResultEnvelope{
+			Version:  2,
+			PartKind: domain.PartKindToolOutput,
+			Tool:     payload.Tool,
+			Status:   StoredResultStatus(payload.Status),
+			Payload:  raw,
+		}, true
+	case domain.TaskUpdatePayload:
+		raw, err := json.Marshal(TaskStoredResult{Body: payload.Body, Status: payload.Status})
+		if err != nil {
+			return storedResultEnvelope{}, false
+		}
+		return storedResultEnvelope{
+			Version:  2,
+			PartKind: domain.PartKindTaskUpdate,
+			Tool:     domain.ToolKindTask,
+			Status:   StoredResultStatusOK,
+			Payload:  raw,
+		}, true
+	case domain.PlanUpdatePayload:
+		steps := make([]PlanStoredStep, 0, len(payload.Steps))
+		for _, step := range payload.Steps {
+			steps = append(steps, PlanStoredStep{Step: step.Step, Status: step.Status})
+		}
+		raw, err := json.Marshal(UpdatePlanStoredResult{Explanation: payload.Explanation, Steps: steps})
+		if err != nil {
+			return storedResultEnvelope{}, false
+		}
+		return storedResultEnvelope{
+			Version:  2,
+			PartKind: domain.PartKindPlanUpdate,
+			Tool:     domain.ToolKindUpdatePlan,
+			Status:   StoredResultStatusOK,
+			Payload:  raw,
+		}, true
+	default:
+		if strings.TrimSpace(part.MetaJSON) != "" {
+			meta, err := decodeStringMap([]byte(part.MetaJSON))
+			if err != nil {
+				return storedResultEnvelope{}, false
+			}
+			raw := strings.TrimSpace(meta[storedResultMetaKey])
+			if raw == "" {
+				return storedResultEnvelope{}, false
+			}
+			var env storedResultEnvelope
+			if err := json.Unmarshal([]byte(raw), &env); err != nil {
+				return storedResultEnvelope{}, false
+			}
+			return env, true
+		}
 		return storedResultEnvelope{}, false
 	}
-	meta, err := decodeStringMap([]byte(part.MetaJSON))
-	if err != nil {
-		return storedResultEnvelope{}, false
-	}
-	raw := strings.TrimSpace(meta[storedResultMetaKey])
-	if raw == "" {
-		return storedResultEnvelope{}, false
-	}
-	var env storedResultEnvelope
-	if err := json.Unmarshal([]byte(raw), &env); err != nil {
-		return storedResultEnvelope{}, false
-	}
-	return env, true
 }
 
 func formatStoredResultForPart(env storedResultEnvelope) (string, bool) {

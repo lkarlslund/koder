@@ -17,8 +17,8 @@ func TestFromMessagesUsesLatestUsageAndContextWindow(t *testing.T) {
 		{ID: 2},
 	}
 	parts := map[int64][]domain.Part{
-		1: {{Kind: domain.PartKindSystemNotice, Body: "usage", MetaJSON: `{"TotalTokens":1000}`}},
-		2: {{Kind: domain.PartKindSystemNotice, Body: "usage", MetaJSON: `{"TotalTokens":8192}`}},
+		1: {{Kind: domain.PartKindUsage, Payload: domain.UsagePayload{Usage: domain.Usage{TotalTokens: 1000}}}},
+		2: {{Kind: domain.PartKindUsage, Payload: domain.UsagePayload{Usage: domain.Usage{TotalTokens: 8192}}}},
 	}
 
 	got, ok := FromMessages(cfg, session, messages, parts)
@@ -37,7 +37,7 @@ func TestFromMessagesSynthesizesTotalFromPromptAndCompletion(t *testing.T) {
 	session := domain.Session{ProviderID: cfg.DefaultProvider}
 	messages := []domain.Message{{ID: 1}}
 	parts := map[int64][]domain.Part{
-		1: {{Kind: domain.PartKindSystemNotice, Body: "usage", MetaJSON: `{"PromptTokens":1200,"CompletionTokens":300}`}},
+		1: {{Kind: domain.PartKindUsage, Payload: domain.UsagePayload{Usage: domain.Usage{PromptTokens: 1200, CompletionTokens: 300}}}},
 	}
 
 	got, ok := FromMessages(cfg, session, messages, parts)
@@ -66,8 +66,8 @@ func TestTotalUsageAccumulatesAllUsageNotices(t *testing.T) {
 		{ID: 2},
 	}
 	parts := map[int64][]domain.Part{
-		1: {{Kind: domain.PartKindSystemNotice, Body: "usage", MetaJSON: `{"PromptTokens":100,"CompletionTokens":40,"CachedTokens":10,"TotalTokens":140}`}},
-		2: {{Kind: domain.PartKindSystemNotice, Body: "usage", MetaJSON: `{"PromptTokens":50,"CompletionTokens":25,"TotalTokens":75}`}},
+		1: {{Kind: domain.PartKindUsage, Payload: domain.UsagePayload{Usage: domain.Usage{PromptTokens: 100, CompletionTokens: 40, CachedTokens: 10, TotalTokens: 140}}}},
+		2: {{Kind: domain.PartKindUsage, Payload: domain.UsagePayload{Usage: domain.Usage{PromptTokens: 50, CompletionTokens: 25, TotalTokens: 75}}}},
 	}
 
 	got, ok := TotalUsage(messages, parts)

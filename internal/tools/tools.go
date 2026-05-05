@@ -105,7 +105,7 @@ type Result struct {
 	Output   string
 	DiffText string
 	Meta     map[string]string
-	Stored   StoredResultPayload
+	Stored   any
 }
 
 type Presentation struct {
@@ -499,29 +499,24 @@ func PersistStandardResult(ctx context.Context, st *store.Store, sessionID int64
 	if err != nil {
 		return nil, err
 	}
-	payload := req.Meta()
+	args := req.Meta()
 	for key, value := range result.Meta {
 		value = strings.TrimSpace(value)
 		if value == "" {
 			continue
 		}
-		payload[key] = value
+		args[key] = value
 	}
-	payload, err = BuildStoredMeta(payload, domain.PartKindToolOutput, req.Tool, StoredResultStatusOK, result.Stored)
-	if err != nil {
+	if _, err := st.AddPart(ctx, msg.ID, domain.ToolOutputPayload{
+		Tool:       req.Tool,
+		ToolCallID: req.ToolCallID,
+		Args:       args,
+		Status:     domain.ToolResultStatusOK,
+		Text:       body,
+		Diff:       strings.TrimSpace(result.DiffText),
+		Result:     result.Stored,
+	}); err != nil {
 		return nil, err
-	}
-	meta, err := json.Marshal(payload)
-	if err != nil {
-		return nil, err
-	}
-	if _, err := st.AddPart(ctx, msg.ID, domain.PartKindToolOutput, body, string(meta)); err != nil {
-		return nil, err
-	}
-	if strings.TrimSpace(result.DiffText) != "" {
-		if _, err := st.AddPart(ctx, msg.ID, domain.PartKindDiff, result.DiffText, ""); err != nil {
-			return nil, err
-		}
 	}
 	return EmitOnce(domain.Event{Kind: domain.EventKindToolResult, Text: body, Tool: req.Tool}), nil
 }
