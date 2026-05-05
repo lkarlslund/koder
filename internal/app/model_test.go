@@ -2251,6 +2251,45 @@ func TestSyncDebugRuntimeIncludesTranscriptItemsInDeepDebug(t *testing.T) {
 	}
 }
 
+func TestSyncDebugRuntimeIncludesInterruptAndFocusState(t *testing.T) {
+	rec := debugsrv.NewRecorder()
+	composer := textarea.New()
+	m := Model{
+		debug:             rec,
+		status:            "Streaming LLM response ...",
+		activeEventStream: true,
+		currentSession:    domain.Session{ID: 7, Title: "Debug Session", ProviderID: "test", ModelID: "model"},
+		currentChat:       domain.Chat{ID: 9, SessionID: 7},
+		viewport:          newTranscriptViewport(40, 6),
+		composer:          composer,
+		width:             80,
+		height:            24,
+		activeOpCancel:    func() {},
+		activeOpCancels: map[int64]context.CancelFunc{
+			9: func() {},
+		},
+	}
+	m.viewport.SetContent("line one\nline two")
+	m.startBusy(busyScopeTranscript, "Waiting for LLM response")
+	m.setTranscriptBusyPhase(transcriptBusyPhaseResponse)
+
+	m.syncDebugRuntime()
+
+	got := rec.Runtime()
+	if got.CurrentChat != 9 || !got.Loading || !got.ActiveEventStream {
+		t.Fatalf("unexpected runtime snapshot: %#v", got)
+	}
+	if !got.TranscriptBusy || got.BusyScope != "transcript" {
+		t.Fatalf("expected transcript busy state, got %#v", got)
+	}
+	if !got.CanInterrupt || !got.HasActiveCancel || !got.HasChatCancel {
+		t.Fatalf("expected interrupt capability state, got %#v", got)
+	}
+	if got.FocusedWindow != string(mainWindowID) || !got.ComposerFocused || !got.InterruptKeyTarget {
+		t.Fatalf("expected main-window focus and esc target state, got %#v", got)
+	}
+}
+
 func TestRenderTranscriptToolMessageFallsBackToSummaryWhenBodyMissing(t *testing.T) {
 	cfg := testConfig(t)
 	m := Model{

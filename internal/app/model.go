@@ -5856,6 +5856,20 @@ func (m *Model) syncDebugRuntime() {
 		return
 	}
 	deepDebug := m.debug.DeepDebug()
+	root := m.syncUIRoot()
+	focusedWindow := ""
+	if root != nil {
+		focusedWindow = string(root.FocusedWindow())
+	}
+	currentChatID := m.currentChatID()
+	hasActiveCancel := m.activeOpCancel != nil
+	hasChatCancel := false
+	if currentChatID > 0 && m.activeOpCancels != nil && m.activeOpCancels[currentChatID] != nil {
+		hasChatCancel = true
+	}
+	canInterrupt := hasActiveCancel || hasChatCancel
+	interruptKeyTarget := canInterrupt && focusedWindow == string(mainWindowID) && !m.queueEditMode
+	busyScope := debugBusyScopeName(m.busy.scope)
 	var transcriptItems []debugsrv.TranscriptItemRef
 	if deepDebug {
 		transcriptItems = m.debugTranscriptItems()
@@ -5873,6 +5887,18 @@ func (m *Model) syncDebugRuntime() {
 		strings.TrimSpace(m.status),
 		strconv.FormatBool(m.busy.active),
 		strings.TrimSpace(m.busy.status),
+		strconv.FormatBool(m.loading),
+		strconv.FormatBool(m.activeEventStream),
+		strconv.FormatBool(m.busy.transcriptActive()),
+		strconv.FormatBool(m.busy.sidebarActive()),
+		busyScope,
+		strconv.FormatBool(canInterrupt),
+		strconv.FormatBool(hasActiveCancel),
+		strconv.FormatBool(hasChatCancel),
+		strconv.FormatBool(m.queueEditMode),
+		focusedWindow,
+		strconv.FormatBool(m.composer.Focused()),
+		strconv.FormatBool(interruptKeyTarget),
 		m.openDialogName(),
 		strconv.FormatBool(m.showSidebar),
 		strconv.FormatBool(m.showReasoning),
@@ -5913,12 +5939,25 @@ func (m *Model) syncDebugRuntime() {
 		Build:              version.Current(),
 		DeepDebug:          deepDebug,
 		CurrentSession:     m.currentSession.ID,
+		CurrentChat:        currentChatID,
 		SessionTitle:       strings.TrimSpace(m.currentSession.Title),
 		ProviderID:         strings.TrimSpace(m.currentSession.ProviderID),
 		ModelID:            strings.TrimSpace(m.currentSession.ModelID),
 		Status:             strings.TrimSpace(m.status),
 		Busy:               m.busy.active,
 		BusyStatus:         strings.TrimSpace(m.busy.status),
+		Loading:            m.loading,
+		ActiveEventStream:  m.activeEventStream,
+		TranscriptBusy:     m.busy.transcriptActive(),
+		SidebarBusy:        m.busy.sidebarActive(),
+		BusyScope:          busyScope,
+		CanInterrupt:       canInterrupt,
+		HasActiveCancel:    hasActiveCancel,
+		HasChatCancel:      hasChatCancel,
+		QueueEditMode:      m.queueEditMode,
+		FocusedWindow:      focusedWindow,
+		ComposerFocused:    m.composer.Focused(),
+		InterruptKeyTarget: interruptKeyTarget,
 		OpenDialog:         m.openDialogName(),
 		ShowSidebar:        m.showSidebar,
 		ShowReasoning:      m.showReasoning,
@@ -5964,6 +6003,17 @@ func (m *Model) syncDebugFrame(surface ui.Surface) {
 	snapshot.TranscriptControls = controls
 	m.debug.UpdateRuntime(snapshot)
 	m.debugFrameLastSync = time.Now()
+}
+
+func debugBusyScopeName(scope busyScope) string {
+	switch scope {
+	case busyScopeSidebar:
+		return "sidebar"
+	case busyScopeTranscript:
+		return "transcript"
+	default:
+		return ""
+	}
 }
 
 func (m Model) debugTranscriptItems() []debugsrv.TranscriptItemRef {

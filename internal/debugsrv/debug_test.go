@@ -321,3 +321,41 @@ func TestServerRuntimeCanToggleDeepDebug(t *testing.T) {
 		t.Fatal("expected recorder deep debug flag to be enabled")
 	}
 }
+
+func TestRuntimeSnapshotIncludesInteractiveState(t *testing.T) {
+	t.Parallel()
+
+	recorder := NewRecorder()
+	recorder.UpdateRuntime(RuntimeSnapshot{
+		CurrentSession:     7,
+		CurrentChat:        9,
+		Busy:               true,
+		BusyStatus:         "Waiting for LLM response",
+		Loading:            true,
+		ActiveEventStream:  true,
+		TranscriptBusy:     true,
+		SidebarBusy:        true,
+		BusyScope:          "transcript",
+		CanInterrupt:       true,
+		HasActiveCancel:    true,
+		HasChatCancel:      true,
+		QueueEditMode:      false,
+		FocusedWindow:      "main",
+		ComposerFocused:    true,
+		InterruptKeyTarget: true,
+	})
+
+	runtime := recorder.Runtime()
+	if runtime.CurrentSession != 7 || runtime.CurrentChat != 9 {
+		t.Fatalf("unexpected session/chat ids: %#v", runtime)
+	}
+	if !runtime.Loading || !runtime.ActiveEventStream {
+		t.Fatalf("expected loading and event stream flags, got %#v", runtime)
+	}
+	if !runtime.CanInterrupt || !runtime.HasActiveCancel || !runtime.HasChatCancel {
+		t.Fatalf("expected interrupt state flags, got %#v", runtime)
+	}
+	if runtime.FocusedWindow != "main" || !runtime.ComposerFocused || !runtime.InterruptKeyTarget {
+		t.Fatalf("expected focus and interrupt target state, got %#v", runtime)
+	}
+}

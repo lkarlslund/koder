@@ -58,12 +58,25 @@ type RuntimeSnapshot struct {
 	DeepDebug          bool                `json:"deep_debug"`
 	Build              version.Info        `json:"build"`
 	CurrentSession     int64               `json:"current_session"`
+	CurrentChat        int64               `json:"current_chat"`
 	SessionTitle       string              `json:"session_title"`
 	ProviderID         string              `json:"provider_id"`
 	ModelID            string              `json:"model_id"`
 	Status             string              `json:"status"`
 	Busy               bool                `json:"busy"`
 	BusyStatus         string              `json:"busy_status,omitempty"`
+	Loading            bool                `json:"loading"`
+	ActiveEventStream  bool                `json:"active_event_stream"`
+	TranscriptBusy     bool                `json:"transcript_busy"`
+	SidebarBusy        bool                `json:"sidebar_busy"`
+	BusyScope          string              `json:"busy_scope,omitempty"`
+	CanInterrupt       bool                `json:"can_interrupt"`
+	HasActiveCancel    bool                `json:"has_active_cancel"`
+	HasChatCancel      bool                `json:"has_chat_cancel"`
+	QueueEditMode      bool                `json:"queue_edit_mode"`
+	FocusedWindow      string              `json:"focused_window,omitempty"`
+	ComposerFocused    bool                `json:"composer_focused"`
+	InterruptKeyTarget bool                `json:"interrupt_key_target"`
 	OpenDialog         string              `json:"open_dialog,omitempty"`
 	ShowSidebar        bool                `json:"show_sidebar"`
 	ShowReasoning      bool                `json:"show_reasoning"`
