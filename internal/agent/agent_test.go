@@ -2461,6 +2461,43 @@ func TestHandleModelToolCallBypassesApprovalForSkill(t *testing.T) {
 	}
 }
 
+func TestSaveChatContextUsageAccumulatesRequestUsage(t *testing.T) {
+	cfg := testConfig(t)
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine := New(cfg, st, tools.NewRegistry(t.TempDir()), nil, t.TempDir())
+	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chat := defaultChatForSession(t, st, session.ID)
+	chat.LastKnownContextTokens = 1000
+	chat.ContextTokensKnown = false
+	if err := st.UpdateChat(context.Background(), chat); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := engine.saveChatContextUsage(context.Background(), chat.ID, domain.Usage{PromptTokens: 200, CompletionTokens: 50, TotalTokens: 250}); err != nil {
+		t.Fatal(err)
+	}
+	if err := engine.saveChatContextUsage(context.Background(), chat.ID, domain.Usage{TotalTokens: 45, CompletionTokens: 5}); err != nil {
+		t.Fatal(err)
+	}
+
+	stored, err := st.GetChat(context.Background(), chat.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.LastKnownContextTokens != 1240 {
+		t.Fatalf("expected accumulated request context usage, got %d", stored.LastKnownContextTokens)
+	}
+	if !stored.ContextTokensKnown {
+		t.Fatal("expected chat context usage to become known after provider usage")
+	}
+}
+
 func TestHandleModelToolCallAllowsProjectWriteInWriteAskMode(t *testing.T) {
 	cfg := testConfig(t)
 	st, err := store.Open(t.TempDir())

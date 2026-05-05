@@ -324,6 +324,16 @@ func (u Usage) Normalized() Usage {
 	return u
 }
 
+func (u Usage) Add(other Usage) Usage {
+	u = u.Normalized()
+	other = other.Normalized()
+	u.PromptTokens += other.PromptTokens
+	u.CompletionTokens += other.CompletionTokens
+	u.CachedTokens += other.CachedTokens
+	u.TotalTokens += other.TotalTokens
+	return u.Normalized()
+}
+
 // ContextTokens returns the prompt/input token count represented by the usage.
 func (u Usage) ContextTokens() (int, bool) {
 	u = u.Normalized()

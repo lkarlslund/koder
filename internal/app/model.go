@@ -1906,20 +1906,20 @@ func (m *Model) applyEvent(evt domain.Event) {
 			}
 		}
 	case domain.EventKindUsage:
-		m.liveUsage = evt.Usage.Normalized()
+		m.liveUsage = m.liveUsage.Add(evt.Usage)
 		m.liveUsageKnown = m.liveUsage.HasAnyTokens()
-		if contextTokens, ok := m.liveUsage.ContextTokens(); ok {
-			m.currentChat.LastKnownContextTokens = contextTokens
+		if contextTokens, ok := evt.Usage.ContextTokens(); ok {
+			m.currentChat.LastKnownContextTokens += contextTokens
 			m.currentChat.ContextTokensKnown = true
 			for i := range m.chats {
 				if m.chats[i].ID == m.currentChat.ID {
-					m.chats[i].LastKnownContextTokens = contextTokens
+					m.chats[i].LastKnownContextTokens = m.currentChat.LastKnownContextTokens
 					m.chats[i].ContextTokensKnown = true
 					break
 				}
 			}
 			m.liveContextEstimatedTokens = 0
-			m.contextTokens = contextTokens
+			m.contextTokens = m.currentChat.LastKnownContextTokens
 			m.contextTokensEstimated = false
 		}
 		m.status = fmt.Sprintf("Usage total=%d", m.liveUsage.TotalTokens)
@@ -3360,11 +3360,7 @@ func (m Model) currentTotalUsage() (domain.Usage, bool) {
 	}
 	total := m.historyTotalUsage
 	if m.liveUsageKnown {
-		live := m.liveUsage.Normalized()
-		total.PromptTokens += live.PromptTokens
-		total.CompletionTokens += live.CompletionTokens
-		total.CachedTokens += live.CachedTokens
-		total.TotalTokens += live.TotalTokens
+		total = total.Add(m.liveUsage)
 	}
 	return total.Normalized(), true
 }
