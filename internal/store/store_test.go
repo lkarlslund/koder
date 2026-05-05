@@ -203,6 +203,36 @@ func TestCreateChatInheritsParentPermissionProfile(t *testing.T) {
 	}
 }
 
+func TestUpdateChatPersistsContextTokens(t *testing.T) {
+	for _, backend := range []string{BackendPebble, BackendJSONFS} {
+		t.Run(backend, func(t *testing.T) {
+			st := openTestStore(t, backend)
+
+			session, err := st.CreateSession(context.Background(), "test", "provider", "model", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			chat, err := st.DefaultChat(context.Background(), session.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			chat.LastKnownContextTokens = 1234
+			chat.ContextTokensKnown = true
+			if err := st.UpdateChat(context.Background(), chat); err != nil {
+				t.Fatal(err)
+			}
+
+			got, err := st.GetChat(context.Background(), chat.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.LastKnownContextTokens != 1234 || !got.ContextTokensKnown {
+				t.Fatalf("expected persisted context tokens, got %#v", got)
+			}
+		})
+	}
+}
+
 func TestAddSessionPermissionRulePersistsAndReplacesByKey(t *testing.T) {
 	for _, backend := range []string{BackendPebble, BackendJSONFS} {
 		t.Run(backend, func(t *testing.T) {

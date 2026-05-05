@@ -212,21 +212,23 @@ const (
 )
 
 type Chat struct {
-	ID                    int64
-	SessionID             int64
-	ParentChatID          *int64
-	Title                 string
-	WorkflowRole          WorkflowRole
-	ProviderID            string
-	ModelID               string
-	PermissionProfile     string
-	ToolStates            map[ToolKind]bool
-	ActiveMilestoneRef    string
-	AssignedTodoBucketRef string
-	QueuedInputs          []QueuedInput
-	CreatedAt             time.Time
-	UpdatedAt             time.Time
-	LastMessage           string
+	ID                     int64
+	SessionID              int64
+	ParentChatID           *int64
+	Title                  string
+	WorkflowRole           WorkflowRole
+	ProviderID             string
+	ModelID                string
+	PermissionProfile      string
+	ToolStates             map[ToolKind]bool
+	ActiveMilestoneRef     string
+	AssignedTodoBucketRef  string
+	LastKnownContextTokens int
+	ContextTokensKnown     bool
+	QueuedInputs           []QueuedInput
+	CreatedAt              time.Time
+	UpdatedAt              time.Time
+	LastMessage            string
 }
 
 type QueuedInputKind string
@@ -319,6 +321,18 @@ func (u Usage) Normalized() Usage {
 		u.TotalTokens = u.PromptTokens + u.CompletionTokens
 	}
 	return u
+}
+
+// ContextTokens returns the prompt/input token count represented by the usage.
+func (u Usage) ContextTokens() (int, bool) {
+	u = u.Normalized()
+	if u.PromptTokens > 0 {
+		return u.PromptTokens, true
+	}
+	if u.TotalTokens > 0 && u.CompletionTokens >= 0 && u.TotalTokens > u.CompletionTokens {
+		return u.TotalTokens - u.CompletionTokens, true
+	}
+	return 0, false
 }
 
 type Event struct {

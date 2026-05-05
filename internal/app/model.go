@@ -31,6 +31,7 @@ import (
 	"github.com/lkarlslund/koder/internal/skills"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/theme"
+	"github.com/lkarlslund/koder/internal/tokenestimate"
 	"github.com/lkarlslund/koder/internal/tools"
 	"github.com/lkarlslund/koder/internal/tui/dialogs"
 	"github.com/lkarlslund/koder/internal/ui"
@@ -479,10 +480,10 @@ type Model struct {
 	historyTotalUsageKnown      bool
 	liveUsage                   domain.Usage
 	liveUsageKnown              bool
+	liveContextEstimatedTokens  int
 	contextTokens               int
 	contextTokensEstimated      bool
 	pendingTranscriptFrameDirty bool
-	pendingContextFrameDirty    bool
 	milestonePlan               store.MilestonePlan
 	todos                       []store.TodoItem
 	approvals                   []store.Approval
@@ -907,6 +908,7 @@ func (m Model) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 			(msg.chat.ID == 0 || msg.chat.ID == m.currentChat.ID)
 		if !preservePendingAssistant {
 			m.pendingAssistant = pendingAssistantTurn{}
+			m.liveContextEstimatedTokens = 0
 		}
 		m.invalidateTranscript()
 		m = m.UpdateLoad(msg)
@@ -940,6 +942,7 @@ func (m Model) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 		return m, m.syncWindowTitleCmd()
 	case forkSessionMsg:
 		m.invalidateTranscript()
+		m.liveContextEstimatedTokens = 0
 		if msg.err != nil {
 			m.status = msg.err.Error()
 			m.stopBusy()
@@ -951,6 +954,7 @@ func (m Model) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 		return m, m.syncWindowTitleCmd()
 	case newSessionMsg:
 		m.invalidateTranscript()
+		m.liveContextEstimatedTokens = 0
 		m.sessions = msg.sessions
 		m.chats = msg.chats
 		m.currentSession = msg.session
@@ -963,7 +967,7 @@ func (m Model) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 		m.todos = msg.todos
 		m.workspace = msg.workspace
 		m.syncUsageFromHistory()
-		m.syncContextEstimate()
+		m.syncContextFromChat()
 		m.resetComposerInput()
 		m.draftAttachments = nil
 		m.draftReferences = nil
@@ -1798,18 +1802,18 @@ func (m *Model) applyEvent(evt domain.Event) {
 			m.pendingAssistant.CreatedAt = time.Now().UTC()
 		}
 		m.pendingAssistant.Text += evt.Text
+		m.addLiveContextEstimate(evt.Text)
 		m.startBusy(busyScopeTranscript, "Working ...")
 		m.pendingTranscriptFrameDirty = true
-		m.pendingContextFrameDirty = true
 		m.invalidatePendingTranscriptFrame()
 	case domain.EventKindReasoning:
 		if m.pendingAssistant.CreatedAt.IsZero() {
 			m.pendingAssistant.CreatedAt = time.Now().UTC()
 		}
 		m.pendingAssistant.Reasoning += evt.Text
+		m.addLiveContextEstimate(evt.Text)
 		m.startBusy(busyScopeTranscript, "Thinking ...")
 		m.pendingTranscriptFrameDirty = true
-		m.pendingContextFrameDirty = true
 		m.invalidatePendingTranscriptFrame()
 	case domain.EventKindToolStart:
 		status := strings.TrimSpace(evt.Text)
@@ -1842,8 +1846,18 @@ func (m *Model) applyEvent(evt domain.Event) {
 	case domain.EventKindUsage:
 		m.liveUsage = evt.Usage.Normalized()
 		m.liveUsageKnown = m.liveUsage.HasAnyTokens()
-		if m.liveUsage.PromptTokens > 0 {
-			m.contextTokens = m.liveUsage.PromptTokens
+		if contextTokens, ok := m.liveUsage.ContextTokens(); ok {
+			m.currentChat.LastKnownContextTokens = contextTokens
+			m.currentChat.ContextTokensKnown = true
+			for i := range m.chats {
+				if m.chats[i].ID == m.currentChat.ID {
+					m.chats[i].LastKnownContextTokens = contextTokens
+					m.chats[i].ContextTokensKnown = true
+					break
+				}
+			}
+			m.liveContextEstimatedTokens = 0
+			m.contextTokens = contextTokens
 			m.contextTokensEstimated = false
 		}
 		m.status = fmt.Sprintf("Usage total=%d", m.liveUsage.TotalTokens)
@@ -1907,10 +1921,6 @@ func (m *Model) invalidatePendingTranscriptFrame() {
 }
 
 func (m *Model) prepareFrame() {
-	if m.pendingContextFrameDirty {
-		m.syncContextEstimate()
-		m.pendingContextFrameDirty = false
-	}
 	if m.pendingTranscriptFrameDirty {
 		m.pendingTranscriptFrameDirty = false
 		m.refreshTranscriptForPendingTurn()
@@ -1923,7 +1933,6 @@ func (m *Model) clearPendingAssistantTurn() {
 	}
 	m.pendingAssistant = pendingAssistantTurn{}
 	m.pendingTranscriptFrameDirty = false
-	m.pendingContextFrameDirty = false
 	m.refreshTranscriptForPendingTurn()
 }
 
@@ -3231,34 +3240,28 @@ func (m *Model) syncUsageFromHistory() {
 	m.liveUsageKnown = false
 }
 
-func (m *Model) syncContextEstimate() {
+func (m *Model) syncContextFromChat() {
 	m.contextTokens = 0
 	m.contextTokensEstimated = false
-	if m.agent == nil {
+	base := m.currentChat.LastKnownContextTokens
+	if base <= 0 {
 		return
 	}
-	messages := slices.Clone(m.messages)
-	parts := make(map[int64][]domain.Part, len(m.parts)+1)
-	for id, messageParts := range m.parts {
-		parts[id] = slices.Clone(messageParts)
-	}
-	if pending := m.pendingAssistantParts(); len(pending) > 0 {
-		messageID := int64(-1)
-		messages = append(messages, domain.Message{
-			ID:        messageID,
-			SessionID: m.currentSession.ID,
-			ChatID:    m.currentChat.ID,
-			Role:      domain.MessageRoleAssistant,
-			Summary:   strings.TrimSpace(m.pendingAssistant.Text),
-			CreatedAt: m.pendingAssistant.CreatedAt,
-		})
-		parts[messageID] = pending
-	}
-	used, err := m.agent.EstimateContextTokensForState(m.currentSession, m.currentChat, messages, parts)
-	if err != nil || used <= 0 {
+	m.contextTokens = base + m.liveContextEstimatedTokens
+	m.contextTokensEstimated = !m.currentChat.ContextTokensKnown || m.liveContextEstimatedTokens > 0
+}
+
+func (m *Model) addLiveContextEstimate(text string) {
+	estimated := tokenestimate.Text(text)
+	if estimated <= 0 {
 		return
 	}
-	m.contextTokens = used
+	m.liveContextEstimatedTokens += estimated
+	base := m.currentChat.LastKnownContextTokens
+	if base <= 0 {
+		base = m.contextTokens
+	}
+	m.contextTokens = base + m.liveContextEstimatedTokens
 	m.contextTokensEstimated = true
 }
 
@@ -4244,7 +4247,7 @@ func (m Model) UpdateLoad(msg loadMsg) Model {
 	m.todos = msg.todos
 	m.workspace = msg.workspace
 	m.syncUsageFromHistory()
-	m.syncContextEstimate()
+	m.syncContextFromChat()
 	m.resetComposerHistory()
 	m.approvalDialog = nil
 	m.draftAttachments = nil
@@ -4966,7 +4969,7 @@ func (m *Model) appendLocalUserPrompt(prompt string, drafts []attachment.Draft, 
 	if !m.appendUserPromptTranscriptItem(m.messages[len(m.messages)-1], parts) {
 		m.transcriptDirty = true
 	}
-	m.syncContextEstimate()
+	m.addLiveContextEstimate(prompt)
 	m.refreshViewport()
 }
 
@@ -5025,7 +5028,7 @@ func (m *Model) appendLocalAssistantError(err error) {
 		m.debug.RecordLifecycle(m.currentSession.ID, "ui_error_appended", err.Error(), nil)
 	}
 	m.transcriptDirty = true
-	m.syncContextEstimate()
+	m.syncContextFromChat()
 	m.refreshViewport()
 }
 
@@ -5063,7 +5066,7 @@ func (m *Model) appendLocalTranscriptNotice(body, kind, severity string) {
 		m.debug.RecordLifecycle(m.currentSession.ID, "ui_notice_appended", body, map[string]string{"kind": kind, "severity": severity})
 	}
 	m.transcriptDirty = true
-	m.syncContextEstimate()
+	m.syncContextFromChat()
 	m.refreshViewport()
 }
 

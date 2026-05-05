@@ -4623,7 +4623,7 @@ func TestSidebarUsageUpdatesFromLiveUsageEvent(t *testing.T) {
 			ProviderID: "test",
 			ModelID:    "model",
 		},
-		currentChat: domain.Chat{ID: 7, SessionID: 2},
+		currentChat: domain.Chat{ID: 7, SessionID: 2, LastKnownContextTokens: 1500, ContextTokensKnown: false},
 		showSidebar: true,
 		cfg: config.Config{
 			Providers: map[string]config.Provider{
@@ -4634,10 +4634,9 @@ func TestSidebarUsageUpdatesFromLiveUsageEvent(t *testing.T) {
 		parts: map[int64][]domain.Part{
 			1: {{Kind: domain.PartKindSystemNotice, Body: "usage", MetaJSON: `{"PromptTokens":1000,"CompletionTokens":500,"CachedTokens":100,"TotalTokens":1500}`}},
 		},
-		contextTokens:          1500,
-		contextTokensEstimated: true,
 	}
 	m.syncUsageFromHistory()
+	m.syncContextFromChat()
 
 	before := m.renderSidebar()
 	if !strings.Contains(before, "Context ~1.5k / 32.8k (4%)") {
@@ -4698,6 +4697,39 @@ func TestSidebarUsageWithoutPromptTokensPreservesEstimate(t *testing.T) {
 	}
 }
 
+func TestSidebarContextAccumulatesStreamedTokenEstimate(t *testing.T) {
+	m := Model{
+		width:          120,
+		height:         40,
+		currentSession: domain.Session{ID: 2, ProviderID: "test", ModelID: "model"},
+		currentChat:    domain.Chat{ID: 7, SessionID: 2, LastKnownContextTokens: 1000, ContextTokensKnown: true},
+		showSidebar:    true,
+		cfg: config.Config{
+			Providers: map[string]config.Provider{
+				"test": {ContextWindow: 32768},
+			},
+		},
+		parts: map[int64][]domain.Part{},
+	}
+	m.syncContextFromChat()
+
+	m.applyEvent(domain.Event{Kind: domain.EventKindMessageDelta, Text: "one two"})
+	m.applyEvent(domain.Event{Kind: domain.EventKindReasoning, Text: "thinking now"})
+
+	got := m.renderSidebar()
+	if !strings.Contains(got, "Context ~1.0k / 32.8k (3%)") {
+		t.Fatalf("expected streamed estimate to be included, got %q", got)
+	}
+	m.applyEvent(domain.Event{Kind: domain.EventKindUsage, Usage: domain.Usage{PromptTokens: 1200, CompletionTokens: 25, TotalTokens: 1225}})
+	got = m.renderSidebar()
+	if !strings.Contains(got, "Context 1.2k / 32.8k (3%)") {
+		t.Fatalf("expected provider usage to replace estimate, got %q", got)
+	}
+	if m.currentChat.LastKnownContextTokens != 1200 || !m.currentChat.ContextTokensKnown {
+		t.Fatalf("expected current chat usage updated, got %#v", m.currentChat)
+	}
+}
+
 func TestSidebarContextUsesCompactedChatEstimateNotCompactionRequestUsage(t *testing.T) {
 	workdir := t.TempDir()
 	engine := agent.New(testConfig(t), nil, tools.NewRegistry(workdir), nil, workdir)
@@ -4711,7 +4743,7 @@ func TestSidebarContextUsesCompactedChatEstimateNotCompactionRequestUsage(t *tes
 			ProviderID: "test",
 			ModelID:    "model",
 		},
-		currentChat: domain.Chat{ID: 24, SessionID: 33, WorkflowRole: domain.WorkflowRoleGeneral},
+		currentChat: domain.Chat{ID: 24, SessionID: 33, WorkflowRole: domain.WorkflowRoleGeneral, LastKnownContextTokens: 42, ContextTokensKnown: false},
 		showSidebar: true,
 		cfg: config.Config{
 			Providers: map[string]config.Provider{
@@ -4734,7 +4766,7 @@ func TestSidebarContextUsesCompactedChatEstimateNotCompactionRequestUsage(t *tes
 		},
 	}
 	m.syncUsageFromHistory()
-	m.syncContextEstimate()
+	m.syncContextFromChat()
 
 	got := m.renderSidebar()
 	if !strings.Contains(got, "Context ") {

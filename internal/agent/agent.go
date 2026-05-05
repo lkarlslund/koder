@@ -31,6 +31,7 @@ import (
 	"github.com/lkarlslund/koder/internal/sessionctx"
 	"github.com/lkarlslund/koder/internal/skills"
 	"github.com/lkarlslund/koder/internal/store"
+	"github.com/lkarlslund/koder/internal/tokenestimate"
 	"github.com/lkarlslund/koder/internal/tools"
 	_ "github.com/lkarlslund/koder/internal/tools/all"
 )
@@ -604,6 +605,9 @@ func (e *Engine) continueModelTurn(ctx context.Context, session domain.Session, 
 					return err
 				}
 				if resp.Usage.HasAnyTokens() {
+					if err := e.saveChatContextUsage(ctx, chat.ID, resp.Usage); err != nil {
+						return err
+					}
 					out <- domain.Event{Kind: domain.EventKindUsage, Usage: resp.Usage}
 				}
 				if pause, ok := tracker.trackCalls(calls); ok {
@@ -691,6 +695,9 @@ func (e *Engine) continueModelTurn(ctx context.Context, session domain.Session, 
 		if usage.HasAnyTokens() {
 			meta, _ := json.Marshal(usage)
 			if _, err := e.store.AddPart(ctx, assistantMsg.ID, domain.PartKindSystemNotice, "usage", string(meta)); err != nil {
+				return err
+			}
+			if err := e.saveChatContextUsage(ctx, chat.ID, usage); err != nil {
 				return err
 			}
 			if !streamed {
@@ -2428,6 +2435,15 @@ func (e *Engine) compactSession(ctx context.Context, session domain.Session, cha
 	if _, err := e.store.AddPart(ctx, msg.ID, domain.PartKindCompaction, summary, string(meta)); err != nil {
 		return err
 	}
+	if chat, err := e.store.GetChat(ctx, chatID); err == nil {
+		chat.LastKnownContextTokens = tokenestimate.Text(summary)
+		chat.ContextTokensKnown = false
+		if err := e.store.UpdateChat(ctx, chat); err != nil {
+			return err
+		}
+	} else {
+		return err
+	}
 	if out != nil {
 		out <- domain.Event{Kind: domain.EventKindStatus, Text: "Session compacted"}
 	}
@@ -2638,6 +2654,26 @@ func (e *Engine) persistAssistantToolCalls(ctx context.Context, chatID, sessionI
 		if _, err := e.store.AddPart(ctx, assistantMsg.ID, domain.PartKindSystemNotice, "usage", string(usageMeta)); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func (e *Engine) saveChatContextUsage(ctx context.Context, chatID int64, usage domain.Usage) error {
+	if e == nil || e.store == nil || chatID <= 0 {
+		return nil
+	}
+	contextTokens, ok := usage.ContextTokens()
+	if !ok {
+		return nil
+	}
+	chat, err := e.store.GetChat(ctx, chatID)
+	if err != nil {
+		return fmt.Errorf("load chat context usage state: %w", err)
+	}
+	chat.LastKnownContextTokens = contextTokens
+	chat.ContextTokensKnown = true
+	if err := e.store.UpdateChat(ctx, chat); err != nil {
+		return fmt.Errorf("save chat context usage state: %w", err)
 	}
 	return nil
 }
