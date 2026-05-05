@@ -1790,6 +1790,130 @@ func TestRunPromptIgnoresMalformedProviderToolCallsWhenTextIsPresent(t *testing.
 	}
 }
 
+func TestRunPromptMessageDoneCarriesPersistedAssistantRecord(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}\n\n"))
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer server.Close()
+
+	cfg := testConfig(t)
+	cfg.Providers = map[string]config.Provider{
+		"test": {BaseURL: server.URL + "/v1", Timeout: time.Second, Stream: true},
+	}
+	cfg.DefaultProvider = "test"
+	cfg.DefaultModel = "test-model"
+
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	engine := New(cfg, st, tools.NewRegistry(t.TempDir()), nil, t.TempDir())
+	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	events, err := engine.RunPrompt(context.Background(), session, "say hello")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var done domain.Event
+	for evt := range events {
+		if evt.Kind == domain.EventKindMessageDone {
+			done = evt
+		}
+	}
+	if done.Message.ID == 0 {
+		t.Fatal("expected persisted assistant message on message done")
+	}
+	if len(done.Parts) == 0 || firstPartText(done.Parts, domain.PartKindText) != "hello" {
+		t.Fatalf("expected persisted assistant parts, got %#v", done.Parts)
+	}
+}
+
+func TestRunPromptApprovalAskCarriesPersistedApprovalRecord(t *testing.T) {
+	t.Parallel()
+
+	var requests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		requests++
+		switch requests {
+		case 1:
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"tool_calls":[{"id":"call_1","type":"function","function":{"name":"bash","arguments":"{\"command\":\"pwd\"}"}}]}}],"usage":{"prompt_tokens":5,"completion_tokens":1,"total_tokens":6}}`))
+		default:
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ignored"}}],"usage":{"total_tokens":1}}`))
+		}
+	}))
+	defer server.Close()
+
+	cfg := testConfig(t)
+	cfg.Providers = map[string]config.Provider{
+		"test": {BaseURL: server.URL + "/v1", Timeout: time.Second},
+	}
+	cfg.DefaultProvider = "test"
+	cfg.DefaultModel = "test-model"
+	cfg.Permissions.Profiles["default"] = config.PermissionProfile{
+		Rules: []config.PermissionRule{{Tool: domain.ToolKindBash, Pattern: "*", Action: domain.PermissionModeAsk}},
+	}
+
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	workdir := t.TempDir()
+	engine := New(cfg, st, tools.NewRegistry(workdir), nil, workdir)
+	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetSessionPermissionProfile(context.Background(), session.ID, "default"); err != nil {
+		t.Fatal(err)
+	}
+
+	events, err := engine.RunPrompt(context.Background(), session, "run pwd")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var approval domain.Event
+	for evt := range events {
+		if evt.Kind == domain.EventKindApprovalAsk {
+			approval = evt
+			break
+		}
+	}
+	if approval.Message.ID == 0 {
+		t.Fatal("expected persisted approval message on approval ask")
+	}
+	if len(approval.Parts) != 1 || approval.Parts[0].Kind != domain.PartKindApprovalRequest {
+		t.Fatalf("expected approval request part, got %#v", approval.Parts)
+	}
+}
+
+func firstPartText(parts []domain.Part, kind domain.PartKind) string {
+	for _, part := range parts {
+		if part.Kind == kind {
+			return part.Text()
+		}
+	}
+	return ""
+}
+
 func TestRunPromptStreamsToolCallArgumentsAcrossChunks(t *testing.T) {
 	t.Parallel()
 

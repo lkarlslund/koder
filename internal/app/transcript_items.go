@@ -78,8 +78,8 @@ func (i *userMessageTranscriptItem) Refresh(m *Model) {
 		i.setElement(ui.AsNode(ui.Paragraph{Text: ""}))
 		return
 	}
-	msg := i.record.MessageValue()
-	parts := i.record.PartSnapshots()
+	msg := i.record.Message
+	parts := partValues(i.record.PartRecords())
 	renderer := newTranscriptRenderer(m)
 	body := renderer.renderUserMessageParts(parts)
 	if strings.TrimSpace(body) == "" {
@@ -114,8 +114,8 @@ func (i *assistantMessageTranscriptItem) Refresh(m *Model) {
 		i.setElement(ui.AsNode(ui.Paragraph{Text: ""}))
 		return
 	}
-	msg := i.record.MessageValue()
-	parts := i.record.PartSnapshots()
+	msg := i.record.Message
+	parts := partValues(i.record.PartRecords())
 	renderer := newTranscriptRenderer(m)
 	renderer.showReasoning = i.showReasoning
 	renderer.showSystem = i.showSystem
@@ -248,6 +248,20 @@ func firstNonEmptyToolRunKey(run ui.ToolRun) string {
 	default:
 		return toolRunFallbackID(run.Tool, run.Preview)
 	}
+}
+
+func partValues(records []*appstate.PartRecord) []domain.Part {
+	if len(records) == 0 {
+		return nil
+	}
+	out := make([]domain.Part, 0, len(records))
+	for _, record := range records {
+		if record == nil {
+			continue
+		}
+		out = append(out, record.Part)
+	}
+	return out
 }
 
 type bashToolRunCardElement struct {

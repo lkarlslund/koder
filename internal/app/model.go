@@ -580,6 +580,7 @@ type Model struct {
 	transcriptItems             []transcriptItemController
 	messageItemIndexByID        map[int64]int
 	toolRunItemIndexByID        map[string]int
+	toolRunItemIndexByCall      map[string]int
 	toolRunItemIndexByAppr      map[int64]int
 	pendingTranscriptIndex      int
 	transcriptDirty             bool
@@ -979,16 +980,12 @@ func (m Model) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 			m.applyEvent(msg.event)
 		}
 		if msg.events != nil {
-			var refresh ui.Cmd
-			if (msg.chatID == 0 || msg.chatID == m.currentChat.ID) && shouldRefreshDetailsAfterEvent(msg.event) {
-				refresh = m.reloadDetailsCmd()
-			}
-			return m, ui.Batch(refresh, nextEventCmd(msg.chatID, msg.events), m.syncWindowTitleCmd())
+			return m, ui.Batch(nextEventCmd(msg.chatID, msg.events), m.syncWindowTitleCmd())
 		}
 		m.activeEventStream = false
 		if msg.chatID == 0 || msg.chatID == m.currentChat.ID {
 			m.stopBusy()
-			return m, ui.Batch(m.reloadDetailsCmd(), m.syncWindowTitleCmd())
+			return m, m.syncWindowTitleCmd()
 		}
 		if m.chatBusy != nil {
 			delete(m.chatBusy, msg.chatID)
@@ -2001,8 +1998,10 @@ func (m *Model) applyEvent(evt domain.Event) {
 		m.clearPendingAssistantTurn()
 		m.stopBusy()
 	case domain.EventKindMessageDone:
-		m.clearPendingAssistantTurn()
-		m.stopBusyWithStatus("Idle")
+		if evt.Message.ID > 0 || !m.activeEventStream || (strings.TrimSpace(m.pendingAssistant.Text) == "" && strings.TrimSpace(m.pendingAssistant.Reasoning) == "") {
+			m.clearPendingAssistantTurn()
+			m.stopBusyWithStatus("Idle")
+		}
 	}
 }
 
@@ -2898,6 +2897,7 @@ func (m *Model) rebuildTranscriptState() []ui.TranscriptItem {
 		m.transcriptItems = items
 		m.messageItemIndexByID = make(map[int64]int)
 		m.toolRunItemIndexByID = make(map[string]int)
+		m.toolRunItemIndexByCall = make(map[string]int)
 		m.toolRunItemIndexByAppr = make(map[int64]int)
 		m.pendingTranscriptIndex = -1
 		return m.uiTranscriptItems()
@@ -2910,6 +2910,7 @@ func (m *Model) rebuildTranscriptState() []ui.TranscriptItem {
 	controllers := make([]transcriptItemController, 0, len(blocks))
 	messageIdx := make(map[int64]int)
 	toolIdx := make(map[string]int)
+	toolCallIdx := make(map[string]int)
 	toolAppr := make(map[int64]int)
 	pendingIndex := -1
 	for idx, block := range blocks {
@@ -2931,33 +2932,19 @@ func (m *Model) rebuildTranscriptState() []ui.TranscriptItem {
 			if id := strings.TrimSpace(typed.RunID()); id != "" {
 				toolIdx[id] = idx
 			}
-			switch concrete := typed.(type) {
-			case *bashToolRunTranscriptItem:
-				if concrete.run.ApprovalID > 0 {
-					toolAppr[concrete.run.ApprovalID] = idx
-				}
-			case *readToolRunTranscriptItem:
-				if concrete.run.ApprovalID > 0 {
-					toolAppr[concrete.run.ApprovalID] = idx
-				}
-			case *writeToolRunTranscriptItem:
-				if concrete.run.ApprovalID > 0 {
-					toolAppr[concrete.run.ApprovalID] = idx
-				}
-			case *editToolRunTranscriptItem:
-				if concrete.run.ApprovalID > 0 {
-					toolAppr[concrete.run.ApprovalID] = idx
-				}
-			case *genericToolRunTranscriptItem:
-				if concrete.run.ApprovalID > 0 {
-					toolAppr[concrete.run.ApprovalID] = idx
-				}
+			run := m.transcriptToolRunValue(typed)
+			if strings.TrimSpace(run.ToolCallID) != "" {
+				toolCallIdx[run.ToolCallID] = idx
+			}
+			if run.ApprovalID > 0 {
+				toolAppr[run.ApprovalID] = idx
 			}
 		}
 	}
 	m.transcriptItems = controllers
 	m.messageItemIndexByID = messageIdx
 	m.toolRunItemIndexByID = toolIdx
+	m.toolRunItemIndexByCall = toolCallIdx
 	m.toolRunItemIndexByAppr = toolAppr
 	m.pendingTranscriptIndex = pendingIndex
 	return m.uiTranscriptItems()
@@ -3075,21 +3062,14 @@ func (m *Model) replaceToolRunRecordInTranscript(record *appstate.ToolRunRecord)
 			}
 		}
 	}
-	if strings.TrimSpace(run.ToolCallID) == "" {
-		return false
-	}
-	for idx, item := range m.transcriptItems {
-		typed, ok := item.(toolRunTranscriptItem)
-		if !ok {
-			continue
+	if idx, ok := m.toolRunItemIndexByCall[strings.TrimSpace(run.ToolCallID)]; ok {
+		if idx >= 0 && idx < len(m.transcriptItems) {
+			if item, ok := m.transcriptItems[idx].(toolRunTranscriptItem); ok {
+				item.Bind(record)
+				item.UpdateRun(run)
+				return m.replaceTranscriptItemAt(idx)
+			}
 		}
-		block := m.transcriptBlockForController(item)
-		if block.ToolRun.ToolCallID != run.ToolCallID {
-			continue
-		}
-		typed.Bind(record)
-		typed.UpdateRun(run)
-		return m.replaceTranscriptItemAt(idx)
 	}
 	return false
 }
@@ -3154,52 +3134,55 @@ func (m Model) pendingAssistantIndicatorLine() string {
 func (m *Model) reindexTranscriptControllers() {
 	m.messageItemIndexByID = make(map[int64]int)
 	m.toolRunItemIndexByID = make(map[string]int)
+	m.toolRunItemIndexByCall = make(map[string]int)
 	m.toolRunItemIndexByAppr = make(map[int64]int)
 	m.pendingTranscriptIndex = -1
 	for idx, item := range m.transcriptItems {
 		switch typed := item.(type) {
 		case *userMessageTranscriptItem:
-			m.messageItemIndexByID[typed.record.MessageValue().ID] = idx
+			m.messageItemIndexByID[typed.record.Message.ID] = idx
 		case *assistantMessageTranscriptItem:
-			m.messageItemIndexByID[typed.record.MessageValue().ID] = idx
+			m.messageItemIndexByID[typed.record.Message.ID] = idx
 		case *pendingAssistantTranscriptItem:
 			m.pendingTranscriptIndex = idx
 		case toolRunTranscriptItem:
 			if id := strings.TrimSpace(typed.RunID()); id != "" {
 				m.toolRunItemIndexByID[id] = idx
 			}
-			switch concrete := typed.(type) {
-			case *bashToolRunTranscriptItem:
-				if concrete.run.ApprovalID > 0 {
-					m.toolRunItemIndexByAppr[concrete.run.ApprovalID] = idx
-				}
-			case *readToolRunTranscriptItem:
-				if concrete.run.ApprovalID > 0 {
-					m.toolRunItemIndexByAppr[concrete.run.ApprovalID] = idx
-				}
-			case *writeToolRunTranscriptItem:
-				if concrete.run.ApprovalID > 0 {
-					m.toolRunItemIndexByAppr[concrete.run.ApprovalID] = idx
-				}
-			case *editToolRunTranscriptItem:
-				if concrete.run.ApprovalID > 0 {
-					m.toolRunItemIndexByAppr[concrete.run.ApprovalID] = idx
-				}
-			case *genericToolRunTranscriptItem:
-				if concrete.run.ApprovalID > 0 {
-					m.toolRunItemIndexByAppr[concrete.run.ApprovalID] = idx
-				}
+			run := m.transcriptToolRunValue(typed)
+			if strings.TrimSpace(run.ToolCallID) != "" {
+				m.toolRunItemIndexByCall[run.ToolCallID] = idx
+			}
+			if run.ApprovalID > 0 {
+				m.toolRunItemIndexByAppr[run.ApprovalID] = idx
 			}
 		}
+	}
+}
+
+func (m *Model) transcriptToolRunValue(item toolRunTranscriptItem) ui.ToolRun {
+	switch concrete := item.(type) {
+	case *bashToolRunTranscriptItem:
+		return concrete.run
+	case *readToolRunTranscriptItem:
+		return concrete.run
+	case *writeToolRunTranscriptItem:
+		return concrete.run
+	case *editToolRunTranscriptItem:
+		return concrete.run
+	case *genericToolRunTranscriptItem:
+		return concrete.run
+	default:
+		return ui.ToolRun{}
 	}
 }
 
 func (m *Model) transcriptBlockForController(item transcriptItemController) transcriptBlock {
 	switch typed := item.(type) {
 	case *userMessageTranscriptItem:
-		return transcriptBlock{Kind: transcriptBlockMessage, Message: typed.record.MessageValue(), Parts: typed.record.PartSnapshots(), Record: typed.record}
+		return transcriptBlock{Kind: transcriptBlockMessage, Message: typed.record.Message, Parts: partValues(typed.record.PartRecords()), Record: typed.record}
 	case *assistantMessageTranscriptItem:
-		return transcriptBlock{Kind: transcriptBlockMessage, Message: typed.record.MessageValue(), Parts: typed.record.PartSnapshots(), Record: typed.record}
+		return transcriptBlock{Kind: transcriptBlockMessage, Message: typed.record.Message, Parts: partValues(typed.record.PartRecords()), Record: typed.record}
 	case *pendingAssistantTranscriptItem:
 		return transcriptBlock{
 			Kind:    transcriptBlockMessage,
@@ -3222,6 +3205,97 @@ func (m *Model) transcriptBlockForController(item transcriptItemController) tran
 		}
 	}
 	return transcriptBlock{}
+}
+
+func (m *Model) appendMessageRecordTranscriptItem(record *appstate.MessageRecord) bool {
+	if record == nil || m.transcriptDirty || len(m.transcriptItems) == 0 {
+		return false
+	}
+	retained := m.ensureRetainedTranscript()
+	if retained.Len() != len(m.transcriptItems) {
+		return false
+	}
+	if _, ok := m.transcriptItems[len(m.transcriptItems)-1].(*placeholderTranscriptItem); ok {
+		return false
+	}
+	block := transcriptBlock{Kind: transcriptBlockMessage, Message: record.Message, Parts: partValues(record.PartRecords()), Record: record}
+	if !block.Pending && !m.assistantMessageShouldExist(block.Message, block.Parts) && block.Message.Role == domain.MessageRoleAssistant {
+		return false
+	}
+	if block.Message.Role == domain.MessageRoleAssistant && m.pendingTranscriptIndex >= 0 && m.pendingTranscriptIndex < len(m.transcriptItems) {
+		gap := m.transcriptItems[m.pendingTranscriptIndex].GapBefore()
+		item := newAssistantMessageTranscriptItem(m.transcriptBlockIdentityKey(block), gap, record, m.showReasoning, m.showSystem)
+		item.Refresh(m)
+		m.transcriptItems[m.pendingTranscriptIndex] = item
+		retained.Replace(m.pendingTranscriptIndex, item.UIItem())
+		m.reindexTranscriptControllers()
+		return true
+	}
+	gap := 0
+	if len(m.transcriptItems) > 0 {
+		prev := m.transcriptBlockForController(m.transcriptItems[len(m.transcriptItems)-1])
+		gap = renderedSeparatorHeight(m.transcriptSeparator(prev, block))
+	}
+	var item transcriptItemController
+	switch block.Message.Role {
+	case domain.MessageRoleUser:
+		item = newUserMessageTranscriptItem(m.transcriptBlockIdentityKey(block), gap, record)
+	default:
+		item = newAssistantMessageTranscriptItem(m.transcriptBlockIdentityKey(block), gap, record, m.showReasoning, m.showSystem)
+	}
+	item.Refresh(m)
+	m.transcriptItems = append(m.transcriptItems, item)
+	retained.Add(item.UIItem())
+	m.reindexTranscriptControllers()
+	return true
+}
+
+func (m *Model) upsertMessageRecordTranscriptItem(record *appstate.MessageRecord) bool {
+	if record == nil {
+		return false
+	}
+	if idx, ok := m.messageItemIndexByID[record.Message.ID]; ok {
+		if idx >= 0 && idx < len(m.transcriptItems) {
+			switch item := m.transcriptItems[idx].(type) {
+			case *userMessageTranscriptItem:
+				item.Bind(record)
+			case *assistantMessageTranscriptItem:
+				item.Bind(record)
+				item.SetReasoningVisible(m.showReasoning)
+				item.SetSystemVisible(m.showSystem)
+			default:
+				return false
+			}
+			return m.replaceTranscriptItemAt(idx)
+		}
+	}
+	return m.appendMessageRecordTranscriptItem(record)
+}
+
+func (m *Model) appendToolRunRecordTranscriptItem(record *appstate.ToolRunRecord) bool {
+	if record == nil || m.transcriptDirty || len(m.transcriptItems) == 0 {
+		return false
+	}
+	retained := m.ensureRetainedTranscript()
+	if retained.Len() != len(m.transcriptItems) {
+		return false
+	}
+	if _, ok := m.transcriptItems[len(m.transcriptItems)-1].(*placeholderTranscriptItem); ok {
+		return false
+	}
+	run := record.RunValue()
+	block := transcriptBlock{Kind: transcriptBlockToolRun, ToolRun: run, ToolRunRecord: record}
+	gap := 0
+	if len(m.transcriptItems) > 0 {
+		prev := m.transcriptBlockForController(m.transcriptItems[len(m.transcriptItems)-1])
+		gap = renderedSeparatorHeight(m.transcriptSeparator(prev, block))
+	}
+	item := newToolRunTranscriptItem(gap, record, run, m.expandedToolRuns[run.ID], m.expandedToolRunCommands[run.ID])
+	item.Refresh(m)
+	m.transcriptItems = append(m.transcriptItems, item)
+	retained.Add(item.UIItem())
+	m.reindexTranscriptControllers()
+	return true
 }
 
 func (m *Model) syncRetainedTranscript() *ui.RetainedTranscript {
@@ -5232,32 +5306,7 @@ func (m *Model) appendLocalUserPrompt(prompt string, drafts []attachment.Draft, 
 }
 
 func (m *Model) appendUserPromptTranscriptItem(record *appstate.MessageRecord) bool {
-	if record == nil {
-		return false
-	}
-	if m.transcriptDirty || len(m.transcriptItems) == 0 {
-		return false
-	}
-	retained := m.ensureRetainedTranscript()
-	if retained.Len() != len(m.transcriptItems) {
-		return false
-	}
-	if _, ok := m.transcriptItems[len(m.transcriptItems)-1].(*placeholderTranscriptItem); ok {
-		return false
-	}
-	block := transcriptBlock{Kind: transcriptBlockMessage, Message: record.MessageValue(), Parts: record.PartSnapshots(), Record: record}
-	prev := m.transcriptBlockForController(m.transcriptItems[len(m.transcriptItems)-1])
-	gap := renderedSeparatorHeight(m.transcriptSeparator(prev, block))
-	item := newUserMessageTranscriptItem(m.transcriptBlockIdentityKey(block), gap, record)
-	item.Refresh(m)
-	index := len(m.transcriptItems)
-	m.transcriptItems = append(m.transcriptItems, item)
-	retained.Add(item.UIItem())
-	if m.messageItemIndexByID == nil {
-		m.messageItemIndexByID = map[int64]int{}
-	}
-	m.messageItemIndexByID[record.MessageValue().ID] = index
-	return true
+	return m.appendMessageRecordTranscriptItem(record)
 }
 
 func (m *Model) appendLocalAssistantError(err error) {

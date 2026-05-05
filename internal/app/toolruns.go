@@ -200,32 +200,157 @@ func (m *Model) applyCurrentChatEvent(evt domain.Event) {
 		return
 	}
 	state := m.ensureChatState()
-	changed := false
+	refreshed := false
 	if evt.Message.ID > 0 {
-		if state.MessageByID(evt.Message.ID) == nil {
-			state.AppendMessage(evt.Message, evt.Parts)
-			changed = true
+		record, mutations, created := state.UpsertMessageParts(evt.Message, evt.Parts)
+		if record != nil {
+			if created {
+				if !m.appendEventMessageToTranscript(record) {
+					m.transcriptDirty = true
+				} else {
+					refreshed = true
+				}
+			} else if m.messageShouldRender(record) {
+				if !m.upsertMessageRecordTranscriptItem(record) {
+					m.transcriptDirty = true
+				} else {
+					refreshed = true
+				}
+			}
+			for _, mutation := range mutations {
+				if !m.applyCurrentChatPartMutation(record, mutation.Record) {
+					continue
+				}
+				refreshed = true
+			}
 		}
 	}
 	switch evt.Kind {
-	case domain.EventKindToolCallDelta, domain.EventKindToolResult:
-		if changed || evt.Kind != domain.EventKindToolCallDelta {
-			m.rebuildChatToolRuns()
-			m.syncChatMirrorsFromState()
-			m.transcriptDirty = true
-			m.refreshViewport()
-		}
+	case domain.EventKindApprovalAsk:
+		m.applyApprovalAskEvent(evt)
+	case domain.EventKindApprovalReply:
+		m.applyApprovalReplyEvent(evt)
 	case domain.EventKindToolStart:
 		if record := state.ToolRunByCallID(strings.TrimSpace(evt.ToolCallID)); record != nil {
 			record.Update(func(run *ui.ToolRun) {
 				run.Status = ui.ToolRunStatusRunning
 			})
-			m.syncChatMirrorsFromState()
 			if !m.replaceToolRunRecordInTranscript(record) {
 				m.transcriptDirty = true
+			} else {
+				refreshed = true
 			}
-			m.refreshViewport()
 		}
+	}
+	if evt.Message.ID > 0 {
+		m.syncChatMirrorsFromState()
+	}
+	if refreshed || evt.Message.ID > 0 {
+		if evt.Kind == domain.EventKindToolCallDelta && evt.Message.ID > 0 {
+			m.clearPendingAssistantTurn()
+		}
+		if evt.Kind == domain.EventKindMessageDone && evt.Message.ID > 0 {
+			m.clearPendingAssistantTurn()
+		}
+		m.refreshViewport()
+	}
+}
+
+func (m *Model) applyCurrentChatPartMutation(record *appstate.MessageRecord, partRecord *appstate.PartRecord) bool {
+	if record == nil || partRecord == nil {
+		return false
+	}
+	run, ok := messageToolRunForPart(record.Message, partRecord.Part)
+	if !ok {
+		return false
+	}
+	toolRecord, created := m.ensureChatState().UpsertToolRun(run)
+	if toolRecord == nil {
+		return false
+	}
+	if created {
+		if !m.appendToolRunRecordTranscriptItem(toolRecord) {
+			m.transcriptDirty = true
+			return false
+		}
+		return true
+	}
+	if !m.replaceToolRunRecordInTranscript(toolRecord) {
+		m.transcriptDirty = true
+		return false
+	}
+	return true
+}
+
+func (m *Model) applyApprovalAskEvent(evt domain.Event) {
+	approvalID, _ := strconv.ParseInt(strings.TrimSpace(evt.Meta["approval_id"]), 10, 64)
+	if approvalID == 0 {
+		return
+	}
+	m.ensureChatState().UpsertApproval(store.Approval{
+		ID:        approvalID,
+		SessionID: m.currentSession.ID,
+		ChatID:    m.currentChat.ID,
+		Tool:      evt.Tool,
+		Command:   strings.TrimSpace(evt.Meta["command"]),
+		Status:    domain.ApprovalStatusPending,
+	})
+	m.syncChatMirrorsFromState()
+}
+
+func (m *Model) applyApprovalReplyEvent(evt domain.Event) {
+	approvalID, _ := strconv.ParseInt(strings.TrimSpace(evt.Meta["approval_id"]), 10, 64)
+	if approvalID == 0 {
+		return
+	}
+	m.ensureChatState().RemoveApproval(approvalID)
+	m.syncChatMirrorsFromState()
+}
+
+func (m *Model) appendEventMessageToTranscript(record *appstate.MessageRecord) bool {
+	if record == nil {
+		return false
+	}
+	if !m.messageShouldRender(record) {
+		return true
+	}
+	return m.appendMessageRecordTranscriptItem(record)
+}
+
+func (m *Model) messageShouldRender(record *appstate.MessageRecord) bool {
+	if record == nil {
+		return false
+	}
+	if record.Message.Role == domain.MessageRoleUser {
+		return true
+	}
+	if record.Message.Role == domain.MessageRoleTool {
+		return false
+	}
+	return m.assistantMessageShouldExist(record.Message, partValues(record.PartRecords()))
+}
+
+func messageToolRunForPart(msg domain.Message, part domain.Part) (ui.ToolRun, bool) {
+	switch part.Kind {
+	case domain.PartKindToolCall:
+		runs := toolRunsFromAssistantMessage([]domain.Part{part})
+		if len(runs) == 0 {
+			return ui.ToolRun{}, false
+		}
+		return runs[0], true
+	case domain.PartKindToolOutput, domain.PartKindApprovalRequest, domain.PartKindSystemNotice:
+		runs := toolRunsFromToolMessage([]domain.Part{part}, msg)
+		if len(runs) == 0 {
+			return ui.ToolRun{}, false
+		}
+		return runs[0], true
+	case domain.PartKindCompaction:
+		return compactionToolRun([]domain.Part{part}, msg)
+	case domain.PartKindEventNotice:
+		run := eventNoticeToolRun(part)
+		return run, strings.TrimSpace(run.ID) != ""
+	default:
+		return ui.ToolRun{}, false
 	}
 }
 

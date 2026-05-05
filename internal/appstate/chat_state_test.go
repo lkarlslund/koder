@@ -63,3 +63,33 @@ func TestChatStateAppendMessage(t *testing.T) {
 		t.Fatalf("snapshot part id = %d", got)
 	}
 }
+
+func TestChatStateUpsertMessagePartsPreservesRecordIdentity(t *testing.T) {
+	t.Helper()
+	state := NewChatState(nil, nil, nil)
+	record := state.AppendMessage(
+		domain.Message{ID: 7, Role: domain.MessageRoleAssistant, Summary: "first"},
+		[]domain.Part{{ID: 9, MessageID: 7, Kind: domain.PartKindText, Payload: domain.TextPayload{Text: "first"}}},
+	)
+	partRecord := record.Parts[0]
+
+	updated, mutations, created := state.UpsertMessageParts(
+		domain.Message{ID: 7, Role: domain.MessageRoleAssistant, Summary: "updated"},
+		[]domain.Part{{ID: 9, MessageID: 7, Kind: domain.PartKindText, Payload: domain.TextPayload{Text: "updated"}}},
+	)
+	if created {
+		t.Fatal("expected existing message record to be reused")
+	}
+	if updated != record {
+		t.Fatal("expected message record pointer preserved")
+	}
+	if len(mutations) != 1 || mutations[0].Record != partRecord || mutations[0].Created {
+		t.Fatalf("unexpected part mutations %#v", mutations)
+	}
+	if got := updated.Message.Summary; got != "updated" {
+		t.Fatalf("summary = %q", got)
+	}
+	if got := updated.Parts[0].Part.Text(); got != "updated" {
+		t.Fatalf("part text = %q", got)
+	}
+}

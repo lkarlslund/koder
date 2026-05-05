@@ -2,6 +2,7 @@ package appstate
 
 import (
 	"slices"
+	"strings"
 
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/store"
@@ -176,6 +177,54 @@ func (s *ChatState) AppendMessage(message domain.Message, parts []domain.Part) *
 	return record
 }
 
+// UpsertMessageParts merges one persisted message and its parts into the chat state.
+func (s *ChatState) UpsertMessageParts(message domain.Message, parts []domain.Part) (*MessageRecord, []PartMutation, bool) {
+	if s == nil {
+		return nil, nil, false
+	}
+	if s.byMessage == nil {
+		s.byMessage = map[int64]*MessageRecord{}
+	}
+	if s.byPart == nil {
+		s.byPart = map[int64]*PartRecord{}
+	}
+	record := s.byMessage[message.ID]
+	created := false
+	if record == nil {
+		record = &MessageRecord{}
+		s.messages = append(s.messages, record)
+		s.byMessage[message.ID] = record
+		created = true
+	}
+	record.Message = message
+	mutations := make([]PartMutation, 0, len(parts))
+	if len(parts) == 0 {
+		return record, mutations, created
+	}
+	if len(record.Parts) == 0 {
+		record.Parts = make([]*PartRecord, 0, len(parts))
+	}
+	for _, part := range parts {
+		partRecord := s.byPart[part.ID]
+		if partRecord == nil {
+			partRecord = &PartRecord{}
+			record.Parts = append(record.Parts, partRecord)
+			s.byPart[part.ID] = partRecord
+			partRecord.Part = part
+			mutations = append(mutations, PartMutation{Record: partRecord, Created: true})
+			continue
+		}
+		partRecord.Part = part
+		if !messageHasPartRecord(record, partRecord) {
+			record.Parts = append(record.Parts, partRecord)
+			mutations = append(mutations, PartMutation{Record: partRecord, Created: true})
+			continue
+		}
+		mutations = append(mutations, PartMutation{Record: partRecord, Created: false})
+	}
+	return record, mutations, created
+}
+
 // MessageByID returns a message record by ID.
 func (s *ChatState) MessageByID(messageID int64) *MessageRecord {
 	if s == nil || messageID == 0 {
@@ -230,6 +279,14 @@ func (r *MessageRecord) MessageValue() domain.Message {
 	return r.Message
 }
 
+// PartRecords returns the current part records for the message.
+func (r *MessageRecord) PartRecords() []*PartRecord {
+	if r == nil {
+		return nil
+	}
+	return r.Parts
+}
+
 // PartSnapshots returns detached part values for the message.
 func (r *MessageRecord) PartSnapshots() []domain.Part {
 	if r == nil || len(r.Parts) == 0 {
@@ -261,6 +318,14 @@ func (r *PartRecord) PartValue() domain.Part {
 	return r.Part
 }
 
+// PartByID returns a part record by ID.
+func (s *ChatState) PartByID(partID int64) *PartRecord {
+	if s == nil || partID == 0 {
+		return nil
+	}
+	return s.byPart[partID]
+}
+
 // Update mutates a tool-run record in place.
 func (r *ToolRunRecord) Update(update func(*ui.ToolRun)) {
 	if r == nil || update == nil {
@@ -275,6 +340,61 @@ func (r *ToolRunRecord) RunValue() ui.ToolRun {
 		return ui.ToolRun{}
 	}
 	return r.Run
+}
+
+// UpsertToolRun merges one tool run into the current chat state.
+func (s *ChatState) UpsertToolRun(run ui.ToolRun) (*ToolRunRecord, bool) {
+	if s == nil || strings.TrimSpace(run.ID) == "" {
+		return nil, false
+	}
+	if s.byToolRunID == nil {
+		s.byToolRunID = map[string]*ToolRunRecord{}
+	}
+	if s.byToolCallID == nil {
+		s.byToolCallID = map[string]*ToolRunRecord{}
+	}
+	if s.byToolApprovalID == nil {
+		s.byToolApprovalID = map[int64]*ToolRunRecord{}
+	}
+	record := s.lookupToolRun(run)
+	created := false
+	if record == nil {
+		record = &ToolRunRecord{Run: run}
+		s.toolRuns = append(s.toolRuns, record)
+		created = true
+	} else {
+		record.Run = run
+	}
+	s.indexToolRunRecord(record)
+	return record, created
+}
+
+// UpsertApproval adds or replaces one approval snapshot.
+func (s *ChatState) UpsertApproval(approval store.Approval) {
+	if s == nil || approval.ID == 0 {
+		return
+	}
+	for idx := range s.approvals {
+		if s.approvals[idx].ID == approval.ID {
+			s.approvals[idx] = approval
+			return
+		}
+	}
+	s.approvals = append(s.approvals, approval)
+}
+
+// RemoveApproval removes one approval snapshot by ID.
+func (s *ChatState) RemoveApproval(approvalID int64) {
+	if s == nil || approvalID == 0 {
+		return
+	}
+	for idx := range s.approvals {
+		if s.approvals[idx].ID != approvalID {
+			continue
+		}
+		s.approvals = append(s.approvals[:idx], s.approvals[idx+1:]...)
+		return
+	}
 }
 
 func (s *ChatState) lookupToolRun(run ui.ToolRun) *ToolRunRecord {
@@ -297,4 +417,37 @@ func (s *ChatState) lookupToolRun(run ui.ToolRun) *ToolRunRecord {
 		}
 	}
 	return nil
+}
+
+func (s *ChatState) indexToolRunRecord(record *ToolRunRecord) {
+	if s == nil || record == nil {
+		return
+	}
+	run := record.Run
+	if strings.TrimSpace(run.ID) != "" {
+		s.byToolRunID[run.ID] = record
+	}
+	if strings.TrimSpace(run.ToolCallID) != "" {
+		s.byToolCallID[run.ToolCallID] = record
+	}
+	if run.ApprovalID > 0 {
+		s.byToolApprovalID[run.ApprovalID] = record
+	}
+}
+
+type PartMutation struct {
+	Record  *PartRecord
+	Created bool
+}
+
+func messageHasPartRecord(record *MessageRecord, candidate *PartRecord) bool {
+	if record == nil || candidate == nil {
+		return false
+	}
+	for _, item := range record.Parts {
+		if item == candidate {
+			return true
+		}
+	}
+	return false
 }

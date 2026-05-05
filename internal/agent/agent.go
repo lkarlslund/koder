@@ -705,21 +705,28 @@ func (e *Engine) continueModelTurn(ctx context.Context, session domain.Session, 
 		if err != nil {
 			return err
 		}
+		assistantParts := make([]domain.Part, 0, 3)
 		if strings.TrimSpace(text) != "" {
-			if _, err := e.store.AddPart(ctx, assistantMsg.ID, domain.TextPayload{Text: text}); err != nil {
+			part, err := e.store.AddPart(ctx, assistantMsg.ID, domain.TextPayload{Text: text})
+			if err != nil {
 				return err
 			}
+			assistantParts = append(assistantParts, part)
 		}
 		if strings.TrimSpace(reasoning) != "" {
-			if _, err := e.store.AddPart(ctx, assistantMsg.ID, domain.ReasoningPayload{Text: reasoning}); err != nil {
+			part, err := e.store.AddPart(ctx, assistantMsg.ID, domain.ReasoningPayload{Text: reasoning})
+			if err != nil {
 				return err
 			}
+			assistantParts = append(assistantParts, part)
 		}
 		usage = usage.Normalized()
 		if usage.HasAnyTokens() {
-			if _, err := e.store.AddPart(ctx, assistantMsg.ID, domain.UsagePayload{Usage: usage}); err != nil {
+			part, err := e.store.AddPart(ctx, assistantMsg.ID, domain.UsagePayload{Usage: usage})
+			if err != nil {
 				return err
 			}
+			assistantParts = append(assistantParts, part)
 			if err := e.saveChatContextUsage(ctx, chat.ID, usage); err != nil {
 				return err
 			}
@@ -746,7 +753,7 @@ func (e *Engine) continueModelTurn(ctx context.Context, session domain.Session, 
 				Meta: map[string]string{"session_id": strconv.FormatInt(session.ID, 10)},
 			}
 		}
-		out <- domain.Event{Kind: domain.EventKindMessageDone}
+		out <- domain.Event{Kind: domain.EventKindMessageDone, Message: assistantMsg, Parts: assistantParts}
 		return nil
 	}
 	e.pauseContinuation(ctx, chat.ID, session.ID, continuationPause{
@@ -1116,12 +1123,14 @@ func (e *Engine) approve(ctx context.Context, sessionID, chatID int64, rawID str
 			return nil, err
 		}
 		text := fmt.Sprintf("%s disabled for this session", req.Tool)
-		if err := e.recordApprovalReply(ctx, item.ChatID, item.SessionID, item.Tool, id, "denied", text, req.ToolCallID); err != nil {
+		msg, parts, err := e.recordApprovalReply(ctx, item.ChatID, item.SessionID, item.Tool, id, "denied", text, req.ToolCallID)
+		if err != nil {
 			return nil, err
 		}
-		return emitOnce(domain.Event{Kind: domain.EventKindApprovalReply, Text: text, Tool: req.Tool}), nil
+		return emitOnce(domain.Event{Kind: domain.EventKindApprovalReply, Text: text, Tool: req.Tool, Message: msg, Parts: parts, Meta: map[string]string{"approval_id": strconv.FormatInt(id, 10)}}), nil
 	}
-	if err := e.recordApprovalReply(ctx, item.ChatID, sessionID, item.Tool, id, "approved", tools.Preview(req), req.ToolCallID); err != nil {
+	replyMsg, replyParts, err := e.recordApprovalReply(ctx, item.ChatID, sessionID, item.Tool, id, "approved", tools.Preview(req), req.ToolCallID)
+	if err != nil {
 		return nil, err
 	}
 	e.recordLifecycle(sessionID, "tool_execution_started", item.Command, map[string]string{"tool": string(item.Tool), "approval_id": strconv.FormatInt(id, 10)})
@@ -1142,6 +1151,7 @@ func (e *Engine) approve(ctx context.Context, sessionID, chatID int64, rawID str
 		out := make(chan domain.Event)
 		go func() {
 			defer close(out)
+			out <- domain.Event{Kind: domain.EventKindApprovalReply, Text: fmt.Sprintf("approval %d approved", id), Tool: req.Tool, Message: replyMsg, Parts: replyParts, Meta: map[string]string{"approval_id": strconv.FormatInt(id, 10)}}
 			for evt := range toolEvents {
 				out <- evt
 			}
@@ -1195,6 +1205,7 @@ func (e *Engine) approve(ctx context.Context, sessionID, chatID int64, rawID str
 	out := make(chan domain.Event)
 	go func() {
 		defer close(out)
+		out <- domain.Event{Kind: domain.EventKindApprovalReply, Text: fmt.Sprintf("approval %d approved", id), Tool: req.Tool, Message: replyMsg, Parts: replyParts, Meta: map[string]string{"approval_id": strconv.FormatInt(id, 10)}}
 		for evt := range toolEvents {
 			out <- evt
 		}
@@ -1251,10 +1262,11 @@ func (e *Engine) deny(ctx context.Context, _, _ int64, rawID string) (<-chan dom
 	if req, err := requestFromStoredApproval(item.Tool, item.Command); err == nil {
 		toolCallID = req.ToolCallID
 	}
-	if err := e.recordApprovalReply(ctx, item.ChatID, item.SessionID, item.Tool, id, "denied", approvalPreviewFromStored(item.Tool, item.Command), toolCallID); err != nil {
+	msg, parts, err := e.recordApprovalReply(ctx, item.ChatID, item.SessionID, item.Tool, id, "denied", approvalPreviewFromStored(item.Tool, item.Command), toolCallID)
+	if err != nil {
 		return nil, err
 	}
-	return emitOnce(domain.Event{Kind: domain.EventKindApprovalReply, Text: fmt.Sprintf("approval %d denied", id)}), nil
+	return emitOnce(domain.Event{Kind: domain.EventKindApprovalReply, Text: fmt.Sprintf("approval %d denied", id), Message: msg, Parts: parts, Meta: map[string]string{"approval_id": strconv.FormatInt(id, 10)}}), nil
 }
 
 func (e *Engine) persistToolResult(ctx context.Context, chatID, sessionID int64, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
@@ -2577,9 +2589,11 @@ func (e *Engine) compactSession(ctx context.Context, session domain.Session, cha
 	}
 	if out != nil {
 		out <- domain.Event{
-			Kind: domain.EventKindStatus,
-			Text: "Compacting session...",
-			Meta: map[string]string{"refresh": "details", "compaction": "started"},
+			Kind:    domain.EventKindStatus,
+			Text:    "Compacting session...",
+			Message: msg,
+			Parts:   []domain.Part{part},
+			Meta:    map[string]string{"refresh": "details", "compaction": "started"},
 		}
 	}
 	resp, err := client.CompleteChat(ctx, e.chatRequest(session, domain.Chat{}, append(messages, provider.Message{
@@ -2601,6 +2615,15 @@ func (e *Engine) compactSession(ctx context.Context, session domain.Session, cha
 	if err := updateCompactionState(summary, "completed", "Compacted session summary"); err != nil {
 		return err
 	}
+	msg.Summary = "Compacted session summary"
+	part.Payload = domain.CompactionPayload{
+		Summary:            summary,
+		Trigger:            trigger,
+		Status:             "completed",
+		FirstKeptMessageID: firstKeptMessageID,
+	}
+	part.Kind = domain.PartKindCompaction
+	part.Body = summary
 	if chat, err := e.store.GetChat(ctx, chatID); err == nil {
 		chat.LastKnownContextTokens = tokenestimate.Text(summary)
 		chat.ContextTokensKnown = false
@@ -2612,9 +2635,11 @@ func (e *Engine) compactSession(ctx context.Context, session domain.Session, cha
 	}
 	if out != nil {
 		out <- domain.Event{
-			Kind: domain.EventKindStatus,
-			Text: "Session compacted",
-			Meta: map[string]string{"refresh": "details", "compaction": "completed"},
+			Kind:    domain.EventKindStatus,
+			Text:    "Session compacted",
+			Message: msg,
+			Parts:   []domain.Part{part},
+			Meta:    map[string]string{"refresh": "details", "compaction": "completed"},
 		}
 	}
 	return nil
@@ -2709,7 +2734,8 @@ func (e *Engine) handleModelToolCall(ctx context.Context, session domain.Session
 			return domain.Event{}, err
 		}
 		preview := tools.Preview(req)
-		if err := e.recordApprovalRequest(ctx, chat.ID, sessionID, req.Tool, approval.ID, preview, req.ToolCallID); err != nil {
+		msg, parts, err := e.recordApprovalRequest(ctx, chat.ID, sessionID, req.Tool, approval.ID, preview, req.ToolCallID)
+		if err != nil {
 			return domain.Event{}, err
 		}
 		text := fmt.Sprintf("%s requires approval", req.Tool)
@@ -2717,9 +2743,11 @@ func (e *Engine) handleModelToolCall(ctx context.Context, session domain.Session
 			text += ": " + decision.Reason
 		}
 		return domain.Event{
-			Kind: domain.EventKindApprovalAsk,
-			Text: text,
-			Tool: req.Tool,
+			Kind:    domain.EventKindApprovalAsk,
+			Text:    text,
+			Tool:    req.Tool,
+			Message: msg,
+			Parts:   parts,
 			Meta: map[string]string{
 				"approval_id":  strconv.FormatInt(approval.ID, 10),
 				"tool":         string(req.Tool),
@@ -3025,7 +3053,8 @@ func (e *Engine) prepareModelToolCall(ctx context.Context, session domain.Sessio
 			return preparedToolCall{}, err
 		}
 		preview := tools.Preview(req)
-		if err := e.recordApprovalRequest(ctx, chat.ID, sessionID, req.Tool, approval.ID, preview, req.ToolCallID); err != nil {
+		msg, parts, err := e.recordApprovalRequest(ctx, chat.ID, sessionID, req.Tool, approval.ID, preview, req.ToolCallID)
+		if err != nil {
 			return preparedToolCall{}, err
 		}
 		text := fmt.Sprintf("%s requires approval", req.Tool)
@@ -3035,9 +3064,11 @@ func (e *Engine) prepareModelToolCall(ctx context.Context, session domain.Sessio
 		return preparedToolCall{
 			req: req,
 			event: domain.Event{
-				Kind: domain.EventKindApprovalAsk,
-				Text: text,
-				Tool: req.Tool,
+				Kind:    domain.EventKindApprovalAsk,
+				Text:    text,
+				Tool:    req.Tool,
+				Message: msg,
+				Parts:   parts,
 				Meta: map[string]string{
 					"approval_id":  strconv.FormatInt(approval.ID, 10),
 					"tool":         string(req.Tool),
@@ -3256,23 +3287,14 @@ func max(a, b int) int {
 	return slices.Max([]int{a, b})
 }
 
-func (e *Engine) recordApprovalRequest(ctx context.Context, chatID, sessionID int64, tool domain.ToolKind, approvalID int64, preview, toolCallID string) error {
+func (e *Engine) recordApprovalRequest(ctx context.Context, chatID, sessionID int64, tool domain.ToolKind, approvalID int64, preview, toolCallID string) (domain.Message, []domain.Part, error) {
 	msg, err := e.store.AddChatMessage(ctx, chatID, domain.MessageRoleTool, fmt.Sprintf("approval:%s", tool))
 	if err != nil {
-		return err
-	}
-	payload := map[string]string{
-		"approval_id": strconv.FormatInt(approvalID, 10),
-		"tool":        string(tool),
-		"status":      "pending",
-		"command":     preview,
-	}
-	if strings.TrimSpace(toolCallID) != "" {
-		payload["tool_call_id"] = toolCallID
+		return domain.Message{}, nil, err
 	}
 	body := fmt.Sprintf("Approval required for %s: %s", tool, preview)
 	approvalStatus := domain.ApprovalStatusPending
-	_, err = e.store.AddPart(ctx, msg.ID, domain.ApprovalRequestPayload{
+	part, err := e.store.AddPart(ctx, msg.ID, domain.ApprovalRequestPayload{
 		ApprovalID: approvalID,
 		Tool:       tool,
 		ToolCallID: toolCallID,
@@ -3280,13 +3302,16 @@ func (e *Engine) recordApprovalRequest(ctx context.Context, chatID, sessionID in
 		Status:     approvalStatus,
 		Body:       body,
 	})
-	return err
+	if err != nil {
+		return domain.Message{}, nil, err
+	}
+	return msg, []domain.Part{part}, nil
 }
 
-func (e *Engine) recordApprovalReply(ctx context.Context, chatID, sessionID int64, tool domain.ToolKind, approvalID int64, status, preview, toolCallID string) error {
+func (e *Engine) recordApprovalReply(ctx context.Context, chatID, sessionID int64, tool domain.ToolKind, approvalID int64, status, preview, toolCallID string) (domain.Message, []domain.Part, error) {
 	msg, err := e.store.AddChatMessage(ctx, chatID, domain.MessageRoleTool, fmt.Sprintf("approval:%s:%s", tool, status))
 	if err != nil {
-		return err
+		return domain.Message{}, nil, err
 	}
 	body := fmt.Sprintf("Approval %d %s for %s: %s", approvalID, status, tool, preview)
 	payload := map[string]string{
@@ -3299,7 +3324,7 @@ func (e *Engine) recordApprovalReply(ctx context.Context, chatID, sessionID int6
 		payload["tool_call_id"] = toolCallID
 	}
 	if status == "denied" {
-		_, err = e.store.AddPart(ctx, msg.ID, domain.ToolOutputPayload{
+		part, err := e.store.AddPart(ctx, msg.ID, domain.ToolOutputPayload{
 			Tool:       tool,
 			ToolCallID: toolCallID,
 			Args:       payload,
@@ -3307,10 +3332,22 @@ func (e *Engine) recordApprovalReply(ctx context.Context, chatID, sessionID int6
 			Text:       body,
 			Result:     domain.DeniedStoredResult{Message: body},
 		})
-		return err
+		if err != nil {
+			return domain.Message{}, nil, err
+		}
+		return msg, []domain.Part{part}, nil
 	}
-	_, err = e.store.AddPart(ctx, msg.ID, domain.SystemNoticePayload{Text: body})
-	return err
+	part, err := e.store.AddPart(ctx, msg.ID, domain.ToolOutputPayload{
+		Tool:       tool,
+		ToolCallID: toolCallID,
+		Args:       payload,
+		Status:     domain.ToolResultStatusOK,
+		Text:       body,
+	})
+	if err != nil {
+		return domain.Message{}, nil, err
+	}
+	return msg, []domain.Part{part}, nil
 }
 
 func approvalPreviewFromStored(tool domain.ToolKind, raw string) string {

@@ -500,6 +500,197 @@ func TestToolResultEventUpdatesRequestedRunInMemory(t *testing.T) {
 	}
 }
 
+func TestMessageDonePersistsAssistantWithoutReload(t *testing.T) {
+	now := time.Now().UTC()
+	msg := domain.Message{
+		ID:        21,
+		SessionID: 1,
+		ChatID:    2,
+		Role:      domain.MessageRoleAssistant,
+		Summary:   "done",
+		CreatedAt: now,
+	}
+	parts := []domain.Part{{
+		ID:        22,
+		MessageID: msg.ID,
+		Kind:      domain.PartKindText,
+		Payload:   domain.TextPayload{Text: "done"},
+		CreatedAt: now,
+	}}
+	m := Model{
+		cfg:               testConfig(t),
+		currentSession:    domain.Session{ID: 1},
+		currentChat:       domain.Chat{ID: 2},
+		parts:             map[int64][]domain.Part{},
+		composer:          textarea.New(),
+		activeEventStream: true,
+	}
+	m.applyEvent(domain.Event{Kind: domain.EventKindMessageDelta, Text: "done"})
+
+	updated, _ := m.Update(eventMsg{
+		chatID: 2,
+		event:  domain.Event{Kind: domain.EventKindMessageDone, Message: msg, Parts: parts},
+		events: make(chan domain.Event),
+	})
+	m = updated.(Model)
+
+	if strings.TrimSpace(m.pendingAssistant.Text) != "" || strings.TrimSpace(m.pendingAssistant.Reasoning) != "" {
+		t.Fatalf("expected pending assistant cleared, got %#v", m.pendingAssistant)
+	}
+	blocks := m.transcriptBlocks()
+	if len(blocks) != 1 || blocks[0].Kind != transcriptBlockMessage {
+		t.Fatalf("expected one persisted assistant block, got %#v", blocks)
+	}
+	if blocks[0].Message.ID != msg.ID || firstPartBody(blocks[0].Parts, domain.PartKindText) != "done" {
+		t.Fatalf("unexpected persisted assistant block %#v", blocks[0])
+	}
+}
+
+func TestApprovalAskEventAppendsPendingApprovalToolRun(t *testing.T) {
+	now := time.Now().UTC()
+	msg := domain.Message{
+		ID:        30,
+		SessionID: 1,
+		ChatID:    2,
+		Role:      domain.MessageRoleTool,
+		Summary:   "approval:bash",
+		CreatedAt: now,
+	}
+	parts := []domain.Part{{
+		ID:        31,
+		MessageID: msg.ID,
+		Kind:      domain.PartKindApprovalRequest,
+		Payload: domain.ApprovalRequestPayload{
+			ApprovalID: 44,
+			Tool:       domain.ToolKindBash,
+			ToolCallID: "call_1",
+			Command:    "pwd",
+			Status:     domain.ApprovalStatusPending,
+			Body:       "Approval required for bash: pwd",
+		},
+		CreatedAt: now,
+	}}
+	m := Model{
+		cfg:            testConfig(t),
+		currentSession: domain.Session{ID: 1},
+		currentChat:    domain.Chat{ID: 2},
+		parts:          map[int64][]domain.Part{},
+		composer:       textarea.New(),
+	}
+
+	updated, _ := m.Update(eventMsg{
+		chatID: 2,
+		event: domain.Event{
+			Kind:    domain.EventKindApprovalAsk,
+			Text:    "bash requires approval",
+			Tool:    domain.ToolKindBash,
+			Message: msg,
+			Parts:   parts,
+			Meta: map[string]string{
+				"approval_id":  "44",
+				"command":      "pwd",
+				"tool_call_id": "call_1",
+			},
+		},
+		events: make(chan domain.Event),
+	})
+	m = updated.(Model)
+
+	if len(m.approvals) != 1 || m.approvals[0].ID != 44 {
+		t.Fatalf("expected pending approval snapshot, got %#v", m.approvals)
+	}
+	blocks := m.transcriptBlocks()
+	if len(blocks) != 1 || blocks[0].Kind != transcriptBlockToolRun {
+		t.Fatalf("expected approval tool run block, got %#v", blocks)
+	}
+	if blocks[0].ToolRun.Status != ui.ToolRunStatusPendingApproval {
+		t.Fatalf("expected pending approval status, got %#v", blocks[0].ToolRun)
+	}
+}
+
+func TestApprovalReplyEventRemovesPendingApproval(t *testing.T) {
+	now := time.Now().UTC()
+	askMsg := domain.Message{
+		ID:        30,
+		SessionID: 1,
+		ChatID:    2,
+		Role:      domain.MessageRoleTool,
+		Summary:   "approval:bash",
+		CreatedAt: now,
+	}
+	askParts := []domain.Part{{
+		ID:        31,
+		MessageID: askMsg.ID,
+		Kind:      domain.PartKindApprovalRequest,
+		Payload: domain.ApprovalRequestPayload{
+			ApprovalID: 44,
+			Tool:       domain.ToolKindBash,
+			ToolCallID: "call_1",
+			Command:    "pwd",
+			Status:     domain.ApprovalStatusPending,
+			Body:       "Approval required for bash: pwd",
+		},
+		CreatedAt: now,
+	}}
+	replyMsg := domain.Message{
+		ID:        32,
+		SessionID: 1,
+		ChatID:    2,
+		Role:      domain.MessageRoleTool,
+		Summary:   "approval:bash:approved",
+		CreatedAt: now.Add(time.Second),
+	}
+	replyParts := []domain.Part{{
+		ID:        33,
+		MessageID: replyMsg.ID,
+		Kind:      domain.PartKindToolOutput,
+		Payload: domain.ToolOutputPayload{
+			Tool:       domain.ToolKindBash,
+			ToolCallID: "call_1",
+			Args:       map[string]string{"approval_id": "44", "tool": "bash", "status": "approved", "command": "pwd", "tool_call_id": "call_1"},
+			Status:     domain.ToolResultStatusOK,
+			Text:       "Approval 44 approved for bash: pwd",
+		},
+		CreatedAt: now.Add(time.Second),
+	}}
+	m := Model{
+		cfg:            testConfig(t),
+		currentSession: domain.Session{ID: 1},
+		currentChat:    domain.Chat{ID: 2},
+		parts:          map[int64][]domain.Part{},
+		composer:       textarea.New(),
+	}
+	updated, _ := m.Update(eventMsg{chatID: 2, event: domain.Event{
+		Kind:    domain.EventKindApprovalAsk,
+		Text:    "bash requires approval",
+		Tool:    domain.ToolKindBash,
+		Message: askMsg,
+		Parts:   askParts,
+		Meta:    map[string]string{"approval_id": "44", "command": "pwd", "tool_call_id": "call_1"},
+	}, events: make(chan domain.Event)})
+	m = updated.(Model)
+	updated, _ = m.Update(eventMsg{chatID: 2, event: domain.Event{
+		Kind:    domain.EventKindApprovalReply,
+		Text:    "approval 44 approved",
+		Tool:    domain.ToolKindBash,
+		Message: replyMsg,
+		Parts:   replyParts,
+		Meta:    map[string]string{"approval_id": "44", "tool_call_id": "call_1"},
+	}, events: make(chan domain.Event)})
+	m = updated.(Model)
+
+	if len(m.approvals) != 0 {
+		t.Fatalf("expected pending approval removed, got %#v", m.approvals)
+	}
+	blocks := m.transcriptBlocks()
+	if len(blocks) != 1 || blocks[0].Kind != transcriptBlockToolRun {
+		t.Fatalf("expected single approval tool run block, got %#v", blocks)
+	}
+	if blocks[0].ToolRun.Status != ui.ToolRunStatusApproved {
+		t.Fatalf("expected approved tool run status, got %#v", blocks[0].ToolRun)
+	}
+}
+
 func TestSkillQuery(t *testing.T) {
 	query, start, ok := skillQuery("Investigate $rev")
 	if !ok || query != "rev" {
