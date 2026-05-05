@@ -24,6 +24,12 @@ func TestLoadWritesDefaultConfig(t *testing.T) {
 	if cfg.MaxToolLoopSteps != 500 {
 		t.Fatalf("expected default max tool loop steps 500, got %d", cfg.MaxToolLoopSteps)
 	}
+	if cfg.AutoCompactAt != defaultAutoCompactAt {
+		t.Fatalf("expected default auto compact threshold %d, got %d", defaultAutoCompactAt, cfg.AutoCompactAt)
+	}
+	if cfg.CompactionKeepToolBatches != defaultCompactionKeepToolBatches {
+		t.Fatalf("expected default kept tool batches %d, got %d", defaultCompactionKeepToolBatches, cfg.CompactionKeepToolBatches)
+	}
 	if cfg.Permissions.Profile != "default" {
 		t.Fatalf("unexpected permission profile: %s", cfg.Permissions.Profile)
 	}
@@ -207,6 +213,45 @@ func TestApplyDefaultsFillsMissingMaxToolLoopSteps(t *testing.T) {
 
 	if cfg.MaxToolLoopSteps != 500 {
 		t.Fatalf("expected default max tool loop steps applied, got %d", cfg.MaxToolLoopSteps)
+	}
+}
+
+func TestLoadBackfillsMissingCompactionPreferences(t *testing.T) {
+	temp := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", temp)
+	t.Setenv("XDG_STATE_HOME", temp)
+	t.Setenv("XDG_CACHE_HOME", temp)
+
+	configRoot := filepath.Join(temp, "koder")
+	if err := os.MkdirAll(configRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	raw := []byte("[ui]\ntheme = \"tokyonight\"\nspinner = \"dots\"\n")
+	if err := os.WriteFile(filepath.Join(configRoot, "config.toml"), raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AutoCompactAt != defaultAutoCompactAt {
+		t.Fatalf("expected auto compact threshold backfilled to %d, got %d", defaultAutoCompactAt, cfg.AutoCompactAt)
+	}
+	if cfg.CompactionKeepToolBatches != defaultCompactionKeepToolBatches {
+		t.Fatalf("expected kept tool batches backfilled to %d, got %d", defaultCompactionKeepToolBatches, cfg.CompactionKeepToolBatches)
+	}
+}
+
+func TestNormalizeCompactionKeepToolBatchesClampsRange(t *testing.T) {
+	if got := NormalizeCompactionKeepToolBatches(-1); got != 0 {
+		t.Fatalf("expected low clamp to 0, got %d", got)
+	}
+	if got := NormalizeCompactionKeepToolBatches(11); got != maxCompactionKeepToolBatches {
+		t.Fatalf("expected high clamp to %d, got %d", maxCompactionKeepToolBatches, got)
+	}
+	if got := NormalizeCompactionKeepToolBatches(4); got != 4 {
+		t.Fatalf("expected in-range value unchanged, got %d", got)
 	}
 }
 

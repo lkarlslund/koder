@@ -26,8 +26,10 @@ type PreferencesAction struct {
 }
 
 type PreferencesValues struct {
-	UI               config.UI
-	MaxToolLoopSteps int
+	UI                        config.UI
+	MaxToolLoopSteps          int
+	AutoCompactAt             int
+	CompactionKeepToolBatches int
 }
 
 type preferencesFocus int
@@ -95,6 +97,8 @@ func NewPreferencesDialog(current PreferencesValues, themeNames, codeStyles []st
 			Title: "General",
 			Fields: []preferencesField{
 				{Kind: preferencesFieldInteger, ID: "max_tool_loop_steps", Label: "Tool Turns", Description: "Maximum model tool turns before continuation pauses"},
+				{Kind: preferencesFieldInteger, ID: "auto_compact_at", Label: "Compact At %", Description: "Auto-compact when estimated context usage reaches this percent"},
+				{Kind: preferencesFieldInteger, ID: "compaction_keep_tool_batches", Label: "Keep Tool Batches", Description: "Number of recent tool batches to keep raw during compaction"},
 			},
 		},
 		{
@@ -136,8 +140,10 @@ func NewPreferencesDialog(current PreferencesValues, themeNames, codeStyles []st
 		},
 		focus: preferencesFocusFields,
 		editors: map[string]textarea.Model{
-			"max_tool_loop_steps": newPreferencesEditor(strconv.Itoa(current.MaxToolLoopSteps)),
-			"sidebar_width":       newPreferencesEditor(strconv.Itoa(current.UI.SidebarWidth)),
+			"max_tool_loop_steps":          newPreferencesEditor(strconv.Itoa(current.MaxToolLoopSteps)),
+			"auto_compact_at":              newPreferencesEditor(strconv.Itoa(current.AutoCompactAt)),
+			"compaction_keep_tool_batches": newPreferencesEditor(strconv.Itoa(current.CompactionKeepToolBatches)),
+			"sidebar_width":                newPreferencesEditor(strconv.Itoa(current.UI.SidebarWidth)),
 		},
 	}
 }
@@ -337,6 +343,19 @@ func (d *PreferencesDialog) adjustField(delta int) PreferencesAction {
 				d.draft.MaxToolLoopSteps = 1
 			}
 			d.setIntegerEditorValue(field.ID, d.draft.MaxToolLoopSteps)
+		case "auto_compact_at":
+			d.draft.AutoCompactAt += delta
+			if d.draft.AutoCompactAt < 1 {
+				d.draft.AutoCompactAt = 1
+			}
+			if d.draft.AutoCompactAt > 100 {
+				d.draft.AutoCompactAt = 100
+			}
+			d.setIntegerEditorValue(field.ID, d.draft.AutoCompactAt)
+		case "compaction_keep_tool_batches":
+			d.draft.CompactionKeepToolBatches += delta
+			d.draft.CompactionKeepToolBatches = config.NormalizeCompactionKeepToolBatches(d.draft.CompactionKeepToolBatches)
+			d.setIntegerEditorValue(field.ID, d.draft.CompactionKeepToolBatches)
 		case "sidebar_width":
 			d.draft.UI.SidebarWidth += delta
 			if d.draft.UI.SidebarWidth < 1 {
@@ -483,7 +502,7 @@ func (d PreferencesDialog) dialog(width int, palette theme.Palette) ui.Node {
 					1,
 				))),
 				ui.Fixed(buttons),
-				ui.Fixed(ui.Static{Content: fmt.Sprintf("Theme: %s  Code: %s  Edit: %s  Spinner: %s  Sidebar: %d  Tool Turns: %d", strings.TrimSpace(d.draft.UI.Theme), strings.TrimSpace(d.draft.UI.CodeStyle), editForgivenessShortLabel(d.draft.UI.EditForgiveness), ui.SpinnerStyleByID(d.draft.UI.Spinner).Label, d.draft.UI.SidebarWidth, d.draft.MaxToolLoopSteps)}),
+				ui.Fixed(ui.Static{Content: fmt.Sprintf("Theme: %s  Code: %s  Edit: %s  Spinner: %s  Sidebar: %d  Tool Turns: %d  Compact: %d%%  Keep Batches: %d", strings.TrimSpace(d.draft.UI.Theme), strings.TrimSpace(d.draft.UI.CodeStyle), editForgivenessShortLabel(d.draft.UI.EditForgiveness), ui.SpinnerStyleByID(d.draft.UI.Spinner).Label, d.draft.UI.SidebarWidth, d.draft.MaxToolLoopSteps, d.draft.AutoCompactAt, d.draft.CompactionKeepToolBatches)}),
 			},
 			2,
 		)),
@@ -598,6 +617,17 @@ func (d *PreferencesDialog) handleFieldStep(delta int) (PreferencesAction, bool)
 	switch fields[d.fieldIndex].ID {
 	case "max_tool_loop_steps":
 		d.draft.MaxToolLoopSteps = value
+	case "auto_compact_at":
+		if value < 1 {
+			value = 1
+		}
+		if value > 100 {
+			value = 100
+		}
+		d.draft.AutoCompactAt = value
+	case "compaction_keep_tool_batches":
+		value = config.NormalizeCompactionKeepToolBatches(value)
+		d.draft.CompactionKeepToolBatches = value
 	case "sidebar_width":
 		d.draft.UI.SidebarWidth = value
 	default:
@@ -622,11 +652,27 @@ func (d *PreferencesDialog) updateCurrentIntegerEditor(msg ui.KeyMsg) (Preferenc
 	editor := d.integerEditor(field.ID)
 	updated, _ := editor.Update(msg)
 	d.storeIntegerEditor(field.ID, updated)
-	if value, err := strconv.Atoi(strings.TrimSpace(updated.Value())); err == nil && value > 0 {
+	if value, err := strconv.Atoi(strings.TrimSpace(updated.Value())); err == nil {
 		switch field.ID {
 		case "max_tool_loop_steps":
+			if value <= 0 {
+				break
+			}
 			d.draft.MaxToolLoopSteps = value
+		case "auto_compact_at":
+			if value <= 0 {
+				break
+			}
+			if value > 100 {
+				value = 100
+			}
+			d.draft.AutoCompactAt = value
+		case "compaction_keep_tool_batches":
+			d.draft.CompactionKeepToolBatches = config.NormalizeCompactionKeepToolBatches(value)
 		case "sidebar_width":
+			if value <= 0 {
+				break
+			}
 			d.draft.UI.SidebarWidth = value
 		}
 	}

@@ -16,7 +16,12 @@ func renderPreferencesDialog(dialog PreferencesDialog, width int, palette theme.
 
 func defaultPreferencesValues() PreferencesValues {
 	cfg := config.Default()
-	return PreferencesValues{UI: cfg.UI, MaxToolLoopSteps: cfg.MaxToolLoopSteps}
+	return PreferencesValues{
+		UI:                        cfg.UI,
+		MaxToolLoopSteps:          cfg.MaxToolLoopSteps,
+		AutoCompactAt:             cfg.AutoCompactAt,
+		CompactionKeepToolBatches: cfg.CompactionKeepToolBatches,
+	}
 }
 
 func TestPreferencesDialogThemeAndToggleEmitDraftChanges(t *testing.T) {
@@ -28,6 +33,22 @@ func TestPreferencesDialogThemeAndToggleEmitDraftChanges(t *testing.T) {
 	}
 	if action.Values.MaxToolLoopSteps != config.Default().MaxToolLoopSteps+1 {
 		t.Fatalf("expected tool turn limit to increment, got %#v", action.Values)
+	}
+	dialog.fieldIndex = 1
+	action = dialog.Update(ui.KeyMsg{Type: ui.KeyLeft})
+	if action.Kind != PreferencesActionChanged {
+		t.Fatalf("expected compact threshold change action, got %#v", action)
+	}
+	if action.Values.AutoCompactAt != config.Default().AutoCompactAt-1 {
+		t.Fatalf("expected compact threshold to decrement, got %#v", action.Values)
+	}
+	dialog.fieldIndex = 2
+	action = dialog.Update(ui.KeyMsg{Type: ui.KeyLeft})
+	if action.Kind != PreferencesActionChanged {
+		t.Fatalf("expected kept batches change action, got %#v", action)
+	}
+	if action.Values.CompactionKeepToolBatches != config.Default().CompactionKeepToolBatches-1 {
+		t.Fatalf("expected kept batches to decrement, got %#v", action.Values)
 	}
 
 	dialog.Update(ui.KeyMsg{Type: ui.KeyShiftTab})
@@ -136,7 +157,7 @@ func TestPreferencesDialogRenderShowsTabsAndButtons(t *testing.T) {
 	dialog := NewPreferencesDialog(defaultPreferencesValues(), []string{"tokyonight", "gruvbox"}, []string{"github", "monokai"})
 
 	view := renderPreferencesDialog(dialog, 84, theme.Default().Palette)
-	for _, needle := range []string{"Preferences", "General", "Appearance", "Behavior", "Tool Turns", "OK", "Cancel"} {
+	for _, needle := range []string{"Preferences", "General", "Appearance", "Behavior", "Tool Turns", "Compact At %", "Keep Tool Batches", "OK", "Cancel"} {
 		if !strings.Contains(view, needle) {
 			t.Fatalf("expected %q in preferences dialog, got %q", needle, view)
 		}
@@ -197,6 +218,40 @@ func TestPreferencesDialogToolTurnsEditorSupportsTypingAndStepping(t *testing.T)
 	action = dialog.Update(ui.KeyMsg{Type: ui.KeyUp})
 	if action.Values.MaxToolLoopSteps != 25 {
 		t.Fatalf("expected up to increment to 25, got %#v", action.Values)
+	}
+
+	dialog.fieldIndex = 1
+	editor = dialog.editors["auto_compact_at"]
+	editor.SetValue("80")
+	dialog.editors["auto_compact_at"] = editor
+
+	action = dialog.Update(ui.KeyMsg{Type: ui.KeyBackspace})
+	if action.Kind != PreferencesActionChanged {
+		t.Fatalf("expected auto compact backspace edit change, got %#v", action)
+	}
+	action = dialog.Update(ui.KeyMsg{Type: ui.KeyRunes, Runes: []rune("5")})
+	if action.Kind != PreferencesActionChanged {
+		t.Fatalf("expected auto compact digit edit change, got %#v", action)
+	}
+	if action.Values.AutoCompactAt != 85 {
+		t.Fatalf("expected typed auto compact value 85, got %#v", action.Values)
+	}
+
+	dialog.fieldIndex = 2
+	editor = dialog.editors["compaction_keep_tool_batches"]
+	editor.SetValue("2")
+	dialog.editors["compaction_keep_tool_batches"] = editor
+
+	action = dialog.Update(ui.KeyMsg{Type: ui.KeyBackspace})
+	if action.Kind != PreferencesActionChanged {
+		t.Fatalf("expected keep batches backspace edit change, got %#v", action)
+	}
+	action = dialog.Update(ui.KeyMsg{Type: ui.KeyRunes, Runes: []rune("0")})
+	if action.Kind != PreferencesActionChanged {
+		t.Fatalf("expected keep batches digit edit change, got %#v", action)
+	}
+	if action.Values.CompactionKeepToolBatches != 0 {
+		t.Fatalf("expected typed kept batches value 0, got %#v", action.Values)
 	}
 
 	dialog.tabList.Active = 1

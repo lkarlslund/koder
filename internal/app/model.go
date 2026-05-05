@@ -7152,8 +7152,10 @@ func sessionTokenSummary(m *Model, sessionID int64) string {
 
 func (m *Model) openPreferencesDialog() {
 	dialog := dialogs.NewPreferencesDialog(dialogs.PreferencesValues{
-		UI:               m.cfg.UI,
-		MaxToolLoopSteps: m.cfg.MaxToolLoopSteps,
+		UI:                        m.cfg.UI,
+		MaxToolLoopSteps:          m.cfg.MaxToolLoopSteps,
+		AutoCompactAt:             m.cfg.AutoCompactAt,
+		CompactionKeepToolBatches: m.cfg.CompactionKeepToolBatches,
 	}, theme.Names(), markdown.CodeStyleNames())
 	m.preferences = &dialog
 	m.syncComposerVisibility()
@@ -7639,7 +7641,7 @@ func (m *Model) saveProviderDraft(draft provider.ConnectDraft) error {
 		if next.ContextWindow == 0 {
 			next.ContextWindow = 32768
 		}
-		next.AutoCompactAt = 80
+		next.AutoCompactAt = max(1, m.cfg.AutoCompactAt)
 		next.Timeout = 2 * time.Minute
 		next.Stream = true
 		next.Disabled = false
@@ -8066,7 +8068,20 @@ func (m *Model) applyPreferences(next dialogs.PreferencesValues, save bool) (ui.
 	if next.MaxToolLoopSteps <= 0 {
 		next.MaxToolLoopSteps = config.Default().MaxToolLoopSteps
 	}
+	if next.AutoCompactAt <= 0 {
+		next.AutoCompactAt = config.Default().AutoCompactAt
+	}
+	if next.AutoCompactAt > 100 {
+		next.AutoCompactAt = 100
+	}
+	next.CompactionKeepToolBatches = config.NormalizeCompactionKeepToolBatches(next.CompactionKeepToolBatches)
 	m.cfg.MaxToolLoopSteps = next.MaxToolLoopSteps
+	m.cfg.AutoCompactAt = next.AutoCompactAt
+	m.cfg.CompactionKeepToolBatches = next.CompactionKeepToolBatches
+	for id, providerCfg := range m.cfg.Providers {
+		providerCfg.AutoCompactAt = next.AutoCompactAt
+		m.cfg.Providers[id] = providerCfg
+	}
 	if save {
 		if err := m.cfg.Save(); err != nil {
 			return nil, err

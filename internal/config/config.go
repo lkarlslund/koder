@@ -88,23 +88,28 @@ type PermissionRule struct {
 }
 
 type Config struct {
-	DefaultProvider  string                   `toml:"default_provider"`
-	DefaultModel     string                   `toml:"default_model"`
-	MaxToolLoopSteps int                      `toml:"max_tool_loop_steps"`
-	ToolDefaults     map[domain.ToolKind]bool `toml:"tool_defaults"`
-	Providers        map[string]Provider      `toml:"providers"`
-	MCPServers       map[string]MCPServer     `toml:"mcp_servers"`
-	Permissions      PermissionRules          `toml:"permissions"`
-	Store            Store                    `toml:"store"`
-	UI               UI                       `toml:"ui"`
-	path             string
-	configDir        string
-	stateDir         string
-	cacheDir         string
+	DefaultProvider           string                   `toml:"default_provider"`
+	DefaultModel              string                   `toml:"default_model"`
+	MaxToolLoopSteps          int                      `toml:"max_tool_loop_steps"`
+	AutoCompactAt             int                      `toml:"auto_compact_at"`
+	CompactionKeepToolBatches int                      `toml:"compaction_keep_tool_batches"`
+	ToolDefaults              map[domain.ToolKind]bool `toml:"tool_defaults"`
+	Providers                 map[string]Provider      `toml:"providers"`
+	MCPServers                map[string]MCPServer     `toml:"mcp_servers"`
+	Permissions               PermissionRules          `toml:"permissions"`
+	Store                     Store                    `toml:"store"`
+	UI                        UI                       `toml:"ui"`
+	path                      string
+	configDir                 string
+	stateDir                  string
+	cacheDir                  string
 }
 
 const providerConfigurationHint = "configure at least one provider in config.toml and set default_provider"
 const defaultMaxToolLoopSteps = 500
+const defaultAutoCompactAt = 80
+const defaultCompactionKeepToolBatches = 2
+const maxCompactionKeepToolBatches = 10
 
 func Load() (Config, error) {
 	cfg := Default()
@@ -144,6 +149,12 @@ func Load() (Config, error) {
 	if !strings.Contains(string(data), "auto_continue") {
 		cfg.UI.AutoContinue = true
 	}
+	if !strings.Contains(string(data), "auto_compact_at") {
+		cfg.AutoCompactAt = defaultAutoCompactAt
+	}
+	if !strings.Contains(string(data), "compaction_keep_tool_batches") {
+		cfg.CompactionKeepToolBatches = defaultCompactionKeepToolBatches
+	}
 	cfg.configDir = configDir
 	cfg.stateDir = stateDir()
 	cfg.cacheDir = cacheDir()
@@ -158,11 +169,13 @@ func Default() Config {
 		toolDefaults[kind] = true
 	}
 	return Config{
-		DefaultProvider:  "",
-		MaxToolLoopSteps: defaultMaxToolLoopSteps,
-		ToolDefaults:     toolDefaults,
-		Providers:        map[string]Provider{},
-		MCPServers:       map[string]MCPServer{},
+		DefaultProvider:           "",
+		MaxToolLoopSteps:          defaultMaxToolLoopSteps,
+		AutoCompactAt:             defaultAutoCompactAt,
+		CompactionKeepToolBatches: defaultCompactionKeepToolBatches,
+		ToolDefaults:              toolDefaults,
+		Providers:                 map[string]Provider{},
+		MCPServers:                map[string]MCPServer{},
 		Permissions: PermissionRules{
 			Profile: "default",
 			Profiles: map[string]PermissionProfile{
@@ -305,6 +318,10 @@ func (c *Config) applyDefaults() {
 	if c.MaxToolLoopSteps <= 0 {
 		c.MaxToolLoopSteps = def.MaxToolLoopSteps
 	}
+	if c.AutoCompactAt <= 0 {
+		c.AutoCompactAt = def.AutoCompactAt
+	}
+	c.CompactionKeepToolBatches = NormalizeCompactionKeepToolBatches(c.CompactionKeepToolBatches)
 	if c.Providers == nil {
 		c.Providers = def.Providers
 	}
@@ -361,7 +378,7 @@ func (c *Config) applyDefaults() {
 			provider.ContextWindow = fallbackProvider.ContextWindow
 		}
 		if provider.AutoCompactAt == 0 {
-			provider.AutoCompactAt = fallbackProvider.AutoCompactAt
+			provider.AutoCompactAt = c.AutoCompactAt
 		}
 		if provider.Headers == nil {
 			provider.Headers = map[string]string{}
@@ -469,11 +486,21 @@ func providerDefaults() Provider {
 	return Provider{
 		Headers:       map[string]string{},
 		ContextWindow: 32768,
-		AutoCompactAt: 80,
+		AutoCompactAt: defaultAutoCompactAt,
 		Stream:        true,
 		Timeout:       10 * time.Minute,
 		Disabled:      false,
 	}
+}
+
+func NormalizeCompactionKeepToolBatches(value int) int {
+	if value < 0 {
+		return 0
+	}
+	if value > maxCompactionKeepToolBatches {
+		return maxCompactionKeepToolBatches
+	}
+	return value
 }
 
 func mcpServerDefaults() MCPServer {

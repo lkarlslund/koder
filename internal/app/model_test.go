@@ -4472,6 +4472,53 @@ func TestPreferencesDialogApplySavesToolLoopLimit(t *testing.T) {
 	}
 }
 
+func TestPreferencesDialogApplySavesCompactionPreferences(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	m, err := New(cfg, nil, nil, StartupModeNew, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.openPreferencesDialog()
+
+	nextValues := m.preferences.DraftValues()
+	nextValues.AutoCompactAt = 75
+	nextValues.CompactionKeepToolBatches = 4
+	cmd, err := m.applyPreferences(nextValues, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cmd != nil {
+		_ = cmd()
+	}
+	if m.cfg.AutoCompactAt != 75 {
+		t.Fatalf("expected auto compact threshold 75, got %d", m.cfg.AutoCompactAt)
+	}
+	if m.cfg.CompactionKeepToolBatches != 4 {
+		t.Fatalf("expected kept tool batches 4, got %d", m.cfg.CompactionKeepToolBatches)
+	}
+	reloaded, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.AutoCompactAt != 75 {
+		t.Fatalf("expected saved auto compact threshold 75, got %d", reloaded.AutoCompactAt)
+	}
+	if reloaded.CompactionKeepToolBatches != 4 {
+		t.Fatalf("expected saved kept tool batches 4, got %d", reloaded.CompactionKeepToolBatches)
+	}
+}
+
 func TestWorkingIndicatorShownWhenModelWorking(t *testing.T) {
 	m := Model{
 		busy: busyModel{

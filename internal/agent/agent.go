@@ -1752,10 +1752,19 @@ func (e *Engine) buildPromptEnvelopeForState(session domain.Session, chat domain
 	envelope := provider.PromptEnvelope{
 		Instructions: baseInstructions,
 	}
-	for _, msg := range messages {
+	segmentStart := 0
+	for idx, msg := range messages {
 		if summary, ok := compactionSummary(partsByMessage[msg.ID]); ok {
 			envelope.Instructions = baseInstructions
 			envelope.Items = append(envelope.Items[:0], compactedHistoryMessage(summary))
+			if segmentStart < idx {
+				preserved, err := e.messagesForPreservedToolTail(session, messages[segmentStart:idx], partsByMessage)
+				if err != nil {
+					return provider.PromptEnvelope{}, err
+				}
+				envelope.Items = append(envelope.Items, preserved...)
+			}
+			segmentStart = idx + 1
 			continue
 		}
 		items, err := e.conversationMessagesForStoredMessage(session, msg, partsByMessage[msg.ID], e.preserveThinkingEnabled(session))
@@ -1775,6 +1784,54 @@ func (e *Engine) buildPromptEnvelopeForState(session domain.Session, chat domain
 		}
 	}
 	return envelope, nil
+}
+
+func (e *Engine) messagesForPreservedToolTail(session domain.Session, messages []domain.Message, partsByMessage map[int64][]domain.Part) ([]provider.Message, error) {
+	start := preservedToolTailStart(messages, partsByMessage, e.compactionKeepToolBatches())
+	if start >= len(messages) {
+		return nil, nil
+	}
+	out := make([]provider.Message, 0, len(messages)-start)
+	for _, msg := range messages[start:] {
+		items, err := e.conversationMessagesForStoredMessage(session, msg, partsByMessage[msg.ID], e.preserveThinkingEnabled(session))
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, items...)
+	}
+	return out, nil
+}
+
+func preservedToolTailStart(messages []domain.Message, partsByMessage map[int64][]domain.Part, keepBatches int) int {
+	if keepBatches <= 0 || len(messages) == 0 {
+		return len(messages)
+	}
+	starts := make([]int, 0, keepBatches)
+	for idx, msg := range messages {
+		if msg.Role != domain.MessageRoleAssistant {
+			continue
+		}
+		if !messageHasToolCall(partsByMessage[msg.ID]) {
+			continue
+		}
+		starts = append(starts, idx)
+	}
+	if len(starts) == 0 {
+		return len(messages)
+	}
+	if keepBatches >= len(starts) {
+		return starts[0]
+	}
+	return starts[len(starts)-keepBatches]
+}
+
+func messageHasToolCall(parts []domain.Part) bool {
+	for _, part := range parts {
+		if part.Kind == domain.PartKindToolCall {
+			return true
+		}
+	}
+	return false
 }
 
 func (e *Engine) baseInstructionsForChat(session domain.Session, chat domain.Chat) []provider.InstructionBlock {
@@ -2260,6 +2317,10 @@ func providerCfgForSession(cfg config.Config, session domain.Session) config.Pro
 	return config.Provider{}
 }
 
+func (e *Engine) compactionKeepToolBatches() int {
+	return config.NormalizeCompactionKeepToolBatches(e.cfg.CompactionKeepToolBatches)
+}
+
 func compactionSummary(parts []domain.Part) (string, bool) {
 	for _, part := range parts {
 		if part.Kind == domain.PartKindCompaction && strings.TrimSpace(part.Text()) != "" {
@@ -2364,7 +2425,7 @@ func (e *Engine) autoCompactPreparedMessagesIfNeeded(ctx context.Context, sessio
 	}
 	threshold := providerCfg.AutoCompactAt
 	if threshold <= 0 {
-		threshold = 80
+		threshold = max(1, e.cfg.AutoCompactAt)
 	}
 	estimated, ok := e.estimateRequestUsagePercent(session, domain.Chat{ID: chatID}, messages)
 	if !ok || estimated < threshold {
@@ -2394,7 +2455,7 @@ func (e *Engine) autoCompactChatIfNeeded(ctx context.Context, session domain.Ses
 	}
 	threshold := providerCfg.AutoCompactAt
 	if threshold <= 0 {
-		threshold = 80
+		threshold = max(1, e.cfg.AutoCompactAt)
 	}
 	if metrics.UsagePercent < threshold {
 		return false, nil
@@ -2435,7 +2496,15 @@ func (e *Engine) estimateRequestUsagePercent(session domain.Session, _ domain.Ch
 }
 
 func (e *Engine) compactSession(ctx context.Context, session domain.Session, chatID int64, client *provider.Client, trigger string, out chan<- domain.Event) error {
-	messages, err := e.buildConversation(ctx, session.ID, chatID)
+	storedMessages, partsByMessage, err := e.store.PartsForChat(ctx, chatID)
+	if err != nil {
+		return err
+	}
+	chat, err := e.store.GetChat(ctx, chatID)
+	if err != nil {
+		return err
+	}
+	messages, err := e.buildCompactionConversation(session, chat, storedMessages, partsByMessage)
 	if err != nil {
 		return err
 	}
@@ -2474,6 +2543,19 @@ func (e *Engine) compactSession(ctx context.Context, session domain.Session, cha
 		out <- domain.Event{Kind: domain.EventKindStatus, Text: "Session compacted"}
 	}
 	return nil
+}
+
+func (e *Engine) buildCompactionConversation(session domain.Session, chat domain.Chat, messages []domain.Message, partsByMessage map[int64][]domain.Part) ([]provider.Message, error) {
+	keepStart := preservedToolTailStart(messages, partsByMessage, e.compactionKeepToolBatches())
+	head := messages
+	if keepStart < len(messages) {
+		head = messages[:keepStart]
+	}
+	envelope, err := e.buildPromptEnvelopeForState(session, chat, head, partsByMessage, "", nil, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	return provider.SerializePromptEnvelope(envelope), nil
 }
 
 func (e *Engine) handleModelToolCall(ctx context.Context, session domain.Session, chat domain.Chat, req tools.Request) (domain.Event, error) {
