@@ -5573,6 +5573,7 @@ func (m *Model) syncBusyState() {
 }
 
 func (m *Model) startBusy(scope busyScope, status string) {
+	wasAtBottom := m.viewport.AtBottom()
 	m.loading = true
 	m.status = status
 	m.busy.start(scope, status)
@@ -5582,10 +5583,11 @@ func (m *Model) startBusy(scope busyScope, status string) {
 		return
 	}
 	m.resize()
-	m.invalidateMainSurface()
+	m.refreshViewportForLayoutChange(wasAtBottom)
 }
 
 func (m *Model) stopBusy() {
+	wasAtBottom := m.viewport.AtBottom()
 	m.loading = false
 	m.activeEventStream = false
 	m.busy.stop()
@@ -5600,12 +5602,20 @@ func (m *Model) stopBusy() {
 		return
 	}
 	m.resize()
-	m.refreshViewportPreserve()
+	m.refreshViewportForLayoutChange(wasAtBottom)
 }
 
 func (m *Model) stopBusyWithStatus(status string) {
 	m.stopBusy()
 	m.status = status
+}
+
+func (m *Model) refreshViewportForLayoutChange(wasAtBottom bool) {
+	if wasAtBottom {
+		m.refreshViewport()
+		return
+	}
+	m.refreshViewportPreserve()
 }
 
 func (m *Model) startWaitingForLLM() {

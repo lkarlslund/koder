@@ -5954,6 +5954,56 @@ func TestStatusEventKeepsTranscriptSpinnerActive(t *testing.T) {
 	}
 }
 
+func TestBusyIndicatorLayoutRefreshKeepsTranscriptAnchoredAtBottom(t *testing.T) {
+	cfg := testConfig(t)
+	m, err := New(cfg, nil, nil, StartupModeNew, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.currentSession = domain.Session{ID: 1}
+	m.width = 60
+	m.height = 16
+	m.viewport = newTranscriptViewport(60, 8)
+	m.messages = []domain.Message{
+		{ID: 1, SessionID: 1, Role: domain.MessageRoleAssistant},
+	}
+	m.parts = map[int64][]domain.Part{
+		1: {
+			{Kind: domain.PartKindText, Body: strings.Join([]string{
+				"line 1", "line 2", "line 3", "line 4", "line 5", "line 6", "line 7", "line 8", "line 9", "line 10", "line 11", "line 12",
+			}, "\n")},
+		},
+	}
+
+	m.resize()
+	m.refreshViewport()
+	if !m.viewport.AtBottom() {
+		t.Fatal("expected transcript to start at bottom")
+	}
+
+	beforeHeight := m.transcriptViewportHeight()
+	m.startBusy(busyScopeTranscript, "Working ...")
+
+	if !m.viewport.AtBottom() {
+		t.Fatal("expected transcript to remain anchored at bottom when busy indicator appears")
+	}
+	afterHeight := m.transcriptViewportHeight()
+	if afterHeight >= beforeHeight {
+		t.Fatalf("expected transcript viewport height to shrink when busy indicator appears, before=%d after=%d", beforeHeight, afterHeight)
+	}
+	if got := m.viewport.VisibleSurface().SurfaceHeight(); got != afterHeight {
+		t.Fatalf("expected visible transcript surface height %d after busy layout change, got %d", afterHeight, got)
+	}
+
+	m.stopBusy()
+	if !m.viewport.AtBottom() {
+		t.Fatal("expected transcript to remain anchored at bottom when busy indicator disappears")
+	}
+	if got := m.viewport.VisibleSurface().SurfaceHeight(); got != m.transcriptViewportHeight() {
+		t.Fatalf("expected visible transcript surface height %d after busy layout reset, got %d", m.transcriptViewportHeight(), got)
+	}
+}
+
 func TestStatusEventDoesNotOverrideTranscriptLLMPhase(t *testing.T) {
 	m := Model{}
 	m.startWaitingForLLM()
