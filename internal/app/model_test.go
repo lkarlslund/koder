@@ -4552,6 +4552,7 @@ func TestRenderSidebarShowsStatusAndSessionInfo(t *testing.T) {
 		contextTokensEstimated: true,
 	}
 	m.syncUsageFromHistory()
+	m.busy.setTranscriptPhase(transcriptBusyPhaseWaiting)
 
 	got := m.renderSidebar()
 	if !strings.Contains(got, "Session #2") || !strings.Contains(got, "Testing Session") || !strings.Contains(got, "Model  test / model") {
@@ -4560,7 +4561,7 @@ func TestRenderSidebarShowsStatusAndSessionInfo(t *testing.T) {
 	if !strings.Contains(got, "Chat    #7  1/2  execution  1 msg  Maze Fix") {
 		t.Fatalf("expected sidebar to include compact chat details, got %q", got)
 	}
-	if !strings.Contains(got, "Working ...") {
+	if !strings.Contains(got, "Waiting for LLM response") {
 		t.Fatalf("expected sidebar to include status, got %q", got)
 	}
 	if !strings.Contains(got, "Help    Alt-H help  Ctrl-S toggle  Alt+, wide  Alt+. narrow") {
@@ -5463,9 +5464,10 @@ func TestRefreshViewportAppendsWorkingLine(t *testing.T) {
 		},
 	}
 
+	m.startWaitingForLLM()
 	m.refreshViewport()
 	got := m.renderBody()
-	if !strings.Contains(got, "Working ...") || !strings.Contains(got, ui.SpinnerFrame(config.Default().UI.Spinner, 0)) {
+	if !strings.Contains(got, "Waiting for LLM response") || !strings.Contains(got, ui.SpinnerFrame(config.Default().UI.Spinner, 0)) {
 		t.Fatalf("expected transcript activity line, got %q", got)
 	}
 }
@@ -5905,6 +5907,65 @@ func TestStatusEventKeepsTranscriptSpinnerActive(t *testing.T) {
 	}
 }
 
+func TestStatusEventDoesNotOverrideTranscriptLLMPhase(t *testing.T) {
+	m := Model{}
+	m.startWaitingForLLM()
+
+	m.applyEvent(domain.Event{Kind: domain.EventKindStatus, Text: "Checking project instructions..."})
+
+	if got := m.transcriptBusyStatus(); got != "Waiting for LLM response" {
+		t.Fatalf("expected transcript llm status to remain stable, got %q", got)
+	}
+}
+
+func TestTranscriptBusyPhaseTransitions(t *testing.T) {
+	m := Model{}
+	m.startWaitingForLLM()
+	if got := m.transcriptBusyStatus(); got != "Waiting for LLM response" {
+		t.Fatalf("expected waiting status, got %q", got)
+	}
+
+	m.applyEvent(domain.Event{Kind: domain.EventKindReasoning, Text: "thinking"})
+	if got := m.transcriptBusyStatus(); got != "Streaming thoughts ..." {
+		t.Fatalf("expected reasoning status, got %q", got)
+	}
+
+	m.applyEvent(domain.Event{Kind: domain.EventKindMessageDelta, Text: "answer"})
+	if got := m.transcriptBusyStatus(); got != "Streaming LLM response ..." {
+		t.Fatalf("expected response status, got %q", got)
+	}
+
+	m.applyEvent(domain.Event{Kind: domain.EventKindMessageDone})
+	if got := m.status; got != "Idle" {
+		t.Fatalf("expected idle status after message done, got %q", got)
+	}
+}
+
+func TestTranscriptBusyPhaseTracksParallelTools(t *testing.T) {
+	m := Model{}
+	m.startWaitingForLLM()
+
+	m.applyEvent(domain.Event{Kind: domain.EventKindToolStart, Tool: domain.ToolKindBash})
+	if got := m.transcriptBusyStatus(); got != "Running tool" {
+		t.Fatalf("expected single tool status, got %q", got)
+	}
+
+	m.applyEvent(domain.Event{Kind: domain.EventKindToolStart, Tool: domain.ToolKindRead})
+	if got := m.transcriptBusyStatus(); got != "Running 2 tools" {
+		t.Fatalf("expected multi-tool status, got %q", got)
+	}
+
+	m.applyEvent(domain.Event{Kind: domain.EventKindToolResult, Tool: domain.ToolKindBash})
+	if got := m.transcriptBusyStatus(); got != "Running tool" {
+		t.Fatalf("expected tool countdown status, got %q", got)
+	}
+
+	m.applyEvent(domain.Event{Kind: domain.EventKindToolResult, Tool: domain.ToolKindRead})
+	if got := m.transcriptBusyStatus(); got != "Waiting for LLM response" {
+		t.Fatalf("expected waiting status after tools finish, got %q", got)
+	}
+}
+
 func TestLoadMsgPreserveBusyKeepsSpinnerActive(t *testing.T) {
 	m := Model{
 		cfg:      testConfig(t),
@@ -6283,9 +6344,10 @@ func TestPendingAssistantReasoningOnlyShowsThinkingIndicator(t *testing.T) {
 		t.Fatal(err)
 	}
 	m.currentSession = domain.Session{ID: 1}
-	m.viewport.Width = 60
+	m.viewport.Width = 120
 	m.showReasoning = false
 	m.startBusy(busyScopeTranscript, "Thinking ...")
+	m.busy.setTranscriptPhase(transcriptBusyPhaseThoughts)
 	m.pendingAssistant = pendingAssistantTurn{
 		CreatedAt: time.Unix(1, 0).UTC(),
 		Reasoning: "hidden chain of thought",
@@ -7462,7 +7524,7 @@ func TestEventMsgReloadsTranscriptBeforeTurnCompletes(t *testing.T) {
 		events: events,
 	})
 	next := updated.(Model)
-	if next.status != "Tool bash finished" {
+	if next.status != "" {
 		t.Fatalf("unexpected status: %q", next.status)
 	}
 	if cmd == nil {

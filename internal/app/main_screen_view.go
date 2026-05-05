@@ -67,7 +67,7 @@ func (m *Model) syncMainScreenViewState() {
 	sidebarContent := m.renderSidebar()
 	statusLine := ""
 	if m.busy.transcriptActive() {
-		statusLine = ui.WorkingIndicatorLine(m.workingIndicator(), m.busy.statusOrDefault("Working ..."))
+		statusLine = ui.WorkingIndicatorLine(m.workingIndicator(), m.transcriptBusyStatus())
 	}
 	sidebarWidth := m.sidebarWidth()
 	sidebarHash := hashStrings(

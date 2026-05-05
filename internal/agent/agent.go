@@ -271,7 +271,7 @@ func (e *Engine) runModelPrompt(ctx context.Context, session domain.Session, cha
 	out := make(chan domain.Event)
 	go func() {
 		defer close(out)
-		if session.ID > 0 {
+		if session.ID > 0 && needsSessionAgentsRefresh(session) {
 			out <- domain.Event{Kind: domain.EventKindStatus, Text: "Checking project instructions..."}
 		}
 		session, err = e.ensureSessionAgents(ctx, session, client)
@@ -341,7 +341,7 @@ func (e *Engine) runContinue(ctx context.Context, session domain.Session, chat d
 	out := make(chan domain.Event)
 	go func() {
 		defer close(out)
-		if session.ID > 0 {
+		if session.ID > 0 && needsSessionAgentsRefresh(session) {
 			out <- domain.Event{Kind: domain.EventKindStatus, Text: "Checking project instructions..."}
 		}
 		session, err = e.ensureSessionAgents(ctx, session, client)
@@ -410,10 +410,17 @@ func (e *Engine) RefreshAgents(ctx context.Context, sessionID int64) (domain.Ses
 }
 
 func (e *Engine) ensureSessionAgents(ctx context.Context, session domain.Session, client *provider.Client) (domain.Session, error) {
-	if strings.TrimSpace(session.ProjectChecksum) != "" && (strings.TrimSpace(session.AgentsResolved) != "" || strings.TrimSpace(session.AgentsSummary) != "") {
+	if !needsSessionAgentsRefresh(session) {
 		return session, nil
 	}
 	return e.refreshSessionAgents(ctx, session, client)
+}
+
+func needsSessionAgentsRefresh(session domain.Session) bool {
+	if strings.TrimSpace(session.ProjectChecksum) == "" {
+		return true
+	}
+	return strings.TrimSpace(session.AgentsResolved) == "" && strings.TrimSpace(session.AgentsSummary) == ""
 }
 
 func (e *Engine) refreshSessionAgents(ctx context.Context, session domain.Session, client *provider.Client) (domain.Session, error) {

@@ -95,16 +95,30 @@ func (s *spinnerModel) tick() {
 }
 
 type busyModel struct {
-	active  bool
-	scope   busyScope
-	status  string
-	spinner spinnerModel
+	active          bool
+	scope           busyScope
+	status          string
+	transcriptPhase transcriptBusyPhase
+	runningTools    int
+	spinner         spinnerModel
 }
+
+type transcriptBusyPhase int
+
+const (
+	transcriptBusyPhaseNone transcriptBusyPhase = iota
+	transcriptBusyPhaseWaiting
+	transcriptBusyPhaseThoughts
+	transcriptBusyPhaseResponse
+	transcriptBusyPhaseTools
+)
 
 func (b *busyModel) start(scope busyScope, status string) {
 	b.active = true
 	b.scope = scope
 	b.status = status
+	b.transcriptPhase = transcriptBusyPhaseNone
+	b.runningTools = 0
 	if scope == busyScopeNone {
 		b.spinner.stop()
 		return
@@ -120,6 +134,8 @@ func (b *busyModel) stop() {
 	b.active = false
 	b.scope = busyScopeNone
 	b.status = ""
+	b.transcriptPhase = transcriptBusyPhaseNone
+	b.runningTools = 0
 	b.spinner.stop()
 }
 
@@ -129,6 +145,56 @@ func (b busyModel) transcriptActive() bool {
 
 func (b busyModel) sidebarActive() bool {
 	return b.active && b.scope != busyScopeNone
+}
+
+func (b *busyModel) setTranscriptPhase(phase transcriptBusyPhase) {
+	if !b.active || b.scope != busyScopeTranscript {
+		return
+	}
+	b.transcriptPhase = phase
+	if phase != transcriptBusyPhaseTools {
+		b.runningTools = 0
+	}
+}
+
+func (b *busyModel) startTranscriptTool() {
+	if !b.active || b.scope != busyScopeTranscript {
+		return
+	}
+	b.transcriptPhase = transcriptBusyPhaseTools
+	b.runningTools++
+}
+
+func (b *busyModel) finishTranscriptTool() {
+	if !b.active || b.scope != busyScopeTranscript {
+		return
+	}
+	if b.runningTools > 0 {
+		b.runningTools--
+	}
+	if b.runningTools > 0 {
+		b.transcriptPhase = transcriptBusyPhaseTools
+		return
+	}
+	b.transcriptPhase = transcriptBusyPhaseWaiting
+}
+
+func (b busyModel) transcriptStatusLabel() string {
+	switch b.transcriptPhase {
+	case transcriptBusyPhaseWaiting:
+		return "Waiting for LLM response"
+	case transcriptBusyPhaseThoughts:
+		return "Streaming thoughts ..."
+	case transcriptBusyPhaseResponse:
+		return "Streaming LLM response ..."
+	case transcriptBusyPhaseTools:
+		if b.runningTools <= 1 {
+			return "Running tool"
+		}
+		return fmt.Sprintf("Running %d tools", b.runningTools)
+	default:
+		return ""
+	}
 }
 
 type eventMsg struct {
@@ -777,7 +843,7 @@ func (m Model) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 			return m.finishOperationWithError(msg.err)
 		}
 		m.activeEventStream = msg.events != nil
-		m.startBusy(m.busy.scopeOrDefault(busyScopeTranscript), m.busy.statusOrDefault("Working ..."))
+		m.startWaitingForLLM()
 		return m, ui.Batch(nextEventCmd(m.currentChat.ID, msg.events), m.spinnerCmdIfNeeded(), m.syncWindowTitleCmd())
 	case runPromptMsg:
 		m.pendingAssistant = pendingAssistantTurn{}
@@ -803,7 +869,7 @@ func (m Model) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 		m.clampQueueSelection()
 		m.pendingModelNote = ""
 		m.activeEventStream = msg.events != nil
-		m.startBusy(m.busy.scopeOrDefault(busyScopeTranscript), "Working ...")
+		m.startWaitingForLLM()
 		return m, ui.Batch(nextEventCmd(msg.chat.ID, msg.events), m.spinnerCmdIfNeeded(), m.refreshExecSubscriptionCmd(), m.syncWindowTitleCmd())
 	case bangCommandMsg:
 		m.invalidateBodyCache()
@@ -832,7 +898,7 @@ func (m Model) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 		switch msg.followupMode {
 		case bangFollowupPrompt:
 			m.appendLocalUserPrompt(msg.followupPrompt, nil, nil)
-			m.startBusy(busyScopeTranscript, "Running…")
+			m.startWaitingForLLM()
 			return m, ui.Batch(reload, m.promptCmd(m.beginActiveOperation(), msg.followupPrompt, nil, nil), m.spinnerCmdIfNeeded(), m.syncWindowTitleCmd())
 		case bangFollowupQueue, bangFollowupSteer:
 			kind := domain.QueuedInputKindQueued
@@ -916,7 +982,7 @@ func (m Model) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 			m.debug.RecordLifecycle(m.currentSession.ID, "session_reloaded", fmt.Sprintf("%d messages", len(m.messages)), map[string]string{"messages": strconv.Itoa(len(m.messages))})
 		}
 		if !msg.preserveBusy {
-			m.stopBusyWithStatus("Ready")
+			m.stopBusyWithStatus("Idle")
 		}
 		cmds := []ui.Cmd{m.syncWindowTitleCmd()}
 		if cmd := m.dequeuePromptCmd(); cmd != nil {
@@ -1419,7 +1485,7 @@ func (m *Model) handleMainWindowKey(msg ui.KeyMsg) (bool, ui.Cmd) {
 			m.status = status
 			return true, m.syncWindowTitleCmd()
 		}
-		m.startBusy(busyScopeTranscript, "Continuing…")
+		m.startWaitingForLLM()
 		return true, ui.Batch(m.continueCmd(m.beginActiveOperation()), m.spinnerCmdIfNeeded())
 	case "shift+enter", "alt+enter":
 		m.composer.InsertRune('\n')
@@ -1513,7 +1579,7 @@ func (m *Model) handleMainWindowKey(msg ui.KeyMsg) (bool, ui.Cmd) {
 		m.draftAttachments = nil
 		m.draftReferences = nil
 		m.appendLocalUserPrompt(prompt, drafts, refs)
-		m.startBusy(busyScopeTranscript, "Running…")
+		m.startWaitingForLLM()
 		return true, m.kickoffPromptCmd(prompt, drafts, refs)
 	case "h":
 		if m.queueEditMode && len(m.currentChat.QueuedInputs) > 0 {
@@ -1803,7 +1869,7 @@ func (m *Model) applyEvent(evt domain.Event) {
 		}
 		m.pendingAssistant.Text += evt.Text
 		m.addLiveContextEstimate(evt.Text)
-		m.startBusy(busyScopeTranscript, "Working ...")
+		m.setTranscriptBusyPhase(transcriptBusyPhaseResponse)
 		m.pendingTranscriptFrameDirty = true
 		m.invalidatePendingTranscriptFrame()
 	case domain.EventKindReasoning:
@@ -1812,19 +1878,13 @@ func (m *Model) applyEvent(evt domain.Event) {
 		}
 		m.pendingAssistant.Reasoning += evt.Text
 		m.addLiveContextEstimate(evt.Text)
-		m.startBusy(busyScopeTranscript, "Thinking ...")
+		m.setTranscriptBusyPhase(transcriptBusyPhaseThoughts)
 		m.pendingTranscriptFrameDirty = true
 		m.invalidatePendingTranscriptFrame()
 	case domain.EventKindToolStart:
-		status := strings.TrimSpace(evt.Text)
-		if status == "" {
-			status = fmt.Sprintf("Running %s…", evt.Tool)
-		} else {
-			status = fmt.Sprintf("Running %s…", status)
-		}
-		m.startBusy(busyScopeTranscript, status)
+		m.startTranscriptTool()
 	case domain.EventKindToolResult:
-		m.startBusy(busyScopeTranscript, fmt.Sprintf("Tool %s finished", evt.Tool))
+		m.finishTranscriptTool()
 	case domain.EventKindApprovalAsk:
 		m.status = evt.Text
 		m.stopBusy()
@@ -1864,7 +1924,7 @@ func (m *Model) applyEvent(evt domain.Event) {
 	case domain.EventKindStatus:
 		if evt.Text != "" {
 			m.status = evt.Text
-			if m.busy.active {
+			if m.busy.active && m.busy.transcriptPhase == transcriptBusyPhaseNone {
 				m.busy.updateStatus(evt.Text)
 			}
 		}
@@ -1885,7 +1945,7 @@ func (m *Model) applyEvent(evt domain.Event) {
 		m.stopBusy()
 	case domain.EventKindMessageDone:
 		m.clearPendingAssistantTurn()
-		m.stopBusyWithStatus("Ready")
+		m.stopBusyWithStatus("Idle")
 	}
 }
 
@@ -2254,9 +2314,12 @@ func (m *Model) renderSidebar() string {
 	lines = append(lines, fmt.Sprintf("Model  %s / %s", provider, model))
 	status := strings.TrimSpace(m.status)
 	if status == "" {
-		status = "Ready"
+		status = "Idle"
 	}
 	if m.busy.sidebarActive() {
+		if m.busy.scope == busyScopeTranscript {
+			status = m.transcriptBusyStatus()
+		}
 		lines = append(lines, fmt.Sprintf("Status %s %s", m.workingIndicator(), status))
 	} else {
 		lines = append(lines, fmt.Sprintf("Status %s", status))
@@ -2994,7 +3057,7 @@ func (m Model) pendingAssistantIndicatorLine() string {
 	if strings.TrimSpace(indicator) == "" {
 		indicator = ui.SpinnerFrame(m.cfg.UI.Spinner, 0)
 	}
-	return ui.WorkingIndicatorLine(indicator, "Thinking ...")
+	return ui.WorkingIndicatorLine(indicator, m.transcriptBusyStatus())
 }
 
 func (m *Model) reindexTranscriptControllers() {
@@ -3205,7 +3268,7 @@ func (m *Model) renderTranscriptActivityElement() ui.Node {
 		return nil
 	}
 	return ui.AsNode(ui.ActivityIndicator{
-		Indicator: ui.WorkingIndicatorLine(m.workingIndicator(), m.busy.statusOrDefault("Working ...")),
+		Indicator: ui.WorkingIndicatorLine(m.workingIndicator(), m.transcriptBusyStatus()),
 		Palette:   m.palette,
 	})
 }
@@ -5500,16 +5563,20 @@ func (m *Model) syncCurrentChatBusy() {
 	}
 }
 
-func (m *Model) startBusy(scope busyScope, status string) {
-	m.loading = true
-	m.status = status
-	m.busy.start(scope, status)
+func (m *Model) syncBusyState() {
 	if chatID := m.currentChatID(); chatID > 0 {
 		if m.chatBusy == nil {
 			m.chatBusy = map[int64]busyModel{}
 		}
 		m.chatBusy[chatID] = m.busy
 	}
+}
+
+func (m *Model) startBusy(scope busyScope, status string) {
+	m.loading = true
+	m.status = status
+	m.busy.start(scope, status)
+	m.syncBusyState()
 	if m.width <= 0 || m.height <= 0 {
 		m.invalidateMainSurface()
 		return
@@ -5522,9 +5589,7 @@ func (m *Model) stopBusy() {
 	m.loading = false
 	m.activeEventStream = false
 	m.busy.stop()
-	if chatID := m.currentChatID(); chatID > 0 && m.chatBusy != nil {
-		m.chatBusy[chatID] = m.busy
-	}
+	m.syncBusyState()
 	m.activeOpCancel = nil
 	if chatID := m.currentChatID(); chatID > 0 && m.activeOpCancels != nil {
 		delete(m.activeOpCancels, chatID)
@@ -5541,6 +5606,42 @@ func (m *Model) stopBusy() {
 func (m *Model) stopBusyWithStatus(status string) {
 	m.stopBusy()
 	m.status = status
+}
+
+func (m *Model) startWaitingForLLM() {
+	m.startBusy(busyScopeTranscript, "Waiting for LLM response")
+	m.busy.setTranscriptPhase(transcriptBusyPhaseWaiting)
+	m.status = m.transcriptBusyStatus()
+	m.busy.updateStatus(m.status)
+	m.syncBusyState()
+}
+
+func (m *Model) setTranscriptBusyPhase(phase transcriptBusyPhase) {
+	m.startBusy(busyScopeTranscript, m.statusOrIdle())
+	m.busy.setTranscriptPhase(phase)
+	m.status = m.transcriptBusyStatus()
+	m.busy.updateStatus(m.status)
+	m.syncBusyState()
+}
+
+func (m *Model) startTranscriptTool() {
+	if !m.busy.active || m.busy.scope != busyScopeTranscript {
+		m.startBusy(busyScopeTranscript, "Running tool")
+	}
+	m.busy.startTranscriptTool()
+	m.status = m.transcriptBusyStatus()
+	m.busy.updateStatus(m.status)
+	m.syncBusyState()
+}
+
+func (m *Model) finishTranscriptTool() {
+	if !m.busy.active || m.busy.scope != busyScopeTranscript {
+		return
+	}
+	m.busy.finishTranscriptTool()
+	m.status = m.transcriptBusyStatus()
+	m.busy.updateStatus(m.status)
+	m.syncBusyState()
 }
 
 func (m *Model) syncDebugRuntime() {
@@ -5806,6 +5907,21 @@ func (b busyModel) statusOrDefault(fallback string) string {
 		return b.status
 	}
 	return fallback
+}
+
+func (m Model) transcriptBusyStatus() string {
+	if label := strings.TrimSpace(m.busy.transcriptStatusLabel()); label != "" {
+		return label
+	}
+	return m.busy.statusOrDefault("Working ...")
+}
+
+func (m Model) statusOrIdle() string {
+	status := strings.TrimSpace(m.status)
+	if status == "" {
+		return "Idle"
+	}
+	return status
 }
 
 func (m *Model) shouldAnimateSpinner() bool {
