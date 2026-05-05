@@ -365,6 +365,7 @@ func TestShouldRefreshDetailsAfterEvent(t *testing.T) {
 		{name: "usage", evt: domain.Event{Kind: domain.EventKindUsage}, want: false},
 		{name: "status", evt: domain.Event{Kind: domain.EventKindStatus}, want: false},
 		{name: "session title", evt: domain.Event{Kind: domain.EventKindSessionTitle}, want: false},
+		{name: "tool call delta", evt: domain.Event{Kind: domain.EventKindToolCallDelta}, want: true},
 		{name: "tool result", evt: domain.Event{Kind: domain.EventKindToolResult}, want: true},
 		{name: "approval ask", evt: domain.Event{Kind: domain.EventKindApprovalAsk}, want: true},
 	}

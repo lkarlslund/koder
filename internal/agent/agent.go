@@ -617,6 +617,7 @@ func (e *Engine) continueModelTurn(ctx context.Context, session domain.Session, 
 				if err := e.persistAssistantToolCalls(ctx, chat.ID, session.ID, calls, strings.TrimSpace(resp.Text), resp.Usage); err != nil {
 					return err
 				}
+				out <- domain.Event{Kind: domain.EventKindToolCallDelta, Text: "tool calls persisted"}
 				if resp.Usage.HasAnyTokens() {
 					if err := e.saveChatContextUsage(ctx, chat.ID, resp.Usage); err != nil {
 						return err
@@ -657,6 +658,7 @@ func (e *Engine) continueModelTurn(ctx context.Context, session domain.Session, 
 					return err
 				}
 			}
+			out <- domain.Event{Kind: domain.EventKindToolCallDelta, Text: "tool call persisted"}
 			if pause, ok := tracker.trackCalls([]tools.Request{*call}); ok {
 				e.pauseContinuation(ctx, chat.ID, session.ID, pause, out)
 				return nil
