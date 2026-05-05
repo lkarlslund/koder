@@ -2389,9 +2389,17 @@ func TestCompactSessionDoesNotPersistUsageOrEmitUsageEvent(t *testing.T) {
 	close(events)
 
 	var sawStatus bool
+	var sawRefreshStart bool
+	var sawRefreshDone bool
 	for evt := range events {
 		if evt.Kind == domain.EventKindStatus && evt.Text == "Session compacted" {
 			sawStatus = true
+		}
+		if evt.Kind == domain.EventKindStatus && evt.Meta["compaction"] == "started" && evt.Meta["refresh"] == "details" {
+			sawRefreshStart = true
+		}
+		if evt.Kind == domain.EventKindStatus && evt.Meta["compaction"] == "completed" && evt.Meta["refresh"] == "details" {
+			sawRefreshDone = true
 		}
 		if evt.Kind == domain.EventKindUsage {
 			t.Fatalf("did not expect compaction to emit usage event, got %#v", evt)
@@ -2400,17 +2408,34 @@ func TestCompactSessionDoesNotPersistUsageOrEmitUsageEvent(t *testing.T) {
 	if !sawStatus {
 		t.Fatal("expected compact session status event")
 	}
+	if !sawRefreshStart || !sawRefreshDone {
+		t.Fatalf("expected compaction lifecycle refresh events, got start=%v done=%v", sawRefreshStart, sawRefreshDone)
+	}
 
 	messages, parts, err := st.PartsForSession(context.Background(), session.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
+	var sawCompaction bool
 	for _, msg := range messages {
 		for _, part := range parts[msg.ID] {
 			if part.Kind == domain.PartKindSystemNotice && part.Body == "usage" {
 				t.Fatalf("did not expect compact session to persist usage notice, got %#v", part)
 			}
+			if part.Kind == domain.PartKindCompaction {
+				payload, ok := part.Payload.(domain.CompactionPayload)
+				if !ok {
+					t.Fatalf("expected typed compaction payload, got %#v", part.Payload)
+				}
+				if payload.Status != "completed" || strings.TrimSpace(payload.Summary) == "" {
+					t.Fatalf("expected completed compaction payload, got %#v", payload)
+				}
+				sawCompaction = true
+			}
 		}
+	}
+	if !sawCompaction {
+		t.Fatal("expected persisted compaction part")
 	}
 	if requests != 1 {
 		t.Fatalf("expected one compaction request, got %d", requests)

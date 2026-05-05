@@ -233,6 +233,7 @@ func (ApprovalRequestPayload) PartKind() PartKind { return PartKindApprovalReque
 type CompactionPayload struct {
 	Summary string `json:"summary"`
 	Trigger string `json:"trigger,omitempty"`
+	Status  string `json:"status,omitempty"`
 }
 
 // PartKind returns the payload part kind.

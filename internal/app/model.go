@@ -1952,6 +1952,9 @@ func (m *Model) applyEvent(evt domain.Event) {
 }
 
 func shouldRefreshDetailsAfterEvent(evt domain.Event) bool {
+	if evt.Kind == domain.EventKindStatus && strings.EqualFold(strings.TrimSpace(evt.Meta["refresh"]), "details") {
+		return true
+	}
 	switch evt.Kind {
 	case domain.EventKindMessageDelta,
 		domain.EventKindReasoning,

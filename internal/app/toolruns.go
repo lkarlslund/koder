@@ -211,13 +211,30 @@ func compactionToolRun(parts []domain.Part, msg domain.Message) (ui.ToolRun, boo
 		if part.Kind != domain.PartKindCompaction {
 			continue
 		}
+		payload, _ := part.Payload.(domain.CompactionPayload)
 		body := strings.TrimSpace(part.Text())
-		if body == "" {
+		status := strings.TrimSpace(payload.Status)
+		switch {
+		case status == "pending":
+			return ui.ToolRun{
+				ID:       fmt.Sprintf("compaction:%d", msg.ID),
+				Title:    "Compacting ...",
+				Subtitle: "Replacing earlier history for the next turn",
+				Status:   ui.ToolRunStatusRunning,
+			}, true
+		case status == "failed":
+			return ui.ToolRun{
+				ID:       fmt.Sprintf("compaction:%d", msg.ID),
+				Title:    "Compaction failed.",
+				Subtitle: "Compaction did not complete",
+				Status:   ui.ToolRunStatusFailed,
+			}, true
+		case body == "" && status == "":
 			continue
 		}
 		return ui.ToolRun{
 			ID:       fmt.Sprintf("compaction:%d", msg.ID),
-			Title:    "Compacted context",
+			Title:    "Compacted.",
 			Subtitle: "Replacement history sent to the model",
 			Preview:  body,
 			Status:   ui.ToolRunStatusCompleted,

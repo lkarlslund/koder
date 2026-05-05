@@ -2511,23 +2511,51 @@ func (e *Engine) compactSession(ctx context.Context, session domain.Session, cha
 	if len(messages) <= 1 {
 		return nil
 	}
+	msg, err := e.store.AddChatMessage(ctx, chatID, domain.MessageRoleAssistant, "Compacting...")
+	if err != nil {
+		return err
+	}
+	part, err := e.store.AddPart(ctx, msg.ID, domain.CompactionPayload{Trigger: trigger, Status: "pending"})
+	if err != nil {
+		return err
+	}
+	updateCompactionState := func(summary, status, messageSummary string) error {
+		if err := e.store.UpdatePartPayload(ctx, part.ID, domain.CompactionPayload{
+			Summary: summary,
+			Trigger: trigger,
+			Status:  status,
+		}); err != nil {
+			return err
+		}
+		if strings.TrimSpace(messageSummary) != "" {
+			if err := e.store.UpdateMessageSummary(ctx, msg.ID, messageSummary); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	if out != nil {
+		out <- domain.Event{
+			Kind: domain.EventKindStatus,
+			Text: "Compacting session...",
+			Meta: map[string]string{"refresh": "details", "compaction": "started"},
+		}
+	}
 	resp, err := client.CompleteChat(ctx, e.chatRequest(session, domain.Chat{}, append(messages, provider.Message{
 		Role:    domain.MessageRoleUser,
 		Content: compactPrompt(),
 	}), false))
 	if err != nil {
+		_ = updateCompactionState("", "failed", "Compaction failed")
 		return err
 	}
 	summary := resp.Text
 	summary = strings.TrimSpace(summary)
 	if summary == "" {
-		return nil
+		_ = updateCompactionState("", "failed", "Compaction failed")
+		return fmt.Errorf("empty compaction summary")
 	}
-	msg, err := e.store.AddChatMessage(ctx, chatID, domain.MessageRoleAssistant, "Compacted session summary")
-	if err != nil {
-		return err
-	}
-	if _, err := e.store.AddPart(ctx, msg.ID, domain.CompactionPayload{Summary: summary, Trigger: trigger}); err != nil {
+	if err := updateCompactionState(summary, "completed", "Compacted session summary"); err != nil {
 		return err
 	}
 	if chat, err := e.store.GetChat(ctx, chatID); err == nil {
@@ -2540,7 +2568,11 @@ func (e *Engine) compactSession(ctx context.Context, session domain.Session, cha
 		return err
 	}
 	if out != nil {
-		out <- domain.Event{Kind: domain.EventKindStatus, Text: "Session compacted"}
+		out <- domain.Event{
+			Kind: domain.EventKindStatus,
+			Text: "Session compacted",
+			Meta: map[string]string{"refresh": "details", "compaction": "completed"},
+		}
 	}
 	return nil
 }

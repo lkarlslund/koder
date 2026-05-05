@@ -6688,13 +6688,13 @@ func TestTranscriptRendersCompactionAsExpandableCard(t *testing.T) {
 		{ID: 1, Role: domain.MessageRoleAssistant, Summary: "Compacted session summary"},
 	}
 	m.parts[1] = []domain.Part{{
-		Kind: domain.PartKindCompaction,
-		Body: "## Goal\n\n- first\n- second",
+		Kind:    domain.PartKindCompaction,
+		Payload: domain.CompactionPayload{Summary: "## Goal\n\n- first\n- second", Status: "completed"},
 	}}
 
 	m.refreshViewport()
 	got := m.viewport.View()
-	if !strings.Contains(got, "Compacted context") {
+	if !strings.Contains(got, "Compacted.") {
 		t.Fatalf("expected compaction card title, got %q", got)
 	}
 	if !strings.Contains(got, "Expand") {
@@ -6709,6 +6709,29 @@ func TestTranscriptRendersCompactionAsExpandableCard(t *testing.T) {
 	got = m.viewport.View()
 	if !strings.Contains(got, "## Goal") || !strings.Contains(got, "- first") || !strings.Contains(got, "- second") {
 		t.Fatalf("expected expanded compaction body, got %q", got)
+	}
+}
+
+func TestTranscriptRendersPendingCompactionAsRunningCard(t *testing.T) {
+	m := Model{
+		currentSession:   domain.Session{ID: 1},
+		viewport:         newTranscriptViewport(120, 8),
+		parts:            map[int64][]domain.Part{},
+		expandedToolRuns: map[string]bool{},
+		palette:          theme.Resolve("tokyonight").Palette,
+	}
+	m.messages = []domain.Message{
+		{ID: 1, Role: domain.MessageRoleAssistant, Summary: "Compacting..."},
+	}
+	m.parts[1] = []domain.Part{{
+		Kind:    domain.PartKindCompaction,
+		Payload: domain.CompactionPayload{Status: "pending"},
+	}}
+
+	m.refreshViewport()
+	got := m.viewport.View()
+	if !strings.Contains(got, "Compacting ...") {
+		t.Fatalf("expected pending compaction card title, got %q", got)
 	}
 }
 
