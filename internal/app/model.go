@@ -869,6 +869,8 @@ func (m Model) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 		m.clampQueueSelection()
 		m.pendingModelNote = ""
 		m.activeEventStream = msg.events != nil
+		m.syncContextFromChat()
+		m.ensureContextEstimateFromState()
 		m.startWaitingForLLM()
 		return m, ui.Batch(nextEventCmd(msg.chat.ID, msg.events), m.spinnerCmdIfNeeded(), m.refreshExecSubscriptionCmd(), m.syncWindowTitleCmd())
 	case bangCommandMsg:
@@ -2324,13 +2326,7 @@ func (m *Model) renderSidebar() string {
 	} else {
 		lines = append(lines, fmt.Sprintf("Status %s", status))
 	}
-	if metrics, ok := m.currentContextMetrics(); ok {
-		used := formatTokens(metrics.Used)
-		if metrics.Estimated {
-			used = "~" + used
-		}
-		lines = append(lines, fmt.Sprintf("Context %s / %s (%d%%)", used, formatTokens(metrics.Max), metrics.UsagePercent))
-	}
+	lines = append(lines, m.sidebarContextLine())
 	if usage, ok := m.currentTotalUsage(); ok {
 		tokenLine := fmt.Sprintf("Tokens in %s  out %s", formatTokens(usage.PromptTokens), formatTokens(usage.CompletionTokens))
 		if usage.CachedTokens > 0 {
@@ -3314,6 +3310,36 @@ func (m *Model) syncContextFromChat() {
 	m.contextTokensEstimated = !m.currentChat.ContextTokensKnown || m.liveContextEstimatedTokens > 0
 }
 
+func (m *Model) ensureContextEstimateFromState() {
+	if m.contextTokens > 0 {
+		return
+	}
+	if m.agent == nil {
+		return
+	}
+	providerID := firstNonEmptyString(strings.TrimSpace(m.currentChat.ProviderID), strings.TrimSpace(m.currentSession.ProviderID))
+	if providerID == "" {
+		return
+	}
+	estimated, err := m.agent.EstimateContextTokensForState(m.currentSession, m.currentChat, m.messages, m.parts)
+	if err != nil || estimated <= 0 {
+		return
+	}
+	m.contextTokens = estimated
+	m.contextTokensEstimated = true
+	if m.currentChat.LastKnownContextTokens <= 0 {
+		m.currentChat.LastKnownContextTokens = estimated
+		m.currentChat.ContextTokensKnown = false
+		for idx := range m.chats {
+			if m.chats[idx].ID == m.currentChat.ID {
+				m.chats[idx].LastKnownContextTokens = estimated
+				m.chats[idx].ContextTokensKnown = false
+				break
+			}
+		}
+	}
+}
+
 func (m *Model) addLiveContextEstimate(text string) {
 	estimated := tokenestimate.Text(text)
 	if estimated <= 0 {
@@ -3365,6 +3391,23 @@ func (m Model) currentContextMetrics() (sessionctx.Metrics, bool) {
 		UsagePercent: percent,
 		Estimated:    m.contextTokensEstimated,
 	}, true
+}
+
+func (m Model) sidebarContextLine() string {
+	metrics, ok := m.currentContextMetrics()
+	if ok {
+		used := formatTokens(metrics.Used)
+		if metrics.Estimated {
+			used = "~" + used
+		}
+		return fmt.Sprintf("Context %s / %s (%d%%)", used, formatTokens(metrics.Max), metrics.UsagePercent)
+	}
+	providerID := firstNonEmptyString(strings.TrimSpace(m.currentChat.ProviderID), strings.TrimSpace(m.currentSession.ProviderID))
+	providerCfg, providerOK := m.cfg.Provider(providerID)
+	if providerOK && providerCfg.ContextWindow > 0 {
+		return fmt.Sprintf("Context ~0 / %s (0%%)", formatTokens(providerCfg.ContextWindow))
+	}
+	return "Context - / -"
 }
 
 func (m Model) pendingAssistantParts() []domain.Part {
@@ -4317,6 +4360,7 @@ func (m Model) UpdateLoad(msg loadMsg) Model {
 	m.workspace = msg.workspace
 	m.syncUsageFromHistory()
 	m.syncContextFromChat()
+	m.ensureContextEstimateFromState()
 	m.resetComposerHistory()
 	m.approvalDialog = nil
 	m.draftAttachments = nil

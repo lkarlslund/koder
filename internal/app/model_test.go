@@ -4737,6 +4737,62 @@ func TestSidebarUsageWithoutPromptTokensPreservesEstimate(t *testing.T) {
 	}
 }
 
+func TestSidebarAlwaysShowsContextLineWithoutProvider(t *testing.T) {
+	m := Model{
+		width:       120,
+		height:      40,
+		currentChat: domain.Chat{ID: 7},
+		showSidebar: true,
+	}
+
+	got := m.renderSidebar()
+	if !strings.Contains(got, "Context - / -") {
+		t.Fatalf("expected placeholder context line, got %q", got)
+	}
+}
+
+func TestUpdateLoadEstimatesContextForNewChat(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.DefaultProvider = "test"
+	cfg.Providers = map[string]config.Provider{
+		"test": {ContextWindow: 32768},
+	}
+	workdir := t.TempDir()
+	engine := agent.New(cfg, nil, tools.NewRegistry(workdir), nil, workdir)
+
+	m := Model{
+		cfg:         cfg,
+		agent:       engine,
+		composer:    textarea.New(),
+		showSidebar: true,
+		width:       120,
+		height:      40,
+	}
+
+	load := loadMsg{
+		current: domain.Session{
+			ID:             1,
+			ProviderID:     "test",
+			ModelID:        "test-model",
+			AgentsResolved: "## Repo\n- Keep changes minimal.",
+		},
+		chat:  domain.Chat{ID: 7, SessionID: 1, ProviderID: "test", ModelID: "test-model"},
+		parts: map[int64][]domain.Part{},
+	}
+	m = m.UpdateLoad(load)
+
+	if m.contextTokens <= 0 {
+		t.Fatalf("expected context estimate after load, got %d", m.contextTokens)
+	}
+	if !m.contextTokensEstimated {
+		t.Fatal("expected loaded context estimate to be marked estimated")
+	}
+	got := m.renderSidebar()
+	if !strings.Contains(got, "Context ~") || !strings.Contains(got, "/ 32.8k (") {
+		t.Fatalf("expected estimated context line after load, got %q", got)
+	}
+}
+
 func TestSidebarContextAccumulatesStreamedTokenEstimate(t *testing.T) {
 	m := Model{
 		width:          120,
