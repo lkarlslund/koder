@@ -162,6 +162,9 @@ func TestPreferencesDialogRenderShowsTabsAndButtons(t *testing.T) {
 			t.Fatalf("expected %q in preferences dialog, got %q", needle, view)
 		}
 	}
+	if strings.Contains(view, "┌") || strings.Contains(view, "┐") || strings.Contains(view, "└") || strings.Contains(view, "┘") {
+		t.Fatalf("expected one-line integer fields without boxed input borders, got %q", view)
+	}
 	dialog.tabList.Active = 1
 	view = renderPreferencesDialog(dialog, 84, theme.Default().Palette)
 	if !strings.Contains(view, "Code Style") || !strings.Contains(view, "Edit Forgiveness") {
@@ -193,7 +196,7 @@ func TestPreferencesDialogSpinnerPreviewAnimates(t *testing.T) {
 	}
 }
 
-func TestPreferencesDialogToolTurnsEditorSupportsTypingAndStepping(t *testing.T) {
+func TestPreferencesDialogToolTurnsEditorSupportsTyping(t *testing.T) {
 	dialog := NewPreferencesDialog(defaultPreferencesValues(), []string{"tokyonight", "gruvbox"}, []string{"github", "monokai"})
 	editor := dialog.editors["max_tool_loop_steps"]
 	editor.SetValue("20")
@@ -211,13 +214,10 @@ func TestPreferencesDialogToolTurnsEditorSupportsTypingAndStepping(t *testing.T)
 		t.Fatalf("expected typed value 25, got %#v", action.Values)
 	}
 
-	action = dialog.Update(ui.KeyMsg{Type: ui.KeyDown})
-	if action.Values.MaxToolLoopSteps != 24 {
-		t.Fatalf("expected down to decrement to 24, got %#v", action.Values)
-	}
-	action = dialog.Update(ui.KeyMsg{Type: ui.KeyUp})
-	if action.Values.MaxToolLoopSteps != 25 {
-		t.Fatalf("expected up to increment to 25, got %#v", action.Values)
+	dialog.fieldIndex = 1
+	dialog.Update(ui.KeyMsg{Type: ui.KeyUp})
+	if dialog.fieldIndex != 0 {
+		t.Fatalf("expected up to move to previous field, got %d", dialog.fieldIndex)
 	}
 
 	dialog.fieldIndex = 1
@@ -270,5 +270,28 @@ func TestPreferencesDialogToolTurnsEditorSupportsTypingAndStepping(t *testing.T)
 	}
 	if action.Values.UI.SidebarWidth != 35 {
 		t.Fatalf("expected typed sidebar width 35, got %#v", action.Values)
+	}
+}
+
+func TestPreferencesDialogButtonFocusUsesArrowKeys(t *testing.T) {
+	dialog := NewPreferencesDialog(defaultPreferencesValues(), []string{"tokyonight", "gruvbox"}, []string{"github", "monokai"})
+	dialog.focus = preferencesFocusButtons
+	dialog.buttonIndex = 0
+
+	dialog.Update(ui.KeyMsg{Type: ui.KeyRight})
+	if dialog.buttonIndex != 1 {
+		t.Fatalf("expected right arrow to move to cancel button, got %d", dialog.buttonIndex)
+	}
+	dialog.Update(ui.KeyMsg{Type: ui.KeyLeft})
+	if dialog.buttonIndex != 0 {
+		t.Fatalf("expected left arrow to move back to ok button, got %d", dialog.buttonIndex)
+	}
+	dialog.Update(ui.KeyMsg{Type: ui.KeyDown})
+	if dialog.buttonIndex != 1 {
+		t.Fatalf("expected down arrow to move across button bar, got %d", dialog.buttonIndex)
+	}
+	dialog.Update(ui.KeyMsg{Type: ui.KeyUp})
+	if dialog.buttonIndex != 0 {
+		t.Fatalf("expected up arrow to move back across button bar, got %d", dialog.buttonIndex)
 	}
 }

@@ -182,14 +182,8 @@ func (d *PreferencesDialog) Update(msg ui.KeyMsg) PreferencesAction {
 		}
 		return PreferencesAction{}
 	case "up":
-		if action, ok := d.handleFieldStep(1); ok {
-			return action
-		}
 		return d.moveVertical(-1)
 	case "down":
-		if action, ok := d.handleFieldStep(-1); ok {
-			return action
-		}
 		return d.moveVertical(1)
 	case "left":
 		return d.moveHorizontal(-1)
@@ -461,11 +455,16 @@ func (d PreferencesDialog) dialog(width int, palette theme.Palette) ui.Node {
 
 	buttons := ui.ButtonRow{
 		Buttons: []ui.Button{
-			{Label: "OK", Primary: true, Focused: d.focus == preferencesFocusButtons && d.buttonIndex == 0},
-			{Label: "Cancel", Focused: d.focus == preferencesFocusButtons && d.buttonIndex == 1},
+			{Label: "OK", Primary: true},
+			{Label: "Cancel"},
 		},
 		Align: ui.HorizontalAlignRight,
 		Width: dialogWidth - 4,
+	}
+	if d.focus == preferencesFocusButtons {
+		buttons.Index = d.buttonIndex
+	} else {
+		buttons.Index = -1
 	}
 
 	buttons.Width = maxInt(0, dialogWidth-6)
@@ -597,46 +596,6 @@ func (d PreferencesDialog) currentFieldKind() preferencesFieldKind {
 	return fields[d.fieldIndex].Kind
 }
 
-func (d *PreferencesDialog) handleFieldStep(delta int) (PreferencesAction, bool) {
-	if d.focus != preferencesFocusFields || d.currentFieldKind() != preferencesFieldInteger {
-		return PreferencesAction{}, false
-	}
-	fields := d.currentFields()
-	if d.fieldIndex < 0 || d.fieldIndex >= len(fields) {
-		return PreferencesAction{}, false
-	}
-	editor := d.integerEditor(fields[d.fieldIndex].ID)
-	value, err := strconv.Atoi(strings.TrimSpace(editor.Value()))
-	if err != nil {
-		return PreferencesAction{}, false
-	}
-	value += delta
-	if value < 1 {
-		value = 1
-	}
-	switch fields[d.fieldIndex].ID {
-	case "max_tool_loop_steps":
-		d.draft.MaxToolLoopSteps = value
-	case "auto_compact_at":
-		if value < 1 {
-			value = 1
-		}
-		if value > 100 {
-			value = 100
-		}
-		d.draft.AutoCompactAt = value
-	case "compaction_keep_tool_batches":
-		value = config.NormalizeCompactionKeepToolBatches(value)
-		d.draft.CompactionKeepToolBatches = value
-	case "sidebar_width":
-		d.draft.UI.SidebarWidth = value
-	default:
-		return PreferencesAction{}, false
-	}
-	d.setIntegerEditorValue(fields[d.fieldIndex].ID, value)
-	return PreferencesAction{Kind: PreferencesActionChanged, Values: d.draft}, true
-}
-
 func (d *PreferencesDialog) updateCurrentIntegerEditor(msg ui.KeyMsg) (PreferencesAction, bool) {
 	fields := d.currentFields()
 	if len(fields) == 0 || d.fieldIndex < 0 || d.fieldIndex >= len(fields) {
@@ -734,42 +693,40 @@ func (d *PreferencesDialog) setIntegerEditorValue(id string, value int) {
 	d.storeIntegerEditor(id, editor)
 }
 
-func (d PreferencesDialog) renderIntegerField(field preferencesField, width int, palette theme.Palette, active bool) ui.Node {
+func (d PreferencesDialog) renderIntegerField(field preferencesField, width int, _ theme.Palette, active bool) ui.Node {
 	editor := d.integerEditor(field.ID)
 	line := editor.VisibleLine()
-	foreground := palette.MarkdownText
-	background := palette.ScreenBackground
-	borderColor := palette.SidebarBorder
-	if active {
-		foreground = palette.UserTextForeground
-		background = palette.UserTextBackground
-		borderColor = firstNonEmptyColor(palette.SelectionBackground, palette.ActivityText, palette.SidebarBorder)
+	return ui.AsNode(ui.ChoiceRow{
+		Label:       field.Label,
+		Description: field.Description,
+		Value:       d.integerFieldValue(editor, line, active),
+		Width:       width,
+		Focused:     active,
+	})
+}
+
+func (d PreferencesDialog) integerFieldValue(editor textarea.Model, line textarea.VisibleLine, active bool) string {
+	if strings.TrimSpace(editor.Value()) == "" {
+		if active && editor.CursorVisible() {
+			return "█"
+		}
+		return ""
 	}
-	return ui.AsNode(ui.NewFlexBox(
-		ui.DirectionVertical,
-		[]ui.Child{
-			ui.Fixed(ui.AsNode(ui.NewFlexBox(
-				ui.DirectionHorizontal,
-				[]ui.Child{
-					ui.Fixed(ui.Static{Content: field.Label}),
-					ui.Flex(ui.Spacer{}, 1),
-					ui.Fixed(ui.Static{Content: truncateText(field.Description, maxInt(16, width-ui.PlainWidth(field.Label)-3))}),
-				},
-				0,
-			))),
-			ui.Fixed(ui.InputField{
-				Width:         maxInt(18, width),
-				Value:         editor.Value(),
-				ContentBefore: line.Before(),
-				ContentCursor: line.Cursor(),
-				ContentAfter:  line.After(),
-				CursorVisible: active && editor.CursorVisible(),
-				Foreground:    foreground,
-				Background:    background,
-				PlaceholderFG: palette.ComposerMutedText,
-				BorderColor:   borderColor,
-			}),
-		},
-		1,
-	))
+	before := line.Before()
+	cursor := line.Cursor()
+	after := line.After()
+	if !active {
+		return before + cursor + after
+	}
+	return before + integerFieldCursor(cursor, editor.CursorVisible()) + after
+}
+
+func integerFieldCursor(cursor string, visible bool) string {
+	if !visible {
+		return cursor
+	}
+	if cursor == "" || cursor == " " {
+		return "█"
+	}
+	return cursor
 }
