@@ -22,8 +22,9 @@ type Manager struct {
 	engine promptRunner
 	store  *store.Store
 
-	mu   sync.RWMutex
-	runs map[int64]runState
+	mu       sync.RWMutex
+	runs     map[int64]runState
+	runtimes map[int64]*Runtime
 }
 
 type runState struct {
@@ -35,9 +36,10 @@ type runState struct {
 
 func New(engine *agent.Engine, st *store.Store) *Manager {
 	return &Manager{
-		engine: engine,
-		store:  st,
-		runs:   map[int64]runState{},
+		engine:   engine,
+		store:    st,
+		runs:     map[int64]runState{},
+		runtimes: map[int64]*Runtime{},
 	}
 }
 

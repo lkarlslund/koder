@@ -19,6 +19,7 @@ import (
 	"github.com/lkarlslund/koder/internal/agent"
 	"github.com/lkarlslund/koder/internal/appstate"
 	"github.com/lkarlslund/koder/internal/attachment"
+	"github.com/lkarlslund/koder/internal/chatruntime"
 	kclipboard "github.com/lkarlslund/koder/internal/clipboard"
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/debugsrv"
@@ -205,6 +206,12 @@ type eventMsg struct {
 	events <-chan domain.Event
 }
 
+type runtimeUpdateMsg struct {
+	chatID  int64
+	update  chatruntime.Update
+	updates <-chan chatruntime.Update
+}
+
 type slashCommand struct {
 	Name         string
 	Description  string
@@ -260,6 +267,9 @@ type runPromptMsg struct {
 	session        domain.Session
 	chat           domain.Chat
 	events         <-chan domain.Event
+	runtime        *chatruntime.Runtime
+	runtimeUpdates <-chan chatruntime.Update
+	runtimeUnsub   func()
 	err            error
 	providerID     string
 	contextWindow  int
@@ -553,6 +563,7 @@ type Model struct {
 	cfg                         config.Config
 	store                       *store.Store
 	agent                       *agent.Engine
+	runtimeMgr                  *chatruntime.Manager
 	exec                        *execruntime.Manager
 	renderer                    *markdown.Renderer
 	palette                     theme.Palette
@@ -653,6 +664,9 @@ type Model struct {
 	activeOpCancel              context.CancelFunc
 	activeOpCancels             map[int64]context.CancelFunc
 	activeEventStream           bool
+	currentRuntime              *chatruntime.Runtime
+	currentRuntimeUpdates       <-chan chatruntime.Update
+	currentRuntimeUnsub         func()
 	queueEditMode               bool
 	queueSelection              int
 	pendingModelNote            string
@@ -758,6 +772,9 @@ func NewWithWorkdir(cfg config.Config, st *store.Store, a *agent.Engine, mode St
 	}
 	if a != nil {
 		model.exec = a.ExecManager()
+	}
+	if a != nil && st != nil {
+		model.runtimeMgr = chatruntime.New(a, st)
 	}
 	model.syncComposerVisibility()
 	return model, nil
@@ -889,13 +906,54 @@ func (m Model) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 		}
 		m.currentSession = msg.session
 		m.currentChat = msg.chat
+		if msg.runtime != nil {
+			m.currentRuntime = msg.runtime
+		}
+		if msg.runtimeUpdates != nil {
+			if m.currentRuntimeUnsub != nil {
+				m.currentRuntimeUnsub()
+			}
+			m.currentRuntimeUpdates = msg.runtimeUpdates
+			m.currentRuntimeUnsub = msg.runtimeUnsub
+		}
 		m.clampQueueSelection()
 		m.pendingModelNote = ""
-		m.activeEventStream = msg.events != nil
+		m.activeEventStream = msg.events != nil || msg.runtimeUpdates != nil
 		m.syncContextFromChat()
 		m.ensureContextEstimateFromState()
 		m.startWaitingForLLM()
-		return m, ui.Batch(nextEventCmd(msg.chat.ID, msg.events), m.spinnerCmdIfNeeded(), m.refreshExecSubscriptionCmd(), m.syncWindowTitleCmd())
+		cmds := []ui.Cmd{m.spinnerCmdIfNeeded(), m.refreshExecSubscriptionCmd(), m.syncWindowTitleCmd()}
+		if msg.events != nil {
+			cmds = append(cmds, nextEventCmd(msg.chat.ID, msg.events))
+		}
+		if msg.runtimeUpdates != nil {
+			cmds = append(cmds, nextRuntimeUpdateCmd(msg.chat.ID, msg.runtimeUpdates))
+		}
+		return m, ui.Batch(cmds...)
+	case runtimeUpdateMsg:
+		if msg.chatID == 0 || msg.chatID != m.currentChat.ID {
+			return m, nil
+		}
+		if msg.updates == nil {
+			m.activeEventStream = false
+			m.stopBusy()
+			return m, m.syncWindowTitleCmd()
+		}
+		m.invalidateBodyCache()
+		m.setQueuedInputs(msg.update.Queue)
+		if msg.update.Event != nil {
+			m.recordEvent(msg.chatID, *msg.update.Event)
+			m.applyCurrentChatEvent(*msg.update.Event)
+			m.applyEvent(*msg.update.Event)
+		}
+		if !msg.update.Active && msg.update.Event == nil {
+			m.activeEventStream = false
+			m.stopBusyWithStatus("Idle")
+		}
+		if msg.update.StatusText != "" && msg.update.Event == nil {
+			m.status = msg.update.StatusText
+		}
+		return m, ui.Batch(nextRuntimeUpdateCmd(msg.chatID, msg.updates), m.syncWindowTitleCmd())
 	case bangCommandMsg:
 		m.invalidateBodyCache()
 		if msg.err != nil {
@@ -3823,12 +3881,36 @@ func (m Model) promptCmd(ctx context.Context, prompt string, drafts []attachment
 		if err != nil {
 			return runPromptMsg{err: err}
 		}
-		events, err := m.agent.RunPromptInChat(ctx, session, chat, prompt, drafts, refs, m.pendingModelNote)
+		if m.runtimeMgr == nil {
+			events, err := m.agent.RunPromptInChat(ctx, session, chat, prompt, drafts, refs, m.pendingModelNote)
+			return runPromptMsg{
+				session:        session,
+				chat:           chat,
+				events:         events,
+				err:            err,
+				providerID:     providerID,
+				contextWindow:  contextWindow,
+				contextChecked: contextChecked,
+			}
+		}
+		rt, err := m.runtimeMgr.Runtime(ctx, session, chat)
+		if err != nil {
+			return runPromptMsg{err: err}
+		}
+		updates, unsub := rt.Subscribe()
+		rt.Enqueue(chatruntime.QueueItem{
+			Kind:        chatruntime.QueueKindSteer,
+			Text:        prompt,
+			Attachments: drafts,
+			References:  refs,
+			Note:        m.pendingModelNote,
+		})
 		return runPromptMsg{
 			session:        session,
 			chat:           chat,
-			events:         events,
-			err:            err,
+			runtime:        rt,
+			runtimeUpdates: updates,
+			runtimeUnsub:   unsub,
 			providerID:     providerID,
 			contextWindow:  contextWindow,
 			contextChecked: contextChecked,
@@ -3939,12 +4021,30 @@ func (m Model) continueCmd(ctx context.Context) ui.Cmd {
 		if err != nil {
 			return runPromptMsg{err: err}
 		}
-		events, err := m.agent.RunContinueInChat(ctx, session, chat, m.pendingModelNote)
+		if m.runtimeMgr == nil {
+			events, err := m.agent.RunContinueInChat(ctx, session, chat, m.pendingModelNote)
+			return runPromptMsg{
+				session:        session,
+				chat:           chat,
+				events:         events,
+				err:            err,
+				providerID:     providerID,
+				contextWindow:  contextWindow,
+				contextChecked: contextChecked,
+			}
+		}
+		rt, err := m.runtimeMgr.Runtime(ctx, session, chat)
+		if err != nil {
+			return runPromptMsg{err: err}
+		}
+		updates, unsub := rt.Subscribe()
+		rt.Enqueue(chatruntime.QueueItem{Kind: chatruntime.QueueKindContinue, Note: m.pendingModelNote})
 		return runPromptMsg{
 			session:        session,
 			chat:           chat,
-			events:         events,
-			err:            err,
+			runtime:        rt,
+			runtimeUpdates: updates,
+			runtimeUnsub:   unsub,
 			providerID:     providerID,
 			contextWindow:  contextWindow,
 			contextChecked: contextChecked,
@@ -4442,6 +4542,16 @@ func nextEventCmd(chatID int64, events <-chan domain.Event) ui.Cmd {
 	}
 }
 
+func nextRuntimeUpdateCmd(chatID int64, updates <-chan chatruntime.Update) ui.Cmd {
+	return func() ui.Msg {
+		update, ok := <-updates
+		if !ok {
+			return runtimeUpdateMsg{}
+		}
+		return runtimeUpdateMsg{chatID: chatID, update: update, updates: updates}
+	}
+}
+
 type bangPrompt struct {
 	Double  bool
 	Command string
@@ -4616,6 +4726,34 @@ func (m *Model) syncChatMirrorsFromState() {
 	m.messages = m.chatState.SnapshotMessages()
 	m.parts = m.chatState.SnapshotParts()
 	m.approvals = m.chatState.Approvals()
+}
+
+func (m *Model) detachCurrentRuntime() {
+	if m.currentRuntimeUnsub != nil {
+		m.currentRuntimeUnsub()
+	}
+	m.currentRuntime = nil
+	m.currentRuntimeUpdates = nil
+	m.currentRuntimeUnsub = nil
+}
+
+func (m *Model) attachCurrentRuntime(session domain.Session, chat domain.Chat) (<-chan chatruntime.Update, *chatruntime.Runtime, error) {
+	if m.runtimeMgr == nil || chat.ID == 0 {
+		return nil, nil, nil
+	}
+	if m.currentRuntime != nil && m.currentChat.ID == chat.ID && m.currentRuntimeUpdates != nil {
+		return m.currentRuntimeUpdates, m.currentRuntime, nil
+	}
+	m.detachCurrentRuntime()
+	rt, err := m.runtimeMgr.Runtime(context.Background(), session, chat)
+	if err != nil {
+		return nil, nil, err
+	}
+	updates, unsub := rt.Subscribe()
+	m.currentRuntime = rt
+	m.currentRuntimeUpdates = updates
+	m.currentRuntimeUnsub = unsub
+	return updates, rt, nil
 }
 
 func min(a, b int) int {
