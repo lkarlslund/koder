@@ -108,6 +108,13 @@ type dispatchQueuedCmd struct {
 }
 
 type interruptCmd struct{}
+type approveCmd struct {
+	approvalID int64
+	rule       *domain.PermissionOverride
+}
+type denyCmd struct {
+	approvalID int64
+}
 type closeCmd struct{}
 type streamEventCmd struct {
 	event domain.Event
@@ -116,6 +123,12 @@ type streamClosedCmd struct{}
 
 type continueRunner interface {
 	RunContinueInChat(context.Context, domain.Session, domain.Chat, string) (<-chan domain.Event, error)
+}
+
+type approvalRunner interface {
+	ApproveInChat(context.Context, int64, int64, int64) (<-chan domain.Event, error)
+	ApproveInChatWithRule(context.Context, int64, int64, int64, domain.PermissionOverride) (<-chan domain.Event, error)
+	DenyInChat(context.Context, int64, int64, int64) (<-chan domain.Event, error)
 }
 
 func (m *Manager) Runtime(ctx context.Context, session domain.Session, chat domain.Chat) (*Runtime, error) {
@@ -179,6 +192,18 @@ func (r *Runtime) DispatchQueued(item domain.QueuedInput, remaining []domain.Que
 
 func (r *Runtime) Interrupt() {
 	r.inbox <- interruptCmd{}
+}
+
+func (r *Runtime) Approve(approvalID int64) {
+	r.inbox <- approveCmd{approvalID: approvalID}
+}
+
+func (r *Runtime) ApproveWithRule(approvalID int64, rule domain.PermissionOverride) {
+	r.inbox <- approveCmd{approvalID: approvalID, rule: &rule}
+}
+
+func (r *Runtime) Deny(approvalID int64) {
+	r.inbox <- denyCmd{approvalID: approvalID}
 }
 
 func (r *Runtime) Close() {
@@ -251,6 +276,10 @@ func (r *Runtime) loop() {
 			r.handleDispatchQueued(typed.item, typed.remaining)
 		case interruptCmd:
 			r.handleInterrupt()
+		case approveCmd:
+			r.handleApprove(typed.approvalID, typed.rule)
+		case denyCmd:
+			r.handleDeny(typed.approvalID)
 		case streamEventCmd:
 			r.handleStreamEvent(typed.event)
 		case streamClosedCmd:
@@ -350,6 +379,80 @@ func (r *Runtime) handleInterrupt() {
 	if cancel != nil {
 		cancel()
 	}
+}
+
+func (r *Runtime) handleApprove(approvalID int64, rule *domain.PermissionOverride) {
+	runner, ok := r.engine.(approvalRunner)
+	if !ok {
+		err := fmt.Errorf("approval is not supported by runner")
+		evt := domain.Event{Kind: domain.EventKindError, Err: err}
+		r.broadcast(r.snapshotUpdateFlags(&evt, false, false, true, false, false))
+		return
+	}
+	r.mu.Lock()
+	ctx, cancel := context.WithCancel(context.Background())
+	r.cancel = cancel
+	r.active = true
+	r.status = StatusWaitingLLM
+	r.statusText = "Waiting for LLM response"
+	sessionID := r.session.ID
+	chatID := r.chat.ID
+	r.mu.Unlock()
+	r.broadcast(r.snapshotUpdateFlags(nil, false, false, true, false, false))
+
+	var (
+		events <-chan domain.Event
+		err    error
+	)
+	if rule != nil {
+		events, err = runner.ApproveInChatWithRule(ctx, sessionID, chatID, approvalID, *rule)
+	} else {
+		events, err = runner.ApproveInChat(ctx, sessionID, chatID, approvalID)
+	}
+	r.handleApprovalEventStream(events, err)
+}
+
+func (r *Runtime) handleDeny(approvalID int64) {
+	runner, ok := r.engine.(approvalRunner)
+	if !ok {
+		err := fmt.Errorf("approval is not supported by runner")
+		evt := domain.Event{Kind: domain.EventKindError, Err: err}
+		r.broadcast(r.snapshotUpdateFlags(&evt, false, false, true, false, false))
+		return
+	}
+	r.mu.Lock()
+	ctx, cancel := context.WithCancel(context.Background())
+	r.cancel = cancel
+	r.active = true
+	r.status = StatusWaitingLLM
+	r.statusText = "Waiting for LLM response"
+	sessionID := r.session.ID
+	chatID := r.chat.ID
+	r.mu.Unlock()
+	r.broadcast(r.snapshotUpdateFlags(nil, false, false, true, false, false))
+
+	events, err := runner.DenyInChat(ctx, sessionID, chatID, approvalID)
+	r.handleApprovalEventStream(events, err)
+}
+
+func (r *Runtime) handleApprovalEventStream(events <-chan domain.Event, err error) {
+	if err != nil {
+		r.mu.Lock()
+		r.active = false
+		r.cancel = nil
+		r.status = StatusErrored
+		r.statusText = err.Error()
+		r.mu.Unlock()
+		evt := domain.Event{Kind: domain.EventKindError, Err: err}
+		r.broadcast(r.snapshotUpdateFlags(&evt, false, false, true, false, false))
+		return
+	}
+	go func() {
+		for evt := range events {
+			r.inbox <- streamEventCmd{event: evt}
+		}
+		r.inbox <- streamClosedCmd{}
+	}()
 }
 
 func (r *Runtime) handleStreamEvent(evt domain.Event) {

@@ -13,6 +13,8 @@ import (
 type runtimeFakeRunner struct {
 	promptCalls   int
 	continueCalls int
+	approveCalls  int
+	denyCalls     int
 	prompts       []string
 	promptNotes   []string
 	continueNotes []string
@@ -36,6 +38,34 @@ func (f *runtimeFakeRunner) RunPromptInChat(_ context.Context, _ domain.Session,
 func (f *runtimeFakeRunner) RunContinueInChat(_ context.Context, _ domain.Session, _ domain.Chat, note string) (<-chan domain.Event, error) {
 	f.continueCalls++
 	f.continueNotes = append(f.continueNotes, note)
+	if len(f.events) == 0 {
+		ch := make(chan domain.Event)
+		close(ch)
+		return ch, nil
+	}
+	evt := f.events[0]
+	f.events = f.events[1:]
+	return evt, nil
+}
+
+func (f *runtimeFakeRunner) ApproveInChat(_ context.Context, _ int64, _ int64, _ int64) (<-chan domain.Event, error) {
+	f.approveCalls++
+	if len(f.events) == 0 {
+		ch := make(chan domain.Event)
+		close(ch)
+		return ch, nil
+	}
+	evt := f.events[0]
+	f.events = f.events[1:]
+	return evt, nil
+}
+
+func (f *runtimeFakeRunner) ApproveInChatWithRule(_ context.Context, _ int64, _ int64, _ int64, _ domain.PermissionOverride) (<-chan domain.Event, error) {
+	return f.ApproveInChat(context.Background(), 0, 0, 0)
+}
+
+func (f *runtimeFakeRunner) DenyInChat(_ context.Context, _ int64, _ int64, _ int64) (<-chan domain.Event, error) {
+	f.denyCalls++
 	if len(f.events) == 0 {
 		ch := make(chan domain.Event)
 		close(ch)
@@ -220,5 +250,40 @@ func TestRuntimePreservesPromptAndContinueNotes(t *testing.T) {
 	}
 	if got := runner.continueNotes[0]; got != "continue-note" {
 		t.Fatalf("continue note = %q", got)
+	}
+}
+
+func TestRuntimeApproveStartsApprovalStream(t *testing.T) {
+	st := openTestStore(t)
+	session, chat, _ := createSessionWithPlan(t, st)
+	approvalEvents := make(chan domain.Event, 1)
+	approvalEvents <- domain.Event{Kind: domain.EventKindApprovalReply, Text: "approved"}
+	close(approvalEvents)
+	runner := &runtimeFakeRunner{events: []<-chan domain.Event{approvalEvents}}
+	mgr := New(nil, st)
+	mgr.engine = runner
+
+	rt, err := mgr.Runtime(context.Background(), session, chat)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updates, unsub := rt.Subscribe()
+	defer unsub()
+
+	rt.Approve(42)
+
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case update := <-updates:
+			if update.Event != nil && update.Event.Kind == domain.EventKindApprovalReply {
+				if runner.approveCalls != 1 {
+					t.Fatalf("approve calls = %d", runner.approveCalls)
+				}
+				return
+			}
+		case <-deadline:
+			t.Fatal("timed out waiting for approval reply")
+		}
 	}
 }

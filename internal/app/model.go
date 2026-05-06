@@ -211,6 +211,7 @@ type runtimeUpdateMsg struct {
 	update  chatruntime.Update
 	updates <-chan chatruntime.Update
 }
+type runtimeKickMsg struct{}
 
 type slashCommand struct {
 	Name         string
@@ -955,6 +956,8 @@ func (m Model) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 			m.refreshViewport()
 		}
 		return m, ui.Batch(nextRuntimeUpdateCmd(msg.chatID, msg.updates), m.syncWindowTitleCmd())
+	case runtimeKickMsg:
+		return m, m.syncWindowTitleCmd()
 	case bangCommandMsg:
 		m.invalidateBodyCache()
 		if msg.err != nil {
@@ -5526,6 +5529,12 @@ func (m Model) compactCmd(ctx context.Context) ui.Cmd {
 }
 
 func (m Model) approveCmd(ctx context.Context, approvalID int64) ui.Cmd {
+	if m.currentRuntime != nil && m.currentChat.ID > 0 {
+		return func() ui.Msg {
+			m.currentRuntime.Approve(approvalID)
+			return runtimeKickMsg{}
+		}
+	}
 	return func() ui.Msg {
 		events, err := m.agent.ApproveInChat(ctx, m.currentSession.ID, m.currentChat.ID, approvalID)
 		return promptDoneMsg{events: events, err: err}
@@ -5533,6 +5542,12 @@ func (m Model) approveCmd(ctx context.Context, approvalID int64) ui.Cmd {
 }
 
 func (m Model) approveWithRuleCmd(ctx context.Context, approvalID int64, rule domain.PermissionOverride) ui.Cmd {
+	if m.currentRuntime != nil && m.currentChat.ID > 0 {
+		return func() ui.Msg {
+			m.currentRuntime.ApproveWithRule(approvalID, rule)
+			return runtimeKickMsg{}
+		}
+	}
 	return func() ui.Msg {
 		events, err := m.agent.ApproveInChatWithRule(ctx, m.currentSession.ID, m.currentChat.ID, approvalID, rule)
 		return promptDoneMsg{events: events, err: err}
@@ -5540,6 +5555,12 @@ func (m Model) approveWithRuleCmd(ctx context.Context, approvalID int64, rule do
 }
 
 func (m Model) denyCmd(ctx context.Context, approvalID int64) ui.Cmd {
+	if m.currentRuntime != nil && m.currentChat.ID > 0 {
+		return func() ui.Msg {
+			m.currentRuntime.Deny(approvalID)
+			return runtimeKickMsg{}
+		}
+	}
 	return func() ui.Msg {
 		events, err := m.agent.DenyInChat(ctx, m.currentSession.ID, m.currentChat.ID, approvalID)
 		return promptDoneMsg{events: events, err: err}
