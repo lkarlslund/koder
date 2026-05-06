@@ -1,4 +1,4 @@
-package chatruntime
+package chat
 
 import (
 	"context"
@@ -9,6 +9,7 @@ import (
 	"github.com/lkarlslund/koder/internal/attachment"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/reference"
+	"github.com/lkarlslund/koder/internal/store"
 )
 
 type runtimeFakeRunner struct {
@@ -77,18 +78,65 @@ func (f *runtimeFakeRunner) DenyInChat(_ context.Context, _ int64, _ int64, _ in
 	return evt, nil
 }
 
+func openTestStore(t *testing.T) *store.Store {
+	t.Helper()
+	st, err := store.OpenWithOptions(t.TempDir(), store.Options{Backend: store.BackendJSONFS})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = st.Close()
+	})
+	return st
+}
+
+func createSessionWithPlan(t *testing.T, st *store.Store) (domain.Session, domain.Chat, store.MilestonePlan) {
+	t.Helper()
+	ctx := context.Background()
+	session, err := st.CreateSession(ctx, "test", "provider", "model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chat, err := st.DefaultChat(ctx, session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := st.SetMilestonePlan(ctx, session.ID, "Ship it", []store.Milestone{
+		{Ref: "alpha", Title: "Alpha", Status: domain.MilestoneStatusInProgress, Position: 0},
+		{Ref: "beta", Title: "Beta", Status: domain.MilestoneStatusPending, Position: 1},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.AddTodoItems(ctx, session.ID, "alpha", []string{"Inspect state", "Write tests"}); err != nil {
+		t.Fatal(err)
+	}
+	return session, chat, plan
+}
+
+func newTestChat(t *testing.T, st *store.Store, session domain.Session, chatRecord domain.Chat, runner Runner) *Chat {
+	t.Helper()
+	messages, parts, err := st.PartsForChat(context.Background(), chatRecord.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	approvals, err := st.PendingApprovalsForChat(context.Background(), chatRecord.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chat, err := New(session, chatRecord, messages, parts, approvals, runner, st, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return chat
+}
+
 func TestRuntimeEnqueueStartsPrompt(t *testing.T) {
 	st := openTestStore(t)
 	session, chat, _ := createSessionWithPlan(t, st)
 	events := make(chan domain.Event)
 	runner := &runtimeFakeRunner{events: []<-chan domain.Event{events}}
-	mgr := New(nil, st)
-	mgr.engine = runner
-
-	rt, err := mgr.Runtime(context.Background(), session, chat)
-	if err != nil {
-		t.Fatal(err)
-	}
+	rt := newTestChat(t, st, session, chat, runner)
 	updates, unsub := rt.Subscribe()
 	defer unsub()
 
@@ -145,13 +193,7 @@ func TestRuntimeQueuesSecondItemUntilFirstCompletes(t *testing.T) {
 	second <- domain.Event{Kind: domain.EventKindMessageDone}
 	close(second)
 	runner := &runtimeFakeRunner{events: []<-chan domain.Event{first, second}}
-	mgr := New(nil, st)
-	mgr.engine = runner
-
-	rt, err := mgr.Runtime(context.Background(), session, chat)
-	if err != nil {
-		t.Fatal(err)
-	}
+	rt := newTestChat(t, st, session, chat, runner)
 
 	rt.Enqueue(QueueItem{Kind: QueueKindSteer, Text: "first"})
 	rt.Enqueue(QueueItem{Kind: QueueKindQueued, Text: "second"})
@@ -183,13 +225,7 @@ func TestRuntimeDispatchQueuedUsesSelectedItemAndPreservesNote(t *testing.T) {
 	session, chat, _ := createSessionWithPlan(t, st)
 	events := make(chan domain.Event)
 	runner := &runtimeFakeRunner{events: []<-chan domain.Event{events}}
-	mgr := New(nil, st)
-	mgr.engine = runner
-
-	rt, err := mgr.Runtime(context.Background(), session, chat)
-	if err != nil {
-		t.Fatal(err)
-	}
+	rt := newTestChat(t, st, session, chat, runner)
 
 	rt.DispatchQueued(
 		domain.QueuedInput{ID: 99, Kind: domain.QueuedInputKindSteer, Text: "selected", CreatedAt: time.Now().UTC()},
@@ -226,13 +262,7 @@ func TestRuntimePreservesPromptAndContinueNotes(t *testing.T) {
 	continueEvents <- domain.Event{Kind: domain.EventKindMessageDone}
 	close(continueEvents)
 	runner := &runtimeFakeRunner{events: []<-chan domain.Event{promptEvents, continueEvents}}
-	mgr := New(nil, st)
-	mgr.engine = runner
-
-	rt, err := mgr.Runtime(context.Background(), session, chat)
-	if err != nil {
-		t.Fatal(err)
-	}
+	rt := newTestChat(t, st, session, chat, runner)
 
 	rt.Enqueue(QueueItem{Kind: QueueKindSteer, Text: "prompt", Note: "prompt-note"})
 	rt.Enqueue(QueueItem{Kind: QueueKindContinue, Note: "continue-note"})
@@ -261,13 +291,7 @@ func TestRuntimeApproveStartsApprovalStream(t *testing.T) {
 	approvalEvents <- domain.Event{Kind: domain.EventKindApprovalReply, Text: "approved"}
 	close(approvalEvents)
 	runner := &runtimeFakeRunner{events: []<-chan domain.Event{approvalEvents}}
-	mgr := New(nil, st)
-	mgr.engine = runner
-
-	rt, err := mgr.Runtime(context.Background(), session, chat)
-	if err != nil {
-		t.Fatal(err)
-	}
+	rt := newTestChat(t, st, session, chat, runner)
 	updates, unsub := rt.Subscribe()
 	defer unsub()
 
@@ -293,7 +317,7 @@ func TestRuntimeCancelWhileToolsRunningStagesThenForcesCancel(t *testing.T) {
 	session := domain.Session{ID: 1}
 	chat := domain.Chat{ID: 2, SessionID: 1}
 	cancelled := false
-	rt := &Runtime{
+	rt := &Chat{
 		session: session,
 		chat:    chat,
 		state:   appstate.NewChatState(chat, nil, nil, nil),
@@ -337,13 +361,7 @@ func TestRuntimeCompactionCompletionUpdatesContextImmediately(t *testing.T) {
 	chat.LastKnownContextTokens = 1200
 	chat.ContextTokensKnown = true
 	runner := &runtimeFakeRunner{}
-	mgr := New(nil, st)
-	mgr.engine = runner
-
-	rt, err := mgr.Runtime(context.Background(), session, chat)
-	if err != nil {
-		t.Fatal(err)
-	}
+	rt := newTestChat(t, st, session, chat, runner)
 	updates, unsub := rt.Subscribe()
 	defer unsub()
 

@@ -18,7 +18,7 @@ import (
 	"github.com/lkarlslund/koder/internal/agent"
 	"github.com/lkarlslund/koder/internal/appstate"
 	"github.com/lkarlslund/koder/internal/attachment"
-	"github.com/lkarlslund/koder/internal/chatruntime"
+	chatpkg "github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/debugsrv"
 	"github.com/lkarlslund/koder/internal/domain"
@@ -2773,8 +2773,8 @@ func TestRunPromptErrorAppendsAssistantErrorToTranscript(t *testing.T) {
 }
 
 func TestRunPromptMsgKeepsExistingRuntimeSubscription(t *testing.T) {
-	rt := new(chatruntime.Runtime)
-	updates := make(chan chatruntime.Update)
+	rt := new(chatpkg.Chat)
+	updates := make(chan chatpkg.Update)
 	unsubCalled := 0
 	m := Model{
 		cfg:                   config.Default().WithStateDir(t.TempDir()),
@@ -2817,7 +2817,7 @@ func TestRuntimeUpdateMsgAppliesRuntimeSnapshot(t *testing.T) {
 		Body:      "queued steer",
 		CreatedAt: now,
 	}
-	updates := make(chan chatruntime.Update)
+	updates := make(chan chatpkg.Update)
 	m := Model{
 		cfg:            config.Default().WithStateDir(t.TempDir()),
 		composer:       textarea.New(),
@@ -2829,8 +2829,8 @@ func TestRuntimeUpdateMsgAppliesRuntimeSnapshot(t *testing.T) {
 
 	updated, _ := m.Update(runtimeUpdateMsg{
 		chatID: 2,
-		update: chatruntime.Update{
-			Snapshot: chatruntime.Snapshot{
+		update: chatpkg.Update{
+			Snapshot: chatpkg.Snapshot{
 				Session:      domain.Session{ID: 1, Title: "Session"},
 				Chat:         domain.Chat{ID: 2, SessionID: 1, QueuedInputs: []domain.QueuedInput{{ID: 9, Kind: domain.QueuedInputKindQueued, Text: "later"}}},
 				Messages:     []domain.Message{message},
@@ -2840,7 +2840,7 @@ func TestRuntimeUpdateMsgAppliesRuntimeSnapshot(t *testing.T) {
 					Text:      "streaming text",
 					CreatedAt: now,
 				},
-				Status:     chatruntime.StatusStreamingResponse,
+				Status:     chatpkg.StatusStreamingResponse,
 				StatusText: "Streaming LLM response ...",
 				Context:    domain.ContextUsage{TotalTokens: 42, Estimated: true},
 				Active:     true,
@@ -2850,7 +2850,7 @@ func TestRuntimeUpdateMsgAppliesRuntimeSnapshot(t *testing.T) {
 			StatusChanged:     true,
 			ContextChanged:    true,
 			Active:            true,
-			Status:            chatruntime.StatusStreamingResponse,
+			Status:            chatpkg.StatusStreamingResponse,
 			StatusText:        "Streaming LLM response ...",
 			Queue:             []domain.QueuedInput{{ID: 9, Kind: domain.QueuedInputKindQueued, Text: "later"}},
 		},

@@ -19,7 +19,7 @@ import (
 	"github.com/lkarlslund/koder/internal/agent"
 	"github.com/lkarlslund/koder/internal/appstate"
 	"github.com/lkarlslund/koder/internal/attachment"
-	"github.com/lkarlslund/koder/internal/chatruntime"
+	chatpkg "github.com/lkarlslund/koder/internal/chat"
 	kclipboard "github.com/lkarlslund/koder/internal/clipboard"
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/debugsrv"
@@ -208,8 +208,8 @@ type eventMsg struct {
 
 type runtimeUpdateMsg struct {
 	chatID  int64
-	update  chatruntime.Update
-	updates <-chan chatruntime.Update
+	update  chatpkg.Update
+	updates <-chan chatpkg.Update
 }
 type runtimeKickMsg struct{}
 
@@ -268,8 +268,8 @@ type runPromptMsg struct {
 	session        domain.Session
 	chat           domain.Chat
 	events         <-chan domain.Event
-	runtime        *chatruntime.Runtime
-	runtimeUpdates <-chan chatruntime.Update
+	runtime        *chatpkg.Chat
+	runtimeUpdates <-chan chatpkg.Update
 	runtimeUnsub   func()
 	err            error
 	providerID     string
@@ -564,7 +564,6 @@ type Model struct {
 	cfg                         config.Config
 	store                       *store.Store
 	agent                       *agent.Engine
-	runtimeMgr                  *chatruntime.Manager
 	exec                        *execruntime.Manager
 	renderer                    *markdown.Renderer
 	palette                     theme.Palette
@@ -665,8 +664,8 @@ type Model struct {
 	activeOpCancel              context.CancelFunc
 	activeOpCancels             map[int64]context.CancelFunc
 	activeEventStream           bool
-	currentRuntime              *chatruntime.Runtime
-	currentRuntimeUpdates       <-chan chatruntime.Update
+	currentRuntime              *chatpkg.Chat
+	currentRuntimeUpdates       <-chan chatpkg.Update
 	currentRuntimeUnsub         func()
 	queueEditMode               bool
 	queueSelection              int
@@ -773,9 +772,6 @@ func NewWithWorkdir(cfg config.Config, st *store.Store, a *agent.Engine, mode St
 	}
 	if a != nil {
 		model.exec = a.ExecManager()
-	}
-	if a != nil && st != nil {
-		model.runtimeMgr = chatruntime.New(a, st)
 	}
 	model.syncComposerVisibility()
 	return model, nil
@@ -984,7 +980,7 @@ func (m Model) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 		reload := m.reloadDetailsCmd()
 		switch msg.followupMode {
 		case bangFollowupPrompt:
-			if m.runtimeMgr == nil {
+			if m.currentRuntime == nil {
 				m.appendLocalUserPrompt(msg.followupPrompt, nil, nil)
 			}
 			m.startWaitingForLLM()
@@ -1704,7 +1700,7 @@ func (m *Model) handleMainWindowKey(msg ui.KeyMsg) (bool, ui.Cmd) {
 		m.resetComposerInput()
 		m.draftAttachments = nil
 		m.draftReferences = nil
-		if m.runtimeMgr == nil {
+		if m.currentRuntime == nil {
 			m.appendLocalUserPrompt(prompt, drafts, refs)
 		}
 		m.startWaitingForLLM()
@@ -3903,25 +3899,16 @@ func (m Model) promptCmd(ctx context.Context, prompt string, drafts []attachment
 		if err != nil {
 			return runPromptMsg{err: err}
 		}
-		if m.runtimeMgr == nil {
-			events, err := m.agent.RunPromptInChat(ctx, session, chat, prompt, drafts, refs, m.pendingModelNote)
-			return runPromptMsg{
-				session:        session,
-				chat:           chat,
-				events:         events,
-				err:            err,
-				providerID:     providerID,
-				contextWindow:  contextWindow,
-				contextChecked: contextChecked,
-			}
+		if m.agent == nil {
+			return runPromptMsg{err: fmt.Errorf("agent is unavailable")}
 		}
-		rt, err := m.runtimeMgr.Runtime(ctx, session, chat)
+		rt, err := m.agent.Chat(ctx, session, chat)
 		if err != nil {
 			return runPromptMsg{err: err}
 		}
 		updates, unsub := rt.Subscribe()
-		rt.Enqueue(chatruntime.QueueItem{
-			Kind:        chatruntime.QueueKindSteer,
+		rt.Enqueue(chatpkg.QueueItem{
+			Kind:        chatpkg.QueueKindSteer,
 			Text:        prompt,
 			Attachments: drafts,
 			References:  refs,
@@ -4043,24 +4030,15 @@ func (m Model) continueCmd(ctx context.Context) ui.Cmd {
 		if err != nil {
 			return runPromptMsg{err: err}
 		}
-		if m.runtimeMgr == nil {
-			events, err := m.agent.RunContinueInChat(ctx, session, chat, m.pendingModelNote)
-			return runPromptMsg{
-				session:        session,
-				chat:           chat,
-				events:         events,
-				err:            err,
-				providerID:     providerID,
-				contextWindow:  contextWindow,
-				contextChecked: contextChecked,
-			}
+		if m.agent == nil {
+			return runPromptMsg{err: fmt.Errorf("agent is unavailable")}
 		}
-		rt, err := m.runtimeMgr.Runtime(ctx, session, chat)
+		rt, err := m.agent.Chat(ctx, session, chat)
 		if err != nil {
 			return runPromptMsg{err: err}
 		}
 		updates, unsub := rt.Subscribe()
-		rt.Enqueue(chatruntime.QueueItem{Kind: chatruntime.QueueKindContinue, Note: m.pendingModelNote})
+		rt.Enqueue(chatpkg.QueueItem{Kind: chatpkg.QueueKindContinue, Note: m.pendingModelNote})
 		return runPromptMsg{
 			session:        session,
 			chat:           chat,
@@ -4564,7 +4542,7 @@ func nextEventCmd(chatID int64, events <-chan domain.Event) ui.Cmd {
 	}
 }
 
-func nextRuntimeUpdateCmd(chatID int64, updates <-chan chatruntime.Update) ui.Cmd {
+func nextRuntimeUpdateCmd(chatID int64, updates <-chan chatpkg.Update) ui.Cmd {
 	return func() ui.Msg {
 		update, ok := <-updates
 		if !ok {
@@ -4759,15 +4737,15 @@ func (m *Model) detachCurrentRuntime() {
 	m.currentRuntimeUnsub = nil
 }
 
-func (m *Model) attachCurrentRuntime(session domain.Session, chat domain.Chat) (<-chan chatruntime.Update, *chatruntime.Runtime, error) {
-	if m.runtimeMgr == nil || chat.ID == 0 {
+func (m *Model) attachCurrentRuntime(session domain.Session, chat domain.Chat) (<-chan chatpkg.Update, *chatpkg.Chat, error) {
+	if m.agent == nil || chat.ID == 0 {
 		return nil, nil, nil
 	}
 	if m.currentRuntime != nil && m.currentChat.ID == chat.ID && m.currentRuntimeUpdates != nil {
 		return m.currentRuntimeUpdates, m.currentRuntime, nil
 	}
 	m.detachCurrentRuntime()
-	rt, err := m.runtimeMgr.Runtime(context.Background(), session, chat)
+	rt, err := m.agent.Chat(context.Background(), session, chat)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -4778,7 +4756,7 @@ func (m *Model) attachCurrentRuntime(session domain.Session, chat domain.Chat) (
 	return updates, rt, nil
 }
 
-func (m *Model) applyRuntimeSnapshot(snapshot chatruntime.Snapshot) {
+func (m *Model) applyRuntimeSnapshot(snapshot chatpkg.Snapshot) {
 	if snapshot.Session.ID != 0 {
 		m.currentSession = m.normalizeSessionToolStates(snapshot.Session)
 		for idx := range m.sessions {
@@ -4823,7 +4801,7 @@ func (m *Model) applyRuntimeTelemetryEvent(evt domain.Event) {
 	}
 }
 
-func (m *Model) syncBusyFromRuntimeUpdate(update chatruntime.Update) {
+func (m *Model) syncBusyFromRuntimeUpdate(update chatpkg.Update) {
 	m.status = update.StatusText
 	if !update.Active {
 		if update.StatusText != "" {
@@ -4834,19 +4812,19 @@ func (m *Model) syncBusyFromRuntimeUpdate(update chatruntime.Update) {
 		return
 	}
 	switch update.Status {
-	case chatruntime.StatusWaitingLLM:
+	case chatpkg.StatusWaitingLLM:
 		m.startWaitingForLLM()
-	case chatruntime.StatusStreamingThoughts:
+	case chatpkg.StatusStreamingThoughts:
 		m.startBusy(busyScopeTranscript, update.StatusText)
 		m.setTranscriptBusyPhase(transcriptBusyPhaseThoughts)
-	case chatruntime.StatusStreamingResponse:
+	case chatpkg.StatusStreamingResponse:
 		m.startBusy(busyScopeTranscript, update.StatusText)
 		m.setTranscriptBusyPhase(transcriptBusyPhaseResponse)
-	case chatruntime.StatusRunningTools:
+	case chatpkg.StatusRunningTools:
 		m.startBusy(busyScopeTranscript, update.StatusText)
-	case chatruntime.StatusWaitingApproval:
+	case chatpkg.StatusWaitingApproval:
 		m.stopBusyWithStatus(update.StatusText)
-	case chatruntime.StatusErrored:
+	case chatpkg.StatusErrored:
 		m.stopBusyWithStatus(update.StatusText)
 	default:
 		if update.StatusText != "" {
@@ -5523,6 +5501,12 @@ func (m *Model) finishOperationWithError(err error) (ui.Model, ui.Cmd) {
 }
 
 func (m Model) compactCmd(ctx context.Context) ui.Cmd {
+	if m.currentRuntime != nil && m.currentChat.ID > 0 {
+		return func() ui.Msg {
+			err := m.currentRuntime.Compact()
+			return promptDoneMsg{err: err}
+		}
+	}
 	return func() ui.Msg {
 		events, err := m.agent.CompactChat(ctx, m.currentSession.ID, m.currentChat.ID)
 		return promptDoneMsg{events: events, err: err}

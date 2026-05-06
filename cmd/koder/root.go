@@ -16,7 +16,6 @@ import (
 	"github.com/lkarlslund/koder/internal/agent"
 	"github.com/lkarlslund/koder/internal/agents"
 	"github.com/lkarlslund/koder/internal/app"
-	"github.com/lkarlslund/koder/internal/chatruntime"
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/debugsrv"
 	"github.com/lkarlslund/koder/internal/domain"
@@ -124,7 +123,7 @@ func runTUI(ctx context.Context, mode app.StartupMode, workdir string, startupOp
 	registry.SetEditForgiveness(cfg.UI.EditForgiveness)
 	registry.SetExecControl(execruntime.NewManager())
 	engine := agent.New(cfg, st, registry, recorder, workdir, mcpManager)
-	registry.SetChatControl(chatruntime.New(engine, st))
+	registry.SetChatControl(engine)
 	return app.RunWithWorkdir(cfg, st, engine, mode, recorder, debugServer, workdir, startupOpts)
 }
 

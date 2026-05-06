@@ -178,7 +178,7 @@ func TestNoAppRuntimeImportsInProductionTUI(t *testing.T) {
 	forbidden := []string{
 		`github.com/lkarlslund/koder/internal/agent`,
 		`github.com/lkarlslund/koder/internal/app`,
-		`github.com/lkarlslund/koder/internal/chatruntime`,
+		`github.com/lkarlslund/koder/internal/chat`,
 		`github.com/lkarlslund/koder/internal/clipboard`,
 		`github.com/lkarlslund/koder/internal/config`,
 		`github.com/lkarlslund/koder/internal/mcp`,

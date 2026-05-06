@@ -20,6 +20,7 @@ import (
 
 	"github.com/lkarlslund/koder/internal/agents"
 	"github.com/lkarlslund/koder/internal/attachment"
+	chatpkg "github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/debugsrv"
 	"github.com/lkarlslund/koder/internal/domain"
@@ -50,6 +51,9 @@ type Engine struct {
 	workdir    string
 	envMu      sync.Mutex
 	envPrompts map[int64]string
+	chatMu     sync.RWMutex
+	chats      map[int64]*chatpkg.Chat
+	runs       map[int64]chatRunState
 	retryPause func(context.Context, time.Duration, func(time.Duration)) error
 }
 
@@ -91,6 +95,8 @@ func New(cfg config.Config, st *store.Store, registry *tools.Registry, debug *de
 		mcp:        mcpManager,
 		exec:       execManager,
 		workdir:    workdir,
+		chats:      map[int64]*chatpkg.Chat{},
+		runs:       map[int64]chatRunState{},
 		retryPause: waitForRetry,
 	}
 }

@@ -1,4 +1,4 @@
-package chatruntime
+package chat
 
 import (
 	"context"
@@ -79,10 +79,10 @@ type Update struct {
 	ApprovalsChanged  bool
 }
 
-type Runtime struct {
-	manager *Manager
+type Chat struct {
 	store   *store.Store
-	engine  promptRunner
+	engine  Runner
+	onClose func(int64)
 
 	mu          sync.RWMutex
 	session     domain.Session
@@ -141,96 +141,112 @@ type approvalRunner interface {
 	DenyInChat(context.Context, int64, int64, int64) (<-chan domain.Event, error)
 }
 
-func (m *Manager) Runtime(ctx context.Context, session domain.Session, chat domain.Chat) (*Runtime, error) {
-	if chat.ID == 0 {
+type compactRunner interface {
+	CompactChat(context.Context, int64, int64) (<-chan domain.Event, error)
+}
+
+type promptRunner interface {
+	RunPromptInChat(context.Context, domain.Session, domain.Chat, string, []attachment.Draft, []reference.Draft, string) (<-chan domain.Event, error)
+}
+
+// Runner provides the shared execution behavior used by a live Chat.
+type Runner interface {
+	promptRunner
+	continueRunner
+	approvalRunner
+}
+
+// New builds a live chat from hydrated persisted state.
+func New(session domain.Session, chatRecord domain.Chat, messages []domain.Message, parts map[int64][]domain.Part, approvals []store.Approval, runner Runner, st *store.Store, onClose func(int64)) (*Chat, error) {
+	if chatRecord.ID == 0 {
 		return nil, fmt.Errorf("chat id is required")
 	}
-	m.mu.RLock()
-	if rt := m.runtimes[chat.ID]; rt != nil {
-		m.mu.RUnlock()
-		return rt, nil
-	}
-	m.mu.RUnlock()
-
-	messages, parts, err := m.store.PartsForChat(ctx, chat.ID)
-	if err != nil {
-		return nil, err
-	}
-	approvals, err := m.store.PendingApprovalsForChat(ctx, chat.ID)
-	if err != nil {
-		return nil, err
-	}
-	rt := &Runtime{
-		manager:    m,
-		store:      m.store,
-		engine:     m.engine,
+	c := &Chat{
+		store:      st,
+		engine:     runner,
+		onClose:    onClose,
 		session:    session,
-		chat:       chat,
-		state:      appstate.NewChatState(chat, messages, parts, approvals),
+		chat:       chatRecord,
+		state:      appstate.NewChatState(chatRecord, messages, parts, approvals),
 		status:     StatusIdle,
-		queue:      cloneQueuedInputs(chat.QueuedInputs),
+		queue:      cloneQueuedInputs(chatRecord.QueuedInputs),
 		queueNotes: map[int64]string{},
 		inbox:      make(chan any, 64),
 		subs:       map[int]chan Update{},
 	}
-	m.mu.Lock()
-	if existing := m.runtimes[chat.ID]; existing != nil {
-		m.mu.Unlock()
-		return existing, nil
-	}
-	m.runtimes[chat.ID] = rt
-	m.mu.Unlock()
-	go rt.loop()
-	rt.inbox <- struct{}{} // trigger initial auto-dispatch
-	return rt, nil
+	go c.loop()
+	c.inbox <- struct{}{}
+	return c, nil
 }
 
-func (r *Runtime) Enqueue(item QueueItem) {
+func (r *Chat) Enqueue(item QueueItem) {
 	r.inbox <- enqueueCmd{item: item}
 }
 
-func (r *Runtime) ReplaceQueue(items []domain.QueuedInput) {
+func (r *Chat) ReplaceQueue(items []domain.QueuedInput) {
 	r.inbox <- replaceQueueCmd{items: cloneQueuedInputs(items)}
 }
 
-func (r *Runtime) DispatchQueued(item domain.QueuedInput, remaining []domain.QueuedInput) {
+func (r *Chat) DispatchQueued(item domain.QueuedInput, remaining []domain.QueuedInput) {
 	cloned := item
 	cloned.Attachments = append([]domain.QueuedAttachment(nil), item.Attachments...)
 	cloned.References = append([]domain.QueuedReference(nil), item.References...)
 	r.inbox <- dispatchQueuedCmd{item: cloned, remaining: cloneQueuedInputs(remaining)}
 }
 
-func (r *Runtime) Cancel() {
+func (r *Chat) Cancel() {
 	r.inbox <- interruptCmd{}
 }
 
-func (r *Runtime) Interrupt() {
+func (r *Chat) Interrupt() {
 	r.Cancel()
 }
 
-func (r *Runtime) Approve(approvalID int64) {
+func (r *Chat) Approve(approvalID int64) {
 	r.inbox <- approveCmd{approvalID: approvalID}
 }
 
-func (r *Runtime) ApproveWithRule(approvalID int64, rule domain.PermissionOverride) {
+func (r *Chat) ApproveWithRule(approvalID int64, rule domain.PermissionOverride) {
 	r.inbox <- approveCmd{approvalID: approvalID, rule: &rule}
 }
 
-func (r *Runtime) Deny(approvalID int64) {
+func (r *Chat) Deny(approvalID int64) {
 	r.inbox <- denyCmd{approvalID: approvalID}
 }
 
-func (r *Runtime) Close() {
+func (r *Chat) Compact() error {
+	runner, ok := r.engine.(compactRunner)
+	if !ok {
+		return fmt.Errorf("compaction is not supported by runner")
+	}
+	r.mu.Lock()
+	ctx, cancel := context.WithCancel(context.Background())
+	r.cancel = cancel
+	r.cancelState = CancelStateNone
+	r.running = map[string]struct{}{}
+	r.active = true
+	r.status = StatusWaitingLLM
+	r.statusText = "Compacting session..."
+	sessionID := r.session.ID
+	chatID := r.chat.ID
+	r.mu.Unlock()
+	r.broadcast(r.snapshotUpdateFlags(nil, false, false, true, false, false))
+	events, err := runner.CompactChat(ctx, sessionID, chatID)
+	r.handleApprovalEventStream(events, err)
+	return nil
+}
+
+func (r *Chat) Close() {
 	r.inbox <- closeCmd{}
 }
 
-func (r *Runtime) Status() (Status, string, bool) {
+func (r *Chat) Status() (Status, string, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.status, r.statusText, r.active
 }
 
-func (r *Runtime) ContextSize() domain.ContextUsage {
+func (r *Chat) ContextSize() domain.ContextUsage {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	if r.state == nil {
@@ -239,7 +255,7 @@ func (r *Runtime) ContextSize() domain.ContextUsage {
 	return r.state.CurrentContextSize()
 }
 
-func (r *Runtime) Snapshot() Snapshot {
+func (r *Chat) Snapshot() Snapshot {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	if r.state == nil {
@@ -260,7 +276,7 @@ func (r *Runtime) Snapshot() Snapshot {
 	}
 }
 
-func (r *Runtime) Subscribe() (<-chan Update, func()) {
+func (r *Chat) Subscribe() (<-chan Update, func()) {
 	ch := make(chan Update, 64)
 	r.subsMu.Lock()
 	id := r.nextSub
@@ -279,7 +295,7 @@ func (r *Runtime) Subscribe() (<-chan Update, func()) {
 	return ch, unsub
 }
 
-func (r *Runtime) loop() {
+func (r *Chat) loop() {
 	for cmd := range r.inbox {
 		switch typed := cmd.(type) {
 		case enqueueCmd:
@@ -307,7 +323,7 @@ func (r *Runtime) loop() {
 	}
 }
 
-func (r *Runtime) handleEnqueue(item QueueItem) {
+func (r *Chat) handleEnqueue(item QueueItem) {
 	queued := queuedInputFromItem(item)
 	if note := strings.TrimSpace(item.Note); note != "" {
 		r.mu.Lock()
@@ -317,7 +333,7 @@ func (r *Runtime) handleEnqueue(item QueueItem) {
 	r.handleAppendQueuedInput(queued)
 }
 
-func (r *Runtime) handleAppendQueuedInput(queued domain.QueuedInput) {
+func (r *Chat) handleAppendQueuedInput(queued domain.QueuedInput) {
 	r.mu.Lock()
 	r.queue = append(r.queue, queued)
 	r.chat.QueuedInputs = cloneQueuedInputs(r.queue)
@@ -332,7 +348,7 @@ func (r *Runtime) handleAppendQueuedInput(queued domain.QueuedInput) {
 	r.maybeDispatchNext()
 }
 
-func (r *Runtime) handleReplaceQueue(items []domain.QueuedInput) {
+func (r *Chat) handleReplaceQueue(items []domain.QueuedInput) {
 	r.mu.Lock()
 	r.queue = cloneQueuedInputs(items)
 	r.chat.QueuedInputs = cloneQueuedInputs(r.queue)
@@ -347,7 +363,7 @@ func (r *Runtime) handleReplaceQueue(items []domain.QueuedInput) {
 	r.maybeDispatchNext()
 }
 
-func (r *Runtime) handleDispatchQueued(item domain.QueuedInput, remaining []domain.QueuedInput) {
+func (r *Chat) handleDispatchQueued(item domain.QueuedInput, remaining []domain.QueuedInput) {
 	r.mu.Lock()
 	if r.active || r.status == StatusWaitingApproval {
 		r.queue = cloneQueuedInputs(remaining)
@@ -393,7 +409,7 @@ func (r *Runtime) handleDispatchQueued(item domain.QueuedInput, remaining []doma
 	r.runItem(ctx, session, chat, item)
 }
 
-func (r *Runtime) handleInterrupt() {
+func (r *Chat) handleInterrupt() {
 	r.mu.Lock()
 	if r.status == StatusRunningTools && len(r.running) > 0 {
 		if r.cancelState != CancelStateCancelling {
@@ -412,7 +428,7 @@ func (r *Runtime) handleInterrupt() {
 	}
 }
 
-func (r *Runtime) handleApprove(approvalID int64, rule *domain.PermissionOverride) {
+func (r *Chat) handleApprove(approvalID int64, rule *domain.PermissionOverride) {
 	runner, ok := r.engine.(approvalRunner)
 	if !ok {
 		err := fmt.Errorf("approval is not supported by runner")
@@ -443,7 +459,7 @@ func (r *Runtime) handleApprove(approvalID int64, rule *domain.PermissionOverrid
 	r.handleApprovalEventStream(events, err)
 }
 
-func (r *Runtime) handleDeny(approvalID int64) {
+func (r *Chat) handleDeny(approvalID int64) {
 	runner, ok := r.engine.(approvalRunner)
 	if !ok {
 		err := fmt.Errorf("approval is not supported by runner")
@@ -466,7 +482,7 @@ func (r *Runtime) handleDeny(approvalID int64) {
 	r.handleApprovalEventStream(events, err)
 }
 
-func (r *Runtime) handleApprovalEventStream(events <-chan domain.Event, err error) {
+func (r *Chat) handleApprovalEventStream(events <-chan domain.Event, err error) {
 	if err != nil {
 		r.mu.Lock()
 		r.active = false
@@ -486,7 +502,7 @@ func (r *Runtime) handleApprovalEventStream(events <-chan domain.Event, err erro
 	}()
 }
 
-func (r *Runtime) handleStreamEvent(evt domain.Event) {
+func (r *Chat) handleStreamEvent(evt domain.Event) {
 	r.mu.Lock()
 	transcriptChanged := false
 	contextChanged := false
@@ -606,7 +622,7 @@ func completedCompactionContext(parts []domain.Part, meta map[string]string) (in
 	return 0, false
 }
 
-func (r *Runtime) handleStreamClosed() {
+func (r *Chat) handleStreamClosed() {
 	r.mu.Lock()
 	if r.cancel != nil {
 		r.cancel = nil
@@ -629,7 +645,7 @@ func (r *Runtime) handleStreamClosed() {
 	}
 }
 
-func (r *Runtime) handleClose() {
+func (r *Chat) handleClose() {
 	r.mu.Lock()
 	if r.closed {
 		r.mu.Unlock()
@@ -648,13 +664,13 @@ func (r *Runtime) handleClose() {
 		close(ch)
 	}
 	r.subsMu.Unlock()
-	r.manager.mu.Lock()
-	delete(r.manager.runtimes, r.chat.ID)
-	r.manager.mu.Unlock()
+	if r.onClose != nil {
+		r.onClose(r.chat.ID)
+	}
 	close(r.inbox)
 }
 
-func (r *Runtime) maybeDispatchNext() {
+func (r *Chat) maybeDispatchNext() {
 	r.mu.Lock()
 	if r.active || r.status == StatusWaitingApproval {
 		r.mu.Unlock()
@@ -697,7 +713,7 @@ func (r *Runtime) maybeDispatchNext() {
 	r.runItem(ctx, session, chat, item)
 }
 
-func (r *Runtime) runItem(ctx context.Context, session domain.Session, chat domain.Chat, item domain.QueuedInput) {
+func (r *Chat) runItem(ctx context.Context, session domain.Session, chat domain.Chat, item domain.QueuedInput) {
 	r.mu.Lock()
 	note := r.queueNotes[item.ID]
 	delete(r.queueNotes, item.ID)
@@ -737,7 +753,7 @@ func (r *Runtime) runItem(ctx context.Context, session domain.Session, chat doma
 	}()
 }
 
-func (r *Runtime) persistQueue() error {
+func (r *Chat) persistQueue() error {
 	if r.store == nil || r.chat.ID == 0 {
 		return nil
 	}
@@ -747,31 +763,31 @@ func (r *Runtime) persistQueue() error {
 	return r.store.SetChatQueuedInputs(context.Background(), r.chat.ID, items)
 }
 
-func (r *Runtime) snapshotStatus() Status {
+func (r *Chat) snapshotStatus() Status {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.status
 }
 
-func (r *Runtime) snapshotStatusText() string {
+func (r *Chat) snapshotStatusText() string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.statusText
 }
 
-func (r *Runtime) snapshotQueue() []domain.QueuedInput {
+func (r *Chat) snapshotQueue() []domain.QueuedInput {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return cloneQueuedInputs(r.queue)
 }
 
-func (r *Runtime) snapshotActive() bool {
+func (r *Chat) snapshotActive() bool {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.active
 }
 
-func (r *Runtime) broadcast(update Update) {
+func (r *Chat) broadcast(update Update) {
 	r.subsMu.Lock()
 	defer r.subsMu.Unlock()
 	for _, ch := range r.subs {
@@ -782,11 +798,11 @@ func (r *Runtime) broadcast(update Update) {
 	}
 }
 
-func (r *Runtime) snapshotUpdate(event *domain.Event) Update {
+func (r *Chat) snapshotUpdate(event *domain.Event) Update {
 	return r.snapshotUpdateFlags(event, false, false, false, false, false)
 }
 
-func (r *Runtime) snapshotUpdateFlags(event *domain.Event, transcriptChanged, queueChanged, statusChanged, contextChanged, approvalsChanged bool) Update {
+func (r *Chat) snapshotUpdateFlags(event *domain.Event, transcriptChanged, queueChanged, statusChanged, contextChanged, approvalsChanged bool) Update {
 	snapshot := r.Snapshot()
 	return Update{
 		Event:             event,
@@ -804,7 +820,7 @@ func (r *Runtime) snapshotUpdateFlags(event *domain.Event, transcriptChanged, qu
 	}
 }
 
-func (r *Runtime) appendOptimisticUserMessage(item domain.QueuedInput, session domain.Session, chat domain.Chat) {
+func (r *Chat) appendOptimisticUserMessage(item domain.QueuedInput, session domain.Session, chat domain.Chat) {
 	if item.Kind == domain.QueuedInputKindContinue || r.state == nil {
 		return
 	}
@@ -863,7 +879,7 @@ func (r *Runtime) appendOptimisticUserMessage(item domain.QueuedInput, session d
 	r.mu.Unlock()
 }
 
-func (r *Runtime) appendRuntimeNoticeLocked(body, kind, severity string) {
+func (r *Chat) appendRuntimeNoticeLocked(body, kind, severity string) {
 	if r.state == nil {
 		return
 	}
