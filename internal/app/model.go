@@ -3471,14 +3471,14 @@ func (m *Model) syncUsageFromHistory() {
 func (m *Model) syncContextFromChat() {
 	m.contextTokens = 0
 	m.contextTokensEstimated = false
-	base := m.currentChat.LastKnownContextTokens
-	if base <= 0 {
+	if m.currentChat.LastKnownContextTokens <= 0 {
 		return
 	}
 	tailEstimate, anchored := sessionctx.EstimateTailTokens(m.messages, m.parts)
-	m.contextTokens = base + tailEstimate + m.liveContextEstimatedTokens
-	m.contextTokensEstimated = !m.currentChat.ContextTokensKnown || tailEstimate > 0 || m.liveContextEstimatedTokens > 0
-	if !anchored {
+	usage := m.currentChat.CurrentContextSize(tailEstimate, m.liveContextEstimatedTokens)
+	m.contextTokens = usage.TotalTokens
+	m.contextTokensEstimated = usage.Estimated
+	if !anchored && !m.currentChat.ContextTokensKnown {
 		m.contextTokensEstimated = true
 	}
 }
@@ -3520,11 +3520,11 @@ func (m *Model) addLiveContextEstimate(text string) {
 		return
 	}
 	m.liveContextEstimatedTokens += estimated
-	base := m.currentChat.LastKnownContextTokens
-	if base <= 0 {
-		base = m.contextTokens
+	usage := m.currentChat.CurrentContextSize(0, m.liveContextEstimatedTokens)
+	if usage.TotalTokens <= 0 {
+		usage.TotalTokens = m.contextTokens + estimated
 	}
-	m.contextTokens = base + m.liveContextEstimatedTokens
+	m.contextTokens = usage.TotalTokens
 	m.contextTokensEstimated = true
 }
 
@@ -3545,10 +3545,20 @@ func (m Model) currentContextMetrics() (sessionctx.Metrics, bool) {
 	if !ok || providerCfg.ContextWindow <= 0 {
 		return sessionctx.Metrics{}, false
 	}
-	if m.contextTokens <= 0 {
+	usage := m.currentChat.CurrentContextSize(0, 0)
+	if m.currentChat.LastKnownContextTokens > 0 {
+		tailEstimate, anchored := sessionctx.EstimateTailTokens(m.messages, m.parts)
+		usage = m.currentChat.CurrentContextSize(tailEstimate, m.liveContextEstimatedTokens)
+		if !anchored && !m.currentChat.ContextTokensKnown {
+			usage.Estimated = true
+		}
+	} else if m.contextTokens > 0 {
+		usage = domain.ContextUsage{TotalTokens: m.contextTokens, Estimated: m.contextTokensEstimated}
+	}
+	if usage.TotalTokens <= 0 {
 		return sessionctx.Metrics{}, false
 	}
-	percent := (m.contextTokens * 100) / providerCfg.ContextWindow
+	percent := (usage.TotalTokens * 100) / providerCfg.ContextWindow
 	if percent < 0 {
 		percent = 0
 	}
@@ -3556,10 +3566,10 @@ func (m Model) currentContextMetrics() (sessionctx.Metrics, bool) {
 		percent = 100
 	}
 	return sessionctx.Metrics{
-		Used:         m.contextTokens,
+		Used:         usage.TotalTokens,
 		Max:          providerCfg.ContextWindow,
 		UsagePercent: percent,
-		Estimated:    m.contextTokensEstimated,
+		Estimated:    usage.Estimated,
 	}, true
 }
 
