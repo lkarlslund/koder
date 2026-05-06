@@ -327,22 +327,30 @@ func TestRuntimeSnapshotIncludesInteractiveState(t *testing.T) {
 
 	recorder := NewRecorder()
 	recorder.UpdateRuntime(RuntimeSnapshot{
-		CurrentSession:     7,
-		CurrentChat:        9,
-		Busy:               true,
-		BusyStatus:         "Waiting for LLM response",
-		Loading:            true,
-		ActiveEventStream:  true,
-		TranscriptBusy:     true,
-		SidebarBusy:        true,
-		BusyScope:          "transcript",
-		CanInterrupt:       true,
-		HasActiveCancel:    true,
-		HasChatCancel:      true,
-		QueueEditMode:      false,
-		FocusedWindow:      "main",
-		ComposerFocused:    true,
-		InterruptKeyTarget: true,
+		CurrentSession:          7,
+		CurrentChat:             9,
+		Busy:                    true,
+		BusyStatus:              "Waiting for LLM response",
+		Loading:                 true,
+		ActiveEventStream:       true,
+		RuntimeAttached:         true,
+		RuntimeSubscribed:       true,
+		RuntimeStatus:           "streaming_response",
+		RuntimeStatusText:       "Streaming LLM response ...",
+		RuntimeActive:           true,
+		RuntimeQueueLen:         2,
+		RuntimePendingText:      17,
+		RuntimePendingReasoning: 9,
+		TranscriptBusy:          true,
+		SidebarBusy:             true,
+		BusyScope:               "transcript",
+		CanInterrupt:            true,
+		HasActiveCancel:         true,
+		HasChatCancel:           true,
+		QueueEditMode:           false,
+		FocusedWindow:           "main",
+		ComposerFocused:         true,
+		InterruptKeyTarget:      true,
 	})
 
 	runtime := recorder.Runtime()
@@ -351,6 +359,12 @@ func TestRuntimeSnapshotIncludesInteractiveState(t *testing.T) {
 	}
 	if !runtime.Loading || !runtime.ActiveEventStream {
 		t.Fatalf("expected loading and event stream flags, got %#v", runtime)
+	}
+	if !runtime.RuntimeAttached || !runtime.RuntimeSubscribed || !runtime.RuntimeActive {
+		t.Fatalf("expected runtime attachment state, got %#v", runtime)
+	}
+	if runtime.RuntimeStatus != "streaming_response" || runtime.RuntimeQueueLen != 2 || runtime.RuntimePendingText != 17 || runtime.RuntimePendingReasoning != 9 {
+		t.Fatalf("expected runtime detail fields, got %#v", runtime)
 	}
 	if !runtime.CanInterrupt || !runtime.HasActiveCancel || !runtime.HasChatCancel {
 		t.Fatalf("expected interrupt state flags, got %#v", runtime)

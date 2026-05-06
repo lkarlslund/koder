@@ -6266,6 +6266,24 @@ func (m *Model) syncDebugRuntime() {
 	canInterrupt := hasActiveCancel || hasChatCancel
 	interruptKeyTarget := canInterrupt && focusedWindow == string(mainWindowID) && !m.queueEditMode
 	busyScope := debugBusyScopeName(m.busy.scope)
+	runtimeAttached := m.currentRuntime != nil
+	runtimeSubscribed := m.currentRuntimeUpdates != nil
+	runtimeStatus := ""
+	runtimeStatusText := ""
+	runtimeActive := false
+	runtimeQueueLen := 0
+	runtimePendingTextLen := 0
+	runtimePendingReasoningLen := 0
+	if m.currentRuntime != nil {
+		status, statusText, active := m.currentRuntime.Status()
+		runtimeStatus = string(status)
+		runtimeStatusText = statusText
+		runtimeActive = active
+		snapshot := m.currentRuntime.Snapshot()
+		runtimeQueueLen = len(snapshot.QueuedInputs)
+		runtimePendingTextLen = len(snapshot.PendingAssistant.Text)
+		runtimePendingReasoningLen = len(snapshot.PendingAssistant.Reasoning)
+	}
 	var transcriptItems []debugsrv.TranscriptItemRef
 	if deepDebug {
 		transcriptItems = m.debugTranscriptItems()
@@ -6291,6 +6309,14 @@ func (m *Model) syncDebugRuntime() {
 		strconv.FormatBool(canInterrupt),
 		strconv.FormatBool(hasActiveCancel),
 		strconv.FormatBool(hasChatCancel),
+		strconv.FormatBool(runtimeAttached),
+		strconv.FormatBool(runtimeSubscribed),
+		runtimeStatus,
+		runtimeStatusText,
+		strconv.FormatBool(runtimeActive),
+		strconv.Itoa(runtimeQueueLen),
+		strconv.Itoa(runtimePendingTextLen),
+		strconv.Itoa(runtimePendingReasoningLen),
 		strconv.FormatBool(m.queueEditMode),
 		focusedWindow,
 		strconv.FormatBool(m.composer.Focused()),
@@ -6331,42 +6357,50 @@ func (m *Model) syncDebugRuntime() {
 		return
 	}
 	m.debug.UpdateRuntime(debugsrv.RuntimeSnapshot{
-		DebugAPI:           m.debugAPIAddr(),
-		Build:              version.Current(),
-		DeepDebug:          deepDebug,
-		CurrentSession:     m.currentSession.ID,
-		CurrentChat:        currentChatID,
-		SessionTitle:       strings.TrimSpace(m.currentSession.Title),
-		ProviderID:         strings.TrimSpace(m.currentSession.ProviderID),
-		ModelID:            strings.TrimSpace(m.currentSession.ModelID),
-		Status:             strings.TrimSpace(m.status),
-		Busy:               m.busy.active,
-		BusyStatus:         strings.TrimSpace(m.busy.status),
-		Loading:            m.loading,
-		ActiveEventStream:  m.activeEventStream,
-		TranscriptBusy:     m.busy.transcriptActive(),
-		SidebarBusy:        m.busy.sidebarActive(),
-		BusyScope:          busyScope,
-		CanInterrupt:       canInterrupt,
-		HasActiveCancel:    hasActiveCancel,
-		HasChatCancel:      hasChatCancel,
-		QueueEditMode:      m.queueEditMode,
-		FocusedWindow:      focusedWindow,
-		ComposerFocused:    m.composer.Focused(),
-		InterruptKeyTarget: interruptKeyTarget,
-		OpenDialog:         m.openDialogName(),
-		ShowSidebar:        m.showSidebar,
-		ShowReasoning:      m.showReasoning,
-		ShowSystem:         m.showSystem,
-		LastError:          m.currentError(),
-		ViewportWidth:      m.viewport.Width,
-		ViewportHeight:     m.viewport.Height,
-		ViewportYOffset:    m.viewport.YOffset,
-		MessageCount:       len(m.messages),
-		RenderBlockCount:   renderBlockCount,
-		ViewportPreview:    "",
-		ViewportContentLen: m.viewport.VisibleSurface().SurfaceHeight(),
-		TranscriptItems:    transcriptItems,
+		DebugAPI:                m.debugAPIAddr(),
+		Build:                   version.Current(),
+		DeepDebug:               deepDebug,
+		CurrentSession:          m.currentSession.ID,
+		CurrentChat:             currentChatID,
+		SessionTitle:            strings.TrimSpace(m.currentSession.Title),
+		ProviderID:              strings.TrimSpace(m.currentSession.ProviderID),
+		ModelID:                 strings.TrimSpace(m.currentSession.ModelID),
+		Status:                  strings.TrimSpace(m.status),
+		Busy:                    m.busy.active,
+		BusyStatus:              strings.TrimSpace(m.busy.status),
+		Loading:                 m.loading,
+		ActiveEventStream:       m.activeEventStream,
+		RuntimeAttached:         runtimeAttached,
+		RuntimeSubscribed:       runtimeSubscribed,
+		RuntimeStatus:           runtimeStatus,
+		RuntimeStatusText:       runtimeStatusText,
+		RuntimeActive:           runtimeActive,
+		RuntimeQueueLen:         runtimeQueueLen,
+		RuntimePendingText:      runtimePendingTextLen,
+		RuntimePendingReasoning: runtimePendingReasoningLen,
+		TranscriptBusy:          m.busy.transcriptActive(),
+		SidebarBusy:             m.busy.sidebarActive(),
+		BusyScope:               busyScope,
+		CanInterrupt:            canInterrupt,
+		HasActiveCancel:         hasActiveCancel,
+		HasChatCancel:           hasChatCancel,
+		QueueEditMode:           m.queueEditMode,
+		FocusedWindow:           focusedWindow,
+		ComposerFocused:         m.composer.Focused(),
+		InterruptKeyTarget:      interruptKeyTarget,
+		OpenDialog:              m.openDialogName(),
+		ShowSidebar:             m.showSidebar,
+		ShowReasoning:           m.showReasoning,
+		ShowSystem:              m.showSystem,
+		LastError:               m.currentError(),
+		ViewportWidth:           m.viewport.Width,
+		ViewportHeight:          m.viewport.Height,
+		ViewportYOffset:         m.viewport.YOffset,
+		MessageCount:            len(m.messages),
+		RenderBlockCount:        renderBlockCount,
+		ViewportPreview:         "",
+		ViewportContentLen:      m.viewport.VisibleSurface().SurfaceHeight(),
+		TranscriptItems:         transcriptItems,
 	})
 	m.debugRuntimeHash = runtimeHash
 }
