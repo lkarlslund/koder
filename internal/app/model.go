@@ -568,7 +568,6 @@ type Model struct {
 	historyTotalUsageKnown      bool
 	liveUsage                   domain.Usage
 	liveUsageKnown              bool
-	liveContextEstimatedTokens  int
 	contextTokens               int
 	contextTokensEstimated      bool
 	pendingTranscriptFrameDirty bool
@@ -995,7 +994,6 @@ func (m Model) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 			(msg.chat.ID == 0 || msg.chat.ID == m.currentChat.ID)
 		if !preservePendingAssistant {
 			m.pendingAssistant = pendingAssistantTurn{}
-			m.liveContextEstimatedTokens = 0
 		}
 		m.invalidateTranscript()
 		m = m.UpdateLoad(msg)
@@ -1029,7 +1027,6 @@ func (m Model) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 		return m, m.syncWindowTitleCmd()
 	case forkSessionMsg:
 		m.invalidateTranscript()
-		m.liveContextEstimatedTokens = 0
 		if msg.err != nil {
 			m.status = msg.err.Error()
 			m.stopBusy()
@@ -1041,7 +1038,6 @@ func (m Model) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 		return m, m.syncWindowTitleCmd()
 	case newSessionMsg:
 		m.invalidateTranscript()
-		m.liveContextEstimatedTokens = 0
 		m.sessions = msg.sessions
 		m.chats = msg.chats
 		m.currentSession = msg.session
@@ -1920,7 +1916,10 @@ func (m *Model) applyEvent(evt domain.Event) {
 			m.pendingAssistant.CreatedAt = time.Now().UTC()
 		}
 		m.pendingAssistant.Text += evt.Text
-		m.addLiveContextEstimate(evt.Text)
+		if m.chatState != nil {
+			m.chatState.AppendPendingAssistantText(evt.Text)
+		}
+		m.refreshContextFromActiveChat()
 		m.setTranscriptBusyPhase(transcriptBusyPhaseResponse)
 		m.pendingTranscriptFrameDirty = true
 		m.invalidatePendingTranscriptFrame()
@@ -1929,7 +1928,10 @@ func (m *Model) applyEvent(evt domain.Event) {
 			m.pendingAssistant.CreatedAt = time.Now().UTC()
 		}
 		m.pendingAssistant.Reasoning += evt.Text
-		m.addLiveContextEstimate(evt.Text)
+		if m.chatState != nil {
+			m.chatState.AppendPendingAssistantReasoning(evt.Text)
+		}
+		m.refreshContextFromActiveChat()
 		m.setTranscriptBusyPhase(transcriptBusyPhaseThoughts)
 		m.pendingTranscriptFrameDirty = true
 		m.invalidatePendingTranscriptFrame()
@@ -1966,7 +1968,6 @@ func (m *Model) applyEvent(evt domain.Event) {
 					chat.LastKnownContextTokens = contextTokens
 					chat.ContextTokensKnown = true
 				})
-				m.chatState.SetLiveContextEstimatedTokens(0)
 			}
 			for i := range m.chats {
 				if m.chats[i].ID == m.currentChat.ID {
@@ -1975,9 +1976,7 @@ func (m *Model) applyEvent(evt domain.Event) {
 					break
 				}
 			}
-			m.liveContextEstimatedTokens = 0
-			m.contextTokens = m.currentChat.LastKnownContextTokens
-			m.contextTokensEstimated = false
+			m.refreshContextFromActiveChat()
 		}
 		m.status = fmt.Sprintf("Usage total=%d", m.liveUsage.TotalTokens)
 	case domain.EventKindStatus:
@@ -2059,7 +2058,11 @@ func (m *Model) clearPendingAssistantTurn() {
 		return
 	}
 	m.pendingAssistant = pendingAssistantTurn{}
+	if m.chatState != nil {
+		m.chatState.ClearPendingAssistant()
+	}
 	m.pendingTranscriptFrameDirty = false
+	m.refreshContextFromActiveChat()
 	m.refreshTranscriptForPendingTurn()
 }
 
@@ -3480,7 +3483,6 @@ func (m *Model) syncContextFromChat() {
 	if state == nil || state.Chat().LastKnownContextTokens <= 0 {
 		return
 	}
-	state.SetLiveContextEstimatedTokens(m.liveContextEstimatedTokens)
 	usage := state.CurrentContextSize()
 	m.contextTokens = usage.TotalTokens
 	m.contextTokensEstimated = usage.Estimated
@@ -3502,7 +3504,7 @@ func (m *Model) ensureContextEstimateFromState() {
 	if err != nil || estimated <= 0 {
 		return
 	}
-	m.contextTokens = estimated + m.liveContextEstimatedTokens
+	m.contextTokens = estimated + m.currentPendingAssistantContextTokens()
 	m.contextTokensEstimated = true
 	if m.currentChat.LastKnownContextTokens <= 0 {
 		m.currentChat.LastKnownContextTokens = estimated
@@ -3523,40 +3525,34 @@ func (m *Model) ensureContextEstimateFromState() {
 	}
 }
 
-func (m *Model) addLiveContextEstimate(text string) {
-	var estimated int
+func (m *Model) currentPendingAssistantContextTokens() int {
 	if m.chatState != nil {
-		estimated = m.chatState.AddLiveContextEstimate(text)
-	} else {
-		estimated = tokenestimate.Text(text)
+		return m.chatState.PendingAssistantContextTokens()
 	}
-	if estimated <= 0 {
+	total := 0
+	if text := strings.TrimSpace(m.pendingAssistant.Reasoning); text != "" {
+		total += tokenestimate.Text(text)
+	}
+	if text := strings.TrimSpace(m.pendingAssistant.Text); text != "" {
+		total += tokenestimate.Text(text)
+	}
+	return total
+}
+
+func (m *Model) refreshContextFromActiveChat() {
+	if m.chatState != nil {
+		usage := m.chatState.CurrentContextSize()
+		if usage.TotalTokens > 0 {
+			m.contextTokens = usage.TotalTokens
+			m.contextTokensEstimated = usage.Estimated
+			return
+		}
+	}
+	pending := m.currentPendingAssistantContextTokens()
+	if pending <= 0 {
 		return
 	}
-	m.liveContextEstimatedTokens += estimated
-	usage := domain.ContextUsage{}
-	if m.chatState != nil {
-		usage = m.chatState.CurrentContextSize()
-	} else {
-		anchor := m.currentChat.LastKnownContextTokens
-		if anchor < 0 {
-			anchor = 0
-		}
-		liveTokens := m.liveContextEstimatedTokens
-		if liveTokens < 0 {
-			liveTokens = 0
-		}
-		usage = domain.ContextUsage{
-			AnchorTokens: anchor,
-			LiveTokens:   liveTokens,
-			TotalTokens:  anchor + liveTokens,
-			Estimated:    true,
-		}
-	}
-	if usage.TotalTokens <= 0 {
-		usage.TotalTokens = m.contextTokens + estimated
-	}
-	m.contextTokens = usage.TotalTokens
+	m.contextTokens += pending
 	m.contextTokensEstimated = true
 }
 
@@ -3589,7 +3585,7 @@ func (m Model) currentContextMetrics() (sessionctx.Metrics, bool) {
 		if anchor < 0 {
 			anchor = 0
 		}
-		liveTokens := m.liveContextEstimatedTokens
+		liveTokens := m.currentPendingAssistantContextTokens()
 		if liveTokens < 0 {
 			liveTokens = 0
 		}
@@ -5363,7 +5359,7 @@ func (m *Model) appendLocalUserPrompt(prompt string, drafts []attachment.Draft, 
 	if !m.appendUserPromptTranscriptItem(record) {
 		m.transcriptDirty = true
 	}
-	m.addLiveContextEstimate(prompt)
+	m.syncContextFromChat()
 	m.refreshViewport()
 }
 

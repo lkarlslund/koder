@@ -3,6 +3,7 @@ package appstate
 import (
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/sessionctx"
@@ -19,8 +20,7 @@ type ChatState struct {
 	byPart    map[int64]*PartRecord
 	approvals []store.Approval
 	toolRuns  []*ToolRunRecord
-
-	liveContextEstimatedTokens int
+	pending   PendingAssistantTurn
 
 	byToolRunID      map[string]*ToolRunRecord
 	byToolCallID     map[string]*ToolRunRecord
@@ -41,6 +41,12 @@ type PartRecord struct {
 // ToolRunRecord stores one mutable tool run view model for the current chat.
 type ToolRunRecord struct {
 	Run ui.ToolRun
+}
+
+type PendingAssistantTurn struct {
+	Text      string
+	Reasoning string
+	CreatedAt time.Time
 }
 
 // NewChatState builds a chat state from persisted snapshots.
@@ -109,26 +115,52 @@ func (s *ChatState) UpdateChat(update func(*domain.Chat)) {
 	update(&s.chat)
 }
 
-func (s *ChatState) SetLiveContextEstimatedTokens(tokens int) {
+func (s *ChatState) PendingAssistant() PendingAssistantTurn {
+	if s == nil {
+		return PendingAssistantTurn{}
+	}
+	return s.pending
+}
+
+func (s *ChatState) AppendPendingAssistantText(text string) {
+	if s == nil || text == "" {
+		return
+	}
+	if s.pending.CreatedAt.IsZero() {
+		s.pending.CreatedAt = time.Now().UTC()
+	}
+	s.pending.Text += text
+}
+
+func (s *ChatState) AppendPendingAssistantReasoning(text string) {
+	if s == nil || text == "" {
+		return
+	}
+	if s.pending.CreatedAt.IsZero() {
+		s.pending.CreatedAt = time.Now().UTC()
+	}
+	s.pending.Reasoning += text
+}
+
+func (s *ChatState) ClearPendingAssistant() {
 	if s == nil {
 		return
 	}
-	if tokens < 0 {
-		tokens = 0
-	}
-	s.liveContextEstimatedTokens = tokens
+	s.pending = PendingAssistantTurn{}
 }
 
-func (s *ChatState) AddLiveContextEstimate(text string) int {
+func (s *ChatState) PendingAssistantContextTokens() int {
 	if s == nil {
 		return 0
 	}
-	estimated := tokenestimate.Text(text)
-	if estimated <= 0 {
-		return 0
+	total := 0
+	if text := strings.TrimSpace(s.pending.Reasoning); text != "" {
+		total += tokenestimate.Text(text)
 	}
-	s.liveContextEstimatedTokens += estimated
-	return estimated
+	if text := strings.TrimSpace(s.pending.Text); text != "" {
+		total += tokenestimate.Text(text)
+	}
+	return total
 }
 
 func (s *ChatState) CurrentContextSize() domain.ContextUsage {
@@ -139,10 +171,7 @@ func (s *ChatState) CurrentContextSize() domain.ContextUsage {
 	if tailEstimate < 0 {
 		tailEstimate = 0
 	}
-	liveTokens := s.liveContextEstimatedTokens
-	if liveTokens < 0 {
-		liveTokens = 0
-	}
+	liveTokens := s.PendingAssistantContextTokens()
 	anchor := s.chat.LastKnownContextTokens
 	if anchor < 0 {
 		anchor = 0

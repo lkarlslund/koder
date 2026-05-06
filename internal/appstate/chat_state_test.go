@@ -110,7 +110,7 @@ func TestChatStateCurrentContextSize(t *testing.T) {
 		},
 		nil,
 	)
-	state.SetLiveContextEstimatedTokens(25)
+	state.AppendPendingAssistantText("delta payload")
 
 	got := state.CurrentContextSize()
 	if got.AnchorTokens != 1200 {
@@ -119,8 +119,8 @@ func TestChatStateCurrentContextSize(t *testing.T) {
 	if got.TailTokens <= 0 {
 		t.Fatalf("expected tail estimate, got %#v", got)
 	}
-	if got.LiveTokens != 25 {
-		t.Fatalf("live = %d", got.LiveTokens)
+	if got.LiveTokens <= 0 {
+		t.Fatalf("expected live estimate, got %d", got.LiveTokens)
 	}
 	if got.TotalTokens != got.AnchorTokens+got.TailTokens+got.LiveTokens {
 		t.Fatalf("total mismatch %#v", got)

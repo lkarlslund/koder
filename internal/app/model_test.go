@@ -5283,8 +5283,8 @@ func TestSidebarContextAccumulatesStreamedTokenEstimate(t *testing.T) {
 	}
 	m.applyEvent(domain.Event{Kind: domain.EventKindUsage, Usage: domain.Usage{PromptTokens: 1200, CompletionTokens: 25, TotalTokens: 1225}})
 	got = m.renderSidebar()
-	if !strings.Contains(got, "Context 1.2k / 32.8k (3%)") {
-		t.Fatalf("expected provider usage to replace estimate, got %q", got)
+	if !strings.Contains(got, "Context ~1.2k / 32.8k (3%)") {
+		t.Fatalf("expected pending streamed output to keep context estimated until message persistence, got %q", got)
 	}
 	if m.currentChat.LastKnownContextTokens != 1200 || !m.currentChat.ContextTokensKnown {
 		t.Fatalf("expected current chat usage updated, got %#v", m.currentChat)
