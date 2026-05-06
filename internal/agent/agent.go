@@ -2559,24 +2559,31 @@ func (e *Engine) compactSession(ctx context.Context, session domain.Session, cha
 	if len(messages) <= 1 {
 		return nil
 	}
+	beforeContextTokens, err := e.EstimateContextTokensForState(session, chat, storedMessages, partsByMessage)
+	if err != nil {
+		return err
+	}
 	msg, err := e.store.AddChatMessage(ctx, chatID, domain.MessageRoleAssistant, "Compacting...")
 	if err != nil {
 		return err
 	}
 	part, err := e.store.AddPart(ctx, msg.ID, domain.CompactionPayload{
-		Trigger:            trigger,
-		Status:             "pending",
-		FirstKeptMessageID: firstKeptMessageID,
+		Trigger:             trigger,
+		Status:              "pending",
+		FirstKeptMessageID:  firstKeptMessageID,
+		BeforeContextTokens: beforeContextTokens,
 	})
 	if err != nil {
 		return err
 	}
-	updateCompactionState := func(summary, status, messageSummary string) error {
+	updateCompactionState := func(summary, status, messageSummary string, afterContextTokens int) error {
 		if err := e.store.UpdatePartPayload(ctx, part.ID, domain.CompactionPayload{
-			Summary:            summary,
-			Trigger:            trigger,
-			Status:             status,
-			FirstKeptMessageID: firstKeptMessageID,
+			Summary:             summary,
+			Trigger:             trigger,
+			Status:              status,
+			FirstKeptMessageID:  firstKeptMessageID,
+			BeforeContextTokens: beforeContextTokens,
+			AfterContextTokens:  afterContextTokens,
 		}); err != nil {
 			return err
 		}
@@ -2601,7 +2608,7 @@ func (e *Engine) compactSession(ctx context.Context, session domain.Session, cha
 		Content: compactPrompt(),
 	}), false))
 	if err != nil {
-		_ = updateCompactionState("", "failed", "Compaction failed")
+		_ = updateCompactionState("", "failed", "Compaction failed", 0)
 		return err
 	}
 	summary := strings.TrimSpace(resp.Text)
@@ -2609,23 +2616,26 @@ func (e *Engine) compactSession(ctx context.Context, session domain.Session, cha
 		summary = strings.TrimSpace(resp.Reasoning)
 	}
 	if summary == "" {
-		_ = updateCompactionState("", "failed", "Compaction failed")
+		_ = updateCompactionState("", "failed", "Compaction failed", 0)
 		return fmt.Errorf("empty compaction summary")
 	}
-	if err := updateCompactionState(summary, "completed", "Compacted session summary"); err != nil {
+	afterContextTokens := e.estimateCompactedContextTokens(session, chat, storedMessages, partsByMessage, msg, firstKeptMessageID, summary)
+	if err := updateCompactionState(summary, "completed", "Compacted session summary", afterContextTokens); err != nil {
 		return err
 	}
 	msg.Summary = "Compacted session summary"
 	part.Payload = domain.CompactionPayload{
-		Summary:            summary,
-		Trigger:            trigger,
-		Status:             "completed",
-		FirstKeptMessageID: firstKeptMessageID,
+		Summary:             summary,
+		Trigger:             trigger,
+		Status:              "completed",
+		FirstKeptMessageID:  firstKeptMessageID,
+		BeforeContextTokens: beforeContextTokens,
+		AfterContextTokens:  afterContextTokens,
 	}
 	part.Kind = domain.PartKindCompaction
 	part.Body = summary
 	if chat, err := e.store.GetChat(ctx, chatID); err == nil {
-		chat.LastKnownContextTokens = tokenestimate.Text(summary)
+		chat.LastKnownContextTokens = afterContextTokens
 		chat.ContextTokensKnown = false
 		if err := e.store.UpdateChat(ctx, chat); err != nil {
 			return err
@@ -2658,6 +2668,51 @@ func (e *Engine) buildCompactionConversation(session domain.Session, chat domain
 		return nil, 0, err
 	}
 	return provider.SerializePromptEnvelope(envelope), firstKeptMessageID, nil
+}
+
+func (e *Engine) estimateCompactedContextTokens(session domain.Session, chat domain.Chat, messages []domain.Message, partsByMessage map[int64][]domain.Part, compactionMsg domain.Message, firstKeptMessageID int64, summary string) int {
+	firstKeptIdx := firstKeptMessageIndex(messages, firstKeptMessageID)
+	if firstKeptIdx < 0 {
+		firstKeptIdx = len(messages)
+	}
+	simulatedMessages := make([]domain.Message, 0, 1+max(0, len(messages)-firstKeptIdx))
+	simulatedMessages = append(simulatedMessages, compactionMsg)
+	if firstKeptIdx < len(messages) {
+		simulatedMessages = append(simulatedMessages, messages[firstKeptIdx:]...)
+	}
+	simulatedParts := make(map[int64][]domain.Part, len(partsByMessage)+1)
+	for messageID, parts := range partsByMessage {
+		if firstKeptIdx < len(messages) {
+			keep := false
+			for _, msg := range messages[firstKeptIdx:] {
+				if msg.ID == messageID {
+					keep = true
+					break
+				}
+			}
+			if !keep {
+				continue
+			}
+		}
+		simulatedParts[messageID] = slices.Clone(parts)
+	}
+	simulatedParts[compactionMsg.ID] = []domain.Part{{
+		ID:        compactionMsg.ID*1000 + 1,
+		MessageID: compactionMsg.ID,
+		Kind:      domain.PartKindCompaction,
+		Payload: domain.CompactionPayload{
+			Summary:            summary,
+			Status:             "completed",
+			FirstKeptMessageID: firstKeptMessageID,
+		},
+		Body:      summary,
+		CreatedAt: compactionMsg.CreatedAt,
+	}}
+	estimated, err := e.EstimateContextTokensForState(session, chat, simulatedMessages, simulatedParts)
+	if err != nil || estimated < 0 {
+		return tokenestimate.Text(summary)
+	}
+	return estimated
 }
 
 func (e *Engine) handleModelToolCall(ctx context.Context, session domain.Session, chat domain.Chat, req tools.Request) (domain.Event, error) {

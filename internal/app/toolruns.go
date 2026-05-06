@@ -375,6 +375,9 @@ func (m *Model) currentLiveExecRuns() []ui.ToolRun {
 }
 
 func (m *Model) assistantMessageShouldExist(msg domain.Message, parts []domain.Part) bool {
+	if isCompactionOnlyAssistantMessage(parts) {
+		return false
+	}
 	summary := strings.TrimSpace(msg.Summary)
 	if summary != "" && !isSyntheticToolSummary(summary) {
 		return true
@@ -404,6 +407,35 @@ func (m *Model) assistantMessageShouldExist(msg domain.Message, parts []domain.P
 		}
 	}
 	return false
+}
+
+func isCompactionOnlyAssistantMessage(parts []domain.Part) bool {
+	if len(parts) == 0 {
+		return false
+	}
+	hasCompaction := false
+	for _, part := range parts {
+		switch part.Kind {
+		case domain.PartKindCompaction:
+			hasCompaction = true
+		case domain.PartKindToolCall,
+			domain.PartKindToolOutput,
+			domain.PartKindApprovalRequest,
+			domain.PartKindReference,
+			domain.PartKindUsage:
+			continue
+		case domain.PartKindEventNotice:
+			if eventNoticeToolRun(part).ID != "" {
+				continue
+			}
+			return false
+		default:
+			if strings.TrimSpace(part.Text()) != "" {
+				return false
+			}
+		}
+	}
+	return hasCompaction
 }
 
 type toolRunTracker struct {
@@ -520,9 +552,13 @@ func compactionToolRun(parts []domain.Part, msg domain.Message) (ui.ToolRun, boo
 		case body == "" && status == "":
 			continue
 		}
+		title := "Compacted."
+		if payload.BeforeContextTokens > 0 && payload.AfterContextTokens > 0 {
+			title = fmt.Sprintf("Compacted from %d context to %d context.", payload.BeforeContextTokens, payload.AfterContextTokens)
+		}
 		return ui.ToolRun{
 			ID:       fmt.Sprintf("compaction:%d", msg.ID),
-			Title:    "Compacted.",
+			Title:    title,
 			Subtitle: "Replacement history sent to the model",
 			Preview:  body,
 			Status:   ui.ToolRunStatusCompleted,

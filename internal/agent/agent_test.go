@@ -2643,6 +2643,9 @@ func TestCompactSessionDoesNotPersistUsageOrEmitUsageEvent(t *testing.T) {
 				if payload.Status != "completed" || strings.TrimSpace(payload.Summary) == "" {
 					t.Fatalf("expected completed compaction payload, got %#v", payload)
 				}
+				if payload.BeforeContextTokens <= 0 || payload.AfterContextTokens <= 0 {
+					t.Fatalf("expected compaction payload context sizes, got %#v", payload)
+				}
 				sawCompaction = true
 			}
 		}

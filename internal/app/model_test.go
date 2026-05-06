@@ -7294,12 +7294,12 @@ func TestTranscriptRendersCompactionAsExpandableCard(t *testing.T) {
 	}
 	m.parts[1] = []domain.Part{{
 		Kind:    domain.PartKindCompaction,
-		Payload: domain.CompactionPayload{Summary: "## Goal\n\n- first\n- second", Status: "completed"},
+		Payload: domain.CompactionPayload{Summary: "## Goal\n\n- first\n- second", Status: "completed", BeforeContextTokens: 1234, AfterContextTokens: 456},
 	}}
 
 	m.refreshViewport()
 	got := m.viewport.View()
-	if !strings.Contains(got, "Compacted.") {
+	if !strings.Contains(got, "Compacted from 1234 context to 456 context.") {
 		t.Fatalf("expected compaction card title, got %q", got)
 	}
 	if !strings.Contains(got, "Expand") {
@@ -7337,6 +7337,9 @@ func TestTranscriptRendersPendingCompactionAsRunningCard(t *testing.T) {
 	got := m.viewport.View()
 	if !strings.Contains(got, "Compacting ...") {
 		t.Fatalf("expected pending compaction card title, got %q", got)
+	}
+	if strings.Count(got, "Compacting ...") != 1 {
+		t.Fatalf("expected pending compaction to render once, got %q", got)
 	}
 }
 
