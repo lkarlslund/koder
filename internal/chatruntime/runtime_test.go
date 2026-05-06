@@ -49,9 +49,7 @@ func (f *runtimeFakeRunner) RunContinueInChat(_ context.Context, _ domain.Sessio
 func TestRuntimeEnqueueStartsPrompt(t *testing.T) {
 	st := openTestStore(t)
 	session, chat, _ := createSessionWithPlan(t, st)
-	events := make(chan domain.Event, 2)
-	events <- domain.Event{Kind: domain.EventKindMessageDone}
-	close(events)
+	events := make(chan domain.Event)
 	runner := &runtimeFakeRunner{events: []<-chan domain.Event{events}}
 	mgr := New(nil, st)
 	mgr.engine = runner
@@ -66,6 +64,30 @@ func TestRuntimeEnqueueStartsPrompt(t *testing.T) {
 	rt.Enqueue(QueueItem{Kind: QueueKindSteer, Text: "first prompt"})
 
 	deadline := time.After(2 * time.Second)
+	for runner.promptCalls == 0 {
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for prompt start")
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	snapshot := rt.Snapshot()
+	if len(snapshot.QueuedInputs) != 0 {
+		t.Fatalf("queued inputs = %#v", snapshot.QueuedInputs)
+	}
+	if len(snapshot.Messages) == 0 {
+		t.Fatal("expected optimistic user message")
+	}
+	last := snapshot.Messages[len(snapshot.Messages)-1]
+	if last.Role != domain.MessageRoleUser || last.Summary != "first prompt" {
+		t.Fatalf("last message = %#v", last)
+	}
+
+	events <- domain.Event{Kind: domain.EventKindMessageDone}
+	close(events)
+
+	deadline = time.After(2 * time.Second)
 	for {
 		select {
 		case update := <-updates:

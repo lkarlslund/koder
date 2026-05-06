@@ -906,13 +906,14 @@ func (m Model) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 		}
 		m.currentSession = msg.session
 		m.currentChat = msg.chat
-		if msg.runtime != nil {
-			m.currentRuntime = msg.runtime
-		}
-		if msg.runtimeUpdates != nil {
+		runtimeChanged := msg.runtime != nil && msg.runtime != m.currentRuntime
+		if runtimeChanged {
 			if m.currentRuntimeUnsub != nil {
 				m.currentRuntimeUnsub()
 			}
+			m.currentRuntime = msg.runtime
+		}
+		if msg.runtimeUpdates != nil && (m.currentRuntimeUpdates == nil || runtimeChanged) {
 			m.currentRuntimeUpdates = msg.runtimeUpdates
 			m.currentRuntimeUnsub = msg.runtimeUnsub
 		}
@@ -940,18 +941,18 @@ func (m Model) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 			return m, m.syncWindowTitleCmd()
 		}
 		m.invalidateBodyCache()
-		m.setQueuedInputs(msg.update.Queue)
+		m.applyRuntimeSnapshot(msg.update.Snapshot)
 		if msg.update.Event != nil {
 			m.recordEvent(msg.chatID, *msg.update.Event)
-			m.applyCurrentChatEvent(*msg.update.Event)
-			m.applyEvent(*msg.update.Event)
+			m.applyRuntimeTelemetryEvent(*msg.update.Event)
 		}
-		if !msg.update.Active && msg.update.Event == nil {
-			m.activeEventStream = false
+		m.syncBusyFromRuntimeUpdate(msg.update)
+		m.activeEventStream = msg.update.Active
+		if !msg.update.Active && msg.update.StatusText == "" {
 			m.stopBusyWithStatus("Idle")
 		}
-		if msg.update.StatusText != "" && msg.update.Event == nil {
-			m.status = msg.update.StatusText
+		if msg.update.TranscriptChanged || msg.update.QueueChanged || msg.update.ContextChanged {
+			m.refreshViewport()
 		}
 		return m, ui.Batch(nextRuntimeUpdateCmd(msg.chatID, msg.updates), m.syncWindowTitleCmd())
 	case bangCommandMsg:
@@ -980,7 +981,9 @@ func (m Model) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 		reload := m.reloadDetailsCmd()
 		switch msg.followupMode {
 		case bangFollowupPrompt:
-			m.appendLocalUserPrompt(msg.followupPrompt, nil, nil)
+			if m.runtimeMgr == nil {
+				m.appendLocalUserPrompt(msg.followupPrompt, nil, nil)
+			}
 			m.startWaitingForLLM()
 			return m, ui.Batch(reload, m.promptCmd(m.beginActiveOperation(), msg.followupPrompt, nil, nil), m.spinnerCmdIfNeeded(), m.syncWindowTitleCmd())
 		case bangFollowupQueue, bangFollowupSteer:
@@ -1698,7 +1701,9 @@ func (m *Model) handleMainWindowKey(msg ui.KeyMsg) (bool, ui.Cmd) {
 		m.resetComposerInput()
 		m.draftAttachments = nil
 		m.draftReferences = nil
-		m.appendLocalUserPrompt(prompt, drafts, refs)
+		if m.runtimeMgr == nil {
+			m.appendLocalUserPrompt(prompt, drafts, refs)
+		}
 		m.startWaitingForLLM()
 		return true, m.kickoffPromptCmd(prompt, drafts, refs)
 	case "h":
@@ -4770,6 +4775,83 @@ func (m *Model) attachCurrentRuntime(session domain.Session, chat domain.Chat) (
 	return updates, rt, nil
 }
 
+func (m *Model) applyRuntimeSnapshot(snapshot chatruntime.Snapshot) {
+	if snapshot.Session.ID != 0 {
+		m.currentSession = m.normalizeSessionToolStates(snapshot.Session)
+		for idx := range m.sessions {
+			if m.sessions[idx].ID == snapshot.Session.ID {
+				m.sessions[idx] = m.currentSession
+				break
+			}
+		}
+	}
+	if snapshot.Chat.ID != 0 {
+		m.currentChat = snapshot.Chat
+		for idx := range m.chats {
+			if m.chats[idx].ID == snapshot.Chat.ID {
+				m.chats[idx] = snapshot.Chat
+				break
+			}
+		}
+		m.clampQueueSelection()
+	}
+	m.loadChatState(snapshot.Chat, snapshot.Messages, snapshot.Parts, snapshot.Approvals)
+	m.pendingAssistant = pendingAssistantTurn(snapshot.PendingAssistant)
+	m.syncUsageFromHistory()
+	m.syncContextFromChat()
+	m.ensureContextEstimateFromState()
+}
+
+func (m *Model) applyRuntimeTelemetryEvent(evt domain.Event) {
+	switch evt.Kind {
+	case domain.EventKindUsage:
+		m.liveUsage = m.liveUsage.Add(evt.Usage)
+		m.liveUsageKnown = m.liveUsage.HasAnyTokens()
+	case domain.EventKindStatus:
+		if profile := strings.TrimSpace(evt.Meta["permission_profile"]); profile != "" {
+			m.currentSession.PermissionProfile = profile
+			for idx := range m.sessions {
+				if m.sessions[idx].ID == m.currentSession.ID {
+					m.sessions[idx].PermissionProfile = profile
+					break
+				}
+			}
+		}
+	}
+}
+
+func (m *Model) syncBusyFromRuntimeUpdate(update chatruntime.Update) {
+	m.status = update.StatusText
+	if !update.Active {
+		if update.StatusText != "" {
+			m.stopBusyWithStatus(update.StatusText)
+		} else {
+			m.stopBusyWithStatus("Idle")
+		}
+		return
+	}
+	switch update.Status {
+	case chatruntime.StatusWaitingLLM:
+		m.startWaitingForLLM()
+	case chatruntime.StatusStreamingThoughts:
+		m.startBusy(busyScopeTranscript, update.StatusText)
+		m.setTranscriptBusyPhase(transcriptBusyPhaseThoughts)
+	case chatruntime.StatusStreamingResponse:
+		m.startBusy(busyScopeTranscript, update.StatusText)
+		m.setTranscriptBusyPhase(transcriptBusyPhaseResponse)
+	case chatruntime.StatusRunningTools:
+		m.startBusy(busyScopeTranscript, update.StatusText)
+	case chatruntime.StatusWaitingApproval:
+		m.stopBusyWithStatus(update.StatusText)
+	case chatruntime.StatusErrored:
+		m.stopBusyWithStatus(update.StatusText)
+	default:
+		if update.StatusText != "" {
+			m.startBusy(busyScopeTranscript, update.StatusText)
+		}
+	}
+}
+
 func min(a, b int) int {
 	if a < b {
 		return a
@@ -5020,6 +5102,12 @@ func (m *Model) handleInterruptKey() (ui.Model, ui.Cmd) {
 	m.interruptArmedAt = time.Time{}
 	m.status = "Interrupting…"
 	m.appendLocalTranscriptNotice("Interrupted", "interrupted", "warning")
+	if m.currentRuntime != nil {
+		if _, _, active := m.currentRuntime.Status(); active {
+			m.currentRuntime.Interrupt()
+			return m, m.syncWindowTitleCmd()
+		}
+	}
 	cancel := m.activeOpCancel
 	if chatID := m.currentChatID(); chatID > 0 && m.activeOpCancels != nil && m.activeOpCancels[chatID] != nil {
 		cancel = m.activeOpCancels[chatID]
@@ -5032,6 +5120,12 @@ func (m *Model) handleInterruptKey() (ui.Model, ui.Cmd) {
 }
 
 func (m *Model) canInterruptActiveOperation() bool {
+	if m.currentRuntime != nil {
+		_, _, active := m.currentRuntime.Status()
+		if active {
+			return true
+		}
+	}
 	return m.activeOpCancel != nil || (m.activeOpCancels != nil && m.activeOpCancels[m.currentChatID()] != nil)
 }
 
@@ -5146,7 +5240,7 @@ func (m *Model) dequeuePromptCmd() ui.Cmd {
 		}
 	}
 	m.startBusy(busyScopeTranscript, queuedInputRunStatus(item.Kind))
-	if item.Kind != domain.QueuedInputKindContinue {
+	if item.Kind != domain.QueuedInputKindContinue && (m.currentRuntime == nil || m.currentRuntimeUpdates == nil || m.currentChat.ID == 0) {
 		m.appendLocalUserPrompt(item.Text, queuedAttachmentDrafts(item.Attachments), queuedReferenceDrafts(item.References))
 	}
 	return m.saveAndDispatchQueuedInputCmd(m.currentChat.ID, items, item)

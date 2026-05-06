@@ -57,12 +57,18 @@ type Snapshot struct {
 }
 
 type Update struct {
-	Event      *domain.Event
-	Status     Status
-	StatusText string
-	Queue      []domain.QueuedInput
-	Context    domain.ContextUsage
-	Active     bool
+	Event             *domain.Event
+	Snapshot          Snapshot
+	Status            Status
+	StatusText        string
+	Queue             []domain.QueuedInput
+	Context           domain.ContextUsage
+	Active            bool
+	TranscriptChanged bool
+	QueueChanged      bool
+	StatusChanged     bool
+	ContextChanged    bool
+	ApprovalsChanged  bool
 }
 
 type Runtime struct {
@@ -222,13 +228,7 @@ func (r *Runtime) Subscribe() (<-chan Update, func()) {
 	r.nextSub++
 	r.subs[id] = ch
 	r.subsMu.Unlock()
-	ch <- Update{
-		Status:     r.snapshotStatus(),
-		StatusText: r.snapshotStatusText(),
-		Queue:      cloneQueuedInputs(r.snapshotQueue()),
-		Context:    r.ContextSize(),
-		Active:     r.snapshotActive(),
-	}
+	ch <- r.snapshotUpdate(nil)
 	unsub := func() {
 		r.subsMu.Lock()
 		if existing, ok := r.subs[id]; ok {
@@ -285,13 +285,7 @@ func (r *Runtime) handleAppendQueuedInput(queued domain.QueuedInput) {
 	}
 	r.mu.Unlock()
 	_ = r.persistQueue()
-	r.broadcast(Update{
-		Status:     r.snapshotStatus(),
-		StatusText: r.snapshotStatusText(),
-		Queue:      cloneQueuedInputs(r.snapshotQueue()),
-		Context:    r.ContextSize(),
-		Active:     r.snapshotActive(),
-	})
+	r.broadcast(r.snapshotUpdateFlags(nil, false, true, false, false, false))
 	r.maybeDispatchNext()
 }
 
@@ -306,13 +300,7 @@ func (r *Runtime) handleReplaceQueue(items []domain.QueuedInput) {
 	}
 	r.mu.Unlock()
 	_ = r.persistQueue()
-	r.broadcast(Update{
-		Status:     r.snapshotStatus(),
-		StatusText: r.snapshotStatusText(),
-		Queue:      cloneQueuedInputs(r.snapshotQueue()),
-		Context:    r.ContextSize(),
-		Active:     r.snapshotActive(),
-	})
+	r.broadcast(r.snapshotUpdateFlags(nil, false, true, false, false, false))
 	r.maybeDispatchNext()
 }
 
@@ -328,13 +316,7 @@ func (r *Runtime) handleDispatchQueued(item domain.QueuedInput, remaining []doma
 		}
 		r.mu.Unlock()
 		_ = r.persistQueue()
-		r.broadcast(Update{
-			Status:     r.snapshotStatus(),
-			StatusText: r.snapshotStatusText(),
-			Queue:      cloneQueuedInputs(r.snapshotQueue()),
-			Context:    r.ContextSize(),
-			Active:     r.snapshotActive(),
-		})
+		r.broadcast(r.snapshotUpdateFlags(nil, false, true, false, false, false))
 		return
 	}
 	r.queue = cloneQueuedInputs(remaining)
@@ -355,14 +337,9 @@ func (r *Runtime) handleDispatchQueued(item domain.QueuedInput, remaining []doma
 	chat := r.chat
 	r.mu.Unlock()
 
+	r.appendOptimisticUserMessage(item, session, chat)
 	_ = r.persistQueue()
-	r.broadcast(Update{
-		Status:     r.snapshotStatus(),
-		StatusText: r.snapshotStatusText(),
-		Queue:      cloneQueuedInputs(r.snapshotQueue()),
-		Context:    r.ContextSize(),
-		Active:     r.snapshotActive(),
-	})
+	r.broadcast(r.snapshotUpdateFlags(nil, item.Kind != domain.QueuedInputKindContinue, true, true, true, false))
 	r.runItem(ctx, session, chat, item)
 }
 
@@ -431,14 +408,7 @@ func (r *Runtime) handleStreamEvent(evt domain.Event) {
 	}
 	r.mu.Unlock()
 	copyEvt := evt
-	r.broadcast(Update{
-		Event:      &copyEvt,
-		Status:     r.snapshotStatus(),
-		StatusText: r.snapshotStatusText(),
-		Queue:      cloneQueuedInputs(r.snapshotQueue()),
-		Context:    r.ContextSize(),
-		Active:     r.snapshotActive(),
-	})
+	r.broadcast(r.snapshotUpdateFlags(&copyEvt, evt.Message.ID > 0 || evt.Kind == domain.EventKindMessageDone, false, true, evt.Kind == domain.EventKindUsage || evt.Kind == domain.EventKindMessageDelta || evt.Kind == domain.EventKindReasoning, evt.Kind == domain.EventKindApprovalAsk || evt.Kind == domain.EventKindApprovalReply))
 }
 
 func (r *Runtime) handleStreamClosed() {
@@ -456,13 +426,7 @@ func (r *Runtime) handleStreamClosed() {
 		}
 	}
 	r.mu.Unlock()
-	r.broadcast(Update{
-		Status:     r.snapshotStatus(),
-		StatusText: r.snapshotStatusText(),
-		Queue:      cloneQueuedInputs(r.snapshotQueue()),
-		Context:    r.ContextSize(),
-		Active:     r.snapshotActive(),
-	})
+	r.broadcast(r.snapshotUpdateFlags(nil, false, false, true, true, false))
 	if shouldDispatch {
 		r.maybeDispatchNext()
 	}
@@ -523,14 +487,9 @@ func (r *Runtime) maybeDispatchNext() {
 	chat := r.chat
 	r.mu.Unlock()
 
+	r.appendOptimisticUserMessage(item, session, chat)
 	_ = r.persistQueue()
-	r.broadcast(Update{
-		Status:     r.snapshotStatus(),
-		StatusText: r.snapshotStatusText(),
-		Queue:      cloneQueuedInputs(r.snapshotQueue()),
-		Context:    r.ContextSize(),
-		Active:     r.snapshotActive(),
-	})
+	r.broadcast(r.snapshotUpdateFlags(nil, item.Kind != domain.QueuedInputKindContinue, true, true, true, false))
 	r.runItem(ctx, session, chat, item)
 }
 
@@ -562,14 +521,7 @@ func (r *Runtime) runItem(ctx context.Context, session domain.Session, chat doma
 		r.statusText = err.Error()
 		r.mu.Unlock()
 		evt := domain.Event{Kind: domain.EventKindError, Err: err}
-		r.broadcast(Update{
-			Event:      &evt,
-			Status:     r.snapshotStatus(),
-			StatusText: r.snapshotStatusText(),
-			Queue:      cloneQueuedInputs(r.snapshotQueue()),
-			Context:    r.ContextSize(),
-			Active:     r.snapshotActive(),
-		})
+		r.broadcast(r.snapshotUpdateFlags(&evt, false, false, true, false, false))
 		r.maybeDispatchNext()
 		return
 	}
@@ -624,6 +576,87 @@ func (r *Runtime) broadcast(update Update) {
 		default:
 		}
 	}
+}
+
+func (r *Runtime) snapshotUpdate(event *domain.Event) Update {
+	return r.snapshotUpdateFlags(event, false, false, false, false, false)
+}
+
+func (r *Runtime) snapshotUpdateFlags(event *domain.Event, transcriptChanged, queueChanged, statusChanged, contextChanged, approvalsChanged bool) Update {
+	snapshot := r.Snapshot()
+	return Update{
+		Event:             event,
+		Snapshot:          snapshot,
+		Status:            snapshot.Status,
+		StatusText:        snapshot.StatusText,
+		Queue:             cloneQueuedInputs(snapshot.QueuedInputs),
+		Context:           snapshot.Context,
+		Active:            snapshot.Active,
+		TranscriptChanged: transcriptChanged,
+		QueueChanged:      queueChanged,
+		StatusChanged:     statusChanged,
+		ContextChanged:    contextChanged,
+		ApprovalsChanged:  approvalsChanged,
+	}
+}
+
+func (r *Runtime) appendOptimisticUserMessage(item domain.QueuedInput, session domain.Session, chat domain.Chat) {
+	if item.Kind == domain.QueuedInputKindContinue || r.state == nil {
+		return
+	}
+	now := time.Now().UTC()
+	messageID := now.UnixNano()
+	summary := strings.TrimSpace(item.Text)
+	message := domain.Message{
+		ID:        messageID,
+		SessionID: session.ID,
+		ChatID:    chat.ID,
+		Role:      domain.MessageRoleUser,
+		Summary:   summary,
+		CreatedAt: now,
+	}
+	parts := make([]domain.Part, 0, 1+len(item.Attachments)+len(item.References))
+	if summary != "" {
+		parts = append(parts, domain.Part{
+			ID:        messageID + 1,
+			MessageID: messageID,
+			Kind:      domain.PartKindText,
+			Payload:   domain.TextPayload{Text: summary},
+			Body:      summary,
+			CreatedAt: now,
+		})
+	}
+	for idx, draft := range item.Attachments {
+		parts = append(parts, domain.Part{
+			ID:        messageID + int64(2+idx),
+			MessageID: messageID,
+			Kind:      domain.PartKindAttachment,
+			Payload: domain.AttachmentPayload{
+				ID: draft.ID, Name: draft.Name, MIME: draft.MIME, Path: draft.Path, Size: draft.Size, Source: draft.Source, Original: draft.Original,
+			},
+			Body:      draft.Name,
+			CreatedAt: now,
+		})
+	}
+	for idx, ref := range item.References {
+		parts = append(parts, domain.Part{
+			ID:        messageID + int64(2+len(item.Attachments)+idx),
+			MessageID: messageID,
+			Kind:      domain.PartKindReference,
+			Payload: domain.ReferencePayload{
+				Kind: ref.Kind, Path: ref.Path, Display: ref.Display, Start: ref.Start, End: ref.End,
+			},
+			Body:      ref.Display,
+			CreatedAt: now,
+		})
+	}
+	r.mu.Lock()
+	r.state.AppendMessage(message, parts)
+	r.chat.LastMessage = summary
+	r.state.UpdateChat(func(chat *domain.Chat) {
+		chat.LastMessage = summary
+	})
+	r.mu.Unlock()
 }
 
 func nextDispatchableIndex(items []domain.QueuedInput) int {

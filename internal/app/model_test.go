@@ -16,7 +16,9 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/lkarlslund/koder/internal/agent"
+	"github.com/lkarlslund/koder/internal/appstate"
 	"github.com/lkarlslund/koder/internal/attachment"
+	"github.com/lkarlslund/koder/internal/chatruntime"
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/debugsrv"
 	"github.com/lkarlslund/koder/internal/domain"
@@ -2767,6 +2769,109 @@ func TestRunPromptErrorAppendsAssistantErrorToTranscript(t *testing.T) {
 	}
 	if !strings.Contains(next.viewport.View(), "Error: connection refused") {
 		t.Fatalf("expected viewport to show error, got %q", next.viewport.View())
+	}
+}
+
+func TestRunPromptMsgKeepsExistingRuntimeSubscription(t *testing.T) {
+	rt := new(chatruntime.Runtime)
+	updates := make(chan chatruntime.Update)
+	unsubCalled := 0
+	m := Model{
+		cfg:                   config.Default().WithStateDir(t.TempDir()),
+		composer:              textarea.New(),
+		parts:                 map[int64][]domain.Part{},
+		viewport:              newTranscriptViewport(40, 6),
+		currentRuntime:        rt,
+		currentRuntimeUpdates: updates,
+		currentRuntimeUnsub:   func() { unsubCalled++ },
+	}
+
+	updated, _ := m.Update(runPromptMsg{
+		session:        domain.Session{ID: 1},
+		chat:           domain.Chat{ID: 2},
+		runtime:        rt,
+		runtimeUpdates: updates,
+		runtimeUnsub:   func() { unsubCalled += 100 },
+	})
+	next := updated.(Model)
+
+	if unsubCalled != 0 {
+		t.Fatalf("expected existing runtime subscription to stay installed, got unsubCalled=%d", unsubCalled)
+	}
+	if next.currentRuntime != rt {
+		t.Fatal("expected runtime to remain attached")
+	}
+	if next.currentRuntimeUpdates != updates {
+		t.Fatal("expected runtime updates channel to remain attached")
+	}
+}
+
+func TestRuntimeUpdateMsgAppliesRuntimeSnapshot(t *testing.T) {
+	now := time.Now().UTC()
+	message := domain.Message{ID: 10, SessionID: 1, ChatID: 2, Role: domain.MessageRoleUser, Summary: "queued steer", CreatedAt: now}
+	part := domain.Part{
+		ID:        11,
+		MessageID: 10,
+		Kind:      domain.PartKindText,
+		Payload:   domain.TextPayload{Text: "queued steer"},
+		Body:      "queued steer",
+		CreatedAt: now,
+	}
+	updates := make(chan chatruntime.Update)
+	m := Model{
+		cfg:            config.Default().WithStateDir(t.TempDir()),
+		composer:       textarea.New(),
+		parts:          map[int64][]domain.Part{},
+		viewport:       newTranscriptViewport(80, 20),
+		currentSession: domain.Session{ID: 1, Title: "Session"},
+		currentChat:    domain.Chat{ID: 2, SessionID: 1},
+	}
+
+	updated, _ := m.Update(runtimeUpdateMsg{
+		chatID: 2,
+		update: chatruntime.Update{
+			Snapshot: chatruntime.Snapshot{
+				Session:      domain.Session{ID: 1, Title: "Session"},
+				Chat:         domain.Chat{ID: 2, SessionID: 1, QueuedInputs: []domain.QueuedInput{{ID: 9, Kind: domain.QueuedInputKindQueued, Text: "later"}}},
+				Messages:     []domain.Message{message},
+				Parts:        map[int64][]domain.Part{10: {part}},
+				QueuedInputs: []domain.QueuedInput{{ID: 9, Kind: domain.QueuedInputKindQueued, Text: "later"}},
+				PendingAssistant: appstate.PendingAssistantTurn{
+					Text:      "streaming text",
+					CreatedAt: now,
+				},
+				Status:     chatruntime.StatusStreamingResponse,
+				StatusText: "Streaming LLM response ...",
+				Context:    domain.ContextUsage{TotalTokens: 42, Estimated: true},
+				Active:     true,
+			},
+			TranscriptChanged: true,
+			QueueChanged:      true,
+			StatusChanged:     true,
+			ContextChanged:    true,
+			Active:            true,
+			Status:            chatruntime.StatusStreamingResponse,
+			StatusText:        "Streaming LLM response ...",
+			Queue:             []domain.QueuedInput{{ID: 9, Kind: domain.QueuedInputKindQueued, Text: "later"}},
+		},
+		updates: updates,
+	})
+	next := updated.(Model)
+
+	if len(next.messages) != 1 || next.messages[0].Summary != "queued steer" {
+		t.Fatalf("expected runtime snapshot messages applied, got %#v", next.messages)
+	}
+	if len(next.currentChat.QueuedInputs) != 1 || next.currentChat.QueuedInputs[0].Text != "later" {
+		t.Fatalf("expected runtime queue applied, got %#v", next.currentChat.QueuedInputs)
+	}
+	if next.pendingAssistant.Text != "streaming text" {
+		t.Fatalf("expected pending assistant from runtime snapshot, got %#v", next.pendingAssistant)
+	}
+	if !next.activeEventStream {
+		t.Fatal("expected runtime update to mark active event stream")
+	}
+	if next.status != "Streaming LLM response ..." {
+		t.Fatalf("unexpected status %q", next.status)
 	}
 }
 
