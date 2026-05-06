@@ -287,3 +287,82 @@ func TestRuntimeApproveStartsApprovalStream(t *testing.T) {
 		}
 	}
 }
+
+func TestRuntimeCompactionCompletionUpdatesContextImmediately(t *testing.T) {
+	st := openTestStore(t)
+	session, chat, _ := createSessionWithPlan(t, st)
+	chat.LastKnownContextTokens = 1200
+	chat.ContextTokensKnown = true
+	runner := &runtimeFakeRunner{}
+	mgr := New(nil, st)
+	mgr.engine = runner
+
+	rt, err := mgr.Runtime(context.Background(), session, chat)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updates, unsub := rt.Subscribe()
+	defer unsub()
+
+	msg := domain.Message{
+		ID:        999,
+		SessionID: session.ID,
+		ChatID:    chat.ID,
+		Role:      domain.MessageRoleAssistant,
+		Summary:   "Compacted session summary",
+		CreatedAt: time.Now().UTC(),
+	}
+	part := domain.Part{
+		ID:        1001,
+		MessageID: msg.ID,
+		Kind:      domain.PartKindCompaction,
+		Payload: domain.CompactionPayload{
+			Summary:             "summary",
+			Status:              "completed",
+			BeforeContextTokens: 1200,
+			AfterContextTokens:  400,
+		},
+		CreatedAt: time.Now().UTC(),
+	}
+
+	rt.inbox <- streamEventCmd{
+		event: domain.Event{
+			Kind:    domain.EventKindStatus,
+			Text:    "Session compacted",
+			Message: msg,
+			Parts:   []domain.Part{part},
+			Meta:    map[string]string{"compaction": "completed", "refresh": "details"},
+		},
+	}
+
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case update := <-updates:
+			if update.Event == nil || update.Event.Meta["compaction"] != "completed" {
+				continue
+			}
+			if !update.ContextChanged {
+				t.Fatal("expected context change update")
+			}
+			if got := update.Snapshot.Context.AnchorTokens; got != 400 {
+				t.Fatalf("anchor tokens = %d", got)
+			}
+			if got := update.Snapshot.Context.TotalTokens; got < 400 {
+				t.Fatalf("total tokens = %d", got)
+			}
+			if got := update.Snapshot.Chat.LastKnownContextTokens; got != 400 {
+				t.Fatalf("chat last known context = %d", got)
+			}
+			if !update.Snapshot.Context.Estimated {
+				t.Fatal("expected compacted context to be marked estimated")
+			}
+			if len(update.Snapshot.Messages) == 0 {
+				t.Fatal("expected compaction message in snapshot")
+			}
+			return
+		case <-deadline:
+			t.Fatal("timed out waiting for compaction completion update")
+		}
+	}
+}

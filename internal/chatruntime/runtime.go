@@ -457,6 +457,18 @@ func (r *Runtime) handleApprovalEventStream(events <-chan domain.Event, err erro
 
 func (r *Runtime) handleStreamEvent(evt domain.Event) {
 	r.mu.Lock()
+	transcriptChanged := false
+	contextChanged := false
+	if evt.Message.ID > 0 && r.state != nil {
+		r.state.UpsertMessageParts(evt.Message, evt.Parts)
+		transcriptChanged = true
+		if strings.TrimSpace(evt.Message.Summary) != "" {
+			r.chat.LastMessage = evt.Message.Summary
+			r.state.UpdateChat(func(chat *domain.Chat) {
+				chat.LastMessage = evt.Message.Summary
+			})
+		}
+	}
 	switch evt.Kind {
 	case domain.EventKindMessageDelta:
 		if r.state != nil {
@@ -464,12 +476,14 @@ func (r *Runtime) handleStreamEvent(evt domain.Event) {
 		}
 		r.status = StatusStreamingResponse
 		r.statusText = "Streaming LLM response ..."
+		contextChanged = true
 	case domain.EventKindReasoning:
 		if r.state != nil {
 			r.state.AppendPendingAssistantReasoning(evt.Text)
 		}
 		r.status = StatusStreamingThoughts
 		r.statusText = "Streaming thoughts ..."
+		contextChanged = true
 	case domain.EventKindUsage:
 		if contextTokens, ok := evt.Usage.ContextTokens(); ok {
 			r.chat.LastKnownContextTokens = contextTokens
@@ -480,6 +494,7 @@ func (r *Runtime) handleStreamEvent(evt domain.Event) {
 					chat.ContextTokensKnown = true
 				})
 			}
+			contextChanged = true
 		}
 	case domain.EventKindToolStart:
 		r.status = StatusRunningTools
@@ -507,11 +522,41 @@ func (r *Runtime) handleStreamEvent(evt domain.Event) {
 	case domain.EventKindMessageDone:
 		if r.state != nil && evt.Message.ID > 0 {
 			r.state.ClearPendingAssistant()
+			contextChanged = true
+		}
+	case domain.EventKindStatus:
+		if afterTokens, ok := completedCompactionContext(evt.Parts, evt.Meta); ok {
+			r.chat.LastKnownContextTokens = afterTokens
+			r.chat.ContextTokensKnown = false
+			if r.state != nil {
+				r.state.UpdateChat(func(chat *domain.Chat) {
+					chat.LastKnownContextTokens = afterTokens
+					chat.ContextTokensKnown = false
+				})
+			}
+			contextChanged = true
 		}
 	}
 	r.mu.Unlock()
 	copyEvt := evt
-	r.broadcast(r.snapshotUpdateFlags(&copyEvt, evt.Message.ID > 0 || evt.Kind == domain.EventKindMessageDone, false, true, evt.Kind == domain.EventKindUsage || evt.Kind == domain.EventKindMessageDelta || evt.Kind == domain.EventKindReasoning, evt.Kind == domain.EventKindApprovalAsk || evt.Kind == domain.EventKindApprovalReply))
+	r.broadcast(r.snapshotUpdateFlags(&copyEvt, transcriptChanged || evt.Kind == domain.EventKindMessageDone, false, true, contextChanged, evt.Kind == domain.EventKindApprovalAsk || evt.Kind == domain.EventKindApprovalReply))
+}
+
+func completedCompactionContext(parts []domain.Part, meta map[string]string) (int, bool) {
+	if meta["compaction"] != "completed" {
+		return 0, false
+	}
+	for _, part := range parts {
+		payload, ok := part.Payload.(domain.CompactionPayload)
+		if !ok {
+			continue
+		}
+		if payload.AfterContextTokens <= 0 {
+			return 0, false
+		}
+		return payload.AfterContextTokens, true
+	}
+	return 0, false
 }
 
 func (r *Runtime) handleStreamClosed() {
