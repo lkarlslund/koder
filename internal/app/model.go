@@ -1961,7 +1961,7 @@ func (m *Model) applyEvent(evt domain.Event) {
 		m.liveUsage = m.liveUsage.Add(evt.Usage)
 		m.liveUsageKnown = m.liveUsage.HasAnyTokens()
 		if contextTokens, ok := evt.Usage.ContextTokens(); ok {
-			m.currentChat.LastKnownContextTokens += contextTokens
+			m.currentChat.LastKnownContextTokens = contextTokens
 			m.currentChat.ContextTokensKnown = true
 			for i := range m.chats {
 				if m.chats[i].ID == m.currentChat.ID {

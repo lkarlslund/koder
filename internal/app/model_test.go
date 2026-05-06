@@ -5159,7 +5159,7 @@ func TestSidebarUsageUpdatesFromLiveUsageEvent(t *testing.T) {
 	}})
 
 	after := m.renderSidebar()
-	if !strings.Contains(after, "Context 1.7k / 32.8k (5%)") {
+	if !strings.Contains(after, "Context 200 / 32.8k (0%)") {
 		t.Fatalf("expected precise context after live usage event, got %q", after)
 	}
 	if !strings.Contains(after, "Tokens in 1.2k  out 550  cache 120") {
@@ -5283,10 +5283,10 @@ func TestSidebarContextAccumulatesStreamedTokenEstimate(t *testing.T) {
 	}
 	m.applyEvent(domain.Event{Kind: domain.EventKindUsage, Usage: domain.Usage{PromptTokens: 1200, CompletionTokens: 25, TotalTokens: 1225}})
 	got = m.renderSidebar()
-	if !strings.Contains(got, "Context 2.2k / 32.8k (6%)") {
+	if !strings.Contains(got, "Context 1.2k / 32.8k (3%)") {
 		t.Fatalf("expected provider usage to replace estimate, got %q", got)
 	}
-	if m.currentChat.LastKnownContextTokens != 2200 || !m.currentChat.ContextTokensKnown {
+	if m.currentChat.LastKnownContextTokens != 1200 || !m.currentChat.ContextTokensKnown {
 		t.Fatalf("expected current chat usage updated, got %#v", m.currentChat)
 	}
 }
@@ -5310,8 +5310,8 @@ func TestSidebarUsageAccumulatesMultipleLiveUsageEvents(t *testing.T) {
 	m.applyEvent(domain.Event{Kind: domain.EventKindUsage, Usage: domain.Usage{CompletionTokens: 30, TotalTokens: 30}})
 
 	got := m.renderSidebar()
-	if !strings.Contains(got, "Context 1.2k / 32.8k (3%)") {
-		t.Fatalf("expected prompt usage to accumulate onto chat context, got %q", got)
+	if !strings.Contains(got, "Context 200 / 32.8k (0%)") {
+		t.Fatalf("expected latest prompt usage to anchor chat context, got %q", got)
 	}
 	if !strings.Contains(got, "Tokens in 200  out 80") {
 		t.Fatalf("expected live usage to accumulate across multiple events, got %q", got)

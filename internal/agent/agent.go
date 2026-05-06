@@ -2892,7 +2892,7 @@ func (e *Engine) saveChatContextUsage(ctx context.Context, chatID int64, usage d
 	if err != nil {
 		return fmt.Errorf("load chat context usage state: %w", err)
 	}
-	chat.LastKnownContextTokens += contextTokens
+	chat.LastKnownContextTokens = contextTokens
 	chat.ContextTokensKnown = true
 	if err := e.store.UpdateChat(ctx, chat); err != nil {
 		return fmt.Errorf("save chat context usage state: %w", err)

@@ -2778,7 +2778,7 @@ func TestHandleModelToolCallBypassesApprovalForSkill(t *testing.T) {
 	}
 }
 
-func TestSaveChatContextUsageAccumulatesRequestUsage(t *testing.T) {
+func TestSaveChatContextUsageStoresLatestRequestUsage(t *testing.T) {
 	cfg := testConfig(t)
 	st, err := store.Open(t.TempDir())
 	if err != nil {
@@ -2807,8 +2807,8 @@ func TestSaveChatContextUsageAccumulatesRequestUsage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stored.LastKnownContextTokens != 1240 {
-		t.Fatalf("expected accumulated request context usage, got %d", stored.LastKnownContextTokens)
+	if stored.LastKnownContextTokens != 40 {
+		t.Fatalf("expected latest request context usage, got %d", stored.LastKnownContextTokens)
 	}
 	if !stored.ContextTokensKnown {
 		t.Fatal("expected chat context usage to become known after provider usage")
