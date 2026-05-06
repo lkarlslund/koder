@@ -1055,6 +1055,17 @@ func (m Model) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 		}
 		m.invalidateTranscript()
 		m = m.UpdateLoad(msg)
+		if m.currentSession.ID > 0 && m.currentChat.ID > 0 {
+			updates, rt, err := m.attachCurrentRuntime(m.currentSession, m.currentChat)
+			if err != nil {
+				m.status = err.Error()
+			} else if rt != nil && updates != nil {
+				m.currentRuntime = rt
+				m.currentRuntimeUpdates = updates
+			}
+		} else {
+			m.detachCurrentRuntime()
+		}
 		if m.debug != nil && m.currentSession.ID > 0 {
 			m.debug.RecordLifecycle(m.currentSession.ID, "session_reloaded", fmt.Sprintf("%d messages", len(m.messages)), map[string]string{"messages": strconv.Itoa(len(m.messages))})
 		}
@@ -1070,6 +1081,9 @@ func (m Model) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 		}
 		if cmd := m.refreshExecSubscriptionCmd(); cmd != nil {
 			cmds = append(cmds, cmd)
+		}
+		if m.currentRuntimeUpdates != nil {
+			cmds = append(cmds, nextRuntimeUpdateCmd(m.currentChat.ID, m.currentRuntimeUpdates))
 		}
 		return m, ui.Batch(cmds...)
 	case agentsRefreshMsg:
@@ -5894,6 +5908,12 @@ func (m Model) saveQueuedInputsCmd(chatID int64, items []domain.QueuedInput) ui.
 		return nil
 	}
 	cloned := cloneQueuedInputs(items)
+	if m.currentRuntime != nil && m.currentChat.ID == chatID {
+		return func() ui.Msg {
+			m.currentRuntime.ReplaceQueue(cloned)
+			return queuePersistMsg{chatID: chatID, items: cloned}
+		}
+	}
 	return func() ui.Msg {
 		ctx := context.Background()
 		err := m.store.SetChatQueuedInputs(ctx, chatID, cloned)
@@ -5906,6 +5926,12 @@ func (m Model) saveAndDispatchQueuedInputCmd(chatID int64, items []domain.Queued
 	clonedItem := item
 	clonedItem.Attachments = append([]domain.QueuedAttachment(nil), item.Attachments...)
 	clonedItem.References = append([]domain.QueuedReference(nil), item.References...)
+	if m.currentRuntime != nil && m.currentChat.ID == chatID {
+		return func() ui.Msg {
+			m.currentRuntime.DispatchQueued(clonedItem, clonedItems)
+			return queuePersistMsg{chatID: chatID, items: clonedItems}
+		}
+	}
 	return func() ui.Msg {
 		ctx := context.Background()
 		if chatID > 0 {

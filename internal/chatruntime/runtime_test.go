@@ -14,12 +14,15 @@ type runtimeFakeRunner struct {
 	promptCalls   int
 	continueCalls int
 	prompts       []string
+	promptNotes   []string
+	continueNotes []string
 	events        []<-chan domain.Event
 }
 
-func (f *runtimeFakeRunner) RunPromptInChat(_ context.Context, _ domain.Session, _ domain.Chat, prompt string, _ []attachment.Draft, _ []reference.Draft, _ string) (<-chan domain.Event, error) {
+func (f *runtimeFakeRunner) RunPromptInChat(_ context.Context, _ domain.Session, _ domain.Chat, prompt string, _ []attachment.Draft, _ []reference.Draft, note string) (<-chan domain.Event, error) {
 	f.promptCalls++
 	f.prompts = append(f.prompts, prompt)
+	f.promptNotes = append(f.promptNotes, note)
 	if len(f.events) == 0 {
 		ch := make(chan domain.Event)
 		close(ch)
@@ -30,8 +33,9 @@ func (f *runtimeFakeRunner) RunPromptInChat(_ context.Context, _ domain.Session,
 	return evt, nil
 }
 
-func (f *runtimeFakeRunner) RunContinueInChat(_ context.Context, _ domain.Session, _ domain.Chat, _ string) (<-chan domain.Event, error) {
+func (f *runtimeFakeRunner) RunContinueInChat(_ context.Context, _ domain.Session, _ domain.Chat, note string) (<-chan domain.Event, error) {
 	f.continueCalls++
+	f.continueNotes = append(f.continueNotes, note)
 	if len(f.events) == 0 {
 		ch := make(chan domain.Event)
 		close(ch)
@@ -118,5 +122,81 @@ func TestRuntimeQueuesSecondItemUntilFirstCompletes(t *testing.T) {
 	}
 	if got := runner.prompts[1]; got != "second" {
 		t.Fatalf("second prompt = %q", got)
+	}
+}
+
+func TestRuntimeDispatchQueuedUsesSelectedItemAndPreservesNote(t *testing.T) {
+	st := openTestStore(t)
+	session, chat, _ := createSessionWithPlan(t, st)
+	events := make(chan domain.Event)
+	runner := &runtimeFakeRunner{events: []<-chan domain.Event{events}}
+	mgr := New(nil, st)
+	mgr.engine = runner
+
+	rt, err := mgr.Runtime(context.Background(), session, chat)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rt.DispatchQueued(
+		domain.QueuedInput{ID: 99, Kind: domain.QueuedInputKindSteer, Text: "selected", CreatedAt: time.Now().UTC()},
+		[]domain.QueuedInput{{ID: 1, Kind: domain.QueuedInputKindQueued, Text: "first", CreatedAt: time.Now().UTC()}},
+	)
+
+	deadline := time.After(2 * time.Second)
+	for runner.promptCalls == 0 {
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for dispatched prompt")
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	if got := runner.prompts[0]; got != "selected" {
+		t.Fatalf("prompt = %q", got)
+	}
+	snapshot := rt.Snapshot()
+	if len(snapshot.QueuedInputs) != 1 || snapshot.QueuedInputs[0].Text != "first" {
+		t.Fatalf("queued inputs = %#v", snapshot.QueuedInputs)
+	}
+	events <- domain.Event{Kind: domain.EventKindMessageDone}
+	close(events)
+}
+
+func TestRuntimePreservesPromptAndContinueNotes(t *testing.T) {
+	st := openTestStore(t)
+	session, chat, _ := createSessionWithPlan(t, st)
+	promptEvents := make(chan domain.Event, 1)
+	promptEvents <- domain.Event{Kind: domain.EventKindMessageDone}
+	close(promptEvents)
+	continueEvents := make(chan domain.Event, 1)
+	continueEvents <- domain.Event{Kind: domain.EventKindMessageDone}
+	close(continueEvents)
+	runner := &runtimeFakeRunner{events: []<-chan domain.Event{promptEvents, continueEvents}}
+	mgr := New(nil, st)
+	mgr.engine = runner
+
+	rt, err := mgr.Runtime(context.Background(), session, chat)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rt.Enqueue(QueueItem{Kind: QueueKindSteer, Text: "prompt", Note: "prompt-note"})
+	rt.Enqueue(QueueItem{Kind: QueueKindContinue, Note: "continue-note"})
+
+	deadline := time.After(2 * time.Second)
+	for runner.continueCalls == 0 {
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for continue")
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	if got := runner.promptNotes[0]; got != "prompt-note" {
+		t.Fatalf("prompt note = %q", got)
+	}
+	if got := runner.continueNotes[0]; got != "continue-note" {
+		t.Fatalf("continue note = %q", got)
 	}
 }

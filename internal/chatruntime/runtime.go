@@ -79,6 +79,7 @@ type Runtime struct {
 	active     bool
 	cancel     context.CancelFunc
 	queue      []domain.QueuedInput
+	queueNotes map[int64]string
 	closed     bool
 
 	inbox   chan any
@@ -89,6 +90,15 @@ type Runtime struct {
 
 type enqueueCmd struct {
 	item QueueItem
+}
+
+type replaceQueueCmd struct {
+	items []domain.QueuedInput
+}
+
+type dispatchQueuedCmd struct {
+	item      domain.QueuedInput
+	remaining []domain.QueuedInput
 }
 
 type interruptCmd struct{}
@@ -122,16 +132,17 @@ func (m *Manager) Runtime(ctx context.Context, session domain.Session, chat doma
 		return nil, err
 	}
 	rt := &Runtime{
-		manager: m,
-		store:   m.store,
-		engine:  m.engine,
-		session: session,
-		chat:    chat,
-		state:   appstate.NewChatState(chat, messages, parts, approvals),
-		status:  StatusIdle,
-		queue:   cloneQueuedInputs(chat.QueuedInputs),
-		inbox:   make(chan any, 64),
-		subs:    map[int]chan Update{},
+		manager:    m,
+		store:      m.store,
+		engine:     m.engine,
+		session:    session,
+		chat:       chat,
+		state:      appstate.NewChatState(chat, messages, parts, approvals),
+		status:     StatusIdle,
+		queue:      cloneQueuedInputs(chat.QueuedInputs),
+		queueNotes: map[int64]string{},
+		inbox:      make(chan any, 64),
+		subs:       map[int]chan Update{},
 	}
 	m.mu.Lock()
 	if existing := m.runtimes[chat.ID]; existing != nil {
@@ -147,6 +158,17 @@ func (m *Manager) Runtime(ctx context.Context, session domain.Session, chat doma
 
 func (r *Runtime) Enqueue(item QueueItem) {
 	r.inbox <- enqueueCmd{item: item}
+}
+
+func (r *Runtime) ReplaceQueue(items []domain.QueuedInput) {
+	r.inbox <- replaceQueueCmd{items: cloneQueuedInputs(items)}
+}
+
+func (r *Runtime) DispatchQueued(item domain.QueuedInput, remaining []domain.QueuedInput) {
+	cloned := item
+	cloned.Attachments = append([]domain.QueuedAttachment(nil), item.Attachments...)
+	cloned.References = append([]domain.QueuedReference(nil), item.References...)
+	r.inbox <- dispatchQueuedCmd{item: cloned, remaining: cloneQueuedInputs(remaining)}
 }
 
 func (r *Runtime) Interrupt() {
@@ -223,6 +245,10 @@ func (r *Runtime) loop() {
 		switch typed := cmd.(type) {
 		case enqueueCmd:
 			r.handleEnqueue(typed.item)
+		case replaceQueueCmd:
+			r.handleReplaceQueue(typed.items)
+		case dispatchQueuedCmd:
+			r.handleDispatchQueued(typed.item, typed.remaining)
 		case interruptCmd:
 			r.handleInterrupt()
 		case streamEventCmd:
@@ -240,6 +266,15 @@ func (r *Runtime) loop() {
 
 func (r *Runtime) handleEnqueue(item QueueItem) {
 	queued := queuedInputFromItem(item)
+	if note := strings.TrimSpace(item.Note); note != "" {
+		r.mu.Lock()
+		r.queueNotes[queued.ID] = note
+		r.mu.Unlock()
+	}
+	r.handleAppendQueuedInput(queued)
+}
+
+func (r *Runtime) handleAppendQueuedInput(queued domain.QueuedInput) {
 	r.mu.Lock()
 	r.queue = append(r.queue, queued)
 	r.chat.QueuedInputs = cloneQueuedInputs(r.queue)
@@ -258,6 +293,77 @@ func (r *Runtime) handleEnqueue(item QueueItem) {
 		Active:     r.snapshotActive(),
 	})
 	r.maybeDispatchNext()
+}
+
+func (r *Runtime) handleReplaceQueue(items []domain.QueuedInput) {
+	r.mu.Lock()
+	r.queue = cloneQueuedInputs(items)
+	r.chat.QueuedInputs = cloneQueuedInputs(r.queue)
+	if r.state != nil {
+		r.state.UpdateChat(func(chat *domain.Chat) {
+			chat.QueuedInputs = cloneQueuedInputs(r.queue)
+		})
+	}
+	r.mu.Unlock()
+	_ = r.persistQueue()
+	r.broadcast(Update{
+		Status:     r.snapshotStatus(),
+		StatusText: r.snapshotStatusText(),
+		Queue:      cloneQueuedInputs(r.snapshotQueue()),
+		Context:    r.ContextSize(),
+		Active:     r.snapshotActive(),
+	})
+	r.maybeDispatchNext()
+}
+
+func (r *Runtime) handleDispatchQueued(item domain.QueuedInput, remaining []domain.QueuedInput) {
+	r.mu.Lock()
+	if r.active || r.status == StatusWaitingApproval {
+		r.queue = cloneQueuedInputs(remaining)
+		r.chat.QueuedInputs = cloneQueuedInputs(r.queue)
+		if r.state != nil {
+			r.state.UpdateChat(func(chat *domain.Chat) {
+				chat.QueuedInputs = cloneQueuedInputs(r.queue)
+			})
+		}
+		r.mu.Unlock()
+		_ = r.persistQueue()
+		r.broadcast(Update{
+			Status:     r.snapshotStatus(),
+			StatusText: r.snapshotStatusText(),
+			Queue:      cloneQueuedInputs(r.snapshotQueue()),
+			Context:    r.ContextSize(),
+			Active:     r.snapshotActive(),
+		})
+		return
+	}
+	r.queue = cloneQueuedInputs(remaining)
+	r.chat.QueuedInputs = cloneQueuedInputs(r.queue)
+	if r.state != nil {
+		r.state.UpdateChat(func(chat *domain.Chat) {
+			chat.QueuedInputs = cloneQueuedInputs(r.queue)
+			chat.LastKnownContextTokens = r.chat.LastKnownContextTokens
+			chat.ContextTokensKnown = r.chat.ContextTokensKnown
+		})
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	r.cancel = cancel
+	r.active = true
+	r.status = StatusWaitingLLM
+	r.statusText = "Waiting for LLM response"
+	session := r.session
+	chat := r.chat
+	r.mu.Unlock()
+
+	_ = r.persistQueue()
+	r.broadcast(Update{
+		Status:     r.snapshotStatus(),
+		StatusText: r.snapshotStatusText(),
+		Queue:      cloneQueuedInputs(r.snapshotQueue()),
+		Context:    r.ContextSize(),
+		Active:     r.snapshotActive(),
+	})
+	r.runItem(ctx, session, chat, item)
 }
 
 func (r *Runtime) handleInterrupt() {
@@ -425,7 +531,14 @@ func (r *Runtime) maybeDispatchNext() {
 		Context:    r.ContextSize(),
 		Active:     r.snapshotActive(),
 	})
+	r.runItem(ctx, session, chat, item)
+}
 
+func (r *Runtime) runItem(ctx context.Context, session domain.Session, chat domain.Chat, item domain.QueuedInput) {
+	r.mu.Lock()
+	note := r.queueNotes[item.ID]
+	delete(r.queueNotes, item.ID)
+	r.mu.Unlock()
 	var (
 		events <-chan domain.Event
 		err    error
@@ -436,10 +549,10 @@ func (r *Runtime) maybeDispatchNext() {
 		if !ok {
 			err = fmt.Errorf("continue is not supported by runner")
 		} else {
-			events, err = runner.RunContinueInChat(ctx, session, chat, "")
+			events, err = runner.RunContinueInChat(ctx, session, chat, note)
 		}
 	default:
-		events, err = r.engine.RunPromptInChat(ctx, session, chat, item.Text, queuedAttachmentDrafts(item.Attachments), queuedReferenceDrafts(item.References), "")
+		events, err = r.engine.RunPromptInChat(ctx, session, chat, item.Text, queuedAttachmentDrafts(item.Attachments), queuedReferenceDrafts(item.References), note)
 	}
 	if err != nil {
 		r.mu.Lock()
