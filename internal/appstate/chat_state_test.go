@@ -13,7 +13,7 @@ func TestChatStateMergeLoadedPreservesRecordIdentity(t *testing.T) {
 	initialParts := map[int64][]domain.Part{
 		1: {{ID: 10, MessageID: 1, Kind: domain.PartKindText, Payload: domain.TextPayload{Text: "one"}}},
 	}
-	state := NewChatState(initialMessages, initialParts, []store.Approval{{ID: 50}})
+	state := NewChatState(domain.Chat{ID: 1}, initialMessages, initialParts, []store.Approval{{ID: 50}})
 	msgRecord := state.Messages()[0]
 	partRecord := msgRecord.Parts[0]
 
@@ -21,7 +21,7 @@ func TestChatStateMergeLoadedPreservesRecordIdentity(t *testing.T) {
 	updatedParts := map[int64][]domain.Part{
 		1: {{ID: 10, MessageID: 1, Kind: domain.PartKindText, Payload: domain.TextPayload{Text: "updated"}}},
 	}
-	state.MergeLoaded(updatedMessages, updatedParts, []store.Approval{{ID: 51}})
+	state.MergeLoaded(domain.Chat{ID: 1, Title: "updated"}, updatedMessages, updatedParts, []store.Approval{{ID: 51}})
 
 	if got := state.Messages()[0]; got != msgRecord {
 		t.Fatalf("message record pointer changed")
@@ -38,11 +38,14 @@ func TestChatStateMergeLoadedPreservesRecordIdentity(t *testing.T) {
 	if approvals := state.Approvals(); len(approvals) != 1 || approvals[0].ID != 51 {
 		t.Fatalf("approvals = %+v", approvals)
 	}
+	if got := state.Chat().Title; got != "updated" {
+		t.Fatalf("chat title = %q", got)
+	}
 }
 
 func TestChatStateAppendMessage(t *testing.T) {
 	t.Helper()
-	state := NewChatState(nil, nil, nil)
+	state := NewChatState(domain.Chat{}, nil, nil, nil)
 	record := state.AppendMessage(
 		domain.Message{ID: 7, Role: domain.MessageRoleAssistant, Summary: "hello"},
 		[]domain.Part{{ID: 9, MessageID: 7, Kind: domain.PartKindText, Payload: domain.TextPayload{Text: "hello"}}},
@@ -66,7 +69,7 @@ func TestChatStateAppendMessage(t *testing.T) {
 
 func TestChatStateUpsertMessagePartsPreservesRecordIdentity(t *testing.T) {
 	t.Helper()
-	state := NewChatState(nil, nil, nil)
+	state := NewChatState(domain.Chat{}, nil, nil, nil)
 	record := state.AppendMessage(
 		domain.Message{ID: 7, Role: domain.MessageRoleAssistant, Summary: "first"},
 		[]domain.Part{{ID: 9, MessageID: 7, Kind: domain.PartKindText, Payload: domain.TextPayload{Text: "first"}}},
@@ -91,5 +94,38 @@ func TestChatStateUpsertMessagePartsPreservesRecordIdentity(t *testing.T) {
 	}
 	if got := updated.Parts[0].Part.Text(); got != "updated" {
 		t.Fatalf("part text = %q", got)
+	}
+}
+
+func TestChatStateCurrentContextSize(t *testing.T) {
+	state := NewChatState(
+		domain.Chat{ID: 7, LastKnownContextTokens: 1200, ContextTokensKnown: true},
+		[]domain.Message{
+			{ID: 1, Role: domain.MessageRoleAssistant},
+			{ID: 2, Role: domain.MessageRoleUser},
+		},
+		map[int64][]domain.Part{
+			1: {{Kind: domain.PartKindUsage, Payload: domain.UsagePayload{Usage: domain.Usage{PromptTokens: 1200, CompletionTokens: 50, TotalTokens: 1250}}}},
+			2: {{Kind: domain.PartKindText, Payload: domain.TextPayload{Text: "inspect these files"}}},
+		},
+		nil,
+	)
+	state.SetLiveContextEstimatedTokens(25)
+
+	got := state.CurrentContextSize()
+	if got.AnchorTokens != 1200 {
+		t.Fatalf("anchor = %d", got.AnchorTokens)
+	}
+	if got.TailTokens <= 0 {
+		t.Fatalf("expected tail estimate, got %#v", got)
+	}
+	if got.LiveTokens != 25 {
+		t.Fatalf("live = %d", got.LiveTokens)
+	}
+	if got.TotalTokens != got.AnchorTokens+got.TailTokens+got.LiveTokens {
+		t.Fatalf("total mismatch %#v", got)
+	}
+	if !got.Estimated {
+		t.Fatalf("expected estimated usage, got %#v", got)
 	}
 }

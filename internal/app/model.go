@@ -960,9 +960,7 @@ func (m Model) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 			return m, m.syncWindowTitleCmd()
 		}
 		if msg.chatID == m.currentChat.ID {
-			m.currentChat.QueuedInputs = cloneQueuedInputs(msg.items)
-			m.clampQueueSelection()
-			m.invalidateFooterCache()
+			m.setQueuedInputs(msg.items)
 		}
 		return m, m.syncWindowTitleCmd()
 	case llmPreviewMsg:
@@ -1963,6 +1961,13 @@ func (m *Model) applyEvent(evt domain.Event) {
 		if contextTokens, ok := evt.Usage.ContextTokens(); ok {
 			m.currentChat.LastKnownContextTokens = contextTokens
 			m.currentChat.ContextTokensKnown = true
+			if m.chatState != nil {
+				m.chatState.UpdateChat(func(chat *domain.Chat) {
+					chat.LastKnownContextTokens = contextTokens
+					chat.ContextTokensKnown = true
+				})
+				m.chatState.SetLiveContextEstimatedTokens(0)
+			}
 			for i := range m.chats {
 				if m.chats[i].ID == m.currentChat.ID {
 					m.chats[i].LastKnownContextTokens = m.currentChat.LastKnownContextTokens
@@ -3471,16 +3476,14 @@ func (m *Model) syncUsageFromHistory() {
 func (m *Model) syncContextFromChat() {
 	m.contextTokens = 0
 	m.contextTokensEstimated = false
-	if m.currentChat.LastKnownContextTokens <= 0 {
+	state := m.ensureChatState()
+	if state == nil || state.Chat().LastKnownContextTokens <= 0 {
 		return
 	}
-	tailEstimate, anchored := sessionctx.EstimateTailTokens(m.messages, m.parts)
-	usage := m.currentChat.CurrentContextSize(tailEstimate, m.liveContextEstimatedTokens)
+	state.SetLiveContextEstimatedTokens(m.liveContextEstimatedTokens)
+	usage := state.CurrentContextSize()
 	m.contextTokens = usage.TotalTokens
 	m.contextTokensEstimated = usage.Estimated
-	if !anchored && !m.currentChat.ContextTokensKnown {
-		m.contextTokensEstimated = true
-	}
 }
 
 func (m *Model) ensureContextEstimateFromState() {
@@ -3504,6 +3507,12 @@ func (m *Model) ensureContextEstimateFromState() {
 	if m.currentChat.LastKnownContextTokens <= 0 {
 		m.currentChat.LastKnownContextTokens = estimated
 		m.currentChat.ContextTokensKnown = false
+		if m.chatState != nil {
+			m.chatState.UpdateChat(func(chat *domain.Chat) {
+				chat.LastKnownContextTokens = estimated
+				chat.ContextTokensKnown = false
+			})
+		}
 		for idx := range m.chats {
 			if m.chats[idx].ID == m.currentChat.ID {
 				m.chats[idx].LastKnownContextTokens = estimated
@@ -3515,12 +3524,35 @@ func (m *Model) ensureContextEstimateFromState() {
 }
 
 func (m *Model) addLiveContextEstimate(text string) {
-	estimated := tokenestimate.Text(text)
+	var estimated int
+	if m.chatState != nil {
+		estimated = m.chatState.AddLiveContextEstimate(text)
+	} else {
+		estimated = tokenestimate.Text(text)
+	}
 	if estimated <= 0 {
 		return
 	}
 	m.liveContextEstimatedTokens += estimated
-	usage := m.currentChat.CurrentContextSize(0, m.liveContextEstimatedTokens)
+	usage := domain.ContextUsage{}
+	if m.chatState != nil {
+		usage = m.chatState.CurrentContextSize()
+	} else {
+		anchor := m.currentChat.LastKnownContextTokens
+		if anchor < 0 {
+			anchor = 0
+		}
+		liveTokens := m.liveContextEstimatedTokens
+		if liveTokens < 0 {
+			liveTokens = 0
+		}
+		usage = domain.ContextUsage{
+			AnchorTokens: anchor,
+			LiveTokens:   liveTokens,
+			TotalTokens:  anchor + liveTokens,
+			Estimated:    true,
+		}
+	}
 	if usage.TotalTokens <= 0 {
 		usage.TotalTokens = m.contextTokens + estimated
 	}
@@ -3545,10 +3577,29 @@ func (m Model) currentContextMetrics() (sessionctx.Metrics, bool) {
 	if !ok || providerCfg.ContextWindow <= 0 {
 		return sessionctx.Metrics{}, false
 	}
-	usage := m.currentChat.CurrentContextSize(0, 0)
-	if m.currentChat.LastKnownContextTokens > 0 {
+	usage := domain.ContextUsage{}
+	if m.chatState != nil {
+		usage = m.chatState.CurrentContextSize()
+	} else if m.currentChat.LastKnownContextTokens > 0 {
 		tailEstimate, anchored := sessionctx.EstimateTailTokens(m.messages, m.parts)
-		usage = m.currentChat.CurrentContextSize(tailEstimate, m.liveContextEstimatedTokens)
+		if tailEstimate < 0 {
+			tailEstimate = 0
+		}
+		anchor := m.currentChat.LastKnownContextTokens
+		if anchor < 0 {
+			anchor = 0
+		}
+		liveTokens := m.liveContextEstimatedTokens
+		if liveTokens < 0 {
+			liveTokens = 0
+		}
+		usage = domain.ContextUsage{
+			AnchorTokens: anchor,
+			TailTokens:   tailEstimate,
+			LiveTokens:   liveTokens,
+			TotalTokens:  anchor + tailEstimate + liveTokens,
+			Estimated:    !m.currentChat.ContextTokensKnown || tailEstimate > 0 || liveTokens > 0,
+		}
 		if !anchored && !m.currentChat.ContextTokensKnown {
 			usage.Estimated = true
 		}
@@ -4539,9 +4590,9 @@ func (m *Model) loadChatState(chat domain.Chat, messages []domain.Message, parts
 		return
 	}
 	if m.chatState != nil && m.chatStateChatID == chat.ID {
-		m.chatState.MergeLoaded(messages, parts, approvals)
+		m.chatState.MergeLoaded(chat, messages, parts, approvals)
 	} else {
-		m.chatState = appstate.NewChatState(messages, parts, approvals)
+		m.chatState = appstate.NewChatState(chat, messages, parts, approvals)
 	}
 	m.rebuildChatToolRuns()
 	m.chatStateChatID = chat.ID
@@ -4550,7 +4601,7 @@ func (m *Model) loadChatState(chat domain.Chat, messages []domain.Message, parts
 
 func (m *Model) ensureChatState() *appstate.ChatState {
 	if m.chatState == nil {
-		m.chatState = appstate.NewChatState(m.messages, m.parts, m.approvals)
+		m.chatState = appstate.NewChatState(m.currentChat, m.messages, m.parts, m.approvals)
 		m.rebuildChatToolRuns()
 		m.chatStateChatID = m.currentChat.ID
 	}
@@ -4565,6 +4616,7 @@ func (m *Model) syncChatMirrorsFromState() {
 		m.approvals = nil
 		return
 	}
+	m.currentChat = m.chatState.Chat()
 	m.messages = m.chatState.SnapshotMessages()
 	m.parts = m.chatState.SnapshotParts()
 	m.approvals = m.chatState.Approvals()
@@ -5657,6 +5709,11 @@ func (m *Model) currentChatID() int64 {
 
 func (m *Model) setQueuedInputs(items []domain.QueuedInput) {
 	m.currentChat.QueuedInputs = cloneQueuedInputs(items)
+	if m.chatState != nil {
+		m.chatState.UpdateChat(func(chat *domain.Chat) {
+			chat.QueuedInputs = cloneQueuedInputs(items)
+		})
+	}
 	for idx := range m.chats {
 		if m.chats[idx].ID == m.currentChat.ID {
 			m.chats[idx].QueuedInputs = cloneQueuedInputs(items)

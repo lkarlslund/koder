@@ -239,27 +239,6 @@ type ContextUsage struct {
 	Estimated    bool
 }
 
-func (c Chat) CurrentContextSize(tailTokens, liveTokens int) ContextUsage {
-	if tailTokens < 0 {
-		tailTokens = 0
-	}
-	if liveTokens < 0 {
-		liveTokens = 0
-	}
-	anchor := c.LastKnownContextTokens
-	if anchor < 0 {
-		anchor = 0
-	}
-	total := anchor + tailTokens + liveTokens
-	return ContextUsage{
-		AnchorTokens: anchor,
-		TailTokens:   tailTokens,
-		LiveTokens:   liveTokens,
-		TotalTokens:  total,
-		Estimated:    !c.ContextTokensKnown || tailTokens > 0 || liveTokens > 0,
-	}
-}
-
 type QueuedInputKind string
 
 const (

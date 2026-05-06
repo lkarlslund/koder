@@ -5,17 +5,22 @@ import (
 	"strings"
 
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/sessionctx"
 	"github.com/lkarlslund/koder/internal/store"
+	"github.com/lkarlslund/koder/internal/tokenestimate"
 	"github.com/lkarlslund/koder/internal/ui"
 )
 
 // ChatState owns the current chat's mutable in-memory records.
 type ChatState struct {
+	chat      domain.Chat
 	messages  []*MessageRecord
 	byMessage map[int64]*MessageRecord
 	byPart    map[int64]*PartRecord
 	approvals []store.Approval
 	toolRuns  []*ToolRunRecord
+
+	liveContextEstimatedTokens int
 
 	byToolRunID      map[string]*ToolRunRecord
 	byToolCallID     map[string]*ToolRunRecord
@@ -39,14 +44,15 @@ type ToolRunRecord struct {
 }
 
 // NewChatState builds a chat state from persisted snapshots.
-func NewChatState(messages []domain.Message, parts map[int64][]domain.Part, approvals []store.Approval) *ChatState {
+func NewChatState(chat domain.Chat, messages []domain.Message, parts map[int64][]domain.Part, approvals []store.Approval) *ChatState {
 	state := &ChatState{}
-	state.MergeLoaded(messages, parts, approvals)
+	state.MergeLoaded(chat, messages, parts, approvals)
 	return state
 }
 
 // MergeLoaded refreshes chat records from loaded store snapshots while preserving record identity by ID.
-func (s *ChatState) MergeLoaded(messages []domain.Message, parts map[int64][]domain.Part, approvals []store.Approval) {
+func (s *ChatState) MergeLoaded(chat domain.Chat, messages []domain.Message, parts map[int64][]domain.Part, approvals []store.Approval) {
+	s.chat = chat
 	if s.byMessage == nil {
 		s.byMessage = map[int64]*MessageRecord{}
 	}
@@ -80,6 +86,78 @@ func (s *ChatState) MergeLoaded(messages []domain.Message, parts map[int64][]dom
 	s.byMessage = nextByMessage
 	s.byPart = nextByPart
 	s.approvals = slices.Clone(approvals)
+}
+
+func (s *ChatState) Chat() domain.Chat {
+	if s == nil {
+		return domain.Chat{}
+	}
+	return s.chat
+}
+
+func (s *ChatState) SetChat(chat domain.Chat) {
+	if s == nil {
+		return
+	}
+	s.chat = chat
+}
+
+func (s *ChatState) UpdateChat(update func(*domain.Chat)) {
+	if s == nil || update == nil {
+		return
+	}
+	update(&s.chat)
+}
+
+func (s *ChatState) SetLiveContextEstimatedTokens(tokens int) {
+	if s == nil {
+		return
+	}
+	if tokens < 0 {
+		tokens = 0
+	}
+	s.liveContextEstimatedTokens = tokens
+}
+
+func (s *ChatState) AddLiveContextEstimate(text string) int {
+	if s == nil {
+		return 0
+	}
+	estimated := tokenestimate.Text(text)
+	if estimated <= 0 {
+		return 0
+	}
+	s.liveContextEstimatedTokens += estimated
+	return estimated
+}
+
+func (s *ChatState) CurrentContextSize() domain.ContextUsage {
+	if s == nil {
+		return domain.ContextUsage{}
+	}
+	tailEstimate, anchored := sessionctx.EstimateTailTokens(s.SnapshotMessages(), s.SnapshotParts())
+	if tailEstimate < 0 {
+		tailEstimate = 0
+	}
+	liveTokens := s.liveContextEstimatedTokens
+	if liveTokens < 0 {
+		liveTokens = 0
+	}
+	anchor := s.chat.LastKnownContextTokens
+	if anchor < 0 {
+		anchor = 0
+	}
+	usage := domain.ContextUsage{
+		AnchorTokens: anchor,
+		TailTokens:   tailEstimate,
+		LiveTokens:   liveTokens,
+		TotalTokens:  anchor + tailEstimate + liveTokens,
+		Estimated:    !s.chat.ContextTokensKnown || tailEstimate > 0 || liveTokens > 0,
+	}
+	if !anchored && !s.chat.ContextTokensKnown {
+		usage.Estimated = true
+	}
+	return usage
 }
 
 // Messages returns the ordered message records for the current chat.
