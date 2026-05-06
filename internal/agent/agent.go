@@ -34,6 +34,7 @@ import (
 	"github.com/lkarlslund/koder/internal/tokenestimate"
 	"github.com/lkarlslund/koder/internal/tools"
 	_ "github.com/lkarlslund/koder/internal/tools/all"
+	"github.com/lkarlslund/koder/internal/turncontrol"
 )
 
 type Engine struct {
@@ -1208,6 +1209,10 @@ func (e *Engine) approve(ctx context.Context, sessionID, chatID int64, rawID str
 		out <- domain.Event{Kind: domain.EventKindApprovalReply, Text: fmt.Sprintf("approval %d approved", id), Tool: req.Tool, Message: replyMsg, Parts: replyParts, Meta: map[string]string{"approval_id": strconv.FormatInt(id, 10)}}
 		for evt := range toolEvents {
 			out <- evt
+		}
+		if turncontrol.ShouldStop(ctx) {
+			e.emitInterrupted(out, item.ChatID, session.ID)
+			return
 		}
 		compacted, err := e.autoCompactChatIfNeeded(ctx, session, item.ChatID, client, out)
 		if err != nil {
@@ -3001,6 +3006,10 @@ func (e *Engine) handleModelToolCalls(ctx context.Context, session domain.Sessio
 	for i := 0; i < execCount; i++ {
 		completed := <-results
 		if completed.err != nil {
+			if interruptedErr(completed.err) {
+				firstErr = completed.err
+				continue
+			}
 			if firstErr == nil {
 				firstErr = completed.err
 			}
@@ -3015,6 +3024,9 @@ func (e *Engine) handleModelToolCalls(ctx context.Context, session domain.Sessio
 	}
 	if firstErr != nil {
 		return needsApproval, firstErr
+	}
+	if turncontrol.ShouldStop(ctx) {
+		return needsApproval, context.Canceled
 	}
 	return needsApproval, nil
 }
@@ -3179,6 +3191,9 @@ func (e *Engine) executePreparedToolCall(ctx context.Context, chatID, sessionID 
 	result, err := e.registry.ExecuteWithChat(ctx, e.store, sessionID, chat, req)
 	if err != nil {
 		e.recordLifecycle(sessionID, "tool_execution_failed", err.Error(), map[string]string{"tool": string(req.Tool), "tool_call_id": req.ToolCallID})
+		if interruptedErr(err) {
+			return nil, err
+		}
 		events, persistErr := e.persistToolFailure(ctx, chatID, sessionID, req, err)
 		if persistErr != nil {
 			return nil, persistErr

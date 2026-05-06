@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lkarlslund/koder/internal/appstate"
 	"github.com/lkarlslund/koder/internal/attachment"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/reference"
@@ -285,6 +286,48 @@ func TestRuntimeApproveStartsApprovalStream(t *testing.T) {
 		case <-deadline:
 			t.Fatal("timed out waiting for approval reply")
 		}
+	}
+}
+
+func TestRuntimeCancelWhileToolsRunningStagesThenForcesCancel(t *testing.T) {
+	session := domain.Session{ID: 1}
+	chat := domain.Chat{ID: 2, SessionID: 1}
+	cancelled := false
+	rt := &Runtime{
+		session: session,
+		chat:    chat,
+		state:   appstate.NewChatState(chat, nil, nil, nil),
+		status:  StatusRunningTools,
+		active:  true,
+		cancel:  func() { cancelled = true },
+		running: map[string]struct{}{"call_1": {}},
+	}
+
+	rt.handleInterrupt()
+	if cancelled {
+		t.Fatal("expected first cancel to wait for tool completion")
+	}
+	if rt.cancelState != CancelStateCancelling {
+		t.Fatalf("cancel state = %q", rt.cancelState)
+	}
+	if rt.statusText != "Cancelling..." {
+		t.Fatalf("status text = %q", rt.statusText)
+	}
+	snapshot := rt.Snapshot()
+	if len(snapshot.Messages) != 1 {
+		t.Fatalf("expected cancellation notice message, got %#v", snapshot.Messages)
+	}
+	parts := snapshot.Parts[snapshot.Messages[0].ID]
+	if len(parts) != 1 || parts[0].Kind != domain.PartKindEventNotice {
+		t.Fatalf("unexpected cancellation notice parts: %#v", parts)
+	}
+	if got := parts[0].Text(); got != "Cancelling. Tool calls running, waiting for completition. Press ESC again to cancel tool calls." {
+		t.Fatalf("unexpected notice body: %q", got)
+	}
+
+	rt.handleInterrupt()
+	if !cancelled {
+		t.Fatal("expected second cancel to force tool cancellation")
 	}
 }
 

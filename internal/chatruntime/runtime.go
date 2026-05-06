@@ -12,6 +12,7 @@ import (
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/reference"
 	"github.com/lkarlslund/koder/internal/store"
+	"github.com/lkarlslund/koder/internal/turncontrol"
 )
 
 type QueueKind string
@@ -40,6 +41,13 @@ const (
 	StatusRunningTools      Status = "running_tools"
 	StatusWaitingApproval   Status = "waiting_approval"
 	StatusErrored           Status = "error"
+)
+
+type CancelState string
+
+const (
+	CancelStateNone       CancelState = ""
+	CancelStateCancelling CancelState = "cancelling"
 )
 
 type Snapshot struct {
@@ -76,17 +84,19 @@ type Runtime struct {
 	store   *store.Store
 	engine  promptRunner
 
-	mu         sync.RWMutex
-	session    domain.Session
-	chat       domain.Chat
-	state      *appstate.ChatState
-	status     Status
-	statusText string
-	active     bool
-	cancel     context.CancelFunc
-	queue      []domain.QueuedInput
-	queueNotes map[int64]string
-	closed     bool
+	mu          sync.RWMutex
+	session     domain.Session
+	chat        domain.Chat
+	state       *appstate.ChatState
+	status      Status
+	statusText  string
+	active      bool
+	cancel      context.CancelFunc
+	queue       []domain.QueuedInput
+	queueNotes  map[int64]string
+	cancelState CancelState
+	running     map[string]struct{}
+	closed      bool
 
 	inbox   chan any
 	subsMu  sync.Mutex
@@ -190,8 +200,12 @@ func (r *Runtime) DispatchQueued(item domain.QueuedInput, remaining []domain.Que
 	r.inbox <- dispatchQueuedCmd{item: cloned, remaining: cloneQueuedInputs(remaining)}
 }
 
-func (r *Runtime) Interrupt() {
+func (r *Runtime) Cancel() {
 	r.inbox <- interruptCmd{}
+}
+
+func (r *Runtime) Interrupt() {
+	r.Cancel()
 }
 
 func (r *Runtime) Approve(approvalID int64) {
@@ -358,7 +372,14 @@ func (r *Runtime) handleDispatchQueued(item domain.QueuedInput, remaining []doma
 		})
 	}
 	ctx, cancel := context.WithCancel(context.Background())
+	ctx = turncontrol.WithShouldStop(ctx, func() bool {
+		r.mu.RLock()
+		defer r.mu.RUnlock()
+		return r.cancelState == CancelStateCancelling
+	})
 	r.cancel = cancel
+	r.cancelState = CancelStateNone
+	r.running = map[string]struct{}{}
 	r.active = true
 	r.status = StatusWaitingLLM
 	r.statusText = "Waiting for LLM response"
@@ -374,6 +395,16 @@ func (r *Runtime) handleDispatchQueued(item domain.QueuedInput, remaining []doma
 
 func (r *Runtime) handleInterrupt() {
 	r.mu.Lock()
+	if r.status == StatusRunningTools && len(r.running) > 0 {
+		if r.cancelState != CancelStateCancelling {
+			r.cancelState = CancelStateCancelling
+			r.appendRuntimeNoticeLocked("Cancelling. Tool calls running, waiting for completition. Press ESC again to cancel tool calls.", "interrupt_pending", "warning")
+			r.statusText = "Cancelling..."
+			r.mu.Unlock()
+			r.broadcast(r.snapshotUpdateFlags(nil, true, false, true, false, false))
+			return
+		}
+	}
 	cancel := r.cancel
 	r.mu.Unlock()
 	if cancel != nil {
@@ -497,16 +528,28 @@ func (r *Runtime) handleStreamEvent(evt domain.Event) {
 			contextChanged = true
 		}
 	case domain.EventKindToolStart:
+		if r.running == nil {
+			r.running = map[string]struct{}{}
+		}
+		if strings.TrimSpace(evt.ToolCallID) != "" {
+			r.running[evt.ToolCallID] = struct{}{}
+		}
 		r.status = StatusRunningTools
 		r.statusText = strings.TrimSpace(evt.Text)
 		if r.statusText == "" {
 			r.statusText = "Running tool"
+		}
+	case domain.EventKindToolResult:
+		if strings.TrimSpace(evt.ToolCallID) != "" {
+			delete(r.running, evt.ToolCallID)
 		}
 	case domain.EventKindApprovalAsk:
 		r.status = StatusWaitingApproval
 		r.statusText = strings.TrimSpace(evt.Text)
 		r.active = false
 		r.cancel = nil
+		r.cancelState = CancelStateNone
+		r.running = nil
 	case domain.EventKindError:
 		r.status = StatusErrored
 		if evt.Err != nil {
@@ -519,11 +562,15 @@ func (r *Runtime) handleStreamEvent(evt domain.Event) {
 		}
 		r.active = false
 		r.cancel = nil
+		r.cancelState = CancelStateNone
+		r.running = nil
 	case domain.EventKindMessageDone:
 		if r.state != nil && evt.Message.ID > 0 {
 			r.state.ClearPendingAssistant()
 			contextChanged = true
 		}
+		r.cancelState = CancelStateNone
+		r.running = nil
 	case domain.EventKindStatus:
 		if afterTokens, ok := completedCompactionContext(evt.Parts, evt.Meta); ok {
 			r.chat.LastKnownContextTokens = afterTokens
@@ -573,6 +620,8 @@ func (r *Runtime) handleStreamClosed() {
 			r.state.ClearPendingAssistant()
 		}
 	}
+	r.cancelState = CancelStateNone
+	r.running = nil
 	r.mu.Unlock()
 	r.broadcast(r.snapshotUpdateFlags(nil, false, false, true, true, false))
 	if shouldDispatch {
@@ -627,7 +676,14 @@ func (r *Runtime) maybeDispatchNext() {
 		})
 	}
 	ctx, cancel := context.WithCancel(context.Background())
+	ctx = turncontrol.WithShouldStop(ctx, func() bool {
+		r.mu.RLock()
+		defer r.mu.RUnlock()
+		return r.cancelState == CancelStateCancelling
+	})
 	r.cancel = cancel
+	r.cancelState = CancelStateNone
+	r.running = map[string]struct{}{}
 	r.active = true
 	r.status = StatusWaitingLLM
 	r.statusText = "Waiting for LLM response"
@@ -805,6 +861,35 @@ func (r *Runtime) appendOptimisticUserMessage(item domain.QueuedInput, session d
 		chat.LastMessage = summary
 	})
 	r.mu.Unlock()
+}
+
+func (r *Runtime) appendRuntimeNoticeLocked(body, kind, severity string) {
+	if r.state == nil {
+		return
+	}
+	body = strings.TrimSpace(body)
+	if body == "" {
+		return
+	}
+	now := time.Now().UTC()
+	messageID := now.UnixNano()
+	message := domain.Message{
+		ID:        messageID,
+		SessionID: r.session.ID,
+		ChatID:    r.chat.ID,
+		Role:      domain.MessageRoleAssistant,
+		Summary:   body,
+		CreatedAt: now,
+	}
+	parts := []domain.Part{{
+		ID:        messageID + 1,
+		MessageID: messageID,
+		Kind:      domain.PartKindEventNotice,
+		Payload:   domain.EventNoticePayload{Text: body, Kind: kind, Severity: severity},
+		Body:      body,
+		CreatedAt: now,
+	}}
+	r.state.AppendMessage(message, parts)
 }
 
 func nextDispatchableIndex(items []domain.QueuedInput) int {

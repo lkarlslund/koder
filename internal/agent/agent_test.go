@@ -26,6 +26,7 @@ import (
 	"github.com/lkarlslund/koder/internal/reference"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools"
+	"github.com/lkarlslund/koder/internal/turncontrol"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -1625,6 +1626,122 @@ func TestRunPromptExecutesMultipleToolCallsInParallel(t *testing.T) {
 	}
 	if len(requests) < 2 {
 		t.Fatalf("expected at least two provider requests, got %d", len(requests))
+	}
+}
+
+func TestHandleModelToolCallsStopsAfterToolBatchWhenCancelRequested(t *testing.T) {
+	t.Parallel()
+
+	cfg := testConfig(t)
+	cfg.Permissions.Profile = permission.ProfileFullAccess
+
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	workdir := t.TempDir()
+	engine := New(cfg, st, tools.NewRegistry(workdir), nil, workdir)
+	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetSessionPermissionProfile(context.Background(), session.ID, permission.ProfileFullAccess); err != nil {
+		t.Fatal(err)
+	}
+	chat, err := st.CreateChat(context.Background(), session.ID, "chat", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	out := make(chan domain.Event, 8)
+	ctx := turncontrol.WithShouldStop(context.Background(), func() bool { return true })
+	needsApproval, err := engine.handleModelToolCalls(ctx, session, chat, []tools.Request{{
+		Tool:       domain.ToolKindBash,
+		ToolCallID: "call_1",
+		Args:       map[string]string{"command": "printf hi"},
+	}}, out)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context canceled, got %v", err)
+	}
+	if needsApproval {
+		t.Fatal("did not expect approval request")
+	}
+	close(out)
+	var sawToolStart bool
+	var sawToolResult bool
+	for evt := range out {
+		if evt.Kind == domain.EventKindToolStart {
+			sawToolStart = true
+		}
+		if evt.Kind == domain.EventKindToolResult && strings.Contains(evt.Text, "hi") {
+			sawToolResult = true
+		}
+	}
+	if !sawToolStart {
+		t.Fatal("expected tool start event")
+	}
+	if !sawToolResult {
+		t.Fatal("expected persisted tool result before cancellation")
+	}
+}
+
+func TestExecutePreparedToolCallDoesNotPersistCanceledToolFailure(t *testing.T) {
+	t.Parallel()
+
+	cfg := testConfig(t)
+	cfg.Permissions.Profile = permission.ProfileFullAccess
+
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	workdir := t.TempDir()
+	engine := New(cfg, st, tools.NewRegistry(workdir), nil, workdir)
+	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chat, err := st.CreateChat(context.Background(), session.ID, "chat", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, runErr := engine.executePreparedToolCall(ctx, chat.ID, session.ID, tools.Request{
+			Tool:       domain.ToolKindBash,
+			ToolCallID: "call_1",
+			Args:       map[string]string{"command": "sleep 1"},
+		})
+		done <- runErr
+	}()
+	time.Sleep(100 * time.Millisecond)
+	cancel()
+
+	select {
+	case runErr := <-done:
+		if !errors.Is(runErr, context.Canceled) {
+			t.Fatalf("expected context canceled, got %v", runErr)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for tool cancellation")
+	}
+
+	_, parts, err := st.PartsForChat(context.Background(), chat.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, byMessage := range parts {
+		for _, part := range byMessage {
+			if strings.Contains(part.Text(), "context canceled") {
+				t.Fatalf("unexpected persisted cancellation tool failure: %#v", part)
+			}
+		}
 	}
 }
 
