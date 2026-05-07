@@ -247,6 +247,7 @@ func (m *Model) applyCurrentChatEvent(evt domain.Event) {
 		}
 	}
 	if evt.Message.ID > 0 {
+		m.syncCurrentSnapshotFromState()
 		m.syncChatMirrorsFromState()
 	}
 	if refreshed || evt.Message.ID > 0 {
@@ -299,6 +300,7 @@ func (m *Model) applyApprovalAskEvent(evt domain.Event) {
 		Command:   strings.TrimSpace(evt.Meta["command"]),
 		Status:    domain.ApprovalStatusPending,
 	})
+	m.syncCurrentSnapshotFromState()
 	m.syncChatMirrorsFromState()
 }
 
@@ -308,6 +310,7 @@ func (m *Model) applyApprovalReplyEvent(evt domain.Event) {
 		return
 	}
 	m.ensureChatState().RemoveApproval(approvalID)
+	m.syncCurrentSnapshotFromState()
 	m.syncChatMirrorsFromState()
 }
 

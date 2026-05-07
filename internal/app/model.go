@@ -4788,56 +4788,68 @@ func (m *Model) ensureChatState() *appstate.ChatState {
 func (m *Model) syncChatMirrorsFromState() {
 	if m.chatState == nil {
 		m.chatStateChatID = 0
-		m.messages = nil
-		m.parts = nil
-		m.approvals = nil
+		if m.currentRuntime == nil {
+			m.messages = nil
+			m.parts = nil
+			m.approvals = nil
+		}
 		return
 	}
 	m.currentChat = m.chatState.Chat()
-	if m.currentRuntime != nil {
-		m.messages = nil
-		m.parts = nil
-		m.approvals = nil
-		return
+	if m.currentRuntime == nil {
+		m.messages = m.chatState.SnapshotMessages()
+		m.parts = m.chatState.SnapshotParts()
+		m.approvals = m.chatState.Approvals()
 	}
-	m.messages = m.chatState.SnapshotMessages()
-	m.parts = m.chatState.SnapshotParts()
-	m.approvals = m.chatState.Approvals()
 }
 
 func (m *Model) activeMessages() []domain.Message {
-	if m.currentRuntime != nil {
+	if len(m.currentSnapshot.Messages) > 0 || m.currentSnapshot.Chat.ID != 0 {
 		return m.currentSnapshot.Messages
 	}
 	return m.messages
 }
 
 func (m *Model) activeParts() map[int64][]domain.Part {
-	if m.currentRuntime != nil {
+	if len(m.currentSnapshot.Parts) > 0 || m.currentSnapshot.Chat.ID != 0 {
 		return m.currentSnapshot.Parts
 	}
 	return m.parts
 }
 
 func (m *Model) activeApprovals() []store.Approval {
-	if m.currentRuntime != nil {
+	if len(m.currentSnapshot.Approvals) > 0 || m.currentSnapshot.Chat.ID != 0 {
 		return m.currentSnapshot.Approvals
 	}
 	return m.approvals
 }
 
 func (m *Model) activeQueuedInputs() []domain.QueuedInput {
-	if m.currentRuntime != nil {
+	if len(m.currentSnapshot.QueuedInputs) > 0 || m.currentSnapshot.Chat.ID != 0 {
 		return m.currentSnapshot.QueuedInputs
 	}
 	return m.currentChat.QueuedInputs
 }
 
 func (m *Model) activePendingAssistant() appstate.PendingAssistantTurn {
-	if m.currentRuntime != nil {
+	if m.currentRuntime != nil || !m.currentSnapshot.PendingAssistant.CreatedAt.IsZero() || strings.TrimSpace(m.currentSnapshot.PendingAssistant.Text) != "" || strings.TrimSpace(m.currentSnapshot.PendingAssistant.Reasoning) != "" {
 		return m.currentSnapshot.PendingAssistant
 	}
 	return appstate.PendingAssistantTurn(m.pendingAssistant)
+}
+
+func (m *Model) syncCurrentSnapshotFromState() {
+	if m.chatState == nil {
+		return
+	}
+	chat := m.chatState.Chat()
+	if m.currentSnapshot.Chat.ID != 0 && m.currentSnapshot.Chat.ID != chat.ID {
+		return
+	}
+	m.currentSnapshot.Chat = chat
+	m.currentSnapshot.Messages = m.chatState.SnapshotMessages()
+	m.currentSnapshot.Parts = m.chatState.SnapshotParts()
+	m.currentSnapshot.Approvals = m.chatState.Approvals()
 }
 
 func (m *Model) detachCurrentRuntime() {
@@ -5730,6 +5742,7 @@ func (m *Model) appendLocalUserPrompt(prompt string, drafts []attachment.Draft, 
 		})
 	}
 	record := m.ensureChatState().AppendMessage(message, parts)
+	m.syncCurrentSnapshotFromState()
 	m.syncChatMirrorsFromState()
 	if m.debug != nil {
 		m.debug.RecordLifecycle(m.currentSession.ID, "prompt_submitted", prompt, map[string]string{"optimistic": "true"})
@@ -5769,6 +5782,7 @@ func (m *Model) appendLocalAssistantError(err error) {
 		CreatedAt: now,
 	}}
 	m.ensureChatState().AppendMessage(message, parts)
+	m.syncCurrentSnapshotFromState()
 	m.syncChatMirrorsFromState()
 	if m.debug != nil {
 		m.debug.RecordLifecycle(m.currentSession.ID, "ui_error_appended", err.Error(), nil)
@@ -5802,6 +5816,7 @@ func (m *Model) appendLocalTranscriptNotice(body, kind, severity string) {
 		CreatedAt: now,
 	}}
 	m.ensureChatState().AppendMessage(message, parts)
+	m.syncCurrentSnapshotFromState()
 	m.syncChatMirrorsFromState()
 	if m.debug != nil {
 		m.debug.RecordLifecycle(m.currentSession.ID, "ui_notice_appended", body, map[string]string{"kind": kind, "severity": severity})
