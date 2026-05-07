@@ -879,7 +879,7 @@ func (m Model) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 		}
 		return m, m.waitForExecEventCmd()
 	case promptDoneMsg:
-		m.pendingAssistant = pendingAssistantTurn{}
+		m.resetPendingAssistantState()
 		m.invalidateBodyCache()
 		if msg.err != nil {
 			return m.finishOperationWithError(msg.err)
@@ -888,7 +888,7 @@ func (m Model) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 		m.startWaitingForLLM()
 		return m, ui.Batch(nextEventCmd(m.currentChat.ID, msg.events), m.spinnerCmdIfNeeded(), m.syncWindowTitleCmd())
 	case runPromptMsg:
-		m.pendingAssistant = pendingAssistantTurn{}
+		m.resetPendingAssistantState()
 		m.invalidateBodyCache()
 		if msg.err != nil {
 			return m.finishOperationWithError(msg.err)
@@ -1058,7 +1058,7 @@ func (m Model) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 			(msg.current.ID == 0 || msg.current.ID == m.currentSession.ID) &&
 			(msg.chat.ID == 0 || msg.chat.ID == m.currentChat.ID)
 		if !preservePendingAssistant {
-			m.pendingAssistant = pendingAssistantTurn{}
+			m.resetPendingAssistantState()
 		}
 		m.invalidateTranscript()
 		m = m.UpdateLoad(msg)
@@ -1994,18 +1994,7 @@ func (m *Model) helpMaxOffset() int {
 func (m *Model) applyEvent(evt domain.Event) {
 	switch evt.Kind {
 	case domain.EventKindMessageDelta:
-		if m.pendingAssistant.CreatedAt.IsZero() {
-			m.pendingAssistant.CreatedAt = time.Now().UTC()
-		}
-		m.pendingAssistant.Text += evt.Text
-		if m.currentRuntime != nil {
-			pending := m.currentSnapshot.PendingAssistant
-			if pending.CreatedAt.IsZero() {
-				pending.CreatedAt = m.pendingAssistant.CreatedAt
-			}
-			pending.Text += evt.Text
-			m.currentSnapshot.PendingAssistant = pending
-		}
+		m.appendPendingAssistantText(evt.Text)
 		if m.chatState != nil {
 			m.chatState.AppendPendingAssistantText(evt.Text)
 		}
@@ -2014,18 +2003,7 @@ func (m *Model) applyEvent(evt domain.Event) {
 		m.pendingTranscriptFrameDirty = true
 		m.invalidatePendingTranscriptFrame()
 	case domain.EventKindReasoning:
-		if m.pendingAssistant.CreatedAt.IsZero() {
-			m.pendingAssistant.CreatedAt = time.Now().UTC()
-		}
-		m.pendingAssistant.Reasoning += evt.Text
-		if m.currentRuntime != nil {
-			pending := m.currentSnapshot.PendingAssistant
-			if pending.CreatedAt.IsZero() {
-				pending.CreatedAt = m.pendingAssistant.CreatedAt
-			}
-			pending.Reasoning += evt.Text
-			m.currentSnapshot.PendingAssistant = pending
-		}
+		m.appendPendingAssistantReasoning(evt.Text)
 		if m.chatState != nil {
 			m.chatState.AppendPendingAssistantReasoning(evt.Text)
 		}
@@ -2167,10 +2145,7 @@ func (m *Model) clearPendingAssistantTurn() {
 	if strings.TrimSpace(pending.Text) == "" && strings.TrimSpace(pending.Reasoning) == "" {
 		return
 	}
-	m.pendingAssistant = pendingAssistantTurn{}
-	if m.currentRuntime != nil {
-		m.currentSnapshot.PendingAssistant = appstate.PendingAssistantTurn{}
-	}
+	m.resetPendingAssistantState()
 	if m.chatState != nil {
 		m.chatState.ClearPendingAssistant()
 	}
@@ -4836,6 +4811,45 @@ func (m *Model) activePendingAssistant() appstate.PendingAssistantTurn {
 		return m.currentSnapshot.PendingAssistant
 	}
 	return appstate.PendingAssistantTurn(m.pendingAssistant)
+}
+
+func (m *Model) resetPendingAssistantState() {
+	m.pendingAssistant = pendingAssistantTurn{}
+	if m.currentRuntime != nil || !m.currentSnapshot.PendingAssistant.CreatedAt.IsZero() || strings.TrimSpace(m.currentSnapshot.PendingAssistant.Text) != "" || strings.TrimSpace(m.currentSnapshot.PendingAssistant.Reasoning) != "" {
+		m.currentSnapshot.PendingAssistant = appstate.PendingAssistantTurn{}
+	}
+}
+
+func (m *Model) appendPendingAssistantText(text string) {
+	if strings.TrimSpace(text) == "" {
+		return
+	}
+	if m.pendingAssistant.CreatedAt.IsZero() {
+		m.pendingAssistant.CreatedAt = time.Now().UTC()
+	}
+	m.pendingAssistant.Text += text
+	pending := m.currentSnapshot.PendingAssistant
+	if pending.CreatedAt.IsZero() {
+		pending.CreatedAt = m.pendingAssistant.CreatedAt
+	}
+	pending.Text += text
+	m.currentSnapshot.PendingAssistant = pending
+}
+
+func (m *Model) appendPendingAssistantReasoning(text string) {
+	if strings.TrimSpace(text) == "" {
+		return
+	}
+	if m.pendingAssistant.CreatedAt.IsZero() {
+		m.pendingAssistant.CreatedAt = time.Now().UTC()
+	}
+	m.pendingAssistant.Reasoning += text
+	pending := m.currentSnapshot.PendingAssistant
+	if pending.CreatedAt.IsZero() {
+		pending.CreatedAt = m.pendingAssistant.CreatedAt
+	}
+	pending.Reasoning += text
+	m.currentSnapshot.PendingAssistant = pending
 }
 
 func (m *Model) syncCurrentSnapshotFromState() {
