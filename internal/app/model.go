@@ -6126,10 +6126,10 @@ func (m *Model) currentChatID() int64 {
 	return 0
 }
 
-func (m *Model) setQueuedInputs(items []domain.QueuedInput) {
+func (m *Model) applyQueuedInputs(items []domain.QueuedInput) {
 	cloned := cloneQueuedInputs(items)
 	m.currentChat.QueuedInputs = cloneQueuedInputs(cloned)
-	if m.currentRuntime != nil {
+	if m.hasSnapshotChatState() || m.currentRuntime != nil {
 		m.currentSnapshot.QueuedInputs = cloneQueuedInputs(cloned)
 		m.currentSnapshot.Chat.QueuedInputs = cloneQueuedInputs(cloned)
 	}
@@ -6144,6 +6144,10 @@ func (m *Model) setQueuedInputs(items []domain.QueuedInput) {
 			break
 		}
 	}
+}
+
+func (m *Model) setQueuedInputs(items []domain.QueuedInput) {
+	m.applyQueuedInputs(items)
 	m.clampQueueSelection()
 	m.invalidateFooterCache()
 }
