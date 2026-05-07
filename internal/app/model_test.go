@@ -2868,8 +2868,11 @@ func TestRuntimeUpdateMsgAppliesRuntimeSnapshot(t *testing.T) {
 	if len(next.currentChat.QueuedInputs) != 1 || next.currentChat.QueuedInputs[0].Text != "later" {
 		t.Fatalf("expected runtime queue applied, got %#v", next.currentChat.QueuedInputs)
 	}
-	if next.pendingAssistant.Text != "streaming text" {
-		t.Fatalf("expected pending assistant from runtime snapshot, got %#v", next.pendingAssistant)
+	if strings.TrimSpace(next.pendingAssistant.Text) != "" || strings.TrimSpace(next.pendingAssistant.Reasoning) != "" {
+		t.Fatalf("expected runtime-backed app to avoid pending assistant mirror, got %#v", next.pendingAssistant)
+	}
+	if got := next.activePendingAssistant(); got.Text != "streaming text" {
+		t.Fatalf("expected pending assistant from runtime snapshot, got %#v", got)
 	}
 	if !next.activeEventStream {
 		t.Fatal("expected runtime update to mark active event stream")

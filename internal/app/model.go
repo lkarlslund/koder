@@ -4891,7 +4891,11 @@ func (m *Model) applyRuntimeSnapshot(snapshot chatpkg.Snapshot) {
 		m.clampQueueSelection()
 	}
 	m.loadChatState(snapshot.Chat, snapshot.Messages, snapshot.Parts, snapshot.Approvals)
-	m.pendingAssistant = pendingAssistantTurn(snapshot.PendingAssistant)
+	if m.currentRuntime == nil {
+		m.pendingAssistant = pendingAssistantTurn(snapshot.PendingAssistant)
+	} else {
+		m.pendingAssistant = pendingAssistantTurn{}
+	}
 	m.syncUsageFromHistory()
 	m.syncContextFromChat()
 	m.ensureContextEstimateFromState()
