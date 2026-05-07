@@ -1998,6 +1998,14 @@ func (m *Model) applyEvent(evt domain.Event) {
 			m.pendingAssistant.CreatedAt = time.Now().UTC()
 		}
 		m.pendingAssistant.Text += evt.Text
+		if m.currentRuntime != nil {
+			pending := m.currentSnapshot.PendingAssistant
+			if pending.CreatedAt.IsZero() {
+				pending.CreatedAt = m.pendingAssistant.CreatedAt
+			}
+			pending.Text += evt.Text
+			m.currentSnapshot.PendingAssistant = pending
+		}
 		if m.chatState != nil {
 			m.chatState.AppendPendingAssistantText(evt.Text)
 		}
@@ -2010,6 +2018,14 @@ func (m *Model) applyEvent(evt domain.Event) {
 			m.pendingAssistant.CreatedAt = time.Now().UTC()
 		}
 		m.pendingAssistant.Reasoning += evt.Text
+		if m.currentRuntime != nil {
+			pending := m.currentSnapshot.PendingAssistant
+			if pending.CreatedAt.IsZero() {
+				pending.CreatedAt = m.pendingAssistant.CreatedAt
+			}
+			pending.Reasoning += evt.Text
+			m.currentSnapshot.PendingAssistant = pending
+		}
 		if m.chatState != nil {
 			m.chatState.AppendPendingAssistantReasoning(evt.Text)
 		}
@@ -2084,7 +2100,8 @@ func (m *Model) applyEvent(evt domain.Event) {
 		m.clearPendingAssistantTurn()
 		m.stopBusy()
 	case domain.EventKindMessageDone:
-		if evt.Message.ID > 0 || !m.activeEventStream || (strings.TrimSpace(m.pendingAssistant.Text) == "" && strings.TrimSpace(m.pendingAssistant.Reasoning) == "") {
+		pending := m.activePendingAssistant()
+		if evt.Message.ID > 0 || !m.activeEventStream || (strings.TrimSpace(pending.Text) == "" && strings.TrimSpace(pending.Reasoning) == "") {
 			m.clearPendingAssistantTurn()
 			m.stopBusyWithStatus("Idle")
 		}
@@ -2136,10 +2153,14 @@ func (m *Model) prepareFrame() {
 }
 
 func (m *Model) clearPendingAssistantTurn() {
-	if strings.TrimSpace(m.pendingAssistant.Text) == "" && strings.TrimSpace(m.pendingAssistant.Reasoning) == "" {
+	pending := m.activePendingAssistant()
+	if strings.TrimSpace(pending.Text) == "" && strings.TrimSpace(pending.Reasoning) == "" {
 		return
 	}
 	m.pendingAssistant = pendingAssistantTurn{}
+	if m.currentRuntime != nil {
+		m.currentSnapshot.PendingAssistant = appstate.PendingAssistantTurn{}
+	}
 	if m.chatState != nil {
 		m.chatState.ClearPendingAssistant()
 	}

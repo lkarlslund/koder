@@ -2899,6 +2899,27 @@ func TestSetQueuedInputsUpdatesRuntimeSnapshotQueue(t *testing.T) {
 	}
 }
 
+func TestApplyEventKeepsRuntimePendingAssistantSnapshotInSync(t *testing.T) {
+	m := Model{
+		currentRuntime: &chatpkg.Chat{},
+		currentSnapshot: chatpkg.Snapshot{
+			Chat: domain.Chat{ID: 2, SessionID: 1},
+		},
+	}
+
+	m.applyEvent(domain.Event{Kind: domain.EventKindMessageDelta, Text: "The"})
+	m.applyEvent(domain.Event{Kind: domain.EventKindReasoning, Text: "thinking"})
+
+	if got := m.activePendingAssistant(); got.Text != "The" || got.Reasoning != "thinking" {
+		t.Fatalf("expected active pending assistant snapshot updated, got %#v", got)
+	}
+
+	m.clearPendingAssistantTurn()
+	if got := m.activePendingAssistant(); strings.TrimSpace(got.Text) != "" || strings.TrimSpace(got.Reasoning) != "" {
+		t.Fatalf("expected active pending assistant snapshot cleared, got %#v", got)
+	}
+}
+
 func TestNewSessionMsgClearsBusyState(t *testing.T) {
 	m := Model{
 		busy: busyModel{
