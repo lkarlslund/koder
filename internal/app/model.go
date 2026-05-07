@@ -4779,35 +4779,49 @@ func (m *Model) syncChatMirrorsFromState() {
 }
 
 func (m *Model) activeMessages() []domain.Message {
-	if len(m.currentSnapshot.Messages) > 0 || m.currentSnapshot.Chat.ID != 0 {
+	if m.hasSnapshotChatState() {
 		return m.currentSnapshot.Messages
 	}
 	return m.messages
 }
 
 func (m *Model) activeParts() map[int64][]domain.Part {
-	if len(m.currentSnapshot.Parts) > 0 || m.currentSnapshot.Chat.ID != 0 {
+	if m.hasSnapshotChatState() {
 		return m.currentSnapshot.Parts
 	}
 	return m.parts
 }
 
 func (m *Model) activeApprovals() []store.Approval {
-	if len(m.currentSnapshot.Approvals) > 0 || m.currentSnapshot.Chat.ID != 0 {
+	if m.hasSnapshotChatState() {
 		return m.currentSnapshot.Approvals
 	}
 	return m.approvals
 }
 
+func (m *Model) hasSnapshotChatState() bool {
+	return m.currentSnapshot.Chat.ID != 0 ||
+		len(m.currentSnapshot.Messages) > 0 ||
+		len(m.currentSnapshot.Parts) > 0 ||
+		len(m.currentSnapshot.Approvals) > 0 ||
+		len(m.currentSnapshot.QueuedInputs) > 0
+}
+
+func (m *Model) hasSnapshotPendingAssistant() bool {
+	return !m.currentSnapshot.PendingAssistant.CreatedAt.IsZero() ||
+		strings.TrimSpace(m.currentSnapshot.PendingAssistant.Text) != "" ||
+		strings.TrimSpace(m.currentSnapshot.PendingAssistant.Reasoning) != ""
+}
+
 func (m *Model) activeQueuedInputs() []domain.QueuedInput {
-	if len(m.currentSnapshot.QueuedInputs) > 0 || m.currentSnapshot.Chat.ID != 0 {
+	if m.hasSnapshotChatState() {
 		return m.currentSnapshot.QueuedInputs
 	}
 	return m.currentChat.QueuedInputs
 }
 
 func (m *Model) activePendingAssistant() appstate.PendingAssistantTurn {
-	if m.currentRuntime != nil || !m.currentSnapshot.PendingAssistant.CreatedAt.IsZero() || strings.TrimSpace(m.currentSnapshot.PendingAssistant.Text) != "" || strings.TrimSpace(m.currentSnapshot.PendingAssistant.Reasoning) != "" {
+	if m.currentRuntime != nil || m.hasSnapshotPendingAssistant() {
 		return m.currentSnapshot.PendingAssistant
 	}
 	return appstate.PendingAssistantTurn(m.pendingAssistant)
@@ -4815,7 +4829,7 @@ func (m *Model) activePendingAssistant() appstate.PendingAssistantTurn {
 
 func (m *Model) resetPendingAssistantState() {
 	m.pendingAssistant = pendingAssistantTurn{}
-	if m.currentRuntime != nil || !m.currentSnapshot.PendingAssistant.CreatedAt.IsZero() || strings.TrimSpace(m.currentSnapshot.PendingAssistant.Text) != "" || strings.TrimSpace(m.currentSnapshot.PendingAssistant.Reasoning) != "" {
+	if m.currentRuntime != nil || m.hasSnapshotPendingAssistant() {
 		m.currentSnapshot.PendingAssistant = appstate.PendingAssistantTurn{}
 	}
 }
