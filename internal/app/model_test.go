@@ -2875,6 +2875,30 @@ func TestRuntimeUpdateMsgAppliesRuntimeSnapshot(t *testing.T) {
 	}
 }
 
+func TestSetQueuedInputsUpdatesRuntimeSnapshotQueue(t *testing.T) {
+	m := Model{
+		currentRuntime: &chatpkg.Chat{},
+		currentChat:    domain.Chat{ID: 2, SessionID: 1},
+		currentSnapshot: chatpkg.Snapshot{
+			Chat:         domain.Chat{ID: 2, SessionID: 1, QueuedInputs: []domain.QueuedInput{{ID: 1, Kind: domain.QueuedInputKindQueued, Text: "before"}}},
+			QueuedInputs: []domain.QueuedInput{{ID: 1, Kind: domain.QueuedInputKindQueued, Text: "before"}},
+		},
+	}
+
+	nextItems := []domain.QueuedInput{{ID: 2, Kind: domain.QueuedInputKindSteer, Text: "after"}}
+	m.setQueuedInputs(nextItems)
+
+	if len(m.activeQueuedInputs()) != 1 || m.activeQueuedInputs()[0].Text != "after" {
+		t.Fatalf("expected active queue to come from updated runtime snapshot, got %#v", m.activeQueuedInputs())
+	}
+	if len(m.currentSnapshot.QueuedInputs) != 1 || m.currentSnapshot.QueuedInputs[0].Text != "after" {
+		t.Fatalf("expected runtime snapshot queue updated, got %#v", m.currentSnapshot.QueuedInputs)
+	}
+	if len(m.currentSnapshot.Chat.QueuedInputs) != 1 || m.currentSnapshot.Chat.QueuedInputs[0].Text != "after" {
+		t.Fatalf("expected runtime snapshot chat queue updated, got %#v", m.currentSnapshot.Chat.QueuedInputs)
+	}
+}
+
 func TestNewSessionMsgClearsBusyState(t *testing.T) {
 	m := Model{
 		busy: busyModel{

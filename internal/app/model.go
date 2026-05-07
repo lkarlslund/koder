@@ -6032,15 +6032,20 @@ func (m *Model) currentChatID() int64 {
 }
 
 func (m *Model) setQueuedInputs(items []domain.QueuedInput) {
-	m.currentChat.QueuedInputs = cloneQueuedInputs(items)
+	cloned := cloneQueuedInputs(items)
+	m.currentChat.QueuedInputs = cloneQueuedInputs(cloned)
+	if m.currentRuntime != nil {
+		m.currentSnapshot.QueuedInputs = cloneQueuedInputs(cloned)
+		m.currentSnapshot.Chat.QueuedInputs = cloneQueuedInputs(cloned)
+	}
 	if m.chatState != nil {
 		m.chatState.UpdateChat(func(chat *domain.Chat) {
-			chat.QueuedInputs = cloneQueuedInputs(items)
+			chat.QueuedInputs = cloneQueuedInputs(cloned)
 		})
 	}
 	for idx := range m.chats {
 		if m.chats[idx].ID == m.currentChat.ID {
-			m.chats[idx].QueuedInputs = cloneQueuedInputs(items)
+			m.chats[idx].QueuedInputs = cloneQueuedInputs(cloned)
 			break
 		}
 	}
