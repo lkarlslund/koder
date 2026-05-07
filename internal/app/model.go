@@ -4794,6 +4794,12 @@ func (m *Model) syncChatMirrorsFromState() {
 		return
 	}
 	m.currentChat = m.chatState.Chat()
+	if m.currentRuntime != nil {
+		m.messages = nil
+		m.parts = nil
+		m.approvals = nil
+		return
+	}
 	m.messages = m.chatState.SnapshotMessages()
 	m.parts = m.chatState.SnapshotParts()
 	m.approvals = m.chatState.Approvals()

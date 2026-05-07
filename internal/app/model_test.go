@@ -2821,6 +2821,7 @@ func TestRuntimeUpdateMsgAppliesRuntimeSnapshot(t *testing.T) {
 	m := Model{
 		cfg:            config.Default().WithStateDir(t.TempDir()),
 		composer:       textarea.New(),
+		currentRuntime: &chatpkg.Chat{},
 		parts:          map[int64][]domain.Part{},
 		viewport:       newTranscriptViewport(80, 20),
 		currentSession: domain.Session{ID: 1, Title: "Session"},
@@ -2858,8 +2859,11 @@ func TestRuntimeUpdateMsgAppliesRuntimeSnapshot(t *testing.T) {
 	})
 	next := updated.(Model)
 
-	if len(next.messages) != 1 || next.messages[0].Summary != "queued steer" {
-		t.Fatalf("expected runtime snapshot messages applied, got %#v", next.messages)
+	if len(next.messages) != 0 {
+		t.Fatalf("expected runtime-backed app to avoid message mirrors, got %#v", next.messages)
+	}
+	if got := next.activeMessages(); len(got) != 1 || got[0].Summary != "queued steer" {
+		t.Fatalf("expected runtime snapshot messages applied, got %#v", got)
 	}
 	if len(next.currentChat.QueuedInputs) != 1 || next.currentChat.QueuedInputs[0].Text != "later" {
 		t.Fatalf("expected runtime queue applied, got %#v", next.currentChat.QueuedInputs)
