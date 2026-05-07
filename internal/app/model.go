@@ -2048,6 +2048,9 @@ func (m *Model) applyEvent(evt domain.Event) {
 		title := strings.TrimSpace(evt.Text)
 		if title != "" {
 			m.currentSession.Title = title
+			if m.currentRuntime != nil {
+				m.currentSnapshot.Session.Title = title
+			}
 			for i := range m.sessions {
 				if m.sessions[i].ID == m.currentSession.ID {
 					m.sessions[i].Title = title
@@ -2061,6 +2064,10 @@ func (m *Model) applyEvent(evt domain.Event) {
 		if contextTokens, ok := evt.Usage.ContextTokens(); ok {
 			m.currentChat.LastKnownContextTokens = contextTokens
 			m.currentChat.ContextTokensKnown = true
+			if m.currentRuntime != nil {
+				m.currentSnapshot.Chat.LastKnownContextTokens = contextTokens
+				m.currentSnapshot.Chat.ContextTokensKnown = true
+			}
 			if m.chatState != nil {
 				m.chatState.UpdateChat(func(chat *domain.Chat) {
 					chat.LastKnownContextTokens = contextTokens
@@ -2086,6 +2093,9 @@ func (m *Model) applyEvent(evt domain.Event) {
 		}
 		if profile := strings.TrimSpace(evt.Meta["permission_profile"]); profile != "" {
 			m.currentSession.PermissionProfile = profile
+			if m.currentRuntime != nil {
+				m.currentSnapshot.Session.PermissionProfile = profile
+			}
 			for idx := range m.sessions {
 				if m.sessions[idx].ID == m.currentSession.ID {
 					m.sessions[idx].PermissionProfile = profile
@@ -4886,8 +4896,15 @@ func (m *Model) applyRuntimeTelemetryEvent(evt domain.Event) {
 	case domain.EventKindUsage:
 		m.liveUsage = m.liveUsage.Add(evt.Usage)
 		m.liveUsageKnown = m.liveUsage.HasAnyTokens()
+		if contextTokens, ok := evt.Usage.ContextTokens(); ok && m.currentRuntime != nil {
+			m.currentSnapshot.Chat.LastKnownContextTokens = contextTokens
+			m.currentSnapshot.Chat.ContextTokensKnown = true
+		}
 	case domain.EventKindStatus:
 		if profile := strings.TrimSpace(evt.Meta["permission_profile"]); profile != "" {
+			if m.currentRuntime != nil {
+				m.currentSnapshot.Session.PermissionProfile = profile
+			}
 			m.currentSession.PermissionProfile = profile
 			for idx := range m.sessions {
 				if m.sessions[idx].ID == m.currentSession.ID {

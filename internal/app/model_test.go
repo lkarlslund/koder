@@ -2920,6 +2920,32 @@ func TestApplyEventKeepsRuntimePendingAssistantSnapshotInSync(t *testing.T) {
 	}
 }
 
+func TestApplyEventKeepsRuntimeSnapshotMetadataInSync(t *testing.T) {
+	m := Model{
+		currentRuntime: &chatpkg.Chat{},
+		currentSession: domain.Session{ID: 1, Title: "Old", PermissionProfile: permission.ProfileWriteAsk},
+		currentChat:    domain.Chat{ID: 2, SessionID: 1},
+		currentSnapshot: chatpkg.Snapshot{
+			Session: domain.Session{ID: 1, Title: "Old", PermissionProfile: permission.ProfileWriteAsk},
+			Chat:    domain.Chat{ID: 2, SessionID: 1},
+		},
+	}
+
+	m.applyEvent(domain.Event{Kind: domain.EventKindSessionTitle, Text: "New"})
+	m.applyEvent(domain.Event{Kind: domain.EventKindStatus, Meta: map[string]string{"permission_profile": permission.ProfileAsk}})
+	m.applyEvent(domain.Event{Kind: domain.EventKindUsage, Usage: domain.Usage{PromptTokens: 123}})
+
+	if got := m.currentSnapshot.Session.Title; got != "New" {
+		t.Fatalf("expected runtime snapshot title updated, got %q", got)
+	}
+	if got := m.currentSnapshot.Session.PermissionProfile; got != permission.ProfileAsk {
+		t.Fatalf("expected runtime snapshot permission profile updated, got %q", got)
+	}
+	if got := m.currentSnapshot.Chat.LastKnownContextTokens; got != 123 || !m.currentSnapshot.Chat.ContextTokensKnown {
+		t.Fatalf("expected runtime snapshot chat context updated, got %#v", m.currentSnapshot.Chat)
+	}
+}
+
 func TestNewSessionMsgClearsBusyState(t *testing.T) {
 	m := Model{
 		busy: busyModel{
