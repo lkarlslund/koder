@@ -48,8 +48,8 @@ func benchmarkModel(b *testing.B, messageCount int) Model {
 		ModelID:    "model",
 	}
 	m.workspace = workspaceStub()
-	m.messages = make([]domain.Message, 0, messageCount)
-	m.parts = make(map[int64][]domain.Part, messageCount)
+	m.currentSnapshot.Messages = make([]domain.Message, 0, messageCount)
+	m.currentSnapshot.Parts = make(map[int64][]domain.Part, messageCount)
 	now := time.Now()
 	for i := 0; i < messageCount; i++ {
 		role := domain.MessageRoleAssistant
@@ -62,9 +62,9 @@ func benchmarkModel(b *testing.B, messageCount int) Model {
 			Role:      role,
 			CreatedAt: now.Add(time.Duration(i) * time.Second),
 		}
-		m.messages = append(m.messages, msg)
+		m.currentSnapshot.Messages = append(m.currentSnapshot.Messages, msg)
 		body := fmt.Sprintf("message %03d %s", i, strings.Repeat("content ", 10))
-		m.parts[msg.ID] = []domain.Part{{
+		m.currentSnapshot.Parts[msg.ID] = []domain.Part{{
 			ID:        int64(i + 1),
 			MessageID: msg.ID,
 			Kind:      domain.PartKindText,
@@ -72,7 +72,7 @@ func benchmarkModel(b *testing.B, messageCount int) Model {
 			CreatedAt: msg.CreatedAt,
 		}}
 		if role == domain.MessageRoleAssistant && i%5 == 1 {
-			m.parts[msg.ID] = append(m.parts[msg.ID], domain.Part{
+			m.currentSnapshot.Parts[msg.ID] = append(m.currentSnapshot.Parts[msg.ID], domain.Part{
 				ID:        int64(1000 + i),
 				MessageID: msg.ID,
 				Kind:      domain.PartKindReasoning,
@@ -559,7 +559,7 @@ func benchmarkPickerDialogModel(b *testing.B) Model {
 func benchmarkApprovalDialogModel(b *testing.B) Model {
 	b.Helper()
 	m := benchmarkModel(b, 40)
-	m.approvals = []store.Approval{{
+	m.currentSnapshot.Approvals = []store.Approval{{
 		ID:      7,
 		Tool:    domain.ToolKindBash,
 		Command: `{"command":"git status","tool_call_id":"call_1"}`,

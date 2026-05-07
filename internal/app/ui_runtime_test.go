@@ -263,7 +263,7 @@ func TestViewSurfacePermissionsPickerCloseDirtyRectsCoverDiff(t *testing.T) {
 
 func TestViewSurfaceApprovalPermissionsPickerCloseRestoresApprovalDialog(t *testing.T) {
 	m := newRuntimeTestModel(t)
-	m.approvals = []store.Approval{{
+	m.currentSnapshot.Approvals = []store.Approval{{
 		ID:      7,
 		Tool:    domain.ToolKindBash,
 		Command: `{"command":"git status"}`,

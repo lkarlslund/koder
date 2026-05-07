@@ -2,6 +2,7 @@ package chat
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 )
 
 type runtimeFakeRunner struct {
+	mu            sync.Mutex
 	promptCalls   int
 	continueCalls int
 	approveCalls  int
@@ -24,6 +26,8 @@ type runtimeFakeRunner struct {
 }
 
 func (f *runtimeFakeRunner) RunPromptInChat(_ context.Context, _ domain.Session, _ domain.Chat, prompt string, _ []attachment.Draft, _ []reference.Draft, note string) (<-chan domain.Event, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.promptCalls++
 	f.prompts = append(f.prompts, prompt)
 	f.promptNotes = append(f.promptNotes, note)
@@ -38,6 +42,8 @@ func (f *runtimeFakeRunner) RunPromptInChat(_ context.Context, _ domain.Session,
 }
 
 func (f *runtimeFakeRunner) RunContinueInChat(_ context.Context, _ domain.Session, _ domain.Chat, note string) (<-chan domain.Event, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.continueCalls++
 	f.continueNotes = append(f.continueNotes, note)
 	if len(f.events) == 0 {
@@ -51,6 +57,8 @@ func (f *runtimeFakeRunner) RunContinueInChat(_ context.Context, _ domain.Sessio
 }
 
 func (f *runtimeFakeRunner) ApproveInChat(_ context.Context, _ int64, _ int64, _ int64) (<-chan domain.Event, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.approveCalls++
 	if len(f.events) == 0 {
 		ch := make(chan domain.Event)
@@ -67,6 +75,8 @@ func (f *runtimeFakeRunner) ApproveInChatWithRule(_ context.Context, _ int64, _ 
 }
 
 func (f *runtimeFakeRunner) DenyInChat(_ context.Context, _ int64, _ int64, _ int64) (<-chan domain.Event, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.denyCalls++
 	if len(f.events) == 0 {
 		ch := make(chan domain.Event)
@@ -76,6 +86,42 @@ func (f *runtimeFakeRunner) DenyInChat(_ context.Context, _ int64, _ int64, _ in
 	evt := f.events[0]
 	f.events = f.events[1:]
 	return evt, nil
+}
+
+func (f *runtimeFakeRunner) promptCallCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.promptCalls
+}
+
+func (f *runtimeFakeRunner) continueCallCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.continueCalls
+}
+
+func (f *runtimeFakeRunner) approveCallCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.approveCalls
+}
+
+func (f *runtimeFakeRunner) promptAt(i int) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.prompts[i]
+}
+
+func (f *runtimeFakeRunner) promptNoteAt(i int) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.promptNotes[i]
+}
+
+func (f *runtimeFakeRunner) continueNoteAt(i int) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.continueNotes[i]
 }
 
 func openTestStore(t *testing.T) *store.Store {
@@ -143,7 +189,7 @@ func TestRuntimeEnqueueStartsPrompt(t *testing.T) {
 	rt.Enqueue(QueueItem{Kind: QueueKindSteer, Text: "first prompt"})
 
 	deadline := time.After(2 * time.Second)
-	for runner.promptCalls == 0 {
+	for runner.promptCallCount() == 0 {
 		select {
 		case <-deadline:
 			t.Fatal("timed out waiting for prompt start")
@@ -171,10 +217,10 @@ func TestRuntimeEnqueueStartsPrompt(t *testing.T) {
 		select {
 		case update := <-updates:
 			if update.Event != nil && update.Event.Kind == domain.EventKindMessageDone {
-				if runner.promptCalls != 1 {
-					t.Fatalf("prompt calls = %d", runner.promptCalls)
+				if got := runner.promptCallCount(); got != 1 {
+					t.Fatalf("prompt calls = %d", got)
 				}
-				if got := runner.prompts[0]; got != "first prompt" {
+				if got := runner.promptAt(0); got != "first prompt" {
 					t.Fatalf("prompt = %q", got)
 				}
 				return
@@ -199,23 +245,23 @@ func TestRuntimeQueuesSecondItemUntilFirstCompletes(t *testing.T) {
 	rt.Enqueue(QueueItem{Kind: QueueKindQueued, Text: "second"})
 
 	time.Sleep(100 * time.Millisecond)
-	if runner.promptCalls != 1 {
-		t.Fatalf("expected one prompt call while first is active, got %d", runner.promptCalls)
+	if got := runner.promptCallCount(); got != 1 {
+		t.Fatalf("expected one prompt call while first is active, got %d", got)
 	}
 
 	first <- domain.Event{Kind: domain.EventKindMessageDone}
 	close(first)
 
 	deadline := time.After(2 * time.Second)
-	for runner.promptCalls < 2 {
+	for runner.promptCallCount() < 2 {
 		select {
 		case <-deadline:
-			t.Fatalf("expected second queued prompt to dispatch, got %d calls", runner.promptCalls)
+			t.Fatalf("expected second queued prompt to dispatch, got %d calls", runner.promptCallCount())
 		default:
 			time.Sleep(10 * time.Millisecond)
 		}
 	}
-	if got := runner.prompts[1]; got != "second" {
+	if got := runner.promptAt(1); got != "second" {
 		t.Fatalf("second prompt = %q", got)
 	}
 }
@@ -233,7 +279,7 @@ func TestRuntimeDispatchQueuedUsesSelectedItemAndPreservesNote(t *testing.T) {
 	)
 
 	deadline := time.After(2 * time.Second)
-	for runner.promptCalls == 0 {
+	for runner.promptCallCount() == 0 {
 		select {
 		case <-deadline:
 			t.Fatal("timed out waiting for dispatched prompt")
@@ -241,7 +287,7 @@ func TestRuntimeDispatchQueuedUsesSelectedItemAndPreservesNote(t *testing.T) {
 			time.Sleep(10 * time.Millisecond)
 		}
 	}
-	if got := runner.prompts[0]; got != "selected" {
+	if got := runner.promptAt(0); got != "selected" {
 		t.Fatalf("prompt = %q", got)
 	}
 	snapshot := rt.Snapshot()
@@ -268,7 +314,7 @@ func TestRuntimePreservesPromptAndContinueNotes(t *testing.T) {
 	rt.Enqueue(QueueItem{Kind: QueueKindContinue, Note: "continue-note"})
 
 	deadline := time.After(2 * time.Second)
-	for runner.continueCalls == 0 {
+	for runner.continueCallCount() == 0 {
 		select {
 		case <-deadline:
 			t.Fatal("timed out waiting for continue")
@@ -276,10 +322,10 @@ func TestRuntimePreservesPromptAndContinueNotes(t *testing.T) {
 			time.Sleep(10 * time.Millisecond)
 		}
 	}
-	if got := runner.promptNotes[0]; got != "prompt-note" {
+	if got := runner.promptNoteAt(0); got != "prompt-note" {
 		t.Fatalf("prompt note = %q", got)
 	}
-	if got := runner.continueNotes[0]; got != "continue-note" {
+	if got := runner.continueNoteAt(0); got != "continue-note" {
 		t.Fatalf("continue note = %q", got)
 	}
 }
@@ -302,8 +348,8 @@ func TestRuntimeApproveStartsApprovalStream(t *testing.T) {
 		select {
 		case update := <-updates:
 			if update.Event != nil && update.Event.Kind == domain.EventKindApprovalReply {
-				if runner.approveCalls != 1 {
-					t.Fatalf("approve calls = %d", runner.approveCalls)
+				if got := runner.approveCallCount(); got != 1 {
+					t.Fatalf("approve calls = %d", got)
 				}
 				return
 			}

@@ -573,8 +573,6 @@ type Model struct {
 	currentChat                 domain.Chat
 	chatState                   *appstate.ChatState
 	chatStateChatID             int64
-	messages                    []domain.Message
-	parts                       map[int64][]domain.Part
 	historyTotalUsage           domain.Usage
 	historyTotalUsageKnown      bool
 	liveUsage                   domain.Usage
@@ -584,7 +582,6 @@ type Model struct {
 	pendingTranscriptFrameDirty bool
 	milestonePlan               store.MilestonePlan
 	todos                       []store.TodoItem
-	approvals                   []store.Approval
 	viewport                    transcriptViewport
 	retainedTranscript          *ui.RetainedTranscript
 	transcriptItems             []transcriptItemController
@@ -671,7 +668,6 @@ type Model struct {
 	queueEditMode               bool
 	queueSelection              int
 	pendingModelNote            string
-	pendingAssistant            pendingAssistantTurn
 	draftAttachments            []attachment.Draft
 	draftReferences             []reference.Draft
 	attachmentFiles             *attachment.Manager
@@ -764,7 +760,7 @@ func NewWithWorkdir(cfg config.Config, st *store.Store, a *agent.Engine, mode St
 		toolRunItemIndexByID:    make(map[string]int),
 		toolRunItemIndexByAppr:  make(map[int64]int),
 		transcriptDirty:         true,
-		parts:                   make(map[int64][]domain.Part),
+		currentSnapshot:         chatpkg.Snapshot{Parts: make(map[int64][]domain.Part)},
 		status:                  "Ready",
 		workdir:                 workdir,
 		startupMode:             mode,
@@ -4716,9 +4712,6 @@ func (m *Model) loadChatState(chat domain.Chat, messages []domain.Message, parts
 	if chat.ID == 0 && len(messages) == 0 && len(parts) == 0 && len(approvals) == 0 {
 		m.chatState = nil
 		m.chatStateChatID = 0
-		m.messages = nil
-		m.parts = nil
-		m.approvals = nil
 		if m.currentRuntime == nil {
 			m.currentSnapshot = chatpkg.Snapshot{}
 		}
@@ -4756,40 +4749,30 @@ func (m *Model) ensureChatState() *appstate.ChatState {
 func (m *Model) syncChatMirrorsFromState() {
 	if m.chatState == nil {
 		m.chatStateChatID = 0
-		if m.currentRuntime == nil {
-			m.messages = nil
-			m.parts = nil
-			m.approvals = nil
-		}
 		return
 	}
 	m.currentChat = m.chatState.Chat()
-	if m.currentRuntime == nil {
-		m.messages = m.chatState.SnapshotMessages()
-		m.parts = m.chatState.SnapshotParts()
-		m.approvals = m.chatState.Approvals()
-	}
 }
 
 func (m *Model) activeMessages() []domain.Message {
 	if m.hasSnapshotChatState() {
 		return m.currentSnapshot.Messages
 	}
-	return m.messages
+	return nil
 }
 
 func (m *Model) activeParts() map[int64][]domain.Part {
 	if m.hasSnapshotChatState() {
 		return m.currentSnapshot.Parts
 	}
-	return m.parts
+	return nil
 }
 
 func (m *Model) activeApprovals() []store.Approval {
 	if m.hasSnapshotChatState() {
 		return m.currentSnapshot.Approvals
 	}
-	return m.approvals
+	return nil
 }
 
 func (m *Model) hasSnapshotChatState() bool {
@@ -4814,30 +4797,20 @@ func (m *Model) activeQueuedInputs() []domain.QueuedInput {
 }
 
 func (m *Model) activePendingAssistant() appstate.PendingAssistantTurn {
-	if m.currentRuntime != nil || m.hasSnapshotPendingAssistant() {
-		return m.currentSnapshot.PendingAssistant
-	}
-	return appstate.PendingAssistantTurn(m.pendingAssistant)
+	return m.currentSnapshot.PendingAssistant
 }
 
 func (m *Model) resetPendingAssistantState() {
-	m.pendingAssistant = pendingAssistantTurn{}
-	if m.currentRuntime != nil || m.hasSnapshotPendingAssistant() {
-		m.currentSnapshot.PendingAssistant = appstate.PendingAssistantTurn{}
-	}
+	m.currentSnapshot.PendingAssistant = appstate.PendingAssistantTurn{}
 }
 
 func (m *Model) appendPendingAssistantText(text string) {
 	if strings.TrimSpace(text) == "" {
 		return
 	}
-	if m.pendingAssistant.CreatedAt.IsZero() {
-		m.pendingAssistant.CreatedAt = time.Now().UTC()
-	}
-	m.pendingAssistant.Text += text
 	pending := m.currentSnapshot.PendingAssistant
 	if pending.CreatedAt.IsZero() {
-		pending.CreatedAt = m.pendingAssistant.CreatedAt
+		pending.CreatedAt = time.Now().UTC()
 	}
 	pending.Text += text
 	m.currentSnapshot.PendingAssistant = pending
@@ -4847,13 +4820,9 @@ func (m *Model) appendPendingAssistantReasoning(text string) {
 	if strings.TrimSpace(text) == "" {
 		return
 	}
-	if m.pendingAssistant.CreatedAt.IsZero() {
-		m.pendingAssistant.CreatedAt = time.Now().UTC()
-	}
-	m.pendingAssistant.Reasoning += text
 	pending := m.currentSnapshot.PendingAssistant
 	if pending.CreatedAt.IsZero() {
-		pending.CreatedAt = m.pendingAssistant.CreatedAt
+		pending.CreatedAt = time.Now().UTC()
 	}
 	pending.Reasoning += text
 	m.currentSnapshot.PendingAssistant = pending
@@ -4946,11 +4915,7 @@ func (m *Model) applyRuntimeSnapshot(snapshot chatpkg.Snapshot) {
 		m.clampQueueSelection()
 	}
 	m.loadChatState(snapshot.Chat, snapshot.Messages, snapshot.Parts, snapshot.Approvals)
-	if m.currentRuntime == nil {
-		m.pendingAssistant = pendingAssistantTurn(snapshot.PendingAssistant)
-	} else {
-		m.pendingAssistant = pendingAssistantTurn{}
-	}
+	m.currentSnapshot.PendingAssistant = snapshot.PendingAssistant
 	m.syncUsageFromHistory()
 	m.syncContextFromChat()
 	m.ensureContextEstimateFromState()
