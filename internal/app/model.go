@@ -3173,7 +3173,8 @@ func (m *Model) syncPendingTranscriptItem() bool {
 	if len(retained.Items()) == 0 {
 		return false
 	}
-	if strings.TrimSpace(m.pendingAssistant.Text) == "" && strings.TrimSpace(m.pendingAssistant.Reasoning) == "" {
+	pending := m.activePendingAssistant()
+	if strings.TrimSpace(pending.Text) == "" && strings.TrimSpace(pending.Reasoning) == "" {
 		if m.pendingTranscriptIndex < 0 || m.pendingTranscriptIndex >= len(m.transcriptItems) {
 			return false
 		}
@@ -3183,12 +3184,12 @@ func (m *Model) syncPendingTranscriptItem() bool {
 		m.pendingTranscriptIndex = -1
 		return true
 	}
-	if m.pendingAssistant.CreatedAt.IsZero() {
-		m.pendingAssistant.CreatedAt = time.Now().UTC()
+	if pending.CreatedAt.IsZero() {
+		pending.CreatedAt = time.Now().UTC()
 	}
 	if m.pendingTranscriptIndex >= 0 && m.pendingTranscriptIndex < len(m.transcriptItems) {
 		if item, ok := m.transcriptItems[m.pendingTranscriptIndex].(*pendingAssistantTranscriptItem); ok {
-			item.Reset(m.pendingAssistant.CreatedAt, m.pendingAssistant.Text, m.pendingAssistant.Reasoning, m.pendingAssistantIndicatorLine())
+			item.Reset(pending.CreatedAt, pending.Text, pending.Reasoning, m.pendingAssistantIndicatorLine())
 			item.SetReasoningVisible(m.showReasoning)
 			return m.replaceTranscriptItemAt(m.pendingTranscriptIndex)
 		}
@@ -3196,11 +3197,11 @@ func (m *Model) syncPendingTranscriptItem() bool {
 	gap := 0
 	if len(m.transcriptItems) > 0 {
 		prevBlock := m.transcriptBlockForController(m.transcriptItems[len(m.transcriptItems)-1])
-		nextBlock := transcriptBlock{Kind: transcriptBlockMessage, Pending: true, Message: domain.Message{Role: domain.MessageRoleAssistant, CreatedAt: m.pendingAssistant.CreatedAt}}
+		nextBlock := transcriptBlock{Kind: transcriptBlockMessage, Pending: true, Message: domain.Message{Role: domain.MessageRoleAssistant, CreatedAt: pending.CreatedAt}}
 		gap = renderedSeparatorHeight(m.transcriptSeparator(prevBlock, nextBlock))
 	}
-	item := newPendingAssistantTranscriptItem(gap, m.pendingAssistant.CreatedAt, m.showReasoning)
-	item.Reset(m.pendingAssistant.CreatedAt, m.pendingAssistant.Text, m.pendingAssistant.Reasoning, m.pendingAssistantIndicatorLine())
+	item := newPendingAssistantTranscriptItem(gap, pending.CreatedAt, m.showReasoning)
+	item.Reset(pending.CreatedAt, pending.Text, pending.Reasoning, m.pendingAssistantIndicatorLine())
 	item.Refresh(m)
 	m.transcriptItems = append(m.transcriptItems, item)
 	retained.Add(item.UIItem())
@@ -3209,10 +3210,11 @@ func (m *Model) syncPendingTranscriptItem() bool {
 }
 
 func (m Model) pendingAssistantIndicatorLine() string {
-	if strings.TrimSpace(m.pendingAssistant.Text) != "" {
+	pending := m.activePendingAssistant()
+	if strings.TrimSpace(pending.Text) != "" {
 		return ""
 	}
-	if strings.TrimSpace(m.pendingAssistant.Reasoning) == "" {
+	if strings.TrimSpace(pending.Reasoning) == "" {
 		return ""
 	}
 	indicator := m.workingIndicator()
