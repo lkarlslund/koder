@@ -995,7 +995,7 @@ func (m Model) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 			if msg.followupMode == bangFollowupSteer {
 				kind = domain.QueuedInputKindSteer
 			}
-			items := cloneQueuedInputs(m.currentChat.QueuedInputs)
+			items := cloneQueuedInputs(m.activeQueuedInputs())
 			items = append(items, domain.QueuedInput{
 				ID:        nextQueuedInputID(),
 				Kind:      kind,
@@ -1516,7 +1516,7 @@ func (m *Model) handleMainWindowKey(msg ui.KeyMsg) (bool, ui.Cmd) {
 		return true, m.switchChatByDelta(1)
 	case "alt+q":
 		m.queueEditMode = !m.queueEditMode
-		if m.queueEditMode && len(m.currentChat.QueuedInputs) > 0 {
+		if m.queueEditMode && len(m.activeQueuedInputs()) > 0 {
 			m.clampQueueSelection()
 		}
 		m.invalidateFooterCache()
@@ -1531,7 +1531,7 @@ func (m *Model) handleMainWindowKey(msg ui.KeyMsg) (bool, ui.Cmd) {
 		_, cmd := m.copyLatestAssistantMessage()
 		return true, cmd
 	case "backspace":
-		if m.queueEditMode && len(m.currentChat.QueuedInputs) > 0 {
+		if m.queueEditMode && len(m.activeQueuedInputs()) > 0 {
 			return true, m.deleteSelectedQueuedInput()
 		}
 	case "esc":
@@ -1621,7 +1621,7 @@ func (m *Model) handleMainWindowKey(msg ui.KeyMsg) (bool, ui.Cmd) {
 		m.invalidateFooterCache()
 		return true, nil
 	case "up":
-		if m.queueEditMode && len(m.currentChat.QueuedInputs) > 0 {
+		if m.queueEditMode && len(m.activeQueuedInputs()) > 0 {
 			m.moveQueueSelection(-1)
 			return true, m.syncWindowTitleCmd()
 		}
@@ -1631,7 +1631,7 @@ func (m *Model) handleMainWindowKey(msg ui.KeyMsg) (bool, ui.Cmd) {
 		m.invalidateFooterCache()
 		return true, nil
 	case "down":
-		if m.queueEditMode && len(m.currentChat.QueuedInputs) > 0 {
+		if m.queueEditMode && len(m.activeQueuedInputs()) > 0 {
 			m.moveQueueSelection(1)
 			return true, m.syncWindowTitleCmd()
 		}
@@ -1644,7 +1644,7 @@ func (m *Model) handleMainWindowKey(msg ui.KeyMsg) (bool, ui.Cmd) {
 		_, cmd := m.popQueuedPromptForEditing()
 		return true, cmd
 	case "alt+down":
-		if m.queueEditMode && len(m.currentChat.QueuedInputs) > 0 {
+		if m.queueEditMode && len(m.activeQueuedInputs()) > 0 {
 			return true, m.reorderSelectedQueuedInput(1)
 		}
 	case "tab":
@@ -1669,7 +1669,7 @@ func (m *Model) handleMainWindowKey(msg ui.KeyMsg) (bool, ui.Cmd) {
 			return true, nil
 		}
 	case "enter":
-		if m.queueEditMode && len(m.currentChat.QueuedInputs) > 0 {
+		if m.queueEditMode && len(m.activeQueuedInputs()) > 0 {
 			_, cmd := m.popQueuedPromptForEditing()
 			return true, cmd
 		}
@@ -1712,11 +1712,11 @@ func (m *Model) handleMainWindowKey(msg ui.KeyMsg) (bool, ui.Cmd) {
 		m.startWaitingForLLM()
 		return true, m.kickoffPromptCmd(prompt, drafts, refs)
 	case "h":
-		if m.queueEditMode && len(m.currentChat.QueuedInputs) > 0 {
+		if m.queueEditMode && len(m.activeQueuedInputs()) > 0 {
 			return true, m.toggleSelectedQueuedInputHeld()
 		}
 	case "delete":
-		if m.queueEditMode && len(m.currentChat.QueuedInputs) > 0 {
+		if m.queueEditMode && len(m.activeQueuedInputs()) > 0 {
 			return true, m.deleteSelectedQueuedInput()
 		}
 	}
@@ -2311,7 +2311,7 @@ func (m *Model) shouldShowComposerArea() bool {
 }
 
 func (m *Model) composerAreaHasContent() bool {
-	if len(m.draftAttachments) > 0 || len(m.currentChat.QueuedInputs) > 0 {
+	if len(m.draftAttachments) > 0 || len(m.activeQueuedInputs()) > 0 {
 		return true
 	}
 	if m.renderComposerHistoryMenuElement() != nil ||
@@ -2388,10 +2388,7 @@ func (m *Model) renderComposerElementWithCursor(cursorVisible bool) ui.Node {
 }
 
 func (m *Model) renderQueuedPromptPreviewElement() ui.Node {
-	items := m.currentChat.QueuedInputs
-	if m.currentRuntime != nil {
-		items = m.currentSnapshot.QueuedInputs
-	}
+	items := m.activeQueuedInputs()
 	if len(items) == 0 {
 		return nil
 	}
@@ -2590,7 +2587,7 @@ func (m *Model) renderSidebarChatLine() string {
 	}
 	label += "  " + role
 	label += fmt.Sprintf("  %d msg", len(m.activeMessages()))
-	if queued := len(m.currentChat.QueuedInputs); queued > 0 {
+	if queued := len(m.activeQueuedInputs()); queued > 0 {
 		label += fmt.Sprintf("  %d queued", queued)
 	}
 	if title := strings.TrimSpace(m.currentChat.Title); title != "" {
@@ -4786,6 +4783,13 @@ func (m *Model) activeApprovals() []store.Approval {
 	return m.approvals
 }
 
+func (m *Model) activeQueuedInputs() []domain.QueuedInput {
+	if m.currentRuntime != nil {
+		return m.currentSnapshot.QueuedInputs
+	}
+	return m.currentChat.QueuedInputs
+}
+
 func (m *Model) activePendingAssistant() appstate.PendingAssistantTurn {
 	if m.currentRuntime != nil {
 		return m.currentSnapshot.PendingAssistant
@@ -5187,7 +5191,7 @@ func (m *Model) queueComposerPrompt(kind domain.QueuedInputKind) (ui.Model, ui.C
 		m.status = "Wait for the current run to finish before using slash commands"
 		return m, m.syncWindowTitleCmd()
 	}
-	items := cloneQueuedInputs(m.currentChat.QueuedInputs)
+	items := cloneQueuedInputs(m.activeQueuedInputs())
 	items = append(items, domain.QueuedInput{
 		ID:          nextQueuedInputID(),
 		Kind:        kind,
@@ -5209,7 +5213,7 @@ func (m *Model) queueContinuePrompt() (ui.Model, ui.Cmd) {
 		m.status = status
 		return m, m.syncWindowTitleCmd()
 	}
-	items := cloneQueuedInputs(m.currentChat.QueuedInputs)
+	items := cloneQueuedInputs(m.activeQueuedInputs())
 	items = append(items, domain.QueuedInput{
 		ID:        nextQueuedInputID(),
 		Kind:      domain.QueuedInputKindContinue,
@@ -5221,7 +5225,7 @@ func (m *Model) queueContinuePrompt() (ui.Model, ui.Cmd) {
 }
 
 func (m *Model) popQueuedPromptForEditing() (ui.Model, ui.Cmd) {
-	items := cloneQueuedInputs(m.currentChat.QueuedInputs)
+	items := cloneQueuedInputs(m.activeQueuedInputs())
 	if len(items) == 0 {
 		return m, nil
 	}
@@ -5272,7 +5276,7 @@ func (m *Model) dequeuePromptCmd() ui.Cmd {
 	if idx < 0 {
 		return nil
 	}
-	items := cloneQueuedInputs(m.currentChat.QueuedInputs)
+	items := cloneQueuedInputs(m.activeQueuedInputs())
 	item := items[idx]
 	items = append(items[:idx], items[idx+1:]...)
 	m.setQueuedInputs(items)
@@ -6043,7 +6047,7 @@ func (m *Model) setQueuedInputs(items []domain.QueuedInput) {
 }
 
 func (m *Model) clampQueueSelection() {
-	count := len(m.currentChat.QueuedInputs)
+	count := len(m.activeQueuedInputs())
 	if count == 0 {
 		m.queueSelection = 0
 		m.queueEditMode = false
@@ -6059,17 +6063,18 @@ func (m *Model) clampQueueSelection() {
 
 func (m *Model) selectedQueuedInputIndex() int {
 	m.clampQueueSelection()
-	if len(m.currentChat.QueuedInputs) == 0 {
+	if len(m.activeQueuedInputs()) == 0 {
 		return -1
 	}
 	return m.queueSelection
 }
 
 func (m *Model) moveQueueSelection(delta int) {
-	if len(m.currentChat.QueuedInputs) == 0 {
+	if len(m.activeQueuedInputs()) == 0 {
 		return
 	}
-	m.queueSelection = (m.queueSelection + delta + len(m.currentChat.QueuedInputs)) % len(m.currentChat.QueuedInputs)
+	items := m.activeQueuedInputs()
+	m.queueSelection = (m.queueSelection + delta + len(items)) % len(items)
 	m.invalidateFooterCache()
 }
 
@@ -6121,7 +6126,7 @@ func (m Model) saveAndDispatchQueuedInputCmd(chatID int64, items []domain.Queued
 }
 
 func (m *Model) reorderSelectedQueuedInput(delta int) ui.Cmd {
-	items := cloneQueuedInputs(m.currentChat.QueuedInputs)
+	items := cloneQueuedInputs(m.activeQueuedInputs())
 	idx := m.selectedQueuedInputIndex()
 	if idx < 0 {
 		return nil
@@ -6138,7 +6143,7 @@ func (m *Model) reorderSelectedQueuedInput(delta int) ui.Cmd {
 }
 
 func (m *Model) toggleSelectedQueuedInputHeld() ui.Cmd {
-	items := cloneQueuedInputs(m.currentChat.QueuedInputs)
+	items := cloneQueuedInputs(m.activeQueuedInputs())
 	idx := m.selectedQueuedInputIndex()
 	if idx < 0 {
 		return nil
@@ -6154,7 +6159,7 @@ func (m *Model) toggleSelectedQueuedInputHeld() ui.Cmd {
 }
 
 func (m *Model) deleteSelectedQueuedInput() ui.Cmd {
-	items := cloneQueuedInputs(m.currentChat.QueuedInputs)
+	items := cloneQueuedInputs(m.activeQueuedInputs())
 	idx := m.selectedQueuedInputIndex()
 	if idx < 0 {
 		return nil
@@ -6176,7 +6181,7 @@ func (m *Model) nextDispatchableQueuedInputIndex(activeTurn bool) int {
 		if activeTurn && kind != domain.QueuedInputKindSteer {
 			continue
 		}
-		for idx, item := range m.currentChat.QueuedInputs {
+		for idx, item := range m.activeQueuedInputs() {
 			if item.Held || item.Kind != kind {
 				continue
 			}
