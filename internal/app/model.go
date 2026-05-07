@@ -667,6 +667,7 @@ type Model struct {
 	currentRuntime              *chatpkg.Chat
 	currentRuntimeUpdates       <-chan chatpkg.Update
 	currentRuntimeUnsub         func()
+	currentSnapshot             chatpkg.Snapshot
 	queueEditMode               bool
 	queueSelection              int
 	pendingModelNote            string
@@ -682,6 +683,10 @@ type Model struct {
 	debugFrameLastSync          time.Time
 	providerInventory           map[string]providerInventoryItem
 }
+
+// App is the top-level TUI application object.
+// Model remains as a compatibility alias while the codebase migrates to App naming.
+type App = Model
 
 type pendingAssistantTurn struct {
 	Text      string
@@ -712,19 +717,19 @@ type composerQueryState struct {
 	hasMentionQuery bool
 }
 
-func New(cfg config.Config, st *store.Store, a *agent.Engine, mode StartupMode, debug *debugsrv.Recorder) (Model, error) {
+func New(cfg config.Config, st *store.Store, a *agent.Engine, mode StartupMode, debug *debugsrv.Recorder) (App, error) {
 	workdir, err := os.Getwd()
 	if err != nil {
-		return Model{}, err
+		return App{}, err
 	}
 	return NewWithWorkdir(cfg, st, a, mode, debug, workdir, StartupOptions{})
 }
 
-func NewWithWorkdir(cfg config.Config, st *store.Store, a *agent.Engine, mode StartupMode, debug *debugsrv.Recorder, workdir string, startupOpts StartupOptions) (Model, error) {
+func NewWithWorkdir(cfg config.Config, st *store.Store, a *agent.Engine, mode StartupMode, debug *debugsrv.Recorder, workdir string, startupOpts StartupOptions) (App, error) {
 	tuiTheme := theme.Resolve(cfg.UI.Theme)
 	renderer, err := markdown.New(tuiTheme.Palette, cfg.UI.CodeStyle)
 	if err != nil {
-		return Model{}, err
+		return App{}, err
 	}
 	composer := textarea.New()
 	composer.Placeholder = "Ask koder or type / for commands"
@@ -2382,11 +2387,15 @@ func (m *Model) renderComposerElementWithCursor(cursorVisible bool) ui.Node {
 }
 
 func (m *Model) renderQueuedPromptPreviewElement() ui.Node {
-	if len(m.currentChat.QueuedInputs) == 0 {
+	items := m.currentChat.QueuedInputs
+	if m.currentRuntime != nil {
+		items = m.currentSnapshot.QueuedInputs
+	}
+	if len(items) == 0 {
 		return nil
 	}
-	rows := make([]ui.PendingInputRow, 0, len(m.currentChat.QueuedInputs))
-	for idx, item := range m.currentChat.QueuedInputs {
+	rows := make([]ui.PendingInputRow, 0, len(items))
+	for idx, item := range items {
 		text := strings.TrimSpace(item.Text)
 		if item.Kind == domain.QueuedInputKindContinue {
 			text = "Continue"
@@ -3547,7 +3556,7 @@ func (m *Model) sessionUsageSummary(sessionID int64) (domain.Usage, bool) {
 }
 
 func (m *Model) syncUsageFromHistory() {
-	m.historyTotalUsage, m.historyTotalUsageKnown = sessionctx.TotalUsage(m.messages, m.parts)
+	m.historyTotalUsage, m.historyTotalUsageKnown = sessionctx.TotalUsage(m.activeMessages(), m.activeParts())
 	m.liveUsage = domain.Usage{}
 	m.liveUsageKnown = false
 }
@@ -3555,6 +3564,12 @@ func (m *Model) syncUsageFromHistory() {
 func (m *Model) syncContextFromChat() {
 	m.contextTokens = 0
 	m.contextTokensEstimated = false
+	if m.currentRuntime != nil {
+		usage := m.currentRuntime.ContextSize()
+		m.contextTokens = usage.TotalTokens
+		m.contextTokensEstimated = usage.Estimated
+		return
+	}
 	state := m.ensureChatState()
 	if state == nil || state.Chat().LastKnownContextTokens <= 0 {
 		return
@@ -3572,11 +3587,11 @@ func (m *Model) ensureContextEstimateFromState() {
 	if providerID == "" {
 		return
 	}
-	_, _, _, anchored := sessionctx.LatestUsageAnchor(m.messages, m.parts)
+	_, _, _, anchored := sessionctx.LatestUsageAnchor(m.activeMessages(), m.activeParts())
 	if m.contextTokens > 0 && anchored {
 		return
 	}
-	estimated, err := m.agent.EstimateContextTokensForState(m.currentSession, m.currentChat, m.messages, m.parts)
+	estimated, err := m.agent.EstimateContextTokensForState(m.currentSession, m.currentChat, m.activeMessages(), m.activeParts())
 	if err != nil || estimated <= 0 {
 		return
 	}
@@ -3605,17 +3620,26 @@ func (m *Model) currentPendingAssistantContextTokens() int {
 	if m.chatState != nil {
 		return m.chatState.PendingAssistantContextTokens()
 	}
+	pending := m.activePendingAssistant()
 	total := 0
-	if text := strings.TrimSpace(m.pendingAssistant.Reasoning); text != "" {
+	if text := strings.TrimSpace(pending.Reasoning); text != "" {
 		total += tokenestimate.Text(text)
 	}
-	if text := strings.TrimSpace(m.pendingAssistant.Text); text != "" {
+	if text := strings.TrimSpace(pending.Text); text != "" {
 		total += tokenestimate.Text(text)
 	}
 	return total
 }
 
 func (m *Model) refreshContextFromActiveChat() {
+	if m.currentRuntime != nil {
+		usage := m.currentRuntime.ContextSize()
+		if usage.TotalTokens > 0 {
+			m.contextTokens = usage.TotalTokens
+			m.contextTokensEstimated = usage.Estimated
+			return
+		}
+	}
 	if m.chatState != nil {
 		usage := m.chatState.CurrentContextSize()
 		if usage.TotalTokens > 0 {
@@ -3650,10 +3674,12 @@ func (m Model) currentContextMetrics() (sessionctx.Metrics, bool) {
 		return sessionctx.Metrics{}, false
 	}
 	usage := domain.ContextUsage{}
-	if m.chatState != nil {
+	if m.currentRuntime != nil {
+		usage = m.currentRuntime.ContextSize()
+	} else if m.chatState != nil {
 		usage = m.chatState.CurrentContextSize()
 	} else if m.currentChat.LastKnownContextTokens > 0 {
-		tailEstimate, anchored := sessionctx.EstimateTailTokens(m.messages, m.parts)
+		tailEstimate, anchored := sessionctx.EstimateTailTokens(m.activeMessages(), m.activeParts())
 		if tailEstimate < 0 {
 			tailEstimate = 0
 		}
@@ -3714,15 +3740,16 @@ func (m Model) sidebarContextLine() string {
 }
 
 func (m Model) pendingAssistantParts() []domain.Part {
-	if strings.TrimSpace(m.pendingAssistant.Text) == "" && strings.TrimSpace(m.pendingAssistant.Reasoning) == "" {
+	pending := m.activePendingAssistant()
+	if strings.TrimSpace(pending.Text) == "" && strings.TrimSpace(pending.Reasoning) == "" {
 		return nil
 	}
 	parts := make([]domain.Part, 0, 2)
-	if strings.TrimSpace(m.pendingAssistant.Reasoning) != "" {
-		parts = append(parts, domain.Part{ID: -1, Kind: domain.PartKindReasoning, Payload: domain.ReasoningPayload{Text: m.pendingAssistant.Reasoning}, Body: m.pendingAssistant.Reasoning})
+	if strings.TrimSpace(pending.Reasoning) != "" {
+		parts = append(parts, domain.Part{ID: -1, Kind: domain.PartKindReasoning, Payload: domain.ReasoningPayload{Text: pending.Reasoning}, Body: pending.Reasoning})
 	}
-	if strings.TrimSpace(m.pendingAssistant.Text) != "" {
-		parts = append(parts, domain.Part{ID: -2, Kind: domain.PartKindText, Payload: domain.TextPayload{Text: m.pendingAssistant.Text}, Body: m.pendingAssistant.Text})
+	if strings.TrimSpace(pending.Text) != "" {
+		parts = append(parts, domain.Part{ID: -2, Kind: domain.PartKindText, Payload: domain.TextPayload{Text: pending.Text}, Body: pending.Text})
 	}
 	return parts
 }
@@ -4693,7 +4720,16 @@ func (m *Model) loadChatState(chat domain.Chat, messages []domain.Message, parts
 		m.messages = nil
 		m.parts = nil
 		m.approvals = nil
+		if m.currentRuntime == nil {
+			m.currentSnapshot = chatpkg.Snapshot{}
+		}
 		return
+	}
+	if m.currentRuntime == nil {
+		m.currentSnapshot.Chat = chat
+		m.currentSnapshot.Messages = messages
+		m.currentSnapshot.Parts = parts
+		m.currentSnapshot.Approvals = approvals
 	}
 	if m.chatState != nil && m.chatStateChatID == chat.ID {
 		m.chatState.MergeLoaded(chat, messages, parts, approvals)
@@ -4728,6 +4764,34 @@ func (m *Model) syncChatMirrorsFromState() {
 	m.approvals = m.chatState.Approvals()
 }
 
+func (m *Model) activeMessages() []domain.Message {
+	if m.currentRuntime != nil {
+		return m.currentSnapshot.Messages
+	}
+	return m.messages
+}
+
+func (m *Model) activeParts() map[int64][]domain.Part {
+	if m.currentRuntime != nil {
+		return m.currentSnapshot.Parts
+	}
+	return m.parts
+}
+
+func (m *Model) activeApprovals() []store.Approval {
+	if m.currentRuntime != nil {
+		return m.currentSnapshot.Approvals
+	}
+	return m.approvals
+}
+
+func (m *Model) activePendingAssistant() appstate.PendingAssistantTurn {
+	if m.currentRuntime != nil {
+		return m.currentSnapshot.PendingAssistant
+	}
+	return appstate.PendingAssistantTurn(m.pendingAssistant)
+}
+
 func (m *Model) detachCurrentRuntime() {
 	if m.currentRuntimeUnsub != nil {
 		m.currentRuntimeUnsub()
@@ -4735,6 +4799,7 @@ func (m *Model) detachCurrentRuntime() {
 	m.currentRuntime = nil
 	m.currentRuntimeUpdates = nil
 	m.currentRuntimeUnsub = nil
+	m.currentSnapshot = chatpkg.Snapshot{}
 }
 
 func (m *Model) attachCurrentRuntime(session domain.Session, chat domain.Chat) (<-chan chatpkg.Update, *chatpkg.Chat, error) {
@@ -4757,6 +4822,7 @@ func (m *Model) attachCurrentRuntime(session domain.Session, chat domain.Chat) (
 }
 
 func (m *Model) applyRuntimeSnapshot(snapshot chatpkg.Snapshot) {
+	m.currentSnapshot = snapshot
 	if snapshot.Session.ID != 0 {
 		m.currentSession = m.normalizeSessionToolStates(snapshot.Session)
 		for idx := range m.sessions {

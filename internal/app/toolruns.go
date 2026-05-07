@@ -36,7 +36,11 @@ type transcriptBlock struct {
 
 func (m *Model) transcriptBlocks() []transcriptBlock {
 	var blocks []transcriptBlock
-	if m.chatState == nil && (len(m.messages) > 0 || len(m.parts) > 0 || len(m.approvals) > 0) {
+	messages := m.activeMessages()
+	parts := m.activeParts()
+	approvals := m.activeApprovals()
+	pending := m.activePendingAssistant()
+	if m.chatState == nil && (len(messages) > 0 || len(parts) > 0 || len(approvals) > 0) {
 		m.ensureChatState()
 	}
 
@@ -52,7 +56,7 @@ func (m *Model) transcriptBlocks() []transcriptBlock {
 		})
 	}
 	appendMessage := func(msg domain.Message) {
-		blocks = append(blocks, transcriptBlock{Kind: transcriptBlockMessage, Message: msg, Parts: m.parts[msg.ID]})
+		blocks = append(blocks, transcriptBlock{Kind: transcriptBlockMessage, Message: msg, Parts: parts[msg.ID]})
 	}
 	appendRun := func(run ui.ToolRun, record *appstate.ToolRunRecord) *ui.ToolRun {
 		blocks = append(blocks, transcriptBlock{Kind: transcriptBlockToolRun, ToolRun: run, ToolRunRecord: record})
@@ -105,27 +109,27 @@ func (m *Model) transcriptBlocks() []transcriptBlock {
 			}
 		}
 	} else {
-		for _, msg := range m.messages {
-			parts := m.parts[msg.ID]
+		for _, msg := range messages {
+			msgParts := parts[msg.ID]
 			switch msg.Role {
 			case domain.MessageRoleAssistant:
-				if m.assistantMessageShouldExist(msg, parts) {
+				if m.assistantMessageShouldExist(msg, msgParts) {
 					appendMessage(msg)
 				}
-				if run, ok := compactionToolRun(parts, msg); ok {
+				if run, ok := compactionToolRun(msgParts, msg); ok {
 					appendRun(run, nil)
 				}
-				for _, part := range parts {
+				for _, part := range msgParts {
 					if run := eventNoticeToolRun(part); strings.TrimSpace(run.ID) != "" {
 						appendRun(run, nil)
 					}
 				}
-				for _, run := range toolRunsFromAssistantMessage(parts) {
+				for _, run := range toolRunsFromAssistantMessage(msgParts) {
 					tracker.Upsert(run)
 				}
 			case domain.MessageRoleTool:
 				consumed := false
-				for _, run := range toolRunsFromToolMessage(parts, msg) {
+				for _, run := range toolRunsFromToolMessage(msgParts, msg) {
 					tracker.Upsert(run)
 					consumed = true
 				}
@@ -140,15 +144,15 @@ func (m *Model) transcriptBlocks() []transcriptBlock {
 	for _, run := range m.currentLiveExecRuns() {
 		tracker.Upsert(run)
 	}
-	if pending := m.pendingAssistantParts(); len(pending) > 0 {
+	if pendingParts := m.pendingAssistantParts(); len(pendingParts) > 0 {
 		blocks = append(blocks, transcriptBlock{
 			Kind:    transcriptBlockMessage,
 			Pending: true,
 			Message: domain.Message{
 				Role:      domain.MessageRoleAssistant,
-				CreatedAt: m.pendingAssistant.CreatedAt,
+				CreatedAt: pending.CreatedAt,
 			},
-			Parts: pending,
+			Parts: pendingParts,
 		})
 	}
 	return blocks
