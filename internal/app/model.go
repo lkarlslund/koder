@@ -1074,7 +1074,8 @@ func (m Model) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 			m.detachCurrentRuntime()
 		}
 		if m.debug != nil && m.currentSession.ID > 0 {
-			m.debug.RecordLifecycle(m.currentSession.ID, "session_reloaded", fmt.Sprintf("%d messages", len(m.messages)), map[string]string{"messages": strconv.Itoa(len(m.messages))})
+			count := len(m.activeMessages())
+			m.debug.RecordLifecycle(m.currentSession.ID, "session_reloaded", fmt.Sprintf("%d messages", count), map[string]string{"messages": strconv.Itoa(count)})
 		}
 		if !msg.preserveBusy {
 			m.stopBusyWithStatus("Idle")
@@ -1969,7 +1970,7 @@ func (m *Model) scrollTranscript(delta int) {
 	if target == m.viewport.YOffset {
 		return
 	}
-	if len(m.messages) == 0 && m.viewport.TotalLineCount() > 0 {
+	if len(m.activeMessages()) == 0 && m.viewport.TotalLineCount() > 0 {
 		m.viewport.SetYOffset(target)
 		m.invalidateMainSurface()
 		if main := m.ensureMainScreenView(); main != nil {
@@ -2588,7 +2589,7 @@ func (m *Model) renderSidebarChatLine() string {
 		role = string(domain.WorkflowRoleGeneral)
 	}
 	label += "  " + role
-	label += fmt.Sprintf("  %d msg", len(m.messages))
+	label += fmt.Sprintf("  %d msg", len(m.activeMessages()))
 	if queued := len(m.currentChat.QueuedInputs); queued > 0 {
 		label += fmt.Sprintf("  %d queued", queued)
 	}
@@ -2972,12 +2973,12 @@ func (m *Model) invalidateTranscript() {
 }
 
 func (m *Model) transcriptPlaceholderItems() []transcriptItemController {
-	if m.currentSession.ID == 0 && len(m.messages) == 0 && !m.cfg.HasUsableDefaultProvider() {
+	if m.currentSession.ID == 0 && len(m.activeMessages()) == 0 && !m.cfg.HasUsableDefaultProvider() {
 		item := newPlaceholderTranscriptItem("no-provider", 0, "No provider configured.\n\nType /provider to add one before sending prompts.")
 		item.Refresh(m)
 		return []transcriptItemController{item}
 	}
-	if m.currentSession.ID == 0 && len(m.messages) == 0 {
+	if m.currentSession.ID == 0 && len(m.activeMessages()) == 0 {
 		item := newPlaceholderTranscriptItem("empty", 0, "Start by asking a question or type / for commands.")
 		item.Refresh(m)
 		return []transcriptItemController{item}
@@ -4677,7 +4678,7 @@ func (m Model) exitSummary() string {
 	if title == "" {
 		title = "untitled session"
 	}
-	return fmt.Sprintf("Closed session %d \"%s\" with %d messages.", m.currentSession.ID, title, len(m.messages))
+	return fmt.Sprintf("Closed session %d \"%s\" with %d messages.", m.currentSession.ID, title, len(m.activeMessages()))
 }
 
 func timestamp(t time.Time, enabled bool) string {
@@ -5264,7 +5265,7 @@ func (m *Model) dequeuePromptCmd() ui.Cmd {
 	if m.loading {
 		return nil
 	}
-	if len(m.approvals) > 0 {
+	if len(m.activeApprovals()) > 0 {
 		return nil
 	}
 	idx := m.nextDispatchableQueuedInputIndex(false)
@@ -5386,8 +5387,9 @@ func (m *Model) setComposerDraftValue(value string) {
 }
 
 func (m Model) composerPromptHistory() []string {
-	entries := make([]string, 0, len(m.messages))
-	for _, msg := range m.messages {
+	messages := m.activeMessages()
+	entries := make([]string, 0, len(messages))
+	for _, msg := range messages {
 		if msg.Role != domain.MessageRoleUser {
 			continue
 		}
@@ -5399,7 +5401,7 @@ func (m Model) composerPromptHistory() []string {
 }
 
 func (m Model) messagePromptText(messageID int64, fallback string) string {
-	parts := m.parts[messageID]
+	parts := m.activeParts()[messageID]
 	var body strings.Builder
 	for _, part := range parts {
 		if part.Kind != domain.PartKindText {
@@ -5990,12 +5992,14 @@ func (m *Model) copyLatestAssistantMessage() (ui.Model, ui.Cmd) {
 
 func (m Model) latestAssistantCopyText() string {
 	renderer := newTranscriptRenderer(&m)
-	for i := len(m.messages) - 1; i >= 0; i-- {
-		msg := m.messages[i]
+	messages := m.activeMessages()
+	parts := m.activeParts()
+	for i := len(messages) - 1; i >= 0; i-- {
+		msg := messages[i]
 		if msg.Role != domain.MessageRoleAssistant {
 			continue
 		}
-		body := strings.TrimSpace(renderer.renderMessageParts(m.parts[msg.ID]))
+		body := strings.TrimSpace(renderer.renderMessageParts(parts[msg.ID]))
 		if body == "" {
 			body = strings.TrimSpace(msg.Summary)
 		}
@@ -6380,7 +6384,7 @@ func (m *Model) syncDebugRuntime() {
 		strconv.Itoa(m.viewport.Width),
 		strconv.Itoa(m.viewport.Height),
 		strconv.Itoa(m.viewport.YOffset),
-		strconv.Itoa(len(m.messages)),
+		strconv.Itoa(len(m.activeMessages())),
 		strconv.Itoa(renderBlockCount),
 		strconv.Itoa(m.viewport.VisibleSurface().SurfaceHeight()),
 	}
@@ -6447,7 +6451,7 @@ func (m *Model) syncDebugRuntime() {
 		ViewportWidth:           m.viewport.Width,
 		ViewportHeight:          m.viewport.Height,
 		ViewportYOffset:         m.viewport.YOffset,
-		MessageCount:            len(m.messages),
+		MessageCount:            len(m.activeMessages()),
 		RenderBlockCount:        renderBlockCount,
 		ViewportPreview:         "",
 		ViewportContentLen:      m.viewport.VisibleSurface().SurfaceHeight(),
@@ -7420,7 +7424,7 @@ func (m *Model) handleModelDialogKey(msg ui.KeyMsg) ui.Cmd {
 }
 
 func (m *Model) hasApprovalPrompt() bool {
-	return !m.loading && len(m.approvals) > 0
+	return !m.loading && len(m.activeApprovals()) > 0
 }
 
 func (m *Model) hasApprovalDialog() bool {
@@ -7432,7 +7436,7 @@ func (m *Model) ensureApprovalDialog() {
 		m.approvalDialog = nil
 		return
 	}
-	item := m.approvals[0]
+	item := m.activeApprovals()[0]
 	run := m.approvalToolRun(item)
 	index := 0
 	if m.approvalDialog != nil {
@@ -7461,7 +7465,7 @@ func (m *Model) handleApprovalDialogAction(action dialogs.ApprovalDialogAction) 
 	if !m.hasApprovalDialog() || action.Kind == dialogs.ApprovalDialogActionNone {
 		return nil
 	}
-	item := m.approvals[0]
+	item := m.activeApprovals()[0]
 	switch action.Kind {
 	case dialogs.ApprovalDialogActionApproveOnce:
 		m.startBusy(busyScopeTranscript, fmt.Sprintf("Approving approval %d…", item.ID))
@@ -8788,7 +8792,7 @@ func (m *Model) openApprovalPermissionsPicker() {
 		return
 	}
 	m.openPermissionsPicker()
-	m.picker.approvalID = m.approvals[0].ID
+	m.picker.approvalID = m.activeApprovals()[0].ID
 }
 
 func (m *Model) submitPickerSelection(value string) (ui.Model, ui.Cmd) {
