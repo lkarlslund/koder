@@ -4743,9 +4743,13 @@ func (m *Model) loadChatState(chat domain.Chat, messages []domain.Message, parts
 
 func (m *Model) ensureChatState() *appstate.ChatState {
 	if m.chatState == nil {
-		m.chatState = appstate.NewChatState(m.currentChat, m.messages, m.parts, m.approvals)
+		chat := m.currentChat
+		if m.currentRuntime != nil && m.currentSnapshot.Chat.ID != 0 {
+			chat = m.currentSnapshot.Chat
+		}
+		m.chatState = appstate.NewChatState(chat, m.activeMessages(), m.activeParts(), m.activeApprovals())
 		m.rebuildChatToolRuns()
-		m.chatStateChatID = m.currentChat.ID
+		m.chatStateChatID = chat.ID
 	}
 	return m.chatState
 }
