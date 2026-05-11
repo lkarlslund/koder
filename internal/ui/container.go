@@ -135,18 +135,13 @@ func (c *RetainedColumn) Paint(ctx *Context, canvas Canvas) {
 	if c == nil || canvas.Width() <= 0 || canvas.Height() <= 0 {
 		return
 	}
-	y := canvas.origin.Y
 	for _, child := range c.children {
-		if child == nil {
+		if child == nil || child.Rect().Empty() {
 			continue
 		}
-		size := child.Measure(ctx, NewConstraints(canvas.Width(), 0))
-		if size.W <= 0 && size.H <= 0 {
-			continue
-		}
-		child.Layout(ctx, Rect{X: canvas.origin.X, Y: y, W: canvas.Width(), H: size.H})
-		child.Prepare(ctx)
-		child.Paint(ctx, canvas)
-		y += size.H + c.spacing
+		rect := child.Rect()
+		rect.X -= canvas.origin.X
+		rect.Y -= canvas.origin.Y
+		child.Paint(ctx, canvas.Subrect(rect))
 	}
 }
