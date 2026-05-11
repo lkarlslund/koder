@@ -3494,10 +3494,16 @@ func (m *App) syncRetainedTranscriptItems(retained *ui.RetainedTranscript, items
 		suffix++
 	}
 	for idx := 0; idx < prefix; idx++ {
-		retained.Replace(idx, items[idx])
+		if !sameTranscriptItem(existing[idx], items[idx]) {
+			retained.Replace(idx, items[idx])
+		}
 	}
 	for idx := 0; idx < suffix; idx++ {
-		retained.Replace(len(items)-1-idx, items[len(items)-1-idx])
+		existingIdx := len(existing) - 1 - idx
+		itemIdx := len(items) - 1 - idx
+		if !sameTranscriptItem(existing[existingIdx], items[itemIdx]) {
+			retained.Replace(itemIdx, items[itemIdx])
+		}
 	}
 	removeEnd := len(existing) - suffix
 	for idx := removeEnd - 1; idx >= prefix; idx-- {
@@ -3507,6 +3513,10 @@ func (m *App) syncRetainedTranscriptItems(retained *ui.RetainedTranscript, items
 	for idx := prefix; idx < insertEnd; idx++ {
 		retained.Insert(idx, items[idx])
 	}
+}
+
+func sameTranscriptItem(a, b ui.TranscriptItem) bool {
+	return a.Key == b.Key && a.GapBefore == b.GapBefore && a.Node == b.Node
 }
 
 func (m *App) transcriptSeparator(prev, next transcriptBlock) string {

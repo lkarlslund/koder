@@ -25,6 +25,15 @@ type RetainedTranscript struct {
 	itemHeights      []int
 	totalHeight      int
 	totalHeightValid bool
+	staticPrefix     retainedTranscriptStaticPrefix
+}
+
+type retainedTranscriptStaticPrefix struct {
+	width   int
+	count   int
+	height  int
+	surface Surface
+	valid   bool
 }
 
 type transcriptViewportNode interface {
@@ -262,8 +271,26 @@ func (t *RetainedTranscript) renderVisibleInto(ctx *Context, width, height, offs
 	if dst == nil && (ctx == nil || ctx.Runtime == nil) {
 		return totalHeight, offset
 	}
+	static := t.staticPrefixSurface(measureCtx, width)
+	if static.valid && static.count > 0 && static.height > offset && height > 0 {
+		renderY := -offset
+		if ctx != nil && ctx.Runtime != nil {
+			clip := BlankSurface(width, height)
+			clip = clip.placeAt(0, renderY, static.surface)
+			clip.RegisterControls(ctx.Runtime, dstX, dstY)
+		}
+		if dst != nil {
+			*dst = dst.placeAt(dstX, dstY+renderY, static.surface)
+		}
+	}
 	y := 0
-	for idx, item := range t.items {
+	start := 0
+	if static.valid {
+		y = static.height
+		start = static.count
+	}
+	for idx := start; idx < len(t.items); idx++ {
+		item := t.items[idx]
 		gap := max(0, item.GapBefore)
 		top := y + gap
 		surface := t.itemSurfaceAt(measureCtx, idx, item, width)
@@ -294,30 +321,24 @@ func (t *RetainedTranscript) RenderBottomInto(ctx *Context, width, height int, d
 	if dst == nil {
 		return totalHeight, offset
 	}
-	y := 0
-	for idx, item := range t.items {
-		gap := max(0, item.GapBefore)
-		top := y + gap
-		surface := t.itemSurfaceAt(measureCtx, idx, item, width)
-		exactHeight := surface.Size().H
-		bottom := top + exactHeight
-		y = bottom
-		if item.Node == nil || exactHeight <= 0 || bottom <= offset || top >= offset+height {
-			continue
-		}
-		renderY := top - offset
-		if ctx != nil && ctx.Runtime != nil {
-			surface.RegisterControls(ctx.Runtime, 0, renderY)
-		}
-		*dst = dst.placeAt(0, renderY, surface)
-	}
-	return totalHeight, offset
+	return t.renderVisibleInto(ctx, width, height, offset, dst, 0, 0)
 }
 
 func (t *RetainedTranscript) exactContentHeight(ctx *Context, width int) int {
 	t.ensureWidth(width)
 	if t.totalHeightValid {
 		return t.totalHeight
+	}
+	if static := t.staticPrefixSurface(ctx, width); static.valid && static.count == max(0, len(t.items)-1) {
+		total := static.height
+		if len(t.items) > static.count {
+			item := t.items[static.count]
+			total += max(0, item.GapBefore)
+			total += t.itemHeightAt(ctx, static.count, item, width)
+		}
+		t.totalHeight = total
+		t.totalHeightValid = true
+		return total
 	}
 	total := 0
 	for idx, item := range t.items {
@@ -339,6 +360,43 @@ func withoutRuntime(ctx *Context) *Context {
 	copy := *ctx
 	copy.Runtime = nil
 	return &copy
+}
+
+func (t *RetainedTranscript) staticPrefixSurface(ctx *Context, width int) retainedTranscriptStaticPrefix {
+	count := max(0, len(t.items)-1)
+	if count == 0 {
+		return retainedTranscriptStaticPrefix{width: max(0, width), valid: true}
+	}
+	t.ensureWidth(width)
+	width = max(0, width)
+	if t.staticPrefix.valid && t.staticPrefix.width == width && t.staticPrefix.count == count {
+		return t.staticPrefix
+	}
+	height := 0
+	surfaces := make([]Surface, count)
+	for idx := 0; idx < count; idx++ {
+		item := t.items[idx]
+		height += max(0, item.GapBefore)
+		surface := t.itemSurfaceAt(ctx, idx, item, width)
+		surfaces[idx] = surface
+		height += surface.Size().H
+	}
+	base := BlankSurface(width, height)
+	y := 0
+	for idx := 0; idx < count; idx++ {
+		item := t.items[idx]
+		y += max(0, item.GapBefore)
+		base = base.placeAt(0, y, surfaces[idx])
+		y += surfaces[idx].Size().H
+	}
+	t.staticPrefix = retainedTranscriptStaticPrefix{
+		width:   width,
+		count:   count,
+		height:  height,
+		surface: base,
+		valid:   true,
+	}
+	return t.staticPrefix
 }
 
 func (t *RetainedTranscript) itemApproxHeight(item TranscriptItem, width int) int {
@@ -391,6 +449,7 @@ func (t *RetainedTranscript) ensureWidth(width int) {
 	}
 	t.totalHeight = 0
 	t.totalHeightValid = false
+	t.invalidateStaticPrefix()
 	for _, item := range t.items {
 		InvalidateNodeCaches(nil, item.Node)
 	}
@@ -401,9 +460,15 @@ func (t *RetainedTranscript) invalidateLayout() {
 	t.itemHeights = nil
 	t.totalHeight = 0
 	t.totalHeightValid = false
+	t.invalidateStaticPrefix()
+}
+
+func (t *RetainedTranscript) invalidateStaticPrefix() {
+	t.staticPrefix = retainedTranscriptStaticPrefix{}
 }
 
 func (t *RetainedTranscript) appendHeight(item TranscriptItem) {
+	t.invalidateStaticPrefix()
 	if !t.totalHeightValid || len(t.itemHeights) != len(t.items)-1 {
 		t.invalidateLayout()
 		return
@@ -413,6 +478,7 @@ func (t *RetainedTranscript) appendHeight(item TranscriptItem) {
 }
 
 func (t *RetainedTranscript) insertHeight(index int, item TranscriptItem) {
+	t.invalidateStaticPrefix()
 	if !t.totalHeightValid || index < 0 || index > len(t.itemHeights) || len(t.itemHeights) != len(t.items)-1 {
 		t.invalidateLayout()
 		return
@@ -424,6 +490,7 @@ func (t *RetainedTranscript) insertHeight(index int, item TranscriptItem) {
 }
 
 func (t *RetainedTranscript) removeHeight(index int) {
+	t.invalidateStaticPrefix()
 	if !t.totalHeightValid || index < 0 || index >= len(t.items) || len(t.itemHeights) != len(t.items) {
 		t.invalidateLayout()
 		return
@@ -439,6 +506,9 @@ func (t *RetainedTranscript) removeHeight(index int) {
 }
 
 func (t *RetainedTranscript) replaceHeight(index int, item TranscriptItem) {
+	if index < len(t.items)-1 {
+		t.invalidateStaticPrefix()
+	}
 	if !t.totalHeightValid || index < 0 || index >= len(t.items) || index >= len(t.itemHeights) {
 		t.invalidateLayout()
 		return

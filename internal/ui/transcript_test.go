@@ -402,3 +402,62 @@ func TestRetainedTranscriptReplaceInvalidatesHeightWithoutImmediateRerender(t *t
 		t.Fatalf("expected replaced item cached height to be reused, got %d renders", secondRenders)
 	}
 }
+
+func TestRetainedTranscriptCachesStaticPrefixAcrossLiveTailReplace(t *testing.T) {
+	transcript := NewRetainedTranscript()
+	staticRenders := 0
+	firstLiveRenders := 0
+	secondLiveRenders := 0
+	transcript.Add(TranscriptItem{
+		Key:  "static",
+		Node: NewCachedElement(AsNode(countingElement{height: 2, renderCalls: &staticRenders}), 2),
+	})
+	transcript.Add(TranscriptItem{
+		Key:       "live",
+		GapBefore: 1,
+		Node:      NewCachedElement(AsNode(countingElement{height: 1, renderCalls: &firstLiveRenders}), 1),
+	})
+
+	_, _, _ = transcript.RenderBottom(nil, 12, 4)
+	if staticRenders != 1 || firstLiveRenders != 1 {
+		t.Fatalf("expected initial static/live render once, got static=%d live=%d", staticRenders, firstLiveRenders)
+	}
+
+	transcript.Replace(1, TranscriptItem{
+		Key:       "live",
+		GapBefore: 1,
+		Node:      NewCachedElement(AsNode(countingElement{height: 2, renderCalls: &secondLiveRenders}), 2),
+	})
+	_, _, _ = transcript.RenderBottom(nil, 12, 5)
+
+	if staticRenders != 1 {
+		t.Fatalf("expected replacing live tail to reuse static prefix surface, got %d static renders", staticRenders)
+	}
+	if secondLiveRenders != 1 {
+		t.Fatalf("expected replacement live tail to render once, got %d renders", secondLiveRenders)
+	}
+}
+
+func TestRetainedTranscriptInvalidatesStaticPrefixOnWidthChange(t *testing.T) {
+	transcript := NewRetainedTranscript()
+	staticRenders := 0
+	transcript.Add(TranscriptItem{
+		Key:  "static",
+		Node: NewCachedElement(AsNode(countingElement{height: 2, renderCalls: &staticRenders}), 2),
+	})
+	transcript.Add(TranscriptItem{
+		Key:  "live",
+		Node: NewCachedElement(AsNode(countingElement{height: 1}), 1),
+	})
+
+	_, _, _ = transcript.RenderBottom(nil, 12, 4)
+	_, _, _ = transcript.RenderBottom(nil, 12, 4)
+	if staticRenders != 1 {
+		t.Fatalf("expected same-width render to reuse static prefix, got %d renders", staticRenders)
+	}
+
+	_, _, _ = transcript.RenderBottom(nil, 16, 4)
+	if staticRenders != 2 {
+		t.Fatalf("expected width change to rerender static prefix, got %d renders", staticRenders)
+	}
+}
