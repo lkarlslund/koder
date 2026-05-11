@@ -675,7 +675,21 @@ func (c *Client) StreamChatResponse(ctx context.Context, input ChatRequest, onEv
 		c.recorder.RecordHTTP(trace)
 	}
 	for {
+		if err := ctx.Err(); errors.Is(err, context.Canceled) {
+			recordTrace(err.Error(), map[string]string{
+				"phase":       "stream_canceled",
+				"chunk_count": strconv.Itoa(chunkCount),
+			})
+			return aggregated.Response(), err
+		}
 		line, err := reader.ReadString('\n')
+		if ctxErr := ctx.Err(); errors.Is(ctxErr, context.Canceled) {
+			recordTrace(ctxErr.Error(), map[string]string{
+				"phase":       "stream_canceled",
+				"chunk_count": strconv.Itoa(chunkCount),
+			})
+			return aggregated.Response(), ctxErr
+		}
 		if err != nil && !errors.Is(err, io.EOF) {
 			meta := map[string]string{
 				"phase":       "read_stream",

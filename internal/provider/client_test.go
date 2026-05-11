@@ -517,6 +517,40 @@ func TestStreamChatResponseAggregatesToolCallsAndDeltas(t *testing.T) {
 	}
 }
 
+func TestStreamChatResponseStopsEmittingBufferedEventsAfterCancel(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"first\"}}]}\n\n"))
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"second\"}}]}\n\n"))
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"third\"}}]}\n\n"))
+	}))
+	defer server.Close()
+
+	client, err := New("test", config.Provider{
+		BaseURL: server.URL,
+		Timeout: time.Second,
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var deltas []string
+	_, err = client.StreamChatResponse(ctx, ChatRequest{Model: "test"}, func(evt domain.Event) {
+		if evt.Kind != domain.EventKindMessageDelta {
+			return
+		}
+		deltas = append(deltas, evt.Text)
+		cancel()
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context cancellation, got %v", err)
+	}
+	if got := strings.Join(deltas, ""); got != "first" {
+		t.Fatalf("expected stream to stop after first delta, got %q", got)
+	}
+}
+
 func TestStreamChatResponseEmitsUsageWhenTotalTokensMissing(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
