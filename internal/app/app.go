@@ -943,6 +943,9 @@ func (m App) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 		if runtimeUpdateChangesPendingAssistant(msg.update) {
 			m.refreshTranscriptForPendingTurn()
 		} else if msg.update.TranscriptChanged || msg.update.QueueChanged || msg.update.ContextChanged {
+			if msg.update.TranscriptChanged {
+				m.invalidateTranscript()
+			}
 			m.refreshViewport()
 		}
 		return m, ui.Batch(cmds...)

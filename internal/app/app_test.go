@@ -2952,6 +2952,68 @@ func TestRuntimeMessageDeltaRefreshesPendingAssistantTail(t *testing.T) {
 	}
 }
 
+func TestRuntimeToolResultRefreshesRetainedTranscript(t *testing.T) {
+	now := time.Now().UTC()
+	initial := domain.Message{ID: 10, SessionID: 1, ChatID: 2, Role: domain.MessageRoleUser, Summary: "run pwd", CreatedAt: now}
+	initialPart := domain.Part{ID: 11, MessageID: 10, Kind: domain.PartKindText, Payload: domain.TextPayload{Text: "run pwd"}, Body: "run pwd", CreatedAt: now}
+	toolMsg := domain.Message{ID: 12, SessionID: 1, ChatID: 2, Role: domain.MessageRoleTool, Summary: "bash", CreatedAt: now.Add(time.Second)}
+	toolPart := domain.Part{
+		ID:        13,
+		MessageID: 12,
+		Kind:      domain.PartKindToolOutput,
+		Payload: domain.ToolOutputPayload{
+			Tool:       domain.ToolKindBash,
+			ToolCallID: "call_1",
+			Status:     domain.ToolResultStatusOK,
+			Text:       "file-a\nfile-b",
+			Result:     tools.BashStoredResult{Command: "pwd", Output: "file-a\nfile-b"},
+		},
+		CreatedAt: now.Add(time.Second),
+	}
+	updates := make(chan chatpkg.Update)
+	m := App{
+		cfg:             config.Default().WithStateDir(t.TempDir()),
+		composer:        textarea.New(),
+		currentRuntime:  &chatpkg.Chat{},
+		currentSnapshot: chatpkg.Snapshot{Chat: domain.Chat{ID: 2, SessionID: 1}, Messages: []domain.Message{initial}, Parts: map[int64][]domain.Part{10: {initialPart}}},
+		viewport:        newTranscriptViewport(80, 8),
+		currentSession:  domain.Session{ID: 1, Title: "Session"},
+		currentChat:     domain.Chat{ID: 2, SessionID: 1},
+		width:           80,
+		height:          16,
+	}
+	m.refreshViewport()
+	if strings.Contains(m.viewport.View(), "file-a") {
+		t.Fatalf("expected initial viewport without tool output, got %q", m.viewport.View())
+	}
+
+	updated, _ := m.Update(runtimeUpdateMsg{
+		chatID: 2,
+		update: chatpkg.Update{
+			Event: &domain.Event{Kind: domain.EventKindToolResult, Tool: domain.ToolKindBash, ToolCallID: "call_1", Message: toolMsg, Parts: []domain.Part{toolPart}},
+			Snapshot: chatpkg.Snapshot{
+				Session:    domain.Session{ID: 1, Title: "Session"},
+				Chat:       domain.Chat{ID: 2, SessionID: 1},
+				Messages:   []domain.Message{initial, toolMsg},
+				Parts:      map[int64][]domain.Part{10: {initialPart}, 12: {toolPart}},
+				Status:     chatpkg.StatusRunningTools,
+				StatusText: "Running tool",
+				Active:     true,
+			},
+			Active:            true,
+			Status:            chatpkg.StatusRunningTools,
+			StatusText:        "Running tool",
+			TranscriptChanged: true,
+		},
+		updates: updates,
+	})
+	next := updated.(App)
+
+	if !strings.Contains(next.viewport.View(), "file-a") {
+		t.Fatalf("expected runtime tool result to refresh retained transcript, got %q", next.viewport.View())
+	}
+}
+
 func TestRepeatedStreamingRuntimeUpdateDoesNotInvalidateTranscript(t *testing.T) {
 	m := App{
 		cfg:             config.Default().WithStateDir(t.TempDir()),
