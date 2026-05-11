@@ -24,6 +24,14 @@ type Model interface {
 	ViewSurface() SurfaceView
 }
 
+// DirtyModel is an optional Model extension for retained views.
+//
+// Program consults it on coalesced frame ticks so a clean retained tree can
+// skip ViewSurface and terminal diffing entirely.
+type DirtyModel interface {
+	ViewDirty() bool
+}
+
 // SurfaceView exposes the immutable cell data Program needs to paint a frame.
 //
 // Implementations may be backed by a concrete Surface or by another retained

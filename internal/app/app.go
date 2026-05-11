@@ -1282,6 +1282,18 @@ func (m App) ViewSurface() ui.SurfaceView {
 	return m.viewSurface()
 }
 
+// ViewDirty reports whether the retained UI or overlays have pending paint work.
+func (m App) ViewDirty() bool {
+	if m.width <= 0 || m.height <= 0 {
+		return false
+	}
+	root := (&m).syncUIRoot()
+	if root == nil || root.NeedsRedraw() {
+		return true
+	}
+	return m.bouncyBalls.Dirty()
+}
+
 func (m *App) renderElementText(node ui.Node, width, height int) string {
 	return strings.Join(ui.RenderSurface(&ui.Context{Palette: m.palette}, node, width, height).Lines(), "\n")
 }

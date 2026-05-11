@@ -109,6 +109,24 @@ func TestSidebarBusySpinnerTimerUpdatesRetainedFrame(t *testing.T) {
 	}
 }
 
+func TestSidebarSpinnerTimerMarksViewDirty(t *testing.T) {
+	m := newRuntimeTestModel(t)
+	m.startBusy(busyScopeSidebar, "Creating session...")
+	_ = m.viewSurface()
+	if m.ViewDirty() {
+		t.Fatal("expected rendered view to be clean")
+	}
+
+	root := m.syncUIRoot()
+	handled, _ := root.HandleEvent(ui.TimerEvent{Owner: ui.SpinnerTimerOwner})
+	if !handled {
+		t.Fatal("expected root to route sidebar spinner timer")
+	}
+	if !m.ViewDirty() {
+		t.Fatal("expected spinner timer to make retained view dirty")
+	}
+}
+
 func TestHelpModalContentUsesWindowBackground(t *testing.T) {
 	m := newRuntimeTestModel(t)
 	m.openHelpModal()

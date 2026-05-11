@@ -151,7 +151,7 @@ func (p *Program) Run() (Model, error) {
 			p.runCmd(cmd, events)
 		}
 		if isFrame || p.shouldRenderImmediately(msg) {
-			if err := p.render(out); err != nil {
+			if err := p.renderIfNeeded(out, isFrame); err != nil {
 				return p.model, err
 			}
 			continue
@@ -241,6 +241,27 @@ func (p *Program) runCmd(cmd Cmd, out chan<- Msg) {
 		}
 		out <- msg
 	}()
+}
+
+// renderIfNeeded renders unless frameTick is a coalesced FPS tick for a clean
+// retained model.
+func (p *Program) renderIfNeeded(out io.Writer, frameTick bool) error {
+	if frameTick && !p.modelViewDirty() {
+		return nil
+	}
+	return p.render(out)
+}
+
+// modelViewDirty reports whether the current model needs a frame render.
+func (p *Program) modelViewDirty() bool {
+	if p == nil || !p.didRender {
+		return true
+	}
+	dirty, ok := p.model.(DirtyModel)
+	if !ok {
+		return true
+	}
+	return dirty.ViewDirty()
 }
 
 // render diffs the current model surface against the previous frame and writes

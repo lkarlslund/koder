@@ -214,6 +214,38 @@ func TestProgramRequestFrameCoalesces(t *testing.T) {
 	}
 }
 
+func TestProgramSkipsCleanFPSFrameRender(t *testing.T) {
+	surface := fakeSurface{
+		w: 1,
+		h: 1,
+		cells: []fakeCell{
+			{text: "a"},
+		},
+	}
+	model := &fakeDirtyModel{fakeModel: fakeModel{surface: surface}}
+	p := &Program{
+		model:     model,
+		rendered:  surface,
+		didRender: true,
+	}
+
+	if err := p.renderIfNeeded(&bytes.Buffer{}, true); err != nil {
+		t.Fatalf("render failed: %v", err)
+	}
+	if model.viewCalls != 0 {
+		t.Fatalf("expected clean FPS tick to skip ViewSurface, got %d calls", model.viewCalls)
+	}
+
+	model.dirty = true
+	var out bytes.Buffer
+	if err := p.renderIfNeeded(&out, true); err != nil {
+		t.Fatalf("render failed: %v", err)
+	}
+	if model.viewCalls != 1 {
+		t.Fatalf("expected dirty FPS tick to render once, got %d calls", model.viewCalls)
+	}
+}
+
 func TestRenderFrameSurfaceEmitsRealSGRSequences(t *testing.T) {
 	s := fakeSurface{
 		w: 5,
@@ -404,6 +436,18 @@ type fakeModel struct {
 func (f *fakeModel) Init() Cmd                { return nil }
 func (f *fakeModel) Update(Msg) (Model, Cmd)  { return f, nil }
 func (f *fakeModel) ViewSurface() SurfaceView { return f.surface }
+
+type fakeDirtyModel struct {
+	fakeModel
+	dirty     bool
+	viewCalls int
+}
+
+func (f *fakeDirtyModel) ViewDirty() bool { return f.dirty }
+func (f *fakeDirtyModel) ViewSurface() SurfaceView {
+	f.viewCalls++
+	return f.surface
+}
 
 type fakeSurface struct {
 	w          int

@@ -104,6 +104,11 @@ func (o *bouncyBallsOverlay) TickCmd() ui.Cmd {
 	})
 }
 
+// Dirty reports whether the overlay has pending paint or cleanup damage.
+func (o bouncyBallsOverlay) Dirty() bool {
+	return len(o.dirtyRects) > 0 || len(o.cleanupRects) > 0
+}
+
 func (o *bouncyBallsOverlay) Step(width, height int) bool {
 	return o.StepAt(time.Now(), width, height)
 }
