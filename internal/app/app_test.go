@@ -434,6 +434,41 @@ func TestToolCallDeltaAppendsCurrentChatImmediately(t *testing.T) {
 	}
 }
 
+func TestProviderToolCallDeltaRendersLiveToolRun(t *testing.T) {
+	m := App{
+		cfg:             testConfig(t),
+		currentSession:  domain.Session{ID: 1},
+		currentChat:     domain.Chat{ID: 2},
+		currentSnapshot: chatpkg.Snapshot{Parts: map[int64][]domain.Part{}},
+		composer:        textarea.New(),
+	}
+
+	m.applyEvent(domain.Event{
+		Kind:       domain.EventKindToolCallDelta,
+		Tool:       domain.ToolKindRead,
+		ToolCallID: "call_1",
+		Meta:       map[string]string{"arguments": `{"path":"main.go","limit":"20"}`},
+	})
+
+	if len(m.transcriptItems) != 1 {
+		t.Fatalf("expected live tool run item, got %d", len(m.transcriptItems))
+	}
+	item, ok := m.transcriptItems[0].(toolRunTranscriptItem)
+	if !ok {
+		t.Fatalf("expected tool run transcript item, got %#v", m.transcriptItems[0])
+	}
+	run := m.transcriptToolRunValue(item)
+	if run.Tool != domain.ToolKindRead || run.ToolCallID != "call_1" {
+		t.Fatalf("unexpected live tool run: %#v", run)
+	}
+	if !strings.Contains(run.Preview, "main.go") {
+		t.Fatalf("expected live tool preview to include path, got %#v", run)
+	}
+	if m.busy.transcriptPhase != transcriptBusyPhaseTools {
+		t.Fatalf("expected tools busy phase, got %#v", m.busy.transcriptPhase)
+	}
+}
+
 func TestToolResultEventUpdatesRequestedRunInMemory(t *testing.T) {
 	now := time.Now().UTC()
 	callMsg := domain.Message{

@@ -1990,6 +1990,10 @@ func (m *App) applyEvent(evt domain.Event) {
 		m.invalidatePendingTranscriptFrame()
 	case domain.EventKindToolStart:
 		m.startTranscriptTool()
+	case domain.EventKindToolCallDelta:
+		if evt.Message.ID == 0 {
+			m.showLiveProviderToolCall(evt)
+		}
 	case domain.EventKindToolResult:
 		m.finishTranscriptTool()
 	case domain.EventKindApprovalAsk:
@@ -3367,14 +3371,19 @@ func (m *App) upsertToolRunTranscriptItem(run ui.ToolRun) bool {
 }
 
 func (m *App) appendToolRunTranscriptItem(run ui.ToolRun) bool {
-	if strings.TrimSpace(run.ID) == "" || m.transcriptDirty || len(m.transcriptItems) == 0 {
+	if strings.TrimSpace(run.ID) == "" || m.transcriptDirty {
 		return false
 	}
 	retained := m.ensureRetainedTranscript()
 	if retained.Len() != len(m.transcriptItems) {
 		return false
 	}
-	if _, ok := m.transcriptItems[len(m.transcriptItems)-1].(*placeholderTranscriptItem); ok {
+	if len(m.transcriptItems) > 0 {
+		if _, ok := m.transcriptItems[len(m.transcriptItems)-1].(*placeholderTranscriptItem); ok {
+			return false
+		}
+	}
+	if len(m.transcriptItems) == 0 && retained.Len() != 0 {
 		return false
 	}
 	block := transcriptBlock{Kind: transcriptBlockToolRun, ToolRun: run}

@@ -170,6 +170,42 @@ func (m *App) applyCurrentChatPartMutation(msg domain.Message, part domain.Part)
 	return true
 }
 
+func (m *App) showLiveProviderToolCall(evt domain.Event) {
+	tool := evt.Tool
+	if tool == "" {
+		return
+	}
+	toolCallID := strings.TrimSpace(evt.ToolCallID)
+	if toolCallID == "" {
+		toolCallID = "pending:" + string(tool)
+	}
+	args := map[string]string{}
+	if rawArgs := strings.TrimSpace(evt.Meta["arguments"]); rawArgs != "" && json.Valid([]byte(rawArgs)) {
+		_ = json.Unmarshal([]byte(rawArgs), &args)
+	}
+	req := tools.Request{Tool: tool, ToolCallID: toolCallID, Args: args}
+	presentation := tools.PresentationForRequest(req)
+	if strings.TrimSpace(presentation.Title) == "" {
+		presentation.Title = "Preparing " + string(tool)
+	} else {
+		presentation.Title = "Preparing " + presentation.Title
+	}
+	run := ui.ToolRun{
+		ID:         toolCallID,
+		Tool:       tool,
+		ToolCallID: strings.TrimSpace(evt.ToolCallID),
+		Title:      presentation.Title,
+		Subtitle:   presentation.Subtitle,
+		Preview:    presentation.Preview,
+		Status:     ui.ToolRunStatusRequested,
+	}
+	if !m.upsertToolRunTranscriptItem(run) {
+		m.transcriptDirty = true
+	}
+	m.setTranscriptBusyPhase(transcriptBusyPhaseTools)
+	m.refreshViewport()
+}
+
 func (m *App) applyApprovalAskEvent(evt domain.Event) {
 	approvalID, _ := strconv.ParseInt(strings.TrimSpace(evt.Meta["approval_id"]), 10, 64)
 	if approvalID == 0 {

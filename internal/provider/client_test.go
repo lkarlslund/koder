@@ -470,12 +470,14 @@ func TestStreamChatResponseAggregatesToolCallsAndDeltas(t *testing.T) {
 	var deltas []string
 	var sawDone bool
 	var sawToolCallDelta bool
+	var toolDelta domain.Event
 	resp, err := client.StreamChatResponse(context.Background(), ChatRequest{Model: "test"}, func(evt domain.Event) {
 		switch evt.Kind {
 		case domain.EventKindMessageDelta:
 			deltas = append(deltas, evt.Text)
 		case domain.EventKindToolCallDelta:
 			sawToolCallDelta = true
+			toolDelta = evt
 			if !strings.Contains(evt.RawJSON, "\"tool_calls\"") {
 				t.Fatalf("expected raw tool call payload, got %q", evt.RawJSON)
 			}
@@ -509,6 +511,9 @@ func TestStreamChatResponseAggregatesToolCallsAndDeltas(t *testing.T) {
 	}
 	if !sawToolCallDelta {
 		t.Fatal("expected streamed tool call delta event")
+	}
+	if toolDelta.Tool != domain.ToolKindBash || toolDelta.ToolCallID != "call_1" || !strings.Contains(toolDelta.Meta["arguments"], "printf hello") {
+		t.Fatalf("expected streamed tool call details, got %#v", toolDelta)
 	}
 }
 

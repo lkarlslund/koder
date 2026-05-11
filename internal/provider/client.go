@@ -718,7 +718,7 @@ func (c *Client) StreamChatResponse(ctx context.Context, input ChatRequest, onEv
 			chunkCount++
 			aggregated.Apply(chunk)
 			if onEvent != nil {
-				c.emitChunk(onEvent, chunk, payload)
+				c.emitChunk(onEvent, chunk, payload, aggregated.toolCalls)
 			}
 		}
 
@@ -773,7 +773,7 @@ func debugTruncate(value string, max int) string {
 	return value[:max-1] + "…"
 }
 
-func (c *Client) emitChunk(emit func(domain.Event), chunk chatChunk, raw string) {
+func (c *Client) emitChunk(emit func(domain.Event), chunk chatChunk, raw string, currentToolCalls []ToolCall) {
 	if len(chunk.Choices) > 0 {
 		choice := chunk.Choices[0]
 		if choice.Delta.Content != "" {
@@ -783,7 +783,7 @@ func (c *Client) emitChunk(emit func(domain.Event), chunk chatChunk, raw string)
 			emit(domain.Event{Kind: domain.EventKindReasoning, Text: reasoning, RawJSON: raw})
 		}
 		if len(choice.Delta.ToolCalls) > 0 || len(choice.Message.ToolCalls) > 0 {
-			emit(domain.Event{Kind: domain.EventKindToolCallDelta, Text: "provider tool call delta", RawJSON: raw})
+			emit(providerToolCallDeltaEvent(raw, currentToolCalls))
 		}
 		if choice.FinishReason != "" {
 			emit(domain.Event{Kind: domain.EventKindStatus, Text: choice.FinishReason})
@@ -801,6 +801,27 @@ func (c *Client) emitChunk(emit func(domain.Event), chunk chatChunk, raw string)
 			Usage: usage,
 		})
 	}
+}
+
+func providerToolCallDeltaEvent(raw string, currentToolCalls []ToolCall) domain.Event {
+	evt := domain.Event{Kind: domain.EventKindToolCallDelta, Text: "provider tool call delta", RawJSON: raw}
+	if len(currentToolCalls) == 0 {
+		return evt
+	}
+	call := currentToolCalls[len(currentToolCalls)-1]
+	evt.ToolCallID = strings.TrimSpace(call.ID)
+	evt.Tool = domain.ToolKind(strings.TrimSpace(call.Function.Name))
+	meta := map[string]string{}
+	if args := strings.TrimSpace(call.Function.Arguments); args != "" {
+		meta["arguments"] = args
+	}
+	if call.Index != nil {
+		meta["index"] = strconv.Itoa(*call.Index)
+	}
+	if len(meta) > 0 {
+		evt.Meta = meta
+	}
+	return evt
 }
 
 func convertToolCalls(raw []rawToolCall) []ToolCall {
