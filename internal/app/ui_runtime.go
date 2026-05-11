@@ -248,10 +248,13 @@ func (m *App) mainWindow() ui.Window {
 			},
 			timer: func(m *App, event ui.TimerEvent) (bool, ui.Cmd) {
 				main := m.ensureMainScreenView()
-				if main == nil || !main.HandleComposerTimer(event) {
+				if main == nil {
 					return false, nil
 				}
-				return true, nil
+				if main.HandleTimer(event) {
+					return true, nil
+				}
+				return false, nil
 			},
 		}
 		return m.mainWindowView
@@ -268,16 +271,16 @@ func (m *App) overlayWindows() []ui.Window {
 		}, func(m *App, controlID string) ui.Cmd {
 			if controlID == "window-close" {
 				m.startBusy(busyScopeSidebar, "Creating session…")
-				return ui.Batch(m.newSessionCmd(), m.spinnerCmdIfNeeded())
+				return m.newSessionCmd()
 			}
 			action := m.sessionDialog.ActivateControl(controlID)
 			switch action.Kind {
 			case dialogs.SessionDialogActionSelect:
 				m.startBusy(busyScopeSidebar, "Resuming session…")
-				return ui.Batch(m.loadSessionCmd(action.SessionID), m.spinnerCmdIfNeeded())
+				return m.loadSessionCmd(action.SessionID)
 			case dialogs.SessionDialogActionCancel:
 				m.startBusy(busyScopeSidebar, "Creating session…")
-				return ui.Batch(m.newSessionCmd(), m.spinnerCmdIfNeeded())
+				return m.newSessionCmd()
 			default:
 				return nil
 			}

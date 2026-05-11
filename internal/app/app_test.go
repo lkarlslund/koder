@@ -2382,27 +2382,6 @@ func TestWindowTitleUsesSessionTitle(t *testing.T) {
 	}
 }
 
-func TestWindowTitleUsesAnimatedSpinnerFrame(t *testing.T) {
-	cfg := testConfig(t)
-	cfg.UI.Spinner = "circles"
-	m := App{
-		cfg: cfg,
-		busy: busyModel{
-			active: true,
-			scope:  busyScopeTranscript,
-			spinner: spinnerModel{
-				active: true,
-				frame:  2,
-			},
-		},
-		currentSession: domain.Session{Title: "Build fixes"},
-	}
-	got := m.windowTitle()
-	if !strings.HasPrefix(got, "◑K ") {
-		t.Fatalf("unexpected animated window title: %q", got)
-	}
-}
-
 func TestSyncDebugRuntimeIncludesViewportState(t *testing.T) {
 	rec := debugsrv.NewRecorder()
 	m := App{
@@ -3118,9 +3097,6 @@ func TestNewSessionMsgClearsBusyState(t *testing.T) {
 			active: true,
 			scope:  busyScopeSidebar,
 			status: "Creating session…",
-			spinner: spinnerModel{
-				active: true,
-			},
 		},
 		loading:         true,
 		composer:        textarea.New(),
@@ -3944,7 +3920,7 @@ func TestOpenSessionPickerStopsComposerBlinkTimer(t *testing.T) {
 		}},
 	}
 
-	m.ensureMainScreenView().SyncComposerBlinkTimer(m.ensureUIRoot())
+	m.ensureMainScreenView().SyncTimers(m.ensureUIRoot())
 	if timers := m.syncUIRoot().ActiveTimers(composerBlinkTimerOwner); len(timers) == 0 {
 		t.Fatal("expected focused composer to own a blink timer")
 	}
@@ -4487,7 +4463,7 @@ func TestPrefsCommandOpensPreferencesDialog(t *testing.T) {
 	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
 	next := updated.(*App)
 	if cmd == nil {
-		t.Fatal("expected spinner tick command when opening preferences")
+		t.Fatal("expected command when opening preferences")
 	}
 	if !next.hasPreferencesDialog() {
 		t.Fatal("expected preferences dialog to open")
@@ -5326,23 +5302,6 @@ func TestPreferencesDialogApplySavesCompactionPreferences(t *testing.T) {
 	}
 }
 
-func TestWorkingIndicatorShownWhenModelWorking(t *testing.T) {
-	m := App{
-		busy: busyModel{
-			active: true,
-			scope:  busyScopeTranscript,
-			spinner: spinnerModel{
-				active: true,
-			},
-		},
-	}
-
-	got := m.workingIndicator()
-	if got == "" {
-		t.Fatal("expected working indicator while model is working")
-	}
-}
-
 func TestRenderHeaderIsEmpty(t *testing.T) {
 	m := App{
 		currentSession: domain.Session{ID: 2, ProviderID: "test", ModelID: "model"},
@@ -5372,9 +5331,6 @@ func TestRenderSidebarShowsStatusAndSessionInfo(t *testing.T) {
 		busy: busyModel{
 			active: true,
 			scope:  busyScopeTranscript,
-			spinner: spinnerModel{
-				active: true,
-			},
 		},
 		workdir: "/tmp/project",
 		workspace: workspace.Status{
@@ -6031,14 +5987,13 @@ func TestMouseClickOnHelpModalCloseIndicatorClosesModal(t *testing.T) {
 		t.Fatalf("failed to find help modal close indicator in %q", view)
 	}
 
-	updated, cmd := m.Update(ui.MouseMsg{
+	updated, _ := m.Update(ui.MouseMsg{
 		Action: ui.MouseActionPress,
 		Button: ui.MouseButtonLeft,
 		X:      closeX,
 		Y:      closeY,
 	})
 	next := asModelPtr(t, updated)
-	_ = cmd
 	if next.hasHelpModal() {
 		t.Fatal("expected help modal to close from mouse click")
 	}
@@ -6425,16 +6380,13 @@ func TestRefreshViewportAppendsWorkingLine(t *testing.T) {
 		busy: busyModel{
 			active: true,
 			scope:  busyScopeTranscript,
-			spinner: spinnerModel{
-				active: true,
-			},
 		},
 	}
 
 	m.startWaitingForLLM()
 	m.refreshViewport()
 	got := m.renderBody()
-	if !strings.Contains(got, "Waiting for LLM response") || !strings.Contains(got, ui.SpinnerFrame(config.Default().UI.Spinner, 0)) {
+	if !strings.Contains(got, "Waiting for LLM response") {
 		t.Fatalf("expected transcript activity line, got %q", got)
 	}
 }
@@ -6814,9 +6766,6 @@ func TestRefreshViewportOmitsWorkingLineForGenericLoading(t *testing.T) {
 		busy: busyModel{
 			active: true,
 			scope:  busyScopeSidebar,
-			spinner: spinnerModel{
-				active: true,
-			},
 		},
 	}
 
@@ -6827,46 +6776,16 @@ func TestRefreshViewportOmitsWorkingLineForGenericLoading(t *testing.T) {
 	}
 }
 
-func TestSpinnerTickRefreshesTranscriptActivity(t *testing.T) {
-	m := App{
-		currentSession:  domain.Session{ID: 1},
-		status:          "Working ...",
-		currentSnapshot: chatpkg.Snapshot{Parts: map[int64][]domain.Part{}},
-		viewport:        newTranscriptViewport(40, 6),
-		busy: busyModel{
-			active: true,
-			scope:  busyScopeTranscript,
-			spinner: spinnerModel{
-				active: true,
-			},
-		},
-	}
-
-	m.refreshViewport()
-	before := m.renderBody()
-
-	updated, cmd := m.Update(spinnerTickMsg{})
-	next := updated.(App)
-	after := next.renderBody()
-
-	if before == after {
-		t.Fatalf("expected spinner tick to refresh transcript activity, before=%q after=%q", before, after)
-	}
-	if cmd == nil {
-		t.Fatal("expected follow-up spinner tick command")
-	}
-}
-
-func TestStatusEventKeepsTranscriptSpinnerActive(t *testing.T) {
+func TestStatusEventKeepsTranscriptBusyActive(t *testing.T) {
 	m := App{}
 	m.startBusy(busyScopeTranscript, "Compacting session...")
 
 	m.applyEvent(domain.Event{Kind: domain.EventKindStatus, Text: "Compacting session..."})
 
 	if !m.busy.transcriptActive() {
-		t.Fatal("expected transcript spinner to remain active for status updates during busy work")
+		t.Fatal("expected transcript busy state to remain active for status updates during busy work")
 	}
-	if got := m.renderTranscriptActivity(); !strings.Contains(got, "Compacting session...") || !strings.Contains(got, ui.SpinnerFrame(config.Default().UI.Spinner, 0)) {
+	if got := m.renderTranscriptActivity(); !strings.Contains(got, "Compacting session...") {
 		t.Fatalf("expected transcript activity to still render, got %q", got)
 	}
 }
@@ -6980,7 +6899,7 @@ func TestTranscriptBusyPhaseTracksParallelTools(t *testing.T) {
 	}
 }
 
-func TestLoadMsgPreserveBusyKeepsSpinnerActive(t *testing.T) {
+func TestLoadMsgPreserveBusyKeepsBusyActive(t *testing.T) {
 	m := App{
 		cfg:      testConfig(t),
 		viewport: newTranscriptViewport(40, 6),
@@ -6988,10 +6907,6 @@ func TestLoadMsgPreserveBusyKeepsSpinnerActive(t *testing.T) {
 			active: true,
 			scope:  busyScopeTranscript,
 			status: "Working ...",
-			spinner: spinnerModel{
-				active: true,
-				frame:  2,
-			},
 		},
 		currentSession: domain.Session{ID: 1, Title: "Test"},
 	}
@@ -7006,14 +6921,11 @@ func TestLoadMsgPreserveBusyKeepsSpinnerActive(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("expected sync title command after load update")
 	}
-	if !next.busy.spinner.active {
-		t.Fatal("expected spinner to remain active during preserved busy reload")
+	if !next.busy.transcriptActive() {
+		t.Fatal("expected busy transcript state to remain active during preserved busy reload")
 	}
-	if got := next.workingIndicator(); got == "" {
-		t.Fatal("expected working indicator to remain visible")
-	}
-	if !strings.Contains(next.windowTitle(), ui.SpinnerFrame(next.cfg.UI.Spinner, 2)) {
-		t.Fatalf("expected spinner in window title, got %q", next.windowTitle())
+	if got := next.windowTitle(); got != "K Test" {
+		t.Fatalf("unexpected window title: %q", got)
 	}
 }
 
@@ -7153,135 +7065,6 @@ func TestQueuedDispatchReloadKeepsPendingAssistantStream(t *testing.T) {
 	}
 }
 
-func TestSpinnerTickPreservesViewportOffsetWhenScrolledBack(t *testing.T) {
-	m := App{
-		cfg:            testConfig(t),
-		currentSession: domain.Session{ID: 1, Title: "Test"},
-		viewport:       newTranscriptViewport(40, 4),
-		busy: busyModel{
-			active: true,
-			scope:  busyScopeTranscript,
-			status: "Working ...",
-			spinner: spinnerModel{
-				active: true,
-			},
-		},
-		currentSnapshot: chatpkg.Snapshot{Messages: []domain.Message{
-			{ID: 1, Role: domain.MessageRoleAssistant},
-		}, Parts: map[int64][]domain.Part{
-			1: {{
-				Kind: domain.PartKindText,
-				Body: strings.Join([]string{
-					"line 1",
-					"line 2",
-					"line 3",
-					"line 4",
-					"line 5",
-					"line 6",
-					"line 7",
-					"line 8",
-				}, "\n"),
-			}},
-		}},
-	}
-
-	m.refreshViewport()
-	m.viewport.SetYOffset(1)
-	beforeOffset := m.viewport.YOffset
-
-	updated, cmd := m.Update(spinnerTickMsg{})
-	next := updated.(App)
-
-	if cmd == nil {
-		t.Fatal("expected follow-up spinner tick command")
-	}
-	if next.viewport.YOffset != beforeOffset {
-		t.Fatalf("expected spinner tick to preserve viewport offset %d, got %d", beforeOffset, next.viewport.YOffset)
-	}
-	if next.transcriptDirty {
-		t.Fatal("expected spinner tick to avoid transcript invalidation")
-	}
-}
-
-func TestSpinnerTickInvalidatesStatusPane(t *testing.T) {
-	m := App{
-		cfg:         config.Default().WithStateDir(t.TempDir()),
-		palette:     theme.Default().Palette,
-		viewport:    newTranscriptViewport(80, 20),
-		renderCache: &modelRenderCache{},
-		composer:    textarea.New(),
-		width:       80,
-		height:      24,
-		showSidebar: false,
-		busy: busyModel{
-			active: true,
-			scope:  busyScopeTranscript,
-			status: "Streaming LLM response ...",
-			spinner: spinnerModel{
-				active: true,
-			},
-		},
-	}
-
-	_ = m.viewSurface()
-	updated, cmd := m.Update(spinnerTickMsg{})
-	next := updated.(App)
-	surface := next.viewSurface()
-
-	if cmd == nil {
-		t.Fatal("expected follow-up spinner tick command")
-	}
-	if next.busy.spinner.frame != 1 {
-		t.Fatalf("expected spinner frame to advance, got %d", next.busy.spinner.frame)
-	}
-	rects, ok := surface.DirtyRects()
-	if !ok || len(rects) == 0 {
-		t.Fatal("expected spinner tick to produce damage")
-	}
-	damageStart := surface.SurfaceHeight() - next.statusPaneHeight()
-	for _, rect := range rects {
-		if rect.Y < damageStart {
-			t.Fatalf("expected spinner damage to stay in status pane, got rect %#v with damage start %d", rect, damageStart)
-		}
-	}
-}
-
-func TestSpinnerTickAnimatesSidebarBusyIndicator(t *testing.T) {
-	cfg := testConfig(t)
-	cfg.UI.Spinner = "circles"
-	m := App{
-		cfg: cfg,
-		busy: busyModel{
-			active: true,
-			scope:  busyScopeSidebar,
-			status: "Creating session…",
-			spinner: spinnerModel{
-				active: true,
-			},
-		},
-		status:         "Ready",
-		currentSession: domain.Session{Title: "Test"},
-		viewport:       newTranscriptViewport(40, 6),
-		composer:       textarea.New(),
-	}
-
-	before := m.renderSidebar()
-
-	updated, cmd := m.Update(spinnerTickMsg{})
-	next := updated.(App)
-	after := next.renderSidebar()
-
-	if before == after {
-		t.Fatalf("expected sidebar busy indicator to animate, before=%q after=%q", before, after)
-	}
-	if cmd == nil {
-		t.Fatal("expected follow-up spinner tick command")
-	}
-	if next.busy.spinner.frame != 1 {
-		t.Fatalf("expected spinner frame to advance, got %d", next.busy.spinner.frame)
-	}
-}
-
 func TestRenderMessagePartsShowsReasoningBeforeText(t *testing.T) {
 	m := App{
 		showReasoning: true,
@@ -7411,12 +7194,13 @@ func TestPendingAssistantReasoningOnlyShowsThinkingIndicator(t *testing.T) {
 		CreatedAt: time.Unix(1, 0).UTC(),
 		Reasoning: "hidden chain of thought",
 	}
+	m.invalidateTranscript()
 
 	m.refreshViewport()
 	got := m.renderBody()
 
-	if !strings.Contains(got, "Thinking ...") {
-		t.Fatalf("expected pending thinking indicator, got %q", got)
+	if !strings.Contains(got, "Streaming thoughts ...") {
+		t.Fatalf("expected pending thoughts indicator, got %q", got)
 	}
 	if strings.Contains(got, reasoningOnlyPlaceholder) {
 		t.Fatalf("expected thinking indicator to replace reasoning placeholder while pending, got %q", got)
@@ -8044,18 +7828,6 @@ func TestMouseClickTogglesToolRunExpansionWhileBusy(t *testing.T) {
 		t.Fatalf("expected busy click to change rendered surface, before=%q after=%q", beforeRendered, afterRendered)
 	}
 
-	updated, cmd = next.Update(spinnerTickMsg{})
-	if cmd != nil {
-		t.Fatal("expected no spinner follow-up when busy state is not animating")
-	}
-	switch typed := updated.(type) {
-	case App:
-		next = typed
-	case *App:
-		next = *typed
-	default:
-		t.Fatalf("unexpected model type after spinner tick %T", updated)
-	}
 	if !strings.Contains(next.viewport.View(), "line one") {
 		t.Fatalf("expected expanded tool output to persist across busy refresh, got %q", next.viewport.View())
 	}
@@ -8077,9 +7849,6 @@ func TestMouseClickResyncsTranscriptControlsDuringBusy(t *testing.T) {
 			active: true,
 			scope:  busyScopeTranscript,
 			status: "Working ...",
-			spinner: spinnerModel{
-				active: true,
-			},
 		},
 	}
 	m.currentSnapshot.Messages = []domain.Message{
@@ -8120,7 +7889,7 @@ func TestMouseClickResyncsTranscriptControlsDuringBusy(t *testing.T) {
 		t.Fatalf("expected rendered body to include expand control, got %q", rendered)
 	}
 
-	updated, cmd := m.Update(ui.MouseMsg{
+	updated, _ := m.Update(ui.MouseMsg{
 		Action: ui.MouseActionPress,
 		Button: ui.MouseButtonLeft,
 		X:      clickX,
@@ -8134,9 +7903,6 @@ func TestMouseClickResyncsTranscriptControlsDuringBusy(t *testing.T) {
 		next = *typed
 	default:
 		t.Fatalf("unexpected model type %T", updated)
-	}
-	if cmd != nil {
-		t.Fatal("expected no command from busy tool run mouse toggle")
 	}
 	if !strings.Contains(next.viewport.View(), "line one") {
 		t.Fatalf("expected resynced busy click to expand tool output, got %q", next.viewport.View())

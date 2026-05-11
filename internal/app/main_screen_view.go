@@ -15,6 +15,7 @@ type mainScreenView struct {
 	composer         *tui.ComposerNode
 	sidebar          *ui.HashedNode
 	statusPane       *ui.HashedNode
+	statusSpinner    *ui.Spinner
 	leftMain         *ui.FlexNode
 	body             *ui.FlexNode
 	root             *ui.FlexNode
@@ -29,10 +30,11 @@ type mainScreenView struct {
 
 func newMainScreenView() *mainScreenView {
 	view := &mainScreenView{
-		transcript: tui.NewChatTranscriptNode(),
-		composer:   tui.NewComposerNode(),
-		sidebar:    ui.NewHashedNode(nil, 0),
-		statusPane: ui.NewHashedNode(nil, 0),
+		transcript:    tui.NewChatTranscriptNode(),
+		composer:      tui.NewComposerNode(),
+		sidebar:       ui.NewHashedNode(nil, 0),
+		statusPane:    ui.NewHashedNode(nil, 0),
+		statusSpinner: &ui.Spinner{},
 	}
 	view.leftMain = ui.NewFlexNode(ui.DirectionVertical, []ui.FlexNodeChild{
 		{Node: view.transcript, Flex: 1},
@@ -67,7 +69,7 @@ func (m *App) syncMainScreenViewState() {
 	sidebarContent := m.renderSidebar()
 	statusLine := ""
 	if m.busy.transcriptActive() {
-		statusLine = ui.WorkingIndicatorLine(m.workingIndicator(), m.transcriptBusyStatus())
+		statusLine = m.transcriptBusyStatus()
 	}
 	sidebarWidth := m.sidebarWidth()
 	sidebarHash := hashStrings(
@@ -103,7 +105,12 @@ func (m *App) syncMainScreenViewState() {
 		})
 	}
 	m.mainScreen.SetSidebar(m.showSidebar, sidebarWidth, sidebarNode, sidebarHash)
-	m.mainScreen.SetStatusPane(statusPaneHeight, m.renderStatusPaneElement(), statusHash)
+	m.mainScreen.statusSpinner.Set(m.cfg.UI.Spinner, statusLine, m.busy.transcriptActive(), m.palette)
+	statusNode := ui.Node(ui.AsNode(ui.VisibleElement{}))
+	if m.busy.transcriptActive() {
+		statusNode = m.mainScreen.statusSpinner
+	}
+	m.mainScreen.SetStatusPane(statusPaneHeight, statusNode, statusHash)
 	m.composerCursorDirty = false
 }
 
@@ -188,11 +195,21 @@ func (v *mainScreenView) InvalidateTranscript() { v.transcript.Invalidate() }
 func (v *mainScreenView) InvalidateComposer()   { v.composer.Invalidate() }
 func (v *mainScreenView) InvalidateSidebar()    { v.sidebar.MarkLayoutDirty() }
 func (v *mainScreenView) InvalidateStatusPane() { v.statusPane.MarkLayoutDirty() }
-func (v *mainScreenView) SyncComposerBlinkTimer(root *ui.Root) {
+func (v *mainScreenView) SyncTimers(root *ui.Root) {
+	if v == nil {
+		return
+	}
 	v.composer.SyncBlinkTimer(root)
+	ui.SyncNodeTimers(root, v.root)
 }
-func (v *mainScreenView) HandleComposerTimer(event ui.TimerEvent) bool {
-	return v.composer.HandleTimer(event)
+func (v *mainScreenView) HandleTimer(event ui.TimerEvent) bool {
+	if v == nil {
+		return false
+	}
+	if v.composer.HandleTimer(event) {
+		return true
+	}
+	return ui.HandleNodeTimer(v.root, event)
 }
 func (v *mainScreenView) ComposerDirty() bool { return v.composer.Dirty() }
 func (v *mainScreenView) ComposerAreaHeight() int {

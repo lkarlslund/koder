@@ -49,7 +49,6 @@ type promptDoneMsg struct {
 	err    error
 }
 
-type spinnerTickMsg struct{}
 type execEventMsg struct {
 	chatID int64
 	seq    uint64
@@ -75,34 +74,12 @@ const (
 	composerInputHeight = 1
 )
 
-type spinnerModel struct {
-	active bool
-	frame  int
-}
-
-func (s *spinnerModel) start() {
-	s.active = true
-}
-
-func (s *spinnerModel) stop() {
-	s.active = false
-	s.frame = 0
-}
-
-func (s *spinnerModel) tick() {
-	if !s.active {
-		return
-	}
-	s.frame++
-}
-
 type busyModel struct {
 	active          bool
 	scope           busyScope
 	status          string
 	transcriptPhase transcriptBusyPhase
 	runningTools    int
-	spinner         spinnerModel
 }
 
 type transcriptBusyPhase int
@@ -121,11 +98,6 @@ func (b *busyModel) start(scope busyScope, status string) {
 	b.status = status
 	b.transcriptPhase = transcriptBusyPhaseNone
 	b.runningTools = 0
-	if scope == busyScopeNone {
-		b.spinner.stop()
-		return
-	}
-	b.spinner.start()
 }
 
 func (b *busyModel) updateStatus(status string) {
@@ -138,11 +110,10 @@ func (b *busyModel) stop() {
 	b.status = ""
 	b.transcriptPhase = transcriptBusyPhaseNone
 	b.runningTools = 0
-	b.spinner.stop()
 }
 
 func (b busyModel) transcriptActive() bool {
-	return b.active && b.scope == busyScopeTranscript && b.spinner.active
+	return b.active && b.scope == busyScopeTranscript
 }
 
 func (b busyModel) sidebarActive() bool {
@@ -828,19 +799,6 @@ func (m App) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 		}
 		_ = m.bouncyBalls.StepAt(msg.At, max(0, m.width), max(0, m.height))
 		return m, nil
-	case spinnerTickMsg:
-		if !m.shouldAnimateSpinner() {
-			return m, nil
-		}
-		m.busy.spinner.tick()
-		if m.hasPreferencesDialog() {
-			m.preferences.Tick()
-			m.invalidateMainSurface()
-		}
-		if m.pendingAssistantSpinnerVisible() {
-			m.refreshTranscriptForPendingTurn()
-		}
-		return m, ui.Batch(spinnerTickCmd(), m.syncWindowTitleCmd())
 	case execEventMsg:
 		if msg.seq != m.execSubscriptionSeq || msg.chatID != m.execSubscriptionChatID {
 			return m, nil
@@ -865,7 +823,7 @@ func (m App) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 		}
 		m.activeEventStream = msg.events != nil
 		m.startWaitingForLLM()
-		return m, ui.Batch(nextEventCmd(m.currentChat.ID, msg.events), m.spinnerCmdIfNeeded(), m.syncWindowTitleCmd())
+		return m, ui.Batch(nextEventCmd(m.currentChat.ID, msg.events), m.syncWindowTitleCmd())
 	case runPromptMsg:
 		m.resetPendingAssistantState()
 		m.invalidateBodyCache()
@@ -904,7 +862,7 @@ func (m App) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 		m.syncContextFromChat()
 		m.ensureContextEstimateFromState()
 		m.startWaitingForLLM()
-		cmds := []ui.Cmd{m.spinnerCmdIfNeeded(), m.refreshExecSubscriptionCmd(), m.syncWindowTitleCmd()}
+		cmds := []ui.Cmd{m.refreshExecSubscriptionCmd(), m.syncWindowTitleCmd()}
 		if msg.events != nil {
 			cmds = append(cmds, nextEventCmd(msg.chat.ID, msg.events))
 		}
@@ -977,7 +935,7 @@ func (m App) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 				m.appendLocalUserPrompt(msg.followupPrompt, nil, nil)
 			}
 			m.startWaitingForLLM()
-			return m, ui.Batch(reload, m.promptCmd(m.beginActiveOperation(), msg.followupPrompt, nil, nil), m.spinnerCmdIfNeeded(), m.syncWindowTitleCmd())
+			return m, ui.Batch(reload, m.promptCmd(m.beginActiveOperation(), msg.followupPrompt, nil, nil), m.syncWindowTitleCmd())
 		case bangFollowupQueue, bangFollowupSteer:
 			kind := domain.QueuedInputKindQueued
 			if msg.followupMode == bangFollowupSteer {
@@ -1002,9 +960,9 @@ func (m App) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 			return m, ui.Batch(reload, m.refreshExecSubscriptionCmd(), m.syncWindowTitleCmd())
 		}
 	case kickoffPromptMsg:
-		return m, ui.Batch(m.promptCmd(m.beginActiveOperation(), msg.Prompt, msg.Attachments, msg.References), m.spinnerCmdIfNeeded(), m.syncWindowTitleCmd())
+		return m, ui.Batch(m.promptCmd(m.beginActiveOperation(), msg.Prompt, msg.Attachments, msg.References), m.syncWindowTitleCmd())
 	case queuedContinueDispatchMsg:
-		return m, ui.Batch(m.continueCmd(m.beginActiveOperation()), m.spinnerCmdIfNeeded(), m.syncWindowTitleCmd())
+		return m, ui.Batch(m.continueCmd(m.beginActiveOperation()), m.syncWindowTitleCmd())
 	case queuePersistMsg:
 		if msg.err != nil {
 			m.stopBusy()
@@ -1608,7 +1566,7 @@ func (m *App) handleMainWindowKey(msg ui.KeyMsg) (bool, ui.Cmd) {
 			return true, m.syncWindowTitleCmd()
 		}
 		m.startWaitingForLLM()
-		return true, ui.Batch(m.continueCmd(m.beginActiveOperation()), m.spinnerCmdIfNeeded())
+		return true, m.continueCmd(m.beginActiveOperation())
 	case "shift+enter", "alt+enter":
 		m.composer.InsertRune('\n')
 		m.updateComposerMenus()
@@ -2138,11 +2096,6 @@ func (m *App) invalidatePendingTranscriptFrame() {
 	}
 }
 
-func (m *App) pendingAssistantSpinnerVisible() bool {
-	pending := m.activePendingAssistant()
-	return strings.TrimSpace(pending.Text) == "" && strings.TrimSpace(pending.Reasoning) != ""
-}
-
 func (m *App) prepareFrame() {
 	if m.pendingTranscriptFrameDirty {
 		m.pendingTranscriptFrameDirty = false
@@ -2364,10 +2317,9 @@ func (m *App) renderStatusPaneElement() ui.Node {
 	if !m.busy.transcriptActive() {
 		return ui.AsNode(ui.VisibleElement{})
 	}
-	return ui.AsNode(ui.ActivityIndicator{
-		Indicator: ui.WorkingIndicatorLine(m.workingIndicator(), m.busy.statusOrDefault("Working ...")),
-		Palette:   m.palette,
-	})
+	spinner := &ui.Spinner{}
+	spinner.Set(m.cfg.UI.Spinner, m.busy.statusOrDefault("Working ..."), true, m.palette)
+	return spinner
 }
 
 func (m *App) statusPaneHeight() int {
@@ -2486,7 +2438,7 @@ func (m *App) renderSidebar() string {
 		if m.busy.scope == busyScopeTranscript {
 			status = m.transcriptBusyStatus()
 		}
-		lines = append(lines, fmt.Sprintf("Status %s %s", m.workingIndicator(), status))
+		lines = append(lines, fmt.Sprintf("Status %s", status))
 	} else {
 		lines = append(lines, fmt.Sprintf("Status %s", status))
 	}
@@ -3259,11 +3211,7 @@ func (m App) pendingAssistantIndicatorLine() string {
 	if strings.TrimSpace(pending.Reasoning) == "" {
 		return ""
 	}
-	indicator := m.workingIndicator()
-	if strings.TrimSpace(indicator) == "" {
-		indicator = ui.SpinnerFrame(m.cfg.UI.Spinner, 0)
-	}
-	return ui.WorkingIndicatorLine(indicator, m.transcriptBusyStatus())
+	return m.transcriptBusyStatus()
 }
 
 func (m *App) reindexTranscriptControllers() {
@@ -3586,10 +3534,9 @@ func (m *App) renderTranscriptActivityElement() ui.Node {
 	if !m.busy.transcriptActive() {
 		return nil
 	}
-	return ui.AsNode(ui.ActivityIndicator{
-		Indicator: ui.WorkingIndicatorLine(m.workingIndicator(), m.transcriptBusyStatus()),
-		Palette:   m.palette,
-	})
+	spinner := &ui.Spinner{}
+	spinner.Set(m.cfg.UI.Spinner, m.transcriptBusyStatus(), true, m.palette)
+	return spinner
 }
 
 func (m *App) sessionUsageSummary(sessionID int64) (domain.Usage, bool) {
@@ -4819,7 +4766,8 @@ func (m *App) hasSnapshotChatState() bool {
 		len(m.currentSnapshot.Messages) > 0 ||
 		len(m.currentSnapshot.Parts) > 0 ||
 		len(m.currentSnapshot.Approvals) > 0 ||
-		len(m.currentSnapshot.QueuedInputs) > 0
+		len(m.currentSnapshot.QueuedInputs) > 0 ||
+		m.hasSnapshotPendingAssistant()
 }
 
 func (m *App) hasSnapshotPendingAssistant() bool {
@@ -5160,11 +5108,11 @@ func (m *App) handleLocalCommand(prompt string) (ui.Model, ui.Cmd, bool) {
 	case trimmed == "/new":
 		m.resetComposerInput()
 		m.startBusy(busyScopeSidebar, "Creating session…")
-		return m, ui.Batch(m.newSessionCmd(), m.spinnerCmdIfNeeded()), true
+		return m, m.newSessionCmd(), true
 	case trimmed == "/resume":
 		m.resetComposerInput()
 		m.startBusy(busyScopeSidebar, "Loading sessions…")
-		return m, ui.Batch(m.sessionPickerCmd(), m.spinnerCmdIfNeeded()), true
+		return m, m.sessionPickerCmd(), true
 	case trimmed == "/quit":
 		m.resetComposerInput()
 		model, cmd := m.quit()
@@ -5177,7 +5125,7 @@ func (m *App) handleLocalCommand(prompt string) (ui.Model, ui.Cmd, bool) {
 		}
 		title := fmt.Sprintf("Chat %d", len(m.chats)+1)
 		m.startBusy(busyScopeSidebar, "Creating chat…")
-		return m, ui.Batch(m.createChatCmd(m.currentSession.ID, domain.WorkflowRoleGeneral, title), m.spinnerCmdIfNeeded()), true
+		return m, m.createChatCmd(m.currentSession.ID, domain.WorkflowRoleGeneral, title), true
 	case trimmed == "/chat next":
 		m.resetComposerInput()
 		return m, m.switchChatByDelta(1), true
@@ -5197,7 +5145,7 @@ func (m *App) handleLocalCommand(prompt string) (ui.Model, ui.Cmd, bool) {
 	case trimmed == "/compact":
 		m.resetComposerInput()
 		m.startBusy(busyScopeTranscript, "Compacting session...")
-		return m, ui.Batch(m.compactCmd(m.beginActiveOperation()), m.spinnerCmdIfNeeded()), true
+		return m, m.compactCmd(m.beginActiveOperation()), true
 	case trimmed == "/connect", trimmed == "/disconnect", trimmed == "/provider":
 		m.resetComposerInput()
 		m.openProviderDialog()
@@ -5237,7 +5185,7 @@ func (m *App) handleLocalCommand(prompt string) (ui.Model, ui.Cmd, bool) {
 	case trimmed == "/preferences":
 		m.resetComposerInput()
 		m.openPreferencesDialog()
-		return m, ui.Batch(spinnerTickCmd(), m.syncWindowTitleCmd()), true
+		return m, m.syncWindowTitleCmd(), true
 	case trimmed == "/tools":
 		m.resetComposerInput()
 		m.openToolsDialog()
@@ -5253,7 +5201,7 @@ func (m *App) handleLocalCommand(prompt string) (ui.Model, ui.Cmd, bool) {
 			return m, m.syncWindowTitleCmd(), true
 		}
 		m.startBusy(busyScopeSidebar, "Refreshing project instructions…")
-		return m, ui.Batch(m.agentsRefreshCmd(m.currentSession.ID), m.spinnerCmdIfNeeded()), true
+		return m, m.agentsRefreshCmd(m.currentSession.ID), true
 	case trimmed == "/fork":
 		m.resetComposerInput()
 		if m.currentSession.ID == 0 {
@@ -5261,7 +5209,7 @@ func (m *App) handleLocalCommand(prompt string) (ui.Model, ui.Cmd, bool) {
 			return m, m.syncWindowTitleCmd(), true
 		}
 		m.startBusy(busyScopeSidebar, fmt.Sprintf("Forking session %d…", m.currentSession.ID))
-		return m, ui.Batch(m.forkSessionCmd(m.currentSession.ID), m.spinnerCmdIfNeeded()), true
+		return m, m.forkSessionCmd(m.currentSession.ID), true
 	case strings.HasPrefix(trimmed, "/approve "):
 		id, err := strconv.ParseInt(strings.TrimSpace(strings.TrimPrefix(trimmed, "/approve")), 10, 64)
 		if err != nil {
@@ -5270,7 +5218,7 @@ func (m *App) handleLocalCommand(prompt string) (ui.Model, ui.Cmd, bool) {
 		}
 		m.resetComposerInput()
 		m.startBusy(busyScopeTranscript, fmt.Sprintf("Approving approval %d…", id))
-		return m, ui.Batch(m.approveCmd(m.beginActiveOperation(), id), m.spinnerCmdIfNeeded()), true
+		return m, m.approveCmd(m.beginActiveOperation(), id), true
 	case strings.HasPrefix(trimmed, "/deny "):
 		id, err := strconv.ParseInt(strings.TrimSpace(strings.TrimPrefix(trimmed, "/deny")), 10, 64)
 		if err != nil {
@@ -5279,7 +5227,7 @@ func (m *App) handleLocalCommand(prompt string) (ui.Model, ui.Cmd, bool) {
 		}
 		m.resetComposerInput()
 		m.startBusy(busyScopeSidebar, fmt.Sprintf("Denying approval %d…", id))
-		return m, ui.Batch(m.denyCmd(m.beginActiveOperation(), id), m.spinnerCmdIfNeeded()), true
+		return m, m.denyCmd(m.beginActiveOperation(), id), true
 	case strings.HasPrefix(trimmed, "/"):
 		m.status = fmt.Sprintf("unknown command: %s", trimmed)
 		return m, nil, true
@@ -5306,7 +5254,7 @@ func (m *App) switchChatByDelta(delta int) ui.Cmd {
 	}
 	next := m.chats[nextIdx]
 	m.startBusy(busyScopeSidebar, fmt.Sprintf("Switching to chat %d…", next.ID))
-	return ui.Batch(m.loadChatCmd(next.SessionID, next.ID), m.spinnerCmdIfNeeded())
+	return m.loadChatCmd(next.SessionID, next.ID)
 }
 
 func (m App) approvalPermissionProfileCmd(ctx context.Context, approvalID int64, profile string) ui.Cmd {
@@ -6835,13 +6783,6 @@ func (m App) recordEvent(chatID int64, evt domain.Event) {
 	m.debug.RecordEvent(sessionID, evt)
 }
 
-func (m *App) spinnerCmdIfNeeded() ui.Cmd {
-	if !m.busy.spinner.active {
-		return nil
-	}
-	return spinnerTickCmd()
-}
-
 func (b busyModel) scopeOrDefault(fallback busyScope) busyScope {
 	if b.scope != busyScopeNone {
 		return b.scope
@@ -6869,10 +6810,6 @@ func (m App) statusOrIdle() string {
 		return "Idle"
 	}
 	return status
-}
-
-func (m *App) shouldAnimateSpinner() bool {
-	return m.busy.spinner.active || m.hasPreferencesDialog()
 }
 
 func (m *App) canSendPrompt() (bool, string) {
@@ -6914,13 +6851,6 @@ func (m App) shouldOpenConnectDialogForSendFailure() bool {
 	return false
 }
 
-func (m *App) workingIndicator() string {
-	if !m.busy.spinner.active {
-		return ""
-	}
-	return ui.SpinnerFrame(m.cfg.UI.Spinner, m.busy.spinner.frame)
-}
-
 func (m App) windowTitle() string {
 	title := strings.TrimSpace(m.currentSession.Title)
 	switch {
@@ -6929,13 +6859,6 @@ func (m App) windowTitle() string {
 		title = fmt.Sprintf("Session #%d", m.currentSession.ID)
 	default:
 		title = "New Session"
-	}
-	if m.busy.spinner.active {
-		spinner := ui.SpinnerFrame(m.cfg.UI.Spinner, m.busy.spinner.frame)
-		if strings.TrimSpace(spinner) == "" {
-			spinner = ui.SpinnerFrame(config.Default().UI.Spinner, 0)
-		}
-		return fmt.Sprintf("%sK %s", spinner, title)
 	}
 	return fmt.Sprintf("K %s", title)
 }
@@ -7389,10 +7312,10 @@ func (m *App) handleSessionDialogKey(msg ui.KeyMsg) ui.Cmd {
 	switch action.Kind {
 	case dialogs.SessionDialogActionSelect:
 		m.startBusy(busyScopeSidebar, fmt.Sprintf("Resuming session %d…", action.SessionID))
-		return ui.Batch(m.loadSessionCmd(action.SessionID), m.spinnerCmdIfNeeded())
+		return m.loadSessionCmd(action.SessionID)
 	case dialogs.SessionDialogActionCancel:
 		m.startBusy(busyScopeSidebar, "Creating session…")
-		return ui.Batch(m.newSessionCmd(), m.spinnerCmdIfNeeded())
+		return m.newSessionCmd()
 	default:
 		return nil
 	}
@@ -7672,24 +7595,24 @@ func (m *App) handleApprovalDialogAction(action dialogs.ApprovalDialogAction) ui
 	switch action.Kind {
 	case dialogs.ApprovalDialogActionApproveOnce:
 		m.startBusy(busyScopeTranscript, fmt.Sprintf("Approving approval %d…", item.ID))
-		return ui.Batch(m.approveCmd(m.beginActiveOperation(), item.ID), m.spinnerCmdIfNeeded())
+		return m.approveCmd(m.beginActiveOperation(), item.ID)
 	case dialogs.ApprovalDialogActionApproveAllTool:
 		m.startBusy(busyScopeTranscript, fmt.Sprintf("Approving all %s commands…", approvalToolScopeLabel(item.Tool)))
 		return ui.Batch(m.approveWithRuleCmd(m.beginActiveOperation(), item.ID, domain.PermissionOverride{
 			Tool:    item.Tool,
 			Pattern: "*",
 			Action:  domain.PermissionModeAllow,
-		}), m.spinnerCmdIfNeeded())
+		}))
 	case dialogs.ApprovalDialogActionApproveMatching:
 		m.startBusy(busyScopeTranscript, fmt.Sprintf("Approving matching %s commands…", approvalToolScopeLabel(item.Tool)))
 		return ui.Batch(m.approveWithRuleCmd(m.beginActiveOperation(), item.ID, domain.PermissionOverride{
 			Tool:    item.Tool,
 			Pattern: approvalPatternScope(item.Tool, m.approvalToolRun(item).PreviewText()),
 			Action:  domain.PermissionModeAllow,
-		}), m.spinnerCmdIfNeeded())
+		}))
 	case dialogs.ApprovalDialogActionDeny:
 		m.startBusy(busyScopeSidebar, fmt.Sprintf("Denying approval %d…", item.ID))
-		return ui.Batch(m.denyCmd(m.beginActiveOperation(), item.ID), m.spinnerCmdIfNeeded())
+		return m.denyCmd(m.beginActiveOperation(), item.ID)
 	case dialogs.ApprovalDialogActionPermissions:
 		m.openApprovalPermissionsPicker()
 		return m.syncWindowTitleCmd()
@@ -7899,7 +7822,7 @@ func (m *App) syncComposerVisibility() {
 		m.invalidateFooterCursor()
 	}
 	if main := m.ensureMainScreenView(); main != nil {
-		main.SyncComposerBlinkTimer(m.ensureUIRoot())
+		main.SyncTimers(m.ensureUIRoot())
 	}
 }
 
@@ -7915,7 +7838,7 @@ func (m *App) syncComposerFocusFromMainScreen(main *mainScreenView) {
 	}
 	if before != m.composer.Focused() {
 		m.invalidateFooterCursor()
-		main.SyncComposerBlinkTimer(m.ensureUIRoot())
+		main.SyncTimers(m.ensureUIRoot())
 	}
 }
 
@@ -7947,7 +7870,7 @@ func (m *App) buildTranscriptItems() []ui.TranscriptItem {
 
 func (m *App) withRootTimers(cmd ui.Cmd) ui.Cmd {
 	if main := m.ensureMainScreenView(); main != nil {
-		main.SyncComposerBlinkTimer(m.ensureUIRoot())
+		main.SyncTimers(m.ensureUIRoot())
 	}
 	animationCmd := m.bouncyBalls.TickCmd()
 	timerCmd := m.rootTimerCmd()
@@ -9008,7 +8931,7 @@ func (m *App) submitPickerSelection(value string) (ui.Model, ui.Cmd) {
 		m.closePicker()
 		if approvalID > 0 {
 			m.startBusy(busyScopeTranscript, fmt.Sprintf("Re-evaluating approval %d with %s…", approvalID, permission.DisplayName(value)))
-			return m, ui.Batch(m.approvalPermissionProfileCmd(m.beginActiveOperation(), approvalID, value), m.spinnerCmdIfNeeded(), m.syncWindowTitleCmd())
+			return m, ui.Batch(m.approvalPermissionProfileCmd(m.beginActiveOperation(), approvalID, value), m.syncWindowTitleCmd())
 		}
 		if err := m.selectPermissionProfile(value); err != nil {
 			m.status = err.Error()
@@ -9238,12 +9161,6 @@ func (m *App) applyPreferences(next dialogs.PreferencesValues, save bool) (ui.Cm
 		}
 	}
 	return cmd, nil
-}
-
-func spinnerTickCmd() ui.Cmd {
-	return ui.Tick(250*time.Millisecond, func(time.Time) ui.Msg {
-		return spinnerTickMsg{}
-	})
 }
 
 func waitForExecEventCmd(events <-chan execruntime.Event, chatID int64, seq uint64) ui.Cmd {
