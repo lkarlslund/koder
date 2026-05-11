@@ -3990,7 +3990,7 @@ func TestAppendingPromptPreservesRetainedTranscriptPrefix(t *testing.T) {
 	}
 }
 
-func TestUpdateLoadPreservesMessageRecordIdentityForSameChat(t *testing.T) {
+func TestUpdateLoadRefreshesCurrentSnapshotForSameChat(t *testing.T) {
 	m := App{composer: textarea.New(), palette: theme.Default().Palette, width: 80, height: 24}
 	first := m.UpdateLoad(loadMsg{
 		current:  domain.Session{ID: 4},
@@ -4000,11 +4000,9 @@ func TestUpdateLoadPreservesMessageRecordIdentityForSameChat(t *testing.T) {
 			10: {{ID: 11, MessageID: 10, Kind: domain.PartKindText, Payload: domain.TextPayload{Text: "first"}}},
 		},
 	})
-	if first.chatState == nil || len(first.chatState.Messages()) != 1 {
-		t.Fatalf("expected loaded chat state")
+	if len(first.currentSnapshot.Messages) != 1 {
+		t.Fatalf("expected loaded snapshot")
 	}
-	record := first.chatState.Messages()[0]
-	partRecord := record.Parts[0]
 
 	second := first.UpdateLoad(loadMsg{
 		current:  domain.Session{ID: 4},
@@ -4014,14 +4012,14 @@ func TestUpdateLoadPreservesMessageRecordIdentityForSameChat(t *testing.T) {
 			10: {{ID: 11, MessageID: 10, Kind: domain.PartKindText, Payload: domain.TextPayload{Text: "updated"}}},
 		},
 	})
-	if got := second.chatState.Messages()[0]; got != record {
-		t.Fatal("expected message record identity to be preserved")
+	if len(second.currentSnapshot.Messages) != 1 {
+		t.Fatalf("expected refreshed snapshot")
 	}
-	if got := second.chatState.Messages()[0].Parts[0]; got != partRecord {
-		t.Fatal("expected part record identity to be preserved")
-	}
-	if got := second.chatState.Messages()[0].Message.Summary; got != "updated" {
+	if got := second.currentSnapshot.Messages[0].Summary; got != "updated" {
 		t.Fatalf("summary = %q", got)
+	}
+	if got := second.currentSnapshot.Parts[10]; len(got) != 1 || got[0].Text() != "updated" {
+		t.Fatalf("parts = %#v", got)
 	}
 }
 

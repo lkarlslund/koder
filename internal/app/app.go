@@ -1981,18 +1981,12 @@ func (m *App) applyEvent(evt domain.Event) {
 	switch evt.Kind {
 	case domain.EventKindMessageDelta:
 		m.appendPendingAssistantText(evt.Text)
-		if m.chatState != nil {
-			m.chatState.AppendPendingAssistantText(evt.Text)
-		}
 		m.refreshContextFromActiveChat()
 		m.setTranscriptBusyPhase(transcriptBusyPhaseResponse)
 		m.pendingTranscriptFrameDirty = true
 		m.invalidatePendingTranscriptFrame()
 	case domain.EventKindReasoning:
 		m.appendPendingAssistantReasoning(evt.Text)
-		if m.chatState != nil {
-			m.chatState.AppendPendingAssistantReasoning(evt.Text)
-		}
 		m.refreshContextFromActiveChat()
 		m.setTranscriptBusyPhase(transcriptBusyPhaseThoughts)
 		m.pendingTranscriptFrameDirty = true
@@ -2027,12 +2021,6 @@ func (m *App) applyEvent(evt domain.Event) {
 			m.currentChat.LastKnownContextTokens = contextTokens
 			m.currentChat.ContextTokensKnown = true
 			m.setCurrentSnapshotContextAnchor(contextTokens, true)
-			if m.chatState != nil {
-				m.chatState.UpdateChat(func(chat *domain.Chat) {
-					chat.LastKnownContextTokens = contextTokens
-					chat.ContextTokensKnown = true
-				})
-			}
 			for i := range m.chats {
 				if m.chats[i].ID == m.currentChat.ID {
 					m.chats[i].LastKnownContextTokens = m.currentChat.LastKnownContextTokens
@@ -2125,9 +2113,6 @@ func (m *App) clearPendingAssistantTurn() {
 		return
 	}
 	m.resetPendingAssistantState()
-	if m.chatState != nil {
-		m.chatState.ClearPendingAssistant()
-	}
 	m.pendingTranscriptFrameDirty = false
 	m.refreshContextFromActiveChat()
 	m.refreshTranscriptForPendingTurn()
@@ -3304,7 +3289,14 @@ func (m *App) transcriptBlockForController(item transcriptItemController) transc
 }
 
 func (m *App) appendMessageRecordTranscriptItem(record *appstate.MessageRecord) bool {
-	if record == nil || m.transcriptDirty || len(m.transcriptItems) == 0 {
+	if record == nil {
+		return false
+	}
+	return m.appendTranscriptBlock(transcriptBlock{Kind: transcriptBlockMessage, Message: record.Message, Parts: partValues(record.PartRecords()), Record: record})
+}
+
+func (m *App) appendTranscriptBlock(block transcriptBlock) bool {
+	if block.Kind != transcriptBlockMessage || block.Message.ID == 0 || m.transcriptDirty || len(m.transcriptItems) == 0 {
 		return false
 	}
 	retained := m.ensureRetainedTranscript()
@@ -3314,13 +3306,12 @@ func (m *App) appendMessageRecordTranscriptItem(record *appstate.MessageRecord) 
 	if _, ok := m.transcriptItems[len(m.transcriptItems)-1].(*placeholderTranscriptItem); ok {
 		return false
 	}
-	block := transcriptBlock{Kind: transcriptBlockMessage, Message: record.Message, Parts: partValues(record.PartRecords()), Record: record}
 	if !block.Pending && !m.assistantMessageShouldExist(block.Message, block.Parts) && block.Message.Role == domain.MessageRoleAssistant {
 		return false
 	}
 	if block.Message.Role == domain.MessageRoleAssistant && m.pendingTranscriptIndex >= 0 && m.pendingTranscriptIndex < len(m.transcriptItems) {
 		gap := m.transcriptItems[m.pendingTranscriptIndex].GapBefore()
-		item := newAssistantMessageTranscriptItem(m.transcriptBlockIdentityKey(block), gap, record, m.showReasoning, m.showSystem)
+		item := m.transcriptControllerFromBlock(nil, block, gap)
 		item.Refresh(m)
 		m.transcriptItems[m.pendingTranscriptIndex] = item
 		retained.Replace(m.pendingTranscriptIndex, item.UIItem())
@@ -3333,12 +3324,7 @@ func (m *App) appendMessageRecordTranscriptItem(record *appstate.MessageRecord) 
 		gap = renderedSeparatorHeight(m.transcriptSeparator(prev, block))
 	}
 	var item transcriptItemController
-	switch block.Message.Role {
-	case domain.MessageRoleUser:
-		item = newUserMessageTranscriptItem(m.transcriptBlockIdentityKey(block), gap, record)
-	default:
-		item = newAssistantMessageTranscriptItem(m.transcriptBlockIdentityKey(block), gap, record, m.showReasoning, m.showSystem)
-	}
+	item = m.transcriptControllerFromBlock(nil, block, gap)
 	item.Refresh(m)
 	m.transcriptItems = append(m.transcriptItems, item)
 	retained.Add(item.UIItem())
@@ -3573,11 +3559,10 @@ func (m *App) syncContextFromChat() {
 		m.contextTokensEstimated = usage.Estimated
 		return
 	}
-	state := m.ensureChatState()
-	if state == nil || state.Chat().LastKnownContextTokens <= 0 {
+	usage := m.currentSnapshotContextUsage()
+	if usage.TotalTokens <= 0 {
 		return
 	}
-	usage := state.CurrentContextSize()
 	m.contextTokens = usage.TotalTokens
 	m.contextTokensEstimated = usage.Estimated
 }
@@ -3603,12 +3588,7 @@ func (m *App) ensureContextEstimateFromState() {
 	if m.currentChat.LastKnownContextTokens <= 0 {
 		m.currentChat.LastKnownContextTokens = estimated
 		m.currentChat.ContextTokensKnown = false
-		if m.chatState != nil {
-			m.chatState.UpdateChat(func(chat *domain.Chat) {
-				chat.LastKnownContextTokens = estimated
-				chat.ContextTokensKnown = false
-			})
-		}
+		m.setCurrentSnapshotContextAnchor(estimated, false)
 		for idx := range m.chats {
 			if m.chats[idx].ID == m.currentChat.ID {
 				m.chats[idx].LastKnownContextTokens = estimated
@@ -3620,9 +3600,6 @@ func (m *App) ensureContextEstimateFromState() {
 }
 
 func (m *App) currentPendingAssistantContextTokens() int {
-	if m.chatState != nil {
-		return m.chatState.PendingAssistantContextTokens()
-	}
 	pending := m.activePendingAssistant()
 	total := 0
 	if text := strings.TrimSpace(pending.Reasoning); text != "" {
@@ -3634,6 +3611,36 @@ func (m *App) currentPendingAssistantContextTokens() int {
 	return total
 }
 
+func (m *App) currentSnapshotContextUsage() domain.ContextUsage {
+	tailEstimate, anchored := sessionctx.EstimateTailTokens(m.activeMessages(), m.activeParts())
+	if tailEstimate < 0 {
+		tailEstimate = 0
+	}
+	liveTokens := m.currentPendingAssistantContextTokens()
+	if liveTokens < 0 {
+		liveTokens = 0
+	}
+	anchor := m.currentChat.LastKnownContextTokens
+	if anchor < 0 {
+		anchor = 0
+	}
+	usage := domain.ContextUsage{
+		AnchorTokens: anchor,
+		TailTokens:   tailEstimate,
+		LiveTokens:   liveTokens,
+		TotalTokens:  anchor + tailEstimate + liveTokens,
+		Estimated:    !m.currentChat.ContextTokensKnown || tailEstimate > 0 || liveTokens > 0,
+	}
+	if !anchored && !m.currentChat.ContextTokensKnown {
+		usage.Estimated = true
+	}
+	if usage.TotalTokens <= 0 && m.contextTokens > 0 {
+		usage.TotalTokens = m.contextTokens
+		usage.Estimated = m.contextTokensEstimated
+	}
+	return usage
+}
+
 func (m *App) refreshContextFromActiveChat() {
 	if m.currentRuntime != nil {
 		usage := m.currentRuntime.ContextSize()
@@ -3643,13 +3650,11 @@ func (m *App) refreshContextFromActiveChat() {
 			return
 		}
 	}
-	if m.chatState != nil {
-		usage := m.chatState.CurrentContextSize()
-		if usage.TotalTokens > 0 {
-			m.contextTokens = usage.TotalTokens
-			m.contextTokensEstimated = usage.Estimated
-			return
-		}
+	usage := m.currentSnapshotContextUsage()
+	if usage.TotalTokens > 0 {
+		m.contextTokens = usage.TotalTokens
+		m.contextTokensEstimated = usage.Estimated
+		return
 	}
 	pending := m.currentPendingAssistantContextTokens()
 	if pending <= 0 {
@@ -3679,33 +3684,8 @@ func (m App) currentContextMetrics() (sessionctx.Metrics, bool) {
 	usage := domain.ContextUsage{}
 	if m.currentRuntime != nil {
 		usage = m.currentRuntime.ContextSize()
-	} else if m.chatState != nil {
-		usage = m.chatState.CurrentContextSize()
-	} else if m.currentChat.LastKnownContextTokens > 0 {
-		tailEstimate, anchored := sessionctx.EstimateTailTokens(m.activeMessages(), m.activeParts())
-		if tailEstimate < 0 {
-			tailEstimate = 0
-		}
-		anchor := m.currentChat.LastKnownContextTokens
-		if anchor < 0 {
-			anchor = 0
-		}
-		liveTokens := m.currentPendingAssistantContextTokens()
-		if liveTokens < 0 {
-			liveTokens = 0
-		}
-		usage = domain.ContextUsage{
-			AnchorTokens: anchor,
-			TailTokens:   tailEstimate,
-			LiveTokens:   liveTokens,
-			TotalTokens:  anchor + tailEstimate + liveTokens,
-			Estimated:    !m.currentChat.ContextTokensKnown || tailEstimate > 0 || liveTokens > 0,
-		}
-		if !anchored && !m.currentChat.ContextTokensKnown {
-			usage.Estimated = true
-		}
-	} else if m.contextTokens > 0 {
-		usage = domain.ContextUsage{TotalTokens: m.contextTokens, Estimated: m.contextTokensEstimated}
+	} else {
+		usage = m.currentSnapshotContextUsage()
 	}
 	if usage.TotalTokens <= 0 {
 		return sessionctx.Metrics{}, false
@@ -4718,27 +4698,27 @@ func mapsCloneToolStates(src map[domain.ToolKind]bool) map[domain.ToolKind]bool 
 
 func (m *App) loadChatState(chat domain.Chat, messages []domain.Message, parts map[int64][]domain.Part, approvals []store.Approval) {
 	if chat.ID == 0 && len(messages) == 0 && len(parts) == 0 && len(approvals) == 0 {
-		m.chatState = nil
-		m.chatStateChatID = 0
 		if m.currentRuntime == nil {
 			m.currentSnapshot = chatpkg.Snapshot{}
 		}
 		return
 	}
-	if m.currentRuntime == nil {
-		m.currentSnapshot.Chat = chat
-		m.currentSnapshot.Messages = messages
-		m.currentSnapshot.Parts = parts
-		m.currentSnapshot.Approvals = approvals
+	m.currentSnapshot.Chat = chat
+	m.currentSnapshot.Messages = slices.Clone(messages)
+	m.currentSnapshot.Parts = clonePartsByMessage(parts)
+	m.currentSnapshot.Approvals = slices.Clone(approvals)
+	m.currentChat = chat
+}
+
+func clonePartsByMessage(parts map[int64][]domain.Part) map[int64][]domain.Part {
+	if len(parts) == 0 {
+		return nil
 	}
-	if m.chatState != nil && m.chatStateChatID == chat.ID {
-		m.chatState.MergeLoaded(chat, messages, parts, approvals)
-	} else {
-		m.chatState = appstate.NewChatState(chat, messages, parts, approvals)
+	out := make(map[int64][]domain.Part, len(parts))
+	for messageID, msgParts := range parts {
+		out[messageID] = slices.Clone(msgParts)
 	}
-	m.rebuildChatToolRuns()
-	m.chatStateChatID = chat.ID
-	m.syncChatMirrorsFromState()
+	return out
 }
 
 func (m *App) ensureChatState() *appstate.ChatState {
@@ -4834,6 +4814,20 @@ func (m *App) appendPendingAssistantReasoning(text string) {
 	}
 	pending.Reasoning += text
 	m.currentSnapshot.PendingAssistant = pending
+}
+
+func (m *App) appendCurrentSnapshotMessage(message domain.Message, parts []domain.Part) {
+	if m.currentSnapshot.Chat.ID == 0 && m.currentChat.ID != 0 {
+		m.currentSnapshot.Chat = m.currentChat
+	}
+	m.currentSnapshot.Messages = append(m.currentSnapshot.Messages, message)
+	if len(parts) == 0 {
+		return
+	}
+	if m.currentSnapshot.Parts == nil {
+		m.currentSnapshot.Parts = make(map[int64][]domain.Part)
+	}
+	m.currentSnapshot.Parts[message.ID] = slices.Clone(parts)
 }
 
 func (m *App) syncCurrentSnapshotFromState() {
@@ -5754,13 +5748,12 @@ func (m *App) appendLocalUserPrompt(prompt string, drafts []attachment.Draft, re
 			CreatedAt: now,
 		})
 	}
-	record := m.ensureChatState().AppendMessage(message, parts)
-	m.syncCurrentSnapshotFromState()
-	m.syncChatMirrorsFromState()
+	m.appendCurrentSnapshotMessage(message, parts)
 	if m.debug != nil {
 		m.debug.RecordLifecycle(m.currentSession.ID, "prompt_submitted", prompt, map[string]string{"optimistic": "true"})
 	}
-	if !m.appendUserPromptTranscriptItem(record) {
+	block := transcriptBlock{Kind: transcriptBlockMessage, Message: message, Parts: parts}
+	if !m.appendTranscriptBlock(block) {
 		m.transcriptDirty = true
 	}
 	m.syncContextFromChat()
@@ -5794,9 +5787,7 @@ func (m *App) appendLocalAssistantError(err error) {
 		Body:      body,
 		CreatedAt: now,
 	}}
-	m.ensureChatState().AppendMessage(message, parts)
-	m.syncCurrentSnapshotFromState()
-	m.syncChatMirrorsFromState()
+	m.appendCurrentSnapshotMessage(message, parts)
 	if m.debug != nil {
 		m.debug.RecordLifecycle(m.currentSession.ID, "ui_error_appended", err.Error(), nil)
 	}
@@ -5828,9 +5819,7 @@ func (m *App) appendLocalTranscriptNotice(body, kind, severity string) {
 		Body:      body,
 		CreatedAt: now,
 	}}
-	m.ensureChatState().AppendMessage(message, parts)
-	m.syncCurrentSnapshotFromState()
-	m.syncChatMirrorsFromState()
+	m.appendCurrentSnapshotMessage(message, parts)
 	if m.debug != nil {
 		m.debug.RecordLifecycle(m.currentSession.ID, "ui_notice_appended", body, map[string]string{"kind": kind, "severity": severity})
 	}
@@ -6117,11 +6106,6 @@ func (m *App) applyQueuedInputs(items []domain.QueuedInput) {
 	if m.hasSnapshotChatState() || m.currentRuntime != nil {
 		m.currentSnapshot.QueuedInputs = cloneQueuedInputs(cloned)
 		m.currentSnapshot.Chat.QueuedInputs = cloneQueuedInputs(cloned)
-	}
-	if m.chatState != nil {
-		m.chatState.UpdateChat(func(chat *domain.Chat) {
-			chat.QueuedInputs = cloneQueuedInputs(cloned)
-		})
 	}
 	for idx := range m.chats {
 		if m.chats[idx].ID == m.currentChat.ID {
