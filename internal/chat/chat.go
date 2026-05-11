@@ -642,6 +642,7 @@ func (r *Chat) handleStreamEvent(evt domain.Event) {
 		}
 		r.status = StatusStreamingResponse
 		r.statusText = "Streaming LLM response ..."
+		transcriptChanged = true
 		contextChanged = true
 	case domain.EventKindReasoning:
 		if r.state != nil {
@@ -649,6 +650,7 @@ func (r *Chat) handleStreamEvent(evt domain.Event) {
 		}
 		r.status = StatusStreamingThoughts
 		r.statusText = "Streaming thoughts ..."
+		transcriptChanged = true
 		contextChanged = true
 	case domain.EventKindUsage:
 		if contextTokens, ok := evt.Usage.ContextTokens(); ok {

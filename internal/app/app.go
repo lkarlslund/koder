@@ -936,7 +936,9 @@ func (m App) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 		if !msg.update.Active && msg.update.StatusText == "" {
 			m.stopBusyWithStatus("Idle")
 		}
-		if msg.update.TranscriptChanged || msg.update.QueueChanged || msg.update.ContextChanged {
+		if runtimeUpdateChangesPendingAssistant(msg.update) {
+			m.refreshTranscriptForPendingTurn()
+		} else if msg.update.TranscriptChanged || msg.update.QueueChanged || msg.update.ContextChanged {
 			m.refreshViewport()
 		}
 		return m, ui.Batch(nextRuntimeUpdateCmd(msg.chatID, msg.updates), m.syncWindowTitleCmd())
@@ -4987,6 +4989,18 @@ func (m *App) applyRuntimeSnapshot(snapshot chatpkg.Snapshot) {
 	m.syncUsageFromHistory()
 	m.syncContextFromChat()
 	m.ensureContextEstimateFromState()
+}
+
+func runtimeUpdateChangesPendingAssistant(update chatpkg.Update) bool {
+	if update.Event == nil {
+		return false
+	}
+	switch update.Event.Kind {
+	case domain.EventKindMessageDelta, domain.EventKindReasoning:
+		return true
+	default:
+		return false
+	}
 }
 
 func (m *App) applyRuntimeTelemetryEvent(evt domain.Event) {

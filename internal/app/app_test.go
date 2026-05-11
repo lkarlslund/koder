@@ -2902,6 +2902,52 @@ func TestRuntimeUpdateMsgAppliesRuntimeSnapshot(t *testing.T) {
 	}
 }
 
+func TestRuntimeMessageDeltaRefreshesPendingAssistantTail(t *testing.T) {
+	updates := make(chan chatpkg.Update)
+	m := App{
+		cfg:               config.Default().WithStateDir(t.TempDir()),
+		composer:          textarea.New(),
+		currentRuntime:    &chatpkg.Chat{},
+		currentSnapshot:   chatpkg.Snapshot{Chat: domain.Chat{ID: 2, SessionID: 1}, Parts: map[int64][]domain.Part{}, PendingAssistant: chatpkg.PendingAssistantTurn{Text: "old"}},
+		viewport:          newTranscriptViewport(80, 8),
+		currentSession:    domain.Session{ID: 1, Title: "Session"},
+		currentChat:       domain.Chat{ID: 2, SessionID: 1},
+		width:             80,
+		height:            16,
+		activeEventStream: true,
+	}
+	m.refreshViewport()
+	if !strings.Contains(m.viewport.View(), "old") {
+		t.Fatalf("expected initial pending assistant in viewport, got %q", m.viewport.View())
+	}
+
+	updated, _ := m.Update(runtimeUpdateMsg{
+		chatID: 2,
+		update: chatpkg.Update{
+			Event: &domain.Event{Kind: domain.EventKindMessageDelta, Text: " new"},
+			Snapshot: chatpkg.Snapshot{
+				Session:          domain.Session{ID: 1, Title: "Session"},
+				Chat:             domain.Chat{ID: 2, SessionID: 1},
+				Parts:            map[int64][]domain.Part{},
+				PendingAssistant: chatpkg.PendingAssistantTurn{Text: "old new"},
+				Status:           chatpkg.StatusStreamingResponse,
+				StatusText:       "Streaming LLM response ...",
+				Active:           true,
+			},
+			Active:         true,
+			Status:         chatpkg.StatusStreamingResponse,
+			StatusText:     "Streaming LLM response ...",
+			ContextChanged: true,
+		},
+		updates: updates,
+	})
+	next := updated.(App)
+
+	if !strings.Contains(next.viewport.View(), "old new") {
+		t.Fatalf("expected runtime delta to refresh pending assistant tail, got %q", next.viewport.View())
+	}
+}
+
 func TestRepeatedStreamingRuntimeUpdateDoesNotInvalidateTranscript(t *testing.T) {
 	m := App{
 		cfg:             config.Default().WithStateDir(t.TempDir()),
