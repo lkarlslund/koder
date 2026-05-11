@@ -362,7 +362,11 @@ func TestShouldRefreshDetailsAfterEvent(t *testing.T) {
 		{name: "status", evt: domain.Event{Kind: domain.EventKindStatus}, want: false},
 		{name: "session title", evt: domain.Event{Kind: domain.EventKindSessionTitle}, want: false},
 		{name: "tool call delta", evt: domain.Event{Kind: domain.EventKindToolCallDelta}, want: false},
-		{name: "tool result", evt: domain.Event{Kind: domain.EventKindToolResult}, want: false},
+		{name: "bash tool result", evt: domain.Event{Kind: domain.EventKindToolResult, Tool: domain.ToolKindBash}, want: false},
+		{name: "todo tool result", evt: domain.Event{Kind: domain.EventKindToolResult, Tool: domain.ToolKindTodoUpdateItem}, want: true},
+		{name: "milestone tool result", evt: domain.Event{Kind: domain.EventKindToolResult, Tool: domain.ToolKindMilestoneUpdate}, want: true},
+		{name: "task update", evt: domain.Event{Kind: domain.EventKindTaskUpdate}, want: true},
+		{name: "message done", evt: domain.Event{Kind: domain.EventKindMessageDone}, want: false},
 		{name: "approval ask", evt: domain.Event{Kind: domain.EventKindApprovalAsk}, want: true},
 	}
 	for _, tc := range cases {

@@ -936,12 +936,16 @@ func (m App) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 		if !msg.update.Active && msg.update.StatusText == "" {
 			m.stopBusyWithStatus("Idle")
 		}
+		cmds := []ui.Cmd{nextRuntimeUpdateCmd(msg.chatID, msg.updates), m.syncWindowTitleCmd()}
+		if msg.update.Event != nil && shouldRefreshDetailsAfterEvent(*msg.update.Event) {
+			cmds = append(cmds, m.reloadDetailsCmd())
+		}
 		if runtimeUpdateChangesPendingAssistant(msg.update) {
 			m.refreshTranscriptForPendingTurn()
 		} else if msg.update.TranscriptChanged || msg.update.QueueChanged || msg.update.ContextChanged {
 			m.refreshViewport()
 		}
-		return m, ui.Batch(nextRuntimeUpdateCmd(msg.chatID, msg.updates), m.syncWindowTitleCmd())
+		return m, ui.Batch(cmds...)
 	case runtimeKickMsg:
 		return m, m.syncWindowTitleCmd()
 	case bangCommandMsg:
@@ -1022,22 +1026,28 @@ func (m App) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 	case eventMsg:
 		m.invalidateBodyCache()
 		m.recordEvent(msg.chatID, msg.event)
+		eventForCurrentChat := msg.chatID == 0 || msg.chatID == m.currentChat.ID
 		if msg.chatID == 0 || msg.chatID == m.currentChat.ID {
 			m.applyCurrentChatEvent(msg.event)
 			m.applyEvent(msg.event)
 		}
+		cmds := []ui.Cmd{m.syncWindowTitleCmd()}
+		if eventForCurrentChat && shouldRefreshDetailsAfterEvent(msg.event) {
+			cmds = append(cmds, m.reloadDetailsCmd())
+		}
 		if msg.events != nil {
-			return m, ui.Batch(nextEventCmd(msg.chatID, msg.events), m.syncWindowTitleCmd())
+			cmds = append(cmds, nextEventCmd(msg.chatID, msg.events))
+			return m, ui.Batch(cmds...)
 		}
 		m.activeEventStream = false
 		if msg.chatID == 0 || msg.chatID == m.currentChat.ID {
 			m.stopBusy()
-			return m, m.syncWindowTitleCmd()
+			return m, ui.Batch(cmds...)
 		}
 		if m.chatBusy != nil {
 			delete(m.chatBusy, msg.chatID)
 		}
-		return m, m.syncWindowTitleCmd()
+		return m, ui.Batch(cmds...)
 	case loadMsg:
 		preservePendingAssistant := msg.preserveBusy &&
 			(msg.current.ID == 0 || msg.current.ID == m.currentSession.ID) &&
@@ -2070,6 +2080,9 @@ func shouldRefreshDetailsAfterEvent(evt domain.Event) bool {
 	if evt.Kind == domain.EventKindStatus && strings.EqualFold(strings.TrimSpace(evt.Meta["refresh"]), "details") {
 		return true
 	}
+	if evt.Kind == domain.EventKindToolResult {
+		return isPlanningToolKind(evt.Tool)
+	}
 	switch evt.Kind {
 	case domain.EventKindMessageDelta,
 		domain.EventKindReasoning,
@@ -2078,10 +2091,33 @@ func shouldRefreshDetailsAfterEvent(evt domain.Event) bool {
 		domain.EventKindSessionTitle,
 		domain.EventKindToolCallDelta,
 		domain.EventKindToolStart,
-		domain.EventKindToolResult:
+		domain.EventKindToolResult,
+		domain.EventKindMessageDone,
+		domain.EventKindError:
 		return false
-	default:
+	case domain.EventKindTaskUpdate,
+		domain.EventKindApprovalAsk,
+		domain.EventKindApprovalReply:
 		return true
+	default:
+		return false
+	}
+}
+
+func isPlanningToolKind(kind domain.ToolKind) bool {
+	switch kind {
+	case domain.ToolKindMilestoneList,
+		domain.ToolKindMilestoneAdd,
+		domain.ToolKindMilestoneUpdate,
+		domain.ToolKindMilestonePlan,
+		domain.ToolKindMilestoneWrite,
+		domain.ToolKindTodoList,
+		domain.ToolKindTodoAddItems,
+		domain.ToolKindTodoUpdateItem,
+		domain.ToolKindTodoFetchNext:
+		return true
+	default:
+		return false
 	}
 }
 
