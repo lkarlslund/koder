@@ -1,4 +1,4 @@
-package appstate
+package chat
 
 import (
 	"slices"

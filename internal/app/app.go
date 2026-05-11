@@ -17,7 +17,6 @@ import (
 	"unicode"
 
 	"github.com/lkarlslund/koder/internal/agent"
-	"github.com/lkarlslund/koder/internal/appstate"
 	"github.com/lkarlslund/koder/internal/attachment"
 	chatpkg "github.com/lkarlslund/koder/internal/chat"
 	kclipboard "github.com/lkarlslund/koder/internal/clipboard"
@@ -4775,12 +4774,12 @@ func (m *App) activeQueuedInputs() []domain.QueuedInput {
 	return m.currentChat.QueuedInputs
 }
 
-func (m *App) activePendingAssistant() appstate.PendingAssistantTurn {
+func (m *App) activePendingAssistant() chatpkg.PendingAssistantTurn {
 	return m.currentSnapshot.PendingAssistant
 }
 
 func (m *App) resetPendingAssistantState() {
-	m.currentSnapshot.PendingAssistant = appstate.PendingAssistantTurn{}
+	m.currentSnapshot.PendingAssistant = chatpkg.PendingAssistantTurn{}
 }
 
 func (m *App) appendPendingAssistantText(text string) {

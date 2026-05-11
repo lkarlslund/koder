@@ -19,16 +19,17 @@ const (
 )
 
 type metaRecord struct {
-	SchemaVersion  int    `json:"schema_version"`
-	Encoding       string `json:"encoding"`
-	Backend        string `json:"backend"`
-	NextSessionID  int64  `json:"next_session_id"`
-	NextChatID     int64  `json:"next_chat_id"`
-	NextMessageID  int64  `json:"next_message_id"`
-	NextPartID     int64  `json:"next_part_id"`
-	NextApprovalID int64  `json:"next_approval_id"`
-	NextTaskID     int64  `json:"next_task_id"`
-	NextTodoID     int64  `json:"next_todo_id"`
+	SchemaVersion  int              `json:"schema_version"`
+	Encoding       string           `json:"encoding"`
+	Backend        string           `json:"backend"`
+	NextSessionID  int64            `json:"next_session_id"`
+	NextChatID     int64            `json:"next_chat_id"`
+	NextMessageID  int64            `json:"next_message_id"`
+	NextPartID     int64            `json:"next_part_id"`
+	NextApprovalID int64            `json:"next_approval_id"`
+	NextTaskID     int64            `json:"next_task_id"`
+	NextTodoID     int64            `json:"next_todo_id"`
+	NextIDs        map[string]int64 `json:"next_ids,omitempty"`
 }
 
 func defaultMeta(backend string) metaRecord {
@@ -43,6 +44,7 @@ func defaultMeta(backend string) metaRecord {
 		NextApprovalID: 1,
 		NextTaskID:     1,
 		NextTodoID:     1,
+		NextIDs:        map[string]int64{},
 	}
 }
 
@@ -78,6 +80,18 @@ func formatID(id int64) string {
 
 func formatUnixNanos(t time.Time) string {
 	return fmt.Sprintf("%020d", t.UTC().UnixNano())
+}
+
+func collectionRecordPrefix(namespace string) string {
+	return "collection/" + namespace + "/"
+}
+
+func collectionRecordKey(namespace string, id int64) string {
+	return collectionRecordPrefix(namespace) + formatID(id)
+}
+
+func collectionIndexKey(namespace, name, value string, id int64) string {
+	return "collection-index/" + namespace + "/" + name + "/" + value + "/" + formatID(id)
 }
 
 func parseIDFromSuffix(key, prefix string) (int64, error) {

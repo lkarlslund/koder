@@ -2,15 +2,13 @@ package chat
 
 import (
 	"context"
-	"sync"
-	"testing"
-	"time"
-
-	"github.com/lkarlslund/koder/internal/appstate"
 	"github.com/lkarlslund/koder/internal/attachment"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/reference"
 	"github.com/lkarlslund/koder/internal/store"
+	"sync"
+	"testing"
+	"time"
 )
 
 type runtimeFakeRunner struct {
@@ -162,18 +160,11 @@ func createSessionWithPlan(t *testing.T, st *store.Store) (domain.Session, domai
 
 func newTestChat(t *testing.T, st *store.Store, session domain.Session, chatRecord domain.Chat, runner Runner) *Chat {
 	t.Helper()
-	messages, parts, err := st.PartsForChat(context.Background(), chatRecord.ID)
+	chat, err := Load(context.Background(), st, session, chatRecord, runner, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	approvals, err := st.PendingApprovalsForChat(context.Background(), chatRecord.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	chat, err := New(session, chatRecord, messages, parts, approvals, runner, st, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	t.Cleanup(chat.Close)
 	return chat
 }
 
@@ -366,7 +357,7 @@ func TestRuntimeCancelWhileToolsRunningStagesThenForcesCancel(t *testing.T) {
 	rt := &Chat{
 		session: session,
 		chat:    chat,
-		state:   appstate.NewChatState(chat, nil, nil, nil),
+		state:   NewChatState(chat, nil, nil, nil),
 		status:  StatusRunningTools,
 		active:  true,
 		cancel:  func() { cancelled = true },
@@ -471,5 +462,53 @@ func TestRuntimeCompactionCompletionUpdatesContextImmediately(t *testing.T) {
 		case <-deadline:
 			t.Fatal("timed out waiting for compaction completion update")
 		}
+	}
+}
+
+func TestPersistRemapsOptimisticIDsAndReloadsWithoutDuplicates(t *testing.T) {
+	st := openTestStore(t)
+	session, chatRecord, _ := createSessionWithPlan(t, st)
+	runner := &runtimeFakeRunner{}
+	rt := newTestChat(t, st, session, chatRecord, runner)
+
+	rt.appendOptimisticUserMessage(domain.QueuedInput{
+		ID:        99,
+		Kind:      domain.QueuedInputKindSteer,
+		Text:      "persist me",
+		CreatedAt: time.Now().UTC(),
+	}, session, chatRecord)
+	before := rt.Snapshot()
+	if len(before.Messages) != 1 || before.Messages[0].ID <= 0 {
+		t.Fatalf("unexpected optimistic snapshot: %#v", before.Messages)
+	}
+
+	if err := rt.Persist(context.Background(), st); err != nil {
+		t.Fatal(err)
+	}
+	after := rt.Snapshot()
+	if len(after.Messages) != 1 {
+		t.Fatalf("messages after persist = %#v", after.Messages)
+	}
+	if after.Messages[0].ID == before.Messages[0].ID {
+		t.Fatalf("message ID was not remapped")
+	}
+	if _, ok := after.Parts[after.Messages[0].ID]; !ok {
+		t.Fatalf("parts were not remapped to durable message ID: %#v", after.Parts)
+	}
+	if err := rt.Persist(context.Background(), st); err != nil {
+		t.Fatal(err)
+	}
+
+	reloaded, err := Load(context.Background(), st, session, chatRecord, runner, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(reloaded.Close)
+	snapshot := reloaded.Snapshot()
+	if len(snapshot.Messages) != 1 {
+		t.Fatalf("reloaded messages = %#v", snapshot.Messages)
+	}
+	if parts := snapshot.Parts[snapshot.Messages[0].ID]; len(parts) != 1 || parts[0].Text() != "persist me" {
+		t.Fatalf("reloaded parts = %#v", parts)
 	}
 }

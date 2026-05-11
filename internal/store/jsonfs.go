@@ -53,6 +53,127 @@ func (b *jsonfsBackend) init() error {
 
 func (b *jsonfsBackend) Close() error { return nil }
 
+func (b *jsonfsBackend) allocateCollectionID(ctx context.Context, key string) (int64, error) {
+	if err := ensureContext(ctx); err != nil {
+		return 0, err
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	meta, err := b.readMeta()
+	if err != nil {
+		return 0, err
+	}
+	if meta.NextIDs == nil {
+		meta.NextIDs = map[string]int64{}
+	}
+	next := meta.NextIDs[key]
+	if next <= 0 {
+		next = 1
+	}
+	meta.NextIDs[key] = next + 1
+	if err := b.writeMeta(meta); err != nil {
+		return 0, err
+	}
+	return next, nil
+}
+
+func (b *jsonfsBackend) getCollectionRecord(ctx context.Context, namespace string, id int64) ([]byte, error) {
+	if err := ensureContext(ctx); err != nil {
+		return nil, err
+	}
+	path := filepath.Join(b.root, "collections", namespace, formatID(id)+".json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("get %s %d: %w", namespace, id, err)
+	}
+	return data, nil
+}
+
+func (b *jsonfsBackend) putCollectionRecord(ctx context.Context, namespace string, id int64, data []byte, indexes map[string]string) error {
+	if err := ensureContext(ctx); err != nil {
+		return err
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	dir := filepath.Join(b.root, "collections", namespace)
+	if err := ensureDir(dir); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(dir, formatID(id)+".json"), append(data, '\n'), 0o644); err != nil {
+		return fmt.Errorf("put %s %d: %w", namespace, id, err)
+	}
+	if err := b.rebuildCollectionIndexes(namespace); err != nil {
+		return err
+	}
+	_ = indexes
+	return nil
+}
+
+func (b *jsonfsBackend) deleteCollectionRecord(ctx context.Context, namespace string, id int64) error {
+	if err := ensureContext(ctx); err != nil {
+		return err
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if err := os.Remove(filepath.Join(b.root, "collections", namespace, formatID(id)+".json")); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("delete %s %d: %w", namespace, id, err)
+	}
+	return b.rebuildCollectionIndexes(namespace)
+}
+
+func (b *jsonfsBackend) listCollectionRecords(ctx context.Context, namespace string, lookup *indexLookup) ([][]byte, error) {
+	if err := ensureContext(ctx); err != nil {
+		return nil, err
+	}
+	dir := filepath.Join(b.root, "collections", namespace)
+	paths, err := sortedJSONPaths(dir)
+	if err != nil {
+		return nil, err
+	}
+	out := make([][]byte, 0, len(paths))
+	for _, path := range paths {
+		id, err := parseIDFromSuffix(strings.TrimSuffix(filepath.Base(path), ".json"), "")
+		if err != nil {
+			return nil, err
+		}
+		if lookup != nil {
+			ok, err := b.collectionIndexContains(namespace, lookup.name, lookup.value, id)
+			if err != nil {
+				return nil, err
+			}
+			if !ok {
+				continue
+			}
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, data)
+	}
+	return out, nil
+}
+
+func (b *jsonfsBackend) transaction(ctx context.Context, fn func() error) error {
+	if err := ensureContext(ctx); err != nil {
+		return err
+	}
+	return fn()
+}
+
+func (b *jsonfsBackend) rebuildCollectionIndexes(namespace string) error {
+	_ = os.RemoveAll(filepath.Join(b.root, "collection-indexes", namespace))
+	return ensureDir(filepath.Join(b.root, "collection-indexes", namespace))
+}
+
+func (b *jsonfsBackend) collectionIndexContains(namespace, name, value string, id int64) (bool, error) {
+	_ = namespace
+	_ = name
+	_ = value
+	_ = id
+	return true, nil
+}
+
 func (b *jsonfsBackend) EnsureSession(ctx context.Context, providerID, modelID string) (domain.Session, error) {
 	sessions, err := b.ListSessions(ctx)
 	if err != nil {
@@ -852,6 +973,9 @@ func (b *jsonfsBackend) readMeta() (metaRecord, error) {
 	}
 	if meta.NextTodoID <= 0 {
 		meta.NextTodoID = 1
+	}
+	if meta.NextIDs == nil {
+		meta.NextIDs = map[string]int64{}
 	}
 	return meta, nil
 }

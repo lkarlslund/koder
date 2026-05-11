@@ -7,7 +7,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/lkarlslund/koder/internal/appstate"
 	"github.com/lkarlslund/koder/internal/attachment"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/reference"
@@ -57,7 +56,7 @@ type Snapshot struct {
 	Parts            map[int64][]domain.Part
 	Approvals        []store.Approval
 	QueuedInputs     []domain.QueuedInput
-	PendingAssistant appstate.PendingAssistantTurn
+	PendingAssistant PendingAssistantTurn
 	Status           Status
 	StatusText       string
 	Context          domain.ContextUsage
@@ -87,7 +86,7 @@ type Chat struct {
 	mu          sync.RWMutex
 	session     domain.Session
 	chat        domain.Chat
-	state       *appstate.ChatState
+	state       *ChatState
 	status      Status
 	statusText  string
 	active      bool
@@ -156,6 +155,32 @@ type Runner interface {
 	approvalRunner
 }
 
+// Load builds a live chat by hydrating its transcript and approval state from store.
+func Load(ctx context.Context, st *store.Store, session domain.Session, chatRecord domain.Chat, runner Runner, onClose func(int64)) (*Chat, error) {
+	if st == nil {
+		return nil, fmt.Errorf("store is required")
+	}
+	if chatRecord.ID == 0 {
+		return nil, fmt.Errorf("chat id is required")
+	}
+	if chatRecord.SessionID == 0 {
+		loaded, err := st.GetChat(ctx, chatRecord.ID)
+		if err != nil {
+			return nil, err
+		}
+		chatRecord = loaded
+	}
+	messages, parts, err := st.PartsForChat(ctx, chatRecord.ID)
+	if err != nil {
+		return nil, err
+	}
+	approvals, err := st.PendingApprovalsForChat(ctx, chatRecord.ID)
+	if err != nil {
+		return nil, err
+	}
+	return New(session, chatRecord, messages, parts, approvals, runner, st, onClose)
+}
+
 // New builds a live chat from hydrated persisted state.
 func New(session domain.Session, chatRecord domain.Chat, messages []domain.Message, parts map[int64][]domain.Part, approvals []store.Approval, runner Runner, st *store.Store, onClose func(int64)) (*Chat, error) {
 	if chatRecord.ID == 0 {
@@ -167,7 +192,7 @@ func New(session domain.Session, chatRecord domain.Chat, messages []domain.Messa
 		onClose:    onClose,
 		session:    session,
 		chat:       chatRecord,
-		state:      appstate.NewChatState(chatRecord, messages, parts, approvals),
+		state:      NewChatState(chatRecord, messages, parts, approvals),
 		status:     StatusIdle,
 		queue:      cloneQueuedInputs(chatRecord.QueuedInputs),
 		queueNotes: map[int64]string{},
@@ -177,6 +202,90 @@ func New(session domain.Session, chatRecord domain.Chat, messages []domain.Messa
 	go c.loop()
 	c.inbox <- struct{}{}
 	return c, nil
+}
+
+// Persist writes the current chat snapshot and remaps optimistic in-memory IDs to durable store IDs.
+func (r *Chat) Persist(ctx context.Context, st *store.Store) error {
+	if st == nil {
+		st = r.store
+	}
+	if st == nil {
+		return nil
+	}
+	r.mu.RLock()
+	chatRecord := r.chat
+	if r.state == nil {
+		r.mu.RUnlock()
+		return st.UpdateChat(ctx, chatRecord)
+	}
+	messages := r.state.SnapshotMessages()
+	parts := r.state.SnapshotParts()
+	approvals := r.state.Approvals()
+	r.mu.RUnlock()
+
+	persistedMessages, persistedParts, err := st.PartsForChat(ctx, chatRecord.ID)
+	if err != nil {
+		return r.markPersistError(err)
+	}
+	messageIDs := make(map[int64]struct{}, len(persistedMessages))
+	partIDs := map[int64]struct{}{}
+	for _, msg := range persistedMessages {
+		messageIDs[msg.ID] = struct{}{}
+		for _, part := range persistedParts[msg.ID] {
+			partIDs[part.ID] = struct{}{}
+		}
+	}
+
+	messageRemap := map[int64]int64{}
+	partRemap := map[int64]int64{}
+	changed := false
+	for _, msg := range messages {
+		if _, ok := messageIDs[msg.ID]; ok {
+			if err := st.UpdateMessageSummary(ctx, msg.ID, msg.Summary); err != nil {
+				return r.markPersistError(err)
+			}
+			for _, part := range parts[msg.ID] {
+				if _, ok := partIDs[part.ID]; ok {
+					if err := st.UpdatePartPayload(ctx, part.ID, part.Payload); err != nil {
+						return r.markPersistError(err)
+					}
+				}
+			}
+			continue
+		}
+		durable, err := st.AddChatMessage(ctx, chatRecord.ID, msg.Role, msg.Summary)
+		if err != nil {
+			return r.markPersistError(err)
+		}
+		messageRemap[msg.ID] = durable.ID
+		changed = true
+		for _, part := range parts[msg.ID] {
+			durablePart, err := st.AddPart(ctx, durable.ID, part.Payload)
+			if err != nil {
+				return r.markPersistError(err)
+			}
+			partRemap[part.ID] = durablePart.ID
+		}
+	}
+	for _, approval := range approvals {
+		if approval.ID <= 0 {
+			continue
+		}
+		if _, err := st.GetApproval(ctx, approval.ID); err == nil {
+			if err := st.UpdateApproval(ctx, approval.ID, approval.Status); err != nil {
+				return r.markPersistError(err)
+			}
+		}
+	}
+	chatRecord.QueuedInputs = cloneQueuedInputs(r.snapshotQueue())
+	if err := st.UpdateChat(ctx, chatRecord); err != nil {
+		return r.markPersistError(err)
+	}
+	if changed {
+		r.remapStateIDs(messageRemap, partRemap)
+		r.broadcast(r.snapshotUpdateFlags(nil, true, false, false, true, false))
+	}
+	return nil
 }
 
 func (r *Chat) Enqueue(item QueueItem) {
@@ -667,7 +776,6 @@ func (r *Chat) handleClose() {
 	if r.onClose != nil {
 		r.onClose(r.chat.ID)
 	}
-	close(r.inbox)
 }
 
 func (r *Chat) maybeDispatchNext() {
@@ -761,6 +869,51 @@ func (r *Chat) persistQueue() error {
 	items := cloneQueuedInputs(r.queue)
 	r.mu.RUnlock()
 	return r.store.SetChatQueuedInputs(context.Background(), r.chat.ID, items)
+}
+
+func (r *Chat) markPersistError(err error) error {
+	r.mu.Lock()
+	r.status = StatusErrored
+	r.statusText = err.Error()
+	r.active = false
+	r.mu.Unlock()
+	evt := domain.Event{Kind: domain.EventKindError, Err: err}
+	r.broadcast(r.snapshotUpdateFlags(&evt, false, false, true, false, false))
+	return err
+}
+
+func (r *Chat) remapStateIDs(messages map[int64]int64, parts map[int64]int64) {
+	if len(messages) == 0 && len(parts) == 0 {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.state == nil {
+		return
+	}
+	for _, record := range r.state.messages {
+		if record == nil {
+			continue
+		}
+		oldMessageID := record.Message.ID
+		if next, ok := messages[oldMessageID]; ok {
+			delete(r.state.byMessage, oldMessageID)
+			record.Message.ID = next
+			r.state.byMessage[next] = record
+		}
+		for _, partRecord := range record.Parts {
+			if partRecord == nil {
+				continue
+			}
+			oldPartID := partRecord.Part.ID
+			if next, ok := parts[oldPartID]; ok {
+				delete(r.state.byPart, oldPartID)
+				partRecord.Part.ID = next
+				partRecord.Part.MessageID = record.Message.ID
+				r.state.byPart[next] = partRecord
+			}
+		}
+	}
 }
 
 func (r *Chat) snapshotStatus() Status {

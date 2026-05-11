@@ -20,8 +20,9 @@ import (
 )
 
 type pebbleBackend struct {
-	db *pebble.DB
-	mu sync.Mutex
+	db     *pebble.DB
+	mu     sync.Mutex
+	closed bool
 }
 
 func openPebbleBackend(stateDir string) (*pebbleBackend, error) {
@@ -65,7 +66,114 @@ func (b *pebbleBackend) init() error {
 }
 
 func (b *pebbleBackend) Close() error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.closed {
+		return nil
+	}
+	b.closed = true
 	return b.db.Close()
+}
+
+func (b *pebbleBackend) allocateCollectionID(ctx context.Context, key string) (int64, error) {
+	if err := ensureContext(ctx); err != nil {
+		return 0, err
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	meta, err := b.readMeta()
+	if err != nil {
+		return 0, err
+	}
+	if meta.NextIDs == nil {
+		meta.NextIDs = map[string]int64{}
+	}
+	next := meta.NextIDs[key]
+	if next <= 0 {
+		next = 1
+	}
+	meta.NextIDs[key] = next + 1
+	batch := b.db.NewBatch()
+	defer batch.Close()
+	if err := b.putMeta(batch, meta); err != nil {
+		return 0, err
+	}
+	if err := batch.Commit(pebble.Sync); err != nil {
+		return 0, err
+	}
+	return next, nil
+}
+
+func (b *pebbleBackend) getCollectionRecord(ctx context.Context, namespace string, id int64) ([]byte, error) {
+	if err := ensureContext(ctx); err != nil {
+		return nil, err
+	}
+	data, closer, err := b.db.Get([]byte(collectionRecordKey(namespace, id)))
+	if err != nil {
+		return nil, fmt.Errorf("get %s %d: %w", namespace, id, err)
+	}
+	defer closer.Close()
+	return cloneBytes(data), nil
+}
+
+func (b *pebbleBackend) putCollectionRecord(ctx context.Context, namespace string, id int64, data []byte, indexes map[string]string) error {
+	if err := ensureContext(ctx); err != nil {
+		return err
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	batch := b.db.NewBatch()
+	defer batch.Close()
+	if err := batch.Set([]byte(collectionRecordKey(namespace, id)), data, nil); err != nil {
+		return fmt.Errorf("put %s %d: %w", namespace, id, err)
+	}
+	for name, value := range indexes {
+		if err := batch.Set([]byte(collectionIndexKey(namespace, name, value, id)), nil, nil); err != nil {
+			return fmt.Errorf("index %s %d: %w", namespace, id, err)
+		}
+	}
+	return batch.Commit(pebble.Sync)
+}
+
+func (b *pebbleBackend) deleteCollectionRecord(ctx context.Context, namespace string, id int64) error {
+	if err := ensureContext(ctx); err != nil {
+		return err
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	batch := b.db.NewBatch()
+	defer batch.Close()
+	if err := batch.Delete([]byte(collectionRecordKey(namespace, id)), nil); err != nil {
+		return err
+	}
+	return batch.Commit(pebble.Sync)
+}
+
+func (b *pebbleBackend) listCollectionRecords(ctx context.Context, namespace string, _ *indexLookup) ([][]byte, error) {
+	if err := ensureContext(ctx); err != nil {
+		return nil, err
+	}
+	prefix := collectionRecordPrefix(namespace)
+	iter, err := b.db.NewIter(&pebble.IterOptions{
+		LowerBound: []byte(prefix),
+		UpperBound: nextPrefix([]byte(prefix)),
+	})
+	if err != nil {
+		return nil, err
+	}
+	defer iter.Close()
+	var out [][]byte
+	for ok := iter.First(); ok; ok = iter.Next() {
+		out = append(out, cloneBytes(iter.Value()))
+	}
+	return out, iter.Error()
+}
+
+func (b *pebbleBackend) transaction(ctx context.Context, fn func() error) error {
+	if err := ensureContext(ctx); err != nil {
+		return err
+	}
+	return fn()
 }
 
 func (b *pebbleBackend) EnsureSession(ctx context.Context, providerID, modelID string) (domain.Session, error) {
@@ -1050,6 +1158,9 @@ func (b *pebbleBackend) readMeta() (metaRecord, error) {
 	}
 	if meta.NextTodoID <= 0 {
 		meta.NextTodoID = 1
+	}
+	if meta.NextIDs == nil {
+		meta.NextIDs = map[string]int64{}
 	}
 	return meta, nil
 }

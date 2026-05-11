@@ -16,7 +16,6 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/lkarlslund/koder/internal/agent"
-	"github.com/lkarlslund/koder/internal/appstate"
 	"github.com/lkarlslund/koder/internal/attachment"
 	chatpkg "github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/config"
@@ -2829,7 +2828,7 @@ func TestRuntimeUpdateMsgAppliesRuntimeSnapshot(t *testing.T) {
 				Messages:     []domain.Message{message},
 				Parts:        map[int64][]domain.Part{10: {part}},
 				QueuedInputs: []domain.QueuedInput{{ID: 9, Kind: domain.QueuedInputKindQueued, Text: "later"}},
-				PendingAssistant: appstate.PendingAssistantTurn{
+				PendingAssistant: chatpkg.PendingAssistantTurn{
 					Text:      "streaming text",
 					CreatedAt: now,
 				},
@@ -7180,7 +7179,7 @@ func TestPendingAssistantReasoningOnlyShowsThinkingIndicator(t *testing.T) {
 	m.showReasoning = false
 	m.startBusy(busyScopeTranscript, "Thinking ...")
 	m.busy.setTranscriptPhase(transcriptBusyPhaseThoughts)
-	m.currentSnapshot.PendingAssistant = appstate.PendingAssistantTurn{
+	m.currentSnapshot.PendingAssistant = chatpkg.PendingAssistantTurn{
 		CreatedAt: time.Unix(1, 0).UTC(),
 		Reasoning: "hidden chain of thought",
 	}
@@ -7204,7 +7203,7 @@ func TestTranscriptBlocksIncludePendingAssistantTurn(t *testing.T) {
 	}
 	m.currentSession = domain.Session{ID: 1}
 	m.showReasoning = true
-	m.currentSnapshot.PendingAssistant = appstate.PendingAssistantTurn{
+	m.currentSnapshot.PendingAssistant = chatpkg.PendingAssistantTurn{
 		Text:      "partial answer",
 		Reasoning: "thinking first",
 	}
@@ -7756,7 +7755,7 @@ func TestMouseClickTogglesToolRunExpansionWhileBusy(t *testing.T) {
 		width:          100,
 		height:         20,
 		viewport:       newTranscriptViewport(80, 8),
-		currentSnapshot: chatpkg.Snapshot{Parts: map[int64][]domain.Part{}, PendingAssistant: appstate.PendingAssistantTurn{
+		currentSnapshot: chatpkg.Snapshot{Parts: map[int64][]domain.Part{}, PendingAssistant: chatpkg.PendingAssistantTurn{
 			Text: "partial answer",
 		}},
 	}

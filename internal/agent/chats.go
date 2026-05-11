@@ -28,15 +28,7 @@ func (e *Engine) Chat(ctx context.Context, session domain.Session, chatRecord do
 	}
 	e.chatMu.RUnlock()
 
-	messages, parts, err := e.store.PartsForChat(ctx, chatRecord.ID)
-	if err != nil {
-		return nil, err
-	}
-	approvals, err := e.store.PendingApprovalsForChat(ctx, chatRecord.ID)
-	if err != nil {
-		return nil, err
-	}
-	loaded, err := chatpkg.New(session, chatRecord, messages, parts, approvals, e, e.store, e.detachChat)
+	loaded, err := chatpkg.Load(ctx, e.store, session, chatRecord, e, e.detachChat)
 	if err != nil {
 		return nil, err
 	}

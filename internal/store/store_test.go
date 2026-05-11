@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
@@ -36,6 +37,71 @@ func TestSessionMessageRoundTrip(t *testing.T) {
 			}
 			if got := parts[msg.ID][0].Text(); got != "hello" {
 				t.Fatalf("unexpected part body: %q", got)
+			}
+		})
+	}
+}
+
+func TestGenericCollectionRoundTripAndIndex(t *testing.T) {
+	type note struct {
+		ID     int64
+		ChatID int64
+		Body   string
+	}
+	for _, backend := range []string{BackendPebble, BackendJSONFS} {
+		t.Run(backend, func(t *testing.T) {
+			dir := t.TempDir()
+			st := openTestStoreAt(t, backend, dir)
+			notes := NewCollection(st, CollectionSpec[note]{
+				Namespace: "test-notes",
+				NextID:    "test-note",
+				GetID:     func(v note) int64 { return v.ID },
+				SetID:     func(v *note, id int64) { v.ID = id },
+				Indexes: []IndexSpec[note]{
+					{Name: "chat", Value: func(v note) string { return strconv.FormatInt(v.ChatID, 10) }},
+				},
+			})
+			first, err := notes.Insert(context.Background(), note{ChatID: 7, Body: "first"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			second, err := notes.Insert(context.Background(), note{ChatID: 8, Body: "second"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			first.Body = "updated"
+			if err := notes.Put(context.Background(), first); err != nil {
+				t.Fatal(err)
+			}
+			got, err := notes.Get(context.Background(), first.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Body != "updated" {
+				t.Fatalf("body = %q", got.Body)
+			}
+			indexed, err := notes.List(context.Background(), ByIndex[note]("chat", "7"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(indexed) != 1 || indexed[0].ID != first.ID {
+				t.Fatalf("indexed = %#v", indexed)
+			}
+			if err := notes.Delete(context.Background(), second.ID); err != nil {
+				t.Fatal(err)
+			}
+			if err := st.Close(); err != nil {
+				t.Fatal(err)
+			}
+
+			reopened := openTestStoreAt(t, backend, dir)
+			notes = NewCollection(reopened, notes.spec)
+			reloaded, err := notes.List(context.Background(), All[note]())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(reloaded) != 1 || reloaded[0].Body != "updated" {
+				t.Fatalf("reloaded = %#v", reloaded)
 			}
 		})
 	}
@@ -458,7 +524,12 @@ func TestJSONFSWritesInspectableFiles(t *testing.T) {
 
 func openTestStore(t *testing.T, backend string) *Store {
 	t.Helper()
-	st, err := OpenWithOptions(t.TempDir(), Options{Backend: backend})
+	return openTestStoreAt(t, backend, t.TempDir())
+}
+
+func openTestStoreAt(t *testing.T, backend, dir string) *Store {
+	t.Helper()
+	st, err := OpenWithOptions(dir, Options{Backend: backend})
 	if err != nil {
 		t.Fatal(err)
 	}
