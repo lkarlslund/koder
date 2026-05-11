@@ -588,6 +588,18 @@ func TestMessageDonePersistsAssistantWithoutReload(t *testing.T) {
 
 func TestApprovalAskEventAppendsPendingApprovalToolRun(t *testing.T) {
 	now := time.Now().UTC()
+	assistantMsg := domain.Message{ID: 20, SessionID: 1, ChatID: 2, Role: domain.MessageRoleAssistant, Summary: "tool:bash", CreatedAt: now.Add(-time.Second)}
+	assistantPart := domain.Part{
+		ID:        21,
+		MessageID: assistantMsg.ID,
+		Kind:      domain.PartKindToolCall,
+		Payload: domain.ToolCallPayload{
+			Tool:       domain.ToolKindBash,
+			ToolCallID: "call_1",
+			Args:       map[string]string{"command": "pwd"},
+		},
+		CreatedAt: assistantMsg.CreatedAt,
+	}
 	msg := domain.Message{
 		ID:        30,
 		SessionID: 1,
@@ -614,7 +626,7 @@ func TestApprovalAskEventAppendsPendingApprovalToolRun(t *testing.T) {
 		cfg:             testConfig(t),
 		currentSession:  domain.Session{ID: 1},
 		currentChat:     domain.Chat{ID: 2},
-		currentSnapshot: chatpkg.Snapshot{Parts: map[int64][]domain.Part{}},
+		currentSnapshot: chatpkg.Snapshot{Messages: []domain.Message{assistantMsg}, Parts: map[int64][]domain.Part{assistantMsg.ID: {assistantPart}}},
 		composer:        textarea.New(),
 	}
 
@@ -640,16 +652,28 @@ func TestApprovalAskEventAppendsPendingApprovalToolRun(t *testing.T) {
 		t.Fatalf("expected pending approval snapshot, got %#v", m.currentSnapshot.Approvals)
 	}
 	blocks := m.transcriptBlocks()
-	if len(blocks) != 1 || blocks[0].Kind != transcriptBlockToolRun {
+	if len(blocks) != 1 || blocks[0].Kind != transcriptBlockMessage || len(blocks[0].ToolRuns) != 1 {
 		t.Fatalf("expected approval tool run block, got %#v", blocks)
 	}
-	if blocks[0].ToolRun.Status != ui.ToolRunStatusPendingApproval {
-		t.Fatalf("expected pending approval status, got %#v", blocks[0].ToolRun)
+	if blocks[0].ToolRuns[0].Status != ui.ToolRunStatusPendingApproval {
+		t.Fatalf("expected pending approval status, got %#v", blocks[0].ToolRuns[0])
 	}
 }
 
 func TestApprovalReplyEventRemovesPendingApproval(t *testing.T) {
 	now := time.Now().UTC()
+	assistantMsg := domain.Message{ID: 20, SessionID: 1, ChatID: 2, Role: domain.MessageRoleAssistant, Summary: "tool:bash", CreatedAt: now.Add(-time.Second)}
+	assistantPart := domain.Part{
+		ID:        21,
+		MessageID: assistantMsg.ID,
+		Kind:      domain.PartKindToolCall,
+		Payload: domain.ToolCallPayload{
+			Tool:       domain.ToolKindBash,
+			ToolCallID: "call_1",
+			Args:       map[string]string{"command": "pwd"},
+		},
+		CreatedAt: assistantMsg.CreatedAt,
+	}
 	askMsg := domain.Message{
 		ID:        30,
 		SessionID: 1,
@@ -697,7 +721,7 @@ func TestApprovalReplyEventRemovesPendingApproval(t *testing.T) {
 		cfg:             testConfig(t),
 		currentSession:  domain.Session{ID: 1},
 		currentChat:     domain.Chat{ID: 2},
-		currentSnapshot: chatpkg.Snapshot{Parts: map[int64][]domain.Part{}},
+		currentSnapshot: chatpkg.Snapshot{Messages: []domain.Message{assistantMsg}, Parts: map[int64][]domain.Part{assistantMsg.ID: {assistantPart}}},
 		composer:        textarea.New(),
 	}
 	updated, _ := m.Update(eventMsg{chatID: 2, event: domain.Event{
@@ -723,11 +747,11 @@ func TestApprovalReplyEventRemovesPendingApproval(t *testing.T) {
 		t.Fatalf("expected pending approval removed, got %#v", m.currentSnapshot.Approvals)
 	}
 	blocks := m.transcriptBlocks()
-	if len(blocks) != 1 || blocks[0].Kind != transcriptBlockToolRun {
+	if len(blocks) != 1 || blocks[0].Kind != transcriptBlockMessage || len(blocks[0].ToolRuns) != 1 {
 		t.Fatalf("expected single approval tool run block, got %#v", blocks)
 	}
-	if blocks[0].ToolRun.Status != ui.ToolRunStatusApproved {
-		t.Fatalf("expected approved tool run status, got %#v", blocks[0].ToolRun)
+	if blocks[0].ToolRuns[0].Status != ui.ToolRunStatusApproved {
+		t.Fatalf("expected approved tool run status, got %#v", blocks[0].ToolRuns[0])
 	}
 }
 
@@ -2612,12 +2636,17 @@ func TestToolOutputUsesRequestPreviewFromMeta(t *testing.T) {
 		palette: theme.Resolve("tokyonight").Palette,
 		currentSnapshot: chatpkg.Snapshot{Parts: map[int64][]domain.Part{
 			1: {{
+				Kind:     domain.PartKindToolCall,
+				MetaJSON: `{"tool":"read","path":"README.md","tool_call_id":"call_2"}`,
+			}},
+			2: {{
 				Kind:     domain.PartKindToolOutput,
 				Body:     "# heading",
 				MetaJSON: `{"tool":"read","path":"README.md","tool_call_id":"call_2"}`,
 			}},
 		}, Messages: []domain.Message{
-			{ID: 1, Role: domain.MessageRoleTool, Summary: "read"},
+			{ID: 1, Role: domain.MessageRoleAssistant, Summary: "tool:read"},
+			{ID: 2, Role: domain.MessageRoleTool, Summary: "read"},
 		}},
 		viewport: newTranscriptViewport(80, 8),
 	}
@@ -2935,6 +2964,18 @@ func TestRuntimeToolResultRefreshesRetainedTranscript(t *testing.T) {
 	now := time.Now().UTC()
 	initial := domain.Message{ID: 10, SessionID: 1, ChatID: 2, Role: domain.MessageRoleUser, Summary: "run pwd", CreatedAt: now}
 	initialPart := domain.Part{ID: 11, MessageID: 10, Kind: domain.PartKindText, Payload: domain.TextPayload{Text: "run pwd"}, Body: "run pwd", CreatedAt: now}
+	assistantMsg := domain.Message{ID: 14, SessionID: 1, ChatID: 2, Role: domain.MessageRoleAssistant, Summary: "tool:bash", CreatedAt: now.Add(500 * time.Millisecond)}
+	assistantPart := domain.Part{
+		ID:        15,
+		MessageID: 14,
+		Kind:      domain.PartKindToolCall,
+		Payload: domain.ToolCallPayload{
+			Tool:       domain.ToolKindBash,
+			ToolCallID: "call_1",
+			Args:       map[string]string{"command": "pwd"},
+		},
+		CreatedAt: now.Add(500 * time.Millisecond),
+	}
 	toolMsg := domain.Message{ID: 12, SessionID: 1, ChatID: 2, Role: domain.MessageRoleTool, Summary: "bash", CreatedAt: now.Add(time.Second)}
 	toolPart := domain.Part{
 		ID:        13,
@@ -2951,15 +2992,19 @@ func TestRuntimeToolResultRefreshesRetainedTranscript(t *testing.T) {
 	}
 	updates := make(chan chatpkg.Update)
 	m := App{
-		cfg:             config.Default().WithStateDir(t.TempDir()),
-		composer:        textarea.New(),
-		currentRuntime:  &chatpkg.Chat{},
-		currentSnapshot: chatpkg.Snapshot{Chat: domain.Chat{ID: 2, SessionID: 1}, Messages: []domain.Message{initial}, Parts: map[int64][]domain.Part{10: {initialPart}}},
-		viewport:        newTranscriptViewport(80, 8),
-		currentSession:  domain.Session{ID: 1, Title: "Session"},
-		currentChat:     domain.Chat{ID: 2, SessionID: 1},
-		width:           80,
-		height:          16,
+		cfg:            config.Default().WithStateDir(t.TempDir()),
+		composer:       textarea.New(),
+		currentRuntime: &chatpkg.Chat{},
+		currentSnapshot: chatpkg.Snapshot{
+			Chat:     domain.Chat{ID: 2, SessionID: 1},
+			Messages: []domain.Message{initial, assistantMsg},
+			Parts:    map[int64][]domain.Part{10: {initialPart}, 14: {assistantPart}},
+		},
+		viewport:       newTranscriptViewport(80, 8),
+		currentSession: domain.Session{ID: 1, Title: "Session"},
+		currentChat:    domain.Chat{ID: 2, SessionID: 1},
+		width:          80,
+		height:         16,
 	}
 	m.refreshViewport()
 	if strings.Contains(m.viewport.View(), "file-a") {
@@ -2973,8 +3018,8 @@ func TestRuntimeToolResultRefreshesRetainedTranscript(t *testing.T) {
 			Snapshot: chatpkg.Snapshot{
 				Session:    domain.Session{ID: 1, Title: "Session"},
 				Chat:       domain.Chat{ID: 2, SessionID: 1},
-				Messages:   []domain.Message{initial, toolMsg},
-				Parts:      map[int64][]domain.Part{10: {initialPart}, 12: {toolPart}},
+				Messages:   []domain.Message{initial, assistantMsg, toolMsg},
+				Parts:      map[int64][]domain.Part{10: {initialPart}, 14: {assistantPart}, 12: {toolPart}},
 				Status:     chatpkg.StatusRunningTools,
 				StatusText: "Running tool",
 				Active:     true,
@@ -8898,6 +8943,215 @@ func TestTranscriptBlocksKeepsReusedToolCallIDInRequestingTurn(t *testing.T) {
 	if runs[1].ParentMessageID != 4 || runs[1].Output != "/second" {
 		t.Fatalf("expected second result to stay under second assistant turn, got %#v", runs[1])
 	}
+}
+
+func TestRuntimeToolResultWithReusedCallIDUpdatesRequestingTurn(t *testing.T) {
+	now := time.Now().UTC()
+	m := App{
+		currentSession: domain.Session{ID: 1},
+		currentChat:    domain.Chat{ID: 2, SessionID: 1},
+		currentSnapshot: chatpkg.Snapshot{
+			Chat:  domain.Chat{ID: 2, SessionID: 1},
+			Parts: map[int64][]domain.Part{},
+		},
+		viewport: newTranscriptViewport(80, 20),
+		width:    80,
+		height:   24,
+	}
+	m.currentSnapshot.Messages = []domain.Message{
+		{ID: 1, Role: domain.MessageRoleAssistant, Summary: "tool:bash", CreatedAt: now},
+		{ID: 2, Role: domain.MessageRoleTool, Summary: "bash", CreatedAt: now.Add(time.Second)},
+		{ID: 3, Role: domain.MessageRoleUser, Summary: "continue", CreatedAt: now.Add(2 * time.Second)},
+		{ID: 4, Role: domain.MessageRoleAssistant, Summary: "tool:bash", CreatedAt: now.Add(3 * time.Second)},
+	}
+	m.currentSnapshot.Parts[1] = []domain.Part{{
+		ID:        11,
+		MessageID: 1,
+		Kind:      domain.PartKindToolCall,
+		Payload: domain.ToolCallPayload{
+			Tool:       domain.ToolKindBash,
+			ToolCallID: "reused_call",
+			Args:       map[string]string{"command": "pwd"},
+		},
+	}}
+	m.currentSnapshot.Parts[2] = []domain.Part{{
+		ID:        21,
+		MessageID: 2,
+		Kind:      domain.PartKindToolOutput,
+		Payload: domain.ToolOutputPayload{
+			Tool:       domain.ToolKindBash,
+			ToolCallID: "reused_call",
+			Status:     domain.ToolResultStatusOK,
+			Text:       "/first",
+			Result:     tools.BashStoredResult{Command: "pwd", Output: "/first"},
+		},
+	}}
+	m.currentSnapshot.Parts[3] = []domain.Part{{ID: 31, MessageID: 3, Kind: domain.PartKindText, Payload: domain.TextPayload{Text: "continue"}}}
+	m.currentSnapshot.Parts[4] = []domain.Part{{
+		ID:        41,
+		MessageID: 4,
+		Kind:      domain.PartKindToolCall,
+		Payload: domain.ToolCallPayload{
+			Tool:       domain.ToolKindBash,
+			ToolCallID: "reused_call",
+			Args:       map[string]string{"command": "pwd"},
+		},
+	}}
+	m.refreshViewport()
+
+	resultMsg := domain.Message{ID: 5, Role: domain.MessageRoleTool, Summary: "bash", CreatedAt: now.Add(4 * time.Second)}
+	resultPart := domain.Part{
+		ID:        51,
+		MessageID: 5,
+		Kind:      domain.PartKindToolOutput,
+		Payload: domain.ToolOutputPayload{
+			Tool:       domain.ToolKindBash,
+			ToolCallID: "reused_call",
+			Status:     domain.ToolResultStatusOK,
+			Text:       "/second",
+			Result:     tools.BashStoredResult{Command: "pwd", Output: "/second"},
+		},
+	}
+	m.applyCurrentChatEvent(domain.Event{Kind: domain.EventKindToolResult, ToolCallID: "reused_call", Tool: domain.ToolKindBash, Message: resultMsg, Parts: []domain.Part{resultPart}})
+
+	var blocks []transcriptBlock
+	for _, item := range m.transcriptItems {
+		blocks = append(blocks, m.transcriptBlockForController(item))
+	}
+	var runs []ui.ToolRun
+	for _, block := range blocks {
+		runs = append(runs, block.ToolRuns...)
+	}
+	if len(runs) != 2 {
+		t.Fatalf("expected two child tool runs, got %#v from %#v", runs, blocks)
+	}
+	if runs[0].ParentMessageID != 1 || runs[0].Output != "/first" {
+		t.Fatalf("expected first turn to keep first result, got %#v", runs[0])
+	}
+	if runs[1].ParentMessageID != 4 || runs[1].Output != "/second" {
+		t.Fatalf("expected second turn to receive live result, got %#v", runs[1])
+	}
+}
+
+func TestRuntimeToolStartWithReusedCallIDUpdatesLatestTurn(t *testing.T) {
+	now := time.Now().UTC()
+	m := App{
+		currentSession: domain.Session{ID: 1},
+		currentChat:    domain.Chat{ID: 2, SessionID: 1},
+		currentSnapshot: chatpkg.Snapshot{
+			Chat:  domain.Chat{ID: 2, SessionID: 1},
+			Parts: map[int64][]domain.Part{},
+		},
+		viewport: newTranscriptViewport(80, 20),
+		width:    80,
+		height:   24,
+	}
+	m.currentSnapshot.Messages = []domain.Message{
+		{ID: 1, Role: domain.MessageRoleAssistant, Summary: "tool:bash", CreatedAt: now},
+		{ID: 2, Role: domain.MessageRoleTool, Summary: "bash", CreatedAt: now.Add(time.Second)},
+		{ID: 3, Role: domain.MessageRoleUser, Summary: "continue", CreatedAt: now.Add(2 * time.Second)},
+		{ID: 4, Role: domain.MessageRoleAssistant, Summary: "tool:bash", CreatedAt: now.Add(3 * time.Second)},
+	}
+	m.currentSnapshot.Parts[1] = []domain.Part{{
+		ID:        11,
+		MessageID: 1,
+		Kind:      domain.PartKindToolCall,
+		Payload: domain.ToolCallPayload{
+			Tool:       domain.ToolKindBash,
+			ToolCallID: "reused_call",
+			Args:       map[string]string{"command": "pwd"},
+		},
+	}}
+	m.currentSnapshot.Parts[2] = []domain.Part{{
+		ID:        21,
+		MessageID: 2,
+		Kind:      domain.PartKindToolOutput,
+		Payload: domain.ToolOutputPayload{
+			Tool:       domain.ToolKindBash,
+			ToolCallID: "reused_call",
+			Status:     domain.ToolResultStatusOK,
+			Text:       "/first",
+			Result:     tools.BashStoredResult{Command: "pwd", Output: "/first"},
+		},
+	}}
+	m.currentSnapshot.Parts[3] = []domain.Part{{ID: 31, MessageID: 3, Kind: domain.PartKindText, Payload: domain.TextPayload{Text: "continue"}}}
+	m.currentSnapshot.Parts[4] = []domain.Part{{
+		ID:        41,
+		MessageID: 4,
+		Kind:      domain.PartKindToolCall,
+		Payload: domain.ToolCallPayload{
+			Tool:       domain.ToolKindBash,
+			ToolCallID: "reused_call",
+			Args:       map[string]string{"command": "pwd"},
+		},
+	}}
+	m.refreshViewport()
+
+	m.applyCurrentChatEvent(domain.Event{Kind: domain.EventKindToolStart, ToolCallID: "reused_call", Tool: domain.ToolKindBash})
+
+	var blocks []transcriptBlock
+	for _, item := range m.transcriptItems {
+		blocks = append(blocks, m.transcriptBlockForController(item))
+	}
+	var runs []ui.ToolRun
+	for _, block := range blocks {
+		runs = append(runs, block.ToolRuns...)
+	}
+	if len(runs) != 2 {
+		t.Fatalf("expected two child tool runs, got %#v from %#v", runs, blocks)
+	}
+	if runs[0].Status != ui.ToolRunStatusCompleted {
+		t.Fatalf("expected first turn to remain completed, got %#v", runs[0])
+	}
+	if runs[1].Status != ui.ToolRunStatusRunning {
+		t.Fatalf("expected latest turn to become running, got %#v", runs[1])
+	}
+}
+
+func TestTranscriptBlocksHardFailsToolResultAfterTurnBoundary(t *testing.T) {
+	m := App{
+		currentSession: domain.Session{ID: 1},
+		currentSnapshot: chatpkg.Snapshot{
+			Chat: domain.Chat{ID: 2, SessionID: 1},
+			Messages: []domain.Message{
+				{ID: 1, Role: domain.MessageRoleAssistant, Summary: "tool:bash"},
+				{ID: 2, Role: domain.MessageRoleUser, Summary: "new turn"},
+				{ID: 3, Role: domain.MessageRoleTool, Summary: "bash"},
+			},
+			Parts: map[int64][]domain.Part{
+				1: {{
+					ID:        11,
+					MessageID: 1,
+					Kind:      domain.PartKindToolCall,
+					Payload: domain.ToolCallPayload{
+						Tool:       domain.ToolKindBash,
+						ToolCallID: "call_1",
+						Args:       map[string]string{"command": "pwd"},
+					},
+				}},
+				2: {{ID: 21, MessageID: 2, Kind: domain.PartKindText, Payload: domain.TextPayload{Text: "new turn"}}},
+				3: {{
+					ID:        31,
+					MessageID: 3,
+					Kind:      domain.PartKindToolOutput,
+					Payload: domain.ToolOutputPayload{
+						Tool:       domain.ToolKindBash,
+						ToolCallID: "call_1",
+						Status:     domain.ToolResultStatusOK,
+						Text:       "/late",
+						Result:     tools.BashStoredResult{Command: "pwd", Output: "/late"},
+					},
+				}},
+			},
+		},
+	}
+
+	defer func() {
+		if recover() == nil {
+			t.Fatal("expected late tool result to hard fail")
+		}
+	}()
+	_ = m.transcriptBlocks()
 }
 
 func TestTranscriptBlocksIncludeLiveExecRuns(t *testing.T) {

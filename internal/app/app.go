@@ -3249,12 +3249,13 @@ func (m *App) updateToolRunInTranscriptByCallID(toolCallID string, update func(*
 	if toolCallID == "" || update == nil {
 		return false
 	}
-	for idx, item := range m.transcriptItems {
+	for idx := len(m.transcriptItems) - 1; idx >= 0; idx-- {
+		item := m.transcriptItems[idx]
 		assistant, ok := item.(*assistantMessageTranscriptItem)
 		if !ok {
 			continue
 		}
-		for runIdx := range assistant.toolRuns {
+		for runIdx := len(assistant.toolRuns) - 1; runIdx >= 0; runIdx-- {
 			if assistant.toolRuns[runIdx].ToolCallID != toolCallID {
 				continue
 			}
@@ -3501,6 +3502,9 @@ func (m *App) upsertOwnedToolRunTranscriptItem(run ui.ToolRun) bool {
 }
 
 func toolRunMatches(existing, next ui.ToolRun) bool {
+	if existing.ParentMessageID > 0 && next.ParentMessageID > 0 && existing.ParentMessageID != next.ParentMessageID {
+		return false
+	}
 	if strings.TrimSpace(next.ToolCallID) != "" && existing.ToolCallID == next.ToolCallID {
 		return true
 	}

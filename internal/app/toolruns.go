@@ -80,6 +80,7 @@ func (m *App) transcriptBlocks() []transcriptBlock {
 		case domain.MessageRoleTool:
 			consumed := false
 			for _, run := range toolRunsFromToolMessage(msgParts, msg) {
+				run = m.bindToolRunToOwningTurn(msg, run)
 				tracker.Upsert(run)
 				consumed = true
 			}
@@ -174,6 +175,9 @@ func (m *App) applyCurrentChatPartMutation(msg domain.Message, part domain.Part)
 	}
 	if strings.TrimSpace(run.ID) == "" {
 		return false
+	}
+	if msg.Role == domain.MessageRoleTool {
+		run = m.bindToolRunToOwningTurn(msg, run)
 	}
 	if run.ParentMessageID > 0 && m.upsertOwnedToolRunTranscriptItem(run) {
 		return true
@@ -306,6 +310,78 @@ func messageHasToolCall(parts []domain.Part) bool {
 		}
 	}
 	return false
+}
+
+func (m *App) bindToolRunToOwningTurn(toolMsg domain.Message, run ui.ToolRun) ui.ToolRun {
+	if run.ParentMessageID > 0 || strings.TrimSpace(run.ToolCallID) == "" {
+		return run
+	}
+	parentID := toolRunOwnerMessageID(m.activeMessages(), m.activeParts(), toolMsg.ID, run.ToolCallID)
+	if parentID == 0 {
+		if !toolCallExists(m.activeMessages(), m.activeParts(), run.ToolCallID) {
+			return run
+		}
+		panic(fmt.Sprintf("tool run %q has no owning assistant turn", run.ToolCallID))
+	}
+	run.ParentMessageID = parentID
+	return run
+}
+
+func toolRunOwnerMessageID(messages []domain.Message, parts map[int64][]domain.Part, beforeMessageID int64, toolCallID string) int64 {
+	toolCallID = strings.TrimSpace(toolCallID)
+	if toolCallID == "" {
+		return 0
+	}
+	limit := len(messages)
+	if beforeMessageID != 0 {
+		for idx, msg := range messages {
+			if msg.ID == beforeMessageID {
+				limit = idx
+				break
+			}
+		}
+	}
+	for idx := limit - 1; idx >= 0; idx-- {
+		msg := messages[idx]
+		if msg.Role == domain.MessageRoleUser {
+			return 0
+		}
+		if msg.Role != domain.MessageRoleAssistant {
+			continue
+		}
+		for _, part := range parts[msg.ID] {
+			if part.Kind == domain.PartKindToolCall && partToolCallID(part) == toolCallID {
+				return msg.ID
+			}
+		}
+	}
+	return 0
+}
+
+func toolCallExists(messages []domain.Message, parts map[int64][]domain.Part, toolCallID string) bool {
+	toolCallID = strings.TrimSpace(toolCallID)
+	if toolCallID == "" {
+		return false
+	}
+	for _, msg := range messages {
+		if msg.Role != domain.MessageRoleAssistant {
+			continue
+		}
+		for _, part := range parts[msg.ID] {
+			if part.Kind == domain.PartKindToolCall && partToolCallID(part) == toolCallID {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func partToolCallID(part domain.Part) string {
+	if payload, ok := part.Payload.(domain.ToolCallPayload); ok {
+		return strings.TrimSpace(payload.ToolCallID)
+	}
+	meta := stringMeta(part.MetaJSON)
+	return strings.TrimSpace(meta["tool_call_id"])
 }
 
 func (m *App) currentLiveExecRuns() []ui.ToolRun {
