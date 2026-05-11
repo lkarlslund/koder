@@ -69,6 +69,26 @@ func TestSidebarBusyStatusComposesSpinner(t *testing.T) {
 	}
 }
 
+func TestSidebarBusySpinnerTimerUpdatesFrame(t *testing.T) {
+	m := newRuntimeTestModel(t)
+	m.startBusy(busyScopeSidebar, "Creating session...")
+	main := m.ensureMainScreenView()
+	ctx := &ui.Context{Palette: m.palette}
+
+	before := strings.Join(ui.RenderSurface(ctx, main.sidebarContent, 40, 0).Lines(), "\n")
+	if !main.HandleTimer(ui.TimerEvent{Owner: ui.SpinnerTimerOwner}) {
+		t.Fatal("expected sidebar spinner timer to be handled")
+	}
+	after := strings.Join(ui.RenderSurface(ctx, main.sidebarContent, 40, 0).Lines(), "\n")
+
+	if !strings.Contains(before, "Status "+ui.SpinnerFrame(m.cfg.UI.Spinner, 0)+"  Creating session...") {
+		t.Fatalf("expected initial sidebar spinner frame, got %q", before)
+	}
+	if !strings.Contains(after, "Status "+ui.SpinnerFrame(m.cfg.UI.Spinner, 1)+"  Creating session...") {
+		t.Fatalf("expected sidebar spinner to advance, got %q", after)
+	}
+}
+
 func TestHelpModalContentUsesWindowBackground(t *testing.T) {
 	m := newRuntimeTestModel(t)
 	m.openHelpModal()

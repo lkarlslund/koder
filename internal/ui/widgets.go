@@ -23,6 +23,43 @@ func (l Label) Paint(_ *Context, canvas Canvas) {
 	canvas.WriteText(0, 0, PlainTruncate(l.Text, max(1, canvas.Width()), ""), l.Style.CellStyle())
 }
 
+type RetainedLabel struct {
+	BaseNode
+	Text  string
+	Style Style
+}
+
+func (l *RetainedLabel) Set(text string, style Style) {
+	if l == nil {
+		return
+	}
+	if l.Text == text && l.Style == style {
+		return
+	}
+	needsLayout := l.Text != text
+	l.Text = text
+	l.Style = style
+	if needsLayout {
+		l.MarkLayoutDirty()
+		return
+	}
+	l.MarkDirtyLocal(Rect{W: l.Rect().W, H: l.Rect().H})
+}
+
+func (l *RetainedLabel) Measure(_ *Context, constraints Constraints) Size {
+	if l == nil {
+		return constraints.Clamp(Size{})
+	}
+	return constraints.Clamp(Size{W: TextWidth(l.Text), H: 1})
+}
+
+func (l *RetainedLabel) Paint(_ *Context, canvas Canvas) {
+	if l == nil || canvas.Width() <= 0 || canvas.Height() <= 0 {
+		return
+	}
+	canvas.WriteText(0, 0, PlainTruncate(l.Text, max(1, canvas.Width()), ""), l.Style.CellStyle())
+}
+
 type TextPane struct {
 	PassiveNode
 	Content string

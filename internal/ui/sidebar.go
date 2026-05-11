@@ -9,6 +9,13 @@ type Sidebar struct {
 	Width  int
 }
 
+func (s Sidebar) Children() []Node {
+	if s.Child == nil {
+		return nil
+	}
+	return []Node{s.Child}
+}
+
 func (s Sidebar) render(ctx *Context, width int) Surface {
 	height := s.Height
 	contentHeight := 0

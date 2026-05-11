@@ -206,7 +206,10 @@ func (n *FlexNode) Paint(ctx *Context, canvas Canvas) {
 		if child.Node == nil || child.Node.Rect().Empty() {
 			continue
 		}
-		child.Node.Paint(ctx, canvas.Subrect(child.Node.Rect()))
+		rect := child.Node.Rect()
+		rect.X -= canvas.origin.X
+		rect.Y -= canvas.origin.Y
+		child.Node.Paint(ctx, canvas.Subrect(rect))
 	}
 }
 

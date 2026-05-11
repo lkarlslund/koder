@@ -12,23 +12,24 @@ import (
 const composerBlinkTimerOwner = tui.ComposerBlinkTimerOwner
 
 type mainScreenView struct {
-	transcript       *tui.ChatTranscriptNode
-	composer         *tui.ComposerNode
-	sidebar          *ui.HashedNode
-	sidebarContent   *ui.RetainedColumn
-	sidebarSpinner   *ui.Spinner
-	statusPane       *ui.HashedNode
-	statusSpinner    *ui.Spinner
-	leftMain         *ui.FlexNode
-	body             *ui.FlexNode
-	root             *ui.FlexNode
-	surface          *ui.RetainedSurface
-	bodyChildren     [2]ui.FlexNodeChild
-	bodyWithoutSide  []ui.FlexNodeChild
-	bodyWithSide     []ui.FlexNodeChild
-	sidebarWidth     int
-	showSidebar      bool
-	statusPaneHeight int
+	transcript         *tui.ChatTranscriptNode
+	composer           *tui.ComposerNode
+	sidebar            *ui.HashedNode
+	sidebarContent     *ui.RetainedColumn
+	sidebarContentHash string
+	sidebarSpinner     *ui.Spinner
+	statusPane         *ui.HashedNode
+	statusSpinner      *ui.Spinner
+	leftMain           *ui.FlexNode
+	body               *ui.FlexNode
+	root               *ui.FlexNode
+	surface            *ui.RetainedSurface
+	bodyChildren       [2]ui.FlexNodeChild
+	bodyWithoutSide    []ui.FlexNodeChild
+	bodyWithSide       []ui.FlexNodeChild
+	sidebarWidth       int
+	showSidebar        bool
+	statusPaneHeight   int
 }
 
 func newMainScreenView() *mainScreenView {
@@ -155,17 +156,29 @@ func (v *mainScreenView) SetSidebarContent(content sidebarContent, spinnerStyle 
 	if v == nil || v.sidebarContent == nil {
 		return
 	}
+	nextHash := content.hash()
+	if v.sidebarContentHash == nextHash {
+		for _, row := range content.rows {
+			if row.Kind == sidebarRowStatus && row.Busy {
+				v.sidebarSpinner.Set(spinnerStyle, row.Value, true, palette)
+				return
+			}
+		}
+		v.sidebarSpinner.Set(spinnerStyle, "", false, palette)
+		return
+	}
+	v.sidebarContentHash = nextHash
 	v.sidebarContent.Clear()
 	for _, row := range content.rows {
 		if row.Kind == sidebarRowStatus && row.Busy {
 			v.sidebarSpinner.Set(spinnerStyle, row.Value, true, palette)
-			v.sidebarContent.Add(ui.AsNode(ui.NewFlexBox(ui.DirectionHorizontal, []ui.Child{
-				ui.Fixed(ui.Label{Text: row.Label}),
-				ui.Fixed(v.sidebarSpinner),
-			}, 1)))
+			v.sidebarContent.Add(ui.NewFlexNode(ui.DirectionHorizontal, []ui.FlexNodeChild{
+				{Node: &ui.RetainedLabel{Text: row.Label}},
+				{Node: v.sidebarSpinner},
+			}, 1))
 			continue
 		}
-		v.sidebarContent.Add(ui.AsNode(ui.Label{Text: row.Text()}))
+		v.sidebarContent.Add(&ui.RetainedLabel{Text: row.Text()})
 	}
 	if !content.busy() {
 		v.sidebarSpinner.Set(spinnerStyle, "", false, palette)
