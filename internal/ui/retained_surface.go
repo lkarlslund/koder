@@ -106,10 +106,13 @@ func NodePending(node Node) bool {
 
 // PaintDirtyNode paints only dirty leaf nodes in node's retained tree.
 func PaintDirtyNode(ctx *Context, canvas Canvas, node Node) {
-	if node == nil || node.Rect().Empty() {
+	if node == nil {
 		return
 	}
 	if node.NeedsPaint() {
+		if node.Rect().Empty() {
+			return
+		}
 		node.Paint(ctx, canvas.Subrect(node.Rect()))
 		return
 	}

@@ -1,6 +1,10 @@
 package ui
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/lkarlslund/koder/internal/theme"
+)
 
 type retainedSurfaceTestNode struct {
 	BaseNode
@@ -133,5 +137,31 @@ func TestRetainedSurfacePaintsDirtyContainerNode(t *testing.T) {
 	next := retained.Surface(&Context{}, bounds)
 	if got := next.Lines()[0]; got != "later   " {
 		t.Fatalf("expected dirty container to repaint child subtree, got %q", got)
+	}
+}
+
+func TestRetainedSurfacePaintsDirtyNodeUnderPassiveContainer(t *testing.T) {
+	spinner := &Spinner{}
+	spinner.Set("dots", "Working", true, theme.Palette{})
+	column := NewRetainedColumn(0)
+	column.Add(NewFlexNode(DirectionHorizontal, []FlexNodeChild{
+		{Node: &RetainedLabel{Text: "Status"}},
+		{Node: spinner},
+	}, 1))
+	node := NewHashedNode(AsNode(Sidebar{Child: column, Width: 20, Height: 1}), 0)
+	retained := NewRetainedSurface(node)
+	bounds := Rect{W: 20, H: 1}
+
+	first := retained.Surface(&Context{}, bounds)
+	if got := first.Lines()[0]; got != " Status ⠋  Working  " {
+		t.Fatalf("expected first sidebar spinner frame, got %q", got)
+	}
+
+	if !HandleSpinnerTimer(node, TimerEvent{Owner: SpinnerTimerOwner}) {
+		t.Fatal("expected spinner timer to be handled")
+	}
+	next := retained.Surface(&Context{}, bounds)
+	if got := next.Lines()[0]; got != " Status ⠙  Working  " {
+		t.Fatalf("expected dirty sidebar spinner to advance, got %q", got)
 	}
 }
