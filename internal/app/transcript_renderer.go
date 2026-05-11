@@ -27,7 +27,7 @@ type transcriptRenderer struct {
 	pendingReasoningLine string
 }
 
-func newTranscriptRenderer(m *Model) transcriptRenderer {
+func newTranscriptRenderer(m *App) transcriptRenderer {
 	return transcriptRenderer{
 		palette:        m.palette,
 		width:          m.viewport.Width,

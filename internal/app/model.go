@@ -560,7 +560,7 @@ type modelRenderCache struct {
 	composerAreaValid           bool
 }
 
-type Model struct {
+type App struct {
 	cfg                         config.Config
 	store                       *store.Store
 	agent                       *agent.Engine
@@ -680,10 +680,6 @@ type Model struct {
 	providerInventory           map[string]providerInventoryItem
 }
 
-// App is the top-level TUI application object.
-// Model remains as a compatibility alias while the codebase migrates to App naming.
-type App = Model
-
 type pendingAssistantTurn struct {
 	Text      string
 	Reasoning string
@@ -740,7 +736,7 @@ func NewWithWorkdir(cfg config.Config, st *store.Store, a *agent.Engine, mode St
 	vp := newTranscriptViewport(40, 10)
 	vp.SetContent("Loading…")
 
-	model := Model{
+	model := App{
 		cfg:                     cfg,
 		store:                   st,
 		agent:                   a,
@@ -778,7 +774,7 @@ func NewWithWorkdir(cfg config.Config, st *store.Store, a *agent.Engine, mode St
 	return model, nil
 }
 
-func (m Model) Init() ui.Cmd {
+func (m App) Init() ui.Cmd {
 	if !m.mouseEnabled {
 		return m.withRootTimers(ui.Batch(m.loadCmd(), m.syncWindowTitleCmd()))
 	}
@@ -789,17 +785,17 @@ func (m Model) Init() ui.Cmd {
 	))
 }
 
-func (m Model) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
+func (m App) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 	defer func() {
 		if next == nil {
 			next = m
 		}
 		switch typed := next.(type) {
-		case Model:
+		case App:
 			typed.syncDebugRuntime()
 			cmd = typed.withRootTimers(cmd)
 			next = typed
-		case *Model:
+		case *App:
 			typed.syncDebugRuntime()
 			cmd = typed.withRootTimers(cmd)
 		}
@@ -1301,7 +1297,7 @@ func (m Model) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 	return m, nextCmd
 }
 
-func (m Model) centeredModal(node ui.Node) ui.Node {
+func (m App) centeredModal(node ui.Node) ui.Node {
 	if node == nil {
 		return nil
 	}
@@ -1318,19 +1314,19 @@ func (m Model) centeredModal(node ui.Node) ui.Node {
 	})
 }
 
-func (m Model) ViewLines() []string {
+func (m App) ViewLines() []string {
 	return m.viewSurface().Lines()
 }
 
-func (m Model) ViewSurface() ui.SurfaceView {
+func (m App) ViewSurface() ui.SurfaceView {
 	return m.viewSurface()
 }
 
-func (m *Model) renderElementText(node ui.Node, width, height int) string {
+func (m *App) renderElementText(node ui.Node, width, height int) string {
 	return strings.Join(ui.RenderSurface(&ui.Context{Palette: m.palette}, node, width, height).Lines(), "\n")
 }
 
-func (m *Model) viewSurface() ui.Surface {
+func (m *App) viewSurface() ui.Surface {
 	if m.width <= 0 || m.height <= 0 {
 		return ui.Surface{}
 	}
@@ -1341,7 +1337,7 @@ func (m *Model) viewSurface() ui.Surface {
 	return surface
 }
 
-func (m *Model) handleKey(msg ui.KeyMsg) (ui.Model, ui.Cmd) {
+func (m *App) handleKey(msg ui.KeyMsg) (ui.Model, ui.Cmd) {
 	if msg.String() != "esc" {
 		m.interruptArmedAt = time.Time{}
 	}
@@ -1365,7 +1361,7 @@ func (m *Model) handleKey(msg ui.KeyMsg) (ui.Model, ui.Cmd) {
 	return m, cmd
 }
 
-func (m *Model) handleMainWindowKey(msg ui.KeyMsg) (bool, ui.Cmd) {
+func (m *App) handleMainWindowKey(msg ui.KeyMsg) (bool, ui.Cmd) {
 	if m.hasHelpModal() {
 		switch msg.String() {
 		case "alt+h", "enter", "esc":
@@ -1740,7 +1736,7 @@ func (m *Model) handleMainWindowKey(msg ui.KeyMsg) (bool, ui.Cmd) {
 	return handled, cmd
 }
 
-func (m *Model) handleMouse(msg ui.MouseMsg) (ui.Model, ui.Cmd, bool) {
+func (m *App) handleMouse(msg ui.MouseMsg) (ui.Model, ui.Cmd, bool) {
 	if !m.mouseEnabled {
 		return m, nil, false
 	}
@@ -1828,7 +1824,7 @@ func (m *Model) handleMouse(msg ui.MouseMsg) (ui.Model, ui.Cmd, bool) {
 	return m, nil, false
 }
 
-func (m *Model) handleMainWindowMouse(msg ui.MouseMsg) (bool, ui.Cmd) {
+func (m *App) handleMainWindowMouse(msg ui.MouseMsg) (bool, ui.Cmd) {
 	if _, cmd, ok := m.handleMouse(msg); ok {
 		return true, cmd
 	}
@@ -1841,7 +1837,7 @@ func (m *Model) handleMainWindowMouse(msg ui.MouseMsg) (bool, ui.Cmd) {
 	return false, nil
 }
 
-func (m *Model) handleTranscriptMouse(msg ui.MouseMsg) bool {
+func (m *App) handleTranscriptMouse(msg ui.MouseMsg) bool {
 	if msg.Action != ui.MouseActionPress {
 		return false
 	}
@@ -1862,7 +1858,7 @@ func (m *Model) handleTranscriptMouse(msg ui.MouseMsg) bool {
 	return false
 }
 
-func (m *Model) handleLLMPreviewMouse(msg ui.MouseMsg) bool {
+func (m *App) handleLLMPreviewMouse(msg ui.MouseMsg) bool {
 	switch msg.Button {
 	case ui.MouseButtonWheelUp:
 		if msg.Action == ui.MouseActionPress {
@@ -1878,7 +1874,7 @@ func (m *Model) handleLLMPreviewMouse(msg ui.MouseMsg) bool {
 	return false
 }
 
-func (m *Model) handleHelpMouse(msg ui.MouseMsg) bool {
+func (m *App) handleHelpMouse(msg ui.MouseMsg) bool {
 	if !m.hasHelpModal() {
 		return false
 	}
@@ -1897,7 +1893,7 @@ func (m *Model) handleHelpMouse(msg ui.MouseMsg) bool {
 	return false
 }
 
-func (m *Model) handleHelpKey(msg ui.KeyMsg) bool {
+func (m *App) handleHelpKey(msg ui.KeyMsg) bool {
 	if !m.hasHelpModal() {
 		return false
 	}
@@ -1925,7 +1921,7 @@ func (m *Model) handleHelpKey(msg ui.KeyMsg) bool {
 	}
 }
 
-func (m *Model) handleLLMPreviewKey(msg ui.KeyMsg) bool {
+func (m *App) handleLLMPreviewKey(msg ui.KeyMsg) bool {
 	switch msg.String() {
 	case "up":
 		m.scrollLLMPreview(-1)
@@ -1950,15 +1946,15 @@ func (m *Model) handleLLMPreviewKey(msg ui.KeyMsg) bool {
 	}
 }
 
-func (m *Model) scrollLLMPreview(delta int) {
+func (m *App) scrollLLMPreview(delta int) {
 	m.llmPreviewYOffset = min(max(0, m.llmPreviewYOffset+delta), m.llmPreviewMaxOffset())
 }
 
-func (m *Model) scrollHelp(delta int) {
+func (m *App) scrollHelp(delta int) {
 	m.helpYOffset = min(max(0, m.helpYOffset+delta), m.helpMaxOffset())
 }
 
-func (m *Model) scrollTranscript(delta int) {
+func (m *App) scrollTranscript(delta int) {
 	target := m.viewport.YOffset + delta
 	if target < 0 {
 		target = 0
@@ -1977,17 +1973,17 @@ func (m *Model) scrollTranscript(delta int) {
 	m.refreshViewportAt(target)
 }
 
-func (m *Model) llmPreviewMaxOffset() int {
+func (m *App) llmPreviewMaxOffset() int {
 	contentHeight := ui.TextHeight(m.llmPreviewBody)
 	return max(0, contentHeight-max(0, m.llmPreviewHeight))
 }
 
-func (m *Model) helpMaxOffset() int {
+func (m *App) helpMaxOffset() int {
 	contentHeight := ui.TextHeight(m.helpBody)
 	return max(0, contentHeight-max(0, m.helpHeight))
 }
 
-func (m *Model) applyEvent(evt domain.Event) {
+func (m *App) applyEvent(evt domain.Event) {
 	switch evt.Kind {
 	case domain.EventKindMessageDelta:
 		m.appendPendingAssistantText(evt.Text)
@@ -2104,7 +2100,7 @@ func shouldRefreshDetailsAfterEvent(evt domain.Event) bool {
 	}
 }
 
-func (m *Model) refreshTranscriptForPendingTurn() {
+func (m *App) refreshTranscriptForPendingTurn() {
 	if !m.syncPendingTranscriptItem() {
 		m.invalidateTranscript()
 	}
@@ -2115,21 +2111,21 @@ func (m *Model) refreshTranscriptForPendingTurn() {
 	m.refreshViewportPreserve()
 }
 
-func (m *Model) invalidatePendingTranscriptFrame() {
+func (m *App) invalidatePendingTranscriptFrame() {
 	m.invalidateMainSurface()
 	if main := m.ensureMainScreenView(); main != nil {
 		main.InvalidateTranscript()
 	}
 }
 
-func (m *Model) prepareFrame() {
+func (m *App) prepareFrame() {
 	if m.pendingTranscriptFrameDirty {
 		m.pendingTranscriptFrameDirty = false
 		m.refreshTranscriptForPendingTurn()
 	}
 }
 
-func (m *Model) clearPendingAssistantTurn() {
+func (m *App) clearPendingAssistantTurn() {
 	pending := m.activePendingAssistant()
 	if strings.TrimSpace(pending.Text) == "" && strings.TrimSpace(pending.Reasoning) == "" {
 		return
@@ -2143,7 +2139,7 @@ func (m *Model) clearPendingAssistantTurn() {
 	m.refreshTranscriptForPendingTurn()
 }
 
-func (m *Model) resize() {
+func (m *App) resize() {
 	sidebarWidth := m.sidebarWidth()
 	bodyWidth := m.width - sidebarWidth
 	if bodyWidth < 20 {
@@ -2163,11 +2159,11 @@ func (m *Model) resize() {
 	m.invalidateTranscript()
 }
 
-func (m *Model) renderHeader() string {
+func (m *App) renderHeader() string {
 	return ""
 }
 
-func (m *Model) renderBodySurface() ui.Surface {
+func (m *App) renderBodySurface() ui.Surface {
 	ctx := &ui.Context{Palette: m.palette}
 	width := max(0, m.width)
 	if width == 0 {
@@ -2201,15 +2197,15 @@ func (m *Model) renderBodySurface() ui.Surface {
 	return surface
 }
 
-func (m *Model) renderBodyElement() ui.Node {
+func (m *App) renderBodyElement() ui.Node {
 	return m.ensureMainScreenView().root
 }
 
-func (m *Model) transcriptViewportHeight() int {
+func (m *App) transcriptViewportHeight() int {
 	return max(0, m.transcriptPaneHeight())
 }
 
-func (m *Model) transcriptPaneWidth() int {
+func (m *App) transcriptPaneWidth() int {
 	if m.width <= 0 {
 		return max(0, m.viewport.Width)
 	}
@@ -2224,7 +2220,7 @@ func (m *Model) transcriptPaneWidth() int {
 	return bodyWidth
 }
 
-func (m *Model) transcriptPaneHeight() int {
+func (m *App) transcriptPaneHeight() int {
 	if m.height <= 0 {
 		return max(0, m.viewport.Height)
 	}
@@ -2235,7 +2231,7 @@ func (m *Model) transcriptPaneHeight() int {
 	return max(0, height)
 }
 
-func (m *Model) renderComposerAreaSurface() ui.Surface {
+func (m *App) renderComposerAreaSurface() ui.Surface {
 	ctx := &ui.Context{Palette: m.palette}
 	width := max(0, m.width)
 	if width == 0 {
@@ -2252,7 +2248,7 @@ func (m *Model) renderComposerAreaSurface() ui.Surface {
 	return surface
 }
 
-func (m *Model) measureComposerArea() int {
+func (m *App) measureComposerArea() int {
 	ctx := &ui.Context{Palette: m.palette}
 	width := max(0, m.width)
 	if width == 0 {
@@ -2266,11 +2262,11 @@ func (m *Model) measureComposerArea() int {
 	return size.H
 }
 
-func (m *Model) renderComposerAreaElement() ui.Node {
+func (m *App) renderComposerAreaElement() ui.Node {
 	return m.renderComposerAreaElementWithCursor(m.composer.CursorVisible())
 }
 
-func (m *Model) renderComposerAreaElementWithCursor(cursorVisible bool) ui.Node {
+func (m *App) renderComposerAreaElementWithCursor(cursorVisible bool) ui.Node {
 	if !m.shouldShowComposerArea() {
 		return ui.AsNode(ui.VisibleElement{})
 	}
@@ -2298,14 +2294,14 @@ func (m *Model) renderComposerAreaElementWithCursor(cursorVisible bool) ui.Node 
 	return ui.AsNode(ui.NewFlexBox(ui.DirectionVertical, children, 0))
 }
 
-func (m *Model) shouldShowComposerArea() bool {
+func (m *App) shouldShowComposerArea() bool {
 	if m.composerAreaHasContent() {
 		return true
 	}
 	return m.composer.Focused()
 }
 
-func (m *Model) composerAreaHasContent() bool {
+func (m *App) composerAreaHasContent() bool {
 	if len(m.draftAttachments) > 0 || len(m.activeQueuedInputs()) > 0 {
 		return true
 	}
@@ -2319,7 +2315,7 @@ func (m *Model) composerAreaHasContent() bool {
 		strings.TrimSpace(m.composer.Value()) != ""
 }
 
-func (m *Model) composerAreaHeight() int {
+func (m *App) composerAreaHeight() int {
 	cache := m.ensureRenderCache()
 	if !cache.composerAreaValid {
 		return m.measureComposerArea()
@@ -2327,7 +2323,7 @@ func (m *Model) composerAreaHeight() int {
 	return cache.composerAreaHeight
 }
 
-func (m *Model) markMainScreenRendered(main *mainScreenView) {
+func (m *App) markMainScreenRendered(main *mainScreenView) {
 	cache := m.ensureRenderCache()
 	cache.bodyValid = true
 	if main != nil {
@@ -2342,7 +2338,7 @@ func (m *Model) markMainScreenRendered(main *mainScreenView) {
 	}
 }
 
-func (m *Model) renderStatusPaneElement() ui.Node {
+func (m *App) renderStatusPaneElement() ui.Node {
 	if !m.busy.transcriptActive() {
 		return ui.AsNode(ui.VisibleElement{})
 	}
@@ -2352,7 +2348,7 @@ func (m *Model) renderStatusPaneElement() ui.Node {
 	})
 }
 
-func (m *Model) statusPaneHeight() int {
+func (m *App) statusPaneHeight() int {
 	element := m.renderStatusPaneElement()
 	if !ui.NodeVisible(element) {
 		return 0
@@ -2360,11 +2356,11 @@ func (m *Model) statusPaneHeight() int {
 	return element.Measure(&ui.Context{Palette: m.palette}, ui.NewConstraints(max(0, m.width), 0)).H
 }
 
-func (m *Model) renderComposerElement() ui.Node {
+func (m *App) renderComposerElement() ui.Node {
 	return m.renderComposerElementWithCursor(m.composer.CursorVisible())
 }
 
-func (m *Model) renderComposerElementWithCursor(cursorVisible bool) ui.Node {
+func (m *App) renderComposerElementWithCursor(cursorVisible bool) ui.Node {
 	tokenRanges := make([]ui.TokenRange, 0, len(m.composer.Tokens()))
 	for _, token := range m.composer.Tokens() {
 		tokenRanges = append(tokenRanges, ui.TokenRange{Start: token.Start, End: token.End})
@@ -2382,7 +2378,7 @@ func (m *Model) renderComposerElementWithCursor(cursorVisible bool) ui.Node {
 	}))
 }
 
-func (m *Model) renderQueuedPromptPreviewElement() ui.Node {
+func (m *App) renderQueuedPromptPreviewElement() ui.Node {
 	items := m.activeQueuedInputs()
 	if len(items) == 0 {
 		return nil
@@ -2407,7 +2403,7 @@ func (m *Model) renderQueuedPromptPreviewElement() ui.Node {
 	})
 }
 
-func (m *Model) composerWidth() int {
+func (m *App) composerWidth() int {
 	width := m.transcriptPaneWidth()
 	if width <= 0 {
 		return 40
@@ -2415,7 +2411,7 @@ func (m *Model) composerWidth() int {
 	return width
 }
 
-func (m *Model) sidebarWidth() int {
+func (m *App) sidebarWidth() int {
 	if !m.showSidebar {
 		return 0
 	}
@@ -2428,11 +2424,11 @@ func (m *Model) sidebarWidth() int {
 	return clampInt(defaultWidth, minWidth, maxWidth)
 }
 
-func (m *Model) halfBlocksEnabled() bool {
+func (m *App) halfBlocksEnabled() bool {
 	return m.cfg.UI.HalfBlocks
 }
 
-func (m *Model) promptGlyph() string {
+func (m *App) promptGlyph() string {
 	if m.halfBlocksEnabled() {
 		return "█"
 	}
@@ -2446,7 +2442,7 @@ func mPrompt(cfg config.Config) string {
 	return "┃ "
 }
 
-func (m *Model) renderSidebar() string {
+func (m *App) renderSidebar() string {
 	var lines []string
 	lines = append(lines, m.renderSidebarSessionLine())
 	lines = append(lines, m.renderSidebarChatLine())
@@ -2519,7 +2515,7 @@ func (m *Model) renderSidebar() string {
 	return strings.Join(lines, "\n")
 }
 
-func (m Model) debugAPIAddr() string {
+func (m App) debugAPIAddr() string {
 	if m.debug == nil {
 		return ""
 	}
@@ -2532,12 +2528,12 @@ const (
 	sidebarWidthStep = 4
 )
 
-func (m *Model) sidebarMaxWidth() int {
+func (m *App) sidebarMaxWidth() int {
 	maxWidth := min(sidebarMaxWidth, max(sidebarMinWidth, m.width-40))
 	return max(sidebarMinWidth, maxWidth)
 }
 
-func (m *Model) adjustSidebarWidth(delta int) {
+func (m *App) adjustSidebarWidth(delta int) {
 	if delta == 0 {
 		return
 	}
@@ -2554,7 +2550,7 @@ func (m *Model) adjustSidebarWidth(delta int) {
 	}
 }
 
-func (m *Model) renderSidebarSessionLine() string {
+func (m *App) renderSidebarSessionLine() string {
 	id := fmt.Sprintf("#%d", m.currentSession.ID)
 	title := strings.TrimSpace(m.currentSession.Title)
 	if title == "" {
@@ -2563,7 +2559,7 @@ func (m *Model) renderSidebarSessionLine() string {
 	return "Session " + id + "  " + title
 }
 
-func (m *Model) renderSidebarChatLine() string {
+func (m *App) renderSidebarChatLine() string {
 	id := fmt.Sprintf("#%d", m.currentChat.ID)
 	chatIndex := 0
 	for idx, item := range m.chats {
@@ -2591,7 +2587,7 @@ func (m *Model) renderSidebarChatLine() string {
 	return label
 }
 
-func (m *Model) renderSidebarChatListItem(item domain.Chat) string {
+func (m *App) renderSidebarChatListItem(item domain.Chat) string {
 	prefix := " "
 	if item.ID == m.currentChat.ID {
 		prefix = "*"
@@ -2610,7 +2606,7 @@ func (m *Model) renderSidebarChatListItem(item domain.Chat) string {
 	return fmt.Sprintf(" %s #%d %s", prefix, item.ID, label)
 }
 
-func (m *Model) sidebarMilestoneLines() []string {
+func (m *App) sidebarMilestoneLines() []string {
 	if len(m.milestonePlan.Milestones) == 0 {
 		return []string{"Milestones: None"}
 	}
@@ -2628,7 +2624,7 @@ func (m *Model) sidebarMilestoneLines() []string {
 	return lines
 }
 
-func (m *Model) sidebarTodoLines() []string {
+func (m *App) sidebarTodoLines() []string {
 	if len(m.todos) == 0 {
 		return []string{"Todos: None"}
 	}
@@ -2687,12 +2683,12 @@ func clampInt(value, low, high int) int {
 	return value
 }
 
-func (m *Model) refreshViewport() {
+func (m *App) refreshViewport() {
 	m.invalidateMainSurface()
 	m.refreshViewportAt(-1)
 }
 
-func (m *Model) refreshViewportPreserve() {
+func (m *App) refreshViewportPreserve() {
 	m.invalidateMainSurface()
 	m.refreshViewportAt(m.viewport.YOffset)
 }
@@ -2708,7 +2704,7 @@ type transcriptViewportAnchor struct {
 	valid        bool
 }
 
-func (m *Model) captureTranscriptViewportAnchor() transcriptViewportAnchor {
+func (m *App) captureTranscriptViewportAnchor() transcriptViewportAnchor {
 	retained := m.syncRetainedTranscript()
 	if retained == nil {
 		return transcriptViewportAnchor{}
@@ -2752,7 +2748,7 @@ func (m *Model) captureTranscriptViewportAnchor() transcriptViewportAnchor {
 	return transcriptViewportAnchor{fallback: offset}
 }
 
-func (m *Model) resolveTranscriptViewportAnchor(anchor transcriptViewportAnchor) int {
+func (m *App) resolveTranscriptViewportAnchor(anchor transcriptViewportAnchor) int {
 	if !anchor.valid {
 		return anchor.fallback
 	}
@@ -2800,7 +2796,7 @@ func (m *Model) resolveTranscriptViewportAnchor(anchor transcriptViewportAnchor)
 	return anchor.fallback
 }
 
-func (m *Model) resolveTranscriptAnchorFromFullSurface(retained *ui.RetainedTranscript, ctx *ui.Context, width int, anchor transcriptViewportAnchor) int {
+func (m *App) resolveTranscriptAnchorFromFullSurface(retained *ui.RetainedTranscript, ctx *ui.Context, width int, anchor transcriptViewportAnchor) int {
 	if retained == nil || strings.TrimSpace(anchor.line) == "" {
 		return -1
 	}
@@ -2861,12 +2857,12 @@ func transcriptAnchorSingleLineIndex(lines []string, needle string) int {
 	return -1
 }
 
-func (m *Model) refreshViewportAnchored(anchor transcriptViewportAnchor) {
+func (m *App) refreshViewportAnchored(anchor transcriptViewportAnchor) {
 	m.invalidateMainSurface()
 	m.refreshViewportAt(m.resolveTranscriptViewportAnchor(anchor))
 }
 
-func (m *Model) refreshViewportAt(offset int) {
+func (m *App) refreshViewportAt(offset int) {
 	m.invalidateMainSurface()
 	retained := m.syncRetainedTranscript()
 	if retained == nil {
@@ -2891,7 +2887,7 @@ func (m *Model) refreshViewportAt(offset int) {
 	}
 }
 
-func (m *Model) renderTranscriptVisibleSurface(retained *ui.RetainedTranscript, width, height, offset int) ui.Surface {
+func (m *App) renderTranscriptVisibleSurface(retained *ui.RetainedTranscript, width, height, offset int) ui.Surface {
 	width = max(0, width)
 	height = max(0, height)
 	if retained == nil || width <= 0 || height <= 0 {
@@ -2903,7 +2899,7 @@ func (m *Model) renderTranscriptVisibleSurface(retained *ui.RetainedTranscript, 
 	return surface
 }
 
-func (m *Model) invalidateBodyCache() {
+func (m *App) invalidateBodyCache() {
 	cache := m.ensureRenderCache()
 	cache.bodyValid = false
 	cache.renderedBodySurface = ui.Surface{}
@@ -2916,7 +2912,7 @@ func (m *Model) invalidateBodyCache() {
 	m.invalidateFooterCache()
 }
 
-func (m *Model) invalidateMainSurface() {
+func (m *App) invalidateMainSurface() {
 	cache := m.ensureRenderCache()
 	cache.bodyValid = false
 	cache.renderedBodySurface = ui.Surface{}
@@ -2925,7 +2921,7 @@ func (m *Model) invalidateMainSurface() {
 	}
 }
 
-func (m *Model) invalidateFooterCache() {
+func (m *App) invalidateFooterCache() {
 	cache := m.ensureRenderCache()
 	cache.composerAreaValid = false
 	cache.renderedComposerAreaSurface = ui.Surface{}
@@ -2935,28 +2931,28 @@ func (m *Model) invalidateFooterCache() {
 	}
 }
 
-func (m *Model) invalidateFooterCursor() {
+func (m *App) invalidateFooterCursor() {
 	cache := m.ensureRenderCache()
 	cache.composerAreaValid = false
 	cache.renderedComposerAreaSurface = ui.Surface{}
 	m.composerCursorDirty = true
 }
 
-func (m *Model) ensureRenderCache() *modelRenderCache {
+func (m *App) ensureRenderCache() *modelRenderCache {
 	if m.renderCache == nil {
 		m.renderCache = &modelRenderCache{}
 	}
 	return m.renderCache
 }
 
-func (m *Model) ensureRetainedTranscript() *ui.RetainedTranscript {
+func (m *App) ensureRetainedTranscript() *ui.RetainedTranscript {
 	if m.retainedTranscript == nil {
 		m.retainedTranscript = ui.NewRetainedTranscript()
 	}
 	return m.retainedTranscript
 }
 
-func (m *Model) invalidateTranscript() {
+func (m *App) invalidateTranscript() {
 	m.transcriptDirty = true
 	if main := m.ensureMainScreenView(); main != nil {
 		main.InvalidateTranscript()
@@ -2964,7 +2960,7 @@ func (m *Model) invalidateTranscript() {
 	m.invalidateBodyCache()
 }
 
-func (m *Model) transcriptPlaceholderItems() []transcriptItemController {
+func (m *App) transcriptPlaceholderItems() []transcriptItemController {
 	if m.currentSession.ID == 0 && len(m.activeMessages()) == 0 && !m.cfg.HasUsableDefaultProvider() {
 		item := newPlaceholderTranscriptItem("no-provider", 0, "No provider configured.\n\nType /provider to add one before sending prompts.")
 		item.Refresh(m)
@@ -2978,7 +2974,7 @@ func (m *Model) transcriptPlaceholderItems() []transcriptItemController {
 	return nil
 }
 
-func (m *Model) rebuildTranscriptState() []ui.TranscriptItem {
+func (m *App) rebuildTranscriptState() []ui.TranscriptItem {
 	if items := m.transcriptPlaceholderItems(); len(items) > 0 {
 		m.transcriptItems = items
 		m.messageItemIndexByID = make(map[int64]int)
@@ -3036,7 +3032,7 @@ func (m *Model) rebuildTranscriptState() []ui.TranscriptItem {
 	return m.uiTranscriptItems()
 }
 
-func (m *Model) transcriptControllerFromBlock(prevByKey map[string]transcriptItemController, block transcriptBlock, gap int) transcriptItemController {
+func (m *App) transcriptControllerFromBlock(prevByKey map[string]transcriptItemController, block transcriptBlock, gap int) transcriptItemController {
 	key := m.transcriptBlockIdentityKey(block)
 	if existing := prevByKey[key]; existing != nil {
 		existing.SetGapBefore(gap)
@@ -3092,7 +3088,7 @@ func firstPartBody(parts []domain.Part, kind domain.PartKind) string {
 	return ""
 }
 
-func (m *Model) uiTranscriptItems() []ui.TranscriptItem {
+func (m *App) uiTranscriptItems() []ui.TranscriptItem {
 	items := make([]ui.TranscriptItem, 0, len(m.transcriptItems))
 	for _, item := range m.transcriptItems {
 		items = append(items, item.UIItem())
@@ -3100,7 +3096,7 @@ func (m *Model) uiTranscriptItems() []ui.TranscriptItem {
 	return items
 }
 
-func (m *Model) replaceTranscriptItemAt(index int) bool {
+func (m *App) replaceTranscriptItemAt(index int) bool {
 	if m.transcriptDirty || index < 0 || index >= len(m.transcriptItems) {
 		return false
 	}
@@ -3114,7 +3110,7 @@ func (m *Model) replaceTranscriptItemAt(index int) bool {
 	return true
 }
 
-func (m *Model) replaceTranscriptItemsInPlace(match func(transcriptItemController) bool) bool {
+func (m *App) replaceTranscriptItemsInPlace(match func(transcriptItemController) bool) bool {
 	if m.transcriptDirty {
 		return false
 	}
@@ -3134,7 +3130,7 @@ func (m *Model) replaceTranscriptItemsInPlace(match func(transcriptItemControlle
 	return updated
 }
 
-func (m *Model) replaceToolRunRecordInTranscript(record *appstate.ToolRunRecord) bool {
+func (m *App) replaceToolRunRecordInTranscript(record *appstate.ToolRunRecord) bool {
 	if record == nil {
 		return false
 	}
@@ -3160,7 +3156,7 @@ func (m *Model) replaceToolRunRecordInTranscript(record *appstate.ToolRunRecord)
 	return false
 }
 
-func (m *Model) syncPendingTranscriptItem() bool {
+func (m *App) syncPendingTranscriptItem() bool {
 	if m.transcriptDirty {
 		return false
 	}
@@ -3204,7 +3200,7 @@ func (m *Model) syncPendingTranscriptItem() bool {
 	return true
 }
 
-func (m Model) pendingAssistantIndicatorLine() string {
+func (m App) pendingAssistantIndicatorLine() string {
 	pending := m.activePendingAssistant()
 	if strings.TrimSpace(pending.Text) != "" {
 		return ""
@@ -3219,7 +3215,7 @@ func (m Model) pendingAssistantIndicatorLine() string {
 	return ui.WorkingIndicatorLine(indicator, m.transcriptBusyStatus())
 }
 
-func (m *Model) reindexTranscriptControllers() {
+func (m *App) reindexTranscriptControllers() {
 	m.messageItemIndexByID = make(map[int64]int)
 	m.toolRunItemIndexByID = make(map[string]int)
 	m.toolRunItemIndexByCall = make(map[string]int)
@@ -3248,7 +3244,7 @@ func (m *Model) reindexTranscriptControllers() {
 	}
 }
 
-func (m *Model) transcriptToolRunValue(item toolRunTranscriptItem) ui.ToolRun {
+func (m *App) transcriptToolRunValue(item toolRunTranscriptItem) ui.ToolRun {
 	switch concrete := item.(type) {
 	case *bashToolRunTranscriptItem:
 		return concrete.run
@@ -3265,7 +3261,7 @@ func (m *Model) transcriptToolRunValue(item toolRunTranscriptItem) ui.ToolRun {
 	}
 }
 
-func (m *Model) transcriptBlockForController(item transcriptItemController) transcriptBlock {
+func (m *App) transcriptBlockForController(item transcriptItemController) transcriptBlock {
 	switch typed := item.(type) {
 	case *userMessageTranscriptItem:
 		return transcriptBlock{Kind: transcriptBlockMessage, Message: typed.record.Message, Parts: partValues(typed.record.PartRecords()), Record: typed.record}
@@ -3295,7 +3291,7 @@ func (m *Model) transcriptBlockForController(item transcriptItemController) tran
 	return transcriptBlock{}
 }
 
-func (m *Model) appendMessageRecordTranscriptItem(record *appstate.MessageRecord) bool {
+func (m *App) appendMessageRecordTranscriptItem(record *appstate.MessageRecord) bool {
 	if record == nil || m.transcriptDirty || len(m.transcriptItems) == 0 {
 		return false
 	}
@@ -3338,7 +3334,7 @@ func (m *Model) appendMessageRecordTranscriptItem(record *appstate.MessageRecord
 	return true
 }
 
-func (m *Model) upsertMessageRecordTranscriptItem(record *appstate.MessageRecord) bool {
+func (m *App) upsertMessageRecordTranscriptItem(record *appstate.MessageRecord) bool {
 	if record == nil {
 		return false
 	}
@@ -3360,7 +3356,7 @@ func (m *Model) upsertMessageRecordTranscriptItem(record *appstate.MessageRecord
 	return m.appendMessageRecordTranscriptItem(record)
 }
 
-func (m *Model) appendToolRunRecordTranscriptItem(record *appstate.ToolRunRecord) bool {
+func (m *App) appendToolRunRecordTranscriptItem(record *appstate.ToolRunRecord) bool {
 	if record == nil || m.transcriptDirty || len(m.transcriptItems) == 0 {
 		return false
 	}
@@ -3386,7 +3382,7 @@ func (m *Model) appendToolRunRecordTranscriptItem(record *appstate.ToolRunRecord
 	return true
 }
 
-func (m *Model) syncRetainedTranscript() *ui.RetainedTranscript {
+func (m *App) syncRetainedTranscript() *ui.RetainedTranscript {
 	retained := m.ensureRetainedTranscript()
 	if m.transcriptDirty || len(retained.Items()) == 0 {
 		items := m.buildTranscriptItems()
@@ -3398,7 +3394,7 @@ func (m *Model) syncRetainedTranscript() *ui.RetainedTranscript {
 	return retained
 }
 
-func (m *Model) syncTranscriptControllerState() {
+func (m *App) syncTranscriptControllerState() {
 	if len(m.transcriptItems) == 0 {
 		return
 	}
@@ -3465,7 +3461,7 @@ func (m *Model) syncTranscriptControllerState() {
 	}
 }
 
-func (m *Model) syncRetainedTranscriptItems(retained *ui.RetainedTranscript, items []ui.TranscriptItem) {
+func (m *App) syncRetainedTranscriptItems(retained *ui.RetainedTranscript, items []ui.TranscriptItem) {
 	if retained == nil {
 		return
 	}
@@ -3495,7 +3491,7 @@ func (m *Model) syncRetainedTranscriptItems(retained *ui.RetainedTranscript, ite
 	}
 }
 
-func (m *Model) transcriptSeparator(prev, next transcriptBlock) string {
+func (m *App) transcriptSeparator(prev, next transcriptBlock) string {
 	if !m.halfBlocksEnabled() {
 		return "\n\n"
 	}
@@ -3505,7 +3501,7 @@ func (m *Model) transcriptSeparator(prev, next transcriptBlock) string {
 	return "\n\n"
 }
 
-func (m *Model) isHalfBlockUserMessage(block transcriptBlock) bool {
+func (m *App) isHalfBlockUserMessage(block transcriptBlock) bool {
 	return m.halfBlocksEnabled() && block.Kind == transcriptBlockMessage && block.Message.Role == domain.MessageRoleUser
 }
 
@@ -3516,7 +3512,7 @@ func renderedSeparatorHeight(separator string) int {
 	return max(0, ui.TextHeight("x"+separator+"x")-2)
 }
 
-func (m *Model) renderTranscriptActivityElement() ui.Node {
+func (m *App) renderTranscriptActivityElement() ui.Node {
 	if !m.busy.transcriptActive() {
 		return nil
 	}
@@ -3526,7 +3522,7 @@ func (m *Model) renderTranscriptActivityElement() ui.Node {
 	})
 }
 
-func (m *Model) sessionUsageSummary(sessionID int64) (domain.Usage, bool) {
+func (m *App) sessionUsageSummary(sessionID int64) (domain.Usage, bool) {
 	if m.store == nil {
 		return domain.Usage{}, false
 	}
@@ -3550,13 +3546,13 @@ func (m *Model) sessionUsageSummary(sessionID int64) (domain.Usage, bool) {
 	return sessionctx.LatestUsage(messages, parts)
 }
 
-func (m *Model) syncUsageFromHistory() {
+func (m *App) syncUsageFromHistory() {
 	m.historyTotalUsage, m.historyTotalUsageKnown = sessionctx.TotalUsage(m.activeMessages(), m.activeParts())
 	m.liveUsage = domain.Usage{}
 	m.liveUsageKnown = false
 }
 
-func (m *Model) syncContextFromChat() {
+func (m *App) syncContextFromChat() {
 	m.contextTokens = 0
 	m.contextTokensEstimated = false
 	if m.currentRuntime != nil {
@@ -3574,7 +3570,7 @@ func (m *Model) syncContextFromChat() {
 	m.contextTokensEstimated = usage.Estimated
 }
 
-func (m *Model) ensureContextEstimateFromState() {
+func (m *App) ensureContextEstimateFromState() {
 	if m.agent == nil {
 		return
 	}
@@ -3611,7 +3607,7 @@ func (m *Model) ensureContextEstimateFromState() {
 	}
 }
 
-func (m *Model) currentPendingAssistantContextTokens() int {
+func (m *App) currentPendingAssistantContextTokens() int {
 	if m.chatState != nil {
 		return m.chatState.PendingAssistantContextTokens()
 	}
@@ -3626,7 +3622,7 @@ func (m *Model) currentPendingAssistantContextTokens() int {
 	return total
 }
 
-func (m *Model) refreshContextFromActiveChat() {
+func (m *App) refreshContextFromActiveChat() {
 	if m.currentRuntime != nil {
 		usage := m.currentRuntime.ContextSize()
 		if usage.TotalTokens > 0 {
@@ -3651,7 +3647,7 @@ func (m *Model) refreshContextFromActiveChat() {
 	m.contextTokensEstimated = true
 }
 
-func (m Model) currentTotalUsage() (domain.Usage, bool) {
+func (m App) currentTotalUsage() (domain.Usage, bool) {
 	if !m.historyTotalUsageKnown && !m.liveUsageKnown {
 		return domain.Usage{}, false
 	}
@@ -3662,7 +3658,7 @@ func (m Model) currentTotalUsage() (domain.Usage, bool) {
 	return total.Normalized(), true
 }
 
-func (m Model) currentContextMetrics() (sessionctx.Metrics, bool) {
+func (m App) currentContextMetrics() (sessionctx.Metrics, bool) {
 	providerID := firstNonEmptyString(strings.TrimSpace(m.currentChat.ProviderID), strings.TrimSpace(m.currentSession.ProviderID))
 	providerCfg, ok := m.cfg.Provider(providerID)
 	if !ok || providerCfg.ContextWindow <= 0 {
@@ -3717,7 +3713,7 @@ func (m Model) currentContextMetrics() (sessionctx.Metrics, bool) {
 	}, true
 }
 
-func (m Model) sidebarContextLine() string {
+func (m App) sidebarContextLine() string {
 	metrics, ok := m.currentContextMetrics()
 	if ok {
 		used := formatTokens(metrics.Used)
@@ -3734,7 +3730,7 @@ func (m Model) sidebarContextLine() string {
 	return "Context - / -"
 }
 
-func (m Model) pendingAssistantParts() []domain.Part {
+func (m App) pendingAssistantParts() []domain.Part {
 	pending := m.activePendingAssistant()
 	if strings.TrimSpace(pending.Text) == "" && strings.TrimSpace(pending.Reasoning) == "" {
 		return nil
@@ -3749,7 +3745,7 @@ func (m Model) pendingAssistantParts() []domain.Part {
 	return parts
 }
 
-func (m Model) loadCmd() ui.Cmd {
+func (m App) loadCmd() ui.Cmd {
 	return func() ui.Msg {
 		ctx := context.Background()
 		totalStart := time.Now()
@@ -3873,7 +3869,7 @@ type loadMsg struct {
 	preserveBusy bool
 }
 
-func (m Model) loadPlanningState(ctx context.Context, sessionID int64) (store.MilestonePlan, []store.TodoItem, error) {
+func (m App) loadPlanningState(ctx context.Context, sessionID int64) (store.MilestonePlan, []store.TodoItem, error) {
 	plan, err := m.store.GetMilestonePlan(ctx, sessionID)
 	if err != nil {
 		return store.MilestonePlan{}, nil, err
@@ -3902,7 +3898,7 @@ func newestChat(chats []domain.Chat) domain.Chat {
 	return best
 }
 
-func (m Model) promptCmd(ctx context.Context, prompt string, drafts []attachment.Draft, refs []reference.Draft) ui.Cmd {
+func (m App) promptCmd(ctx context.Context, prompt string, drafts []attachment.Draft, refs []reference.Draft) ui.Cmd {
 	return func() ui.Msg {
 		session := m.currentSession
 		chat := m.currentChat
@@ -3949,7 +3945,7 @@ func (m Model) promptCmd(ctx context.Context, prompt string, drafts []attachment
 	}
 }
 
-func (m *Model) submitBangPrompt(bang bangPrompt, followup bangFollowupMode) ui.Cmd {
+func (m *App) submitBangPrompt(bang bangPrompt, followup bangFollowupMode) ui.Cmd {
 	if len(m.draftAttachments) > 0 || len(m.draftReferences) > 0 {
 		m.status = "Bang commands do not support attachments or references"
 		return m.syncWindowTitleCmd()
@@ -3982,7 +3978,7 @@ func (m *Model) submitBangPrompt(bang bangPrompt, followup bangFollowupMode) ui.
 	return m.runBangPromptCmd(context.Background(), bang, followup, preserveBusy)
 }
 
-func (m Model) runBangPromptCmd(ctx context.Context, bang bangPrompt, followup bangFollowupMode, preserveBusy bool) ui.Cmd {
+func (m App) runBangPromptCmd(ctx context.Context, bang bangPrompt, followup bangFollowupMode, preserveBusy bool) ui.Cmd {
 	return func() ui.Msg {
 		session := m.currentSession
 		chat := m.currentChat
@@ -4041,7 +4037,7 @@ func (m Model) runBangPromptCmd(ctx context.Context, bang bangPrompt, followup b
 	}
 }
 
-func (m Model) continueCmd(ctx context.Context) ui.Cmd {
+func (m App) continueCmd(ctx context.Context) ui.Cmd {
 	return func() ui.Msg {
 		session := m.currentSession
 		chat := m.currentChat
@@ -4074,7 +4070,7 @@ func (m Model) continueCmd(ctx context.Context) ui.Cmd {
 	}
 }
 
-func (m Model) newSessionCmd() ui.Cmd {
+func (m App) newSessionCmd() ui.Cmd {
 	return func() ui.Msg {
 		ctx := context.Background()
 		allSessions, err := m.store.ListSessions(ctx)
@@ -4101,7 +4097,7 @@ func (m Model) newSessionCmd() ui.Cmd {
 	}
 }
 
-func (m Model) sessionPickerCmd() ui.Cmd {
+func (m App) sessionPickerCmd() ui.Cmd {
 	return func() ui.Msg {
 		allSessions, err := m.store.ListSessions(context.Background())
 		if err != nil {
@@ -4112,7 +4108,7 @@ func (m Model) sessionPickerCmd() ui.Cmd {
 	}
 }
 
-func (m Model) loadSessionCmd(sessionID int64) ui.Cmd {
+func (m App) loadSessionCmd(sessionID int64) ui.Cmd {
 	return func() ui.Msg {
 		if sessionID == 0 {
 			return nil
@@ -4209,7 +4205,7 @@ func (m Model) loadSessionCmd(sessionID int64) ui.Cmd {
 	}
 }
 
-func (m Model) loadChatCmd(sessionID, chatID int64) ui.Cmd {
+func (m App) loadChatCmd(sessionID, chatID int64) ui.Cmd {
 	return func() ui.Msg {
 		if sessionID == 0 || chatID == 0 {
 			return nil
@@ -4304,7 +4300,7 @@ func (m Model) loadChatCmd(sessionID, chatID int64) ui.Cmd {
 	}
 }
 
-func (m Model) createChatCmd(sessionID int64, role domain.WorkflowRole, title string) ui.Cmd {
+func (m App) createChatCmd(sessionID int64, role domain.WorkflowRole, title string) ui.Cmd {
 	return func() ui.Msg {
 		ctx := context.Background()
 		start := time.Now()
@@ -4323,7 +4319,7 @@ func (m Model) createChatCmd(sessionID int64, role domain.WorkflowRole, title st
 	}
 }
 
-func (m Model) recordLoadTiming(sessionID, chatID int64, step string, started time.Time, meta map[string]string) {
+func (m App) recordLoadTiming(sessionID, chatID int64, step string, started time.Time, meta map[string]string) {
 	if m.debug == nil || sessionID == 0 || started.IsZero() {
 		return
 	}
@@ -4338,7 +4334,7 @@ func (m Model) recordLoadTiming(sessionID, chatID int64, step string, started ti
 	m.debug.RecordLifecycle(sessionID, "chat_load_timing", step, meta)
 }
 
-func (m Model) recordStartupTiming(sessionID int64, step string, started time.Time, meta map[string]string) {
+func (m App) recordStartupTiming(sessionID int64, step string, started time.Time, meta map[string]string) {
 	if m.debug == nil || started.IsZero() {
 		return
 	}
@@ -4361,7 +4357,7 @@ func startupModeLabel(mode StartupMode) string {
 	}
 }
 
-func (m Model) agentsRefreshCmd(sessionID int64) ui.Cmd {
+func (m App) agentsRefreshCmd(sessionID int64) ui.Cmd {
 	return func() ui.Msg {
 		ctx := context.Background()
 		if _, err := m.agent.RefreshAgents(ctx, sessionID); err != nil {
@@ -4424,7 +4420,7 @@ func (m Model) agentsRefreshCmd(sessionID int64) ui.Cmd {
 	}
 }
 
-func (m Model) forkSessionCmd(sourceSessionID int64) ui.Cmd {
+func (m App) forkSessionCmd(sourceSessionID int64) ui.Cmd {
 	return func() ui.Msg {
 		ctx := context.Background()
 		forked, err := m.store.ForkSession(ctx, sourceSessionID)
@@ -4513,7 +4509,7 @@ func (m Model) forkSessionCmd(sourceSessionID int64) ui.Cmd {
 	}
 }
 
-func (m Model) reloadDetailsCmd() ui.Cmd {
+func (m App) reloadDetailsCmd() ui.Cmd {
 	return func() ui.Msg {
 		var msg ui.Msg
 		if m.currentChat.ID != 0 {
@@ -4530,7 +4526,7 @@ func (m Model) reloadDetailsCmd() ui.Cmd {
 	}
 }
 
-func (m Model) loadCurrentDetailsSync() (loadMsg, bool, error) {
+func (m App) loadCurrentDetailsSync() (loadMsg, bool, error) {
 	if m.currentSession.ID == 0 {
 		return loadMsg{}, false, nil
 	}
@@ -4650,10 +4646,10 @@ func RunWithWorkdir(cfg config.Config, st *store.Store, a *agent.Engine, mode St
 		return err
 	}
 	switch typed := finalModel.(type) {
-	case Model:
+	case App:
 		fmt.Println(typed.exitSummary())
 		return nil
-	case *Model:
+	case *App:
 		fmt.Println(typed.exitSummary())
 		return nil
 	}
@@ -4664,7 +4660,7 @@ func RunWithWorkdir(cfg config.Config, st *store.Store, a *agent.Engine, mode St
 	return nil
 }
 
-func (m Model) exitSummary() string {
+func (m App) exitSummary() string {
 	if m.currentSession.ID <= 0 {
 		return "Exited koder."
 	}
@@ -4708,7 +4704,7 @@ func mapsCloneToolStates(src map[domain.ToolKind]bool) map[domain.ToolKind]bool 
 	return dst
 }
 
-func (m *Model) loadChatState(chat domain.Chat, messages []domain.Message, parts map[int64][]domain.Part, approvals []store.Approval) {
+func (m *App) loadChatState(chat domain.Chat, messages []domain.Message, parts map[int64][]domain.Part, approvals []store.Approval) {
 	if chat.ID == 0 && len(messages) == 0 && len(parts) == 0 && len(approvals) == 0 {
 		m.chatState = nil
 		m.chatStateChatID = 0
@@ -4733,7 +4729,7 @@ func (m *Model) loadChatState(chat domain.Chat, messages []domain.Message, parts
 	m.syncChatMirrorsFromState()
 }
 
-func (m *Model) ensureChatState() *appstate.ChatState {
+func (m *App) ensureChatState() *appstate.ChatState {
 	if m.chatState == nil {
 		chat := m.currentChat
 		if m.currentRuntime != nil && m.currentSnapshot.Chat.ID != 0 {
@@ -4746,7 +4742,7 @@ func (m *Model) ensureChatState() *appstate.ChatState {
 	return m.chatState
 }
 
-func (m *Model) syncChatMirrorsFromState() {
+func (m *App) syncChatMirrorsFromState() {
 	if m.chatState == nil {
 		m.chatStateChatID = 0
 		return
@@ -4754,28 +4750,28 @@ func (m *Model) syncChatMirrorsFromState() {
 	m.currentChat = m.chatState.Chat()
 }
 
-func (m *Model) activeMessages() []domain.Message {
+func (m *App) activeMessages() []domain.Message {
 	if m.hasSnapshotChatState() {
 		return m.currentSnapshot.Messages
 	}
 	return nil
 }
 
-func (m *Model) activeParts() map[int64][]domain.Part {
+func (m *App) activeParts() map[int64][]domain.Part {
 	if m.hasSnapshotChatState() {
 		return m.currentSnapshot.Parts
 	}
 	return nil
 }
 
-func (m *Model) activeApprovals() []store.Approval {
+func (m *App) activeApprovals() []store.Approval {
 	if m.hasSnapshotChatState() {
 		return m.currentSnapshot.Approvals
 	}
 	return nil
 }
 
-func (m *Model) hasSnapshotChatState() bool {
+func (m *App) hasSnapshotChatState() bool {
 	return m.currentSnapshot.Chat.ID != 0 ||
 		len(m.currentSnapshot.Messages) > 0 ||
 		len(m.currentSnapshot.Parts) > 0 ||
@@ -4783,28 +4779,28 @@ func (m *Model) hasSnapshotChatState() bool {
 		len(m.currentSnapshot.QueuedInputs) > 0
 }
 
-func (m *Model) hasSnapshotPendingAssistant() bool {
+func (m *App) hasSnapshotPendingAssistant() bool {
 	return !m.currentSnapshot.PendingAssistant.CreatedAt.IsZero() ||
 		strings.TrimSpace(m.currentSnapshot.PendingAssistant.Text) != "" ||
 		strings.TrimSpace(m.currentSnapshot.PendingAssistant.Reasoning) != ""
 }
 
-func (m *Model) activeQueuedInputs() []domain.QueuedInput {
+func (m *App) activeQueuedInputs() []domain.QueuedInput {
 	if m.hasSnapshotChatState() {
 		return m.currentSnapshot.QueuedInputs
 	}
 	return m.currentChat.QueuedInputs
 }
 
-func (m *Model) activePendingAssistant() appstate.PendingAssistantTurn {
+func (m *App) activePendingAssistant() appstate.PendingAssistantTurn {
 	return m.currentSnapshot.PendingAssistant
 }
 
-func (m *Model) resetPendingAssistantState() {
+func (m *App) resetPendingAssistantState() {
 	m.currentSnapshot.PendingAssistant = appstate.PendingAssistantTurn{}
 }
 
-func (m *Model) appendPendingAssistantText(text string) {
+func (m *App) appendPendingAssistantText(text string) {
 	if strings.TrimSpace(text) == "" {
 		return
 	}
@@ -4816,7 +4812,7 @@ func (m *Model) appendPendingAssistantText(text string) {
 	m.currentSnapshot.PendingAssistant = pending
 }
 
-func (m *Model) appendPendingAssistantReasoning(text string) {
+func (m *App) appendPendingAssistantReasoning(text string) {
 	if strings.TrimSpace(text) == "" {
 		return
 	}
@@ -4828,7 +4824,7 @@ func (m *Model) appendPendingAssistantReasoning(text string) {
 	m.currentSnapshot.PendingAssistant = pending
 }
 
-func (m *Model) syncCurrentSnapshotFromState() {
+func (m *App) syncCurrentSnapshotFromState() {
 	if m.chatState == nil {
 		return
 	}
@@ -4842,21 +4838,21 @@ func (m *Model) syncCurrentSnapshotFromState() {
 	m.currentSnapshot.Approvals = m.chatState.Approvals()
 }
 
-func (m *Model) setCurrentSnapshotSessionTitle(title string) {
+func (m *App) setCurrentSnapshotSessionTitle(title string) {
 	if !m.hasSnapshotChatState() && m.currentSession.ID == 0 && m.currentSnapshot.Session.ID == 0 {
 		return
 	}
 	m.currentSnapshot.Session.Title = title
 }
 
-func (m *Model) setCurrentSnapshotPermissionProfile(profile string) {
+func (m *App) setCurrentSnapshotPermissionProfile(profile string) {
 	if !m.hasSnapshotChatState() && m.currentSession.ID == 0 && m.currentSnapshot.Session.ID == 0 {
 		return
 	}
 	m.currentSnapshot.Session.PermissionProfile = profile
 }
 
-func (m *Model) setCurrentSnapshotContextAnchor(tokens int, known bool) {
+func (m *App) setCurrentSnapshotContextAnchor(tokens int, known bool) {
 	if !m.hasSnapshotChatState() && m.currentChat.ID == 0 && m.currentSnapshot.Chat.ID == 0 {
 		return
 	}
@@ -4864,7 +4860,7 @@ func (m *Model) setCurrentSnapshotContextAnchor(tokens int, known bool) {
 	m.currentSnapshot.Chat.ContextTokensKnown = known
 }
 
-func (m *Model) detachCurrentRuntime() {
+func (m *App) detachCurrentRuntime() {
 	if m.currentRuntimeUnsub != nil {
 		m.currentRuntimeUnsub()
 	}
@@ -4874,7 +4870,7 @@ func (m *Model) detachCurrentRuntime() {
 	m.currentSnapshot = chatpkg.Snapshot{}
 }
 
-func (m *Model) attachCurrentRuntime(session domain.Session, chat domain.Chat) (<-chan chatpkg.Update, *chatpkg.Chat, error) {
+func (m *App) attachCurrentRuntime(session domain.Session, chat domain.Chat) (<-chan chatpkg.Update, *chatpkg.Chat, error) {
 	if m.agent == nil || chat.ID == 0 {
 		return nil, nil, nil
 	}
@@ -4893,7 +4889,7 @@ func (m *Model) attachCurrentRuntime(session domain.Session, chat domain.Chat) (
 	return updates, rt, nil
 }
 
-func (m *Model) applyRuntimeSnapshot(snapshot chatpkg.Snapshot) {
+func (m *App) applyRuntimeSnapshot(snapshot chatpkg.Snapshot) {
 	m.currentSnapshot = snapshot
 	if snapshot.Session.ID != 0 {
 		m.currentSession = m.normalizeSessionToolStates(snapshot.Session)
@@ -4921,7 +4917,7 @@ func (m *Model) applyRuntimeSnapshot(snapshot chatpkg.Snapshot) {
 	m.ensureContextEstimateFromState()
 }
 
-func (m *Model) applyRuntimeTelemetryEvent(evt domain.Event) {
+func (m *App) applyRuntimeTelemetryEvent(evt domain.Event) {
 	switch evt.Kind {
 	case domain.EventKindUsage:
 		m.liveUsage = m.liveUsage.Add(evt.Usage)
@@ -4943,7 +4939,7 @@ func (m *Model) applyRuntimeTelemetryEvent(evt domain.Event) {
 	}
 }
 
-func (m *Model) syncBusyFromRuntimeUpdate(update chatpkg.Update) {
+func (m *App) syncBusyFromRuntimeUpdate(update chatpkg.Update) {
 	m.status = update.StatusText
 	if !update.Active {
 		if update.StatusText != "" {
@@ -4989,7 +4985,7 @@ func max(a, b int) int {
 	return b
 }
 
-func (m Model) UpdateLoad(msg loadMsg) Model {
+func (m App) UpdateLoad(msg loadMsg) App {
 	m.sessions = make([]domain.Session, 0, len(msg.sessions))
 	for _, session := range msg.sessions {
 		m.sessions = append(m.sessions, m.normalizeSessionToolStates(session))
@@ -5032,7 +5028,7 @@ func (m Model) UpdateLoad(msg loadMsg) Model {
 	return m
 }
 
-func (m *Model) handleLocalCommand(prompt string) (ui.Model, ui.Cmd, bool) {
+func (m *App) handleLocalCommand(prompt string) (ui.Model, ui.Cmd, bool) {
 	trimmed := strings.TrimSpace(prompt)
 	switch {
 	case trimmed == "/new":
@@ -5166,7 +5162,7 @@ func (m *Model) handleLocalCommand(prompt string) (ui.Model, ui.Cmd, bool) {
 	}
 }
 
-func (m *Model) switchChatByDelta(delta int) ui.Cmd {
+func (m *App) switchChatByDelta(delta int) ui.Cmd {
 	if len(m.chats) <= 1 {
 		m.status = "No other chats in this session"
 		return m.syncWindowTitleCmd()
@@ -5187,14 +5183,14 @@ func (m *Model) switchChatByDelta(delta int) ui.Cmd {
 	return ui.Batch(m.loadChatCmd(next.SessionID, next.ID), m.spinnerCmdIfNeeded())
 }
 
-func (m Model) approvalPermissionProfileCmd(ctx context.Context, approvalID int64, profile string) ui.Cmd {
+func (m App) approvalPermissionProfileCmd(ctx context.Context, approvalID int64, profile string) ui.Cmd {
 	return func() ui.Msg {
 		events, err := m.agent.SetPermissionProfileInChatAndReevaluateApproval(ctx, m.currentSession.ID, m.currentChat.ID, approvalID, profile)
 		return promptDoneMsg{events: events, err: err}
 	}
 }
 
-func (m *Model) beginActiveOperation() context.Context {
+func (m *App) beginActiveOperation() context.Context {
 	chatID := m.currentChatID()
 	if chatID == 0 {
 		if m.activeOpCancel != nil {
@@ -5218,7 +5214,7 @@ func (m *Model) beginActiveOperation() context.Context {
 	return ctx
 }
 
-func (m *Model) handleInterruptKey() (ui.Model, ui.Cmd) {
+func (m *App) handleInterruptKey() (ui.Model, ui.Cmd) {
 	if !m.canInterruptActiveOperation() {
 		return m, nil
 	}
@@ -5243,7 +5239,7 @@ func (m *Model) handleInterruptKey() (ui.Model, ui.Cmd) {
 	return m, m.syncWindowTitleCmd()
 }
 
-func (m *Model) canInterruptActiveOperation() bool {
+func (m *App) canInterruptActiveOperation() bool {
 	if m.currentRuntime != nil {
 		_, _, active := m.currentRuntime.Status()
 		if active {
@@ -5253,7 +5249,7 @@ func (m *Model) canInterruptActiveOperation() bool {
 	return m.activeOpCancel != nil || (m.activeOpCancels != nil && m.activeOpCancels[m.currentChatID()] != nil)
 }
 
-func (m *Model) queueComposerPrompt(kind domain.QueuedInputKind) (ui.Model, ui.Cmd) {
+func (m *App) queueComposerPrompt(kind domain.QueuedInputKind) (ui.Model, ui.Cmd) {
 	prompt := strings.TrimSpace(m.composer.Value())
 	if prompt == "" && len(m.draftAttachments) == 0 && len(m.draftReferences) == 0 {
 		return m, nil
@@ -5279,7 +5275,7 @@ func (m *Model) queueComposerPrompt(kind domain.QueuedInputKind) (ui.Model, ui.C
 	return m, ui.Batch(m.saveQueuedInputsCmd(m.currentChat.ID, items), m.syncWindowTitleCmd())
 }
 
-func (m *Model) queueContinuePrompt() (ui.Model, ui.Cmd) {
+func (m *App) queueContinuePrompt() (ui.Model, ui.Cmd) {
 	if ok, status := m.canContinue(); !ok {
 		m.status = status
 		return m, m.syncWindowTitleCmd()
@@ -5295,7 +5291,7 @@ func (m *Model) queueContinuePrompt() (ui.Model, ui.Cmd) {
 	return m, ui.Batch(m.saveQueuedInputsCmd(m.currentChat.ID, items), m.syncWindowTitleCmd())
 }
 
-func (m *Model) popQueuedPromptForEditing() (ui.Model, ui.Cmd) {
+func (m *App) popQueuedPromptForEditing() (ui.Model, ui.Cmd) {
 	items := cloneQueuedInputs(m.activeQueuedInputs())
 	if len(items) == 0 {
 		return m, nil
@@ -5336,7 +5332,7 @@ func (m *Model) popQueuedPromptForEditing() (ui.Model, ui.Cmd) {
 	return m, ui.Batch(m.saveQueuedInputsCmd(m.currentChat.ID, items), m.syncWindowTitleCmd())
 }
 
-func (m *Model) dequeuePromptCmd() ui.Cmd {
+func (m *App) dequeuePromptCmd() ui.Cmd {
 	if m.loading {
 		return nil
 	}
@@ -5370,7 +5366,7 @@ func (m *Model) dequeuePromptCmd() ui.Cmd {
 	return m.saveAndDispatchQueuedInputCmd(m.currentChat.ID, items, item)
 }
 
-func (m Model) ensureRuntimeContextWindow(ctx context.Context, session domain.Session) (string, int, bool, error) {
+func (m App) ensureRuntimeContextWindow(ctx context.Context, session domain.Session) (string, int, bool, error) {
 	start := time.Now()
 	providerID := strings.TrimSpace(session.ProviderID)
 	providerCfg, ok := m.cfg.Provider(providerID)
@@ -5425,7 +5421,7 @@ func (m Model) ensureRuntimeContextWindow(ctx context.Context, session domain.Se
 	return providerID, contextWindow, true, nil
 }
 
-func (m Model) kickoffPromptCmd(prompt string, drafts []attachment.Draft, refs []reference.Draft) ui.Cmd {
+func (m App) kickoffPromptCmd(prompt string, drafts []attachment.Draft, refs []reference.Draft) ui.Cmd {
 	return ui.Tick(time.Millisecond, func(time.Time) ui.Msg {
 		return kickoffPromptMsg{
 			Prompt:      prompt,
@@ -5435,11 +5431,11 @@ func (m Model) kickoffPromptCmd(prompt string, drafts []attachment.Draft, refs [
 	})
 }
 
-func (m *Model) resetComposerHistory() {
+func (m *App) resetComposerHistory() {
 	m.composerHistory = composerHistoryState{}
 }
 
-func (m *Model) resetComposerInput() {
+func (m *App) resetComposerInput() {
 	m.composer.Reset()
 	m.resetComposerHistory()
 	m.composerQueries = composerQueryState{}
@@ -5447,7 +5443,7 @@ func (m *Model) resetComposerInput() {
 	m.invalidateFooterCache()
 }
 
-func (m *Model) setComposerValue(value string) {
+func (m *App) setComposerValue(value string) {
 	m.composer.SetValue(value)
 	m.composer.SetCursor(len(value))
 	m.composerQueries = composerQueryState{}
@@ -5455,13 +5451,13 @@ func (m *Model) setComposerValue(value string) {
 	m.invalidateFooterCache()
 }
 
-func (m *Model) setComposerDraftValue(value string) {
+func (m *App) setComposerDraftValue(value string) {
 	numberDraftAttachmentTokens(m.draftAttachments)
 	m.setComposerValue(m.decorateComposerTextWithAttachments(value, m.draftAttachments))
 	m.hydrateComposerTokens()
 }
 
-func (m Model) composerPromptHistory() []string {
+func (m App) composerPromptHistory() []string {
 	messages := m.activeMessages()
 	entries := make([]string, 0, len(messages))
 	for _, msg := range messages {
@@ -5475,7 +5471,7 @@ func (m Model) composerPromptHistory() []string {
 	return entries
 }
 
-func (m Model) messagePromptText(messageID int64, fallback string) string {
+func (m App) messagePromptText(messageID int64, fallback string) string {
 	parts := m.activeParts()[messageID]
 	var body strings.Builder
 	for _, part := range parts {
@@ -5490,7 +5486,7 @@ func (m Model) messagePromptText(messageID int64, fallback string) string {
 	return strings.TrimSpace(fallback)
 }
 
-func (m *Model) recallComposerHistory(delta int) bool {
+func (m *App) recallComposerHistory(delta int) bool {
 	history := m.composerPromptHistory()
 	if len(history) == 0 {
 		return false
@@ -5522,7 +5518,7 @@ func (m *Model) recallComposerHistory(delta int) bool {
 	return true
 }
 
-func (m *Model) openComposerHistorySearch() bool {
+func (m *App) openComposerHistorySearch() bool {
 	history := m.filteredComposerHistory("")
 	if len(history) == 0 {
 		m.status = "No prompt history in this session"
@@ -5540,11 +5536,11 @@ func (m *Model) openComposerHistorySearch() bool {
 	return true
 }
 
-func (m *Model) hasComposerHistoryMenu() bool {
+func (m *App) hasComposerHistoryMenu() bool {
 	return m.composerHistory.SearchActive
 }
 
-func (m *Model) filteredComposerHistory(query string) []string {
+func (m *App) filteredComposerHistory(query string) []string {
 	history := m.composerPromptHistory()
 	if len(history) == 0 {
 		return nil
@@ -5565,7 +5561,7 @@ func (m *Model) filteredComposerHistory(query string) []string {
 	return matches
 }
 
-func (m *Model) composerHistorySelection() (string, bool) {
+func (m *App) composerHistorySelection() (string, bool) {
 	matches := m.filteredComposerHistory(m.composerHistory.SearchQuery)
 	if len(matches) == 0 {
 		return "", false
@@ -5579,7 +5575,7 @@ func (m *Model) composerHistorySelection() (string, bool) {
 	return matches[m.composerHistory.SearchIndex], true
 }
 
-func (m *Model) moveComposerHistorySelection(delta int) {
+func (m *App) moveComposerHistorySelection(delta int) {
 	matches := m.filteredComposerHistory(m.composerHistory.SearchQuery)
 	if len(matches) == 0 {
 		m.composerHistory.SearchIndex = 0
@@ -5594,12 +5590,12 @@ func (m *Model) moveComposerHistorySelection(delta int) {
 	}
 }
 
-func (m *Model) appendComposerHistoryQuery(fragment string) {
+func (m *App) appendComposerHistoryQuery(fragment string) {
 	m.composerHistory.SearchQuery += fragment
 	m.composerHistory.SearchIndex = 0
 }
 
-func (m *Model) trimComposerHistoryQuery(byWord bool) {
+func (m *App) trimComposerHistoryQuery(byWord bool) {
 	if m.composerHistory.SearchQuery == "" {
 		return
 	}
@@ -5607,7 +5603,7 @@ func (m *Model) trimComposerHistoryQuery(byWord bool) {
 	m.composerHistory.SearchIndex = 0
 }
 
-func (m *Model) acceptComposerHistorySelection() bool {
+func (m *App) acceptComposerHistorySelection() bool {
 	value, ok := m.composerHistorySelection()
 	if !ok {
 		m.status = "No matching prompt history entry"
@@ -5619,12 +5615,12 @@ func (m *Model) acceptComposerHistorySelection() bool {
 	return true
 }
 
-func (m *Model) cancelComposerHistorySearch() {
+func (m *App) cancelComposerHistorySearch() {
 	m.resetComposerHistory()
 	m.status = "History search cancelled"
 }
 
-func (m *Model) finishOperationWithError(err error) (ui.Model, ui.Cmd) {
+func (m *App) finishOperationWithError(err error) (ui.Model, ui.Cmd) {
 	if errors.Is(err, context.Canceled) {
 		m.status = "Interrupted"
 		if m.busy.active {
@@ -5643,7 +5639,7 @@ func (m *Model) finishOperationWithError(err error) (ui.Model, ui.Cmd) {
 	return *m, m.syncWindowTitleCmd()
 }
 
-func (m Model) compactCmd(ctx context.Context) ui.Cmd {
+func (m App) compactCmd(ctx context.Context) ui.Cmd {
 	if m.currentRuntime != nil && m.currentChat.ID > 0 {
 		return func() ui.Msg {
 			err := m.currentRuntime.Compact()
@@ -5656,7 +5652,7 @@ func (m Model) compactCmd(ctx context.Context) ui.Cmd {
 	}
 }
 
-func (m Model) approveCmd(ctx context.Context, approvalID int64) ui.Cmd {
+func (m App) approveCmd(ctx context.Context, approvalID int64) ui.Cmd {
 	if m.currentRuntime != nil && m.currentChat.ID > 0 {
 		return func() ui.Msg {
 			m.currentRuntime.Approve(approvalID)
@@ -5669,7 +5665,7 @@ func (m Model) approveCmd(ctx context.Context, approvalID int64) ui.Cmd {
 	}
 }
 
-func (m Model) approveWithRuleCmd(ctx context.Context, approvalID int64, rule domain.PermissionOverride) ui.Cmd {
+func (m App) approveWithRuleCmd(ctx context.Context, approvalID int64, rule domain.PermissionOverride) ui.Cmd {
 	if m.currentRuntime != nil && m.currentChat.ID > 0 {
 		return func() ui.Msg {
 			m.currentRuntime.ApproveWithRule(approvalID, rule)
@@ -5682,7 +5678,7 @@ func (m Model) approveWithRuleCmd(ctx context.Context, approvalID int64, rule do
 	}
 }
 
-func (m Model) denyCmd(ctx context.Context, approvalID int64) ui.Cmd {
+func (m App) denyCmd(ctx context.Context, approvalID int64) ui.Cmd {
 	if m.currentRuntime != nil && m.currentChat.ID > 0 {
 		return func() ui.Msg {
 			m.currentRuntime.Deny(approvalID)
@@ -5695,12 +5691,12 @@ func (m Model) denyCmd(ctx context.Context, approvalID int64) ui.Cmd {
 	}
 }
 
-func (m *Model) quit() (ui.Model, ui.Cmd) {
+func (m *App) quit() (ui.Model, ui.Cmd) {
 	m.stopBusyWithStatus("Quitting")
 	return m, ui.Quit
 }
 
-func (m *Model) appendLocalUserPrompt(prompt string, drafts []attachment.Draft, refs []reference.Draft) {
+func (m *App) appendLocalUserPrompt(prompt string, drafts []attachment.Draft, refs []reference.Draft) {
 	now := time.Now().UTC()
 	messageID := m.nextPendingID()
 	message := domain.Message{
@@ -5759,11 +5755,11 @@ func (m *Model) appendLocalUserPrompt(prompt string, drafts []attachment.Draft, 
 	m.refreshViewport()
 }
 
-func (m *Model) appendUserPromptTranscriptItem(record *appstate.MessageRecord) bool {
+func (m *App) appendUserPromptTranscriptItem(record *appstate.MessageRecord) bool {
 	return m.appendMessageRecordTranscriptItem(record)
 }
 
-func (m *Model) appendLocalAssistantError(err error) {
+func (m *App) appendLocalAssistantError(err error) {
 	if err == nil {
 		return
 	}
@@ -5797,7 +5793,7 @@ func (m *Model) appendLocalAssistantError(err error) {
 	m.refreshViewport()
 }
 
-func (m *Model) appendLocalTranscriptNotice(body, kind, severity string) {
+func (m *App) appendLocalTranscriptNotice(body, kind, severity string) {
 	body = strings.TrimSpace(body)
 	if body == "" {
 		return
@@ -5831,28 +5827,28 @@ func (m *Model) appendLocalTranscriptNotice(body, kind, severity string) {
 	m.refreshViewport()
 }
 
-func (m Model) clipboardReadText() (string, error) {
+func (m App) clipboardReadText() (string, error) {
 	if m.readClipboardText != nil {
 		return m.readClipboardText()
 	}
 	return kclipboard.ReadText()
 }
 
-func (m Model) clipboardReadImage() ([]byte, error) {
+func (m App) clipboardReadImage() ([]byte, error) {
 	if m.readClipboardImage != nil {
 		return m.readClipboardImage()
 	}
 	return kclipboard.ReadImage()
 }
 
-func (m Model) clipboardWriteText(text string) error {
+func (m App) clipboardWriteText(text string) error {
 	if m.writeClipboardText != nil {
 		return m.writeClipboardText(text)
 	}
 	return kclipboard.WriteText(text)
 }
 
-func (m *Model) pasteClipboardText() (ui.Model, ui.Cmd) {
+func (m *App) pasteClipboardText() (ui.Model, ui.Cmd) {
 	image, err := m.clipboardReadImage()
 	if err == nil && len(image) > 0 {
 		draft, err := m.attachmentFiles.ImportClipboardImage(image)
@@ -5895,7 +5891,7 @@ func (m *Model) pasteClipboardText() (ui.Model, ui.Cmd) {
 	return m, m.syncWindowTitleCmd()
 }
 
-func (m *Model) imageAttachmentStatus(draft attachment.Draft) string {
+func (m *App) imageAttachmentStatus(draft attachment.Draft) string {
 	session := m.draftSession()
 	if strings.TrimSpace(session.ProviderID) == "" || strings.TrimSpace(session.ModelID) == "" {
 		return fmt.Sprintf("Attached image %s", draft.Name)
@@ -5910,7 +5906,7 @@ func (m *Model) imageAttachmentStatus(draft attachment.Draft) string {
 	return fmt.Sprintf("Attached image %s", draft.Name)
 }
 
-func (m *Model) syncDraftReferencesFromComposer() {
+func (m *App) syncDraftReferencesFromComposer() {
 	if len(m.draftReferences) == 0 {
 		return
 	}
@@ -5937,7 +5933,7 @@ func (m *Model) syncDraftReferencesFromComposer() {
 	m.draftReferences = synced
 }
 
-func (m *Model) hydrateComposerTokens() {
+func (m *App) hydrateComposerTokens() {
 	value := m.composer.Value()
 	for _, draft := range m.draftAttachments {
 		token := draftAttachmentToken(draft)
@@ -5967,7 +5963,7 @@ func (m *Model) hydrateComposerTokens() {
 	}
 }
 
-func (m *Model) syncDraftAttachmentsFromComposer() {
+func (m *App) syncDraftAttachmentsFromComposer() {
 	if len(m.draftAttachments) == 0 {
 		return
 	}
@@ -5985,7 +5981,7 @@ func (m *Model) syncDraftAttachmentsFromComposer() {
 	m.draftAttachments = synced
 }
 
-func (m *Model) insertDraftAttachment(draft attachment.Draft) {
+func (m *App) insertDraftAttachment(draft attachment.Draft) {
 	m.draftAttachments = append(m.draftAttachments, draft)
 	numberDraftAttachmentTokens(m.draftAttachments)
 	draft = m.draftAttachments[len(m.draftAttachments)-1]
@@ -6000,7 +5996,7 @@ func (m *Model) insertDraftAttachment(draft attachment.Draft) {
 	m.invalidateFooterCache()
 }
 
-func (m Model) decorateComposerTextWithAttachments(text string, drafts []attachment.Draft) string {
+func (m App) decorateComposerTextWithAttachments(text string, drafts []attachment.Draft) string {
 	if len(drafts) == 0 {
 		return text
 	}
@@ -6015,7 +6011,7 @@ func (m Model) decorateComposerTextWithAttachments(text string, drafts []attachm
 	return prefix + " " + text
 }
 
-func (m Model) submissionPromptText() string {
+func (m App) submissionPromptText() string {
 	return stripAttachmentPlaceholders(m.composer.Value(), m.draftAttachments)
 }
 
@@ -6036,7 +6032,7 @@ func stripAttachmentPlaceholders(value string, drafts []attachment.Draft) string
 	return strings.TrimSpace(trimmed)
 }
 
-func (m Model) pastedAttachmentPath(text string) string {
+func (m App) pastedAttachmentPath(text string) string {
 	path := strings.TrimSpace(text)
 	if path == "" || strings.ContainsRune(path, '\n') {
 		return ""
@@ -6054,7 +6050,7 @@ func (m Model) pastedAttachmentPath(text string) string {
 	return path
 }
 
-func (m *Model) copyLatestAssistantMessage() (ui.Model, ui.Cmd) {
+func (m *App) copyLatestAssistantMessage() (ui.Model, ui.Cmd) {
 	text := strings.TrimSpace(m.latestAssistantCopyText())
 	if text == "" {
 		m.status = "No assistant message to copy"
@@ -6068,7 +6064,7 @@ func (m *Model) copyLatestAssistantMessage() (ui.Model, ui.Cmd) {
 	return m, m.syncWindowTitleCmd()
 }
 
-func (m Model) latestAssistantCopyText() string {
+func (m App) latestAssistantCopyText() string {
 	renderer := newTranscriptRenderer(&m)
 	messages := m.activeMessages()
 	parts := m.activeParts()
@@ -6088,7 +6084,7 @@ func (m Model) latestAssistantCopyText() string {
 	return ""
 }
 
-func (m *Model) nextPendingID() int64 {
+func (m *App) nextPendingID() int64 {
 	m.pendingPartID--
 	if m.pendingPartID == 0 {
 		m.pendingPartID = -1
@@ -6096,14 +6092,14 @@ func (m *Model) nextPendingID() int64 {
 	return m.pendingPartID
 }
 
-func (m *Model) currentChatID() int64 {
+func (m *App) currentChatID() int64 {
 	if m.currentChat.ID > 0 {
 		return m.currentChat.ID
 	}
 	return 0
 }
 
-func (m *Model) applyQueuedInputs(items []domain.QueuedInput) {
+func (m *App) applyQueuedInputs(items []domain.QueuedInput) {
 	cloned := cloneQueuedInputs(items)
 	m.currentChat.QueuedInputs = cloneQueuedInputs(cloned)
 	if m.hasSnapshotChatState() || m.currentRuntime != nil {
@@ -6123,13 +6119,13 @@ func (m *Model) applyQueuedInputs(items []domain.QueuedInput) {
 	}
 }
 
-func (m *Model) setQueuedInputs(items []domain.QueuedInput) {
+func (m *App) setQueuedInputs(items []domain.QueuedInput) {
 	m.applyQueuedInputs(items)
 	m.clampQueueSelection()
 	m.invalidateFooterCache()
 }
 
-func (m *Model) clampQueueSelection() {
+func (m *App) clampQueueSelection() {
 	count := len(m.activeQueuedInputs())
 	if count == 0 {
 		m.queueSelection = 0
@@ -6144,7 +6140,7 @@ func (m *Model) clampQueueSelection() {
 	}
 }
 
-func (m *Model) selectedQueuedInputIndex() int {
+func (m *App) selectedQueuedInputIndex() int {
 	m.clampQueueSelection()
 	if len(m.activeQueuedInputs()) == 0 {
 		return -1
@@ -6152,7 +6148,7 @@ func (m *Model) selectedQueuedInputIndex() int {
 	return m.queueSelection
 }
 
-func (m *Model) moveQueueSelection(delta int) {
+func (m *App) moveQueueSelection(delta int) {
 	if len(m.activeQueuedInputs()) == 0 {
 		return
 	}
@@ -6161,7 +6157,7 @@ func (m *Model) moveQueueSelection(delta int) {
 	m.invalidateFooterCache()
 }
 
-func (m Model) saveQueuedInputsCmd(chatID int64, items []domain.QueuedInput) ui.Cmd {
+func (m App) saveQueuedInputsCmd(chatID int64, items []domain.QueuedInput) ui.Cmd {
 	if chatID == 0 {
 		return nil
 	}
@@ -6179,7 +6175,7 @@ func (m Model) saveQueuedInputsCmd(chatID int64, items []domain.QueuedInput) ui.
 	}
 }
 
-func (m Model) saveAndDispatchQueuedInputCmd(chatID int64, items []domain.QueuedInput, item domain.QueuedInput) ui.Cmd {
+func (m App) saveAndDispatchQueuedInputCmd(chatID int64, items []domain.QueuedInput, item domain.QueuedInput) ui.Cmd {
 	clonedItems := cloneQueuedInputs(items)
 	clonedItem := item
 	clonedItem.Attachments = append([]domain.QueuedAttachment(nil), item.Attachments...)
@@ -6208,7 +6204,7 @@ func (m Model) saveAndDispatchQueuedInputCmd(chatID int64, items []domain.Queued
 	}
 }
 
-func (m *Model) reorderSelectedQueuedInput(delta int) ui.Cmd {
+func (m *App) reorderSelectedQueuedInput(delta int) ui.Cmd {
 	items := cloneQueuedInputs(m.activeQueuedInputs())
 	idx := m.selectedQueuedInputIndex()
 	if idx < 0 {
@@ -6225,7 +6221,7 @@ func (m *Model) reorderSelectedQueuedInput(delta int) ui.Cmd {
 	return ui.Batch(m.saveQueuedInputsCmd(m.currentChat.ID, items), m.syncWindowTitleCmd())
 }
 
-func (m *Model) toggleSelectedQueuedInputHeld() ui.Cmd {
+func (m *App) toggleSelectedQueuedInputHeld() ui.Cmd {
 	items := cloneQueuedInputs(m.activeQueuedInputs())
 	idx := m.selectedQueuedInputIndex()
 	if idx < 0 {
@@ -6241,7 +6237,7 @@ func (m *Model) toggleSelectedQueuedInputHeld() ui.Cmd {
 	return ui.Batch(m.saveQueuedInputsCmd(m.currentChat.ID, items), m.syncWindowTitleCmd())
 }
 
-func (m *Model) deleteSelectedQueuedInput() ui.Cmd {
+func (m *App) deleteSelectedQueuedInput() ui.Cmd {
 	items := cloneQueuedInputs(m.activeQueuedInputs())
 	idx := m.selectedQueuedInputIndex()
 	if idx < 0 {
@@ -6253,7 +6249,7 @@ func (m *Model) deleteSelectedQueuedInput() ui.Cmd {
 	return ui.Batch(m.saveQueuedInputsCmd(m.currentChat.ID, items), m.syncWindowTitleCmd())
 }
 
-func (m *Model) nextDispatchableQueuedInputIndex(activeTurn bool) int {
+func (m *App) nextDispatchableQueuedInputIndex(activeTurn bool) int {
 	priority := []domain.QueuedInputKind{
 		domain.QueuedInputKindSteer,
 		domain.QueuedInputKindRejectedSteer,
@@ -6274,7 +6270,7 @@ func (m *Model) nextDispatchableQueuedInputIndex(activeTurn bool) int {
 	return -1
 }
 
-func (m *Model) syncCurrentChatBusy() {
+func (m *App) syncCurrentChatBusy() {
 	chatID := m.currentChatID()
 	if chatID == 0 {
 		return
@@ -6299,7 +6295,7 @@ func (m *Model) syncCurrentChatBusy() {
 	m.activeOpCancel = nil
 }
 
-func (m *Model) syncBusyState() {
+func (m *App) syncBusyState() {
 	if chatID := m.currentChatID(); chatID > 0 {
 		if m.chatBusy == nil {
 			m.chatBusy = map[int64]busyModel{}
@@ -6308,7 +6304,7 @@ func (m *Model) syncBusyState() {
 	}
 }
 
-func (m *Model) startBusy(scope busyScope, status string) {
+func (m *App) startBusy(scope busyScope, status string) {
 	wasAtBottom := m.viewport.AtBottom()
 	m.loading = true
 	m.status = status
@@ -6322,7 +6318,7 @@ func (m *Model) startBusy(scope busyScope, status string) {
 	m.refreshViewportForLayoutChange(wasAtBottom)
 }
 
-func (m *Model) stopBusy() {
+func (m *App) stopBusy() {
 	wasAtBottom := m.viewport.AtBottom()
 	m.loading = false
 	m.activeEventStream = false
@@ -6341,12 +6337,12 @@ func (m *Model) stopBusy() {
 	m.refreshViewportForLayoutChange(wasAtBottom)
 }
 
-func (m *Model) stopBusyWithStatus(status string) {
+func (m *App) stopBusyWithStatus(status string) {
 	m.stopBusy()
 	m.status = status
 }
 
-func (m *Model) refreshViewportForLayoutChange(wasAtBottom bool) {
+func (m *App) refreshViewportForLayoutChange(wasAtBottom bool) {
 	if wasAtBottom {
 		m.refreshViewport()
 		return
@@ -6354,7 +6350,7 @@ func (m *Model) refreshViewportForLayoutChange(wasAtBottom bool) {
 	m.refreshViewportPreserve()
 }
 
-func (m *Model) startWaitingForLLM() {
+func (m *App) startWaitingForLLM() {
 	m.startBusy(busyScopeTranscript, "Waiting for LLM response")
 	m.busy.setTranscriptPhase(transcriptBusyPhaseWaiting)
 	m.status = m.transcriptBusyStatus()
@@ -6362,7 +6358,7 @@ func (m *Model) startWaitingForLLM() {
 	m.syncBusyState()
 }
 
-func (m *Model) setTranscriptBusyPhase(phase transcriptBusyPhase) {
+func (m *App) setTranscriptBusyPhase(phase transcriptBusyPhase) {
 	m.startBusy(busyScopeTranscript, m.statusOrIdle())
 	m.busy.setTranscriptPhase(phase)
 	m.status = m.transcriptBusyStatus()
@@ -6370,7 +6366,7 @@ func (m *Model) setTranscriptBusyPhase(phase transcriptBusyPhase) {
 	m.syncBusyState()
 }
 
-func (m *Model) startTranscriptTool() {
+func (m *App) startTranscriptTool() {
 	if !m.busy.active || m.busy.scope != busyScopeTranscript {
 		m.startBusy(busyScopeTranscript, "Running tool")
 	}
@@ -6380,7 +6376,7 @@ func (m *Model) startTranscriptTool() {
 	m.syncBusyState()
 }
 
-func (m *Model) finishTranscriptTool() {
+func (m *App) finishTranscriptTool() {
 	if !m.busy.active || m.busy.scope != busyScopeTranscript {
 		return
 	}
@@ -6390,7 +6386,7 @@ func (m *Model) finishTranscriptTool() {
 	m.syncBusyState()
 }
 
-func (m *Model) syncDebugRuntime() {
+func (m *App) syncDebugRuntime() {
 	if m.debug == nil {
 		return
 	}
@@ -6548,7 +6544,7 @@ func (m *Model) syncDebugRuntime() {
 	m.debugRuntimeHash = runtimeHash
 }
 
-func (m *Model) syncDebugFrame(surface ui.Surface) {
+func (m *App) syncDebugFrame(surface ui.Surface) {
 	if m.debug == nil || !m.debug.DeepDebug() {
 		return
 	}
@@ -6589,7 +6585,7 @@ func debugBusyScopeName(scope busyScope) string {
 	}
 }
 
-func (m Model) debugTranscriptItems() []debugsrv.TranscriptItemRef {
+func (m App) debugTranscriptItems() []debugsrv.TranscriptItemRef {
 	retained := m.syncRetainedTranscript()
 	if retained == nil {
 		return nil
@@ -6667,7 +6663,7 @@ func countBlankSurfaceRows(surface ui.Surface) int {
 	return blank
 }
 
-func (m Model) currentError() string {
+func (m App) currentError() string {
 	status := strings.TrimSpace(m.status)
 	if strings.HasPrefix(status, "Error:") {
 		return status
@@ -6675,7 +6671,7 @@ func (m Model) currentError() string {
 	return ""
 }
 
-func (m Model) openDialogName() string {
+func (m App) openDialogName() string {
 	switch {
 	case m.hasModelDialog():
 		return "model"
@@ -6704,7 +6700,7 @@ func (m Model) openDialogName() string {
 	}
 }
 
-func (m Model) recordEvent(chatID int64, evt domain.Event) {
+func (m App) recordEvent(chatID int64, evt domain.Event) {
 	if m.debug == nil {
 		return
 	}
@@ -6720,7 +6716,7 @@ func (m Model) recordEvent(chatID int64, evt domain.Event) {
 	m.debug.RecordEvent(sessionID, evt)
 }
 
-func (m *Model) spinnerCmdIfNeeded() ui.Cmd {
+func (m *App) spinnerCmdIfNeeded() ui.Cmd {
 	if !m.busy.spinner.active {
 		return nil
 	}
@@ -6741,14 +6737,14 @@ func (b busyModel) statusOrDefault(fallback string) string {
 	return fallback
 }
 
-func (m Model) transcriptBusyStatus() string {
+func (m App) transcriptBusyStatus() string {
 	if label := strings.TrimSpace(m.busy.transcriptStatusLabel()); label != "" {
 		return label
 	}
 	return m.busy.statusOrDefault("Working ...")
 }
 
-func (m Model) statusOrIdle() string {
+func (m App) statusOrIdle() string {
 	status := strings.TrimSpace(m.status)
 	if status == "" {
 		return "Idle"
@@ -6756,11 +6752,11 @@ func (m Model) statusOrIdle() string {
 	return status
 }
 
-func (m *Model) shouldAnimateSpinner() bool {
+func (m *App) shouldAnimateSpinner() bool {
 	return m.busy.spinner.active || m.hasPreferencesDialog()
 }
 
-func (m *Model) canSendPrompt() (bool, string) {
+func (m *App) canSendPrompt() (bool, string) {
 	session := m.draftSession()
 	if strings.TrimSpace(session.ProviderID) == "" {
 		return false, "Configure a provider first with /provider"
@@ -6785,7 +6781,7 @@ func (m *Model) canSendPrompt() (bool, string) {
 	return true, ""
 }
 
-func (m Model) shouldOpenConnectDialogForSendFailure() bool {
+func (m App) shouldOpenConnectDialogForSendFailure() bool {
 	session := m.draftSession()
 	if strings.TrimSpace(session.ProviderID) == "" {
 		return true
@@ -6799,14 +6795,14 @@ func (m Model) shouldOpenConnectDialogForSendFailure() bool {
 	return false
 }
 
-func (m *Model) workingIndicator() string {
+func (m *App) workingIndicator() string {
 	if !m.busy.spinner.active {
 		return ""
 	}
 	return ui.SpinnerFrame(m.cfg.UI.Spinner, m.busy.spinner.frame)
 }
 
-func (m Model) windowTitle() string {
+func (m App) windowTitle() string {
 	title := strings.TrimSpace(m.currentSession.Title)
 	switch {
 	case title != "":
@@ -6825,11 +6821,11 @@ func (m Model) windowTitle() string {
 	return fmt.Sprintf("K %s", title)
 }
 
-func (m Model) syncWindowTitleCmd() ui.Cmd {
+func (m App) syncWindowTitleCmd() ui.Cmd {
 	return ui.SetWindowTitle(m.windowTitle())
 }
 
-func (m Model) draftSession() domain.Session {
+func (m App) draftSession() domain.Session {
 	providerID := m.currentSession.ProviderID
 	if providerID == "" {
 		providerID = m.cfg.DefaultProvider
@@ -6857,7 +6853,7 @@ func (m Model) draftSession() domain.Session {
 	}
 }
 
-func (m Model) persistDraftSession(ctx context.Context) (domain.Session, error) {
+func (m App) persistDraftSession(ctx context.Context) (domain.Session, error) {
 	session, err := m.store.CreateSession(ctx, "New Session", m.draftSession().ProviderID, m.draftSession().ModelID, nil)
 	if err != nil {
 		return domain.Session{}, err
@@ -6884,7 +6880,7 @@ func (m Model) persistDraftSession(ctx context.Context) (domain.Session, error) 
 	return session, nil
 }
 
-func (m Model) visibleSessions(sessions []domain.Session) []domain.Session {
+func (m App) visibleSessions(sessions []domain.Session) []domain.Session {
 	if m.startupOptions.ShowAllSessions {
 		return sessions
 	}
@@ -6897,7 +6893,7 @@ func (m Model) visibleSessions(sessions []domain.Session) []domain.Session {
 	return filtered
 }
 
-func (m Model) sessionMatchesWorkdir(session domain.Session) bool {
+func (m App) sessionMatchesWorkdir(session domain.Session) bool {
 	return normalizedSessionCWD(session) == normalizedSessionPath(m.workdir)
 }
 
@@ -6913,7 +6909,7 @@ func normalizedSessionPath(path string) string {
 	return filepath.Clean(trimmed)
 }
 
-func (m *Model) currentComposerQueries() composerQueryState {
+func (m *App) currentComposerQueries() composerQueryState {
 	revision := m.composer.Revision()
 	if m.composerQueries.revision == revision {
 		return m.composerQueries
@@ -6939,7 +6935,7 @@ func (m *Model) currentComposerQueries() composerQueryState {
 	return state
 }
 
-func (m *Model) updateComposerMenus() {
+func (m *App) updateComposerMenus() {
 	queries := m.currentComposerQueries()
 	if queries.hasSlashQuery {
 		m.slashMatches = matchingSlashCommands(queries.slashQuery)
@@ -6990,19 +6986,19 @@ func (m *Model) updateComposerMenus() {
 	m.syncDraftAttachmentsFromComposer()
 }
 
-func (m *Model) hasSlashMenu() bool {
+func (m *App) hasSlashMenu() bool {
 	return len(m.slashMatches) > 0
 }
 
-func (m *Model) hasSkillMenu() bool {
+func (m *App) hasSkillMenu() bool {
 	return len(m.skillMatches) > 0
 }
 
-func (m *Model) hasMentionMenu() bool {
+func (m *App) hasMentionMenu() bool {
 	return len(m.mentionMatches) > 0
 }
 
-func (m *Model) acceptSlashSelection() {
+func (m *App) acceptSlashSelection() {
 	if len(m.slashMatches) == 0 {
 		return
 	}
@@ -7016,7 +7012,7 @@ func (m *Model) acceptSlashSelection() {
 	m.updateComposerMenus()
 }
 
-func (m *Model) executeSelectedSlashCommand() (ui.Model, ui.Cmd, bool) {
+func (m *App) executeSelectedSlashCommand() (ui.Model, ui.Cmd, bool) {
 	if len(m.slashMatches) == 0 {
 		return nil, nil, false
 	}
@@ -7030,7 +7026,7 @@ func (m *Model) executeSelectedSlashCommand() (ui.Model, ui.Cmd, bool) {
 	return m.handleLocalCommand(selected.Name)
 }
 
-func (m *Model) acceptSkillSelection() {
+func (m *App) acceptSkillSelection() {
 	if len(m.skillMatches) == 0 {
 		return
 	}
@@ -7044,7 +7040,7 @@ func (m *Model) acceptSkillSelection() {
 	m.updateComposerMenus()
 }
 
-func (m *Model) acceptMentionSelection() {
+func (m *App) acceptMentionSelection() {
 	if len(m.mentionMatches) == 0 {
 		return
 	}
@@ -7064,7 +7060,7 @@ func (m *Model) acceptMentionSelection() {
 	m.status = fmt.Sprintf("Inserted %s", display)
 }
 
-func (m *Model) renderSlashMenuElement() ui.Node {
+func (m *App) renderSlashMenuElement() ui.Node {
 	if len(m.slashMatches) == 0 {
 		return nil
 	}
@@ -7082,7 +7078,7 @@ func (m *Model) renderSlashMenuElement() ui.Node {
 	return ui.AsNode(ui.SlashMenu{Title: "Commands", Items: items, Selected: selected})
 }
 
-func (m *Model) renderSkillMenuElement() ui.Node {
+func (m *App) renderSkillMenuElement() ui.Node {
 	if len(m.skillMatches) == 0 {
 		return nil
 	}
@@ -7103,7 +7099,7 @@ func (m *Model) renderSkillMenuElement() ui.Node {
 	return ui.AsNode(ui.SlashMenu{Title: "Skills", Items: items, Selected: selected})
 }
 
-func (m *Model) renderMentionMenuElement() ui.Node {
+func (m *App) renderMentionMenuElement() ui.Node {
 	if len(m.mentionMatches) == 0 {
 		return nil
 	}
@@ -7124,7 +7120,7 @@ func (m *Model) renderMentionMenuElement() ui.Node {
 	return ui.AsNode(ui.SlashMenu{Title: "References", Items: items, Selected: selected})
 }
 
-func (m *Model) renderComposerHistoryMenuElement() ui.Node {
+func (m *App) renderComposerHistoryMenuElement() ui.Node {
 	if !m.hasComposerHistoryMenu() {
 		return nil
 	}
@@ -7185,21 +7181,21 @@ func historySummary(input string) string {
 	return summary
 }
 
-func (m *Model) renderPickerElement() ui.Node {
+func (m *App) renderPickerElement() ui.Node {
 	if !m.hasPicker() {
 		return nil
 	}
 	return ui.AsNode(m.picker.dialog)
 }
 
-func (m *Model) renderThemeDialogElement() ui.Node {
+func (m *App) renderThemeDialogElement() ui.Node {
 	if !m.hasThemeDialog() {
 		return nil
 	}
 	return ui.AsNode(m.themeDialog)
 }
 
-func (m *Model) renderSessionDialog() string {
+func (m *App) renderSessionDialog() string {
 	if element := m.renderSessionDialogElement(); element != nil {
 		width := 112
 		if m.width > 0 {
@@ -7210,63 +7206,63 @@ func (m *Model) renderSessionDialog() string {
 	return ""
 }
 
-func (m *Model) renderSessionDialogElement() ui.Node {
+func (m *App) renderSessionDialogElement() ui.Node {
 	if !m.hasSessionDialog() {
 		return nil
 	}
 	return ui.AsNode(m.sessionDialog)
 }
 
-func (m *Model) renderPreferencesDialogElement() ui.Node {
+func (m *App) renderPreferencesDialogElement() ui.Node {
 	if !m.hasPreferencesDialog() {
 		return nil
 	}
 	return ui.AsNode(m.preferences)
 }
 
-func (m *Model) renderToolsDialogElement() ui.Node {
+func (m *App) renderToolsDialogElement() ui.Node {
 	if !m.hasToolsDialog() {
 		return nil
 	}
 	return ui.AsNode(m.toolsDialog)
 }
 
-func (m *Model) renderConnectDialogElement() ui.Node {
+func (m *App) renderConnectDialogElement() ui.Node {
 	if !m.hasConnectDialog() {
 		return nil
 	}
 	return ui.AsNode(m.connectDialog)
 }
 
-func (m *Model) renderMCPDialogElement() ui.Node {
+func (m *App) renderMCPDialogElement() ui.Node {
 	if !m.hasMCPDialog() {
 		return nil
 	}
 	return m.mcpDialog.ListNode(max(0, m.width), m.palette)
 }
 
-func (m *Model) renderMCPEditDialogElement() ui.Node {
+func (m *App) renderMCPEditDialogElement() ui.Node {
 	if !m.hasMCPEditDialog() {
 		return nil
 	}
 	return m.mcpDialog.EditorNode(max(0, m.width), m.palette)
 }
 
-func (m *Model) renderProviderDialogElement() ui.Node {
+func (m *App) renderProviderDialogElement() ui.Node {
 	if !m.hasProviderDialog() {
 		return nil
 	}
 	return ui.AsNode(m.providerDialog)
 }
 
-func (m *Model) renderModelDialogElement() ui.Node {
+func (m *App) renderModelDialogElement() ui.Node {
 	if !m.hasModelDialog() {
 		return nil
 	}
 	return ui.AsNode(m.modelDialog)
 }
 
-func (m *Model) handleSessionDialogKey(msg ui.KeyMsg) ui.Cmd {
+func (m *App) handleSessionDialogKey(msg ui.KeyMsg) ui.Cmd {
 	if !m.hasSessionDialog() {
 		return nil
 	}
@@ -7283,7 +7279,7 @@ func (m *Model) handleSessionDialogKey(msg ui.KeyMsg) ui.Cmd {
 	}
 }
 
-func (m *Model) handlePreferencesKey(msg ui.KeyMsg) ui.Cmd {
+func (m *App) handlePreferencesKey(msg ui.KeyMsg) ui.Cmd {
 	if !m.hasPreferencesDialog() {
 		return nil
 	}
@@ -7319,7 +7315,7 @@ func (m *Model) handlePreferencesKey(msg ui.KeyMsg) ui.Cmd {
 	}
 }
 
-func (m *Model) handleToolsDialogKey(msg ui.KeyMsg) ui.Cmd {
+func (m *App) handleToolsDialogKey(msg ui.KeyMsg) ui.Cmd {
 	if !m.hasToolsDialog() {
 		return nil
 	}
@@ -7342,7 +7338,7 @@ func (m *Model) handleToolsDialogKey(msg ui.KeyMsg) ui.Cmd {
 	}
 }
 
-func (m *Model) handleConnectDialogKey(msg ui.KeyMsg) ui.Cmd {
+func (m *App) handleConnectDialogKey(msg ui.KeyMsg) ui.Cmd {
 	if !m.hasConnectDialog() {
 		return nil
 	}
@@ -7374,21 +7370,21 @@ func (m *Model) handleConnectDialogKey(msg ui.KeyMsg) ui.Cmd {
 	}
 }
 
-func (m *Model) handleMCPDialogKey(msg ui.KeyMsg) ui.Cmd {
+func (m *App) handleMCPDialogKey(msg ui.KeyMsg) ui.Cmd {
 	if !m.hasMCPDialog() {
 		return nil
 	}
 	return m.applyMCPDialogAction(m.mcpDialog.UpdateList(msg), false)
 }
 
-func (m *Model) handleMCPEditDialogKey(msg ui.KeyMsg) ui.Cmd {
+func (m *App) handleMCPEditDialogKey(msg ui.KeyMsg) ui.Cmd {
 	if !m.hasMCPEditDialog() {
 		return nil
 	}
 	return m.applyMCPDialogAction(m.mcpDialog.UpdateEditor(msg), true)
 }
 
-func (m *Model) applyMCPDialogAction(action dialogs.MCPDialogAction, fromEditor bool) ui.Cmd {
+func (m *App) applyMCPDialogAction(action dialogs.MCPDialogAction, fromEditor bool) ui.Cmd {
 	switch action.Kind {
 	case dialogs.MCPDialogActionSave:
 		if err := kodermcp.ValidateServerConfig(action.ServerID, action.Config); err != nil {
@@ -7446,7 +7442,7 @@ func (m *Model) applyMCPDialogAction(action dialogs.MCPDialogAction, fromEditor 
 	return nil
 }
 
-func (m *Model) handleProviderDialogKey(msg ui.KeyMsg) ui.Cmd {
+func (m *App) handleProviderDialogKey(msg ui.KeyMsg) ui.Cmd {
 	if !m.hasProviderDialog() {
 		return nil
 	}
@@ -7486,7 +7482,7 @@ func (m *Model) handleProviderDialogKey(msg ui.KeyMsg) ui.Cmd {
 	}
 }
 
-func (m *Model) handleModelDialogKey(msg ui.KeyMsg) ui.Cmd {
+func (m *App) handleModelDialogKey(msg ui.KeyMsg) ui.Cmd {
 	if !m.hasModelDialog() {
 		return nil
 	}
@@ -7511,15 +7507,15 @@ func (m *Model) handleModelDialogKey(msg ui.KeyMsg) ui.Cmd {
 	}
 }
 
-func (m *Model) hasApprovalPrompt() bool {
+func (m *App) hasApprovalPrompt() bool {
 	return !m.loading && len(m.activeApprovals()) > 0
 }
 
-func (m *Model) hasApprovalDialog() bool {
+func (m *App) hasApprovalDialog() bool {
 	return m.hasApprovalPrompt()
 }
 
-func (m *Model) ensureApprovalDialog() {
+func (m *App) ensureApprovalDialog() {
 	if !m.hasApprovalDialog() {
 		m.approvalDialog = nil
 		return
@@ -7534,7 +7530,7 @@ func (m *Model) ensureApprovalDialog() {
 	m.approvalDialog.SetButtonIndex(index)
 }
 
-func (m *Model) renderApprovalDialogElement() ui.Node {
+func (m *App) renderApprovalDialogElement() ui.Node {
 	if !m.hasApprovalDialog() {
 		return nil
 	}
@@ -7542,14 +7538,14 @@ func (m *Model) renderApprovalDialogElement() ui.Node {
 	return m.approvalDialog.Element(m.palette, ui.Rect{W: max(0, m.width), H: max(0, m.height)})
 }
 
-func (m *Model) renderApprovalPrompt() string {
+func (m *App) renderApprovalPrompt() string {
 	if element := m.renderApprovalDialogElement(); element != nil {
 		return m.renderElementText(element, 0, 0)
 	}
 	return ""
 }
 
-func (m *Model) handleApprovalDialogAction(action dialogs.ApprovalDialogAction) ui.Cmd {
+func (m *App) handleApprovalDialogAction(action dialogs.ApprovalDialogAction) ui.Cmd {
 	if !m.hasApprovalDialog() || action.Kind == dialogs.ApprovalDialogActionNone {
 		return nil
 	}
@@ -7641,7 +7637,7 @@ func approvalPatternScopeLabel(tool domain.ToolKind, preview string) string {
 	return strings.TrimSpace(strings.TrimSuffix(pattern, " *"))
 }
 
-func (m *Model) permissionProfile() string {
+func (m *App) permissionProfile() string {
 	if strings.TrimSpace(m.currentChat.PermissionProfile) != "" {
 		return m.currentChat.PermissionProfile
 	}
@@ -7651,7 +7647,7 @@ func (m *Model) permissionProfile() string {
 	return m.cfg.Permissions.Profile
 }
 
-func (m *Model) sessionToolStates() map[domain.ToolKind]bool {
+func (m *App) sessionToolStates() map[domain.ToolKind]bool {
 	states := make(map[domain.ToolKind]bool, len(domain.AllToolKinds()))
 	for _, kind := range domain.AllToolKinds() {
 		enabled := true
@@ -7666,11 +7662,11 @@ func (m *Model) sessionToolStates() map[domain.ToolKind]bool {
 	return states
 }
 
-func (m *Model) sessionToolEnabled(kind domain.ToolKind) bool {
+func (m *App) sessionToolEnabled(kind domain.ToolKind) bool {
 	return m.sessionToolStates()[kind]
 }
 
-func (m *Model) normalizeSessionToolStates(session domain.Session) domain.Session {
+func (m *App) normalizeSessionToolStates(session domain.Session) domain.Session {
 	states := make(map[domain.ToolKind]bool, len(domain.AllToolKinds()))
 	for _, kind := range domain.AllToolKinds() {
 		enabled := true
@@ -7686,7 +7682,7 @@ func (m *Model) normalizeSessionToolStates(session domain.Session) domain.Sessio
 	return session
 }
 
-func (m *Model) applySessionToolStates(states map[domain.ToolKind]bool) error {
+func (m *App) applySessionToolStates(states map[domain.ToolKind]bool) error {
 	next := make(map[domain.ToolKind]bool, len(domain.AllToolKinds()))
 	for _, kind := range domain.AllToolKinds() {
 		enabled := true
@@ -7743,15 +7739,15 @@ func applyComposerTheme(composer *textarea.Model, palette theme.Palette) {
 		Foreground(palette.UserTextBackground)
 }
 
-func (m *Model) hasPicker() bool {
+func (m *App) hasPicker() bool {
 	return m.picker.visible
 }
 
-func (m *Model) hasThemeDialog() bool {
+func (m *App) hasThemeDialog() bool {
 	return m.themeDialog != nil
 }
 
-func (m *Model) hasModalOverlay() bool {
+func (m *App) hasModalOverlay() bool {
 	return m.hasModelDialog() ||
 		m.hasProviderDialog() ||
 		m.hasToolsDialog() ||
@@ -7767,7 +7763,7 @@ func (m *Model) hasModalOverlay() bool {
 		m.hasPicker()
 }
 
-func (m *Model) syncComposerVisibility() {
+func (m *App) syncComposerVisibility() {
 	beforeFocus := m.composer.Focused()
 	beforeCursorVisible := m.composer.CursorVisible()
 	shouldFocus := !m.hasModalOverlay() && (beforeFocus || m.composer.BlinkEnabled || m.composerAreaHasContent())
@@ -7788,7 +7784,7 @@ func (m *Model) syncComposerVisibility() {
 	}
 }
 
-func (m *Model) syncComposerFocusFromMainScreen(main *mainScreenView) {
+func (m *App) syncComposerFocusFromMainScreen(main *mainScreenView) {
 	if main == nil {
 		return
 	}
@@ -7804,7 +7800,7 @@ func (m *Model) syncComposerFocusFromMainScreen(main *mainScreenView) {
 	}
 }
 
-func (m *Model) rootTimerCmd() ui.Cmd {
+func (m *App) rootTimerCmd() ui.Cmd {
 	root := m.syncUIRoot()
 	now := time.Now()
 	delay, ok := root.NextTimerDelay(now)
@@ -7826,11 +7822,11 @@ func (m *Model) rootTimerCmd() ui.Cmd {
 	})
 }
 
-func (m *Model) buildTranscriptItems() []ui.TranscriptItem {
+func (m *App) buildTranscriptItems() []ui.TranscriptItem {
 	return m.rebuildTranscriptState()
 }
 
-func (m *Model) withRootTimers(cmd ui.Cmd) ui.Cmd {
+func (m *App) withRootTimers(cmd ui.Cmd) ui.Cmd {
 	if main := m.ensureMainScreenView(); main != nil {
 		main.SyncComposerBlinkTimer(m.ensureUIRoot())
 	}
@@ -7848,69 +7844,69 @@ func (m *Model) withRootTimers(cmd ui.Cmd) ui.Cmd {
 	return ui.Batch(cmd, timerCmd, animationCmd)
 }
 
-func (m *Model) closePicker() {
+func (m *App) closePicker() {
 	m.picker = pickerModel{}
 	m.syncComposerVisibility()
 	m.invalidateMainSurface()
 }
 
-func (m *Model) closeThemeDialog() {
+func (m *App) closeThemeDialog() {
 	m.themeDialog = nil
 	m.themeDialogInitial = ""
 	m.syncComposerVisibility()
 }
 
-func (m *Model) hasSessionDialog() bool {
+func (m *App) hasSessionDialog() bool {
 	return m.sessionDialog != nil
 }
 
-func (m *Model) closeSessionDialog() {
+func (m *App) closeSessionDialog() {
 	m.sessionDialog = nil
 	m.syncComposerVisibility()
 }
 
-func (m *Model) hasPreferencesDialog() bool {
+func (m *App) hasPreferencesDialog() bool {
 	return m.preferences != nil
 }
 
-func (m *Model) closePreferencesDialog() {
+func (m *App) closePreferencesDialog() {
 	m.preferences = nil
 	m.syncComposerVisibility()
 }
 
-func (m *Model) hasToolsDialog() bool {
+func (m *App) hasToolsDialog() bool {
 	return m.toolsDialog != nil
 }
 
-func (m *Model) closeToolsDialog() {
+func (m *App) closeToolsDialog() {
 	m.toolsDialog = nil
 	m.syncComposerVisibility()
 }
 
-func (m *Model) hasAgentsModal() bool {
+func (m *App) hasAgentsModal() bool {
 	return m.agentsModal != nil
 }
 
-func (m *Model) closeAgentsModal() {
+func (m *App) closeAgentsModal() {
 	m.agentsModal = nil
 	m.syncComposerVisibility()
 }
 
-func (m *Model) hasHelpModal() bool {
+func (m *App) hasHelpModal() bool {
 	return m.helpModal != nil
 }
 
-func (m *Model) closeHelpModal() {
+func (m *App) closeHelpModal() {
 	m.helpModal = nil
 	m.helpYOffset = 0
 	m.syncComposerVisibility()
 }
 
-func (m *Model) hasLLMPreview() bool {
+func (m *App) hasLLMPreview() bool {
 	return strings.TrimSpace(m.llmPreviewBody) != ""
 }
 
-func (m *Model) closeLLMPreview() {
+func (m *App) closeLLMPreview() {
 	m.llmPreviewTitle = ""
 	m.llmPreviewBody = ""
 	m.llmPreviewYOffset = 0
@@ -7919,47 +7915,47 @@ func (m *Model) closeLLMPreview() {
 	m.syncComposerVisibility()
 }
 
-func (m *Model) hasConnectDialog() bool {
+func (m *App) hasConnectDialog() bool {
 	return m.connectDialog != nil
 }
 
-func (m *Model) closeConnectDialog() {
+func (m *App) closeConnectDialog() {
 	m.connectDialog = nil
 	m.syncComposerVisibility()
 }
 
-func (m *Model) hasMCPDialog() bool {
+func (m *App) hasMCPDialog() bool {
 	return m.mcpDialog != nil
 }
 
-func (m *Model) hasMCPEditDialog() bool {
+func (m *App) hasMCPEditDialog() bool {
 	return m.mcpDialog != nil && m.mcpDialog.HasEditor()
 }
 
-func (m *Model) closeMCPDialog() {
+func (m *App) closeMCPDialog() {
 	m.mcpDialog = nil
 	m.syncComposerVisibility()
 }
 
-func (m *Model) hasProviderDialog() bool {
+func (m *App) hasProviderDialog() bool {
 	return m.providerDialog != nil
 }
 
-func (m *Model) closeProviderDialog() {
+func (m *App) closeProviderDialog() {
 	m.providerDialog = nil
 	m.syncComposerVisibility()
 }
 
-func (m *Model) hasModelDialog() bool {
+func (m *App) hasModelDialog() bool {
 	return m.modelDialog != nil
 }
 
-func (m *Model) closeModelDialog() {
+func (m *App) closeModelDialog() {
 	m.modelDialog = nil
 	m.syncComposerVisibility()
 }
 
-func (m *Model) openSessionPicker() {
+func (m *App) openSessionPicker() {
 	items := make([]dialogs.SessionItem, 0, len(m.sessions))
 	showCWD := m.startupOptions.ShowAllSessions
 	for _, session := range m.sessions {
@@ -7989,14 +7985,14 @@ func (m *Model) openSessionPicker() {
 	m.syncComposerVisibility()
 }
 
-func sessionTokenSummary(m *Model, sessionID int64) string {
+func sessionTokenSummary(m *App, sessionID int64) string {
 	if usage, ok := m.sessionUsageSummary(sessionID); ok {
 		return fmt.Sprintf("%s/%s", formatTokens(usage.PromptTokens), formatTokens(usage.CompletionTokens))
 	}
 	return "-/-"
 }
 
-func (m *Model) openPreferencesDialog() {
+func (m *App) openPreferencesDialog() {
 	dialog := dialogs.NewPreferencesDialog(dialogs.PreferencesValues{
 		UI:                        m.cfg.UI,
 		MaxToolLoopSteps:          m.cfg.MaxToolLoopSteps,
@@ -8007,7 +8003,7 @@ func (m *Model) openPreferencesDialog() {
 	m.syncComposerVisibility()
 }
 
-func (m *Model) openToolsDialog() {
+func (m *App) openToolsDialog() {
 	items := make([]dialogs.ToolToggleItem, 0, len(domain.AllToolKinds()))
 	for _, kind := range domain.AllToolKinds() {
 		info := tools.Info(kind)
@@ -8034,13 +8030,13 @@ func (m *Model) openToolsDialog() {
 	m.syncComposerVisibility()
 }
 
-func (m *Model) openConnectDialog() {
+func (m *App) openConnectDialog() {
 	dialog := dialogs.NewConnectDialog(provider.Catalog(), m.cfg.Providers)
 	m.connectDialog = &dialog
 	m.syncComposerVisibility()
 }
 
-func (m *Model) openEditProviderDialog(providerID string) error {
+func (m *App) openEditProviderDialog(providerID string) error {
 	providerID = strings.TrimSpace(providerID)
 	if providerID == "" {
 		return fmt.Errorf("provider id is required")
@@ -8059,13 +8055,13 @@ func (m *Model) openEditProviderDialog(providerID string) error {
 	return nil
 }
 
-func (m *Model) openMCPDialog() {
+func (m *App) openMCPDialog() {
 	dialog := dialogs.NewMCPDialog(m.agent.ListMCPServers(), m.cfg.MCPServers)
 	m.mcpDialog = &dialog
 	m.syncComposerVisibility()
 }
 
-func (m *Model) mcpReloadCmd() ui.Cmd {
+func (m *App) mcpReloadCmd() ui.Cmd {
 	return func() ui.Msg {
 		err := m.agent.ReloadMCP(context.Background())
 		return mcpReloadMsg{
@@ -8075,7 +8071,7 @@ func (m *Model) mcpReloadCmd() ui.Cmd {
 	}
 }
 
-func (m *Model) mcpStatusSummary() string {
+func (m *App) mcpStatusSummary() string {
 	servers := m.agent.ListMCPServers()
 	if len(servers) == 0 {
 		if len(m.cfg.MCPServers) == 0 {
@@ -8090,20 +8086,20 @@ func (m *Model) mcpStatusSummary() string {
 	return "MCP: " + strings.Join(statuses, ", ")
 }
 
-func (m *Model) mcpDialogEditID() string {
+func (m *App) mcpDialogEditID() string {
 	if m.mcpDialog == nil {
 		return ""
 	}
 	return m.mcpDialog.EditID()
 }
 
-func (m *Model) openProviderDialog() {
+func (m *App) openProviderDialog() {
 	dialog := dialogs.NewProviderDialog(m.providerDialogItems())
 	m.providerDialog = &dialog
 	m.syncComposerVisibility()
 }
 
-func (m *Model) providerDialogItems() []dialogs.EntityListItem {
+func (m *App) providerDialogItems() []dialogs.EntityListItem {
 	items := make([]dialogs.EntityListItem, 0, len(m.cfg.Providers))
 	ids := make([]string, 0, len(m.cfg.Providers))
 	for id := range m.cfg.Providers {
@@ -8157,7 +8153,7 @@ func (m *Model) providerDialogItems() []dialogs.EntityListItem {
 	return items
 }
 
-func (m *Model) openModelDialog(entries []dialogs.ModelDialogEntry) {
+func (m *App) openModelDialog(entries []dialogs.ModelDialogEntry) {
 	currentProviderID := strings.TrimSpace(m.currentSession.ProviderID)
 	if currentProviderID == "" {
 		currentProviderID = strings.TrimSpace(m.cfg.DefaultProvider)
@@ -8175,7 +8171,7 @@ func (m *Model) openModelDialog(entries []dialogs.ModelDialogEntry) {
 	m.syncComposerVisibility()
 }
 
-func (m *Model) openAgentsModal() {
+func (m *App) openAgentsModal() {
 	lines := []string{
 		fmt.Sprintf("CWD: %s", blankAsDash(m.workdir)),
 		fmt.Sprintf("Project root: %s", blankAsDash(m.currentProjectRoot())),
@@ -8227,14 +8223,14 @@ func (m *Model) openAgentsModal() {
 	m.syncComposerVisibility()
 }
 
-func (m *Model) renderAgentsModalElement() ui.Node {
+func (m *App) renderAgentsModalElement() ui.Node {
 	if m.agentsModal == nil {
 		return nil
 	}
 	return ui.AsNode(*m.agentsModal)
 }
 
-func (m *Model) openHelpModal() {
+func (m *App) openHelpModal() {
 	hotkeys := []string{
 		"Hotkeys",
 		"Alt-H               show or close help",
@@ -8302,7 +8298,7 @@ func (m *Model) openHelpModal() {
 	m.syncComposerVisibility()
 }
 
-func (m *Model) renderHelpModalElement() ui.Node {
+func (m *App) renderHelpModalElement() ui.Node {
 	if m.helpModal == nil {
 		return nil
 	}
@@ -8319,7 +8315,7 @@ func (m *Model) renderHelpModalElement() ui.Node {
 	})
 }
 
-func (m *Model) resizeHelpModal() {
+func (m *App) resizeHelpModal() {
 	if !m.hasHelpModal() {
 		return
 	}
@@ -8333,7 +8329,7 @@ func (m *Model) resizeHelpModal() {
 	}
 }
 
-func (m Model) previewLLMRequestCmd(ctx context.Context, prompt string, drafts []attachment.Draft, refs []reference.Draft) ui.Cmd {
+func (m App) previewLLMRequestCmd(ctx context.Context, prompt string, drafts []attachment.Draft, refs []reference.Draft) ui.Cmd {
 	return func() ui.Msg {
 		req, err := m.agent.PreviewNextRequestForChat(ctx, m.currentSession, m.currentChat, prompt, drafts, refs, m.pendingModelNote)
 		if err != nil {
@@ -8350,7 +8346,7 @@ func (m Model) previewLLMRequestCmd(ctx context.Context, prompt string, drafts [
 	}
 }
 
-func (m *Model) openLLMPreview(title string, body string) {
+func (m *App) openLLMPreview(title string, body string) {
 	m.llmPreviewTitle = title
 	m.llmPreviewBody = body
 	m.llmPreviewYOffset = 0
@@ -8358,7 +8354,7 @@ func (m *Model) openLLMPreview(title string, body string) {
 	m.syncComposerVisibility()
 }
 
-func (m *Model) resizeLLMPreview() {
+func (m *App) resizeLLMPreview() {
 	if !m.hasLLMPreview() {
 		return
 	}
@@ -8371,14 +8367,14 @@ func (m *Model) resizeLLMPreview() {
 	m.llmPreviewYOffset = min(max(0, m.llmPreviewYOffset), m.llmPreviewMaxOffset())
 }
 
-func (m *Model) renderLLMPreview() string {
+func (m *App) renderLLMPreview() string {
 	if element := m.renderLLMPreviewElement(); element != nil {
 		return m.renderElementText(m.centeredModal(element), max(0, m.width), max(0, m.height))
 	}
 	return ""
 }
 
-func (m *Model) renderLLMPreviewElement() ui.Node {
+func (m *App) renderLLMPreviewElement() ui.Node {
 	if !m.hasLLMPreview() {
 		return nil
 	}
@@ -8399,7 +8395,7 @@ func (m *Model) renderLLMPreviewElement() ui.Node {
 	})
 }
 
-func (m Model) currentProjectRoot() string {
+func (m App) currentProjectRoot() string {
 	if strings.TrimSpace(m.workspace.ProjectRoot) != "" {
 		return m.workspace.ProjectRoot
 	}
@@ -8409,7 +8405,7 @@ func (m Model) currentProjectRoot() string {
 	return m.workdir
 }
 
-func (m Model) agentsStatusLabel() string {
+func (m App) agentsStatusLabel() string {
 	if m.workspace.AgentsFiles == 0 {
 		return "None"
 	}
@@ -8419,11 +8415,11 @@ func (m Model) agentsStatusLabel() string {
 	return "Changed"
 }
 
-func (m Model) renderAgentsSidebarStatus() string {
+func (m App) renderAgentsSidebarStatus() string {
 	return m.agentsStatusLabel()
 }
 
-func (m Model) probeProviderCmd(draft provider.ConnectDraft) ui.Cmd {
+func (m App) probeProviderCmd(draft provider.ConnectDraft) ui.Cmd {
 	return func() ui.Msg {
 		result, err := provider.Probe(context.Background(), draft, m.debug)
 		if err == nil {
@@ -8433,7 +8429,7 @@ func (m Model) probeProviderCmd(draft provider.ConnectDraft) ui.Cmd {
 	}
 }
 
-func (m Model) detectContextWindowCmd(providerID string, providerCfg config.Provider, modelID string) ui.Cmd {
+func (m App) detectContextWindowCmd(providerID string, providerCfg config.Provider, modelID string) ui.Cmd {
 	if !provider.SupportsContextWindowDetection(providerCfg) {
 		return nil
 	}
@@ -8449,7 +8445,7 @@ func (m Model) detectContextWindowCmd(providerID string, providerCfg config.Prov
 	}
 }
 
-func (m Model) detectSessionContextWindowCmd() ui.Cmd {
+func (m App) detectSessionContextWindowCmd() ui.Cmd {
 	providerID := strings.TrimSpace(m.currentSession.ProviderID)
 	if providerID == "" {
 		return nil
@@ -8468,7 +8464,7 @@ func (m Model) detectSessionContextWindowCmd() ui.Cmd {
 	return m.detectContextWindowCmd(providerID, providerCfg, modelID)
 }
 
-func (m Model) loadModelsCmd(providerID string, postConnect bool) ui.Cmd {
+func (m App) loadModelsCmd(providerID string, postConnect bool) ui.Cmd {
 	return func() ui.Msg {
 		cfg, ok := m.cfg.Provider(providerID)
 		if !ok {
@@ -8486,7 +8482,7 @@ func (m Model) loadModelsCmd(providerID string, postConnect bool) ui.Cmd {
 	}
 }
 
-func (m Model) loadAllModelsCmd(preferredProviderID string, postConnect bool) ui.Cmd {
+func (m App) loadAllModelsCmd(preferredProviderID string, postConnect bool) ui.Cmd {
 	return func() ui.Msg {
 		ids := make([]string, 0, len(m.cfg.Providers))
 		for id := range m.cfg.Providers {
@@ -8539,7 +8535,7 @@ func (m Model) loadAllModelsCmd(preferredProviderID string, postConnect bool) ui
 	}
 }
 
-func (m Model) providerInventoryCmd() ui.Cmd {
+func (m App) providerInventoryCmd() ui.Cmd {
 	return func() ui.Msg {
 		items := make(map[string]providerInventoryItem, len(m.cfg.Providers))
 		ids := make([]string, 0, len(m.cfg.Providers))
@@ -8568,7 +8564,7 @@ func (m Model) providerInventoryCmd() ui.Cmd {
 	}
 }
 
-func (m Model) capabilityStore() *provider.CapabilityStore {
+func (m App) capabilityStore() *provider.CapabilityStore {
 	if m.caps != nil {
 		return m.caps
 	}
@@ -8626,7 +8622,7 @@ func providerRemoteAddr(providerCfg config.Provider) string {
 	return raw
 }
 
-func (m *Model) saveProviderDraft(draft provider.ConnectDraft) error {
+func (m *App) saveProviderDraft(draft provider.ConnectDraft) error {
 	if err := provider.ValidateDraft(draft); err != nil {
 		return err
 	}
@@ -8703,7 +8699,7 @@ func (m *Model) saveProviderDraft(draft provider.ConnectDraft) error {
 	return nil
 }
 
-func (m *Model) disconnectProvider(providerID string) error {
+func (m *App) disconnectProvider(providerID string) error {
 	providerID = strings.TrimSpace(providerID)
 	if providerID == "" {
 		return fmt.Errorf("provider id is required")
@@ -8745,7 +8741,7 @@ func (m *Model) disconnectProvider(providerID string) error {
 	return nil
 }
 
-func (m *Model) selectModel(providerID string, modelID string, presetID string) error {
+func (m *App) selectModel(providerID string, modelID string, presetID string) error {
 	providerID = strings.TrimSpace(providerID)
 	modelID = strings.TrimSpace(modelID)
 	presetID = provider.NormalizePresetSelection(presetID)
@@ -8790,21 +8786,21 @@ func (m *Model) selectModel(providerID string, modelID string, presetID string) 
 	return nil
 }
 
-func (m *Model) providerModelPreset(providerID string) string {
+func (m *App) providerModelPreset(providerID string) string {
 	if providerCfg, ok := m.cfg.Provider(providerID); ok {
 		return provider.NormalizePresetSelection(providerCfg.ModelPreset)
 	}
 	return provider.ModelPresetAuto
 }
 
-func (m *Model) activeProviderID() string {
+func (m *App) activeProviderID() string {
 	if strings.TrimSpace(m.currentSession.ProviderID) != "" {
 		return m.currentSession.ProviderID
 	}
 	return m.cfg.DefaultProvider
 }
 
-func (m *Model) openThemePicker() {
+func (m *App) openThemePicker() {
 	current := strings.TrimSpace(m.cfg.UI.Theme)
 	if current == "" {
 		current = theme.Default().Name
@@ -8815,7 +8811,7 @@ func (m *Model) openThemePicker() {
 	m.previewSelectedTheme()
 }
 
-func (m *Model) submitThemeSelection(value string) (ui.Model, ui.Cmd) {
+func (m *App) submitThemeSelection(value string) (ui.Model, ui.Cmd) {
 	if strings.TrimSpace(value) == "" {
 		return m, nil
 	}
@@ -8828,7 +8824,7 @@ func (m *Model) submitThemeSelection(value string) (ui.Model, ui.Cmd) {
 	return m, nil
 }
 
-func (m *Model) cancelThemeDialog() (ui.Model, ui.Cmd) {
+func (m *App) cancelThemeDialog() (ui.Model, ui.Cmd) {
 	restore := strings.TrimSpace(m.themeDialogInitial)
 	if restore == "" {
 		restore = theme.Default().Name
@@ -8840,7 +8836,7 @@ func (m *Model) cancelThemeDialog() (ui.Model, ui.Cmd) {
 	return m, nil
 }
 
-func (m *Model) openPermissionsPicker() {
+func (m *App) openPermissionsPicker() {
 	items := make([]ui.PickerItem, 0, len(permission.BuiltinProfiles()))
 	for _, item := range permission.BuiltinProfiles() {
 		items = append(items, ui.PickerItem{
@@ -8858,7 +8854,7 @@ func (m *Model) openPermissionsPicker() {
 	m.setPickerCurrentValue(m.permissionProfile())
 }
 
-func (m *Model) openSkillsPicker() {
+func (m *App) openSkillsPicker() {
 	catalog := skills.Discover(m.workdir)
 	items := make([]ui.PickerItem, 0, len(catalog))
 	for _, item := range catalog {
@@ -8875,7 +8871,7 @@ func (m *Model) openSkillsPicker() {
 	}
 }
 
-func (m *Model) openApprovalPermissionsPicker() {
+func (m *App) openApprovalPermissionsPicker() {
 	if !m.hasApprovalPrompt() {
 		return
 	}
@@ -8883,7 +8879,7 @@ func (m *Model) openApprovalPermissionsPicker() {
 	m.picker.approvalID = m.activeApprovals()[0].ID
 }
 
-func (m *Model) submitPickerSelection(value string) (ui.Model, ui.Cmd) {
+func (m *App) submitPickerSelection(value string) (ui.Model, ui.Cmd) {
 	switch m.picker.mode {
 	case pickerModePermissions:
 		if strings.TrimSpace(value) == "" {
@@ -8915,7 +8911,7 @@ func (m *Model) submitPickerSelection(value string) (ui.Model, ui.Cmd) {
 	}
 }
 
-func (m *Model) cancelPicker() (ui.Model, ui.Cmd) {
+func (m *App) cancelPicker() (ui.Model, ui.Cmd) {
 	switch m.picker.mode {
 	case pickerModePermissions:
 		approvalID := m.picker.approvalID
@@ -8936,7 +8932,7 @@ func (m *Model) cancelPicker() (ui.Model, ui.Cmd) {
 	}
 }
 
-func (m *Model) previewSelectedTheme() {
+func (m *App) previewSelectedTheme() {
 	if !m.hasThemeDialog() {
 		return
 	}
@@ -8949,14 +8945,14 @@ func (m *Model) previewSelectedTheme() {
 	}
 }
 
-func (m *Model) setPickerCurrentValue(value string) {
+func (m *App) setPickerCurrentValue(value string) {
 	if !m.hasPicker() {
 		return
 	}
 	m.picker.dialog.SetCurrentValue(value)
 }
 
-func (m *Model) selectPermissionProfile(profile string) error {
+func (m *App) selectPermissionProfile(profile string) error {
 	profile = strings.TrimSpace(profile)
 	if profile == "" {
 		return fmt.Errorf("permission profile is required")
@@ -8995,7 +8991,7 @@ func (m *Model) selectPermissionProfile(profile string) error {
 	return nil
 }
 
-func (m *Model) setTheme(name string, save bool) error {
+func (m *App) setTheme(name string, save bool) error {
 	selected := theme.Resolve(name)
 	renderer, err := markdown.New(selected.Palette, m.cfg.UI.CodeStyle)
 	if err != nil {
@@ -9016,7 +9012,7 @@ func (m *Model) setTheme(name string, save bool) error {
 	return nil
 }
 
-func (m *Model) canContinue() (bool, string) {
+func (m *App) canContinue() (bool, string) {
 	if strings.TrimSpace(m.composer.Value()) != "" || len(m.draftAttachments) > 0 || len(m.draftReferences) > 0 {
 		return false, "Clear the composer before continuing"
 	}
@@ -9029,7 +9025,7 @@ func (m *Model) canContinue() (bool, string) {
 	return true, ""
 }
 
-func (m *Model) queuePermissionChangeNote() {
+func (m *App) queuePermissionChangeNote() {
 	label := permission.DisplayName(m.permissionProfile())
 	projectRoot := strings.TrimSpace(m.currentProjectRoot())
 	if projectRoot == "" {
@@ -9042,7 +9038,7 @@ func (m *Model) queuePermissionChangeNote() {
 	)
 }
 
-func (m *Model) applyUIConfig(next config.UI, save bool) (ui.Cmd, error) {
+func (m *App) applyUIConfig(next config.UI, save bool) (ui.Cmd, error) {
 	prevMouse := m.mouseEnabled
 
 	selected := theme.Resolve(next.Theme)
@@ -9092,7 +9088,7 @@ func (m *Model) applyUIConfig(next config.UI, save bool) (ui.Cmd, error) {
 	return ui.Batch(cmds...), nil
 }
 
-func (m *Model) applyPreferences(next dialogs.PreferencesValues, save bool) (ui.Cmd, error) {
+func (m *App) applyPreferences(next dialogs.PreferencesValues, save bool) (ui.Cmd, error) {
 	cmd, err := m.applyUIConfig(next.UI, false)
 	if err != nil {
 		return nil, err
@@ -9141,14 +9137,14 @@ func waitForExecEventCmd(events <-chan execruntime.Event, chatID int64, seq uint
 	}
 }
 
-func (m *Model) waitForExecEventCmd() ui.Cmd {
+func (m *App) waitForExecEventCmd() ui.Cmd {
 	if m == nil || m.execEvents == nil || m.execSubscriptionChatID == 0 || m.execSubscriptionSeq == 0 {
 		return nil
 	}
 	return waitForExecEventCmd(m.execEvents, m.execSubscriptionChatID, m.execSubscriptionSeq)
 }
 
-func (m *Model) refreshExecSubscriptionCmd() ui.Cmd {
+func (m *App) refreshExecSubscriptionCmd() ui.Cmd {
 	if m == nil {
 		return nil
 	}

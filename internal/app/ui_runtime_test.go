@@ -12,11 +12,11 @@ import (
 	"github.com/lkarlslund/koder/internal/ui/textarea"
 )
 
-func newRuntimeTestModel(t *testing.T) Model {
+func newRuntimeTestModel(t *testing.T) App {
 	t.Helper()
 	composer := textarea.New()
 	composer.Focus()
-	return Model{
+	return App{
 		cfg:         testConfig(t),
 		palette:     theme.Default().Palette,
 		viewport:    newTranscriptViewport(80, 18),

@@ -27,18 +27,18 @@ const (
 
 type modelWindow struct {
 	base        ui.BaseWindow
-	model       *Model
-	bounds      func(*Model, ui.Rect) ui.Rect
-	element     func(*Model) ui.Node
-	render      func(*Model, ui.Rect) ui.Surface
-	paint       func(*Model, *ui.Context, ui.Rect, *ui.Surface) []ui.Rect
+	model       *App
+	bounds      func(*App, ui.Rect) ui.Rect
+	element     func(*App) ui.Node
+	render      func(*App, ui.Rect) ui.Surface
+	paint       func(*App, *ui.Context, ui.Rect, *ui.Surface) []ui.Rect
 	frameDirty  []ui.Rect
-	invalidate  func(*Model, *ui.Context)
-	needsRedraw func(*Model) bool
-	dirtyRects  func(*Model) []ui.Rect
-	key         func(*Model, ui.KeyMsg) (bool, ui.Cmd)
-	mouse       func(*Model, ui.MouseMsg) (bool, ui.Cmd)
-	timer       func(*Model, ui.TimerEvent) (bool, ui.Cmd)
+	invalidate  func(*App, *ui.Context)
+	needsRedraw func(*App) bool
+	dirtyRects  func(*App) []ui.Rect
+	key         func(*App, ui.KeyMsg) (bool, ui.Cmd)
+	mouse       func(*App, ui.MouseMsg) (bool, ui.Cmd)
+	timer       func(*App, ui.TimerEvent) (bool, ui.Cmd)
 }
 
 func (w *modelWindow) ID() ui.WindowID {
@@ -175,14 +175,14 @@ func (w *modelWindow) HandleTimer(event ui.TimerEvent) (bool, ui.Cmd) {
 	return handled, cmd
 }
 
-func (m *Model) ensureUIRoot() *ui.Root {
+func (m *App) ensureUIRoot() *ui.Root {
 	if m.uiRoot == nil {
 		m.uiRoot = ui.NewRoot(m.palette, ui.Rect{W: max(0, m.width), H: max(0, m.height)})
 	}
 	return m.uiRoot
 }
 
-func (m *Model) syncUIRoot() *ui.Root {
+func (m *App) syncUIRoot() *ui.Root {
 	root := m.ensureUIRoot()
 	root.SetPalette(m.palette)
 	root.SetBounds(ui.Rect{W: max(0, m.width), H: max(0, m.height)})
@@ -197,7 +197,7 @@ func (m *Model) syncUIRoot() *ui.Root {
 	return root
 }
 
-func (m *Model) mainWindow() ui.Window {
+func (m *App) mainWindow() ui.Window {
 	if m.mainWindowView == nil {
 		m.mainWindowView = &modelWindow{
 			base: ui.BaseWindow{
@@ -214,10 +214,10 @@ func (m *Model) mainWindow() ui.Window {
 				},
 			},
 			model: m,
-			element: func(m *Model) ui.Node {
+			element: func(m *App) ui.Node {
 				return m.renderBodyElement()
 			},
-			paint: func(m *Model, ctx *ui.Context, bounds ui.Rect, dst *ui.Surface) []ui.Rect {
+			paint: func(m *App, ctx *ui.Context, bounds ui.Rect, dst *ui.Surface) []ui.Rect {
 				main := m.mainScreen
 				if main == nil {
 					main = m.ensureMainScreenView()
@@ -229,24 +229,24 @@ func (m *Model) mainWindow() ui.Window {
 				m.markMainScreenRendered(main)
 				return rects
 			},
-			invalidate: func(m *Model, ctx *ui.Context) {
+			invalidate: func(m *App, ctx *ui.Context) {
 				ui.InvalidateNodeCaches(ctx, m.renderBodyElement())
 				m.invalidateBodyCache()
 			},
-			needsRedraw: func(m *Model) bool {
+			needsRedraw: func(m *App) bool {
 				if m == nil {
 					return false
 				}
 				m.ensureMainScreenView()
 				return m.mainScreen.Dirty()
 			},
-			key: func(m *Model, msg ui.KeyMsg) (bool, ui.Cmd) {
+			key: func(m *App, msg ui.KeyMsg) (bool, ui.Cmd) {
 				return m.handleMainWindowKey(msg)
 			},
-			mouse: func(m *Model, msg ui.MouseMsg) (bool, ui.Cmd) {
+			mouse: func(m *App, msg ui.MouseMsg) (bool, ui.Cmd) {
 				return m.handleMainWindowMouse(msg)
 			},
-			timer: func(m *Model, event ui.TimerEvent) (bool, ui.Cmd) {
+			timer: func(m *App, event ui.TimerEvent) (bool, ui.Cmd) {
 				main := m.ensureMainScreenView()
 				if main == nil || !main.HandleComposerTimer(event) {
 					return false, nil
@@ -260,12 +260,12 @@ func (m *Model) mainWindow() ui.Window {
 	return m.mainWindowView
 }
 
-func (m *Model) overlayWindows() []ui.Window {
+func (m *App) overlayWindows() []ui.Window {
 	windows := make([]ui.Window, 0, 8)
 	if m.hasSessionDialog() {
-		windows = append(windows, m.centeredWindow(sessionWindowID, 10, m.renderSessionDialogElement(), func(m *Model, msg ui.KeyMsg) ui.Cmd {
+		windows = append(windows, m.centeredWindow(sessionWindowID, 10, m.renderSessionDialogElement(), func(m *App, msg ui.KeyMsg) ui.Cmd {
 			return m.handleSessionDialogKey(msg)
-		}, func(m *Model, controlID string) ui.Cmd {
+		}, func(m *App, controlID string) ui.Cmd {
 			if controlID == "window-close" {
 				m.startBusy(busyScopeSidebar, "Creating session…")
 				return ui.Batch(m.newSessionCmd(), m.spinnerCmdIfNeeded())
@@ -284,9 +284,9 @@ func (m *Model) overlayWindows() []ui.Window {
 		}))
 	}
 	if m.hasModelDialog() {
-		windows = append(windows, m.centeredWindow(modelWindowID, 20, m.renderModelDialogElement(), func(m *Model, msg ui.KeyMsg) ui.Cmd {
+		windows = append(windows, m.centeredWindow(modelWindowID, 20, m.renderModelDialogElement(), func(m *App, msg ui.KeyMsg) ui.Cmd {
 			return m.handleModelDialogKey(msg)
-		}, func(m *Model, controlID string) ui.Cmd {
+		}, func(m *App, controlID string) ui.Cmd {
 			if controlID == "window-close" {
 				m.closeModelDialog()
 				m.status = "Model selection cancelled"
@@ -313,9 +313,9 @@ func (m *Model) overlayWindows() []ui.Window {
 		}))
 	}
 	if m.hasProviderDialog() {
-		windows = append(windows, m.centeredWindow(disconnectWindowID, 30, m.renderProviderDialogElement(), func(m *Model, msg ui.KeyMsg) ui.Cmd {
+		windows = append(windows, m.centeredWindow(disconnectWindowID, 30, m.renderProviderDialogElement(), func(m *App, msg ui.KeyMsg) ui.Cmd {
 			return m.handleProviderDialogKey(msg)
-		}, func(m *Model, controlID string) ui.Cmd {
+		}, func(m *App, controlID string) ui.Cmd {
 			if controlID == "window-close" {
 				m.closeProviderDialog()
 				m.status = "Provider dialog closed"
@@ -357,9 +357,9 @@ func (m *Model) overlayWindows() []ui.Window {
 		}))
 	}
 	if m.hasToolsDialog() {
-		windows = append(windows, m.centeredWindow(toolsWindowID, 40, m.renderToolsDialogElement(), func(m *Model, msg ui.KeyMsg) ui.Cmd {
+		windows = append(windows, m.centeredWindow(toolsWindowID, 40, m.renderToolsDialogElement(), func(m *App, msg ui.KeyMsg) ui.Cmd {
 			return m.handleToolsDialogKey(msg)
-		}, func(m *Model, controlID string) ui.Cmd {
+		}, func(m *App, controlID string) ui.Cmd {
 			if controlID == "window-close" {
 				m.closeToolsDialog()
 				m.status = "Tool selection cancelled"
@@ -385,9 +385,9 @@ func (m *Model) overlayWindows() []ui.Window {
 		}))
 	}
 	if m.hasConnectDialog() {
-		windows = append(windows, m.centeredWindow(connectWindowID, 50, m.renderConnectDialogElement(), func(m *Model, msg ui.KeyMsg) ui.Cmd {
+		windows = append(windows, m.centeredWindow(connectWindowID, 50, m.renderConnectDialogElement(), func(m *App, msg ui.KeyMsg) ui.Cmd {
 			return m.handleConnectDialogKey(msg)
-		}, func(m *Model, controlID string) ui.Cmd {
+		}, func(m *App, controlID string) ui.Cmd {
 			if controlID == "window-close" {
 				m.closeConnectDialog()
 				m.status = "Provider connect cancelled"
@@ -417,21 +417,21 @@ func (m *Model) overlayWindows() []ui.Window {
 		}))
 	}
 	if m.hasMCPDialog() {
-		windows = append(windows, m.centeredWindow(mcpWindowID, 55, m.renderMCPDialogElement(), func(m *Model, msg ui.KeyMsg) ui.Cmd {
+		windows = append(windows, m.centeredWindow(mcpWindowID, 55, m.renderMCPDialogElement(), func(m *App, msg ui.KeyMsg) ui.Cmd {
 			return m.handleMCPDialogKey(msg)
-		}, func(m *Model, controlID string) ui.Cmd {
+		}, func(m *App, controlID string) ui.Cmd {
 			return m.applyMCPDialogAction(m.mcpDialog.ActivateListControl(controlID), false)
 		}))
 	}
 	if m.hasMCPEditDialog() {
-		windows = append(windows, m.centeredWindow(mcpEditWindowID, 56, m.renderMCPEditDialogElement(), func(m *Model, msg ui.KeyMsg) ui.Cmd {
+		windows = append(windows, m.centeredWindow(mcpEditWindowID, 56, m.renderMCPEditDialogElement(), func(m *App, msg ui.KeyMsg) ui.Cmd {
 			return m.handleMCPEditDialogKey(msg)
-		}, func(m *Model, controlID string) ui.Cmd {
+		}, func(m *App, controlID string) ui.Cmd {
 			return m.applyMCPDialogAction(m.mcpDialog.ActivateEditorControl(controlID), true)
 		}))
 	}
 	if m.hasAgentsModal() {
-		windows = append(windows, m.centeredWindow(agentsWindowID, 60, m.renderAgentsModalElement(), func(m *Model, msg ui.KeyMsg) ui.Cmd {
+		windows = append(windows, m.centeredWindow(agentsWindowID, 60, m.renderAgentsModalElement(), func(m *App, msg ui.KeyMsg) ui.Cmd {
 			switch msg.String() {
 			case "esc", "enter":
 				m.closeAgentsModal()
@@ -439,7 +439,7 @@ func (m *Model) overlayWindows() []ui.Window {
 			default:
 				return nil
 			}
-		}, func(m *Model, controlID string) ui.Cmd {
+		}, func(m *App, controlID string) ui.Cmd {
 			if controlID == "window-close" {
 				m.closeAgentsModal()
 				return m.syncWindowTitleCmd()
@@ -448,7 +448,7 @@ func (m *Model) overlayWindows() []ui.Window {
 		}))
 	}
 	if m.hasHelpModal() {
-		windows = append(windows, m.centeredWindow(helpWindowID, 70, m.renderHelpModalElement(), func(m *Model, msg ui.KeyMsg) ui.Cmd {
+		windows = append(windows, m.centeredWindow(helpWindowID, 70, m.renderHelpModalElement(), func(m *App, msg ui.KeyMsg) ui.Cmd {
 			switch msg.String() {
 			case "esc", "enter", "alt+h":
 				m.closeHelpModal()
@@ -456,7 +456,7 @@ func (m *Model) overlayWindows() []ui.Window {
 			default:
 				return nil
 			}
-		}, func(m *Model, controlID string) ui.Cmd {
+		}, func(m *App, controlID string) ui.Cmd {
 			if controlID == "window-close" {
 				m.closeHelpModal()
 				return m.syncWindowTitleCmd()
@@ -465,7 +465,7 @@ func (m *Model) overlayWindows() []ui.Window {
 		}))
 	}
 	if m.hasLLMPreview() {
-		windows = append(windows, m.centeredWindow(llmPreviewWindowID, 80, m.renderLLMPreviewElement(), func(m *Model, msg ui.KeyMsg) ui.Cmd {
+		windows = append(windows, m.centeredWindow(llmPreviewWindowID, 80, m.renderLLMPreviewElement(), func(m *App, msg ui.KeyMsg) ui.Cmd {
 			switch msg.String() {
 			case "esc", "enter", "alt+o":
 				m.closeLLMPreview()
@@ -476,7 +476,7 @@ func (m *Model) overlayWindows() []ui.Window {
 				}
 				return nil
 			}
-		}, func(m *Model, msgControl string) ui.Cmd {
+		}, func(m *App, msgControl string) ui.Cmd {
 			if msgControl == "window-close" {
 				m.closeLLMPreview()
 				return m.syncWindowTitleCmd()
@@ -485,9 +485,9 @@ func (m *Model) overlayWindows() []ui.Window {
 		}))
 	}
 	if m.hasPreferencesDialog() {
-		windows = append(windows, m.centeredWindow(preferencesWindowID, 90, m.renderPreferencesDialogElement(), func(m *Model, msg ui.KeyMsg) ui.Cmd {
+		windows = append(windows, m.centeredWindow(preferencesWindowID, 90, m.renderPreferencesDialogElement(), func(m *App, msg ui.KeyMsg) ui.Cmd {
 			return m.handlePreferencesKey(msg)
-		}, func(m *Model, controlID string) ui.Cmd {
+		}, func(m *App, controlID string) ui.Cmd {
 			if controlID == "window-close" {
 				m.closePreferencesDialog()
 				m.status = "Preferences cancelled"
@@ -497,7 +497,7 @@ func (m *Model) overlayWindows() []ui.Window {
 		}))
 	}
 	if m.hasThemeDialog() {
-		windows = append(windows, m.centeredWindow(themeWindowID, 100, m.renderThemeDialogElement(), func(m *Model, msg ui.KeyMsg) ui.Cmd {
+		windows = append(windows, m.centeredWindow(themeWindowID, 100, m.renderThemeDialogElement(), func(m *App, msg ui.KeyMsg) ui.Cmd {
 			if msg.String() == "ctrl+c" {
 				_, cmd := m.quit()
 				return cmd
@@ -514,7 +514,7 @@ func (m *Model) overlayWindows() []ui.Window {
 			default:
 				return nil
 			}
-		}, func(m *Model, controlID string) ui.Cmd {
+		}, func(m *App, controlID string) ui.Cmd {
 			if controlID == "window-close" {
 				_, cmd := m.cancelThemeDialog()
 				return cmd
@@ -534,16 +534,16 @@ func (m *Model) overlayWindows() []ui.Window {
 		}))
 	}
 	if m.hasApprovalDialog() {
-		windows = append(windows, m.centeredWindow(approvalWindowID, 90, m.renderApprovalDialogElement(), func(m *Model, msg ui.KeyMsg) ui.Cmd {
+		windows = append(windows, m.centeredWindow(approvalWindowID, 90, m.renderApprovalDialogElement(), func(m *App, msg ui.KeyMsg) ui.Cmd {
 			action := m.approvalDialog.Update(msg)
 			return m.handleApprovalDialogAction(action)
-		}, func(m *Model, controlID string) ui.Cmd {
+		}, func(m *App, controlID string) ui.Cmd {
 			action := m.approvalDialog.ActivateControl(controlID)
 			return m.handleApprovalDialogAction(action)
 		}))
 	}
 	if m.hasPicker() {
-		windows = append(windows, m.centeredWindow(pickerWindowID, 100, m.renderPickerElement(), func(m *Model, msg ui.KeyMsg) ui.Cmd {
+		windows = append(windows, m.centeredWindow(pickerWindowID, 100, m.renderPickerElement(), func(m *App, msg ui.KeyMsg) ui.Cmd {
 			if msg.String() == "ctrl+c" {
 				_, cmd := m.quit()
 				return cmd
@@ -559,7 +559,7 @@ func (m *Model) overlayWindows() []ui.Window {
 			default:
 				return nil
 			}
-		}, func(m *Model, controlID string) ui.Cmd {
+		}, func(m *App, controlID string) ui.Cmd {
 			action := m.picker.dialog.ActivateControl(controlID)
 			switch action.Kind {
 			case ui.PickerDialogActionSelect:
@@ -576,7 +576,7 @@ func (m *Model) overlayWindows() []ui.Window {
 	return windows
 }
 
-func (m *Model) centeredWindow(id ui.WindowID, z int, element ui.Node, onKey func(*Model, ui.KeyMsg) ui.Cmd, onControl func(*Model, string) ui.Cmd) ui.Window {
+func (m *App) centeredWindow(id ui.WindowID, z int, element ui.Node, onKey func(*App, ui.KeyMsg) ui.Cmd, onControl func(*App, string) ui.Cmd) ui.Window {
 	return &modelWindow{
 		base: ui.BaseWindow{
 			WindowID:      id,
@@ -587,8 +587,8 @@ func (m *Model) centeredWindow(id ui.WindowID, z int, element ui.Node, onKey fun
 			Dirty:         true,
 		},
 		model:   m,
-		element: func(*Model) ui.Node { return element },
-		bounds: func(m *Model, root ui.Rect) ui.Rect {
+		element: func(*App) ui.Node { return element },
+		bounds: func(m *App, root ui.Rect) ui.Rect {
 			if element == nil {
 				return ui.Rect{}
 			}
@@ -601,16 +601,16 @@ func (m *Model) centeredWindow(id ui.WindowID, z int, element ui.Node, onKey fun
 				H: min(root.H, size.H),
 			}
 		},
-		render: func(m *Model, bounds ui.Rect) ui.Surface {
+		render: func(m *App, bounds ui.Rect) ui.Surface {
 			if element == nil {
 				return ui.Surface{}
 			}
 			return ui.PaintNodeSurface(&ui.Context{Palette: m.palette}, element, ui.Rect{W: bounds.W, H: bounds.H}).Normalize(bounds.W, bounds.H)
 		},
-		key: func(m *Model, msg ui.KeyMsg) (bool, ui.Cmd) {
+		key: func(m *App, msg ui.KeyMsg) (bool, ui.Cmd) {
 			return true, onKey(m, msg)
 		},
-		mouse: func(m *Model, msg ui.MouseMsg) (bool, ui.Cmd) {
+		mouse: func(m *App, msg ui.MouseMsg) (bool, ui.Cmd) {
 			if msg.Action != ui.MouseActionPress || msg.Button != ui.MouseButtonLeft {
 				if id == helpWindowID {
 					if m.handleHelpMouse(msg) {
@@ -639,7 +639,7 @@ func (m *Model) centeredWindow(id ui.WindowID, z int, element ui.Node, onKey fun
 	}
 }
 
-func (m *Model) centeredWindowBounds(element ui.Node) ui.Rect {
+func (m *App) centeredWindowBounds(element ui.Node) ui.Rect {
 	if element == nil {
 		return ui.Rect{}
 	}

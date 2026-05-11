@@ -16,7 +16,7 @@ type transcriptItemController interface {
 	GapBefore() int
 	SetGapBefore(int)
 	UIItem() ui.TranscriptItem
-	Refresh(*Model)
+	Refresh(*App)
 	Invalidate()
 }
 
@@ -55,7 +55,7 @@ func newPlaceholderTranscriptItem(key string, gap int, text string) *placeholder
 	}
 }
 
-func (i *placeholderTranscriptItem) Refresh(_ *Model) {
+func (i *placeholderTranscriptItem) Refresh(_ *App) {
 	i.setElement(ui.AsNode(ui.Paragraph{Text: i.text}))
 }
 
@@ -73,7 +73,7 @@ func newUserMessageTranscriptItem(key string, gap int, record *appstate.MessageR
 
 func (i *userMessageTranscriptItem) Bind(record *appstate.MessageRecord) { i.record = record }
 
-func (i *userMessageTranscriptItem) Refresh(m *Model) {
+func (i *userMessageTranscriptItem) Refresh(m *App) {
 	if i.record == nil {
 		i.setElement(ui.AsNode(ui.Paragraph{Text: ""}))
 		return
@@ -109,7 +109,7 @@ func (i *assistantMessageTranscriptItem) Bind(record *appstate.MessageRecord) { 
 func (i *assistantMessageTranscriptItem) SetReasoningVisible(v bool) { i.showReasoning = v }
 func (i *assistantMessageTranscriptItem) SetSystemVisible(v bool)    { i.showSystem = v }
 
-func (i *assistantMessageTranscriptItem) Refresh(m *Model) {
+func (i *assistantMessageTranscriptItem) Refresh(m *App) {
 	if i.record == nil {
 		i.setElement(ui.AsNode(ui.Paragraph{Text: ""}))
 		return
@@ -163,7 +163,7 @@ func (i *pendingAssistantTranscriptItem) Parts() []domain.Part {
 	return parts
 }
 
-func (i *pendingAssistantTranscriptItem) Refresh(m *Model) {
+func (i *pendingAssistantTranscriptItem) Refresh(m *App) {
 	msg := domain.Message{Role: domain.MessageRoleAssistant, CreatedAt: i.createdAt}
 	parts := i.Parts()
 	renderer := newTranscriptRenderer(m)
@@ -396,31 +396,31 @@ func (e genericToolRunCardElement) Paint(_ *ui.Context, canvas ui.Canvas) {
 	canvas.BlitSurface(0, 0, e.Run.CardSurface(e.Palette, width, e.ExpandedOutput, e.ExpandedCommand).Normalize(canvas.Width(), canvas.Height()))
 }
 
-func (i *bashToolRunTranscriptItem) Refresh(m *Model) {
+func (i *bashToolRunTranscriptItem) Refresh(m *App) {
 	if i.record != nil {
 		i.run = i.record.RunValue()
 	}
 	i.setElement(ui.AsNode(bashToolRunCardElement{Run: i.run, Palette: m.palette, Width: m.viewport.Width, ExpandedOutput: i.expandedOutput, ExpandedCommand: i.expandedCommand}))
 }
-func (i *readToolRunTranscriptItem) Refresh(m *Model) {
+func (i *readToolRunTranscriptItem) Refresh(m *App) {
 	if i.record != nil {
 		i.run = i.record.RunValue()
 	}
 	i.setElement(ui.AsNode(readToolRunCardElement{Run: i.run, Palette: m.palette, Width: m.viewport.Width, ExpandedOutput: i.expandedOutput}))
 }
-func (i *writeToolRunTranscriptItem) Refresh(m *Model) {
+func (i *writeToolRunTranscriptItem) Refresh(m *App) {
 	if i.record != nil {
 		i.run = i.record.RunValue()
 	}
 	i.setElement(ui.AsNode(writeToolRunCardElement{Run: i.run, Palette: m.palette, Width: m.viewport.Width, ExpandedOutput: i.expandedOutput}))
 }
-func (i *editToolRunTranscriptItem) Refresh(m *Model) {
+func (i *editToolRunTranscriptItem) Refresh(m *App) {
 	if i.record != nil {
 		i.run = i.record.RunValue()
 	}
 	i.setElement(ui.AsNode(editToolRunCardElement{Run: i.run, Palette: m.palette, Width: m.viewport.Width, ExpandedOutput: i.expandedOutput}))
 }
-func (i *genericToolRunTranscriptItem) Refresh(m *Model) {
+func (i *genericToolRunTranscriptItem) Refresh(m *App) {
 	if i.record != nil {
 		i.run = i.record.RunValue()
 	}

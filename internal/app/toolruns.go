@@ -34,7 +34,7 @@ type transcriptBlock struct {
 	Pending       bool
 }
 
-func (m *Model) transcriptBlocks() []transcriptBlock {
+func (m *App) transcriptBlocks() []transcriptBlock {
 	var blocks []transcriptBlock
 	messages := m.activeMessages()
 	parts := m.activeParts()
@@ -158,7 +158,7 @@ func (m *Model) transcriptBlocks() []transcriptBlock {
 	return blocks
 }
 
-func (m *Model) rebuildChatToolRuns() {
+func (m *App) rebuildChatToolRuns() {
 	if m == nil || m.chatState == nil {
 		return
 	}
@@ -199,7 +199,7 @@ func (m *Model) rebuildChatToolRuns() {
 	m.chatState.ReplaceToolRuns(runs)
 }
 
-func (m *Model) applyCurrentChatEvent(evt domain.Event) {
+func (m *App) applyCurrentChatEvent(evt domain.Event) {
 	if m == nil || m.currentChat.ID == 0 {
 		return
 	}
@@ -261,7 +261,7 @@ func (m *Model) applyCurrentChatEvent(evt domain.Event) {
 	}
 }
 
-func (m *Model) applyCurrentChatPartMutation(record *appstate.MessageRecord, partRecord *appstate.PartRecord) bool {
+func (m *App) applyCurrentChatPartMutation(record *appstate.MessageRecord, partRecord *appstate.PartRecord) bool {
 	if record == nil || partRecord == nil {
 		return false
 	}
@@ -287,7 +287,7 @@ func (m *Model) applyCurrentChatPartMutation(record *appstate.MessageRecord, par
 	return true
 }
 
-func (m *Model) applyApprovalAskEvent(evt domain.Event) {
+func (m *App) applyApprovalAskEvent(evt domain.Event) {
 	approvalID, _ := strconv.ParseInt(strings.TrimSpace(evt.Meta["approval_id"]), 10, 64)
 	if approvalID == 0 {
 		return
@@ -304,7 +304,7 @@ func (m *Model) applyApprovalAskEvent(evt domain.Event) {
 	m.syncChatMirrorsFromState()
 }
 
-func (m *Model) applyApprovalReplyEvent(evt domain.Event) {
+func (m *App) applyApprovalReplyEvent(evt domain.Event) {
 	approvalID, _ := strconv.ParseInt(strings.TrimSpace(evt.Meta["approval_id"]), 10, 64)
 	if approvalID == 0 {
 		return
@@ -314,7 +314,7 @@ func (m *Model) applyApprovalReplyEvent(evt domain.Event) {
 	m.syncChatMirrorsFromState()
 }
 
-func (m *Model) appendEventMessageToTranscript(record *appstate.MessageRecord) bool {
+func (m *App) appendEventMessageToTranscript(record *appstate.MessageRecord) bool {
 	if record == nil {
 		return false
 	}
@@ -324,7 +324,7 @@ func (m *Model) appendEventMessageToTranscript(record *appstate.MessageRecord) b
 	return m.appendMessageRecordTranscriptItem(record)
 }
 
-func (m *Model) messageShouldRender(record *appstate.MessageRecord) bool {
+func (m *App) messageShouldRender(record *appstate.MessageRecord) bool {
 	if record == nil {
 		return false
 	}
@@ -361,7 +361,7 @@ func messageToolRunForPart(msg domain.Message, part domain.Part) (ui.ToolRun, bo
 	}
 }
 
-func (m *Model) currentLiveExecRuns() []ui.ToolRun {
+func (m *App) currentLiveExecRuns() []ui.ToolRun {
 	if m == nil || m.exec == nil || m.currentSession.ID == 0 || m.currentChat.ID == 0 {
 		return nil
 	}
@@ -381,7 +381,7 @@ func (m *Model) currentLiveExecRuns() []ui.ToolRun {
 	return runs
 }
 
-func (m *Model) assistantMessageShouldExist(msg domain.Message, parts []domain.Part) bool {
+func (m *App) assistantMessageShouldExist(msg domain.Message, parts []domain.Part) bool {
 	if isCompactionOnlyAssistantMessage(parts) {
 		return false
 	}
@@ -1011,7 +1011,7 @@ func toolRunHasTerminalStatus(status ui.ToolRunStatus) bool {
 	}
 }
 
-func (m *Model) transcriptBlockIdentityKey(block transcriptBlock) string {
+func (m *App) transcriptBlockIdentityKey(block transcriptBlock) string {
 	switch block.Kind {
 	case transcriptBlockToolRun:
 		if strings.TrimSpace(block.ToolRun.ID) != "" {
@@ -1032,7 +1032,7 @@ func (m *Model) transcriptBlockIdentityKey(block transcriptBlock) string {
 	}
 }
 
-func (m *Model) approvalToolRun(item store.Approval) ui.ToolRun {
+func (m *App) approvalToolRun(item store.Approval) ui.ToolRun {
 	run := ui.ToolRun{
 		ID:         approvalFallbackID(item.ID, item.Tool, item.Command),
 		Tool:       item.Tool,

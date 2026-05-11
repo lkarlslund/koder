@@ -21,7 +21,7 @@ func benchmarkConfig(b *testing.B) config.Config {
 	return config.Default().WithStateDir(b.TempDir())
 }
 
-func benchmarkModel(b *testing.B, messageCount int) Model {
+func benchmarkModel(b *testing.B, messageCount int) App {
 	b.Helper()
 	cfg := benchmarkConfig(b)
 	cfg.DefaultProvider = "benchmark"
@@ -166,7 +166,7 @@ func BenchmarkHandleKeyTyping(b *testing.B) {
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		next, _ := m.handleKey(msg)
-		m = *next.(*Model)
+		m = *next.(*App)
 	}
 }
 
@@ -177,7 +177,7 @@ func BenchmarkHandleKeyTypingSlashMode(b *testing.B) {
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		next, _ := m.handleKey(msg)
-		m = *next.(*Model)
+		m = *next.(*App)
 	}
 }
 
@@ -188,7 +188,7 @@ func BenchmarkHandleKeyTypingMentionMode(b *testing.B) {
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		next, _ := m.handleKey(msg)
-		m = *next.(*Model)
+		m = *next.(*App)
 	}
 }
 
@@ -199,7 +199,7 @@ func BenchmarkHandleKeyTypingLargeDraft(b *testing.B) {
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		next, _ := m.handleKey(msg)
-		m = *next.(*Model)
+		m = *next.(*App)
 	}
 }
 
@@ -276,7 +276,7 @@ func BenchmarkViewSurfaceComposerCursorDamage(b *testing.B) {
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		next, _ := m.handleKey(msg)
-		m = *next.(*Model)
+		m = *next.(*App)
 		_ = m.viewSurface()
 	}
 }
@@ -430,26 +430,26 @@ func BenchmarkThemeSwitchRepaint(b *testing.B) {
 }
 
 func BenchmarkDialogPaint(b *testing.B) {
-	benchmarkDialogPaint(b, "connect", benchmarkConnectDialogModel, func(m *Model) {
+	benchmarkDialogPaint(b, "connect", benchmarkConnectDialogModel, func(m *App) {
 		m.connectDialog.Update(ui.KeyMsg{Type: ui.KeyDown})
 	})
-	benchmarkDialogPaint(b, "model", benchmarkModelDialogModel, func(m *Model) {
+	benchmarkDialogPaint(b, "model", benchmarkModelDialogModel, func(m *App) {
 		m.modelDialog.Update(ui.KeyMsg{Type: ui.KeyDown})
 	})
-	benchmarkDialogPaint(b, "preferences", benchmarkPreferencesDialogModel, func(m *Model) {
+	benchmarkDialogPaint(b, "preferences", benchmarkPreferencesDialogModel, func(m *App) {
 		m.preferences.Update(ui.KeyMsg{Type: ui.KeyRight})
 	})
-	benchmarkDialogPaint(b, "tools", benchmarkToolsDialogModel, func(m *Model) {
+	benchmarkDialogPaint(b, "tools", benchmarkToolsDialogModel, func(m *App) {
 		m.toolsDialog.Update(ui.KeyMsg{Type: ui.KeyDown})
 	})
-	benchmarkDialogPaint(b, "theme", benchmarkThemeDialogModel, func(m *Model) {
+	benchmarkDialogPaint(b, "theme", benchmarkThemeDialogModel, func(m *App) {
 		m.themeDialog.Update(ui.KeyMsg{Type: ui.KeyRight})
 		m.previewSelectedTheme()
 	})
-	benchmarkDialogPaint(b, "picker", benchmarkPickerDialogModel, func(m *Model) {
+	benchmarkDialogPaint(b, "picker", benchmarkPickerDialogModel, func(m *App) {
 		m.picker.dialog.Update(ui.KeyMsg{Type: ui.KeyDown})
 	})
-	benchmarkDialogPaint(b, "approval", benchmarkApprovalDialogModel, func(m *Model) {
+	benchmarkDialogPaint(b, "approval", benchmarkApprovalDialogModel, func(m *App) {
 		m.ensureApprovalDialog()
 		m.approvalDialog.Update(ui.KeyMsg{Type: ui.KeyRight})
 	})
@@ -479,7 +479,7 @@ func benchmarkNonsenseChunks(chunkCount, wordsPerChunk int, seed int64) []string
 	return chunks
 }
 
-func benchmarkDialogPaint(b *testing.B, name string, setup func(*testing.B) Model, interact func(*Model)) {
+func benchmarkDialogPaint(b *testing.B, name string, setup func(*testing.B) App, interact func(*App)) {
 	b.Helper()
 	b.Run(name+"/initial_full_paint", func(b *testing.B) {
 		b.ReportAllocs()
@@ -507,14 +507,14 @@ func benchmarkDialogPaint(b *testing.B, name string, setup func(*testing.B) Mode
 	})
 }
 
-func benchmarkConnectDialogModel(b *testing.B) Model {
+func benchmarkConnectDialogModel(b *testing.B) App {
 	b.Helper()
 	m := benchmarkModel(b, 40)
 	m.openConnectDialog()
 	return m
 }
 
-func benchmarkModelDialogModel(b *testing.B) Model {
+func benchmarkModelDialogModel(b *testing.B) App {
 	b.Helper()
 	m := benchmarkModel(b, 40)
 	models := make([]domain.Model, 0, 120)
@@ -528,35 +528,35 @@ func benchmarkModelDialogModel(b *testing.B) Model {
 	return m
 }
 
-func benchmarkPreferencesDialogModel(b *testing.B) Model {
+func benchmarkPreferencesDialogModel(b *testing.B) App {
 	b.Helper()
 	m := benchmarkModel(b, 40)
 	m.openPreferencesDialog()
 	return m
 }
 
-func benchmarkToolsDialogModel(b *testing.B) Model {
+func benchmarkToolsDialogModel(b *testing.B) App {
 	b.Helper()
 	m := benchmarkModel(b, 40)
 	m.openToolsDialog()
 	return m
 }
 
-func benchmarkThemeDialogModel(b *testing.B) Model {
+func benchmarkThemeDialogModel(b *testing.B) App {
 	b.Helper()
 	m := benchmarkModel(b, 40)
 	m.openThemePicker()
 	return m
 }
 
-func benchmarkPickerDialogModel(b *testing.B) Model {
+func benchmarkPickerDialogModel(b *testing.B) App {
 	b.Helper()
 	m := benchmarkModel(b, 40)
 	m.openPermissionsPicker()
 	return m
 }
 
-func benchmarkApprovalDialogModel(b *testing.B) Model {
+func benchmarkApprovalDialogModel(b *testing.B) App {
 	b.Helper()
 	m := benchmarkModel(b, 40)
 	m.currentSnapshot.Approvals = []store.Approval{{

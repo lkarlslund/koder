@@ -9,7 +9,7 @@ import (
 )
 
 func TestMainScreenViewPrepareDirtyUsesNodeFlags(t *testing.T) {
-	m := Model{
+	m := App{
 		cfg:         testConfig(t),
 		palette:     theme.Default().Palette,
 		viewport:    newTranscriptViewport(80, 20),
@@ -37,7 +37,7 @@ func TestMainScreenViewPrepareDirtyUsesNodeFlags(t *testing.T) {
 }
 
 func TestMainScreenViewLayoutChangeMarksNodesDirtyWithoutInvalidation(t *testing.T) {
-	m := Model{
+	m := App{
 		cfg:         testConfig(t),
 		palette:     theme.Default().Palette,
 		viewport:    newTranscriptViewport(80, 20),
@@ -63,7 +63,7 @@ func TestMainScreenViewLayoutChangeMarksNodesDirtyWithoutInvalidation(t *testing
 }
 
 func TestMainScreenViewRepaintsFullyAfterComposerHeightChange(t *testing.T) {
-	m := Model{
+	m := App{
 		cfg:         testConfig(t),
 		palette:     theme.Default().Palette,
 		viewport:    newTranscriptViewport(80, 20),

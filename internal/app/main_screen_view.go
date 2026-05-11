@@ -52,7 +52,7 @@ func newMainScreenView() *mainScreenView {
 	return view
 }
 
-func (m *Model) ensureMainScreenView() *mainScreenView {
+func (m *App) ensureMainScreenView() *mainScreenView {
 	if m.mainScreen == nil {
 		m.mainScreen = newMainScreenView()
 	}
@@ -60,7 +60,7 @@ func (m *Model) ensureMainScreenView() *mainScreenView {
 	return m.mainScreen
 }
 
-func (m *Model) syncMainScreenViewState() {
+func (m *App) syncMainScreenViewState() {
 	if m.mainScreen == nil {
 		return
 	}

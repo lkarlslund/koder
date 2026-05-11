@@ -96,7 +96,7 @@ func TestMatchingSlashCommands(t *testing.T) {
 }
 
 func TestComposerUpdatesKeepMainScreenCacheAndInvalidateComposerArea(t *testing.T) {
-	m := Model{
+	m := App{
 		cfg:         config.Default().WithStateDir(t.TempDir()),
 		palette:     theme.Default().Palette,
 		viewport:    newTranscriptViewport(80, 20),
@@ -116,7 +116,7 @@ func TestComposerUpdatesKeepMainScreenCacheAndInvalidateComposerArea(t *testing.
 	}
 
 	nextModel, _ := m.handleKey(ui.KeyMsg{Type: ui.KeyLeft})
-	next := nextModel.(*Model)
+	next := nextModel.(*App)
 
 	if !next.ensureRenderCache().bodyValid {
 		t.Fatal("expected composer update to keep the cached main screen surface for patching")
@@ -127,7 +127,7 @@ func TestComposerUpdatesKeepMainScreenCacheAndInvalidateComposerArea(t *testing.
 }
 
 func TestHandleKeyInsertsPlainRunesIntoComposer(t *testing.T) {
-	m := Model{
+	m := App{
 		cfg:      config.Default().WithStateDir(t.TempDir()),
 		palette:  theme.Default().Palette,
 		viewport: newTranscriptViewport(80, 20),
@@ -140,7 +140,7 @@ func TestHandleKeyInsertsPlainRunesIntoComposer(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("expected composer input to schedule blink command")
 	}
-	next := *(updated.(*Model))
+	next := *(updated.(*App))
 	if got := next.composer.Value(); got != "a" {
 		t.Fatalf("expected plain rune input to reach composer, got %q", got)
 	}
@@ -149,7 +149,7 @@ func TestHandleKeyInsertsPlainRunesIntoComposer(t *testing.T) {
 func TestTabFocusesComposerThroughMainScreenFocusScope(t *testing.T) {
 	composer := textarea.New()
 	composer.Blur()
-	m := Model{
+	m := App{
 		cfg:      config.Default().WithStateDir(t.TempDir()),
 		palette:  theme.Default().Palette,
 		viewport: newTranscriptViewport(80, 20),
@@ -159,7 +159,7 @@ func TestTabFocusesComposerThroughMainScreenFocusScope(t *testing.T) {
 	}
 
 	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyTab})
-	next := updated.(*Model)
+	next := updated.(*App)
 
 	if cmd != nil {
 		t.Fatal("expected no command from focus traversal")
@@ -170,7 +170,7 @@ func TestTabFocusesComposerThroughMainScreenFocusScope(t *testing.T) {
 }
 
 func TestTypingIntoPrimedComposerUpdatesRenderedView(t *testing.T) {
-	m := Model{
+	m := App{
 		cfg:      config.Default().WithStateDir(t.TempDir()),
 		palette:  theme.Default().Palette,
 		viewport: newTranscriptViewport(80, 20),
@@ -181,7 +181,7 @@ func TestTypingIntoPrimedComposerUpdatesRenderedView(t *testing.T) {
 
 	_ = m.ViewLines()
 	updated, _ := m.handleKey(ui.KeyMsg{Type: ui.KeyRunes, Runes: []rune("hello")})
-	next := *(updated.(*Model))
+	next := *(updated.(*App))
 	got := strings.Join(next.ViewLines(), "\n")
 	if !strings.Contains(got, "hello") {
 		t.Fatalf("expected typed composer text in rendered view, got %q", got)
@@ -189,7 +189,7 @@ func TestTypingIntoPrimedComposerUpdatesRenderedView(t *testing.T) {
 }
 
 func TestComposerRevisionChangeMarksRetainedFooterDirty(t *testing.T) {
-	m := Model{
+	m := App{
 		cfg:      config.Default().WithStateDir(t.TempDir()),
 		palette:  theme.Default().Palette,
 		viewport: newTranscriptViewport(80, 20),
@@ -215,7 +215,7 @@ func TestComposerRevisionChangeMarksRetainedFooterDirty(t *testing.T) {
 }
 
 func TestComposerCursorMoveProducesBottomOnlyDamage(t *testing.T) {
-	m := Model{
+	m := App{
 		cfg:         config.Default().WithStateDir(t.TempDir()),
 		palette:     theme.Default().Palette,
 		viewport:    newTranscriptViewport(80, 20),
@@ -228,7 +228,7 @@ func TestComposerCursorMoveProducesBottomOnlyDamage(t *testing.T) {
 
 	_ = m.viewSurface()
 	nextModel, _ := m.handleKey(ui.KeyMsg{Type: ui.KeyLeft})
-	next := nextModel.(*Model)
+	next := nextModel.(*App)
 
 	surface := next.viewSurface()
 	rects, ok := surface.DirtyRects()
@@ -249,7 +249,7 @@ func TestComposerCursorMoveProducesBottomOnlyDamage(t *testing.T) {
 }
 
 func TestCtrlBTogglesBouncyBallsAndSchedulesAnimation(t *testing.T) {
-	m := Model{
+	m := App{
 		cfg:         config.Default().WithStateDir(t.TempDir()),
 		palette:     theme.Default().Palette,
 		viewport:    newTranscriptViewport(80, 20),
@@ -324,7 +324,7 @@ func TestCtrlBTogglesBouncyBallsAndSchedulesAnimation(t *testing.T) {
 }
 
 func TestStatusUpdateProducesBottomOnlyDamage(t *testing.T) {
-	m := Model{
+	m := App{
 		cfg:         config.Default().WithStateDir(t.TempDir()),
 		palette:     theme.Default().Palette,
 		viewport:    newTranscriptViewport(80, 20),
@@ -396,7 +396,7 @@ func TestToolCallDeltaAppendsCurrentChatImmediately(t *testing.T) {
 		},
 		CreatedAt: now,
 	}}
-	m := Model{
+	m := App{
 		cfg:             testConfig(t),
 		currentSession:  domain.Session{ID: 1},
 		currentChat:     domain.Chat{ID: 2},
@@ -416,7 +416,7 @@ func TestToolCallDeltaAppendsCurrentChatImmediately(t *testing.T) {
 		},
 		events: events,
 	})
-	next := updated.(Model)
+	next := updated.(App)
 	if cmd == nil {
 		t.Fatal("expected follow-up command for remaining event stream")
 	}
@@ -477,7 +477,7 @@ func TestToolResultEventUpdatesRequestedRunInMemory(t *testing.T) {
 		},
 		CreatedAt: now.Add(time.Second),
 	}}
-	m := Model{
+	m := App{
 		cfg:             testConfig(t),
 		currentSession:  domain.Session{ID: 1},
 		currentChat:     domain.Chat{ID: 2},
@@ -485,9 +485,9 @@ func TestToolResultEventUpdatesRequestedRunInMemory(t *testing.T) {
 		composer:        textarea.New(),
 	}
 	updated, _ := m.Update(eventMsg{chatID: 2, event: domain.Event{Kind: domain.EventKindToolCallDelta, Message: callMsg, Parts: callParts}, events: make(chan domain.Event)})
-	m = updated.(Model)
+	m = updated.(App)
 	updated, _ = m.Update(eventMsg{chatID: 2, event: domain.Event{Kind: domain.EventKindToolResult, Tool: domain.ToolKindBash, ToolCallID: "call_1", Message: resultMsg, Parts: resultParts}, events: make(chan domain.Event)})
-	m = updated.(Model)
+	m = updated.(App)
 
 	blocks := m.transcriptBlocks()
 	if len(blocks) != 1 || blocks[0].Kind != transcriptBlockToolRun {
@@ -519,7 +519,7 @@ func TestMessageDonePersistsAssistantWithoutReload(t *testing.T) {
 		Payload:   domain.TextPayload{Text: "done"},
 		CreatedAt: now,
 	}}
-	m := Model{
+	m := App{
 		cfg:               testConfig(t),
 		currentSession:    domain.Session{ID: 1},
 		currentChat:       domain.Chat{ID: 2},
@@ -534,7 +534,7 @@ func TestMessageDonePersistsAssistantWithoutReload(t *testing.T) {
 		event:  domain.Event{Kind: domain.EventKindMessageDone, Message: msg, Parts: parts},
 		events: make(chan domain.Event),
 	})
-	m = updated.(Model)
+	m = updated.(App)
 
 	if strings.TrimSpace(m.currentSnapshot.PendingAssistant.Text) != "" || strings.TrimSpace(m.currentSnapshot.PendingAssistant.Reasoning) != "" {
 		t.Fatalf("expected pending assistant cleared, got %#v", m.currentSnapshot.PendingAssistant)
@@ -572,7 +572,7 @@ func TestApprovalAskEventAppendsPendingApprovalToolRun(t *testing.T) {
 		},
 		CreatedAt: now,
 	}}
-	m := Model{
+	m := App{
 		cfg:             testConfig(t),
 		currentSession:  domain.Session{ID: 1},
 		currentChat:     domain.Chat{ID: 2},
@@ -596,7 +596,7 @@ func TestApprovalAskEventAppendsPendingApprovalToolRun(t *testing.T) {
 		},
 		events: make(chan domain.Event),
 	})
-	m = updated.(Model)
+	m = updated.(App)
 
 	if len(m.currentSnapshot.Approvals) != 1 || m.currentSnapshot.Approvals[0].ID != 44 {
 		t.Fatalf("expected pending approval snapshot, got %#v", m.currentSnapshot.Approvals)
@@ -655,7 +655,7 @@ func TestApprovalReplyEventRemovesPendingApproval(t *testing.T) {
 		},
 		CreatedAt: now.Add(time.Second),
 	}}
-	m := Model{
+	m := App{
 		cfg:             testConfig(t),
 		currentSession:  domain.Session{ID: 1},
 		currentChat:     domain.Chat{ID: 2},
@@ -670,7 +670,7 @@ func TestApprovalReplyEventRemovesPendingApproval(t *testing.T) {
 		Parts:   askParts,
 		Meta:    map[string]string{"approval_id": "44", "command": "pwd", "tool_call_id": "call_1"},
 	}, events: make(chan domain.Event)})
-	m = updated.(Model)
+	m = updated.(App)
 	updated, _ = m.Update(eventMsg{chatID: 2, event: domain.Event{
 		Kind:    domain.EventKindApprovalReply,
 		Text:    "approval 44 approved",
@@ -679,7 +679,7 @@ func TestApprovalReplyEventRemovesPendingApproval(t *testing.T) {
 		Parts:   replyParts,
 		Meta:    map[string]string{"approval_id": "44", "tool_call_id": "call_1"},
 	}, events: make(chan domain.Event)})
-	m = updated.(Model)
+	m = updated.(App)
 
 	if len(m.currentSnapshot.Approvals) != 0 {
 		t.Fatalf("expected pending approval removed, got %#v", m.currentSnapshot.Approvals)
@@ -731,7 +731,7 @@ func TestAcceptMentionSelectionInsertsStructuredReference(t *testing.T) {
 	composer := textarea.New()
 	composer.SetValue("inspect @rea")
 	composer.SetCursor(len("inspect @rea"))
-	m := Model{
+	m := App{
 		cfg:            testConfig(t),
 		composer:       composer,
 		workdir:        workdir,
@@ -761,7 +761,7 @@ func TestMentionTokenBackspaceRemovesWholeReference(t *testing.T) {
 	composer := textarea.New()
 	composer.SetValue("inspect @rea")
 	composer.SetCursor(len("inspect @rea"))
-	m := Model{
+	m := App{
 		cfg:            testConfig(t),
 		composer:       composer,
 		workdir:        workdir,
@@ -771,7 +771,7 @@ func TestMentionTokenBackspaceRemovesWholeReference(t *testing.T) {
 	m.composer.SetCursor(len("inspect @READ"))
 
 	updated, _ := m.handleKey(ui.KeyMsg{Type: ui.KeyBackspace})
-	next := updated.(*Model)
+	next := updated.(*App)
 	if got := next.composer.Value(); got != "inspect " {
 		t.Fatalf("expected reference token to be removed atomically, got %q", got)
 	}
@@ -781,7 +781,7 @@ func TestMentionTokenBackspaceRemovesWholeReference(t *testing.T) {
 }
 
 func TestHandleLocalCommandOpensPermissionsPicker(t *testing.T) {
-	m := Model{
+	m := App{
 		cfg:      testConfig(t),
 		composer: textarea.New(),
 	}
@@ -792,7 +792,7 @@ func TestHandleLocalCommandOpensPermissionsPicker(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("expected sync title command")
 	}
-	next := model.(*Model)
+	next := model.(*App)
 	if !next.hasPicker() {
 		t.Fatal("expected permissions picker to open")
 	}
@@ -803,7 +803,7 @@ func TestHandleLocalCommandOpensPermissionsPicker(t *testing.T) {
 
 func TestHandleLocalCommandOpensSkillsPicker(t *testing.T) {
 	workdir := newSkillRepo(t)
-	m := Model{
+	m := App{
 		cfg:      testConfig(t),
 		composer: textarea.New(),
 		workdir:  workdir,
@@ -815,7 +815,7 @@ func TestHandleLocalCommandOpensSkillsPicker(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("expected sync title command")
 	}
-	next := model.(*Model)
+	next := model.(*App)
 	if !next.hasPicker() {
 		t.Fatal("expected skills picker to open")
 	}
@@ -829,7 +829,7 @@ func TestHandleLocalCommandOpensSkillsPicker(t *testing.T) {
 
 func TestSkillAutocompleteAcceptsSelection(t *testing.T) {
 	workdir := newSkillRepo(t)
-	m := Model{
+	m := App{
 		cfg:      testConfig(t),
 		composer: textarea.New(),
 		workdir:  workdir,
@@ -841,7 +841,7 @@ func TestSkillAutocompleteAcceptsSelection(t *testing.T) {
 	}
 
 	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyTab})
-	next := updated.(*Model)
+	next := updated.(*App)
 	if cmd != nil {
 		t.Fatal("expected no async command")
 	}
@@ -855,7 +855,7 @@ func TestSkillAutocompleteAcceptsSelection(t *testing.T) {
 
 func TestSkillTokenDeleteRemovesWholeToken(t *testing.T) {
 	workdir := newSkillRepo(t)
-	m := Model{
+	m := App{
 		cfg:      testConfig(t),
 		composer: textarea.New(),
 		workdir:  workdir,
@@ -863,11 +863,11 @@ func TestSkillTokenDeleteRemovesWholeToken(t *testing.T) {
 	m.composer.SetValue("Use $rev")
 	m.updateComposerMenus()
 	updated, _ := m.handleKey(ui.KeyMsg{Type: ui.KeyTab})
-	next := updated.(*Model)
+	next := updated.(*App)
 	next.composer.SetCursor(len("Use $rev"))
 
 	updated, _ = next.handleKey(ui.KeyMsg{Type: ui.KeyDelete})
-	final := updated.(*Model)
+	final := updated.(*App)
 	if got := final.composer.Value(); got != "Use " {
 		t.Fatalf("expected skill token to be removed atomically, got %q", got)
 	}
@@ -875,14 +875,14 @@ func TestSkillTokenDeleteRemovesWholeToken(t *testing.T) {
 
 func TestSkillsPickerSelectionInsertsToken(t *testing.T) {
 	workdir := newSkillRepo(t)
-	m := Model{
+	m := App{
 		cfg:      testConfig(t),
 		composer: textarea.New(),
 		workdir:  workdir,
 	}
 	m.openSkillsPicker()
 	model, cmd := m.submitPickerSelection("review")
-	next := model.(*Model)
+	next := model.(*App)
 	if cmd == nil {
 		t.Fatal("expected sync title command")
 	}
@@ -895,7 +895,7 @@ func TestSkillsPickerSelectionInsertsToken(t *testing.T) {
 }
 
 func TestPermissionsCommandOpensWhileBusy(t *testing.T) {
-	m := Model{
+	m := App{
 		cfg:      testConfig(t),
 		composer: textarea.New(),
 		loading:  true,
@@ -908,7 +908,7 @@ func TestPermissionsCommandOpensWhileBusy(t *testing.T) {
 	m.updateComposerMenus()
 
 	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
-	next := updated.(*Model)
+	next := updated.(*App)
 	if cmd == nil {
 		t.Fatal("expected permissions command to execute while busy")
 	}
@@ -921,7 +921,7 @@ func TestPermissionsCommandOpensWhileBusy(t *testing.T) {
 }
 
 func TestPermissionsPickerSelectionUpdatesDraftSession(t *testing.T) {
-	m := Model{
+	m := App{
 		cfg:      testConfig(t),
 		composer: textarea.New(),
 	}
@@ -933,7 +933,7 @@ func TestPermissionsPickerSelectionUpdatesDraftSession(t *testing.T) {
 		}
 	}
 	model, _ := m.submitPickerSelection(permission.ProfileWriteAsk)
-	next := model.(*Model)
+	next := model.(*App)
 	if next.currentSession.PermissionProfile != permission.ProfileWriteAsk {
 		t.Fatalf("expected draft session permission profile updated, got %q", next.currentSession.PermissionProfile)
 	}
@@ -952,7 +952,7 @@ func TestEnterShowsOptimisticUserPromptBeforePromptStarts(t *testing.T) {
 	cfg.Providers = map[string]config.Provider{
 		"test": {BaseURL: "https://example.invalid/v1", APIKey: "secret", DefaultModel: "model"},
 	}
-	m := Model{
+	m := App{
 		cfg:             cfg,
 		composer:        textarea.New(),
 		palette:         theme.Resolve("tokyonight").Palette,
@@ -963,7 +963,7 @@ func TestEnterShowsOptimisticUserPromptBeforePromptStarts(t *testing.T) {
 	m.composer.SetValue("hello there")
 
 	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
-	next := updated.(*Model)
+	next := updated.(*App)
 	if cmd == nil {
 		t.Fatal("expected prompt kickoff command")
 	}
@@ -988,12 +988,12 @@ func testConfig(t *testing.T) config.Config {
 	return config.Default().WithStateDir(t.TempDir())
 }
 
-func asModelPtr(t *testing.T, model ui.Model) *Model {
+func asModelPtr(t *testing.T, model ui.Model) *App {
 	t.Helper()
 	switch next := model.(type) {
-	case *Model:
+	case *App:
 		return next
-	case Model:
+	case App:
 		return &next
 	default:
 		t.Fatalf("unexpected model type %T", model)
@@ -1116,7 +1116,7 @@ func TestEnterSendsNormalPrompt(t *testing.T) {
 			DefaultModel: "gpt-5.4",
 		},
 	}
-	m := Model{
+	m := App{
 		cfg:             cfg,
 		composer:        textarea.New(),
 		currentSnapshot: chatpkg.Snapshot{Parts: map[int64][]domain.Part{}},
@@ -1124,7 +1124,7 @@ func TestEnterSendsNormalPrompt(t *testing.T) {
 	m.composer.SetValue("hello")
 
 	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
-	next := updated.(*Model)
+	next := updated.(*App)
 	if cmd == nil {
 		t.Fatal("expected send command")
 	}
@@ -1155,7 +1155,7 @@ func TestAltEnterInsertsNewlineInsteadOfSending(t *testing.T) {
 			DefaultModel: "gpt-5.4",
 		},
 	}
-	m := Model{
+	m := App{
 		cfg:             cfg,
 		composer:        textarea.New(),
 		currentSnapshot: chatpkg.Snapshot{Parts: map[int64][]domain.Part{}},
@@ -1164,7 +1164,7 @@ func TestAltEnterInsertsNewlineInsteadOfSending(t *testing.T) {
 	m.composer.SetCursor(len("hello"))
 
 	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEnter, Alt: true})
-	next := updated.(*Model)
+	next := updated.(*App)
 	if cmd != nil {
 		t.Fatal("expected no send command for modified enter")
 	}
@@ -1180,7 +1180,7 @@ func TestAltEnterInsertsNewlineInsteadOfSending(t *testing.T) {
 }
 
 func TestCtrlVPastesClipboardText(t *testing.T) {
-	m := Model{
+	m := App{
 		composer:           textarea.New(),
 		attachmentFiles:    attachment.NewManager(t.TempDir()),
 		readClipboardImage: func() ([]byte, error) { return nil, nil },
@@ -1190,7 +1190,7 @@ func TestCtrlVPastesClipboardText(t *testing.T) {
 	m.composer.SetCursor(len("hello "))
 
 	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyCtrlV})
-	next := updated.(*Model)
+	next := updated.(*App)
 	if cmd == nil {
 		t.Fatal("expected title sync command after paste")
 	}
@@ -1203,7 +1203,7 @@ func TestCtrlVPastesClipboardText(t *testing.T) {
 }
 
 func TestCtrlVPastesClipboardImageAsAttachment(t *testing.T) {
-	m := Model{
+	m := App{
 		composer:          textarea.New(),
 		attachmentFiles:   attachment.NewManager(t.TempDir()),
 		readClipboardText: func() (string, error) { return "", nil },
@@ -1213,7 +1213,7 @@ func TestCtrlVPastesClipboardImageAsAttachment(t *testing.T) {
 	}
 
 	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyCtrlV})
-	next := updated.(*Model)
+	next := updated.(*App)
 	if cmd == nil {
 		t.Fatal("expected title sync command after image attach")
 	}
@@ -1241,7 +1241,7 @@ func TestCtrlVPastesClipboardImageWarnsWhenModelDoesNotSupportImages(t *testing.
 	cfg.Providers = map[string]config.Provider{
 		"openai-compatible": {Kind: provider.ProviderKindCompatible, BaseURL: server.URL + "/v1", DefaultModel: "text-only-model"},
 	}
-	m := Model{
+	m := App{
 		cfg:               cfg,
 		composer:          textarea.New(),
 		attachmentFiles:   attachment.NewManager(t.TempDir()),
@@ -1257,14 +1257,14 @@ func TestCtrlVPastesClipboardImageWarnsWhenModelDoesNotSupportImages(t *testing.
 	}
 
 	updated, _ := m.handleKey(ui.KeyMsg{Type: ui.KeyCtrlV})
-	next := updated.(*Model)
+	next := updated.(*App)
 	if !strings.Contains(next.status, "warning: text-only-model may not support image inputs") {
 		t.Fatalf("expected unsupported image warning, got %q", next.status)
 	}
 }
 
 func TestAttachmentTokenBackspaceRemovesWholeToken(t *testing.T) {
-	m := Model{
+	m := App{
 		composer:        textarea.New(),
 		attachmentFiles: attachment.NewManager(t.TempDir()),
 		draftAttachments: []attachment.Draft{{
@@ -1276,7 +1276,7 @@ func TestAttachmentTokenBackspaceRemovesWholeToken(t *testing.T) {
 	m.composer.SetCursor(len("[clipboard"))
 
 	updated, _ := m.handleKey(ui.KeyMsg{Type: ui.KeyBackspace})
-	next := updated.(*Model)
+	next := updated.(*App)
 	if got := next.composer.Value(); got != "analyze this" {
 		t.Fatalf("expected attachment token to be removed atomically, got %q", got)
 	}
@@ -1291,7 +1291,7 @@ func TestCtrlVPastesAttachmentFilePath(t *testing.T) {
 	if err := os.WriteFile(path, []byte("hello"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	m := Model{
+	m := App{
 		composer:          textarea.New(),
 		attachmentFiles:   attachment.NewManager(root),
 		readClipboardText: func() (string, error) { return path, nil },
@@ -1301,7 +1301,7 @@ func TestCtrlVPastesAttachmentFilePath(t *testing.T) {
 	}
 
 	updated, _ := m.handleKey(ui.KeyMsg{Type: ui.KeyCtrlV})
-	next := updated.(*Model)
+	next := updated.(*App)
 	if len(next.draftAttachments) != 1 {
 		t.Fatalf("expected one draft attachment, got %#v", next.draftAttachments)
 	}
@@ -1315,7 +1315,7 @@ func TestCtrlVPastesAttachmentFilePath(t *testing.T) {
 
 func TestBackspaceRemovesLastDraftAttachmentWhenComposerEmpty(t *testing.T) {
 	root := t.TempDir()
-	m := Model{
+	m := App{
 		composer:        textarea.New(),
 		attachmentFiles: attachment.NewManager(root),
 		draftAttachments: []attachment.Draft{{
@@ -1327,7 +1327,7 @@ func TestBackspaceRemovesLastDraftAttachmentWhenComposerEmpty(t *testing.T) {
 	m.composer.SetCursor(len("[file #1]"))
 
 	updated, _ := m.handleKey(ui.KeyMsg{Type: ui.KeyBackspace})
-	next := updated.(*Model)
+	next := updated.(*App)
 	if len(next.draftAttachments) != 0 {
 		t.Fatalf("expected attachment to be removed, got %#v", next.draftAttachments)
 	}
@@ -1335,7 +1335,7 @@ func TestBackspaceRemovesLastDraftAttachmentWhenComposerEmpty(t *testing.T) {
 
 func TestBackspaceAtComposerStartRemovesLastDraftAttachment(t *testing.T) {
 	root := t.TempDir()
-	m := Model{
+	m := App{
 		composer:        textarea.New(),
 		attachmentFiles: attachment.NewManager(root),
 		draftAttachments: []attachment.Draft{{
@@ -1347,7 +1347,7 @@ func TestBackspaceAtComposerStartRemovesLastDraftAttachment(t *testing.T) {
 	m.composer.SetCursor(len("[clipboard image #1]"))
 
 	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyBackspace})
-	next := updated.(*Model)
+	next := updated.(*App)
 	_ = cmd
 	if len(next.draftAttachments) != 0 {
 		t.Fatalf("expected attachment removed, got %#v", next.draftAttachments)
@@ -1359,7 +1359,7 @@ func TestBackspaceAtComposerStartRemovesLastDraftAttachment(t *testing.T) {
 
 func TestDeleteAtComposerEndRemovesLastDraftAttachment(t *testing.T) {
 	root := t.TempDir()
-	m := Model{
+	m := App{
 		composer:        textarea.New(),
 		attachmentFiles: attachment.NewManager(root),
 		draftAttachments: []attachment.Draft{{
@@ -1371,7 +1371,7 @@ func TestDeleteAtComposerEndRemovesLastDraftAttachment(t *testing.T) {
 	m.composer.SetCursor(0)
 
 	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyDelete})
-	next := updated.(*Model)
+	next := updated.(*App)
 	_ = cmd
 	if len(next.draftAttachments) != 0 {
 		t.Fatalf("expected attachment removed, got %#v", next.draftAttachments)
@@ -1389,7 +1389,7 @@ func TestRenderComposerShowsDraftAttachmentInsideComposer(t *testing.T) {
 	composer.SetWidth(38)
 	composer.Focus()
 
-	m := Model{
+	m := App{
 		width:    40,
 		palette:  theme.Default().Palette,
 		composer: composer,
@@ -1424,7 +1424,7 @@ func TestEnterSendsPromptWithPastedImageAttachment(t *testing.T) {
 	m.readClipboardText = func() (string, error) { return "", nil }
 
 	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyCtrlV})
-	next := updated.(*Model)
+	next := updated.(*App)
 	if cmd == nil {
 		t.Fatal("expected title sync command after image attach")
 	}
@@ -1437,7 +1437,7 @@ func TestEnterSendsPromptWithPastedImageAttachment(t *testing.T) {
 
 	next.composer.SetValue("analyze this image")
 	updated, cmd = next.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
-	final := updated.(*Model)
+	final := updated.(*App)
 	if cmd == nil {
 		t.Fatal("expected prompt kickoff command after enter")
 	}
@@ -1464,7 +1464,7 @@ func TestEnterSendsPromptWithPastedImageAttachment(t *testing.T) {
 
 func TestSubmissionPromptTextStripsAttachmentPlaceholders(t *testing.T) {
 	root := t.TempDir()
-	m := Model{
+	m := App{
 		composer: textarea.New(),
 		draftAttachments: []attachment.Draft{{
 			Metadata: attachment.Metadata{Name: "clipboard.png", MIME: "image/png", Path: filepath.Join(root, "clipboard.png")},
@@ -1492,7 +1492,7 @@ func TestForkSessionCopiesAttachmentFiles(t *testing.T) {
 	cfg.Providers = map[string]config.Provider{
 		"openai": {BaseURL: "https://api.openai.com/v1", APIKey: "secret", DefaultModel: "gpt-5.4"},
 	}
-	m := Model{
+	m := App{
 		cfg:             cfg,
 		store:           st,
 		attachmentFiles: manager,
@@ -1549,7 +1549,7 @@ func TestForkSessionCopiesAttachmentFiles(t *testing.T) {
 
 func TestCtrlYCopiesLatestAssistantMessage(t *testing.T) {
 	var copied string
-	m := Model{
+	m := App{
 		composer: textarea.New(),
 		currentSnapshot: chatpkg.Snapshot{Parts: map[int64][]domain.Part{
 			2: {{Kind: domain.PartKindText, Body: "latest assistant reply"}},
@@ -1564,7 +1564,7 @@ func TestCtrlYCopiesLatestAssistantMessage(t *testing.T) {
 	}
 
 	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyCtrlY})
-	next := updated.(*Model)
+	next := updated.(*App)
 	if cmd == nil {
 		t.Fatal("expected title sync command after copy")
 	}
@@ -1589,7 +1589,7 @@ func TestEnterWhileBusyQueuesSteeringPrompt(t *testing.T) {
 			DefaultModel: "gpt-5.4",
 		},
 	}
-	m := Model{
+	m := App{
 		cfg:             cfg,
 		composer:        textarea.New(),
 		currentSnapshot: chatpkg.Snapshot{Parts: map[int64][]domain.Part{}},
@@ -1602,7 +1602,7 @@ func TestEnterWhileBusyQueuesSteeringPrompt(t *testing.T) {
 	m.composer.SetValue("follow up")
 
 	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
-	next := updated.(*Model)
+	next := updated.(*App)
 	if cmd == nil {
 		t.Fatal("expected title sync command after queueing")
 	}
@@ -1666,7 +1666,7 @@ func TestBangPromptWithoutProviderRunsShellOnly(t *testing.T) {
 	}
 	defer st.Close()
 
-	m := Model{
+	m := App{
 		cfg:             testConfig(t),
 		store:           st,
 		composer:        textarea.New(),
@@ -1676,7 +1676,7 @@ func TestBangPromptWithoutProviderRunsShellOnly(t *testing.T) {
 	m.composer.SetValue("!printf hi")
 
 	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
-	next := updated.(*Model)
+	next := updated.(*App)
 	if cmd == nil {
 		t.Fatal("expected shell command execution")
 	}
@@ -1700,7 +1700,7 @@ func TestBangPromptWithoutProviderRunsShellOnly(t *testing.T) {
 	}
 
 	updated, cmd = next.Update(bangMsg)
-	done := updated.(Model)
+	done := updated.(App)
 	if cmd == nil {
 		t.Fatal("expected transcript reload command")
 	}
@@ -1741,14 +1741,14 @@ func TestBangPromptWithoutProviderRunsShellOnly(t *testing.T) {
 
 func TestDoubleBangWithoutProviderOpensConnectDialogBeforeRunningShell(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "blocked.txt")
-	m := Model{
+	m := App{
 		cfg:      testConfig(t),
 		composer: textarea.New(),
 	}
 	m.composer.SetValue("!!touch " + path)
 
 	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
-	next := updated.(*Model)
+	next := updated.(*App)
 	if cmd == nil {
 		t.Fatal("expected title sync command when opening connect dialog")
 	}
@@ -1780,7 +1780,7 @@ func TestDoubleBangIdleCreatesSynthesizedPrompt(t *testing.T) {
 			DefaultModel: "gpt-5.4",
 		},
 	}
-	m := Model{
+	m := App{
 		cfg:             cfg,
 		store:           st,
 		composer:        textarea.New(),
@@ -1790,7 +1790,7 @@ func TestDoubleBangIdleCreatesSynthesizedPrompt(t *testing.T) {
 	m.composer.SetValue("!!printf hi")
 
 	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
-	next := updated.(*Model)
+	next := updated.(*App)
 	if cmd == nil {
 		t.Fatal("expected shell command execution")
 	}
@@ -1811,7 +1811,7 @@ func TestDoubleBangIdleCreatesSynthesizedPrompt(t *testing.T) {
 	}
 
 	updated, cmd = next.Update(bangMsg)
-	done := updated.(Model)
+	done := updated.(App)
 	if cmd == nil {
 		t.Fatal("expected batched reload and prompt kickoff")
 	}
@@ -1848,7 +1848,7 @@ func TestDoubleBangWhileBusyEnterQueuesSteeringPrompt(t *testing.T) {
 			DefaultModel: "gpt-5.4",
 		},
 	}
-	m := Model{
+	m := App{
 		cfg:             cfg,
 		store:           st,
 		composer:        textarea.New(),
@@ -1863,7 +1863,7 @@ func TestDoubleBangWhileBusyEnterQueuesSteeringPrompt(t *testing.T) {
 	m.composer.SetValue("!!printf hi")
 
 	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
-	next := updated.(*Model)
+	next := updated.(*App)
 	if cmd == nil {
 		t.Fatal("expected shell command execution while busy")
 	}
@@ -1877,7 +1877,7 @@ func TestDoubleBangWhileBusyEnterQueuesSteeringPrompt(t *testing.T) {
 	}
 
 	updated, cmd = next.Update(bangMsg)
-	done := updated.(Model)
+	done := updated.(App)
 	if cmd == nil {
 		t.Fatal("expected queue persistence command")
 	}
@@ -1913,7 +1913,7 @@ func TestDoubleBangWhileBusyTabQueuesSynthesizedPrompt(t *testing.T) {
 			DefaultModel: "gpt-5.4",
 		},
 	}
-	m := Model{
+	m := App{
 		cfg:             cfg,
 		store:           st,
 		composer:        textarea.New(),
@@ -1928,7 +1928,7 @@ func TestDoubleBangWhileBusyTabQueuesSynthesizedPrompt(t *testing.T) {
 	m.composer.SetValue("!!printf hi")
 
 	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyTab})
-	next := updated.(*Model)
+	next := updated.(*App)
 	if cmd == nil {
 		t.Fatal("expected shell command execution while busy")
 	}
@@ -1942,7 +1942,7 @@ func TestDoubleBangWhileBusyTabQueuesSynthesizedPrompt(t *testing.T) {
 	}
 
 	updated, cmd = next.Update(bangMsg)
-	done := updated.(Model)
+	done := updated.(App)
 	if cmd == nil {
 		t.Fatal("expected queue persistence command")
 	}
@@ -1955,7 +1955,7 @@ func TestDoubleBangWhileBusyTabQueuesSynthesizedPrompt(t *testing.T) {
 }
 
 func TestUpDownBrowseComposerPromptHistory(t *testing.T) {
-	m := Model{
+	m := App{
 		composer: textarea.New(),
 		currentSnapshot: chatpkg.Snapshot{Messages: []domain.Message{
 			{ID: 1, Role: domain.MessageRoleUser, Summary: "first"},
@@ -1966,32 +1966,32 @@ func TestUpDownBrowseComposerPromptHistory(t *testing.T) {
 	m.composer.SetValue("draft")
 
 	updated, _ := m.handleKey(ui.KeyMsg{Type: ui.KeyUp})
-	next := updated.(*Model)
+	next := updated.(*App)
 	if got := next.composer.Value(); got != "second" {
 		t.Fatalf("expected newest history entry, got %q", got)
 	}
 
 	updated, _ = next.handleKey(ui.KeyMsg{Type: ui.KeyUp})
-	next = updated.(*Model)
+	next = updated.(*App)
 	if got := next.composer.Value(); got != "first" {
 		t.Fatalf("expected older history entry, got %q", got)
 	}
 
 	updated, _ = next.handleKey(ui.KeyMsg{Type: ui.KeyDown})
-	next = updated.(*Model)
+	next = updated.(*App)
 	if got := next.composer.Value(); got != "second" {
 		t.Fatalf("expected newer history entry, got %q", got)
 	}
 
 	updated, _ = next.handleKey(ui.KeyMsg{Type: ui.KeyDown})
-	next = updated.(*Model)
+	next = updated.(*App)
 	if got := next.composer.Value(); got != "draft" {
 		t.Fatalf("expected draft restored after newest history entry, got %q", got)
 	}
 }
 
 func TestCtrlROpensComposerHistoryMenuAndAcceptsSelection(t *testing.T) {
-	m := Model{
+	m := App{
 		composer: textarea.New(),
 		currentSnapshot: chatpkg.Snapshot{Messages: []domain.Message{
 			{ID: 1, Role: domain.MessageRoleUser, Summary: "alpha one"},
@@ -2002,7 +2002,7 @@ func TestCtrlROpensComposerHistoryMenuAndAcceptsSelection(t *testing.T) {
 	m.composer.SetValue("alpha")
 
 	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyCtrlR})
-	next := updated.(*Model)
+	next := updated.(*App)
 	if cmd == nil {
 		t.Fatal("expected title sync command after opening history search")
 	}
@@ -2017,13 +2017,13 @@ func TestCtrlROpensComposerHistoryMenuAndAcceptsSelection(t *testing.T) {
 	}
 
 	updated, _ = next.handleKey(ui.KeyMsg{Type: ui.KeyCtrlR})
-	next = updated.(*Model)
+	next = updated.(*App)
 	if got := next.filteredComposerHistory(next.composerHistory.SearchQuery)[next.composerHistory.SearchIndex]; got != "alpha one" {
 		t.Fatalf("expected ctrl-r to move to earlier matching history entry, got %q", got)
 	}
 
 	updated, cmd = next.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
-	next = updated.(*Model)
+	next = updated.(*App)
 	if cmd == nil {
 		t.Fatal("expected title sync command after accepting history selection")
 	}
@@ -2036,7 +2036,7 @@ func TestCtrlROpensComposerHistoryMenuAndAcceptsSelection(t *testing.T) {
 }
 
 func TestComposerHistoryMenuFiltersWithoutMutatingComposer(t *testing.T) {
-	m := Model{
+	m := App{
 		composer: textarea.New(),
 		currentSnapshot: chatpkg.Snapshot{Messages: []domain.Message{
 			{ID: 1, Role: domain.MessageRoleUser, Summary: "first deploy"},
@@ -2046,9 +2046,9 @@ func TestComposerHistoryMenuFiltersWithoutMutatingComposer(t *testing.T) {
 	m.composer.SetValue("")
 
 	updated, _ := m.handleKey(ui.KeyMsg{Type: ui.KeyCtrlR})
-	next := updated.(*Model)
+	next := updated.(*App)
 	updated, _ = next.handleKey(ui.KeyMsg{Type: ui.KeyRunes, Runes: []rune("status")})
-	next = updated.(*Model)
+	next = updated.(*App)
 
 	if !next.hasComposerHistoryMenu() {
 		t.Fatal("expected history menu to remain open while filtering")
@@ -2075,7 +2075,7 @@ func TestTabWhileBusyQueuesPrompt(t *testing.T) {
 			DefaultModel: "gpt-5.4",
 		},
 	}
-	m := Model{
+	m := App{
 		cfg:      cfg,
 		composer: textarea.New(),
 		loading:  true,
@@ -2087,7 +2087,7 @@ func TestTabWhileBusyQueuesPrompt(t *testing.T) {
 	m.composer.SetValue("nudge the plan")
 
 	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyTab})
-	next := updated.(*Model)
+	next := updated.(*App)
 	if cmd == nil {
 		t.Fatal("expected title sync command after queueing")
 	}
@@ -2109,7 +2109,7 @@ func TestCtrlGQueuesContinueWhileBusy(t *testing.T) {
 			DefaultModel: "gpt-5.4",
 		},
 	}
-	m := Model{
+	m := App{
 		cfg:            cfg,
 		composer:       textarea.New(),
 		loading:        true,
@@ -2121,7 +2121,7 @@ func TestCtrlGQueuesContinueWhileBusy(t *testing.T) {
 	}
 
 	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyCtrlG})
-	next := updated.(*Model)
+	next := updated.(*App)
 	if cmd == nil {
 		t.Fatal("expected title sync command after queueing continue")
 	}
@@ -2143,14 +2143,14 @@ func TestCtrlGStartsContinueWhenIdle(t *testing.T) {
 			DefaultModel: "gpt-5.4",
 		},
 	}
-	m := Model{
+	m := App{
 		cfg:            cfg,
 		composer:       textarea.New(),
 		currentSession: domain.Session{ID: 9, ProviderID: "openai", ModelID: "gpt-5.4"},
 	}
 
 	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyCtrlG})
-	next := updated.(*Model)
+	next := updated.(*App)
 	if cmd == nil {
 		t.Fatal("expected continue command")
 	}
@@ -2172,7 +2172,7 @@ func TestLoadMsgDispatchesQueuedPrompt(t *testing.T) {
 			DefaultModel: "gpt-5.4",
 		},
 	}
-	m := Model{
+	m := App{
 		cfg:             cfg,
 		composer:        textarea.New(),
 		currentSnapshot: chatpkg.Snapshot{Parts: map[int64][]domain.Part{}},
@@ -2185,7 +2185,7 @@ func TestLoadMsgDispatchesQueuedPrompt(t *testing.T) {
 		current: domain.Session{ID: 9, ProviderID: "openai", ModelID: "gpt-5.4", Title: "Queued"},
 		parts:   map[int64][]domain.Part{},
 	})
-	next := updated.(Model)
+	next := updated.(App)
 	if cmd == nil {
 		t.Fatal("expected queued input dispatch command")
 	}
@@ -2201,7 +2201,7 @@ func TestLoadMsgDispatchesQueuedPrompt(t *testing.T) {
 }
 
 func TestQueueEditEnterRestoresQueuedPromptToComposer(t *testing.T) {
-	m := Model{
+	m := App{
 		cfg:         testConfig(t),
 		composer:    textarea.New(),
 		currentChat: domain.Chat{QueuedInputs: []domain.QueuedInput{{ID: 1, Text: "queued ask", Kind: domain.QueuedInputKindQueued}}},
@@ -2209,7 +2209,7 @@ func TestQueueEditEnterRestoresQueuedPromptToComposer(t *testing.T) {
 	m.queueEditMode = true
 
 	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
-	next := updated.(*Model)
+	next := updated.(*App)
 
 	_ = cmd
 	if len(next.currentChat.QueuedInputs) != 0 {
@@ -2221,7 +2221,7 @@ func TestQueueEditEnterRestoresQueuedPromptToComposer(t *testing.T) {
 }
 
 func TestAltUpRestoresQueuedPromptToComposer(t *testing.T) {
-	m := Model{
+	m := App{
 		cfg:      testConfig(t),
 		palette:  theme.Default().Palette,
 		viewport: newTranscriptViewport(80, 20),
@@ -2235,7 +2235,7 @@ func TestAltUpRestoresQueuedPromptToComposer(t *testing.T) {
 
 	_ = m.ViewLines()
 	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyUp, Alt: true})
-	next := updated.(*Model)
+	next := updated.(*App)
 
 	_ = cmd
 	if len(next.currentChat.QueuedInputs) != 0 {
@@ -2250,7 +2250,7 @@ func TestAltUpRestoresQueuedPromptToComposer(t *testing.T) {
 }
 
 func TestQueueEditAltUpRestoresSelectedQueuedPromptToComposer(t *testing.T) {
-	m := Model{
+	m := App{
 		cfg:      testConfig(t),
 		palette:  theme.Default().Palette,
 		viewport: newTranscriptViewport(80, 20),
@@ -2268,7 +2268,7 @@ func TestQueueEditAltUpRestoresSelectedQueuedPromptToComposer(t *testing.T) {
 
 	_ = m.ViewLines()
 	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyUp, Alt: true})
-	next := updated.(*Model)
+	next := updated.(*App)
 
 	_ = cmd
 	if next.composer.Value() != "second" {
@@ -2286,7 +2286,7 @@ func TestQueueEditAltUpRestoresSelectedQueuedPromptToComposer(t *testing.T) {
 }
 
 func TestQueueEditEnterSwapsQueuedPromptWithExistingDraft(t *testing.T) {
-	m := Model{
+	m := App{
 		cfg:         testConfig(t),
 		composer:    textarea.New(),
 		currentChat: domain.Chat{QueuedInputs: []domain.QueuedInput{{ID: 1, Text: "queued ask", Kind: domain.QueuedInputKindSteer}}},
@@ -2295,7 +2295,7 @@ func TestQueueEditEnterSwapsQueuedPromptWithExistingDraft(t *testing.T) {
 	m.setComposerValue("current draft")
 
 	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
-	next := updated.(*Model)
+	next := updated.(*App)
 
 	_ = cmd
 	if next.composer.Value() != "queued ask" {
@@ -2313,7 +2313,7 @@ func TestQueueEditEnterSwapsQueuedPromptWithExistingDraft(t *testing.T) {
 }
 
 func TestQueueEditEnterClearsQueuedContinue(t *testing.T) {
-	m := Model{
+	m := App{
 		cfg:         testConfig(t),
 		composer:    textarea.New(),
 		currentChat: domain.Chat{QueuedInputs: []domain.QueuedInput{{ID: 1, Kind: domain.QueuedInputKindContinue}}},
@@ -2322,7 +2322,7 @@ func TestQueueEditEnterClearsQueuedContinue(t *testing.T) {
 	m.setComposerValue("keep draft")
 
 	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
-	next := updated.(*Model)
+	next := updated.(*App)
 
 	_ = cmd
 	if len(next.currentChat.QueuedInputs) != 0 {
@@ -2334,7 +2334,7 @@ func TestQueueEditEnterClearsQueuedContinue(t *testing.T) {
 }
 
 func TestWindowTitleUsesSessionTitle(t *testing.T) {
-	m := Model{
+	m := App{
 		cfg:            config.Default(),
 		currentSession: domain.Session{ID: 7, Title: "Helpful Session Title"},
 	}
@@ -2347,7 +2347,7 @@ func TestWindowTitleUsesSessionTitle(t *testing.T) {
 func TestWindowTitleUsesAnimatedSpinnerFrame(t *testing.T) {
 	cfg := testConfig(t)
 	cfg.UI.Spinner = "circles"
-	m := Model{
+	m := App{
 		cfg: cfg,
 		busy: busyModel{
 			active: true,
@@ -2367,7 +2367,7 @@ func TestWindowTitleUsesAnimatedSpinnerFrame(t *testing.T) {
 
 func TestSyncDebugRuntimeIncludesViewportState(t *testing.T) {
 	rec := debugsrv.NewRecorder()
-	m := Model{
+	m := App{
 		debug:           rec,
 		status:          "Ready",
 		currentSession:  domain.Session{ID: 7, Title: "Debug Session", ProviderID: "test", ModelID: "model"},
@@ -2392,7 +2392,7 @@ func TestSyncDebugRuntimeIncludesViewportState(t *testing.T) {
 
 func TestSyncDebugRuntimeSkipsIdenticalSnapshots(t *testing.T) {
 	rec := debugsrv.NewRecorder()
-	m := Model{
+	m := App{
 		debug:           rec,
 		status:          "Ready",
 		currentSession:  domain.Session{ID: 7, Title: "Debug Session", ProviderID: "test", ModelID: "model"},
@@ -2413,7 +2413,7 @@ func TestSyncDebugRuntimeSkipsIdenticalSnapshots(t *testing.T) {
 func TestSyncDebugRuntimeIncludesTranscriptItemsInDeepDebug(t *testing.T) {
 	rec := debugsrv.NewRecorder()
 	rec.SetDeepDebug(true)
-	m := Model{
+	m := App{
 		debug:          rec,
 		status:         "Ready",
 		currentSession: domain.Session{ID: 7, Title: "Debug Session", ProviderID: "test", ModelID: "model"},
@@ -2442,7 +2442,7 @@ func TestSyncDebugRuntimeIncludesTranscriptItemsInDeepDebug(t *testing.T) {
 func TestSyncDebugRuntimeIncludesInterruptAndFocusState(t *testing.T) {
 	rec := debugsrv.NewRecorder()
 	composer := textarea.New()
-	m := Model{
+	m := App{
 		debug:             rec,
 		status:            "Streaming LLM response ...",
 		activeEventStream: true,
@@ -2480,7 +2480,7 @@ func TestSyncDebugRuntimeIncludesInterruptAndFocusState(t *testing.T) {
 
 func TestRenderTranscriptToolMessageFallsBackToSummaryWhenBodyMissing(t *testing.T) {
 	cfg := testConfig(t)
-	m := Model{
+	m := App{
 		cfg:             cfg,
 		palette:         theme.Resolve("tokyonight").Palette,
 		currentSnapshot: chatpkg.Snapshot{Parts: map[int64][]domain.Part{}},
@@ -2498,7 +2498,7 @@ func TestRenderTranscriptToolMessageFallsBackToSummaryWhenBodyMissing(t *testing
 
 func TestRefreshViewportGroupsToolRunMessagesIntoCard(t *testing.T) {
 	cfg := testConfig(t)
-	m := Model{
+	m := App{
 		cfg:     cfg,
 		palette: theme.Resolve("tokyonight").Palette,
 		currentSnapshot: chatpkg.Snapshot{Parts: map[int64][]domain.Part{
@@ -2543,7 +2543,7 @@ func TestRefreshViewportGroupsToolRunMessagesIntoCard(t *testing.T) {
 
 func TestRenderApprovalPromptUsesApprovalDialog(t *testing.T) {
 	cfg := testConfig(t)
-	m := Model{
+	m := App{
 		cfg:             cfg,
 		palette:         theme.Resolve("tokyonight").Palette,
 		viewport:        newTranscriptViewport(80, 12),
@@ -2564,7 +2564,7 @@ func TestRenderApprovalPromptUsesApprovalDialog(t *testing.T) {
 
 func TestRefreshViewportSkipsSyntheticAssistantToolSummary(t *testing.T) {
 	cfg := testConfig(t)
-	m := Model{
+	m := App{
 		cfg:     cfg,
 		palette: theme.Resolve("tokyonight").Palette,
 		currentSnapshot: chatpkg.Snapshot{Parts: map[int64][]domain.Part{
@@ -2590,7 +2590,7 @@ func TestRefreshViewportSkipsSyntheticAssistantToolSummary(t *testing.T) {
 
 func TestToolOutputUsesRequestPreviewFromMeta(t *testing.T) {
 	cfg := testConfig(t)
-	m := Model{
+	m := App{
 		cfg:     cfg,
 		palette: theme.Resolve("tokyonight").Palette,
 		currentSnapshot: chatpkg.Snapshot{Parts: map[int64][]domain.Part{
@@ -2619,14 +2619,14 @@ func TestToolOutputUsesRequestPreviewFromMeta(t *testing.T) {
 }
 
 func TestEnterWithoutProviderOpensConnectDialog(t *testing.T) {
-	m := Model{
+	m := App{
 		cfg:      config.Default(),
 		composer: textarea.New(),
 	}
 	m.composer.SetValue("hello")
 
 	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
-	next := updated.(*Model)
+	next := updated.(*App)
 	if cmd != nil {
 		t.Fatal("expected no async command when provider is missing")
 	}
@@ -2639,14 +2639,14 @@ func TestEnterWithoutProviderOpensConnectDialog(t *testing.T) {
 }
 
 func TestExactSlashCommandDoesNotConsumeEnterForAutocomplete(t *testing.T) {
-	m := Model{
+	m := App{
 		composer: textarea.New(),
 	}
 	m.composer.SetValue("/new")
 	m.updateComposerMenus()
 
 	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
-	next := updated.(*Model)
+	next := updated.(*App)
 	if cmd == nil {
 		t.Fatal("expected enter to continue to normal command handling")
 	}
@@ -2656,14 +2656,14 @@ func TestExactSlashCommandDoesNotConsumeEnterForAutocomplete(t *testing.T) {
 }
 
 func TestExactSlashCommandWithArgsConsumesEnterForAutocomplete(t *testing.T) {
-	m := Model{
+	m := App{
 		composer: textarea.New(),
 	}
 	m.composer.SetValue("/mouse")
 	m.updateComposerMenus()
 
 	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
-	next := updated.(*Model)
+	next := updated.(*App)
 	if cmd != nil {
 		t.Fatal("expected no command while autocompleting needs-args slash command")
 	}
@@ -2676,14 +2676,14 @@ func TestExactSlashCommandWithArgsConsumesEnterForAutocomplete(t *testing.T) {
 }
 
 func TestSlashSelectionExecutesNoArgsCommandDirectly(t *testing.T) {
-	m := Model{
+	m := App{
 		composer: textarea.New(),
 	}
 	m.composer.SetValue("/per")
 	m.updateComposerMenus()
 
 	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
-	next := updated.(*Model)
+	next := updated.(*App)
 	if cmd == nil {
 		t.Fatal("expected direct command execution")
 	}
@@ -2696,7 +2696,7 @@ func TestSlashSelectionExecutesNoArgsCommandDirectly(t *testing.T) {
 }
 
 func TestPermissionsPickerApplyAfterSlashCommandInvalidatesComposerArea(t *testing.T) {
-	m := Model{
+	m := App{
 		cfg:         testConfig(t),
 		palette:     theme.Default().Palette,
 		composer:    textarea.New(),
@@ -2714,7 +2714,7 @@ func TestPermissionsPickerApplyAfterSlashCommandInvalidatesComposerArea(t *testi
 	}
 
 	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
-	next := updated.(*Model)
+	next := updated.(*App)
 	if cmd == nil {
 		t.Fatal("expected direct command execution")
 	}
@@ -2723,7 +2723,7 @@ func TestPermissionsPickerApplyAfterSlashCommandInvalidatesComposerArea(t *testi
 	}
 
 	updated, cmd = next.submitPickerSelection(permission.ProfileAsk)
-	final := updated.(*Model)
+	final := updated.(*App)
 	if cmd == nil {
 		t.Fatal("expected title sync command after applying permission profile")
 	}
@@ -2736,14 +2736,14 @@ func TestPermissionsPickerApplyAfterSlashCommandInvalidatesComposerArea(t *testi
 }
 
 func TestRunPromptErrorAppendsAssistantErrorToTranscript(t *testing.T) {
-	m := Model{
+	m := App{
 		composer:        textarea.New(),
 		currentSnapshot: chatpkg.Snapshot{Parts: map[int64][]domain.Part{}},
 		viewport:        newTranscriptViewport(40, 6),
 	}
 
 	updated, cmd := m.Update(runPromptMsg{err: errors.New("connection refused")})
-	next := updated.(Model)
+	next := updated.(App)
 	if cmd == nil {
 		t.Fatal("expected title sync command on immediate prompt error")
 	}
@@ -2768,7 +2768,7 @@ func TestRunPromptMsgKeepsExistingRuntimeSubscription(t *testing.T) {
 	rt := new(chatpkg.Chat)
 	updates := make(chan chatpkg.Update)
 	unsubCalled := 0
-	m := Model{
+	m := App{
 		cfg:                   config.Default().WithStateDir(t.TempDir()),
 		composer:              textarea.New(),
 		currentSnapshot:       chatpkg.Snapshot{Parts: map[int64][]domain.Part{}},
@@ -2785,7 +2785,7 @@ func TestRunPromptMsgKeepsExistingRuntimeSubscription(t *testing.T) {
 		runtimeUpdates: updates,
 		runtimeUnsub:   func() { unsubCalled += 100 },
 	})
-	next := updated.(Model)
+	next := updated.(App)
 
 	if unsubCalled != 0 {
 		t.Fatalf("expected existing runtime subscription to stay installed, got unsubCalled=%d", unsubCalled)
@@ -2810,7 +2810,7 @@ func TestRuntimeUpdateMsgAppliesRuntimeSnapshot(t *testing.T) {
 		CreatedAt: now,
 	}
 	updates := make(chan chatpkg.Update)
-	m := Model{
+	m := App{
 		cfg:             config.Default().WithStateDir(t.TempDir()),
 		composer:        textarea.New(),
 		currentRuntime:  &chatpkg.Chat{},
@@ -2849,7 +2849,7 @@ func TestRuntimeUpdateMsgAppliesRuntimeSnapshot(t *testing.T) {
 		},
 		updates: updates,
 	})
-	next := updated.(Model)
+	next := updated.(App)
 
 	if got := next.currentSnapshot.Messages; len(got) != 1 || got[0].Summary != "queued steer" {
 		t.Fatalf("expected runtime snapshot messages applied, got %#v", got)
@@ -2869,7 +2869,7 @@ func TestRuntimeUpdateMsgAppliesRuntimeSnapshot(t *testing.T) {
 }
 
 func TestSetQueuedInputsUpdatesRuntimeSnapshotQueue(t *testing.T) {
-	m := Model{
+	m := App{
 		currentRuntime:  &chatpkg.Chat{},
 		currentChat:     domain.Chat{ID: 2, SessionID: 1},
 		currentSnapshot: chatpkg.Snapshot{Chat: domain.Chat{ID: 2, SessionID: 1, QueuedInputs: []domain.QueuedInput{{ID: 1, Kind: domain.QueuedInputKindQueued, Text: "before"}}}, QueuedInputs: []domain.QueuedInput{{ID: 1, Kind: domain.QueuedInputKindQueued, Text: "before"}}},
@@ -2890,7 +2890,7 @@ func TestSetQueuedInputsUpdatesRuntimeSnapshotQueue(t *testing.T) {
 }
 
 func TestApplyEventKeepsRuntimePendingAssistantSnapshotInSync(t *testing.T) {
-	m := Model{
+	m := App{
 		currentRuntime:  &chatpkg.Chat{},
 		currentSnapshot: chatpkg.Snapshot{Chat: domain.Chat{ID: 2, SessionID: 1}},
 	}
@@ -2909,7 +2909,7 @@ func TestApplyEventKeepsRuntimePendingAssistantSnapshotInSync(t *testing.T) {
 }
 
 func TestApplyEventKeepsRuntimeSnapshotMetadataInSync(t *testing.T) {
-	m := Model{
+	m := App{
 		currentRuntime:  &chatpkg.Chat{},
 		currentSession:  domain.Session{ID: 1, Title: "Old", PermissionProfile: permission.ProfileWriteAsk},
 		currentChat:     domain.Chat{ID: 2, SessionID: 1},
@@ -2932,7 +2932,7 @@ func TestApplyEventKeepsRuntimeSnapshotMetadataInSync(t *testing.T) {
 }
 
 func TestNewSessionMsgClearsBusyState(t *testing.T) {
-	m := Model{
+	m := App{
 		busy: busyModel{
 			active: true,
 			scope:  busyScopeSidebar,
@@ -2952,7 +2952,7 @@ func TestNewSessionMsgClearsBusyState(t *testing.T) {
 		parts:     map[int64][]domain.Part{},
 		workspace: workspace.Status{},
 	})
-	next := updated.(Model)
+	next := updated.(App)
 	if next.loading {
 		t.Fatal("expected new session to clear loading")
 	}
@@ -2984,7 +2984,7 @@ func TestForkCommandCreatesForkedSession(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	m := Model{
+	m := App{
 		cfg:             cfg,
 		store:           st,
 		composer:        textarea.New(),
@@ -2996,7 +2996,7 @@ func TestForkCommandCreatesForkedSession(t *testing.T) {
 	m.composer.SetValue("/fork")
 
 	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
-	next := updated.(*Model)
+	next := updated.(*App)
 	if cmd == nil {
 		t.Fatal("expected fork command")
 	}
@@ -3010,7 +3010,7 @@ func TestForkCommandCreatesForkedSession(t *testing.T) {
 		t.Fatalf("expected forkSessionMsg, got %T", msgAny)
 	}
 	updated, _ = next.Update(forkMsg)
-	forked := updated.(Model)
+	forked := updated.(App)
 	if forked.currentSession.ID == session.ID {
 		t.Fatal("expected forked session id to differ from source")
 	}
@@ -3026,13 +3026,13 @@ func TestForkCommandCreatesForkedSession(t *testing.T) {
 }
 
 func TestToolLikeSlashCommandIsRejectedLocally(t *testing.T) {
-	m := Model{
+	m := App{
 		composer: textarea.New(),
 	}
 	m.composer.SetValue("/read README.md")
 
 	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
-	next := updated.(*Model)
+	next := updated.(*App)
 	if cmd != nil {
 		t.Fatal("expected no command for hidden tool-like slash input")
 	}
@@ -3045,13 +3045,13 @@ func TestToolLikeSlashCommandIsRejectedLocally(t *testing.T) {
 }
 
 func TestApprovalDialogConsumesEnter(t *testing.T) {
-	m := Model{
+	m := App{
 		composer:        textarea.New(),
 		currentSnapshot: chatpkg.Snapshot{Approvals: []store.Approval{{ID: 7}}},
 	}
 
 	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
-	next := updated.(*Model)
+	next := updated.(*App)
 	if cmd == nil {
 		t.Fatal("expected approval command")
 	}
@@ -3061,7 +3061,7 @@ func TestApprovalDialogConsumesEnter(t *testing.T) {
 }
 
 func TestApprovalDialogOpensPermissionsPicker(t *testing.T) {
-	m := Model{
+	m := App{
 		cfg:             testConfig(t),
 		composer:        textarea.New(),
 		currentSnapshot: chatpkg.Snapshot{Approvals: []store.Approval{{ID: 7, Tool: domain.ToolKindBash, Command: `{"command":"git status"}`}}},
@@ -3070,7 +3070,7 @@ func TestApprovalDialogOpensPermissionsPicker(t *testing.T) {
 	m.approvalDialog.SetButtonIndex(4)
 
 	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
-	next := updated.(*Model)
+	next := updated.(*App)
 	if cmd == nil {
 		t.Fatal("expected sync title command")
 	}
@@ -3089,7 +3089,7 @@ func TestApprovalDialogOpensPermissionsPicker(t *testing.T) {
 }
 
 func TestApprovalDialogArrowNavigationThenEnterOpensPermissionsPicker(t *testing.T) {
-	m := Model{
+	m := App{
 		cfg:             testConfig(t),
 		composer:        textarea.New(),
 		currentSnapshot: chatpkg.Snapshot{Approvals: []store.Approval{{ID: 7, Tool: domain.ToolKindBash, Command: `{"command":"git status"}`}}},
@@ -3098,8 +3098,8 @@ func TestApprovalDialogArrowNavigationThenEnterOpensPermissionsPicker(t *testing
 	var updated ui.Model = &m
 	var cmd ui.Cmd
 	for i := 0; i < 4; i++ {
-		updated, cmd = updated.(*Model).handleKey(ui.KeyMsg{Type: ui.KeyRight})
-		next := updated.(*Model)
+		updated, cmd = updated.(*App).handleKey(ui.KeyMsg{Type: ui.KeyRight})
+		next := updated.(*App)
 		if cmd != nil {
 			t.Fatal("expected navigation to avoid starting a command")
 		}
@@ -3107,13 +3107,13 @@ func TestApprovalDialogArrowNavigationThenEnterOpensPermissionsPicker(t *testing
 			t.Fatal("expected approval dialog to remain open")
 		}
 	}
-	next := updated.(*Model)
+	next := updated.(*App)
 	if next.approvalDialog.ButtonIndex() != 4 {
 		t.Fatalf("expected right arrow to focus permissions button, got %d", next.approvalDialog.ButtonIndex())
 	}
 
 	updated, cmd = next.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
-	next = updated.(*Model)
+	next = updated.(*App)
 	if cmd == nil {
 		t.Fatal("expected sync title command")
 	}
@@ -3129,14 +3129,14 @@ func TestApprovalDialogArrowNavigationThenEnterOpensPermissionsPicker(t *testing
 }
 
 func TestApprovalDialogAltHotkeys(t *testing.T) {
-	m := Model{
+	m := App{
 		cfg:             testConfig(t),
 		composer:        textarea.New(),
 		currentSnapshot: chatpkg.Snapshot{Approvals: []store.Approval{{ID: 7, Tool: domain.ToolKindBash, Command: `{"command":"git status"}`}}},
 	}
 
 	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyRunes, Alt: true, Runes: []rune("s")})
-	next := updated.(*Model)
+	next := updated.(*App)
 	if cmd == nil {
 		t.Fatal("expected sync title command")
 	}
@@ -3144,13 +3144,13 @@ func TestApprovalDialogAltHotkeys(t *testing.T) {
 		t.Fatalf("expected alt+s to open permission picker for approval, got %#v", next.picker)
 	}
 
-	m = Model{
+	m = App{
 		cfg:             testConfig(t),
 		composer:        textarea.New(),
 		currentSnapshot: chatpkg.Snapshot{Approvals: []store.Approval{{ID: 7, Tool: domain.ToolKindBash, Command: `{"command":"git status"}`}}},
 	}
 	updated, cmd = m.handleKey(ui.KeyMsg{Type: ui.KeyRunes, Alt: true, Runes: []rune("t")})
-	next = updated.(*Model)
+	next = updated.(*App)
 	if cmd == nil {
 		t.Fatal("expected alt+t to trigger approval command")
 	}
@@ -3158,13 +3158,13 @@ func TestApprovalDialogAltHotkeys(t *testing.T) {
 		t.Fatal("expected alt+t to start approval flow")
 	}
 
-	m = Model{
+	m = App{
 		cfg:             testConfig(t),
 		composer:        textarea.New(),
 		currentSnapshot: chatpkg.Snapshot{Approvals: []store.Approval{{ID: 7, Tool: domain.ToolKindBash, Command: `{"command":"git status"}`}}},
 	}
 	updated, cmd = m.handleKey(ui.KeyMsg{Type: ui.KeyRunes, Alt: true, Runes: []rune("d")})
-	next = updated.(*Model)
+	next = updated.(*App)
 	if cmd == nil {
 		t.Fatal("expected alt+d to trigger deny command")
 	}
@@ -3182,7 +3182,7 @@ func TestAltOOpensNextLLMRequestPreview(t *testing.T) {
 	defer st.Close()
 
 	workdir := t.TempDir()
-	m := Model{
+	m := App{
 		cfg:            cfg,
 		composer:       textarea.New(),
 		agent:          agent.New(cfg, st, tools.NewRegistry(workdir), nil, workdir),
@@ -3193,7 +3193,7 @@ func TestAltOOpensNextLLMRequestPreview(t *testing.T) {
 	m.composer.SetValue("draft question")
 
 	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyRunes, Alt: true, Runes: []rune("o")})
-	next := updated.(*Model)
+	next := updated.(*App)
 	if cmd == nil {
 		t.Fatal("expected preview command")
 	}
@@ -3205,7 +3205,7 @@ func TestAltOOpensNextLLMRequestPreview(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("expected sync title command after preview opens")
 	}
-	previewModel := updated.(Model)
+	previewModel := updated.(App)
 	rendered := (&previewModel).renderLLMPreview()
 	if !strings.Contains(rendered, "Next LLM Request") {
 		t.Fatalf("expected preview title, got %q", rendered)
@@ -3216,13 +3216,13 @@ func TestAltOOpensNextLLMRequestPreview(t *testing.T) {
 }
 
 func TestAltOWithoutDraftShowsStatus(t *testing.T) {
-	m := Model{
+	m := App{
 		cfg:      testConfig(t),
 		composer: textarea.New(),
 	}
 
 	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyRunes, Alt: true, Runes: []rune("o")})
-	next := updated.(*Model)
+	next := updated.(*App)
 	if cmd == nil {
 		t.Fatal("expected sync title command")
 	}
@@ -3235,7 +3235,7 @@ func TestAltOWithoutDraftShowsStatus(t *testing.T) {
 }
 
 func TestLLMPreviewScrollUsesElementOffsetState(t *testing.T) {
-	m := Model{
+	m := App{
 		cfg:      testConfig(t),
 		composer: textarea.New(),
 		width:    80,
@@ -3270,13 +3270,13 @@ func TestLLMPreviewScrollUsesElementOffsetState(t *testing.T) {
 }
 
 func TestQuitCommandQuits(t *testing.T) {
-	m := Model{
+	m := App{
 		composer: textarea.New(),
 	}
 	m.composer.SetValue("/quit")
 
 	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
-	next := updated.(*Model)
+	next := updated.(*App)
 	if cmd == nil {
 		t.Fatal("expected quit command")
 	}
@@ -3286,13 +3286,13 @@ func TestQuitCommandQuits(t *testing.T) {
 }
 
 func TestMouseOnCommandEnablesMouseCapture(t *testing.T) {
-	m := Model{
+	m := App{
 		composer: textarea.New(),
 	}
 	m.composer.SetValue("/mouse on")
 
 	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
-	next := updated.(*Model)
+	next := updated.(*App)
 	if cmd == nil {
 		t.Fatal("expected mouse enable command")
 	}
@@ -3305,14 +3305,14 @@ func TestMouseOnCommandEnablesMouseCapture(t *testing.T) {
 }
 
 func TestMouseOffCommandDisablesMouseCapture(t *testing.T) {
-	m := Model{
+	m := App{
 		composer:     textarea.New(),
 		mouseEnabled: true,
 	}
 	m.composer.SetValue("/mouse off")
 
 	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
-	next := updated.(*Model)
+	next := updated.(*App)
 	if cmd == nil {
 		t.Fatal("expected mouse disable command")
 	}
@@ -3346,12 +3346,12 @@ func TestInitEnablesMouseWhenConfigured(t *testing.T) {
 }
 
 func TestCtrlCUsesQuitPath(t *testing.T) {
-	m := Model{
+	m := App{
 		composer: textarea.New(),
 	}
 
 	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyCtrlC})
-	next := updated.(*Model)
+	next := updated.(*App)
 	if cmd == nil {
 		t.Fatal("expected quit command")
 	}
@@ -3362,7 +3362,7 @@ func TestCtrlCUsesQuitPath(t *testing.T) {
 
 func TestEscInterruptCancelsActiveOperationImmediately(t *testing.T) {
 	cancelled := false
-	m := Model{
+	m := App{
 		composer: textarea.New(),
 		loading:  true,
 		busy: busyModel{
@@ -3373,7 +3373,7 @@ func TestEscInterruptCancelsActiveOperationImmediately(t *testing.T) {
 	}
 
 	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEsc})
-	next := updated.(*Model)
+	next := updated.(*App)
 	if cmd == nil {
 		t.Fatal("expected title sync command after esc")
 	}
@@ -3390,7 +3390,7 @@ func TestEscInterruptCancelsActiveOperationImmediately(t *testing.T) {
 
 func TestEscInterruptCancelsActiveOperationWhenNotLoading(t *testing.T) {
 	cancelled := false
-	m := Model{
+	m := App{
 		composer: textarea.New(),
 		busy: busyModel{
 			active: true,
@@ -3400,7 +3400,7 @@ func TestEscInterruptCancelsActiveOperationWhenNotLoading(t *testing.T) {
 	}
 
 	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEsc})
-	next := updated.(*Model)
+	next := updated.(*App)
 	if cmd == nil {
 		t.Fatal("expected title sync command after esc")
 	}
@@ -3414,7 +3414,7 @@ func TestEscInterruptCancelsActiveOperationWhenNotLoading(t *testing.T) {
 
 func TestHandleKeyEscInterruptsWhileMainWindowFocused(t *testing.T) {
 	cancelled := false
-	m := Model{
+	m := App{
 		composer: textarea.New(),
 		width:    100,
 		height:   30,
@@ -3430,7 +3430,7 @@ func TestHandleKeyEscInterruptsWhileMainWindowFocused(t *testing.T) {
 	}
 
 	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEsc})
-	next := updated.(*Model)
+	next := updated.(*App)
 	if cmd == nil {
 		t.Fatal("expected title sync command after esc")
 	}
@@ -3450,7 +3450,7 @@ func TestHandleKeyEscInterruptsWhileMainWindowFocused(t *testing.T) {
 
 func TestEscInterruptCancelsCurrentChatOperationFromMap(t *testing.T) {
 	cancelled := false
-	m := Model{
+	m := App{
 		composer: textarea.New(),
 		width:    100,
 		height:   30,
@@ -3471,7 +3471,7 @@ func TestEscInterruptCancelsCurrentChatOperationFromMap(t *testing.T) {
 	}
 
 	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEsc})
-	next := updated.(*Model)
+	next := updated.(*App)
 	if cmd == nil {
 		t.Fatal("expected title sync command after esc")
 	}
@@ -3490,7 +3490,7 @@ func TestEscInterruptCancelsCurrentChatOperationFromMap(t *testing.T) {
 }
 
 func TestFinishOperationWithCanceledErrorKeepsBusyUntilActiveStreamEnds(t *testing.T) {
-	m := Model{
+	m := App{
 		composer: textarea.New(),
 		loading:  true,
 		busy: busyModel{
@@ -3501,7 +3501,7 @@ func TestFinishOperationWithCanceledErrorKeepsBusyUntilActiveStreamEnds(t *testi
 	}
 
 	updated, cmd := m.finishOperationWithError(context.Canceled)
-	next := updated.(Model)
+	next := updated.(App)
 	if cmd == nil {
 		t.Fatal("expected title sync command after interrupted finish")
 	}
@@ -3517,7 +3517,7 @@ func TestFinishOperationWithCanceledErrorKeepsBusyUntilActiveStreamEnds(t *testi
 }
 
 func TestFinishOperationWithCanceledErrorStopsBusyWithoutActiveStream(t *testing.T) {
-	m := Model{
+	m := App{
 		composer: textarea.New(),
 		loading:  true,
 		busy: busyModel{
@@ -3527,7 +3527,7 @@ func TestFinishOperationWithCanceledErrorStopsBusyWithoutActiveStream(t *testing
 	}
 
 	updated, cmd := m.finishOperationWithError(context.Canceled)
-	next := updated.(Model)
+	next := updated.(App)
 	if cmd == nil {
 		t.Fatal("expected title sync command after interrupted finish")
 	}
@@ -3543,7 +3543,7 @@ func TestFinishOperationWithCanceledErrorStopsBusyWithoutActiveStream(t *testing
 }
 
 func TestExitSummaryIncludesSessionDetails(t *testing.T) {
-	m := Model{
+	m := App{
 		currentSession:  domain.Session{ID: 4, Title: "Testing Session Review Flow"},
 		currentSnapshot: chatpkg.Snapshot{Messages: []domain.Message{{ID: 1}, {ID: 2}, {ID: 3}}},
 	}
@@ -3556,14 +3556,14 @@ func TestExitSummaryIncludesSessionDetails(t *testing.T) {
 }
 
 func TestSessionPickerEscapeCreatesNewSession(t *testing.T) {
-	m := Model{
+	m := App{
 		composer:      textarea.New(),
 		sessionDialog: &dialogs.SessionDialog{},
 		sessions:      []domain.Session{{ID: 1}},
 	}
 
 	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEsc})
-	next := updated.(*Model)
+	next := updated.(*App)
 	if cmd == nil {
 		t.Fatal("expected new session command")
 	}
@@ -3591,7 +3591,7 @@ func TestSessionPickerRendersCenteredDialogWithPreview(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	m := Model{
+	m := App{
 		width:   100,
 		height:  30,
 		store:   st,
@@ -3637,7 +3637,7 @@ func TestSessionPickerRendersCenteredDialogWithPreview(t *testing.T) {
 }
 
 func TestSessionPickerLeavesScreenMarginForRightBorder(t *testing.T) {
-	m := Model{
+	m := App{
 		width:  72,
 		height: 24,
 		sessions: []domain.Session{{
@@ -3669,7 +3669,7 @@ func TestSessionPickerLeavesScreenMarginForRightBorder(t *testing.T) {
 }
 
 func TestOpenSessionPickerShowsCWDWhenAllSessionsEnabled(t *testing.T) {
-	m := Model{
+	m := App{
 		startupOptions: StartupOptions{ShowAllSessions: true},
 		sessions: []domain.Session{{
 			ID:          1,
@@ -3687,7 +3687,7 @@ func TestOpenSessionPickerShowsCWDWhenAllSessionsEnabled(t *testing.T) {
 }
 
 func TestOpenSessionPickerBlursComposer(t *testing.T) {
-	m := Model{
+	m := App{
 		composer: textarea.New(),
 		sessions: []domain.Session{{
 			ID:          1,
@@ -3733,7 +3733,7 @@ func TestNewWithWorkdirStartsComposerFocusedWithBlinkTimer(t *testing.T) {
 }
 
 func TestClosingSessionPickerRefocusesComposer(t *testing.T) {
-	m := Model{
+	m := App{
 		composer: textarea.New(),
 		sessions: []domain.Session{{
 			ID:          1,
@@ -3751,7 +3751,7 @@ func TestClosingSessionPickerRefocusesComposer(t *testing.T) {
 }
 
 func TestOpenSessionPickerStopsComposerBlinkTimer(t *testing.T) {
-	m := Model{
+	m := App{
 		composer: textarea.New(),
 		palette:  theme.Default().Palette,
 		width:    80,
@@ -3775,7 +3775,7 @@ func TestOpenSessionPickerStopsComposerBlinkTimer(t *testing.T) {
 }
 
 func TestClosingSessionPickerRestartsComposerBlinkTimer(t *testing.T) {
-	m := Model{
+	m := App{
 		composer: textarea.New(),
 		palette:  theme.Default().Palette,
 		width:    80,
@@ -3796,7 +3796,7 @@ func TestClosingSessionPickerRestartsComposerBlinkTimer(t *testing.T) {
 }
 
 func TestSelectingSessionKeepsComposerBlinkStopped(t *testing.T) {
-	m := Model{
+	m := App{
 		composer: textarea.New(),
 		palette:  theme.Default().Palette,
 		width:    80,
@@ -3820,7 +3820,7 @@ func TestSelectingSessionKeepsComposerBlinkStopped(t *testing.T) {
 }
 
 func TestWithRootTimersDoesNotQueueDuplicateTicks(t *testing.T) {
-	m := Model{
+	m := App{
 		composer: textarea.New(),
 		palette:  theme.Default().Palette,
 		width:    80,
@@ -3851,7 +3851,7 @@ func TestWithRootTimersDoesNotQueueDuplicateTicks(t *testing.T) {
 }
 
 func TestVisibleSessionsFiltersByExactCWD(t *testing.T) {
-	m := Model{workdir: "/repo/a"}
+	m := App{workdir: "/repo/a"}
 	sessions := []domain.Session{
 		{ID: 1, CWD: "/repo/a"},
 		{ID: 2, CWD: "/repo/b"},
@@ -3886,7 +3886,7 @@ func TestFormatRelativeSessionTime(t *testing.T) {
 }
 
 func TestUpdateLoadHidesSessionPicker(t *testing.T) {
-	m := Model{
+	m := App{
 		composer:      textarea.New(),
 		palette:       theme.Default().Palette,
 		width:         80,
@@ -3912,7 +3912,7 @@ func TestUpdateLoadHidesSessionPicker(t *testing.T) {
 
 func TestUpdateLoadPreservesActiveInterruptForBusyChat(t *testing.T) {
 	cancelled := false
-	m := Model{
+	m := App{
 		composer: textarea.New(),
 		palette:  theme.Default().Palette,
 		width:    80,
@@ -3937,7 +3937,7 @@ func TestUpdateLoadPreservesActiveInterruptForBusyChat(t *testing.T) {
 	}
 
 	nextModel, cmd := updated.handleKey(ui.KeyMsg{Type: ui.KeyEsc})
-	next := nextModel.(*Model)
+	next := nextModel.(*App)
 	if cmd == nil {
 		t.Fatal("expected title sync command after esc")
 	}
@@ -3956,7 +3956,7 @@ func TestUpdateLoadPreservesActiveInterruptForBusyChat(t *testing.T) {
 }
 
 func TestAppendingPromptPreservesRetainedTranscriptPrefix(t *testing.T) {
-	m := Model{
+	m := App{
 		cfg:              testConfig(t),
 		palette:          theme.Default().Palette,
 		viewport:         newTranscriptViewport(80, 18),
@@ -3991,7 +3991,7 @@ func TestAppendingPromptPreservesRetainedTranscriptPrefix(t *testing.T) {
 }
 
 func TestUpdateLoadPreservesMessageRecordIdentityForSameChat(t *testing.T) {
-	m := Model{composer: textarea.New(), palette: theme.Default().Palette, width: 80, height: 24}
+	m := App{composer: textarea.New(), palette: theme.Default().Palette, width: 80, height: 24}
 	first := m.UpdateLoad(loadMsg{
 		current:  domain.Session{ID: 4},
 		chat:     domain.Chat{ID: 7, SessionID: 4},
@@ -4026,7 +4026,7 @@ func TestUpdateLoadPreservesMessageRecordIdentityForSameChat(t *testing.T) {
 }
 
 func TestAppendLocalUserPromptStoresSharedRecord(t *testing.T) {
-	m := Model{
+	m := App{
 		cfg:              testConfig(t),
 		palette:          theme.Default().Palette,
 		viewport:         newTranscriptViewport(80, 18),
@@ -4058,14 +4058,14 @@ func TestAppendLocalUserPromptStoresSharedRecord(t *testing.T) {
 }
 
 func TestThemeCommandOpensFilterablePicker(t *testing.T) {
-	m := Model{
+	m := App{
 		cfg:      config.Default(),
 		composer: textarea.New(),
 	}
 	m.composer.SetValue("/theme")
 
 	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
-	next := updated.(*Model)
+	next := updated.(*App)
 	if cmd != nil {
 		t.Fatal("expected no async command for theme picker")
 	}
@@ -4088,9 +4088,9 @@ func TestThemePickerFiltersAndPreviewsSelection(t *testing.T) {
 	m.openThemePicker()
 
 	updated, _ := m.handleKey(ui.KeyMsg{Type: ui.KeyRunes, Runes: []rune("g")})
-	next := updated.(*Model)
+	next := updated.(*App)
 	updated, _ = next.handleKey(ui.KeyMsg{Type: ui.KeyRunes, Runes: []rune("r")})
-	next = updated.(*Model)
+	next = updated.(*App)
 
 	if len(next.themeDialog.Themes) == 0 {
 		t.Fatal("expected filtered theme matches")
@@ -4174,7 +4174,7 @@ func TestThemePickerEscapeRestoresOriginalTheme(t *testing.T) {
 	}
 
 	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEsc})
-	next := updated.(*Model)
+	next := updated.(*App)
 	if cmd != nil {
 		t.Fatal("expected no async command on theme picker cancel")
 	}
@@ -4208,7 +4208,7 @@ func TestThemePickerEnterSavesTheme(t *testing.T) {
 	m.themeDialog.Update(ui.KeyMsg{Type: ui.KeyRight})
 
 	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
-	next := updated.(*Model)
+	next := updated.(*App)
 	if cmd != nil {
 		t.Fatal("expected no async command on theme apply")
 	}
@@ -4297,14 +4297,14 @@ func TestMouseClickOnThemePickerOKAppliesSelection(t *testing.T) {
 }
 
 func TestPrefsCommandOpensPreferencesDialog(t *testing.T) {
-	m := Model{
+	m := App{
 		cfg:      config.Default(),
 		composer: textarea.New(),
 	}
 	m.composer.SetValue("/preferences")
 
 	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
-	next := updated.(*Model)
+	next := updated.(*App)
 	if cmd == nil {
 		t.Fatal("expected spinner tick command when opening preferences")
 	}
@@ -4314,14 +4314,14 @@ func TestPrefsCommandOpensPreferencesDialog(t *testing.T) {
 }
 
 func TestToolsCommandOpensToolsDialog(t *testing.T) {
-	m := Model{
+	m := App{
 		cfg:      config.Default(),
 		composer: textarea.New(),
 	}
 	m.composer.SetValue("/tools")
 
 	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
-	next := updated.(*Model)
+	next := updated.(*App)
 	if cmd == nil {
 		t.Fatal("expected title sync command when opening tools dialog")
 	}
@@ -4331,7 +4331,7 @@ func TestToolsCommandOpensToolsDialog(t *testing.T) {
 }
 
 func TestApplySessionToolStatesUpdatesDraftSession(t *testing.T) {
-	m := Model{cfg: config.Default()}
+	m := App{cfg: config.Default()}
 
 	err := m.applySessionToolStates(map[domain.ToolKind]bool{
 		domain.ToolKindRead: true,
@@ -4346,14 +4346,14 @@ func TestApplySessionToolStatesUpdatesDraftSession(t *testing.T) {
 }
 
 func TestProviderCommandOpensProviderDialog(t *testing.T) {
-	m := Model{
+	m := App{
 		cfg:      config.Default(),
 		composer: textarea.New(),
 	}
 	m.composer.SetValue("/provider")
 
 	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
-	next := updated.(*Model)
+	next := updated.(*App)
 	if cmd == nil {
 		t.Fatal("expected title sync command when opening provider dialog")
 	}
@@ -4363,7 +4363,7 @@ func TestProviderCommandOpensProviderDialog(t *testing.T) {
 }
 
 func TestDisconnectAliasOpensProviderDialog(t *testing.T) {
-	m := Model{
+	m := App{
 		cfg: config.Config{
 			Providers: map[string]config.Provider{
 				"openai": {Name: "OpenAI", BaseURL: "https://api.openai.com/v1"},
@@ -4374,7 +4374,7 @@ func TestDisconnectAliasOpensProviderDialog(t *testing.T) {
 	m.composer.SetValue("/disconnect")
 
 	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
-	next := updated.(*Model)
+	next := updated.(*App)
 	if cmd == nil {
 		t.Fatal("expected title sync command when opening provider dialog")
 	}
@@ -4384,14 +4384,14 @@ func TestDisconnectAliasOpensProviderDialog(t *testing.T) {
 }
 
 func TestConnectAliasOpensProviderDialog(t *testing.T) {
-	m := Model{
+	m := App{
 		cfg:      config.Default(),
 		composer: textarea.New(),
 	}
 	m.composer.SetValue("/connect")
 
 	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
-	next := updated.(*Model)
+	next := updated.(*App)
 	if cmd == nil {
 		t.Fatal("expected title sync command")
 	}
@@ -4401,14 +4401,14 @@ func TestConnectAliasOpensProviderDialog(t *testing.T) {
 }
 
 func TestModelCommandWithoutProviderShowsStatus(t *testing.T) {
-	m := Model{
+	m := App{
 		cfg:      config.Default(),
 		composer: textarea.New(),
 	}
 	m.composer.SetValue("/model")
 
 	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
-	next := updated.(*Model)
+	next := updated.(*App)
 	if cmd == nil {
 		t.Fatal("expected title sync command")
 	}
@@ -4431,14 +4431,14 @@ func TestModelCommandLoadsModelsAcrossProviders(t *testing.T) {
 			DefaultModel: "gpt-5.4",
 		},
 	}
-	m := Model{
+	m := App{
 		cfg:      cfg,
 		composer: textarea.New(),
 	}
 	m.composer.SetValue("/model")
 
 	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
-	next := updated.(*Model)
+	next := updated.(*App)
 	if cmd == nil {
 		t.Fatal("expected async model load command")
 	}
@@ -4456,7 +4456,7 @@ func TestSaveProviderDraftPersistsDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := Model{cfg: cfg}
+	m := App{cfg: cfg}
 	draft, err := provider.BuildDraft("openai", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -4491,7 +4491,7 @@ func TestSaveProviderDraftDefaultsContextWindowWhenUnset(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := Model{cfg: cfg}
+	m := App{cfg: cfg}
 	draft := provider.ConnectDraft{
 		ProviderID: "openai-compatible",
 		Kind:       provider.ProviderKindCompatible,
@@ -4547,7 +4547,7 @@ func TestEnsureRuntimeContextWindowDetectsAndPersistsCompatibleLocalProvider(t *
 			ContextWindow: 32768,
 		},
 	}
-	m := Model{cfg: cfg, runtimeCtxChecked: map[string]bool{}}
+	m := App{cfg: cfg, runtimeCtxChecked: map[string]bool{}}
 	session := domain.Session{ProviderID: "openai-compatible", ModelID: "coder.gguf"}
 
 	providerID, contextWindow, checked, err := m.ensureRuntimeContextWindow(context.Background(), session)
@@ -4597,7 +4597,7 @@ func TestEnsureRuntimeContextWindowDetectsAndPersistsCompatibleAPIKeyProvider(t 
 			ContextWindow: 32768,
 		},
 	}
-	m := Model{cfg: cfg, runtimeCtxChecked: map[string]bool{}}
+	m := App{cfg: cfg, runtimeCtxChecked: map[string]bool{}}
 	session := domain.Session{ProviderID: "openai", ModelID: "Lorbus/Qwen3.6-27B-int4-AutoRound"}
 
 	providerID, contextWindow, checked, err := m.ensureRuntimeContextWindow(context.Background(), session)
@@ -4646,7 +4646,7 @@ func TestEnsureRuntimeContextWindowRecordsTiming(t *testing.T) {
 		},
 	}
 	rec := debugsrv.NewRecorder()
-	m := Model{cfg: cfg, runtimeCtxChecked: map[string]bool{}, debug: rec}
+	m := App{cfg: cfg, runtimeCtxChecked: map[string]bool{}, debug: rec}
 	session := domain.Session{ID: 42, ProviderID: "openai", ModelID: "model-a"}
 
 	_, _, _, err = m.ensureRuntimeContextWindow(context.Background(), session)
@@ -4692,7 +4692,7 @@ func TestLoadSessionCmdRecordsChatLoadTiming(t *testing.T) {
 	}
 
 	rec := debugsrv.NewRecorder()
-	m := Model{
+	m := App{
 		store:          st,
 		debug:          rec,
 		workdir:        t.TempDir(),
@@ -4740,7 +4740,7 @@ func TestUpdateLoadSchedulesContextWindowDetectionForCurrentSession(t *testing.T
 			DefaultModel: "coder.gguf",
 		},
 	}
-	m := Model{
+	m := App{
 		cfg:               cfg,
 		composer:          textarea.New(),
 		runtimeCtxChecked: map[string]bool{},
@@ -4753,7 +4753,7 @@ func TestUpdateLoadSchedulesContextWindowDetectionForCurrentSession(t *testing.T
 	if cmd == nil {
 		t.Fatal("expected follow-up command after load")
 	}
-	next := updated.(Model)
+	next := updated.(App)
 	if next.currentSession.ProviderID != "openai-compatible" {
 		t.Fatalf("unexpected current session: %#v", next.currentSession)
 	}
@@ -4789,7 +4789,7 @@ func TestDisconnectProviderClearsDefaultAndFallsBack(t *testing.T) {
 	if err := cfg.Save(); err != nil {
 		t.Fatal(err)
 	}
-	m := Model{
+	m := App{
 		cfg:            cfg,
 		currentSession: domain.Session{ProviderID: "openai", ModelID: "gpt-5.4"},
 	}
@@ -4844,7 +4844,7 @@ func TestSelectModelUpdatesConfigAndCurrentSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := Model{
+	m := App{
 		cfg:            cfg,
 		store:          st,
 		currentSession: session,
@@ -4907,7 +4907,7 @@ func TestSelectModelSwitchesCurrentSessionProvider(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := Model{
+	m := App{
 		cfg:            cfg,
 		store:          st,
 		currentSession: session,
@@ -4932,7 +4932,7 @@ func TestSelectModelSwitchesCurrentSessionProvider(t *testing.T) {
 }
 
 func TestModelListMsgOpensModelDialog(t *testing.T) {
-	m := Model{}
+	m := App{}
 	updated, _ := m.Update(modelListMsg{
 		providerID: "openai",
 		models: []domain.Model{
@@ -4940,7 +4940,7 @@ func TestModelListMsgOpensModelDialog(t *testing.T) {
 			{ID: "gpt-4.1-mini", OwnedBy: "openai"},
 		},
 	})
-	next := updated.(Model)
+	next := updated.(App)
 	if !next.hasModelDialog() {
 		t.Fatal("expected model dialog to open")
 	}
@@ -4959,7 +4959,7 @@ func TestOpenModelDialogUsesProviderPreset(t *testing.T) {
 	cfg.DefaultProvider = "openai"
 	cfg.DefaultModel = "Qwen/Qwen3.6-35B-A3B"
 
-	m := Model{cfg: cfg}
+	m := App{cfg: cfg}
 	m.openModelDialog(singleProviderModelEntries("openai", "openai", []domain.Model{{ID: "Qwen/Qwen3.6-35B-A3B"}}))
 	if m.modelDialog == nil {
 		t.Fatal("expected model dialog")
@@ -4980,19 +4980,19 @@ func TestPreferencesDialogCancelRestoresOriginalUI(t *testing.T) {
 	m.openPreferencesDialog()
 
 	updated, _ := m.handleKey(ui.KeyMsg{Type: ui.KeyShiftTab})
-	next := updated.(*Model)
+	next := updated.(*App)
 	updated, _ = next.handleKey(ui.KeyMsg{Type: ui.KeyRight})
-	next = updated.(*Model)
+	next = updated.(*App)
 	updated, _ = next.handleKey(ui.KeyMsg{Type: ui.KeyTab})
-	next = updated.(*Model)
+	next = updated.(*App)
 	updated, _ = next.handleKey(ui.KeyMsg{Type: ui.KeyRight})
-	next = updated.(*Model)
+	next = updated.(*App)
 	if next.cfg.UI.Theme == "flexoki" {
 		t.Fatal("expected preferences preview to change current theme")
 	}
 
 	updated, cmd := next.handleKey(ui.KeyMsg{Type: ui.KeyEsc})
-	next = updated.(*Model)
+	next = updated.(*App)
 	if cmd == nil {
 		t.Fatal("expected title sync command when cancelling preferences")
 	}
@@ -5027,17 +5027,17 @@ func TestPreferencesDialogApplySavesUIConfig(t *testing.T) {
 	m.openPreferencesDialog()
 
 	updated, _ := m.handleKey(ui.KeyMsg{Type: ui.KeyShiftTab})
-	next := updated.(*Model)
+	next := updated.(*App)
 	updated, _ = next.handleKey(ui.KeyMsg{Type: ui.KeyRight})
-	next = updated.(*Model)
+	next = updated.(*App)
 	updated, _ = next.handleKey(ui.KeyMsg{Type: ui.KeyTab})
-	next = updated.(*Model)
+	next = updated.(*App)
 	updated, _ = next.handleKey(ui.KeyMsg{Type: ui.KeyRight})
-	next = updated.(*Model)
+	next = updated.(*App)
 	updated, _ = next.handleKey(ui.KeyMsg{Type: ui.KeyTab})
-	next = updated.(*Model)
+	next = updated.(*App)
 	updated, _ = next.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
-	next = updated.(*Model)
+	next = updated.(*App)
 
 	if next.hasPreferencesDialog() {
 		t.Fatal("expected preferences dialog to close after apply")
@@ -5080,11 +5080,11 @@ func TestPreferencesDialogApplySavesToolLoopLimit(t *testing.T) {
 	m.openPreferencesDialog()
 
 	updated, _ := m.handleKey(ui.KeyMsg{Type: ui.KeyRight})
-	next := updated.(*Model)
+	next := updated.(*App)
 	updated, _ = next.handleKey(ui.KeyMsg{Type: ui.KeyTab})
-	next = updated.(*Model)
+	next = updated.(*App)
 	updated, _ = next.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
-	next = updated.(*Model)
+	next = updated.(*App)
 
 	if next.cfg.MaxToolLoopSteps != 501 {
 		t.Fatalf("expected tool loop limit incremented to 501, got %d", next.cfg.MaxToolLoopSteps)
@@ -5146,7 +5146,7 @@ func TestPreferencesDialogApplySavesCompactionPreferences(t *testing.T) {
 }
 
 func TestWorkingIndicatorShownWhenModelWorking(t *testing.T) {
-	m := Model{
+	m := App{
 		busy: busyModel{
 			active: true,
 			scope:  busyScopeTranscript,
@@ -5163,7 +5163,7 @@ func TestWorkingIndicatorShownWhenModelWorking(t *testing.T) {
 }
 
 func TestRenderHeaderIsEmpty(t *testing.T) {
-	m := Model{
+	m := App{
 		currentSession: domain.Session{ID: 2, ProviderID: "test", ModelID: "model"},
 		status:         "Waiting for model…",
 	}
@@ -5175,7 +5175,7 @@ func TestRenderHeaderIsEmpty(t *testing.T) {
 }
 
 func TestRenderSidebarShowsStatusAndSessionInfo(t *testing.T) {
-	m := Model{
+	m := App{
 		currentSession: domain.Session{ID: 2, Title: "Testing Session", ProviderID: "test", ModelID: "model", PermissionProfile: "default", ProjectChecksum: "agents-1"},
 		currentChat:    domain.Chat{ID: 7, Title: "Maze Fix", WorkflowRole: domain.WorkflowRoleExecution},
 		chats: []domain.Chat{
@@ -5279,7 +5279,7 @@ func TestRenderSidebarShowsStatusAndSessionInfo(t *testing.T) {
 }
 
 func TestSidebarUsageUpdatesFromLiveUsageEvent(t *testing.T) {
-	m := Model{
+	m := App{
 		width:  120,
 		height: 40,
 		currentSession: domain.Session{
@@ -5327,7 +5327,7 @@ func TestSidebarUsageUpdatesFromLiveUsageEvent(t *testing.T) {
 }
 
 func TestSidebarUsageWithoutPromptTokensPreservesEstimate(t *testing.T) {
-	m := Model{
+	m := App{
 		width:  120,
 		height: 40,
 		currentSession: domain.Session{
@@ -5362,7 +5362,7 @@ func TestSidebarUsageWithoutPromptTokensPreservesEstimate(t *testing.T) {
 }
 
 func TestSidebarAlwaysShowsContextLineWithoutProvider(t *testing.T) {
-	m := Model{
+	m := App{
 		width:       120,
 		height:      40,
 		currentChat: domain.Chat{ID: 7},
@@ -5384,7 +5384,7 @@ func TestUpdateLoadEstimatesContextForNewChat(t *testing.T) {
 	workdir := t.TempDir()
 	engine := agent.New(cfg, nil, tools.NewRegistry(workdir), nil, workdir)
 
-	m := Model{
+	m := App{
 		cfg:         cfg,
 		agent:       engine,
 		composer:    textarea.New(),
@@ -5418,7 +5418,7 @@ func TestUpdateLoadEstimatesContextForNewChat(t *testing.T) {
 }
 
 func TestSidebarContextAccumulatesStreamedTokenEstimate(t *testing.T) {
-	m := Model{
+	m := App{
 		width:          120,
 		height:         40,
 		currentSession: domain.Session{ID: 2, ProviderID: "test", ModelID: "model"},
@@ -5451,7 +5451,7 @@ func TestSidebarContextAccumulatesStreamedTokenEstimate(t *testing.T) {
 }
 
 func TestSidebarUsageAccumulatesMultipleLiveUsageEvents(t *testing.T) {
-	m := Model{
+	m := App{
 		width:          120,
 		height:         40,
 		currentSession: domain.Session{ID: 2, ProviderID: "test", ModelID: "model"},
@@ -5480,7 +5480,7 @@ func TestSidebarUsageAccumulatesMultipleLiveUsageEvents(t *testing.T) {
 func TestSidebarContextUsesCompactedChatEstimateNotCompactionRequestUsage(t *testing.T) {
 	workdir := t.TempDir()
 	engine := agent.New(testConfig(t), nil, tools.NewRegistry(workdir), nil, workdir)
-	m := Model{
+	m := App{
 		width:  120,
 		height: 40,
 		agent:  engine,
@@ -5527,7 +5527,7 @@ func TestSidebarContextUsesCompactedChatEstimateNotCompactionRequestUsage(t *tes
 }
 
 func TestSidebarContextAnchorsOnLatestUsageAndEstimatesTail(t *testing.T) {
-	m := Model{
+	m := App{
 		width:          120,
 		height:         40,
 		currentSession: domain.Session{ID: 2, ProviderID: "test", ModelID: "model"},
@@ -5561,7 +5561,7 @@ func TestSidebarContextAnchorsOnLatestUsageAndEstimatesTail(t *testing.T) {
 }
 
 func TestSidebarMilestonesAndTodosRenderNoneWhenEmpty(t *testing.T) {
-	m := Model{}
+	m := App{}
 	got := m.renderSidebar()
 	if !strings.Contains(got, "Milestones: None") {
 		t.Fatalf("expected empty milestones line, got %q", got)
@@ -5572,7 +5572,7 @@ func TestSidebarMilestonesAndTodosRenderNoneWhenEmpty(t *testing.T) {
 }
 
 func TestSidebarWidthHotkeysAdjustWidth(t *testing.T) {
-	m := Model{
+	m := App{
 		showSidebar:          true,
 		width:                120,
 		height:               30,
@@ -5585,7 +5585,7 @@ func TestSidebarWidthHotkeysAdjustWidth(t *testing.T) {
 	if cmd != nil {
 		t.Fatalf("expected no command from sidebar shrink hotkey, got %#v", cmd)
 	}
-	next := updated.(*Model)
+	next := updated.(*App)
 	if next.sidebarWidth() >= start {
 		t.Fatalf("expected sidebar width to shrink, start=%d next=%d", start, next.sidebarWidth())
 	}
@@ -5595,7 +5595,7 @@ func TestSidebarWidthHotkeysAdjustWidth(t *testing.T) {
 	if cmd != nil {
 		t.Fatalf("expected no command from sidebar grow hotkey, got %#v", cmd)
 	}
-	grown := updated.(*Model)
+	grown := updated.(*App)
 	if grown.sidebarWidth() <= shrunk {
 		t.Fatalf("expected sidebar width to grow, prev=%d next=%d", shrunk, grown.sidebarWidth())
 	}
@@ -5605,7 +5605,7 @@ func TestSidebarWidthHotkeysAdjustWidth(t *testing.T) {
 	if cmd != nil {
 		t.Fatalf("expected no command from alternate sidebar grow hotkey, got %#v", cmd)
 	}
-	widenedAlt := updated.(*Model)
+	widenedAlt := updated.(*App)
 	if widenedAlt.sidebarWidth() <= beforeWidenAlt {
 		t.Fatalf("expected alt+, to grow sidebar width, start=%d next=%d", beforeWidenAlt, widenedAlt.sidebarWidth())
 	}
@@ -5615,7 +5615,7 @@ func TestSidebarWidthHotkeysAdjustWidth(t *testing.T) {
 	if cmd != nil {
 		t.Fatalf("expected no command from alternate sidebar shrink hotkey, got %#v", cmd)
 	}
-	narrowedAlt := updated.(*Model)
+	narrowedAlt := updated.(*App)
 	if narrowedAlt.sidebarWidth() >= beforeNarrowAlt {
 		t.Fatalf("expected alt+. to shrink sidebar width, prev=%d next=%d", beforeNarrowAlt, narrowedAlt.sidebarWidth())
 	}
@@ -5644,7 +5644,7 @@ func TestSidebarWidthHotkeysPersistPreference(t *testing.T) {
 	m.viewport = newTranscriptViewport(80, 10)
 
 	updated, _ := m.handleKey(ui.KeyMsg{Type: ui.KeyRunes, Alt: true, Runes: []rune(",")})
-	next := updated.(*Model)
+	next := updated.(*App)
 	if next.cfg.UI.SidebarWidth != next.sidebarWidth() {
 		t.Fatalf("expected saved sidebar width to match live width, got saved=%d live=%d", next.cfg.UI.SidebarWidth, next.sidebarWidth())
 	}
@@ -5659,7 +5659,7 @@ func TestSidebarWidthHotkeysPersistPreference(t *testing.T) {
 }
 
 func TestSidebarWidthHotkeysGrowRenderedSidebarColumn(t *testing.T) {
-	m := Model{
+	m := App{
 		cfg:                  testConfig(t),
 		composer:             textarea.New(),
 		showSidebar:          true,
@@ -5671,7 +5671,7 @@ func TestSidebarWidthHotkeysGrowRenderedSidebarColumn(t *testing.T) {
 
 	before := m.sidebarWidth()
 	updated, _ := m.handleKey(ui.KeyMsg{Type: ui.KeyRunes, Alt: true, Runes: []rune(",")})
-	next := updated.(*Model)
+	next := updated.(*App)
 	after := next.sidebarWidth()
 	if after <= before {
 		t.Fatalf("expected sidebar width override to grow, before=%d after=%d", before, after)
@@ -5703,21 +5703,21 @@ func TestPreferencesDialogApplySavesSidebarWidth(t *testing.T) {
 	m.openPreferencesDialog()
 
 	updated, _ := m.handleKey(ui.KeyMsg{Type: ui.KeyShiftTab})
-	next := updated.(*Model)
+	next := updated.(*App)
 	updated, _ = next.handleKey(ui.KeyMsg{Type: ui.KeyRight})
-	next = updated.(*Model)
+	next = updated.(*App)
 	updated, _ = next.handleKey(ui.KeyMsg{Type: ui.KeyTab})
-	next = updated.(*Model)
+	next = updated.(*App)
 	for i := 0; i < 6; i++ {
 		updated, _ = next.handleKey(ui.KeyMsg{Type: ui.KeyDown})
-		next = updated.(*Model)
+		next = updated.(*App)
 	}
 	updated, _ = next.handleKey(ui.KeyMsg{Type: ui.KeyRight})
-	next = updated.(*Model)
+	next = updated.(*App)
 	updated, _ = next.handleKey(ui.KeyMsg{Type: ui.KeyTab})
-	next = updated.(*Model)
+	next = updated.(*App)
 	updated, _ = next.handleKey(ui.KeyMsg{Type: ui.KeyEnter})
-	next = updated.(*Model)
+	next = updated.(*App)
 
 	if next.cfg.UI.SidebarWidth != 31 {
 		t.Fatalf("expected sidebar width incremented to 31, got %d", next.cfg.UI.SidebarWidth)
@@ -5732,7 +5732,7 @@ func TestPreferencesDialogApplySavesSidebarWidth(t *testing.T) {
 }
 
 func TestRefreshViewportShowsProviderHintWithoutProvider(t *testing.T) {
-	m := Model{
+	m := App{
 		cfg:      config.Default(),
 		viewport: newTranscriptViewport(40, 6),
 	}
@@ -5743,7 +5743,7 @@ func TestRefreshViewportShowsProviderHintWithoutProvider(t *testing.T) {
 }
 
 func TestAltHTogglesHelpDialog(t *testing.T) {
-	m := Model{
+	m := App{
 		cfg:      testConfig(t),
 		composer: textarea.New(),
 		width:    120,
@@ -5751,7 +5751,7 @@ func TestAltHTogglesHelpDialog(t *testing.T) {
 	}
 
 	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyRunes, Alt: true, Runes: []rune("h")})
-	next := updated.(*Model)
+	next := updated.(*App)
 	if cmd == nil {
 		t.Fatal("expected sync command when opening help dialog")
 	}
@@ -5773,7 +5773,7 @@ func TestAltHTogglesHelpDialog(t *testing.T) {
 	}
 
 	updated, cmd = next.handleKey(ui.KeyMsg{Type: ui.KeyEnd})
-	next = updated.(*Model)
+	next = updated.(*App)
 	if cmd != nil {
 		t.Fatal("expected scroll key to update modal in place")
 	}
@@ -5782,7 +5782,7 @@ func TestAltHTogglesHelpDialog(t *testing.T) {
 	}
 
 	updated, cmd = next.handleKey(ui.KeyMsg{Type: ui.KeyRunes, Alt: true, Runes: []rune("h")})
-	next = updated.(*Model)
+	next = updated.(*App)
 	if cmd == nil {
 		t.Fatal("expected sync command when closing help dialog")
 	}
@@ -5792,7 +5792,7 @@ func TestAltHTogglesHelpDialog(t *testing.T) {
 }
 
 func TestCtrlPageKeysSwitchChats(t *testing.T) {
-	m := Model{
+	m := App{
 		cfg:            testConfig(t),
 		composer:       textarea.New(),
 		currentSession: domain.Session{ID: 7},
@@ -5805,7 +5805,7 @@ func TestCtrlPageKeysSwitchChats(t *testing.T) {
 	}
 
 	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyCtrlPgDown})
-	next := updated.(*Model)
+	next := updated.(*App)
 	if cmd == nil {
 		t.Fatal("expected chat switch command for ctrl+pgdown")
 	}
@@ -5817,7 +5817,7 @@ func TestCtrlPageKeysSwitchChats(t *testing.T) {
 	}
 
 	updated, cmd = m.handleKey(ui.KeyMsg{Type: ui.KeyCtrlPgUp})
-	next = updated.(*Model)
+	next = updated.(*App)
 	if cmd == nil {
 		t.Fatal("expected chat switch command for ctrl+pgup")
 	}
@@ -5864,7 +5864,7 @@ func TestMouseClickOnHelpModalCloseIndicatorClosesModal(t *testing.T) {
 }
 
 func TestMouseClickOnPermissionsPickerCloseIndicatorClosesPicker(t *testing.T) {
-	m := Model{
+	m := App{
 		cfg:          testConfig(t),
 		mouseEnabled: true,
 		width:        100,
@@ -5904,7 +5904,7 @@ func TestMouseClickOnPermissionsPickerCloseIndicatorClosesPicker(t *testing.T) {
 }
 
 func TestMouseClickOnModelDialogCloseIndicatorCancelsDialog(t *testing.T) {
-	m := Model{
+	m := App{
 		cfg:          testConfig(t),
 		mouseEnabled: true,
 		width:        100,
@@ -5919,7 +5919,7 @@ func TestMouseClickOnModelDialogCloseIndicatorCancelsDialog(t *testing.T) {
 			{ID: "gpt-4.1-mini", OwnedBy: "openai"},
 		},
 	})
-	nextModel := updated.(Model)
+	nextModel := updated.(App)
 
 	view := nextModel.View()
 	lines := strings.Split(ansi.Strip(view), "\n")
@@ -5958,7 +5958,7 @@ func TestAltPTogglesSystemOutput(t *testing.T) {
 	}
 
 	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyRunes, Alt: true, Runes: []rune("p")})
-	next := updated.(*Model)
+	next := updated.(*App)
 	if cmd != nil {
 		t.Fatalf("expected no command, got %v", cmd)
 	}
@@ -5967,7 +5967,7 @@ func TestAltPTogglesSystemOutput(t *testing.T) {
 	}
 
 	updated, cmd = next.handleKey(ui.KeyMsg{Type: ui.KeyRunes, Alt: true, Runes: []rune("p")})
-	next = updated.(*Model)
+	next = updated.(*App)
 	if cmd != nil {
 		t.Fatalf("expected no command, got %v", cmd)
 	}
@@ -5984,7 +5984,7 @@ func TestAltRTogglesReasoningOutput(t *testing.T) {
 	}
 
 	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyRunes, Alt: true, Runes: []rune("r")})
-	next := updated.(*Model)
+	next := updated.(*App)
 	if cmd != nil {
 		t.Fatalf("expected no command, got %v", cmd)
 	}
@@ -5993,7 +5993,7 @@ func TestAltRTogglesReasoningOutput(t *testing.T) {
 	}
 
 	updated, cmd = next.handleKey(ui.KeyMsg{Type: ui.KeyRunes, Alt: true, Runes: []rune("r")})
-	next = updated.(*Model)
+	next = updated.(*App)
 	if cmd != nil {
 		t.Fatalf("expected no command, got %v", cmd)
 	}
@@ -6038,7 +6038,7 @@ func TestAltRPreservesVisibleTopLine(t *testing.T) {
 	}
 
 	updated, cmd := m.handleKey(ui.KeyMsg{Type: ui.KeyRunes, Alt: true, Runes: []rune("r")})
-	next := updated.(*Model)
+	next := updated.(*App)
 	if cmd != nil {
 		t.Fatalf("expected no command, got %v", cmd)
 	}
@@ -6053,12 +6053,12 @@ func TestAltRPreservesVisibleTopLine(t *testing.T) {
 }
 
 func TestRenderAgentsSidebarStatusColors(t *testing.T) {
-	none := Model{}.renderAgentsSidebarStatus()
+	none := App{}.renderAgentsSidebarStatus()
 	if none != "None" {
 		t.Fatalf("expected plain None status, got %q", none)
 	}
 
-	upToDate := Model{
+	upToDate := App{
 		currentSession: domain.Session{ProjectChecksum: "abc"},
 		workspace:      workspace.Status{AgentsFiles: 1, AgentsChecksum: "abc"},
 	}.renderAgentsSidebarStatus()
@@ -6066,7 +6066,7 @@ func TestRenderAgentsSidebarStatusColors(t *testing.T) {
 		t.Fatalf("expected plain Up to date status, got %q", upToDate)
 	}
 
-	changed := Model{
+	changed := App{
 		currentSession: domain.Session{ProjectChecksum: "abc"},
 		workspace:      workspace.Status{AgentsFiles: 1, AgentsChecksum: "def"},
 	}.renderAgentsSidebarStatus()
@@ -6076,7 +6076,7 @@ func TestRenderAgentsSidebarStatusColors(t *testing.T) {
 }
 
 func TestRenderBodyAppliesSidebarThemeBackground(t *testing.T) {
-	m := Model{
+	m := App{
 		showSidebar: true,
 		palette:     theme.Resolve("tokyonight").Palette,
 		viewport:    newTranscriptViewport(40, 6),
@@ -6090,7 +6090,7 @@ func TestRenderBodyAppliesSidebarThemeBackground(t *testing.T) {
 }
 
 func TestRenderBodyClipsSidebarToViewportHeight(t *testing.T) {
-	m := Model{
+	m := App{
 		showSidebar: true,
 		palette:     theme.Resolve("tokyonight").Palette,
 		viewport:    newTranscriptViewport(40, 6),
@@ -6106,7 +6106,7 @@ func TestRenderBodyClipsSidebarToViewportHeight(t *testing.T) {
 }
 
 func TestRenderBodyOmitsTranscriptBorder(t *testing.T) {
-	m := Model{
+	m := App{
 		palette:  theme.Resolve("tokyonight").Palette,
 		viewport: newTranscriptViewport(38, 6),
 	}
@@ -6119,7 +6119,7 @@ func TestRenderBodyOmitsTranscriptBorder(t *testing.T) {
 }
 
 func TestRenderBodyKeepsSidebarAtConfiguredWidth(t *testing.T) {
-	m := Model{
+	m := App{
 		showSidebar: true,
 		width:       120,
 		palette:     theme.Resolve("tokyonight").Palette,
@@ -6148,7 +6148,7 @@ func TestRenderBodyKeepsSidebarAtConfiguredWidth(t *testing.T) {
 
 func TestRenderBodyUsesTranscriptElementInsteadOfViewportString(t *testing.T) {
 	cfg := testConfig(t)
-	m := Model{
+	m := App{
 		cfg:            cfg,
 		currentSession: domain.Session{ID: 1, ProviderID: "test", ModelID: "model"},
 		currentSnapshot: chatpkg.Snapshot{Messages: []domain.Message{
@@ -6170,7 +6170,7 @@ func TestRenderBodyUsesTranscriptElementInsteadOfViewportString(t *testing.T) {
 }
 
 func TestComposerAreaAutoExpandsForMultilineDraft(t *testing.T) {
-	m := Model{
+	m := App{
 		cfg:         testConfig(t),
 		palette:     theme.Default().Palette,
 		viewport:    newTranscriptViewport(40, 8),
@@ -6198,7 +6198,7 @@ func TestSyncRetainedTranscriptItemsReplacesMatchingKeys(t *testing.T) {
 		Node: ui.NewCachedElement(ui.AsNode(ui.Paragraph{Text: "after"}), 1),
 	}
 
-	m := Model{}
+	m := App{}
 	m.syncRetainedTranscriptItems(retained, []ui.TranscriptItem{first})
 	m.syncRetainedTranscriptItems(retained, []ui.TranscriptItem{second})
 
@@ -6213,7 +6213,7 @@ func TestSyncRetainedTranscriptItemsReplacesMatchingKeys(t *testing.T) {
 }
 
 func TestViewUsesFullTerminalWidthWithSidebar(t *testing.T) {
-	m := Model{
+	m := App{
 		showSidebar: true,
 		palette:     theme.Resolve("tokyonight").Palette,
 		width:       100,
@@ -6236,7 +6236,7 @@ func TestViewUsesFullTerminalWidthWithSidebar(t *testing.T) {
 }
 
 func TestRefreshViewportAppendsWorkingLine(t *testing.T) {
-	m := Model{
+	m := App{
 		currentSession:  domain.Session{ID: 1},
 		status:          "Working ...",
 		currentSnapshot: chatpkg.Snapshot{Parts: map[int64][]domain.Part{}},
@@ -6259,7 +6259,7 @@ func TestRefreshViewportAppendsWorkingLine(t *testing.T) {
 }
 
 func TestRenderFooterOmitsHotkeyHints(t *testing.T) {
-	m := Model{
+	m := App{
 		composer: textarea.New(),
 	}
 
@@ -6276,7 +6276,7 @@ func TestRenderFooterShowsQueuedPromptPreviewAboveComposer(t *testing.T) {
 	composer.SetWidth(38)
 	composer.Focus()
 
-	m := Model{
+	m := App{
 		width:    40,
 		composer: composer,
 		currentChat: domain.Chat{QueuedInputs: []domain.QueuedInput{{
@@ -6302,7 +6302,7 @@ func TestRenderFooterOnlyUsesComposerHeightWhenNoAuxiliaryContent(t *testing.T) 
 	composer.SetWidth(38)
 	composer.Focus()
 
-	m := Model{
+	m := App{
 		width:    40,
 		composer: composer,
 	}
@@ -6320,7 +6320,7 @@ func TestViewBottomAlignsFooter(t *testing.T) {
 	composer.SetWidth(38)
 	composer.Focus()
 
-	m := Model{
+	m := App{
 		width:    40,
 		height:   12,
 		composer: composer,
@@ -6345,7 +6345,7 @@ func TestViewShowsAllVisibleTranscriptLinesAboveComposer(t *testing.T) {
 	composer.SetHeight(composerInputHeight)
 	composer.Focus()
 
-	m := Model{
+	m := App{
 		cfg:            testConfig(t),
 		palette:        theme.Resolve("tokyonight").Palette,
 		width:          40,
@@ -6390,7 +6390,7 @@ func TestViewDoesNotLeaveLargeGapBetweenTranscriptAndComposer(t *testing.T) {
 	composer.SetHeight(composerInputHeight)
 	composer.Focus()
 
-	m := Model{
+	m := App{
 		cfg:            testConfig(t),
 		palette:        theme.Resolve("tokyonight").Palette,
 		width:          40,
@@ -6429,7 +6429,7 @@ func TestViewShowsLastUserBubbleLineBeforeComposer(t *testing.T) {
 	composer.SetHeight(composerInputHeight)
 	composer.Focus()
 
-	m := Model{
+	m := App{
 		cfg:            testConfig(t),
 		palette:        theme.Resolve("tokyonight").Palette,
 		width:          40,
@@ -6498,7 +6498,7 @@ func lastNonEmptyTrimmedLineIndex(lines []string) int {
 }
 
 func TestResizeUsesMeasuredFooterHeight(t *testing.T) {
-	m := Model{
+	m := App{
 		width:    80,
 		height:   24,
 		composer: textarea.New(),
@@ -6522,7 +6522,7 @@ func TestResizeUsesMeasuredFooterHeight(t *testing.T) {
 func TestRenderComposerUsesThreeLineBoxAndFullWidth(t *testing.T) {
 	palette := theme.Resolve("tokyonight").Palette
 	cfg := testConfig(t)
-	m := Model{
+	m := App{
 		cfg:         cfg,
 		width:       80,
 		showSidebar: true,
@@ -6558,7 +6558,7 @@ func TestRenderComposerUsesThreeLineBoxAndFullWidth(t *testing.T) {
 
 func TestRenderUserMessageUsesAccentBarOnAllLines(t *testing.T) {
 	cfg := testConfig(t)
-	m := Model{
+	m := App{
 		cfg:     cfg,
 		palette: theme.Resolve("tokyonight").Palette,
 		viewport: transcriptViewport{
@@ -6585,7 +6585,7 @@ func TestRenderUserMessageUsesAccentBarOnAllLines(t *testing.T) {
 func TestRenderUserMessageCanDisableHalfBlocks(t *testing.T) {
 	cfg := testConfig(t)
 	cfg.UI.HalfBlocks = false
-	m := Model{
+	m := App{
 		cfg:     cfg,
 		palette: theme.Resolve("tokyonight").Palette,
 		viewport: transcriptViewport{
@@ -6604,7 +6604,7 @@ func TestRenderUserMessageCanDisableHalfBlocks(t *testing.T) {
 
 func TestRenderTranscriptUserMessageFallsBackToSummaryWhenPartsMissing(t *testing.T) {
 	cfg := testConfig(t)
-	m := Model{
+	m := App{
 		cfg:             cfg,
 		palette:         theme.Resolve("tokyonight").Palette,
 		currentSnapshot: chatpkg.Snapshot{Parts: map[int64][]domain.Part{}},
@@ -6624,7 +6624,7 @@ func TestRenderTranscriptUserMessageFallsBackToSummaryWhenPartsMissing(t *testin
 }
 
 func TestRefreshViewportOmitsWorkingLineForGenericLoading(t *testing.T) {
-	m := Model{
+	m := App{
 		currentSession:  domain.Session{ID: 1},
 		loading:         true,
 		status:          "Resuming session 2…",
@@ -6647,7 +6647,7 @@ func TestRefreshViewportOmitsWorkingLineForGenericLoading(t *testing.T) {
 }
 
 func TestSpinnerTickRefreshesTranscriptActivity(t *testing.T) {
-	m := Model{
+	m := App{
 		currentSession:  domain.Session{ID: 1},
 		status:          "Working ...",
 		currentSnapshot: chatpkg.Snapshot{Parts: map[int64][]domain.Part{}},
@@ -6665,7 +6665,7 @@ func TestSpinnerTickRefreshesTranscriptActivity(t *testing.T) {
 	before := m.renderBody()
 
 	updated, cmd := m.Update(spinnerTickMsg{})
-	next := updated.(Model)
+	next := updated.(App)
 	after := next.renderBody()
 
 	if before == after {
@@ -6677,7 +6677,7 @@ func TestSpinnerTickRefreshesTranscriptActivity(t *testing.T) {
 }
 
 func TestStatusEventKeepsTranscriptSpinnerActive(t *testing.T) {
-	m := Model{}
+	m := App{}
 	m.startBusy(busyScopeTranscript, "Compacting session...")
 
 	m.applyEvent(domain.Event{Kind: domain.EventKindStatus, Text: "Compacting session..."})
@@ -6741,7 +6741,7 @@ func TestBusyIndicatorLayoutRefreshKeepsTranscriptAnchoredAtBottom(t *testing.T)
 }
 
 func TestStatusEventDoesNotOverrideTranscriptLLMPhase(t *testing.T) {
-	m := Model{}
+	m := App{}
 	m.startWaitingForLLM()
 
 	m.applyEvent(domain.Event{Kind: domain.EventKindStatus, Text: "Checking project instructions..."})
@@ -6752,7 +6752,7 @@ func TestStatusEventDoesNotOverrideTranscriptLLMPhase(t *testing.T) {
 }
 
 func TestTranscriptBusyPhaseTransitions(t *testing.T) {
-	m := Model{}
+	m := App{}
 	m.startWaitingForLLM()
 	if got := m.transcriptBusyStatus(); got != "Waiting for LLM response" {
 		t.Fatalf("expected waiting status, got %q", got)
@@ -6775,7 +6775,7 @@ func TestTranscriptBusyPhaseTransitions(t *testing.T) {
 }
 
 func TestTranscriptBusyPhaseTracksParallelTools(t *testing.T) {
-	m := Model{}
+	m := App{}
 	m.startWaitingForLLM()
 
 	m.applyEvent(domain.Event{Kind: domain.EventKindToolStart, Tool: domain.ToolKindBash})
@@ -6800,7 +6800,7 @@ func TestTranscriptBusyPhaseTracksParallelTools(t *testing.T) {
 }
 
 func TestLoadMsgPreserveBusyKeepsSpinnerActive(t *testing.T) {
-	m := Model{
+	m := App{
 		cfg:      testConfig(t),
 		viewport: newTranscriptViewport(40, 6),
 		busy: busyModel{
@@ -6821,7 +6821,7 @@ func TestLoadMsgPreserveBusyKeepsSpinnerActive(t *testing.T) {
 		workspace:    workspace.Status{},
 		preserveBusy: true,
 	})
-	next := updated.(Model)
+	next := updated.(App)
 	if cmd == nil {
 		t.Fatal("expected sync title command after load update")
 	}
@@ -6837,7 +6837,7 @@ func TestLoadMsgPreserveBusyKeepsSpinnerActive(t *testing.T) {
 }
 
 func TestLoadMsgPreserveBusySameChatKeepsPendingAssistantStream(t *testing.T) {
-	m := Model{
+	m := App{
 		cfg: func() config.Config {
 			cfg := testConfig(t)
 			cfg.DefaultProvider = "openai"
@@ -6878,7 +6878,7 @@ func TestLoadMsgPreserveBusySameChatKeepsPendingAssistantStream(t *testing.T) {
 		workspace:    workspace.Status{},
 		preserveBusy: true,
 	})
-	m = updated.(Model)
+	m = updated.(App)
 	if got := m.currentSnapshot.PendingAssistant.Text; got != "The" {
 		t.Fatalf("expected preserved pending assistant text after preserved reload, got %q", got)
 	}
@@ -6897,7 +6897,7 @@ func TestLoadMsgPreserveBusySameChatKeepsPendingAssistantStream(t *testing.T) {
 }
 
 func TestMessageDeltasRenderOnFrame(t *testing.T) {
-	m := Model{
+	m := App{
 		cfg:             testConfig(t),
 		viewport:        newTranscriptViewport(60, 8),
 		currentSession:  domain.Session{ID: 1, Title: "Test"},
@@ -6928,7 +6928,7 @@ func TestMessageDeltasRenderOnFrame(t *testing.T) {
 }
 
 func TestQueuedDispatchReloadKeepsPendingAssistantStream(t *testing.T) {
-	m := Model{
+	m := App{
 		cfg:            testConfig(t),
 		viewport:       newTranscriptViewport(60, 8),
 		currentSession: domain.Session{ID: 33, Title: "Refactor coordinates to use float tiles"},
@@ -6963,7 +6963,7 @@ func TestQueuedDispatchReloadKeepsPendingAssistantStream(t *testing.T) {
 		workspace:    workspace.Status{},
 		preserveBusy: true,
 	})
-	m = updated.(Model)
+	m = updated.(App)
 
 	m.applyEvent(domain.Event{Kind: domain.EventKindMessageDelta, Text: " `ts` is"})
 	m.applyEvent(domain.Event{Kind: domain.EventKindMessageDelta, Text: " now"})
@@ -6973,7 +6973,7 @@ func TestQueuedDispatchReloadKeepsPendingAssistantStream(t *testing.T) {
 }
 
 func TestSpinnerTickPreservesViewportOffsetWhenScrolledBack(t *testing.T) {
-	m := Model{
+	m := App{
 		cfg:            testConfig(t),
 		currentSession: domain.Session{ID: 1, Title: "Test"},
 		viewport:       newTranscriptViewport(40, 4),
@@ -7009,7 +7009,7 @@ func TestSpinnerTickPreservesViewportOffsetWhenScrolledBack(t *testing.T) {
 	beforeOffset := m.viewport.YOffset
 
 	updated, cmd := m.Update(spinnerTickMsg{})
-	next := updated.(Model)
+	next := updated.(App)
 
 	if cmd == nil {
 		t.Fatal("expected follow-up spinner tick command")
@@ -7022,7 +7022,7 @@ func TestSpinnerTickPreservesViewportOffsetWhenScrolledBack(t *testing.T) {
 func TestSpinnerTickAnimatesSidebarBusyIndicator(t *testing.T) {
 	cfg := testConfig(t)
 	cfg.UI.Spinner = "circles"
-	m := Model{
+	m := App{
 		cfg: cfg,
 		busy: busyModel{
 			active: true,
@@ -7041,7 +7041,7 @@ func TestSpinnerTickAnimatesSidebarBusyIndicator(t *testing.T) {
 	before := m.renderSidebar()
 
 	updated, cmd := m.Update(spinnerTickMsg{})
-	next := updated.(Model)
+	next := updated.(App)
 	after := next.renderSidebar()
 
 	if before == after {
@@ -7056,7 +7056,7 @@ func TestSpinnerTickAnimatesSidebarBusyIndicator(t *testing.T) {
 }
 
 func TestRenderMessagePartsShowsReasoningBeforeText(t *testing.T) {
-	m := Model{
+	m := App{
 		showReasoning: true,
 	}
 
@@ -7108,7 +7108,7 @@ func TestRenderStyledMessagePartsShowsReasoningBeforeText(t *testing.T) {
 }
 
 func TestRenderMessagePartsReasoningOnlyShowsReasoningWhenHidden(t *testing.T) {
-	m := Model{
+	m := App{
 		showReasoning: false,
 	}
 
@@ -7128,7 +7128,7 @@ func TestRenderMessagePartsReasoningOnlyShowsReasoningWhenHidden(t *testing.T) {
 }
 
 func TestRenderMessagePartsHidesReasoningWhenTextExistsAndReasoningHidden(t *testing.T) {
-	m := Model{
+	m := App{
 		showReasoning: false,
 	}
 
@@ -7223,7 +7223,7 @@ func TestTranscriptBlocksIncludePendingAssistantTurn(t *testing.T) {
 }
 
 func TestRenderMessagePartsSkipsSystemNotice(t *testing.T) {
-	m := Model{}
+	m := App{}
 
 	got := newTranscriptRenderer(&m).renderMessageParts([]domain.Part{
 		{Kind: domain.PartKindText, Body: "final answer"},
@@ -7281,7 +7281,7 @@ func TestRenderMessagePartsShowsNonUsageSystemNoticeWhenEnabled(t *testing.T) {
 }
 
 func TestRenderMessagePartsShowsEventNotice(t *testing.T) {
-	m := Model{}
+	m := App{}
 
 	got := newTranscriptRenderer(&m).renderMessageParts([]domain.Part{
 		{Kind: domain.PartKindText, Body: "final answer"},
@@ -7297,7 +7297,7 @@ func TestRenderMessagePartsShowsEventNotice(t *testing.T) {
 }
 
 func TestRenderMessagePartsSkipsLoopPauseEventNotice(t *testing.T) {
-	m := Model{}
+	m := App{}
 
 	got := newTranscriptRenderer(&m).renderMessageParts([]domain.Part{
 		{Kind: domain.PartKindText, Body: "final answer"},
@@ -7313,7 +7313,7 @@ func TestRenderMessagePartsSkipsLoopPauseEventNotice(t *testing.T) {
 }
 
 func TestRenderMessagePartsShowsAssistantNarrationWithoutSystemPrefix(t *testing.T) {
-	m := Model{}
+	m := App{}
 
 	got := newTranscriptRenderer(&m).renderMessageParts([]domain.Part{
 		{Kind: domain.PartKindText, Body: "There are two main functions. Let me check and remove the duplicate:"},
@@ -7329,7 +7329,7 @@ func TestRenderMessagePartsShowsAssistantNarrationWithoutSystemPrefix(t *testing
 }
 
 func TestTranscriptRendersCompactionAsExpandableCard(t *testing.T) {
-	m := Model{
+	m := App{
 		currentSession:   domain.Session{ID: 1},
 		viewport:         newTranscriptViewport(120, 8),
 		currentSnapshot:  chatpkg.Snapshot{Parts: map[int64][]domain.Part{}},
@@ -7365,7 +7365,7 @@ func TestTranscriptRendersCompactionAsExpandableCard(t *testing.T) {
 }
 
 func TestTranscriptRendersPendingCompactionAsRunningCard(t *testing.T) {
-	m := Model{
+	m := App{
 		currentSession:   domain.Session{ID: 1},
 		viewport:         newTranscriptViewport(120, 8),
 		currentSnapshot:  chatpkg.Snapshot{Parts: map[int64][]domain.Part{}},
@@ -7391,7 +7391,7 @@ func TestTranscriptRendersPendingCompactionAsRunningCard(t *testing.T) {
 }
 
 func TestTranscriptRendersLoopPauseAsCard(t *testing.T) {
-	m := Model{
+	m := App{
 		currentSession:   domain.Session{ID: 1},
 		viewport:         newTranscriptViewport(80, 8),
 		currentSnapshot:  chatpkg.Snapshot{Parts: map[int64][]domain.Part{}},
@@ -7421,7 +7421,7 @@ func TestTranscriptRendersLoopPauseAsCard(t *testing.T) {
 }
 
 func TestRenderReasoningBlockStartsWithoutBlankLine(t *testing.T) {
-	m := Model{}
+	m := App{}
 
 	got := newTranscriptRenderer(&m).renderReasoningBlock("thinking first")
 	lines := strings.Split(got, "\n")
@@ -7440,7 +7440,7 @@ func TestMouseWheelScrollsViewport(t *testing.T) {
 	composer := textarea.New()
 	composer.SetHeight(composerInputHeight)
 	composer.BlinkEnabled = false
-	m := Model{
+	m := App{
 		cfg:          testConfig(t),
 		palette:      theme.Default().Palette,
 		width:        40,
@@ -7466,7 +7466,7 @@ func TestMouseWheelScrollsViewport(t *testing.T) {
 		X:      5,
 		Y:      1,
 	})
-	next := updated.(Model)
+	next := updated.(App)
 	if cmd != nil {
 		t.Fatal("expected no command from mouse wheel scroll")
 	}
@@ -7480,7 +7480,7 @@ func TestMouseWheelOverComposerDoesNotScrollTranscript(t *testing.T) {
 	composer.SetHeight(composerInputHeight)
 	composer.Focus()
 	composer.BlinkEnabled = false
-	m := Model{
+	m := App{
 		cfg:          testConfig(t),
 		palette:      theme.Default().Palette,
 		width:        40,
@@ -7509,7 +7509,7 @@ func TestMouseWheelOverComposerDoesNotScrollTranscript(t *testing.T) {
 		X:      5,
 		Y:      m.height - 1,
 	})
-	next := updated.(Model)
+	next := updated.(App)
 	if next.viewport.YOffset != before {
 		t.Fatalf("expected composer wheel to leave transcript offset %d, got %d", before, next.viewport.YOffset)
 	}
@@ -7521,7 +7521,7 @@ func TestMouseWheelScrollRefreshesRetainedTranscriptSurface(t *testing.T) {
 	composer.SetHeight(composerInputHeight)
 	composer.Focus()
 
-	m := Model{
+	m := App{
 		cfg:            testConfig(t),
 		palette:        theme.Resolve("tokyonight").Palette,
 		mouseEnabled:   true,
@@ -7570,7 +7570,7 @@ func TestMouseWheelScrollRefreshesRetainedTranscriptSurface(t *testing.T) {
 		X:      5,
 		Y:      3,
 	})
-	next := updated.(Model)
+	next := updated.(App)
 	after := strings.Join(next.viewSurface().Lines(), "\n")
 	if !strings.Contains(after, "line 5") {
 		t.Fatalf("expected scrolled retained transcript to show earlier lines, got:\n%s", after)
@@ -7586,7 +7586,7 @@ func TestMouseWheelScrollCanReturnToTrueTranscriptBottom(t *testing.T) {
 	composer.SetHeight(composerInputHeight)
 	composer.Focus()
 
-	m := Model{
+	m := App{
 		cfg:          testConfig(t),
 		palette:      theme.Resolve("tokyonight").Palette,
 		mouseEnabled: true,
@@ -7630,7 +7630,7 @@ func TestMouseWheelScrollCanReturnToTrueTranscriptBottom(t *testing.T) {
 		X:      5,
 		Y:      3,
 	})
-	scrolledUp := updated.(Model)
+	scrolledUp := updated.(App)
 	if scrolledUp.viewport.YOffset >= m.viewport.YOffset {
 		t.Fatalf("expected upward wheel scroll to reduce offset from %d, got %d", m.viewport.YOffset, scrolledUp.viewport.YOffset)
 	}
@@ -7643,7 +7643,7 @@ func TestMouseWheelScrollCanReturnToTrueTranscriptBottom(t *testing.T) {
 			X:      5,
 			Y:      3,
 		})
-		current = updated.(Model)
+		current = updated.(App)
 	}
 
 	got := strings.Join(current.viewSurface().Lines(), "\n")
@@ -7656,7 +7656,7 @@ func TestMouseWheelScrollCanReturnToTrueTranscriptBottom(t *testing.T) {
 }
 
 func TestMouseClickTogglesToolRunExpansion(t *testing.T) {
-	m := Model{
+	m := App{
 		mouseEnabled:            true,
 		currentSession:          domain.Session{ID: 1},
 		width:                   100,
@@ -7710,11 +7710,11 @@ func TestMouseClickTogglesToolRunExpansion(t *testing.T) {
 		X:      clickX,
 		Y:      clickY,
 	})
-	var next Model
+	var next App
 	switch typed := updated.(type) {
-	case Model:
+	case App:
 		next = typed
-	case *Model:
+	case *App:
 		next = *typed
 	default:
 		t.Fatalf("unexpected model type %T", updated)
@@ -7735,11 +7735,11 @@ func TestMouseClickTogglesToolRunExpansion(t *testing.T) {
 		X:      clickX,
 		Y:      clickY,
 	})
-	var final Model
+	var final App
 	switch typed := updated.(type) {
-	case Model:
+	case App:
 		final = typed
-	case *Model:
+	case *App:
 		final = *typed
 	default:
 		t.Fatalf("unexpected model type %T", updated)
@@ -7750,7 +7750,7 @@ func TestMouseClickTogglesToolRunExpansion(t *testing.T) {
 }
 
 func TestMouseClickTogglesToolRunExpansionWhileBusy(t *testing.T) {
-	m := Model{
+	m := App{
 		mouseEnabled:   true,
 		currentSession: domain.Session{ID: 1},
 		width:          100,
@@ -7793,11 +7793,11 @@ func TestMouseClickTogglesToolRunExpansionWhileBusy(t *testing.T) {
 		X:      clickX,
 		Y:      clickY,
 	})
-	var next Model
+	var next App
 	switch typed := updated.(type) {
-	case Model:
+	case App:
 		next = typed
-	case *Model:
+	case *App:
 		next = *typed
 	default:
 		t.Fatalf("unexpected model type %T", updated)
@@ -7822,9 +7822,9 @@ func TestMouseClickTogglesToolRunExpansionWhileBusy(t *testing.T) {
 		t.Fatal("expected no spinner follow-up when busy state is not animating")
 	}
 	switch typed := updated.(type) {
-	case Model:
+	case App:
 		next = typed
-	case *Model:
+	case *App:
 		next = *typed
 	default:
 		t.Fatalf("unexpected model type after spinner tick %T", updated)
@@ -7835,7 +7835,7 @@ func TestMouseClickTogglesToolRunExpansionWhileBusy(t *testing.T) {
 }
 
 func TestMouseClickResyncsTranscriptControlsDuringBusy(t *testing.T) {
-	m := Model{
+	m := App{
 		mouseEnabled:            true,
 		currentSession:          domain.Session{ID: 1},
 		width:                   100,
@@ -7899,11 +7899,11 @@ func TestMouseClickResyncsTranscriptControlsDuringBusy(t *testing.T) {
 		X:      clickX,
 		Y:      clickY,
 	})
-	var next Model
+	var next App
 	switch typed := updated.(type) {
-	case Model:
+	case App:
 		next = typed
-	case *Model:
+	case *App:
 		next = *typed
 	default:
 		t.Fatalf("unexpected model type %T", updated)
@@ -7917,7 +7917,7 @@ func TestMouseClickResyncsTranscriptControlsDuringBusy(t *testing.T) {
 }
 
 func TestMouseClickTogglesEditToolRunExpansion(t *testing.T) {
-	m := Model{
+	m := App{
 		mouseEnabled:     true,
 		currentSession:   domain.Session{ID: 1},
 		viewport:         newTranscriptViewport(80, 8),
@@ -7978,7 +7978,7 @@ func TestMouseClickTogglesEditToolRunExpansion(t *testing.T) {
 }
 
 func TestMouseClickTogglesWrappedEditToolRunExpansion(t *testing.T) {
-	m := Model{
+	m := App{
 		mouseEnabled:     true,
 		currentSession:   domain.Session{ID: 1},
 		viewport:         newTranscriptViewport(28, 30),
@@ -8027,11 +8027,11 @@ func TestMouseClickTogglesWrappedEditToolRunExpansion(t *testing.T) {
 		X:      wrappedControl.Rect.X + 1,
 		Y:      wrappedControl.Rect.Y,
 	})
-	var next Model
+	var next App
 	switch typed := updated.(type) {
-	case Model:
+	case App:
 		next = typed
-	case *Model:
+	case *App:
 		next = *typed
 	default:
 		t.Fatalf("unexpected model type %T", updated)
@@ -8046,7 +8046,7 @@ func TestMouseClickTogglesWrappedEditToolRunExpansion(t *testing.T) {
 }
 
 func TestWriteToolRunUsesStoredContentForExpansion(t *testing.T) {
-	m := Model{
+	m := App{
 		currentSession:   domain.Session{ID: 1},
 		viewport:         newTranscriptViewport(80, 8),
 		currentSnapshot:  chatpkg.Snapshot{Parts: map[int64][]domain.Part{}},
@@ -8093,7 +8093,7 @@ func TestWriteToolRunUsesStoredContentForExpansion(t *testing.T) {
 }
 
 func TestEditToolRunShowsStoredHunkDetails(t *testing.T) {
-	m := Model{
+	m := App{
 		currentSession:   domain.Session{ID: 1},
 		viewport:         newTranscriptViewport(80, 10),
 		currentSnapshot:  chatpkg.Snapshot{Parts: map[int64][]domain.Part{}},
@@ -8139,7 +8139,7 @@ func TestEditToolRunShowsStoredHunkDetails(t *testing.T) {
 }
 
 func TestBashToolRunUsesRanCommandTitleAndCollapsedFirstOutputLine(t *testing.T) {
-	m := Model{
+	m := App{
 		currentSession:          domain.Session{ID: 1},
 		viewport:                newTranscriptViewport(100, 8),
 		currentSnapshot:         chatpkg.Snapshot{Parts: map[int64][]domain.Part{}},
@@ -8186,7 +8186,7 @@ func TestBashToolRunUsesRanCommandTitleAndCollapsedFirstOutputLine(t *testing.T)
 }
 
 func TestResumedBashToolRunReplacesRequestTitleWithCompletedTitle(t *testing.T) {
-	m := Model{
+	m := App{
 		currentSession:          domain.Session{ID: 1},
 		viewport:                newTranscriptViewport(100, 8),
 		currentSnapshot:         chatpkg.Snapshot{Parts: map[int64][]domain.Part{}},
@@ -8235,7 +8235,7 @@ func TestResumedBashToolRunReplacesRequestTitleWithCompletedTitle(t *testing.T) 
 }
 
 func TestResumedEditToolRunReplacesRequestTitleWithCompletedTitle(t *testing.T) {
-	m := Model{
+	m := App{
 		currentSession:   domain.Session{ID: 1},
 		viewport:         newTranscriptViewport(100, 8),
 		currentSnapshot:  chatpkg.Snapshot{Parts: map[int64][]domain.Part{}},
@@ -8283,7 +8283,7 @@ func TestResumedEditToolRunReplacesRequestTitleWithCompletedTitle(t *testing.T) 
 }
 
 func TestMouseClickOnApprovalPromptPermissionsOpensPicker(t *testing.T) {
-	m := Model{
+	m := App{
 		mouseEnabled: true,
 		width:        160,
 		height:       28,
@@ -8320,7 +8320,7 @@ func TestMouseClickOnApprovalPromptPermissionsOpensPicker(t *testing.T) {
 		X:      bounds.X + buttonX,
 		Y:      bounds.Y + buttonLine,
 	})
-	next := updated.(*Model)
+	next := updated.(*App)
 	if cmd == nil {
 		t.Fatal("expected title sync command when opening permissions picker")
 	}
@@ -8358,7 +8358,7 @@ func TestEventMsgAppendsToolResultBeforeTurnCompletes(t *testing.T) {
 		},
 		CreatedAt: now,
 	}}
-	m := Model{
+	m := App{
 		currentSession:  domain.Session{ID: 1},
 		currentChat:     domain.Chat{ID: 2},
 		currentSnapshot: chatpkg.Snapshot{Parts: map[int64][]domain.Part{}},
@@ -8378,7 +8378,7 @@ func TestEventMsgAppendsToolResultBeforeTurnCompletes(t *testing.T) {
 		},
 		events: events,
 	})
-	next := updated.(Model)
+	next := updated.(App)
 	if next.status != "" {
 		t.Fatalf("unexpected status: %q", next.status)
 	}
@@ -8395,7 +8395,7 @@ func TestEventMsgAppendsToolResultBeforeTurnCompletes(t *testing.T) {
 
 func TestRenderTranscriptMessageUsesUserStyleWithoutRoleLabel(t *testing.T) {
 	cfg := testConfig(t)
-	m := Model{
+	m := App{
 		cfg: cfg,
 		currentSnapshot: chatpkg.Snapshot{Parts: map[int64][]domain.Part{
 			1: {{Kind: domain.PartKindText, Body: "hello world"}},
@@ -8417,7 +8417,7 @@ func TestRenderTranscriptMessageUsesUserStyleWithoutRoleLabel(t *testing.T) {
 
 func TestRenderTranscriptMessageUserBubbleHasBlankPaddingLines(t *testing.T) {
 	cfg := testConfig(t)
-	m := Model{
+	m := App{
 		cfg: cfg,
 		currentSnapshot: chatpkg.Snapshot{Parts: map[int64][]domain.Part{
 			1: {{Kind: domain.PartKindText, Body: "hello world"}},
@@ -8457,7 +8457,7 @@ func TestRenderTranscriptMessageUserBubbleHasBlankPaddingLines(t *testing.T) {
 
 func TestRenderTranscriptMessageUserBubbleUsesConsistentWidthForMultilineInput(t *testing.T) {
 	cfg := testConfig(t)
-	m := Model{
+	m := App{
 		cfg: cfg,
 		currentSnapshot: chatpkg.Snapshot{Parts: map[int64][]domain.Part{
 			1: {{Kind: domain.PartKindText, Body: "short\nthis is a much longer line"}},
@@ -8484,7 +8484,7 @@ func TestRenderTranscriptMessageUserBubbleUsesConsistentWidthForMultilineInput(t
 
 func TestRenderTranscriptMessageUserBubbleWrapsToViewportWidth(t *testing.T) {
 	cfg := testConfig(t)
-	m := Model{
+	m := App{
 		cfg: cfg,
 		currentSnapshot: chatpkg.Snapshot{Parts: map[int64][]domain.Part{
 			1: {{Kind: domain.PartKindText, Body: "this line is intentionally longer than the viewport width"}},
@@ -8510,7 +8510,7 @@ func TestRenderTranscriptMessageUserBubbleWrapsToViewportWidth(t *testing.T) {
 }
 
 func TestRenderTranscriptMessageUsesAssistantStyleWithoutRoleLabel(t *testing.T) {
-	m := Model{
+	m := App{
 		currentSnapshot: chatpkg.Snapshot{Parts: map[int64][]domain.Part{
 			2: {{Kind: domain.PartKindText, Body: "final answer"}},
 		}},
@@ -8530,7 +8530,7 @@ func TestRenderTranscriptMessageUsesAssistantStyleWithoutRoleLabel(t *testing.T)
 }
 
 func TestRenderTranscriptMessageAssistantWrapsToViewportWidth(t *testing.T) {
-	m := Model{
+	m := App{
 		currentSnapshot: chatpkg.Snapshot{Parts: map[int64][]domain.Part{
 			2: {{Kind: domain.PartKindText, Body: "this assistant line is intentionally longer than the viewport width"}},
 		}},
@@ -8554,7 +8554,7 @@ func TestRenderTranscriptMessageAssistantWrapsToViewportWidth(t *testing.T) {
 }
 
 func TestRenderTranscriptMessageAssistantPreservesPlainTextContent(t *testing.T) {
-	m := Model{
+	m := App{
 		palette: theme.Default().Palette,
 		currentSnapshot: chatpkg.Snapshot{Parts: map[int64][]domain.Part{
 			2: {{Kind: domain.PartKindText, Body: "plain assistant text"}},
@@ -8573,7 +8573,7 @@ func TestRenderTranscriptMessageAssistantPreservesPlainTextContent(t *testing.T)
 
 func TestRefreshViewportUsesSingleNewlineBetweenBlocksWithHalfBlocks(t *testing.T) {
 	cfg := testConfig(t)
-	m := Model{
+	m := App{
 		cfg: cfg,
 		currentSnapshot: chatpkg.Snapshot{Messages: []domain.Message{
 			{ID: 1, Role: domain.MessageRoleUser},
@@ -8597,7 +8597,7 @@ func TestRefreshViewportUsesSingleNewlineBetweenBlocksWithHalfBlocks(t *testing.
 
 func TestRefreshViewportUsesBlankLineBetweenAssistantMessagesWithHalfBlocks(t *testing.T) {
 	cfg := testConfig(t)
-	m := Model{
+	m := App{
 		cfg: cfg,
 		currentSnapshot: chatpkg.Snapshot{Messages: []domain.Message{
 			{ID: 1, Role: domain.MessageRoleAssistant},
@@ -8632,7 +8632,7 @@ func TestRefreshViewportUsesBlankLineBetweenAssistantMessagesWithHalfBlocks(t *t
 
 func TestRefreshViewportUsesBlankLineBetweenAssistantTextAndToolRunWithHalfBlocks(t *testing.T) {
 	cfg := testConfig(t)
-	m := Model{
+	m := App{
 		cfg: cfg,
 		currentSnapshot: chatpkg.Snapshot{Messages: []domain.Message{
 			{ID: 1, Role: domain.MessageRoleAssistant},
@@ -8679,7 +8679,7 @@ func TestRefreshViewportUsesBlankLineBetweenAssistantTextAndToolRunWithHalfBlock
 
 func TestRefreshViewportUsesBlankLineBetweenConsecutiveToolRunsWithHalfBlocks(t *testing.T) {
 	cfg := testConfig(t)
-	m := Model{
+	m := App{
 		cfg: cfg,
 		currentSnapshot: chatpkg.Snapshot{Messages: []domain.Message{
 			{ID: 1, Role: domain.MessageRoleAssistant},
@@ -8753,7 +8753,7 @@ func TestRefreshViewportUsesBlankLineBetweenConsecutiveToolRunsWithHalfBlocks(t 
 }
 
 func TestTranscriptBlocksKeepsRepeatedFailedToolRunsSeparate(t *testing.T) {
-	m := Model{
+	m := App{
 		currentSession:  domain.Session{ID: 1},
 		currentSnapshot: chatpkg.Snapshot{Parts: map[int64][]domain.Part{}},
 	}
@@ -8844,7 +8844,7 @@ func TestTranscriptBlocksIncludeLiveExecRuns(t *testing.T) {
 		t.Fatalf("start exec session: %v", err)
 	}
 
-	m := Model{
+	m := App{
 		exec:            mgr,
 		currentSession:  domain.Session{ID: 1},
 		currentChat:     domain.Chat{ID: 2, SessionID: 1},
@@ -8904,7 +8904,7 @@ func TestToolRunOutputUsesPastTenseForCompletedExec(t *testing.T) {
 
 func TestRefreshExecSubscriptionCmdReceivesExecEventsForCurrentChat(t *testing.T) {
 	mgr := execruntime.NewManager()
-	m := Model{
+	m := App{
 		exec:           mgr,
 		currentSession: domain.Session{ID: 1},
 		currentChat:    domain.Chat{ID: 2, SessionID: 1},
@@ -8941,7 +8941,7 @@ func TestRefreshExecSubscriptionCmdReceivesExecEventsForCurrentChat(t *testing.T
 
 func TestExecEventMsgIgnoresStaleSubscription(t *testing.T) {
 	mgr := execruntime.NewManager()
-	m := Model{
+	m := App{
 		exec:           mgr,
 		currentSession: domain.Session{ID: 1},
 		currentChat:    domain.Chat{ID: 2, SessionID: 1},
@@ -8971,7 +8971,7 @@ func TestExecEventMsgIgnoresStaleSubscription(t *testing.T) {
 	}
 
 	nextModel, cmd := m.Update(msg)
-	updated, ok := nextModel.(Model)
+	updated, ok := nextModel.(App)
 	if !ok {
 		t.Fatalf("expected Model, got %T", nextModel)
 	}

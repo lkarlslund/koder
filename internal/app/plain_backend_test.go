@@ -7,7 +7,7 @@ import (
 	"github.com/lkarlslund/koder/internal/ui"
 )
 
-func (m Model) View() string {
+func (m App) View() string {
 	return strings.Join(m.viewSurface().Lines(), "\n")
 }
 
@@ -15,22 +15,22 @@ func (v transcriptViewport) View() string {
 	return strings.Join(v.VisibleSurface().Lines(), "\n")
 }
 
-func (m *Model) renderBody() string {
+func (m *App) renderBody() string {
 	return strings.Join(m.renderBodySurface().Lines(), "\n")
 }
 
-func (m *Model) renderFooter() string {
+func (m *App) renderFooter() string {
 	return strings.Join(m.renderComposerAreaSurface().Lines(), "\n")
 }
 
-func (m *Model) renderComposer() string {
+func (m *App) renderComposer() string {
 	element := m.renderComposerElement()
 	ctx := &ui.Context{Palette: m.palette}
 	size := element.Measure(ctx, ui.NewConstraints(m.composerWidth(), 0))
 	return strings.Join(ui.PaintNodeSurface(ctx, element, ui.Rect{W: m.composerWidth(), H: size.H}).Lines(), "\n")
 }
 
-func (m *Model) renderTranscriptActivity() string {
+func (m *App) renderTranscriptActivity() string {
 	element := m.renderTranscriptActivityElement()
 	if element == nil {
 		return ""
@@ -41,7 +41,7 @@ func (m *Model) renderTranscriptActivity() string {
 	return strings.Join(ui.PaintNodeSurface(ctx, element, ui.Rect{W: width, H: size.H}).Lines(), "\n")
 }
 
-func (m *Model) renderTranscriptMessage(msg domain.Message) string {
+func (m *App) renderTranscriptMessage(msg domain.Message) string {
 	element := newTranscriptRenderer(m).renderTranscriptMessageElement(msg, m.currentSnapshot.Parts[msg.ID])
 	if element == nil {
 		return ""

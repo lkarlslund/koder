@@ -325,7 +325,7 @@ func paintBouncyBall(surface *ui.Surface, ball bouncyBall) {
 	}
 }
 
-func (m *Model) toggleBouncyBalls() {
+func (m *App) toggleBouncyBalls() {
 	m.bouncyBalls.Toggle(max(0, m.width), max(0, m.height))
 	if m.bouncyBalls.Enabled {
 		m.status = "Bouncy balls enabled"
