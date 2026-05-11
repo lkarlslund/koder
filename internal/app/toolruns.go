@@ -8,7 +8,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/lkarlslund/koder/internal/appstate"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/execruntime"
 	"github.com/lkarlslund/koder/internal/store"
@@ -25,13 +24,11 @@ const (
 )
 
 type transcriptBlock struct {
-	Kind          transcriptBlockKind
-	Message       domain.Message
-	Parts         []domain.Part
-	Record        *appstate.MessageRecord
-	ToolRun       ui.ToolRun
-	ToolRunRecord *appstate.ToolRunRecord
-	Pending       bool
+	Kind    transcriptBlockKind
+	Message domain.Message
+	Parts   []domain.Part
+	ToolRun ui.ToolRun
+	Pending bool
 }
 
 func (m *App) transcriptBlocks() []transcriptBlock {
@@ -44,8 +41,8 @@ func (m *App) transcriptBlocks() []transcriptBlock {
 	appendMessage := func(msg domain.Message) {
 		blocks = append(blocks, transcriptBlock{Kind: transcriptBlockMessage, Message: msg, Parts: parts[msg.ID]})
 	}
-	appendRun := func(run ui.ToolRun, record *appstate.ToolRunRecord) *ui.ToolRun {
-		blocks = append(blocks, transcriptBlock{Kind: transcriptBlockToolRun, ToolRun: run, ToolRunRecord: record})
+	appendRun := func(run ui.ToolRun) *ui.ToolRun {
+		blocks = append(blocks, transcriptBlock{Kind: transcriptBlockToolRun, ToolRun: run})
 		return &blocks[len(blocks)-1].ToolRun
 	}
 	tracker := newToolRunTracker(appendRun)
@@ -58,11 +55,11 @@ func (m *App) transcriptBlocks() []transcriptBlock {
 				appendMessage(msg)
 			}
 			if run, ok := compactionToolRun(msgParts, msg); ok {
-				appendRun(run, nil)
+				appendRun(run)
 			}
 			for _, part := range msgParts {
 				if run := eventNoticeToolRun(part); strings.TrimSpace(run.ID) != "" {
-					appendRun(run, nil)
+					appendRun(run)
 				}
 			}
 			for _, run := range toolRunsFromAssistantMessage(msgParts) {
@@ -104,75 +101,31 @@ func (m *App) transcriptBlocks() []transcriptBlock {
 	return blocks
 }
 
-func (m *App) rebuildChatToolRuns() {
-	if m == nil || m.chatState == nil {
-		return
-	}
-	var runs []ui.ToolRun
-	appendRun := func(run ui.ToolRun) {
-		if strings.TrimSpace(run.ID) == "" {
-			return
-		}
-		runs = append(runs, run)
-	}
-	tracker := newToolRunTracker(func(run ui.ToolRun, _ *appstate.ToolRunRecord) *ui.ToolRun {
-		runs = append(runs, run)
-		return &runs[len(runs)-1]
-	})
-	for _, record := range m.chatState.Messages() {
-		if record == nil {
-			continue
-		}
-		msg := record.MessageValue()
-		parts := record.PartSnapshots()
-		switch msg.Role {
-		case domain.MessageRoleAssistant:
-			for _, run := range toolRunsFromAssistantMessage(parts) {
-				tracker.Upsert(run)
-			}
-		case domain.MessageRoleTool:
-			for _, run := range toolRunsFromToolMessage(parts, msg) {
-				tracker.Upsert(run)
-			}
-		}
-	}
-	for _, approval := range m.chatState.Approvals() {
-		run := m.approvalToolRun(approval)
-		if strings.TrimSpace(run.ID) != "" {
-			appendRun(run)
-		}
-	}
-	m.chatState.ReplaceToolRuns(runs)
-}
-
 func (m *App) applyCurrentChatEvent(evt domain.Event) {
 	if m == nil || m.currentChat.ID == 0 {
 		return
 	}
-	state := m.ensureChatState()
 	refreshed := false
 	if evt.Message.ID > 0 {
-		record, mutations, created := state.UpsertMessageParts(evt.Message, evt.Parts)
-		if record != nil {
-			if created {
-				if !m.appendEventMessageToTranscript(record) {
-					m.transcriptDirty = true
-				} else {
-					refreshed = true
-				}
-			} else if m.messageShouldRender(record) {
-				if !m.upsertMessageRecordTranscriptItem(record) {
-					m.transcriptDirty = true
-				} else {
-					refreshed = true
-				}
-			}
-			for _, mutation := range mutations {
-				if !m.applyCurrentChatPartMutation(record, mutation.Record) {
-					continue
-				}
+		msg, msgParts, mutations, created := m.upsertCurrentSnapshotMessageParts(evt.Message, evt.Parts)
+		if created {
+			if !m.appendEventMessageToTranscript(msg, msgParts) {
+				m.transcriptDirty = true
+			} else {
 				refreshed = true
 			}
+		} else if m.messageShouldRender(msg, msgParts) {
+			if !m.upsertMessageTranscriptItem(msg, msgParts) {
+				m.transcriptDirty = true
+			} else {
+				refreshed = true
+			}
+		}
+		for _, part := range mutations {
+			if !m.applyCurrentChatPartMutation(msg, part) {
+				continue
+			}
+			refreshed = true
 		}
 	}
 	switch evt.Kind {
@@ -181,20 +134,15 @@ func (m *App) applyCurrentChatEvent(evt domain.Event) {
 	case domain.EventKindApprovalReply:
 		m.applyApprovalReplyEvent(evt)
 	case domain.EventKindToolStart:
-		if record := state.ToolRunByCallID(strings.TrimSpace(evt.ToolCallID)); record != nil {
-			record.Update(func(run *ui.ToolRun) {
+		if toolCallID := strings.TrimSpace(evt.ToolCallID); toolCallID != "" {
+			if !m.updateToolRunInTranscriptByCallID(toolCallID, func(run *ui.ToolRun) {
 				run.Status = ui.ToolRunStatusRunning
-			})
-			if !m.replaceToolRunRecordInTranscript(record) {
+			}) {
 				m.transcriptDirty = true
 			} else {
 				refreshed = true
 			}
 		}
-	}
-	if evt.Message.ID > 0 {
-		m.syncCurrentSnapshotFromState()
-		m.syncChatMirrorsFromState()
 	}
 	if refreshed || evt.Message.ID > 0 {
 		if evt.Kind == domain.EventKindToolCallDelta && evt.Message.ID > 0 {
@@ -207,26 +155,15 @@ func (m *App) applyCurrentChatEvent(evt domain.Event) {
 	}
 }
 
-func (m *App) applyCurrentChatPartMutation(record *appstate.MessageRecord, partRecord *appstate.PartRecord) bool {
-	if record == nil || partRecord == nil {
-		return false
-	}
-	run, ok := messageToolRunForPart(record.Message, partRecord.Part)
+func (m *App) applyCurrentChatPartMutation(msg domain.Message, part domain.Part) bool {
+	run, ok := messageToolRunForPart(msg, part)
 	if !ok {
 		return false
 	}
-	toolRecord, created := m.ensureChatState().UpsertToolRun(run)
-	if toolRecord == nil {
+	if strings.TrimSpace(run.ID) == "" {
 		return false
 	}
-	if created {
-		if !m.appendToolRunRecordTranscriptItem(toolRecord) {
-			m.transcriptDirty = true
-			return false
-		}
-		return true
-	}
-	if !m.replaceToolRunRecordInTranscript(toolRecord) {
+	if !m.upsertToolRunTranscriptItem(run) {
 		m.transcriptDirty = true
 		return false
 	}
@@ -238,7 +175,7 @@ func (m *App) applyApprovalAskEvent(evt domain.Event) {
 	if approvalID == 0 {
 		return
 	}
-	m.ensureChatState().UpsertApproval(store.Approval{
+	m.upsertCurrentSnapshotApproval(store.Approval{
 		ID:        approvalID,
 		SessionID: m.currentSession.ID,
 		ChatID:    m.currentChat.ID,
@@ -246,8 +183,6 @@ func (m *App) applyApprovalAskEvent(evt domain.Event) {
 		Command:   strings.TrimSpace(evt.Meta["command"]),
 		Status:    domain.ApprovalStatusPending,
 	})
-	m.syncCurrentSnapshotFromState()
-	m.syncChatMirrorsFromState()
 }
 
 func (m *App) applyApprovalReplyEvent(evt domain.Event) {
@@ -255,32 +190,30 @@ func (m *App) applyApprovalReplyEvent(evt domain.Event) {
 	if approvalID == 0 {
 		return
 	}
-	m.ensureChatState().RemoveApproval(approvalID)
-	m.syncCurrentSnapshotFromState()
-	m.syncChatMirrorsFromState()
+	m.removeCurrentSnapshotApproval(approvalID)
 }
 
-func (m *App) appendEventMessageToTranscript(record *appstate.MessageRecord) bool {
-	if record == nil {
+func (m *App) appendEventMessageToTranscript(msg domain.Message, parts []domain.Part) bool {
+	if msg.ID == 0 {
 		return false
 	}
-	if !m.messageShouldRender(record) {
+	if !m.messageShouldRender(msg, parts) {
 		return true
 	}
-	return m.appendMessageRecordTranscriptItem(record)
+	return m.appendTranscriptBlock(transcriptBlock{Kind: transcriptBlockMessage, Message: msg, Parts: parts})
 }
 
-func (m *App) messageShouldRender(record *appstate.MessageRecord) bool {
-	if record == nil {
+func (m *App) messageShouldRender(msg domain.Message, parts []domain.Part) bool {
+	if msg.ID == 0 {
 		return false
 	}
-	if record.Message.Role == domain.MessageRoleUser {
+	if msg.Role == domain.MessageRoleUser {
 		return true
 	}
-	if record.Message.Role == domain.MessageRoleTool {
+	if msg.Role == domain.MessageRoleTool {
 		return false
 	}
-	return m.assistantMessageShouldExist(record.Message, partValues(record.PartRecords()))
+	return m.assistantMessageShouldExist(msg, parts)
 }
 
 func messageToolRunForPart(msg domain.Message, part domain.Part) (ui.ToolRun, bool) {
@@ -392,20 +325,18 @@ func isCompactionOnlyAssistantMessage(parts []domain.Part) bool {
 }
 
 type toolRunTracker struct {
-	append       func(ui.ToolRun, *appstate.ToolRunRecord) *ui.ToolRun
+	append       func(ui.ToolRun) *ui.ToolRun
 	byID         map[string]*ui.ToolRun
 	byToolCallID map[string]*ui.ToolRun
 	byApprovalID map[int64]*ui.ToolRun
-	records      map[string]*appstate.ToolRunRecord
 }
 
-func newToolRunTracker(append func(ui.ToolRun, *appstate.ToolRunRecord) *ui.ToolRun) *toolRunTracker {
+func newToolRunTracker(append func(ui.ToolRun) *ui.ToolRun) *toolRunTracker {
 	return &toolRunTracker{
 		append:       append,
 		byID:         map[string]*ui.ToolRun{},
 		byToolCallID: map[string]*ui.ToolRun{},
 		byApprovalID: map[int64]*ui.ToolRun{},
-		records:      map[string]*appstate.ToolRunRecord{},
 	}
 }
 
@@ -418,30 +349,7 @@ func (t *toolRunTracker) Upsert(run ui.ToolRun) {
 		t.index(existing)
 		return
 	}
-	t.index(t.append(run, nil))
-}
-
-func (t *toolRunTracker) UpsertRecord(record *appstate.ToolRunRecord) {
-	if t == nil || record == nil {
-		return
-	}
-	run := record.RunValue()
-	if strings.TrimSpace(run.ID) == "" {
-		return
-	}
-	if existing := t.lookup(run); existing != nil {
-		mergeToolRun(existing, run)
-		t.index(existing)
-		if id := strings.TrimSpace(existing.ID); id != "" {
-			t.records[id] = record
-		}
-		return
-	}
-	appended := t.append(run, record)
-	if id := strings.TrimSpace(appended.ID); id != "" {
-		t.records[id] = record
-	}
-	t.index(appended)
+	t.index(t.append(run))
 }
 
 func (t *toolRunTracker) lookup(run ui.ToolRun) *ui.ToolRun {

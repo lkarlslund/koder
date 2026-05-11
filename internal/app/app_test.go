@@ -4049,9 +4049,6 @@ func TestAppendLocalUserPromptHydratesTranscriptFromSnapshot(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected user transcript item, got %T", m.transcriptItems[0])
 	}
-	if item.record != nil {
-		t.Fatal("expected transcript item to render from snapshot value, not shared record")
-	}
 	if got := item.msg.Summary; got != "first" {
 		t.Fatalf("item summary = %q", got)
 	}
