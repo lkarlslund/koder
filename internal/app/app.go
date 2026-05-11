@@ -829,20 +829,16 @@ func (m App) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 		_ = m.bouncyBalls.StepAt(msg.At, max(0, m.width), max(0, m.height))
 		return m, nil
 	case spinnerTickMsg:
-		m.invalidateBodyCache()
 		if !m.shouldAnimateSpinner() {
 			return m, nil
 		}
-		wasAtBottom := m.viewport.AtBottom()
-		offset := m.viewport.YOffset
 		m.busy.spinner.tick()
 		if m.hasPreferencesDialog() {
 			m.preferences.Tick()
+			m.invalidateMainSurface()
 		}
-		if wasAtBottom {
-			m.refreshViewport()
-		} else {
-			m.refreshViewportAt(offset)
+		if m.pendingAssistantSpinnerVisible() {
+			m.refreshTranscriptForPendingTurn()
 		}
 		return m, ui.Batch(spinnerTickCmd(), m.syncWindowTitleCmd())
 	case execEventMsg:
@@ -2140,6 +2136,11 @@ func (m *App) invalidatePendingTranscriptFrame() {
 	if main := m.ensureMainScreenView(); main != nil {
 		main.InvalidateTranscript()
 	}
+}
+
+func (m *App) pendingAssistantSpinnerVisible() bool {
+	pending := m.activePendingAssistant()
+	return strings.TrimSpace(pending.Text) == "" && strings.TrimSpace(pending.Reasoning) != ""
 }
 
 func (m *App) prepareFrame() {

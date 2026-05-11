@@ -117,3 +117,21 @@ func TestRetainedSurfacePaintsDirtyNode(t *testing.T) {
 		t.Fatalf("expected dirty rect for repaint, got %#v ok=%v", rects, ok)
 	}
 }
+
+func TestRetainedSurfacePaintsDirtyContainerNode(t *testing.T) {
+	child := &retainedSurfaceTestNode{text: "first"}
+	node := NewHashedNode(child, 0)
+	retained := NewRetainedSurface(node)
+	bounds := Rect{W: 8, H: 1}
+	first := retained.Surface(&Context{}, bounds)
+	if got := first.Lines()[0]; got != "first   " {
+		t.Fatalf("expected first paint, got %q", got)
+	}
+
+	child.text = "later"
+	node.SetHash(1)
+	next := retained.Surface(&Context{}, bounds)
+	if got := next.Lines()[0]; got != "later   " {
+		t.Fatalf("expected dirty container to repaint child subtree, got %q", got)
+	}
+}

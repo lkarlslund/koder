@@ -109,16 +109,16 @@ func PaintDirtyNode(ctx *Context, canvas Canvas, node Node) {
 	if node == nil || node.Rect().Empty() {
 		return
 	}
+	if node.NeedsPaint() {
+		node.Paint(ctx, canvas.Subrect(node.Rect()))
+		return
+	}
 	if children := NodeChildren(node); len(children) > 0 {
 		for _, child := range children {
 			PaintDirtyNode(ctx, canvas, child)
 		}
 		return
 	}
-	if !node.NeedsPaint() {
-		return
-	}
-	node.Paint(ctx, canvas.Subrect(node.Rect()))
 }
 
 // CollectNodeDamage returns dirty rectangles for node and retained descendants.

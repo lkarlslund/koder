@@ -7198,6 +7198,52 @@ func TestSpinnerTickPreservesViewportOffsetWhenScrolledBack(t *testing.T) {
 	if next.viewport.YOffset != beforeOffset {
 		t.Fatalf("expected spinner tick to preserve viewport offset %d, got %d", beforeOffset, next.viewport.YOffset)
 	}
+	if next.transcriptDirty {
+		t.Fatal("expected spinner tick to avoid transcript invalidation")
+	}
+}
+
+func TestSpinnerTickInvalidatesStatusPane(t *testing.T) {
+	m := App{
+		cfg:         config.Default().WithStateDir(t.TempDir()),
+		palette:     theme.Default().Palette,
+		viewport:    newTranscriptViewport(80, 20),
+		renderCache: &modelRenderCache{},
+		composer:    textarea.New(),
+		width:       80,
+		height:      24,
+		showSidebar: false,
+		busy: busyModel{
+			active: true,
+			scope:  busyScopeTranscript,
+			status: "Streaming LLM response ...",
+			spinner: spinnerModel{
+				active: true,
+			},
+		},
+	}
+
+	_ = m.viewSurface()
+	updated, cmd := m.Update(spinnerTickMsg{})
+	next := updated.(App)
+	surface := next.viewSurface()
+
+	if cmd == nil {
+		t.Fatal("expected follow-up spinner tick command")
+	}
+	if next.busy.spinner.frame != 1 {
+		t.Fatalf("expected spinner frame to advance, got %d", next.busy.spinner.frame)
+	}
+	rects, ok := surface.DirtyRects()
+	if !ok || len(rects) == 0 {
+		t.Fatal("expected spinner tick to produce damage")
+	}
+	damageStart := surface.SurfaceHeight() - next.statusPaneHeight()
+	for _, rect := range rects {
+		if rect.Y < damageStart {
+			t.Fatalf("expected spinner damage to stay in status pane, got rect %#v with damage start %d", rect, damageStart)
+		}
+	}
 }
 
 func TestSpinnerTickAnimatesSidebarBusyIndicator(t *testing.T) {
