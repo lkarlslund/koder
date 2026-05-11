@@ -2904,7 +2904,7 @@ func (e *Engine) parseProviderToolCall(item provider.ToolCall) (tools.Request, e
 		},
 	}
 	if req.ToolCallID == "" {
-		req.ToolCallID = "call_mcp"
+		return tools.Request{}, fmt.Errorf("provider MCP tool call for %s missing id", name)
 	}
 	return tools.Normalize(req)
 }

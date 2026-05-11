@@ -47,18 +47,15 @@ func TestRequestJSONRoundTrip(t *testing.T) {
 	}
 }
 
-func TestParseProviderCallAddsFallbackToolCallID(t *testing.T) {
-	req, err := tools.ParseProviderCall(provider.ToolCall{
+func TestParseProviderCallRejectsMissingToolCallID(t *testing.T) {
+	_, err := tools.ParseProviderCall(provider.ToolCall{
 		Function: provider.FunctionCall{
 			Name:      string(domain.ToolKindWrite),
 			Arguments: `{"path":"notes.txt","content":"hello"}`,
 		},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if req.ToolCallID != "call_write" {
-		t.Fatalf("expected fallback tool call id, got %q", req.ToolCallID)
+	if err == nil || !strings.Contains(err.Error(), "missing id") {
+		t.Fatalf("expected missing id error, got %v", err)
 	}
 }
 

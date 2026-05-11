@@ -346,7 +346,7 @@ func ParseProviderCall(call provider.ToolCall) (Request, error) {
 		Args:       args,
 	}
 	if req.ToolCallID == "" {
-		req.ToolCallID = "call_" + strings.ToLower(string(kind))
+		return Request{}, fmt.Errorf("provider tool call for %s missing id", kind)
 	}
 	return req, nil
 }
