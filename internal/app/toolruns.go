@@ -40,21 +40,7 @@ func (m *App) transcriptBlocks() []transcriptBlock {
 	parts := m.activeParts()
 	approvals := m.activeApprovals()
 	pending := m.activePendingAssistant()
-	if m.chatState == nil && (len(messages) > 0 || len(parts) > 0 || len(approvals) > 0) {
-		m.ensureChatState()
-	}
 
-	appendMessageRecord := func(record *appstate.MessageRecord) {
-		if record == nil {
-			return
-		}
-		blocks = append(blocks, transcriptBlock{
-			Kind:    transcriptBlockMessage,
-			Message: record.MessageValue(),
-			Parts:   record.PartSnapshots(),
-			Record:  record,
-		})
-	}
 	appendMessage := func(msg domain.Message) {
 		blocks = append(blocks, transcriptBlock{Kind: transcriptBlockMessage, Message: msg, Parts: parts[msg.ID]})
 	}
@@ -64,81 +50,41 @@ func (m *App) transcriptBlocks() []transcriptBlock {
 	}
 	tracker := newToolRunTracker(appendRun)
 
-	if m.chatState != nil {
-		for _, record := range m.chatState.Messages() {
-			if record == nil {
-				continue
-			}
-			msg := record.MessageValue()
-			parts := record.PartSnapshots()
-			switch msg.Role {
-			case domain.MessageRoleAssistant:
-				if m.assistantMessageShouldExist(msg, parts) {
-					appendMessageRecord(record)
-				}
-				if run, ok := compactionToolRun(parts, msg); ok {
-					appendRun(run, nil)
-				}
-				for _, part := range parts {
-					if run := eventNoticeToolRun(part); strings.TrimSpace(run.ID) != "" {
-						appendRun(run, nil)
-					}
-				}
-				for _, run := range toolRunsFromAssistantMessage(parts) {
-					if record := m.chatState.ToolRunByCallID(run.ToolCallID); record != nil {
-						tracker.UpsertRecord(record)
-						continue
-					}
-					tracker.Upsert(run)
-				}
-			case domain.MessageRoleTool:
-				consumed := false
-				for _, run := range toolRunsFromToolMessage(parts, msg) {
-					if record := m.chatState.ToolRunByCallID(run.ToolCallID); record != nil {
-						tracker.UpsertRecord(record)
-					} else {
-						tracker.Upsert(run)
-					}
-					consumed = true
-				}
-				if !consumed {
-					appendMessageRecord(record)
-				}
-			default:
-				appendMessageRecord(record)
-			}
-		}
-	} else {
-		for _, msg := range messages {
-			msgParts := parts[msg.ID]
-			switch msg.Role {
-			case domain.MessageRoleAssistant:
-				if m.assistantMessageShouldExist(msg, msgParts) {
-					appendMessage(msg)
-				}
-				if run, ok := compactionToolRun(msgParts, msg); ok {
-					appendRun(run, nil)
-				}
-				for _, part := range msgParts {
-					if run := eventNoticeToolRun(part); strings.TrimSpace(run.ID) != "" {
-						appendRun(run, nil)
-					}
-				}
-				for _, run := range toolRunsFromAssistantMessage(msgParts) {
-					tracker.Upsert(run)
-				}
-			case domain.MessageRoleTool:
-				consumed := false
-				for _, run := range toolRunsFromToolMessage(msgParts, msg) {
-					tracker.Upsert(run)
-					consumed = true
-				}
-				if !consumed {
-					appendMessage(msg)
-				}
-			default:
+	for _, msg := range messages {
+		msgParts := parts[msg.ID]
+		switch msg.Role {
+		case domain.MessageRoleAssistant:
+			if m.assistantMessageShouldExist(msg, msgParts) {
 				appendMessage(msg)
 			}
+			if run, ok := compactionToolRun(msgParts, msg); ok {
+				appendRun(run, nil)
+			}
+			for _, part := range msgParts {
+				if run := eventNoticeToolRun(part); strings.TrimSpace(run.ID) != "" {
+					appendRun(run, nil)
+				}
+			}
+			for _, run := range toolRunsFromAssistantMessage(msgParts) {
+				tracker.Upsert(run)
+			}
+		case domain.MessageRoleTool:
+			consumed := false
+			for _, run := range toolRunsFromToolMessage(msgParts, msg) {
+				tracker.Upsert(run)
+				consumed = true
+			}
+			if !consumed {
+				appendMessage(msg)
+			}
+		default:
+			appendMessage(msg)
+		}
+	}
+	for _, approval := range approvals {
+		run := m.approvalToolRun(approval)
+		if strings.TrimSpace(run.ID) != "" {
+			tracker.Upsert(run)
 		}
 	}
 	for _, run := range m.currentLiveExecRuns() {

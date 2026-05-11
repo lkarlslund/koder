@@ -62,64 +62,114 @@ func (i *placeholderTranscriptItem) Refresh(_ *App) {
 type userMessageTranscriptItem struct {
 	transcriptItemBase
 	record *appstate.MessageRecord
+	msg    domain.Message
+	parts  []domain.Part
 }
 
 func newUserMessageTranscriptItem(key string, gap int, record *appstate.MessageRecord) *userMessageTranscriptItem {
-	return &userMessageTranscriptItem{
+	item := &userMessageTranscriptItem{
 		transcriptItemBase: newTranscriptItemBase(key, gap),
 		record:             record,
 	}
+	if record != nil {
+		item.Bind(record)
+	}
+	return item
 }
 
-func (i *userMessageTranscriptItem) Bind(record *appstate.MessageRecord) { i.record = record }
+func newUserMessageTranscriptItemValue(key string, gap int, msg domain.Message, parts []domain.Part) *userMessageTranscriptItem {
+	return &userMessageTranscriptItem{
+		transcriptItemBase: newTranscriptItemBase(key, gap),
+		msg:                msg,
+		parts:              slicesCloneParts(parts),
+	}
+}
+
+func (i *userMessageTranscriptItem) Bind(record *appstate.MessageRecord) {
+	i.record = record
+	if record != nil {
+		i.msg = record.MessageValue()
+		i.parts = record.PartSnapshots()
+	}
+}
+
+func (i *userMessageTranscriptItem) BindValue(msg domain.Message, parts []domain.Part) {
+	i.record = nil
+	i.msg = msg
+	i.parts = slicesCloneParts(parts)
+}
 
 func (i *userMessageTranscriptItem) Refresh(m *App) {
-	if i.record == nil {
+	if i.msg.ID == 0 && strings.TrimSpace(i.msg.Summary) == "" && len(i.parts) == 0 {
 		i.setElement(ui.AsNode(ui.Paragraph{Text: ""}))
 		return
 	}
-	msg := i.record.Message
-	parts := partValues(i.record.PartRecords())
 	renderer := newTranscriptRenderer(m)
-	body := renderer.renderUserMessageParts(parts)
+	body := renderer.renderUserMessageParts(i.parts)
 	if strings.TrimSpace(body) == "" {
-		body = strings.TrimSpace(msg.Summary)
+		body = strings.TrimSpace(i.msg.Summary)
 	}
-	i.setElement(renderer.renderUserMessageElement(body, timestamp(msg.CreatedAt, m.cfg.UI.ShowTimestamps)))
+	i.setElement(renderer.renderUserMessageElement(body, timestamp(i.msg.CreatedAt, m.cfg.UI.ShowTimestamps)))
 }
 
 type assistantMessageTranscriptItem struct {
 	transcriptItemBase
 	record        *appstate.MessageRecord
+	msg           domain.Message
+	parts         []domain.Part
 	showReasoning bool
 	showSystem    bool
 }
 
 func newAssistantMessageTranscriptItem(key string, gap int, record *appstate.MessageRecord, showReasoning, showSystem bool) *assistantMessageTranscriptItem {
-	return &assistantMessageTranscriptItem{
+	item := &assistantMessageTranscriptItem{
 		transcriptItemBase: newTranscriptItemBase(key, gap),
 		record:             record,
 		showReasoning:      showReasoning,
 		showSystem:         showSystem,
 	}
+	if record != nil {
+		item.Bind(record)
+	}
+	return item
 }
 
-func (i *assistantMessageTranscriptItem) Bind(record *appstate.MessageRecord) { i.record = record }
+func newAssistantMessageTranscriptItemValue(key string, gap int, msg domain.Message, parts []domain.Part, showReasoning, showSystem bool) *assistantMessageTranscriptItem {
+	return &assistantMessageTranscriptItem{
+		transcriptItemBase: newTranscriptItemBase(key, gap),
+		msg:                msg,
+		parts:              slicesCloneParts(parts),
+		showReasoning:      showReasoning,
+		showSystem:         showSystem,
+	}
+}
+
+func (i *assistantMessageTranscriptItem) Bind(record *appstate.MessageRecord) {
+	i.record = record
+	if record != nil {
+		i.msg = record.MessageValue()
+		i.parts = record.PartSnapshots()
+	}
+}
+
+func (i *assistantMessageTranscriptItem) BindValue(msg domain.Message, parts []domain.Part) {
+	i.record = nil
+	i.msg = msg
+	i.parts = slicesCloneParts(parts)
+}
 
 func (i *assistantMessageTranscriptItem) SetReasoningVisible(v bool) { i.showReasoning = v }
 func (i *assistantMessageTranscriptItem) SetSystemVisible(v bool)    { i.showSystem = v }
 
 func (i *assistantMessageTranscriptItem) Refresh(m *App) {
-	if i.record == nil {
+	if i.msg.ID == 0 && strings.TrimSpace(i.msg.Summary) == "" && len(i.parts) == 0 {
 		i.setElement(ui.AsNode(ui.Paragraph{Text: ""}))
 		return
 	}
-	msg := i.record.Message
-	parts := partValues(i.record.PartRecords())
 	renderer := newTranscriptRenderer(m)
 	renderer.showReasoning = i.showReasoning
 	renderer.showSystem = i.showSystem
-	i.setElement(renderer.renderTranscriptMessageElement(msg, parts))
+	i.setElement(renderer.renderTranscriptMessageElement(i.msg, i.parts))
 }
 
 type pendingAssistantTranscriptItem struct {
@@ -261,6 +311,15 @@ func partValues(records []*appstate.PartRecord) []domain.Part {
 		}
 		out = append(out, record.Part)
 	}
+	return out
+}
+
+func slicesCloneParts(parts []domain.Part) []domain.Part {
+	if len(parts) == 0 {
+		return nil
+	}
+	out := make([]domain.Part, len(parts))
+	copy(out, parts)
 	return out
 }
 

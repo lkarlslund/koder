@@ -4025,7 +4025,7 @@ func TestUpdateLoadPreservesMessageRecordIdentityForSameChat(t *testing.T) {
 	}
 }
 
-func TestAppendLocalUserPromptStoresSharedRecord(t *testing.T) {
+func TestAppendLocalUserPromptHydratesTranscriptFromSnapshot(t *testing.T) {
 	m := App{
 		cfg:              testConfig(t),
 		palette:          theme.Default().Palette,
@@ -4041,19 +4041,24 @@ func TestAppendLocalUserPromptStoresSharedRecord(t *testing.T) {
 	m.appendLocalUserPrompt("first", nil, nil)
 	m.syncRetainedTranscript()
 
-	if m.chatState == nil || len(m.chatState.Messages()) != 1 {
-		t.Fatalf("expected shared chat state to contain prompt")
+	if len(m.currentSnapshot.Messages) != 1 {
+		t.Fatalf("expected current snapshot to contain prompt")
 	}
-	record := m.chatState.Messages()[0]
-	if got := record.Message.Summary; got != "first" {
+	if got := m.currentSnapshot.Messages[0].Summary; got != "first" {
 		t.Fatalf("summary = %q", got)
 	}
 	item, ok := m.transcriptItems[0].(*userMessageTranscriptItem)
 	if !ok {
 		t.Fatalf("expected user transcript item, got %T", m.transcriptItems[0])
 	}
-	if item.record != record {
-		t.Fatal("expected transcript item to bind directly to shared message record")
+	if item.record != nil {
+		t.Fatal("expected transcript item to render from snapshot value, not shared record")
+	}
+	if got := item.msg.Summary; got != "first" {
+		t.Fatalf("item summary = %q", got)
+	}
+	if len(item.parts) != 1 || item.parts[0].Text() != "first" {
+		t.Fatalf("item parts = %#v", item.parts)
 	}
 }
 

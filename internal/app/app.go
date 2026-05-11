@@ -3032,13 +3032,21 @@ func (m *App) transcriptControllerFromBlock(prevByKey map[string]transcriptItemC
 		existing.SetGapBefore(gap)
 		switch typed := existing.(type) {
 		case *userMessageTranscriptItem:
-			if block.Kind == transcriptBlockMessage && block.Record != nil {
-				typed.Bind(block.Record)
+			if block.Kind == transcriptBlockMessage && block.Message.Role == domain.MessageRoleUser {
+				if block.Record != nil {
+					typed.Bind(block.Record)
+				} else {
+					typed.BindValue(block.Message, block.Parts)
+				}
 				return typed
 			}
 		case *assistantMessageTranscriptItem:
-			if block.Kind == transcriptBlockMessage && !block.Pending && block.Record != nil {
-				typed.Bind(block.Record)
+			if block.Kind == transcriptBlockMessage && !block.Pending && block.Message.Role != domain.MessageRoleUser {
+				if block.Record != nil {
+					typed.Bind(block.Record)
+				} else {
+					typed.BindValue(block.Message, block.Parts)
+				}
 				typed.SetReasoningVisible(m.showReasoning)
 				typed.SetSystemVisible(m.showSystem)
 				return typed
@@ -3067,9 +3075,15 @@ func (m *App) transcriptControllerFromBlock(prevByKey map[string]transcriptItemC
 		item.Reset(block.Message.CreatedAt, firstPartBody(block.Parts, domain.PartKindText), firstPartBody(block.Parts, domain.PartKindReasoning), m.pendingAssistantIndicatorLine())
 		return item
 	case block.Message.Role == domain.MessageRoleUser:
-		return newUserMessageTranscriptItem(key, gap, block.Record)
+		if block.Record != nil {
+			return newUserMessageTranscriptItem(key, gap, block.Record)
+		}
+		return newUserMessageTranscriptItemValue(key, gap, block.Message, block.Parts)
 	default:
-		return newAssistantMessageTranscriptItem(key, gap, block.Record, m.showReasoning, m.showSystem)
+		if block.Record != nil {
+			return newAssistantMessageTranscriptItem(key, gap, block.Record, m.showReasoning, m.showSystem)
+		}
+		return newAssistantMessageTranscriptItemValue(key, gap, block.Message, block.Parts, m.showReasoning, m.showSystem)
 	}
 }
 
@@ -3218,9 +3232,13 @@ func (m *App) reindexTranscriptControllers() {
 	for idx, item := range m.transcriptItems {
 		switch typed := item.(type) {
 		case *userMessageTranscriptItem:
-			m.messageItemIndexByID[typed.record.Message.ID] = idx
+			if typed.msg.ID > 0 {
+				m.messageItemIndexByID[typed.msg.ID] = idx
+			}
 		case *assistantMessageTranscriptItem:
-			m.messageItemIndexByID[typed.record.Message.ID] = idx
+			if typed.msg.ID > 0 {
+				m.messageItemIndexByID[typed.msg.ID] = idx
+			}
 		case *pendingAssistantTranscriptItem:
 			m.pendingTranscriptIndex = idx
 		case toolRunTranscriptItem:
@@ -3258,9 +3276,9 @@ func (m *App) transcriptToolRunValue(item toolRunTranscriptItem) ui.ToolRun {
 func (m *App) transcriptBlockForController(item transcriptItemController) transcriptBlock {
 	switch typed := item.(type) {
 	case *userMessageTranscriptItem:
-		return transcriptBlock{Kind: transcriptBlockMessage, Message: typed.record.Message, Parts: partValues(typed.record.PartRecords()), Record: typed.record}
+		return transcriptBlock{Kind: transcriptBlockMessage, Message: typed.msg, Parts: typed.parts, Record: typed.record}
 	case *assistantMessageTranscriptItem:
-		return transcriptBlock{Kind: transcriptBlockMessage, Message: typed.record.Message, Parts: partValues(typed.record.PartRecords()), Record: typed.record}
+		return transcriptBlock{Kind: transcriptBlockMessage, Message: typed.msg, Parts: typed.parts, Record: typed.record}
 	case *pendingAssistantTranscriptItem:
 		return transcriptBlock{
 			Kind:    transcriptBlockMessage,
