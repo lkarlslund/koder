@@ -67,29 +67,54 @@ func LatestUsageAnchor(messages []domain.Message, parts map[int64][]domain.Part)
 }
 
 // EstimateTailTokens estimates the token cost of persisted chat content added
-// after the latest usage-bearing part.
+// after the latest context-bearing part. Usage events and completed compaction
+// parts both establish a fresh context anchor for the chat.
 func EstimateTailTokens(messages []domain.Message, parts map[int64][]domain.Part) (int, bool) {
-	_, anchorMessageID, anchorPartIdx, ok := LatestUsageAnchor(messages, parts)
+	anchorMessageID, anchorPartIdx, ok := LatestContextAnchor(messages, parts)
 	if !ok {
 		return 0, false
 	}
 	total := 0
-	afterAnchorMessage := false
+	seenAnchor := false
 	for _, msg := range messages {
 		messageParts := parts[msg.ID]
-		switch {
-		case msg.ID == anchorMessageID:
-			if anchorPartIdx+1 >= len(messageParts) {
-				continue
+		if msg.ID == anchorMessageID {
+			seenAnchor = true
+			if anchorPartIdx+1 < len(messageParts) {
+				total += estimateMessageTokens(msg, messageParts[anchorPartIdx+1:])
 			}
-			total += estimateMessageTokens(msg, messageParts[anchorPartIdx+1:])
-			afterAnchorMessage = true
-		case afterAnchorMessage || msg.ID != anchorMessageID:
-			total += estimateMessageTokens(msg, messageParts)
-			afterAnchorMessage = true
+			continue
 		}
+		if !seenAnchor {
+			continue
+		}
+		total += estimateMessageTokens(msg, messageParts)
 	}
 	return total, true
+}
+
+// LatestContextAnchor returns the latest part position that corresponds to a
+// known context size for the chat.
+func LatestContextAnchor(messages []domain.Message, parts map[int64][]domain.Part) (int64, int, bool) {
+	for msgIdx := len(messages) - 1; msgIdx >= 0; msgIdx-- {
+		msg := messages[msgIdx]
+		messageParts := parts[msg.ID]
+		for partIdx := len(messageParts) - 1; partIdx >= 0; partIdx-- {
+			part := messageParts[partIdx]
+			if usage, ok := usageFromPart(part); ok {
+				if usage.Normalized().HasAnyTokens() {
+					return msg.ID, partIdx, true
+				}
+				continue
+			}
+			if payload, ok := part.Payload.(domain.CompactionPayload); ok {
+				if payload.Status == "completed" && payload.AfterContextTokens > 0 {
+					return msg.ID, partIdx, true
+				}
+			}
+		}
+	}
+	return 0, 0, false
 }
 
 func TotalUsage(messages []domain.Message, parts map[int64][]domain.Part) (domain.Usage, bool) {

@@ -97,7 +97,53 @@ func TestEstimateTailTokensUsesLatestUsageAnchor(t *testing.T) {
 	if !ok {
 		t.Fatal("expected latest usage anchor")
 	}
-	if got != 23 {
+	want := estimateMessageTokens(messages[2], parts[3]) + estimateMessageTokens(messages[3], parts[4])
+	if got != want {
 		t.Fatalf("expected tail-only estimate, got %d", got)
+	}
+}
+
+func TestEstimateTailTokensUsesCompletedCompactionAnchor(t *testing.T) {
+	messages := []domain.Message{
+		{ID: 1, Role: domain.MessageRoleUser},
+		{ID: 2, Role: domain.MessageRoleAssistant},
+		{ID: 3, Role: domain.MessageRoleAssistant},
+		{ID: 4, Role: domain.MessageRoleUser},
+	}
+	parts := map[int64][]domain.Part{
+		1: {{Kind: domain.PartKindText, Payload: domain.TextPayload{Text: "large pre-compaction transcript should be ignored"}}},
+		2: {{Kind: domain.PartKindUsage, Payload: domain.UsagePayload{Usage: domain.Usage{PromptTokens: 36000, CompletionTokens: 40, TotalTokens: 36040}}}},
+		3: {{Kind: domain.PartKindCompaction, Payload: domain.CompactionPayload{Summary: "short compacted summary", Status: "completed", AfterContextTokens: 6564}}},
+		4: {{Kind: domain.PartKindText, Payload: domain.TextPayload{Text: "followup after compaction"}}},
+	}
+
+	got, ok := EstimateTailTokens(messages, parts)
+	if !ok {
+		t.Fatal("expected compaction context anchor")
+	}
+	want := estimateMessageTokens(messages[3], parts[4])
+	if got != want {
+		t.Fatalf("expected post-compaction tail only, got %d want %d", got, want)
+	}
+}
+
+func TestEstimateTailTokensCountsPartsAfterAnchorInSameMessage(t *testing.T) {
+	messages := []domain.Message{
+		{ID: 1, Role: domain.MessageRoleAssistant},
+	}
+	parts := map[int64][]domain.Part{
+		1: {
+			{Kind: domain.PartKindUsage, Payload: domain.UsagePayload{Usage: domain.Usage{PromptTokens: 1200, CompletionTokens: 40, TotalTokens: 1240}}},
+			{Kind: domain.PartKindText, Payload: domain.TextPayload{Text: "persisted after usage"}},
+		},
+	}
+
+	got, ok := EstimateTailTokens(messages, parts)
+	if !ok {
+		t.Fatal("expected context anchor")
+	}
+	want := estimateMessageTokens(messages[0], parts[1][1:])
+	if got != want {
+		t.Fatalf("expected same-message tail, got %d want %d", got, want)
 	}
 }
