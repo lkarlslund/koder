@@ -5363,7 +5363,7 @@ func TestRenderSidebarShowsStatusAndSessionInfo(t *testing.T) {
 	m.syncUsageFromHistory()
 	m.busy.setTranscriptPhase(transcriptBusyPhaseWaiting)
 
-	got := m.renderSidebar()
+	got := m.sidebarContent().String()
 	if !strings.Contains(got, "Session #2") || !strings.Contains(got, "Testing Session") || !strings.Contains(got, "Model  test / model") {
 		t.Fatalf("expected sidebar to include session details, got %q", got)
 	}
@@ -5439,7 +5439,7 @@ func TestSidebarUsageUpdatesFromLiveUsageEvent(t *testing.T) {
 	m.syncUsageFromHistory()
 	m.syncContextFromChat()
 
-	before := m.renderSidebar()
+	before := m.sidebarContent().String()
 	if !strings.Contains(before, "Context ~1.5k / 32.8k (4%)") {
 		t.Fatalf("expected hydrated context usage before live event, got %q", before)
 	}
@@ -5454,7 +5454,7 @@ func TestSidebarUsageUpdatesFromLiveUsageEvent(t *testing.T) {
 		TotalTokens:      250,
 	}})
 
-	after := m.renderSidebar()
+	after := m.sidebarContent().String()
 	if !strings.Contains(after, "Context 200 / 32.8k (0%)") {
 		t.Fatalf("expected precise context after live usage event, got %q", after)
 	}
@@ -5489,7 +5489,7 @@ func TestSidebarUsageWithoutPromptTokensPreservesEstimate(t *testing.T) {
 		CachedTokens:     100,
 	}})
 
-	got := m.renderSidebar()
+	got := m.sidebarContent().String()
 	if !strings.Contains(got, "Context ~1.5k / 32.8k (4%)") {
 		t.Fatalf("expected missing prompt tokens to preserve estimate, got %q", got)
 	}
@@ -5506,7 +5506,7 @@ func TestSidebarAlwaysShowsContextLineWithoutProvider(t *testing.T) {
 		showSidebar: true,
 	}
 
-	got := m.renderSidebar()
+	got := m.sidebarContent().String()
 	if !strings.Contains(got, "Context - / -") {
 		t.Fatalf("expected placeholder context line, got %q", got)
 	}
@@ -5548,7 +5548,7 @@ func TestUpdateLoadEstimatesContextForNewChat(t *testing.T) {
 	if !m.contextTokensEstimated {
 		t.Fatal("expected loaded context estimate to be marked estimated")
 	}
-	got := m.renderSidebar()
+	got := m.sidebarContent().String()
 	if !strings.Contains(got, "Context ~") || !strings.Contains(got, "/ 32.8k (") {
 		t.Fatalf("expected estimated context line after load, got %q", got)
 	}
@@ -5573,12 +5573,12 @@ func TestSidebarContextAccumulatesStreamedTokenEstimate(t *testing.T) {
 	m.applyEvent(domain.Event{Kind: domain.EventKindMessageDelta, Text: "one two"})
 	m.applyEvent(domain.Event{Kind: domain.EventKindReasoning, Text: "thinking now"})
 
-	got := m.renderSidebar()
+	got := m.sidebarContent().String()
 	if !strings.Contains(got, "Context ~1.0k / 32.8k (3%)") {
 		t.Fatalf("expected streamed estimate to be included, got %q", got)
 	}
 	m.applyEvent(domain.Event{Kind: domain.EventKindUsage, Usage: domain.Usage{PromptTokens: 1200, CompletionTokens: 25, TotalTokens: 1225}})
-	got = m.renderSidebar()
+	got = m.sidebarContent().String()
 	if !strings.Contains(got, "Context ~1.2k / 32.8k (3%)") {
 		t.Fatalf("expected pending streamed output to keep context estimated until message persistence, got %q", got)
 	}
@@ -5605,7 +5605,7 @@ func TestSidebarUsageAccumulatesMultipleLiveUsageEvents(t *testing.T) {
 	m.applyEvent(domain.Event{Kind: domain.EventKindUsage, Usage: domain.Usage{PromptTokens: 200, CompletionTokens: 50, TotalTokens: 250}})
 	m.applyEvent(domain.Event{Kind: domain.EventKindUsage, Usage: domain.Usage{CompletionTokens: 30, TotalTokens: 30}})
 
-	got := m.renderSidebar()
+	got := m.sidebarContent().String()
 	if !strings.Contains(got, "Context 200 / 32.8k (0%)") {
 		t.Fatalf("expected latest prompt usage to anchor chat context, got %q", got)
 	}
@@ -5651,7 +5651,7 @@ func TestSidebarContextUsesCompactedChatEstimateNotCompactionRequestUsage(t *tes
 	m.syncUsageFromHistory()
 	m.syncContextFromChat()
 
-	got := m.renderSidebar()
+	got := m.sidebarContent().String()
 	if !strings.Contains(got, "Context ") {
 		t.Fatalf("expected context estimate, got %q", got)
 	}
@@ -5688,7 +5688,7 @@ func TestSidebarContextAnchorsOnLatestUsageAndEstimatesTail(t *testing.T) {
 
 	m.syncContextFromChat()
 
-	got := m.renderSidebar()
+	got := m.sidebarContent().String()
 	if !strings.Contains(got, "Context ~3.0k / 32.8k (9%)") {
 		t.Fatalf("expected anchored tail estimate in sidebar, got %q", got)
 	}
@@ -5699,7 +5699,7 @@ func TestSidebarContextAnchorsOnLatestUsageAndEstimatesTail(t *testing.T) {
 
 func TestSidebarMilestonesAndTodosRenderNoneWhenEmpty(t *testing.T) {
 	m := App{}
-	got := m.renderSidebar()
+	got := m.sidebarContent().String()
 	if !strings.Contains(got, "Milestones: None") {
 		t.Fatalf("expected empty milestones line, got %q", got)
 	}

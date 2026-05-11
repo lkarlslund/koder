@@ -53,8 +53,19 @@ func TestViewSurfaceComposesMainWindowBehindModal(t *testing.T) {
 	if !strings.Contains(frame, "Help") || !strings.Contains(frame, "Hotkeys") {
 		t.Fatalf("expected help modal content in frame, got %q", frame)
 	}
-	if !strings.Contains(frame, "Session #0") {
+	if !strings.Contains(frame, "No provider configured.") {
 		t.Fatalf("expected main window content to remain in composed frame, got %q", frame)
+	}
+}
+
+func TestSidebarBusyStatusComposesSpinner(t *testing.T) {
+	m := newRuntimeTestModel(t)
+	m.startBusy(busyScopeSidebar, "Creating session...")
+
+	main := m.ensureMainScreenView()
+	frame := strings.Join(ui.RenderSurface(&ui.Context{Palette: m.palette}, main.sidebarContent, 40, 0).Lines(), "\n")
+	if !strings.Contains(frame, "Status "+ui.SpinnerFrame(m.cfg.UI.Spinner, 0)+"  Creating session...") {
+		t.Fatalf("expected sidebar status spinner row, got %q", frame)
 	}
 }
 

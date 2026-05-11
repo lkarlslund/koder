@@ -2416,11 +2416,76 @@ func mPrompt(cfg config.Config) string {
 	return "┃ "
 }
 
-func (m *App) renderSidebar() string {
-	var lines []string
-	lines = append(lines, m.renderSidebarSessionLine())
-	lines = append(lines, m.renderSidebarChatLine())
-	lines = appendSidebarSpacer(lines)
+type sidebarRowKind int
+
+const (
+	sidebarRowText sidebarRowKind = iota
+	sidebarRowStatus
+)
+
+type sidebarRow struct {
+	Kind  sidebarRowKind
+	Label string
+	Value string
+	Busy  bool
+}
+
+func (r sidebarRow) Text() string {
+	if strings.TrimSpace(r.Label) == "" {
+		return r.Value
+	}
+	if r.Value == "" {
+		return r.Label
+	}
+	return r.Label + " " + r.Value
+}
+
+type sidebarContent struct {
+	rows []sidebarRow
+}
+
+func (c sidebarContent) String() string {
+	lines := make([]string, 0, len(c.rows))
+	for _, row := range c.rows {
+		lines = append(lines, row.Text())
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (c sidebarContent) hash() string {
+	parts := make([]string, 0, len(c.rows)*4)
+	for _, row := range c.rows {
+		parts = append(parts, strconv.Itoa(int(row.Kind)), row.Label, row.Value, strconv.FormatBool(row.Busy))
+	}
+	return strings.Join(parts, "\x00")
+}
+
+func (c sidebarContent) busy() bool {
+	for _, row := range c.rows {
+		if row.Kind == sidebarRowStatus && row.Busy {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *sidebarContent) appendText(line string) {
+	c.rows = append(c.rows, sidebarRow{Kind: sidebarRowText, Value: line})
+}
+
+func (c *sidebarContent) appendStatus(status string, busy bool) {
+	c.rows = append(c.rows, sidebarRow{Kind: sidebarRowStatus, Label: "Status", Value: status, Busy: busy})
+}
+
+func (c *sidebarContent) appendSpacer() {
+	c.appendText("")
+}
+
+func (m *App) sidebarContent() sidebarContent {
+	var content sidebarContent
+	content.appendText(m.renderSidebarSessionLine())
+	content.appendText(m.renderSidebarChatLine())
+	content.appendSpacer()
 	provider := firstNonEmptyString(strings.TrimSpace(m.currentChat.ProviderID), strings.TrimSpace(m.currentSession.ProviderID))
 	if provider == "" {
 		provider = "(unset)"
@@ -2429,35 +2494,24 @@ func (m *App) renderSidebar() string {
 	if model == "" {
 		model = "(unset)"
 	}
-	lines = append(lines, fmt.Sprintf("Model  %s / %s", provider, model))
-	status := strings.TrimSpace(m.status)
-	if status == "" {
-		status = "Idle"
-	}
-	if m.busy.sidebarActive() {
-		if m.busy.scope == busyScopeTranscript {
-			status = m.transcriptBusyStatus()
-		}
-		lines = append(lines, fmt.Sprintf("Status %s", status))
-	} else {
-		lines = append(lines, fmt.Sprintf("Status %s", status))
-	}
-	lines = append(lines, m.sidebarContextLine())
+	content.appendText(fmt.Sprintf("Model  %s / %s", provider, model))
+	content.appendStatus(m.sidebarStatusText(), m.busy.sidebarActive())
+	content.appendText(m.sidebarContextLine())
 	if usage, ok := m.currentTotalUsage(); ok {
 		tokenLine := fmt.Sprintf("Tokens in %s  out %s", formatTokens(usage.PromptTokens), formatTokens(usage.CompletionTokens))
 		if usage.CachedTokens > 0 {
 			tokenLine += "  cache " + formatTokens(usage.CachedTokens)
 		}
-		lines = append(lines, tokenLine)
+		content.appendText(tokenLine)
 	}
-	lines = appendSidebarSpacer(lines)
-	lines = append(lines, "Workspace "+blankAsDash(m.workdir))
+	content.appendSpacer()
+	content.appendText("Workspace " + blankAsDash(m.workdir))
 	if projectRoot := strings.TrimSpace(m.currentProjectRoot()); projectRoot != "" && projectRoot != strings.TrimSpace(m.workdir) {
-		lines = append(lines, "Project  "+projectRoot)
+		content.appendText("Project  " + projectRoot)
 	}
-	lines = append(lines, "AGENTS   "+m.renderAgentsSidebarStatus())
+	content.appendText("AGENTS   " + m.renderAgentsSidebarStatus())
 	if !m.workspace.Available {
-		lines = append(lines, "Git      no repository")
+		content.appendText("Git      no repository")
 	} else {
 		branch := m.workspace.Branch
 		if branch == "" {
@@ -2467,26 +2521,41 @@ func (m *App) renderSidebar() string {
 		if strings.TrimSpace(m.workspace.Summary) != "" {
 			gitLine += "  " + strings.TrimSpace(m.workspace.Summary)
 		}
-		lines = append(lines, gitLine)
+		content.appendText(gitLine)
 	}
-	lines = appendSidebarSpacer(lines)
-	lines = append(lines, m.sidebarMilestoneLines()...)
-	lines = appendSidebarSpacer(lines)
-	lines = append(lines, m.sidebarTodoLines()...)
+	content.appendSpacer()
+	for _, line := range m.sidebarMilestoneLines() {
+		content.appendText(line)
+	}
+	content.appendSpacer()
+	for _, line := range m.sidebarTodoLines() {
+		content.appendText(line)
+	}
 	if len(m.chats) > 0 {
-		lines = appendSidebarSpacer(lines)
-		lines = append(lines, "Chats")
+		content.appendSpacer()
+		content.appendText("Chats")
 		for _, item := range m.chats {
-			lines = append(lines, m.renderSidebarChatListItem(item))
+			content.appendText(m.renderSidebarChatListItem(item))
 		}
 	}
 	if debugAddr := m.debugAPIAddr(); debugAddr != "" {
-		lines = appendSidebarSpacer(lines)
-		lines = append(lines, "Debug   "+debugAddr)
+		content.appendSpacer()
+		content.appendText("Debug   " + debugAddr)
 	}
-	lines = appendSidebarSpacer(lines)
-	lines = append(lines, "Help    Alt-H help  Ctrl-S toggle  Alt+, wide  Alt+. narrow")
-	return strings.Join(lines, "\n")
+	content.appendSpacer()
+	content.appendText("Help    Alt-H help  Ctrl-S toggle  Alt+, wide  Alt+. narrow")
+	return content
+}
+
+func (m *App) sidebarStatusText() string {
+	status := strings.TrimSpace(m.status)
+	if status == "" {
+		status = "Idle"
+	}
+	if m.busy.sidebarActive() && m.busy.scope == busyScopeTranscript {
+		status = m.transcriptBusyStatus()
+	}
+	return status
 }
 
 func (m App) debugAPIAddr() string {

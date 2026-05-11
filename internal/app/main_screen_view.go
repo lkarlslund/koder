@@ -4,6 +4,7 @@ import (
 	"hash/fnv"
 	"strconv"
 
+	"github.com/lkarlslund/koder/internal/theme"
 	"github.com/lkarlslund/koder/internal/tui"
 	"github.com/lkarlslund/koder/internal/ui"
 )
@@ -14,6 +15,8 @@ type mainScreenView struct {
 	transcript       *tui.ChatTranscriptNode
 	composer         *tui.ComposerNode
 	sidebar          *ui.HashedNode
+	sidebarContent   *ui.RetainedColumn
+	sidebarSpinner   *ui.Spinner
 	statusPane       *ui.HashedNode
 	statusSpinner    *ui.Spinner
 	leftMain         *ui.FlexNode
@@ -30,11 +33,13 @@ type mainScreenView struct {
 
 func newMainScreenView() *mainScreenView {
 	view := &mainScreenView{
-		transcript:    tui.NewChatTranscriptNode(),
-		composer:      tui.NewComposerNode(),
-		sidebar:       ui.NewHashedNode(nil, 0),
-		statusPane:    ui.NewHashedNode(nil, 0),
-		statusSpinner: &ui.Spinner{},
+		transcript:     tui.NewChatTranscriptNode(),
+		composer:       tui.NewComposerNode(),
+		sidebar:        ui.NewHashedNode(nil, 0),
+		sidebarContent: ui.NewRetainedColumn(0),
+		sidebarSpinner: &ui.Spinner{},
+		statusPane:     ui.NewHashedNode(nil, 0),
+		statusSpinner:  &ui.Spinner{},
 	}
 	view.leftMain = ui.NewFlexNode(ui.DirectionVertical, []ui.FlexNodeChild{
 		{Node: view.transcript, Flex: 1},
@@ -66,7 +71,7 @@ func (m *App) syncMainScreenViewState() {
 	if m.mainScreen == nil {
 		return
 	}
-	sidebarContent := m.renderSidebar()
+	sidebarContent := m.sidebarContent()
 	statusLine := ""
 	if m.busy.transcriptActive() {
 		statusLine = m.transcriptBusyStatus()
@@ -76,7 +81,7 @@ func (m *App) syncMainScreenViewState() {
 		strconv.Itoa(sidebarWidth),
 		strconv.Itoa(m.viewport.Height),
 		strconv.FormatBool(m.showSidebar),
-		sidebarContent,
+		sidebarContent.hash(),
 	)
 	statusPaneHeight := m.statusPaneHeight()
 	statusHash := hashStrings(strconv.Itoa(m.width), strconv.Itoa(statusPaneHeight), statusLine)
@@ -98,8 +103,9 @@ func (m *App) syncMainScreenViewState() {
 	})
 	sidebarNode := ui.Node(nil)
 	if m.showSidebar {
+		m.mainScreen.SetSidebarContent(sidebarContent, m.cfg.UI.Spinner, m.palette)
 		sidebarNode = ui.AsNode(ui.Sidebar{
-			Child:  ui.AsNode(ui.TextPane{Content: sidebarContent}),
+			Child:  m.mainScreen.sidebarContent,
 			Height: m.viewport.Height,
 			Width:  sidebarWidth,
 		})
@@ -143,6 +149,27 @@ func (v *mainScreenView) SetSidebar(show bool, width int, node ui.Node, hash uin
 		return
 	}
 	v.sidebar.Set(nil, hash)
+}
+
+func (v *mainScreenView) SetSidebarContent(content sidebarContent, spinnerStyle string, palette theme.Palette) {
+	if v == nil || v.sidebarContent == nil {
+		return
+	}
+	v.sidebarContent.Clear()
+	for _, row := range content.rows {
+		if row.Kind == sidebarRowStatus && row.Busy {
+			v.sidebarSpinner.Set(spinnerStyle, row.Value, true, palette)
+			v.sidebarContent.Add(ui.AsNode(ui.NewFlexBox(ui.DirectionHorizontal, []ui.Child{
+				ui.Fixed(ui.Label{Text: row.Label}),
+				ui.Fixed(v.sidebarSpinner),
+			}, 1)))
+			continue
+		}
+		v.sidebarContent.Add(ui.AsNode(ui.Label{Text: row.Text()}))
+	}
+	if !content.busy() {
+		v.sidebarSpinner.Set(spinnerStyle, "", false, palette)
+	}
 }
 
 func (v *mainScreenView) SetStatusPane(height int, node ui.Node, hash uint64) {
