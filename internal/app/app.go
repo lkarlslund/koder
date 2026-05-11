@@ -1338,7 +1338,7 @@ func (m *App) handleKey(msg ui.KeyMsg) (ui.Model, ui.Cmd) {
 		}
 	}
 	root := m.syncUIRoot()
-	if msg.String() == "esc" && m.canInterruptActiveOperation() && root.FocusedWindow() == mainWindowID && !m.queueEditMode {
+	if msg.String() == "esc" && m.canInterruptActiveOperation() && !m.queueEditMode {
 		_, cmd := m.handleInterruptKey()
 		return m, cmd
 	}

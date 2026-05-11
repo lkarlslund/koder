@@ -23,6 +23,39 @@ type runtimeFakeRunner struct {
 	events        []<-chan domain.Event
 }
 
+type cancelAwareRunner struct {
+	ctxSeen chan context.Context
+	events  chan domain.Event
+}
+
+func (f *cancelAwareRunner) RunPromptInChat(ctx context.Context, _ domain.Session, _ domain.Chat, _ string, _ []attachment.Draft, _ []reference.Draft, _ string) (<-chan domain.Event, error) {
+	f.ctxSeen <- ctx
+	return f.events, nil
+}
+
+func (f *cancelAwareRunner) RunContinueInChat(ctx context.Context, _ domain.Session, _ domain.Chat, _ string) (<-chan domain.Event, error) {
+	f.ctxSeen <- ctx
+	return f.events, nil
+}
+
+func (f *cancelAwareRunner) ApproveInChat(context.Context, int64, int64, int64) (<-chan domain.Event, error) {
+	ch := make(chan domain.Event)
+	close(ch)
+	return ch, nil
+}
+
+func (f *cancelAwareRunner) ApproveInChatWithRule(context.Context, int64, int64, int64, domain.PermissionOverride) (<-chan domain.Event, error) {
+	ch := make(chan domain.Event)
+	close(ch)
+	return ch, nil
+}
+
+func (f *cancelAwareRunner) DenyInChat(context.Context, int64, int64, int64) (<-chan domain.Event, error) {
+	ch := make(chan domain.Event)
+	close(ch)
+	return ch, nil
+}
+
 func (f *runtimeFakeRunner) RunPromptInChat(_ context.Context, _ domain.Session, _ domain.Chat, prompt string, _ []attachment.Draft, _ []reference.Draft, note string) (<-chan domain.Event, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -390,6 +423,34 @@ func TestRuntimeCancelWhileToolsRunningStagesThenForcesCancel(t *testing.T) {
 	if !cancelled {
 		t.Fatal("expected second cancel to force tool cancellation")
 	}
+}
+
+func TestRuntimeCancelCancelsStreamingContextImmediately(t *testing.T) {
+	st := openTestStore(t)
+	session, chat, _ := createSessionWithPlan(t, st)
+	runner := &cancelAwareRunner{
+		ctxSeen: make(chan context.Context, 1),
+		events:  make(chan domain.Event),
+	}
+	rt := newTestChat(t, st, session, chat, runner)
+
+	rt.Enqueue(QueueItem{Kind: QueueKindSteer, Text: "stream"})
+
+	var runCtx context.Context
+	select {
+	case runCtx = <-runner.ctxSeen:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for prompt context")
+	}
+
+	rt.Cancel()
+
+	select {
+	case <-runCtx.Done():
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("expected cancel to cancel streaming context immediately")
+	}
+	close(runner.events)
 }
 
 func TestRuntimeCompactionCompletionUpdatesContextImmediately(t *testing.T) {

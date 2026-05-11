@@ -304,7 +304,17 @@ func (r *Chat) DispatchQueued(item domain.QueuedInput, remaining []domain.Queued
 }
 
 func (r *Chat) Cancel() {
-	r.inbox <- interruptCmd{}
+	r.mu.RLock()
+	cancel := r.cancel
+	stagedToolCancel := r.status == StatusRunningTools && len(r.running) > 0 && r.cancelState != CancelStateCancelling
+	r.mu.RUnlock()
+	if cancel != nil && !stagedToolCancel {
+		cancel()
+	}
+	select {
+	case r.inbox <- interruptCmd{}:
+	default:
+	}
 }
 
 func (r *Chat) Interrupt() {
