@@ -6353,6 +6353,13 @@ func (m *App) syncBusyState() {
 }
 
 func (m *App) startBusy(scope busyScope, status string) {
+	if m.loading && m.busy.active && m.busy.scope == scope {
+		m.status = status
+		m.busy.updateStatus(status)
+		m.syncBusyState()
+		m.invalidateMainSurface()
+		return
+	}
 	wasAtBottom := m.viewport.AtBottom()
 	m.loading = true
 	m.status = status

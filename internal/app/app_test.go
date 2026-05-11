@@ -2902,6 +2902,41 @@ func TestRuntimeUpdateMsgAppliesRuntimeSnapshot(t *testing.T) {
 	}
 }
 
+func TestRepeatedStreamingRuntimeUpdateDoesNotInvalidateTranscript(t *testing.T) {
+	m := App{
+		cfg:             config.Default().WithStateDir(t.TempDir()),
+		composer:        textarea.New(),
+		currentRuntime:  &chatpkg.Chat{},
+		currentSnapshot: chatpkg.Snapshot{Parts: map[int64][]domain.Part{}},
+		viewport:        newTranscriptViewport(80, 20),
+		currentSession:  domain.Session{ID: 1, Title: "Session"},
+		currentChat:     domain.Chat{ID: 2, SessionID: 1},
+		width:           80,
+		height:          24,
+		loading:         true,
+		status:          "Streaming LLM response ...",
+	}
+	m.busy.start(busyScopeTranscript, "Streaming LLM response ...")
+	m.busy.setTranscriptPhase(transcriptBusyPhaseResponse)
+	m.transcriptDirty = false
+
+	m.syncBusyFromRuntimeUpdate(chatpkg.Update{
+		Active:     true,
+		Status:     chatpkg.StatusStreamingResponse,
+		StatusText: "Streaming LLM response ...",
+	})
+
+	if m.transcriptDirty {
+		t.Fatal("expected repeated streaming busy update to avoid transcript invalidation")
+	}
+	if m.busy.transcriptPhase != transcriptBusyPhaseResponse {
+		t.Fatalf("expected response phase to remain active, got %#v", m.busy.transcriptPhase)
+	}
+	if m.status != "Streaming LLM response ..." {
+		t.Fatalf("unexpected status %q", m.status)
+	}
+}
+
 func TestSetQueuedInputsUpdatesRuntimeSnapshotQueue(t *testing.T) {
 	m := App{
 		currentRuntime:  &chatpkg.Chat{},
