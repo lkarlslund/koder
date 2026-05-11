@@ -24,11 +24,12 @@ const (
 )
 
 type transcriptBlock struct {
-	Kind    transcriptBlockKind
-	Message domain.Message
-	Parts   []domain.Part
-	ToolRun ui.ToolRun
-	Pending bool
+	Kind     transcriptBlockKind
+	Message  domain.Message
+	Parts    []domain.Part
+	ToolRuns []ui.ToolRun
+	ToolRun  ui.ToolRun
+	Pending  bool
 }
 
 func (m *App) transcriptBlocks() []transcriptBlock {
@@ -45,13 +46,24 @@ func (m *App) transcriptBlocks() []transcriptBlock {
 		blocks = append(blocks, transcriptBlock{Kind: transcriptBlockToolRun, ToolRun: run})
 		return &blocks[len(blocks)-1].ToolRun
 	}
-	tracker := newToolRunTracker(appendRun)
+	appendChildRun := func(messageID int64, run ui.ToolRun) *ui.ToolRun {
+		for idx := range blocks {
+			if blocks[idx].Kind != transcriptBlockMessage || blocks[idx].Message.ID != messageID {
+				continue
+			}
+			blocks[idx].ToolRuns = append(blocks[idx].ToolRuns, run)
+			return &blocks[idx].ToolRuns[len(blocks[idx].ToolRuns)-1]
+		}
+		return appendRun(run)
+	}
+	tracker := newToolRunTracker(appendRun, appendChildRun)
 
 	for _, msg := range messages {
 		msgParts := parts[msg.ID]
 		switch msg.Role {
 		case domain.MessageRoleAssistant:
-			if m.assistantMessageShouldExist(msg, msgParts) {
+			assistantExists := m.assistantMessageShouldExist(msg, msgParts)
+			if assistantExists || messageHasToolCall(msgParts) {
 				appendMessage(msg)
 			}
 			if run, ok := compactionToolRun(msgParts, msg); ok {
@@ -62,7 +74,7 @@ func (m *App) transcriptBlocks() []transcriptBlock {
 					appendRun(run)
 				}
 			}
-			for _, run := range toolRunsFromAssistantMessage(msgParts) {
+			for _, run := range toolRunsFromAssistantMessage(msgParts, msg) {
 				tracker.Upsert(run)
 			}
 		case domain.MessageRoleTool:
@@ -163,6 +175,9 @@ func (m *App) applyCurrentChatPartMutation(msg domain.Message, part domain.Part)
 	if strings.TrimSpace(run.ID) == "" {
 		return false
 	}
+	if run.ParentMessageID > 0 && m.upsertOwnedToolRunTranscriptItem(run) {
+		return true
+	}
 	if !m.upsertToolRunTranscriptItem(run) {
 		m.transcriptDirty = true
 		return false
@@ -233,6 +248,14 @@ func (m *App) appendEventMessageToTranscript(msg domain.Message, parts []domain.
 	if msg.ID == 0 {
 		return false
 	}
+	if msg.Role == domain.MessageRoleAssistant && messageHasToolCall(parts) {
+		return m.appendTranscriptBlock(transcriptBlock{
+			Kind:     transcriptBlockMessage,
+			Message:  msg,
+			Parts:    parts,
+			ToolRuns: toolRunsFromAssistantMessage(parts, msg),
+		})
+	}
 	if !m.messageShouldRender(msg, parts) {
 		return true
 	}
@@ -255,7 +278,7 @@ func (m *App) messageShouldRender(msg domain.Message, parts []domain.Part) bool 
 func messageToolRunForPart(msg domain.Message, part domain.Part) (ui.ToolRun, bool) {
 	switch part.Kind {
 	case domain.PartKindToolCall:
-		runs := toolRunsFromAssistantMessage([]domain.Part{part})
+		runs := toolRunsFromAssistantMessage([]domain.Part{part}, msg)
 		if len(runs) == 0 {
 			return ui.ToolRun{}, false
 		}
@@ -274,6 +297,15 @@ func messageToolRunForPart(msg domain.Message, part domain.Part) (ui.ToolRun, bo
 	default:
 		return ui.ToolRun{}, false
 	}
+}
+
+func messageHasToolCall(parts []domain.Part) bool {
+	for _, part := range parts {
+		if part.Kind == domain.PartKindToolCall {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *App) currentLiveExecRuns() []ui.ToolRun {
@@ -362,14 +394,16 @@ func isCompactionOnlyAssistantMessage(parts []domain.Part) bool {
 
 type toolRunTracker struct {
 	append       func(ui.ToolRun) *ui.ToolRun
+	appendChild  func(int64, ui.ToolRun) *ui.ToolRun
 	byID         map[string]*ui.ToolRun
 	byToolCallID map[string]*ui.ToolRun
 	byApprovalID map[int64]*ui.ToolRun
 }
 
-func newToolRunTracker(append func(ui.ToolRun) *ui.ToolRun) *toolRunTracker {
+func newToolRunTracker(append func(ui.ToolRun) *ui.ToolRun, appendChild func(int64, ui.ToolRun) *ui.ToolRun) *toolRunTracker {
 	return &toolRunTracker{
 		append:       append,
+		appendChild:  appendChild,
 		byID:         map[string]*ui.ToolRun{},
 		byToolCallID: map[string]*ui.ToolRun{},
 		byApprovalID: map[int64]*ui.ToolRun{},
@@ -385,6 +419,10 @@ func (t *toolRunTracker) Upsert(run ui.ToolRun) {
 		t.index(existing)
 		return
 	}
+	if run.ParentMessageID > 0 && t.appendChild != nil {
+		t.index(t.appendChild(run.ParentMessageID, run))
+		return
+	}
 	t.index(t.append(run))
 }
 
@@ -393,19 +431,29 @@ func (t *toolRunTracker) lookup(run ui.ToolRun) *ui.ToolRun {
 		return nil
 	}
 	if run.ToolCallID != "" {
-		if existing := t.byToolCallID[run.ToolCallID]; existing != nil {
+		if existing := t.byToolCallID[run.ToolCallID]; ownerCompatible(existing, run) {
 			return existing
 		}
 	}
 	if run.ApprovalID > 0 {
-		if existing := t.byApprovalID[run.ApprovalID]; existing != nil {
+		if existing := t.byApprovalID[run.ApprovalID]; ownerCompatible(existing, run) {
 			return existing
 		}
 	}
-	if existing := t.byID[run.ID]; existing != nil {
+	if existing := t.byID[run.ID]; ownerCompatible(existing, run) {
 		return existing
 	}
 	return nil
+}
+
+func ownerCompatible(existing *ui.ToolRun, next ui.ToolRun) bool {
+	if existing == nil {
+		return false
+	}
+	if existing.ParentMessageID == 0 || next.ParentMessageID == 0 {
+		return true
+	}
+	return existing.ParentMessageID == next.ParentMessageID
 }
 
 func (t *toolRunTracker) index(run *ui.ToolRun) {
@@ -513,7 +561,7 @@ func eventNoticePauseSubtitle(meta eventNoticeMeta) string {
 	}
 }
 
-func toolRunsFromAssistantMessage(parts []domain.Part) []ui.ToolRun {
+func toolRunsFromAssistantMessage(parts []domain.Part, msg domain.Message) []ui.ToolRun {
 	var runs []ui.ToolRun
 	for _, part := range parts {
 		if part.Kind != domain.PartKindToolCall {
@@ -544,14 +592,15 @@ func toolRunsFromAssistantMessage(parts []domain.Part) []ui.ToolRun {
 			}
 		}
 		runs = append(runs, ui.ToolRun{
-			ID:         firstNonEmptyString(strings.TrimSpace(req.ToolCallID), toolRunFallbackID(req.Tool, presentation.Preview)),
-			Tool:       req.Tool,
-			ToolCallID: strings.TrimSpace(req.ToolCallID),
-			Title:      presentation.Title,
-			Command:    command,
-			Subtitle:   presentation.Subtitle,
-			Preview:    presentation.Preview,
-			Status:     ui.ToolRunStatusRequested,
+			ID:              firstNonEmptyString(strings.TrimSpace(req.ToolCallID), toolRunFallbackID(req.Tool, presentation.Preview)),
+			Tool:            req.Tool,
+			ToolCallID:      strings.TrimSpace(req.ToolCallID),
+			ParentMessageID: msg.ID,
+			Title:           presentation.Title,
+			Command:         command,
+			Subtitle:        presentation.Subtitle,
+			Preview:         presentation.Preview,
+			Status:          ui.ToolRunStatusRequested,
 		})
 	}
 	return runs
@@ -866,6 +915,9 @@ func mergeToolRun(dst *ui.ToolRun, src ui.ToolRun) {
 	if strings.TrimSpace(src.ToolCallID) != "" {
 		dst.ToolCallID = src.ToolCallID
 	}
+	if src.ParentMessageID > 0 {
+		dst.ParentMessageID = src.ParentMessageID
+	}
 	if src.ApprovalID > 0 {
 		dst.ApprovalID = src.ApprovalID
 	}
@@ -904,8 +956,9 @@ func toolRunHasTerminalStatus(status ui.ToolRunStatus) bool {
 func (m *App) transcriptBlockIdentityKey(block transcriptBlock) string {
 	switch block.Kind {
 	case transcriptBlockToolRun:
-		if strings.TrimSpace(block.ToolRun.ID) != "" {
-			return "toolrun:" + block.ToolRun.ID
+		key := firstNonEmptyToolRunKey(block.ToolRun)
+		if strings.TrimSpace(key) != "" {
+			return "toolrun:" + key
 		}
 		if block.ToolRun.ApprovalID > 0 {
 			return fmt.Sprintf("toolrun-approval:%d", block.ToolRun.ApprovalID)

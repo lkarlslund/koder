@@ -25,21 +25,22 @@ const (
 )
 
 type ToolRun struct {
-	ID         string
-	Tool       domain.ToolKind
-	ToolCallID string
-	ApprovalID int64
-	Title      string
-	Command    string
-	Subtitle   string
-	ProcessID  string
-	TTY        bool
-	ExitCode   *int
-	Preview    string
-	Status     ToolRunStatus
-	Output     string
-	Diff       string
-	ErrorText  string
+	ID              string
+	Tool            domain.ToolKind
+	ToolCallID      string
+	ParentMessageID int64
+	ApprovalID      int64
+	Title           string
+	Command         string
+	Subtitle        string
+	ProcessID       string
+	TTY             bool
+	ExitCode        *int
+	Preview         string
+	Status          ToolRunStatus
+	Output          string
+	Diff            string
+	ErrorText       string
 }
 
 const editInlineDiffLineLimit = 20

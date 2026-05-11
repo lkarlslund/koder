@@ -94,23 +94,26 @@ type assistantMessageTranscriptItem struct {
 	transcriptItemBase
 	msg           domain.Message
 	parts         []domain.Part
+	toolRuns      []ui.ToolRun
 	showReasoning bool
 	showSystem    bool
 }
 
-func newAssistantMessageTranscriptItemValue(key string, gap int, msg domain.Message, parts []domain.Part, showReasoning, showSystem bool) *assistantMessageTranscriptItem {
+func newAssistantMessageTranscriptItemValue(key string, gap int, msg domain.Message, parts []domain.Part, toolRuns []ui.ToolRun, showReasoning, showSystem bool) *assistantMessageTranscriptItem {
 	return &assistantMessageTranscriptItem{
 		transcriptItemBase: newTranscriptItemBase(key, gap),
 		msg:                msg,
 		parts:              slicesCloneParts(parts),
+		toolRuns:           slicesCloneToolRuns(toolRuns),
 		showReasoning:      showReasoning,
 		showSystem:         showSystem,
 	}
 }
 
-func (i *assistantMessageTranscriptItem) BindValue(msg domain.Message, parts []domain.Part) {
+func (i *assistantMessageTranscriptItem) BindValue(msg domain.Message, parts []domain.Part, toolRuns []ui.ToolRun) {
 	i.msg = msg
 	i.parts = slicesCloneParts(parts)
+	i.toolRuns = slicesCloneToolRuns(toolRuns)
 }
 
 func (i *assistantMessageTranscriptItem) SetReasoningVisible(v bool) { i.showReasoning = v }
@@ -124,7 +127,21 @@ func (i *assistantMessageTranscriptItem) Refresh(m *App) {
 	renderer := newTranscriptRenderer(m)
 	renderer.showReasoning = i.showReasoning
 	renderer.showSystem = i.showSystem
-	i.setElement(renderer.renderTranscriptMessageElement(i.msg, i.parts))
+	var children []ui.Child
+	if message := renderer.renderTranscriptMessageElement(i.msg, i.parts); message != nil {
+		children = append(children, ui.Fixed(message))
+	}
+	for _, run := range i.toolRuns {
+		if strings.TrimSpace(run.ID) == "" {
+			continue
+		}
+		children = append(children, ui.Fixed(toolRunCardNode(run, m.palette, m.viewport.Width, m.expandedToolRuns[run.ID], m.expandedToolRunCommands[run.ID])))
+	}
+	if len(children) == 0 {
+		i.setElement(ui.AsNode(ui.Paragraph{Text: ""}))
+		return
+	}
+	i.setElement(ui.AsNode(ui.NewFlexBox(ui.DirectionVertical, children, 1)))
 }
 
 type pendingAssistantTranscriptItem struct {
@@ -233,16 +250,35 @@ func newToolRunTranscriptItem(gap int, run ui.ToolRun, expandedOutput, expandedC
 	}
 }
 
+func toolRunCardNode(run ui.ToolRun, palette theme.Palette, width int, expandedOutput, expandedCommand bool) ui.Node {
+	switch run.Tool {
+	case domain.ToolKindBash, domain.ToolKindExecCommand:
+		return bashToolRunCardElement{Run: run, Palette: palette, Width: width, ExpandedOutput: expandedOutput, ExpandedCommand: expandedCommand}
+	case domain.ToolKindRead:
+		return readToolRunCardElement{Run: run, Palette: palette, Width: width, ExpandedOutput: expandedOutput}
+	case domain.ToolKindWrite:
+		return writeToolRunCardElement{Run: run, Palette: palette, Width: width, ExpandedOutput: expandedOutput}
+	case domain.ToolKindEdit:
+		return editToolRunCardElement{Run: run, Palette: palette, Width: width, ExpandedOutput: expandedOutput}
+	default:
+		return genericToolRunCardElement{Run: run, Palette: palette, Width: width, ExpandedOutput: expandedOutput, ExpandedCommand: expandedCommand}
+	}
+}
+
 func firstNonEmptyToolRunKey(run ui.ToolRun) string {
+	prefix := ""
+	if run.ParentMessageID > 0 {
+		prefix = fmt.Sprintf("parent:%d:", run.ParentMessageID)
+	}
 	switch {
 	case strings.TrimSpace(run.ID) != "":
-		return run.ID
+		return prefix + run.ID
 	case run.ApprovalID > 0:
-		return fmt.Sprintf("approval:%d", run.ApprovalID)
+		return prefix + fmt.Sprintf("approval:%d", run.ApprovalID)
 	case strings.TrimSpace(run.ToolCallID) != "":
-		return "call:" + run.ToolCallID
+		return prefix + "call:" + run.ToolCallID
 	default:
-		return toolRunFallbackID(run.Tool, run.Preview)
+		return prefix + toolRunFallbackID(run.Tool, run.Preview)
 	}
 }
 
@@ -252,6 +288,15 @@ func slicesCloneParts(parts []domain.Part) []domain.Part {
 	}
 	out := make([]domain.Part, len(parts))
 	copy(out, parts)
+	return out
+}
+
+func slicesCloneToolRuns(runs []ui.ToolRun) []ui.ToolRun {
+	if len(runs) == 0 {
+		return nil
+	}
+	out := make([]ui.ToolRun, len(runs))
+	copy(out, runs)
 	return out
 }
 

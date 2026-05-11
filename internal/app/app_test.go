@@ -427,14 +427,14 @@ func TestToolCallDeltaAppendsCurrentChatImmediately(t *testing.T) {
 		t.Fatalf("expected current chat to append immediately, got %d messages", len(next.currentSnapshot.Messages))
 	}
 	blocks := next.transcriptBlocks()
-	if len(blocks) != 1 || blocks[0].Kind != transcriptBlockToolRun {
-		t.Fatalf("expected requested tool run block, got %#v", blocks)
+	if len(blocks) != 1 || blocks[0].Kind != transcriptBlockMessage || len(blocks[0].ToolRuns) != 1 {
+		t.Fatalf("expected requested tool run child, got %#v", blocks)
 	}
-	if blocks[0].ToolRun.Status != ui.ToolRunStatusRequested {
-		t.Fatalf("expected requested status, got %#v", blocks[0].ToolRun)
+	if blocks[0].ToolRuns[0].Status != ui.ToolRunStatusRequested {
+		t.Fatalf("expected requested status, got %#v", blocks[0].ToolRuns[0])
 	}
-	if blocks[0].ToolRun.ToolCallID != "call_1" {
-		t.Fatalf("unexpected tool call id: %#v", blocks[0].ToolRun)
+	if blocks[0].ToolRuns[0].ToolCallID != "call_1" {
+		t.Fatalf("unexpected tool call id: %#v", blocks[0].ToolRuns[0])
 	}
 }
 
@@ -528,10 +528,10 @@ func TestToolResultEventUpdatesRequestedRunInMemory(t *testing.T) {
 	m = updated.(App)
 
 	blocks := m.transcriptBlocks()
-	if len(blocks) != 1 || blocks[0].Kind != transcriptBlockToolRun {
-		t.Fatalf("expected one merged tool run block, got %#v", blocks)
+	if len(blocks) != 1 || blocks[0].Kind != transcriptBlockMessage || len(blocks[0].ToolRuns) != 1 {
+		t.Fatalf("expected one merged tool run child, got %#v", blocks)
 	}
-	run := blocks[0].ToolRun
+	run := blocks[0].ToolRuns[0]
 	if run.Status != ui.ToolRunStatusCompleted {
 		t.Fatalf("expected completed status, got %#v", run)
 	}
@@ -8816,13 +8816,87 @@ func TestTranscriptBlocksKeepsRepeatedFailedToolRunsSeparate(t *testing.T) {
 		if block.Kind == transcriptBlockToolRun {
 			runCount++
 		}
+		runCount += len(block.ToolRuns)
 		lastKind = block.Kind
 	}
 	if runCount != 2 {
 		t.Fatalf("expected two separate tool runs, got %d from %#v", runCount, blocks)
 	}
-	if lastKind != transcriptBlockToolRun {
-		t.Fatalf("expected tail block to remain the second tool run, got %#v", blocks[len(blocks)-1])
+	if lastKind != transcriptBlockMessage || len(blocks[len(blocks)-1].ToolRuns) != 1 {
+		t.Fatalf("expected tail block to be the second assistant turn with a child tool run, got %#v", blocks[len(blocks)-1])
+	}
+}
+
+func TestTranscriptBlocksKeepsReusedToolCallIDInRequestingTurn(t *testing.T) {
+	m := App{
+		currentSession:  domain.Session{ID: 1},
+		currentSnapshot: chatpkg.Snapshot{Parts: map[int64][]domain.Part{}},
+	}
+	m.currentSnapshot.Messages = []domain.Message{
+		{ID: 1, Role: domain.MessageRoleAssistant, Summary: "tool:bash"},
+		{ID: 2, Role: domain.MessageRoleTool, Summary: "bash"},
+		{ID: 3, Role: domain.MessageRoleUser, Summary: "continue"},
+		{ID: 4, Role: domain.MessageRoleAssistant, Summary: "tool:bash"},
+		{ID: 5, Role: domain.MessageRoleTool, Summary: "bash"},
+	}
+	m.currentSnapshot.Parts[1] = []domain.Part{{
+		MessageID: 1,
+		Kind:      domain.PartKindToolCall,
+		Payload: domain.ToolCallPayload{
+			Tool:       domain.ToolKindBash,
+			ToolCallID: "reused_call",
+			Args:       map[string]string{"command": "pwd"},
+		},
+	}}
+	m.currentSnapshot.Parts[2] = []domain.Part{{
+		MessageID: 2,
+		Kind:      domain.PartKindToolOutput,
+		Payload: domain.ToolOutputPayload{
+			Tool:       domain.ToolKindBash,
+			ToolCallID: "reused_call",
+			Status:     domain.ToolResultStatusOK,
+			Text:       "/first",
+			Result:     tools.BashStoredResult{Command: "pwd", Output: "/first"},
+		},
+	}}
+	m.currentSnapshot.Parts[3] = []domain.Part{{MessageID: 3, Kind: domain.PartKindText, Payload: domain.TextPayload{Text: "continue"}}}
+	m.currentSnapshot.Parts[4] = []domain.Part{{
+		MessageID: 4,
+		Kind:      domain.PartKindToolCall,
+		Payload: domain.ToolCallPayload{
+			Tool:       domain.ToolKindBash,
+			ToolCallID: "reused_call",
+			Args:       map[string]string{"command": "pwd"},
+		},
+	}}
+	m.currentSnapshot.Parts[5] = []domain.Part{{
+		MessageID: 5,
+		Kind:      domain.PartKindToolOutput,
+		Payload: domain.ToolOutputPayload{
+			Tool:       domain.ToolKindBash,
+			ToolCallID: "reused_call",
+			Status:     domain.ToolResultStatusOK,
+			Text:       "/second",
+			Result:     tools.BashStoredResult{Command: "pwd", Output: "/second"},
+		},
+	}}
+
+	blocks := m.transcriptBlocks()
+	var runs []ui.ToolRun
+	for _, block := range blocks {
+		if block.Kind == transcriptBlockToolRun {
+			runs = append(runs, block.ToolRun)
+		}
+		runs = append(runs, block.ToolRuns...)
+	}
+	if len(runs) != 2 {
+		t.Fatalf("expected two turn-owned tool runs, got %#v from %#v", runs, blocks)
+	}
+	if runs[0].ParentMessageID != 1 || runs[0].Output != "/first" {
+		t.Fatalf("expected first result to stay under first assistant turn, got %#v", runs[0])
+	}
+	if runs[1].ParentMessageID != 4 || runs[1].Output != "/second" {
+		t.Fatalf("expected second result to stay under second assistant turn, got %#v", runs[1])
 	}
 }
 

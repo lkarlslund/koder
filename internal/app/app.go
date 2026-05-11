@@ -3091,7 +3091,7 @@ func (m *App) transcriptControllerFromBlock(prevByKey map[string]transcriptItemC
 			}
 		case *assistantMessageTranscriptItem:
 			if block.Kind == transcriptBlockMessage && !block.Pending && block.Message.Role != domain.MessageRoleUser {
-				typed.BindValue(block.Message, block.Parts)
+				typed.BindValue(block.Message, block.Parts, block.ToolRuns)
 				typed.SetReasoningVisible(m.showReasoning)
 				typed.SetSystemVisible(m.showSystem)
 				return typed
@@ -3121,7 +3121,7 @@ func (m *App) transcriptControllerFromBlock(prevByKey map[string]transcriptItemC
 	case block.Message.Role == domain.MessageRoleUser:
 		return newUserMessageTranscriptItemValue(key, gap, block.Message, block.Parts)
 	default:
-		return newAssistantMessageTranscriptItemValue(key, gap, block.Message, block.Parts, m.showReasoning, m.showSystem)
+		return newAssistantMessageTranscriptItemValue(key, gap, block.Message, block.Parts, block.ToolRuns, m.showReasoning, m.showSystem)
 	}
 }
 
@@ -3180,6 +3180,9 @@ func (m *App) replaceToolRunInTranscript(run ui.ToolRun) bool {
 	if strings.TrimSpace(run.ID) == "" {
 		return false
 	}
+	if m.replaceOwnedToolRunInTranscript(run) {
+		return true
+	}
 	if idx, ok := m.toolRunItemIndexByID[strings.TrimSpace(run.ID)]; ok {
 		if idx >= 0 && idx < len(m.transcriptItems) {
 			if item, ok := m.transcriptItems[idx].(toolRunTranscriptItem); ok {
@@ -3209,10 +3212,43 @@ func (m *App) replaceToolRunInTranscript(run ui.ToolRun) bool {
 	return false
 }
 
+func (m *App) replaceOwnedToolRunInTranscript(run ui.ToolRun) bool {
+	if m.transcriptDirty {
+		return false
+	}
+	for idx, item := range m.transcriptItems {
+		assistant, ok := item.(*assistantMessageTranscriptItem)
+		if !ok {
+			continue
+		}
+		for runIdx := range assistant.toolRuns {
+			if !toolRunMatches(assistant.toolRuns[runIdx], run) {
+				continue
+			}
+			mergeToolRun(&assistant.toolRuns[runIdx], run)
+			return m.replaceTranscriptItemAt(idx)
+		}
+	}
+	return false
+}
+
 func (m *App) updateToolRunInTranscriptByCallID(toolCallID string, update func(*ui.ToolRun)) bool {
 	toolCallID = strings.TrimSpace(toolCallID)
 	if toolCallID == "" || update == nil {
 		return false
+	}
+	for idx, item := range m.transcriptItems {
+		assistant, ok := item.(*assistantMessageTranscriptItem)
+		if !ok {
+			continue
+		}
+		for runIdx := range assistant.toolRuns {
+			if assistant.toolRuns[runIdx].ToolCallID != toolCallID {
+				continue
+			}
+			update(&assistant.toolRuns[runIdx])
+			return m.replaceTranscriptItemAt(idx)
+		}
 	}
 	idx, ok := m.toolRunItemIndexByCall[toolCallID]
 	if !ok || idx < 0 || idx >= len(m.transcriptItems) {
@@ -3338,7 +3374,7 @@ func (m *App) transcriptBlockForController(item transcriptItemController) transc
 	case *userMessageTranscriptItem:
 		return transcriptBlock{Kind: transcriptBlockMessage, Message: typed.msg, Parts: typed.parts}
 	case *assistantMessageTranscriptItem:
-		return transcriptBlock{Kind: transcriptBlockMessage, Message: typed.msg, Parts: typed.parts}
+		return transcriptBlock{Kind: transcriptBlockMessage, Message: typed.msg, Parts: typed.parts, ToolRuns: slicesCloneToolRuns(typed.toolRuns)}
 	case *pendingAssistantTranscriptItem:
 		return transcriptBlock{
 			Kind:    transcriptBlockMessage,
@@ -3410,7 +3446,7 @@ func (m *App) upsertMessageTranscriptItem(msg domain.Message, parts []domain.Par
 			case *userMessageTranscriptItem:
 				item.BindValue(msg, parts)
 			case *assistantMessageTranscriptItem:
-				item.BindValue(msg, parts)
+				item.BindValue(msg, parts, nil)
 				item.SetReasoningVisible(m.showReasoning)
 				item.SetSystemVisible(m.showSystem)
 			default:
@@ -3427,6 +3463,39 @@ func (m *App) upsertToolRunTranscriptItem(run ui.ToolRun) bool {
 		return true
 	}
 	return m.appendToolRunTranscriptItem(run)
+}
+
+func (m *App) upsertOwnedToolRunTranscriptItem(run ui.ToolRun) bool {
+	if run.ParentMessageID <= 0 || m.transcriptDirty {
+		return false
+	}
+	idx, ok := m.messageItemIndexByID[run.ParentMessageID]
+	if !ok || idx < 0 || idx >= len(m.transcriptItems) {
+		return false
+	}
+	item, ok := m.transcriptItems[idx].(*assistantMessageTranscriptItem)
+	if !ok {
+		return false
+	}
+	for runIdx := range item.toolRuns {
+		existing := &item.toolRuns[runIdx]
+		if toolRunMatches(*existing, run) {
+			mergeToolRun(existing, run)
+			return m.replaceTranscriptItemAt(idx)
+		}
+	}
+	item.toolRuns = append(item.toolRuns, run)
+	return m.replaceTranscriptItemAt(idx)
+}
+
+func toolRunMatches(existing, next ui.ToolRun) bool {
+	if strings.TrimSpace(next.ToolCallID) != "" && existing.ToolCallID == next.ToolCallID {
+		return true
+	}
+	if next.ApprovalID > 0 && existing.ApprovalID == next.ApprovalID {
+		return true
+	}
+	return strings.TrimSpace(next.ID) != "" && existing.ID == next.ID
 }
 
 func (m *App) appendToolRunTranscriptItem(run ui.ToolRun) bool {
