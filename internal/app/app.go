@@ -680,12 +680,6 @@ type App struct {
 	providerInventory           map[string]providerInventoryItem
 }
 
-type pendingAssistantTurn struct {
-	Text      string
-	Reasoning string
-	CreatedAt time.Time
-}
-
 type composerHistoryState struct {
 	Index        int
 	Active       bool
