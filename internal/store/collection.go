@@ -117,6 +117,19 @@ func (s *Store) Approvals() Collection[Approval] {
 	})
 }
 
+// WorkspaceStates returns the generic workspace state collection.
+func (s *Store) WorkspaceStates() Collection[WorkspaceState] {
+	return NewCollection(s, CollectionSpec[WorkspaceState]{
+		Namespace: "workspace-states",
+		NextID:    "workspace-state",
+		GetID:     func(v WorkspaceState) int64 { return v.ID },
+		SetID:     func(v *WorkspaceState, id int64) { v.ID = id },
+		Indexes: []IndexSpec[WorkspaceState]{
+			{Name: "workdir", Value: func(v WorkspaceState) string { return v.Workdir }},
+		},
+	})
+}
+
 // Get loads one record by durable ID.
 func (c Collection[T]) Get(ctx context.Context, id int64) (T, error) {
 	var zero T

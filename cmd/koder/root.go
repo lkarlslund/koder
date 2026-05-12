@@ -2,8 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -165,7 +163,7 @@ func runWeb(ctx context.Context, cfg config.Config, st *store.Store, engine *age
 	if err := controller.Start(ctx, mode); err != nil {
 		return err
 	}
-	bind, cachedBind := webBindForLaunch(cfg, workdir, startupOpts)
+	bind, cachedBind := webBindForLaunch(ctx, st, workdir, startupOpts)
 	server, err := webui.Start(ctx, controller, webui.Options{
 		Bind:      bind,
 		NoBrowser: startupOpts.NoBrowser,
@@ -181,7 +179,7 @@ func runWeb(ctx context.Context, cfg config.Config, st *store.Store, engine *age
 		return err
 	}
 	if !startupOpts.WebBindExplicit || isReusableWebBind(startupOpts.WebBind) {
-		if err := saveWorkspaceWebBind(cfg, workdir, server.Addr()); err != nil {
+		if err := saveWorkspaceWebBind(ctx, st, workdir, server.Addr()); err != nil {
 			fmt.Fprintf(os.Stderr, "koder web ui: failed to save workspace port: %v\n", err)
 		}
 	}
@@ -221,13 +219,7 @@ func appStartupOptions(opts startupOptions, showAllSessions bool) app.StartupOpt
 	}
 }
 
-type workspaceWebBindRecord struct {
-	Workdir   string    `json:"workdir"`
-	Bind      string    `json:"bind"`
-	UpdatedAt time.Time `json:"updated_at"`
-}
-
-func webBindForLaunch(cfg config.Config, workdir string, startupOpts app.StartupOptions) (string, bool) {
+func webBindForLaunch(ctx context.Context, st *store.Store, workdir string, startupOpts app.StartupOptions) (string, bool) {
 	bind := strings.TrimSpace(startupOpts.WebBind)
 	if bind == "" {
 		bind = defaultWebBind
@@ -235,75 +227,35 @@ func webBindForLaunch(cfg config.Config, workdir string, startupOpts app.Startup
 	if startupOpts.WebBindExplicit || bind != defaultWebBind {
 		return bind, false
 	}
-	cached, err := loadWorkspaceWebBind(cfg, workdir)
+	cached, err := loadWorkspaceWebBind(ctx, st, workdir)
 	if err != nil || cached == "" {
 		return bind, false
 	}
 	return cached, true
 }
 
-func loadWorkspaceWebBind(cfg config.Config, workdir string) (string, error) {
-	path, err := workspaceWebBindPath(cfg, workdir)
+func loadWorkspaceWebBind(ctx context.Context, st *store.Store, workdir string) (string, error) {
+	if st == nil {
+		return "", nil
+	}
+	state, err := st.GetWorkspaceState(ctx, workdir)
 	if err != nil {
 		return "", err
 	}
-	data, err := os.ReadFile(path)
-	if os.IsNotExist(err) {
+	if !isReusableWebBind(state.WebBind) {
 		return "", nil
 	}
-	if err != nil {
-		return "", err
-	}
-	var record workspaceWebBindRecord
-	if err := json.Unmarshal(data, &record); err != nil {
-		return "", err
-	}
-	if !isReusableWebBind(record.Bind) {
-		return "", nil
-	}
-	return strings.TrimSpace(record.Bind), nil
+	return strings.TrimSpace(state.WebBind), nil
 }
 
-func saveWorkspaceWebBind(cfg config.Config, workdir, bind string) error {
+func saveWorkspaceWebBind(ctx context.Context, st *store.Store, workdir, bind string) error {
 	if !isReusableWebBind(bind) {
 		return nil
 	}
-	path, err := workspaceWebBindPath(cfg, workdir)
-	if err != nil {
-		return err
+	if st == nil {
+		return nil
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	absWorkdir, err := filepath.Abs(workdir)
-	if err != nil {
-		return err
-	}
-	record := workspaceWebBindRecord{
-		Workdir:   filepath.Clean(absWorkdir),
-		Bind:      strings.TrimSpace(bind),
-		UpdatedAt: time.Now().UTC(),
-	}
-	data, err := json.MarshalIndent(record, "", "  ")
-	if err != nil {
-		return err
-	}
-	data = append(data, '\n')
-	return os.WriteFile(path, data, 0o644)
-}
-
-func workspaceWebBindPath(cfg config.Config, workdir string) (string, error) {
-	stateDir := strings.TrimSpace(cfg.StateDir())
-	if stateDir == "" {
-		return "", fmt.Errorf("state dir is empty")
-	}
-	absWorkdir, err := filepath.Abs(workdir)
-	if err != nil {
-		return "", err
-	}
-	sum := sha256.Sum256([]byte(filepath.Clean(absWorkdir)))
-	name := hex.EncodeToString(sum[:16]) + ".json"
-	return filepath.Join(stateDir, "web-ports", name), nil
+	return st.SetWorkspaceWebBind(ctx, workdir, bind)
 }
 
 func isReusableWebBind(bind string) bool {

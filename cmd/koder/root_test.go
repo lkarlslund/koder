@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,8 +11,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/lkarlslund/koder/internal/app"
-	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/debugsrv"
+	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/version"
 )
 
@@ -154,48 +155,65 @@ func TestStartupOptionsCapturesExplicitWebBind(t *testing.T) {
 }
 
 func TestWorkspaceWebBindRoundTrip(t *testing.T) {
-	cfg := config.Default().WithStateDir(t.TempDir())
+	st := newRootTestStore(t)
 	workdir := t.TempDir()
 
-	if bind, cached := webBindForLaunch(cfg, workdir, app.StartupOptions{WebBind: defaultWebBind}); bind != defaultWebBind || cached {
+	if bind, cached := webBindForLaunch(context.Background(), st, workdir, app.StartupOptions{WebBind: defaultWebBind}); bind != defaultWebBind || cached {
 		t.Fatalf("expected default bind before cache, got bind=%q cached=%v", bind, cached)
 	}
-	if err := saveWorkspaceWebBind(cfg, workdir, "127.0.0.1:45678"); err != nil {
+	if err := saveWorkspaceWebBind(context.Background(), st, workdir, "127.0.0.1:45678"); err != nil {
 		t.Fatalf("save bind: %v", err)
 	}
-	bind, cached := webBindForLaunch(cfg, workdir, app.StartupOptions{WebBind: defaultWebBind})
+	bind, cached := webBindForLaunch(context.Background(), st, workdir, app.StartupOptions{WebBind: defaultWebBind})
 	if bind != "127.0.0.1:45678" || !cached {
 		t.Fatalf("expected cached bind, got bind=%q cached=%v", bind, cached)
+	}
+	state, err := st.GetWorkspaceState(context.Background(), workdir)
+	if err != nil {
+		t.Fatalf("get workspace state: %v", err)
+	}
+	if state.ID == 0 || state.WebBind != "127.0.0.1:45678" {
+		t.Fatalf("expected bind in store workspace state, got %#v", state)
 	}
 }
 
 func TestWorkspaceWebBindRespectsExplicitBind(t *testing.T) {
-	cfg := config.Default().WithStateDir(t.TempDir())
+	st := newRootTestStore(t)
 	workdir := t.TempDir()
-	if err := saveWorkspaceWebBind(cfg, workdir, "127.0.0.1:45678"); err != nil {
+	if err := saveWorkspaceWebBind(context.Background(), st, workdir, "127.0.0.1:45678"); err != nil {
 		t.Fatalf("save bind: %v", err)
 	}
 
-	bind, cached := webBindForLaunch(cfg, workdir, app.StartupOptions{WebBind: "127.0.0.1:0", WebBindExplicit: true})
+	bind, cached := webBindForLaunch(context.Background(), st, workdir, app.StartupOptions{WebBind: "127.0.0.1:0", WebBindExplicit: true})
 	if bind != "127.0.0.1:0" || cached {
 		t.Fatalf("expected explicit ephemeral bind, got bind=%q cached=%v", bind, cached)
 	}
-	bind, cached = webBindForLaunch(cfg, workdir, app.StartupOptions{WebBind: "127.0.0.1:33333", WebBindExplicit: true})
+	bind, cached = webBindForLaunch(context.Background(), st, workdir, app.StartupOptions{WebBind: "127.0.0.1:33333", WebBindExplicit: true})
 	if bind != "127.0.0.1:33333" || cached {
 		t.Fatalf("expected explicit fixed bind, got bind=%q cached=%v", bind, cached)
 	}
 }
 
 func TestWorkspaceWebBindIgnoresEphemeralRecords(t *testing.T) {
-	cfg := config.Default().WithStateDir(t.TempDir())
+	st := newRootTestStore(t)
 	workdir := t.TempDir()
-	if err := saveWorkspaceWebBind(cfg, workdir, "127.0.0.1:0"); err != nil {
+	if err := saveWorkspaceWebBind(context.Background(), st, workdir, "127.0.0.1:0"); err != nil {
 		t.Fatalf("save bind: %v", err)
 	}
-	bind, cached := webBindForLaunch(cfg, workdir, app.StartupOptions{WebBind: defaultWebBind})
+	bind, cached := webBindForLaunch(context.Background(), st, workdir, app.StartupOptions{WebBind: defaultWebBind})
 	if bind != defaultWebBind || cached {
 		t.Fatalf("expected default bind after ephemeral record, got bind=%q cached=%v", bind, cached)
 	}
+}
+
+func newRootTestStore(t *testing.T) *store.Store {
+	t.Helper()
+	st, err := store.OpenWithOptions(t.TempDir(), store.Options{Backend: store.BackendJSONFS})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	return st
 }
 
 func TestNewRootCommandRegistersSubcommands(t *testing.T) {

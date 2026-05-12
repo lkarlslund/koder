@@ -213,6 +213,12 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(string(body), `writePreference('sidebarRatio'`) {
 		t.Fatalf("expected sidebar split ratio to use shared browser preference storage")
 	}
+	if !strings.Contains(string(body), `selectedChatPreferenceName()`) {
+		t.Fatalf("expected selected chat to use browser preference storage")
+	}
+	if !strings.Contains(string(body), `restoreSelectedChat()`) {
+		t.Fatalf("expected selected chat to be restored after reload")
+	}
 	if !strings.Contains(string(body), `delete_chat`) {
 		t.Fatalf("expected chat deletion RPC")
 	}

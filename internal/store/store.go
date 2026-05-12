@@ -103,6 +103,13 @@ type TodoItem struct {
 	UpdatedAt    time.Time
 }
 
+type WorkspaceState struct {
+	ID        int64     `json:"id"`
+	Workdir   string    `json:"workdir"`
+	WebBind   string    `json:"web_bind"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
 func cloneToolStates(src map[domain.ToolKind]bool) map[domain.ToolKind]bool {
 	if len(src) == 0 {
 		return map[domain.ToolKind]bool{}

@@ -451,7 +451,7 @@ const indexHTML = `<!doctype html>
         showSessions: false, sessionLoading: false, sessionState: {active_id: 0, workdir: '', sessions: []}, newSessionTitle: '',
         showProviders: false, providerState: {catalog: [], providers: [], drafts: {}}, providerDraft: null, providerHeadersText: '{}', providerStatus: '', providerStatusKind: 'secondary', providerTesting: false, providerSaving: false,
         completion: {kind: '', query: '', start: 0, end: 0, items: [], selected: 0}, completionSeq: 0,
-        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, error: '', toast: '', toastTimer: null,
+        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, restoreChatAttempted: false, error: '', toast: '', toastTimer: null,
         init() { this.clampSidebarRatio(); this.applyTheme(); this.connect(); window.addEventListener('resize', () => this.resizeComposer()); this.$nextTick(() => this.resizeComposer()); },
         applyTheme() {
           const resolved = this.theme === 'auto' ? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : this.theme;
@@ -508,7 +508,25 @@ const indexHTML = `<!doctype html>
           this.ws.send(JSON.stringify({id, method, params}));
           return new Promise((resolve, reject) => this.pending[id] = {resolve, reject}).catch(err => { this.error = err.message; this.showToast(err.message); throw err; });
         },
-        applyState(s) { this.state = s || {}; this.applyTheme(); this.error = this.state.error || ''; this.$nextTick(() => { const el = document.querySelector('.transcript'); if (el) el.scrollTop = el.scrollHeight; }); },
+        applyState(s) {
+          this.state = s || {}; this.applyTheme(); this.error = this.state.error || '';
+          if (!this.restoreSelectedChat()) this.writeSelectedChat();
+          this.$nextTick(() => { const el = document.querySelector('.transcript'); if (el) el.scrollTop = el.scrollHeight; });
+        },
+        selectedChatPreferenceName() { return 'selectedChat.' + encodeURIComponent(this.state.workdir || this.state.Workdir || ''); },
+        activeChatID() { return this.state.active_chat_id || this.state.ActiveChatID || 0; },
+        writeSelectedChat() { const id = this.activeChatID(); if (id) writePreference(this.selectedChatPreferenceName(), id); },
+        restoreSelectedChat() {
+          if (this.restoreChatAttempted) return false;
+          const raw = readPreference(this.selectedChatPreferenceName(), '');
+          const id = Number(raw);
+          if (!id) { this.restoreChatAttempted = true; return false; }
+          const exists = (this.state.chats || this.state.Chats || []).some(chat => this.chatID(chat) === id);
+          this.restoreChatAttempted = true;
+          if (!exists || id === this.activeChatID()) return false;
+          this.rpc('switch_chat', {chat_id: id}).then(s => this.applyState(s));
+          return true;
+        },
         timeline() { return this.state.snapshot?.Timeline || this.state.snapshot?.timeline || []; },
         approvals() { return this.state.snapshot?.Approvals || this.state.snapshot?.approvals || []; },
         pendingText() { const p = this.state.snapshot?.PendingAssistant || this.state.snapshot?.pending_assistant || {}; return [p.Reasoning || p.reasoning, p.Text || p.text].filter(Boolean).join('\n'); },
@@ -611,8 +629,8 @@ const indexHTML = `<!doctype html>
           if (text.startsWith('/')) { this.error = 'Unknown web command: ' + text; return true; }
           return false;
         },
-        switchChat(id) { if (id) this.rpc('switch_chat', {chat_id: id}).then(s => this.applyState(s)); },
-        newChat() { this.rpc('new_chat', {title: 'Chat'}).then(s => this.applyState(s)); },
+        switchChat(id) { if (id) this.rpc('switch_chat', {chat_id: id}).then(s => { this.applyState(s); this.writeSelectedChat(); }); },
+        newChat() { this.rpc('new_chat', {title: 'Chat'}).then(s => { this.applyState(s); this.writeSelectedChat(); }); },
         deleteChat(id) {
           if (!id || !confirm('Delete this chat?')) return;
           this.rpc('delete_chat', {chat_id: id}).then(s => this.applyState(s)).catch(err => this.showToast(err.message));
