@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"fmt"
 	"slices"
 	"strings"
 	"time"
@@ -15,6 +16,8 @@ import (
 // ChatState owns the current chat's mutable in-memory records.
 type ChatState struct {
 	chat      domain.Chat
+	timeline  []*TimelineRecord
+	byItem    map[int64]*TimelineRecord
 	messages  []*MessageRecord
 	byMessage map[int64]*MessageRecord
 	byPart    map[int64]*PartRecord
@@ -25,6 +28,11 @@ type ChatState struct {
 	byToolRunID      map[string]*ToolRunRecord
 	byToolCallID     map[string]*ToolRunRecord
 	byToolApprovalID map[int64]*ToolRunRecord
+}
+
+// TimelineRecord stores one mutable timeline item.
+type TimelineRecord struct {
+	Item domain.TimelineItem
 }
 
 // MessageRecord stores one message and its ordered parts.
@@ -54,6 +62,35 @@ func NewChatState(chat domain.Chat, messages []domain.Message, parts map[int64][
 	state := &ChatState{}
 	state.MergeLoaded(chat, messages, parts, approvals)
 	return state
+}
+
+// NewTimelineState builds a chat state from persisted timeline snapshots.
+func NewTimelineState(chat domain.Chat, timeline []domain.TimelineItem, approvals []store.Approval) *ChatState {
+	state := &ChatState{}
+	state.MergeTimelineLoaded(chat, timeline, approvals)
+	return state
+}
+
+// MergeTimelineLoaded refreshes timeline records while preserving record identity by ID.
+func (s *ChatState) MergeTimelineLoaded(chat domain.Chat, timeline []domain.TimelineItem, approvals []store.Approval) {
+	s.chat = chat
+	if s.byItem == nil {
+		s.byItem = map[int64]*TimelineRecord{}
+	}
+	nextTimeline := make([]*TimelineRecord, 0, len(timeline))
+	nextByItem := make(map[int64]*TimelineRecord, len(timeline))
+	for _, item := range timeline {
+		record := s.byItem[item.ID]
+		if record == nil {
+			record = &TimelineRecord{}
+		}
+		record.Item = item
+		nextTimeline = append(nextTimeline, record)
+		nextByItem[item.ID] = record
+	}
+	s.timeline = nextTimeline
+	s.byItem = nextByItem
+	s.approvals = slices.Clone(approvals)
 }
 
 // MergeLoaded refreshes chat records from loaded store snapshots while preserving record identity by ID.
@@ -167,7 +204,13 @@ func (s *ChatState) CurrentContextSize() domain.ContextUsage {
 	if s == nil {
 		return domain.ContextUsage{}
 	}
-	tailEstimate, anchored := sessionctx.EstimateTailTokens(s.SnapshotMessages(), s.SnapshotParts())
+	var tailEstimate int
+	var anchored bool
+	if len(s.timeline) > 0 {
+		tailEstimate, anchored = sessionctx.EstimateTimelineTailTokens(s.SnapshotTimeline())
+	} else {
+		tailEstimate, anchored = sessionctx.EstimateTailTokens(s.SnapshotMessages(), s.SnapshotParts())
+	}
 	if tailEstimate < 0 {
 		tailEstimate = 0
 	}
@@ -195,6 +238,167 @@ func (s *ChatState) Messages() []*MessageRecord {
 		return nil
 	}
 	return s.messages
+}
+
+// Timeline returns the ordered timeline records for the current chat.
+func (s *ChatState) Timeline() []*TimelineRecord {
+	if s == nil {
+		return nil
+	}
+	return s.timeline
+}
+
+// AppendTimelineItem adds a new timeline record to the current chat state.
+func (s *ChatState) AppendTimelineItem(item domain.TimelineItem) *TimelineRecord {
+	if s == nil {
+		return nil
+	}
+	if s.byItem == nil {
+		s.byItem = map[int64]*TimelineRecord{}
+	}
+	record := &TimelineRecord{Item: item}
+	s.timeline = append(s.timeline, record)
+	s.byItem[item.ID] = record
+	return record
+}
+
+// UpsertTimelineItem merges one persisted timeline item into the current chat state.
+func (s *ChatState) UpsertTimelineItem(item domain.TimelineItem) (*TimelineRecord, bool) {
+	if s == nil {
+		return nil, false
+	}
+	if s.byItem == nil {
+		s.byItem = map[int64]*TimelineRecord{}
+	}
+	record := s.byItem[item.ID]
+	created := false
+	if record == nil {
+		record = &TimelineRecord{}
+		s.timeline = append(s.timeline, record)
+		s.byItem[item.ID] = record
+		created = true
+	}
+	record.Item = item
+	return record, created
+}
+
+// SnapshotTimeline returns detached timeline values.
+func (s *ChatState) SnapshotTimeline() []domain.TimelineItem {
+	if s == nil {
+		return nil
+	}
+	out := make([]domain.TimelineItem, 0, len(s.timeline))
+	for _, record := range s.timeline {
+		if record == nil {
+			continue
+		}
+		out = append(out, record.Item)
+	}
+	return out
+}
+
+// ActiveAssistant returns the latest unsealed assistant item, creating one when absent.
+func (s *ChatState) ActiveAssistant(chatID int64, now time.Time) *TimelineRecord {
+	if record := s.LatestActiveAssistant(); record != nil {
+		return record
+	}
+	if s == nil {
+		return nil
+	}
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	seq := int64(len(s.timeline) + 1)
+	item := domain.TimelineItem{
+		ID:        -now.UnixNano(),
+		ChatID:    chatID,
+		Seq:       seq,
+		Content:   domain.AssistantMessage{},
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	return s.AppendTimelineItem(item)
+}
+
+// LatestActiveAssistant returns the latest unsealed assistant item.
+func (s *ChatState) LatestActiveAssistant() *TimelineRecord {
+	if s == nil {
+		return nil
+	}
+	for idx := len(s.timeline) - 1; idx >= 0; idx-- {
+		record := s.timeline[idx]
+		if record == nil || record.Item.Sealed() {
+			continue
+		}
+		if _, ok := record.Item.Content.(domain.AssistantMessage); ok {
+			return record
+		}
+		break
+	}
+	return nil
+}
+
+// AppendAssistantText appends text to the active assistant item.
+func (s *ChatState) AppendAssistantText(chatID int64, text string) error {
+	if s == nil || text == "" {
+		return nil
+	}
+	record := s.ActiveAssistant(chatID, time.Now().UTC())
+	if record == nil {
+		return nil
+	}
+	if record.Item.Sealed() {
+		return fmt.Errorf("assistant item %d is sealed", record.Item.ID)
+	}
+	assistant, ok := record.Item.Content.(domain.AssistantMessage)
+	if !ok {
+		return fmt.Errorf("timeline item %d is not assistant", record.Item.ID)
+	}
+	assistant.AppendText(text)
+	record.Item.Content = assistant
+	record.Item.UpdatedAt = time.Now().UTC()
+	return nil
+}
+
+// AppendAssistantReasoning appends reasoning to the active assistant item.
+func (s *ChatState) AppendAssistantReasoning(chatID int64, text string) error {
+	if s == nil || text == "" {
+		return nil
+	}
+	record := s.ActiveAssistant(chatID, time.Now().UTC())
+	if record == nil {
+		return nil
+	}
+	if record.Item.Sealed() {
+		return fmt.Errorf("assistant item %d is sealed", record.Item.ID)
+	}
+	assistant, ok := record.Item.Content.(domain.AssistantMessage)
+	if !ok {
+		return fmt.Errorf("timeline item %d is not assistant", record.Item.ID)
+	}
+	assistant.AppendReasoning(text)
+	record.Item.Content = assistant
+	record.Item.UpdatedAt = time.Now().UTC()
+	return nil
+}
+
+// SealActiveAssistant marks the active assistant item complete.
+func (s *ChatState) SealActiveAssistant(status domain.ToolStatus) {
+	if s == nil {
+		return
+	}
+	_ = status
+	if record := s.LatestActiveAssistant(); record != nil && !record.Item.Sealed() {
+		record.Item.Seal(time.Now().UTC())
+	}
+}
+
+// TimelineValue returns the current timeline item value.
+func (r *TimelineRecord) TimelineValue() domain.TimelineItem {
+	if r == nil {
+		return domain.TimelineItem{}
+	}
+	return r.Item
 }
 
 // Approvals returns the current approval snapshot.
@@ -345,6 +549,9 @@ func (s *ChatState) SnapshotMessages() []domain.Message {
 	if s == nil {
 		return nil
 	}
+	if len(s.messages) == 0 && len(s.timeline) > 0 {
+		return s.legacySnapshotMessages()
+	}
 	out := make([]domain.Message, 0, len(s.messages))
 	for _, record := range s.messages {
 		if record == nil {
@@ -359,6 +566,9 @@ func (s *ChatState) SnapshotMessages() []domain.Message {
 func (s *ChatState) SnapshotParts() map[int64][]domain.Part {
 	if s == nil {
 		return nil
+	}
+	if len(s.messages) == 0 && len(s.timeline) > 0 {
+		return s.legacySnapshotParts()
 	}
 	out := make(map[int64][]domain.Part, len(s.messages))
 	for _, record := range s.messages {
@@ -557,4 +767,112 @@ func messageHasPartRecord(record *MessageRecord, candidate *PartRecord) bool {
 		}
 	}
 	return false
+}
+
+func (s *ChatState) legacySnapshotMessages() []domain.Message {
+	out := make([]domain.Message, 0, len(s.timeline))
+	for _, record := range s.timeline {
+		if record == nil {
+			continue
+		}
+		item := record.Item
+		out = append(out, domain.Message{
+			ID:        item.ID,
+			SessionID: s.chat.SessionID,
+			ChatID:    item.ChatID,
+			Role:      legacyTimelineRole(item),
+			Summary:   legacyTimelineSummary(item),
+			CreatedAt: item.CreatedAt,
+		})
+	}
+	return out
+}
+
+func (s *ChatState) legacySnapshotParts() map[int64][]domain.Part {
+	out := make(map[int64][]domain.Part, len(s.timeline))
+	for _, record := range s.timeline {
+		if record == nil {
+			continue
+		}
+		out[record.Item.ID] = legacyTimelineParts(record.Item)
+	}
+	return out
+}
+
+func legacyTimelineRole(item domain.TimelineItem) domain.MessageRole {
+	switch item.Content.(type) {
+	case domain.UserMessage:
+		return domain.MessageRoleUser
+	case domain.Notice, domain.Compaction:
+		return domain.MessageRoleTool
+	default:
+		return domain.MessageRoleAssistant
+	}
+}
+
+func legacyTimelineSummary(item domain.TimelineItem) string {
+	switch payload := item.Content.(type) {
+	case domain.UserMessage:
+		return payload.Text
+	case domain.AssistantMessage:
+		return payload.Text
+	case domain.Notice:
+		return payload.Text
+	case domain.Compaction:
+		return payload.Summary
+	default:
+		return ""
+	}
+}
+
+func legacyTimelineParts(item domain.TimelineItem) []domain.Part {
+	var parts []domain.Part
+	add := func(kind domain.PartKind, payload domain.PartPayload, offset int64) {
+		part := domain.Part{ID: item.ID*1000 + offset, MessageID: item.ID, Kind: kind, Payload: payload, CreatedAt: item.CreatedAt}
+		part.Body = part.Text()
+		part.MetaJSON = part.LegacyMetaJSON()
+		parts = append(parts, part)
+	}
+	switch payload := item.Content.(type) {
+	case domain.UserMessage:
+		if strings.TrimSpace(payload.Text) != "" {
+			add(domain.PartKindText, domain.TextPayload{Text: payload.Text}, 1)
+		}
+		for idx, attachment := range payload.Attachments {
+			add(domain.PartKindAttachment, domain.AttachmentPayload(attachment), int64(2+idx))
+		}
+		for idx, ref := range payload.References {
+			add(domain.PartKindReference, domain.ReferencePayload(ref), int64(2+len(payload.Attachments)+idx))
+		}
+	case domain.AssistantMessage:
+		offset := int64(1)
+		if strings.TrimSpace(payload.Reasoning.Text) != "" {
+			add(domain.PartKindReasoning, domain.ReasoningPayload{Text: payload.Reasoning.Text}, offset)
+			offset++
+		}
+		if strings.TrimSpace(payload.Text) != "" {
+			add(domain.PartKindText, domain.TextPayload{Text: payload.Text}, offset)
+			offset++
+		}
+		for _, tool := range payload.Tools {
+			add(domain.PartKindToolCall, domain.ToolCallPayload{Tool: tool.Tool, ToolCallID: string(tool.ToolCallID), Args: tool.Args}, offset)
+			offset++
+			if tool.Result != nil {
+				add(domain.PartKindToolOutput, domain.ToolOutputPayload{Tool: tool.Tool, ToolCallID: string(tool.ToolCallID), Args: tool.Args, Status: tool.Result.Status, Text: tool.Result.Text, Diff: tool.Result.Diff}, offset)
+				offset++
+			}
+			if tool.Error != nil {
+				add(domain.PartKindToolOutput, domain.ToolOutputPayload{Tool: tool.Tool, ToolCallID: string(tool.ToolCallID), Args: tool.Args, Status: domain.ToolResultStatusError, Text: tool.Error.Message}, offset)
+				offset++
+			}
+		}
+		if payload.Usage != nil {
+			add(domain.PartKindUsage, domain.UsagePayload{Usage: *payload.Usage}, offset)
+		}
+	case domain.Notice:
+		add(domain.PartKindEventNotice, domain.EventNoticePayload{Text: payload.Text, Kind: payload.Kind, Severity: payload.Level, Tool: payload.Tool, ToolCallID: payload.ToolCallID}, 1)
+	case domain.Compaction:
+		add(domain.PartKindCompaction, domain.CompactionPayload{Summary: payload.Summary, Trigger: payload.Trigger, Status: payload.Status, BeforeContextTokens: payload.BeforeContextTokens, AfterContextTokens: payload.AfterContextTokens}, 1)
+	}
+	return parts
 }

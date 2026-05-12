@@ -517,7 +517,7 @@ func TestJSONFSWritesInspectableFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(root, "store-jsonfs-v2", "sessions", formatID(session.ID)+".json")); err != nil {
+	if _, err := os.Stat(filepath.Join(root, "store-jsonfs-v3", "sessions", formatID(session.ID)+".json")); err != nil {
 		t.Fatalf("expected inspectable session JSON file: %v", err)
 	}
 }

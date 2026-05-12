@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -40,15 +41,7 @@ type backend interface {
 	SetSessionToolStates(context.Context, int64, map[domain.ToolKind]bool) error
 	UpdateSessionTitle(context.Context, int64, string, time.Time, int) error
 	UpdateSessionAgents(context.Context, int64, string, string, string, string, []domain.AgentsFile, time.Time) error
-	CountMessagesByRole(context.Context, int64, domain.MessageRole) (int, error)
 	SetSessionModel(context.Context, int64, string, string) error
-	AddMessage(context.Context, int64, domain.MessageRole, string) (domain.Message, error)
-	AddChatMessage(context.Context, int64, domain.MessageRole, string) (domain.Message, error)
-	UpdateMessageSummary(context.Context, int64, string) error
-	AddPart(context.Context, int64, domain.PartPayload) (domain.Part, error)
-	UpdatePartPayload(context.Context, int64, domain.PartPayload) error
-	PartsForSession(context.Context, int64) ([]domain.Message, map[int64][]domain.Part, error)
-	PartsForChat(context.Context, int64) ([]domain.Message, map[int64][]domain.Part, error)
 	CreateApproval(context.Context, int64, domain.ToolKind, string) (Approval, error)
 	CreateChatApproval(context.Context, int64, domain.ToolKind, string) (Approval, error)
 	UpdateApproval(context.Context, int64, domain.ApprovalStatus) error
@@ -252,40 +245,41 @@ func (s *Store) UpdateSessionAgents(
 	return s.backend.UpdateSessionAgents(ctx, sessionID, projectRoot, projectChecksum, resolved, summary, files, generatedAt)
 }
 
-func (s *Store) CountMessagesByRole(ctx context.Context, sessionID int64, role domain.MessageRole) (int, error) {
-	return s.backend.CountMessagesByRole(ctx, sessionID, role)
-}
-
 func (s *Store) SetSessionModel(ctx context.Context, sessionID int64, providerID, modelID string) error {
 	return s.backend.SetSessionModel(ctx, sessionID, providerID, modelID)
 }
 
-func (s *Store) AddMessage(ctx context.Context, sessionID int64, role domain.MessageRole, summary string) (domain.Message, error) {
-	return s.backend.AddMessage(ctx, sessionID, role, summary)
+// TimelineForChat returns persisted timeline items for a chat ordered by sequence.
+func (s *Store) TimelineForChat(ctx context.Context, chatID int64) ([]domain.TimelineItem, error) {
+	items, err := s.Timeline().List(ctx, ByIndex[domain.TimelineItem]("chat", fmt.Sprint(chatID)))
+	if err != nil {
+		return nil, err
+	}
+	slices.SortFunc(items, func(a, b domain.TimelineItem) int {
+		switch {
+		case a.Seq < b.Seq:
+			return -1
+		case a.Seq > b.Seq:
+			return 1
+		case a.ID < b.ID:
+			return -1
+		case a.ID > b.ID:
+			return 1
+		default:
+			return 0
+		}
+	})
+	return items, nil
 }
 
-func (s *Store) AddChatMessage(ctx context.Context, chatID int64, role domain.MessageRole, summary string) (domain.Message, error) {
-	return s.backend.AddChatMessage(ctx, chatID, role, summary)
+// PutTimelineItem upserts one timeline item.
+func (s *Store) PutTimelineItem(ctx context.Context, item domain.TimelineItem) error {
+	return s.Timeline().Put(ctx, item)
 }
 
-func (s *Store) UpdateMessageSummary(ctx context.Context, messageID int64, summary string) error {
-	return s.backend.UpdateMessageSummary(ctx, messageID, summary)
-}
-
-func (s *Store) AddPart(ctx context.Context, messageID int64, payload domain.PartPayload) (domain.Part, error) {
-	return s.backend.AddPart(ctx, messageID, payload)
-}
-
-func (s *Store) UpdatePartPayload(ctx context.Context, partID int64, payload domain.PartPayload) error {
-	return s.backend.UpdatePartPayload(ctx, partID, payload)
-}
-
-func (s *Store) PartsForSession(ctx context.Context, sessionID int64) ([]domain.Message, map[int64][]domain.Part, error) {
-	return s.backend.PartsForSession(ctx, sessionID)
-}
-
-func (s *Store) PartsForChat(ctx context.Context, chatID int64) ([]domain.Message, map[int64][]domain.Part, error) {
-	return s.backend.PartsForChat(ctx, chatID)
+// InsertTimelineItem inserts one timeline item.
+func (s *Store) InsertTimelineItem(ctx context.Context, item domain.TimelineItem) (domain.TimelineItem, error) {
+	return s.Timeline().Insert(ctx, item)
 }
 
 func (s *Store) CreateApproval(ctx context.Context, sessionID int64, tool domain.ToolKind, command string) (Approval, error) {

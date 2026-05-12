@@ -26,7 +26,7 @@ type pebbleBackend struct {
 }
 
 func openPebbleBackend(stateDir string) (*pebbleBackend, error) {
-	dir := filepath.Join(stateDir, "store-pebble-v2")
+	dir := filepath.Join(stateDir, "store-pebble-v3")
 	if err := ensureDir(dir); err != nil {
 		return nil, fmt.Errorf("create pebble store dir: %w", err)
 	}

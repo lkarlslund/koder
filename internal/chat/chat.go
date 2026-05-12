@@ -52,6 +52,7 @@ const (
 type Snapshot struct {
 	Session          domain.Session
 	Chat             domain.Chat
+	Timeline         []domain.TimelineItem
 	Messages         []domain.Message
 	Parts            map[int64][]domain.Part
 	Approvals        []store.Approval
@@ -155,7 +156,7 @@ type Runner interface {
 	approvalRunner
 }
 
-// Load builds a live chat by hydrating its transcript and approval state from store.
+// Load builds a live chat by hydrating its timeline and approval state from store.
 func Load(ctx context.Context, st *store.Store, session domain.Session, chatRecord domain.Chat, runner Runner, onClose func(int64)) (*Chat, error) {
 	if st == nil {
 		return nil, fmt.Errorf("store is required")
@@ -170,7 +171,7 @@ func Load(ctx context.Context, st *store.Store, session domain.Session, chatReco
 		}
 		chatRecord = loaded
 	}
-	messages, parts, err := st.PartsForChat(ctx, chatRecord.ID)
+	timeline, err := st.TimelineForChat(ctx, chatRecord.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -178,11 +179,11 @@ func Load(ctx context.Context, st *store.Store, session domain.Session, chatReco
 	if err != nil {
 		return nil, err
 	}
-	return New(session, chatRecord, messages, parts, approvals, runner, st, onClose)
+	return New(session, chatRecord, timeline, approvals, runner, st, onClose)
 }
 
 // New builds a live chat from hydrated persisted state.
-func New(session domain.Session, chatRecord domain.Chat, messages []domain.Message, parts map[int64][]domain.Part, approvals []store.Approval, runner Runner, st *store.Store, onClose func(int64)) (*Chat, error) {
+func New(session domain.Session, chatRecord domain.Chat, timeline []domain.TimelineItem, approvals []store.Approval, runner Runner, st *store.Store, onClose func(int64)) (*Chat, error) {
 	if chatRecord.ID == 0 {
 		return nil, fmt.Errorf("chat id is required")
 	}
@@ -192,7 +193,7 @@ func New(session domain.Session, chatRecord domain.Chat, messages []domain.Messa
 		onClose:    onClose,
 		session:    session,
 		chat:       chatRecord,
-		state:      NewChatState(chatRecord, messages, parts, approvals),
+		state:      NewTimelineState(chatRecord, timeline, approvals),
 		status:     StatusIdle,
 		queue:      cloneQueuedInputs(chatRecord.QueuedInputs),
 		queueNotes: map[int64]string{},
@@ -218,54 +219,43 @@ func (r *Chat) Persist(ctx context.Context, st *store.Store) error {
 		r.mu.RUnlock()
 		return st.UpdateChat(ctx, chatRecord)
 	}
-	messages := r.state.SnapshotMessages()
-	parts := r.state.SnapshotParts()
+	timeline := r.state.SnapshotTimeline()
 	approvals := r.state.Approvals()
 	r.mu.RUnlock()
 
-	persistedMessages, persistedParts, err := st.PartsForChat(ctx, chatRecord.ID)
+	persisted, err := st.TimelineForChat(ctx, chatRecord.ID)
 	if err != nil {
 		return r.markPersistError(err)
 	}
-	messageIDs := make(map[int64]struct{}, len(persistedMessages))
-	partIDs := map[int64]struct{}{}
-	for _, msg := range persistedMessages {
-		messageIDs[msg.ID] = struct{}{}
-		for _, part := range persistedParts[msg.ID] {
-			partIDs[part.ID] = struct{}{}
-		}
+	itemIDs := make(map[int64]struct{}, len(persisted))
+	for _, item := range persisted {
+		itemIDs[item.ID] = struct{}{}
 	}
 
-	messageRemap := map[int64]int64{}
-	partRemap := map[int64]int64{}
+	itemRemap := map[int64]int64{}
 	changed := false
-	for _, msg := range messages {
-		if _, ok := messageIDs[msg.ID]; ok {
-			if err := st.UpdateMessageSummary(ctx, msg.ID, msg.Summary); err != nil {
+	for _, item := range timeline {
+		if item.ChatID == 0 {
+			item.ChatID = chatRecord.ID
+		}
+		if _, ok := itemIDs[item.ID]; ok {
+			if err := st.PutTimelineItem(ctx, item); err != nil {
 				return r.markPersistError(err)
-			}
-			for _, part := range parts[msg.ID] {
-				if _, ok := partIDs[part.ID]; ok {
-					if err := st.UpdatePartPayload(ctx, part.ID, part.Payload); err != nil {
-						return r.markPersistError(err)
-					}
-				}
 			}
 			continue
 		}
-		durable, err := st.AddChatMessage(ctx, chatRecord.ID, msg.Role, msg.Summary)
+		oldID := item.ID
+		if isTemporaryTimelineID(oldID) {
+			item.ID = 0
+		}
+		durable, err := st.InsertTimelineItem(ctx, item)
 		if err != nil {
 			return r.markPersistError(err)
 		}
-		messageRemap[msg.ID] = durable.ID
-		changed = true
-		for _, part := range parts[msg.ID] {
-			durablePart, err := st.AddPart(ctx, durable.ID, part.Payload)
-			if err != nil {
-				return r.markPersistError(err)
-			}
-			partRemap[part.ID] = durablePart.ID
+		if oldID != durable.ID {
+			itemRemap[oldID] = durable.ID
 		}
+		changed = true
 	}
 	for _, approval := range approvals {
 		if approval.ID <= 0 {
@@ -282,10 +272,14 @@ func (r *Chat) Persist(ctx context.Context, st *store.Store) error {
 		return r.markPersistError(err)
 	}
 	if changed {
-		r.remapStateIDs(messageRemap, partRemap)
+		r.remapTimelineIDs(itemRemap)
 		r.broadcast(r.snapshotUpdateFlags(nil, true, false, false, true, false))
 	}
 	return nil
+}
+
+func isTemporaryTimelineID(id int64) bool {
+	return id < 0 || id > 1_000_000_000_000
 }
 
 func (r *Chat) Enqueue(item QueueItem) {
@@ -383,6 +377,7 @@ func (r *Chat) Snapshot() Snapshot {
 	return Snapshot{
 		Session:          r.session,
 		Chat:             r.state.Chat(),
+		Timeline:         r.state.SnapshotTimeline(),
 		Messages:         r.state.SnapshotMessages(),
 		Parts:            r.state.SnapshotParts(),
 		Approvals:        r.state.Approvals(),
@@ -625,6 +620,16 @@ func (r *Chat) handleStreamEvent(evt domain.Event) {
 	r.mu.Lock()
 	transcriptChanged := false
 	contextChanged := false
+	if evt.Item.ID != 0 && r.state != nil {
+		r.state.UpsertTimelineItem(evt.Item)
+		transcriptChanged = true
+		if text := timelineItemSummary(evt.Item); text != "" {
+			r.chat.LastMessage = text
+			r.state.UpdateChat(func(chat *domain.Chat) {
+				chat.LastMessage = text
+			})
+		}
+	}
 	if evt.Message.ID > 0 && r.state != nil {
 		r.state.UpsertMessageParts(evt.Message, evt.Parts)
 		transcriptChanged = true
@@ -638,7 +643,10 @@ func (r *Chat) handleStreamEvent(evt domain.Event) {
 	switch evt.Kind {
 	case domain.EventKindMessageDelta:
 		if r.state != nil {
-			r.state.AppendPendingAssistantText(evt.Text)
+			if err := r.state.AppendAssistantText(r.chat.ID, evt.Text); err != nil {
+				r.status = StatusErrored
+				r.statusText = err.Error()
+			}
 		}
 		r.status = StatusStreamingResponse
 		r.statusText = "Streaming LLM response ..."
@@ -646,7 +654,10 @@ func (r *Chat) handleStreamEvent(evt domain.Event) {
 		contextChanged = true
 	case domain.EventKindReasoning:
 		if r.state != nil {
-			r.state.AppendPendingAssistantReasoning(evt.Text)
+			if err := r.state.AppendAssistantReasoning(r.chat.ID, evt.Text); err != nil {
+				r.status = StatusErrored
+				r.statusText = err.Error()
+			}
 		}
 		r.status = StatusStreamingThoughts
 		r.statusText = "Streaming thoughts ..."
@@ -702,7 +713,8 @@ func (r *Chat) handleStreamEvent(evt domain.Event) {
 		r.cancelState = CancelStateNone
 		r.running = nil
 	case domain.EventKindMessageDone:
-		if r.state != nil && evt.Message.ID > 0 {
+		if r.state != nil {
+			r.state.SealActiveAssistant("")
 			r.state.ClearPendingAssistant()
 			contextChanged = true
 		}
@@ -741,6 +753,28 @@ func completedCompactionContext(parts []domain.Part, meta map[string]string) (in
 		return payload.AfterContextTokens, true
 	}
 	return 0, false
+}
+
+func timelineItemSummary(item domain.TimelineItem) string {
+	switch payload := item.Content.(type) {
+	case domain.UserMessage:
+		return strings.TrimSpace(payload.Text)
+	case domain.AssistantMessage:
+		if text := strings.TrimSpace(payload.Text); text != "" {
+			return text
+		}
+		if len(payload.Tools) == 1 {
+			return "tool:" + string(payload.Tools[0].Tool)
+		}
+		if len(payload.Tools) > 1 {
+			return fmt.Sprintf("tools:%d", len(payload.Tools))
+		}
+	case domain.Notice:
+		return strings.TrimSpace(payload.Text)
+	case domain.Compaction:
+		return strings.TrimSpace(payload.Summary)
+	}
+	return ""
 }
 
 func (r *Chat) handleStreamClosed() {
@@ -928,6 +962,30 @@ func (r *Chat) remapStateIDs(messages map[int64]int64, parts map[int64]int64) {
 	}
 }
 
+func (r *Chat) remapTimelineIDs(items map[int64]int64) {
+	if len(items) == 0 {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.state == nil {
+		return
+	}
+	for _, record := range r.state.timeline {
+		if record == nil {
+			continue
+		}
+		oldID := record.Item.ID
+		next, ok := items[oldID]
+		if !ok {
+			continue
+		}
+		delete(r.state.byItem, oldID)
+		record.Item.ID = next
+		r.state.byItem[next] = record
+	}
+}
+
 func (r *Chat) snapshotStatus() Status {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -986,57 +1044,34 @@ func (r *Chat) snapshotUpdateFlags(event *domain.Event, transcriptChanged, queue
 }
 
 func (r *Chat) appendOptimisticUserMessage(item domain.QueuedInput, session domain.Session, chat domain.Chat) {
+	_ = session
 	if item.Kind == domain.QueuedInputKindContinue || r.state == nil {
 		return
 	}
 	now := time.Now().UTC()
-	messageID := now.UnixNano()
 	summary := strings.TrimSpace(item.Text)
-	message := domain.Message{
-		ID:        messageID,
-		SessionID: session.ID,
-		ChatID:    chat.ID,
-		Role:      domain.MessageRoleUser,
-		Summary:   summary,
-		CreatedAt: now,
-	}
-	parts := make([]domain.Part, 0, 1+len(item.Attachments)+len(item.References))
-	if summary != "" {
-		parts = append(parts, domain.Part{
-			ID:        messageID + 1,
-			MessageID: messageID,
-			Kind:      domain.PartKindText,
-			Payload:   domain.TextPayload{Text: summary},
-			Body:      summary,
-			CreatedAt: now,
+	user := domain.UserMessage{Text: summary}
+	for _, draft := range item.Attachments {
+		user.Attachments = append(user.Attachments, domain.Attachment{
+			ID: draft.ID, Name: draft.Name, MIME: draft.MIME, Path: draft.Path, Size: draft.Size, Source: draft.Source, Original: draft.Original,
 		})
 	}
-	for idx, draft := range item.Attachments {
-		parts = append(parts, domain.Part{
-			ID:        messageID + int64(2+idx),
-			MessageID: messageID,
-			Kind:      domain.PartKindAttachment,
-			Payload: domain.AttachmentPayload{
-				ID: draft.ID, Name: draft.Name, MIME: draft.MIME, Path: draft.Path, Size: draft.Size, Source: draft.Source, Original: draft.Original,
-			},
-			Body:      draft.Name,
-			CreatedAt: now,
-		})
-	}
-	for idx, ref := range item.References {
-		parts = append(parts, domain.Part{
-			ID:        messageID + int64(2+len(item.Attachments)+idx),
-			MessageID: messageID,
-			Kind:      domain.PartKindReference,
-			Payload: domain.ReferencePayload{
-				Kind: ref.Kind, Path: ref.Path, Display: ref.Display, Start: ref.Start, End: ref.End,
-			},
-			Body:      ref.Display,
-			CreatedAt: now,
+	for _, ref := range item.References {
+		user.References = append(user.References, domain.Reference{
+			Kind: ref.Kind, Path: ref.Path, Display: ref.Display, Start: ref.Start, End: ref.End,
 		})
 	}
 	r.mu.Lock()
-	r.state.AppendMessage(message, parts)
+	timelineItem := domain.TimelineItem{
+		ID:        now.UnixNano(),
+		ChatID:    chat.ID,
+		Seq:       int64(len(r.state.Timeline()) + 1),
+		Content:   user,
+		CreatedAt: now,
+		UpdatedAt: now,
+		SealedAt:  now,
+	}
+	r.state.AppendTimelineItem(timelineItem)
 	r.chat.LastMessage = summary
 	r.state.UpdateChat(func(chat *domain.Chat) {
 		chat.LastMessage = summary
@@ -1053,24 +1088,15 @@ func (r *Chat) appendRuntimeNoticeLocked(body, kind, severity string) {
 		return
 	}
 	now := time.Now().UTC()
-	messageID := now.UnixNano()
-	message := domain.Message{
-		ID:        messageID,
-		SessionID: r.session.ID,
+	r.state.AppendTimelineItem(domain.TimelineItem{
+		ID:        -now.UnixNano(),
 		ChatID:    r.chat.ID,
-		Role:      domain.MessageRoleAssistant,
-		Summary:   body,
+		Seq:       int64(len(r.state.Timeline()) + 1),
+		Content:   domain.Notice{Text: body, Kind: kind, Level: severity},
 		CreatedAt: now,
-	}
-	parts := []domain.Part{{
-		ID:        messageID + 1,
-		MessageID: messageID,
-		Kind:      domain.PartKindEventNotice,
-		Payload:   domain.EventNoticePayload{Text: body, Kind: kind, Severity: severity},
-		Body:      body,
-		CreatedAt: now,
-	}}
-	r.state.AppendMessage(message, parts)
+		UpdatedAt: now,
+		SealedAt:  now,
+	})
 }
 
 func nextDispatchableIndex(items []domain.QueuedInput) int {

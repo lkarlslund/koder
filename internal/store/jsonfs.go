@@ -20,13 +20,12 @@ type jsonfsBackend struct {
 }
 
 func openJSONFSBackend(stateDir string) (*jsonfsBackend, error) {
-	root := filepath.Join(stateDir, "store-jsonfs-v2")
+	root := filepath.Join(stateDir, "store-jsonfs-v3")
 	for _, dir := range []string{
 		root,
 		filepath.Join(root, "sessions"),
 		filepath.Join(root, "chats"),
-		filepath.Join(root, "messages"),
-		filepath.Join(root, "parts"),
+		filepath.Join(root, "timeline"),
 		filepath.Join(root, "approvals"),
 		filepath.Join(root, "tasks"),
 		filepath.Join(root, "milestone-plans"),

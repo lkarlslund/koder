@@ -89,29 +89,15 @@ func (s *Store) Chats() Collection[domain.Chat] {
 	})
 }
 
-// Messages returns the generic messages collection.
-func (s *Store) Messages() Collection[domain.Message] {
-	return NewCollection(s, CollectionSpec[domain.Message]{
-		Namespace: "messages",
-		NextID:    "message",
-		GetID:     func(v domain.Message) int64 { return v.ID },
-		SetID:     func(v *domain.Message, id int64) { v.ID = id },
-		Indexes: []IndexSpec[domain.Message]{
-			{Name: "session", Value: func(v domain.Message) string { return fmt.Sprint(v.SessionID) }},
-			{Name: "chat", Value: func(v domain.Message) string { return fmt.Sprint(v.ChatID) }},
-		},
-	})
-}
-
-// Parts returns the generic parts collection.
-func (s *Store) Parts() Collection[domain.Part] {
-	return NewCollection(s, CollectionSpec[domain.Part]{
-		Namespace: "parts",
-		NextID:    "part",
-		GetID:     func(v domain.Part) int64 { return v.ID },
-		SetID:     func(v *domain.Part, id int64) { v.ID = id },
-		Indexes: []IndexSpec[domain.Part]{
-			{Name: "message", Value: func(v domain.Part) string { return fmt.Sprint(v.MessageID) }},
+// Timeline returns the generic chat timeline collection.
+func (s *Store) Timeline() Collection[domain.TimelineItem] {
+	return NewCollection(s, CollectionSpec[domain.TimelineItem]{
+		Namespace: "timeline",
+		NextID:    "timeline",
+		GetID:     func(v domain.TimelineItem) int64 { return v.ID },
+		SetID:     func(v *domain.TimelineItem, id int64) { v.ID = id },
+		Indexes: []IndexSpec[domain.TimelineItem]{
+			{Name: "chat", Value: func(v domain.TimelineItem) string { return fmt.Sprint(v.ChatID) }},
 		},
 	})
 }

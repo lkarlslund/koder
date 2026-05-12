@@ -40,6 +40,91 @@ func FromMessages(cfg config.Config, session domain.Session, messages []domain.M
 	}, true
 }
 
+// FromTimeline returns context metrics from timeline usage data.
+func FromTimeline(cfg config.Config, session domain.Session, items []domain.TimelineItem) (Metrics, bool) {
+	providerCfg, ok := cfg.Provider(session.ProviderID)
+	if !ok || providerCfg.ContextWindow <= 0 {
+		return Metrics{}, false
+	}
+	usage, ok := LatestTimelineUsage(items)
+	usage = usage.Normalized()
+	if !ok || usage.TotalTokens <= 0 {
+		return Metrics{}, false
+	}
+	percent := (usage.TotalTokens * 100) / providerCfg.ContextWindow
+	if percent < 0 {
+		percent = 0
+	}
+	if percent > 100 {
+		percent = 100
+	}
+	return Metrics{Used: usage.TotalTokens, Max: providerCfg.ContextWindow, UsagePercent: percent}, true
+}
+
+// LatestTimelineUsage returns the latest usage attached to an assistant item.
+func LatestTimelineUsage(items []domain.TimelineItem) (domain.Usage, bool) {
+	for idx := len(items) - 1; idx >= 0; idx-- {
+		assistant, ok := items[idx].Content.(domain.AssistantMessage)
+		if !ok || assistant.Usage == nil {
+			continue
+		}
+		usage := assistant.Usage.Normalized()
+		if usage.HasAnyTokens() {
+			return usage, true
+		}
+	}
+	return domain.Usage{}, false
+}
+
+// EstimateTimelineTailTokens estimates persisted timeline content after the latest context anchor.
+func EstimateTimelineTailTokens(items []domain.TimelineItem) (int, bool) {
+	anchorIdx, ok := LatestTimelineContextAnchor(items)
+	if !ok {
+		return 0, false
+	}
+	total := 0
+	for idx := anchorIdx + 1; idx < len(items); idx++ {
+		total += estimateTimelineItemTokens(items[idx])
+	}
+	return total, true
+}
+
+// LatestTimelineContextAnchor returns the latest item index that has known context size.
+func LatestTimelineContextAnchor(items []domain.TimelineItem) (int, bool) {
+	for idx := len(items) - 1; idx >= 0; idx-- {
+		switch payload := items[idx].Content.(type) {
+		case domain.AssistantMessage:
+			if payload.Usage != nil && payload.Usage.Normalized().HasAnyTokens() {
+				return idx, true
+			}
+		case domain.Compaction:
+			if payload.Status == "completed" && payload.AfterContextTokens > 0 {
+				return idx, true
+			}
+		}
+	}
+	return 0, false
+}
+
+// TotalTimelineUsage returns total usage attached to timeline items.
+func TotalTimelineUsage(items []domain.TimelineItem) (domain.Usage, bool) {
+	var total domain.Usage
+	var found bool
+	for _, item := range items {
+		assistant, ok := item.Content.(domain.AssistantMessage)
+		if !ok || assistant.Usage == nil {
+			continue
+		}
+		usage := assistant.Usage.Normalized()
+		if !usage.HasAnyTokens() {
+			continue
+		}
+		total = total.Add(usage)
+		found = true
+	}
+	return total, found
+}
+
 func LatestUsage(messages []domain.Message, parts map[int64][]domain.Part) (domain.Usage, bool) {
 	usage, _, _, ok := LatestUsageAnchor(messages, parts)
 	return usage, ok
@@ -171,6 +256,48 @@ func estimateMessageTokens(msg domain.Message, parts []domain.Part) int {
 		if text := strings.TrimSpace(part.Text()); text != "" {
 			texts = append(texts, text)
 		}
+	}
+	return tokenestimate.Text(strings.Join(texts, "\n"))
+}
+
+func estimateTimelineItemTokens(item domain.TimelineItem) int {
+	var texts []string
+	switch payload := item.Content.(type) {
+	case domain.UserMessage:
+		if text := strings.TrimSpace(payload.Text); text != "" {
+			texts = append(texts, string(domain.MessageRoleUser), text)
+		}
+		for _, attachment := range payload.Attachments {
+			if attachment.Name != "" {
+				texts = append(texts, attachment.Name)
+			}
+		}
+		for _, ref := range payload.References {
+			if ref.Display != "" {
+				texts = append(texts, ref.Display)
+			}
+		}
+	case domain.AssistantMessage:
+		texts = append(texts, string(domain.MessageRoleAssistant))
+		if text := strings.TrimSpace(payload.Reasoning.Text); text != "" {
+			texts = append(texts, text)
+		}
+		if text := strings.TrimSpace(payload.Text); text != "" {
+			texts = append(texts, text)
+		}
+		for _, tool := range payload.Tools {
+			texts = append(texts, string(tool.Tool), string(tool.ToolCallID))
+			if tool.Result != nil {
+				texts = append(texts, tool.Result.Text)
+			}
+			if tool.Error != nil {
+				texts = append(texts, tool.Error.Message)
+			}
+		}
+	case domain.Notice:
+		texts = append(texts, payload.Text)
+	case domain.Compaction:
+		texts = append(texts, payload.Summary)
 	}
 	return tokenestimate.Text(strings.Join(texts, "\n"))
 }
