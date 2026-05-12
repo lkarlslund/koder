@@ -63,6 +63,56 @@ type PermissionsState struct {
 	Profiles []permission.ProfileOption `json:"profiles"`
 }
 
+// ProviderState describes configured and available provider templates.
+type ProviderState struct {
+	DefaultProvider string                   `json:"default_provider"`
+	DefaultModel    string                   `json:"default_model"`
+	Catalog         []ProviderCatalogItem    `json:"catalog"`
+	Providers       []ProviderConfigItem     `json:"providers"`
+	Drafts          map[string]ProviderDraft `json:"drafts"`
+}
+
+// ProviderCatalogItem is one provider template offered by the provider catalog.
+type ProviderCatalogItem struct {
+	ID             string `json:"id"`
+	Title          string `json:"title"`
+	Description    string `json:"description"`
+	DefaultBaseURL string `json:"default_base_url"`
+	ModelHint      string `json:"model_hint"`
+	Local          bool   `json:"local"`
+}
+
+// ProviderConfigItem is one configured provider row.
+type ProviderConfigItem struct {
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	TemplateID   string `json:"template_id"`
+	Kind         string `json:"kind"`
+	BaseURL      string `json:"base_url"`
+	DefaultModel string `json:"default_model"`
+	Disabled     bool   `json:"disabled"`
+	Default      bool   `json:"default"`
+}
+
+// ProviderDraft is the JSON-friendly provider edit shape used by renderers.
+type ProviderDraft struct {
+	OriginalProviderID string            `json:"original_provider_id"`
+	ProviderID         string            `json:"provider_id"`
+	TemplateID         string            `json:"template_id"`
+	Kind               string            `json:"kind"`
+	Name               string            `json:"name"`
+	BaseURL            string            `json:"base_url"`
+	APIKey             string            `json:"api_key"`
+	Model              string            `json:"model"`
+	Headers            map[string]string `json:"headers"`
+}
+
+// ProviderProbeResult reports a provider test outcome.
+type ProviderProbeResult struct {
+	ModelCount int      `json:"model_count"`
+	Models     []string `json:"models"`
+}
+
 // Controller owns session/chat state independently from any renderer.
 type Controller struct {
 	cfg     config.Config
@@ -308,6 +358,194 @@ func (c *Controller) DeleteChat(ctx context.Context, chatID int64) error {
 	return nil
 }
 
+// Providers returns the configured providers and catalog templates.
+func (c *Controller) Providers() ProviderState {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.providerStateLocked()
+}
+
+// NewProviderDraft returns a draft initialized from a provider template.
+func (c *Controller) NewProviderDraft(templateID string) (ProviderDraft, error) {
+	c.mu.RLock()
+	cfg := c.cfg
+	c.mu.RUnlock()
+	templateID = strings.TrimSpace(templateID)
+	if templateID == "" {
+		templateID = provider.ProviderKindCompatible
+	}
+	draft, err := provider.BuildDraft(templateID, cfg.Providers)
+	if err != nil {
+		return ProviderDraft{}, err
+	}
+	return providerDraftFromCatalog(draft), nil
+}
+
+// TestProvider probes a provider draft by listing models.
+func (c *Controller) TestProvider(ctx context.Context, draft ProviderDraft) (ProviderProbeResult, error) {
+	result, err := provider.Probe(ctx, providerDraftToCatalog(draft), nil)
+	if err != nil {
+		return ProviderProbeResult{}, err
+	}
+	limit := len(result.Models)
+	if limit > 12 {
+		limit = 12
+	}
+	models := make([]string, 0, limit)
+	for idx, item := range result.Models {
+		if idx >= 12 {
+			break
+		}
+		models = append(models, item.ID)
+	}
+	return ProviderProbeResult{ModelCount: len(result.Models), Models: models}, nil
+}
+
+// SaveProvider validates and persists a provider draft.
+func (c *Controller) SaveProvider(ctx context.Context, draft ProviderDraft) (ProviderState, error) {
+	catalogDraft := providerDraftToCatalog(draft)
+	if err := provider.ValidateDraft(catalogDraft); err != nil {
+		return ProviderState{}, err
+	}
+	originalID := strings.TrimSpace(catalogDraft.OriginalProviderID)
+	catalogDraft.ProviderID = strings.TrimSpace(catalogDraft.ProviderID)
+	if catalogDraft.ProviderID == "" {
+		return ProviderState{}, fmt.Errorf("provider id is required")
+	}
+
+	c.mu.Lock()
+	if c.cfg.Providers == nil {
+		c.cfg.Providers = map[string]config.Provider{}
+	}
+	if originalID != "" && originalID != catalogDraft.ProviderID {
+		if _, exists := c.cfg.Providers[catalogDraft.ProviderID]; exists {
+			c.mu.Unlock()
+			return ProviderState{}, fmt.Errorf("provider %q already exists", catalogDraft.ProviderID)
+		}
+	}
+	next := catalogDraft.ToConfig()
+	lookupID := catalogDraft.ProviderID
+	if originalID != "" {
+		lookupID = originalID
+	}
+	existing, ok := c.cfg.Providers[lookupID]
+	if ok {
+		mergeProviderEditDefaults(&next, existing)
+	} else {
+		applyNewProviderDefaults(&next, c.cfg.AutoCompactAt)
+	}
+	if strings.TrimSpace(next.Name) == "" {
+		if desc, found := provider.Lookup(catalogDraft.TemplateID); found {
+			next.Name = desc.Title
+		} else {
+			next.Name = catalogDraft.ProviderID
+		}
+	}
+	if originalID != "" && originalID != catalogDraft.ProviderID {
+		delete(c.cfg.Providers, originalID)
+	}
+	c.cfg.Providers[catalogDraft.ProviderID] = next
+	if strings.TrimSpace(c.cfg.DefaultProvider) == "" || c.cfg.DefaultProvider == originalID || c.cfg.DefaultProvider == catalogDraft.ProviderID {
+		c.cfg.DefaultProvider = catalogDraft.ProviderID
+	}
+	c.cfg.DefaultModel = catalogDraft.Model
+	if err := c.cfg.Save(); err != nil {
+		c.mu.Unlock()
+		return ProviderState{}, err
+	}
+	if c.agent != nil {
+		c.agent.UpdateConfig(c.cfg)
+	}
+	if c.session.ID != 0 && (strings.TrimSpace(c.session.ProviderID) == "" || !c.cfg.HasUsableProvider(c.session.ProviderID) || c.session.ProviderID == originalID) {
+		if err := c.store.SetSessionModel(ctx, c.session.ID, catalogDraft.ProviderID, catalogDraft.Model); err != nil {
+			c.mu.Unlock()
+			return ProviderState{}, err
+		}
+		session, err := c.store.GetSession(ctx, c.session.ID)
+		if err != nil {
+			c.mu.Unlock()
+			return ProviderState{}, err
+		}
+		c.session = session
+		for idx := range c.sessions {
+			if c.sessions[idx].ID == session.ID {
+				c.sessions[idx] = session
+			}
+		}
+		if c.runtime != nil {
+			c.runtime.SetSession(session)
+		}
+	}
+	state := c.providerStateLocked()
+	c.mu.Unlock()
+	c.broadcast("snapshot", c.State())
+	return state, nil
+}
+
+// DeleteProvider removes a configured provider.
+func (c *Controller) DeleteProvider(ctx context.Context, providerID string) (ProviderState, error) {
+	providerID = strings.TrimSpace(providerID)
+	if providerID == "" {
+		return ProviderState{}, fmt.Errorf("provider id is required")
+	}
+	c.mu.Lock()
+	if _, ok := c.cfg.Providers[providerID]; !ok {
+		c.mu.Unlock()
+		return ProviderState{}, fmt.Errorf("provider %q is not configured", providerID)
+	}
+	delete(c.cfg.Providers, providerID)
+	nextDefault := strings.TrimSpace(c.cfg.DefaultProvider)
+	if nextDefault == providerID || !c.cfg.HasUsableProvider(nextDefault) {
+		nextDefault = ""
+		ids := make([]string, 0, len(c.cfg.Providers))
+		for id := range c.cfg.Providers {
+			ids = append(ids, id)
+		}
+		slices.Sort(ids)
+		if len(ids) > 0 {
+			nextDefault = ids[0]
+		}
+	}
+	c.cfg.DefaultProvider = nextDefault
+	c.cfg.DefaultModel = ""
+	if nextDefault != "" {
+		if next, ok := c.cfg.Provider(nextDefault); ok {
+			c.cfg.DefaultModel = next.DefaultModel
+		}
+	}
+	if err := c.cfg.Save(); err != nil {
+		c.mu.Unlock()
+		return ProviderState{}, err
+	}
+	if c.agent != nil {
+		c.agent.UpdateConfig(c.cfg)
+	}
+	if c.session.ID != 0 && c.session.ProviderID == providerID {
+		if err := c.store.SetSessionModel(ctx, c.session.ID, c.cfg.DefaultProvider, c.cfg.DefaultModel); err != nil {
+			c.mu.Unlock()
+			return ProviderState{}, err
+		}
+		session, err := c.store.GetSession(ctx, c.session.ID)
+		if err != nil {
+			c.mu.Unlock()
+			return ProviderState{}, err
+		}
+		c.session = session
+		for idx := range c.sessions {
+			if c.sessions[idx].ID == session.ID {
+				c.sessions[idx] = session
+			}
+		}
+		if c.runtime != nil {
+			c.runtime.SetSession(session)
+		}
+	}
+	state := c.providerStateLocked()
+	c.mu.Unlock()
+	c.broadcast("snapshot", c.State())
+	return state, nil
+}
+
 // SetTheme updates the web theme preference.
 func (c *Controller) SetTheme(theme string) {
 	theme = strings.ToLower(strings.TrimSpace(theme))
@@ -493,6 +731,126 @@ func providerEntryLabel(providerID string, cfg config.Provider) string {
 		return label
 	}
 	return providerID
+}
+
+func (c *Controller) providerStateLocked() ProviderState {
+	catalog := make([]ProviderCatalogItem, 0, len(provider.Catalog()))
+	for _, item := range provider.Catalog() {
+		catalog = append(catalog, ProviderCatalogItem{
+			ID:             item.ID,
+			Title:          item.Title,
+			Description:    item.Description,
+			DefaultBaseURL: item.DefaultBaseURL,
+			ModelHint:      item.ModelHint,
+			Local:          item.Local,
+		})
+	}
+
+	ids := make([]string, 0, len(c.cfg.Providers))
+	for id := range c.cfg.Providers {
+		ids = append(ids, id)
+	}
+	slices.Sort(ids)
+
+	providers := make([]ProviderConfigItem, 0, len(ids))
+	drafts := make(map[string]ProviderDraft, len(ids))
+	for _, id := range ids {
+		cfg := c.cfg.Providers[id]
+		templateID := strings.TrimSpace(cfg.TemplateID)
+		if templateID == "" {
+			if draft, err := provider.BuildDraftForExisting(id, cfg); err == nil {
+				templateID = draft.TemplateID
+			}
+		}
+		providers = append(providers, ProviderConfigItem{
+			ID:           id,
+			Name:         providerEntryLabel(id, cfg),
+			TemplateID:   templateID,
+			Kind:         strings.TrimSpace(cfg.Kind),
+			BaseURL:      strings.TrimSpace(cfg.BaseURL),
+			DefaultModel: strings.TrimSpace(cfg.DefaultModel),
+			Disabled:     cfg.Disabled,
+			Default:      id == c.cfg.DefaultProvider,
+		})
+		if draft, err := provider.BuildDraftForExisting(id, cfg); err == nil {
+			drafts[id] = providerDraftFromCatalog(draft)
+		}
+	}
+
+	return ProviderState{
+		DefaultProvider: strings.TrimSpace(c.cfg.DefaultProvider),
+		DefaultModel:    strings.TrimSpace(c.cfg.DefaultModel),
+		Catalog:         catalog,
+		Providers:       providers,
+		Drafts:          drafts,
+	}
+}
+
+func providerDraftFromCatalog(draft provider.ConnectDraft) ProviderDraft {
+	return ProviderDraft{
+		OriginalProviderID: strings.TrimSpace(draft.OriginalProviderID),
+		ProviderID:         strings.TrimSpace(draft.ProviderID),
+		TemplateID:         strings.TrimSpace(draft.TemplateID),
+		Kind:               strings.TrimSpace(draft.Kind),
+		Name:               strings.TrimSpace(draft.Name),
+		BaseURL:            strings.TrimSpace(draft.BaseURL),
+		APIKey:             strings.TrimSpace(draft.APIKey),
+		Model:              strings.TrimSpace(draft.Model),
+		Headers:            cloneHeaderMap(draft.Headers),
+	}
+}
+
+func providerDraftToCatalog(draft ProviderDraft) provider.ConnectDraft {
+	return provider.ConnectDraft{
+		OriginalProviderID: strings.TrimSpace(draft.OriginalProviderID),
+		ProviderID:         strings.TrimSpace(draft.ProviderID),
+		TemplateID:         strings.TrimSpace(draft.TemplateID),
+		Kind:               strings.TrimSpace(draft.Kind),
+		Name:               strings.TrimSpace(draft.Name),
+		BaseURL:            strings.TrimSpace(draft.BaseURL),
+		APIKey:             strings.TrimSpace(draft.APIKey),
+		Model:              strings.TrimSpace(draft.Model),
+		Headers:            cloneHeaderMap(draft.Headers),
+	}
+}
+
+func cloneHeaderMap(src map[string]string) map[string]string {
+	if len(src) == 0 {
+		return map[string]string{}
+	}
+	dst := make(map[string]string, len(src))
+	for key, value := range src {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		dst[key] = strings.TrimSpace(value)
+	}
+	return dst
+}
+
+func mergeProviderEditDefaults(next *config.Provider, existing config.Provider) {
+	next.AuthMethod = existing.AuthMethod
+	next.APIKeyEnv = existing.APIKeyEnv
+	next.ModelPreset = existing.ModelPreset
+	next.ContextWindow = existing.ContextWindow
+	next.AutoCompactAt = existing.AutoCompactAt
+	next.Stream = existing.Stream
+	next.Timeout = existing.Timeout
+	next.Disabled = false
+}
+
+func applyNewProviderDefaults(next *config.Provider, autoCompactAt int) {
+	if next.ContextWindow == 0 {
+		next.ContextWindow = 32768
+	}
+	if autoCompactAt <= 0 {
+		autoCompactAt = 80
+	}
+	next.AutoCompactAt = autoCompactAt
+	next.Stream = true
+	next.Timeout = 2 * time.Minute
+	next.Disabled = false
 }
 
 func (c *Controller) initialSession(ctx context.Context, mode StartupMode) (domain.Session, error) {

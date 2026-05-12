@@ -271,6 +271,44 @@ func (s *Server) handleRPC(ctx context.Context, method string, params json.RawMe
 			return nil, err
 		}
 		return s.controller.State(), nil
+	case "provider_state":
+		return s.controller.Providers(), nil
+	case "new_provider_draft":
+		var in struct {
+			TemplateID string `json:"template_id"`
+		}
+		if err := decodeParams(params, &in); err != nil {
+			return nil, err
+		}
+		return s.controller.NewProviderDraft(in.TemplateID)
+	case "test_provider":
+		var in uicore.ProviderDraft
+		if err := decodeParams(params, &in); err != nil {
+			return nil, err
+		}
+		return s.controller.TestProvider(ctx, in)
+	case "save_provider":
+		var in uicore.ProviderDraft
+		if err := decodeParams(params, &in); err != nil {
+			return nil, err
+		}
+		providers, err := s.controller.SaveProvider(ctx, in)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"providers": providers, "state": s.controller.State()}, nil
+	case "delete_provider":
+		var in struct {
+			ProviderID string `json:"provider_id"`
+		}
+		if err := decodeParams(params, &in); err != nil {
+			return nil, err
+		}
+		providers, err := s.controller.DeleteProvider(ctx, in.ProviderID)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"providers": providers, "state": s.controller.State()}, nil
 	case "set_permission_profile":
 		var in struct {
 			Profile string `json:"profile"`

@@ -29,9 +29,12 @@ const indexHTML = `<!doctype html>
     .modal-backdrop-lite { position: fixed; inset: 0; background: rgba(0, 0, 0, .45); z-index: 1050; display: grid; place-items: center; padding: 1rem; }
     .model-dialog { width: min(760px, 100%); max-height: min(720px, 90vh); overflow: hidden; display: flex; flex-direction: column; }
     .model-list { overflow: auto; }
+    .provider-dialog { width: min(980px, 100%); max-height: min(820px, 92vh); overflow: hidden; display: flex; flex-direction: column; }
+    .provider-body { min-height: 0; display: grid; grid-template-columns: 280px minmax(0, 1fr); }
+    .provider-list, .provider-form { min-height: 0; overflow: auto; }
     .toast-stack { position: fixed; right: 1rem; bottom: 1rem; z-index: 1100; max-width: min(420px, calc(100vw - 2rem)); }
     pre { white-space: pre-wrap; word-break: break-word; margin: 0; }
-    @media (max-width: 900px) { .app-shell { grid-template-columns: 1fr; } .sidebar, .sidebar-resizer { display: none; } .topbar, .composer { grid-column: 1; } }
+    @media (max-width: 900px) { .app-shell { grid-template-columns: 1fr; } .sidebar, .sidebar-resizer { display: none; } .topbar, .composer { grid-column: 1; } .provider-body { grid-template-columns: 1fr; } }
   </style>
 </head>
 <body class="bg-body text-body">
@@ -44,6 +47,7 @@ const indexHTML = `<!doctype html>
       </div>
       <div class="d-flex align-items-center gap-2">
         <span class="badge text-bg-secondary" x-text="connected ? 'connected' : 'offline'"></span>
+        <button class="btn btn-sm btn-outline-secondary" title="Providers" @click="openProviderDialog()"><i class="bi bi-plug"></i></button>
         <select class="form-select form-select-sm" x-model="theme" @change="setTheme(theme)" style="width: 8rem">
           <option value="auto">auto</option>
           <option value="dark">dark</option>
@@ -249,6 +253,96 @@ const indexHTML = `<!doctype html>
     </section>
   </div>
 
+  <div class="modal-backdrop-lite" x-show="showProviders" x-transition @keydown.escape.window="closeProviderDialog()" style="display: none;">
+    <section class="provider-dialog bg-body border rounded shadow">
+      <header class="d-flex align-items-center justify-content-between gap-3 p-3 border-bottom">
+        <div>
+          <div class="fw-semibold"><i class="bi bi-plug me-1"></i> Providers</div>
+          <div class="small text-secondary" x-text="providerState.default_provider ? providerState.default_provider + ' / ' + (providerState.default_model || '-') : 'No default provider'"></div>
+        </div>
+        <button type="button" class="btn btn-sm btn-outline-secondary" @click="closeProviderDialog()"><i class="bi bi-x-lg"></i></button>
+      </header>
+      <div class="provider-body">
+        <aside class="provider-list border-end">
+          <div class="p-3 border-bottom d-flex align-items-center justify-content-between gap-2">
+            <span class="small text-secondary">Configured</span>
+            <button type="button" class="btn btn-sm btn-outline-primary" @click="addProvider()"><i class="bi bi-plus-lg"></i></button>
+          </div>
+          <div class="list-group list-group-flush">
+            <template x-if="providerRows().length === 0">
+              <div class="list-group-item text-secondary">None</div>
+            </template>
+            <template x-for="item in providerRows()" :key="item.id">
+              <div class="list-group-item d-flex align-items-start gap-2" :class="{'active': providerDraft?.original_provider_id === item.id || providerDraft?.provider_id === item.id}">
+                <button type="button" class="btn btn-sm p-0 border-0 bg-transparent flex-grow-1 text-start" :class="{'text-white': providerDraft?.original_provider_id === item.id || providerDraft?.provider_id === item.id}" @click="editProvider(item.id)">
+                  <span class="fw-semibold" x-text="item.name || item.id"></span>
+                  <span class="d-block small opacity-75">
+                    <span x-text="item.default_model || '-'"></span>
+                    <span class="badge text-bg-primary ms-1" x-show="item.default">default</span>
+                  </span>
+                </button>
+                <button type="button" class="btn btn-sm" :class="(providerDraft?.original_provider_id === item.id || providerDraft?.provider_id === item.id) ? 'btn-outline-light' : 'btn-outline-danger'" title="Delete provider" @click.stop="deleteProvider(item.id)">
+                  <i class="bi bi-trash"></i>
+                </button>
+              </div>
+            </template>
+          </div>
+        </aside>
+        <form class="provider-form p-3" @submit.prevent="saveProvider()">
+          <template x-if="providerDraft">
+            <div class="row g-3">
+              <div class="col-md-6">
+                <label class="form-label small text-secondary">Template</label>
+                <select class="form-select" x-model="providerDraft.template_id" @change="providerTemplateChanged()">
+                  <template x-for="template in providerTemplates()" :key="template.id">
+                    <option :value="template.id" x-text="template.title"></option>
+                  </template>
+                </select>
+              </div>
+              <div class="col-md-6">
+                <label class="form-label small text-secondary">Provider ID</label>
+                <input class="form-control" x-model="providerDraft.provider_id" autocomplete="off">
+              </div>
+              <div class="col-md-6">
+                <label class="form-label small text-secondary">Name</label>
+                <input class="form-control" x-model="providerDraft.name" autocomplete="off">
+              </div>
+              <div class="col-md-6">
+                <label class="form-label small text-secondary">Model</label>
+                <input class="form-control" x-model="providerDraft.model" autocomplete="off">
+              </div>
+              <div class="col-12">
+                <label class="form-label small text-secondary">Base URL</label>
+                <input class="form-control" x-model="providerDraft.base_url" autocomplete="off">
+              </div>
+              <div class="col-12">
+                <label class="form-label small text-secondary">API key</label>
+                <input class="form-control" type="password" x-model="providerDraft.api_key" autocomplete="off">
+              </div>
+              <div class="col-12">
+                <label class="form-label small text-secondary">Headers JSON</label>
+                <textarea class="form-control font-monospace" rows="4" x-model="providerHeadersText" spellcheck="false"></textarea>
+              </div>
+              <div class="col-12" x-show="providerStatus">
+                <div class="alert mb-0" :class="providerStatusKind === 'success' ? 'alert-success' : (providerStatusKind === 'danger' ? 'alert-danger' : 'alert-secondary')" x-text="providerStatus"></div>
+              </div>
+            </div>
+          </template>
+          <div class="text-secondary" x-show="!providerDraft">Select or add a provider</div>
+          <footer class="d-flex justify-content-end gap-2 mt-3 pt-3 border-top">
+            <button type="button" class="btn btn-outline-secondary" @click="testProvider()" :disabled="!providerDraft || providerTesting">
+              <span class="spinner-border spinner-border-sm me-1" x-show="providerTesting"></span>Test
+            </button>
+            <button type="submit" class="btn btn-primary" :disabled="!providerDraft || providerSaving">
+              <span class="spinner-border spinner-border-sm me-1" x-show="providerSaving"></span>Save
+            </button>
+            <button type="button" class="btn btn-outline-secondary" @click="closeProviderDialog()">Cancel</button>
+          </footer>
+        </form>
+      </div>
+    </section>
+  </div>
+
   <div class="toast-stack" x-show="toast" x-transition style="display: none;">
     <div class="alert alert-danger shadow mb-0" role="status" x-text="toast"></div>
   </div>
@@ -258,6 +352,7 @@ const indexHTML = `<!doctype html>
       return {
         ws: null, nextID: 1, pending: {}, state: {}, connected: false, draft: '', showPermissions: false,
         showModels: false, modelLoading: false, modelQuery: '', modelOptions: [],
+        showProviders: false, providerState: {catalog: [], providers: [], drafts: {}}, providerDraft: null, providerHeadersText: '{}', providerStatus: '', providerStatusKind: 'secondary', providerTesting: false, providerSaving: false,
         theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, error: '', toast: '', toastTimer: null,
         init() { this.clampSidebarRatio(); this.applyTheme(); this.connect(); },
         applyTheme() {
@@ -384,6 +479,86 @@ const indexHTML = `<!doctype html>
           this.rpc('set_model', {provider_id: model.provider_id, model_id: model.model_id}).then(s => {
             this.applyState(s); this.closeModelDialog();
           });
+        },
+        openProviderDialog() {
+          this.showProviders = true; this.providerStatus = ''; this.providerStatusKind = 'secondary';
+          this.rpc('provider_state', {}).then(state => {
+            this.providerState = state || {catalog: [], providers: [], drafts: {}};
+            if (this.providerRows().length > 0) this.editProvider(this.providerRows()[0].id);
+            else this.addProvider();
+          });
+        },
+        closeProviderDialog() { this.showProviders = false; this.providerDraft = null; this.providerStatus = ''; },
+        providerTemplates() { return this.providerState.catalog || []; },
+        providerRows() { return this.providerState.providers || []; },
+        setProviderDraft(draft) {
+          this.providerDraft = Object.assign({headers: {}}, draft || {});
+          this.providerHeadersText = JSON.stringify(this.providerDraft.headers || {}, null, 2);
+        },
+        editProvider(id) {
+          const draft = (this.providerState.drafts || {})[id];
+          if (draft) { this.setProviderDraft(draft); this.providerStatus = ''; }
+        },
+        addProvider() {
+          const first = this.providerTemplates()[0]?.id || 'openai-compatible';
+          this.rpc('new_provider_draft', {template_id: first}).then(draft => { this.setProviderDraft(draft); this.providerStatus = ''; });
+        },
+        providerTemplateChanged() {
+          if (!this.providerDraft) return;
+          const current = this.providerDraft;
+          this.rpc('new_provider_draft', {template_id: current.template_id}).then(next => {
+            next.original_provider_id = current.original_provider_id || next.original_provider_id;
+            next.provider_id = current.provider_id || next.provider_id;
+            next.name = current.name || next.name;
+            next.api_key = current.api_key || '';
+            this.setProviderDraft(next);
+          });
+        },
+        providerDraftPayload() {
+          if (!this.providerDraft) return null;
+          let headers = {};
+          try {
+            headers = this.providerHeadersText.trim() ? JSON.parse(this.providerHeadersText) : {};
+          } catch (err) {
+            this.providerStatus = 'Invalid headers JSON: ' + err.message; this.providerStatusKind = 'danger';
+            return null;
+          }
+          if (!headers || Array.isArray(headers) || typeof headers !== 'object') {
+            this.providerStatus = 'Headers JSON must be an object'; this.providerStatusKind = 'danger';
+            return null;
+          }
+          const cleanHeaders = {};
+          for (const [key, value] of Object.entries(headers)) cleanHeaders[key] = String(value);
+          return Object.assign({}, this.providerDraft, {headers: cleanHeaders});
+        },
+        testProvider() {
+          const payload = this.providerDraftPayload(); if (!payload) return;
+          this.providerTesting = true; this.providerStatus = ''; this.providerStatusKind = 'secondary';
+          this.rpc('test_provider', payload).then(result => {
+            const count = result.model_count || 0;
+            const sample = (result.models || []).slice(0, 4).join(', ');
+            this.providerStatus = 'Test passed: ' + count + ' model' + (count === 1 ? '' : 's') + (sample ? ' (' + sample + ')' : '');
+            this.providerStatusKind = 'success';
+          }).catch(err => { this.providerStatus = err.message; this.providerStatusKind = 'danger'; }).finally(() => { this.providerTesting = false; });
+        },
+        saveProvider() {
+          const payload = this.providerDraftPayload(); if (!payload) return;
+          this.providerSaving = true; this.providerStatus = ''; this.providerStatusKind = 'secondary';
+          this.rpc('save_provider', payload).then(result => {
+            this.providerState = result.providers || result;
+            if (result.state) this.applyState(result.state);
+            this.providerStatus = 'Saved provider'; this.providerStatusKind = 'success';
+            this.editProvider(payload.provider_id);
+          }).catch(err => { this.providerStatus = err.message; this.providerStatusKind = 'danger'; }).finally(() => { this.providerSaving = false; });
+        },
+        deleteProvider(id) {
+          if (!id || !confirm('Delete this provider?')) return;
+          this.rpc('delete_provider', {provider_id: id}).then(result => {
+            this.providerState = result.providers || result;
+            if (result.state) this.applyState(result.state);
+            const next = this.providerRows()[0];
+            if (next) this.editProvider(next.id); else this.addProvider();
+          }).catch(err => this.showToast(err.message));
         },
         setTheme(theme) { writePreference('theme', theme); this.applyTheme(); this.rpc('set_theme', {theme}); }
       }
