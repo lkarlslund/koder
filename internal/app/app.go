@@ -3718,7 +3718,7 @@ func (m *App) sessionUsageSummary(sessionID int64) (domain.Usage, bool) {
 	if err != nil {
 		return domain.Usage{}, false
 	}
-	messages, parts := domain.LegacyTranscriptFromTimeline(sessionID, timeline)
+	messages, parts := renderTranscriptFromTimeline(sessionID, timeline)
 	return sessionctx.LatestUsage(messages, parts)
 }
 
@@ -4877,7 +4877,7 @@ func mapsCloneToolStates(src map[domain.ToolKind]bool) map[domain.ToolKind]bool 
 
 func (m *App) loadChatState(chat domain.Chat, timeline []domain.TimelineItem, messages []domain.Message, parts map[int64][]domain.Part, approvals []store.Approval) {
 	if len(timeline) > 0 {
-		messages, parts = domain.LegacyTranscriptFromTimeline(chat.SessionID, timeline)
+		messages, parts = renderTranscriptFromTimeline(chat.SessionID, timeline)
 	}
 	if chat.ID == 0 && len(timeline) == 0 && len(messages) == 0 && len(parts) == 0 && len(approvals) == 0 {
 		if m.currentRuntime == nil {
@@ -4907,7 +4907,7 @@ func clonePartsByMessage(parts map[int64][]domain.Part) map[int64][]domain.Part 
 func (m *App) activeMessages() []domain.Message {
 	if m.hasSnapshotChatState() {
 		if len(m.currentSnapshot.Timeline) > 0 {
-			messages, _ := domain.LegacyTranscriptFromTimeline(m.currentSnapshot.Chat.SessionID, m.currentSnapshot.Timeline)
+			messages, _ := renderTranscriptFromTimeline(m.currentSnapshot.Chat.SessionID, m.currentSnapshot.Timeline)
 			return messages
 		}
 		return m.currentSnapshot.Messages
@@ -4918,7 +4918,7 @@ func (m *App) activeMessages() []domain.Message {
 func (m *App) activeParts() map[int64][]domain.Part {
 	if m.hasSnapshotChatState() {
 		if len(m.currentSnapshot.Timeline) > 0 {
-			_, parts := domain.LegacyTranscriptFromTimeline(m.currentSnapshot.Chat.SessionID, m.currentSnapshot.Timeline)
+			_, parts := renderTranscriptFromTimeline(m.currentSnapshot.Chat.SessionID, m.currentSnapshot.Timeline)
 			return parts
 		}
 		return m.currentSnapshot.Parts
@@ -5011,12 +5011,15 @@ func (m *App) upsertCurrentSnapshotTimelineFromMessage(message domain.Message, p
 		m.currentSnapshot.Chat = m.currentChat
 	}
 	m.ensureCurrentSnapshotTimeline()
+	if message.Role == domain.MessageRoleTool && m.attachToolMessageToTimeline(parts) {
+		return
+	}
 	now := time.Now().UTC()
 	item := domain.TimelineItem{
 		ID:        message.ID,
 		ChatID:    firstNonZeroAppInt64(message.ChatID, m.currentSnapshot.Chat.ID, m.currentChat.ID),
 		Seq:       int64(len(m.currentSnapshot.Timeline) + 1),
-		Content:   domain.LegacyMessage{Role: message.Role, Summary: message.Summary, Parts: slices.Clone(parts)},
+		Content:   timelineContentFromMessageParts(message, parts),
 		CreatedAt: message.CreatedAt,
 		UpdatedAt: now,
 	}
@@ -5038,17 +5041,96 @@ func (m *App) upsertCurrentSnapshotTimelineFromMessage(message domain.Message, p
 		if item.CreatedAt.IsZero() {
 			item.CreatedAt = existing.CreatedAt
 		}
-		if legacy, ok := existing.Content.(domain.LegacyMessage); ok {
-			item.Content = domain.LegacyMessage{
-				Role:    firstNonZeroMessageRole(message.Role, legacy.Role),
-				Summary: firstNonEmptyString(message.Summary, legacy.Summary),
-				Parts:   mergeAppLegacyParts(legacy.Parts, parts),
-			}
-		}
 		m.currentSnapshot.Timeline[idx] = item
 		return
 	}
 	m.currentSnapshot.Timeline = append(m.currentSnapshot.Timeline, item)
+}
+
+func (m *App) attachToolMessageToTimeline(parts []domain.Part) bool {
+	updated := false
+	for _, part := range parts {
+		if m.attachToolPartToTimeline(part) {
+			updated = true
+		}
+	}
+	return updated
+}
+
+func (m *App) attachToolPartToTimeline(part domain.Part) bool {
+	switch payload := part.Payload.(type) {
+	case domain.ToolOutputPayload:
+		if strings.TrimSpace(payload.ToolCallID) == "" {
+			return false
+		}
+		if approvalID, ok := approvalIDFromToolOutput(payload); ok {
+			status := domain.ApprovalStatus(payload.Args["status"])
+			return m.updateTimelineToolCall(payload.ToolCallID, func(call *domain.ToolCall) {
+				if call.Approval == nil {
+					call.Approval = &domain.ApprovalRequest{ID: approvalID}
+				}
+				call.Approval.Status = status
+				if call.Approval.Body == "" {
+					call.Approval.Body = payload.Text
+				}
+				if status == domain.ApprovalStatusApproved {
+					call.Status = domain.ToolStatusRunning
+				}
+				if status == domain.ApprovalStatusDenied {
+					call.Status = domain.ToolStatusDenied
+				}
+			})
+		}
+		return m.updateTimelineToolCall(payload.ToolCallID, func(call *domain.ToolCall) {
+			call.Result = &domain.ToolResult{Text: payload.Text, Diff: payload.Diff, Data: toolResultPayloadFromAny(payload.Result), Status: payload.Status}
+			call.Error = nil
+			call.Status = domain.ToolStatusDone
+			if call.CompletedAt.IsZero() {
+				call.CompletedAt = part.CreatedAt
+			}
+		})
+	case domain.ApprovalRequestPayload:
+		if strings.TrimSpace(payload.ToolCallID) == "" {
+			return false
+		}
+		return m.updateTimelineToolCall(payload.ToolCallID, func(call *domain.ToolCall) {
+			call.Approval = &domain.ApprovalRequest{ID: payload.ApprovalID, Status: payload.Status, Body: payload.Body}
+			call.Status = domain.ToolStatusPending
+		})
+	default:
+		return false
+	}
+}
+
+func approvalIDFromToolOutput(payload domain.ToolOutputPayload) (int64, bool) {
+	raw := strings.TrimSpace(payload.Args["approval_id"])
+	if raw == "" {
+		return 0, false
+	}
+	id, err := strconv.ParseInt(raw, 10, 64)
+	return id, err == nil && id > 0
+}
+
+func (m *App) updateTimelineToolCall(toolCallID string, update func(*domain.ToolCall)) bool {
+	toolCallID = strings.TrimSpace(toolCallID)
+	if toolCallID == "" {
+		return false
+	}
+	for idx := len(m.currentSnapshot.Timeline) - 1; idx >= 0; idx-- {
+		assistant, ok := m.currentSnapshot.Timeline[idx].Content.(domain.AssistantMessage)
+		if !ok {
+			continue
+		}
+		call := assistant.ToolByID(domain.ToolCallID(toolCallID))
+		if call == nil {
+			continue
+		}
+		update(call)
+		m.currentSnapshot.Timeline[idx].Content = assistant
+		m.currentSnapshot.Timeline[idx].UpdatedAt = time.Now().UTC()
+		return true
+	}
+	return false
 }
 
 func (m *App) upsertCurrentSnapshotTimelineItem(item domain.TimelineItem) {
@@ -5083,11 +5165,98 @@ func (m *App) ensureCurrentSnapshotTimeline() {
 			ID:        message.ID,
 			ChatID:    firstNonZeroAppInt64(message.ChatID, m.currentSnapshot.Chat.ID, m.currentChat.ID),
 			Seq:       int64(idx + 1),
-			Content:   domain.LegacyMessage{Role: message.Role, Summary: message.Summary, Parts: slices.Clone(m.currentSnapshot.Parts[message.ID])},
+			Content:   timelineContentFromMessageParts(message, m.currentSnapshot.Parts[message.ID]),
 			CreatedAt: createdAt,
 			UpdatedAt: createdAt,
 		})
 	}
+}
+
+func timelineContentFromMessageParts(message domain.Message, parts []domain.Part) domain.TimelineContent {
+	switch message.Role {
+	case domain.MessageRoleUser:
+		content := domain.UserMessage{Text: firstPartText(parts, domain.PartKindText)}
+		for _, part := range parts {
+			switch payload := part.Payload.(type) {
+			case domain.AttachmentPayload:
+				content.Attachments = append(content.Attachments, domain.Attachment(payload))
+			case domain.ReferencePayload:
+				content.References = append(content.References, domain.Reference(payload))
+			}
+		}
+		if strings.TrimSpace(content.Text) == "" {
+			content.Text = message.Summary
+		}
+		return content
+	case domain.MessageRoleTool:
+		return timelineToolExecutionFromParts(message, parts)
+	default:
+		content := domain.AssistantMessage{Text: firstPartText(parts, domain.PartKindText)}
+		content.Reasoning.Text = firstPartText(parts, domain.PartKindReasoning)
+		for _, part := range parts {
+			switch payload := part.Payload.(type) {
+			case domain.ToolCallPayload:
+				content.Tools = append(content.Tools, domain.ToolCall{
+					ToolCallID: domain.ToolCallID(payload.ToolCallID),
+					Tool:       payload.Tool,
+					Args:       payload.Args,
+					Status:     domain.ToolStatusPending,
+				})
+			case domain.UsagePayload:
+				usage := payload.Usage
+				content.Usage = &usage
+			}
+		}
+		return content
+	}
+}
+
+func timelineToolExecutionFromParts(message domain.Message, parts []domain.Part) domain.TimelineContent {
+	if len(parts) == 0 {
+		return domain.Notice{Text: message.Summary, Level: "info"}
+	}
+	for _, part := range parts {
+		switch payload := part.Payload.(type) {
+		case domain.ToolOutputPayload:
+			return domain.ToolExecution{
+				Tool: payload.Tool,
+				Args: payload.Args,
+				Result: &domain.ToolResult{
+					Text:   payload.Text,
+					Diff:   payload.Diff,
+					Data:   toolResultPayloadFromAny(payload.Result),
+					Status: payload.Status,
+				},
+				StartedAt: message.CreatedAt,
+				EndedAt:   part.CreatedAt,
+			}
+		case domain.EventNoticePayload:
+			return domain.Notice{Text: payload.Text, Level: payload.Severity, Kind: payload.Kind, Reason: payload.Reason, Title: payload.Title, Subtitle: payload.Subtitle, Tool: payload.Tool, ToolCallID: payload.ToolCallID, Count: payload.Count, Limit: payload.Limit}
+		case domain.ApprovalRequestPayload:
+			return domain.Notice{Text: payload.Body, Kind: "approval_request", Tool: payload.Tool, ToolCallID: payload.ToolCallID}
+		case domain.SystemNoticePayload:
+			return domain.Notice{Text: payload.Text, Kind: "system_notice"}
+		case domain.CompactionPayload:
+			return domain.Compaction{Summary: payload.Summary, Trigger: payload.Trigger, Status: payload.Status, BeforeContextTokens: payload.BeforeContextTokens, AfterContextTokens: payload.AfterContextTokens}
+		}
+	}
+	return domain.Notice{Text: message.Summary, Level: "info"}
+}
+
+func toolResultPayloadFromAny(value any) domain.ToolResultPayload {
+	if payload, ok := value.(domain.ToolResultPayload); ok {
+		return payload
+	}
+	return nil
+}
+
+func firstPartText(parts []domain.Part, kind domain.PartKind) string {
+	for _, part := range parts {
+		if part.Kind == kind {
+			return part.Text()
+		}
+	}
+	return ""
 }
 
 func (m *App) upsertCurrentSnapshotMessageParts(message domain.Message, parts []domain.Part) (domain.Message, []domain.Part, []domain.Part, bool) {
@@ -5142,39 +5311,6 @@ func firstNonZeroAppInt64(values ...int64) int64 {
 		}
 	}
 	return 0
-}
-
-func firstNonZeroMessageRole(values ...domain.MessageRole) domain.MessageRole {
-	for _, value := range values {
-		if value != "" {
-			return value
-		}
-	}
-	return ""
-}
-
-func mergeAppLegacyParts(existing, incoming []domain.Part) []domain.Part {
-	if len(incoming) == 0 {
-		return slices.Clone(existing)
-	}
-	out := slices.Clone(existing)
-	byID := make(map[int64]int, len(out))
-	for idx := range out {
-		if out[idx].ID != 0 {
-			byID[out[idx].ID] = idx
-		}
-	}
-	for _, part := range incoming {
-		if part.ID != 0 {
-			if idx, ok := byID[part.ID]; ok {
-				out[idx] = part
-				continue
-			}
-			byID[part.ID] = len(out)
-		}
-		out = append(out, part)
-	}
-	return out
 }
 
 func (m *App) upsertCurrentSnapshotApproval(approval store.Approval) {

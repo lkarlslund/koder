@@ -758,9 +758,20 @@ func toolRunApprovalRequest(part domain.Part) (ui.ToolRun, bool) {
 		Title:      presentation.Title,
 		Subtitle:   presentation.Subtitle,
 		Preview:    preview,
-		Status:     ui.ToolRunStatusPendingApproval,
+		Status:     uiStatusForApprovalStatus(payload.Status),
 	}
 	return run, tool != ""
+}
+
+func uiStatusForApprovalStatus(status domain.ApprovalStatus) ui.ToolRunStatus {
+	switch status {
+	case domain.ApprovalStatusApproved:
+		return ui.ToolRunStatusApproved
+	case domain.ApprovalStatusDenied:
+		return ui.ToolRunStatusDenied
+	default:
+		return ui.ToolRunStatusPendingApproval
+	}
 }
 
 func toolRunApprovalReply(part domain.Part) (ui.ToolRun, bool) {
