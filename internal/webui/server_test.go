@@ -164,6 +164,12 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(string(body), `set_model`) {
 		t.Fatalf("expected model dialog to set model")
 	}
+	if !strings.Contains(string(body), `milestoneItems()`) {
+		t.Fatalf("expected sidebar to render milestones")
+	}
+	if !strings.Contains(string(body), `todoItems()`) {
+		t.Fatalf("expected sidebar to render todos")
+	}
 }
 
 func TestWebSocketSetModelReturnsUpdatedState(t *testing.T) {

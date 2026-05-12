@@ -536,6 +536,7 @@ func (c *Controller) forwardRuntime(chatID int64, updates <-chan chat.Update) {
 	for update := range updates {
 		c.mu.RLock()
 		current := c.chat.ID
+		sessionID := c.session.ID
 		c.mu.RUnlock()
 		if current != chatID {
 			return
@@ -545,9 +546,24 @@ func (c *Controller) forwardRuntime(chatID int64, updates <-chan chat.Update) {
 			c.lastErr = update.Event.Err.Error()
 			c.mu.Unlock()
 		}
+		c.refreshPlanningState(context.Background(), sessionID)
 		c.broadcast("chat_update", update)
 		c.broadcast("snapshot", c.State())
 	}
+}
+
+func (c *Controller) refreshPlanningState(ctx context.Context, sessionID int64) {
+	if sessionID == 0 {
+		return
+	}
+	milestone, todos := c.planningState(ctx, sessionID)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.session.ID != sessionID {
+		return
+	}
+	c.milestone = milestone
+	c.todos = todos
 }
 
 func (c *Controller) currentRuntime() *chat.Chat {

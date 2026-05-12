@@ -110,6 +110,48 @@ const indexHTML = `<!doctype html>
         <div x-text="statusText()"></div>
       </div>
       <div class="mb-3">
+        <div class="small text-secondary">Milestones</div>
+        <template x-if="milestoneSummary()">
+          <div class="small text-body-secondary mb-2" x-text="milestoneSummary()"></div>
+        </template>
+        <template x-if="milestoneItems().length === 0">
+          <div class="text-secondary">None</div>
+        </template>
+        <div class="list-group list-group-flush mt-2" x-show="milestoneItems().length > 0">
+          <template x-for="milestone in milestoneItems()" :key="milestoneRef(milestone)">
+            <div class="list-group-item bg-transparent px-0 py-2">
+              <div class="d-flex align-items-start justify-content-between gap-2">
+                <div class="text-break">
+                  <span class="fw-semibold" x-text="milestoneTitle(milestone)"></span>
+                  <span class="small text-secondary" x-text="' ' + milestoneRef(milestone)"></span>
+                </div>
+                <span class="badge" :class="milestoneBadge(milestoneStatus(milestone))" x-text="milestoneStatus(milestone)"></span>
+              </div>
+              <div class="small text-secondary mt-1" x-show="milestoneNotes(milestone)" x-text="milestoneNotes(milestone)"></div>
+            </div>
+          </template>
+        </div>
+      </div>
+      <div class="mb-3">
+        <div class="small text-secondary">Todos</div>
+        <template x-if="todoItems().length === 0">
+          <div class="text-secondary">None</div>
+        </template>
+        <div class="list-group list-group-flush mt-2" x-show="todoItems().length > 0">
+          <template x-for="todo in todoItems()" :key="todo.ID || todo.id">
+            <div class="list-group-item bg-transparent px-0 py-2">
+              <div class="d-flex align-items-start gap-2">
+                <i class="bi mt-1" :class="todoIcon(todoStatus(todo))"></i>
+                <div class="text-break">
+                  <div x-text="todo.Content || todo.content"></div>
+                  <div class="small text-secondary" x-text="todoStatus(todo)"></div>
+                </div>
+              </div>
+            </div>
+          </template>
+        </div>
+      </div>
+      <div class="mb-3">
         <div class="d-flex align-items-center justify-content-between">
           <div class="small text-secondary">Permissions</div>
           <button class="btn btn-sm btn-outline-secondary" @click="showPermissions = !showPermissions"><i class="bi bi-shield-lock"></i></button>
@@ -236,6 +278,26 @@ const indexHTML = `<!doctype html>
         statusText() { return this.state.snapshot?.StatusText || this.state.snapshot?.status_text || this.state.snapshot?.Status || 'idle'; },
         activeProvider() { return this.state.session?.provider_id || this.state.session?.ProviderID || ''; },
         activeModel() { return this.state.session?.model_id || this.state.session?.ModelID || ''; },
+        milestones() { return this.state.milestones || this.state.Milestones || {}; },
+        milestoneItems() { return this.milestones().milestones || this.milestones().Milestones || []; },
+        milestoneSummary() { return this.milestones().summary || this.milestones().Summary || ''; },
+        milestoneRef(m) { return m.Ref || m.ref || ''; },
+        milestoneTitle(m) { return m.Title || m.title || this.milestoneRef(m); },
+        milestoneStatus(m) { return m.Status || m.status || 'pending'; },
+        milestoneNotes(m) { return m.Notes || m.notes || ''; },
+        milestoneBadge(status) {
+          if (status === 'completed') return 'text-bg-success';
+          if (status === 'blocked') return 'text-bg-danger';
+          if (status === 'in_progress' || status === 'decomposing' || status === 'executing') return 'text-bg-primary';
+          return 'text-bg-secondary';
+        },
+        todoItems() { return this.state.todos || this.state.Todos || []; },
+        todoStatus(todo) { return todo.Status || todo.status || 'pending'; },
+        todoIcon(status) {
+          if (status === 'completed') return 'bi-check-circle-fill text-success';
+          if (status === 'in_progress') return 'bi-arrow-repeat text-primary';
+          return 'bi-circle text-secondary';
+        },
         chatID(chat) { return chat.ID || chat.id; },
         formatArgs(args) { return args ? JSON.stringify(args, null, 2) : ''; },
         send() { const text = this.draft.trim(); if (!text) return; if (this.handleSlash(text)) { this.draft = ''; return; } this.draft = ''; this.rpc('send_prompt', {text}); },
