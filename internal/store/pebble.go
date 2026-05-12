@@ -400,6 +400,55 @@ func (b *pebbleBackend) UpdateChat(ctx context.Context, chat domain.Chat) error 
 	return nil
 }
 
+func (b *pebbleBackend) DeleteChat(ctx context.Context, chatID int64) error {
+	if err := ensureContext(ctx); err != nil {
+		return err
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	chat, err := b.readChat(chatID)
+	if err != nil {
+		return err
+	}
+	chats, err := b.ListChats(ctx, chat.SessionID)
+	if err != nil {
+		return err
+	}
+	if len(chats) <= 1 {
+		return fmt.Errorf("cannot delete the only chat in a session")
+	}
+	approvalIDs, err := b.approvalIDsForChat(chatID)
+	if err != nil {
+		return err
+	}
+	batch := b.db.NewBatch()
+	defer batch.Close()
+	if err := batch.Delete([]byte(chatKey(chatID)), nil); err != nil {
+		return fmt.Errorf("delete chat: %w", err)
+	}
+	if err := batch.Delete([]byte(chatSessionIndexKey(chat.SessionID, chatID)), nil); err != nil {
+		return fmt.Errorf("delete chat session index: %w", err)
+	}
+	if err := batch.Delete([]byte(collectionRecordKey("chats", chatID)), nil); err != nil && !errors.Is(err, pebble.ErrNotFound) {
+		return fmt.Errorf("delete generic chat: %w", err)
+	}
+	for _, approvalID := range approvalIDs {
+		if err := batch.Delete([]byte(approvalKey(approvalID)), nil); err != nil {
+			return fmt.Errorf("delete approval: %w", err)
+		}
+		if err := batch.Delete([]byte(approvalChatIndexKey(chatID, approvalID)), nil); err != nil {
+			return fmt.Errorf("delete approval chat index: %w", err)
+		}
+		if err := batch.Delete([]byte(approvalPendingIndexKey(chatID, approvalID)), nil); err != nil {
+			return fmt.Errorf("delete approval pending index: %w", err)
+		}
+	}
+	if err := batch.Commit(pebble.Sync); err != nil {
+		return fmt.Errorf("commit delete chat: %w", err)
+	}
+	return nil
+}
+
 func (b *pebbleBackend) ListSessions(ctx context.Context) ([]domain.Session, error) {
 	if err := ensureContext(ctx); err != nil {
 		return nil, err
@@ -1040,6 +1089,27 @@ func (b *pebbleBackend) readApproval(approvalID int64) (Approval, error) {
 	return approval, nil
 }
 
+func (b *pebbleBackend) approvalIDsForChat(chatID int64) ([]int64, error) {
+	prefix := "chat-approval/" + strconvID(chatID)
+	iter, err := b.db.NewIter(&pebble.IterOptions{
+		LowerBound: []byte(prefix),
+		UpperBound: nextPrefix([]byte(prefix)),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("new chat approvals iterator: %w", err)
+	}
+	defer iter.Close()
+	var ids []int64
+	for ok := iter.First(); ok; ok = iter.Next() {
+		approvalID, err := approvalIDFromChatIndex(iter.Key())
+		if err != nil {
+			return nil, err
+		}
+		ids = append(ids, approvalID)
+	}
+	return ids, iter.Error()
+}
+
 func (b *pebbleBackend) readTask(taskID int64) (Task, error) {
 	var task Task
 	if err := b.readRecord(taskKey(taskID), &task); err != nil {
@@ -1166,6 +1236,14 @@ func approvalIDFromPendingIndex(key []byte) (int64, error) {
 	parts := bytes.Split(key, []byte("/"))
 	if len(parts) != 3 {
 		return 0, fmt.Errorf("invalid pending approval index key %q", string(key))
+	}
+	return parseID(parts[2])
+}
+
+func approvalIDFromChatIndex(key []byte) (int64, error) {
+	parts := bytes.Split(key, []byte("/"))
+	if len(parts) != 3 {
+		return 0, fmt.Errorf("invalid chat approval index key %q", string(key))
 	}
 	return parseID(parts[2])
 }

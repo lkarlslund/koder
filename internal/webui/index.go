@@ -29,6 +29,7 @@ const indexHTML = `<!doctype html>
     .modal-backdrop-lite { position: fixed; inset: 0; background: rgba(0, 0, 0, .45); z-index: 1050; display: grid; place-items: center; padding: 1rem; }
     .model-dialog { width: min(760px, 100%); max-height: min(720px, 90vh); overflow: hidden; display: flex; flex-direction: column; }
     .model-list { overflow: auto; }
+    .toast-stack { position: fixed; right: 1rem; bottom: 1rem; z-index: 1100; max-width: min(420px, calc(100vw - 2rem)); }
     pre { white-space: pre-wrap; word-break: break-word; margin: 0; }
     @media (max-width: 900px) { .app-shell { grid-template-columns: 1fr; } .sidebar, .sidebar-resizer { display: none; } .topbar, .composer { grid-column: 1; } }
   </style>
@@ -177,9 +178,14 @@ const indexHTML = `<!doctype html>
         </div>
         <div class="list-group list-group-flush mt-2">
           <template x-for="chat in state.chats || []" :key="chat.ID || chat.id">
-            <button class="list-group-item list-group-item-action" :class="{'active': chatID(chat) === state.active_chat_id}" @click="switchChat(chatID(chat))">
-              <i class="bi bi-chat-left-text"></i> <span x-text="chat.Title || chat.title || 'Chat'"></span>
-            </button>
+            <div class="list-group-item list-group-item-action d-flex align-items-center gap-2" :class="{'active': chatID(chat) === state.active_chat_id}" @click="switchChat(chatID(chat))">
+              <button type="button" class="btn btn-sm p-0 border-0 bg-transparent flex-grow-1 text-start" :class="{'text-white': chatID(chat) === state.active_chat_id}" @click.stop="switchChat(chatID(chat))">
+                <i class="bi bi-chat-left-text"></i> <span x-text="chat.Title || chat.title || 'Chat'"></span>
+              </button>
+              <button type="button" class="btn btn-sm" :class="chatID(chat) === state.active_chat_id ? 'btn-outline-light' : 'btn-outline-danger'" title="Delete chat" @click.stop="deleteChat(chatID(chat))">
+                <i class="bi bi-trash"></i>
+              </button>
+            </div>
           </template>
         </div>
       </div>
@@ -243,12 +249,16 @@ const indexHTML = `<!doctype html>
     </section>
   </div>
 
+  <div class="toast-stack" x-show="toast" x-transition style="display: none;">
+    <div class="alert alert-danger shadow mb-0" role="status" x-text="toast"></div>
+  </div>
+
   <script>
     function koderApp() {
       return {
         ws: null, nextID: 1, pending: {}, state: {}, connected: false, draft: '', showPermissions: false,
         showModels: false, modelLoading: false, modelQuery: '', modelOptions: [],
-        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, error: '',
+        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, error: '', toast: '', toastTimer: null,
         init() { this.clampSidebarRatio(); this.applyTheme(); this.connect(); },
         applyTheme() {
           const resolved = this.theme === 'auto' ? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : this.theme;
@@ -303,7 +313,7 @@ const indexHTML = `<!doctype html>
         rpc(method, params) {
           const id = this.nextID++;
           this.ws.send(JSON.stringify({id, method, params}));
-          return new Promise((resolve, reject) => this.pending[id] = {resolve, reject}).catch(err => { this.error = err.message; throw err; });
+          return new Promise((resolve, reject) => this.pending[id] = {resolve, reject}).catch(err => { this.error = err.message; this.showToast(err.message); throw err; });
         },
         applyState(s) { this.state = s || {}; this.applyTheme(); this.error = this.state.error || ''; this.$nextTick(() => { const el = document.querySelector('.transcript'); if (el) el.scrollTop = el.scrollHeight; }); },
         timeline() { return this.state.snapshot?.Timeline || this.state.snapshot?.timeline || []; },
@@ -344,6 +354,15 @@ const indexHTML = `<!doctype html>
         },
         switchChat(id) { if (id) this.rpc('switch_chat', {chat_id: id}).then(s => this.applyState(s)); },
         newChat() { this.rpc('new_chat', {title: 'Chat'}).then(s => this.applyState(s)); },
+        deleteChat(id) {
+          if (!id || !confirm('Delete this chat?')) return;
+          this.rpc('delete_chat', {chat_id: id}).then(s => this.applyState(s)).catch(err => this.showToast(err.message));
+        },
+        showToast(message) {
+          this.toast = message || '';
+          if (this.toastTimer) clearTimeout(this.toastTimer);
+          this.toastTimer = setTimeout(() => { this.toast = ''; this.toastTimer = null; }, 4500);
+        },
         permissionProfiles() { return this.state.permissions?.profiles || this.state.Permissions?.Profiles || []; },
         activePermission() { return this.state.permissions?.active || this.state.Permissions?.Active || ''; },
         permissionName(profile) { return profile.Name || profile.name; },

@@ -365,6 +365,47 @@ func (b *jsonfsBackend) UpdateChat(ctx context.Context, chat domain.Chat) error 
 	return b.writeChat(updated)
 }
 
+func (b *jsonfsBackend) DeleteChat(ctx context.Context, chatID int64) error {
+	if err := ensureContext(ctx); err != nil {
+		return err
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	chat, err := b.readChat(chatID)
+	if err != nil {
+		return err
+	}
+	chats, err := b.ListChats(ctx, chat.SessionID)
+	if err != nil {
+		return err
+	}
+	if len(chats) <= 1 {
+		return fmt.Errorf("cannot delete the only chat in a session")
+	}
+	if err := os.Remove(filepath.Join(b.root, "chats", formatID(chatID)+".json")); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("delete chat: %w", err)
+	}
+	if err := os.Remove(filepath.Join(b.root, "collections", "chats", formatID(chatID)+".json")); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("delete generic chat: %w", err)
+	}
+	if err := b.rebuildCollectionIndexes("chats"); err != nil {
+		return err
+	}
+	approvals, err := b.allApprovals()
+	if err != nil {
+		return err
+	}
+	for _, approval := range approvals {
+		if approval.ChatID != chatID {
+			continue
+		}
+		if err := os.Remove(filepath.Join(b.root, "approvals", formatID(approval.ID)+".json")); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("delete chat approval: %w", err)
+		}
+	}
+	return nil
+}
+
 func (b *jsonfsBackend) SetChatQueuedInputs(ctx context.Context, chatID int64, items []domain.QueuedInput) error {
 	if err := ensureContext(ctx); err != nil {
 		return err

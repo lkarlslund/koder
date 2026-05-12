@@ -368,6 +368,59 @@ func TestUpdateChatPersistsContextTokens(t *testing.T) {
 	}
 }
 
+func TestDeleteChatRemovesChatTimelineAndApprovals(t *testing.T) {
+	for _, backend := range []string{BackendPebble, BackendJSONFS} {
+		t.Run(backend, func(t *testing.T) {
+			st := openTestStore(t, backend)
+
+			session, err := st.CreateSession(context.Background(), "test", "provider", "model", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			chat, err := st.CreateChat(context.Background(), session.ID, "side", domain.WorkflowRoleExecution, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := st.AppendTimeline(context.Background(), chat.ID, domain.Notice{Text: "hello"}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := st.CreateChatApproval(context.Background(), chat.ID, domain.ToolKindBash, "echo hi"); err != nil {
+				t.Fatal(err)
+			}
+
+			if err := st.DeleteChat(context.Background(), chat.ID); err != nil {
+				t.Fatalf("delete chat: %v", err)
+			}
+			if _, err := st.GetChat(context.Background(), chat.ID); err == nil {
+				t.Fatal("expected deleted chat to be unavailable")
+			}
+			chats, err := st.ListChats(context.Background(), session.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, item := range chats {
+				if item.ID == chat.ID {
+					t.Fatalf("deleted chat still listed: %#v", chats)
+				}
+			}
+			timeline, err := st.TimelineForChat(context.Background(), chat.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(timeline) != 0 {
+				t.Fatalf("expected timeline to be deleted, got %#v", timeline)
+			}
+			approvals, err := st.PendingApprovalsForChat(context.Background(), chat.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(approvals) != 0 {
+				t.Fatalf("expected approvals to be deleted, got %#v", approvals)
+			}
+		})
+	}
+}
+
 func TestAddSessionPermissionRulePersistsAndReplacesByKey(t *testing.T) {
 	for _, backend := range []string{BackendPebble, BackendJSONFS} {
 		t.Run(backend, func(t *testing.T) {

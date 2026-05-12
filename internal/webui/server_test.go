@@ -3,6 +3,7 @@ package webui
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -179,6 +180,15 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(string(body), `writePreference('sidebarRatio'`) {
 		t.Fatalf("expected sidebar split ratio to use shared browser preference storage")
 	}
+	if !strings.Contains(string(body), `delete_chat`) {
+		t.Fatalf("expected chat deletion RPC")
+	}
+	if !strings.Contains(string(body), `deleteChat(chatID(chat))`) {
+		t.Fatalf("expected chat list trash action")
+	}
+	if !strings.Contains(string(body), `showToast`) {
+		t.Fatalf("expected toast error path")
+	}
 }
 
 func TestWebSocketSetModelReturnsUpdatedState(t *testing.T) {
@@ -225,6 +235,56 @@ func TestWebSocketSetModelReturnsUpdatedState(t *testing.T) {
 	}
 	if resp.Result.Snapshot.Session.ModelID != "next-model" {
 		t.Fatalf("expected runtime snapshot next-model, got %q", resp.Result.Snapshot.Session.ModelID)
+	}
+}
+
+func TestWebSocketDeleteChatReturnsUpdatedState(t *testing.T) {
+	ctrl := newTestController(t)
+	if err := ctrl.NewChat(context.Background(), "side chat"); err != nil {
+		t.Fatalf("new chat: %v", err)
+	}
+	deletedID := ctrl.State().ActiveChatID
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoBrowser: true})
+	if err != nil {
+		t.Fatalf("start server: %v", err)
+	}
+	conn, _, err := websocket.Dial(ctx, "ws://"+srv.Addr()+"/ws", nil)
+	if err != nil {
+		t.Fatalf("dial websocket: %v", err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	_ = readMessage(t, ctx, conn)
+	if err := conn.Write(ctx, websocket.MessageText, []byte(fmt.Sprintf(`{"id":1,"method":"delete_chat","params":{"chat_id":%d}}`, deletedID))); err != nil {
+		t.Fatalf("write delete_chat: %v", err)
+	}
+	msg := readRPCResponse(t, ctx, conn, 1)
+	var resp struct {
+		OK     bool `json:"ok"`
+		Result struct {
+			ActiveChatID int64 `json:"active_chat_id"`
+			Chats        []struct {
+				ID int64
+			}
+		} `json:"result"`
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(msg, &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !resp.OK {
+		t.Fatalf("expected delete_chat ok, got %s", resp.Error)
+	}
+	if resp.Result.ActiveChatID == deletedID {
+		t.Fatalf("expected active chat to switch away from %d", deletedID)
+	}
+	for _, chat := range resp.Result.Chats {
+		if chat.ID == deletedID {
+			t.Fatalf("deleted chat still listed: %#v", resp.Result.Chats)
+		}
 	}
 }
 

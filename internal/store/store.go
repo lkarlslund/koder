@@ -34,6 +34,7 @@ type backend interface {
 	GetChat(context.Context, int64) (domain.Chat, error)
 	DefaultChat(context.Context, int64) (domain.Chat, error)
 	UpdateChat(context.Context, domain.Chat) error
+	DeleteChat(context.Context, int64) error
 	SetChatQueuedInputs(context.Context, int64, []domain.QueuedInput) error
 	UpdateSessionWorkspace(context.Context, int64, string, string) error
 	SetSessionPermissionProfile(context.Context, int64, string) error
@@ -206,6 +207,43 @@ func (s *Store) DefaultChat(ctx context.Context, sessionID int64) (domain.Chat, 
 
 func (s *Store) UpdateChat(ctx context.Context, chat domain.Chat) error {
 	return s.backend.UpdateChat(ctx, chat)
+}
+
+// DeleteChat removes a chat and its direct chat-owned persisted data.
+func (s *Store) DeleteChat(ctx context.Context, chatID int64) error {
+	if chatID <= 0 {
+		return fmt.Errorf("delete chat: chat id is required")
+	}
+	chat, err := s.GetChat(ctx, chatID)
+	if err != nil {
+		return err
+	}
+	chats, err := s.ListChats(ctx, chat.SessionID)
+	if err != nil {
+		return err
+	}
+	if len(chats) <= 1 {
+		return fmt.Errorf("cannot delete the only chat in a session")
+	}
+	timeline, err := s.TimelineForChat(ctx, chatID)
+	if err != nil {
+		return err
+	}
+	for _, item := range timeline {
+		if err := s.Timeline().Delete(ctx, item.ID); err != nil {
+			return err
+		}
+	}
+	approvals, err := s.Approvals().List(ctx, ByIndex[Approval]("chat", fmt.Sprint(chatID)))
+	if err != nil {
+		return err
+	}
+	for _, approval := range approvals {
+		if err := s.Approvals().Delete(ctx, approval.ID); err != nil {
+			return err
+		}
+	}
+	return s.backend.DeleteChat(ctx, chatID)
 }
 
 func (s *Store) SetChatQueuedInputs(ctx context.Context, chatID int64, items []domain.QueuedInput) error {

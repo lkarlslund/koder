@@ -217,6 +217,17 @@ func (s *Server) handleRPC(ctx context.Context, method string, params json.RawMe
 		}
 		_ = decodeParams(params, &in)
 		return s.controller.State(), s.controller.NewChat(ctx, in.Title)
+	case "delete_chat":
+		var in struct {
+			ChatID int64 `json:"chat_id"`
+		}
+		if err := decodeParams(params, &in); err != nil {
+			return nil, err
+		}
+		if err := s.controller.DeleteChat(ctx, in.ChatID); err != nil {
+			return nil, err
+		}
+		return s.controller.State(), nil
 	case "approve":
 		var in struct {
 			ID int64 `json:"id"`

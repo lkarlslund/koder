@@ -247,6 +247,67 @@ func (c *Controller) NewChat(ctx context.Context, title string) error {
 	return c.loadSession(ctx, sessionID, chatRecord.ID)
 }
 
+// DeleteChat deletes an idle chat and switches away first when it is active.
+func (c *Controller) DeleteChat(ctx context.Context, chatID int64) error {
+	if chatID <= 0 {
+		return fmt.Errorf("chat id is required")
+	}
+	c.mu.RLock()
+	sessionID := c.session.ID
+	activeChatID := c.chat.ID
+	activeRuntime := c.runtime
+	c.mu.RUnlock()
+	if sessionID == 0 {
+		return fmt.Errorf("no active session")
+	}
+	if c.agent != nil {
+		status, err := c.agent.PollChat(ctx, sessionID, chatID)
+		if err != nil {
+			return err
+		}
+		if status.Busy {
+			return fmt.Errorf("busy chat can not be deleted")
+		}
+	}
+	chats, err := c.store.ListChats(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	if len(chats) <= 1 {
+		return fmt.Errorf("cannot delete the only chat in a session")
+	}
+	target, ok := chatByID(chats, chatID)
+	if !ok {
+		return fmt.Errorf("chat %d not found", chatID)
+	}
+	nextChatID := activeChatID
+	deletingActive := chatID == activeChatID
+	if deletingActive {
+		nextChatID = fallbackChatID(chats, target)
+		if nextChatID == 0 {
+			return fmt.Errorf("no chat to switch to after deletion")
+		}
+		if activeRuntime != nil {
+			activeRuntime.Close()
+		}
+	}
+	if err := c.store.DeleteChat(ctx, chatID); err != nil {
+		return err
+	}
+	if deletingActive {
+		return c.loadSession(ctx, sessionID, nextChatID)
+	}
+	chats, err = c.store.ListChats(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	c.mu.Lock()
+	c.chats = chats
+	c.mu.Unlock()
+	c.broadcast("snapshot", c.State())
+	return nil
+}
+
 // SetTheme updates the web theme preference.
 func (c *Controller) SetTheme(theme string) {
 	theme = strings.ToLower(strings.TrimSpace(theme))
@@ -646,6 +707,31 @@ func newestChat(chats []domain.Chat) domain.Chat {
 		}
 	}
 	return best
+}
+
+func chatByID(chats []domain.Chat, chatID int64) (domain.Chat, bool) {
+	for _, item := range chats {
+		if item.ID == chatID {
+			return item, true
+		}
+	}
+	return domain.Chat{}, false
+}
+
+func fallbackChatID(chats []domain.Chat, deleting domain.Chat) int64 {
+	if deleting.ParentChatID != nil {
+		for _, item := range chats {
+			if item.ID == *deleting.ParentChatID && item.ID != deleting.ID {
+				return item.ID
+			}
+		}
+	}
+	for _, item := range chats {
+		if item.ID != deleting.ID {
+			return item.ID
+		}
+	}
+	return 0
 }
 
 // Touch avoids stale-session ordering when a renderer action changes state.

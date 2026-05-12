@@ -57,6 +57,45 @@ func TestControllerNewChatAndSwitchChat(t *testing.T) {
 	}
 }
 
+func TestControllerDeleteInactiveChat(t *testing.T) {
+	ctrl, st := newTestController(t)
+	active := ctrl.State().ActiveChatID
+	if err := ctrl.NewChat(context.Background(), "side chat"); err != nil {
+		t.Fatalf("new chat: %v", err)
+	}
+	side := ctrl.State().ActiveChatID
+	if err := ctrl.SwitchChat(context.Background(), active); err != nil {
+		t.Fatalf("switch chat: %v", err)
+	}
+	if err := ctrl.DeleteChat(context.Background(), side); err != nil {
+		t.Fatalf("delete chat: %v", err)
+	}
+	if got := ctrl.State().ActiveChatID; got != active {
+		t.Fatalf("expected active chat to stay %d, got %d", active, got)
+	}
+	if _, err := st.GetChat(context.Background(), side); err == nil {
+		t.Fatal("expected side chat to be deleted")
+	}
+}
+
+func TestControllerDeleteActiveChatSwitchesToRemainingChat(t *testing.T) {
+	ctrl, st := newTestController(t)
+	first := ctrl.State().ActiveChatID
+	if err := ctrl.NewChat(context.Background(), "side chat"); err != nil {
+		t.Fatalf("new chat: %v", err)
+	}
+	side := ctrl.State().ActiveChatID
+	if err := ctrl.DeleteChat(context.Background(), side); err != nil {
+		t.Fatalf("delete active chat: %v", err)
+	}
+	if got := ctrl.State().ActiveChatID; got != first {
+		t.Fatalf("expected active chat to switch to %d, got %d", first, got)
+	}
+	if _, err := st.GetChat(context.Background(), side); err == nil {
+		t.Fatal("expected side chat to be deleted")
+	}
+}
+
 func TestControllerModelOptionsLoadsConfiguredModels(t *testing.T) {
 	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/models" {
