@@ -65,6 +65,25 @@ func TestRetainedSurfaceReusesCleanSurface(t *testing.T) {
 	}
 }
 
+func TestRetainedSurfaceReportsFullDamageAfterInvalidate(t *testing.T) {
+	node := &retainedSurfaceTestNode{text: "first"}
+	retained := NewRetainedSurface(node)
+	bounds := Rect{W: 8, H: 2}
+	_ = retained.Surface(&Context{}, bounds)
+
+	node.text = "later"
+	retained.Invalidate()
+	next := retained.Surface(&Context{}, bounds)
+
+	if got := next.Lines()[0]; got != "later   " {
+		t.Fatalf("expected invalidated surface to repaint, got %q", got)
+	}
+	rects, ok := next.DirtyRects()
+	if !ok || len(rects) != 1 || rects[0] != bounds {
+		t.Fatalf("expected invalidated retained surface to report full damage, got %#v ok=%v", rects, ok)
+	}
+}
+
 func TestFlexNodeFocusTraversalSkipsNonFocusableChildren(t *testing.T) {
 	first := &retainedFocusTestNode{retainedSurfaceTestNode: retainedSurfaceTestNode{text: "a"}}
 	passive := &retainedSurfaceTestNode{text: "b"}

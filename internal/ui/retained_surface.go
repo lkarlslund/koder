@@ -74,6 +74,9 @@ func (r *RetainedSurface) PaintInto(ctx *Context, bounds Rect, dst *Surface) []R
 		PaintDirtyNode(ctx, canvas, r.node)
 	}
 	rects := CollectNodeDamage(r.node)
+	if fullPaint && !local.Empty() {
+		rects = []Rect{local}
+	}
 	ClearNodeDirty(r.node)
 	r.bounds = local
 	if bounds.X == 0 && bounds.Y == 0 && dst.SurfaceWidth() == local.W && dst.SurfaceHeight() == local.H {

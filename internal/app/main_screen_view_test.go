@@ -58,6 +58,10 @@ func TestMainScreenViewClearsSidebarWhenHidden(t *testing.T) {
 	if strings.Contains(strings.Join(next.Lines(), "\n"), "SIDEBAR") {
 		t.Fatalf("expected hidden sidebar to clear retained pixels, got %q", next.Lines())
 	}
+	rects, ok := next.DirtyRects()
+	if !ok || len(rects) != 1 || rects[0] != bounds {
+		t.Fatalf("expected sidebar layout change to report full-frame damage, got %#v ok=%v", rects, ok)
+	}
 }
 
 func TestMainScreenViewLayoutChangeMarksNodesDirtyWithoutInvalidation(t *testing.T) {
