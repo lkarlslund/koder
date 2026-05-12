@@ -54,6 +54,31 @@ func TestControllerNewChatAndSwitchChat(t *testing.T) {
 	}
 }
 
+func TestControllerSetPermissionProfileUpdatesActiveChat(t *testing.T) {
+	ctrl, st := newTestController(t)
+	chatID := ctrl.State().ActiveChatID
+	if err := ctrl.SetPermissionProfile(context.Background(), "write-ask"); err != nil {
+		t.Fatalf("set permission profile: %v", err)
+	}
+	chat, err := st.GetChat(context.Background(), chatID)
+	if err != nil {
+		t.Fatalf("get chat: %v", err)
+	}
+	if chat.PermissionProfile != "write-ask" {
+		t.Fatalf("expected chat permission profile write-ask, got %q", chat.PermissionProfile)
+	}
+	if got := ctrl.State().Permissions.Active; got != "write-ask" {
+		t.Fatalf("expected active permission profile write-ask, got %q", got)
+	}
+}
+
+func TestControllerSetPermissionProfileRejectsUnknownProfile(t *testing.T) {
+	ctrl, _ := newTestController(t)
+	if err := ctrl.SetPermissionProfile(context.Background(), "nope"); err == nil {
+		t.Fatal("expected unknown permission profile error")
+	}
+}
+
 func newTestController(t *testing.T) (*Controller, *store.Store) {
 	t.Helper()
 	cfg := config.Default().WithStateDir(t.TempDir())

@@ -12,6 +12,7 @@ import (
 	"github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/permission"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools"
 )
@@ -37,12 +38,19 @@ type State struct {
 	Sessions     []domain.Session    `json:"sessions"`
 	Chats        []domain.Chat       `json:"chats"`
 	ActiveChatID int64               `json:"active_chat_id"`
+	Permissions  PermissionsState    `json:"permissions"`
 	Snapshot     chat.Snapshot       `json:"snapshot"`
 	Milestones   store.MilestonePlan `json:"milestones"`
 	Todos        []store.TodoItem    `json:"todos"`
 	Theme        string              `json:"theme"`
 	Workdir      string              `json:"workdir"`
 	Error        string              `json:"error,omitempty"`
+}
+
+// PermissionsState describes permission profiles available to renderers.
+type PermissionsState struct {
+	Active   string                     `json:"active"`
+	Profiles []permission.ProfileOption `json:"profiles"`
 }
 
 // Controller owns session/chat state independently from any renderer.
@@ -103,6 +111,7 @@ func (c *Controller) State() State {
 		Sessions:     slices.Clone(c.sessions),
 		Chats:        slices.Clone(c.chats),
 		ActiveChatID: c.chat.ID,
+		Permissions:  c.permissionsStateLocked(),
 		Milestones:   c.milestone,
 		Todos:        slices.Clone(c.todos),
 		Theme:        c.theme,
@@ -240,6 +249,52 @@ func (c *Controller) SetTheme(theme string) {
 	c.broadcast("theme", map[string]string{"theme": theme})
 }
 
+// SetPermissionProfile updates the active chat permission profile.
+func (c *Controller) SetPermissionProfile(ctx context.Context, profile string) error {
+	profile = strings.TrimSpace(profile)
+	if profile == "" {
+		return fmt.Errorf("permission profile is required")
+	}
+	if !permission.IsBuiltinProfile(profile) {
+		if _, ok := c.cfg.Permissions.Profiles[profile]; !ok {
+			return fmt.Errorf("unknown permission profile %q", profile)
+		}
+	}
+	c.mu.Lock()
+	session := c.session
+	chatRecord := c.chat
+	c.mu.Unlock()
+	if chatRecord.ID != 0 {
+		chatRecord.PermissionProfile = profile
+		if err := c.store.UpdateChat(ctx, chatRecord); err != nil {
+			return err
+		}
+		c.mu.Lock()
+		c.chat = chatRecord
+		for idx := range c.chats {
+			if c.chats[idx].ID == chatRecord.ID {
+				c.chats[idx].PermissionProfile = profile
+			}
+		}
+		c.mu.Unlock()
+	} else if session.ID != 0 {
+		if err := c.store.SetSessionPermissionProfile(ctx, session.ID, profile); err != nil {
+			return err
+		}
+		session.PermissionProfile = profile
+		c.mu.Lock()
+		c.session = session
+		for idx := range c.sessions {
+			if c.sessions[idx].ID == session.ID {
+				c.sessions[idx].PermissionProfile = profile
+			}
+		}
+		c.mu.Unlock()
+	}
+	c.broadcast("snapshot", c.State())
+	return nil
+}
+
 func (c *Controller) initialSession(ctx context.Context, mode StartupMode) (domain.Session, error) {
 	if c.store == nil {
 		return domain.Session{}, fmt.Errorf("store is unavailable")
@@ -360,6 +415,28 @@ func (c *Controller) currentRuntime() *chat.Chat {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.runtime
+}
+
+func (c *Controller) permissionsStateLocked() PermissionsState {
+	active := strings.TrimSpace(c.chat.PermissionProfile)
+	if active == "" {
+		active = strings.TrimSpace(c.session.PermissionProfile)
+	}
+	if active == "" {
+		active = c.cfg.Permissions.Profile
+	}
+	profiles := permission.BuiltinProfiles()
+	seen := map[string]struct{}{}
+	for _, item := range profiles {
+		seen[item.Name] = struct{}{}
+	}
+	for _, name := range permission.ProfileNames(c.cfg.Permissions) {
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		profiles = append(profiles, permission.ProfileOption{Name: name, Label: permission.DisplayName(name)})
+	}
+	return PermissionsState{Active: active, Profiles: profiles}
 }
 
 func (c *Controller) publishTo(ch chan Event, typ string, payload any) {

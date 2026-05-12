@@ -105,6 +105,21 @@ const indexHTML = `<!doctype html>
       </div>
       <div class="mb-3">
         <div class="d-flex align-items-center justify-content-between">
+          <div class="small text-secondary">Permissions</div>
+          <button class="btn btn-sm btn-outline-secondary" @click="showPermissions = !showPermissions"><i class="bi bi-shield-lock"></i></button>
+        </div>
+        <div class="mt-1" x-text="permissionLabel(activePermission())"></div>
+        <div class="list-group list-group-flush mt-2" x-show="showPermissions">
+          <template x-for="profile in permissionProfiles()" :key="profile.Name || profile.name">
+            <button class="list-group-item list-group-item-action" :class="{'active': permissionName(profile) === activePermission()}" @click="setPermission(permissionName(profile))">
+              <div class="fw-semibold" x-text="profile.Label || profile.label || profile.Name || profile.name"></div>
+              <div class="small opacity-75" x-text="profile.Description || profile.description || ''"></div>
+            </button>
+          </template>
+        </div>
+      </div>
+      <div class="mb-3">
+        <div class="d-flex align-items-center justify-content-between">
           <div class="small text-secondary">Chats</div>
           <button class="btn btn-sm btn-outline-primary" @click="newChat()"><i class="bi bi-plus-lg"></i></button>
         </div>
@@ -144,7 +159,7 @@ const indexHTML = `<!doctype html>
   <script>
     function koderApp() {
       return {
-        ws: null, nextID: 1, pending: {}, state: {}, connected: false, draft: '',
+        ws: null, nextID: 1, pending: {}, state: {}, connected: false, draft: '', showPermissions: false,
         theme: localStorage.getItem('koder.theme') || 'auto', error: '',
         init() { this.applyTheme(); this.connect(); },
         applyTheme() {
@@ -179,9 +194,21 @@ const indexHTML = `<!doctype html>
         statusText() { return this.state.snapshot?.StatusText || this.state.snapshot?.status_text || this.state.snapshot?.Status || 'idle'; },
         chatID(chat) { return chat.ID || chat.id; },
         formatArgs(args) { return args ? JSON.stringify(args, null, 2) : ''; },
-        send() { const text = this.draft.trim(); if (!text) return; this.draft = ''; this.rpc('send_prompt', {text}); },
+        send() { const text = this.draft.trim(); if (!text) return; if (this.handleSlash(text)) { this.draft = ''; return; } this.draft = ''; this.rpc('send_prompt', {text}); },
+        handleSlash(text) {
+          if (text === '/permissions') { this.showPermissions = true; return true; }
+          if (text === '/compact') { this.rpc('compact', {}); return true; }
+          if (text === '/chat new') { this.newChat(); return true; }
+          if (text.startsWith('/')) { this.error = 'Unknown web command: ' + text; return true; }
+          return false;
+        },
         switchChat(id) { if (id) this.rpc('switch_chat', {chat_id: id}).then(s => this.applyState(s)); },
         newChat() { this.rpc('new_chat', {title: 'Chat'}).then(s => this.applyState(s)); },
+        permissionProfiles() { return this.state.permissions?.profiles || this.state.Permissions?.Profiles || []; },
+        activePermission() { return this.state.permissions?.active || this.state.Permissions?.Active || ''; },
+        permissionName(profile) { return profile.Name || profile.name; },
+        permissionLabel(name) { const p = this.permissionProfiles().find(p => this.permissionName(p) === name); return p ? (p.Label || p.label || name) : (name || '-'); },
+        setPermission(profile) { this.rpc('set_permission_profile', {profile}).then(s => { this.applyState(s); this.showPermissions = false; }); },
         setTheme(theme) { localStorage.setItem('koder.theme', theme); this.applyTheme(); this.rpc('set_theme', {theme}); }
       }
     }

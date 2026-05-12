@@ -242,6 +242,14 @@ func (s *Server) handleRPC(ctx context.Context, method string, params json.RawMe
 		}
 		s.controller.SetTheme(in.Theme)
 		return map[string]string{"theme": in.Theme}, nil
+	case "set_permission_profile":
+		var in struct {
+			Profile string `json:"profile"`
+		}
+		if err := decodeParams(params, &in); err != nil {
+			return nil, err
+		}
+		return s.controller.State(), s.controller.SetPermissionProfile(ctx, in.Profile)
 	default:
 		return nil, fmt.Errorf("unknown method %q", method)
 	}

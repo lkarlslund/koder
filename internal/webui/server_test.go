@@ -149,6 +149,12 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(string(body), `@keydown.enter.exact.prevent="send()"`) {
 		t.Fatalf("expected plain enter to submit composer")
 	}
+	if !strings.Contains(string(body), `text === '/permissions'`) {
+		t.Fatalf("expected /permissions to be handled locally")
+	}
+	if !strings.Contains(string(body), `set_permission_profile`) {
+		t.Fatalf("expected permissions UI to call set_permission_profile")
+	}
 }
 
 func newTestController(t *testing.T) *uicore.Controller {
