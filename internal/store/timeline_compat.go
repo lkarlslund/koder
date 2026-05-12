@@ -160,13 +160,7 @@ func (s *Store) PartsForChat(ctx context.Context, chatID int64) ([]domain.Messag
 	if err != nil {
 		return nil, nil, err
 	}
-	messages := make([]domain.Message, 0, len(items))
-	parts := make(map[int64][]domain.Part, len(items))
-	for _, item := range items {
-		msg := legacyMessageFromTimeline(chat.SessionID, item)
-		messages = append(messages, msg)
-		parts[msg.ID] = legacyPartsFromTimeline(item)
-	}
+	messages, parts := domain.LegacyTranscriptFromTimeline(chat.SessionID, items)
 	return messages, parts, nil
 }
 
@@ -175,44 +169,15 @@ func timelineContentForRole(role domain.MessageRole, text string) domain.Timelin
 }
 
 func legacyMessageFromTimeline(sessionID int64, item domain.TimelineItem) domain.Message {
-	return domain.Message{
-		ID:        item.ID,
-		SessionID: sessionID,
-		ChatID:    item.ChatID,
-		Role:      timelineRole(item),
-		Summary:   timelineSummary(item),
-		CreatedAt: item.CreatedAt,
-	}
+	return domain.LegacyMessageFromTimeline(sessionID, item)
 }
 
 func timelineRole(item domain.TimelineItem) domain.MessageRole {
-	switch payload := item.Content.(type) {
-	case domain.LegacyMessage:
-		return payload.Role
-	case domain.UserMessage:
-		return domain.MessageRoleUser
-	case domain.Notice, domain.Compaction:
-		return domain.MessageRoleTool
-	default:
-		return domain.MessageRoleAssistant
-	}
+	return domain.LegacyTimelineRole(item)
 }
 
 func timelineSummary(item domain.TimelineItem) string {
-	switch payload := item.Content.(type) {
-	case domain.LegacyMessage:
-		return payload.Summary
-	case domain.UserMessage:
-		return payload.Text
-	case domain.AssistantMessage:
-		return payload.Text
-	case domain.Notice:
-		return payload.Text
-	case domain.Compaction:
-		return payload.Summary
-	default:
-		return ""
-	}
+	return domain.LegacyTimelineSummary(item)
 }
 
 func applyLegacyPartToTimeline(item *domain.TimelineItem, part domain.Part) error {
@@ -327,71 +292,5 @@ func upsertAttachment(items []domain.Attachment, next domain.Attachment) []domai
 }
 
 func legacyPartsFromTimeline(item domain.TimelineItem) []domain.Part {
-	var parts []domain.Part
-	add := func(kind domain.PartKind, payload domain.PartPayload, offset int64) {
-		part := domain.Part{ID: item.ID*1000 + offset, MessageID: item.ID, Kind: kind, Payload: payload, CreatedAt: item.CreatedAt}
-		part.Body = part.Text()
-		part.MetaJSON = part.LegacyMetaJSON()
-		parts = append(parts, part)
-	}
-	switch payload := item.Content.(type) {
-	case domain.LegacyMessage:
-		parts = make([]domain.Part, 0, len(payload.Parts))
-		for _, part := range payload.Parts {
-			part.MessageID = item.ID
-			if part.Kind == "" && part.Payload != nil {
-				part.Kind = part.Payload.PartKind()
-			}
-			if part.CreatedAt.IsZero() {
-				part.CreatedAt = item.CreatedAt
-			}
-			if part.Body == "" {
-				part.Body = part.Text()
-			}
-			if part.MetaJSON == "" {
-				part.MetaJSON = part.LegacyMetaJSON()
-			}
-			parts = append(parts, part)
-		}
-	case domain.UserMessage:
-		if strings.TrimSpace(payload.Text) != "" {
-			add(domain.PartKindText, domain.TextPayload{Text: payload.Text}, 1)
-		}
-		for idx, attachment := range payload.Attachments {
-			add(domain.PartKindAttachment, domain.AttachmentPayload(attachment), int64(2+idx))
-		}
-		for idx, ref := range payload.References {
-			add(domain.PartKindReference, domain.ReferencePayload(ref), int64(2+len(payload.Attachments)+idx))
-		}
-	case domain.AssistantMessage:
-		offset := int64(1)
-		if strings.TrimSpace(payload.Reasoning.Text) != "" {
-			add(domain.PartKindReasoning, domain.ReasoningPayload{Text: payload.Reasoning.Text}, offset)
-			offset++
-		}
-		if strings.TrimSpace(payload.Text) != "" {
-			add(domain.PartKindText, domain.TextPayload{Text: payload.Text}, offset)
-			offset++
-		}
-		for _, tool := range payload.Tools {
-			add(domain.PartKindToolCall, domain.ToolCallPayload{Tool: tool.Tool, ToolCallID: string(tool.ToolCallID), Args: tool.Args}, offset)
-			offset++
-			if tool.Result != nil {
-				add(domain.PartKindToolOutput, domain.ToolOutputPayload{Tool: tool.Tool, ToolCallID: string(tool.ToolCallID), Args: tool.Args, Status: tool.Result.Status, Text: tool.Result.Text, Diff: tool.Result.Diff}, offset)
-				offset++
-			}
-			if tool.Error != nil {
-				add(domain.PartKindToolOutput, domain.ToolOutputPayload{Tool: tool.Tool, ToolCallID: string(tool.ToolCallID), Args: tool.Args, Status: domain.ToolResultStatusError, Text: tool.Error.Message}, offset)
-				offset++
-			}
-		}
-		if payload.Usage != nil {
-			add(domain.PartKindUsage, domain.UsagePayload{Usage: *payload.Usage}, offset)
-		}
-	case domain.Notice:
-		add(domain.PartKindEventNotice, domain.EventNoticePayload{Text: payload.Text, Kind: payload.Kind, Severity: payload.Level, Tool: payload.Tool, ToolCallID: payload.ToolCallID}, 1)
-	case domain.Compaction:
-		add(domain.PartKindCompaction, domain.CompactionPayload{Summary: payload.Summary, Trigger: payload.Trigger, Status: payload.Status, BeforeContextTokens: payload.BeforeContextTokens, AfterContextTokens: payload.AfterContextTokens}, 1)
-	}
-	return parts
+	return domain.LegacyPartsFromTimeline(item)
 }

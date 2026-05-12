@@ -4896,6 +4896,10 @@ func clonePartsByMessage(parts map[int64][]domain.Part) map[int64][]domain.Part 
 
 func (m *App) activeMessages() []domain.Message {
 	if m.hasSnapshotChatState() {
+		if len(m.currentSnapshot.Timeline) > 0 {
+			messages, _ := domain.LegacyTranscriptFromTimeline(m.currentSnapshot.Chat.SessionID, m.currentSnapshot.Timeline)
+			return messages
+		}
 		return m.currentSnapshot.Messages
 	}
 	return nil
@@ -4903,6 +4907,10 @@ func (m *App) activeMessages() []domain.Message {
 
 func (m *App) activeParts() map[int64][]domain.Part {
 	if m.hasSnapshotChatState() {
+		if len(m.currentSnapshot.Timeline) > 0 {
+			_, parts := domain.LegacyTranscriptFromTimeline(m.currentSnapshot.Chat.SessionID, m.currentSnapshot.Timeline)
+			return parts
+		}
 		return m.currentSnapshot.Parts
 	}
 	return nil
@@ -4917,6 +4925,7 @@ func (m *App) activeApprovals() []store.Approval {
 
 func (m *App) hasSnapshotChatState() bool {
 	return m.currentSnapshot.Chat.ID != 0 ||
+		len(m.currentSnapshot.Timeline) > 0 ||
 		len(m.currentSnapshot.Messages) > 0 ||
 		len(m.currentSnapshot.Parts) > 0 ||
 		len(m.currentSnapshot.Approvals) > 0 ||
