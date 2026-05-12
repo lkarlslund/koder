@@ -3,7 +3,9 @@ package webui
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -139,6 +141,13 @@ func TestIndexServesHTML(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected index status 200, got %d", resp.StatusCode)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read index: %v", err)
+	}
+	if !strings.Contains(string(body), `@keydown.enter.exact.prevent="send()"`) {
+		t.Fatalf("expected plain enter to submit composer")
 	}
 }
 

@@ -135,7 +135,7 @@ const indexHTML = `<!doctype html>
 
     <form class="composer p-3 bg-body" @submit.prevent="send()">
       <div class="input-group">
-        <textarea class="form-control" rows="2" x-model="draft" placeholder="Ask koder or type / for commands" @keydown.meta.enter.prevent="send()" @keydown.ctrl.enter.prevent="send()"></textarea>
+        <textarea class="form-control" rows="2" x-model="draft" placeholder="Ask koder or type / for commands" @keydown.enter.exact.prevent="send()" @keydown.meta.enter.prevent="send()" @keydown.ctrl.enter.prevent="send()"></textarea>
         <button class="btn btn-primary" type="submit"><i class="bi bi-send-fill"></i></button>
       </div>
     </form>
