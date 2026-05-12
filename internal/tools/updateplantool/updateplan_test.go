@@ -67,12 +67,23 @@ func TestPersistResultStoresPlanUpdate(t *testing.T) {
 	if evt.Kind != domain.EventKindStatus || evt.Text != "Plan updated" {
 		t.Fatalf("unexpected event: %#v", evt)
 	}
-	messages, partsByMessage, err := st.PartsForSession(context.Background(), session.ID)
+	chat, err := st.DefaultChat(context.Background(), session.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(messages) != 1 || len(partsByMessage[messages[0].ID]) != 1 {
-		t.Fatalf("unexpected stored plan output: %#v %#v", messages, partsByMessage)
+	items, err := st.TimelineForChat(context.Background(), chat.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("unexpected stored plan output: %#v", items)
+	}
+	exec, ok := items[0].Content.(domain.ToolExecution)
+	if !ok || exec.Result == nil {
+		t.Fatalf("expected plan tool execution, got %#v", items[0])
+	}
+	if _, ok := exec.Result.Data.(domain.UpdatePlanStoredResult); !ok {
+		t.Fatalf("expected typed plan result, got %#v", exec.Result.Data)
 	}
 }
 
@@ -93,11 +104,15 @@ func TestPersistResultRejectsInvalidPlanBeforeWriting(t *testing.T) {
 		t.Fatal("expected invalid plan error")
 	}
 
-	messages, partsByMessage, err := st.PartsForSession(context.Background(), session.ID)
+	chat, err := st.DefaultChat(context.Background(), session.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(messages) != 0 || len(partsByMessage) != 0 {
-		t.Fatalf("expected no partial plan message on error, got %#v %#v", messages, partsByMessage)
+	items, err := st.TimelineForChat(context.Background(), chat.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("expected no partial plan item on error, got %#v", items)
 	}
 }

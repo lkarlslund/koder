@@ -3113,20 +3113,21 @@ func TestModelTaskPersistsTranscriptUpdate(t *testing.T) {
 		t.Fatalf("unexpected task update event: %#v", evt)
 	}
 
-	messages, parts, err := st.PartsForSession(context.Background(), session.ID)
+	items, err := st.TimelineForChat(context.Background(), chat.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(messages) != 1 {
-		t.Fatalf("expected one persisted message, got %d", len(messages))
+	if len(items) != 1 {
+		t.Fatalf("expected one persisted timeline item, got %d", len(items))
 	}
-	if messages[0].Role != domain.MessageRoleTool {
-		t.Fatalf("expected tool role, got %s", messages[0].Role)
+	exec, ok := items[0].Content.(domain.ToolExecution)
+	if !ok || exec.Result == nil {
+		t.Fatalf("expected task tool execution, got %#v", items[0])
 	}
-	if got := parts[messages[0].ID][0].Kind; got != domain.PartKindTaskUpdate {
-		t.Fatalf("expected task update part, got %s", got)
+	if _, ok := exec.Result.Data.(domain.TaskStoredResult); !ok {
+		t.Fatalf("expected typed task result, got %#v", exec.Result.Data)
 	}
-	if got := parts[messages[0].ID][0].Body; got != "write docs" {
+	if got := exec.Result.Text; got != "write docs" {
 		t.Fatalf("unexpected task update body: %q", got)
 	}
 }

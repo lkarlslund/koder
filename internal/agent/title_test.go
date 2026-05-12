@@ -12,21 +12,21 @@ func TestShouldRefreshSessionTitle(t *testing.T) {
 	cases := []struct {
 		name     string
 		session  domain.Session
-		messages []domain.Message
+		timeline []domain.TimelineItem
 		want     bool
 	}{
 		{
 			name: "first completed exchange generates title",
-			messages: []domain.Message{
-				{Role: domain.MessageRoleUser},
-				{Role: domain.MessageRoleAssistant},
+			timeline: []domain.TimelineItem{
+				{Content: domain.UserMessage{}},
+				{Content: domain.AssistantMessage{}},
 			},
 			want: true,
 		},
 		{
 			name: "no assistant yet does not generate title",
-			messages: []domain.Message{
-				{Role: domain.MessageRoleUser},
+			timeline: []domain.TimelineItem{
+				{Content: domain.UserMessage{}},
 			},
 			want: false,
 		},
@@ -37,13 +37,13 @@ func TestShouldRefreshSessionTitle(t *testing.T) {
 				TitleRefreshCount: 1,
 				TitleGeneratedAt:  now.Add(-59 * time.Second),
 			},
-			messages: []domain.Message{
-				{Role: domain.MessageRoleUser},
-				{Role: domain.MessageRoleAssistant},
-				{Role: domain.MessageRoleUser},
-				{Role: domain.MessageRoleAssistant},
-				{Role: domain.MessageRoleUser},
-				{Role: domain.MessageRoleAssistant},
+			timeline: []domain.TimelineItem{
+				{Content: domain.UserMessage{}},
+				{Content: domain.AssistantMessage{}},
+				{Content: domain.UserMessage{}},
+				{Content: domain.AssistantMessage{}},
+				{Content: domain.UserMessage{}},
+				{Content: domain.AssistantMessage{}},
 			},
 			want: false,
 		},
@@ -54,13 +54,13 @@ func TestShouldRefreshSessionTitle(t *testing.T) {
 				TitleRefreshCount: 1,
 				TitleGeneratedAt:  now.Add(-time.Minute),
 			},
-			messages: []domain.Message{
-				{Role: domain.MessageRoleUser},
-				{Role: domain.MessageRoleAssistant},
-				{Role: domain.MessageRoleUser},
-				{Role: domain.MessageRoleAssistant},
-				{Role: domain.MessageRoleUser},
-				{Role: domain.MessageRoleAssistant},
+			timeline: []domain.TimelineItem{
+				{Content: domain.UserMessage{}},
+				{Content: domain.AssistantMessage{}},
+				{Content: domain.UserMessage{}},
+				{Content: domain.AssistantMessage{}},
+				{Content: domain.UserMessage{}},
+				{Content: domain.AssistantMessage{}},
 			},
 			want: true,
 		},
@@ -71,13 +71,13 @@ func TestShouldRefreshSessionTitle(t *testing.T) {
 				TitleRefreshCount: 2,
 				TitleGeneratedAt:  now.Add(-2 * time.Minute),
 			},
-			messages: []domain.Message{
-				{Role: domain.MessageRoleUser},
-				{Role: domain.MessageRoleAssistant},
-				{Role: domain.MessageRoleUser},
-				{Role: domain.MessageRoleAssistant},
-				{Role: domain.MessageRoleUser},
-				{Role: domain.MessageRoleAssistant},
+			timeline: []domain.TimelineItem{
+				{Content: domain.UserMessage{}},
+				{Content: domain.AssistantMessage{}},
+				{Content: domain.UserMessage{}},
+				{Content: domain.AssistantMessage{}},
+				{Content: domain.UserMessage{}},
+				{Content: domain.AssistantMessage{}},
 			},
 			want: false,
 		},
@@ -87,20 +87,20 @@ func TestShouldRefreshSessionTitle(t *testing.T) {
 				Title:     "Already Generated",
 				UpdatedAt: now.Add(-2 * time.Minute),
 			},
-			messages: []domain.Message{
-				{Role: domain.MessageRoleUser},
-				{Role: domain.MessageRoleAssistant},
-				{Role: domain.MessageRoleUser},
-				{Role: domain.MessageRoleAssistant},
-				{Role: domain.MessageRoleUser},
-				{Role: domain.MessageRoleAssistant},
+			timeline: []domain.TimelineItem{
+				{Content: domain.UserMessage{}},
+				{Content: domain.AssistantMessage{}},
+				{Content: domain.UserMessage{}},
+				{Content: domain.AssistantMessage{}},
+				{Content: domain.UserMessage{}},
+				{Content: domain.AssistantMessage{}},
 			},
 			want: true,
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := shouldRefreshSessionTitle(tc.session, tc.messages, now); got != tc.want {
+			if got := shouldRefreshSessionTitle(tc.session, tc.timeline, now); got != tc.want {
 				t.Fatalf("got %v want %v", got, tc.want)
 			}
 		})

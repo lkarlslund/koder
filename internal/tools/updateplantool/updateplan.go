@@ -79,25 +79,41 @@ func (tool) PersistResult(ctx context.Context, st *store.Store, sessionID int64,
 	if err != nil {
 		return nil, err
 	}
-	msg, err := st.AddMessage(ctx, sessionID, domain.MessageRoleTool, "plan")
-	if err != nil {
-		return nil, err
-	}
-	storedSteps := make([]domain.PlanStepPayload, 0, len(steps))
+	storedSteps := make([]domain.PlanStoredStep, 0, len(steps))
 	for _, item := range steps {
-		storedSteps = append(storedSteps, domain.PlanStepPayload{
+		storedSteps = append(storedSteps, domain.PlanStoredStep{
 			Step:   item.Step,
 			Status: item.Status,
 		})
 	}
-	if _, err := st.AddPart(ctx, msg.ID, domain.PlanUpdatePayload{
-		Explanation: req.Args["explanation"],
-		Steps:       storedSteps,
-		Output:      result.Output,
-	}); err != nil {
+	chatID, ok := tools.ChatIDFromContext(ctx)
+	if !ok || chatID <= 0 {
+		chat, err := st.DefaultChat(ctx, sessionID)
+		if err != nil {
+			return nil, err
+		}
+		chatID = chat.ID
+	}
+	item, err := st.AppendTimeline(ctx, chatID, domain.ToolExecution{
+		Tool: req.Tool,
+		Args: req.Meta(),
+		Result: &domain.ToolResult{
+			Text:   result.Output,
+			Status: domain.ToolResultStatusOK,
+			Data: domain.UpdatePlanStoredResult{
+				Explanation: req.Args["explanation"],
+				Steps:       storedSteps,
+			},
+		},
+	})
+	if err != nil {
 		return nil, err
 	}
-	return tools.EmitOnce(domain.Event{Kind: domain.EventKindStatus, Text: "Plan updated", Tool: req.Tool}), nil
+	item.Seal(item.UpdatedAt)
+	if err := st.Timeline().Put(ctx, item); err != nil {
+		return nil, err
+	}
+	return tools.EmitOnce(domain.Event{Kind: domain.EventKindStatus, Text: "Plan updated", Tool: req.Tool, Item: item}), nil
 }
 
 func normalizePlan(raw string) ([]step, error) {

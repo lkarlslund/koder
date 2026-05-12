@@ -1565,7 +1565,7 @@ func TestForkSessionCopiesAttachmentFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	msg, err := st.AddMessage(context.Background(), session.ID, domain.MessageRoleUser, "hello")
+	chat, err := st.DefaultChat(context.Background(), session.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1581,7 +1581,17 @@ func TestForkSessionCopiesAttachmentFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.AddPart(context.Background(), msg.ID, domain.AttachmentPayload{ID: meta.ID, Name: meta.Name, MIME: meta.MIME, Path: meta.Path, Size: meta.Size, Source: meta.Source, Original: meta.Original}); err != nil {
+	item, err := st.AppendTimeline(context.Background(), chat.ID, domain.UserMessage{
+		Text: "hello",
+		Attachments: []domain.Attachment{{
+			ID: meta.ID, Name: meta.Name, MIME: meta.MIME, Path: meta.Path, Size: meta.Size, Source: meta.Source, Original: meta.Original,
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	item.Seal(time.Now().UTC())
+	if err := st.Timeline().Put(context.Background(), item); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1596,11 +1606,14 @@ func TestForkSessionCopiesAttachmentFiles(t *testing.T) {
 	if forked.forkedID == session.ID {
 		t.Fatal("expected distinct forked session id")
 	}
-	forkParts := forked.load.parts[forked.load.messages[0].ID]
-	if len(forkParts) != 1 {
-		t.Fatalf("unexpected forked parts: %#v", forkParts)
+	if len(forked.load.timeline) != 1 {
+		t.Fatalf("unexpected forked timeline: %#v", forked.load.timeline)
 	}
-	forkMeta := forkParts[0].Payload.(domain.AttachmentPayload)
+	forkUser, ok := forked.load.timeline[0].Content.(domain.UserMessage)
+	if !ok || len(forkUser.Attachments) != 1 {
+		t.Fatalf("unexpected forked user item: %#v", forked.load.timeline[0])
+	}
+	forkMeta := forkUser.Attachments[0]
 	if forkMeta.Path == meta.Path {
 		t.Fatalf("expected copied attachment path, got %q", forkMeta.Path)
 	}

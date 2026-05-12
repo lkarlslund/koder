@@ -206,6 +206,7 @@ type newSessionMsg struct {
 	chat      domain.Chat
 	chats     []domain.Chat
 	sessions  []domain.Session
+	timeline  []domain.TimelineItem
 	messages  []domain.Message
 	parts     map[int64][]domain.Part
 	approvals []store.Approval
@@ -1075,7 +1076,7 @@ func (m App) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 		m.currentSession = msg.session
 		m.currentChat = msg.chat
 		m.clampQueueSelection()
-		m.loadChatState(m.currentChat, msg.messages, msg.parts, msg.approvals)
+		m.loadChatState(m.currentChat, msg.timeline, msg.messages, msg.parts, msg.approvals)
 		m.milestonePlan = msg.plan
 		m.todos = msg.todos
 		m.workspace = msg.workspace
@@ -3702,18 +3703,22 @@ func (m *App) sessionUsageSummary(sessionID int64) (domain.Usage, bool) {
 		chatID = m.currentChat.ID
 	}
 	var (
-		messages []domain.Message
-		parts    map[int64][]domain.Part
+		timeline []domain.TimelineItem
 		err      error
 	)
 	if chatID > 0 {
-		messages, parts, err = m.store.PartsForChat(context.Background(), chatID)
+		timeline, err = m.store.TimelineForChat(context.Background(), chatID)
 	} else {
-		messages, parts, err = m.store.PartsForSession(context.Background(), sessionID)
+		chat, chatErr := m.store.DefaultChat(context.Background(), sessionID)
+		if chatErr != nil {
+			return domain.Usage{}, false
+		}
+		timeline, err = m.store.TimelineForChat(context.Background(), chat.ID)
 	}
 	if err != nil {
 		return domain.Usage{}, false
 	}
+	messages, parts := domain.LegacyTranscriptFromTimeline(sessionID, timeline)
 	return sessionctx.LatestUsage(messages, parts)
 }
 
@@ -3966,14 +3971,13 @@ func (m App) loadCmd() ui.Cmd {
 			})
 		}
 		stepStart = time.Now()
-		messages, parts, err := m.store.PartsForChat(ctx, currentChat.ID)
+		timeline, err := m.store.TimelineForChat(ctx, currentChat.ID)
 		if err != nil {
 			return promptDoneMsg{err: err}
 		}
-		m.recordStartupTiming(current.ID, "parts_for_chat", stepStart, map[string]string{
-			"chat_id":  strconv.FormatInt(currentChat.ID, 10),
-			"messages": strconv.Itoa(len(messages)),
-			"parts":    strconv.Itoa(len(parts)),
+		m.recordStartupTiming(current.ID, "timeline_for_chat", stepStart, map[string]string{
+			"chat_id": strconv.FormatInt(currentChat.ID, 10),
+			"items":   strconv.Itoa(len(timeline)),
 		})
 		stepStart = time.Now()
 		approvals, err := m.store.PendingApprovalsForChat(ctx, currentChat.ID)
@@ -4010,8 +4014,7 @@ func (m App) loadCmd() ui.Cmd {
 			chats:     chats,
 			current:   current,
 			chat:      currentChat,
-			messages:  messages,
-			parts:     parts,
+			timeline:  timeline,
 			approvals: approvals,
 			plan:      plan,
 			todos:     todos,
@@ -4025,6 +4028,7 @@ type loadMsg struct {
 	chats        []domain.Chat
 	current      domain.Session
 	chat         domain.Chat
+	timeline     []domain.TimelineItem
 	messages     []domain.Message
 	parts        map[int64][]domain.Part
 	approvals    []store.Approval
@@ -4321,13 +4325,12 @@ func (m App) loadSessionCmd(sessionID int64) ui.Cmd {
 			m.recordLoadTiming(sessionID, currentChat.ID, "default_chat", stepStart, nil)
 		}
 		stepStart = time.Now()
-		messages, parts, err := m.store.PartsForChat(ctx, currentChat.ID)
+		timeline, err := m.store.TimelineForChat(ctx, currentChat.ID)
 		if err != nil {
 			return promptDoneMsg{err: err}
 		}
-		m.recordLoadTiming(sessionID, currentChat.ID, "parts_for_chat", stepStart, map[string]string{
-			"messages": strconv.Itoa(len(messages)),
-			"parts":    strconv.Itoa(len(parts)),
+		m.recordLoadTiming(sessionID, currentChat.ID, "timeline_for_chat", stepStart, map[string]string{
+			"items": strconv.Itoa(len(timeline)),
 		})
 		stepStart = time.Now()
 		approvals, err := m.store.PendingApprovalsForChat(ctx, currentChat.ID)
@@ -4360,8 +4363,7 @@ func (m App) loadSessionCmd(sessionID int64) ui.Cmd {
 			chats:     chats,
 			current:   session,
 			chat:      currentChat,
-			messages:  messages,
-			parts:     parts,
+			timeline:  timeline,
 			approvals: approvals,
 			plan:      plan,
 			todos:     todos,
@@ -4416,13 +4418,12 @@ func (m App) loadChatCmd(sessionID, chatID int64) ui.Cmd {
 		}
 		m.recordLoadTiming(sessionID, chatID, "get_chat", stepStart, nil)
 		stepStart = time.Now()
-		messages, parts, err := m.store.PartsForChat(ctx, currentChat.ID)
+		timeline, err := m.store.TimelineForChat(ctx, currentChat.ID)
 		if err != nil {
 			return promptDoneMsg{err: err}
 		}
-		m.recordLoadTiming(sessionID, chatID, "parts_for_chat", stepStart, map[string]string{
-			"messages": strconv.Itoa(len(messages)),
-			"parts":    strconv.Itoa(len(parts)),
+		m.recordLoadTiming(sessionID, chatID, "timeline_for_chat", stepStart, map[string]string{
+			"items": strconv.Itoa(len(timeline)),
 		})
 		stepStart = time.Now()
 		approvals, err := m.store.PendingApprovalsForChat(ctx, currentChat.ID)
@@ -4455,8 +4456,7 @@ func (m App) loadChatCmd(sessionID, chatID int64) ui.Cmd {
 			chats:     chats,
 			current:   session,
 			chat:      currentChat,
-			messages:  messages,
-			parts:     parts,
+			timeline:  timeline,
 			approvals: approvals,
 			plan:      plan,
 			todos:     todos,
@@ -4552,7 +4552,7 @@ func (m App) agentsRefreshCmd(sessionID int64) ui.Cmd {
 			}
 			chats = append(chats, currentChat)
 		}
-		messages, parts, err := m.store.PartsForChat(ctx, currentChat.ID)
+		timeline, err := m.store.TimelineForChat(ctx, currentChat.ID)
 		if err != nil {
 			return agentsRefreshMsg{err: err}
 		}
@@ -4574,8 +4574,7 @@ func (m App) agentsRefreshCmd(sessionID int64) ui.Cmd {
 				chats:     chats,
 				current:   session,
 				chat:      currentChat,
-				messages:  messages,
-				parts:     parts,
+				timeline:  timeline,
 				approvals: approvals,
 				plan:      plan,
 				todos:     todos,
@@ -4609,39 +4608,13 @@ func (m App) forkSessionCmd(sourceSessionID int64) ui.Cmd {
 			}
 			chats = append(chats, currentChat)
 		}
-		messages, parts, err := m.store.PartsForChat(ctx, currentChat.ID)
+		timeline, err := m.store.TimelineForChat(ctx, currentChat.ID)
 		if err != nil {
 			return forkSessionMsg{err: err}
 		}
-		for _, msg := range messages {
-			for i, part := range parts[msg.ID] {
-				if part.Kind != domain.PartKindAttachment {
-					continue
-				}
-				payload, ok := part.Payload.(domain.AttachmentPayload)
-				if !ok {
-					return forkSessionMsg{err: fmt.Errorf("attachment part has %T payload", part.Payload)}
-				}
-				meta := attachment.Metadata{
-					ID: payload.ID, Name: payload.Name, MIME: payload.MIME, Path: payload.Path, Size: payload.Size, Source: payload.Source, Original: payload.Original,
-				}
-				rewritten, err := m.attachmentFiles.CopyToSession(meta, forked.ID)
-				if err != nil {
-					return forkSessionMsg{err: err}
-				}
-				payload.ID = rewritten.ID
-				payload.Name = rewritten.Name
-				payload.MIME = rewritten.MIME
-				payload.Path = rewritten.Path
-				payload.Size = rewritten.Size
-				payload.Source = rewritten.Source
-				payload.Original = rewritten.Original
-				if err := m.store.UpdatePartPayload(ctx, part.ID, payload); err != nil {
-					return forkSessionMsg{err: err}
-				}
-				part.Payload = payload
-				parts[msg.ID][i] = part
-			}
+		timeline, err = m.copyTimelineAttachmentsToSession(ctx, timeline, forked.ID)
+		if err != nil {
+			return forkSessionMsg{err: err}
 		}
 		approvals, err := m.store.PendingApprovalsForChat(ctx, currentChat.ID)
 		if err != nil {
@@ -4663,8 +4636,7 @@ func (m App) forkSessionCmd(sourceSessionID int64) ui.Cmd {
 				chats:     chats,
 				current:   forked,
 				chat:      currentChat,
-				messages:  messages,
-				parts:     parts,
+				timeline:  timeline,
 				approvals: approvals,
 				plan:      plan,
 				todos:     todos,
@@ -4672,6 +4644,40 @@ func (m App) forkSessionCmd(sourceSessionID int64) ui.Cmd {
 			},
 		}
 	}
+}
+
+func (m App) copyTimelineAttachmentsToSession(ctx context.Context, timeline []domain.TimelineItem, sessionID int64) ([]domain.TimelineItem, error) {
+	out := slices.Clone(timeline)
+	for idx := range out {
+		user, ok := out[idx].Content.(domain.UserMessage)
+		if !ok || len(user.Attachments) == 0 {
+			continue
+		}
+		changed := false
+		for attachmentIdx := range user.Attachments {
+			payload := user.Attachments[attachmentIdx]
+			meta := attachment.Metadata{
+				ID: payload.ID, Name: payload.Name, MIME: payload.MIME, Path: payload.Path, Size: payload.Size, Source: payload.Source, Original: payload.Original,
+			}
+			rewritten, err := m.attachmentFiles.CopyToSession(meta, sessionID)
+			if err != nil {
+				return nil, err
+			}
+			user.Attachments[attachmentIdx] = domain.Attachment{
+				ID: rewritten.ID, Name: rewritten.Name, MIME: rewritten.MIME, Path: rewritten.Path, Size: rewritten.Size, Source: rewritten.Source, Original: rewritten.Original,
+			}
+			changed = true
+		}
+		if !changed {
+			continue
+		}
+		out[idx].Content = user
+		out[idx].UpdatedAt = time.Now().UTC()
+		if err := m.store.Timeline().Put(ctx, out[idx]); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
 }
 
 func (m App) reloadDetailsCmd() ui.Cmd {
@@ -4869,14 +4875,18 @@ func mapsCloneToolStates(src map[domain.ToolKind]bool) map[domain.ToolKind]bool 
 	return dst
 }
 
-func (m *App) loadChatState(chat domain.Chat, messages []domain.Message, parts map[int64][]domain.Part, approvals []store.Approval) {
-	if chat.ID == 0 && len(messages) == 0 && len(parts) == 0 && len(approvals) == 0 {
+func (m *App) loadChatState(chat domain.Chat, timeline []domain.TimelineItem, messages []domain.Message, parts map[int64][]domain.Part, approvals []store.Approval) {
+	if len(timeline) > 0 {
+		messages, parts = domain.LegacyTranscriptFromTimeline(chat.SessionID, timeline)
+	}
+	if chat.ID == 0 && len(timeline) == 0 && len(messages) == 0 && len(parts) == 0 && len(approvals) == 0 {
 		if m.currentRuntime == nil {
 			m.currentSnapshot = chatpkg.Snapshot{}
 		}
 		return
 	}
 	m.currentSnapshot.Chat = chat
+	m.currentSnapshot.Timeline = slices.Clone(timeline)
 	m.currentSnapshot.Messages = slices.Clone(messages)
 	m.currentSnapshot.Parts = clonePartsByMessage(parts)
 	m.currentSnapshot.Approvals = slices.Clone(approvals)
@@ -5265,7 +5275,7 @@ func (m *App) applyRuntimeSnapshot(snapshot chatpkg.Snapshot) {
 		}
 		m.clampQueueSelection()
 	}
-	m.loadChatState(snapshot.Chat, snapshot.Messages, snapshot.Parts, snapshot.Approvals)
+	m.loadChatState(snapshot.Chat, snapshot.Timeline, snapshot.Messages, snapshot.Parts, snapshot.Approvals)
 	m.currentSnapshot.PendingAssistant = snapshot.PendingAssistant
 	m.syncUsageFromHistory()
 	m.syncContextFromChat()
@@ -5365,7 +5375,7 @@ func (m App) UpdateLoad(msg loadMsg) App {
 		m.currentChat = msg.chat
 		m.clampQueueSelection()
 	}
-	m.loadChatState(m.currentChat, msg.messages, msg.parts, msg.approvals)
+	m.loadChatState(m.currentChat, msg.timeline, msg.messages, msg.parts, msg.approvals)
 	m.milestonePlan = msg.plan
 	m.todos = msg.todos
 	m.workspace = msg.workspace

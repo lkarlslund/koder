@@ -29,7 +29,6 @@ import (
 	"github.com/lkarlslund/koder/internal/permission"
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/reference"
-	"github.com/lkarlslund/koder/internal/sessionctx"
 	"github.com/lkarlslund/koder/internal/skills"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tokenestimate"
@@ -771,11 +770,11 @@ func shouldAutoContinueBadStop(text string) bool {
 
 func (e *Engine) maybeUpdateSessionTitle(ctx context.Context, session domain.Session, client *provider.Client) (string, error) {
 	now := time.Now().UTC()
-	messages, prompt, err := e.titleSummaryMessages(ctx, session.ID)
+	timeline, prompt, err := e.titleSummaryMessages(ctx, session.ID)
 	if err != nil {
 		return "", err
 	}
-	if !shouldRefreshSessionTitle(session, messages, now) {
+	if !shouldRefreshSessionTitle(session, timeline, now) {
 		return "", nil
 	}
 	resp, err := client.CompleteChat(ctx, e.chatRequest(session, domain.Chat{}, prompt, false))
@@ -827,12 +826,12 @@ func (e *Engine) preserveThinkingEnabled(session domain.Session) bool {
 	return provider.PreserveThinkingEnabled(session.ModelID, e.modelPresetForSession(session))
 }
 
-func shouldRefreshSessionTitle(session domain.Session, messages []domain.Message, now time.Time) bool {
+func shouldRefreshSessionTitle(session domain.Session, timeline []domain.TimelineItem, now time.Time) bool {
 	refreshCount, generatedAt := sessionTitleRefreshState(session)
 	if refreshCount == 0 {
-		return hasCompletedUserAssistantExchange(messages)
+		return hasCompletedUserAssistantExchange(timeline)
 	}
-	if refreshCount == 1 && len(messages) > 5 {
+	if refreshCount == 1 && len(timeline) > 5 {
 		if generatedAt.IsZero() {
 			return true
 		}
@@ -855,13 +854,13 @@ func sessionTitleRefreshState(session domain.Session) (int, time.Time) {
 	return 0, time.Time{}
 }
 
-func hasCompletedUserAssistantExchange(messages []domain.Message) bool {
+func hasCompletedUserAssistantExchange(timeline []domain.TimelineItem) bool {
 	var sawUser, sawAssistant bool
-	for _, msg := range messages {
-		switch msg.Role {
-		case domain.MessageRoleUser:
+	for _, item := range timeline {
+		switch item.Content.(type) {
+		case domain.UserMessage:
 			sawUser = true
-		case domain.MessageRoleAssistant:
+		case domain.AssistantMessage:
 			sawAssistant = true
 		}
 		if sawUser && sawAssistant {
@@ -876,24 +875,25 @@ func hasCustomSessionTitle(title string) bool {
 	return title != "" && title != "New Session"
 }
 
-func (e *Engine) titleSummaryMessages(ctx context.Context, sessionID int64) ([]domain.Message, []provider.Message, error) {
-	messages, partsByMessage, err := e.store.PartsForSession(ctx, sessionID)
+func (e *Engine) titleSummaryMessages(ctx context.Context, sessionID int64) ([]domain.TimelineItem, []provider.Message, error) {
+	chat, err := e.store.DefaultChat(ctx, sessionID)
 	if err != nil {
 		return nil, nil, err
 	}
-	start := max(0, len(messages)-8)
+	timeline, err := e.store.TimelineForChat(ctx, chat.ID)
+	if err != nil {
+		return nil, nil, err
+	}
+	start := max(0, len(timeline)-8)
 	var transcript []string
-	for _, msg := range messages[start:] {
-		content := stringifyParts(partsByMessage[msg.ID], false)
-		if strings.TrimSpace(content) == "" {
-			content = msg.Summary
-		}
-		if strings.TrimSpace(content) == "" {
+	for _, item := range timeline[start:] {
+		role, content := timelineTitleEntry(item)
+		if strings.TrimSpace(role) == "" || strings.TrimSpace(content) == "" {
 			continue
 		}
-		transcript = append(transcript, fmt.Sprintf("%s: %s", msg.Role, content))
+		transcript = append(transcript, fmt.Sprintf("%s: %s", role, content))
 	}
-	return messages, []provider.Message{
+	return timeline, []provider.Message{
 		{
 			Role: domain.MessageRoleSystem,
 			Content: "Write a concise session title of exactly 5 or 6 words. " +
@@ -904,6 +904,33 @@ func (e *Engine) titleSummaryMessages(ctx context.Context, sessionID int64) ([]d
 			Content: strings.Join(transcript, "\n\n"),
 		},
 	}, nil
+}
+
+func timelineTitleEntry(item domain.TimelineItem) (string, string) {
+	switch content := item.Content.(type) {
+	case domain.UserMessage:
+		return string(domain.MessageRoleUser), content.Text
+	case domain.AssistantMessage:
+		if strings.TrimSpace(content.Text) != "" {
+			return string(domain.MessageRoleAssistant), content.Text
+		}
+		return string(domain.MessageRoleAssistant), strings.TrimSpace(content.Reasoning.Text)
+	case domain.ToolExecution:
+		text := ""
+		if content.Result != nil {
+			text = content.Result.Text
+		}
+		if content.Error != nil {
+			text = content.Error.Message
+		}
+		return string(domain.MessageRoleTool), text
+	case domain.Notice:
+		return "notice", content.Text
+	case domain.Compaction:
+		return "compaction", content.Summary
+	default:
+		return "", ""
+	}
 }
 
 func normalizeSessionTitle(raw string) string {
@@ -2690,11 +2717,15 @@ func (e *Engine) autoCompactPreparedMessagesIfNeeded(ctx context.Context, sessio
 }
 
 func (e *Engine) autoCompactChatIfNeeded(ctx context.Context, session domain.Session, chatID int64, client *provider.Client, out chan<- domain.Event) (bool, error) {
-	messages, parts, err := e.store.PartsForChat(ctx, chatID)
+	chat, err := e.store.GetChat(ctx, chatID)
 	if err != nil {
 		return false, err
 	}
-	metrics, ok := sessionctx.FromMessages(e.cfg, session, messages, parts)
+	envelope, err := e.buildPromptEnvelopePreview(ctx, session, chatID, "", nil, nil, nil)
+	if err != nil {
+		return false, err
+	}
+	estimated, ok := e.estimateRequestUsagePercent(session, chat, provider.SerializePromptEnvelope(envelope))
 	if !ok {
 		return false, nil
 	}
@@ -2706,16 +2737,13 @@ func (e *Engine) autoCompactChatIfNeeded(ctx context.Context, session domain.Ses
 	if threshold <= 0 {
 		threshold = max(1, e.cfg.AutoCompactAt)
 	}
-	if metrics.UsagePercent < threshold {
+	if estimated < threshold {
 		return false, nil
 	}
 	if out != nil {
-		out <- domain.Event{Kind: domain.EventKindStatus, Text: fmt.Sprintf("Auto-compacting at %d%% context used", metrics.UsagePercent)}
+		out <- domain.Event{Kind: domain.EventKindStatus, Text: fmt.Sprintf("Auto-compacting at ~%d%% estimated context used", estimated)}
 	}
-	if err := e.compactSession(ctx, session, chatID, client, "auto", out); err != nil {
-		return false, err
-	}
-	return true, nil
+	return e.autoCompactPreparedMessagesIfNeeded(ctx, session, chatID, client, provider.SerializePromptEnvelope(envelope), nil)
 }
 
 func (e *Engine) estimateRequestUsagePercent(session domain.Session, _ domain.Chat, messages []provider.Message) (int, bool) {

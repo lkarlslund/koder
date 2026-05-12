@@ -3,7 +3,6 @@ package tasktool
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 
 	"github.com/lkarlslund/koder/internal/domain"
@@ -42,15 +41,35 @@ func (tool) PersistResult(ctx context.Context, st *store.Store, sessionID int64,
 	if err != nil {
 		return nil, err
 	}
-	msg, err := st.AddMessage(ctx, sessionID, domain.MessageRoleTool, fmt.Sprintf("task:%s", task.Status))
+	chatID, ok := tools.ChatIDFromContext(ctx)
+	if !ok || chatID <= 0 {
+		chat, err := st.DefaultChat(ctx, sessionID)
+		if err != nil {
+			return nil, err
+		}
+		chatID = chat.ID
+	}
+	resultItem, err := st.AppendTimeline(ctx, chatID, domain.ToolExecution{
+		Tool: req.Tool,
+		Args: req.Meta(),
+		Result: &domain.ToolResult{
+			Text:   task.Body,
+			Status: domain.ToolResultStatusOK,
+			Data: domain.TaskStoredResult{
+				Body:   task.Body,
+				Status: task.Status,
+			},
+		},
+	})
 	if err != nil {
 		return nil, err
 	}
-	if _, err := st.AddPart(ctx, msg.ID, domain.TaskUpdatePayload{Body: task.Body, Status: task.Status}); err != nil {
+	resultItem.Seal(resultItem.UpdatedAt)
+	if err := st.Timeline().Put(ctx, resultItem); err != nil {
 		return nil, err
 	}
 	out := make(chan domain.Event, 1)
-	out <- domain.Event{Kind: domain.EventKindTaskUpdate, Text: task.Body, Tool: req.Tool}
+	out <- domain.Event{Kind: domain.EventKindTaskUpdate, Text: task.Body, Tool: req.Tool, Item: resultItem}
 	close(out)
 	return out, nil
 }
