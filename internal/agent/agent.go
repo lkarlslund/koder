@@ -242,6 +242,88 @@ func (e *Engine) RunContinueInChat(ctx context.Context, session domain.Session, 
 	return e.runContinue(ctx, session, chat, note)
 }
 
+// ResumePendingToolCallsInChat resumes durable tool calls that were saved before shutdown.
+func (e *Engine) ResumePendingToolCallsInChat(ctx context.Context, session domain.Session, chat domain.Chat) (<-chan domain.Event, error) {
+	calls, err := e.pendingExecutableToolCalls(ctx, chat.ID)
+	if err != nil {
+		return nil, err
+	}
+	if len(calls) == 0 {
+		return nil, nil
+	}
+	providerCfg, ok := e.cfg.Provider(session.ProviderID)
+	if !ok {
+		return nil, fmt.Errorf("provider %q not found", session.ProviderID)
+	}
+	client, err := provider.New(session.ProviderID, providerCfg, e.debug)
+	if err != nil {
+		return nil, err
+	}
+	out := make(chan domain.Event)
+	go func() {
+		defer close(out)
+		needsApproval, err := e.handleModelToolCalls(ctx, session, chat, calls, out)
+		if err != nil {
+			if interruptedErr(err) {
+				e.emitInterrupted(out, chat.ID, session.ID)
+				return
+			}
+			e.recordAssistantError(ctx, chat.ID, session.ID, err)
+			out <- domain.Event{Kind: domain.EventKindError, Err: err}
+			return
+		}
+		if needsApproval || turncontrol.ShouldStop(ctx) {
+			return
+		}
+		session, err = e.store.GetSession(ctx, session.ID)
+		if err != nil {
+			if interruptedErr(err) {
+				e.emitInterrupted(out, chat.ID, session.ID)
+				return
+			}
+			out <- domain.Event{Kind: domain.EventKindError, Err: err}
+			return
+		}
+		if err := e.continueModelTurn(ctx, session, chat, client, out, nil); err != nil {
+			if interruptedErr(err) {
+				e.emitInterrupted(out, chat.ID, session.ID)
+				return
+			}
+			e.recordAssistantError(ctx, chat.ID, session.ID, err)
+			out <- domain.Event{Kind: domain.EventKindError, Err: err}
+		}
+	}()
+	return out, nil
+}
+
+func (e *Engine) pendingExecutableToolCalls(ctx context.Context, chatID int64) ([]tools.Request, error) {
+	if chatID <= 0 {
+		return nil, nil
+	}
+	items, err := e.store.TimelineForChat(ctx, chatID)
+	if err != nil {
+		return nil, err
+	}
+	var calls []tools.Request
+	for _, item := range items {
+		assistant, ok := item.Content.(domain.AssistantMessage)
+		if !ok {
+			continue
+		}
+		for _, call := range assistant.Tools {
+			if call.Status != domain.ToolStatusPending || call.Result != nil || call.Error != nil || call.Approval != nil {
+				continue
+			}
+			calls = append(calls, tools.Request{
+				Tool:       call.Tool,
+				ToolCallID: string(call.ToolCallID),
+				Args:       maps.Clone(call.Args),
+			})
+		}
+	}
+	return calls, nil
+}
+
 func (e *Engine) PreviewNextRequest(ctx context.Context, session domain.Session, prompt string, drafts []attachment.Draft, refs []reference.Draft, note string) (provider.ChatRequest, error) {
 	chat, err := e.store.DefaultChat(ctx, session.ID)
 	if err != nil {
@@ -621,6 +703,9 @@ func (e *Engine) continueModelTurn(ctx context.Context, session domain.Session, 
 					}
 					out <- domain.Event{Kind: domain.EventKindUsage, Usage: resp.Usage}
 				}
+				if turncontrol.ShouldStop(ctx) {
+					return nil
+				}
 				if pause, ok := tracker.trackCalls(calls); ok {
 					e.pauseContinuation(ctx, chat.ID, session.ID, pause, out)
 					return nil
@@ -651,6 +736,9 @@ func (e *Engine) continueModelTurn(ctx context.Context, session domain.Session, 
 			out <- domain.Event{Kind: domain.EventKindToolCallDelta, Text: "tool call persisted", Item: assistantItem}
 			if pause, ok := tracker.trackCalls([]tools.Request{*call}); ok {
 				e.pauseContinuation(ctx, chat.ID, session.ID, pause, out)
+				return nil
+			}
+			if turncontrol.ShouldStop(ctx) {
 				return nil
 			}
 

@@ -1665,6 +1665,153 @@ func TestHandleModelToolCallsStopsAfterToolBatchWhenCancelRequested(t *testing.T
 	}
 }
 
+func TestContinueModelTurnStopsAfterPersistingToolCallsWhenDrainRequested(t *testing.T) {
+	t.Parallel()
+
+	var requests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		requests++
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"tool_calls":[{"id":"call_1","type":"function","function":{"name":"bash","arguments":"{\"command\":\"printf hi\"}"}}]}}],"usage":{"total_tokens":1}}`))
+	}))
+	defer server.Close()
+
+	cfg := testConfig(t)
+	cfg.Providers = map[string]config.Provider{"test": {BaseURL: server.URL + "/v1", Timeout: time.Second}}
+	cfg.DefaultProvider = "test"
+	cfg.DefaultModel = "test-model"
+	cfg.Permissions.Profile = permission.ProfileFullAccess
+
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	workdir := t.TempDir()
+	engine := New(cfg, st, tools.NewRegistry(workdir), nil, workdir)
+	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetSessionPermissionProfile(context.Background(), session.ID, permission.ProfileFullAccess); err != nil {
+		t.Fatal(err)
+	}
+	chat := defaultChatForSession(t, st, session.ID)
+	client, err := provider.New("test", cfg.Providers["test"], nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := turncontrol.WithShouldStop(context.Background(), func() bool { return true })
+	out := make(chan domain.Event, 8)
+
+	if err := engine.continueModelTurn(ctx, session, chat, client, out, nil); err != nil {
+		t.Fatal(err)
+	}
+	close(out)
+
+	if requests != 1 {
+		t.Fatalf("expected one provider request, got %d", requests)
+	}
+	items, err := st.TimelineForChat(context.Background(), chat.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pendingTool bool
+	for _, item := range items {
+		assistant, ok := item.Content.(domain.AssistantMessage)
+		if !ok {
+			continue
+		}
+		call := assistant.ToolByID(domain.ToolCallID("call_1"))
+		if call != nil && call.Status == domain.ToolStatusPending && call.Result == nil {
+			pendingTool = true
+		}
+	}
+	if !pendingTool {
+		t.Fatalf("expected pending tool call to be persisted, got %#v", items)
+	}
+	for evt := range out {
+		if evt.Kind == domain.EventKindToolStart || evt.Kind == domain.EventKindToolResult {
+			t.Fatalf("did not expect tool execution while draining, got %#v", evt)
+		}
+	}
+}
+
+func TestResumePendingToolCallsExecutesAndContinues(t *testing.T) {
+	t.Parallel()
+
+	var requests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		requests++
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"done"}}],"usage":{"total_tokens":1}}`))
+	}))
+	defer server.Close()
+
+	cfg := testConfig(t)
+	cfg.Providers = map[string]config.Provider{"test": {BaseURL: server.URL + "/v1", Timeout: time.Second}}
+	cfg.DefaultProvider = "test"
+	cfg.DefaultModel = "test-model"
+	cfg.Permissions.Profile = permission.ProfileFullAccess
+
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	workdir := t.TempDir()
+	engine := New(cfg, st, tools.NewRegistry(workdir), nil, workdir)
+	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetSessionPermissionProfile(context.Background(), session.ID, permission.ProfileFullAccess); err != nil {
+		t.Fatal(err)
+	}
+	chat := defaultChatForSession(t, st, session.ID)
+	req := tools.Request{
+		Tool:       domain.ToolKindBash,
+		ToolCallID: "call_1",
+		Args:       map[string]string{"command": "printf hi"},
+	}
+	appendAssistantToolTimelineItem(t, st, chat.ID, req, "")
+
+	events, err := engine.ResumePendingToolCallsInChat(context.Background(), session, chat)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if events == nil {
+		t.Fatal("expected resume events")
+	}
+	var sawToolResult bool
+	var sawFinalAnswer bool
+	for evt := range events {
+		if evt.Kind == domain.EventKindToolResult && strings.Contains(evt.Text, "hi") {
+			sawToolResult = true
+		}
+		if evt.Kind == domain.EventKindMessageDelta && evt.Text == "done" {
+			sawFinalAnswer = true
+		}
+	}
+	if !sawToolResult {
+		t.Fatal("expected resumed tool result")
+	}
+	if !sawFinalAnswer {
+		t.Fatal("expected final assistant answer")
+	}
+	if requests != 1 {
+		t.Fatalf("expected one continuation request, got %d", requests)
+	}
+}
+
 func TestExecutePreparedToolCallDoesNotPersistCanceledToolFailure(t *testing.T) {
 	t.Parallel()
 

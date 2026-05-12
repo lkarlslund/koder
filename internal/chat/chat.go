@@ -94,6 +94,7 @@ type Chat struct {
 	queueNotes  map[int64]string
 	cancelState CancelState
 	running     map[string]struct{}
+	draining    bool
 	closed      bool
 
 	inbox   chan any
@@ -116,6 +117,7 @@ type dispatchQueuedCmd struct {
 }
 
 type interruptCmd struct{}
+type resumePendingToolsCmd struct{}
 type approveCmd struct {
 	approvalID int64
 	rule       *domain.PermissionOverride
@@ -141,6 +143,10 @@ type approvalRunner interface {
 
 type compactRunner interface {
 	CompactChat(context.Context, int64, int64) (<-chan domain.Event, error)
+}
+
+type pendingToolRunner interface {
+	ResumePendingToolCallsInChat(context.Context, domain.Session, domain.Chat) (<-chan domain.Event, error)
 }
 
 type promptRunner interface {
@@ -199,6 +205,7 @@ func New(session domain.Session, chatRecord domain.Chat, timeline []domain.Timel
 		subs:       map[int]chan Update{},
 	}
 	go c.loop()
+	c.inbox <- resumePendingToolsCmd{}
 	c.inbox <- struct{}{}
 	return c, nil
 }
@@ -332,6 +339,11 @@ func (r *Chat) Compact() error {
 	}
 	r.mu.Lock()
 	ctx, cancel := context.WithCancel(context.Background())
+	ctx = turncontrol.WithShouldStop(ctx, func() bool {
+		r.mu.RLock()
+		defer r.mu.RUnlock()
+		return r.cancelState == CancelStateCancelling || r.draining
+	})
 	r.cancel = cancel
 	r.cancelState = CancelStateNone
 	r.running = map[string]struct{}{}
@@ -349,6 +361,45 @@ func (r *Chat) Compact() error {
 
 func (r *Chat) Close() {
 	r.inbox <- closeCmd{}
+}
+
+// DrainAndClose waits for the active turn to reach a persisted boundary, then closes the chat.
+func (r *Chat) DrainAndClose(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	r.mu.Lock()
+	if r.closed {
+		r.mu.Unlock()
+		return nil
+	}
+	r.draining = true
+	if r.active {
+		r.statusText = "Stopping after current turn"
+	}
+	r.mu.Unlock()
+	r.broadcast(r.snapshotUpdateFlags(nil, false, false, true, false, false))
+
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		r.mu.RLock()
+		active := r.active
+		r.mu.RUnlock()
+		if !active {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
+	if err := r.Persist(context.Background(), nil); err != nil {
+		return err
+	}
+	r.Close()
+	return nil
 }
 
 func (r *Chat) Status() (Status, string, bool) {
@@ -424,6 +475,8 @@ func (r *Chat) loop() {
 			r.handleDispatchQueued(typed.item, typed.remaining)
 		case interruptCmd:
 			r.handleInterrupt()
+		case resumePendingToolsCmd:
+			r.handleResumePendingTools()
 		case approveCmd:
 			r.handleApprove(typed.approvalID, typed.rule)
 		case denyCmd:
@@ -483,6 +536,19 @@ func (r *Chat) handleReplaceQueue(items []domain.QueuedInput) {
 
 func (r *Chat) handleDispatchQueued(item domain.QueuedInput, remaining []domain.QueuedInput) {
 	r.mu.Lock()
+	if r.draining {
+		r.queue = append([]domain.QueuedInput{item}, cloneQueuedInputs(remaining)...)
+		r.chat.QueuedInputs = cloneQueuedInputs(r.queue)
+		if r.state != nil {
+			r.state.UpdateChat(func(chat *domain.Chat) {
+				chat.QueuedInputs = cloneQueuedInputs(r.queue)
+			})
+		}
+		r.mu.Unlock()
+		_ = r.persistQueue()
+		r.broadcast(r.snapshotUpdateFlags(nil, false, true, true, false, false))
+		return
+	}
 	if r.active || r.status == StatusWaitingApproval {
 		r.queue = cloneQueuedInputs(remaining)
 		r.chat.QueuedInputs = cloneQueuedInputs(r.queue)
@@ -509,7 +575,7 @@ func (r *Chat) handleDispatchQueued(item domain.QueuedInput, remaining []domain.
 	ctx = turncontrol.WithShouldStop(ctx, func() bool {
 		r.mu.RLock()
 		defer r.mu.RUnlock()
-		return r.cancelState == CancelStateCancelling
+		return r.cancelState == CancelStateCancelling || r.draining
 	})
 	r.cancel = cancel
 	r.cancelState = CancelStateNone
@@ -556,6 +622,11 @@ func (r *Chat) handleApprove(approvalID int64, rule *domain.PermissionOverride) 
 	}
 	r.mu.Lock()
 	ctx, cancel := context.WithCancel(context.Background())
+	ctx = turncontrol.WithShouldStop(ctx, func() bool {
+		r.mu.RLock()
+		defer r.mu.RUnlock()
+		return r.cancelState == CancelStateCancelling || r.draining
+	})
 	r.cancel = cancel
 	r.active = true
 	r.status = StatusWaitingLLM
@@ -587,6 +658,11 @@ func (r *Chat) handleDeny(approvalID int64) {
 	}
 	r.mu.Lock()
 	ctx, cancel := context.WithCancel(context.Background())
+	ctx = turncontrol.WithShouldStop(ctx, func() bool {
+		r.mu.RLock()
+		defer r.mu.RUnlock()
+		return r.cancelState == CancelStateCancelling || r.draining
+	})
 	r.cancel = cancel
 	r.active = true
 	r.status = StatusWaitingLLM
@@ -598,6 +674,59 @@ func (r *Chat) handleDeny(approvalID int64) {
 
 	events, err := runner.DenyInChat(ctx, sessionID, chatID, approvalID)
 	r.handleApprovalEventStream(events, err)
+}
+
+func (r *Chat) handleResumePendingTools() {
+	runner, ok := r.engine.(pendingToolRunner)
+	if !ok {
+		return
+	}
+	r.mu.Lock()
+	if r.active || r.status == StatusWaitingApproval || r.draining {
+		r.mu.Unlock()
+		return
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	ctx = turncontrol.WithShouldStop(ctx, func() bool {
+		r.mu.RLock()
+		defer r.mu.RUnlock()
+		return r.cancelState == CancelStateCancelling || r.draining
+	})
+	session := r.session
+	chat := r.chat
+	r.mu.Unlock()
+	events, err := runner.ResumePendingToolCallsInChat(ctx, session, chat)
+	if err != nil {
+		cancel()
+		r.mu.Lock()
+		r.active = false
+		r.cancel = nil
+		r.status = StatusErrored
+		r.statusText = err.Error()
+		r.mu.Unlock()
+		evt := domain.Event{Kind: domain.EventKindError, Err: err}
+		r.broadcast(r.snapshotUpdateFlags(&evt, false, false, true, false, false))
+		return
+	}
+	if events == nil {
+		cancel()
+		return
+	}
+	r.mu.Lock()
+	if r.active || r.status == StatusWaitingApproval || r.draining {
+		r.mu.Unlock()
+		cancel()
+		return
+	}
+	r.cancel = cancel
+	r.cancelState = CancelStateNone
+	r.running = map[string]struct{}{}
+	r.active = true
+	r.status = StatusRunningTools
+	r.statusText = "Resuming tool calls"
+	r.mu.Unlock()
+	r.broadcast(r.snapshotUpdateFlags(nil, false, false, true, false, false))
+	r.handleApprovalEventStream(events, nil)
 }
 
 func (r *Chat) handleApprovalEventStream(events <-chan domain.Event, err error) {
@@ -781,9 +910,10 @@ func (r *Chat) handleStreamClosed() {
 	}
 	r.cancelState = CancelStateNone
 	r.running = nil
+	draining := r.draining
 	r.mu.Unlock()
 	r.broadcast(r.snapshotUpdateFlags(nil, false, false, true, true, false))
-	if shouldDispatch {
+	if shouldDispatch && !draining {
 		r.maybeDispatchNext()
 	}
 }
@@ -814,7 +944,7 @@ func (r *Chat) handleClose() {
 
 func (r *Chat) maybeDispatchNext() {
 	r.mu.Lock()
-	if r.active || r.status == StatusWaitingApproval {
+	if r.draining || r.active || r.status == StatusWaitingApproval {
 		r.mu.Unlock()
 		return
 	}
@@ -837,7 +967,7 @@ func (r *Chat) maybeDispatchNext() {
 	ctx = turncontrol.WithShouldStop(ctx, func() bool {
 		r.mu.RLock()
 		defer r.mu.RUnlock()
-		return r.cancelState == CancelStateCancelling
+		return r.cancelState == CancelStateCancelling || r.draining
 	})
 	r.cancel = cancel
 	r.cancelState = CancelStateNone

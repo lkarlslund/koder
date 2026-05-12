@@ -28,6 +28,12 @@ type cancelAwareRunner struct {
 	events  chan domain.Event
 }
 
+type pendingToolFakeRunner struct {
+	runtimeFakeRunner
+	resumeCalls  int
+	resumeEvents []<-chan domain.Event
+}
+
 func (f *cancelAwareRunner) RunPromptInChat(ctx context.Context, _ domain.Session, _ domain.Chat, _ string, _ []attachment.Draft, _ []reference.Draft, _ string) (<-chan domain.Event, error) {
 	f.ctxSeen <- ctx
 	return f.events, nil
@@ -117,6 +123,24 @@ func (f *runtimeFakeRunner) DenyInChat(_ context.Context, _ int64, _ int64, _ in
 	evt := f.events[0]
 	f.events = f.events[1:]
 	return evt, nil
+}
+
+func (f *pendingToolFakeRunner) ResumePendingToolCallsInChat(_ context.Context, _ domain.Session, _ domain.Chat) (<-chan domain.Event, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.resumeCalls++
+	if len(f.resumeEvents) == 0 {
+		return nil, nil
+	}
+	events := f.resumeEvents[0]
+	f.resumeEvents = f.resumeEvents[1:]
+	return events, nil
+}
+
+func (f *pendingToolFakeRunner) resumeCallCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.resumeCalls
 }
 
 func (f *runtimeFakeRunner) promptCallCount() int {
@@ -288,6 +312,107 @@ func TestRuntimeQueuesSecondItemUntilFirstCompletes(t *testing.T) {
 	}
 	if got := runner.promptAt(1); got != "second" {
 		t.Fatalf("second prompt = %q", got)
+	}
+}
+
+func TestDrainAndCloseDoesNotDispatchQueuedWork(t *testing.T) {
+	st := openTestStore(t)
+	session, chatRecord, _ := createSessionWithPlan(t, st)
+	events := make(chan domain.Event)
+	runner := &runtimeFakeRunner{events: []<-chan domain.Event{events}}
+	rt := newTestChat(t, st, session, chatRecord, runner)
+	updates, unsub := rt.Subscribe()
+	defer unsub()
+
+	rt.Enqueue(QueueItem{Kind: QueueKindSteer, Text: "first"})
+	rt.Enqueue(QueueItem{Kind: QueueKindQueued, Text: "second"})
+
+	deadline := time.After(2 * time.Second)
+	for runner.promptCallCount() == 0 {
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for first prompt")
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+
+	drained := make(chan error, 1)
+	go func() {
+		drained <- rt.DrainAndClose(context.Background())
+	}()
+	waitForDrainUpdate(t, updates)
+	events <- domain.Event{Kind: domain.EventKindMessageDone}
+	close(events)
+
+	select {
+	case err := <-drained:
+		if err != nil {
+			t.Fatalf("drain: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for drain")
+	}
+	if got := runner.promptCallCount(); got != 1 {
+		t.Fatalf("expected drain to leave queued work undispatched, got %d prompt calls", got)
+	}
+	reloaded, err := st.GetChat(context.Background(), chatRecord.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reloaded.QueuedInputs) != 1 || reloaded.QueuedInputs[0].Text != "second" {
+		t.Fatalf("expected queued work to remain persisted, got %#v", reloaded.QueuedInputs)
+	}
+}
+
+func waitForDrainUpdate(t *testing.T, updates <-chan Update) {
+	t.Helper()
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case update := <-updates:
+			if update.StatusText == "Stopping after current turn" {
+				return
+			}
+		case <-deadline:
+			t.Fatal("timed out waiting for drain update")
+		}
+	}
+}
+
+func TestLoadResumesPendingToolCalls(t *testing.T) {
+	st := openTestStore(t)
+	session, chatRecord, _ := createSessionWithPlan(t, st)
+	events := make(chan domain.Event)
+	runner := &pendingToolFakeRunner{resumeEvents: []<-chan domain.Event{events}}
+	rt := newTestChat(t, st, session, chatRecord, runner)
+	updates, unsub := rt.Subscribe()
+	defer unsub()
+
+	deadline := time.After(2 * time.Second)
+	for runner.resumeCallCount() == 0 {
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for pending tool resume")
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	events <- domain.Event{Kind: domain.EventKindToolStart, Tool: domain.ToolKindRead, ToolCallID: "call_1", Text: "read README.md"}
+	close(events)
+
+	for {
+		select {
+		case update := <-updates:
+			if update.Event != nil && update.Event.Kind == domain.EventKindToolStart {
+				if update.Status != StatusRunningTools {
+					t.Fatalf("expected running tools status, got %s", update.Status)
+				}
+				return
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("timed out waiting for resumed tool event")
+		}
 	}
 }
 

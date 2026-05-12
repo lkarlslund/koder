@@ -192,9 +192,12 @@ func runWeb(ctx context.Context, cfg config.Config, st *store.Store, engine *age
 	defer signal.Stop(sig)
 	select {
 	case <-ctx.Done():
+		if err := controller.Shutdown(context.Background()); err != nil {
+			return err
+		}
 		return ctx.Err()
 	case <-sig:
-		return nil
+		return controller.Shutdown(context.Background())
 	}
 }
 

@@ -6,13 +6,13 @@ BUILD_SCRIPT="$ROOT_DIR/scripts/build-koder"
 BIN="${KODER_DEV_BIN:-/tmp/koder-dev-${USER:-user}/koder}"
 SETTLE_SECONDS="${KODER_DEV_SETTLE_SECONDS:-10}"
 POLL_SECONDS="${KODER_DEV_POLL_SECONDS:-1}"
+STOP_TIMEOUT_SECONDS="${KODER_DEV_STOP_TIMEOUT_SECONDS:-180}"
 
 child_pid=""
 
 cleanup() {
   if [[ -n "$child_pid" ]] && kill -0 "$child_pid" 2>/dev/null; then
-    kill "$child_pid" 2>/dev/null || true
-    wait "$child_pid" 2>/dev/null || true
+    stop_koder "$child_pid"
   fi
 }
 
@@ -26,6 +26,26 @@ launch_koder() {
   "$BIN" "$@" &
   child_pid="$!"
   echo "launched koder pid=$child_pid"
+}
+
+stop_koder() {
+  local pid="$1"
+  local waited=0
+  if [[ -z "$pid" ]] || ! kill -0 "$pid" 2>/dev/null; then
+    return 0
+  fi
+  echo "stopping koder pid=$pid"
+  kill -TERM "$pid" 2>/dev/null || true
+  while kill -0 "$pid" 2>/dev/null; do
+    if (( waited >= STOP_TIMEOUT_SECONDS )); then
+      echo "koder pid=$pid did not stop after ${STOP_TIMEOUT_SECONDS}s; killing"
+      kill -KILL "$pid" 2>/dev/null || true
+      break
+    fi
+    sleep 1
+    waited=$((waited + 1))
+  done
+  wait "$pid" 2>/dev/null || true
 }
 
 source_signature() {
@@ -88,8 +108,7 @@ while true; do
   echo "building koder..."
   if build_koder; then
     if [[ -n "$child_pid" ]] && kill -0 "$child_pid" 2>/dev/null; then
-      kill "$child_pid" 2>/dev/null || true
-      wait "$child_pid" 2>/dev/null || true
+      stop_koder "$child_pid"
       child_pid=""
     fi
     launch_koder "$@"

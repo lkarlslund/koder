@@ -277,6 +277,25 @@ func (c *Controller) Stop() error {
 	return nil
 }
 
+// Shutdown gracefully drains the active runtime and releases subscriptions.
+func (c *Controller) Shutdown(ctx context.Context) error {
+	c.mu.RLock()
+	rt := c.runtime
+	unsub := c.unsub
+	c.mu.RUnlock()
+	if rt == nil {
+		if unsub != nil {
+			unsub()
+		}
+		return nil
+	}
+	err := rt.DrainAndClose(ctx)
+	if unsub != nil {
+		unsub()
+	}
+	return err
+}
+
 // Compact starts compaction on the active chat.
 func (c *Controller) Compact() error {
 	rt := c.currentRuntime()
