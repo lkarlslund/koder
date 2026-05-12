@@ -20,6 +20,7 @@ const (
 	TimelineKindAssistant  TimelineKind = "assistant"
 	TimelineKindNotice     TimelineKind = "notice"
 	TimelineKindCompaction TimelineKind = "compaction"
+	TimelineKindLegacy     TimelineKind = "legacy_message"
 )
 
 // TimelineItem is the durable ordered unit of chat transcript state.
@@ -251,6 +252,16 @@ type Compaction struct {
 // TimelineKind returns the timeline payload kind.
 func (Compaction) TimelineKind() TimelineKind { return TimelineKindCompaction }
 
+// LegacyMessage preserves the old message/parts shape inside timeline storage while callers migrate.
+type LegacyMessage struct {
+	Role    MessageRole `json:"role"`
+	Summary string      `json:"summary,omitempty"`
+	Parts   []Part      `json:"parts,omitempty"`
+}
+
+// TimelineKind returns the timeline payload kind.
+func (LegacyMessage) TimelineKind() TimelineKind { return TimelineKindLegacy }
+
 // MarshalJSON stores timeline content behind a discriminator.
 func (i TimelineItem) MarshalJSON() ([]byte, error) {
 	kind := TimelineKind("")
@@ -314,6 +325,8 @@ func decodeTimelineContent(kind TimelineKind, raw json.RawMessage) (TimelineCont
 		return decodeTimelinePayload[Notice](raw)
 	case TimelineKindCompaction:
 		return decodeTimelinePayload[Compaction](raw)
+	case TimelineKindLegacy:
+		return decodeTimelinePayload[LegacyMessage](raw)
 	default:
 		return nil, fmt.Errorf("unsupported timeline kind %q", kind)
 	}

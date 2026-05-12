@@ -800,7 +800,9 @@ func (s *ChatState) legacySnapshotParts() map[int64][]domain.Part {
 }
 
 func legacyTimelineRole(item domain.TimelineItem) domain.MessageRole {
-	switch item.Content.(type) {
+	switch payload := item.Content.(type) {
+	case domain.LegacyMessage:
+		return payload.Role
 	case domain.UserMessage:
 		return domain.MessageRoleUser
 	case domain.Notice, domain.Compaction:
@@ -812,6 +814,8 @@ func legacyTimelineRole(item domain.TimelineItem) domain.MessageRole {
 
 func legacyTimelineSummary(item domain.TimelineItem) string {
 	switch payload := item.Content.(type) {
+	case domain.LegacyMessage:
+		return payload.Summary
 	case domain.UserMessage:
 		return payload.Text
 	case domain.AssistantMessage:
@@ -834,6 +838,24 @@ func legacyTimelineParts(item domain.TimelineItem) []domain.Part {
 		parts = append(parts, part)
 	}
 	switch payload := item.Content.(type) {
+	case domain.LegacyMessage:
+		parts = make([]domain.Part, 0, len(payload.Parts))
+		for _, part := range payload.Parts {
+			part.MessageID = item.ID
+			if part.Kind == "" && part.Payload != nil {
+				part.Kind = part.Payload.PartKind()
+			}
+			if part.CreatedAt.IsZero() {
+				part.CreatedAt = item.CreatedAt
+			}
+			if part.Body == "" {
+				part.Body = part.Text()
+			}
+			if part.MetaJSON == "" {
+				part.MetaJSON = part.LegacyMetaJSON()
+			}
+			parts = append(parts, part)
+		}
 	case domain.UserMessage:
 		if strings.TrimSpace(payload.Text) != "" {
 			add(domain.PartKindText, domain.TextPayload{Text: payload.Text}, 1)

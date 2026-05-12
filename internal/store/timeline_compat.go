@@ -72,6 +72,9 @@ func (s *Store) UpdateMessageSummary(ctx context.Context, messageID int64, summa
 		return err
 	}
 	switch payload := item.Content.(type) {
+	case domain.LegacyMessage:
+		payload.Summary = summary
+		item.Content = payload
 	case domain.UserMessage:
 		payload.Text = summary
 		item.Content = payload
@@ -168,14 +171,7 @@ func (s *Store) PartsForChat(ctx context.Context, chatID int64) ([]domain.Messag
 }
 
 func timelineContentForRole(role domain.MessageRole, text string) domain.TimelineContent {
-	switch role {
-	case domain.MessageRoleUser:
-		return domain.UserMessage{}
-	case domain.MessageRoleTool:
-		return domain.Notice{Text: strings.TrimSpace(text), Kind: "tool"}
-	default:
-		return domain.AssistantMessage{}
-	}
+	return domain.LegacyMessage{Role: role, Summary: strings.TrimSpace(text)}
 }
 
 func legacyMessageFromTimeline(sessionID int64, item domain.TimelineItem) domain.Message {
@@ -190,7 +186,9 @@ func legacyMessageFromTimeline(sessionID int64, item domain.TimelineItem) domain
 }
 
 func timelineRole(item domain.TimelineItem) domain.MessageRole {
-	switch item.Content.(type) {
+	switch payload := item.Content.(type) {
+	case domain.LegacyMessage:
+		return payload.Role
 	case domain.UserMessage:
 		return domain.MessageRoleUser
 	case domain.Notice, domain.Compaction:
@@ -202,6 +200,8 @@ func timelineRole(item domain.TimelineItem) domain.MessageRole {
 
 func timelineSummary(item domain.TimelineItem) string {
 	switch payload := item.Content.(type) {
+	case domain.LegacyMessage:
+		return payload.Summary
 	case domain.UserMessage:
 		return payload.Text
 	case domain.AssistantMessage:
@@ -216,6 +216,10 @@ func timelineSummary(item domain.TimelineItem) string {
 }
 
 func applyLegacyPartToTimeline(item *domain.TimelineItem, part domain.Part) error {
+	if applyLegacyPartToLegacyMessage(item, part) {
+		item.UpdatedAt = time.Now().UTC()
+		return nil
+	}
 	switch payload := part.Payload.(type) {
 	case domain.TextPayload:
 		switch content := item.Content.(type) {
@@ -282,6 +286,32 @@ func applyLegacyPartToTimeline(item *domain.TimelineItem, part domain.Part) erro
 	return nil
 }
 
+func applyLegacyPartToLegacyMessage(item *domain.TimelineItem, part domain.Part) bool {
+	legacy, ok := item.Content.(domain.LegacyMessage)
+	if !ok {
+		return false
+	}
+	if part.Kind == "" && part.Payload != nil {
+		part.Kind = part.Payload.PartKind()
+	}
+	if part.Body == "" {
+		part.Body = part.Text()
+	}
+	if part.MetaJSON == "" {
+		part.MetaJSON = part.LegacyMetaJSON()
+	}
+	for idx := range legacy.Parts {
+		if legacy.Parts[idx].ID == part.ID {
+			legacy.Parts[idx] = part
+			item.Content = legacy
+			return true
+		}
+	}
+	legacy.Parts = append(legacy.Parts, part)
+	item.Content = legacy
+	return true
+}
+
 func upsertAttachment(items []domain.Attachment, next domain.Attachment) []domain.Attachment {
 	for idx := range items {
 		if items[idx].ID != "" && items[idx].ID == next.ID {
@@ -305,6 +335,24 @@ func legacyPartsFromTimeline(item domain.TimelineItem) []domain.Part {
 		parts = append(parts, part)
 	}
 	switch payload := item.Content.(type) {
+	case domain.LegacyMessage:
+		parts = make([]domain.Part, 0, len(payload.Parts))
+		for _, part := range payload.Parts {
+			part.MessageID = item.ID
+			if part.Kind == "" && part.Payload != nil {
+				part.Kind = part.Payload.PartKind()
+			}
+			if part.CreatedAt.IsZero() {
+				part.CreatedAt = item.CreatedAt
+			}
+			if part.Body == "" {
+				part.Body = part.Text()
+			}
+			if part.MetaJSON == "" {
+				part.MetaJSON = part.LegacyMetaJSON()
+			}
+			parts = append(parts, part)
+		}
 	case domain.UserMessage:
 		if strings.TrimSpace(payload.Text) != "" {
 			add(domain.PartKindText, domain.TextPayload{Text: payload.Text}, 1)
