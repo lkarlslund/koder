@@ -120,6 +120,7 @@ func (m *App) applyCurrentChatEvent(evt domain.Event) {
 	}
 	refreshed := false
 	if evt.Message.ID > 0 {
+		m.upsertCurrentSnapshotTimelineFromMessage(evt.Message, evt.Parts)
 		msg, msgParts, mutations, created := m.upsertCurrentSnapshotMessageParts(evt.Message, evt.Parts)
 		if created {
 			if !m.appendEventMessageToTranscript(msg, msgParts) {

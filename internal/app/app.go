@@ -4982,6 +4982,7 @@ func (m *App) appendCurrentSnapshotMessage(message domain.Message, parts []domai
 	if m.currentSnapshot.Chat.ID == 0 && m.currentChat.ID != 0 {
 		m.currentSnapshot.Chat = m.currentChat
 	}
+	m.upsertCurrentSnapshotTimelineFromMessage(message, parts)
 	m.currentSnapshot.Messages = append(m.currentSnapshot.Messages, message)
 	if len(parts) == 0 {
 		return
@@ -4990,6 +4991,77 @@ func (m *App) appendCurrentSnapshotMessage(message domain.Message, parts []domai
 		m.currentSnapshot.Parts = make(map[int64][]domain.Part)
 	}
 	m.currentSnapshot.Parts[message.ID] = slices.Clone(parts)
+}
+
+func (m *App) upsertCurrentSnapshotTimelineFromMessage(message domain.Message, parts []domain.Part) {
+	if message.ID == 0 {
+		return
+	}
+	if m.currentSnapshot.Chat.ID == 0 && m.currentChat.ID != 0 {
+		m.currentSnapshot.Chat = m.currentChat
+	}
+	m.ensureCurrentSnapshotTimeline()
+	now := time.Now().UTC()
+	item := domain.TimelineItem{
+		ID:        message.ID,
+		ChatID:    firstNonZeroAppInt64(message.ChatID, m.currentSnapshot.Chat.ID, m.currentChat.ID),
+		Seq:       int64(len(m.currentSnapshot.Timeline) + 1),
+		Content:   domain.LegacyMessage{Role: message.Role, Summary: message.Summary, Parts: slices.Clone(parts)},
+		CreatedAt: message.CreatedAt,
+		UpdatedAt: now,
+	}
+	if item.CreatedAt.IsZero() {
+		item.CreatedAt = now
+	}
+	for idx := range m.currentSnapshot.Timeline {
+		if m.currentSnapshot.Timeline[idx].ID != message.ID {
+			continue
+		}
+		existing := m.currentSnapshot.Timeline[idx]
+		item.Seq = existing.Seq
+		if item.Seq == 0 {
+			item.Seq = int64(idx + 1)
+		}
+		if item.ChatID == 0 {
+			item.ChatID = existing.ChatID
+		}
+		if item.CreatedAt.IsZero() {
+			item.CreatedAt = existing.CreatedAt
+		}
+		if legacy, ok := existing.Content.(domain.LegacyMessage); ok {
+			item.Content = domain.LegacyMessage{
+				Role:    firstNonZeroMessageRole(message.Role, legacy.Role),
+				Summary: firstNonEmptyString(message.Summary, legacy.Summary),
+				Parts:   mergeAppLegacyParts(legacy.Parts, parts),
+			}
+		}
+		m.currentSnapshot.Timeline[idx] = item
+		return
+	}
+	m.currentSnapshot.Timeline = append(m.currentSnapshot.Timeline, item)
+}
+
+func (m *App) ensureCurrentSnapshotTimeline() {
+	if len(m.currentSnapshot.Timeline) > 0 || len(m.currentSnapshot.Messages) == 0 {
+		return
+	}
+	for idx, message := range m.currentSnapshot.Messages {
+		if message.ID == 0 {
+			continue
+		}
+		createdAt := message.CreatedAt
+		if createdAt.IsZero() {
+			createdAt = time.Now().UTC()
+		}
+		m.currentSnapshot.Timeline = append(m.currentSnapshot.Timeline, domain.TimelineItem{
+			ID:        message.ID,
+			ChatID:    firstNonZeroAppInt64(message.ChatID, m.currentSnapshot.Chat.ID, m.currentChat.ID),
+			Seq:       int64(idx + 1),
+			Content:   domain.LegacyMessage{Role: message.Role, Summary: message.Summary, Parts: slices.Clone(m.currentSnapshot.Parts[message.ID])},
+			CreatedAt: createdAt,
+			UpdatedAt: createdAt,
+		})
+	}
 }
 
 func (m *App) upsertCurrentSnapshotMessageParts(message domain.Message, parts []domain.Part) (domain.Message, []domain.Part, []domain.Part, bool) {
@@ -5035,6 +5107,48 @@ func (m *App) upsertCurrentSnapshotMessageParts(message domain.Message, parts []
 	}
 	m.currentSnapshot.Parts[message.ID] = existing
 	return message, slices.Clone(existing), mutations, created
+}
+
+func firstNonZeroAppInt64(values ...int64) int64 {
+	for _, value := range values {
+		if value != 0 {
+			return value
+		}
+	}
+	return 0
+}
+
+func firstNonZeroMessageRole(values ...domain.MessageRole) domain.MessageRole {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func mergeAppLegacyParts(existing, incoming []domain.Part) []domain.Part {
+	if len(incoming) == 0 {
+		return slices.Clone(existing)
+	}
+	out := slices.Clone(existing)
+	byID := make(map[int64]int, len(out))
+	for idx := range out {
+		if out[idx].ID != 0 {
+			byID[out[idx].ID] = idx
+		}
+	}
+	for _, part := range incoming {
+		if part.ID != 0 {
+			if idx, ok := byID[part.ID]; ok {
+				out[idx] = part
+				continue
+			}
+			byID[part.ID] = len(out)
+		}
+		out = append(out, part)
+	}
+	return out
 }
 
 func (m *App) upsertCurrentSnapshotApproval(approval store.Approval) {

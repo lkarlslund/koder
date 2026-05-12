@@ -631,6 +631,7 @@ func (r *Chat) handleStreamEvent(evt domain.Event) {
 		}
 	}
 	if evt.Message.ID > 0 && r.state != nil {
+		r.state.UpsertLegacyMessageParts(evt.Message, evt.Parts)
 		r.state.UpsertMessageParts(evt.Message, evt.Parts)
 		transcriptChanged = true
 		if strings.TrimSpace(evt.Message.Summary) != "" {

@@ -282,6 +282,49 @@ func (s *ChatState) UpsertTimelineItem(item domain.TimelineItem) (*TimelineRecor
 	return record, created
 }
 
+// UpsertLegacyMessageParts mirrors an old message/parts event into timeline storage.
+func (s *ChatState) UpsertLegacyMessageParts(message domain.Message, parts []domain.Part) (*TimelineRecord, bool) {
+	if s == nil || message.ID == 0 {
+		return nil, false
+	}
+	if s.byItem == nil {
+		s.byItem = map[int64]*TimelineRecord{}
+	}
+	record := s.byItem[message.ID]
+	created := false
+	now := time.Now().UTC()
+	if record == nil {
+		record = &TimelineRecord{}
+		s.timeline = append(s.timeline, record)
+		s.byItem[message.ID] = record
+		created = true
+	}
+	item := record.Item
+	if item.ID == 0 {
+		item.ID = message.ID
+	}
+	if item.ChatID == 0 {
+		item.ChatID = firstNonZeroInt64(message.ChatID, s.chat.ID)
+	}
+	if item.Seq == 0 {
+		item.Seq = int64(len(s.timeline))
+	}
+	if item.CreatedAt.IsZero() {
+		item.CreatedAt = message.CreatedAt
+	}
+	if item.CreatedAt.IsZero() {
+		item.CreatedAt = now
+	}
+	item.UpdatedAt = now
+	legacy, _ := item.Content.(domain.LegacyMessage)
+	legacy.Role = message.Role
+	legacy.Summary = message.Summary
+	legacy.Parts = mergeLegacyParts(legacy.Parts, parts)
+	item.Content = legacy
+	record.Item = item
+	return record, created
+}
+
 // SnapshotTimeline returns detached timeline values.
 func (s *ChatState) SnapshotTimeline() []domain.TimelineItem {
 	if s == nil {
@@ -293,6 +336,39 @@ func (s *ChatState) SnapshotTimeline() []domain.TimelineItem {
 			continue
 		}
 		out = append(out, record.Item)
+	}
+	return out
+}
+
+func firstNonZeroInt64(values ...int64) int64 {
+	for _, value := range values {
+		if value != 0 {
+			return value
+		}
+	}
+	return 0
+}
+
+func mergeLegacyParts(existing, incoming []domain.Part) []domain.Part {
+	if len(incoming) == 0 {
+		return slices.Clone(existing)
+	}
+	out := slices.Clone(existing)
+	byID := make(map[int64]int, len(out))
+	for idx := range out {
+		if out[idx].ID != 0 {
+			byID[out[idx].ID] = idx
+		}
+	}
+	for _, part := range incoming {
+		if part.ID != 0 {
+			if idx, ok := byID[part.ID]; ok {
+				out[idx] = part
+				continue
+			}
+			byID[part.ID] = len(out)
+		}
+		out = append(out, part)
 	}
 	return out
 }
