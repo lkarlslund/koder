@@ -270,6 +270,9 @@ func (s *ChatState) UpsertTimelineItem(item domain.TimelineItem) (*TimelineRecor
 	if s.byItem == nil {
 		s.byItem = map[int64]*TimelineRecord{}
 	}
+	if record := s.replaceTemporaryActiveAssistant(item); record != nil {
+		return record, false
+	}
 	record := s.byItem[item.ID]
 	created := false
 	if record == nil {
@@ -280,6 +283,27 @@ func (s *ChatState) UpsertTimelineItem(item domain.TimelineItem) (*TimelineRecor
 	}
 	record.Item = item
 	return record, created
+}
+
+func (s *ChatState) replaceTemporaryActiveAssistant(item domain.TimelineItem) *TimelineRecord {
+	if !isDurableTimelineItem(item) {
+		return nil
+	}
+	if _, ok := item.Content.(domain.AssistantMessage); !ok {
+		return nil
+	}
+	active := s.LatestActiveAssistant()
+	if active == nil || isDurableTimelineItem(active.Item) {
+		return nil
+	}
+	delete(s.byItem, active.Item.ID)
+	active.Item = item
+	s.byItem[item.ID] = active
+	return active
+}
+
+func isDurableTimelineItem(item domain.TimelineItem) bool {
+	return item.ID > 0 && item.ID <= 1_000_000_000_000
 }
 
 // UpsertLegacyMessageParts mirrors an old message/parts event into timeline storage.

@@ -343,10 +343,6 @@ func (s *Store) ForkSession(ctx context.Context, sourceSessionID int64) (domain.
 	if err != nil {
 		return domain.Session{}, err
 	}
-	messages, partsByMessage, err := s.PartsForSession(ctx, sourceSessionID)
-	if err != nil {
-		return domain.Session{}, err
-	}
 	forked, err := s.CreateSession(ctx, source.Title, source.ProviderID, source.ModelID, &source.ID)
 	if err != nil {
 		return domain.Session{}, err
@@ -398,16 +394,8 @@ func (s *Store) ForkSession(ctx context.Context, sourceSessionID int64) (domain.
 			}
 		}
 	}
-	for _, msg := range messages {
-		next, err := s.AddMessage(ctx, forked.ID, msg.Role, msg.Summary)
-		if err != nil {
-			return domain.Session{}, err
-		}
-		for _, part := range partsByMessage[msg.ID] {
-			if _, err := s.AddPart(ctx, next.ID, part.Payload); err != nil {
-				return domain.Session{}, err
-			}
-		}
+	if err := s.ForkTimeline(ctx, sourceSessionID, forked.ID); err != nil {
+		return domain.Session{}, err
 	}
 	return s.GetSession(ctx, forked.ID)
 }

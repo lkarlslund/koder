@@ -57,6 +57,96 @@ func defaultChatForSession(t *testing.T, st *store.Store, sessionID int64) domai
 	return chat
 }
 
+func appendUserTimelineItem(t *testing.T, st *store.Store, chatID int64, text string) domain.TimelineItem {
+	t.Helper()
+	return appendUserTimelineItemWithAttachments(t, st, chatID, text, nil)
+}
+
+func appendUserTimelineItemWithAttachments(t *testing.T, st *store.Store, chatID int64, text string, attachments []domain.Attachment) domain.TimelineItem {
+	t.Helper()
+	item, err := st.AppendTimeline(context.Background(), chatID, domain.UserMessage{Text: text, Attachments: attachments})
+	if err != nil {
+		t.Fatal(err)
+	}
+	item.Seal(time.Now().UTC())
+	if err := st.Timeline().Put(context.Background(), item); err != nil {
+		t.Fatal(err)
+	}
+	return item
+}
+
+func appendAssistantTimelineItem(t *testing.T, st *store.Store, chatID int64, msg domain.AssistantMessage) domain.TimelineItem {
+	t.Helper()
+	item, err := st.AppendTimeline(context.Background(), chatID, msg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	item.Seal(time.Now().UTC())
+	if err := st.Timeline().Put(context.Background(), item); err != nil {
+		t.Fatal(err)
+	}
+	return item
+}
+
+func appendAssistantToolTimelineItem(t *testing.T, st *store.Store, chatID int64, req tools.Request, text string) domain.TimelineItem {
+	t.Helper()
+	item, err := st.AppendAssistantToolCalls(context.Background(), chatID, []domain.ToolCall{{
+		ToolCallID: domain.ToolCallID(req.ToolCallID),
+		Tool:       req.Tool,
+		Args:       req.Args,
+		Status:     domain.ToolStatusPending,
+	}}, text, domain.Usage{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return item
+}
+
+func attachToolResultTimelineItem(t *testing.T, st *store.Store, chatID int64, req tools.Request, text string, data domain.ToolResultPayload) domain.TimelineItem {
+	t.Helper()
+	item, err := st.AttachToolResult(context.Background(), chatID, req.ToolCallID, domain.ToolResult{
+		Text:   text,
+		Data:   data,
+		Status: domain.ToolResultStatusOK,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return item
+}
+
+func appendCompactionTimelineItem(t *testing.T, st *store.Store, chatID int64, summary string, firstKeptItemID int64) domain.TimelineItem {
+	t.Helper()
+	item, err := st.AppendTimeline(context.Background(), chatID, domain.Compaction{
+		Summary:         summary,
+		Status:          "completed",
+		FirstKeptItemID: firstKeptItemID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	item.Seal(time.Now().UTC())
+	if err := st.Timeline().Put(context.Background(), item); err != nil {
+		t.Fatal(err)
+	}
+	return item
+}
+
+func timelineNoticesForChat(t *testing.T, st *store.Store, chatID int64) []domain.Notice {
+	t.Helper()
+	items, err := st.TimelineForChat(context.Background(), chatID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []domain.Notice
+	for _, item := range items {
+		if notice, ok := item.Content.(domain.Notice); ok {
+			out = append(out, notice)
+		}
+	}
+	return out
+}
+
 func TestSystemPromptDoesNotMentionInternalSlashCommands(t *testing.T) {
 	prompt := systemPrompt()
 	for _, command := range []string{"/new", "/quit", "/permissions", "/mouse", "/approve", "/deny"} {
@@ -387,33 +477,33 @@ func TestPersistAssistantToolCallsStoresNarrationAsText(t *testing.T) {
 		ToolCallID: "call_1",
 		Args:       map[string]string{"path": "README.md"},
 	}
-	msg, persistedParts, err := engine.persistAssistantToolCalls(context.Background(), chat.ID, session.ID, []tools.Request{call}, "Let me inspect that file first.", domain.Usage{TotalTokens: 10})
+	item, err := engine.persistAssistantToolCalls(context.Background(), chat.ID, session.ID, []tools.Request{call}, "Let me inspect that file first.", domain.Usage{TotalTokens: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if msg.ID == 0 || len(persistedParts) < 3 {
-		t.Fatalf("expected persisted message and parts, got msg=%#v parts=%#v", msg, persistedParts)
+	if item.ID == 0 {
+		t.Fatalf("expected persisted timeline item, got %#v", item)
 	}
 
-	messages, parts, err := st.PartsForSession(context.Background(), session.ID)
+	items, err := st.TimelineForChat(context.Background(), chat.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(messages) != 1 {
-		t.Fatalf("expected one assistant message, got %d", len(messages))
+	if len(items) != 1 {
+		t.Fatalf("expected one assistant item, got %d", len(items))
 	}
-	got := parts[messages[0].ID]
-	if len(got) < 3 {
-		t.Fatalf("expected text, tool call, and usage parts, got %#v", got)
+	assistant, ok := items[0].Content.(domain.AssistantMessage)
+	if !ok {
+		t.Fatalf("expected assistant item, got %#v", items[0].Content)
 	}
-	if got[0].Kind != domain.PartKindToolCall {
-		t.Fatalf("expected first part to be tool call, got %#v", got[0])
+	if len(assistant.Tools) != 1 || assistant.Tools[0].Tool != domain.ToolKindRead {
+		t.Fatalf("expected tool call child, got %#v", assistant.Tools)
 	}
-	if got[1].Kind != domain.PartKindText || !strings.Contains(got[1].Body, "inspect that file") {
-		t.Fatalf("expected narration to be stored as text, got %#v", got[1])
+	if !strings.Contains(assistant.Text, "inspect that file") {
+		t.Fatalf("expected narration to be stored as text, got %#v", assistant)
 	}
-	if got[2].Kind != domain.PartKindUsage {
-		t.Fatalf("expected usage to be stored as typed usage part, got %#v", got[2])
+	if assistant.Usage == nil || assistant.Usage.TotalTokens != 10 {
+		t.Fatalf("expected usage to be stored on assistant item, got %#v", assistant.Usage)
 	}
 }
 
@@ -432,21 +522,12 @@ func TestBuildConversationIncludesAssistantNarrationAlongsideToolCalls(t *testin
 	}
 	chat := defaultChatForSession(t, st, session.ID)
 
-	assistantMsg, err := st.AddMessage(context.Background(), session.ID, domain.MessageRoleAssistant, "tool:read")
-	if err != nil {
-		t.Fatal(err)
-	}
 	req := tools.Request{
 		Tool:       domain.ToolKindRead,
 		ToolCallID: "call_1",
 		Args:       map[string]string{"path": "README.md"},
 	}
-	if _, err := st.AddPart(context.Background(), assistantMsg.ID, domain.ToolCallPayload{Tool: req.Tool, ToolCallID: req.ToolCallID, Args: req.Args}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.AddPart(context.Background(), assistantMsg.ID, domain.TextPayload{Text: "Let me inspect that file first."}); err != nil {
-		t.Fatal(err)
-	}
+	appendAssistantToolTimelineItem(t, st, chat.ID, req, "Let me inspect that file first.")
 
 	conversation, err := engine.buildConversation(context.Background(), session.ID, chat.ID)
 	if err != nil {
@@ -481,27 +562,9 @@ func TestBuildConversationResetsAtCompactionBoundary(t *testing.T) {
 		t.Fatal(err)
 	}
 	chat := defaultChatForSession(t, st, session.ID)
-	before, err := st.AddMessage(context.Background(), session.ID, domain.MessageRoleUser, "before")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.AddPart(context.Background(), before.ID, domain.TextPayload{Text: "old question"}); err != nil {
-		t.Fatal(err)
-	}
-	compactMsg, err := st.AddMessage(context.Background(), session.ID, domain.MessageRoleAssistant, "compact")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.AddPart(context.Background(), compactMsg.ID, domain.CompactionPayload{Summary: "summary block"}); err != nil {
-		t.Fatal(err)
-	}
-	after, err := st.AddMessage(context.Background(), session.ID, domain.MessageRoleUser, "after")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.AddPart(context.Background(), after.ID, domain.TextPayload{Text: "new question"}); err != nil {
-		t.Fatal(err)
-	}
+	appendUserTimelineItem(t, st, chat.ID, "old question")
+	appendCompactionTimelineItem(t, st, chat.ID, "summary block", 0)
+	appendUserTimelineItem(t, st, chat.ID, "new question")
 
 	conversation, err := engine.buildConversation(context.Background(), session.ID, chat.ID)
 	if err != nil {
@@ -540,34 +603,11 @@ func TestBuildConversationKeepsRecentToolBatchAfterCompactionBoundary(t *testing
 	}
 	chat := defaultChatForSession(t, st, session.ID)
 
-	userMsg, err := st.AddMessage(context.Background(), session.ID, domain.MessageRoleUser, "before")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.AddPart(context.Background(), userMsg.ID, domain.TextPayload{Text: "old question"}); err != nil {
-		t.Fatal(err)
-	}
-	toolCallMsg, err := st.AddMessage(context.Background(), session.ID, domain.MessageRoleAssistant, "tool:bash")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.AddPart(context.Background(), toolCallMsg.ID, domain.ToolCallPayload{Tool: domain.ToolKindBash, ToolCallID: "call_1", Args: map[string]string{"command": "pwd"}}); err != nil {
-		t.Fatal(err)
-	}
-	toolMsg, err := st.AddMessage(context.Background(), session.ID, domain.MessageRoleTool, "bash")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.AddPart(context.Background(), toolMsg.ID, domain.ToolOutputPayload{Tool: domain.ToolKindBash, ToolCallID: "call_1", Status: domain.ToolResultStatusOK, Text: "/tmp/project", Result: tools.BashStoredResult{Command: "pwd", Output: "/tmp/project"}}); err != nil {
-		t.Fatal(err)
-	}
-	compactMsg, err := st.AddMessage(context.Background(), session.ID, domain.MessageRoleAssistant, "compact")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.AddPart(context.Background(), compactMsg.ID, domain.CompactionPayload{Summary: "summary block", FirstKeptMessageID: toolCallMsg.ID}); err != nil {
-		t.Fatal(err)
-	}
+	appendUserTimelineItem(t, st, chat.ID, "old question")
+	toolReq := tools.Request{Tool: domain.ToolKindBash, ToolCallID: "call_1", Args: map[string]string{"command": "pwd"}}
+	toolItem := appendAssistantToolTimelineItem(t, st, chat.ID, toolReq, "")
+	attachToolResultTimelineItem(t, st, chat.ID, toolReq, "/tmp/project", domain.BashStoredResult{Command: "pwd", Output: "/tmp/project"})
+	appendCompactionTimelineItem(t, st, chat.ID, "summary block", toolItem.ID)
 
 	conversation, err := engine.buildConversation(context.Background(), session.ID, chat.ID)
 	if err != nil {
@@ -606,51 +646,13 @@ func TestBuildConversationAfterCompactionKeepsEntireSuffixFromSavedBoundary(t *t
 	}
 	chat := defaultChatForSession(t, st, session.ID)
 
-	before, err := st.AddMessage(context.Background(), session.ID, domain.MessageRoleUser, "before")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.AddPart(context.Background(), before.ID, domain.TextPayload{Text: "summarize this away"}); err != nil {
-		t.Fatal(err)
-	}
-	toolCallMsg, err := st.AddMessage(context.Background(), session.ID, domain.MessageRoleAssistant, "tool:bash")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.AddPart(context.Background(), toolCallMsg.ID, domain.ToolCallPayload{Tool: domain.ToolKindBash, ToolCallID: "call_1", Args: map[string]string{"command": "pwd"}}); err != nil {
-		t.Fatal(err)
-	}
-	toolMsg, err := st.AddMessage(context.Background(), session.ID, domain.MessageRoleTool, "bash")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.AddPart(context.Background(), toolMsg.ID, domain.ToolOutputPayload{Tool: domain.ToolKindBash, ToolCallID: "call_1", Status: domain.ToolResultStatusOK, Text: "/tmp/project", Result: tools.BashStoredResult{Command: "pwd", Output: "/tmp/project"}}); err != nil {
-		t.Fatal(err)
-	}
-	afterUser, err := st.AddMessage(context.Background(), session.ID, domain.MessageRoleUser, "after")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.AddPart(context.Background(), afterUser.ID, domain.TextPayload{Text: "keep this question raw"}); err != nil {
-		t.Fatal(err)
-	}
-	afterAssistant, err := st.AddMessage(context.Background(), session.ID, domain.MessageRoleAssistant, "after-answer")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.AddPart(context.Background(), afterAssistant.ID, domain.TextPayload{Text: "keep this answer raw"}); err != nil {
-		t.Fatal(err)
-	}
-	compactMsg, err := st.AddMessage(context.Background(), session.ID, domain.MessageRoleAssistant, "compact")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.AddPart(context.Background(), compactMsg.ID, domain.CompactionPayload{
-		Summary:            "summary block",
-		FirstKeptMessageID: toolCallMsg.ID,
-	}); err != nil {
-		t.Fatal(err)
-	}
+	appendUserTimelineItem(t, st, chat.ID, "summarize this away")
+	toolReq := tools.Request{Tool: domain.ToolKindBash, ToolCallID: "call_1", Args: map[string]string{"command": "pwd"}}
+	toolItem := appendAssistantToolTimelineItem(t, st, chat.ID, toolReq, "")
+	attachToolResultTimelineItem(t, st, chat.ID, toolReq, "/tmp/project", domain.BashStoredResult{Command: "pwd", Output: "/tmp/project"})
+	appendUserTimelineItem(t, st, chat.ID, "keep this question raw")
+	appendAssistantTimelineItem(t, st, chat.ID, domain.AssistantMessage{Text: "keep this answer raw"})
+	appendCompactionTimelineItem(t, st, chat.ID, "summary block", toolItem.ID)
 
 	conversation, err := engine.buildConversation(context.Background(), session.ID, chat.ID)
 	if err != nil {
@@ -688,41 +690,24 @@ func TestBuildCompactionConversationExcludesPreservedToolTail(t *testing.T) {
 	}
 	chat := defaultChatForSession(t, st, session.ID)
 
-	userMsg, err := st.AddMessage(context.Background(), session.ID, domain.MessageRoleUser, "before")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.AddPart(context.Background(), userMsg.ID, domain.TextPayload{Text: "old question"}); err != nil {
-		t.Fatal(err)
-	}
-	toolCallMsg, err := st.AddMessage(context.Background(), session.ID, domain.MessageRoleAssistant, "tool:bash")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.AddPart(context.Background(), toolCallMsg.ID, domain.ToolCallPayload{Tool: domain.ToolKindBash, ToolCallID: "call_1", Args: map[string]string{"command": "pwd"}}); err != nil {
-		t.Fatal(err)
-	}
-	toolMsg, err := st.AddMessage(context.Background(), session.ID, domain.MessageRoleTool, "bash")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.AddPart(context.Background(), toolMsg.ID, domain.ToolOutputPayload{Tool: domain.ToolKindBash, ToolCallID: "call_1", Status: domain.ToolResultStatusOK, Text: "/tmp/project", Result: tools.BashStoredResult{Command: "pwd", Output: "/tmp/project"}}); err != nil {
-		t.Fatal(err)
-	}
+	appendUserTimelineItem(t, st, chat.ID, "old question")
+	toolReq := tools.Request{Tool: domain.ToolKindBash, ToolCallID: "call_1", Args: map[string]string{"command": "pwd"}}
+	toolItem := appendAssistantToolTimelineItem(t, st, chat.ID, toolReq, "")
+	attachToolResultTimelineItem(t, st, chat.ID, toolReq, "/tmp/project", domain.BashStoredResult{Command: "pwd", Output: "/tmp/project"})
 
-	messages, partsByMessage, err := st.PartsForChat(context.Background(), chat.ID)
+	timeline, err := st.TimelineForChat(context.Background(), chat.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	conversation, firstKeptMessageID, err := engine.buildCompactionConversation(session, chat, messages, partsByMessage)
+	conversation, firstKeptItemID, err := engine.buildCompactionConversationForTimeline(session, chat, timeline)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(conversation) == 0 {
 		t.Fatal("expected compaction source conversation")
 	}
-	if firstKeptMessageID != toolCallMsg.ID {
-		t.Fatalf("expected compaction boundary at tool call message, got %d want %d", firstKeptMessageID, toolCallMsg.ID)
+	if firstKeptItemID != toolItem.ID {
+		t.Fatalf("expected compaction boundary at tool call item, got %d want %d", firstKeptItemID, toolItem.ID)
 	}
 	last := conversation[len(conversation)-1]
 	if strings.Contains(last.Content, "/tmp/project") || len(last.ToolCalls) != 0 {
@@ -803,26 +788,15 @@ func TestBuildConversationUsesStructuredToolMessages(t *testing.T) {
 		t.Fatal(err)
 	}
 	chat := defaultChatForSession(t, st, session.ID)
-	assistantMsg, err := st.AddMessage(context.Background(), session.ID, domain.MessageRoleAssistant, "tool:bash")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.AddPart(context.Background(), assistantMsg.ID, domain.ToolCallPayload{Tool: domain.ToolKindBash, ToolCallID: "call_1", Args: map[string]string{"command": "pwd"}}); err != nil {
-		t.Fatal(err)
-	}
-	toolMsg, err := st.AddMessage(context.Background(), session.ID, domain.MessageRoleTool, "bash")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.AddPart(context.Background(), toolMsg.ID, domain.ToolOutputPayload{Tool: domain.ToolKindBash, ToolCallID: "call_1", Status: domain.ToolResultStatusOK, Text: "/stale/body", Result: tools.BashStoredResult{
+	toolReq := tools.Request{Tool: domain.ToolKindBash, ToolCallID: "call_1", Args: map[string]string{"command": "pwd"}}
+	appendAssistantToolTimelineItem(t, st, chat.ID, toolReq, "")
+	attachToolResultTimelineItem(t, st, chat.ID, toolReq, "/stale/body", domain.BashStoredResult{
 		Command:   "pwd",
 		Workdir:   ".",
 		TimeoutMS: 1000,
 		ExitCode:  0,
 		Output:    "/typed/output",
-	}}); err != nil {
-		t.Fatal(err)
-	}
+	})
 
 	conversation, err := engine.buildConversation(context.Background(), session.ID, chat.ID)
 	if err != nil {
@@ -858,18 +832,14 @@ func TestBuildConversationIncludesViewImageToolContentParts(t *testing.T) {
 	if err := os.WriteFile(imagePath, []byte("\x89PNG\r\n\x1a\nfake"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	toolMsg, err := st.AddMessage(context.Background(), session.ID, domain.MessageRoleTool, "view_image")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.AddPart(context.Background(), toolMsg.ID, domain.ToolOutputPayload{Tool: domain.ToolKindViewImage, ToolCallID: "call_image", Status: domain.ToolResultStatusOK, Text: "Viewed image screen.png", Result: tools.ViewImageStoredResult{
+	toolReq := tools.Request{Tool: domain.ToolKindViewImage, ToolCallID: "call_image", Args: map[string]string{"path": "screen.png"}}
+	appendAssistantToolTimelineItem(t, st, chat.ID, toolReq, "")
+	attachToolResultTimelineItem(t, st, chat.ID, toolReq, "Viewed image screen.png", domain.ViewImageStoredResult{
 		Path:       "screen.png",
 		SourcePath: imagePath,
 		MIMEType:   "image/png",
 		Summary:    "Viewed image screen.png",
-	}}); err != nil {
-		t.Fatal(err)
-	}
+	})
 
 	conversation, err := engine.buildConversation(context.Background(), session.ID, chat.ID)
 	if err != nil {
@@ -938,22 +908,12 @@ func TestBuildConversationIncludesImageAndTextAttachments(t *testing.T) {
 	}
 	chat := defaultChatForSession(t, st, session.ID)
 
-	msg, err := st.AddMessage(context.Background(), session.ID, domain.MessageRoleUser, "inspect these")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.AddPart(context.Background(), msg.ID, domain.TextPayload{Text: "inspect these"}); err != nil {
-		t.Fatal(err)
-	}
 	imageDraft, err := engine.files.ImportClipboardImage([]byte("\x89PNG\r\n\x1a\nfake"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	imageMeta, err := engine.files.AdoptDraft(imageDraft, session.ID)
 	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.AddPart(context.Background(), msg.ID, domain.AttachmentPayload{ID: imageMeta.ID, Name: imageMeta.Name, MIME: imageMeta.MIME, Path: imageMeta.Path, Size: imageMeta.Size, Source: imageMeta.Source, Original: imageMeta.Original}); err != nil {
 		t.Fatal(err)
 	}
 	textPath := filepath.Join(t.TempDir(), "note.txt")
@@ -968,9 +928,10 @@ func TestBuildConversationIncludesImageAndTextAttachments(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.AddPart(context.Background(), msg.ID, domain.AttachmentPayload{ID: textMeta.ID, Name: textMeta.Name, MIME: textMeta.MIME, Path: textMeta.Path, Size: textMeta.Size, Source: textMeta.Source, Original: textMeta.Original}); err != nil {
-		t.Fatal(err)
-	}
+	appendUserTimelineItemWithAttachments(t, st, chat.ID, "inspect these", []domain.Attachment{
+		{ID: imageMeta.ID, Name: imageMeta.Name, MIME: imageMeta.MIME, Path: imageMeta.Path, Size: imageMeta.Size, Source: imageMeta.Source, Original: imageMeta.Original},
+		{ID: textMeta.ID, Name: textMeta.Name, MIME: textMeta.MIME, Path: textMeta.Path, Size: textMeta.Size, Source: textMeta.Source, Original: textMeta.Original},
+	})
 
 	conversation, err := engine.buildConversation(context.Background(), session.ID, chat.ID)
 	if err != nil {
@@ -1008,13 +969,8 @@ func TestPreviewNextRequestIncludesUnsentDraftMessage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	msg, err := st.AddMessage(context.Background(), session.ID, domain.MessageRoleUser, "saved prompt")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.AddPart(context.Background(), msg.ID, domain.TextPayload{Text: "saved prompt"}); err != nil {
-		t.Fatal(err)
-	}
+	chat := defaultChatForSession(t, st, session.ID)
+	appendUserTimelineItem(t, st, chat.ID, "saved prompt")
 
 	req, err := engine.PreviewNextRequest(context.Background(), session, "unsent draft", nil, nil, "Permission mode changed")
 	if err != nil {
@@ -1290,16 +1246,10 @@ func TestBuildConversationPreservesThinkingBlockForQwenPreset(t *testing.T) {
 		t.Fatal(err)
 	}
 	chat := defaultChatForSession(t, st, session.ID)
-	msg, err := st.AddChatMessage(context.Background(), chat.ID, domain.MessageRoleAssistant, "done")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.AddPart(context.Background(), msg.ID, domain.ReasoningPayload{Text: "hidden trace"}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.AddPart(context.Background(), msg.ID, domain.TextPayload{Text: "done"}); err != nil {
-		t.Fatal(err)
-	}
+	appendAssistantTimelineItem(t, st, chat.ID, domain.AssistantMessage{
+		Reasoning: domain.ReasoningContent{Text: "hidden trace"},
+		Text:      "done",
+	})
 
 	conversation, err := engine.buildConversation(context.Background(), session.ID, chat.ID)
 	if err != nil {
@@ -1657,11 +1607,13 @@ func TestHandleModelToolCallsStopsAfterToolBatchWhenCancelRequested(t *testing.T
 
 	out := make(chan domain.Event, 8)
 	ctx := turncontrol.WithShouldStop(context.Background(), func() bool { return true })
-	needsApproval, err := engine.handleModelToolCalls(ctx, session, chat, []tools.Request{{
+	req := tools.Request{
 		Tool:       domain.ToolKindBash,
 		ToolCallID: "call_1",
 		Args:       map[string]string{"command": "printf hi"},
-	}}, out)
+	}
+	appendAssistantToolTimelineItem(t, st, chat.ID, req, "")
+	needsApproval, err := engine.handleModelToolCalls(ctx, session, chat, []tools.Request{req}, out)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context canceled, got %v", err)
 	}
@@ -1950,11 +1902,12 @@ func TestRunPromptMessageDoneCarriesPersistedAssistantRecord(t *testing.T) {
 			done = evt
 		}
 	}
-	if done.Message.ID == 0 {
-		t.Fatal("expected persisted assistant message on message done")
+	if done.Item.ID == 0 {
+		t.Fatal("expected persisted assistant item on message done")
 	}
-	if len(done.Parts) == 0 || firstPartText(done.Parts, domain.PartKindText) != "hello" {
-		t.Fatalf("expected persisted assistant parts, got %#v", done.Parts)
+	assistant, ok := done.Item.Content.(domain.AssistantMessage)
+	if !ok || assistant.Text != "hello" {
+		t.Fatalf("expected persisted assistant timeline item, got %#v", done.Item)
 	}
 }
 
@@ -2014,11 +1967,12 @@ func TestRunPromptApprovalAskCarriesPersistedApprovalRecord(t *testing.T) {
 			break
 		}
 	}
-	if approval.Message.ID == 0 {
-		t.Fatal("expected persisted approval message on approval ask")
+	if approval.Item.ID == 0 {
+		t.Fatal("expected persisted approval item on approval ask")
 	}
-	if len(approval.Parts) != 1 || approval.Parts[0].Kind != domain.PartKindApprovalRequest {
-		t.Fatalf("expected approval request part, got %#v", approval.Parts)
+	assistant, ok := approval.Item.Content.(domain.AssistantMessage)
+	if !ok || len(assistant.Tools) != 1 || assistant.Tools[0].Approval == nil {
+		t.Fatalf("expected approval request attached to tool child, got %#v", approval.Item)
 	}
 }
 
@@ -2157,24 +2111,13 @@ func TestRunPromptPersistsAssistantErrorOnBackendFailure(t *testing.T) {
 		t.Fatal("expected backend failure event")
 	}
 
-	messages, parts, err := st.PartsForSession(context.Background(), session.ID)
-	if err != nil {
-		t.Fatal(err)
+	chat := defaultChatForSession(t, st, session.ID)
+	for _, notice := range timelineNoticesForChat(t, st, chat.ID) {
+		if notice.Kind == "model_error" && strings.Contains(notice.Text, "Error:") {
+			return
+		}
 	}
-	if len(messages) < 2 {
-		t.Fatalf("expected persisted user and assistant error messages, got %d", len(messages))
-	}
-	last := messages[len(messages)-1]
-	if last.Role != domain.MessageRoleAssistant {
-		t.Fatalf("expected assistant error message, got %s", last.Role)
-	}
-	errorParts := parts[last.ID]
-	if len(errorParts) != 1 || errorParts[0].Kind != domain.PartKindEventNotice {
-		t.Fatalf("expected one assistant event notice part, got %#v", errorParts)
-	}
-	if !strings.Contains(errorParts[0].Body, "Error:") {
-		t.Fatalf("expected stored error prefix, got %q", errorParts[0].Body)
-	}
+	t.Fatal("expected persisted assistant error notice")
 }
 
 func TestHandleModelToolCallAsksForOutsideProjectRead(t *testing.T) {
@@ -2201,10 +2144,13 @@ func TestHandleModelToolCallAsksForOutsideProjectRead(t *testing.T) {
 	}
 
 	chat := defaultChatForSession(t, st, session.ID)
-	evt, err := engine.handleModelToolCall(context.Background(), session, chat, tools.Request{
-		Tool: domain.ToolKindRead,
-		Args: map[string]string{"path": outsidePath},
-	})
+	req := tools.Request{
+		Tool:       domain.ToolKindRead,
+		ToolCallID: "call_1",
+		Args:       map[string]string{"path": outsidePath},
+	}
+	appendAssistantToolTimelineItem(t, st, chat.ID, req, "")
+	evt, err := engine.handleModelToolCall(context.Background(), session, chat, req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2693,20 +2639,8 @@ func TestCompactSessionDoesNotPersistUsageOrEmitUsageEvent(t *testing.T) {
 		t.Fatal(err)
 	}
 	chat := defaultChatForSession(t, st, session.ID)
-	userMsg, err := st.AddMessage(context.Background(), session.ID, domain.MessageRoleUser, "hello")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.AddPart(context.Background(), userMsg.ID, domain.TextPayload{Text: "hello"}); err != nil {
-		t.Fatal(err)
-	}
-	assistantMsg, err := st.AddMessage(context.Background(), session.ID, domain.MessageRoleAssistant, "world")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.AddPart(context.Background(), assistantMsg.ID, domain.TextPayload{Text: "world"}); err != nil {
-		t.Fatal(err)
-	}
+	appendUserTimelineItem(t, st, chat.ID, "hello")
+	appendAssistantTimelineItem(t, st, chat.ID, domain.AssistantMessage{Text: "world"})
 
 	client, err := provider.New("test", cfg.Providers["test"], nil)
 	if err != nil {
@@ -2742,26 +2676,24 @@ func TestCompactSessionDoesNotPersistUsageOrEmitUsageEvent(t *testing.T) {
 		t.Fatalf("expected compaction lifecycle refresh events, got start=%v done=%v", sawRefreshStart, sawRefreshDone)
 	}
 
-	messages, parts, err := st.PartsForSession(context.Background(), session.ID)
+	timeline, err := st.TimelineForChat(context.Background(), chat.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	var sawCompaction bool
-	for _, msg := range messages {
-		for _, part := range parts[msg.ID] {
-			if part.Kind == domain.PartKindSystemNotice && part.Body == "usage" {
-				t.Fatalf("did not expect compact session to persist usage notice, got %#v", part)
+	for _, item := range timeline {
+		switch content := item.Content.(type) {
+		case domain.Notice:
+			if content.Kind == "usage" {
+				t.Fatalf("did not expect compact session to persist usage notice, got %#v", content)
 			}
-			if part.Kind == domain.PartKindCompaction {
-				payload, ok := part.Payload.(domain.CompactionPayload)
-				if !ok {
-					t.Fatalf("expected typed compaction payload, got %#v", part.Payload)
+		case domain.Compaction:
+			if content.Status == "completed" {
+				if strings.TrimSpace(content.Summary) == "" {
+					t.Fatalf("expected completed compaction summary, got %#v", content)
 				}
-				if payload.Status != "completed" || strings.TrimSpace(payload.Summary) == "" {
-					t.Fatalf("expected completed compaction payload, got %#v", payload)
-				}
-				if payload.BeforeContextTokens <= 0 || payload.AfterContextTokens <= 0 {
-					t.Fatalf("expected compaction payload context sizes, got %#v", payload)
+				if content.BeforeContextTokens <= 0 || content.AfterContextTokens <= 0 {
+					t.Fatalf("expected compaction context sizes, got %#v", content)
 				}
 				sawCompaction = true
 			}
@@ -2810,13 +2742,7 @@ func TestCompactSessionAcceptsReasoningOnlySummary(t *testing.T) {
 		t.Fatal(err)
 	}
 	chat := defaultChatForSession(t, st, session.ID)
-	userMsg, err := st.AddMessage(context.Background(), session.ID, domain.MessageRoleUser, "hello")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.AddPart(context.Background(), userMsg.ID, domain.TextPayload{Text: "hello"}); err != nil {
-		t.Fatal(err)
-	}
+	appendUserTimelineItem(t, st, chat.ID, "hello")
 
 	client, err := provider.New("test", cfg.Providers["test"], nil)
 	if err != nil {
@@ -2826,28 +2752,20 @@ func TestCompactSessionAcceptsReasoningOnlySummary(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	messages, parts, err := st.PartsForChat(context.Background(), chat.ID)
+	timeline, err := st.TimelineForChat(context.Background(), chat.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	var found bool
-	for _, msg := range messages {
-		for _, part := range parts[msg.ID] {
-			if part.Kind != domain.PartKindCompaction {
-				continue
-			}
-			payload, ok := part.Payload.(domain.CompactionPayload)
-			if !ok {
-				t.Fatalf("expected typed compaction payload, got %#v", part.Payload)
-			}
-			if payload.Status != "completed" {
-				t.Fatalf("expected completed compaction payload, got %#v", payload)
-			}
-			if got := strings.TrimSpace(payload.Summary); got != "reasoning-only compact summary" {
-				t.Fatalf("summary = %q", got)
-			}
-			found = true
+	for _, item := range timeline {
+		payload, ok := item.Content.(domain.Compaction)
+		if !ok || payload.Status != "completed" {
+			continue
 		}
+		if got := strings.TrimSpace(payload.Summary); got != "reasoning-only compact summary" {
+			t.Fatalf("summary = %q", got)
+		}
+		found = true
 	}
 	if !found {
 		t.Fatal("expected persisted compaction summary")
@@ -2986,10 +2904,13 @@ func TestHandleModelToolCallAsksForBashInWriteAskMode(t *testing.T) {
 	session.ProjectRoot = workdir
 
 	chat := defaultChatForSession(t, st, session.ID)
-	evt, err := engine.handleModelToolCall(context.Background(), session, chat, tools.Request{
-		Tool: domain.ToolKindBash,
-		Args: map[string]string{"command": "pwd"},
-	})
+	req := tools.Request{
+		Tool:       domain.ToolKindBash,
+		ToolCallID: "call_1",
+		Args:       map[string]string{"command": "pwd"},
+	}
+	appendAssistantToolTimelineItem(t, st, chat.ID, req, "")
+	evt, err := engine.handleModelToolCall(context.Background(), session, chat, req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3649,25 +3570,23 @@ func TestRunPromptPausesRepeatedIdenticalToolCalls(t *testing.T) {
 		t.Fatal("expected repeated-tool pause status")
 	}
 
-	messages, parts, err := st.PartsForSession(context.Background(), session.ID)
+	chat := defaultChatForSession(t, st, session.ID)
+	timeline, err := st.TimelineForChat(context.Background(), chat.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	var toolOutputs int
 	var sawPauseNotice bool
-	for _, msg := range messages {
-		for _, part := range parts[msg.ID] {
-			if part.Kind == domain.PartKindToolOutput {
-				toolOutputs++
+	for _, item := range timeline {
+		switch content := item.Content.(type) {
+		case domain.AssistantMessage:
+			for _, tool := range content.Tools {
+				if tool.Result != nil || tool.Error != nil {
+					toolOutputs++
+				}
 			}
-			if part.Kind != domain.PartKindEventNotice {
-				continue
-			}
-			var meta transcriptNotice
-			if err := json.Unmarshal([]byte(part.MetaJSON), &meta); err != nil {
-				t.Fatalf("unmarshal pause meta: %v", err)
-			}
-			if meta.Kind == "loop_pause" && meta.Reason == string(continuationPauseReasonRepeatedTool) {
+		case domain.Notice:
+			if content.Kind == "loop_pause" && content.Reason == string(continuationPauseReasonRepeatedTool) {
 				sawPauseNotice = true
 			}
 		}
@@ -3729,22 +3648,10 @@ func TestRunPromptPausesOnProviderRefusalAfterToolResult(t *testing.T) {
 		}
 	}
 
-	messages, parts, err := st.PartsForSession(context.Background(), session.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, msg := range messages {
-		for _, part := range parts[msg.ID] {
-			if part.Kind != domain.PartKindEventNotice {
-				continue
-			}
-			var meta transcriptNotice
-			if err := json.Unmarshal([]byte(part.MetaJSON), &meta); err != nil {
-				t.Fatalf("unmarshal pause meta: %v", err)
-			}
-			if meta.Kind == "loop_pause" && meta.Reason == string(continuationPauseReasonProviderRefusal) {
-				return
-			}
+	chat := defaultChatForSession(t, st, session.ID)
+	for _, notice := range timelineNoticesForChat(t, st, chat.ID) {
+		if notice.Kind == "loop_pause" && notice.Reason == string(continuationPauseReasonProviderRefusal) {
+			return
 		}
 	}
 	t.Fatal("expected persisted provider-refusal pause notice")
@@ -4047,22 +3954,10 @@ func TestRunPromptPausesOnTurnLimit(t *testing.T) {
 		}
 	}
 
-	messages, parts, err := st.PartsForSession(context.Background(), session.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, msg := range messages {
-		for _, part := range parts[msg.ID] {
-			if part.Kind != domain.PartKindEventNotice {
-				continue
-			}
-			var meta transcriptNotice
-			if err := json.Unmarshal([]byte(part.MetaJSON), &meta); err != nil {
-				t.Fatalf("unmarshal pause meta: %v", err)
-			}
-			if meta.Kind == "loop_pause" && meta.Reason == string(continuationPauseReasonTurnLimit) && meta.Limit == 2 {
-				return
-			}
+	chat := defaultChatForSession(t, st, session.ID)
+	for _, notice := range timelineNoticesForChat(t, st, chat.ID) {
+		if notice.Kind == "loop_pause" && notice.Reason == string(continuationPauseReasonTurnLimit) && notice.Limit == 2 {
+			return
 		}
 	}
 	t.Fatal("expected persisted turn-limit pause notice")

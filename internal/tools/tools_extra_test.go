@@ -89,10 +89,24 @@ func TestPersistStandardResultPersistsMessagePartAndDiff(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	chat, err := st.DefaultChat(context.Background(), session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = st.AppendAssistantToolCalls(context.Background(), chat.ID, []domain.ToolCall{{
+		ToolCallID: "call_write",
+		Tool:       domain.ToolKindWrite,
+		Args:       map[string]string{"path": "notes.txt"},
+		Status:     domain.ToolStatusPending,
+	}}, "", domain.Usage{})
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	events, err := tools.PersistStandardResult(context.Background(), st, session.ID, tools.Request{
-		Tool: domain.ToolKindWrite,
-		Args: map[string]string{"path": "notes.txt"},
+	events, err := tools.PersistStandardResult(tools.WithChatID(context.Background(), chat.ID), st, session.ID, tools.Request{
+		Tool:       domain.ToolKindWrite,
+		ToolCallID: "call_write",
+		Args:       map[string]string{"path": "notes.txt"},
 	}, tools.Result{
 		Output:   "Created notes.txt",
 		DiffText: "diff --git a/notes.txt b/notes.txt",
@@ -111,22 +125,22 @@ func TestPersistStandardResultPersistsMessagePartAndDiff(t *testing.T) {
 		t.Fatalf("unexpected event: %#v", evt)
 	}
 
-	messages, partsByMessage, err := st.PartsForSession(context.Background(), session.ID)
+	items, err := st.TimelineForChat(context.Background(), chat.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(messages) != 1 {
-		t.Fatalf("expected one stored message, got %d", len(messages))
+	if len(items) != 1 {
+		t.Fatalf("expected one stored item, got %d", len(items))
 	}
-	parts := partsByMessage[messages[0].ID]
-	if len(parts) != 1 {
-		t.Fatalf("expected tool output part, got %#v", parts)
+	assistant, ok := items[0].Content.(domain.AssistantMessage)
+	if !ok || len(assistant.Tools) != 1 || assistant.Tools[0].Result == nil {
+		t.Fatalf("expected tool result child, got %#v", items[0].Content)
 	}
-	if parts[0].Kind != domain.PartKindToolOutput {
-		t.Fatalf("expected tool output part, got %s", parts[0].Kind)
+	if strings.TrimSpace(assistant.Tools[0].Result.Diff) == "" {
+		t.Fatalf("expected diff on tool result, got %#v", assistant.Tools[0].Result)
 	}
-	payload, ok := parts[0].Payload.(domain.ToolOutputPayload)
-	if !ok || payload.Tool != domain.ToolKindWrite || strings.TrimSpace(payload.Diff) == "" {
-		t.Fatalf("expected typed write payload with diff, got %#v", parts[0].Payload)
+	payload, ok := assistant.Tools[0].Result.Data.(domain.WriteStoredResult)
+	if !ok || payload.Path != "notes.txt" {
+		t.Fatalf("expected typed write payload, got %#v", assistant.Tools[0].Result.Data)
 	}
 }

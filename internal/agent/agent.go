@@ -313,7 +313,7 @@ func (e *Engine) runModelPrompt(ctx context.Context, session domain.Session, cha
 				return
 			}
 		}
-		userMsg, err := e.persistUserPrompt(ctx, session, chat.ID, prompt, drafts, refs)
+		userItem, err := e.persistUserPrompt(ctx, session, chat.ID, prompt, drafts, refs)
 		if err != nil {
 			if interruptedErr(err) {
 				e.emitInterrupted(out, chat.ID, session.ID)
@@ -322,7 +322,7 @@ func (e *Engine) runModelPrompt(ctx context.Context, session domain.Session, cha
 			out <- domain.Event{Kind: domain.EventKindError, Err: err}
 			return
 		}
-		e.recordLifecycle(session.ID, "user_message_persisted", prompt, map[string]string{"message_id": strconv.FormatInt(userMsg.ID, 10)})
+		e.recordLifecycle(session.ID, "user_message_persisted", prompt, map[string]string{"item_id": strconv.FormatInt(userItem.ID, 10)})
 		if err := e.continueModelTurn(ctx, session, chat, client, out, transientTurnMessages(note, "")); err != nil {
 			if interruptedErr(err) {
 				e.emitInterrupted(out, chat.ID, session.ID)
@@ -466,45 +466,35 @@ func (e *Engine) refreshSessionAgents(ctx context.Context, session domain.Sessio
 	return e.store.GetSession(ctx, session.ID)
 }
 
-func (e *Engine) persistUserPrompt(ctx context.Context, session domain.Session, chatID int64, prompt string, drafts []attachment.Draft, refs []reference.Draft) (domain.Message, error) {
-	userMsg, err := e.store.AddChatMessage(ctx, chatID, domain.MessageRoleUser, prompt)
-	if err != nil {
-		return domain.Message{}, err
-	}
-	if strings.TrimSpace(prompt) != "" {
-		if _, err := e.store.AddPart(ctx, userMsg.ID, domain.TextPayload{Text: prompt}); err != nil {
-			return domain.Message{}, err
-		}
-	}
+func (e *Engine) persistUserPrompt(ctx context.Context, session domain.Session, chatID int64, prompt string, drafts []attachment.Draft, refs []reference.Draft) (domain.TimelineItem, error) {
+	user := domain.UserMessage{Text: prompt}
 	for _, draft := range drafts {
 		meta, err := e.files.AdoptDraft(draft, session.ID)
 		if err != nil {
-			return domain.Message{}, err
+			return domain.TimelineItem{}, err
 		}
-		if _, err := e.store.AddPart(ctx, userMsg.ID, domain.AttachmentPayload{
-			ID:       meta.ID,
-			Name:     meta.Name,
-			MIME:     meta.MIME,
-			Path:     meta.Path,
-			Size:     meta.Size,
-			Source:   meta.Source,
-			Original: meta.Original,
-		}); err != nil {
-			return domain.Message{}, err
-		}
+		user.Attachments = append(user.Attachments, domain.Attachment{
+			ID: meta.ID, Name: meta.Name, MIME: meta.MIME, Path: meta.Path, Size: meta.Size, Source: meta.Source, Original: meta.Original,
+		})
 	}
 	for _, ref := range refs {
-		if _, err := e.store.AddPart(ctx, userMsg.ID, domain.ReferencePayload{
+		user.References = append(user.References, domain.Reference{
 			Kind:    string(ref.Kind),
 			Path:    ref.Path,
 			Display: ref.Display,
 			Start:   ref.Start,
 			End:     ref.End,
-		}); err != nil {
-			return domain.Message{}, err
-		}
+		})
 	}
-	return userMsg, nil
+	item, err := e.store.AppendTimeline(ctx, chatID, user)
+	if err != nil {
+		return domain.TimelineItem{}, err
+	}
+	item.Seal(time.Now().UTC())
+	if err := e.store.Timeline().Put(ctx, item); err != nil {
+		return domain.TimelineItem{}, err
+	}
+	return item, nil
 }
 
 func queuedAttachmentDrafts(src []domain.QueuedAttachment) []attachment.Draft {
@@ -621,11 +611,11 @@ func (e *Engine) continueModelTurn(ctx context.Context, session domain.Session, 
 					"tool_calls": strconv.Itoa(len(resp.ToolCalls)),
 				})
 			} else if len(calls) > 0 {
-				assistantMsg, assistantParts, err := e.persistAssistantToolCalls(ctx, chat.ID, session.ID, calls, strings.TrimSpace(resp.Text), resp.Usage)
+				assistantItem, err := e.persistAssistantToolCalls(ctx, chat.ID, session.ID, calls, strings.TrimSpace(resp.Text), resp.Usage)
 				if err != nil {
 					return err
 				}
-				out <- domain.Event{Kind: domain.EventKindToolCallDelta, Text: "tool calls persisted", Message: assistantMsg, Parts: assistantParts}
+				out <- domain.Event{Kind: domain.EventKindToolCallDelta, Text: "tool calls persisted", Item: assistantItem}
 				if resp.Usage.HasAnyTokens() {
 					if err := e.saveChatContextUsage(ctx, chat.ID, resp.Usage); err != nil {
 						return err
@@ -650,28 +640,16 @@ func (e *Engine) continueModelTurn(ctx context.Context, session domain.Session, 
 		call, plain := parseToolCall(text)
 		if call != nil {
 			e.recordLifecycle(session.ID, "tool_call_parsed", call.ContextString(), map[string]string{"tool": string(call.Tool), "tool_call_id": call.ToolCallID})
-			assistantMsg, err := e.store.AddChatMessage(ctx, chat.ID, domain.MessageRoleAssistant, fmt.Sprintf("tool:%s", call.Tool))
-			if err != nil {
-				return err
-			}
-			parts := make([]domain.Part, 0, 2)
-			toolPart, err := e.store.AddPart(ctx, assistantMsg.ID, domain.ToolCallPayload{
+			assistantItem, err := e.store.AppendAssistantToolCalls(ctx, chat.ID, []domain.ToolCall{{
+				ToolCallID: domain.ToolCallID(call.ToolCallID),
 				Tool:       call.Tool,
-				ToolCallID: call.ToolCallID,
 				Args:       call.Args,
-			})
+				Status:     domain.ToolStatusPending,
+			}}, strings.TrimSpace(plain), domain.Usage{})
 			if err != nil {
 				return err
 			}
-			parts = append(parts, toolPart)
-			if strings.TrimSpace(plain) != "" {
-				textPart, err := e.store.AddPart(ctx, assistantMsg.ID, domain.TextPayload{Text: strings.TrimSpace(plain)})
-				if err != nil {
-					return err
-				}
-				parts = append(parts, textPart)
-			}
-			out <- domain.Event{Kind: domain.EventKindToolCallDelta, Text: "tool call persisted", Message: assistantMsg, Parts: parts}
+			out <- domain.Event{Kind: domain.EventKindToolCallDelta, Text: "tool call persisted", Item: assistantItem}
 			if pause, ok := tracker.trackCalls([]tools.Request{*call}); ok {
 				e.pauseContinuation(ctx, chat.ID, session.ID, pause, out)
 				return nil
@@ -708,32 +686,13 @@ func (e *Engine) continueModelTurn(ctx context.Context, session domain.Session, 
 		}
 		autoContinuedBadStop = false
 
-		assistantMsg, err := e.store.AddChatMessage(ctx, chat.ID, domain.MessageRoleAssistant, strings.TrimSpace(text))
-		if err != nil {
-			return err
-		}
-		assistantParts := make([]domain.Part, 0, 3)
-		if strings.TrimSpace(text) != "" {
-			part, err := e.store.AddPart(ctx, assistantMsg.ID, domain.TextPayload{Text: text})
-			if err != nil {
-				return err
-			}
-			assistantParts = append(assistantParts, part)
-		}
+		assistant := domain.AssistantMessage{Text: text}
 		if strings.TrimSpace(reasoning) != "" {
-			part, err := e.store.AddPart(ctx, assistantMsg.ID, domain.ReasoningPayload{Text: reasoning})
-			if err != nil {
-				return err
-			}
-			assistantParts = append(assistantParts, part)
+			assistant.Reasoning.Text = reasoning
 		}
 		usage = usage.Normalized()
 		if usage.HasAnyTokens() {
-			part, err := e.store.AddPart(ctx, assistantMsg.ID, domain.UsagePayload{Usage: usage})
-			if err != nil {
-				return err
-			}
-			assistantParts = append(assistantParts, part)
+			assistant.Usage = &usage
 			if err := e.saveChatContextUsage(ctx, chat.ID, usage); err != nil {
 				return err
 			}
@@ -747,7 +706,15 @@ func (e *Engine) continueModelTurn(ctx context.Context, session domain.Session, 
 		if !streamed && strings.TrimSpace(reasoning) != "" {
 			out <- domain.Event{Kind: domain.EventKindReasoning, Text: reasoning}
 		}
-		e.recordLifecycle(session.ID, "assistant_message_persisted", strings.TrimSpace(text), map[string]string{"message_id": strconv.FormatInt(assistantMsg.ID, 10)})
+		assistantItem, err := e.store.AppendTimeline(ctx, chat.ID, assistant)
+		if err != nil {
+			return err
+		}
+		assistantItem.Seal(time.Now().UTC())
+		if err := e.store.Timeline().Put(ctx, assistantItem); err != nil {
+			return err
+		}
+		e.recordLifecycle(session.ID, "assistant_message_persisted", strings.TrimSpace(text), map[string]string{"item_id": strconv.FormatInt(assistantItem.ID, 10)})
 		title, titleErr := e.maybeUpdateSessionTitle(ctx, session, client)
 		if titleErr != nil {
 			e.recordLifecycle(session.ID, "session_title_update_failed", titleErr.Error(), nil)
@@ -760,7 +727,7 @@ func (e *Engine) continueModelTurn(ctx context.Context, session domain.Session, 
 				Meta: map[string]string{"session_id": strconv.FormatInt(session.ID, 10)},
 			}
 		}
-		out <- domain.Event{Kind: domain.EventKindMessageDone, Message: assistantMsg, Parts: assistantParts}
+		out <- domain.Event{Kind: domain.EventKindMessageDone, Item: assistantItem}
 		return nil
 	}
 	e.pauseContinuation(ctx, chat.ID, session.ID, continuationPause{
@@ -1130,13 +1097,13 @@ func (e *Engine) approve(ctx context.Context, sessionID, chatID int64, rawID str
 			return nil, err
 		}
 		text := fmt.Sprintf("%s disabled for this session", req.Tool)
-		msg, parts, err := e.recordApprovalReply(ctx, item.ChatID, item.SessionID, item.Tool, id, "denied", text, req.ToolCallID)
+		replyItem, err := e.recordApprovalReply(ctx, item.ChatID, item.SessionID, item.Tool, id, "denied", text, req.ToolCallID)
 		if err != nil {
 			return nil, err
 		}
-		return emitOnce(domain.Event{Kind: domain.EventKindApprovalReply, Text: text, Tool: req.Tool, Message: msg, Parts: parts, Meta: map[string]string{"approval_id": strconv.FormatInt(id, 10)}}), nil
+		return emitOnce(domain.Event{Kind: domain.EventKindApprovalReply, Text: text, Tool: req.Tool, Item: replyItem, Meta: map[string]string{"approval_id": strconv.FormatInt(id, 10)}}), nil
 	}
-	replyMsg, replyParts, err := e.recordApprovalReply(ctx, item.ChatID, sessionID, item.Tool, id, "approved", tools.Preview(req), req.ToolCallID)
+	replyItem, err := e.recordApprovalReply(ctx, item.ChatID, sessionID, item.Tool, id, "approved", tools.Preview(req), req.ToolCallID)
 	if err != nil {
 		return nil, err
 	}
@@ -1158,7 +1125,7 @@ func (e *Engine) approve(ctx context.Context, sessionID, chatID int64, rawID str
 		out := make(chan domain.Event)
 		go func() {
 			defer close(out)
-			out <- domain.Event{Kind: domain.EventKindApprovalReply, Text: fmt.Sprintf("approval %d approved", id), Tool: req.Tool, Message: replyMsg, Parts: replyParts, Meta: map[string]string{"approval_id": strconv.FormatInt(id, 10)}}
+			out <- domain.Event{Kind: domain.EventKindApprovalReply, Text: fmt.Sprintf("approval %d approved", id), Tool: req.Tool, Item: replyItem, Meta: map[string]string{"approval_id": strconv.FormatInt(id, 10)}}
 			for evt := range toolEvents {
 				out <- evt
 			}
@@ -1212,7 +1179,7 @@ func (e *Engine) approve(ctx context.Context, sessionID, chatID int64, rawID str
 	out := make(chan domain.Event)
 	go func() {
 		defer close(out)
-		out <- domain.Event{Kind: domain.EventKindApprovalReply, Text: fmt.Sprintf("approval %d approved", id), Tool: req.Tool, Message: replyMsg, Parts: replyParts, Meta: map[string]string{"approval_id": strconv.FormatInt(id, 10)}}
+		out <- domain.Event{Kind: domain.EventKindApprovalReply, Text: fmt.Sprintf("approval %d approved", id), Tool: req.Tool, Item: replyItem, Meta: map[string]string{"approval_id": strconv.FormatInt(id, 10)}}
 		for evt := range toolEvents {
 			out <- evt
 		}
@@ -1273,11 +1240,11 @@ func (e *Engine) deny(ctx context.Context, _, _ int64, rawID string) (<-chan dom
 	if req, err := requestFromStoredApproval(item.Tool, item.Command); err == nil {
 		toolCallID = req.ToolCallID
 	}
-	msg, parts, err := e.recordApprovalReply(ctx, item.ChatID, item.SessionID, item.Tool, id, "denied", approvalPreviewFromStored(item.Tool, item.Command), toolCallID)
+	replyItem, err := e.recordApprovalReply(ctx, item.ChatID, item.SessionID, item.Tool, id, "denied", approvalPreviewFromStored(item.Tool, item.Command), toolCallID)
 	if err != nil {
 		return nil, err
 	}
-	return emitOnce(domain.Event{Kind: domain.EventKindApprovalReply, Text: fmt.Sprintf("approval %d denied", id), Message: msg, Parts: parts, Meta: map[string]string{"approval_id": strconv.FormatInt(id, 10)}}), nil
+	return emitOnce(domain.Event{Kind: domain.EventKindApprovalReply, Text: fmt.Sprintf("approval %d denied", id), Item: replyItem, Meta: map[string]string{"approval_id": strconv.FormatInt(id, 10)}}), nil
 }
 
 func (e *Engine) persistToolResult(ctx context.Context, chatID, sessionID int64, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
@@ -1298,23 +1265,31 @@ func (e *Engine) persistToolFailure(ctx context.Context, chatID, sessionID int64
 	if sessionID == 0 {
 		return emitOnce(domain.Event{Kind: domain.EventKindToolResult, Tool: req.Tool, ToolCallID: req.ToolCallID, Text: text}), nil
 	}
-	msg, err := e.store.AddChatMessage(ctx, chatID, domain.MessageRoleTool, string(req.Tool))
-	if err != nil {
-		return nil, err
+	var item domain.TimelineItem
+	var err error
+	if strings.TrimSpace(req.ToolCallID) != "" {
+		item, err = e.store.AttachToolError(ctx, chatID, req.ToolCallID, domain.ToolError{Message: text})
+	} else {
+		now := time.Now().UTC()
+		item, err = e.store.AppendTimeline(ctx, chatID, domain.ToolExecution{
+			Tool: req.Tool,
+			Args: req.Args,
+			Error: &domain.ToolError{
+				Message: text,
+			},
+			StartedAt: now,
+			EndedAt:   now,
+		})
+		if err == nil {
+			item.Seal(now)
+			err = e.store.Timeline().Put(ctx, item)
+		}
 	}
-	part, err := e.store.AddPart(ctx, msg.ID, domain.ToolOutputPayload{
-		Tool:       req.Tool,
-		ToolCallID: req.ToolCallID,
-		Args:       req.Meta(),
-		Status:     domain.ToolResultStatusError,
-		Text:       text,
-		Result:     domain.ErrorStoredResult{Message: text},
-	})
 	if err != nil {
 		return nil, err
 	}
 	e.recordLifecycle(sessionID, "tool_result_persisted", text, map[string]string{"tool": string(req.Tool), "status": "error"})
-	return emitOnce(domain.Event{Kind: domain.EventKindToolResult, Tool: req.Tool, ToolCallID: req.ToolCallID, Text: text, Message: msg, Parts: []domain.Part{part}}), nil
+	return emitOnce(domain.Event{Kind: domain.EventKindToolResult, Tool: req.Tool, ToolCallID: req.ToolCallID, Text: text, Item: item}), nil
 }
 
 func emitOnce(evt domain.Event) <-chan domain.Event {
@@ -1524,25 +1499,22 @@ func (e *Engine) persistTranscriptNotice(ctx context.Context, chatID, sessionID 
 	if body == "" {
 		return
 	}
-	msg, err := e.store.AddChatMessage(ctx, chatID, domain.MessageRoleAssistant, body)
-	if err != nil {
-		return
-	}
-	part, _ := e.store.AddPart(ctx, msg.ID, domain.EventNoticePayload{
+	item, err := e.store.AppendTimeline(ctx, chatID, domain.Notice{
+		Level:    strings.TrimSpace(meta.Severity),
 		Text:     body,
-		Kind:     meta.Kind,
-		Severity: meta.Severity,
-		Reason:   meta.Reason,
-		Title:    meta.Title,
-		Subtitle: meta.Subtitle,
+		Kind:     strings.TrimSpace(meta.Kind),
+		Reason:   strings.TrimSpace(meta.Reason),
+		Title:    strings.TrimSpace(meta.Title),
+		Subtitle: strings.TrimSpace(meta.Subtitle),
 		Tool:     domain.ToolKind(meta.Tool),
 		Count:    meta.Count,
 		Limit:    meta.Limit,
 	})
-	if part.ID > 0 {
-		raw, _ := json.Marshal(meta)
-		part.MetaJSON = string(raw)
+	if err != nil {
+		return
 	}
+	item.Seal(time.Now().UTC())
+	_ = e.store.Timeline().Put(ctx, item)
 }
 
 func waitForRetry(ctx context.Context, delay time.Duration, onTick func(time.Duration)) error {
@@ -1765,18 +1737,236 @@ func (e *Engine) buildPromptEnvelopePreview(ctx context.Context, session domain.
 		}
 		chat = stored
 	}
-	var (
-		messages       []domain.Message
-		partsByMessage map[int64][]domain.Part
-	)
+	var timeline []domain.TimelineItem
 	if chatID > 0 {
 		var err error
-		messages, partsByMessage, err = e.store.PartsForChat(ctx, chatID)
+		timeline, err = e.store.TimelineForChat(ctx, chatID)
 		if err != nil {
 			return provider.PromptEnvelope{}, err
 		}
 	}
-	return e.buildPromptEnvelopeForState(session, chat, messages, partsByMessage, prompt, drafts, refs, transient)
+	return e.buildPromptEnvelopeForTimeline(session, chat, timeline, prompt, drafts, refs, transient)
+}
+
+func (e *Engine) buildPromptEnvelopeForTimeline(session domain.Session, chat domain.Chat, timeline []domain.TimelineItem, prompt string, drafts []attachment.Draft, refs []reference.Draft, transient []provider.InstructionBlock) (provider.PromptEnvelope, error) {
+	baseInstructions := e.baseInstructionsForChat(session, chat)
+	envelope := provider.PromptEnvelope{Instructions: baseInstructions}
+	segmentStart := 0
+	for idx, item := range timeline {
+		if compacted, ok := item.Content.(domain.Compaction); ok {
+			if strings.TrimSpace(compacted.Summary) == "" {
+				segmentStart = idx + 1
+				continue
+			}
+			envelope.Instructions = baseInstructions
+			envelope.Items = append(envelope.Items[:0], compactedHistoryMessage(compacted.Summary))
+			if segmentStart < idx {
+				preserved, err := e.timelineMessagesForCompactionTail(session, timeline[segmentStart:idx], compacted.FirstKeptItemID)
+				if err != nil {
+					return provider.PromptEnvelope{}, err
+				}
+				envelope.Items = append(envelope.Items, preserved...)
+			}
+			segmentStart = idx + 1
+			continue
+		}
+		messages, err := e.conversationMessagesForTimelineItem(session, item, e.preserveThinkingEnabled(session))
+		if err != nil {
+			return provider.PromptEnvelope{}, err
+		}
+		envelope.Items = append(envelope.Items, messages...)
+	}
+	envelope.Instructions = append(envelope.Instructions, transient...)
+	if strings.TrimSpace(prompt) != "" || len(drafts) > 0 {
+		msg, ok, err := e.previewUserMessage(prompt, drafts, refs)
+		if err != nil {
+			return provider.PromptEnvelope{}, err
+		}
+		if ok {
+			envelope.Items = append(envelope.Items, msg)
+		}
+	}
+	return envelope, nil
+}
+
+func (e *Engine) timelineMessagesForCompactionTail(session domain.Session, items []domain.TimelineItem, firstKeptItemID int64) ([]provider.Message, error) {
+	start := firstKeptTimelineIndex(items, firstKeptItemID)
+	if start < 0 {
+		start = preservedTimelineToolTailStart(items, e.compactionKeepToolBatches())
+	}
+	if start >= len(items) {
+		return nil, nil
+	}
+	out := make([]provider.Message, 0, len(items)-start)
+	for _, item := range items[start:] {
+		messages, err := e.conversationMessagesForTimelineItem(session, item, e.preserveThinkingEnabled(session))
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, messages...)
+	}
+	return out, nil
+}
+
+func firstKeptTimelineIndex(items []domain.TimelineItem, firstKeptItemID int64) int {
+	if firstKeptItemID <= 0 {
+		return -1
+	}
+	for idx, item := range items {
+		if item.ID == firstKeptItemID {
+			return idx
+		}
+	}
+	return -1
+}
+
+func preservedTimelineToolTailStart(items []domain.TimelineItem, keepBatches int) int {
+	if keepBatches <= 0 || len(items) == 0 {
+		return len(items)
+	}
+	starts := make([]int, 0, keepBatches)
+	for idx, item := range items {
+		assistant, ok := item.Content.(domain.AssistantMessage)
+		if !ok || len(assistant.Tools) == 0 {
+			continue
+		}
+		starts = append(starts, idx)
+	}
+	if len(starts) == 0 {
+		return len(items)
+	}
+	if keepBatches >= len(starts) {
+		return starts[0]
+	}
+	return starts[len(starts)-keepBatches]
+}
+
+func (e *Engine) conversationMessagesForTimelineItem(session domain.Session, item domain.TimelineItem, preserveThinking bool) ([]provider.Message, error) {
+	switch content := item.Content.(type) {
+	case domain.UserMessage:
+		parts := make([]domain.Part, 0, 1+len(content.Attachments)+len(content.References))
+		if strings.TrimSpace(content.Text) != "" {
+			parts = append(parts, domain.Part{Kind: domain.PartKindText, Payload: domain.TextPayload{Text: content.Text}})
+		}
+		for _, attachment := range content.Attachments {
+			parts = append(parts, domain.Part{Kind: domain.PartKindAttachment, Payload: domain.AttachmentPayload(attachment)})
+		}
+		for _, ref := range content.References {
+			parts = append(parts, domain.Part{Kind: domain.PartKindReference, Payload: domain.ReferencePayload(ref)})
+		}
+		msg, ok, err := e.userMessageWithContext(parts)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			return []provider.Message{msg}, nil
+		}
+		if strings.TrimSpace(content.Text) == "" {
+			return nil, nil
+		}
+		return []provider.Message{{Role: domain.MessageRoleUser, Content: content.Text}}, nil
+	case domain.AssistantMessage:
+		var toolCalls []provider.ToolCall
+		for _, tool := range content.Tools {
+			if strings.TrimSpace(string(tool.ToolCallID)) == "" {
+				return nil, fmt.Errorf("assistant item %d has tool call without id", item.ID)
+			}
+			toolCalls = append(toolCalls, tools.ToolCall(tools.Request{
+				Tool:       tool.Tool,
+				ToolCallID: string(tool.ToolCallID),
+				Args:       tool.Args,
+			}))
+		}
+		textChunks := []string{}
+		reasoningChunks := []string{}
+		if preserveThinking && strings.TrimSpace(content.Reasoning.Text) != "" {
+			reasoningChunks = append(reasoningChunks, content.Reasoning.Text)
+		}
+		if strings.TrimSpace(content.Text) != "" {
+			textChunks = append(textChunks, content.Text)
+		}
+		out := []provider.Message{{
+			Role:      domain.MessageRoleAssistant,
+			Content:   assistantConversationContent(textChunks, reasoningChunks, preserveThinking),
+			ToolCalls: toolCalls,
+		}}
+		if strings.TrimSpace(out[0].Content) == "" && len(out[0].ToolCalls) == 0 {
+			out = out[:0]
+		}
+		for _, tool := range content.Tools {
+			msg, ok := e.timelineToolResultMessage(session, tool)
+			if ok {
+				out = append(out, msg)
+			}
+		}
+		return out, nil
+	case domain.Compaction:
+		return nil, fmt.Errorf("compaction item %d must be handled at envelope boundary", item.ID)
+	case domain.ToolExecution:
+		body := ""
+		if content.Result != nil {
+			body = strings.TrimSpace(content.Result.Text)
+		}
+		if content.Error != nil {
+			body = strings.TrimSpace(content.Error.Message)
+		}
+		if body == "" {
+			return nil, nil
+		}
+		return []provider.Message{{Role: domain.MessageRoleUser, Content: fmt.Sprintf("%s output:\n%s", content.Tool, body)}}, nil
+	case domain.Notice:
+		return nil, nil
+	default:
+		return nil, fmt.Errorf("unsupported timeline item %d content %T", item.ID, item.Content)
+	}
+}
+
+func (e *Engine) timelineToolResultMessage(session domain.Session, tool domain.ToolCall) (provider.Message, bool) {
+	if tool.Result == nil && tool.Error == nil {
+		return provider.Message{}, false
+	}
+	status := domain.ToolResultStatusOK
+	text := ""
+	diff := ""
+	var data any
+	if tool.Result != nil {
+		status = tool.Result.Status
+		text = tool.Result.Text
+		diff = tool.Result.Diff
+		data = tool.Result.Data
+	}
+	if tool.Error != nil {
+		status = domain.ToolResultStatusError
+		text = tool.Error.Message
+		data = domain.ErrorStoredResult{Message: tool.Error.Message}
+	}
+	part := domain.Part{
+		Kind: domain.PartKindToolOutput,
+		Payload: domain.ToolOutputPayload{
+			Tool:       tool.Tool,
+			ToolCallID: string(tool.ToolCallID),
+			Args:       tool.Args,
+			Status:     status,
+			Text:       text,
+			Diff:       diff,
+			Result:     data,
+		},
+	}
+	part.Body = part.Text()
+	if imageMsg, ok := e.toolImageMessage(session, part, string(tool.ToolCallID), text); ok {
+		return imageMsg, true
+	}
+	body := strings.TrimSpace(part.Text())
+	if formatted, ok := tools.ModelTextForPart(part, diff); ok {
+		body = strings.TrimSpace(formatted)
+	} else if diff != "" {
+		if body != "" {
+			body += "\n\nDiff:\n" + diff
+		} else {
+			body = "Diff:\n" + diff
+		}
+	}
+	return provider.Message{Role: domain.MessageRoleTool, Content: body, ToolCallID: string(tool.ToolCallID)}, true
 }
 
 func (e *Engine) buildPromptEnvelopeForState(session domain.Session, chat domain.Chat, messages []domain.Message, partsByMessage map[int64][]domain.Part, prompt string, drafts []attachment.Draft, refs []reference.Draft, transient []provider.InstructionBlock) (provider.PromptEnvelope, error) {
@@ -2555,7 +2745,7 @@ func (e *Engine) estimateRequestUsagePercent(session domain.Session, _ domain.Ch
 }
 
 func (e *Engine) compactSession(ctx context.Context, session domain.Session, chatID int64, client *provider.Client, trigger string, out chan<- domain.Event) error {
-	storedMessages, partsByMessage, err := e.store.PartsForChat(ctx, chatID)
+	timeline, err := e.store.TimelineForChat(ctx, chatID)
 	if err != nil {
 		return err
 	}
@@ -2563,55 +2753,44 @@ func (e *Engine) compactSession(ctx context.Context, session domain.Session, cha
 	if err != nil {
 		return err
 	}
-	messages, firstKeptMessageID, err := e.buildCompactionConversation(session, chat, storedMessages, partsByMessage)
+	messages, firstKeptItemID, err := e.buildCompactionConversationForTimeline(session, chat, timeline)
 	if err != nil {
 		return err
 	}
 	if len(messages) <= 1 {
 		return nil
 	}
-	beforeContextTokens, err := e.EstimateContextTokensForState(session, chat, storedMessages, partsByMessage)
-	if err != nil {
-		return err
-	}
-	msg, err := e.store.AddChatMessage(ctx, chatID, domain.MessageRoleAssistant, "Compacting...")
-	if err != nil {
-		return err
-	}
-	part, err := e.store.AddPart(ctx, msg.ID, domain.CompactionPayload{
+	beforeContextTokens := e.estimateContextTokensForTimeline(session, chat, timeline)
+	compactionItem, err := e.store.AppendTimeline(ctx, chatID, domain.Compaction{
 		Trigger:             trigger,
 		Status:              "pending",
-		FirstKeptMessageID:  firstKeptMessageID,
+		FirstKeptItemID:     firstKeptItemID,
 		BeforeContextTokens: beforeContextTokens,
 	})
 	if err != nil {
 		return err
 	}
-	updateCompactionState := func(summary, status, messageSummary string, afterContextTokens int) error {
-		if err := e.store.UpdatePartPayload(ctx, part.ID, domain.CompactionPayload{
+	updateCompactionState := func(summary, status string, afterContextTokens int) error {
+		compactionItem.Content = domain.Compaction{
 			Summary:             summary,
 			Trigger:             trigger,
 			Status:              status,
-			FirstKeptMessageID:  firstKeptMessageID,
+			FirstKeptItemID:     firstKeptItemID,
 			BeforeContextTokens: beforeContextTokens,
 			AfterContextTokens:  afterContextTokens,
-		}); err != nil {
-			return err
 		}
-		if strings.TrimSpace(messageSummary) != "" {
-			if err := e.store.UpdateMessageSummary(ctx, msg.ID, messageSummary); err != nil {
-				return err
-			}
+		compactionItem.UpdatedAt = time.Now().UTC()
+		if status == "completed" || status == "failed" {
+			compactionItem.Seal(compactionItem.UpdatedAt)
 		}
-		return nil
+		return e.store.Timeline().Put(ctx, compactionItem)
 	}
 	if out != nil {
 		out <- domain.Event{
-			Kind:    domain.EventKindStatus,
-			Text:    "Compacting session...",
-			Message: msg,
-			Parts:   []domain.Part{part},
-			Meta:    map[string]string{"refresh": "details", "compaction": "started"},
+			Kind: domain.EventKindStatus,
+			Text: "Compacting session...",
+			Item: compactionItem,
+			Meta: map[string]string{"refresh": "details", "compaction": "started"},
 		}
 	}
 	resp, err := client.CompleteChat(ctx, e.chatRequest(session, domain.Chat{}, append(messages, provider.Message{
@@ -2619,7 +2798,7 @@ func (e *Engine) compactSession(ctx context.Context, session domain.Session, cha
 		Content: compactPrompt(),
 	}), false))
 	if err != nil {
-		_ = updateCompactionState("", "failed", "Compaction failed", 0)
+		_ = updateCompactionState("", "failed", 0)
 		return err
 	}
 	summary := strings.TrimSpace(resp.Text)
@@ -2627,24 +2806,13 @@ func (e *Engine) compactSession(ctx context.Context, session domain.Session, cha
 		summary = strings.TrimSpace(resp.Reasoning)
 	}
 	if summary == "" {
-		_ = updateCompactionState("", "failed", "Compaction failed", 0)
+		_ = updateCompactionState("", "failed", 0)
 		return fmt.Errorf("empty compaction summary")
 	}
-	afterContextTokens := e.estimateCompactedContextTokens(session, chat, storedMessages, partsByMessage, msg, firstKeptMessageID, summary)
-	if err := updateCompactionState(summary, "completed", "Compacted session summary", afterContextTokens); err != nil {
+	afterContextTokens := e.estimateCompactedTimelineContextTokens(session, chat, timeline, compactionItem, firstKeptItemID, summary)
+	if err := updateCompactionState(summary, "completed", afterContextTokens); err != nil {
 		return err
 	}
-	msg.Summary = "Compacted session summary"
-	part.Payload = domain.CompactionPayload{
-		Summary:             summary,
-		Trigger:             trigger,
-		Status:              "completed",
-		FirstKeptMessageID:  firstKeptMessageID,
-		BeforeContextTokens: beforeContextTokens,
-		AfterContextTokens:  afterContextTokens,
-	}
-	part.Kind = domain.PartKindCompaction
-	part.Body = summary
 	if chat, err := e.store.GetChat(ctx, chatID); err == nil {
 		chat.LastKnownContextTokens = afterContextTokens
 		chat.ContextTokensKnown = false
@@ -2655,15 +2823,69 @@ func (e *Engine) compactSession(ctx context.Context, session domain.Session, cha
 		return err
 	}
 	if out != nil {
+		completed := compactionItem
+		completed.Content = domain.Compaction{
+			Summary:             summary,
+			Trigger:             trigger,
+			Status:              "completed",
+			FirstKeptItemID:     firstKeptItemID,
+			BeforeContextTokens: beforeContextTokens,
+			AfterContextTokens:  afterContextTokens,
+		}
+		completed.Seal(time.Now().UTC())
 		out <- domain.Event{
-			Kind:    domain.EventKindStatus,
-			Text:    "Session compacted",
-			Message: msg,
-			Parts:   []domain.Part{part},
-			Meta:    map[string]string{"refresh": "details", "compaction": "completed"},
+			Kind: domain.EventKindStatus,
+			Text: "Session compacted",
+			Item: completed,
+			Meta: map[string]string{"refresh": "details", "compaction": "completed"},
 		}
 	}
 	return nil
+}
+
+func (e *Engine) buildCompactionConversationForTimeline(session domain.Session, chat domain.Chat, timeline []domain.TimelineItem) ([]provider.Message, int64, error) {
+	keepStart := preservedTimelineToolTailStart(timeline, e.compactionKeepToolBatches())
+	head := timeline
+	firstKeptItemID := int64(0)
+	if keepStart < len(timeline) {
+		head = timeline[:keepStart]
+		firstKeptItemID = timeline[keepStart].ID
+	}
+	envelope, err := e.buildPromptEnvelopeForTimeline(session, chat, head, "", nil, nil, nil)
+	if err != nil {
+		return nil, 0, err
+	}
+	return provider.SerializePromptEnvelope(envelope), firstKeptItemID, nil
+}
+
+func (e *Engine) estimateContextTokensForTimeline(session domain.Session, chat domain.Chat, timeline []domain.TimelineItem) int {
+	envelope, err := e.buildPromptEnvelopeForTimeline(session, chat, timeline, "", nil, nil, nil)
+	if err != nil {
+		return 0
+	}
+	payload, err := json.Marshal(provider.SerializePromptEnvelope(envelope))
+	if err != nil || len(payload) == 0 {
+		return 0
+	}
+	return len(payload) / 4
+}
+
+func (e *Engine) estimateCompactedTimelineContextTokens(session domain.Session, chat domain.Chat, timeline []domain.TimelineItem, compactionItem domain.TimelineItem, firstKeptItemID int64, summary string) int {
+	firstKeptIdx := firstKeptTimelineIndex(timeline, firstKeptItemID)
+	if firstKeptIdx < 0 {
+		firstKeptIdx = len(timeline)
+	}
+	simulated := make([]domain.TimelineItem, 0, 1+max(0, len(timeline)-firstKeptIdx))
+	compactionItem.Content = domain.Compaction{Summary: summary, Status: "completed", FirstKeptItemID: firstKeptItemID}
+	simulated = append(simulated, compactionItem)
+	if firstKeptIdx < len(timeline) {
+		simulated = append(simulated, timeline[firstKeptIdx:]...)
+	}
+	estimated := e.estimateContextTokensForTimeline(session, chat, simulated)
+	if estimated <= 0 {
+		return tokenestimate.Text(summary)
+	}
+	return estimated
 }
 
 func (e *Engine) buildCompactionConversation(session domain.Session, chat domain.Chat, messages []domain.Message, partsByMessage map[int64][]domain.Part) ([]provider.Message, int64, error) {
@@ -2773,22 +2995,11 @@ func (e *Engine) handleModelToolCall(ctx context.Context, session domain.Session
 		if strings.TrimSpace(decision.Reason) != "" {
 			text = fmt.Sprintf("%s denied by policy: %s", req.Tool, decision.Reason)
 		}
-		msg, err := e.store.AddChatMessage(ctx, chat.ID, domain.MessageRoleTool, string(req.Tool))
+		item, err := e.recordDeniedToolResult(ctx, chat.ID, req, text)
 		if err != nil {
 			return domain.Event{}, err
 		}
-		part, err := e.store.AddPart(ctx, msg.ID, domain.ToolOutputPayload{
-			Tool:       req.Tool,
-			ToolCallID: req.ToolCallID,
-			Args:       req.Meta(),
-			Status:     domain.ToolResultStatusDenied,
-			Text:       text,
-			Result:     domain.DeniedStoredResult{Message: text},
-		})
-		if err != nil {
-			return domain.Event{}, err
-		}
-		return domain.Event{Kind: domain.EventKindToolResult, Tool: req.Tool, ToolCallID: req.ToolCallID, Text: text, Message: msg, Parts: []domain.Part{part}}, nil
+		return domain.Event{Kind: domain.EventKindToolResult, Tool: req.Tool, ToolCallID: req.ToolCallID, Text: text, Item: item}, nil
 	}
 	if decision.Mode == domain.PermissionModeAsk {
 		storedArgs, err := serializeRequest(req)
@@ -2800,7 +3011,7 @@ func (e *Engine) handleModelToolCall(ctx context.Context, session domain.Session
 			return domain.Event{}, err
 		}
 		preview := tools.Preview(req)
-		msg, parts, err := e.recordApprovalRequest(ctx, chat.ID, sessionID, req.Tool, approval.ID, preview, req.ToolCallID)
+		approvalItem, err := e.recordApprovalRequest(ctx, chat.ID, sessionID, req.Tool, approval.ID, preview, req.ToolCallID)
 		if err != nil {
 			return domain.Event{}, err
 		}
@@ -2809,11 +3020,10 @@ func (e *Engine) handleModelToolCall(ctx context.Context, session domain.Session
 			text += ": " + decision.Reason
 		}
 		return domain.Event{
-			Kind:    domain.EventKindApprovalAsk,
-			Text:    text,
-			Tool:    req.Tool,
-			Message: msg,
-			Parts:   parts,
+			Kind: domain.EventKindApprovalAsk,
+			Text: text,
+			Tool: req.Tool,
+			Item: approvalItem,
 			Meta: map[string]string{
 				"approval_id":  strconv.FormatInt(approval.ID, 10),
 				"tool":         string(req.Tool),
@@ -2909,41 +3119,21 @@ func (e *Engine) parseProviderToolCall(item provider.ToolCall) (tools.Request, e
 	return tools.Normalize(req)
 }
 
-func (e *Engine) persistAssistantToolCalls(ctx context.Context, chatID, sessionID int64, calls []tools.Request, text string, usage domain.Usage) (domain.Message, []domain.Part, error) {
-	summary := "tool"
-	if len(calls) == 1 {
-		summary = fmt.Sprintf("tool:%s", calls[0].Tool)
-	} else if len(calls) > 1 {
-		summary = fmt.Sprintf("tools:%d", len(calls))
-	}
-	assistantMsg, err := e.store.AddChatMessage(ctx, chatID, domain.MessageRoleAssistant, summary)
-	if err != nil {
-		return domain.Message{}, nil, err
-	}
-	parts := make([]domain.Part, 0, len(calls)+2)
+func (e *Engine) persistAssistantToolCalls(ctx context.Context, chatID, sessionID int64, calls []tools.Request, text string, usage domain.Usage) (domain.TimelineItem, error) {
+	toolCalls := make([]domain.ToolCall, 0, len(calls))
 	for _, call := range calls {
-		part, err := e.store.AddPart(ctx, assistantMsg.ID, domain.ToolCallPayload{Tool: call.Tool, ToolCallID: call.ToolCallID, Args: call.Args})
-		if err != nil {
-			return domain.Message{}, nil, err
-		}
-		parts = append(parts, part)
+		toolCalls = append(toolCalls, domain.ToolCall{
+			ToolCallID: domain.ToolCallID(call.ToolCallID),
+			Tool:       call.Tool,
+			Args:       call.Args,
+			Status:     domain.ToolStatusPending,
+		})
 	}
-	if text != "" {
-		part, err := e.store.AddPart(ctx, assistantMsg.ID, domain.TextPayload{Text: text})
-		if err != nil {
-			return domain.Message{}, nil, err
-		}
-		parts = append(parts, part)
+	item, err := e.store.AppendAssistantToolCalls(ctx, chatID, toolCalls, text, usage)
+	if err != nil {
+		return domain.TimelineItem{}, err
 	}
-	usage = usage.Normalized()
-	if usage.HasAnyTokens() {
-		part, err := e.store.AddPart(ctx, assistantMsg.ID, domain.UsagePayload{Usage: usage})
-		if err != nil {
-			return domain.Message{}, nil, err
-		}
-		parts = append(parts, part)
-	}
-	return assistantMsg, parts, nil
+	return item, nil
 }
 
 func (e *Engine) saveChatContextUsage(ctx context.Context, chatID int64, usage domain.Usage) error {
@@ -3096,24 +3286,13 @@ func (e *Engine) prepareModelToolCall(ctx context.Context, session domain.Sessio
 		if strings.TrimSpace(decision.Reason) != "" {
 			text = fmt.Sprintf("%s denied by policy: %s", req.Tool, decision.Reason)
 		}
-		msg, err := e.store.AddChatMessage(ctx, chat.ID, domain.MessageRoleTool, string(req.Tool))
-		if err != nil {
-			return preparedToolCall{}, err
-		}
-		part, err := e.store.AddPart(ctx, msg.ID, domain.ToolOutputPayload{
-			Tool:       req.Tool,
-			ToolCallID: req.ToolCallID,
-			Args:       req.Meta(),
-			Status:     domain.ToolResultStatusDenied,
-			Text:       text,
-			Result:     domain.DeniedStoredResult{Message: text},
-		})
+		item, err := e.recordDeniedToolResult(ctx, chat.ID, req, text)
 		if err != nil {
 			return preparedToolCall{}, err
 		}
 		return preparedToolCall{
 			req:   req,
-			event: domain.Event{Kind: domain.EventKindToolResult, Tool: req.Tool, ToolCallID: req.ToolCallID, Text: text, Message: msg, Parts: []domain.Part{part}},
+			event: domain.Event{Kind: domain.EventKindToolResult, Tool: req.Tool, ToolCallID: req.ToolCallID, Text: text, Item: item},
 		}, nil
 	}
 	if decision.Mode == domain.PermissionModeAsk {
@@ -3126,7 +3305,7 @@ func (e *Engine) prepareModelToolCall(ctx context.Context, session domain.Sessio
 			return preparedToolCall{}, err
 		}
 		preview := tools.Preview(req)
-		msg, parts, err := e.recordApprovalRequest(ctx, chat.ID, sessionID, req.Tool, approval.ID, preview, req.ToolCallID)
+		approvalItem, err := e.recordApprovalRequest(ctx, chat.ID, sessionID, req.Tool, approval.ID, preview, req.ToolCallID)
 		if err != nil {
 			return preparedToolCall{}, err
 		}
@@ -3137,11 +3316,10 @@ func (e *Engine) prepareModelToolCall(ctx context.Context, session domain.Sessio
 		return preparedToolCall{
 			req: req,
 			event: domain.Event{
-				Kind:    domain.EventKindApprovalAsk,
-				Text:    text,
-				Tool:    req.Tool,
-				Message: msg,
-				Parts:   parts,
+				Kind: domain.EventKindApprovalAsk,
+				Text: text,
+				Tool: req.Tool,
+				Item: approvalItem,
 				Meta: map[string]string{
 					"approval_id":  strconv.FormatInt(approval.ID, 10),
 					"tool":         string(req.Tool),
@@ -3160,22 +3338,38 @@ func (e *Engine) recordDisabledToolResult(ctx context.Context, chatID, sessionID
 	if sessionID == 0 {
 		return domain.Event{Kind: domain.EventKindToolResult, Tool: req.Tool, ToolCallID: req.ToolCallID, Text: text}, nil
 	}
-	msg, err := e.store.AddChatMessage(ctx, chatID, domain.MessageRoleTool, string(req.Tool))
+	item, err := e.recordDeniedToolResult(ctx, chatID, req, text)
 	if err != nil {
 		return domain.Event{}, err
 	}
-	part, err := e.store.AddPart(ctx, msg.ID, domain.ToolOutputPayload{
-		Tool:       req.Tool,
-		ToolCallID: req.ToolCallID,
-		Args:       req.Meta(),
-		Status:     domain.ToolResultStatusDenied,
-		Text:       text,
-		Result:     domain.DeniedStoredResult{Message: text},
+	return domain.Event{Kind: domain.EventKindToolResult, Tool: req.Tool, ToolCallID: req.ToolCallID, Text: text, Item: item}, nil
+}
+
+func (e *Engine) recordDeniedToolResult(ctx context.Context, chatID int64, req tools.Request, text string) (domain.TimelineItem, error) {
+	result := domain.ToolResult{
+		Text:   text,
+		Status: domain.ToolResultStatusDenied,
+		Data:   domain.DeniedStoredResult{Message: text},
+	}
+	if strings.TrimSpace(req.ToolCallID) != "" {
+		return e.store.AttachToolResult(ctx, chatID, req.ToolCallID, result)
+	}
+	now := time.Now().UTC()
+	item, err := e.store.AppendTimeline(ctx, chatID, domain.ToolExecution{
+		Tool:      req.Tool,
+		Args:      req.Args,
+		Result:    &result,
+		StartedAt: now,
+		EndedAt:   now,
 	})
 	if err != nil {
-		return domain.Event{}, err
+		return domain.TimelineItem{}, err
 	}
-	return domain.Event{Kind: domain.EventKindToolResult, Tool: req.Tool, ToolCallID: req.ToolCallID, Text: text, Message: msg, Parts: []domain.Part{part}}, nil
+	item.Seal(now)
+	if err := e.store.Timeline().Put(ctx, item); err != nil {
+		return domain.TimelineItem{}, err
+	}
+	return item, nil
 }
 
 func toolEnabledForSession(cfg config.Config, session domain.Session, kind domain.ToolKind) bool {
@@ -3363,32 +3557,21 @@ func max(a, b int) int {
 	return slices.Max([]int{a, b})
 }
 
-func (e *Engine) recordApprovalRequest(ctx context.Context, chatID, sessionID int64, tool domain.ToolKind, approvalID int64, preview, toolCallID string) (domain.Message, []domain.Part, error) {
-	msg, err := e.store.AddChatMessage(ctx, chatID, domain.MessageRoleTool, fmt.Sprintf("approval:%s", tool))
-	if err != nil {
-		return domain.Message{}, nil, err
-	}
+func (e *Engine) recordApprovalRequest(ctx context.Context, chatID, sessionID int64, tool domain.ToolKind, approvalID int64, preview, toolCallID string) (domain.TimelineItem, error) {
 	body := fmt.Sprintf("Approval required for %s: %s", tool, preview)
 	approvalStatus := domain.ApprovalStatusPending
-	part, err := e.store.AddPart(ctx, msg.ID, domain.ApprovalRequestPayload{
-		ApprovalID: approvalID,
-		Tool:       tool,
-		ToolCallID: toolCallID,
-		Command:    preview,
-		Status:     approvalStatus,
-		Body:       body,
+	item, err := e.store.AttachToolApproval(ctx, chatID, toolCallID, domain.ApprovalRequest{
+		ID:     approvalID,
+		Status: approvalStatus,
+		Body:   body,
 	})
 	if err != nil {
-		return domain.Message{}, nil, err
+		return domain.TimelineItem{}, err
 	}
-	return msg, []domain.Part{part}, nil
+	return item, nil
 }
 
-func (e *Engine) recordApprovalReply(ctx context.Context, chatID, sessionID int64, tool domain.ToolKind, approvalID int64, status, preview, toolCallID string) (domain.Message, []domain.Part, error) {
-	msg, err := e.store.AddChatMessage(ctx, chatID, domain.MessageRoleTool, fmt.Sprintf("approval:%s:%s", tool, status))
-	if err != nil {
-		return domain.Message{}, nil, err
-	}
+func (e *Engine) recordApprovalReply(ctx context.Context, chatID, sessionID int64, tool domain.ToolKind, approvalID int64, status, preview, toolCallID string) (domain.TimelineItem, error) {
 	body := fmt.Sprintf("Approval %d %s for %s: %s", approvalID, status, tool, preview)
 	payload := map[string]string{
 		"approval_id": strconv.FormatInt(approvalID, 10),
@@ -3399,31 +3582,22 @@ func (e *Engine) recordApprovalReply(ctx context.Context, chatID, sessionID int6
 	if strings.TrimSpace(toolCallID) != "" {
 		payload["tool_call_id"] = toolCallID
 	}
+	resultStatus := domain.ToolResultStatusOK
+	var data domain.ToolResultPayload
 	if status == "denied" {
-		part, err := e.store.AddPart(ctx, msg.ID, domain.ToolOutputPayload{
-			Tool:       tool,
-			ToolCallID: toolCallID,
-			Args:       payload,
-			Status:     domain.ToolResultStatusDenied,
-			Text:       body,
-			Result:     domain.DeniedStoredResult{Message: body},
-		})
-		if err != nil {
-			return domain.Message{}, nil, err
-		}
-		return msg, []domain.Part{part}, nil
+		resultStatus = domain.ToolResultStatusDenied
+		data = domain.DeniedStoredResult{Message: body}
 	}
-	part, err := e.store.AddPart(ctx, msg.ID, domain.ToolOutputPayload{
-		Tool:       tool,
-		ToolCallID: toolCallID,
-		Args:       payload,
-		Status:     domain.ToolResultStatusOK,
-		Text:       body,
+	_ = payload
+	item, err := e.store.AttachToolResult(ctx, chatID, toolCallID, domain.ToolResult{
+		Text:   body,
+		Data:   data,
+		Status: resultStatus,
 	})
 	if err != nil {
-		return domain.Message{}, nil, err
+		return domain.TimelineItem{}, err
 	}
-	return msg, []domain.Part{part}, nil
+	return item, nil
 }
 
 func approvalPreviewFromStored(tool domain.ToolKind, raw string) string {

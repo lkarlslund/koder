@@ -152,7 +152,8 @@ func (p *ToolOutputPayload) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-func decodeToolResultPayload(tool ToolKind, status ToolResultStatus, raw json.RawMessage) (ToolResultPayload, error) {
+// DecodeToolResultPayload loads typed tool result data from the tool and status discriminator.
+func DecodeToolResultPayload(tool ToolKind, status ToolResultStatus, raw json.RawMessage) (ToolResultPayload, error) {
 	if len(raw) == 0 || string(raw) == "null" {
 		return nil, nil
 	}
@@ -206,6 +207,10 @@ func decodeToolResultPayload(tool ToolKind, status ToolResultStatus, raw json.Ra
 	default:
 		return nil, fmt.Errorf("unsupported tool result kind %q", tool)
 	}
+}
+
+func decodeToolResultPayload(tool ToolKind, status ToolResultStatus, raw json.RawMessage) (ToolResultPayload, error) {
+	return DecodeToolResultPayload(tool, status, raw)
 }
 
 func decodeToolResult[T ToolResultPayload](raw json.RawMessage) (ToolResultPayload, error) {

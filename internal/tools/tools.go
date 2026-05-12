@@ -486,40 +486,53 @@ func providerDefinition(kind domain.ToolKind, spec ToolSpec) provider.ToolDefini
 }
 
 func PersistStandardResult(ctx context.Context, st *store.Store, sessionID int64, req Request, result Result) (<-chan domain.Event, error) {
-	summary, body := SummarizeResult(req, result)
-	var (
-		msg domain.Message
-		err error
-	)
-	if chatID, ok := ChatIDFromContext(ctx); ok && chatID > 0 {
-		msg, err = st.AddChatMessage(ctx, chatID, domain.MessageRoleTool, summary)
-	} else {
-		msg, err = st.AddMessage(ctx, sessionID, domain.MessageRoleTool, summary)
-	}
-	if err != nil {
-		return nil, err
-	}
-	args := req.Meta()
-	for key, value := range result.Meta {
-		value = strings.TrimSpace(value)
-		if value == "" {
-			continue
+	_, body := SummarizeResult(req, result)
+	chatID, ok := ChatIDFromContext(ctx)
+	if !ok || chatID <= 0 {
+		chat, err := st.DefaultChat(ctx, sessionID)
+		if err != nil {
+			return nil, err
 		}
-		args[key] = value
+		chatID = chat.ID
 	}
-	part, err := st.AddPart(ctx, msg.ID, domain.ToolOutputPayload{
-		Tool:       req.Tool,
-		ToolCallID: req.ToolCallID,
-		Args:       args,
-		Status:     domain.ToolResultStatusOK,
-		Text:       body,
-		Diff:       strings.TrimSpace(result.DiffText),
-		Result:     result.Stored,
-	})
+	stored, err := domainToolResultPayload(req.Tool, domain.ToolResultStatusOK, result.Stored)
 	if err != nil {
 		return nil, err
 	}
-	return EmitOnce(domain.Event{Kind: domain.EventKindToolResult, Text: body, Tool: req.Tool, ToolCallID: req.ToolCallID, Message: msg, Parts: []domain.Part{part}}), nil
+	toolResult := domain.ToolResult{
+		Text:   body,
+		Diff:   strings.TrimSpace(result.DiffText),
+		Data:   stored,
+		Status: domain.ToolResultStatusOK,
+	}
+	var item domain.TimelineItem
+	if strings.TrimSpace(req.ToolCallID) == "" {
+		item, err = st.AppendTimeline(ctx, chatID, domain.ToolExecution{
+			Tool:   req.Tool,
+			Args:   req.Meta(),
+			Result: &toolResult,
+		})
+	} else {
+		item, err = st.AttachToolResult(ctx, chatID, req.ToolCallID, toolResult)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return EmitOnce(domain.Event{Kind: domain.EventKindToolResult, Text: body, Tool: req.Tool, ToolCallID: req.ToolCallID, Item: item}), nil
+}
+
+func domainToolResultPayload(tool domain.ToolKind, status domain.ToolResultStatus, stored any) (domain.ToolResultPayload, error) {
+	if stored == nil {
+		return nil, nil
+	}
+	if payload, ok := stored.(domain.ToolResultPayload); ok {
+		return payload, nil
+	}
+	raw, err := json.Marshal(stored)
+	if err != nil {
+		return nil, fmt.Errorf("marshal tool result %s: %w", tool, err)
+	}
+	return domain.DecodeToolResultPayload(tool, status, raw)
 }
 
 func WithChatID(ctx context.Context, chatID int64) context.Context {

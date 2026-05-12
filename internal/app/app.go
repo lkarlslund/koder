@@ -5041,6 +5041,22 @@ func (m *App) upsertCurrentSnapshotTimelineFromMessage(message domain.Message, p
 	m.currentSnapshot.Timeline = append(m.currentSnapshot.Timeline, item)
 }
 
+func (m *App) upsertCurrentSnapshotTimelineItem(item domain.TimelineItem) {
+	if item.ID == 0 {
+		return
+	}
+	if m.currentSnapshot.Chat.ID == 0 && m.currentChat.ID != 0 {
+		m.currentSnapshot.Chat = m.currentChat
+	}
+	for idx := range m.currentSnapshot.Timeline {
+		if m.currentSnapshot.Timeline[idx].ID == item.ID {
+			m.currentSnapshot.Timeline[idx] = item
+			return
+		}
+	}
+	m.currentSnapshot.Timeline = append(m.currentSnapshot.Timeline, item)
+}
+
 func (m *App) ensureCurrentSnapshotTimeline() {
 	if len(m.currentSnapshot.Timeline) > 0 || len(m.currentSnapshot.Messages) == 0 {
 		return

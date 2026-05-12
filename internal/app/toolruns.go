@@ -119,6 +119,11 @@ func (m *App) applyCurrentChatEvent(evt domain.Event) {
 		return
 	}
 	refreshed := false
+	if evt.Item.ID > 0 {
+		m.upsertCurrentSnapshotTimelineItem(evt.Item)
+		m.transcriptDirty = true
+		refreshed = true
+	}
 	if evt.Message.ID > 0 {
 		m.upsertCurrentSnapshotTimelineFromMessage(evt.Message, evt.Parts)
 		msg, msgParts, mutations, created := m.upsertCurrentSnapshotMessageParts(evt.Message, evt.Parts)
@@ -641,7 +646,21 @@ func eventNoticePauseSubtitle(meta eventNoticeMeta) string {
 func toolRunsFromAssistantMessage(parts []domain.Part, msg domain.Message) []ui.ToolRun {
 	var runs []ui.ToolRun
 	for _, part := range parts {
-		if part.Kind != domain.PartKindToolCall {
+		switch part.Kind {
+		case domain.PartKindToolCall:
+		case domain.PartKindToolOutput, domain.PartKindApprovalRequest:
+			run := toolRunOutput(part, parts, msg)
+			if part.Kind == domain.PartKindApprovalRequest {
+				if approvalRun, ok := toolRunApprovalRequest(part); ok {
+					run = approvalRun
+				}
+			}
+			run.ParentMessageID = msg.ID
+			if strings.TrimSpace(run.ID) != "" {
+				runs = append(runs, run)
+			}
+			continue
+		default:
 			continue
 		}
 		var req tools.Request

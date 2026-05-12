@@ -18,6 +18,7 @@ type TimelineKind string
 const (
 	TimelineKindUser       TimelineKind = "user"
 	TimelineKindAssistant  TimelineKind = "assistant"
+	TimelineKindTool       TimelineKind = "tool"
 	TimelineKindNotice     TimelineKind = "notice"
 	TimelineKindCompaction TimelineKind = "compaction"
 	TimelineKindLegacy     TimelineKind = "legacy_message"
@@ -200,6 +201,154 @@ type ToolCall struct {
 	CompletedAt time.Time         `json:"completed_at,omitempty"`
 }
 
+// MarshalJSON stores typed tool result data behind the tool/status discriminator.
+func (c ToolCall) MarshalJSON() ([]byte, error) {
+	type encodedToolResult struct {
+		Text   string           `json:"text,omitempty"`
+		Diff   string           `json:"diff,omitempty"`
+		Data   json.RawMessage  `json:"data,omitempty"`
+		Status ToolResultStatus `json:"status,omitempty"`
+	}
+	type encodedToolCall struct {
+		ToolCallID  ToolCallID         `json:"tool_call_id"`
+		Tool        ToolKind           `json:"tool"`
+		Args        map[string]string  `json:"args,omitempty"`
+		Status      ToolStatus         `json:"status"`
+		Result      *encodedToolResult `json:"result,omitempty"`
+		Error       *ToolError         `json:"error,omitempty"`
+		Approval    *ApprovalRequest   `json:"approval,omitempty"`
+		StartedAt   time.Time          `json:"started_at,omitempty"`
+		CompletedAt time.Time          `json:"completed_at,omitempty"`
+	}
+	var result *encodedToolResult
+	if c.Result != nil {
+		raw, err := json.Marshal(c.Result.Data)
+		if err != nil {
+			return nil, fmt.Errorf("marshal tool result %s: %w", c.Tool, err)
+		}
+		result = &encodedToolResult{
+			Text:   c.Result.Text,
+			Diff:   c.Result.Diff,
+			Data:   raw,
+			Status: c.Result.Status,
+		}
+	}
+	return json.Marshal(encodedToolCall{
+		ToolCallID: c.ToolCallID, Tool: c.Tool, Args: c.Args, Status: c.Status, Result: result,
+		Error: c.Error, Approval: c.Approval, StartedAt: c.StartedAt, CompletedAt: c.CompletedAt,
+	})
+}
+
+// UnmarshalJSON loads typed tool result data from the tool/status discriminator.
+func (c *ToolCall) UnmarshalJSON(data []byte) error {
+	type encodedToolResult struct {
+		Text   string           `json:"text,omitempty"`
+		Diff   string           `json:"diff,omitempty"`
+		Data   json.RawMessage  `json:"data,omitempty"`
+		Status ToolResultStatus `json:"status,omitempty"`
+	}
+	type encodedToolCall struct {
+		ToolCallID  ToolCallID         `json:"tool_call_id"`
+		Tool        ToolKind           `json:"tool"`
+		Args        map[string]string  `json:"args,omitempty"`
+		Status      ToolStatus         `json:"status"`
+		Result      *encodedToolResult `json:"result,omitempty"`
+		Error       *ToolError         `json:"error,omitempty"`
+		Approval    *ApprovalRequest   `json:"approval,omitempty"`
+		StartedAt   time.Time          `json:"started_at,omitempty"`
+		CompletedAt time.Time          `json:"completed_at,omitempty"`
+	}
+	var in encodedToolCall
+	if err := json.Unmarshal(data, &in); err != nil {
+		return err
+	}
+	var result *ToolResult
+	if in.Result != nil {
+		decoded, err := DecodeToolResultPayload(in.Tool, in.Result.Status, in.Result.Data)
+		if err != nil {
+			return fmt.Errorf("decode tool result %s: %w", in.Tool, err)
+		}
+		result = &ToolResult{Text: in.Result.Text, Diff: in.Result.Diff, Data: decoded, Status: in.Result.Status}
+	}
+	*c = ToolCall{
+		ToolCallID: in.ToolCallID, Tool: in.Tool, Args: in.Args, Status: in.Status, Result: result,
+		Error: in.Error, Approval: in.Approval, StartedAt: in.StartedAt, CompletedAt: in.CompletedAt,
+	}
+	return nil
+}
+
+// ToolExecution stores a user-initiated tool execution that was not requested by an assistant item.
+type ToolExecution struct {
+	Tool      ToolKind          `json:"tool"`
+	Args      map[string]string `json:"args,omitempty"`
+	Result    *ToolResult       `json:"result,omitempty"`
+	Error     *ToolError        `json:"error,omitempty"`
+	StartedAt time.Time         `json:"started_at,omitempty"`
+	EndedAt   time.Time         `json:"ended_at,omitempty"`
+}
+
+// TimelineKind returns the timeline payload kind.
+func (ToolExecution) TimelineKind() TimelineKind { return TimelineKindTool }
+
+// MarshalJSON stores typed standalone tool result data behind the tool/status discriminator.
+func (e ToolExecution) MarshalJSON() ([]byte, error) {
+	type encodedToolResult struct {
+		Text   string           `json:"text,omitempty"`
+		Diff   string           `json:"diff,omitempty"`
+		Data   json.RawMessage  `json:"data,omitempty"`
+		Status ToolResultStatus `json:"status,omitempty"`
+	}
+	type encodedToolExecution struct {
+		Tool      ToolKind           `json:"tool"`
+		Args      map[string]string  `json:"args,omitempty"`
+		Result    *encodedToolResult `json:"result,omitempty"`
+		Error     *ToolError         `json:"error,omitempty"`
+		StartedAt time.Time          `json:"started_at,omitempty"`
+		EndedAt   time.Time          `json:"ended_at,omitempty"`
+	}
+	var result *encodedToolResult
+	if e.Result != nil {
+		raw, err := json.Marshal(e.Result.Data)
+		if err != nil {
+			return nil, fmt.Errorf("marshal tool result %s: %w", e.Tool, err)
+		}
+		result = &encodedToolResult{Text: e.Result.Text, Diff: e.Result.Diff, Data: raw, Status: e.Result.Status}
+	}
+	return json.Marshal(encodedToolExecution{Tool: e.Tool, Args: e.Args, Result: result, Error: e.Error, StartedAt: e.StartedAt, EndedAt: e.EndedAt})
+}
+
+// UnmarshalJSON loads typed standalone tool result data from the tool/status discriminator.
+func (e *ToolExecution) UnmarshalJSON(data []byte) error {
+	type encodedToolResult struct {
+		Text   string           `json:"text,omitempty"`
+		Diff   string           `json:"diff,omitempty"`
+		Data   json.RawMessage  `json:"data,omitempty"`
+		Status ToolResultStatus `json:"status,omitempty"`
+	}
+	type encodedToolExecution struct {
+		Tool      ToolKind           `json:"tool"`
+		Args      map[string]string  `json:"args,omitempty"`
+		Result    *encodedToolResult `json:"result,omitempty"`
+		Error     *ToolError         `json:"error,omitempty"`
+		StartedAt time.Time          `json:"started_at,omitempty"`
+		EndedAt   time.Time          `json:"ended_at,omitempty"`
+	}
+	var in encodedToolExecution
+	if err := json.Unmarshal(data, &in); err != nil {
+		return err
+	}
+	var result *ToolResult
+	if in.Result != nil {
+		decoded, err := DecodeToolResultPayload(in.Tool, in.Result.Status, in.Result.Data)
+		if err != nil {
+			return fmt.Errorf("decode tool result %s: %w", in.Tool, err)
+		}
+		result = &ToolResult{Text: in.Result.Text, Diff: in.Result.Diff, Data: decoded, Status: in.Result.Status}
+	}
+	*e = ToolExecution{Tool: in.Tool, Args: in.Args, Result: result, Error: in.Error, StartedAt: in.StartedAt, EndedAt: in.EndedAt}
+	return nil
+}
+
 // ToolResult stores one completed tool response.
 type ToolResult struct {
 	Text   string            `json:"text,omitempty"`
@@ -232,8 +381,13 @@ type Notice struct {
 	Level      string   `json:"level,omitempty"`
 	Text       string   `json:"text"`
 	Kind       string   `json:"kind,omitempty"`
+	Reason     string   `json:"reason,omitempty"`
+	Title      string   `json:"title,omitempty"`
+	Subtitle   string   `json:"subtitle,omitempty"`
 	Tool       ToolKind `json:"tool,omitempty"`
 	ToolCallID string   `json:"tool_call_id,omitempty"`
+	Count      int      `json:"count,omitempty"`
+	Limit      int      `json:"limit,omitempty"`
 }
 
 // TimelineKind returns the timeline payload kind.
@@ -321,6 +475,8 @@ func decodeTimelineContent(kind TimelineKind, raw json.RawMessage) (TimelineCont
 		return decodeTimelinePayload[UserMessage](raw)
 	case TimelineKindAssistant:
 		return decodeTimelinePayload[AssistantMessage](raw)
+	case TimelineKindTool:
+		return decodeTimelinePayload[ToolExecution](raw)
 	case TimelineKindNotice:
 		return decodeTimelinePayload[Notice](raw)
 	case TimelineKindCompaction:

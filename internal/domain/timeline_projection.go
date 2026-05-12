@@ -37,6 +37,8 @@ func LegacyTimelineRole(item TimelineItem) MessageRole {
 		return payload.Role
 	case UserMessage:
 		return MessageRoleUser
+	case ToolExecution:
+		return MessageRoleTool
 	case Notice, Compaction:
 		return MessageRoleTool
 	default:
@@ -55,6 +57,8 @@ func LegacyTimelineSummary(item TimelineItem) string {
 		return payload.Text
 	case Notice:
 		return payload.Text
+	case ToolExecution:
+		return string(payload.Tool)
 	case Compaction:
 		return payload.Summary
 	default:
@@ -111,6 +115,13 @@ func LegacyPartsFromTimeline(item TimelineItem) []Part {
 		}
 	case Notice:
 		add(PartKindEventNotice, EventNoticePayload{Text: payload.Text, Kind: payload.Kind, Severity: payload.Level, Tool: payload.Tool, ToolCallID: payload.ToolCallID}, 1)
+	case ToolExecution:
+		if payload.Result != nil {
+			add(PartKindToolOutput, ToolOutputPayload{Tool: payload.Tool, Args: payload.Args, Status: payload.Result.Status, Text: payload.Result.Text, Diff: payload.Result.Diff, Result: payload.Result.Data}, 1)
+		}
+		if payload.Error != nil {
+			add(PartKindToolOutput, ToolOutputPayload{Tool: payload.Tool, Args: payload.Args, Status: ToolResultStatusError, Text: payload.Error.Message, Result: ErrorStoredResult{Message: payload.Error.Message}}, 1)
+		}
 	case Compaction:
 		add(PartKindCompaction, CompactionPayload{Summary: payload.Summary, Trigger: payload.Trigger, Status: payload.Status, BeforeContextTokens: payload.BeforeContextTokens, AfterContextTokens: payload.AfterContextTokens}, 1)
 	}
