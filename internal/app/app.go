@@ -207,8 +207,6 @@ type newSessionMsg struct {
 	chats     []domain.Chat
 	sessions  []domain.Session
 	timeline  []domain.TimelineItem
-	messages  []domain.Message
-	parts     map[int64][]domain.Part
 	approvals []store.Approval
 	plan      store.MilestonePlan
 	todos     []store.TodoItem
@@ -719,7 +717,7 @@ func NewWithWorkdir(cfg config.Config, st *store.Store, a *agent.Engine, mode St
 		toolRunItemIndexByID:    make(map[string]int),
 		toolRunItemIndexByAppr:  make(map[int64]int),
 		transcriptDirty:         true,
-		currentSnapshot:         chatpkg.Snapshot{Parts: make(map[int64][]domain.Part)},
+		currentSnapshot:         chatpkg.Snapshot{},
 		status:                  "Ready",
 		workdir:                 workdir,
 		startupMode:             mode,
@@ -1076,7 +1074,7 @@ func (m App) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 		m.currentSession = msg.session
 		m.currentChat = msg.chat
 		m.clampQueueSelection()
-		m.loadChatState(m.currentChat, msg.timeline, msg.messages, msg.parts, msg.approvals)
+		m.loadChatState(m.currentChat, msg.timeline, msg.approvals)
 		m.milestonePlan = msg.plan
 		m.todos = msg.todos
 		m.workspace = msg.workspace
@@ -1973,9 +1971,7 @@ func (m *App) applyEvent(evt domain.Event) {
 	case domain.EventKindToolStart:
 		m.startTranscriptTool()
 	case domain.EventKindToolCallDelta:
-		if evt.Message.ID == 0 {
-			m.showLiveProviderToolCall(evt)
-		}
+		m.showLiveProviderToolCall(evt)
 	case domain.EventKindToolResult:
 		m.finishTranscriptTool()
 	case domain.EventKindApprovalAsk:
@@ -2039,7 +2035,7 @@ func (m *App) applyEvent(evt domain.Event) {
 		m.stopBusy()
 	case domain.EventKindMessageDone:
 		pending := m.activePendingAssistant()
-		if evt.Message.ID > 0 || !m.activeEventStream || (strings.TrimSpace(pending.Text) == "" && strings.TrimSpace(pending.Reasoning) == "") {
+		if evt.Item.ID > 0 || !m.activeEventStream || (strings.TrimSpace(pending.Text) == "" && strings.TrimSpace(pending.Reasoning) == "") {
 			m.clearPendingAssistantTurn()
 			m.stopBusyWithStatus("Idle")
 		}
@@ -3757,7 +3753,7 @@ func (m *App) ensureContextEstimateFromState() {
 	if m.contextTokens > 0 && anchored {
 		return
 	}
-	estimated, err := m.agent.EstimateContextTokensForState(m.currentSession, m.currentChat, m.activeMessages(), m.activeParts())
+	estimated, err := m.agent.EstimateContextTokensForTimeline(m.currentSession, m.currentChat, m.currentSnapshot.Timeline)
 	if err != nil || estimated <= 0 {
 		return
 	}
@@ -4029,8 +4025,6 @@ type loadMsg struct {
 	current      domain.Session
 	chat         domain.Chat
 	timeline     []domain.TimelineItem
-	messages     []domain.Message
-	parts        map[int64][]domain.Part
 	approvals    []store.Approval
 	plan         store.MilestonePlan
 	todos        []store.TodoItem
@@ -4256,8 +4250,6 @@ func (m App) newSessionCmd() ui.Cmd {
 			chat:      domain.Chat{},
 			chats:     nil,
 			sessions:  sessions,
-			messages:  nil,
-			parts:     map[int64][]domain.Part{},
 			approvals: nil,
 			plan:      store.MilestonePlan{},
 			todos:     nil,
@@ -4875,11 +4867,8 @@ func mapsCloneToolStates(src map[domain.ToolKind]bool) map[domain.ToolKind]bool 
 	return dst
 }
 
-func (m *App) loadChatState(chat domain.Chat, timeline []domain.TimelineItem, messages []domain.Message, parts map[int64][]domain.Part, approvals []store.Approval) {
-	if len(timeline) > 0 {
-		messages, parts = renderTranscriptFromTimeline(chat.SessionID, timeline)
-	}
-	if chat.ID == 0 && len(timeline) == 0 && len(messages) == 0 && len(parts) == 0 && len(approvals) == 0 {
+func (m *App) loadChatState(chat domain.Chat, timeline []domain.TimelineItem, approvals []store.Approval) {
+	if chat.ID == 0 && len(timeline) == 0 && len(approvals) == 0 {
 		if m.currentRuntime == nil {
 			m.currentSnapshot = chatpkg.Snapshot{}
 		}
@@ -4887,41 +4876,22 @@ func (m *App) loadChatState(chat domain.Chat, timeline []domain.TimelineItem, me
 	}
 	m.currentSnapshot.Chat = chat
 	m.currentSnapshot.Timeline = slices.Clone(timeline)
-	m.currentSnapshot.Messages = slices.Clone(messages)
-	m.currentSnapshot.Parts = clonePartsByMessage(parts)
 	m.currentSnapshot.Approvals = slices.Clone(approvals)
 	m.currentChat = chat
 }
 
-func clonePartsByMessage(parts map[int64][]domain.Part) map[int64][]domain.Part {
-	if len(parts) == 0 {
-		return nil
-	}
-	out := make(map[int64][]domain.Part, len(parts))
-	for messageID, msgParts := range parts {
-		out[messageID] = slices.Clone(msgParts)
-	}
-	return out
-}
-
 func (m *App) activeMessages() []domain.Message {
 	if m.hasSnapshotChatState() {
-		if len(m.currentSnapshot.Timeline) > 0 {
-			messages, _ := renderTranscriptFromTimeline(m.currentSnapshot.Chat.SessionID, m.currentSnapshot.Timeline)
-			return messages
-		}
-		return m.currentSnapshot.Messages
+		messages, _ := renderTranscriptFromTimeline(m.currentSnapshot.Chat.SessionID, m.currentSnapshot.Timeline)
+		return messages
 	}
 	return nil
 }
 
 func (m *App) activeParts() map[int64][]domain.Part {
 	if m.hasSnapshotChatState() {
-		if len(m.currentSnapshot.Timeline) > 0 {
-			_, parts := renderTranscriptFromTimeline(m.currentSnapshot.Chat.SessionID, m.currentSnapshot.Timeline)
-			return parts
-		}
-		return m.currentSnapshot.Parts
+		_, parts := renderTranscriptFromTimeline(m.currentSnapshot.Chat.SessionID, m.currentSnapshot.Timeline)
+		return parts
 	}
 	return nil
 }
@@ -4936,8 +4906,6 @@ func (m *App) activeApprovals() []store.Approval {
 func (m *App) hasSnapshotChatState() bool {
 	return m.currentSnapshot.Chat.ID != 0 ||
 		len(m.currentSnapshot.Timeline) > 0 ||
-		len(m.currentSnapshot.Messages) > 0 ||
-		len(m.currentSnapshot.Parts) > 0 ||
 		len(m.currentSnapshot.Approvals) > 0 ||
 		len(m.currentSnapshot.QueuedInputs) > 0 ||
 		m.hasSnapshotPendingAssistant()
@@ -4993,14 +4961,6 @@ func (m *App) appendCurrentSnapshotMessage(message domain.Message, parts []domai
 		m.currentSnapshot.Chat = m.currentChat
 	}
 	m.upsertCurrentSnapshotTimelineFromMessage(message, parts)
-	m.currentSnapshot.Messages = append(m.currentSnapshot.Messages, message)
-	if len(parts) == 0 {
-		return
-	}
-	if m.currentSnapshot.Parts == nil {
-		m.currentSnapshot.Parts = make(map[int64][]domain.Part)
-	}
-	m.currentSnapshot.Parts[message.ID] = slices.Clone(parts)
 }
 
 func (m *App) upsertCurrentSnapshotTimelineFromMessage(message domain.Message, parts []domain.Part) {
@@ -5010,7 +4970,6 @@ func (m *App) upsertCurrentSnapshotTimelineFromMessage(message domain.Message, p
 	if m.currentSnapshot.Chat.ID == 0 && m.currentChat.ID != 0 {
 		m.currentSnapshot.Chat = m.currentChat
 	}
-	m.ensureCurrentSnapshotTimeline()
 	if message.Role == domain.MessageRoleTool && m.attachToolMessageToTimeline(parts) {
 		return
 	}
@@ -5149,30 +5108,25 @@ func (m *App) upsertCurrentSnapshotTimelineItem(item domain.TimelineItem) {
 	m.currentSnapshot.Timeline = append(m.currentSnapshot.Timeline, item)
 }
 
-func (m *App) ensureCurrentSnapshotTimeline() {
-	if len(m.currentSnapshot.Timeline) > 0 || len(m.currentSnapshot.Messages) == 0 {
-		return
-	}
-	for idx, message := range m.currentSnapshot.Messages {
-		if message.ID == 0 {
-			continue
-		}
-		createdAt := message.CreatedAt
-		if createdAt.IsZero() {
-			createdAt = time.Now().UTC()
-		}
-		m.currentSnapshot.Timeline = append(m.currentSnapshot.Timeline, domain.TimelineItem{
-			ID:        message.ID,
-			ChatID:    firstNonZeroAppInt64(message.ChatID, m.currentSnapshot.Chat.ID, m.currentChat.ID),
-			Seq:       int64(idx + 1),
-			Content:   timelineContentFromMessageParts(message, m.currentSnapshot.Parts[message.ID]),
-			CreatedAt: createdAt,
-			UpdatedAt: createdAt,
-		})
-	}
-}
-
 func timelineContentFromMessageParts(message domain.Message, parts []domain.Part) domain.TimelineContent {
+	var usage *domain.Usage
+	for _, part := range parts {
+		if payload, ok := part.Payload.(domain.UsagePayload); ok {
+			value := payload.Usage
+			usage = &value
+			break
+		}
+	}
+	for _, part := range parts {
+		switch payload := part.Payload.(type) {
+		case domain.CompactionPayload:
+			return domain.Compaction{Summary: payload.Summary, Trigger: payload.Trigger, Status: payload.Status, BeforeContextTokens: payload.BeforeContextTokens, AfterContextTokens: payload.AfterContextTokens, Usage: usage}
+		case domain.EventNoticePayload:
+			return domain.Notice{Text: payload.Text, Level: payload.Severity, Kind: payload.Kind, Reason: payload.Reason, Title: payload.Title, Subtitle: payload.Subtitle, Tool: payload.Tool, ToolCallID: payload.ToolCallID, Count: payload.Count, Limit: payload.Limit}
+		case domain.SystemNoticePayload:
+			return domain.Notice{Text: payload.Text, Kind: "system_notice"}
+		}
+	}
 	switch message.Role {
 	case domain.MessageRoleUser:
 		content := domain.UserMessage{Text: firstPartText(parts, domain.PartKindText)}
@@ -5202,6 +5156,30 @@ func timelineContentFromMessageParts(message domain.Message, parts []domain.Part
 					Args:       payload.Args,
 					Status:     domain.ToolStatusPending,
 				})
+			case domain.ApprovalRequestPayload:
+				if call := content.ToolByID(domain.ToolCallID(payload.ToolCallID)); call != nil {
+					call.Approval = &domain.ApprovalRequest{ID: payload.ApprovalID, Status: payload.Status, Body: payload.Body}
+					call.Status = domain.ToolStatusPending
+				}
+			case domain.ToolOutputPayload:
+				if call := content.ToolByID(domain.ToolCallID(payload.ToolCallID)); call != nil {
+					if approvalID, ok := approvalIDFromToolOutput(payload); ok {
+						if call.Approval == nil {
+							call.Approval = &domain.ApprovalRequest{ID: approvalID}
+						}
+						call.Approval.Status = domain.ApprovalStatus(payload.Args["status"])
+						call.Approval.Body = payload.Text
+						if call.Approval.Status == domain.ApprovalStatusApproved {
+							call.Status = domain.ToolStatusRunning
+						}
+						if call.Approval.Status == domain.ApprovalStatusDenied {
+							call.Status = domain.ToolStatusDenied
+						}
+						continue
+					}
+					call.Result = &domain.ToolResult{Text: payload.Text, Diff: payload.Diff, Data: toolResultPayloadFromAny(payload.Result), Status: payload.Status}
+					call.Status = domain.ToolStatusDone
+				}
 			case domain.UsagePayload:
 				usage := payload.Usage
 				content.Usage = &usage
@@ -5219,8 +5197,9 @@ func timelineToolExecutionFromParts(message domain.Message, parts []domain.Part)
 		switch payload := part.Payload.(type) {
 		case domain.ToolOutputPayload:
 			return domain.ToolExecution{
-				Tool: payload.Tool,
-				Args: payload.Args,
+				Tool:       payload.Tool,
+				ToolCallID: domain.ToolCallID(payload.ToolCallID),
+				Args:       payload.Args,
 				Result: &domain.ToolResult{
 					Text:   payload.Text,
 					Diff:   payload.Diff,
@@ -5257,51 +5236,6 @@ func firstPartText(parts []domain.Part, kind domain.PartKind) string {
 		}
 	}
 	return ""
-}
-
-func (m *App) upsertCurrentSnapshotMessageParts(message domain.Message, parts []domain.Part) (domain.Message, []domain.Part, []domain.Part, bool) {
-	if m.currentSnapshot.Chat.ID == 0 && m.currentChat.ID != 0 {
-		m.currentSnapshot.Chat = m.currentChat
-	}
-	idx := -1
-	for i := range m.currentSnapshot.Messages {
-		if m.currentSnapshot.Messages[i].ID == message.ID {
-			idx = i
-			break
-		}
-	}
-	created := idx < 0
-	if created {
-		m.currentSnapshot.Messages = append(m.currentSnapshot.Messages, message)
-	} else {
-		m.currentSnapshot.Messages[idx] = message
-	}
-	if m.currentSnapshot.Parts == nil {
-		m.currentSnapshot.Parts = make(map[int64][]domain.Part)
-	}
-	existing := m.currentSnapshot.Parts[message.ID]
-	byPartID := make(map[int64]int, len(existing))
-	for i := range existing {
-		byPartID[existing[i].ID] = i
-	}
-	mutations := make([]domain.Part, 0, len(parts))
-	for _, part := range parts {
-		if part.ID == 0 {
-			existing = append(existing, part)
-			mutations = append(mutations, part)
-			continue
-		}
-		if partIdx, ok := byPartID[part.ID]; ok {
-			existing[partIdx] = part
-			mutations = append(mutations, part)
-			continue
-		}
-		byPartID[part.ID] = len(existing)
-		existing = append(existing, part)
-		mutations = append(mutations, part)
-	}
-	m.currentSnapshot.Parts[message.ID] = existing
-	return message, slices.Clone(existing), mutations, created
 }
 
 func firstNonZeroAppInt64(values ...int64) int64 {
@@ -5411,7 +5345,7 @@ func (m *App) applyRuntimeSnapshot(snapshot chatpkg.Snapshot) {
 		}
 		m.clampQueueSelection()
 	}
-	m.loadChatState(snapshot.Chat, snapshot.Timeline, snapshot.Messages, snapshot.Parts, snapshot.Approvals)
+	m.loadChatState(snapshot.Chat, snapshot.Timeline, snapshot.Approvals)
 	m.currentSnapshot.PendingAssistant = snapshot.PendingAssistant
 	m.syncUsageFromHistory()
 	m.syncContextFromChat()
@@ -5511,7 +5445,7 @@ func (m App) UpdateLoad(msg loadMsg) App {
 		m.currentChat = msg.chat
 		m.clampQueueSelection()
 	}
-	m.loadChatState(m.currentChat, msg.timeline, msg.messages, msg.parts, msg.approvals)
+	m.loadChatState(m.currentChat, msg.timeline, msg.approvals)
 	m.milestonePlan = msg.plan
 	m.todos = msg.todos
 	m.workspace = msg.workspace

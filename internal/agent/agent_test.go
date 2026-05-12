@@ -147,8 +147,69 @@ func timelineTranscriptForChat(t *testing.T, st *store.Store, chat domain.Chat) 
 	if err != nil {
 		return nil, nil, err
 	}
-	messages, parts := domain.LegacyTranscriptFromTimeline(chat.SessionID, items)
+	messages := make([]domain.Message, 0, len(items))
+	parts := make(map[int64][]domain.Part, len(items))
+	for _, item := range items {
+		msg, itemParts := testTranscriptItem(chat.SessionID, item)
+		if msg.ID == 0 {
+			continue
+		}
+		messages = append(messages, msg)
+		parts[msg.ID] = itemParts
+	}
 	return messages, parts, nil
+}
+
+func testTranscriptItem(sessionID int64, item domain.TimelineItem) (domain.Message, []domain.Part) {
+	msg := domain.Message{ID: item.ID, SessionID: sessionID, ChatID: item.ChatID, CreatedAt: item.CreatedAt}
+	addPart := func(parts *[]domain.Part, kind domain.PartKind, payload domain.PartPayload, offset int64) {
+		part := domain.Part{ID: item.ID*1000 + offset, MessageID: item.ID, Kind: kind, Payload: payload, CreatedAt: item.CreatedAt}
+		part.Body = part.Text()
+		*parts = append(*parts, part)
+	}
+	var parts []domain.Part
+	switch content := item.Content.(type) {
+	case domain.UserMessage:
+		msg.Role = domain.MessageRoleUser
+		msg.Summary = content.Text
+		addPart(&parts, domain.PartKindText, domain.TextPayload{Text: content.Text}, 1)
+	case domain.AssistantMessage:
+		msg.Role = domain.MessageRoleAssistant
+		msg.Summary = content.Text
+		offset := int64(1)
+		if strings.TrimSpace(content.Text) != "" {
+			addPart(&parts, domain.PartKindText, domain.TextPayload{Text: content.Text}, offset)
+			offset++
+		}
+		for _, tool := range content.Tools {
+			addPart(&parts, domain.PartKindToolCall, domain.ToolCallPayload{Tool: tool.Tool, ToolCallID: string(tool.ToolCallID), Args: tool.Args}, offset)
+			offset++
+			if tool.Result != nil {
+				addPart(&parts, domain.PartKindToolOutput, domain.ToolOutputPayload{Tool: tool.Tool, ToolCallID: string(tool.ToolCallID), Args: tool.Args, Status: tool.Result.Status, Text: tool.Result.Text, Diff: tool.Result.Diff, Result: tool.Result.Data}, offset)
+			}
+			if tool.Error != nil {
+				addPart(&parts, domain.PartKindToolOutput, domain.ToolOutputPayload{Tool: tool.Tool, ToolCallID: string(tool.ToolCallID), Args: tool.Args, Status: domain.ToolResultStatusError, Text: tool.Error.Message, Result: domain.ErrorStoredResult{Message: tool.Error.Message}}, offset)
+			}
+		}
+	case domain.ToolExecution:
+		msg.Role = domain.MessageRoleTool
+		msg.Summary = string(content.Tool)
+		if content.Result != nil {
+			addPart(&parts, domain.PartKindToolOutput, domain.ToolOutputPayload{Tool: content.Tool, ToolCallID: string(content.ToolCallID), Args: content.Args, Status: content.Result.Status, Text: content.Result.Text, Diff: content.Result.Diff, Result: content.Result.Data}, 1)
+		}
+		if content.Error != nil {
+			addPart(&parts, domain.PartKindToolOutput, domain.ToolOutputPayload{Tool: content.Tool, ToolCallID: string(content.ToolCallID), Args: content.Args, Status: domain.ToolResultStatusError, Text: content.Error.Message, Result: domain.ErrorStoredResult{Message: content.Error.Message}}, 1)
+		}
+	case domain.Notice:
+		msg.Role = domain.MessageRoleAssistant
+		msg.Summary = content.Text
+		addPart(&parts, domain.PartKindEventNotice, domain.EventNoticePayload{Text: content.Text, Kind: content.Kind, Severity: content.Level}, 1)
+	case domain.Compaction:
+		msg.Role = domain.MessageRoleAssistant
+		msg.Summary = content.Summary
+		addPart(&parts, domain.PartKindCompaction, domain.CompactionPayload{Summary: content.Summary, Status: content.Status, BeforeContextTokens: content.BeforeContextTokens, AfterContextTokens: content.AfterContextTokens}, 1)
+	}
+	return msg, parts
 }
 
 func timelineNoticesForChat(t *testing.T, st *store.Store, chatID int64) []domain.Notice {
@@ -463,19 +524,6 @@ func TestHandleModelToolCallPersistsNormalizationFailure(t *testing.T) {
 	}
 }
 
-func TestStringifyPartsExcludesSystemNotice(t *testing.T) {
-	got := stringifyParts([]domain.Part{
-		{Kind: domain.PartKindText, Body: "answer"},
-		{Kind: domain.PartKindSystemNotice, Body: "usage", MetaJSON: `{"PromptTokens":1}`},
-	}, false)
-	if strings.Contains(got, "PromptTokens") || strings.Contains(got, "usage") {
-		t.Fatalf("expected system notices to stay out of model context, got %q", got)
-	}
-	if !strings.Contains(got, "answer") {
-		t.Fatalf("expected text to remain in model context, got %q", got)
-	}
-}
-
 func TestPersistAssistantToolCallsStoresNarrationAsText(t *testing.T) {
 	cfg := testConfig(t)
 	st, err := store.Open(t.TempDir())
@@ -779,20 +827,6 @@ func TestBuildConversationIncludesSkillPromptContext(t *testing.T) {
 	}
 }
 
-func TestStringifyPartsNormalizesToolCallFromMetadata(t *testing.T) {
-	got := stringifyParts([]domain.Part{{
-		Kind:     domain.PartKindToolCall,
-		Body:     "Tool call:\n<koder_tool>\n{\"tool\":\"read\",\"path\":\"README.md\"}\n</koder_tool>",
-		MetaJSON: `{"tool":"read","path":"README.md"}`,
-	}}, false)
-	if !strings.Contains(got, `"tool":"read"`) || !strings.Contains(got, `"path":"README.md"`) {
-		t.Fatalf("expected structured tool call in model context, got %q", got)
-	}
-	if strings.Contains(got, "<koder_tool>") || strings.Contains(got, "Tool call:\nTool call:") {
-		t.Fatalf("expected raw wrapper text to be removed, got %q", got)
-	}
-}
-
 func TestBuildConversationUsesStructuredToolMessages(t *testing.T) {
 	cfg := testConfig(t)
 	st, err := store.Open(t.TempDir())
@@ -882,33 +916,6 @@ func TestBuildConversationIncludesViewImageToolContentParts(t *testing.T) {
 	}
 	if len(msg.ContentParts[1].Data) == 0 {
 		t.Fatalf("expected image bytes in content part, got %#v", msg.ContentParts[1])
-	}
-}
-
-func TestStringifyPartsFormatsStoredTaskAndPlanUpdates(t *testing.T) {
-	taskMeta := tools.MetaWithStoredResult(map[string]string{
-		"status": "pending",
-	}, domain.PartKindTaskUpdate, domain.ToolKindTask, tools.StoredResultStatusOK, tools.TaskStoredResult{
-		Body:   "write docs",
-		Status: domain.TaskStatusPending,
-	})
-	planMeta := tools.MetaWithStoredResult(nil, domain.PartKindPlanUpdate, domain.ToolKindUpdatePlan, tools.StoredResultStatusOK, tools.UpdatePlanStoredResult{
-		Explanation: "updated plan",
-		Steps: []tools.PlanStoredStep{
-			{Step: "inspect repo", Status: "completed"},
-			{Step: "wire persistence", Status: "in_progress"},
-		},
-	})
-
-	got := stringifyParts([]domain.Part{
-		{Kind: domain.PartKindTaskUpdate, Body: "stale task body", MetaJSON: tools.JSONMeta(taskMeta)},
-		{Kind: domain.PartKindPlanUpdate, Body: "stale plan body", MetaJSON: tools.JSONMeta(planMeta)},
-	}, false)
-	if !strings.Contains(got, "Task update:\nwrite docs") {
-		t.Fatalf("expected task update from stored result, got %q", got)
-	}
-	if !strings.Contains(got, "Plan update:\nupdated plan\n[completed] inspect repo\n[in_progress] wire persistence") {
-		t.Fatalf("expected plan update from stored result, got %q", got)
 	}
 }
 

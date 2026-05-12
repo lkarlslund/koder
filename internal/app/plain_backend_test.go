@@ -42,7 +42,7 @@ func (m *App) renderTranscriptActivity() string {
 }
 
 func (m *App) renderTranscriptMessage(msg domain.Message) string {
-	element := newTranscriptRenderer(m).renderTranscriptMessageElement(msg, m.currentSnapshot.Parts[msg.ID])
+	element := newTranscriptRenderer(m).renderTranscriptMessageElement(msg, m.activeParts()[msg.ID])
 	if element == nil {
 		return ""
 	}

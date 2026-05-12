@@ -48,8 +48,8 @@ func benchmarkModel(b *testing.B, messageCount int) App {
 		ModelID:    "model",
 	}
 	m.workspace = workspaceStub()
-	m.currentSnapshot.Messages = make([]domain.Message, 0, messageCount)
-	m.currentSnapshot.Parts = make(map[int64][]domain.Part, messageCount)
+	messages := make([]domain.Message, 0, messageCount)
+	parts := make(map[int64][]domain.Part, messageCount)
 	now := time.Now()
 	for i := 0; i < messageCount; i++ {
 		role := domain.MessageRoleAssistant
@@ -62,9 +62,9 @@ func benchmarkModel(b *testing.B, messageCount int) App {
 			Role:      role,
 			CreatedAt: now.Add(time.Duration(i) * time.Second),
 		}
-		m.currentSnapshot.Messages = append(m.currentSnapshot.Messages, msg)
+		messages = append(messages, msg)
 		body := fmt.Sprintf("message %03d %s", i, strings.Repeat("content ", 10))
-		m.currentSnapshot.Parts[msg.ID] = []domain.Part{{
+		parts[msg.ID] = []domain.Part{{
 			ID:        int64(i + 1),
 			MessageID: msg.ID,
 			Kind:      domain.PartKindText,
@@ -72,7 +72,7 @@ func benchmarkModel(b *testing.B, messageCount int) App {
 			CreatedAt: msg.CreatedAt,
 		}}
 		if role == domain.MessageRoleAssistant && i%5 == 1 {
-			m.currentSnapshot.Parts[msg.ID] = append(m.currentSnapshot.Parts[msg.ID], domain.Part{
+			parts[msg.ID] = append(parts[msg.ID], domain.Part{
 				ID:        int64(1000 + i),
 				MessageID: msg.ID,
 				Kind:      domain.PartKindReasoning,
@@ -81,6 +81,7 @@ func benchmarkModel(b *testing.B, messageCount int) App {
 			})
 		}
 	}
+	m.currentSnapshot = snapshotWithTranscript(messages, parts)
 	m.resize()
 	m.refreshViewport()
 	return m

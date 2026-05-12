@@ -361,8 +361,6 @@ type Event struct {
 	ToolCallID string
 	ApprovalID int64
 	Item       TimelineItem
-	Message    Message
-	Parts      []Part
 	Meta       map[string]string
 	Usage      Usage
 	Err        error

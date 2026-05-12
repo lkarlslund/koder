@@ -355,17 +355,6 @@ func (p Part) Text() string {
 	}
 }
 
-// LegacyMetaJSON returns non-persisted metadata used by old in-memory tests.
-func (p Part) LegacyMetaJSON() string {
-	switch payload := p.Payload.(type) {
-	case EventNoticePayload:
-		raw, _ := json.Marshal(payload)
-		return string(raw)
-	default:
-		return ""
-	}
-}
-
 // MarshalJSON stores a part as a discriminator plus typed payload.
 func (p Part) MarshalJSON() ([]byte, error) {
 	kind := p.Kind
@@ -414,7 +403,6 @@ func (p *Part) UnmarshalJSON(data []byte) error {
 	p.Kind = encoded.Kind
 	p.Payload = payload
 	p.Body = p.Text()
-	p.MetaJSON = p.LegacyMetaJSON()
 	if len(encoded.CreatedAt) > 0 {
 		if err := json.Unmarshal(encoded.CreatedAt, &p.CreatedAt); err != nil {
 			return fmt.Errorf("decode part created_at: %w", err)

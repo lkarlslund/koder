@@ -53,8 +53,6 @@ type Snapshot struct {
 	Session          domain.Session
 	Chat             domain.Chat
 	Timeline         []domain.TimelineItem
-	Messages         []domain.Message
-	Parts            map[int64][]domain.Part
 	Approvals        []store.Approval
 	QueuedInputs     []domain.QueuedInput
 	PendingAssistant PendingAssistantTurn
@@ -378,8 +376,6 @@ func (r *Chat) Snapshot() Snapshot {
 		Session:          r.session,
 		Chat:             r.state.Chat(),
 		Timeline:         r.state.SnapshotTimeline(),
-		Messages:         r.state.SnapshotMessages(),
-		Parts:            r.state.SnapshotParts(),
 		Approvals:        r.state.Approvals(),
 		QueuedInputs:     cloneQueuedInputs(r.queue),
 		PendingAssistant: r.state.PendingAssistant(),
@@ -630,17 +626,6 @@ func (r *Chat) handleStreamEvent(evt domain.Event) {
 			})
 		}
 	}
-	if evt.Message.ID > 0 && r.state != nil {
-		r.state.UpsertLegacyMessageParts(evt.Message, evt.Parts)
-		r.state.UpsertMessageParts(evt.Message, evt.Parts)
-		transcriptChanged = true
-		if strings.TrimSpace(evt.Message.Summary) != "" {
-			r.chat.LastMessage = evt.Message.Summary
-			r.state.UpdateChat(func(chat *domain.Chat) {
-				chat.LastMessage = evt.Message.Summary
-			})
-		}
-	}
 	switch evt.Kind {
 	case domain.EventKindMessageDelta:
 		if r.state != nil {
@@ -722,7 +707,7 @@ func (r *Chat) handleStreamEvent(evt domain.Event) {
 		r.cancelState = CancelStateNone
 		r.running = nil
 	case domain.EventKindStatus:
-		if afterTokens, ok := completedCompactionContext(evt.Parts, evt.Meta); ok {
+		if afterTokens, ok := completedCompactionContext(evt.Item, evt.Meta); ok {
 			r.chat.LastKnownContextTokens = afterTokens
 			r.chat.ContextTokensKnown = false
 			if r.state != nil {
@@ -739,21 +724,15 @@ func (r *Chat) handleStreamEvent(evt domain.Event) {
 	r.broadcast(r.snapshotUpdateFlags(&copyEvt, transcriptChanged || evt.Kind == domain.EventKindMessageDone, false, true, contextChanged, evt.Kind == domain.EventKindApprovalAsk || evt.Kind == domain.EventKindApprovalReply))
 }
 
-func completedCompactionContext(parts []domain.Part, meta map[string]string) (int, bool) {
+func completedCompactionContext(item domain.TimelineItem, meta map[string]string) (int, bool) {
 	if meta["compaction"] != "completed" {
 		return 0, false
 	}
-	for _, part := range parts {
-		payload, ok := part.Payload.(domain.CompactionPayload)
-		if !ok {
-			continue
-		}
-		if payload.AfterContextTokens <= 0 {
-			return 0, false
-		}
-		return payload.AfterContextTokens, true
+	payload, ok := item.Content.(domain.Compaction)
+	if !ok || payload.AfterContextTokens <= 0 {
+		return 0, false
 	}
-	return 0, false
+	return payload.AfterContextTokens, true
 }
 
 func timelineItemSummary(item domain.TimelineItem) string {
@@ -927,40 +906,6 @@ func (r *Chat) markPersistError(err error) error {
 	evt := domain.Event{Kind: domain.EventKindError, Err: err}
 	r.broadcast(r.snapshotUpdateFlags(&evt, false, false, true, false, false))
 	return err
-}
-
-func (r *Chat) remapStateIDs(messages map[int64]int64, parts map[int64]int64) {
-	if len(messages) == 0 && len(parts) == 0 {
-		return
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.state == nil {
-		return
-	}
-	for _, record := range r.state.messages {
-		if record == nil {
-			continue
-		}
-		oldMessageID := record.Message.ID
-		if next, ok := messages[oldMessageID]; ok {
-			delete(r.state.byMessage, oldMessageID)
-			record.Message.ID = next
-			r.state.byMessage[next] = record
-		}
-		for _, partRecord := range record.Parts {
-			if partRecord == nil {
-				continue
-			}
-			oldPartID := partRecord.Part.ID
-			if next, ok := parts[oldPartID]; ok {
-				delete(r.state.byPart, oldPartID)
-				partRecord.Part.ID = next
-				partRecord.Part.MessageID = record.Message.ID
-				r.state.byPart[next] = partRecord
-			}
-		}
-	}
 }
 
 func (r *Chat) remapTimelineIDs(items map[int64]int64) {

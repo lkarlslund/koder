@@ -225,12 +225,13 @@ func TestRuntimeEnqueueStartsPrompt(t *testing.T) {
 	if len(snapshot.QueuedInputs) != 0 {
 		t.Fatalf("queued inputs = %#v", snapshot.QueuedInputs)
 	}
-	if len(snapshot.Messages) == 0 {
+	if len(snapshot.Timeline) == 0 {
 		t.Fatal("expected optimistic user message")
 	}
-	last := snapshot.Messages[len(snapshot.Messages)-1]
-	if last.Role != domain.MessageRoleUser || last.Summary != "first prompt" {
-		t.Fatalf("last message = %#v", last)
+	last := snapshot.Timeline[len(snapshot.Timeline)-1]
+	user, ok := last.Content.(domain.UserMessage)
+	if !ok || user.Text != "first prompt" {
+		t.Fatalf("last timeline item = %#v", last)
 	}
 
 	events <- domain.Event{Kind: domain.EventKindMessageDone}
@@ -390,7 +391,7 @@ func TestRuntimeCancelWhileToolsRunningStagesThenForcesCancel(t *testing.T) {
 	rt := &Chat{
 		session: session,
 		chat:    chat,
-		state:   NewChatState(chat, nil, nil, nil),
+		state:   NewTimelineState(chat, nil, nil),
 		status:  StatusRunningTools,
 		active:  true,
 		cancel:  func() { cancelled = true },
@@ -408,14 +409,14 @@ func TestRuntimeCancelWhileToolsRunningStagesThenForcesCancel(t *testing.T) {
 		t.Fatalf("status text = %q", rt.statusText)
 	}
 	snapshot := rt.Snapshot()
-	if len(snapshot.Messages) != 1 {
-		t.Fatalf("expected cancellation notice message, got %#v", snapshot.Messages)
+	if len(snapshot.Timeline) != 1 {
+		t.Fatalf("expected cancellation notice item, got %#v", snapshot.Timeline)
 	}
-	parts := snapshot.Parts[snapshot.Messages[0].ID]
-	if len(parts) != 1 || parts[0].Kind != domain.PartKindEventNotice {
-		t.Fatalf("unexpected cancellation notice parts: %#v", parts)
+	notice, ok := snapshot.Timeline[0].Content.(domain.Notice)
+	if !ok {
+		t.Fatalf("unexpected cancellation notice item: %#v", snapshot.Timeline[0])
 	}
-	if got := parts[0].Text(); got != "Cancelling. Tool calls running, waiting for completition. Press ESC again to cancel tool calls." {
+	if got := notice.Text; got != "Cancelling. Tool calls running, waiting for completition. Press ESC again to cancel tool calls." {
 		t.Fatalf("unexpected notice body: %q", got)
 	}
 
@@ -463,19 +464,11 @@ func TestRuntimeCompactionCompletionUpdatesContextImmediately(t *testing.T) {
 	updates, unsub := rt.Subscribe()
 	defer unsub()
 
-	msg := domain.Message{
-		ID:        999,
-		SessionID: session.ID,
-		ChatID:    chat.ID,
-		Role:      domain.MessageRoleAssistant,
-		Summary:   "Compacted session summary",
-		CreatedAt: time.Now().UTC(),
-	}
-	part := domain.Part{
-		ID:        1001,
-		MessageID: msg.ID,
-		Kind:      domain.PartKindCompaction,
-		Payload: domain.CompactionPayload{
+	item := domain.TimelineItem{
+		ID:     999,
+		ChatID: chat.ID,
+		Seq:    1,
+		Content: domain.Compaction{
 			Summary:             "summary",
 			Status:              "completed",
 			BeforeContextTokens: 1200,
@@ -486,11 +479,10 @@ func TestRuntimeCompactionCompletionUpdatesContextImmediately(t *testing.T) {
 
 	rt.inbox <- streamEventCmd{
 		event: domain.Event{
-			Kind:    domain.EventKindStatus,
-			Text:    "Session compacted",
-			Message: msg,
-			Parts:   []domain.Part{part},
-			Meta:    map[string]string{"compaction": "completed", "refresh": "details"},
+			Kind: domain.EventKindStatus,
+			Text: "Session compacted",
+			Item: item,
+			Meta: map[string]string{"compaction": "completed", "refresh": "details"},
 		},
 	}
 
@@ -516,8 +508,8 @@ func TestRuntimeCompactionCompletionUpdatesContextImmediately(t *testing.T) {
 			if !update.Snapshot.Context.Estimated {
 				t.Fatal("expected compacted context to be marked estimated")
 			}
-			if len(update.Snapshot.Messages) == 0 {
-				t.Fatal("expected compaction message in snapshot")
+			if len(update.Snapshot.Timeline) == 0 {
+				t.Fatal("expected compaction item in snapshot")
 			}
 			return
 		case <-deadline:
@@ -539,22 +531,19 @@ func TestPersistRemapsOptimisticIDsAndReloadsWithoutDuplicates(t *testing.T) {
 		CreatedAt: time.Now().UTC(),
 	}, session, chatRecord)
 	before := rt.Snapshot()
-	if len(before.Messages) != 1 || before.Messages[0].ID <= 0 {
-		t.Fatalf("unexpected optimistic snapshot: %#v", before.Messages)
+	if len(before.Timeline) != 1 || before.Timeline[0].ID <= 0 {
+		t.Fatalf("unexpected optimistic snapshot: %#v", before.Timeline)
 	}
 
 	if err := rt.Persist(context.Background(), st); err != nil {
 		t.Fatal(err)
 	}
 	after := rt.Snapshot()
-	if len(after.Messages) != 1 {
-		t.Fatalf("messages after persist = %#v", after.Messages)
+	if len(after.Timeline) != 1 {
+		t.Fatalf("timeline after persist = %#v", after.Timeline)
 	}
-	if after.Messages[0].ID == before.Messages[0].ID {
-		t.Fatalf("message ID was not remapped")
-	}
-	if _, ok := after.Parts[after.Messages[0].ID]; !ok {
-		t.Fatalf("parts were not remapped to durable message ID: %#v", after.Parts)
+	if after.Timeline[0].ID == before.Timeline[0].ID {
+		t.Fatalf("timeline ID was not remapped")
 	}
 	if err := rt.Persist(context.Background(), st); err != nil {
 		t.Fatal(err)
@@ -566,10 +555,10 @@ func TestPersistRemapsOptimisticIDsAndReloadsWithoutDuplicates(t *testing.T) {
 	}
 	t.Cleanup(reloaded.Close)
 	snapshot := reloaded.Snapshot()
-	if len(snapshot.Messages) != 1 {
-		t.Fatalf("reloaded messages = %#v", snapshot.Messages)
+	if len(snapshot.Timeline) != 1 {
+		t.Fatalf("reloaded timeline = %#v", snapshot.Timeline)
 	}
-	if parts := snapshot.Parts[snapshot.Messages[0].ID]; len(parts) != 1 || parts[0].Text() != "persist me" {
-		t.Fatalf("reloaded parts = %#v", parts)
+	if user, ok := snapshot.Timeline[0].Content.(domain.UserMessage); !ok || user.Text != "persist me" {
+		t.Fatalf("reloaded timeline item = %#v", snapshot.Timeline[0])
 	}
 }

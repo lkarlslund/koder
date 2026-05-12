@@ -162,7 +162,6 @@ func TestResumeClosesSessionDialogAndRestoresTyping(t *testing.T) {
 	m = m.UpdateLoad(loadMsg{
 		current:  domain.Session{ID: 7, Title: "Session A"},
 		sessions: m.sessions,
-		parts:    map[int64][]domain.Part{},
 	})
 	if m.hasSessionDialog() {
 		t.Fatal("expected session dialog to close after loading")

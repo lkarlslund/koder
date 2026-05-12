@@ -9,6 +9,8 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -45,6 +47,184 @@ func appendAppTimelineItem(t *testing.T, st *store.Store, chatID int64, content 
 		t.Fatal(err)
 	}
 	return item
+}
+
+func snapshotWithTranscript(messages []domain.Message, parts map[int64][]domain.Part) chatpkg.Snapshot {
+	return chatpkg.Snapshot{Timeline: timelineForTestTranscript(messages, parts)}
+}
+
+func timelineForTestTranscript(messages []domain.Message, parts map[int64][]domain.Part) []domain.TimelineItem {
+	items := make([]domain.TimelineItem, 0, len(messages))
+	for idx, message := range messages {
+		if message.ID == 0 {
+			message.ID = int64(idx + 1)
+		}
+		createdAt := message.CreatedAt
+		if createdAt.IsZero() {
+			createdAt = time.Now().UTC()
+		}
+		itemParts := normalizeTestParts(parts[message.ID])
+		if message.Role == domain.MessageRoleTool && attachTestToolParts(items, itemParts) {
+			continue
+		}
+		items = append(items, domain.TimelineItem{
+			ID:        message.ID,
+			ChatID:    message.ChatID,
+			Seq:       int64(idx + 1),
+			Content:   timelineContentFromMessageParts(message, itemParts),
+			CreatedAt: createdAt,
+			UpdatedAt: createdAt,
+		})
+	}
+	return items
+}
+
+func normalizeTestParts(parts []domain.Part) []domain.Part {
+	out := slices.Clone(parts)
+	for idx := range out {
+		if out[idx].Payload != nil {
+			continue
+		}
+		out[idx].Payload = testPayloadFromPartMeta(out[idx])
+	}
+	return out
+}
+
+func testPayloadFromPartMeta(part domain.Part) domain.PartPayload {
+	meta := stringMeta(part.MetaJSON)
+	switch part.Kind {
+	case domain.PartKindToolCall:
+		req := testRequestFromMeta(meta)
+		return domain.ToolCallPayload{Tool: req.Tool, ToolCallID: req.ToolCallID, Args: req.Args}
+	case domain.PartKindToolOutput:
+		req := testRequestFromMeta(meta)
+		status, result := testStoredResultFromMeta(meta)
+		if status == "" {
+			status = domain.ToolResultStatusOK
+		}
+		return domain.ToolOutputPayload{Tool: req.Tool, ToolCallID: req.ToolCallID, Args: req.Args, Status: status, Text: part.Body, Result: result}
+	case domain.PartKindApprovalRequest:
+		req := testRequestFromMeta(meta)
+		approvalID, _ := strconv.ParseInt(strings.TrimSpace(meta["approval_id"]), 10, 64)
+		return domain.ApprovalRequestPayload{ApprovalID: approvalID, Tool: req.Tool, ToolCallID: req.ToolCallID, Command: meta["command"], Status: domain.ApprovalStatus(meta["status"]), Body: part.Body}
+	case domain.PartKindSystemNotice:
+		var usage domain.Usage
+		if err := json.Unmarshal([]byte(part.MetaJSON), &usage); err == nil && usage.HasAnyTokens() {
+			return domain.UsagePayload{Usage: usage}
+		}
+		req := testRequestFromMeta(meta)
+		return domain.ToolOutputPayload{Tool: req.Tool, ToolCallID: req.ToolCallID, Args: meta, Status: domain.ToolResultStatusOK, Text: part.Body}
+	case domain.PartKindEventNotice:
+		return domain.EventNoticePayload{Text: firstNonEmptyString(part.Body, meta["text"]), Kind: meta["kind"], Severity: firstNonEmptyString(meta["severity"], "info"), Reason: meta["reason"], Title: meta["title"], Subtitle: meta["subtitle"], Tool: domain.ToolKind(meta["tool"]), ToolCallID: meta["tool_call_id"]}
+	case domain.PartKindCompaction:
+		return domain.CompactionPayload{Summary: part.Body, Status: meta["status"]}
+	default:
+		return nil
+	}
+}
+
+func testRequestFromMeta(meta map[string]string) tools.Request {
+	args := make(map[string]string, len(meta))
+	for key, value := range meta {
+		if key == "tool" || key == "tool_call_id" || key == "_stored_result" {
+			continue
+		}
+		args[key] = value
+	}
+	return tools.Request{Tool: domain.ToolKind(strings.TrimSpace(meta["tool"])), ToolCallID: strings.TrimSpace(meta["tool_call_id"]), Args: args}
+}
+
+func testStoredResultFromMeta(meta map[string]string) (domain.ToolResultStatus, domain.ToolResultPayload) {
+	raw := strings.TrimSpace(meta["_stored_result"])
+	if raw == "" {
+		return "", nil
+	}
+	var envelope struct {
+		Tool    domain.ToolKind         `json:"tool"`
+		Status  domain.ToolResultStatus `json:"status"`
+		Payload json.RawMessage         `json:"payload"`
+	}
+	if err := json.Unmarshal([]byte(raw), &envelope); err != nil {
+		return "", nil
+	}
+	payload, err := domain.DecodeToolResultPayload(envelope.Tool, envelope.Status, envelope.Payload)
+	if err != nil {
+		return envelope.Status, nil
+	}
+	return envelope.Status, payload
+}
+
+func attachTestToolParts(items []domain.TimelineItem, parts []domain.Part) bool {
+	attached := false
+	for _, part := range parts {
+		for idx := len(items) - 1; idx >= 0; idx-- {
+			assistant, ok := items[idx].Content.(domain.AssistantMessage)
+			if !ok {
+				if _, isTool := items[idx].Content.(domain.ToolExecution); !isTool {
+					break
+				}
+				continue
+			}
+			if attachTestToolPart(&assistant, part) {
+				items[idx].Content = assistant
+				items[idx].UpdatedAt = time.Now().UTC()
+				attached = true
+				break
+			}
+		}
+	}
+	return attached
+}
+
+func attachTestToolPart(assistant *domain.AssistantMessage, part domain.Part) bool {
+	switch payload := part.Payload.(type) {
+	case domain.ApprovalRequestPayload:
+		call := assistant.ToolByID(domain.ToolCallID(payload.ToolCallID))
+		if call == nil {
+			return false
+		}
+		call.Approval = &domain.ApprovalRequest{ID: payload.ApprovalID, Status: payload.Status, Body: payload.Body}
+		call.Status = domain.ToolStatusPending
+		return true
+	case domain.ToolOutputPayload:
+		call := assistant.ToolByID(domain.ToolCallID(payload.ToolCallID))
+		if call == nil {
+			return false
+		}
+		if approvalID, ok := approvalIDFromToolOutput(payload); ok {
+			if call.Approval == nil {
+				call.Approval = &domain.ApprovalRequest{ID: approvalID}
+			}
+			call.Approval.Status = domain.ApprovalStatus(payload.Args["status"])
+			call.Approval.Body = payload.Text
+			if call.Approval.Status == domain.ApprovalStatusApproved {
+				call.Status = domain.ToolStatusRunning
+			}
+			if call.Approval.Status == domain.ApprovalStatusDenied {
+				call.Status = domain.ToolStatusDenied
+			}
+			return true
+		}
+		call.Result = &domain.ToolResult{Text: payload.Text, Status: payload.Status, Data: toolResultPayloadFromAny(payload.Result)}
+		call.Status = domain.ToolStatusDone
+		return true
+	default:
+		return false
+	}
+}
+
+func setTestTranscript(m *App, messages []domain.Message, parts map[int64][]domain.Part) {
+	snapshot := m.currentSnapshot
+	snapshot.Timeline = timelineForTestTranscript(messages, parts)
+	m.currentSnapshot = snapshot
+}
+
+func testTimelineItem(message domain.Message, parts []domain.Part) domain.TimelineItem {
+	items := timelineForTestTranscript([]domain.Message{message}, map[int64][]domain.Part{message.ID: parts})
+	if len(items) == 0 {
+		return domain.TimelineItem{}
+	}
+	return items[0]
 }
 
 func TestMatchingSlashCommands(t *testing.T) {
@@ -416,7 +596,7 @@ func TestToolCallDeltaAppendsCurrentChatImmediately(t *testing.T) {
 		cfg:             testConfig(t),
 		currentSession:  domain.Session{ID: 1},
 		currentChat:     domain.Chat{ID: 2},
-		currentSnapshot: chatpkg.Snapshot{Parts: map[int64][]domain.Part{}},
+		currentSnapshot: chatpkg.Snapshot{},
 		composer:        textarea.New(),
 	}
 	events := make(chan domain.Event)
@@ -425,10 +605,9 @@ func TestToolCallDeltaAppendsCurrentChatImmediately(t *testing.T) {
 	updated, cmd := m.Update(eventMsg{
 		chatID: 2,
 		event: domain.Event{
-			Kind:    domain.EventKindToolCallDelta,
-			Text:    "tool calls persisted",
-			Message: msg,
-			Parts:   parts,
+			Kind: domain.EventKindToolCallDelta,
+			Text: "tool calls persisted",
+			Item: testTimelineItem(msg, parts),
 		},
 		events: events,
 	})
@@ -436,8 +615,8 @@ func TestToolCallDeltaAppendsCurrentChatImmediately(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("expected follow-up command for remaining event stream")
 	}
-	if len(next.currentSnapshot.Messages) != 1 {
-		t.Fatalf("expected current chat to append immediately, got %d messages", len(next.currentSnapshot.Messages))
+	if len(next.activeMessages()) != 1 {
+		t.Fatalf("expected current chat to append immediately, got %d messages", len(next.activeMessages()))
 	}
 	blocks := next.transcriptBlocks()
 	if len(blocks) != 1 || blocks[0].Kind != transcriptBlockMessage || len(blocks[0].ToolRuns) != 1 {
@@ -456,7 +635,7 @@ func TestProviderToolCallDeltaRendersLiveToolRun(t *testing.T) {
 		cfg:             testConfig(t),
 		currentSession:  domain.Session{ID: 1},
 		currentChat:     domain.Chat{ID: 2},
-		currentSnapshot: chatpkg.Snapshot{Parts: map[int64][]domain.Part{}},
+		currentSnapshot: chatpkg.Snapshot{},
 		composer:        textarea.New(),
 	}
 
@@ -532,12 +711,12 @@ func TestToolResultEventUpdatesRequestedRunInMemory(t *testing.T) {
 		cfg:             testConfig(t),
 		currentSession:  domain.Session{ID: 1},
 		currentChat:     domain.Chat{ID: 2},
-		currentSnapshot: chatpkg.Snapshot{Parts: map[int64][]domain.Part{}},
+		currentSnapshot: chatpkg.Snapshot{},
 		composer:        textarea.New(),
 	}
-	updated, _ := m.Update(eventMsg{chatID: 2, event: domain.Event{Kind: domain.EventKindToolCallDelta, Message: callMsg, Parts: callParts}, events: make(chan domain.Event)})
+	updated, _ := m.Update(eventMsg{chatID: 2, event: domain.Event{Kind: domain.EventKindToolCallDelta, Item: testTimelineItem(callMsg, callParts)}, events: make(chan domain.Event)})
 	m = updated.(App)
-	updated, _ = m.Update(eventMsg{chatID: 2, event: domain.Event{Kind: domain.EventKindToolResult, Tool: domain.ToolKindBash, ToolCallID: "call_1", Message: resultMsg, Parts: resultParts}, events: make(chan domain.Event)})
+	updated, _ = m.Update(eventMsg{chatID: 2, event: domain.Event{Kind: domain.EventKindToolResult, Tool: domain.ToolKindBash, ToolCallID: "call_1", Item: testTimelineItem(resultMsg, resultParts)}, events: make(chan domain.Event)})
 	m = updated.(App)
 
 	blocks := m.transcriptBlocks()
@@ -574,7 +753,7 @@ func TestMessageDonePersistsAssistantWithoutReload(t *testing.T) {
 		cfg:               testConfig(t),
 		currentSession:    domain.Session{ID: 1},
 		currentChat:       domain.Chat{ID: 2},
-		currentSnapshot:   chatpkg.Snapshot{Parts: map[int64][]domain.Part{}},
+		currentSnapshot:   chatpkg.Snapshot{},
 		composer:          textarea.New(),
 		activeEventStream: true,
 	}
@@ -582,7 +761,7 @@ func TestMessageDonePersistsAssistantWithoutReload(t *testing.T) {
 
 	updated, _ := m.Update(eventMsg{
 		chatID: 2,
-		event:  domain.Event{Kind: domain.EventKindMessageDone, Message: msg, Parts: parts},
+		event:  domain.Event{Kind: domain.EventKindMessageDone, Item: testTimelineItem(msg, parts)},
 		events: make(chan domain.Event),
 	})
 	m = updated.(App)
@@ -639,18 +818,17 @@ func TestApprovalAskEventAppendsPendingApprovalToolRun(t *testing.T) {
 		cfg:             testConfig(t),
 		currentSession:  domain.Session{ID: 1},
 		currentChat:     domain.Chat{ID: 2},
-		currentSnapshot: chatpkg.Snapshot{Messages: []domain.Message{assistantMsg}, Parts: map[int64][]domain.Part{assistantMsg.ID: {assistantPart}}},
+		currentSnapshot: snapshotWithTranscript([]domain.Message{assistantMsg}, map[int64][]domain.Part{assistantMsg.ID: {assistantPart}}),
 		composer:        textarea.New(),
 	}
 
 	updated, _ := m.Update(eventMsg{
 		chatID: 2,
 		event: domain.Event{
-			Kind:    domain.EventKindApprovalAsk,
-			Text:    "bash requires approval",
-			Tool:    domain.ToolKindBash,
-			Message: msg,
-			Parts:   parts,
+			Kind: domain.EventKindApprovalAsk,
+			Text: "bash requires approval",
+			Tool: domain.ToolKindBash,
+			Item: testTimelineItem(assistantMsg, append([]domain.Part{assistantPart}, parts...)),
 			Meta: map[string]string{
 				"approval_id":  "44",
 				"command":      "pwd",
@@ -734,25 +912,23 @@ func TestApprovalReplyEventRemovesPendingApproval(t *testing.T) {
 		cfg:             testConfig(t),
 		currentSession:  domain.Session{ID: 1},
 		currentChat:     domain.Chat{ID: 2},
-		currentSnapshot: chatpkg.Snapshot{Messages: []domain.Message{assistantMsg}, Parts: map[int64][]domain.Part{assistantMsg.ID: {assistantPart}}},
+		currentSnapshot: snapshotWithTranscript([]domain.Message{assistantMsg}, map[int64][]domain.Part{assistantMsg.ID: {assistantPart}}),
 		composer:        textarea.New(),
 	}
 	updated, _ := m.Update(eventMsg{chatID: 2, event: domain.Event{
-		Kind:    domain.EventKindApprovalAsk,
-		Text:    "bash requires approval",
-		Tool:    domain.ToolKindBash,
-		Message: askMsg,
-		Parts:   askParts,
-		Meta:    map[string]string{"approval_id": "44", "command": "pwd", "tool_call_id": "call_1"},
+		Kind: domain.EventKindApprovalAsk,
+		Text: "bash requires approval",
+		Tool: domain.ToolKindBash,
+		Item: testTimelineItem(assistantMsg, append([]domain.Part{assistantPart}, askParts...)),
+		Meta: map[string]string{"approval_id": "44", "command": "pwd", "tool_call_id": "call_1"},
 	}, events: make(chan domain.Event)})
 	m = updated.(App)
 	updated, _ = m.Update(eventMsg{chatID: 2, event: domain.Event{
-		Kind:    domain.EventKindApprovalReply,
-		Text:    "approval 44 approved",
-		Tool:    domain.ToolKindBash,
-		Message: replyMsg,
-		Parts:   replyParts,
-		Meta:    map[string]string{"approval_id": "44", "tool_call_id": "call_1"},
+		Kind: domain.EventKindApprovalReply,
+		Text: "approval 44 approved",
+		Tool: domain.ToolKindBash,
+		Item: testTimelineItem(assistantMsg, append([]domain.Part{assistantPart}, replyParts...)),
+		Meta: map[string]string{"approval_id": "44", "tool_call_id": "call_1"},
 	}, events: make(chan domain.Event)})
 	m = updated.(App)
 
@@ -1033,7 +1209,7 @@ func TestEnterShowsOptimisticUserPromptBeforePromptStarts(t *testing.T) {
 		palette:         theme.Resolve("tokyonight").Palette,
 		viewport:        newTranscriptViewport(60, 10),
 		currentSession:  domain.Session{ID: 1, ProviderID: "test", ModelID: "model"},
-		currentSnapshot: chatpkg.Snapshot{Parts: map[int64][]domain.Part{}},
+		currentSnapshot: chatpkg.Snapshot{},
 	}
 	m.composer.SetValue("hello there")
 
@@ -1042,11 +1218,11 @@ func TestEnterShowsOptimisticUserPromptBeforePromptStarts(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("expected prompt kickoff command")
 	}
-	if len(next.currentSnapshot.Messages) != 1 {
-		t.Fatalf("expected optimistic user message, got %#v", next.currentSnapshot.Messages)
+	if len(next.activeMessages()) != 1 {
+		t.Fatalf("expected optimistic user message, got %#v", next.activeMessages())
 	}
-	if next.currentSnapshot.Messages[0].Role != domain.MessageRoleUser || next.currentSnapshot.Messages[0].Summary != "hello there" {
-		t.Fatalf("unexpected optimistic message: %#v", next.currentSnapshot.Messages[0])
+	if next.activeMessages()[0].Role != domain.MessageRoleUser || next.activeMessages()[0].Summary != "hello there" {
+		t.Fatalf("unexpected optimistic message: %#v", next.activeMessages()[0])
 	}
 	if got := next.viewport.View(); !strings.Contains(got, "hello there") {
 		t.Fatalf("expected viewport to show optimistic user prompt, got %q", got)
@@ -1194,7 +1370,7 @@ func TestEnterSendsNormalPrompt(t *testing.T) {
 	m := App{
 		cfg:             cfg,
 		composer:        textarea.New(),
-		currentSnapshot: chatpkg.Snapshot{Parts: map[int64][]domain.Part{}},
+		currentSnapshot: chatpkg.Snapshot{},
 	}
 	m.composer.SetValue("hello")
 
@@ -1209,11 +1385,11 @@ func TestEnterSendsNormalPrompt(t *testing.T) {
 	if next.composer.Value() != "" {
 		t.Fatalf("expected composer reset, got %q", next.composer.Value())
 	}
-	if len(next.currentSnapshot.Messages) != 1 || next.currentSnapshot.Messages[0].Summary != "hello" {
-		t.Fatalf("expected optimistic user message, got %#v", next.currentSnapshot.Messages)
+	if len(next.activeMessages()) != 1 || next.activeMessages()[0].Summary != "hello" {
+		t.Fatalf("expected optimistic user message, got %#v", next.activeMessages())
 	}
-	if len(next.currentSnapshot.Parts[next.currentSnapshot.Messages[0].ID]) != 1 || next.currentSnapshot.Parts[next.currentSnapshot.Messages[0].ID][0].Body != "hello" {
-		t.Fatalf("expected optimistic user part, got %#v", next.currentSnapshot.Parts)
+	if len(next.activeParts()[next.activeMessages()[0].ID]) != 1 || next.activeParts()[next.activeMessages()[0].ID][0].Body != "hello" {
+		t.Fatalf("expected optimistic user part, got %#v", next.activeParts())
 	}
 }
 
@@ -1233,7 +1409,7 @@ func TestAltEnterInsertsNewlineInsteadOfSending(t *testing.T) {
 	m := App{
 		cfg:             cfg,
 		composer:        textarea.New(),
-		currentSnapshot: chatpkg.Snapshot{Parts: map[int64][]domain.Part{}},
+		currentSnapshot: chatpkg.Snapshot{},
 	}
 	m.composer.SetValue("hello")
 	m.composer.SetCursor(len("hello"))
@@ -1249,8 +1425,8 @@ func TestAltEnterInsertsNewlineInsteadOfSending(t *testing.T) {
 	if next.composer.Value() != "hello\n" {
 		t.Fatalf("expected newline inserted, got %q", next.composer.Value())
 	}
-	if len(next.currentSnapshot.Messages) != 0 {
-		t.Fatalf("expected no optimistic transcript append, got %#v", next.currentSnapshot.Messages)
+	if len(next.activeMessages()) != 0 {
+		t.Fatalf("expected no optimistic transcript append, got %#v", next.activeMessages())
 	}
 }
 
@@ -1525,14 +1701,14 @@ func TestEnterSendsPromptWithPastedImageAttachment(t *testing.T) {
 	if len(final.draftAttachments) != 0 {
 		t.Fatalf("expected draft attachments cleared after sending, got %#v", final.draftAttachments)
 	}
-	if len(final.currentSnapshot.Messages) == 0 {
+	if len(final.activeMessages()) == 0 {
 		t.Fatal("expected optimistic user message")
 	}
-	last := final.currentSnapshot.Messages[len(final.currentSnapshot.Messages)-1]
+	last := final.activeMessages()[len(final.activeMessages())-1]
 	if last.Role != domain.MessageRoleUser {
 		t.Fatalf("expected user message, got %#v", last)
 	}
-	if parts := final.currentSnapshot.Parts[last.ID]; len(parts) == 0 {
+	if parts := final.activeParts()[last.ID]; len(parts) == 0 {
 		t.Fatal("expected message parts for optimistic user prompt")
 	}
 }
@@ -1632,12 +1808,12 @@ func TestCtrlYCopiesLatestAssistantMessage(t *testing.T) {
 	var copied string
 	m := App{
 		composer: textarea.New(),
-		currentSnapshot: chatpkg.Snapshot{Parts: map[int64][]domain.Part{
-			2: {{Kind: domain.PartKindText, Body: "latest assistant reply"}},
-		}, Messages: []domain.Message{
+		currentSnapshot: snapshotWithTranscript([]domain.Message{
 			{ID: 1, Role: domain.MessageRoleUser, Summary: "hello"},
 			{ID: 2, Role: domain.MessageRoleAssistant, Summary: "latest assistant reply"},
-		}},
+		}, map[int64][]domain.Part{
+			2: {{Kind: domain.PartKindText, Body: "latest assistant reply"}},
+		}),
 		writeClipboardText: func(text string) error {
 			copied = text
 			return nil
@@ -1673,7 +1849,7 @@ func TestEnterWhileBusyQueuesSteeringPrompt(t *testing.T) {
 	m := App{
 		cfg:             cfg,
 		composer:        textarea.New(),
-		currentSnapshot: chatpkg.Snapshot{Parts: map[int64][]domain.Part{}},
+		currentSnapshot: chatpkg.Snapshot{},
 		loading:         true,
 		busy: busyModel{
 			active: true,
@@ -1693,8 +1869,8 @@ func TestEnterWhileBusyQueuesSteeringPrompt(t *testing.T) {
 	if next.composer.Value() != "" {
 		t.Fatalf("expected composer reset after queueing, got %q", next.composer.Value())
 	}
-	if len(next.currentSnapshot.Messages) != 0 {
-		t.Fatalf("expected no optimistic send while busy, got %#v", next.currentSnapshot.Messages)
+	if len(next.activeMessages()) != 0 {
+		t.Fatalf("expected no optimistic send while busy, got %#v", next.activeMessages())
 	}
 }
 
@@ -1752,7 +1928,7 @@ func TestBangPromptWithoutProviderRunsShellOnly(t *testing.T) {
 		store:           st,
 		composer:        textarea.New(),
 		workdir:         t.TempDir(),
-		currentSnapshot: chatpkg.Snapshot{Parts: map[int64][]domain.Part{}},
+		currentSnapshot: chatpkg.Snapshot{},
 	}
 	m.composer.SetValue("!printf hi")
 
@@ -1791,8 +1967,8 @@ func TestBangPromptWithoutProviderRunsShellOnly(t *testing.T) {
 	if done.currentSession.ID == 0 || done.currentChat.ID == 0 {
 		t.Fatalf("expected draft session/chat to be created, got session=%d chat=%d", done.currentSession.ID, done.currentChat.ID)
 	}
-	if len(done.currentSnapshot.Messages) != 0 {
-		t.Fatalf("expected no synthetic user message, got %#v", done.currentSnapshot.Messages)
+	if len(done.activeMessages()) != 0 {
+		t.Fatalf("expected no synthetic user message, got %#v", done.activeMessages())
 	}
 
 	items, err := st.TimelineForChat(context.Background(), done.currentChat.ID)
@@ -1857,7 +2033,7 @@ func TestDoubleBangIdleCreatesSynthesizedPrompt(t *testing.T) {
 		store:           st,
 		composer:        textarea.New(),
 		workdir:         t.TempDir(),
-		currentSnapshot: chatpkg.Snapshot{Parts: map[int64][]domain.Part{}},
+		currentSnapshot: chatpkg.Snapshot{},
 	}
 	m.composer.SetValue("!!printf hi")
 
@@ -1887,10 +2063,10 @@ func TestDoubleBangIdleCreatesSynthesizedPrompt(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("expected batched reload and prompt kickoff")
 	}
-	if len(done.currentSnapshot.Messages) != 1 || done.currentSnapshot.Messages[0].Role != domain.MessageRoleUser {
-		t.Fatalf("expected optimistic user prompt, got %#v", done.currentSnapshot.Messages)
+	if len(done.activeMessages()) != 1 || done.activeMessages()[0].Role != domain.MessageRoleUser {
+		t.Fatalf("expected optimistic user prompt, got %#v", done.activeMessages())
 	}
-	if got := done.currentSnapshot.Messages[0].Summary; !strings.Contains(got, "User-requested shell command:") || !strings.Contains(got, "printf hi") {
+	if got := done.activeMessages()[0].Summary; !strings.Contains(got, "User-requested shell command:") || !strings.Contains(got, "printf hi") {
 		t.Fatalf("unexpected optimistic summary %q", got)
 	}
 
@@ -1925,7 +2101,7 @@ func TestDoubleBangWhileBusyEnterQueuesSteeringPrompt(t *testing.T) {
 		store:           st,
 		composer:        textarea.New(),
 		workdir:         t.TempDir(),
-		currentSnapshot: chatpkg.Snapshot{Parts: map[int64][]domain.Part{}},
+		currentSnapshot: chatpkg.Snapshot{},
 		loading:         true,
 		busy: busyModel{
 			active: true,
@@ -1990,7 +2166,7 @@ func TestDoubleBangWhileBusyTabQueuesSynthesizedPrompt(t *testing.T) {
 		store:           st,
 		composer:        textarea.New(),
 		workdir:         t.TempDir(),
-		currentSnapshot: chatpkg.Snapshot{Parts: map[int64][]domain.Part{}},
+		currentSnapshot: chatpkg.Snapshot{},
 		loading:         true,
 		busy: busyModel{
 			active: true,
@@ -2029,11 +2205,11 @@ func TestDoubleBangWhileBusyTabQueuesSynthesizedPrompt(t *testing.T) {
 func TestUpDownBrowseComposerPromptHistory(t *testing.T) {
 	m := App{
 		composer: textarea.New(),
-		currentSnapshot: chatpkg.Snapshot{Messages: []domain.Message{
+		currentSnapshot: snapshotWithTranscript([]domain.Message{
 			{ID: 1, Role: domain.MessageRoleUser, Summary: "first"},
 			{ID: 2, Role: domain.MessageRoleAssistant, Summary: "reply"},
 			{ID: 3, Role: domain.MessageRoleUser, Summary: "second"},
-		}, Parts: map[int64][]domain.Part{}},
+		}, nil),
 	}
 	m.composer.SetValue("draft")
 
@@ -2065,11 +2241,11 @@ func TestUpDownBrowseComposerPromptHistory(t *testing.T) {
 func TestCtrlROpensComposerHistoryMenuAndAcceptsSelection(t *testing.T) {
 	m := App{
 		composer: textarea.New(),
-		currentSnapshot: chatpkg.Snapshot{Messages: []domain.Message{
+		currentSnapshot: snapshotWithTranscript([]domain.Message{
 			{ID: 1, Role: domain.MessageRoleUser, Summary: "alpha one"},
 			{ID: 2, Role: domain.MessageRoleUser, Summary: "beta two"},
 			{ID: 3, Role: domain.MessageRoleUser, Summary: "alpha three"},
-		}, Parts: map[int64][]domain.Part{}},
+		}, nil),
 	}
 	m.composer.SetValue("alpha")
 
@@ -2110,10 +2286,10 @@ func TestCtrlROpensComposerHistoryMenuAndAcceptsSelection(t *testing.T) {
 func TestComposerHistoryMenuFiltersWithoutMutatingComposer(t *testing.T) {
 	m := App{
 		composer: textarea.New(),
-		currentSnapshot: chatpkg.Snapshot{Messages: []domain.Message{
+		currentSnapshot: snapshotWithTranscript([]domain.Message{
 			{ID: 1, Role: domain.MessageRoleUser, Summary: "first deploy"},
 			{ID: 2, Role: domain.MessageRoleUser, Summary: "second status"},
-		}, Parts: map[int64][]domain.Part{}},
+		}, nil),
 	}
 	m.composer.SetValue("")
 
@@ -2247,7 +2423,7 @@ func TestLoadMsgDispatchesQueuedPrompt(t *testing.T) {
 	m := App{
 		cfg:             cfg,
 		composer:        textarea.New(),
-		currentSnapshot: chatpkg.Snapshot{Parts: map[int64][]domain.Part{}},
+		currentSnapshot: chatpkg.Snapshot{},
 		viewport:        newTranscriptViewport(40, 6),
 		currentSession:  domain.Session{ID: 9, ProviderID: "openai", ModelID: "gpt-5.4", Title: "Queued"},
 		currentChat:     domain.Chat{QueuedInputs: []domain.QueuedInput{{ID: 1, Text: "queued ask", Kind: domain.QueuedInputKindQueued}}},
@@ -2255,7 +2431,6 @@ func TestLoadMsgDispatchesQueuedPrompt(t *testing.T) {
 
 	updated, cmd := m.Update(loadMsg{
 		current: domain.Session{ID: 9, ProviderID: "openai", ModelID: "gpt-5.4", Title: "Queued"},
-		parts:   map[int64][]domain.Part{},
 	})
 	next := updated.(App)
 	if cmd == nil {
@@ -2264,8 +2439,8 @@ func TestLoadMsgDispatchesQueuedPrompt(t *testing.T) {
 	if !next.loading {
 		t.Fatal("expected queued input dispatch to restart loading")
 	}
-	if len(next.currentSnapshot.Messages) != 1 || next.currentSnapshot.Messages[0].Summary != "queued ask" {
-		t.Fatalf("expected optimistic queued message, got %#v", next.currentSnapshot.Messages)
+	if len(next.activeMessages()) != 1 || next.activeMessages()[0].Summary != "queued ask" {
+		t.Fatalf("expected optimistic queued message, got %#v", next.activeMessages())
 	}
 	if len(next.currentChat.QueuedInputs) != 0 {
 		t.Fatalf("expected queued input cleared, got %#v", next.currentChat.QueuedInputs)
@@ -2422,7 +2597,7 @@ func TestSyncDebugRuntimeIncludesViewportState(t *testing.T) {
 		debug:           rec,
 		status:          "Ready",
 		currentSession:  domain.Session{ID: 7, Title: "Debug Session", ProviderID: "test", ModelID: "model"},
-		currentSnapshot: chatpkg.Snapshot{Messages: []domain.Message{{ID: 1}, {ID: 2}}},
+		currentSnapshot: snapshotWithTranscript([]domain.Message{{ID: 1}, {ID: 2}}, nil),
 		viewport:        newTranscriptViewport(40, 6),
 	}
 	m.viewport.SetContent("line one\nline two")
@@ -2447,7 +2622,7 @@ func TestSyncDebugRuntimeSkipsIdenticalSnapshots(t *testing.T) {
 		debug:           rec,
 		status:          "Ready",
 		currentSession:  domain.Session{ID: 7, Title: "Debug Session", ProviderID: "test", ModelID: "model"},
-		currentSnapshot: chatpkg.Snapshot{Messages: []domain.Message{{ID: 1}, {ID: 2}}},
+		currentSnapshot: snapshotWithTranscript([]domain.Message{{ID: 1}, {ID: 2}}, nil),
 		viewport:        newTranscriptViewport(40, 6),
 	}
 	m.viewport.SetContent("line one\nline two")
@@ -2469,12 +2644,12 @@ func TestSyncDebugRuntimeIncludesTranscriptItemsInDeepDebug(t *testing.T) {
 		status:         "Ready",
 		currentSession: domain.Session{ID: 7, Title: "Debug Session", ProviderID: "test", ModelID: "model"},
 		viewport:       newTranscriptViewport(40, 6),
-		currentSnapshot: chatpkg.Snapshot{Messages: []domain.Message{{
+		currentSnapshot: snapshotWithTranscript([]domain.Message{{
 			ID:   1,
 			Role: domain.MessageRoleAssistant,
-		}}, Parts: map[int64][]domain.Part{
+		}}, map[int64][]domain.Part{
 			1: {{Kind: domain.PartKindText, Body: "hello"}},
-		}},
+		}),
 		transcriptDirty: true,
 	}
 	m.viewport.SetContent("line one\nline two")
@@ -2534,7 +2709,7 @@ func TestRenderTranscriptToolMessageFallsBackToSummaryWhenBodyMissing(t *testing
 	m := App{
 		cfg:             cfg,
 		palette:         theme.Resolve("tokyonight").Palette,
-		currentSnapshot: chatpkg.Snapshot{Parts: map[int64][]domain.Part{}},
+		currentSnapshot: chatpkg.Snapshot{},
 	}
 
 	got := m.renderTranscriptMessage(domain.Message{
@@ -2552,7 +2727,11 @@ func TestRefreshViewportGroupsToolRunMessagesIntoCard(t *testing.T) {
 	m := App{
 		cfg:     cfg,
 		palette: theme.Resolve("tokyonight").Palette,
-		currentSnapshot: chatpkg.Snapshot{Parts: map[int64][]domain.Part{
+		currentSnapshot: snapshotWithTranscript([]domain.Message{
+			{ID: 1, Role: domain.MessageRoleAssistant},
+			{ID: 2, Role: domain.MessageRoleTool},
+			{ID: 3, Role: domain.MessageRoleTool, Summary: "bash"},
+		}, map[int64][]domain.Part{
 			1: {{
 				Kind:     domain.PartKindToolCall,
 				Body:     `{"command":"git status","tool":"bash","tool_call_id":"call_1"}`,
@@ -2568,11 +2747,7 @@ func TestRefreshViewportGroupsToolRunMessagesIntoCard(t *testing.T) {
 				Body:     "On branch main",
 				MetaJSON: `{"tool":"bash","command":"git status","tool_call_id":"call_1"}`,
 			}},
-		}, Messages: []domain.Message{
-			{ID: 1, Role: domain.MessageRoleAssistant},
-			{ID: 2, Role: domain.MessageRoleTool},
-			{ID: 3, Role: domain.MessageRoleTool, Summary: "bash"},
-		}},
+		}),
 		viewport: newTranscriptViewport(80, 12),
 	}
 
@@ -2618,14 +2793,14 @@ func TestRefreshViewportSkipsSyntheticAssistantToolSummary(t *testing.T) {
 	m := App{
 		cfg:     cfg,
 		palette: theme.Resolve("tokyonight").Palette,
-		currentSnapshot: chatpkg.Snapshot{Parts: map[int64][]domain.Part{
+		currentSnapshot: snapshotWithTranscript([]domain.Message{
+			{ID: 1, Role: domain.MessageRoleAssistant, Summary: "tool:read"},
+		}, map[int64][]domain.Part{
 			1: {{
 				Kind:     domain.PartKindToolCall,
 				MetaJSON: `{"path":"README.md","tool":"read","tool_call_id":"call_2"}`,
 			}},
-		}, Messages: []domain.Message{
-			{ID: 1, Role: domain.MessageRoleAssistant, Summary: "tool:read"},
-		}},
+		}),
 		viewport: newTranscriptViewport(80, 8),
 	}
 
@@ -2644,7 +2819,10 @@ func TestToolOutputUsesRequestPreviewFromMeta(t *testing.T) {
 	m := App{
 		cfg:     cfg,
 		palette: theme.Resolve("tokyonight").Palette,
-		currentSnapshot: chatpkg.Snapshot{Parts: map[int64][]domain.Part{
+		currentSnapshot: snapshotWithTranscript([]domain.Message{
+			{ID: 1, Role: domain.MessageRoleAssistant, Summary: "tool:read"},
+			{ID: 2, Role: domain.MessageRoleTool, Summary: "read"},
+		}, map[int64][]domain.Part{
 			1: {{
 				Kind:     domain.PartKindToolCall,
 				MetaJSON: `{"tool":"read","path":"README.md","tool_call_id":"call_2"}`,
@@ -2654,10 +2832,7 @@ func TestToolOutputUsesRequestPreviewFromMeta(t *testing.T) {
 				Body:     "# heading",
 				MetaJSON: `{"tool":"read","path":"README.md","tool_call_id":"call_2"}`,
 			}},
-		}, Messages: []domain.Message{
-			{ID: 1, Role: domain.MessageRoleAssistant, Summary: "tool:read"},
-			{ID: 2, Role: domain.MessageRoleTool, Summary: "read"},
-		}},
+		}),
 		viewport: newTranscriptViewport(80, 8),
 	}
 
@@ -2794,7 +2969,7 @@ func TestPermissionsPickerApplyAfterSlashCommandInvalidatesComposerArea(t *testi
 func TestRunPromptErrorAppendsAssistantErrorToTranscript(t *testing.T) {
 	m := App{
 		composer:        textarea.New(),
-		currentSnapshot: chatpkg.Snapshot{Parts: map[int64][]domain.Part{}},
+		currentSnapshot: chatpkg.Snapshot{},
 		viewport:        newTranscriptViewport(40, 6),
 	}
 
@@ -2806,13 +2981,13 @@ func TestRunPromptErrorAppendsAssistantErrorToTranscript(t *testing.T) {
 	if next.loading {
 		t.Fatal("expected loading cleared after prompt error")
 	}
-	if len(next.currentSnapshot.Messages) != 1 {
-		t.Fatalf("expected local assistant error message, got %#v", next.currentSnapshot.Messages)
+	if len(next.activeMessages()) != 1 {
+		t.Fatalf("expected local assistant error message, got %#v", next.activeMessages())
 	}
-	if next.currentSnapshot.Messages[0].Role != domain.MessageRoleAssistant {
-		t.Fatalf("expected assistant role, got %s", next.currentSnapshot.Messages[0].Role)
+	if next.activeMessages()[0].Role != domain.MessageRoleAssistant {
+		t.Fatalf("expected assistant role, got %s", next.activeMessages()[0].Role)
 	}
-	if got := next.currentSnapshot.Parts[next.currentSnapshot.Messages[0].ID][0].Body; got != "Error: connection refused" {
+	if got := next.activeParts()[next.activeMessages()[0].ID][0].Body; got != "Error: connection refused" {
 		t.Fatalf("unexpected local error part: %q", got)
 	}
 	if !strings.Contains(next.viewport.View(), "Error: connection refused") {
@@ -2827,7 +3002,7 @@ func TestRunPromptMsgKeepsExistingRuntimeSubscription(t *testing.T) {
 	m := App{
 		cfg:                   config.Default().WithStateDir(t.TempDir()),
 		composer:              textarea.New(),
-		currentSnapshot:       chatpkg.Snapshot{Parts: map[int64][]domain.Part{}},
+		currentSnapshot:       chatpkg.Snapshot{},
 		viewport:              newTranscriptViewport(40, 6),
 		currentRuntime:        rt,
 		currentRuntimeUpdates: updates,
@@ -2870,7 +3045,7 @@ func TestRuntimeUpdateMsgAppliesRuntimeSnapshot(t *testing.T) {
 		cfg:             config.Default().WithStateDir(t.TempDir()),
 		composer:        textarea.New(),
 		currentRuntime:  &chatpkg.Chat{},
-		currentSnapshot: chatpkg.Snapshot{Parts: map[int64][]domain.Part{}},
+		currentSnapshot: chatpkg.Snapshot{},
 		viewport:        newTranscriptViewport(80, 20),
 		currentSession:  domain.Session{ID: 1, Title: "Session"},
 		currentChat:     domain.Chat{ID: 2, SessionID: 1},
@@ -2882,8 +3057,7 @@ func TestRuntimeUpdateMsgAppliesRuntimeSnapshot(t *testing.T) {
 			Snapshot: chatpkg.Snapshot{
 				Session:      domain.Session{ID: 1, Title: "Session"},
 				Chat:         domain.Chat{ID: 2, SessionID: 1, QueuedInputs: []domain.QueuedInput{{ID: 9, Kind: domain.QueuedInputKindQueued, Text: "later"}}},
-				Messages:     []domain.Message{message},
-				Parts:        map[int64][]domain.Part{10: {part}},
+				Timeline:     timelineForTestTranscript([]domain.Message{message}, map[int64][]domain.Part{10: {part}}),
 				QueuedInputs: []domain.QueuedInput{{ID: 9, Kind: domain.QueuedInputKindQueued, Text: "later"}},
 				PendingAssistant: chatpkg.PendingAssistantTurn{
 					Text:      "streaming text",
@@ -2907,7 +3081,7 @@ func TestRuntimeUpdateMsgAppliesRuntimeSnapshot(t *testing.T) {
 	})
 	next := updated.(App)
 
-	if got := next.currentSnapshot.Messages; len(got) != 1 || got[0].Summary != "queued steer" {
+	if got := next.activeMessages(); len(got) != 1 || got[0].Summary != "queued steer" {
 		t.Fatalf("expected runtime snapshot messages applied, got %#v", got)
 	}
 	if len(next.currentChat.QueuedInputs) != 1 || next.currentChat.QueuedInputs[0].Text != "later" {
@@ -2930,7 +3104,7 @@ func TestRuntimeMessageDeltaRefreshesPendingAssistantTail(t *testing.T) {
 		cfg:               config.Default().WithStateDir(t.TempDir()),
 		composer:          textarea.New(),
 		currentRuntime:    &chatpkg.Chat{},
-		currentSnapshot:   chatpkg.Snapshot{Chat: domain.Chat{ID: 2, SessionID: 1}, Parts: map[int64][]domain.Part{}, PendingAssistant: chatpkg.PendingAssistantTurn{Text: "old"}},
+		currentSnapshot:   chatpkg.Snapshot{Chat: domain.Chat{ID: 2, SessionID: 1}, PendingAssistant: chatpkg.PendingAssistantTurn{Text: "old"}},
 		viewport:          newTranscriptViewport(80, 8),
 		currentSession:    domain.Session{ID: 1, Title: "Session"},
 		currentChat:       domain.Chat{ID: 2, SessionID: 1},
@@ -2950,7 +3124,6 @@ func TestRuntimeMessageDeltaRefreshesPendingAssistantTail(t *testing.T) {
 			Snapshot: chatpkg.Snapshot{
 				Session:          domain.Session{ID: 1, Title: "Session"},
 				Chat:             domain.Chat{ID: 2, SessionID: 1},
-				Parts:            map[int64][]domain.Part{},
 				PendingAssistant: chatpkg.PendingAssistantTurn{Text: "old new"},
 				Status:           chatpkg.StatusStreamingResponse,
 				StatusText:       "Streaming LLM response ...",
@@ -3007,8 +3180,7 @@ func TestRuntimeToolResultRefreshesRetainedTranscript(t *testing.T) {
 		currentRuntime: &chatpkg.Chat{},
 		currentSnapshot: chatpkg.Snapshot{
 			Chat:     domain.Chat{ID: 2, SessionID: 1},
-			Messages: []domain.Message{initial, assistantMsg},
-			Parts:    map[int64][]domain.Part{10: {initialPart}, 14: {assistantPart}},
+			Timeline: timelineForTestTranscript([]domain.Message{initial, assistantMsg}, map[int64][]domain.Part{10: {initialPart}, 14: {assistantPart}}),
 		},
 		viewport:       newTranscriptViewport(80, 8),
 		currentSession: domain.Session{ID: 1, Title: "Session"},
@@ -3024,12 +3196,11 @@ func TestRuntimeToolResultRefreshesRetainedTranscript(t *testing.T) {
 	updated, _ := m.Update(runtimeUpdateMsg{
 		chatID: 2,
 		update: chatpkg.Update{
-			Event: &domain.Event{Kind: domain.EventKindToolResult, Tool: domain.ToolKindBash, ToolCallID: "call_1", Message: toolMsg, Parts: []domain.Part{toolPart}},
+			Event: &domain.Event{Kind: domain.EventKindToolResult, Tool: domain.ToolKindBash, ToolCallID: "call_1", Item: testTimelineItem(toolMsg, []domain.Part{toolPart})},
 			Snapshot: chatpkg.Snapshot{
 				Session:    domain.Session{ID: 1, Title: "Session"},
 				Chat:       domain.Chat{ID: 2, SessionID: 1},
-				Messages:   []domain.Message{initial, assistantMsg, toolMsg},
-				Parts:      map[int64][]domain.Part{10: {initialPart}, 14: {assistantPart}, 12: {toolPart}},
+				Timeline:   timelineForTestTranscript([]domain.Message{initial, assistantMsg, toolMsg}, map[int64][]domain.Part{10: {initialPart}, 14: {assistantPart}, 12: {toolPart}}),
 				Status:     chatpkg.StatusRunningTools,
 				StatusText: "Running tool",
 				Active:     true,
@@ -3053,7 +3224,7 @@ func TestRepeatedStreamingRuntimeUpdateDoesNotInvalidateTranscript(t *testing.T)
 		cfg:             config.Default().WithStateDir(t.TempDir()),
 		composer:        textarea.New(),
 		currentRuntime:  &chatpkg.Chat{},
-		currentSnapshot: chatpkg.Snapshot{Parts: map[int64][]domain.Part{}},
+		currentSnapshot: chatpkg.Snapshot{},
 		viewport:        newTranscriptViewport(80, 20),
 		currentSession:  domain.Session{ID: 1, Title: "Session"},
 		currentChat:     domain.Chat{ID: 2, SessionID: 1},
@@ -3155,13 +3326,12 @@ func TestNewSessionMsgClearsBusyState(t *testing.T) {
 		},
 		loading:         true,
 		composer:        textarea.New(),
-		currentSnapshot: chatpkg.Snapshot{Parts: map[int64][]domain.Part{}},
+		currentSnapshot: chatpkg.Snapshot{},
 		viewport:        newTranscriptViewport(40, 6),
 	}
 
 	updated, _ := m.Update(newSessionMsg{
 		session:   domain.Session{Title: "New Session"},
-		parts:     map[int64][]domain.Part{},
 		workspace: workspace.Status{},
 	})
 	next := updated.(App)
@@ -3200,7 +3370,7 @@ func TestForkCommandCreatesForkedSession(t *testing.T) {
 		composer:        textarea.New(),
 		viewport:        newTranscriptViewport(40, 6),
 		currentSession:  session,
-		currentSnapshot: chatpkg.Snapshot{Parts: map[int64][]domain.Part{}},
+		currentSnapshot: chatpkg.Snapshot{},
 		workdir:         t.TempDir(),
 	}
 	m.composer.SetValue("/fork")
@@ -3227,8 +3397,8 @@ func TestForkCommandCreatesForkedSession(t *testing.T) {
 	if forked.currentSession.ParentID == nil || *forked.currentSession.ParentID != session.ID {
 		t.Fatalf("expected parent id %d, got %#v", session.ID, forked.currentSession.ParentID)
 	}
-	if len(forked.currentSnapshot.Messages) != 1 || forked.currentSnapshot.Messages[0].Summary != "hello" {
-		t.Fatalf("unexpected forked messages: %#v", forked.currentSnapshot.Messages)
+	if len(forked.activeMessages()) != 1 || forked.activeMessages()[0].Summary != "hello" {
+		t.Fatalf("unexpected forked messages: %#v", forked.activeMessages())
 	}
 	if forked.status == "" || !strings.Contains(forked.status, "Forked session") {
 		t.Fatalf("unexpected fork status: %q", forked.status)
@@ -3650,10 +3820,10 @@ func TestHandleKeyEscInterruptsWhileMainWindowFocused(t *testing.T) {
 	if next.status != "Interrupting…" {
 		t.Fatalf("unexpected esc status: %q", next.status)
 	}
-	if len(next.currentSnapshot.Messages) != 1 {
-		t.Fatalf("expected local interrupted notice message, got %#v", next.currentSnapshot.Messages)
+	if len(next.activeMessages()) != 1 {
+		t.Fatalf("expected local interrupted notice message, got %#v", next.activeMessages())
 	}
-	if got := next.currentSnapshot.Parts[next.currentSnapshot.Messages[0].ID]; len(got) != 1 || got[0].Kind != domain.PartKindEventNotice || got[0].Body != "Interrupted" {
+	if got := next.activeParts()[next.activeMessages()[0].ID]; len(got) != 1 || got[0].Kind != domain.PartKindEventNotice || got[0].Body != "Interrupted" {
 		t.Fatalf("expected interrupted event notice part, got %#v", got)
 	}
 }
@@ -3691,10 +3861,10 @@ func TestEscInterruptCancelsCurrentChatOperationFromMap(t *testing.T) {
 	if next.status != "Interrupting…" {
 		t.Fatalf("unexpected esc status: %q", next.status)
 	}
-	if len(next.currentSnapshot.Messages) != 1 {
-		t.Fatalf("expected local interrupted notice message, got %#v", next.currentSnapshot.Messages)
+	if len(next.activeMessages()) != 1 {
+		t.Fatalf("expected local interrupted notice message, got %#v", next.activeMessages())
 	}
-	if got := next.currentSnapshot.Parts[next.currentSnapshot.Messages[0].ID]; len(got) != 1 || got[0].Kind != domain.PartKindEventNotice || got[0].Body != "Interrupted" {
+	if got := next.activeParts()[next.activeMessages()[0].ID]; len(got) != 1 || got[0].Kind != domain.PartKindEventNotice || got[0].Body != "Interrupted" {
 		t.Fatalf("expected interrupted event notice part, got %#v", got)
 	}
 }
@@ -3755,7 +3925,7 @@ func TestFinishOperationWithCanceledErrorStopsBusyWithoutActiveStream(t *testing
 func TestExitSummaryIncludesSessionDetails(t *testing.T) {
 	m := App{
 		currentSession:  domain.Session{ID: 4, Title: "Testing Session Review Flow"},
-		currentSnapshot: chatpkg.Snapshot{Messages: []domain.Message{{ID: 1}, {ID: 2}, {ID: 3}}},
+		currentSnapshot: snapshotWithTranscript([]domain.Message{{ID: 1}, {ID: 2}, {ID: 3}}, nil),
 	}
 
 	got := m.exitSummary()
@@ -4156,10 +4326,10 @@ func TestUpdateLoadPreservesActiveInterruptForBusyChat(t *testing.T) {
 	if next.status != "Interrupting…" {
 		t.Fatalf("unexpected esc status: %q", next.status)
 	}
-	if len(next.currentSnapshot.Messages) != 1 {
-		t.Fatalf("expected local interrupted notice message, got %#v", next.currentSnapshot.Messages)
+	if len(next.activeMessages()) != 1 {
+		t.Fatalf("expected local interrupted notice message, got %#v", next.activeMessages())
 	}
-	if got := next.currentSnapshot.Parts[next.currentSnapshot.Messages[0].ID]; len(got) != 1 || got[0].Kind != domain.PartKindEventNotice || got[0].Body != "Interrupted" {
+	if got := next.activeParts()[next.activeMessages()[0].ID]; len(got) != 1 || got[0].Kind != domain.PartKindEventNotice || got[0].Body != "Interrupted" {
 		t.Fatalf("expected interrupted event notice part, got %#v", got)
 	}
 }
@@ -4173,7 +4343,7 @@ func TestAppendingPromptPreservesRetainedTranscriptPrefix(t *testing.T) {
 		composer:         textarea.New(),
 		width:            80,
 		height:           24,
-		currentSnapshot:  chatpkg.Snapshot{Parts: make(map[int64][]domain.Part)},
+		currentSnapshot:  chatpkg.Snapshot{},
 		expandedToolRuns: make(map[string]bool),
 		transcriptDirty:  true,
 	}
@@ -4204,30 +4374,24 @@ func TestUpdateLoadRefreshesCurrentSnapshotForSameChat(t *testing.T) {
 	first := m.UpdateLoad(loadMsg{
 		current:  domain.Session{ID: 4},
 		chat:     domain.Chat{ID: 7, SessionID: 4},
-		messages: []domain.Message{{ID: 10, ChatID: 7, Role: domain.MessageRoleUser, Summary: "first"}},
-		parts: map[int64][]domain.Part{
-			10: {{ID: 11, MessageID: 10, Kind: domain.PartKindText, Payload: domain.TextPayload{Text: "first"}}},
-		},
+		timeline: timelineForTestTranscript([]domain.Message{{ID: 10, ChatID: 7, Role: domain.MessageRoleUser, Summary: "first"}}, map[int64][]domain.Part{10: {{ID: 11, MessageID: 10, Kind: domain.PartKindText, Payload: domain.TextPayload{Text: "first"}}}}),
 	})
-	if len(first.currentSnapshot.Messages) != 1 {
+	if len(first.activeMessages()) != 1 {
 		t.Fatalf("expected loaded snapshot")
 	}
 
 	second := first.UpdateLoad(loadMsg{
 		current:  domain.Session{ID: 4},
 		chat:     domain.Chat{ID: 7, SessionID: 4},
-		messages: []domain.Message{{ID: 10, ChatID: 7, Role: domain.MessageRoleUser, Summary: "updated"}},
-		parts: map[int64][]domain.Part{
-			10: {{ID: 11, MessageID: 10, Kind: domain.PartKindText, Payload: domain.TextPayload{Text: "updated"}}},
-		},
+		timeline: timelineForTestTranscript([]domain.Message{{ID: 10, ChatID: 7, Role: domain.MessageRoleUser, Summary: "updated"}}, map[int64][]domain.Part{10: {{ID: 11, MessageID: 10, Kind: domain.PartKindText, Payload: domain.TextPayload{Text: "updated"}}}}),
 	})
-	if len(second.currentSnapshot.Messages) != 1 {
+	if len(second.activeMessages()) != 1 {
 		t.Fatalf("expected refreshed snapshot")
 	}
-	if got := second.currentSnapshot.Messages[0].Summary; got != "updated" {
+	if got := second.activeMessages()[0].Summary; got != "updated" {
 		t.Fatalf("summary = %q", got)
 	}
-	if got := second.currentSnapshot.Parts[10]; len(got) != 1 || got[0].Text() != "updated" {
+	if got := second.activeParts()[10]; len(got) != 1 || got[0].Text() != "updated" {
 		t.Fatalf("parts = %#v", got)
 	}
 }
@@ -4248,10 +4412,10 @@ func TestAppendLocalUserPromptHydratesTranscriptFromSnapshot(t *testing.T) {
 	m.appendLocalUserPrompt("first", nil, nil)
 	m.syncRetainedTranscript()
 
-	if len(m.currentSnapshot.Messages) != 1 {
+	if len(m.activeMessages()) != 1 {
 		t.Fatalf("expected current snapshot to contain prompt")
 	}
-	if got := m.currentSnapshot.Messages[0].Summary; got != "first" {
+	if got := m.activeMessages()[0].Summary; got != "first" {
 		t.Fatalf("summary = %q", got)
 	}
 	item, ok := m.transcriptItems[0].(*userMessageTranscriptItem)
@@ -4324,15 +4488,14 @@ func TestSetThemeRefreshesTranscriptColors(t *testing.T) {
 	m.width = 80
 	m.height = 24
 	m.viewport = newTranscriptViewport(60, 12)
-	m.currentSnapshot.Messages = []domain.Message{{
+	m.currentSnapshot = snapshotWithTranscript([]domain.Message{{
 		ID:        1,
 		Role:      domain.MessageRoleAssistant,
 		Summary:   "hello",
 		CreatedAt: time.Now(),
-	}}
-	m.currentSnapshot.Parts = map[int64][]domain.Part{
+	}}, map[int64][]domain.Part{
 		1: {{Kind: domain.PartKindText, Body: "hello"}},
-	}
+	})
 
 	m.refreshViewport()
 	before := m.viewSurface()
@@ -5404,9 +5567,9 @@ func TestRenderSidebarShowsStatusAndSessionInfo(t *testing.T) {
 			{ID: 2, Content: "Fix bug", Status: domain.TodoStatusInProgress},
 			{ID: 3, Content: "Polish copy", Status: domain.TodoStatusPending},
 		},
-		currentSnapshot: chatpkg.Snapshot{Messages: []domain.Message{{ID: 1}}, Parts: map[int64][]domain.Part{
+		currentSnapshot: snapshotWithTranscript([]domain.Message{{ID: 1}}, map[int64][]domain.Part{
 			1: {{Kind: domain.PartKindSystemNotice, Body: "usage", MetaJSON: `{"PromptTokens":4096,"CompletionTokens":2048,"CachedTokens":1024,"TotalTokens":8192}`}},
-		}},
+		}),
 		contextTokens:          8192,
 		contextTokensEstimated: true,
 	}
@@ -5482,9 +5645,9 @@ func TestSidebarUsageUpdatesFromLiveUsageEvent(t *testing.T) {
 				"test": {ContextWindow: 32768},
 			},
 		},
-		currentSnapshot: chatpkg.Snapshot{Messages: []domain.Message{{ID: 1}}, Parts: map[int64][]domain.Part{
+		currentSnapshot: snapshotWithTranscript([]domain.Message{{ID: 1}}, map[int64][]domain.Part{
 			1: {{Kind: domain.PartKindSystemNotice, Body: "usage", MetaJSON: `{"PromptTokens":1000,"CompletionTokens":500,"CachedTokens":100,"TotalTokens":1500}`}},
-		}},
+		}),
 	}
 	m.syncUsageFromHistory()
 	m.syncContextFromChat()
@@ -5587,8 +5750,7 @@ func TestUpdateLoadEstimatesContextForNewChat(t *testing.T) {
 			ModelID:        "test-model",
 			AgentsResolved: "## Repo\n- Keep changes minimal.",
 		},
-		chat:  domain.Chat{ID: 7, SessionID: 1, ProviderID: "test", ModelID: "test-model"},
-		parts: map[int64][]domain.Part{},
+		chat: domain.Chat{ID: 7, SessionID: 1, ProviderID: "test", ModelID: "test-model"},
 	}
 	m = m.UpdateLoad(load)
 
@@ -5616,7 +5778,7 @@ func TestSidebarContextAccumulatesStreamedTokenEstimate(t *testing.T) {
 				"test": {ContextWindow: 32768},
 			},
 		},
-		currentSnapshot: chatpkg.Snapshot{Parts: map[int64][]domain.Part{}},
+		currentSnapshot: chatpkg.Snapshot{},
 	}
 	m.syncContextFromChat()
 
@@ -5684,7 +5846,7 @@ func TestSidebarContextUsesCompactedChatEstimateNotCompactionRequestUsage(t *tes
 				"test": {ContextWindow: 32768},
 			},
 		},
-		currentSnapshot: chatpkg.Snapshot{Messages: []domain.Message{{ID: 1, Role: domain.MessageRoleAssistant, Summary: "Compacted session summary"}}, Parts: map[int64][]domain.Part{
+		currentSnapshot: snapshotWithTranscript([]domain.Message{{ID: 1, Role: domain.MessageRoleAssistant, Summary: "Compacted session summary"}}, map[int64][]domain.Part{
 			1: {
 				{
 					Kind: domain.PartKindCompaction,
@@ -5696,7 +5858,7 @@ func TestSidebarContextUsesCompactedChatEstimateNotCompactionRequestUsage(t *tes
 					MetaJSON: `{"PromptTokens":25023,"CompletionTokens":625,"CachedTokens":0,"TotalTokens":25648}`,
 				},
 			},
-		}},
+		}),
 	}
 	m.syncUsageFromHistory()
 	m.syncContextFromChat()
@@ -5725,15 +5887,15 @@ func TestSidebarContextAnchorsOnLatestUsageAndEstimatesTail(t *testing.T) {
 				"test": {ContextWindow: 32768},
 			},
 		},
-		currentSnapshot: chatpkg.Snapshot{Messages: []domain.Message{
+		currentSnapshot: snapshotWithTranscript([]domain.Message{
 			{ID: 1, Role: domain.MessageRoleAssistant},
 			{ID: 2, Role: domain.MessageRoleUser},
 			{ID: 3, Role: domain.MessageRoleAssistant},
-		}, Parts: map[int64][]domain.Part{
+		}, map[int64][]domain.Part{
 			1: {{Kind: domain.PartKindUsage, Payload: domain.UsagePayload{Usage: domain.Usage{PromptTokens: 3000, CompletionTokens: 120, TotalTokens: 3120}}}},
 			2: {{Kind: domain.PartKindText, Payload: domain.TextPayload{Text: "please inspect these three files"}}},
 			3: {{Kind: domain.PartKindToolCall, Payload: domain.ToolCallPayload{Tool: domain.ToolKindRead, ToolCallID: "call_1", Args: map[string]string{"path": "cmd/app.go"}}}},
-		}},
+		}),
 	}
 
 	m.syncContextFromChat()
@@ -6199,15 +6361,14 @@ func TestAltRPreservesVisibleTopLine(t *testing.T) {
 	m.width = 24
 	m.height = 12
 	m.viewport = newTranscriptViewport(24, 4)
-	m.currentSnapshot.Messages = []domain.Message{
+	m.currentSnapshot = snapshotWithTranscript([]domain.Message{
 		{ID: 1, SessionID: 1, Role: domain.MessageRoleAssistant},
-	}
-	m.currentSnapshot.Parts = map[int64][]domain.Part{
+	}, map[int64][]domain.Part{
 		1: {
 			{Kind: domain.PartKindReasoning, Body: "thinking line 1\nthinking line 2\nthinking line 3"},
 			{Kind: domain.PartKindText, Body: strings.Repeat("text line ", 40)},
 		},
-	}
+	})
 
 	m.resize()
 	m.refreshViewport()
@@ -6337,11 +6498,11 @@ func TestRenderBodyUsesTranscriptElementInsteadOfViewportString(t *testing.T) {
 	m := App{
 		cfg:            cfg,
 		currentSession: domain.Session{ID: 1, ProviderID: "test", ModelID: "model"},
-		currentSnapshot: chatpkg.Snapshot{Messages: []domain.Message{
+		currentSnapshot: snapshotWithTranscript([]domain.Message{
 			{ID: 1, Role: domain.MessageRoleAssistant},
-		}, Parts: map[int64][]domain.Part{
+		}, map[int64][]domain.Part{
 			1: {{Kind: domain.PartKindText, Body: "fresh transcript"}},
-		}},
+		}),
 		viewport: newTranscriptViewport(32, 6),
 	}
 	m.viewport.SetContent("stale viewport")
@@ -6425,7 +6586,7 @@ func TestRefreshViewportAppendsWorkingLine(t *testing.T) {
 	m := App{
 		currentSession:  domain.Session{ID: 1},
 		status:          "Working ...",
-		currentSnapshot: chatpkg.Snapshot{Parts: map[int64][]domain.Part{}},
+		currentSnapshot: chatpkg.Snapshot{},
 		viewport:        newTranscriptViewport(40, 6),
 		busy: busyModel{
 			active: true,
@@ -6535,13 +6696,13 @@ func TestViewShowsAllVisibleTranscriptLinesAboveComposer(t *testing.T) {
 		height:         12,
 		composer:       composer,
 		currentSession: domain.Session{ID: 1},
-		currentSnapshot: chatpkg.Snapshot{Messages: []domain.Message{
+		currentSnapshot: snapshotWithTranscript([]domain.Message{
 			{ID: 1, Role: domain.MessageRoleAssistant},
 			{ID: 2, Role: domain.MessageRoleUser},
-		}, Parts: map[int64][]domain.Part{
+		}, map[int64][]domain.Part{
 			1: {{Kind: domain.PartKindText, Body: "assistant context"}},
 			2: {{Kind: domain.PartKindText, Body: "final user line one\nfinal user line two"}},
-		}},
+		}),
 		viewport: newTranscriptViewport(37, 8),
 	}
 
@@ -6580,11 +6741,11 @@ func TestViewDoesNotLeaveLargeGapBetweenTranscriptAndComposer(t *testing.T) {
 		height:         12,
 		composer:       composer,
 		currentSession: domain.Session{ID: 1},
-		currentSnapshot: chatpkg.Snapshot{Messages: []domain.Message{
+		currentSnapshot: snapshotWithTranscript([]domain.Message{
 			{ID: 1, Role: domain.MessageRoleAssistant},
-		}, Parts: map[int64][]domain.Part{
+		}, map[int64][]domain.Part{
 			1: {{Kind: domain.PartKindText, Body: "continue"}},
-		}},
+		}),
 		viewport: newTranscriptViewport(37, 8),
 	}
 
@@ -6619,11 +6780,11 @@ func TestViewShowsLastUserBubbleLineBeforeComposer(t *testing.T) {
 		height:         10,
 		composer:       composer,
 		currentSession: domain.Session{ID: 1},
-		currentSnapshot: chatpkg.Snapshot{Messages: []domain.Message{
+		currentSnapshot: snapshotWithTranscript([]domain.Message{
 			{ID: 1, Role: domain.MessageRoleUser},
-		}, Parts: map[int64][]domain.Part{
+		}, map[int64][]domain.Part{
 			1: {{Kind: domain.PartKindText, Body: "final line"}},
-		}},
+		}),
 		viewport: newTranscriptViewport(37, 6),
 	}
 
@@ -6790,7 +6951,7 @@ func TestRenderTranscriptUserMessageFallsBackToSummaryWhenPartsMissing(t *testin
 	m := App{
 		cfg:             cfg,
 		palette:         theme.Resolve("tokyonight").Palette,
-		currentSnapshot: chatpkg.Snapshot{Parts: map[int64][]domain.Part{}},
+		currentSnapshot: chatpkg.Snapshot{},
 		viewport: transcriptViewport{
 			Width: 40,
 		},
@@ -6811,7 +6972,7 @@ func TestRefreshViewportOmitsWorkingLineForGenericLoading(t *testing.T) {
 		currentSession:  domain.Session{ID: 1},
 		loading:         true,
 		status:          "Resuming session 2…",
-		currentSnapshot: chatpkg.Snapshot{Parts: map[int64][]domain.Part{}},
+		currentSnapshot: chatpkg.Snapshot{},
 		viewport:        newTranscriptViewport(40, 6),
 		busy: busyModel{
 			active: true,
@@ -6850,16 +7011,15 @@ func TestBusyIndicatorLayoutRefreshKeepsTranscriptAnchoredAtBottom(t *testing.T)
 	m.width = 60
 	m.height = 16
 	m.viewport = newTranscriptViewport(60, 8)
-	m.currentSnapshot.Messages = []domain.Message{
+	m.currentSnapshot = snapshotWithTranscript([]domain.Message{
 		{ID: 1, SessionID: 1, Role: domain.MessageRoleAssistant},
-	}
-	m.currentSnapshot.Parts = map[int64][]domain.Part{
+	}, map[int64][]domain.Part{
 		1: {
 			{Kind: domain.PartKindText, Body: strings.Join([]string{
 				"line 1", "line 2", "line 3", "line 4", "line 5", "line 6", "line 7", "line 8", "line 9", "line 10", "line 11", "line 12",
 			}, "\n")},
 		},
-	}
+	})
 
 	m.resize()
 	m.refreshViewport()
@@ -6963,7 +7123,6 @@ func TestLoadMsgPreserveBusyKeepsBusyActive(t *testing.T) {
 
 	updated, cmd := m.Update(loadMsg{
 		current:      domain.Session{ID: 1, Title: "Test"},
-		parts:        map[int64][]domain.Part{},
 		workspace:    workspace.Status{},
 		preserveBusy: true,
 	})
@@ -7004,7 +7163,7 @@ func TestLoadMsgPreserveBusySameChatKeepsPendingAssistantStream(t *testing.T) {
 			scope:  busyScopeTranscript,
 			status: "Working ...",
 		},
-		currentSnapshot: chatpkg.Snapshot{Parts: map[int64][]domain.Part{}},
+		currentSnapshot: chatpkg.Snapshot{},
 	}
 
 	// Captured from the live session 33 stream around 11:40:08, where
@@ -7017,7 +7176,6 @@ func TestLoadMsgPreserveBusySameChatKeepsPendingAssistantStream(t *testing.T) {
 	updated, _ := m.Update(loadMsg{
 		current:      domain.Session{ID: 33, Title: "Refactor coordinates to use float tiles"},
 		chat:         domain.Chat{ID: 24, SessionID: 33},
-		parts:        map[int64][]domain.Part{},
 		workspace:    workspace.Status{},
 		preserveBusy: true,
 	})
@@ -7045,7 +7203,7 @@ func TestMessageDeltasRenderOnFrame(t *testing.T) {
 		viewport:        newTranscriptViewport(60, 8),
 		currentSession:  domain.Session{ID: 1, Title: "Test"},
 		currentChat:     domain.Chat{ID: 2, SessionID: 1},
-		currentSnapshot: chatpkg.Snapshot{Parts: map[int64][]domain.Part{}},
+		currentSnapshot: chatpkg.Snapshot{},
 	}
 	m.refreshViewport()
 
@@ -7089,7 +7247,7 @@ func TestQueuedDispatchReloadKeepsPendingAssistantStream(t *testing.T) {
 			scope:  busyScopeTranscript,
 			status: "Working ...",
 		},
-		currentSnapshot: chatpkg.Snapshot{Parts: map[int64][]domain.Part{}},
+		currentSnapshot: chatpkg.Snapshot{},
 	}
 
 	m.applyEvent(domain.Event{Kind: domain.EventKindMessageDelta, Text: "The"})
@@ -7102,7 +7260,6 @@ func TestQueuedDispatchReloadKeepsPendingAssistantStream(t *testing.T) {
 	updated, _ := m.Update(loadMsg{
 		current:      domain.Session{ID: 33, Title: "Refactor coordinates to use float tiles"},
 		chat:         domain.Chat{ID: 24, SessionID: 33},
-		parts:        map[int64][]domain.Part{},
 		workspace:    workspace.Status{},
 		preserveBusy: true,
 	})
@@ -7393,17 +7550,16 @@ func TestTranscriptRendersCompactionAsExpandableCard(t *testing.T) {
 	m := App{
 		currentSession:   domain.Session{ID: 1},
 		viewport:         newTranscriptViewport(120, 8),
-		currentSnapshot:  chatpkg.Snapshot{Parts: map[int64][]domain.Part{}},
+		currentSnapshot:  chatpkg.Snapshot{},
 		expandedToolRuns: map[string]bool{},
 		palette:          theme.Resolve("tokyonight").Palette,
 	}
-	m.currentSnapshot.Messages = []domain.Message{
+	m.currentSnapshot = snapshotWithTranscript([]domain.Message{
 		{ID: 1, Role: domain.MessageRoleAssistant, Summary: "Compacted session summary"},
-	}
-	m.currentSnapshot.Parts[1] = []domain.Part{{
+	}, map[int64][]domain.Part{1: {{
 		Kind:    domain.PartKindCompaction,
 		Payload: domain.CompactionPayload{Summary: "## Goal\n\n- first\n- second", Status: "completed", BeforeContextTokens: 1234, AfterContextTokens: 456},
-	}}
+	}}})
 
 	m.refreshViewport()
 	got := m.viewport.View()
@@ -7429,17 +7585,16 @@ func TestTranscriptRendersPendingCompactionAsRunningCard(t *testing.T) {
 	m := App{
 		currentSession:   domain.Session{ID: 1},
 		viewport:         newTranscriptViewport(120, 8),
-		currentSnapshot:  chatpkg.Snapshot{Parts: map[int64][]domain.Part{}},
+		currentSnapshot:  chatpkg.Snapshot{},
 		expandedToolRuns: map[string]bool{},
 		palette:          theme.Resolve("tokyonight").Palette,
 	}
-	m.currentSnapshot.Messages = []domain.Message{
+	m.currentSnapshot = snapshotWithTranscript([]domain.Message{
 		{ID: 1, Role: domain.MessageRoleAssistant, Summary: "Compacting..."},
-	}
-	m.currentSnapshot.Parts[1] = []domain.Part{{
+	}, map[int64][]domain.Part{1: {{
 		Kind:    domain.PartKindCompaction,
 		Payload: domain.CompactionPayload{Status: "pending"},
-	}}
+	}}})
 
 	m.refreshViewport()
 	got := m.viewport.View()
@@ -7455,18 +7610,17 @@ func TestTranscriptRendersLoopPauseAsCard(t *testing.T) {
 	m := App{
 		currentSession:   domain.Session{ID: 1},
 		viewport:         newTranscriptViewport(80, 8),
-		currentSnapshot:  chatpkg.Snapshot{Parts: map[int64][]domain.Part{}},
+		currentSnapshot:  chatpkg.Snapshot{},
 		expandedToolRuns: map[string]bool{},
 		palette:          theme.Resolve("tokyonight").Palette,
 	}
-	m.currentSnapshot.Messages = []domain.Message{
+	m.currentSnapshot = snapshotWithTranscript([]domain.Message{
 		{ID: 1, Role: domain.MessageRoleAssistant, Summary: "Paused continuation"},
-	}
-	m.currentSnapshot.Parts[1] = []domain.Part{{
+	}, map[int64][]domain.Part{1: {{
 		Kind:     domain.PartKindEventNotice,
 		Body:     "Paused continuation after 3 identical read calls with the same input.",
 		MetaJSON: `{"kind":"loop_pause","reason":"repeated_tool","title":"Continuation paused","subtitle":"Repeated identical read calls","tool":"read"}`,
-	}}
+	}}})
 
 	m.refreshViewport()
 	got := m.viewport.View()
@@ -7590,9 +7744,9 @@ func TestMouseWheelScrollRefreshesRetainedTranscriptSurface(t *testing.T) {
 		height:         12,
 		composer:       composer,
 		currentSession: domain.Session{ID: 1},
-		currentSnapshot: chatpkg.Snapshot{Messages: []domain.Message{
+		currentSnapshot: snapshotWithTranscript([]domain.Message{
 			{ID: 1, Role: domain.MessageRoleAssistant},
-		}, Parts: map[int64][]domain.Part{
+		}, map[int64][]domain.Part{
 			1: {{Kind: domain.PartKindText, Body: strings.Join([]string{
 				"line 1",
 				"line 2",
@@ -7611,7 +7765,7 @@ func TestMouseWheelScrollRefreshesRetainedTranscriptSurface(t *testing.T) {
 				"line 15",
 				"line 16",
 			}, "\n")}},
-		}},
+		}),
 		viewport: newTranscriptViewport(37, 8),
 	}
 
@@ -7657,9 +7811,9 @@ func TestMouseWheelScrollCanReturnToTrueTranscriptBottom(t *testing.T) {
 		currentSession: domain.Session{
 			ID: 1,
 		},
-		currentSnapshot: chatpkg.Snapshot{Messages: []domain.Message{
+		currentSnapshot: snapshotWithTranscript([]domain.Message{
 			{ID: 1, Role: domain.MessageRoleAssistant},
-		}, Parts: map[int64][]domain.Part{
+		}, map[int64][]domain.Part{
 			1: {{Kind: domain.PartKindText, Body: strings.Join([]string{
 				"line 1",
 				"line 2",
@@ -7678,7 +7832,7 @@ func TestMouseWheelScrollCanReturnToTrueTranscriptBottom(t *testing.T) {
 				"line 15",
 				"line 16",
 			}, "\n")}},
-		}},
+		}),
 		viewport: newTranscriptViewport(37, 8),
 	}
 
@@ -7723,19 +7877,18 @@ func TestMouseClickTogglesToolRunExpansion(t *testing.T) {
 		width:                   100,
 		height:                  20,
 		viewport:                newTranscriptViewport(80, 8),
-		currentSnapshot:         chatpkg.Snapshot{Parts: map[int64][]domain.Part{}},
+		currentSnapshot:         chatpkg.Snapshot{},
 		expandedToolRuns:        map[string]bool{},
 		expandedToolRunCommands: map[string]bool{},
 		palette:                 theme.Resolve("tokyonight").Palette,
 	}
-	m.currentSnapshot.Messages = []domain.Message{
+	setTestTranscript(&m, []domain.Message{
 		{ID: 1, Role: domain.MessageRoleTool, Summary: "bash"},
-	}
-	m.currentSnapshot.Parts[1] = []domain.Part{{
+	}, map[int64][]domain.Part{1: {{
 		Kind:     domain.PartKindToolOutput,
 		Body:     "line one\nline two",
 		MetaJSON: `{"tool":"bash","command":"echo hi","tool_call_id":"call_bash_1"}`,
-	}}
+	}}})
 
 	m.refreshViewport()
 	if strings.Contains(m.viewport.View(), "line one\nline two") {
@@ -7817,18 +7970,17 @@ func TestMouseClickTogglesToolRunExpansionWhileBusy(t *testing.T) {
 		width:          100,
 		height:         20,
 		viewport:       newTranscriptViewport(80, 8),
-		currentSnapshot: chatpkg.Snapshot{Parts: map[int64][]domain.Part{}, PendingAssistant: chatpkg.PendingAssistantTurn{
+		currentSnapshot: chatpkg.Snapshot{PendingAssistant: chatpkg.PendingAssistantTurn{
 			Text: "partial answer",
 		}},
 	}
-	m.currentSnapshot.Messages = []domain.Message{
+	setTestTranscript(&m, []domain.Message{
 		{ID: 1, Role: domain.MessageRoleTool, Summary: "bash"},
-	}
-	m.currentSnapshot.Parts[1] = []domain.Part{{
+	}, map[int64][]domain.Part{1: {{
 		Kind:     domain.PartKindToolOutput,
 		Body:     "line one\nline two",
 		MetaJSON: `{"tool":"bash","command":"echo hi","tool_call_id":"call_bash_1"}`,
-	}}
+	}}})
 
 	m.refreshViewport()
 	beforeRendered := m.renderBody()
@@ -7890,7 +8042,7 @@ func TestMouseClickResyncsTranscriptControlsDuringBusy(t *testing.T) {
 		width:                   100,
 		height:                  20,
 		viewport:                newTranscriptViewport(80, 8),
-		currentSnapshot:         chatpkg.Snapshot{Parts: map[int64][]domain.Part{}},
+		currentSnapshot:         chatpkg.Snapshot{},
 		expandedToolRuns:        map[string]bool{},
 		expandedToolRunCommands: map[string]bool{},
 		palette:                 theme.Resolve("tokyonight").Palette,
@@ -7901,14 +8053,13 @@ func TestMouseClickResyncsTranscriptControlsDuringBusy(t *testing.T) {
 			status: "Working ...",
 		},
 	}
-	m.currentSnapshot.Messages = []domain.Message{
+	setTestTranscript(&m, []domain.Message{
 		{ID: 1, Role: domain.MessageRoleTool, Summary: "bash"},
-	}
-	m.currentSnapshot.Parts[1] = []domain.Part{{
+	}, map[int64][]domain.Part{1: {{
 		Kind:     domain.PartKindToolOutput,
 		Body:     "line one\nline two",
 		MetaJSON: `{"tool":"bash","command":"echo hi","tool_call_id":"call_bash_1"}`,
-	}}
+	}}})
 
 	m.refreshViewport()
 	_ = m.renderBody()
@@ -7916,11 +8067,20 @@ func TestMouseClickResyncsTranscriptControlsDuringBusy(t *testing.T) {
 		t.Fatal("expected initial transcript controls")
 	}
 
-	m.currentSnapshot.Messages = append([]domain.Message{{ID: 2, Role: domain.MessageRoleAssistant, Summary: "lead in"}}, m.currentSnapshot.Messages...)
-	m.currentSnapshot.Parts[2] = []domain.Part{{
-		Kind: domain.PartKindText,
-		Body: "prepended line\nsecond line",
-	}}
+	setTestTranscript(&m, []domain.Message{
+		{ID: 2, Role: domain.MessageRoleAssistant, Summary: "lead in"},
+		{ID: 1, Role: domain.MessageRoleTool, Summary: "bash"},
+	}, map[int64][]domain.Part{
+		1: {{
+			Kind:     domain.PartKindToolOutput,
+			Body:     "line one\nline two",
+			MetaJSON: `{"tool":"bash","command":"echo hi","tool_call_id":"call_bash_1"}`,
+		}},
+		2: {{
+			Kind: domain.PartKindText,
+			Body: "prepended line\nsecond line",
+		}},
+	})
 	m.invalidateTranscript()
 	rendered := m.renderBody()
 	lines := strings.Split(rendered, "\n")
@@ -7964,7 +8124,7 @@ func TestMouseClickTogglesEditToolRunExpansion(t *testing.T) {
 		mouseEnabled:     true,
 		currentSession:   domain.Session{ID: 1},
 		viewport:         newTranscriptViewport(80, 8),
-		currentSnapshot:  chatpkg.Snapshot{Parts: map[int64][]domain.Part{}},
+		currentSnapshot:  chatpkg.Snapshot{},
 		expandedToolRuns: map[string]bool{},
 		palette:          theme.Resolve("tokyonight").Palette,
 	}
@@ -7979,14 +8139,13 @@ func TestMouseClickTogglesEditToolRunExpansion(t *testing.T) {
 		Diff:    "--- game/sim_test.go\n+++ game/sim_test.go\n@@ -1,3 +1,3 @@\n before\n-old\n+new\n after",
 	}))
 
-	m.currentSnapshot.Messages = []domain.Message{
+	setTestTranscript(&m, []domain.Message{
 		{ID: 1, Role: domain.MessageRoleTool, Summary: "edit"},
-	}
-	m.currentSnapshot.Parts[1] = []domain.Part{{
+	}, map[int64][]domain.Part{1: {{
 		Kind:     domain.PartKindToolOutput,
 		Body:     "Edited game/sim_test.go (replaced 1 occurrence)",
 		MetaJSON: meta,
-	}}
+	}}})
 
 	m.refreshViewport()
 	if !strings.Contains(m.viewport.View(), "(-1 +1)") {
@@ -8025,7 +8184,7 @@ func TestMouseClickTogglesWrappedEditToolRunExpansion(t *testing.T) {
 		mouseEnabled:     true,
 		currentSession:   domain.Session{ID: 1},
 		viewport:         newTranscriptViewport(28, 30),
-		currentSnapshot:  chatpkg.Snapshot{Parts: map[int64][]domain.Part{}},
+		currentSnapshot:  chatpkg.Snapshot{},
 		expandedToolRuns: map[string]bool{},
 		palette:          theme.Resolve("tokyonight").Palette,
 	}
@@ -8040,14 +8199,13 @@ func TestMouseClickTogglesWrappedEditToolRunExpansion(t *testing.T) {
 		Diff:    "--- game/sim_test.go\n+++ game/sim_test.go\n@@ -1,22 +1,22 @@\n before\n-old1\n-old2\n-old3\n-old4\n-old5\n-old6\n-old7\n-old8\n-old9\n-old10\n+new1\n+new2\n+new3\n+new4\n+new5\n+new6\n+new7\n+new8\n+new9\n+new10\n after",
 	}))
 
-	m.currentSnapshot.Messages = []domain.Message{
+	setTestTranscript(&m, []domain.Message{
 		{ID: 1, Role: domain.MessageRoleTool, Summary: "edit"},
-	}
-	m.currentSnapshot.Parts[1] = []domain.Part{{
+	}, map[int64][]domain.Part{1: {{
 		Kind:     domain.PartKindToolOutput,
 		Body:     "Edited game/sim_test.go (replaced 1 occurrence)",
 		MetaJSON: meta,
-	}}
+	}}})
 
 	m.refreshViewport()
 	_ = m.renderBody()
@@ -8092,7 +8250,7 @@ func TestWriteToolRunUsesStoredContentForExpansion(t *testing.T) {
 	m := App{
 		currentSession:   domain.Session{ID: 1},
 		viewport:         newTranscriptViewport(80, 8),
-		currentSnapshot:  chatpkg.Snapshot{Parts: map[int64][]domain.Part{}},
+		currentSnapshot:  chatpkg.Snapshot{},
 		expandedToolRuns: map[string]bool{},
 		palette:          theme.Resolve("tokyonight").Palette,
 	}
@@ -8111,14 +8269,13 @@ func TestWriteToolRunUsesStoredContentForExpansion(t *testing.T) {
 		t.Fatalf("marshal meta: %v", err)
 	}
 
-	m.currentSnapshot.Messages = []domain.Message{
+	setTestTranscript(&m, []domain.Message{
 		{ID: 1, Role: domain.MessageRoleTool, Summary: "write"},
-	}
-	m.currentSnapshot.Parts[1] = []domain.Part{{
+	}, map[int64][]domain.Part{1: {{
 		Kind:     domain.PartKindToolOutput,
 		Body:     "Created note.txt",
 		MetaJSON: string(meta),
-	}}
+	}}})
 
 	m.refreshViewport()
 	if strings.Contains(m.viewport.View(), " line one\n line two") {
@@ -8139,7 +8296,7 @@ func TestEditToolRunShowsStoredHunkDetails(t *testing.T) {
 	m := App{
 		currentSession:   domain.Session{ID: 1},
 		viewport:         newTranscriptViewport(80, 10),
-		currentSnapshot:  chatpkg.Snapshot{Parts: map[int64][]domain.Part{}},
+		currentSnapshot:  chatpkg.Snapshot{},
 		expandedToolRuns: map[string]bool{"call_edit_1": true},
 		palette:          theme.Resolve("tokyonight").Palette,
 	}
@@ -8154,14 +8311,13 @@ func TestEditToolRunShowsStoredHunkDetails(t *testing.T) {
 		Diff:    "--- game/map.go\n+++ game/map.go\n@@ -11,3 +11,3 @@\n before\n-if oldCondition {\n+if newCondition {\n after",
 	}))
 
-	m.currentSnapshot.Messages = []domain.Message{
+	setTestTranscript(&m, []domain.Message{
 		{ID: 1, Role: domain.MessageRoleTool, Summary: "edit"},
-	}
-	m.currentSnapshot.Parts[1] = []domain.Part{{
+	}, map[int64][]domain.Part{1: {{
 		Kind:     domain.PartKindToolOutput,
 		Body:     "Edited game/map.go (replaced 1 occurrence)",
 		MetaJSON: meta,
-	}}
+	}}})
 
 	m.refreshViewport()
 	got := m.viewport.View()
@@ -8185,7 +8341,7 @@ func TestBashToolRunUsesRanCommandTitleAndCollapsedFirstOutputLine(t *testing.T)
 	m := App{
 		currentSession:          domain.Session{ID: 1},
 		viewport:                newTranscriptViewport(100, 8),
-		currentSnapshot:         chatpkg.Snapshot{Parts: map[int64][]domain.Part{}},
+		currentSnapshot:         chatpkg.Snapshot{},
 		expandedToolRuns:        map[string]bool{},
 		expandedToolRunCommands: map[string]bool{},
 		palette:                 theme.Resolve("tokyonight").Palette,
@@ -8200,14 +8356,13 @@ func TestBashToolRunUsesRanCommandTitleAndCollapsedFirstOutputLine(t *testing.T)
 		Output:  "line one\nline two\n",
 	}))
 
-	m.currentSnapshot.Messages = []domain.Message{
+	setTestTranscript(&m, []domain.Message{
 		{ID: 1, Role: domain.MessageRoleTool, Summary: "bash"},
-	}
-	m.currentSnapshot.Parts[1] = []domain.Part{{
+	}, map[int64][]domain.Part{1: {{
 		Kind:     domain.PartKindToolOutput,
 		Body:     "line one\nline two\n",
 		MetaJSON: meta,
-	}}
+	}}})
 
 	m.refreshViewport()
 	got := m.viewport.View()
@@ -8232,7 +8387,7 @@ func TestResumedBashToolRunReplacesRequestTitleWithCompletedTitle(t *testing.T) 
 	m := App{
 		currentSession:          domain.Session{ID: 1},
 		viewport:                newTranscriptViewport(100, 8),
-		currentSnapshot:         chatpkg.Snapshot{Parts: map[int64][]domain.Part{}},
+		currentSnapshot:         chatpkg.Snapshot{},
 		expandedToolRuns:        map[string]bool{},
 		expandedToolRunCommands: map[string]bool{},
 		palette:                 theme.Resolve("tokyonight").Palette,
@@ -8252,20 +8407,21 @@ func TestResumedBashToolRunReplacesRequestTitleWithCompletedTitle(t *testing.T) 
 		Output:  "line one\nline two\n",
 	}))
 
-	m.currentSnapshot.Messages = []domain.Message{
+	setTestTranscript(&m, []domain.Message{
 		{ID: 1, Role: domain.MessageRoleAssistant, Summary: "tool:bash"},
 		{ID: 2, Role: domain.MessageRoleTool, Summary: "bash"},
-	}
-	m.currentSnapshot.Parts[1] = []domain.Part{{
-		Kind:     domain.PartKindToolCall,
-		Body:     `{"command":"printf 'line one\\nline two\\n'","tool":"bash","tool_call_id":"call_bash_1"}`,
-		MetaJSON: callMeta,
-	}}
-	m.currentSnapshot.Parts[2] = []domain.Part{{
-		Kind:     domain.PartKindToolOutput,
-		Body:     "line one\nline two\n",
-		MetaJSON: outputMeta,
-	}}
+	}, map[int64][]domain.Part{
+		1: {{
+			Kind:     domain.PartKindToolCall,
+			Body:     `{"command":"printf 'line one\\nline two\\n'","tool":"bash","tool_call_id":"call_bash_1"}`,
+			MetaJSON: callMeta,
+		}},
+		2: {{
+			Kind:     domain.PartKindToolOutput,
+			Body:     "line one\nline two\n",
+			MetaJSON: outputMeta,
+		}},
+	})
 
 	m.refreshViewport()
 	got := m.viewport.View()
@@ -8281,7 +8437,7 @@ func TestResumedEditToolRunReplacesRequestTitleWithCompletedTitle(t *testing.T) 
 	m := App{
 		currentSession:   domain.Session{ID: 1},
 		viewport:         newTranscriptViewport(100, 8),
-		currentSnapshot:  chatpkg.Snapshot{Parts: map[int64][]domain.Part{}},
+		currentSnapshot:  chatpkg.Snapshot{},
 		expandedToolRuns: map[string]bool{},
 		palette:          theme.Resolve("tokyonight").Palette,
 	}
@@ -8300,20 +8456,21 @@ func TestResumedEditToolRunReplacesRequestTitleWithCompletedTitle(t *testing.T) 
 		Summary: "Edited game/map.go (replaced 1 occurrence)",
 	}))
 
-	m.currentSnapshot.Messages = []domain.Message{
+	setTestTranscript(&m, []domain.Message{
 		{ID: 1, Role: domain.MessageRoleAssistant, Summary: "tool:edit"},
 		{ID: 2, Role: domain.MessageRoleTool, Summary: "edit"},
-	}
-	m.currentSnapshot.Parts[1] = []domain.Part{{
-		Kind:     domain.PartKindToolCall,
-		Body:     `{"path":"game/map.go","tool":"edit","tool_call_id":"call_edit_1"}`,
-		MetaJSON: callMeta,
-	}}
-	m.currentSnapshot.Parts[2] = []domain.Part{{
-		Kind:     domain.PartKindToolOutput,
-		Body:     "Edited game/map.go (replaced 1 occurrence)",
-		MetaJSON: outputMeta,
-	}}
+	}, map[int64][]domain.Part{
+		1: {{
+			Kind:     domain.PartKindToolCall,
+			Body:     `{"path":"game/map.go","tool":"edit","tool_call_id":"call_edit_1"}`,
+			MetaJSON: callMeta,
+		}},
+		2: {{
+			Kind:     domain.PartKindToolOutput,
+			Body:     "Edited game/map.go (replaced 1 occurrence)",
+			MetaJSON: outputMeta,
+		}},
+	})
 
 	m.refreshViewport()
 	got := m.viewport.View()
@@ -8404,7 +8561,7 @@ func TestEventMsgAppendsToolResultBeforeTurnCompletes(t *testing.T) {
 	m := App{
 		currentSession:  domain.Session{ID: 1},
 		currentChat:     domain.Chat{ID: 2},
-		currentSnapshot: chatpkg.Snapshot{Parts: map[int64][]domain.Part{}},
+		currentSnapshot: chatpkg.Snapshot{},
 	}
 	events := make(chan domain.Event)
 	defer close(events)
@@ -8416,8 +8573,7 @@ func TestEventMsgAppendsToolResultBeforeTurnCompletes(t *testing.T) {
 			Tool:       domain.ToolKindBash,
 			ToolCallID: "call_1",
 			Text:       "file-a\nfile-b",
-			Message:    msg,
-			Parts:      parts,
+			Item:       testTimelineItem(msg, parts),
 		},
 		events: events,
 	})
@@ -8428,10 +8584,10 @@ func TestEventMsgAppendsToolResultBeforeTurnCompletes(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("expected follow-up command")
 	}
-	if len(next.currentSnapshot.Messages) != 1 {
-		t.Fatalf("expected one appended message, got %d", len(next.currentSnapshot.Messages))
+	if len(next.activeMessages()) != 1 {
+		t.Fatalf("expected one appended message, got %d", len(next.activeMessages()))
 	}
-	if got := next.currentSnapshot.Parts[next.currentSnapshot.Messages[0].ID][0].Text(); got != "file-a\nfile-b" {
+	if got := next.activeParts()[next.activeMessages()[0].ID][0].Text(); got != "file-a\nfile-b" {
 		t.Fatalf("unexpected in-memory tool output: %q", got)
 	}
 }
@@ -8440,9 +8596,9 @@ func TestRenderTranscriptMessageUsesUserStyleWithoutRoleLabel(t *testing.T) {
 	cfg := testConfig(t)
 	m := App{
 		cfg: cfg,
-		currentSnapshot: chatpkg.Snapshot{Parts: map[int64][]domain.Part{
+		currentSnapshot: snapshotWithTranscript([]domain.Message{{ID: 1, Role: domain.MessageRoleUser}}, map[int64][]domain.Part{
 			1: {{Kind: domain.PartKindText, Body: "hello world"}},
-		}},
+		}),
 	}
 
 	got := m.renderTranscriptMessage(domain.Message{
@@ -8462,9 +8618,9 @@ func TestRenderTranscriptMessageUserBubbleHasBlankPaddingLines(t *testing.T) {
 	cfg := testConfig(t)
 	m := App{
 		cfg: cfg,
-		currentSnapshot: chatpkg.Snapshot{Parts: map[int64][]domain.Part{
+		currentSnapshot: snapshotWithTranscript([]domain.Message{{ID: 1, Role: domain.MessageRoleUser}}, map[int64][]domain.Part{
 			1: {{Kind: domain.PartKindText, Body: "hello world"}},
-		}},
+		}),
 		viewport: newTranscriptViewport(24, 6),
 	}
 
@@ -8502,9 +8658,9 @@ func TestRenderTranscriptMessageUserBubbleUsesConsistentWidthForMultilineInput(t
 	cfg := testConfig(t)
 	m := App{
 		cfg: cfg,
-		currentSnapshot: chatpkg.Snapshot{Parts: map[int64][]domain.Part{
+		currentSnapshot: snapshotWithTranscript([]domain.Message{{ID: 1, Role: domain.MessageRoleUser}}, map[int64][]domain.Part{
 			1: {{Kind: domain.PartKindText, Body: "short\nthis is a much longer line"}},
-		}},
+		}),
 		viewport: newTranscriptViewport(30, 6),
 	}
 
@@ -8529,9 +8685,9 @@ func TestRenderTranscriptMessageUserBubbleWrapsToViewportWidth(t *testing.T) {
 	cfg := testConfig(t)
 	m := App{
 		cfg: cfg,
-		currentSnapshot: chatpkg.Snapshot{Parts: map[int64][]domain.Part{
+		currentSnapshot: snapshotWithTranscript([]domain.Message{{ID: 1, Role: domain.MessageRoleUser}}, map[int64][]domain.Part{
 			1: {{Kind: domain.PartKindText, Body: "this line is intentionally longer than the viewport width"}},
-		}},
+		}),
 		viewport: newTranscriptViewport(18, 6),
 	}
 
@@ -8554,9 +8710,9 @@ func TestRenderTranscriptMessageUserBubbleWrapsToViewportWidth(t *testing.T) {
 
 func TestRenderTranscriptMessageUsesAssistantStyleWithoutRoleLabel(t *testing.T) {
 	m := App{
-		currentSnapshot: chatpkg.Snapshot{Parts: map[int64][]domain.Part{
+		currentSnapshot: snapshotWithTranscript([]domain.Message{{ID: 2, Role: domain.MessageRoleAssistant}}, map[int64][]domain.Part{
 			2: {{Kind: domain.PartKindText, Body: "final answer"}},
-		}},
+		}),
 	}
 
 	got := m.renderTranscriptMessage(domain.Message{
@@ -8574,9 +8730,9 @@ func TestRenderTranscriptMessageUsesAssistantStyleWithoutRoleLabel(t *testing.T)
 
 func TestRenderTranscriptMessageAssistantWrapsToViewportWidth(t *testing.T) {
 	m := App{
-		currentSnapshot: chatpkg.Snapshot{Parts: map[int64][]domain.Part{
+		currentSnapshot: snapshotWithTranscript([]domain.Message{{ID: 2, Role: domain.MessageRoleAssistant}}, map[int64][]domain.Part{
 			2: {{Kind: domain.PartKindText, Body: "this assistant line is intentionally longer than the viewport width"}},
-		}},
+		}),
 		viewport: newTranscriptViewport(18, 6),
 	}
 
@@ -8599,9 +8755,9 @@ func TestRenderTranscriptMessageAssistantWrapsToViewportWidth(t *testing.T) {
 func TestRenderTranscriptMessageAssistantPreservesPlainTextContent(t *testing.T) {
 	m := App{
 		palette: theme.Default().Palette,
-		currentSnapshot: chatpkg.Snapshot{Parts: map[int64][]domain.Part{
+		currentSnapshot: snapshotWithTranscript([]domain.Message{{ID: 2, Role: domain.MessageRoleAssistant}}, map[int64][]domain.Part{
 			2: {{Kind: domain.PartKindText, Body: "plain assistant text"}},
-		}},
+		}),
 	}
 
 	got := m.renderTranscriptMessage(domain.Message{
@@ -8618,13 +8774,13 @@ func TestRefreshViewportUsesSingleNewlineBetweenBlocksWithHalfBlocks(t *testing.
 	cfg := testConfig(t)
 	m := App{
 		cfg: cfg,
-		currentSnapshot: chatpkg.Snapshot{Messages: []domain.Message{
+		currentSnapshot: snapshotWithTranscript([]domain.Message{
 			{ID: 1, Role: domain.MessageRoleUser},
 			{ID: 2, Role: domain.MessageRoleAssistant},
-		}, Parts: map[int64][]domain.Part{
+		}, map[int64][]domain.Part{
 			1: {{Kind: domain.PartKindText, Body: "hello"}},
 			2: {{Kind: domain.PartKindText, Body: "reply"}},
-		}},
+		}),
 		viewport: newTranscriptViewport(24, 8),
 	}
 
@@ -8642,13 +8798,13 @@ func TestRefreshViewportUsesBlankLineBetweenAssistantMessagesWithHalfBlocks(t *t
 	cfg := testConfig(t)
 	m := App{
 		cfg: cfg,
-		currentSnapshot: chatpkg.Snapshot{Messages: []domain.Message{
+		currentSnapshot: snapshotWithTranscript([]domain.Message{
 			{ID: 1, Role: domain.MessageRoleAssistant},
 			{ID: 2, Role: domain.MessageRoleAssistant},
-		}, Parts: map[int64][]domain.Part{
+		}, map[int64][]domain.Part{
 			1: {{Kind: domain.PartKindText, Body: "first reply"}},
 			2: {{Kind: domain.PartKindText, Body: "second reply"}},
-		}},
+		}),
 		viewport: newTranscriptViewport(24, 8),
 	}
 
@@ -8677,10 +8833,10 @@ func TestRefreshViewportUsesBlankLineBetweenAssistantTextAndToolRunWithHalfBlock
 	cfg := testConfig(t)
 	m := App{
 		cfg: cfg,
-		currentSnapshot: chatpkg.Snapshot{Messages: []domain.Message{
+		currentSnapshot: snapshotWithTranscript([]domain.Message{
 			{ID: 1, Role: domain.MessageRoleAssistant},
 			{ID: 2, Role: domain.MessageRoleTool},
-		}, Parts: map[int64][]domain.Part{
+		}, map[int64][]domain.Part{
 			1: {{Kind: domain.PartKindText, Body: "plain assistant text"}},
 			2: {{
 				Kind: domain.PartKindToolOutput,
@@ -8692,7 +8848,7 @@ func TestRefreshViewportUsesBlankLineBetweenAssistantTextAndToolRunWithHalfBlock
 					"tool_call_id": "call_1",
 				}),
 			}},
-		}},
+		}),
 		viewport: newTranscriptViewport(60, 12),
 	}
 
@@ -8724,51 +8880,20 @@ func TestRefreshViewportUsesBlankLineBetweenConsecutiveToolRunsWithHalfBlocks(t 
 	cfg := testConfig(t)
 	m := App{
 		cfg: cfg,
-		currentSnapshot: chatpkg.Snapshot{Messages: []domain.Message{
-			{ID: 1, Role: domain.MessageRoleAssistant},
-			{ID: 2, Role: domain.MessageRoleTool},
-			{ID: 3, Role: domain.MessageRoleAssistant},
-			{ID: 4, Role: domain.MessageRoleTool},
-		}, Parts: map[int64][]domain.Part{
-			1: {{
-				Kind: domain.PartKindToolCall,
-				MetaJSON: mustMarshalMeta(t, map[string]string{
-					"tool":         string(domain.ToolKindRead),
-					"path":         "README.md",
-					"preview":      "README.md",
-					"tool_call_id": "call_1",
-				}),
-			}},
-			2: {{
-				Kind: domain.PartKindToolOutput,
-				Body: "first line",
-				MetaJSON: mustMarshalMeta(t, map[string]string{
-					"tool":         string(domain.ToolKindRead),
-					"path":         "README.md",
-					"preview":      "README.md",
-					"tool_call_id": "call_1",
-				}),
-			}},
-			3: {{
-				Kind: domain.PartKindToolCall,
-				MetaJSON: mustMarshalMeta(t, map[string]string{
-					"tool":         string(domain.ToolKindRead),
-					"path":         "go.mod",
-					"preview":      "go.mod",
-					"tool_call_id": "call_2",
-				}),
-			}},
-			4: {{
-				Kind: domain.PartKindToolOutput,
-				Body: "second line",
-				MetaJSON: mustMarshalMeta(t, map[string]string{
-					"tool":         string(domain.ToolKindRead),
-					"path":         "go.mod",
-					"preview":      "go.mod",
-					"tool_call_id": "call_2",
-				}),
-			}},
-		}},
+		currentSnapshot: snapshotWithTranscript(
+			[]domain.Message{
+				{ID: 1, Role: domain.MessageRoleAssistant},
+				{ID: 2, Role: domain.MessageRoleTool},
+				{ID: 3, Role: domain.MessageRoleAssistant},
+				{ID: 4, Role: domain.MessageRoleTool},
+			},
+			map[int64][]domain.Part{
+				1: {{Kind: domain.PartKindToolCall, MetaJSON: mustMarshalMeta(t, map[string]string{"tool": string(domain.ToolKindRead), "path": "README.md", "preview": "README.md", "tool_call_id": "call_1"})}},
+				2: {{Kind: domain.PartKindToolOutput, Body: "first line", MetaJSON: mustMarshalMeta(t, map[string]string{"tool": string(domain.ToolKindRead), "path": "README.md", "preview": "README.md", "tool_call_id": "call_1"})}},
+				3: {{Kind: domain.PartKindToolCall, MetaJSON: mustMarshalMeta(t, map[string]string{"tool": string(domain.ToolKindRead), "path": "go.mod", "preview": "go.mod", "tool_call_id": "call_2"})}},
+				4: {{Kind: domain.PartKindToolOutput, Body: "second line", MetaJSON: mustMarshalMeta(t, map[string]string{"tool": string(domain.ToolKindRead), "path": "go.mod", "preview": "go.mod", "tool_call_id": "call_2"})}},
+			},
+		),
 		viewport: newTranscriptViewport(60, 12),
 	}
 
@@ -8798,9 +8923,9 @@ func TestRefreshViewportUsesBlankLineBetweenConsecutiveToolRunsWithHalfBlocks(t 
 func TestTranscriptBlocksKeepsRepeatedFailedToolRunsSeparate(t *testing.T) {
 	m := App{
 		currentSession:  domain.Session{ID: 1},
-		currentSnapshot: chatpkg.Snapshot{Parts: map[int64][]domain.Part{}},
+		currentSnapshot: chatpkg.Snapshot{},
 	}
-	m.currentSnapshot.Messages = []domain.Message{
+	setTestTranscript(&m, []domain.Message{
 		{ID: 1, Role: domain.MessageRoleAssistant, Summary: "tool:bash"},
 		{ID: 2, Role: domain.MessageRoleTool, Summary: "approval:bash"},
 		{ID: 3, Role: domain.MessageRoleTool, Summary: "approval:bash:approved"},
@@ -8810,54 +8935,55 @@ func TestTranscriptBlocksKeepsRepeatedFailedToolRunsSeparate(t *testing.T) {
 		{ID: 7, Role: domain.MessageRoleTool, Summary: "approval:bash"},
 		{ID: 8, Role: domain.MessageRoleTool, Summary: "approval:bash:approved"},
 		{ID: 9, Role: domain.MessageRoleTool, Summary: "bash"},
-	}
-	m.currentSnapshot.Parts[1] = []domain.Part{{
-		Kind: domain.PartKindToolCall,
-		MetaJSON: mustMarshalMeta(t, map[string]string{
-			"tool":         string(domain.ToolKindBash),
-			"command":      `go build -v . 2>&1; echo "EXIT_CODE=$?"`,
-			"tool_call_id": "call_1",
-		}),
-	}}
-	m.currentSnapshot.Parts[2] = []domain.Part{{
-		Kind:     domain.PartKindApprovalRequest,
-		Body:     `Approval required for bash: go build -v . 2>&1; echo "EXIT_CODE=$?"`,
-		MetaJSON: mustMarshalMeta(t, map[string]string{"approval_id": "1", "command": `go build -v . 2>&1; echo "EXIT_CODE=$?"`, "status": "pending", "tool": string(domain.ToolKindBash), "tool_call_id": "call_1"}),
-	}}
-	m.currentSnapshot.Parts[3] = []domain.Part{{
-		Kind:     domain.PartKindSystemNotice,
-		Body:     `Approval 1 approved for bash: go build -v . 2>&1; echo "EXIT_CODE=$?"`,
-		MetaJSON: mustMarshalMeta(t, map[string]string{"approval_id": "1", "command": `go build -v . 2>&1; echo "EXIT_CODE=$?"`, "status": "approved", "tool": string(domain.ToolKindBash), "tool_call_id": "call_1"}),
-	}}
-	m.currentSnapshot.Parts[4] = []domain.Part{{
-		Kind:     domain.PartKindToolOutput,
-		Body:     "bash failed: timeout_ms must be a positive integer",
-		MetaJSON: mustMarshalMeta(t, map[string]string{"tool": string(domain.ToolKindBash), "command": `go build -v . 2>&1; echo "EXIT_CODE=$?"`, "tool_call_id": "call_1"}),
-	}}
-	m.currentSnapshot.Parts[5] = []domain.Part{{Kind: domain.PartKindText, Body: "continue"}}
-	m.currentSnapshot.Parts[6] = []domain.Part{{
-		Kind: domain.PartKindToolCall,
-		MetaJSON: mustMarshalMeta(t, map[string]string{
-			"tool":         string(domain.ToolKindBash),
-			"command":      `go build -v . 2>&1; echo "EXIT_CODE=$?"`,
-			"tool_call_id": "call_2",
-		}),
-	}}
-	m.currentSnapshot.Parts[7] = []domain.Part{{
-		Kind:     domain.PartKindApprovalRequest,
-		Body:     `Approval required for bash: go build -v . 2>&1; echo "EXIT_CODE=$?"`,
-		MetaJSON: mustMarshalMeta(t, map[string]string{"approval_id": "2", "command": `go build -v . 2>&1; echo "EXIT_CODE=$?"`, "status": "pending", "tool": string(domain.ToolKindBash), "tool_call_id": "call_2"}),
-	}}
-	m.currentSnapshot.Parts[8] = []domain.Part{{
-		Kind:     domain.PartKindSystemNotice,
-		Body:     `Approval 2 approved for bash: go build -v . 2>&1; echo "EXIT_CODE=$?"`,
-		MetaJSON: mustMarshalMeta(t, map[string]string{"approval_id": "2", "command": `go build -v . 2>&1; echo "EXIT_CODE=$?"`, "status": "approved", "tool": string(domain.ToolKindBash), "tool_call_id": "call_2"}),
-	}}
-	m.currentSnapshot.Parts[9] = []domain.Part{{
-		Kind:     domain.PartKindToolOutput,
-		Body:     "bash failed: timeout_ms must be a positive integer",
-		MetaJSON: mustMarshalMeta(t, map[string]string{"tool": string(domain.ToolKindBash), "command": `go build -v . 2>&1; echo "EXIT_CODE=$?"`, "tool_call_id": "call_2"}),
-	}}
+	}, map[int64][]domain.Part{
+		1: {{
+			Kind: domain.PartKindToolCall,
+			MetaJSON: mustMarshalMeta(t, map[string]string{
+				"tool":         string(domain.ToolKindBash),
+				"command":      `go build -v . 2>&1; echo "EXIT_CODE=$?"`,
+				"tool_call_id": "call_1",
+			}),
+		}},
+		2: {{
+			Kind:     domain.PartKindApprovalRequest,
+			Body:     `Approval required for bash: go build -v . 2>&1; echo "EXIT_CODE=$?"`,
+			MetaJSON: mustMarshalMeta(t, map[string]string{"approval_id": "1", "command": `go build -v . 2>&1; echo "EXIT_CODE=$?"`, "status": "pending", "tool": string(domain.ToolKindBash), "tool_call_id": "call_1"}),
+		}},
+		3: {{
+			Kind:     domain.PartKindSystemNotice,
+			Body:     `Approval 1 approved for bash: go build -v . 2>&1; echo "EXIT_CODE=$?"`,
+			MetaJSON: mustMarshalMeta(t, map[string]string{"approval_id": "1", "command": `go build -v . 2>&1; echo "EXIT_CODE=$?"`, "status": "approved", "tool": string(domain.ToolKindBash), "tool_call_id": "call_1"}),
+		}},
+		4: {{
+			Kind:     domain.PartKindToolOutput,
+			Body:     "bash failed: timeout_ms must be a positive integer",
+			MetaJSON: mustMarshalMeta(t, map[string]string{"tool": string(domain.ToolKindBash), "command": `go build -v . 2>&1; echo "EXIT_CODE=$?"`, "tool_call_id": "call_1"}),
+		}},
+		5: {{Kind: domain.PartKindText, Body: "continue"}},
+		6: {{
+			Kind: domain.PartKindToolCall,
+			MetaJSON: mustMarshalMeta(t, map[string]string{
+				"tool":         string(domain.ToolKindBash),
+				"command":      `go build -v . 2>&1; echo "EXIT_CODE=$?"`,
+				"tool_call_id": "call_2",
+			}),
+		}},
+		7: {{
+			Kind:     domain.PartKindApprovalRequest,
+			Body:     `Approval required for bash: go build -v . 2>&1; echo "EXIT_CODE=$?"`,
+			MetaJSON: mustMarshalMeta(t, map[string]string{"approval_id": "2", "command": `go build -v . 2>&1; echo "EXIT_CODE=$?"`, "status": "pending", "tool": string(domain.ToolKindBash), "tool_call_id": "call_2"}),
+		}},
+		8: {{
+			Kind:     domain.PartKindSystemNotice,
+			Body:     `Approval 2 approved for bash: go build -v . 2>&1; echo "EXIT_CODE=$?"`,
+			MetaJSON: mustMarshalMeta(t, map[string]string{"approval_id": "2", "command": `go build -v . 2>&1; echo "EXIT_CODE=$?"`, "status": "approved", "tool": string(domain.ToolKindBash), "tool_call_id": "call_2"}),
+		}},
+		9: {{
+			Kind:     domain.PartKindToolOutput,
+			Body:     "bash failed: timeout_ms must be a positive integer",
+			MetaJSON: mustMarshalMeta(t, map[string]string{"tool": string(domain.ToolKindBash), "command": `go build -v . 2>&1; echo "EXIT_CODE=$?"`, "tool_call_id": "call_2"}),
+		}},
+	})
 
 	blocks := m.transcriptBlocks()
 	runCount := 0
@@ -8880,56 +9006,57 @@ func TestTranscriptBlocksKeepsRepeatedFailedToolRunsSeparate(t *testing.T) {
 func TestTranscriptBlocksKeepsReusedToolCallIDInRequestingTurn(t *testing.T) {
 	m := App{
 		currentSession:  domain.Session{ID: 1},
-		currentSnapshot: chatpkg.Snapshot{Parts: map[int64][]domain.Part{}},
+		currentSnapshot: chatpkg.Snapshot{},
 	}
-	m.currentSnapshot.Messages = []domain.Message{
+	setTestTranscript(&m, []domain.Message{
 		{ID: 1, Role: domain.MessageRoleAssistant, Summary: "tool:bash"},
 		{ID: 2, Role: domain.MessageRoleTool, Summary: "bash"},
 		{ID: 3, Role: domain.MessageRoleUser, Summary: "continue"},
 		{ID: 4, Role: domain.MessageRoleAssistant, Summary: "tool:bash"},
 		{ID: 5, Role: domain.MessageRoleTool, Summary: "bash"},
-	}
-	m.currentSnapshot.Parts[1] = []domain.Part{{
-		MessageID: 1,
-		Kind:      domain.PartKindToolCall,
-		Payload: domain.ToolCallPayload{
-			Tool:       domain.ToolKindBash,
-			ToolCallID: "reused_call",
-			Args:       map[string]string{"command": "pwd"},
-		},
-	}}
-	m.currentSnapshot.Parts[2] = []domain.Part{{
-		MessageID: 2,
-		Kind:      domain.PartKindToolOutput,
-		Payload: domain.ToolOutputPayload{
-			Tool:       domain.ToolKindBash,
-			ToolCallID: "reused_call",
-			Status:     domain.ToolResultStatusOK,
-			Text:       "/first",
-			Result:     tools.BashStoredResult{Command: "pwd", Output: "/first"},
-		},
-	}}
-	m.currentSnapshot.Parts[3] = []domain.Part{{MessageID: 3, Kind: domain.PartKindText, Payload: domain.TextPayload{Text: "continue"}}}
-	m.currentSnapshot.Parts[4] = []domain.Part{{
-		MessageID: 4,
-		Kind:      domain.PartKindToolCall,
-		Payload: domain.ToolCallPayload{
-			Tool:       domain.ToolKindBash,
-			ToolCallID: "reused_call",
-			Args:       map[string]string{"command": "pwd"},
-		},
-	}}
-	m.currentSnapshot.Parts[5] = []domain.Part{{
-		MessageID: 5,
-		Kind:      domain.PartKindToolOutput,
-		Payload: domain.ToolOutputPayload{
-			Tool:       domain.ToolKindBash,
-			ToolCallID: "reused_call",
-			Status:     domain.ToolResultStatusOK,
-			Text:       "/second",
-			Result:     tools.BashStoredResult{Command: "pwd", Output: "/second"},
-		},
-	}}
+	}, map[int64][]domain.Part{
+		1: {{
+			MessageID: 1,
+			Kind:      domain.PartKindToolCall,
+			Payload: domain.ToolCallPayload{
+				Tool:       domain.ToolKindBash,
+				ToolCallID: "reused_call",
+				Args:       map[string]string{"command": "pwd"},
+			},
+		}},
+		2: {{
+			MessageID: 2,
+			Kind:      domain.PartKindToolOutput,
+			Payload: domain.ToolOutputPayload{
+				Tool:       domain.ToolKindBash,
+				ToolCallID: "reused_call",
+				Status:     domain.ToolResultStatusOK,
+				Text:       "/first",
+				Result:     tools.BashStoredResult{Command: "pwd", Output: "/first"},
+			},
+		}},
+		3: {{MessageID: 3, Kind: domain.PartKindText, Payload: domain.TextPayload{Text: "continue"}}},
+		4: {{
+			MessageID: 4,
+			Kind:      domain.PartKindToolCall,
+			Payload: domain.ToolCallPayload{
+				Tool:       domain.ToolKindBash,
+				ToolCallID: "reused_call",
+				Args:       map[string]string{"command": "pwd"},
+			},
+		}},
+		5: {{
+			MessageID: 5,
+			Kind:      domain.PartKindToolOutput,
+			Payload: domain.ToolOutputPayload{
+				Tool:       domain.ToolKindBash,
+				ToolCallID: "reused_call",
+				Status:     domain.ToolResultStatusOK,
+				Text:       "/second",
+				Result:     tools.BashStoredResult{Command: "pwd", Output: "/second"},
+			},
+		}},
+	})
 
 	blocks := m.transcriptBlocks()
 	var runs []ui.ToolRun
@@ -8956,52 +9083,52 @@ func TestRuntimeToolResultWithReusedCallIDUpdatesRequestingTurn(t *testing.T) {
 		currentSession: domain.Session{ID: 1},
 		currentChat:    domain.Chat{ID: 2, SessionID: 1},
 		currentSnapshot: chatpkg.Snapshot{
-			Chat:  domain.Chat{ID: 2, SessionID: 1},
-			Parts: map[int64][]domain.Part{},
+			Chat: domain.Chat{ID: 2, SessionID: 1},
 		},
 		viewport: newTranscriptViewport(80, 20),
 		width:    80,
 		height:   24,
 	}
-	m.currentSnapshot.Messages = []domain.Message{
+	setTestTranscript(&m, []domain.Message{
 		{ID: 1, Role: domain.MessageRoleAssistant, Summary: "tool:bash", CreatedAt: now},
 		{ID: 2, Role: domain.MessageRoleTool, Summary: "bash", CreatedAt: now.Add(time.Second)},
 		{ID: 3, Role: domain.MessageRoleUser, Summary: "continue", CreatedAt: now.Add(2 * time.Second)},
 		{ID: 4, Role: domain.MessageRoleAssistant, Summary: "tool:bash", CreatedAt: now.Add(3 * time.Second)},
-	}
-	m.currentSnapshot.Parts[1] = []domain.Part{{
-		ID:        11,
-		MessageID: 1,
-		Kind:      domain.PartKindToolCall,
-		Payload: domain.ToolCallPayload{
-			Tool:       domain.ToolKindBash,
-			ToolCallID: "reused_call",
-			Args:       map[string]string{"command": "pwd"},
-		},
-	}}
-	m.currentSnapshot.Parts[2] = []domain.Part{{
-		ID:        21,
-		MessageID: 2,
-		Kind:      domain.PartKindToolOutput,
-		Payload: domain.ToolOutputPayload{
-			Tool:       domain.ToolKindBash,
-			ToolCallID: "reused_call",
-			Status:     domain.ToolResultStatusOK,
-			Text:       "/first",
-			Result:     tools.BashStoredResult{Command: "pwd", Output: "/first"},
-		},
-	}}
-	m.currentSnapshot.Parts[3] = []domain.Part{{ID: 31, MessageID: 3, Kind: domain.PartKindText, Payload: domain.TextPayload{Text: "continue"}}}
-	m.currentSnapshot.Parts[4] = []domain.Part{{
-		ID:        41,
-		MessageID: 4,
-		Kind:      domain.PartKindToolCall,
-		Payload: domain.ToolCallPayload{
-			Tool:       domain.ToolKindBash,
-			ToolCallID: "reused_call",
-			Args:       map[string]string{"command": "pwd"},
-		},
-	}}
+	}, map[int64][]domain.Part{
+		1: {{
+			ID:        11,
+			MessageID: 1,
+			Kind:      domain.PartKindToolCall,
+			Payload: domain.ToolCallPayload{
+				Tool:       domain.ToolKindBash,
+				ToolCallID: "reused_call",
+				Args:       map[string]string{"command": "pwd"},
+			},
+		}},
+		2: {{
+			ID:        21,
+			MessageID: 2,
+			Kind:      domain.PartKindToolOutput,
+			Payload: domain.ToolOutputPayload{
+				Tool:       domain.ToolKindBash,
+				ToolCallID: "reused_call",
+				Status:     domain.ToolResultStatusOK,
+				Text:       "/first",
+				Result:     tools.BashStoredResult{Command: "pwd", Output: "/first"},
+			},
+		}},
+		3: {{ID: 31, MessageID: 3, Kind: domain.PartKindText, Payload: domain.TextPayload{Text: "continue"}}},
+		4: {{
+			ID:        41,
+			MessageID: 4,
+			Kind:      domain.PartKindToolCall,
+			Payload: domain.ToolCallPayload{
+				Tool:       domain.ToolKindBash,
+				ToolCallID: "reused_call",
+				Args:       map[string]string{"command": "pwd"},
+			},
+		}},
+	})
 	m.refreshViewport()
 
 	resultMsg := domain.Message{ID: 5, Role: domain.MessageRoleTool, Summary: "bash", CreatedAt: now.Add(4 * time.Second)}
@@ -9017,7 +9144,7 @@ func TestRuntimeToolResultWithReusedCallIDUpdatesRequestingTurn(t *testing.T) {
 			Result:     tools.BashStoredResult{Command: "pwd", Output: "/second"},
 		},
 	}
-	m.applyCurrentChatEvent(domain.Event{Kind: domain.EventKindToolResult, ToolCallID: "reused_call", Tool: domain.ToolKindBash, Message: resultMsg, Parts: []domain.Part{resultPart}})
+	m.applyCurrentChatEvent(domain.Event{Kind: domain.EventKindToolResult, ToolCallID: "reused_call", Tool: domain.ToolKindBash, Item: testTimelineItem(resultMsg, []domain.Part{resultPart})})
 
 	var blocks []transcriptBlock
 	for _, item := range m.transcriptItems {
@@ -9044,52 +9171,52 @@ func TestRuntimeToolStartWithReusedCallIDUpdatesLatestTurn(t *testing.T) {
 		currentSession: domain.Session{ID: 1},
 		currentChat:    domain.Chat{ID: 2, SessionID: 1},
 		currentSnapshot: chatpkg.Snapshot{
-			Chat:  domain.Chat{ID: 2, SessionID: 1},
-			Parts: map[int64][]domain.Part{},
+			Chat: domain.Chat{ID: 2, SessionID: 1},
 		},
 		viewport: newTranscriptViewport(80, 20),
 		width:    80,
 		height:   24,
 	}
-	m.currentSnapshot.Messages = []domain.Message{
+	setTestTranscript(&m, []domain.Message{
 		{ID: 1, Role: domain.MessageRoleAssistant, Summary: "tool:bash", CreatedAt: now},
 		{ID: 2, Role: domain.MessageRoleTool, Summary: "bash", CreatedAt: now.Add(time.Second)},
 		{ID: 3, Role: domain.MessageRoleUser, Summary: "continue", CreatedAt: now.Add(2 * time.Second)},
 		{ID: 4, Role: domain.MessageRoleAssistant, Summary: "tool:bash", CreatedAt: now.Add(3 * time.Second)},
-	}
-	m.currentSnapshot.Parts[1] = []domain.Part{{
-		ID:        11,
-		MessageID: 1,
-		Kind:      domain.PartKindToolCall,
-		Payload: domain.ToolCallPayload{
-			Tool:       domain.ToolKindBash,
-			ToolCallID: "reused_call",
-			Args:       map[string]string{"command": "pwd"},
-		},
-	}}
-	m.currentSnapshot.Parts[2] = []domain.Part{{
-		ID:        21,
-		MessageID: 2,
-		Kind:      domain.PartKindToolOutput,
-		Payload: domain.ToolOutputPayload{
-			Tool:       domain.ToolKindBash,
-			ToolCallID: "reused_call",
-			Status:     domain.ToolResultStatusOK,
-			Text:       "/first",
-			Result:     tools.BashStoredResult{Command: "pwd", Output: "/first"},
-		},
-	}}
-	m.currentSnapshot.Parts[3] = []domain.Part{{ID: 31, MessageID: 3, Kind: domain.PartKindText, Payload: domain.TextPayload{Text: "continue"}}}
-	m.currentSnapshot.Parts[4] = []domain.Part{{
-		ID:        41,
-		MessageID: 4,
-		Kind:      domain.PartKindToolCall,
-		Payload: domain.ToolCallPayload{
-			Tool:       domain.ToolKindBash,
-			ToolCallID: "reused_call",
-			Args:       map[string]string{"command": "pwd"},
-		},
-	}}
+	}, map[int64][]domain.Part{
+		1: {{
+			ID:        11,
+			MessageID: 1,
+			Kind:      domain.PartKindToolCall,
+			Payload: domain.ToolCallPayload{
+				Tool:       domain.ToolKindBash,
+				ToolCallID: "reused_call",
+				Args:       map[string]string{"command": "pwd"},
+			},
+		}},
+		2: {{
+			ID:        21,
+			MessageID: 2,
+			Kind:      domain.PartKindToolOutput,
+			Payload: domain.ToolOutputPayload{
+				Tool:       domain.ToolKindBash,
+				ToolCallID: "reused_call",
+				Status:     domain.ToolResultStatusOK,
+				Text:       "/first",
+				Result:     tools.BashStoredResult{Command: "pwd", Output: "/first"},
+			},
+		}},
+		3: {{ID: 31, MessageID: 3, Kind: domain.PartKindText, Payload: domain.TextPayload{Text: "continue"}}},
+		4: {{
+			ID:        41,
+			MessageID: 4,
+			Kind:      domain.PartKindToolCall,
+			Payload: domain.ToolCallPayload{
+				Tool:       domain.ToolKindBash,
+				ToolCallID: "reused_call",
+				Args:       map[string]string{"command": "pwd"},
+			},
+		}},
+	})
 	m.refreshViewport()
 
 	m.applyCurrentChatEvent(domain.Event{Kind: domain.EventKindToolStart, ToolCallID: "reused_call", Tool: domain.ToolKindBash})
@@ -9118,12 +9245,11 @@ func TestTranscriptBlocksHardFailsToolResultAfterTurnBoundary(t *testing.T) {
 		currentSession: domain.Session{ID: 1},
 		currentSnapshot: chatpkg.Snapshot{
 			Chat: domain.Chat{ID: 2, SessionID: 1},
-			Messages: []domain.Message{
+			Timeline: timelineForTestTranscript([]domain.Message{
 				{ID: 1, Role: domain.MessageRoleAssistant, Summary: "tool:bash"},
 				{ID: 2, Role: domain.MessageRoleUser, Summary: "new turn"},
 				{ID: 3, Role: domain.MessageRoleTool, Summary: "bash"},
-			},
-			Parts: map[int64][]domain.Part{
+			}, map[int64][]domain.Part{
 				1: {{
 					ID:        11,
 					MessageID: 1,
@@ -9147,7 +9273,7 @@ func TestTranscriptBlocksHardFailsToolResultAfterTurnBoundary(t *testing.T) {
 						Result:     tools.BashStoredResult{Command: "pwd", Output: "/late"},
 					},
 				}},
-			},
+			}),
 		},
 	}
 
@@ -9174,7 +9300,7 @@ func TestTranscriptBlocksIncludeLiveExecRuns(t *testing.T) {
 		exec:            mgr,
 		currentSession:  domain.Session{ID: 1},
 		currentChat:     domain.Chat{ID: 2, SessionID: 1},
-		currentSnapshot: chatpkg.Snapshot{Parts: map[int64][]domain.Part{}},
+		currentSnapshot: chatpkg.Snapshot{},
 	}
 	blocks := m.transcriptBlocks()
 	if len(blocks) != 1 || blocks[0].Kind != transcriptBlockToolRun {

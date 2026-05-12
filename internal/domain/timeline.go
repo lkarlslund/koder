@@ -21,7 +21,6 @@ const (
 	TimelineKindTool       TimelineKind = "tool"
 	TimelineKindNotice     TimelineKind = "notice"
 	TimelineKindCompaction TimelineKind = "compaction"
-	TimelineKindLegacy     TimelineKind = "legacy_message"
 )
 
 // TimelineItem is the durable ordered unit of chat transcript state.
@@ -279,12 +278,13 @@ func (c *ToolCall) UnmarshalJSON(data []byte) error {
 
 // ToolExecution stores a user-initiated tool execution that was not requested by an assistant item.
 type ToolExecution struct {
-	Tool      ToolKind          `json:"tool"`
-	Args      map[string]string `json:"args,omitempty"`
-	Result    *ToolResult       `json:"result,omitempty"`
-	Error     *ToolError        `json:"error,omitempty"`
-	StartedAt time.Time         `json:"started_at,omitempty"`
-	EndedAt   time.Time         `json:"ended_at,omitempty"`
+	Tool       ToolKind          `json:"tool"`
+	ToolCallID ToolCallID        `json:"tool_call_id,omitempty"`
+	Args       map[string]string `json:"args,omitempty"`
+	Result     *ToolResult       `json:"result,omitempty"`
+	Error      *ToolError        `json:"error,omitempty"`
+	StartedAt  time.Time         `json:"started_at,omitempty"`
+	EndedAt    time.Time         `json:"ended_at,omitempty"`
 }
 
 // TimelineKind returns the timeline payload kind.
@@ -299,12 +299,13 @@ func (e ToolExecution) MarshalJSON() ([]byte, error) {
 		Status ToolResultStatus `json:"status,omitempty"`
 	}
 	type encodedToolExecution struct {
-		Tool      ToolKind           `json:"tool"`
-		Args      map[string]string  `json:"args,omitempty"`
-		Result    *encodedToolResult `json:"result,omitempty"`
-		Error     *ToolError         `json:"error,omitempty"`
-		StartedAt time.Time          `json:"started_at,omitempty"`
-		EndedAt   time.Time          `json:"ended_at,omitempty"`
+		Tool       ToolKind           `json:"tool"`
+		ToolCallID ToolCallID         `json:"tool_call_id,omitempty"`
+		Args       map[string]string  `json:"args,omitempty"`
+		Result     *encodedToolResult `json:"result,omitempty"`
+		Error      *ToolError         `json:"error,omitempty"`
+		StartedAt  time.Time          `json:"started_at,omitempty"`
+		EndedAt    time.Time          `json:"ended_at,omitempty"`
 	}
 	var result *encodedToolResult
 	if e.Result != nil {
@@ -314,7 +315,7 @@ func (e ToolExecution) MarshalJSON() ([]byte, error) {
 		}
 		result = &encodedToolResult{Text: e.Result.Text, Diff: e.Result.Diff, Data: raw, Status: e.Result.Status}
 	}
-	return json.Marshal(encodedToolExecution{Tool: e.Tool, Args: e.Args, Result: result, Error: e.Error, StartedAt: e.StartedAt, EndedAt: e.EndedAt})
+	return json.Marshal(encodedToolExecution{Tool: e.Tool, ToolCallID: e.ToolCallID, Args: e.Args, Result: result, Error: e.Error, StartedAt: e.StartedAt, EndedAt: e.EndedAt})
 }
 
 // UnmarshalJSON loads typed standalone tool result data from the tool/status discriminator.
@@ -326,12 +327,13 @@ func (e *ToolExecution) UnmarshalJSON(data []byte) error {
 		Status ToolResultStatus `json:"status,omitempty"`
 	}
 	type encodedToolExecution struct {
-		Tool      ToolKind           `json:"tool"`
-		Args      map[string]string  `json:"args,omitempty"`
-		Result    *encodedToolResult `json:"result,omitempty"`
-		Error     *ToolError         `json:"error,omitempty"`
-		StartedAt time.Time          `json:"started_at,omitempty"`
-		EndedAt   time.Time          `json:"ended_at,omitempty"`
+		Tool       ToolKind           `json:"tool"`
+		ToolCallID ToolCallID         `json:"tool_call_id,omitempty"`
+		Args       map[string]string  `json:"args,omitempty"`
+		Result     *encodedToolResult `json:"result,omitempty"`
+		Error      *ToolError         `json:"error,omitempty"`
+		StartedAt  time.Time          `json:"started_at,omitempty"`
+		EndedAt    time.Time          `json:"ended_at,omitempty"`
 	}
 	var in encodedToolExecution
 	if err := json.Unmarshal(data, &in); err != nil {
@@ -345,7 +347,7 @@ func (e *ToolExecution) UnmarshalJSON(data []byte) error {
 		}
 		result = &ToolResult{Text: in.Result.Text, Diff: in.Result.Diff, Data: decoded, Status: in.Result.Status}
 	}
-	*e = ToolExecution{Tool: in.Tool, Args: in.Args, Result: result, Error: in.Error, StartedAt: in.StartedAt, EndedAt: in.EndedAt}
+	*e = ToolExecution{Tool: in.Tool, ToolCallID: in.ToolCallID, Args: in.Args, Result: result, Error: in.Error, StartedAt: in.StartedAt, EndedAt: in.EndedAt}
 	return nil
 }
 
@@ -401,20 +403,11 @@ type Compaction struct {
 	FirstKeptItemID     int64  `json:"first_kept_item_id,omitempty"`
 	BeforeContextTokens int    `json:"before_context_tokens,omitempty"`
 	AfterContextTokens  int    `json:"after_context_tokens,omitempty"`
+	Usage               *Usage `json:"usage,omitempty"`
 }
 
 // TimelineKind returns the timeline payload kind.
 func (Compaction) TimelineKind() TimelineKind { return TimelineKindCompaction }
-
-// LegacyMessage preserves the old message/parts shape inside timeline storage while callers migrate.
-type LegacyMessage struct {
-	Role    MessageRole `json:"role"`
-	Summary string      `json:"summary,omitempty"`
-	Parts   []Part      `json:"parts,omitempty"`
-}
-
-// TimelineKind returns the timeline payload kind.
-func (LegacyMessage) TimelineKind() TimelineKind { return TimelineKindLegacy }
 
 // MarshalJSON stores timeline content behind a discriminator.
 func (i TimelineItem) MarshalJSON() ([]byte, error) {
@@ -481,8 +474,6 @@ func decodeTimelineContent(kind TimelineKind, raw json.RawMessage) (TimelineCont
 		return decodeTimelinePayload[Notice](raw)
 	case TimelineKindCompaction:
 		return decodeTimelinePayload[Compaction](raw)
-	case TimelineKindLegacy:
-		return decodeTimelinePayload[LegacyMessage](raw)
 	default:
 		return nil, fmt.Errorf("unsupported timeline kind %q", kind)
 	}

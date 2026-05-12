@@ -124,29 +124,6 @@ func (m *App) applyCurrentChatEvent(evt domain.Event) {
 		m.transcriptDirty = true
 		refreshed = true
 	}
-	if evt.Message.ID > 0 {
-		m.upsertCurrentSnapshotTimelineFromMessage(evt.Message, evt.Parts)
-		msg, msgParts, mutations, created := m.upsertCurrentSnapshotMessageParts(evt.Message, evt.Parts)
-		if created {
-			if !m.appendEventMessageToTranscript(msg, msgParts) {
-				m.transcriptDirty = true
-			} else {
-				refreshed = true
-			}
-		} else if m.messageShouldRender(msg, msgParts) {
-			if !m.upsertMessageTranscriptItem(msg, msgParts) {
-				m.transcriptDirty = true
-			} else {
-				refreshed = true
-			}
-		}
-		for _, part := range mutations {
-			if !m.applyCurrentChatPartMutation(msg, part) {
-				continue
-			}
-			refreshed = true
-		}
-	}
 	switch evt.Kind {
 	case domain.EventKindApprovalAsk:
 		m.applyApprovalAskEvent(evt)
@@ -163,11 +140,11 @@ func (m *App) applyCurrentChatEvent(evt domain.Event) {
 			}
 		}
 	}
-	if refreshed || evt.Message.ID > 0 {
-		if evt.Kind == domain.EventKindToolCallDelta && evt.Message.ID > 0 {
+	if refreshed {
+		if evt.Kind == domain.EventKindToolCallDelta && evt.Item.ID > 0 {
 			m.clearPendingAssistantTurn()
 		}
-		if evt.Kind == domain.EventKindMessageDone && evt.Message.ID > 0 {
+		if evt.Kind == domain.EventKindMessageDone && evt.Item.ID > 0 {
 			m.clearPendingAssistantTurn()
 		}
 		m.refreshViewport()
@@ -866,7 +843,7 @@ func toolRunOutput(part domain.Part, parts []domain.Part, msg domain.Message) ui
 		req = tools.Request{
 			Tool:       firstNonEmptyTool(payload.Tool, domain.ToolKind(strings.TrimSpace(meta["tool"]))),
 			ToolCallID: firstNonEmptyString(strings.TrimSpace(payload.ToolCallID), strings.TrimSpace(meta["tool_call_id"])),
-			Args:       meta,
+			Args:       firstNonEmptyStringMap(payload.Args, meta),
 		}
 	}
 	presentation := tools.PresentationForRequest(req)
@@ -1200,6 +1177,15 @@ func firstNonEmptyTool(values ...domain.ToolKind) domain.ToolKind {
 		}
 	}
 	return ""
+}
+
+func firstNonEmptyStringMap(values ...map[string]string) map[string]string {
+	for _, value := range values {
+		if len(value) != 0 {
+			return value
+		}
+	}
+	return nil
 }
 
 func presentationFromPreview(tool domain.ToolKind, preview string) tools.Presentation {

@@ -37,7 +37,7 @@ func renderTimelineRole(item domain.TimelineItem) domain.MessageRole {
 	switch item.Content.(type) {
 	case domain.UserMessage:
 		return domain.MessageRoleUser
-	case domain.ToolExecution, domain.Notice, domain.Compaction:
+	case domain.ToolExecution:
 		return domain.MessageRoleTool
 	default:
 		return domain.MessageRoleAssistant
@@ -123,13 +123,16 @@ func renderTimelineParts(item domain.TimelineItem) []domain.Part {
 		}
 	case domain.ToolExecution:
 		if payload.Result != nil {
-			add(domain.PartKindToolOutput, domain.ToolOutputPayload{Tool: payload.Tool, Args: payload.Args, Status: payload.Result.Status, Text: payload.Result.Text, Diff: payload.Result.Diff, Result: payload.Result.Data}, 1)
+			add(domain.PartKindToolOutput, domain.ToolOutputPayload{Tool: payload.Tool, ToolCallID: string(payload.ToolCallID), Args: payload.Args, Status: payload.Result.Status, Text: payload.Result.Text, Diff: payload.Result.Diff, Result: payload.Result.Data}, 1)
 		}
 		if payload.Error != nil {
-			add(domain.PartKindToolOutput, domain.ToolOutputPayload{Tool: payload.Tool, Args: payload.Args, Status: domain.ToolResultStatusError, Text: payload.Error.Message, Result: domain.ErrorStoredResult{Message: payload.Error.Message}}, 1)
+			add(domain.PartKindToolOutput, domain.ToolOutputPayload{Tool: payload.Tool, ToolCallID: string(payload.ToolCallID), Args: payload.Args, Status: domain.ToolResultStatusError, Text: payload.Error.Message, Result: domain.ErrorStoredResult{Message: payload.Error.Message}}, 1)
 		}
 	case domain.Compaction:
 		add(domain.PartKindCompaction, domain.CompactionPayload{Summary: payload.Summary, Trigger: payload.Trigger, Status: payload.Status, BeforeContextTokens: payload.BeforeContextTokens, AfterContextTokens: payload.AfterContextTokens}, 1)
+		if payload.Usage != nil {
+			add(domain.PartKindUsage, domain.UsagePayload{Usage: *payload.Usage}, 2)
+		}
 	}
 	return parts
 }
@@ -147,9 +150,6 @@ func normalizeRenderPart(item domain.TimelineItem, part *domain.Part) {
 	}
 	if part.Body == "" {
 		part.Body = part.Text()
-	}
-	if part.MetaJSON == "" && part.Kind == domain.PartKindEventNotice {
-		part.MetaJSON = part.LegacyMetaJSON()
 	}
 }
 
