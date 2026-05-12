@@ -2,9 +2,12 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -31,12 +34,15 @@ import (
 	"github.com/lkarlslund/koder/internal/webui"
 )
 
+const defaultWebBind = "127.0.0.1:0"
+
 func NewRootCommand() *cobra.Command {
 	opts := startupOptions{}
 	cmd := &cobra.Command{
 		Use:   "koder",
 		Short: "Terminal coding agent",
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			opts.captureFlagState(cmd)
 			workdir, err := opts.resolve()
 			if err != nil {
 				return err
@@ -55,6 +61,7 @@ type startupOptions struct {
 	ui          string
 	noBrowser   bool
 	webBind     string
+	webBindSet  bool
 }
 
 func bindStartupFlags(cmd *cobra.Command, opts *startupOptions) {
@@ -63,7 +70,16 @@ func bindStartupFlags(cmd *cobra.Command, opts *startupOptions) {
 	flags.StringVar(&opts.projectRoot, "project-root", "", "Alias for --cwd")
 	flags.StringVar(&opts.ui, "ui", "web", "Renderer to launch: web or tui")
 	flags.BoolVar(&opts.noBrowser, "nobrowser", false, "Do not open a browser for the web UI")
-	flags.StringVar(&opts.webBind, "web-bind", "127.0.0.1:0", "Web UI bind address")
+	flags.StringVar(&opts.webBind, "web-bind", defaultWebBind, "Web UI bind address")
+}
+
+func (o *startupOptions) captureFlagState(cmd *cobra.Command) {
+	if cmd == nil {
+		return
+	}
+	if flag := cmd.Flags().Lookup("web-bind"); flag != nil {
+		o.webBindSet = flag.Changed
+	}
 }
 
 func (o startupOptions) resolve() (string, error) {
@@ -149,12 +165,25 @@ func runWeb(ctx context.Context, cfg config.Config, st *store.Store, engine *age
 	if err := controller.Start(ctx, mode); err != nil {
 		return err
 	}
+	bind, cachedBind := webBindForLaunch(cfg, workdir, startupOpts)
 	server, err := webui.Start(ctx, controller, webui.Options{
-		Bind:      startupOpts.WebBind,
+		Bind:      bind,
 		NoBrowser: startupOpts.NoBrowser,
 	})
+	if err != nil && cachedBind {
+		fmt.Fprintf(os.Stderr, "koder web ui: cached bind %s unavailable, falling back to %s\n", bind, defaultWebBind)
+		server, err = webui.Start(ctx, controller, webui.Options{
+			Bind:      defaultWebBind,
+			NoBrowser: startupOpts.NoBrowser,
+		})
+	}
 	if err != nil {
 		return err
+	}
+	if !startupOpts.WebBindExplicit || isReusableWebBind(startupOpts.WebBind) {
+		if err := saveWorkspaceWebBind(cfg, workdir, server.Addr()); err != nil {
+			fmt.Fprintf(os.Stderr, "koder web ui: failed to save workspace port: %v\n", err)
+		}
 	}
 	fmt.Fprintf(os.Stderr, "koder web ui: %s\n", server.URL())
 	if recorder != nil {
@@ -188,7 +217,102 @@ func appStartupOptions(opts startupOptions, showAllSessions bool) app.StartupOpt
 		Renderer:        renderer,
 		NoBrowser:       opts.noBrowser,
 		WebBind:         opts.webBind,
+		WebBindExplicit: opts.webBindSet,
 	}
+}
+
+type workspaceWebBindRecord struct {
+	Workdir   string    `json:"workdir"`
+	Bind      string    `json:"bind"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+func webBindForLaunch(cfg config.Config, workdir string, startupOpts app.StartupOptions) (string, bool) {
+	bind := strings.TrimSpace(startupOpts.WebBind)
+	if bind == "" {
+		bind = defaultWebBind
+	}
+	if startupOpts.WebBindExplicit || bind != defaultWebBind {
+		return bind, false
+	}
+	cached, err := loadWorkspaceWebBind(cfg, workdir)
+	if err != nil || cached == "" {
+		return bind, false
+	}
+	return cached, true
+}
+
+func loadWorkspaceWebBind(cfg config.Config, workdir string) (string, error) {
+	path, err := workspaceWebBindPath(cfg, workdir)
+	if err != nil {
+		return "", err
+	}
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	var record workspaceWebBindRecord
+	if err := json.Unmarshal(data, &record); err != nil {
+		return "", err
+	}
+	if !isReusableWebBind(record.Bind) {
+		return "", nil
+	}
+	return strings.TrimSpace(record.Bind), nil
+}
+
+func saveWorkspaceWebBind(cfg config.Config, workdir, bind string) error {
+	if !isReusableWebBind(bind) {
+		return nil
+	}
+	path, err := workspaceWebBindPath(cfg, workdir)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	absWorkdir, err := filepath.Abs(workdir)
+	if err != nil {
+		return err
+	}
+	record := workspaceWebBindRecord{
+		Workdir:   filepath.Clean(absWorkdir),
+		Bind:      strings.TrimSpace(bind),
+		UpdatedAt: time.Now().UTC(),
+	}
+	data, err := json.MarshalIndent(record, "", "  ")
+	if err != nil {
+		return err
+	}
+	data = append(data, '\n')
+	return os.WriteFile(path, data, 0o644)
+}
+
+func workspaceWebBindPath(cfg config.Config, workdir string) (string, error) {
+	stateDir := strings.TrimSpace(cfg.StateDir())
+	if stateDir == "" {
+		return "", fmt.Errorf("state dir is empty")
+	}
+	absWorkdir, err := filepath.Abs(workdir)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256([]byte(filepath.Clean(absWorkdir)))
+	name := hex.EncodeToString(sum[:16]) + ".json"
+	return filepath.Join(stateDir, "web-ports", name), nil
+}
+
+func isReusableWebBind(bind string) bool {
+	bind = strings.TrimSpace(bind)
+	if bind == "" {
+		return false
+	}
+	_, port, err := net.SplitHostPort(bind)
+	return err == nil && port != "" && port != "0"
 }
 
 func debugAPIAddr(server *debugsrv.Server) string {
@@ -205,6 +329,7 @@ func newResumeCommand() *cobra.Command {
 		Use:   "resume",
 		Short: "Resume an existing session from a picker",
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			opts.captureFlagState(cmd)
 			workdir, err := opts.resolve()
 			if err != nil {
 				return err

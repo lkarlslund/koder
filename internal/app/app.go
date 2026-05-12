@@ -202,6 +202,7 @@ type StartupOptions struct {
 	Renderer        string
 	NoBrowser       bool
 	WebBind         string
+	WebBindExplicit bool
 }
 
 type newSessionMsg struct {
