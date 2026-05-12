@@ -170,6 +170,15 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(string(body), `todoItems()`) {
 		t.Fatalf("expected sidebar to render todos")
 	}
+	if !strings.Contains(string(body), `@pointerdown="startSidebarResize($event)"`) {
+		t.Fatalf("expected draggable sidebar divider")
+	}
+	if !strings.Contains(string(body), `readPreference('theme'`) {
+		t.Fatalf("expected theme to use shared browser preference storage")
+	}
+	if !strings.Contains(string(body), `writePreference('sidebarRatio'`) {
+		t.Fatalf("expected sidebar split ratio to use shared browser preference storage")
+	}
 }
 
 func TestWebSocketSetModelReturnsUpdatedState(t *testing.T) {

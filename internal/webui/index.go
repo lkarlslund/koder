@@ -13,11 +13,13 @@ const indexHTML = `<!doctype html>
     :root { color-scheme: light dark; }
     html, body { height: 100%; }
     body { overflow: hidden; }
-    .app-shell { height: 100vh; display: grid; grid-template-columns: minmax(0, 1fr) 340px; grid-template-rows: auto minmax(0, 1fr) auto; }
-    .topbar { grid-column: 1 / 3; }
+    .app-shell { height: 100vh; display: grid; grid-template-columns: minmax(0, 1fr) 6px var(--sidebar-width, 340px); grid-template-rows: auto minmax(0, 1fr) auto; }
+    .topbar { grid-column: 1 / 4; }
     .transcript { min-height: 0; overflow: auto; }
+    .sidebar-resizer { min-height: 0; cursor: col-resize; background: var(--bs-border-color); opacity: .55; touch-action: none; }
+    .sidebar-resizer:hover, .sidebar-resizer.resizing { background: var(--bs-primary); opacity: 1; }
     .sidebar { min-height: 0; overflow: auto; border-left: 1px solid var(--bs-border-color); }
-    .composer { grid-column: 1 / 3; border-top: 1px solid var(--bs-border-color); }
+    .composer { grid-column: 1 / 4; border-top: 1px solid var(--bs-border-color); }
     .message { border-radius: .75rem; }
     .message.user { background: var(--bs-primary-bg-subtle); }
     .message.assistant { background: var(--bs-tertiary-bg); }
@@ -28,11 +30,11 @@ const indexHTML = `<!doctype html>
     .model-dialog { width: min(760px, 100%); max-height: min(720px, 90vh); overflow: hidden; display: flex; flex-direction: column; }
     .model-list { overflow: auto; }
     pre { white-space: pre-wrap; word-break: break-word; margin: 0; }
-    @media (max-width: 900px) { .app-shell { grid-template-columns: 1fr; } .sidebar { display: none; } .topbar, .composer { grid-column: 1; } }
+    @media (max-width: 900px) { .app-shell { grid-template-columns: 1fr; } .sidebar, .sidebar-resizer { display: none; } .topbar, .composer { grid-column: 1; } }
   </style>
 </head>
 <body class="bg-body text-body">
-  <div class="app-shell">
+  <div class="app-shell" :style="appShellStyle()">
     <nav class="topbar navbar bg-body-tertiary px-3">
       <div class="d-flex align-items-center gap-2">
         <i class="bi bi-terminal-fill text-primary"></i>
@@ -97,6 +99,8 @@ const indexHTML = `<!doctype html>
         </section>
       </template>
     </main>
+
+    <div class="sidebar-resizer" :class="{'resizing': resizingSidebar}" role="separator" aria-orientation="vertical" aria-label="Resize sidebar" @pointerdown="startSidebarResize($event)"></div>
 
     <aside class="sidebar p-3 bg-body-tertiary">
       <div class="mb-3">
@@ -244,11 +248,41 @@ const indexHTML = `<!doctype html>
       return {
         ws: null, nextID: 1, pending: {}, state: {}, connected: false, draft: '', showPermissions: false,
         showModels: false, modelLoading: false, modelQuery: '', modelOptions: [],
-        theme: localStorage.getItem('koder.theme') || 'auto', error: '',
-        init() { this.applyTheme(); this.connect(); },
+        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, error: '',
+        init() { this.clampSidebarRatio(); this.applyTheme(); this.connect(); },
         applyTheme() {
           const resolved = this.theme === 'auto' ? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : this.theme;
           document.documentElement.setAttribute('data-bs-theme', resolved);
+        },
+        appShellStyle() { return '--sidebar-width: ' + this.sidebarWidth() + 'px;'; },
+        sidebarWidth() {
+          const width = window.innerWidth || 1440;
+          return Math.round(Math.max(280, Math.min(640, width * this.sidebarRatio)));
+        },
+        clampSidebarRatio() {
+          if (!Number.isFinite(this.sidebarRatio)) this.sidebarRatio = 0.22;
+          this.sidebarRatio = Math.max(0.16, Math.min(0.45, this.sidebarRatio));
+        },
+        startSidebarResize(ev) {
+          if (window.innerWidth <= 900) return;
+          ev.preventDefault();
+          this.resizingSidebar = true;
+          const move = event => {
+            const width = window.innerWidth || 1;
+            this.sidebarRatio = Math.max(0.16, Math.min(0.45, (width - event.clientX) / width));
+          };
+          const stop = () => {
+            this.resizingSidebar = false;
+            this.clampSidebarRatio();
+            writePreference('sidebarRatio', this.sidebarRatio.toFixed(4));
+            window.removeEventListener('pointermove', move);
+            window.removeEventListener('pointerup', stop);
+            window.removeEventListener('pointercancel', stop);
+          };
+          window.addEventListener('pointermove', move);
+          window.addEventListener('pointerup', stop);
+          window.addEventListener('pointercancel', stop);
+          move(ev);
         },
         connect() {
           const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -264,14 +298,14 @@ const indexHTML = `<!doctype html>
         },
         onPush(msg) {
           if (msg.type === 'snapshot') this.applyState(msg.payload);
-          if (msg.type === 'theme') { this.theme = msg.payload.theme || 'auto'; this.applyTheme(); }
+          if (msg.type === 'theme') { this.theme = msg.payload.theme || 'auto'; writePreference('theme', this.theme); this.applyTheme(); }
         },
         rpc(method, params) {
           const id = this.nextID++;
           this.ws.send(JSON.stringify({id, method, params}));
           return new Promise((resolve, reject) => this.pending[id] = {resolve, reject}).catch(err => { this.error = err.message; throw err; });
         },
-        applyState(s) { this.state = s || {}; this.theme = this.state.theme || this.theme; this.applyTheme(); this.error = this.state.error || ''; this.$nextTick(() => { const el = document.querySelector('.transcript'); if (el) el.scrollTop = el.scrollHeight; }); },
+        applyState(s) { this.state = s || {}; this.applyTheme(); this.error = this.state.error || ''; this.$nextTick(() => { const el = document.querySelector('.transcript'); if (el) el.scrollTop = el.scrollHeight; }); },
         timeline() { return this.state.snapshot?.Timeline || this.state.snapshot?.timeline || []; },
         approvals() { return this.state.snapshot?.Approvals || this.state.snapshot?.approvals || []; },
         pendingText() { const p = this.state.snapshot?.PendingAssistant || this.state.snapshot?.pending_assistant || {}; return [p.Reasoning || p.reasoning, p.Text || p.text].filter(Boolean).join('\n'); },
@@ -332,8 +366,15 @@ const indexHTML = `<!doctype html>
             this.applyState(s); this.closeModelDialog();
           });
         },
-        setTheme(theme) { localStorage.setItem('koder.theme', theme); this.applyTheme(); this.rpc('set_theme', {theme}); }
+        setTheme(theme) { writePreference('theme', theme); this.applyTheme(); this.rpc('set_theme', {theme}); }
       }
+    }
+    function preferenceKey(name) { return 'koder.' + name; }
+    function readPreference(name, fallback) {
+      try { return localStorage.getItem(preferenceKey(name)) || fallback; } catch (_) { return fallback; }
+    }
+    function writePreference(name, value) {
+      try { localStorage.setItem(preferenceKey(name), String(value)); } catch (_) {}
     }
   </script>
 </body>
