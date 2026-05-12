@@ -53,11 +53,11 @@ func TestServerExposesTranscriptAndEvents(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	msg, err := st.AddMessage(context.Background(), session.ID, domain.MessageRoleUser, "hello")
+	chat, err := st.DefaultChat(context.Background(), session.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.AddPart(context.Background(), msg.ID, domain.TextPayload{Text: "hello"}); err != nil {
+	if _, err := appendDebugTimelineItem(st, chat.ID, domain.UserMessage{Text: "hello"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -80,15 +80,12 @@ func TestServerExposesTranscriptAndEvents(t *testing.T) {
 		t.Fatalf("unexpected transcript status: %d", resp.StatusCode)
 	}
 	var transcript struct {
-		Messages []struct {
-			Message domain.Message `json:"message"`
-			Parts   []domain.Part  `json:"parts"`
-		} `json:"messages"`
+		Timeline []domain.TimelineItem `json:"timeline"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&transcript); err != nil {
 		t.Fatal(err)
 	}
-	if len(transcript.Messages) != 1 || len(transcript.Messages[0].Parts) != 1 {
+	if len(transcript.Timeline) != 1 {
 		t.Fatalf("unexpected transcript payload: %#v", transcript)
 	}
 
@@ -149,18 +146,21 @@ func TestServerExposesSessionAnalysis(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assistantStop, err := st.AddMessage(context.Background(), session.ID, domain.MessageRoleAssistant, "Now update `CollidesWith`:")
+	chat, err := st.DefaultChat(context.Background(), session.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.AddPart(context.Background(), assistantStop.ID, domain.TextPayload{Text: "Now update `CollidesWith`:"}); err != nil {
-		t.Fatal(err)
-	}
-	toolMsg, err := st.AddMessage(context.Background(), session.ID, domain.MessageRoleAssistant, "edit")
+	assistantStop, err := appendDebugTimelineItem(st, chat.ID, domain.AssistantMessage{Text: "Now update `CollidesWith`:"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.AddPart(context.Background(), toolMsg.ID, domain.ToolCallPayload{Tool: domain.ToolKindEdit, Args: map[string]string{"path": "main.go"}}); err != nil {
+	toolMsg, err := appendDebugTimelineItem(st, chat.ID, domain.AssistantMessage{Tools: []domain.ToolCall{{
+		ToolCallID: "call_1",
+		Tool:       domain.ToolKindEdit,
+		Args:       map[string]string{"path": "main.go"},
+		Status:     domain.ToolStatusPending,
+	}}})
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -201,6 +201,18 @@ func TestServerExposesSessionAnalysis(t *testing.T) {
 	if analysis.BadStops[0].NextTool != "edit" {
 		t.Fatalf("expected next tool edit, got %#v", analysis.BadStops[0])
 	}
+}
+
+func appendDebugTimelineItem(st *store.Store, chatID int64, content domain.TimelineContent) (domain.TimelineItem, error) {
+	item, err := st.AppendTimeline(context.Background(), chatID, content)
+	if err != nil {
+		return domain.TimelineItem{}, err
+	}
+	item.Seal(item.UpdatedAt)
+	if err := st.Timeline().Put(context.Background(), item); err != nil {
+		return domain.TimelineItem{}, err
+	}
+	return item, nil
 }
 
 func TestServerExposesPprofHandlers(t *testing.T) {

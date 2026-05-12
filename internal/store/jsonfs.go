@@ -394,11 +394,6 @@ func (b *jsonfsBackend) ListSessions(ctx context.Context) ([]domain.Session, err
 		if err := readJSONFile(path, &session); err != nil {
 			return nil, fmt.Errorf("read session file: %w", err)
 		}
-		messages, err := b.sessionMessages(session.ID)
-		if err != nil {
-			return nil, err
-		}
-		session.LastMessage = sessionLastMessage(messages)
 		sessions = append(sessions, session)
 	}
 	slices.SortFunc(sessions, func(a, c domain.Session) int {
@@ -435,11 +430,6 @@ func (b *jsonfsBackend) GetSession(ctx context.Context, sessionID int64) (domain
 	if err != nil {
 		return domain.Session{}, err
 	}
-	messages, err := b.sessionMessages(session.ID)
-	if err != nil {
-		return domain.Session{}, err
-	}
-	session.LastMessage = sessionLastMessage(messages)
 	return session, nil
 }
 
@@ -489,187 +479,11 @@ func (b *jsonfsBackend) UpdateSessionAgents(
 	})
 }
 
-func (b *jsonfsBackend) CountMessagesByRole(ctx context.Context, sessionID int64, role domain.MessageRole) (int, error) {
-	messages, err := b.sessionMessages(sessionID)
-	if err != nil {
-		return 0, err
-	}
-	count := 0
-	for _, message := range messages {
-		if message.Role == role {
-			count++
-		}
-	}
-	return count, nil
-}
-
 func (b *jsonfsBackend) SetSessionModel(ctx context.Context, sessionID int64, providerID, modelID string) error {
 	return b.updateSession(ctx, sessionID, func(session *domain.Session) {
 		session.ProviderID = providerID
 		session.ModelID = modelID
 	})
-}
-
-func (b *jsonfsBackend) AddMessage(ctx context.Context, sessionID int64, role domain.MessageRole, summary string) (domain.Message, error) {
-	chat, err := b.DefaultChat(ctx, sessionID)
-	if err != nil {
-		return domain.Message{}, err
-	}
-	return b.AddChatMessage(ctx, chat.ID, role, summary)
-}
-
-func (b *jsonfsBackend) AddChatMessage(ctx context.Context, chatID int64, role domain.MessageRole, summary string) (domain.Message, error) {
-	if err := ensureContext(ctx); err != nil {
-		return domain.Message{}, err
-	}
-	b.mu.Lock()
-	defer b.mu.Unlock()
-
-	meta, err := b.readMeta()
-	if err != nil {
-		return domain.Message{}, err
-	}
-	chat, err := b.readChat(chatID)
-	if err != nil {
-		return domain.Message{}, err
-	}
-	session, err := b.readSession(chat.SessionID)
-	if err != nil {
-		return domain.Message{}, err
-	}
-	now := time.Now().UTC()
-	message := domain.Message{
-		ID:        meta.NextMessageID,
-		SessionID: chat.SessionID,
-		ChatID:    chatID,
-		Role:      role,
-		Summary:   summary,
-		CreatedAt: now,
-	}
-	meta.NextMessageID++
-	session.UpdatedAt = now
-	session.LastMessage = summary
-	chat.UpdatedAt = now
-	chat.LastMessage = summary
-
-	if err := b.writeMeta(meta); err != nil {
-		return domain.Message{}, err
-	}
-	if err := b.writeMessage(message); err != nil {
-		return domain.Message{}, err
-	}
-	if err := b.writeSession(session); err != nil {
-		return domain.Message{}, err
-	}
-	if err := b.writeChat(chat); err != nil {
-		return domain.Message{}, err
-	}
-	return message, nil
-}
-
-func (b *jsonfsBackend) UpdateMessageSummary(ctx context.Context, messageID int64, summary string) error {
-	if err := ensureContext(ctx); err != nil {
-		return err
-	}
-	b.mu.Lock()
-	defer b.mu.Unlock()
-
-	message, err := b.readMessage(messageID)
-	if err != nil {
-		return err
-	}
-	message.Summary = summary
-	return b.writeMessage(message)
-}
-
-func (b *jsonfsBackend) AddPart(ctx context.Context, messageID int64, payload domain.PartPayload) (domain.Part, error) {
-	if err := ensureContext(ctx); err != nil {
-		return domain.Part{}, err
-	}
-	b.mu.Lock()
-	defer b.mu.Unlock()
-
-	meta, err := b.readMeta()
-	if err != nil {
-		return domain.Part{}, err
-	}
-	if _, err := b.readMessage(messageID); err != nil {
-		return domain.Part{}, err
-	}
-	part := domain.Part{
-		ID:        meta.NextPartID,
-		MessageID: messageID,
-		Kind:      payload.PartKind(),
-		Payload:   payload,
-		Body:      domain.Part{Payload: payload}.Text(),
-		MetaJSON:  domain.Part{Payload: payload}.LegacyMetaJSON(),
-		CreatedAt: time.Now().UTC(),
-	}
-	meta.NextPartID++
-	if err := b.writeMeta(meta); err != nil {
-		return domain.Part{}, err
-	}
-	if err := b.writePart(part); err != nil {
-		return domain.Part{}, err
-	}
-	return part, nil
-}
-
-func (b *jsonfsBackend) UpdatePartPayload(ctx context.Context, partID int64, payload domain.PartPayload) error {
-	if err := ensureContext(ctx); err != nil {
-		return err
-	}
-	b.mu.Lock()
-	defer b.mu.Unlock()
-
-	part, err := b.readPart(partID)
-	if err != nil {
-		return err
-	}
-	part.Kind = payload.PartKind()
-	part.Payload = payload
-	part.Body = domain.Part{Payload: payload}.Text()
-	part.MetaJSON = domain.Part{Payload: payload}.LegacyMetaJSON()
-	return b.writePart(part)
-}
-
-func (b *jsonfsBackend) PartsForSession(ctx context.Context, sessionID int64) ([]domain.Message, map[int64][]domain.Part, error) {
-	chat, err := b.DefaultChat(ctx, sessionID)
-	if err != nil {
-		return nil, nil, err
-	}
-	return b.PartsForChat(ctx, chat.ID)
-}
-
-func (b *jsonfsBackend) PartsForChat(ctx context.Context, chatID int64) ([]domain.Message, map[int64][]domain.Part, error) {
-	if err := ensureContext(ctx); err != nil {
-		return nil, nil, err
-	}
-	messages, err := b.chatMessages(chatID)
-	if err != nil {
-		return nil, nil, err
-	}
-	allParts, err := b.allParts()
-	if err != nil {
-		return nil, nil, err
-	}
-	partsByMessage := make(map[int64][]domain.Part)
-	for _, part := range allParts {
-		partsByMessage[part.MessageID] = append(partsByMessage[part.MessageID], part)
-	}
-	for messageID := range partsByMessage {
-		slices.SortFunc(partsByMessage[messageID], func(a, c domain.Part) int {
-			switch {
-			case a.ID < c.ID:
-				return -1
-			case a.ID > c.ID:
-				return 1
-			default:
-				return 0
-			}
-		})
-	}
-	return messages, partsByMessage, nil
 }
 
 func (b *jsonfsBackend) CreateApproval(ctx context.Context, sessionID int64, tool domain.ToolKind, command string) (Approval, error) {
@@ -1005,38 +819,6 @@ func (b *jsonfsBackend) writeSession(session domain.Session) error {
 	return nil
 }
 
-func (b *jsonfsBackend) readMessage(messageID int64) (domain.Message, error) {
-	var message domain.Message
-	path := filepath.Join(b.root, "messages", formatID(messageID)+".json")
-	if err := readJSONFile(path, &message); err != nil {
-		return domain.Message{}, fmt.Errorf("read message: %w", err)
-	}
-	return message, nil
-}
-
-func (b *jsonfsBackend) readPart(partID int64) (domain.Part, error) {
-	var part domain.Part
-	path := filepath.Join(b.root, "parts", formatID(partID)+".json")
-	if err := readJSONFile(path, &part); err != nil {
-		return domain.Part{}, fmt.Errorf("read part: %w", err)
-	}
-	return part, nil
-}
-
-func (b *jsonfsBackend) writeMessage(message domain.Message) error {
-	if err := writeJSONFile(filepath.Join(b.root, "messages", formatID(message.ID)+".json"), message); err != nil {
-		return fmt.Errorf("write message: %w", err)
-	}
-	return nil
-}
-
-func (b *jsonfsBackend) writePart(part domain.Part) error {
-	if err := writeJSONFile(filepath.Join(b.root, "parts", formatID(part.ID)+".json"), part); err != nil {
-		return fmt.Errorf("write part: %w", err)
-	}
-	return nil
-}
-
 func (b *jsonfsBackend) readApproval(approvalID int64) (Approval, error) {
 	var approval Approval
 	path := filepath.Join(b.root, "approvals", formatID(approvalID)+".json")
@@ -1166,88 +948,6 @@ func (b *jsonfsBackend) listTodosLocked(sessionID int64, milestoneRef string) ([
 		}
 	})
 	return todos, nil
-}
-
-func (b *jsonfsBackend) sessionMessages(sessionID int64) ([]domain.Message, error) {
-	var sessionFound bool
-	if _, err := b.readSession(sessionID); err == nil {
-		sessionFound = true
-	}
-	if !sessionFound {
-		return nil, fmt.Errorf("session %d not found", sessionID)
-	}
-	paths, err := sortedJSONPaths(filepath.Join(b.root, "messages"))
-	if err != nil {
-		return nil, fmt.Errorf("list message files: %w", err)
-	}
-	var messages []domain.Message
-	for _, path := range paths {
-		var message domain.Message
-		if err := readJSONFile(path, &message); err != nil {
-			return nil, fmt.Errorf("read message file: %w", err)
-		}
-		if message.SessionID == sessionID {
-			messages = append(messages, message)
-		}
-	}
-	slices.SortFunc(messages, func(a, c domain.Message) int {
-		switch {
-		case a.ID < c.ID:
-			return -1
-		case a.ID > c.ID:
-			return 1
-		default:
-			return 0
-		}
-	})
-	return messages, nil
-}
-
-func (b *jsonfsBackend) chatMessages(chatID int64) ([]domain.Message, error) {
-	if _, err := b.readChat(chatID); err != nil {
-		return nil, err
-	}
-	paths, err := sortedJSONPaths(filepath.Join(b.root, "messages"))
-	if err != nil {
-		return nil, fmt.Errorf("list message files: %w", err)
-	}
-	var messages []domain.Message
-	for _, path := range paths {
-		var message domain.Message
-		if err := readJSONFile(path, &message); err != nil {
-			return nil, fmt.Errorf("read message file: %w", err)
-		}
-		if message.ChatID == chatID {
-			messages = append(messages, message)
-		}
-	}
-	slices.SortFunc(messages, func(a, c domain.Message) int {
-		switch {
-		case a.ID < c.ID:
-			return -1
-		case a.ID > c.ID:
-			return 1
-		default:
-			return 0
-		}
-	})
-	return messages, nil
-}
-
-func (b *jsonfsBackend) allParts() ([]domain.Part, error) {
-	paths, err := sortedJSONPaths(filepath.Join(b.root, "parts"))
-	if err != nil {
-		return nil, fmt.Errorf("list part files: %w", err)
-	}
-	parts := make([]domain.Part, 0, len(paths))
-	for _, path := range paths {
-		var part domain.Part
-		if err := readJSONFile(path, &part); err != nil {
-			return nil, fmt.Errorf("read part file: %w", err)
-		}
-		parts = append(parts, part)
-	}
-	return parts, nil
 }
 
 func (b *jsonfsBackend) allApprovals() ([]Approval, error) {

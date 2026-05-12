@@ -631,7 +631,7 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request, sessionID
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	messages, parts, err := s.store.PartsForSession(r.Context(), sessionID)
+	timeline, err := s.sessionTimeline(r.Context(), sessionID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -657,8 +657,7 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request, sessionID
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"session":        session,
-		"messages":       messages,
-		"parts":          parts,
+		"timeline":       timeline,
 		"approvals":      approvals,
 		"milestone_plan": plan,
 		"todos":          todos,
@@ -667,22 +666,14 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request, sessionID
 }
 
 func (s *Server) handleTranscript(w http.ResponseWriter, r *http.Request, sessionID int64) {
-	messages, parts, err := s.store.PartsForSession(r.Context(), sessionID)
+	timeline, err := s.sessionTimeline(r.Context(), sessionID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	type transcriptMessage struct {
-		Message domain.Message `json:"message"`
-		Parts   []domain.Part  `json:"parts"`
-	}
-	out := make([]transcriptMessage, 0, len(messages))
-	for _, msg := range messages {
-		out = append(out, transcriptMessage{Message: msg, Parts: parts[msg.ID]})
-	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"session_id": sessionID,
-		"messages":   out,
+		"timeline":   timeline,
 	})
 }
 
@@ -694,12 +685,20 @@ func (s *Server) handleEvents(w http.ResponseWriter, _ *http.Request, sessionID 
 }
 
 func (s *Server) handleAnalysis(w http.ResponseWriter, r *http.Request, sessionID int64) {
-	messages, parts, err := s.store.PartsForSession(r.Context(), sessionID)
+	timeline, err := s.sessionTimeline(r.Context(), sessionID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, analyzeSession(sessionID, messages, parts, s.recorder.Events(sessionID)))
+	writeJSON(w, http.StatusOK, analyzeSession(sessionID, timeline, s.recorder.Events(sessionID)))
+}
+
+func (s *Server) sessionTimeline(ctx context.Context, sessionID int64) ([]domain.TimelineItem, error) {
+	chat, err := s.store.DefaultChat(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	return s.store.TimelineForChat(ctx, chat.ID)
 }
 
 func (s *Server) handleGlobalEvents(w http.ResponseWriter, _ *http.Request) {
@@ -843,7 +842,8 @@ func truncate(value string, max int) string {
 }
 
 type analyzedTranscriptMessage struct {
-	message     domain.Message
+	item        domain.TimelineItem
+	role        domain.MessageRole
 	text        string
 	summary     string
 	kind        string
@@ -851,10 +851,10 @@ type analyzedTranscriptMessage struct {
 	hasToolCall bool
 }
 
-func analyzeSession(sessionID int64, messages []domain.Message, parts map[int64][]domain.Part, events []RecordedEvent) SessionAnalysis {
-	transcript := make([]analyzedTranscriptMessage, 0, len(messages))
-	for _, msg := range messages {
-		transcript = append(transcript, analyzeTranscriptMessage(msg, parts[msg.ID]))
+func analyzeSession(sessionID int64, timeline []domain.TimelineItem, events []RecordedEvent) SessionAnalysis {
+	transcript := make([]analyzedTranscriptMessage, 0, len(timeline))
+	for _, item := range timeline {
+		transcript = append(transcript, analyzeTranscriptItem(item))
 	}
 	out := SessionAnalysis{
 		SessionID:       sessionID,
@@ -880,17 +880,17 @@ func analyzeSession(sessionID int64, messages []domain.Message, parts map[int64]
 			continue
 		}
 		record := SessionBadStopRecord{
-			MessageID:        msg.message.ID,
-			ChatID:           msg.message.ChatID,
-			CreatedAt:        msg.message.CreatedAt,
+			MessageID:        msg.item.ID,
+			ChatID:           msg.item.ChatID,
+			CreatedAt:        msg.item.CreatedAt,
 			Summary:          msg.summary,
 			Text:             msg.text,
 			SameTurnToolCall: msg.hasToolCall,
 		}
 		if i+1 < len(transcript) {
 			next := transcript[i+1]
-			record.NextMessageID = next.message.ID
-			record.NextRole = string(next.message.Role)
+			record.NextMessageID = next.item.ID
+			record.NextRole = string(next.role)
 			record.NextKind = next.kind
 			if len(next.toolNames) > 0 {
 				record.NextTool = next.toolNames[0]
@@ -904,52 +904,53 @@ func analyzeSession(sessionID int64, messages []domain.Message, parts map[int64]
 	return out
 }
 
-func analyzeTranscriptMessage(msg domain.Message, parts []domain.Part) analyzedTranscriptMessage {
-	out := analyzedTranscriptMessage{
-		message: msg,
-		summary: strings.TrimSpace(msg.Summary),
-	}
-	var texts []string
-	for _, part := range parts {
-		switch part.Kind {
-		case domain.PartKindText:
-			text := strings.TrimSpace(part.Text())
-			if text != "" {
-				texts = append(texts, text)
-			}
-			if out.kind == "" {
-				out.kind = string(domain.PartKindText)
-			}
-		case domain.PartKindToolCall:
+func analyzeTranscriptItem(item domain.TimelineItem) analyzedTranscriptMessage {
+	out := analyzedTranscriptMessage{item: item}
+	switch content := item.Content.(type) {
+	case domain.UserMessage:
+		out.role = domain.MessageRoleUser
+		out.kind = string(domain.TimelineKindUser)
+		out.text = strings.TrimSpace(content.Text)
+	case domain.AssistantMessage:
+		out.role = domain.MessageRoleAssistant
+		out.kind = string(domain.TimelineKindAssistant)
+		out.text = strings.TrimSpace(content.Text)
+		if out.text == "" {
+			out.text = strings.TrimSpace(content.Reasoning.Text)
+		}
+		for _, tool := range content.Tools {
 			out.hasToolCall = true
-			name := ""
-			if payload, ok := part.Payload.(domain.ToolCallPayload); ok {
-				name = string(payload.Tool)
-			}
-			if name != "" {
-				out.toolNames = append(out.toolNames, name)
-			}
-			out.kind = string(domain.PartKindToolCall)
-		default:
-			if out.kind == "" {
-				out.kind = string(part.Kind)
+			if tool.Tool != "" {
+				out.toolNames = append(out.toolNames, string(tool.Tool))
 			}
 		}
-	}
-	if len(texts) > 0 {
-		out.text = strings.Join(texts, "\n\n")
-		if out.summary == "" {
-			out.summary = truncate(out.text, 120)
+	case domain.ToolExecution:
+		out.role = domain.MessageRoleTool
+		out.kind = string(domain.TimelineKindTool)
+		out.toolNames = append(out.toolNames, string(content.Tool))
+		if content.Result != nil {
+			out.text = strings.TrimSpace(content.Result.Text)
 		}
+		if content.Error != nil {
+			out.text = strings.TrimSpace(content.Error.Message)
+		}
+	case domain.Notice:
+		out.role = domain.MessageRoleTool
+		out.kind = string(domain.TimelineKindNotice)
+		out.text = strings.TrimSpace(content.Text)
+	case domain.Compaction:
+		out.role = domain.MessageRoleTool
+		out.kind = string(domain.TimelineKindCompaction)
+		out.text = strings.TrimSpace(content.Summary)
+	default:
+		out.kind = "item"
 	}
-	if out.kind == "" {
-		out.kind = "message"
-	}
+	out.summary = truncate(out.text, 120)
 	return out
 }
 
 func looksLikeBadStop(msg analyzedTranscriptMessage) bool {
-	if msg.message.Role != domain.MessageRoleAssistant {
+	if msg.role != domain.MessageRoleAssistant {
 		return false
 	}
 	if msg.hasToolCall {

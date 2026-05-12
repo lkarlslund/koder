@@ -279,14 +279,22 @@ func TestPlanPersistStoresRealTodoIDsInOutput(t *testing.T) {
 		t.Fatalf("expected persisted event to contain real todo ids, got %q", event.Text)
 	}
 
-	messages, partsByMessage, err := st.PartsForSession(context.Background(), session.ID)
+	chat, err := st.DefaultChat(context.Background(), session.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(messages) != 1 {
-		t.Fatalf("expected one tool message, got %d", len(messages))
+	items, err := st.TimelineForChat(context.Background(), chat.ID)
+	if err != nil {
+		t.Fatal(err)
 	}
-	body := partsByMessage[messages[0].ID][0].Body
+	if len(items) != 1 {
+		t.Fatalf("expected one tool item, got %d", len(items))
+	}
+	exec, ok := items[0].Content.(domain.ToolExecution)
+	if !ok || exec.Result == nil {
+		t.Fatalf("expected tool execution, got %#v", items[0])
+	}
+	body := exec.Result.Text
 	if strings.Contains(body, "#0") || !strings.Contains(body, "#1 one") || !strings.Contains(body, "#2 two") {
 		t.Fatalf("expected persisted body to contain real todo ids, got %q", body)
 	}

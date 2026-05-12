@@ -9,8 +9,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/lkarlslund/koder/internal/domain"
 )
 
 const (
@@ -24,8 +22,6 @@ type metaRecord struct {
 	Backend        string           `json:"backend"`
 	NextSessionID  int64            `json:"next_session_id"`
 	NextChatID     int64            `json:"next_chat_id"`
-	NextMessageID  int64            `json:"next_message_id"`
-	NextPartID     int64            `json:"next_part_id"`
 	NextApprovalID int64            `json:"next_approval_id"`
 	NextTaskID     int64            `json:"next_task_id"`
 	NextTodoID     int64            `json:"next_todo_id"`
@@ -39,8 +35,6 @@ func defaultMeta(backend string) metaRecord {
 		Backend:        backend,
 		NextSessionID:  1,
 		NextChatID:     1,
-		NextMessageID:  1,
-		NextPartID:     1,
 		NextApprovalID: 1,
 		NextTaskID:     1,
 		NextTodoID:     1,
@@ -118,13 +112,6 @@ func readJSONFile(path string, dst any) error {
 
 func ensureDir(path string) error {
 	return os.MkdirAll(path, 0o755)
-}
-
-func sessionLastMessage(messages []domain.Message) string {
-	if len(messages) == 0 {
-		return ""
-	}
-	return messages[len(messages)-1].Summary
 }
 
 func fileExists(path string) bool {

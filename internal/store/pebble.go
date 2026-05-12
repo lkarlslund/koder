@@ -400,73 +400,6 @@ func (b *pebbleBackend) UpdateChat(ctx context.Context, chat domain.Chat) error 
 	return nil
 }
 
-func (b *pebbleBackend) AddMessage(ctx context.Context, sessionID int64, role domain.MessageRole, summary string) (domain.Message, error) {
-	chat, err := b.DefaultChat(ctx, sessionID)
-	if err != nil {
-		return domain.Message{}, err
-	}
-	return b.AddChatMessage(ctx, chat.ID, role, summary)
-}
-
-func (b *pebbleBackend) AddChatMessage(ctx context.Context, chatID int64, role domain.MessageRole, summary string) (domain.Message, error) {
-	if err := ensureContext(ctx); err != nil {
-		return domain.Message{}, err
-	}
-	b.mu.Lock()
-	defer b.mu.Unlock()
-
-	meta, err := b.readMeta()
-	if err != nil {
-		return domain.Message{}, err
-	}
-	chat, err := b.readChat(chatID)
-	if err != nil {
-		return domain.Message{}, err
-	}
-	session, err := b.readSession(chat.SessionID)
-	if err != nil {
-		return domain.Message{}, err
-	}
-	previousSession := session
-	now := time.Now().UTC()
-	message := domain.Message{
-		ID:        meta.NextMessageID,
-		SessionID: chat.SessionID,
-		ChatID:    chatID,
-		Role:      role,
-		Summary:   summary,
-		CreatedAt: now,
-	}
-	meta.NextMessageID++
-
-	session.UpdatedAt = now
-	session.LastMessage = summary
-	chat.UpdatedAt = now
-	chat.LastMessage = summary
-
-	batch := b.db.NewBatch()
-	defer batch.Close()
-	if err := b.putMeta(batch, meta); err != nil {
-		return domain.Message{}, err
-	}
-	if err := b.putMessage(batch, message); err != nil {
-		return domain.Message{}, err
-	}
-	if err := batch.Set([]byte(messageChatIndexKey(chatID, message.ID)), nil, nil); err != nil {
-		return domain.Message{}, fmt.Errorf("index message by chat: %w", err)
-	}
-	if err := b.putSession(batch, &previousSession, &session); err != nil {
-		return domain.Message{}, err
-	}
-	if err := b.putChat(batch, chat); err != nil {
-		return domain.Message{}, err
-	}
-	if err := batch.Commit(pebble.Sync); err != nil {
-		return domain.Message{}, fmt.Errorf("commit add message: %w", err)
-	}
-	return message, nil
-}
-
 func (b *pebbleBackend) ListSessions(ctx context.Context) ([]domain.Session, error) {
 	if err := ensureContext(ctx); err != nil {
 		return nil, err
@@ -555,67 +488,11 @@ func (b *pebbleBackend) UpdateSessionAgents(
 	})
 }
 
-func (b *pebbleBackend) CountMessagesByRole(ctx context.Context, sessionID int64, role domain.MessageRole) (int, error) {
-	messages, _, err := b.PartsForSession(ctx, sessionID)
-	if err != nil {
-		return 0, err
-	}
-	count := 0
-	for _, message := range messages {
-		if message.Role == role {
-			count++
-		}
-	}
-	return count, nil
-}
-
 func (b *pebbleBackend) SetSessionModel(ctx context.Context, sessionID int64, providerID, modelID string) error {
 	return b.updateSession(ctx, sessionID, func(session *domain.Session) {
 		session.ProviderID = providerID
 		session.ModelID = modelID
 	})
-}
-
-func (b *pebbleBackend) UpdateMessageSummary(ctx context.Context, messageID int64, summary string) error {
-	if err := ensureContext(ctx); err != nil {
-		return err
-	}
-	b.mu.Lock()
-	defer b.mu.Unlock()
-
-	message, err := b.readMessage(messageID)
-	if err != nil {
-		return err
-	}
-	session, err := b.readSession(message.SessionID)
-	if err != nil {
-		return err
-	}
-	chat, err := b.readChat(message.ChatID)
-	if err != nil {
-		return err
-	}
-
-	oldSummary := message.Summary
-	message.Summary = summary
-	batch := b.db.NewBatch()
-	defer batch.Close()
-	if err := b.putMessage(batch, message); err != nil {
-		return err
-	}
-	if session.LastMessage == "" || session.LastMessage == oldSummary {
-		session.LastMessage = summary
-		if err := b.putSession(batch, &session, &session); err != nil {
-			return err
-		}
-	}
-	if chat.LastMessage == "" || chat.LastMessage == oldSummary {
-		chat.LastMessage = summary
-		if err := b.putChat(batch, chat); err != nil {
-			return err
-		}
-	}
-	return batch.Commit(pebble.Sync)
 }
 
 func (b *pebbleBackend) SetChatQueuedInputs(ctx context.Context, chatID int64, items []domain.QueuedInput) error {
@@ -636,117 +513,6 @@ func (b *pebbleBackend) SetChatQueuedInputs(ctx context.Context, chatID int64, i
 		return err
 	}
 	return batch.Commit(pebble.Sync)
-}
-
-func (b *pebbleBackend) AddPart(ctx context.Context, messageID int64, payload domain.PartPayload) (domain.Part, error) {
-	if err := ensureContext(ctx); err != nil {
-		return domain.Part{}, err
-	}
-	b.mu.Lock()
-	defer b.mu.Unlock()
-
-	meta, err := b.readMeta()
-	if err != nil {
-		return domain.Part{}, err
-	}
-	if _, err := b.readMessage(messageID); err != nil {
-		return domain.Part{}, err
-	}
-	now := time.Now().UTC()
-	part := domain.Part{
-		ID:        meta.NextPartID,
-		MessageID: messageID,
-		Kind:      payload.PartKind(),
-		Payload:   payload,
-		Body:      domain.Part{Payload: payload}.Text(),
-		MetaJSON:  domain.Part{Payload: payload}.LegacyMetaJSON(),
-		CreatedAt: now,
-	}
-	meta.NextPartID++
-
-	batch := b.db.NewBatch()
-	defer batch.Close()
-	if err := b.putMeta(batch, meta); err != nil {
-		return domain.Part{}, err
-	}
-	if err := b.putPart(batch, part); err != nil {
-		return domain.Part{}, err
-	}
-	if err := batch.Set([]byte(partMessageIndexKey(messageID, part.ID)), nil, nil); err != nil {
-		return domain.Part{}, fmt.Errorf("index part by message: %w", err)
-	}
-	if err := batch.Commit(pebble.Sync); err != nil {
-		return domain.Part{}, fmt.Errorf("commit add part: %w", err)
-	}
-	return part, nil
-}
-
-func (b *pebbleBackend) UpdatePartPayload(ctx context.Context, partID int64, payload domain.PartPayload) error {
-	if err := ensureContext(ctx); err != nil {
-		return err
-	}
-	b.mu.Lock()
-	defer b.mu.Unlock()
-
-	part, err := b.readPart(partID)
-	if err != nil {
-		return err
-	}
-	part.Kind = payload.PartKind()
-	part.Payload = payload
-	part.Body = domain.Part{Payload: payload}.Text()
-	part.MetaJSON = domain.Part{Payload: payload}.LegacyMetaJSON()
-
-	batch := b.db.NewBatch()
-	defer batch.Close()
-	if err := b.putPart(batch, part); err != nil {
-		return err
-	}
-	return batch.Commit(pebble.Sync)
-}
-
-func (b *pebbleBackend) PartsForSession(ctx context.Context, sessionID int64) ([]domain.Message, map[int64][]domain.Part, error) {
-	chat, err := b.DefaultChat(ctx, sessionID)
-	if err != nil {
-		return nil, nil, err
-	}
-	return b.PartsForChat(ctx, chat.ID)
-}
-
-func (b *pebbleBackend) PartsForChat(ctx context.Context, chatID int64) ([]domain.Message, map[int64][]domain.Part, error) {
-	if err := ensureContext(ctx); err != nil {
-		return nil, nil, err
-	}
-	if _, err := b.readChat(chatID); err != nil {
-		return nil, nil, err
-	}
-	iter, err := b.db.NewIter(&pebble.IterOptions{
-		LowerBound: []byte(messageChatIndexPrefix(chatID)),
-		UpperBound: nextPrefix([]byte(messageChatIndexPrefix(chatID))),
-	})
-	if err != nil {
-		return nil, nil, fmt.Errorf("new message iterator: %w", err)
-	}
-	defer iter.Close()
-	var messages []domain.Message
-	partsByMessage := make(map[int64][]domain.Part)
-	for ok := iter.First(); ok; ok = iter.Next() {
-		messageID, err := messageIDFromChatIndex(iter.Key())
-		if err != nil {
-			return nil, nil, err
-		}
-		message, err := b.readMessage(messageID)
-		if err != nil {
-			return nil, nil, err
-		}
-		messages = append(messages, message)
-		parts, err := b.partsForMessage(messageID)
-		if err != nil {
-			return nil, nil, err
-		}
-		partsByMessage[message.ID] = parts
-	}
-	return messages, partsByMessage, iter.Error()
 }
 
 func (b *pebbleBackend) CreateApproval(ctx context.Context, sessionID int64, tool domain.ToolKind, command string) (Approval, error) {
@@ -1206,28 +972,6 @@ func (b *pebbleBackend) putChat(batch *pebble.Batch, chat domain.Chat) error {
 	return nil
 }
 
-func (b *pebbleBackend) putMessage(batch *pebble.Batch, message domain.Message) error {
-	data, err := encodeJSON(message)
-	if err != nil {
-		return fmt.Errorf("encode message: %w", err)
-	}
-	if err := batch.Set([]byte(messageKey(message.ID)), data, nil); err != nil {
-		return fmt.Errorf("write message: %w", err)
-	}
-	return nil
-}
-
-func (b *pebbleBackend) putPart(batch *pebble.Batch, part domain.Part) error {
-	data, err := encodeJSON(part)
-	if err != nil {
-		return fmt.Errorf("encode part: %w", err)
-	}
-	if err := batch.Set([]byte(partKey(part.ID)), data, nil); err != nil {
-		return fmt.Errorf("write part: %w", err)
-	}
-	return nil
-}
-
 func (b *pebbleBackend) putApproval(batch *pebble.Batch, approval Approval) error {
 	data, err := encodeJSON(approval)
 	if err != nil {
@@ -1288,22 +1032,6 @@ func (b *pebbleBackend) readChat(chatID int64) (domain.Chat, error) {
 	return chat, nil
 }
 
-func (b *pebbleBackend) readMessage(messageID int64) (domain.Message, error) {
-	var message domain.Message
-	if err := b.readRecord(messageKey(messageID), &message); err != nil {
-		return domain.Message{}, fmt.Errorf("get message: %w", err)
-	}
-	return message, nil
-}
-
-func (b *pebbleBackend) readPart(partID int64) (domain.Part, error) {
-	var part domain.Part
-	if err := b.readRecord(partKey(partID), &part); err != nil {
-		return domain.Part{}, fmt.Errorf("get part: %w", err)
-	}
-	return part, nil
-}
-
 func (b *pebbleBackend) readApproval(approvalID int64) (Approval, error) {
 	var approval Approval
 	if err := b.readRecord(approvalKey(approvalID), &approval); err != nil {
@@ -1356,31 +1084,6 @@ func (b *pebbleBackend) readRecord(key string, dst any) error {
 	return json.Unmarshal(cloneBytes(data), dst)
 }
 
-func (b *pebbleBackend) partsForMessage(messageID int64) ([]domain.Part, error) {
-	iter, err := b.db.NewIter(&pebble.IterOptions{
-		LowerBound: []byte(partMessageIndexPrefix(messageID)),
-		UpperBound: nextPrefix([]byte(partMessageIndexPrefix(messageID))),
-	})
-	if err != nil {
-		return nil, fmt.Errorf("new part iterator: %w", err)
-	}
-	defer iter.Close()
-
-	var parts []domain.Part
-	for ok := iter.First(); ok; ok = iter.Next() {
-		partID, err := partIDFromMessageIndex(iter.Key())
-		if err != nil {
-			return nil, err
-		}
-		var part domain.Part
-		if err := b.readRecord(partKey(partID), &part); err != nil {
-			return nil, fmt.Errorf("get part: %w", err)
-		}
-		parts = append(parts, part)
-	}
-	return parts, iter.Error()
-}
-
 func nextPrefix(prefix []byte) []byte {
 	if len(prefix) == 0 {
 		return nil
@@ -1400,20 +1103,10 @@ func chatKey(id int64) string    { return "chat/" + strconvID(id) }
 func sessionUpdatedIndexKey(updatedAt time.Time, id int64) string {
 	return "session-updated/" + formatUnixNanos(updatedAt) + "/" + strconvID(id)
 }
-func messageKey(id int64) string { return "message/" + strconvID(id) }
 func chatSessionIndexKey(sessionID, chatID int64) string {
 	return chatSessionIndexPrefix(sessionID) + "/" + strconvID(chatID)
 }
 func chatSessionIndexPrefix(sessionID int64) string { return "session-chat/" + strconvID(sessionID) }
-func messageChatIndexKey(chatID, messageID int64) string {
-	return messageChatIndexPrefix(chatID) + "/" + strconvID(messageID)
-}
-func messageChatIndexPrefix(chatID int64) string { return "chat-message/" + strconvID(chatID) }
-func partKey(id int64) string                    { return "part/" + strconvID(id) }
-func partMessageIndexKey(messageID, partID int64) string {
-	return partMessageIndexPrefix(messageID) + "/" + strconvID(partID)
-}
-func partMessageIndexPrefix(messageID int64) string { return "message-part/" + strconvID(messageID) }
 func approvalKey(id int64) string                   { return "approval/" + strconvID(id) }
 func approvalChatIndexKey(chatID, approvalID int64) string {
 	return "chat-approval/" + strconvID(chatID) + "/" + strconvID(approvalID)

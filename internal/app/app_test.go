@@ -34,6 +34,19 @@ import (
 	"github.com/lkarlslund/koder/internal/workspace"
 )
 
+func appendAppTimelineItem(t *testing.T, st *store.Store, chatID int64, content domain.TimelineContent) domain.TimelineItem {
+	t.Helper()
+	item, err := st.AppendTimeline(context.Background(), chatID, content)
+	if err != nil {
+		t.Fatal(err)
+	}
+	item.Seal(time.Now().UTC())
+	if err := st.Timeline().Put(context.Background(), item); err != nil {
+		t.Fatal(err)
+	}
+	return item
+}
+
 func TestMatchingSlashCommands(t *testing.T) {
 	all := matchingSlashCommands("")
 	if len(all) == 0 {
@@ -1581,19 +1594,12 @@ func TestForkSessionCopiesAttachmentFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	item, err := st.AppendTimeline(context.Background(), chat.ID, domain.UserMessage{
+	appendAppTimelineItem(t, st, chat.ID, domain.UserMessage{
 		Text: "hello",
 		Attachments: []domain.Attachment{{
 			ID: meta.ID, Name: meta.Name, MIME: meta.MIME, Path: meta.Path, Size: meta.Size, Source: meta.Source, Original: meta.Original,
 		}},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	item.Seal(time.Now().UTC())
-	if err := st.Timeline().Put(context.Background(), item); err != nil {
-		t.Fatal(err)
-	}
 
 	msgAny := m.forkSessionCmd(session.ID)()
 	forked, ok := msgAny.(forkSessionMsg)
@@ -1789,28 +1795,19 @@ func TestBangPromptWithoutProviderRunsShellOnly(t *testing.T) {
 		t.Fatalf("expected no synthetic user message, got %#v", done.currentSnapshot.Messages)
 	}
 
-	messages, parts, err := st.PartsForChat(context.Background(), done.currentChat.ID)
+	items, err := st.TimelineForChat(context.Background(), done.currentChat.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(messages) != 1 {
-		t.Fatalf("expected one persisted tool message, got %d", len(messages))
+	if len(items) != 1 {
+		t.Fatalf("expected one persisted tool item, got %d", len(items))
 	}
-	if messages[0].Role != domain.MessageRoleTool {
-		t.Fatalf("expected tool message role, got %q", messages[0].Role)
+	exec, ok := items[0].Content.(domain.ToolExecution)
+	if !ok || exec.Result == nil {
+		t.Fatalf("expected persisted tool execution, got %#v", items[0])
 	}
-	partList := parts[messages[0].ID]
-	if len(partList) == 0 {
-		t.Fatal("expected persisted tool parts")
-	}
-	foundOutput := false
-	for _, part := range partList {
-		if part.Kind == domain.PartKindToolOutput && strings.TrimSpace(part.Body) == "hi" {
-			foundOutput = true
-		}
-	}
-	if !foundOutput {
-		t.Fatalf("expected bash output part, got %#v", partList)
+	if !strings.Contains(exec.Result.Text, "hi") {
+		t.Fatalf("expected bash output, got %#v", exec.Result)
 	}
 }
 
@@ -3191,13 +3188,11 @@ func TestForkCommandCreatesForkedSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	msg, err := st.AddMessage(context.Background(), session.ID, domain.MessageRoleUser, "hello")
+	chat, err := st.DefaultChat(context.Background(), session.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.AddPart(context.Background(), msg.ID, domain.TextPayload{Text: "hello"}); err != nil {
-		t.Fatal(err)
-	}
+	appendAppTimelineItem(t, st, chat.ID, domain.UserMessage{Text: "hello"})
 
 	m := App{
 		cfg:             cfg,
@@ -3798,13 +3793,12 @@ func TestSessionPickerRendersCenteredDialogWithPreview(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	msg, err := st.AddMessage(context.Background(), session.ID, domain.MessageRoleAssistant, "summary")
+	chat, err := st.DefaultChat(context.Background(), session.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.AddPart(context.Background(), msg.ID, domain.UsagePayload{Usage: domain.Usage{PromptTokens: 123, CompletionTokens: 456, TotalTokens: 579}}); err != nil {
-		t.Fatal(err)
-	}
+	usage := domain.Usage{PromptTokens: 123, CompletionTokens: 456, TotalTokens: 579}
+	appendAppTimelineItem(t, st, chat.ID, domain.AssistantMessage{Text: "summary", Usage: &usage})
 
 	m := App{
 		width:   100,
@@ -4898,13 +4892,11 @@ func TestLoadSessionCmdRecordsChatLoadTiming(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	msg, err := st.AddMessage(context.Background(), session.ID, domain.MessageRoleAssistant, "hello")
+	chat, err := st.DefaultChat(context.Background(), session.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.AddPart(context.Background(), msg.ID, domain.TextPayload{Text: "hello"}); err != nil {
-		t.Fatal(err)
-	}
+	appendAppTimelineItem(t, st, chat.ID, domain.AssistantMessage{Text: "hello"})
 
 	rec := debugsrv.NewRecorder()
 	m := App{

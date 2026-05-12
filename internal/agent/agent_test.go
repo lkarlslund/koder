@@ -132,6 +132,25 @@ func appendCompactionTimelineItem(t *testing.T, st *store.Store, chatID int64, s
 	return item
 }
 
+func timelineTranscriptForSession(t *testing.T, st *store.Store, sessionID int64) ([]domain.Message, map[int64][]domain.Part, error) {
+	t.Helper()
+	chat, err := st.DefaultChat(context.Background(), sessionID)
+	if err != nil {
+		return nil, nil, err
+	}
+	return timelineTranscriptForChat(t, st, chat)
+}
+
+func timelineTranscriptForChat(t *testing.T, st *store.Store, chat domain.Chat) ([]domain.Message, map[int64][]domain.Part, error) {
+	t.Helper()
+	items, err := st.TimelineForChat(context.Background(), chat.ID)
+	if err != nil {
+		return nil, nil, err
+	}
+	messages, parts := domain.LegacyTranscriptFromTimeline(chat.SessionID, items)
+	return messages, parts, nil
+}
+
 func timelineNoticesForChat(t *testing.T, st *store.Store, chatID int64) []domain.Notice {
 	t.Helper()
 	items, err := st.TimelineForChat(context.Background(), chatID)
@@ -428,7 +447,7 @@ func TestHandleModelToolCallPersistsNormalizationFailure(t *testing.T) {
 		t.Fatalf("expected normalization failure text, got %#v", evt)
 	}
 
-	messages, parts, err := st.PartsForSession(context.Background(), session.ID)
+	messages, parts, err := timelineTranscriptForSession(t, st, session.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1684,7 +1703,7 @@ func TestExecutePreparedToolCallDoesNotPersistCanceledToolFailure(t *testing.T) 
 		t.Fatal("timed out waiting for tool cancellation")
 	}
 
-	_, parts, err := st.PartsForChat(context.Background(), chat.ID)
+	_, parts, err := timelineTranscriptForChat(t, st, chat)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1840,7 +1859,7 @@ func TestRunPromptIgnoresMalformedProviderToolCallsWhenTextIsPresent(t *testing.
 		t.Fatal("did not expect malformed provider tool call to surface as turn error when text is present")
 	}
 
-	messages, parts, err := st.PartsForSession(context.Background(), session.ID)
+	messages, parts, err := timelineTranscriptForSession(t, st, session.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2053,7 +2072,7 @@ func TestRunPromptStreamsToolCallArgumentsAcrossChunks(t *testing.T) {
 		t.Fatal("did not expect streamed tool call arguments to fail")
 	}
 
-	messages, parts, err := st.PartsForSession(context.Background(), session.ID)
+	messages, parts, err := timelineTranscriptForSession(t, st, session.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2962,7 +2981,7 @@ func TestRunPromptIncludesTransientSessionNote(t *testing.T) {
 	if len(requests) == 0 || !strings.Contains(requests[0], `Session update:\nPermission mode changed to ask.`) {
 		t.Fatalf("expected transient session note in request, got %v", requests)
 	}
-	messages, _, err := st.PartsForSession(context.Background(), session.ID)
+	messages, _, err := timelineTranscriptForSession(t, st, session.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3066,7 +3085,7 @@ func TestRunPromptCancellationDoesNotPersistAssistantError(t *testing.T) {
 		t.Fatal("expected interrupted status event")
 	}
 
-	messages, parts, err := st.PartsForSession(context.Background(), session.ID)
+	messages, parts, err := timelineTranscriptForSession(t, st, session.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3202,7 +3221,7 @@ func TestRunPromptRetriesRateLimitAndCompletes(t *testing.T) {
 		t.Fatalf("expected single retry wait of 2s, got %#v", waited)
 	}
 
-	messages, parts, err := st.PartsForSession(context.Background(), session.ID)
+	messages, parts, err := timelineTranscriptForSession(t, st, session.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3505,7 +3524,7 @@ func TestRunPromptIgnoresSessionTitleRefreshFailure(t *testing.T) {
 		t.Fatal("expected visible assistant response")
 	}
 
-	messages, parts, err := st.PartsForSession(context.Background(), session.ID)
+	messages, parts, err := timelineTranscriptForSession(t, st, session.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3724,7 +3743,7 @@ func TestRunPromptContinuesAfterReasoningOnlyTurnFollowingToolResult(t *testing.
 		t.Fatalf("expected continuation instruction after reasoning-only turn, got %v", requests)
 	}
 
-	messages, parts, err := st.PartsForSession(context.Background(), session.ID)
+	messages, parts, err := timelineTranscriptForSession(t, st, session.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3810,7 +3829,7 @@ func TestRunPromptAutoContinuesAfterIntentOnlyStopFollowingToolResult(t *testing
 		t.Fatalf("expected auto-continue instruction after intent-only stop, got %v", requests)
 	}
 
-	messages, parts, err := st.PartsForSession(context.Background(), session.ID)
+	messages, parts, err := timelineTranscriptForSession(t, st, session.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3886,7 +3905,7 @@ func TestRunPromptDoesNotAutoContinueIntentOnlyStopWhenDisabled(t *testing.T) {
 			t.Fatalf("did not expect auto-continue instruction when disabled, got %v", requests)
 		}
 	}
-	messages, parts, err := st.PartsForSession(context.Background(), session.ID)
+	messages, parts, err := timelineTranscriptForSession(t, st, session.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4022,7 +4041,7 @@ func TestRunPromptPersistsEventNoticeWhenRetriesExhausted(t *testing.T) {
 		t.Fatalf("expected %d attempts, got %d", maxRateLimitRetries+1, requests)
 	}
 
-	messages, parts, err := st.PartsForSession(context.Background(), session.ID)
+	messages, parts, err := timelineTranscriptForSession(t, st, session.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4092,7 +4111,7 @@ func TestRunPromptPersistsInterruptedEventNoticeDuringRetryWait(t *testing.T) {
 		t.Fatal("expected interrupted status event")
 	}
 
-	messages, parts, err := st.PartsForSession(context.Background(), session.ID)
+	messages, parts, err := timelineTranscriptForSession(t, st, session.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4129,7 +4148,7 @@ func TestPersistToolResultSynthesizesVisibleOutputWhenToolReturnsNothing(t *test
 		t.Fatalf("unexpected tool result event: %#v", evt)
 	}
 
-	messages, parts, err := st.PartsForSession(context.Background(), session.ID)
+	messages, parts, err := timelineTranscriptForSession(t, st, session.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -56,15 +56,22 @@ func TestPersistResult(t *testing.T) {
 	if evt.Kind != domain.EventKindToolResult {
 		t.Fatalf("unexpected event: %#v", evt)
 	}
-	messages, partsByMessage, err := st.PartsForSession(context.Background(), session.ID)
+	chat, err := st.DefaultChat(context.Background(), session.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(messages) != 1 || len(partsByMessage[messages[0].ID]) != 1 {
-		t.Fatalf("unexpected stored output: %#v %#v", messages, partsByMessage)
+	items, err := st.TimelineForChat(context.Background(), chat.ID)
+	if err != nil {
+		t.Fatal(err)
 	}
-	payload, ok := partsByMessage[messages[0].ID][0].Payload.(domain.ToolOutputPayload)
-	if !ok || payload.Tool != domain.ToolKindQuestion {
-		t.Fatalf("expected typed question tool payload, got %#v", partsByMessage[messages[0].ID][0].Payload)
+	if len(items) != 1 {
+		t.Fatalf("unexpected stored output: %#v", items)
+	}
+	exec, ok := items[0].Content.(domain.ToolExecution)
+	if !ok || exec.Tool != domain.ToolKindQuestion || exec.Result == nil {
+		t.Fatalf("expected question tool execution, got %#v", items[0])
+	}
+	if _, ok := exec.Result.Data.(domain.QuestionStoredResult); !ok {
+		t.Fatalf("expected typed question tool payload, got %#v", exec.Result.Data)
 	}
 }

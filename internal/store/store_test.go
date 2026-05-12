@@ -20,26 +20,37 @@ func TestSessionMessageRoundTrip(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			msg, err := st.AddMessage(context.Background(), session.ID, domain.MessageRoleUser, "hello")
+			chat, err := st.DefaultChat(context.Background(), session.ID)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := st.AddPart(context.Background(), msg.ID, domain.TextPayload{Text: "hello"}); err != nil {
-				t.Fatal(err)
-			}
-
-			messages, parts, err := st.PartsForSession(context.Background(), session.ID)
+			item := appendTimelineForTest(t, st, chat.ID, domain.UserMessage{Text: "hello"})
+			items, err := st.TimelineForChat(context.Background(), chat.ID)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if len(messages) != 1 {
-				t.Fatalf("unexpected message count: %d", len(messages))
+			if len(items) != 1 || items[0].ID != item.ID {
+				t.Fatalf("unexpected timeline items: %#v", items)
 			}
-			if got := parts[msg.ID][0].Text(); got != "hello" {
-				t.Fatalf("unexpected part body: %q", got)
+			user, ok := items[0].Content.(domain.UserMessage)
+			if !ok || user.Text != "hello" {
+				t.Fatalf("unexpected timeline content: %#v", items[0].Content)
 			}
 		})
 	}
+}
+
+func appendTimelineForTest(t *testing.T, st *Store, chatID int64, content domain.TimelineContent) domain.TimelineItem {
+	t.Helper()
+	item, err := st.AppendTimeline(context.Background(), chatID, content)
+	if err != nil {
+		t.Fatal(err)
+	}
+	item.Seal(time.Now().UTC())
+	if err := st.Timeline().Put(context.Background(), item); err != nil {
+		t.Fatal(err)
+	}
+	return item
 }
 
 func TestGenericCollectionRoundTripAndIndex(t *testing.T) {
@@ -160,7 +171,7 @@ func TestApprovalAndTask(t *testing.T) {
 	}
 }
 
-func TestUpdateSessionTitleAndCountMessagesByRole(t *testing.T) {
+func TestUpdateSessionTitle(t *testing.T) {
 	for _, backend := range []string{BackendPebble, BackendJSONFS} {
 		t.Run(backend, func(t *testing.T) {
 			st := openTestStore(t, backend)
@@ -168,19 +179,6 @@ func TestUpdateSessionTitleAndCountMessagesByRole(t *testing.T) {
 			session, err := st.CreateSession(context.Background(), "test", "provider", "model", nil)
 			if err != nil {
 				t.Fatal(err)
-			}
-			if _, err := st.AddMessage(context.Background(), session.ID, domain.MessageRoleUser, "hello"); err != nil {
-				t.Fatal(err)
-			}
-			if _, err := st.AddMessage(context.Background(), session.ID, domain.MessageRoleAssistant, "hi"); err != nil {
-				t.Fatal(err)
-			}
-			count, err := st.CountMessagesByRole(context.Background(), session.ID, domain.MessageRoleUser)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if count != 1 {
-				t.Fatalf("unexpected user message count: %d", count)
 			}
 			generatedAt := time.Now().UTC().Truncate(time.Second)
 			if err := st.UpdateSessionTitle(context.Background(), session.ID, "Short Helpful Session Title", generatedAt, 1); err != nil {
@@ -417,13 +415,11 @@ func TestForkSessionCopiesTranscriptAndParent(t *testing.T) {
 			if _, err := st.UpdateTodoItem(context.Background(), todos[0].ID, domain.TodoStatusCompleted, "Write tests"); err != nil {
 				t.Fatal(err)
 			}
-			msg, err := st.AddMessage(context.Background(), session.ID, domain.MessageRoleUser, "hello")
+			chat, err := st.DefaultChat(context.Background(), session.ID)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := st.AddPart(context.Background(), msg.ID, domain.TextPayload{Text: "hello"}); err != nil {
-				t.Fatal(err)
-			}
+			appendTimelineForTest(t, st, chat.ID, domain.UserMessage{Text: "hello"})
 
 			forked, err := st.ForkSession(context.Background(), session.ID)
 			if err != nil {
@@ -459,21 +455,26 @@ func TestForkSessionCopiesTranscriptAndParent(t *testing.T) {
 				t.Fatalf("expected todos copied, got %#v", forkTodos)
 			}
 
-			messages, parts, err := st.PartsForSession(context.Background(), forked.ID)
+			forkedChat, err := st.DefaultChat(context.Background(), forked.ID)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if len(messages) != 1 || messages[0].Summary != "hello" {
-				t.Fatalf("unexpected forked messages: %#v", messages)
+			items, err := st.TimelineForChat(context.Background(), forkedChat.ID)
+			if err != nil {
+				t.Fatal(err)
 			}
-			if got := parts[messages[0].ID][0].Text(); got != "hello" {
-				t.Fatalf("unexpected forked part body: %q", got)
+			if len(items) != 1 {
+				t.Fatalf("unexpected forked timeline: %#v", items)
+			}
+			user, ok := items[0].Content.(domain.UserMessage)
+			if !ok || user.Text != "hello" {
+				t.Fatalf("unexpected forked timeline content: %#v", items[0].Content)
 			}
 		})
 	}
 }
 
-func TestUpdatePartPayload(t *testing.T) {
+func TestTimelinePutUpdatesAttachmentPayload(t *testing.T) {
 	for _, backend := range []string{BackendPebble, BackendJSONFS} {
 		t.Run(backend, func(t *testing.T) {
 			st := openTestStore(t, backend)
@@ -482,24 +483,24 @@ func TestUpdatePartPayload(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			msg, err := st.AddMessage(context.Background(), session.ID, domain.MessageRoleUser, "hello")
+			chat, err := st.DefaultChat(context.Background(), session.ID)
 			if err != nil {
 				t.Fatal(err)
 			}
-			part, err := st.AddPart(context.Background(), msg.ID, domain.AttachmentPayload{Name: "note.txt", Path: "old"})
+			item := appendTimelineForTest(t, st, chat.ID, domain.UserMessage{Attachments: []domain.Attachment{{Name: "note.txt", Path: "old"}}})
+			user := item.Content.(domain.UserMessage)
+			user.Attachments[0].Path = "new"
+			item.Content = user
+			if err := st.Timeline().Put(context.Background(), item); err != nil {
+				t.Fatal(err)
+			}
+			items, err := st.TimelineForChat(context.Background(), chat.ID)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := st.UpdatePartPayload(context.Background(), part.ID, domain.AttachmentPayload{Name: "note.txt", Path: "new"}); err != nil {
-				t.Fatal(err)
-			}
-			_, parts, err := st.PartsForSession(context.Background(), session.ID)
-			if err != nil {
-				t.Fatal(err)
-			}
-			payload, ok := parts[msg.ID][0].Payload.(domain.AttachmentPayload)
-			if !ok || payload.Path != "new" {
-				t.Fatalf("unexpected updated part payload: %#v", parts[msg.ID][0].Payload)
+			got := items[0].Content.(domain.UserMessage)
+			if got.Attachments[0].Path != "new" {
+				t.Fatalf("unexpected updated attachment: %#v", got.Attachments[0])
 			}
 		})
 	}
