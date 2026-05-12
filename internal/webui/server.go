@@ -203,6 +203,11 @@ func (s *Server) handleRPC(ctx context.Context, method string, params json.RawMe
 		return map[string]bool{"stopped": true}, s.controller.Stop()
 	case "compact":
 		return map[string]bool{"started": true}, s.controller.Compact()
+	case "refresh_workspace":
+		if err := s.controller.RefreshWorkspace(ctx); err != nil {
+			return nil, err
+		}
+		return s.controller.State(), nil
 	case "switch_chat":
 		var in struct {
 			ChatID int64 `json:"chat_id"`

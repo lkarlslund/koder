@@ -10,25 +10,25 @@ import (
 )
 
 type FileStatus struct {
-	Code      string
-	Path      string
-	Additions int
-	Deletions int
+	Code      string `json:"code"`
+	Path      string `json:"path"`
+	Additions int    `json:"additions"`
+	Deletions int    `json:"deletions"`
 }
 
 type Status struct {
-	Available      bool
-	ProjectRoot    string
-	AgentsChecksum string
-	AgentsFiles    int
-	Branch         string
-	Upstream       string
-	Summary        string
-	Files          []FileStatus
-	Added          int
-	Modified       int
-	Deleted        int
-	Untracked      int
+	Available      bool         `json:"available"`
+	ProjectRoot    string       `json:"project_root"`
+	AgentsChecksum string       `json:"agents_checksum"`
+	AgentsFiles    int          `json:"agents_files"`
+	Branch         string       `json:"branch"`
+	Upstream       string       `json:"upstream"`
+	Summary        string       `json:"summary"`
+	Files          []FileStatus `json:"files"`
+	Added          int          `json:"added"`
+	Modified       int          `json:"modified"`
+	Deleted        int          `json:"deleted"`
+	Untracked      int          `json:"untracked"`
 }
 
 func Snapshot(ctx context.Context, dir string) (Status, error) {

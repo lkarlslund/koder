@@ -28,6 +28,11 @@ const indexHTML = `<!doctype html>
     .tool { border-left: 3px solid var(--bs-info); }
     .reasoning { color: var(--bs-secondary-color); }
     .model-trigger { color: inherit; text-decoration: none; }
+    .git-file { border-left: 3px solid transparent; }
+    .git-file.git-added, .diff-add { color: var(--bs-success-text-emphasis); }
+    .git-file.git-modified { border-left-color: var(--bs-warning); }
+    .git-file.git-deleted, .diff-del { color: var(--bs-danger-text-emphasis); }
+    .git-file.git-untracked { color: var(--bs-info-text-emphasis); }
     .modal-backdrop-lite { position: fixed; inset: 0; background: rgba(0, 0, 0, .45); z-index: 1050; display: grid; place-items: center; padding: 1rem; }
     .model-dialog { width: min(760px, 100%); max-height: min(720px, 90vh); overflow: hidden; display: flex; flex-direction: column; }
     .model-list { overflow: auto; }
@@ -213,6 +218,43 @@ const indexHTML = `<!doctype html>
       </div>
       <div class="small text-secondary">Workspace</div>
       <div class="text-break" x-text="state.workdir"></div>
+      <div class="mt-3">
+        <div class="d-flex align-items-center justify-content-between">
+          <div class="small text-secondary">Git</div>
+          <button class="btn btn-sm btn-outline-secondary" title="Refresh git status" @click="refreshWorkspace()"><i class="bi bi-arrow-clockwise"></i></button>
+        </div>
+        <template x-if="!gitStatus().available">
+          <div class="text-secondary mt-1">No git repository</div>
+        </template>
+        <template x-if="gitStatus().available">
+          <div class="mt-1">
+            <div class="d-flex align-items-center gap-2 flex-wrap">
+              <span class="fw-semibold" x-text="gitStatus().branch || '-'"></span>
+              <span class="small text-secondary" x-show="gitStatus().upstream" x-text="gitStatus().upstream"></span>
+              <span class="badge text-bg-secondary" x-show="gitStatus().summary" x-text="gitStatus().summary"></span>
+            </div>
+            <div class="small mt-1">
+              <span class="diff-add" x-text="'+' + (gitStatus().added || 0)"></span>
+              <span class="text-warning ms-2" x-text="'~' + (gitStatus().modified || 0)"></span>
+              <span class="diff-del ms-2" x-text="'-' + (gitStatus().deleted || 0)"></span>
+              <span class="text-info ms-2" x-text="'?' + (gitStatus().untracked || 0)"></span>
+            </div>
+            <div class="list-group list-group-flush mt-2" x-show="gitFiles().length > 0">
+              <template x-for="file in gitFiles()" :key="file.path || file.Path">
+                <div class="list-group-item bg-transparent px-0 py-1 git-file" :class="gitFileClass(file)">
+                  <div class="d-flex align-items-start justify-content-between gap-2">
+                    <span class="text-break"><span class="badge me-1" :class="gitCodeBadge(file)" x-text="gitFileCode(file)"></span><span x-text="file.path || file.Path"></span></span>
+                    <span class="small text-nowrap" x-show="gitAdditions(file) || gitDeletions(file)">
+                      <span class="diff-add" x-text="'+' + gitAdditions(file)"></span>
+                      <span class="diff-del ms-1" x-text="'-' + gitDeletions(file)"></span>
+                    </span>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </div>
+        </template>
+      </div>
     </aside>
 
     <form class="composer p-3 bg-body" @submit.prevent="send()">
@@ -494,6 +536,28 @@ const indexHTML = `<!doctype html>
           return 'bi-circle text-secondary';
         },
         chatID(chat) { return chat.ID || chat.id; },
+        gitStatus() { return this.state.workspace_status || this.state.Workspace || {}; },
+        gitFiles() { return this.gitStatus().files || this.gitStatus().Files || []; },
+        gitFileCode(file) { return file.code || file.Code || ''; },
+        gitAdditions(file) { return file.additions ?? file.Additions ?? 0; },
+        gitDeletions(file) { return file.deletions ?? file.Deletions ?? 0; },
+        gitFileClass(file) {
+          const code = this.gitFileCode(file);
+          if (code === '??') return 'git-untracked';
+          if (code.includes('D')) return 'git-deleted';
+          if (code.includes('A')) return 'git-added';
+          if (code.includes('M') || code.includes('R') || code.includes('C')) return 'git-modified';
+          return '';
+        },
+        gitCodeBadge(file) {
+          const code = this.gitFileCode(file);
+          if (code === '??') return 'text-bg-info';
+          if (code.includes('D')) return 'text-bg-danger';
+          if (code.includes('A')) return 'text-bg-success';
+          if (code.includes('M') || code.includes('R') || code.includes('C')) return 'text-bg-warning';
+          return 'text-bg-secondary';
+        },
+        refreshWorkspace() { this.rpc('refresh_workspace', {}).then(s => this.applyState(s)); },
         formatArgs(args) { return args ? JSON.stringify(args, null, 2) : ''; },
         resizeComposer() {
           const el = this.$refs.composerInput; if (!el) return;

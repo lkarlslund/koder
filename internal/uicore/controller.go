@@ -19,6 +19,7 @@ import (
 	"github.com/lkarlslund/koder/internal/skills"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools"
+	workspacepkg "github.com/lkarlslund/koder/internal/workspace"
 )
 
 // StartupMode selects the initial session behavior for renderer-neutral UI.
@@ -46,6 +47,7 @@ type State struct {
 	Snapshot     chat.Snapshot       `json:"snapshot"`
 	Milestones   store.MilestonePlan `json:"milestones"`
 	Todos        []store.TodoItem    `json:"todos"`
+	Workspace    workspacepkg.Status `json:"workspace_status"`
 	Theme        string              `json:"theme"`
 	Workdir      string              `json:"workdir"`
 	Error        string              `json:"error,omitempty"`
@@ -157,6 +159,7 @@ type Controller struct {
 	unsub     func()
 	milestone store.MilestonePlan
 	todos     []store.TodoItem
+	workspace workspacepkg.Status
 	theme     string
 	lastErr   string
 
@@ -164,6 +167,8 @@ type Controller struct {
 	nextSub int
 	nextSeq uint64
 	subs    map[int]chan Event
+
+	monitorOnce sync.Once
 }
 
 // New constructs a renderer-neutral controller.
@@ -187,7 +192,13 @@ func (c *Controller) Start(ctx context.Context, mode StartupMode) error {
 	if err != nil {
 		return err
 	}
-	return c.loadSession(ctx, session.ID, 0)
+	if err := c.loadSession(ctx, session.ID, 0); err != nil {
+		return err
+	}
+	c.monitorOnce.Do(func() {
+		go c.monitorWorkspace(ctx)
+	})
+	return nil
 }
 
 // State returns a detached snapshot of current renderer-neutral UI state.
@@ -202,6 +213,7 @@ func (c *Controller) State() State {
 		Permissions:  c.permissionsStateLocked(),
 		Milestones:   c.milestone,
 		Todos:        slices.Clone(c.todos),
+		Workspace:    c.workspace,
 		Theme:        c.theme,
 		Workdir:      c.workdir,
 		Error:        c.lastErr,
@@ -420,6 +432,22 @@ func (c *Controller) NewSession(ctx context.Context, title string) error {
 		return err
 	}
 	return c.loadSession(ctx, session.ID, 0)
+}
+
+// RefreshWorkspace refreshes workspace metadata and publishes a snapshot on change.
+func (c *Controller) RefreshWorkspace(ctx context.Context) error {
+	status, err := workspacepkg.Snapshot(ctx, c.workdir)
+	if err != nil {
+		return err
+	}
+	c.mu.Lock()
+	changed := workspaceSignature(c.workspace) != workspaceSignature(status)
+	c.workspace = status
+	c.mu.Unlock()
+	if changed {
+		c.broadcast("snapshot", c.State())
+	}
+	return nil
 }
 
 // CompleteComposer returns skill and reference completions for the current composer token.
@@ -1121,6 +1149,7 @@ func (c *Controller) loadSession(ctx context.Context, sessionID, chatID int64) e
 		return err
 	}
 	milestone, todos := c.planningState(ctx, session.ID)
+	workspaceStatus, _ := workspacepkg.Snapshot(ctx, c.workdir)
 	updates, unsub := rt.Subscribe()
 
 	c.mu.Lock()
@@ -1135,6 +1164,7 @@ func (c *Controller) loadSession(ctx context.Context, sessionID, chatID int64) e
 	c.unsub = unsub
 	c.milestone = milestone
 	c.todos = todos
+	c.workspace = workspaceStatus
 	c.lastErr = ""
 	c.mu.Unlock()
 
@@ -1228,6 +1258,19 @@ func (c *Controller) refreshPlanningState(ctx context.Context, sessionID int64) 
 	}
 	c.milestone = milestone
 	c.todos = todos
+}
+
+func (c *Controller) monitorWorkspace(ctx context.Context) {
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			_ = c.RefreshWorkspace(ctx)
+		}
+	}
 }
 
 func (c *Controller) currentRuntime() *chat.Chat {
@@ -1343,6 +1386,30 @@ func normalizedWorkspacePath(path string) string {
 		return ""
 	}
 	return filepath.Clean(path)
+}
+
+func workspaceSignature(status workspacepkg.Status) string {
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("%t\n%s\n%s\n%s\n%s\n%s\n%d/%d/%d/%d\n",
+		status.Available,
+		status.ProjectRoot,
+		status.AgentsChecksum,
+		status.Branch,
+		status.Upstream,
+		status.Summary,
+		status.Added,
+		status.Modified,
+		status.Deleted,
+		status.Untracked,
+	))
+	for _, file := range status.Files {
+		b.WriteString(file.Code)
+		b.WriteByte('\t')
+		b.WriteString(file.Path)
+		b.WriteByte('\t')
+		b.WriteString(fmt.Sprintf("%d/%d\n", file.Additions, file.Deletions))
+	}
+	return b.String()
 }
 
 // Touch avoids stale-session ordering when a renderer action changes state.

@@ -195,6 +195,15 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(string(body), `todoItems()`) {
 		t.Fatalf("expected sidebar to render todos")
 	}
+	if !strings.Contains(string(body), `gitStatus()`) {
+		t.Fatalf("expected sidebar to render git status")
+	}
+	if !strings.Contains(string(body), `gitFiles()`) {
+		t.Fatalf("expected sidebar to render git diff files")
+	}
+	if !strings.Contains(string(body), `refresh_workspace`) {
+		t.Fatalf("expected git sidebar refresh RPC")
+	}
 	if !strings.Contains(string(body), `@pointerdown="startSidebarResize($event)"`) {
 		t.Fatalf("expected draggable sidebar divider")
 	}

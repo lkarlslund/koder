@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -234,9 +237,81 @@ func TestControllerSessionsAreWorkspaceScoped(t *testing.T) {
 	}
 }
 
+func TestControllerRefreshWorkspacePublishesGitStatus(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	workdir := t.TempDir()
+	runGit(t, workdir, "init")
+	runGit(t, workdir, "config", "user.email", "test@example.com")
+	runGit(t, workdir, "config", "user.name", "Test User")
+	if err := os.WriteFile(filepath.Join(workdir, "tracked.txt"), []byte("one\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, workdir, "add", "tracked.txt")
+	runGit(t, workdir, "commit", "-m", "initial")
+	if err := os.WriteFile(filepath.Join(workdir, "tracked.txt"), []byte("one\ntwo\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workdir, "new.txt"), []byte("new\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.Default().WithStateDir(t.TempDir())
+	cfg.DefaultProvider = "test"
+	cfg.DefaultModel = "model"
+	st, err := store.OpenWithOptions(cfg.StateDir(), store.Options{Backend: store.BackendJSONFS})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	engine := agent.New(cfg, st, nil, nil, workdir)
+	ctrl := New(cfg, st, engine, workdir)
+	if err := ctrl.Start(ctx, StartupModeNew); err != nil {
+		t.Fatalf("start controller: %v", err)
+	}
+
+	state := ctrl.State()
+	if !state.Workspace.Available {
+		t.Fatalf("expected git workspace status, got %#v", state.Workspace)
+	}
+	if state.Workspace.Modified != 1 || state.Workspace.Untracked != 1 {
+		t.Fatalf("expected modified and untracked counts, got %#v", state.Workspace)
+	}
+
+	events, unsub := ctrl.Subscribe()
+	defer unsub()
+	_ = <-events
+	if err := os.WriteFile(filepath.Join(workdir, "tracked.txt"), []byte("one\ntwo\nthree\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := ctrl.RefreshWorkspace(ctx); err != nil {
+		t.Fatalf("refresh workspace: %v", err)
+	}
+	deadline := time.After(time.Second)
+	for {
+		select {
+		case event := <-events:
+			if event.Type == "snapshot" {
+				return
+			}
+		case <-deadline:
+			t.Fatal("expected workspace refresh snapshot")
+		}
+	}
+}
+
 func newTestController(t *testing.T) (*Controller, *store.Store) {
 	t.Helper()
 	return newTestControllerWithConfig(t, nil)
+}
+
+func runGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, string(out))
+	}
 }
 
 func newTestControllerWithConfig(t *testing.T, edit func(*config.Config)) (*Controller, *store.Store) {
