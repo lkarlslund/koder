@@ -3,10 +3,12 @@ package webui
 import (
 	"context"
 	"crypto/sha256"
+	"embed"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"net"
 	"net/http"
@@ -24,7 +26,10 @@ import (
 const defaultOpenDelay = 5 * time.Second
 const assetHashPlaceholder = "__KODER_ASSET_HASH__"
 
-var currentAssetHash = computeAssetHash(indexHTML)
+//go:embed assets/vendor
+var webAssets embed.FS
+
+var currentAssetHash = computeAssetHash(indexHTML, webAssets)
 
 // Options configures the web UI server.
 type Options struct {
@@ -66,6 +71,7 @@ func Start(ctx context.Context, controller *uicore.Controller, options Options) 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", s.handleIndex)
 	mux.HandleFunc("/favicon.ico", handleFavicon)
+	mux.Handle("/assets/", assetHandler())
 	mux.HandleFunc("/ws", s.handleWebSocket)
 	s.server = &http.Server{Handler: mux}
 	go func() {
@@ -148,6 +154,14 @@ func handleFavicon(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Cache-Control", "public, max-age=86400")
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func assetHandler() http.Handler {
+	files := http.FileServer(http.FS(webAssets))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-cache")
+		files.ServeHTTP(w, r)
+	})
 }
 
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
@@ -418,9 +432,25 @@ func renderIndexHTML() string {
 	return strings.ReplaceAll(indexHTML, assetHashPlaceholder, currentAssetHash)
 }
 
-func computeAssetHash(html string) string {
+func computeAssetHash(html string, assets fs.FS) string {
+	h := sha256.New()
 	normalized := strings.ReplaceAll(html, assetHashPlaceholder, "")
-	sum := sha256.Sum256([]byte(normalized))
+	_, _ = h.Write([]byte(normalized))
+	_ = fs.WalkDir(assets, "assets", func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		data, err := fs.ReadFile(assets, path)
+		if err != nil {
+			return err
+		}
+		_, _ = h.Write([]byte{0})
+		_, _ = h.Write([]byte(path))
+		_, _ = h.Write([]byte{0})
+		_, _ = h.Write(data)
+		return nil
+	})
+	sum := h.Sum(nil)
 	return hex.EncodeToString(sum[:16])
 }
 

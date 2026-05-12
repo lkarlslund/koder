@@ -8,6 +8,10 @@ const indexHTML = `<!doctype html>
   <title>koder</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+  <link href="/assets/vendor/highlight/github-dark.min.css" rel="stylesheet">
+  <script defer src="/assets/vendor/marked/marked.umd.js"></script>
+  <script defer src="/assets/vendor/dompurify/purify.min.js"></script>
+  <script defer src="/assets/vendor/highlight/highlight.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js"></script>
   <style>
     :root { color-scheme: light dark; }
@@ -25,6 +29,23 @@ const indexHTML = `<!doctype html>
     .message { border-radius: .75rem; }
     .message.user { background: var(--bs-primary-bg-subtle); }
     .message.assistant { background: var(--bs-tertiary-bg); }
+    .markdown-body { overflow-wrap: anywhere; }
+    .markdown-body > :first-child { margin-top: 0; }
+    .markdown-body > :last-child { margin-bottom: 0; }
+    .markdown-body h1, .markdown-body h2, .markdown-body h3 { margin: .45rem 0 .65rem; line-height: 1.2; }
+    .markdown-body h1 { font-size: 1.35rem; border-bottom: 1px solid var(--bs-border-color); padding-bottom: .35rem; }
+    .markdown-body h2 { font-size: 1.15rem; }
+    .markdown-body h3 { font-size: 1rem; }
+    .markdown-body p, .markdown-body ul, .markdown-body ol, .markdown-body table, .markdown-body pre { margin-bottom: .75rem; }
+    .markdown-body ul, .markdown-body ol { padding-left: 1.4rem; }
+    .markdown-body li + li { margin-top: .2rem; }
+    .markdown-body table { width: 100%; border-collapse: collapse; display: block; overflow-x: auto; }
+    .markdown-body th, .markdown-body td { border: 1px solid var(--bs-border-color); padding: .35rem .5rem; vertical-align: top; }
+    .markdown-body th { background: var(--bs-secondary-bg); font-weight: 600; }
+    .markdown-body code { color: var(--bs-code-color); background: var(--bs-secondary-bg); border-radius: .25rem; padding: .1rem .25rem; }
+    .markdown-body pre { background: #0d1117; color: #c9d1d9; border-radius: .45rem; padding: .75rem; overflow: auto; white-space: pre; }
+    .markdown-body pre code { background: transparent; color: inherit; padding: 0; border-radius: 0; }
+    .markdown-body blockquote { border-left: 3px solid var(--bs-border-color); color: var(--bs-secondary-color); padding-left: .75rem; margin: .75rem 0; }
     .tool { border-left: 3px solid var(--bs-info); }
     .reasoning { color: var(--bs-secondary-color); }
     .model-trigger { color: inherit; text-decoration: none; }
@@ -76,7 +97,7 @@ const indexHTML = `<!doctype html>
           <template x-if="item.kind === 'user'">
             <div class="message user p-3 ms-auto" style="max-width: 78%;">
               <div class="small text-secondary mb-1"><i class="bi bi-person"></i> You</div>
-              <pre x-text="item.content?.text || ''"></pre>
+              <div class="markdown-body" x-html="markdownHTML(item.content?.text || '')"></div>
             </div>
           </template>
           <template x-if="item.kind === 'assistant'">
@@ -88,12 +109,12 @@ const indexHTML = `<!doctype html>
                   <pre x-text="item.content.reasoning.text"></pre>
                 </details>
               </template>
-              <pre x-text="item.content?.text || ''"></pre>
+              <div class="markdown-body" x-html="markdownHTML(item.content?.text || '')"></div>
               <template x-for="tool in item.content?.tools || []" :key="tool.tool_call_id">
                 <div class="tool mt-3 ps-3">
                   <div class="small fw-semibold"><i class="bi bi-wrench-adjustable"></i> <span x-text="tool.tool"></span> <span class="badge text-bg-secondary" x-text="tool.status"></span></div>
                   <pre class="small text-secondary" x-text="formatArgs(tool.args)"></pre>
-                  <template x-if="tool.result"><pre class="small mt-2" x-text="tool.result.text || tool.result.diff || ''"></pre></template>
+                  <template x-if="tool.result"><div class="markdown-body small mt-2" x-html="markdownHTML(tool.result.text || tool.result.diff || '')"></div></template>
                   <template x-if="tool.error"><pre class="small text-danger mt-2" x-text="tool.error.message || tool.error.code || 'tool error'"></pre></template>
                 </div>
               </template>
@@ -110,7 +131,7 @@ const indexHTML = `<!doctype html>
       <template x-if="pendingText()">
         <section class="message assistant p-3 mb-3" style="max-width: 86%;">
           <div class="small text-secondary mb-2"><i class="bi bi-broadcast"></i> streaming</div>
-          <pre x-text="pendingText()"></pre>
+          <div class="markdown-body" x-html="markdownHTML(pendingText())"></div>
         </section>
       </template>
     </main>
@@ -445,6 +466,45 @@ const indexHTML = `<!doctype html>
 
   <script>
     window.KODER_ASSET_HASH = "__KODER_ASSET_HASH__";
+    function escapeHTML(value) {
+      return String(value || '').replace(/[&<>"']/g, ch => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[ch]));
+    }
+    function sanitizeHTML(html) {
+      if (!window.DOMPurify) return html;
+      return DOMPurify.sanitize(html, {
+        ADD_ATTR: ['class'],
+        FORBID_TAGS: ['script', 'style', 'iframe', 'object', 'embed', 'form', 'input', 'button']
+      });
+    }
+    function highlightMarkdownCode(html) {
+      if (!window.hljs || !html) return html;
+      const template = document.createElement('template');
+      template.innerHTML = html;
+      template.content.querySelectorAll('pre code').forEach(code => {
+        const raw = code.textContent || '';
+        const langMatch = String(code.className || '').match(/(?:^|\s)language-([A-Za-z0-9_+-]+)/);
+        try {
+          const highlighted = langMatch && hljs.getLanguage(langMatch[1])
+            ? hljs.highlight(raw, {language: langMatch[1], ignoreIllegals: true}).value
+            : hljs.highlightAuto(raw).value;
+          code.innerHTML = highlighted;
+          code.classList.add('hljs');
+        } catch (_) {
+          code.textContent = raw;
+        }
+      });
+      return template.innerHTML;
+    }
+    function renderMarkdown(text) {
+      const source = String(text || '');
+      if (!source.trim()) return '';
+      if (!window.marked) return '<pre>' + escapeHTML(source) + '</pre>';
+      marked.setOptions({gfm: true, breaks: false});
+      let html = marked.parse(source);
+      html = sanitizeHTML(html);
+      html = highlightMarkdownCode(html);
+      return sanitizeHTML(html);
+    }
     function koderApp() {
       return {
         ws: null, nextID: 1, pending: {}, state: {}, connected: false, draft: '', showPermissions: false,
@@ -568,6 +628,7 @@ const indexHTML = `<!doctype html>
         timeline() { return this.state.snapshot?.Timeline || this.state.snapshot?.timeline || []; },
         approvals() { return this.state.snapshot?.Approvals || this.state.snapshot?.approvals || []; },
         pendingText() { const p = this.state.snapshot?.PendingAssistant || this.state.snapshot?.pending_assistant || {}; return [p.Reasoning || p.reasoning, p.Text || p.text].filter(Boolean).join('\n'); },
+        markdownHTML(text) { return renderMarkdown(text); },
         statusText() { return this.state.snapshot?.StatusText || this.state.snapshot?.status_text || this.state.snapshot?.Status || 'idle'; },
         activeProvider() { return this.state.session?.provider_id || this.state.session?.ProviderID || ''; },
         activeModel() { return this.state.session?.model_id || this.state.session?.ModelID || ''; },

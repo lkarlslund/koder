@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/coder/websocket"
@@ -172,6 +173,24 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(string(body), `window.KODER_ASSET_HASH = "`+currentAssetHash+`"`) {
 		t.Fatalf("expected served index to publish the current asset hash")
 	}
+	if !strings.Contains(string(body), `/assets/vendor/marked/marked.umd.js`) {
+		t.Fatalf("expected marked to be loaded from vendored assets")
+	}
+	if !strings.Contains(string(body), `/assets/vendor/dompurify/purify.min.js`) {
+		t.Fatalf("expected DOMPurify to be loaded from vendored assets")
+	}
+	if !strings.Contains(string(body), `/assets/vendor/highlight/highlight.min.js`) {
+		t.Fatalf("expected highlight.js to be loaded from vendored assets")
+	}
+	if !strings.Contains(string(body), `x-html="markdownHTML(item.content?.text || '')"`) {
+		t.Fatalf("expected assistant text to render as markdown HTML")
+	}
+	if !strings.Contains(string(body), `x-html="markdownHTML(pendingText())"`) {
+		t.Fatalf("expected streaming assistant text to render as markdown HTML")
+	}
+	if !strings.Contains(string(body), `marked.parse(source)`) || !strings.Contains(string(body), `DOMPurify.sanitize`) || !strings.Contains(string(body), `hljs.highlight`) {
+		t.Fatalf("expected browser markdown renderer to parse, sanitize, and syntax-highlight")
+	}
 	if !strings.Contains(string(body), `hello.asset_hash !== window.KODER_ASSET_HASH`) || !strings.Contains(string(body), `location.reload()`) {
 		t.Fatalf("expected websocket reconnect to reload on asset mismatch")
 	}
@@ -303,6 +322,43 @@ func TestFaviconDoesNot404(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusNoContent {
 		t.Fatalf("expected favicon status 204, got %d", resp.StatusCode)
+	}
+}
+
+func TestVendoredAssetServes(t *testing.T) {
+	ctrl := newTestController(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoBrowser: true})
+	if err != nil {
+		t.Fatalf("start server: %v", err)
+	}
+	resp, err := http.Get(srv.URL() + "/assets/vendor/marked/marked.umd.js")
+	if err != nil {
+		t.Fatalf("get marked asset: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected marked asset status 200, got %d", resp.StatusCode)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read marked asset: %v", err)
+	}
+	if !strings.Contains(string(body), "marked") {
+		t.Fatalf("expected marked asset body")
+	}
+}
+
+func TestAssetHashIncludesVendoredAssets(t *testing.T) {
+	first := computeAssetHash("hello "+assetHashPlaceholder, fstest.MapFS{
+		"assets/vendor/a.js": {Data: []byte("one")},
+	})
+	second := computeAssetHash("hello "+assetHashPlaceholder, fstest.MapFS{
+		"assets/vendor/a.js": {Data: []byte("two")},
+	})
+	if first == second {
+		t.Fatalf("expected asset hash to change when vendored asset changes")
 	}
 }
 
