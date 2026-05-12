@@ -118,6 +118,77 @@ func TestGenericCollectionRoundTripAndIndex(t *testing.T) {
 	}
 }
 
+func TestGenericCollectionTransactionPersistsMultipleCollections(t *testing.T) {
+	type note struct {
+		ID     int64
+		ChatID int64
+		Body   string
+	}
+	type marker struct {
+		ID     int64
+		NoteID int64
+		Label  string
+	}
+	for _, backend := range []string{BackendPebble, BackendJSONFS} {
+		t.Run(backend, func(t *testing.T) {
+			dir := t.TempDir()
+			st := openTestStoreAt(t, backend, dir)
+			notes := NewCollection(st, CollectionSpec[note]{
+				Namespace: "tx-notes",
+				NextID:    "tx-note",
+				GetID:     func(v note) int64 { return v.ID },
+				SetID:     func(v *note, id int64) { v.ID = id },
+				Indexes: []IndexSpec[note]{
+					{Name: "chat", Value: func(v note) string { return strconv.FormatInt(v.ChatID, 10) }},
+				},
+			})
+			markers := NewCollection(st, CollectionSpec[marker]{
+				Namespace: "tx-markers",
+				NextID:    "tx-marker",
+				GetID:     func(v marker) int64 { return v.ID },
+				SetID:     func(v *marker, id int64) { v.ID = id },
+				Indexes: []IndexSpec[marker]{
+					{Name: "note", Value: func(v marker) string { return strconv.FormatInt(v.NoteID, 10) }},
+				},
+			})
+
+			var inserted note
+			if err := st.Transaction(context.Background(), func(tx *Tx) error {
+				var err error
+				inserted, err = notes.InsertTx(tx, context.Background(), note{ChatID: 42, Body: "inside transaction"})
+				if err != nil {
+					return err
+				}
+				_, err = markers.InsertTx(tx, context.Background(), marker{NoteID: inserted.ID, Label: "linked"})
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if err := st.Close(); err != nil {
+				t.Fatal(err)
+			}
+
+			reopened := openTestStoreAt(t, backend, dir)
+			notes = NewCollection(reopened, notes.spec)
+			markers = NewCollection(reopened, markers.spec)
+			reloadedNotes, err := notes.List(context.Background(), ByIndex[note]("chat", "42"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(reloadedNotes) != 1 || reloadedNotes[0].ID != inserted.ID {
+				t.Fatalf("reloaded notes = %#v", reloadedNotes)
+			}
+			reloadedMarkers, err := markers.List(context.Background(), ByIndex[marker]("note", strconv.FormatInt(inserted.ID, 10)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(reloadedMarkers) != 1 || reloadedMarkers[0].Label != "linked" {
+				t.Fatalf("reloaded markers = %#v", reloadedMarkers)
+			}
+		})
+	}
+}
+
 func TestApprovalAndTask(t *testing.T) {
 	for _, backend := range []string{BackendPebble, BackendJSONFS} {
 		t.Run(backend, func(t *testing.T) {
