@@ -386,6 +386,14 @@ func (r *Chat) Snapshot() Snapshot {
 	}
 }
 
+// SetSession replaces the live session metadata used for future chat runs.
+func (r *Chat) SetSession(session domain.Session) {
+	r.mu.Lock()
+	r.session = session
+	r.mu.Unlock()
+	r.broadcast(r.snapshotUpdateFlags(nil, false, false, false, false, false))
+}
+
 func (r *Chat) Subscribe() (<-chan Update, func()) {
 	ch := make(chan Update, 64)
 	r.subsMu.Lock()

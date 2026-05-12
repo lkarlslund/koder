@@ -242,6 +242,24 @@ func (s *Server) handleRPC(ctx context.Context, method string, params json.RawMe
 		}
 		s.controller.SetTheme(in.Theme)
 		return map[string]string{"theme": in.Theme}, nil
+	case "list_models":
+		options, err := s.controller.ModelOptions(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"models": options}, nil
+	case "set_model":
+		var in struct {
+			ProviderID string `json:"provider_id"`
+			ModelID    string `json:"model_id"`
+		}
+		if err := decodeParams(params, &in); err != nil {
+			return nil, err
+		}
+		if err := s.controller.SetModel(ctx, in.ProviderID, in.ModelID); err != nil {
+			return nil, err
+		}
+		return s.controller.State(), nil
 	case "set_permission_profile":
 		var in struct {
 			Profile string `json:"profile"`

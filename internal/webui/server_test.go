@@ -155,6 +155,62 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(string(body), `set_permission_profile`) {
 		t.Fatalf("expected permissions UI to call set_permission_profile")
 	}
+	if !strings.Contains(string(body), `openModelDialog()`) {
+		t.Fatalf("expected model text to open model dialog")
+	}
+	if !strings.Contains(string(body), `list_models`) {
+		t.Fatalf("expected model dialog to list models")
+	}
+	if !strings.Contains(string(body), `set_model`) {
+		t.Fatalf("expected model dialog to set model")
+	}
+}
+
+func TestWebSocketSetModelReturnsUpdatedState(t *testing.T) {
+	ctrl := newTestController(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoBrowser: true})
+	if err != nil {
+		t.Fatalf("start server: %v", err)
+	}
+	conn, _, err := websocket.Dial(ctx, "ws://"+srv.Addr()+"/ws", nil)
+	if err != nil {
+		t.Fatalf("dial websocket: %v", err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	_ = readMessage(t, ctx, conn)
+	if err := conn.Write(ctx, websocket.MessageText, []byte(`{"id":1,"method":"set_model","params":{"provider_id":"test","model_id":"next-model"}}`)); err != nil {
+		t.Fatalf("write set_model: %v", err)
+	}
+	msg := readRPCResponse(t, ctx, conn, 1)
+	var resp struct {
+		OK     bool `json:"ok"`
+		Result struct {
+			Session struct {
+				ModelID string
+			}
+			Snapshot struct {
+				Session struct {
+					ModelID string
+				}
+			}
+		} `json:"result"`
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(msg, &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !resp.OK {
+		t.Fatalf("expected set_model ok, got %s", resp.Error)
+	}
+	if resp.Result.Session.ModelID != "next-model" {
+		t.Fatalf("expected response session next-model, got %q", resp.Result.Session.ModelID)
+	}
+	if resp.Result.Snapshot.Session.ModelID != "next-model" {
+		t.Fatalf("expected runtime snapshot next-model, got %q", resp.Result.Snapshot.Session.ModelID)
+	}
 }
 
 func newTestController(t *testing.T) *uicore.Controller {
@@ -162,6 +218,9 @@ func newTestController(t *testing.T) *uicore.Controller {
 	cfg := config.Default().WithStateDir(t.TempDir())
 	cfg.DefaultProvider = "test"
 	cfg.DefaultModel = "model"
+	cfg.Providers = map[string]config.Provider{
+		"test": {BaseURL: "https://example.invalid/v1", DefaultModel: "model"},
+	}
 	st, err := store.OpenWithOptions(cfg.StateDir(), store.Options{Backend: store.BackendJSONFS})
 	if err != nil {
 		t.Fatalf("open store: %v", err)
@@ -184,4 +243,20 @@ func readMessage(t *testing.T, ctx context.Context, conn *websocket.Conn) []byte
 		t.Fatalf("read websocket: %v", err)
 	}
 	return data
+}
+
+func readRPCResponse(t *testing.T, ctx context.Context, conn *websocket.Conn, id float64) []byte {
+	t.Helper()
+	for {
+		msg := readMessage(t, ctx, conn)
+		var header struct {
+			ID any `json:"id"`
+		}
+		if err := json.Unmarshal(msg, &header); err != nil {
+			t.Fatalf("decode response header: %v", err)
+		}
+		if got, ok := header.ID.(float64); ok && got == id {
+			return msg
+		}
+	}
 }

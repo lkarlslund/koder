@@ -13,6 +13,7 @@ import (
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/permission"
+	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools"
 )
@@ -45,6 +46,15 @@ type State struct {
 	Theme        string              `json:"theme"`
 	Workdir      string              `json:"workdir"`
 	Error        string              `json:"error,omitempty"`
+}
+
+// ModelOption is a selectable provider/model pair exposed to renderers.
+type ModelOption struct {
+	ProviderID    string `json:"provider_id"`
+	ProviderLabel string `json:"provider_label"`
+	ModelID       string `json:"model_id"`
+	OwnedBy       string `json:"owned_by,omitempty"`
+	Current       bool   `json:"current"`
 }
 
 // PermissionsState describes permission profiles available to renderers.
@@ -249,6 +259,128 @@ func (c *Controller) SetTheme(theme string) {
 	c.broadcast("theme", map[string]string{"theme": theme})
 }
 
+// ModelOptions lists selectable models across configured providers.
+func (c *Controller) ModelOptions(ctx context.Context) ([]ModelOption, error) {
+	c.mu.RLock()
+	currentProvider := strings.TrimSpace(c.session.ProviderID)
+	currentModel := strings.TrimSpace(c.session.ModelID)
+	c.mu.RUnlock()
+
+	seen := map[string]struct{}{}
+	options := make([]ModelOption, 0, len(c.cfg.Providers))
+	add := func(providerID string, providerCfg config.Provider, model domain.Model) {
+		providerID = strings.TrimSpace(providerID)
+		modelID := strings.TrimSpace(model.ID)
+		if providerID == "" || modelID == "" {
+			return
+		}
+		key := providerID + "\x00" + modelID
+		if _, ok := seen[key]; ok {
+			return
+		}
+		seen[key] = struct{}{}
+		options = append(options, ModelOption{
+			ProviderID:    providerID,
+			ProviderLabel: providerEntryLabel(providerID, providerCfg),
+			ModelID:       modelID,
+			OwnedBy:       strings.TrimSpace(model.OwnedBy),
+			Current:       providerID == currentProvider && modelID == currentModel,
+		})
+	}
+
+	ids := make([]string, 0, len(c.cfg.Providers))
+	for id, providerCfg := range c.cfg.Providers {
+		if providerCfg.Disabled {
+			continue
+		}
+		ids = append(ids, id)
+	}
+	slices.Sort(ids)
+
+	var failures []string
+	for _, providerID := range ids {
+		providerCfg, ok := c.cfg.Provider(providerID)
+		if !ok {
+			continue
+		}
+		if strings.TrimSpace(providerCfg.DefaultModel) != "" {
+			add(providerID, providerCfg, domain.Model{ID: providerCfg.DefaultModel})
+		}
+		client, err := provider.New(providerID, providerCfg, nil)
+		if err != nil {
+			failures = append(failures, providerID)
+			continue
+		}
+		models, err := client.ListModels(ctx)
+		if err != nil {
+			failures = append(failures, providerID)
+			continue
+		}
+		for _, model := range models {
+			add(providerID, providerCfg, model)
+		}
+	}
+	if currentProvider != "" && currentModel != "" {
+		if providerCfg, ok := c.cfg.Provider(currentProvider); ok {
+			add(currentProvider, providerCfg, domain.Model{ID: currentModel})
+		} else {
+			add(currentProvider, config.Provider{Name: currentProvider}, domain.Model{ID: currentModel})
+		}
+	}
+	slices.SortFunc(options, func(a, b ModelOption) int {
+		if cmp := strings.Compare(a.ProviderLabel, b.ProviderLabel); cmp != 0 {
+			return cmp
+		}
+		return strings.Compare(a.ModelID, b.ModelID)
+	})
+	if len(options) == 0 && len(failures) > 0 {
+		return nil, fmt.Errorf("failed to load models from %s", strings.Join(failures, ", "))
+	}
+	return options, nil
+}
+
+// SetModel persists the active session model and updates the live chat runtime.
+func (c *Controller) SetModel(ctx context.Context, providerID, modelID string) error {
+	providerID = strings.TrimSpace(providerID)
+	modelID = strings.TrimSpace(modelID)
+	if providerID == "" {
+		return fmt.Errorf("provider id is required")
+	}
+	if modelID == "" {
+		return fmt.Errorf("model id is required")
+	}
+	if !c.cfg.HasUsableProvider(providerID) {
+		return fmt.Errorf("provider %q is not configured", providerID)
+	}
+	c.mu.RLock()
+	sessionID := c.session.ID
+	rt := c.runtime
+	c.mu.RUnlock()
+	if sessionID == 0 {
+		return fmt.Errorf("no active session")
+	}
+	if err := c.store.SetSessionModel(ctx, sessionID, providerID, modelID); err != nil {
+		return err
+	}
+	session, err := c.store.GetSession(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	c.mu.Lock()
+	c.session = session
+	for idx := range c.sessions {
+		if c.sessions[idx].ID == session.ID {
+			c.sessions[idx] = session
+		}
+	}
+	c.mu.Unlock()
+	if rt != nil {
+		rt.SetSession(session)
+	}
+	c.broadcast("snapshot", c.State())
+	return nil
+}
+
 // SetPermissionProfile updates the active chat permission profile.
 func (c *Controller) SetPermissionProfile(ctx context.Context, profile string) error {
 	profile = strings.TrimSpace(profile)
@@ -293,6 +425,13 @@ func (c *Controller) SetPermissionProfile(ctx context.Context, profile string) e
 	}
 	c.broadcast("snapshot", c.State())
 	return nil
+}
+
+func providerEntryLabel(providerID string, cfg config.Provider) string {
+	if label := strings.TrimSpace(cfg.Name); label != "" {
+		return label
+	}
+	return providerID
 }
 
 func (c *Controller) initialSession(ctx context.Context, mode StartupMode) (domain.Session, error) {

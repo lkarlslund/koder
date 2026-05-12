@@ -2,6 +2,9 @@ package uicore
 
 import (
 	"context"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -54,6 +57,61 @@ func TestControllerNewChatAndSwitchChat(t *testing.T) {
 	}
 }
 
+func TestControllerModelOptionsLoadsConfiguredModels(t *testing.T) {
+	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/models" {
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+		fmt.Fprint(w, `{"data":[{"id":"z-model","owned_by":"remote"},{"id":"a-model"}]}`)
+	}))
+	defer modelServer.Close()
+
+	ctrl, _ := newTestControllerWithConfig(t, func(cfg *config.Config) {
+		cfg.Providers = map[string]config.Provider{
+			"test": {Name: "Test Provider", BaseURL: modelServer.URL + "/v1", DefaultModel: "default-model"},
+		}
+	})
+
+	options, err := ctrl.ModelOptions(context.Background())
+	if err != nil {
+		t.Fatalf("model options: %v", err)
+	}
+	got := make([]string, 0, len(options))
+	for _, option := range options {
+		got = append(got, option.ProviderID+"/"+option.ModelID)
+	}
+	want := []string{"test/a-model", "test/default-model", "test/model", "test/z-model"}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("expected options %v, got %v", want, got)
+	}
+}
+
+func TestControllerSetModelUpdatesStoreStateAndRuntimeSnapshot(t *testing.T) {
+	ctrl, st := newTestControllerWithConfig(t, func(cfg *config.Config) {
+		cfg.Providers = map[string]config.Provider{
+			"test": {BaseURL: "https://example.invalid/v1", DefaultModel: "model"},
+		}
+	})
+	if err := ctrl.SetModel(context.Background(), "test", "next-model"); err != nil {
+		t.Fatalf("set model: %v", err)
+	}
+
+	state := ctrl.State()
+	if state.Session.ProviderID != "test" || state.Session.ModelID != "next-model" {
+		t.Fatalf("expected state model test/next-model, got %s/%s", state.Session.ProviderID, state.Session.ModelID)
+	}
+	if state.Snapshot.Session.ProviderID != "test" || state.Snapshot.Session.ModelID != "next-model" {
+		t.Fatalf("expected runtime snapshot model test/next-model, got %s/%s", state.Snapshot.Session.ProviderID, state.Snapshot.Session.ModelID)
+	}
+	session, err := st.GetSession(context.Background(), state.Session.ID)
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	if session.ModelID != "next-model" {
+		t.Fatalf("expected stored model next-model, got %q", session.ModelID)
+	}
+}
+
 func TestControllerSetPermissionProfileUpdatesActiveChat(t *testing.T) {
 	ctrl, st := newTestController(t)
 	chatID := ctrl.State().ActiveChatID
@@ -81,9 +139,17 @@ func TestControllerSetPermissionProfileRejectsUnknownProfile(t *testing.T) {
 
 func newTestController(t *testing.T) (*Controller, *store.Store) {
 	t.Helper()
+	return newTestControllerWithConfig(t, nil)
+}
+
+func newTestControllerWithConfig(t *testing.T, edit func(*config.Config)) (*Controller, *store.Store) {
+	t.Helper()
 	cfg := config.Default().WithStateDir(t.TempDir())
 	cfg.DefaultProvider = "test"
 	cfg.DefaultModel = "model"
+	if edit != nil {
+		edit(&cfg)
+	}
 	st, err := store.OpenWithOptions(cfg.StateDir(), store.Options{Backend: store.BackendJSONFS})
 	if err != nil {
 		t.Fatalf("open store: %v", err)

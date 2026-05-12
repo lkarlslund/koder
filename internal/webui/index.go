@@ -23,6 +23,10 @@ const indexHTML = `<!doctype html>
     .message.assistant { background: var(--bs-tertiary-bg); }
     .tool { border-left: 3px solid var(--bs-info); }
     .reasoning { color: var(--bs-secondary-color); }
+    .model-trigger { color: inherit; text-decoration: none; }
+    .modal-backdrop-lite { position: fixed; inset: 0; background: rgba(0, 0, 0, .45); z-index: 1050; display: grid; place-items: center; padding: 1rem; }
+    .model-dialog { width: min(760px, 100%); max-height: min(720px, 90vh); overflow: hidden; display: flex; flex-direction: column; }
+    .model-list { overflow: auto; }
     pre { white-space: pre-wrap; word-break: break-word; margin: 0; }
     @media (max-width: 900px) { .app-shell { grid-template-columns: 1fr; } .sidebar { display: none; } .topbar, .composer { grid-column: 1; } }
   </style>
@@ -97,7 +101,9 @@ const indexHTML = `<!doctype html>
     <aside class="sidebar p-3 bg-body-tertiary">
       <div class="mb-3">
         <div class="small text-secondary">Model</div>
-        <div><span x-text="state.session?.provider_id || state.session?.ProviderID || ''"></span> / <span x-text="state.session?.model_id || state.session?.ModelID || ''"></span></div>
+        <button type="button" class="btn btn-link model-trigger p-0 text-start" @click="openModelDialog()">
+          <i class="bi bi-cpu me-1 text-secondary"></i><span x-text="activeProvider()"></span> / <span x-text="activeModel()"></span>
+        </button>
       </div>
       <div class="mb-3">
         <div class="small text-secondary">Status</div>
@@ -156,10 +162,46 @@ const indexHTML = `<!doctype html>
     </form>
   </div>
 
+  <div class="modal-backdrop-lite" x-show="showModels" x-transition @keydown.escape.window="closeModelDialog()" style="display: none;">
+    <section class="model-dialog bg-body border rounded shadow">
+      <header class="d-flex align-items-center justify-content-between gap-3 p-3 border-bottom">
+        <div>
+          <div class="fw-semibold"><i class="bi bi-cpu me-1"></i> Select model</div>
+          <div class="small text-secondary" x-text="activeProvider() + ' / ' + activeModel()"></div>
+        </div>
+        <button type="button" class="btn btn-sm btn-outline-secondary" @click="closeModelDialog()"><i class="bi bi-x-lg"></i></button>
+      </header>
+      <div class="p-3 border-bottom">
+        <input class="form-control" type="search" x-model="modelQuery" placeholder="Filter models" x-ref="modelSearch">
+      </div>
+      <div class="model-list list-group list-group-flush">
+        <template x-if="modelLoading">
+          <div class="list-group-item text-secondary"><span class="spinner-border spinner-border-sm me-2"></span>Loading models</div>
+        </template>
+        <template x-if="!modelLoading && filteredModels().length === 0">
+          <div class="list-group-item text-secondary">No models match the filter</div>
+        </template>
+        <template x-for="model in filteredModels()" :key="model.provider_id + '/' + model.model_id">
+          <button type="button" class="list-group-item list-group-item-action d-flex align-items-start justify-content-between gap-3" :class="{'active': model.current}" @click="selectModel(model)">
+            <span class="text-start">
+              <span class="fw-semibold" x-text="model.model_id"></span>
+              <span class="d-block small opacity-75">
+                <span x-text="model.provider_label || model.provider_id"></span>
+                <template x-if="model.owned_by"><span x-text="' · ' + model.owned_by"></span></template>
+              </span>
+            </span>
+            <i class="bi bi-check-lg" x-show="model.current"></i>
+          </button>
+        </template>
+      </div>
+    </section>
+  </div>
+
   <script>
     function koderApp() {
       return {
         ws: null, nextID: 1, pending: {}, state: {}, connected: false, draft: '', showPermissions: false,
+        showModels: false, modelLoading: false, modelQuery: '', modelOptions: [],
         theme: localStorage.getItem('koder.theme') || 'auto', error: '',
         init() { this.applyTheme(); this.connect(); },
         applyTheme() {
@@ -192,6 +234,8 @@ const indexHTML = `<!doctype html>
         approvals() { return this.state.snapshot?.Approvals || this.state.snapshot?.approvals || []; },
         pendingText() { const p = this.state.snapshot?.PendingAssistant || this.state.snapshot?.pending_assistant || {}; return [p.Reasoning || p.reasoning, p.Text || p.text].filter(Boolean).join('\n'); },
         statusText() { return this.state.snapshot?.StatusText || this.state.snapshot?.status_text || this.state.snapshot?.Status || 'idle'; },
+        activeProvider() { return this.state.session?.provider_id || this.state.session?.ProviderID || ''; },
+        activeModel() { return this.state.session?.model_id || this.state.session?.ModelID || ''; },
         chatID(chat) { return chat.ID || chat.id; },
         formatArgs(args) { return args ? JSON.stringify(args, null, 2) : ''; },
         send() { const text = this.draft.trim(); if (!text) return; if (this.handleSlash(text)) { this.draft = ''; return; } this.draft = ''; this.rpc('send_prompt', {text}); },
@@ -209,6 +253,23 @@ const indexHTML = `<!doctype html>
         permissionName(profile) { return profile.Name || profile.name; },
         permissionLabel(name) { const p = this.permissionProfiles().find(p => this.permissionName(p) === name); return p ? (p.Label || p.label || name) : (name || '-'); },
         setPermission(profile) { this.rpc('set_permission_profile', {profile}).then(s => { this.applyState(s); this.showPermissions = false; }); },
+        openModelDialog() {
+          this.showModels = true; this.modelLoading = true; this.modelQuery = '';
+          this.$nextTick(() => this.$refs.modelSearch?.focus());
+          this.rpc('list_models', {}).then(result => { this.modelOptions = result.models || []; }).finally(() => { this.modelLoading = false; });
+        },
+        closeModelDialog() { this.showModels = false; },
+        filteredModels() {
+          const q = this.modelQuery.trim().toLowerCase();
+          const models = this.modelOptions || [];
+          if (!q) return models;
+          return models.filter(m => [m.provider_id, m.provider_label, m.model_id, m.owned_by].filter(Boolean).join(' ').toLowerCase().includes(q));
+        },
+        selectModel(model) {
+          this.rpc('set_model', {provider_id: model.provider_id, model_id: model.model_id}).then(s => {
+            this.applyState(s); this.closeModelDialog();
+          });
+        },
         setTheme(theme) { localStorage.setItem('koder.theme', theme); this.applyTheme(); this.rpc('set_theme', {theme}); }
       }
     }
