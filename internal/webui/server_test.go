@@ -175,6 +175,15 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(string(body), `hello.asset_hash !== window.KODER_ASSET_HASH`) || !strings.Contains(string(body), `location.reload()`) {
 		t.Fatalf("expected websocket reconnect to reload on asset mismatch")
 	}
+	if !strings.Contains(string(body), `rpcOn(ws, 'hello', {})`) {
+		t.Fatalf("expected hello RPC to be bound to the socket that opened")
+	}
+	if !strings.Contains(string(body), `ws.readyState !== WebSocket.OPEN`) || !strings.Contains(string(body), `try {`) {
+		t.Fatalf("expected websocket sends to be guarded against closed sockets")
+	}
+	if !strings.Contains(string(body), `rejectPending('connection closed')`) {
+		t.Fatalf("expected websocket close to reject pending RPCs")
+	}
 	if !strings.Contains(string(body), `class="form-control composer-input" rows="1"`) {
 		t.Fatalf("expected composer to start as a single line")
 	}
@@ -276,6 +285,24 @@ func TestIndexServesHTML(t *testing.T) {
 	}
 	if !strings.Contains(string(body), `showToast`) {
 		t.Fatalf("expected toast error path")
+	}
+}
+
+func TestFaviconDoesNot404(t *testing.T) {
+	ctrl := newTestController(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoBrowser: true})
+	if err != nil {
+		t.Fatalf("start server: %v", err)
+	}
+	resp, err := http.Get(srv.URL() + "/favicon.ico")
+	if err != nil {
+		t.Fatalf("get favicon: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("expected favicon status 204, got %d", resp.StatusCode)
 	}
 }
 

@@ -65,6 +65,7 @@ func Start(ctx context.Context, controller *uicore.Controller, options Options) 
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", s.handleIndex)
+	mux.HandleFunc("/favicon.ico", handleFavicon)
 	mux.HandleFunc("/ws", s.handleWebSocket)
 	s.server = &http.Server{Handler: mux}
 	go func() {
@@ -138,6 +139,15 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache")
 	_, _ = w.Write([]byte(renderIndexHTML()))
+}
+
+func handleFavicon(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/favicon.ico" {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {

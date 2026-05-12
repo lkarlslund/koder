@@ -489,11 +489,22 @@ const indexHTML = `<!doctype html>
           move(ev);
         },
         connect() {
+          if (this.ws && (this.ws.readyState === WebSocket.CONNECTING || this.ws.readyState === WebSocket.OPEN)) return;
           const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-          this.ws = new WebSocket(proto + '//' + location.host + '/ws');
-          this.ws.onopen = () => { this.connected = true; this.rpc('hello', {}).then(hello => this.applyHello(hello)); };
-          this.ws.onclose = () => { this.connected = false; setTimeout(() => this.connect(), 1000); };
-          this.ws.onmessage = ev => this.onMessage(JSON.parse(ev.data));
+          const ws = new WebSocket(proto + '//' + location.host + '/ws');
+          this.ws = ws;
+          ws.onopen = () => {
+            if (this.ws !== ws) return;
+            this.connected = true;
+            this.rpcOn(ws, 'hello', {}).then(hello => this.applyHello(hello)).catch(() => {});
+          };
+          ws.onclose = () => {
+            if (this.ws !== ws) return;
+            this.connected = false;
+            this.rejectPending('connection closed');
+            setTimeout(() => this.connect(), 1000);
+          };
+          ws.onmessage = ev => { if (this.ws === ws) this.onMessage(JSON.parse(ev.data)); };
         },
         applyHello(hello) {
           if (hello && hello.asset_hash && window.KODER_ASSET_HASH && hello.asset_hash !== window.KODER_ASSET_HASH) {
@@ -512,9 +523,28 @@ const indexHTML = `<!doctype html>
           if (msg.type === 'theme') { this.theme = msg.payload.theme || 'auto'; writePreference('theme', this.theme); this.applyTheme(); }
         },
         rpc(method, params) {
+          return this.rpcOn(this.ws, method, params).catch(err => { this.error = err.message; this.showToast(err.message); throw err; });
+        },
+        rpcOn(ws, method, params) {
           const id = this.nextID++;
-          this.ws.send(JSON.stringify({id, method, params}));
-          return new Promise((resolve, reject) => this.pending[id] = {resolve, reject}).catch(err => { this.error = err.message; this.showToast(err.message); throw err; });
+          return new Promise((resolve, reject) => {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+              reject(new Error('websocket is not connected'));
+              return;
+            }
+            this.pending[id] = {resolve, reject};
+            try {
+              ws.send(JSON.stringify({id, method, params}));
+            } catch (err) {
+              delete this.pending[id];
+              reject(err);
+            }
+          });
+        },
+        rejectPending(message) {
+          const pending = this.pending;
+          this.pending = {};
+          Object.values(pending).forEach(p => p.reject(new Error(message)));
         },
         applyState(s) {
           this.state = s || {}; this.applyTheme(); this.error = this.state.error || '';
