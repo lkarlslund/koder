@@ -1,6 +1,7 @@
 package app
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/lkarlslund/koder/internal/theme"
@@ -33,6 +34,29 @@ func TestMainScreenViewPrepareDirtyUsesNodeFlags(t *testing.T) {
 	}
 	if len(rects) >= 1 && rects[0] == (ui.Rect{W: bounds.W, H: bounds.H}) {
 		t.Fatal("expected composer invalidation to avoid a full-screen repaint")
+	}
+}
+
+func TestMainScreenViewClearsSidebarWhenHidden(t *testing.T) {
+	view := newMainScreenView()
+	ctx := &ui.Context{Palette: theme.Default().Palette}
+	bounds := ui.Rect{W: 40, H: 8}
+	sidebar := ui.AsNode(ui.Sidebar{
+		Child:  &ui.RetainedLabel{Text: "SIDEBAR"},
+		Width:  12,
+		Height: bounds.H,
+	})
+
+	view.SetSidebar(true, 12, sidebar, 1)
+	first := view.Surface(ctx, bounds)
+	if !strings.Contains(strings.Join(first.Lines(), "\n"), "SIDEBAR") {
+		t.Fatalf("expected sidebar text in initial render, got %q", first.Lines())
+	}
+
+	view.SetSidebar(false, 0, nil, 2)
+	next := view.Surface(ctx, bounds)
+	if strings.Contains(strings.Join(next.Lines(), "\n"), "SIDEBAR") {
+		t.Fatalf("expected hidden sidebar to clear retained pixels, got %q", next.Lines())
 	}
 }
 

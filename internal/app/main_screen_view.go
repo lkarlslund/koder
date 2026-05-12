@@ -144,6 +144,7 @@ func (v *mainScreenView) SetSidebar(show bool, width int, node ui.Node, hash uin
 		v.showSidebar = show
 		v.sidebarWidth = width
 		v.syncBodyChildren()
+		v.Invalidate()
 	}
 	if show {
 		v.sidebar.Set(node, hash)
