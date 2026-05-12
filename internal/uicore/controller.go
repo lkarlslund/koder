@@ -14,6 +14,8 @@ import (
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/permission"
 	"github.com/lkarlslund/koder/internal/provider"
+	"github.com/lkarlslund/koder/internal/reference"
+	"github.com/lkarlslund/koder/internal/skills"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools"
 )
@@ -111,6 +113,24 @@ type ProviderDraft struct {
 type ProviderProbeResult struct {
 	ModelCount int      `json:"model_count"`
 	Models     []string `json:"models"`
+}
+
+// ComposerCompletions describes completion candidates for composer trigger tokens.
+type ComposerCompletions struct {
+	Kind  string                   `json:"kind"`
+	Query string                   `json:"query"`
+	Start int                      `json:"start"`
+	End   int                      `json:"end"`
+	Items []ComposerCompletionItem `json:"items"`
+}
+
+// ComposerCompletionItem is one insertable composer completion.
+type ComposerCompletionItem struct {
+	Label       string `json:"label"`
+	InsertText  string `json:"insert_text"`
+	Description string `json:"description,omitempty"`
+	Kind        string `json:"kind,omitempty"`
+	Path        string `json:"path,omitempty"`
 }
 
 // Controller owns session/chat state independently from any renderer.
@@ -356,6 +376,56 @@ func (c *Controller) DeleteChat(ctx context.Context, chatID int64) error {
 	c.mu.Unlock()
 	c.broadcast("snapshot", c.State())
 	return nil
+}
+
+// CompleteComposer returns skill and reference completions for the current composer token.
+func (c *Controller) CompleteComposer(text string, cursor int) (ComposerCompletions, error) {
+	if cursor < 0 || cursor > len(text) {
+		cursor = len(text)
+	}
+	if query, start, ok := composerSkillQuery(text, cursor); ok {
+		items := matchingComposerSkills(c.workdir, query)
+		if len(items) == 1 && strings.EqualFold(items[0].Name, query) {
+			items = nil
+		}
+		out := ComposerCompletions{Kind: "skill", Query: query, Start: start, End: cursor}
+		for _, item := range items {
+			out.Items = append(out.Items, ComposerCompletionItem{
+				Label:       "$" + item.Name,
+				InsertText:  "$" + item.Name,
+				Description: blankAsDash(item.Description),
+				Kind:        string(item.Scope),
+				Path:        item.Path,
+			})
+		}
+		return out, nil
+	}
+	if query, start, end, pathMode, ok := composerMentionQuery(text, cursor); ok {
+		var matches []reference.Entry
+		var err error
+		if pathMode {
+			matches, err = reference.PathCompletions(c.workdir, query, 8)
+		} else {
+			var catalog []reference.Entry
+			catalog, err = reference.Entries(c.workdir)
+			matches = reference.Search(catalog, query, 8)
+		}
+		if err != nil {
+			return ComposerCompletions{}, err
+		}
+		out := ComposerCompletions{Kind: "reference", Query: query, Start: start, End: end}
+		for _, item := range matches {
+			out.Items = append(out.Items, ComposerCompletionItem{
+				Label:       reference.DisplayToken(item.Path),
+				InsertText:  reference.DisplayToken(item.Path),
+				Description: item.Description,
+				Kind:        string(item.Kind),
+				Path:        item.Path,
+			})
+		}
+		return out, nil
+	}
+	return ComposerCompletions{}, nil
 }
 
 // Providers returns the configured providers and catalog templates.
@@ -851,6 +921,104 @@ func applyNewProviderDefaults(next *config.Provider, autoCompactAt int) {
 	next.Stream = true
 	next.Timeout = 2 * time.Minute
 	next.Disabled = false
+}
+
+func composerSkillQuery(value string, cursor int) (query string, start int, ok bool) {
+	if cursor < 0 || cursor > len(value) {
+		cursor = len(value)
+	}
+	if cursor == 0 || strings.TrimSpace(value) == "" {
+		return "", 0, false
+	}
+	start, _ = composerTokenBounds(value, cursor)
+	if start >= len(value) || value[start] != '$' {
+		return "", 0, false
+	}
+	for _, r := range value[start+1 : cursor] {
+		if isComposerWhitespace(r) {
+			return "", 0, false
+		}
+	}
+	return strings.ToLower(strings.TrimSpace(strings.TrimPrefix(value[start:cursor], "$"))), start, true
+}
+
+func composerMentionQuery(value string, cursor int) (query string, start int, end int, pathMode bool, ok bool) {
+	if cursor < 0 || cursor > len(value) {
+		cursor = len(value)
+	}
+	if cursor == 0 || strings.TrimSpace(value) == "" {
+		return "", 0, 0, false, false
+	}
+	start, end = composerTokenBounds(value, cursor)
+	if start >= len(value) || value[start] != '@' {
+		return "", 0, 0, false, false
+	}
+	token := value[start:cursor]
+	if strings.HasPrefix(token, `@"`) {
+		query = strings.TrimSuffix(strings.TrimPrefix(token, `@"`), `"`)
+	} else {
+		query = strings.TrimPrefix(token, "@")
+	}
+	query = strings.TrimSpace(query)
+	pathMode = strings.HasPrefix(query, "./") || strings.HasPrefix(query, "../") || strings.HasPrefix(query, "/")
+	if pathMode {
+		return query, start, end, pathMode, true
+	}
+	return strings.ToLower(query), start, end, pathMode, true
+}
+
+func composerTokenBounds(value string, cursor int) (start, end int) {
+	if cursor < 0 {
+		cursor = 0
+	}
+	if cursor > len(value) {
+		cursor = len(value)
+	}
+	start = cursor
+	for start > 0 && !isComposerTokenBoundary(rune(value[start-1])) {
+		start--
+	}
+	end = cursor
+	for end < len(value) && !isComposerTokenBoundary(rune(value[end])) {
+		end++
+	}
+	return start, end
+}
+
+func isComposerWhitespace(r rune) bool {
+	switch r {
+	case ' ', '\t', '\n':
+		return true
+	default:
+		return false
+	}
+}
+
+func isComposerTokenBoundary(r rune) bool {
+	switch r {
+	case ' ', '\t', '\n', '(', '[', '{':
+		return true
+	default:
+		return false
+	}
+}
+
+func matchingComposerSkills(workdir string, query string) []skills.Skill {
+	var matches []skills.Skill
+	for _, item := range skills.Discover(workdir) {
+		name := strings.ToLower(strings.TrimSpace(item.Name))
+		if query == "" || strings.HasPrefix(name, query) {
+			matches = append(matches, item)
+		}
+	}
+	return matches
+}
+
+func blankAsDash(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return "-"
+	}
+	return value
 }
 
 func (c *Controller) initialSession(ctx context.Context, mode StartupMode) (domain.Session, error) {

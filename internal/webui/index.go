@@ -21,6 +21,7 @@ const indexHTML = `<!doctype html>
     .sidebar { min-height: 0; overflow: auto; border-left: 1px solid var(--bs-border-color); }
     .composer { grid-column: 1 / 4; border-top: 1px solid var(--bs-border-color); }
     .composer-input { max-height: 20vh; overflow-y: hidden; resize: none; }
+    .composer-menu { max-height: 32vh; overflow: auto; }
     .message { border-radius: .75rem; }
     .message.user { background: var(--bs-primary-bg-subtle); }
     .message.assistant { background: var(--bs-tertiary-bg); }
@@ -212,8 +213,19 @@ const indexHTML = `<!doctype html>
     </aside>
 
     <form class="composer p-3 bg-body" @submit.prevent="send()">
+      <div class="composer-menu list-group shadow-sm mb-2" x-show="completion.items.length > 0" style="display: none;">
+        <template x-for="(item, idx) in completion.items" :key="item.insert_text + idx">
+          <button type="button" class="list-group-item list-group-item-action d-flex align-items-start justify-content-between gap-3" :class="{'active': idx === completion.selected}" @mousedown.prevent="acceptCompletion(idx)">
+            <span class="text-start">
+              <span class="fw-semibold" x-text="item.label"></span>
+              <span class="d-block small opacity-75" x-text="item.description || item.kind || ''"></span>
+            </span>
+            <span class="badge text-bg-secondary" x-text="completion.kind"></span>
+          </button>
+        </template>
+      </div>
       <div class="input-group">
-        <textarea class="form-control composer-input" rows="1" x-ref="composerInput" x-model="draft" placeholder="Ask koder or type / for commands" @input="resizeComposer()" @keydown.enter.exact.prevent="send()" @keydown.meta.enter.prevent="send()" @keydown.ctrl.enter.prevent="send()"></textarea>
+        <textarea class="form-control composer-input" rows="1" x-ref="composerInput" x-model="draft" placeholder="Ask koder or type / for commands" @input="onComposerInput()" @click="updateCompletions()" @keyup="onComposerKeyup($event)" @keydown="onComposerKeydown($event)"></textarea>
         <button class="btn btn-primary" type="submit"><i class="bi bi-send-fill"></i></button>
       </div>
     </form>
@@ -354,6 +366,7 @@ const indexHTML = `<!doctype html>
         ws: null, nextID: 1, pending: {}, state: {}, connected: false, draft: '', showPermissions: false,
         showModels: false, modelLoading: false, modelQuery: '', modelOptions: [],
         showProviders: false, providerState: {catalog: [], providers: [], drafts: {}}, providerDraft: null, providerHeadersText: '{}', providerStatus: '', providerStatusKind: 'secondary', providerTesting: false, providerSaving: false,
+        completion: {kind: '', query: '', start: 0, end: 0, items: [], selected: 0}, completionSeq: 0,
         theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, error: '', toast: '', toastTimer: null,
         init() { this.clampSidebarRatio(); this.applyTheme(); this.connect(); window.addEventListener('resize', () => this.resizeComposer()); this.$nextTick(() => this.resizeComposer()); },
         applyTheme() {
@@ -448,7 +461,43 @@ const indexHTML = `<!doctype html>
           el.style.height = nextHeight + 'px';
           el.style.overflowY = el.scrollHeight > maxHeight ? 'auto' : 'hidden';
         },
-        send() { const text = this.draft.trim(); if (!text) return; if (this.handleSlash(text)) { this.draft = ''; this.$nextTick(() => this.resizeComposer()); return; } this.draft = ''; this.$nextTick(() => this.resizeComposer()); this.rpc('send_prompt', {text}); },
+        onComposerInput() { this.resizeComposer(); this.updateCompletions(); },
+        onComposerKeydown(ev) {
+          if (this.completion.items.length > 0) {
+            if (ev.key === 'ArrowDown') { ev.preventDefault(); this.completion.selected = Math.min(this.completion.items.length - 1, this.completion.selected + 1); return; }
+            if (ev.key === 'ArrowUp') { ev.preventDefault(); this.completion.selected = Math.max(0, this.completion.selected - 1); return; }
+            if (ev.key === 'Tab' || ev.key === 'Enter') { ev.preventDefault(); this.acceptCompletion(this.completion.selected); return; }
+            if (ev.key === 'Escape') { ev.preventDefault(); this.clearCompletions(); return; }
+          }
+          if (ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); this.send(); }
+          if (ev.key === 'Enter' && (ev.metaKey || ev.ctrlKey)) { ev.preventDefault(); this.send(); }
+        },
+        onComposerKeyup(ev) {
+          if (['ArrowDown', 'ArrowUp', 'Tab', 'Enter', 'Escape'].includes(ev.key)) return;
+          this.updateCompletions();
+        },
+        updateCompletions() {
+          const el = this.$refs.composerInput; if (!el) return;
+          const cursor = el.selectionStart ?? this.draft.length;
+          const seq = ++this.completionSeq;
+          this.rpc('composer_completions', {text: this.draft, cursor}).then(result => {
+            if (seq !== this.completionSeq) return;
+            const items = result.items || [];
+            this.completion = {kind: result.kind || '', query: result.query || '', start: result.start || 0, end: result.end || cursor, items, selected: 0};
+          }).catch(() => this.clearCompletions());
+        },
+        clearCompletions() { this.completion = {kind: '', query: '', start: 0, end: 0, items: [], selected: 0}; },
+        acceptCompletion(index) {
+          const item = this.completion.items[index]; if (!item) return;
+          const before = this.draft.slice(0, this.completion.start);
+          const after = this.draft.slice(this.completion.end);
+          const insert = item.insert_text || item.label || '';
+          this.draft = before + insert + after;
+          const cursor = before.length + insert.length;
+          this.clearCompletions();
+          this.$nextTick(() => { const el = this.$refs.composerInput; if (el) { el.focus(); el.setSelectionRange(cursor, cursor); } this.resizeComposer(); });
+        },
+        send() { const text = this.draft.trim(); if (!text) return; if (this.handleSlash(text)) { this.draft = ''; this.clearCompletions(); this.$nextTick(() => this.resizeComposer()); return; } this.draft = ''; this.clearCompletions(); this.$nextTick(() => this.resizeComposer()); this.rpc('send_prompt', {text}); },
         handleSlash(text) {
           if (text === '/permissions') { this.showPermissions = true; return true; }
           if (text === '/compact') { this.rpc('compact', {}); return true; }

@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -148,14 +150,23 @@ func TestIndexServesHTML(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read index: %v", err)
 	}
-	if !strings.Contains(string(body), `@keydown.enter.exact.prevent="send()"`) {
+	if !strings.Contains(string(body), `@keydown="onComposerKeydown($event)"`) || !strings.Contains(string(body), `if (ev.key === 'Enter' && !ev.shiftKey)`) {
 		t.Fatalf("expected plain enter to submit composer")
 	}
 	if !strings.Contains(string(body), `class="form-control composer-input" rows="1"`) {
 		t.Fatalf("expected composer to start as a single line")
 	}
-	if !strings.Contains(string(body), `@input="resizeComposer()"`) {
+	if !strings.Contains(string(body), `@input="onComposerInput()"`) {
 		t.Fatalf("expected composer input to resize itself as text changes")
+	}
+	if !strings.Contains(string(body), `composer_completions`) {
+		t.Fatalf("expected composer to request web completions")
+	}
+	if !strings.Contains(string(body), `acceptCompletion(this.completion.selected)`) {
+		t.Fatalf("expected composer completion keyboard acceptance")
+	}
+	if !strings.Contains(string(body), `completion.items.length > 0`) {
+		t.Fatalf("expected composer completion menu")
 	}
 	if !strings.Contains(string(body), `* 0.2`) {
 		t.Fatalf("expected composer height to cap at 20 percent of the viewport")
@@ -456,7 +467,94 @@ func TestWebSocketTestProviderReturnsProbeResult(t *testing.T) {
 	}
 }
 
+func TestWebSocketComposerCompletionsReturnsSkillsAndReferences(t *testing.T) {
+	workdir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(workdir, ".agents", "skills", "review"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workdir, ".agents", "skills", "review", "SKILL.md"), []byte("---\nname: review\ndescription: Review code carefully\n---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workdir, "README.md"), []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ctrl := newTestControllerWithWorkdir(t, workdir)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoBrowser: true})
+	if err != nil {
+		t.Fatalf("start server: %v", err)
+	}
+	conn, _, err := websocket.Dial(ctx, "ws://"+srv.Addr()+"/ws", nil)
+	if err != nil {
+		t.Fatalf("dial websocket: %v", err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	_ = readMessage(t, ctx, conn)
+	if err := conn.Write(ctx, websocket.MessageText, []byte(`{"id":1,"method":"composer_completions","params":{"text":"Use $rev","cursor":8}}`)); err != nil {
+		t.Fatalf("write skill completion request: %v", err)
+	}
+	msg := readRPCResponse(t, ctx, conn, 1)
+	var skillResp struct {
+		OK     bool `json:"ok"`
+		Result struct {
+			Kind  string `json:"kind"`
+			Start int    `json:"start"`
+			End   int    `json:"end"`
+			Items []struct {
+				Label      string `json:"label"`
+				InsertText string `json:"insert_text"`
+			} `json:"items"`
+		} `json:"result"`
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(msg, &skillResp); err != nil {
+		t.Fatalf("decode skill completions: %v", err)
+	}
+	if !skillResp.OK {
+		t.Fatalf("expected skill completions ok, got %s", skillResp.Error)
+	}
+	if skillResp.Result.Kind != "skill" || skillResp.Result.Start != 4 || skillResp.Result.End != 8 || len(skillResp.Result.Items) != 1 || skillResp.Result.Items[0].InsertText != "$review" {
+		t.Fatalf("unexpected skill completions: %#v", skillResp.Result)
+	}
+
+	if err := conn.Write(ctx, websocket.MessageText, []byte(`{"id":2,"method":"composer_completions","params":{"text":"Read @REA","cursor":9}}`)); err != nil {
+		t.Fatalf("write reference completion request: %v", err)
+	}
+	msg = readRPCResponse(t, ctx, conn, 2)
+	var refResp struct {
+		OK     bool `json:"ok"`
+		Result struct {
+			Kind  string `json:"kind"`
+			Start int    `json:"start"`
+			End   int    `json:"end"`
+			Items []struct {
+				Label      string `json:"label"`
+				InsertText string `json:"insert_text"`
+				Kind       string `json:"kind"`
+				Path       string `json:"path"`
+			} `json:"items"`
+		} `json:"result"`
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(msg, &refResp); err != nil {
+		t.Fatalf("decode reference completions: %v", err)
+	}
+	if !refResp.OK {
+		t.Fatalf("expected reference completions ok, got %s", refResp.Error)
+	}
+	if refResp.Result.Kind != "reference" || refResp.Result.Start != 5 || refResp.Result.End != 9 || len(refResp.Result.Items) == 0 || refResp.Result.Items[0].InsertText != "@README.md" || refResp.Result.Items[0].Path != "README.md" {
+		t.Fatalf("unexpected reference completions: %#v", refResp.Result)
+	}
+}
+
 func newTestController(t *testing.T) *uicore.Controller {
+	t.Helper()
+	return newTestControllerWithWorkdir(t, t.TempDir())
+}
+
+func newTestControllerWithWorkdir(t *testing.T, workdir string) *uicore.Controller {
 	t.Helper()
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
@@ -478,8 +576,8 @@ func newTestController(t *testing.T) *uicore.Controller {
 		t.Fatalf("open store: %v", err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	engine := agent.New(cfg, st, nil, nil, t.TempDir())
-	ctrl := uicore.New(cfg, st, engine, t.TempDir())
+	engine := agent.New(cfg, st, nil, nil, workdir)
+	ctrl := uicore.New(cfg, st, engine, workdir)
 	if err := ctrl.Start(context.Background(), uicore.StartupModeNew); err != nil {
 		t.Fatalf("start controller: %v", err)
 	}

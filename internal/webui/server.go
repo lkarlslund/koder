@@ -244,6 +244,15 @@ func (s *Server) handleRPC(ctx context.Context, method string, params json.RawMe
 			return nil, err
 		}
 		return map[string]bool{"accepted": true}, s.controller.Deny(in.ID)
+	case "composer_completions":
+		var in struct {
+			Text   string `json:"text"`
+			Cursor int    `json:"cursor"`
+		}
+		if err := decodeParams(params, &in); err != nil {
+			return nil, err
+		}
+		return s.controller.CompleteComposer(in.Text, in.Cursor)
 	case "set_theme":
 		var in struct {
 			Theme string `json:"theme"`
