@@ -199,6 +199,9 @@ const (
 
 type StartupOptions struct {
 	ShowAllSessions bool
+	Renderer        string
+	NoBrowser       bool
+	WebBind         string
 }
 
 type newSessionMsg struct {

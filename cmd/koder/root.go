@@ -7,8 +7,10 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -24,7 +26,9 @@ import (
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools"
+	"github.com/lkarlslund/koder/internal/uicore"
 	"github.com/lkarlslund/koder/internal/version"
+	"github.com/lkarlslund/koder/internal/webui"
 )
 
 func NewRootCommand() *cobra.Command {
@@ -37,7 +41,7 @@ func NewRootCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return runTUI(cmd.Context(), app.StartupModeNew, workdir, app.StartupOptions{})
+			return runTUI(cmd.Context(), app.StartupModeNew, workdir, appStartupOptions(opts, false))
 		},
 	}
 	bindStartupFlags(cmd, &opts)
@@ -48,12 +52,18 @@ func NewRootCommand() *cobra.Command {
 type startupOptions struct {
 	cwd         string
 	projectRoot string
+	ui          string
+	noBrowser   bool
+	webBind     string
 }
 
 func bindStartupFlags(cmd *cobra.Command, opts *startupOptions) {
 	flags := cmd.PersistentFlags()
 	flags.StringVar(&opts.cwd, "cwd", "", "Start koder in this working directory")
 	flags.StringVar(&opts.projectRoot, "project-root", "", "Alias for --cwd")
+	flags.StringVar(&opts.ui, "ui", "web", "Renderer to launch: web or tui")
+	flags.BoolVar(&opts.noBrowser, "nobrowser", false, "Do not open a browser for the web UI")
+	flags.StringVar(&opts.webBind, "web-bind", "127.0.0.1:0", "Web UI bind address")
 }
 
 func (o startupOptions) resolve() (string, error) {
@@ -124,7 +134,68 @@ func runTUI(ctx context.Context, mode app.StartupMode, workdir string, startupOp
 	registry.SetExecControl(execruntime.NewManager())
 	engine := agent.New(cfg, st, registry, recorder, workdir, mcpManager)
 	registry.SetChatControl(engine)
-	return app.RunWithWorkdir(cfg, st, engine, mode, recorder, debugServer, workdir, startupOpts)
+	switch strings.ToLower(strings.TrimSpace(startupOpts.Renderer)) {
+	case "web":
+		return runWeb(ctx, cfg, st, engine, appModeToUICore(mode), recorder, debugServer, workdir, startupOpts)
+	case "tui":
+		return app.RunWithWorkdir(cfg, st, engine, mode, recorder, debugServer, workdir, startupOpts)
+	default:
+		return fmt.Errorf("unsupported --ui %q: expected web or tui", startupOpts.Renderer)
+	}
+}
+
+func runWeb(ctx context.Context, cfg config.Config, st *store.Store, engine *agent.Engine, mode uicore.StartupMode, recorder *debugsrv.Recorder, debugServer *debugsrv.Server, workdir string, startupOpts app.StartupOptions) error {
+	controller := uicore.New(cfg, st, engine, workdir)
+	if err := controller.Start(ctx, mode); err != nil {
+		return err
+	}
+	server, err := webui.Start(ctx, controller, webui.Options{
+		Bind:      startupOpts.WebBind,
+		NoBrowser: startupOpts.NoBrowser,
+	})
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "koder web ui: %s\n", server.URL())
+	if recorder != nil {
+		recorder.UpdateRuntime(debugsrv.RuntimeSnapshot{DebugAPI: debugAPIAddr(debugServer), Status: "Web UI running"})
+	}
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(sig)
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-sig:
+		return nil
+	}
+}
+
+func appModeToUICore(mode app.StartupMode) uicore.StartupMode {
+	if mode == app.StartupModeResume {
+		return uicore.StartupModeResume
+	}
+	return uicore.StartupModeNew
+}
+
+func appStartupOptions(opts startupOptions, showAllSessions bool) app.StartupOptions {
+	renderer := strings.ToLower(strings.TrimSpace(opts.ui))
+	if renderer == "" {
+		renderer = "web"
+	}
+	return app.StartupOptions{
+		ShowAllSessions: showAllSessions,
+		Renderer:        renderer,
+		NoBrowser:       opts.noBrowser,
+		WebBind:         opts.webBind,
+	}
+}
+
+func debugAPIAddr(server *debugsrv.Server) string {
+	if server == nil {
+		return ""
+	}
+	return server.Addr()
 }
 
 func newResumeCommand() *cobra.Command {
@@ -138,7 +209,7 @@ func newResumeCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return runTUI(cmd.Context(), app.StartupModeResume, workdir, app.StartupOptions{ShowAllSessions: showAllSessions})
+			return runTUI(cmd.Context(), app.StartupModeResume, workdir, appStartupOptions(opts, showAllSessions))
 		},
 	}
 	bindStartupFlags(cmd, &opts)

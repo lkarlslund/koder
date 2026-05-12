@@ -115,6 +115,22 @@ func TestBindStartupFlagsRegistersAliases(t *testing.T) {
 	if projectRootFlag == nil {
 		t.Fatal("expected project-root flag to be registered")
 	}
+	if uiFlag := cmd.PersistentFlags().Lookup("ui"); uiFlag == nil {
+		t.Fatal("expected ui flag to be registered")
+	}
+	if noBrowserFlag := cmd.PersistentFlags().Lookup("nobrowser"); noBrowserFlag == nil {
+		t.Fatal("expected nobrowser flag to be registered")
+	}
+	if webBindFlag := cmd.PersistentFlags().Lookup("web-bind"); webBindFlag == nil {
+		t.Fatal("expected web-bind flag to be registered")
+	}
+}
+
+func TestAppStartupOptionsDefaultsToWeb(t *testing.T) {
+	got := appStartupOptions(startupOptions{}, false)
+	if got.Renderer != "web" {
+		t.Fatalf("expected web renderer default, got %q", got.Renderer)
+	}
 }
 
 func TestNewRootCommandRegistersSubcommands(t *testing.T) {
