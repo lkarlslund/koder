@@ -137,7 +137,6 @@ type Tool interface {
 	Kind() domain.ToolKind
 	BypassesPermission() bool
 	NormalizeArgs(map[string]string) (map[string]string, error)
-	LegacyArgs(raw string) map[string]string
 	Preview(req Request) string
 	Execute(ctx context.Context, runtime Runtime, req Request) (Result, error)
 }
@@ -354,11 +353,7 @@ func ParseProviderCall(call provider.ToolCall) (Request, error) {
 func RequestFromStored(kind domain.ToolKind, raw string) (Request, error) {
 	args, err := decodeStringMap([]byte(raw))
 	if err != nil {
-		tool, ok := Lookup(kind)
-		if !ok {
-			return Request{}, fmt.Errorf("unsupported tool %q", kind)
-		}
-		args = tool.LegacyArgs(raw)
+		return Request{}, fmt.Errorf("decode stored tool arguments for %s: %w", kind, err)
 	}
 	req := Request{
 		Tool:       kind,

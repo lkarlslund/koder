@@ -95,15 +95,6 @@ func (pollTool) NormalizeArgs(args map[string]string) (map[string]string, error)
 	return map[string]string{"chat_id": fmt.Sprintf("%d", id)}, nil
 }
 
-func (listTool) LegacyArgs(raw string) map[string]string { return map[string]string{} }
-func (startDecompositionTool) LegacyArgs(raw string) map[string]string {
-	return map[string]string{"milestone_ref": raw}
-}
-func (startExecutionTool) LegacyArgs(raw string) map[string]string {
-	return map[string]string{"milestone_ref": raw}
-}
-func (pollTool) LegacyArgs(raw string) map[string]string { return map[string]string{"chat_id": raw} }
-
 func (listTool) Preview(req tools.Request) string { return "List chats" }
 func (startDecompositionTool) Preview(req tools.Request) string {
 	return "Start decomposition chat for " + req.Args["milestone_ref"]

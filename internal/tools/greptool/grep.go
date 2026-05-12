@@ -89,8 +89,7 @@ func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 	return out, nil
 }
 
-func (tool) LegacyArgs(raw string) map[string]string { return map[string]string{"pattern": raw} }
-func (tool) Preview(req tools.Request) string        { return req.Args["pattern"] }
+func (tool) Preview(req tools.Request) string { return req.Args["pattern"] }
 
 func (tool) Presentation(req tools.Request) tools.Presentation {
 	pattern := strings.TrimSpace(req.Args["pattern"])

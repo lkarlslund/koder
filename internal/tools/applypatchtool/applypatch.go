@@ -40,7 +40,6 @@ func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 	}
 	return map[string]string{"patch": patch}, nil
 }
-func (tool) LegacyArgs(raw string) map[string]string { return map[string]string{"patch": raw} }
 func (tool) Preview(req tools.Request) string {
 	paths := patchPaths(req.Args["patch"])
 	if len(paths) == 0 {

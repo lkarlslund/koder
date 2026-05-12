@@ -81,8 +81,7 @@ func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 	return out, nil
 }
 
-func (tool) LegacyArgs(raw string) map[string]string { return map[string]string{"url": raw} }
-func (tool) Preview(req tools.Request) string        { return req.Args["url"] }
+func (tool) Preview(req tools.Request) string { return req.Args["url"] }
 
 func (tool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
 	if cached, ok := fetchCache.Load(cacheKey(req)); ok {

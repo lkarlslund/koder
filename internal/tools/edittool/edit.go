@@ -65,8 +65,7 @@ func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 	}
 	return out, nil
 }
-func (tool) LegacyArgs(raw string) map[string]string { return map[string]string{"path": raw} }
-func (tool) Preview(req tools.Request) string        { return req.Args["path"] }
+func (tool) Preview(req tools.Request) string { return req.Args["path"] }
 func (tool) Execute(_ context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
 	abs, rel, err := tools.WorkspacePath(runtime.Workdir, req.Args["path"])
 	if err != nil {

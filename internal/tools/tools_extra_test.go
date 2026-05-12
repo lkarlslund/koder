@@ -59,13 +59,10 @@ func TestParseProviderCallRejectsMissingToolCallID(t *testing.T) {
 	}
 }
 
-func TestRequestFromStoredUsesLegacyArgs(t *testing.T) {
-	req, err := tools.RequestFromStored(domain.ToolKindWrite, "notes.txt")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if req.Tool != domain.ToolKindWrite || req.Args["path"] != "notes.txt" {
-		t.Fatalf("unexpected legacy request: %#v", req)
+func TestRequestFromStoredRejectsUnstructuredArgs(t *testing.T) {
+	_, err := tools.RequestFromStored(domain.ToolKindWrite, "notes.txt")
+	if err == nil || !strings.Contains(err.Error(), "decode stored tool arguments") {
+		t.Fatalf("expected structured stored arguments error, got %v", err)
 	}
 }
 

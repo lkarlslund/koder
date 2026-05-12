@@ -42,7 +42,6 @@ func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 	}
 	return out, nil
 }
-func (tool) LegacyArgs(raw string) map[string]string { return map[string]string{"plan": raw} }
 func (tool) Preview(req tools.Request) string {
 	steps, err := normalizePlan(req.Args["plan"])
 	if err != nil || len(steps) == 0 {

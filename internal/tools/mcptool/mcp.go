@@ -47,10 +47,6 @@ func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 	}, nil
 }
 
-func (tool) LegacyArgs(raw string) map[string]string {
-	return map[string]string{"arguments_raw": raw}
-}
-
 func (tool) Preview(req tools.Request) string {
 	serverID := strings.TrimSpace(req.Args["server"])
 	toolName := strings.TrimSpace(req.Args["tool"])

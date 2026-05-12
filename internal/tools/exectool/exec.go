@@ -186,22 +186,6 @@ func (cleanupTool) NormalizeArgs(args map[string]string) (map[string]string, err
 	return (listTool{}).NormalizeArgs(args)
 }
 
-func (commandTool) LegacyArgs(raw string) map[string]string { return map[string]string{"cmd": raw} }
-func (statusTool) LegacyArgs(raw string) map[string]string {
-	return map[string]string{"process_id": raw}
-}
-func (listTool) LegacyArgs(string) map[string]string { return map[string]string{} }
-func (writeStdinTool) LegacyArgs(raw string) map[string]string {
-	return map[string]string{"process_id": raw}
-}
-func (resizeTool) LegacyArgs(raw string) map[string]string {
-	return map[string]string{"process_id": raw}
-}
-func (terminateTool) LegacyArgs(raw string) map[string]string {
-	return map[string]string{"process_id": raw}
-}
-func (cleanupTool) LegacyArgs(string) map[string]string { return map[string]string{} }
-
 func (commandTool) Preview(req tools.Request) string { return req.Args["cmd"] }
 func (statusTool) Preview(req tools.Request) string  { return "Inspect " + req.Args["process_id"] }
 func (listTool) Preview(req tools.Request) string    { return "List exec sessions" }

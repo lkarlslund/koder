@@ -161,14 +161,6 @@ func (writeTool) NormalizeArgs(args map[string]string) (map[string]string, error
 	return out, nil
 }
 
-func (listTool) LegacyArgs(raw string) map[string]string       { return map[string]string{} }
-func (addItemsTool) LegacyArgs(raw string) map[string]string   { return map[string]string{"items": raw} }
-func (updateItemTool) LegacyArgs(raw string) map[string]string { return map[string]string{"ref": raw} }
-func (planTool) LegacyArgs(raw string) map[string]string       { return map[string]string{"ref": raw} }
-func (writeTool) LegacyArgs(raw string) map[string]string {
-	return map[string]string{"milestones": raw}
-}
-
 func (listTool) Preview(req tools.Request) string       { return "Read milestones" }
 func (addItemsTool) Preview(req tools.Request) string   { return "Add milestones" }
 func (updateItemTool) Preview(req tools.Request) string { return "Update milestone " + req.Args["ref"] }

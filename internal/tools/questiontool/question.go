@@ -27,8 +27,7 @@ func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 	}
 	return map[string]string{"question": question}, nil
 }
-func (tool) LegacyArgs(raw string) map[string]string { return map[string]string{"question": raw} }
-func (tool) Preview(req tools.Request) string        { return req.Args["question"] }
+func (tool) Preview(req tools.Request) string { return req.Args["question"] }
 func (tool) Execute(_ context.Context, _ tools.Runtime, req tools.Request) (tools.Result, error) {
 	return tools.Result{
 		Output: req.Args["question"],
