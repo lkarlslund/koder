@@ -128,6 +128,16 @@ func TestWebSocketHelloReturnsState(t *testing.T) {
 	if !resp.OK {
 		t.Fatalf("expected hello ok, got %#v", resp)
 	}
+	result, ok := resp.Result.(map[string]any)
+	if !ok {
+		t.Fatalf("expected hello result object, got %#v", resp.Result)
+	}
+	if result["asset_hash"] != currentAssetHash {
+		t.Fatalf("expected asset hash %q, got %#v", currentAssetHash, result["asset_hash"])
+	}
+	if _, ok := result["state"].(map[string]any); !ok {
+		t.Fatalf("expected hello state object, got %#v", result["state"])
+	}
 }
 
 func TestIndexServesHTML(t *testing.T) {
@@ -146,12 +156,24 @@ func TestIndexServesHTML(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected index status 200, got %d", resp.StatusCode)
 	}
+	if got := resp.Header.Get("Cache-Control"); got != "no-cache" {
+		t.Fatalf("expected index to disable stale cache, got %q", got)
+	}
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		t.Fatalf("read index: %v", err)
 	}
 	if !strings.Contains(string(body), `@keydown="onComposerKeydown($event)"`) || !strings.Contains(string(body), `if (ev.key === 'Enter' && !ev.shiftKey)`) {
 		t.Fatalf("expected plain enter to submit composer")
+	}
+	if strings.Contains(string(body), assetHashPlaceholder) {
+		t.Fatalf("expected served index to contain the rendered asset hash")
+	}
+	if !strings.Contains(string(body), `window.KODER_ASSET_HASH = "`+currentAssetHash+`"`) {
+		t.Fatalf("expected served index to publish the current asset hash")
+	}
+	if !strings.Contains(string(body), `hello.asset_hash !== window.KODER_ASSET_HASH`) || !strings.Contains(string(body), `location.reload()`) {
+		t.Fatalf("expected websocket reconnect to reload on asset mismatch")
 	}
 	if !strings.Contains(string(body), `class="form-control composer-input" rows="1"`) {
 		t.Fatalf("expected composer to start as a single line")

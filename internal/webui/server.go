@@ -2,6 +2,8 @@ package webui
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,6 +22,9 @@ import (
 )
 
 const defaultOpenDelay = 5 * time.Second
+const assetHashPlaceholder = "__KODER_ASSET_HASH__"
+
+var currentAssetHash = computeAssetHash(indexHTML)
 
 // Options configures the web UI server.
 type Options struct {
@@ -131,7 +136,8 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = w.Write([]byte(indexHTML))
+	w.Header().Set("Cache-Control", "no-cache")
+	_, _ = w.Write([]byte(renderIndexHTML()))
 }
 
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
@@ -183,7 +189,12 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleRPC(ctx context.Context, method string, params json.RawMessage) (any, error) {
 	switch strings.TrimSpace(method) {
-	case "hello", "get_state":
+	case "hello":
+		return rpcHello{
+			AssetHash: currentAssetHash,
+			State:     s.controller.State(),
+		}, nil
+	case "get_state":
 		return s.controller.State(), nil
 	case "send_prompt":
 		var in struct {
@@ -358,6 +369,11 @@ func (s *Server) handleRPC(ctx context.Context, method string, params json.RawMe
 	}
 }
 
+type rpcHello struct {
+	AssetHash string `json:"asset_hash"`
+	State     any    `json:"state"`
+}
+
 type rpcRequest struct {
 	ID     any             `json:"id"`
 	Method string          `json:"method"`
@@ -386,6 +402,16 @@ func writeJSON(ctx context.Context, conn *websocket.Conn, mu *sync.Mutex, value 
 	mu.Lock()
 	defer mu.Unlock()
 	return conn.Write(ctx, websocket.MessageText, data)
+}
+
+func renderIndexHTML() string {
+	return strings.ReplaceAll(indexHTML, assetHashPlaceholder, currentAssetHash)
+}
+
+func computeAssetHash(html string) string {
+	normalized := strings.ReplaceAll(html, assetHashPlaceholder, "")
+	sum := sha256.Sum256([]byte(normalized))
+	return hex.EncodeToString(sum[:16])
 }
 
 // OpenBrowser opens url with the platform's default browser.

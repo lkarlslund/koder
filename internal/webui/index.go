@@ -444,6 +444,7 @@ const indexHTML = `<!doctype html>
   </div>
 
   <script>
+    window.KODER_ASSET_HASH = "__KODER_ASSET_HASH__";
     function koderApp() {
       return {
         ws: null, nextID: 1, pending: {}, state: {}, connected: false, draft: '', showPermissions: false,
@@ -490,9 +491,16 @@ const indexHTML = `<!doctype html>
         connect() {
           const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
           this.ws = new WebSocket(proto + '//' + location.host + '/ws');
-          this.ws.onopen = () => { this.connected = true; this.rpc('hello', {}).then(s => this.applyState(s)); };
+          this.ws.onopen = () => { this.connected = true; this.rpc('hello', {}).then(hello => this.applyHello(hello)); };
           this.ws.onclose = () => { this.connected = false; setTimeout(() => this.connect(), 1000); };
           this.ws.onmessage = ev => this.onMessage(JSON.parse(ev.data));
+        },
+        applyHello(hello) {
+          if (hello && hello.asset_hash && window.KODER_ASSET_HASH && hello.asset_hash !== window.KODER_ASSET_HASH) {
+            location.reload();
+            return;
+          }
+          this.applyState((hello && hello.state) || hello || {});
         },
         onMessage(msg) {
           if (msg.type) { this.onPush(msg); return; }
