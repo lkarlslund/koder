@@ -3,6 +3,7 @@ package uicore
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -131,6 +132,13 @@ type ComposerCompletionItem struct {
 	Description string `json:"description,omitempty"`
 	Kind        string `json:"kind,omitempty"`
 	Path        string `json:"path,omitempty"`
+}
+
+// SessionState describes workspace-scoped sessions.
+type SessionState struct {
+	ActiveID int64            `json:"active_id"`
+	Workdir  string           `json:"workdir"`
+	Sessions []domain.Session `json:"sessions"`
 }
 
 // Controller owns session/chat state independently from any renderer.
@@ -376,6 +384,42 @@ func (c *Controller) DeleteChat(ctx context.Context, chatID int64) error {
 	c.mu.Unlock()
 	c.broadcast("snapshot", c.State())
 	return nil
+}
+
+// Sessions returns sessions for the current workspace.
+func (c *Controller) Sessions(ctx context.Context) (SessionState, error) {
+	sessions, err := c.workspaceSessions(ctx)
+	if err != nil {
+		return SessionState{}, err
+	}
+	c.mu.RLock()
+	activeID := c.session.ID
+	c.mu.RUnlock()
+	return SessionState{ActiveID: activeID, Workdir: c.workdir, Sessions: sessions}, nil
+}
+
+// SwitchSession switches the active session within the current workspace.
+func (c *Controller) SwitchSession(ctx context.Context, sessionID int64) error {
+	if sessionID <= 0 {
+		return fmt.Errorf("session id is required")
+	}
+	session, err := c.store.GetSession(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	if !c.sessionInWorkspace(session) {
+		return fmt.Errorf("session %d does not belong to this workspace", sessionID)
+	}
+	return c.loadSession(ctx, sessionID, 0)
+}
+
+// NewSession creates and switches to a new session in the current workspace.
+func (c *Controller) NewSession(ctx context.Context, title string) error {
+	session, err := c.createWorkspaceSession(ctx, title)
+	if err != nil {
+		return err
+	}
+	return c.loadSession(ctx, session.ID, 0)
 }
 
 // CompleteComposer returns skill and reference completions for the current composer token.
@@ -1026,16 +1070,9 @@ func (c *Controller) initialSession(ctx context.Context, mode StartupMode) (doma
 		return domain.Session{}, fmt.Errorf("store is unavailable")
 	}
 	if mode == StartupModeNew {
-		session, err := c.store.CreateSession(ctx, "New Session", c.cfg.DefaultProvider, c.cfg.DefaultModel, nil)
-		if err != nil {
-			return domain.Session{}, err
-		}
-		_ = c.store.UpdateSessionWorkspace(ctx, session.ID, c.workdir, c.workdir)
-		_ = c.store.SetSessionPermissionProfile(ctx, session.ID, c.cfg.Permissions.Profile)
-		_ = c.store.SetSessionToolStates(ctx, session.ID, c.cfg.ToolDefaults)
-		return c.store.GetSession(ctx, session.ID)
+		return c.createWorkspaceSession(ctx, "New Session")
 	}
-	sessions, err := c.store.ListSessions(ctx)
+	sessions, err := c.workspaceSessions(ctx)
 	if err != nil {
 		return domain.Session{}, err
 	}
@@ -1050,7 +1087,10 @@ func (c *Controller) loadSession(ctx context.Context, sessionID, chatID int64) e
 	if err != nil {
 		return err
 	}
-	sessions, err := c.store.ListSessions(ctx)
+	if !c.sessionInWorkspace(session) {
+		return fmt.Errorf("session %d does not belong to this workspace", sessionID)
+	}
+	sessions, err := c.workspaceSessions(ctx)
 	if err != nil {
 		return err
 	}
@@ -1101,6 +1141,43 @@ func (c *Controller) loadSession(ctx context.Context, sessionID, chatID int64) e
 	go c.forwardRuntime(chatRecord.ID, updates)
 	c.broadcast("snapshot", c.State())
 	return nil
+}
+
+func (c *Controller) createWorkspaceSession(ctx context.Context, title string) (domain.Session, error) {
+	title = strings.TrimSpace(title)
+	if title == "" {
+		title = "New Session"
+	}
+	session, err := c.store.CreateSession(ctx, title, c.cfg.DefaultProvider, c.cfg.DefaultModel, nil)
+	if err != nil {
+		return domain.Session{}, err
+	}
+	_ = c.store.UpdateSessionWorkspace(ctx, session.ID, c.workdir, c.workdir)
+	_ = c.store.SetSessionPermissionProfile(ctx, session.ID, c.cfg.Permissions.Profile)
+	_ = c.store.SetSessionToolStates(ctx, session.ID, c.cfg.ToolDefaults)
+	return c.store.GetSession(ctx, session.ID)
+}
+
+func (c *Controller) workspaceSessions(ctx context.Context) ([]domain.Session, error) {
+	sessions, err := c.store.ListSessions(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]domain.Session, 0, len(sessions))
+	for _, session := range sessions {
+		if c.sessionInWorkspace(session) {
+			out = append(out, session)
+		}
+	}
+	return out, nil
+}
+
+func (c *Controller) sessionInWorkspace(session domain.Session) bool {
+	workdir := normalizedWorkspacePath(c.workdir)
+	if workdir == "" {
+		return true
+	}
+	return normalizedWorkspacePath(session.CWD) == workdir || normalizedWorkspacePath(session.ProjectRoot) == workdir
 }
 
 func (c *Controller) planningState(ctx context.Context, sessionID int64) (store.MilestonePlan, []store.TodoItem) {
@@ -1258,6 +1335,14 @@ func fallbackChatID(chats []domain.Chat, deleting domain.Chat) int64 {
 		}
 	}
 	return 0
+}
+
+func normalizedWorkspacePath(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	return filepath.Clean(path)
 }
 
 // Touch avoids stale-session ordering when a renderer action changes state.

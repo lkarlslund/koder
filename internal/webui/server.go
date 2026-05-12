@@ -217,6 +217,28 @@ func (s *Server) handleRPC(ctx context.Context, method string, params json.RawMe
 		}
 		_ = decodeParams(params, &in)
 		return s.controller.State(), s.controller.NewChat(ctx, in.Title)
+	case "list_sessions":
+		return s.controller.Sessions(ctx)
+	case "switch_session":
+		var in struct {
+			SessionID int64 `json:"session_id"`
+		}
+		if err := decodeParams(params, &in); err != nil {
+			return nil, err
+		}
+		if err := s.controller.SwitchSession(ctx, in.SessionID); err != nil {
+			return nil, err
+		}
+		return s.controller.State(), nil
+	case "new_session":
+		var in struct {
+			Title string `json:"title"`
+		}
+		_ = decodeParams(params, &in)
+		if err := s.controller.NewSession(ctx, in.Title); err != nil {
+			return nil, err
+		}
+		return s.controller.State(), nil
 	case "delete_chat":
 		var in struct {
 			ChatID int64 `json:"chat_id"`

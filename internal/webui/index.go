@@ -31,6 +31,8 @@ const indexHTML = `<!doctype html>
     .modal-backdrop-lite { position: fixed; inset: 0; background: rgba(0, 0, 0, .45); z-index: 1050; display: grid; place-items: center; padding: 1rem; }
     .model-dialog { width: min(760px, 100%); max-height: min(720px, 90vh); overflow: hidden; display: flex; flex-direction: column; }
     .model-list { overflow: auto; }
+    .session-dialog { width: min(820px, 100%); max-height: min(720px, 90vh); overflow: hidden; display: flex; flex-direction: column; }
+    .session-list { overflow: auto; }
     .provider-dialog { width: min(980px, 100%); max-height: min(820px, 92vh); overflow: hidden; display: flex; flex-direction: column; }
     .provider-body { min-height: 0; display: grid; grid-template-columns: 280px minmax(0, 1fr); }
     .provider-list, .provider-form { min-height: 0; overflow: auto; }
@@ -49,6 +51,7 @@ const indexHTML = `<!doctype html>
       </div>
       <div class="d-flex align-items-center gap-2">
         <span class="badge text-bg-secondary" x-text="connected ? 'connected' : 'offline'"></span>
+        <button class="btn btn-sm btn-outline-secondary" title="Sessions" @click="openSessionDialog()"><i class="bi bi-collection"></i></button>
         <button class="btn btn-sm btn-outline-secondary" title="Providers" @click="openProviderDialog()"><i class="bi bi-plug"></i></button>
         <select class="form-select form-select-sm" x-model="theme" @change="setTheme(theme)" style="width: 8rem">
           <option value="auto">auto</option>
@@ -266,6 +269,44 @@ const indexHTML = `<!doctype html>
     </section>
   </div>
 
+  <div class="modal-backdrop-lite" x-show="showSessions" x-transition @keydown.escape.window="closeSessionDialog()" style="display: none;">
+    <section class="session-dialog bg-body border rounded shadow">
+      <header class="d-flex align-items-center justify-content-between gap-3 p-3 border-bottom">
+        <div>
+          <div class="fw-semibold"><i class="bi bi-collection me-1"></i> Sessions</div>
+          <div class="small text-secondary" x-text="sessionState.workdir || state.workdir || ''"></div>
+        </div>
+        <button type="button" class="btn btn-sm btn-outline-secondary" @click="closeSessionDialog()"><i class="bi bi-x-lg"></i></button>
+      </header>
+      <div class="p-3 border-bottom">
+        <div class="input-group">
+          <input class="form-control" x-model="newSessionTitle" placeholder="New Session" @keydown.enter.prevent="createSession()">
+          <button class="btn btn-primary" type="button" @click="createSession()"><i class="bi bi-plus-lg"></i></button>
+        </div>
+      </div>
+      <div class="session-list list-group list-group-flush">
+        <template x-if="sessionLoading">
+          <div class="list-group-item text-secondary"><span class="spinner-border spinner-border-sm me-2"></span>Loading sessions</div>
+        </template>
+        <template x-if="!sessionLoading && sessionRows().length === 0">
+          <div class="list-group-item text-secondary">No sessions in this workspace</div>
+        </template>
+        <template x-for="session in sessionRows()" :key="sessionID(session)">
+          <button type="button" class="list-group-item list-group-item-action d-flex align-items-start justify-content-between gap-3" :class="{'active': sessionID(session) === activeSessionID()}" @click="switchSession(sessionID(session))">
+            <span class="text-start">
+              <span class="fw-semibold" x-text="sessionTitle(session)"></span>
+              <span class="d-block small opacity-75">
+                <span x-text="sessionModel(session)"></span>
+                <template x-if="session.LastMessage || session.last_message"><span x-text="' · ' + (session.LastMessage || session.last_message)"></span></template>
+              </span>
+            </span>
+            <span class="badge text-bg-secondary" x-text="'#' + sessionID(session)"></span>
+          </button>
+        </template>
+      </div>
+    </section>
+  </div>
+
   <div class="modal-backdrop-lite" x-show="showProviders" x-transition @keydown.escape.window="closeProviderDialog()" style="display: none;">
     <section class="provider-dialog bg-body border rounded shadow">
       <header class="d-flex align-items-center justify-content-between gap-3 p-3 border-bottom">
@@ -365,6 +406,7 @@ const indexHTML = `<!doctype html>
       return {
         ws: null, nextID: 1, pending: {}, state: {}, connected: false, draft: '', showPermissions: false,
         showModels: false, modelLoading: false, modelQuery: '', modelOptions: [],
+        showSessions: false, sessionLoading: false, sessionState: {active_id: 0, workdir: '', sessions: []}, newSessionTitle: '',
         showProviders: false, providerState: {catalog: [], providers: [], drafts: {}}, providerDraft: null, providerHeadersText: '{}', providerStatus: '', providerStatusKind: 'secondary', providerTesting: false, providerSaving: false,
         completion: {kind: '', query: '', start: 0, end: 0, items: [], selected: 0}, completionSeq: 0,
         theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, error: '', toast: '', toastTimer: null,
@@ -537,6 +579,23 @@ const indexHTML = `<!doctype html>
           this.rpc('set_model', {provider_id: model.provider_id, model_id: model.model_id}).then(s => {
             this.applyState(s); this.closeModelDialog();
           });
+        },
+        openSessionDialog() {
+          this.showSessions = true; this.sessionLoading = true; this.newSessionTitle = '';
+          this.rpc('list_sessions', {}).then(result => { this.sessionState = result || {active_id: 0, workdir: '', sessions: []}; }).finally(() => { this.sessionLoading = false; });
+        },
+        closeSessionDialog() { this.showSessions = false; },
+        sessionRows() { return this.sessionState.sessions || this.state.sessions || []; },
+        activeSessionID() { return this.sessionState.active_id || this.state.session?.ID || this.state.session?.id || 0; },
+        sessionID(session) { return session.ID || session.id; },
+        sessionTitle(session) { return session.Title || session.title || 'New Session'; },
+        sessionModel(session) { return (session.ProviderID || session.provider_id || '-') + ' / ' + (session.ModelID || session.model_id || '-'); },
+        switchSession(id) {
+          if (!id || id === this.activeSessionID()) { this.closeSessionDialog(); return; }
+          this.rpc('switch_session', {session_id: id}).then(s => { this.applyState(s); this.closeSessionDialog(); });
+        },
+        createSession() {
+          this.rpc('new_session', {title: this.newSessionTitle || 'New Session'}).then(s => { this.applyState(s); this.closeSessionDialog(); });
         },
         openProviderDialog() {
           this.showProviders = true; this.providerStatus = ''; this.providerStatusKind = 'secondary';

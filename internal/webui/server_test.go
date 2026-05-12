@@ -213,6 +213,18 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(string(body), `openProviderDialog()`) {
 		t.Fatalf("expected top status bar provider dialog button")
 	}
+	if !strings.Contains(string(body), `openSessionDialog()`) {
+		t.Fatalf("expected top status bar session dialog button")
+	}
+	if !strings.Contains(string(body), `list_sessions`) {
+		t.Fatalf("expected session dialog to list sessions")
+	}
+	if !strings.Contains(string(body), `switch_session`) {
+		t.Fatalf("expected session dialog to switch sessions")
+	}
+	if !strings.Contains(string(body), `new_session`) {
+		t.Fatalf("expected session dialog to create sessions")
+	}
 	if !strings.Contains(string(body), `provider_state`) {
 		t.Fatalf("expected provider dialog to load provider state")
 	}
@@ -324,6 +336,95 @@ func TestWebSocketDeleteChatReturnsUpdatedState(t *testing.T) {
 		if chat.ID == deletedID {
 			t.Fatalf("deleted chat still listed: %#v", resp.Result.Chats)
 		}
+	}
+}
+
+func TestWebSocketSessionManagementCreatesAndSwitchesWorkspaceSessions(t *testing.T) {
+	ctrl := newTestController(t)
+	initialID := ctrl.State().Session.ID
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoBrowser: true})
+	if err != nil {
+		t.Fatalf("start server: %v", err)
+	}
+	conn, _, err := websocket.Dial(ctx, "ws://"+srv.Addr()+"/ws", nil)
+	if err != nil {
+		t.Fatalf("dial websocket: %v", err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	_ = readMessage(t, ctx, conn)
+	if err := conn.Write(ctx, websocket.MessageText, []byte(`{"id":1,"method":"list_sessions","params":{}}`)); err != nil {
+		t.Fatalf("write list_sessions: %v", err)
+	}
+	msg := readRPCResponse(t, ctx, conn, 1)
+	var listResp struct {
+		OK     bool `json:"ok"`
+		Result struct {
+			ActiveID int64 `json:"active_id"`
+			Sessions []struct {
+				ID int64
+			} `json:"sessions"`
+		} `json:"result"`
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(msg, &listResp); err != nil {
+		t.Fatalf("decode list response: %v", err)
+	}
+	if !listResp.OK {
+		t.Fatalf("expected list_sessions ok, got %s", listResp.Error)
+	}
+	if listResp.Result.ActiveID != initialID || len(listResp.Result.Sessions) != 1 || listResp.Result.Sessions[0].ID != initialID {
+		t.Fatalf("unexpected initial session list: %#v", listResp.Result)
+	}
+
+	if err := conn.Write(ctx, websocket.MessageText, []byte(`{"id":2,"method":"new_session","params":{"title":"Side Session"}}`)); err != nil {
+		t.Fatalf("write new_session: %v", err)
+	}
+	msg = readRPCResponse(t, ctx, conn, 2)
+	var newResp struct {
+		OK     bool `json:"ok"`
+		Result struct {
+			Session struct {
+				ID    int64
+				Title string
+			}
+		} `json:"result"`
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(msg, &newResp); err != nil {
+		t.Fatalf("decode new response: %v", err)
+	}
+	if !newResp.OK {
+		t.Fatalf("expected new_session ok, got %s", newResp.Error)
+	}
+	newID := newResp.Result.Session.ID
+	if newID == 0 || newID == initialID || newResp.Result.Session.Title != "Side Session" {
+		t.Fatalf("unexpected new session response: %#v", newResp.Result.Session)
+	}
+
+	if err := conn.Write(ctx, websocket.MessageText, []byte(fmt.Sprintf(`{"id":3,"method":"switch_session","params":{"session_id":%d}}`, initialID))); err != nil {
+		t.Fatalf("write switch_session: %v", err)
+	}
+	msg = readRPCResponse(t, ctx, conn, 3)
+	var switchResp struct {
+		OK     bool `json:"ok"`
+		Result struct {
+			Session struct {
+				ID int64
+			}
+		} `json:"result"`
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(msg, &switchResp); err != nil {
+		t.Fatalf("decode switch response: %v", err)
+	}
+	if !switchResp.OK {
+		t.Fatalf("expected switch_session ok, got %s", switchResp.Error)
+	}
+	if switchResp.Result.Session.ID != initialID {
+		t.Fatalf("expected switched back to %d, got %#v", initialID, switchResp.Result.Session)
 	}
 }
 

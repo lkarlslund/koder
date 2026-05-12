@@ -176,6 +176,64 @@ func TestControllerSetPermissionProfileRejectsUnknownProfile(t *testing.T) {
 	}
 }
 
+func TestControllerSessionsAreWorkspaceScoped(t *testing.T) {
+	cfg := config.Default().WithStateDir(t.TempDir())
+	cfg.DefaultProvider = "test"
+	cfg.DefaultModel = "model"
+	st, err := store.OpenWithOptions(cfg.StateDir(), store.Options{Backend: store.BackendJSONFS})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+
+	ctx := context.Background()
+	workspaceA := t.TempDir()
+	workspaceB := t.TempDir()
+	sessionA, err := st.CreateSession(ctx, "Workspace A", "test", "model", nil)
+	if err != nil {
+		t.Fatalf("create session a: %v", err)
+	}
+	if err := st.UpdateSessionWorkspace(ctx, sessionA.ID, workspaceA, workspaceA); err != nil {
+		t.Fatalf("workspace a: %v", err)
+	}
+	sessionB, err := st.CreateSession(ctx, "Workspace B", "test", "model", nil)
+	if err != nil {
+		t.Fatalf("create session b: %v", err)
+	}
+	if err := st.UpdateSessionWorkspace(ctx, sessionB.ID, workspaceB, workspaceB); err != nil {
+		t.Fatalf("workspace b: %v", err)
+	}
+
+	engine := agent.New(cfg, st, nil, nil, workspaceA)
+	ctrl := New(cfg, st, engine, workspaceA)
+	if err := ctrl.Start(ctx, StartupModeResume); err != nil {
+		t.Fatalf("start resume: %v", err)
+	}
+	if got := ctrl.State().Session.ID; got != sessionA.ID {
+		t.Fatalf("expected workspace A session %d, got %d", sessionA.ID, got)
+	}
+	sessionState, err := ctrl.Sessions(ctx)
+	if err != nil {
+		t.Fatalf("sessions: %v", err)
+	}
+	if len(sessionState.Sessions) != 1 || sessionState.Sessions[0].ID != sessionA.ID {
+		t.Fatalf("expected only workspace A session, got %#v", sessionState.Sessions)
+	}
+	if err := ctrl.SwitchSession(ctx, sessionB.ID); err == nil {
+		t.Fatal("expected switch to other workspace session to fail")
+	}
+	if err := ctrl.NewSession(ctx, "Second A"); err != nil {
+		t.Fatalf("new session: %v", err)
+	}
+	sessionState, err = ctrl.Sessions(ctx)
+	if err != nil {
+		t.Fatalf("sessions after new: %v", err)
+	}
+	if len(sessionState.Sessions) != 2 {
+		t.Fatalf("expected two workspace A sessions, got %#v", sessionState.Sessions)
+	}
+}
+
 func newTestController(t *testing.T) (*Controller, *store.Store) {
 	t.Helper()
 	return newTestControllerWithConfig(t, nil)
