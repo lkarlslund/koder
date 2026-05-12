@@ -251,25 +251,26 @@ func newSessionDumpCommand() *cobra.Command {
 			}
 			defer st.Close()
 
-			messages, partsByMessage, err := st.PartsForSession(cmd.Context(), sessionID)
+			chats, err := st.ListChats(cmd.Context(), sessionID)
 			if err != nil {
 				return err
 			}
-			type messageDump struct {
-				Message domain.Message `json:"message"`
-				Parts   []domain.Part  `json:"parts"`
+			type chatDump struct {
+				Chat     domain.Chat           `json:"chat"`
+				Timeline []domain.TimelineItem `json:"timeline"`
 			}
 			out := struct {
-				SessionID int64         `json:"session_id"`
-				Messages  []messageDump `json:"messages"`
+				SessionID int64      `json:"session_id"`
+				Chats     []chatDump `json:"chats"`
 			}{
 				SessionID: sessionID,
 			}
-			for _, message := range messages {
-				out.Messages = append(out.Messages, messageDump{
-					Message: message,
-					Parts:   partsByMessage[message.ID],
-				})
+			for _, chat := range chats {
+				timeline, err := st.TimelineForChat(cmd.Context(), chat.ID)
+				if err != nil {
+					return err
+				}
+				out.Chats = append(out.Chats, chatDump{Chat: chat, Timeline: timeline})
 			}
 			enc := json.NewEncoder(cmd.OutOrStdout())
 			enc.SetIndent("", "  ")
