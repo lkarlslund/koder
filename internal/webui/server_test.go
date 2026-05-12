@@ -151,6 +151,18 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(string(body), `@keydown.enter.exact.prevent="send()"`) {
 		t.Fatalf("expected plain enter to submit composer")
 	}
+	if !strings.Contains(string(body), `class="form-control composer-input" rows="1"`) {
+		t.Fatalf("expected composer to start as a single line")
+	}
+	if !strings.Contains(string(body), `@input="resizeComposer()"`) {
+		t.Fatalf("expected composer input to resize itself as text changes")
+	}
+	if !strings.Contains(string(body), `* 0.2`) {
+		t.Fatalf("expected composer height to cap at 20 percent of the viewport")
+	}
+	if !strings.Contains(string(body), `el.style.overflowY = el.scrollHeight > maxHeight ? 'auto' : 'hidden'`) {
+		t.Fatalf("expected composer to scroll after reaching the height cap")
+	}
 	if !strings.Contains(string(body), `text === '/permissions'`) {
 		t.Fatalf("expected /permissions to be handled locally")
 	}

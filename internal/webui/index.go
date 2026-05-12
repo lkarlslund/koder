@@ -20,6 +20,7 @@ const indexHTML = `<!doctype html>
     .sidebar-resizer:hover, .sidebar-resizer.resizing { background: var(--bs-primary); opacity: 1; }
     .sidebar { min-height: 0; overflow: auto; border-left: 1px solid var(--bs-border-color); }
     .composer { grid-column: 1 / 4; border-top: 1px solid var(--bs-border-color); }
+    .composer-input { max-height: 20vh; overflow-y: hidden; resize: none; }
     .message { border-radius: .75rem; }
     .message.user { background: var(--bs-primary-bg-subtle); }
     .message.assistant { background: var(--bs-tertiary-bg); }
@@ -212,7 +213,7 @@ const indexHTML = `<!doctype html>
 
     <form class="composer p-3 bg-body" @submit.prevent="send()">
       <div class="input-group">
-        <textarea class="form-control" rows="2" x-model="draft" placeholder="Ask koder or type / for commands" @keydown.enter.exact.prevent="send()" @keydown.meta.enter.prevent="send()" @keydown.ctrl.enter.prevent="send()"></textarea>
+        <textarea class="form-control composer-input" rows="1" x-ref="composerInput" x-model="draft" placeholder="Ask koder or type / for commands" @input="resizeComposer()" @keydown.enter.exact.prevent="send()" @keydown.meta.enter.prevent="send()" @keydown.ctrl.enter.prevent="send()"></textarea>
         <button class="btn btn-primary" type="submit"><i class="bi bi-send-fill"></i></button>
       </div>
     </form>
@@ -354,7 +355,7 @@ const indexHTML = `<!doctype html>
         showModels: false, modelLoading: false, modelQuery: '', modelOptions: [],
         showProviders: false, providerState: {catalog: [], providers: [], drafts: {}}, providerDraft: null, providerHeadersText: '{}', providerStatus: '', providerStatusKind: 'secondary', providerTesting: false, providerSaving: false,
         theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, error: '', toast: '', toastTimer: null,
-        init() { this.clampSidebarRatio(); this.applyTheme(); this.connect(); },
+        init() { this.clampSidebarRatio(); this.applyTheme(); this.connect(); window.addEventListener('resize', () => this.resizeComposer()); this.$nextTick(() => this.resizeComposer()); },
         applyTheme() {
           const resolved = this.theme === 'auto' ? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : this.theme;
           document.documentElement.setAttribute('data-bs-theme', resolved);
@@ -439,7 +440,15 @@ const indexHTML = `<!doctype html>
         },
         chatID(chat) { return chat.ID || chat.id; },
         formatArgs(args) { return args ? JSON.stringify(args, null, 2) : ''; },
-        send() { const text = this.draft.trim(); if (!text) return; if (this.handleSlash(text)) { this.draft = ''; return; } this.draft = ''; this.rpc('send_prompt', {text}); },
+        resizeComposer() {
+          const el = this.$refs.composerInput; if (!el) return;
+          const maxHeight = Math.floor((window.innerHeight || 800) * 0.2);
+          el.style.height = 'auto';
+          const nextHeight = Math.min(el.scrollHeight, maxHeight);
+          el.style.height = nextHeight + 'px';
+          el.style.overflowY = el.scrollHeight > maxHeight ? 'auto' : 'hidden';
+        },
+        send() { const text = this.draft.trim(); if (!text) return; if (this.handleSlash(text)) { this.draft = ''; this.$nextTick(() => this.resizeComposer()); return; } this.draft = ''; this.$nextTick(() => this.resizeComposer()); this.rpc('send_prompt', {text}); },
         handleSlash(text) {
           if (text === '/permissions') { this.showPermissions = true; return true; }
           if (text === '/compact') { this.rpc('compact', {}); return true; }
