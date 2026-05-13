@@ -174,6 +174,7 @@ const (
 	EventKindApprovalReply EventKind = "approval_reply"
 	EventKindTaskUpdate    EventKind = "task_update"
 	EventKindSessionTitle  EventKind = "session_title"
+	EventKindChatTitle     EventKind = "chat_title"
 	EventKindError         EventKind = "error"
 	EventKindStatus        EventKind = "status"
 )

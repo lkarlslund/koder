@@ -1259,6 +1259,17 @@ func (c *Controller) forwardRuntime(chatID int64, updates <-chan chat.Update) {
 			c.lastErr = update.Event.Err.Error()
 			c.mu.Unlock()
 		}
+		if update.Snapshot.Chat.ID == chatID {
+			c.mu.Lock()
+			c.chat = update.Snapshot.Chat
+			for idx := range c.chats {
+				if c.chats[idx].ID == update.Snapshot.Chat.ID {
+					c.chats[idx] = update.Snapshot.Chat
+					break
+				}
+			}
+			c.mu.Unlock()
+		}
 		c.refreshPlanningState(context.Background(), sessionID)
 		c.broadcast("chat_update", update)
 		c.broadcast("snapshot", c.State())

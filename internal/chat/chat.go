@@ -814,6 +814,17 @@ func (r *Chat) handleStreamEvent(evt domain.Event) {
 		if strings.TrimSpace(evt.ToolCallID) != "" {
 			delete(r.running, evt.ToolCallID)
 		}
+	case domain.EventKindChatTitle:
+		title := strings.TrimSpace(evt.Text)
+		if title != "" {
+			r.chat.Title = title
+			if r.state != nil {
+				r.state.UpdateChat(func(chat *domain.Chat) {
+					chat.Title = title
+				})
+				contextChanged = true
+			}
+		}
 	case domain.EventKindApprovalAsk:
 		r.status = StatusWaitingApproval
 		r.statusText = strings.TrimSpace(evt.Text)

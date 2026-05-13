@@ -3761,6 +3761,68 @@ func TestRunPromptIgnoresSessionTitleRefreshFailure(t *testing.T) {
 	}
 }
 
+func TestRunPromptUpdatesGeneratedChatTitle(t *testing.T) {
+	t.Parallel()
+
+	var requests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests++
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"done"}}],"usage":{"total_tokens":1}}`))
+	}))
+	defer server.Close()
+
+	cfg := testConfig(t)
+	cfg.Providers = map[string]config.Provider{
+		"test": {
+			BaseURL: server.URL + "/v1",
+			Timeout: time.Second,
+		},
+	}
+	cfg.DefaultProvider = "test"
+	cfg.DefaultModel = "test-model"
+
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	engine := New(cfg, st, tools.NewRegistry(t.TempDir()), nil, t.TempDir())
+	session, err := st.CreateSession(context.Background(), "Existing Session", "test", "test-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chat := defaultChatForSession(t, st, session.ID)
+	if chat.Title != "Main" {
+		t.Fatalf("expected generated main title, got %q", chat.Title)
+	}
+
+	events, err := engine.RunPrompt(context.Background(), session, "compare go code to c reference and identify gaps")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var chatTitle string
+	for evt := range events {
+		if evt.Kind == domain.EventKindChatTitle {
+			chatTitle = evt.Text
+		}
+	}
+	want := "compare go code to c reference"
+	if chatTitle != want {
+		t.Fatalf("expected chat title event %q, got %q", want, chatTitle)
+	}
+	updated, err := st.GetChat(context.Background(), chat.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Title != want {
+		t.Fatalf("expected stored chat title %q, got %q", want, updated.Title)
+	}
+	if requests != 1 {
+		t.Fatalf("expected no extra provider request for chat title, got %d", requests)
+	}
+}
+
 func TestRunPromptPausesRepeatedIdenticalToolCalls(t *testing.T) {
 	t.Parallel()
 

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/lkarlslund/koder/internal/agent"
+	"github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/store"
@@ -96,6 +97,34 @@ func TestControllerDeleteActiveChatSwitchesToRemainingChat(t *testing.T) {
 	}
 	if _, err := st.GetChat(context.Background(), side); err == nil {
 		t.Fatal("expected side chat to be deleted")
+	}
+}
+
+func TestControllerForwardRuntimeRefreshesChatListMetadata(t *testing.T) {
+	ctrl, _ := newTestController(t)
+	state := ctrl.State()
+	if state.ActiveChatID == 0 {
+		t.Fatal("expected active chat")
+	}
+	updated := state.Snapshot
+	updated.Chat.ID = state.ActiveChatID
+	updated.Chat.Title = "Generated Chat Title"
+	updates := make(chan chat.Update, 1)
+	updates <- chat.Update{Snapshot: updated}
+	close(updates)
+
+	ctrl.forwardRuntime(state.ActiveChatID, updates)
+
+	got := ctrl.State()
+	var listed string
+	for _, item := range got.Chats {
+		if item.ID == state.ActiveChatID {
+			listed = item.Title
+			break
+		}
+	}
+	if listed != "Generated Chat Title" {
+		t.Fatalf("expected chat list title updated, got %q", listed)
 	}
 }
 

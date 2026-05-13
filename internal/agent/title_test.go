@@ -114,3 +114,30 @@ func TestNormalizeSessionTitle(t *testing.T) {
 		t.Fatalf("got %q want %q", got, want)
 	}
 }
+
+func TestShouldRefreshChatTitle(t *testing.T) {
+	timeline := []domain.TimelineItem{
+		{Content: domain.UserMessage{Text: "compare go code to c reference"}},
+		{Content: domain.AssistantMessage{Text: "done"}},
+	}
+	if !shouldRefreshChatTitle(domain.Chat{Title: "Chat"}, timeline) {
+		t.Fatal("expected generated chat title to refresh")
+	}
+	if !shouldRefreshChatTitle(domain.Chat{Title: "Main"}, timeline) {
+		t.Fatal("expected main chat title to refresh")
+	}
+	if shouldRefreshChatTitle(domain.Chat{Title: "hand picked title"}, timeline) {
+		t.Fatal("did not expect custom chat title to refresh")
+	}
+}
+
+func TestTitleFromTimelineUsesFirstUserMessage(t *testing.T) {
+	got := titleFromTimeline([]domain.TimelineItem{
+		{Content: domain.UserMessage{Text: "compare go code to c reference and identify gaps"}},
+		{Content: domain.AssistantMessage{Text: "Done"}},
+	})
+	want := "compare go code to c reference"
+	if got != want {
+		t.Fatalf("got %q want %q", got, want)
+	}
+}

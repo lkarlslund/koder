@@ -1997,6 +1997,18 @@ func (m *App) applyEvent(evt domain.Event) {
 				}
 			}
 		}
+	case domain.EventKindChatTitle:
+		title := strings.TrimSpace(evt.Text)
+		if title != "" {
+			m.currentChat.Title = title
+			m.currentSnapshot.Chat.Title = title
+			for i := range m.chats {
+				if m.chats[i].ID == m.currentChat.ID {
+					m.chats[i].Title = title
+					break
+				}
+			}
+		}
 	case domain.EventKindUsage:
 		m.liveUsage = m.liveUsage.Add(evt.Usage)
 		m.liveUsageKnown = m.liveUsage.HasAnyTokens()
@@ -2059,6 +2071,7 @@ func shouldRefreshDetailsAfterEvent(evt domain.Event) bool {
 		domain.EventKindUsage,
 		domain.EventKindStatus,
 		domain.EventKindSessionTitle,
+		domain.EventKindChatTitle,
 		domain.EventKindToolCallDelta,
 		domain.EventKindToolStart,
 		domain.EventKindToolResult,

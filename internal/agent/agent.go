@@ -807,6 +807,18 @@ func (e *Engine) continueModelTurn(ctx context.Context, session domain.Session, 
 			return err
 		}
 		e.recordLifecycle(session.ID, "assistant_message_persisted", strings.TrimSpace(text), map[string]string{"item_id": strconv.FormatInt(assistantItem.ID, 10)})
+		chatTitle, chatTitleErr := e.maybeUpdateChatTitle(ctx, chat.ID)
+		if chatTitleErr != nil {
+			e.recordLifecycle(session.ID, "chat_title_update_failed", chatTitleErr.Error(), map[string]string{"chat_id": strconv.FormatInt(chat.ID, 10)})
+		}
+		if strings.TrimSpace(chatTitle) != "" {
+			e.recordLifecycle(session.ID, "chat_title_updated", chatTitle, map[string]string{"chat_id": strconv.FormatInt(chat.ID, 10)})
+			out <- domain.Event{
+				Kind: domain.EventKindChatTitle,
+				Text: chatTitle,
+				Meta: map[string]string{"chat_id": strconv.FormatInt(chat.ID, 10)},
+			}
+		}
 		title, titleErr := e.maybeUpdateSessionTitle(ctx, session, client)
 		if titleErr != nil {
 			e.recordLifecycle(session.ID, "session_title_update_failed", titleErr.Error(), nil)
@@ -931,6 +943,67 @@ func shouldRefreshSessionTitle(session domain.Session, timeline []domain.Timelin
 		return now.Sub(generatedAt) >= time.Minute
 	}
 	return false
+}
+
+func (e *Engine) maybeUpdateChatTitle(ctx context.Context, chatID int64) (string, error) {
+	if chatID <= 0 {
+		return "", nil
+	}
+	chat, err := e.store.GetChat(ctx, chatID)
+	if err != nil {
+		return "", err
+	}
+	timeline, err := e.store.TimelineForChat(ctx, chatID)
+	if err != nil {
+		return "", err
+	}
+	if !shouldRefreshChatTitle(chat, timeline) {
+		return "", nil
+	}
+	title := titleFromTimeline(timeline)
+	if title == "" {
+		return "", nil
+	}
+	chat.Title = title
+	if err := e.store.UpdateChat(ctx, chat); err != nil {
+		return "", err
+	}
+	return title, nil
+}
+
+func shouldRefreshChatTitle(chat domain.Chat, timeline []domain.TimelineItem) bool {
+	return isGeneratedChatTitle(chat.Title) && hasCompletedUserAssistantExchange(timeline)
+}
+
+func isGeneratedChatTitle(title string) bool {
+	title = strings.TrimSpace(title)
+	if title == "" || title == "Main" || title == "Chat" {
+		return true
+	}
+	if strings.HasPrefix(title, "Chat ") {
+		_, err := strconv.ParseInt(strings.TrimSpace(strings.TrimPrefix(title, "Chat ")), 10, 64)
+		return err == nil
+	}
+	return false
+}
+
+func titleFromTimeline(timeline []domain.TimelineItem) string {
+	for _, item := range timeline {
+		if user, ok := item.Content.(domain.UserMessage); ok {
+			if title := normalizeSessionTitle(user.Text); title != "" {
+				return title
+			}
+		}
+	}
+	for _, item := range timeline {
+		role, content := timelineTitleEntry(item)
+		if role != "" {
+			if title := normalizeSessionTitle(content); title != "" {
+				return title
+			}
+		}
+	}
+	return ""
 }
 
 func sessionTitleRefreshState(session domain.Session) (int, time.Time) {
