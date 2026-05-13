@@ -219,14 +219,58 @@ func (s *ChatState) replaceTemporaryActiveAssistant(item domain.TimelineItem) *T
 	if _, ok := item.Content.(domain.AssistantMessage); !ok {
 		return nil
 	}
-	active := s.LatestActiveAssistant()
-	if active == nil || isDurableTimelineItem(active.Item) {
+	active := s.latestReplaceableAssistant(item)
+	if active == nil {
 		return nil
 	}
 	delete(s.byItem, active.Item.ID)
 	active.Item = item
 	s.byItem[item.ID] = active
 	return active
+}
+
+func (s *ChatState) latestReplaceableAssistant(item domain.TimelineItem) *TimelineRecord {
+	if s == nil {
+		return nil
+	}
+	for idx := len(s.timeline) - 1; idx >= 0; idx-- {
+		record := s.timeline[idx]
+		if record == nil {
+			continue
+		}
+		assistant, ok := record.Item.Content.(domain.AssistantMessage)
+		if !ok {
+			break
+		}
+		if isDurableTimelineItem(record.Item) {
+			return nil
+		}
+		if record.Item.ChatID != 0 && item.ChatID != 0 && record.Item.ChatID != item.ChatID {
+			return nil
+		}
+		if item.Seq > 0 && record.Item.Seq > 0 && item.Seq < record.Item.Seq {
+			return nil
+		}
+		if !streamedAssistantMatchesFinal(assistant, item.Content.(domain.AssistantMessage)) {
+			return nil
+		}
+		return record
+	}
+	return nil
+}
+
+func streamedAssistantMatchesFinal(streamed, final domain.AssistantMessage) bool {
+	streamedText := strings.TrimSpace(streamed.Text)
+	finalText := strings.TrimSpace(final.Text)
+	if streamedText != "" && finalText != "" && streamedText != finalText {
+		return false
+	}
+	streamedReasoning := strings.TrimSpace(streamed.Reasoning.Text)
+	finalReasoning := strings.TrimSpace(final.Reasoning.Text)
+	if streamedReasoning != "" && finalReasoning != "" && streamedReasoning != finalReasoning {
+		return false
+	}
+	return true
 }
 
 func isDurableTimelineItem(item domain.TimelineItem) bool {

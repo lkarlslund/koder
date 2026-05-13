@@ -847,7 +847,7 @@ func (r *Chat) handleStreamEvent(evt domain.Event) {
 		r.cancelState = CancelStateNone
 		r.running = nil
 	case domain.EventKindMessageDone:
-		if r.state != nil {
+		if r.state != nil && evt.Item.ID != 0 {
 			r.state.SealActiveAssistant("")
 			r.state.ClearPendingAssistant()
 			contextChanged = true
@@ -916,6 +916,7 @@ func (r *Chat) handleStreamClosed() {
 		r.status = StatusIdle
 		r.statusText = "Idle"
 		if r.state != nil {
+			r.state.SealActiveAssistant("")
 			r.state.ClearPendingAssistant()
 		}
 	}

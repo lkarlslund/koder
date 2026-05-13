@@ -61,6 +61,52 @@ func TestChatStateUpsertTimelineItemPreservesRecordIdentity(t *testing.T) {
 	}
 }
 
+func TestChatStateUpsertReplacesSealedStreamedAssistantWithFinalItem(t *testing.T) {
+	state := NewTimelineState(domain.Chat{ID: 7}, nil, nil)
+	if err := state.AppendAssistantText(7, "I'll inspect the files."); err != nil {
+		t.Fatalf("append assistant text: %v", err)
+	}
+	streamed := state.Timeline()[0]
+	state.SealActiveAssistant("")
+	if !streamed.Item.Sealed() {
+		t.Fatal("expected streamed assistant to be sealed")
+	}
+
+	final := domain.TimelineItem{
+		ID:     42,
+		ChatID: 7,
+		Seq:    1,
+		Content: domain.AssistantMessage{
+			Text: "I'll inspect the files.",
+			Tools: []domain.ToolCall{{
+				ToolCallID: "call_1",
+				Tool:       domain.ToolKindRead,
+				Args:       map[string]string{"path": "main.go"},
+				Status:     domain.ToolStatusPending,
+			}},
+		},
+		CreatedAt: time.Now().UTC(),
+	}
+	replaced, created := state.UpsertTimelineItem(final)
+	if created {
+		t.Fatal("expected final assistant to replace streamed assistant")
+	}
+	if replaced != streamed {
+		t.Fatal("expected streamed assistant record identity to be preserved")
+	}
+	timeline := state.SnapshotTimeline()
+	if len(timeline) != 1 {
+		t.Fatalf("expected one assistant item, got %d", len(timeline))
+	}
+	if timeline[0].ID != final.ID {
+		t.Fatalf("expected durable final id %d, got %d", final.ID, timeline[0].ID)
+	}
+	assistant := timeline[0].Content.(domain.AssistantMessage)
+	if len(assistant.Tools) != 1 || assistant.Tools[0].ToolCallID != "call_1" {
+		t.Fatalf("expected final tool calls, got %#v", assistant.Tools)
+	}
+}
+
 func TestChatStateCurrentContextSizeFromTimeline(t *testing.T) {
 	now := time.Now().UTC()
 	state := NewTimelineState(
