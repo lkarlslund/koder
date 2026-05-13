@@ -250,13 +250,19 @@ func (s *Server) handleRPC(ctx context.Context, method string, params json.RawMe
 		if err := decodeParams(params, &in); err != nil {
 			return nil, err
 		}
-		return s.controller.State(), s.controller.SwitchChat(ctx, in.ChatID)
+		if err := s.controller.SwitchChat(ctx, in.ChatID); err != nil {
+			return nil, err
+		}
+		return s.controller.State(), nil
 	case "new_chat":
 		var in struct {
 			Title string `json:"title"`
 		}
 		_ = decodeParams(params, &in)
-		return s.controller.State(), s.controller.NewChat(ctx, in.Title)
+		if err := s.controller.NewChat(ctx, in.Title); err != nil {
+			return nil, err
+		}
+		return s.controller.State(), nil
 	case "list_sessions":
 		return s.controller.Sessions(ctx)
 	case "switch_session":
@@ -387,7 +393,10 @@ func (s *Server) handleRPC(ctx context.Context, method string, params json.RawMe
 		if err := decodeParams(params, &in); err != nil {
 			return nil, err
 		}
-		return s.controller.State(), s.controller.SetPermissionProfile(ctx, in.Profile)
+		if err := s.controller.SetPermissionProfile(ctx, in.Profile); err != nil {
+			return nil, err
+		}
+		return s.controller.State(), nil
 	default:
 		return nil, fmt.Errorf("unknown method %q", method)
 	}

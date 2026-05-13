@@ -430,6 +430,60 @@ func TestWebSocketSetModelReturnsUpdatedState(t *testing.T) {
 	}
 }
 
+func TestWebSocketSwitchChatReturnsUpdatedState(t *testing.T) {
+	ctrl := newTestController(t)
+	firstID := ctrl.State().ActiveChatID
+	if err := ctrl.NewChat(context.Background(), "side chat"); err != nil {
+		t.Fatalf("new chat: %v", err)
+	}
+	secondID := ctrl.State().ActiveChatID
+	if firstID == 0 || secondID == 0 || firstID == secondID {
+		t.Fatalf("expected two distinct chats, first=%d second=%d", firstID, secondID)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoBrowser: true})
+	if err != nil {
+		t.Fatalf("start server: %v", err)
+	}
+	conn, _, err := websocket.Dial(ctx, "ws://"+srv.Addr()+"/ws", nil)
+	if err != nil {
+		t.Fatalf("dial websocket: %v", err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	_ = readMessage(t, ctx, conn)
+	if err := conn.Write(ctx, websocket.MessageText, []byte(fmt.Sprintf(`{"id":1,"method":"switch_chat","params":{"chat_id":%d}}`, firstID))); err != nil {
+		t.Fatalf("write switch_chat: %v", err)
+	}
+	msg := readRPCResponse(t, ctx, conn, 1)
+	var resp struct {
+		OK     bool `json:"ok"`
+		Result struct {
+			ActiveChatID int64 `json:"active_chat_id"`
+			Snapshot     struct {
+				Chat struct {
+					ID int64
+				}
+			}
+		} `json:"result"`
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(msg, &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !resp.OK {
+		t.Fatalf("expected switch_chat ok, got %s", resp.Error)
+	}
+	if resp.Result.ActiveChatID != firstID {
+		t.Fatalf("expected response active chat %d, got %d", firstID, resp.Result.ActiveChatID)
+	}
+	if resp.Result.Snapshot.Chat.ID != firstID {
+		t.Fatalf("expected response snapshot chat %d, got %d", firstID, resp.Result.Snapshot.Chat.ID)
+	}
+}
+
 func TestWebSocketDeleteChatReturnsUpdatedState(t *testing.T) {
 	ctrl := newTestController(t)
 	if err := ctrl.NewChat(context.Background(), "side chat"); err != nil {
