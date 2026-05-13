@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/pebble"
+
 	"github.com/lkarlslund/koder/internal/domain"
 )
 
@@ -750,6 +752,81 @@ func TestJSONFSWritesInspectableFiles(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, "store-jsonfs-v3", "sessions", formatID(session.ID)+".json")); err != nil {
 		t.Fatalf("expected inspectable session JSON file: %v", err)
+	}
+}
+
+func TestOpenResetsStoreWhenSchemaVersionChanges(t *testing.T) {
+	for _, backend := range []string{BackendPebble, BackendJSONFS} {
+		t.Run(backend, func(t *testing.T) {
+			root := t.TempDir()
+			st, err := OpenWithOptions(root, Options{Backend: backend})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := st.CreateSession(context.Background(), "old", "provider", "model", nil); err != nil {
+				t.Fatal(err)
+			}
+			if err := st.Close(); err != nil {
+				t.Fatal(err)
+			}
+			writeStoreMetaForTest(t, root, backend, metaRecord{
+				SchemaVersion: schemaVersion - 1,
+				Encoding:      encodingJSON,
+				Backend:       backend,
+			})
+
+			st, err = OpenWithOptions(root, Options{Backend: backend})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer st.Close()
+			sessions, err := st.ListSessions(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(sessions) != 0 {
+				t.Fatalf("expected old sessions to be cleared after schema reset, got %#v", sessions)
+			}
+			session, err := st.CreateSession(context.Background(), "new", "provider", "model", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if session.ID != 1 {
+				t.Fatalf("expected ids to restart after schema reset, got %d", session.ID)
+			}
+		})
+	}
+}
+
+func writeStoreMetaForTest(t *testing.T, root, backend string, meta metaRecord) {
+	t.Helper()
+	switch backend {
+	case BackendJSONFS:
+		if err := writeJSONFile(filepath.Join(root, "store-jsonfs-v3", "meta.json"), meta); err != nil {
+			t.Fatal(err)
+		}
+	case BackendPebble:
+		impl, err := openPebbleBackend(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		batch := impl.db.NewBatch()
+		if err := impl.putMeta(batch, meta); err != nil {
+			_ = batch.Close()
+			_ = impl.Close()
+			t.Fatal(err)
+		}
+		if err := batch.Commit(pebble.Sync); err != nil {
+			_ = batch.Close()
+			_ = impl.Close()
+			t.Fatal(err)
+		}
+		_ = batch.Close()
+		if err := impl.Close(); err != nil {
+			t.Fatal(err)
+		}
+	default:
+		t.Fatalf("unknown backend %q", backend)
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -39,6 +40,27 @@ func openPebbleBackend(stateDir string) (*pebbleBackend, error) {
 		_ = db.Close()
 		return nil, err
 	}
+	if reset, err := b.needsSchemaReset(); err != nil {
+		_ = db.Close()
+		return nil, err
+	} else if reset {
+		_ = db.Close()
+		if err := os.RemoveAll(dir); err != nil {
+			return nil, fmt.Errorf("reset pebble store: %w", err)
+		}
+		if err := ensureDir(dir); err != nil {
+			return nil, fmt.Errorf("recreate pebble store: %w", err)
+		}
+		db, err = pebble.Open(dir, &pebble.Options{Logger: silentPebbleLogger{}})
+		if err != nil {
+			return nil, fmt.Errorf("reopen pebble after reset: %w", err)
+		}
+		b = &pebbleBackend{db: db}
+		if err := b.init(); err != nil {
+			_ = db.Close()
+			return nil, err
+		}
+	}
 	return b, nil
 }
 
@@ -63,6 +85,14 @@ func (b *pebbleBackend) init() error {
 		return fmt.Errorf("encode pebble metadata: %w", err)
 	}
 	return b.db.Set([]byte("meta/store"), metaBytes, pebble.Sync)
+}
+
+func (b *pebbleBackend) needsSchemaReset() (bool, error) {
+	meta, err := b.readMeta()
+	if err != nil {
+		return false, err
+	}
+	return meta.SchemaVersion != schemaVersion || meta.Encoding != encodingJSON || meta.Backend != BackendPebble, nil
 }
 
 func (b *pebbleBackend) Close() error {

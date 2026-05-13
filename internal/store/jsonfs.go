@@ -21,6 +21,13 @@ type jsonfsBackend struct {
 
 func openJSONFSBackend(stateDir string) (*jsonfsBackend, error) {
 	root := filepath.Join(stateDir, "store-jsonfs-v3")
+	if reset, err := jsonfsNeedsSchemaReset(root); err != nil {
+		return nil, err
+	} else if reset {
+		if err := os.RemoveAll(root); err != nil {
+			return nil, fmt.Errorf("reset jsonfs store: %w", err)
+		}
+	}
 	for _, dir := range []string{
 		root,
 		filepath.Join(root, "sessions"),
@@ -40,6 +47,18 @@ func openJSONFSBackend(stateDir string) (*jsonfsBackend, error) {
 		return nil, err
 	}
 	return b, nil
+}
+
+func jsonfsNeedsSchemaReset(root string) (bool, error) {
+	metaPath := filepath.Join(root, "meta.json")
+	if !fileExists(metaPath) {
+		return false, nil
+	}
+	var meta metaRecord
+	if err := readJSONFile(metaPath, &meta); err != nil {
+		return false, fmt.Errorf("read jsonfs metadata before schema check: %w", err)
+	}
+	return meta.SchemaVersion != schemaVersion || meta.Encoding != encodingJSON || meta.Backend != BackendJSONFS, nil
 }
 
 func (b *jsonfsBackend) init() error {

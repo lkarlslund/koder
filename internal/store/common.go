@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	schemaVersion = 2
+	schemaVersion = 3
 	encodingJSON  = "json"
 )
 
