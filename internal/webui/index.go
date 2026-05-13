@@ -577,14 +577,19 @@ const indexHTML = `<!doctype html>
       const data = toolData(tool);
       const args = toolArgs(tool);
       const path = firstValue(data, ['path', 'Path']) || firstValue(args, ['path']);
-      const command = firstValue(data, ['command', 'Command']) || firstValue(args, ['command']);
       switch (kind) {
         case 'read': return path ? 'Read ' + path : 'Read';
         case 'write': return path ? 'Write ' + path : 'Write file';
         case 'edit': return path ? 'Edit ' + path : 'Edit file';
         case 'apply_patch': return 'Apply patch';
-        case 'bash': return command ? 'Run ' + command : 'Run command';
-        case 'exec_command': return command ? 'Start ' + command : 'Start exec';
+        case 'bash': return 'Run command';
+        case 'exec_command': return 'Start exec';
+        case 'exec_status': return 'Exec status';
+        case 'exec_list': return 'Exec sessions';
+        case 'exec_write_stdin': return 'Write exec stdin';
+        case 'exec_resize': return 'Resize exec';
+        case 'exec_terminate': return 'Terminate exec';
+        case 'exec_cleanup_background': return 'Clean exec sessions';
         case 'grep': return 'Search ' + (firstValue(data, ['pattern', 'Pattern']) || firstValue(args, ['pattern']));
         case 'glob': return 'Glob ' + (firstValue(data, ['pattern', 'Pattern']) || firstValue(args, ['pattern']));
         case 'webfetch': return 'Fetch ' + (firstValue(data, ['url', 'URL']) || firstValue(args, ['url']));
@@ -595,11 +600,25 @@ const indexHTML = `<!doctype html>
     function toolPreviewText(tool) {
       const args = toolArgs(tool);
       const values = [];
+      if (args.command) values.push(args.command);
       for (const key of ['path', 'pattern', 'query', 'url', 'include']) {
         if (args[key]) values.push(key + '=' + args[key]);
       }
-      if (args.command) values.push(args.command);
       return values.slice(0, 2).join('  ');
+    }
+    function execResultLines(data, fallback) {
+      const output = firstValue(data, ['output', 'Output']);
+      if (output) return output;
+      const lines = [];
+      const message = firstValue(data, ['message', 'Message']);
+      const processID = firstValue(data, ['process_id', 'ProcessID']);
+      const state = firstValue(data, ['state', 'State']);
+      const exitCode = firstValue(data, ['exit_code', 'ExitCode']);
+      if (message) lines.push(message);
+      if (processID) lines.push('process_id: ' + processID);
+      if (state) lines.push('state: ' + state);
+      if (exitCode !== '') lines.push('exit_code: ' + exitCode);
+      return lines.length ? lines : fallback;
     }
     function renderToolResult(tool) {
       const kind = String((tool && tool.tool) || '');
@@ -626,9 +645,11 @@ const indexHTML = `<!doctype html>
         const lines = storedLines.length ? storedLines.map(line => (line.number || line.Number || '') + ': ' + (line.text || line.Text || '')) : toolResultText(tool);
         return renderCompactBlock(path, lines);
       }
-      if (kind === 'bash' || kind.startsWith('exec_')) {
-        const title = firstValue(data, ['command', 'Command', 'message', 'Message']) || kind;
-        return renderCompactBlock(title, firstValue(data, ['output', 'Output']) || toolResultText(tool));
+      if (kind === 'bash') {
+        return renderCompactBlock('Output', firstValue(data, ['output', 'Output']) || toolResultText(tool));
+      }
+      if (kind.startsWith('exec_')) {
+        return renderCompactBlock('Result', execResultLines(data, toolResultText(tool)));
       }
       if (kind === 'glob') return renderCompactBlock('Matches', data.matches || data.Matches || toolResultText(tool));
       if (kind === 'grep') return renderCompactBlock('Matches', firstValue(data, ['output', 'Output']) || toolResultText(tool));

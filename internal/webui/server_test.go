@@ -203,6 +203,15 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(string(body), `compactLines(lines, head = 2, tail = 2)`) {
 		t.Fatalf("expected file write results to use compact head/tail rendering")
 	}
+	if strings.Contains(string(body), `case 'bash': return command ? 'Run ' + command`) || strings.Contains(string(body), `const title = firstValue(data, ['command', 'Command'`) {
+		t.Fatalf("expected command tools to render the command once, not in title and result header")
+	}
+	if !strings.Contains(string(body), `case 'bash': return 'Run command'`) || !strings.Contains(string(body), `return renderCompactBlock('Output'`) {
+		t.Fatalf("expected bash tool rendering to show a generic title and output block")
+	}
+	if !strings.Contains(string(body), `if (args.command) values.push(args.command)`) || !strings.Contains(string(body), `function execResultLines(data, fallback)`) {
+		t.Fatalf("expected command preview and exec result helpers")
+	}
 	if !strings.Contains(string(body), `hello.asset_hash !== window.KODER_ASSET_HASH`) || !strings.Contains(string(body), `location.reload()`) {
 		t.Fatalf("expected websocket reconnect to reload on asset mismatch")
 	}
