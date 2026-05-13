@@ -42,6 +42,7 @@ type State struct {
 	Session      domain.Session      `json:"session"`
 	Sessions     []domain.Session    `json:"sessions"`
 	Chats        []domain.Chat       `json:"chats"`
+	ChatStatuses []ChatSidebarStatus `json:"chat_statuses"`
 	ActiveChatID int64               `json:"active_chat_id"`
 	Permissions  PermissionsState    `json:"permissions"`
 	Snapshot     chat.Snapshot       `json:"snapshot"`
@@ -51,6 +52,16 @@ type State struct {
 	Theme        string              `json:"theme"`
 	Workdir      string              `json:"workdir"`
 	Error        string              `json:"error,omitempty"`
+}
+
+// ChatSidebarStatus is the renderer-neutral run state for one chat in the sidebar.
+type ChatSidebarStatus struct {
+	ChatID           int64  `json:"chat_id"`
+	Status           string `json:"status"`
+	Busy             bool   `json:"busy"`
+	PendingApprovals int    `json:"pending_approvals,omitempty"`
+	StatusText       string `json:"status_text,omitempty"`
+	LastError        string `json:"last_error,omitempty"`
 }
 
 // ModelOption is a selectable provider/model pair exposed to renderers.
@@ -154,6 +165,7 @@ type Controller struct {
 	session   domain.Session
 	sessions  []domain.Session
 	chats     []domain.Chat
+	statuses  map[int64]ChatSidebarStatus
 	chat      domain.Chat
 	runtime   *chat.Chat
 	unsub     func()
@@ -174,12 +186,13 @@ type Controller struct {
 // New constructs a renderer-neutral controller.
 func New(cfg config.Config, st *store.Store, engine *agent.Engine, workdir string) *Controller {
 	return &Controller{
-		cfg:     cfg,
-		store:   st,
-		agent:   engine,
-		workdir: strings.TrimSpace(workdir),
-		theme:   "auto",
-		subs:    map[int]chan Event{},
+		cfg:      cfg,
+		store:    st,
+		agent:    engine,
+		workdir:  strings.TrimSpace(workdir),
+		theme:    "auto",
+		statuses: map[int64]ChatSidebarStatus{},
+		subs:     map[int]chan Event{},
 	}
 }
 
@@ -209,6 +222,7 @@ func (c *Controller) State() State {
 		Session:      c.session,
 		Sessions:     slices.Clone(c.sessions),
 		Chats:        slices.Clone(c.chats),
+		ChatStatuses: c.chatStatusesLocked(),
 		ActiveChatID: c.chat.ID,
 		Permissions:  c.permissionsStateLocked(),
 		Milestones:   c.milestone,
@@ -219,7 +233,11 @@ func (c *Controller) State() State {
 		Error:        c.lastErr,
 	}
 	if c.runtime != nil {
-		state.Snapshot = c.runtime.Snapshot()
+		snapshot := c.runtime.Snapshot()
+		state.Snapshot = snapshot
+		if !hasChatSidebarStatus(state.ChatStatuses, snapshot.Chat.ID) {
+			state.ChatStatuses = mergeChatSidebarStatus(state.ChatStatuses, sidebarStatusFromSnapshot(snapshot))
+		}
 	}
 	return state
 }
@@ -412,7 +430,9 @@ func (c *Controller) DeleteChat(ctx context.Context, chatID int64) error {
 	}
 	c.mu.Lock()
 	c.chats = chats
+	delete(c.statuses, chatID)
 	c.mu.Unlock()
+	c.refreshChatStatuses(ctx, sessionID)
 	c.broadcast("snapshot", c.State())
 	return nil
 }
@@ -1170,6 +1190,8 @@ func (c *Controller) loadSession(ctx context.Context, sessionID, chatID int64) e
 	milestone, todos := c.planningState(ctx, session.ID)
 	workspaceStatus, _ := workspacepkg.Snapshot(ctx, c.workdir)
 	updates, unsub := rt.Subscribe()
+	statuses := c.chatStatuses(ctx, session.ID)
+	statuses[chatRecord.ID] = sidebarStatusFromSnapshot(rt.Snapshot())
 
 	c.mu.Lock()
 	if c.unsub != nil {
@@ -1181,6 +1203,7 @@ func (c *Controller) loadSession(ctx context.Context, sessionID, chatID int64) e
 	c.chat = chatRecord
 	c.runtime = rt
 	c.unsub = unsub
+	c.statuses = statuses
 	c.milestone = milestone
 	c.todos = todos
 	c.workspace = workspaceStatus
@@ -1245,6 +1268,74 @@ func (c *Controller) planningState(ctx context.Context, sessionID int64) (store.
 	return plan, todos
 }
 
+func (c *Controller) chatStatuses(ctx context.Context, sessionID int64) map[int64]ChatSidebarStatus {
+	out := map[int64]ChatSidebarStatus{}
+	if sessionID == 0 {
+		return out
+	}
+	if c.agent != nil {
+		statuses, err := c.agent.ListChats(ctx, sessionID)
+		if err == nil {
+			for _, status := range statuses {
+				out[status.Chat.ID] = sidebarStatusFromToolStatus(status)
+			}
+			return out
+		}
+	}
+	if c.store == nil {
+		return out
+	}
+	chats, err := c.store.ListChats(ctx, sessionID)
+	if err != nil {
+		return out
+	}
+	for _, item := range chats {
+		out[item.ID] = idleChatSidebarStatus(item.ID)
+	}
+	return out
+}
+
+func (c *Controller) refreshChatStatuses(ctx context.Context, sessionID int64) bool {
+	statuses := c.chatStatuses(ctx, sessionID)
+	if status, ok := c.activeChatSidebarStatus(sessionID); ok {
+		statuses[status.ChatID] = status
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if sessionID == 0 || c.session.ID != sessionID {
+		return false
+	}
+	if chatSidebarStatusMapsEqual(c.statuses, statuses) {
+		return false
+	}
+	c.statuses = statuses
+	return true
+}
+
+func (c *Controller) chatStatusesLocked() []ChatSidebarStatus {
+	out := make([]ChatSidebarStatus, 0, len(c.chats))
+	for _, item := range c.chats {
+		status, ok := c.statuses[item.ID]
+		if !ok {
+			status = idleChatSidebarStatus(item.ID)
+		}
+		out = append(out, status)
+	}
+	return out
+}
+
+func (c *Controller) activeChatSidebarStatus(sessionID int64) (ChatSidebarStatus, bool) {
+	c.mu.RLock()
+	rt := c.runtime
+	activeSessionID := c.session.ID
+	c.mu.RUnlock()
+	if rt == nil || activeSessionID != sessionID {
+		return ChatSidebarStatus{}, false
+	}
+	status := sidebarStatusFromSnapshot(rt.Snapshot())
+	return status, status.ChatID != 0
+}
+
 func (c *Controller) forwardRuntime(chatID int64, updates <-chan chat.Update) {
 	for update := range updates {
 		c.mu.RLock()
@@ -1262,6 +1353,10 @@ func (c *Controller) forwardRuntime(chatID int64, updates <-chan chat.Update) {
 		if update.Snapshot.Chat.ID == chatID {
 			c.mu.Lock()
 			c.chat = update.Snapshot.Chat
+			if c.statuses == nil {
+				c.statuses = map[int64]ChatSidebarStatus{}
+			}
+			c.statuses[chatID] = sidebarStatusFromUpdate(update)
 			for idx := range c.chats {
 				if c.chats[idx].ID == update.Snapshot.Chat.ID {
 					c.chats[idx] = update.Snapshot.Chat
@@ -1269,10 +1364,143 @@ func (c *Controller) forwardRuntime(chatID int64, updates <-chan chat.Update) {
 				}
 			}
 			c.mu.Unlock()
+		} else {
+			c.mu.Lock()
+			if c.statuses == nil {
+				c.statuses = map[int64]ChatSidebarStatus{}
+			}
+			c.statuses[chatID] = sidebarStatusFromUpdate(update)
+			c.mu.Unlock()
 		}
 		c.refreshPlanningState(context.Background(), sessionID)
 		c.broadcast("chat_update", update)
 		c.broadcast("snapshot", c.State())
+	}
+}
+
+func idleChatSidebarStatus(chatID int64) ChatSidebarStatus {
+	return ChatSidebarStatus{ChatID: chatID, Status: string(chat.StatusIdle), StatusText: "Idle"}
+}
+
+func sidebarStatusFromToolStatus(status tools.ChatStatus) ChatSidebarStatus {
+	value := strings.TrimSpace(status.Status)
+	if value == "" {
+		value = string(status.State)
+	}
+	if value == "" {
+		value = string(chat.StatusIdle)
+	}
+	text := strings.TrimSpace(status.StatusText)
+	if text == "" {
+		text = chatSidebarStatusText(value)
+	}
+	return ChatSidebarStatus{
+		ChatID:           status.Chat.ID,
+		Status:           value,
+		Busy:             status.Busy,
+		PendingApprovals: status.PendingApprovals,
+		StatusText:       text,
+		LastError:        status.LastError,
+	}
+}
+
+func sidebarStatusFromUpdate(update chat.Update) ChatSidebarStatus {
+	status := update.Status
+	if status == "" {
+		status = update.Snapshot.Status
+	}
+	text := strings.TrimSpace(update.StatusText)
+	if text == "" {
+		text = strings.TrimSpace(update.Snapshot.StatusText)
+	}
+	return sidebarStatusFromSnapshot(chat.Snapshot{
+		Chat:       update.Snapshot.Chat,
+		Status:     status,
+		StatusText: text,
+		Active:     update.Active || update.Snapshot.Active,
+		Approvals:  update.Snapshot.Approvals,
+	})
+}
+
+func sidebarStatusFromSnapshot(snapshot chat.Snapshot) ChatSidebarStatus {
+	value := string(snapshot.Status)
+	if value == "" {
+		value = string(chat.StatusIdle)
+	}
+	text := strings.TrimSpace(snapshot.StatusText)
+	if text == "" {
+		text = chatSidebarStatusText(value)
+	}
+	return ChatSidebarStatus{
+		ChatID:           snapshot.Chat.ID,
+		Status:           value,
+		Busy:             snapshot.Active || value == string(chat.StatusRunningTools) || value == string(chat.StatusWaitingLLM) || value == string(chat.StatusStreamingResponse) || value == string(chat.StatusStreamingThoughts) || value == string(chat.StatusWaitingApproval),
+		PendingApprovals: len(snapshot.Approvals),
+		StatusText:       text,
+	}
+}
+
+func mergeChatSidebarStatus(statuses []ChatSidebarStatus, status ChatSidebarStatus) []ChatSidebarStatus {
+	if status.ChatID == 0 {
+		return statuses
+	}
+	for idx := range statuses {
+		if statuses[idx].ChatID == status.ChatID {
+			statuses[idx] = status
+			return statuses
+		}
+	}
+	return append(statuses, status)
+}
+
+func hasChatSidebarStatus(statuses []ChatSidebarStatus, chatID int64) bool {
+	if chatID == 0 {
+		return false
+	}
+	for _, status := range statuses {
+		if status.ChatID == chatID {
+			return true
+		}
+	}
+	return false
+}
+
+func chatSidebarStatusMapsEqual(left, right map[int64]ChatSidebarStatus) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for id, leftStatus := range left {
+		if right[id] != leftStatus {
+			return false
+		}
+	}
+	return true
+}
+
+func chatSidebarStatusText(status string) string {
+	switch status {
+	case string(chat.StatusWaitingLLM):
+		return "Waiting for LLM"
+	case string(chat.StatusStreamingThoughts):
+		return "Streaming reasoning"
+	case string(chat.StatusStreamingResponse):
+		return "Streaming response"
+	case string(chat.StatusRunningTools):
+		return "Running tools"
+	case string(chat.StatusWaitingApproval):
+		return "Waiting for approval"
+	case string(chat.StatusErrored):
+		return "Error"
+	case string(tools.ChatRunStateFailed):
+		return "Failed"
+	case string(tools.ChatRunStateRunning):
+		return "Running"
+	case string(tools.ChatRunStateCompleted):
+		return "Completed"
+	case string(tools.ChatRunStateCancelled):
+		return "Cancelled"
+	default:
+		return "Idle"
 	}
 }
 
@@ -1299,6 +1527,12 @@ func (c *Controller) monitorWorkspace(ctx context.Context) {
 			return
 		case <-ticker.C:
 			_ = c.RefreshWorkspace(ctx)
+			c.mu.RLock()
+			sessionID := c.session.ID
+			c.mu.RUnlock()
+			if c.refreshChatStatuses(ctx, sessionID) {
+				c.broadcast("snapshot", c.State())
+			}
 		}
 	}
 }

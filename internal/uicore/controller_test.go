@@ -30,6 +30,9 @@ func TestControllerStartCreatesSessionAndPublishesState(t *testing.T) {
 	if state.ActiveChatID == 0 {
 		t.Fatal("expected active chat")
 	}
+	if len(state.ChatStatuses) == 0 {
+		t.Fatal("expected chat sidebar statuses")
+	}
 	select {
 	case event := <-events:
 		if event.Type != "snapshot" {
@@ -106,11 +109,19 @@ func TestControllerForwardRuntimeRefreshesChatListMetadata(t *testing.T) {
 	if state.ActiveChatID == 0 {
 		t.Fatal("expected active chat")
 	}
+	ctrl.mu.Lock()
+	if ctrl.unsub != nil {
+		ctrl.unsub()
+		ctrl.unsub = nil
+	}
+	ctrl.mu.Unlock()
 	updated := state.Snapshot
 	updated.Chat.ID = state.ActiveChatID
 	updated.Chat.Title = "Generated Chat Title"
+	updated.Status = chat.StatusRunningTools
+	updated.StatusText = "Running tools"
 	updates := make(chan chat.Update, 1)
-	updates <- chat.Update{Snapshot: updated}
+	updates <- chat.Update{Snapshot: updated, Status: chat.StatusRunningTools, StatusText: "Running tools", Active: true}
 	close(updates)
 
 	ctrl.forwardRuntime(state.ActiveChatID, updates)
@@ -125,6 +136,16 @@ func TestControllerForwardRuntimeRefreshesChatListMetadata(t *testing.T) {
 	}
 	if listed != "Generated Chat Title" {
 		t.Fatalf("expected chat list title updated, got %q", listed)
+	}
+	var sidebarStatus ChatSidebarStatus
+	for _, item := range got.ChatStatuses {
+		if item.ChatID == state.ActiveChatID {
+			sidebarStatus = item
+			break
+		}
+	}
+	if sidebarStatus.Status != string(chat.StatusRunningTools) || !sidebarStatus.Busy {
+		t.Fatalf("expected active chat sidebar status running tools, got %#v", sidebarStatus)
 	}
 }
 

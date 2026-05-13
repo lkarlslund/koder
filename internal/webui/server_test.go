@@ -305,6 +305,21 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(string(body), `deleteChat(chatID(chat))`) {
 		t.Fatalf("expected chat list trash action")
 	}
+	if !strings.Contains(string(body), `chatStatusLabel(chat)`) || !strings.Contains(string(body), `chat-status-icon`) {
+		t.Fatalf("expected chat sidebar to render per-chat animated status icons")
+	}
+	if !strings.Contains(string(body), `this.state.chat_statuses`) || !strings.Contains(string(body), `waiting_llm: 'Waiting for LLM'`) {
+		t.Fatalf("expected chat sidebar status helpers for all chats")
+	}
+	if strings.Contains(string(body), `x-show="!chatStatusIdle(chat)"`) || !strings.Contains(string(body), `:title="chatStatusLabel(chat)"`) {
+		t.Fatalf("expected all chat status icons to render with hover tooltips")
+	}
+	if !strings.Contains(string(body), `.chat-status-icon.status-idle`) || strings.Contains(string(body), `.chat-status-icon.status-idle { color: var(--bs-secondary-color); opacity: .65; animation`) {
+		t.Fatalf("expected idle chat status icon to be static")
+	}
+	if !strings.Contains(string(body), `@keyframes chat-status-spin`) || !strings.Contains(string(body), `chatStatusIcon(chat)`) {
+		t.Fatalf("expected chat status icons to animate per state")
+	}
 	if !strings.Contains(string(body), `openProviderDialog()`) {
 		t.Fatalf("expected top status bar provider dialog button")
 	}

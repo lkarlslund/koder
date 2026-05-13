@@ -13,6 +13,7 @@ import (
 
 type chatRunState struct {
 	state      tools.ChatRunState
+	status     string
 	statusText string
 	lastError  string
 }
@@ -85,12 +86,14 @@ func (e *Engine) PollChat(ctx context.Context, sessionID, chatID int64) (tools.C
 	e.chatMu.RUnlock()
 
 	state := run.state
+	status := strings.TrimSpace(run.status)
 	statusText := run.statusText
 	lastError := run.lastError
 	busy := false
 
 	if activeChat != nil {
 		chatStatus, text, active := activeChat.Status()
+		status = string(chatStatus)
 		statusText = text
 		switch chatStatus {
 		case chatpkg.StatusWaitingApproval:
@@ -109,8 +112,12 @@ func (e *Engine) PollChat(ctx context.Context, sessionID, chatID int64) (tools.C
 	if state == "" {
 		state = tools.ChatRunStateIdle
 	}
+	if status == "" {
+		status = string(state)
+	}
 	if len(pending) > 0 && state == tools.ChatRunStateIdle {
 		state = tools.ChatRunStateWaitingApproval
+		status = string(chatpkg.StatusWaitingApproval)
 		busy = true
 		if strings.TrimSpace(statusText) == "" {
 			statusText = "Waiting for approval"
@@ -119,6 +126,7 @@ func (e *Engine) PollChat(ctx context.Context, sessionID, chatID int64) (tools.C
 	return tools.ChatStatus{
 		Chat:             chatRecord,
 		State:            state,
+		Status:           status,
 		Busy:             busy,
 		PendingApprovals: len(pending),
 		LastError:        lastError,
@@ -186,9 +194,13 @@ func (e *Engine) consumeChatUpdates(chatID int64, updates <-chan chatpkg.Update,
 		}
 	}()
 	state := tools.ChatRunStateRunning
+	status := string(chatpkg.StatusWaitingLLM)
 	statusText := "Running"
 	lastError := ""
 	for update := range updates {
+		if update.Status != "" {
+			status = string(update.Status)
+		}
 		switch update.Status {
 		case chatpkg.StatusWaitingApproval:
 			state = tools.ChatRunStateWaitingApproval
@@ -200,18 +212,20 @@ func (e *Engine) consumeChatUpdates(chatID int64, updates <-chan chatpkg.Update,
 				state = tools.ChatRunStateRunning
 			} else if state == tools.ChatRunStateRunning {
 				state = tools.ChatRunStateCompleted
+				status = string(tools.ChatRunStateCompleted)
 			}
 		}
 		if strings.TrimSpace(update.StatusText) != "" {
 			statusText = strings.TrimSpace(update.StatusText)
 		}
-		e.setRunState(chatID, chatRunState{state: state, statusText: statusText, lastError: lastError})
+		e.setRunState(chatID, chatRunState{state: state, status: status, statusText: statusText, lastError: lastError})
 	}
 	if state == tools.ChatRunStateRunning {
 		state = tools.ChatRunStateCompleted
+		status = string(tools.ChatRunStateCompleted)
 		statusText = "Completed"
 	}
-	e.setRunState(chatID, chatRunState{state: state, statusText: statusText, lastError: lastError})
+	e.setRunState(chatID, chatRunState{state: state, status: status, statusText: statusText, lastError: lastError})
 }
 
 func (e *Engine) setRunState(chatID int64, state chatRunState) {

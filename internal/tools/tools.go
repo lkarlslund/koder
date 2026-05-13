@@ -33,6 +33,7 @@ const (
 type ChatStatus struct {
 	Chat             domain.Chat
 	State            ChatRunState
+	Status           string
 	Busy             bool
 	PendingApprovals int
 	LastError        string

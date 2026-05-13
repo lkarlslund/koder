@@ -23,6 +23,15 @@ const indexHTML = `<!doctype html>
     .sidebar-resizer { min-height: 0; cursor: col-resize; background: var(--bs-border-color); opacity: .55; touch-action: none; }
     .sidebar-resizer:hover, .sidebar-resizer.resizing { background: var(--bs-primary); opacity: 1; }
     .sidebar { min-height: 0; overflow: auto; border-left: 1px solid var(--bs-border-color); }
+    .chat-status-icon { flex: 0 0 auto; font-size: .9rem; line-height: 1; }
+    .chat-status-icon.status-idle { color: var(--bs-secondary-color); opacity: .65; }
+    .chat-status-icon.status-running, .chat-status-icon.status-waiting-llm, .chat-status-icon.status-streaming-response, .chat-status-icon.status-streaming-thoughts, .chat-status-icon.status-running-tools { color: var(--bs-primary); animation: chat-status-spin 1s linear infinite; }
+    .chat-status-icon.status-waiting-approval { color: var(--bs-warning); animation: chat-status-pulse 1s ease-in-out infinite; }
+    .chat-status-icon.status-error, .chat-status-icon.status-failed, .chat-status-icon.status-cancelled { color: var(--bs-danger); animation: chat-status-pulse 1.1s ease-in-out infinite; }
+    .chat-status-icon.status-completed { color: var(--bs-success); animation: chat-status-fade 1.5s ease-in-out infinite; }
+    @keyframes chat-status-spin { to { transform: rotate(360deg); } }
+    @keyframes chat-status-pulse { 0%, 100% { opacity: .45; transform: scale(.94); } 50% { opacity: 1; transform: scale(1.08); } }
+    @keyframes chat-status-fade { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
     .composer { grid-column: 1 / 4; border-top: 1px solid var(--bs-border-color); }
     .composer-input { max-height: 20vh; overflow-y: hidden; resize: none; }
     .composer-menu { max-height: 32vh; overflow: auto; }
@@ -224,7 +233,11 @@ const indexHTML = `<!doctype html>
           <template x-for="chat in state.chats || []" :key="chat.ID || chat.id">
             <div class="list-group-item list-group-item-action d-flex align-items-center gap-2" :class="{'active': chatID(chat) === state.active_chat_id}" @click="switchChat(chatID(chat))">
               <button type="button" class="btn btn-sm p-0 border-0 bg-transparent flex-grow-1 text-start" :class="{'text-white': chatID(chat) === state.active_chat_id}" @click.stop="switchChat(chatID(chat))">
-                <i class="bi bi-chat-left-text"></i> <span x-text="chat.Title || chat.title || 'Chat'"></span>
+                <div class="d-flex align-items-center gap-2">
+                  <i class="bi bi-chat-left-text"></i>
+                  <span class="text-truncate" x-text="chat.Title || chat.title || 'Chat'"></span>
+                  <i class="chat-status-icon bi" :class="[chatStatusIcon(chat), chatStatusClass(chat)]" :title="chatStatusLabel(chat)"></i>
+                </div>
               </button>
               <button type="button" class="btn btn-sm" :class="chatID(chat) === state.active_chat_id ? 'btn-outline-light' : 'btn-outline-danger'" title="Delete chat" @click.stop="deleteChat(chatID(chat))">
                 <i class="bi bi-trash"></i>
@@ -826,6 +839,50 @@ const indexHTML = `<!doctype html>
           return 'bi-circle text-secondary';
         },
         chatID(chat) { return chat.ID || chat.id; },
+        chatStatus(chat) {
+          const id = this.chatID(chat);
+          const statuses = this.state.chat_statuses || this.state.ChatStatuses || [];
+          return statuses.find(status => (status.chat_id || status.ChatID) === id) || {chat_id: id, status: 'idle', status_text: 'Idle'};
+        },
+        chatStatusValue(chat) {
+          const status = this.chatStatus(chat);
+          return String(status.status || status.Status || 'idle');
+        },
+        chatStatusLabel(chat) {
+          const status = this.chatStatus(chat);
+          const text = status.status_text || status.StatusText || '';
+          if (text) return text;
+          const value = this.chatStatusValue(chat);
+          const labels = {
+            idle: 'Idle',
+            waiting_llm: 'Waiting for LLM',
+            streaming_thoughts: 'Streaming reasoning',
+            streaming_response: 'Streaming response',
+            running_tools: 'Running tools',
+            waiting_approval: 'Waiting for approval',
+            running: 'Running',
+            completed: 'Completed',
+            failed: 'Failed',
+            cancelled: 'Cancelled',
+            error: 'Error',
+          };
+          return labels[value] || value.replaceAll('_', ' ');
+        },
+        chatStatusClass(chat) {
+          const value = this.chatStatusValue(chat).replaceAll('_', '-');
+          return 'status-' + value;
+        },
+        chatStatusIcon(chat) {
+          const value = this.chatStatusValue(chat);
+          if (value === 'waiting_approval') return 'bi-pause-circle-fill';
+          if (value === 'error' || value === 'failed') return 'bi-exclamation-triangle-fill';
+          if (value === 'cancelled') return 'bi-x-circle-fill';
+          if (value === 'completed') return 'bi-check-circle-fill';
+          if (value === 'running_tools') return 'bi-tools';
+          if (value === 'waiting_llm') return 'bi-hourglass-split';
+          if (value === 'streaming_response' || value === 'streaming_thoughts' || value === 'running') return 'bi-arrow-repeat';
+          return 'bi-circle';
+        },
         gitStatus() { return this.state.workspace_status || this.state.Workspace || {}; },
         gitFiles() { return this.gitStatus().files || this.gitStatus().Files || []; },
         gitFileCode(file) { return file.code || file.Code || ''; },
