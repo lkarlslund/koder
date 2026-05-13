@@ -899,10 +899,11 @@ func (e *Engine) maybeUpdateSessionTitle(ctx context.Context, session domain.Ses
 
 func (e *Engine) chatRequest(session domain.Session, chat domain.Chat, messages []provider.Message, stream bool) provider.ChatRequest {
 	req := provider.ChatRequest{
-		Model:     session.ModelID,
-		Messages:  messages,
-		Stream:    stream,
-		ExtraBody: provider.RequestExtraBody(e.providerConfigForSession(session), session.ModelID, e.modelPresetForSession(session)),
+		Model:                     session.ModelID,
+		Messages:                  messages,
+		Stream:                    stream,
+		ExtraBody:                 provider.RequestExtraBody(e.providerConfigForSession(session), session.ModelID, e.modelPresetForSession(session)),
+		ToolCallArgumentsAsObject: provider.ToolCallArgumentsAsObject(session.ModelID, e.modelPresetForSession(session)),
 	}
 	if len(messages) > 0 && (chat.ID != 0 || chat.WorkflowRole != "") {
 		req.Tools = tools.Definitions(e.toolRuntime(session, chat))

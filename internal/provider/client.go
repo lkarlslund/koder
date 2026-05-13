@@ -64,11 +64,12 @@ func parseRetryAfter(value string, now time.Time) time.Duration {
 }
 
 type Message struct {
-	Role         domain.MessageRole `json:"role"`
-	Content      string             `json:"content,omitempty"`
-	ContentParts []ContentPart      `json:"-"`
-	ToolCallID   string             `json:"tool_call_id,omitempty"`
-	ToolCalls    []ToolCall         `json:"tool_calls,omitempty"`
+	Role                      domain.MessageRole `json:"role"`
+	Content                   string             `json:"content,omitempty"`
+	ContentParts              []ContentPart      `json:"-"`
+	ToolCallID                string             `json:"tool_call_id,omitempty"`
+	ToolCalls                 []ToolCall         `json:"tool_calls,omitempty"`
+	ToolCallArgumentsAsObject bool               `json:"-"`
 }
 
 type ContentPart struct {
@@ -103,7 +104,7 @@ func (m Message) MarshalJSON() ([]byte, error) {
 		Role       domain.MessageRole `json:"role"`
 		Content    any                `json:"content,omitempty"`
 		ToolCallID string             `json:"tool_call_id,omitempty"`
-		ToolCalls  []ToolCall         `json:"tool_calls,omitempty"`
+		ToolCalls  any                `json:"tool_calls,omitempty"`
 	}
 	var content any
 	trimmed := strings.TrimSpace(m.Content)
@@ -132,11 +133,19 @@ func (m Message) MarshalJSON() ([]byte, error) {
 		}
 		content = items
 	}
+	var toolCalls any
+	if len(m.ToolCalls) > 0 {
+		if m.ToolCallArgumentsAsObject {
+			toolCalls = toolCallsWithArgumentObjects(m.ToolCalls)
+		} else {
+			toolCalls = m.ToolCalls
+		}
+	}
 	return json.Marshal(wireMessage{
 		Role:       m.Role,
 		Content:    content,
 		ToolCallID: m.ToolCallID,
-		ToolCalls:  m.ToolCalls,
+		ToolCalls:  toolCalls,
 	})
 }
 
@@ -163,19 +172,67 @@ type FunctionCall struct {
 	Arguments string `json:"arguments"`
 }
 
+type wireToolCall struct {
+	ID       string           `json:"id,omitempty"`
+	Index    *int             `json:"index,omitempty"`
+	Type     string           `json:"type,omitempty"`
+	Function wireFunctionCall `json:"function"`
+}
+
+type wireFunctionCall struct {
+	Name      string `json:"name"`
+	Arguments any    `json:"arguments"`
+}
+
+func toolCallsWithArgumentObjects(calls []ToolCall) []wireToolCall {
+	out := make([]wireToolCall, 0, len(calls))
+	for _, call := range calls {
+		args := any(call.Function.Arguments)
+		if object, ok := decodeArgumentsObject(call.Function.Arguments); ok {
+			args = object
+		}
+		out = append(out, wireToolCall{
+			ID:    call.ID,
+			Index: call.Index,
+			Type:  call.Type,
+			Function: wireFunctionCall{
+				Name:      call.Function.Name,
+				Arguments: args,
+			},
+		})
+	}
+	return out
+}
+
+func decodeArgumentsObject(raw string) (map[string]any, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return map[string]any{}, true
+	}
+	var object map[string]any
+	if err := json.Unmarshal([]byte(raw), &object); err != nil {
+		return nil, false
+	}
+	if object == nil {
+		return nil, false
+	}
+	return object, true
+}
+
 type ChatRequest struct {
-	Model      string           `json:"model"`
-	Messages   []Message        `json:"messages"`
-	Tools      []ToolDefinition `json:"tools,omitempty"`
-	ToolChoice string           `json:"tool_choice,omitempty"`
-	Stream     bool             `json:"stream"`
-	ExtraBody  map[string]any   `json:"-"`
+	Model                     string           `json:"model"`
+	Messages                  []Message        `json:"messages"`
+	Tools                     []ToolDefinition `json:"tools,omitempty"`
+	ToolChoice                string           `json:"tool_choice,omitempty"`
+	Stream                    bool             `json:"stream"`
+	ExtraBody                 map[string]any   `json:"-"`
+	ToolCallArgumentsAsObject bool             `json:"-"`
 }
 
 func (r ChatRequest) MarshalJSON() ([]byte, error) {
 	body := map[string]any{
 		"model":    r.Model,
-		"messages": r.Messages,
+		"messages": r.messagesForWire(),
 		"stream":   r.Stream,
 	}
 	if r.Stream {
@@ -194,6 +251,18 @@ func (r ChatRequest) MarshalJSON() ([]byte, error) {
 		body[key] = value
 	}
 	return json.Marshal(body)
+}
+
+func (r ChatRequest) messagesForWire() []Message {
+	if !r.ToolCallArgumentsAsObject {
+		return r.Messages
+	}
+	messages := make([]Message, len(r.Messages))
+	copy(messages, r.Messages)
+	for idx := range messages {
+		messages[idx].ToolCallArgumentsAsObject = true
+	}
+	return messages
 }
 
 type modelsResponse struct {

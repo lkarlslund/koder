@@ -100,6 +100,52 @@ func TestMessageMarshalJSONOmitsEmptyAssistantToolCallContent(t *testing.T) {
 	if !strings.Contains(got, `"tool_calls"`) {
 		t.Fatalf("expected tool calls to be preserved, got %s", got)
 	}
+	if !strings.Contains(got, `"arguments":"{\"path\":\".\"}"`) {
+		t.Fatalf("expected default tool call arguments to remain an OpenAI-compatible JSON string, got %s", got)
+	}
+}
+
+func TestChatRequestMarshalJSONCanUseObjectToolCallArguments(t *testing.T) {
+	data, err := json.Marshal(ChatRequest{
+		Model:                     "qwen3.6-27b-dflash",
+		ToolCallArgumentsAsObject: true,
+		Messages: []Message{{
+			Role: domain.MessageRoleAssistant,
+			ToolCalls: []ToolCall{{
+				ID:   "call_1",
+				Type: "function",
+				Function: FunctionCall{
+					Name:      "read",
+					Arguments: "{\"path\":\".\"}",
+				},
+			}},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body struct {
+		Messages []struct {
+			ToolCalls []struct {
+				Function struct {
+					Arguments any `json:"arguments"`
+				} `json:"function"`
+			} `json:"tool_calls"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(data, &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Messages) != 1 || len(body.Messages[0].ToolCalls) != 1 {
+		t.Fatalf("expected one replayed tool call, got %s", string(data))
+	}
+	args, ok := body.Messages[0].ToolCalls[0].Function.Arguments.(map[string]any)
+	if !ok {
+		t.Fatalf("expected object tool call arguments, got %T in %s", body.Messages[0].ToolCalls[0].Function.Arguments, string(data))
+	}
+	if args["path"] != "." {
+		t.Fatalf("expected decoded path argument, got %#v", args)
+	}
 }
 
 func TestChatRequestMarshalJSONIncludesStreamUsageOptions(t *testing.T) {
