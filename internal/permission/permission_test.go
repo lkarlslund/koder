@@ -55,6 +55,15 @@ func TestEvaluateBuiltinReadAskMode(t *testing.T) {
 	if inside.Mode != domain.PermissionModeAllow {
 		t.Fatalf("expected in-project read allow, got %s", inside.Mode)
 	}
+	codeSearch := Evaluate(cfg.Permissions, ProfileReadAsk, nil, Request{
+		Tool:        domain.ToolKindCodeSearch,
+		Pattern:     "RunPrompt",
+		ProjectRoot: projectRoot,
+		Targets:     []string{projectRoot},
+	})
+	if codeSearch.Mode != domain.PermissionModeAllow {
+		t.Fatalf("expected in-project code search allow, got %s", codeSearch.Mode)
+	}
 	outside := Evaluate(cfg.Permissions, ProfileReadAsk, nil, Request{
 		Tool:           domain.ToolKindRead,
 		Pattern:        "/tmp/README.md",

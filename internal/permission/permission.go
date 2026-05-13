@@ -185,7 +185,7 @@ func evaluateBuiltin(profileName string, req Request) Decision {
 
 func isProjectReadTool(tool domain.ToolKind) bool {
 	switch tool {
-	case domain.ToolKindRead, domain.ToolKindGlob, domain.ToolKindGrep:
+	case domain.ToolKindRead, domain.ToolKindGlob, domain.ToolKindGrep, domain.ToolKindCodeSearch:
 		return true
 	default:
 		return false

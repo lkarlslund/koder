@@ -3260,7 +3260,7 @@ func (e *Engine) resolvePermissionTargets(projectRoot string, req tools.Request)
 	switch req.Tool {
 	case domain.ToolKindRead, domain.ToolKindViewImage, domain.ToolKindEdit, domain.ToolKindWrite:
 		raws = append(raws, req.Args["path"])
-	case domain.ToolKindGlob, domain.ToolKindGrep:
+	case domain.ToolKindGlob, domain.ToolKindGrep, domain.ToolKindCodeSearch:
 		if root := strings.TrimSpace(req.Args["path"]); root != "" {
 			raws = append(raws, root)
 		} else {

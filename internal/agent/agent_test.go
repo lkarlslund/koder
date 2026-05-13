@@ -2442,6 +2442,42 @@ func TestHandleModelToolCallAllowsProjectReadInReadAskMode(t *testing.T) {
 	}
 }
 
+func TestHandleModelToolCallAllowsProjectCodeSearchInReadAskMode(t *testing.T) {
+	cfg := testConfig(t)
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	workdir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workdir, "main.go"), []byte("package main\nfunc Target() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	engine := New(cfg, st, tools.NewRegistry(workdir), nil, workdir)
+	session, err := st.CreateSession(context.Background(), "test", cfg.DefaultProvider, "test-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	session.PermissionProfile = permission.ProfileReadAsk
+	session.ProjectRoot = workdir
+
+	chat := defaultChatForSession(t, st, session.ID)
+	evt, err := engine.handleModelToolCall(context.Background(), session, chat, tools.Request{
+		Tool: domain.ToolKindCodeSearch,
+		Args: map[string]string{"query": "Target"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if evt.Kind != domain.EventKindToolResult {
+		t.Fatalf("expected tool result, got %#v", evt)
+	}
+	if !strings.Contains(evt.Text, "function Target") {
+		t.Fatalf("expected code search result, got %q", evt.Text)
+	}
+}
+
 func TestApproveContinuesAfterOutsideWorkspaceRead(t *testing.T) {
 	t.Parallel()
 
