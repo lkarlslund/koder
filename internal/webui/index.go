@@ -783,19 +783,28 @@ const indexHTML = `<!doctype html>
           const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
           return {el, top: el.scrollTop, nearBottom: distance <= 48};
         },
+        afterTranscriptDOMUpdate(fn) {
+          this.$nextTick(() => {
+            requestAnimationFrame(() => {
+              fn();
+              setTimeout(fn, 0);
+            });
+          });
+        },
+        restoreTranscriptScroll(scroll, options = {}) {
+          const el = document.querySelector('.transcript');
+          if (!el) return;
+          if (options.scrollToBottom || scroll.nearBottom) {
+            el.scrollTop = el.scrollHeight;
+            return;
+          }
+          el.scrollTop = scroll.top;
+        },
         applyState(s, options = {}) {
           const scroll = this.transcriptScrollState();
           this.state = s || {}; this.applyTheme(); this.error = this.state.error || '';
           if (!this.restoreSelectedChat()) this.writeSelectedChat();
-          this.$nextTick(() => {
-            const el = document.querySelector('.transcript');
-            if (!el) return;
-            if (options.scrollToBottom || scroll.nearBottom) {
-              el.scrollTop = el.scrollHeight;
-              return;
-            }
-            el.scrollTop = scroll.top;
-          });
+          this.afterTranscriptDOMUpdate(() => this.restoreTranscriptScroll(scroll, options));
         },
         selectedChatPreferenceName() { return 'selectedChat.' + encodeURIComponent(this.state.workdir || this.state.Workdir || ''); },
         activeChatID() { return this.state.active_chat_id || this.state.ActiveChatID || 0; },

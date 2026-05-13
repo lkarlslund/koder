@@ -242,6 +242,9 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(string(body), `scroll.nearBottom`) || !strings.Contains(string(body), `el.scrollTop = scroll.top`) {
 		t.Fatalf("expected transcript to follow only when near bottom and preserve scroll otherwise")
 	}
+	if !strings.Contains(string(body), `afterTranscriptDOMUpdate`) || !strings.Contains(string(body), `requestAnimationFrame`) || !strings.Contains(string(body), `setTimeout(fn, 0)`) {
+		t.Fatalf("expected transcript scroll restoration to run after deferred DOM height updates")
+	}
 	if !strings.Contains(string(body), `applyState(s, {scrollToBottom: true})`) {
 		t.Fatalf("expected explicit chat switches to scroll to the bottom")
 	}
