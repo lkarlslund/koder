@@ -233,6 +233,9 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(string(body), `applyState(s, {scrollToBottom: true})`) {
 		t.Fatalf("expected explicit chat switches to scroll to the bottom")
 	}
+	if !strings.Contains(string(body), `this.applyState((hello && hello.state) || hello || {}, {scrollToBottom: true})`) {
+		t.Fatalf("expected fresh page loads to start at the bottom of the transcript")
+	}
 	if !strings.Contains(string(body), `class="form-control composer-input" rows="1"`) {
 		t.Fatalf("expected composer to start as a single line")
 	}

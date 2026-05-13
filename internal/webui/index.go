@@ -742,7 +742,7 @@ const indexHTML = `<!doctype html>
             location.reload();
             return;
           }
-          this.applyState((hello && hello.state) || hello || {});
+          this.applyState((hello && hello.state) || hello || {}, {scrollToBottom: true});
         },
         onMessage(msg) {
           if (msg.type) { this.onPush(msg); return; }
