@@ -764,10 +764,25 @@ const indexHTML = `<!doctype html>
           this.pending = {};
           Object.values(pending).forEach(p => p.reject(new Error(message)));
         },
-        applyState(s) {
+        transcriptScrollState() {
+          const el = document.querySelector('.transcript');
+          if (!el) return {el: null, top: 0, nearBottom: true};
+          const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
+          return {el, top: el.scrollTop, nearBottom: distance <= 48};
+        },
+        applyState(s, options = {}) {
+          const scroll = this.transcriptScrollState();
           this.state = s || {}; this.applyTheme(); this.error = this.state.error || '';
           if (!this.restoreSelectedChat()) this.writeSelectedChat();
-          this.$nextTick(() => { const el = document.querySelector('.transcript'); if (el) el.scrollTop = el.scrollHeight; });
+          this.$nextTick(() => {
+            const el = document.querySelector('.transcript');
+            if (!el) return;
+            if (options.scrollToBottom || scroll.nearBottom) {
+              el.scrollTop = el.scrollHeight;
+              return;
+            }
+            el.scrollTop = scroll.top;
+          });
         },
         selectedChatPreferenceName() { return 'selectedChat.' + encodeURIComponent(this.state.workdir || this.state.Workdir || ''); },
         activeChatID() { return this.state.active_chat_id || this.state.ActiveChatID || 0; },
@@ -780,7 +795,7 @@ const indexHTML = `<!doctype html>
           const exists = (this.state.chats || this.state.Chats || []).some(chat => this.chatID(chat) === id);
           this.restoreChatAttempted = true;
           if (!exists || id === this.activeChatID()) return false;
-          this.rpc('switch_chat', {chat_id: id}).then(s => this.applyState(s));
+          this.rpc('switch_chat', {chat_id: id}).then(s => this.applyState(s, {scrollToBottom: true}));
           return true;
         },
         timeline() { return this.state.snapshot?.Timeline || this.state.snapshot?.timeline || []; },
@@ -896,8 +911,8 @@ const indexHTML = `<!doctype html>
           if (text.startsWith('/')) { this.error = 'Unknown web command: ' + text; return true; }
           return false;
         },
-        switchChat(id) { if (id) this.rpc('switch_chat', {chat_id: id}).then(s => { this.applyState(s); this.writeSelectedChat(); }); },
-        newChat() { this.rpc('new_chat', {title: 'Chat'}).then(s => { this.applyState(s); this.writeSelectedChat(); }); },
+        switchChat(id) { if (id) this.rpc('switch_chat', {chat_id: id}).then(s => { this.applyState(s, {scrollToBottom: true}); this.writeSelectedChat(); }); },
+        newChat() { this.rpc('new_chat', {title: 'Chat'}).then(s => { this.applyState(s, {scrollToBottom: true}); this.writeSelectedChat(); }); },
         deleteChat(id) {
           if (!id || !confirm('Delete this chat?')) return;
           this.rpc('delete_chat', {chat_id: id}).then(s => this.applyState(s)).catch(err => this.showToast(err.message));

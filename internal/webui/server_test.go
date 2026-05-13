@@ -224,6 +224,15 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(string(body), `rejectPending('connection closed')`) {
 		t.Fatalf("expected websocket close to reject pending RPCs")
 	}
+	if !strings.Contains(string(body), `transcriptScrollState()`) || !strings.Contains(string(body), `distance <= 48`) {
+		t.Fatalf("expected transcript scroll anchoring when new output arrives")
+	}
+	if !strings.Contains(string(body), `scroll.nearBottom`) || !strings.Contains(string(body), `el.scrollTop = scroll.top`) {
+		t.Fatalf("expected transcript to follow only when near bottom and preserve scroll otherwise")
+	}
+	if !strings.Contains(string(body), `applyState(s, {scrollToBottom: true})`) {
+		t.Fatalf("expected explicit chat switches to scroll to the bottom")
+	}
 	if !strings.Contains(string(body), `class="form-control composer-input" rows="1"`) {
 		t.Fatalf("expected composer to start as a single line")
 	}
