@@ -6,13 +6,13 @@ const indexHTML = `<!doctype html>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>koder</title>
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+  <link href="/assets/vendor/bootstrap/bootstrap.min.css" rel="stylesheet">
+  <link href="/assets/vendor/bootstrap-icons/font/bootstrap-icons.css" rel="stylesheet">
   <link href="/assets/vendor/highlight/github-dark.min.css" rel="stylesheet">
   <script defer src="/assets/vendor/marked/marked.umd.js"></script>
   <script defer src="/assets/vendor/dompurify/purify.min.js"></script>
   <script defer src="/assets/vendor/highlight/highlight.min.js"></script>
-  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js"></script>
+  <script defer src="/assets/vendor/alpine/cdn.min.js"></script>
   <style>
     :root { color-scheme: light dark; }
     html, body { height: 100%; }

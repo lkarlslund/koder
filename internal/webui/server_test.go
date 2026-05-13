@@ -173,6 +173,12 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(string(body), `window.KODER_ASSET_HASH = "`+currentAssetHash+`"`) {
 		t.Fatalf("expected served index to publish the current asset hash")
 	}
+	if !strings.Contains(string(body), `/assets/vendor/bootstrap/bootstrap.min.css`) {
+		t.Fatalf("expected Bootstrap CSS to be loaded from vendored assets")
+	}
+	if !strings.Contains(string(body), `/assets/vendor/bootstrap-icons/font/bootstrap-icons.css`) {
+		t.Fatalf("expected Bootstrap Icons to be loaded from vendored assets")
+	}
 	if !strings.Contains(string(body), `/assets/vendor/marked/marked.umd.js`) {
 		t.Fatalf("expected marked to be loaded from vendored assets")
 	}
@@ -181,6 +187,12 @@ func TestIndexServesHTML(t *testing.T) {
 	}
 	if !strings.Contains(string(body), `/assets/vendor/highlight/highlight.min.js`) {
 		t.Fatalf("expected highlight.js to be loaded from vendored assets")
+	}
+	if !strings.Contains(string(body), `/assets/vendor/alpine/cdn.min.js`) {
+		t.Fatalf("expected Alpine to be loaded from vendored assets")
+	}
+	if strings.Contains(string(body), `cdn.jsdelivr.net`) {
+		t.Fatalf("expected index to avoid CDN dependencies")
 	}
 	if !strings.Contains(string(body), `x-html="markdownHTML(item.content?.text || '')"`) {
 		t.Fatalf("expected assistant text to render as markdown HTML")
@@ -373,7 +385,7 @@ func TestFaviconDoesNot404(t *testing.T) {
 	}
 }
 
-func TestVendoredAssetServes(t *testing.T) {
+func TestVendoredAssetsServe(t *testing.T) {
 	ctrl := newTestController(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -381,20 +393,31 @@ func TestVendoredAssetServes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("start server: %v", err)
 	}
-	resp, err := http.Get(srv.URL() + "/assets/vendor/marked/marked.umd.js")
-	if err != nil {
-		t.Fatalf("get marked asset: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("expected marked asset status 200, got %d", resp.StatusCode)
-	}
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		t.Fatalf("read marked asset: %v", err)
-	}
-	if !strings.Contains(string(body), "marked") {
-		t.Fatalf("expected marked asset body")
+	for _, tc := range []struct {
+		path string
+		want string
+	}{
+		{path: "/assets/vendor/bootstrap/bootstrap.min.css", want: "Bootstrap"},
+		{path: "/assets/vendor/bootstrap-icons/font/bootstrap-icons.css", want: "bootstrap-icons"},
+		{path: "/assets/vendor/bootstrap-icons/font/fonts/bootstrap-icons.woff2", want: ""},
+		{path: "/assets/vendor/alpine/cdn.min.js", want: "Alpine"},
+		{path: "/assets/vendor/marked/marked.umd.js", want: "marked"},
+	} {
+		resp, err := http.Get(srv.URL() + tc.path)
+		if err != nil {
+			t.Fatalf("get asset %s: %v", tc.path, err)
+		}
+		body, readErr := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("expected asset %s status 200, got %d", tc.path, resp.StatusCode)
+		}
+		if readErr != nil {
+			t.Fatalf("read asset %s: %v", tc.path, readErr)
+		}
+		if tc.want != "" && !strings.Contains(string(body), tc.want) {
+			t.Fatalf("expected asset %s body to contain %q", tc.path, tc.want)
+		}
 	}
 }
 
