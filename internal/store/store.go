@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/lkarlslund/koder/internal/domain"
@@ -20,7 +21,8 @@ type Options struct {
 }
 
 type Store struct {
-	backend backend
+	backend    backend
+	toolCallMu sync.Mutex
 }
 
 type backend interface {

@@ -76,6 +76,8 @@ func (s *Store) updateToolCall(ctx context.Context, chatID int64, toolCallID str
 	if toolCallID == "" {
 		return domain.TimelineItem{}, fmt.Errorf("update tool call: tool call id is required")
 	}
+	s.toolCallMu.Lock()
+	defer s.toolCallMu.Unlock()
 	items, err := s.TimelineForChat(ctx, chatID)
 	if err != nil {
 		return domain.TimelineItem{}, err

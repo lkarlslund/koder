@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -51,6 +52,79 @@ func appendTimelineForTest(t *testing.T, st *Store, chatID int64, content domain
 		t.Fatal(err)
 	}
 	return item
+}
+
+func TestConcurrentAttachToolResultsPreservesAllChildren(t *testing.T) {
+	for _, backend := range []string{BackendPebble, BackendJSONFS} {
+		t.Run(backend, func(t *testing.T) {
+			st := openTestStore(t, backend)
+			session, err := st.CreateSession(context.Background(), "test", "provider", "model", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			chat, err := st.DefaultChat(context.Background(), session.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			const callCount = 24
+			calls := make([]domain.ToolCall, 0, callCount)
+			for i := range callCount {
+				calls = append(calls, domain.ToolCall{
+					ToolCallID: domain.ToolCallID("call_" + strconv.Itoa(i)),
+					Tool:       domain.ToolKindBash,
+					Args:       map[string]string{"command": "printf " + strconv.Itoa(i)},
+					Status:     domain.ToolStatusPending,
+				})
+			}
+			item, err := st.AppendAssistantToolCalls(context.Background(), chat.ID, calls, "", domain.Usage{})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			var wg sync.WaitGroup
+			errs := make(chan error, callCount)
+			for i := range callCount {
+				wg.Add(1)
+				go func(i int) {
+					defer wg.Done()
+					_, err := st.AttachToolResult(context.Background(), chat.ID, "call_"+strconv.Itoa(i), domain.ToolResult{
+						Text:   "result " + strconv.Itoa(i),
+						Status: domain.ToolResultStatusOK,
+						Data:   domain.BashStoredResult{Command: "printf " + strconv.Itoa(i), Output: "result " + strconv.Itoa(i)},
+					})
+					if err != nil {
+						errs <- err
+					}
+				}(i)
+			}
+			wg.Wait()
+			close(errs)
+			for err := range errs {
+				t.Fatal(err)
+			}
+
+			got, err := st.Timeline().Get(context.Background(), item.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			assistant, ok := got.Content.(domain.AssistantMessage)
+			if !ok {
+				t.Fatalf("expected assistant item, got %#v", got.Content)
+			}
+			if len(assistant.Tools) != callCount {
+				t.Fatalf("expected %d tool children, got %d", callCount, len(assistant.Tools))
+			}
+			for i := range callCount {
+				call := assistant.ToolByID(domain.ToolCallID("call_" + strconv.Itoa(i)))
+				if call == nil {
+					t.Fatalf("missing call_%d in %#v", i, assistant.Tools)
+				}
+				if call.Status != domain.ToolStatusDone || call.Result == nil || call.Result.Text != "result "+strconv.Itoa(i) {
+					t.Fatalf("call_%d not completed in-place: %#v", i, call)
+				}
+			}
+		})
+	}
 }
 
 func TestGenericCollectionRoundTripAndIndex(t *testing.T) {
