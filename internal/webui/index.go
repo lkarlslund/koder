@@ -47,6 +47,15 @@ const indexHTML = `<!doctype html>
     .markdown-body pre code { background: transparent; color: inherit; padding: 0; border-radius: 0; }
     .markdown-body blockquote { border-left: 3px solid var(--bs-border-color); color: var(--bs-secondary-color); padding-left: .75rem; margin: .75rem 0; }
     .tool { border-left: 3px solid var(--bs-info); }
+    .tool-result { border: 1px solid var(--bs-border-color); border-radius: .45rem; overflow: hidden; background: var(--bs-body-bg); }
+    .tool-result-header { padding: .35rem .55rem; background: var(--bs-secondary-bg); border-bottom: 1px solid var(--bs-border-color); font-size: .82rem; font-weight: 600; }
+    .tool-result-body { padding: .45rem .55rem; font-family: var(--bs-font-monospace); font-size: .82rem; line-height: 1.35; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .tool-result-line { min-height: 1.35em; }
+    .tool-result-omitted { color: var(--bs-secondary-color); font-style: italic; }
+    .tool-diff-line { padding: .05rem .45rem; font-family: var(--bs-font-monospace); font-size: .82rem; line-height: 1.35; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .tool-diff-add { background: rgba(var(--bs-success-rgb), .18); color: var(--bs-success-text-emphasis); }
+    .tool-diff-del { background: rgba(var(--bs-danger-rgb), .18); color: var(--bs-danger-text-emphasis); }
+    .tool-diff-meta { background: var(--bs-secondary-bg); color: var(--bs-secondary-color); }
     .reasoning { color: var(--bs-secondary-color); }
     .model-trigger { color: inherit; text-decoration: none; }
     .git-file { border-left: 3px solid transparent; }
@@ -112,9 +121,9 @@ const indexHTML = `<!doctype html>
               <div class="markdown-body" x-html="markdownHTML(item.content?.text || '')"></div>
               <template x-for="tool in item.content?.tools || []" :key="tool.tool_call_id">
                 <div class="tool mt-3 ps-3">
-                  <div class="small fw-semibold"><i class="bi bi-wrench-adjustable"></i> <span x-text="tool.tool"></span> <span class="badge text-bg-secondary" x-text="tool.status"></span></div>
-                  <pre class="small text-secondary" x-text="formatArgs(tool.args)"></pre>
-                  <template x-if="tool.result"><div class="markdown-body small mt-2" x-html="markdownHTML(tool.result.text || tool.result.diff || '')"></div></template>
+                  <div class="small fw-semibold"><i class="bi" :class="toolIcon(tool.tool)"></i> <span x-text="toolTitle(tool)"></span> <span class="badge text-bg-secondary" x-text="tool.status"></span></div>
+                  <div class="small text-secondary" x-show="toolPreview(tool)" x-text="toolPreview(tool)"></div>
+                  <template x-if="tool.result"><div class="tool-result mt-2" x-html="toolResultHTML(tool)"></div></template>
                   <template x-if="tool.error"><pre class="small text-danger mt-2" x-text="tool.error.message || tool.error.code || 'tool error'"></pre></template>
                 </div>
               </template>
@@ -505,6 +514,134 @@ const indexHTML = `<!doctype html>
       html = highlightMarkdownCode(html);
       return sanitizeHTML(html);
     }
+    function firstValue(obj, names) {
+      if (!obj) return '';
+      for (const name of names) {
+        const value = obj[name];
+        if (value !== undefined && value !== null && value !== '') return value;
+      }
+      return '';
+    }
+    function splitLines(text) {
+      const source = String(text || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+      if (!source) return [];
+      const lines = source.split('\n');
+      if (lines.length > 0 && lines[lines.length - 1] === '') lines.pop();
+      return lines;
+    }
+    function compactLines(lines, head = 2, tail = 2) {
+      const clean = Array.isArray(lines) ? lines.map(line => String(line ?? '')) : splitLines(lines);
+      if (clean.length <= head + tail + 1) return clean.map(text => ({text}));
+      return [
+        ...clean.slice(0, head).map(text => ({text})),
+        {text: '... ' + (clean.length - head - tail) + ' lines omitted ...', omitted: true},
+        ...clean.slice(clean.length - tail).map(text => ({text}))
+      ];
+    }
+    function toolData(tool) {
+      return (tool && tool.result && (tool.result.data || tool.result.Data)) || {};
+    }
+    function toolArgs(tool) {
+      return (tool && (tool.args || tool.Args)) || {};
+    }
+    function toolResultText(tool) {
+      const result = (tool && tool.result) || {};
+      return firstValue(result, ['text', 'Text']) || firstValue(result, ['diff', 'Diff']);
+    }
+    function toolResultHeader(title) {
+      return '<div class="tool-result-header">' + escapeHTML(title) + '</div>';
+    }
+    function renderCompactBlock(title, lines) {
+      const body = compactLines(lines).map(line => {
+        const cls = line.omitted ? 'tool-result-line tool-result-omitted' : 'tool-result-line';
+        return '<div class="' + cls + '">' + escapeHTML(line.text || ' ') + '</div>';
+      }).join('');
+      return toolResultHeader(title) + '<div class="tool-result-body">' + body + '</div>';
+    }
+    function renderKeyValueBlock(title, pairs) {
+      const lines = pairs.filter(pair => pair[1] !== undefined && pair[1] !== null && String(pair[1]) !== '').map(pair => pair[0] + ': ' + pair[1]);
+      return renderCompactBlock(title, lines);
+    }
+    function renderDiffBlock(title, diff) {
+      const rows = splitLines(diff).map(line => {
+        let cls = 'tool-diff-line';
+        if (line.startsWith('+') && !line.startsWith('+++')) cls += ' tool-diff-add';
+        else if (line.startsWith('-') && !line.startsWith('---')) cls += ' tool-diff-del';
+        else if (line.startsWith('@@') || line.startsWith('---') || line.startsWith('+++')) cls += ' tool-diff-meta';
+        return '<div class="' + cls + '">' + escapeHTML(line || ' ') + '</div>';
+      }).join('');
+      return toolResultHeader(title) + '<div>' + (rows || '<div class="tool-result-body text-secondary">No diff</div>') + '</div>';
+    }
+    function toolTitleText(tool) {
+      const kind = String((tool && tool.tool) || '');
+      const data = toolData(tool);
+      const args = toolArgs(tool);
+      const path = firstValue(data, ['path', 'Path']) || firstValue(args, ['path']);
+      const command = firstValue(data, ['command', 'Command']) || firstValue(args, ['command']);
+      switch (kind) {
+        case 'read': return path ? 'Read ' + path : 'Read';
+        case 'write': return path ? 'Write ' + path : 'Write file';
+        case 'edit': return path ? 'Edit ' + path : 'Edit file';
+        case 'apply_patch': return 'Apply patch';
+        case 'bash': return command ? 'Run ' + command : 'Run command';
+        case 'exec_command': return command ? 'Start ' + command : 'Start exec';
+        case 'grep': return 'Search ' + (firstValue(data, ['pattern', 'Pattern']) || firstValue(args, ['pattern']));
+        case 'glob': return 'Glob ' + (firstValue(data, ['pattern', 'Pattern']) || firstValue(args, ['pattern']));
+        case 'webfetch': return 'Fetch ' + (firstValue(data, ['url', 'URL']) || firstValue(args, ['url']));
+        case 'websearch': return 'Search web ' + (firstValue(data, ['query', 'Query']) || firstValue(args, ['query']));
+        default: return kind || 'Tool';
+      }
+    }
+    function toolPreviewText(tool) {
+      const args = toolArgs(tool);
+      const values = [];
+      for (const key of ['path', 'pattern', 'query', 'url', 'include']) {
+        if (args[key]) values.push(key + '=' + args[key]);
+      }
+      if (args.command) values.push(args.command);
+      return values.slice(0, 2).join('  ');
+    }
+    function renderToolResult(tool) {
+      const kind = String((tool && tool.tool) || '');
+      const result = (tool && tool.result) || {};
+      const data = toolData(tool);
+      const args = toolArgs(tool);
+      const status = firstValue(result, ['status', 'Status']);
+      if (status === 'error' || status === 'denied') return renderCompactBlock(status, toolResultText(tool));
+      if (kind === 'write') {
+        const path = firstValue(data, ['path', 'Path']) || firstValue(args, ['path']) || 'file';
+        const content = firstValue(data, ['content', 'Content']);
+        const summary = firstValue(data, ['summary', 'Summary']) || toolResultText(tool);
+        if (content) return renderCompactBlock(summary || ('Wrote ' + path), content);
+        return renderCompactBlock('Wrote ' + path, summary);
+      }
+      if (kind === 'edit' || kind === 'apply_patch') {
+        const title = firstValue(data, ['summary', 'Summary']) || (kind === 'edit' ? 'Edited file' : 'Applied patch');
+        const diff = firstValue(data, ['diff', 'Diff']) || firstValue(result, ['diff', 'Diff']) || toolResultText(tool);
+        return renderDiffBlock(title, diff);
+      }
+      if (kind === 'read') {
+        const path = firstValue(data, ['path', 'Path']) || firstValue(args, ['path']) || 'read';
+        const storedLines = data.lines || data.Lines || [];
+        const lines = storedLines.length ? storedLines.map(line => (line.number || line.Number || '') + ': ' + (line.text || line.Text || '')) : toolResultText(tool);
+        return renderCompactBlock(path, lines);
+      }
+      if (kind === 'bash' || kind.startsWith('exec_')) {
+        const title = firstValue(data, ['command', 'Command', 'message', 'Message']) || kind;
+        return renderCompactBlock(title, firstValue(data, ['output', 'Output']) || toolResultText(tool));
+      }
+      if (kind === 'glob') return renderCompactBlock('Matches', data.matches || data.Matches || toolResultText(tool));
+      if (kind === 'grep') return renderCompactBlock('Matches', firstValue(data, ['output', 'Output']) || toolResultText(tool));
+      if (kind === 'webfetch') return renderCompactBlock(firstValue(data, ['final_url', 'FinalURL', 'url', 'URL']) || 'Fetched page', firstValue(data, ['body', 'Body']) || toolResultText(tool));
+      if (kind === 'websearch') {
+        const items = data.items || data.Items || [];
+        return renderCompactBlock('Search results', items.length ? items.map((item, idx) => (idx + 1) + '. ' + (item.title || item.Title || item.url || item.URL || '')) : toolResultText(tool));
+      }
+      if (kind === 'view_image') {
+        return renderKeyValueBlock('Viewed image', [['path', firstValue(data, ['path', 'Path'])], ['mime', firstValue(data, ['mime_type', 'MIMEType'])], ['detail', firstValue(data, ['detail', 'Detail'])]]);
+      }
+      return renderCompactBlock(kind || 'Tool result', toolResultText(tool));
+    }
     function koderApp() {
       return {
         ws: null, nextID: 1, pending: {}, state: {}, connected: false, draft: '', showPermissions: false,
@@ -675,7 +812,17 @@ const indexHTML = `<!doctype html>
           return 'text-bg-secondary';
         },
         refreshWorkspace() { this.rpc('refresh_workspace', {}).then(s => this.applyState(s)); },
-        formatArgs(args) { return args ? JSON.stringify(args, null, 2) : ''; },
+        toolIcon(kind) {
+          if (kind === 'read' || kind === 'write' || kind === 'edit' || kind === 'apply_patch') return 'bi-file-earmark-code';
+          if (kind === 'bash' || String(kind || '').startsWith('exec_')) return 'bi-terminal';
+          if (kind === 'grep' || kind === 'glob' || kind === 'websearch') return 'bi-search';
+          if (kind === 'webfetch') return 'bi-globe';
+          if (kind === 'view_image') return 'bi-image';
+          return 'bi-wrench-adjustable';
+        },
+        toolTitle(tool) { return toolTitleText(tool); },
+        toolPreview(tool) { return toolPreviewText(tool); },
+        toolResultHTML(tool) { return renderToolResult(tool); },
         resizeComposer() {
           const el = this.$refs.composerInput; if (!el) return;
           const maxHeight = Math.floor((window.innerHeight || 800) * 0.2);

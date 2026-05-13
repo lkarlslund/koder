@@ -191,6 +191,18 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(string(body), `marked.parse(source)`) || !strings.Contains(string(body), `DOMPurify.sanitize`) || !strings.Contains(string(body), `hljs.highlight`) {
 		t.Fatalf("expected browser markdown renderer to parse, sanitize, and syntax-highlight")
 	}
+	if strings.Contains(string(body), `formatArgs(tool.args)`) || strings.Contains(string(body), `JSON.stringify(tool.args`) {
+		t.Fatalf("expected tool calls to avoid raw JSON argument rendering")
+	}
+	if !strings.Contains(string(body), `toolResultHTML(tool)`) || !strings.Contains(string(body), `function renderToolResult(tool)`) {
+		t.Fatalf("expected tool results to render through the per-tool formatter")
+	}
+	if !strings.Contains(string(body), `function renderDiffBlock(title, diff)`) || !strings.Contains(string(body), `tool-diff-add`) || !strings.Contains(string(body), `tool-diff-del`) {
+		t.Fatalf("expected edit and patch results to use colored diff rendering")
+	}
+	if !strings.Contains(string(body), `compactLines(lines, head = 2, tail = 2)`) {
+		t.Fatalf("expected file write results to use compact head/tail rendering")
+	}
 	if !strings.Contains(string(body), `hello.asset_hash !== window.KODER_ASSET_HASH`) || !strings.Contains(string(body), `location.reload()`) {
 		t.Fatalf("expected websocket reconnect to reload on asset mismatch")
 	}
