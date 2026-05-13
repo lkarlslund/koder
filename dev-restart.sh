@@ -10,6 +10,10 @@ STOP_TIMEOUT_SECONDS="${KODER_DEV_STOP_TIMEOUT_SECONDS:-180}"
 
 child_pid=""
 
+log() {
+  printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"
+}
+
 cleanup() {
   if [[ -n "$child_pid" ]] && kill -0 "$child_pid" 2>/dev/null; then
     stop_koder "$child_pid"
@@ -25,7 +29,7 @@ build_koder() {
 launch_koder() {
   "$BIN" "$@" &
   child_pid="$!"
-  echo "launched koder pid=$child_pid"
+  log "launched koder pid=$child_pid"
 }
 
 stop_koder() {
@@ -34,11 +38,11 @@ stop_koder() {
   if [[ -z "$pid" ]] || ! kill -0 "$pid" 2>/dev/null; then
     return 0
   fi
-  echo "stopping koder pid=$pid"
+  log "stopping koder pid=$pid"
   kill -TERM "$pid" 2>/dev/null || true
   while kill -0 "$pid" 2>/dev/null; do
     if (( waited >= STOP_TIMEOUT_SECONDS )); then
-      echo "koder pid=$pid did not stop after ${STOP_TIMEOUT_SECONDS}s; killing"
+      log "koder pid=$pid did not stop after ${STOP_TIMEOUT_SECONDS}s; killing"
       kill -KILL "$pid" 2>/dev/null || true
       break
     fi
@@ -83,7 +87,7 @@ wait_for_settle() {
   done
 }
 
-echo "building koder..."
+log "building koder..."
 build_koder
 launch_koder "$@"
 last_signature="$(source_signature)"
@@ -93,7 +97,7 @@ while true; do
   if [[ -n "$child_pid" ]] && ! kill -0 "$child_pid" 2>/dev/null; then
     wait "$child_pid" 2>/dev/null || true
     child_pid=""
-    echo "koder exited; waiting for next successful build"
+    log "koder exited; waiting for next successful build"
   fi
 
   current_signature="$(source_signature)"
@@ -101,11 +105,11 @@ while true; do
     continue
   fi
 
-  echo "changes detected; waiting ${SETTLE_SECONDS}s for code to settle..."
+  log "changes detected; waiting ${SETTLE_SECONDS}s for code to settle..."
   wait_for_settle
   last_signature="$(source_signature)"
 
-  echo "building koder..."
+  log "building koder..."
   if build_koder; then
     if [[ -n "$child_pid" ]] && kill -0 "$child_pid" 2>/dev/null; then
       stop_koder "$child_pid"
@@ -113,6 +117,6 @@ while true; do
     fi
     launch_koder "$@"
   else
-    echo "build failed; keeping current koder process"
+    log "build failed; keeping current koder process"
   fi
 done
