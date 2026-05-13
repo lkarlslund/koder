@@ -1812,6 +1812,75 @@ func TestResumePendingToolCallsExecutesAndContinues(t *testing.T) {
 	}
 }
 
+func TestPendingExecutableToolCallsIgnoresStalePendingBeforeLaterUser(t *testing.T) {
+	t.Parallel()
+
+	cfg := testConfig(t)
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	workdir := t.TempDir()
+	engine := New(cfg, st, tools.NewRegistry(workdir), nil, workdir)
+	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chat := defaultChatForSession(t, st, session.ID)
+	req := tools.Request{
+		Tool:       domain.ToolKindRead,
+		ToolCallID: "old_call",
+		Args:       map[string]string{"path": "README.md"},
+	}
+	appendAssistantToolTimelineItem(t, st, chat.ID, req, "")
+	appendUserTimelineItem(t, st, chat.ID, "continue")
+	appendAssistantTimelineItem(t, st, chat.ID, domain.AssistantMessage{Text: "done"})
+
+	calls, err := engine.pendingExecutableToolCalls(context.Background(), chat.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(calls) != 0 {
+		t.Fatalf("expected no stale calls, got %#v", calls)
+	}
+}
+
+func TestPendingExecutableToolCallsIgnoresStalePendingBeforeFinalAssistant(t *testing.T) {
+	t.Parallel()
+
+	cfg := testConfig(t)
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	workdir := t.TempDir()
+	engine := New(cfg, st, tools.NewRegistry(workdir), nil, workdir)
+	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chat := defaultChatForSession(t, st, session.ID)
+	req := tools.Request{
+		Tool:       domain.ToolKindRead,
+		ToolCallID: "old_call",
+		Args:       map[string]string{"path": "README.md"},
+	}
+	appendAssistantToolTimelineItem(t, st, chat.ID, req, "")
+	appendAssistantTimelineItem(t, st, chat.ID, domain.AssistantMessage{Text: "done"})
+
+	calls, err := engine.pendingExecutableToolCalls(context.Background(), chat.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(calls) != 0 {
+		t.Fatalf("expected no stale calls, got %#v", calls)
+	}
+}
+
 func TestExecutePreparedToolCallDoesNotPersistCanceledToolFailure(t *testing.T) {
 	t.Parallel()
 

@@ -304,12 +304,16 @@ func (e *Engine) pendingExecutableToolCalls(ctx context.Context, chatID int64) (
 	if err != nil {
 		return nil, err
 	}
-	var calls []tools.Request
-	for _, item := range items {
+	for idx := len(items) - 1; idx >= 0; idx-- {
+		item := items[idx]
+		if _, ok := item.Content.(domain.UserMessage); ok {
+			return nil, nil
+		}
 		assistant, ok := item.Content.(domain.AssistantMessage)
 		if !ok {
 			continue
 		}
+		var calls []tools.Request
 		for _, call := range assistant.Tools {
 			if call.Status != domain.ToolStatusPending || call.Result != nil || call.Error != nil || call.Approval != nil {
 				continue
@@ -320,8 +324,9 @@ func (e *Engine) pendingExecutableToolCalls(ctx context.Context, chatID int64) (
 				Args:       maps.Clone(call.Args),
 			})
 		}
+		return calls, nil
 	}
-	return calls, nil
+	return nil, nil
 }
 
 func (e *Engine) PreviewNextRequest(ctx context.Context, session domain.Session, prompt string, drafts []attachment.Draft, refs []reference.Draft, note string) (provider.ChatRequest, error) {
