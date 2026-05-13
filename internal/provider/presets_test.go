@@ -39,12 +39,3 @@ func TestRequestExtraBodyUsesCompatibleChatTemplateKwargs(t *testing.T) {
 		t.Fatalf("unexpected compatible body: %#v", got)
 	}
 }
-
-func TestToolCallArgumentsAsObjectOnlyForQwen36Preset(t *testing.T) {
-	if !ToolCallArgumentsAsObject("Qwen/Qwen3.6-35B-A3B", ModelPresetAuto) {
-		t.Fatal("expected qwen3.6 preset to use object tool call arguments")
-	}
-	if ToolCallArgumentsAsObject("gpt-5.4", ModelPresetAuto) {
-		t.Fatal("expected default preset to keep string tool call arguments")
-	}
-}

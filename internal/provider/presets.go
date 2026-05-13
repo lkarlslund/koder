@@ -72,11 +72,6 @@ func PreserveThinkingEnabled(modelID, selected string) bool {
 	return ResolvePresetID(modelID, selected) == ModelPresetQwen36PreserveThinking
 }
 
-// ToolCallArgumentsAsObject reports whether replayed assistant tool calls should encode arguments as JSON objects.
-func ToolCallArgumentsAsObject(modelID, selected string) bool {
-	return ResolvePresetID(modelID, selected) == ModelPresetQwen36PreserveThinking
-}
-
 func RequestExtraBody(cfg config.Provider, modelID, selected string) map[string]any {
 	if !PreserveThinkingEnabled(modelID, selected) {
 		return nil
