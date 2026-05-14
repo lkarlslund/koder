@@ -1,0 +1,420 @@
+<!doctype html>
+<html lang="en" x-data="koderApp()" x-init="init()" :data-bs-theme="theme">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>koder</title>
+  <link href="/assets/vendor/bootstrap/bootstrap.min.css" rel="stylesheet">
+  <link href="/assets/vendor/bootstrap-icons/font/bootstrap-icons.css" rel="stylesheet">
+  <link href="/assets/vendor/highlight/github-dark.min.css" rel="stylesheet">
+  <script defer src="/assets/vendor/marked/marked.umd.js"></script>
+  <script defer src="/assets/vendor/dompurify/purify.min.js"></script>
+  <script defer src="/assets/vendor/highlight/highlight.min.js"></script>
+  <script defer src="/assets/vendor/alpine/cdn.min.js"></script>
+  <link href="/assets/app.css" rel="stylesheet">
+</head>
+<body class="bg-body text-body">
+  <div class="app-shell" :style="appShellStyle()">
+    <nav class="topbar navbar bg-body-tertiary px-3">
+      <div class="d-flex align-items-center gap-2">
+        <i class="bi bi-terminal-fill text-primary"></i>
+        <span class="fw-semibold">koder</span>
+        <span class="text-secondary small" x-text="state.session?.title || 'New Session'"></span>
+      </div>
+      <div class="d-flex align-items-center gap-2">
+        <span class="badge text-bg-secondary" x-text="connected ? 'connected' : 'offline'"></span>
+        <button class="btn btn-sm btn-outline-secondary" title="Sessions" @click="openSessionDialog()"><i class="bi bi-collection"></i></button>
+        <button class="btn btn-sm btn-outline-secondary" title="Providers" @click="openProviderDialog()"><i class="bi bi-plug"></i></button>
+        <select class="form-select form-select-sm" x-model="theme" @change="setTheme(theme)" style="width: 8rem">
+          <option value="auto">auto</option>
+          <option value="dark">dark</option>
+          <option value="light">light</option>
+        </select>
+        <button class="btn btn-sm btn-outline-danger" @click="rpc('stop', {})"><i class="bi bi-stop-fill"></i></button>
+      </div>
+    </nav>
+
+    <main class="transcript p-3">
+      <template x-if="error">
+        <div class="alert alert-danger" x-text="error"></div>
+      </template>
+      <template x-for="item in timeline()" :key="item.id || item.seq">
+        <section class="mb-3">
+          <template x-if="item.kind === 'user'">
+            <div class="message user p-3 ms-auto" style="max-width: 78%;">
+              <div class="small text-secondary mb-1"><i class="bi bi-person"></i> You</div>
+              <div class="markdown-body" x-html="markdownHTML(item.content?.text || '')"></div>
+            </div>
+          </template>
+          <template x-if="item.kind === 'assistant'">
+            <div class="message assistant p-3" style="max-width: 86%;">
+              <div class="small text-secondary mb-2"><i class="bi bi-stars"></i> Assistant</div>
+              <template x-if="item.content?.reasoning?.text">
+                <details class="reasoning mb-2">
+                  <summary>thinking</summary>
+                  <pre x-text="item.content.reasoning.text"></pre>
+                </details>
+              </template>
+              <div class="markdown-body" x-html="markdownHTML(item.content?.text || '')"></div>
+              <template x-for="tool in item.content?.tools || []" :key="tool.tool_call_id">
+                <div class="tool mt-3 ps-3">
+                  <div class="small fw-semibold"><i class="bi" :class="toolIcon(tool.tool)"></i> <span x-text="toolTitle(tool)"></span> <span class="badge text-bg-secondary" x-text="tool.status"></span></div>
+                  <div class="small text-secondary" x-show="toolPreview(tool)" x-text="toolPreview(tool)"></div>
+                  <template x-if="tool.result"><div class="tool-result mt-2" x-html="toolResultHTML(tool)"></div></template>
+                  <template x-if="tool.error"><pre class="small text-danger mt-2" x-text="tool.error.message || tool.error.code || 'tool error'"></pre></template>
+                </div>
+              </template>
+            </div>
+          </template>
+          <template x-if="item.kind !== 'user' && item.kind !== 'assistant'">
+            <div class="message p-3 bg-body-tertiary">
+              <div class="small text-secondary"><i class="bi bi-info-circle"></i> <span x-text="item.kind"></span></div>
+              <pre x-text="JSON.stringify(item.content, null, 2)"></pre>
+            </div>
+          </template>
+        </section>
+      </template>
+      <template x-if="pendingText()">
+        <section class="message assistant p-3 mb-3" style="max-width: 86%;">
+          <div class="small text-secondary mb-2"><i class="bi bi-broadcast"></i> streaming</div>
+          <div class="markdown-body" x-html="markdownHTML(pendingText())"></div>
+        </section>
+      </template>
+    </main>
+
+    <div class="sidebar-resizer" :class="{'resizing': resizingSidebar}" role="separator" aria-orientation="vertical" aria-label="Resize sidebar" @pointerdown="startSidebarResize($event)"></div>
+
+    <aside class="sidebar p-3 bg-body-tertiary">
+      <div class="mb-3">
+        <div class="small text-secondary">Model</div>
+        <button type="button" class="btn btn-link model-trigger p-0 text-start" @click="openModelDialog()">
+          <i class="bi bi-cpu me-1 text-secondary"></i><span x-text="activeProvider()"></span> / <span x-text="activeModel()"></span>
+        </button>
+      </div>
+      <div class="mb-3">
+        <div class="small text-secondary">Status</div>
+        <div x-text="statusText()"></div>
+      </div>
+      <div class="mb-3">
+        <div class="small text-secondary">Milestones</div>
+        <template x-if="milestoneSummary()">
+          <div class="small text-body-secondary mb-2" x-text="milestoneSummary()"></div>
+        </template>
+        <template x-if="milestoneItems().length === 0">
+          <div class="text-secondary">None</div>
+        </template>
+        <div class="list-group list-group-flush mt-2" x-show="milestoneItems().length > 0">
+          <template x-for="milestone in milestoneItems()" :key="milestoneRef(milestone)">
+            <div class="list-group-item bg-transparent px-0 py-2">
+              <div class="d-flex align-items-start justify-content-between gap-2">
+                <div class="text-break">
+                  <span class="fw-semibold" x-text="milestoneTitle(milestone)"></span>
+                  <span class="small text-secondary" x-text="' ' + milestoneRef(milestone)"></span>
+                </div>
+                <span class="badge" :class="milestoneBadge(milestoneStatus(milestone))" x-text="milestoneStatus(milestone)"></span>
+              </div>
+              <div class="small text-secondary mt-1" x-show="milestoneNotes(milestone)" x-text="milestoneNotes(milestone)"></div>
+            </div>
+          </template>
+        </div>
+      </div>
+      <div class="mb-3">
+        <div class="small text-secondary">Todos</div>
+        <template x-if="todoItems().length === 0">
+          <div class="text-secondary">None</div>
+        </template>
+        <div class="list-group list-group-flush mt-2" x-show="todoItems().length > 0">
+          <template x-for="todo in todoItems()" :key="todo.ID || todo.id">
+            <div class="list-group-item bg-transparent px-0 py-2">
+              <div class="d-flex align-items-start gap-2">
+                <i class="bi mt-1" :class="todoIcon(todoStatus(todo))"></i>
+                <div class="text-break">
+                  <div x-text="todo.Content || todo.content"></div>
+                  <div class="small text-secondary" x-text="todoStatus(todo)"></div>
+                </div>
+              </div>
+            </div>
+          </template>
+        </div>
+      </div>
+      <div class="mb-3">
+        <div class="d-flex align-items-center justify-content-between">
+          <div class="small text-secondary">Permissions</div>
+          <button class="btn btn-sm btn-outline-secondary" @click="showPermissions = !showPermissions"><i class="bi bi-shield-lock"></i></button>
+        </div>
+        <div class="mt-1" x-text="permissionLabel(activePermission())"></div>
+        <div class="list-group list-group-flush mt-2" x-show="showPermissions">
+          <template x-for="profile in permissionProfiles()" :key="profile.Name || profile.name">
+            <button class="list-group-item list-group-item-action" :class="{'active': permissionName(profile) === activePermission()}" @click="setPermission(permissionName(profile))">
+              <div class="fw-semibold" x-text="profile.Label || profile.label || profile.Name || profile.name"></div>
+              <div class="small opacity-75" x-text="profile.Description || profile.description || ''"></div>
+            </button>
+          </template>
+        </div>
+      </div>
+      <div class="mb-3">
+        <div class="d-flex align-items-center justify-content-between">
+          <div class="small text-secondary">Chats</div>
+          <button class="btn btn-sm btn-outline-primary" @click="newChat()"><i class="bi bi-plus-lg"></i></button>
+        </div>
+        <div class="list-group list-group-flush mt-2">
+          <template x-for="chat in state.chats || []" :key="chat.ID || chat.id">
+            <div class="list-group-item list-group-item-action d-flex align-items-center gap-2" :class="{'active': chatID(chat) === state.active_chat_id}" @click="switchChat(chatID(chat))">
+              <button type="button" class="btn btn-sm p-0 border-0 bg-transparent flex-grow-1 text-start" :class="{'text-white': chatID(chat) === state.active_chat_id}" @click.stop="switchChat(chatID(chat))">
+                <div class="d-flex align-items-center gap-2">
+                  <i class="bi bi-chat-left-text"></i>
+                  <span class="text-truncate" x-text="chat.Title || chat.title || 'Chat'"></span>
+                  <i class="chat-status-icon bi" :class="[chatStatusIcon(chat), chatStatusClass(chat)]" :title="chatStatusLabel(chat)"></i>
+                </div>
+              </button>
+              <button type="button" class="btn btn-sm" :class="chatID(chat) === state.active_chat_id ? 'btn-outline-light' : 'btn-outline-danger'" title="Delete chat" @click.stop="deleteChat(chatID(chat))">
+                <i class="bi bi-trash"></i>
+              </button>
+            </div>
+          </template>
+        </div>
+      </div>
+      <div class="mb-3">
+        <div class="small text-secondary">Approvals</div>
+        <template x-for="approval in approvals()" :key="approval.ID || approval.id">
+          <div class="border rounded p-2 my-2">
+            <div class="small fw-semibold" x-text="approval.Tool || approval.tool"></div>
+            <div class="small text-secondary" x-text="approval.Command || approval.command"></div>
+            <div class="btn-group btn-group-sm mt-2">
+              <button class="btn btn-success" @click="rpc('approve', {id: approval.ID || approval.id})"><i class="bi bi-check-lg"></i></button>
+              <button class="btn btn-outline-danger" @click="rpc('deny', {id: approval.ID || approval.id})"><i class="bi bi-x-lg"></i></button>
+            </div>
+          </div>
+        </template>
+      </div>
+      <div class="small text-secondary">Workspace</div>
+      <div class="text-break" x-text="state.workdir"></div>
+      <div class="mt-3">
+        <div class="d-flex align-items-center justify-content-between">
+          <div class="small text-secondary">Git</div>
+          <button class="btn btn-sm btn-outline-secondary" title="Refresh git status" @click="refreshWorkspace()"><i class="bi bi-arrow-clockwise"></i></button>
+        </div>
+        <template x-if="!gitStatus().available">
+          <div class="text-secondary mt-1">No git repository</div>
+        </template>
+        <template x-if="gitStatus().available">
+          <div class="mt-1">
+            <div class="d-flex align-items-center gap-2 flex-wrap">
+              <span class="fw-semibold" x-text="gitStatus().branch || '-'"></span>
+              <span class="small text-secondary" x-show="gitStatus().upstream" x-text="gitStatus().upstream"></span>
+              <span class="badge text-bg-secondary" x-show="gitStatus().summary" x-text="gitStatus().summary"></span>
+            </div>
+            <div class="small mt-1">
+              <span class="diff-add" x-text="'+' + (gitStatus().added || 0)"></span>
+              <span class="text-warning ms-2" x-text="'~' + (gitStatus().modified || 0)"></span>
+              <span class="diff-del ms-2" x-text="'-' + (gitStatus().deleted || 0)"></span>
+              <span class="text-info ms-2" x-text="'?' + (gitStatus().untracked || 0)"></span>
+            </div>
+            <div class="list-group list-group-flush mt-2" x-show="gitFiles().length > 0">
+              <template x-for="file in gitFiles()" :key="file.path || file.Path">
+                <div class="list-group-item bg-transparent px-0 py-1 git-file" :class="gitFileClass(file)">
+                  <div class="d-flex align-items-start justify-content-between gap-2">
+                    <span class="text-break"><span class="badge me-1" :class="gitCodeBadge(file)" x-text="gitFileCode(file)"></span><span x-text="file.path || file.Path"></span></span>
+                    <span class="small text-nowrap" x-show="gitAdditions(file) || gitDeletions(file)">
+                      <span class="diff-add" x-text="'+' + gitAdditions(file)"></span>
+                      <span class="diff-del ms-1" x-text="'-' + gitDeletions(file)"></span>
+                    </span>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </div>
+        </template>
+      </div>
+    </aside>
+
+    <form class="composer p-3 bg-body" @submit.prevent="send()">
+      <div class="composer-menu list-group shadow-sm mb-2" x-show="completion.items.length > 0" style="display: none;">
+        <template x-for="(item, idx) in completion.items" :key="item.insert_text + idx">
+          <button type="button" class="list-group-item list-group-item-action d-flex align-items-start justify-content-between gap-3" :class="{'active': idx === completion.selected}" @mousedown.prevent="acceptCompletion(idx)">
+            <span class="text-start">
+              <span class="fw-semibold" x-text="item.label"></span>
+              <span class="d-block small opacity-75" x-text="item.description || item.kind || ''"></span>
+            </span>
+            <span class="badge text-bg-secondary" x-text="completion.kind"></span>
+          </button>
+        </template>
+      </div>
+      <div class="input-group">
+        <textarea class="form-control composer-input" rows="1" x-ref="composerInput" x-model="draft" placeholder="Ask koder or type / for commands" @input="onComposerInput()" @click="updateCompletions()" @keyup="onComposerKeyup($event)" @keydown="onComposerKeydown($event)"></textarea>
+        <button class="btn btn-primary" type="submit"><i class="bi bi-send-fill"></i></button>
+      </div>
+    </form>
+  </div>
+
+  <div class="modal-backdrop-lite" x-show="showModels" x-transition @keydown.escape.window="closeModelDialog()" style="display: none;">
+    <section class="model-dialog bg-body border rounded shadow">
+      <header class="d-flex align-items-center justify-content-between gap-3 p-3 border-bottom">
+        <div>
+          <div class="fw-semibold"><i class="bi bi-cpu me-1"></i> Select model</div>
+          <div class="small text-secondary" x-text="activeProvider() + ' / ' + activeModel()"></div>
+        </div>
+        <button type="button" class="btn btn-sm btn-outline-secondary" @click="closeModelDialog()"><i class="bi bi-x-lg"></i></button>
+      </header>
+      <div class="p-3 border-bottom">
+        <input class="form-control" type="search" x-model="modelQuery" placeholder="Filter models" x-ref="modelSearch">
+      </div>
+      <div class="model-list list-group list-group-flush">
+        <template x-if="modelLoading">
+          <div class="list-group-item text-secondary"><span class="spinner-border spinner-border-sm me-2"></span>Loading models</div>
+        </template>
+        <template x-if="!modelLoading && filteredModels().length === 0">
+          <div class="list-group-item text-secondary">No models match the filter</div>
+        </template>
+        <template x-for="model in filteredModels()" :key="model.provider_id + '/' + model.model_id">
+          <button type="button" class="list-group-item list-group-item-action d-flex align-items-start justify-content-between gap-3" :class="{'active': model.current}" @click="selectModel(model)">
+            <span class="text-start">
+              <span class="fw-semibold" x-text="model.model_id"></span>
+              <span class="d-block small opacity-75">
+                <span x-text="model.provider_label || model.provider_id"></span>
+                <template x-if="model.owned_by"><span x-text="' · ' + model.owned_by"></span></template>
+              </span>
+            </span>
+            <i class="bi bi-check-lg" x-show="model.current"></i>
+          </button>
+        </template>
+      </div>
+    </section>
+  </div>
+
+  <div class="modal-backdrop-lite" x-show="showSessions" x-transition @keydown.escape.window="closeSessionDialog()" style="display: none;">
+    <section class="session-dialog bg-body border rounded shadow">
+      <header class="d-flex align-items-center justify-content-between gap-3 p-3 border-bottom">
+        <div>
+          <div class="fw-semibold"><i class="bi bi-collection me-1"></i> Sessions</div>
+          <div class="small text-secondary" x-text="sessionState.workdir || state.workdir || ''"></div>
+        </div>
+        <button type="button" class="btn btn-sm btn-outline-secondary" @click="closeSessionDialog()"><i class="bi bi-x-lg"></i></button>
+      </header>
+      <div class="p-3 border-bottom">
+        <div class="input-group">
+          <input class="form-control" x-model="newSessionTitle" placeholder="New Session" @keydown.enter.prevent="createSession()">
+          <button class="btn btn-primary" type="button" @click="createSession()"><i class="bi bi-plus-lg"></i></button>
+        </div>
+      </div>
+      <div class="session-list list-group list-group-flush">
+        <template x-if="sessionLoading">
+          <div class="list-group-item text-secondary"><span class="spinner-border spinner-border-sm me-2"></span>Loading sessions</div>
+        </template>
+        <template x-if="!sessionLoading && sessionRows().length === 0">
+          <div class="list-group-item text-secondary">No sessions in this workspace</div>
+        </template>
+        <template x-for="session in sessionRows()" :key="sessionID(session)">
+          <button type="button" class="list-group-item list-group-item-action d-flex align-items-start justify-content-between gap-3" :class="{'active': sessionID(session) === activeSessionID()}" @click="switchSession(sessionID(session))">
+            <span class="text-start">
+              <span class="fw-semibold" x-text="sessionTitle(session)"></span>
+              <span class="d-block small opacity-75">
+                <span x-text="sessionModel(session)"></span>
+                <template x-if="session.LastMessage || session.last_message"><span x-text="' · ' + (session.LastMessage || session.last_message)"></span></template>
+              </span>
+            </span>
+            <span class="badge text-bg-secondary" x-text="'#' + sessionID(session)"></span>
+          </button>
+        </template>
+      </div>
+    </section>
+  </div>
+
+  <div class="modal-backdrop-lite" x-show="showProviders" x-transition @keydown.escape.window="closeProviderDialog()" style="display: none;">
+    <section class="provider-dialog bg-body border rounded shadow">
+      <header class="d-flex align-items-center justify-content-between gap-3 p-3 border-bottom">
+        <div>
+          <div class="fw-semibold"><i class="bi bi-plug me-1"></i> Providers</div>
+          <div class="small text-secondary" x-text="providerState.default_provider ? providerState.default_provider + ' / ' + (providerState.default_model || '-') : 'No default provider'"></div>
+        </div>
+        <button type="button" class="btn btn-sm btn-outline-secondary" @click="closeProviderDialog()"><i class="bi bi-x-lg"></i></button>
+      </header>
+      <div class="provider-body">
+        <aside class="provider-list border-end">
+          <div class="p-3 border-bottom d-flex align-items-center justify-content-between gap-2">
+            <span class="small text-secondary">Configured</span>
+            <button type="button" class="btn btn-sm btn-outline-primary" @click="addProvider()"><i class="bi bi-plus-lg"></i></button>
+          </div>
+          <div class="list-group list-group-flush">
+            <template x-if="providerRows().length === 0">
+              <div class="list-group-item text-secondary">None</div>
+            </template>
+            <template x-for="item in providerRows()" :key="item.id">
+              <div class="list-group-item d-flex align-items-start gap-2" :class="{'active': providerDraft?.original_provider_id === item.id || providerDraft?.provider_id === item.id}">
+                <button type="button" class="btn btn-sm p-0 border-0 bg-transparent flex-grow-1 text-start" :class="{'text-white': providerDraft?.original_provider_id === item.id || providerDraft?.provider_id === item.id}" @click="editProvider(item.id)">
+                  <span class="fw-semibold" x-text="item.name || item.id"></span>
+                  <span class="d-block small opacity-75">
+                    <span x-text="item.default_model || '-'"></span>
+                    <span class="badge text-bg-primary ms-1" x-show="item.default">default</span>
+                  </span>
+                </button>
+                <button type="button" class="btn btn-sm" :class="(providerDraft?.original_provider_id === item.id || providerDraft?.provider_id === item.id) ? 'btn-outline-light' : 'btn-outline-danger'" title="Delete provider" @click.stop="deleteProvider(item.id)">
+                  <i class="bi bi-trash"></i>
+                </button>
+              </div>
+            </template>
+          </div>
+        </aside>
+        <form class="provider-form p-3" @submit.prevent="saveProvider()">
+          <template x-if="providerDraft">
+            <div class="row g-3">
+              <div class="col-md-6">
+                <label class="form-label small text-secondary">Template</label>
+                <select class="form-select" x-model="providerDraft.template_id" @change="providerTemplateChanged()">
+                  <template x-for="template in providerTemplates()" :key="template.id">
+                    <option :value="template.id" x-text="template.title"></option>
+                  </template>
+                </select>
+              </div>
+              <div class="col-md-6">
+                <label class="form-label small text-secondary">Provider ID</label>
+                <input class="form-control" x-model="providerDraft.provider_id" autocomplete="off">
+              </div>
+              <div class="col-md-6">
+                <label class="form-label small text-secondary">Name</label>
+                <input class="form-control" x-model="providerDraft.name" autocomplete="off">
+              </div>
+              <div class="col-md-6">
+                <label class="form-label small text-secondary">Model</label>
+                <input class="form-control" x-model="providerDraft.model" autocomplete="off">
+              </div>
+              <div class="col-12">
+                <label class="form-label small text-secondary">Base URL</label>
+                <input class="form-control" x-model="providerDraft.base_url" autocomplete="off">
+              </div>
+              <div class="col-12">
+                <label class="form-label small text-secondary">API key</label>
+                <input class="form-control" type="password" x-model="providerDraft.api_key" autocomplete="off">
+              </div>
+              <div class="col-12">
+                <label class="form-label small text-secondary">Headers JSON</label>
+                <textarea class="form-control font-monospace" rows="4" x-model="providerHeadersText" spellcheck="false"></textarea>
+              </div>
+              <div class="col-12" x-show="providerStatus">
+                <div class="alert mb-0" :class="providerStatusKind === 'success' ? 'alert-success' : (providerStatusKind === 'danger' ? 'alert-danger' : 'alert-secondary')" x-text="providerStatus"></div>
+              </div>
+            </div>
+          </template>
+          <div class="text-secondary" x-show="!providerDraft">Select or add a provider</div>
+          <footer class="d-flex justify-content-end gap-2 mt-3 pt-3 border-top">
+            <button type="button" class="btn btn-outline-secondary" @click="testProvider()" :disabled="!providerDraft || providerTesting">
+              <span class="spinner-border spinner-border-sm me-1" x-show="providerTesting"></span>Test
+            </button>
+            <button type="submit" class="btn btn-primary" :disabled="!providerDraft || providerSaving">
+              <span class="spinner-border spinner-border-sm me-1" x-show="providerSaving"></span>Save
+            </button>
+            <button type="button" class="btn btn-outline-secondary" @click="closeProviderDialog()">Cancel</button>
+          </footer>
+        </form>
+      </div>
+    </section>
+  </div>
+
+  <div class="toast-stack" x-show="toast" x-transition style="display: none;">
+    <div class="alert alert-danger shadow mb-0" role="status" x-text="toast"></div>
+  </div>
+
+  <script>window.KODER_ASSET_HASH = "__KODER_ASSET_HASH__";</script>
+  <script defer src="/assets/app.js"></script>
+</body>
+</html>

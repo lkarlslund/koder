@@ -25,11 +25,15 @@ import (
 
 const defaultOpenDelay = 5 * time.Second
 const assetHashPlaceholder = "__KODER_ASSET_HASH__"
+const indexAssetPath = "assets/index.html"
 
-//go:embed assets/vendor
+//go:embed assets
 var webAssets embed.FS
 
-var currentAssetHash = computeAssetHash(indexHTML, webAssets)
+var (
+	indexHTML        = mustReadAsset(indexAssetPath)
+	currentAssetHash = computeAssetHash(webAssets)
+)
 
 // Options configures the web UI server.
 type Options struct {
@@ -441,10 +445,16 @@ func renderIndexHTML() string {
 	return strings.ReplaceAll(indexHTML, assetHashPlaceholder, currentAssetHash)
 }
 
-func computeAssetHash(html string, assets fs.FS) string {
+func mustReadAsset(path string) string {
+	data, err := fs.ReadFile(webAssets, path)
+	if err != nil {
+		panic(fmt.Sprintf("read embedded web asset %s: %v", path, err))
+	}
+	return string(data)
+}
+
+func computeAssetHash(assets fs.FS) string {
 	h := sha256.New()
-	normalized := strings.ReplaceAll(html, assetHashPlaceholder, "")
-	_, _ = h.Write([]byte(normalized))
 	_ = fs.WalkDir(assets, "assets", func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return err
@@ -452,6 +462,9 @@ func computeAssetHash(html string, assets fs.FS) string {
 		data, err := fs.ReadFile(assets, path)
 		if err != nil {
 			return err
+		}
+		if strings.HasSuffix(path, ".html") {
+			data = []byte(strings.ReplaceAll(string(data), assetHashPlaceholder, ""))
 		}
 		_, _ = h.Write([]byte{0})
 		_, _ = h.Write([]byte(path))

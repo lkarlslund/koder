@@ -164,208 +164,221 @@ func TestIndexServesHTML(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read index: %v", err)
 	}
-	if !strings.Contains(string(body), `@keydown="onComposerKeydown($event)"`) || !strings.Contains(string(body), `if (ev.key === 'Enter' && !ev.shiftKey)`) {
+	document := string(body)
+	appJS := getAssetBody(t, srv, "/assets/app.js")
+	appCSS := getAssetBody(t, srv, "/assets/app.css")
+	fullPage := document + "\n" + appJS + "\n" + appCSS
+	if !strings.Contains(document, `/assets/app.css`) {
+		t.Fatalf("expected app CSS to be loaded from embedded assets")
+	}
+	if !strings.Contains(document, `/assets/app.js`) {
+		t.Fatalf("expected app JS to be loaded from embedded assets")
+	}
+	if strings.Contains(document, `<style>`) || strings.Contains(document, `function koderApp()`) {
+		t.Fatalf("expected first-party CSS and JS to live in embedded asset files, not inline index content")
+	}
+	if !strings.Contains(fullPage, `@keydown="onComposerKeydown($event)"`) || !strings.Contains(fullPage, `if (ev.key === 'Enter' && !ev.shiftKey)`) {
 		t.Fatalf("expected plain enter to submit composer")
 	}
-	if strings.Contains(string(body), assetHashPlaceholder) {
+	if strings.Contains(fullPage, assetHashPlaceholder) {
 		t.Fatalf("expected served index to contain the rendered asset hash")
 	}
-	if !strings.Contains(string(body), `window.KODER_ASSET_HASH = "`+currentAssetHash+`"`) {
+	if !strings.Contains(fullPage, `window.KODER_ASSET_HASH = "`+currentAssetHash+`"`) {
 		t.Fatalf("expected served index to publish the current asset hash")
 	}
-	if !strings.Contains(string(body), `/assets/vendor/bootstrap/bootstrap.min.css`) {
+	if !strings.Contains(fullPage, `/assets/vendor/bootstrap/bootstrap.min.css`) {
 		t.Fatalf("expected Bootstrap CSS to be loaded from vendored assets")
 	}
-	if !strings.Contains(string(body), `/assets/vendor/bootstrap-icons/font/bootstrap-icons.css`) {
+	if !strings.Contains(fullPage, `/assets/vendor/bootstrap-icons/font/bootstrap-icons.css`) {
 		t.Fatalf("expected Bootstrap Icons to be loaded from vendored assets")
 	}
-	if !strings.Contains(string(body), `/assets/vendor/marked/marked.umd.js`) {
+	if !strings.Contains(fullPage, `/assets/vendor/marked/marked.umd.js`) {
 		t.Fatalf("expected marked to be loaded from vendored assets")
 	}
-	if !strings.Contains(string(body), `/assets/vendor/dompurify/purify.min.js`) {
+	if !strings.Contains(fullPage, `/assets/vendor/dompurify/purify.min.js`) {
 		t.Fatalf("expected DOMPurify to be loaded from vendored assets")
 	}
-	if !strings.Contains(string(body), `/assets/vendor/highlight/highlight.min.js`) {
+	if !strings.Contains(fullPage, `/assets/vendor/highlight/highlight.min.js`) {
 		t.Fatalf("expected highlight.js to be loaded from vendored assets")
 	}
-	if !strings.Contains(string(body), `/assets/vendor/alpine/cdn.min.js`) {
+	if !strings.Contains(fullPage, `/assets/vendor/alpine/cdn.min.js`) {
 		t.Fatalf("expected Alpine to be loaded from vendored assets")
 	}
-	if strings.Contains(string(body), `cdn.jsdelivr.net`) {
+	if strings.Contains(fullPage, `cdn.jsdelivr.net`) {
 		t.Fatalf("expected index to avoid CDN dependencies")
 	}
-	if !strings.Contains(string(body), `x-html="markdownHTML(item.content?.text || '')"`) {
+	if !strings.Contains(fullPage, `x-html="markdownHTML(item.content?.text || '')"`) {
 		t.Fatalf("expected assistant text to render as markdown HTML")
 	}
-	if !strings.Contains(string(body), `x-html="markdownHTML(pendingText())"`) {
+	if !strings.Contains(fullPage, `x-html="markdownHTML(pendingText())"`) {
 		t.Fatalf("expected streaming assistant text to render as markdown HTML")
 	}
-	if !strings.Contains(string(body), `marked.parse(source)`) || !strings.Contains(string(body), `DOMPurify.sanitize`) || !strings.Contains(string(body), `hljs.highlight`) {
+	if !strings.Contains(fullPage, `marked.parse(source)`) || !strings.Contains(fullPage, `DOMPurify.sanitize`) || !strings.Contains(fullPage, `hljs.highlight`) {
 		t.Fatalf("expected browser markdown renderer to parse, sanitize, and syntax-highlight")
 	}
-	if strings.Contains(string(body), `formatArgs(tool.args)`) || strings.Contains(string(body), `JSON.stringify(tool.args`) {
+	if strings.Contains(fullPage, `formatArgs(tool.args)`) || strings.Contains(fullPage, `JSON.stringify(tool.args`) {
 		t.Fatalf("expected tool calls to avoid raw JSON argument rendering")
 	}
-	if !strings.Contains(string(body), `toolResultHTML(tool)`) || !strings.Contains(string(body), `function renderToolResult(tool)`) {
+	if !strings.Contains(fullPage, `toolResultHTML(tool)`) || !strings.Contains(fullPage, `function renderToolResult(tool)`) {
 		t.Fatalf("expected tool results to render through the per-tool formatter")
 	}
-	if !strings.Contains(string(body), `function renderDiffBlock(title, diff)`) || !strings.Contains(string(body), `tool-diff-add`) || !strings.Contains(string(body), `tool-diff-del`) {
+	if !strings.Contains(fullPage, `function renderDiffBlock(title, diff)`) || !strings.Contains(fullPage, `tool-diff-add`) || !strings.Contains(fullPage, `tool-diff-del`) {
 		t.Fatalf("expected edit and patch results to use colored diff rendering")
 	}
-	if !strings.Contains(string(body), `compactLines(lines, head = 2, tail = 2)`) {
+	if !strings.Contains(fullPage, `compactLines(lines, head = 2, tail = 2)`) {
 		t.Fatalf("expected file write results to use compact head/tail rendering")
 	}
-	if strings.Contains(string(body), `case 'bash': return command ? 'Run ' + command`) || strings.Contains(string(body), `const title = firstValue(data, ['command', 'Command'`) {
+	if strings.Contains(fullPage, `case 'bash': return command ? 'Run ' + command`) || strings.Contains(fullPage, `const title = firstValue(data, ['command', 'Command'`) {
 		t.Fatalf("expected command tools to render the command once, not in title and result header")
 	}
-	if !strings.Contains(string(body), `case 'bash': return 'Run command'`) || !strings.Contains(string(body), `return renderCompactBlock('Output'`) {
+	if !strings.Contains(fullPage, `case 'bash': return 'Run command'`) || !strings.Contains(fullPage, `return renderCompactBlock('Output'`) {
 		t.Fatalf("expected bash tool rendering to show a generic title and output block")
 	}
-	if !strings.Contains(string(body), `if (args.command) values.push(args.command)`) || !strings.Contains(string(body), `function execResultLines(data, fallback)`) {
+	if !strings.Contains(fullPage, `if (args.command) values.push(args.command)`) || !strings.Contains(fullPage, `function execResultLines(data, fallback)`) {
 		t.Fatalf("expected command preview and exec result helpers")
 	}
-	if !strings.Contains(string(body), `hello.asset_hash !== window.KODER_ASSET_HASH`) || !strings.Contains(string(body), `location.reload()`) {
+	if !strings.Contains(fullPage, `hello.asset_hash !== window.KODER_ASSET_HASH`) || !strings.Contains(fullPage, `location.reload()`) {
 		t.Fatalf("expected websocket reconnect to reload on asset mismatch")
 	}
-	if !strings.Contains(string(body), `rpcOn(ws, 'hello', {})`) {
+	if !strings.Contains(fullPage, `rpcOn(ws, 'hello', {})`) {
 		t.Fatalf("expected hello RPC to be bound to the socket that opened")
 	}
-	if !strings.Contains(string(body), `ws.readyState !== WebSocket.OPEN`) || !strings.Contains(string(body), `try {`) {
+	if !strings.Contains(fullPage, `ws.readyState !== WebSocket.OPEN`) || !strings.Contains(fullPage, `try {`) {
 		t.Fatalf("expected websocket sends to be guarded against closed sockets")
 	}
-	if !strings.Contains(string(body), `rejectPending('connection closed')`) {
+	if !strings.Contains(fullPage, `rejectPending('connection closed')`) {
 		t.Fatalf("expected websocket close to reject pending RPCs")
 	}
-	if !strings.Contains(string(body), `transcriptScrollState()`) || !strings.Contains(string(body), `distance <= 48`) {
+	if !strings.Contains(fullPage, `transcriptScrollState()`) || !strings.Contains(fullPage, `distance <= 48`) {
 		t.Fatalf("expected transcript scroll anchoring when new output arrives")
 	}
-	if !strings.Contains(string(body), `scroll.nearBottom`) || !strings.Contains(string(body), `el.scrollTop = scroll.top`) {
+	if !strings.Contains(fullPage, `scroll.nearBottom`) || !strings.Contains(fullPage, `el.scrollTop = scroll.top`) {
 		t.Fatalf("expected transcript to follow only when near bottom and preserve scroll otherwise")
 	}
-	if !strings.Contains(string(body), `afterTranscriptDOMUpdate`) || !strings.Contains(string(body), `requestAnimationFrame`) || !strings.Contains(string(body), `setTimeout(fn, 0)`) {
+	if !strings.Contains(fullPage, `afterTranscriptDOMUpdate`) || !strings.Contains(fullPage, `requestAnimationFrame`) || !strings.Contains(fullPage, `setTimeout(fn, 0)`) {
 		t.Fatalf("expected transcript scroll restoration to run after deferred DOM height updates")
 	}
-	if !strings.Contains(string(body), `applyState(s, {scrollToBottom: true})`) {
+	if !strings.Contains(fullPage, `applyState(s, {scrollToBottom: true})`) {
 		t.Fatalf("expected explicit chat switches to scroll to the bottom")
 	}
-	if !strings.Contains(string(body), `this.applyState((hello && hello.state) || hello || {}, {scrollToBottom: true})`) {
+	if !strings.Contains(fullPage, `this.applyState((hello && hello.state) || hello || {}, {scrollToBottom: true})`) {
 		t.Fatalf("expected fresh page loads to start at the bottom of the transcript")
 	}
-	if !strings.Contains(string(body), `class="form-control composer-input" rows="1"`) {
+	if !strings.Contains(fullPage, `class="form-control composer-input" rows="1"`) {
 		t.Fatalf("expected composer to start as a single line")
 	}
-	if !strings.Contains(string(body), `@input="onComposerInput()"`) {
+	if !strings.Contains(fullPage, `@input="onComposerInput()"`) {
 		t.Fatalf("expected composer input to resize itself as text changes")
 	}
-	if !strings.Contains(string(body), `composer_completions`) {
+	if !strings.Contains(fullPage, `composer_completions`) {
 		t.Fatalf("expected composer to request web completions")
 	}
-	if !strings.Contains(string(body), `acceptCompletion(this.completion.selected)`) {
+	if !strings.Contains(fullPage, `acceptCompletion(this.completion.selected)`) {
 		t.Fatalf("expected composer completion keyboard acceptance")
 	}
-	if !strings.Contains(string(body), `completion.items.length > 0`) {
+	if !strings.Contains(fullPage, `completion.items.length > 0`) {
 		t.Fatalf("expected composer completion menu")
 	}
-	if !strings.Contains(string(body), `* 0.2`) {
+	if !strings.Contains(fullPage, `* 0.2`) {
 		t.Fatalf("expected composer height to cap at 20 percent of the viewport")
 	}
-	if !strings.Contains(string(body), `el.style.overflowY = el.scrollHeight > maxHeight ? 'auto' : 'hidden'`) {
+	if !strings.Contains(fullPage, `el.style.overflowY = el.scrollHeight > maxHeight ? 'auto' : 'hidden'`) {
 		t.Fatalf("expected composer to scroll after reaching the height cap")
 	}
-	if !strings.Contains(string(body), `text === '/permissions'`) {
+	if !strings.Contains(fullPage, `text === '/permissions'`) {
 		t.Fatalf("expected /permissions to be handled locally")
 	}
-	if !strings.Contains(string(body), `set_permission_profile`) {
+	if !strings.Contains(fullPage, `set_permission_profile`) {
 		t.Fatalf("expected permissions UI to call set_permission_profile")
 	}
-	if !strings.Contains(string(body), `openModelDialog()`) {
+	if !strings.Contains(fullPage, `openModelDialog()`) {
 		t.Fatalf("expected model text to open model dialog")
 	}
-	if !strings.Contains(string(body), `list_models`) {
+	if !strings.Contains(fullPage, `list_models`) {
 		t.Fatalf("expected model dialog to list models")
 	}
-	if !strings.Contains(string(body), `set_model`) {
+	if !strings.Contains(fullPage, `set_model`) {
 		t.Fatalf("expected model dialog to set model")
 	}
-	if !strings.Contains(string(body), `milestoneItems()`) {
+	if !strings.Contains(fullPage, `milestoneItems()`) {
 		t.Fatalf("expected sidebar to render milestones")
 	}
-	if !strings.Contains(string(body), `todoItems()`) {
+	if !strings.Contains(fullPage, `todoItems()`) {
 		t.Fatalf("expected sidebar to render todos")
 	}
-	if !strings.Contains(string(body), `gitStatus()`) {
+	if !strings.Contains(fullPage, `gitStatus()`) {
 		t.Fatalf("expected sidebar to render git status")
 	}
-	if !strings.Contains(string(body), `gitFiles()`) {
+	if !strings.Contains(fullPage, `gitFiles()`) {
 		t.Fatalf("expected sidebar to render git diff files")
 	}
-	if !strings.Contains(string(body), `refresh_workspace`) {
+	if !strings.Contains(fullPage, `refresh_workspace`) {
 		t.Fatalf("expected git sidebar refresh RPC")
 	}
-	if !strings.Contains(string(body), `@pointerdown="startSidebarResize($event)"`) {
+	if !strings.Contains(fullPage, `@pointerdown="startSidebarResize($event)"`) {
 		t.Fatalf("expected draggable sidebar divider")
 	}
-	if !strings.Contains(string(body), `readPreference('theme'`) {
+	if !strings.Contains(fullPage, `readPreference('theme'`) {
 		t.Fatalf("expected theme to use shared browser preference storage")
 	}
-	if !strings.Contains(string(body), `writePreference('sidebarRatio'`) {
+	if !strings.Contains(fullPage, `writePreference('sidebarRatio'`) {
 		t.Fatalf("expected sidebar split ratio to use shared browser preference storage")
 	}
-	if !strings.Contains(string(body), `selectedChatPreferenceName()`) {
+	if !strings.Contains(fullPage, `selectedChatPreferenceName()`) {
 		t.Fatalf("expected selected chat to use browser preference storage")
 	}
-	if !strings.Contains(string(body), `restoreSelectedChat()`) {
+	if !strings.Contains(fullPage, `restoreSelectedChat()`) {
 		t.Fatalf("expected selected chat to be restored after reload")
 	}
-	if !strings.Contains(string(body), `delete_chat`) {
+	if !strings.Contains(fullPage, `delete_chat`) {
 		t.Fatalf("expected chat deletion RPC")
 	}
-	if !strings.Contains(string(body), `deleteChat(chatID(chat))`) {
+	if !strings.Contains(fullPage, `deleteChat(chatID(chat))`) {
 		t.Fatalf("expected chat list trash action")
 	}
-	if !strings.Contains(string(body), `chatStatusLabel(chat)`) || !strings.Contains(string(body), `chat-status-icon`) {
+	if !strings.Contains(fullPage, `chatStatusLabel(chat)`) || !strings.Contains(fullPage, `chat-status-icon`) {
 		t.Fatalf("expected chat sidebar to render per-chat animated status icons")
 	}
-	if !strings.Contains(string(body), `this.state.chat_statuses`) || !strings.Contains(string(body), `waiting_llm: 'Waiting for LLM'`) {
+	if !strings.Contains(fullPage, `this.state.chat_statuses`) || !strings.Contains(fullPage, `waiting_llm: 'Waiting for LLM'`) {
 		t.Fatalf("expected chat sidebar status helpers for all chats")
 	}
-	if strings.Contains(string(body), `x-show="!chatStatusIdle(chat)"`) || !strings.Contains(string(body), `:title="chatStatusLabel(chat)"`) {
+	if strings.Contains(fullPage, `x-show="!chatStatusIdle(chat)"`) || !strings.Contains(fullPage, `:title="chatStatusLabel(chat)"`) {
 		t.Fatalf("expected all chat status icons to render with hover tooltips")
 	}
-	if !strings.Contains(string(body), `.chat-status-icon.status-idle`) || strings.Contains(string(body), `.chat-status-icon.status-idle { color: var(--bs-secondary-color); opacity: .65; animation`) {
+	if !strings.Contains(fullPage, `.chat-status-icon.status-idle`) || strings.Contains(fullPage, `.chat-status-icon.status-idle { color: var(--bs-secondary-color); opacity: .65; animation`) {
 		t.Fatalf("expected idle chat status icon to be static")
 	}
-	if !strings.Contains(string(body), `@keyframes chat-status-spin`) || !strings.Contains(string(body), `chatStatusIcon(chat)`) {
+	if !strings.Contains(fullPage, `@keyframes chat-status-spin`) || !strings.Contains(fullPage, `chatStatusIcon(chat)`) {
 		t.Fatalf("expected chat status icons to animate per state")
 	}
-	if !strings.Contains(string(body), `openProviderDialog()`) {
+	if !strings.Contains(fullPage, `openProviderDialog()`) {
 		t.Fatalf("expected top status bar provider dialog button")
 	}
-	if !strings.Contains(string(body), `openSessionDialog()`) {
+	if !strings.Contains(fullPage, `openSessionDialog()`) {
 		t.Fatalf("expected top status bar session dialog button")
 	}
-	if !strings.Contains(string(body), `list_sessions`) {
+	if !strings.Contains(fullPage, `list_sessions`) {
 		t.Fatalf("expected session dialog to list sessions")
 	}
-	if !strings.Contains(string(body), `switch_session`) {
+	if !strings.Contains(fullPage, `switch_session`) {
 		t.Fatalf("expected session dialog to switch sessions")
 	}
-	if !strings.Contains(string(body), `new_session`) {
+	if !strings.Contains(fullPage, `new_session`) {
 		t.Fatalf("expected session dialog to create sessions")
 	}
-	if !strings.Contains(string(body), `provider_state`) {
+	if !strings.Contains(fullPage, `provider_state`) {
 		t.Fatalf("expected provider dialog to load provider state")
 	}
-	if !strings.Contains(string(body), `test_provider`) {
+	if !strings.Contains(fullPage, `test_provider`) {
 		t.Fatalf("expected provider dialog test action")
 	}
-	if !strings.Contains(string(body), `save_provider`) {
+	if !strings.Contains(fullPage, `save_provider`) {
 		t.Fatalf("expected provider dialog save action")
 	}
-	if !strings.Contains(string(body), `delete_provider`) {
+	if !strings.Contains(fullPage, `delete_provider`) {
 		t.Fatalf("expected provider dialog delete action")
 	}
-	if !strings.Contains(string(body), `showToast`) {
+	if !strings.Contains(fullPage, `showToast`) {
 		t.Fatalf("expected toast error path")
 	}
 }
@@ -424,11 +437,30 @@ func TestVendoredAssetsServe(t *testing.T) {
 	}
 }
 
+func getAssetBody(t *testing.T, srv *Server, path string) string {
+	t.Helper()
+	resp, err := http.Get(srv.URL() + path)
+	if err != nil {
+		t.Fatalf("get asset %s: %v", path, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected asset %s status 200, got %d", path, resp.StatusCode)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read asset %s: %v", path, err)
+	}
+	return string(body)
+}
+
 func TestAssetHashIncludesVendoredAssets(t *testing.T) {
-	first := computeAssetHash("hello "+assetHashPlaceholder, fstest.MapFS{
+	first := computeAssetHash(fstest.MapFS{
+		"assets/index.html":  {Data: []byte("hello " + assetHashPlaceholder)},
 		"assets/vendor/a.js": {Data: []byte("one")},
 	})
-	second := computeAssetHash("hello "+assetHashPlaceholder, fstest.MapFS{
+	second := computeAssetHash(fstest.MapFS{
+		"assets/index.html":  {Data: []byte("hello " + assetHashPlaceholder)},
 		"assets/vendor/a.js": {Data: []byte("two")},
 	})
 	if first == second {
