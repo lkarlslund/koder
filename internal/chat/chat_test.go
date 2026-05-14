@@ -509,6 +509,44 @@ func TestRuntimeApproveStartsApprovalStream(t *testing.T) {
 	}
 }
 
+func TestRuntimeApproveRemovesPendingApprovalImmediately(t *testing.T) {
+	st := openTestStore(t)
+	session, chatRecord, _ := createSessionWithPlan(t, st)
+	if _, err := st.AppendAssistantToolCalls(context.Background(), chatRecord.ID, []domain.ToolCall{{
+		ToolCallID: "call_approval",
+		Tool:       domain.ToolKindBash,
+		Args:       map[string]string{"command": "echo hi"},
+		Status:     domain.ToolStatusAwaitingApproval,
+	}}, "", domain.Usage{}); err != nil {
+		t.Fatal(err)
+	}
+	runner := &runtimeFakeRunner{}
+	rt, err := Load(context.Background(), st, session, chatRecord, runner, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(rt.Close)
+	updates, unsub := rt.Subscribe()
+	defer unsub()
+
+	rt.ApproveTool("call_approval")
+
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case update := <-updates:
+			if update.ApprovalsChanged && len(update.Snapshot.Approvals) == 0 {
+				if got := runner.approveCallCount(); got != 1 {
+					t.Fatalf("approve calls = %d", got)
+				}
+				return
+			}
+		case <-deadline:
+			t.Fatalf("timed out waiting for approval removal; approvals=%#v", rt.Snapshot().Approvals)
+		}
+	}
+}
+
 func TestLoadWithPendingApprovalStartsWaitingForApproval(t *testing.T) {
 	st := openTestStore(t)
 	session, chatRecord, _ := createSessionWithPlan(t, st)

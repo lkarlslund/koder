@@ -650,8 +650,9 @@ func (r *Chat) handleApprove(toolCallID string, rule *domain.PermissionOverride)
 	sessionID := r.session.ID
 	chatID := r.chat.ID
 	toolCallID = r.resolveApprovalToolCallIDLocked(toolCallID)
+	r.removeApprovalLocked(toolCallID)
 	r.mu.Unlock()
-	r.broadcast(r.snapshotUpdateFlags(nil, false, false, true, false, false))
+	r.broadcast(r.snapshotUpdateFlags(nil, true, false, true, false, true))
 
 	var (
 		events <-chan domain.Event
@@ -687,8 +688,9 @@ func (r *Chat) handleDeny(toolCallID string) {
 	sessionID := r.session.ID
 	chatID := r.chat.ID
 	toolCallID = r.resolveApprovalToolCallIDLocked(toolCallID)
+	r.removeApprovalLocked(toolCallID)
 	r.mu.Unlock()
-	r.broadcast(r.snapshotUpdateFlags(nil, false, false, true, false, false))
+	r.broadcast(r.snapshotUpdateFlags(nil, true, false, true, false, true))
 
 	events, err := runner.DenyToolInChat(ctx, sessionID, chatID, toolCallID)
 	r.handleApprovalEventStream(events, err)
@@ -709,6 +711,25 @@ func (r *Chat) resolveApprovalToolCallIDLocked(raw string) string {
 		}
 	}
 	return raw
+}
+
+func (r *Chat) removeApprovalLocked(toolCallID string) {
+	if r.state == nil {
+		return
+	}
+	toolCallID = strings.TrimSpace(toolCallID)
+	if toolCallID == "" {
+		return
+	}
+	for _, approval := range r.state.Approvals() {
+		if strings.TrimSpace(approval.ToolCallID) == toolCallID {
+			r.state.RemoveApproval(approval.ID)
+			return
+		}
+	}
+	if id, err := strconv.ParseInt(toolCallID, 10, 64); err == nil && id != 0 {
+		r.state.RemoveApproval(id)
+	}
 }
 
 func (r *Chat) handleResumePendingTools() {
