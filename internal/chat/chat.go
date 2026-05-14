@@ -450,6 +450,17 @@ func (r *Chat) SetSession(session domain.Session) {
 	r.broadcast(r.snapshotUpdateFlags(nil, false, false, false, false, false))
 }
 
+// SetChat replaces the live chat metadata used for future snapshots.
+func (r *Chat) SetChat(chat domain.Chat) {
+	r.mu.Lock()
+	r.chat = chat
+	if r.state != nil {
+		r.state.SetChat(chat)
+	}
+	r.mu.Unlock()
+	r.broadcast(r.snapshotUpdateFlags(nil, false, false, false, false, false))
+}
+
 func (r *Chat) Subscribe() (<-chan Update, func()) {
 	ch := make(chan Update, 64)
 	r.subsMu.Lock()

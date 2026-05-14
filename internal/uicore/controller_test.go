@@ -222,6 +222,36 @@ func TestControllerSetPermissionProfileUpdatesActiveChat(t *testing.T) {
 	}
 }
 
+func TestControllerSetPermissionProfileSurvivesRuntimeUpdate(t *testing.T) {
+	ctrl, _ := newTestController(t)
+	if err := ctrl.SetPermissionProfile(context.Background(), "write-ask"); err != nil {
+		t.Fatalf("set permission profile: %v", err)
+	}
+	rt := ctrl.currentRuntime()
+	if rt == nil {
+		t.Fatal("expected runtime")
+	}
+	events, unsub := ctrl.Subscribe()
+	defer unsub()
+	rt.SetSession(ctrl.State().Session)
+
+	deadline := time.After(time.Second)
+	for {
+		select {
+		case event := <-events:
+			if event.Type != "snapshot" && event.Type != "chat_update" {
+				continue
+			}
+			if got := ctrl.State().Permissions.Active; got != "write-ask" {
+				t.Fatalf("expected runtime update to preserve active permission profile, got %q", got)
+			}
+			return
+		case <-deadline:
+			t.Fatalf("expected runtime update to preserve active permission profile, got %q", ctrl.State().Permissions.Active)
+		}
+	}
+}
+
 func TestControllerSetPermissionProfileRejectsUnknownProfile(t *testing.T) {
 	ctrl, _ := newTestController(t)
 	if err := ctrl.SetPermissionProfile(context.Background(), "nope"); err == nil {

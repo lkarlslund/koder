@@ -881,6 +881,7 @@ func (c *Controller) SetPermissionProfile(ctx context.Context, profile string) e
 	c.mu.Lock()
 	session := c.session
 	chatRecord := c.chat
+	rt := c.runtime
 	c.mu.Unlock()
 	if chatRecord.ID != 0 {
 		chatRecord.PermissionProfile = profile
@@ -895,6 +896,9 @@ func (c *Controller) SetPermissionProfile(ctx context.Context, profile string) e
 			}
 		}
 		c.mu.Unlock()
+		if rt != nil {
+			rt.SetChat(chatRecord)
+		}
 	} else if session.ID != 0 {
 		if err := c.store.SetSessionPermissionProfile(ctx, session.ID, profile); err != nil {
 			return err
@@ -908,6 +912,9 @@ func (c *Controller) SetPermissionProfile(ctx context.Context, profile string) e
 			}
 		}
 		c.mu.Unlock()
+		if rt != nil {
+			rt.SetSession(session)
+		}
 	}
 	c.broadcast("snapshot", c.State())
 	return nil
