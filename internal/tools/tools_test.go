@@ -27,6 +27,20 @@ func (f *fakeMCPExecutor) ExecuteTool(_ context.Context, serverID, toolName stri
 	return f.result, nil
 }
 
+func TestToolCallNoArgsUsesEmptyObjectArguments(t *testing.T) {
+	call := tools.ToolCall(tools.Request{
+		Tool:       domain.ToolKindMilestoneList,
+		ToolCallID: "call_1",
+	})
+
+	if call.Function.Name != string(domain.ToolKindMilestoneList) {
+		t.Fatalf("expected function name %q, got %q", domain.ToolKindMilestoneList, call.Function.Name)
+	}
+	if call.Function.Arguments != "{}" {
+		t.Fatalf("expected empty object arguments, got %q", call.Function.Arguments)
+	}
+}
+
 func TestReadAndPatch(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "file.txt")

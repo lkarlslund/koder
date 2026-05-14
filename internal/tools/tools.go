@@ -87,6 +87,9 @@ func (r Request) Meta() map[string]string {
 }
 
 func (r Request) ArgumentsJSON() string {
+	if r.Args == nil {
+		return "{}"
+	}
 	data, err := json.Marshal(r.Args)
 	if err != nil {
 		return "{}"
