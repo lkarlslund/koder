@@ -288,22 +288,17 @@ func (b *pebbleBackend) CreateChat(ctx context.Context, sessionID int64, title s
 	if err != nil {
 		return domain.Chat{}, err
 	}
-	if _, err := b.readSession(sessionID); err != nil {
+	session, err := b.readSession(sessionID)
+	if err != nil {
 		return domain.Chat{}, err
 	}
-	parentProfile := ""
 	if parentChatID != nil && *parentChatID > 0 {
 		parent, err := b.readChat(*parentChatID)
 		if err != nil {
 			return domain.Chat{}, err
 		}
-		parentProfile = strings.TrimSpace(parent.PermissionProfile)
-		if parentProfile == "" {
-			session, err := b.readSession(sessionID)
-			if err != nil {
-				return domain.Chat{}, err
-			}
-			parentProfile = strings.TrimSpace(session.PermissionProfile)
+		if parent.SessionID != sessionID {
+			return domain.Chat{}, fmt.Errorf("parent chat %d belongs to session %d, not %d", parent.ID, parent.SessionID, sessionID)
 		}
 	}
 	now := time.Now().UTC()
@@ -313,8 +308,8 @@ func (b *pebbleBackend) CreateChat(ctx context.Context, sessionID int64, title s
 		ParentChatID:      parentChatID,
 		Title:             strings.TrimSpace(title),
 		WorkflowRole:      role,
-		PermissionProfile: parentProfile,
-		ToolStates:        map[domain.ToolKind]bool{},
+		PermissionProfile: strings.TrimSpace(session.PermissionProfile),
+		ToolStates:        cloneToolStates(session.ToolStates),
 		CreatedAt:         now,
 		UpdatedAt:         now,
 	}

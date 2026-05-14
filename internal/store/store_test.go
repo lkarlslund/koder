@@ -400,7 +400,7 @@ func TestUpdateSessionWorkspacePersistsCWD(t *testing.T) {
 	}
 }
 
-func TestCreateChatInheritsParentPermissionProfile(t *testing.T) {
+func TestCreateChatInheritsSessionPermissions(t *testing.T) {
 	for _, backend := range []string{BackendPebble, BackendJSONFS} {
 		t.Run(backend, func(t *testing.T) {
 			st := openTestStore(t, backend)
@@ -412,6 +412,12 @@ func TestCreateChatInheritsParentPermissionProfile(t *testing.T) {
 			if err := st.SetSessionPermissionProfile(context.Background(), session.ID, "readonly"); err != nil {
 				t.Fatal(err)
 			}
+			if err := st.SetSessionToolStates(context.Background(), session.ID, map[domain.ToolKind]bool{
+				domain.ToolKindRead: true,
+				domain.ToolKindBash: false,
+			}); err != nil {
+				t.Fatal(err)
+			}
 			mainChat, err := st.DefaultChat(context.Background(), session.ID)
 			if err != nil {
 				t.Fatal(err)
@@ -421,10 +427,17 @@ func TestCreateChatInheritsParentPermissionProfile(t *testing.T) {
 				t.Fatal(err)
 			}
 			if child.PermissionProfile != "readonly" {
-				t.Fatalf("expected child chat to inherit session fallback profile, got %q", child.PermissionProfile)
+				t.Fatalf("expected child chat to inherit session profile, got %q", child.PermissionProfile)
+			}
+			if enabled, ok := child.ToolStates[domain.ToolKindBash]; !ok || enabled {
+				t.Fatalf("expected child chat to inherit disabled bash tool state, got %#v", child.ToolStates)
 			}
 
 			mainChat.PermissionProfile = "full-access"
+			mainChat.ToolStates = map[domain.ToolKind]bool{
+				domain.ToolKindRead: false,
+				domain.ToolKindBash: true,
+			}
 			if err := st.UpdateChat(context.Background(), mainChat); err != nil {
 				t.Fatal(err)
 			}
@@ -432,8 +445,11 @@ func TestCreateChatInheritsParentPermissionProfile(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if secondChild.PermissionProfile != "full-access" {
-				t.Fatalf("expected child chat to inherit parent chat profile, got %q", secondChild.PermissionProfile)
+			if secondChild.PermissionProfile != "readonly" {
+				t.Fatalf("expected child chat to ignore parent profile and inherit session profile, got %q", secondChild.PermissionProfile)
+			}
+			if enabled, ok := secondChild.ToolStates[domain.ToolKindBash]; !ok || enabled {
+				t.Fatalf("expected child chat to ignore parent tool states and inherit session tool states, got %#v", secondChild.ToolStates)
 			}
 		})
 	}
