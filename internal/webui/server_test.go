@@ -304,6 +304,9 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `}, 500);`) || !strings.Contains(fullPage, `Math.min(1000`) || !strings.Contains(fullPage, `reconnectDelay: 100`) {
 		t.Fatalf("expected reconnect timing to stay below one second")
 	}
+	if !strings.Contains(fullPage, `performance.mark('koder-ready')`) {
+		t.Fatalf("expected browser readiness to be marked after hello hydration")
+	}
 	if !strings.Contains(fullPage, `window.addEventListener('online'`) || !strings.Contains(fullPage, `window.addEventListener('focus'`) || !strings.Contains(fullPage, `visibilitychange`) {
 		t.Fatalf("expected browser to reconnect immediately when page becomes active or network returns")
 	}

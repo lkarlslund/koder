@@ -328,6 +328,10 @@
             return;
           }
           this.applyState((hello && hello.state) || hello || {}, {scrollToBottom: true});
+          if (window.performance && performance.mark) {
+            performance.clearMarks('koder-ready');
+            performance.mark('koder-ready');
+          }
         },
         onMessage(msg) {
           if (msg.type) { this.onPush(msg); return; }
