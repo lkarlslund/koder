@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/lkarlslund/koder/internal/domain"
-	"github.com/lkarlslund/koder/internal/store"
 )
 
 func TestChatStateMergeTimelineLoadedPreservesRecordIdentity(t *testing.T) {
@@ -16,7 +15,7 @@ func TestChatStateMergeTimelineLoadedPreservesRecordIdentity(t *testing.T) {
 		Content:   domain.UserMessage{Text: "one"},
 		CreatedAt: time.Now().UTC(),
 	}}
-	state := NewTimelineState(domain.Chat{ID: 7}, initial, []store.Approval{{ID: 50}})
+	state := NewTimelineState(domain.Chat{ID: 7}, initial, nil)
 	record := state.Timeline()[0]
 
 	updated := []domain.TimelineItem{{
@@ -27,7 +26,7 @@ func TestChatStateMergeTimelineLoadedPreservesRecordIdentity(t *testing.T) {
 		CreatedAt: initial[0].CreatedAt,
 		UpdatedAt: time.Now().UTC(),
 	}}
-	state.MergeTimelineLoaded(domain.Chat{ID: 7, Title: "updated"}, updated, []store.Approval{{ID: 51}})
+	state.MergeTimelineLoaded(domain.Chat{ID: 7, Title: "updated"}, updated, nil)
 
 	if got := state.Timeline()[0]; got != record {
 		t.Fatalf("timeline record pointer changed")
@@ -35,7 +34,7 @@ func TestChatStateMergeTimelineLoadedPreservesRecordIdentity(t *testing.T) {
 	if got := state.Timeline()[0].Item.Content.(domain.UserMessage).Text; got != "updated" {
 		t.Fatalf("timeline text = %q", got)
 	}
-	if approvals := state.Approvals(); len(approvals) != 1 || approvals[0].ID != 51 {
+	if approvals := state.Approvals(); len(approvals) != 0 {
 		t.Fatalf("approvals = %+v", approvals)
 	}
 	if got := state.Chat().Title; got != "updated" {

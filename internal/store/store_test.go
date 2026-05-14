@@ -306,10 +306,6 @@ func TestApprovalAndTask(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			approval, err := st.CreateApproval(context.Background(), session.ID, domain.ToolKindBash, "echo hi")
-			if err != nil {
-				t.Fatal(err)
-			}
 			if err := st.SetSessionPermissionProfile(context.Background(), session.ID, "readonly"); err != nil {
 				t.Fatal(err)
 			}
@@ -317,9 +313,6 @@ func TestApprovalAndTask(t *testing.T) {
 				domain.ToolKindRead: true,
 				domain.ToolKindBash: false,
 			}); err != nil {
-				t.Fatal(err)
-			}
-			if err := st.UpdateApproval(context.Background(), approval.ID, domain.ApprovalStatusApproved); err != nil {
 				t.Fatal(err)
 			}
 			task, err := st.AddTask(context.Background(), session.ID, "ship v1", domain.TaskStatusPending)
@@ -492,10 +485,6 @@ func TestDeleteChatRemovesChatTimelineAndApprovals(t *testing.T) {
 			if _, err := st.AppendTimeline(context.Background(), chat.ID, domain.Notice{Text: "hello"}); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := st.CreateChatApproval(context.Background(), chat.ID, domain.ToolKindBash, "echo hi"); err != nil {
-				t.Fatal(err)
-			}
-
 			if err := st.DeleteChat(context.Background(), chat.ID); err != nil {
 				t.Fatalf("delete chat: %v", err)
 			}
@@ -529,7 +518,7 @@ func TestDeleteChatRemovesChatTimelineAndApprovals(t *testing.T) {
 	}
 }
 
-func TestAttachToolResultUpdatesApprovalStatus(t *testing.T) {
+func TestToolApprovalStateIsDerivedFromTimeline(t *testing.T) {
 	for _, backend := range []string{BackendPebble, BackendJSONFS} {
 		t.Run(backend, func(t *testing.T) {
 			st := openTestStore(t, backend)
@@ -551,11 +540,16 @@ func TestAttachToolResultUpdatesApprovalStatus(t *testing.T) {
 				t.Fatal(err)
 			}
 			if _, err := st.AttachToolApproval(context.Background(), chat.ID, "call_1", domain.ApprovalRequest{
-				ID:     42,
-				Status: domain.ApprovalStatusPending,
-				Body:   "run echo hi",
+				Body: "run echo hi",
 			}); err != nil {
 				t.Fatal(err)
+			}
+			pending, err := st.PendingApprovalsForChat(context.Background(), chat.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(pending) != 1 || pending[0].ToolCallID != "call_1" {
+				t.Fatalf("pending approvals = %#v", pending)
 			}
 
 			item, err := st.AttachToolResult(context.Background(), chat.ID, "call_1", domain.ToolResult{
@@ -577,8 +571,15 @@ func TestAttachToolResultUpdatesApprovalStatus(t *testing.T) {
 			if call.Status != domain.ToolStatusDone {
 				t.Fatalf("tool status = %q", call.Status)
 			}
-			if call.Approval == nil || call.Approval.Status != domain.ApprovalStatusApproved {
-				t.Fatalf("approval = %#v, want approved", call.Approval)
+			if call.Approval != nil || call.ApprovalID != "" {
+				t.Fatalf("approval state = %#v/%q, want cleared", call.Approval, call.ApprovalID)
+			}
+			pending, err = st.PendingApprovalsForChat(context.Background(), chat.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(pending) != 0 {
+				t.Fatalf("pending approvals after result = %#v", pending)
 			}
 		})
 	}

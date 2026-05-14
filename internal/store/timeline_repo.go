@@ -38,13 +38,12 @@ func (s *Store) AttachToolResult(ctx context.Context, chatID int64, toolCallID s
 	return s.updateToolCall(ctx, chatID, toolCallID, func(call *domain.ToolCall) error {
 		call.Result = &result
 		call.Error = nil
-		call.Status = domain.ToolStatusDone
-		if call.Approval != nil {
-			if result.Status == domain.ToolResultStatusDenied {
-				call.Approval.Status = domain.ApprovalStatusDenied
-			} else {
-				call.Approval.Status = domain.ApprovalStatusApproved
-			}
+		call.Approval = nil
+		call.ApprovalID = ""
+		if result.Status == domain.ToolResultStatusDenied {
+			call.Status = domain.ToolStatusDenied
+		} else {
+			call.Status = domain.ToolStatusDone
 		}
 		if call.CompletedAt.IsZero() {
 			call.CompletedAt = time.Now().UTC()
@@ -58,6 +57,8 @@ func (s *Store) AttachToolError(ctx context.Context, chatID int64, toolCallID st
 	return s.updateToolCall(ctx, chatID, toolCallID, func(call *domain.ToolCall) error {
 		call.Error = &toolErr
 		call.Result = nil
+		call.Approval = nil
+		call.ApprovalID = ""
 		call.Status = domain.ToolStatusErrored
 		if call.CompletedAt.IsZero() {
 			call.CompletedAt = time.Now().UTC()
@@ -69,8 +70,22 @@ func (s *Store) AttachToolError(ctx context.Context, chatID int64, toolCallID st
 // AttachToolApproval stores an approval request on the assistant item that requested it.
 func (s *Store) AttachToolApproval(ctx context.Context, chatID int64, toolCallID string, approval domain.ApprovalRequest) (domain.TimelineItem, error) {
 	return s.updateToolCall(ctx, chatID, toolCallID, func(call *domain.ToolCall) error {
-		call.Approval = &approval
-		call.Status = domain.ToolStatusPending
+		call.Approval = nil
+		call.ApprovalID = strings.TrimSpace(toolCallID)
+		call.Status = domain.ToolStatusAwaitingApproval
+		return nil
+	})
+}
+
+// MarkToolRunning marks a requested tool call as executing.
+func (s *Store) MarkToolRunning(ctx context.Context, chatID int64, toolCallID string) (domain.TimelineItem, error) {
+	return s.updateToolCall(ctx, chatID, toolCallID, func(call *domain.ToolCall) error {
+		call.Status = domain.ToolStatusRunning
+		call.Approval = nil
+		call.ApprovalID = ""
+		if call.StartedAt.IsZero() {
+			call.StartedAt = time.Now().UTC()
+		}
 		return nil
 	})
 }

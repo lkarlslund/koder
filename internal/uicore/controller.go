@@ -323,23 +323,23 @@ func (c *Controller) Compact() error {
 	return rt.Compact()
 }
 
-// Approve approves a pending approval in the active chat.
-func (c *Controller) Approve(id int64) error {
+// Approve approves a pending tool call in the active chat.
+func (c *Controller) Approve(toolCallID string) error {
 	rt := c.currentRuntime()
 	if rt == nil {
 		return fmt.Errorf("no active chat")
 	}
-	rt.Approve(id)
+	rt.ApproveTool(toolCallID)
 	return nil
 }
 
-// Deny denies a pending approval in the active chat.
-func (c *Controller) Deny(id int64) error {
+// Deny denies a pending tool call in the active chat.
+func (c *Controller) Deny(toolCallID string) error {
 	rt := c.currentRuntime()
 	if rt == nil {
 		return fmt.Errorf("no active chat")
 	}
-	rt.Deny(id)
+	rt.DenyTool(toolCallID)
 	return nil
 }
 

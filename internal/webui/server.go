@@ -302,20 +302,28 @@ func (s *Server) handleRPC(ctx context.Context, method string, params json.RawMe
 		return s.controller.State(), nil
 	case "approve":
 		var in struct {
-			ID int64 `json:"id"`
+			ToolCallID string `json:"tool_call_id"`
+			ID         int64  `json:"id"`
 		}
 		if err := decodeParams(params, &in); err != nil {
 			return nil, err
 		}
-		return map[string]bool{"accepted": true}, s.controller.Approve(in.ID)
+		if strings.TrimSpace(in.ToolCallID) == "" && in.ID != 0 {
+			in.ToolCallID = fmt.Sprint(in.ID)
+		}
+		return map[string]bool{"accepted": true}, s.controller.Approve(in.ToolCallID)
 	case "deny":
 		var in struct {
-			ID int64 `json:"id"`
+			ToolCallID string `json:"tool_call_id"`
+			ID         int64  `json:"id"`
 		}
 		if err := decodeParams(params, &in); err != nil {
 			return nil, err
 		}
-		return map[string]bool{"accepted": true}, s.controller.Deny(in.ID)
+		if strings.TrimSpace(in.ToolCallID) == "" && in.ID != 0 {
+			in.ToolCallID = fmt.Sprint(in.ID)
+		}
+		return map[string]bool{"accepted": true}, s.controller.Deny(in.ToolCallID)
 	case "composer_completions":
 		var in struct {
 			Text   string `json:"text"`

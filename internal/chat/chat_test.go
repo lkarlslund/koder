@@ -44,19 +44,19 @@ func (f *cancelAwareRunner) RunContinueInChat(ctx context.Context, _ domain.Sess
 	return f.events, nil
 }
 
-func (f *cancelAwareRunner) ApproveInChat(context.Context, int64, int64, int64) (<-chan domain.Event, error) {
+func (f *cancelAwareRunner) ApproveToolInChat(context.Context, int64, int64, string) (<-chan domain.Event, error) {
 	ch := make(chan domain.Event)
 	close(ch)
 	return ch, nil
 }
 
-func (f *cancelAwareRunner) ApproveInChatWithRule(context.Context, int64, int64, int64, domain.PermissionOverride) (<-chan domain.Event, error) {
+func (f *cancelAwareRunner) ApproveToolInChatWithRule(context.Context, int64, int64, string, domain.PermissionOverride) (<-chan domain.Event, error) {
 	ch := make(chan domain.Event)
 	close(ch)
 	return ch, nil
 }
 
-func (f *cancelAwareRunner) DenyInChat(context.Context, int64, int64, int64) (<-chan domain.Event, error) {
+func (f *cancelAwareRunner) DenyToolInChat(context.Context, int64, int64, string) (<-chan domain.Event, error) {
 	ch := make(chan domain.Event)
 	close(ch)
 	return ch, nil
@@ -93,7 +93,7 @@ func (f *runtimeFakeRunner) RunContinueInChat(_ context.Context, _ domain.Sessio
 	return evt, nil
 }
 
-func (f *runtimeFakeRunner) ApproveInChat(_ context.Context, _ int64, _ int64, _ int64) (<-chan domain.Event, error) {
+func (f *runtimeFakeRunner) ApproveToolInChat(_ context.Context, _ int64, _ int64, _ string) (<-chan domain.Event, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.approveCalls++
@@ -107,11 +107,11 @@ func (f *runtimeFakeRunner) ApproveInChat(_ context.Context, _ int64, _ int64, _
 	return evt, nil
 }
 
-func (f *runtimeFakeRunner) ApproveInChatWithRule(_ context.Context, _ int64, _ int64, _ int64, _ domain.PermissionOverride) (<-chan domain.Event, error) {
-	return f.ApproveInChat(context.Background(), 0, 0, 0)
+func (f *runtimeFakeRunner) ApproveToolInChatWithRule(_ context.Context, _ int64, _ int64, toolCallID string, _ domain.PermissionOverride) (<-chan domain.Event, error) {
+	return f.ApproveToolInChat(context.Background(), 0, 0, toolCallID)
 }
 
-func (f *runtimeFakeRunner) DenyInChat(_ context.Context, _ int64, _ int64, _ int64) (<-chan domain.Event, error) {
+func (f *runtimeFakeRunner) DenyToolInChat(_ context.Context, _ int64, _ int64, _ string) (<-chan domain.Event, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.denyCalls++
@@ -512,8 +512,12 @@ func TestRuntimeApproveStartsApprovalStream(t *testing.T) {
 func TestLoadWithPendingApprovalStartsWaitingForApproval(t *testing.T) {
 	st := openTestStore(t)
 	session, chatRecord, _ := createSessionWithPlan(t, st)
-	approval, err := st.CreateChatApproval(context.Background(), chatRecord.ID, domain.ToolKindBash, "echo hi")
-	if err != nil {
+	if _, err := st.AppendAssistantToolCalls(context.Background(), chatRecord.ID, []domain.ToolCall{{
+		ToolCallID: "call_approval",
+		Tool:       domain.ToolKindBash,
+		Args:       map[string]string{"command": "echo hi"},
+		Status:     domain.ToolStatusAwaitingApproval,
+	}}, "", domain.Usage{}); err != nil {
 		t.Fatal(err)
 	}
 	runner := &pendingToolFakeRunner{}
@@ -533,8 +537,8 @@ func TestLoadWithPendingApprovalStartsWaitingForApproval(t *testing.T) {
 	if got := len(snapshot.Approvals); got != 1 {
 		t.Fatalf("approvals = %d, want 1", got)
 	}
-	if snapshot.Approvals[0].ID != approval.ID {
-		t.Fatalf("approval ID = %d, want %d", snapshot.Approvals[0].ID, approval.ID)
+	if snapshot.Approvals[0].ToolCallID != "call_approval" {
+		t.Fatalf("approval tool call = %q", snapshot.Approvals[0].ToolCallID)
 	}
 	time.Sleep(20 * time.Millisecond)
 	if got := runner.resumeCallCount(); got != 0 {

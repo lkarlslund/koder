@@ -69,7 +69,8 @@ func (s *ChatState) MergeTimelineLoaded(chat domain.Chat, timeline []domain.Time
 	}
 	s.timeline = nextTimeline
 	s.byItem = nextByItem
-	s.approvals = slices.Clone(approvals)
+	_ = approvals
+	s.approvals = deriveApprovals(chat, timeline)
 }
 
 func (s *ChatState) Chat() domain.Chat {
@@ -402,6 +403,42 @@ func (s *ChatState) Approvals() []store.Approval {
 		return nil
 	}
 	return slices.Clone(s.approvals)
+}
+
+func deriveApprovals(chat domain.Chat, timeline []domain.TimelineItem) []store.Approval {
+	var approvals []store.Approval
+	for _, item := range timeline {
+		assistant, ok := item.Content.(domain.AssistantMessage)
+		if !ok {
+			continue
+		}
+		for _, call := range assistant.Tools {
+			if call.Status != domain.ToolStatusAwaitingApproval {
+				continue
+			}
+			approvals = append(approvals, store.Approval{
+				ID:         store.SyntheticApprovalID(string(call.ToolCallID)),
+				SessionID:  chat.SessionID,
+				ChatID:     chat.ID,
+				Tool:       call.Tool,
+				ToolCallID: string(call.ToolCallID),
+				Command:    approvalCommand(call),
+				Status:     domain.ApprovalStatusPending,
+				CreatedAt:  item.UpdatedAt,
+			})
+		}
+	}
+	return approvals
+}
+
+func approvalCommand(call domain.ToolCall) string {
+	if command := strings.TrimSpace(call.Args["command"]); command != "" {
+		return command
+	}
+	if path := strings.TrimSpace(call.Args["path"]); path != "" {
+		return path
+	}
+	return strings.TrimSpace(string(call.Tool))
 }
 
 // ReplaceToolRuns refreshes tool-run records while preserving identity by tool call, approval, or run ID.

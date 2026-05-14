@@ -115,6 +115,46 @@ func attachToolResultTimelineItem(t *testing.T, st *store.Store, chatID int64, r
 	return item
 }
 
+func waitForToolStatus(t *testing.T, st *store.Store, chatID int64, toolCallID string, want domain.ToolStatus) bool {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if currentToolStatus(t, st, chatID, toolCallID) == want {
+			return true
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	return false
+}
+
+func assertToolStatus(t *testing.T, st *store.Store, chatID int64, toolCallID string, want domain.ToolStatus) {
+	t.Helper()
+	got := currentToolStatus(t, st, chatID, toolCallID)
+	if got != want {
+		t.Fatalf("tool %s status = %s, want %s", toolCallID, got, want)
+	}
+}
+
+func currentToolStatus(t *testing.T, st *store.Store, chatID int64, toolCallID string) domain.ToolStatus {
+	t.Helper()
+	items, err := st.TimelineForChat(context.Background(), chatID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range items {
+		assistant, ok := item.Content.(domain.AssistantMessage)
+		if !ok {
+			continue
+		}
+		call := assistant.ToolByID(domain.ToolCallID(toolCallID))
+		if call != nil {
+			return call.Status
+		}
+	}
+	t.Fatalf("tool %s not found in chat %d", toolCallID, chatID)
+	return ""
+}
+
 func appendCompactionTimelineItem(t *testing.T, st *store.Store, chatID int64, summary string, firstKeptItemID int64) domain.TimelineItem {
 	t.Helper()
 	item, err := st.AppendTimeline(context.Background(), chatID, domain.Compaction{
@@ -1507,12 +1547,19 @@ func TestPermissionProfileChangeReevaluatesPendingApproval(t *testing.T) {
 		t.Fatalf("expected permission profile %q, got %q", permission.ProfileFullAccess, updated.PermissionProfile)
 	}
 
-	approval, err := st.GetApproval(context.Background(), approvalID)
+	chats, err := st.ListChats(context.Background(), session.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if approval.Status != domain.ApprovalStatusApproved {
-		t.Fatalf("expected approval to be approved, got %s", approval.Status)
+	if len(chats) != 1 {
+		t.Fatalf("expected one chat, got %d", len(chats))
+	}
+	pending, err := st.PendingApprovalsForChat(context.Background(), chats[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pending) != 0 {
+		t.Fatalf("expected no pending approvals after re-evaluation, got %#v", pending)
 	}
 	if len(requests) < 2 {
 		t.Fatalf("expected approval re-evaluation to continue the model, got %d requests", len(requests))
@@ -1812,6 +1859,131 @@ func TestResumePendingToolCallsExecutesAndContinues(t *testing.T) {
 	}
 }
 
+func TestRunPromptAllowedToolTransitionsPendingToRunning(t *testing.T) {
+	t.Parallel()
+
+	var requests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		requests++
+		switch requests {
+		case 1:
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"tool_calls":[{"id":"call_1","type":"function","function":{"name":"bash","arguments":"{\"command\":\"sleep 0.3; printf hi\"}"}}]}}],"usage":{"total_tokens":1}}`))
+		default:
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"done"}}],"usage":{"total_tokens":1}}`))
+		}
+	}))
+	defer server.Close()
+
+	cfg := testConfig(t)
+	cfg.Providers = map[string]config.Provider{"test": {BaseURL: server.URL + "/v1", Timeout: time.Second}}
+	cfg.DefaultProvider = "test"
+	cfg.DefaultModel = "test-model"
+	cfg.Permissions.Profile = permission.ProfileFullAccess
+
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	workdir := t.TempDir()
+	engine := New(cfg, st, tools.NewRegistry(workdir), nil, workdir)
+	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetSessionPermissionProfile(context.Background(), session.ID, permission.ProfileFullAccess); err != nil {
+		t.Fatal(err)
+	}
+
+	events, err := engine.RunPrompt(context.Background(), session, "run slow command")
+	if err != nil {
+		t.Fatal(err)
+	}
+	chat := defaultChatForSession(t, st, session.ID)
+	var sawRunning bool
+	var sawDone bool
+	for evt := range events {
+		if evt.Kind == domain.EventKindToolStart {
+			sawRunning = waitForToolStatus(t, st, chat.ID, "call_1", domain.ToolStatusRunning)
+		}
+		if evt.Kind == domain.EventKindToolResult && strings.Contains(evt.Text, "hi") {
+			sawDone = true
+		}
+	}
+	if !sawRunning {
+		t.Fatal("expected allowed tool to transition to running before completion")
+	}
+	if !sawDone {
+		t.Fatal("expected allowed tool result")
+	}
+	assertToolStatus(t, st, chat.ID, "call_1", domain.ToolStatusDone)
+}
+
+func TestRunPromptDeniedToolTransitionsPendingToDenied(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"tool_calls":[{"id":"call_1","type":"function","function":{"name":"bash","arguments":"{\"command\":\"printf hi\"}"}}]}}],"usage":{"total_tokens":1}}`))
+	}))
+	defer server.Close()
+
+	cfg := testConfig(t)
+	cfg.Providers = map[string]config.Provider{"test": {BaseURL: server.URL + "/v1", Timeout: time.Second}}
+	cfg.DefaultProvider = "test"
+	cfg.DefaultModel = "test-model"
+	cfg.Permissions.Profiles["default"] = config.PermissionProfile{
+		Rules: []config.PermissionRule{{Tool: domain.ToolKindBash, Pattern: "*", Action: domain.PermissionModeDeny}},
+	}
+
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	workdir := t.TempDir()
+	engine := New(cfg, st, tools.NewRegistry(workdir), nil, workdir)
+	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetSessionPermissionProfile(context.Background(), session.ID, "default"); err != nil {
+		t.Fatal(err)
+	}
+
+	events, err := engine.RunPrompt(context.Background(), session, "run command")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sawDenied bool
+	for evt := range events {
+		if evt.Kind == domain.EventKindToolResult && strings.Contains(evt.Text, "denied by policy") {
+			sawDenied = true
+		}
+	}
+	if !sawDenied {
+		t.Fatal("expected denied tool result")
+	}
+	chat := defaultChatForSession(t, st, session.ID)
+	assertToolStatus(t, st, chat.ID, "call_1", domain.ToolStatusDenied)
+	pending, err := st.PendingApprovalsForChat(context.Background(), chat.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pending) != 0 {
+		t.Fatalf("expected no derived pending approvals for denied tool, got %#v", pending)
+	}
+}
+
 func TestPendingExecutableToolCallsIgnoresStalePendingBeforeLaterUser(t *testing.T) {
 	t.Parallel()
 
@@ -1903,15 +2075,17 @@ func TestExecutePreparedToolCallDoesNotPersistCanceledToolFailure(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
+	req := tools.Request{
+		Tool:       domain.ToolKindBash,
+		ToolCallID: "call_1",
+		Args:       map[string]string{"command": "sleep 1"},
+	}
+	appendAssistantToolTimelineItem(t, st, chat.ID, req, "")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() {
-		_, runErr := engine.executePreparedToolCall(ctx, chat.ID, session.ID, tools.Request{
-			Tool:       domain.ToolKindBash,
-			ToolCallID: "call_1",
-			Args:       map[string]string{"command": "sleep 1"},
-		})
+		_, runErr := engine.executePreparedToolCall(ctx, chat.ID, session.ID, req)
 		done <- runErr
 	}()
 	time.Sleep(100 * time.Millisecond)
@@ -2153,7 +2327,7 @@ func TestRunPromptMessageDoneCarriesPersistedAssistantRecord(t *testing.T) {
 	}
 }
 
-func TestRunPromptApprovalAskCarriesPersistedApprovalRecord(t *testing.T) {
+func TestRunPromptApprovalAskMarksToolAwaitingApproval(t *testing.T) {
 	t.Parallel()
 
 	var requests int
@@ -2210,11 +2384,24 @@ func TestRunPromptApprovalAskCarriesPersistedApprovalRecord(t *testing.T) {
 		}
 	}
 	if approval.Item.ID == 0 {
-		t.Fatal("expected persisted approval item on approval ask")
+		t.Fatal("expected persisted assistant item on approval ask")
 	}
 	assistant, ok := approval.Item.Content.(domain.AssistantMessage)
-	if !ok || len(assistant.Tools) != 1 || assistant.Tools[0].Approval == nil {
-		t.Fatalf("expected approval request attached to tool child, got %#v", approval.Item)
+	if !ok || len(assistant.Tools) != 1 {
+		t.Fatalf("expected assistant tool child, got %#v", approval.Item)
+	}
+	tool := assistant.Tools[0]
+	if tool.Status != domain.ToolStatusAwaitingApproval {
+		t.Fatalf("expected tool awaiting approval, got %s", tool.Status)
+	}
+	if tool.Approval != nil {
+		t.Fatalf("expected no nested approval request, got %#v", tool.Approval)
+	}
+	if tool.ApprovalID == "" {
+		t.Fatal("expected synthetic approval id on tool child")
+	}
+	if approval.Meta["tool_call_id"] != "call_1" {
+		t.Fatalf("expected approval event tool_call_id call_1, got %q", approval.Meta["tool_call_id"])
 	}
 }
 

@@ -98,6 +98,20 @@
       }).join('');
       return toolResultHeader(title) + '<div>' + (rows || '<div class="tool-result-body text-secondary">No diff</div>') + '</div>';
     }
+    function renderShowImageBlock(data, fallbackText) {
+      const path = firstValue(data, ['path', 'Path']);
+      const sourcePath = firstValue(data, ['source_path', 'SourcePath']) || path;
+      const mime = firstValue(data, ['mime_type', 'MIMEType']);
+      const summary = firstValue(data, ['summary', 'Summary']) || fallbackText || ('Showed image ' + path);
+      if (!sourcePath) return renderCompactBlock('Showed image', summary);
+      const src = '/api/show-image?path=' + encodeURIComponent(sourcePath);
+      const meta = [path, mime].filter(Boolean).join(' · ');
+      return toolResultHeader(summary || 'Showed image') +
+        '<div class="tool-result-body">' +
+          '<img class="img-fluid rounded border bg-body-tertiary" alt="' + escapeHTML(path || 'shown image') + '" src="' + escapeHTML(src) + '">' +
+          (meta ? '<div class="small text-secondary mt-2">' + escapeHTML(meta) + '</div>' : '') +
+        '</div>';
+    }
     function toolTitleText(tool) {
       const kind = String((tool && tool.tool) || '');
       const data = toolData(tool);
@@ -121,6 +135,7 @@
         case 'glob': return 'Glob ' + (firstValue(data, ['pattern', 'Pattern']) || firstValue(args, ['pattern']));
         case 'webfetch': return 'Fetch ' + (firstValue(data, ['url', 'URL']) || firstValue(args, ['url']));
         case 'websearch': return 'Search web ' + (firstValue(data, ['query', 'Query']) || firstValue(args, ['query']));
+        case 'show_image': return path ? 'Show image ' + path : 'Show image';
         default: return kind || 'Tool';
       }
     }
@@ -189,6 +204,7 @@
       if (kind === 'view_image') {
         return renderKeyValueBlock('Viewed image', [['path', firstValue(data, ['path', 'Path'])], ['mime', firstValue(data, ['mime_type', 'MIMEType'])], ['detail', firstValue(data, ['detail', 'Detail'])]]);
       }
+      if (kind === 'show_image') return renderShowImageBlock(data, toolResultText(tool));
       return renderCompactBlock(kind || 'Tool result', toolResultText(tool));
     }
     function koderApp() {
@@ -434,22 +450,14 @@
           if (kind === 'bash' || String(kind || '').startsWith('exec_')) return 'bi-terminal';
           if (kind === 'grep' || kind === 'glob' || kind === 'websearch') return 'bi-search';
           if (kind === 'webfetch') return 'bi-globe';
-          if (kind === 'view_image') return 'bi-image';
+          if (kind === 'view_image' || kind === 'show_image') return 'bi-image';
           return 'bi-wrench-adjustable';
         },
         toolTitle(tool) { return toolTitleText(tool); },
         toolPreview(tool) { return toolPreviewText(tool); },
-        toolApproval(tool) { return tool?.approval || tool?.Approval || null; },
-        toolApprovalID(tool) {
-          const approval = this.toolApproval(tool);
-          return approval?.id || approval?.ID || 0;
-        },
+        toolCallID(tool) { return tool?.tool_call_id || tool?.ToolCallID || ''; },
         toolApprovalPending(tool) {
-          const approval = this.toolApproval(tool);
-          if (!approval) return false;
-          const status = String(approval.status || approval.Status || tool?.status || tool?.Status || '').toLowerCase();
-          const currentToolStatus = toolStatus(tool);
-          return this.toolApprovalID(tool) > 0 && (!status || status === 'pending') && (!currentToolStatus || currentToolStatus === 'pending');
+          return this.toolCallID(tool) && toolStatus(tool) === 'awaiting_approval';
         },
         toolResultHTML(tool) { return renderToolResult(tool); },
         resizeComposer() {

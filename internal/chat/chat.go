@@ -3,6 +3,7 @@ package chat
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -119,11 +120,11 @@ type dispatchQueuedCmd struct {
 type interruptCmd struct{}
 type resumePendingToolsCmd struct{}
 type approveCmd struct {
-	approvalID int64
+	toolCallID string
 	rule       *domain.PermissionOverride
 }
 type denyCmd struct {
-	approvalID int64
+	toolCallID string
 }
 type closeCmd struct{}
 type streamEventCmd struct {
@@ -136,9 +137,9 @@ type continueRunner interface {
 }
 
 type approvalRunner interface {
-	ApproveInChat(context.Context, int64, int64, int64) (<-chan domain.Event, error)
-	ApproveInChatWithRule(context.Context, int64, int64, int64, domain.PermissionOverride) (<-chan domain.Event, error)
-	DenyInChat(context.Context, int64, int64, int64) (<-chan domain.Event, error)
+	ApproveToolInChat(context.Context, int64, int64, string) (<-chan domain.Event, error)
+	ApproveToolInChatWithRule(context.Context, int64, int64, string, domain.PermissionOverride) (<-chan domain.Event, error)
+	DenyToolInChat(context.Context, int64, int64, string) (<-chan domain.Event, error)
 }
 
 type compactRunner interface {
@@ -232,7 +233,6 @@ func (r *Chat) Persist(ctx context.Context, st *store.Store) error {
 		return st.UpdateChat(ctx, chatRecord)
 	}
 	timeline := r.state.SnapshotTimeline()
-	approvals := r.state.Approvals()
 	r.mu.RUnlock()
 
 	persisted, err := st.TimelineForChat(ctx, chatRecord.ID)
@@ -268,16 +268,6 @@ func (r *Chat) Persist(ctx context.Context, st *store.Store) error {
 			itemRemap[oldID] = durable.ID
 		}
 		changed = true
-	}
-	for _, approval := range approvals {
-		if approval.ID <= 0 {
-			continue
-		}
-		if _, err := st.GetApproval(ctx, approval.ID); err == nil {
-			if err := st.UpdateApproval(ctx, approval.ID, approval.Status); err != nil {
-				return r.markPersistError(err)
-			}
-		}
 	}
 	chatRecord.QueuedInputs = cloneQueuedInputs(r.snapshotQueue())
 	if err := st.UpdateChat(ctx, chatRecord); err != nil {
@@ -328,15 +318,23 @@ func (r *Chat) Interrupt() {
 }
 
 func (r *Chat) Approve(approvalID int64) {
-	r.inbox <- approveCmd{approvalID: approvalID}
+	r.inbox <- approveCmd{toolCallID: fmt.Sprint(approvalID)}
+}
+
+func (r *Chat) ApproveTool(toolCallID string) {
+	r.inbox <- approveCmd{toolCallID: strings.TrimSpace(toolCallID)}
 }
 
 func (r *Chat) ApproveWithRule(approvalID int64, rule domain.PermissionOverride) {
-	r.inbox <- approveCmd{approvalID: approvalID, rule: &rule}
+	r.inbox <- approveCmd{toolCallID: fmt.Sprint(approvalID), rule: &rule}
 }
 
 func (r *Chat) Deny(approvalID int64) {
-	r.inbox <- denyCmd{approvalID: approvalID}
+	r.inbox <- denyCmd{toolCallID: fmt.Sprint(approvalID)}
+}
+
+func (r *Chat) DenyTool(toolCallID string) {
+	r.inbox <- denyCmd{toolCallID: strings.TrimSpace(toolCallID)}
 }
 
 func (r *Chat) Compact() error {
@@ -485,9 +483,9 @@ func (r *Chat) loop() {
 		case resumePendingToolsCmd:
 			r.handleResumePendingTools()
 		case approveCmd:
-			r.handleApprove(typed.approvalID, typed.rule)
+			r.handleApprove(typed.toolCallID, typed.rule)
 		case denyCmd:
-			r.handleDeny(typed.approvalID)
+			r.handleDeny(typed.toolCallID)
 		case streamEventCmd:
 			r.handleStreamEvent(typed.event)
 		case streamClosedCmd:
@@ -619,7 +617,7 @@ func (r *Chat) handleInterrupt() {
 	}
 }
 
-func (r *Chat) handleApprove(approvalID int64, rule *domain.PermissionOverride) {
+func (r *Chat) handleApprove(toolCallID string, rule *domain.PermissionOverride) {
 	runner, ok := r.engine.(approvalRunner)
 	if !ok {
 		err := fmt.Errorf("approval is not supported by runner")
@@ -640,6 +638,7 @@ func (r *Chat) handleApprove(approvalID int64, rule *domain.PermissionOverride) 
 	r.statusText = "Waiting for LLM response"
 	sessionID := r.session.ID
 	chatID := r.chat.ID
+	toolCallID = r.resolveApprovalToolCallIDLocked(toolCallID)
 	r.mu.Unlock()
 	r.broadcast(r.snapshotUpdateFlags(nil, false, false, true, false, false))
 
@@ -648,14 +647,14 @@ func (r *Chat) handleApprove(approvalID int64, rule *domain.PermissionOverride) 
 		err    error
 	)
 	if rule != nil {
-		events, err = runner.ApproveInChatWithRule(ctx, sessionID, chatID, approvalID, *rule)
+		events, err = runner.ApproveToolInChatWithRule(ctx, sessionID, chatID, toolCallID, *rule)
 	} else {
-		events, err = runner.ApproveInChat(ctx, sessionID, chatID, approvalID)
+		events, err = runner.ApproveToolInChat(ctx, sessionID, chatID, toolCallID)
 	}
 	r.handleApprovalEventStream(events, err)
 }
 
-func (r *Chat) handleDeny(approvalID int64) {
+func (r *Chat) handleDeny(toolCallID string) {
 	runner, ok := r.engine.(approvalRunner)
 	if !ok {
 		err := fmt.Errorf("approval is not supported by runner")
@@ -676,11 +675,29 @@ func (r *Chat) handleDeny(approvalID int64) {
 	r.statusText = "Waiting for LLM response"
 	sessionID := r.session.ID
 	chatID := r.chat.ID
+	toolCallID = r.resolveApprovalToolCallIDLocked(toolCallID)
 	r.mu.Unlock()
 	r.broadcast(r.snapshotUpdateFlags(nil, false, false, true, false, false))
 
-	events, err := runner.DenyInChat(ctx, sessionID, chatID, approvalID)
+	events, err := runner.DenyToolInChat(ctx, sessionID, chatID, toolCallID)
 	r.handleApprovalEventStream(events, err)
+}
+
+func (r *Chat) resolveApprovalToolCallIDLocked(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	id, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || id == 0 {
+		return raw
+	}
+	for _, approval := range r.state.Approvals() {
+		if approval.ID == id && strings.TrimSpace(approval.ToolCallID) != "" {
+			return approval.ToolCallID
+		}
+	}
+	return raw
 }
 
 func (r *Chat) handleResumePendingTools() {

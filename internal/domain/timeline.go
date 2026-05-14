@@ -179,12 +179,13 @@ type ToolCallID string
 type ToolStatus string
 
 const (
-	ToolStatusPending  ToolStatus = "pending"
-	ToolStatusRunning  ToolStatus = "running"
-	ToolStatusDone     ToolStatus = "done"
-	ToolStatusDenied   ToolStatus = "denied"
-	ToolStatusErrored  ToolStatus = "errored"
-	ToolStatusCanceled ToolStatus = "canceled"
+	ToolStatusPending          ToolStatus = "pending"
+	ToolStatusAwaitingApproval ToolStatus = "awaiting_approval"
+	ToolStatusRunning          ToolStatus = "running"
+	ToolStatusDone             ToolStatus = "done"
+	ToolStatusDenied           ToolStatus = "denied"
+	ToolStatusErrored          ToolStatus = "errored"
+	ToolStatusCanceled         ToolStatus = "canceled"
 )
 
 // ToolCall stores one tool call and its result/error.
@@ -195,7 +196,8 @@ type ToolCall struct {
 	Status      ToolStatus        `json:"status"`
 	Result      *ToolResult       `json:"result,omitempty"`
 	Error       *ToolError        `json:"error,omitempty"`
-	Approval    *ApprovalRequest  `json:"approval,omitempty"`
+	ApprovalID  string            `json:"approval_id,omitempty"`
+	Approval    *ApprovalRequest  `json:"approval,omitempty"` // legacy read path; new state is Status plus ApprovalID.
 	StartedAt   time.Time         `json:"started_at,omitempty"`
 	CompletedAt time.Time         `json:"completed_at,omitempty"`
 }
@@ -215,7 +217,7 @@ func (c ToolCall) MarshalJSON() ([]byte, error) {
 		Status      ToolStatus         `json:"status"`
 		Result      *encodedToolResult `json:"result,omitempty"`
 		Error       *ToolError         `json:"error,omitempty"`
-		Approval    *ApprovalRequest   `json:"approval,omitempty"`
+		ApprovalID  string             `json:"approval_id,omitempty"`
 		StartedAt   time.Time          `json:"started_at,omitempty"`
 		CompletedAt time.Time          `json:"completed_at,omitempty"`
 	}
@@ -234,7 +236,7 @@ func (c ToolCall) MarshalJSON() ([]byte, error) {
 	}
 	return json.Marshal(encodedToolCall{
 		ToolCallID: c.ToolCallID, Tool: c.Tool, Args: c.Args, Status: c.Status, Result: result,
-		Error: c.Error, Approval: c.Approval, StartedAt: c.StartedAt, CompletedAt: c.CompletedAt,
+		Error: c.Error, ApprovalID: c.ApprovalID, StartedAt: c.StartedAt, CompletedAt: c.CompletedAt,
 	})
 }
 
@@ -253,6 +255,7 @@ func (c *ToolCall) UnmarshalJSON(data []byte) error {
 		Status      ToolStatus         `json:"status"`
 		Result      *encodedToolResult `json:"result,omitempty"`
 		Error       *ToolError         `json:"error,omitempty"`
+		ApprovalID  string             `json:"approval_id,omitempty"`
 		Approval    *ApprovalRequest   `json:"approval,omitempty"`
 		StartedAt   time.Time          `json:"started_at,omitempty"`
 		CompletedAt time.Time          `json:"completed_at,omitempty"`
@@ -269,9 +272,17 @@ func (c *ToolCall) UnmarshalJSON(data []byte) error {
 		}
 		result = &ToolResult{Text: in.Result.Text, Diff: in.Result.Diff, Data: decoded, Status: in.Result.Status}
 	}
+	status := in.Status
+	approvalID := strings.TrimSpace(in.ApprovalID)
+	if in.Approval != nil && status == ToolStatusPending && result == nil && in.Error == nil {
+		status = ToolStatusAwaitingApproval
+		if approvalID == "" && in.Approval.ID > 0 {
+			approvalID = fmt.Sprint(in.Approval.ID)
+		}
+	}
 	*c = ToolCall{
-		ToolCallID: in.ToolCallID, Tool: in.Tool, Args: in.Args, Status: in.Status, Result: result,
-		Error: in.Error, Approval: in.Approval, StartedAt: in.StartedAt, CompletedAt: in.CompletedAt,
+		ToolCallID: in.ToolCallID, Tool: in.Tool, Args: in.Args, Status: status, Result: result,
+		Error: in.Error, ApprovalID: approvalID, StartedAt: in.StartedAt, CompletedAt: in.CompletedAt,
 	}
 	return nil
 }

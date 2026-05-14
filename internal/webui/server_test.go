@@ -353,10 +353,10 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `chatStatusLabel(chat)`) || !strings.Contains(fullPage, `chat-status-icon`) {
 		t.Fatalf("expected chat sidebar to render per-chat animated status icons")
 	}
-	if !strings.Contains(fullPage, `toolApprovalPending(tool)`) || !strings.Contains(fullPage, `rpc('approve', {id: toolApprovalID(tool)})`) || !strings.Contains(fullPage, `rpc('deny', {id: toolApprovalID(tool)})`) {
+	if !strings.Contains(fullPage, `toolApprovalPending(tool)`) || !strings.Contains(fullPage, `rpc('approve', {tool_call_id: toolCallID(tool)})`) || !strings.Contains(fullPage, `rpc('deny', {tool_call_id: toolCallID(tool)})`) {
 		t.Fatalf("expected pending tool approval cards to expose approve and deny actions inline")
 	}
-	if !strings.Contains(fullPage, `currentToolStatus === 'pending'`) {
+	if !strings.Contains(fullPage, `toolStatus(tool) === 'awaiting_approval'`) {
 		t.Fatalf("expected approval actions to hide once the pushed tool turn is no longer pending")
 	}
 	if !strings.Contains(fullPage, `this.state.chat_statuses`) || !strings.Contains(fullPage, `waiting_llm: 'Waiting for LLM'`) {

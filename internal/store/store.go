@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"fmt"
+	"hash/fnv"
 	"slices"
 	"strings"
 	"sync"
@@ -62,13 +63,14 @@ type backend interface {
 }
 
 type Approval struct {
-	ID        int64
-	SessionID int64
-	ChatID    int64
-	Tool      domain.ToolKind
-	Command   string
-	Status    domain.ApprovalStatus
-	CreatedAt time.Time
+	ID         int64
+	SessionID  int64
+	ChatID     int64
+	Tool       domain.ToolKind
+	ToolCallID string
+	Command    string
+	Status     domain.ApprovalStatus
+	CreatedAt  time.Time
 }
 
 type Task struct {
@@ -342,11 +344,72 @@ func (s *Store) UpdateApproval(ctx context.Context, approvalID int64, status dom
 }
 
 func (s *Store) PendingApprovals(ctx context.Context, sessionID int64) ([]Approval, error) {
-	return s.backend.PendingApprovals(ctx, sessionID)
+	chats, err := s.ListChats(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	var approvals []Approval
+	for _, chat := range chats {
+		next, err := s.PendingApprovalsForChat(ctx, chat.ID)
+		if err != nil {
+			return nil, err
+		}
+		approvals = append(approvals, next...)
+	}
+	return approvals, nil
 }
 
 func (s *Store) PendingApprovalsForChat(ctx context.Context, chatID int64) ([]Approval, error) {
-	return s.backend.PendingApprovalsForChat(ctx, chatID)
+	chat, err := s.GetChat(ctx, chatID)
+	if err != nil {
+		return nil, nil
+	}
+	items, err := s.TimelineForChat(ctx, chatID)
+	if err != nil {
+		return nil, err
+	}
+	var approvals []Approval
+	for _, item := range items {
+		assistant, ok := item.Content.(domain.AssistantMessage)
+		if !ok {
+			continue
+		}
+		for _, call := range assistant.Tools {
+			if call.Status != domain.ToolStatusAwaitingApproval {
+				continue
+			}
+			approvals = append(approvals, Approval{
+				ID:         SyntheticApprovalID(string(call.ToolCallID)),
+				SessionID:  chat.SessionID,
+				ChatID:     chatID,
+				Tool:       call.Tool,
+				ToolCallID: string(call.ToolCallID),
+				Command:    toolCallPreview(call),
+				Status:     domain.ApprovalStatusPending,
+				CreatedAt:  item.UpdatedAt,
+			})
+		}
+	}
+	return approvals, nil
+}
+
+func SyntheticApprovalID(toolCallID string) int64 {
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(strings.TrimSpace(toolCallID)))
+	return int64(h.Sum64() & 0x7fffffffffffffff)
+}
+
+func toolCallPreview(call domain.ToolCall) string {
+	if command := strings.TrimSpace(call.Args["command"]); command != "" {
+		return command
+	}
+	if path := strings.TrimSpace(call.Args["path"]); path != "" {
+		return path
+	}
+	if pattern := strings.TrimSpace(call.Args["pattern"]); pattern != "" {
+		return pattern
+	}
+	return strings.TrimSpace(string(call.Tool))
 }
 
 func (s *Store) AddTask(ctx context.Context, sessionID int64, body string, status domain.TaskStatus) (Task, error) {

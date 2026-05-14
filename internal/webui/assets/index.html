@@ -61,8 +61,8 @@
                   <div class="small fw-semibold"><i class="bi" :class="toolIcon(tool.tool)"></i> <span x-text="toolTitle(tool)"></span> <span class="badge text-bg-secondary" x-text="tool.status"></span></div>
                   <div class="small text-secondary" x-show="toolPreview(tool)" x-text="toolPreview(tool)"></div>
                   <div class="btn-group btn-group-sm mt-2" x-show="toolApprovalPending(tool)">
-                    <button type="button" class="btn btn-success" @click="rpc('approve', {id: toolApprovalID(tool)})"><i class="bi bi-check-lg"></i> Approve</button>
-                    <button type="button" class="btn btn-outline-danger" @click="rpc('deny', {id: toolApprovalID(tool)})"><i class="bi bi-x-lg"></i> Deny</button>
+                    <button type="button" class="btn btn-success" @click="rpc('approve', {tool_call_id: toolCallID(tool)})"><i class="bi bi-check-lg"></i> Approve</button>
+                    <button type="button" class="btn btn-outline-danger" @click="rpc('deny', {tool_call_id: toolCallID(tool)})"><i class="bi bi-x-lg"></i> Deny</button>
                   </div>
                   <template x-if="tool.result"><div class="tool-result mt-2" x-html="toolResultHTML(tool)"></div></template>
                   <template x-if="tool.error"><pre class="small text-danger mt-2" x-text="tool.error.message || tool.error.code || 'tool error'"></pre></template>
@@ -180,13 +180,13 @@
       </div>
       <div class="mb-3">
         <div class="small text-secondary">Approvals</div>
-        <template x-for="approval in approvals()" :key="approval.ID || approval.id">
+        <template x-for="approval in approvals()" :key="approval.ToolCallID || approval.tool_call_id">
           <div class="border rounded p-2 my-2">
             <div class="small fw-semibold" x-text="approval.Tool || approval.tool"></div>
             <div class="small text-secondary" x-text="approval.Command || approval.command"></div>
             <div class="btn-group btn-group-sm mt-2">
-              <button class="btn btn-success" @click="rpc('approve', {id: approval.ID || approval.id})"><i class="bi bi-check-lg"></i></button>
-              <button class="btn btn-outline-danger" @click="rpc('deny', {id: approval.ID || approval.id})"><i class="bi bi-x-lg"></i></button>
+              <button class="btn btn-success" @click="rpc('approve', {tool_call_id: approval.ToolCallID || approval.tool_call_id})"><i class="bi bi-check-lg"></i></button>
+              <button class="btn btn-outline-danger" @click="rpc('deny', {tool_call_id: approval.ToolCallID || approval.tool_call_id})"><i class="bi bi-x-lg"></i></button>
             </div>
           </div>
         </template>
