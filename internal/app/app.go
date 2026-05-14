@@ -8070,9 +8070,6 @@ func approvalPatternScopeLabel(tool domain.ToolKind, preview string) string {
 }
 
 func (m *App) permissionProfile() string {
-	if strings.TrimSpace(m.currentChat.PermissionProfile) != "" {
-		return m.currentChat.PermissionProfile
-	}
 	if strings.TrimSpace(m.currentSession.PermissionProfile) != "" {
 		return m.currentSession.PermissionProfile
 	}
@@ -9394,30 +9391,22 @@ func (m *App) selectPermissionProfile(profile string) error {
 			return fmt.Errorf("unknown permission profile %q", profile)
 		}
 	}
-	if m.currentChat.ID != 0 {
-		next := m.currentChat
-		next.PermissionProfile = profile
-		if err := m.store.UpdateChat(context.Background(), next); err != nil {
-			return err
-		}
-		m.currentChat = next
-		for idx := range m.chats {
-			if m.chats[idx].ID == next.ID {
-				m.chats[idx].PermissionProfile = profile
-			}
-		}
-	} else if m.currentSession.ID != 0 {
+	if m.currentSession.ID != 0 {
 		if err := m.store.SetSessionPermissionProfile(context.Background(), m.currentSession.ID, profile); err != nil {
 			return err
 		}
-		m.currentSession.PermissionProfile = profile
-		for idx := range m.sessions {
-			if m.sessions[idx].ID == m.currentSession.ID {
-				m.sessions[idx].PermissionProfile = profile
-			}
+	}
+	m.currentSession.PermissionProfile = profile
+	m.currentChat.PermissionProfile = ""
+	for idx := range m.sessions {
+		if m.sessions[idx].ID == m.currentSession.ID {
+			m.sessions[idx].PermissionProfile = profile
 		}
-	} else {
-		m.currentSession.PermissionProfile = profile
+	}
+	for idx := range m.chats {
+		if m.chats[idx].ID == m.currentChat.ID {
+			m.chats[idx].PermissionProfile = ""
+		}
 	}
 	m.queuePermissionChangeNote()
 	return nil

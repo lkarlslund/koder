@@ -114,6 +114,7 @@ func TestControllerForwardRuntimeRefreshesChatListMetadata(t *testing.T) {
 		ctrl.unsub()
 		ctrl.unsub = nil
 	}
+	ctrl.runtime = nil
 	ctrl.mu.Unlock()
 	updated := state.Snapshot
 	updated.Chat.ID = state.ActiveChatID
@@ -204,21 +205,53 @@ func TestControllerSetModelUpdatesStoreStateAndRuntimeSnapshot(t *testing.T) {
 	}
 }
 
-func TestControllerSetPermissionProfileUpdatesActiveChat(t *testing.T) {
+func TestControllerSetPermissionProfileUpdatesActiveSession(t *testing.T) {
 	ctrl, st := newTestController(t)
-	chatID := ctrl.State().ActiveChatID
+	sessionID := ctrl.State().Session.ID
 	if err := ctrl.SetPermissionProfile(context.Background(), "write-ask"); err != nil {
 		t.Fatalf("set permission profile: %v", err)
 	}
-	chat, err := st.GetChat(context.Background(), chatID)
+	session, err := st.GetSession(context.Background(), sessionID)
 	if err != nil {
-		t.Fatalf("get chat: %v", err)
+		t.Fatalf("get session: %v", err)
 	}
-	if chat.PermissionProfile != "write-ask" {
-		t.Fatalf("expected chat permission profile write-ask, got %q", chat.PermissionProfile)
+	if session.PermissionProfile != "write-ask" {
+		t.Fatalf("expected session permission profile write-ask, got %q", session.PermissionProfile)
 	}
 	if got := ctrl.State().Permissions.Active; got != "write-ask" {
 		t.Fatalf("expected active permission profile write-ask, got %q", got)
+	}
+}
+
+func TestControllerPermissionProfilePersistsBySession(t *testing.T) {
+	workdir := t.TempDir()
+	cfg := config.Default().WithStateDir(t.TempDir())
+	cfg.DefaultProvider = "test"
+	cfg.DefaultModel = "model"
+	st, err := store.OpenWithOptions(cfg.StateDir(), store.Options{Backend: store.BackendJSONFS})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	ctrl := New(cfg, st, agent.New(cfg, st, nil, nil, workdir), workdir)
+	if err := ctrl.Start(context.Background(), StartupModeNew); err != nil {
+		t.Fatalf("start controller: %v", err)
+	}
+	if err := ctrl.SetPermissionProfile(context.Background(), "write-ask"); err != nil {
+		t.Fatalf("set permission profile: %v", err)
+	}
+	sessionID := ctrl.State().Session.ID
+	if err := ctrl.Shutdown(context.Background()); err != nil {
+		t.Fatalf("shutdown: %v", err)
+	}
+
+	engine := agent.New(cfg, st, nil, nil, workdir)
+	next := New(cfg, st, engine, workdir)
+	if err := next.loadSession(context.Background(), sessionID, 0); err != nil {
+		t.Fatalf("start next controller: %v", err)
+	}
+	if got := next.State().Permissions.Active; got != "write-ask" {
+		t.Fatalf("expected session permission profile to persist, got %q", got)
 	}
 }
 

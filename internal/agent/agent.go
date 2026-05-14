@@ -1135,26 +1135,15 @@ func (e *Engine) setPermissionProfile(ctx context.Context, sessionID, chatID int
 			return nil, fmt.Errorf("unknown permission profile %q", profile)
 		}
 	}
-	if chatID == 0 && sessionID == 0 {
+	if sessionID == 0 {
 		return emitOnce(domain.Event{
 			Kind: domain.EventKindStatus,
 			Text: fmt.Sprintf("permission profile set to %s", permission.DisplayName(profile)),
 			Meta: map[string]string{"permission_profile": profile},
 		}), nil
 	}
-	if chatID > 0 {
-		chat, err := e.store.GetChat(ctx, chatID)
-		if err != nil {
-			return nil, err
-		}
-		chat.PermissionProfile = profile
-		if err := e.store.UpdateChat(ctx, chat); err != nil {
-			return nil, err
-		}
-	} else {
-		if err := e.store.SetSessionPermissionProfile(ctx, sessionID, profile); err != nil {
-			return nil, err
-		}
+	if err := e.store.SetSessionPermissionProfile(ctx, sessionID, profile); err != nil {
+		return nil, err
 	}
 	return emitOnce(domain.Event{
 		Kind: domain.EventKindStatus,
@@ -1186,7 +1175,7 @@ func (e *Engine) setPermissionProfileAndReevaluateApproval(ctx context.Context, 
 		if toolSpec, ok := tools.Lookup(req.Tool); !ok {
 			return nil, fmt.Errorf("unsupported tool %q", req.Tool)
 		} else if !toolSpec.BypassesPermission() {
-			decision = permission.Evaluate(e.cfg.Permissions, effectivePermissionProfile(e.cfg, session, chat), session.PermissionRules, e.permissionRequest(session, req))
+			decision = permission.Evaluate(e.cfg.Permissions, e.effectivePermissionProfile(ctx, session, chat), session.PermissionRules, e.permissionRequest(session, req))
 		}
 		var next <-chan domain.Event
 		switch decision.Mode {
@@ -1228,7 +1217,7 @@ func (e *Engine) setPermissionProfileAndReevaluateApproval(ctx context.Context, 
 	if toolSpec, ok := tools.Lookup(req.Tool); !ok {
 		return nil, fmt.Errorf("unsupported tool %q", req.Tool)
 	} else if !toolSpec.BypassesPermission() {
-		decision = permission.Evaluate(e.cfg.Permissions, effectivePermissionProfile(e.cfg, session, chat), session.PermissionRules, e.permissionRequest(session, req))
+		decision = permission.Evaluate(e.cfg.Permissions, e.effectivePermissionProfile(ctx, session, chat), session.PermissionRules, e.permissionRequest(session, req))
 	}
 
 	var next <-chan domain.Event
@@ -1280,7 +1269,7 @@ func (e *Engine) approveInChatWithRule(ctx context.Context, sessionID, chatID, a
 		if toolSpec, ok := tools.Lookup(req.Tool); !ok {
 			return nil, fmt.Errorf("unsupported tool %q", req.Tool)
 		} else if !toolSpec.BypassesPermission() {
-			decision = permission.Evaluate(e.cfg.Permissions, effectivePermissionProfile(e.cfg, session, chat), session.PermissionRules, e.permissionRequest(session, req))
+			decision = permission.Evaluate(e.cfg.Permissions, e.effectivePermissionProfile(ctx, session, chat), session.PermissionRules, e.permissionRequest(session, req))
 		}
 		var next <-chan domain.Event
 		switch decision.Mode {
@@ -1328,7 +1317,7 @@ func (e *Engine) approveInChatWithRule(ctx context.Context, sessionID, chatID, a
 	if toolSpec, ok := tools.Lookup(req.Tool); !ok {
 		return nil, fmt.Errorf("unsupported tool %q", req.Tool)
 	} else if !toolSpec.BypassesPermission() {
-		decision = permission.Evaluate(e.cfg.Permissions, effectivePermissionProfile(e.cfg, session, chat), session.PermissionRules, e.permissionRequest(session, req))
+		decision = permission.Evaluate(e.cfg.Permissions, e.effectivePermissionProfile(ctx, session, chat), session.PermissionRules, e.permissionRequest(session, req))
 	}
 	var next <-chan domain.Event
 	switch decision.Mode {
@@ -1385,7 +1374,7 @@ func (e *Engine) approveToolInChatWithRule(ctx context.Context, sessionID, chatI
 	if toolSpec, ok := tools.Lookup(req.Tool); !ok {
 		return nil, fmt.Errorf("unsupported tool %q", req.Tool)
 	} else if !toolSpec.BypassesPermission() {
-		decision = permission.Evaluate(e.cfg.Permissions, effectivePermissionProfile(e.cfg, session, chat), session.PermissionRules, e.permissionRequest(session, req))
+		decision = permission.Evaluate(e.cfg.Permissions, e.effectivePermissionProfile(ctx, session, chat), session.PermissionRules, e.permissionRequest(session, req))
 	}
 	var next <-chan domain.Event
 	switch decision.Mode {
@@ -3049,7 +3038,7 @@ func (e *Engine) handleModelToolCall(ctx context.Context, session domain.Session
 
 	decision := permission.Decision{Mode: domain.PermissionModeAllow}
 	if !toolSpec.BypassesPermission() {
-		decision = permission.Evaluate(e.cfg.Permissions, effectivePermissionProfile(e.cfg, session, chat), session.PermissionRules, e.permissionRequest(session, req))
+		decision = permission.Evaluate(e.cfg.Permissions, e.effectivePermissionProfile(ctx, session, chat), session.PermissionRules, e.permissionRequest(session, req))
 	}
 	if decision.Mode == domain.PermissionModeDeny {
 		text := fmt.Sprintf("%s denied by policy", req.Tool)
@@ -3332,7 +3321,7 @@ func (e *Engine) prepareModelToolCall(ctx context.Context, session domain.Sessio
 
 	decision := permission.Decision{Mode: domain.PermissionModeAllow}
 	if !toolSpec.BypassesPermission() {
-		decision = permission.Evaluate(e.cfg.Permissions, effectivePermissionProfile(e.cfg, session, chat), session.PermissionRules, e.permissionRequest(session, req))
+		decision = permission.Evaluate(e.cfg.Permissions, e.effectivePermissionProfile(ctx, session, chat), session.PermissionRules, e.permissionRequest(session, req))
 	}
 	if decision.Mode == domain.PermissionModeDeny {
 		text := fmt.Sprintf("%s denied by policy", req.Tool)
@@ -3466,9 +3455,10 @@ func (e *Engine) executePreparedToolCall(ctx context.Context, chatID, sessionID 
 	return out, nil
 }
 
-func effectivePermissionProfile(cfg config.Config, session domain.Session, chat domain.Chat) string {
-	if strings.TrimSpace(chat.PermissionProfile) != "" {
-		return chat.PermissionProfile
+func (e *Engine) effectivePermissionProfile(_ context.Context, session domain.Session, _ domain.Chat) string {
+	cfg := config.Config{}
+	if e != nil {
+		cfg = e.cfg
 	}
 	if strings.TrimSpace(session.PermissionProfile) != "" {
 		return session.PermissionProfile

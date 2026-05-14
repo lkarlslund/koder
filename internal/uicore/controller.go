@@ -867,7 +867,7 @@ func (c *Controller) SetModel(ctx context.Context, providerID, modelID string) e
 	return nil
 }
 
-// SetPermissionProfile updates the active chat permission profile.
+// SetPermissionProfile updates the active session permission profile.
 func (c *Controller) SetPermissionProfile(ctx context.Context, profile string) error {
 	profile = strings.TrimSpace(profile)
 	if profile == "" {
@@ -883,38 +883,30 @@ func (c *Controller) SetPermissionProfile(ctx context.Context, profile string) e
 	chatRecord := c.chat
 	rt := c.runtime
 	c.mu.Unlock()
-	if chatRecord.ID != 0 {
-		chatRecord.PermissionProfile = profile
-		if err := c.store.UpdateChat(ctx, chatRecord); err != nil {
-			return err
-		}
-		c.mu.Lock()
-		c.chat = chatRecord
-		for idx := range c.chats {
-			if c.chats[idx].ID == chatRecord.ID {
-				c.chats[idx].PermissionProfile = profile
-			}
-		}
-		c.mu.Unlock()
-		if rt != nil {
-			rt.SetChat(chatRecord)
-		}
-	} else if session.ID != 0 {
+	if session.ID != 0 {
 		if err := c.store.SetSessionPermissionProfile(ctx, session.ID, profile); err != nil {
 			return err
 		}
-		session.PermissionProfile = profile
-		c.mu.Lock()
-		c.session = session
-		for idx := range c.sessions {
-			if c.sessions[idx].ID == session.ID {
-				c.sessions[idx].PermissionProfile = profile
-			}
+	}
+	session.PermissionProfile = profile
+	chatRecord.PermissionProfile = ""
+	c.mu.Lock()
+	c.session = session
+	c.chat = chatRecord
+	for idx := range c.sessions {
+		if c.sessions[idx].ID == session.ID {
+			c.sessions[idx].PermissionProfile = profile
 		}
-		c.mu.Unlock()
-		if rt != nil {
-			rt.SetSession(session)
+	}
+	for idx := range c.chats {
+		if c.chats[idx].ID == chatRecord.ID {
+			c.chats[idx].PermissionProfile = ""
 		}
+	}
+	c.mu.Unlock()
+	if rt != nil {
+		rt.SetSession(session)
+		rt.SetChat(chatRecord)
 	}
 	c.broadcast("snapshot", c.State())
 	return nil
@@ -1196,6 +1188,7 @@ func (c *Controller) loadSession(ctx context.Context, sessionID, chatID int64) e
 			}
 		}
 	}
+	chatRecord.PermissionProfile = ""
 	rt, err := c.agent.Chat(ctx, session, chatRecord)
 	if err != nil {
 		return err
@@ -1581,10 +1574,7 @@ func (c *Controller) currentRuntime() *chat.Chat {
 }
 
 func (c *Controller) permissionsStateLocked() PermissionsState {
-	active := strings.TrimSpace(c.chat.PermissionProfile)
-	if active == "" {
-		active = strings.TrimSpace(c.session.PermissionProfile)
-	}
+	active := strings.TrimSpace(c.session.PermissionProfile)
 	if active == "" {
 		active = c.cfg.Permissions.Profile
 	}
