@@ -150,6 +150,39 @@ func TestControllerForwardRuntimeRefreshesChatListMetadata(t *testing.T) {
 	}
 }
 
+func TestControllerRefreshChatStatusesDiscoversNewStoreChats(t *testing.T) {
+	ctrl, st := newTestController(t)
+	state := ctrl.State()
+	if state.Session.ID == 0 || state.ActiveChatID == 0 {
+		t.Fatal("expected active session and chat")
+	}
+	parentID := state.ActiveChatID
+	created, err := st.CreateChat(context.Background(), state.Session.ID, "Worker", domain.WorkflowRoleExecution, &parentID)
+	if err != nil {
+		t.Fatalf("create worker chat: %v", err)
+	}
+	created.ActiveMilestoneRef = "alpha"
+	created.AssignedTodoBucketRef = "alpha"
+	if err := st.UpdateChat(context.Background(), created); err != nil {
+		t.Fatalf("update worker chat: %v", err)
+	}
+
+	if !ctrl.refreshChatStatuses(context.Background(), state.Session.ID) {
+		t.Fatal("expected refreshed chat list to report a change")
+	}
+	next := ctrl.State()
+	found := false
+	for _, item := range next.Chats {
+		if item.ID == created.ID && item.Title == "Worker" && item.ActiveMilestoneRef == "alpha" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected worker chat in sidebar state, got %#v", next.Chats)
+	}
+}
+
 func TestControllerModelOptionsLoadsConfiguredModels(t *testing.T) {
 	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/models" {

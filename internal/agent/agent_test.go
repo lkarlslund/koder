@@ -516,6 +516,38 @@ func TestHandleModelToolCallDeniesDisabledSessionTool(t *testing.T) {
 	}
 }
 
+func TestUpdateMilestoneStatusDoesNotDemoteOtherActiveMilestones(t *testing.T) {
+	cfg := testConfig(t)
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	session, err := st.CreateSession(context.Background(), "test", "provider", "model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.SetMilestonePlan(context.Background(), session.ID, "Ship it", []store.Milestone{
+		{Ref: "alpha", Title: "Alpha", Status: domain.MilestoneStatusExecuting, Position: 0},
+		{Ref: "beta", Title: "Beta", Status: domain.MilestoneStatusPending, Position: 1},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	engine := New(cfg, st, tools.NewRegistry(t.TempDir()), nil, t.TempDir())
+
+	if err := engine.updateMilestoneStatus(context.Background(), session.ID, "beta", domain.MilestoneStatusExecuting); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := st.GetMilestonePlan(context.Background(), session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Milestones[0].Status != domain.MilestoneStatusExecuting || plan.Milestones[1].Status != domain.MilestoneStatusExecuting {
+		t.Fatalf("expected both milestones to remain executing, got %#v", plan.Milestones)
+	}
+}
+
 func TestHandleModelToolCallPersistsNormalizationFailure(t *testing.T) {
 	cfg := testConfig(t)
 	st, err := store.Open(t.TempDir())

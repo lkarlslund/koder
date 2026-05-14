@@ -1326,7 +1326,13 @@ func (c *Controller) chatStatuses(ctx context.Context, sessionID int64) map[int6
 }
 
 func (c *Controller) refreshChatStatuses(ctx context.Context, sessionID int64) bool {
-	statuses := c.cachedChatStatuses(ctx, sessionID)
+	var chats []domain.Chat
+	if c.store != nil && sessionID != 0 {
+		if loaded, err := c.store.ListChats(ctx, sessionID); err == nil {
+			chats = loaded
+		}
+	}
+	statuses := c.chatStatuses(ctx, sessionID)
 	if status, ok := c.activeChatSidebarStatus(sessionID); ok {
 		statuses[status.ChatID] = status
 	}
@@ -1335,7 +1341,12 @@ func (c *Controller) refreshChatStatuses(ctx context.Context, sessionID int64) b
 	if sessionID == 0 || c.session.ID != sessionID {
 		return false
 	}
-	if chatSidebarStatusMapsEqual(c.statuses, statuses) {
+	changed := !chatSidebarStatusMapsEqual(c.statuses, statuses)
+	if len(chats) > 0 && !chatListsSameForSidebar(c.chats, chats) {
+		c.chats = chats
+		changed = true
+	}
+	if !changed {
 		return false
 	}
 	c.statuses = statuses
@@ -1404,18 +1415,29 @@ func (c *Controller) forwardRuntime(chatID int64, updates <-chan chat.Update) {
 			c.lastErr = update.Event.Err.Error()
 			c.mu.Unlock()
 		}
+		if update.Snapshot.Chat.ID == 0 {
+			update.Snapshot.Chat.ID = chatID
+		}
 		if update.Snapshot.Chat.ID == chatID {
 			c.mu.Lock()
+			if strings.TrimSpace(update.Snapshot.Chat.Title) == "" {
+				update.Snapshot.Chat = c.chat
+			}
 			c.chat = update.Snapshot.Chat
 			if c.statuses == nil {
 				c.statuses = map[int64]ChatSidebarStatus{}
 			}
 			c.statuses[chatID] = sidebarStatusFromUpdate(update)
+			found := false
 			for idx := range c.chats {
 				if c.chats[idx].ID == update.Snapshot.Chat.ID {
 					c.chats[idx] = update.Snapshot.Chat
+					found = true
 					break
 				}
+			}
+			if !found {
+				c.chats = append([]domain.Chat{update.Snapshot.Chat}, c.chats...)
 			}
 			c.mu.Unlock()
 		} else {
@@ -1525,6 +1547,25 @@ func chatSidebarStatusMapsEqual(left, right map[int64]ChatSidebarStatus) bool {
 	}
 	for id, leftStatus := range left {
 		if right[id] != leftStatus {
+			return false
+		}
+	}
+	return true
+}
+
+func chatListsSameForSidebar(left, right []domain.Chat) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for idx := range left {
+		if left[idx].ID != right[idx].ID ||
+			left[idx].ParentChatID != right[idx].ParentChatID ||
+			left[idx].Title != right[idx].Title ||
+			left[idx].WorkflowRole != right[idx].WorkflowRole ||
+			left[idx].ActiveMilestoneRef != right[idx].ActiveMilestoneRef ||
+			left[idx].AssignedTodoBucketRef != right[idx].AssignedTodoBucketRef ||
+			left[idx].LastMessage != right[idx].LastMessage ||
+			!left[idx].UpdatedAt.Equal(right[idx].UpdatedAt) {
 			return false
 		}
 	}

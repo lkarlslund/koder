@@ -100,6 +100,12 @@ func TestAppendAndValidationHelpers(t *testing.T) {
 	if err := ensureMilestoneRefsAvailable(existing, []store.Milestone{{Ref: "alpha", Title: "dup"}}); err == nil {
 		t.Fatal("expected duplicate ref error")
 	}
+	if err := tools.ValidateMilestoneProgress([]store.Milestone{
+		{Ref: "alpha", Title: "Alpha", Status: domain.MilestoneStatusExecuting},
+		{Ref: "beta", Title: "Beta", Status: domain.MilestoneStatusExecuting},
+	}); err != nil {
+		t.Fatalf("expected multiple active milestones to be allowed, got %v", err)
+	}
 }
 
 func TestUpsertAndUpdatedPlanHelpers(t *testing.T) {
@@ -133,7 +139,7 @@ func TestUpsertAndUpdatedPlanHelpers(t *testing.T) {
 	}
 }
 
-func TestUpdateItemActiveMilestoneErrorExplainsSwitching(t *testing.T) {
+func TestUpdateItemAllowsMultipleActiveMilestones(t *testing.T) {
 	plan := store.MilestonePlan{
 		Summary: "Ship it",
 		Milestones: []store.Milestone{
@@ -142,17 +148,61 @@ func TestUpdateItemActiveMilestoneErrorExplainsSwitching(t *testing.T) {
 		},
 	}
 
-	_, err := updatedMilestonePlan(plan, tools.Request{Args: map[string]string{"ref": "beta", "status": "in_progress"}})
-	if err == nil {
-		t.Fatal("expected active milestone error")
+	updated, err := updatedMilestonePlan(plan, tools.Request{Args: map[string]string{"ref": "beta", "status": "executing"}})
+	if err != nil {
+		t.Fatal(err)
 	}
-	for _, want := range []string{
-		"active milestones: alpha (in_progress), beta (in_progress)",
-		"To switch milestones, first update the current active milestone to pending, blocked, completed, or cancelled",
-	} {
-		if !strings.Contains(err.Error(), want) {
-			t.Fatalf("expected %q in error %q", want, err.Error())
-		}
+	if updated.Milestones[0].Status != domain.MilestoneStatusInProgress || updated.Milestones[1].Status != domain.MilestoneStatusExecuting {
+		t.Fatalf("expected both milestones to remain active, got %#v", updated.Milestones)
+	}
+}
+
+func TestScopedExecutionChatSeesOnlyAssignedMilestone(t *testing.T) {
+	runtime, st, session := newMilestoneRuntime(t)
+	runtime.ChatRole = domain.WorkflowRoleExecution
+	runtime.ActiveMilestoneRef = "beta"
+	if _, err := st.SetMilestonePlan(context.Background(), session.ID, "Ship it", []store.Milestone{
+		{Ref: "alpha", Title: "Alpha", Status: domain.MilestoneStatusExecuting, Position: 0},
+		{Ref: "beta", Title: "Beta", Status: domain.MilestoneStatusExecuting, Position: 1},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := (listTool{}).Execute(context.Background(), runtime, tools.Request{Tool: domain.ToolKindMilestoneList})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(result.Output, "Alpha") || !strings.Contains(result.Output, "Beta") {
+		t.Fatalf("expected scoped milestone list, got %q", result.Output)
+	}
+
+	result, err = (updateItemTool{}).Execute(context.Background(), runtime, tools.Request{
+		Tool: domain.ToolKindMilestoneUpdate,
+		Args: map[string]string{"ref": "beta", "status": "completed"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(result.Output, "Alpha") || !strings.Contains(result.Output, "Beta") {
+		t.Fatalf("expected scoped milestone update output, got %q", result.Output)
+	}
+	if _, err := (updateItemTool{}).Execute(context.Background(), runtime, tools.Request{
+		Tool: domain.ToolKindMilestoneUpdate,
+		Args: map[string]string{"ref": "alpha", "status": "completed"},
+	}); err == nil || !strings.Contains(err.Error(), `scoped to milestone "beta"`) {
+		t.Fatalf("expected scoped milestone error, got %v", err)
+	}
+
+	events, err := (updateItemTool{}).PersistResult(context.Background(), st, session.ID, tools.Request{
+		Tool: domain.ToolKindMilestoneUpdate,
+		Args: map[string]string{"ref": "beta", "status": "executing"},
+	}, tools.Result{Output: result.Output, Stored: result.Stored})
+	if err != nil {
+		t.Fatal(err)
+	}
+	event := <-events
+	if strings.Contains(event.Text, "Alpha") || !strings.Contains(event.Text, "Beta") {
+		t.Fatalf("expected persisted scoped milestone result, got %q", event.Text)
 	}
 }
 

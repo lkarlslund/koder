@@ -29,7 +29,7 @@ func init() {
 	tools.Register(updateItemTool{}, tools.ToolSpec{
 		Title:       "Update milestone",
 		Description: "Update one milestone's status or details.",
-		Usage:       "Update one milestone's status, and optionally its title or notes. Keep at most one active milestone in the plan. Active statuses are in_progress, decomposing, and executing. If a milestone was created by accident or is no longer wanted, set status to cancelled at any time.",
+		Usage:       "Update one milestone's status, and optionally its title or notes. Multiple milestones may be active at the same time. If a milestone was created by accident or is no longer wanted, set status to cancelled at any time.",
 		Parameters:  `{"type":"object","properties":{"ref":{"type":"string","description":"Milestone ref"},"status":{"type":"string","enum":["pending","in_progress","decomposing","executing","completed","blocked","cancelled"]},"title":{"type":"string","description":"Optional replacement title"},"notes":{"type":"string","description":"Optional replacement notes"}},"required":["ref","status"],"additionalProperties":false}`,
 		ExposeToLLM: true,
 	})
@@ -178,7 +178,7 @@ func (listTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Re
 	if err != nil {
 		return tools.Result{}, err
 	}
-	return tools.MilestonePlanResult(plan), nil
+	return tools.MilestonePlanResult(tools.ScopedMilestonePlan(runtime, plan)), nil
 }
 
 func (addItemsTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
@@ -224,7 +224,7 @@ func (updateItemTool) Execute(ctx context.Context, runtime tools.Runtime, req to
 	if err := validateCompletedMilestoneTodos(ctx, st, runtime.SessionID, updated.Milestones); err != nil {
 		return tools.Result{}, err
 	}
-	return tools.MilestonePlanResult(updated), nil
+	return tools.MilestonePlanResult(tools.ScopedMilestonePlan(runtime, updated)), nil
 }
 
 func (planTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
@@ -310,7 +310,9 @@ func (listTool) PersistResult(ctx context.Context, st *store.Store, sessionID in
 	if err != nil {
 		return nil, err
 	}
-	result.Stored = tools.MilestoneStoredResult(plan)
+	if result.Stored == nil {
+		result.Stored = tools.MilestoneStoredResult(plan)
+	}
 	return tools.PersistStandardResult(ctx, st, sessionID, req, result)
 }
 
@@ -350,7 +352,9 @@ func (updateItemTool) PersistResult(ctx context.Context, st *store.Store, sessio
 	if err != nil {
 		return nil, err
 	}
-	result.Stored = tools.MilestoneStoredResult(plan)
+	stored := tools.MilestoneStoredResult(tools.MilestonePlanForRef(plan, req.Args["ref"]))
+	result.Stored = stored
+	result.Output = tools.FormatMilestoneOutput(stored)
 	return tools.PersistStandardResult(ctx, st, sessionID, req, result)
 }
 

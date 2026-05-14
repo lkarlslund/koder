@@ -36,7 +36,6 @@ func ParseMilestones(raw string) ([]store.Milestone, error) {
 	}
 	out := make([]store.Milestone, 0, len(items))
 	seenRefs := map[string]struct{}{}
-	inProgress := 0
 	for idx, item := range items {
 		ref := strings.TrimSpace(item.Ref)
 		title := strings.TrimSpace(item.Title)
@@ -54,9 +53,6 @@ func ParseMilestones(raw string) ([]store.Milestone, error) {
 		default:
 			return nil, fmt.Errorf("invalid milestone status %q", item.Status)
 		}
-		if milestoneStatusCountsAsActive(status) {
-			inProgress++
-		}
 		out = append(out, store.Milestone{
 			Ref:      ref,
 			Title:    title,
@@ -67,9 +63,6 @@ func ParseMilestones(raw string) ([]store.Milestone, error) {
 	}
 	if len(out) == 0 {
 		return nil, errors.New("milestones list is empty")
-	}
-	if inProgress > 1 {
-		return nil, errors.New("milestones may contain at most one in_progress item")
 	}
 	return out, nil
 }
@@ -202,7 +195,6 @@ func ValidateTodoProgress(items []store.TodoItem) error {
 }
 
 func ValidateMilestoneProgress(items []store.Milestone) error {
-	active := make([]string, 0, 1)
 	seenRefs := make(map[string]struct{}, len(items))
 	for _, item := range items {
 		if item.Ref == "" {
@@ -212,12 +204,6 @@ func ValidateMilestoneProgress(items []store.Milestone) error {
 			return fmt.Errorf("duplicate milestone ref %q", item.Ref)
 		}
 		seenRefs[item.Ref] = struct{}{}
-		if milestoneStatusCountsAsActive(item.Status) {
-			active = append(active, fmt.Sprintf("%s (%s)", item.Ref, item.Status))
-		}
-	}
-	if len(active) > 1 {
-		return fmt.Errorf("milestones may contain at most one active item (in_progress, decomposing, or executing); active milestones: %s. To switch milestones, first update the current active milestone to pending, blocked, completed, or cancelled, then update the next milestone to in_progress, decomposing, or executing", strings.Join(active, ", "))
 	}
 	return nil
 }
@@ -240,12 +226,9 @@ func RequireSessionStore(runtime Runtime) (*store.Store, error) {
 
 func AllowedMilestoneRef(runtime Runtime, requested string) (string, error) {
 	requested = strings.TrimSpace(requested)
+	assigned := AssignedMilestoneRef(runtime)
 	switch runtime.ChatRole {
 	case domain.WorkflowRoleDecomposition, domain.WorkflowRoleExecution:
-		assigned := strings.TrimSpace(runtime.ActiveMilestoneRef)
-		if assigned == "" {
-			assigned = strings.TrimSpace(runtime.AssignedTodoBucketRef)
-		}
 		if assigned == "" {
 			return requested, nil
 		}
@@ -256,6 +239,51 @@ func AllowedMilestoneRef(runtime Runtime, requested string) (string, error) {
 	default:
 		return requested, nil
 	}
+}
+
+func AssignedMilestoneRef(runtime Runtime) string {
+	assigned := strings.TrimSpace(runtime.ActiveMilestoneRef)
+	if assigned == "" {
+		assigned = strings.TrimSpace(runtime.AssignedTodoBucketRef)
+	}
+	return assigned
+}
+
+func ScopedMilestonePlan(runtime Runtime, plan store.MilestonePlan) store.MilestonePlan {
+	switch runtime.ChatRole {
+	case domain.WorkflowRoleDecomposition, domain.WorkflowRoleExecution:
+	default:
+		return plan
+	}
+	assigned := AssignedMilestoneRef(runtime)
+	if assigned == "" {
+		return plan
+	}
+	scoped := plan
+	scoped.Milestones = nil
+	for _, milestone := range plan.Milestones {
+		if milestone.Ref == assigned {
+			scoped.Milestones = []store.Milestone{milestone}
+			return scoped
+		}
+	}
+	return scoped
+}
+
+func MilestonePlanForRef(plan store.MilestonePlan, ref string) store.MilestonePlan {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return plan
+	}
+	scoped := plan
+	scoped.Milestones = nil
+	for _, milestone := range plan.Milestones {
+		if milestone.Ref == ref {
+			scoped.Milestones = []store.Milestone{milestone}
+			return scoped
+		}
+	}
+	return scoped
 }
 
 func PersistedTodoBucket(ctx context.Context, st *store.Store, sessionID int64, ref string) (store.MilestonePlan, []store.TodoItem, string, error) {

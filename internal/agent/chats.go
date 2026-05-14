@@ -267,13 +267,7 @@ func (e *Engine) updateMilestoneStatus(ctx context.Context, sessionID int64, ref
 		return err
 	}
 	for idx := range plan.Milestones {
-		switch {
-		case plan.Milestones[idx].Ref != ref:
-			switch plan.Milestones[idx].Status {
-			case domain.MilestoneStatusInProgress, domain.MilestoneStatusDecomposing, domain.MilestoneStatusExecuting:
-				plan.Milestones[idx].Status = domain.MilestoneStatusPending
-			}
-		default:
+		if plan.Milestones[idx].Ref == ref {
 			plan.Milestones[idx].Status = status
 		}
 	}

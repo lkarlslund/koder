@@ -28,7 +28,7 @@ func init() {
 	tools.Register(startExecutionTool{}, tools.ToolSpec{
 		Title:       "Start execution chat",
 		Description: "Start a background execution chat for one milestone.",
-		Usage:       "Start a new background execution chat for one milestone. Use this after a milestone has enough todo context to implement independently.",
+		Usage:       "Start a new background execution chat for one milestone. Use this after a milestone has enough todo context to implement independently. The execution chat is scoped to the assigned milestone and can only see or update that milestone and its todo bucket.",
 		Parameters:  `{"type":"object","properties":{"milestone_ref":{"type":"string","description":"Milestone ref to execute"},"title":{"type":"string","description":"Optional chat title"}},"required":["milestone_ref"],"additionalProperties":false}`,
 		ExposeToLLM: true,
 	})
