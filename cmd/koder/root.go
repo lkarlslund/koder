@@ -27,6 +27,7 @@ import (
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools"
+	"github.com/lkarlslund/koder/internal/tools/codesearchtool"
 	"github.com/lkarlslund/koder/internal/uicore"
 	"github.com/lkarlslund/koder/internal/version"
 	"github.com/lkarlslund/koder/internal/webui"
@@ -111,6 +112,7 @@ func (o startupOptions) resolve() (string, error) {
 }
 
 func runTUI(ctx context.Context, mode app.StartupMode, workdir string, startupOpts app.StartupOptions) error {
+	defer codesearchtool.CloseLanguageServers()
 	cfg, err := config.Load()
 	if err != nil {
 		return err

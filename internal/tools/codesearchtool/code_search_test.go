@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/tools"
@@ -55,6 +56,117 @@ func TestExecuteQueriesWorkspaceSymbolsThroughLSP(t *testing.T) {
 	}
 	if !strings.Contains(result.Output, "go: main.go:2:6: function main.Target") {
 		t.Fatalf("expected LSP workspace symbol result, got:\n%s", result.Output)
+	}
+}
+
+func TestExecuteReusesWarmLanguageServer(t *testing.T) {
+	withTestLSPManager(t, time.Hour, 10*time.Millisecond)
+	workdir := t.TempDir()
+	counter := filepath.Join(t.TempDir(), "lsp.log")
+	writeFile(t, workdir, "go.mod", "module example.com/test\n")
+	writeFile(t, workdir, "main.go", "package main\nfunc Target() {}\n")
+	installFakeServer(t, "gopls")
+	t.Setenv("KODER_FAKE_LSP_COUNTER", counter)
+	t.Setenv("KODER_FAKE_LSP_URI", fileURI(filepath.Join(workdir, "main.go")))
+
+	for i := 0; i < 2; i++ {
+		result, err := tool{}.Execute(t.Context(), tools.Runtime{Workdir: workdir}, tools.Request{
+			Tool: domain.ToolKindCodeSearch,
+			Args: map[string]string{"query": "Target"},
+		})
+		if err != nil {
+			t.Fatalf("execute workspace symbol %d: %v", i, err)
+		}
+		if !strings.Contains(result.Output, "go: main.go:2:6: function main.Target") {
+			t.Fatalf("expected LSP workspace symbol result, got:\n%s", result.Output)
+		}
+	}
+	if got := fakeLSPEventCount(t, counter, "start"); got != 1 {
+		t.Fatalf("expected one fake LSP start, got %d", got)
+	}
+}
+
+func TestIdleReaperShutsDownWarmLanguageServer(t *testing.T) {
+	withTestLSPManager(t, 20*time.Millisecond, 10*time.Millisecond)
+	workdir := t.TempDir()
+	counter := filepath.Join(t.TempDir(), "lsp.log")
+	writeFile(t, workdir, "go.mod", "module example.com/test\n")
+	writeFile(t, workdir, "main.go", "package main\nfunc Target() {}\n")
+	installFakeServer(t, "gopls")
+	t.Setenv("KODER_FAKE_LSP_COUNTER", counter)
+	t.Setenv("KODER_FAKE_LSP_URI", fileURI(filepath.Join(workdir, "main.go")))
+
+	_, err := tool{}.Execute(t.Context(), tools.Runtime{Workdir: workdir}, tools.Request{
+		Tool: domain.ToolKindCodeSearch,
+		Args: map[string]string{"query": "Target"},
+	})
+	if err != nil {
+		t.Fatalf("execute workspace symbol: %v", err)
+	}
+	waitForFakeLSPEvent(t, counter, "shutdown", 1)
+}
+
+func TestExecuteRetriesAfterBrokenLanguageServer(t *testing.T) {
+	withTestLSPManager(t, time.Hour, 10*time.Millisecond)
+	workdir := t.TempDir()
+	counter := filepath.Join(t.TempDir(), "lsp.log")
+	writeFile(t, workdir, "go.mod", "module example.com/test\n")
+	writeFile(t, workdir, "main.go", "package main\nfunc Target() {}\n")
+	installFakeServer(t, "gopls")
+	t.Setenv("KODER_FAKE_LSP_COUNTER", counter)
+	t.Setenv("KODER_FAKE_LSP_FAIL_FIRST_WORKSPACE_SYMBOL", "1")
+	t.Setenv("KODER_FAKE_LSP_URI", fileURI(filepath.Join(workdir, "main.go")))
+
+	result, err := tool{}.Execute(t.Context(), tools.Runtime{Workdir: workdir}, tools.Request{
+		Tool: domain.ToolKindCodeSearch,
+		Args: map[string]string{"query": "Target"},
+	})
+	if err != nil {
+		t.Fatalf("execute workspace symbol: %v", err)
+	}
+	if !strings.Contains(result.Output, "go: main.go:2:6: function main.Target") {
+		t.Fatalf("expected retry result, got:\n%s", result.Output)
+	}
+	if got := fakeLSPEventCount(t, counter, "start"); got != 2 {
+		t.Fatalf("expected retry to start a second fake LSP, got %d starts", got)
+	}
+}
+
+func TestExecuteWarnsAboutDetectedMissingLanguageServer(t *testing.T) {
+	workdir := t.TempDir()
+	writeFile(t, workdir, "go.mod", "module example.com/test\n")
+	t.Setenv("PATH", t.TempDir())
+
+	result, err := tool{}.Execute(t.Context(), tools.Runtime{Workdir: workdir}, tools.Request{
+		Tool: domain.ToolKindCodeSearch,
+		Args: map[string]string{"action": actionLanguages},
+	})
+	if err != nil {
+		t.Fatalf("execute languages: %v", err)
+	}
+	if !strings.Contains(result.Output, "Missing language servers:") || !strings.Contains(result.Output, `go: Go requires command "gopls"`) {
+		t.Fatalf("expected missing server warning, got:\n%s", result.Output)
+	}
+}
+
+func TestDetectsAdditionalPopularLanguages(t *testing.T) {
+	workdir := t.TempDir()
+	writeFile(t, workdir, "build.zig", "const std = @import(\"std\");\n")
+	writeFile(t, workdir, "composer.json", "{}\n")
+	writeFile(t, workdir, "style.scss", ".target { color: red; }\n")
+
+	detected, err := detectLanguages(workdir)
+	if err != nil {
+		t.Fatalf("detect languages: %v", err)
+	}
+	got := map[string]bool{}
+	for _, server := range detected {
+		got[server.ID] = true
+	}
+	for _, id := range []string{"zig", "php", "css"} {
+		if !got[id] {
+			t.Fatalf("expected detected language %q in %#v", id, got)
+		}
 	}
 }
 
@@ -144,6 +256,7 @@ func installFakeServer(t *testing.T, name string) {
 }
 
 func runFakeLSP() {
+	startIndex := recordFakeLSPEvent("start")
 	reader := bufio.NewReader(os.Stdin)
 	for {
 		msg, err := fakeReadMessage(reader)
@@ -157,6 +270,9 @@ func runFakeLSP() {
 			fakeWriteResponse(id, map[string]any{"capabilities": map[string]any{}})
 		case "initialized", "textDocument/didOpen":
 		case "workspace/symbol":
+			if os.Getenv("KODER_FAKE_LSP_FAIL_FIRST_WORKSPACE_SYMBOL") == "1" && startIndex == 1 {
+				return
+			}
 			fakeWriteResponse(id, []map[string]any{fakeSymbol("main.Target")})
 		case "textDocument/documentSymbol":
 			fakeWriteResponse(id, []map[string]any{{
@@ -170,6 +286,7 @@ func runFakeLSP() {
 		case "textDocument/references":
 			fakeWriteResponse(id, []map[string]any{fakeLocation()})
 		case "shutdown":
+			recordFakeLSPEvent("shutdown")
 			fakeWriteResponse(id, nil)
 		case "exit":
 			return
@@ -179,6 +296,71 @@ func runFakeLSP() {
 			}
 		}
 	}
+}
+
+func withTestLSPManager(t *testing.T, idleTimeout, sweepInterval time.Duration) {
+	t.Helper()
+	old := defaultLSPManager
+	manager := newLSPManager(idleTimeout, sweepInterval, 100*time.Millisecond)
+	defaultLSPManager = manager
+	t.Cleanup(func() {
+		manager.close()
+		defaultLSPManager = old
+	})
+}
+
+func recordFakeLSPEvent(event string) int {
+	path := os.Getenv("KODER_FAKE_LSP_COUNTER")
+	if path == "" {
+		return 0
+	}
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return 0
+	}
+	defer file.Close()
+	_, _ = fmt.Fprintln(file, event)
+	return fakeLSPEventCountNoFail(path, event)
+}
+
+func fakeLSPEventCount(t *testing.T, path, event string) int {
+	t.Helper()
+	count, err := readFakeLSPEventCount(path, event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return count
+}
+
+func readFakeLSPEventCount(path, event string) (int, error) {
+	data, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return 0, err
+	}
+	count := 0
+	for _, line := range strings.Split(string(data), "\n") {
+		if line == event {
+			count++
+		}
+	}
+	return count, nil
+}
+
+func fakeLSPEventCountNoFail(path, event string) int {
+	count, _ := readFakeLSPEventCount(path, event)
+	return count
+}
+
+func waitForFakeLSPEvent(t *testing.T, path, event string, want int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if got := fakeLSPEventCount(t, path, event); got >= want {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %d %q events, got %d", want, event, fakeLSPEventCount(t, path, event))
 }
 
 func fakeSymbol(name string) map[string]any {

@@ -25,11 +25,12 @@ import (
 type tool struct{}
 
 type languageServer struct {
-	ID         string
-	Title      string
-	Command    []string
-	Markers    []string
-	Extensions []string
+	ID          string
+	Title       string
+	Command     []string
+	Markers     []string
+	Extensions  []string
+	LanguageIDs map[string]string
 }
 
 type searchOptions struct {
@@ -43,11 +44,12 @@ type searchOptions struct {
 }
 
 type lspClient struct {
-	cmd    *exec.Cmd
-	stdin  io.WriteCloser
-	stdout *bufio.Reader
-	mu     sync.Mutex
-	nextID int
+	cmd       *exec.Cmd
+	stdin     io.WriteCloser
+	stdout    *bufio.Reader
+	mu        sync.Mutex
+	nextID    int
+	closeOnce sync.Once
 }
 
 type lspRequest struct {
@@ -114,6 +116,9 @@ const (
 	actionReferences      = "references"
 	defaultLimit          = 100
 	defaultTimeout        = 20 * time.Second
+	defaultIdleTimeout    = 10 * time.Minute
+	defaultSweepInterval  = 30 * time.Second
+	defaultCloseTimeout   = 2 * time.Second
 )
 
 var languageServers = []languageServer{
@@ -145,14 +150,229 @@ var languageServers = []languageServer{
 		Markers:    []string{"Cargo.toml"},
 		Extensions: []string{".rs"},
 	},
+	{
+		ID:         "cpp",
+		Title:      "C/C++",
+		Command:    []string{"clangd"},
+		Markers:    []string{"compile_commands.json", "compile_flags.txt", "CMakeLists.txt", "Makefile"},
+		Extensions: []string{".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx"},
+		LanguageIDs: map[string]string{
+			".c": "c", ".h": "c",
+			".cc": "cpp", ".cpp": "cpp", ".cxx": "cpp", ".hh": "cpp", ".hpp": "cpp", ".hxx": "cpp",
+		},
+	},
+	{
+		ID:         "java",
+		Title:      "Java",
+		Command:    []string{"jdtls"},
+		Markers:    []string{"pom.xml", "build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts"},
+		Extensions: []string{".java"},
+	},
+	{
+		ID:         "csharp",
+		Title:      "C#",
+		Command:    []string{"csharp-ls"},
+		Markers:    []string{"*.sln", "*.csproj"},
+		Extensions: []string{".cs"},
+	},
+	{
+		ID:         "php",
+		Title:      "PHP",
+		Command:    []string{"intelephense", "--stdio"},
+		Markers:    []string{"composer.json"},
+		Extensions: []string{".php"},
+	},
+	{
+		ID:         "ruby",
+		Title:      "Ruby",
+		Command:    []string{"ruby-lsp"},
+		Markers:    []string{"Gemfile", ".ruby-version"},
+		Extensions: []string{".rb"},
+	},
+	{
+		ID:         "lua",
+		Title:      "Lua",
+		Command:    []string{"lua-language-server"},
+		Markers:    []string{".luarc.json", ".luarc.jsonc", "stylua.toml"},
+		Extensions: []string{".lua"},
+	},
+	{
+		ID:         "bash",
+		Title:      "Shell",
+		Command:    []string{"bash-language-server", "start"},
+		Markers:    []string{".shellcheckrc"},
+		Extensions: []string{".sh", ".bash", ".zsh"},
+		LanguageIDs: map[string]string{
+			".sh": "shellscript", ".bash": "shellscript", ".zsh": "shellscript",
+		},
+	},
+	{
+		ID:         "json",
+		Title:      "JSON",
+		Command:    []string{"vscode-json-language-server", "--stdio"},
+		Markers:    []string{},
+		Extensions: []string{".json", ".jsonc"},
+		LanguageIDs: map[string]string{
+			".json": "json", ".jsonc": "jsonc",
+		},
+	},
+	{
+		ID:         "yaml",
+		Title:      "YAML",
+		Command:    []string{"yaml-language-server", "--stdio"},
+		Markers:    []string{},
+		Extensions: []string{".yaml", ".yml"},
+		LanguageIDs: map[string]string{
+			".yaml": "yaml", ".yml": "yaml",
+		},
+	},
+	{
+		ID:         "html",
+		Title:      "HTML",
+		Command:    []string{"vscode-html-language-server", "--stdio"},
+		Markers:    []string{},
+		Extensions: []string{".html", ".htm"},
+		LanguageIDs: map[string]string{
+			".html": "html", ".htm": "html",
+		},
+	},
+	{
+		ID:         "css",
+		Title:      "CSS",
+		Command:    []string{"vscode-css-language-server", "--stdio"},
+		Markers:    []string{},
+		Extensions: []string{".css", ".scss", ".sass", ".less"},
+		LanguageIDs: map[string]string{
+			".css": "css", ".scss": "scss", ".sass": "sass", ".less": "less",
+		},
+	},
+	{
+		ID:         "vue",
+		Title:      "Vue",
+		Command:    []string{"vue-language-server", "--stdio"},
+		Markers:    []string{"vue.config.js", "vite.config.js", "vite.config.ts", "nuxt.config.js", "nuxt.config.ts"},
+		Extensions: []string{".vue"},
+	},
+	{
+		ID:         "svelte",
+		Title:      "Svelte",
+		Command:    []string{"svelteserver", "--stdio"},
+		Markers:    []string{"svelte.config.js", "svelte.config.ts"},
+		Extensions: []string{".svelte"},
+	},
+	{
+		ID:         "kotlin",
+		Title:      "Kotlin",
+		Command:    []string{"kotlin-language-server"},
+		Markers:    []string{"build.gradle.kts", "settings.gradle.kts"},
+		Extensions: []string{".kt", ".kts"},
+		LanguageIDs: map[string]string{
+			".kt": "kotlin", ".kts": "kotlin",
+		},
+	},
+	{
+		ID:         "swift",
+		Title:      "Swift",
+		Command:    []string{"sourcekit-lsp"},
+		Markers:    []string{"Package.swift"},
+		Extensions: []string{".swift"},
+	},
+	{
+		ID:         "dart",
+		Title:      "Dart",
+		Command:    []string{"dart", "language-server", "--protocol=lsp"},
+		Markers:    []string{"pubspec.yaml"},
+		Extensions: []string{".dart"},
+	},
+	{
+		ID:         "terraform",
+		Title:      "Terraform",
+		Command:    []string{"terraform-ls", "serve"},
+		Markers:    []string{".terraform.lock.hcl"},
+		Extensions: []string{".tf", ".tfvars"},
+		LanguageIDs: map[string]string{
+			".tf": "terraform", ".tfvars": "terraform-vars",
+		},
+	},
+	{
+		ID:         "nix",
+		Title:      "Nix",
+		Command:    []string{"nil"},
+		Markers:    []string{"flake.nix", "shell.nix"},
+		Extensions: []string{".nix"},
+	},
+	{
+		ID:         "zig",
+		Title:      "Zig",
+		Command:    []string{"zls"},
+		Markers:    []string{"build.zig", "build.zig.zon"},
+		Extensions: []string{".zig"},
+	},
+	{
+		ID:         "haskell",
+		Title:      "Haskell",
+		Command:    []string{"haskell-language-server-wrapper", "--lsp"},
+		Markers:    []string{"cabal.project", "stack.yaml", "package.yaml"},
+		Extensions: []string{".hs", ".lhs"},
+		LanguageIDs: map[string]string{
+			".hs": "haskell", ".lhs": "literate haskell",
+		},
+	},
+	{
+		ID:         "ocaml",
+		Title:      "OCaml",
+		Command:    []string{"ocamllsp"},
+		Markers:    []string{"dune-project", "dune"},
+		Extensions: []string{".ml", ".mli"},
+		LanguageIDs: map[string]string{
+			".ml": "ocaml", ".mli": "ocaml.interface",
+		},
+	},
+	{
+		ID:         "scala",
+		Title:      "Scala",
+		Command:    []string{"metals"},
+		Markers:    []string{"build.sbt", ".scala-build"},
+		Extensions: []string{".scala", ".sc"},
+	},
+	{
+		ID:         "clojure",
+		Title:      "Clojure",
+		Command:    []string{"clojure-lsp"},
+		Markers:    []string{"deps.edn", "project.clj", "bb.edn"},
+		Extensions: []string{".clj", ".cljs", ".cljc", ".edn"},
+		LanguageIDs: map[string]string{
+			".clj": "clojure", ".cljs": "clojure", ".cljc": "clojure", ".edn": "clojure",
+		},
+	},
+}
+
+var defaultLSPManager = newLSPManager(defaultIdleTimeout, defaultSweepInterval, defaultCloseTimeout)
+
+// CloseLanguageServers shuts down all pooled language server subprocesses.
+func CloseLanguageServers() {
+	defaultLSPManager.close()
+}
+
+func parametersJSON() string {
+	languages, _ := json.Marshal(languageIDs())
+	return fmt.Sprintf(`{"type":"object","properties":{"action":{"type":"string","enum":["languages","workspace_symbol","document_symbols","definition","references"],"description":"LSP query to run. Defaults to workspace_symbol when query is provided."},"query":{"type":"string","description":"Workspace symbol query for action=workspace_symbol."},"path":{"type":"string","description":"Workspace file path for document_symbols, definition, or references, or optional scope hint for choosing a language server."},"language":{"type":"string","enum":%s,"description":"Optional language server to use. If omitted, all detected languages are queried for workspace_symbol, and path extension chooses for file actions."},"line":{"type":"integer","description":"1-indexed line for definition or references."},"character":{"type":"integer","description":"1-indexed UTF-16 character/column for definition or references."},"limit":{"type":"integer","description":"Maximum result lines to return. Defaults to 100."}},"additionalProperties":false}`, languages)
+}
+
+func languageIDs() []string {
+	ids := make([]string, 0, len(languageServers))
+	for _, server := range languageServers {
+		ids = append(ids, server.ID)
+	}
+	return ids
 }
 
 func init() {
 	tools.Register(tool{}, tools.ToolSpec{
 		Title:       "Search code",
 		Description: "Query detected language servers for code navigation.",
-		Usage:       "Launch well-known language server subprocesses for detected workspace languages and query them over LSP. Supports Go via gopls, TypeScript/JavaScript via typescript-language-server --stdio, Python via pylsp, and Rust via rust-analyzer when those commands are installed. Use action=workspace_symbol with query to find symbols across the workspace. Use action=document_symbols with path to list symbols in one file. Use action=definition or action=references with path, line, and character for navigation at a source position. Use action=languages to see detected languages and available server commands. Prefer this tool for semantic code navigation; use grep for arbitrary text search and read to inspect returned files.",
-		Parameters:  `{"type":"object","properties":{"action":{"type":"string","enum":["languages","workspace_symbol","document_symbols","definition","references"],"description":"LSP query to run. Defaults to workspace_symbol when query is provided."},"query":{"type":"string","description":"Workspace symbol query for action=workspace_symbol."},"path":{"type":"string","description":"Workspace file path for document_symbols, definition, or references, or optional scope hint for choosing a language server."},"language":{"type":"string","enum":["go","typescript","python","rust"],"description":"Optional language server to use. If omitted, all detected languages are queried for workspace_symbol, and path extension chooses for file actions."},"line":{"type":"integer","description":"1-indexed line for definition or references."},"character":{"type":"integer","description":"1-indexed UTF-16 character/column for definition or references."},"limit":{"type":"integer","description":"Maximum result lines to return. Defaults to 100."}},"additionalProperties":false}`,
+		Usage:       "Launch and reuse well-known language server subprocesses for detected workspace languages, keeping them warm while idle for about 10 minutes. Use action=workspace_symbol with query to find symbols across the workspace. Use action=document_symbols with path to list symbols in one file. Use action=definition or action=references with path, line, and character for navigation at a source position. Use action=languages to see detected languages, available server commands, and missing language server commands. Prefer this tool for semantic code navigation; use grep for arbitrary text search and read to inspect returned files.",
+		Parameters:  parametersJSON(),
 		ExposeToLLM: true,
 	})
 }
@@ -182,7 +402,7 @@ func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 	}
 	if language := strings.ToLower(strings.TrimSpace(tools.FirstArg(args, "language", "lang"))); language != "" {
 		if _, ok := languageByID(language); !ok {
-			return nil, errors.New("language must be one of: go, typescript, python, rust")
+			return nil, fmt.Errorf("language must be one of: %s", strings.Join(languageIDs(), ", "))
 		}
 		out["language"] = language
 	}
@@ -263,7 +483,7 @@ func (tool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Reques
 			skipped = append(skipped, fmt.Sprintf("%s: command %q not found", server.ID, server.Command[0]))
 			continue
 		}
-		result, err := queryServer(ctx, rootAbs, server, options)
+		result, err := defaultLSPManager.query(ctx, rootAbs, server, options)
 		if err != nil {
 			skipped = append(skipped, fmt.Sprintf("%s: %v", server.ID, err))
 			continue
@@ -280,6 +500,10 @@ func (tool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Reques
 	if len(skipped) > 0 {
 		lines = append(lines, "", "Skipped language servers:")
 		lines = append(lines, skipped...)
+	}
+	if missing := missingDetectedServers(detected); len(missing) > 0 {
+		lines = append(lines, "", "Missing language servers:")
+		lines = append(lines, missing...)
 	}
 	body, truncated := tools.TruncateText(strings.Join(lines, "\n"), tools.DefaultToolOutputLimit)
 	return tools.Result{
@@ -341,8 +565,12 @@ func languagesResult(detected []languageServer) tools.Result {
 			if _, err := exec.LookPath(server.Command[0]); err != nil {
 				status = "missing command"
 			}
-			lines = append(lines, fmt.Sprintf("%s: %s (%s) - %s", server.ID, server.Title, strings.Join(server.Command, " "), status))
+			lines = append(lines, fmt.Sprintf("%s: %s (%s) - %s", server.ID, server.Title, commandString(server), status))
 		}
+	}
+	if missing := missingDetectedServers(detected); len(missing) > 0 {
+		lines = append(lines, "", "Missing language servers:")
+		lines = append(lines, missing...)
 	}
 	return tools.Result{
 		Output: strings.Join(lines, "\n"),
@@ -350,31 +578,23 @@ func languagesResult(detected []languageServer) tools.Result {
 	}
 }
 
-func queryServer(ctx context.Context, rootAbs string, server languageServer, options searchOptions) (lspResult, error) {
-	client, err := startLSP(ctx, rootAbs, server)
-	if err != nil {
-		return lspResult{}, err
-	}
-	defer client.close()
-	if err := client.initialize(rootAbs); err != nil {
-		return lspResult{}, err
-	}
+func queryClient(ctx context.Context, client *lspClient, rootAbs string, server languageServer, options searchOptions) (lspResult, error) {
 	switch options.Action {
 	case actionWorkspaceSymbol:
-		return client.workspaceSymbol(server, rootAbs, options.Query)
+		return client.workspaceSymbol(ctx, server, rootAbs, options.Query)
 	case actionDocumentSymbols:
-		return client.documentSymbols(server, rootAbs, options.Path)
+		return client.documentSymbols(ctx, server, rootAbs, options.Path)
 	case actionDefinition:
-		return client.definition(server, rootAbs, options.Path, options.Line, options.Character)
+		return client.definition(ctx, server, rootAbs, options.Path, options.Line, options.Character)
 	case actionReferences:
-		return client.references(server, rootAbs, options.Path, options.Line, options.Character)
+		return client.references(ctx, server, rootAbs, options.Path, options.Line, options.Character)
 	default:
 		return lspResult{}, fmt.Errorf("unsupported action %q", options.Action)
 	}
 }
 
-func startLSP(ctx context.Context, rootAbs string, server languageServer) (*lspClient, error) {
-	cmd := exec.CommandContext(ctx, server.Command[0], server.Command[1:]...)
+func startLSP(rootAbs string, server languageServer) (*lspClient, error) {
+	cmd := exec.Command(server.Command[0], server.Command[1:]...)
 	cmd.Dir = rootAbs
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -391,7 +611,7 @@ func startLSP(ctx context.Context, rootAbs string, server languageServer) (*lspC
 	return &lspClient{cmd: cmd, stdin: stdin, stdout: bufio.NewReader(stdout), nextID: 1}, nil
 }
 
-func (c *lspClient) initialize(rootAbs string) error {
+func (c *lspClient) initialize(ctx context.Context, rootAbs string) error {
 	params := map[string]any{
 		"processId": os.Getpid(),
 		"rootUri":   fileURI(rootAbs),
@@ -408,14 +628,14 @@ func (c *lspClient) initialize(rootAbs string) error {
 			"name": filepath.Base(rootAbs),
 		}},
 	}
-	if _, err := c.request("initialize", params); err != nil {
+	if _, err := c.request(ctx, "initialize", params); err != nil {
 		return err
 	}
-	return c.notify("initialized", map[string]any{})
+	return c.notify(ctx, "initialized", map[string]any{})
 }
 
-func (c *lspClient) workspaceSymbol(server languageServer, rootAbs, query string) (lspResult, error) {
-	raw, err := c.request("workspace/symbol", map[string]string{"query": query})
+func (c *lspClient) workspaceSymbol(ctx context.Context, server languageServer, rootAbs, query string) (lspResult, error) {
+	raw, err := c.request(ctx, "workspace/symbol", map[string]string{"query": query})
 	if err != nil {
 		return lspResult{}, err
 	}
@@ -427,34 +647,34 @@ func (c *lspClient) workspaceSymbol(server languageServer, rootAbs, query string
 	for _, symbol := range symbols {
 		lines = append(lines, formatSymbol(server.ID, rootAbs, symbol))
 	}
-	return lspResult{Language: server.ID, Server: strings.Join(server.Command, " "), Lines: lines}, nil
+	return lspResult{Language: server.ID, Server: commandString(server), Lines: lines}, nil
 }
 
-func (c *lspClient) documentSymbols(server languageServer, rootAbs, path string) (lspResult, error) {
+func (c *lspClient) documentSymbols(ctx context.Context, server languageServer, rootAbs, path string) (lspResult, error) {
 	abs, uri, text, err := textDocument(rootAbs, path)
 	if err != nil {
 		return lspResult{}, err
 	}
-	if err := c.didOpen(uri, server.ID, text); err != nil {
+	if err := c.didOpen(ctx, uri, languageIDForPath(server, path), text); err != nil {
 		return lspResult{}, err
 	}
-	raw, err := c.request("textDocument/documentSymbol", map[string]any{"textDocument": map[string]string{"uri": uri}})
+	raw, err := c.request(ctx, "textDocument/documentSymbol", map[string]any{"textDocument": map[string]string{"uri": uri}})
 	if err != nil {
 		return lspResult{}, err
 	}
 	lines, err := formatDocumentSymbols(server.ID, rootAbs, abs, raw)
-	return lspResult{Language: server.ID, Server: strings.Join(server.Command, " "), Lines: lines}, err
+	return lspResult{Language: server.ID, Server: commandString(server), Lines: lines}, err
 }
 
-func (c *lspClient) definition(server languageServer, rootAbs, path string, line, character int) (lspResult, error) {
+func (c *lspClient) definition(ctx context.Context, server languageServer, rootAbs, path string, line, character int) (lspResult, error) {
 	_, uri, text, err := textDocument(rootAbs, path)
 	if err != nil {
 		return lspResult{}, err
 	}
-	if err := c.didOpen(uri, server.ID, text); err != nil {
+	if err := c.didOpen(ctx, uri, languageIDForPath(server, path), text); err != nil {
 		return lspResult{}, err
 	}
-	raw, err := c.request("textDocument/definition", map[string]any{
+	raw, err := c.request(ctx, "textDocument/definition", map[string]any{
 		"textDocument": map[string]string{"uri": uri},
 		"position": map[string]int{
 			"line":      line - 1,
@@ -465,18 +685,18 @@ func (c *lspClient) definition(server languageServer, rootAbs, path string, line
 		return lspResult{}, err
 	}
 	lines, err := formatLocations(server.ID, rootAbs, raw)
-	return lspResult{Language: server.ID, Server: strings.Join(server.Command, " "), Lines: lines}, err
+	return lspResult{Language: server.ID, Server: commandString(server), Lines: lines}, err
 }
 
-func (c *lspClient) references(server languageServer, rootAbs, path string, line, character int) (lspResult, error) {
+func (c *lspClient) references(ctx context.Context, server languageServer, rootAbs, path string, line, character int) (lspResult, error) {
 	_, uri, text, err := textDocument(rootAbs, path)
 	if err != nil {
 		return lspResult{}, err
 	}
-	if err := c.didOpen(uri, server.ID, text); err != nil {
+	if err := c.didOpen(ctx, uri, languageIDForPath(server, path), text); err != nil {
 		return lspResult{}, err
 	}
-	raw, err := c.request("textDocument/references", map[string]any{
+	raw, err := c.request(ctx, "textDocument/references", map[string]any{
 		"textDocument": map[string]string{"uri": uri},
 		"position": map[string]int{
 			"line":      line - 1,
@@ -488,11 +708,11 @@ func (c *lspClient) references(server languageServer, rootAbs, path string, line
 		return lspResult{}, err
 	}
 	lines, err := formatLocations(server.ID, rootAbs, raw)
-	return lspResult{Language: server.ID, Server: strings.Join(server.Command, " "), Lines: lines}, err
+	return lspResult{Language: server.ID, Server: commandString(server), Lines: lines}, err
 }
 
-func (c *lspClient) didOpen(uri, languageID, text string) error {
-	return c.notify("textDocument/didOpen", map[string]any{
+func (c *lspClient) didOpen(ctx context.Context, uri, languageID, text string) error {
+	return c.notify(ctx, "textDocument/didOpen", map[string]any{
 		"textDocument": map[string]any{
 			"uri":        uri,
 			"languageId": languageID,
@@ -502,16 +722,19 @@ func (c *lspClient) didOpen(uri, languageID, text string) error {
 	})
 }
 
-func (c *lspClient) request(method string, params any) (json.RawMessage, error) {
+func (c *lspClient) request(ctx context.Context, method string, params any) (json.RawMessage, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	c.mu.Lock()
+	defer c.mu.Unlock()
 	id := c.nextID
 	c.nextID++
-	c.mu.Unlock()
 	if err := writeLSP(c.stdin, lspRequest{JSONRPC: "2.0", ID: id, Method: method, Params: params}); err != nil {
 		return nil, err
 	}
 	for {
-		resp, err := readLSP(c.stdout)
+		resp, err := c.readResponse(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -519,21 +742,72 @@ func (c *lspClient) request(method string, params any) (json.RawMessage, error) 
 			continue
 		}
 		if resp.Error != nil {
-			return nil, errors.New(resp.Error.Message)
+			return nil, lspServerError{message: resp.Error.Message}
 		}
 		return resp.Result, nil
 	}
 }
 
-func (c *lspClient) notify(method string, params any) error {
+func (c *lspClient) notify(ctx context.Context, method string, params any) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	return writeLSP(c.stdin, lspRequest{JSONRPC: "2.0", Method: method, Params: params})
 }
 
-func (c *lspClient) close() {
-	_, _ = c.request("shutdown", nil)
-	_ = c.notify("exit", nil)
-	_ = c.stdin.Close()
-	_ = c.cmd.Wait()
+func (c *lspClient) readResponse(ctx context.Context) (lspResponse, error) {
+	type readResult struct {
+		response lspResponse
+		err      error
+	}
+	out := make(chan readResult, 1)
+	go func() {
+		resp, err := readLSP(c.stdout)
+		out <- readResult{response: resp, err: err}
+	}()
+	select {
+	case result := <-out:
+		return result.response, result.err
+	case <-ctx.Done():
+		c.kill()
+		return lspResponse{}, ctx.Err()
+	}
+}
+
+func (c *lspClient) closeWithTimeout(timeout time.Duration) {
+	c.closeOnce.Do(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+		done := make(chan struct{})
+		go func() {
+			_, _ = c.request(ctx, "shutdown", nil)
+			_ = c.notify(ctx, "exit", nil)
+			_ = c.stdin.Close()
+			_ = c.cmd.Wait()
+			close(done)
+		}()
+		select {
+		case <-done:
+		case <-ctx.Done():
+			c.kill()
+			_ = c.stdin.Close()
+			select {
+			case <-done:
+			case <-time.After(timeout):
+			}
+		}
+	})
+}
+
+func (c *lspClient) kill() {
+	if c.cmd != nil && c.cmd.Process != nil {
+		_ = c.cmd.Process.Kill()
+	}
 }
 
 func writeLSP(w io.Writer, msg lspRequest) error {
@@ -598,6 +872,16 @@ func detectLanguages(rootAbs string) ([]languageServer, error) {
 
 func detectsLanguage(rootAbs string, server languageServer) (bool, error) {
 	for _, marker := range server.Markers {
+		if strings.ContainsAny(marker, "*?[") {
+			matches, err := filepath.Glob(filepath.Join(rootAbs, marker))
+			if err != nil {
+				return false, err
+			}
+			if len(matches) > 0 {
+				return true, nil
+			}
+			continue
+		}
 		if _, err := os.Stat(filepath.Join(rootAbs, marker)); err == nil {
 			return true, nil
 		}
@@ -646,6 +930,26 @@ func selectedServers(rootAbs string, detected []languageServer, options searchOp
 		return nil, errors.New("no supported workspace language detected")
 	}
 	return detected, nil
+}
+
+func missingDetectedServers(detected []languageServer) []string {
+	var missing []string
+	for _, server := range detected {
+		if msg := missingCommand(server); msg != "" {
+			missing = append(missing, msg)
+		}
+	}
+	return missing
+}
+
+func languageIDForPath(server languageServer, path string) string {
+	ext := filepath.Ext(path)
+	if server.LanguageIDs != nil {
+		if id := server.LanguageIDs[ext]; id != "" {
+			return id
+		}
+	}
+	return server.ID
 }
 
 func languageByID(id string) (languageServer, bool) {
