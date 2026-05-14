@@ -434,6 +434,17 @@
         },
         toolTitle(tool) { return toolTitleText(tool); },
         toolPreview(tool) { return toolPreviewText(tool); },
+        toolApproval(tool) { return tool?.approval || tool?.Approval || null; },
+        toolApprovalID(tool) {
+          const approval = this.toolApproval(tool);
+          return approval?.id || approval?.ID || 0;
+        },
+        toolApprovalPending(tool) {
+          const approval = this.toolApproval(tool);
+          if (!approval) return false;
+          const status = String(approval.status || approval.Status || tool?.status || tool?.Status || '').toLowerCase();
+          return this.toolApprovalID(tool) > 0 && (!status || status === 'pending');
+        },
         toolResultHTML(tool) { return renderToolResult(tool); },
         resizeComposer() {
           const el = this.$refs.composerInput; if (!el) return;

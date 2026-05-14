@@ -509,6 +509,39 @@ func TestRuntimeApproveStartsApprovalStream(t *testing.T) {
 	}
 }
 
+func TestLoadWithPendingApprovalStartsWaitingForApproval(t *testing.T) {
+	st := openTestStore(t)
+	session, chatRecord, _ := createSessionWithPlan(t, st)
+	approval, err := st.CreateChatApproval(context.Background(), chatRecord.ID, domain.ToolKindBash, "echo hi")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := &pendingToolFakeRunner{}
+	rt, err := Load(context.Background(), st, session, chatRecord, runner, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(rt.Close)
+
+	snapshot := rt.Snapshot()
+	if snapshot.Status != StatusWaitingApproval {
+		t.Fatalf("status = %q, want %q", snapshot.Status, StatusWaitingApproval)
+	}
+	if snapshot.StatusText != "Waiting for approval" {
+		t.Fatalf("status text = %q", snapshot.StatusText)
+	}
+	if got := len(snapshot.Approvals); got != 1 {
+		t.Fatalf("approvals = %d, want 1", got)
+	}
+	if snapshot.Approvals[0].ID != approval.ID {
+		t.Fatalf("approval ID = %d, want %d", snapshot.Approvals[0].ID, approval.ID)
+	}
+	time.Sleep(20 * time.Millisecond)
+	if got := runner.resumeCallCount(); got != 0 {
+		t.Fatalf("pending tools resumed while waiting for approval: %d calls", got)
+	}
+}
+
 func TestRuntimeCancelWhileToolsRunningStagesThenForcesCancel(t *testing.T) {
 	session := domain.Session{ID: 1}
 	chat := domain.Chat{ID: 2, SessionID: 1}

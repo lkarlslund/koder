@@ -62,6 +62,10 @@
                 <div class="tool mt-3 ps-3">
                   <div class="small fw-semibold"><i class="bi" :class="toolIcon(tool.tool)"></i> <span x-text="toolTitle(tool)"></span> <span class="badge text-bg-secondary" x-text="tool.status"></span></div>
                   <div class="small text-secondary" x-show="toolPreview(tool)" x-text="toolPreview(tool)"></div>
+                  <div class="btn-group btn-group-sm mt-2" x-show="toolApprovalPending(tool)">
+                    <button type="button" class="btn btn-success" @click="rpc('approve', {id: toolApprovalID(tool)})"><i class="bi bi-check-lg"></i> Approve</button>
+                    <button type="button" class="btn btn-outline-danger" @click="rpc('deny', {id: toolApprovalID(tool)})"><i class="bi bi-x-lg"></i> Deny</button>
+                  </div>
                   <template x-if="tool.result"><div class="tool-result mt-2" x-html="toolResultHTML(tool)"></div></template>
                   <template x-if="tool.error"><pre class="small text-danger mt-2" x-text="tool.error.message || tool.error.code || 'tool error'"></pre></template>
                 </div>

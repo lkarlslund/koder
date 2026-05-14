@@ -191,6 +191,12 @@ func New(session domain.Session, chatRecord domain.Chat, timeline []domain.Timel
 	if chatRecord.ID == 0 {
 		return nil, fmt.Errorf("chat id is required")
 	}
+	status := StatusIdle
+	statusText := ""
+	if len(approvals) > 0 {
+		status = StatusWaitingApproval
+		statusText = "Waiting for approval"
+	}
 	c := &Chat{
 		store:      st,
 		engine:     runner,
@@ -198,7 +204,8 @@ func New(session domain.Session, chatRecord domain.Chat, timeline []domain.Timel
 		session:    session,
 		chat:       chatRecord,
 		state:      NewTimelineState(chatRecord, timeline, approvals),
-		status:     StatusIdle,
+		status:     status,
+		statusText: statusText,
 		queue:      cloneQueuedInputs(chatRecord.QueuedInputs),
 		queueNotes: map[int64]string{},
 		inbox:      make(chan any, 64),

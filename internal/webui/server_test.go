@@ -344,6 +344,9 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `chatStatusLabel(chat)`) || !strings.Contains(fullPage, `chat-status-icon`) {
 		t.Fatalf("expected chat sidebar to render per-chat animated status icons")
 	}
+	if !strings.Contains(fullPage, `toolApprovalPending(tool)`) || !strings.Contains(fullPage, `rpc('approve', {id: toolApprovalID(tool)})`) || !strings.Contains(fullPage, `rpc('deny', {id: toolApprovalID(tool)})`) {
+		t.Fatalf("expected pending tool approval cards to expose approve and deny actions inline")
+	}
 	if !strings.Contains(fullPage, `this.state.chat_statuses`) || !strings.Contains(fullPage, `waiting_llm: 'Waiting for LLM'`) {
 		t.Fatalf("expected chat sidebar status helpers for all chats")
 	}
