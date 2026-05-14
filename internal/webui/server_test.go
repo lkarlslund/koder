@@ -378,6 +378,9 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `applyChatDelta(delta)`) || !strings.Contains(fullPage, `patchTimelineItem`) || !strings.Contains(fullPage, `msg.type === 'chat_delta'`) {
 		t.Fatalf("expected browser to patch compact chat deltas")
 	}
+	if !strings.Contains(fullPage, `(id && existingID === id) || (seq && existingSeq === seq)`) {
+		t.Fatalf("expected browser timeline patching to replace temporary streaming ids by stable sequence")
+	}
 	if !strings.Contains(fullPage, `applyStateDelta(delta)`) || !strings.Contains(fullPage, `msg.type === 'state_delta'`) {
 		t.Fatalf("expected browser to patch compact state deltas")
 	}

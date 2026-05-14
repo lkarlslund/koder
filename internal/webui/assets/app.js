@@ -469,7 +469,7 @@
           const idx = out.findIndex(existing => {
             const existingID = existing.id || existing.ID || 0;
             const existingSeq = existing.seq || existing.Seq || 0;
-            return (id && existingID === id) || (!id && seq && existingSeq === seq);
+            return (id && existingID === id) || (seq && existingSeq === seq);
           });
           if (idx >= 0) out[idx] = item; else out.push(item);
           return out;
