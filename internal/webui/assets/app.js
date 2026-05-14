@@ -71,8 +71,29 @@
       const result = (tool && tool.result) || {};
       return firstValue(result, ['text', 'Text']) || firstValue(result, ['diff', 'Diff']);
     }
+    function toolErrorText(tool) {
+      const err = (tool && (tool.error || tool.Error)) || {};
+      return firstValue(err, ['message', 'Message', 'code', 'Code']);
+    }
     function toolStatus(tool) {
       return String((tool && (tool.status || tool.Status)) || '').toLowerCase();
+    }
+    function toolExitCode(tool) {
+      const data = toolData(tool);
+      const direct = firstValue(data, ['exit_code', 'ExitCode']);
+      if (direct !== '') return direct;
+      const text = [toolErrorText(tool), toolResultText(tool)].join('\n');
+      const match = text.match(/exit status\s+(-?\d+)/i) || text.match(/exit code\s+(-?\d+)/i);
+      return match ? match[1] : '';
+    }
+    function toolStatusBadgeText(tool) {
+      const kind = String((tool && tool.tool) || '');
+      const exitCode = toolExitCode(tool);
+      if ((kind === 'bash' || kind.startsWith('exec_')) && exitCode !== '') return 'exit ' + exitCode;
+      return toolStatus(tool);
+    }
+    function isBareExitStatus(text) {
+      return /^bash failed:\s*exit status\s+-?\d+\s*$/i.test(String(text || '').trim());
     }
     function toolResultHeader(title) {
       return '<div class="tool-result-header">' + escapeHTML(title) + '</div>';
@@ -124,7 +145,10 @@
         case 'write': return path ? 'Write ' + path : 'Write file';
         case 'edit': return path ? 'Edit ' + path : 'Edit file';
         case 'apply_patch': return 'Apply patch';
-        case 'bash': return toolStatus(tool) === 'done' && command ? 'Ran ' + command : 'Run command';
+        case 'bash': {
+          if ((toolStatus(tool) === 'done' || toolStatus(tool) === 'errored') && command) return 'Ran ' + command;
+          return 'Run command';
+        }
         case 'exec_command': return 'Start exec';
         case 'exec_status': return 'Exec status';
         case 'exec_list': return 'Exec sessions';
@@ -142,7 +166,7 @@
     }
     function toolPreviewText(tool) {
       const args = toolArgs(tool);
-      if (String((tool && tool.tool) || '') === 'bash' && toolStatus(tool) === 'done') return '';
+      if (String((tool && tool.tool) || '') === 'bash' && (toolStatus(tool) === 'done' || toolStatus(tool) === 'errored')) return '';
       const values = [];
       if (args.command) values.push(args.command);
       for (const key of ['path', 'pattern', 'query', 'url', 'include']) {
@@ -207,6 +231,20 @@
       }
       if (kind === 'show_image') return renderShowImageBlock(data, toolResultText(tool));
       return renderCompactBlock(kind || 'Tool result', toolResultText(tool));
+    }
+    function renderToolError(tool) {
+      const kind = String((tool && tool.tool) || '');
+      const data = toolData(tool);
+      if (kind === 'bash') {
+        const output = firstValue(data, ['output', 'Output']);
+        const error = toolErrorText(tool);
+        if (!output && isBareExitStatus(error)) return '';
+        return renderCompactBlock('Output', output || error, 'tool-result-body-mono');
+      }
+      if (kind.startsWith('exec_')) {
+        return renderCompactBlock('Result', execResultLines(data, toolErrorText(tool)), 'tool-result-body-mono');
+      }
+      return renderCompactBlock('Error', toolErrorText(tool));
     }
     function koderApp() {
       return {
@@ -687,11 +725,13 @@
         },
         toolTitle(tool) { return toolTitleText(tool); },
         toolPreview(tool) { return toolPreviewText(tool); },
+        toolStatusBadge(tool) { return toolStatusBadgeText(tool); },
         toolCallID(tool) { return tool?.tool_call_id || tool?.ToolCallID || ''; },
         toolApprovalPending(tool) {
           return this.toolCallID(tool) && toolStatus(tool) === 'awaiting_approval';
         },
         toolResultHTML(tool) { return renderToolResult(tool); },
+        toolErrorHTML(tool) { return renderToolError(tool); },
         resizeComposer() {
           const el = this.$refs.composerInput; if (!el) return;
           const maxHeight = Math.floor((window.innerHeight || 800) * 0.2);

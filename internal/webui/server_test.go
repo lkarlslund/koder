@@ -342,6 +342,9 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `toolResultHTML(tool)`) || !strings.Contains(fullPage, `function renderToolResult(tool)`) {
 		t.Fatalf("expected tool results to render through the per-tool formatter")
 	}
+	if !strings.Contains(fullPage, `toolErrorHTML(tool)`) || !strings.Contains(fullPage, `function renderToolError(tool)`) || !strings.Contains(fullPage, `toolStatusBadge(tool)`) {
+		t.Fatalf("expected tool errors to render through the compact per-tool formatter")
+	}
 	if !strings.Contains(fullPage, `function renderDiffBlock(title, diff)`) || !strings.Contains(fullPage, `tool-diff-add`) || !strings.Contains(fullPage, `tool-diff-del`) {
 		t.Fatalf("expected edit and patch results to use colored diff rendering")
 	}
@@ -351,11 +354,11 @@ func TestIndexServesHTML(t *testing.T) {
 	if strings.Contains(fullPage, `case 'bash': return command ? 'Run ' + command`) || strings.Contains(fullPage, `const title = firstValue(data, ['command', 'Command'`) {
 		t.Fatalf("expected command tools to render the command once, not in title and result header")
 	}
-	if !strings.Contains(fullPage, `case 'bash': return toolStatus(tool) === 'done' && command ? 'Ran ' + command : 'Run command'`) || !strings.Contains(fullPage, `return renderCompactBlock('Output'`) {
-		t.Fatalf("expected completed bash tool rendering to show Ran command and compact output")
+	if !strings.Contains(fullPage, `toolStatus(tool) === 'done' || toolStatus(tool) === 'errored'`) || !strings.Contains(fullPage, `return 'exit ' + exitCode`) || !strings.Contains(fullPage, `isBareExitStatus(error)`) || !strings.Contains(fullPage, `return renderCompactBlock('Output'`) {
+		t.Fatalf("expected bash tool rendering to show Ran command, exit code, and compact output")
 	}
-	if !strings.Contains(fullPage, `String((tool && tool.tool) || '') === 'bash' && toolStatus(tool) === 'done'`) {
-		t.Fatalf("expected completed bash tool rendering to avoid repeating the command preview")
+	if !strings.Contains(fullPage, `String((tool && tool.tool) || '') === 'bash' && (toolStatus(tool) === 'done' || toolStatus(tool) === 'errored')`) {
+		t.Fatalf("expected completed and errored bash tool rendering to avoid repeating the command preview")
 	}
 	if !strings.Contains(fullPage, `if (args.command) values.push(args.command)`) || !strings.Contains(fullPage, `function execResultLines(data, fallback)`) {
 		t.Fatalf("expected command preview and exec result helpers")
