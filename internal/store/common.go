@@ -6,39 +6,25 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
-	"strings"
 	"time"
 )
 
 const (
-	schemaVersion = 4
+	schemaVersion = 6
 	encodingJSON  = "json"
 )
 
 type metaRecord struct {
-	SchemaVersion  int              `json:"schema_version"`
-	Encoding       string           `json:"encoding"`
-	Backend        string           `json:"backend"`
-	NextSessionID  int64            `json:"next_session_id"`
-	NextChatID     int64            `json:"next_chat_id"`
-	NextApprovalID int64            `json:"next_approval_id"`
-	NextTaskID     int64            `json:"next_task_id"`
-	NextTodoID     int64            `json:"next_todo_id"`
-	NextIDs        map[string]int64 `json:"next_ids,omitempty"`
+	SchemaVersion int    `json:"schema_version"`
+	Encoding      string `json:"encoding"`
+	Backend       string `json:"backend"`
 }
 
 func defaultMeta(backend string) metaRecord {
 	return metaRecord{
-		SchemaVersion:  schemaVersion,
-		Encoding:       encodingJSON,
-		Backend:        backend,
-		NextSessionID:  1,
-		NextChatID:     1,
-		NextApprovalID: 1,
-		NextTaskID:     1,
-		NextTodoID:     1,
-		NextIDs:        map[string]int64{},
+		SchemaVersion: schemaVersion,
+		Encoding:      encodingJSON,
+		Backend:       backend,
 	}
 }
 
@@ -68,10 +54,6 @@ func encodeJSON(v any) ([]byte, error) {
 	return data, nil
 }
 
-func formatID(id int64) string {
-	return fmt.Sprintf("%020d", id)
-}
-
 func formatUnixNanos(t time.Time) string {
 	return fmt.Sprintf("%020d", t.UTC().UnixNano())
 }
@@ -86,11 +68,6 @@ func collectionRecordKey(namespace string, id string) string {
 
 func collectionIndexKey(namespace, name, value, id string) string {
 	return "collection-index/" + namespace + "/" + name + "/" + value + "/" + id
-}
-
-func parseIDFromSuffix(key, prefix string) (int64, error) {
-	raw := strings.TrimPrefix(key, prefix)
-	return strconv.ParseInt(raw, 10, 64)
 }
 
 func writeJSONFile(path string, value any) error {

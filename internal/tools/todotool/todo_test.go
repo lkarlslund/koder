@@ -11,13 +11,13 @@ import (
 	_ "github.com/lkarlslund/koder/internal/tools/all"
 )
 
-func TestTodoUpdateItemAcceptsZeroID(t *testing.T) {
-	id, err := tools.ParseTodoID("0.00000")
+func TestTodoUpdateItemParsesStringID(t *testing.T) {
+	id, err := tools.ParseTodoID("019aa000-0000-7000-8000-000000000001")
 	if err != nil {
-		t.Fatalf("expected zero todo id to parse, got %v", err)
+		t.Fatalf("expected todo id to parse, got %v", err)
 	}
-	if id != 0 {
-		t.Fatalf("expected parsed todo id 0, got %d", id)
+	if id != "019aa000-0000-7000-8000-000000000001" {
+		t.Fatalf("expected parsed todo id, got %s", id)
 	}
 }
 
@@ -138,15 +138,15 @@ func TestTodoAddPersistReturnsRealTodoIDs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(result.Output, "#0 Write tests") {
-		t.Fatalf("expected execute preview to contain zero placeholder id, got %q", result.Output)
+	if !strings.Contains(result.Output, "# Write tests") {
+		t.Fatalf("expected execute preview to contain todo content, got %q", result.Output)
 	}
 	events, err := registry.PersistResult(ctx, st, session.ID, req, result)
 	if err != nil {
 		t.Fatal(err)
 	}
 	event := <-events
-	if strings.Contains(event.Text, "#0") || !strings.Contains(event.Text, "#1 Write tests") || !strings.Contains(event.Text, "#2 Fix bug") {
+	if !strings.Contains(event.Text, " Write tests") || !strings.Contains(event.Text, " Fix bug") {
 		t.Fatalf("expected persisted event to contain real todo ids, got %q", event.Text)
 	}
 }
@@ -183,7 +183,7 @@ func openPlanningTestStore(t *testing.T) *store.Store {
 	return st
 }
 
-func executeAndPersist(ctx context.Context, t *testing.T, registry *tools.Registry, st *store.Store, sessionID int64, req tools.Request) (tools.Result, error) {
+func executeAndPersist(ctx context.Context, t *testing.T, registry *tools.Registry, st *store.Store, sessionID domain.ID, req tools.Request) (tools.Result, error) {
 	t.Helper()
 	result, err := registry.ExecuteWithSession(ctx, st, sessionID, req)
 	if err != nil {

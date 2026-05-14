@@ -43,7 +43,7 @@ func TestSessionMessageRoundTrip(t *testing.T) {
 	}
 }
 
-func appendTimelineForTest(t *testing.T, st *Store, chatID int64, content domain.TimelineContent) domain.TimelineItem {
+func appendTimelineForTest(t *testing.T, st *Store, chatID domain.ID, content domain.TimelineContent) domain.TimelineItem {
 	t.Helper()
 	item, err := st.AppendTimeline(context.Background(), chatID, content)
 	if err != nil {
@@ -131,8 +131,8 @@ func TestConcurrentAttachToolResultsPreservesAllChildren(t *testing.T) {
 
 func TestGenericCollectionRoundTripAndIndex(t *testing.T) {
 	type note struct {
-		ID     int64
-		ChatID int64
+		ID     domain.ID
+		ChatID domain.ID
 		Body   string
 	}
 	for _, backend := range []string{BackendPebble, BackendJSONFS} {
@@ -141,18 +141,17 @@ func TestGenericCollectionRoundTripAndIndex(t *testing.T) {
 			st := openTestStoreAt(t, backend, dir)
 			notes := NewCollection(st, CollectionSpec[note]{
 				Namespace: "test-notes",
-				NextID:    "test-note",
-				GetID:     func(v note) string { return numericCollectionID(v.ID) },
-				SetID:     func(v *note, id string) { v.ID = mustParseCollectionID(id) },
+				GetID:     func(v note) string { return v.ID },
+				SetID:     func(v *note, id string) { v.ID = id },
 				Indexes: []IndexSpec[note]{
-					{Name: "chat", Value: func(v note) string { return strconv.FormatInt(v.ChatID, 10) }},
+					{Name: "chat", Value: func(v note) string { return v.ChatID }},
 				},
 			})
-			first, err := notes.Insert(context.Background(), note{ChatID: 7, Body: "first"})
+			first, err := notes.Insert(context.Background(), note{ChatID: "chat-7", Body: "first"})
 			if err != nil {
 				t.Fatal(err)
 			}
-			second, err := notes.Insert(context.Background(), note{ChatID: 8, Body: "second"})
+			second, err := notes.Insert(context.Background(), note{ChatID: "chat-8", Body: "second"})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -167,7 +166,7 @@ func TestGenericCollectionRoundTripAndIndex(t *testing.T) {
 			if got.Body != "updated" {
 				t.Fatalf("body = %q", got.Body)
 			}
-			indexed, err := notes.List(context.Background(), ByIndex[note]("chat", "7"))
+			indexed, err := notes.List(context.Background(), ByIndex[note]("chat", "chat-7"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -196,13 +195,13 @@ func TestGenericCollectionRoundTripAndIndex(t *testing.T) {
 
 func TestGenericCollectionTransactionPersistsMultipleCollections(t *testing.T) {
 	type note struct {
-		ID     int64
-		ChatID int64
+		ID     domain.ID
+		ChatID domain.ID
 		Body   string
 	}
 	type marker struct {
-		ID     int64
-		NoteID int64
+		ID     domain.ID
+		NoteID domain.ID
 		Label  string
 	}
 	for _, backend := range []string{BackendPebble, BackendJSONFS} {
@@ -211,27 +210,25 @@ func TestGenericCollectionTransactionPersistsMultipleCollections(t *testing.T) {
 			st := openTestStoreAt(t, backend, dir)
 			notes := NewCollection(st, CollectionSpec[note]{
 				Namespace: "tx-notes",
-				NextID:    "tx-note",
-				GetID:     func(v note) string { return numericCollectionID(v.ID) },
-				SetID:     func(v *note, id string) { v.ID = mustParseCollectionID(id) },
+				GetID:     func(v note) string { return v.ID },
+				SetID:     func(v *note, id string) { v.ID = id },
 				Indexes: []IndexSpec[note]{
-					{Name: "chat", Value: func(v note) string { return strconv.FormatInt(v.ChatID, 10) }},
+					{Name: "chat", Value: func(v note) string { return v.ChatID }},
 				},
 			})
 			markers := NewCollection(st, CollectionSpec[marker]{
 				Namespace: "tx-markers",
-				NextID:    "tx-marker",
-				GetID:     func(v marker) string { return numericCollectionID(v.ID) },
-				SetID:     func(v *marker, id string) { v.ID = mustParseCollectionID(id) },
+				GetID:     func(v marker) string { return v.ID },
+				SetID:     func(v *marker, id string) { v.ID = id },
 				Indexes: []IndexSpec[marker]{
-					{Name: "note", Value: func(v marker) string { return strconv.FormatInt(v.NoteID, 10) }},
+					{Name: "note", Value: func(v marker) string { return v.NoteID }},
 				},
 			})
 
 			var inserted note
 			if err := st.Transaction(context.Background(), func(tx *Tx) error {
 				var err error
-				inserted, err = notes.InsertTx(tx, context.Background(), note{ChatID: 42, Body: "inside transaction"})
+				inserted, err = notes.InsertTx(tx, context.Background(), note{ChatID: "chat-42", Body: "inside transaction"})
 				if err != nil {
 					return err
 				}
@@ -247,14 +244,14 @@ func TestGenericCollectionTransactionPersistsMultipleCollections(t *testing.T) {
 			reopened := openTestStoreAt(t, backend, dir)
 			notes = NewCollection(reopened, notes.spec)
 			markers = NewCollection(reopened, markers.spec)
-			reloadedNotes, err := notes.List(context.Background(), ByIndex[note]("chat", "42"))
+			reloadedNotes, err := notes.List(context.Background(), ByIndex[note]("chat", "chat-42"))
 			if err != nil {
 				t.Fatal(err)
 			}
 			if len(reloadedNotes) != 1 || reloadedNotes[0].ID != inserted.ID {
 				t.Fatalf("reloaded notes = %#v", reloadedNotes)
 			}
-			reloadedMarkers, err := markers.List(context.Background(), ByIndex[marker]("note", strconv.FormatInt(inserted.ID, 10)))
+			reloadedMarkers, err := markers.List(context.Background(), ByIndex[marker]("note", inserted.ID))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -278,7 +275,7 @@ func TestWorkspaceStateWebBindRoundTrip(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if state.ID == 0 || state.WebBind != "127.0.0.1:45678" {
+			if state.ID == "" || state.WebBind != "127.0.0.1:45678" {
 				t.Fatalf("unexpected workspace state: %#v", state)
 			}
 			if err := st.Close(); err != nil {
@@ -733,7 +730,7 @@ func TestForkSessionCopiesTranscriptAndParent(t *testing.T) {
 				t.Fatal("expected forked session to have distinct id")
 			}
 			if forked.ParentID == nil || *forked.ParentID != session.ID {
-				t.Fatalf("expected parent id %d, got %#v", session.ID, forked.ParentID)
+				t.Fatalf("expected parent id %s, got %#v", session.ID, forked.ParentID)
 			}
 			if forked.PermissionProfile != "readonly" {
 				t.Fatalf("expected permission profile copied, got %q", forked.PermissionProfile)
@@ -822,7 +819,7 @@ func TestJSONFSWritesInspectableFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(root, "store-jsonfs-v3", "sessions", formatID(session.ID)+".json")); err != nil {
+	if _, err := os.Stat(filepath.Join(root, "store-jsonfs-v6", "sessions", session.ID+".json")); err != nil {
 		t.Fatalf("expected inspectable session JSON file: %v", err)
 	}
 }
@@ -863,8 +860,8 @@ func TestOpenResetsStoreWhenSchemaVersionChanges(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if session.ID != 1 {
-				t.Fatalf("expected ids to restart after schema reset, got %d", session.ID)
+			if session.ID == "" {
+				t.Fatalf("expected new id after schema reset, got %q", session.ID)
 			}
 		})
 	}
@@ -874,7 +871,7 @@ func writeStoreMetaForTest(t *testing.T, root, backend string, meta metaRecord) 
 	t.Helper()
 	switch backend {
 	case BackendJSONFS:
-		if err := writeJSONFile(filepath.Join(root, "store-jsonfs-v3", "meta.json"), meta); err != nil {
+		if err := writeJSONFile(filepath.Join(root, "store-jsonfs-v6", "meta.json"), meta); err != nil {
 			t.Fatal(err)
 		}
 	case BackendPebble:

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 
 	"github.com/lkarlslund/koder/internal/domain"
@@ -135,12 +134,12 @@ func ParseTodoAddItems(raw string) ([]string, error) {
 	return out, nil
 }
 
-func ParseTodoID(raw string) (int64, error) {
-	value, err := ParseFlexibleInt(raw)
-	if err != nil || value < 0 {
-		return 0, errors.New("id must be a non-negative integer")
+func ParseTodoID(raw string) (domain.ID, error) {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return "", errors.New("id is required")
 	}
-	return int64(value), nil
+	return value, nil
 }
 
 func ParseTodoStatus(raw string) (domain.TodoStatus, error) {
@@ -218,7 +217,7 @@ func milestoneStatusCountsAsActive(status domain.MilestoneStatus) bool {
 }
 
 func RequireSessionStore(runtime Runtime) (*store.Store, error) {
-	if runtime.Store == nil || runtime.SessionID == 0 {
+	if runtime.Store == nil || runtime.SessionID == "" {
 		return nil, errors.New("planning tools require a persisted session")
 	}
 	return runtime.Store, nil
@@ -286,7 +285,7 @@ func MilestonePlanForRef(plan store.MilestonePlan, ref string) store.MilestonePl
 	return scoped
 }
 
-func PersistedTodoBucket(ctx context.Context, st *store.Store, sessionID int64, ref string) (store.MilestonePlan, []store.TodoItem, string, error) {
+func PersistedTodoBucket(ctx context.Context, st *store.Store, sessionID domain.ID, ref string) (store.MilestonePlan, []store.TodoItem, string, error) {
 	plan, err := st.GetMilestonePlan(ctx, sessionID)
 	if err != nil {
 		return store.MilestonePlan{}, nil, "", err
@@ -410,4 +409,4 @@ func FormatTodoOutput(result TodoListStoredResult) string {
 	return text
 }
 
-func FormatTodoID(id int64) string { return strconv.FormatInt(id, 10) }
+func FormatTodoID(id domain.ID) string { return id }

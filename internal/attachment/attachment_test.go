@@ -21,11 +21,11 @@ func TestImportClipboardImageAndAdoptDraft(t *testing.T) {
 		t.Fatalf("expected draft file to exist: %v", err)
 	}
 
-	adopted, err := manager.AdoptDraft(draft, 42)
+	adopted, err := manager.AdoptDraft(draft, "session-42")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(adopted.Path, filepath.Join("sessions", "42")) {
+	if !strings.Contains(adopted.Path, filepath.Join("sessions", "session-42")) {
 		t.Fatalf("expected adopted path to be under session dir, got %q", adopted.Path)
 	}
 	if _, err := os.Stat(adopted.Path); err != nil {
@@ -48,7 +48,7 @@ func TestImportFileAndReadText(t *testing.T) {
 	if got := ClassifyMIME(draft.MIME); got != KindText {
 		t.Fatalf("unexpected draft kind: %s", got)
 	}
-	adopted, err := manager.AdoptDraft(draft, 7)
+	adopted, err := manager.AdoptDraft(draft, "session-7")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,18 +72,18 @@ func TestCopyToSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	meta, err := manager.AdoptDraft(draft, 1)
+	meta, err := manager.AdoptDraft(draft, "session-1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	copied, err := manager.CopyToSession(meta, 2)
+	copied, err := manager.CopyToSession(meta, "session-2")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if copied.Path == meta.Path {
 		t.Fatal("expected copied attachment to have a distinct path")
 	}
-	if !strings.Contains(copied.Path, filepath.Join("sessions", "2")) {
+	if !strings.Contains(copied.Path, filepath.Join("sessions", "session-2")) {
 		t.Fatalf("expected copied attachment to be under session 2, got %q", copied.Path)
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/theme"
 	"github.com/lkarlslund/koder/internal/ui"
 )
@@ -31,7 +32,7 @@ const (
 
 type SessionDialogAction struct {
 	Kind      SessionDialogActionKind
-	SessionID int64
+	SessionID domain.ID
 }
 
 type SessionDialog struct {
@@ -321,8 +322,8 @@ func (d SessionDialog) selectCurrent() SessionDialogAction {
 	if !ok {
 		return SessionDialogAction{Kind: SessionDialogActionCancel}
 	}
-	id, err := strconv.ParseInt(item.Value, 10, 64)
-	if err != nil {
+	id := domain.ID(strings.TrimSpace(item.Value))
+	if id == "" {
 		return SessionDialogAction{}
 	}
 	return SessionDialogAction{Kind: SessionDialogActionSelect, SessionID: id}

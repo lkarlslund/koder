@@ -19,6 +19,8 @@ import (
 	"time"
 
 	"github.com/creack/pty"
+
+	"github.com/lkarlslund/koder/internal/domain"
 )
 
 const (
@@ -59,8 +61,8 @@ type TerminalSize struct {
 }
 
 type StartRequest struct {
-	SessionID   int64
-	ChatID      int64
+	SessionID   domain.ID
+	ChatID      domain.ID
 	ToolCallID  string
 	Command     string
 	Workdir     string
@@ -73,22 +75,22 @@ type StartRequest struct {
 }
 
 type StatusRequest struct {
-	SessionID  int64
-	ChatID     int64
+	SessionID   domain.ID
+	ChatID      domain.ID
 	ProcessID  string
 	MaxBytes   int
 }
 
 type ListRequest struct {
-	SessionID int64
-	ChatID    int64
+	SessionID domain.ID
+	ChatID      domain.ID
 	Scope     Scope
 	MaxBytes  int
 }
 
 type WriteStdinRequest struct {
-	SessionID  int64
-	ChatID     int64
+	SessionID   domain.ID
+	ChatID      domain.ID
 	ProcessID  string
 	Chars      string
 	CloseStdin bool
@@ -96,31 +98,31 @@ type WriteStdinRequest struct {
 }
 
 type ResizeRequest struct {
-	SessionID int64
-	ChatID    int64
+	SessionID domain.ID
+	ChatID      domain.ID
 	ProcessID string
 	Size      TerminalSize
 	MaxBytes  int
 }
 
 type TerminateRequest struct {
-	SessionID int64
-	ChatID    int64
+	SessionID domain.ID
+	ChatID      domain.ID
 	ProcessID string
 	MaxBytes  int
 }
 
 type CleanupRequest struct {
-	SessionID int64
-	ChatID    int64
+	SessionID domain.ID
+	ChatID      domain.ID
 	Scope     Scope
 	MaxBytes  int
 }
 
 type Snapshot struct {
 	ProcessID   string
-	SessionID   int64
-	ChatID      int64
+	SessionID   domain.ID
+	ChatID      domain.ID
 	ToolCallID  string
 	Command     string
 	Workdir     string
@@ -157,14 +159,14 @@ type Manager struct {
 	mu          sync.RWMutex
 	nextID      uint64
 	processes   map[string]*process
-	subscribers map[int64]map[chan Event]struct{}
+	subscribers map[domain.ID]map[chan Event]struct{}
 }
 
 type process struct {
 	mu          sync.RWMutex
 	processID   string
-	sessionID   int64
-	chatID      int64
+	sessionID   domain.ID
+	chatID      domain.ID
 	toolCallID  string
 	command     string
 	workdir     string
@@ -189,11 +191,11 @@ type process struct {
 func NewManager() *Manager {
 	return &Manager{
 		processes:   map[string]*process{},
-		subscribers: map[int64]map[chan Event]struct{}{},
+		subscribers: map[domain.ID]map[chan Event]struct{}{},
 	}
 }
 
-func (m *Manager) Subscribe(chatID int64) (<-chan Event, func()) {
+func (m *Manager) Subscribe(chatID domain.ID) (<-chan Event, func()) {
 	ch := make(chan Event, defaultSubscriberCap)
 	m.mu.Lock()
 	if m.subscribers[chatID] == nil {
@@ -220,7 +222,7 @@ func (m *Manager) Start(ctx context.Context, req StartRequest) (Snapshot, error)
 	if command == "" {
 		return Snapshot{}, errors.New("command is empty")
 	}
-	if req.SessionID <= 0 || req.ChatID <= 0 {
+	if req.SessionID == "" || req.ChatID == "" {
 		return Snapshot{}, errors.New("session_id and chat_id are required")
 	}
 	shell, args, err := shellArgs(req.Shell, req.Login, command)
@@ -467,7 +469,7 @@ func (m *Manager) enforceTimeout(p *process, timeout time.Duration) {
 	}
 }
 
-func (m *Manager) lookup(sessionID, chatID int64, processID string) (*process, error) {
+func (m *Manager) lookup(sessionID, chatID domain.ID, processID string) (*process, error) {
 	m.mu.RLock()
 	p := m.processes[strings.TrimSpace(processID)]
 	m.mu.RUnlock()
@@ -598,7 +600,7 @@ func terminateProcess(p *process) error {
 	return p.proc.Process.Kill()
 }
 
-func matchesScope(p *process, sessionID, chatID int64, scope Scope) bool {
+func matchesScope(p *process, sessionID, chatID domain.ID, scope Scope) bool {
 	switch scope {
 	case ScopeSession:
 		return p.sessionID == sessionID

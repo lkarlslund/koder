@@ -185,8 +185,8 @@ const (
 )
 
 type Session struct {
-	ID                int64
-	ParentID          *int64
+	ID                ID
+	ParentID          *ID
 	Title             string
 	TitleGeneratedAt  time.Time
 	TitleRefreshCount int
@@ -218,9 +218,9 @@ const (
 )
 
 type Chat struct {
-	ID                     int64
-	SessionID              int64
-	ParentChatID           *int64
+	ID                     ID
+	SessionID              ID
+	ParentChatID           *ID
 	Title                  string
 	WorkflowRole           WorkflowRole
 	ProviderID             string
@@ -255,7 +255,7 @@ const (
 )
 
 type QueuedInput struct {
-	ID          int64
+	ID          ID
 	Kind        QueuedInputKind
 	Text        string
 	Held        bool
@@ -293,17 +293,17 @@ type AgentsFile struct {
 }
 
 type Message struct {
-	ID        int64
-	SessionID int64
-	ChatID    int64
+	ID        ID
+	SessionID ID
+	ChatID    ID
 	Role      MessageRole
 	Summary   string
 	CreatedAt time.Time
 }
 
 type Part struct {
-	ID        int64
-	MessageID int64
+	ID        ID
+	MessageID ID
 	Kind      PartKind
 	Payload   PartPayload
 	Body      string `json:"-"`
@@ -365,7 +365,7 @@ type Event struct {
 	Text       string
 	Tool       ToolKind
 	ToolCallID string
-	ApprovalID int64
+	ApprovalID ID
 	Item       TimelineItem
 	Meta       map[string]string
 	Usage      Usage

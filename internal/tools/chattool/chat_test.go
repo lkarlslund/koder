@@ -13,16 +13,16 @@ type fakeChatControl struct {
 	statuses         []tools.ChatStatus
 	lastRef          string
 	lastTitle        string
-	lastSessionID    int64
-	lastParentChatID int64
-	lastChatID       int64
+	lastSessionID    domain.ID
+	lastParentChatID domain.ID
+	lastChatID       domain.ID
 }
 
-func (f *fakeChatControl) ListChats(context.Context, int64) ([]tools.ChatStatus, error) {
+func (f *fakeChatControl) ListChats(context.Context, domain.ID) ([]tools.ChatStatus, error) {
 	return f.statuses, nil
 }
 
-func (f *fakeChatControl) StartDecomposition(_ context.Context, sessionID, parentChatID int64, ref, title string) (tools.ChatStatus, error) {
+func (f *fakeChatControl) StartDecomposition(_ context.Context, sessionID, parentChatID domain.ID, ref, title string) (tools.ChatStatus, error) {
 	f.lastSessionID = sessionID
 	f.lastParentChatID = parentChatID
 	f.lastRef = ref
@@ -30,7 +30,7 @@ func (f *fakeChatControl) StartDecomposition(_ context.Context, sessionID, paren
 	return f.statuses[0], nil
 }
 
-func (f *fakeChatControl) StartExecution(_ context.Context, sessionID, parentChatID int64, ref, title string) (tools.ChatStatus, error) {
+func (f *fakeChatControl) StartExecution(_ context.Context, sessionID, parentChatID domain.ID, ref, title string) (tools.ChatStatus, error) {
 	f.lastSessionID = sessionID
 	f.lastParentChatID = parentChatID
 	f.lastRef = ref
@@ -38,15 +38,15 @@ func (f *fakeChatControl) StartExecution(_ context.Context, sessionID, parentCha
 	return f.statuses[0], nil
 }
 
-func (f *fakeChatControl) PollChat(context.Context, int64, int64) (tools.ChatStatus, error) {
+func (f *fakeChatControl) PollChat(context.Context, domain.ID, domain.ID) (tools.ChatStatus, error) {
 	f.lastChatID = f.statuses[0].Chat.ID
 	return f.statuses[0], nil
 }
 
 func testRuntime(control tools.ChatControl) tools.Runtime {
 	return tools.Runtime{
-		SessionID:   10,
-		ChatID:      20,
+		SessionID:   "session-10",
+		ChatID:      "chat-20",
 		ChatRole:    domain.WorkflowRoleOrchestrator,
 		ChatControl: control,
 	}
@@ -72,7 +72,7 @@ func TestListExecuteRequiresChatControlAndFormatsStoredOutput(t *testing.T) {
 	}
 
 	control := &fakeChatControl{statuses: []tools.ChatStatus{{
-		Chat:       domain.Chat{ID: 7, Title: "Worker", WorkflowRole: domain.WorkflowRoleExecution},
+		Chat:       domain.Chat{ID: "chat-7", Title: "Worker", WorkflowRole: domain.WorkflowRoleExecution},
 		State:      tools.ChatRunStateRunning,
 		StatusText: "Running",
 	}}}
@@ -87,7 +87,7 @@ func TestListExecuteRequiresChatControlAndFormatsStoredOutput(t *testing.T) {
 
 func TestStartExecutionUsesControl(t *testing.T) {
 	control := &fakeChatControl{statuses: []tools.ChatStatus{{
-		Chat:       domain.Chat{ID: 9, Title: "Worker", WorkflowRole: domain.WorkflowRoleExecution},
+		Chat:       domain.Chat{ID: "chat-9", Title: "Worker", WorkflowRole: domain.WorkflowRoleExecution},
 		State:      tools.ChatRunStateRunning,
 		StatusText: "Running",
 	}}}
@@ -98,7 +98,7 @@ func TestStartExecutionUsesControl(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if control.lastRef != "alpha" || control.lastTitle != "Worker" || control.lastSessionID != 10 || control.lastParentChatID != 20 {
+	if control.lastRef != "alpha" || control.lastTitle != "Worker" || control.lastSessionID != "session-10" || control.lastParentChatID != "chat-20" {
 		t.Fatalf("unexpected control call: %#v", control)
 	}
 	if !strings.Contains(result.Output, "Worker") {
@@ -108,13 +108,13 @@ func TestStartExecutionUsesControl(t *testing.T) {
 
 func TestPollExecuteReturnsStatus(t *testing.T) {
 	control := &fakeChatControl{statuses: []tools.ChatStatus{{
-		Chat:       domain.Chat{ID: 11, Title: "Worker", WorkflowRole: domain.WorkflowRoleExecution},
+		Chat:       domain.Chat{ID: "chat-11", Title: "Worker", WorkflowRole: domain.WorkflowRoleExecution},
 		State:      tools.ChatRunStateCompleted,
 		StatusText: "Completed",
 	}}}
 	result, err := (pollTool{}).Execute(context.Background(), testRuntime(control), tools.Request{
 		Tool: domain.ToolKindChatPoll,
-		Args: map[string]string{"chat_id": "11"},
+		Args: map[string]string{"chat_id": "chat-11"},
 	})
 	if err != nil {
 		t.Fatal(err)

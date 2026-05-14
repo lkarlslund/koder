@@ -225,7 +225,7 @@ func decodeToolResult[T ToolResultPayload](raw json.RawMessage) (ToolResultPaylo
 
 // ApprovalRequestPayload stores a persisted permission prompt.
 type ApprovalRequestPayload struct {
-	ApprovalID int64          `json:"approval_id,omitempty"`
+	ApprovalID ID             `json:"approval_id,omitempty"`
 	Tool       ToolKind       `json:"tool,omitempty"`
 	ToolCallID string         `json:"tool_call_id,omitempty"`
 	Command    string         `json:"command,omitempty"`
@@ -241,7 +241,7 @@ type CompactionPayload struct {
 	Summary             string `json:"summary"`
 	Trigger             string `json:"trigger,omitempty"`
 	Status              string `json:"status,omitempty"`
-	FirstKeptMessageID  int64  `json:"first_kept_message_id,omitempty"`
+	FirstKeptMessageID  ID     `json:"first_kept_message_id,omitempty"`
 	BeforeContextTokens int    `json:"before_context_tokens,omitempty"`
 	AfterContextTokens  int    `json:"after_context_tokens,omitempty"`
 }
@@ -364,8 +364,8 @@ func (p Part) MarshalJSON() ([]byte, error) {
 		kind = p.Payload.PartKind()
 	}
 	type encodedPart struct {
-		ID        int64           `json:"id"`
-		MessageID int64           `json:"message_id"`
+		ID        ID              `json:"id"`
+		MessageID ID              `json:"message_id"`
 		Kind      PartKind        `json:"kind"`
 		Payload   json.RawMessage `json:"payload"`
 		CreatedAt any             `json:"created_at"`
@@ -386,8 +386,8 @@ func (p Part) MarshalJSON() ([]byte, error) {
 // UnmarshalJSON loads a part from its typed payload discriminator.
 func (p *Part) UnmarshalJSON(data []byte) error {
 	type encodedPart struct {
-		ID        int64           `json:"id"`
-		MessageID int64           `json:"message_id"`
+		ID        ID              `json:"id"`
+		MessageID ID              `json:"message_id"`
 		Kind      PartKind        `json:"kind"`
 		Payload   json.RawMessage `json:"payload"`
 		CreatedAt json.RawMessage `json:"created_at"`

@@ -176,7 +176,7 @@ func TestWebSocketHelloReturnsState(t *testing.T) {
 func TestWebSocketChatUpdateIsCompactedToSingleItemDelta(t *testing.T) {
 	item := domain.TimelineItem{
 		ID:     "019aa000-0000-7000-8000-000000000042",
-		ChatID: 7,
+		ChatID: "chat-7",
 		Seq:    3,
 		Content: domain.AssistantMessage{
 			Text: "streamed",
@@ -184,8 +184,8 @@ func TestWebSocketChatUpdateIsCompactedToSingleItemDelta(t *testing.T) {
 	}
 	update := chat.Update{
 		Snapshot: chat.Snapshot{
-			Chat:     domain.Chat{ID: 7, SessionID: 1, Title: "Chat"},
-			Timeline: []domain.TimelineItem{{ID: "019aa000-0000-7000-8000-000000000001", ChatID: 7, Seq: 1, Content: domain.UserMessage{Text: "old"}}, item},
+			Chat:     domain.Chat{ID: "chat-7", SessionID: "session-1", Title: "Chat"},
+			Timeline: []domain.TimelineItem{{ID: "019aa000-0000-7000-8000-000000000001", ChatID: "chat-7", Seq: 1, Content: domain.UserMessage{Text: "old"}}, item},
 			Status:   chat.StatusStreamingResponse,
 			Active:   true,
 		},
@@ -217,13 +217,13 @@ func TestWebSocketChatUpdateIsCompactedToSingleItemDelta(t *testing.T) {
 
 func TestWebSocketSnapshotEventIsCompactedToStateDelta(t *testing.T) {
 	state := uicore.State{
-		Session:      domain.Session{ID: 1, Title: "Session"},
-		Chats:        []domain.Chat{{ID: 7, SessionID: 1, Title: "Chat"}},
-		ActiveChatID: 7,
-		Snapshots: map[int64]chat.Snapshot{
-			7: {
-				Chat:     domain.Chat{ID: 7, SessionID: 1, Title: "Chat"},
-				Timeline: []domain.TimelineItem{{ID: "019aa000-0000-7000-8000-000000000001", ChatID: 7, Seq: 1, Content: domain.UserMessage{Text: "old transcript"}}},
+		Session:      domain.Session{ID: "session-1", Title: "Session"},
+		Chats:        []domain.Chat{{ID: "chat-7", SessionID: "session-1", Title: "Chat"}},
+		ActiveChatID: "chat-7",
+		Snapshots: map[domain.ID]chat.Snapshot{
+			"chat-7": {
+				Chat:     domain.Chat{ID: "chat-7", SessionID: "session-1", Title: "Chat"},
+				Timeline: []domain.TimelineItem{{ID: "019aa000-0000-7000-8000-000000000001", ChatID: "chat-7", Seq: 1, Content: domain.UserMessage{Text: "old transcript"}}},
 			},
 		},
 	}
@@ -697,8 +697,8 @@ func TestWebSocketSwitchChatReturnsUpdatedState(t *testing.T) {
 		t.Fatalf("new chat: %v", err)
 	}
 	secondID := ctrl.State().ActiveChatID
-	if firstID == 0 || secondID == 0 || firstID == secondID {
-		t.Fatalf("expected two distinct chats, first=%d second=%d", firstID, secondID)
+	if firstID == "" || secondID == "" || firstID == secondID {
+		t.Fatalf("expected two distinct chats, first=%s second=%s", firstID, secondID)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -712,17 +712,17 @@ func TestWebSocketSwitchChatReturnsUpdatedState(t *testing.T) {
 		t.Fatalf("dial websocket: %v", err)
 	}
 	defer conn.Close(websocket.StatusNormalClosure, "")
-	if err := conn.Write(ctx, websocket.MessageText, []byte(fmt.Sprintf(`{"id":1,"method":"switch_chat","params":{"chat_id":%d}}`, firstID))); err != nil {
+	if err := conn.Write(ctx, websocket.MessageText, []byte(fmt.Sprintf(`{"id":1,"method":"switch_chat","params":{"chat_id":"%s"}}`, firstID))); err != nil {
 		t.Fatalf("write switch_chat: %v", err)
 	}
 	msg := readRPCResponse(t, ctx, conn, 1)
 	var resp struct {
 		OK     bool `json:"ok"`
 		Result struct {
-			ActiveChatID int64 `json:"active_chat_id"`
+			ActiveChatID domain.ID `json:"active_chat_id"`
 			Snapshot     struct {
 				Chat struct {
-					ID int64
+					ID domain.ID
 				}
 			}
 		} `json:"result"`
@@ -735,10 +735,10 @@ func TestWebSocketSwitchChatReturnsUpdatedState(t *testing.T) {
 		t.Fatalf("expected switch_chat ok, got %s", resp.Error)
 	}
 	if resp.Result.ActiveChatID != firstID {
-		t.Fatalf("expected response active chat %d, got %d", firstID, resp.Result.ActiveChatID)
+		t.Fatalf("expected response active chat %s, got %s", firstID, resp.Result.ActiveChatID)
 	}
 	if resp.Result.Snapshot.Chat.ID != firstID {
-		t.Fatalf("expected response snapshot chat %d, got %d", firstID, resp.Result.Snapshot.Chat.ID)
+		t.Fatalf("expected response snapshot chat %s, got %s", firstID, resp.Result.Snapshot.Chat.ID)
 	}
 }
 
@@ -760,16 +760,16 @@ func TestWebSocketDeleteChatReturnsUpdatedState(t *testing.T) {
 		t.Fatalf("dial websocket: %v", err)
 	}
 	defer conn.Close(websocket.StatusNormalClosure, "")
-	if err := conn.Write(ctx, websocket.MessageText, []byte(fmt.Sprintf(`{"id":1,"method":"delete_chat","params":{"chat_id":%d}}`, deletedID))); err != nil {
+	if err := conn.Write(ctx, websocket.MessageText, []byte(fmt.Sprintf(`{"id":1,"method":"delete_chat","params":{"chat_id":"%s"}}`, deletedID))); err != nil {
 		t.Fatalf("write delete_chat: %v", err)
 	}
 	msg := readRPCResponse(t, ctx, conn, 1)
 	var resp struct {
 		OK     bool `json:"ok"`
 		Result struct {
-			ActiveChatID int64 `json:"active_chat_id"`
+			ActiveChatID domain.ID `json:"active_chat_id"`
 			Chats        []struct {
-				ID int64
+				ID domain.ID
 			}
 		} `json:"result"`
 		Error string `json:"error"`
@@ -781,7 +781,7 @@ func TestWebSocketDeleteChatReturnsUpdatedState(t *testing.T) {
 		t.Fatalf("expected delete_chat ok, got %s", resp.Error)
 	}
 	if resp.Result.ActiveChatID == deletedID {
-		t.Fatalf("expected active chat to switch away from %d", deletedID)
+		t.Fatalf("expected active chat to switch away from %s", deletedID)
 	}
 	for _, chat := range resp.Result.Chats {
 		if chat.ID == deletedID {
@@ -811,9 +811,9 @@ func TestWebSocketSessionManagementCreatesAndSwitchesWorkspaceSessions(t *testin
 	var listResp struct {
 		OK     bool `json:"ok"`
 		Result struct {
-			ActiveID int64 `json:"active_id"`
+			ActiveID domain.ID `json:"active_id"`
 			Sessions []struct {
-				ID int64
+				ID domain.ID
 			} `json:"sessions"`
 		} `json:"result"`
 		Error string `json:"error"`
@@ -836,7 +836,7 @@ func TestWebSocketSessionManagementCreatesAndSwitchesWorkspaceSessions(t *testin
 		OK     bool `json:"ok"`
 		Result struct {
 			Session struct {
-				ID    int64
+				ID    domain.ID
 				Title string
 			}
 		} `json:"result"`
@@ -849,11 +849,11 @@ func TestWebSocketSessionManagementCreatesAndSwitchesWorkspaceSessions(t *testin
 		t.Fatalf("expected new_session ok, got %s", newResp.Error)
 	}
 	newID := newResp.Result.Session.ID
-	if newID == 0 || newID == initialID || newResp.Result.Session.Title != "Side Session" {
+	if newID == "" || newID == initialID || newResp.Result.Session.Title != "Side Session" {
 		t.Fatalf("unexpected new session response: %#v", newResp.Result.Session)
 	}
 
-	if err := conn.Write(ctx, websocket.MessageText, []byte(fmt.Sprintf(`{"id":3,"method":"switch_session","params":{"session_id":%d}}`, initialID))); err != nil {
+	if err := conn.Write(ctx, websocket.MessageText, []byte(fmt.Sprintf(`{"id":3,"method":"switch_session","params":{"session_id":"%s"}}`, initialID))); err != nil {
 		t.Fatalf("write switch_session: %v", err)
 	}
 	msg = readRPCResponse(t, ctx, conn, 3)
@@ -861,7 +861,7 @@ func TestWebSocketSessionManagementCreatesAndSwitchesWorkspaceSessions(t *testin
 		OK     bool `json:"ok"`
 		Result struct {
 			Session struct {
-				ID int64
+				ID domain.ID
 			}
 		} `json:"result"`
 		Error string `json:"error"`
@@ -873,7 +873,7 @@ func TestWebSocketSessionManagementCreatesAndSwitchesWorkspaceSessions(t *testin
 		t.Fatalf("expected switch_session ok, got %s", switchResp.Error)
 	}
 	if switchResp.Result.Session.ID != initialID {
-		t.Fatalf("expected switched back to %d, got %#v", initialID, switchResp.Result.Session)
+		t.Fatalf("expected switched back to %s, got %#v", initialID, switchResp.Result.Session)
 	}
 }
 

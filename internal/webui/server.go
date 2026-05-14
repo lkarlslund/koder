@@ -320,7 +320,7 @@ func (s *Server) handleRPC(ctx context.Context, method string, params json.RawMe
 		return s.controller.State(), nil
 	case "switch_chat":
 		var in struct {
-			ChatID int64 `json:"chat_id"`
+			ChatID domain.ID `json:"chat_id"`
 		}
 		if err := decodeParams(params, &in); err != nil {
 			return nil, err
@@ -342,7 +342,7 @@ func (s *Server) handleRPC(ctx context.Context, method string, params json.RawMe
 		return s.controller.Sessions(ctx)
 	case "switch_session":
 		var in struct {
-			SessionID int64 `json:"session_id"`
+			SessionID domain.ID `json:"session_id"`
 		}
 		if err := decodeParams(params, &in); err != nil {
 			return nil, err
@@ -362,7 +362,7 @@ func (s *Server) handleRPC(ctx context.Context, method string, params json.RawMe
 		return s.controller.State(), nil
 	case "delete_chat":
 		var in struct {
-			ChatID int64 `json:"chat_id"`
+			ChatID domain.ID `json:"chat_id"`
 		}
 		if err := decodeParams(params, &in); err != nil {
 			return nil, err
@@ -373,26 +373,26 @@ func (s *Server) handleRPC(ctx context.Context, method string, params json.RawMe
 		return s.controller.State(), nil
 	case "approve":
 		var in struct {
-			ToolCallID string `json:"tool_call_id"`
-			ID         int64  `json:"id"`
+			ToolCallID string    `json:"tool_call_id"`
+			ID         domain.ID `json:"id"`
 		}
 		if err := decodeParams(params, &in); err != nil {
 			return nil, err
 		}
-		if strings.TrimSpace(in.ToolCallID) == "" && in.ID != 0 {
-			in.ToolCallID = fmt.Sprint(in.ID)
+		if strings.TrimSpace(in.ToolCallID) == "" && in.ID != "" {
+			in.ToolCallID = string(in.ID)
 		}
 		return map[string]bool{"accepted": true}, s.controller.Approve(in.ToolCallID)
 	case "deny":
 		var in struct {
-			ToolCallID string `json:"tool_call_id"`
-			ID         int64  `json:"id"`
+			ToolCallID string    `json:"tool_call_id"`
+			ID         domain.ID `json:"id"`
 		}
 		if err := decodeParams(params, &in); err != nil {
 			return nil, err
 		}
-		if strings.TrimSpace(in.ToolCallID) == "" && in.ID != 0 {
-			in.ToolCallID = fmt.Sprint(in.ID)
+		if strings.TrimSpace(in.ToolCallID) == "" && in.ID != "" {
+			in.ToolCallID = string(in.ID)
 		}
 		return map[string]bool{"accepted": true}, s.controller.Deny(in.ToolCallID)
 	case "composer_completions":
@@ -486,23 +486,23 @@ func (s *Server) handleRPC(ctx context.Context, method string, params json.RawMe
 }
 
 type stateDelta struct {
-	Session      any    `json:"session,omitempty"`
-	Sessions     any    `json:"sessions,omitempty"`
-	Chats        any    `json:"chats,omitempty"`
-	ChatStatuses any    `json:"chat_statuses,omitempty"`
-	ActiveChatID int64  `json:"active_chat_id,omitempty"`
-	Permissions  any    `json:"permissions,omitempty"`
-	Milestones   any    `json:"milestones,omitempty"`
-	Todos        any    `json:"todos,omitempty"`
-	TodosByRef   any    `json:"todos_by_milestone,omitempty"`
-	Workspace    any    `json:"workspace_status,omitempty"`
-	Theme        string `json:"theme,omitempty"`
-	Workdir      string `json:"workdir,omitempty"`
-	Error        string `json:"error,omitempty"`
+	Session      any       `json:"session,omitempty"`
+	Sessions     any       `json:"sessions,omitempty"`
+	Chats        any       `json:"chats,omitempty"`
+	ChatStatuses any       `json:"chat_statuses,omitempty"`
+	ActiveChatID domain.ID `json:"active_chat_id,omitempty"`
+	Permissions  any       `json:"permissions,omitempty"`
+	Milestones   any       `json:"milestones,omitempty"`
+	Todos        any       `json:"todos,omitempty"`
+	TodosByRef   any       `json:"todos_by_milestone,omitempty"`
+	Workspace    any       `json:"workspace_status,omitempty"`
+	Theme        string    `json:"theme,omitempty"`
+	Workdir      string    `json:"workdir,omitempty"`
+	Error        string    `json:"error,omitempty"`
 }
 
 type chatDelta struct {
-	ChatID            int64                `json:"chat_id"`
+	ChatID            domain.ID            `json:"chat_id"`
 	Chat              any                  `json:"chat,omitempty"`
 	Item              *domain.TimelineItem `json:"item,omitempty"`
 	Approvals         any                  `json:"approvals,omitempty"`

@@ -27,8 +27,8 @@ func TestSessionDialogSelectsCurrentSession(t *testing.T) {
 	if action.Kind != SessionDialogActionSelect {
 		t.Fatalf("expected select action, got %#v", action)
 	}
-	if action.SessionID != 2 {
-		t.Fatalf("expected session 2, got %d", action.SessionID)
+	if action.SessionID != "2" {
+		t.Fatalf("expected session 2, got %s", action.SessionID)
 	}
 }
 

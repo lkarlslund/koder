@@ -156,11 +156,11 @@ func TestHelpModalContentUsesWindowBackground(t *testing.T) {
 
 func TestResumeClosesSessionDialogAndRestoresTyping(t *testing.T) {
 	m := newRuntimeTestModel(t)
-	m.sessions = []domain.Session{{ID: 7, Title: "Session A"}}
+	m.sessions = []domain.Session{{ID: "7", Title: "Session A"}}
 	m.openSessionPicker()
 
 	m = m.UpdateLoad(loadMsg{
-		current:  domain.Session{ID: 7, Title: "Session A"},
+		current:  domain.Session{ID: "7", Title: "Session A"},
 		sessions: m.sessions,
 	})
 	if m.hasSessionDialog() {
@@ -182,7 +182,7 @@ func TestResumeClosesSessionDialogAndRestoresTyping(t *testing.T) {
 
 func TestMainWindowFocusSyncsComposerLifecycle(t *testing.T) {
 	m := newRuntimeTestModel(t)
-	m.sessions = []domain.Session{{ID: 7, Title: "Session A"}}
+	m.sessions = []domain.Session{{ID: "7", Title: "Session A"}}
 	m.openSessionPicker()
 	m.composer.SetValue("draft")
 	cache := m.ensureRenderCache()
@@ -225,7 +225,7 @@ func TestSessionDialogScrollMarksWindowDirty(t *testing.T) {
 	m.height = 32
 	for i := int64(1); i <= 14; i++ {
 		m.sessions = append(m.sessions, domain.Session{
-			ID:    i,
+			ID:    domain.ID(strconv.FormatInt(i, 10)),
 			Title: "Session " + strconv.FormatInt(i, 10),
 		})
 	}
@@ -332,7 +332,7 @@ func TestViewSurfacePermissionsPickerCloseDirtyRectsCoverDiff(t *testing.T) {
 func TestViewSurfaceApprovalPermissionsPickerCloseRestoresApprovalDialog(t *testing.T) {
 	m := newRuntimeTestModel(t)
 	m.currentSnapshot.Approvals = []store.Approval{{
-		ID:      7,
+		ID:      "7",
 		Tool:    domain.ToolKindBash,
 		Command: `{"command":"git status"}`,
 	}}
@@ -412,7 +412,7 @@ func TestBouncyBallsOverlayTintsFrameAndTracksDamage(t *testing.T) {
 
 func TestViewSurfaceTranscriptAppendWithSidebarDirtyRectsCoverDiff(t *testing.T) {
 	m := newRuntimeTestModel(t)
-	m.currentSession = domain.Session{ID: 1, Title: "Session 1"}
+	m.currentSession = domain.Session{ID: "1", Title: "Session 1"}
 	m.appendLocalUserPrompt("first message", nil, nil)
 	m.resize()
 	m.refreshViewport()

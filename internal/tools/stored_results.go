@@ -179,7 +179,7 @@ type MilestonePlanStoredResult struct {
 }
 
 type ChatStoredItem struct {
-	ID                 int64  `json:"id"`
+	ID                 domain.ID `json:"id"`
 	Title              string `json:"title"`
 	Role               string `json:"role,omitempty"`
 	State              string `json:"state,omitempty"`
@@ -192,7 +192,7 @@ type ChatListStoredResult struct {
 }
 
 type TodoStoredItem struct {
-	ID      int64  `json:"id"`
+	ID      domain.ID `json:"id"`
 	Content string `json:"content"`
 	Status  string `json:"status"`
 }
@@ -782,7 +782,7 @@ func formatTodoListStoredResult(result TodoListStoredResult) string {
 		if strings.TrimSpace(item.Content) == "" {
 			continue
 		}
-		lines = append(lines, fmt.Sprintf("[%s] #%d %s", strings.TrimSpace(item.Status), item.ID, strings.TrimSpace(item.Content)))
+		lines = append(lines, fmt.Sprintf("[%s] #%s %s", strings.TrimSpace(item.Status), item.ID, strings.TrimSpace(item.Content)))
 	}
 	if message := strings.TrimSpace(result.Message); message != "" {
 		lines = append(lines, message)
@@ -793,10 +793,10 @@ func formatTodoListStoredResult(result TodoListStoredResult) string {
 func formatChatListStoredResult(result ChatListStoredResult) string {
 	lines := make([]string, 0, len(result.Items))
 	for _, item := range result.Items {
-		if item.ID == 0 {
+		if item.ID == "" {
 			continue
 		}
-		line := fmt.Sprintf("#%d %s", item.ID, strings.TrimSpace(item.Title))
+		line := fmt.Sprintf("#%s %s", item.ID, strings.TrimSpace(item.Title))
 		if role := strings.TrimSpace(item.Role); role != "" {
 			line += " [" + role + "]"
 		}

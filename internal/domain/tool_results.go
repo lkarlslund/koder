@@ -149,7 +149,7 @@ type MilestonePlanStoredResult struct {
 }
 
 type ChatStoredItem struct {
-	ID                 int64  `json:"id"`
+	ID                 ID     `json:"id"`
 	Title              string `json:"title"`
 	Role               string `json:"role,omitempty"`
 	State              string `json:"state,omitempty"`
@@ -162,7 +162,7 @@ type ChatListStoredResult struct {
 }
 
 type TodoStoredItem struct {
-	ID      int64  `json:"id"`
+	ID      ID     `json:"id"`
 	Content string `json:"content"`
 	Status  string `json:"status"`
 }

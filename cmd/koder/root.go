@@ -422,13 +422,13 @@ func newDebugCommand() *cobra.Command {
 }
 
 func newSessionDumpCommand() *cobra.Command {
-	var sessionID int64
+	var sessionID domain.ID
 	cmd := &cobra.Command{
 		Use:   "dump",
 		Short: "Dump raw stored chat for a session as JSON",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if sessionID <= 0 {
-				return fmt.Errorf("--id must be greater than zero")
+			if sessionID == "" {
+				return fmt.Errorf("--id is required")
 			}
 			cfg, err := config.Load()
 			if err != nil {
@@ -449,7 +449,7 @@ func newSessionDumpCommand() *cobra.Command {
 				Timeline []domain.TimelineItem `json:"timeline"`
 			}
 			out := struct {
-				SessionID int64      `json:"session_id"`
+				SessionID domain.ID  `json:"session_id"`
 				Chats     []chatDump `json:"chats"`
 			}{
 				SessionID: sessionID,
@@ -466,20 +466,20 @@ func newSessionDumpCommand() *cobra.Command {
 			return enc.Encode(out)
 		},
 	}
-	cmd.Flags().Int64Var(&sessionID, "id", 0, "Session ID to dump")
+	cmd.Flags().StringVar((*string)(&sessionID), "id", "", "Session ID to dump")
 	return cmd
 }
 
 func newSessionTailCommand() *cobra.Command {
-	var sessionID int64
+	var sessionID domain.ID
 	var addr string
 	var interval time.Duration
 	cmd := &cobra.Command{
 		Use:   "tail",
 		Short: "Poll live debug events for a session",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if sessionID <= 0 {
-				return fmt.Errorf("--id must be greater than zero")
+			if sessionID == "" {
+				return fmt.Errorf("--id is required")
 			}
 			if strings.TrimSpace(addr) == "" {
 				addr = strings.TrimSpace(os.Getenv(debugsrv.EnvDebugAPI))
@@ -496,7 +496,7 @@ func newSessionTailCommand() *cobra.Command {
 			}
 			seen := map[string]struct{}{}
 			for {
-				resp, err := http.Get(fmt.Sprintf("%s/debug/sessions/%d/events", baseURL, sessionID))
+				resp, err := http.Get(fmt.Sprintf("%s/debug/sessions/%s/events", baseURL, sessionID))
 				if err != nil {
 					return err
 				}
@@ -513,7 +513,7 @@ func newSessionTailCommand() *cobra.Command {
 					return err
 				}
 				for _, event := range out.Events {
-					key := fmt.Sprintf("%s|%d|%s|%s|%s", event.Timestamp.Format(time.RFC3339Nano), event.SessionID, event.Source, event.Kind, event.Text)
+					key := fmt.Sprintf("%s|%s|%s|%s|%s", event.Timestamp.Format(time.RFC3339Nano), event.SessionID, event.Source, event.Kind, event.Text)
 					if _, ok := seen[key]; ok {
 						continue
 					}
@@ -528,7 +528,7 @@ func newSessionTailCommand() *cobra.Command {
 			}
 		},
 	}
-	cmd.Flags().Int64Var(&sessionID, "id", 0, "Session ID to tail")
+	cmd.Flags().StringVar((*string)(&sessionID), "id", "", "Session ID to tail")
 	cmd.Flags().StringVar(&addr, "addr", "", "Resolved debug API address, for example 127.0.0.1:61347")
 	cmd.Flags().DurationVar(&interval, "interval", time.Second, "Polling interval")
 	return cmd

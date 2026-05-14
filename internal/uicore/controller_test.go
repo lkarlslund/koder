@@ -24,10 +24,10 @@ func TestControllerStartCreatesSessionAndPublishesState(t *testing.T) {
 	defer unsub()
 
 	state := ctrl.State()
-	if state.Session.ID == 0 {
+	if state.Session.ID == "" {
 		t.Fatal("expected active session")
 	}
-	if state.ActiveChatID == 0 {
+	if state.ActiveChatID == "" {
 		t.Fatal("expected active chat")
 	}
 	if len(state.ChatStatuses) == 0 {
@@ -45,21 +45,21 @@ func TestControllerStartCreatesSessionAndPublishesState(t *testing.T) {
 func TestControllerNewChatAndSwitchChat(t *testing.T) {
 	ctrl, _ := newTestController(t)
 	first := ctrl.State().ActiveChatID
-	if first == 0 {
+	if first == "" {
 		t.Fatal("expected first chat")
 	}
 	if err := ctrl.NewChat(context.Background(), "side chat"); err != nil {
 		t.Fatalf("new chat: %v", err)
 	}
 	second := ctrl.State().ActiveChatID
-	if second == 0 || second == first {
-		t.Fatalf("expected new active chat, first=%d second=%d", first, second)
+	if second == "" || second == first {
+		t.Fatalf("expected new active chat, first=%s second=%s", first, second)
 	}
 	if err := ctrl.SwitchChat(context.Background(), first); err != nil {
 		t.Fatalf("switch chat: %v", err)
 	}
 	if got := ctrl.State().ActiveChatID; got != first {
-		t.Fatalf("expected active chat %d, got %d", first, got)
+		t.Fatalf("expected active chat %s, got %s", first, got)
 	}
 }
 
@@ -77,7 +77,7 @@ func TestControllerDeleteInactiveChat(t *testing.T) {
 		t.Fatalf("delete chat: %v", err)
 	}
 	if got := ctrl.State().ActiveChatID; got != active {
-		t.Fatalf("expected active chat to stay %d, got %d", active, got)
+		t.Fatalf("expected active chat to stay %s, got %s", active, got)
 	}
 	if _, err := st.GetChat(context.Background(), side); err == nil {
 		t.Fatal("expected side chat to be deleted")
@@ -95,7 +95,7 @@ func TestControllerDeleteActiveChatSwitchesToRemainingChat(t *testing.T) {
 		t.Fatalf("delete active chat: %v", err)
 	}
 	if got := ctrl.State().ActiveChatID; got != first {
-		t.Fatalf("expected active chat to switch to %d, got %d", first, got)
+		t.Fatalf("expected active chat to switch to %s, got %s", first, got)
 	}
 	if _, err := st.GetChat(context.Background(), side); err == nil {
 		t.Fatal("expected side chat to be deleted")
@@ -105,7 +105,7 @@ func TestControllerDeleteActiveChatSwitchesToRemainingChat(t *testing.T) {
 func TestControllerForwardRuntimeRefreshesChatListMetadata(t *testing.T) {
 	ctrl, _ := newTestController(t)
 	state := ctrl.State()
-	if state.ActiveChatID == 0 {
+	if state.ActiveChatID == "" {
 		t.Fatal("expected active chat")
 	}
 	ctrl.mu.Lock()
@@ -113,6 +113,12 @@ func TestControllerForwardRuntimeRefreshesChatListMetadata(t *testing.T) {
 		ctrl.unsub()
 		ctrl.unsub = nil
 	}
+	for _, unsub := range ctrl.unsubs {
+		if unsub != nil {
+			unsub()
+		}
+	}
+	ctrl.unsubs = nil
 	ctrl.runtime = nil
 	ctrl.mu.Unlock()
 	updated := state.Snapshot
@@ -152,15 +158,15 @@ func TestControllerForwardRuntimeRefreshesChatListMetadata(t *testing.T) {
 func TestControllerForwardRuntimeRefreshesInactiveChatMetadata(t *testing.T) {
 	ctrl, _ := newTestController(t)
 	first := ctrl.State().ActiveChatID
-	if first == 0 {
+	if first == "" {
 		t.Fatal("expected first chat")
 	}
 	if err := ctrl.NewChat(context.Background(), "side chat"); err != nil {
 		t.Fatalf("new chat: %v", err)
 	}
 	side := ctrl.State().ActiveChatID
-	if side == 0 || side == first {
-		t.Fatalf("expected side chat, first=%d side=%d", first, side)
+	if side == "" || side == first {
+		t.Fatalf("expected side chat, first=%s side=%s", first, side)
 	}
 	if err := ctrl.SwitchChat(context.Background(), first); err != nil {
 		t.Fatalf("switch chat: %v", err)
@@ -179,7 +185,7 @@ func TestControllerForwardRuntimeRefreshesInactiveChatMetadata(t *testing.T) {
 
 	got := ctrl.State()
 	if got.ActiveChatID != first {
-		t.Fatalf("expected active chat to remain %d, got %d", first, got.ActiveChatID)
+		t.Fatalf("expected active chat to remain %s, got %s", first, got.ActiveChatID)
 	}
 	if got.Snapshots[side].Chat.Title != "Generated Side Title" {
 		t.Fatalf("expected inactive snapshot title updated, got %#v", got.Snapshots[side].Chat)
@@ -209,7 +215,7 @@ func TestControllerForwardRuntimeRefreshesInactiveChatMetadata(t *testing.T) {
 func TestControllerRefreshChatStatusesDiscoversNewStoreChats(t *testing.T) {
 	ctrl, st := newTestController(t)
 	state := ctrl.State()
-	if state.Session.ID == 0 || state.ActiveChatID == 0 {
+	if state.Session.ID == "" || state.ActiveChatID == "" {
 		t.Fatal("expected active session and chat")
 	}
 	parentID := state.ActiveChatID
@@ -336,7 +342,7 @@ func TestControllerPermissionProfilePersistsBySession(t *testing.T) {
 
 	engine := agent.New(cfg, st, nil, nil, workdir)
 	next := New(cfg, st, engine, workdir)
-	if err := next.loadSession(context.Background(), sessionID, 0); err != nil {
+	if err := next.loadSession(context.Background(), sessionID, ""); err != nil {
 		t.Fatalf("start next controller: %v", err)
 	}
 	if got := next.State().Permissions.Active; got != "write-ask" {
@@ -415,7 +421,7 @@ func TestControllerSessionsAreWorkspaceScoped(t *testing.T) {
 		t.Fatalf("start resume: %v", err)
 	}
 	if got := ctrl.State().Session.ID; got != sessionA.ID {
-		t.Fatalf("expected workspace A session %d, got %d", sessionA.ID, got)
+		t.Fatalf("expected workspace A session %s, got %s", sessionA.ID, got)
 	}
 	sessionState, err := ctrl.Sessions(ctx)
 	if err != nil {
@@ -540,11 +546,11 @@ func newTestControllerWithConfig(t *testing.T, edit func(*config.Config)) (*Cont
 func TestNewestSessionUsesUpdatedAtThenID(t *testing.T) {
 	now := time.Now()
 	got := newestSession([]domain.Session{
-		{ID: 1, UpdatedAt: now},
-		{ID: 2, UpdatedAt: now},
-		{ID: 3, UpdatedAt: now.Add(-time.Second)},
+		{ID: "session-1", UpdatedAt: now},
+		{ID: "session-2", UpdatedAt: now},
+		{ID: "session-3", UpdatedAt: now.Add(-time.Second)},
 	})
-	if got.ID != 2 {
-		t.Fatalf("expected newest session 2, got %d", got.ID)
+	if got.ID != "session-2" {
+		t.Fatalf("expected newest session 2, got %s", got.ID)
 	}
 }

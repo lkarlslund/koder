@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"fmt"
-	"hash/fnv"
 	"slices"
 	"strings"
 	"sync"
@@ -29,43 +28,43 @@ type Store struct {
 type backend interface {
 	Close() error
 	EnsureSession(context.Context, string, string) (domain.Session, error)
-	CreateSession(context.Context, string, string, string, *int64) (domain.Session, error)
+	CreateSession(context.Context, string, string, string, *domain.ID) (domain.Session, error)
 	ListSessions(context.Context) ([]domain.Session, error)
-	GetSession(context.Context, int64) (domain.Session, error)
-	CreateChat(context.Context, int64, string, domain.WorkflowRole, *int64) (domain.Chat, error)
-	ListChats(context.Context, int64) ([]domain.Chat, error)
-	GetChat(context.Context, int64) (domain.Chat, error)
-	DefaultChat(context.Context, int64) (domain.Chat, error)
+	GetSession(context.Context, domain.ID) (domain.Session, error)
+	CreateChat(context.Context, domain.ID, string, domain.WorkflowRole, *domain.ID) (domain.Chat, error)
+	ListChats(context.Context, domain.ID) ([]domain.Chat, error)
+	GetChat(context.Context, domain.ID) (domain.Chat, error)
+	DefaultChat(context.Context, domain.ID) (domain.Chat, error)
 	UpdateChat(context.Context, domain.Chat) error
-	DeleteChat(context.Context, int64) error
-	SetChatQueuedInputs(context.Context, int64, []domain.QueuedInput) error
-	UpdateSessionWorkspace(context.Context, int64, string, string) error
-	SetSessionPermissionProfile(context.Context, int64, string) error
-	AddSessionPermissionRule(context.Context, int64, domain.PermissionOverride) error
-	SetSessionToolStates(context.Context, int64, map[domain.ToolKind]bool) error
-	UpdateSessionTitle(context.Context, int64, string, time.Time, int) error
-	UpdateSessionAgents(context.Context, int64, string, string, string, string, []domain.AgentsFile, time.Time) error
-	SetSessionModel(context.Context, int64, string, string) error
-	CreateApproval(context.Context, int64, domain.ToolKind, string) (Approval, error)
-	CreateChatApproval(context.Context, int64, domain.ToolKind, string) (Approval, error)
-	UpdateApproval(context.Context, int64, domain.ApprovalStatus) error
-	PendingApprovals(context.Context, int64) ([]Approval, error)
-	PendingApprovalsForChat(context.Context, int64) ([]Approval, error)
-	AddTask(context.Context, int64, string, domain.TaskStatus) (Task, error)
-	UpdateTask(context.Context, int64, domain.TaskStatus) error
-	ListTasks(context.Context, int64) ([]Task, error)
-	SetMilestonePlan(context.Context, int64, string, []Milestone) (MilestonePlan, error)
-	GetMilestonePlan(context.Context, int64) (MilestonePlan, error)
-	AddTodoItems(context.Context, int64, string, []string) ([]TodoItem, error)
-	UpdateTodoItem(context.Context, int64, domain.TodoStatus, string) (TodoItem, error)
-	ListTodos(context.Context, int64, string) ([]TodoItem, error)
-	GetApproval(context.Context, int64) (Approval, error)
+	DeleteChat(context.Context, domain.ID) error
+	SetChatQueuedInputs(context.Context, domain.ID, []domain.QueuedInput) error
+	UpdateSessionWorkspace(context.Context, domain.ID, string, string) error
+	SetSessionPermissionProfile(context.Context, domain.ID, string) error
+	AddSessionPermissionRule(context.Context, domain.ID, domain.PermissionOverride) error
+	SetSessionToolStates(context.Context, domain.ID, map[domain.ToolKind]bool) error
+	UpdateSessionTitle(context.Context, domain.ID, string, time.Time, int) error
+	UpdateSessionAgents(context.Context, domain.ID, string, string, string, string, []domain.AgentsFile, time.Time) error
+	SetSessionModel(context.Context, domain.ID, string, string) error
+	CreateApproval(context.Context, domain.ID, domain.ToolKind, string) (Approval, error)
+	CreateChatApproval(context.Context, domain.ID, domain.ToolKind, string) (Approval, error)
+	UpdateApproval(context.Context, domain.ID, domain.ApprovalStatus) error
+	PendingApprovals(context.Context, domain.ID) ([]Approval, error)
+	PendingApprovalsForChat(context.Context, domain.ID) ([]Approval, error)
+	AddTask(context.Context, domain.ID, string, domain.TaskStatus) (Task, error)
+	UpdateTask(context.Context, domain.ID, domain.TaskStatus) error
+	ListTasks(context.Context, domain.ID) ([]Task, error)
+	SetMilestonePlan(context.Context, domain.ID, string, []Milestone) (MilestonePlan, error)
+	GetMilestonePlan(context.Context, domain.ID) (MilestonePlan, error)
+	AddTodoItems(context.Context, domain.ID, string, []string) ([]TodoItem, error)
+	UpdateTodoItem(context.Context, domain.ID, domain.TodoStatus, string) (TodoItem, error)
+	ListTodos(context.Context, domain.ID, string) ([]TodoItem, error)
+	GetApproval(context.Context, domain.ID) (Approval, error)
 }
 
 type Approval struct {
-	ID         int64
-	SessionID  int64
-	ChatID     int64
+	ID         domain.ID
+	SessionID  domain.ID
+	ChatID     domain.ID
 	Tool       domain.ToolKind
 	ToolCallID string
 	Command    string
@@ -74,15 +73,15 @@ type Approval struct {
 }
 
 type Task struct {
-	ID        int64
-	SessionID int64
+	ID        domain.ID
+	SessionID domain.ID
 	Body      string
 	Status    domain.TaskStatus
 	CreatedAt time.Time
 }
 
 type MilestonePlan struct {
-	SessionID  int64
+	SessionID  domain.ID
 	Summary    string
 	Milestones []Milestone
 	UpdatedAt  time.Time
@@ -97,8 +96,8 @@ type Milestone struct {
 }
 
 type TodoItem struct {
-	ID           int64
-	SessionID    int64
+	ID           domain.ID
+	SessionID    domain.ID
 	MilestoneRef string
 	Content      string
 	Status       domain.TodoStatus
@@ -108,7 +107,7 @@ type TodoItem struct {
 }
 
 type WorkspaceState struct {
-	ID        int64     `json:"id"`
+	ID        domain.ID `json:"id"`
 	Workdir   string    `json:"workdir"`
 	WebBind   string    `json:"web_bind"`
 	UpdatedAt time.Time `json:"updated_at"`
@@ -188,11 +187,11 @@ func (s *Store) EnsureSession(ctx context.Context, providerID, modelID string) (
 	return s.backend.EnsureSession(ctx, providerID, modelID)
 }
 
-func (s *Store) CreateSession(ctx context.Context, title, providerID, modelID string, parentID *int64) (domain.Session, error) {
+func (s *Store) CreateSession(ctx context.Context, title, providerID, modelID string, parentID *domain.ID) (domain.Session, error) {
 	return s.backend.CreateSession(ctx, title, providerID, modelID, parentID)
 }
 
-func (s *Store) CreateChat(ctx context.Context, sessionID int64, title string, role domain.WorkflowRole, parentChatID *int64) (domain.Chat, error) {
+func (s *Store) CreateChat(ctx context.Context, sessionID domain.ID, title string, role domain.WorkflowRole, parentChatID *domain.ID) (domain.Chat, error) {
 	return s.backend.CreateChat(ctx, sessionID, title, role, parentChatID)
 }
 
@@ -200,19 +199,19 @@ func (s *Store) ListSessions(ctx context.Context) ([]domain.Session, error) {
 	return s.backend.ListSessions(ctx)
 }
 
-func (s *Store) GetSession(ctx context.Context, sessionID int64) (domain.Session, error) {
+func (s *Store) GetSession(ctx context.Context, sessionID domain.ID) (domain.Session, error) {
 	return s.backend.GetSession(ctx, sessionID)
 }
 
-func (s *Store) ListChats(ctx context.Context, sessionID int64) ([]domain.Chat, error) {
+func (s *Store) ListChats(ctx context.Context, sessionID domain.ID) ([]domain.Chat, error) {
 	return s.backend.ListChats(ctx, sessionID)
 }
 
-func (s *Store) GetChat(ctx context.Context, chatID int64) (domain.Chat, error) {
+func (s *Store) GetChat(ctx context.Context, chatID domain.ID) (domain.Chat, error) {
 	return s.backend.GetChat(ctx, chatID)
 }
 
-func (s *Store) DefaultChat(ctx context.Context, sessionID int64) (domain.Chat, error) {
+func (s *Store) DefaultChat(ctx context.Context, sessionID domain.ID) (domain.Chat, error) {
 	return s.backend.DefaultChat(ctx, sessionID)
 }
 
@@ -221,8 +220,8 @@ func (s *Store) UpdateChat(ctx context.Context, chat domain.Chat) error {
 }
 
 // DeleteChat removes a chat and its direct chat-owned persisted data.
-func (s *Store) DeleteChat(ctx context.Context, chatID int64) error {
-	if chatID <= 0 {
+func (s *Store) DeleteChat(ctx context.Context, chatID domain.ID) error {
+	if chatID == "" {
 		return fmt.Errorf("delete chat: chat id is required")
 	}
 	chat, err := s.GetChat(ctx, chatID)
@@ -257,33 +256,33 @@ func (s *Store) DeleteChat(ctx context.Context, chatID int64) error {
 	return s.backend.DeleteChat(ctx, chatID)
 }
 
-func (s *Store) SetChatQueuedInputs(ctx context.Context, chatID int64, items []domain.QueuedInput) error {
+func (s *Store) SetChatQueuedInputs(ctx context.Context, chatID domain.ID, items []domain.QueuedInput) error {
 	return s.backend.SetChatQueuedInputs(ctx, chatID, items)
 }
 
-func (s *Store) UpdateSessionWorkspace(ctx context.Context, sessionID int64, cwd, projectRoot string) error {
+func (s *Store) UpdateSessionWorkspace(ctx context.Context, sessionID domain.ID, cwd, projectRoot string) error {
 	return s.backend.UpdateSessionWorkspace(ctx, sessionID, cwd, projectRoot)
 }
 
-func (s *Store) SetSessionPermissionProfile(ctx context.Context, sessionID int64, profile string) error {
+func (s *Store) SetSessionPermissionProfile(ctx context.Context, sessionID domain.ID, profile string) error {
 	return s.backend.SetSessionPermissionProfile(ctx, sessionID, profile)
 }
 
-func (s *Store) AddSessionPermissionRule(ctx context.Context, sessionID int64, rule domain.PermissionOverride) error {
+func (s *Store) AddSessionPermissionRule(ctx context.Context, sessionID domain.ID, rule domain.PermissionOverride) error {
 	return s.backend.AddSessionPermissionRule(ctx, sessionID, rule)
 }
 
-func (s *Store) SetSessionToolStates(ctx context.Context, sessionID int64, states map[domain.ToolKind]bool) error {
+func (s *Store) SetSessionToolStates(ctx context.Context, sessionID domain.ID, states map[domain.ToolKind]bool) error {
 	return s.backend.SetSessionToolStates(ctx, sessionID, states)
 }
 
-func (s *Store) UpdateSessionTitle(ctx context.Context, sessionID int64, title string, generatedAt time.Time, refreshCount int) error {
+func (s *Store) UpdateSessionTitle(ctx context.Context, sessionID domain.ID, title string, generatedAt time.Time, refreshCount int) error {
 	return s.backend.UpdateSessionTitle(ctx, sessionID, title, generatedAt, refreshCount)
 }
 
 func (s *Store) UpdateSessionAgents(
 	ctx context.Context,
-	sessionID int64,
+	sessionID domain.ID,
 	projectRoot string,
 	projectChecksum string,
 	resolved string,
@@ -294,12 +293,12 @@ func (s *Store) UpdateSessionAgents(
 	return s.backend.UpdateSessionAgents(ctx, sessionID, projectRoot, projectChecksum, resolved, summary, files, generatedAt)
 }
 
-func (s *Store) SetSessionModel(ctx context.Context, sessionID int64, providerID, modelID string) error {
+func (s *Store) SetSessionModel(ctx context.Context, sessionID domain.ID, providerID, modelID string) error {
 	return s.backend.SetSessionModel(ctx, sessionID, providerID, modelID)
 }
 
 // TimelineForChat returns persisted timeline items for a chat ordered by sequence.
-func (s *Store) TimelineForChat(ctx context.Context, chatID int64) ([]domain.TimelineItem, error) {
+func (s *Store) TimelineForChat(ctx context.Context, chatID domain.ID) ([]domain.TimelineItem, error) {
 	items, err := s.Timeline().List(ctx, ByIndex[domain.TimelineItem]("chat", fmt.Sprint(chatID)))
 	if err != nil {
 		return nil, err
@@ -331,19 +330,19 @@ func (s *Store) InsertTimelineItem(ctx context.Context, item domain.TimelineItem
 	return s.Timeline().Insert(ctx, item)
 }
 
-func (s *Store) CreateApproval(ctx context.Context, sessionID int64, tool domain.ToolKind, command string) (Approval, error) {
+func (s *Store) CreateApproval(ctx context.Context, sessionID domain.ID, tool domain.ToolKind, command string) (Approval, error) {
 	return s.backend.CreateApproval(ctx, sessionID, tool, command)
 }
 
-func (s *Store) CreateChatApproval(ctx context.Context, chatID int64, tool domain.ToolKind, command string) (Approval, error) {
+func (s *Store) CreateChatApproval(ctx context.Context, chatID domain.ID, tool domain.ToolKind, command string) (Approval, error) {
 	return s.backend.CreateChatApproval(ctx, chatID, tool, command)
 }
 
-func (s *Store) UpdateApproval(ctx context.Context, approvalID int64, status domain.ApprovalStatus) error {
+func (s *Store) UpdateApproval(ctx context.Context, approvalID domain.ID, status domain.ApprovalStatus) error {
 	return s.backend.UpdateApproval(ctx, approvalID, status)
 }
 
-func (s *Store) PendingApprovals(ctx context.Context, sessionID int64) ([]Approval, error) {
+func (s *Store) PendingApprovals(ctx context.Context, sessionID domain.ID) ([]Approval, error) {
 	chats, err := s.ListChats(ctx, sessionID)
 	if err != nil {
 		return nil, err
@@ -359,7 +358,7 @@ func (s *Store) PendingApprovals(ctx context.Context, sessionID int64) ([]Approv
 	return approvals, nil
 }
 
-func (s *Store) PendingApprovalsForChat(ctx context.Context, chatID int64) ([]Approval, error) {
+func (s *Store) PendingApprovalsForChat(ctx context.Context, chatID domain.ID) ([]Approval, error) {
 	chat, err := s.GetChat(ctx, chatID)
 	if err != nil {
 		return nil, nil
@@ -393,10 +392,8 @@ func (s *Store) PendingApprovalsForChat(ctx context.Context, chatID int64) ([]Ap
 	return approvals, nil
 }
 
-func SyntheticApprovalID(toolCallID string) int64 {
-	h := fnv.New64a()
-	_, _ = h.Write([]byte(strings.TrimSpace(toolCallID)))
-	return int64(h.Sum64() & 0x7fffffffffffffff)
+func SyntheticApprovalID(toolCallID string) domain.ID {
+	return strings.TrimSpace(toolCallID)
 }
 
 func toolCallPreview(call domain.ToolCall) string {
@@ -412,43 +409,43 @@ func toolCallPreview(call domain.ToolCall) string {
 	return strings.TrimSpace(string(call.Tool))
 }
 
-func (s *Store) AddTask(ctx context.Context, sessionID int64, body string, status domain.TaskStatus) (Task, error) {
+func (s *Store) AddTask(ctx context.Context, sessionID domain.ID, body string, status domain.TaskStatus) (Task, error) {
 	return s.backend.AddTask(ctx, sessionID, body, status)
 }
 
-func (s *Store) UpdateTask(ctx context.Context, taskID int64, status domain.TaskStatus) error {
+func (s *Store) UpdateTask(ctx context.Context, taskID domain.ID, status domain.TaskStatus) error {
 	return s.backend.UpdateTask(ctx, taskID, status)
 }
 
-func (s *Store) ListTasks(ctx context.Context, sessionID int64) ([]Task, error) {
+func (s *Store) ListTasks(ctx context.Context, sessionID domain.ID) ([]Task, error) {
 	return s.backend.ListTasks(ctx, sessionID)
 }
 
-func (s *Store) SetMilestonePlan(ctx context.Context, sessionID int64, summary string, milestones []Milestone) (MilestonePlan, error) {
+func (s *Store) SetMilestonePlan(ctx context.Context, sessionID domain.ID, summary string, milestones []Milestone) (MilestonePlan, error) {
 	return s.backend.SetMilestonePlan(ctx, sessionID, summary, milestones)
 }
 
-func (s *Store) GetMilestonePlan(ctx context.Context, sessionID int64) (MilestonePlan, error) {
+func (s *Store) GetMilestonePlan(ctx context.Context, sessionID domain.ID) (MilestonePlan, error) {
 	return s.backend.GetMilestonePlan(ctx, sessionID)
 }
 
-func (s *Store) AddTodoItems(ctx context.Context, sessionID int64, milestoneRef string, contents []string) ([]TodoItem, error) {
+func (s *Store) AddTodoItems(ctx context.Context, sessionID domain.ID, milestoneRef string, contents []string) ([]TodoItem, error) {
 	return s.backend.AddTodoItems(ctx, sessionID, milestoneRef, contents)
 }
 
-func (s *Store) UpdateTodoItem(ctx context.Context, todoID int64, status domain.TodoStatus, content string) (TodoItem, error) {
+func (s *Store) UpdateTodoItem(ctx context.Context, todoID domain.ID, status domain.TodoStatus, content string) (TodoItem, error) {
 	return s.backend.UpdateTodoItem(ctx, todoID, status, content)
 }
 
-func (s *Store) ListTodos(ctx context.Context, sessionID int64, milestoneRef string) ([]TodoItem, error) {
+func (s *Store) ListTodos(ctx context.Context, sessionID domain.ID, milestoneRef string) ([]TodoItem, error) {
 	return s.backend.ListTodos(ctx, sessionID, milestoneRef)
 }
 
-func (s *Store) GetApproval(ctx context.Context, approvalID int64) (Approval, error) {
+func (s *Store) GetApproval(ctx context.Context, approvalID domain.ID) (Approval, error) {
 	return s.backend.GetApproval(ctx, approvalID)
 }
 
-func (s *Store) ForkSession(ctx context.Context, sourceSessionID int64) (domain.Session, error) {
+func (s *Store) ForkSession(ctx context.Context, sourceSessionID domain.ID) (domain.Session, error) {
 	source, err := s.GetSession(ctx, sourceSessionID)
 	if err != nil {
 		return domain.Session{}, err

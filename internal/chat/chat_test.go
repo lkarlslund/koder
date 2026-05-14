@@ -44,19 +44,19 @@ func (f *cancelAwareRunner) RunContinueInChat(ctx context.Context, _ domain.Sess
 	return f.events, nil
 }
 
-func (f *cancelAwareRunner) ApproveToolInChat(context.Context, int64, int64, string) (<-chan domain.Event, error) {
+func (f *cancelAwareRunner) ApproveToolInChat(context.Context, domain.ID, domain.ID, string) (<-chan domain.Event, error) {
 	ch := make(chan domain.Event)
 	close(ch)
 	return ch, nil
 }
 
-func (f *cancelAwareRunner) ApproveToolInChatWithRule(context.Context, int64, int64, string, domain.PermissionOverride) (<-chan domain.Event, error) {
+func (f *cancelAwareRunner) ApproveToolInChatWithRule(context.Context, domain.ID, domain.ID, string, domain.PermissionOverride) (<-chan domain.Event, error) {
 	ch := make(chan domain.Event)
 	close(ch)
 	return ch, nil
 }
 
-func (f *cancelAwareRunner) DenyToolInChat(context.Context, int64, int64, string) (<-chan domain.Event, error) {
+func (f *cancelAwareRunner) DenyToolInChat(context.Context, domain.ID, domain.ID, string) (<-chan domain.Event, error) {
 	ch := make(chan domain.Event)
 	close(ch)
 	return ch, nil
@@ -93,7 +93,7 @@ func (f *runtimeFakeRunner) RunContinueInChat(_ context.Context, _ domain.Sessio
 	return evt, nil
 }
 
-func (f *runtimeFakeRunner) ApproveToolInChat(_ context.Context, _ int64, _ int64, _ string) (<-chan domain.Event, error) {
+func (f *runtimeFakeRunner) ApproveToolInChat(_ context.Context, _ domain.ID, _ domain.ID, _ string) (<-chan domain.Event, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.approveCalls++
@@ -107,11 +107,11 @@ func (f *runtimeFakeRunner) ApproveToolInChat(_ context.Context, _ int64, _ int6
 	return evt, nil
 }
 
-func (f *runtimeFakeRunner) ApproveToolInChatWithRule(_ context.Context, _ int64, _ int64, toolCallID string, _ domain.PermissionOverride) (<-chan domain.Event, error) {
-	return f.ApproveToolInChat(context.Background(), 0, 0, toolCallID)
+func (f *runtimeFakeRunner) ApproveToolInChatWithRule(_ context.Context, _ domain.ID, _ domain.ID, toolCallID string, _ domain.PermissionOverride) (<-chan domain.Event, error) {
+	return f.ApproveToolInChat(context.Background(), "", "", toolCallID)
 }
 
-func (f *runtimeFakeRunner) DenyToolInChat(_ context.Context, _ int64, _ int64, _ string) (<-chan domain.Event, error) {
+func (f *runtimeFakeRunner) DenyToolInChat(_ context.Context, _ domain.ID, _ domain.ID, _ string) (<-chan domain.Event, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.denyCalls++
@@ -424,8 +424,8 @@ func TestRuntimeDispatchQueuedUsesSelectedItemAndPreservesNote(t *testing.T) {
 	rt := newTestChat(t, st, session, chat, runner)
 
 	rt.DispatchQueued(
-		domain.QueuedInput{ID: 99, Kind: domain.QueuedInputKindSteer, Text: "selected", CreatedAt: time.Now().UTC()},
-		[]domain.QueuedInput{{ID: 1, Kind: domain.QueuedInputKindQueued, Text: "first", CreatedAt: time.Now().UTC()}},
+		domain.QueuedInput{ID: "queue-99", Kind: domain.QueuedInputKindSteer, Text: "selected", CreatedAt: time.Now().UTC()},
+		[]domain.QueuedInput{{ID: "queue-1", Kind: domain.QueuedInputKindQueued, Text: "first", CreatedAt: time.Now().UTC()}},
 	)
 
 	deadline := time.After(2 * time.Second)
@@ -491,7 +491,7 @@ func TestRuntimeApproveStartsApprovalStream(t *testing.T) {
 	updates, unsub := rt.Subscribe()
 	defer unsub()
 
-	rt.Approve(42)
+	rt.Approve("approval-42")
 
 	deadline := time.After(2 * time.Second)
 	for {
@@ -585,8 +585,8 @@ func TestLoadWithPendingApprovalStartsWaitingForApproval(t *testing.T) {
 }
 
 func TestRuntimeCancelWhileToolsRunningStagesThenForcesCancel(t *testing.T) {
-	session := domain.Session{ID: 1}
-	chat := domain.Chat{ID: 2, SessionID: 1}
+	session := domain.Session{ID: "session-1"}
+	chat := domain.Chat{ID: "chat-2", SessionID: "session-1"}
 	cancelled := false
 	rt := &Chat{
 		session: session,
@@ -725,7 +725,7 @@ func TestPersistRemapsOptimisticIDsAndReloadsWithoutDuplicates(t *testing.T) {
 	rt := newTestChat(t, st, session, chatRecord, runner)
 
 	rt.appendOptimisticUserMessage(domain.QueuedInput{
-		ID:        99,
+		ID:        "queue-99",
 		Kind:      domain.QueuedInputKindSteer,
 		Text:      "persist me",
 		CreatedAt: time.Now().UTC(),

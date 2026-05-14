@@ -1,7 +1,6 @@
 package app
 
 import (
-	"hash/fnv"
 	"strconv"
 	"strings"
 	"time"
@@ -9,12 +8,12 @@ import (
 	"github.com/lkarlslund/koder/internal/domain"
 )
 
-func renderTranscriptFromTimeline(sessionID int64, items []domain.TimelineItem) ([]domain.Message, map[int64][]domain.Part) {
+func renderTranscriptFromTimeline(sessionID domain.ID, items []domain.TimelineItem) ([]domain.Message, map[domain.ID][]domain.Part) {
 	messages := make([]domain.Message, 0, len(items))
-	parts := make(map[int64][]domain.Part, len(items))
+	parts := make(map[domain.ID][]domain.Part, len(items))
 	for _, item := range items {
 		msg, itemParts := renderTimelineItem(sessionID, item)
-		if msg.ID == 0 {
+		if msg.ID == "" {
 			continue
 		}
 		messages = append(messages, msg)
@@ -23,9 +22,9 @@ func renderTranscriptFromTimeline(sessionID int64, items []domain.TimelineItem) 
 	return messages, parts
 }
 
-func renderTimelineItem(sessionID int64, item domain.TimelineItem) (domain.Message, []domain.Part) {
+func renderTimelineItem(sessionID domain.ID, item domain.TimelineItem) (domain.Message, []domain.Part) {
 	msg := domain.Message{
-		ID:        timelineRenderID(item.ID),
+		ID:        domain.ID(item.ID),
 		SessionID: sessionID,
 		ChatID:    item.ChatID,
 		Role:      renderTimelineRole(item),
@@ -65,9 +64,9 @@ func renderTimelineSummary(item domain.TimelineItem) string {
 
 func renderTimelineParts(item domain.TimelineItem) []domain.Part {
 	var parts []domain.Part
-	messageID := timelineRenderID(item.ID)
+	messageID := domain.ID(item.ID)
 	add := func(kind domain.PartKind, payload domain.PartPayload, offset int64) {
-		part := domain.Part{ID: messageID*1000 + offset, MessageID: messageID, Kind: kind, Payload: payload, CreatedAt: item.CreatedAt}
+		part := domain.Part{ID: domain.ID(string(messageID) + "-part-" + strconv.FormatInt(offset, 10)), MessageID: messageID, Kind: kind, Payload: payload, CreatedAt: item.CreatedAt}
 		normalizeRenderPart(item, &part)
 		parts = append(parts, part)
 	}
@@ -144,7 +143,7 @@ func normalizeRenderPart(item domain.TimelineItem, part *domain.Part) {
 	if part == nil {
 		return
 	}
-	part.MessageID = timelineRenderID(item.ID)
+	part.MessageID = domain.ID(item.ID)
 	if part.Kind == "" && part.Payload != nil {
 		part.Kind = part.Payload.PartKind()
 	}
@@ -154,20 +153,6 @@ func normalizeRenderPart(item domain.TimelineItem, part *domain.Part) {
 	if part.Body == "" {
 		part.Body = part.Text()
 	}
-}
-
-func timelineRenderID(id string) int64 {
-	if id == "" {
-		return 0
-	}
-	if strings.HasPrefix(id, "019aa000-0000-7000-8000-") {
-		if parsed, err := strconv.ParseInt(strings.TrimPrefix(id, "019aa000-0000-7000-8000-"), 10, 64); err == nil {
-			return parsed
-		}
-	}
-	h := fnv.New64a()
-	_, _ = h.Write([]byte(id))
-	return int64(h.Sum64() & 0x7fffffffffffffff)
 }
 
 func firstNonZeroRenderTime(values ...time.Time) time.Time {

@@ -177,7 +177,7 @@ func TestWorkspaceWebBindRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get workspace state: %v", err)
 	}
-	if state.ID == 0 || state.WebBind != "127.0.0.1:45678" {
+	if state.ID == "" || state.WebBind != "127.0.0.1:45678" {
 		t.Fatalf("expected bind in store workspace state, got %#v", state)
 	}
 }
@@ -453,7 +453,7 @@ func TestSessionDumpCommandRejectsMissingID(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected missing id error")
 	}
-	if !strings.Contains(err.Error(), "--id must be greater than zero") {
+	if !strings.Contains(err.Error(), "--id is required") {
 		t.Fatalf("expected id validation error, got %v", err)
 	}
 }

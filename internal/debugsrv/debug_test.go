@@ -18,15 +18,15 @@ func TestRecorderTracksSessionEventsAndRuntime(t *testing.T) {
 	t.Parallel()
 
 	rec := NewRecorder()
-	rec.RecordLifecycle(7, "prompt_submitted", "hello", map[string]string{"source": "tui"})
-	rec.RecordEvent(7, domain.Event{Kind: domain.EventKindToolResult, Text: "done"})
-	rec.UpdateRuntime(RuntimeSnapshot{CurrentSession: 7, Status: "Ready", ViewportWidth: 80, MessageCount: 2, ViewportPreview: "hello"})
+	rec.RecordLifecycle("session-7", "prompt_submitted", "hello", map[string]string{"source": "tui"})
+	rec.RecordEvent("session-7", domain.Event{Kind: domain.EventKindToolResult, Text: "done"})
+	rec.UpdateRuntime(RuntimeSnapshot{CurrentSession: "session-7", Status: "Ready", ViewportWidth: 80, MessageCount: 2, ViewportPreview: "hello"})
 
-	events := rec.Events(7)
+	events := rec.Events("session-7")
 	if len(events) != 2 {
 		t.Fatalf("expected 2 events, got %d", len(events))
 	}
-	if rec.Runtime().CurrentSession != 7 {
+	if rec.Runtime().CurrentSession != "session-7" {
 		t.Fatalf("unexpected runtime snapshot: %#v", rec.Runtime())
 	}
 	if rec.Runtime().ViewportWidth != 80 || rec.Runtime().MessageCount != 2 {
@@ -62,7 +62,7 @@ func TestServerExposesTranscriptAndEvents(t *testing.T) {
 	}
 
 	rec := NewRecorder()
-	rec.RecordLifecycle(0, "startup_timing", "list_sessions", map[string]string{"duration_ms": "42"})
+	rec.RecordLifecycle("", "startup_timing", "list_sessions", map[string]string{"duration_ms": "42"})
 	rec.RecordEvent(session.ID, domain.Event{Kind: domain.EventKindMessageDelta, Text: "hello"})
 
 	srv, err := Start("127.0.0.1:0", st, rec)
@@ -71,7 +71,7 @@ func TestServerExposesTranscriptAndEvents(t *testing.T) {
 	}
 	defer srv.Close()
 
-	resp, err := http.Get("http://" + srv.Addr() + "/debug/sessions/" + "1/transcript")
+	resp, err := http.Get("http://" + srv.Addr() + "/debug/sessions/" + session.ID + "/transcript")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +89,7 @@ func TestServerExposesTranscriptAndEvents(t *testing.T) {
 		t.Fatalf("unexpected transcript payload: %#v", transcript)
 	}
 
-	resp, err = http.Get("http://" + srv.Addr() + "/debug/sessions/1/events")
+	resp, err = http.Get("http://" + srv.Addr() + "/debug/sessions/" + session.ID + "/events")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,14 +116,14 @@ func TestServerExposesTranscriptAndEvents(t *testing.T) {
 		t.Fatalf("unexpected global events status: %d", resp.StatusCode)
 	}
 	var global struct {
-		SessionID int64           `json:"session_id"`
+		SessionID domain.ID       `json:"session_id"`
 		Events    []RecordedEvent `json:"events"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&global); err != nil {
 		t.Fatal(err)
 	}
-	if global.SessionID != 0 {
-		t.Fatalf("expected global session id 0, got %d", global.SessionID)
+	if global.SessionID != "" {
+		t.Fatalf("expected global session id empty, got %s", global.SessionID)
 	}
 	if len(global.Events) != 2 {
 		t.Fatalf("expected 2 global events, got %#v", global)
@@ -173,7 +173,7 @@ func TestServerExposesSessionAnalysis(t *testing.T) {
 	}
 	defer srv.Close()
 
-	resp, err := http.Get("http://" + srv.Addr() + "/debug/sessions/1/analysis")
+	resp, err := http.Get("http://" + srv.Addr() + "/debug/sessions/" + session.ID + "/analysis")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -187,7 +187,7 @@ func TestServerExposesSessionAnalysis(t *testing.T) {
 		t.Fatal(err)
 	}
 	if analysis.SessionID != session.ID {
-		t.Fatalf("expected session id %d, got %#v", session.ID, analysis)
+		t.Fatalf("expected session id %s, got %#v", session.ID, analysis)
 	}
 	if analysis.ContinueCount != 1 || len(analysis.Continues) != 1 || analysis.Continues[0].Kind != "continue" {
 		t.Fatalf("expected one continue event, got %#v", analysis)
@@ -203,7 +203,7 @@ func TestServerExposesSessionAnalysis(t *testing.T) {
 	}
 }
 
-func appendDebugTimelineItem(st *store.Store, chatID int64, content domain.TimelineContent) (domain.TimelineItem, error) {
+func appendDebugTimelineItem(st *store.Store, chatID domain.ID, content domain.TimelineContent) (domain.TimelineItem, error) {
 	item, err := st.AppendTimeline(context.Background(), chatID, content)
 	if err != nil {
 		return domain.TimelineItem{}, err
@@ -339,8 +339,8 @@ func TestRuntimeSnapshotIncludesInteractiveState(t *testing.T) {
 
 	recorder := NewRecorder()
 	recorder.UpdateRuntime(RuntimeSnapshot{
-		CurrentSession:          7,
-		CurrentChat:             9,
+		CurrentSession:          "session-7",
+		CurrentChat:             "chat-9",
 		Busy:                    true,
 		BusyStatus:              "Waiting for LLM response",
 		Loading:                 true,
@@ -366,7 +366,7 @@ func TestRuntimeSnapshotIncludesInteractiveState(t *testing.T) {
 	})
 
 	runtime := recorder.Runtime()
-	if runtime.CurrentSession != 7 || runtime.CurrentChat != 9 {
+	if runtime.CurrentSession != "session-7" || runtime.CurrentChat != "chat-9" {
 		t.Fatalf("unexpected session/chat ids: %#v", runtime)
 	}
 	if !runtime.Loading || !runtime.ActiveEventStream {

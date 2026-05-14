@@ -41,10 +41,10 @@ type ChatStatus struct {
 }
 
 type ChatControl interface {
-	ListChats(context.Context, int64) ([]ChatStatus, error)
-	StartDecomposition(context.Context, int64, int64, string, string) (ChatStatus, error)
-	StartExecution(context.Context, int64, int64, string, string) (ChatStatus, error)
-	PollChat(context.Context, int64, int64) (ChatStatus, error)
+	ListChats(context.Context, domain.ID) ([]ChatStatus, error)
+	StartDecomposition(context.Context, domain.ID, domain.ID, string, string) (ChatStatus, error)
+	StartExecution(context.Context, domain.ID, domain.ID, string, string) (ChatStatus, error)
+	PollChat(context.Context, domain.ID, domain.ID) (ChatStatus, error)
 }
 
 type Request struct {
@@ -122,8 +122,8 @@ type Runtime struct {
 	Workdir               string
 	HTTPClient            *http.Client
 	Store                 *store.Store
-	SessionID             int64
-	ChatID                int64
+	SessionID             domain.ID
+	ChatID                domain.ID
 	ChatRole              domain.WorkflowRole
 	ActiveMilestoneRef    string
 	AssignedTodoBucketRef string
@@ -167,7 +167,7 @@ type resultSummarizer interface {
 }
 
 type resultPersister interface {
-	PersistResult(ctx context.Context, st *store.Store, sessionID int64, req Request, result Result) (<-chan domain.Event, error)
+	PersistResult(ctx context.Context, st *store.Store, sessionID domain.ID, req Request, result Result) (<-chan domain.Event, error)
 }
 
 type Registry struct {
@@ -261,11 +261,11 @@ func (r *Registry) Execute(ctx context.Context, req Request) (Result, error) {
 	return tool.Execute(ctx, r.runtime, req)
 }
 
-func (r *Registry) ExecuteWithSession(ctx context.Context, st *store.Store, sessionID int64, req Request) (Result, error) {
+func (r *Registry) ExecuteWithSession(ctx context.Context, st *store.Store, sessionID domain.ID, req Request) (Result, error) {
 	return r.ExecuteWithChat(ctx, st, sessionID, domain.Chat{}, req)
 }
 
-func (r *Registry) ExecuteWithChat(ctx context.Context, st *store.Store, sessionID int64, chat domain.Chat, req Request) (Result, error) {
+func (r *Registry) ExecuteWithChat(ctx context.Context, st *store.Store, sessionID domain.ID, chat domain.Chat, req Request) (Result, error) {
 	req, tool, err := normalizeRequest(req)
 	if err != nil {
 		return Result{}, err
@@ -280,11 +280,11 @@ func (r *Registry) ExecuteWithChat(ctx context.Context, st *store.Store, session
 	return tool.Execute(ctx, runtime, req)
 }
 
-func (r *Registry) PersistResult(ctx context.Context, st *store.Store, sessionID int64, req Request, result Result) (<-chan domain.Event, error) {
-	return r.PersistResultInChat(ctx, st, sessionID, 0, req, result)
+func (r *Registry) PersistResult(ctx context.Context, st *store.Store, sessionID domain.ID, req Request, result Result) (<-chan domain.Event, error) {
+	return r.PersistResultInChat(ctx, st, sessionID, "", req, result)
 }
 
-func (r *Registry) PersistResultInChat(ctx context.Context, st *store.Store, sessionID, chatID int64, req Request, result Result) (<-chan domain.Event, error) {
+func (r *Registry) PersistResultInChat(ctx context.Context, st *store.Store, sessionID, chatID domain.ID, req Request, result Result) (<-chan domain.Event, error) {
 	if req.Tool == "" {
 		return nil, errors.New("tool is empty")
 	}
@@ -484,10 +484,10 @@ func providerDefinition(kind domain.ToolKind, spec ToolSpec) provider.ToolDefini
 	}
 }
 
-func PersistStandardResult(ctx context.Context, st *store.Store, sessionID int64, req Request, result Result) (<-chan domain.Event, error) {
+func PersistStandardResult(ctx context.Context, st *store.Store, sessionID domain.ID, req Request, result Result) (<-chan domain.Event, error) {
 	_, body := SummarizeResult(req, result)
 	chatID, ok := ChatIDFromContext(ctx)
-	if !ok || chatID <= 0 {
+	if !ok || chatID == "" {
 		chat, err := st.DefaultChat(ctx, sessionID)
 		if err != nil {
 			return nil, err
@@ -534,33 +534,33 @@ func domainToolResultPayload(tool domain.ToolKind, status domain.ToolResultStatu
 	return domain.DecodeToolResultPayload(tool, status, raw)
 }
 
-func WithChatID(ctx context.Context, chatID int64) context.Context {
-	if chatID <= 0 {
+func WithChatID(ctx context.Context, chatID domain.ID) context.Context {
+	if chatID == "" {
 		return ctx
 	}
 	return context.WithValue(ctx, chatIDContextKey{}, chatID)
 }
 
-func ChatIDFromContext(ctx context.Context) (int64, bool) {
+func ChatIDFromContext(ctx context.Context) (domain.ID, bool) {
 	if ctx == nil {
-		return 0, false
+		return "", false
 	}
-	value, ok := ctx.Value(chatIDContextKey{}).(int64)
-	if !ok || value <= 0 {
-		return 0, false
+	value, ok := ctx.Value(chatIDContextKey{}).(domain.ID)
+	if !ok || value == "" {
+		return "", false
 	}
 	return value, true
 }
 
 func RequireChatControl(runtime Runtime) (ChatControl, error) {
-	if runtime.ChatControl == nil || runtime.SessionID == 0 || runtime.ChatID == 0 {
+	if runtime.ChatControl == nil || runtime.SessionID == "" || runtime.ChatID == "" {
 		return nil, errors.New("chat orchestration requires an active persisted chat")
 	}
 	return runtime.ChatControl, nil
 }
 
 func RequireExecControl(runtime Runtime) (execruntime.Control, error) {
-	if runtime.Exec == nil || runtime.SessionID == 0 || runtime.ChatID == 0 {
+	if runtime.Exec == nil || runtime.SessionID == "" || runtime.ChatID == "" {
 		return nil, errors.New("exec sessions require an active persisted chat")
 	}
 	return runtime.Exec, nil

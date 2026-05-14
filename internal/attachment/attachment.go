@@ -11,6 +11,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/lkarlslund/koder/internal/domain"
 )
 
 const (
@@ -45,8 +47,8 @@ func (m *Manager) DraftsDir() string {
 	return filepath.Join(m.root, "drafts")
 }
 
-func (m *Manager) SessionDir(sessionID int64) string {
-	return filepath.Join(m.root, "sessions", fmt.Sprintf("%d", sessionID))
+func (m *Manager) SessionDir(sessionID domain.ID) string {
+	return filepath.Join(m.root, "sessions", string(sessionID))
 }
 
 func (m *Manager) ImportClipboardImage(png []byte) (Draft, error) {
@@ -112,7 +114,7 @@ func (m *Manager) ImportFile(path string) (Draft, error) {
 	}}, nil
 }
 
-func (m *Manager) AdoptDraft(draft Draft, sessionID int64) (Metadata, error) {
+func (m *Manager) AdoptDraft(draft Draft, sessionID domain.ID) (Metadata, error) {
 	if strings.TrimSpace(draft.Path) == "" {
 		return Metadata{}, fmt.Errorf("draft attachment path is empty")
 	}
@@ -136,7 +138,7 @@ func (m *Manager) AdoptDraft(draft Draft, sessionID int64) (Metadata, error) {
 	}, nil
 }
 
-func (m *Manager) CopyToSession(meta Metadata, sessionID int64) (Metadata, error) {
+func (m *Manager) CopyToSession(meta Metadata, sessionID domain.ID) (Metadata, error) {
 	if strings.TrimSpace(meta.Path) == "" {
 		return Metadata{}, fmt.Errorf("attachment path is empty")
 	}

@@ -16,7 +16,7 @@ type Metrics struct {
 	Estimated    bool
 }
 
-func FromMessages(cfg config.Config, session domain.Session, messages []domain.Message, parts map[int64][]domain.Part) (Metrics, bool) {
+func FromMessages(cfg config.Config, session domain.Session, messages []domain.Message, parts map[domain.ID][]domain.Part) (Metrics, bool) {
 	providerCfg, ok := cfg.Provider(session.ProviderID)
 	if !ok || providerCfg.ContextWindow <= 0 {
 		return Metrics{}, false
@@ -125,14 +125,14 @@ func TotalTimelineUsage(items []domain.TimelineItem) (domain.Usage, bool) {
 	return total, found
 }
 
-func LatestUsage(messages []domain.Message, parts map[int64][]domain.Part) (domain.Usage, bool) {
+func LatestUsage(messages []domain.Message, parts map[domain.ID][]domain.Part) (domain.Usage, bool) {
 	usage, _, _, ok := LatestUsageAnchor(messages, parts)
 	return usage, ok
 }
 
 // LatestUsageAnchor returns the latest usage payload together with its message
 // and part position in the chat history.
-func LatestUsageAnchor(messages []domain.Message, parts map[int64][]domain.Part) (domain.Usage, int64, int, bool) {
+func LatestUsageAnchor(messages []domain.Message, parts map[domain.ID][]domain.Part) (domain.Usage, domain.ID, int, bool) {
 	for msgIdx := len(messages) - 1; msgIdx >= 0; msgIdx-- {
 		msg := messages[msgIdx]
 		messageParts := parts[msg.ID]
@@ -148,13 +148,13 @@ func LatestUsageAnchor(messages []domain.Message, parts map[int64][]domain.Part)
 			}
 		}
 	}
-	return domain.Usage{}, 0, 0, false
+	return domain.Usage{}, "", 0, false
 }
 
 // EstimateTailTokens estimates the token cost of persisted chat content added
 // after the latest context-bearing part. Usage events and completed compaction
 // parts both establish a fresh context anchor for the chat.
-func EstimateTailTokens(messages []domain.Message, parts map[int64][]domain.Part) (int, bool) {
+func EstimateTailTokens(messages []domain.Message, parts map[domain.ID][]domain.Part) (int, bool) {
 	anchorMessageID, anchorPartIdx, ok := LatestContextAnchor(messages, parts)
 	if !ok {
 		return 0, false
@@ -180,7 +180,7 @@ func EstimateTailTokens(messages []domain.Message, parts map[int64][]domain.Part
 
 // LatestContextAnchor returns the latest part position that corresponds to a
 // known context size for the chat.
-func LatestContextAnchor(messages []domain.Message, parts map[int64][]domain.Part) (int64, int, bool) {
+func LatestContextAnchor(messages []domain.Message, parts map[domain.ID][]domain.Part) (domain.ID, int, bool) {
 	for msgIdx := len(messages) - 1; msgIdx >= 0; msgIdx-- {
 		msg := messages[msgIdx]
 		messageParts := parts[msg.ID]
@@ -199,10 +199,10 @@ func LatestContextAnchor(messages []domain.Message, parts map[int64][]domain.Par
 			}
 		}
 	}
-	return 0, 0, false
+	return "", 0, false
 }
 
-func TotalUsage(messages []domain.Message, parts map[int64][]domain.Part) (domain.Usage, bool) {
+func TotalUsage(messages []domain.Message, parts map[domain.ID][]domain.Part) (domain.Usage, bool) {
 	var total domain.Usage
 	var found bool
 	for _, msg := range messages {

@@ -78,7 +78,7 @@ func (i *userMessageTranscriptItem) BindValue(msg domain.Message, parts []domain
 }
 
 func (i *userMessageTranscriptItem) Refresh(m *App) {
-	if i.msg.ID == 0 && strings.TrimSpace(i.msg.Summary) == "" && len(i.parts) == 0 {
+	if i.msg.ID == "" && strings.TrimSpace(i.msg.Summary) == "" && len(i.parts) == 0 {
 		i.setElement(ui.AsNode(ui.Paragraph{Text: ""}))
 		return
 	}
@@ -120,7 +120,7 @@ func (i *assistantMessageTranscriptItem) SetReasoningVisible(v bool) { i.showRea
 func (i *assistantMessageTranscriptItem) SetSystemVisible(v bool)    { i.showSystem = v }
 
 func (i *assistantMessageTranscriptItem) Refresh(m *App) {
-	if i.msg.ID == 0 && strings.TrimSpace(i.msg.Summary) == "" && len(i.parts) == 0 {
+	if i.msg.ID == "" && strings.TrimSpace(i.msg.Summary) == "" && len(i.parts) == 0 {
 		i.setElement(ui.AsNode(ui.Paragraph{Text: ""}))
 		return
 	}
@@ -177,10 +177,10 @@ func (i *pendingAssistantTranscriptItem) Reset(createdAt time.Time, text, reason
 func (i *pendingAssistantTranscriptItem) Parts() []domain.Part {
 	var parts []domain.Part
 	if strings.TrimSpace(i.reasoning) != "" {
-		parts = append(parts, domain.Part{ID: -1, Kind: domain.PartKindReasoning, Payload: domain.ReasoningPayload{Text: i.reasoning}, Body: i.reasoning})
+		parts = append(parts, domain.Part{ID: "pending-reasoning", Kind: domain.PartKindReasoning, Payload: domain.ReasoningPayload{Text: i.reasoning}, Body: i.reasoning})
 	}
 	if strings.TrimSpace(i.text) != "" {
-		parts = append(parts, domain.Part{ID: -2, Kind: domain.PartKindText, Payload: domain.TextPayload{Text: i.text}, Body: i.text})
+		parts = append(parts, domain.Part{ID: "pending-text", Kind: domain.PartKindText, Payload: domain.TextPayload{Text: i.text}, Body: i.text})
 	}
 	return parts
 }
@@ -267,14 +267,14 @@ func toolRunCardNode(run ui.ToolRun, palette theme.Palette, width int, expandedO
 
 func firstNonEmptyToolRunKey(run ui.ToolRun) string {
 	prefix := ""
-	if run.ParentMessageID > 0 {
-		prefix = fmt.Sprintf("parent:%d:", run.ParentMessageID)
+	if run.ParentMessageID != "" {
+		prefix = fmt.Sprintf("parent:%s:", run.ParentMessageID)
 	}
 	switch {
 	case strings.TrimSpace(run.ID) != "":
 		return prefix + run.ID
-	case run.ApprovalID > 0:
-		return prefix + fmt.Sprintf("approval:%d", run.ApprovalID)
+	case run.ApprovalID != "":
+		return prefix + fmt.Sprintf("approval:%s", run.ApprovalID)
 	case strings.TrimSpace(run.ToolCallID) != "":
 		return prefix + "call:" + run.ToolCallID
 	default:

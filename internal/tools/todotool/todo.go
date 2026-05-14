@@ -200,7 +200,7 @@ func (updateItemTool) Execute(ctx context.Context, runtime tools.Runtime, req to
 			return tools.TodoBucketResultWithTitle(milestone.Ref, milestone.Title, todos, ""), nil
 		}
 	}
-	return tools.Result{}, fmt.Errorf("todo item %d not found", id)
+	return tools.Result{}, fmt.Errorf("todo item %s not found", id)
 }
 
 func (fetchNextTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
@@ -246,7 +246,7 @@ func (fetchNextTool) SummarizeResult(req tools.Request, result tools.Result) (st
 	return "Fetched next todo", result.Output
 }
 
-func (listTool) PersistResult(ctx context.Context, st *store.Store, sessionID int64, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
+func (listTool) PersistResult(ctx context.Context, st *store.Store, sessionID domain.ID, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
 	plan, todos, ref, err := tools.PersistedTodoBucket(ctx, st, sessionID, req.Args["milestone_ref"])
 	if err != nil {
 		return nil, err
@@ -255,7 +255,7 @@ func (listTool) PersistResult(ctx context.Context, st *store.Store, sessionID in
 	return tools.PersistStandardResult(ctx, st, sessionID, req, result)
 }
 
-func (addItemsTool) PersistResult(ctx context.Context, st *store.Store, sessionID int64, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
+func (addItemsTool) PersistResult(ctx context.Context, st *store.Store, sessionID domain.ID, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
 	items, err := tools.ParseTodoAddItems(req.Args["items"])
 	if err != nil {
 		return nil, err
@@ -274,7 +274,7 @@ func (addItemsTool) PersistResult(ctx context.Context, st *store.Store, sessionI
 	return tools.PersistStandardResult(ctx, st, sessionID, req, result)
 }
 
-func (updateItemTool) PersistResult(ctx context.Context, st *store.Store, sessionID int64, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
+func (updateItemTool) PersistResult(ctx context.Context, st *store.Store, sessionID domain.ID, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
 	id, _ := tools.ParseTodoID(req.Args["id"])
 	plan, err := st.GetMilestonePlan(ctx, sessionID)
 	if err != nil {
@@ -307,10 +307,10 @@ func (updateItemTool) PersistResult(ctx context.Context, st *store.Store, sessio
 			return tools.PersistStandardResult(ctx, st, sessionID, req, result)
 		}
 	}
-	return nil, fmt.Errorf("todo item %d not found", id)
+	return nil, fmt.Errorf("todo item %s not found", id)
 }
 
-func (fetchNextTool) PersistResult(ctx context.Context, st *store.Store, sessionID int64, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
+func (fetchNextTool) PersistResult(ctx context.Context, st *store.Store, sessionID domain.ID, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
 	plan, todos, ref, err := tools.PersistedTodoBucket(ctx, st, sessionID, req.Args["milestone_ref"])
 	if err != nil {
 		return nil, err

@@ -28,8 +28,8 @@ type ToolRun struct {
 	ID              string
 	Tool            domain.ToolKind
 	ToolCallID      string
-	ParentMessageID int64
-	ApprovalID      int64
+	ParentMessageID domain.ID
+	ApprovalID      domain.ID
 	Title           string
 	Command         string
 	Subtitle        string
@@ -70,8 +70,8 @@ func (r ToolRun) StatusLabel() string {
 	case ToolRunStatusRunning:
 		return "Running"
 	case ToolRunStatusPendingApproval:
-		if r.ApprovalID > 0 {
-			return "Needs approval #" + strconv.FormatInt(r.ApprovalID, 10)
+		if r.ApprovalID != "" {
+			return "Needs approval #" + r.ApprovalID
 		}
 		return "Needs approval"
 	case ToolRunStatusApproved:

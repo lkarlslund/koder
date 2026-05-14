@@ -13,12 +13,12 @@ func TestFromMessagesUsesLatestUsageAndContextWindow(t *testing.T) {
 	cfg.Providers["test"] = config.Provider{ContextWindow: 32768}
 	session := domain.Session{ProviderID: cfg.DefaultProvider}
 	messages := []domain.Message{
-		{ID: 1},
-		{ID: 2},
+		{ID: "msg-1"},
+		{ID: "msg-2"},
 	}
-	parts := map[int64][]domain.Part{
-		1: {{Kind: domain.PartKindUsage, Payload: domain.UsagePayload{Usage: domain.Usage{TotalTokens: 1000}}}},
-		2: {{Kind: domain.PartKindUsage, Payload: domain.UsagePayload{Usage: domain.Usage{TotalTokens: 8192}}}},
+	parts := map[domain.ID][]domain.Part{
+		"msg-1": {{Kind: domain.PartKindUsage, Payload: domain.UsagePayload{Usage: domain.Usage{TotalTokens: 1000}}}},
+		"msg-2": {{Kind: domain.PartKindUsage, Payload: domain.UsagePayload{Usage: domain.Usage{TotalTokens: 8192}}}},
 	}
 
 	got, ok := FromMessages(cfg, session, messages, parts)
@@ -35,9 +35,9 @@ func TestFromMessagesSynthesizesTotalFromPromptAndCompletion(t *testing.T) {
 	cfg.DefaultProvider = "test"
 	cfg.Providers["test"] = config.Provider{ContextWindow: 32768}
 	session := domain.Session{ProviderID: cfg.DefaultProvider}
-	messages := []domain.Message{{ID: 1}}
-	parts := map[int64][]domain.Part{
-		1: {{Kind: domain.PartKindUsage, Payload: domain.UsagePayload{Usage: domain.Usage{PromptTokens: 1200, CompletionTokens: 300}}}},
+	messages := []domain.Message{{ID: "msg-1"}}
+	parts := map[domain.ID][]domain.Part{
+		"msg-1": {{Kind: domain.PartKindUsage, Payload: domain.UsagePayload{Usage: domain.Usage{PromptTokens: 1200, CompletionTokens: 300}}}},
 	}
 
 	got, ok := FromMessages(cfg, session, messages, parts)
@@ -62,12 +62,12 @@ func TestFromMessagesSkipsMissingContextWindow(t *testing.T) {
 
 func TestTotalUsageAccumulatesAllUsageNotices(t *testing.T) {
 	messages := []domain.Message{
-		{ID: 1},
-		{ID: 2},
+		{ID: "msg-1"},
+		{ID: "msg-2"},
 	}
-	parts := map[int64][]domain.Part{
-		1: {{Kind: domain.PartKindUsage, Payload: domain.UsagePayload{Usage: domain.Usage{PromptTokens: 100, CompletionTokens: 40, CachedTokens: 10, TotalTokens: 140}}}},
-		2: {{Kind: domain.PartKindUsage, Payload: domain.UsagePayload{Usage: domain.Usage{PromptTokens: 50, CompletionTokens: 25, TotalTokens: 75}}}},
+	parts := map[domain.ID][]domain.Part{
+		"msg-1": {{Kind: domain.PartKindUsage, Payload: domain.UsagePayload{Usage: domain.Usage{PromptTokens: 100, CompletionTokens: 40, CachedTokens: 10, TotalTokens: 140}}}},
+		"msg-2": {{Kind: domain.PartKindUsage, Payload: domain.UsagePayload{Usage: domain.Usage{PromptTokens: 50, CompletionTokens: 25, TotalTokens: 75}}}},
 	}
 
 	got, ok := TotalUsage(messages, parts)
@@ -81,23 +81,23 @@ func TestTotalUsageAccumulatesAllUsageNotices(t *testing.T) {
 
 func TestEstimateTailTokensUsesLatestUsageAnchor(t *testing.T) {
 	messages := []domain.Message{
-		{ID: 1, Role: domain.MessageRoleUser},
-		{ID: 2, Role: domain.MessageRoleAssistant},
-		{ID: 3, Role: domain.MessageRoleUser},
-		{ID: 4, Role: domain.MessageRoleAssistant},
+		{ID: "msg-1", Role: domain.MessageRoleUser},
+		{ID: "msg-2", Role: domain.MessageRoleAssistant},
+		{ID: "msg-3", Role: domain.MessageRoleUser},
+		{ID: "msg-4", Role: domain.MessageRoleAssistant},
 	}
-	parts := map[int64][]domain.Part{
-		1: {{Kind: domain.PartKindText, Payload: domain.TextPayload{Text: "old context should be ignored"}}},
-		2: {{Kind: domain.PartKindUsage, Payload: domain.UsagePayload{Usage: domain.Usage{PromptTokens: 1200, CompletionTokens: 40, TotalTokens: 1240}}}},
-		3: {{Kind: domain.PartKindText, Payload: domain.TextPayload{Text: "new prompt words"}}},
-		4: {{Kind: domain.PartKindReasoning, Payload: domain.ReasoningPayload{Text: "fresh thoughts only"}}},
+	parts := map[domain.ID][]domain.Part{
+		"msg-1": {{Kind: domain.PartKindText, Payload: domain.TextPayload{Text: "old context should be ignored"}}},
+		"msg-2": {{Kind: domain.PartKindUsage, Payload: domain.UsagePayload{Usage: domain.Usage{PromptTokens: 1200, CompletionTokens: 40, TotalTokens: 1240}}}},
+		"msg-3": {{Kind: domain.PartKindText, Payload: domain.TextPayload{Text: "new prompt words"}}},
+		"msg-4": {{Kind: domain.PartKindReasoning, Payload: domain.ReasoningPayload{Text: "fresh thoughts only"}}},
 	}
 
 	got, ok := EstimateTailTokens(messages, parts)
 	if !ok {
 		t.Fatal("expected latest usage anchor")
 	}
-	want := estimateMessageTokens(messages[2], parts[3]) + estimateMessageTokens(messages[3], parts[4])
+	want := estimateMessageTokens(messages[2], parts["msg-3"]) + estimateMessageTokens(messages[3], parts["msg-4"])
 	if got != want {
 		t.Fatalf("expected tail-only estimate, got %d", got)
 	}
@@ -105,23 +105,23 @@ func TestEstimateTailTokensUsesLatestUsageAnchor(t *testing.T) {
 
 func TestEstimateTailTokensUsesCompletedCompactionAnchor(t *testing.T) {
 	messages := []domain.Message{
-		{ID: 1, Role: domain.MessageRoleUser},
-		{ID: 2, Role: domain.MessageRoleAssistant},
-		{ID: 3, Role: domain.MessageRoleAssistant},
-		{ID: 4, Role: domain.MessageRoleUser},
+		{ID: "msg-1", Role: domain.MessageRoleUser},
+		{ID: "msg-2", Role: domain.MessageRoleAssistant},
+		{ID: "msg-3", Role: domain.MessageRoleAssistant},
+		{ID: "msg-4", Role: domain.MessageRoleUser},
 	}
-	parts := map[int64][]domain.Part{
-		1: {{Kind: domain.PartKindText, Payload: domain.TextPayload{Text: "large pre-compaction transcript should be ignored"}}},
-		2: {{Kind: domain.PartKindUsage, Payload: domain.UsagePayload{Usage: domain.Usage{PromptTokens: 36000, CompletionTokens: 40, TotalTokens: 36040}}}},
-		3: {{Kind: domain.PartKindCompaction, Payload: domain.CompactionPayload{Summary: "short compacted summary", Status: "completed", AfterContextTokens: 6564}}},
-		4: {{Kind: domain.PartKindText, Payload: domain.TextPayload{Text: "followup after compaction"}}},
+	parts := map[domain.ID][]domain.Part{
+		"msg-1": {{Kind: domain.PartKindText, Payload: domain.TextPayload{Text: "large pre-compaction transcript should be ignored"}}},
+		"msg-2": {{Kind: domain.PartKindUsage, Payload: domain.UsagePayload{Usage: domain.Usage{PromptTokens: 36000, CompletionTokens: 40, TotalTokens: 36040}}}},
+		"msg-3": {{Kind: domain.PartKindCompaction, Payload: domain.CompactionPayload{Summary: "short compacted summary", Status: "completed", AfterContextTokens: 6564}}},
+		"msg-4": {{Kind: domain.PartKindText, Payload: domain.TextPayload{Text: "followup after compaction"}}},
 	}
 
 	got, ok := EstimateTailTokens(messages, parts)
 	if !ok {
 		t.Fatal("expected compaction context anchor")
 	}
-	want := estimateMessageTokens(messages[3], parts[4])
+	want := estimateMessageTokens(messages[3], parts["msg-4"])
 	if got != want {
 		t.Fatalf("expected post-compaction tail only, got %d want %d", got, want)
 	}
@@ -129,10 +129,10 @@ func TestEstimateTailTokensUsesCompletedCompactionAnchor(t *testing.T) {
 
 func TestEstimateTailTokensCountsPartsAfterAnchorInSameMessage(t *testing.T) {
 	messages := []domain.Message{
-		{ID: 1, Role: domain.MessageRoleAssistant},
+		{ID: "msg-1", Role: domain.MessageRoleAssistant},
 	}
-	parts := map[int64][]domain.Part{
-		1: {
+	parts := map[domain.ID][]domain.Part{
+		"msg-1": {
 			{Kind: domain.PartKindUsage, Payload: domain.UsagePayload{Usage: domain.Usage{PromptTokens: 1200, CompletionTokens: 40, TotalTokens: 1240}}},
 			{Kind: domain.PartKindText, Payload: domain.TextPayload{Text: "persisted after usage"}},
 		},
@@ -142,7 +142,7 @@ func TestEstimateTailTokensCountsPartsAfterAnchorInSameMessage(t *testing.T) {
 	if !ok {
 		t.Fatal("expected context anchor")
 	}
-	want := estimateMessageTokens(messages[0], parts[1][1:])
+	want := estimateMessageTokens(messages[0], parts["msg-1"][1:])
 	if got != want {
 		t.Fatalf("expected same-message tail, got %d want %d", got, want)
 	}

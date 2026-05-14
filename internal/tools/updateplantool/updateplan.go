@@ -73,7 +73,7 @@ func (tool) Execute(_ context.Context, _ tools.Runtime, req tools.Request) (tool
 func (tool) SummarizeResult(req tools.Request, result tools.Result) (string, string) {
 	return "plan", result.Output
 }
-func (tool) PersistResult(ctx context.Context, st *store.Store, sessionID int64, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
+func (tool) PersistResult(ctx context.Context, st *store.Store, sessionID domain.ID, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
 	steps, err := normalizePlan(req.Args["plan"])
 	if err != nil {
 		return nil, err
@@ -86,7 +86,7 @@ func (tool) PersistResult(ctx context.Context, st *store.Store, sessionID int64,
 		})
 	}
 	chatID, ok := tools.ChatIDFromContext(ctx)
-	if !ok || chatID <= 0 {
+	if !ok || chatID == "" {
 		chat, err := st.DefaultChat(ctx, sessionID)
 		if err != nil {
 			return nil, err

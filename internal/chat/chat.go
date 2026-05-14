@@ -3,7 +3,6 @@ package chat
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -81,7 +80,7 @@ type Update struct {
 type Chat struct {
 	store   *store.Store
 	engine  Runner
-	onClose func(int64)
+	onClose func(domain.ID)
 
 	mu          sync.RWMutex
 	session     domain.Session
@@ -92,7 +91,7 @@ type Chat struct {
 	active      bool
 	cancel      context.CancelFunc
 	queue       []domain.QueuedInput
-	queueNotes  map[int64]string
+	queueNotes  map[domain.ID]string
 	cancelState CancelState
 	running     map[string]struct{}
 	draining    bool
@@ -137,13 +136,13 @@ type continueRunner interface {
 }
 
 type approvalRunner interface {
-	ApproveToolInChat(context.Context, int64, int64, string) (<-chan domain.Event, error)
-	ApproveToolInChatWithRule(context.Context, int64, int64, string, domain.PermissionOverride) (<-chan domain.Event, error)
-	DenyToolInChat(context.Context, int64, int64, string) (<-chan domain.Event, error)
+	ApproveToolInChat(context.Context, domain.ID, domain.ID, string) (<-chan domain.Event, error)
+	ApproveToolInChatWithRule(context.Context, domain.ID, domain.ID, string, domain.PermissionOverride) (<-chan domain.Event, error)
+	DenyToolInChat(context.Context, domain.ID, domain.ID, string) (<-chan domain.Event, error)
 }
 
 type compactRunner interface {
-	CompactChat(context.Context, int64, int64) (<-chan domain.Event, error)
+	CompactChat(context.Context, domain.ID, domain.ID) (<-chan domain.Event, error)
 }
 
 type pendingToolRunner interface {
@@ -162,14 +161,14 @@ type Runner interface {
 }
 
 // Load builds a live chat by hydrating its timeline and approval state from store.
-func Load(ctx context.Context, st *store.Store, session domain.Session, chatRecord domain.Chat, runner Runner, onClose func(int64)) (*Chat, error) {
+func Load(ctx context.Context, st *store.Store, session domain.Session, chatRecord domain.Chat, runner Runner, onClose func(domain.ID)) (*Chat, error) {
 	if st == nil {
 		return nil, fmt.Errorf("store is required")
 	}
-	if chatRecord.ID == 0 {
+	if chatRecord.ID == "" {
 		return nil, fmt.Errorf("chat id is required")
 	}
-	if chatRecord.SessionID == 0 {
+	if chatRecord.SessionID == "" {
 		loaded, err := st.GetChat(ctx, chatRecord.ID)
 		if err != nil {
 			return nil, err
@@ -188,8 +187,8 @@ func Load(ctx context.Context, st *store.Store, session domain.Session, chatReco
 }
 
 // New builds a live chat from hydrated persisted state.
-func New(session domain.Session, chatRecord domain.Chat, timeline []domain.TimelineItem, approvals []store.Approval, runner Runner, st *store.Store, onClose func(int64)) (*Chat, error) {
-	if chatRecord.ID == 0 {
+func New(session domain.Session, chatRecord domain.Chat, timeline []domain.TimelineItem, approvals []store.Approval, runner Runner, st *store.Store, onClose func(domain.ID)) (*Chat, error) {
+	if chatRecord.ID == "" {
 		return nil, fmt.Errorf("chat id is required")
 	}
 	status := StatusIdle
@@ -208,7 +207,7 @@ func New(session domain.Session, chatRecord domain.Chat, timeline []domain.Timel
 		status:     status,
 		statusText: statusText,
 		queue:      cloneQueuedInputs(chatRecord.QueuedInputs),
-		queueNotes: map[int64]string{},
+		queueNotes: map[domain.ID]string{},
 		inbox:      make(chan any, 64),
 		subs:       map[int]chan Update{},
 	}
@@ -246,7 +245,7 @@ func (r *Chat) Persist(ctx context.Context, st *store.Store) error {
 
 	changed := false
 	for _, item := range timeline {
-		if item.ChatID == 0 {
+		if item.ChatID == "" {
 			item.ChatID = chatRecord.ID
 		}
 		if _, ok := itemIDs[item.ID]; ok {
@@ -303,7 +302,7 @@ func (r *Chat) Interrupt() {
 	r.Cancel()
 }
 
-func (r *Chat) Approve(approvalID int64) {
+func (r *Chat) Approve(approvalID domain.ID) {
 	r.inbox <- approveCmd{toolCallID: fmt.Sprint(approvalID)}
 }
 
@@ -311,11 +310,11 @@ func (r *Chat) ApproveTool(toolCallID string) {
 	r.inbox <- approveCmd{toolCallID: strings.TrimSpace(toolCallID)}
 }
 
-func (r *Chat) ApproveWithRule(approvalID int64, rule domain.PermissionOverride) {
+func (r *Chat) ApproveWithRule(approvalID domain.ID, rule domain.PermissionOverride) {
 	r.inbox <- approveCmd{toolCallID: fmt.Sprint(approvalID), rule: &rule}
 }
 
-func (r *Chat) Deny(approvalID int64) {
+func (r *Chat) Deny(approvalID domain.ID) {
 	r.inbox <- denyCmd{toolCallID: fmt.Sprint(approvalID)}
 }
 
@@ -687,12 +686,8 @@ func (r *Chat) resolveApprovalToolCallIDLocked(raw string) string {
 	if raw == "" {
 		return ""
 	}
-	id, err := strconv.ParseInt(raw, 10, 64)
-	if err != nil || id == 0 {
-		return raw
-	}
 	for _, approval := range r.state.Approvals() {
-		if approval.ID == id && strings.TrimSpace(approval.ToolCallID) != "" {
+		if approval.ID == raw && strings.TrimSpace(approval.ToolCallID) != "" {
 			return approval.ToolCallID
 		}
 	}
@@ -713,9 +708,7 @@ func (r *Chat) removeApprovalLocked(toolCallID string) {
 			return
 		}
 	}
-	if id, err := strconv.ParseInt(toolCallID, 10, 64); err == nil && id != 0 {
-		r.state.RemoveApproval(id)
-	}
+	r.state.RemoveApproval(domain.ID(toolCallID))
 }
 
 func (r *Chat) handleResumePendingTools() {
@@ -1080,7 +1073,7 @@ func (r *Chat) runItem(ctx context.Context, session domain.Session, chat domain.
 }
 
 func (r *Chat) persistQueue() error {
-	if r.store == nil || r.chat.ID == 0 {
+	if r.store == nil || r.chat.ID == "" {
 		return nil
 	}
 	r.mu.RLock()
@@ -1242,7 +1235,7 @@ func queuedInputFromItem(item QueueItem) domain.QueuedInput {
 		kind = domain.QueuedInputKindContinue
 	}
 	return domain.QueuedInput{
-		ID:          time.Now().UTC().UnixNano(),
+		ID:          domain.NewID(),
 		Kind:        kind,
 		Text:        strings.TrimSpace(item.Text),
 		Attachments: queuedAttachmentsFromDrafts(item.Attachments),

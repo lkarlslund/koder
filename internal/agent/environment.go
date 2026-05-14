@@ -57,7 +57,7 @@ func (e *Engine) sessionEnvironmentPrompt(session domain.Session) string {
 	e.envMu.Lock()
 	defer e.envMu.Unlock()
 	if e.envPrompts == nil {
-		e.envPrompts = map[int64]string{}
+		e.envPrompts = map[domain.ID]string{}
 	}
 	if text := e.envPrompts[session.ID]; text != "" {
 		return text

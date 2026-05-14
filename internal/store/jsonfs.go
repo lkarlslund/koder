@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -20,7 +19,7 @@ type jsonfsBackend struct {
 }
 
 func openJSONFSBackend(stateDir string) (*jsonfsBackend, error) {
-	root := filepath.Join(stateDir, "store-jsonfs-v3")
+	root := filepath.Join(stateDir, "store-jsonfs-v6")
 	if reset, err := jsonfsNeedsSchemaReset(root); err != nil {
 		return nil, err
 	} else if reset {
@@ -70,30 +69,6 @@ func (b *jsonfsBackend) init() error {
 }
 
 func (b *jsonfsBackend) Close() error { return nil }
-
-func (b *jsonfsBackend) allocateCollectionID(ctx context.Context, key string) (int64, error) {
-	if err := ensureContext(ctx); err != nil {
-		return 0, err
-	}
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	meta, err := b.readMeta()
-	if err != nil {
-		return 0, err
-	}
-	if meta.NextIDs == nil {
-		meta.NextIDs = map[string]int64{}
-	}
-	next := meta.NextIDs[key]
-	if next <= 0 {
-		next = 1
-	}
-	meta.NextIDs[key] = next + 1
-	if err := b.writeMeta(meta); err != nil {
-		return 0, err
-	}
-	return next, nil
-}
 
 func (b *jsonfsBackend) getCollectionRecord(ctx context.Context, namespace string, id string) ([]byte, error) {
 	if err := ensureContext(ctx); err != nil {
@@ -200,7 +175,7 @@ func (b *jsonfsBackend) EnsureSession(ctx context.Context, providerID, modelID s
 	return b.CreateSession(ctx, "New Session", providerID, modelID, nil)
 }
 
-func (b *jsonfsBackend) CreateSession(ctx context.Context, title, providerID, modelID string, parentID *int64) (domain.Session, error) {
+func (b *jsonfsBackend) CreateSession(ctx context.Context, title, providerID, modelID string, parentID *domain.ID) (domain.Session, error) {
 	if err := ensureContext(ctx); err != nil {
 		return domain.Session{}, err
 	}
@@ -213,7 +188,7 @@ func (b *jsonfsBackend) CreateSession(ctx context.Context, title, providerID, mo
 	}
 	now := time.Now().UTC()
 	session := domain.Session{
-		ID:                meta.NextSessionID,
+		ID:                domain.NewID(),
 		ParentID:          parentID,
 		Title:             title,
 		ProviderID:        providerID,
@@ -224,7 +199,6 @@ func (b *jsonfsBackend) CreateSession(ctx context.Context, title, providerID, mo
 		PermissionRules:   nil,
 		ToolStates:        map[domain.ToolKind]bool{},
 	}
-	meta.NextSessionID++
 	if err := b.writeMeta(meta); err != nil {
 		return domain.Session{}, err
 	}
@@ -232,7 +206,7 @@ func (b *jsonfsBackend) CreateSession(ctx context.Context, title, providerID, mo
 		return domain.Session{}, err
 	}
 	chat := domain.Chat{
-		ID:                meta.NextChatID,
+		ID:                domain.NewID(),
 		SessionID:         session.ID,
 		Title:             "Main",
 		WorkflowRole:      domain.WorkflowRoleOrchestrator,
@@ -241,7 +215,6 @@ func (b *jsonfsBackend) CreateSession(ctx context.Context, title, providerID, mo
 		CreatedAt:         now,
 		UpdatedAt:         now,
 	}
-	meta.NextChatID++
 	if err := b.writeMeta(meta); err != nil {
 		return domain.Session{}, err
 	}
@@ -251,7 +224,7 @@ func (b *jsonfsBackend) CreateSession(ctx context.Context, title, providerID, mo
 	return session, nil
 }
 
-func (b *jsonfsBackend) CreateChat(ctx context.Context, sessionID int64, title string, role domain.WorkflowRole, parentChatID *int64) (domain.Chat, error) {
+func (b *jsonfsBackend) CreateChat(ctx context.Context, sessionID domain.ID, title string, role domain.WorkflowRole, parentChatID *domain.ID) (domain.Chat, error) {
 	if err := ensureContext(ctx); err != nil {
 		return domain.Chat{}, err
 	}
@@ -265,18 +238,18 @@ func (b *jsonfsBackend) CreateChat(ctx context.Context, sessionID int64, title s
 	if err != nil {
 		return domain.Chat{}, err
 	}
-	if parentChatID != nil && *parentChatID > 0 {
+	if parentChatID != nil && *parentChatID != "" {
 		parent, err := b.readChat(*parentChatID)
 		if err != nil {
 			return domain.Chat{}, err
 		}
 		if parent.SessionID != sessionID {
-			return domain.Chat{}, fmt.Errorf("parent chat %d belongs to session %d, not %d", parent.ID, parent.SessionID, sessionID)
+			return domain.Chat{}, fmt.Errorf("parent chat %s belongs to session %s, not %s", parent.ID, parent.SessionID, sessionID)
 		}
 	}
 	now := time.Now().UTC()
 	chat := domain.Chat{
-		ID:                meta.NextChatID,
+		ID:                domain.NewID(),
 		SessionID:         sessionID,
 		ParentChatID:      parentChatID,
 		Title:             strings.TrimSpace(title),
@@ -287,9 +260,8 @@ func (b *jsonfsBackend) CreateChat(ctx context.Context, sessionID int64, title s
 		UpdatedAt:         now,
 	}
 	if chat.Title == "" {
-		chat.Title = "Chat " + strconv.FormatInt(chat.ID, 10)
+		chat.Title = "Chat " + chat.ID
 	}
-	meta.NextChatID++
 	if err := b.writeMeta(meta); err != nil {
 		return domain.Chat{}, err
 	}
@@ -299,7 +271,7 @@ func (b *jsonfsBackend) CreateChat(ctx context.Context, sessionID int64, title s
 	return chat, nil
 }
 
-func (b *jsonfsBackend) ListChats(ctx context.Context, sessionID int64) ([]domain.Chat, error) {
+func (b *jsonfsBackend) ListChats(ctx context.Context, sessionID domain.ID) ([]domain.Chat, error) {
 	if err := ensureContext(ctx); err != nil {
 		return nil, err
 	}
@@ -339,20 +311,20 @@ func (b *jsonfsBackend) ListChats(ctx context.Context, sessionID int64) ([]domai
 	return chats, nil
 }
 
-func (b *jsonfsBackend) GetChat(ctx context.Context, chatID int64) (domain.Chat, error) {
+func (b *jsonfsBackend) GetChat(ctx context.Context, chatID domain.ID) (domain.Chat, error) {
 	if err := ensureContext(ctx); err != nil {
 		return domain.Chat{}, err
 	}
 	return b.readChat(chatID)
 }
 
-func (b *jsonfsBackend) DefaultChat(ctx context.Context, sessionID int64) (domain.Chat, error) {
+func (b *jsonfsBackend) DefaultChat(ctx context.Context, sessionID domain.ID) (domain.Chat, error) {
 	chats, err := b.ListChats(ctx, sessionID)
 	if err != nil {
 		return domain.Chat{}, err
 	}
 	if len(chats) == 0 {
-		return domain.Chat{}, fmt.Errorf("no chat for session %d", sessionID)
+		return domain.Chat{}, fmt.Errorf("no chat for session %s", sessionID)
 	}
 	return chats[0], nil
 }
@@ -376,7 +348,7 @@ func (b *jsonfsBackend) UpdateChat(ctx context.Context, chat domain.Chat) error 
 	return b.writeChat(updated)
 }
 
-func (b *jsonfsBackend) DeleteChat(ctx context.Context, chatID int64) error {
+func (b *jsonfsBackend) DeleteChat(ctx context.Context, chatID domain.ID) error {
 	if err := ensureContext(ctx); err != nil {
 		return err
 	}
@@ -393,10 +365,10 @@ func (b *jsonfsBackend) DeleteChat(ctx context.Context, chatID int64) error {
 	if len(chats) <= 1 {
 		return fmt.Errorf("cannot delete the only chat in a session")
 	}
-	if err := os.Remove(filepath.Join(b.root, "chats", formatID(chatID)+".json")); err != nil && !os.IsNotExist(err) {
+	if err := os.Remove(filepath.Join(b.root, "chats", chatID+".json")); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("delete chat: %w", err)
 	}
-	if err := os.Remove(filepath.Join(b.root, "collections", "chats", formatID(chatID)+".json")); err != nil && !os.IsNotExist(err) {
+	if err := os.Remove(filepath.Join(b.root, "collections", "chats", chatID+".json")); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("delete generic chat: %w", err)
 	}
 	if err := b.rebuildCollectionIndexes("chats"); err != nil {
@@ -410,14 +382,14 @@ func (b *jsonfsBackend) DeleteChat(ctx context.Context, chatID int64) error {
 		if approval.ChatID != chatID {
 			continue
 		}
-		if err := os.Remove(filepath.Join(b.root, "approvals", formatID(approval.ID)+".json")); err != nil && !os.IsNotExist(err) {
+		if err := os.Remove(filepath.Join(b.root, "approvals", approval.ID+".json")); err != nil && !os.IsNotExist(err) {
 			return fmt.Errorf("delete chat approval: %w", err)
 		}
 	}
 	return nil
 }
 
-func (b *jsonfsBackend) SetChatQueuedInputs(ctx context.Context, chatID int64, items []domain.QueuedInput) error {
+func (b *jsonfsBackend) SetChatQueuedInputs(ctx context.Context, chatID domain.ID, items []domain.QueuedInput) error {
 	if err := ensureContext(ctx); err != nil {
 		return err
 	}
@@ -467,14 +439,14 @@ func (b *jsonfsBackend) ListSessions(ctx context.Context) ([]domain.Session, err
 	return sessions, nil
 }
 
-func (b *jsonfsBackend) UpdateSessionWorkspace(ctx context.Context, sessionID int64, cwd, projectRoot string) error {
+func (b *jsonfsBackend) UpdateSessionWorkspace(ctx context.Context, sessionID domain.ID, cwd, projectRoot string) error {
 	return b.updateSession(ctx, sessionID, func(session *domain.Session) {
 		session.CWD = cwd
 		session.ProjectRoot = projectRoot
 	})
 }
 
-func (b *jsonfsBackend) GetSession(ctx context.Context, sessionID int64) (domain.Session, error) {
+func (b *jsonfsBackend) GetSession(ctx context.Context, sessionID domain.ID) (domain.Session, error) {
 	if err := ensureContext(ctx); err != nil {
 		return domain.Session{}, err
 	}
@@ -485,25 +457,25 @@ func (b *jsonfsBackend) GetSession(ctx context.Context, sessionID int64) (domain
 	return session, nil
 }
 
-func (b *jsonfsBackend) SetSessionPermissionProfile(ctx context.Context, sessionID int64, profile string) error {
+func (b *jsonfsBackend) SetSessionPermissionProfile(ctx context.Context, sessionID domain.ID, profile string) error {
 	return b.updateSession(ctx, sessionID, func(session *domain.Session) {
 		session.PermissionProfile = profile
 	})
 }
 
-func (b *jsonfsBackend) AddSessionPermissionRule(ctx context.Context, sessionID int64, rule domain.PermissionOverride) error {
+func (b *jsonfsBackend) AddSessionPermissionRule(ctx context.Context, sessionID domain.ID, rule domain.PermissionOverride) error {
 	return b.updateSession(ctx, sessionID, func(session *domain.Session) {
 		session.PermissionRules = appendPermissionRule(session.PermissionRules, rule)
 	})
 }
 
-func (b *jsonfsBackend) SetSessionToolStates(ctx context.Context, sessionID int64, states map[domain.ToolKind]bool) error {
+func (b *jsonfsBackend) SetSessionToolStates(ctx context.Context, sessionID domain.ID, states map[domain.ToolKind]bool) error {
 	return b.updateSession(ctx, sessionID, func(session *domain.Session) {
 		session.ToolStates = cloneToolStates(states)
 	})
 }
 
-func (b *jsonfsBackend) UpdateSessionTitle(ctx context.Context, sessionID int64, title string, generatedAt time.Time, refreshCount int) error {
+func (b *jsonfsBackend) UpdateSessionTitle(ctx context.Context, sessionID domain.ID, title string, generatedAt time.Time, refreshCount int) error {
 	return b.updateSession(ctx, sessionID, func(session *domain.Session) {
 		session.Title = title
 		session.TitleGeneratedAt = generatedAt
@@ -513,7 +485,7 @@ func (b *jsonfsBackend) UpdateSessionTitle(ctx context.Context, sessionID int64,
 
 func (b *jsonfsBackend) UpdateSessionAgents(
 	ctx context.Context,
-	sessionID int64,
+	sessionID domain.ID,
 	projectRoot string,
 	projectChecksum string,
 	resolved string,
@@ -531,14 +503,14 @@ func (b *jsonfsBackend) UpdateSessionAgents(
 	})
 }
 
-func (b *jsonfsBackend) SetSessionModel(ctx context.Context, sessionID int64, providerID, modelID string) error {
+func (b *jsonfsBackend) SetSessionModel(ctx context.Context, sessionID domain.ID, providerID, modelID string) error {
 	return b.updateSession(ctx, sessionID, func(session *domain.Session) {
 		session.ProviderID = providerID
 		session.ModelID = modelID
 	})
 }
 
-func (b *jsonfsBackend) CreateApproval(ctx context.Context, sessionID int64, tool domain.ToolKind, command string) (Approval, error) {
+func (b *jsonfsBackend) CreateApproval(ctx context.Context, sessionID domain.ID, tool domain.ToolKind, command string) (Approval, error) {
 	chat, err := b.DefaultChat(ctx, sessionID)
 	if err != nil {
 		return Approval{}, err
@@ -546,7 +518,7 @@ func (b *jsonfsBackend) CreateApproval(ctx context.Context, sessionID int64, too
 	return b.CreateChatApproval(ctx, chat.ID, tool, command)
 }
 
-func (b *jsonfsBackend) CreateChatApproval(ctx context.Context, chatID int64, tool domain.ToolKind, command string) (Approval, error) {
+func (b *jsonfsBackend) CreateChatApproval(ctx context.Context, chatID domain.ID, tool domain.ToolKind, command string) (Approval, error) {
 	if err := ensureContext(ctx); err != nil {
 		return Approval{}, err
 	}
@@ -562,7 +534,7 @@ func (b *jsonfsBackend) CreateChatApproval(ctx context.Context, chatID int64, to
 		return Approval{}, err
 	}
 	approval := Approval{
-		ID:        meta.NextApprovalID,
+		ID:        domain.NewID(),
 		SessionID: chat.SessionID,
 		ChatID:    chatID,
 		Tool:      tool,
@@ -570,7 +542,6 @@ func (b *jsonfsBackend) CreateChatApproval(ctx context.Context, chatID int64, to
 		Status:    domain.ApprovalStatusPending,
 		CreatedAt: time.Now().UTC(),
 	}
-	meta.NextApprovalID++
 	if err := b.writeMeta(meta); err != nil {
 		return Approval{}, err
 	}
@@ -580,7 +551,7 @@ func (b *jsonfsBackend) CreateChatApproval(ctx context.Context, chatID int64, to
 	return approval, nil
 }
 
-func (b *jsonfsBackend) UpdateApproval(ctx context.Context, approvalID int64, status domain.ApprovalStatus) error {
+func (b *jsonfsBackend) UpdateApproval(ctx context.Context, approvalID domain.ID, status domain.ApprovalStatus) error {
 	if err := ensureContext(ctx); err != nil {
 		return err
 	}
@@ -594,7 +565,7 @@ func (b *jsonfsBackend) UpdateApproval(ctx context.Context, approvalID int64, st
 	return b.writeApproval(approval)
 }
 
-func (b *jsonfsBackend) PendingApprovals(ctx context.Context, sessionID int64) ([]Approval, error) {
+func (b *jsonfsBackend) PendingApprovals(ctx context.Context, sessionID domain.ID) ([]Approval, error) {
 	chat, err := b.DefaultChat(ctx, sessionID)
 	if err != nil {
 		return nil, err
@@ -602,7 +573,7 @@ func (b *jsonfsBackend) PendingApprovals(ctx context.Context, sessionID int64) (
 	return b.PendingApprovalsForChat(ctx, chat.ID)
 }
 
-func (b *jsonfsBackend) PendingApprovalsForChat(ctx context.Context, chatID int64) ([]Approval, error) {
+func (b *jsonfsBackend) PendingApprovalsForChat(ctx context.Context, chatID domain.ID) ([]Approval, error) {
 	if err := ensureContext(ctx); err != nil {
 		return nil, err
 	}
@@ -629,7 +600,7 @@ func (b *jsonfsBackend) PendingApprovalsForChat(ctx context.Context, chatID int6
 	return approvals, nil
 }
 
-func (b *jsonfsBackend) AddTask(ctx context.Context, sessionID int64, body string, status domain.TaskStatus) (Task, error) {
+func (b *jsonfsBackend) AddTask(ctx context.Context, sessionID domain.ID, body string, status domain.TaskStatus) (Task, error) {
 	if err := ensureContext(ctx); err != nil {
 		return Task{}, err
 	}
@@ -644,13 +615,12 @@ func (b *jsonfsBackend) AddTask(ctx context.Context, sessionID int64, body strin
 		return Task{}, err
 	}
 	task := Task{
-		ID:        meta.NextTaskID,
+		ID:        domain.NewID(),
 		SessionID: sessionID,
 		Body:      body,
 		Status:    status,
 		CreatedAt: time.Now().UTC(),
 	}
-	meta.NextTaskID++
 	if err := b.writeMeta(meta); err != nil {
 		return Task{}, err
 	}
@@ -660,7 +630,7 @@ func (b *jsonfsBackend) AddTask(ctx context.Context, sessionID int64, body strin
 	return task, nil
 }
 
-func (b *jsonfsBackend) UpdateTask(ctx context.Context, taskID int64, status domain.TaskStatus) error {
+func (b *jsonfsBackend) UpdateTask(ctx context.Context, taskID domain.ID, status domain.TaskStatus) error {
 	if err := ensureContext(ctx); err != nil {
 		return err
 	}
@@ -674,7 +644,7 @@ func (b *jsonfsBackend) UpdateTask(ctx context.Context, taskID int64, status dom
 	return b.writeTask(task)
 }
 
-func (b *jsonfsBackend) ListTasks(ctx context.Context, sessionID int64) ([]Task, error) {
+func (b *jsonfsBackend) ListTasks(ctx context.Context, sessionID domain.ID) ([]Task, error) {
 	if err := ensureContext(ctx); err != nil {
 		return nil, err
 	}
@@ -701,7 +671,7 @@ func (b *jsonfsBackend) ListTasks(ctx context.Context, sessionID int64) ([]Task,
 	return tasks, nil
 }
 
-func (b *jsonfsBackend) SetMilestonePlan(ctx context.Context, sessionID int64, summary string, milestones []Milestone) (MilestonePlan, error) {
+func (b *jsonfsBackend) SetMilestonePlan(ctx context.Context, sessionID domain.ID, summary string, milestones []Milestone) (MilestonePlan, error) {
 	if err := ensureContext(ctx); err != nil {
 		return MilestonePlan{}, err
 	}
@@ -722,7 +692,7 @@ func (b *jsonfsBackend) SetMilestonePlan(ctx context.Context, sessionID int64, s
 	return plan, nil
 }
 
-func (b *jsonfsBackend) GetMilestonePlan(ctx context.Context, sessionID int64) (MilestonePlan, error) {
+func (b *jsonfsBackend) GetMilestonePlan(ctx context.Context, sessionID domain.ID) (MilestonePlan, error) {
 	if err := ensureContext(ctx); err != nil {
 		return MilestonePlan{}, err
 	}
@@ -736,7 +706,7 @@ func (b *jsonfsBackend) GetMilestonePlan(ctx context.Context, sessionID int64) (
 	return plan, nil
 }
 
-func (b *jsonfsBackend) AddTodoItems(ctx context.Context, sessionID int64, milestoneRef string, contents []string) ([]TodoItem, error) {
+func (b *jsonfsBackend) AddTodoItems(ctx context.Context, sessionID domain.ID, milestoneRef string, contents []string) ([]TodoItem, error) {
 	if err := ensureContext(ctx); err != nil {
 		return nil, err
 	}
@@ -754,7 +724,7 @@ func (b *jsonfsBackend) AddTodoItems(ctx context.Context, sessionID int64, miles
 	items := make([]TodoItem, 0, len(contents))
 	for _, content := range contents {
 		item := TodoItem{
-			ID:           meta.NextTodoID,
+			ID:           domain.NewID(),
 			SessionID:    sessionID,
 			MilestoneRef: milestoneRef,
 			Content:      content,
@@ -763,7 +733,6 @@ func (b *jsonfsBackend) AddTodoItems(ctx context.Context, sessionID int64, miles
 			CreatedAt:    now,
 			UpdatedAt:    now,
 		}
-		meta.NextTodoID++
 		if err := b.writeTodoItem(item); err != nil {
 			return nil, err
 		}
@@ -775,7 +744,7 @@ func (b *jsonfsBackend) AddTodoItems(ctx context.Context, sessionID int64, miles
 	return items, nil
 }
 
-func (b *jsonfsBackend) UpdateTodoItem(ctx context.Context, todoID int64, status domain.TodoStatus, content string) (TodoItem, error) {
+func (b *jsonfsBackend) UpdateTodoItem(ctx context.Context, todoID domain.ID, status domain.TodoStatus, content string) (TodoItem, error) {
 	if err := ensureContext(ctx); err != nil {
 		return TodoItem{}, err
 	}
@@ -796,21 +765,21 @@ func (b *jsonfsBackend) UpdateTodoItem(ctx context.Context, todoID int64, status
 	return item, nil
 }
 
-func (b *jsonfsBackend) ListTodos(ctx context.Context, sessionID int64, milestoneRef string) ([]TodoItem, error) {
+func (b *jsonfsBackend) ListTodos(ctx context.Context, sessionID domain.ID, milestoneRef string) ([]TodoItem, error) {
 	if err := ensureContext(ctx); err != nil {
 		return nil, err
 	}
 	return b.listTodosLocked(sessionID, milestoneRef)
 }
 
-func (b *jsonfsBackend) GetApproval(ctx context.Context, approvalID int64) (Approval, error) {
+func (b *jsonfsBackend) GetApproval(ctx context.Context, approvalID domain.ID) (Approval, error) {
 	if err := ensureContext(ctx); err != nil {
 		return Approval{}, err
 	}
 	return b.readApproval(approvalID)
 }
 
-func (b *jsonfsBackend) updateSession(ctx context.Context, sessionID int64, update func(*domain.Session)) error {
+func (b *jsonfsBackend) updateSession(ctx context.Context, sessionID domain.ID, update func(*domain.Session)) error {
 	if err := ensureContext(ctx); err != nil {
 		return err
 	}
@@ -830,18 +799,6 @@ func (b *jsonfsBackend) readMeta() (metaRecord, error) {
 	if err := readJSONFile(filepath.Join(b.root, "meta.json"), &meta); err != nil {
 		return metaRecord{}, fmt.Errorf("read jsonfs metadata: %w", err)
 	}
-	if meta.NextTaskID <= 0 {
-		meta.NextTaskID = 1
-	}
-	if meta.NextChatID <= 0 {
-		meta.NextChatID = 1
-	}
-	if meta.NextTodoID <= 0 {
-		meta.NextTodoID = 1
-	}
-	if meta.NextIDs == nil {
-		meta.NextIDs = map[string]int64{}
-	}
 	return meta, nil
 }
 
@@ -852,12 +809,12 @@ func (b *jsonfsBackend) writeMeta(meta metaRecord) error {
 	return nil
 }
 
-func (b *jsonfsBackend) readSession(sessionID int64) (domain.Session, error) {
+func (b *jsonfsBackend) readSession(sessionID domain.ID) (domain.Session, error) {
 	var session domain.Session
-	path := filepath.Join(b.root, "sessions", formatID(sessionID)+".json")
+	path := filepath.Join(b.root, "sessions", sessionID+".json")
 	if err := readJSONFile(path, &session); err != nil {
 		if os.IsNotExist(err) {
-			return domain.Session{}, fmt.Errorf("session %d not found", sessionID)
+			return domain.Session{}, fmt.Errorf("session %s not found", sessionID)
 		}
 		return domain.Session{}, fmt.Errorf("read session: %w", err)
 	}
@@ -865,18 +822,18 @@ func (b *jsonfsBackend) readSession(sessionID int64) (domain.Session, error) {
 }
 
 func (b *jsonfsBackend) writeSession(session domain.Session) error {
-	if err := writeJSONFile(filepath.Join(b.root, "sessions", formatID(session.ID)+".json"), session); err != nil {
+	if err := writeJSONFile(filepath.Join(b.root, "sessions", session.ID+".json"), session); err != nil {
 		return fmt.Errorf("write session: %w", err)
 	}
 	return nil
 }
 
-func (b *jsonfsBackend) readApproval(approvalID int64) (Approval, error) {
+func (b *jsonfsBackend) readApproval(approvalID domain.ID) (Approval, error) {
 	var approval Approval
-	path := filepath.Join(b.root, "approvals", formatID(approvalID)+".json")
+	path := filepath.Join(b.root, "approvals", approvalID+".json")
 	if err := readJSONFile(path, &approval); err != nil {
 		if os.IsNotExist(err) {
-			return Approval{}, fmt.Errorf("approval %d not found", approvalID)
+			return Approval{}, fmt.Errorf("approval %s not found", approvalID)
 		}
 		return Approval{}, fmt.Errorf("read approval: %w", err)
 	}
@@ -884,15 +841,15 @@ func (b *jsonfsBackend) readApproval(approvalID int64) (Approval, error) {
 }
 
 func (b *jsonfsBackend) writeApproval(approval Approval) error {
-	if err := writeJSONFile(filepath.Join(b.root, "approvals", formatID(approval.ID)+".json"), approval); err != nil {
+	if err := writeJSONFile(filepath.Join(b.root, "approvals", approval.ID+".json"), approval); err != nil {
 		return fmt.Errorf("write approval: %w", err)
 	}
 	return nil
 }
 
-func (b *jsonfsBackend) readTask(taskID int64) (Task, error) {
+func (b *jsonfsBackend) readTask(taskID domain.ID) (Task, error) {
 	var task Task
-	path := filepath.Join(b.root, "tasks", formatID(taskID)+".json")
+	path := filepath.Join(b.root, "tasks", taskID+".json")
 	if err := readJSONFile(path, &task); err != nil {
 		return Task{}, fmt.Errorf("read task: %w", err)
 	}
@@ -900,24 +857,24 @@ func (b *jsonfsBackend) readTask(taskID int64) (Task, error) {
 }
 
 func (b *jsonfsBackend) writeTask(task Task) error {
-	if err := writeJSONFile(filepath.Join(b.root, "tasks", formatID(task.ID)+".json"), task); err != nil {
+	if err := writeJSONFile(filepath.Join(b.root, "tasks", task.ID+".json"), task); err != nil {
 		return fmt.Errorf("write task: %w", err)
 	}
 	return nil
 }
 
-func (b *jsonfsBackend) readMilestonePlan(sessionID int64) (MilestonePlan, error) {
+func (b *jsonfsBackend) readMilestonePlan(sessionID domain.ID) (MilestonePlan, error) {
 	var plan MilestonePlan
-	path := filepath.Join(b.root, "milestone-plans", formatID(sessionID)+".json")
+	path := filepath.Join(b.root, "milestone-plans", sessionID+".json")
 	if err := readJSONFile(path, &plan); err != nil {
 		return MilestonePlan{}, fmt.Errorf("read milestone plan: %w", err)
 	}
 	return plan, nil
 }
 
-func (b *jsonfsBackend) readChat(chatID int64) (domain.Chat, error) {
+func (b *jsonfsBackend) readChat(chatID domain.ID) (domain.Chat, error) {
 	var chat domain.Chat
-	path := filepath.Join(b.root, "chats", formatID(chatID)+".json")
+	path := filepath.Join(b.root, "chats", chatID+".json")
 	if err := readJSONFile(path, &chat); err != nil {
 		return domain.Chat{}, fmt.Errorf("read chat: %w", err)
 	}
@@ -925,22 +882,22 @@ func (b *jsonfsBackend) readChat(chatID int64) (domain.Chat, error) {
 }
 
 func (b *jsonfsBackend) writeChat(chat domain.Chat) error {
-	if err := writeJSONFile(filepath.Join(b.root, "chats", formatID(chat.ID)+".json"), chat); err != nil {
+	if err := writeJSONFile(filepath.Join(b.root, "chats", chat.ID+".json"), chat); err != nil {
 		return fmt.Errorf("write chat: %w", err)
 	}
 	return nil
 }
 
 func (b *jsonfsBackend) writeMilestonePlan(plan MilestonePlan) error {
-	if err := writeJSONFile(filepath.Join(b.root, "milestone-plans", formatID(plan.SessionID)+".json"), plan); err != nil {
+	if err := writeJSONFile(filepath.Join(b.root, "milestone-plans", plan.SessionID+".json"), plan); err != nil {
 		return fmt.Errorf("write milestone plan: %w", err)
 	}
 	return nil
 }
 
-func (b *jsonfsBackend) readTodoItem(todoID int64) (TodoItem, error) {
+func (b *jsonfsBackend) readTodoItem(todoID domain.ID) (TodoItem, error) {
 	var item TodoItem
-	path := filepath.Join(b.root, "todos", formatID(todoID)+".json")
+	path := filepath.Join(b.root, "todos", todoID+".json")
 	if err := readJSONFile(path, &item); err != nil {
 		return TodoItem{}, fmt.Errorf("read todo item: %w", err)
 	}
@@ -948,7 +905,7 @@ func (b *jsonfsBackend) readTodoItem(todoID int64) (TodoItem, error) {
 }
 
 func (b *jsonfsBackend) writeTodoItem(item TodoItem) error {
-	if err := writeJSONFile(filepath.Join(b.root, "todos", formatID(item.ID)+".json"), item); err != nil {
+	if err := writeJSONFile(filepath.Join(b.root, "todos", item.ID+".json"), item); err != nil {
 		return fmt.Errorf("write todo item: %w", err)
 	}
 	return nil
@@ -970,7 +927,7 @@ func (b *jsonfsBackend) allTodoItems() ([]TodoItem, error) {
 	return items, nil
 }
 
-func (b *jsonfsBackend) listTodosLocked(sessionID int64, milestoneRef string) ([]TodoItem, error) {
+func (b *jsonfsBackend) listTodosLocked(sessionID domain.ID, milestoneRef string) ([]TodoItem, error) {
 	items, err := b.allTodoItems()
 	if err != nil {
 		return nil, err

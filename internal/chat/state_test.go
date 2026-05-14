@@ -10,23 +10,23 @@ import (
 func TestChatStateMergeTimelineLoadedPreservesRecordIdentity(t *testing.T) {
 	initial := []domain.TimelineItem{{
 		ID:        "019aa000-0000-7000-8000-000000000001",
-		ChatID:    7,
+		ChatID:    "chat-7",
 		Seq:       1,
 		Content:   domain.UserMessage{Text: "one"},
 		CreatedAt: time.Now().UTC(),
 	}}
-	state := NewTimelineState(domain.Chat{ID: 7}, initial, nil)
+	state := NewTimelineState(domain.Chat{ID: "chat-7"}, initial, nil)
 	record := state.Timeline()[0]
 
 	updated := []domain.TimelineItem{{
 		ID:        initial[0].ID,
-		ChatID:    7,
+		ChatID:    "chat-7",
 		Seq:       1,
 		Content:   domain.UserMessage{Text: "updated"},
 		CreatedAt: initial[0].CreatedAt,
 		UpdatedAt: time.Now().UTC(),
 	}}
-	state.MergeTimelineLoaded(domain.Chat{ID: 7, Title: "updated"}, updated, nil)
+	state.MergeTimelineLoaded(domain.Chat{ID: "chat-7", Title: "updated"}, updated, nil)
 
 	if got := state.Timeline()[0]; got != record {
 		t.Fatalf("timeline record pointer changed")
@@ -43,12 +43,12 @@ func TestChatStateMergeTimelineLoadedPreservesRecordIdentity(t *testing.T) {
 }
 
 func TestChatStateUpsertTimelineItemPreservesRecordIdentity(t *testing.T) {
-	state := NewTimelineState(domain.Chat{ID: 7}, nil, nil)
-	record, created := state.UpsertTimelineItem(domain.TimelineItem{ID: "019aa000-0000-7000-8000-000000000010", ChatID: 7, Seq: 1, Content: domain.AssistantMessage{Text: "first"}})
+	state := NewTimelineState(domain.Chat{ID: "chat-7"}, nil, nil)
+	record, created := state.UpsertTimelineItem(domain.TimelineItem{ID: "019aa000-0000-7000-8000-000000000010", ChatID: "chat-7", Seq: 1, Content: domain.AssistantMessage{Text: "first"}})
 	if !created || record == nil {
 		t.Fatalf("expected new timeline record")
 	}
-	updated, created := state.UpsertTimelineItem(domain.TimelineItem{ID: "019aa000-0000-7000-8000-000000000010", ChatID: 7, Seq: 1, Content: domain.AssistantMessage{Text: "updated"}})
+	updated, created := state.UpsertTimelineItem(domain.TimelineItem{ID: "019aa000-0000-7000-8000-000000000010", ChatID: "chat-7", Seq: 1, Content: domain.AssistantMessage{Text: "updated"}})
 	if created {
 		t.Fatal("expected existing timeline record to be reused")
 	}
@@ -61,8 +61,8 @@ func TestChatStateUpsertTimelineItemPreservesRecordIdentity(t *testing.T) {
 }
 
 func TestChatStateUpsertReplacesSealedStreamedAssistantWithFinalItem(t *testing.T) {
-	state := NewTimelineState(domain.Chat{ID: 7}, nil, nil)
-	if err := state.AppendAssistantText(7, "I'll inspect the files."); err != nil {
+	state := NewTimelineState(domain.Chat{ID: "chat-7"}, nil, nil)
+	if err := state.AppendAssistantText("chat-7", "I'll inspect the files."); err != nil {
 		t.Fatalf("append assistant text: %v", err)
 	}
 	streamed := state.Timeline()[0]
@@ -73,7 +73,7 @@ func TestChatStateUpsertReplacesSealedStreamedAssistantWithFinalItem(t *testing.
 
 	final := domain.TimelineItem{
 		ID:     streamed.Item.ID,
-		ChatID: 7,
+		ChatID: "chat-7",
 		Seq:    1,
 		Content: domain.AssistantMessage{
 			Text: "I'll inspect the files.",
@@ -109,10 +109,10 @@ func TestChatStateUpsertReplacesSealedStreamedAssistantWithFinalItem(t *testing.
 func TestChatStateCurrentContextSizeFromTimeline(t *testing.T) {
 	now := time.Now().UTC()
 	state := NewTimelineState(
-		domain.Chat{ID: 7, LastKnownContextTokens: 1200, ContextTokensKnown: true},
+		domain.Chat{ID: "chat-7", LastKnownContextTokens: 1200, ContextTokensKnown: true},
 		[]domain.TimelineItem{
-			{ID: "019aa000-0000-7000-8000-000000000001", ChatID: 7, Seq: 1, Content: domain.AssistantMessage{Usage: &domain.Usage{PromptTokens: 1200, CompletionTokens: 50, TotalTokens: 1250}}, CreatedAt: now},
-			{ID: "019aa000-0000-7000-8000-000000000002", ChatID: 7, Seq: 2, Content: domain.UserMessage{Text: "inspect these files"}, CreatedAt: now.Add(time.Second)},
+			{ID: "019aa000-0000-7000-8000-000000000001", ChatID: "chat-7", Seq: 1, Content: domain.AssistantMessage{Usage: &domain.Usage{PromptTokens: 1200, CompletionTokens: 50, TotalTokens: 1250}}, CreatedAt: now},
+			{ID: "019aa000-0000-7000-8000-000000000002", ChatID: "chat-7", Seq: 2, Content: domain.UserMessage{Text: "inspect these files"}, CreatedAt: now.Add(time.Second)},
 		},
 		nil,
 	)

@@ -49,7 +49,7 @@ func testConfig(t *testing.T) config.Config {
 	return config.Default().WithStateDir(t.TempDir())
 }
 
-func defaultChatForSession(t *testing.T, st *store.Store, sessionID int64) domain.Chat {
+func defaultChatForSession(t *testing.T, st *store.Store, sessionID domain.ID) domain.Chat {
 	t.Helper()
 	chat, err := st.DefaultChat(context.Background(), sessionID)
 	if err != nil {
@@ -58,12 +58,12 @@ func defaultChatForSession(t *testing.T, st *store.Store, sessionID int64) domai
 	return chat
 }
 
-func appendUserTimelineItem(t *testing.T, st *store.Store, chatID int64, text string) domain.TimelineItem {
+func appendUserTimelineItem(t *testing.T, st *store.Store, chatID domain.ID, text string) domain.TimelineItem {
 	t.Helper()
 	return appendUserTimelineItemWithAttachments(t, st, chatID, text, nil)
 }
 
-func appendUserTimelineItemWithAttachments(t *testing.T, st *store.Store, chatID int64, text string, attachments []domain.Attachment) domain.TimelineItem {
+func appendUserTimelineItemWithAttachments(t *testing.T, st *store.Store, chatID domain.ID, text string, attachments []domain.Attachment) domain.TimelineItem {
 	t.Helper()
 	item, err := st.AppendTimeline(context.Background(), chatID, domain.UserMessage{Text: text, Attachments: attachments})
 	if err != nil {
@@ -76,7 +76,7 @@ func appendUserTimelineItemWithAttachments(t *testing.T, st *store.Store, chatID
 	return item
 }
 
-func appendAssistantTimelineItem(t *testing.T, st *store.Store, chatID int64, msg domain.AssistantMessage) domain.TimelineItem {
+func appendAssistantTimelineItem(t *testing.T, st *store.Store, chatID domain.ID, msg domain.AssistantMessage) domain.TimelineItem {
 	t.Helper()
 	item, err := st.AppendTimeline(context.Background(), chatID, msg)
 	if err != nil {
@@ -89,7 +89,7 @@ func appendAssistantTimelineItem(t *testing.T, st *store.Store, chatID int64, ms
 	return item
 }
 
-func appendAssistantToolTimelineItem(t *testing.T, st *store.Store, chatID int64, req tools.Request, text string) domain.TimelineItem {
+func appendAssistantToolTimelineItem(t *testing.T, st *store.Store, chatID domain.ID, req tools.Request, text string) domain.TimelineItem {
 	t.Helper()
 	item, err := st.AppendAssistantToolCalls(context.Background(), chatID, []domain.ToolCall{{
 		ToolCallID: domain.ToolCallID(req.ToolCallID),
@@ -103,7 +103,7 @@ func appendAssistantToolTimelineItem(t *testing.T, st *store.Store, chatID int64
 	return item
 }
 
-func attachToolResultTimelineItem(t *testing.T, st *store.Store, chatID int64, req tools.Request, text string, data domain.ToolResultPayload) domain.TimelineItem {
+func attachToolResultTimelineItem(t *testing.T, st *store.Store, chatID domain.ID, req tools.Request, text string, data domain.ToolResultPayload) domain.TimelineItem {
 	t.Helper()
 	item, err := st.AttachToolResult(context.Background(), chatID, req.ToolCallID, domain.ToolResult{
 		Text:   text,
@@ -116,7 +116,7 @@ func attachToolResultTimelineItem(t *testing.T, st *store.Store, chatID int64, r
 	return item
 }
 
-func waitForToolStatus(t *testing.T, st *store.Store, chatID int64, toolCallID string, want domain.ToolStatus) bool {
+func waitForToolStatus(t *testing.T, st *store.Store, chatID domain.ID, toolCallID string, want domain.ToolStatus) bool {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
@@ -128,7 +128,7 @@ func waitForToolStatus(t *testing.T, st *store.Store, chatID int64, toolCallID s
 	return false
 }
 
-func assertToolStatus(t *testing.T, st *store.Store, chatID int64, toolCallID string, want domain.ToolStatus) {
+func assertToolStatus(t *testing.T, st *store.Store, chatID domain.ID, toolCallID string, want domain.ToolStatus) {
 	t.Helper()
 	got := currentToolStatus(t, st, chatID, toolCallID)
 	if got != want {
@@ -136,7 +136,7 @@ func assertToolStatus(t *testing.T, st *store.Store, chatID int64, toolCallID st
 	}
 }
 
-func currentToolStatus(t *testing.T, st *store.Store, chatID int64, toolCallID string) domain.ToolStatus {
+func currentToolStatus(t *testing.T, st *store.Store, chatID domain.ID, toolCallID string) domain.ToolStatus {
 	t.Helper()
 	items, err := st.TimelineForChat(context.Background(), chatID)
 	if err != nil {
@@ -152,11 +152,11 @@ func currentToolStatus(t *testing.T, st *store.Store, chatID int64, toolCallID s
 			return call.Status
 		}
 	}
-	t.Fatalf("tool %s not found in chat %d", toolCallID, chatID)
+	t.Fatalf("tool %s not found in chat %s", toolCallID, chatID)
 	return ""
 }
 
-func appendCompactionTimelineItem(t *testing.T, st *store.Store, chatID int64, summary string, firstKeptItemID string) domain.TimelineItem {
+func appendCompactionTimelineItem(t *testing.T, st *store.Store, chatID domain.ID, summary string, firstKeptItemID string) domain.TimelineItem {
 	t.Helper()
 	item, err := st.AppendTimeline(context.Background(), chatID, domain.Compaction{
 		Summary:         summary,
@@ -173,7 +173,7 @@ func appendCompactionTimelineItem(t *testing.T, st *store.Store, chatID int64, s
 	return item
 }
 
-func timelineTranscriptForSession(t *testing.T, st *store.Store, sessionID int64) ([]domain.Message, map[int64][]domain.Part, error) {
+func timelineTranscriptForSession(t *testing.T, st *store.Store, sessionID domain.ID) ([]domain.Message, map[domain.ID][]domain.Part, error) {
 	t.Helper()
 	chat, err := st.DefaultChat(context.Background(), sessionID)
 	if err != nil {
@@ -182,17 +182,17 @@ func timelineTranscriptForSession(t *testing.T, st *store.Store, sessionID int64
 	return timelineTranscriptForChat(t, st, chat)
 }
 
-func timelineTranscriptForChat(t *testing.T, st *store.Store, chat domain.Chat) ([]domain.Message, map[int64][]domain.Part, error) {
+func timelineTranscriptForChat(t *testing.T, st *store.Store, chat domain.Chat) ([]domain.Message, map[domain.ID][]domain.Part, error) {
 	t.Helper()
 	items, err := st.TimelineForChat(context.Background(), chat.ID)
 	if err != nil {
 		return nil, nil, err
 	}
 	messages := make([]domain.Message, 0, len(items))
-	parts := make(map[int64][]domain.Part, len(items))
+	parts := make(map[domain.ID][]domain.Part, len(items))
 	for _, item := range items {
 		msg, itemParts := testTranscriptItem(chat.SessionID, item)
-		if msg.ID == 0 {
+		if msg.ID == "" {
 			continue
 		}
 		messages = append(messages, msg)
@@ -201,11 +201,11 @@ func timelineTranscriptForChat(t *testing.T, st *store.Store, chat domain.Chat) 
 	return messages, parts, nil
 }
 
-func testTranscriptItem(sessionID int64, item domain.TimelineItem) (domain.Message, []domain.Part) {
-	messageID := testTimelineRenderID(item.ID)
+func testTranscriptItem(sessionID domain.ID, item domain.TimelineItem) (domain.Message, []domain.Part) {
+	messageID := domain.ID(item.ID)
 	msg := domain.Message{ID: messageID, SessionID: sessionID, ChatID: item.ChatID, CreatedAt: item.CreatedAt}
 	addPart := func(parts *[]domain.Part, kind domain.PartKind, payload domain.PartPayload, offset int64) {
-		part := domain.Part{ID: messageID*1000 + offset, MessageID: messageID, Kind: kind, Payload: payload, CreatedAt: item.CreatedAt}
+		part := domain.Part{ID: domain.ID(fmt.Sprintf("%s-part-%d", messageID, offset)), MessageID: messageID, Kind: kind, Payload: payload, CreatedAt: item.CreatedAt}
 		part.Body = part.Text()
 		*parts = append(*parts, part)
 	}
@@ -263,7 +263,7 @@ func testTimelineRenderID(id string) int64 {
 	return int64(h.Sum64() & 0x7fffffffffffffff)
 }
 
-func timelineNoticesForChat(t *testing.T, st *store.Store, chatID int64) []domain.Notice {
+func timelineNoticesForChat(t *testing.T, st *store.Store, chatID domain.ID) []domain.Notice {
 	t.Helper()
 	items, err := st.TimelineForChat(context.Background(), chatID)
 	if err != nil {
@@ -397,7 +397,7 @@ func TestSessionEnvironmentPromptBuildsOncePerSession(t *testing.T) {
 	cfg := testConfig(t)
 	workdir := t.TempDir()
 	engine := New(cfg, nil, tools.NewRegistry(workdir), nil, workdir)
-	session := domain.Session{ID: 42, ProjectRoot: workdir}
+	session := domain.Session{ID: "session-42", ProjectRoot: workdir}
 
 	first := engine.sessionEnvironmentPrompt(session)
 	if first == "" {
@@ -1447,7 +1447,7 @@ func TestApproveContinuesModelWithToolOutput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var approvalID int64
+	var approvalID domain.ID
 	for evt := range events {
 		if evt.Kind == domain.EventKindApprovalAsk {
 			id, convErr := parseApprovalID(evt.Meta["approval_id"])
@@ -1457,11 +1457,11 @@ func TestApproveContinuesModelWithToolOutput(t *testing.T) {
 			approvalID = id
 		}
 	}
-	if approvalID == 0 {
+	if approvalID == "" {
 		t.Fatal("expected approval request")
 	}
 
-	approvedEvents, err := engine.approve(context.Background(), session.ID, 0, strconv.FormatInt(approvalID, 10))
+	approvedEvents, err := engine.approve(context.Background(), session.ID, "", approvalID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1542,7 +1542,7 @@ func TestPermissionProfileChangeReevaluatesPendingApproval(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var approvalID int64
+	var approvalID domain.ID
 	for evt := range events {
 		if evt.Kind == domain.EventKindApprovalAsk {
 			approvalID, err = parseApprovalID(evt.Meta["approval_id"])
@@ -1551,7 +1551,7 @@ func TestPermissionProfileChangeReevaluatesPendingApproval(t *testing.T) {
 			}
 		}
 	}
-	if approvalID == 0 {
+	if approvalID == "" {
 		t.Fatal("expected approval request")
 	}
 
@@ -2776,7 +2776,7 @@ func TestApproveContinuesAfterOutsideWorkspaceRead(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var approvalID int64
+	var approvalID domain.ID
 	for evt := range events {
 		if evt.Kind == domain.EventKindApprovalAsk {
 			id, convErr := parseApprovalID(evt.Meta["approval_id"])
@@ -2786,11 +2786,11 @@ func TestApproveContinuesAfterOutsideWorkspaceRead(t *testing.T) {
 			approvalID = id
 		}
 	}
-	if approvalID == 0 {
+	if approvalID == "" {
 		t.Fatal("expected approval request")
 	}
 
-	approvedEvents, err := engine.approve(context.Background(), session.ID, 0, strconv.FormatInt(approvalID, 10))
+	approvedEvents, err := engine.approve(context.Background(), session.ID, "", approvalID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2870,7 +2870,7 @@ func TestApproveAutoCompactContinuesFromCompactedHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var approvalID int64
+	var approvalID domain.ID
 	for evt := range events {
 		if evt.Kind == domain.EventKindApprovalAsk {
 			approvalID, err = parseApprovalID(evt.Meta["approval_id"])
@@ -2879,11 +2879,11 @@ func TestApproveAutoCompactContinuesFromCompactedHistory(t *testing.T) {
 			}
 		}
 	}
-	if approvalID == 0 {
+	if approvalID == "" {
 		t.Fatal("expected approval request")
 	}
 
-	approvedEvents, err := engine.approve(context.Background(), session.ID, 0, strconv.FormatInt(approvalID, 10))
+	approvedEvents, err := engine.approve(context.Background(), session.ID, "", approvalID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2977,7 +2977,7 @@ func TestApproveContinuesAfterApprovedToolFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var approvalID int64
+	var approvalID domain.ID
 	for evt := range events {
 		if evt.Kind == domain.EventKindApprovalAsk {
 			id, convErr := parseApprovalID(evt.Meta["approval_id"])
@@ -2987,11 +2987,11 @@ func TestApproveContinuesAfterApprovedToolFailure(t *testing.T) {
 			approvalID = id
 		}
 	}
-	if approvalID == 0 {
+	if approvalID == "" {
 		t.Fatal("expected approval request")
 	}
 
-	approvedEvents, err := engine.approve(context.Background(), session.ID, 0, strconv.FormatInt(approvalID, 10))
+	approvedEvents, err := engine.approve(context.Background(), session.ID, "", approvalID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3848,7 +3848,7 @@ func TestChatWithRetryRetriesTransientEOFBeforeStreamingStarts(t *testing.T) {
 	}
 
 	events := make(chan domain.Event, 16)
-	resp, streamed, err := engine.chatWithRetry(context.Background(), 0, client, events, provider.ChatRequest{
+	resp, streamed, err := engine.chatWithRetry(context.Background(), "", client, events, provider.ChatRequest{
 		Model: "test-model",
 		Messages: []provider.Message{{
 			Role:    domain.MessageRoleUser,
@@ -3918,7 +3918,7 @@ func TestChatWithRetryDoesNotRetryAfterPartialStreamFailure(t *testing.T) {
 	}
 
 	events := make(chan domain.Event, 16)
-	_, streamed, err := engine.chatWithRetry(context.Background(), 0, client, events, provider.ChatRequest{
+	_, streamed, err := engine.chatWithRetry(context.Background(), "", client, events, provider.ChatRequest{
 		Model: "test-model",
 		Messages: []provider.Message{{
 			Role:    domain.MessageRoleUser,
@@ -4719,8 +4719,12 @@ func TestPersistToolResultSynthesizesVisibleOutputWhenToolReturnsNothing(t *test
 	}
 }
 
-func parseApprovalID(raw string) (int64, error) {
-	return strconv.ParseInt(raw, 10, 64)
+func parseApprovalID(raw string) (domain.ID, error) {
+	id := domain.ID(strings.TrimSpace(raw))
+	if id == "" {
+		return "", fmt.Errorf("approval id is required")
+	}
+	return id, nil
 }
 
 func TestErrorSummaryPrefixesMessage(t *testing.T) {

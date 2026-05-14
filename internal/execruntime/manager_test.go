@@ -10,8 +10,8 @@ import (
 func TestManagerStartStatusAndWriteStdin(t *testing.T) {
 	mgr := NewManager()
 	snap, err := mgr.Start(context.Background(), StartRequest{
-		SessionID: 1,
-		ChatID:    2,
+		SessionID: "session-1",
+		ChatID:    "chat-2",
 		Command:   "read line; printf 'got:%s' \"$line\"",
 		YieldTime: 100 * time.Millisecond,
 	})
@@ -22,8 +22,8 @@ func TestManagerStartStatusAndWriteStdin(t *testing.T) {
 		t.Fatal("expected process id")
 	}
 	snap, err = mgr.WriteStdin(context.Background(), WriteStdinRequest{
-		SessionID:  1,
-		ChatID:     2,
+		SessionID:  "session-1",
+		ChatID:    "chat-2",
 		ProcessID:  snap.ProcessID,
 		Chars:      "hello\n",
 		CloseStdin: true,
@@ -34,8 +34,8 @@ func TestManagerStartStatusAndWriteStdin(t *testing.T) {
 	}
 	time.Sleep(100 * time.Millisecond)
 	status, err := mgr.Status(context.Background(), StatusRequest{
-		SessionID: 1,
-		ChatID:    2,
+		SessionID: "session-1",
+		ChatID:    "chat-2",
 		ProcessID: snap.ProcessID,
 		MaxBytes:  1024,
 	})
@@ -50,16 +50,16 @@ func TestManagerStartStatusAndWriteStdin(t *testing.T) {
 func TestManagerListAndTerminate(t *testing.T) {
 	mgr := NewManager()
 	snap, err := mgr.Start(context.Background(), StartRequest{
-		SessionID: 1,
-		ChatID:    2,
+		SessionID: "session-1",
+		ChatID:    "chat-2",
 		Command:   "sleep 10",
 	})
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
 	list, err := mgr.List(context.Background(), ListRequest{
-		SessionID: 1,
-		ChatID:    2,
+		SessionID: "session-1",
+		ChatID:    "chat-2",
 		Scope:     ScopeChat,
 		MaxBytes:  256,
 	})
@@ -70,8 +70,8 @@ func TestManagerListAndTerminate(t *testing.T) {
 		t.Fatalf("unexpected list result: %#v", list)
 	}
 	terminated, err := mgr.Terminate(context.Background(), TerminateRequest{
-		SessionID: 1,
-		ChatID:    2,
+		SessionID: "session-1",
+		ChatID:    "chat-2",
 		ProcessID: snap.ProcessID,
 	})
 	if err != nil {
@@ -84,11 +84,11 @@ func TestManagerListAndTerminate(t *testing.T) {
 
 func TestManagerSubscribeReceivesOutput(t *testing.T) {
 	mgr := NewManager()
-	events, cancel := mgr.Subscribe(2)
+	events, cancel := mgr.Subscribe("chat-2")
 	defer cancel()
 	_, err := mgr.Start(context.Background(), StartRequest{
-		SessionID: 1,
-		ChatID:    2,
+		SessionID: "session-1",
+		ChatID:    "chat-2",
 		Command:   "printf hi",
 		YieldTime: 50 * time.Millisecond,
 	})

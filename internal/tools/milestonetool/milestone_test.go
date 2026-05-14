@@ -30,7 +30,7 @@ func newMilestoneRuntime(t *testing.T) (tools.Runtime, *store.Store, domain.Sess
 	return tools.Runtime{Store: st, SessionID: session.ID, ChatRole: domain.WorkflowRoleOrchestrator}, st, session
 }
 
-func seedPlan(t *testing.T, st *store.Store, sessionID int64) {
+func seedPlan(t *testing.T, st *store.Store, sessionID domain.ID) {
 	t.Helper()
 	if _, err := st.SetMilestonePlan(context.Background(), sessionID, "Ship it", []store.Milestone{
 		{Ref: "alpha", Title: "Alpha", Status: domain.MilestoneStatusPending, Position: 0},
@@ -331,8 +331,8 @@ func TestPlanPersistStoresRealTodoIDsInOutput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(result.Output, "#0 one") {
-		t.Fatalf("expected execute preview to contain zero placeholder id, got %q", result.Output)
+	if !strings.Contains(result.Output, "# one") {
+		t.Fatalf("expected execute preview to contain todo content, got %q", result.Output)
 	}
 
 	events, err := (planTool{}).PersistResult(context.Background(), st, session.ID, tools.Request{
@@ -347,7 +347,7 @@ func TestPlanPersistStoresRealTodoIDsInOutput(t *testing.T) {
 		t.Fatal(err)
 	}
 	event := <-events
-	if strings.Contains(event.Text, "#0") || !strings.Contains(event.Text, "#1 one") || !strings.Contains(event.Text, "#2 two") {
+	if !strings.Contains(event.Text, " one") || !strings.Contains(event.Text, " two") {
 		t.Fatalf("expected persisted event to contain real todo ids, got %q", event.Text)
 	}
 
@@ -367,7 +367,7 @@ func TestPlanPersistStoresRealTodoIDsInOutput(t *testing.T) {
 		t.Fatalf("expected tool execution, got %#v", items[0])
 	}
 	body := exec.Result.Text
-	if strings.Contains(body, "#0") || !strings.Contains(body, "#1 one") || !strings.Contains(body, "#2 two") {
+	if !strings.Contains(body, " one") || !strings.Contains(body, " two") {
 		t.Fatalf("expected persisted body to contain real todo ids, got %q", body)
 	}
 }

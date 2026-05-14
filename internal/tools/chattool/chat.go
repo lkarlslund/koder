@@ -132,8 +132,8 @@ func (pollTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Re
 	if err != nil {
 		return tools.Result{}, err
 	}
-	chatID, _ := tools.ParseFlexibleInt(req.Args["chat_id"])
-	status, err := control.PollChat(ctx, runtime.SessionID, int64(chatID))
+	chatID := strings.TrimSpace(req.Args["chat_id"])
+	status, err := control.PollChat(ctx, runtime.SessionID, chatID)
 	if err != nil {
 		return tools.Result{}, err
 	}

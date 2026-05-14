@@ -10,7 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -27,7 +26,7 @@ type pebbleBackend struct {
 }
 
 func openPebbleBackend(stateDir string) (*pebbleBackend, error) {
-	dir := filepath.Join(stateDir, "store-pebble-v3")
+	dir := filepath.Join(stateDir, "store-pebble-v6")
 	if err := ensureDir(dir); err != nil {
 		return nil, fmt.Errorf("create pebble store dir: %w", err)
 	}
@@ -103,35 +102,6 @@ func (b *pebbleBackend) Close() error {
 	}
 	b.closed = true
 	return b.db.Close()
-}
-
-func (b *pebbleBackend) allocateCollectionID(ctx context.Context, key string) (int64, error) {
-	if err := ensureContext(ctx); err != nil {
-		return 0, err
-	}
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	meta, err := b.readMeta()
-	if err != nil {
-		return 0, err
-	}
-	if meta.NextIDs == nil {
-		meta.NextIDs = map[string]int64{}
-	}
-	next := meta.NextIDs[key]
-	if next <= 0 {
-		next = 1
-	}
-	meta.NextIDs[key] = next + 1
-	batch := b.db.NewBatch()
-	defer batch.Close()
-	if err := b.putMeta(batch, meta); err != nil {
-		return 0, err
-	}
-	if err := batch.Commit(pebble.Sync); err != nil {
-		return 0, err
-	}
-	return next, nil
 }
 
 func (b *pebbleBackend) getCollectionRecord(ctx context.Context, namespace string, id string) ([]byte, error) {
@@ -217,7 +187,7 @@ func (b *pebbleBackend) EnsureSession(ctx context.Context, providerID, modelID s
 	return b.CreateSession(ctx, "New Session", providerID, modelID, nil)
 }
 
-func (b *pebbleBackend) CreateSession(ctx context.Context, title, providerID, modelID string, parentID *int64) (domain.Session, error) {
+func (b *pebbleBackend) CreateSession(ctx context.Context, title, providerID, modelID string, parentID *domain.ID) (domain.Session, error) {
 	if err := ensureContext(ctx); err != nil {
 		return domain.Session{}, err
 	}
@@ -230,7 +200,7 @@ func (b *pebbleBackend) CreateSession(ctx context.Context, title, providerID, mo
 	}
 	now := time.Now().UTC()
 	session := domain.Session{
-		ID:                meta.NextSessionID,
+		ID:                domain.NewID(),
 		ParentID:          parentID,
 		Title:             title,
 		ProviderID:        providerID,
@@ -242,8 +212,6 @@ func (b *pebbleBackend) CreateSession(ctx context.Context, title, providerID, mo
 		UpdatedAt:         now,
 		LastMessage:       "",
 	}
-	meta.NextSessionID++
-
 	batch := b.db.NewBatch()
 	defer batch.Close()
 	if err := b.putMeta(batch, meta); err != nil {
@@ -253,7 +221,7 @@ func (b *pebbleBackend) CreateSession(ctx context.Context, title, providerID, mo
 		return domain.Session{}, err
 	}
 	chat := domain.Chat{
-		ID:                meta.NextChatID,
+		ID:                domain.NewID(),
 		SessionID:         session.ID,
 		Title:             "Main",
 		WorkflowRole:      domain.WorkflowRoleOrchestrator,
@@ -262,7 +230,6 @@ func (b *pebbleBackend) CreateSession(ctx context.Context, title, providerID, mo
 		CreatedAt:         now,
 		UpdatedAt:         now,
 	}
-	meta.NextChatID++
 	if err := b.putMeta(batch, meta); err != nil {
 		return domain.Session{}, err
 	}
@@ -278,7 +245,7 @@ func (b *pebbleBackend) CreateSession(ctx context.Context, title, providerID, mo
 	return session, nil
 }
 
-func (b *pebbleBackend) CreateChat(ctx context.Context, sessionID int64, title string, role domain.WorkflowRole, parentChatID *int64) (domain.Chat, error) {
+func (b *pebbleBackend) CreateChat(ctx context.Context, sessionID domain.ID, title string, role domain.WorkflowRole, parentChatID *domain.ID) (domain.Chat, error) {
 	if err := ensureContext(ctx); err != nil {
 		return domain.Chat{}, err
 	}
@@ -292,18 +259,18 @@ func (b *pebbleBackend) CreateChat(ctx context.Context, sessionID int64, title s
 	if err != nil {
 		return domain.Chat{}, err
 	}
-	if parentChatID != nil && *parentChatID > 0 {
+	if parentChatID != nil && *parentChatID != "" {
 		parent, err := b.readChat(*parentChatID)
 		if err != nil {
 			return domain.Chat{}, err
 		}
 		if parent.SessionID != sessionID {
-			return domain.Chat{}, fmt.Errorf("parent chat %d belongs to session %d, not %d", parent.ID, parent.SessionID, sessionID)
+			return domain.Chat{}, fmt.Errorf("parent chat %s belongs to session %s, not %s", parent.ID, parent.SessionID, sessionID)
 		}
 	}
 	now := time.Now().UTC()
 	chat := domain.Chat{
-		ID:                meta.NextChatID,
+		ID:                domain.NewID(),
 		SessionID:         sessionID,
 		ParentChatID:      parentChatID,
 		Title:             strings.TrimSpace(title),
@@ -314,9 +281,8 @@ func (b *pebbleBackend) CreateChat(ctx context.Context, sessionID int64, title s
 		UpdatedAt:         now,
 	}
 	if chat.Title == "" {
-		chat.Title = "Chat " + strconv.FormatInt(chat.ID, 10)
+		chat.Title = "Chat " + chat.ID
 	}
-	meta.NextChatID++
 	batch := b.db.NewBatch()
 	defer batch.Close()
 	if err := b.putMeta(batch, meta); err != nil {
@@ -334,7 +300,7 @@ func (b *pebbleBackend) CreateChat(ctx context.Context, sessionID int64, title s
 	return chat, nil
 }
 
-func (b *pebbleBackend) ListChats(ctx context.Context, sessionID int64) ([]domain.Chat, error) {
+func (b *pebbleBackend) ListChats(ctx context.Context, sessionID domain.ID) ([]domain.Chat, error) {
 	if err := ensureContext(ctx); err != nil {
 		return nil, err
 	}
@@ -380,20 +346,20 @@ func (b *pebbleBackend) ListChats(ctx context.Context, sessionID int64) ([]domai
 	return chats, iter.Error()
 }
 
-func (b *pebbleBackend) GetChat(ctx context.Context, chatID int64) (domain.Chat, error) {
+func (b *pebbleBackend) GetChat(ctx context.Context, chatID domain.ID) (domain.Chat, error) {
 	if err := ensureContext(ctx); err != nil {
 		return domain.Chat{}, err
 	}
 	return b.readChat(chatID)
 }
 
-func (b *pebbleBackend) DefaultChat(ctx context.Context, sessionID int64) (domain.Chat, error) {
+func (b *pebbleBackend) DefaultChat(ctx context.Context, sessionID domain.ID) (domain.Chat, error) {
 	chats, err := b.ListChats(ctx, sessionID)
 	if err != nil {
 		return domain.Chat{}, err
 	}
 	if len(chats) == 0 {
-		return domain.Chat{}, fmt.Errorf("no chat for session %d", sessionID)
+		return domain.Chat{}, fmt.Errorf("no chat for session %s", sessionID)
 	}
 	return chats[0], nil
 }
@@ -425,7 +391,7 @@ func (b *pebbleBackend) UpdateChat(ctx context.Context, chat domain.Chat) error 
 	return nil
 }
 
-func (b *pebbleBackend) DeleteChat(ctx context.Context, chatID int64) error {
+func (b *pebbleBackend) DeleteChat(ctx context.Context, chatID domain.ID) error {
 	if err := ensureContext(ctx); err != nil {
 		return err
 	}
@@ -454,7 +420,7 @@ func (b *pebbleBackend) DeleteChat(ctx context.Context, chatID int64) error {
 	if err := batch.Delete([]byte(chatSessionIndexKey(chat.SessionID, chatID)), nil); err != nil {
 		return fmt.Errorf("delete chat session index: %w", err)
 	}
-	if err := batch.Delete([]byte(collectionRecordKey("chats", numericCollectionID(chatID))), nil); err != nil && !errors.Is(err, pebble.ErrNotFound) {
+	if err := batch.Delete([]byte(collectionRecordKey("chats", chatID)), nil); err != nil && !errors.Is(err, pebble.ErrNotFound) {
 		return fmt.Errorf("delete generic chat: %w", err)
 	}
 	for _, approvalID := range approvalIDs {
@@ -502,39 +468,39 @@ func (b *pebbleBackend) ListSessions(ctx context.Context) ([]domain.Session, err
 	return sessions, iter.Error()
 }
 
-func (b *pebbleBackend) GetSession(ctx context.Context, sessionID int64) (domain.Session, error) {
+func (b *pebbleBackend) GetSession(ctx context.Context, sessionID domain.ID) (domain.Session, error) {
 	if err := ensureContext(ctx); err != nil {
 		return domain.Session{}, err
 	}
 	return b.readSession(sessionID)
 }
 
-func (b *pebbleBackend) UpdateSessionWorkspace(ctx context.Context, sessionID int64, cwd, projectRoot string) error {
+func (b *pebbleBackend) UpdateSessionWorkspace(ctx context.Context, sessionID domain.ID, cwd, projectRoot string) error {
 	return b.updateSession(ctx, sessionID, func(session *domain.Session) {
 		session.CWD = cwd
 		session.ProjectRoot = projectRoot
 	})
 }
 
-func (b *pebbleBackend) SetSessionPermissionProfile(ctx context.Context, sessionID int64, profile string) error {
+func (b *pebbleBackend) SetSessionPermissionProfile(ctx context.Context, sessionID domain.ID, profile string) error {
 	return b.updateSession(ctx, sessionID, func(session *domain.Session) {
 		session.PermissionProfile = profile
 	})
 }
 
-func (b *pebbleBackend) AddSessionPermissionRule(ctx context.Context, sessionID int64, rule domain.PermissionOverride) error {
+func (b *pebbleBackend) AddSessionPermissionRule(ctx context.Context, sessionID domain.ID, rule domain.PermissionOverride) error {
 	return b.updateSession(ctx, sessionID, func(session *domain.Session) {
 		session.PermissionRules = appendPermissionRule(session.PermissionRules, rule)
 	})
 }
 
-func (b *pebbleBackend) SetSessionToolStates(ctx context.Context, sessionID int64, states map[domain.ToolKind]bool) error {
+func (b *pebbleBackend) SetSessionToolStates(ctx context.Context, sessionID domain.ID, states map[domain.ToolKind]bool) error {
 	return b.updateSession(ctx, sessionID, func(session *domain.Session) {
 		session.ToolStates = cloneToolStates(states)
 	})
 }
 
-func (b *pebbleBackend) UpdateSessionTitle(ctx context.Context, sessionID int64, title string, generatedAt time.Time, refreshCount int) error {
+func (b *pebbleBackend) UpdateSessionTitle(ctx context.Context, sessionID domain.ID, title string, generatedAt time.Time, refreshCount int) error {
 	return b.updateSession(ctx, sessionID, func(session *domain.Session) {
 		session.Title = title
 		session.TitleGeneratedAt = generatedAt
@@ -544,7 +510,7 @@ func (b *pebbleBackend) UpdateSessionTitle(ctx context.Context, sessionID int64,
 
 func (b *pebbleBackend) UpdateSessionAgents(
 	ctx context.Context,
-	sessionID int64,
+	sessionID domain.ID,
 	projectRoot string,
 	projectChecksum string,
 	resolved string,
@@ -562,14 +528,14 @@ func (b *pebbleBackend) UpdateSessionAgents(
 	})
 }
 
-func (b *pebbleBackend) SetSessionModel(ctx context.Context, sessionID int64, providerID, modelID string) error {
+func (b *pebbleBackend) SetSessionModel(ctx context.Context, sessionID domain.ID, providerID, modelID string) error {
 	return b.updateSession(ctx, sessionID, func(session *domain.Session) {
 		session.ProviderID = providerID
 		session.ModelID = modelID
 	})
 }
 
-func (b *pebbleBackend) SetChatQueuedInputs(ctx context.Context, chatID int64, items []domain.QueuedInput) error {
+func (b *pebbleBackend) SetChatQueuedInputs(ctx context.Context, chatID domain.ID, items []domain.QueuedInput) error {
 	if err := ensureContext(ctx); err != nil {
 		return err
 	}
@@ -589,7 +555,7 @@ func (b *pebbleBackend) SetChatQueuedInputs(ctx context.Context, chatID int64, i
 	return batch.Commit(pebble.Sync)
 }
 
-func (b *pebbleBackend) CreateApproval(ctx context.Context, sessionID int64, tool domain.ToolKind, command string) (Approval, error) {
+func (b *pebbleBackend) CreateApproval(ctx context.Context, sessionID domain.ID, tool domain.ToolKind, command string) (Approval, error) {
 	chat, err := b.DefaultChat(ctx, sessionID)
 	if err != nil {
 		return Approval{}, err
@@ -597,7 +563,7 @@ func (b *pebbleBackend) CreateApproval(ctx context.Context, sessionID int64, too
 	return b.CreateChatApproval(ctx, chat.ID, tool, command)
 }
 
-func (b *pebbleBackend) CreateChatApproval(ctx context.Context, chatID int64, tool domain.ToolKind, command string) (Approval, error) {
+func (b *pebbleBackend) CreateChatApproval(ctx context.Context, chatID domain.ID, tool domain.ToolKind, command string) (Approval, error) {
 	if err := ensureContext(ctx); err != nil {
 		return Approval{}, err
 	}
@@ -613,7 +579,7 @@ func (b *pebbleBackend) CreateChatApproval(ctx context.Context, chatID int64, to
 		return Approval{}, err
 	}
 	approval := Approval{
-		ID:        meta.NextApprovalID,
+		ID:        domain.NewID(),
 		SessionID: chat.SessionID,
 		ChatID:    chatID,
 		Tool:      tool,
@@ -621,8 +587,6 @@ func (b *pebbleBackend) CreateChatApproval(ctx context.Context, chatID int64, to
 		Status:    domain.ApprovalStatusPending,
 		CreatedAt: time.Now().UTC(),
 	}
-	meta.NextApprovalID++
-
 	batch := b.db.NewBatch()
 	defer batch.Close()
 	if err := b.putMeta(batch, meta); err != nil {
@@ -643,7 +607,7 @@ func (b *pebbleBackend) CreateChatApproval(ctx context.Context, chatID int64, to
 	return approval, nil
 }
 
-func (b *pebbleBackend) UpdateApproval(ctx context.Context, approvalID int64, status domain.ApprovalStatus) error {
+func (b *pebbleBackend) UpdateApproval(ctx context.Context, approvalID domain.ID, status domain.ApprovalStatus) error {
 	if err := ensureContext(ctx); err != nil {
 		return err
 	}
@@ -672,7 +636,7 @@ func (b *pebbleBackend) UpdateApproval(ctx context.Context, approvalID int64, st
 	return batch.Commit(pebble.Sync)
 }
 
-func (b *pebbleBackend) PendingApprovals(ctx context.Context, sessionID int64) ([]Approval, error) {
+func (b *pebbleBackend) PendingApprovals(ctx context.Context, sessionID domain.ID) ([]Approval, error) {
 	chat, err := b.DefaultChat(ctx, sessionID)
 	if err != nil {
 		return nil, err
@@ -680,7 +644,7 @@ func (b *pebbleBackend) PendingApprovals(ctx context.Context, sessionID int64) (
 	return b.PendingApprovalsForChat(ctx, chat.ID)
 }
 
-func (b *pebbleBackend) PendingApprovalsForChat(ctx context.Context, chatID int64) ([]Approval, error) {
+func (b *pebbleBackend) PendingApprovalsForChat(ctx context.Context, chatID domain.ID) ([]Approval, error) {
 	if err := ensureContext(ctx); err != nil {
 		return nil, err
 	}
@@ -708,7 +672,7 @@ func (b *pebbleBackend) PendingApprovalsForChat(ctx context.Context, chatID int6
 	return approvals, iter.Error()
 }
 
-func (b *pebbleBackend) AddTask(ctx context.Context, sessionID int64, body string, status domain.TaskStatus) (Task, error) {
+func (b *pebbleBackend) AddTask(ctx context.Context, sessionID domain.ID, body string, status domain.TaskStatus) (Task, error) {
 	if err := ensureContext(ctx); err != nil {
 		return Task{}, err
 	}
@@ -723,14 +687,12 @@ func (b *pebbleBackend) AddTask(ctx context.Context, sessionID int64, body strin
 		return Task{}, err
 	}
 	task := Task{
-		ID:        meta.NextTaskID,
+		ID:        domain.NewID(),
 		SessionID: sessionID,
 		Body:      body,
 		Status:    status,
 		CreatedAt: time.Now().UTC(),
 	}
-	meta.NextTaskID++
-
 	batch := b.db.NewBatch()
 	defer batch.Close()
 	if err := b.putMeta(batch, meta); err != nil {
@@ -748,7 +710,7 @@ func (b *pebbleBackend) AddTask(ctx context.Context, sessionID int64, body strin
 	return task, nil
 }
 
-func (b *pebbleBackend) UpdateTask(ctx context.Context, taskID int64, status domain.TaskStatus) error {
+func (b *pebbleBackend) UpdateTask(ctx context.Context, taskID domain.ID, status domain.TaskStatus) error {
 	if err := ensureContext(ctx); err != nil {
 		return err
 	}
@@ -769,7 +731,7 @@ func (b *pebbleBackend) UpdateTask(ctx context.Context, taskID int64, status dom
 	return batch.Commit(pebble.Sync)
 }
 
-func (b *pebbleBackend) ListTasks(ctx context.Context, sessionID int64) ([]Task, error) {
+func (b *pebbleBackend) ListTasks(ctx context.Context, sessionID domain.ID) ([]Task, error) {
 	if err := ensureContext(ctx); err != nil {
 		return nil, err
 	}
@@ -797,7 +759,7 @@ func (b *pebbleBackend) ListTasks(ctx context.Context, sessionID int64) ([]Task,
 	return tasks, iter.Error()
 }
 
-func (b *pebbleBackend) SetMilestonePlan(ctx context.Context, sessionID int64, summary string, milestones []Milestone) (MilestonePlan, error) {
+func (b *pebbleBackend) SetMilestonePlan(ctx context.Context, sessionID domain.ID, summary string, milestones []Milestone) (MilestonePlan, error) {
 	if err := ensureContext(ctx); err != nil {
 		return MilestonePlan{}, err
 	}
@@ -823,7 +785,7 @@ func (b *pebbleBackend) SetMilestonePlan(ctx context.Context, sessionID int64, s
 	return plan, nil
 }
 
-func (b *pebbleBackend) GetMilestonePlan(ctx context.Context, sessionID int64) (MilestonePlan, error) {
+func (b *pebbleBackend) GetMilestonePlan(ctx context.Context, sessionID domain.ID) (MilestonePlan, error) {
 	if err := ensureContext(ctx); err != nil {
 		return MilestonePlan{}, err
 	}
@@ -840,7 +802,7 @@ func (b *pebbleBackend) GetMilestonePlan(ctx context.Context, sessionID int64) (
 	return MilestonePlan{}, err
 }
 
-func (b *pebbleBackend) AddTodoItems(ctx context.Context, sessionID int64, milestoneRef string, contents []string) ([]TodoItem, error) {
+func (b *pebbleBackend) AddTodoItems(ctx context.Context, sessionID domain.ID, milestoneRef string, contents []string) ([]TodoItem, error) {
 	if err := ensureContext(ctx); err != nil {
 		return nil, err
 	}
@@ -863,7 +825,7 @@ func (b *pebbleBackend) AddTodoItems(ctx context.Context, sessionID int64, miles
 	defer batch.Close()
 	for _, content := range contents {
 		item := TodoItem{
-			ID:           meta.NextTodoID,
+			ID:           domain.NewID(),
 			SessionID:    sessionID,
 			MilestoneRef: milestoneRef,
 			Content:      content,
@@ -872,7 +834,6 @@ func (b *pebbleBackend) AddTodoItems(ctx context.Context, sessionID int64, miles
 			CreatedAt:    now,
 			UpdatedAt:    now,
 		}
-		meta.NextTodoID++
 		if err := b.putTodoItem(batch, item); err != nil {
 			return nil, err
 		}
@@ -890,7 +851,7 @@ func (b *pebbleBackend) AddTodoItems(ctx context.Context, sessionID int64, miles
 	return created, nil
 }
 
-func (b *pebbleBackend) UpdateTodoItem(ctx context.Context, todoID int64, status domain.TodoStatus, content string) (TodoItem, error) {
+func (b *pebbleBackend) UpdateTodoItem(ctx context.Context, todoID domain.ID, status domain.TodoStatus, content string) (TodoItem, error) {
 	if err := ensureContext(ctx); err != nil {
 		return TodoItem{}, err
 	}
@@ -916,21 +877,21 @@ func (b *pebbleBackend) UpdateTodoItem(ctx context.Context, todoID int64, status
 	return item, nil
 }
 
-func (b *pebbleBackend) ListTodos(ctx context.Context, sessionID int64, milestoneRef string) ([]TodoItem, error) {
+func (b *pebbleBackend) ListTodos(ctx context.Context, sessionID domain.ID, milestoneRef string) ([]TodoItem, error) {
 	if err := ensureContext(ctx); err != nil {
 		return nil, err
 	}
 	return b.listTodosLocked(sessionID, milestoneRef)
 }
 
-func (b *pebbleBackend) GetApproval(ctx context.Context, approvalID int64) (Approval, error) {
+func (b *pebbleBackend) GetApproval(ctx context.Context, approvalID domain.ID) (Approval, error) {
 	if err := ensureContext(ctx); err != nil {
 		return Approval{}, err
 	}
 	return b.readApproval(approvalID)
 }
 
-func (b *pebbleBackend) listTodosLocked(sessionID int64, milestoneRef string) ([]TodoItem, error) {
+func (b *pebbleBackend) listTodosLocked(sessionID domain.ID, milestoneRef string) ([]TodoItem, error) {
 	iter, err := b.db.NewIter(&pebble.IterOptions{
 		LowerBound: []byte(todoSessionIndexPrefix(sessionID)),
 		UpperBound: nextPrefix([]byte(todoSessionIndexPrefix(sessionID))),
@@ -954,10 +915,27 @@ func (b *pebbleBackend) listTodosLocked(sessionID int64, milestoneRef string) ([
 		}
 		items = append(items, item)
 	}
-	return items, iter.Error()
+	if err := iter.Error(); err != nil {
+		return nil, err
+	}
+	slices.SortFunc(items, func(a, c TodoItem) int {
+		switch {
+		case a.Position < c.Position:
+			return -1
+		case a.Position > c.Position:
+			return 1
+		case a.ID < c.ID:
+			return -1
+		case a.ID > c.ID:
+			return 1
+		default:
+			return 0
+		}
+	})
+	return items, nil
 }
 
-func (b *pebbleBackend) updateSession(ctx context.Context, sessionID int64, update func(*domain.Session)) error {
+func (b *pebbleBackend) updateSession(ctx context.Context, sessionID domain.ID, update func(*domain.Session)) error {
 	if err := ensureContext(ctx); err != nil {
 		return err
 	}
@@ -989,18 +967,6 @@ func (b *pebbleBackend) readMeta() (metaRecord, error) {
 	var meta metaRecord
 	if err := json.Unmarshal(cloneBytes(data), &meta); err != nil {
 		return metaRecord{}, fmt.Errorf("decode pebble metadata: %w", err)
-	}
-	if meta.NextTaskID <= 0 {
-		meta.NextTaskID = 1
-	}
-	if meta.NextChatID <= 0 {
-		meta.NextChatID = 1
-	}
-	if meta.NextTodoID <= 0 {
-		meta.NextTodoID = 1
-	}
-	if meta.NextIDs == nil {
-		meta.NextIDs = map[string]int64{}
 	}
 	return meta, nil
 }
@@ -1090,7 +1056,7 @@ func (b *pebbleBackend) putTodoItem(batch *pebble.Batch, item TodoItem) error {
 	return nil
 }
 
-func (b *pebbleBackend) readSession(sessionID int64) (domain.Session, error) {
+func (b *pebbleBackend) readSession(sessionID domain.ID) (domain.Session, error) {
 	var session domain.Session
 	if err := b.readRecord(sessionKey(sessionID), &session); err != nil {
 		return domain.Session{}, fmt.Errorf("get session: %w", err)
@@ -1098,7 +1064,7 @@ func (b *pebbleBackend) readSession(sessionID int64) (domain.Session, error) {
 	return session, nil
 }
 
-func (b *pebbleBackend) readChat(chatID int64) (domain.Chat, error) {
+func (b *pebbleBackend) readChat(chatID domain.ID) (domain.Chat, error) {
 	var chat domain.Chat
 	if err := b.readRecord(chatKey(chatID), &chat); err != nil {
 		return domain.Chat{}, fmt.Errorf("get chat: %w", err)
@@ -1106,7 +1072,7 @@ func (b *pebbleBackend) readChat(chatID int64) (domain.Chat, error) {
 	return chat, nil
 }
 
-func (b *pebbleBackend) readApproval(approvalID int64) (Approval, error) {
+func (b *pebbleBackend) readApproval(approvalID domain.ID) (Approval, error) {
 	var approval Approval
 	if err := b.readRecord(approvalKey(approvalID), &approval); err != nil {
 		return Approval{}, fmt.Errorf("get approval: %w", err)
@@ -1114,7 +1080,7 @@ func (b *pebbleBackend) readApproval(approvalID int64) (Approval, error) {
 	return approval, nil
 }
 
-func (b *pebbleBackend) approvalIDsForChat(chatID int64) ([]int64, error) {
+func (b *pebbleBackend) approvalIDsForChat(chatID domain.ID) ([]domain.ID, error) {
 	prefix := "chat-approval/" + strconvID(chatID)
 	iter, err := b.db.NewIter(&pebble.IterOptions{
 		LowerBound: []byte(prefix),
@@ -1124,7 +1090,7 @@ func (b *pebbleBackend) approvalIDsForChat(chatID int64) ([]int64, error) {
 		return nil, fmt.Errorf("new chat approvals iterator: %w", err)
 	}
 	defer iter.Close()
-	var ids []int64
+	var ids []domain.ID
 	for ok := iter.First(); ok; ok = iter.Next() {
 		approvalID, err := approvalIDFromChatIndex(iter.Key())
 		if err != nil {
@@ -1135,7 +1101,7 @@ func (b *pebbleBackend) approvalIDsForChat(chatID int64) ([]int64, error) {
 	return ids, iter.Error()
 }
 
-func (b *pebbleBackend) readTask(taskID int64) (Task, error) {
+func (b *pebbleBackend) readTask(taskID domain.ID) (Task, error) {
 	var task Task
 	if err := b.readRecord(taskKey(taskID), &task); err != nil {
 		return Task{}, fmt.Errorf("get task: %w", err)
@@ -1143,7 +1109,7 @@ func (b *pebbleBackend) readTask(taskID int64) (Task, error) {
 	return task, nil
 }
 
-func (b *pebbleBackend) readMilestonePlan(sessionID int64) (MilestonePlan, error) {
+func (b *pebbleBackend) readMilestonePlan(sessionID domain.ID) (MilestonePlan, error) {
 	var plan MilestonePlan
 	if err := b.readRecord(milestonePlanKey(sessionID), &plan); err != nil {
 		return MilestonePlan{}, fmt.Errorf("get milestone plan: %w", err)
@@ -1151,7 +1117,7 @@ func (b *pebbleBackend) readMilestonePlan(sessionID int64) (MilestonePlan, error
 	return plan, nil
 }
 
-func (b *pebbleBackend) readTodoItem(todoID int64) (TodoItem, error) {
+func (b *pebbleBackend) readTodoItem(todoID domain.ID) (TodoItem, error) {
 	var item TodoItem
 	if err := b.readRecord(todoItemKey(todoID), &item); err != nil {
 		return TodoItem{}, fmt.Errorf("get todo item: %w", err)
@@ -1164,12 +1130,12 @@ func (b *pebbleBackend) readRecord(key string, dst any) error {
 	if err != nil {
 		if errors.Is(err, pebble.ErrNotFound) {
 			if strings.HasPrefix(key, "session/") {
-				id, _ := parseIDFromSuffix(key, "session/")
-				return fmt.Errorf("session %d not found", id)
+				id := strings.TrimPrefix(key, "session/")
+				return fmt.Errorf("session %s not found", id)
 			}
 			if strings.HasPrefix(key, "approval/") {
-				id, _ := parseIDFromSuffix(key, "approval/")
-				return fmt.Errorf("approval %d not found", id)
+				id := strings.TrimPrefix(key, "approval/")
+				return fmt.Errorf("approval %s not found", id)
 			}
 			return err
 		}
@@ -1193,102 +1159,92 @@ func nextPrefix(prefix []byte) []byte {
 	return nil
 }
 
-func sessionKey(id int64) string { return "session/" + strconvID(id) }
-func chatKey(id int64) string    { return "chat/" + strconvID(id) }
-func sessionUpdatedIndexKey(updatedAt time.Time, id int64) string {
+func sessionKey(id domain.ID) string { return "session/" + strconvID(id) }
+func chatKey(id domain.ID) string    { return "chat/" + strconvID(id) }
+func sessionUpdatedIndexKey(updatedAt time.Time, id domain.ID) string {
 	return "session-updated/" + formatUnixNanos(updatedAt) + "/" + strconvID(id)
 }
-func chatSessionIndexKey(sessionID, chatID int64) string {
+func chatSessionIndexKey(sessionID, chatID domain.ID) string {
 	return chatSessionIndexPrefix(sessionID) + "/" + strconvID(chatID)
 }
-func chatSessionIndexPrefix(sessionID int64) string { return "session-chat/" + strconvID(sessionID) }
-func approvalKey(id int64) string                   { return "approval/" + strconvID(id) }
-func approvalChatIndexKey(chatID, approvalID int64) string {
+func chatSessionIndexPrefix(sessionID domain.ID) string {
+	return "session-chat/" + strconvID(sessionID)
+}
+func approvalKey(id domain.ID) string { return "approval/" + strconvID(id) }
+func approvalChatIndexKey(chatID, approvalID domain.ID) string {
 	return "chat-approval/" + strconvID(chatID) + "/" + strconvID(approvalID)
 }
-func approvalPendingIndexKey(chatID, approvalID int64) string {
+func approvalPendingIndexKey(chatID, approvalID domain.ID) string {
 	return approvalPendingIndexPrefix(chatID) + "/" + strconvID(approvalID)
 }
-func approvalPendingIndexPrefix(chatID int64) string {
+func approvalPendingIndexPrefix(chatID domain.ID) string {
 	return "approval-pending/" + strconvID(chatID)
 }
-func taskKey(id int64) string { return "task/" + strconvID(id) }
-func taskSessionIndexKey(sessionID, taskID int64) string {
+func taskKey(id domain.ID) string { return "task/" + strconvID(id) }
+func taskSessionIndexKey(sessionID, taskID domain.ID) string {
 	return taskSessionIndexPrefix(sessionID) + "/" + strconvID(taskID)
 }
-func taskSessionIndexPrefix(sessionID int64) string { return "session-task/" + strconvID(sessionID) }
-func milestonePlanKey(sessionID int64) string       { return "milestone-plan/" + strconvID(sessionID) }
-func todoItemKey(id int64) string                   { return "todo/" + strconvID(id) }
-func todoSessionIndexKey(sessionID, todoID int64) string {
+func taskSessionIndexPrefix(sessionID domain.ID) string {
+	return "session-task/" + strconvID(sessionID)
+}
+func milestonePlanKey(sessionID domain.ID) string { return "milestone-plan/" + strconvID(sessionID) }
+func todoItemKey(id domain.ID) string             { return "todo/" + strconvID(id) }
+func todoSessionIndexKey(sessionID, todoID domain.ID) string {
 	return todoSessionIndexPrefix(sessionID) + "/" + strconvID(todoID)
 }
-func todoSessionIndexPrefix(sessionID int64) string { return "session-todo/" + strconvID(sessionID) }
-func strconvID(id int64) string                     { return formatID(id) }
+func todoSessionIndexPrefix(sessionID domain.ID) string {
+	return "session-todo/" + strconvID(sessionID)
+}
+func strconvID(id domain.ID) string { return id }
 
-func sessionIDFromUpdatedIndex(key []byte) (int64, error) {
+func sessionIDFromUpdatedIndex(key []byte) (domain.ID, error) {
 	parts := bytes.Split(key, []byte("/"))
 	if len(parts) != 3 {
-		return 0, fmt.Errorf("invalid session updated index key %q", string(key))
+		return "", fmt.Errorf("invalid session updated index key %q", string(key))
 	}
 	return parseID(parts[2])
 }
 
-func chatIDFromSessionIndex(key []byte) (int64, error) {
+func chatIDFromSessionIndex(key []byte) (domain.ID, error) {
 	parts := bytes.Split(key, []byte("/"))
 	if len(parts) != 3 {
-		return 0, fmt.Errorf("invalid session chat index key %q", string(key))
+		return "", fmt.Errorf("invalid session chat index key %q", string(key))
 	}
 	return parseID(parts[2])
 }
 
-func messageIDFromChatIndex(key []byte) (int64, error) {
+func approvalIDFromPendingIndex(key []byte) (domain.ID, error) {
 	parts := bytes.Split(key, []byte("/"))
 	if len(parts) != 3 {
-		return 0, fmt.Errorf("invalid chat message index key %q", string(key))
+		return "", fmt.Errorf("invalid pending approval index key %q", string(key))
 	}
 	return parseID(parts[2])
 }
 
-func partIDFromMessageIndex(key []byte) (int64, error) {
+func approvalIDFromChatIndex(key []byte) (domain.ID, error) {
 	parts := bytes.Split(key, []byte("/"))
 	if len(parts) != 3 {
-		return 0, fmt.Errorf("invalid message part index key %q", string(key))
+		return "", fmt.Errorf("invalid chat approval index key %q", string(key))
 	}
 	return parseID(parts[2])
 }
 
-func approvalIDFromPendingIndex(key []byte) (int64, error) {
+func taskIDFromSessionIndex(key []byte) (domain.ID, error) {
 	parts := bytes.Split(key, []byte("/"))
 	if len(parts) != 3 {
-		return 0, fmt.Errorf("invalid pending approval index key %q", string(key))
+		return "", fmt.Errorf("invalid session task index key %q", string(key))
 	}
 	return parseID(parts[2])
 }
 
-func approvalIDFromChatIndex(key []byte) (int64, error) {
+func todoIDFromSessionIndex(key []byte) (domain.ID, error) {
 	parts := bytes.Split(key, []byte("/"))
 	if len(parts) != 3 {
-		return 0, fmt.Errorf("invalid chat approval index key %q", string(key))
+		return "", fmt.Errorf("invalid session todo index key %q", string(key))
 	}
 	return parseID(parts[2])
 }
 
-func taskIDFromSessionIndex(key []byte) (int64, error) {
-	parts := bytes.Split(key, []byte("/"))
-	if len(parts) != 3 {
-		return 0, fmt.Errorf("invalid session task index key %q", string(key))
-	}
-	return parseID(parts[2])
-}
-
-func todoIDFromSessionIndex(key []byte) (int64, error) {
-	parts := bytes.Split(key, []byte("/"))
-	if len(parts) != 3 {
-		return 0, fmt.Errorf("invalid session todo index key %q", string(key))
-	}
-	return parseID(parts[2])
-}
-
-func parseID(raw []byte) (int64, error) {
-	return parseIDFromSuffix(string(raw), "")
+func parseID(raw []byte) (domain.ID, error) {
+	return string(raw), nil
 }

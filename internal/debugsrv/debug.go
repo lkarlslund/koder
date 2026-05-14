@@ -7,7 +7,6 @@ import (
 	"net"
 	"net/http"
 	"net/http/pprof"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -26,7 +25,7 @@ const (
 
 type RecordedEvent struct {
 	Timestamp time.Time         `json:"timestamp"`
-	SessionID int64             `json:"session_id"`
+	SessionID domain.ID         `json:"session_id"`
 	Source    string            `json:"source"`
 	Kind      string            `json:"kind"`
 	Text      string            `json:"text,omitempty"`
@@ -57,8 +56,8 @@ type RuntimeSnapshot struct {
 	DebugAPI                string              `json:"debug_api"`
 	DeepDebug               bool                `json:"deep_debug"`
 	Build                   version.Info        `json:"build"`
-	CurrentSession          int64               `json:"current_session"`
-	CurrentChat             int64               `json:"current_chat"`
+	CurrentSession          domain.ID           `json:"current_session"`
+	CurrentChat             domain.ID           `json:"current_chat"`
 	SessionTitle            string              `json:"session_title"`
 	ProviderID              string              `json:"provider_id"`
 	ModelID                 string              `json:"model_id"`
@@ -128,7 +127,7 @@ type TranscriptItemRef struct {
 }
 
 type SessionAnalysis struct {
-	SessionID       int64                   `json:"session_id"`
+	SessionID       domain.ID               `json:"session_id"`
 	ContinueCount   int                     `json:"continue_count"`
 	Continues       []SessionContinueRecord `json:"continues,omitempty"`
 	BadStopCount    int                     `json:"bad_stop_count"`
@@ -145,7 +144,7 @@ type SessionContinueRecord struct {
 
 type SessionBadStopRecord struct {
 	MessageID        string    `json:"message_id"`
-	ChatID           int64     `json:"chat_id"`
+	ChatID           domain.ID `json:"chat_id"`
 	CreatedAt        time.Time `json:"created_at"`
 	Summary          string    `json:"summary,omitempty"`
 	Text             string    `json:"text,omitempty"`
@@ -185,7 +184,7 @@ type Recorder struct {
 	maxHTTP       int
 	runtime       RuntimeSnapshot
 	events        []RecordedEvent
-	sessionEvents map[int64][]RecordedEvent
+	sessionEvents map[domain.ID][]RecordedEvent
 	httpTraces    []HTTPTrace
 }
 
@@ -193,7 +192,7 @@ func NewRecorder() *Recorder {
 	return &Recorder{
 		maxEvents:     defaultMaxLogs,
 		maxHTTP:       defaultMaxHTTP,
-		sessionEvents: map[int64][]RecordedEvent{},
+		sessionEvents: map[domain.ID][]RecordedEvent{},
 	}
 }
 
@@ -230,7 +229,7 @@ func (r *Recorder) DeepDebug() bool {
 	return r.deepDebug
 }
 
-func (r *Recorder) RecordEvent(sessionID int64, evt domain.Event) {
+func (r *Recorder) RecordEvent(sessionID domain.ID, evt domain.Event) {
 	if r == nil {
 		return
 	}
@@ -254,7 +253,7 @@ func (r *Recorder) RecordEvent(sessionID int64, evt domain.Event) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.events = appendRecordedEvent(r.events, entry, r.maxEvents)
-	if sessionID > 0 {
+	if sessionID != "" {
 		r.sessionEvents[sessionID] = appendRecordedEvent(r.sessionEvents[sessionID], entry, r.maxEvents)
 	}
 	if entry.Error != "" {
@@ -262,7 +261,7 @@ func (r *Recorder) RecordEvent(sessionID int64, evt domain.Event) {
 	}
 }
 
-func (r *Recorder) RecordLifecycle(sessionID int64, kind, text string, meta map[string]string) {
+func (r *Recorder) RecordLifecycle(sessionID domain.ID, kind, text string, meta map[string]string) {
 	if r == nil {
 		return
 	}
@@ -277,7 +276,7 @@ func (r *Recorder) RecordLifecycle(sessionID int64, kind, text string, meta map[
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.events = appendRecordedEvent(r.events, entry, r.maxEvents)
-	if sessionID > 0 {
+	if sessionID != "" {
 		r.sessionEvents[sessionID] = appendRecordedEvent(r.sessionEvents[sessionID], entry, r.maxEvents)
 	}
 }
@@ -325,13 +324,13 @@ func (r *Recorder) Runtime() RuntimeSnapshot {
 	return r.runtime
 }
 
-func (r *Recorder) Events(sessionID int64) []RecordedEvent {
+func (r *Recorder) Events(sessionID domain.ID) []RecordedEvent {
 	if r == nil {
 		return nil
 	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	if sessionID > 0 {
+	if sessionID != "" {
 		return cloneEvents(r.sessionEvents[sessionID])
 	}
 	return cloneEvents(r.events)
@@ -596,8 +595,8 @@ func (s *Server) handleSessionRoutes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	parts := strings.Split(path, "/")
-	sessionID, err := strconv.ParseInt(parts[0], 10, 64)
-	if err != nil || sessionID <= 0 {
+	sessionID := strings.TrimSpace(parts[0])
+	if sessionID == "" {
 		writeError(w, http.StatusBadRequest, fmt.Errorf("invalid session id"))
 		return
 	}
@@ -625,7 +624,7 @@ func (s *Server) handleSessionRoutes(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Server) handleSession(w http.ResponseWriter, r *http.Request, sessionID int64) {
+func (s *Server) handleSession(w http.ResponseWriter, r *http.Request, sessionID domain.ID) {
 	session, err := s.store.GetSession(r.Context(), sessionID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
@@ -665,7 +664,7 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request, sessionID
 	})
 }
 
-func (s *Server) handleTranscript(w http.ResponseWriter, r *http.Request, sessionID int64) {
+func (s *Server) handleTranscript(w http.ResponseWriter, r *http.Request, sessionID domain.ID) {
 	timeline, err := s.sessionTimeline(r.Context(), sessionID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
@@ -677,14 +676,14 @@ func (s *Server) handleTranscript(w http.ResponseWriter, r *http.Request, sessio
 	})
 }
 
-func (s *Server) handleEvents(w http.ResponseWriter, _ *http.Request, sessionID int64) {
+func (s *Server) handleEvents(w http.ResponseWriter, _ *http.Request, sessionID domain.ID) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"session_id": sessionID,
 		"events":     s.recorder.Events(sessionID),
 	})
 }
 
-func (s *Server) handleAnalysis(w http.ResponseWriter, r *http.Request, sessionID int64) {
+func (s *Server) handleAnalysis(w http.ResponseWriter, r *http.Request, sessionID domain.ID) {
 	timeline, err := s.sessionTimeline(r.Context(), sessionID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
@@ -693,7 +692,7 @@ func (s *Server) handleAnalysis(w http.ResponseWriter, r *http.Request, sessionI
 	writeJSON(w, http.StatusOK, analyzeSession(sessionID, timeline, s.recorder.Events(sessionID)))
 }
 
-func (s *Server) sessionTimeline(ctx context.Context, sessionID int64) ([]domain.TimelineItem, error) {
+func (s *Server) sessionTimeline(ctx context.Context, sessionID domain.ID) ([]domain.TimelineItem, error) {
 	chat, err := s.store.DefaultChat(ctx, sessionID)
 	if err != nil {
 		return nil, err
@@ -703,12 +702,12 @@ func (s *Server) sessionTimeline(ctx context.Context, sessionID int64) ([]domain
 
 func (s *Server) handleGlobalEvents(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
-		"session_id": 0,
-		"events":     s.recorder.Events(0),
+		"session_id": "",
+		"events":     s.recorder.Events(""),
 	})
 }
 
-func (s *Server) handleApprovals(w http.ResponseWriter, r *http.Request, sessionID int64) {
+func (s *Server) handleApprovals(w http.ResponseWriter, r *http.Request, sessionID domain.ID) {
 	approvals, err := s.store.PendingApprovals(r.Context(), sessionID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
@@ -720,7 +719,7 @@ func (s *Server) handleApprovals(w http.ResponseWriter, r *http.Request, session
 	})
 }
 
-func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request, sessionID int64) {
+func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request, sessionID domain.ID) {
 	tasks, err := s.store.ListTasks(r.Context(), sessionID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
@@ -732,7 +731,7 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request, sessionID i
 	})
 }
 
-func (s *Server) handleMilestones(w http.ResponseWriter, r *http.Request, sessionID int64) {
+func (s *Server) handleMilestones(w http.ResponseWriter, r *http.Request, sessionID domain.ID) {
 	plan, err := s.store.GetMilestonePlan(r.Context(), sessionID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
@@ -744,7 +743,7 @@ func (s *Server) handleMilestones(w http.ResponseWriter, r *http.Request, sessio
 	})
 }
 
-func (s *Server) handleTodos(w http.ResponseWriter, r *http.Request, sessionID int64) {
+func (s *Server) handleTodos(w http.ResponseWriter, r *http.Request, sessionID domain.ID) {
 	plan, err := s.store.GetMilestonePlan(r.Context(), sessionID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
@@ -851,7 +850,7 @@ type analyzedTranscriptMessage struct {
 	hasToolCall bool
 }
 
-func analyzeSession(sessionID int64, timeline []domain.TimelineItem, events []RecordedEvent) SessionAnalysis {
+func analyzeSession(sessionID domain.ID, timeline []domain.TimelineItem, events []RecordedEvent) SessionAnalysis {
 	transcript := make([]analyzedTranscriptMessage, 0, len(timeline))
 	for _, item := range timeline {
 		transcript = append(transcript, analyzeTranscriptItem(item))

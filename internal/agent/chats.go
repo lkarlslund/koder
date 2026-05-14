@@ -19,7 +19,7 @@ type chatRunState struct {
 }
 
 func (e *Engine) Chat(ctx context.Context, session domain.Session, chatRecord domain.Chat) (*chatpkg.Chat, error) {
-	if chatRecord.ID == 0 {
+	if chatRecord.ID == "" {
 		return nil, fmt.Errorf("chat id is required")
 	}
 	e.chatMu.RLock()
@@ -45,13 +45,13 @@ func (e *Engine) Chat(ctx context.Context, session domain.Session, chatRecord do
 	return loaded, nil
 }
 
-func (e *Engine) detachChat(chatID int64) {
+func (e *Engine) detachChat(chatID domain.ID) {
 	e.chatMu.Lock()
 	delete(e.chats, chatID)
 	e.chatMu.Unlock()
 }
 
-func (e *Engine) ListChats(ctx context.Context, sessionID int64) ([]tools.ChatStatus, error) {
+func (e *Engine) ListChats(ctx context.Context, sessionID domain.ID) ([]tools.ChatStatus, error) {
 	chats, err := e.store.ListChats(ctx, sessionID)
 	if err != nil {
 		return nil, err
@@ -67,13 +67,13 @@ func (e *Engine) ListChats(ctx context.Context, sessionID int64) ([]tools.ChatSt
 	return statuses, nil
 }
 
-func (e *Engine) PollChat(ctx context.Context, sessionID, chatID int64) (tools.ChatStatus, error) {
+func (e *Engine) PollChat(ctx context.Context, sessionID, chatID domain.ID) (tools.ChatStatus, error) {
 	chatRecord, err := e.store.GetChat(ctx, chatID)
 	if err != nil {
 		return tools.ChatStatus{}, err
 	}
-	if sessionID > 0 && chatRecord.SessionID != sessionID {
-		return tools.ChatStatus{}, fmt.Errorf("chat %d does not belong to session %d", chatID, sessionID)
+	if sessionID != "" && chatRecord.SessionID != sessionID {
+		return tools.ChatStatus{}, fmt.Errorf("chat %s does not belong to session %s", chatID, sessionID)
 	}
 	pending, err := e.store.PendingApprovalsForChat(ctx, chatID)
 	if err != nil {
@@ -134,15 +134,15 @@ func (e *Engine) PollChat(ctx context.Context, sessionID, chatID int64) (tools.C
 	}, nil
 }
 
-func (e *Engine) StartDecomposition(ctx context.Context, sessionID, parentChatID int64, milestoneRef, title string) (tools.ChatStatus, error) {
+func (e *Engine) StartDecomposition(ctx context.Context, sessionID, parentChatID domain.ID, milestoneRef, title string) (tools.ChatStatus, error) {
 	return e.startWorkflowChat(ctx, sessionID, parentChatID, domain.WorkflowRoleDecomposition, milestoneRef, title)
 }
 
-func (e *Engine) StartExecution(ctx context.Context, sessionID, parentChatID int64, milestoneRef, title string) (tools.ChatStatus, error) {
+func (e *Engine) StartExecution(ctx context.Context, sessionID, parentChatID domain.ID, milestoneRef, title string) (tools.ChatStatus, error) {
 	return e.startWorkflowChat(ctx, sessionID, parentChatID, domain.WorkflowRoleExecution, milestoneRef, title)
 }
 
-func (e *Engine) startWorkflowChat(ctx context.Context, sessionID, parentChatID int64, role domain.WorkflowRole, milestoneRef, title string) (tools.ChatStatus, error) {
+func (e *Engine) startWorkflowChat(ctx context.Context, sessionID, parentChatID domain.ID, role domain.WorkflowRole, milestoneRef, title string) (tools.ChatStatus, error) {
 	session, err := e.store.GetSession(ctx, sessionID)
 	if err != nil {
 		return tools.ChatStatus{}, err
@@ -187,7 +187,7 @@ func (e *Engine) startWorkflowChat(ctx context.Context, sessionID, parentChatID 
 	return e.PollChat(ctx, sessionID, chatRecord.ID)
 }
 
-func (e *Engine) consumeChatUpdates(chatID int64, updates <-chan chatpkg.Update, unsub func()) {
+func (e *Engine) consumeChatUpdates(chatID domain.ID, updates <-chan chatpkg.Update, unsub func()) {
 	defer func() {
 		if unsub != nil {
 			unsub()
@@ -228,13 +228,13 @@ func (e *Engine) consumeChatUpdates(chatID int64, updates <-chan chatpkg.Update,
 	e.setRunState(chatID, chatRunState{state: state, status: status, statusText: statusText, lastError: lastError})
 }
 
-func (e *Engine) setRunState(chatID int64, state chatRunState) {
+func (e *Engine) setRunState(chatID domain.ID, state chatRunState) {
 	e.chatMu.Lock()
 	defer e.chatMu.Unlock()
 	e.runs[chatID] = state
 }
 
-func (e *Engine) bootstrapPrompt(ctx context.Context, sessionID int64, milestone store.Milestone, role domain.WorkflowRole) string {
+func (e *Engine) bootstrapPrompt(ctx context.Context, sessionID domain.ID, milestone store.Milestone, role domain.WorkflowRole) string {
 	todos, _ := e.store.ListTodos(ctx, sessionID, milestone.Ref)
 	lines := []string{
 		fmt.Sprintf("Milestone ref: %s", milestone.Ref),
@@ -249,7 +249,7 @@ func (e *Engine) bootstrapPrompt(ctx context.Context, sessionID int64, milestone
 	} else {
 		lines = append(lines, "Current todos:")
 		for _, item := range todos {
-			lines = append(lines, fmt.Sprintf("- [%s] #%d %s", item.Status, item.ID, item.Content))
+			lines = append(lines, fmt.Sprintf("- [%s] #%s %s", item.Status, item.ID, item.Content))
 		}
 	}
 	switch role {
@@ -261,7 +261,7 @@ func (e *Engine) bootstrapPrompt(ctx context.Context, sessionID int64, milestone
 	return strings.TrimSpace(strings.Join(lines, "\n"))
 }
 
-func (e *Engine) updateMilestoneStatus(ctx context.Context, sessionID int64, ref string, status domain.MilestoneStatus) error {
+func (e *Engine) updateMilestoneStatus(ctx context.Context, sessionID domain.ID, ref string, status domain.MilestoneStatus) error {
 	plan, err := e.store.GetMilestonePlan(ctx, sessionID)
 	if err != nil {
 		return err

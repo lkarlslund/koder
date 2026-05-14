@@ -1,7 +1,6 @@
 package domain
 
 import (
-	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -26,43 +25,13 @@ const (
 
 // TimelineItem is the durable ordered unit of chat transcript state.
 type TimelineItem struct {
-	ID        string
-	ChatID    int64
+	ID        ID
+	ChatID    ID
 	Seq       int64
 	Content   TimelineContent
 	CreatedAt time.Time
 	UpdatedAt time.Time
 	SealedAt  time.Time
-}
-
-// NewTimelineID returns a UUIDv7 identifier for a timeline item.
-func NewTimelineID(now time.Time) string {
-	if now.IsZero() {
-		now = time.Now().UTC()
-	}
-	ms := uint64(now.UTC().UnixMilli())
-	var b [16]byte
-	b[0] = byte(ms >> 40)
-	b[1] = byte(ms >> 32)
-	b[2] = byte(ms >> 24)
-	b[3] = byte(ms >> 16)
-	b[4] = byte(ms >> 8)
-	b[5] = byte(ms)
-	if _, err := rand.Read(b[6:]); err != nil {
-		nano := uint64(now.UTC().UnixNano())
-		for i := 6; i < len(b); i++ {
-			b[i] = byte(nano >> ((i - 6) * 8))
-		}
-	}
-	b[6] = (b[6] & 0x0f) | 0x70
-	b[8] = (b[8] & 0x3f) | 0x80
-	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",
-		uint32(b[0])<<24|uint32(b[1])<<16|uint32(b[2])<<8|uint32(b[3]),
-		uint16(b[4])<<8|uint16(b[5]),
-		uint16(b[6])<<8|uint16(b[7]),
-		uint16(b[8])<<8|uint16(b[9]),
-		uint64(b[10])<<40|uint64(b[11])<<32|uint64(b[12])<<24|uint64(b[13])<<16|uint64(b[14])<<8|uint64(b[15]),
-	)
 }
 
 // Sealed reports whether the item can no longer be mutated.
@@ -307,8 +276,8 @@ func (c *ToolCall) UnmarshalJSON(data []byte) error {
 	approvalID := strings.TrimSpace(in.ApprovalID)
 	if in.Approval != nil && status == ToolStatusPending && result == nil && in.Error == nil {
 		status = ToolStatusAwaitingApproval
-		if approvalID == "" && in.Approval.ID > 0 {
-			approvalID = fmt.Sprint(in.Approval.ID)
+		if approvalID == "" && in.Approval.ID != "" {
+			approvalID = in.Approval.ID
 		}
 	}
 	*c = ToolCall{
@@ -409,7 +378,7 @@ type ToolError struct {
 
 // ApprovalRequest stores a permission prompt attached to a tool call.
 type ApprovalRequest struct {
-	ID     int64          `json:"id,omitempty"`
+	ID     ID             `json:"id,omitempty"`
 	Status ApprovalStatus `json:"status,omitempty"`
 	Body   string         `json:"body,omitempty"`
 }
@@ -463,7 +432,7 @@ func (i TimelineItem) MarshalJSON() ([]byte, error) {
 	}
 	type encoded struct {
 		ID        string          `json:"id"`
-		ChatID    int64           `json:"chat_id"`
+		ChatID    ID              `json:"chat_id"`
 		Seq       int64           `json:"seq"`
 		Kind      TimelineKind    `json:"kind"`
 		Content   json.RawMessage `json:"content"`
@@ -481,7 +450,7 @@ func (i TimelineItem) MarshalJSON() ([]byte, error) {
 func (i *TimelineItem) UnmarshalJSON(data []byte) error {
 	type encoded struct {
 		ID        string          `json:"id"`
-		ChatID    int64           `json:"chat_id"`
+		ChatID    ID              `json:"chat_id"`
 		Seq       int64           `json:"seq"`
 		Kind      TimelineKind    `json:"kind"`
 		Content   json.RawMessage `json:"content"`

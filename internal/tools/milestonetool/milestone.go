@@ -305,7 +305,7 @@ func (writeTool) SummarizeResult(req tools.Request, result tools.Result) (string
 	return "Updated milestones", result.Output
 }
 
-func (listTool) PersistResult(ctx context.Context, st *store.Store, sessionID int64, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
+func (listTool) PersistResult(ctx context.Context, st *store.Store, sessionID domain.ID, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
 	plan, err := st.GetMilestonePlan(ctx, sessionID)
 	if err != nil {
 		return nil, err
@@ -316,7 +316,7 @@ func (listTool) PersistResult(ctx context.Context, st *store.Store, sessionID in
 	return tools.PersistStandardResult(ctx, st, sessionID, req, result)
 }
 
-func (addItemsTool) PersistResult(ctx context.Context, st *store.Store, sessionID int64, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
+func (addItemsTool) PersistResult(ctx context.Context, st *store.Store, sessionID domain.ID, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
 	items, err := tools.ParseMilestoneAddItems(req.Args["items"])
 	if err != nil {
 		return nil, err
@@ -336,7 +336,7 @@ func (addItemsTool) PersistResult(ctx context.Context, st *store.Store, sessionI
 	return tools.PersistStandardResult(ctx, st, sessionID, req, result)
 }
 
-func (updateItemTool) PersistResult(ctx context.Context, st *store.Store, sessionID int64, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
+func (updateItemTool) PersistResult(ctx context.Context, st *store.Store, sessionID domain.ID, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
 	plan, err := st.GetMilestonePlan(ctx, sessionID)
 	if err != nil {
 		return nil, err
@@ -358,7 +358,7 @@ func (updateItemTool) PersistResult(ctx context.Context, st *store.Store, sessio
 	return tools.PersistStandardResult(ctx, st, sessionID, req, result)
 }
 
-func (planTool) PersistResult(ctx context.Context, st *store.Store, sessionID int64, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
+func (planTool) PersistResult(ctx context.Context, st *store.Store, sessionID domain.ID, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
 	plan, err := st.GetMilestonePlan(ctx, sessionID)
 	if err != nil {
 		return nil, err
@@ -399,7 +399,7 @@ func (planTool) PersistResult(ctx context.Context, st *store.Store, sessionID in
 	return tools.PersistStandardResult(ctx, st, sessionID, req, result)
 }
 
-func (writeTool) PersistResult(ctx context.Context, st *store.Store, sessionID int64, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
+func (writeTool) PersistResult(ctx context.Context, st *store.Store, sessionID domain.ID, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
 	milestones, err := tools.ParseMilestones(req.Args["milestones"])
 	if err != nil {
 		return nil, err
@@ -487,7 +487,7 @@ func updatedMilestonePlan(plan store.MilestonePlan, req tools.Request) (store.Mi
 	}, nil
 }
 
-func validateCompletedMilestoneTodos(ctx context.Context, st *store.Store, sessionID int64, milestones []store.Milestone) error {
+func validateCompletedMilestoneTodos(ctx context.Context, st *store.Store, sessionID domain.ID, milestones []store.Milestone) error {
 	for _, milestone := range milestones {
 		if milestone.Status != domain.MilestoneStatusCompleted {
 			continue
@@ -504,7 +504,7 @@ func validateCompletedMilestoneTodos(ctx context.Context, st *store.Store, sessi
 			if name == "" {
 				name = milestone.Ref
 			}
-			return fmt.Errorf("cannot complete milestone %q while todo %d is %s", name, todo.ID, todo.Status)
+			return fmt.Errorf("cannot complete milestone %q while todo %s is %s", name, todo.ID, todo.Status)
 		}
 	}
 	return nil

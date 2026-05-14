@@ -29,7 +29,7 @@ func (s *Store) SetWorkspaceWebBind(ctx context.Context, workdir string, bind st
 	state.Workdir = cleanWorkspacePath(workdir)
 	state.WebBind = strings.TrimSpace(bind)
 	state.UpdatedAt = time.Now().UTC()
-	if state.ID == 0 {
+	if state.ID == "" {
 		_, err = s.WorkspaceStates().Insert(ctx, state)
 		return err
 	}

@@ -46,7 +46,7 @@ func (m *App) transcriptBlocks() []transcriptBlock {
 		blocks = append(blocks, transcriptBlock{Kind: transcriptBlockToolRun, ToolRun: run})
 		return &blocks[len(blocks)-1].ToolRun
 	}
-	appendChildRun := func(messageID int64, run ui.ToolRun) *ui.ToolRun {
+	appendChildRun := func(messageID domain.ID, run ui.ToolRun) *ui.ToolRun {
 		for idx := range blocks {
 			if blocks[idx].Kind != transcriptBlockMessage || blocks[idx].Message.ID != messageID {
 				continue
@@ -115,7 +115,7 @@ func (m *App) transcriptBlocks() []transcriptBlock {
 }
 
 func (m *App) applyCurrentChatEvent(evt domain.Event) {
-	if m == nil || m.currentChat.ID == 0 {
+	if m == nil || m.currentChat.ID == "" {
 		return
 	}
 	refreshed := false
@@ -162,7 +162,7 @@ func (m *App) applyCurrentChatPartMutation(msg domain.Message, part domain.Part)
 	if msg.Role == domain.MessageRoleTool {
 		run = m.bindToolRunToOwningTurn(msg, run)
 	}
-	if run.ParentMessageID > 0 && m.upsertOwnedToolRunTranscriptItem(run) {
+	if run.ParentMessageID != "" && m.upsertOwnedToolRunTranscriptItem(run) {
 		return true
 	}
 	if !m.upsertToolRunTranscriptItem(run) {
@@ -209,8 +209,8 @@ func (m *App) showLiveProviderToolCall(evt domain.Event) {
 }
 
 func (m *App) applyApprovalAskEvent(evt domain.Event) {
-	approvalID, _ := strconv.ParseInt(strings.TrimSpace(evt.Meta["approval_id"]), 10, 64)
-	if approvalID == 0 {
+	approvalID := domain.ID(strings.TrimSpace(evt.Meta["approval_id"]))
+	if approvalID == "" {
 		return
 	}
 	m.upsertCurrentSnapshotApproval(store.Approval{
@@ -224,15 +224,15 @@ func (m *App) applyApprovalAskEvent(evt domain.Event) {
 }
 
 func (m *App) applyApprovalReplyEvent(evt domain.Event) {
-	approvalID, _ := strconv.ParseInt(strings.TrimSpace(evt.Meta["approval_id"]), 10, 64)
-	if approvalID == 0 {
+	approvalID := domain.ID(strings.TrimSpace(evt.Meta["approval_id"]))
+	if approvalID == "" {
 		return
 	}
 	m.removeCurrentSnapshotApproval(approvalID)
 }
 
 func (m *App) appendEventMessageToTranscript(msg domain.Message, parts []domain.Part) bool {
-	if msg.ID == 0 {
+	if msg.ID == "" {
 		return false
 	}
 	if msg.Role == domain.MessageRoleAssistant && messageHasToolCall(parts) {
@@ -250,7 +250,7 @@ func (m *App) appendEventMessageToTranscript(msg domain.Message, parts []domain.
 }
 
 func (m *App) messageShouldRender(msg domain.Message, parts []domain.Part) bool {
-	if msg.ID == 0 {
+	if msg.ID == "" {
 		return false
 	}
 	if msg.Role == domain.MessageRoleUser {
@@ -296,11 +296,11 @@ func messageHasToolCall(parts []domain.Part) bool {
 }
 
 func (m *App) bindToolRunToOwningTurn(toolMsg domain.Message, run ui.ToolRun) ui.ToolRun {
-	if run.ParentMessageID > 0 || strings.TrimSpace(run.ToolCallID) == "" {
+	if run.ParentMessageID != "" || strings.TrimSpace(run.ToolCallID) == "" {
 		return run
 	}
 	parentID := toolRunOwnerMessageID(m.activeMessages(), m.activeParts(), toolMsg.ID, run.ToolCallID)
-	if parentID == 0 {
+	if parentID == "" {
 		if !toolCallExists(m.activeMessages(), m.activeParts(), run.ToolCallID) {
 			return run
 		}
@@ -310,13 +310,13 @@ func (m *App) bindToolRunToOwningTurn(toolMsg domain.Message, run ui.ToolRun) ui
 	return run
 }
 
-func toolRunOwnerMessageID(messages []domain.Message, parts map[int64][]domain.Part, beforeMessageID int64, toolCallID string) int64 {
+func toolRunOwnerMessageID(messages []domain.Message, parts map[domain.ID][]domain.Part, beforeMessageID domain.ID, toolCallID string) domain.ID {
 	toolCallID = strings.TrimSpace(toolCallID)
 	if toolCallID == "" {
-		return 0
+		return ""
 	}
 	limit := len(messages)
-	if beforeMessageID != 0 {
+	if beforeMessageID != "" {
 		for idx, msg := range messages {
 			if msg.ID == beforeMessageID {
 				limit = idx
@@ -327,7 +327,7 @@ func toolRunOwnerMessageID(messages []domain.Message, parts map[int64][]domain.P
 	for idx := limit - 1; idx >= 0; idx-- {
 		msg := messages[idx]
 		if msg.Role == domain.MessageRoleUser {
-			return 0
+			return ""
 		}
 		if msg.Role != domain.MessageRoleAssistant {
 			continue
@@ -338,10 +338,10 @@ func toolRunOwnerMessageID(messages []domain.Message, parts map[int64][]domain.P
 			}
 		}
 	}
-	return 0
+	return ""
 }
 
-func toolCallExists(messages []domain.Message, parts map[int64][]domain.Part, toolCallID string) bool {
+func toolCallExists(messages []domain.Message, parts map[domain.ID][]domain.Part, toolCallID string) bool {
 	toolCallID = strings.TrimSpace(toolCallID)
 	if toolCallID == "" {
 		return false
@@ -368,7 +368,7 @@ func partToolCallID(part domain.Part) string {
 }
 
 func (m *App) currentLiveExecRuns() []ui.ToolRun {
-	if m == nil || m.exec == nil || m.currentSession.ID == 0 || m.currentChat.ID == 0 {
+	if m == nil || m.exec == nil || m.currentSession.ID == "" || m.currentChat.ID == "" {
 		return nil
 	}
 	snaps, err := m.exec.List(context.Background(), execruntime.ListRequest{
@@ -453,19 +453,19 @@ func isCompactionOnlyAssistantMessage(parts []domain.Part) bool {
 
 type toolRunTracker struct {
 	append       func(ui.ToolRun) *ui.ToolRun
-	appendChild  func(int64, ui.ToolRun) *ui.ToolRun
+	appendChild  func(domain.ID, ui.ToolRun) *ui.ToolRun
 	byID         map[string]*ui.ToolRun
 	byToolCallID map[string]*ui.ToolRun
-	byApprovalID map[int64]*ui.ToolRun
+	byApprovalID map[domain.ID]*ui.ToolRun
 }
 
-func newToolRunTracker(append func(ui.ToolRun) *ui.ToolRun, appendChild func(int64, ui.ToolRun) *ui.ToolRun) *toolRunTracker {
+func newToolRunTracker(append func(ui.ToolRun) *ui.ToolRun, appendChild func(domain.ID, ui.ToolRun) *ui.ToolRun) *toolRunTracker {
 	return &toolRunTracker{
 		append:       append,
 		appendChild:  appendChild,
 		byID:         map[string]*ui.ToolRun{},
 		byToolCallID: map[string]*ui.ToolRun{},
-		byApprovalID: map[int64]*ui.ToolRun{},
+		byApprovalID: map[domain.ID]*ui.ToolRun{},
 	}
 }
 
@@ -478,7 +478,7 @@ func (t *toolRunTracker) Upsert(run ui.ToolRun) {
 		t.index(existing)
 		return
 	}
-	if run.ParentMessageID > 0 && t.appendChild != nil {
+	if run.ParentMessageID != "" && t.appendChild != nil {
 		t.index(t.appendChild(run.ParentMessageID, run))
 		return
 	}
@@ -494,7 +494,7 @@ func (t *toolRunTracker) lookup(run ui.ToolRun) *ui.ToolRun {
 			return existing
 		}
 	}
-	if run.ApprovalID > 0 {
+	if run.ApprovalID != "" {
 		if existing := t.byApprovalID[run.ApprovalID]; ownerCompatible(existing, run) {
 			return existing
 		}
@@ -509,7 +509,7 @@ func ownerCompatible(existing *ui.ToolRun, next ui.ToolRun) bool {
 	if existing == nil {
 		return false
 	}
-	if existing.ParentMessageID == 0 || next.ParentMessageID == 0 {
+	if existing.ParentMessageID == "" || next.ParentMessageID == "" {
 		return true
 	}
 	return existing.ParentMessageID == next.ParentMessageID
@@ -525,7 +525,7 @@ func (t *toolRunTracker) index(run *ui.ToolRun) {
 	if run.ToolCallID != "" {
 		t.byToolCallID[run.ToolCallID] = run
 	}
-	if run.ApprovalID > 0 {
+	if run.ApprovalID != "" {
 		t.byApprovalID[run.ApprovalID] = run
 	}
 }
@@ -541,14 +541,14 @@ func compactionToolRun(parts []domain.Part, msg domain.Message) (ui.ToolRun, boo
 		switch {
 		case status == "pending":
 			return ui.ToolRun{
-				ID:       fmt.Sprintf("compaction:%d", msg.ID),
+				ID:       fmt.Sprintf("compaction:%s", msg.ID),
 				Title:    "Compacting ...",
 				Subtitle: "Replacing earlier history for the next turn",
 				Status:   ui.ToolRunStatusRunning,
 			}, true
 		case status == "failed":
 			return ui.ToolRun{
-				ID:       fmt.Sprintf("compaction:%d", msg.ID),
+				ID:       fmt.Sprintf("compaction:%s", msg.ID),
 				Title:    "Compaction failed.",
 				Subtitle: "Compaction did not complete",
 				Status:   ui.ToolRunStatusFailed,
@@ -561,7 +561,7 @@ func compactionToolRun(parts []domain.Part, msg domain.Message) (ui.ToolRun, boo
 			title = fmt.Sprintf("Compacted from %d context to %d context.", payload.BeforeContextTokens, payload.AfterContextTokens)
 		}
 		return ui.ToolRun{
-			ID:       fmt.Sprintf("compaction:%d", msg.ID),
+			ID:       fmt.Sprintf("compaction:%s", msg.ID),
 			Title:    title,
 			Subtitle: "Replacement history sent to the model",
 			Preview:  body,
@@ -708,7 +708,7 @@ func toolRunApprovalRequest(part domain.Part) (ui.ToolRun, bool) {
 		if len(meta) == 0 {
 			return ui.ToolRun{}, false
 		}
-		approvalID, _ := strconv.ParseInt(strings.TrimSpace(meta["approval_id"]), 10, 64)
+		approvalID := domain.ID(strings.TrimSpace(meta["approval_id"]))
 		tool := domain.ToolKind(strings.TrimSpace(meta["tool"]))
 		preview := strings.TrimSpace(meta["command"])
 		presentation := presentationFromPreview(tool, preview)
@@ -755,7 +755,7 @@ func toolRunApprovalReply(part domain.Part) (ui.ToolRun, bool) {
 	if part.Kind != domain.PartKindSystemNotice && part.Kind != domain.PartKindToolOutput {
 		return ui.ToolRun{}, false
 	}
-	var approvalID int64
+	var approvalID domain.ID
 	var tool domain.ToolKind
 	var toolCallID string
 	var preview string
@@ -765,19 +765,19 @@ func toolRunApprovalReply(part domain.Part) (ui.ToolRun, bool) {
 		toolCallID = payload.ToolCallID
 		preview = strings.TrimSpace(payload.Args["command"])
 		statusText = string(payload.Status)
-		approvalID, _ = strconv.ParseInt(strings.TrimSpace(payload.Args["approval_id"]), 10, 64)
+		approvalID = domain.ID(strings.TrimSpace(payload.Args["approval_id"]))
 	} else {
 		meta := stringMeta(part.MetaJSON)
 		if strings.TrimSpace(meta["approval_id"]) == "" || strings.TrimSpace(meta["status"]) == "" {
 			return ui.ToolRun{}, false
 		}
-		approvalID, _ = strconv.ParseInt(strings.TrimSpace(meta["approval_id"]), 10, 64)
+		approvalID = domain.ID(strings.TrimSpace(meta["approval_id"]))
 		tool = domain.ToolKind(strings.TrimSpace(meta["tool"]))
 		toolCallID = strings.TrimSpace(meta["tool_call_id"])
 		preview = strings.TrimSpace(meta["command"])
 		statusText = strings.TrimSpace(meta["status"])
 	}
-	if approvalID == 0 || strings.TrimSpace(statusText) == "" {
+	if approvalID == "" || strings.TrimSpace(statusText) == "" {
 		return ui.ToolRun{}, false
 	}
 	if strings.EqualFold(strings.TrimSpace(statusText), "pending") {
@@ -999,10 +999,10 @@ func mergeToolRun(dst *ui.ToolRun, src ui.ToolRun) {
 	if strings.TrimSpace(src.ToolCallID) != "" {
 		dst.ToolCallID = src.ToolCallID
 	}
-	if src.ParentMessageID > 0 {
+	if src.ParentMessageID != "" {
 		dst.ParentMessageID = src.ParentMessageID
 	}
-	if src.ApprovalID > 0 {
+	if src.ApprovalID != "" {
 		dst.ApprovalID = src.ApprovalID
 	}
 	if terminal || strings.TrimSpace(dst.Title) == "" {
@@ -1044,8 +1044,8 @@ func (m *App) transcriptBlockIdentityKey(block transcriptBlock) string {
 		if strings.TrimSpace(key) != "" {
 			return "toolrun:" + key
 		}
-		if block.ToolRun.ApprovalID > 0 {
-			return fmt.Sprintf("toolrun-approval:%d", block.ToolRun.ApprovalID)
+		if block.ToolRun.ApprovalID != "" {
+			return fmt.Sprintf("toolrun-approval:%s", block.ToolRun.ApprovalID)
 		}
 		if strings.TrimSpace(block.ToolRun.ToolCallID) != "" {
 			return "toolrun-call:" + block.ToolRun.ToolCallID
@@ -1055,7 +1055,7 @@ func (m *App) transcriptBlockIdentityKey(block transcriptBlock) string {
 		if block.Pending {
 			return "pending-assistant"
 		}
-		return fmt.Sprintf("msg:%d", block.Message.ID)
+		return fmt.Sprintf("msg:%s", block.Message.ID)
 	}
 }
 
@@ -1137,9 +1137,9 @@ func toolRunFallbackID(tool domain.ToolKind, preview string) string {
 	return fmt.Sprintf("%s:%s", tool, strings.TrimSpace(preview))
 }
 
-func approvalFallbackID(approvalID int64, tool domain.ToolKind, preview string) string {
-	if approvalID > 0 {
-		return fmt.Sprintf("approval:%d", approvalID)
+func approvalFallbackID(approvalID domain.ID, tool domain.ToolKind, preview string) string {
+	if approvalID != "" {
+		return fmt.Sprintf("approval:%s", approvalID)
 	}
 	return toolRunFallbackID(tool, preview)
 }

@@ -50,7 +50,7 @@ type promptDoneMsg struct {
 }
 
 type execEventMsg struct {
-	chatID int64
+	chatID domain.ID
 	seq    uint64
 	event  execruntime.Event
 	ok     bool
@@ -171,13 +171,13 @@ func (b busyModel) transcriptStatusLabel() string {
 }
 
 type eventMsg struct {
-	chatID int64
+	chatID domain.ID
 	event  domain.Event
 	events <-chan domain.Event
 }
 
 type runtimeUpdateMsg struct {
-	chatID  int64
+	chatID  domain.ID
 	update  chatpkg.Update
 	updates <-chan chatpkg.Update
 }
@@ -233,7 +233,7 @@ type pickerModel struct {
 	visible      bool
 	mode         pickerMode
 	initialValue string
-	approvalID   int64
+	approvalID   domain.ID
 	dialog       ui.PickerDialog
 }
 
@@ -284,21 +284,9 @@ type mcpReloadMsg struct {
 }
 
 type queuePersistMsg struct {
-	chatID int64
+	chatID domain.ID
 	items  []domain.QueuedInput
 	err    error
-}
-
-var lastQueuedInputID int64
-
-func nextQueuedInputID() int64 {
-	now := time.Now().UTC().UnixNano()
-	if now <= lastQueuedInputID {
-		lastQueuedInputID++
-		return lastQueuedInputID
-	}
-	lastQueuedInputID = now
-	return now
 }
 
 func cloneQueuedInputs(src []domain.QueuedInput) []domain.QueuedInput {
@@ -509,8 +497,8 @@ type contextWindowMsg struct {
 
 type forkSessionMsg struct {
 	load     loadMsg
-	sourceID int64
-	forkedID int64
+	sourceID domain.ID
+	forkedID domain.ID
 	err      error
 }
 
@@ -556,10 +544,10 @@ type App struct {
 	viewport                    transcriptViewport
 	retainedTranscript          *ui.RetainedTranscript
 	transcriptItems             []transcriptItemController
-	messageItemIndexByID        map[int64]int
+	messageItemIndexByID        map[domain.ID]int
 	toolRunItemIndexByID        map[string]int
 	toolRunItemIndexByCall      map[string]int
-	toolRunItemIndexByAppr      map[int64]int
+	toolRunItemIndexByAppr      map[domain.ID]int
 	pendingTranscriptIndex      int
 	transcriptDirty             bool
 	mainScreen                  *mainScreenView
@@ -575,7 +563,7 @@ type App struct {
 	status                      string
 	loading                     bool
 	busy                        busyModel
-	chatBusy                    map[int64]busyModel
+	chatBusy                    map[domain.ID]busyModel
 	showSidebar                 bool
 	sidebarWidthOverride        int
 	showReasoning               bool
@@ -621,7 +609,7 @@ type App struct {
 	uiRoot                      *ui.Root
 	execEvents                  <-chan execruntime.Event
 	execCancel                  func()
-	execSubscriptionChatID      int64
+	execSubscriptionChatID      domain.ID
 	execSubscriptionSeq         uint64
 	rootTimerSeq                uint64
 	rootTimerPending            bool
@@ -630,7 +618,7 @@ type App struct {
 	caps                        *provider.CapabilityStore
 	runtimeCtxChecked           map[string]bool
 	activeOpCancel              context.CancelFunc
-	activeOpCancels             map[int64]context.CancelFunc
+	activeOpCancels             map[domain.ID]context.CancelFunc
 	activeEventStream           bool
 	currentRuntime              *chatpkg.Chat
 	currentRuntimeUpdates       <-chan chatpkg.Update
@@ -717,9 +705,9 @@ func NewWithWorkdir(cfg config.Config, st *store.Store, a *agent.Engine, mode St
 		expandedToolRuns:        make(map[string]bool),
 		expandedToolRunCommands: make(map[string]bool),
 		pendingTranscriptIndex:  -1,
-		messageItemIndexByID:    make(map[int64]int),
+		messageItemIndexByID:    make(map[domain.ID]int),
 		toolRunItemIndexByID:    make(map[string]int),
-		toolRunItemIndexByAppr:  make(map[int64]int),
+		toolRunItemIndexByAppr:  make(map[domain.ID]int),
 		transcriptDirty:         true,
 		currentSnapshot:         chatpkg.Snapshot{},
 		status:                  "Ready",
@@ -874,7 +862,7 @@ func (m App) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 		}
 		return m, ui.Batch(cmds...)
 	case runtimeUpdateMsg:
-		if msg.chatID == 0 || msg.chatID != m.currentChat.ID {
+		if msg.chatID == "" || msg.chatID != m.currentChat.ID {
 			return m, nil
 		}
 		if msg.updates == nil {
@@ -918,10 +906,10 @@ func (m App) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 			}
 			return m.finishOperationWithError(msg.err)
 		}
-		if msg.session.ID != 0 {
+		if msg.session.ID != "" {
 			m.currentSession = msg.session
 		}
-		if msg.chat.ID != 0 {
+		if msg.chat.ID != "" {
 			m.currentChat = msg.chat
 			m.clampQueueSelection()
 		}
@@ -946,7 +934,7 @@ func (m App) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 			}
 			items := cloneQueuedInputs(m.activeQueuedInputs())
 			items = append(items, domain.QueuedInput{
-				ID:        nextQueuedInputID(),
+				ID:        domain.NewID(),
 				Kind:      kind,
 				Text:      msg.followupPrompt,
 				CreatedAt: time.Now().UTC(),
@@ -986,8 +974,8 @@ func (m App) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 	case eventMsg:
 		m.invalidateBodyCache()
 		m.recordEvent(msg.chatID, msg.event)
-		eventForCurrentChat := msg.chatID == 0 || msg.chatID == m.currentChat.ID
-		if msg.chatID == 0 || msg.chatID == m.currentChat.ID {
+		eventForCurrentChat := msg.chatID == "" || msg.chatID == m.currentChat.ID
+		if msg.chatID == "" || msg.chatID == m.currentChat.ID {
 			m.applyCurrentChatEvent(msg.event)
 			m.applyEvent(msg.event)
 		}
@@ -1000,7 +988,7 @@ func (m App) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 			return m, ui.Batch(cmds...)
 		}
 		m.activeEventStream = false
-		if msg.chatID == 0 || msg.chatID == m.currentChat.ID {
+		if msg.chatID == "" || msg.chatID == m.currentChat.ID {
 			m.stopBusy()
 			return m, ui.Batch(cmds...)
 		}
@@ -1010,14 +998,14 @@ func (m App) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 		return m, ui.Batch(cmds...)
 	case loadMsg:
 		preservePendingAssistant := msg.preserveBusy &&
-			(msg.current.ID == 0 || msg.current.ID == m.currentSession.ID) &&
-			(msg.chat.ID == 0 || msg.chat.ID == m.currentChat.ID)
+			(msg.current.ID == "" || msg.current.ID == m.currentSession.ID) &&
+			(msg.chat.ID == "" || msg.chat.ID == m.currentChat.ID)
 		if !preservePendingAssistant {
 			m.resetPendingAssistantState()
 		}
 		m.invalidateTranscript()
 		m = m.UpdateLoad(msg)
-		if m.currentSession.ID > 0 && m.currentChat.ID > 0 {
+		if m.currentSession.ID != "" && m.currentChat.ID != "" {
 			updates, rt, err := m.attachCurrentRuntime(m.currentSession, m.currentChat)
 			if err != nil {
 				m.status = err.Error()
@@ -1028,7 +1016,7 @@ func (m App) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 		} else {
 			m.detachCurrentRuntime()
 		}
-		if m.debug != nil && m.currentSession.ID > 0 {
+		if m.debug != nil && m.currentSession.ID != "" {
 			count := len(m.activeMessages())
 			m.debug.RecordLifecycle(m.currentSession.ID, "session_reloaded", fmt.Sprintf("%d messages", count), map[string]string{"messages": strconv.Itoa(count)})
 		}
@@ -1069,7 +1057,7 @@ func (m App) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 		}
 		m = m.UpdateLoad(msg.load)
 		m.stopBusy()
-		m.status = fmt.Sprintf("Forked session %d from %d", msg.forkedID, msg.sourceID)
+		m.status = fmt.Sprintf("Forked session %s from %s", msg.forkedID, msg.sourceID)
 		return m, m.syncWindowTitleCmd()
 	case newSessionMsg:
 		m.invalidateTranscript()
@@ -1098,8 +1086,8 @@ func (m App) Update(msg ui.Msg) (next ui.Model, cmd ui.Cmd) {
 		m.syncCurrentChatBusy()
 		m.stopBusy()
 		m.invalidateBodyCache()
-		if msg.session.ID > 0 {
-			m.status = fmt.Sprintf("Started session %d", msg.session.ID)
+		if msg.session.ID != "" {
+			m.status = fmt.Sprintf("Started session %s", msg.session.ID)
 		} else {
 			m.status = "Started new session"
 		}
@@ -2620,7 +2608,7 @@ func (m *App) adjustSidebarWidth(delta int) {
 }
 
 func (m *App) renderSidebarSessionLine() string {
-	id := fmt.Sprintf("#%d", m.currentSession.ID)
+	id := fmt.Sprintf("#%s", m.currentSession.ID)
 	title := strings.TrimSpace(m.currentSession.Title)
 	if title == "" {
 		return "Session " + id
@@ -2629,7 +2617,7 @@ func (m *App) renderSidebarSessionLine() string {
 }
 
 func (m *App) renderSidebarChatLine() string {
-	id := fmt.Sprintf("#%d", m.currentChat.ID)
+	id := fmt.Sprintf("#%s", m.currentChat.ID)
 	chatIndex := 0
 	for idx, item := range m.chats {
 		if item.ID == m.currentChat.ID {
@@ -2663,7 +2651,7 @@ func (m *App) renderSidebarChatListItem(item domain.Chat) string {
 	}
 	label := strings.TrimSpace(item.Title)
 	if label == "" {
-		label = fmt.Sprintf("Chat %d", item.ID)
+		label = fmt.Sprintf("Chat %s", item.ID)
 	}
 	role := strings.TrimSpace(string(item.WorkflowRole))
 	if role != "" && role != string(domain.WorkflowRoleGeneral) {
@@ -2672,7 +2660,7 @@ func (m *App) renderSidebarChatListItem(item domain.Chat) string {
 	if queued := len(item.QueuedInputs); queued > 0 {
 		label += fmt.Sprintf(" (%d queued)", queued)
 	}
-	return fmt.Sprintf(" %s #%d %s", prefix, item.ID, label)
+	return fmt.Sprintf(" %s #%s %s", prefix, item.ID, label)
 }
 
 func (m *App) sidebarMilestoneLines() []string {
@@ -3032,12 +3020,12 @@ func (m *App) invalidateTranscript() {
 }
 
 func (m *App) transcriptPlaceholderItems() []transcriptItemController {
-	if m.currentSession.ID == 0 && len(m.activeMessages()) == 0 && !m.cfg.HasUsableDefaultProvider() {
+	if m.currentSession.ID == "" && len(m.activeMessages()) == 0 && !m.cfg.HasUsableDefaultProvider() {
 		item := newPlaceholderTranscriptItem("no-provider", 0, "No provider configured.\n\nType /provider to add one before sending prompts.")
 		item.Refresh(m)
 		return []transcriptItemController{item}
 	}
-	if m.currentSession.ID == 0 && len(m.activeMessages()) == 0 {
+	if m.currentSession.ID == "" && len(m.activeMessages()) == 0 {
 		item := newPlaceholderTranscriptItem("empty", 0, "Start by asking a question or type / for commands.")
 		item.Refresh(m)
 		return []transcriptItemController{item}
@@ -3048,10 +3036,10 @@ func (m *App) transcriptPlaceholderItems() []transcriptItemController {
 func (m *App) rebuildTranscriptState() []ui.TranscriptItem {
 	if items := m.transcriptPlaceholderItems(); len(items) > 0 {
 		m.transcriptItems = items
-		m.messageItemIndexByID = make(map[int64]int)
+		m.messageItemIndexByID = make(map[domain.ID]int)
 		m.toolRunItemIndexByID = make(map[string]int)
 		m.toolRunItemIndexByCall = make(map[string]int)
-		m.toolRunItemIndexByAppr = make(map[int64]int)
+		m.toolRunItemIndexByAppr = make(map[domain.ID]int)
 		m.pendingTranscriptIndex = -1
 		return m.uiTranscriptItems()
 	}
@@ -3061,10 +3049,10 @@ func (m *App) rebuildTranscriptState() []ui.TranscriptItem {
 	}
 	blocks := m.transcriptBlocks()
 	controllers := make([]transcriptItemController, 0, len(blocks))
-	messageIdx := make(map[int64]int)
+	messageIdx := make(map[domain.ID]int)
 	toolIdx := make(map[string]int)
 	toolCallIdx := make(map[string]int)
-	toolAppr := make(map[int64]int)
+	toolAppr := make(map[domain.ID]int)
 	pendingIndex := -1
 	for idx, block := range blocks {
 		gap := 0
@@ -3078,11 +3066,11 @@ func (m *App) rebuildTranscriptState() []ui.TranscriptItem {
 		case *pendingAssistantTranscriptItem:
 			pendingIndex = idx
 		case *userMessageTranscriptItem:
-			if typed.msg.ID > 0 {
+			if typed.msg.ID != "" {
 				messageIdx[typed.msg.ID] = idx
 			}
 		case *assistantMessageTranscriptItem:
-			if typed.msg.ID > 0 {
+			if typed.msg.ID != "" {
 				messageIdx[typed.msg.ID] = idx
 			}
 		case toolRunTranscriptItem:
@@ -3093,7 +3081,7 @@ func (m *App) rebuildTranscriptState() []ui.TranscriptItem {
 			if strings.TrimSpace(run.ToolCallID) != "" {
 				toolCallIdx[run.ToolCallID] = idx
 			}
-			if run.ApprovalID > 0 {
+			if run.ApprovalID != "" {
 				toolAppr[run.ApprovalID] = idx
 			}
 		}
@@ -3227,7 +3215,7 @@ func (m *App) replaceToolRunInTranscript(run ui.ToolRun) bool {
 			}
 		}
 	}
-	if run.ApprovalID > 0 {
+	if run.ApprovalID != "" {
 		if idx, ok := m.toolRunItemIndexByAppr[run.ApprovalID]; ok {
 			if idx >= 0 && idx < len(m.transcriptItems) {
 				if item, ok := m.transcriptItems[idx].(toolRunTranscriptItem); ok {
@@ -3349,19 +3337,19 @@ func (m App) pendingAssistantIndicatorLine() string {
 }
 
 func (m *App) reindexTranscriptControllers() {
-	m.messageItemIndexByID = make(map[int64]int)
+	m.messageItemIndexByID = make(map[domain.ID]int)
 	m.toolRunItemIndexByID = make(map[string]int)
 	m.toolRunItemIndexByCall = make(map[string]int)
-	m.toolRunItemIndexByAppr = make(map[int64]int)
+	m.toolRunItemIndexByAppr = make(map[domain.ID]int)
 	m.pendingTranscriptIndex = -1
 	for idx, item := range m.transcriptItems {
 		switch typed := item.(type) {
 		case *userMessageTranscriptItem:
-			if typed.msg.ID > 0 {
+			if typed.msg.ID != "" {
 				m.messageItemIndexByID[typed.msg.ID] = idx
 			}
 		case *assistantMessageTranscriptItem:
-			if typed.msg.ID > 0 {
+			if typed.msg.ID != "" {
 				m.messageItemIndexByID[typed.msg.ID] = idx
 			}
 		case *pendingAssistantTranscriptItem:
@@ -3374,7 +3362,7 @@ func (m *App) reindexTranscriptControllers() {
 			if strings.TrimSpace(run.ToolCallID) != "" {
 				m.toolRunItemIndexByCall[run.ToolCallID] = idx
 			}
-			if run.ApprovalID > 0 {
+			if run.ApprovalID != "" {
 				m.toolRunItemIndexByAppr[run.ApprovalID] = idx
 			}
 		}
@@ -3429,7 +3417,7 @@ func (m *App) transcriptBlockForController(item transcriptItemController) transc
 }
 
 func (m *App) appendTranscriptBlock(block transcriptBlock) bool {
-	if block.Kind != transcriptBlockMessage || block.Message.ID == 0 || m.transcriptDirty || len(m.transcriptItems) == 0 {
+	if block.Kind != transcriptBlockMessage || block.Message.ID == "" || m.transcriptDirty || len(m.transcriptItems) == 0 {
 		return false
 	}
 	retained := m.ensureRetainedTranscript()
@@ -3466,7 +3454,7 @@ func (m *App) appendTranscriptBlock(block transcriptBlock) bool {
 }
 
 func (m *App) upsertMessageTranscriptItem(msg domain.Message, parts []domain.Part) bool {
-	if msg.ID == 0 {
+	if msg.ID == "" {
 		return false
 	}
 	if idx, ok := m.messageItemIndexByID[msg.ID]; ok {
@@ -3495,7 +3483,7 @@ func (m *App) upsertToolRunTranscriptItem(run ui.ToolRun) bool {
 }
 
 func (m *App) upsertOwnedToolRunTranscriptItem(run ui.ToolRun) bool {
-	if run.ParentMessageID <= 0 || m.transcriptDirty {
+	if run.ParentMessageID == "" || m.transcriptDirty {
 		return false
 	}
 	idx, ok := m.messageItemIndexByID[run.ParentMessageID]
@@ -3518,13 +3506,13 @@ func (m *App) upsertOwnedToolRunTranscriptItem(run ui.ToolRun) bool {
 }
 
 func toolRunMatches(existing, next ui.ToolRun) bool {
-	if existing.ParentMessageID > 0 && next.ParentMessageID > 0 && existing.ParentMessageID != next.ParentMessageID {
+	if existing.ParentMessageID != "" && next.ParentMessageID != "" && existing.ParentMessageID != next.ParentMessageID {
 		return false
 	}
 	if strings.TrimSpace(next.ToolCallID) != "" && existing.ToolCallID == next.ToolCallID {
 		return true
 	}
-	if next.ApprovalID > 0 && existing.ApprovalID == next.ApprovalID {
+	if next.ApprovalID != "" && existing.ApprovalID == next.ApprovalID {
 		return true
 	}
 	return strings.TrimSpace(next.ID) != "" && existing.ID == next.ID
@@ -3709,11 +3697,11 @@ func (m *App) renderTranscriptActivityElement() ui.Node {
 	return spinner
 }
 
-func (m *App) sessionUsageSummary(sessionID int64) (domain.Usage, bool) {
+func (m *App) sessionUsageSummary(sessionID domain.ID) (domain.Usage, bool) {
 	if m.store == nil {
 		return domain.Usage{}, false
 	}
-	chatID := int64(0)
+	chatID := domain.ID("")
 	if m.currentSession.ID == sessionID {
 		chatID = m.currentChat.ID
 	}
@@ -3721,7 +3709,7 @@ func (m *App) sessionUsageSummary(sessionID int64) (domain.Usage, bool) {
 		timeline []domain.TimelineItem
 		err      error
 	)
-	if chatID > 0 {
+	if chatID != "" {
 		timeline, err = m.store.TimelineForChat(context.Background(), chatID)
 	} else {
 		chat, chatErr := m.store.DefaultChat(context.Background(), sessionID)
@@ -3922,10 +3910,10 @@ func (m App) pendingAssistantParts() []domain.Part {
 	}
 	parts := make([]domain.Part, 0, 2)
 	if strings.TrimSpace(pending.Reasoning) != "" {
-		parts = append(parts, domain.Part{ID: -1, Kind: domain.PartKindReasoning, Payload: domain.ReasoningPayload{Text: pending.Reasoning}, Body: pending.Reasoning})
+		parts = append(parts, domain.Part{ID: "pending-reasoning", Kind: domain.PartKindReasoning, Payload: domain.ReasoningPayload{Text: pending.Reasoning}, Body: pending.Reasoning})
 	}
 	if strings.TrimSpace(pending.Text) != "" {
-		parts = append(parts, domain.Part{ID: -2, Kind: domain.PartKindText, Payload: domain.TextPayload{Text: pending.Text}, Body: pending.Text})
+		parts = append(parts, domain.Part{ID: "pending-text", Kind: domain.PartKindText, Payload: domain.TextPayload{Text: pending.Text}, Body: pending.Text})
 	}
 	return parts
 }
@@ -3939,13 +3927,13 @@ func (m App) loadCmd() ui.Cmd {
 		if err != nil {
 			return promptDoneMsg{err: err}
 		}
-		m.recordStartupTiming(0, "list_sessions", stepStart, map[string]string{
+		m.recordStartupTiming("", "list_sessions", stepStart, map[string]string{
 			"count": strconv.Itoa(len(allSessions)),
 			"mode":  startupModeLabel(m.startupMode),
 		})
 		stepStart = time.Now()
 		sessions := m.visibleSessions(allSessions)
-		m.recordStartupTiming(0, "visible_sessions", stepStart, map[string]string{
+		m.recordStartupTiming("", "visible_sessions", stepStart, map[string]string{
 			"count": strconv.Itoa(len(sessions)),
 			"mode":  startupModeLabel(m.startupMode),
 		})
@@ -3953,7 +3941,7 @@ func (m App) loadCmd() ui.Cmd {
 			if len(sessions) == 0 {
 				return m.newSessionCmd()()
 			}
-			m.recordStartupTiming(0, "resume_picker_ready", totalStart, map[string]string{
+			m.recordStartupTiming("", "resume_picker_ready", totalStart, map[string]string{
 				"count": strconv.Itoa(len(sessions)),
 			})
 			return sessionPickerMsg{sessions: sessions}
@@ -3974,7 +3962,7 @@ func (m App) loadCmd() ui.Cmd {
 			"count": strconv.Itoa(len(chats)),
 		})
 		currentChat := newestChat(chats)
-		if currentChat.ID == 0 {
+		if currentChat.ID == "" {
 			stepStart = time.Now()
 			currentChat, err = m.store.DefaultChat(ctx, current.ID)
 			if err != nil {
@@ -3982,7 +3970,7 @@ func (m App) loadCmd() ui.Cmd {
 			}
 			chats = append(chats, currentChat)
 			m.recordStartupTiming(current.ID, "default_chat", stepStart, map[string]string{
-				"chat_id": strconv.FormatInt(currentChat.ID, 10),
+				"chat_id": currentChat.ID,
 			})
 		}
 		stepStart = time.Now()
@@ -3991,7 +3979,7 @@ func (m App) loadCmd() ui.Cmd {
 			return promptDoneMsg{err: err}
 		}
 		m.recordStartupTiming(current.ID, "timeline_for_chat", stepStart, map[string]string{
-			"chat_id": strconv.FormatInt(currentChat.ID, 10),
+			"chat_id": currentChat.ID,
 			"items":   strconv.Itoa(len(timeline)),
 		})
 		stepStart = time.Now()
@@ -4000,7 +3988,7 @@ func (m App) loadCmd() ui.Cmd {
 			return promptDoneMsg{err: err}
 		}
 		m.recordStartupTiming(current.ID, "pending_approvals", stepStart, map[string]string{
-			"chat_id": strconv.FormatInt(currentChat.ID, 10),
+			"chat_id": currentChat.ID,
 			"count":   strconv.Itoa(len(approvals)),
 		})
 		stepStart = time.Now()
@@ -4021,7 +4009,7 @@ func (m App) loadCmd() ui.Cmd {
 			"files": strconv.Itoa(len(workspaceStatus.Files)),
 		})
 		m.recordStartupTiming(current.ID, "startup_load_total", totalStart, map[string]string{
-			"chat_id": strconv.FormatInt(currentChat.ID, 10),
+			"chat_id": currentChat.ID,
 			"mode":    startupModeLabel(m.startupMode),
 		})
 		return loadMsg{
@@ -4051,7 +4039,7 @@ type loadMsg struct {
 	preserveBusy bool
 }
 
-func (m App) loadPlanningState(ctx context.Context, sessionID int64) (store.MilestonePlan, []store.TodoItem, error) {
+func (m App) loadPlanningState(ctx context.Context, sessionID domain.ID) (store.MilestonePlan, []store.TodoItem, error) {
 	plan, err := m.store.GetMilestonePlan(ctx, sessionID)
 	if err != nil {
 		return store.MilestonePlan{}, nil, err
@@ -4070,10 +4058,10 @@ func (m App) loadPlanningState(ctx context.Context, sessionID int64) (store.Mile
 func newestChat(chats []domain.Chat) domain.Chat {
 	var best domain.Chat
 	for _, item := range chats {
-		if item.ID == 0 {
+		if item.ID == "" {
 			continue
 		}
-		if best.ID == 0 || item.UpdatedAt.After(best.UpdatedAt) || (item.UpdatedAt.Equal(best.UpdatedAt) && item.ID > best.ID) {
+		if best.ID == "" || item.UpdatedAt.After(best.UpdatedAt) || (item.UpdatedAt.Equal(best.UpdatedAt) && item.ID > best.ID) {
 			best = item
 		}
 	}
@@ -4084,7 +4072,7 @@ func (m App) promptCmd(ctx context.Context, prompt string, drafts []attachment.D
 	return func() ui.Msg {
 		session := m.currentSession
 		chat := m.currentChat
-		if session.ID == 0 {
+		if session.ID == "" {
 			var err error
 			session, err = m.persistDraftSession(ctx)
 			if err != nil {
@@ -4167,14 +4155,14 @@ func (m App) runBangPromptCmd(ctx context.Context, bang bangPrompt, followup ban
 		if m.store == nil {
 			return bangCommandMsg{err: errors.New("store is not available"), preserveBusy: preserveBusy}
 		}
-		if session.ID == 0 {
+		if session.ID == "" {
 			var err error
 			session, err = m.persistDraftSession(ctx)
 			if err != nil {
 				return bangCommandMsg{err: err, preserveBusy: preserveBusy}
 			}
 		}
-		if chat.ID == 0 || chat.SessionID != session.ID {
+		if chat.ID == "" || chat.SessionID != session.ID {
 			var err error
 			chat, err = m.store.DefaultChat(ctx, session.ID)
 			if err != nil {
@@ -4223,7 +4211,7 @@ func (m App) continueCmd(ctx context.Context) ui.Cmd {
 	return func() ui.Msg {
 		session := m.currentSession
 		chat := m.currentChat
-		if session.ID == 0 {
+		if session.ID == "" {
 			return runPromptMsg{err: fmt.Errorf("no saved session to continue")}
 		}
 		providerID, contextWindow, contextChecked, err := m.ensureRuntimeContextWindow(ctx, session)
@@ -4288,9 +4276,9 @@ func (m App) sessionPickerCmd() ui.Cmd {
 	}
 }
 
-func (m App) loadSessionCmd(sessionID int64) ui.Cmd {
+func (m App) loadSessionCmd(sessionID domain.ID) ui.Cmd {
 	return func() ui.Msg {
-		if sessionID == 0 {
+		if sessionID == "" {
 			return nil
 		}
 		ctx := context.Background()
@@ -4303,7 +4291,7 @@ func (m App) loadSessionCmd(sessionID int64) ui.Cmd {
 		if err != nil {
 			return promptDoneMsg{err: err}
 		}
-		m.recordLoadTiming(sessionID, 0, "list_sessions", stepStart, map[string]string{
+		m.recordLoadTiming(sessionID, "", "list_sessions", stepStart, map[string]string{
 			"count": strconv.Itoa(len(allSessions)),
 		})
 		sessions := m.visibleSessions(allSessions)
@@ -4314,19 +4302,19 @@ func (m App) loadSessionCmd(sessionID int64) ui.Cmd {
 				break
 			}
 		}
-		if session.ID == 0 {
-			return promptDoneMsg{err: fmt.Errorf("session %d not found", sessionID)}
+		if session.ID == "" {
+			return promptDoneMsg{err: fmt.Errorf("session %s not found", sessionID)}
 		}
 		stepStart = time.Now()
 		chats, err := m.store.ListChats(ctx, session.ID)
 		if err != nil {
 			return promptDoneMsg{err: err}
 		}
-		m.recordLoadTiming(sessionID, 0, "list_chats", stepStart, map[string]string{
+		m.recordLoadTiming(sessionID, "", "list_chats", stepStart, map[string]string{
 			"count": strconv.Itoa(len(chats)),
 		})
 		currentChat := newestChat(chats)
-		if currentChat.ID == 0 {
+		if currentChat.ID == "" {
 			stepStart = time.Now()
 			currentChat, err = m.store.DefaultChat(ctx, session.ID)
 			if err != nil {
@@ -4383,16 +4371,16 @@ func (m App) loadSessionCmd(sessionID int64) ui.Cmd {
 	}
 }
 
-func (m App) loadChatCmd(sessionID, chatID int64) ui.Cmd {
+func (m App) loadChatCmd(sessionID, chatID domain.ID) ui.Cmd {
 	return func() ui.Msg {
-		if sessionID == 0 || chatID == 0 {
+		if sessionID == "" || chatID == "" {
 			return nil
 		}
 		ctx := context.Background()
 		totalStart := time.Now()
 		if m.debug != nil {
-			m.debug.RecordLifecycle(sessionID, "chat_load_started", fmt.Sprintf("chat=%d", chatID), map[string]string{
-				"chat_id": strconv.FormatInt(chatID, 10),
+			m.debug.RecordLifecycle(sessionID, "chat_load_started", fmt.Sprintf("chat=%s", chatID), map[string]string{
+				"chat_id": chatID,
 			})
 		}
 		stepStart := time.Now()
@@ -4411,8 +4399,8 @@ func (m App) loadChatCmd(sessionID, chatID int64) ui.Cmd {
 				break
 			}
 		}
-		if session.ID == 0 {
-			return promptDoneMsg{err: fmt.Errorf("session %d not found", sessionID)}
+		if session.ID == "" {
+			return promptDoneMsg{err: fmt.Errorf("session %s not found", sessionID)}
 		}
 		stepStart = time.Now()
 		chats, err := m.store.ListChats(ctx, sessionID)
@@ -4476,12 +4464,12 @@ func (m App) loadChatCmd(sessionID, chatID int64) ui.Cmd {
 	}
 }
 
-func (m App) createChatCmd(sessionID int64, role domain.WorkflowRole, title string) ui.Cmd {
+func (m App) createChatCmd(sessionID domain.ID, role domain.WorkflowRole, title string) ui.Cmd {
 	return func() ui.Msg {
 		ctx := context.Background()
 		start := time.Now()
-		var parentChatID *int64
-		if m.currentChat.ID > 0 && m.currentChat.SessionID == sessionID {
+		var parentChatID *domain.ID
+		if m.currentChat.ID != "" && m.currentChat.SessionID == sessionID {
 			parentChatID = &m.currentChat.ID
 		}
 		chat, err := m.store.CreateChat(ctx, sessionID, title, role, parentChatID)
@@ -4495,8 +4483,8 @@ func (m App) createChatCmd(sessionID int64, role domain.WorkflowRole, title stri
 	}
 }
 
-func (m App) recordLoadTiming(sessionID, chatID int64, step string, started time.Time, meta map[string]string) {
-	if m.debug == nil || sessionID == 0 || started.IsZero() {
+func (m App) recordLoadTiming(sessionID, chatID domain.ID, step string, started time.Time, meta map[string]string) {
+	if m.debug == nil || sessionID == "" || started.IsZero() {
 		return
 	}
 	if meta == nil {
@@ -4504,13 +4492,13 @@ func (m App) recordLoadTiming(sessionID, chatID int64, step string, started time
 	}
 	meta["step"] = step
 	meta["duration_ms"] = strconv.FormatInt(time.Since(started).Milliseconds(), 10)
-	if chatID > 0 {
-		meta["chat_id"] = strconv.FormatInt(chatID, 10)
+	if chatID != "" {
+		meta["chat_id"] = chatID
 	}
 	m.debug.RecordLifecycle(sessionID, "chat_load_timing", step, meta)
 }
 
-func (m App) recordStartupTiming(sessionID int64, step string, started time.Time, meta map[string]string) {
+func (m App) recordStartupTiming(sessionID domain.ID, step string, started time.Time, meta map[string]string) {
 	if m.debug == nil || started.IsZero() {
 		return
 	}
@@ -4533,7 +4521,7 @@ func startupModeLabel(mode StartupMode) string {
 	}
 }
 
-func (m App) agentsRefreshCmd(sessionID int64) ui.Cmd {
+func (m App) agentsRefreshCmd(sessionID domain.ID) ui.Cmd {
 	return func() ui.Msg {
 		ctx := context.Background()
 		if _, err := m.agent.RefreshAgents(ctx, sessionID); err != nil {
@@ -4553,10 +4541,10 @@ func (m App) agentsRefreshCmd(sessionID int64) ui.Cmd {
 			return agentsRefreshMsg{err: err}
 		}
 		currentChat := m.currentChat
-		if currentChat.ID == 0 || currentChat.SessionID != session.ID {
+		if currentChat.ID == "" || currentChat.SessionID != session.ID {
 			currentChat = newestChat(chats)
 		}
-		if currentChat.ID == 0 {
+		if currentChat.ID == "" {
 			currentChat, err = m.store.DefaultChat(ctx, session.ID)
 			if err != nil {
 				return agentsRefreshMsg{err: err}
@@ -4595,7 +4583,7 @@ func (m App) agentsRefreshCmd(sessionID int64) ui.Cmd {
 	}
 }
 
-func (m App) forkSessionCmd(sourceSessionID int64) ui.Cmd {
+func (m App) forkSessionCmd(sourceSessionID domain.ID) ui.Cmd {
 	return func() ui.Msg {
 		ctx := context.Background()
 		forked, err := m.store.ForkSession(ctx, sourceSessionID)
@@ -4612,7 +4600,7 @@ func (m App) forkSessionCmd(sourceSessionID int64) ui.Cmd {
 			return forkSessionMsg{err: err}
 		}
 		currentChat := newestChat(chats)
-		if currentChat.ID == 0 {
+		if currentChat.ID == "" {
 			currentChat, err = m.store.DefaultChat(ctx, forked.ID)
 			if err != nil {
 				return forkSessionMsg{err: err}
@@ -4657,7 +4645,7 @@ func (m App) forkSessionCmd(sourceSessionID int64) ui.Cmd {
 	}
 }
 
-func (m App) copyTimelineAttachmentsToSession(ctx context.Context, timeline []domain.TimelineItem, sessionID int64) ([]domain.TimelineItem, error) {
+func (m App) copyTimelineAttachmentsToSession(ctx context.Context, timeline []domain.TimelineItem, sessionID domain.ID) ([]domain.TimelineItem, error) {
 	out := slices.Clone(timeline)
 	for idx := range out {
 		user, ok := out[idx].Content.(domain.UserMessage)
@@ -4694,7 +4682,7 @@ func (m App) copyTimelineAttachmentsToSession(ctx context.Context, timeline []do
 func (m App) reloadDetailsCmd() ui.Cmd {
 	return func() ui.Msg {
 		var msg ui.Msg
-		if m.currentChat.ID != 0 {
+		if m.currentChat.ID != "" {
 			msg = m.loadChatCmd(m.currentSession.ID, m.currentChat.ID)()
 		} else {
 			msg = m.loadSessionCmd(m.currentSession.ID)()
@@ -4709,11 +4697,11 @@ func (m App) reloadDetailsCmd() ui.Cmd {
 }
 
 func (m App) loadCurrentDetailsSync() (loadMsg, bool, error) {
-	if m.currentSession.ID == 0 {
+	if m.currentSession.ID == "" {
 		return loadMsg{}, false, nil
 	}
 	var msg ui.Msg
-	if m.currentChat.ID != 0 {
+	if m.currentChat.ID != "" {
 		msg = m.loadChatCmd(m.currentSession.ID, m.currentChat.ID)()
 	} else {
 		msg = m.loadSessionCmd(m.currentSession.ID)()
@@ -4732,7 +4720,7 @@ func (m App) loadCurrentDetailsSync() (loadMsg, bool, error) {
 	return load, true, nil
 }
 
-func nextEventCmd(chatID int64, events <-chan domain.Event) ui.Cmd {
+func nextEventCmd(chatID domain.ID, events <-chan domain.Event) ui.Cmd {
 	return func() ui.Msg {
 		evt, ok := <-events
 		if !ok {
@@ -4742,7 +4730,7 @@ func nextEventCmd(chatID int64, events <-chan domain.Event) ui.Cmd {
 	}
 }
 
-func nextRuntimeUpdateCmd(chatID int64, updates <-chan chatpkg.Update) ui.Cmd {
+func nextRuntimeUpdateCmd(chatID domain.ID, updates <-chan chatpkg.Update) ui.Cmd {
 	return func() ui.Msg {
 		update, ok := <-updates
 		if !ok {
@@ -4843,14 +4831,14 @@ func RunWithWorkdir(cfg config.Config, st *store.Store, a *agent.Engine, mode St
 }
 
 func (m App) exitSummary() string {
-	if m.currentSession.ID <= 0 {
+	if m.currentSession.ID == "" {
 		return "Exited koder."
 	}
 	title := strings.TrimSpace(m.currentSession.Title)
 	if title == "" {
 		title = "untitled session"
 	}
-	return fmt.Sprintf("Closed session %d \"%s\" with %d messages.", m.currentSession.ID, title, len(m.activeMessages()))
+	return fmt.Sprintf("Closed session %s \"%s\" with %d messages.", m.currentSession.ID, title, len(m.activeMessages()))
 }
 
 func timestamp(t time.Time, enabled bool) string {
@@ -4887,7 +4875,7 @@ func mapsCloneToolStates(src map[domain.ToolKind]bool) map[domain.ToolKind]bool 
 }
 
 func (m *App) loadChatState(chat domain.Chat, timeline []domain.TimelineItem, approvals []store.Approval) {
-	if chat.ID == 0 && len(timeline) == 0 && len(approvals) == 0 {
+	if chat.ID == "" && len(timeline) == 0 && len(approvals) == 0 {
 		if m.currentRuntime == nil {
 			m.currentSnapshot = chatpkg.Snapshot{}
 		}
@@ -4907,7 +4895,7 @@ func (m *App) activeMessages() []domain.Message {
 	return nil
 }
 
-func (m *App) activeParts() map[int64][]domain.Part {
+func (m *App) activeParts() map[domain.ID][]domain.Part {
 	if m.hasSnapshotChatState() {
 		_, parts := renderTranscriptFromTimeline(m.currentSnapshot.Chat.SessionID, m.currentSnapshot.Timeline)
 		return parts
@@ -4923,7 +4911,7 @@ func (m *App) activeApprovals() []store.Approval {
 }
 
 func (m *App) hasSnapshotChatState() bool {
-	return m.currentSnapshot.Chat.ID != 0 ||
+	return m.currentSnapshot.Chat.ID != "" ||
 		len(m.currentSnapshot.Timeline) > 0 ||
 		len(m.currentSnapshot.Approvals) > 0 ||
 		len(m.currentSnapshot.QueuedInputs) > 0 ||
@@ -4976,17 +4964,17 @@ func (m *App) appendPendingAssistantReasoning(text string) {
 }
 
 func (m *App) appendCurrentSnapshotMessage(message domain.Message, parts []domain.Part) {
-	if m.currentSnapshot.Chat.ID == 0 && m.currentChat.ID != 0 {
+	if m.currentSnapshot.Chat.ID == "" && m.currentChat.ID != "" {
 		m.currentSnapshot.Chat = m.currentChat
 	}
 	m.upsertCurrentSnapshotTimelineFromMessage(message, parts)
 }
 
 func (m *App) upsertCurrentSnapshotTimelineFromMessage(message domain.Message, parts []domain.Part) {
-	if message.ID == 0 {
+	if message.ID == "" {
 		return
 	}
-	if m.currentSnapshot.Chat.ID == 0 && m.currentChat.ID != 0 {
+	if m.currentSnapshot.Chat.ID == "" && m.currentChat.ID != "" {
 		m.currentSnapshot.Chat = m.currentChat
 	}
 	if message.Role == domain.MessageRoleTool && m.attachToolMessageToTimeline(parts) {
@@ -4996,7 +4984,7 @@ func (m *App) upsertCurrentSnapshotTimelineFromMessage(message domain.Message, p
 	itemID := timelineIDFromMessageID(message.ID)
 	item := domain.TimelineItem{
 		ID:        itemID,
-		ChatID:    firstNonZeroAppInt64(message.ChatID, m.currentSnapshot.Chat.ID, m.currentChat.ID),
+		ChatID:    firstNonZeroAppID(message.ChatID, m.currentSnapshot.Chat.ID, m.currentChat.ID),
 		Seq:       int64(len(m.currentSnapshot.Timeline) + 1),
 		Content:   timelineContentFromMessageParts(message, parts),
 		CreatedAt: message.CreatedAt,
@@ -5014,7 +5002,7 @@ func (m *App) upsertCurrentSnapshotTimelineFromMessage(message domain.Message, p
 		if item.Seq == 0 {
 			item.Seq = int64(idx + 1)
 		}
-		if item.ChatID == 0 {
+		if item.ChatID == "" {
 			item.ChatID = existing.ChatID
 		}
 		if item.CreatedAt.IsZero() {
@@ -5081,13 +5069,12 @@ func (m *App) attachToolPartToTimeline(part domain.Part) bool {
 	}
 }
 
-func approvalIDFromToolOutput(payload domain.ToolOutputPayload) (int64, bool) {
+func approvalIDFromToolOutput(payload domain.ToolOutputPayload) (domain.ID, bool) {
 	raw := strings.TrimSpace(payload.Args["approval_id"])
 	if raw == "" {
-		return 0, false
+		return "", false
 	}
-	id, err := strconv.ParseInt(raw, 10, 64)
-	return id, err == nil && id > 0
+	return domain.ID(raw), true
 }
 
 func (m *App) updateTimelineToolCall(toolCallID string, update func(*domain.ToolCall)) bool {
@@ -5116,7 +5103,7 @@ func (m *App) upsertCurrentSnapshotTimelineItem(item domain.TimelineItem) {
 	if item.ID == "" {
 		return
 	}
-	if m.currentSnapshot.Chat.ID == 0 && m.currentChat.ID != 0 {
+	if m.currentSnapshot.Chat.ID == "" && m.currentChat.ID != "" {
 		m.currentSnapshot.Chat = m.currentChat
 	}
 	for idx := range m.currentSnapshot.Timeline {
@@ -5258,27 +5245,21 @@ func firstPartText(parts []domain.Part, kind domain.PartKind) string {
 	return ""
 }
 
-func firstNonZeroAppInt64(values ...int64) int64 {
+func firstNonZeroAppID(values ...domain.ID) domain.ID {
 	for _, value := range values {
-		if value != 0 {
+		if value != "" {
 			return value
 		}
 	}
-	return 0
+	return ""
 }
 
-func timelineIDFromMessageID(id int64) string {
-	if id == 0 {
-		return ""
-	}
-	if id < 0 {
-		id = -id
-	}
-	return fmt.Sprintf("019aa000-0000-7000-8000-%012d", id)
+func timelineIDFromMessageID(id domain.ID) string {
+	return string(id)
 }
 
 func (m *App) upsertCurrentSnapshotApproval(approval store.Approval) {
-	if approval.ID == 0 {
+	if approval.ID == "" {
 		return
 	}
 	for idx := range m.currentSnapshot.Approvals {
@@ -5290,8 +5271,8 @@ func (m *App) upsertCurrentSnapshotApproval(approval store.Approval) {
 	m.currentSnapshot.Approvals = append(m.currentSnapshot.Approvals, approval)
 }
 
-func (m *App) removeCurrentSnapshotApproval(approvalID int64) {
-	if approvalID == 0 {
+func (m *App) removeCurrentSnapshotApproval(approvalID domain.ID) {
+	if approvalID == "" {
 		return
 	}
 	for idx := range m.currentSnapshot.Approvals {
@@ -5304,21 +5285,21 @@ func (m *App) removeCurrentSnapshotApproval(approvalID int64) {
 }
 
 func (m *App) setCurrentSnapshotSessionTitle(title string) {
-	if !m.hasSnapshotChatState() && m.currentSession.ID == 0 && m.currentSnapshot.Session.ID == 0 {
+	if !m.hasSnapshotChatState() && m.currentSession.ID == "" && m.currentSnapshot.Session.ID == "" {
 		return
 	}
 	m.currentSnapshot.Session.Title = title
 }
 
 func (m *App) setCurrentSnapshotPermissionProfile(profile string) {
-	if !m.hasSnapshotChatState() && m.currentSession.ID == 0 && m.currentSnapshot.Session.ID == 0 {
+	if !m.hasSnapshotChatState() && m.currentSession.ID == "" && m.currentSnapshot.Session.ID == "" {
 		return
 	}
 	m.currentSnapshot.Session.PermissionProfile = profile
 }
 
 func (m *App) setCurrentSnapshotContextAnchor(tokens int, known bool) {
-	if !m.hasSnapshotChatState() && m.currentChat.ID == 0 && m.currentSnapshot.Chat.ID == 0 {
+	if !m.hasSnapshotChatState() && m.currentChat.ID == "" && m.currentSnapshot.Chat.ID == "" {
 		return
 	}
 	m.currentSnapshot.Chat.LastKnownContextTokens = tokens
@@ -5336,7 +5317,7 @@ func (m *App) detachCurrentRuntime() {
 }
 
 func (m *App) attachCurrentRuntime(session domain.Session, chat domain.Chat) (<-chan chatpkg.Update, *chatpkg.Chat, error) {
-	if m.agent == nil || chat.ID == 0 {
+	if m.agent == nil || chat.ID == "" {
 		return nil, nil, nil
 	}
 	if m.currentRuntime != nil && m.currentChat.ID == chat.ID && m.currentRuntimeUpdates != nil {
@@ -5356,7 +5337,7 @@ func (m *App) attachCurrentRuntime(session domain.Session, chat domain.Chat) (<-
 
 func (m *App) applyRuntimeSnapshot(snapshot chatpkg.Snapshot) {
 	m.currentSnapshot = snapshot
-	if snapshot.Session.ID != 0 {
+	if snapshot.Session.ID != "" {
 		m.currentSession = m.normalizeSessionToolStates(snapshot.Session)
 		for idx := range m.sessions {
 			if m.sessions[idx].ID == snapshot.Session.ID {
@@ -5365,7 +5346,7 @@ func (m *App) applyRuntimeSnapshot(snapshot chatpkg.Snapshot) {
 			}
 		}
 	}
-	if snapshot.Chat.ID != 0 {
+	if snapshot.Chat.ID != "" {
 		m.currentChat = snapshot.Chat
 		for idx := range m.chats {
 			if m.chats[idx].ID == snapshot.Chat.ID {
@@ -5471,7 +5452,7 @@ func (m App) UpdateLoad(msg loadMsg) App {
 		m.chats = slices.Clone(msg.chats)
 	}
 	m.currentSession = m.normalizeSessionToolStates(msg.current)
-	if msg.chat.ID != 0 {
+	if msg.chat.ID != "" {
 		m.currentChat = msg.chat
 		m.clampQueueSelection()
 	}
@@ -5522,7 +5503,7 @@ func (m *App) handleLocalCommand(prompt string) (ui.Model, ui.Cmd, bool) {
 		return model, cmd, true
 	case trimmed == "/chat new":
 		m.resetComposerInput()
-		if m.currentSession.ID == 0 {
+		if m.currentSession.ID == "" {
 			m.status = "Save the session with a prompt before creating chats"
 			return m, m.syncWindowTitleCmd(), true
 		}
@@ -5599,7 +5580,7 @@ func (m *App) handleLocalCommand(prompt string) (ui.Model, ui.Cmd, bool) {
 		return m, m.syncWindowTitleCmd(), true
 	case trimmed == "/agents refresh":
 		m.resetComposerInput()
-		if m.currentSession.ID == 0 {
+		if m.currentSession.ID == "" {
 			m.status = "No saved session to refresh"
 			return m, m.syncWindowTitleCmd(), true
 		}
@@ -5607,29 +5588,37 @@ func (m *App) handleLocalCommand(prompt string) (ui.Model, ui.Cmd, bool) {
 		return m, m.agentsRefreshCmd(m.currentSession.ID), true
 	case trimmed == "/fork":
 		m.resetComposerInput()
-		if m.currentSession.ID == 0 {
+		if m.currentSession.ID == "" {
 			m.status = "No saved session to fork"
 			return m, m.syncWindowTitleCmd(), true
 		}
-		m.startBusy(busyScopeSidebar, fmt.Sprintf("Forking session %d…", m.currentSession.ID))
+		m.startBusy(busyScopeSidebar, fmt.Sprintf("Forking session %s…", m.currentSession.ID))
 		return m, m.forkSessionCmd(m.currentSession.ID), true
 	case strings.HasPrefix(trimmed, "/approve "):
-		id, err := strconv.ParseInt(strings.TrimSpace(strings.TrimPrefix(trimmed, "/approve")), 10, 64)
+		id := domain.ID(strings.TrimSpace(strings.TrimPrefix(trimmed, "/approve")))
+		err := error(nil)
+		if id == "" {
+			err = fmt.Errorf("approval id is required")
+		}
 		if err != nil {
 			m.status = fmt.Sprintf("invalid approval id: %v", err)
 			return m, nil, true
 		}
 		m.resetComposerInput()
-		m.startBusy(busyScopeTranscript, fmt.Sprintf("Approving approval %d…", id))
+		m.startBusy(busyScopeTranscript, fmt.Sprintf("Approving approval %s…", id))
 		return m, m.approveCmd(m.beginActiveOperation(), id), true
 	case strings.HasPrefix(trimmed, "/deny "):
-		id, err := strconv.ParseInt(strings.TrimSpace(strings.TrimPrefix(trimmed, "/deny")), 10, 64)
+		id := domain.ID(strings.TrimSpace(strings.TrimPrefix(trimmed, "/deny")))
+		err := error(nil)
+		if id == "" {
+			err = fmt.Errorf("approval id is required")
+		}
 		if err != nil {
 			m.status = fmt.Sprintf("invalid approval id: %v", err)
 			return m, nil, true
 		}
 		m.resetComposerInput()
-		m.startBusy(busyScopeSidebar, fmt.Sprintf("Denying approval %d…", id))
+		m.startBusy(busyScopeSidebar, fmt.Sprintf("Denying approval %s…", id))
 		return m, m.denyCmd(m.beginActiveOperation(), id), true
 	case strings.HasPrefix(trimmed, "/"):
 		m.status = fmt.Sprintf("unknown command: %s", trimmed)
@@ -5656,11 +5645,11 @@ func (m *App) switchChatByDelta(delta int) ui.Cmd {
 		nextIdx += len(m.chats)
 	}
 	next := m.chats[nextIdx]
-	m.startBusy(busyScopeSidebar, fmt.Sprintf("Switching to chat %d…", next.ID))
+	m.startBusy(busyScopeSidebar, fmt.Sprintf("Switching to chat %s…", next.ID))
 	return m.loadChatCmd(next.SessionID, next.ID)
 }
 
-func (m App) approvalPermissionProfileCmd(ctx context.Context, approvalID int64, profile string) ui.Cmd {
+func (m App) approvalPermissionProfileCmd(ctx context.Context, approvalID domain.ID, profile string) ui.Cmd {
 	return func() ui.Msg {
 		events, err := m.agent.SetPermissionProfileInChatAndReevaluateApproval(ctx, m.currentSession.ID, m.currentChat.ID, approvalID, profile)
 		return promptDoneMsg{events: events, err: err}
@@ -5669,7 +5658,7 @@ func (m App) approvalPermissionProfileCmd(ctx context.Context, approvalID int64,
 
 func (m *App) beginActiveOperation() context.Context {
 	chatID := m.currentChatID()
-	if chatID == 0 {
+	if chatID == "" {
 		if m.activeOpCancel != nil {
 			m.activeOpCancel()
 		}
@@ -5679,7 +5668,7 @@ func (m *App) beginActiveOperation() context.Context {
 		return ctx
 	}
 	if m.activeOpCancels == nil {
-		m.activeOpCancels = map[int64]context.CancelFunc{}
+		m.activeOpCancels = map[domain.ID]context.CancelFunc{}
 	}
 	if cancel := m.activeOpCancels[chatID]; cancel != nil {
 		cancel()
@@ -5706,7 +5695,7 @@ func (m *App) handleInterruptKey() (ui.Model, ui.Cmd) {
 	m.status = "Interrupting…"
 	m.appendLocalTranscriptNotice("Interrupted", "interrupted", "warning")
 	cancel := m.activeOpCancel
-	if chatID := m.currentChatID(); chatID > 0 && m.activeOpCancels != nil && m.activeOpCancels[chatID] != nil {
+	if chatID := m.currentChatID(); chatID != "" && m.activeOpCancels != nil && m.activeOpCancels[chatID] != nil {
 		cancel = m.activeOpCancels[chatID]
 		m.activeOpCancel = cancel
 	}
@@ -5737,7 +5726,7 @@ func (m *App) queueComposerPrompt(kind domain.QueuedInputKind) (ui.Model, ui.Cmd
 	}
 	items := cloneQueuedInputs(m.activeQueuedInputs())
 	items = append(items, domain.QueuedInput{
-		ID:          nextQueuedInputID(),
+		ID:          domain.NewID(),
 		Kind:        kind,
 		Text:        prompt,
 		Attachments: queuedAttachmentsFromDrafts(m.draftAttachments),
@@ -5759,7 +5748,7 @@ func (m *App) queueContinuePrompt() (ui.Model, ui.Cmd) {
 	}
 	items := cloneQueuedInputs(m.activeQueuedInputs())
 	items = append(items, domain.QueuedInput{
-		ID:        nextQueuedInputID(),
+		ID:        domain.NewID(),
 		Kind:      domain.QueuedInputKindContinue,
 		CreatedAt: time.Now().UTC(),
 	})
@@ -5837,7 +5826,7 @@ func (m *App) dequeuePromptCmd() ui.Cmd {
 		}
 	}
 	m.startBusy(busyScopeTranscript, queuedInputRunStatus(item.Kind))
-	if item.Kind != domain.QueuedInputKindContinue && (m.currentRuntime == nil || m.currentRuntimeUpdates == nil || m.currentChat.ID == 0) {
+	if item.Kind != domain.QueuedInputKindContinue && (m.currentRuntime == nil || m.currentRuntimeUpdates == nil || m.currentChat.ID == "") {
 		m.appendLocalUserPrompt(item.Text, queuedAttachmentDrafts(item.Attachments), queuedReferenceDrafts(item.References))
 	}
 	return m.saveAndDispatchQueuedInputCmd(m.currentChat.ID, items, item)
@@ -5948,7 +5937,7 @@ func (m App) composerPromptHistory() []string {
 	return entries
 }
 
-func (m App) messagePromptText(messageID int64, fallback string) string {
+func (m App) messagePromptText(messageID domain.ID, fallback string) string {
 	parts := m.activeParts()[messageID]
 	var body strings.Builder
 	for _, part := range parts {
@@ -6117,7 +6106,7 @@ func (m *App) finishOperationWithError(err error) (ui.Model, ui.Cmd) {
 }
 
 func (m App) compactCmd(ctx context.Context) ui.Cmd {
-	if m.currentRuntime != nil && m.currentChat.ID > 0 {
+	if m.currentRuntime != nil && m.currentChat.ID != "" {
 		return func() ui.Msg {
 			err := m.currentRuntime.Compact()
 			return promptDoneMsg{err: err}
@@ -6129,8 +6118,8 @@ func (m App) compactCmd(ctx context.Context) ui.Cmd {
 	}
 }
 
-func (m App) approveCmd(ctx context.Context, approvalID int64) ui.Cmd {
-	if m.currentRuntime != nil && m.currentChat.ID > 0 {
+func (m App) approveCmd(ctx context.Context, approvalID domain.ID) ui.Cmd {
+	if m.currentRuntime != nil && m.currentChat.ID != "" {
 		return func() ui.Msg {
 			m.currentRuntime.Approve(approvalID)
 			return runtimeKickMsg{}
@@ -6142,8 +6131,8 @@ func (m App) approveCmd(ctx context.Context, approvalID int64) ui.Cmd {
 	}
 }
 
-func (m App) approveWithRuleCmd(ctx context.Context, approvalID int64, rule domain.PermissionOverride) ui.Cmd {
-	if m.currentRuntime != nil && m.currentChat.ID > 0 {
+func (m App) approveWithRuleCmd(ctx context.Context, approvalID domain.ID, rule domain.PermissionOverride) ui.Cmd {
+	if m.currentRuntime != nil && m.currentChat.ID != "" {
 		return func() ui.Msg {
 			m.currentRuntime.ApproveWithRule(approvalID, rule)
 			return runtimeKickMsg{}
@@ -6155,8 +6144,8 @@ func (m App) approveWithRuleCmd(ctx context.Context, approvalID int64, rule doma
 	}
 }
 
-func (m App) denyCmd(ctx context.Context, approvalID int64) ui.Cmd {
-	if m.currentRuntime != nil && m.currentChat.ID > 0 {
+func (m App) denyCmd(ctx context.Context, approvalID domain.ID) ui.Cmd {
+	if m.currentRuntime != nil && m.currentChat.ID != "" {
 		return func() ui.Msg {
 			m.currentRuntime.Deny(approvalID)
 			return runtimeKickMsg{}
@@ -6552,19 +6541,19 @@ func (m App) latestAssistantCopyText() string {
 	return ""
 }
 
-func (m *App) nextPendingID() int64 {
+func (m *App) nextPendingID() domain.ID {
 	m.pendingPartID--
 	if m.pendingPartID == 0 {
 		m.pendingPartID = -1
 	}
-	return m.pendingPartID
+	return domain.ID(fmt.Sprintf("pending-%d", -m.pendingPartID))
 }
 
-func (m *App) currentChatID() int64 {
-	if m.currentChat.ID > 0 {
+func (m *App) currentChatID() domain.ID {
+	if m.currentChat.ID != "" {
 		return m.currentChat.ID
 	}
-	return 0
+	return ""
 }
 
 func (m *App) applyQueuedInputs(items []domain.QueuedInput) {
@@ -6620,8 +6609,8 @@ func (m *App) moveQueueSelection(delta int) {
 	m.invalidateFooterCache()
 }
 
-func (m App) saveQueuedInputsCmd(chatID int64, items []domain.QueuedInput) ui.Cmd {
-	if chatID == 0 {
+func (m App) saveQueuedInputsCmd(chatID domain.ID, items []domain.QueuedInput) ui.Cmd {
+	if chatID == "" {
 		return nil
 	}
 	cloned := cloneQueuedInputs(items)
@@ -6638,7 +6627,7 @@ func (m App) saveQueuedInputsCmd(chatID int64, items []domain.QueuedInput) ui.Cm
 	}
 }
 
-func (m App) saveAndDispatchQueuedInputCmd(chatID int64, items []domain.QueuedInput, item domain.QueuedInput) ui.Cmd {
+func (m App) saveAndDispatchQueuedInputCmd(chatID domain.ID, items []domain.QueuedInput, item domain.QueuedInput) ui.Cmd {
 	clonedItems := cloneQueuedInputs(items)
 	clonedItem := item
 	clonedItem.Attachments = append([]domain.QueuedAttachment(nil), item.Attachments...)
@@ -6651,7 +6640,7 @@ func (m App) saveAndDispatchQueuedInputCmd(chatID int64, items []domain.QueuedIn
 	}
 	return func() ui.Msg {
 		ctx := context.Background()
-		if chatID > 0 {
+		if chatID != "" {
 			if err := m.store.SetChatQueuedInputs(ctx, chatID, clonedItems); err != nil {
 				return queuePersistMsg{chatID: chatID, items: clonedItems, err: err}
 			}
@@ -6735,11 +6724,11 @@ func (m *App) nextDispatchableQueuedInputIndex(activeTurn bool) int {
 
 func (m *App) syncCurrentChatBusy() {
 	chatID := m.currentChatID()
-	if chatID == 0 {
+	if chatID == "" {
 		return
 	}
 	if m.chatBusy == nil {
-		m.chatBusy = map[int64]busyModel{}
+		m.chatBusy = map[domain.ID]busyModel{}
 	}
 	m.busy = m.chatBusy[chatID]
 	if m.activeOpCancels != nil {
@@ -6750,7 +6739,7 @@ func (m *App) syncCurrentChatBusy() {
 	}
 	if m.busy.active && m.activeOpCancel != nil {
 		if m.activeOpCancels == nil {
-			m.activeOpCancels = map[int64]context.CancelFunc{}
+			m.activeOpCancels = map[domain.ID]context.CancelFunc{}
 		}
 		m.activeOpCancels[chatID] = m.activeOpCancel
 		return
@@ -6759,9 +6748,9 @@ func (m *App) syncCurrentChatBusy() {
 }
 
 func (m *App) syncBusyState() {
-	if chatID := m.currentChatID(); chatID > 0 {
+	if chatID := m.currentChatID(); chatID != "" {
 		if m.chatBusy == nil {
-			m.chatBusy = map[int64]busyModel{}
+			m.chatBusy = map[domain.ID]busyModel{}
 		}
 		m.chatBusy[chatID] = m.busy
 	}
@@ -6795,7 +6784,7 @@ func (m *App) stopBusy() {
 	m.busy.stop()
 	m.syncBusyState()
 	m.activeOpCancel = nil
-	if chatID := m.currentChatID(); chatID > 0 && m.activeOpCancels != nil {
+	if chatID := m.currentChatID(); chatID != "" && m.activeOpCancels != nil {
 		delete(m.activeOpCancels, chatID)
 	}
 	m.interruptArmedAt = time.Time{}
@@ -6869,7 +6858,7 @@ func (m *App) syncDebugRuntime() {
 	currentChatID := m.currentChatID()
 	hasActiveCancel := m.activeOpCancel != nil
 	hasChatCancel := false
-	if currentChatID > 0 && m.activeOpCancels != nil && m.activeOpCancels[currentChatID] != nil {
+	if currentChatID != "" && m.activeOpCancels != nil && m.activeOpCancels[currentChatID] != nil {
 		hasChatCancel = true
 	}
 	canInterrupt := hasActiveCancel || hasChatCancel
@@ -6903,7 +6892,7 @@ func (m *App) syncDebugRuntime() {
 	}
 	hashValues := []string{
 		strconv.FormatBool(deepDebug),
-		strconv.FormatInt(m.currentSession.ID, 10),
+		m.currentSession.ID,
 		strings.TrimSpace(m.currentSession.Title),
 		strings.TrimSpace(m.currentSession.ProviderID),
 		strings.TrimSpace(m.currentSession.ModelID),
@@ -7075,13 +7064,13 @@ func (m App) debugTranscriptItems() []debugsrv.TranscriptItemRef {
 			case *userMessageTranscriptItem:
 				msg := typed.msg
 				ref.Kind = "message"
-				ref.MessageID = strconv.FormatInt(msg.ID, 10)
+				ref.MessageID = msg.ID
 				ref.Role = string(msg.Role)
 				ref.Summary = strings.TrimSpace(msg.Summary)
 			case *assistantMessageTranscriptItem:
 				msg := typed.msg
 				ref.Kind = "message"
-				ref.MessageID = strconv.FormatInt(msg.ID, 10)
+				ref.MessageID = msg.ID
 				ref.Role = string(msg.Role)
 				ref.Summary = strings.TrimSpace(msg.Summary)
 			case *pendingAssistantTranscriptItem:
@@ -7170,12 +7159,12 @@ func (m App) openDialogName() string {
 	}
 }
 
-func (m App) recordEvent(chatID int64, evt domain.Event) {
+func (m App) recordEvent(chatID domain.ID, evt domain.Event) {
 	if m.debug == nil {
 		return
 	}
 	sessionID := m.currentSession.ID
-	if chatID > 0 {
+	if chatID != "" {
 		for _, item := range m.chats {
 			if item.ID == chatID {
 				sessionID = item.SessionID
@@ -7258,8 +7247,8 @@ func (m App) windowTitle() string {
 	title := strings.TrimSpace(m.currentSession.Title)
 	switch {
 	case title != "":
-	case m.currentSession.ID > 0:
-		title = fmt.Sprintf("Session #%d", m.currentSession.ID)
+	case m.currentSession.ID != "":
+		title = fmt.Sprintf("Session #%s", m.currentSession.ID)
 	default:
 		title = "New Session"
 	}
@@ -7285,7 +7274,7 @@ func (m App) draftSession() domain.Session {
 	}
 	now := time.Now().UTC()
 	return domain.Session{
-		ID:                0,
+		ID:                "",
 		Title:             "New Session",
 		ProviderID:        providerID,
 		ModelID:           modelID,
@@ -7714,7 +7703,7 @@ func (m *App) handleSessionDialogKey(msg ui.KeyMsg) ui.Cmd {
 	action := m.sessionDialog.Update(msg)
 	switch action.Kind {
 	case dialogs.SessionDialogActionSelect:
-		m.startBusy(busyScopeSidebar, fmt.Sprintf("Resuming session %d…", action.SessionID))
+		m.startBusy(busyScopeSidebar, fmt.Sprintf("Resuming session %s…", action.SessionID))
 		return m.loadSessionCmd(action.SessionID)
 	case dialogs.SessionDialogActionCancel:
 		m.startBusy(busyScopeSidebar, "Creating session…")
@@ -7997,7 +7986,7 @@ func (m *App) handleApprovalDialogAction(action dialogs.ApprovalDialogAction) ui
 	item := m.activeApprovals()[0]
 	switch action.Kind {
 	case dialogs.ApprovalDialogActionApproveOnce:
-		m.startBusy(busyScopeTranscript, fmt.Sprintf("Approving approval %d…", item.ID))
+		m.startBusy(busyScopeTranscript, fmt.Sprintf("Approving approval %s…", item.ID))
 		return m.approveCmd(m.beginActiveOperation(), item.ID)
 	case dialogs.ApprovalDialogActionApproveAllTool:
 		m.startBusy(busyScopeTranscript, fmt.Sprintf("Approving all %s commands…", approvalToolScopeLabel(item.Tool)))
@@ -8014,7 +8003,7 @@ func (m *App) handleApprovalDialogAction(action dialogs.ApprovalDialogAction) ui
 			Action:  domain.PermissionModeAllow,
 		}))
 	case dialogs.ApprovalDialogActionDeny:
-		m.startBusy(busyScopeSidebar, fmt.Sprintf("Denying approval %d…", item.ID))
+		m.startBusy(busyScopeSidebar, fmt.Sprintf("Denying approval %s…", item.ID))
 		return m.denyCmd(m.beginActiveOperation(), item.ID)
 	case dialogs.ApprovalDialogActionPermissions:
 		m.openApprovalPermissionsPicker()
@@ -8136,7 +8125,7 @@ func (m *App) applySessionToolStates(states map[domain.ToolKind]bool) error {
 		}
 		next[kind] = enabled
 	}
-	if m.currentSession.ID != 0 && m.store != nil {
+	if m.currentSession.ID != "" && m.store != nil {
 		if err := m.store.SetSessionToolStates(context.Background(), m.currentSession.ID, next); err != nil {
 			return err
 		}
@@ -8403,7 +8392,7 @@ func (m *App) openSessionPicker() {
 	for _, session := range m.sessions {
 		title := strings.TrimSpace(session.Title)
 		if title == "" {
-			title = fmt.Sprintf("Session #%d", session.ID)
+			title = fmt.Sprintf("Session #%s", session.ID)
 		}
 		description := strings.TrimSpace(session.LastMessage)
 		if description == "" {
@@ -8411,7 +8400,7 @@ func (m *App) openSessionPicker() {
 		}
 		preview := description
 		items = append(items, dialogs.SessionItem{
-			SessionID:    "#" + strconv.FormatInt(session.ID, 10),
+			SessionID:    "#" + session.ID,
 			CreatedAt:    formatRelativeSessionTime(session.CreatedAt),
 			ModifiedAt:   formatRelativeSessionTime(session.UpdatedAt),
 			TokenSummary: sessionTokenSummary(m, session.ID),
@@ -8419,7 +8408,7 @@ func (m *App) openSessionPicker() {
 			CWD:          session.CWD,
 			Description:  description,
 			Preview:      preview,
-			Value:        strconv.FormatInt(session.ID, 10),
+			Value:        session.ID,
 		})
 	}
 	dialog := dialogs.NewSessionDialog(items, showCWD)
@@ -8427,7 +8416,7 @@ func (m *App) openSessionPicker() {
 	m.syncComposerVisibility()
 }
 
-func sessionTokenSummary(m *App, sessionID int64) string {
+func sessionTokenSummary(m *App, sessionID domain.ID) string {
 	if usage, ok := m.sessionUsageSummary(sessionID); ok {
 		return fmt.Sprintf("%s/%s", formatTokens(usage.PromptTokens), formatTokens(usage.CompletionTokens))
 	}
@@ -9218,7 +9207,7 @@ func (m *App) selectModel(providerID string, modelID string, presetID string) er
 	if m.agent != nil {
 		m.agent.UpdateConfig(m.cfg)
 	}
-	if m.currentSession.ID != 0 && m.store != nil {
+	if m.currentSession.ID != "" && m.store != nil {
 		if err := m.store.SetSessionModel(context.Background(), m.currentSession.ID, providerID, modelID); err != nil {
 			return err
 		}
@@ -9329,8 +9318,8 @@ func (m *App) submitPickerSelection(value string) (ui.Model, ui.Cmd) {
 		}
 		approvalID := m.picker.approvalID
 		m.closePicker()
-		if approvalID > 0 {
-			m.startBusy(busyScopeTranscript, fmt.Sprintf("Re-evaluating approval %d with %s…", approvalID, permission.DisplayName(value)))
+		if approvalID != "" {
+			m.startBusy(busyScopeTranscript, fmt.Sprintf("Re-evaluating approval %s with %s…", approvalID, permission.DisplayName(value)))
 			return m, ui.Batch(m.approvalPermissionProfileCmd(m.beginActiveOperation(), approvalID, value), m.syncWindowTitleCmd())
 		}
 		if err := m.selectPermissionProfile(value); err != nil {
@@ -9358,7 +9347,7 @@ func (m *App) cancelPicker() (ui.Model, ui.Cmd) {
 	case pickerModePermissions:
 		approvalID := m.picker.approvalID
 		m.closePicker()
-		if approvalID > 0 {
+		if approvalID != "" {
 			m.status = "Permission mode change cancelled"
 		} else {
 			m.status = "Permission mode selection cancelled"
@@ -9404,7 +9393,7 @@ func (m *App) selectPermissionProfile(profile string) error {
 			return fmt.Errorf("unknown permission profile %q", profile)
 		}
 	}
-	if m.currentSession.ID != 0 {
+	if m.currentSession.ID != "" {
 		if err := m.store.SetSessionPermissionProfile(context.Background(), m.currentSession.ID, profile); err != nil {
 			return err
 		}
@@ -9450,7 +9439,7 @@ func (m *App) canContinue() (bool, string) {
 	if strings.TrimSpace(m.composer.Value()) != "" || len(m.draftAttachments) > 0 || len(m.draftReferences) > 0 {
 		return false, "Clear the composer before continuing"
 	}
-	if m.currentSession.ID == 0 {
+	if m.currentSession.ID == "" {
 		return false, "No saved session to continue"
 	}
 	if ok, status := m.canSendPrompt(); !ok {
@@ -9555,7 +9544,7 @@ func (m *App) applyPreferences(next dialogs.PreferencesValues, save bool) (ui.Cm
 	return cmd, nil
 }
 
-func waitForExecEventCmd(events <-chan execruntime.Event, chatID int64, seq uint64) ui.Cmd {
+func waitForExecEventCmd(events <-chan execruntime.Event, chatID domain.ID, seq uint64) ui.Cmd {
 	if events == nil {
 		return nil
 	}
@@ -9566,7 +9555,7 @@ func waitForExecEventCmd(events <-chan execruntime.Event, chatID int64, seq uint
 }
 
 func (m *App) waitForExecEventCmd() ui.Cmd {
-	if m == nil || m.execEvents == nil || m.execSubscriptionChatID == 0 || m.execSubscriptionSeq == 0 {
+	if m == nil || m.execEvents == nil || m.execSubscriptionChatID == "" || m.execSubscriptionSeq == 0 {
 		return nil
 	}
 	return waitForExecEventCmd(m.execEvents, m.execSubscriptionChatID, m.execSubscriptionSeq)
@@ -9581,8 +9570,8 @@ func (m *App) refreshExecSubscriptionCmd() ui.Cmd {
 		m.execCancel = nil
 	}
 	m.execEvents = nil
-	m.execSubscriptionChatID = 0
-	if m.exec == nil || m.currentSession.ID == 0 || m.currentChat.ID == 0 {
+	m.execSubscriptionChatID = ""
+	if m.exec == nil || m.currentSession.ID == "" || m.currentChat.ID == "" {
 		return nil
 	}
 	events, cancel := m.exec.Subscribe(m.currentChat.ID)

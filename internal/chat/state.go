@@ -24,7 +24,7 @@ type ChatState struct {
 
 	byToolRunID      map[string]*ToolRunRecord
 	byToolCallID     map[string]*ToolRunRecord
-	byToolApprovalID map[int64]*ToolRunRecord
+	byToolApprovalID map[domain.ID]*ToolRunRecord
 }
 
 // TimelineRecord stores one mutable timeline item.
@@ -252,7 +252,7 @@ func (s *ChatState) latestReplaceableAssistant(item domain.TimelineItem) *Timeli
 		if isDurableTimelineItem(record.Item) {
 			return nil
 		}
-		if record.Item.ChatID != 0 && item.ChatID != 0 && record.Item.ChatID != item.ChatID {
+		if record.Item.ChatID != "" && item.ChatID != "" && record.Item.ChatID != item.ChatID {
 			return nil
 		}
 		if item.Seq > 0 && record.Item.Seq > 0 && item.Seq < record.Item.Seq {
@@ -300,7 +300,7 @@ func (s *ChatState) SnapshotTimeline() []domain.TimelineItem {
 }
 
 // ActiveAssistant returns the latest unsealed assistant item, creating one when absent.
-func (s *ChatState) ActiveAssistant(chatID int64, now time.Time) *TimelineRecord {
+func (s *ChatState) ActiveAssistant(chatID domain.ID, now time.Time) *TimelineRecord {
 	if record := s.LatestActiveAssistant(); record != nil {
 		return record
 	}
@@ -341,7 +341,7 @@ func (s *ChatState) LatestActiveAssistant() *TimelineRecord {
 }
 
 // AppendAssistantText appends text to the active assistant item.
-func (s *ChatState) AppendAssistantText(chatID int64, text string) error {
+func (s *ChatState) AppendAssistantText(chatID domain.ID, text string) error {
 	if s == nil || text == "" {
 		return nil
 	}
@@ -363,7 +363,7 @@ func (s *ChatState) AppendAssistantText(chatID int64, text string) error {
 }
 
 // AppendAssistantReasoning appends reasoning to the active assistant item.
-func (s *ChatState) AppendAssistantReasoning(chatID int64, text string) error {
+func (s *ChatState) AppendAssistantReasoning(chatID domain.ID, text string) error {
 	if s == nil || text == "" {
 		return nil
 	}
@@ -459,12 +459,12 @@ func (s *ChatState) ReplaceToolRuns(runs []ui.ToolRun) {
 		s.byToolCallID = map[string]*ToolRunRecord{}
 	}
 	if s.byToolApprovalID == nil {
-		s.byToolApprovalID = map[int64]*ToolRunRecord{}
+		s.byToolApprovalID = map[domain.ID]*ToolRunRecord{}
 	}
 	nextRuns := make([]*ToolRunRecord, 0, len(runs))
 	nextByID := make(map[string]*ToolRunRecord, len(runs))
 	nextByCall := make(map[string]*ToolRunRecord, len(runs))
-	nextByApproval := make(map[int64]*ToolRunRecord, len(runs))
+	nextByApproval := make(map[domain.ID]*ToolRunRecord, len(runs))
 	for _, run := range runs {
 		record := s.lookupToolRun(run)
 		if record == nil {
@@ -478,7 +478,7 @@ func (s *ChatState) ReplaceToolRuns(runs []ui.ToolRun) {
 		if run.ToolCallID != "" {
 			nextByCall[run.ToolCallID] = record
 		}
-		if run.ApprovalID > 0 {
+		if run.ApprovalID != "" {
 			nextByApproval[run.ApprovalID] = record
 		}
 	}
@@ -532,7 +532,7 @@ func (s *ChatState) UpsertToolRun(run ui.ToolRun) (*ToolRunRecord, bool) {
 		s.byToolCallID = map[string]*ToolRunRecord{}
 	}
 	if s.byToolApprovalID == nil {
-		s.byToolApprovalID = map[int64]*ToolRunRecord{}
+		s.byToolApprovalID = map[domain.ID]*ToolRunRecord{}
 	}
 	record := s.lookupToolRun(run)
 	created := false
@@ -549,7 +549,7 @@ func (s *ChatState) UpsertToolRun(run ui.ToolRun) (*ToolRunRecord, bool) {
 
 // UpsertApproval adds or replaces one approval snapshot.
 func (s *ChatState) UpsertApproval(approval store.Approval) {
-	if s == nil || approval.ID == 0 {
+	if s == nil || approval.ID == "" {
 		return
 	}
 	for idx := range s.approvals {
@@ -562,8 +562,8 @@ func (s *ChatState) UpsertApproval(approval store.Approval) {
 }
 
 // RemoveApproval removes one approval snapshot by ID.
-func (s *ChatState) RemoveApproval(approvalID int64) {
-	if s == nil || approvalID == 0 {
+func (s *ChatState) RemoveApproval(approvalID domain.ID) {
+	if s == nil || approvalID == "" {
 		return
 	}
 	for idx := range s.approvals {
@@ -584,7 +584,7 @@ func (s *ChatState) lookupToolRun(run ui.ToolRun) *ToolRunRecord {
 			return record
 		}
 	}
-	if run.ApprovalID > 0 {
+	if run.ApprovalID != "" {
 		if record := s.byToolApprovalID[run.ApprovalID]; record != nil {
 			return record
 		}
@@ -608,7 +608,7 @@ func (s *ChatState) indexToolRunRecord(record *ToolRunRecord) {
 	if strings.TrimSpace(run.ToolCallID) != "" {
 		s.byToolCallID[run.ToolCallID] = record
 	}
-	if run.ApprovalID > 0 {
+	if run.ApprovalID != "" {
 		s.byToolApprovalID[run.ApprovalID] = record
 	}
 }
