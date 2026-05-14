@@ -789,7 +789,12 @@ func (r *Chat) handleStreamEvent(evt domain.Event) {
 	transcriptChanged := false
 	contextChanged := false
 	if evt.Item.ID != "" && r.state != nil {
-		r.state.UpsertTimelineItem(evt.Item)
+		switch evt.Kind {
+		case domain.EventKindMessageDelta, domain.EventKindReasoning:
+			r.state.EnsureTimelineItem(evt.Item)
+		default:
+			r.state.UpsertTimelineItem(evt.Item)
+		}
 		transcriptChanged = true
 		if text := timelineItemSummary(evt.Item); text != "" {
 			r.chat.LastMessage = text

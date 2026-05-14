@@ -219,6 +219,30 @@ func (s *ChatState) UpsertTimelineItem(item domain.TimelineItem) (*TimelineRecor
 	return record, created
 }
 
+// EnsureTimelineItem adds item if it does not already exist, without replacing
+// existing mutable content.
+func (s *ChatState) EnsureTimelineItem(item domain.TimelineItem) (*TimelineRecord, bool) {
+	if s == nil {
+		return nil, false
+	}
+	if s.byItem == nil {
+		s.byItem = map[string]*TimelineRecord{}
+	}
+	if item.ID == "" {
+		item.ID = domain.NewTimelineID(item.CreatedAt)
+	}
+	if record := s.byItem[item.ID]; record != nil {
+		return record, false
+	}
+	if record := s.replaceTemporaryActiveAssistant(item); record != nil {
+		return record, false
+	}
+	record := &TimelineRecord{Item: item}
+	s.timeline = append(s.timeline, record)
+	s.byItem[item.ID] = record
+	return record, true
+}
+
 func (s *ChatState) replaceTemporaryActiveAssistant(item domain.TimelineItem) *TimelineRecord {
 	if !isDurableTimelineItem(item) {
 		return nil

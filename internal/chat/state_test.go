@@ -60,6 +60,32 @@ func TestChatStateUpsertTimelineItemPreservesRecordIdentity(t *testing.T) {
 	}
 }
 
+func TestChatStateEnsureTimelineItemDoesNotOverwriteStreamingAssistant(t *testing.T) {
+	state := NewTimelineState(domain.Chat{ID: "chat-7"}, nil, nil)
+	seed := domain.TimelineItem{ID: "019aa000-0000-7000-8000-000000000011", ChatID: "chat-7", Seq: 1, Content: domain.AssistantMessage{}}
+	record, created := state.EnsureTimelineItem(seed)
+	if !created || record == nil {
+		t.Fatalf("expected seed assistant item")
+	}
+	if err := state.AppendAssistantText("chat-7", "hel"); err != nil {
+		t.Fatalf("append first delta: %v", err)
+	}
+	recordAgain, created := state.EnsureTimelineItem(seed)
+	if created {
+		t.Fatal("expected existing streaming assistant to be reused")
+	}
+	if recordAgain != record {
+		t.Fatal("expected streaming assistant record identity to be preserved")
+	}
+	if err := state.AppendAssistantText("chat-7", "lo"); err != nil {
+		t.Fatalf("append second delta: %v", err)
+	}
+	assistant := state.SnapshotTimeline()[0].Content.(domain.AssistantMessage)
+	if assistant.Text != "hello" {
+		t.Fatalf("expected accumulated text, got %q", assistant.Text)
+	}
+}
+
 func TestChatStateUpsertReplacesSealedStreamedAssistantWithFinalItem(t *testing.T) {
 	state := NewTimelineState(domain.Chat{ID: "chat-7"}, nil, nil)
 	if err := state.AppendAssistantText("chat-7", "I'll inspect the files."); err != nil {
