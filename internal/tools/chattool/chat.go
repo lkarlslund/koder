@@ -3,7 +3,6 @@ package chattool
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 
 	"github.com/lkarlslund/koder/internal/domain"
@@ -36,7 +35,7 @@ func init() {
 		Title:       "Poll chat",
 		Description: "Read the latest runtime state for one chat.",
 		Usage:       "Read the latest runtime state for one chat by id, including whether it is running, waiting for approval, completed, or failed.",
-		Parameters:  `{"type":"object","properties":{"chat_id":{"type":"integer","description":"Chat id to inspect"}},"required":["chat_id"],"additionalProperties":false}`,
+		Parameters:  `{"type":"object","properties":{"chat_id":{"type":"string","description":"Chat UUID to inspect, as returned by chat_list"}},"required":["chat_id"],"additionalProperties":false}`,
 		ExposeToLLM: true,
 	})
 }
@@ -88,11 +87,12 @@ func (startExecutionTool) NormalizeArgs(args map[string]string) (map[string]stri
 }
 
 func (pollTool) NormalizeArgs(args map[string]string) (map[string]string, error) {
-	id, err := tools.ParseFlexibleInt(tools.FirstArg(args, "chat_id", "id"))
-	if err != nil || id <= 0 {
-		return nil, errors.New("chat_id must be a positive integer")
+	id := strings.TrimSpace(tools.FirstArg(args, "chat_id", "id"))
+	id = strings.TrimPrefix(id, "#")
+	if id == "" {
+		return nil, errors.New("chat_id is required")
 	}
-	return map[string]string{"chat_id": fmt.Sprintf("%d", id)}, nil
+	return map[string]string{"chat_id": id}, nil
 }
 
 func (listTool) Preview(req tools.Request) string { return "List chats" }
@@ -102,7 +102,7 @@ func (startDecompositionTool) Preview(req tools.Request) string {
 func (startExecutionTool) Preview(req tools.Request) string {
 	return "Start execution chat for " + req.Args["milestone_ref"]
 }
-func (pollTool) Preview(req tools.Request) string { return "Poll chat #" + req.Args["chat_id"] }
+func (pollTool) Preview(req tools.Request) string { return "Poll chat " + req.Args["chat_id"] }
 
 func (listTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
 	control, err := tools.RequireChatControl(runtime)

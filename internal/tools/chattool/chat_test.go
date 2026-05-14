@@ -38,8 +38,8 @@ func (f *fakeChatControl) StartExecution(_ context.Context, sessionID, parentCha
 	return f.statuses[0], nil
 }
 
-func (f *fakeChatControl) PollChat(context.Context, domain.ID, domain.ID) (tools.ChatStatus, error) {
-	f.lastChatID = f.statuses[0].Chat.ID
+func (f *fakeChatControl) PollChat(_ context.Context, _ domain.ID, chatID domain.ID) (tools.ChatStatus, error) {
+	f.lastChatID = chatID
 	return f.statuses[0], nil
 }
 
@@ -60,8 +60,15 @@ func TestNormalizeStartAndPollArgs(t *testing.T) {
 	if args["milestone_ref"] != "alpha" || args["title"] != "Worker" {
 		t.Fatalf("unexpected normalized args: %#v", args)
 	}
-	if _, err := (pollTool{}).NormalizeArgs(map[string]string{"chat_id": "0"}); err == nil {
-		t.Fatal("expected invalid chat id error")
+	pollArgs, err := (pollTool{}).NormalizeArgs(map[string]string{"chat_id": " #019e2831-cbf8-79f6-9e6d-3ec97db3d9f9 "})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pollArgs["chat_id"] != "019e2831-cbf8-79f6-9e6d-3ec97db3d9f9" {
+		t.Fatalf("unexpected poll args: %#v", pollArgs)
+	}
+	if _, err := (pollTool{}).NormalizeArgs(map[string]string{"chat_id": "   "}); err == nil {
+		t.Fatal("expected empty chat id error")
 	}
 }
 
@@ -118,6 +125,9 @@ func TestPollExecuteReturnsStatus(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if control.lastChatID != "chat-11" {
+		t.Fatalf("expected poll chat id chat-11, got %q", control.lastChatID)
 	}
 	if !strings.Contains(result.Output, "Completed") {
 		t.Fatalf("expected poll output to include status, got %q", result.Output)
