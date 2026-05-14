@@ -35,11 +35,10 @@ func TestControllerStartCreatesSessionAndPublishesState(t *testing.T) {
 	}
 	select {
 	case event := <-events:
-		if event.Type != "snapshot" {
-			t.Fatalf("expected initial snapshot event, got %q", event.Type)
+		if event.Type == "snapshot" {
+			t.Fatalf("expected subscriptions to avoid unsolicited full snapshots, got %q", event.Type)
 		}
-	case <-time.After(time.Second):
-		t.Fatal("expected initial snapshot event")
+	case <-time.After(20 * time.Millisecond):
 	}
 }
 

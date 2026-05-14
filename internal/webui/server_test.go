@@ -17,7 +17,9 @@ import (
 	"github.com/coder/websocket"
 
 	"github.com/lkarlslund/koder/internal/agent"
+	"github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/config"
+	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/uicore"
 )
@@ -148,8 +150,6 @@ func TestWebSocketHelloReturnsState(t *testing.T) {
 		t.Fatalf("dial websocket: %v", err)
 	}
 	defer conn.Close(websocket.StatusNormalClosure, "")
-
-	_ = readMessage(t, ctx, conn)
 	if err := conn.Write(ctx, websocket.MessageText, []byte(`{"id":1,"method":"hello","params":{}}`)); err != nil {
 		t.Fatalf("write hello: %v", err)
 	}
@@ -170,6 +170,80 @@ func TestWebSocketHelloReturnsState(t *testing.T) {
 	}
 	if _, ok := result["state"].(map[string]any); !ok {
 		t.Fatalf("expected hello state object, got %#v", result["state"])
+	}
+}
+
+func TestWebSocketChatUpdateIsCompactedToSingleItemDelta(t *testing.T) {
+	item := domain.TimelineItem{
+		ID:     42,
+		ChatID: 7,
+		Seq:    3,
+		Content: domain.AssistantMessage{
+			Text: "streamed",
+		},
+	}
+	update := chat.Update{
+		Snapshot: chat.Snapshot{
+			Chat:     domain.Chat{ID: 7, SessionID: 1, Title: "Chat"},
+			Timeline: []domain.TimelineItem{{ID: 1, ChatID: 7, Seq: 1, Content: domain.UserMessage{Text: "old"}}, item},
+			Status:   chat.StatusStreamingResponse,
+			Active:   true,
+		},
+		TranscriptChanged: true,
+		StatusChanged:     true,
+	}
+	event, ok := webEventFromControllerEvent(uicore.Event{Seq: 9, Type: "chat_update", Payload: update})
+	if !ok {
+		t.Fatal("expected compact web event")
+	}
+	if event.Type != "chat_delta" {
+		t.Fatalf("expected chat_delta, got %q", event.Type)
+	}
+	data, err := json.Marshal(event)
+	if err != nil {
+		t.Fatalf("marshal event: %v", err)
+	}
+	payload := string(data)
+	if strings.Contains(payload, `"Timeline"`) || strings.Contains(payload, `"timeline"`) || strings.Contains(payload, `"Snapshots"`) || strings.Contains(payload, `"snapshots"`) {
+		t.Fatalf("expected compact chat delta without full timelines/snapshots, got %s", payload)
+	}
+	if !strings.Contains(payload, `"item"`) || !strings.Contains(payload, `"streamed"`) {
+		t.Fatalf("expected changed item in chat delta, got %s", payload)
+	}
+	if strings.Contains(payload, `"old"`) {
+		t.Fatalf("expected only the changed timeline item, got %s", payload)
+	}
+}
+
+func TestWebSocketSnapshotEventIsCompactedToStateDelta(t *testing.T) {
+	state := uicore.State{
+		Session:      domain.Session{ID: 1, Title: "Session"},
+		Chats:        []domain.Chat{{ID: 7, SessionID: 1, Title: "Chat"}},
+		ActiveChatID: 7,
+		Snapshots: map[int64]chat.Snapshot{
+			7: {
+				Chat:     domain.Chat{ID: 7, SessionID: 1, Title: "Chat"},
+				Timeline: []domain.TimelineItem{{ID: 1, ChatID: 7, Seq: 1, Content: domain.UserMessage{Text: "old transcript"}}},
+			},
+		},
+	}
+	event, ok := webEventFromControllerEvent(uicore.Event{Seq: 2, Type: "snapshot", Payload: state})
+	if !ok {
+		t.Fatal("expected compact state event")
+	}
+	if event.Type != "state_delta" {
+		t.Fatalf("expected state_delta, got %q", event.Type)
+	}
+	data, err := json.Marshal(event)
+	if err != nil {
+		t.Fatalf("marshal event: %v", err)
+	}
+	payload := string(data)
+	if strings.Contains(payload, `"snapshot"`) || strings.Contains(payload, `"snapshots"`) || strings.Contains(payload, `"timeline"`) || strings.Contains(payload, "old transcript") {
+		t.Fatalf("expected state delta without transcript snapshots, got %s", payload)
+	}
+	if !strings.Contains(payload, `"chats"`) || !strings.Contains(payload, `"Chat"`) {
+		t.Fatalf("expected state delta to include sidebar chat state, got %s", payload)
 	}
 }
 
@@ -288,6 +362,12 @@ func TestIndexServesHTML(t *testing.T) {
 	}
 	if !strings.Contains(fullPage, `rpcOn(ws, 'hello', {})`) {
 		t.Fatalf("expected hello RPC to be bound to the socket that opened")
+	}
+	if !strings.Contains(fullPage, `applyChatDelta(delta)`) || !strings.Contains(fullPage, `patchTimelineItem`) || !strings.Contains(fullPage, `msg.type === 'chat_delta'`) {
+		t.Fatalf("expected browser to patch compact chat deltas")
+	}
+	if !strings.Contains(fullPage, `applyStateDelta(delta)`) || !strings.Contains(fullPage, `msg.type === 'state_delta'`) {
+		t.Fatalf("expected browser to patch compact state deltas")
 	}
 	if !strings.Contains(fullPage, `handleSocketOpen(ws)`) || !strings.Contains(fullPage, `ws.readyState === WebSocket.OPEN && !this.connected`) || !strings.Contains(fullPage, `queueMicrotask`) {
 		t.Fatalf("expected open-but-not-connected websocket state to be recovered for Firefox")
@@ -560,8 +640,6 @@ func TestWebSocketSetModelReturnsUpdatedState(t *testing.T) {
 		t.Fatalf("dial websocket: %v", err)
 	}
 	defer conn.Close(websocket.StatusNormalClosure, "")
-
-	_ = readMessage(t, ctx, conn)
 	if err := conn.Write(ctx, websocket.MessageText, []byte(`{"id":1,"method":"set_model","params":{"provider_id":"test","model_id":"next-model"}}`)); err != nil {
 		t.Fatalf("write set_model: %v", err)
 	}
@@ -616,8 +694,6 @@ func TestWebSocketSwitchChatReturnsUpdatedState(t *testing.T) {
 		t.Fatalf("dial websocket: %v", err)
 	}
 	defer conn.Close(websocket.StatusNormalClosure, "")
-
-	_ = readMessage(t, ctx, conn)
 	if err := conn.Write(ctx, websocket.MessageText, []byte(fmt.Sprintf(`{"id":1,"method":"switch_chat","params":{"chat_id":%d}}`, firstID))); err != nil {
 		t.Fatalf("write switch_chat: %v", err)
 	}
@@ -666,8 +742,6 @@ func TestWebSocketDeleteChatReturnsUpdatedState(t *testing.T) {
 		t.Fatalf("dial websocket: %v", err)
 	}
 	defer conn.Close(websocket.StatusNormalClosure, "")
-
-	_ = readMessage(t, ctx, conn)
 	if err := conn.Write(ctx, websocket.MessageText, []byte(fmt.Sprintf(`{"id":1,"method":"delete_chat","params":{"chat_id":%d}}`, deletedID))); err != nil {
 		t.Fatalf("write delete_chat: %v", err)
 	}
@@ -712,8 +786,6 @@ func TestWebSocketSessionManagementCreatesAndSwitchesWorkspaceSessions(t *testin
 		t.Fatalf("dial websocket: %v", err)
 	}
 	defer conn.Close(websocket.StatusNormalClosure, "")
-
-	_ = readMessage(t, ctx, conn)
 	if err := conn.Write(ctx, websocket.MessageText, []byte(`{"id":1,"method":"list_sessions","params":{}}`)); err != nil {
 		t.Fatalf("write list_sessions: %v", err)
 	}
@@ -800,8 +872,6 @@ func TestWebSocketProviderCRUDReturnsProviderState(t *testing.T) {
 		t.Fatalf("dial websocket: %v", err)
 	}
 	defer conn.Close(websocket.StatusNormalClosure, "")
-
-	_ = readMessage(t, ctx, conn)
 	save := `{"id":1,"method":"save_provider","params":{"original_provider_id":"","provider_id":"local","template_id":"openai-compatible","kind":"openai-compatible","name":"Local","base_url":"https://example.invalid/v1","api_key":"secret","model":"local-model","headers":{"X-Test":"yes"}}}`
 	if err := conn.Write(ctx, websocket.MessageText, []byte(save)); err != nil {
 		t.Fatalf("write save_provider: %v", err)
@@ -901,8 +971,6 @@ func TestWebSocketTestProviderReturnsProbeResult(t *testing.T) {
 		t.Fatalf("dial websocket: %v", err)
 	}
 	defer conn.Close(websocket.StatusNormalClosure, "")
-
-	_ = readMessage(t, ctx, conn)
 	request := fmt.Sprintf(`{"id":1,"method":"test_provider","params":{"provider_id":"probe","template_id":"openai-compatible","kind":"openai-compatible","name":"Probe","base_url":%q,"api_key":"secret","model":"alpha","headers":{}}}`, providerServer.URL+"/v1")
 	if err := conn.Write(ctx, websocket.MessageText, []byte(request)); err != nil {
 		t.Fatalf("write test_provider: %v", err)
@@ -950,8 +1018,6 @@ func TestWebSocketComposerCompletionsReturnsSkillsAndReferences(t *testing.T) {
 		t.Fatalf("dial websocket: %v", err)
 	}
 	defer conn.Close(websocket.StatusNormalClosure, "")
-
-	_ = readMessage(t, ctx, conn)
 	if err := conn.Write(ctx, websocket.MessageText, []byte(`{"id":1,"method":"composer_completions","params":{"text":"Use $rev","cursor":8}}`)); err != nil {
 		t.Fatalf("write skill completion request: %v", err)
 	}

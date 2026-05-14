@@ -353,8 +353,89 @@
         },
         onPush(msg) {
           if (msg.type === 'snapshot') this.applyState(msg.payload);
+          if (msg.type === 'state_delta') this.applyStateDelta(msg.payload);
+          if (msg.type === 'chat_delta') this.applyChatDelta(msg.payload);
           if (msg.type === 'chat_update') this.applyChatUpdate(msg.payload);
           if (msg.type === 'theme') { this.theme = msg.payload.theme || 'auto'; writePreference('theme', this.theme); this.applyTheme(); }
+        },
+        applyStateDelta(delta) {
+          if (!delta) return;
+          const scroll = this.transcriptScrollState();
+          const seq = ++this.scrollRestoreSeq;
+          this.state = {...this.state, ...delta};
+          this.applyTheme();
+          this.error = this.state.error || '';
+          this.afterTranscriptDOMUpdate(() => {
+            if (seq === this.scrollRestoreSeq) this.restoreTranscriptScroll(scroll);
+          });
+        },
+        applyChatDelta(delta) {
+          if (!delta) return;
+          const id = Number(delta.chat_id || delta.ChatID || delta.chat?.id || delta.chat?.ID);
+          if (!id) return;
+          const scroll = this.transcriptScrollState();
+          const seq = ++this.scrollRestoreSeq;
+          const snapshots = {...(this.state.snapshots || this.state.Snapshots || {})};
+          const current = snapshots[id] || snapshots[String(id)] || {};
+          const next = {...current};
+          if (delta.chat) next.Chat = delta.chat;
+          if (delta.approvals !== undefined) next.Approvals = delta.approvals;
+          if (delta.queue !== undefined) next.QueuedInputs = delta.queue;
+          if (delta.context !== undefined) next.Context = delta.context;
+          if (delta.status !== undefined) next.Status = delta.status;
+          if (delta.status_text !== undefined) next.StatusText = delta.status_text;
+          if (delta.active !== undefined) next.Active = delta.active;
+          if (delta.item) next.Timeline = this.patchTimelineItem(next.Timeline || next.timeline || [], delta.item);
+          snapshots[id] = next;
+          snapshots[String(id)] = next;
+          this.state.snapshots = snapshots;
+          this.state.Snapshots = snapshots;
+          if (delta.chat) this.patchChatList(delta.chat);
+          this.patchChatStatus(delta);
+          if (id === this.activeChatID()) {
+            this.state.snapshot = next;
+            this.state.Snapshot = next;
+          }
+          if (delta.error) this.error = delta.error;
+          this.afterTranscriptDOMUpdate(() => {
+            if (seq === this.scrollRestoreSeq) this.restoreTranscriptScroll(scroll);
+          });
+        },
+        patchTimelineItem(timeline, item) {
+          const out = Array.isArray(timeline) ? timeline.slice() : [];
+          const id = item.id || item.ID || 0;
+          const seq = item.seq || item.Seq || 0;
+          const idx = out.findIndex(existing => {
+            const existingID = existing.id || existing.ID || 0;
+            const existingSeq = existing.seq || existing.Seq || 0;
+            return (id && existingID === id) || (!id && seq && existingSeq === seq);
+          });
+          if (idx >= 0) out[idx] = item; else out.push(item);
+          return out;
+        },
+        patchChatList(chat) {
+          const id = this.chatID(chat);
+          const chats = (this.state.chats || this.state.Chats || []).slice();
+          const idx = chats.findIndex(existing => this.chatID(existing) === id);
+          if (idx >= 0) chats[idx] = chat; else chats.unshift(chat);
+          this.state.chats = chats;
+          this.state.Chats = chats;
+        },
+        patchChatStatus(delta) {
+          const id = delta.chat_id || delta.ChatID;
+          const statuses = (this.state.chat_statuses || this.state.ChatStatuses || []).slice();
+          const status = {
+            chat_id: id,
+            status: delta.status || 'idle',
+            status_text: delta.status_text || '',
+            busy: !!delta.active,
+            pending_approvals: (delta.approvals || []).length,
+            last_error: delta.error || '',
+          };
+          const idx = statuses.findIndex(existing => (existing.chat_id || existing.ChatID) === id);
+          if (idx >= 0) statuses[idx] = {...statuses[idx], ...status}; else statuses.push(status);
+          this.state.chat_statuses = statuses;
+          this.state.ChatStatuses = statuses;
         },
         applyChatUpdate(update) {
           const snapshot = update?.Snapshot || update?.snapshot;

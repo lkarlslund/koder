@@ -298,7 +298,6 @@ func (c *Controller) Subscribe() (<-chan Event, func()) {
 	c.nextSub++
 	c.subs[id] = ch
 	c.subMu.Unlock()
-	c.publishTo(ch, "snapshot", c.State())
 	return ch, func() {
 		c.subMu.Lock()
 		if existing, ok := c.subs[id]; ok {
@@ -1599,7 +1598,24 @@ func (c *Controller) forwardRuntime(chatID int64, updates <-chan chat.Update) {
 		}
 		c.refreshPlanningState(context.Background(), sessionID)
 		c.broadcast("chat_update", update)
-		c.broadcast("snapshot", c.State())
+		if runtimeUpdateNeedsStateSnapshot(update) {
+			c.broadcast("snapshot", c.State())
+		}
+	}
+}
+
+func runtimeUpdateNeedsStateSnapshot(update chat.Update) bool {
+	if update.QueueChanged || update.ApprovalsChanged {
+		return true
+	}
+	if update.Event == nil {
+		return false
+	}
+	switch update.Event.Kind {
+	case domain.EventKindToolResult, domain.EventKindApprovalAsk, domain.EventKindApprovalReply, domain.EventKindChatTitle, domain.EventKindSessionTitle, domain.EventKindError, domain.EventKindMessageDone:
+		return true
+	default:
+		return false
 	}
 }
 

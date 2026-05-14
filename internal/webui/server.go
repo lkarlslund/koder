@@ -24,6 +24,8 @@ import (
 	"github.com/coder/websocket"
 
 	"github.com/lkarlslund/koder/internal/attachment"
+	"github.com/lkarlslund/koder/internal/chat"
+	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/uicore"
 )
 
@@ -233,10 +235,22 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	defer unsub()
 	done := make(chan struct{})
 	var writeMu sync.Mutex
+	var baselineMu sync.RWMutex
+	baselineEstablished := false
 	go func() {
 		defer close(done)
 		for event := range events {
-			if err := writeJSON(ctx, conn, &writeMu, event); err != nil {
+			baselineMu.RLock()
+			ready := baselineEstablished
+			baselineMu.RUnlock()
+			if !ready {
+				continue
+			}
+			webEvent, ok := webEventFromControllerEvent(event)
+			if !ok {
+				continue
+			}
+			if err := writeJSON(ctx, conn, &writeMu, webEvent); err != nil {
 				return
 			}
 		}
@@ -258,6 +272,11 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		}
 		if err := writeJSON(ctx, conn, &writeMu, resp); err != nil {
 			return
+		}
+		if err == nil && rpcEstablishesSnapshotBaseline(req.Method, result) {
+			baselineMu.Lock()
+			baselineEstablished = true
+			baselineMu.Unlock()
 		}
 		select {
 		case <-done:
@@ -464,6 +483,141 @@ func (s *Server) handleRPC(ctx context.Context, method string, params json.RawMe
 	default:
 		return nil, fmt.Errorf("unknown method %q", method)
 	}
+}
+
+type stateDelta struct {
+	Session      any    `json:"session,omitempty"`
+	Sessions     any    `json:"sessions,omitempty"`
+	Chats        any    `json:"chats,omitempty"`
+	ChatStatuses any    `json:"chat_statuses,omitempty"`
+	ActiveChatID int64  `json:"active_chat_id,omitempty"`
+	Permissions  any    `json:"permissions,omitempty"`
+	Milestones   any    `json:"milestones,omitempty"`
+	Todos        any    `json:"todos,omitempty"`
+	TodosByRef   any    `json:"todos_by_milestone,omitempty"`
+	Workspace    any    `json:"workspace_status,omitempty"`
+	Theme        string `json:"theme,omitempty"`
+	Workdir      string `json:"workdir,omitempty"`
+	Error        string `json:"error,omitempty"`
+}
+
+type chatDelta struct {
+	ChatID            int64                `json:"chat_id"`
+	Chat              any                  `json:"chat,omitempty"`
+	Item              *domain.TimelineItem `json:"item,omitempty"`
+	Approvals         any                  `json:"approvals,omitempty"`
+	Queue             any                  `json:"queue,omitempty"`
+	Context           any                  `json:"context,omitempty"`
+	Status            string               `json:"status,omitempty"`
+	StatusText        string               `json:"status_text,omitempty"`
+	Active            bool                 `json:"active"`
+	TranscriptChanged bool                 `json:"transcript_changed,omitempty"`
+	QueueChanged      bool                 `json:"queue_changed,omitempty"`
+	StatusChanged     bool                 `json:"status_changed,omitempty"`
+	ContextChanged    bool                 `json:"context_changed,omitempty"`
+	ApprovalsChanged  bool                 `json:"approvals_changed,omitempty"`
+	Error             string               `json:"error,omitempty"`
+}
+
+func webEventFromControllerEvent(event uicore.Event) (uicore.Event, bool) {
+	switch event.Type {
+	case "chat_update":
+		update, ok := event.Payload.(chat.Update)
+		if !ok {
+			return uicore.Event{}, false
+		}
+		return uicore.Event{Seq: event.Seq, Type: "chat_delta", Payload: chatDeltaFromUpdate(update)}, true
+	case "snapshot":
+		state, ok := event.Payload.(uicore.State)
+		if !ok {
+			return uicore.Event{}, false
+		}
+		return uicore.Event{Seq: event.Seq, Type: "state_delta", Payload: stateDeltaFromState(state)}, true
+	default:
+		return event, true
+	}
+}
+
+func chatDeltaFromUpdate(update chat.Update) chatDelta {
+	snapshot := update.Snapshot
+	delta := chatDelta{
+		ChatID:            snapshot.Chat.ID,
+		Chat:              snapshot.Chat,
+		Approvals:         snapshot.Approvals,
+		Queue:             snapshot.QueuedInputs,
+		Context:           snapshot.Context,
+		Status:            string(snapshot.Status),
+		StatusText:        snapshot.StatusText,
+		Active:            snapshot.Active,
+		TranscriptChanged: update.TranscriptChanged,
+		QueueChanged:      update.QueueChanged,
+		StatusChanged:     update.StatusChanged,
+		ContextChanged:    update.ContextChanged,
+		ApprovalsChanged:  update.ApprovalsChanged,
+	}
+	if delta.Status == "" && update.Status != "" {
+		delta.Status = string(update.Status)
+	}
+	if delta.StatusText == "" {
+		delta.StatusText = update.StatusText
+	}
+	if update.Event != nil && update.Event.Err != nil {
+		delta.Error = update.Event.Err.Error()
+	}
+	if item, ok := changedTimelineItem(update); ok {
+		delta.Item = &item
+	}
+	return delta
+}
+
+func changedTimelineItem(update chat.Update) (domain.TimelineItem, bool) {
+	if update.Event != nil && update.Event.Item.ID != 0 {
+		return update.Event.Item, true
+	}
+	if !update.TranscriptChanged {
+		return domain.TimelineItem{}, false
+	}
+	timeline := update.Snapshot.Timeline
+	if len(timeline) == 0 {
+		return domain.TimelineItem{}, false
+	}
+	return timeline[len(timeline)-1], true
+}
+
+func stateDeltaFromState(state uicore.State) stateDelta {
+	return stateDelta{
+		Session:      state.Session,
+		Sessions:     state.Sessions,
+		Chats:        state.Chats,
+		ChatStatuses: state.ChatStatuses,
+		ActiveChatID: state.ActiveChatID,
+		Permissions:  state.Permissions,
+		Milestones:   state.Milestones,
+		Todos:        state.Todos,
+		TodosByRef:   state.TodosByRef,
+		Workspace:    state.Workspace,
+		Theme:        state.Theme,
+		Workdir:      state.Workdir,
+		Error:        state.Error,
+	}
+}
+
+func rpcEstablishesSnapshotBaseline(method string, result any) bool {
+	method = strings.TrimSpace(method)
+	if method == "hello" || method == "get_state" {
+		return true
+	}
+	if _, ok := result.(uicore.State); ok {
+		return true
+	}
+	if hello, ok := result.(rpcHello); ok && hello.State != nil {
+		return true
+	}
+	if value, ok := result.(map[string]any); ok {
+		_, ok = value["state"]
+		return ok
+	}
+	return false
 }
 
 type rpcHello struct {
