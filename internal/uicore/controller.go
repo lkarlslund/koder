@@ -232,6 +232,12 @@ func (c *Controller) State() State {
 		Workdir:      c.workdir,
 		Error:        c.lastErr,
 	}
+	for idx := range state.Chats {
+		if state.Chats[idx].ID == c.chat.ID {
+			state.Chats[idx] = c.chat
+			break
+		}
+	}
 	if c.runtime != nil {
 		snapshot := c.runtime.Snapshot()
 		state.Snapshot = snapshot
