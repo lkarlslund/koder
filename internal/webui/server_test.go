@@ -215,6 +215,44 @@ func TestWebSocketChatUpdateIsCompactedToSingleItemDelta(t *testing.T) {
 	}
 }
 
+func TestWebSocketStreamingDeltaUsesMutatedSnapshotItem(t *testing.T) {
+	itemID := domain.ID("019aa000-0000-7000-8000-000000000043")
+	emptyEventItem := domain.TimelineItem{
+		ID:      itemID,
+		ChatID:  "chat-7",
+		Seq:     2,
+		Content: domain.AssistantMessage{},
+	}
+	streamedSnapshotItem := emptyEventItem
+	streamedSnapshotItem.Content = domain.AssistantMessage{Text: "partial stream"}
+	update := chat.Update{
+		Event: &domain.Event{
+			Kind: domain.EventKindMessageDelta,
+			Text: "partial stream",
+			Item: emptyEventItem,
+		},
+		Snapshot: chat.Snapshot{
+			Chat:     domain.Chat{ID: "chat-7", SessionID: "session-1", Title: "Chat"},
+			Timeline: []domain.TimelineItem{streamedSnapshotItem},
+			Status:   chat.StatusStreamingResponse,
+			Active:   true,
+		},
+		TranscriptChanged: true,
+		StatusChanged:     true,
+	}
+	delta := chatDeltaFromUpdate(update)
+	if delta.Item == nil {
+		t.Fatal("expected streaming chat delta item")
+	}
+	assistant, ok := delta.Item.Content.(domain.AssistantMessage)
+	if !ok {
+		t.Fatalf("expected assistant item, got %T", delta.Item.Content)
+	}
+	if assistant.Text != "partial stream" {
+		t.Fatalf("expected mutated snapshot text in streaming delta, got %q", assistant.Text)
+	}
+}
+
 func TestWebSocketSnapshotEventIsCompactedToStateDelta(t *testing.T) {
 	state := uicore.State{
 		Session:      domain.Session{ID: "session-1", Title: "Session"},

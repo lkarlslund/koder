@@ -572,6 +572,9 @@ func chatDeltaFromUpdate(update chat.Update) chatDelta {
 
 func changedTimelineItem(update chat.Update) (domain.TimelineItem, bool) {
 	if update.Event != nil && update.Event.Item.ID != "" {
+		if item, ok := snapshotTimelineItem(update.Snapshot.Timeline, update.Event.Item.ID); ok {
+			return item, true
+		}
 		return update.Event.Item, true
 	}
 	if !update.TranscriptChanged {
@@ -582,6 +585,15 @@ func changedTimelineItem(update chat.Update) (domain.TimelineItem, bool) {
 		return domain.TimelineItem{}, false
 	}
 	return timeline[len(timeline)-1], true
+}
+
+func snapshotTimelineItem(timeline []domain.TimelineItem, id domain.ID) (domain.TimelineItem, bool) {
+	for idx := len(timeline) - 1; idx >= 0; idx-- {
+		if timeline[idx].ID == id {
+			return timeline[idx], true
+		}
+	}
+	return domain.TimelineItem{}, false
 }
 
 func stateDeltaFromState(state uicore.State) stateDelta {
