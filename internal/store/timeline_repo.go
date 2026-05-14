@@ -39,6 +39,13 @@ func (s *Store) AttachToolResult(ctx context.Context, chatID int64, toolCallID s
 		call.Result = &result
 		call.Error = nil
 		call.Status = domain.ToolStatusDone
+		if call.Approval != nil {
+			if result.Status == domain.ToolResultStatusDenied {
+				call.Approval.Status = domain.ApprovalStatusDenied
+			} else {
+				call.Approval.Status = domain.ApprovalStatusApproved
+			}
+		}
 		if call.CompletedAt.IsZero() {
 			call.CompletedAt = time.Now().UTC()
 		}

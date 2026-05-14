@@ -242,8 +242,11 @@ func TestIndexServesHTML(t *testing.T) {
 	if strings.Contains(fullPage, `case 'bash': return command ? 'Run ' + command`) || strings.Contains(fullPage, `const title = firstValue(data, ['command', 'Command'`) {
 		t.Fatalf("expected command tools to render the command once, not in title and result header")
 	}
-	if !strings.Contains(fullPage, `case 'bash': return 'Run command'`) || !strings.Contains(fullPage, `return renderCompactBlock('Output'`) {
-		t.Fatalf("expected bash tool rendering to show a generic title and output block")
+	if !strings.Contains(fullPage, `case 'bash': return toolStatus(tool) === 'done' && command ? 'Ran ' + command : 'Run command'`) || !strings.Contains(fullPage, `return renderCompactBlock('Output'`) {
+		t.Fatalf("expected completed bash tool rendering to show Ran command and compact output")
+	}
+	if !strings.Contains(fullPage, `String((tool && tool.tool) || '') === 'bash' && toolStatus(tool) === 'done'`) {
+		t.Fatalf("expected completed bash tool rendering to avoid repeating the command preview")
 	}
 	if !strings.Contains(fullPage, `if (args.command) values.push(args.command)`) || !strings.Contains(fullPage, `function execResultLines(data, fallback)`) {
 		t.Fatalf("expected command preview and exec result helpers")
@@ -352,6 +355,9 @@ func TestIndexServesHTML(t *testing.T) {
 	}
 	if !strings.Contains(fullPage, `toolApprovalPending(tool)`) || !strings.Contains(fullPage, `rpc('approve', {id: toolApprovalID(tool)})`) || !strings.Contains(fullPage, `rpc('deny', {id: toolApprovalID(tool)})`) {
 		t.Fatalf("expected pending tool approval cards to expose approve and deny actions inline")
+	}
+	if !strings.Contains(fullPage, `currentToolStatus === 'pending'`) {
+		t.Fatalf("expected approval actions to hide once the pushed tool turn is no longer pending")
 	}
 	if !strings.Contains(fullPage, `this.state.chat_statuses`) || !strings.Contains(fullPage, `waiting_llm: 'Waiting for LLM'`) {
 		t.Fatalf("expected chat sidebar status helpers for all chats")

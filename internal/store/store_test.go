@@ -529,6 +529,61 @@ func TestDeleteChatRemovesChatTimelineAndApprovals(t *testing.T) {
 	}
 }
 
+func TestAttachToolResultUpdatesApprovalStatus(t *testing.T) {
+	for _, backend := range []string{BackendPebble, BackendJSONFS} {
+		t.Run(backend, func(t *testing.T) {
+			st := openTestStore(t, backend)
+
+			session, err := st.CreateSession(context.Background(), "test", "provider", "model", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			chat, err := st.DefaultChat(context.Background(), session.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := st.AppendAssistantToolCalls(context.Background(), chat.ID, []domain.ToolCall{{
+				ToolCallID: "call_1",
+				Tool:       domain.ToolKindBash,
+				Args:       map[string]string{"command": "echo hi"},
+				Status:     domain.ToolStatusPending,
+			}}, "", domain.Usage{}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := st.AttachToolApproval(context.Background(), chat.ID, "call_1", domain.ApprovalRequest{
+				ID:     42,
+				Status: domain.ApprovalStatusPending,
+				Body:   "run echo hi",
+			}); err != nil {
+				t.Fatal(err)
+			}
+
+			item, err := st.AttachToolResult(context.Background(), chat.ID, "call_1", domain.ToolResult{
+				Text:   "hi\n",
+				Status: domain.ToolResultStatusOK,
+				Data:   domain.BashStoredResult{Command: "echo hi", Output: "hi\n"},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			assistant, ok := item.Content.(domain.AssistantMessage)
+			if !ok {
+				t.Fatalf("item content = %T", item.Content)
+			}
+			call := assistant.ToolByID("call_1")
+			if call == nil {
+				t.Fatal("tool call missing")
+			}
+			if call.Status != domain.ToolStatusDone {
+				t.Fatalf("tool status = %q", call.Status)
+			}
+			if call.Approval == nil || call.Approval.Status != domain.ApprovalStatusApproved {
+				t.Fatalf("approval = %#v, want approved", call.Approval)
+			}
+		})
+	}
+}
+
 func TestAddSessionPermissionRulePersistsAndReplacesByKey(t *testing.T) {
 	for _, backend := range []string{BackendPebble, BackendJSONFS} {
 		t.Run(backend, func(t *testing.T) {

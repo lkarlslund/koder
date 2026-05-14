@@ -71,6 +71,9 @@
       const result = (tool && tool.result) || {};
       return firstValue(result, ['text', 'Text']) || firstValue(result, ['diff', 'Diff']);
     }
+    function toolStatus(tool) {
+      return String((tool && (tool.status || tool.Status)) || '').toLowerCase();
+    }
     function toolResultHeader(title) {
       return '<div class="tool-result-header">' + escapeHTML(title) + '</div>';
     }
@@ -100,12 +103,13 @@
       const data = toolData(tool);
       const args = toolArgs(tool);
       const path = firstValue(data, ['path', 'Path']) || firstValue(args, ['path']);
+      const command = firstValue(data, ['command', 'Command']) || firstValue(args, ['command']);
       switch (kind) {
         case 'read': return path ? 'Read ' + path : 'Read';
         case 'write': return path ? 'Write ' + path : 'Write file';
         case 'edit': return path ? 'Edit ' + path : 'Edit file';
         case 'apply_patch': return 'Apply patch';
-        case 'bash': return 'Run command';
+        case 'bash': return toolStatus(tool) === 'done' && command ? 'Ran ' + command : 'Run command';
         case 'exec_command': return 'Start exec';
         case 'exec_status': return 'Exec status';
         case 'exec_list': return 'Exec sessions';
@@ -122,6 +126,7 @@
     }
     function toolPreviewText(tool) {
       const args = toolArgs(tool);
+      if (String((tool && tool.tool) || '') === 'bash' && toolStatus(tool) === 'done') return '';
       const values = [];
       if (args.command) values.push(args.command);
       for (const key of ['path', 'pattern', 'query', 'url', 'include']) {
@@ -443,7 +448,8 @@
           const approval = this.toolApproval(tool);
           if (!approval) return false;
           const status = String(approval.status || approval.Status || tool?.status || tool?.Status || '').toLowerCase();
-          return this.toolApprovalID(tool) > 0 && (!status || status === 'pending');
+          const currentToolStatus = toolStatus(tool);
+          return this.toolApprovalID(tool) > 0 && (!status || status === 'pending') && (!currentToolStatus || currentToolStatus === 'pending');
         },
         toolResultHTML(tool) { return renderToolResult(tool); },
         resizeComposer() {
