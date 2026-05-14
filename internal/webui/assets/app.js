@@ -432,7 +432,7 @@
         },
         applyChatDelta(delta) {
           if (!delta) return;
-          const id = Number(delta.chat_id || delta.ChatID || delta.chat?.id || delta.chat?.ID);
+          const id = String(delta.chat_id || delta.ChatID || delta.chat?.id || delta.chat?.ID || '').trim();
           if (!id) return;
           const scroll = this.transcriptScrollState();
           const seq = ++this.scrollRestoreSeq;
@@ -589,7 +589,7 @@
         restoreSelectedChat() {
           if (this.restoreChatAttempted) return false;
           const raw = readPreference(this.selectedChatPreferenceName(), '');
-          const id = Number(raw);
+          const id = String(raw || '').trim();
           if (!id) { this.restoreChatAttempted = true; return false; }
           const exists = (this.state.chats || this.state.Chats || []).some(chat => this.chatID(chat) === id);
           this.restoreChatAttempted = true;

@@ -378,6 +378,9 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `applyChatDelta(delta)`) || !strings.Contains(fullPage, `patchTimelineItem`) || !strings.Contains(fullPage, `msg.type === 'chat_delta'`) {
 		t.Fatalf("expected browser to patch compact chat deltas")
 	}
+	if !strings.Contains(fullPage, `const id = String(delta.chat_id || delta.ChatID || delta.chat?.id || delta.chat?.ID || '').trim()`) || strings.Contains(fullPage, `const id = Number(delta.chat_id`) {
+		t.Fatalf("expected browser chat deltas to keep UUID chat ids as strings")
+	}
 	if !strings.Contains(fullPage, `if (!id) throw new Error('timeline delta missing item id')`) || !strings.Contains(fullPage, `return existingID === id`) {
 		t.Fatalf("expected browser timeline patching to require stable item ids")
 	}
@@ -398,6 +401,9 @@ func TestIndexServesHTML(t *testing.T) {
 	}
 	if !strings.Contains(fullPage, `connectionLabel()`) || !strings.Contains(fullPage, `return 'connecting'`) {
 		t.Fatalf("expected connection badge to show connecting instead of offline during reconnect")
+	}
+	if !strings.Contains(fullPage, `const id = String(raw || '').trim()`) || strings.Contains(fullPage, `const id = Number(raw)`) {
+		t.Fatalf("expected selected chat restore to keep UUID chat ids as strings")
 	}
 	if !strings.Contains(fullPage, `connectWatchdog`) || !strings.Contains(fullPage, `WebSocket.CONNECTING`) || !strings.Contains(fullPage, `ws.close()`) {
 		t.Fatalf("expected stuck websocket handshakes to be closed and retried")
