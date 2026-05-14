@@ -301,6 +301,9 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `connectWatchdog`) || !strings.Contains(fullPage, `WebSocket.CONNECTING`) || !strings.Contains(fullPage, `ws.close()`) {
 		t.Fatalf("expected stuck websocket handshakes to be closed and retried")
 	}
+	if !strings.Contains(fullPage, `}, 500);`) || !strings.Contains(fullPage, `Math.min(1000`) || !strings.Contains(fullPage, `reconnectDelay: 100`) {
+		t.Fatalf("expected reconnect timing to stay below one second")
+	}
 	if !strings.Contains(fullPage, `window.addEventListener('online'`) || !strings.Contains(fullPage, `window.addEventListener('focus'`) || !strings.Contains(fullPage, `visibilitychange`) {
 		t.Fatalf("expected browser to reconnect immediately when page becomes active or network returns")
 	}

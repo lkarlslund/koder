@@ -1296,7 +1296,7 @@ func (c *Controller) chatStatuses(ctx context.Context, sessionID int64) map[int6
 }
 
 func (c *Controller) refreshChatStatuses(ctx context.Context, sessionID int64) bool {
-	statuses := c.chatStatuses(ctx, sessionID)
+	statuses := c.cachedChatStatuses(ctx, sessionID)
 	if status, ok := c.activeChatSidebarStatus(sessionID); ok {
 		statuses[status.ChatID] = status
 	}
@@ -1310,6 +1310,30 @@ func (c *Controller) refreshChatStatuses(ctx context.Context, sessionID int64) b
 	}
 	c.statuses = statuses
 	return true
+}
+
+func (c *Controller) cachedChatStatuses(ctx context.Context, sessionID int64) map[int64]ChatSidebarStatus {
+	c.mu.RLock()
+	cached := make(map[int64]ChatSidebarStatus, len(c.chats))
+	for _, item := range c.chats {
+		status, ok := c.statuses[item.ID]
+		if !ok {
+			status = idleChatSidebarStatus(item.ID)
+		}
+		cached[item.ID] = status
+	}
+	c.mu.RUnlock()
+	if len(cached) > 0 || c.store == nil || sessionID == 0 {
+		return cached
+	}
+	chats, err := c.store.ListChats(ctx, sessionID)
+	if err != nil {
+		return cached
+	}
+	for _, item := range chats {
+		cached[item.ID] = idleChatSidebarStatus(item.ID)
+	}
+	return cached
 }
 
 func (c *Controller) chatStatusesLocked() []ChatSidebarStatus {

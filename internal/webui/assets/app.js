@@ -209,7 +209,7 @@
     }
     function koderApp() {
       return {
-        ws: null, reconnectTimer: null, connectWatchdog: null, reconnectDelay: 250, nextID: 1, pending: {}, state: {}, connected: false, connecting: true, draft: '', showPermissions: false,
+        ws: null, reconnectTimer: null, connectWatchdog: null, reconnectDelay: 100, nextID: 1, pending: {}, state: {}, connected: false, connecting: true, draft: '', showPermissions: false,
         showModels: false, modelLoading: false, modelQuery: '', modelOptions: [],
         showSessions: false, sessionLoading: false, sessionState: {active_id: 0, workdir: '', sessions: []}, newSessionTitle: '',
         showProviders: false, providerState: {catalog: [], providers: [], drafts: {}}, providerDraft: null, providerHeadersText: '{}', providerStatus: '', providerStatusKind: 'secondary', providerTesting: false, providerSaving: false,
@@ -273,7 +273,7 @@
           if (this.connectWatchdog) clearTimeout(this.connectWatchdog);
           this.connectWatchdog = setTimeout(() => {
             if (this.ws === ws && ws.readyState === WebSocket.CONNECTING) ws.close();
-          }, 1500);
+          }, 500);
           ws.onopen = () => {
             if (this.ws !== ws) return;
             if (this.connectWatchdog) {
@@ -282,7 +282,7 @@
             }
             this.connecting = false;
             this.connected = true;
-            this.reconnectDelay = 250;
+            this.reconnectDelay = 100;
             this.rpcOn(ws, 'hello', {}).then(hello => this.applyHello(hello)).catch(() => {});
           };
           ws.onerror = () => {
@@ -311,7 +311,7 @@
         scheduleReconnect() {
           if (this.reconnectTimer) return;
           const delay = this.reconnectDelay;
-          this.reconnectDelay = Math.min(2000, Math.round(this.reconnectDelay * 1.6));
+          this.reconnectDelay = Math.min(1000, Math.round(this.reconnectDelay * 1.6));
           this.reconnectTimer = setTimeout(() => {
             this.reconnectTimer = null;
             this.connect();
