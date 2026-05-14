@@ -39,19 +39,20 @@ type Event struct {
 
 // State is the renderer-neutral UI snapshot consumed by web and TUI renderers.
 type State struct {
-	Session      domain.Session      `json:"session"`
-	Sessions     []domain.Session    `json:"sessions"`
-	Chats        []domain.Chat       `json:"chats"`
-	ChatStatuses []ChatSidebarStatus `json:"chat_statuses"`
-	ActiveChatID int64               `json:"active_chat_id"`
-	Permissions  PermissionsState    `json:"permissions"`
-	Snapshot     chat.Snapshot       `json:"snapshot"`
-	Milestones   store.MilestonePlan `json:"milestones"`
-	Todos        []store.TodoItem    `json:"todos"`
-	Workspace    workspacepkg.Status `json:"workspace_status"`
-	Theme        string              `json:"theme"`
-	Workdir      string              `json:"workdir"`
-	Error        string              `json:"error,omitempty"`
+	Session      domain.Session              `json:"session"`
+	Sessions     []domain.Session            `json:"sessions"`
+	Chats        []domain.Chat               `json:"chats"`
+	ChatStatuses []ChatSidebarStatus         `json:"chat_statuses"`
+	ActiveChatID int64                       `json:"active_chat_id"`
+	Permissions  PermissionsState            `json:"permissions"`
+	Snapshot     chat.Snapshot               `json:"snapshot"`
+	Milestones   store.MilestonePlan         `json:"milestones"`
+	Todos        []store.TodoItem            `json:"todos"`
+	TodosByRef   map[string][]store.TodoItem `json:"todos_by_milestone"`
+	Workspace    workspacepkg.Status         `json:"workspace_status"`
+	Theme        string                      `json:"theme"`
+	Workdir      string                      `json:"workdir"`
+	Error        string                      `json:"error,omitempty"`
 }
 
 // ChatSidebarStatus is the renderer-neutral run state for one chat in the sidebar.
@@ -161,19 +162,20 @@ type Controller struct {
 	agent   *agent.Engine
 	workdir string
 
-	mu        sync.RWMutex
-	session   domain.Session
-	sessions  []domain.Session
-	chats     []domain.Chat
-	statuses  map[int64]ChatSidebarStatus
-	chat      domain.Chat
-	runtime   *chat.Chat
-	unsub     func()
-	milestone store.MilestonePlan
-	todos     []store.TodoItem
-	workspace workspacepkg.Status
-	theme     string
-	lastErr   string
+	mu         sync.RWMutex
+	session    domain.Session
+	sessions   []domain.Session
+	chats      []domain.Chat
+	statuses   map[int64]ChatSidebarStatus
+	chat       domain.Chat
+	runtime    *chat.Chat
+	unsub      func()
+	milestone  store.MilestonePlan
+	todos      []store.TodoItem
+	todosByRef map[string][]store.TodoItem
+	workspace  workspacepkg.Status
+	theme      string
+	lastErr    string
 
 	subMu   sync.Mutex
 	nextSub int
@@ -227,6 +229,7 @@ func (c *Controller) State() State {
 		Permissions:  c.permissionsStateLocked(),
 		Milestones:   c.milestone,
 		Todos:        slices.Clone(c.todos),
+		TodosByRef:   cloneTodosByRef(c.todosByRef),
 		Workspace:    c.workspace,
 		Theme:        c.theme,
 		Workdir:      c.workdir,
@@ -1193,7 +1196,7 @@ func (c *Controller) loadSession(ctx context.Context, sessionID, chatID int64) e
 	if err != nil {
 		return err
 	}
-	milestone, todos := c.planningState(ctx, session.ID)
+	milestone, todos, todosByRef := c.planningState(ctx, session.ID)
 	workspaceStatus, _ := workspacepkg.Snapshot(ctx, c.workdir)
 	updates, unsub := rt.Subscribe()
 	statuses := c.chatStatuses(ctx, session.ID)
@@ -1212,6 +1215,7 @@ func (c *Controller) loadSession(ctx context.Context, sessionID, chatID int64) e
 	c.statuses = statuses
 	c.milestone = milestone
 	c.todos = todos
+	c.todosByRef = todosByRef
 	c.workspace = workspaceStatus
 	c.lastErr = ""
 	c.mu.Unlock()
@@ -1258,20 +1262,40 @@ func (c *Controller) sessionInWorkspace(session domain.Session) bool {
 	return normalizedWorkspacePath(session.CWD) == workdir || normalizedWorkspacePath(session.ProjectRoot) == workdir
 }
 
-func (c *Controller) planningState(ctx context.Context, sessionID int64) (store.MilestonePlan, []store.TodoItem) {
+func (c *Controller) planningState(ctx context.Context, sessionID int64) (store.MilestonePlan, []store.TodoItem, map[string][]store.TodoItem) {
 	plan, err := c.store.GetMilestonePlan(ctx, sessionID)
 	if err != nil {
-		return store.MilestonePlan{}, nil
+		return store.MilestonePlan{}, nil, nil
+	}
+	todosByRef := make(map[string][]store.TodoItem, len(plan.Milestones))
+	for _, milestone := range plan.Milestones {
+		ref := strings.TrimSpace(milestone.Ref)
+		if ref == "" {
+			continue
+		}
+		todos, err := c.store.ListTodos(ctx, sessionID, ref)
+		if err != nil {
+			todosByRef[ref] = nil
+			continue
+		}
+		todosByRef[ref] = slices.Clone(todos)
 	}
 	active, ok := tools.ActiveMilestone(plan)
 	if !ok {
-		return plan, nil
+		return plan, nil, todosByRef
 	}
-	todos, err := c.store.ListTodos(ctx, sessionID, active.Ref)
-	if err != nil {
-		return plan, nil
+	return plan, slices.Clone(todosByRef[active.Ref]), todosByRef
+}
+
+func cloneTodosByRef(in map[string][]store.TodoItem) map[string][]store.TodoItem {
+	if len(in) == 0 {
+		return nil
 	}
-	return plan, todos
+	out := make(map[string][]store.TodoItem, len(in))
+	for ref, todos := range in {
+		out[ref] = slices.Clone(todos)
+	}
+	return out
 }
 
 func (c *Controller) chatStatuses(ctx context.Context, sessionID int64) map[int64]ChatSidebarStatus {
@@ -1538,7 +1562,7 @@ func (c *Controller) refreshPlanningState(ctx context.Context, sessionID int64) 
 	if sessionID == 0 {
 		return
 	}
-	milestone, todos := c.planningState(ctx, sessionID)
+	milestone, todos, todosByRef := c.planningState(ctx, sessionID)
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.session.ID != sessionID {
@@ -1546,6 +1570,7 @@ func (c *Controller) refreshPlanningState(ctx context.Context, sessionID int64) 
 	}
 	c.milestone = milestone
 	c.todos = todos
+	c.todosByRef = todosByRef
 }
 
 func (c *Controller) monitorWorkspace(ctx context.Context) {

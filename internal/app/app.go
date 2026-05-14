@@ -2719,6 +2719,8 @@ func sidebarMilestoneStatusGlyph(status domain.MilestoneStatus) string {
 		return "◐"
 	case domain.MilestoneStatusBlocked:
 		return "!"
+	case domain.MilestoneStatusCancelled:
+		return "×"
 	default:
 		return "○"
 	}

@@ -107,35 +107,28 @@
         <template x-if="milestoneItems().length === 0">
           <div class="text-secondary">None</div>
         </template>
-        <div class="list-group list-group-flush mt-2" x-show="milestoneItems().length > 0">
+        <div class="planning-tree mt-2" x-show="milestoneItems().length > 0">
           <template x-for="milestone in milestoneItems()" :key="milestoneRef(milestone)">
-            <div class="list-group-item bg-transparent px-0 py-2">
-              <div class="d-flex align-items-start justify-content-between gap-2">
-                <div class="text-break">
-                  <span class="fw-semibold" x-text="milestoneTitle(milestone)"></span>
-                  <span class="small text-secondary" x-text="' ' + milestoneRef(milestone)"></span>
-                </div>
-                <span class="badge" :class="milestoneBadge(milestoneStatus(milestone))" x-text="milestoneStatus(milestone)"></span>
-              </div>
-              <div class="small text-secondary mt-1" x-show="milestoneNotes(milestone)" x-text="milestoneNotes(milestone)"></div>
-            </div>
-          </template>
-        </div>
-      </div>
-      <div class="mb-3">
-        <div class="small text-secondary">Todos</div>
-        <template x-if="todoItems().length === 0">
-          <div class="text-secondary">None</div>
-        </template>
-        <div class="list-group list-group-flush mt-2" x-show="todoItems().length > 0">
-          <template x-for="todo in todoItems()" :key="todo.ID || todo.id">
-            <div class="list-group-item bg-transparent px-0 py-2">
-              <div class="d-flex align-items-start gap-2">
-                <i class="bi mt-1" :class="todoIcon(todoStatus(todo))"></i>
-                <div class="text-break">
-                  <div x-text="todo.Content || todo.content"></div>
-                  <div class="small text-secondary" x-text="todoStatus(todo)"></div>
-                </div>
+            <div class="planning-node">
+              <button type="button" class="planning-row" :title="milestoneNotes(milestone)" @click="toggleMilestone(milestoneRef(milestone))">
+                <i class="bi planning-expander" :class="milestoneExpanded(milestoneRef(milestone)) ? 'bi-dash-square' : 'bi-plus-square'"></i>
+                <i class="bi planning-status" :class="milestoneIcon(milestoneStatus(milestone))"></i>
+                <span class="planning-title text-truncate" x-text="milestoneTitle(milestone)"></span>
+                <span class="planning-ref" x-text="milestoneRef(milestone)"></span>
+                <span class="planning-counts" x-text="milestoneTodoSummary(milestone)"></span>
+                <span class="badge planning-badge" :class="milestoneBadge(milestoneStatus(milestone))" x-text="milestoneStatus(milestone)"></span>
+              </button>
+              <div class="planning-children" x-show="milestoneExpanded(milestoneRef(milestone))" x-transition>
+                <template x-if="todoItemsForMilestone(milestone).length === 0">
+                  <div class="planning-empty">No todos</div>
+                </template>
+                <template x-for="todo in todoItemsForMilestone(milestone)" :key="todo.ID || todo.id">
+                  <div class="planning-todo">
+                    <i class="bi" :class="todoIcon(todoStatus(todo))"></i>
+                    <span class="text-truncate" x-text="todo.Content || todo.content"></span>
+                    <span class="planning-todo-status" x-text="todoStatus(todo)"></span>
+                  </div>
+                </template>
               </div>
             </div>
           </template>

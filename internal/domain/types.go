@@ -154,6 +154,7 @@ const (
 	MilestoneStatusExecuting   MilestoneStatus = "executing"
 	MilestoneStatusCompleted   MilestoneStatus = "completed"
 	MilestoneStatusBlocked     MilestoneStatus = "blocked"
+	MilestoneStatusCancelled   MilestoneStatus = "cancelled"
 )
 
 type TodoStatus string

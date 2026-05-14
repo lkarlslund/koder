@@ -373,8 +373,11 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `milestoneItems()`) {
 		t.Fatalf("expected sidebar to render milestones")
 	}
-	if !strings.Contains(fullPage, `todoItems()`) {
-		t.Fatalf("expected sidebar to render todos")
+	if !strings.Contains(fullPage, `todoItemsForMilestone(milestone)`) {
+		t.Fatalf("expected sidebar to render todos as milestone children")
+	}
+	if !strings.Contains(fullPage, `milestoneTodoSummary(milestone)`) {
+		t.Fatalf("expected collapsed milestones to show todo counts")
 	}
 	if !strings.Contains(fullPage, `gitStatus()`) {
 		t.Fatalf("expected sidebar to render git status")

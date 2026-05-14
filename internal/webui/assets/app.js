@@ -214,7 +214,7 @@
         showSessions: false, sessionLoading: false, sessionState: {active_id: 0, workdir: '', sessions: []}, newSessionTitle: '',
         showProviders: false, providerState: {catalog: [], providers: [], drafts: {}}, providerDraft: null, providerHeadersText: '{}', providerStatus: '', providerStatusKind: 'secondary', providerTesting: false, providerSaving: false,
         completion: {kind: '', query: '', start: 0, end: 0, items: [], selected: 0}, completionSeq: 0,
-        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, restoreChatAttempted: false, transcriptStickToBottom: true, scrollRestoreSeq: 0, error: '', toast: '', toastTimer: null,
+        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, restoreChatAttempted: false, transcriptStickToBottom: true, scrollRestoreSeq: 0, expandedMilestones: {}, error: '', toast: '', toastTimer: null,
         init() {
           this.clampSidebarRatio();
           this.applyTheme();
@@ -455,13 +455,53 @@
         milestoneTitle(m) { return m.Title || m.title || this.milestoneRef(m); },
         milestoneStatus(m) { return m.Status || m.status || 'pending'; },
         milestoneNotes(m) { return m.Notes || m.notes || ''; },
+        milestoneExpanded(ref) { return !!this.expandedMilestones[ref]; },
+        toggleMilestone(ref) {
+          if (!ref) return;
+          this.expandedMilestones = {...this.expandedMilestones, [ref]: !this.expandedMilestones[ref]};
+        },
+        milestoneIcon(status) {
+          if (status === 'completed') return 'bi-check-circle-fill text-success';
+          if (status === 'cancelled') return 'bi-x-circle-fill text-secondary';
+          if (status === 'blocked') return 'bi-exclamation-octagon-fill text-danger';
+          if (status === 'in_progress' || status === 'decomposing' || status === 'executing') return 'bi-arrow-repeat text-primary';
+          return 'bi-circle text-secondary';
+        },
         milestoneBadge(status) {
           if (status === 'completed') return 'text-bg-success';
+          if (status === 'cancelled') return 'text-bg-secondary';
           if (status === 'blocked') return 'text-bg-danger';
           if (status === 'in_progress' || status === 'decomposing' || status === 'executing') return 'text-bg-primary';
           return 'text-bg-secondary';
         },
         todoItems() { return this.state.todos || this.state.Todos || []; },
+        todosByMilestone() { return this.state.todos_by_milestone || this.state.TodosByRef || {}; },
+        todoItemsForMilestone(milestone) {
+          const ref = this.milestoneRef(milestone);
+          const grouped = this.todosByMilestone();
+          if (grouped && Object.prototype.hasOwnProperty.call(grouped, ref)) return grouped[ref] || [];
+          return [];
+        },
+        milestoneTodoCounts(milestone) {
+          const counts = {total: 0, completed: 0, active: 0, pending: 0};
+          for (const todo of this.todoItemsForMilestone(milestone)) {
+            counts.total++;
+            const status = this.todoStatus(todo);
+            if (status === 'completed') counts.completed++;
+            else if (status === 'in_progress') counts.active++;
+            else counts.pending++;
+          }
+          return counts;
+        },
+        milestoneTodoSummary(milestone) {
+          const counts = this.milestoneTodoCounts(milestone);
+          if (!counts.total) return '0 todos';
+          const details = [];
+          if (counts.active) details.push(counts.active + ' active');
+          if (counts.pending) details.push(counts.pending + ' pending');
+          const suffix = details.length ? ' · ' + details.join(' · ') : '';
+          return counts.completed + '/' + counts.total + ' done' + suffix;
+        },
         todoStatus(todo) { return todo.Status || todo.status || 'pending'; },
         todoIcon(status) {
           if (status === 'completed') return 'bi-check-circle-fill text-success';

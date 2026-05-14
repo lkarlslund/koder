@@ -63,9 +63,31 @@ func TestNormalizeArgsAndDefinitions(t *testing.T) {
 	if _, enabled := tools.DefinitionFor(domain.ToolKindMilestonePlan, tools.Runtime{ChatRole: domain.WorkflowRoleDecomposition}); enabled {
 		t.Fatal("expected plan definition to be disabled in decomposition chats")
 	}
+	updated, err := (updateItemTool{}).NormalizeArgs(map[string]string{"ref": "alpha", "status": "cancelled"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated["status"] != string(domain.MilestoneStatusCancelled) {
+		t.Fatalf("expected cancelled status, got %#v", updated)
+	}
+	def, enabled := tools.DefinitionFor(domain.ToolKindMilestoneUpdate, tools.Runtime{ChatRole: domain.WorkflowRoleOrchestrator})
+	if !enabled {
+		t.Fatal("expected update milestone definition to be enabled")
+	}
+	if !strings.Contains(string(def.Function.Parameters), `"cancelled"`) || !strings.Contains(def.Function.Description, "created by accident") {
+		t.Fatalf("expected cancelled status and guidance in LLM definition: %#v", def)
+	}
 }
 
 func TestAppendAndValidationHelpers(t *testing.T) {
+	parsed, err := tools.ParseMilestones(`[{"ref":"alpha","title":"Alpha","status":"cancelled"}]`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parsed[0].Status != domain.MilestoneStatusCancelled {
+		t.Fatalf("expected cancelled milestone status, got %#v", parsed[0])
+	}
+
 	existing := []store.Milestone{{Ref: "alpha", Title: "Alpha", Position: 0}}
 	added := []store.Milestone{{Ref: "beta", Title: "Beta"}}
 	got := appendMilestones(existing, added)
@@ -126,7 +148,7 @@ func TestUpdateItemActiveMilestoneErrorExplainsSwitching(t *testing.T) {
 	}
 	for _, want := range []string{
 		"active milestones: alpha (in_progress), beta (in_progress)",
-		"To switch milestones, first update the current active milestone to pending, blocked, or completed",
+		"To switch milestones, first update the current active milestone to pending, blocked, completed, or cancelled",
 	} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("expected %q in error %q", want, err.Error())

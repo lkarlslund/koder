@@ -15,29 +15,29 @@ func init() {
 	tools.Register(listTool{}, tools.ToolSpec{
 		Title:       "List milestones",
 		Description: "Read the current session milestone plan.",
-		Usage:       "Read the current session milestone plan. Use this to understand the long-horizon plan before choosing or breaking down work.",
+		Usage:       "Read the current session milestone plan. Use this to understand the long-horizon plan before choosing or breaking down work. If a milestone was created by accident or is no longer wanted, update it to cancelled at any time.",
 		Parameters:  `{"type":"object","properties":{},"additionalProperties":false}`,
 		ExposeToLLM: true,
 	})
 	tools.Register(addItemsTool{}, tools.ToolSpec{
 		Title:       "Add milestones",
 		Description: "Append new pending milestones to the current plan.",
-		Usage:       "Append new pending milestones to the current session plan. Use milestones for larger chunks of work. Each milestone requires a stable ref so its todo bucket can be tracked separately.",
+		Usage:       "Append new pending milestones to the current session plan. Use milestones for larger chunks of work. Each milestone requires a stable ref so its todo bucket can be tracked separately. If a milestone is later found to be accidental or unwanted, cancel it with milestone_update_item.",
 		Parameters:  `{"type":"object","properties":{"items":{"type":"array","description":"New milestones to append as pending","items":{"type":"object","properties":{"ref":{"type":"string"},"title":{"type":"string"},"notes":{"type":"string"}},"required":["ref","title"]}}},"required":["items"],"additionalProperties":false}`,
 		ExposeToLLM: true,
 	})
 	tools.Register(updateItemTool{}, tools.ToolSpec{
 		Title:       "Update milestone",
 		Description: "Update one milestone's status or details.",
-		Usage:       "Update one milestone's status, and optionally its title or notes. Keep at most one active milestone in the plan. Active statuses are in_progress, decomposing, and executing.",
-		Parameters:  `{"type":"object","properties":{"ref":{"type":"string","description":"Milestone ref"},"status":{"type":"string","enum":["pending","in_progress","decomposing","executing","completed","blocked"]},"title":{"type":"string","description":"Optional replacement title"},"notes":{"type":"string","description":"Optional replacement notes"}},"required":["ref","status"],"additionalProperties":false}`,
+		Usage:       "Update one milestone's status, and optionally its title or notes. Keep at most one active milestone in the plan. Active statuses are in_progress, decomposing, and executing. If a milestone was created by accident or is no longer wanted, set status to cancelled at any time.",
+		Parameters:  `{"type":"object","properties":{"ref":{"type":"string","description":"Milestone ref"},"status":{"type":"string","enum":["pending","in_progress","decomposing","executing","completed","blocked","cancelled"]},"title":{"type":"string","description":"Optional replacement title"},"notes":{"type":"string","description":"Optional replacement notes"}},"required":["ref","status"],"additionalProperties":false}`,
 		ExposeToLLM: true,
 	})
 	tools.Register(planTool{}, tools.ToolSpec{
 		Title:       "Plan milestone",
 		Description: "Create or update a milestone and append todo items.",
-		Usage:       "Create or update one milestone and append concrete todo items for it in one step. Use this when the current discussion already contains enough detail and a separate decomposition chat would be overkill.",
-		Parameters:  `{"type":"object","properties":{"ref":{"type":"string","description":"Milestone ref"},"title":{"type":"string","description":"Milestone title"},"notes":{"type":"string","description":"Optional milestone notes"},"status":{"type":"string","enum":["pending","in_progress","decomposing","executing","completed","blocked"]},"items":{"type":"array","description":"Todo items to append for this milestone","items":{"type":"object","properties":{"content":{"type":"string"}},"required":["content"]}}},"required":["ref","title","items"],"additionalProperties":false}`,
+		Usage:       "Create or update one milestone and append concrete todo items for it in one step. Use this when the current discussion already contains enough detail and a separate decomposition chat would be overkill. If a milestone was created by accident or is no longer wanted, update it to cancelled at any time.",
+		Parameters:  `{"type":"object","properties":{"ref":{"type":"string","description":"Milestone ref"},"title":{"type":"string","description":"Milestone title"},"notes":{"type":"string","description":"Optional milestone notes"},"status":{"type":"string","enum":["pending","in_progress","decomposing","executing","completed","blocked","cancelled"]},"items":{"type":"array","description":"Todo items to append for this milestone","items":{"type":"object","properties":{"content":{"type":"string"}},"required":["content"]}}},"required":["ref","title","items"],"additionalProperties":false}`,
 		ExposeToLLM: true,
 	})
 	tools.Register(writeTool{}, tools.ToolSpec{

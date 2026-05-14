@@ -50,7 +50,7 @@ func ParseMilestones(raw string) ([]store.Milestone, error) {
 		}
 		seenRefs[ref] = struct{}{}
 		switch status {
-		case domain.MilestoneStatusPending, domain.MilestoneStatusInProgress, domain.MilestoneStatusDecomposing, domain.MilestoneStatusExecuting, domain.MilestoneStatusCompleted, domain.MilestoneStatusBlocked:
+		case domain.MilestoneStatusPending, domain.MilestoneStatusInProgress, domain.MilestoneStatusDecomposing, domain.MilestoneStatusExecuting, domain.MilestoneStatusCompleted, domain.MilestoneStatusBlocked, domain.MilestoneStatusCancelled:
 		default:
 			return nil, fmt.Errorf("invalid milestone status %q", item.Status)
 		}
@@ -116,7 +116,7 @@ func ParseMilestoneRef(raw string) (string, error) {
 func ParseMilestoneStatus(raw string) (domain.MilestoneStatus, error) {
 	status := domain.MilestoneStatus(strings.TrimSpace(raw))
 	switch status {
-	case domain.MilestoneStatusPending, domain.MilestoneStatusInProgress, domain.MilestoneStatusDecomposing, domain.MilestoneStatusExecuting, domain.MilestoneStatusCompleted, domain.MilestoneStatusBlocked:
+	case domain.MilestoneStatusPending, domain.MilestoneStatusInProgress, domain.MilestoneStatusDecomposing, domain.MilestoneStatusExecuting, domain.MilestoneStatusCompleted, domain.MilestoneStatusBlocked, domain.MilestoneStatusCancelled:
 		return status, nil
 	default:
 		return "", fmt.Errorf("invalid milestone status %q", raw)
@@ -217,7 +217,7 @@ func ValidateMilestoneProgress(items []store.Milestone) error {
 		}
 	}
 	if len(active) > 1 {
-		return fmt.Errorf("milestones may contain at most one active item (in_progress, decomposing, or executing); active milestones: %s. To switch milestones, first update the current active milestone to pending, blocked, or completed, then update the next milestone to in_progress, decomposing, or executing", strings.Join(active, ", "))
+		return fmt.Errorf("milestones may contain at most one active item (in_progress, decomposing, or executing); active milestones: %s. To switch milestones, first update the current active milestone to pending, blocked, completed, or cancelled, then update the next milestone to in_progress, decomposing, or executing", strings.Join(active, ", "))
 	}
 	return nil
 }
