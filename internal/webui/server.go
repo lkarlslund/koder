@@ -82,6 +82,7 @@ func Start(ctx context.Context, controller *uicore.Controller, options Options) 
 	mux.HandleFunc("/", s.handleIndex)
 	mux.HandleFunc("/favicon.ico", handleFavicon)
 	mux.Handle("/assets/", assetHandler())
+	mux.HandleFunc("/api/health", handleHealth)
 	mux.HandleFunc("/api/show-image", handleShowImage)
 	mux.HandleFunc("/ws", s.handleWebSocket)
 	s.server = &http.Server{Handler: mux}
@@ -166,6 +167,22 @@ func handleFavicon(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Cache-Control", "public, max-age=86400")
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func handleHealth(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-cache")
+	if r.Method == http.MethodHead {
+		return
+	}
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"ok":         true,
+		"asset_hash": currentAssetHash,
+	})
 }
 
 func assetHandler() http.Handler {

@@ -137,6 +137,31 @@ func TestServerNoBrowserSuppressesBrowserOpen(t *testing.T) {
 	}
 }
 
+func TestServerHealthEndpoint(t *testing.T) {
+	ctrl := newTestController(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoBrowser: true})
+	if err != nil {
+		t.Fatalf("start server: %v", err)
+	}
+	resp, err := http.Get(srv.URL() + "/api/health")
+	if err != nil {
+		t.Fatalf("get health: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected health status 200, got %d", resp.StatusCode)
+	}
+	var body map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode health: %v", err)
+	}
+	if body["ok"] != true || body["asset_hash"] != currentAssetHash {
+		t.Fatalf("unexpected health body: %#v", body)
+	}
+}
+
 func TestWebSocketHelloReturnsState(t *testing.T) {
 	ctrl := newTestController(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -446,8 +471,11 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `connectWatchdog`) || !strings.Contains(fullPage, `WebSocket.CONNECTING`) || !strings.Contains(fullPage, `ws.close()`) {
 		t.Fatalf("expected stuck websocket handshakes to be closed and retried")
 	}
-	if !strings.Contains(fullPage, `}, 500);`) || !strings.Contains(fullPage, `Math.min(100`) || !strings.Contains(fullPage, `reconnectDelay: 25`) {
-		t.Fatalf("expected reconnect timing to stay below one second")
+	if !strings.Contains(fullPage, `}, 500);`) || !strings.Contains(fullPage, `Math.min(2000`) || !strings.Contains(fullPage, `reconnectDelay: 150`) {
+		t.Fatalf("expected reconnect timing to back off without spamming")
+	}
+	if !strings.Contains(fullPage, `connectWhenReady()`) || !strings.Contains(fullPage, `fetch('/api/health'`) || !strings.Contains(fullPage, `server not ready`) {
+		t.Fatalf("expected reconnect to probe HTTP readiness before opening websocket")
 	}
 	if !strings.Contains(fullPage, `performance.mark('koder-ready')`) {
 		t.Fatalf("expected browser readiness to be marked after hello hydration")

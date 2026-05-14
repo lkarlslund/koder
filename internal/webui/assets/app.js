@@ -270,7 +270,7 @@
     }
     function koderApp() {
       return {
-        ws: null, reconnectTimer: null, connectWatchdog: null, reconnectDelay: 25, nextID: 1, pending: {}, state: {}, connected: false, connecting: true, draft: '', showPermissions: false,
+        ws: null, reconnectTimer: null, connectWatchdog: null, reconnectDelay: 150, reconnectProbe: null, nextID: 1, pending: {}, state: {}, connected: false, connecting: true, draft: '', showPermissions: false,
         showModels: false, modelLoading: false, modelQuery: '', modelOptions: [],
         showSessions: false, sessionLoading: false, sessionState: {active_id: 0, workdir: '', sessions: []}, newSessionTitle: '',
         showProviders: false, providerState: {catalog: [], providers: [], drafts: {}}, providerDraft: null, providerHeadersText: '{}', providerStatus: '', providerStatusKind: 'secondary', providerTesting: false, providerSaving: false,
@@ -372,7 +372,7 @@
           }
           this.connecting = false;
           this.connected = true;
-          this.reconnectDelay = 25;
+          this.reconnectDelay = 150;
           this.rpcOn(ws, 'hello', {}).then(hello => this.applyHello(hello)).catch(() => {});
         },
         connectNow() {
@@ -380,16 +380,41 @@
             clearTimeout(this.reconnectTimer);
             this.reconnectTimer = null;
           }
-          this.connect();
+          this.connectWhenReady();
         },
         scheduleReconnect() {
           if (this.reconnectTimer) return;
           const delay = this.reconnectDelay;
-          this.reconnectDelay = Math.min(100, Math.round(this.reconnectDelay * 1.6));
+          this.reconnectDelay = Math.min(2000, Math.round(this.reconnectDelay * 1.6));
           this.reconnectTimer = setTimeout(() => {
             this.reconnectTimer = null;
-            this.connect();
+            this.connectWhenReady();
           }, delay);
+        },
+        connectWhenReady() {
+          if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) {
+            this.connect();
+            return;
+          }
+          if (this.reconnectProbe) return;
+          this.connecting = true;
+          this.connected = false;
+          const controller = new AbortController();
+          this.reconnectProbe = controller;
+          const timeout = setTimeout(() => controller.abort(), 1000);
+          fetch('/api/health', {cache: 'no-store', signal: controller.signal})
+            .then(resp => {
+              if (!resp.ok) throw new Error('server not ready');
+              this.reconnectProbe = null;
+              this.connect();
+            })
+            .catch(() => {
+              if (this.reconnectProbe === controller) {
+                this.reconnectProbe = null;
+                this.scheduleReconnect();
+              }
+            })
+            .finally(() => clearTimeout(timeout));
         },
         connectionLabel() {
           if (this.connected) return 'connected';
