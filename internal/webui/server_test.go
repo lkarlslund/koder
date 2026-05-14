@@ -324,11 +324,14 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `x-html="markdownHTML(pendingText())"`) {
 		t.Fatalf("expected streaming assistant text to render as markdown HTML")
 	}
-	if !strings.Contains(fullPage, `class="turn user-turn"`) || !strings.Contains(fullPage, `.user-turn { border-left-color: var(--bs-primary); }`) {
-		t.Fatalf("expected user turns to render left aligned with a colored rail")
+	if !strings.Contains(fullPage, `class="turn user-turn"`) || !strings.Contains(fullPage, `.transcript-turn { width: 100%; max-width: none; }`) {
+		t.Fatalf("expected user turns to use the full transcript width")
 	}
 	if !strings.Contains(fullPage, `class="turn assistant-turn"`) || strings.Contains(fullPage, `bi bi-stars`) || strings.Contains(fullPage, `> Assistant</div>`) || strings.Contains(fullPage, `message assistant p-3`) || strings.Contains(fullPage, `message user p-3 ms-auto`) {
 		t.Fatalf("expected assistant turns without repeated assistant title or chat-bubble boxes")
+	}
+	if !strings.Contains(fullPage, `.user-turn, .assistant-turn { border-left: 0; padding-left: 0; }`) || strings.Contains(fullPage, `.tool { border-left`) || strings.Contains(fullPage, `class="tool mt-3 ps-3"`) {
+		t.Fatalf("expected transcript turns and tools to avoid redundant border rails")
 	}
 	if !strings.Contains(fullPage, `marked.parse(source)`) || !strings.Contains(fullPage, `DOMPurify.sanitize`) || !strings.Contains(fullPage, `hljs.highlight`) {
 		t.Fatalf("expected browser markdown renderer to parse, sanitize, and syntax-highlight")
@@ -356,6 +359,9 @@ func TestIndexServesHTML(t *testing.T) {
 	}
 	if !strings.Contains(fullPage, `if (args.command) values.push(args.command)`) || !strings.Contains(fullPage, `function execResultLines(data, fallback)`) {
 		t.Fatalf("expected command preview and exec result helpers")
+	}
+	if !strings.Contains(fullPage, `tool-result-body-mono`) || !strings.Contains(fullPage, `renderCompactBlock('Result', execResultLines(data, toolResultText(tool)), 'tool-result-body-mono')`) {
+		t.Fatalf("expected exec output to render with monospace result styling")
 	}
 	if !strings.Contains(fullPage, `hello.asset_hash !== window.KODER_ASSET_HASH`) || !strings.Contains(fullPage, `location.reload()`) {
 		t.Fatalf("expected websocket reconnect to reload on asset mismatch")

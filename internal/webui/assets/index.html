@@ -57,7 +57,7 @@
               </template>
               <div class="markdown-body" x-html="markdownHTML(item.content?.text || '')"></div>
               <template x-for="tool in item.content?.tools || []" :key="tool.tool_call_id">
-                <div class="tool mt-3 ps-3">
+                <div class="tool mt-3">
                   <div class="small fw-semibold"><i class="bi" :class="toolIcon(tool.tool)"></i> <span x-text="toolTitle(tool)"></span> <span class="badge text-bg-secondary" x-text="tool.status"></span></div>
                   <div class="small text-secondary" x-show="toolPreview(tool)" x-text="toolPreview(tool)"></div>
                   <div class="btn-group btn-group-sm mt-2" x-show="toolApprovalPending(tool)">

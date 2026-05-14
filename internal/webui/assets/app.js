@@ -77,12 +77,13 @@
     function toolResultHeader(title) {
       return '<div class="tool-result-header">' + escapeHTML(title) + '</div>';
     }
-    function renderCompactBlock(title, lines) {
+    function renderCompactBlock(title, lines, extraClass = '') {
       const body = compactLines(lines).map(line => {
         const cls = line.omitted ? 'tool-result-line tool-result-omitted' : 'tool-result-line';
         return '<div class="' + cls + '">' + escapeHTML(line.text || ' ') + '</div>';
       }).join('');
-      return toolResultHeader(title) + '<div class="tool-result-body">' + body + '</div>';
+      const bodyClass = ['tool-result-body', extraClass].filter(Boolean).join(' ');
+      return toolResultHeader(title) + '<div class="' + bodyClass + '">' + body + '</div>';
     }
     function renderKeyValueBlock(title, pairs) {
       const lines = pairs.filter(pair => pair[1] !== undefined && pair[1] !== null && String(pair[1]) !== '').map(pair => pair[0] + ': ' + pair[1]);
@@ -192,7 +193,7 @@
         return renderCompactBlock('Output', firstValue(data, ['output', 'Output']) || toolResultText(tool));
       }
       if (kind.startsWith('exec_')) {
-        return renderCompactBlock('Result', execResultLines(data, toolResultText(tool)));
+        return renderCompactBlock('Result', execResultLines(data, toolResultText(tool)), 'tool-result-body-mono');
       }
       if (kind === 'glob') return renderCompactBlock('Matches', data.matches || data.Matches || toolResultText(tool));
       if (kind === 'grep') return renderCompactBlock('Matches', firstValue(data, ['output', 'Output']) || toolResultText(tool));

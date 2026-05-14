@@ -19,10 +19,9 @@
     .composer { grid-column: 1 / 4; border-top: 1px solid var(--bs-border-color); }
     .composer-input { max-height: 20vh; overflow-y: hidden; resize: none; }
     .composer-menu { max-height: 32vh; overflow: auto; }
-    .transcript-turn { max-width: min(920px, 100%); }
-    .turn { padding-left: 1rem; border-left: 3px solid transparent; }
-    .user-turn { border-left-color: var(--bs-primary); }
-    .assistant-turn { border-left-color: var(--bs-secondary-border-subtle); }
+    .transcript-turn { width: 100%; max-width: none; }
+    .turn { width: 100%; }
+    .user-turn, .assistant-turn { border-left: 0; padding-left: 0; }
     .markdown-body { overflow-wrap: anywhere; }
     .markdown-body > :first-child { margin-top: 0; }
     .markdown-body > :last-child { margin-bottom: 0; }
@@ -40,10 +39,11 @@
     .markdown-body pre { background: #0d1117; color: #c9d1d9; border-radius: .45rem; padding: .75rem; overflow: auto; white-space: pre; }
     .markdown-body pre code { background: transparent; color: inherit; padding: 0; border-radius: 0; }
     .markdown-body blockquote { border-left: 3px solid var(--bs-border-color); color: var(--bs-secondary-color); padding-left: .75rem; margin: .75rem 0; }
-    .tool { border-left: 3px solid var(--bs-info); }
+    .tool { padding-left: 0; }
     .tool-result { border: 1px solid var(--bs-border-color); border-radius: .45rem; overflow: hidden; background: var(--bs-body-bg); }
     .tool-result-header { padding: .35rem .55rem; background: var(--bs-secondary-bg); border-bottom: 1px solid var(--bs-border-color); font-size: .82rem; font-weight: 600; }
     .tool-result-body { padding: .45rem .55rem; font-family: var(--bs-font-monospace); font-size: .82rem; line-height: 1.35; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .tool-result-body-mono { font-family: var(--bs-font-monospace); }
     .tool-result-line { min-height: 1.35em; }
     .tool-result-omitted { color: var(--bs-secondary-color); font-style: italic; }
     .tool-diff-line { padding: .05rem .45rem; font-family: var(--bs-font-monospace); font-size: .82rem; line-height: 1.35; white-space: pre-wrap; overflow-wrap: anywhere; }
