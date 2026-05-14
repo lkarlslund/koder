@@ -177,6 +177,11 @@ func TestIndexServesHTML(t *testing.T) {
 	if strings.Contains(document, `<style>`) || strings.Contains(document, `function koderApp()`) {
 		t.Fatalf("expected first-party CSS and JS to live in embedded asset files, not inline index content")
 	}
+	appScript := strings.Index(document, `/assets/app.js`)
+	alpineScript := strings.Index(document, `/assets/vendor/alpine/cdn.min.js`)
+	if appScript < 0 || alpineScript < 0 || appScript > alpineScript {
+		t.Fatalf("expected app JS to load before Alpine so x-data scope is registered before Alpine initializes")
+	}
 	if !strings.Contains(fullPage, `@keydown="onComposerKeydown($event)"`) || !strings.Contains(fullPage, `if (ev.key === 'Enter' && !ev.shiftKey)`) {
 		t.Fatalf("expected plain enter to submit composer")
 	}

@@ -10,8 +10,10 @@
   <script defer src="/assets/vendor/marked/marked.umd.js"></script>
   <script defer src="/assets/vendor/dompurify/purify.min.js"></script>
   <script defer src="/assets/vendor/highlight/highlight.min.js"></script>
-  <script defer src="/assets/vendor/alpine/cdn.min.js"></script>
   <link href="/assets/app.css" rel="stylesheet">
+  <script>window.KODER_ASSET_HASH = "__KODER_ASSET_HASH__";</script>
+  <script defer src="/assets/app.js"></script>
+  <script defer src="/assets/vendor/alpine/cdn.min.js"></script>
 </head>
 <body class="bg-body text-body">
   <div class="app-shell" :style="appShellStyle()">
@@ -413,8 +415,5 @@
   <div class="toast-stack" x-show="toast" x-transition style="display: none;">
     <div class="alert alert-danger shadow mb-0" role="status" x-text="toast"></div>
   </div>
-
-  <script>window.KODER_ASSET_HASH = "__KODER_ASSET_HASH__";</script>
-  <script defer src="/assets/app.js"></script>
 </body>
 </html>
