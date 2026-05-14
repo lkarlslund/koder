@@ -51,6 +51,9 @@
     .tool-diff-del { background: rgba(var(--bs-danger-rgb), .18); color: var(--bs-danger-text-emphasis); }
     .tool-diff-meta { background: var(--bs-secondary-bg); color: var(--bs-secondary-color); }
     .reasoning { color: var(--bs-secondary-color); }
+    .notice { display: inline-flex; align-items: center; gap: .45rem; color: var(--bs-secondary-color); font-size: .9rem; }
+    .notice-warning { color: var(--bs-warning-text-emphasis); }
+    .notice-error, .notice-danger { color: var(--bs-danger-text-emphasis); }
     .model-trigger { color: inherit; text-decoration: none; }
     .planning-tree { display: grid; gap: .2rem; }
     .planning-node { border-bottom: 1px solid var(--bs-border-color-translucent); padding-bottom: .2rem; }

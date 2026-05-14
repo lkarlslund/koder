@@ -71,9 +71,19 @@
             </div>
           </template>
           <template x-if="item.kind !== 'user' && item.kind !== 'assistant'">
-            <div class="message p-3 bg-body-tertiary">
-              <div class="small text-secondary"><i class="bi bi-info-circle"></i> <span x-text="item.kind"></span></div>
-              <pre x-text="JSON.stringify(item.content, null, 2)"></pre>
+            <div>
+              <template x-if="item.kind === 'notice'">
+                <div class="notice" :class="'notice-' + noticeLevel(item.content || {})">
+                  <i class="bi" :class="noticeIcon(item.content || {})"></i>
+                  <span x-text="noticeText(item.content || {})"></span>
+                  <span class="text-secondary" x-show="noticeDetail(item.content || {})" x-text="noticeDetail(item.content || {})"></span>
+                </div>
+              </template>
+              <template x-if="item.kind !== 'notice'">
+                <div class="message p-2 bg-body-tertiary">
+                  <span class="small text-secondary"><i class="bi bi-info-circle"></i> <span x-text="item.kind"></span></span>
+                </div>
+              </template>
             </div>
           </template>
         </section>

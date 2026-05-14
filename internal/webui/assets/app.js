@@ -95,6 +95,28 @@
     function isBareExitStatus(text) {
       return /^bash failed:\s*exit status\s+-?\d+\s*$/i.test(String(text || '').trim());
     }
+    function noticeLevel(content) {
+      return String(firstValue(content, ['level', 'Level']) || 'info').toLowerCase();
+    }
+    function noticeIcon(content) {
+      const level = noticeLevel(content);
+      const kind = String(firstValue(content, ['kind', 'Kind'])).toLowerCase();
+      if (kind === 'interrupted') return 'bi-stop-circle';
+      if (level === 'warning') return 'bi-exclamation-triangle';
+      if (level === 'error' || level === 'danger') return 'bi-x-circle';
+      return 'bi-info-circle';
+    }
+    function noticeText(content) {
+      return firstValue(content, ['title', 'Title', 'text', 'Text', 'kind', 'Kind']) || 'Notice';
+    }
+    function noticeDetail(content) {
+      const parts = [];
+      for (const key of ['subtitle', 'Subtitle', 'reason', 'Reason']) {
+        const value = content && content[key];
+        if (value) parts.push(String(value));
+      }
+      return parts.join(' · ');
+    }
     function toolResultHeader(title) {
       return '<div class="tool-result-header">' + escapeHTML(title) + '</div>';
     }
@@ -732,6 +754,10 @@
         },
         toolResultHTML(tool) { return renderToolResult(tool); },
         toolErrorHTML(tool) { return renderToolError(tool); },
+        noticeIcon(content) { return noticeIcon(content); },
+        noticeLevel(content) { return noticeLevel(content); },
+        noticeText(content) { return noticeText(content); },
+        noticeDetail(content) { return noticeDetail(content); },
         resizeComposer() {
           const el = this.$refs.composerInput; if (!el) return;
           const maxHeight = Math.floor((window.innerHeight || 800) * 0.2);
