@@ -150,6 +150,63 @@ func TestControllerForwardRuntimeRefreshesChatListMetadata(t *testing.T) {
 	}
 }
 
+func TestControllerForwardRuntimeRefreshesInactiveChatMetadata(t *testing.T) {
+	ctrl, _ := newTestController(t)
+	first := ctrl.State().ActiveChatID
+	if first == 0 {
+		t.Fatal("expected first chat")
+	}
+	if err := ctrl.NewChat(context.Background(), "side chat"); err != nil {
+		t.Fatalf("new chat: %v", err)
+	}
+	side := ctrl.State().ActiveChatID
+	if side == 0 || side == first {
+		t.Fatalf("expected side chat, first=%d side=%d", first, side)
+	}
+	if err := ctrl.SwitchChat(context.Background(), first); err != nil {
+		t.Fatalf("switch chat: %v", err)
+	}
+
+	updated := ctrl.State().Snapshots[side]
+	updated.Chat.ID = side
+	updated.Chat.Title = "Generated Side Title"
+	updated.Status = chat.StatusWaitingApproval
+	updated.StatusText = "Waiting for approval"
+	updates := make(chan chat.Update, 1)
+	updates <- chat.Update{Snapshot: updated, Status: chat.StatusWaitingApproval, StatusText: "Waiting for approval", Active: true}
+	close(updates)
+
+	ctrl.forwardRuntime(side, updates)
+
+	got := ctrl.State()
+	if got.ActiveChatID != first {
+		t.Fatalf("expected active chat to remain %d, got %d", first, got.ActiveChatID)
+	}
+	if got.Snapshots[side].Chat.Title != "Generated Side Title" {
+		t.Fatalf("expected inactive snapshot title updated, got %#v", got.Snapshots[side].Chat)
+	}
+	var listed string
+	for _, item := range got.Chats {
+		if item.ID == side {
+			listed = item.Title
+			break
+		}
+	}
+	if listed != "Generated Side Title" {
+		t.Fatalf("expected inactive chat list title updated, got %q", listed)
+	}
+	var sidebarStatus ChatSidebarStatus
+	for _, item := range got.ChatStatuses {
+		if item.ChatID == side {
+			sidebarStatus = item
+			break
+		}
+	}
+	if sidebarStatus.Status != string(chat.StatusWaitingApproval) || !sidebarStatus.Busy {
+		t.Fatalf("expected inactive chat sidebar status waiting approval, got %#v", sidebarStatus)
+	}
+}
+
 func TestControllerRefreshChatStatusesDiscoversNewStoreChats(t *testing.T) {
 	ctrl, st := newTestController(t)
 	state := ctrl.State()

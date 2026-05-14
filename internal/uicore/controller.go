@@ -46,6 +46,7 @@ type State struct {
 	ActiveChatID int64                       `json:"active_chat_id"`
 	Permissions  PermissionsState            `json:"permissions"`
 	Snapshot     chat.Snapshot               `json:"snapshot"`
+	Snapshots    map[int64]chat.Snapshot     `json:"snapshots"`
 	Milestones   store.MilestonePlan         `json:"milestones"`
 	Todos        []store.TodoItem            `json:"todos"`
 	TodosByRef   map[string][]store.TodoItem `json:"todos_by_milestone"`
@@ -170,6 +171,9 @@ type Controller struct {
 	chat       domain.Chat
 	runtime    *chat.Chat
 	unsub      func()
+	runtimes   map[int64]*chat.Chat
+	unsubs     map[int64]func()
+	snapshots  map[int64]chat.Snapshot
 	milestone  store.MilestonePlan
 	todos      []store.TodoItem
 	todosByRef map[string][]store.TodoItem
@@ -188,13 +192,16 @@ type Controller struct {
 // New constructs a renderer-neutral controller.
 func New(cfg config.Config, st *store.Store, engine *agent.Engine, workdir string) *Controller {
 	return &Controller{
-		cfg:      cfg,
-		store:    st,
-		agent:    engine,
-		workdir:  strings.TrimSpace(workdir),
-		theme:    "auto",
-		statuses: map[int64]ChatSidebarStatus{},
-		subs:     map[int]chan Event{},
+		cfg:       cfg,
+		store:     st,
+		agent:     engine,
+		workdir:   strings.TrimSpace(workdir),
+		theme:     "auto",
+		statuses:  map[int64]ChatSidebarStatus{},
+		runtimes:  map[int64]*chat.Chat{},
+		unsubs:    map[int64]func(){},
+		snapshots: map[int64]chat.Snapshot{},
+		subs:      map[int]chan Event{},
 	}
 }
 
@@ -227,6 +234,7 @@ func (c *Controller) State() State {
 		ChatStatuses: c.chatStatusesLocked(),
 		ActiveChatID: c.chat.ID,
 		Permissions:  c.permissionsStateLocked(),
+		Snapshots:    map[int64]chat.Snapshot{},
 		Milestones:   c.milestone,
 		Todos:        slices.Clone(c.todos),
 		TodosByRef:   cloneTodosByRef(c.todosByRef),
@@ -241,7 +249,38 @@ func (c *Controller) State() State {
 			break
 		}
 	}
-	if c.runtime != nil {
+	for chatID, snapshot := range c.snapshots {
+		if snapshot.Chat.ID == 0 {
+			snapshot.Chat.ID = chatID
+		}
+		state.Snapshots[chatID] = snapshot
+		if chatID == c.chat.ID {
+			state.Snapshot = snapshot
+		}
+		if !hasChatSidebarStatus(state.ChatStatuses, snapshot.Chat.ID) {
+			state.ChatStatuses = mergeChatSidebarStatus(state.ChatStatuses, sidebarStatusFromSnapshot(snapshot))
+		}
+	}
+	for chatID, rt := range c.runtimes {
+		if rt == nil {
+			continue
+		}
+		if _, ok := state.Snapshots[chatID]; ok {
+			continue
+		}
+		snapshot := rt.Snapshot()
+		if snapshot.Chat.ID == 0 {
+			snapshot.Chat.ID = chatID
+		}
+		state.Snapshots[chatID] = snapshot
+		if chatID == c.chat.ID {
+			state.Snapshot = snapshot
+		}
+		if !hasChatSidebarStatus(state.ChatStatuses, snapshot.Chat.ID) {
+			state.ChatStatuses = mergeChatSidebarStatus(state.ChatStatuses, sidebarStatusFromSnapshot(snapshot))
+		}
+	}
+	if state.Snapshot.Chat.ID == 0 && c.runtime != nil {
 		snapshot := c.runtime.Snapshot()
 		state.Snapshot = snapshot
 		if !hasChatSidebarStatus(state.ChatStatuses, snapshot.Chat.ID) {
@@ -307,20 +346,32 @@ func (c *Controller) Stop() error {
 // Shutdown gracefully drains the active runtime and releases subscriptions.
 func (c *Controller) Shutdown(ctx context.Context) error {
 	c.mu.RLock()
-	rt := c.runtime
-	unsub := c.unsub
-	c.mu.RUnlock()
-	if rt == nil {
-		if unsub != nil {
-			unsub()
+	runtimes := make([]*chat.Chat, 0, len(c.runtimes))
+	for _, rt := range c.runtimes {
+		if rt != nil {
+			runtimes = append(runtimes, rt)
 		}
-		return nil
 	}
-	err := rt.DrainAndClose(ctx)
-	if unsub != nil {
+	unsubs := make([]func(), 0, len(c.unsubs)+1)
+	for _, unsub := range c.unsubs {
+		if unsub != nil {
+			unsubs = append(unsubs, unsub)
+		}
+	}
+	if c.unsub != nil {
+		unsubs = append(unsubs, c.unsub)
+	}
+	c.mu.RUnlock()
+	for _, unsub := range unsubs {
 		unsub()
 	}
-	return err
+	var firstErr error
+	for _, rt := range runtimes {
+		if err := rt.DrainAndClose(ctx); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
 }
 
 // Compact starts compaction on the active chat.
@@ -392,6 +443,8 @@ func (c *Controller) DeleteChat(ctx context.Context, chatID int64) error {
 	sessionID := c.session.ID
 	activeChatID := c.chat.ID
 	activeRuntime := c.runtime
+	targetRuntime := c.runtimes[chatID]
+	targetUnsub := c.unsubs[chatID]
 	c.mu.RUnlock()
 	if sessionID == 0 {
 		return fmt.Errorf("no active session")
@@ -426,6 +479,11 @@ func (c *Controller) DeleteChat(ctx context.Context, chatID int64) error {
 		if activeRuntime != nil {
 			activeRuntime.Close()
 		}
+	} else if targetRuntime != nil {
+		targetRuntime.Close()
+	}
+	if targetUnsub != nil {
+		targetUnsub()
 	}
 	if err := c.store.DeleteChat(ctx, chatID); err != nil {
 		return err
@@ -440,6 +498,9 @@ func (c *Controller) DeleteChat(ctx context.Context, chatID int64) error {
 	c.mu.Lock()
 	c.chats = chats
 	delete(c.statuses, chatID)
+	delete(c.runtimes, chatID)
+	delete(c.unsubs, chatID)
+	delete(c.snapshots, chatID)
 	c.mu.Unlock()
 	c.refreshChatStatuses(ctx, sessionID)
 	c.broadcast("snapshot", c.State())
@@ -843,7 +904,12 @@ func (c *Controller) SetModel(ctx context.Context, providerID, modelID string) e
 	}
 	c.mu.RLock()
 	sessionID := c.session.ID
-	rt := c.runtime
+	runtimes := make([]*chat.Chat, 0, len(c.runtimes))
+	for _, rt := range c.runtimes {
+		if rt != nil {
+			runtimes = append(runtimes, rt)
+		}
+	}
 	c.mu.RUnlock()
 	if sessionID == 0 {
 		return fmt.Errorf("no active session")
@@ -862,8 +928,12 @@ func (c *Controller) SetModel(ctx context.Context, providerID, modelID string) e
 			c.sessions[idx] = session
 		}
 	}
+	for id, snapshot := range c.snapshots {
+		snapshot.Session = session
+		c.snapshots[id] = snapshot
+	}
 	c.mu.Unlock()
-	if rt != nil {
+	for _, rt := range runtimes {
 		rt.SetSession(session)
 	}
 	c.broadcast("snapshot", c.State())
@@ -884,7 +954,12 @@ func (c *Controller) SetPermissionProfile(ctx context.Context, profile string) e
 	c.mu.Lock()
 	session := c.session
 	chatRecord := c.chat
-	rt := c.runtime
+	runtimes := make([]*chat.Chat, 0, len(c.runtimes))
+	for _, rt := range c.runtimes {
+		if rt != nil {
+			runtimes = append(runtimes, rt)
+		}
+	}
 	c.mu.Unlock()
 	if session.ID != 0 {
 		if err := c.store.SetSessionPermissionProfile(ctx, session.ID, profile); err != nil {
@@ -902,14 +977,23 @@ func (c *Controller) SetPermissionProfile(ctx context.Context, profile string) e
 		}
 	}
 	for idx := range c.chats {
-		if c.chats[idx].ID == chatRecord.ID {
-			c.chats[idx].PermissionProfile = ""
+		c.chats[idx].PermissionProfile = ""
+	}
+	for id, snapshot := range c.snapshots {
+		snapshot.Session = session
+		if snapshot.Chat.ID == chatRecord.ID {
+			snapshot.Chat = chatRecord
+		} else {
+			snapshot.Chat.PermissionProfile = ""
 		}
+		c.snapshots[id] = snapshot
 	}
 	c.mu.Unlock()
-	if rt != nil {
+	for _, rt := range runtimes {
 		rt.SetSession(session)
-		rt.SetChat(chatRecord)
+		if snapshot := rt.Snapshot(); snapshot.Chat.ID == chatRecord.ID {
+			rt.SetChat(chatRecord)
+		}
 	}
 	c.broadcast("snapshot", c.State())
 	return nil
@@ -1192,26 +1276,78 @@ func (c *Controller) loadSession(ctx context.Context, sessionID, chatID int64) e
 		}
 	}
 	chatRecord.PermissionProfile = ""
-	rt, err := c.agent.Chat(ctx, session, chatRecord)
-	if err != nil {
-		return err
+	c.mu.RLock()
+	existingRuntimes := make(map[int64]*chat.Chat, len(c.runtimes))
+	for id, rt := range c.runtimes {
+		existingRuntimes[id] = rt
+	}
+	existingUnsubs := make(map[int64]func(), len(c.unsubs))
+	for id, unsub := range c.unsubs {
+		existingUnsubs[id] = unsub
+	}
+	c.mu.RUnlock()
+
+	type runtimeSubscription struct {
+		chatID  int64
+		updates <-chan chat.Update
+	}
+	runtimes := make(map[int64]*chat.Chat, len(chats))
+	unsubs := make(map[int64]func(), len(chats))
+	var subscriptions []runtimeSubscription
+	for _, item := range chats {
+		item.PermissionProfile = ""
+		rt := existingRuntimes[item.ID]
+		if rt == nil {
+			var err error
+			rt, err = c.agent.Chat(ctx, session, item)
+			if err != nil {
+				return err
+			}
+			updates, unsub := rt.Subscribe()
+			unsubs[item.ID] = unsub
+			subscriptions = append(subscriptions, runtimeSubscription{chatID: item.ID, updates: updates})
+		} else {
+			rt.SetSession(session)
+			rt.SetChat(item)
+			if unsub := existingUnsubs[item.ID]; unsub != nil {
+				unsubs[item.ID] = unsub
+			} else {
+				updates, unsub := rt.Subscribe()
+				unsubs[item.ID] = unsub
+				subscriptions = append(subscriptions, runtimeSubscription{chatID: item.ID, updates: updates})
+			}
+		}
+		runtimes[item.ID] = rt
+	}
+	rt := runtimes[chatRecord.ID]
+	if rt == nil {
+		return fmt.Errorf("chat %d runtime was not loaded", chatRecord.ID)
 	}
 	milestone, todos, todosByRef := c.planningState(ctx, session.ID)
 	workspaceStatus, _ := workspacepkg.Snapshot(ctx, c.workdir)
-	updates, unsub := rt.Subscribe()
 	statuses := c.chatStatuses(ctx, session.ID)
-	statuses[chatRecord.ID] = sidebarStatusFromSnapshot(rt.Snapshot())
+	snapshots := make(map[int64]chat.Snapshot, len(runtimes))
+	for id, loaded := range runtimes {
+		snapshot := loaded.Snapshot()
+		snapshots[id] = snapshot
+		statuses[id] = sidebarStatusFromSnapshot(snapshot)
+	}
 
 	c.mu.Lock()
-	if c.unsub != nil {
-		c.unsub()
+	for id, unsub := range c.unsubs {
+		if _, keep := runtimes[id]; !keep && unsub != nil {
+			unsub()
+		}
 	}
 	c.session = session
 	c.sessions = sessions
 	c.chats = chats
 	c.chat = chatRecord
 	c.runtime = rt
-	c.unsub = unsub
+	c.unsub = nil
+	c.runtimes = runtimes
+	c.unsubs = unsubs
+	c.snapshots = snapshots
 	c.statuses = statuses
 	c.milestone = milestone
 	c.todos = todos
@@ -1220,7 +1356,9 @@ func (c *Controller) loadSession(ctx context.Context, sessionID, chatID int64) e
 	c.lastErr = ""
 	c.mu.Unlock()
 
-	go c.forwardRuntime(chatRecord.ID, updates)
+	for _, sub := range subscriptions {
+		go c.forwardRuntime(sub.chatID, sub.updates)
+	}
 	c.broadcast("snapshot", c.State())
 	return nil
 }
@@ -1404,10 +1542,11 @@ func (c *Controller) activeChatSidebarStatus(sessionID int64) (ChatSidebarStatus
 func (c *Controller) forwardRuntime(chatID int64, updates <-chan chat.Update) {
 	for update := range updates {
 		c.mu.RLock()
-		current := c.chat.ID
 		sessionID := c.session.ID
+		activeChatID := c.chat.ID
+		_, subscribed := c.runtimes[chatID]
 		c.mu.RUnlock()
-		if current != chatID {
+		if !subscribed {
 			return
 		}
 		if update.Event != nil && update.Event.Err != nil {
@@ -1421,12 +1560,22 @@ func (c *Controller) forwardRuntime(chatID int64, updates <-chan chat.Update) {
 		if update.Snapshot.Chat.ID == chatID {
 			c.mu.Lock()
 			if strings.TrimSpace(update.Snapshot.Chat.Title) == "" {
-				update.Snapshot.Chat = c.chat
+				if existing, ok := chatByID(c.chats, chatID); ok {
+					update.Snapshot.Chat = existing
+				} else if activeChatID == chatID {
+					update.Snapshot.Chat = c.chat
+				}
 			}
-			c.chat = update.Snapshot.Chat
+			if activeChatID == chatID {
+				c.chat = update.Snapshot.Chat
+			}
 			if c.statuses == nil {
 				c.statuses = map[int64]ChatSidebarStatus{}
 			}
+			if c.snapshots == nil {
+				c.snapshots = map[int64]chat.Snapshot{}
+			}
+			c.snapshots[chatID] = update.Snapshot
 			c.statuses[chatID] = sidebarStatusFromUpdate(update)
 			found := false
 			for idx := range c.chats {

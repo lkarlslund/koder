@@ -353,7 +353,22 @@
         },
         onPush(msg) {
           if (msg.type === 'snapshot') this.applyState(msg.payload);
+          if (msg.type === 'chat_update') this.applyChatUpdate(msg.payload);
           if (msg.type === 'theme') { this.theme = msg.payload.theme || 'auto'; writePreference('theme', this.theme); this.applyTheme(); }
+        },
+        applyChatUpdate(update) {
+          const snapshot = update?.Snapshot || update?.snapshot;
+          const chat = snapshot?.Chat || snapshot?.chat || {};
+          const id = chat.ID || chat.id || update?.chat_id || update?.ChatID;
+          if (!id) return;
+          const snapshots = {...(this.state.snapshots || this.state.Snapshots || {})};
+          snapshots[id] = snapshot;
+          this.state.snapshots = snapshots;
+          this.state.Snapshots = snapshots;
+          if (id === this.activeChatID()) {
+            this.state.snapshot = snapshot;
+            this.state.Snapshot = snapshot;
+          }
         },
         rpc(method, params) {
           return this.rpcOn(this.ws, method, params).catch(err => { this.error = err.message; this.showToast(err.message); throw err; });
@@ -441,11 +456,16 @@
           this.rpc('switch_chat', {chat_id: id}).then(s => this.applyState(s, {scrollToBottom: true}));
           return true;
         },
-        timeline() { return this.state.snapshot?.Timeline || this.state.snapshot?.timeline || []; },
-        approvals() { return this.state.snapshot?.Approvals || this.state.snapshot?.approvals || []; },
-        pendingText() { const p = this.state.snapshot?.PendingAssistant || this.state.snapshot?.pending_assistant || {}; return [p.Reasoning || p.reasoning, p.Text || p.text].filter(Boolean).join('\n'); },
+        activeSnapshot() {
+          const id = this.activeChatID();
+          const snapshots = this.state.snapshots || this.state.Snapshots || {};
+          return snapshots[id] || snapshots[String(id)] || this.state.snapshot || this.state.Snapshot || {};
+        },
+        timeline() { const snapshot = this.activeSnapshot(); return snapshot.Timeline || snapshot.timeline || []; },
+        approvals() { const snapshot = this.activeSnapshot(); return snapshot.Approvals || snapshot.approvals || []; },
+        pendingText() { const snapshot = this.activeSnapshot(); const p = snapshot.PendingAssistant || snapshot.pending_assistant || {}; return [p.Reasoning || p.reasoning, p.Text || p.text].filter(Boolean).join('\n'); },
         markdownHTML(text) { return renderMarkdown(text); },
-        statusText() { return this.state.snapshot?.StatusText || this.state.snapshot?.status_text || this.state.snapshot?.Status || 'idle'; },
+        statusText() { const snapshot = this.activeSnapshot(); return snapshot.StatusText || snapshot.status_text || snapshot.Status || 'idle'; },
         activeProvider() { return this.state.session?.provider_id || this.state.session?.ProviderID || ''; },
         activeModel() { return this.state.session?.model_id || this.state.session?.ModelID || ''; },
         milestones() { return this.state.milestones || this.state.Milestones || {}; },
