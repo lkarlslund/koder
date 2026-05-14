@@ -218,6 +218,12 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `x-html="markdownHTML(pendingText())"`) {
 		t.Fatalf("expected streaming assistant text to render as markdown HTML")
 	}
+	if !strings.Contains(fullPage, `class="turn user-turn"`) || !strings.Contains(fullPage, `.user-turn { border-left-color: var(--bs-primary); }`) {
+		t.Fatalf("expected user turns to render left aligned with a colored rail")
+	}
+	if !strings.Contains(fullPage, `class="turn assistant-turn"`) || strings.Contains(fullPage, `bi bi-stars`) || strings.Contains(fullPage, `> Assistant</div>`) || strings.Contains(fullPage, `message assistant p-3`) || strings.Contains(fullPage, `message user p-3 ms-auto`) {
+		t.Fatalf("expected assistant turns without repeated assistant title or chat-bubble boxes")
+	}
 	if !strings.Contains(fullPage, `marked.parse(source)`) || !strings.Contains(fullPage, `DOMPurify.sanitize`) || !strings.Contains(fullPage, `hljs.highlight`) {
 		t.Fatalf("expected browser markdown renderer to parse, sanitize, and syntax-highlight")
 	}

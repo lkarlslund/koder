@@ -19,9 +19,10 @@
     .composer { grid-column: 1 / 4; border-top: 1px solid var(--bs-border-color); }
     .composer-input { max-height: 20vh; overflow-y: hidden; resize: none; }
     .composer-menu { max-height: 32vh; overflow: auto; }
-    .message { border-radius: .75rem; }
-    .message.user { background: var(--bs-primary-bg-subtle); }
-    .message.assistant { background: var(--bs-tertiary-bg); }
+    .transcript-turn { max-width: min(920px, 100%); }
+    .turn { padding-left: 1rem; border-left: 3px solid transparent; }
+    .user-turn { border-left-color: var(--bs-primary); }
+    .assistant-turn { border-left-color: var(--bs-secondary-border-subtle); }
     .markdown-body { overflow-wrap: anywhere; }
     .markdown-body > :first-child { margin-top: 0; }
     .markdown-body > :last-child { margin-bottom: 0; }

@@ -41,16 +41,14 @@
         <div class="alert alert-danger" x-text="error"></div>
       </template>
       <template x-for="item in timeline()" :key="item.id || item.seq">
-        <section class="mb-3">
+        <section class="transcript-turn mb-4">
           <template x-if="item.kind === 'user'">
-            <div class="message user p-3 ms-auto" style="max-width: 78%;">
-              <div class="small text-secondary mb-1"><i class="bi bi-person"></i> You</div>
+            <div class="turn user-turn">
               <div class="markdown-body" x-html="markdownHTML(item.content?.text || '')"></div>
             </div>
           </template>
           <template x-if="item.kind === 'assistant'">
-            <div class="message assistant p-3" style="max-width: 86%;">
-              <div class="small text-secondary mb-2"><i class="bi bi-stars"></i> Assistant</div>
+            <div class="turn assistant-turn">
               <template x-if="item.content?.reasoning?.text">
                 <details class="reasoning mb-2">
                   <summary>thinking</summary>
@@ -81,7 +79,7 @@
         </section>
       </template>
       <template x-if="pendingText()">
-        <section class="message assistant p-3 mb-3" style="max-width: 86%;">
+        <section class="turn assistant-turn mb-4">
           <div class="small text-secondary mb-2"><i class="bi bi-broadcast"></i> streaming</div>
           <div class="markdown-body" x-html="markdownHTML(pendingText())"></div>
         </section>
