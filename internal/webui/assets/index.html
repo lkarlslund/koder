@@ -36,7 +36,7 @@
       </div>
     </nav>
 
-    <main class="transcript p-3">
+    <main class="transcript p-3" x-ref="transcript" @scroll.passive="updateTranscriptStickiness()">
       <template x-if="error">
         <div class="alert alert-danger" x-text="error"></div>
       </template>

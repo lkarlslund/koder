@@ -214,7 +214,7 @@
         showSessions: false, sessionLoading: false, sessionState: {active_id: 0, workdir: '', sessions: []}, newSessionTitle: '',
         showProviders: false, providerState: {catalog: [], providers: [], drafts: {}}, providerDraft: null, providerHeadersText: '{}', providerStatus: '', providerStatusKind: 'secondary', providerTesting: false, providerSaving: false,
         completion: {kind: '', query: '', start: 0, end: 0, items: [], selected: 0}, completionSeq: 0,
-        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, restoreChatAttempted: false, error: '', toast: '', toastTimer: null,
+        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, restoreChatAttempted: false, transcriptStickToBottom: true, scrollRestoreSeq: 0, error: '', toast: '', toastTimer: null,
         init() {
           this.clampSidebarRatio();
           this.applyTheme();
@@ -223,7 +223,7 @@
           window.addEventListener('online', () => this.connectNow());
           window.addEventListener('focus', () => this.connectNow());
           document.addEventListener('visibilitychange', () => { if (!document.hidden) this.connectNow(); });
-          this.$nextTick(() => this.resizeComposer());
+          this.$nextTick(() => { this.resizeComposer(); this.updateTranscriptStickiness(); });
         },
         applyTheme() {
           const resolved = this.theme === 'auto' ? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : this.theme;
@@ -379,11 +379,25 @@
           this.pending = {};
           Object.values(pending).forEach(p => p.reject(new Error(message)));
         },
-        transcriptScrollState() {
-          const el = document.querySelector('.transcript');
-          if (!el) return {el: null, top: 0, nearBottom: true};
+        transcriptElement() {
+          return this.$refs?.transcript || document.querySelector('.transcript');
+        },
+        updateTranscriptStickiness() {
+          const el = this.transcriptElement();
+          if (!el) {
+            this.transcriptStickToBottom = true;
+            return true;
+          }
           const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
-          return {el, top: el.scrollTop, nearBottom: distance <= 48};
+          this.transcriptStickToBottom = distance <= 48;
+          return this.transcriptStickToBottom;
+        },
+        transcriptScrollState() {
+          const el = this.transcriptElement();
+          if (!el) return {el: null, top: 0, nearBottom: true, stickToBottom: true};
+          const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
+          const nearBottom = distance <= 48;
+          return {el, top: el.scrollTop, nearBottom, stickToBottom: this.transcriptStickToBottom || nearBottom};
         },
         afterTranscriptDOMUpdate(fn) {
           this.$nextTick(() => {
@@ -394,19 +408,24 @@
           });
         },
         restoreTranscriptScroll(scroll, options = {}) {
-          const el = document.querySelector('.transcript');
+          const el = this.transcriptElement();
           if (!el) return;
-          if (options.scrollToBottom || scroll.nearBottom) {
+          if (options.scrollToBottom || scroll.stickToBottom) {
             el.scrollTop = el.scrollHeight;
+            this.transcriptStickToBottom = true;
             return;
           }
           el.scrollTop = scroll.top;
+          this.updateTranscriptStickiness();
         },
         applyState(s, options = {}) {
           const scroll = this.transcriptScrollState();
+          const seq = ++this.scrollRestoreSeq;
           this.state = s || {}; this.applyTheme(); this.error = this.state.error || '';
           if (!this.restoreSelectedChat()) this.writeSelectedChat();
-          this.afterTranscriptDOMUpdate(() => this.restoreTranscriptScroll(scroll, options));
+          this.afterTranscriptDOMUpdate(() => {
+            if (seq === this.scrollRestoreSeq) this.restoreTranscriptScroll(scroll, options);
+          });
         },
         selectedChatPreferenceName() { return 'selectedChat.' + encodeURIComponent(this.state.workdir || this.state.Workdir || ''); },
         activeChatID() { return this.state.active_chat_id || this.state.ActiveChatID || 0; },

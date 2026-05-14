@@ -316,8 +316,14 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `transcriptScrollState()`) || !strings.Contains(fullPage, `distance <= 48`) {
 		t.Fatalf("expected transcript scroll anchoring when new output arrives")
 	}
-	if !strings.Contains(fullPage, `scroll.nearBottom`) || !strings.Contains(fullPage, `el.scrollTop = scroll.top`) {
+	if !strings.Contains(fullPage, `transcriptStickToBottom`) || !strings.Contains(fullPage, `updateTranscriptStickiness()`) {
+		t.Fatalf("expected transcript sticky-bottom intent to be tracked from scroll events")
+	}
+	if !strings.Contains(fullPage, `scroll.stickToBottom`) || !strings.Contains(fullPage, `el.scrollTop = scroll.top`) {
 		t.Fatalf("expected transcript to follow only when near bottom and preserve scroll otherwise")
+	}
+	if !strings.Contains(fullPage, `scrollRestoreSeq`) || !strings.Contains(fullPage, `seq === this.scrollRestoreSeq`) {
+		t.Fatalf("expected stale deferred transcript scroll restorations to be ignored")
 	}
 	if !strings.Contains(fullPage, `afterTranscriptDOMUpdate`) || !strings.Contains(fullPage, `requestAnimationFrame`) || !strings.Contains(fullPage, `setTimeout(fn, 0)`) {
 		t.Fatalf("expected transcript scroll restoration to run after deferred DOM height updates")
