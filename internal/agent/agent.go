@@ -1788,11 +1788,15 @@ func (e *Engine) recordLifecycle(sessionID int64, kind, text string, meta map[st
 
 func (e *Engine) emitInterrupted(out chan<- domain.Event, chatID, sessionID int64) {
 	e.recordLifecycle(sessionID, "interrupted", "Interrupted", nil)
-	e.persistTranscriptNotice(context.Background(), chatID, sessionID, "Interrupted", transcriptNotice{
+	item, ok := e.persistTranscriptNotice(context.Background(), chatID, sessionID, "Interrupted", transcriptNotice{
 		Kind:     "interrupted",
 		Severity: "warning",
 	})
-	out <- domain.Event{Kind: domain.EventKindStatus, Text: "Interrupted"}
+	evt := domain.Event{Kind: domain.EventKindStatus, Text: "Interrupted"}
+	if ok {
+		evt.Item = item
+	}
+	out <- evt
 }
 
 func interruptedErr(err error) bool {
@@ -1906,7 +1910,7 @@ func (e *Engine) pauseContinuation(ctx context.Context, chatID, sessionID int64,
 		"count":  strconv.Itoa(pause.Count),
 		"limit":  strconv.Itoa(pause.Limit),
 	})
-	e.persistTranscriptNotice(ctx, chatID, sessionID, body, transcriptNotice{
+	item, ok := e.persistTranscriptNotice(ctx, chatID, sessionID, body, transcriptNotice{
 		Kind:     "loop_pause",
 		Severity: "warning",
 		Reason:   string(pause.Reason),
@@ -1917,7 +1921,11 @@ func (e *Engine) pauseContinuation(ctx context.Context, chatID, sessionID int64,
 		Limit:    pause.Limit,
 	})
 	if out != nil {
-		out <- domain.Event{Kind: domain.EventKindStatus, Text: body}
+		evt := domain.Event{Kind: domain.EventKindStatus, Text: body}
+		if ok {
+			evt.Item = item
+		}
+		out <- evt
 		out <- domain.Event{Kind: domain.EventKindMessageDone}
 	}
 }
@@ -1941,13 +1949,13 @@ func continuationPauseSubtitle(pause continuationPause) string {
 	}
 }
 
-func (e *Engine) persistTranscriptNotice(ctx context.Context, chatID, sessionID int64, body string, meta transcriptNotice) {
+func (e *Engine) persistTranscriptNotice(ctx context.Context, chatID, sessionID int64, body string, meta transcriptNotice) (domain.TimelineItem, bool) {
 	if sessionID == 0 || chatID == 0 || e.store == nil {
-		return
+		return domain.TimelineItem{}, false
 	}
 	body = strings.TrimSpace(body)
 	if body == "" {
-		return
+		return domain.TimelineItem{}, false
 	}
 	item, err := e.store.AppendTimeline(ctx, chatID, domain.Notice{
 		Level:    strings.TrimSpace(meta.Severity),
@@ -1961,10 +1969,13 @@ func (e *Engine) persistTranscriptNotice(ctx context.Context, chatID, sessionID 
 		Limit:    meta.Limit,
 	})
 	if err != nil {
-		return
+		return domain.TimelineItem{}, false
 	}
 	item.Seal(time.Now().UTC())
-	_ = e.store.Timeline().Put(ctx, item)
+	if err := e.store.Timeline().Put(ctx, item); err != nil {
+		return domain.TimelineItem{}, false
+	}
+	return item, true
 }
 
 func waitForRetry(ctx context.Context, delay time.Duration, onTick func(time.Duration)) error {

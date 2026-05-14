@@ -4118,9 +4118,13 @@ func TestRunPromptPausesRepeatedIdenticalToolCalls(t *testing.T) {
 	}
 
 	var sawPauseStatus bool
+	var sawPauseStatusItem bool
 	for evt := range events {
 		if evt.Kind == domain.EventKindStatus && strings.Contains(evt.Text, "identical read calls") {
 			sawPauseStatus = true
+			if notice, ok := evt.Item.Content.(domain.Notice); ok && notice.Kind == "loop_pause" {
+				sawPauseStatusItem = true
+			}
 		}
 		if evt.Kind == domain.EventKindError {
 			t.Fatalf("expected loop pause instead of error, got %#v", evt)
@@ -4128,6 +4132,9 @@ func TestRunPromptPausesRepeatedIdenticalToolCalls(t *testing.T) {
 	}
 	if !sawPauseStatus {
 		t.Fatal("expected repeated-tool pause status")
+	}
+	if !sawPauseStatusItem {
+		t.Fatal("expected repeated-tool pause status to include persisted notice item for live transcript updates")
 	}
 
 	chat := defaultChatForSession(t, st, session.ID)
