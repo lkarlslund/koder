@@ -119,7 +119,7 @@ func (m *App) applyCurrentChatEvent(evt domain.Event) {
 		return
 	}
 	refreshed := false
-	if evt.Item.ID > 0 {
+	if evt.Item.ID != "" {
 		m.upsertCurrentSnapshotTimelineItem(evt.Item)
 		m.transcriptDirty = true
 		refreshed = true
@@ -141,10 +141,10 @@ func (m *App) applyCurrentChatEvent(evt domain.Event) {
 		}
 	}
 	if refreshed {
-		if evt.Kind == domain.EventKindToolCallDelta && evt.Item.ID > 0 {
+		if evt.Kind == domain.EventKindToolCallDelta && evt.Item.ID != "" {
 			m.clearPendingAssistantTurn()
 		}
-		if evt.Kind == domain.EventKindMessageDone && evt.Item.ID > 0 {
+		if evt.Kind == domain.EventKindMessageDone && evt.Item.ID != "" {
 			m.clearPendingAssistantTurn()
 		}
 		m.refreshViewport()

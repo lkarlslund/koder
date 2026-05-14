@@ -95,19 +95,19 @@ func (b *jsonfsBackend) allocateCollectionID(ctx context.Context, key string) (i
 	return next, nil
 }
 
-func (b *jsonfsBackend) getCollectionRecord(ctx context.Context, namespace string, id int64) ([]byte, error) {
+func (b *jsonfsBackend) getCollectionRecord(ctx context.Context, namespace string, id string) ([]byte, error) {
 	if err := ensureContext(ctx); err != nil {
 		return nil, err
 	}
-	path := filepath.Join(b.root, "collections", namespace, formatID(id)+".json")
+	path := filepath.Join(b.root, "collections", namespace, id+".json")
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("get %s %d: %w", namespace, id, err)
+		return nil, fmt.Errorf("get %s %s: %w", namespace, id, err)
 	}
 	return data, nil
 }
 
-func (b *jsonfsBackend) putCollectionRecord(ctx context.Context, namespace string, id int64, data []byte, indexes map[string]string) error {
+func (b *jsonfsBackend) putCollectionRecord(ctx context.Context, namespace string, id string, data []byte, indexes map[string]string) error {
 	if err := ensureContext(ctx); err != nil {
 		return err
 	}
@@ -117,8 +117,8 @@ func (b *jsonfsBackend) putCollectionRecord(ctx context.Context, namespace strin
 	if err := ensureDir(dir); err != nil {
 		return err
 	}
-	if err := os.WriteFile(filepath.Join(dir, formatID(id)+".json"), append(data, '\n'), 0o644); err != nil {
-		return fmt.Errorf("put %s %d: %w", namespace, id, err)
+	if err := os.WriteFile(filepath.Join(dir, id+".json"), append(data, '\n'), 0o644); err != nil {
+		return fmt.Errorf("put %s %s: %w", namespace, id, err)
 	}
 	if err := b.rebuildCollectionIndexes(namespace); err != nil {
 		return err
@@ -127,14 +127,14 @@ func (b *jsonfsBackend) putCollectionRecord(ctx context.Context, namespace strin
 	return nil
 }
 
-func (b *jsonfsBackend) deleteCollectionRecord(ctx context.Context, namespace string, id int64) error {
+func (b *jsonfsBackend) deleteCollectionRecord(ctx context.Context, namespace string, id string) error {
 	if err := ensureContext(ctx); err != nil {
 		return err
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if err := os.Remove(filepath.Join(b.root, "collections", namespace, formatID(id)+".json")); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("delete %s %d: %w", namespace, id, err)
+	if err := os.Remove(filepath.Join(b.root, "collections", namespace, id+".json")); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("delete %s %s: %w", namespace, id, err)
 	}
 	return b.rebuildCollectionIndexes(namespace)
 }
@@ -150,10 +150,7 @@ func (b *jsonfsBackend) listCollectionRecords(ctx context.Context, namespace str
 	}
 	out := make([][]byte, 0, len(paths))
 	for _, path := range paths {
-		id, err := parseIDFromSuffix(strings.TrimSuffix(filepath.Base(path), ".json"), "")
-		if err != nil {
-			return nil, err
-		}
+		id := strings.TrimSuffix(filepath.Base(path), ".json")
 		if lookup != nil {
 			ok, err := b.collectionIndexContains(namespace, lookup.name, lookup.value, id)
 			if err != nil {
@@ -184,7 +181,7 @@ func (b *jsonfsBackend) rebuildCollectionIndexes(namespace string) error {
 	return ensureDir(filepath.Join(b.root, "collection-indexes", namespace))
 }
 
-func (b *jsonfsBackend) collectionIndexContains(namespace, name, value string, id int64) (bool, error) {
+func (b *jsonfsBackend) collectionIndexContains(namespace, name, value string, id string) (bool, error) {
 	_ = namespace
 	_ = name
 	_ = value

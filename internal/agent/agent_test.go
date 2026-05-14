@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -155,7 +156,7 @@ func currentToolStatus(t *testing.T, st *store.Store, chatID int64, toolCallID s
 	return ""
 }
 
-func appendCompactionTimelineItem(t *testing.T, st *store.Store, chatID int64, summary string, firstKeptItemID int64) domain.TimelineItem {
+func appendCompactionTimelineItem(t *testing.T, st *store.Store, chatID int64, summary string, firstKeptItemID string) domain.TimelineItem {
 	t.Helper()
 	item, err := st.AppendTimeline(context.Background(), chatID, domain.Compaction{
 		Summary:         summary,
@@ -201,9 +202,10 @@ func timelineTranscriptForChat(t *testing.T, st *store.Store, chat domain.Chat) 
 }
 
 func testTranscriptItem(sessionID int64, item domain.TimelineItem) (domain.Message, []domain.Part) {
-	msg := domain.Message{ID: item.ID, SessionID: sessionID, ChatID: item.ChatID, CreatedAt: item.CreatedAt}
+	messageID := testTimelineRenderID(item.ID)
+	msg := domain.Message{ID: messageID, SessionID: sessionID, ChatID: item.ChatID, CreatedAt: item.CreatedAt}
 	addPart := func(parts *[]domain.Part, kind domain.PartKind, payload domain.PartPayload, offset int64) {
-		part := domain.Part{ID: item.ID*1000 + offset, MessageID: item.ID, Kind: kind, Payload: payload, CreatedAt: item.CreatedAt}
+		part := domain.Part{ID: messageID*1000 + offset, MessageID: messageID, Kind: kind, Payload: payload, CreatedAt: item.CreatedAt}
 		part.Body = part.Text()
 		*parts = append(*parts, part)
 	}
@@ -250,6 +252,15 @@ func testTranscriptItem(sessionID int64, item domain.TimelineItem) (domain.Messa
 		addPart(&parts, domain.PartKindCompaction, domain.CompactionPayload{Summary: content.Summary, Status: content.Status, BeforeContextTokens: content.BeforeContextTokens, AfterContextTokens: content.AfterContextTokens}, 1)
 	}
 	return msg, parts
+}
+
+func testTimelineRenderID(id string) int64 {
+	if id == "" {
+		return 0
+	}
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(id))
+	return int64(h.Sum64() & 0x7fffffffffffffff)
 }
 
 func timelineNoticesForChat(t *testing.T, st *store.Store, chatID int64) []domain.Notice {
@@ -616,11 +627,12 @@ func TestPersistAssistantToolCallsStoresNarrationAsText(t *testing.T) {
 		ToolCallID: "call_1",
 		Args:       map[string]string{"path": "README.md"},
 	}
-	item, err := engine.persistAssistantToolCalls(context.Background(), chat.ID, session.ID, []tools.Request{call}, "Let me inspect that file first.", domain.Usage{TotalTokens: 10})
+	itemSeed := domain.TimelineItem{ID: domain.NewTimelineID(time.Now().UTC()), ChatID: chat.ID, Seq: 1, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
+	item, err := engine.persistAssistantToolCalls(context.Background(), chat.ID, session.ID, itemSeed, []tools.Request{call}, "Let me inspect that file first.", domain.Usage{TotalTokens: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if item.ID == 0 {
+	if item.ID == "" {
 		t.Fatalf("expected persisted timeline item, got %#v", item)
 	}
 
@@ -702,7 +714,7 @@ func TestBuildConversationResetsAtCompactionBoundary(t *testing.T) {
 	}
 	chat := defaultChatForSession(t, st, session.ID)
 	appendUserTimelineItem(t, st, chat.ID, "old question")
-	appendCompactionTimelineItem(t, st, chat.ID, "summary block", 0)
+	appendCompactionTimelineItem(t, st, chat.ID, "summary block", "")
 	appendUserTimelineItem(t, st, chat.ID, "new question")
 
 	conversation, err := engine.buildConversation(context.Background(), session.ID, chat.ID)
@@ -846,7 +858,7 @@ func TestBuildCompactionConversationExcludesPreservedToolTail(t *testing.T) {
 		t.Fatal("expected compaction source conversation")
 	}
 	if firstKeptItemID != toolItem.ID {
-		t.Fatalf("expected compaction boundary at tool call item, got %d want %d", firstKeptItemID, toolItem.ID)
+		t.Fatalf("expected compaction boundary at tool call item, got %s want %s", firstKeptItemID, toolItem.ID)
 	}
 	last := conversation[len(conversation)-1]
 	if strings.Contains(last.Content, "/tmp/project") || len(last.ToolCalls) != 0 {
@@ -2350,7 +2362,7 @@ func TestRunPromptMessageDoneCarriesPersistedAssistantRecord(t *testing.T) {
 			done = evt
 		}
 	}
-	if done.Item.ID == 0 {
+	if done.Item.ID == "" {
 		t.Fatal("expected persisted assistant item on message done")
 	}
 	assistant, ok := done.Item.Content.(domain.AssistantMessage)
@@ -2415,7 +2427,7 @@ func TestRunPromptApprovalAskMarksToolAwaitingApproval(t *testing.T) {
 			break
 		}
 	}
-	if approval.Item.ID == 0 {
+	if approval.Item.ID == "" {
 		t.Fatal("expected persisted assistant item on approval ask")
 	}
 	assistant, ok := approval.Item.Content.(domain.AssistantMessage)
@@ -3843,7 +3855,7 @@ func TestChatWithRetryRetriesTransientEOFBeforeStreamingStarts(t *testing.T) {
 			Content: "hello",
 		}},
 		Stream: true,
-	})
+	}, domain.TimelineItem{ID: domain.NewTimelineID(time.Now().UTC())})
 	if err != nil {
 		t.Fatalf("expected transient retry to succeed, got %v", err)
 	}
@@ -3913,7 +3925,7 @@ func TestChatWithRetryDoesNotRetryAfterPartialStreamFailure(t *testing.T) {
 			Content: "hello",
 		}},
 		Stream: true,
-	})
+	}, domain.TimelineItem{ID: domain.NewTimelineID(time.Now().UTC())})
 	close(events)
 	if err == nil {
 		t.Fatal("expected stream failure error")

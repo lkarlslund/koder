@@ -239,12 +239,11 @@ func (r *Chat) Persist(ctx context.Context, st *store.Store) error {
 	if err != nil {
 		return r.markPersistError(err)
 	}
-	itemIDs := make(map[int64]struct{}, len(persisted))
+	itemIDs := make(map[string]struct{}, len(persisted))
 	for _, item := range persisted {
 		itemIDs[item.ID] = struct{}{}
 	}
 
-	itemRemap := map[int64]int64{}
 	changed := false
 	for _, item := range timeline {
 		if item.ChatID == 0 {
@@ -256,16 +255,8 @@ func (r *Chat) Persist(ctx context.Context, st *store.Store) error {
 			}
 			continue
 		}
-		oldID := item.ID
-		if isTemporaryTimelineID(oldID) {
-			item.ID = 0
-		}
-		durable, err := st.InsertTimelineItem(ctx, item)
-		if err != nil {
+		if _, err := st.InsertTimelineItem(ctx, item); err != nil {
 			return r.markPersistError(err)
-		}
-		if oldID != durable.ID {
-			itemRemap[oldID] = durable.ID
 		}
 		changed = true
 	}
@@ -274,14 +265,9 @@ func (r *Chat) Persist(ctx context.Context, st *store.Store) error {
 		return r.markPersistError(err)
 	}
 	if changed {
-		r.remapTimelineIDs(itemRemap)
 		r.broadcast(r.snapshotUpdateFlags(nil, true, false, false, true, false))
 	}
 	return nil
-}
-
-func isTemporaryTimelineID(id int64) bool {
-	return id < 0 || id > 1_000_000_000_000
 }
 
 func (r *Chat) Enqueue(item QueueItem) {
@@ -809,7 +795,7 @@ func (r *Chat) handleStreamEvent(evt domain.Event) {
 	r.mu.Lock()
 	transcriptChanged := false
 	contextChanged := false
-	if evt.Item.ID != 0 && r.state != nil {
+	if evt.Item.ID != "" && r.state != nil {
 		r.state.UpsertTimelineItem(evt.Item)
 		transcriptChanged = true
 		if text := timelineItemSummary(evt.Item); text != "" {
@@ -903,7 +889,7 @@ func (r *Chat) handleStreamEvent(evt domain.Event) {
 		r.cancelState = CancelStateNone
 		r.running = nil
 	case domain.EventKindMessageDone:
-		if r.state != nil && evt.Item.ID != 0 {
+		if r.state != nil && evt.Item.ID != "" {
 			r.state.SealActiveAssistant("")
 			r.state.ClearPendingAssistant()
 			contextChanged = true
@@ -1114,30 +1100,6 @@ func (r *Chat) markPersistError(err error) error {
 	return err
 }
 
-func (r *Chat) remapTimelineIDs(items map[int64]int64) {
-	if len(items) == 0 {
-		return
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.state == nil {
-		return
-	}
-	for _, record := range r.state.timeline {
-		if record == nil {
-			continue
-		}
-		oldID := record.Item.ID
-		next, ok := items[oldID]
-		if !ok {
-			continue
-		}
-		delete(r.state.byItem, oldID)
-		record.Item.ID = next
-		r.state.byItem[next] = record
-	}
-}
-
 func (r *Chat) snapshotStatus() Status {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -1215,7 +1177,7 @@ func (r *Chat) appendOptimisticUserMessage(item domain.QueuedInput, session doma
 	}
 	r.mu.Lock()
 	timelineItem := domain.TimelineItem{
-		ID:        now.UnixNano(),
+		ID:        domain.NewTimelineID(now),
 		ChatID:    chat.ID,
 		Seq:       int64(len(r.state.Timeline()) + 1),
 		Content:   user,
@@ -1241,7 +1203,7 @@ func (r *Chat) appendRuntimeNoticeLocked(body, kind, severity string) {
 	}
 	now := time.Now().UTC()
 	r.state.AppendTimelineItem(domain.TimelineItem{
-		ID:        -now.UnixNano(),
+		ID:        domain.NewTimelineID(now),
 		ChatID:    r.chat.ID,
 		Seq:       int64(len(r.state.Timeline()) + 1),
 		Content:   domain.Notice{Text: body, Kind: kind, Level: severity},

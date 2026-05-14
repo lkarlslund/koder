@@ -2051,7 +2051,7 @@ func (m *App) applyEvent(evt domain.Event) {
 		m.stopBusy()
 	case domain.EventKindMessageDone:
 		pending := m.activePendingAssistant()
-		if evt.Item.ID > 0 || !m.activeEventStream || (strings.TrimSpace(pending.Text) == "" && strings.TrimSpace(pending.Reasoning) == "") {
+		if evt.Item.ID != "" || !m.activeEventStream || (strings.TrimSpace(pending.Text) == "" && strings.TrimSpace(pending.Reasoning) == "") {
 			m.clearPendingAssistantTurn()
 			m.stopBusyWithStatus("Idle")
 		}
@@ -4993,8 +4993,9 @@ func (m *App) upsertCurrentSnapshotTimelineFromMessage(message domain.Message, p
 		return
 	}
 	now := time.Now().UTC()
+	itemID := timelineIDFromMessageID(message.ID)
 	item := domain.TimelineItem{
-		ID:        message.ID,
+		ID:        itemID,
 		ChatID:    firstNonZeroAppInt64(message.ChatID, m.currentSnapshot.Chat.ID, m.currentChat.ID),
 		Seq:       int64(len(m.currentSnapshot.Timeline) + 1),
 		Content:   timelineContentFromMessageParts(message, parts),
@@ -5005,7 +5006,7 @@ func (m *App) upsertCurrentSnapshotTimelineFromMessage(message domain.Message, p
 		item.CreatedAt = now
 	}
 	for idx := range m.currentSnapshot.Timeline {
-		if m.currentSnapshot.Timeline[idx].ID != message.ID {
+		if m.currentSnapshot.Timeline[idx].ID != itemID {
 			continue
 		}
 		existing := m.currentSnapshot.Timeline[idx]
@@ -5112,7 +5113,7 @@ func (m *App) updateTimelineToolCall(toolCallID string, update func(*domain.Tool
 }
 
 func (m *App) upsertCurrentSnapshotTimelineItem(item domain.TimelineItem) {
-	if item.ID == 0 {
+	if item.ID == "" {
 		return
 	}
 	if m.currentSnapshot.Chat.ID == 0 && m.currentChat.ID != 0 {
@@ -5264,6 +5265,16 @@ func firstNonZeroAppInt64(values ...int64) int64 {
 		}
 	}
 	return 0
+}
+
+func timelineIDFromMessageID(id int64) string {
+	if id == 0 {
+		return ""
+	}
+	if id < 0 {
+		id = -id
+	}
+	return fmt.Sprintf("019aa000-0000-7000-8000-%012d", id)
 }
 
 func (m *App) upsertCurrentSnapshotApproval(approval store.Approval) {
@@ -6940,7 +6951,7 @@ func (m *App) syncDebugRuntime() {
 				strconv.Itoa(item.GapBefore),
 				strconv.Itoa(item.Height),
 				strconv.Itoa(item.BlankRows),
-				strconv.FormatInt(item.MessageID, 10),
+				item.MessageID,
 				item.Role,
 				item.Summary,
 				string(item.Tool),
@@ -7064,13 +7075,13 @@ func (m App) debugTranscriptItems() []debugsrv.TranscriptItemRef {
 			case *userMessageTranscriptItem:
 				msg := typed.msg
 				ref.Kind = "message"
-				ref.MessageID = msg.ID
+				ref.MessageID = strconv.FormatInt(msg.ID, 10)
 				ref.Role = string(msg.Role)
 				ref.Summary = strings.TrimSpace(msg.Summary)
 			case *assistantMessageTranscriptItem:
 				msg := typed.msg
 				ref.Kind = "message"
-				ref.MessageID = msg.ID
+				ref.MessageID = strconv.FormatInt(msg.ID, 10)
 				ref.Role = string(msg.Role)
 				ref.Summary = strings.TrimSpace(msg.Summary)
 			case *pendingAssistantTranscriptItem:

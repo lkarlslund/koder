@@ -175,7 +175,7 @@ func TestWebSocketHelloReturnsState(t *testing.T) {
 
 func TestWebSocketChatUpdateIsCompactedToSingleItemDelta(t *testing.T) {
 	item := domain.TimelineItem{
-		ID:     42,
+		ID:     "019aa000-0000-7000-8000-000000000042",
 		ChatID: 7,
 		Seq:    3,
 		Content: domain.AssistantMessage{
@@ -185,7 +185,7 @@ func TestWebSocketChatUpdateIsCompactedToSingleItemDelta(t *testing.T) {
 	update := chat.Update{
 		Snapshot: chat.Snapshot{
 			Chat:     domain.Chat{ID: 7, SessionID: 1, Title: "Chat"},
-			Timeline: []domain.TimelineItem{{ID: 1, ChatID: 7, Seq: 1, Content: domain.UserMessage{Text: "old"}}, item},
+			Timeline: []domain.TimelineItem{{ID: "019aa000-0000-7000-8000-000000000001", ChatID: 7, Seq: 1, Content: domain.UserMessage{Text: "old"}}, item},
 			Status:   chat.StatusStreamingResponse,
 			Active:   true,
 		},
@@ -223,7 +223,7 @@ func TestWebSocketSnapshotEventIsCompactedToStateDelta(t *testing.T) {
 		Snapshots: map[int64]chat.Snapshot{
 			7: {
 				Chat:     domain.Chat{ID: 7, SessionID: 1, Title: "Chat"},
-				Timeline: []domain.TimelineItem{{ID: 1, ChatID: 7, Seq: 1, Content: domain.UserMessage{Text: "old transcript"}}},
+				Timeline: []domain.TimelineItem{{ID: "019aa000-0000-7000-8000-000000000001", ChatID: 7, Seq: 1, Content: domain.UserMessage{Text: "old transcript"}}},
 			},
 		},
 	}
@@ -378,8 +378,11 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `applyChatDelta(delta)`) || !strings.Contains(fullPage, `patchTimelineItem`) || !strings.Contains(fullPage, `msg.type === 'chat_delta'`) {
 		t.Fatalf("expected browser to patch compact chat deltas")
 	}
-	if !strings.Contains(fullPage, `(id && existingID === id) || (seq && existingSeq === seq)`) {
-		t.Fatalf("expected browser timeline patching to replace temporary streaming ids by stable sequence")
+	if !strings.Contains(fullPage, `if (!id) throw new Error('timeline delta missing item id')`) || !strings.Contains(fullPage, `return existingID === id`) {
+		t.Fatalf("expected browser timeline patching to require stable item ids")
+	}
+	if !strings.Contains(fullPage, `:key="item.id || item.ID"`) || strings.Contains(fullPage, `timelineKey(item)`) {
+		t.Fatalf("expected transcript rows to use item ids directly")
 	}
 	if !strings.Contains(fullPage, `applyStateDelta(delta)`) || !strings.Contains(fullPage, `msg.type === 'state_delta'`) {
 		t.Fatalf("expected browser to patch compact state deltas")

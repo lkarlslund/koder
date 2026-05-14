@@ -9,7 +9,7 @@ import (
 
 func TestChatStateMergeTimelineLoadedPreservesRecordIdentity(t *testing.T) {
 	initial := []domain.TimelineItem{{
-		ID:        1,
+		ID:        "019aa000-0000-7000-8000-000000000001",
 		ChatID:    7,
 		Seq:       1,
 		Content:   domain.UserMessage{Text: "one"},
@@ -19,7 +19,7 @@ func TestChatStateMergeTimelineLoadedPreservesRecordIdentity(t *testing.T) {
 	record := state.Timeline()[0]
 
 	updated := []domain.TimelineItem{{
-		ID:        1,
+		ID:        initial[0].ID,
 		ChatID:    7,
 		Seq:       1,
 		Content:   domain.UserMessage{Text: "updated"},
@@ -44,11 +44,11 @@ func TestChatStateMergeTimelineLoadedPreservesRecordIdentity(t *testing.T) {
 
 func TestChatStateUpsertTimelineItemPreservesRecordIdentity(t *testing.T) {
 	state := NewTimelineState(domain.Chat{ID: 7}, nil, nil)
-	record, created := state.UpsertTimelineItem(domain.TimelineItem{ID: 10, ChatID: 7, Seq: 1, Content: domain.AssistantMessage{Text: "first"}})
+	record, created := state.UpsertTimelineItem(domain.TimelineItem{ID: "019aa000-0000-7000-8000-000000000010", ChatID: 7, Seq: 1, Content: domain.AssistantMessage{Text: "first"}})
 	if !created || record == nil {
 		t.Fatalf("expected new timeline record")
 	}
-	updated, created := state.UpsertTimelineItem(domain.TimelineItem{ID: 10, ChatID: 7, Seq: 1, Content: domain.AssistantMessage{Text: "updated"}})
+	updated, created := state.UpsertTimelineItem(domain.TimelineItem{ID: "019aa000-0000-7000-8000-000000000010", ChatID: 7, Seq: 1, Content: domain.AssistantMessage{Text: "updated"}})
 	if created {
 		t.Fatal("expected existing timeline record to be reused")
 	}
@@ -72,7 +72,7 @@ func TestChatStateUpsertReplacesSealedStreamedAssistantWithFinalItem(t *testing.
 	}
 
 	final := domain.TimelineItem{
-		ID:     42,
+		ID:     streamed.Item.ID,
 		ChatID: 7,
 		Seq:    1,
 		Content: domain.AssistantMessage{
@@ -98,7 +98,7 @@ func TestChatStateUpsertReplacesSealedStreamedAssistantWithFinalItem(t *testing.
 		t.Fatalf("expected one assistant item, got %d", len(timeline))
 	}
 	if timeline[0].ID != final.ID {
-		t.Fatalf("expected durable final id %d, got %d", final.ID, timeline[0].ID)
+		t.Fatalf("expected durable final id %s, got %s", final.ID, timeline[0].ID)
 	}
 	assistant := timeline[0].Content.(domain.AssistantMessage)
 	if len(assistant.Tools) != 1 || assistant.Tools[0].ToolCallID != "call_1" {
@@ -111,8 +111,8 @@ func TestChatStateCurrentContextSizeFromTimeline(t *testing.T) {
 	state := NewTimelineState(
 		domain.Chat{ID: 7, LastKnownContextTokens: 1200, ContextTokensKnown: true},
 		[]domain.TimelineItem{
-			{ID: 1, ChatID: 7, Seq: 1, Content: domain.AssistantMessage{Usage: &domain.Usage{PromptTokens: 1200, CompletionTokens: 50, TotalTokens: 1250}}, CreatedAt: now},
-			{ID: 2, ChatID: 7, Seq: 2, Content: domain.UserMessage{Text: "inspect these files"}, CreatedAt: now.Add(time.Second)},
+			{ID: "019aa000-0000-7000-8000-000000000001", ChatID: 7, Seq: 1, Content: domain.AssistantMessage{Usage: &domain.Usage{PromptTokens: 1200, CompletionTokens: 50, TotalTokens: 1250}}, CreatedAt: now},
+			{ID: "019aa000-0000-7000-8000-000000000002", ChatID: 7, Seq: 2, Content: domain.UserMessage{Text: "inspect these files"}, CreatedAt: now.Add(time.Second)},
 		},
 		nil,
 	)

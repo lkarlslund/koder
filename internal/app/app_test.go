@@ -68,7 +68,7 @@ func timelineForTestTranscript(messages []domain.Message, parts map[int64][]doma
 			continue
 		}
 		items = append(items, domain.TimelineItem{
-			ID:        message.ID,
+			ID:        timelineIDFromMessageID(message.ID),
 			ChatID:    message.ChatID,
 			Seq:       int64(idx + 1),
 			Content:   timelineContentFromMessageParts(message, itemParts),

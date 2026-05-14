@@ -665,7 +665,7 @@ func TestRuntimeCompactionCompletionUpdatesContextImmediately(t *testing.T) {
 	defer unsub()
 
 	item := domain.TimelineItem{
-		ID:     999,
+		ID:     "019aa000-0000-7000-8000-000000000999",
 		ChatID: chat.ID,
 		Seq:    1,
 		Content: domain.Compaction{
@@ -731,7 +731,7 @@ func TestPersistRemapsOptimisticIDsAndReloadsWithoutDuplicates(t *testing.T) {
 		CreatedAt: time.Now().UTC(),
 	}, session, chatRecord)
 	before := rt.Snapshot()
-	if len(before.Timeline) != 1 || before.Timeline[0].ID <= 0 {
+	if len(before.Timeline) != 1 || before.Timeline[0].ID == "" {
 		t.Fatalf("unexpected optimistic snapshot: %#v", before.Timeline)
 	}
 
@@ -742,8 +742,8 @@ func TestPersistRemapsOptimisticIDsAndReloadsWithoutDuplicates(t *testing.T) {
 	if len(after.Timeline) != 1 {
 		t.Fatalf("timeline after persist = %#v", after.Timeline)
 	}
-	if after.Timeline[0].ID == before.Timeline[0].ID {
-		t.Fatalf("timeline ID was not remapped")
+	if after.Timeline[0].ID != before.Timeline[0].ID {
+		t.Fatalf("timeline ID changed during persist")
 	}
 	if err := rt.Persist(context.Background(), st); err != nil {
 		t.Fatal(err)

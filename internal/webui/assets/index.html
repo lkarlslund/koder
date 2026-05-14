@@ -40,7 +40,7 @@
       <template x-if="error">
         <div class="alert alert-danger" x-text="error"></div>
       </template>
-      <template x-for="item in timeline()" :key="item.id || item.seq">
+      <template x-for="item in timeline()" :key="item.id || item.ID">
         <section class="transcript-turn mb-4">
           <template x-if="item.kind === 'user'">
             <div class="turn user-turn">

@@ -571,7 +571,7 @@ func chatDeltaFromUpdate(update chat.Update) chatDelta {
 }
 
 func changedTimelineItem(update chat.Update) (domain.TimelineItem, bool) {
-	if update.Event != nil && update.Event.Item.ID != 0 {
+	if update.Event != nil && update.Event.Item.ID != "" {
 		return update.Event.Item, true
 	}
 	if !update.TranscriptChanged {

@@ -420,7 +420,7 @@ func (e *Engine) runModelPrompt(ctx context.Context, session domain.Session, cha
 			out <- domain.Event{Kind: domain.EventKindError, Err: err}
 			return
 		}
-		e.recordLifecycle(session.ID, "user_message_persisted", prompt, map[string]string{"item_id": strconv.FormatInt(userItem.ID, 10)})
+		e.recordLifecycle(session.ID, "user_message_persisted", prompt, map[string]string{"item_id": userItem.ID})
 		if err := e.continueModelTurn(ctx, session, chat, client, out, transientTurnMessages(note, "")); err != nil {
 			if interruptedErr(err) {
 				e.emitInterrupted(out, chat.ID, session.ID)
@@ -693,7 +693,11 @@ func (e *Engine) continueModelTurn(ctx context.Context, session domain.Session, 
 
 		stream := e.providerStreamingEnabled(session)
 		req := e.chatRequest(session, chat, messages, stream)
-		resp, streamed, completeErr := e.chatWithRetry(ctx, session.ID, client, out, req)
+		assistantItem, itemErr := e.nextAssistantTimelineItem(ctx, chat.ID)
+		if itemErr != nil {
+			return itemErr
+		}
+		resp, streamed, completeErr := e.chatWithRetry(ctx, session.ID, client, out, req, assistantItem)
 		if completeErr != nil {
 			return completeErr
 		}
@@ -709,7 +713,7 @@ func (e *Engine) continueModelTurn(ctx context.Context, session domain.Session, 
 					"tool_calls": strconv.Itoa(len(resp.ToolCalls)),
 				})
 			} else if len(calls) > 0 {
-				assistantItem, err := e.persistAssistantToolCalls(ctx, chat.ID, session.ID, calls, strings.TrimSpace(resp.Text), resp.Usage)
+				assistantItem, err := e.persistAssistantToolCalls(ctx, chat.ID, session.ID, assistantItem, calls, strings.TrimSpace(resp.Text), resp.Usage)
 				if err != nil {
 					return err
 				}
@@ -805,20 +809,25 @@ func (e *Engine) continueModelTurn(ctx context.Context, session domain.Session, 
 			}
 		}
 		if !streamed && strings.TrimSpace(text) != "" {
-			out <- domain.Event{Kind: domain.EventKindMessageDelta, Text: text}
+			out <- domain.Event{Kind: domain.EventKindMessageDelta, Text: text, Item: assistantItem}
 		}
 		if !streamed && strings.TrimSpace(reasoning) != "" {
-			out <- domain.Event{Kind: domain.EventKindReasoning, Text: reasoning}
+			out <- domain.Event{Kind: domain.EventKindReasoning, Text: reasoning, Item: assistantItem}
 		}
-		assistantItem, err := e.store.AppendTimeline(ctx, chat.ID, assistant)
-		if err != nil {
+		now := time.Now().UTC()
+		assistantItem.Content = assistant
+		if assistantItem.CreatedAt.IsZero() {
+			assistantItem.CreatedAt = now
+		}
+		assistantItem.UpdatedAt = now
+		if _, err := e.store.InsertTimelineItem(ctx, assistantItem); err != nil {
 			return err
 		}
 		assistantItem.Seal(time.Now().UTC())
 		if err := e.store.Timeline().Put(ctx, assistantItem); err != nil {
 			return err
 		}
-		e.recordLifecycle(session.ID, "assistant_message_persisted", strings.TrimSpace(text), map[string]string{"item_id": strconv.FormatInt(assistantItem.ID, 10)})
+		e.recordLifecycle(session.ID, "assistant_message_persisted", strings.TrimSpace(text), map[string]string{"item_id": assistantItem.ID})
 		chatTitle, chatTitleErr := e.maybeUpdateChatTitle(ctx, chat.ID)
 		if chatTitleErr != nil {
 			e.recordLifecycle(session.ID, "chat_title_update_failed", chatTitleErr.Error(), map[string]string{"chat_id": strconv.FormatInt(chat.ID, 10)})
@@ -2012,7 +2021,7 @@ func waitForRetry(ctx context.Context, delay time.Duration, onTick func(time.Dur
 	}
 }
 
-func (e *Engine) chatWithRetry(ctx context.Context, sessionID int64, client *provider.Client, out chan<- domain.Event, req provider.ChatRequest) (provider.ChatResponse, bool, error) {
+func (e *Engine) chatWithRetry(ctx context.Context, sessionID int64, client *provider.Client, out chan<- domain.Event, req provider.ChatRequest, streamItem domain.TimelineItem) (provider.ChatResponse, bool, error) {
 	for attempt := 0; ; attempt++ {
 		var (
 			resp           provider.ChatResponse
@@ -2023,6 +2032,9 @@ func (e *Engine) chatWithRetry(ctx context.Context, sessionID int64, client *pro
 		if req.Stream {
 			resp, err = client.StreamChatResponse(ctx, req, func(evt domain.Event) {
 				receivedStream = true
+				if (evt.Kind == domain.EventKindMessageDelta || evt.Kind == domain.EventKindReasoning) && evt.Item.ID == "" {
+					evt.Item = streamItem
+				}
 				if out != nil {
 					out <- evt
 				}
@@ -2087,6 +2099,22 @@ func (e *Engine) chatWithRetry(ctx context.Context, sessionID int64, client *pro
 			return provider.ChatResponse{}, streamed, err
 		}
 	}
+}
+
+func (e *Engine) nextAssistantTimelineItem(ctx context.Context, chatID int64) (domain.TimelineItem, error) {
+	now := time.Now().UTC()
+	items, err := e.store.TimelineForChat(ctx, chatID)
+	if err != nil {
+		return domain.TimelineItem{}, err
+	}
+	return domain.TimelineItem{
+		ID:        domain.NewTimelineID(now),
+		ChatID:    chatID,
+		Seq:       int64(len(items) + 1),
+		Content:   domain.AssistantMessage{},
+		CreatedAt: now,
+		UpdatedAt: now,
+	}, nil
 }
 
 func formatRateLimitRetryStatus(delay time.Duration, retryNumber int) string {
@@ -2250,7 +2278,7 @@ func (e *Engine) buildPromptEnvelopeForTimeline(session domain.Session, chat dom
 	return envelope, nil
 }
 
-func (e *Engine) timelineMessagesForCompactionTail(session domain.Session, items []domain.TimelineItem, firstKeptItemID int64) ([]provider.Message, error) {
+func (e *Engine) timelineMessagesForCompactionTail(session domain.Session, items []domain.TimelineItem, firstKeptItemID string) ([]provider.Message, error) {
 	start := firstKeptTimelineIndex(items, firstKeptItemID)
 	if start < 0 {
 		start = preservedTimelineToolTailStart(items, e.compactionKeepToolBatches())
@@ -2269,8 +2297,8 @@ func (e *Engine) timelineMessagesForCompactionTail(session domain.Session, items
 	return out, nil
 }
 
-func firstKeptTimelineIndex(items []domain.TimelineItem, firstKeptItemID int64) int {
-	if firstKeptItemID <= 0 {
+func firstKeptTimelineIndex(items []domain.TimelineItem, firstKeptItemID string) int {
+	if strings.TrimSpace(firstKeptItemID) == "" {
 		return -1
 	}
 	for idx, item := range items {
@@ -2330,7 +2358,7 @@ func (e *Engine) conversationMessagesForTimelineItem(session domain.Session, ite
 		var toolCalls []provider.ToolCall
 		for _, tool := range content.Tools {
 			if strings.TrimSpace(string(tool.ToolCallID)) == "" {
-				return nil, fmt.Errorf("assistant item %d has tool call without id", item.ID)
+				return nil, fmt.Errorf("assistant item %s has tool call without id", item.ID)
 			}
 			toolCalls = append(toolCalls, tools.ToolCall(tools.Request{
 				Tool:       tool.Tool,
@@ -2362,7 +2390,7 @@ func (e *Engine) conversationMessagesForTimelineItem(session domain.Session, ite
 		}
 		return out, nil
 	case domain.Compaction:
-		return nil, fmt.Errorf("compaction item %d must be handled at envelope boundary", item.ID)
+		return nil, fmt.Errorf("compaction item %s must be handled at envelope boundary", item.ID)
 	case domain.ToolExecution:
 		body := ""
 		if content.Result != nil {
@@ -2378,7 +2406,7 @@ func (e *Engine) conversationMessagesForTimelineItem(session domain.Session, ite
 	case domain.Notice:
 		return nil, nil
 	default:
-		return nil, fmt.Errorf("unsupported timeline item %d content %T", item.ID, item.Content)
+		return nil, fmt.Errorf("unsupported timeline item %s content %T", item.ID, item.Content)
 	}
 }
 
@@ -2964,17 +2992,17 @@ func (e *Engine) compactSession(ctx context.Context, session domain.Session, cha
 	return nil
 }
 
-func (e *Engine) buildCompactionConversationForTimeline(session domain.Session, chat domain.Chat, timeline []domain.TimelineItem) ([]provider.Message, int64, error) {
+func (e *Engine) buildCompactionConversationForTimeline(session domain.Session, chat domain.Chat, timeline []domain.TimelineItem) ([]provider.Message, string, error) {
 	keepStart := preservedTimelineToolTailStart(timeline, e.compactionKeepToolBatches())
 	head := timeline
-	firstKeptItemID := int64(0)
+	firstKeptItemID := ""
 	if keepStart < len(timeline) {
 		head = timeline[:keepStart]
 		firstKeptItemID = timeline[keepStart].ID
 	}
 	envelope, err := e.buildPromptEnvelopeForTimeline(session, chat, head, "", nil, nil, nil)
 	if err != nil {
-		return nil, 0, err
+		return nil, "", err
 	}
 	return provider.SerializePromptEnvelope(envelope), firstKeptItemID, nil
 }
@@ -2991,7 +3019,7 @@ func (e *Engine) estimateContextTokensForTimeline(session domain.Session, chat d
 	return len(payload) / 4
 }
 
-func (e *Engine) estimateCompactedTimelineContextTokens(session domain.Session, chat domain.Chat, timeline []domain.TimelineItem, compactionItem domain.TimelineItem, firstKeptItemID int64, summary string) int {
+func (e *Engine) estimateCompactedTimelineContextTokens(session domain.Session, chat domain.Chat, timeline []domain.TimelineItem, compactionItem domain.TimelineItem, firstKeptItemID string, summary string) int {
 	firstKeptIdx := firstKeptTimelineIndex(timeline, firstKeptItemID)
 	if firstKeptIdx < 0 {
 		firstKeptIdx = len(timeline)
@@ -3172,7 +3200,7 @@ func (e *Engine) parseProviderToolCall(item provider.ToolCall) (tools.Request, e
 	return tools.Normalize(req)
 }
 
-func (e *Engine) persistAssistantToolCalls(ctx context.Context, chatID, sessionID int64, calls []tools.Request, text string, usage domain.Usage) (domain.TimelineItem, error) {
+func (e *Engine) persistAssistantToolCalls(ctx context.Context, chatID, sessionID int64, item domain.TimelineItem, calls []tools.Request, text string, usage domain.Usage) (domain.TimelineItem, error) {
 	toolCalls := make([]domain.ToolCall, 0, len(calls))
 	for _, call := range calls {
 		toolCalls = append(toolCalls, domain.ToolCall{
@@ -3182,7 +3210,7 @@ func (e *Engine) persistAssistantToolCalls(ctx context.Context, chatID, sessionI
 			Status:     domain.ToolStatusPending,
 		})
 	}
-	item, err := e.store.AppendAssistantToolCalls(ctx, chatID, toolCalls, text, usage)
+	item, err := e.store.AppendAssistantToolCallsWithItem(ctx, chatID, item, toolCalls, text, usage)
 	if err != nil {
 		return domain.TimelineItem{}, err
 	}

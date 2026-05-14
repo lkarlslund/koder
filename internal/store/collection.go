@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strconv"
+	"time"
 
 	"github.com/lkarlslund/koder/internal/domain"
 )
@@ -13,8 +15,8 @@ import (
 type CollectionSpec[T any] struct {
 	Namespace string
 	NextID    string
-	GetID     func(T) int64
-	SetID     func(*T, int64)
+	GetID     func(T) string
+	SetID     func(*T, string)
 	Indexes   []IndexSpec[T]
 }
 
@@ -49,9 +51,9 @@ type Collection[T any] struct {
 
 type collectionBackend interface {
 	allocateCollectionID(context.Context, string) (int64, error)
-	getCollectionRecord(context.Context, string, int64) ([]byte, error)
-	putCollectionRecord(context.Context, string, int64, []byte, map[string]string) error
-	deleteCollectionRecord(context.Context, string, int64) error
+	getCollectionRecord(context.Context, string, string) ([]byte, error)
+	putCollectionRecord(context.Context, string, string, []byte, map[string]string) error
+	deleteCollectionRecord(context.Context, string, string) error
 	listCollectionRecords(context.Context, string, *indexLookup) ([][]byte, error)
 	transaction(context.Context, func() error) error
 }
@@ -71,8 +73,8 @@ func (s *Store) Sessions() Collection[domain.Session] {
 	return NewCollection(s, CollectionSpec[domain.Session]{
 		Namespace: "sessions",
 		NextID:    "session",
-		GetID:     func(v domain.Session) int64 { return v.ID },
-		SetID:     func(v *domain.Session, id int64) { v.ID = id },
+		GetID:     func(v domain.Session) string { return numericCollectionID(v.ID) },
+		SetID:     func(v *domain.Session, id string) { v.ID = mustParseCollectionID(id) },
 	})
 }
 
@@ -81,8 +83,8 @@ func (s *Store) Chats() Collection[domain.Chat] {
 	return NewCollection(s, CollectionSpec[domain.Chat]{
 		Namespace: "chats",
 		NextID:    "chat",
-		GetID:     func(v domain.Chat) int64 { return v.ID },
-		SetID:     func(v *domain.Chat, id int64) { v.ID = id },
+		GetID:     func(v domain.Chat) string { return numericCollectionID(v.ID) },
+		SetID:     func(v *domain.Chat, id string) { v.ID = mustParseCollectionID(id) },
 		Indexes: []IndexSpec[domain.Chat]{
 			{Name: "session", Value: func(v domain.Chat) string { return fmt.Sprint(v.SessionID) }},
 		},
@@ -93,9 +95,8 @@ func (s *Store) Chats() Collection[domain.Chat] {
 func (s *Store) Timeline() Collection[domain.TimelineItem] {
 	return NewCollection(s, CollectionSpec[domain.TimelineItem]{
 		Namespace: "timeline",
-		NextID:    "timeline",
-		GetID:     func(v domain.TimelineItem) int64 { return v.ID },
-		SetID:     func(v *domain.TimelineItem, id int64) { v.ID = id },
+		GetID:     func(v domain.TimelineItem) string { return v.ID },
+		SetID:     func(v *domain.TimelineItem, id string) { v.ID = id },
 		Indexes: []IndexSpec[domain.TimelineItem]{
 			{Name: "chat", Value: func(v domain.TimelineItem) string { return fmt.Sprint(v.ChatID) }},
 		},
@@ -107,8 +108,8 @@ func (s *Store) Approvals() Collection[Approval] {
 	return NewCollection(s, CollectionSpec[Approval]{
 		Namespace: "approvals",
 		NextID:    "approval",
-		GetID:     func(v Approval) int64 { return v.ID },
-		SetID:     func(v *Approval, id int64) { v.ID = id },
+		GetID:     func(v Approval) string { return numericCollectionID(v.ID) },
+		SetID:     func(v *Approval, id string) { v.ID = mustParseCollectionID(id) },
 		Indexes: []IndexSpec[Approval]{
 			{Name: "session", Value: func(v Approval) string { return fmt.Sprint(v.SessionID) }},
 			{Name: "chat", Value: func(v Approval) string { return fmt.Sprint(v.ChatID) }},
@@ -122,8 +123,8 @@ func (s *Store) WorkspaceStates() Collection[WorkspaceState] {
 	return NewCollection(s, CollectionSpec[WorkspaceState]{
 		Namespace: "workspace-states",
 		NextID:    "workspace-state",
-		GetID:     func(v WorkspaceState) int64 { return v.ID },
-		SetID:     func(v *WorkspaceState, id int64) { v.ID = id },
+		GetID:     func(v WorkspaceState) string { return numericCollectionID(v.ID) },
+		SetID:     func(v *WorkspaceState, id string) { v.ID = mustParseCollectionID(id) },
 		Indexes: []IndexSpec[WorkspaceState]{
 			{Name: "workdir", Value: func(v WorkspaceState) string { return v.Workdir }},
 		},
@@ -131,15 +132,19 @@ func (s *Store) WorkspaceStates() Collection[WorkspaceState] {
 }
 
 // Get loads one record by durable ID.
-func (c Collection[T]) Get(ctx context.Context, id int64) (T, error) {
+func (c Collection[T]) Get(ctx context.Context, id any) (T, error) {
 	var zero T
-	raw, err := c.backend().getCollectionRecord(ctx, c.spec.Namespace, id)
+	key, err := collectionIDKey(id)
+	if err != nil {
+		return zero, err
+	}
+	raw, err := c.backend().getCollectionRecord(ctx, c.spec.Namespace, key)
 	if err != nil {
 		return zero, err
 	}
 	var out T
 	if err := json.Unmarshal(raw, &out); err != nil {
-		return zero, fmt.Errorf("decode %s %d: %w", c.spec.Namespace, id, err)
+		return zero, fmt.Errorf("decode %s %v: %w", c.spec.Namespace, id, err)
 	}
 	return out, nil
 }
@@ -147,7 +152,7 @@ func (c Collection[T]) Get(ctx context.Context, id int64) (T, error) {
 // Put upserts one record with its existing durable ID.
 func (c Collection[T]) Put(ctx context.Context, value T) error {
 	id := c.spec.GetID(value)
-	if id <= 0 {
+	if id == "" {
 		return fmt.Errorf("put %s: id is required", c.spec.Namespace)
 	}
 	return c.put(ctx, value)
@@ -155,13 +160,17 @@ func (c Collection[T]) Put(ctx context.Context, value T) error {
 
 // Insert allocates a durable ID and stores one record.
 func (c Collection[T]) Insert(ctx context.Context, value T) (T, error) {
-	if c.spec.GetID(value) <= 0 {
-		id, err := c.backend().allocateCollectionID(ctx, c.spec.NextID)
-		if err != nil {
-			var zero T
-			return zero, err
+	if c.spec.GetID(value) == "" {
+		if c.spec.NextID != "" {
+			id, err := c.backend().allocateCollectionID(ctx, c.spec.NextID)
+			if err != nil {
+				var zero T
+				return zero, err
+			}
+			c.spec.SetID(&value, numericCollectionID(id))
+		} else {
+			c.spec.SetID(&value, domain.NewTimelineID(time.Now().UTC()))
 		}
-		c.spec.SetID(&value, id)
 	}
 	if err := c.put(ctx, value); err != nil {
 		var zero T
@@ -171,8 +180,12 @@ func (c Collection[T]) Insert(ctx context.Context, value T) (T, error) {
 }
 
 // Delete removes one record by durable ID.
-func (c Collection[T]) Delete(ctx context.Context, id int64) error {
-	return c.backend().deleteCollectionRecord(ctx, c.spec.Namespace, id)
+func (c Collection[T]) Delete(ctx context.Context, id any) error {
+	key, err := collectionIDKey(id)
+	if err != nil {
+		return err
+	}
+	return c.backend().deleteCollectionRecord(ctx, c.spec.Namespace, key)
 }
 
 // List returns records matching query, sorted by ID when the spec has an ID function.
@@ -244,6 +257,45 @@ func (c Collection[T]) put(ctx context.Context, value T) error {
 		indexes[spec.Name] = spec.Value(value)
 	}
 	return c.backend().putCollectionRecord(ctx, c.spec.Namespace, c.spec.GetID(value), data, indexes)
+}
+
+func numericCollectionID(id int64) string {
+	if id <= 0 {
+		return ""
+	}
+	return formatID(id)
+}
+
+func collectionIDKey(id any) (string, error) {
+	switch typed := id.(type) {
+	case string:
+		if typed == "" {
+			return "", fmt.Errorf("collection id is required")
+		}
+		return typed, nil
+	case int:
+		key := numericCollectionID(int64(typed))
+		if key == "" {
+			return "", fmt.Errorf("collection id is required")
+		}
+		return key, nil
+	case int64:
+		key := numericCollectionID(typed)
+		if key == "" {
+			return "", fmt.Errorf("collection id is required")
+		}
+		return key, nil
+	default:
+		return "", fmt.Errorf("unsupported collection id %T", id)
+	}
+}
+
+func mustParseCollectionID(id string) int64 {
+	parsed, err := strconv.ParseInt(id, 10, 64)
+	if err != nil {
+		panic(err)
+	}
+	return parsed
 }
 
 func (c Collection[T]) backend() collectionBackend {

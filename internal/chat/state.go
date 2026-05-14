@@ -17,7 +17,7 @@ import (
 type ChatState struct {
 	chat      domain.Chat
 	timeline  []*TimelineRecord
-	byItem    map[int64]*TimelineRecord
+	byItem    map[string]*TimelineRecord
 	approvals []store.Approval
 	toolRuns  []*ToolRunRecord
 	pending   PendingAssistantTurn
@@ -54,10 +54,10 @@ func NewTimelineState(chat domain.Chat, timeline []domain.TimelineItem, approval
 func (s *ChatState) MergeTimelineLoaded(chat domain.Chat, timeline []domain.TimelineItem, approvals []store.Approval) {
 	s.chat = chat
 	if s.byItem == nil {
-		s.byItem = map[int64]*TimelineRecord{}
+		s.byItem = map[string]*TimelineRecord{}
 	}
 	nextTimeline := make([]*TimelineRecord, 0, len(timeline))
-	nextByItem := make(map[int64]*TimelineRecord, len(timeline))
+	nextByItem := make(map[string]*TimelineRecord, len(timeline))
 	for _, item := range timeline {
 		record := s.byItem[item.ID]
 		if record == nil {
@@ -182,7 +182,10 @@ func (s *ChatState) AppendTimelineItem(item domain.TimelineItem) *TimelineRecord
 		return nil
 	}
 	if s.byItem == nil {
-		s.byItem = map[int64]*TimelineRecord{}
+		s.byItem = map[string]*TimelineRecord{}
+	}
+	if item.ID == "" {
+		item.ID = domain.NewTimelineID(item.CreatedAt)
 	}
 	record := &TimelineRecord{Item: item}
 	s.timeline = append(s.timeline, record)
@@ -196,7 +199,10 @@ func (s *ChatState) UpsertTimelineItem(item domain.TimelineItem) (*TimelineRecor
 		return nil, false
 	}
 	if s.byItem == nil {
-		s.byItem = map[int64]*TimelineRecord{}
+		s.byItem = map[string]*TimelineRecord{}
+	}
+	if item.ID == "" {
+		item.ID = domain.NewTimelineID(item.CreatedAt)
 	}
 	if record := s.replaceTemporaryActiveAssistant(item); record != nil {
 		return record, false
@@ -275,7 +281,7 @@ func streamedAssistantMatchesFinal(streamed, final domain.AssistantMessage) bool
 }
 
 func isDurableTimelineItem(item domain.TimelineItem) bool {
-	return item.ID > 0 && item.ID <= 1_000_000_000_000
+	return item.ID != ""
 }
 
 // SnapshotTimeline returns detached timeline values.
@@ -306,7 +312,7 @@ func (s *ChatState) ActiveAssistant(chatID int64, now time.Time) *TimelineRecord
 	}
 	seq := int64(len(s.timeline) + 1)
 	item := domain.TimelineItem{
-		ID:        -now.UnixNano(),
+		ID:        domain.NewTimelineID(now),
 		ChatID:    chatID,
 		Seq:       seq,
 		Content:   domain.AssistantMessage{},
@@ -344,11 +350,11 @@ func (s *ChatState) AppendAssistantText(chatID int64, text string) error {
 		return nil
 	}
 	if record.Item.Sealed() {
-		return fmt.Errorf("assistant item %d is sealed", record.Item.ID)
+		return fmt.Errorf("assistant item %s is sealed", record.Item.ID)
 	}
 	assistant, ok := record.Item.Content.(domain.AssistantMessage)
 	if !ok {
-		return fmt.Errorf("timeline item %d is not assistant", record.Item.ID)
+		return fmt.Errorf("timeline item %s is not assistant", record.Item.ID)
 	}
 	assistant.AppendText(text)
 	record.Item.Content = assistant
@@ -366,11 +372,11 @@ func (s *ChatState) AppendAssistantReasoning(chatID int64, text string) error {
 		return nil
 	}
 	if record.Item.Sealed() {
-		return fmt.Errorf("assistant item %d is sealed", record.Item.ID)
+		return fmt.Errorf("assistant item %s is sealed", record.Item.ID)
 	}
 	assistant, ok := record.Item.Content.(domain.AssistantMessage)
 	if !ok {
-		return fmt.Errorf("timeline item %d is not assistant", record.Item.ID)
+		return fmt.Errorf("timeline item %s is not assistant", record.Item.ID)
 	}
 	assistant.AppendReasoning(text)
 	record.Item.Content = assistant

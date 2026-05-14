@@ -464,12 +464,11 @@
         },
         patchTimelineItem(timeline, item) {
           const out = Array.isArray(timeline) ? timeline.slice() : [];
-          const id = item.id || item.ID || 0;
-          const seq = item.seq || item.Seq || 0;
+          const id = item.id || item.ID || '';
+          if (!id) throw new Error('timeline delta missing item id');
           const idx = out.findIndex(existing => {
-            const existingID = existing.id || existing.ID || 0;
-            const existingSeq = existing.seq || existing.Seq || 0;
-            return (id && existingID === id) || (seq && existingSeq === seq);
+            const existingID = existing.id || existing.ID || '';
+            return existingID === id;
           });
           if (idx >= 0) out[idx] = item; else out.push(item);
           return out;

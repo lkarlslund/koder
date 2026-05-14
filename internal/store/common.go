@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	schemaVersion = 3
+	schemaVersion = 4
 	encodingJSON  = "json"
 )
 
@@ -80,12 +80,12 @@ func collectionRecordPrefix(namespace string) string {
 	return "collection/" + namespace + "/"
 }
 
-func collectionRecordKey(namespace string, id int64) string {
-	return collectionRecordPrefix(namespace) + formatID(id)
+func collectionRecordKey(namespace string, id string) string {
+	return collectionRecordPrefix(namespace) + id
 }
 
-func collectionIndexKey(namespace, name, value string, id int64) string {
-	return "collection-index/" + namespace + "/" + name + "/" + value + "/" + formatID(id)
+func collectionIndexKey(namespace, name, value, id string) string {
+	return "collection-index/" + namespace + "/" + name + "/" + value + "/" + id
 }
 
 func parseIDFromSuffix(key, prefix string) (int64, error) {

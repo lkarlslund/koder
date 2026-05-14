@@ -118,7 +118,7 @@ type TranscriptItemRef struct {
 	GapBefore int             `json:"gap_before"`
 	Height    int             `json:"height"`
 	BlankRows int             `json:"blank_rows"`
-	MessageID int64           `json:"message_id,omitempty"`
+	MessageID string          `json:"message_id,omitempty"`
 	Role      string          `json:"role,omitempty"`
 	Summary   string          `json:"summary,omitempty"`
 	Tool      domain.ToolKind `json:"tool,omitempty"`
@@ -144,12 +144,12 @@ type SessionContinueRecord struct {
 }
 
 type SessionBadStopRecord struct {
-	MessageID        int64     `json:"message_id"`
+	MessageID        string    `json:"message_id"`
 	ChatID           int64     `json:"chat_id"`
 	CreatedAt        time.Time `json:"created_at"`
 	Summary          string    `json:"summary,omitempty"`
 	Text             string    `json:"text,omitempty"`
-	NextMessageID    int64     `json:"next_message_id,omitempty"`
+	NextMessageID    string    `json:"next_message_id,omitempty"`
 	NextRole         string    `json:"next_role,omitempty"`
 	NextKind         string    `json:"next_kind,omitempty"`
 	NextTool         string    `json:"next_tool,omitempty"`

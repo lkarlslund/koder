@@ -134,19 +134,19 @@ func (b *pebbleBackend) allocateCollectionID(ctx context.Context, key string) (i
 	return next, nil
 }
 
-func (b *pebbleBackend) getCollectionRecord(ctx context.Context, namespace string, id int64) ([]byte, error) {
+func (b *pebbleBackend) getCollectionRecord(ctx context.Context, namespace string, id string) ([]byte, error) {
 	if err := ensureContext(ctx); err != nil {
 		return nil, err
 	}
 	data, closer, err := b.db.Get([]byte(collectionRecordKey(namespace, id)))
 	if err != nil {
-		return nil, fmt.Errorf("get %s %d: %w", namespace, id, err)
+		return nil, fmt.Errorf("get %s %s: %w", namespace, id, err)
 	}
 	defer closer.Close()
 	return cloneBytes(data), nil
 }
 
-func (b *pebbleBackend) putCollectionRecord(ctx context.Context, namespace string, id int64, data []byte, indexes map[string]string) error {
+func (b *pebbleBackend) putCollectionRecord(ctx context.Context, namespace string, id string, data []byte, indexes map[string]string) error {
 	if err := ensureContext(ctx); err != nil {
 		return err
 	}
@@ -155,17 +155,17 @@ func (b *pebbleBackend) putCollectionRecord(ctx context.Context, namespace strin
 	batch := b.db.NewBatch()
 	defer batch.Close()
 	if err := batch.Set([]byte(collectionRecordKey(namespace, id)), data, nil); err != nil {
-		return fmt.Errorf("put %s %d: %w", namespace, id, err)
+		return fmt.Errorf("put %s %s: %w", namespace, id, err)
 	}
 	for name, value := range indexes {
 		if err := batch.Set([]byte(collectionIndexKey(namespace, name, value, id)), nil, nil); err != nil {
-			return fmt.Errorf("index %s %d: %w", namespace, id, err)
+			return fmt.Errorf("index %s %s: %w", namespace, id, err)
 		}
 	}
 	return batch.Commit(pebble.Sync)
 }
 
-func (b *pebbleBackend) deleteCollectionRecord(ctx context.Context, namespace string, id int64) error {
+func (b *pebbleBackend) deleteCollectionRecord(ctx context.Context, namespace string, id string) error {
 	if err := ensureContext(ctx); err != nil {
 		return err
 	}
@@ -454,7 +454,7 @@ func (b *pebbleBackend) DeleteChat(ctx context.Context, chatID int64) error {
 	if err := batch.Delete([]byte(chatSessionIndexKey(chat.SessionID, chatID)), nil); err != nil {
 		return fmt.Errorf("delete chat session index: %w", err)
 	}
-	if err := batch.Delete([]byte(collectionRecordKey("chats", chatID)), nil); err != nil && !errors.Is(err, pebble.ErrNotFound) {
+	if err := batch.Delete([]byte(collectionRecordKey("chats", numericCollectionID(chatID))), nil); err != nil && !errors.Is(err, pebble.ErrNotFound) {
 		return fmt.Errorf("delete generic chat: %w", err)
 	}
 	for _, approvalID := range approvalIDs {

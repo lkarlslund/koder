@@ -142,8 +142,8 @@ func TestGenericCollectionRoundTripAndIndex(t *testing.T) {
 			notes := NewCollection(st, CollectionSpec[note]{
 				Namespace: "test-notes",
 				NextID:    "test-note",
-				GetID:     func(v note) int64 { return v.ID },
-				SetID:     func(v *note, id int64) { v.ID = id },
+				GetID:     func(v note) string { return numericCollectionID(v.ID) },
+				SetID:     func(v *note, id string) { v.ID = mustParseCollectionID(id) },
 				Indexes: []IndexSpec[note]{
 					{Name: "chat", Value: func(v note) string { return strconv.FormatInt(v.ChatID, 10) }},
 				},
@@ -212,8 +212,8 @@ func TestGenericCollectionTransactionPersistsMultipleCollections(t *testing.T) {
 			notes := NewCollection(st, CollectionSpec[note]{
 				Namespace: "tx-notes",
 				NextID:    "tx-note",
-				GetID:     func(v note) int64 { return v.ID },
-				SetID:     func(v *note, id int64) { v.ID = id },
+				GetID:     func(v note) string { return numericCollectionID(v.ID) },
+				SetID:     func(v *note, id string) { v.ID = mustParseCollectionID(id) },
 				Indexes: []IndexSpec[note]{
 					{Name: "chat", Value: func(v note) string { return strconv.FormatInt(v.ChatID, 10) }},
 				},
@@ -221,8 +221,8 @@ func TestGenericCollectionTransactionPersistsMultipleCollections(t *testing.T) {
 			markers := NewCollection(st, CollectionSpec[marker]{
 				Namespace: "tx-markers",
 				NextID:    "tx-marker",
-				GetID:     func(v marker) int64 { return v.ID },
-				SetID:     func(v *marker, id int64) { v.ID = id },
+				GetID:     func(v marker) string { return numericCollectionID(v.ID) },
+				SetID:     func(v *marker, id string) { v.ID = mustParseCollectionID(id) },
 				Indexes: []IndexSpec[marker]{
 					{Name: "note", Value: func(v marker) string { return strconv.FormatInt(v.NoteID, 10) }},
 				},

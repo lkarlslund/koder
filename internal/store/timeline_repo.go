@@ -133,6 +133,11 @@ func (s *Store) updateToolCall(ctx context.Context, chatID int64, toolCallID str
 
 // AppendAssistantToolCalls appends an assistant item with direct child tool calls.
 func (s *Store) AppendAssistantToolCalls(ctx context.Context, chatID int64, calls []domain.ToolCall, text string, usage domain.Usage) (domain.TimelineItem, error) {
+	return s.AppendAssistantToolCallsWithItem(ctx, chatID, domain.TimelineItem{}, calls, text, usage)
+}
+
+// AppendAssistantToolCallsWithItem appends an assistant item with a preassigned timeline identity.
+func (s *Store) AppendAssistantToolCallsWithItem(ctx context.Context, chatID int64, item domain.TimelineItem, calls []domain.ToolCall, text string, usage domain.Usage) (domain.TimelineItem, error) {
 	if len(calls) == 0 && strings.TrimSpace(text) == "" {
 		return domain.TimelineItem{}, fmt.Errorf("assistant item needs text or tool calls")
 	}
@@ -146,9 +151,32 @@ func (s *Store) AppendAssistantToolCalls(ctx context.Context, chatID int64, call
 	if usage.HasAnyTokens() {
 		assistant.Usage = &usage
 	}
-	item, err := s.AppendTimeline(ctx, chatID, assistant)
-	if err != nil {
-		return domain.TimelineItem{}, err
+	if item.ID == "" {
+		var err error
+		item, err = s.AppendTimeline(ctx, chatID, assistant)
+		if err != nil {
+			return domain.TimelineItem{}, err
+		}
+	} else {
+		now := time.Now().UTC()
+		if item.ChatID == 0 {
+			item.ChatID = chatID
+		}
+		if item.Seq == 0 {
+			items, err := s.TimelineForChat(ctx, chatID)
+			if err != nil {
+				return domain.TimelineItem{}, err
+			}
+			item.Seq = int64(len(items) + 1)
+		}
+		if item.CreatedAt.IsZero() {
+			item.CreatedAt = now
+		}
+		item.UpdatedAt = now
+		item.Content = assistant
+		if _, err := s.Timeline().Insert(ctx, item); err != nil {
+			return domain.TimelineItem{}, err
+		}
 	}
 	item.Seal(time.Now().UTC())
 	if err := s.Timeline().Put(ctx, item); err != nil {
@@ -172,7 +200,7 @@ func (s *Store) ForkTimeline(ctx context.Context, sourceSessionID, destSessionID
 		return err
 	}
 	for idx, item := range slices.Clone(items) {
-		item.ID = 0
+		item.ID = ""
 		item.ChatID = destChat.ID
 		item.Seq = int64(idx + 1)
 		if _, err := s.Timeline().Insert(ctx, item); err != nil {
