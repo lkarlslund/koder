@@ -24,7 +24,7 @@
         <span class="text-secondary small" x-text="state.session?.title || 'New Session'"></span>
       </div>
       <div class="d-flex align-items-center gap-2">
-        <span class="badge text-bg-secondary" x-text="connected ? 'connected' : 'offline'"></span>
+        <span class="badge text-bg-secondary" x-text="connectionLabel()"></span>
         <button class="btn btn-sm btn-outline-secondary" title="Sessions" @click="openSessionDialog()"><i class="bi bi-collection"></i></button>
         <button class="btn btn-sm btn-outline-secondary" title="Providers" @click="openProviderDialog()"><i class="bi bi-plug"></i></button>
         <select class="form-select form-select-sm" x-model="theme" @change="setTheme(theme)" style="width: 8rem">

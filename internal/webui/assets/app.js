@@ -209,13 +209,22 @@
     }
     function koderApp() {
       return {
-        ws: null, nextID: 1, pending: {}, state: {}, connected: false, draft: '', showPermissions: false,
+        ws: null, reconnectTimer: null, connectWatchdog: null, reconnectDelay: 250, nextID: 1, pending: {}, state: {}, connected: false, connecting: true, draft: '', showPermissions: false,
         showModels: false, modelLoading: false, modelQuery: '', modelOptions: [],
         showSessions: false, sessionLoading: false, sessionState: {active_id: 0, workdir: '', sessions: []}, newSessionTitle: '',
         showProviders: false, providerState: {catalog: [], providers: [], drafts: {}}, providerDraft: null, providerHeadersText: '{}', providerStatus: '', providerStatusKind: 'secondary', providerTesting: false, providerSaving: false,
         completion: {kind: '', query: '', start: 0, end: 0, items: [], selected: 0}, completionSeq: 0,
         theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, restoreChatAttempted: false, error: '', toast: '', toastTimer: null,
-        init() { this.clampSidebarRatio(); this.applyTheme(); this.connect(); window.addEventListener('resize', () => this.resizeComposer()); this.$nextTick(() => this.resizeComposer()); },
+        init() {
+          this.clampSidebarRatio();
+          this.applyTheme();
+          this.connect();
+          window.addEventListener('resize', () => this.resizeComposer());
+          window.addEventListener('online', () => this.connectNow());
+          window.addEventListener('focus', () => this.connectNow());
+          document.addEventListener('visibilitychange', () => { if (!document.hidden) this.connectNow(); });
+          this.$nextTick(() => this.resizeComposer());
+        },
         applyTheme() {
           const resolved = this.theme === 'auto' ? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : this.theme;
           document.documentElement.setAttribute('data-bs-theme', resolved);
@@ -252,21 +261,66 @@
         },
         connect() {
           if (this.ws && (this.ws.readyState === WebSocket.CONNECTING || this.ws.readyState === WebSocket.OPEN)) return;
+          if (this.reconnectTimer) {
+            clearTimeout(this.reconnectTimer);
+            this.reconnectTimer = null;
+          }
           const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
           const ws = new WebSocket(proto + '//' + location.host + '/ws');
           this.ws = ws;
+          this.connecting = true;
+          this.connected = false;
+          if (this.connectWatchdog) clearTimeout(this.connectWatchdog);
+          this.connectWatchdog = setTimeout(() => {
+            if (this.ws === ws && ws.readyState === WebSocket.CONNECTING) ws.close();
+          }, 1500);
           ws.onopen = () => {
             if (this.ws !== ws) return;
+            if (this.connectWatchdog) {
+              clearTimeout(this.connectWatchdog);
+              this.connectWatchdog = null;
+            }
+            this.connecting = false;
             this.connected = true;
+            this.reconnectDelay = 250;
             this.rpcOn(ws, 'hello', {}).then(hello => this.applyHello(hello)).catch(() => {});
+          };
+          ws.onerror = () => {
+            if (this.ws === ws && ws.readyState !== WebSocket.CLOSED) ws.close();
           };
           ws.onclose = () => {
             if (this.ws !== ws) return;
+            if (this.connectWatchdog) {
+              clearTimeout(this.connectWatchdog);
+              this.connectWatchdog = null;
+            }
+            this.connecting = true;
             this.connected = false;
             this.rejectPending('connection closed');
-            setTimeout(() => this.connect(), 1000);
+            this.scheduleReconnect();
           };
           ws.onmessage = ev => { if (this.ws === ws) this.onMessage(JSON.parse(ev.data)); };
+        },
+        connectNow() {
+          if (this.reconnectTimer) {
+            clearTimeout(this.reconnectTimer);
+            this.reconnectTimer = null;
+          }
+          this.connect();
+        },
+        scheduleReconnect() {
+          if (this.reconnectTimer) return;
+          const delay = this.reconnectDelay;
+          this.reconnectDelay = Math.min(2000, Math.round(this.reconnectDelay * 1.6));
+          this.reconnectTimer = setTimeout(() => {
+            this.reconnectTimer = null;
+            this.connect();
+          }, delay);
+        },
+        connectionLabel() {
+          if (this.connected) return 'connected';
+          if (this.connecting) return 'connecting';
+          return 'offline';
         },
         applyHello(hello) {
           if (hello && hello.asset_hash && window.KODER_ASSET_HASH && hello.asset_hash !== window.KODER_ASSET_HASH) {

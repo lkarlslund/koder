@@ -51,6 +51,38 @@ func TestServerDoesNotOpenBrowserWhenWebSocketConnects(t *testing.T) {
 	}
 }
 
+func TestServerDoesNotOpenBrowserWhenExistingTabRefreshes(t *testing.T) {
+	ctrl := newTestController(t)
+	opened := make(chan string, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	srv, err := Start(ctx, ctrl, Options{
+		Bind:      "127.0.0.1:0",
+		OpenDelay: 30 * time.Millisecond,
+		OpenBrowser: func(url string) error {
+			opened <- url
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("start server: %v", err)
+	}
+	resp, err := http.Get(srv.URL())
+	if err != nil {
+		t.Fatalf("get index: %v", err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected index status 200, got %d", resp.StatusCode)
+	}
+
+	select {
+	case url := <-opened:
+		t.Fatalf("expected no browser open after existing tab refresh, got %s", url)
+	case <-time.After(80 * time.Millisecond):
+	}
+}
+
 func TestServerOpensBrowserWhenNoWebSocketConnects(t *testing.T) {
 	ctrl := newTestController(t)
 	opened := make(chan string, 1)
@@ -262,6 +294,15 @@ func TestIndexServesHTML(t *testing.T) {
 	}
 	if !strings.Contains(fullPage, `rejectPending('connection closed')`) {
 		t.Fatalf("expected websocket close to reject pending RPCs")
+	}
+	if !strings.Contains(fullPage, `connectionLabel()`) || !strings.Contains(fullPage, `return 'connecting'`) {
+		t.Fatalf("expected connection badge to show connecting instead of offline during reconnect")
+	}
+	if !strings.Contains(fullPage, `connectWatchdog`) || !strings.Contains(fullPage, `WebSocket.CONNECTING`) || !strings.Contains(fullPage, `ws.close()`) {
+		t.Fatalf("expected stuck websocket handshakes to be closed and retried")
+	}
+	if !strings.Contains(fullPage, `window.addEventListener('online'`) || !strings.Contains(fullPage, `window.addEventListener('focus'`) || !strings.Contains(fullPage, `visibilitychange`) {
+		t.Fatalf("expected browser to reconnect immediately when page becomes active or network returns")
 	}
 	if !strings.Contains(fullPage, `transcriptScrollState()`) || !strings.Contains(fullPage, `distance <= 48`) {
 		t.Fatalf("expected transcript scroll anchoring when new output arrives")
