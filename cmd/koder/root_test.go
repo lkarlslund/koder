@@ -3,16 +3,21 @@ package main
 import (
 	"bytes"
 	"context"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/spf13/cobra"
 
+	"github.com/lkarlslund/koder/internal/agent"
 	"github.com/lkarlslund/koder/internal/app"
+	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/debugsrv"
 	"github.com/lkarlslund/koder/internal/store"
+	"github.com/lkarlslund/koder/internal/uicore"
 	"github.com/lkarlslund/koder/internal/version"
 )
 
@@ -206,6 +211,51 @@ func TestWorkspaceWebBindIgnoresEphemeralRecords(t *testing.T) {
 	}
 }
 
+func TestStartWebUIRetriesCachedBind(t *testing.T) {
+	ctrl := newRootTestController(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	bind := listener.Addr().String()
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		_ = listener.Close()
+	}()
+
+	server, err := startWebUIWithRetry(ctx, ctrl, bind, true, true, 500*time.Millisecond, 10*time.Millisecond)
+	if err != nil {
+		t.Fatalf("start web ui: %v", err)
+	}
+	if server.Addr() != bind {
+		t.Fatalf("expected cached bind %q after retry, got %q", bind, server.Addr())
+	}
+}
+
+func TestStartWebUIFallsBackWhenCachedBindStaysBusy(t *testing.T) {
+	ctrl := newRootTestController(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+	bind := listener.Addr().String()
+
+	server, err := startWebUIWithRetry(ctx, ctrl, bind, true, true, 50*time.Millisecond, 10*time.Millisecond)
+	if err != nil {
+		t.Fatalf("start web ui: %v", err)
+	}
+	if server.Addr() == bind {
+		t.Fatalf("expected fallback bind while %q stays busy", bind)
+	}
+}
+
 func newRootTestStore(t *testing.T) *store.Store {
 	t.Helper()
 	st, err := store.OpenWithOptions(t.TempDir(), store.Options{Backend: store.BackendJSONFS})
@@ -214,6 +264,26 @@ func newRootTestStore(t *testing.T) *store.Store {
 	}
 	t.Cleanup(func() { _ = st.Close() })
 	return st
+}
+
+func newRootTestController(t *testing.T) *uicore.Controller {
+	t.Helper()
+	cfg := config.Default().WithStateDir(t.TempDir())
+	cfg.DefaultProvider = "test"
+	cfg.DefaultModel = "model"
+	st, err := store.OpenWithOptions(cfg.StateDir(), store.Options{Backend: store.BackendJSONFS})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	workdir := t.TempDir()
+	engine := agent.New(cfg, st, nil, nil, workdir)
+	ctrl := uicore.New(cfg, st, engine, workdir)
+	if err := ctrl.Start(context.Background(), uicore.StartupModeNew); err != nil {
+		t.Fatalf("start controller: %v", err)
+	}
+	t.Cleanup(func() { _ = ctrl.Shutdown(context.Background()) })
+	return ctrl
 }
 
 func TestNewRootCommandRegistersSubcommands(t *testing.T) {

@@ -34,6 +34,8 @@ import (
 )
 
 const defaultWebBind = "127.0.0.1:0"
+const cachedWebBindRetryTimeout = 30 * time.Second
+const cachedWebBindRetryInterval = 100 * time.Millisecond
 
 func NewRootCommand() *cobra.Command {
 	opts := startupOptions{}
@@ -166,17 +168,7 @@ func runWeb(ctx context.Context, cfg config.Config, st *store.Store, engine *age
 		return err
 	}
 	bind, cachedBind := webBindForLaunch(ctx, st, workdir, startupOpts)
-	server, err := webui.Start(ctx, controller, webui.Options{
-		Bind:      bind,
-		NoBrowser: startupOpts.NoBrowser,
-	})
-	if err != nil && cachedBind {
-		fmt.Fprintf(os.Stderr, "koder web ui: cached bind %s unavailable, falling back to %s\n", bind, defaultWebBind)
-		server, err = webui.Start(ctx, controller, webui.Options{
-			Bind:      defaultWebBind,
-			NoBrowser: startupOpts.NoBrowser,
-		})
-	}
+	server, err := startWebUI(ctx, controller, bind, cachedBind, startupOpts.NoBrowser)
 	if err != nil {
 		return err
 	}
@@ -200,6 +192,50 @@ func runWeb(ctx context.Context, cfg config.Config, st *store.Store, engine *age
 		return ctx.Err()
 	case <-sig:
 		return controller.Shutdown(context.Background())
+	}
+}
+
+func startWebUI(ctx context.Context, controller *uicore.Controller, bind string, cachedBind bool, noBrowser bool) (*webui.Server, error) {
+	return startWebUIWithRetry(ctx, controller, bind, cachedBind, noBrowser, cachedWebBindRetryTimeout, cachedWebBindRetryInterval)
+}
+
+func startWebUIWithRetry(ctx context.Context, controller *uicore.Controller, bind string, cachedBind bool, noBrowser bool, retryTimeout time.Duration, retryInterval time.Duration) (*webui.Server, error) {
+	server, err := webui.Start(ctx, controller, webui.Options{
+		Bind:      bind,
+		NoBrowser: noBrowser,
+	})
+	if err == nil || !cachedBind {
+		return server, err
+	}
+	timer := time.NewTimer(retryTimeout)
+	defer timer.Stop()
+	ticker := time.NewTicker(retryInterval)
+	defer ticker.Stop()
+	lastErr := err
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-ticker.C:
+			server, err = webui.Start(ctx, controller, webui.Options{
+				Bind:      bind,
+				NoBrowser: noBrowser,
+			})
+			if err == nil {
+				return server, nil
+			}
+			lastErr = err
+		case <-timer.C:
+			fmt.Fprintf(os.Stderr, "koder web ui: cached bind %s unavailable after %s, falling back to %s\n", bind, retryTimeout, defaultWebBind)
+			server, err = webui.Start(ctx, controller, webui.Options{
+				Bind:      defaultWebBind,
+				NoBrowser: noBrowser,
+			})
+			if err != nil {
+				return nil, fmt.Errorf("start cached web ui on %s: %w; fallback failed: %v", bind, lastErr, err)
+			}
+			return server, nil
+		}
 	}
 }
 

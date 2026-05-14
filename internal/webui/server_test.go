@@ -289,6 +289,9 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `rpcOn(ws, 'hello', {})`) {
 		t.Fatalf("expected hello RPC to be bound to the socket that opened")
 	}
+	if !strings.Contains(fullPage, `handleSocketOpen(ws)`) || !strings.Contains(fullPage, `ws.readyState === WebSocket.OPEN && !this.connected`) || !strings.Contains(fullPage, `queueMicrotask`) {
+		t.Fatalf("expected open-but-not-connected websocket state to be recovered for Firefox")
+	}
 	if !strings.Contains(fullPage, `ws.readyState !== WebSocket.OPEN`) || !strings.Contains(fullPage, `try {`) {
 		t.Fatalf("expected websocket sends to be guarded against closed sockets")
 	}
@@ -301,7 +304,7 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `connectWatchdog`) || !strings.Contains(fullPage, `WebSocket.CONNECTING`) || !strings.Contains(fullPage, `ws.close()`) {
 		t.Fatalf("expected stuck websocket handshakes to be closed and retried")
 	}
-	if !strings.Contains(fullPage, `}, 500);`) || !strings.Contains(fullPage, `Math.min(1000`) || !strings.Contains(fullPage, `reconnectDelay: 100`) {
+	if !strings.Contains(fullPage, `}, 500);`) || !strings.Contains(fullPage, `Math.min(100`) || !strings.Contains(fullPage, `reconnectDelay: 25`) {
 		t.Fatalf("expected reconnect timing to stay below one second")
 	}
 	if !strings.Contains(fullPage, `performance.mark('koder-ready')`) {

@@ -209,7 +209,7 @@
     }
     function koderApp() {
       return {
-        ws: null, reconnectTimer: null, connectWatchdog: null, reconnectDelay: 100, nextID: 1, pending: {}, state: {}, connected: false, connecting: true, draft: '', showPermissions: false,
+        ws: null, reconnectTimer: null, connectWatchdog: null, reconnectDelay: 25, nextID: 1, pending: {}, state: {}, connected: false, connecting: true, draft: '', showPermissions: false,
         showModels: false, modelLoading: false, modelQuery: '', modelOptions: [],
         showSessions: false, sessionLoading: false, sessionState: {active_id: 0, workdir: '', sessions: []}, newSessionTitle: '',
         showProviders: false, providerState: {catalog: [], providers: [], drafts: {}}, providerDraft: null, providerHeadersText: '{}', providerStatus: '', providerStatusKind: 'secondary', providerTesting: false, providerSaving: false,
@@ -260,7 +260,11 @@
           move(ev);
         },
         connect() {
-          if (this.ws && (this.ws.readyState === WebSocket.CONNECTING || this.ws.readyState === WebSocket.OPEN)) return;
+          if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+            this.handleSocketOpen(this.ws);
+            return;
+          }
+          if (this.ws && this.ws.readyState === WebSocket.CONNECTING) return;
           if (this.reconnectTimer) {
             clearTimeout(this.reconnectTimer);
             this.reconnectTimer = null;
@@ -272,19 +276,14 @@
           this.connected = false;
           if (this.connectWatchdog) clearTimeout(this.connectWatchdog);
           this.connectWatchdog = setTimeout(() => {
-            if (this.ws === ws && ws.readyState === WebSocket.CONNECTING) ws.close();
-          }, 500);
-          ws.onopen = () => {
             if (this.ws !== ws) return;
-            if (this.connectWatchdog) {
-              clearTimeout(this.connectWatchdog);
-              this.connectWatchdog = null;
+            if (ws.readyState === WebSocket.OPEN && !this.connected) {
+              this.handleSocketOpen(ws);
+              return;
             }
-            this.connecting = false;
-            this.connected = true;
-            this.reconnectDelay = 100;
-            this.rpcOn(ws, 'hello', {}).then(hello => this.applyHello(hello)).catch(() => {});
-          };
+            if (ws.readyState === WebSocket.CONNECTING) ws.close();
+          }, 500);
+          ws.onopen = () => this.handleSocketOpen(ws);
           ws.onerror = () => {
             if (this.ws === ws && ws.readyState !== WebSocket.CLOSED) ws.close();
           };
@@ -300,6 +299,20 @@
             this.scheduleReconnect();
           };
           ws.onmessage = ev => { if (this.ws === ws) this.onMessage(JSON.parse(ev.data)); };
+          queueMicrotask(() => {
+            if (this.ws === ws && ws.readyState === WebSocket.OPEN && !this.connected) this.handleSocketOpen(ws);
+          });
+        },
+        handleSocketOpen(ws) {
+          if (this.ws !== ws || this.connected) return;
+          if (this.connectWatchdog) {
+            clearTimeout(this.connectWatchdog);
+            this.connectWatchdog = null;
+          }
+          this.connecting = false;
+          this.connected = true;
+          this.reconnectDelay = 25;
+          this.rpcOn(ws, 'hello', {}).then(hello => this.applyHello(hello)).catch(() => {});
         },
         connectNow() {
           if (this.reconnectTimer) {
@@ -311,7 +324,7 @@
         scheduleReconnect() {
           if (this.reconnectTimer) return;
           const delay = this.reconnectDelay;
-          this.reconnectDelay = Math.min(1000, Math.round(this.reconnectDelay * 1.6));
+          this.reconnectDelay = Math.min(100, Math.round(this.reconnectDelay * 1.6));
           this.reconnectTimer = setTimeout(() => {
             this.reconnectTimer = null;
             this.connect();
