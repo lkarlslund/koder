@@ -8,11 +8,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -20,6 +23,7 @@ import (
 
 	"github.com/coder/websocket"
 
+	"github.com/lkarlslund/koder/internal/attachment"
 	"github.com/lkarlslund/koder/internal/uicore"
 )
 
@@ -76,6 +80,7 @@ func Start(ctx context.Context, controller *uicore.Controller, options Options) 
 	mux.HandleFunc("/", s.handleIndex)
 	mux.HandleFunc("/favicon.ico", handleFavicon)
 	mux.Handle("/assets/", assetHandler())
+	mux.HandleFunc("/api/show-image", handleShowImage)
 	mux.HandleFunc("/ws", s.handleWebSocket)
 	s.server = &http.Server{Handler: mux}
 	go func() {
@@ -166,6 +171,52 @@ func assetHandler() http.Handler {
 		w.Header().Set("Cache-Control", "no-cache")
 		files.ServeHTTP(w, r)
 	})
+}
+
+func handleShowImage(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	rawPath := strings.TrimSpace(r.URL.Query().Get("path"))
+	if rawPath == "" {
+		http.Error(w, "path is required", http.StatusBadRequest)
+		return
+	}
+	path := filepath.Clean(rawPath)
+	info, err := os.Stat(path)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	if info.IsDir() {
+		http.Error(w, "path is a directory", http.StatusBadRequest)
+		return
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	defer file.Close()
+	var sniff [512]byte
+	n, err := file.Read(sniff[:])
+	if err != nil && !errors.Is(err, io.EOF) {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	mimeType := http.DetectContentType(sniff[:n])
+	if attachment.ClassifyMIME(mimeType) != attachment.KindImage {
+		http.Error(w, "path is not an image", http.StatusUnsupportedMediaType)
+		return
+	}
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", mimeType)
+	w.Header().Set("Cache-Control", "no-cache")
+	http.ServeContent(w, r, filepath.Base(path), info.ModTime(), file)
 }
 
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {

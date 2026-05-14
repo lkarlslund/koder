@@ -184,6 +184,7 @@ func Default() Config {
 					Rules: []PermissionRule{
 						{Tool: domain.ToolKindRead, Pattern: "*", Action: domain.PermissionModeAllow},
 						{Tool: domain.ToolKindViewImage, Pattern: "*", Action: domain.PermissionModeAllow},
+						{Tool: domain.ToolKindShowImage, Pattern: "*", Action: domain.PermissionModeAllow},
 						{Tool: domain.ToolKindGlob, Pattern: "*", Action: domain.PermissionModeAllow},
 						{Tool: domain.ToolKindGrep, Pattern: "*", Action: domain.PermissionModeAllow},
 						{Tool: domain.ToolKindCodeSearch, Pattern: "*", Action: domain.PermissionModeAllow},
@@ -219,6 +220,7 @@ func Default() Config {
 					Rules: []PermissionRule{
 						{Tool: domain.ToolKindRead, Pattern: "*", Action: domain.PermissionModeAllow},
 						{Tool: domain.ToolKindViewImage, Pattern: "*", Action: domain.PermissionModeAllow},
+						{Tool: domain.ToolKindShowImage, Pattern: "*", Action: domain.PermissionModeAllow},
 						{Tool: domain.ToolKindGlob, Pattern: "*", Action: domain.PermissionModeAllow},
 						{Tool: domain.ToolKindGrep, Pattern: "*", Action: domain.PermissionModeAllow},
 						{Tool: domain.ToolKindCodeSearch, Pattern: "*", Action: domain.PermissionModeAllow},
@@ -254,6 +256,7 @@ func Default() Config {
 					Rules: []PermissionRule{
 						{Tool: domain.ToolKindRead, Pattern: "*", Action: domain.PermissionModeAllow},
 						{Tool: domain.ToolKindViewImage, Pattern: "*", Action: domain.PermissionModeAllow},
+						{Tool: domain.ToolKindShowImage, Pattern: "*", Action: domain.PermissionModeAllow},
 						{Tool: domain.ToolKindGlob, Pattern: "*", Action: domain.PermissionModeAllow},
 						{Tool: domain.ToolKindGrep, Pattern: "*", Action: domain.PermissionModeAllow},
 						{Tool: domain.ToolKindCodeSearch, Pattern: "*", Action: domain.PermissionModeAllow},
@@ -551,6 +554,7 @@ func legacyPermissionProfile(rules PermissionRules) PermissionProfile {
 		Rules: []PermissionRule{
 			{Tool: domain.ToolKindRead, Pattern: "*", Action: firstPermission(rules.Read, domain.PermissionModeAllow)},
 			{Tool: domain.ToolKindViewImage, Pattern: "*", Action: firstPermission(rules.Read, domain.PermissionModeAllow)},
+			{Tool: domain.ToolKindShowImage, Pattern: "*", Action: firstPermission(rules.Read, domain.PermissionModeAllow)},
 			{Tool: domain.ToolKindGlob, Pattern: "*", Action: firstPermission(rules.Glob, domain.PermissionModeAllow)},
 			{Tool: domain.ToolKindGrep, Pattern: "*", Action: firstPermission(rules.Grep, domain.PermissionModeAllow)},
 			{Tool: domain.ToolKindCodeSearch, Pattern: "*", Action: firstPermission(rules.Grep, domain.PermissionModeAllow)},

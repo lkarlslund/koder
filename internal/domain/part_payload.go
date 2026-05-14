@@ -196,6 +196,8 @@ func DecodeToolResultPayload(tool ToolKind, status ToolResultStatus, raw json.Ra
 		return decodeToolResult[WebSearchStoredResult](raw)
 	case ToolKindViewImage:
 		return decodeToolResult[ViewImageStoredResult](raw)
+	case ToolKindShowImage:
+		return decodeToolResult[ShowImageStoredResult](raw)
 	case ToolKindMilestoneList, ToolKindMilestoneAdd, ToolKindMilestoneUpdate, ToolKindMilestoneWrite, ToolKindMilestonePlan:
 		return decodeToolResult[MilestonePlanStoredResult](raw)
 	case ToolKindChatList, ToolKindChatStartDecomp, ToolKindChatStartExec, ToolKindChatPoll:

@@ -35,6 +35,7 @@ type ToolKind string
 const (
 	ToolKindRead            ToolKind = "read"
 	ToolKindViewImage       ToolKind = "view_image"
+	ToolKindShowImage       ToolKind = "show_image"
 	ToolKindGlob            ToolKind = "glob"
 	ToolKindGrep            ToolKind = "grep"
 	ToolKindCodeSearch      ToolKind = "code_search"
@@ -75,6 +76,7 @@ func AllToolKinds() []ToolKind {
 	return []ToolKind{
 		ToolKindRead,
 		ToolKindViewImage,
+		ToolKindShowImage,
 		ToolKindGlob,
 		ToolKindGrep,
 		ToolKindCodeSearch,

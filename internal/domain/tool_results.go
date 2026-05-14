@@ -212,6 +212,13 @@ type ViewImageStoredResult struct {
 	Summary    string `json:"summary,omitempty"`
 }
 
+type ShowImageStoredResult struct {
+	Path       string `json:"path"`
+	SourcePath string `json:"source_path"`
+	MIMEType   string `json:"mime_type"`
+	Summary    string `json:"summary,omitempty"`
+}
+
 type MCPStoredContentItem struct {
 	Type     string `json:"type"`
 	Text     string `json:"text,omitempty"`
@@ -255,6 +262,7 @@ func (SkillStoredResult) ToolResultPayload()         {}
 func (WebFetchStoredResult) ToolResultPayload()      {}
 func (WebSearchStoredResult) ToolResultPayload()     {}
 func (ViewImageStoredResult) ToolResultPayload()     {}
+func (ShowImageStoredResult) ToolResultPayload()     {}
 func (MCPStoredResult) ToolResultPayload()           {}
 func (DeniedStoredResult) ToolResultPayload()        {}
 func (ErrorStoredResult) ToolResultPayload()         {}
