@@ -208,42 +208,47 @@ func (e *Engine) consumeChatUpdates(chatID domain.ID, updates <-chan chatpkg.Upd
 	statusText := "Running"
 	lastError := ""
 	notifiedIdle := false
+	sawActive := false
 	for update := range updates {
+		if !update.Active && !sawActive && update.Status != chatpkg.StatusWaitingApproval && update.Status != chatpkg.StatusErrored {
+			continue
+		}
 		if update.Status != "" {
 			status = string(update.Status)
 		}
 		switch update.Status {
 		case chatpkg.StatusWaitingApproval:
 			state = tools.ChatRunStateWaitingApproval
+			if !notifiedIdle {
+				notifiedIdle = true
+				e.notifyParentChat(context.Background(), chatID, fmt.Sprintf("Chat %s is waiting for approval: %s", chatID, strings.TrimSpace(update.StatusText)))
+			}
 		case chatpkg.StatusErrored:
 			state = tools.ChatRunStateFailed
 			lastError = strings.TrimSpace(update.StatusText)
+			if !notifiedIdle {
+				notifiedIdle = true
+				e.notifyParentChat(context.Background(), chatID, fmt.Sprintf("Chat %s failed: %s", chatID, strings.TrimSpace(update.StatusText)))
+			}
 		default:
 			if update.Active {
+				sawActive = true
 				state = tools.ChatRunStateRunning
-			} else if state == tools.ChatRunStateRunning {
-				state = tools.ChatRunStateCompleted
-				status = string(tools.ChatRunStateCompleted)
+			} else if sawActive {
+				state = tools.ChatRunStateIdle
+				status = string(chatpkg.StatusIdle)
 			}
 		}
 		if strings.TrimSpace(update.StatusText) != "" {
 			statusText = strings.TrimSpace(update.StatusText)
 		}
 		e.setRunState(chatID, chatRunState{state: state, status: status, statusText: statusText, lastError: lastError})
-		if !update.Active && !notifiedIdle && (state == tools.ChatRunStateCompleted || state == tools.ChatRunStateFailed || state == tools.ChatRunStateWaitingApproval) {
+		if !update.Active && sawActive && !notifiedIdle && state == tools.ChatRunStateIdle {
 			notifiedIdle = true
-			e.notifyParentChat(context.Background(), chatID, fmt.Sprintf("Chat %s is %s: %s", chatID, state, strings.TrimSpace(statusText)))
+			e.notifyParentChat(context.Background(), chatID, fmt.Sprintf("Chat %s is idle: %s", chatID, strings.TrimSpace(statusText)))
 		}
 	}
-	if state == tools.ChatRunStateRunning {
-		state = tools.ChatRunStateCompleted
-		status = string(tools.ChatRunStateCompleted)
-		statusText = "Completed"
-	}
 	e.setRunState(chatID, chatRunState{state: state, status: status, statusText: statusText, lastError: lastError})
-	if !notifiedIdle {
-		e.notifyParentChat(context.Background(), chatID, fmt.Sprintf("Chat %s is %s: %s", chatID, state, strings.TrimSpace(statusText)))
-	}
 }
 
 func (e *Engine) setRunState(chatID domain.ID, state chatRunState) {

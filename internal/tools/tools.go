@@ -258,6 +258,9 @@ func (r *Registry) Execute(ctx context.Context, req Request) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	if err := CheckRoleToolAllowed(r.runtime.ChatRole, req.Tool); err != nil {
+		return Result{}, err
+	}
 	return tool.Execute(ctx, r.runtime, req)
 }
 
@@ -277,6 +280,9 @@ func (r *Registry) ExecuteWithChat(ctx context.Context, st *store.Store, session
 	runtime.ChatRole = chat.WorkflowRole
 	runtime.ActiveMilestoneRef = chat.ActiveMilestoneRef
 	runtime.AssignedTodoBucketRef = chat.AssignedTodoBucketRef
+	if err := CheckRoleToolAllowed(runtime.ChatRole, req.Tool); err != nil {
+		return Result{}, err
+	}
 	return tool.Execute(ctx, runtime, req)
 }
 
@@ -320,6 +326,9 @@ func Definitions(runtime Runtime) []provider.ToolDefinition {
 func DefinitionFor(kind domain.ToolKind, runtime Runtime) (provider.ToolDefinition, bool) {
 	tool, spec, ok := lookupWithSpec(kind)
 	if !ok {
+		return provider.ToolDefinition{}, false
+	}
+	if !RoleAllowsTool(runtime.ChatRole, kind) {
 		return provider.ToolDefinition{}, false
 	}
 	if dynamic, ok := tool.(definitionProvider); ok {

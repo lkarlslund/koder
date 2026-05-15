@@ -927,7 +927,7 @@ func (e *Engine) chatRequest(session domain.Session, chat domain.Chat, messages 
 	}
 	if len(messages) > 0 && (chat.ID != "" || chat.WorkflowRole != "") {
 		req.Tools = tools.Definitions(e.toolRuntime(session, chat))
-		if e.mcp != nil && toolEnabledForSession(e.cfg, session, domain.ToolKindMCP) {
+		if e.mcp != nil && toolEnabledForSession(e.cfg, session, domain.ToolKindMCP) && tools.RoleAllowsTool(chat.WorkflowRole, domain.ToolKindMCP) {
 			req.Tools = append(req.Tools, e.mcp.ToolDefinitionsWithReserved(req.Tools)...)
 		}
 		req.ToolChoice = "auto"
@@ -1435,15 +1435,26 @@ func (e *Engine) approve(ctx context.Context, sessionID, chatID domain.ID, rawID
 		}
 		return emitOnce(domain.Event{Kind: domain.EventKindApprovalReply, Text: text, Tool: req.Tool, Item: replyItem, Meta: map[string]string{"approval_id": id}}), nil
 	}
+	chat, chatErr := e.store.GetChat(ctx, item.ChatID)
+	if chatErr != nil {
+		return nil, chatErr
+	}
+	if !tools.RoleAllowsTool(chat.WorkflowRole, req.Tool) {
+		if err := e.store.UpdateApproval(ctx, id, domain.ApprovalStatusDenied); err != nil {
+			return nil, err
+		}
+		text := fmt.Sprintf("%s is not available to %s chats", req.Tool, chat.WorkflowRole)
+		replyItem, err := e.recordApprovalReply(ctx, item.ChatID, item.SessionID, item.Tool, id, "denied", text, req.ToolCallID)
+		if err != nil {
+			return nil, err
+		}
+		return emitOnce(domain.Event{Kind: domain.EventKindApprovalReply, Text: text, Tool: req.Tool, Item: replyItem, Meta: map[string]string{"approval_id": id}}), nil
+	}
 	replyItem, err := e.recordApprovalReply(ctx, item.ChatID, sessionID, item.Tool, id, "approved", tools.Preview(req), req.ToolCallID)
 	if err != nil {
 		return nil, err
 	}
 	e.recordLifecycle(sessionID, "tool_execution_started", item.Command, map[string]string{"tool": string(item.Tool), "approval_id": id})
-	chat, chatErr := e.store.GetChat(ctx, item.ChatID)
-	if chatErr != nil {
-		return nil, chatErr
-	}
 	result, execErr := e.registry.ExecuteWithChat(ctx, e.store, sessionID, chat, req)
 	if execErr != nil {
 		e.recordLifecycle(sessionID, "tool_execution_failed", execErr.Error(), map[string]string{"tool": string(item.Tool), "approval_id": id})
@@ -3114,6 +3125,9 @@ func (e *Engine) handleModelToolCall(ctx context.Context, session domain.Session
 	if !toolEnabledForSession(e.cfg, session, req.Tool) {
 		return e.recordDisabledToolResult(ctx, chat.ID, sessionID, req)
 	}
+	if !tools.RoleAllowsTool(chat.WorkflowRole, req.Tool) {
+		return e.recordRoleDeniedToolResult(ctx, chat.ID, sessionID, req, chat.WorkflowRole)
+	}
 
 	decision := permission.Decision{Mode: domain.PermissionModeAllow}
 	if !toolSpec.BypassesPermission() {
@@ -3397,6 +3411,17 @@ func (e *Engine) prepareModelToolCall(ctx context.Context, session domain.Sessio
 			run:   false,
 		}, nil
 	}
+	if !tools.RoleAllowsTool(chat.WorkflowRole, req.Tool) {
+		evt, err := e.recordRoleDeniedToolResult(ctx, chat.ID, sessionID, req, chat.WorkflowRole)
+		if err != nil {
+			return preparedToolCall{}, err
+		}
+		return preparedToolCall{
+			req:   req,
+			event: evt,
+			run:   false,
+		}, nil
+	}
 
 	decision := permission.Decision{Mode: domain.PermissionModeAllow}
 	if !toolSpec.BypassesPermission() {
@@ -3448,6 +3473,18 @@ func (e *Engine) prepareModelToolCall(ctx context.Context, session domain.Sessio
 
 func (e *Engine) recordDisabledToolResult(ctx context.Context, chatID, sessionID domain.ID, req tools.Request) (domain.Event, error) {
 	text := fmt.Sprintf("%s disabled for this session", req.Tool)
+	if sessionID == "" {
+		return domain.Event{Kind: domain.EventKindToolResult, Tool: req.Tool, ToolCallID: req.ToolCallID, Text: text}, nil
+	}
+	item, err := e.recordDeniedToolResult(ctx, chatID, req, text)
+	if err != nil {
+		return domain.Event{}, err
+	}
+	return domain.Event{Kind: domain.EventKindToolResult, Tool: req.Tool, ToolCallID: req.ToolCallID, Text: text, Item: item}, nil
+}
+
+func (e *Engine) recordRoleDeniedToolResult(ctx context.Context, chatID, sessionID domain.ID, req tools.Request, role domain.WorkflowRole) (domain.Event, error) {
+	text := fmt.Sprintf("%s is not available to %s chats", req.Tool, role)
 	if sessionID == "" {
 		return domain.Event{Kind: domain.EventKindToolResult, Tool: req.Tool, ToolCallID: req.ToolCallID, Text: text}, nil
 	}

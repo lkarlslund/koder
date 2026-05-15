@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/lkarlslund/koder/internal/attachment"
+	chatpkg "github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/mcp"
@@ -597,6 +598,106 @@ func TestUpdateMilestoneStatusRejectsOtherOwner(t *testing.T) {
 	err = engine.updateMilestoneStatus(context.Background(), session.ID, "alpha", domain.MilestoneStatusReady, otherID)
 	if err == nil || !strings.Contains(err.Error(), "owned by chat") {
 		t.Fatalf("expected ownership error, got %v", err)
+	}
+}
+
+func TestConsumeChatUpdatesIgnoresInitialInactiveSnapshot(t *testing.T) {
+	cfg := testConfig(t)
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	session, err := st.CreateSession(context.Background(), "test", "provider", "model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent := defaultChatForSession(t, st, session.ID)
+	parentID := parent.ID
+	child, err := st.CreateChat(context.Background(), session.ID, "child", domain.WorkflowRoleDecomposition, &parentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine := New(cfg, st, tools.NewRegistry(t.TempDir()), nil, t.TempDir())
+
+	updates := make(chan chatpkg.Update, 1)
+	updates <- chatpkg.Update{Snapshot: chatpkg.Snapshot{Chat: child, Status: chatpkg.StatusIdle}, Status: chatpkg.StatusIdle, StatusText: "Idle", Active: false}
+	close(updates)
+	engine.consumeChatUpdates(child.ID, updates, nil)
+
+	got, err := st.GetChat(context.Background(), parent.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.QueuedInputs) != 0 {
+		t.Fatalf("expected no parent notification for initial inactive snapshot, got %#v", got.QueuedInputs)
+	}
+}
+
+func TestConsumeChatUpdatesNotifiesParentWhenChildBecomesIdle(t *testing.T) {
+	cfg := testConfig(t)
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	session, err := st.CreateSession(context.Background(), "test", "provider", "model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent := defaultChatForSession(t, st, session.ID)
+	parentID := parent.ID
+	child, err := st.CreateChat(context.Background(), session.ID, "child", domain.WorkflowRoleDecomposition, &parentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine := New(cfg, st, tools.NewRegistry(t.TempDir()), nil, t.TempDir())
+
+	updates := make(chan chatpkg.Update, 2)
+	updates <- chatpkg.Update{Snapshot: chatpkg.Snapshot{Chat: child, Status: chatpkg.StatusWaitingLLM, Active: true}, Status: chatpkg.StatusWaitingLLM, StatusText: "Running", Active: true}
+	updates <- chatpkg.Update{Snapshot: chatpkg.Snapshot{Chat: child, Status: chatpkg.StatusIdle, Active: false}, Status: chatpkg.StatusIdle, StatusText: "Idle", Active: false}
+	close(updates)
+	engine.consumeChatUpdates(child.ID, updates, nil)
+
+	got, err := st.GetChat(context.Background(), parent.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.QueuedInputs) != 1 || !strings.Contains(got.QueuedInputs[0].Text, " is idle: Idle") {
+		t.Fatalf("expected one idle parent notification, got %#v", got.QueuedInputs)
+	}
+}
+
+func TestHandleModelToolCallRejectsRoleForbiddenTool(t *testing.T) {
+	cfg := testConfig(t)
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	session, err := st.CreateSession(context.Background(), "test", cfg.DefaultProvider, "test-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chat := defaultChatForSession(t, st, session.ID)
+	chat.WorkflowRole = domain.WorkflowRoleDecomposition
+	if err := st.UpdateChat(context.Background(), chat); err != nil {
+		t.Fatal(err)
+	}
+	engine := New(cfg, st, tools.NewRegistry(t.TempDir()), nil, t.TempDir())
+
+	evt, err := engine.handleModelToolCall(context.Background(), session, chat, tools.Request{
+		Tool: domain.ToolKindBash,
+		Args: map[string]string{"command": "echo no"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if evt.Kind != domain.EventKindToolResult || !strings.Contains(evt.Text, "not available to decomposition chats") {
+		t.Fatalf("expected role denied tool result, got %#v", evt)
 	}
 }
 
