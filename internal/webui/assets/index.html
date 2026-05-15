@@ -135,12 +135,12 @@
         </div>
         <div class="list-group list-group-flush sidebar-list">
           <template x-for="chat in state.chats || []" :key="chat.ID || chat.id">
-            <div class="list-group-item list-group-item-action d-flex align-items-center gap-2" :class="{'active': chatID(chat) === state.active_chat_id}" @click="switchChat(chatID(chat))">
+            <div class="list-group-item list-group-item-action chat-list-item d-flex align-items-center gap-1" :class="{'active': chatID(chat) === state.active_chat_id}" @click="switchChat(chatID(chat))">
               <button type="button" class="btn btn-sm p-0 border-0 bg-transparent flex-grow-1 text-start" :class="{'text-white': chatID(chat) === state.active_chat_id}" @click.stop="switchChat(chatID(chat))">
-                <div class="d-flex align-items-center gap-2">
+                <div class="d-flex align-items-center gap-1">
+                  <i class="chat-status-icon bi" :class="[chatStatusIcon(chat), chatStatusClass(chat)]" :title="chatStatusLabel(chat)"></i>
                   <i class="bi bi-chat-left-text"></i>
                   <span class="text-truncate" x-text="chat.Title || chat.title || 'Chat'"></span>
-                  <i class="chat-status-icon bi" :class="[chatStatusIcon(chat), chatStatusClass(chat)]" :title="chatStatusLabel(chat)"></i>
                   <span class="chat-context text-nowrap" x-text="chatContextLabel(chat)"></span>
                 </div>
               </button>

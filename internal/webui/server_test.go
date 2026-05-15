@@ -653,6 +653,14 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `chatStatusLabel(chat)`) || !strings.Contains(fullPage, `chat-status-icon`) {
 		t.Fatalf("expected chat sidebar to render per-chat animated status icons")
 	}
+	statusIdx := strings.Index(fullPage, `chat-status-icon bi`)
+	chatIconIdx := strings.Index(fullPage, `bi bi-chat-left-text`)
+	if statusIdx < 0 || chatIconIdx < 0 || statusIdx > chatIconIdx {
+		t.Fatalf("expected chat busy indicator to render before the chat icon")
+	}
+	if !strings.Contains(fullPage, `chat-list-item`) || !strings.Contains(fullPage, `.sidebar-list .chat-list-item { padding: .16rem .25rem; min-height: 1.65rem; }`) {
+		t.Fatalf("expected compact chat list row spacing")
+	}
 	if !strings.Contains(fullPage, `chatContextLabel(chat)`) || !strings.Contains(fullPage, `context_window`) || !strings.Contains(fullPage, `'% ctx)'`) {
 		t.Fatalf("expected chat sidebar to render context percentage")
 	}
