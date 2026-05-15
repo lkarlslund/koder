@@ -88,6 +88,7 @@ func Start(ctx context.Context, controller *uicore.Controller, options Options) 
 	mux.Handle("/assets/", assetHandler())
 	mux.HandleFunc("/api/health", handleHealth)
 	mux.HandleFunc("/api/show-image", handleShowImage)
+	mux.HandleFunc("/api/attachments/clipboard-image", s.handleClipboardImage)
 	mux.HandleFunc("/ws", s.handleWebSocket)
 	s.server = &http.Server{Handler: mux}
 	go func() {
@@ -243,6 +244,38 @@ func handleShowImage(w http.ResponseWriter, r *http.Request) {
 	http.ServeContent(w, r, filepath.Base(path), info.ModTime(), file)
 }
 
+func (s *Server) handleClipboardImage(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 25<<20)
+	if err := r.ParseMultipartForm(25 << 20); err != nil {
+		http.Error(w, "parse image upload: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	file, header, err := r.FormFile("image")
+	if err != nil {
+		http.Error(w, "image is required", http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+	data, err := io.ReadAll(file)
+	if err != nil {
+		http.Error(w, "read image upload: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	mimeType := strings.TrimSpace(header.Header.Get("Content-Type"))
+	draft, err := s.controller.ImportClipboardImage(data, header.Filename, mimeType)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusUnsupportedMediaType)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-cache")
+	_ = json.NewEncoder(w).Encode(draft)
+}
+
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	conn, err := websocket.Accept(w, r, nil)
 	if err != nil {
@@ -342,12 +375,13 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		return map[string]bool{"accepted": true}, nil
 	case "send_prompt":
 		var in struct {
-			Text string `json:"text"`
+			Text        string             `json:"text"`
+			Attachments []attachment.Draft `json:"attachments"`
 		}
 		if err := decodeParams(params, &in); err != nil {
 			return nil, err
 		}
-		return map[string]bool{"queued": true}, s.controller.SendPrompt(in.Text)
+		return map[string]bool{"queued": true}, s.controller.SendPromptWithAttachments(in.Text, in.Attachments)
 	case "continue":
 		var in struct {
 			Note string `json:"note"`

@@ -33,6 +33,43 @@ func TestImportClipboardImageAndAdoptDraft(t *testing.T) {
 	}
 }
 
+func TestImportClipboardImageDataUsesPastedNameAndMIME(t *testing.T) {
+	manager := NewManager(t.TempDir())
+
+	draft, err := manager.ImportClipboardImageData([]byte("\x89PNG\r\n\x1a\nfake"), "pasted-image", "image/png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if draft.Name != "pasted-image" || draft.MIME != "image/png" || filepath.Ext(draft.Path) != ".png" {
+		t.Fatalf("unexpected draft: %#v", draft)
+	}
+	validated, err := manager.ValidateDraft(draft)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if validated.Size != int64(len("\x89PNG\r\n\x1a\nfake")) {
+		t.Fatalf("unexpected validated size: %d", validated.Size)
+	}
+}
+
+func TestValidateDraftRejectsPathOutsideDrafts(t *testing.T) {
+	root := t.TempDir()
+	manager := NewManager(root)
+	outside := filepath.Join(root, "outside.png")
+	if err := os.WriteFile(outside, []byte("\x89PNG\r\n\x1a\nfake"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := manager.ValidateDraft(Draft{Metadata: Metadata{
+		ID:   "outside",
+		Name: "outside.png",
+		MIME: "image/png",
+		Path: outside,
+	}})
+	if err == nil {
+		t.Fatal("expected outside draft path to be rejected")
+	}
+}
+
 func TestImportFileAndReadText(t *testing.T) {
 	root := t.TempDir()
 	manager := NewManager(root)

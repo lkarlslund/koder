@@ -275,7 +275,7 @@
         showSessions: false, sessionLoading: false, sessionState: {active_id: 0, workdir: '', sessions: []}, newSessionTitle: '',
         showProviders: false, providerState: {catalog: [], providers: [], drafts: {}}, providerDraft: null, providerHeadersText: '{}', providerStatus: '', providerStatusKind: 'secondary', providerTesting: false, providerSaving: false,
         completion: {kind: '', query: '', start: 0, end: 0, items: [], selected: 0}, completionSeq: 0,
-        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, restoreChatAttempted: false, transcriptStickToBottom: true, scrollRestoreSeq: 0, expandedMilestones: {}, interruptArmedChatID: '', error: '', toast: '', toastTimer: null,
+        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, restoreChatAttempted: false, transcriptStickToBottom: true, scrollRestoreSeq: 0, expandedMilestones: {}, interruptArmedChatID: '', composerAttachments: [], error: '', toast: '', toastTimer: null,
         init() {
           this.clampSidebarRatio();
           this.applyTheme();
@@ -890,6 +890,13 @@
         noticeLevel(content) { return noticeLevel(content); },
         noticeText(content) { return noticeText(content); },
         noticeDetail(content) { return noticeDetail(content); },
+        attachmentName(attachment) { return attachment?.name || attachment?.Name || 'image'; },
+        attachmentIcon(attachment) {
+          const mime = String(attachment?.mime || attachment?.MIME || '').toLowerCase();
+          if (mime.startsWith('image/')) return 'bi-image';
+          if (mime === 'application/pdf') return 'bi-filetype-pdf';
+          return 'bi-paperclip';
+        },
         resizeComposer() {
           const el = this.$refs.composerInput; if (!el) return;
           const maxHeight = Math.floor((window.innerHeight || 800) * 0.2);
@@ -899,6 +906,45 @@
           el.style.overflowY = el.scrollHeight > maxHeight ? 'auto' : 'hidden';
         },
         onComposerInput() { this.resizeComposer(); this.updateCompletions(); },
+        onComposerPaste(ev) {
+          const items = Array.from(ev.clipboardData?.items || []);
+          const imageItems = items.filter(item => item.kind === 'file' && String(item.type || '').startsWith('image/'));
+          if (imageItems.length === 0) {
+            this.insertComposerText(ev.clipboardData?.getData('text/plain') || '');
+            return;
+          }
+          imageItems.forEach(item => {
+            const file = item.getAsFile();
+            if (file) this.uploadComposerImage(file);
+          });
+        },
+        insertComposerText(text) {
+          if (!text) return;
+          const el = this.$refs.composerInput;
+          const start = el ? el.selectionStart ?? this.draft.length : this.draft.length;
+          const end = el ? el.selectionEnd ?? start : start;
+          this.draft = this.draft.slice(0, start) + text + this.draft.slice(end);
+          const cursor = start + text.length;
+          this.$nextTick(() => { if (el) { el.focus(); el.setSelectionRange(cursor, cursor); } this.resizeComposer(); this.updateCompletions(); });
+        },
+        uploadComposerImage(file) {
+          const form = new FormData();
+          form.append('image', file, file.name || 'clipboard.png');
+          fetch('/api/attachments/clipboard-image', {method: 'POST', body: form})
+            .then(resp => {
+              if (!resp.ok) return resp.text().then(text => { throw new Error(text || resp.statusText); });
+              return resp.json();
+            })
+            .then(draft => {
+              this.composerAttachments = [...this.composerAttachments, draft];
+              this.showToast('Attached ' + this.attachmentName(draft));
+            })
+            .catch(err => this.showToast(err.message || 'image paste failed'));
+        },
+        removeComposerAttachment(attachment) {
+          const id = attachment?.id || attachment?.ID;
+          this.composerAttachments = this.composerAttachments.filter(item => (item.id || item.ID) !== id);
+        },
         onComposerKeydown(ev) {
           if (this.completion.items.length > 0) {
             if (ev.key === 'ArrowDown') { ev.preventDefault(); this.completion.selected = Math.min(this.completion.items.length - 1, this.completion.selected + 1); return; }
@@ -934,7 +980,22 @@
           this.clearCompletions();
           this.$nextTick(() => { const el = this.$refs.composerInput; if (el) { el.focus(); el.setSelectionRange(cursor, cursor); } this.resizeComposer(); });
         },
-        send() { const text = this.draft.trim(); if (!text) return; if (this.handleSlash(text)) { this.draft = ''; this.clearCompletions(); this.$nextTick(() => this.resizeComposer()); return; } this.draft = ''; this.clearCompletions(); this.$nextTick(() => this.resizeComposer()); this.rpc('send_prompt', {text}); },
+        send() {
+          const text = this.draft.trim();
+          const attachments = this.composerAttachments.slice();
+          if (!text && attachments.length === 0) return;
+          if (text && attachments.length === 0 && this.handleSlash(text)) {
+            this.draft = '';
+            this.clearCompletions();
+            this.$nextTick(() => this.resizeComposer());
+            return;
+          }
+          this.draft = '';
+          this.composerAttachments = [];
+          this.clearCompletions();
+          this.$nextTick(() => this.resizeComposer());
+          this.rpc('send_prompt', {text, attachments}).catch(() => { this.draft = text; this.composerAttachments = attachments; });
+        },
         handleSlash(text) {
           if (text === '/permissions') { this.showPermissions = true; return true; }
           if (text === '/compact') { this.rpc('compact', {}); return true; }

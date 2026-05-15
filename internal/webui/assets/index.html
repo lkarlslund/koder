@@ -44,6 +44,16 @@
         <section class="transcript-turn mb-4">
           <template x-if="item.kind === 'user'">
             <div class="turn user-turn">
+              <template x-if="(item.content?.attachments || []).length > 0">
+                <div class="attachment-strip mb-2">
+                  <template x-for="attachment in item.content.attachments || []" :key="attachment.id || attachment.ID || attachment.path || attachment.Path">
+                    <span class="attachment-chip">
+                      <i class="bi" :class="attachmentIcon(attachment)"></i>
+                      <span class="text-truncate" x-text="attachmentName(attachment)"></span>
+                    </span>
+                  </template>
+                </div>
+              </template>
               <div class="markdown-body" x-html="markdownHTML(item.content?.text || '')"></div>
             </div>
           </template>
@@ -248,11 +258,20 @@
           </button>
         </template>
       </div>
+      <div class="composer-attachments mb-2" x-show="composerAttachments.length > 0" style="display: none;">
+        <template x-for="attachment in composerAttachments" :key="attachment.id || attachment.ID">
+          <span class="attachment-chip">
+            <i class="bi" :class="attachmentIcon(attachment)"></i>
+            <span class="text-truncate" x-text="attachmentName(attachment)"></span>
+            <button type="button" class="btn btn-sm btn-link p-0 ms-1" title="Remove attachment" @click="removeComposerAttachment(attachment)"><i class="bi bi-x-lg"></i></button>
+          </span>
+        </template>
+      </div>
       <div class="input-group">
         <button class="btn btn-danger interrupt-button" type="button" x-show="chatInterruptible()" :title="interruptButtonTitle()" @click="interruptChat()" style="display: none;">
           <i class="bi" :class="interruptArmed() ? 'bi-x-octagon-fill' : 'bi-stop-fill'"></i>
         </button>
-        <textarea class="form-control composer-input" rows="1" x-ref="composerInput" x-model="draft" placeholder="Ask koder or type / for commands" @input="onComposerInput()" @click="updateCompletions()" @focus="reportClientStateSoon()" @blur="reportClientStateSoon()" @keyup="onComposerKeyup($event)" @keydown="onComposerKeydown($event)"></textarea>
+        <textarea class="form-control composer-input" rows="1" x-ref="composerInput" x-model="draft" placeholder="Ask koder or type / for commands" @input="onComposerInput()" @click="updateCompletions()" @focus="reportClientStateSoon()" @blur="reportClientStateSoon()" @keyup="onComposerKeyup($event)" @keydown="onComposerKeydown($event)" @paste.prevent="onComposerPaste($event)"></textarea>
         <button class="btn btn-primary" type="submit"><i class="bi bi-send-fill"></i></button>
       </div>
     </form>

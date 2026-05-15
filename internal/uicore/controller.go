@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/lkarlslund/koder/internal/agent"
+	"github.com/lkarlslund/koder/internal/attachment"
 	"github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/chatrole"
 	"github.com/lkarlslund/koder/internal/config"
@@ -313,16 +314,35 @@ func (c *Controller) Subscribe() (<-chan Event, func()) {
 
 // SendPrompt appends a user prompt to the active chat queue.
 func (c *Controller) SendPrompt(text string) error {
+	return c.SendPromptWithAttachments(text, nil)
+}
+
+// SendPromptWithAttachments appends a user prompt and uploaded attachment drafts to the active chat queue.
+func (c *Controller) SendPromptWithAttachments(text string, drafts []attachment.Draft) error {
 	text = strings.TrimSpace(text)
-	if text == "" {
+	validated := make([]attachment.Draft, 0, len(drafts))
+	manager := attachment.NewManager(c.cfg.StateDir())
+	for _, draft := range drafts {
+		next, err := manager.ValidateDraft(draft)
+		if err != nil {
+			return err
+		}
+		validated = append(validated, next)
+	}
+	if text == "" && len(validated) == 0 {
 		return fmt.Errorf("prompt is empty")
 	}
 	rt := c.currentRuntime()
 	if rt == nil {
 		return fmt.Errorf("no active chat")
 	}
-	rt.Enqueue(chat.QueueItem{Kind: chat.QueueKindSteer, Text: text})
+	rt.Enqueue(chat.QueueItem{Kind: chat.QueueKindSteer, Text: text, Attachments: validated})
 	return nil
+}
+
+// ImportClipboardImage stores a pasted image as a draft attachment for the web composer.
+func (c *Controller) ImportClipboardImage(data []byte, name string, mimeType string) (attachment.Draft, error) {
+	return attachment.NewManager(c.cfg.StateDir()).ImportClipboardImageData(data, name, mimeType)
 }
 
 // Continue asks the active chat to continue.

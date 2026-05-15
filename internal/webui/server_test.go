@@ -1,10 +1,12 @@
 package webui
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -586,6 +588,12 @@ func TestIndexServesHTML(t *testing.T) {
 	}
 	if !strings.Contains(fullPage, `el.style.overflowY = el.scrollHeight > maxHeight ? 'auto' : 'hidden'`) {
 		t.Fatalf("expected composer to scroll after reaching the height cap")
+	}
+	if !strings.Contains(fullPage, `@paste.prevent="onComposerPaste($event)"`) ||
+		!strings.Contains(fullPage, `/api/attachments/clipboard-image`) ||
+		!strings.Contains(fullPage, `composerAttachments`) ||
+		!strings.Contains(fullPage, `this.rpc('send_prompt', {text, attachments})`) {
+		t.Fatalf("expected composer to upload pasted images and send them as attachments")
 	}
 	if !strings.Contains(fullPage, `text === '/permissions'`) {
 		t.Fatalf("expected /permissions to be handled locally")
@@ -1254,6 +1262,59 @@ func TestWebSocketComposerCompletionsReturnsSkillsAndReferences(t *testing.T) {
 	}
 	if refResp.Result.Kind != "reference" || refResp.Result.Start != 5 || refResp.Result.End != 9 || len(refResp.Result.Items) == 0 || refResp.Result.Items[0].InsertText != "@README.md" || refResp.Result.Items[0].Path != "README.md" {
 		t.Fatalf("unexpected reference completions: %#v", refResp.Result)
+	}
+}
+
+func TestClipboardImageUploadEndpointReturnsDraftAttachment(t *testing.T) {
+	ctrl := newTestController(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoBrowser: true})
+	if err != nil {
+		t.Fatalf("start server: %v", err)
+	}
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("image", "paste.png")
+	if err != nil {
+		t.Fatalf("create form file: %v", err)
+	}
+	if _, err := part.Write([]byte("\x89PNG\r\n\x1a\nfake")); err != nil {
+		t.Fatalf("write image: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close multipart writer: %v", err)
+	}
+	req, err := http.NewRequest(http.MethodPost, srv.URL()+"/api/attachments/clipboard-image", &body)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected 200, got %s: %s", resp.Status, body)
+	}
+	var draft struct {
+		ID     string `json:"id"`
+		Name   string `json:"name"`
+		MIME   string `json:"mime"`
+		Path   string `json:"path"`
+		Source string `json:"source"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&draft); err != nil {
+		t.Fatalf("decode draft: %v", err)
+	}
+	if draft.ID == "" || draft.Name != "paste.png" || draft.MIME != "image/png" || draft.Source != "clipboard_image" {
+		t.Fatalf("unexpected draft: %#v", draft)
+	}
+	if _, err := os.Stat(draft.Path); err != nil {
+		t.Fatalf("expected uploaded draft file: %v", err)
 	}
 }
 

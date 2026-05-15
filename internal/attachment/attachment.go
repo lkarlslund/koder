@@ -52,26 +52,88 @@ func (m *Manager) SessionDir(sessionID domain.ID) string {
 }
 
 func (m *Manager) ImportClipboardImage(png []byte) (Draft, error) {
-	if len(png) == 0 {
+	return m.ImportClipboardImageData(png, "clipboard.png", "image/png")
+}
+
+func (m *Manager) ImportClipboardImageData(data []byte, name string, mimeType string) (Draft, error) {
+	if len(data) == 0 {
 		return Draft{}, fmt.Errorf("clipboard image is empty")
+	}
+	mimeType = strings.TrimSpace(mimeType)
+	if mimeType == "" {
+		mimeType = http.DetectContentType(data)
+	}
+	if ClassifyMIME(mimeType) != KindImage {
+		mimeType = http.DetectContentType(data)
+	}
+	if ClassifyMIME(mimeType) != KindImage {
+		return Draft{}, fmt.Errorf("clipboard item is not an image")
 	}
 	id, err := newID()
 	if err != nil {
 		return Draft{}, err
 	}
-	name := "clipboard.png"
-	dst := filepath.Join(m.DraftsDir(), id+".png")
-	if err := writeFile(dst, png); err != nil {
+	name = strings.TrimSpace(filepath.Base(name))
+	if name == "" || name == "." {
+		name = "clipboard" + extensionForMIME(mimeType)
+	}
+	ext := strings.ToLower(filepath.Ext(name))
+	if ext == "" {
+		ext = extensionForMIME(mimeType)
+	}
+	dst := filepath.Join(m.DraftsDir(), id+ext)
+	if err := writeFile(dst, data); err != nil {
 		return Draft{}, err
 	}
 	return Draft{Metadata: Metadata{
 		ID:     id,
 		Name:   name,
-		MIME:   "image/png",
+		MIME:   mimeType,
 		Path:   dst,
-		Size:   int64(len(png)),
+		Size:   int64(len(data)),
 		Source: SourceClipboardImage,
 	}}, nil
+}
+
+func (m *Manager) ValidateDraft(draft Draft) (Draft, error) {
+	if strings.TrimSpace(draft.Path) == "" {
+		return Draft{}, fmt.Errorf("draft attachment path is empty")
+	}
+	draftsDir, err := filepath.Abs(m.DraftsDir())
+	if err != nil {
+		return Draft{}, fmt.Errorf("resolve drafts dir: %w", err)
+	}
+	path, err := filepath.Abs(draft.Path)
+	if err != nil {
+		return Draft{}, fmt.Errorf("resolve draft attachment path: %w", err)
+	}
+	rel, err := filepath.Rel(draftsDir, path)
+	if err != nil || rel == "." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || rel == ".." {
+		return Draft{}, fmt.Errorf("draft attachment is outside the drafts directory")
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return Draft{}, fmt.Errorf("stat draft attachment: %w", err)
+	}
+	if info.IsDir() {
+		return Draft{}, fmt.Errorf("draft attachment path %q is a directory", path)
+	}
+	draft.Path = path
+	draft.Size = info.Size()
+	if strings.TrimSpace(draft.MIME) == "" {
+		_, mimeType, err := classifyFile(path)
+		if err != nil {
+			return Draft{}, err
+		}
+		draft.MIME = mimeType
+	}
+	if ClassifyMIME(draft.MIME) == KindUnsupported {
+		return Draft{}, fmt.Errorf("unsupported attachment type %q", draft.MIME)
+	}
+	if strings.TrimSpace(draft.Name) == "" {
+		draft.Name = filepath.Base(path)
+	}
+	return draft, nil
 }
 
 func (m *Manager) ImportFile(path string) (Draft, error) {
@@ -258,6 +320,14 @@ func newID() (string, error) {
 		return "", fmt.Errorf("generate attachment id: %w", err)
 	}
 	return hex.EncodeToString(buf[:]), nil
+}
+
+func extensionForMIME(mimeType string) string {
+	exts, err := mime.ExtensionsByType(strings.ToLower(strings.TrimSpace(strings.Split(mimeType, ";")[0])))
+	if err == nil && len(exts) > 0 {
+		return exts[0]
+	}
+	return ".png"
 }
 
 func writeFile(path string, data []byte) error {
