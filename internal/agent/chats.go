@@ -7,6 +7,7 @@ import (
 	"time"
 
 	chatpkg "github.com/lkarlslund/koder/internal/chat"
+	"github.com/lkarlslund/koder/internal/chatrole"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools"
@@ -136,11 +137,11 @@ func (e *Engine) PollChat(ctx context.Context, sessionID, chatID domain.ID) (too
 }
 
 func (e *Engine) StartDecomposition(ctx context.Context, sessionID, parentChatID domain.ID, milestoneRef, title string) (tools.ChatStatus, error) {
-	return e.startWorkflowChat(ctx, sessionID, parentChatID, domain.WorkflowRoleDecomposition, milestoneRef, title)
+	return e.startWorkflowChat(ctx, sessionID, parentChatID, chatrole.Decomposition, milestoneRef, title)
 }
 
 func (e *Engine) StartExecution(ctx context.Context, sessionID, parentChatID domain.ID, milestoneRef, title string) (tools.ChatStatus, error) {
-	return e.startWorkflowChat(ctx, sessionID, parentChatID, domain.WorkflowRoleExecution, milestoneRef, title)
+	return e.startWorkflowChat(ctx, sessionID, parentChatID, chatrole.Execution, milestoneRef, title)
 }
 
 func (e *Engine) startWorkflowChat(ctx context.Context, sessionID, parentChatID domain.ID, role domain.WorkflowRole, milestoneRef, title string) (tools.ChatStatus, error) {
@@ -163,16 +164,16 @@ func (e *Engine) startWorkflowChat(ctx context.Context, sessionID, parentChatID 
 	if milestone.OwnerChatID != nil {
 		return tools.ChatStatus{}, fmt.Errorf("milestone %q is owned by chat %s", milestoneRef, *milestone.OwnerChatID)
 	}
-	if role == domain.WorkflowRoleDecomposition && milestone.Status != domain.MilestoneStatusPending && milestone.Status != domain.MilestoneStatusReady {
+	if role == chatrole.Decomposition && milestone.Status != domain.MilestoneStatusPending && milestone.Status != domain.MilestoneStatusReady {
 		return tools.ChatStatus{}, fmt.Errorf("milestone %q is %s, expected pending or ready", milestoneRef, milestone.Status)
 	}
-	if role == domain.WorkflowRoleExecution && milestone.Status != domain.MilestoneStatusReady {
+	if role == chatrole.Execution && milestone.Status != domain.MilestoneStatusReady {
 		return tools.ChatStatus{}, fmt.Errorf("milestone %q is %s, expected ready", milestoneRef, milestone.Status)
 	}
 	parentID := parentChat.ID
 	chatTitle := strings.TrimSpace(title)
 	if chatTitle == "" {
-		chatTitle = fmt.Sprintf("%s: %s", roleDisplayName(role), milestone.Title)
+		chatTitle = fmt.Sprintf("%s: %s", chatrole.DisplayName(role), milestone.Title)
 	}
 	chatRecord, err := e.store.CreateChat(ctx, sessionID, chatTitle, role, &parentID)
 	if err != nil {
@@ -309,9 +310,9 @@ func (e *Engine) bootstrapPrompt(ctx context.Context, sessionID domain.ID, miles
 		}
 	}
 	switch role {
-	case domain.WorkflowRoleDecomposition:
+	case chatrole.Decomposition:
 		lines = append(lines, "", "Decompose only this milestone into concrete todo items.", "Use milestone and todo tools only for this milestone.", "When decomposition is complete, set the milestone status to ready and then go idle.", "Do not edit code in this chat.")
-	case domain.WorkflowRoleExecution:
+	case chatrole.Execution:
 		lines = append(lines, "", "Execute only this milestone using its todo bucket as the working queue.", "Update todo statuses as you make progress and keep the milestone status accurate.", "When finished, set the milestone status to completed or blocked and then go idle.")
 	}
 	return strings.TrimSpace(strings.Join(lines, "\n"))
@@ -347,25 +348,12 @@ func (e *Engine) updateMilestoneStatus(ctx context.Context, sessionID domain.ID,
 
 func roleMilestoneStatus(role domain.WorkflowRole) domain.MilestoneStatus {
 	switch role {
-	case domain.WorkflowRoleDecomposition:
+	case chatrole.Decomposition:
 		return domain.MilestoneStatusDecomposing
-	case domain.WorkflowRoleExecution:
+	case chatrole.Execution:
 		return domain.MilestoneStatusExecuting
 	default:
 		return domain.MilestoneStatusPending
-	}
-}
-
-func roleDisplayName(role domain.WorkflowRole) string {
-	switch role {
-	case domain.WorkflowRoleDecomposition:
-		return "Decompose"
-	case domain.WorkflowRoleExecution:
-		return "Execute"
-	case domain.WorkflowRoleOrchestrator:
-		return "Orchestrate"
-	default:
-		return "Chat"
 	}
 }
 

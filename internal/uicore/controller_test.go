@@ -13,6 +13,7 @@ import (
 
 	"github.com/lkarlslund/koder/internal/agent"
 	"github.com/lkarlslund/koder/internal/chat"
+	"github.com/lkarlslund/koder/internal/chatrole"
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/store"
@@ -219,7 +220,7 @@ func TestControllerRefreshChatStatusesDiscoversNewStoreChats(t *testing.T) {
 		t.Fatal("expected active session and chat")
 	}
 	parentID := state.ActiveChatID
-	created, err := st.CreateChat(context.Background(), state.Session.ID, "Worker", domain.WorkflowRoleExecution, &parentID)
+	created, err := st.CreateChat(context.Background(), state.Session.ID, "Worker", chatrole.Execution, &parentID)
 	if err != nil {
 		t.Fatalf("create worker chat: %v", err)
 	}

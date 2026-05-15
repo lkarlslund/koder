@@ -1,4 +1,4 @@
-package permission
+package permissionprofile
 
 import (
 	"fmt"
@@ -8,7 +8,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/domain"
 )
 
@@ -19,14 +18,54 @@ const (
 	ProfileFullAccess = "full-access"
 )
 
+// Rules is the configured permission profile set plus active profile name.
+type Rules struct {
+	Profile  string             `toml:"profile"`
+	Profiles map[string]Profile `toml:"profiles"`
+
+	Read       domain.PermissionMode `toml:"read"`
+	Glob       domain.PermissionMode `toml:"glob"`
+	Grep       domain.PermissionMode `toml:"grep"`
+	Bash       domain.PermissionMode `toml:"bash"`
+	ApplyPatch domain.PermissionMode `toml:"apply_patch"`
+	Task       domain.PermissionMode `toml:"task"`
+	Question   domain.PermissionMode `toml:"question"`
+	WebFetch   domain.PermissionMode `toml:"webfetch"`
+	WebSearch  domain.PermissionMode `toml:"websearch"`
+}
+
+// Profile is a named list of permission rules.
+type Profile struct {
+	Rules []Rule `toml:"rules"`
+}
+
+// Rule grants, asks, or denies a tool matching a pattern.
+type Rule struct {
+	Tool    domain.ToolKind       `toml:"tool"`
+	Pattern string                `toml:"pattern"`
+	Action  domain.PermissionMode `toml:"action"`
+}
+
+// AccessKind is a coarse permission category supplied by the tool caller.
+type AccessKind string
+
+const (
+	AccessUnknown AccessKind = ""
+	AccessRead    AccessKind = "read"
+	AccessWrite   AccessKind = "write"
+	AccessShell   AccessKind = "shell"
+)
+
 type ProfileOption struct {
 	Name        string
 	Label       string
 	Description string
 }
 
+// Request describes the permission-sensitive operation being evaluated.
 type Request struct {
 	Tool           domain.ToolKind
+	Access         AccessKind
 	Pattern        string
 	ProjectRoot    string
 	Targets        []string
@@ -34,18 +73,20 @@ type Request struct {
 	Ambiguous      bool
 }
 
+// Decision is the outcome of evaluating a permission request.
 type Decision struct {
 	Mode   domain.PermissionMode
 	Reason string
 }
 
-func Evaluate(cfg config.PermissionRules, profileName string, overrides []domain.PermissionOverride, req Request) Decision {
+// Evaluate returns the permission decision for req under profileName.
+func Evaluate(cfg Rules, profileName string, overrides []domain.PermissionOverride, req Request) Decision {
 	pattern := req.Pattern
 	if pattern == "" {
 		pattern = "*"
 	}
 	for _, rule := range slices.Backward(overrides) {
-		if rule.Tool != req.Tool {
+		if !toolMatches(rule.Tool, req.Tool) {
 			continue
 		}
 		if wildcardMatch(rule.Pattern, pattern) {
@@ -61,7 +102,7 @@ func Evaluate(cfg config.PermissionRules, profileName string, overrides []domain
 	}
 
 	for _, rule := range slices.Backward(profile.Rules) {
-		if rule.Tool != req.Tool {
+		if !toolMatches(rule.Tool, req.Tool) {
 			continue
 		}
 		if wildcardMatch(rule.Pattern, pattern) {
@@ -71,6 +112,7 @@ func Evaluate(cfg config.PermissionRules, profileName string, overrides []domain
 	return Decision{Mode: domain.PermissionModeDeny}
 }
 
+// BuiltinProfiles returns the built-in permission profiles in display order.
 func BuiltinProfiles() []ProfileOption {
 	return []ProfileOption{
 		{Name: ProfileAsk, Label: "ask", Description: "Ask before every permission-governed tool action"},
@@ -80,6 +122,7 @@ func BuiltinProfiles() []ProfileOption {
 	}
 }
 
+// IsBuiltinProfile reports whether name is a built-in profile.
 func IsBuiltinProfile(name string) bool {
 	switch strings.TrimSpace(name) {
 	case ProfileAsk, ProfileReadAsk, ProfileWriteAsk, ProfileFullAccess:
@@ -89,6 +132,7 @@ func IsBuiltinProfile(name string) bool {
 	}
 }
 
+// DisplayName returns a short label for a permission profile.
 func DisplayName(name string) string {
 	for _, item := range BuiltinProfiles() {
 		if item.Name == strings.TrimSpace(name) {
@@ -101,7 +145,8 @@ func DisplayName(name string) string {
 	return name
 }
 
-func ProfileNames(cfg config.PermissionRules) []string {
+// ProfileNames returns built-in and configured profile names in display order.
+func ProfileNames(cfg Rules) []string {
 	names := make([]string, 0, len(cfg.Profiles)+len(BuiltinProfiles()))
 	seen := map[string]struct{}{}
 	for _, item := range BuiltinProfiles() {
@@ -120,6 +165,7 @@ func ProfileNames(cfg config.PermissionRules) []string {
 	return names
 }
 
+// Validate reports whether mode is a supported permission mode.
 func Validate(mode domain.PermissionMode) error {
 	switch mode {
 	case domain.PermissionModeAllow, domain.PermissionModeAsk, domain.PermissionModeDeny:
@@ -161,18 +207,18 @@ func evaluateBuiltin(profileName string, req Request) Decision {
 	case ProfileAsk:
 		return Decision{Mode: domain.PermissionModeAsk, Reason: "this mode requires approval for all tool actions"}
 	case ProfileReadAsk:
-		if req.Tool == domain.ToolKindBash || req.Tool == domain.ToolKindExecCommand {
+		if req.Access == AccessShell {
 			return Decision{Mode: domain.PermissionModeAsk, Reason: "shell commands require approval in this mode"}
 		}
-		if isProjectReadTool(req.Tool) && req.targetsProjectOnly() {
+		if req.Access == AccessRead && req.targetsProjectOnly() {
 			return Decision{Mode: domain.PermissionModeAllow}
 		}
 		return Decision{Mode: domain.PermissionModeAsk, Reason: req.reason("this mode only auto-allows reads in the current project")}
 	case ProfileWriteAsk:
-		if req.Tool == domain.ToolKindBash || req.Tool == domain.ToolKindExecCommand {
+		if req.Access == AccessShell {
 			return Decision{Mode: domain.PermissionModeAsk, Reason: "shell commands require approval in this mode"}
 		}
-		if isProjectReadOrWriteTool(req.Tool) && req.targetsProjectOnly() {
+		if (req.Access == AccessRead || req.Access == AccessWrite) && req.targetsProjectOnly() {
 			return Decision{Mode: domain.PermissionModeAllow}
 		}
 		return Decision{Mode: domain.PermissionModeAsk, Reason: req.reason("this mode only auto-allows reads and writes in the current project")}
@@ -180,27 +226,6 @@ func evaluateBuiltin(profileName string, req Request) Decision {
 		return Decision{Mode: domain.PermissionModeAllow}
 	default:
 		return Decision{Mode: domain.PermissionModeDeny}
-	}
-}
-
-func isProjectReadTool(tool domain.ToolKind) bool {
-	switch tool {
-	case domain.ToolKindRead, domain.ToolKindGlob, domain.ToolKindGrep, domain.ToolKindCodeSearch:
-		return true
-	default:
-		return false
-	}
-}
-
-func isProjectReadOrWriteTool(tool domain.ToolKind) bool {
-	if isProjectReadTool(tool) {
-		return true
-	}
-	switch tool {
-	case domain.ToolKindApplyPatch, domain.ToolKindEdit, domain.ToolKindWrite:
-		return true
-	default:
-		return false
 	}
 }
 
@@ -226,6 +251,13 @@ func (req Request) targetsProjectOnly() bool {
 		}
 	}
 	return true
+}
+
+func toolMatches(ruleTool, reqTool domain.ToolKind) bool {
+	if strings.TrimSpace(string(ruleTool)) == "" {
+		return false
+	}
+	return wildcardMatch(string(ruleTool), string(reqTool))
 }
 
 func (req Request) reason(fallback string) string {

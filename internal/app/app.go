@@ -19,6 +19,7 @@ import (
 	"github.com/lkarlslund/koder/internal/agent"
 	"github.com/lkarlslund/koder/internal/attachment"
 	chatpkg "github.com/lkarlslund/koder/internal/chat"
+	"github.com/lkarlslund/koder/internal/chatrole"
 	kclipboard "github.com/lkarlslund/koder/internal/clipboard"
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/debugsrv"
@@ -26,7 +27,7 @@ import (
 	"github.com/lkarlslund/koder/internal/execruntime"
 	"github.com/lkarlslund/koder/internal/markdown"
 	kodermcp "github.com/lkarlslund/koder/internal/mcp"
-	"github.com/lkarlslund/koder/internal/permission"
+	"github.com/lkarlslund/koder/internal/permissionprofile"
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/reference"
 	"github.com/lkarlslund/koder/internal/sessionctx"
@@ -2631,7 +2632,7 @@ func (m *App) renderSidebarChatLine() string {
 	}
 	role := strings.TrimSpace(string(m.currentChat.WorkflowRole))
 	if role == "" {
-		role = string(domain.WorkflowRoleGeneral)
+		role = string(chatrole.General)
 	}
 	label += "  " + role
 	label += fmt.Sprintf("  %d msg", len(m.activeMessages()))
@@ -2654,7 +2655,7 @@ func (m *App) renderSidebarChatListItem(item domain.Chat) string {
 		label = fmt.Sprintf("Chat %s", item.ID)
 	}
 	role := strings.TrimSpace(string(item.WorkflowRole))
-	if role != "" && role != string(domain.WorkflowRoleGeneral) {
+	if role != "" && role != string(chatrole.General) {
 		label += " [" + role + "]"
 	}
 	if queued := len(item.QueuedInputs); queued > 0 {
@@ -5511,7 +5512,7 @@ func (m *App) handleLocalCommand(prompt string) (ui.Model, ui.Cmd, bool) {
 		}
 		title := fmt.Sprintf("Chat %d", len(m.chats)+1)
 		m.startBusy(busyScopeSidebar, "Creating chat…")
-		return m, m.createChatCmd(m.currentSession.ID, domain.WorkflowRoleGeneral, title), true
+		return m, m.createChatCmd(m.currentSession.ID, chatrole.General, title), true
 	case trimmed == "/chat next":
 		m.resetComposerInput()
 		return m, m.switchChatByDelta(1), true
@@ -9270,8 +9271,8 @@ func (m *App) cancelThemeDialog() (ui.Model, ui.Cmd) {
 }
 
 func (m *App) openPermissionsPicker() {
-	items := make([]ui.PickerItem, 0, len(permission.BuiltinProfiles()))
-	for _, item := range permission.BuiltinProfiles() {
+	items := make([]ui.PickerItem, 0, len(permissionprofile.BuiltinProfiles()))
+	for _, item := range permissionprofile.BuiltinProfiles() {
 		items = append(items, ui.PickerItem{
 			Title:       item.Label,
 			Description: item.Description,
@@ -9321,14 +9322,14 @@ func (m *App) submitPickerSelection(value string) (ui.Model, ui.Cmd) {
 		approvalID := m.picker.approvalID
 		m.closePicker()
 		if approvalID != "" {
-			m.startBusy(busyScopeTranscript, fmt.Sprintf("Re-evaluating approval %s with %s…", approvalID, permission.DisplayName(value)))
+			m.startBusy(busyScopeTranscript, fmt.Sprintf("Re-evaluating approval %s with %s…", approvalID, permissionprofile.DisplayName(value)))
 			return m, ui.Batch(m.approvalPermissionProfileCmd(m.beginActiveOperation(), approvalID, value), m.syncWindowTitleCmd())
 		}
 		if err := m.selectPermissionProfile(value); err != nil {
 			m.status = err.Error()
 			return m, nil
 		}
-		m.status = fmt.Sprintf("Permission mode set to %s; model will be updated on the next turn", permission.DisplayName(value))
+		m.status = fmt.Sprintf("Permission mode set to %s; model will be updated on the next turn", permissionprofile.DisplayName(value))
 		return m, m.syncWindowTitleCmd()
 	case pickerModeSkills:
 		if strings.TrimSpace(value) == "" {
@@ -9390,7 +9391,7 @@ func (m *App) selectPermissionProfile(profile string) error {
 	if profile == "" {
 		return fmt.Errorf("permission profile is required")
 	}
-	if !permission.IsBuiltinProfile(profile) {
+	if !permissionprofile.IsBuiltinProfile(profile) {
 		if _, ok := m.cfg.Permissions.Profiles[profile]; !ok {
 			return fmt.Errorf("unknown permission profile %q", profile)
 		}
@@ -9451,7 +9452,7 @@ func (m *App) canContinue() (bool, string) {
 }
 
 func (m *App) queuePermissionChangeNote() {
-	label := permission.DisplayName(m.permissionProfile())
+	label := permissionprofile.DisplayName(m.permissionProfile())
 	projectRoot := strings.TrimSpace(m.currentProjectRoot())
 	if projectRoot == "" {
 		projectRoot = m.workdir

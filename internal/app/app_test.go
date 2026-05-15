@@ -19,11 +19,12 @@ import (
 	"github.com/lkarlslund/koder/internal/agent"
 	"github.com/lkarlslund/koder/internal/attachment"
 	chatpkg "github.com/lkarlslund/koder/internal/chat"
+	"github.com/lkarlslund/koder/internal/chatrole"
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/debugsrv"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/execruntime"
-	"github.com/lkarlslund/koder/internal/permission"
+	"github.com/lkarlslund/koder/internal/permissionprofile"
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/reference"
 	"github.com/lkarlslund/koder/internal/store"
@@ -1177,14 +1178,14 @@ func TestPermissionsPickerSelectionUpdatesDraftSession(t *testing.T) {
 	}
 	m.openPermissionsPicker()
 	for idx, item := range m.picker.dialog.Items {
-		if item.Value == permission.ProfileWriteAsk {
+		if item.Value == permissionprofile.ProfileWriteAsk {
 			m.picker.dialog.Index = idx
 			break
 		}
 	}
-	model, _ := m.submitPickerSelection(permission.ProfileWriteAsk)
+	model, _ := m.submitPickerSelection(permissionprofile.ProfileWriteAsk)
 	next := model.(*App)
-	if next.currentSession.PermissionProfile != permission.ProfileWriteAsk {
+	if next.currentSession.PermissionProfile != permissionprofile.ProfileWriteAsk {
 		t.Fatalf("expected draft session permission profile updated, got %q", next.currentSession.PermissionProfile)
 	}
 	if !strings.Contains(next.pendingModelNote, "Permission mode changed to write / ask.") {
@@ -2952,7 +2953,7 @@ func TestPermissionsPickerApplyAfterSlashCommandInvalidatesComposerArea(t *testi
 		t.Fatal("expected /permissions to open immediately from slash menu")
 	}
 
-	updated, cmd = next.submitPickerSelection(permission.ProfileAsk)
+	updated, cmd = next.submitPickerSelection(permissionprofile.ProfileAsk)
 	final := updated.(*App)
 	if cmd == nil {
 		t.Fatal("expected title sync command after applying permission profile")
@@ -3296,14 +3297,14 @@ func TestApplyEventKeepsRuntimePendingAssistantSnapshotInSync(t *testing.T) {
 func TestApplyEventKeepsRuntimeSnapshotMetadataInSync(t *testing.T) {
 	m := App{
 		currentRuntime:  &chatpkg.Chat{},
-		currentSession:  domain.Session{ID: "1", Title: "Old", PermissionProfile: permission.ProfileWriteAsk},
+		currentSession:  domain.Session{ID: "1", Title: "Old", PermissionProfile: permissionprofile.ProfileWriteAsk},
 		currentChat:     domain.Chat{ID: "2", SessionID: "1"},
-		currentSnapshot: chatpkg.Snapshot{Session: domain.Session{ID: "1", Title: "Old", PermissionProfile: permission.ProfileWriteAsk}, Chat: domain.Chat{ID: "2", SessionID: "1"}},
+		currentSnapshot: chatpkg.Snapshot{Session: domain.Session{ID: "1", Title: "Old", PermissionProfile: permissionprofile.ProfileWriteAsk}, Chat: domain.Chat{ID: "2", SessionID: "1"}},
 	}
 
 	m.applyEvent(domain.Event{Kind: domain.EventKindSessionTitle, Text: "New"})
 	m.applyEvent(domain.Event{Kind: domain.EventKindChatTitle, Text: "Chat New"})
-	m.applyEvent(domain.Event{Kind: domain.EventKindStatus, Meta: map[string]string{"permission_profile": permission.ProfileAsk}})
+	m.applyEvent(domain.Event{Kind: domain.EventKindStatus, Meta: map[string]string{"permission_profile": permissionprofile.ProfileAsk}})
 	m.applyEvent(domain.Event{Kind: domain.EventKindUsage, Usage: domain.Usage{PromptTokens: 123}})
 
 	if got := m.currentSnapshot.Session.Title; got != "New" {
@@ -3312,7 +3313,7 @@ func TestApplyEventKeepsRuntimeSnapshotMetadataInSync(t *testing.T) {
 	if got := m.currentSnapshot.Chat.Title; got != "Chat New" {
 		t.Fatalf("expected runtime snapshot chat title updated, got %q", got)
 	}
-	if got := m.currentSnapshot.Session.PermissionProfile; got != permission.ProfileAsk {
+	if got := m.currentSnapshot.Session.PermissionProfile; got != permissionprofile.ProfileAsk {
 		t.Fatalf("expected runtime snapshot permission profile updated, got %q", got)
 	}
 	if got := m.currentSnapshot.Chat.LastKnownContextTokens; got != 123 || !m.currentSnapshot.Chat.ContextTokensKnown {
@@ -5533,9 +5534,9 @@ func TestRenderHeaderIsEmpty(t *testing.T) {
 func TestRenderSidebarShowsStatusAndSessionInfo(t *testing.T) {
 	m := App{
 		currentSession: domain.Session{ID: "2", Title: "Testing Session", ProviderID: "test", ModelID: "model", PermissionProfile: "default", ProjectChecksum: "agents-1"},
-		currentChat:    domain.Chat{ID: "7", Title: "Maze Fix", WorkflowRole: domain.WorkflowRoleExecution},
+		currentChat:    domain.Chat{ID: "7", Title: "Maze Fix", WorkflowRole: chatrole.Execution},
 		chats: []domain.Chat{
-			{ID: "7", Title: "Maze Fix", WorkflowRole: domain.WorkflowRoleExecution},
+			{ID: "7", Title: "Maze Fix", WorkflowRole: chatrole.Execution},
 			{ID: "8", Title: "Review"},
 		},
 		status: "Working ...",
@@ -5842,7 +5843,7 @@ func TestSidebarContextUsesCompactedChatEstimateNotCompactionRequestUsage(t *tes
 			ProviderID: "test",
 			ModelID:    "model",
 		},
-		currentChat: domain.Chat{ID: "24", SessionID: "33", WorkflowRole: domain.WorkflowRoleGeneral, LastKnownContextTokens: 42, ContextTokensKnown: false},
+		currentChat: domain.Chat{ID: "24", SessionID: "33", WorkflowRole: chatrole.General, LastKnownContextTokens: 42, ContextTokensKnown: false},
 		showSidebar: true,
 		cfg: config.Config{
 			Providers: map[string]config.Provider{

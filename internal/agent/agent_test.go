@@ -20,10 +20,11 @@ import (
 
 	"github.com/lkarlslund/koder/internal/attachment"
 	chatpkg "github.com/lkarlslund/koder/internal/chat"
+	"github.com/lkarlslund/koder/internal/chatrole"
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/mcp"
-	"github.com/lkarlslund/koder/internal/permission"
+	"github.com/lkarlslund/koder/internal/permissionprofile"
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/reference"
 	"github.com/lkarlslund/koder/internal/store"
@@ -615,7 +616,7 @@ func TestConsumeChatUpdatesIgnoresInitialInactiveSnapshot(t *testing.T) {
 	}
 	parent := defaultChatForSession(t, st, session.ID)
 	parentID := parent.ID
-	child, err := st.CreateChat(context.Background(), session.ID, "child", domain.WorkflowRoleDecomposition, &parentID)
+	child, err := st.CreateChat(context.Background(), session.ID, "child", chatrole.Decomposition, &parentID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -649,7 +650,7 @@ func TestConsumeChatUpdatesNotifiesParentWhenChildBecomesIdle(t *testing.T) {
 	}
 	parent := defaultChatForSession(t, st, session.ID)
 	parentID := parent.ID
-	child, err := st.CreateChat(context.Background(), session.ID, "child", domain.WorkflowRoleDecomposition, &parentID)
+	child, err := st.CreateChat(context.Background(), session.ID, "child", chatrole.Decomposition, &parentID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -683,7 +684,7 @@ func TestHandleModelToolCallRejectsRoleForbiddenTool(t *testing.T) {
 		t.Fatal(err)
 	}
 	chat := defaultChatForSession(t, st, session.ID)
-	chat.WorkflowRole = domain.WorkflowRoleDecomposition
+	chat.WorkflowRole = chatrole.Decomposition
 	if err := st.UpdateChat(context.Background(), chat); err != nil {
 		t.Fatal(err)
 	}
@@ -1662,7 +1663,7 @@ func TestPermissionProfileChangeReevaluatesPendingApproval(t *testing.T) {
 	}
 	cfg.DefaultProvider = "test"
 	cfg.DefaultModel = "test-model"
-	cfg.Permissions.Profile = permission.ProfileAsk
+	cfg.Permissions.Profile = permissionprofile.ProfileAsk
 
 	st, err := store.Open(t.TempDir())
 	if err != nil {
@@ -1676,7 +1677,7 @@ func TestPermissionProfileChangeReevaluatesPendingApproval(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := st.SetSessionPermissionProfile(context.Background(), session.ID, permission.ProfileAsk); err != nil {
+	if err := st.SetSessionPermissionProfile(context.Background(), session.ID, permissionprofile.ProfileAsk); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1697,7 +1698,7 @@ func TestPermissionProfileChangeReevaluatesPendingApproval(t *testing.T) {
 		t.Fatal("expected approval request")
 	}
 
-	reeval, err := engine.SetPermissionProfileAndReevaluateApproval(context.Background(), session.ID, approvalID, permission.ProfileFullAccess)
+	reeval, err := engine.SetPermissionProfileAndReevaluateApproval(context.Background(), session.ID, approvalID, permissionprofile.ProfileFullAccess)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1705,7 +1706,7 @@ func TestPermissionProfileChangeReevaluatesPendingApproval(t *testing.T) {
 	var sawToolResult bool
 	var sawFinalAnswer bool
 	for evt := range reeval {
-		if evt.Kind == domain.EventKindStatus && evt.Meta["permission_profile"] == permission.ProfileFullAccess {
+		if evt.Kind == domain.EventKindStatus && evt.Meta["permission_profile"] == permissionprofile.ProfileFullAccess {
 			sawProfileChange = true
 		}
 		if evt.Kind == domain.EventKindToolResult && strings.Contains(evt.Text, "hello") {
@@ -1729,8 +1730,8 @@ func TestPermissionProfileChangeReevaluatesPendingApproval(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if updated.PermissionProfile != permission.ProfileFullAccess {
-		t.Fatalf("expected permission profile %q, got %q", permission.ProfileFullAccess, updated.PermissionProfile)
+	if updated.PermissionProfile != permissionprofile.ProfileFullAccess {
+		t.Fatalf("expected permission profile %q, got %q", permissionprofile.ProfileFullAccess, updated.PermissionProfile)
 	}
 
 	chats, err := st.ListChats(context.Background(), session.ID)
@@ -1789,7 +1790,7 @@ func TestRunPromptExecutesMultipleToolCallsInParallel(t *testing.T) {
 	}
 	cfg.DefaultProvider = "test"
 	cfg.DefaultModel = "test-model"
-	cfg.Permissions.Profile = permission.ProfileFullAccess
+	cfg.Permissions.Profile = permissionprofile.ProfileFullAccess
 
 	st, err := store.Open(t.TempDir())
 	if err != nil {
@@ -1803,7 +1804,7 @@ func TestRunPromptExecutesMultipleToolCallsInParallel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := st.SetSessionPermissionProfile(context.Background(), session.ID, permission.ProfileFullAccess); err != nil {
+	if err := st.SetSessionPermissionProfile(context.Background(), session.ID, permissionprofile.ProfileFullAccess); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1842,7 +1843,7 @@ func TestHandleModelToolCallsStopsAfterToolBatchWhenCancelRequested(t *testing.T
 	t.Parallel()
 
 	cfg := testConfig(t)
-	cfg.Permissions.Profile = permission.ProfileFullAccess
+	cfg.Permissions.Profile = permissionprofile.ProfileFullAccess
 
 	st, err := store.Open(t.TempDir())
 	if err != nil {
@@ -1856,7 +1857,7 @@ func TestHandleModelToolCallsStopsAfterToolBatchWhenCancelRequested(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := st.SetSessionPermissionProfile(context.Background(), session.ID, permission.ProfileFullAccess); err != nil {
+	if err := st.SetSessionPermissionProfile(context.Background(), session.ID, permissionprofile.ProfileFullAccess); err != nil {
 		t.Fatal(err)
 	}
 	chat, err := st.CreateChat(context.Background(), session.ID, "chat", "", nil)
@@ -1916,7 +1917,7 @@ func TestContinueModelTurnStopsAfterPersistingToolCallsWhenDrainRequested(t *tes
 	cfg.Providers = map[string]config.Provider{"test": {BaseURL: server.URL + "/v1", Timeout: time.Second}}
 	cfg.DefaultProvider = "test"
 	cfg.DefaultModel = "test-model"
-	cfg.Permissions.Profile = permission.ProfileFullAccess
+	cfg.Permissions.Profile = permissionprofile.ProfileFullAccess
 
 	st, err := store.Open(t.TempDir())
 	if err != nil {
@@ -1930,7 +1931,7 @@ func TestContinueModelTurnStopsAfterPersistingToolCallsWhenDrainRequested(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := st.SetSessionPermissionProfile(context.Background(), session.ID, permission.ProfileFullAccess); err != nil {
+	if err := st.SetSessionPermissionProfile(context.Background(), session.ID, permissionprofile.ProfileFullAccess); err != nil {
 		t.Fatal(err)
 	}
 	chat := defaultChatForSession(t, st, session.ID)
@@ -1992,7 +1993,7 @@ func TestResumePendingToolCallsExecutesAndContinues(t *testing.T) {
 	cfg.Providers = map[string]config.Provider{"test": {BaseURL: server.URL + "/v1", Timeout: time.Second}}
 	cfg.DefaultProvider = "test"
 	cfg.DefaultModel = "test-model"
-	cfg.Permissions.Profile = permission.ProfileFullAccess
+	cfg.Permissions.Profile = permissionprofile.ProfileFullAccess
 
 	st, err := store.Open(t.TempDir())
 	if err != nil {
@@ -2006,7 +2007,7 @@ func TestResumePendingToolCallsExecutesAndContinues(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := st.SetSessionPermissionProfile(context.Background(), session.ID, permission.ProfileFullAccess); err != nil {
+	if err := st.SetSessionPermissionProfile(context.Background(), session.ID, permissionprofile.ProfileFullAccess); err != nil {
 		t.Fatal(err)
 	}
 	chat := defaultChatForSession(t, st, session.ID)
@@ -2068,7 +2069,7 @@ func TestRunPromptAllowedToolTransitionsPendingToRunning(t *testing.T) {
 	cfg.Providers = map[string]config.Provider{"test": {BaseURL: server.URL + "/v1", Timeout: time.Second}}
 	cfg.DefaultProvider = "test"
 	cfg.DefaultModel = "test-model"
-	cfg.Permissions.Profile = permission.ProfileFullAccess
+	cfg.Permissions.Profile = permissionprofile.ProfileFullAccess
 
 	st, err := store.Open(t.TempDir())
 	if err != nil {
@@ -2082,7 +2083,7 @@ func TestRunPromptAllowedToolTransitionsPendingToRunning(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := st.SetSessionPermissionProfile(context.Background(), session.ID, permission.ProfileFullAccess); err != nil {
+	if err := st.SetSessionPermissionProfile(context.Background(), session.ID, permissionprofile.ProfileFullAccess); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2243,7 +2244,7 @@ func TestExecutePreparedToolCallDoesNotPersistCanceledToolFailure(t *testing.T) 
 	t.Parallel()
 
 	cfg := testConfig(t)
-	cfg.Permissions.Profile = permission.ProfileFullAccess
+	cfg.Permissions.Profile = permissionprofile.ProfileFullAccess
 
 	st, err := store.Open(t.TempDir())
 	if err != nil {
@@ -2749,7 +2750,7 @@ func TestHandleModelToolCallAsksForOutsideProjectRead(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	session.PermissionProfile = permission.ProfileReadAsk
+	session.PermissionProfile = permissionprofile.ProfileReadAsk
 	session.ProjectRoot = workdir
 
 	outsideDir := t.TempDir()
@@ -2791,7 +2792,7 @@ func TestHandleModelToolCallAllowsProjectReadInReadAskMode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	session.PermissionProfile = permission.ProfileReadAsk
+	session.PermissionProfile = permissionprofile.ProfileReadAsk
 	session.ProjectRoot = workdir
 
 	targetPath := filepath.Join(workdir, "inside.txt")
@@ -2832,7 +2833,7 @@ func TestHandleModelToolCallAllowsProjectCodeSearchInReadAskMode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	session.PermissionProfile = permission.ProfileReadAsk
+	session.PermissionProfile = permissionprofile.ProfileReadAsk
 	session.ProjectRoot = workdir
 
 	chat := defaultChatForSession(t, st, session.ID)
@@ -2908,9 +2909,9 @@ func TestApproveContinuesAfterOutsideWorkspaceRead(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	session.PermissionProfile = permission.ProfileReadAsk
+	session.PermissionProfile = permissionprofile.ProfileReadAsk
 	session.ProjectRoot = workdir
-	if err := st.SetSessionPermissionProfile(context.Background(), session.ID, permission.ProfileReadAsk); err != nil {
+	if err := st.SetSessionPermissionProfile(context.Background(), session.ID, permissionprofile.ProfileReadAsk); err != nil {
 		t.Fatal(err)
 	}
 
@@ -3109,9 +3110,9 @@ func TestApproveContinuesAfterApprovedToolFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	session.PermissionProfile = permission.ProfileReadAsk
+	session.PermissionProfile = permissionprofile.ProfileReadAsk
 	session.ProjectRoot = workdir
-	if err := st.SetSessionPermissionProfile(context.Background(), session.ID, permission.ProfileReadAsk); err != nil {
+	if err := st.SetSessionPermissionProfile(context.Background(), session.ID, permissionprofile.ProfileReadAsk); err != nil {
 		t.Fatal(err)
 	}
 
@@ -3448,7 +3449,7 @@ func TestHandleModelToolCallBypassesApprovalForSkill(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	session.PermissionProfile = permission.ProfileAsk
+	session.PermissionProfile = permissionprofile.ProfileAsk
 	session.ProjectRoot = workdir
 
 	chat := defaultChatForSession(t, st, session.ID)
@@ -3518,7 +3519,7 @@ func TestHandleModelToolCallAllowsProjectWriteInWriteAskMode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	session.PermissionProfile = permission.ProfileWriteAsk
+	session.PermissionProfile = permissionprofile.ProfileWriteAsk
 	session.ProjectRoot = workdir
 
 	chat := defaultChatForSession(t, st, session.ID)
@@ -3551,7 +3552,7 @@ func TestHandleModelToolCallAsksForBashInWriteAskMode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	session.PermissionProfile = permission.ProfileWriteAsk
+	session.PermissionProfile = permissionprofile.ProfileWriteAsk
 	session.ProjectRoot = workdir
 
 	chat := defaultChatForSession(t, st, session.ID)

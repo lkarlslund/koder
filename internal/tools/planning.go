@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/lkarlslund/koder/internal/chatrole"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/store"
 )
@@ -230,7 +231,7 @@ func AllowedMilestoneRef(runtime Runtime, requested string) (string, error) {
 	requested = strings.TrimSpace(requested)
 	assigned := AssignedMilestoneRef(runtime)
 	switch runtime.ChatRole {
-	case domain.WorkflowRoleDecomposition, domain.WorkflowRoleExecution:
+	case chatrole.Decomposition, chatrole.Execution:
 		if assigned == "" {
 			return requested, nil
 		}
@@ -253,7 +254,7 @@ func AssignedMilestoneRef(runtime Runtime) string {
 
 func ScopedMilestonePlan(runtime Runtime, plan store.MilestonePlan) store.MilestonePlan {
 	switch runtime.ChatRole {
-	case domain.WorkflowRoleDecomposition, domain.WorkflowRoleExecution:
+	case chatrole.Decomposition, chatrole.Execution:
 	default:
 		return plan
 	}

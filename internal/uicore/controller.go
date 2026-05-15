@@ -11,9 +11,10 @@ import (
 
 	"github.com/lkarlslund/koder/internal/agent"
 	"github.com/lkarlslund/koder/internal/chat"
+	"github.com/lkarlslund/koder/internal/chatrole"
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/domain"
-	"github.com/lkarlslund/koder/internal/permission"
+	"github.com/lkarlslund/koder/internal/permissionprofile"
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/reference"
 	"github.com/lkarlslund/koder/internal/skills"
@@ -77,8 +78,8 @@ type ModelOption struct {
 
 // PermissionsState describes permission profiles available to renderers.
 type PermissionsState struct {
-	Active   string                     `json:"active"`
-	Profiles []permission.ProfileOption `json:"profiles"`
+	Active   string                            `json:"active"`
+	Profiles []permissionprofile.ProfileOption `json:"profiles"`
 }
 
 // ProviderState describes configured and available provider templates.
@@ -426,7 +427,7 @@ func (c *Controller) NewChat(ctx context.Context, title string) error {
 	if title == "" {
 		title = "Chat"
 	}
-	chatRecord, err := c.store.CreateChat(ctx, sessionID, title, domain.WorkflowRoleOrchestrator, &parentID)
+	chatRecord, err := c.store.CreateChat(ctx, sessionID, title, chatrole.Orchestrator, &parentID)
 	if err != nil {
 		return err
 	}
@@ -945,7 +946,7 @@ func (c *Controller) SetPermissionProfile(ctx context.Context, profile string) e
 	if profile == "" {
 		return fmt.Errorf("permission profile is required")
 	}
-	if !permission.IsBuiltinProfile(profile) {
+	if !permissionprofile.IsBuiltinProfile(profile) {
 		if _, ok := c.cfg.Permissions.Profiles[profile]; !ok {
 			return fmt.Errorf("unknown permission profile %q", profile)
 		}
@@ -1810,16 +1811,16 @@ func (c *Controller) permissionsStateLocked() PermissionsState {
 	if active == "" {
 		active = c.cfg.Permissions.Profile
 	}
-	profiles := permission.BuiltinProfiles()
+	profiles := permissionprofile.BuiltinProfiles()
 	seen := map[string]struct{}{}
 	for _, item := range profiles {
 		seen[item.Name] = struct{}{}
 	}
-	for _, name := range permission.ProfileNames(c.cfg.Permissions) {
+	for _, name := range permissionprofile.ProfileNames(c.cfg.Permissions) {
 		if _, ok := seen[name]; ok {
 			continue
 		}
-		profiles = append(profiles, permission.ProfileOption{Name: name, Label: permission.DisplayName(name)})
+		profiles = append(profiles, permissionprofile.ProfileOption{Name: name, Label: permissionprofile.DisplayName(name)})
 	}
 	return PermissionsState{Active: active, Profiles: profiles}
 }

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/permissionprofile"
 	toml "github.com/pelletier/go-toml/v2"
 )
 
@@ -63,30 +64,9 @@ type MCPServer struct {
 	BearerTokenEnv       string            `toml:"bearer_token_env"`
 }
 
-type PermissionRules struct {
-	Profile  string                       `toml:"profile"`
-	Profiles map[string]PermissionProfile `toml:"profiles"`
-
-	Read       domain.PermissionMode `toml:"read"`
-	Glob       domain.PermissionMode `toml:"glob"`
-	Grep       domain.PermissionMode `toml:"grep"`
-	Bash       domain.PermissionMode `toml:"bash"`
-	ApplyPatch domain.PermissionMode `toml:"apply_patch"`
-	Task       domain.PermissionMode `toml:"task"`
-	Question   domain.PermissionMode `toml:"question"`
-	WebFetch   domain.PermissionMode `toml:"webfetch"`
-	WebSearch  domain.PermissionMode `toml:"websearch"`
-}
-
-type PermissionProfile struct {
-	Rules []PermissionRule `toml:"rules"`
-}
-
-type PermissionRule struct {
-	Tool    domain.ToolKind       `toml:"tool"`
-	Pattern string                `toml:"pattern"`
-	Action  domain.PermissionMode `toml:"action"`
-}
+type PermissionRules = permissionprofile.Rules
+type PermissionProfile = permissionprofile.Profile
+type PermissionRule = permissionprofile.Rule
 
 type Config struct {
 	DefaultProvider           string                   `toml:"default_provider"`

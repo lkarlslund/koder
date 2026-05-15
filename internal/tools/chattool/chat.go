@@ -55,25 +55,6 @@ func (startDecompositionTool) BypassesPermission() bool { return true }
 func (startExecutionTool) BypassesPermission() bool     { return true }
 func (pollTool) BypassesPermission() bool               { return true }
 
-func (listTool) Definition(runtime tools.Runtime, spec tools.ToolSpec) (tools.ToolSpec, bool) {
-	if !chatToolAllowed(runtime.ChatRole) {
-		return tools.ToolSpec{}, false
-	}
-	return spec, true
-}
-
-func (startDecompositionTool) Definition(runtime tools.Runtime, spec tools.ToolSpec) (tools.ToolSpec, bool) {
-	return listTool{}.Definition(runtime, spec)
-}
-
-func (startExecutionTool) Definition(runtime tools.Runtime, spec tools.ToolSpec) (tools.ToolSpec, bool) {
-	return listTool{}.Definition(runtime, spec)
-}
-
-func (pollTool) Definition(runtime tools.Runtime, spec tools.ToolSpec) (tools.ToolSpec, bool) {
-	return listTool{}.Definition(runtime, spec)
-}
-
 func (listTool) NormalizeArgs(map[string]string) (map[string]string, error) {
 	return map[string]string{}, nil
 }
@@ -191,13 +172,4 @@ func startChat(ctx context.Context, runtime tools.Runtime, req tools.Request, de
 		Output: tools.DisplayTextForStored(req.Tool, stored),
 		Stored: stored,
 	}, nil
-}
-
-func chatToolAllowed(role domain.WorkflowRole) bool {
-	switch role {
-	case domain.WorkflowRoleDecomposition, domain.WorkflowRoleExecution, domain.WorkflowRoleGeneral, domain.WorkflowRoleOrchestrator, domain.WorkflowRolePlanning:
-		return true
-	default:
-		return true
-	}
 }

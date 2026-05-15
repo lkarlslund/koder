@@ -5,40 +5,15 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/lkarlslund/koder/internal/chatrole"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools"
 	_ "github.com/lkarlslund/koder/internal/tools/all"
 )
 
-func TestRoleAllowsTool(t *testing.T) {
-	tests := []struct {
-		name string
-		role domain.WorkflowRole
-		tool domain.ToolKind
-		want bool
-	}{
-		{"decomposition read", domain.WorkflowRoleDecomposition, domain.ToolKindRead, true},
-		{"decomposition add todos", domain.WorkflowRoleDecomposition, domain.ToolKindTodoAddItems, true},
-		{"decomposition rejects bash", domain.WorkflowRoleDecomposition, domain.ToolKindBash, false},
-		{"decomposition rejects chat poll", domain.WorkflowRoleDecomposition, domain.ToolKindChatPoll, false},
-		{"execution allows edit", domain.WorkflowRoleExecution, domain.ToolKindEdit, true},
-		{"execution rejects chat start", domain.WorkflowRoleExecution, domain.ToolKindChatStartExec, false},
-		{"execution rejects milestone add", domain.WorkflowRoleExecution, domain.ToolKindMilestoneAdd, false},
-		{"execution allows milestone update", domain.WorkflowRoleExecution, domain.ToolKindMilestoneUpdate, true},
-		{"orchestrator allows chat poll", domain.WorkflowRoleOrchestrator, domain.ToolKindChatPoll, true},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := tools.RoleAllowsTool(tt.role, tt.tool); got != tt.want {
-				t.Fatalf("RoleAllowsTool(%q, %q) = %v, want %v", tt.role, tt.tool, got, tt.want)
-			}
-		})
-	}
-}
-
 func TestDefinitionsHideRoleForbiddenTools(t *testing.T) {
-	defs := tools.Definitions(tools.Runtime{ChatRole: domain.WorkflowRoleDecomposition})
+	defs := tools.Definitions(tools.Runtime{ChatRole: chatrole.Decomposition})
 	names := map[string]bool{}
 	for _, def := range defs {
 		names[def.Function.Name] = true
@@ -65,7 +40,7 @@ func TestExecuteWithChatRejectsRoleForbiddenTool(t *testing.T) {
 	registry := tools.NewRegistry(t.TempDir())
 	_, err = registry.ExecuteWithChat(context.Background(), st, "session-1", domain.Chat{
 		ID:           "chat-1",
-		WorkflowRole: domain.WorkflowRoleDecomposition,
+		WorkflowRole: chatrole.Decomposition,
 	}, tools.Request{
 		Tool: domain.ToolKindBash,
 		Args: map[string]string{"command": "echo no"},

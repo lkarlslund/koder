@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/lkarlslund/koder/internal/chatrole"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools"
@@ -65,7 +66,7 @@ func (planTool) BypassesPermission() bool       { return true }
 func (writeTool) BypassesPermission() bool      { return true }
 
 func (addItemsTool) Definition(runtime tools.Runtime, spec tools.ToolSpec) (tools.ToolSpec, bool) {
-	if runtime.ChatRole == domain.WorkflowRoleDecomposition || runtime.ChatRole == domain.WorkflowRoleExecution {
+	if runtime.ChatRole == chatrole.Decomposition || runtime.ChatRole == chatrole.Execution {
 		return tools.ToolSpec{}, false
 	}
 	return spec, true
@@ -517,7 +518,7 @@ func updatedMilestonePlan(plan store.MilestonePlan, req tools.Request, actor dom
 }
 
 func validateMilestoneOwner(milestone store.Milestone, next domain.MilestoneStatus, actor domain.Chat) error {
-	if actor.ID == "" || actor.WorkflowRole == domain.WorkflowRoleOrchestrator {
+	if actor.ID == "" || actor.WorkflowRole == chatrole.Orchestrator {
 		return nil
 	}
 	if milestone.OwnerChatID != nil && *milestone.OwnerChatID != actor.ID {
@@ -525,11 +526,11 @@ func validateMilestoneOwner(milestone store.Milestone, next domain.MilestoneStat
 	}
 	switch next {
 	case domain.MilestoneStatusDecomposing:
-		if actor.WorkflowRole != domain.WorkflowRoleDecomposition {
+		if actor.WorkflowRole != chatrole.Decomposition {
 			return fmt.Errorf("milestone %q can only be set to decomposing by a decomposition chat", milestone.Ref)
 		}
 	case domain.MilestoneStatusExecuting:
-		if actor.WorkflowRole != domain.WorkflowRoleExecution {
+		if actor.WorkflowRole != chatrole.Execution {
 			return fmt.Errorf("milestone %q can only be set to executing by an execution chat", milestone.Ref)
 		}
 	}
@@ -539,7 +540,7 @@ func validateMilestoneOwner(milestone store.Milestone, next domain.MilestoneStat
 func applyMilestoneOwner(milestone *store.Milestone, status domain.MilestoneStatus, actor domain.Chat) {
 	switch status {
 	case domain.MilestoneStatusDecomposing, domain.MilestoneStatusExecuting:
-		if actor.ID != "" && actor.WorkflowRole != domain.WorkflowRoleOrchestrator {
+		if actor.ID != "" && actor.WorkflowRole != chatrole.Orchestrator {
 			owner := actor.ID
 			milestone.OwnerChatID = &owner
 		}

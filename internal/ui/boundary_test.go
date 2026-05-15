@@ -182,7 +182,7 @@ func TestNoAppRuntimeImportsInProductionTUI(t *testing.T) {
 		`github.com/lkarlslund/koder/internal/clipboard`,
 		`github.com/lkarlslund/koder/internal/config`,
 		`github.com/lkarlslund/koder/internal/mcp`,
-		`github.com/lkarlslund/koder/internal/permission`,
+		`github.com/lkarlslund/koder/internal/permissionprofile`,
 		`github.com/lkarlslund/koder/internal/provider`,
 		`github.com/lkarlslund/koder/internal/sessionctx`,
 		`github.com/lkarlslund/koder/internal/store`,

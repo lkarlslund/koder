@@ -1,40 +1,59 @@
-package permission
+package permissionprofile
 
 import (
 	"testing"
 
-	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/domain"
 )
 
-func TestEvaluateDefaultProfile(t *testing.T) {
-	cfg := config.Default()
+func testRules() Rules {
+	return Rules{
+		Profile: "default",
+		Profiles: map[string]Profile{
+			"default": {
+				Rules: []Rule{
+					{Tool: domain.ToolKindRead, Pattern: "*", Action: domain.PermissionModeAllow},
+					{Tool: domain.ToolKindBash, Pattern: "*", Action: domain.PermissionModeAsk},
+					{Tool: domain.ToolKindApplyPatch, Pattern: "*", Action: domain.PermissionModeAsk},
+				},
+			},
+			"readonly": {
+				Rules: []Rule{
+					{Tool: domain.ToolKindRead, Pattern: "*", Action: domain.PermissionModeAllow},
+				},
+			},
+		},
+	}
+}
 
-	if got := Evaluate(cfg.Permissions, "default", nil, Request{Tool: domain.ToolKindRead, Pattern: "README.md"}); got.Mode != domain.PermissionModeAllow {
+func TestEvaluateDefaultProfile(t *testing.T) {
+	cfg := testRules()
+
+	if got := Evaluate(cfg, "default", nil, Request{Tool: domain.ToolKindRead, Pattern: "README.md"}); got.Mode != domain.PermissionModeAllow {
 		t.Fatalf("unexpected read mode: %s", got)
 	}
-	if got := Evaluate(cfg.Permissions, "default", nil, Request{Tool: domain.ToolKindBash, Pattern: "ls"}); got.Mode != domain.PermissionModeAsk {
+	if got := Evaluate(cfg, "default", nil, Request{Tool: domain.ToolKindBash, Pattern: "ls"}); got.Mode != domain.PermissionModeAsk {
 		t.Fatalf("unexpected bash mode: %s", got)
 	}
-	if got := Evaluate(cfg.Permissions, "default", nil, Request{Tool: domain.ToolKindRead, Pattern: "internal/domain/types.go"}); got.Mode != domain.PermissionModeAllow {
+	if got := Evaluate(cfg, "default", nil, Request{Tool: domain.ToolKindRead, Pattern: "internal/domain/types.go"}); got.Mode != domain.PermissionModeAllow {
 		t.Fatalf("unexpected read mode for nested path: %s", got)
 	}
-	if got := Evaluate(cfg.Permissions, "default", nil, Request{Tool: domain.ToolKindBash, Pattern: `git add internal/domain/types.go && git commit -m "Update types.go" && git push`}); got.Mode != domain.PermissionModeAsk {
+	if got := Evaluate(cfg, "default", nil, Request{Tool: domain.ToolKindBash, Pattern: `git add internal/domain/types.go && git commit -m "Update types.go" && git push`}); got.Mode != domain.PermissionModeAsk {
 		t.Fatalf("unexpected bash mode for path-containing command: %s", got)
 	}
 }
 
 func TestEvaluateReadonlyProfile(t *testing.T) {
-	cfg := config.Default()
+	cfg := testRules()
 
-	if got := Evaluate(cfg.Permissions, "readonly", nil, Request{Tool: domain.ToolKindApplyPatch, Pattern: "main.go"}); got.Mode != domain.PermissionModeDeny {
+	if got := Evaluate(cfg, "readonly", nil, Request{Tool: domain.ToolKindApplyPatch, Pattern: "main.go"}); got.Mode != domain.PermissionModeDeny {
 		t.Fatalf("unexpected apply_patch mode: %s", got)
 	}
 }
 
 func TestEvaluateBuiltinAskMode(t *testing.T) {
-	cfg := config.Default()
-	got := Evaluate(cfg.Permissions, ProfileAsk, nil, Request{Tool: domain.ToolKindRead, Pattern: "README.md"})
+	cfg := testRules()
+	got := Evaluate(cfg, ProfileAsk, nil, Request{Tool: domain.ToolKindRead, Pattern: "README.md"})
 	if got.Mode != domain.PermissionModeAsk {
 		t.Fatalf("unexpected mode: %s", got.Mode)
 	}
@@ -44,10 +63,11 @@ func TestEvaluateBuiltinAskMode(t *testing.T) {
 }
 
 func TestEvaluateBuiltinReadAskMode(t *testing.T) {
-	cfg := config.Default()
+	cfg := testRules()
 	projectRoot := t.TempDir()
-	inside := Evaluate(cfg.Permissions, ProfileReadAsk, nil, Request{
+	inside := Evaluate(cfg, ProfileReadAsk, nil, Request{
 		Tool:        domain.ToolKindRead,
+		Access:      AccessRead,
 		Pattern:     "README.md",
 		ProjectRoot: projectRoot,
 		Targets:     []string{projectRoot + "/README.md"},
@@ -55,8 +75,9 @@ func TestEvaluateBuiltinReadAskMode(t *testing.T) {
 	if inside.Mode != domain.PermissionModeAllow {
 		t.Fatalf("expected in-project read allow, got %s", inside.Mode)
 	}
-	codeSearch := Evaluate(cfg.Permissions, ProfileReadAsk, nil, Request{
+	codeSearch := Evaluate(cfg, ProfileReadAsk, nil, Request{
 		Tool:        domain.ToolKindCodeSearch,
+		Access:      AccessRead,
 		Pattern:     "RunPrompt",
 		ProjectRoot: projectRoot,
 		Targets:     []string{projectRoot},
@@ -64,8 +85,9 @@ func TestEvaluateBuiltinReadAskMode(t *testing.T) {
 	if codeSearch.Mode != domain.PermissionModeAllow {
 		t.Fatalf("expected in-project code search allow, got %s", codeSearch.Mode)
 	}
-	outside := Evaluate(cfg.Permissions, ProfileReadAsk, nil, Request{
+	outside := Evaluate(cfg, ProfileReadAsk, nil, Request{
 		Tool:           domain.ToolKindRead,
+		Access:         AccessRead,
 		Pattern:        "/tmp/README.md",
 		ProjectRoot:    projectRoot,
 		Targets:        []string{t.TempDir() + "/README.md"},
@@ -80,10 +102,11 @@ func TestEvaluateBuiltinReadAskMode(t *testing.T) {
 }
 
 func TestEvaluateBuiltinWriteAskMode(t *testing.T) {
-	cfg := config.Default()
+	cfg := testRules()
 	projectRoot := t.TempDir()
-	writeAllowed := Evaluate(cfg.Permissions, ProfileWriteAsk, nil, Request{
+	writeAllowed := Evaluate(cfg, ProfileWriteAsk, nil, Request{
 		Tool:        domain.ToolKindWrite,
+		Access:      AccessWrite,
 		Pattern:     "main.go",
 		ProjectRoot: projectRoot,
 		Targets:     []string{projectRoot + "/main.go"},
@@ -91,8 +114,9 @@ func TestEvaluateBuiltinWriteAskMode(t *testing.T) {
 	if writeAllowed.Mode != domain.PermissionModeAllow {
 		t.Fatalf("expected in-project write allow, got %s", writeAllowed.Mode)
 	}
-	bash := Evaluate(cfg.Permissions, ProfileWriteAsk, nil, Request{
+	bash := Evaluate(cfg, ProfileWriteAsk, nil, Request{
 		Tool:        domain.ToolKindBash,
+		Access:      AccessShell,
 		Pattern:     "pwd",
 		ProjectRoot: projectRoot,
 	})
@@ -105,22 +129,42 @@ func TestEvaluateBuiltinWriteAskMode(t *testing.T) {
 }
 
 func TestEvaluateBuiltinFullAccessMode(t *testing.T) {
-	cfg := config.Default()
-	got := Evaluate(cfg.Permissions, ProfileFullAccess, nil, Request{Tool: domain.ToolKindBash, Pattern: "pwd"})
+	cfg := testRules()
+	got := Evaluate(cfg, ProfileFullAccess, nil, Request{Tool: domain.ToolKindBash, Pattern: "pwd"})
 	if got.Mode != domain.PermissionModeAllow {
 		t.Fatalf("unexpected mode: %s", got.Mode)
 	}
 }
 
 func TestEvaluateSessionOverridesTakePrecedence(t *testing.T) {
-	cfg := config.Default()
-	got := Evaluate(cfg.Permissions, ProfileAsk, []domain.PermissionOverride{{
+	cfg := testRules()
+	got := Evaluate(cfg, ProfileAsk, []domain.PermissionOverride{{
 		Tool:    domain.ToolKindBash,
 		Pattern: "git *",
 		Action:  domain.PermissionModeAllow,
 	}}, Request{Tool: domain.ToolKindBash, Pattern: "git status"})
 	if got.Mode != domain.PermissionModeAllow {
 		t.Fatalf("expected override allow, got %s", got.Mode)
+	}
+}
+
+func TestEvaluateProfileMatchesToolWildcards(t *testing.T) {
+	cfg := Rules{
+		Profile: "custom",
+		Profiles: map[string]Profile{
+			"custom": {
+				Rules: []Rule{
+					{Tool: domain.ToolKind("exec_*"), Pattern: "*", Action: domain.PermissionModeAsk},
+					{Tool: domain.ToolKind("custom_vendor_tool"), Pattern: "*", Action: domain.PermissionModeAllow},
+				},
+			},
+		},
+	}
+	if got := Evaluate(cfg, "custom", nil, Request{Tool: domain.ToolKind("exec_resize"), Pattern: "tty"}); got.Mode != domain.PermissionModeAsk {
+		t.Fatalf("expected wildcard tool ask, got %s", got.Mode)
+	}
+	if got := Evaluate(cfg, "custom", nil, Request{Tool: domain.ToolKind("custom_vendor_tool"), Pattern: "anything"}); got.Mode != domain.PermissionModeAllow {
+		t.Fatalf("expected custom tool allow, got %s", got.Mode)
 	}
 }
 

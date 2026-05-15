@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/lkarlslund/koder/internal/chatrole"
 	"github.com/lkarlslund/koder/internal/domain"
 )
 
@@ -209,7 +210,7 @@ func (b *jsonfsBackend) CreateSession(ctx context.Context, title, providerID, mo
 		ID:                domain.NewID(),
 		SessionID:         session.ID,
 		Title:             "Main",
-		WorkflowRole:      domain.WorkflowRoleOrchestrator,
+		WorkflowRole:      chatrole.Orchestrator,
 		PermissionProfile: session.PermissionProfile,
 		ToolStates:        map[domain.ToolKind]bool{},
 		CreatedAt:         now,

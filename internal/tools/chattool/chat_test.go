@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/lkarlslund/koder/internal/chatrole"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/tools"
 )
@@ -47,7 +48,7 @@ func testRuntime(control tools.ChatControl) tools.Runtime {
 	return tools.Runtime{
 		SessionID:   "session-10",
 		ChatID:      "chat-20",
-		ChatRole:    domain.WorkflowRoleOrchestrator,
+		ChatRole:    chatrole.Orchestrator,
 		ChatControl: control,
 	}
 }
@@ -79,7 +80,7 @@ func TestListExecuteRequiresChatControlAndFormatsStoredOutput(t *testing.T) {
 	}
 
 	control := &fakeChatControl{statuses: []tools.ChatStatus{{
-		Chat:       domain.Chat{ID: "chat-7", Title: "Worker", WorkflowRole: domain.WorkflowRoleExecution},
+		Chat:       domain.Chat{ID: "chat-7", Title: "Worker", WorkflowRole: chatrole.Execution},
 		State:      tools.ChatRunStateRunning,
 		StatusText: "Running",
 	}}}
@@ -94,7 +95,7 @@ func TestListExecuteRequiresChatControlAndFormatsStoredOutput(t *testing.T) {
 
 func TestStartExecutionUsesControl(t *testing.T) {
 	control := &fakeChatControl{statuses: []tools.ChatStatus{{
-		Chat:       domain.Chat{ID: "chat-9", Title: "Worker", WorkflowRole: domain.WorkflowRoleExecution},
+		Chat:       domain.Chat{ID: "chat-9", Title: "Worker", WorkflowRole: chatrole.Execution},
 		State:      tools.ChatRunStateRunning,
 		StatusText: "Running",
 	}}}
@@ -115,7 +116,7 @@ func TestStartExecutionUsesControl(t *testing.T) {
 
 func TestPollExecuteReturnsStatus(t *testing.T) {
 	control := &fakeChatControl{statuses: []tools.ChatStatus{{
-		Chat:       domain.Chat{ID: "chat-11", Title: "Worker", WorkflowRole: domain.WorkflowRoleExecution},
+		Chat:       domain.Chat{ID: "chat-11", Title: "Worker", WorkflowRole: chatrole.Execution},
 		State:      tools.ChatRunStateCompleted,
 		StatusText: "Completed",
 	}}}

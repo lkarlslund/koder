@@ -21,12 +21,13 @@ import (
 	"github.com/lkarlslund/koder/internal/agents"
 	"github.com/lkarlslund/koder/internal/attachment"
 	chatpkg "github.com/lkarlslund/koder/internal/chat"
+	"github.com/lkarlslund/koder/internal/chatrole"
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/debugsrv"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/execruntime"
 	"github.com/lkarlslund/koder/internal/mcp"
-	"github.com/lkarlslund/koder/internal/permission"
+	"github.com/lkarlslund/koder/internal/permissionprofile"
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/reference"
 	"github.com/lkarlslund/koder/internal/skills"
@@ -927,7 +928,7 @@ func (e *Engine) chatRequest(session domain.Session, chat domain.Chat, messages 
 	}
 	if len(messages) > 0 && (chat.ID != "" || chat.WorkflowRole != "") {
 		req.Tools = tools.Definitions(e.toolRuntime(session, chat))
-		if e.mcp != nil && toolEnabledForSession(e.cfg, session, domain.ToolKindMCP) && tools.RoleAllowsTool(chat.WorkflowRole, domain.ToolKindMCP) {
+		if e.mcp != nil && toolEnabledForSession(e.cfg, session, domain.ToolKindMCP) && chatrole.AllowsTool(chat.WorkflowRole, domain.ToolKindMCP) {
 			req.Tools = append(req.Tools, e.mcp.ToolDefinitionsWithReserved(req.Tools)...)
 		}
 		req.ToolChoice = "auto"
@@ -1137,9 +1138,9 @@ func normalizeSessionTitle(raw string) string {
 func (e *Engine) setPermissionProfile(ctx context.Context, sessionID, chatID domain.ID, raw string) (<-chan domain.Event, error) {
 	profile := strings.TrimSpace(raw)
 	if profile == "" {
-		return nil, fmt.Errorf("permission profile is required; choose one of: %s", strings.Join(permission.ProfileNames(e.cfg.Permissions), "|"))
+		return nil, fmt.Errorf("permission profile is required; choose one of: %s", strings.Join(permissionprofile.ProfileNames(e.cfg.Permissions), "|"))
 	}
-	if !permission.IsBuiltinProfile(profile) {
+	if !permissionprofile.IsBuiltinProfile(profile) {
 		if _, ok := e.cfg.Permissions.Profiles[profile]; !ok {
 			return nil, fmt.Errorf("unknown permission profile %q", profile)
 		}
@@ -1147,7 +1148,7 @@ func (e *Engine) setPermissionProfile(ctx context.Context, sessionID, chatID dom
 	if sessionID == "" {
 		return emitOnce(domain.Event{
 			Kind: domain.EventKindStatus,
-			Text: fmt.Sprintf("permission profile set to %s", permission.DisplayName(profile)),
+			Text: fmt.Sprintf("permission profile set to %s", permissionprofile.DisplayName(profile)),
 			Meta: map[string]string{"permission_profile": profile},
 		}), nil
 	}
@@ -1156,7 +1157,7 @@ func (e *Engine) setPermissionProfile(ctx context.Context, sessionID, chatID dom
 	}
 	return emitOnce(domain.Event{
 		Kind: domain.EventKindStatus,
-		Text: fmt.Sprintf("permission profile set to %s", permission.DisplayName(profile)),
+		Text: fmt.Sprintf("permission profile set to %s", permissionprofile.DisplayName(profile)),
 		Meta: map[string]string{"permission_profile": profile},
 	}), nil
 }
@@ -1180,11 +1181,11 @@ func (e *Engine) setPermissionProfileAndReevaluateApproval(ctx context.Context, 
 		if err != nil {
 			return nil, err
 		}
-		decision := permission.Decision{Mode: domain.PermissionModeAllow}
+		decision := permissionprofile.Decision{Mode: domain.PermissionModeAllow}
 		if toolSpec, ok := tools.Lookup(req.Tool); !ok {
 			return nil, fmt.Errorf("unsupported tool %q", req.Tool)
 		} else if !toolSpec.BypassesPermission() {
-			decision = permission.Evaluate(e.cfg.Permissions, e.effectivePermissionProfile(ctx, session, chat), session.PermissionRules, e.permissionRequest(session, req))
+			decision = permissionprofile.Evaluate(e.cfg.Permissions, e.effectivePermissionProfile(ctx, session, chat), session.PermissionRules, e.permissionRequest(session, req))
 		}
 		var next <-chan domain.Event
 		switch decision.Mode {
@@ -1222,11 +1223,11 @@ func (e *Engine) setPermissionProfileAndReevaluateApproval(ctx context.Context, 
 		return nil, err
 	}
 
-	decision := permission.Decision{Mode: domain.PermissionModeAllow}
+	decision := permissionprofile.Decision{Mode: domain.PermissionModeAllow}
 	if toolSpec, ok := tools.Lookup(req.Tool); !ok {
 		return nil, fmt.Errorf("unsupported tool %q", req.Tool)
 	} else if !toolSpec.BypassesPermission() {
-		decision = permission.Evaluate(e.cfg.Permissions, e.effectivePermissionProfile(ctx, session, chat), session.PermissionRules, e.permissionRequest(session, req))
+		decision = permissionprofile.Evaluate(e.cfg.Permissions, e.effectivePermissionProfile(ctx, session, chat), session.PermissionRules, e.permissionRequest(session, req))
 	}
 
 	var next <-chan domain.Event
@@ -1253,7 +1254,7 @@ func (e *Engine) approveInChatWithRule(ctx context.Context, sessionID, chatID, a
 	if rule.Pattern == "" {
 		rule.Pattern = "*"
 	}
-	if err := permission.Validate(rule.Action); err != nil {
+	if err := permissionprofile.Validate(rule.Action); err != nil {
 		return nil, err
 	}
 	item, err := e.store.GetApproval(ctx, approvalID)
@@ -1274,11 +1275,11 @@ func (e *Engine) approveInChatWithRule(ctx context.Context, sessionID, chatID, a
 		if err != nil {
 			return nil, err
 		}
-		decision := permission.Decision{Mode: domain.PermissionModeAllow}
+		decision := permissionprofile.Decision{Mode: domain.PermissionModeAllow}
 		if toolSpec, ok := tools.Lookup(req.Tool); !ok {
 			return nil, fmt.Errorf("unsupported tool %q", req.Tool)
 		} else if !toolSpec.BypassesPermission() {
-			decision = permission.Evaluate(e.cfg.Permissions, e.effectivePermissionProfile(ctx, session, chat), session.PermissionRules, e.permissionRequest(session, req))
+			decision = permissionprofile.Evaluate(e.cfg.Permissions, e.effectivePermissionProfile(ctx, session, chat), session.PermissionRules, e.permissionRequest(session, req))
 		}
 		var next <-chan domain.Event
 		switch decision.Mode {
@@ -1322,11 +1323,11 @@ func (e *Engine) approveInChatWithRule(ctx context.Context, sessionID, chatID, a
 	if err != nil {
 		return nil, err
 	}
-	decision := permission.Decision{Mode: domain.PermissionModeAllow}
+	decision := permissionprofile.Decision{Mode: domain.PermissionModeAllow}
 	if toolSpec, ok := tools.Lookup(req.Tool); !ok {
 		return nil, fmt.Errorf("unsupported tool %q", req.Tool)
 	} else if !toolSpec.BypassesPermission() {
-		decision = permission.Evaluate(e.cfg.Permissions, e.effectivePermissionProfile(ctx, session, chat), session.PermissionRules, e.permissionRequest(session, req))
+		decision = permissionprofile.Evaluate(e.cfg.Permissions, e.effectivePermissionProfile(ctx, session, chat), session.PermissionRules, e.permissionRequest(session, req))
 	}
 	var next <-chan domain.Event
 	switch decision.Mode {
@@ -1348,7 +1349,7 @@ func (e *Engine) approveToolInChatWithRule(ctx context.Context, sessionID, chatI
 	if rule.Pattern == "" {
 		rule.Pattern = "*"
 	}
-	if err := permission.Validate(rule.Action); err != nil {
+	if err := permissionprofile.Validate(rule.Action); err != nil {
 		return nil, err
 	}
 	session, err := e.store.GetSession(ctx, sessionID)
@@ -1379,11 +1380,11 @@ func (e *Engine) approveToolInChatWithRule(ctx context.Context, sessionID, chatI
 			"permission_pattern": rule.Pattern,
 		},
 	})
-	decision := permission.Decision{Mode: domain.PermissionModeAllow}
+	decision := permissionprofile.Decision{Mode: domain.PermissionModeAllow}
 	if toolSpec, ok := tools.Lookup(req.Tool); !ok {
 		return nil, fmt.Errorf("unsupported tool %q", req.Tool)
 	} else if !toolSpec.BypassesPermission() {
-		decision = permission.Evaluate(e.cfg.Permissions, e.effectivePermissionProfile(ctx, session, chat), session.PermissionRules, e.permissionRequest(session, req))
+		decision = permissionprofile.Evaluate(e.cfg.Permissions, e.effectivePermissionProfile(ctx, session, chat), session.PermissionRules, e.permissionRequest(session, req))
 	}
 	var next <-chan domain.Event
 	switch decision.Mode {
@@ -1439,7 +1440,7 @@ func (e *Engine) approve(ctx context.Context, sessionID, chatID domain.ID, rawID
 	if chatErr != nil {
 		return nil, chatErr
 	}
-	if !tools.RoleAllowsTool(chat.WorkflowRole, req.Tool) {
+	if !chatrole.AllowsTool(chat.WorkflowRole, req.Tool) {
 		if err := e.store.UpdateApproval(ctx, id, domain.ApprovalStatusDenied); err != nil {
 			return nil, err
 		}
@@ -2269,7 +2270,7 @@ func (e *Engine) EstimateContextTokensForTimeline(session domain.Session, chat d
 }
 
 func (e *Engine) buildPromptEnvelopePreview(ctx context.Context, session domain.Session, chatID domain.ID, prompt string, drafts []attachment.Draft, refs []reference.Draft, transient []provider.InstructionBlock) (provider.PromptEnvelope, error) {
-	chat := domain.Chat{WorkflowRole: domain.WorkflowRoleGeneral}
+	chat := domain.Chat{WorkflowRole: chatrole.General}
 	if chatID != "" {
 		stored, err := e.store.GetChat(ctx, chatID)
 		if err != nil {
@@ -2518,7 +2519,7 @@ func (e *Engine) baseInstructionsForChat(session domain.Session, chat domain.Cha
 		Kind: provider.InstructionKindEnvironment,
 		Text: environmentPrompt,
 	}}
-	if roleText := strings.TrimSpace(chatRoleInstructions(chat)); roleText != "" {
+	if roleText := strings.TrimSpace(chatrole.SystemPrompt(chat.WorkflowRole)); roleText != "" {
 		instructions = append(instructions, provider.InstructionBlock{
 			Kind: provider.InstructionKindProjectInstructions,
 			Text: roleText,
@@ -2537,34 +2538,6 @@ func (e *Engine) baseInstructionsForChat(session domain.Session, chat domain.Cha
 		})
 	}
 	return instructions
-}
-
-func chatRoleInstructions(chat domain.Chat) string {
-	switch chat.WorkflowRole {
-	case domain.WorkflowRoleDecomposition:
-		return strings.TrimSpace(`This chat is a decomposition worker.
-
-Focus on one assigned milestone and its todo bucket.
-- Break that milestone into concrete todo items.
-- Update only that milestone and its todo bucket.
-- Do not edit code in this chat unless the user explicitly changes the workflow.`)
-	case domain.WorkflowRoleExecution:
-		return strings.TrimSpace(`This chat is an execution worker.
-
-Focus only on the assigned milestone and todo bucket.
-- Implement the work using available coding tools.
-- Keep todo item status updated as you progress.
-- Do not rewrite unrelated milestones or todo buckets.`)
-	case domain.WorkflowRoleOrchestrator, domain.WorkflowRoleGeneral, domain.WorkflowRolePlanning:
-		return strings.TrimSpace(`This chat is the main orchestration thread.
-
-You may discuss, ask clarifying questions, manage milestones, decompose work inline, and start background decomposition or execution chats when helpful.
-- Use milestones for longer-horizon work.
-- Use todos for concrete execution steps.
-- For small changes, inline decomposition is fine; a separate decomposition chat is optional.`)
-	default:
-		return ""
-	}
 }
 
 func (e *Engine) toolRuntime(session domain.Session, chat domain.Chat) tools.Runtime {
@@ -3125,13 +3098,13 @@ func (e *Engine) handleModelToolCall(ctx context.Context, session domain.Session
 	if !toolEnabledForSession(e.cfg, session, req.Tool) {
 		return e.recordDisabledToolResult(ctx, chat.ID, sessionID, req)
 	}
-	if !tools.RoleAllowsTool(chat.WorkflowRole, req.Tool) {
+	if !chatrole.AllowsTool(chat.WorkflowRole, req.Tool) {
 		return e.recordRoleDeniedToolResult(ctx, chat.ID, sessionID, req, chat.WorkflowRole)
 	}
 
-	decision := permission.Decision{Mode: domain.PermissionModeAllow}
+	decision := permissionprofile.Decision{Mode: domain.PermissionModeAllow}
 	if !toolSpec.BypassesPermission() {
-		decision = permission.Evaluate(e.cfg.Permissions, e.effectivePermissionProfile(ctx, session, chat), session.PermissionRules, e.permissionRequest(session, req))
+		decision = permissionprofile.Evaluate(e.cfg.Permissions, e.effectivePermissionProfile(ctx, session, chat), session.PermissionRules, e.permissionRequest(session, req))
 	}
 	if decision.Mode == domain.PermissionModeDeny {
 		text := fmt.Sprintf("%s denied by policy", req.Tool)
@@ -3411,7 +3384,7 @@ func (e *Engine) prepareModelToolCall(ctx context.Context, session domain.Sessio
 			run:   false,
 		}, nil
 	}
-	if !tools.RoleAllowsTool(chat.WorkflowRole, req.Tool) {
+	if !chatrole.AllowsTool(chat.WorkflowRole, req.Tool) {
 		evt, err := e.recordRoleDeniedToolResult(ctx, chat.ID, sessionID, req, chat.WorkflowRole)
 		if err != nil {
 			return preparedToolCall{}, err
@@ -3423,9 +3396,9 @@ func (e *Engine) prepareModelToolCall(ctx context.Context, session domain.Sessio
 		}, nil
 	}
 
-	decision := permission.Decision{Mode: domain.PermissionModeAllow}
+	decision := permissionprofile.Decision{Mode: domain.PermissionModeAllow}
 	if !toolSpec.BypassesPermission() {
-		decision = permission.Evaluate(e.cfg.Permissions, e.effectivePermissionProfile(ctx, session, chat), session.PermissionRules, e.permissionRequest(session, req))
+		decision = permissionprofile.Evaluate(e.cfg.Permissions, e.effectivePermissionProfile(ctx, session, chat), session.PermissionRules, e.permissionRequest(session, req))
 	}
 	if decision.Mode == domain.PermissionModeDeny {
 		text := fmt.Sprintf("%s denied by policy", req.Tool)
@@ -3582,7 +3555,7 @@ func (e *Engine) effectivePermissionProfile(_ context.Context, session domain.Se
 	return cfg.Permissions.Profile
 }
 
-func (e *Engine) permissionRequest(session domain.Session, req tools.Request) permission.Request {
+func (e *Engine) permissionRequest(session domain.Session, req tools.Request) permissionprofile.Request {
 	projectRoot := strings.TrimSpace(session.ProjectRoot)
 	if projectRoot == "" {
 		projectRoot = agents.FindProjectRoot(e.workdir)
@@ -3592,13 +3565,27 @@ func (e *Engine) permissionRequest(session domain.Session, req tools.Request) pe
 		pattern = strings.TrimSpace(req.Args["server"]) + "/" + strings.TrimSpace(req.Args["tool"])
 	}
 	targets, outsideProject, ambiguous := e.resolvePermissionTargets(projectRoot, req)
-	return permission.Request{
+	return permissionprofile.Request{
 		Tool:           req.Tool,
+		Access:         permissionAccessForTool(req.Tool),
 		Pattern:        pattern,
 		ProjectRoot:    projectRoot,
 		Targets:        targets,
 		OutsideProject: outsideProject,
 		Ambiguous:      ambiguous,
+	}
+}
+
+func permissionAccessForTool(kind domain.ToolKind) permissionprofile.AccessKind {
+	switch kind {
+	case domain.ToolKindBash, domain.ToolKindExecCommand:
+		return permissionprofile.AccessShell
+	case domain.ToolKindRead, domain.ToolKindViewImage, domain.ToolKindShowImage, domain.ToolKindGlob, domain.ToolKindGrep, domain.ToolKindCodeSearch:
+		return permissionprofile.AccessRead
+	case domain.ToolKindApplyPatch, domain.ToolKindEdit, domain.ToolKindWrite:
+		return permissionprofile.AccessWrite
+	default:
+		return permissionprofile.AccessUnknown
 	}
 }
 

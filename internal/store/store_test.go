@@ -11,6 +11,7 @@ import (
 
 	"github.com/cockroachdb/pebble"
 
+	"github.com/lkarlslund/koder/internal/chatrole"
 	"github.com/lkarlslund/koder/internal/domain"
 )
 
@@ -419,7 +420,7 @@ func TestCreateChatInheritsSessionPermissions(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			child, err := st.CreateChat(context.Background(), session.ID, "child", domain.WorkflowRoleExecution, &mainChat.ID)
+			child, err := st.CreateChat(context.Background(), session.ID, "child", chatrole.Execution, &mainChat.ID)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -438,7 +439,7 @@ func TestCreateChatInheritsSessionPermissions(t *testing.T) {
 			if err := st.UpdateChat(context.Background(), mainChat); err != nil {
 				t.Fatal(err)
 			}
-			secondChild, err := st.CreateChat(context.Background(), session.ID, "child 2", domain.WorkflowRoleExecution, &mainChat.ID)
+			secondChild, err := st.CreateChat(context.Background(), session.ID, "child 2", chatrole.Execution, &mainChat.ID)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -491,7 +492,7 @@ func TestDeleteChatRemovesChatTimelineAndApprovals(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			chat, err := st.CreateChat(context.Background(), session.ID, "side", domain.WorkflowRoleExecution, nil)
+			chat, err := st.CreateChat(context.Background(), session.ID, "side", chatrole.Execution, nil)
 			if err != nil {
 				t.Fatal(err)
 			}

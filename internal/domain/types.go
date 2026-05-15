@@ -209,14 +209,6 @@ type Session struct {
 
 type WorkflowRole string
 
-const (
-	WorkflowRoleGeneral       WorkflowRole = "general"
-	WorkflowRoleOrchestrator  WorkflowRole = "orchestrator"
-	WorkflowRolePlanning      WorkflowRole = "planning"
-	WorkflowRoleDecomposition WorkflowRole = "decomposition"
-	WorkflowRoleExecution     WorkflowRole = "execution"
-)
-
 type Chat struct {
 	ID                     ID
 	SessionID              ID

@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/lkarlslund/koder/internal/chatrole"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools"
@@ -27,7 +28,7 @@ func newMilestoneRuntime(t *testing.T) (tools.Runtime, *store.Store, domain.Sess
 	if err != nil {
 		t.Fatal(err)
 	}
-	return tools.Runtime{Store: st, SessionID: session.ID, ChatRole: domain.WorkflowRoleOrchestrator}, st, session
+	return tools.Runtime{Store: st, SessionID: session.ID, ChatRole: chatrole.Orchestrator}, st, session
 }
 
 func seedPlan(t *testing.T, st *store.Store, sessionID domain.ID) {
@@ -57,10 +58,10 @@ func TestNormalizeArgsAndDefinitions(t *testing.T) {
 	if args["ref"] != "alpha" || args["title"] != "Alpha" {
 		t.Fatalf("unexpected normalized args: %#v", args)
 	}
-	if _, enabled := tools.DefinitionFor(domain.ToolKindMilestoneAdd, tools.Runtime{ChatRole: domain.WorkflowRoleExecution}); enabled {
+	if _, enabled := tools.DefinitionFor(domain.ToolKindMilestoneAdd, tools.Runtime{ChatRole: chatrole.Execution}); enabled {
 		t.Fatal("expected add-items definition to be disabled in execution chats")
 	}
-	if _, enabled := tools.DefinitionFor(domain.ToolKindMilestonePlan, tools.Runtime{ChatRole: domain.WorkflowRoleDecomposition}); enabled {
+	if _, enabled := tools.DefinitionFor(domain.ToolKindMilestonePlan, tools.Runtime{ChatRole: chatrole.Decomposition}); enabled {
 		t.Fatal("expected plan definition to be disabled in decomposition chats")
 	}
 	updated, err := (updateItemTool{}).NormalizeArgs(map[string]string{"ref": "alpha", "status": "cancelled"})
@@ -70,7 +71,7 @@ func TestNormalizeArgsAndDefinitions(t *testing.T) {
 	if updated["status"] != string(domain.MilestoneStatusCancelled) {
 		t.Fatalf("expected cancelled status, got %#v", updated)
 	}
-	def, enabled := tools.DefinitionFor(domain.ToolKindMilestoneUpdate, tools.Runtime{ChatRole: domain.WorkflowRoleOrchestrator})
+	def, enabled := tools.DefinitionFor(domain.ToolKindMilestoneUpdate, tools.Runtime{ChatRole: chatrole.Orchestrator})
 	if !enabled {
 		t.Fatal("expected update milestone definition to be enabled")
 	}
@@ -169,14 +170,14 @@ func TestUpdateItemEnforcesMilestoneOwnership(t *testing.T) {
 
 	if _, err := updatedMilestonePlan(plan, tools.Request{Args: map[string]string{"ref": "alpha", "status": "completed"}}, domain.Chat{
 		ID:           otherID,
-		WorkflowRole: domain.WorkflowRoleExecution,
+		WorkflowRole: chatrole.Execution,
 	}); err == nil || !strings.Contains(err.Error(), "owned by chat") {
 		t.Fatalf("expected ownership error, got %v", err)
 	}
 
 	updated, err := updatedMilestonePlan(plan, tools.Request{Args: map[string]string{"ref": "alpha", "status": "completed"}}, domain.Chat{
 		ID:           ownerID,
-		WorkflowRole: domain.WorkflowRoleExecution,
+		WorkflowRole: chatrole.Execution,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -197,7 +198,7 @@ func TestUpdateItemAssignsOwnerForActiveScopedMilestone(t *testing.T) {
 
 	updated, err := updatedMilestonePlan(plan, tools.Request{Args: map[string]string{"ref": "alpha", "status": "executing"}}, domain.Chat{
 		ID:           ownerID,
-		WorkflowRole: domain.WorkflowRoleExecution,
+		WorkflowRole: chatrole.Execution,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -209,7 +210,7 @@ func TestUpdateItemAssignsOwnerForActiveScopedMilestone(t *testing.T) {
 
 func TestScopedExecutionChatSeesOnlyAssignedMilestone(t *testing.T) {
 	runtime, st, session := newMilestoneRuntime(t)
-	runtime.ChatRole = domain.WorkflowRoleExecution
+	runtime.ChatRole = chatrole.Execution
 	runtime.ActiveMilestoneRef = "beta"
 	if _, err := st.SetMilestonePlan(context.Background(), session.ID, "Ship it", []store.Milestone{
 		{Ref: "alpha", Title: "Alpha", Status: domain.MilestoneStatusExecuting, Position: 0},
