@@ -28,8 +28,8 @@ func init() {
 	tools.Register(updateItemTool{}, tools.ToolSpec{
 		Title:       "Update todo item",
 		Description: "Update one todo item's status or content.",
-		Usage:       "Update one todo item's status, and optionally its content. Keep at most one todo item in_progress in a milestone bucket.",
-		Parameters:  `{"type":"object","properties":{"id":{"type":"integer","description":"Todo item id"},"status":{"type":"string","enum":["pending","in_progress","completed"]},"content":{"type":"string","description":"Optional replacement content"}},"required":["id","status"],"additionalProperties":false}`,
+		Usage:       "Update one todo item's status, and optionally its content. Use the exact UUID id returned by todo_list, todo_fetch_next, or todo_add_items. Do not invent numeric ids. Keep at most one todo item in_progress in a milestone bucket.",
+		Parameters:  `{"type":"object","properties":{"id":{"type":"string","description":"Todo item UUID returned by todo_list, todo_fetch_next, or todo_add_items"},"status":{"type":"string","enum":["pending","in_progress","completed"]},"content":{"type":"string","description":"Optional replacement content"}},"required":["id","status"],"additionalProperties":false}`,
 		ExposeToLLM: true,
 	})
 	tools.Register(fetchNextTool{}, tools.ToolSpec{
@@ -108,7 +108,7 @@ func (listTool) Preview(req tools.Request) string {
 func (addItemsTool) Preview(req tools.Request) string {
 	return milestonePreview(req.Args["milestone_ref"], "Add todo items")
 }
-func (updateItemTool) Preview(req tools.Request) string { return "Update todo #" + req.Args["id"] }
+func (updateItemTool) Preview(req tools.Request) string { return "Update todo " + req.Args["id"] }
 func (fetchNextTool) Preview(req tools.Request) string {
 	return milestonePreview(req.Args["milestone_ref"], "Fetch next todo")
 }

@@ -21,6 +21,24 @@ func TestTodoUpdateItemParsesStringID(t *testing.T) {
 	}
 }
 
+func TestTodoUpdateItemDefinitionUsesUUIDStringID(t *testing.T) {
+	defs := tools.Definitions(tools.Runtime{})
+	for _, def := range defs {
+		if def.Function.Name != string(domain.ToolKindTodoUpdateItem) {
+			continue
+		}
+		params := string(def.Function.Parameters)
+		if !strings.Contains(params, `"id":{"type":"string"`) || strings.Contains(params, `"id":{"type":"integer"`) {
+			t.Fatalf("expected todo_update_item id to be a string UUID, got %s", params)
+		}
+		if !strings.Contains(def.Function.Description, "exact UUID id") {
+			t.Fatalf("expected todo_update_item description to tell model to use UUID ids, got %q", def.Function.Description)
+		}
+		return
+	}
+	t.Fatal("todo_update_item definition not found")
+}
+
 func TestMilestoneAndTodoWorkflow(t *testing.T) {
 	ctx := context.Background()
 	st := openPlanningTestStore(t)
