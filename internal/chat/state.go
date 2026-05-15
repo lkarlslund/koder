@@ -10,7 +10,6 @@ import (
 	"github.com/lkarlslund/koder/internal/sessionctx"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tokenestimate"
-	"github.com/lkarlslund/koder/internal/ui"
 )
 
 // ChatState owns the current chat's mutable in-memory records.
@@ -19,22 +18,12 @@ type ChatState struct {
 	timeline  []*TimelineRecord
 	byItem    map[string]*TimelineRecord
 	approvals []store.Approval
-	toolRuns  []*ToolRunRecord
 	pending   PendingAssistantTurn
-
-	byToolRunID      map[string]*ToolRunRecord
-	byToolCallID     map[string]*ToolRunRecord
-	byToolApprovalID map[domain.ID]*ToolRunRecord
 }
 
 // TimelineRecord stores one mutable timeline item.
 type TimelineRecord struct {
 	Item domain.TimelineItem
-}
-
-// ToolRunRecord stores one mutable tool run view model for the current chat.
-type ToolRunRecord struct {
-	Run ui.ToolRun
 }
 
 type PendingAssistantTurn struct {
@@ -471,106 +460,6 @@ func approvalCommand(call domain.ToolCall) string {
 	return strings.TrimSpace(string(call.Tool))
 }
 
-// ReplaceToolRuns refreshes tool-run records while preserving identity by tool call, approval, or run ID.
-func (s *ChatState) ReplaceToolRuns(runs []ui.ToolRun) {
-	if s == nil {
-		return
-	}
-	if s.byToolRunID == nil {
-		s.byToolRunID = map[string]*ToolRunRecord{}
-	}
-	if s.byToolCallID == nil {
-		s.byToolCallID = map[string]*ToolRunRecord{}
-	}
-	if s.byToolApprovalID == nil {
-		s.byToolApprovalID = map[domain.ID]*ToolRunRecord{}
-	}
-	nextRuns := make([]*ToolRunRecord, 0, len(runs))
-	nextByID := make(map[string]*ToolRunRecord, len(runs))
-	nextByCall := make(map[string]*ToolRunRecord, len(runs))
-	nextByApproval := make(map[domain.ID]*ToolRunRecord, len(runs))
-	for _, run := range runs {
-		record := s.lookupToolRun(run)
-		if record == nil {
-			record = &ToolRunRecord{}
-		}
-		record.Run = run
-		nextRuns = append(nextRuns, record)
-		if run.ID != "" {
-			nextByID[run.ID] = record
-		}
-		if run.ToolCallID != "" {
-			nextByCall[run.ToolCallID] = record
-		}
-		if run.ApprovalID != "" {
-			nextByApproval[run.ApprovalID] = record
-		}
-	}
-	s.toolRuns = nextRuns
-	s.byToolRunID = nextByID
-	s.byToolCallID = nextByCall
-	s.byToolApprovalID = nextByApproval
-}
-
-// ToolRuns returns the current ordered tool-run records for the current chat.
-func (s *ChatState) ToolRuns() []*ToolRunRecord {
-	if s == nil {
-		return nil
-	}
-	return s.toolRuns
-}
-
-// ToolRunByCallID returns the tool-run record for a tool call when present.
-func (s *ChatState) ToolRunByCallID(toolCallID string) *ToolRunRecord {
-	if s == nil || toolCallID == "" {
-		return nil
-	}
-	return s.byToolCallID[toolCallID]
-}
-
-// Update mutates a tool-run record in place.
-func (r *ToolRunRecord) Update(update func(*ui.ToolRun)) {
-	if r == nil || update == nil {
-		return
-	}
-	update(&r.Run)
-}
-
-// RunValue returns the current tool-run value.
-func (r *ToolRunRecord) RunValue() ui.ToolRun {
-	if r == nil {
-		return ui.ToolRun{}
-	}
-	return r.Run
-}
-
-// UpsertToolRun merges one tool run into the current chat state.
-func (s *ChatState) UpsertToolRun(run ui.ToolRun) (*ToolRunRecord, bool) {
-	if s == nil || strings.TrimSpace(run.ID) == "" {
-		return nil, false
-	}
-	if s.byToolRunID == nil {
-		s.byToolRunID = map[string]*ToolRunRecord{}
-	}
-	if s.byToolCallID == nil {
-		s.byToolCallID = map[string]*ToolRunRecord{}
-	}
-	if s.byToolApprovalID == nil {
-		s.byToolApprovalID = map[domain.ID]*ToolRunRecord{}
-	}
-	record := s.lookupToolRun(run)
-	created := false
-	if record == nil {
-		record = &ToolRunRecord{Run: run}
-		s.toolRuns = append(s.toolRuns, record)
-		created = true
-	} else {
-		record.Run = run
-	}
-	s.indexToolRunRecord(record)
-	return record, created
-}
-
 // UpsertApproval adds or replaces one approval snapshot.
 func (s *ChatState) UpsertApproval(approval store.Approval) {
 	if s == nil || approval.ID == "" {
@@ -596,43 +485,5 @@ func (s *ChatState) RemoveApproval(approvalID domain.ID) {
 		}
 		s.approvals = append(s.approvals[:idx], s.approvals[idx+1:]...)
 		return
-	}
-}
-
-func (s *ChatState) lookupToolRun(run ui.ToolRun) *ToolRunRecord {
-	if s == nil {
-		return nil
-	}
-	if run.ToolCallID != "" {
-		if record := s.byToolCallID[run.ToolCallID]; record != nil {
-			return record
-		}
-	}
-	if run.ApprovalID != "" {
-		if record := s.byToolApprovalID[run.ApprovalID]; record != nil {
-			return record
-		}
-	}
-	if run.ID != "" {
-		if record := s.byToolRunID[run.ID]; record != nil {
-			return record
-		}
-	}
-	return nil
-}
-
-func (s *ChatState) indexToolRunRecord(record *ToolRunRecord) {
-	if s == nil || record == nil {
-		return
-	}
-	run := record.Run
-	if strings.TrimSpace(run.ID) != "" {
-		s.byToolRunID[run.ID] = record
-	}
-	if strings.TrimSpace(run.ToolCallID) != "" {
-		s.byToolCallID[run.ToolCallID] = record
-	}
-	if run.ApprovalID != "" {
-		s.byToolApprovalID[run.ApprovalID] = record
 	}
 }

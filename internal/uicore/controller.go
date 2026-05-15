@@ -1479,6 +1479,11 @@ func (c *Controller) refreshChatStatuses(ctx context.Context, sessionID domain.I
 	if sessionID == "" || c.session.ID != sessionID {
 		return false
 	}
+	for idx := range chats {
+		if snapshot, ok := c.snapshots[chats[idx].ID]; ok && snapshot.Chat.ID == chats[idx].ID {
+			chats[idx] = snapshot.Chat
+		}
+	}
 	changed := !chatSidebarStatusMapsEqual(c.statuses, statuses)
 	if len(chats) > 0 && !chatListsSameForSidebar(c.chats, chats) {
 		c.chats = chats
@@ -1560,36 +1565,44 @@ func (c *Controller) forwardRuntime(chatID domain.ID, updates <-chan chat.Update
 		}
 		if update.Snapshot.Chat.ID == chatID {
 			c.mu.Lock()
-			if strings.TrimSpace(update.Snapshot.Chat.Title) == "" {
-				if existing, ok := chatByID(c.chats, chatID); ok {
-					update.Snapshot.Chat = existing
-				} else if activeChatID == chatID {
-					update.Snapshot.Chat = c.chat
+			stalePassive := false
+			if existing, ok := c.snapshots[chatID]; ok && runtimeUpdateIsPassive(update) && !update.Snapshot.Chat.UpdatedAt.After(existing.Chat.UpdatedAt) {
+				stalePassive = true
+			}
+			if stalePassive {
+				c.mu.Unlock()
+			} else {
+				if strings.TrimSpace(update.Snapshot.Chat.Title) == "" {
+					if existing, ok := chatByID(c.chats, chatID); ok {
+						update.Snapshot.Chat = existing
+					} else if activeChatID == chatID {
+						update.Snapshot.Chat = c.chat
+					}
 				}
-			}
-			if activeChatID == chatID {
-				c.chat = update.Snapshot.Chat
-			}
-			if c.statuses == nil {
-				c.statuses = map[domain.ID]ChatSidebarStatus{}
-			}
-			if c.snapshots == nil {
-				c.snapshots = map[domain.ID]chat.Snapshot{}
-			}
-			c.snapshots[chatID] = update.Snapshot
-			c.statuses[chatID] = sidebarStatusFromUpdate(update)
-			found := false
-			for idx := range c.chats {
-				if c.chats[idx].ID == update.Snapshot.Chat.ID {
-					c.chats[idx] = update.Snapshot.Chat
-					found = true
-					break
+				if activeChatID == chatID {
+					c.chat = update.Snapshot.Chat
 				}
+				if c.statuses == nil {
+					c.statuses = map[domain.ID]ChatSidebarStatus{}
+				}
+				if c.snapshots == nil {
+					c.snapshots = map[domain.ID]chat.Snapshot{}
+				}
+				c.snapshots[chatID] = update.Snapshot
+				c.statuses[chatID] = sidebarStatusFromUpdate(update)
+				found := false
+				for idx := range c.chats {
+					if c.chats[idx].ID == update.Snapshot.Chat.ID {
+						c.chats[idx] = update.Snapshot.Chat
+						found = true
+						break
+					}
+				}
+				if !found {
+					c.chats = append([]domain.Chat{update.Snapshot.Chat}, c.chats...)
+				}
+				c.mu.Unlock()
 			}
-			if !found {
-				c.chats = append([]domain.Chat{update.Snapshot.Chat}, c.chats...)
-			}
-			c.mu.Unlock()
 		} else {
 			c.mu.Lock()
 			if c.statuses == nil {
@@ -1604,6 +1617,10 @@ func (c *Controller) forwardRuntime(chatID domain.ID, updates <-chan chat.Update
 			c.broadcast("snapshot", c.State())
 		}
 	}
+}
+
+func runtimeUpdateIsPassive(update chat.Update) bool {
+	return update.Event == nil && !update.Active && !update.QueueChanged && !update.ApprovalsChanged
 }
 
 func runtimeUpdateNeedsStateSnapshot(update chat.Update) bool {

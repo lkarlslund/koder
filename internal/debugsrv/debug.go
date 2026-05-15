@@ -13,7 +13,6 @@ import (
 
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/store"
-	"github.com/lkarlslund/koder/internal/ui"
 	"github.com/lkarlslund/koder/internal/version"
 )
 
@@ -155,25 +154,6 @@ type SessionBadStopRecord struct {
 	NextSummary      string    `json:"next_summary,omitempty"`
 	NextText         string    `json:"next_text,omitempty"`
 	SameTurnToolCall bool      `json:"same_turn_tool_call,omitempty"`
-}
-
-type InputRequest struct {
-	Mouse *MouseInput `json:"mouse,omitempty"`
-	Key   *KeyInput   `json:"key,omitempty"`
-}
-
-type MouseInput struct {
-	X      int    `json:"x"`
-	Y      int    `json:"y"`
-	Button string `json:"button"`
-	Action string `json:"action"`
-	Alt    bool   `json:"alt,omitempty"`
-}
-
-type KeyInput struct {
-	Type  string `json:"type"`
-	Runes string `json:"runes,omitempty"`
-	Alt   bool   `json:"alt,omitempty"`
 }
 
 type Recorder struct {
@@ -350,8 +330,6 @@ type Server struct {
 	recorder *Recorder
 	server   *http.Server
 	listener net.Listener
-	mu       sync.RWMutex
-	input    func(ui.Msg)
 }
 
 func Start(bind string, st *store.Store, recorder *Recorder) (*Server, error) {
@@ -378,7 +356,6 @@ func Start(bind string, st *store.Store, recorder *Recorder) (*Server, error) {
 	mux.HandleFunc("/debug/events", s.handleGlobalEvents)
 	mux.HandleFunc("/debug/sessions", s.handleSessions)
 	mux.HandleFunc("/debug/sessions/", s.handleSessionRoutes)
-	mux.HandleFunc("/debug/input", s.handleInput)
 	mux.HandleFunc("/debug/pprof/", pprof.Index)
 	mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
 	mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
@@ -406,15 +383,6 @@ func (s *Server) Recorder() *Recorder {
 		return nil
 	}
 	return s.recorder
-}
-
-func (s *Server) SetInputSink(fn func(ui.Msg)) {
-	if s == nil {
-		return
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.input = fn
 }
 
 func (s *Server) Close() error {
@@ -458,117 +426,6 @@ func (s *Server) handleHTTP(w http.ResponseWriter, _ *http.Request) {
 		"debug_api": s.Addr(),
 		"traces":    s.recorder.HTTPTraces(),
 	})
-}
-
-func (s *Server) handleInput(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		w.Header().Set("Allow", http.MethodPost)
-		writeError(w, http.StatusMethodNotAllowed, fmt.Errorf("method not allowed"))
-		return
-	}
-	s.mu.RLock()
-	input := s.input
-	s.mu.RUnlock()
-	if input == nil {
-		writeError(w, http.StatusServiceUnavailable, fmt.Errorf("live input is unavailable"))
-		return
-	}
-	var req InputRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	msg, err := decodeInputRequest(req)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	input(msg)
-	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":      true,
-		"runtime": s.recorder.Runtime(),
-	})
-}
-
-func decodeInputRequest(req InputRequest) (ui.Msg, error) {
-	if req.Mouse != nil {
-		return ui.MouseMsg{
-			X:      req.Mouse.X,
-			Y:      req.Mouse.Y,
-			Button: parseMouseButton(req.Mouse.Button),
-			Action: parseMouseAction(req.Mouse.Action),
-			Alt:    req.Mouse.Alt,
-		}, nil
-	}
-	if req.Key != nil {
-		return ui.KeyMsg{
-			Type:  parseKeyType(req.Key.Type),
-			Runes: []rune(req.Key.Runes),
-			Alt:   req.Key.Alt,
-		}, nil
-	}
-	return nil, fmt.Errorf("missing input payload")
-}
-
-func parseMouseButton(value string) ui.MouseButton {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "left":
-		return ui.MouseButtonLeft
-	case "middle":
-		return ui.MouseButtonMiddle
-	case "right":
-		return ui.MouseButtonRight
-	case "wheel_up":
-		return ui.MouseButtonWheelUp
-	case "wheel_down":
-		return ui.MouseButtonWheelDown
-	default:
-		return ui.MouseButtonNone
-	}
-}
-
-func parseMouseAction(value string) ui.MouseAction {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "release":
-		return ui.MouseActionRelease
-	case "motion":
-		return ui.MouseActionMotion
-	default:
-		return ui.MouseActionPress
-	}
-}
-
-func parseKeyType(value string) ui.KeyType {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "enter":
-		return ui.KeyEnter
-	case "tab":
-		return ui.KeyTab
-	case "shift+tab":
-		return ui.KeyShiftTab
-	case "esc":
-		return ui.KeyEsc
-	case "up":
-		return ui.KeyUp
-	case "down":
-		return ui.KeyDown
-	case "left":
-		return ui.KeyLeft
-	case "right":
-		return ui.KeyRight
-	case "ctrl+c":
-		return ui.KeyCtrlC
-	case "ctrl+v":
-		return ui.KeyCtrlV
-	case "ctrl+y":
-		return ui.KeyCtrlY
-	case "space":
-		return ui.KeySpace
-	case "runes":
-		return ui.KeyRunes
-	default:
-		return ui.KeyUnknown
-	}
 }
 
 func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {

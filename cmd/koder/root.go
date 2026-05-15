@@ -18,7 +18,6 @@ import (
 
 	"github.com/lkarlslund/koder/internal/agent"
 	"github.com/lkarlslund/koder/internal/agents"
-	"github.com/lkarlslund/koder/internal/app"
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/debugsrv"
 	"github.com/lkarlslund/koder/internal/domain"
@@ -41,14 +40,14 @@ func NewRootCommand() *cobra.Command {
 	opts := startupOptions{}
 	cmd := &cobra.Command{
 		Use:   "koder",
-		Short: "Terminal coding agent",
+		Short: "Browser coding agent",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			opts.captureFlagState(cmd)
 			workdir, err := opts.resolve()
 			if err != nil {
 				return err
 			}
-			return runTUI(cmd.Context(), app.StartupModeNew, workdir, appStartupOptions(opts, false))
+			return runKoder(cmd.Context(), uicore.StartupModeNew, workdir, startupOptsFromFlags(opts, false))
 		},
 	}
 	bindStartupFlags(cmd, &opts)
@@ -59,7 +58,6 @@ func NewRootCommand() *cobra.Command {
 type startupOptions struct {
 	cwd         string
 	projectRoot string
-	ui          string
 	noBrowser   bool
 	webBind     string
 	webBindSet  bool
@@ -69,7 +67,6 @@ func bindStartupFlags(cmd *cobra.Command, opts *startupOptions) {
 	flags := cmd.PersistentFlags()
 	flags.StringVar(&opts.cwd, "cwd", "", "Start koder in this working directory")
 	flags.StringVar(&opts.projectRoot, "project-root", "", "Alias for --cwd")
-	flags.StringVar(&opts.ui, "ui", "web", "Renderer to launch: web or tui")
 	flags.BoolVar(&opts.noBrowser, "nobrowser", false, "Do not open a browser for the web UI")
 	flags.StringVar(&opts.webBind, "web-bind", defaultWebBind, "Web UI bind address")
 }
@@ -113,7 +110,14 @@ func (o startupOptions) resolve() (string, error) {
 	return abs, nil
 }
 
-func runTUI(ctx context.Context, mode app.StartupMode, workdir string, startupOpts app.StartupOptions) error {
+type startupConfig struct {
+	ShowAllSessions bool
+	NoBrowser       bool
+	WebBind         string
+	WebBindExplicit bool
+}
+
+func runKoder(ctx context.Context, mode uicore.StartupMode, workdir string, startupOpts startupConfig) error {
 	defer codesearchtool.CloseLanguageServers()
 	cfg, err := config.Load()
 	if err != nil {
@@ -152,17 +156,10 @@ func runTUI(ctx context.Context, mode app.StartupMode, workdir string, startupOp
 	registry.SetExecControl(execruntime.NewManager())
 	engine := agent.New(cfg, st, registry, recorder, workdir, mcpManager)
 	registry.SetChatControl(engine)
-	switch strings.ToLower(strings.TrimSpace(startupOpts.Renderer)) {
-	case "web":
-		return runWeb(ctx, cfg, st, engine, appModeToUICore(mode), recorder, debugServer, workdir, startupOpts)
-	case "tui":
-		return app.RunWithWorkdir(cfg, st, engine, mode, recorder, debugServer, workdir, startupOpts)
-	default:
-		return fmt.Errorf("unsupported --ui %q: expected web or tui", startupOpts.Renderer)
-	}
+	return runWeb(ctx, cfg, st, engine, mode, recorder, debugServer, workdir, startupOpts)
 }
 
-func runWeb(ctx context.Context, cfg config.Config, st *store.Store, engine *agent.Engine, mode uicore.StartupMode, recorder *debugsrv.Recorder, debugServer *debugsrv.Server, workdir string, startupOpts app.StartupOptions) error {
+func runWeb(ctx context.Context, cfg config.Config, st *store.Store, engine *agent.Engine, mode uicore.StartupMode, recorder *debugsrv.Recorder, debugServer *debugsrv.Server, workdir string, startupOpts startupConfig) error {
 	controller := uicore.New(cfg, st, engine, workdir)
 	if err := controller.Start(ctx, mode); err != nil {
 		return err
@@ -239,28 +236,16 @@ func startWebUIWithRetry(ctx context.Context, controller *uicore.Controller, bin
 	}
 }
 
-func appModeToUICore(mode app.StartupMode) uicore.StartupMode {
-	if mode == app.StartupModeResume {
-		return uicore.StartupModeResume
-	}
-	return uicore.StartupModeNew
-}
-
-func appStartupOptions(opts startupOptions, showAllSessions bool) app.StartupOptions {
-	renderer := strings.ToLower(strings.TrimSpace(opts.ui))
-	if renderer == "" {
-		renderer = "web"
-	}
-	return app.StartupOptions{
+func startupOptsFromFlags(opts startupOptions, showAllSessions bool) startupConfig {
+	return startupConfig{
 		ShowAllSessions: showAllSessions,
-		Renderer:        renderer,
 		NoBrowser:       opts.noBrowser,
 		WebBind:         opts.webBind,
 		WebBindExplicit: opts.webBindSet,
 	}
 }
 
-func webBindForLaunch(ctx context.Context, st *store.Store, workdir string, startupOpts app.StartupOptions) (string, bool) {
+func webBindForLaunch(ctx context.Context, st *store.Store, workdir string, startupOpts startupConfig) (string, bool) {
 	bind := strings.TrimSpace(startupOpts.WebBind)
 	if bind == "" {
 		bind = defaultWebBind
@@ -327,7 +312,7 @@ func newResumeCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return runTUI(cmd.Context(), app.StartupModeResume, workdir, appStartupOptions(opts, showAllSessions))
+			return runKoder(cmd.Context(), uicore.StartupModeResume, workdir, startupOptsFromFlags(opts, showAllSessions))
 		},
 	}
 	bindStartupFlags(cmd, &opts)

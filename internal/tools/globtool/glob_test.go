@@ -46,7 +46,7 @@ func TestGlobSupportsRecursivePatternsAndLimit(t *testing.T) {
 }
 
 func TestGlobPatternToRegexp(t *testing.T) {
-	matched, err := matchGlobPattern("internal/**/two.go", "internal/app/two.go")
+	matched, err := matchGlobPattern("internal/**/two.go", "internal/webui/two.go")
 	if err != nil {
 		t.Fatal(err)
 	}

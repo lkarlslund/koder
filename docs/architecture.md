@@ -2,15 +2,16 @@
 
 `koder` is a single-binary Go application with these main subsystems:
 
-- `internal/app`: Cobra entrypoints and process bootstrap
+- `cmd/koder`: Cobra entrypoints and process bootstrap
 - `internal/config`: TOML config plus XDG path resolution
 - `internal/store`: Pebble-backed or JSON-file-backed persistence for sessions, chats, messages, parts, approvals, tasks, milestones, and todos
 - `internal/provider`: OpenAI-compatible `/models` and `/chat/completions` client
 - `internal/tools`: typed local tool execution surface
 - `internal/agent`: prompt handling, tool approval flow, and event emission
-- `internal/tui`: Bubble Tea TUI with transcript viewport, sidebar, and composer
+- `internal/uicore`: renderer-neutral session and chat controller
+- `internal/webui`: embedded browser UI and websocket RPC bridge
 
-Current v1 shape is a modular monolith inside one binary. The TUI talks to in-process services rather than a daemon.
+Current v1 shape is a modular monolith inside one binary. The browser UI talks to in-process services over the embedded websocket server rather than a daemon.
 
 ## Storage
 

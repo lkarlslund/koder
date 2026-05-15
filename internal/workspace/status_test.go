@@ -3,8 +3,8 @@ package workspace
 import "testing"
 
 func TestParseStatus(t *testing.T) {
-	raw := "## main...origin/main [ahead 1]\n M internal/tui/model.go\nA  internal/workspace/status.go\nD  old.txt\n?? new.txt\n"
-	numstat := "12\t4\tinternal/tui/model.go\n7\t0\tinternal/workspace/status.go\n0\t9\told.txt\n"
+	raw := "## main...origin/main [ahead 1]\n M internal/webui/server.go\nA  internal/workspace/status.go\nD  old.txt\n?? new.txt\n"
+	numstat := "12\t4\tinternal/webui/server.go\n7\t0\tinternal/workspace/status.go\n0\t9\told.txt\n"
 	got := parseStatus(raw, numstat)
 
 	if got.Branch != "main" {
@@ -22,7 +22,7 @@ func TestParseStatus(t *testing.T) {
 	if len(got.Files) != 4 {
 		t.Fatalf("unexpected files: %#v", got.Files)
 	}
-	if got.Files[0].Path != "internal/tui/model.go" {
+	if got.Files[0].Path != "internal/webui/server.go" {
 		t.Fatalf("unexpected first file: %#v", got.Files[0])
 	}
 	if got.Files[0].Additions != 12 || got.Files[0].Deletions != 4 {

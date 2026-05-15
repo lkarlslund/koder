@@ -13,7 +13,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/lkarlslund/koder/internal/agent"
-	"github.com/lkarlslund/koder/internal/app"
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/debugsrv"
 	"github.com/lkarlslund/koder/internal/store"
@@ -123,9 +122,6 @@ func TestBindStartupFlagsRegistersAliases(t *testing.T) {
 	if projectRootFlag == nil {
 		t.Fatal("expected project-root flag to be registered")
 	}
-	if uiFlag := cmd.PersistentFlags().Lookup("ui"); uiFlag == nil {
-		t.Fatal("expected ui flag to be registered")
-	}
 	if noBrowserFlag := cmd.PersistentFlags().Lookup("nobrowser"); noBrowserFlag == nil {
 		t.Fatal("expected nobrowser flag to be registered")
 	}
@@ -134,10 +130,10 @@ func TestBindStartupFlagsRegistersAliases(t *testing.T) {
 	}
 }
 
-func TestAppStartupOptionsDefaultsToWeb(t *testing.T) {
-	got := appStartupOptions(startupOptions{}, false)
-	if got.Renderer != "web" {
-		t.Fatalf("expected web renderer default, got %q", got.Renderer)
+func TestStartupConfigFromFlags(t *testing.T) {
+	got := startupOptsFromFlags(startupOptions{noBrowser: true, webBind: "127.0.0.1:12345", webBindSet: true}, true)
+	if !got.ShowAllSessions || !got.NoBrowser || got.WebBind != "127.0.0.1:12345" || !got.WebBindExplicit {
+		t.Fatalf("unexpected startup config: %#v", got)
 	}
 }
 
@@ -163,13 +159,13 @@ func TestWorkspaceWebBindRoundTrip(t *testing.T) {
 	st := newRootTestStore(t)
 	workdir := t.TempDir()
 
-	if bind, cached := webBindForLaunch(context.Background(), st, workdir, app.StartupOptions{WebBind: defaultWebBind}); bind != defaultWebBind || cached {
+	if bind, cached := webBindForLaunch(context.Background(), st, workdir, startupConfig{WebBind: defaultWebBind}); bind != defaultWebBind || cached {
 		t.Fatalf("expected default bind before cache, got bind=%q cached=%v", bind, cached)
 	}
 	if err := saveWorkspaceWebBind(context.Background(), st, workdir, "127.0.0.1:45678"); err != nil {
 		t.Fatalf("save bind: %v", err)
 	}
-	bind, cached := webBindForLaunch(context.Background(), st, workdir, app.StartupOptions{WebBind: defaultWebBind})
+	bind, cached := webBindForLaunch(context.Background(), st, workdir, startupConfig{WebBind: defaultWebBind})
 	if bind != "127.0.0.1:45678" || !cached {
 		t.Fatalf("expected cached bind, got bind=%q cached=%v", bind, cached)
 	}
@@ -189,11 +185,11 @@ func TestWorkspaceWebBindRespectsExplicitBind(t *testing.T) {
 		t.Fatalf("save bind: %v", err)
 	}
 
-	bind, cached := webBindForLaunch(context.Background(), st, workdir, app.StartupOptions{WebBind: "127.0.0.1:0", WebBindExplicit: true})
+	bind, cached := webBindForLaunch(context.Background(), st, workdir, startupConfig{WebBind: "127.0.0.1:0", WebBindExplicit: true})
 	if bind != "127.0.0.1:0" || cached {
 		t.Fatalf("expected explicit ephemeral bind, got bind=%q cached=%v", bind, cached)
 	}
-	bind, cached = webBindForLaunch(context.Background(), st, workdir, app.StartupOptions{WebBind: "127.0.0.1:33333", WebBindExplicit: true})
+	bind, cached = webBindForLaunch(context.Background(), st, workdir, startupConfig{WebBind: "127.0.0.1:33333", WebBindExplicit: true})
 	if bind != "127.0.0.1:33333" || cached {
 		t.Fatalf("expected explicit fixed bind, got bind=%q cached=%v", bind, cached)
 	}
@@ -205,7 +201,7 @@ func TestWorkspaceWebBindIgnoresEphemeralRecords(t *testing.T) {
 	if err := saveWorkspaceWebBind(context.Background(), st, workdir, "127.0.0.1:0"); err != nil {
 		t.Fatalf("save bind: %v", err)
 	}
-	bind, cached := webBindForLaunch(context.Background(), st, workdir, app.StartupOptions{WebBind: defaultWebBind})
+	bind, cached := webBindForLaunch(context.Background(), st, workdir, startupConfig{WebBind: defaultWebBind})
 	if bind != defaultWebBind || cached {
 		t.Fatalf("expected default bind after ephemeral record, got bind=%q cached=%v", bind, cached)
 	}
