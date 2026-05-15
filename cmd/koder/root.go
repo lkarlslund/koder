@@ -165,7 +165,7 @@ func runWeb(ctx context.Context, cfg config.Config, st *store.Store, engine *age
 		return err
 	}
 	bind, cachedBind := webBindForLaunch(ctx, st, workdir, startupOpts)
-	server, err := startWebUI(ctx, controller, bind, cachedBind, startupOpts.NoBrowser)
+	server, err := startWebUI(ctx, controller, bind, cachedBind, startupOpts.NoBrowser, recorder)
 	if err != nil {
 		return err
 	}
@@ -176,7 +176,7 @@ func runWeb(ctx context.Context, cfg config.Config, st *store.Store, engine *age
 	}
 	fmt.Fprintf(os.Stderr, "koder web ui: %s\n", server.URL())
 	if recorder != nil {
-		recorder.UpdateRuntime(debugsrv.RuntimeSnapshot{DebugAPI: debugAPIAddr(debugServer), Status: "Web UI running"})
+		recorder.UpdateProcess(debugsrv.ProcessDebug{DebugAPI: debugAPIAddr(debugServer), Status: "Web UI running"})
 	}
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
@@ -192,14 +192,15 @@ func runWeb(ctx context.Context, cfg config.Config, st *store.Store, engine *age
 	}
 }
 
-func startWebUI(ctx context.Context, controller *uicore.Controller, bind string, cachedBind bool, noBrowser bool) (*webui.Server, error) {
-	return startWebUIWithRetry(ctx, controller, bind, cachedBind, noBrowser, cachedWebBindRetryTimeout, cachedWebBindRetryInterval)
+func startWebUI(ctx context.Context, controller *uicore.Controller, bind string, cachedBind bool, noBrowser bool, recorder *debugsrv.Recorder) (*webui.Server, error) {
+	return startWebUIWithRetry(ctx, controller, bind, cachedBind, noBrowser, recorder, cachedWebBindRetryTimeout, cachedWebBindRetryInterval)
 }
 
-func startWebUIWithRetry(ctx context.Context, controller *uicore.Controller, bind string, cachedBind bool, noBrowser bool, retryTimeout time.Duration, retryInterval time.Duration) (*webui.Server, error) {
+func startWebUIWithRetry(ctx context.Context, controller *uicore.Controller, bind string, cachedBind bool, noBrowser bool, recorder *debugsrv.Recorder, retryTimeout time.Duration, retryInterval time.Duration) (*webui.Server, error) {
 	server, err := webui.Start(ctx, controller, webui.Options{
 		Bind:      bind,
 		NoBrowser: noBrowser,
+		Debug:     recorder,
 	})
 	if err == nil || !cachedBind {
 		return server, err
@@ -217,6 +218,7 @@ func startWebUIWithRetry(ctx context.Context, controller *uicore.Controller, bin
 			server, err = webui.Start(ctx, controller, webui.Options{
 				Bind:      bind,
 				NoBrowser: noBrowser,
+				Debug:     recorder,
 			})
 			if err == nil {
 				return server, nil
@@ -227,6 +229,7 @@ func startWebUIWithRetry(ctx context.Context, controller *uicore.Controller, bin
 			server, err = webui.Start(ctx, controller, webui.Options{
 				Bind:      defaultWebBind,
 				NoBrowser: noBrowser,
+				Debug:     recorder,
 			})
 			if err != nil {
 				return nil, fmt.Errorf("start cached web ui on %s: %w; fallback failed: %v", bind, lastErr, err)

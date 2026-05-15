@@ -270,7 +270,7 @@
     }
     function koderApp() {
       return {
-        ws: null, reconnectTimer: null, connectWatchdog: null, reconnectDelay: 150, reconnectProbe: null, nextID: 1, pending: {}, state: {}, connected: false, connecting: true, draft: '', showPermissions: false,
+        ws: null, reconnectTimer: null, connectWatchdog: null, reconnectDelay: 150, reconnectProbe: null, nextID: 1, pending: {}, clientID: '', clientStateTimer: null, state: {}, connected: false, connecting: true, draft: '', showPermissions: false,
         showModels: false, modelLoading: false, modelQuery: '', modelOptions: [],
         showSessions: false, sessionLoading: false, sessionState: {active_id: 0, workdir: '', sessions: []}, newSessionTitle: '',
         showProviders: false, providerState: {catalog: [], providers: [], drafts: {}}, providerDraft: null, providerHeadersText: '{}', providerStatus: '', providerStatusKind: 'secondary', providerTesting: false, providerSaving: false,
@@ -280,10 +280,11 @@
           this.clampSidebarRatio();
           this.applyTheme();
           this.connect();
-          window.addEventListener('resize', () => this.resizeComposer());
+          window.addEventListener('resize', () => { this.resizeComposer(); this.reportClientStateSoon(); });
           window.addEventListener('online', () => this.connectNow());
-          window.addEventListener('focus', () => this.connectNow());
-          document.addEventListener('visibilitychange', () => { if (!document.hidden) this.connectNow(); });
+          window.addEventListener('focus', () => { this.connectNow(); this.reportClientStateSoon(); });
+          window.addEventListener('blur', () => this.reportClientStateSoon());
+          document.addEventListener('visibilitychange', () => { if (!document.hidden) this.connectNow(); this.reportClientStateSoon(); });
           this.$nextTick(() => { this.resizeComposer(); this.updateTranscriptStickiness(); });
         },
         applyTheme() {
@@ -426,7 +427,9 @@
             location.reload();
             return;
           }
+          this.clientID = (hello && hello.client_id) || this.clientID || '';
           this.applyState((hello && hello.state) || hello || {}, {scrollToBottom: true});
+          this.reportClientStateSoon();
           if (window.performance && performance.mark) {
             performance.clearMarks('koder-ready');
             performance.mark('koder-ready');
@@ -455,6 +458,7 @@
           this.afterTranscriptDOMUpdate(() => {
             if (seq === this.scrollRestoreSeq) this.restoreTranscriptScroll(scroll);
           });
+          this.reportClientStateSoon();
         },
         applyChatDelta(delta) {
           if (!delta) return;
@@ -488,6 +492,7 @@
           this.afterTranscriptDOMUpdate(() => {
             if (seq === this.scrollRestoreSeq) this.restoreTranscriptScroll(scroll);
           });
+          this.reportClientStateSoon();
         },
         patchTimelineItem(timeline, item) {
           const out = Array.isArray(timeline) ? timeline.slice() : [];
@@ -538,6 +543,7 @@
             this.state.Snapshot = snapshot;
           }
           this.syncInterruptArmed();
+          this.reportClientStateSoon();
         },
         rpc(method, params) {
           return this.rpcOn(this.ws, method, params).catch(err => { this.error = err.message; this.showToast(err.message); throw err; });
@@ -570,10 +576,12 @@
           const el = this.transcriptElement();
           if (!el) {
             this.transcriptStickToBottom = true;
+            this.reportClientStateSoon();
             return true;
           }
           const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
           this.transcriptStickToBottom = distance <= 48;
+          this.reportClientStateSoon();
           return this.transcriptStickToBottom;
         },
         transcriptScrollState() {
@@ -611,6 +619,7 @@
           this.afterTranscriptDOMUpdate(() => {
             if (seq === this.scrollRestoreSeq) this.restoreTranscriptScroll(scroll, options);
           });
+          this.reportClientStateSoon();
         },
         selectedChatPreferenceName() { return 'selectedChat.' + encodeURIComponent(this.state.workdir || this.state.Workdir || ''); },
         activeChatID() { return this.state.active_chat_id || this.state.ActiveChatID || 0; },
@@ -651,6 +660,41 @@
           if (!this.chatInterruptible() || this.interruptArmedChatID !== String(this.activeChatID() || '')) {
             this.interruptArmedChatID = '';
           }
+        },
+        clientDebugState() {
+          const transcript = this.transcriptElement();
+          return {
+            selected_session: this.state.session?.id || this.state.session?.ID || '',
+            selected_chat: String(this.activeChatID() || ''),
+            document_visible: !document.hidden,
+            window_focused: document.hasFocus(),
+            composer_focused: this.$refs.composerInput === document.activeElement,
+            viewport_width: window.innerWidth || 0,
+            viewport_height: window.innerHeight || 0,
+            transcript_scroll_top: transcript ? Math.round(transcript.scrollTop) : 0,
+            transcript_scroll_height: transcript ? Math.round(transcript.scrollHeight) : 0,
+            transcript_client_height: transcript ? Math.round(transcript.clientHeight) : 0,
+            stick_to_bottom: !!this.transcriptStickToBottom,
+            open_dialog: this.openDialogName(),
+            interrupt_visible: this.chatInterruptible(),
+            interrupt_armed: !!this.interruptArmed(),
+          };
+        },
+        openDialogName() {
+          if (this.showPermissions) return 'permissions';
+          if (this.showModels) return 'models';
+          if (this.showSessions) return 'sessions';
+          if (this.showProviders) return 'providers';
+          return '';
+        },
+        reportClientStateSoon() {
+          if (!this.connected || !this.clientID) return;
+          if (this.clientStateTimer) clearTimeout(this.clientStateTimer);
+          this.clientStateTimer = setTimeout(() => {
+            this.clientStateTimer = null;
+            if (!this.connected || !this.clientID) return;
+            this.rpcOn(this.ws, 'client_state', this.clientDebugState()).catch(() => {});
+          }, 180);
         },
         interruptChat() {
           const id = String(this.activeChatID() || '');
@@ -884,13 +928,14 @@
         activePermission() { return this.state.permissions?.active || this.state.Permissions?.Active || ''; },
         permissionName(profile) { return profile.Name || profile.name; },
         permissionLabel(name) { const p = this.permissionProfiles().find(p => this.permissionName(p) === name); return p ? (p.Label || p.label || name) : (name || '-'); },
-        setPermission(profile) { this.rpc('set_permission_profile', {profile}).then(s => { this.applyState(s); this.showPermissions = false; }); },
+        setPermission(profile) { this.rpc('set_permission_profile', {profile}).then(s => { this.applyState(s); this.showPermissions = false; this.reportClientStateSoon(); }); },
         openModelDialog() {
           this.showModels = true; this.modelLoading = true; this.modelQuery = '';
+          this.reportClientStateSoon();
           this.$nextTick(() => this.$refs.modelSearch?.focus());
           this.rpc('list_models', {}).then(result => { this.modelOptions = result.models || []; }).finally(() => { this.modelLoading = false; });
         },
-        closeModelDialog() { this.showModels = false; },
+        closeModelDialog() { this.showModels = false; this.reportClientStateSoon(); },
         filteredModels() {
           const q = this.modelQuery.trim().toLowerCase();
           const models = this.modelOptions || [];
@@ -904,9 +949,10 @@
         },
         openSessionDialog() {
           this.showSessions = true; this.sessionLoading = true; this.newSessionTitle = '';
+          this.reportClientStateSoon();
           this.rpc('list_sessions', {}).then(result => { this.sessionState = result || {active_id: 0, workdir: '', sessions: []}; }).finally(() => { this.sessionLoading = false; });
         },
-        closeSessionDialog() { this.showSessions = false; },
+        closeSessionDialog() { this.showSessions = false; this.reportClientStateSoon(); },
         sessionRows() { return this.sessionState.sessions || this.state.sessions || []; },
         activeSessionID() { return this.sessionState.active_id || this.state.session?.ID || this.state.session?.id || 0; },
         sessionID(session) { return session.ID || session.id; },
@@ -921,13 +967,14 @@
         },
         openProviderDialog() {
           this.showProviders = true; this.providerStatus = ''; this.providerStatusKind = 'secondary';
+          this.reportClientStateSoon();
           this.rpc('provider_state', {}).then(state => {
             this.providerState = state || {catalog: [], providers: [], drafts: {}};
             if (this.providerRows().length > 0) this.editProvider(this.providerRows()[0].id);
             else this.addProvider();
           });
         },
-        closeProviderDialog() { this.showProviders = false; this.providerDraft = null; this.providerStatus = ''; },
+        closeProviderDialog() { this.showProviders = false; this.providerDraft = null; this.providerStatus = ''; this.reportClientStateSoon(); },
         providerTemplates() { return this.providerState.catalog || []; },
         providerRows() { return this.providerState.providers || []; },
         setProviderDraft(draft) {

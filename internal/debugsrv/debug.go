@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/pprof"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -50,79 +51,58 @@ type HTTPTrace struct {
 	Error        string            `json:"error,omitempty"`
 }
 
-type RuntimeSnapshot struct {
-	Timestamp               time.Time           `json:"timestamp"`
-	DebugAPI                string              `json:"debug_api"`
-	DeepDebug               bool                `json:"deep_debug"`
-	Build                   version.Info        `json:"build"`
-	CurrentSession          domain.ID           `json:"current_session"`
-	CurrentChat             domain.ID           `json:"current_chat"`
-	SessionTitle            string              `json:"session_title"`
-	ProviderID              string              `json:"provider_id"`
-	ModelID                 string              `json:"model_id"`
-	Status                  string              `json:"status"`
-	Busy                    bool                `json:"busy"`
-	BusyStatus              string              `json:"busy_status,omitempty"`
-	Loading                 bool                `json:"loading"`
-	ActiveEventStream       bool                `json:"active_event_stream"`
-	RuntimeAttached         bool                `json:"runtime_attached"`
-	RuntimeSubscribed       bool                `json:"runtime_subscribed"`
-	RuntimeStatus           string              `json:"runtime_status,omitempty"`
-	RuntimeStatusText       string              `json:"runtime_status_text,omitempty"`
-	RuntimeActive           bool                `json:"runtime_active"`
-	RuntimeQueueLen         int                 `json:"runtime_queue_len"`
-	RuntimePendingText      int                 `json:"runtime_pending_text_len"`
-	RuntimePendingReasoning int                 `json:"runtime_pending_reasoning_len"`
-	TranscriptBusy          bool                `json:"transcript_busy"`
-	SidebarBusy             bool                `json:"sidebar_busy"`
-	BusyScope               string              `json:"busy_scope,omitempty"`
-	CanInterrupt            bool                `json:"can_interrupt"`
-	HasActiveCancel         bool                `json:"has_active_cancel"`
-	HasChatCancel           bool                `json:"has_chat_cancel"`
-	QueueEditMode           bool                `json:"queue_edit_mode"`
-	FocusedWindow           string              `json:"focused_window,omitempty"`
-	ComposerFocused         bool                `json:"composer_focused"`
-	InterruptKeyTarget      bool                `json:"interrupt_key_target"`
-	OpenDialog              string              `json:"open_dialog,omitempty"`
-	ShowSidebar             bool                `json:"show_sidebar"`
-	ShowReasoning           bool                `json:"show_reasoning"`
-	ShowSystem              bool                `json:"show_system"`
-	LastError               string              `json:"last_error,omitempty"`
-	ViewportWidth           int                 `json:"viewport_width"`
-	ViewportHeight          int                 `json:"viewport_height"`
-	ViewportYOffset         int                 `json:"viewport_y_offset"`
-	MessageCount            int                 `json:"message_count"`
-	RenderBlockCount        int                 `json:"render_block_count"`
-	ViewportPreview         string              `json:"viewport_preview,omitempty"`
-	ViewportContentLen      int                 `json:"viewport_content_len"`
-	FrameLines              []string            `json:"frame_lines,omitempty"`
-	TranscriptControls      []ControlRef        `json:"transcript_controls,omitempty"`
-	TranscriptItems         []TranscriptItemRef `json:"transcript_items,omitempty"`
+type RuntimeDebug struct {
+	Process   ProcessDebug  `json:"process"`
+	Clients   []ClientDebug `json:"clients"`
+	Chats     []ChatDebug   `json:"chats"`
+	DeepDebug bool          `json:"deep_debug"`
 }
 
-type ControlRef struct {
-	ID      string `json:"id"`
-	X       int    `json:"x"`
-	Y       int    `json:"y"`
-	W       int    `json:"w"`
-	H       int    `json:"h"`
-	Enabled bool   `json:"enabled"`
+type ProcessDebug struct {
+	Timestamp            time.Time    `json:"timestamp"`
+	DebugAPI             string       `json:"debug_api"`
+	Build                version.Info `json:"build"`
+	Status               string       `json:"status"`
+	LastError            string       `json:"last_error,omitempty"`
+	WebsocketClientCount int          `json:"websocket_client_count"`
 }
 
-type TranscriptItemRef struct {
-	Index     int             `json:"index"`
-	Key       string          `json:"key"`
-	Kind      string          `json:"kind"`
-	GapBefore int             `json:"gap_before"`
-	Height    int             `json:"height"`
-	BlankRows int             `json:"blank_rows"`
-	MessageID string          `json:"message_id,omitempty"`
-	Role      string          `json:"role,omitempty"`
-	Summary   string          `json:"summary,omitempty"`
-	Tool      domain.ToolKind `json:"tool,omitempty"`
-	ToolRunID string          `json:"tool_run_id,omitempty"`
-	Title     string          `json:"title,omitempty"`
-	ControlID string          `json:"control_id,omitempty"`
+type ClientDebug struct {
+	ID                     string    `json:"id"`
+	Connected              bool      `json:"connected"`
+	ConnectedAt            time.Time `json:"connected_at"`
+	LastSeen               time.Time `json:"last_seen"`
+	RemoteAddr             string    `json:"remote_addr,omitempty"`
+	UserAgent              string    `json:"user_agent,omitempty"`
+	SelectedSession        domain.ID `json:"selected_session,omitempty"`
+	SelectedChat           domain.ID `json:"selected_chat,omitempty"`
+	DocumentVisible        bool      `json:"document_visible"`
+	WindowFocused          bool      `json:"window_focused"`
+	ComposerFocused        bool      `json:"composer_focused"`
+	ViewportWidth          int       `json:"viewport_width,omitempty"`
+	ViewportHeight         int       `json:"viewport_height,omitempty"`
+	TranscriptScrollTop    int       `json:"transcript_scroll_top,omitempty"`
+	TranscriptScrollHeight int       `json:"transcript_scroll_height,omitempty"`
+	TranscriptClientHeight int       `json:"transcript_client_height,omitempty"`
+	StickToBottom          bool      `json:"stick_to_bottom"`
+	OpenDialog             string    `json:"open_dialog,omitempty"`
+	InterruptVisible       bool      `json:"interrupt_visible"`
+	InterruptArmed         bool      `json:"interrupt_armed"`
+}
+
+type ChatDebug struct {
+	ID                        domain.ID `json:"id"`
+	SessionID                 domain.ID `json:"session_id"`
+	Title                     string    `json:"title,omitempty"`
+	Status                    string    `json:"status"`
+	StatusText                string    `json:"status_text,omitempty"`
+	Active                    bool      `json:"active"`
+	Busy                      bool      `json:"busy"`
+	QueueLen                  int       `json:"queue_len"`
+	PendingAssistantText      int       `json:"pending_assistant_text_len"`
+	PendingAssistantReasoning int       `json:"pending_assistant_reasoning_len"`
+	PendingApprovals          int       `json:"pending_approvals"`
+	RunningToolCalls          int       `json:"running_tool_calls"`
 }
 
 type SessionAnalysis struct {
@@ -162,7 +142,9 @@ type Recorder struct {
 	deepDebug     bool
 	maxEvents     int
 	maxHTTP       int
-	runtime       RuntimeSnapshot
+	process       ProcessDebug
+	clients       map[string]ClientDebug
+	chats         map[domain.ID]ChatDebug
 	events        []RecordedEvent
 	sessionEvents map[domain.ID][]RecordedEvent
 	httpTraces    []HTTPTrace
@@ -172,6 +154,8 @@ func NewRecorder() *Recorder {
 	return &Recorder{
 		maxEvents:     defaultMaxLogs,
 		maxHTTP:       defaultMaxHTTP,
+		clients:       map[string]ClientDebug{},
+		chats:         map[domain.ID]ChatDebug{},
 		sessionEvents: map[domain.ID][]RecordedEvent{},
 	}
 }
@@ -187,7 +171,7 @@ func (r *Recorder) SetDebugAPI(addr string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.debugAPI = strings.TrimSpace(addr)
-	r.runtime.DebugAPI = r.debugAPI
+	r.process.DebugAPI = r.debugAPI
 }
 
 func (r *Recorder) SetDeepDebug(enabled bool) {
@@ -197,7 +181,6 @@ func (r *Recorder) SetDeepDebug(enabled bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.deepDebug = enabled
-	r.runtime.DeepDebug = enabled
 }
 
 func (r *Recorder) DeepDebug() bool {
@@ -237,7 +220,7 @@ func (r *Recorder) RecordEvent(sessionID domain.ID, evt domain.Event) {
 		r.sessionEvents[sessionID] = appendRecordedEvent(r.sessionEvents[sessionID], entry, r.maxEvents)
 	}
 	if entry.Error != "" {
-		r.runtime.LastError = entry.Error
+		r.process.LastError = entry.Error
 	}
 }
 
@@ -275,33 +258,165 @@ func (r *Recorder) RecordHTTP(trace HTTPTrace) {
 	r.httpTraces = appendHTTPTrace(r.httpTraces, trace, r.maxHTTP)
 }
 
-func (r *Recorder) UpdateRuntime(snapshot RuntimeSnapshot) {
+func (r *Recorder) UpdateProcess(process ProcessDebug) {
 	if r == nil {
 		return
 	}
-	snapshot.Timestamp = time.Now().UTC()
+	process.Timestamp = time.Now().UTC()
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if snapshot.DebugAPI == "" {
-		snapshot.DebugAPI = r.debugAPI
+	if process.DebugAPI == "" {
+		process.DebugAPI = r.debugAPI
 	}
-	snapshot.DeepDebug = r.deepDebug
-	if snapshot.LastError == "" {
-		snapshot.LastError = r.runtime.LastError
+	if process.LastError == "" {
+		process.LastError = r.process.LastError
 	}
-	if snapshot.Build.Name == "" {
-		snapshot.Build = version.Current()
+	if process.Build.Name == "" {
+		process.Build = version.Current()
 	}
-	r.runtime = snapshot
+	r.process = process
 }
 
-func (r *Recorder) Runtime() RuntimeSnapshot {
+func (r *Recorder) RegisterClient(client ClientDebug) ClientDebug {
 	if r == nil {
-		return RuntimeSnapshot{}
+		return ClientDebug{}
+	}
+	now := time.Now().UTC()
+	client.ID = strings.TrimSpace(client.ID)
+	if client.ID == "" {
+		client.ID = string(domain.NewID())
+	}
+	client.Connected = true
+	client.ConnectedAt = now
+	client.LastSeen = now
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.clients == nil {
+		r.clients = map[string]ClientDebug{}
+	}
+	r.clients[client.ID] = client
+	return client
+}
+
+func (r *Recorder) UpdateClient(clientID string, update ClientDebug) {
+	if r == nil {
+		return
+	}
+	clientID = strings.TrimSpace(clientID)
+	if clientID == "" {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.clients == nil {
+		r.clients = map[string]ClientDebug{}
+	}
+	existing := r.clients[clientID]
+	if existing.ID == "" {
+		existing.ID = clientID
+		existing.ConnectedAt = time.Now().UTC()
+	}
+	update.ID = clientID
+	update.Connected = existing.Connected
+	if !update.Connected {
+		update.Connected = true
+	}
+	update.ConnectedAt = existing.ConnectedAt
+	update.LastSeen = time.Now().UTC()
+	update.RemoteAddr = firstNonEmpty(update.RemoteAddr, existing.RemoteAddr)
+	update.UserAgent = firstNonEmpty(update.UserAgent, existing.UserAgent)
+	r.clients[clientID] = update
+}
+
+func (r *Recorder) UnregisterClient(clientID string) {
+	if r == nil {
+		return
+	}
+	clientID = strings.TrimSpace(clientID)
+	if clientID == "" {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	client, ok := r.clients[clientID]
+	if !ok {
+		return
+	}
+	client.Connected = false
+	client.LastSeen = time.Now().UTC()
+	r.clients[clientID] = client
+}
+
+func (r *Recorder) UpdateChats(chats []ChatDebug) {
+	if r == nil {
+		return
+	}
+	next := make(map[domain.ID]ChatDebug, len(chats))
+	for _, chat := range chats {
+		if chat.ID == "" {
+			continue
+		}
+		next[chat.ID] = chat
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.chats = next
+}
+
+func (r *Recorder) Runtime() RuntimeDebug {
+	if r == nil {
+		return RuntimeDebug{}
 	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	return r.runtime
+	process := r.process
+	process.Timestamp = time.Now().UTC()
+	process.DebugAPI = firstNonEmpty(process.DebugAPI, r.debugAPI)
+	if process.Build.Name == "" {
+		process.Build = version.Current()
+	}
+	clients := cloneClients(r.clients)
+	chats := cloneChats(r.chats)
+	process.WebsocketClientCount = connectedClientCount(clients)
+	return RuntimeDebug{Process: process, Clients: clients, Chats: chats, DeepDebug: r.deepDebug}
+}
+
+func (r *Recorder) Clients() []ClientDebug {
+	if r == nil {
+		return nil
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return cloneClients(r.clients)
+}
+
+func (r *Recorder) Client(clientID string) (ClientDebug, bool) {
+	if r == nil {
+		return ClientDebug{}, false
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	client, ok := r.clients[strings.TrimSpace(clientID)]
+	return client, ok
+}
+
+func (r *Recorder) Chats() []ChatDebug {
+	if r == nil {
+		return nil
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return cloneChats(r.chats)
+}
+
+func (r *Recorder) Chat(chatID domain.ID) (ChatDebug, bool) {
+	if r == nil {
+		return ChatDebug{}, false
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	chat, ok := r.chats[chatID]
+	return chat, ok
 }
 
 func (r *Recorder) Events(sessionID domain.ID) []RecordedEvent {
@@ -352,6 +467,10 @@ func Start(bind string, st *store.Store, recorder *Recorder) (*Server, error) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/debug/health", s.handleHealth)
 	mux.HandleFunc("/debug/runtime", s.handleRuntime)
+	mux.HandleFunc("/debug/clients", s.handleClients)
+	mux.HandleFunc("/debug/clients/", s.handleClient)
+	mux.HandleFunc("/debug/chats", s.handleChats)
+	mux.HandleFunc("/debug/chats/", s.handleChat)
 	mux.HandleFunc("/debug/http", s.handleHTTP)
 	mux.HandleFunc("/debug/events", s.handleGlobalEvents)
 	mux.HandleFunc("/debug/sessions", s.handleSessions)
@@ -419,6 +538,50 @@ func (s *Server) handleRuntime(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Allow", "GET, POST")
 		writeError(w, http.StatusMethodNotAllowed, fmt.Errorf("method not allowed"))
 	}
+}
+
+func (s *Server) handleClients(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/debug/clients" {
+		http.NotFound(w, r)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"clients": s.recorder.Clients()})
+}
+
+func (s *Server) handleClient(w http.ResponseWriter, r *http.Request) {
+	clientID := strings.Trim(strings.TrimPrefix(r.URL.Path, "/debug/clients/"), "/")
+	if clientID == "" {
+		http.NotFound(w, r)
+		return
+	}
+	client, ok := s.recorder.Client(clientID)
+	if !ok {
+		writeError(w, http.StatusNotFound, fmt.Errorf("client not found"))
+		return
+	}
+	writeJSON(w, http.StatusOK, client)
+}
+
+func (s *Server) handleChats(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/debug/chats" {
+		http.NotFound(w, r)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"chats": s.recorder.Chats()})
+}
+
+func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
+	chatID := domain.ID(strings.Trim(strings.TrimPrefix(r.URL.Path, "/debug/chats/"), "/"))
+	if chatID == "" {
+		http.NotFound(w, r)
+		return
+	}
+	chat, ok := s.recorder.Chat(chatID)
+	if !ok {
+		writeError(w, http.StatusNotFound, fmt.Errorf("chat not found"))
+		return
+	}
+	writeJSON(w, http.StatusOK, chat)
 }
 
 func (s *Server) handleHTTP(w http.ResponseWriter, _ *http.Request) {
@@ -687,6 +850,49 @@ func cloneHTTPTraces(src []HTTPTrace) []HTTPTrace {
 		dst[i].Meta = cloneMeta(item.Meta)
 	}
 	return dst
+}
+
+func cloneClients(src map[string]ClientDebug) []ClientDebug {
+	if len(src) == 0 {
+		return nil
+	}
+	out := make([]ClientDebug, 0, len(src))
+	for _, item := range src {
+		out = append(out, item)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
+}
+
+func cloneChats(src map[domain.ID]ChatDebug) []ChatDebug {
+	if len(src) == 0 {
+		return nil
+	}
+	out := make([]ChatDebug, 0, len(src))
+	for _, item := range src {
+		out = append(out, item)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
+}
+
+func connectedClientCount(clients []ClientDebug) int {
+	var count int
+	for _, client := range clients {
+		if client.Connected {
+			count++
+		}
+	}
+	return count
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func truncate(value string, max int) string {

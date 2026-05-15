@@ -146,7 +146,7 @@
       <div class="mb-3">
         <div class="d-flex align-items-center justify-content-between">
           <div class="small text-secondary">Permissions</div>
-          <button class="btn btn-sm btn-outline-secondary" @click="showPermissions = !showPermissions"><i class="bi bi-shield-lock"></i></button>
+          <button class="btn btn-sm btn-outline-secondary" @click="showPermissions = !showPermissions; reportClientStateSoon()"><i class="bi bi-shield-lock"></i></button>
         </div>
         <div class="mt-1" x-text="permissionLabel(activePermission())"></div>
         <div class="list-group list-group-flush mt-2" x-show="showPermissions">
@@ -250,7 +250,7 @@
         <button class="btn btn-danger interrupt-button" type="button" x-show="chatInterruptible()" :title="interruptButtonTitle()" @click="interruptChat()" style="display: none;">
           <i class="bi" :class="interruptArmed() ? 'bi-x-octagon-fill' : 'bi-stop-fill'"></i>
         </button>
-        <textarea class="form-control composer-input" rows="1" x-ref="composerInput" x-model="draft" placeholder="Ask koder or type / for commands" @input="onComposerInput()" @click="updateCompletions()" @keyup="onComposerKeyup($event)" @keydown="onComposerKeydown($event)"></textarea>
+        <textarea class="form-control composer-input" rows="1" x-ref="composerInput" x-model="draft" placeholder="Ask koder or type / for commands" @input="onComposerInput()" @click="updateCompletions()" @focus="reportClientStateSoon()" @blur="reportClientStateSoon()" @keyup="onComposerKeyup($event)" @keydown="onComposerKeydown($event)"></textarea>
         <button class="btn btn-primary" type="submit"><i class="bi bi-send-fill"></i></button>
       </div>
     </form>

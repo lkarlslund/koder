@@ -25,6 +25,7 @@ import (
 
 	"github.com/lkarlslund/koder/internal/attachment"
 	"github.com/lkarlslund/koder/internal/chat"
+	"github.com/lkarlslund/koder/internal/debugsrv"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/uicore"
 )
@@ -47,6 +48,7 @@ type Options struct {
 	NoBrowser   bool
 	OpenDelay   time.Duration
 	OpenBrowser func(string) error
+	Debug       *debugsrv.Recorder
 }
 
 // Server serves the browser UI and bridges websocket RPC to the controller.
@@ -57,6 +59,7 @@ type Server struct {
 	listener   net.Listener
 	connected  chan struct{}
 	once       sync.Once
+	debug      *debugsrv.Recorder
 }
 
 // Start starts the web UI server.
@@ -77,6 +80,7 @@ func Start(ctx context.Context, controller *uicore.Controller, options Options) 
 		options:    options,
 		listener:   listener,
 		connected:  make(chan struct{}),
+		debug:      options.Debug,
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", s.handleIndex)
@@ -248,6 +252,16 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	s.markConnected()
 
 	ctx := r.Context()
+	clientID := string(domain.NewID())
+	if s.debug != nil {
+		s.debug.RegisterClient(debugsrv.ClientDebug{
+			ID:         clientID,
+			RemoteAddr: r.RemoteAddr,
+			UserAgent:  r.UserAgent(),
+		})
+		s.updateDebugChats()
+		defer s.debug.UnregisterClient(clientID)
+	}
 	events, unsub := s.controller.Subscribe()
 	defer unsub()
 	done := make(chan struct{})
@@ -267,6 +281,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			if !ok {
 				continue
 			}
+			s.updateDebugChats()
 			if err := writeJSON(ctx, conn, &writeMu, webEvent); err != nil {
 				return
 			}
@@ -282,13 +297,16 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			_ = writeJSON(ctx, conn, &writeMu, rpcResponse{ID: nil, OK: false, Error: err.Error()})
 			continue
 		}
-		result, err := s.handleRPC(ctx, req.Method, req.Params)
+		result, err := s.handleRPC(ctx, clientID, req.Method, req.Params)
 		resp := rpcResponse{ID: req.ID, OK: err == nil, Result: result}
 		if err != nil {
 			resp.Error = err.Error()
 		}
 		if err := writeJSON(ctx, conn, &writeMu, resp); err != nil {
 			return
+		}
+		if err == nil {
+			s.updateDebugChats()
 		}
 		if err == nil && rpcEstablishesSnapshotBaseline(req.Method, result) {
 			baselineMu.Lock()
@@ -303,15 +321,25 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Server) handleRPC(ctx context.Context, method string, params json.RawMessage) (any, error) {
+func (s *Server) handleRPC(ctx context.Context, clientID string, method string, params json.RawMessage) (any, error) {
 	switch strings.TrimSpace(method) {
 	case "hello":
 		return rpcHello{
 			AssetHash: currentAssetHash,
+			ClientID:  clientID,
 			State:     s.controller.State(),
 		}, nil
 	case "get_state":
 		return s.controller.State(), nil
+	case "client_state":
+		var in debugsrv.ClientDebug
+		if err := decodeParams(params, &in); err != nil {
+			return nil, err
+		}
+		if s.debug != nil {
+			s.debug.UpdateClient(clientID, in)
+		}
+		return map[string]bool{"accepted": true}, nil
 	case "send_prompt":
 		var in struct {
 			Text string `json:"text"`
@@ -651,8 +679,74 @@ func rpcEstablishesSnapshotBaseline(method string, result any) bool {
 	return false
 }
 
+func (s *Server) updateDebugChats() {
+	if s == nil || s.debug == nil || s.controller == nil {
+		return
+	}
+	s.debug.UpdateChats(chatDebugFromState(s.controller.State()))
+}
+
+func chatDebugFromState(state uicore.State) []debugsrv.ChatDebug {
+	statuses := make(map[domain.ID]uicore.ChatSidebarStatus, len(state.ChatStatuses))
+	for _, status := range state.ChatStatuses {
+		statuses[status.ChatID] = status
+	}
+	out := make([]debugsrv.ChatDebug, 0, len(state.Chats))
+	for _, item := range state.Chats {
+		if item.ID == "" {
+			continue
+		}
+		snapshot := state.Snapshots[item.ID]
+		status := statuses[item.ID]
+		value := status.Status
+		if value == "" {
+			value = string(snapshot.Status)
+		}
+		text := status.StatusText
+		if text == "" {
+			text = snapshot.StatusText
+		}
+		queue := snapshot.QueuedInputs
+		if queue == nil {
+			queue = item.QueuedInputs
+		}
+		out = append(out, debugsrv.ChatDebug{
+			ID:                        item.ID,
+			SessionID:                 item.SessionID,
+			Title:                     item.Title,
+			Status:                    value,
+			StatusText:                text,
+			Active:                    snapshot.Active,
+			Busy:                      status.Busy || snapshot.Active,
+			QueueLen:                  len(queue),
+			PendingAssistantText:      len(snapshot.PendingAssistant.Text),
+			PendingAssistantReasoning: len(snapshot.PendingAssistant.Reasoning),
+			PendingApprovals:          len(snapshot.Approvals),
+			RunningToolCalls:          runningToolCalls(snapshot.Timeline),
+		})
+	}
+	return out
+}
+
+func runningToolCalls(timeline []domain.TimelineItem) int {
+	var count int
+	for _, item := range timeline {
+		message, ok := item.Content.(domain.AssistantMessage)
+		if !ok {
+			continue
+		}
+		for _, tool := range message.Tools {
+			if tool.Status == domain.ToolStatusRunning {
+				count++
+			}
+		}
+	}
+	return count
+}
+
 type rpcHello struct {
 	AssetHash string `json:"asset_hash"`
+	ClientID  string `json:"client_id"`
 	State     any    `json:"state"`
 }
 

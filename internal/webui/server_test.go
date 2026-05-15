@@ -19,6 +19,7 @@ import (
 	"github.com/lkarlslund/koder/internal/agent"
 	"github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/config"
+	"github.com/lkarlslund/koder/internal/debugsrv"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/uicore"
@@ -164,9 +165,10 @@ func TestServerHealthEndpoint(t *testing.T) {
 
 func TestWebSocketHelloReturnsState(t *testing.T) {
 	ctrl := newTestController(t)
+	recorder := debugsrv.NewRecorder()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoBrowser: true})
+	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoBrowser: true, Debug: recorder})
 	if err != nil {
 		t.Fatalf("start server: %v", err)
 	}
@@ -193,8 +195,59 @@ func TestWebSocketHelloReturnsState(t *testing.T) {
 	if result["asset_hash"] != currentAssetHash {
 		t.Fatalf("expected asset hash %q, got %#v", currentAssetHash, result["asset_hash"])
 	}
+	clientID, _ := result["client_id"].(string)
+	if clientID == "" {
+		t.Fatalf("expected hello client id, got %#v", result)
+	}
 	if _, ok := result["state"].(map[string]any); !ok {
 		t.Fatalf("expected hello state object, got %#v", result["state"])
+	}
+	clients := recorder.Clients()
+	if len(clients) != 1 || clients[0].ID != clientID || !clients[0].Connected {
+		t.Fatalf("expected registered debug client %q, got %#v", clientID, clients)
+	}
+	chats := recorder.Chats()
+	if len(chats) == 0 || chats[0].ID == "" {
+		t.Fatalf("expected debug chat records after hello, got %#v", chats)
+	}
+}
+
+func TestWebSocketClientStateUpdatesDebugClient(t *testing.T) {
+	ctrl := newTestController(t)
+	recorder := debugsrv.NewRecorder()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoBrowser: true, Debug: recorder})
+	if err != nil {
+		t.Fatalf("start server: %v", err)
+	}
+	conn, _, err := websocket.Dial(ctx, "ws://"+srv.Addr()+"/ws", nil)
+	if err != nil {
+		t.Fatalf("dial websocket: %v", err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+	if err := conn.Write(ctx, websocket.MessageText, []byte(`{"id":1,"method":"hello","params":{}}`)); err != nil {
+		t.Fatalf("write hello: %v", err)
+	}
+	msg := readRPCResponse(t, ctx, conn, 1)
+	var hello rpcResponse
+	if err := json.Unmarshal(msg, &hello); err != nil {
+		t.Fatalf("decode hello: %v", err)
+	}
+	result := hello.Result.(map[string]any)
+	clientID := result["client_id"].(string)
+	activeChatID := ctrl.State().ActiveChatID
+	update := fmt.Sprintf(`{"id":2,"method":"client_state","params":{"selected_session":"%s","selected_chat":"%s","document_visible":true,"window_focused":true,"composer_focused":true,"viewport_width":120,"viewport_height":40,"stick_to_bottom":true,"open_dialog":"models","interrupt_visible":true,"interrupt_armed":true}}`, ctrl.State().Session.ID, activeChatID)
+	if err := conn.Write(ctx, websocket.MessageText, []byte(update)); err != nil {
+		t.Fatalf("write client_state: %v", err)
+	}
+	_ = readRPCResponse(t, ctx, conn, 2)
+	client, ok := recorder.Client(clientID)
+	if !ok {
+		t.Fatalf("expected debug client %q", clientID)
+	}
+	if client.SelectedChat != activeChatID || !client.ComposerFocused || client.OpenDialog != "models" || !client.InterruptVisible || !client.InterruptArmed {
+		t.Fatalf("unexpected client debug state: %#v", client)
 	}
 }
 
@@ -356,6 +409,9 @@ func TestIndexServesHTML(t *testing.T) {
 	}
 	if !strings.Contains(fullPage, `class="btn btn-danger interrupt-button"`) || !strings.Contains(fullPage, `x-show="chatInterruptible()"`) || !strings.Contains(fullPage, `rpc('stop_after_turn', {})`) || !strings.Contains(fullPage, `rpc('stop', {})`) {
 		t.Fatalf("expected composer interrupt button with staged then immediate stop behavior")
+	}
+	if !strings.Contains(fullPage, `hello.client_id`) || !strings.Contains(fullPage, `rpcOn(this.ws, 'client_state'`) || !strings.Contains(fullPage, `selected_chat: String(this.activeChatID() || '')`) {
+		t.Fatalf("expected browser to report per-client debug state")
 	}
 	if strings.Contains(fullPage, `btn btn-sm btn-outline-danger" @click="rpc('stop', {})"`) {
 		t.Fatalf("expected interrupt control to be removed from the topbar")

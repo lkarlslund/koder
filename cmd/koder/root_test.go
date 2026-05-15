@@ -222,7 +222,7 @@ func TestStartWebUIRetriesCachedBind(t *testing.T) {
 		_ = listener.Close()
 	}()
 
-	server, err := startWebUIWithRetry(ctx, ctrl, bind, true, true, 500*time.Millisecond, 10*time.Millisecond)
+	server, err := startWebUIWithRetry(ctx, ctrl, bind, true, true, nil, 500*time.Millisecond, 10*time.Millisecond)
 	if err != nil {
 		t.Fatalf("start web ui: %v", err)
 	}
@@ -243,7 +243,7 @@ func TestStartWebUIFallsBackWhenCachedBindStaysBusy(t *testing.T) {
 	t.Cleanup(func() { _ = listener.Close() })
 	bind := listener.Addr().String()
 
-	server, err := startWebUIWithRetry(ctx, ctrl, bind, true, true, 50*time.Millisecond, 10*time.Millisecond)
+	server, err := startWebUIWithRetry(ctx, ctrl, bind, true, true, nil, 50*time.Millisecond, 10*time.Millisecond)
 	if err != nil {
 		t.Fatalf("start web ui: %v", err)
 	}

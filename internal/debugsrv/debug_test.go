@@ -19,23 +19,36 @@ func TestRecorderTracksSessionEventsAndRuntime(t *testing.T) {
 	rec := NewRecorder()
 	rec.RecordLifecycle("session-7", "prompt_submitted", "hello", map[string]string{"source": "web"})
 	rec.RecordEvent("session-7", domain.Event{Kind: domain.EventKindToolResult, Text: "done"})
-	rec.UpdateRuntime(RuntimeSnapshot{CurrentSession: "session-7", Status: "Ready", ViewportWidth: 80, MessageCount: 2, ViewportPreview: "hello"})
+	rec.UpdateProcess(ProcessDebug{Status: "Ready"})
+	rec.RegisterClient(ClientDebug{ID: "client-1", SelectedSession: "session-7", SelectedChat: "chat-9", ViewportWidth: 80})
+	rec.UpdateChats([]ChatDebug{{ID: "chat-9", SessionID: "session-7", Status: "idle"}})
 
 	events := rec.Events("session-7")
 	if len(events) != 2 {
 		t.Fatalf("expected 2 events, got %d", len(events))
 	}
-	if rec.Runtime().CurrentSession != "session-7" {
-		t.Fatalf("unexpected runtime snapshot: %#v", rec.Runtime())
+	runtime := rec.Runtime()
+	payload, err := json.Marshal(runtime)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if rec.Runtime().ViewportWidth != 80 || rec.Runtime().MessageCount != 2 {
-		t.Fatalf("expected runtime viewport details, got %#v", rec.Runtime())
+	if strings.Contains(string(payload), "current_chat") || strings.Contains(string(payload), "current_session") || strings.Contains(string(payload), "focused_window") {
+		t.Fatalf("runtime debug still contains stale single-focus fields: %s", string(payload))
 	}
-	if rec.Runtime().Build.Version != version.Version {
-		t.Fatalf("expected runtime build version %q, got %#v", version.Version, rec.Runtime().Build)
+	if runtime.Process.Status != "Ready" {
+		t.Fatalf("unexpected runtime process: %#v", runtime.Process)
 	}
-	if rec.Runtime().DeepDebug {
-		t.Fatalf("expected deep debug off by default, got %#v", rec.Runtime())
+	if len(runtime.Clients) != 1 || runtime.Clients[0].SelectedSession != "session-7" || runtime.Clients[0].ViewportWidth != 80 {
+		t.Fatalf("expected per-client focus details, got %#v", runtime.Clients)
+	}
+	if len(runtime.Chats) != 1 || runtime.Chats[0].ID != "chat-9" {
+		t.Fatalf("expected chat debug state, got %#v", runtime.Chats)
+	}
+	if runtime.Process.Build.Version != version.Version {
+		t.Fatalf("expected runtime build version %q, got %#v", version.Version, runtime.Process.Build)
+	}
+	if runtime.DeepDebug {
+		t.Fatalf("expected deep debug off by default, got %#v", runtime)
 	}
 }
 
@@ -276,7 +289,7 @@ func TestServerRuntimeCanToggleDeepDebug(t *testing.T) {
 		data, _ := io.ReadAll(resp.Body)
 		t.Fatalf("unexpected runtime status %d: %s", resp.StatusCode, string(data))
 	}
-	var runtime RuntimeSnapshot
+	var runtime RuntimeDebug
 	if err := json.NewDecoder(resp.Body).Decode(&runtime); err != nil {
 		t.Fatal(err)
 	}
@@ -288,54 +301,101 @@ func TestServerRuntimeCanToggleDeepDebug(t *testing.T) {
 	}
 }
 
-func TestRuntimeSnapshotIncludesInteractiveState(t *testing.T) {
+func TestServerExposesClientsAndChats(t *testing.T) {
+	t.Parallel()
+
+	st, err := store.OpenWithOptions(t.TempDir(), store.Options{Backend: store.BackendJSONFS})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	rec := NewRecorder()
+	rec.RegisterClient(ClientDebug{ID: "client-1", SelectedSession: "session-7", SelectedChat: "chat-9"})
+	rec.UpdateChats([]ChatDebug{{ID: "chat-9", SessionID: "session-7", Status: "idle"}})
+	srv, err := Start("127.0.0.1:0", st, rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer srv.Close()
+
+	resp, err := http.Get("http://" + srv.Addr() + "/debug/clients")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var clients struct {
+		Clients []ClientDebug `json:"clients"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&clients); err != nil {
+		t.Fatal(err)
+	}
+	if len(clients.Clients) != 1 || clients.Clients[0].ID != "client-1" {
+		t.Fatalf("unexpected clients response: %#v", clients)
+	}
+
+	resp, err = http.Get("http://" + srv.Addr() + "/debug/chats/chat-9")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var chat ChatDebug
+	if err := json.NewDecoder(resp.Body).Decode(&chat); err != nil {
+		t.Fatal(err)
+	}
+	if chat.ID != "chat-9" || chat.SessionID != "session-7" {
+		t.Fatalf("unexpected chat response: %#v", chat)
+	}
+}
+
+func TestRuntimeDebugSeparatesClientAndChatState(t *testing.T) {
 	t.Parallel()
 
 	recorder := NewRecorder()
-	recorder.UpdateRuntime(RuntimeSnapshot{
-		CurrentSession:          "session-7",
-		CurrentChat:             "chat-9",
-		Busy:                    true,
-		BusyStatus:              "Waiting for LLM response",
-		Loading:                 true,
-		ActiveEventStream:       true,
-		RuntimeAttached:         true,
-		RuntimeSubscribed:       true,
-		RuntimeStatus:           "streaming_response",
-		RuntimeStatusText:       "Streaming LLM response ...",
-		RuntimeActive:           true,
-		RuntimeQueueLen:         2,
-		RuntimePendingText:      17,
-		RuntimePendingReasoning: 9,
-		TranscriptBusy:          true,
-		SidebarBusy:             true,
-		BusyScope:               "transcript",
-		CanInterrupt:            true,
-		HasActiveCancel:         true,
-		HasChatCancel:           true,
-		QueueEditMode:           false,
-		FocusedWindow:           "main",
-		ComposerFocused:         true,
-		InterruptKeyTarget:      true,
+	recorder.UpdateProcess(ProcessDebug{Status: "Web UI running"})
+	recorder.RegisterClient(ClientDebug{
+		ID:               "client-1",
+		SelectedSession:  "session-7",
+		SelectedChat:     "chat-9",
+		DocumentVisible:  true,
+		WindowFocused:    true,
+		ComposerFocused:  true,
+		ViewportWidth:    120,
+		ViewportHeight:   40,
+		StickToBottom:    true,
+		OpenDialog:       "models",
+		InterruptVisible: true,
+		InterruptArmed:   true,
 	})
+	recorder.UpdateChats([]ChatDebug{{
+		ID:                        "chat-9",
+		SessionID:                 "session-7",
+		Title:                     "Main",
+		Status:                    "streaming_response",
+		StatusText:                "Streaming LLM response ...",
+		Active:                    true,
+		Busy:                      true,
+		QueueLen:                  2,
+		PendingAssistantText:      17,
+		PendingAssistantReasoning: 9,
+		PendingApprovals:          1,
+		RunningToolCalls:          3,
+	}})
 
 	runtime := recorder.Runtime()
-	if runtime.CurrentSession != "session-7" || runtime.CurrentChat != "chat-9" {
-		t.Fatalf("unexpected session/chat ids: %#v", runtime)
+	if runtime.Process.Status != "Web UI running" {
+		t.Fatalf("unexpected process debug state: %#v", runtime.Process)
 	}
-	if !runtime.Loading || !runtime.ActiveEventStream {
-		t.Fatalf("expected loading and event stream flags, got %#v", runtime)
+	if len(runtime.Clients) != 1 || runtime.Clients[0].SelectedChat != "chat-9" || !runtime.Clients[0].ComposerFocused || runtime.Clients[0].OpenDialog != "models" {
+		t.Fatalf("expected per-client state, got %#v", runtime.Clients)
 	}
-	if !runtime.RuntimeAttached || !runtime.RuntimeSubscribed || !runtime.RuntimeActive {
-		t.Fatalf("expected runtime attachment state, got %#v", runtime)
+	if !runtime.Clients[0].InterruptVisible || !runtime.Clients[0].InterruptArmed {
+		t.Fatalf("expected client interrupt button state, got %#v", runtime.Clients[0])
 	}
-	if runtime.RuntimeStatus != "streaming_response" || runtime.RuntimeQueueLen != 2 || runtime.RuntimePendingText != 17 || runtime.RuntimePendingReasoning != 9 {
-		t.Fatalf("expected runtime detail fields, got %#v", runtime)
+	if len(runtime.Chats) != 1 || runtime.Chats[0].Status != "streaming_response" || runtime.Chats[0].QueueLen != 2 || runtime.Chats[0].RunningToolCalls != 3 {
+		t.Fatalf("expected per-chat state, got %#v", runtime.Chats)
 	}
-	if !runtime.CanInterrupt || !runtime.HasActiveCancel || !runtime.HasChatCancel {
-		t.Fatalf("expected interrupt state flags, got %#v", runtime)
-	}
-	if runtime.FocusedWindow != "main" || !runtime.ComposerFocused || !runtime.InterruptKeyTarget {
-		t.Fatalf("expected focus and interrupt target state, got %#v", runtime)
+	if runtime.Chats[0].PendingAssistantText != 17 || runtime.Chats[0].PendingAssistantReasoning != 9 {
+		t.Fatalf("expected pending assistant lengths, got %#v", runtime.Chats[0])
 	}
 }
