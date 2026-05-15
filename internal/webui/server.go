@@ -533,19 +533,20 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 }
 
 type stateDelta struct {
-	Session      any       `json:"session,omitempty"`
-	Sessions     any       `json:"sessions,omitempty"`
-	Chats        any       `json:"chats,omitempty"`
-	ChatStatuses any       `json:"chat_statuses,omitempty"`
-	ActiveChatID domain.ID `json:"active_chat_id,omitempty"`
-	Permissions  any       `json:"permissions,omitempty"`
-	Milestones   any       `json:"milestones,omitempty"`
-	Todos        any       `json:"todos,omitempty"`
-	TodosByRef   any       `json:"todos_by_milestone,omitempty"`
-	Workspace    any       `json:"workspace_status,omitempty"`
-	Theme        string    `json:"theme,omitempty"`
-	Workdir      string    `json:"workdir,omitempty"`
-	Error        string    `json:"error,omitempty"`
+	Session       any       `json:"session,omitempty"`
+	Sessions      any       `json:"sessions,omitempty"`
+	Chats         any       `json:"chats,omitempty"`
+	ChatStatuses  any       `json:"chat_statuses,omitempty"`
+	ActiveChatID  domain.ID `json:"active_chat_id,omitempty"`
+	Permissions   any       `json:"permissions,omitempty"`
+	Milestones    any       `json:"milestones,omitempty"`
+	Todos         any       `json:"todos,omitempty"`
+	TodosByRef    any       `json:"todos_by_milestone,omitempty"`
+	Workspace     any       `json:"workspace_status,omitempty"`
+	ContextWindow int       `json:"context_window,omitempty"`
+	Theme         string    `json:"theme,omitempty"`
+	Workdir       string    `json:"workdir,omitempty"`
+	Error         string    `json:"error,omitempty"`
 }
 
 type chatDelta struct {
@@ -645,19 +646,20 @@ func snapshotTimelineItem(timeline []domain.TimelineItem, id domain.ID) (domain.
 
 func stateDeltaFromState(state uicore.State) stateDelta {
 	return stateDelta{
-		Session:      state.Session,
-		Sessions:     state.Sessions,
-		Chats:        state.Chats,
-		ChatStatuses: state.ChatStatuses,
-		ActiveChatID: state.ActiveChatID,
-		Permissions:  state.Permissions,
-		Milestones:   state.Milestones,
-		Todos:        state.Todos,
-		TodosByRef:   state.TodosByRef,
-		Workspace:    state.Workspace,
-		Theme:        state.Theme,
-		Workdir:      state.Workdir,
-		Error:        state.Error,
+		Session:       state.Session,
+		Sessions:      state.Sessions,
+		Chats:         state.Chats,
+		ChatStatuses:  state.ChatStatuses,
+		ActiveChatID:  state.ActiveChatID,
+		Permissions:   state.Permissions,
+		Milestones:    state.Milestones,
+		Todos:         state.Todos,
+		TodosByRef:    state.TodosByRef,
+		Workspace:     state.Workspace,
+		ContextWindow: state.ContextWindow,
+		Theme:         state.Theme,
+		Workdir:       state.Workdir,
+		Error:         state.Error,
 	}
 }
 

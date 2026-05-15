@@ -40,21 +40,22 @@ type Event struct {
 
 // State is the renderer-neutral UI snapshot consumed by web and TUI renderers.
 type State struct {
-	Session      domain.Session              `json:"session"`
-	Sessions     []domain.Session            `json:"sessions"`
-	Chats        []domain.Chat               `json:"chats"`
-	ChatStatuses []ChatSidebarStatus         `json:"chat_statuses"`
-	ActiveChatID domain.ID                   `json:"active_chat_id"`
-	Permissions  PermissionsState            `json:"permissions"`
-	Snapshot     chat.Snapshot               `json:"snapshot"`
-	Snapshots    map[domain.ID]chat.Snapshot `json:"snapshots"`
-	Milestones   store.MilestonePlan         `json:"milestones"`
-	Todos        []store.TodoItem            `json:"todos"`
-	TodosByRef   map[string][]store.TodoItem `json:"todos_by_milestone"`
-	Workspace    workspacepkg.Status         `json:"workspace_status"`
-	Theme        string                      `json:"theme"`
-	Workdir      string                      `json:"workdir"`
-	Error        string                      `json:"error,omitempty"`
+	Session       domain.Session              `json:"session"`
+	Sessions      []domain.Session            `json:"sessions"`
+	Chats         []domain.Chat               `json:"chats"`
+	ChatStatuses  []ChatSidebarStatus         `json:"chat_statuses"`
+	ActiveChatID  domain.ID                   `json:"active_chat_id"`
+	Permissions   PermissionsState            `json:"permissions"`
+	Snapshot      chat.Snapshot               `json:"snapshot"`
+	Snapshots     map[domain.ID]chat.Snapshot `json:"snapshots"`
+	Milestones    store.MilestonePlan         `json:"milestones"`
+	Todos         []store.TodoItem            `json:"todos"`
+	TodosByRef    map[string][]store.TodoItem `json:"todos_by_milestone"`
+	Workspace     workspacepkg.Status         `json:"workspace_status"`
+	ContextWindow int                         `json:"context_window"`
+	Theme         string                      `json:"theme"`
+	Workdir       string                      `json:"workdir"`
+	Error         string                      `json:"error,omitempty"`
 }
 
 // ChatSidebarStatus is the renderer-neutral run state for one chat in the sidebar.
@@ -229,20 +230,21 @@ func (c *Controller) State() State {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	state := State{
-		Session:      c.session,
-		Sessions:     slices.Clone(c.sessions),
-		Chats:        slices.Clone(c.chats),
-		ChatStatuses: c.chatStatusesLocked(),
-		ActiveChatID: c.chat.ID,
-		Permissions:  c.permissionsStateLocked(),
-		Snapshots:    map[domain.ID]chat.Snapshot{},
-		Milestones:   c.milestone,
-		Todos:        slices.Clone(c.todos),
-		TodosByRef:   cloneTodosByRef(c.todosByRef),
-		Workspace:    c.workspace,
-		Theme:        c.theme,
-		Workdir:      c.workdir,
-		Error:        c.lastErr,
+		Session:       c.session,
+		Sessions:      slices.Clone(c.sessions),
+		Chats:         slices.Clone(c.chats),
+		ChatStatuses:  c.chatStatusesLocked(),
+		ActiveChatID:  c.chat.ID,
+		Permissions:   c.permissionsStateLocked(),
+		Snapshots:     map[domain.ID]chat.Snapshot{},
+		Milestones:    c.milestone,
+		Todos:         slices.Clone(c.todos),
+		TodosByRef:    cloneTodosByRef(c.todosByRef),
+		Workspace:     c.workspace,
+		ContextWindow: c.contextWindowLocked(),
+		Theme:         c.theme,
+		Workdir:       c.workdir,
+		Error:         c.lastErr,
 	}
 	for idx := range state.Chats {
 		if state.Chats[idx].ID == c.chat.ID {
@@ -1850,6 +1852,19 @@ func (c *Controller) permissionsStateLocked() PermissionsState {
 		profiles = append(profiles, permissionprofile.ProfileOption{Name: name, Label: permissionprofile.DisplayName(name)})
 	}
 	return PermissionsState{Active: active, Profiles: profiles}
+}
+
+func (c *Controller) contextWindowLocked() int {
+	providerID := strings.TrimSpace(c.session.ProviderID)
+	if providerID != "" {
+		if providerCfg, ok := c.cfg.Providers[providerID]; ok && providerCfg.ContextWindow > 0 {
+			return providerCfg.ContextWindow
+		}
+	}
+	if providerCfg, ok := c.cfg.Providers[c.cfg.DefaultProvider]; ok && providerCfg.ContextWindow > 0 {
+		return providerCfg.ContextWindow
+	}
+	return 32768
 }
 
 func (c *Controller) publishTo(ch chan Event, typ string, payload any) {

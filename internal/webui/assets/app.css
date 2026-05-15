@@ -3,6 +3,7 @@
     body { overflow: hidden; }
     .app-shell { height: 100vh; display: grid; grid-template-columns: minmax(0, 1fr) 6px var(--sidebar-width, 340px); grid-template-rows: auto minmax(0, 1fr) auto; }
     .topbar { grid-column: 1 / 4; }
+    .topbar-workspace { max-width: min(34vw, 34rem); }
     .transcript { min-height: 0; overflow: auto; }
     .sidebar-resizer { min-height: 0; cursor: col-resize; background: var(--bs-border-color); opacity: .55; touch-action: none; }
     .sidebar-resizer:hover, .sidebar-resizer.resizing { background: var(--bs-primary); opacity: 1; }
@@ -23,6 +24,7 @@
     .chat-status-icon.status-waiting-approval { color: var(--bs-warning); animation: chat-status-pulse 1s ease-in-out infinite; }
     .chat-status-icon.status-error, .chat-status-icon.status-failed, .chat-status-icon.status-cancelled { color: var(--bs-danger); animation: chat-status-pulse 1.1s ease-in-out infinite; }
     .chat-status-icon.status-completed { color: var(--bs-success); animation: chat-status-fade 1.5s ease-in-out infinite; }
+    .chat-context { color: var(--bs-secondary-color); font-size: .78rem; margin-left: auto; }
     @keyframes chat-status-spin { to { transform: rotate(360deg); } }
     @keyframes chat-status-pulse { 0%, 100% { opacity: .45; transform: scale(.94); } 50% { opacity: 1; transform: scale(1.08); } }
     @keyframes chat-status-fade { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }

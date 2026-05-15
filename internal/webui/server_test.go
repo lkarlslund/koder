@@ -602,8 +602,11 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `set_model`) {
 		t.Fatalf("expected model dialog to set model")
 	}
-	if !strings.Contains(fullPage, `class="sidebar-info-row"`) || !strings.Contains(fullPage, `class="sidebar-label">Model`) || !strings.Contains(fullPage, `class="sidebar-value text-truncate" x-text="statusText()"`) {
+	if !strings.Contains(fullPage, `class="sidebar-info-row"`) || !strings.Contains(fullPage, `class="sidebar-label">Model`) || !strings.Contains(fullPage, `class="sidebar-label">Permissions`) {
 		t.Fatalf("expected sidebar facts to render as compact single-line label/value rows")
+	}
+	if !strings.Contains(fullPage, `topbar-workspace`) || strings.Contains(fullPage, `class="sidebar-label">Workspace`) {
+		t.Fatalf("expected workspace to render in the top status bar instead of the sidebar")
 	}
 	if !strings.Contains(fullPage, `milestoneItems()`) {
 		t.Fatalf("expected sidebar to render milestones")
@@ -649,6 +652,9 @@ func TestIndexServesHTML(t *testing.T) {
 	}
 	if !strings.Contains(fullPage, `chatStatusLabel(chat)`) || !strings.Contains(fullPage, `chat-status-icon`) {
 		t.Fatalf("expected chat sidebar to render per-chat animated status icons")
+	}
+	if !strings.Contains(fullPage, `chatContextLabel(chat)`) || !strings.Contains(fullPage, `context_window`) || !strings.Contains(fullPage, `'% ctx)'`) {
+		t.Fatalf("expected chat sidebar to render context percentage")
 	}
 	if !strings.Contains(fullPage, `toolApprovalPending(tool)`) || !strings.Contains(fullPage, `rpc('approve', {tool_call_id: toolCallID(tool)})`) || !strings.Contains(fullPage, `rpc('deny', {tool_call_id: toolCallID(tool)})`) {
 		t.Fatalf("expected pending tool approval cards to expose approve and deny actions inline")

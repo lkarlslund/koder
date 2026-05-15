@@ -774,6 +774,25 @@
           return 'bi-circle text-secondary';
         },
         chatID(chat) { return chat.ID || chat.id; },
+        chatSnapshot(chat) {
+          const id = this.chatID(chat);
+          const snapshots = this.state.snapshots || this.state.Snapshots || {};
+          return snapshots[id] || snapshots[String(id)] || {};
+        },
+        chatContextTokens(chat) {
+          const snapshot = this.chatSnapshot(chat);
+          const context = snapshot.Context || snapshot.context || {};
+          const liveTotal = context.TotalTokens || context.total_tokens || 0;
+          if (liveTotal > 0) return liveTotal;
+          return chat.LastKnownContextTokens || chat.last_known_context_tokens || 0;
+        },
+        chatContextLabel(chat) {
+          const windowSize = this.state.context_window || this.state.ContextWindow || 0;
+          const tokens = this.chatContextTokens(chat);
+          if (!windowSize || !tokens) return '(0% ctx)';
+          const pct = Math.max(0, Math.min(999, Math.round((tokens / windowSize) * 100)));
+          return '(' + pct + '% ctx)';
+        },
         chatStatus(chat) {
           const id = this.chatID(chat);
           const statuses = this.state.chat_statuses || this.state.ChatStatuses || [];

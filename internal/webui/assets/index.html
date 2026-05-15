@@ -21,6 +21,7 @@
       <div class="d-flex align-items-center gap-2">
         <i class="bi bi-terminal-fill text-primary"></i>
         <span class="fw-semibold">koder</span>
+        <span class="text-secondary small topbar-workspace text-truncate" :title="state.workdir" x-text="state.workdir || ''"></span>
         <span class="text-secondary small" x-text="state.session?.title || 'New Session'"></span>
       </div>
       <div class="d-flex align-items-center gap-2">
@@ -108,9 +109,60 @@
       </div>
       <div class="sidebar-section">
         <div class="sidebar-info-row">
+          <span class="sidebar-label">Permissions</span>
+          <span class="sidebar-value text-truncate" x-text="permissionLabel(activePermission())"></span>
+          <button class="btn btn-sm btn-outline-secondary" @click="showPermissions = !showPermissions; reportClientStateSoon()"><i class="bi bi-shield-lock"></i></button>
+        </div>
+        <div class="list-group list-group-flush sidebar-list" x-show="showPermissions">
+          <template x-for="profile in permissionProfiles()" :key="profile.Name || profile.name">
+            <button class="list-group-item list-group-item-action" :class="{'active': permissionName(profile) === activePermission()}" @click="setPermission(permissionName(profile))">
+              <div class="fw-semibold" x-text="profile.Label || profile.label || profile.Name || profile.name"></div>
+              <div class="small opacity-75" x-text="profile.Description || profile.description || ''"></div>
+            </button>
+          </template>
+        </div>
+      </div>
+      <div class="sidebar-section">
+        <div class="sidebar-info-row">
           <span class="sidebar-label">Status</span>
           <span class="sidebar-value text-truncate" x-text="statusText()"></span>
         </div>
+      </div>
+      <div class="sidebar-section">
+        <div class="sidebar-info-row">
+          <span class="sidebar-heading">Chats</span>
+          <button class="btn btn-sm btn-outline-primary" @click="newChat()"><i class="bi bi-plus-lg"></i></button>
+        </div>
+        <div class="list-group list-group-flush sidebar-list">
+          <template x-for="chat in state.chats || []" :key="chat.ID || chat.id">
+            <div class="list-group-item list-group-item-action d-flex align-items-center gap-2" :class="{'active': chatID(chat) === state.active_chat_id}" @click="switchChat(chatID(chat))">
+              <button type="button" class="btn btn-sm p-0 border-0 bg-transparent flex-grow-1 text-start" :class="{'text-white': chatID(chat) === state.active_chat_id}" @click.stop="switchChat(chatID(chat))">
+                <div class="d-flex align-items-center gap-2">
+                  <i class="bi bi-chat-left-text"></i>
+                  <span class="text-truncate" x-text="chat.Title || chat.title || 'Chat'"></span>
+                  <i class="chat-status-icon bi" :class="[chatStatusIcon(chat), chatStatusClass(chat)]" :title="chatStatusLabel(chat)"></i>
+                  <span class="chat-context text-nowrap" x-text="chatContextLabel(chat)"></span>
+                </div>
+              </button>
+              <button type="button" class="btn btn-sm" :class="chatID(chat) === state.active_chat_id ? 'btn-outline-light' : 'btn-outline-danger'" title="Delete chat" @click.stop="deleteChat(chatID(chat))">
+                <i class="bi bi-trash"></i>
+              </button>
+            </div>
+          </template>
+        </div>
+      </div>
+      <div class="sidebar-section">
+        <div class="sidebar-heading">Approvals</div>
+        <template x-for="approval in approvals()" :key="approval.ToolCallID || approval.tool_call_id">
+          <div class="border rounded p-2 sidebar-card">
+            <div class="small fw-semibold" x-text="approval.Tool || approval.tool"></div>
+            <div class="small text-secondary" x-text="approval.Command || approval.command"></div>
+            <div class="btn-group btn-group-sm mt-2">
+              <button class="btn btn-success" @click="rpc('approve', {tool_call_id: approval.ToolCallID || approval.tool_call_id})"><i class="bi bi-check-lg"></i></button>
+              <button class="btn btn-outline-danger" @click="rpc('deny', {tool_call_id: approval.ToolCallID || approval.tool_call_id})"><i class="bi bi-x-lg"></i></button>
+            </div>
+          </div>
+        </template>
       </div>
       <div class="sidebar-section">
         <div class="sidebar-heading">Milestones</div>
@@ -145,62 +197,6 @@
               </div>
             </div>
           </template>
-        </div>
-      </div>
-      <div class="sidebar-section">
-        <div class="sidebar-info-row">
-          <span class="sidebar-label">Permissions</span>
-          <span class="sidebar-value text-truncate" x-text="permissionLabel(activePermission())"></span>
-          <button class="btn btn-sm btn-outline-secondary" @click="showPermissions = !showPermissions; reportClientStateSoon()"><i class="bi bi-shield-lock"></i></button>
-        </div>
-        <div class="list-group list-group-flush sidebar-list" x-show="showPermissions">
-          <template x-for="profile in permissionProfiles()" :key="profile.Name || profile.name">
-            <button class="list-group-item list-group-item-action" :class="{'active': permissionName(profile) === activePermission()}" @click="setPermission(permissionName(profile))">
-              <div class="fw-semibold" x-text="profile.Label || profile.label || profile.Name || profile.name"></div>
-              <div class="small opacity-75" x-text="profile.Description || profile.description || ''"></div>
-            </button>
-          </template>
-        </div>
-      </div>
-      <div class="sidebar-section">
-        <div class="sidebar-info-row">
-          <span class="sidebar-heading">Chats</span>
-          <button class="btn btn-sm btn-outline-primary" @click="newChat()"><i class="bi bi-plus-lg"></i></button>
-        </div>
-        <div class="list-group list-group-flush sidebar-list">
-          <template x-for="chat in state.chats || []" :key="chat.ID || chat.id">
-            <div class="list-group-item list-group-item-action d-flex align-items-center gap-2" :class="{'active': chatID(chat) === state.active_chat_id}" @click="switchChat(chatID(chat))">
-              <button type="button" class="btn btn-sm p-0 border-0 bg-transparent flex-grow-1 text-start" :class="{'text-white': chatID(chat) === state.active_chat_id}" @click.stop="switchChat(chatID(chat))">
-                <div class="d-flex align-items-center gap-2">
-                  <i class="bi bi-chat-left-text"></i>
-                  <span class="text-truncate" x-text="chat.Title || chat.title || 'Chat'"></span>
-                  <i class="chat-status-icon bi" :class="[chatStatusIcon(chat), chatStatusClass(chat)]" :title="chatStatusLabel(chat)"></i>
-                </div>
-              </button>
-              <button type="button" class="btn btn-sm" :class="chatID(chat) === state.active_chat_id ? 'btn-outline-light' : 'btn-outline-danger'" title="Delete chat" @click.stop="deleteChat(chatID(chat))">
-                <i class="bi bi-trash"></i>
-              </button>
-            </div>
-          </template>
-        </div>
-      </div>
-      <div class="sidebar-section">
-        <div class="sidebar-heading">Approvals</div>
-        <template x-for="approval in approvals()" :key="approval.ToolCallID || approval.tool_call_id">
-          <div class="border rounded p-2 sidebar-card">
-            <div class="small fw-semibold" x-text="approval.Tool || approval.tool"></div>
-            <div class="small text-secondary" x-text="approval.Command || approval.command"></div>
-            <div class="btn-group btn-group-sm mt-2">
-              <button class="btn btn-success" @click="rpc('approve', {tool_call_id: approval.ToolCallID || approval.tool_call_id})"><i class="bi bi-check-lg"></i></button>
-              <button class="btn btn-outline-danger" @click="rpc('deny', {tool_call_id: approval.ToolCallID || approval.tool_call_id})"><i class="bi bi-x-lg"></i></button>
-            </div>
-          </div>
-        </template>
-      </div>
-      <div class="sidebar-section">
-        <div class="sidebar-info-row">
-          <span class="sidebar-label">Workspace</span>
-          <span class="sidebar-value text-truncate" :title="state.workdir" x-text="state.workdir"></span>
         </div>
       </div>
       <div class="sidebar-section">

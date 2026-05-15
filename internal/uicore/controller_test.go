@@ -278,7 +278,7 @@ func TestControllerModelOptionsLoadsConfiguredModels(t *testing.T) {
 func TestControllerSetModelUpdatesStoreStateAndRuntimeSnapshot(t *testing.T) {
 	ctrl, st := newTestControllerWithConfig(t, func(cfg *config.Config) {
 		cfg.Providers = map[string]config.Provider{
-			"test": {BaseURL: "https://example.invalid/v1", DefaultModel: "model"},
+			"test": {BaseURL: "https://example.invalid/v1", DefaultModel: "model", ContextWindow: 12345},
 		}
 	})
 	if err := ctrl.SetModel(context.Background(), "test", "next-model"); err != nil {
@@ -291,6 +291,9 @@ func TestControllerSetModelUpdatesStoreStateAndRuntimeSnapshot(t *testing.T) {
 	}
 	if state.Snapshot.Session.ProviderID != "test" || state.Snapshot.Session.ModelID != "next-model" {
 		t.Fatalf("expected runtime snapshot model test/next-model, got %s/%s", state.Snapshot.Session.ProviderID, state.Snapshot.Session.ModelID)
+	}
+	if state.ContextWindow != 12345 {
+		t.Fatalf("expected context window 12345, got %d", state.ContextWindow)
 	}
 	session, err := st.GetSession(context.Background(), state.Session.ID)
 	if err != nil {
