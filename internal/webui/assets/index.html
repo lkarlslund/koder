@@ -200,8 +200,17 @@
         </div>
       </div>
       <div class="sidebar-section">
-        <div class="sidebar-info-row">
+        <div class="sidebar-info-row git-summary-row">
           <span class="sidebar-heading">Git</span>
+          <span class="fw-semibold text-truncate" x-show="gitStatus().available" x-text="gitStatus().branch || '-'"></span>
+          <span class="small text-secondary text-truncate" x-show="gitStatus().available && gitStatus().upstream" x-text="gitStatus().upstream"></span>
+          <span class="badge text-bg-secondary" x-show="gitStatus().available && gitStatus().summary" x-text="gitStatus().summary"></span>
+          <span class="small text-nowrap ms-auto" x-show="gitStatus().available">
+            <span class="diff-add" x-text="'+' + (gitStatus().added || 0)"></span>
+            <span class="text-warning ms-1" x-text="'~' + (gitStatus().modified || 0)"></span>
+            <span class="diff-del ms-1" x-text="'-' + (gitStatus().deleted || 0)"></span>
+            <span class="text-info ms-1" x-text="'?' + (gitStatus().untracked || 0)"></span>
+          </span>
           <button class="btn btn-sm btn-outline-secondary" title="Refresh git status" @click="refreshWorkspace()"><i class="bi bi-arrow-clockwise"></i></button>
         </div>
         <template x-if="!gitStatus().available">
@@ -209,18 +218,6 @@
         </template>
         <template x-if="gitStatus().available">
           <div class="sidebar-compact-block">
-            <div class="sidebar-info-row">
-              <span class="sidebar-label">Branch</span>
-              <span class="fw-semibold" x-text="gitStatus().branch || '-'"></span>
-              <span class="small text-secondary" x-show="gitStatus().upstream" x-text="gitStatus().upstream"></span>
-              <span class="badge text-bg-secondary" x-show="gitStatus().summary" x-text="gitStatus().summary"></span>
-            </div>
-            <div class="small mt-1">
-              <span class="diff-add" x-text="'+' + (gitStatus().added || 0)"></span>
-              <span class="text-warning ms-2" x-text="'~' + (gitStatus().modified || 0)"></span>
-              <span class="diff-del ms-2" x-text="'-' + (gitStatus().deleted || 0)"></span>
-              <span class="text-info ms-2" x-text="'?' + (gitStatus().untracked || 0)"></span>
-            </div>
             <div class="list-group list-group-flush sidebar-list" x-show="gitFiles().length > 0">
               <template x-for="file in gitFiles()" :key="file.path || file.Path">
                 <div class="list-group-item bg-transparent px-0 py-1 git-file" :class="gitFileClass(file)">

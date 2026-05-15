@@ -629,6 +629,13 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `refresh_workspace`) {
 		t.Fatalf("expected git sidebar refresh RPC")
 	}
+	if !strings.Contains(fullPage, `git-summary-row`) ||
+		!strings.Contains(fullPage, `x-text="gitStatus().branch || '-'"`) ||
+		!strings.Contains(fullPage, `x-text="'+' + (gitStatus().added || 0)"`) ||
+		!strings.Contains(fullPage, `title="Refresh git status"`) ||
+		strings.Contains(fullPage, `class="sidebar-label">Branch`) {
+		t.Fatalf("expected git branch, change summary, and refresh button on one compact row")
+	}
 	if !strings.Contains(fullPage, `@pointerdown="startSidebarResize($event)"`) {
 		t.Fatalf("expected draggable sidebar divider")
 	}

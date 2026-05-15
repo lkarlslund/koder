@@ -19,6 +19,8 @@
     .sidebar-list .chat-list-item .btn { line-height: 1.1; }
     .sidebar-card { margin: .35rem 0; }
     .sidebar-compact-block { margin-top: .2rem; }
+    .git-summary-row { gap: .35rem; }
+    .git-summary-row .btn { flex: 0 0 auto; padding: .05rem .35rem; line-height: 1.2; }
     .chat-status-icon { flex: 0 0 auto; font-size: .9rem; line-height: 1; }
     .chat-status-icon.status-idle { color: var(--bs-secondary-color); opacity: .65; }
     .chat-status-icon.status-running, .chat-status-icon.status-waiting-llm, .chat-status-icon.status-streaming-response, .chat-status-icon.status-streaming-thoughts, .chat-status-icon.status-running-tools { color: var(--bs-primary); animation: chat-status-spin 1s linear infinite; }
