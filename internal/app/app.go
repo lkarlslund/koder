@@ -2703,8 +2703,10 @@ func sidebarMilestoneStatusGlyph(status domain.MilestoneStatus) string {
 	switch status {
 	case domain.MilestoneStatusCompleted:
 		return "✓"
-	case domain.MilestoneStatusInProgress, domain.MilestoneStatusExecuting, domain.MilestoneStatusDecomposing:
+	case domain.MilestoneStatusExecuting, domain.MilestoneStatusDecomposing:
 		return "◐"
+	case domain.MilestoneStatusReady:
+		return "▷"
 	case domain.MilestoneStatusBlocked:
 		return "!"
 	case domain.MilestoneStatusCancelled:

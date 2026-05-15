@@ -65,7 +65,7 @@ func TestMilestoneAndTodoWorkflow(t *testing.T) {
 	}
 	if _, err := executeAndPersist(ctx, t, registry, st, session.ID, tools.Request{
 		Tool: domain.ToolKindMilestoneUpdate,
-		Args: map[string]string{"ref": "implement", "status": "in_progress"},
+		Args: map[string]string{"ref": "implement", "status": "ready"},
 	}); err != nil {
 		t.Fatal(err)
 	}

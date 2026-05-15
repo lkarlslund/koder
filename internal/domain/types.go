@@ -149,8 +149,8 @@ type MilestoneStatus string
 
 const (
 	MilestoneStatusPending     MilestoneStatus = "pending"
-	MilestoneStatusInProgress  MilestoneStatus = "in_progress"
 	MilestoneStatusDecomposing MilestoneStatus = "decomposing"
+	MilestoneStatusReady       MilestoneStatus = "ready"
 	MilestoneStatusExecuting   MilestoneStatus = "executing"
 	MilestoneStatusCompleted   MilestoneStatus = "completed"
 	MilestoneStatusBlocked     MilestoneStatus = "blocked"

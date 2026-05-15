@@ -137,10 +137,11 @@ type UpdatePlanStoredResult struct {
 }
 
 type MilestoneStoredItem struct {
-	Ref    string `json:"ref"`
-	Title  string `json:"title"`
-	Status string `json:"status"`
-	Notes  string `json:"notes,omitempty"`
+	Ref         string `json:"ref"`
+	Title       string `json:"title"`
+	Status      string `json:"status"`
+	Notes       string `json:"notes,omitempty"`
+	OwnerChatID string `json:"owner_chat_id,omitempty"`
 }
 
 type MilestonePlanStoredResult struct {

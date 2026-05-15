@@ -5561,7 +5561,7 @@ func TestRenderSidebarShowsStatusAndSessionInfo(t *testing.T) {
 		milestonePlan: store.MilestonePlan{
 			Milestones: []store.Milestone{
 				{Ref: "investigate", Title: "Investigate", Status: domain.MilestoneStatusCompleted, Position: 0},
-				{Ref: "implement", Title: "Implement", Status: domain.MilestoneStatusInProgress, Position: 1},
+				{Ref: "implement", Title: "Implement", Status: domain.MilestoneStatusReady, Position: 1},
 				{Ref: "ship", Title: "Ship", Status: domain.MilestoneStatusPending, Position: 2},
 			},
 		},
@@ -5610,7 +5610,7 @@ func TestRenderSidebarShowsStatusAndSessionInfo(t *testing.T) {
 	for _, needle := range []string{
 		"\n\nModel  test / model\nStatus ",
 		"\n\nWorkspace /tmp/project",
-		"\n\nMilestones: 1/3 done\n  ✓ Investigate\n  ◐ Implement\n  ○ Ship",
+		"\n\nMilestones: 1/3 done\n  ✓ Investigate\n  ▷ Implement\n  ○ Ship",
 		"\n\nTodos: 1/3 done\n  ✓ Write tests\n  ◐ Fix bug\n  ○ Polish copy",
 		"\n\nChats",
 		"\n\nDebug   127.0.0.1:61347",

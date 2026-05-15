@@ -47,9 +47,7 @@ func ParseMilestones(raw string) ([]store.Milestone, error) {
 			return nil, fmt.Errorf("duplicate milestone ref %q", ref)
 		}
 		seenRefs[ref] = struct{}{}
-		switch status {
-		case domain.MilestoneStatusPending, domain.MilestoneStatusInProgress, domain.MilestoneStatusDecomposing, domain.MilestoneStatusExecuting, domain.MilestoneStatusCompleted, domain.MilestoneStatusBlocked, domain.MilestoneStatusCancelled:
-		default:
+		if !ValidMilestoneStatus(status) {
 			return nil, fmt.Errorf("invalid milestone status %q", item.Status)
 		}
 		out = append(out, store.Milestone{
@@ -107,11 +105,18 @@ func ParseMilestoneRef(raw string) (string, error) {
 
 func ParseMilestoneStatus(raw string) (domain.MilestoneStatus, error) {
 	status := domain.MilestoneStatus(strings.TrimSpace(raw))
-	switch status {
-	case domain.MilestoneStatusPending, domain.MilestoneStatusInProgress, domain.MilestoneStatusDecomposing, domain.MilestoneStatusExecuting, domain.MilestoneStatusCompleted, domain.MilestoneStatusBlocked, domain.MilestoneStatusCancelled:
+	if ValidMilestoneStatus(status) {
 		return status, nil
+	}
+	return "", fmt.Errorf("invalid milestone status %q", raw)
+}
+
+func ValidMilestoneStatus(status domain.MilestoneStatus) bool {
+	switch status {
+	case domain.MilestoneStatusPending, domain.MilestoneStatusDecomposing, domain.MilestoneStatusReady, domain.MilestoneStatusExecuting, domain.MilestoneStatusCompleted, domain.MilestoneStatusBlocked, domain.MilestoneStatusCancelled:
+		return true
 	default:
-		return "", fmt.Errorf("invalid milestone status %q", raw)
+		return false
 	}
 }
 
@@ -163,11 +168,6 @@ func ActiveMilestone(plan store.MilestonePlan) (store.Milestone, bool) {
 			return item, true
 		}
 	}
-	for _, item := range plan.Milestones {
-		if item.Status == domain.MilestoneStatusInProgress {
-			return item, true
-		}
-	}
 	return store.Milestone{}, false
 }
 
@@ -199,6 +199,9 @@ func ValidateMilestoneProgress(items []store.Milestone) error {
 		if item.Ref == "" {
 			return errors.New("milestone ref is empty")
 		}
+		if !ValidMilestoneStatus(item.Status) {
+			return fmt.Errorf("invalid milestone status %q", item.Status)
+		}
 		if _, exists := seenRefs[item.Ref]; exists {
 			return fmt.Errorf("duplicate milestone ref %q", item.Ref)
 		}
@@ -209,7 +212,7 @@ func ValidateMilestoneProgress(items []store.Milestone) error {
 
 func milestoneStatusCountsAsActive(status domain.MilestoneStatus) bool {
 	switch status {
-	case domain.MilestoneStatusInProgress, domain.MilestoneStatusDecomposing, domain.MilestoneStatusExecuting:
+	case domain.MilestoneStatusDecomposing, domain.MilestoneStatusExecuting:
 		return true
 	default:
 		return false
@@ -307,11 +310,16 @@ func PersistedTodoBucket(ctx context.Context, st *store.Store, sessionID domain.
 func MilestoneStoredResult(plan store.MilestonePlan) MilestonePlanStoredResult {
 	items := make([]MilestoneStoredItem, 0, len(plan.Milestones))
 	for _, item := range plan.Milestones {
+		ownerChatID := ""
+		if item.OwnerChatID != nil {
+			ownerChatID = *item.OwnerChatID
+		}
 		items = append(items, MilestoneStoredItem{
-			Ref:    item.Ref,
-			Title:  item.Title,
-			Status: string(item.Status),
-			Notes:  item.Notes,
+			Ref:         item.Ref,
+			Title:       item.Title,
+			Status:      string(item.Status),
+			Notes:       item.Notes,
+			OwnerChatID: ownerChatID,
 		})
 	}
 	return MilestonePlanStoredResult{

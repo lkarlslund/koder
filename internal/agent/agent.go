@@ -1707,13 +1707,53 @@ func (e *Engine) deny(ctx context.Context, sessionID, chatID domain.ID, rawID st
 }
 
 func (e *Engine) persistToolResult(ctx context.Context, chatID, sessionID domain.ID, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
+	beforePlan, trackMilestones := e.milestonePlanForNotification(ctx, sessionID, req.Tool)
 	events, err := e.registry.PersistResultInChat(ctx, e.store, sessionID, chatID, req, result)
 	if err != nil {
 		return nil, err
 	}
+	if trackMilestones {
+		e.notifyMilestoneChanges(ctx, chatID, beforePlan)
+	}
 	summary, _ := tools.SummarizeResult(req, result)
 	e.recordLifecycle(sessionID, "tool_result_persisted", summary, map[string]string{"tool": string(req.Tool)})
 	return events, nil
+}
+
+func (e *Engine) milestonePlanForNotification(ctx context.Context, sessionID domain.ID, tool domain.ToolKind) (store.MilestonePlan, bool) {
+	switch tool {
+	case domain.ToolKindMilestoneUpdate, domain.ToolKindMilestonePlan, domain.ToolKindMilestoneWrite, domain.ToolKindMilestoneAdd:
+	default:
+		return store.MilestonePlan{}, false
+	}
+	plan, err := e.store.GetMilestonePlan(ctx, sessionID)
+	if err != nil {
+		return store.MilestonePlan{}, false
+	}
+	return plan, true
+}
+
+func (e *Engine) notifyMilestoneChanges(ctx context.Context, chatID domain.ID, before store.MilestonePlan) {
+	chatRecord, err := e.store.GetChat(ctx, chatID)
+	if err != nil || chatRecord.ParentChatID == nil {
+		return
+	}
+	after, err := e.store.GetMilestonePlan(ctx, chatRecord.SessionID)
+	if err != nil {
+		return
+	}
+	beforeByRef := make(map[string]store.Milestone, len(before.Milestones))
+	for _, milestone := range before.Milestones {
+		beforeByRef[milestone.Ref] = milestone
+	}
+	for _, milestone := range after.Milestones {
+		prev, ok := beforeByRef[milestone.Ref]
+		if !ok || prev.Status == milestone.Status {
+			continue
+		}
+		text := fmt.Sprintf("Milestone %s changed from %s to %s by chat %s.", milestone.Ref, prev.Status, milestone.Status, chatID)
+		e.enqueueSteer(ctx, *chatRecord.ParentChatID, text)
+	}
 }
 
 func (e *Engine) persistToolFailure(ctx context.Context, chatID, sessionID domain.ID, req tools.Request, execErr error) (<-chan domain.Event, error) {

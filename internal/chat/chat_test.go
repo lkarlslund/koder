@@ -203,7 +203,7 @@ func createSessionWithPlan(t *testing.T, st *store.Store) (domain.Session, domai
 		t.Fatal(err)
 	}
 	plan, err := st.SetMilestonePlan(ctx, session.ID, "Ship it", []store.Milestone{
-		{Ref: "alpha", Title: "Alpha", Status: domain.MilestoneStatusInProgress, Position: 0},
+		{Ref: "alpha", Title: "Alpha", Status: domain.MilestoneStatusExecuting, Position: 0},
 		{Ref: "beta", Title: "Beta", Status: domain.MilestoneStatusPending, Position: 1},
 	})
 	if err != nil {

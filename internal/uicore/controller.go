@@ -1544,8 +1544,9 @@ func (c *Controller) forwardRuntime(chatID domain.ID, updates <-chan chat.Update
 		sessionID := c.session.ID
 		activeChatID := c.chat.ID
 		_, subscribed := c.runtimes[chatID]
+		_, hasSnapshot := c.snapshots[chatID]
 		c.mu.RUnlock()
-		if !subscribed {
+		if !subscribed && chatID != activeChatID && !hasSnapshot {
 			return
 		}
 		if update.Event != nil && update.Event.Err != nil {
@@ -1836,14 +1837,10 @@ func (c *Controller) publishTo(ch chan Event, typ string, payload any) {
 
 func (c *Controller) broadcast(typ string, payload any) {
 	c.subMu.Lock()
+	defer c.subMu.Unlock()
 	c.nextSeq++
 	evt := Event{Seq: c.nextSeq, Type: typ, Payload: payload}
-	subs := make([]chan Event, 0, len(c.subs))
 	for _, ch := range c.subs {
-		subs = append(subs, ch)
-	}
-	c.subMu.Unlock()
-	for _, ch := range subs {
 		select {
 		case ch <- evt:
 		default:

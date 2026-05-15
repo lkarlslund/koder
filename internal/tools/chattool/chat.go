@@ -20,14 +20,14 @@ func init() {
 	tools.Register(startDecompositionTool{}, tools.ToolSpec{
 		Title:       "Start decomposition chat",
 		Description: "Start a background decomposition chat for one milestone.",
-		Usage:       "Start a new background decomposition chat for one milestone. Use this when a milestone needs dedicated todo synthesis instead of inline decomposition.",
+		Usage:       "Start a new background decomposition chat for one milestone. Use this when a milestone needs dedicated todo synthesis instead of inline decomposition. The new chat owns the milestone until it sets the milestone to ready. After starting it, go idle unless you have unrelated work; milestone changes and subchat idle/completion updates will be sent to you automatically.",
 		Parameters:  `{"type":"object","properties":{"milestone_ref":{"type":"string","description":"Milestone ref to decompose"},"title":{"type":"string","description":"Optional chat title"}},"required":["milestone_ref"],"additionalProperties":false}`,
 		ExposeToLLM: true,
 	})
 	tools.Register(startExecutionTool{}, tools.ToolSpec{
 		Title:       "Start execution chat",
 		Description: "Start a background execution chat for one milestone.",
-		Usage:       "Start a new background execution chat for one milestone. Use this after a milestone has enough todo context to implement independently. The execution chat is scoped to the assigned milestone and can only see or update that milestone and its todo bucket.",
+		Usage:       "Start a new background execution chat for one ready milestone. The execution chat owns the milestone until it sets the milestone to completed, blocked, or cancelled. After starting it, go idle unless you have unrelated work; milestone changes and subchat idle/completion updates will be sent to you automatically.",
 		Parameters:  `{"type":"object","properties":{"milestone_ref":{"type":"string","description":"Milestone ref to execute"},"title":{"type":"string","description":"Optional chat title"}},"required":["milestone_ref"],"additionalProperties":false}`,
 		ExposeToLLM: true,
 	})

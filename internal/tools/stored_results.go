@@ -167,10 +167,11 @@ type UpdatePlanStoredResult struct {
 }
 
 type MilestoneStoredItem struct {
-	Ref    string `json:"ref"`
-	Title  string `json:"title"`
-	Status string `json:"status"`
-	Notes  string `json:"notes,omitempty"`
+	Ref         string `json:"ref"`
+	Title       string `json:"title"`
+	Status      string `json:"status"`
+	Notes       string `json:"notes,omitempty"`
+	OwnerChatID string `json:"owner_chat_id,omitempty"`
 }
 
 type MilestonePlanStoredResult struct {
@@ -180,11 +181,11 @@ type MilestonePlanStoredResult struct {
 
 type ChatStoredItem struct {
 	ID                 domain.ID `json:"id"`
-	Title              string `json:"title"`
-	Role               string `json:"role,omitempty"`
-	State              string `json:"state,omitempty"`
-	ActiveMilestoneRef string `json:"active_milestone_ref,omitempty"`
-	StatusText         string `json:"status_text,omitempty"`
+	Title              string    `json:"title"`
+	Role               string    `json:"role,omitempty"`
+	State              string    `json:"state,omitempty"`
+	ActiveMilestoneRef string    `json:"active_milestone_ref,omitempty"`
+	StatusText         string    `json:"status_text,omitempty"`
 }
 
 type ChatListStoredResult struct {
@@ -193,8 +194,8 @@ type ChatListStoredResult struct {
 
 type TodoStoredItem struct {
 	ID      domain.ID `json:"id"`
-	Content string `json:"content"`
-	Status  string `json:"status"`
+	Content string    `json:"content"`
+	Status  string    `json:"status"`
 }
 
 type TodoListStoredResult struct {

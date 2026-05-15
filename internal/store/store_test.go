@@ -647,7 +647,7 @@ func TestMilestonePlanAndTodosRoundTrip(t *testing.T) {
 			}
 			plan, err := st.SetMilestonePlan(context.Background(), session.ID, "Ship the feature", []Milestone{
 				{Ref: "investigate", Title: "Investigate", Status: domain.MilestoneStatusCompleted, Position: 0},
-				{Ref: "implement", Title: "Implement", Status: domain.MilestoneStatusInProgress, Position: 1},
+				{Ref: "implement", Title: "Implement", Status: domain.MilestoneStatusReady, Position: 1},
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -705,7 +705,7 @@ func TestForkSessionCopiesTranscriptAndParent(t *testing.T) {
 				t.Fatal(err)
 			}
 			if _, err := st.SetMilestonePlan(context.Background(), session.ID, "Ship feature", []Milestone{
-				{Ref: "implement", Title: "Implement", Status: domain.MilestoneStatusInProgress, Position: 0},
+				{Ref: "implement", Title: "Implement", Status: domain.MilestoneStatusReady, Position: 0},
 			}); err != nil {
 				t.Fatal(err)
 			}

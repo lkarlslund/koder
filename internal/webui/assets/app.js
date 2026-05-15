@@ -650,14 +650,16 @@
           if (status === 'completed') return 'bi-check-circle-fill text-success';
           if (status === 'cancelled') return 'bi-x-circle-fill text-secondary';
           if (status === 'blocked') return 'bi-exclamation-octagon-fill text-danger';
-          if (status === 'in_progress' || status === 'decomposing' || status === 'executing') return 'bi-arrow-repeat text-primary';
+          if (status === 'decomposing' || status === 'executing') return 'bi-arrow-repeat text-primary';
+          if (status === 'ready') return 'bi-play-circle text-info';
           return 'bi-circle text-secondary';
         },
         milestoneBadge(status) {
           if (status === 'completed') return 'text-bg-success';
           if (status === 'cancelled') return 'text-bg-secondary';
           if (status === 'blocked') return 'text-bg-danger';
-          if (status === 'in_progress' || status === 'decomposing' || status === 'executing') return 'text-bg-primary';
+          if (status === 'decomposing' || status === 'executing') return 'text-bg-primary';
+          if (status === 'ready') return 'text-bg-info';
           return 'text-bg-secondary';
         },
         todoItems() { return this.state.todos || this.state.Todos || []; },

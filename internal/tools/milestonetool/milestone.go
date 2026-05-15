@@ -29,15 +29,15 @@ func init() {
 	tools.Register(updateItemTool{}, tools.ToolSpec{
 		Title:       "Update milestone",
 		Description: "Update one milestone's status or details.",
-		Usage:       "Update one milestone's status, and optionally its title or notes. Multiple milestones may be active at the same time. If a milestone was created by accident or is no longer wanted, set status to cancelled at any time.",
-		Parameters:  `{"type":"object","properties":{"ref":{"type":"string","description":"Milestone ref"},"status":{"type":"string","enum":["pending","in_progress","decomposing","executing","completed","blocked","cancelled"]},"title":{"type":"string","description":"Optional replacement title"},"notes":{"type":"string","description":"Optional replacement notes"}},"required":["ref","status"],"additionalProperties":false}`,
+		Usage:       "Update one milestone's status, and optionally its title or notes. Use ready when decomposition is done and execution can start. Set completed, blocked, or cancelled when work is finished, blocked, created by accident, or no longer wanted.",
+		Parameters:  `{"type":"object","properties":{"ref":{"type":"string","description":"Milestone ref"},"status":{"type":"string","enum":["pending","decomposing","ready","executing","completed","blocked","cancelled"]},"title":{"type":"string","description":"Optional replacement title"},"notes":{"type":"string","description":"Optional replacement notes"}},"required":["ref","status"],"additionalProperties":false}`,
 		ExposeToLLM: true,
 	})
 	tools.Register(planTool{}, tools.ToolSpec{
 		Title:       "Plan milestone",
 		Description: "Create or update a milestone and append todo items.",
-		Usage:       "Create or update one milestone and append concrete todo items for it in one step. Use this when the current discussion already contains enough detail and a separate decomposition chat would be overkill. If a milestone was created by accident or is no longer wanted, update it to cancelled at any time.",
-		Parameters:  `{"type":"object","properties":{"ref":{"type":"string","description":"Milestone ref"},"title":{"type":"string","description":"Milestone title"},"notes":{"type":"string","description":"Optional milestone notes"},"status":{"type":"string","enum":["pending","in_progress","decomposing","executing","completed","blocked","cancelled"]},"items":{"type":"array","description":"Todo items to append for this milestone","items":{"type":"object","properties":{"content":{"type":"string"}},"required":["content"]}}},"required":["ref","title","items"],"additionalProperties":false}`,
+		Usage:       "Create or update one milestone and append concrete todo items for it in one step. Use ready when this creates an executable todo bucket. If a milestone was created by accident or is no longer wanted, update it to cancelled at any time.",
+		Parameters:  `{"type":"object","properties":{"ref":{"type":"string","description":"Milestone ref"},"title":{"type":"string","description":"Milestone title"},"notes":{"type":"string","description":"Optional milestone notes"},"status":{"type":"string","enum":["pending","decomposing","ready","executing","completed","blocked","cancelled"]},"items":{"type":"array","description":"Todo items to append for this milestone","items":{"type":"object","properties":{"content":{"type":"string"}},"required":["content"]}}},"required":["ref","title","items"],"additionalProperties":false}`,
 		ExposeToLLM: true,
 	})
 	tools.Register(writeTool{}, tools.ToolSpec{
@@ -217,7 +217,7 @@ func (updateItemTool) Execute(ctx context.Context, runtime tools.Runtime, req to
 	if err != nil {
 		return tools.Result{}, err
 	}
-	updated, err := updatedMilestonePlan(plan, req)
+	updated, err := updatedMilestonePlan(plan, req, actorChatFromRuntime(runtime))
 	if err != nil {
 		return tools.Result{}, err
 	}
@@ -242,7 +242,7 @@ func (planTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Re
 	}
 	status := domain.MilestoneStatus(strings.TrimSpace(req.Args["status"]))
 	if status == "" {
-		status = domain.MilestoneStatusPending
+		status = domain.MilestoneStatusReady
 	}
 	nextMilestones := upsertMilestone(plan.Milestones, store.Milestone{
 		Ref:    ref,
@@ -341,7 +341,11 @@ func (updateItemTool) PersistResult(ctx context.Context, st *store.Store, sessio
 	if err != nil {
 		return nil, err
 	}
-	updated, err := updatedMilestonePlan(plan, req)
+	actor, err := actorChatFromContext(ctx, st)
+	if err != nil {
+		return nil, err
+	}
+	updated, err := updatedMilestonePlan(plan, req, actor)
 	if err != nil {
 		return nil, err
 	}
@@ -365,7 +369,7 @@ func (planTool) PersistResult(ctx context.Context, st *store.Store, sessionID do
 	}
 	status := domain.MilestoneStatus(strings.TrimSpace(req.Args["status"]))
 	if status == "" {
-		status = domain.MilestoneStatusPending
+		status = domain.MilestoneStatusReady
 	}
 	nextMilestones := upsertMilestone(plan.Milestones, store.Milestone{
 		Ref:    req.Args["ref"],
@@ -456,7 +460,28 @@ func upsertMilestone(existing []store.Milestone, next store.Milestone) []store.M
 	return append(out, next)
 }
 
-func updatedMilestonePlan(plan store.MilestonePlan, req tools.Request) (store.MilestonePlan, error) {
+func actorChatFromRuntime(runtime tools.Runtime) domain.Chat {
+	return domain.Chat{
+		ID:                    runtime.ChatID,
+		WorkflowRole:          runtime.ChatRole,
+		ActiveMilestoneRef:    runtime.ActiveMilestoneRef,
+		AssignedTodoBucketRef: runtime.AssignedTodoBucketRef,
+	}
+}
+
+func actorChatFromContext(ctx context.Context, st *store.Store) (domain.Chat, error) {
+	chatID, ok := tools.ChatIDFromContext(ctx)
+	if !ok {
+		return domain.Chat{}, nil
+	}
+	chat, err := st.GetChat(ctx, chatID)
+	if err != nil {
+		return domain.Chat{}, err
+	}
+	return chat, nil
+}
+
+func updatedMilestonePlan(plan store.MilestonePlan, req tools.Request, actor domain.Chat) (store.MilestonePlan, error) {
 	ref := req.Args["ref"]
 	status := domain.MilestoneStatus(req.Args["status"])
 	milestones := append([]store.Milestone(nil), plan.Milestones...)
@@ -466,7 +491,11 @@ func updatedMilestonePlan(plan store.MilestonePlan, req tools.Request) (store.Mi
 			continue
 		}
 		found = true
+		if err := validateMilestoneOwner(milestones[idx], status, actor); err != nil {
+			return store.MilestonePlan{}, err
+		}
 		milestones[idx].Status = status
+		applyMilestoneOwner(&milestones[idx], status, actor)
 		if title := strings.TrimSpace(req.Args["title"]); title != "" {
 			milestones[idx].Title = title
 		}
@@ -485,6 +514,38 @@ func updatedMilestonePlan(plan store.MilestonePlan, req tools.Request) (store.Mi
 		Summary:    plan.Summary,
 		Milestones: milestones,
 	}, nil
+}
+
+func validateMilestoneOwner(milestone store.Milestone, next domain.MilestoneStatus, actor domain.Chat) error {
+	if actor.ID == "" || actor.WorkflowRole == domain.WorkflowRoleOrchestrator {
+		return nil
+	}
+	if milestone.OwnerChatID != nil && *milestone.OwnerChatID != actor.ID {
+		return fmt.Errorf("milestone %q is owned by chat %s", milestone.Ref, *milestone.OwnerChatID)
+	}
+	switch next {
+	case domain.MilestoneStatusDecomposing:
+		if actor.WorkflowRole != domain.WorkflowRoleDecomposition {
+			return fmt.Errorf("milestone %q can only be set to decomposing by a decomposition chat", milestone.Ref)
+		}
+	case domain.MilestoneStatusExecuting:
+		if actor.WorkflowRole != domain.WorkflowRoleExecution {
+			return fmt.Errorf("milestone %q can only be set to executing by an execution chat", milestone.Ref)
+		}
+	}
+	return nil
+}
+
+func applyMilestoneOwner(milestone *store.Milestone, status domain.MilestoneStatus, actor domain.Chat) {
+	switch status {
+	case domain.MilestoneStatusDecomposing, domain.MilestoneStatusExecuting:
+		if actor.ID != "" && actor.WorkflowRole != domain.WorkflowRoleOrchestrator {
+			owner := actor.ID
+			milestone.OwnerChatID = &owner
+		}
+	default:
+		milestone.OwnerChatID = nil
+	}
 }
 
 func validateCompletedMilestoneTodos(ctx context.Context, st *store.Store, sessionID domain.ID, milestones []store.Milestone) error {

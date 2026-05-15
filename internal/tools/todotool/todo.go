@@ -14,8 +14,8 @@ func init() {
 	tools.Register(listTool{}, tools.ToolSpec{
 		Title:       "List todos",
 		Description: "Read the todo bucket for a milestone.",
-		Usage:       "Read the todo bucket for a milestone. If milestone_ref is omitted, this reads the current in_progress milestone's todos.",
-		Parameters:  `{"type":"object","properties":{"milestone_ref":{"type":"string","description":"Optional milestone ref; defaults to the in_progress milestone"}},"additionalProperties":false}`,
+		Usage:       "Read the todo bucket for a milestone. If milestone_ref is omitted, this reads the current assigned milestone's todos.",
+		Parameters:  `{"type":"object","properties":{"milestone_ref":{"type":"string","description":"Optional milestone ref; defaults to the assigned milestone"}},"additionalProperties":false}`,
 		ExposeToLLM: true,
 	})
 	tools.Register(addItemsTool{}, tools.ToolSpec{
@@ -36,7 +36,7 @@ func init() {
 		Title:       "Fetch next todo",
 		Description: "Find the next todo item to work on.",
 		Usage:       "Find the next todo item to work on for a milestone. If there is already an in_progress item, it is returned. Otherwise the first pending item is returned. If all items are done, this returns the finished bucket and a message telling you to move to the next milestone or break it down into todos.",
-		Parameters:  `{"type":"object","properties":{"milestone_ref":{"type":"string","description":"Optional milestone ref; defaults to the in_progress milestone"}},"additionalProperties":false}`,
+		Parameters:  `{"type":"object","properties":{"milestone_ref":{"type":"string","description":"Optional milestone ref; defaults to the assigned milestone"}},"additionalProperties":false}`,
 		ExposeToLLM: true,
 	})
 }

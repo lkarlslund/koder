@@ -527,7 +527,7 @@ func TestHandleModelToolCallDeniesDisabledSessionTool(t *testing.T) {
 	}
 }
 
-func TestUpdateMilestoneStatusDoesNotDemoteOtherActiveMilestones(t *testing.T) {
+func TestUpdateMilestoneStatusSetsAndClearsOwner(t *testing.T) {
 	cfg := testConfig(t)
 	st, err := store.Open(t.TempDir())
 	if err != nil {
@@ -546,8 +546,9 @@ func TestUpdateMilestoneStatusDoesNotDemoteOtherActiveMilestones(t *testing.T) {
 		t.Fatal(err)
 	}
 	engine := New(cfg, st, tools.NewRegistry(t.TempDir()), nil, t.TempDir())
+	ownerID := domain.NewID()
 
-	if err := engine.updateMilestoneStatus(context.Background(), session.ID, "beta", domain.MilestoneStatusExecuting); err != nil {
+	if err := engine.updateMilestoneStatus(context.Background(), session.ID, "beta", domain.MilestoneStatusExecuting, ownerID); err != nil {
 		t.Fatal(err)
 	}
 	plan, err := st.GetMilestonePlan(context.Background(), session.ID)
@@ -556,6 +557,46 @@ func TestUpdateMilestoneStatusDoesNotDemoteOtherActiveMilestones(t *testing.T) {
 	}
 	if plan.Milestones[0].Status != domain.MilestoneStatusExecuting || plan.Milestones[1].Status != domain.MilestoneStatusExecuting {
 		t.Fatalf("expected both milestones to remain executing, got %#v", plan.Milestones)
+	}
+	if plan.Milestones[1].OwnerChatID == nil || *plan.Milestones[1].OwnerChatID != ownerID {
+		t.Fatalf("expected beta to be owned by %s, got %#v", ownerID, plan.Milestones[1].OwnerChatID)
+	}
+	if err := engine.updateMilestoneStatus(context.Background(), session.ID, "beta", domain.MilestoneStatusReady, ownerID); err != nil {
+		t.Fatal(err)
+	}
+	plan, err = st.GetMilestonePlan(context.Background(), session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Milestones[1].Status != domain.MilestoneStatusReady || plan.Milestones[1].OwnerChatID != nil {
+		t.Fatalf("expected beta to become ready and release owner, got %#v", plan.Milestones[1])
+	}
+}
+
+func TestUpdateMilestoneStatusRejectsOtherOwner(t *testing.T) {
+	cfg := testConfig(t)
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	session, err := st.CreateSession(context.Background(), "test", "provider", "model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ownerID := domain.NewID()
+	if _, err := st.SetMilestonePlan(context.Background(), session.ID, "Ship it", []store.Milestone{
+		{Ref: "alpha", Title: "Alpha", Status: domain.MilestoneStatusExecuting, OwnerChatID: &ownerID, Position: 0},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	engine := New(cfg, st, tools.NewRegistry(t.TempDir()), nil, t.TempDir())
+
+	otherID := domain.NewID()
+	err = engine.updateMilestoneStatus(context.Background(), session.ID, "alpha", domain.MilestoneStatusReady, otherID)
+	if err == nil || !strings.Contains(err.Error(), "owned by chat") {
+		t.Fatalf("expected ownership error, got %v", err)
 	}
 }
 

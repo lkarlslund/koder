@@ -88,11 +88,12 @@ type MilestonePlan struct {
 }
 
 type Milestone struct {
-	Ref      string
-	Title    string
-	Status   domain.MilestoneStatus
-	Notes    string
-	Position int
+	Ref         string
+	Title       string
+	Status      domain.MilestoneStatus
+	Notes       string
+	Position    int
+	OwnerChatID *domain.ID
 }
 
 type TodoItem struct {

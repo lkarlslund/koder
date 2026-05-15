@@ -112,7 +112,7 @@ func TestUpsertAndUpdatedPlanHelpers(t *testing.T) {
 	items := upsertMilestone([]store.Milestone{{Ref: "alpha", Title: "Alpha", Position: 0}}, store.Milestone{
 		Ref:    "alpha",
 		Title:  "Alpha updated",
-		Status: domain.MilestoneStatusInProgress,
+		Status: domain.MilestoneStatusReady,
 	})
 	if items[0].Title != "Alpha updated" || items[0].Position != 0 {
 		t.Fatalf("unexpected updated milestone: %#v", items[0])
@@ -127,14 +127,14 @@ func TestUpsertAndUpdatedPlanHelpers(t *testing.T) {
 		Milestones: []store.Milestone{
 			{Ref: "alpha", Title: "Alpha", Status: domain.MilestoneStatusPending, Position: 0},
 		},
-	}, tools.Request{Args: map[string]string{"ref": "alpha", "status": "completed", "notes": "done"}})
+	}, tools.Request{Args: map[string]string{"ref": "alpha", "status": "completed", "notes": "done"}}, domain.Chat{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if plan.Milestones[0].Status != domain.MilestoneStatusCompleted || plan.Milestones[0].Notes != "done" {
 		t.Fatalf("unexpected updated plan: %#v", plan)
 	}
-	if _, err := updatedMilestonePlan(plan, tools.Request{Args: map[string]string{"ref": "missing", "status": "completed"}}); err == nil {
+	if _, err := updatedMilestonePlan(plan, tools.Request{Args: map[string]string{"ref": "missing", "status": "completed"}}, domain.Chat{}); err == nil {
 		t.Fatal("expected missing milestone error")
 	}
 }
@@ -143,17 +143,67 @@ func TestUpdateItemAllowsMultipleActiveMilestones(t *testing.T) {
 	plan := store.MilestonePlan{
 		Summary: "Ship it",
 		Milestones: []store.Milestone{
-			{Ref: "alpha", Title: "Alpha", Status: domain.MilestoneStatusInProgress, Position: 0},
+			{Ref: "alpha", Title: "Alpha", Status: domain.MilestoneStatusExecuting, Position: 0},
 			{Ref: "beta", Title: "Beta", Status: domain.MilestoneStatusPending, Position: 1},
 		},
 	}
 
-	updated, err := updatedMilestonePlan(plan, tools.Request{Args: map[string]string{"ref": "beta", "status": "executing"}})
+	updated, err := updatedMilestonePlan(plan, tools.Request{Args: map[string]string{"ref": "beta", "status": "executing"}}, domain.Chat{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if updated.Milestones[0].Status != domain.MilestoneStatusInProgress || updated.Milestones[1].Status != domain.MilestoneStatusExecuting {
+	if updated.Milestones[0].Status != domain.MilestoneStatusExecuting || updated.Milestones[1].Status != domain.MilestoneStatusExecuting {
 		t.Fatalf("expected both milestones to remain active, got %#v", updated.Milestones)
+	}
+}
+
+func TestUpdateItemEnforcesMilestoneOwnership(t *testing.T) {
+	ownerID := domain.NewID()
+	otherID := domain.NewID()
+	plan := store.MilestonePlan{
+		Summary: "Ship it",
+		Milestones: []store.Milestone{
+			{Ref: "alpha", Title: "Alpha", Status: domain.MilestoneStatusExecuting, OwnerChatID: &ownerID, Position: 0},
+		},
+	}
+
+	if _, err := updatedMilestonePlan(plan, tools.Request{Args: map[string]string{"ref": "alpha", "status": "completed"}}, domain.Chat{
+		ID:           otherID,
+		WorkflowRole: domain.WorkflowRoleExecution,
+	}); err == nil || !strings.Contains(err.Error(), "owned by chat") {
+		t.Fatalf("expected ownership error, got %v", err)
+	}
+
+	updated, err := updatedMilestonePlan(plan, tools.Request{Args: map[string]string{"ref": "alpha", "status": "completed"}}, domain.Chat{
+		ID:           ownerID,
+		WorkflowRole: domain.WorkflowRoleExecution,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Milestones[0].OwnerChatID != nil {
+		t.Fatalf("expected completed milestone to release owner, got %#v", updated.Milestones[0].OwnerChatID)
+	}
+}
+
+func TestUpdateItemAssignsOwnerForActiveScopedMilestone(t *testing.T) {
+	ownerID := domain.NewID()
+	plan := store.MilestonePlan{
+		Summary: "Ship it",
+		Milestones: []store.Milestone{
+			{Ref: "alpha", Title: "Alpha", Status: domain.MilestoneStatusReady, Position: 0},
+		},
+	}
+
+	updated, err := updatedMilestonePlan(plan, tools.Request{Args: map[string]string{"ref": "alpha", "status": "executing"}}, domain.Chat{
+		ID:           ownerID,
+		WorkflowRole: domain.WorkflowRoleExecution,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Milestones[0].OwnerChatID == nil || *updated.Milestones[0].OwnerChatID != ownerID {
+		t.Fatalf("expected executing milestone to be owned by actor, got %#v", updated.Milestones[0].OwnerChatID)
 	}
 }
 

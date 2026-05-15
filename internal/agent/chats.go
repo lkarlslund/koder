@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	chatpkg "github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/domain"
@@ -159,8 +160,14 @@ func (e *Engine) startWorkflowChat(ctx context.Context, sessionID, parentChatID 
 	if !ok {
 		return tools.ChatStatus{}, fmt.Errorf("milestone %q not found", milestoneRef)
 	}
-	if err := e.updateMilestoneStatus(ctx, sessionID, milestoneRef, roleMilestoneStatus(role)); err != nil {
-		return tools.ChatStatus{}, err
+	if milestone.OwnerChatID != nil {
+		return tools.ChatStatus{}, fmt.Errorf("milestone %q is owned by chat %s", milestoneRef, *milestone.OwnerChatID)
+	}
+	if role == domain.WorkflowRoleDecomposition && milestone.Status != domain.MilestoneStatusPending && milestone.Status != domain.MilestoneStatusReady {
+		return tools.ChatStatus{}, fmt.Errorf("milestone %q is %s, expected pending or ready", milestoneRef, milestone.Status)
+	}
+	if role == domain.WorkflowRoleExecution && milestone.Status != domain.MilestoneStatusReady {
+		return tools.ChatStatus{}, fmt.Errorf("milestone %q is %s, expected ready", milestoneRef, milestone.Status)
 	}
 	parentID := parentChat.ID
 	chatTitle := strings.TrimSpace(title)
@@ -174,6 +181,9 @@ func (e *Engine) startWorkflowChat(ctx context.Context, sessionID, parentChatID 
 	chatRecord.ActiveMilestoneRef = milestone.Ref
 	chatRecord.AssignedTodoBucketRef = milestone.Ref
 	if err := e.store.UpdateChat(ctx, chatRecord); err != nil {
+		return tools.ChatStatus{}, err
+	}
+	if err := e.updateMilestoneStatus(ctx, sessionID, milestoneRef, roleMilestoneStatus(role), chatRecord.ID); err != nil {
 		return tools.ChatStatus{}, err
 	}
 	activeChat, err := e.Chat(ctx, session, chatRecord)
@@ -197,6 +207,7 @@ func (e *Engine) consumeChatUpdates(chatID domain.ID, updates <-chan chatpkg.Upd
 	status := string(chatpkg.StatusWaitingLLM)
 	statusText := "Running"
 	lastError := ""
+	notifiedIdle := false
 	for update := range updates {
 		if update.Status != "" {
 			status = string(update.Status)
@@ -219,6 +230,10 @@ func (e *Engine) consumeChatUpdates(chatID domain.ID, updates <-chan chatpkg.Upd
 			statusText = strings.TrimSpace(update.StatusText)
 		}
 		e.setRunState(chatID, chatRunState{state: state, status: status, statusText: statusText, lastError: lastError})
+		if !update.Active && !notifiedIdle && (state == tools.ChatRunStateCompleted || state == tools.ChatRunStateFailed || state == tools.ChatRunStateWaitingApproval) {
+			notifiedIdle = true
+			e.notifyParentChat(context.Background(), chatID, fmt.Sprintf("Chat %s is %s: %s", chatID, state, strings.TrimSpace(statusText)))
+		}
 	}
 	if state == tools.ChatRunStateRunning {
 		state = tools.ChatRunStateCompleted
@@ -226,12 +241,48 @@ func (e *Engine) consumeChatUpdates(chatID domain.ID, updates <-chan chatpkg.Upd
 		statusText = "Completed"
 	}
 	e.setRunState(chatID, chatRunState{state: state, status: status, statusText: statusText, lastError: lastError})
+	if !notifiedIdle {
+		e.notifyParentChat(context.Background(), chatID, fmt.Sprintf("Chat %s is %s: %s", chatID, state, strings.TrimSpace(statusText)))
+	}
 }
 
 func (e *Engine) setRunState(chatID domain.ID, state chatRunState) {
 	e.chatMu.Lock()
 	defer e.chatMu.Unlock()
 	e.runs[chatID] = state
+}
+
+func (e *Engine) notifyParentChat(ctx context.Context, sourceChatID domain.ID, text string) {
+	source, err := e.store.GetChat(ctx, sourceChatID)
+	if err != nil || source.ParentChatID == nil || strings.TrimSpace(text) == "" {
+		return
+	}
+	e.enqueueSteer(ctx, *source.ParentChatID, text)
+}
+
+func (e *Engine) enqueueSteer(ctx context.Context, chatID domain.ID, text string) {
+	text = strings.TrimSpace(text)
+	if chatID == "" || text == "" {
+		return
+	}
+	e.chatMu.RLock()
+	activeChat := e.chats[chatID]
+	e.chatMu.RUnlock()
+	if activeChat != nil {
+		activeChat.Enqueue(chatpkg.QueueItem{Kind: chatpkg.QueueKindSteer, Text: text})
+		return
+	}
+	chatRecord, err := e.store.GetChat(ctx, chatID)
+	if err != nil {
+		return
+	}
+	chatRecord.QueuedInputs = append(chatRecord.QueuedInputs, domain.QueuedInput{
+		ID:        domain.NewID(),
+		Kind:      domain.QueuedInputKindSteer,
+		Text:      text,
+		CreatedAt: time.Now().UTC(),
+	})
+	_ = e.store.UpdateChat(ctx, chatRecord)
 }
 
 func (e *Engine) bootstrapPrompt(ctx context.Context, sessionID domain.ID, milestone store.Milestone, role domain.WorkflowRole) string {
@@ -254,22 +305,36 @@ func (e *Engine) bootstrapPrompt(ctx context.Context, sessionID domain.ID, miles
 	}
 	switch role {
 	case domain.WorkflowRoleDecomposition:
-		lines = append(lines, "", "Decompose only this milestone into concrete todo items.", "Use milestone and todo tools only for this milestone.", "Do not edit code in this chat.")
+		lines = append(lines, "", "Decompose only this milestone into concrete todo items.", "Use milestone and todo tools only for this milestone.", "When decomposition is complete, set the milestone status to ready and then go idle.", "Do not edit code in this chat.")
 	case domain.WorkflowRoleExecution:
-		lines = append(lines, "", "Execute only this milestone using its todo bucket as the working queue.", "Update todo statuses as you make progress and keep the milestone status accurate.")
+		lines = append(lines, "", "Execute only this milestone using its todo bucket as the working queue.", "Update todo statuses as you make progress and keep the milestone status accurate.", "When finished, set the milestone status to completed or blocked and then go idle.")
 	}
 	return strings.TrimSpace(strings.Join(lines, "\n"))
 }
 
-func (e *Engine) updateMilestoneStatus(ctx context.Context, sessionID domain.ID, ref string, status domain.MilestoneStatus) error {
+func (e *Engine) updateMilestoneStatus(ctx context.Context, sessionID domain.ID, ref string, status domain.MilestoneStatus, ownerChatID domain.ID) error {
 	plan, err := e.store.GetMilestonePlan(ctx, sessionID)
 	if err != nil {
 		return err
 	}
+	found := false
 	for idx := range plan.Milestones {
 		if plan.Milestones[idx].Ref == ref {
+			found = true
+			if plan.Milestones[idx].OwnerChatID != nil && *plan.Milestones[idx].OwnerChatID != ownerChatID {
+				return fmt.Errorf("milestone %q is owned by chat %s", ref, *plan.Milestones[idx].OwnerChatID)
+			}
 			plan.Milestones[idx].Status = status
+			if status == domain.MilestoneStatusDecomposing || status == domain.MilestoneStatusExecuting {
+				owner := ownerChatID
+				plan.Milestones[idx].OwnerChatID = &owner
+			} else {
+				plan.Milestones[idx].OwnerChatID = nil
+			}
 		}
+	}
+	if !found {
+		return fmt.Errorf("milestone %q not found", ref)
 	}
 	_, err = e.store.SetMilestonePlan(ctx, sessionID, plan.Summary, plan.Milestones)
 	return err
@@ -282,7 +347,7 @@ func roleMilestoneStatus(role domain.WorkflowRole) domain.MilestoneStatus {
 	case domain.WorkflowRoleExecution:
 		return domain.MilestoneStatusExecuting
 	default:
-		return domain.MilestoneStatusInProgress
+		return domain.MilestoneStatusPending
 	}
 }
 
