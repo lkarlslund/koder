@@ -17,6 +17,7 @@
     @keyframes chat-status-pulse { 0%, 100% { opacity: .45; transform: scale(.94); } 50% { opacity: 1; transform: scale(1.08); } }
     @keyframes chat-status-fade { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
     .composer { grid-column: 1 / 4; border-top: 1px solid var(--bs-border-color); }
+    .interrupt-button { min-width: 2.75rem; }
     .composer-input { max-height: 20vh; overflow-y: hidden; resize: none; }
     .composer-menu { max-height: 32vh; overflow: auto; }
     .transcript-turn { width: 100%; max-width: none; }

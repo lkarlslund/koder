@@ -654,6 +654,37 @@ func TestRuntimeCancelCancelsStreamingContextImmediately(t *testing.T) {
 	close(runner.events)
 }
 
+func TestRuntimeStopAfterCurrentTurnDoesNotCancelStreamingContext(t *testing.T) {
+	st := openTestStore(t)
+	session, chat, _ := createSessionWithPlan(t, st)
+	runner := &cancelAwareRunner{
+		ctxSeen: make(chan context.Context, 1),
+		events:  make(chan domain.Event),
+	}
+	rt := newTestChat(t, st, session, chat, runner)
+
+	rt.Enqueue(QueueItem{Kind: QueueKindSteer, Text: "stream"})
+
+	var runCtx context.Context
+	select {
+	case runCtx = <-runner.ctxSeen:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for prompt context")
+	}
+
+	rt.StopAfterCurrentTurn()
+
+	select {
+	case <-runCtx.Done():
+		t.Fatal("expected stop-after-current-turn to keep streaming context alive")
+	case <-time.After(100 * time.Millisecond):
+	}
+	if got := rt.Snapshot().StatusText; got != "Stopping after current turn" {
+		t.Fatalf("status text = %q", got)
+	}
+	close(runner.events)
+}
+
 func TestRuntimeCompactionCompletionUpdatesContextImmediately(t *testing.T) {
 	st := openTestStore(t)
 	session, chat, _ := createSessionWithPlan(t, st)

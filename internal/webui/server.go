@@ -328,6 +328,8 @@ func (s *Server) handleRPC(ctx context.Context, method string, params json.RawMe
 		return map[string]bool{"queued": true}, s.controller.Continue(in.Note)
 	case "stop":
 		return map[string]bool{"stopped": true}, s.controller.Stop()
+	case "stop_after_turn":
+		return map[string]bool{"stopping": true}, s.controller.StopAfterCurrentTurn()
 	case "compact":
 		return map[string]bool{"started": true}, s.controller.Compact()
 	case "refresh_workspace":

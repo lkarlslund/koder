@@ -343,6 +343,16 @@ func (c *Controller) Stop() error {
 	return nil
 }
 
+// StopAfterCurrentTurn asks the active chat to stop at the next persisted turn boundary.
+func (c *Controller) StopAfterCurrentTurn() error {
+	rt := c.currentRuntime()
+	if rt == nil {
+		return fmt.Errorf("no active chat")
+	}
+	rt.StopAfterCurrentTurn()
+	return nil
+}
+
 // Shutdown gracefully drains the active runtime and releases subscriptions.
 func (c *Controller) Shutdown(ctx context.Context) error {
 	c.mu.RLock()

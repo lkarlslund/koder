@@ -298,6 +298,18 @@ func (r *Chat) Cancel() {
 	}
 }
 
+func (r *Chat) StopAfterCurrentTurn() {
+	r.mu.Lock()
+	if r.closed || !r.active {
+		r.mu.Unlock()
+		return
+	}
+	r.draining = true
+	r.statusText = "Stopping after current turn"
+	r.mu.Unlock()
+	r.broadcast(r.snapshotUpdateFlags(nil, false, false, true, false, false))
+}
+
 func (r *Chat) Interrupt() {
 	r.Cancel()
 }
@@ -963,6 +975,7 @@ func (r *Chat) handleStreamClosed() {
 	r.cancelState = CancelStateNone
 	r.running = nil
 	draining := r.draining
+	r.draining = false
 	r.mu.Unlock()
 	r.broadcast(r.snapshotUpdateFlags(nil, false, false, true, true, false))
 	if shouldDispatch && !draining {

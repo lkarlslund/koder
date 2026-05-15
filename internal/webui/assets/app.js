@@ -275,7 +275,7 @@
         showSessions: false, sessionLoading: false, sessionState: {active_id: 0, workdir: '', sessions: []}, newSessionTitle: '',
         showProviders: false, providerState: {catalog: [], providers: [], drafts: {}}, providerDraft: null, providerHeadersText: '{}', providerStatus: '', providerStatusKind: 'secondary', providerTesting: false, providerSaving: false,
         completion: {kind: '', query: '', start: 0, end: 0, items: [], selected: 0}, completionSeq: 0,
-        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, restoreChatAttempted: false, transcriptStickToBottom: true, scrollRestoreSeq: 0, expandedMilestones: {}, error: '', toast: '', toastTimer: null,
+        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, restoreChatAttempted: false, transcriptStickToBottom: true, scrollRestoreSeq: 0, expandedMilestones: {}, interruptArmedChatID: '', error: '', toast: '', toastTimer: null,
         init() {
           this.clampSidebarRatio();
           this.applyTheme();
@@ -451,6 +451,7 @@
           this.state = {...this.state, ...delta};
           this.applyTheme();
           this.error = this.state.error || '';
+          this.syncInterruptArmed();
           this.afterTranscriptDOMUpdate(() => {
             if (seq === this.scrollRestoreSeq) this.restoreTranscriptScroll(scroll);
           });
@@ -483,6 +484,7 @@
             this.state.Snapshot = next;
           }
           if (delta.error) this.error = delta.error;
+          this.syncInterruptArmed();
           this.afterTranscriptDOMUpdate(() => {
             if (seq === this.scrollRestoreSeq) this.restoreTranscriptScroll(scroll);
           });
@@ -535,6 +537,7 @@
             this.state.snapshot = snapshot;
             this.state.Snapshot = snapshot;
           }
+          this.syncInterruptArmed();
         },
         rpc(method, params) {
           return this.rpcOn(this.ws, method, params).catch(err => { this.error = err.message; this.showToast(err.message); throw err; });
@@ -603,6 +606,7 @@
           const scroll = this.transcriptScrollState();
           const seq = ++this.scrollRestoreSeq;
           this.state = s || {}; this.applyTheme(); this.error = this.state.error || '';
+          this.syncInterruptArmed();
           if (!this.restoreSelectedChat()) this.writeSelectedChat();
           this.afterTranscriptDOMUpdate(() => {
             if (seq === this.scrollRestoreSeq) this.restoreTranscriptScroll(scroll, options);
@@ -632,6 +636,35 @@
         pendingText() { const snapshot = this.activeSnapshot(); const p = snapshot.PendingAssistant || snapshot.pending_assistant || {}; return [p.Reasoning || p.reasoning, p.Text || p.text].filter(Boolean).join('\n'); },
         markdownHTML(text) { return renderMarkdown(text); },
         statusText() { const snapshot = this.activeSnapshot(); return snapshot.StatusText || snapshot.status_text || snapshot.Status || 'idle'; },
+        chatInterruptible() {
+          const snapshot = this.activeSnapshot();
+          return !!(snapshot.Active || snapshot.active);
+        },
+        interruptArmed() {
+          return this.interruptArmedChatID && this.interruptArmedChatID === String(this.activeChatID() || '');
+        },
+        interruptButtonTitle() {
+          return this.interruptArmed() ? 'Interrupt immediately' : 'Stop after current turn';
+        },
+        syncInterruptArmed() {
+          if (!this.interruptArmedChatID) return;
+          if (!this.chatInterruptible() || this.interruptArmedChatID !== String(this.activeChatID() || '')) {
+            this.interruptArmedChatID = '';
+          }
+        },
+        interruptChat() {
+          const id = String(this.activeChatID() || '');
+          if (!id || !this.chatInterruptible()) return;
+          if (this.interruptArmed()) {
+            this.interruptArmedChatID = '';
+            this.rpc('stop', {}).catch(() => {});
+            return;
+          }
+          this.interruptArmedChatID = id;
+          this.rpc('stop_after_turn', {}).catch(() => {
+            if (this.interruptArmedChatID === id) this.interruptArmedChatID = '';
+          });
+        },
         activeProvider() { return this.state.session?.provider_id || this.state.session?.ProviderID || ''; },
         activeModel() { return this.state.session?.model_id || this.state.session?.ModelID || ''; },
         milestones() { return this.state.milestones || this.state.Milestones || {}; },

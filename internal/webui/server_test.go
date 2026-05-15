@@ -354,6 +354,12 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `@keydown="onComposerKeydown($event)"`) || !strings.Contains(fullPage, `if (ev.key === 'Enter' && !ev.shiftKey)`) {
 		t.Fatalf("expected plain enter to submit composer")
 	}
+	if !strings.Contains(fullPage, `class="btn btn-danger interrupt-button"`) || !strings.Contains(fullPage, `x-show="chatInterruptible()"`) || !strings.Contains(fullPage, `rpc('stop_after_turn', {})`) || !strings.Contains(fullPage, `rpc('stop', {})`) {
+		t.Fatalf("expected composer interrupt button with staged then immediate stop behavior")
+	}
+	if strings.Contains(fullPage, `btn btn-sm btn-outline-danger" @click="rpc('stop', {})"`) {
+		t.Fatalf("expected interrupt control to be removed from the topbar")
+	}
 	if strings.Contains(fullPage, assetHashPlaceholder) {
 		t.Fatalf("expected served index to contain the rendered asset hash")
 	}

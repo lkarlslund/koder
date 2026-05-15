@@ -32,7 +32,6 @@
           <option value="dark">dark</option>
           <option value="light">light</option>
         </select>
-        <button class="btn btn-sm btn-outline-danger" @click="rpc('stop', {})"><i class="bi bi-stop-fill"></i></button>
       </div>
     </nav>
 
@@ -248,6 +247,9 @@
         </template>
       </div>
       <div class="input-group">
+        <button class="btn btn-danger interrupt-button" type="button" x-show="chatInterruptible()" :title="interruptButtonTitle()" @click="interruptChat()" style="display: none;">
+          <i class="bi" :class="interruptArmed() ? 'bi-x-octagon-fill' : 'bi-stop-fill'"></i>
+        </button>
         <textarea class="form-control composer-input" rows="1" x-ref="composerInput" x-model="draft" placeholder="Ask koder or type / for commands" @input="onComposerInput()" @click="updateCompletions()" @keyup="onComposerKeyup($event)" @keydown="onComposerKeydown($event)"></textarea>
         <button class="btn btn-primary" type="submit"><i class="bi bi-send-fill"></i></button>
       </div>
