@@ -98,25 +98,29 @@
     <div class="sidebar-resizer" :class="{'resizing': resizingSidebar}" role="separator" aria-orientation="vertical" aria-label="Resize sidebar" @pointerdown="startSidebarResize($event)"></div>
 
     <aside class="sidebar p-3 bg-body-tertiary">
-      <div class="mb-3">
-        <div class="small text-secondary">Model</div>
-        <button type="button" class="btn btn-link model-trigger p-0 text-start" @click="openModelDialog()">
-          <i class="bi bi-cpu me-1 text-secondary"></i><span x-text="activeProvider()"></span> / <span x-text="activeModel()"></span>
-        </button>
+      <div class="sidebar-section">
+        <div class="sidebar-info-row">
+          <span class="sidebar-label">Model</span>
+          <button type="button" class="btn btn-link model-trigger p-0 text-start text-truncate" @click="openModelDialog()">
+            <i class="bi bi-cpu me-1 text-secondary"></i><span x-text="activeProvider()"></span> / <span x-text="activeModel()"></span>
+          </button>
+        </div>
       </div>
-      <div class="mb-3">
-        <div class="small text-secondary">Status</div>
-        <div x-text="statusText()"></div>
+      <div class="sidebar-section">
+        <div class="sidebar-info-row">
+          <span class="sidebar-label">Status</span>
+          <span class="sidebar-value text-truncate" x-text="statusText()"></span>
+        </div>
       </div>
-      <div class="mb-3">
-        <div class="small text-secondary">Milestones</div>
+      <div class="sidebar-section">
+        <div class="sidebar-heading">Milestones</div>
         <template x-if="milestoneSummary()">
-          <div class="small text-body-secondary mb-2" x-text="milestoneSummary()"></div>
+          <div class="sidebar-note" x-text="milestoneSummary()"></div>
         </template>
         <template x-if="milestoneItems().length === 0">
           <div class="text-secondary">None</div>
         </template>
-        <div class="planning-tree mt-2" x-show="milestoneItems().length > 0">
+        <div class="planning-tree" x-show="milestoneItems().length > 0">
           <template x-for="milestone in milestoneItems()" :key="milestoneRef(milestone)">
             <div class="planning-node">
               <button type="button" class="planning-row" :title="milestoneNotes(milestone)" @click="toggleMilestone(milestoneRef(milestone))">
@@ -143,13 +147,13 @@
           </template>
         </div>
       </div>
-      <div class="mb-3">
-        <div class="d-flex align-items-center justify-content-between">
-          <div class="small text-secondary">Permissions</div>
+      <div class="sidebar-section">
+        <div class="sidebar-info-row">
+          <span class="sidebar-label">Permissions</span>
+          <span class="sidebar-value text-truncate" x-text="permissionLabel(activePermission())"></span>
           <button class="btn btn-sm btn-outline-secondary" @click="showPermissions = !showPermissions; reportClientStateSoon()"><i class="bi bi-shield-lock"></i></button>
         </div>
-        <div class="mt-1" x-text="permissionLabel(activePermission())"></div>
-        <div class="list-group list-group-flush mt-2" x-show="showPermissions">
+        <div class="list-group list-group-flush sidebar-list" x-show="showPermissions">
           <template x-for="profile in permissionProfiles()" :key="profile.Name || profile.name">
             <button class="list-group-item list-group-item-action" :class="{'active': permissionName(profile) === activePermission()}" @click="setPermission(permissionName(profile))">
               <div class="fw-semibold" x-text="profile.Label || profile.label || profile.Name || profile.name"></div>
@@ -158,12 +162,12 @@
           </template>
         </div>
       </div>
-      <div class="mb-3">
-        <div class="d-flex align-items-center justify-content-between">
-          <div class="small text-secondary">Chats</div>
+      <div class="sidebar-section">
+        <div class="sidebar-info-row">
+          <span class="sidebar-heading">Chats</span>
           <button class="btn btn-sm btn-outline-primary" @click="newChat()"><i class="bi bi-plus-lg"></i></button>
         </div>
-        <div class="list-group list-group-flush mt-2">
+        <div class="list-group list-group-flush sidebar-list">
           <template x-for="chat in state.chats || []" :key="chat.ID || chat.id">
             <div class="list-group-item list-group-item-action d-flex align-items-center gap-2" :class="{'active': chatID(chat) === state.active_chat_id}" @click="switchChat(chatID(chat))">
               <button type="button" class="btn btn-sm p-0 border-0 bg-transparent flex-grow-1 text-start" :class="{'text-white': chatID(chat) === state.active_chat_id}" @click.stop="switchChat(chatID(chat))">
@@ -180,10 +184,10 @@
           </template>
         </div>
       </div>
-      <div class="mb-3">
-        <div class="small text-secondary">Approvals</div>
+      <div class="sidebar-section">
+        <div class="sidebar-heading">Approvals</div>
         <template x-for="approval in approvals()" :key="approval.ToolCallID || approval.tool_call_id">
-          <div class="border rounded p-2 my-2">
+          <div class="border rounded p-2 sidebar-card">
             <div class="small fw-semibold" x-text="approval.Tool || approval.tool"></div>
             <div class="small text-secondary" x-text="approval.Command || approval.command"></div>
             <div class="btn-group btn-group-sm mt-2">
@@ -193,19 +197,24 @@
           </div>
         </template>
       </div>
-      <div class="small text-secondary">Workspace</div>
-      <div class="text-break" x-text="state.workdir"></div>
-      <div class="mt-3">
-        <div class="d-flex align-items-center justify-content-between">
-          <div class="small text-secondary">Git</div>
+      <div class="sidebar-section">
+        <div class="sidebar-info-row">
+          <span class="sidebar-label">Workspace</span>
+          <span class="sidebar-value text-truncate" :title="state.workdir" x-text="state.workdir"></span>
+        </div>
+      </div>
+      <div class="sidebar-section">
+        <div class="sidebar-info-row">
+          <span class="sidebar-heading">Git</span>
           <button class="btn btn-sm btn-outline-secondary" title="Refresh git status" @click="refreshWorkspace()"><i class="bi bi-arrow-clockwise"></i></button>
         </div>
         <template x-if="!gitStatus().available">
-          <div class="text-secondary mt-1">No git repository</div>
+          <div class="text-secondary">No git repository</div>
         </template>
         <template x-if="gitStatus().available">
-          <div class="mt-1">
-            <div class="d-flex align-items-center gap-2 flex-wrap">
+          <div class="sidebar-compact-block">
+            <div class="sidebar-info-row">
+              <span class="sidebar-label">Branch</span>
               <span class="fw-semibold" x-text="gitStatus().branch || '-'"></span>
               <span class="small text-secondary" x-show="gitStatus().upstream" x-text="gitStatus().upstream"></span>
               <span class="badge text-bg-secondary" x-show="gitStatus().summary" x-text="gitStatus().summary"></span>
@@ -216,7 +225,7 @@
               <span class="diff-del ms-2" x-text="'-' + (gitStatus().deleted || 0)"></span>
               <span class="text-info ms-2" x-text="'?' + (gitStatus().untracked || 0)"></span>
             </div>
-            <div class="list-group list-group-flush mt-2" x-show="gitFiles().length > 0">
+            <div class="list-group list-group-flush sidebar-list" x-show="gitFiles().length > 0">
               <template x-for="file in gitFiles()" :key="file.path || file.Path">
                 <div class="list-group-item bg-transparent px-0 py-1 git-file" :class="gitFileClass(file)">
                   <div class="d-flex align-items-start justify-content-between gap-2">

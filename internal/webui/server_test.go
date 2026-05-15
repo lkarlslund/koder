@@ -602,6 +602,9 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `set_model`) {
 		t.Fatalf("expected model dialog to set model")
 	}
+	if !strings.Contains(fullPage, `class="sidebar-info-row"`) || !strings.Contains(fullPage, `class="sidebar-label">Model`) || !strings.Contains(fullPage, `class="sidebar-value text-truncate" x-text="statusText()"`) {
+		t.Fatalf("expected sidebar facts to render as compact single-line label/value rows")
+	}
 	if !strings.Contains(fullPage, `milestoneItems()`) {
 		t.Fatalf("expected sidebar to render milestones")
 	}
@@ -610,6 +613,9 @@ func TestIndexServesHTML(t *testing.T) {
 	}
 	if !strings.Contains(fullPage, `milestoneTodoSummary(milestone)`) {
 		t.Fatalf("expected collapsed milestones to show todo counts")
+	}
+	if !strings.Contains(fullPage, `.planning-tree { display: grid; gap: .05rem;`) || !strings.Contains(fullPage, `.planning-row { width: 100%; display: grid;`) || !strings.Contains(fullPage, `padding: .12rem 0`) {
+		t.Fatalf("expected compact milestone spacing in sidebar")
 	}
 	if !strings.Contains(fullPage, `gitStatus()`) {
 		t.Fatalf("expected sidebar to render git status")
