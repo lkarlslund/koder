@@ -51,7 +51,7 @@
             <div class="turn assistant-turn">
               <template x-if="item.content?.reasoning?.text">
                 <details class="reasoning mb-2">
-                  <summary>thinking</summary>
+                  <summary x-text="thinkingLabel(item.content.reasoning)"></summary>
                   <pre x-text="item.content.reasoning.text"></pre>
                 </details>
               </template>

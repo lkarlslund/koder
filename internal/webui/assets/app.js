@@ -643,6 +643,16 @@
         timeline() { const snapshot = this.activeSnapshot(); return snapshot.Timeline || snapshot.timeline || []; },
         approvals() { const snapshot = this.activeSnapshot(); return snapshot.Approvals || snapshot.approvals || []; },
         pendingText() { const snapshot = this.activeSnapshot(); const p = snapshot.PendingAssistant || snapshot.pending_assistant || {}; return [p.Reasoning || p.reasoning, p.Text || p.text].filter(Boolean).join('\n'); },
+        thinkingLabel(reasoning) {
+          const explicit = Number(reasoning?.tokens || reasoning?.Tokens || reasoning?.token_count || reasoning?.TokenCount || 0);
+          const tokens = explicit > 0 ? explicit : this.estimateTextTokens(reasoning?.text || reasoning?.Text || '');
+          return 'thinking (' + tokens + ' tokens)';
+        },
+        estimateTextTokens(text) {
+          const source = String(text || '').trim();
+          if (!source) return 0;
+          return Math.max(1, Math.ceil(source.length / 4));
+        },
         markdownHTML(text) { return renderMarkdown(text); },
         statusText() { const snapshot = this.activeSnapshot(); return snapshot.StatusText || snapshot.status_text || snapshot.Status || 'idle'; },
         chatInterruptible() {

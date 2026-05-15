@@ -656,6 +656,9 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `chatContextLabel(chat)`) || !strings.Contains(fullPage, `context_window`) || !strings.Contains(fullPage, `'% ctx)'`) {
 		t.Fatalf("expected chat sidebar to render context percentage")
 	}
+	if !strings.Contains(fullPage, `thinkingLabel(item.content.reasoning)`) || !strings.Contains(fullPage, `estimateTextTokens(text)`) || !strings.Contains(fullPage, `'thinking (' + tokens + ' tokens)'`) {
+		t.Fatalf("expected reasoning summary to render live token count")
+	}
 	if !strings.Contains(fullPage, `toolApprovalPending(tool)`) || !strings.Contains(fullPage, `rpc('approve', {tool_call_id: toolCallID(tool)})`) || !strings.Contains(fullPage, `rpc('deny', {tool_call_id: toolCallID(tool)})`) {
 		t.Fatalf("expected pending tool approval cards to expose approve and deny actions inline")
 	}
