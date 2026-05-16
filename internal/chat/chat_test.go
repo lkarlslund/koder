@@ -2,13 +2,15 @@ package chat
 
 import (
 	"context"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
 	"github.com/lkarlslund/koder/internal/attachment"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/reference"
 	"github.com/lkarlslund/koder/internal/store"
-	"sync"
-	"testing"
-	"time"
 )
 
 type runtimeFakeRunner struct {
@@ -412,6 +414,46 @@ func TestLoadResumesPendingToolCalls(t *testing.T) {
 			}
 		case <-time.After(2 * time.Second):
 			t.Fatal("timed out waiting for resumed tool event")
+		}
+	}
+}
+
+func TestRuntimeToolStartStatusUsesToolNameNotPreviewArgs(t *testing.T) {
+	st := openTestStore(t)
+	session, chatRecord, _ := createSessionWithPlan(t, st)
+	events := make(chan domain.Event)
+	runner := &runtimeFakeRunner{events: []<-chan domain.Event{events}}
+	rt := newTestChat(t, st, session, chatRecord, runner)
+	updates, unsub := rt.Subscribe()
+	defer unsub()
+
+	rt.Enqueue(QueueItem{Kind: QueueKindQueued, Text: "run it"})
+	events <- domain.Event{
+		Kind:       domain.EventKindToolStart,
+		Tool:       domain.ToolKindExecCommand,
+		ToolCallID: "call_exec",
+		Text:       "go test ./...",
+	}
+	close(events)
+
+	for {
+		select {
+		case update := <-updates:
+			if update.Event == nil || update.Event.Kind != domain.EventKindToolStart {
+				continue
+			}
+			if update.Status != StatusRunningTools {
+				t.Fatalf("expected running tools status, got %s", update.Status)
+			}
+			if update.StatusText != "Running exec_command" {
+				t.Fatalf("expected tool-name status text, got %q", update.StatusText)
+			}
+			if strings.Contains(update.StatusText, "go test") {
+				t.Fatalf("status text leaked preview args: %q", update.StatusText)
+			}
+			return
+		case <-time.After(2 * time.Second):
+			t.Fatal("timed out waiting for tool start update")
 		}
 	}
 }

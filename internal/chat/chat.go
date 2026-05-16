@@ -882,10 +882,7 @@ func (r *Chat) handleStreamEvent(evt domain.Event) {
 			r.running[evt.ToolCallID] = struct{}{}
 		}
 		r.status = StatusRunningTools
-		r.statusText = strings.TrimSpace(evt.Text)
-		if r.statusText == "" {
-			r.statusText = "Running tool"
-		}
+		r.statusText = runningToolStatusText(evt.Tool)
 	case domain.EventKindToolResult:
 		if strings.TrimSpace(evt.ToolCallID) != "" {
 			delete(r.running, evt.ToolCallID)
@@ -1145,6 +1142,14 @@ func (r *Chat) snapshotStatusText() string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.statusText
+}
+
+func runningToolStatusText(tool domain.ToolKind) string {
+	toolName := strings.TrimSpace(string(tool))
+	if toolName == "" {
+		return "Running tool"
+	}
+	return "Running " + toolName
 }
 
 func (r *Chat) snapshotQueue() []domain.QueuedInput {
