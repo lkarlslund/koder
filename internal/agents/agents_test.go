@@ -27,6 +27,7 @@ func TestFindProjectRootPrefersNearestMarker(t *testing.T) {
 
 func TestFindProjectRootFallsBackToCWD(t *testing.T) {
 	cwd := t.TempDir()
+	t.Setenv("HOME", cwd)
 	if got := FindProjectRoot(cwd); got != cwd {
 		t.Fatalf("expected cwd fallback, got %q", got)
 	}
