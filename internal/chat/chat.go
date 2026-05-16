@@ -1132,18 +1132,6 @@ func (r *Chat) markPersistError(err error) error {
 	return err
 }
 
-func (r *Chat) snapshotStatus() Status {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	return r.status
-}
-
-func (r *Chat) snapshotStatusText() string {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	return r.statusText
-}
-
 func runningToolStatusText(tool domain.ToolKind) string {
 	toolName := strings.TrimSpace(string(tool))
 	if toolName == "" {
@@ -1156,12 +1144,6 @@ func (r *Chat) snapshotQueue() []domain.QueuedInput {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return cloneQueuedInputs(r.queue)
-}
-
-func (r *Chat) snapshotActive() bool {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	return r.active
 }
 
 func (r *Chat) broadcast(update Update) {
@@ -1206,14 +1188,10 @@ func (r *Chat) appendOptimisticUserMessage(item domain.QueuedInput, session doma
 	summary := strings.TrimSpace(item.Text)
 	user := domain.UserMessage{Text: summary}
 	for _, draft := range item.Attachments {
-		user.Attachments = append(user.Attachments, domain.Attachment{
-			ID: draft.ID, Name: draft.Name, MIME: draft.MIME, Path: draft.Path, Size: draft.Size, Source: draft.Source, Original: draft.Original,
-		})
+		user.Attachments = append(user.Attachments, domain.Attachment(draft))
 	}
 	for _, ref := range item.References {
-		user.References = append(user.References, domain.Reference{
-			Kind: ref.Kind, Path: ref.Path, Display: ref.Display, Start: ref.Start, End: ref.End,
-		})
+		user.References = append(user.References, domain.Reference(ref))
 	}
 	r.mu.Lock()
 	timelineItem := domain.TimelineItem{

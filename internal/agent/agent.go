@@ -3797,22 +3797,6 @@ func (e *Engine) requestForToolCall(ctx context.Context, chatID domain.ID, toolC
 	return tools.Request{}, fmt.Errorf("tool call %q not found", toolCallID)
 }
 
-func (e *Engine) toolCallIDForSyntheticApproval(ctx context.Context, chatID, approvalID domain.ID) (string, error) {
-	if chatID == "" {
-		return "", fmt.Errorf("chat id is required")
-	}
-	approvals, err := e.store.PendingApprovalsForChat(ctx, chatID)
-	if err != nil {
-		return "", err
-	}
-	for _, approval := range approvals {
-		if approval.ID == approvalID && strings.TrimSpace(approval.ToolCallID) != "" {
-			return approval.ToolCallID, nil
-		}
-	}
-	return "", fmt.Errorf("approval %s not found", approvalID)
-}
-
 func (e *Engine) syntheticApprovalRequest(ctx context.Context, sessionID, chatID, approvalID domain.ID) (domain.Session, domain.Chat, tools.Request, error) {
 	var chats []domain.Chat
 	if chatID != "" {

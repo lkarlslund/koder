@@ -1053,10 +1053,3 @@ func looksLikeBadStop(msg analyzedTranscriptMessage) bool {
 func compactText(value string) string {
 	return strings.Join(strings.Fields(strings.TrimSpace(value)), " ")
 }
-
-func firstLine(value string) string {
-	if idx := strings.IndexByte(value, '\n'); idx >= 0 {
-		return strings.TrimSpace(value[:idx])
-	}
-	return strings.TrimSpace(value)
-}

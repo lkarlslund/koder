@@ -211,15 +211,6 @@ func ValidateMilestoneProgress(items []store.Milestone) error {
 	return nil
 }
 
-func milestoneStatusCountsAsActive(status domain.MilestoneStatus) bool {
-	switch status {
-	case domain.MilestoneStatusDecomposing, domain.MilestoneStatusExecuting:
-		return true
-	default:
-		return false
-	}
-}
-
 func RequireSessionStore(runtime Runtime) (*store.Store, error) {
 	if runtime.Store == nil || runtime.SessionID == "" {
 		return nil, errors.New("planning tools require a persisted session")

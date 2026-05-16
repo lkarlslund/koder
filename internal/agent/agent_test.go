@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"hash/fnv"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -254,15 +253,6 @@ func testTranscriptItem(sessionID domain.ID, item domain.TimelineItem) (domain.M
 		addPart(&parts, domain.PartKindCompaction, domain.CompactionPayload{Summary: content.Summary, Status: content.Status, BeforeContextTokens: content.BeforeContextTokens, AfterContextTokens: content.AfterContextTokens}, 1)
 	}
 	return msg, parts
-}
-
-func testTimelineRenderID(id string) int64 {
-	if id == "" {
-		return 0
-	}
-	h := fnv.New64a()
-	_, _ = h.Write([]byte(id))
-	return int64(h.Sum64() & 0x7fffffffffffffff)
 }
 
 func timelineNoticesForChat(t *testing.T, st *store.Store, chatID domain.ID) []domain.Notice {
@@ -2608,15 +2598,6 @@ func TestRunPromptApprovalAskMarksToolAwaitingApproval(t *testing.T) {
 	}
 }
 
-func firstPartText(parts []domain.Part, kind domain.PartKind) string {
-	for _, part := range parts {
-		if part.Kind == kind {
-			return part.Text()
-		}
-	}
-	return ""
-}
-
 func TestRunPromptStreamsToolCallArgumentsAcrossChunks(t *testing.T) {
 	t.Parallel()
 
@@ -2920,6 +2901,9 @@ func TestApproveContinuesAfterOutsideWorkspaceRead(t *testing.T) {
 	defer st.Close()
 
 	workdir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(workdir, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	engine := New(cfg, st, tools.NewRegistry(workdir), nil, workdir)
 	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
 	if err != nil {
@@ -3121,6 +3105,9 @@ func TestApproveContinuesAfterApprovedToolFailure(t *testing.T) {
 	defer st.Close()
 
 	workdir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(workdir, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	engine := New(cfg, st, tools.NewRegistry(workdir), nil, workdir)
 	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
 	if err != nil {

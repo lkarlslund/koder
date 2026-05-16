@@ -1665,30 +1665,6 @@ func (c *Controller) refreshChatStatuses(ctx context.Context, sessionID domain.I
 	return true
 }
 
-func (c *Controller) cachedChatStatuses(ctx context.Context, sessionID domain.ID) map[domain.ID]ChatSidebarStatus {
-	c.mu.RLock()
-	cached := make(map[domain.ID]ChatSidebarStatus, len(c.chats))
-	for _, item := range c.chats {
-		status, ok := c.statuses[item.ID]
-		if !ok {
-			status = idleChatSidebarStatus(item.ID)
-		}
-		cached[item.ID] = status
-	}
-	c.mu.RUnlock()
-	if len(cached) > 0 || c.store == nil || sessionID == "" {
-		return cached
-	}
-	chats, err := c.store.ListChats(ctx, sessionID)
-	if err != nil {
-		return cached
-	}
-	for _, item := range chats {
-		cached[item.ID] = idleChatSidebarStatus(item.ID)
-	}
-	return cached
-}
-
 func (c *Controller) chatStatusesLocked() []ChatSidebarStatus {
 	out := make([]ChatSidebarStatus, 0, len(c.chats))
 	for _, item := range c.chats {
@@ -2047,17 +2023,6 @@ func (c *Controller) modelInfoLocked() ModelInfo {
 	info.CapabilitiesKnown = enriched.CapabilitiesKnown
 	info.CapabilitySource = strings.TrimSpace(enriched.CapabilitySource)
 	return info
-}
-
-func (c *Controller) publishTo(ch chan Event, typ string, payload any) {
-	c.subMu.Lock()
-	c.nextSeq++
-	evt := Event{Seq: c.nextSeq, Type: typ, Payload: payload}
-	c.subMu.Unlock()
-	select {
-	case ch <- evt:
-	default:
-	}
 }
 
 func (c *Controller) broadcast(typ string, payload any) {

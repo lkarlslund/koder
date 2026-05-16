@@ -579,7 +579,7 @@ func TestControllerRefreshWorkspacePublishesGitStatus(t *testing.T) {
 
 	events, unsub := ctrl.Subscribe()
 	defer unsub()
-	_ = <-events
+	<-events
 	if err := os.WriteFile(filepath.Join(workdir, "tracked.txt"), []byte("one\ntwo\nthree\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
