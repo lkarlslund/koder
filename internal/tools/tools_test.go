@@ -317,21 +317,23 @@ func TestReadTextFileUsesColonLinePrefix(t *testing.T) {
 	}
 }
 
-func TestParseReadStoredLinesAcceptsColonAndLegacyFormats(t *testing.T) {
-	lines, footer := tools.ParseReadStoredLines("1: alpha\n2: beta")
+func TestParseReadStoredLinesAcceptsTabDelimitedLines(t *testing.T) {
+	lines, footer := tools.ParseReadStoredLines("     1\talpha\n     2\tbeta")
 	if footer != "" {
 		t.Fatalf("expected empty footer, got %q", footer)
 	}
 	if len(lines) != 2 || lines[0].Number != 1 || lines[0].Text != "alpha" || lines[1].Number != 2 || lines[1].Text != "beta" {
-		t.Fatalf("unexpected colon parsed lines: %#v", lines)
+		t.Fatalf("unexpected parsed lines: %#v", lines)
 	}
+}
 
-	lines, footer = tools.ParseReadStoredLines("     1\talpha\n     2\tbeta")
-	if footer != "" {
-		t.Fatalf("expected empty legacy footer, got %q", footer)
+func TestParseReadStoredLinesTreatsColonLinesAsFooter(t *testing.T) {
+	lines, footer := tools.ParseReadStoredLines("1: alpha\n2: beta")
+	if len(lines) != 0 {
+		t.Fatalf("expected no parsed lines, got %#v", lines)
 	}
-	if len(lines) != 2 || lines[0].Number != 1 || lines[0].Text != "alpha" || lines[1].Number != 2 || lines[1].Text != "beta" {
-		t.Fatalf("unexpected legacy parsed lines: %#v", lines)
+	if footer != "1: alpha\n2: beta" {
+		t.Fatalf("expected colon lines in footer, got %q", footer)
 	}
 }
 

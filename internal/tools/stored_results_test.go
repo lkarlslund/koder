@@ -95,6 +95,16 @@ func TestDisplayTextForPartStripsRedundantToolFailurePrefix(t *testing.T) {
 	}
 }
 
+func TestDisplayTextForPartIgnoresLegacyMetaJSON(t *testing.T) {
+	_, ok := tools.DisplayTextForPart(domain.Part{
+		Kind:     domain.PartKindToolOutput,
+		MetaJSON: `{"_stored_result":"{\"version\":1}"}`,
+	})
+	if ok {
+		t.Fatal("expected legacy MetaJSON stored result to be ignored")
+	}
+}
+
 func toolOutputPart(tool domain.ToolKind, status tools.StoredResultStatus, text string, result any) domain.Part {
 	return domain.Part{
 		Kind: domain.PartKindToolOutput,

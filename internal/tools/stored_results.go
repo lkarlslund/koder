@@ -9,8 +9,6 @@ import (
 	"github.com/lkarlslund/koder/internal/domain"
 )
 
-const storedResultMetaKey = "_stored_result"
-
 type StoredResultStatus string
 
 const (
@@ -298,36 +296,6 @@ func (MCPStoredResult) storedResultPayload()           {}
 func (DeniedStoredResult) storedResultPayload()        {}
 func (ErrorStoredResult) storedResultPayload()         {}
 
-func MetaWithStoredResult(meta map[string]string, partKind domain.PartKind, tool domain.ToolKind, status StoredResultStatus, payload StoredResultPayload) map[string]string {
-	if payload == nil {
-		return meta
-	}
-	body, err := marshalStoredResult(partKind, tool, status, payload)
-	if err != nil {
-		return meta
-	}
-	if meta == nil {
-		meta = map[string]string{}
-	}
-	meta[storedResultMetaKey] = body
-	return meta
-}
-
-func BuildStoredMeta(meta map[string]string, partKind domain.PartKind, tool domain.ToolKind, status StoredResultStatus, payload StoredResultPayload) (map[string]string, error) {
-	if payload == nil {
-		return meta, nil
-	}
-	body, err := marshalStoredResult(partKind, tool, status, payload)
-	if err != nil {
-		return nil, err
-	}
-	if meta == nil {
-		meta = map[string]string{}
-	}
-	meta[storedResultMetaKey] = body
-	return meta, nil
-}
-
 func ModelTextForPart(part domain.Part, diff string) (string, bool) {
 	env, ok := storedResultFromPart(part)
 	if !ok {
@@ -430,7 +398,7 @@ func marshalStoredResult(partKind domain.PartKind, tool domain.ToolKind, status 
 		return "", err
 	}
 	rawEnvelope, err := json.Marshal(storedResultEnvelope{
-		Version:  1,
+		Version:  2,
 		PartKind: partKind,
 		Tool:     tool,
 		Status:   status,
@@ -485,21 +453,6 @@ func storedResultFromPart(part domain.Part) (storedResultEnvelope, bool) {
 			Payload:  raw,
 		}, true
 	default:
-		if strings.TrimSpace(part.MetaJSON) != "" {
-			meta, err := decodeStringMap([]byte(part.MetaJSON))
-			if err != nil {
-				return storedResultEnvelope{}, false
-			}
-			raw := strings.TrimSpace(meta[storedResultMetaKey])
-			if raw == "" {
-				return storedResultEnvelope{}, false
-			}
-			var env storedResultEnvelope
-			if err := json.Unmarshal([]byte(raw), &env); err != nil {
-				return storedResultEnvelope{}, false
-			}
-			return env, true
-		}
 		return storedResultEnvelope{}, false
 	}
 }
@@ -922,13 +875,5 @@ func parseReadStoredLine(raw string) (int, string, bool) {
 			return number, textPart, true
 		}
 	}
-	numberPart, textPart, ok := strings.Cut(raw, ":")
-	if !ok {
-		return 0, "", false
-	}
-	number, err := strconv.Atoi(strings.TrimSpace(numberPart))
-	if err != nil {
-		return 0, "", false
-	}
-	return number, strings.TrimPrefix(textPart, " "), true
+	return 0, "", false
 }
