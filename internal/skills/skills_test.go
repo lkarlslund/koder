@@ -20,16 +20,20 @@ func TestDiscoverPrefersNearestProjectSkill(t *testing.T) {
 	writeSkill(t, filepath.Join(repo, "pkg", ".agents", "skills", "dup", fileName), "dup", "nearest")
 	writeSkill(t, filepath.Join(home, ".agents", "skills", "dup", fileName), "dup", "user")
 	writeSkill(t, filepath.Join(home, ".agents", "skills", "global-only", fileName), "global-only", "global")
+	writeSkill(t, filepath.Join(home, ".koder", "skills", "managed-only", fileName), "managed-only", "managed")
 
 	items := Discover(cwd)
-	if len(items) != 2 {
-		t.Fatalf("expected 2 skills, got %d: %s", len(items), DebugString(items))
+	if len(items) != 3 {
+		t.Fatalf("expected 3 skills, got %d: %s", len(items), DebugString(items))
 	}
 	if items[0].Name != "dup" || !strings.Contains(items[0].Path, filepath.Join("pkg", ".agents", "skills", "dup", fileName)) {
 		t.Fatalf("expected nearest project dup skill first, got %#v", items[0])
 	}
 	if items[1].Name != "global-only" || items[1].Scope != ScopeUser {
 		t.Fatalf("expected user-global skill second, got %#v", items[1])
+	}
+	if items[2].Name != "managed-only" || items[2].Scope != ScopeUser {
+		t.Fatalf("expected managed user skill third, got %#v", items[2])
 	}
 }
 

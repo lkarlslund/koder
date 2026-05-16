@@ -18,6 +18,7 @@ import (
 
 	"github.com/lkarlslund/koder/internal/agent"
 	"github.com/lkarlslund/koder/internal/agents"
+	"github.com/lkarlslund/koder/internal/assets"
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/debugsrv"
 	"github.com/lkarlslund/koder/internal/domain"
@@ -123,6 +124,9 @@ func runKoder(ctx context.Context, mode uicore.StartupMode, workdir string, star
 	if err != nil {
 		return err
 	}
+	if err := syncManagedUserAssets(ctx); err != nil {
+		return err
+	}
 	st, err := store.OpenWithOptions(cfg.StateDir(), store.Options{Backend: cfg.Store.Backend})
 	if err != nil {
 		return err
@@ -157,6 +161,19 @@ func runKoder(ctx context.Context, mode uicore.StartupMode, workdir string, star
 	engine := agent.New(cfg, st, registry, recorder, workdir, mcpManager)
 	registry.SetChatControl(engine)
 	return runWeb(ctx, cfg, st, engine, mode, recorder, debugServer, workdir, startupOpts)
+}
+
+func syncManagedUserAssets(ctx context.Context) error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("locate home directory for managed assets: %w", err)
+	}
+	items, err := assets.UserDefaults()
+	if err != nil {
+		return err
+	}
+	_, err = assets.Sync(ctx, filepath.Join(home, ".koder"), items)
+	return err
 }
 
 func runWeb(ctx context.Context, cfg config.Config, st *store.Store, engine *agent.Engine, mode uicore.StartupMode, recorder *debugsrv.Recorder, debugServer *debugsrv.Server, workdir string, startupOpts startupConfig) error {

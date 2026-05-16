@@ -36,6 +36,10 @@ func Discover(workdir string) []Skill {
 			Path:  filepath.Join(home, ".agents", "skills"),
 			Scope: ScopeUser,
 		})
+		roots = append(roots, rootSpec{
+			Path:  filepath.Join(home, ".koder", "skills"),
+			Scope: ScopeUser,
+		})
 	}
 
 	seen := map[string]struct{}{}

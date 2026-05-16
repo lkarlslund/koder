@@ -292,6 +292,26 @@ func TestNewRootCommandRegistersSubcommands(t *testing.T) {
 	}
 }
 
+func TestSyncManagedUserAssetsInstallsBundledSkill(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	if err := syncManagedUserAssets(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(home, ".koder", "skills", "skill-creator", "SKILL.md")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "name: skill-creator") {
+		t.Fatalf("expected skill creator default, got %q", string(data))
+	}
+	if _, err := os.Stat(filepath.Join(home, ".koder", "managed-assets.json")); err != nil {
+		t.Fatalf("expected managed asset manifest: %v", err)
+	}
+}
+
 func TestDebugInfoReportsUnsetEnv(t *testing.T) {
 	t.Setenv(debugsrv.EnvDebugAPI, "")
 	cmd := newDebugCommand()
