@@ -51,7 +51,7 @@ func NewRootCommand() *cobra.Command {
 		},
 	}
 	bindStartupFlags(cmd, &opts)
-	cmd.AddCommand(newDoctorCommand(), newVersionCommand(), newResumeCommand(), newSessionCommand(), newDebugCommand())
+	cmd.AddCommand(newDoctorCommand(), newVersionCommand(), newResumeCommand(), newSessionCommand(), newDebugCommand(), newSkillCommand())
 	return cmd
 }
 
