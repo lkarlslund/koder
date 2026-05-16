@@ -122,6 +122,21 @@ func BuiltinProfiles() []ProfileOption {
 	}
 }
 
+// Description returns a concise description for a permission profile.
+func Description(name string, cfg Rules) string {
+	name = strings.TrimSpace(name)
+	for _, item := range BuiltinProfiles() {
+		if item.Name == name {
+			return item.Description
+		}
+	}
+	profile, ok := cfg.Profiles[name]
+	if !ok {
+		return ""
+	}
+	return summarizeRules(profile.Rules)
+}
+
 // IsBuiltinProfile reports whether name is a built-in profile.
 func IsBuiltinProfile(name string) bool {
 	switch strings.TrimSpace(name) {
@@ -149,19 +164,23 @@ func DisplayName(name string) string {
 func ProfileNames(cfg Rules) []string {
 	names := make([]string, 0, len(cfg.Profiles)+len(BuiltinProfiles()))
 	seen := map[string]struct{}{}
-	for _, item := range BuiltinProfiles() {
-		names = append(names, item.Name)
-		seen[item.Name] = struct{}{}
-	}
-	var extra []string
+	var configured []string
 	for name := range cfg.Profiles {
-		if _, ok := seen[name]; ok {
+		name = strings.TrimSpace(name)
+		if name == "" {
 			continue
 		}
-		extra = append(extra, name)
+		configured = append(configured, name)
+		seen[name] = struct{}{}
 	}
-	sort.Strings(extra)
-	names = append(names, extra...)
+	sort.Strings(configured)
+	names = append(names, configured...)
+	for _, item := range BuiltinProfiles() {
+		if _, ok := seen[item.Name]; ok {
+			continue
+		}
+		names = append(names, item.Name)
+	}
 	return names
 }
 
@@ -227,6 +246,24 @@ func evaluateBuiltin(profileName string, req Request) Decision {
 	default:
 		return Decision{Mode: domain.PermissionModeDeny}
 	}
+}
+
+func summarizeRules(rules []Rule) string {
+	if len(rules) == 0 {
+		return ""
+	}
+	counts := map[domain.PermissionMode]int{}
+	for _, rule := range rules {
+		counts[rule.Action]++
+	}
+	parts := make([]string, 0, 3)
+	for _, mode := range []domain.PermissionMode{domain.PermissionModeAllow, domain.PermissionModeAsk, domain.PermissionModeDeny} {
+		if counts[mode] == 0 {
+			continue
+		}
+		parts = append(parts, fmt.Sprintf("%d %s", counts[mode], mode))
+	}
+	return strings.Join(parts, ", ")
 }
 
 func (req Request) targetsProjectOnly() bool {

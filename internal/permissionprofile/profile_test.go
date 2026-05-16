@@ -1,6 +1,7 @@
 package permissionprofile
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/lkarlslund/koder/internal/domain"
@@ -165,6 +166,43 @@ func TestEvaluateProfileMatchesToolWildcards(t *testing.T) {
 	}
 	if got := Evaluate(cfg, "custom", nil, Request{Tool: domain.ToolKind("custom_vendor_tool"), Pattern: "anything"}); got.Mode != domain.PermissionModeAllow {
 		t.Fatalf("expected custom tool allow, got %s", got.Mode)
+	}
+}
+
+func TestProfileNamesPreferConfiguredProfilesBeforeBuiltinExtras(t *testing.T) {
+	cfg := Rules{
+		Profiles: map[string]Profile{
+			"default":  {},
+			"readonly": {},
+			"auto":     {},
+		},
+	}
+
+	got := ProfileNames(cfg)
+	want := []string{"auto", "default", "readonly", "ask", "read-ask", "write-ask", "full-access"}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("expected names %v, got %v", want, got)
+	}
+}
+
+func TestConfiguredProfileDescriptionSummarizesRules(t *testing.T) {
+	cfg := Rules{
+		Profiles: map[string]Profile{
+			"default": {
+				Rules: []Rule{
+					{Tool: domain.ToolKindRead, Pattern: "*", Action: domain.PermissionModeAllow},
+					{Tool: domain.ToolKindBash, Pattern: "*", Action: domain.PermissionModeAsk},
+					{Tool: domain.ToolKindWrite, Pattern: "*", Action: domain.PermissionModeDeny},
+				},
+			},
+		},
+	}
+
+	if got := Description("default", cfg); got != "1 allow, 1 ask, 1 deny" {
+		t.Fatalf("unexpected configured profile description: %q", got)
+	}
+	if got := Description(ProfileFullAccess, cfg); got != "Allow all permission-governed tool actions" {
+		t.Fatalf("unexpected builtin profile description: %q", got)
 	}
 }
 

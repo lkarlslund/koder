@@ -1997,16 +1997,14 @@ func (c *Controller) permissionsStateLocked() PermissionsState {
 	if active == "" {
 		active = c.cfg.Permissions.Profile
 	}
-	profiles := permissionprofile.BuiltinProfiles()
-	seen := map[string]struct{}{}
-	for _, item := range profiles {
-		seen[item.Name] = struct{}{}
-	}
-	for _, name := range permissionprofile.ProfileNames(c.cfg.Permissions) {
-		if _, ok := seen[name]; ok {
-			continue
-		}
-		profiles = append(profiles, permissionprofile.ProfileOption{Name: name, Label: permissionprofile.DisplayName(name)})
+	names := permissionprofile.ProfileNames(c.cfg.Permissions)
+	profiles := make([]permissionprofile.ProfileOption, 0, len(names))
+	for _, name := range names {
+		profiles = append(profiles, permissionprofile.ProfileOption{
+			Name:        name,
+			Label:       permissionprofile.DisplayName(name),
+			Description: permissionprofile.Description(name, c.cfg.Permissions),
+		})
 	}
 	return PermissionsState{Active: active, Profiles: profiles}
 }
