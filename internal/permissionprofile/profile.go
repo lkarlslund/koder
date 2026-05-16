@@ -22,16 +22,6 @@ const (
 type Rules struct {
 	Profile  string             `toml:"profile"`
 	Profiles map[string]Profile `toml:"profiles"`
-
-	Read       domain.PermissionMode `toml:"read"`
-	Glob       domain.PermissionMode `toml:"glob"`
-	Grep       domain.PermissionMode `toml:"grep"`
-	Bash       domain.PermissionMode `toml:"bash"`
-	ApplyPatch domain.PermissionMode `toml:"apply_patch"`
-	Task       domain.PermissionMode `toml:"task"`
-	Question   domain.PermissionMode `toml:"question"`
-	WebFetch   domain.PermissionMode `toml:"webfetch"`
-	WebSearch  domain.PermissionMode `toml:"websearch"`
 }
 
 // Profile is a named list of permission rules.

@@ -320,6 +320,40 @@ func TestApplyDefaultsBackfillsMissingBuiltinPermissionRules(t *testing.T) {
 	}
 }
 
+func TestLoadIgnoresLegacyPermissionFields(t *testing.T) {
+	temp := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", temp)
+	t.Setenv("XDG_STATE_HOME", temp)
+	t.Setenv("XDG_CACHE_HOME", temp)
+	configDir := filepath.Join(temp, "koder")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	data := []byte(`
+[permissions]
+profile = "default"
+read = "deny"
+bash = "allow"
+`)
+	if err := os.WriteFile(filepath.Join(configDir, "config.toml"), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile := cfg.Permissions.Profiles["default"]
+	for _, rule := range profile.Rules {
+		if rule.Tool == "read" && rule.Pattern == "*" && rule.Action != "allow" {
+			t.Fatalf("expected legacy read field to be ignored, got %#v", rule)
+		}
+		if rule.Tool == "bash" && rule.Pattern == "*" && rule.Action != "ask" {
+			t.Fatalf("expected legacy bash field to be ignored, got %#v", rule)
+		}
+	}
+}
+
 func TestMCPServerResolvesBearerTokenEnv(t *testing.T) {
 	t.Setenv("MCP_TOKEN", "secret")
 	cfg := Default()

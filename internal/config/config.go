@@ -332,9 +332,6 @@ func (c *Config) applyDefaults() {
 	if c.Permissions.Profiles == nil {
 		c.Permissions.Profiles = cloneProfiles(def.Permissions.Profiles)
 	}
-	if hasLegacyPermissions(c.Permissions) {
-		c.Permissions.Profiles["default"] = legacyPermissionProfile(c.Permissions)
-	}
 	mergeBuiltinPermissionProfileDefaults(c.Permissions.Profiles, def.Permissions.Profiles)
 	if _, ok := c.Permissions.Profiles[c.Permissions.Profile]; !ok {
 		c.Permissions.Profile = def.Permissions.Profile
@@ -517,37 +514,6 @@ func cloneToolDefaults(src map[domain.ToolKind]bool) map[domain.ToolKind]bool {
 	return dst
 }
 
-func hasLegacyPermissions(rules PermissionRules) bool {
-	return rules.Read != "" ||
-		rules.Glob != "" ||
-		rules.Grep != "" ||
-		rules.Bash != "" ||
-		rules.ApplyPatch != "" ||
-		rules.Task != "" ||
-		rules.Question != "" ||
-		rules.WebFetch != "" ||
-		rules.WebSearch != ""
-}
-
-func legacyPermissionProfile(rules PermissionRules) PermissionProfile {
-	return PermissionProfile{
-		Rules: []PermissionRule{
-			{Tool: domain.ToolKindRead, Pattern: "*", Action: firstPermission(rules.Read, domain.PermissionModeAllow)},
-			{Tool: domain.ToolKindViewImage, Pattern: "*", Action: firstPermission(rules.Read, domain.PermissionModeAllow)},
-			{Tool: domain.ToolKindShowImage, Pattern: "*", Action: firstPermission(rules.Read, domain.PermissionModeAllow)},
-			{Tool: domain.ToolKindGlob, Pattern: "*", Action: firstPermission(rules.Glob, domain.PermissionModeAllow)},
-			{Tool: domain.ToolKindGrep, Pattern: "*", Action: firstPermission(rules.Grep, domain.PermissionModeAllow)},
-			{Tool: domain.ToolKindCodeSearch, Pattern: "*", Action: firstPermission(rules.Grep, domain.PermissionModeAllow)},
-			{Tool: domain.ToolKindBash, Pattern: "*", Action: firstPermission(rules.Bash, domain.PermissionModeAsk)},
-			{Tool: domain.ToolKindApplyPatch, Pattern: "*", Action: firstPermission(rules.ApplyPatch, domain.PermissionModeAsk)},
-			{Tool: domain.ToolKindTask, Pattern: "*", Action: firstPermission(rules.Task, domain.PermissionModeAsk)},
-			{Tool: domain.ToolKindQuestion, Pattern: "*", Action: firstPermission(rules.Question, domain.PermissionModeAsk)},
-			{Tool: domain.ToolKindWebFetch, Pattern: "*", Action: firstPermission(rules.WebFetch, domain.PermissionModeAsk)},
-			{Tool: domain.ToolKindWebSearch, Pattern: "*", Action: firstPermission(rules.WebSearch, domain.PermissionModeAsk)},
-		},
-	}
-}
-
 func mergeBuiltinPermissionProfileDefaults(dst map[string]PermissionProfile, defaults map[string]PermissionProfile) {
 	for name, defProfile := range defaults {
 		existing, ok := dst[name]
@@ -581,13 +547,6 @@ func hasPermissionRule(rules []PermissionRule, candidate PermissionRule) bool {
 		}
 	}
 	return false
-}
-
-func firstPermission(got, fallback domain.PermissionMode) domain.PermissionMode {
-	if got != "" {
-		return got
-	}
-	return fallback
 }
 
 func configDir() string {
