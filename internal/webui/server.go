@@ -465,26 +465,26 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		return s.controller.State(), nil
 	case "approve":
 		var in struct {
-			ToolCallID string    `json:"tool_call_id"`
-			ID         domain.ID `json:"id"`
+			ToolCallID string `json:"tool_call_id"`
 		}
 		if err := decodeParams(params, &in); err != nil {
 			return nil, err
 		}
-		if strings.TrimSpace(in.ToolCallID) == "" && in.ID != "" {
-			in.ToolCallID = string(in.ID)
+		in.ToolCallID = strings.TrimSpace(in.ToolCallID)
+		if in.ToolCallID == "" {
+			return nil, fmt.Errorf("tool_call_id is required")
 		}
 		return map[string]bool{"accepted": true}, s.controller.Approve(in.ToolCallID)
 	case "deny":
 		var in struct {
-			ToolCallID string    `json:"tool_call_id"`
-			ID         domain.ID `json:"id"`
+			ToolCallID string `json:"tool_call_id"`
 		}
 		if err := decodeParams(params, &in); err != nil {
 			return nil, err
 		}
-		if strings.TrimSpace(in.ToolCallID) == "" && in.ID != "" {
-			in.ToolCallID = string(in.ID)
+		in.ToolCallID = strings.TrimSpace(in.ToolCallID)
+		if in.ToolCallID == "" {
+			return nil, fmt.Errorf("tool_call_id is required")
 		}
 		return map[string]bool{"accepted": true}, s.controller.Deny(in.ToolCallID)
 	case "composer_completions":

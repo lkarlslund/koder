@@ -254,6 +254,19 @@ func TestWebSocketClientStateUpdatesDebugClient(t *testing.T) {
 	}
 }
 
+func TestApprovalRPCRequiresToolCallID(t *testing.T) {
+	ctrl := newTestController(t)
+	srv := &Server{controller: ctrl}
+	for _, method := range []string{"approve", "deny"} {
+		t.Run(method, func(t *testing.T) {
+			_, err := srv.handleRPC(context.Background(), "client", method, json.RawMessage(`{"id":"legacy-approval"}`))
+			if err == nil || !strings.Contains(err.Error(), "tool_call_id is required") {
+				t.Fatalf("expected missing tool_call_id error, got %v", err)
+			}
+		})
+	}
+}
+
 func TestWebSocketChatUpdateIsCompactedToSingleItemDelta(t *testing.T) {
 	item := domain.TimelineItem{
 		ID:     "019aa000-0000-7000-8000-000000000042",
