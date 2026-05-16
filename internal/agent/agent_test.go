@@ -3380,6 +3380,84 @@ func TestCompactSessionDoesNotPersistUsageOrEmitUsageEvent(t *testing.T) {
 	}
 }
 
+func TestCompactSessionStreamsWhenProviderStreamingEnabled(t *testing.T) {
+	t.Parallel()
+
+	var sawStream bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read request body: %v", err)
+		}
+		sawStream = strings.Contains(string(body), `"stream":true`)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"streamed compact summary\"}}]}\n\n"))
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer server.Close()
+
+	cfg := testConfig(t)
+	cfg.Providers = map[string]config.Provider{
+		"test": {
+			BaseURL:       server.URL + "/v1",
+			Timeout:       time.Second,
+			ContextWindow: 32768,
+			Stream:        true,
+		},
+	}
+	cfg.DefaultProvider = "test"
+	cfg.DefaultModel = "test-model"
+
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	engine := New(cfg, st, tools.NewRegistry(t.TempDir()), nil, t.TempDir())
+	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chat := defaultChatForSession(t, st, session.ID)
+	appendUserTimelineItem(t, st, chat.ID, "hello")
+	appendAssistantTimelineItem(t, st, chat.ID, domain.AssistantMessage{Text: "world"})
+
+	client, err := provider.New("test", cfg.Providers["test"], nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := engine.compactSession(context.Background(), session, chat.ID, client, "manual", nil); err != nil {
+		t.Fatal(err)
+	}
+	if !sawStream {
+		t.Fatal("expected compaction request to stream")
+	}
+
+	timeline, err := st.TimelineForChat(context.Background(), chat.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, item := range timeline {
+		payload, ok := item.Content.(domain.Compaction)
+		if !ok || payload.Status != "completed" {
+			continue
+		}
+		if got := strings.TrimSpace(payload.Summary); got != "streamed compact summary" {
+			t.Fatalf("summary = %q", got)
+		}
+		found = true
+	}
+	if !found {
+		t.Fatal("expected persisted compaction summary")
+	}
+}
+
 func TestCompactSessionAcceptsReasoningOnlySummary(t *testing.T) {
 	t.Parallel()
 

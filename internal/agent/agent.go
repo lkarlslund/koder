@@ -2982,10 +2982,11 @@ func (e *Engine) compactSession(ctx context.Context, session domain.Session, cha
 			Meta: map[string]string{"refresh": "details", "compaction": "started"},
 		}
 	}
-	resp, err := client.CompleteChat(ctx, e.chatRequest(session, domain.Chat{}, append(messages, provider.Message{
+	req := e.chatRequest(session, domain.Chat{}, append(messages, provider.Message{
 		Role:    domain.MessageRoleUser,
 		Content: compactPrompt(),
-	}), false))
+	}), e.providerStreamingEnabled(session))
+	resp, err := e.completeCompactionChat(ctx, client, req)
 	if err != nil {
 		_ = updateCompactionState("", "failed", 0)
 		return err
@@ -3045,6 +3046,13 @@ func (e *Engine) buildCompactionConversationForTimeline(session domain.Session, 
 		return nil, "", err
 	}
 	return provider.SerializePromptEnvelope(envelope), firstKeptItemID, nil
+}
+
+func (e *Engine) completeCompactionChat(ctx context.Context, client *provider.Client, req provider.ChatRequest) (provider.ChatResponse, error) {
+	if req.Stream {
+		return client.StreamChatResponse(ctx, req, nil)
+	}
+	return client.CompleteChat(ctx, req)
 }
 
 func (e *Engine) estimateContextTokensForTimeline(session domain.Session, chat domain.Chat, timeline []domain.TimelineItem) int {
