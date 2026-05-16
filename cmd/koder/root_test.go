@@ -154,52 +154,60 @@ func TestStartupOptionsCapturesExplicitWebBind(t *testing.T) {
 	}
 }
 
-func TestWorkspaceWebBindRoundTrip(t *testing.T) {
+func TestWebBindForLaunchUsesGlobalLastBind(t *testing.T) {
 	st := newRootTestStore(t)
-	workdir := t.TempDir()
 
-	if bind := webBindForLaunch(startupConfig{WebBind: defaultWebBind}); bind != defaultWebBind {
+	bind, err := webBindForLaunch(context.Background(), st, startupConfig{WebBind: defaultWebBind})
+	if err != nil {
+		t.Fatalf("launch bind: %v", err)
+	}
+	if bind != defaultWebBind {
 		t.Fatalf("expected default bind before cache, got bind=%q", bind)
 	}
-	if err := saveWorkspaceWebBind(context.Background(), st, workdir, "127.0.0.1:45678"); err != nil {
+	if err := saveLastWebBind(context.Background(), st, "127.0.0.1:45678"); err != nil {
 		t.Fatalf("save bind: %v", err)
 	}
-	if bind := webBindForLaunch(startupConfig{WebBind: defaultWebBind}); bind != defaultWebBind {
-		t.Fatalf("expected launch to ignore saved bind, got bind=%q", bind)
-	}
-	state, err := st.GetWorkspaceState(context.Background(), workdir)
+	bind, err = webBindForLaunch(context.Background(), st, startupConfig{WebBind: defaultWebBind})
 	if err != nil {
-		t.Fatalf("get workspace state: %v", err)
+		t.Fatalf("launch bind: %v", err)
 	}
-	if state.ID == "" || state.WebBind != "127.0.0.1:45678" {
-		t.Fatalf("expected bind in store workspace state, got %#v", state)
+	if bind != "127.0.0.1:45678" {
+		t.Fatalf("expected saved bind, got bind=%q", bind)
 	}
 }
 
-func TestWorkspaceWebBindRespectsExplicitBind(t *testing.T) {
+func TestWebBindForLaunchRespectsExplicitBind(t *testing.T) {
 	st := newRootTestStore(t)
-	workdir := t.TempDir()
-	if err := saveWorkspaceWebBind(context.Background(), st, workdir, "127.0.0.1:45678"); err != nil {
+	if err := saveLastWebBind(context.Background(), st, "127.0.0.1:45678"); err != nil {
 		t.Fatalf("save bind: %v", err)
 	}
 
-	bind := webBindForLaunch(startupConfig{WebBind: "127.0.0.1:0", WebBindExplicit: true})
+	bind, err := webBindForLaunch(context.Background(), st, startupConfig{WebBind: "127.0.0.1:0", WebBindExplicit: true})
+	if err != nil {
+		t.Fatalf("launch bind: %v", err)
+	}
 	if bind != "127.0.0.1:0" {
 		t.Fatalf("expected explicit ephemeral bind, got bind=%q", bind)
 	}
-	bind = webBindForLaunch(startupConfig{WebBind: "127.0.0.1:33333", WebBindExplicit: true})
+	bind, err = webBindForLaunch(context.Background(), st, startupConfig{WebBind: "127.0.0.1:33333", WebBindExplicit: true})
+	if err != nil {
+		t.Fatalf("launch bind: %v", err)
+	}
 	if bind != "127.0.0.1:33333" {
 		t.Fatalf("expected explicit fixed bind, got bind=%q", bind)
 	}
 }
 
-func TestWorkspaceWebBindIgnoresSavedEphemeralRecordsForLaunch(t *testing.T) {
+func TestWebBindForLaunchIgnoresSavedEphemeralRecords(t *testing.T) {
 	st := newRootTestStore(t)
-	workdir := t.TempDir()
-	if err := saveWorkspaceWebBind(context.Background(), st, workdir, "127.0.0.1:0"); err != nil {
+	if err := saveLastWebBind(context.Background(), st, "127.0.0.1:0"); err != nil {
 		t.Fatalf("save bind: %v", err)
 	}
-	if bind := webBindForLaunch(startupConfig{WebBind: defaultWebBind}); bind != defaultWebBind {
+	bind, err := webBindForLaunch(context.Background(), st, startupConfig{WebBind: defaultWebBind})
+	if err != nil {
+		t.Fatalf("launch bind: %v", err)
+	}
+	if bind != defaultWebBind {
 		t.Fatalf("expected default bind after ephemeral record, got bind=%q", bind)
 	}
 }

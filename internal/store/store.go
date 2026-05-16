@@ -114,6 +114,12 @@ type WorkspaceState struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+type RuntimeState struct {
+	ID          string    `json:"id"`
+	LastWebBind string    `json:"last_web_bind"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
 func cloneToolStates(src map[domain.ToolKind]bool) map[domain.ToolKind]bool {
 	if len(src) == 0 {
 		return map[domain.ToolKind]bool{}

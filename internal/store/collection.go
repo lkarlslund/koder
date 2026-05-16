@@ -124,6 +124,15 @@ func (s *Store) WorkspaceStates() Collection[WorkspaceState] {
 	})
 }
 
+// RuntimeStates returns the generic runtime state collection.
+func (s *Store) RuntimeStates() Collection[RuntimeState] {
+	return NewCollection(s, CollectionSpec[RuntimeState]{
+		Namespace: "runtime-states",
+		GetID:     func(v RuntimeState) string { return v.ID },
+		SetID:     func(v *RuntimeState, id string) { v.ID = id },
+	})
+}
+
 // Get loads one record by durable ID.
 func (c Collection[T]) Get(ctx context.Context, id any) (T, error) {
 	var zero T

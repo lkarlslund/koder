@@ -179,15 +179,16 @@ func runWeb(ctx context.Context, cfg config.Config, st *store.Store, engine *age
 	if err := controller.Start(ctx, mode); err != nil {
 		return err
 	}
-	bind := webBindForLaunch(startupOpts)
+	bind, err := webBindForLaunch(ctx, st, startupOpts)
+	if err != nil {
+		return err
+	}
 	server, err := startWebUI(ctx, controller, bind, startupOpts.NoBrowser, recorder)
 	if err != nil {
 		return err
 	}
-	if !startupOpts.WebBindExplicit || isReusableWebBind(startupOpts.WebBind) {
-		if err := saveWorkspaceWebBind(ctx, st, workdir, server.Addr()); err != nil {
-			fmt.Fprintf(os.Stderr, "koder web ui: failed to save workspace port: %v\n", err)
-		}
+	if err := saveLastWebBind(ctx, st, server.Addr()); err != nil {
+		fmt.Fprintf(os.Stderr, "koder web ui: failed to save web bind: %v\n", err)
 	}
 	fmt.Fprintf(os.Stderr, "koder web ui: %s\n", server.URL())
 	if recorder != nil {
@@ -228,22 +229,34 @@ func startupOptsFromFlags(opts startupOptions, showAllSessions bool) startupConf
 	}
 }
 
-func webBindForLaunch(startupOpts startupConfig) string {
+func webBindForLaunch(ctx context.Context, st *store.Store, startupOpts startupConfig) (string, error) {
 	bind := strings.TrimSpace(startupOpts.WebBind)
-	if bind == "" {
-		bind = defaultWebBind
+	if startupOpts.WebBindExplicit {
+		if bind == "" {
+			return defaultWebBind, nil
+		}
+		return bind, nil
 	}
-	return bind
+	if st != nil {
+		state, err := st.GlobalRuntimeState(ctx)
+		if err != nil {
+			return "", err
+		}
+		if isReusableWebBind(state.LastWebBind) {
+			return state.LastWebBind, nil
+		}
+	}
+	return defaultWebBind, nil
 }
 
-func saveWorkspaceWebBind(ctx context.Context, st *store.Store, workdir, bind string) error {
+func saveLastWebBind(ctx context.Context, st *store.Store, bind string) error {
 	if !isReusableWebBind(bind) {
 		return nil
 	}
 	if st == nil {
 		return nil
 	}
-	return st.SetWorkspaceWebBind(ctx, workdir, bind)
+	return st.SetLastWebBind(ctx, bind)
 }
 
 func isReusableWebBind(bind string) bool {

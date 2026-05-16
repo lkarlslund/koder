@@ -304,6 +304,37 @@ func TestWorkspaceStateWebBindRoundTrip(t *testing.T) {
 	}
 }
 
+func TestGlobalRuntimeStateLastWebBindRoundTrip(t *testing.T) {
+	for _, backend := range []string{BackendPebble, BackendJSONFS} {
+		t.Run(backend, func(t *testing.T) {
+			dir := t.TempDir()
+			st := openTestStoreAt(t, backend, dir)
+			if err := st.SetLastWebBind(context.Background(), "127.0.0.1:45678"); err != nil {
+				t.Fatal(err)
+			}
+			state, err := st.GlobalRuntimeState(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if state.ID == "" || state.LastWebBind != "127.0.0.1:45678" {
+				t.Fatalf("unexpected runtime state: %#v", state)
+			}
+			if err := st.Close(); err != nil {
+				t.Fatal(err)
+			}
+
+			reopened := openTestStoreAt(t, backend, dir)
+			state, err = reopened.GlobalRuntimeState(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if state.LastWebBind != "127.0.0.1:45678" {
+				t.Fatalf("unexpected reloaded runtime state: %#v", state)
+			}
+		})
+	}
+}
+
 func TestApprovalAndTask(t *testing.T) {
 	for _, backend := range []string{BackendPebble, BackendJSONFS} {
 		t.Run(backend, func(t *testing.T) {
