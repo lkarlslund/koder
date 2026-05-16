@@ -17,6 +17,8 @@
     .sidebar-list { margin-top: .25rem; }
     .sidebar-list .chat-list-item { padding: .16rem .25rem; min-height: 1.65rem; }
     .sidebar-list .chat-list-item .btn { line-height: 1.1; }
+    .sidebar-list .chat-list-item.dragging { opacity: .55; }
+    .chat-drag-handle { color: var(--bs-secondary-color); cursor: grab; }
     .sidebar-card { margin: .35rem 0; }
     .sidebar-compact-block { margin-top: .2rem; }
     .git-summary-row { gap: .35rem; }

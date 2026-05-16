@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -668,6 +669,12 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `delete_chat`) {
 		t.Fatalf("expected chat deletion RPC")
 	}
+	if !strings.Contains(fullPage, `draggable="true"`) ||
+		!strings.Contains(fullPage, `@drop.stop.prevent="dropChat($event, chatID(chat))"`) ||
+		!strings.Contains(fullPage, `reorder_chats`) ||
+		!strings.Contains(fullPage, `chat_ids: chats.map(chat => this.chatID(chat))`) {
+		t.Fatalf("expected drag/drop chat reordering")
+	}
 	if !strings.Contains(fullPage, `deleteChat(chatID(chat))`) {
 		t.Fatalf("expected chat list trash action")
 	}
@@ -917,6 +924,64 @@ func TestWebSocketSwitchChatReturnsUpdatedState(t *testing.T) {
 	}
 	if resp.Result.Snapshot.Chat.ID != firstID {
 		t.Fatalf("expected response snapshot chat %s, got %s", firstID, resp.Result.Snapshot.Chat.ID)
+	}
+}
+
+func TestWebSocketReorderChatsReturnsUpdatedOrder(t *testing.T) {
+	ctrl := newTestController(t)
+	firstID := ctrl.State().ActiveChatID
+	if err := ctrl.NewChat(context.Background(), "second"); err != nil {
+		t.Fatalf("new second chat: %v", err)
+	}
+	secondID := ctrl.State().ActiveChatID
+	if err := ctrl.NewChat(context.Background(), "third"); err != nil {
+		t.Fatalf("new third chat: %v", err)
+	}
+	thirdID := ctrl.State().ActiveChatID
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoBrowser: true})
+	if err != nil {
+		t.Fatalf("start server: %v", err)
+	}
+	conn, _, err := websocket.Dial(ctx, "ws://"+srv.Addr()+"/ws", nil)
+	if err != nil {
+		t.Fatalf("dial websocket: %v", err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+	payload := fmt.Sprintf(`{"id":1,"method":"reorder_chats","params":{"chat_ids":["%s","%s","%s"]}}`, thirdID, firstID, secondID)
+	if err := conn.Write(ctx, websocket.MessageText, []byte(payload)); err != nil {
+		t.Fatalf("write reorder_chats: %v", err)
+	}
+	msg := readRPCResponse(t, ctx, conn, 1)
+	var resp struct {
+		OK     bool `json:"ok"`
+		Result struct {
+			Chats []struct {
+				ID       domain.ID
+				Position int
+			}
+		} `json:"result"`
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(msg, &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !resp.OK {
+		t.Fatalf("expected reorder_chats ok, got %s", resp.Error)
+	}
+	got := make([]domain.ID, 0, len(resp.Result.Chats))
+	for _, chat := range resp.Result.Chats {
+		got = append(got, chat.ID)
+	}
+	if !slices.Equal(got, []domain.ID{thirdID, firstID, secondID}) {
+		t.Fatalf("unexpected chat order: %#v", got)
+	}
+	for idx, chat := range resp.Result.Chats {
+		if chat.Position != idx {
+			t.Fatalf("expected position %d for %s, got %d", idx, chat.ID, chat.Position)
+		}
 	}
 }
 

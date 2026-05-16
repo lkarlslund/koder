@@ -452,6 +452,17 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 			return nil, err
 		}
 		return s.controller.State(), nil
+	case "reorder_chats":
+		var in struct {
+			ChatIDs []domain.ID `json:"chat_ids"`
+		}
+		if err := decodeParams(params, &in); err != nil {
+			return nil, err
+		}
+		if err := s.controller.ReorderChats(ctx, in.ChatIDs); err != nil {
+			return nil, err
+		}
+		return s.controller.State(), nil
 	case "approve":
 		var in struct {
 			ToolCallID string    `json:"tool_call_id"`

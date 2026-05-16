@@ -208,6 +208,27 @@ func (s *Store) ListChats(ctx context.Context, sessionID domain.ID) ([]domain.Ch
 	return s.backend.ListChats(ctx, sessionID)
 }
 
+func sortChatsForSidebar(chats []domain.Chat) {
+	slices.SortFunc(chats, func(a, b domain.Chat) int {
+		switch {
+		case a.Position < b.Position:
+			return -1
+		case a.Position > b.Position:
+			return 1
+		case a.CreatedAt.Before(b.CreatedAt):
+			return -1
+		case a.CreatedAt.After(b.CreatedAt):
+			return 1
+		case a.ID < b.ID:
+			return -1
+		case a.ID > b.ID:
+			return 1
+		default:
+			return 0
+		}
+	})
+}
+
 func (s *Store) GetChat(ctx context.Context, chatID domain.ID) (domain.Chat, error) {
 	return s.backend.GetChat(ctx, chatID)
 }
@@ -217,7 +238,55 @@ func (s *Store) DefaultChat(ctx context.Context, sessionID domain.ID) (domain.Ch
 }
 
 func (s *Store) UpdateChat(ctx context.Context, chat domain.Chat) error {
+	existing, err := s.backend.GetChat(ctx, chat.ID)
+	if err != nil {
+		return err
+	}
+	if chat.Position == 0 && existing.Position != 0 && chat.UpdatedAt.After(existing.UpdatedAt) {
+		chat.Position = existing.Position
+	}
 	return s.backend.UpdateChat(ctx, chat)
+}
+
+// ReorderChats persists the complete sidebar order for a session.
+func (s *Store) ReorderChats(ctx context.Context, sessionID domain.ID, orderedIDs []domain.ID) ([]domain.Chat, error) {
+	if sessionID == "" {
+		return nil, fmt.Errorf("reorder chats: session id is required")
+	}
+	chats, err := s.ListChats(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if len(orderedIDs) != len(chats) {
+		return nil, fmt.Errorf("reorder chats: expected %d chat ids, got %d", len(chats), len(orderedIDs))
+	}
+	byID := make(map[domain.ID]domain.Chat, len(chats))
+	for _, chat := range chats {
+		byID[chat.ID] = chat
+	}
+	seen := make(map[domain.ID]bool, len(orderedIDs))
+	ordered := make([]domain.Chat, 0, len(orderedIDs))
+	for idx, chatID := range orderedIDs {
+		if chatID == "" {
+			return nil, fmt.Errorf("reorder chats: empty chat id at position %d", idx)
+		}
+		if seen[chatID] {
+			return nil, fmt.Errorf("reorder chats: duplicate chat id %s", chatID)
+		}
+		chat, ok := byID[chatID]
+		if !ok {
+			return nil, fmt.Errorf("reorder chats: chat %s not found in session %s", chatID, sessionID)
+		}
+		seen[chatID] = true
+		chat.Position = idx
+		ordered = append(ordered, chat)
+	}
+	for _, chat := range ordered {
+		if err := s.UpdateChat(ctx, chat); err != nil {
+			return nil, err
+		}
+	}
+	return ordered, nil
 }
 
 // DeleteChat removes a chat and its direct chat-owned persisted data.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"sync"
 	"testing"
@@ -55,6 +56,14 @@ func appendTimelineForTest(t *testing.T, st *Store, chatID domain.ID, content do
 		t.Fatal(err)
 	}
 	return item
+}
+
+func chatIDs(chats []domain.Chat) []domain.ID {
+	ids := make([]domain.ID, 0, len(chats))
+	for _, chat := range chats {
+		ids = append(ids, chat.ID)
+	}
+	return ids
 }
 
 func TestConcurrentAttachToolResultsPreservesAllChildren(t *testing.T) {
@@ -478,6 +487,57 @@ func TestUpdateChatPersistsContextTokens(t *testing.T) {
 			}
 			if got.LastKnownContextTokens != 1234 || !got.ContextTokensKnown {
 				t.Fatalf("expected persisted context tokens, got %#v", got)
+			}
+		})
+	}
+}
+
+func TestChatOrderIsExplicitAndStableAcrossUpdates(t *testing.T) {
+	for _, backend := range []string{BackendPebble, BackendJSONFS} {
+		t.Run(backend, func(t *testing.T) {
+			st := openTestStore(t, backend)
+
+			session, err := st.CreateSession(context.Background(), "test", "provider", "model", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			first, err := st.DefaultChat(context.Background(), session.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			second, err := st.CreateChat(context.Background(), session.ID, "second", chatrole.Orchestrator, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			third, err := st.CreateChat(context.Background(), session.ID, "third", chatrole.Orchestrator, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			ordered, err := st.ReorderChats(context.Background(), session.ID, []domain.ID{third.ID, first.ID, second.ID})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := chatIDs(ordered); !slices.Equal(got, []domain.ID{third.ID, first.ID, second.ID}) {
+				t.Fatalf("unexpected reordered ids: %#v", got)
+			}
+
+			first.Title = "updated after reorder"
+			first.UpdatedAt = time.Now().UTC().Add(time.Hour)
+			if err := st.UpdateChat(context.Background(), first); err != nil {
+				t.Fatal(err)
+			}
+			listed, err := st.ListChats(context.Background(), session.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := chatIDs(listed); !slices.Equal(got, []domain.ID{third.ID, first.ID, second.ID}) {
+				t.Fatalf("chat update changed explicit order: %#v", got)
+			}
+			for idx, chat := range listed {
+				if chat.Position != idx {
+					t.Fatalf("expected position %d for %s, got %d", idx, chat.ID, chat.Position)
+				}
 			}
 		})
 	}

@@ -285,7 +285,7 @@
         showSessions: false, sessionLoading: false, sessionState: {active_id: 0, workdir: '', sessions: []}, newSessionTitle: '',
         showProviders: false, providerState: {catalog: [], providers: [], drafts: {}}, providerDraft: null, providerHeadersText: '{}', providerStatus: '', providerStatusKind: 'secondary', providerTesting: false, providerSaving: false,
         completion: {kind: '', query: '', start: 0, end: 0, items: [], selected: 0}, completionSeq: 0,
-        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, restoreChatAttempted: false, transcriptStickToBottom: true, scrollRestoreSeq: 0, expandedMilestones: {}, interruptArmedChatID: '', composerAttachments: [], error: '', toast: '', toastTimer: null,
+        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, restoreChatAttempted: false, transcriptStickToBottom: true, scrollRestoreSeq: 0, expandedMilestones: {}, interruptArmedChatID: '', dragChatID: '', composerAttachments: [], error: '', toast: '', toastTimer: null,
         init() {
           this.clampSidebarRatio();
           this.applyTheme();
@@ -519,7 +519,7 @@
           const id = this.chatID(chat);
           const chats = (this.state.chats || this.state.Chats || []).slice();
           const idx = chats.findIndex(existing => this.chatID(existing) === id);
-          if (idx >= 0) chats[idx] = chat; else chats.unshift(chat);
+          if (idx >= 0) chats[idx] = chat; else chats.push(chat);
           this.state.chats = chats;
           this.state.Chats = chats;
         },
@@ -1015,6 +1015,39 @@
         },
         switchChat(id) { if (id) this.rpc('switch_chat', {chat_id: id}).then(s => { this.applyState(s, {scrollToBottom: true}); this.writeSelectedChat(); }); },
         newChat() { this.rpc('new_chat', {title: 'Chat'}).then(s => { this.applyState(s, {scrollToBottom: true}); this.writeSelectedChat(); }); },
+        startChatDrag(ev, id) {
+          if (!id) return;
+          this.dragChatID = id;
+          if (ev.dataTransfer) {
+            ev.dataTransfer.effectAllowed = 'move';
+            ev.dataTransfer.setData('text/plain', id);
+          }
+        },
+        overChatDrag(ev, id) {
+          const sourceID = this.dragChatID || (ev.dataTransfer && ev.dataTransfer.getData('text/plain')) || '';
+          if (!sourceID || sourceID === id) return;
+          if (ev.dataTransfer) ev.dataTransfer.dropEffect = 'move';
+        },
+        dropChat(ev, targetID) {
+          const sourceID = this.dragChatID || (ev.dataTransfer && ev.dataTransfer.getData('text/plain')) || '';
+          this.dragChatID = '';
+          if (!sourceID || !targetID || sourceID === targetID) return;
+          const chats = (this.state.chats || this.state.Chats || []).slice();
+          const from = chats.findIndex(chat => this.chatID(chat) === sourceID);
+          const to = chats.findIndex(chat => this.chatID(chat) === targetID);
+          if (from < 0 || to < 0) return;
+          const [moved] = chats.splice(from, 1);
+          chats.splice(to, 0, moved);
+          this.state.chats = chats;
+          this.state.Chats = chats;
+          this.rpc('reorder_chats', {chat_ids: chats.map(chat => this.chatID(chat))})
+            .then(s => this.applyState(s))
+            .catch(err => {
+              this.showToast(err.message);
+              this.rpc('get_state', {}).then(s => this.applyState(s)).catch(() => {});
+            });
+        },
+        endChatDrag() { this.dragChatID = ''; },
         deleteChat(id) {
           if (!id || !confirm('Delete this chat?')) return;
           this.rpc('delete_chat', {chat_id: id}).then(s => this.applyState(s)).catch(err => this.showToast(err.message));

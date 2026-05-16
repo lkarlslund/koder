@@ -248,6 +248,10 @@ func (b *jsonfsBackend) CreateChat(ctx context.Context, sessionID domain.ID, tit
 			return domain.Chat{}, fmt.Errorf("parent chat %s belongs to session %s, not %s", parent.ID, parent.SessionID, sessionID)
 		}
 	}
+	existing, err := b.ListChats(ctx, sessionID)
+	if err != nil {
+		return domain.Chat{}, err
+	}
 	now := time.Now().UTC()
 	chat := domain.Chat{
 		ID:                domain.NewID(),
@@ -257,6 +261,7 @@ func (b *jsonfsBackend) CreateChat(ctx context.Context, sessionID domain.ID, tit
 		WorkflowRole:      role,
 		PermissionProfile: strings.TrimSpace(session.PermissionProfile),
 		ToolStates:        cloneToolStates(session.ToolStates),
+		Position:          len(existing),
 		CreatedAt:         now,
 		UpdatedAt:         now,
 	}
@@ -293,22 +298,7 @@ func (b *jsonfsBackend) ListChats(ctx context.Context, sessionID domain.ID) ([]d
 			chats = append(chats, chat)
 		}
 	}
-	slices.SortFunc(chats, func(a, c domain.Chat) int {
-		if a.UpdatedAt.Equal(c.UpdatedAt) {
-			switch {
-			case a.ID > c.ID:
-				return -1
-			case a.ID < c.ID:
-				return 1
-			default:
-				return 0
-			}
-		}
-		if a.UpdatedAt.After(c.UpdatedAt) {
-			return -1
-		}
-		return 1
-	})
+	sortChatsForSidebar(chats)
 	return chats, nil
 }
 

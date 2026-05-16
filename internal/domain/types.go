@@ -223,6 +223,7 @@ type Chat struct {
 	AssignedTodoBucketRef  string
 	LastKnownContextTokens int
 	ContextTokensKnown     bool
+	Position               int
 	QueuedInputs           []QueuedInput
 	CreatedAt              time.Time
 	UpdatedAt              time.Time

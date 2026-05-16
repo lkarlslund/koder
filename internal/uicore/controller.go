@@ -551,6 +551,44 @@ func (c *Controller) DeleteChat(ctx context.Context, chatID domain.ID) error {
 	return nil
 }
 
+// ReorderChats persists the sidebar chat order for the active session.
+func (c *Controller) ReorderChats(ctx context.Context, chatIDs []domain.ID) error {
+	c.mu.RLock()
+	sessionID := c.session.ID
+	activeChatID := c.chat.ID
+	runtimes := make(map[domain.ID]*chat.Chat, len(c.runtimes))
+	for id, rt := range c.runtimes {
+		runtimes[id] = rt
+	}
+	c.mu.RUnlock()
+	if sessionID == "" {
+		return fmt.Errorf("no active session")
+	}
+	ordered, err := c.store.ReorderChats(ctx, sessionID, chatIDs)
+	if err != nil {
+		return err
+	}
+	for _, item := range ordered {
+		if rt := runtimes[item.ID]; rt != nil {
+			rt.SetChat(item)
+		}
+	}
+	c.mu.Lock()
+	c.chats = ordered
+	for _, item := range ordered {
+		if item.ID == activeChatID {
+			c.chat = item
+		}
+		if snapshot, ok := c.snapshots[item.ID]; ok {
+			snapshot.Chat = item
+			c.snapshots[item.ID] = snapshot
+		}
+	}
+	c.mu.Unlock()
+	c.broadcast("snapshot", c.State())
+	return nil
+}
+
 // Sessions returns sessions for the current workspace.
 func (c *Controller) Sessions(ctx context.Context) (SessionState, error) {
 	sessions, err := c.workspaceSessions(ctx)
@@ -1716,7 +1754,7 @@ func (c *Controller) forwardRuntime(chatID domain.ID, updates <-chan chat.Update
 					}
 				}
 				if !found {
-					c.chats = append([]domain.Chat{update.Snapshot.Chat}, c.chats...)
+					c.chats = append(c.chats, update.Snapshot.Chat)
 				}
 				c.mu.Unlock()
 			}
