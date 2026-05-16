@@ -289,6 +289,22 @@ func TestSystemPromptDoesNotMentionInternalSlashCommands(t *testing.T) {
 	}
 }
 
+func TestEngineSystemPromptUsesManagedUserAsset(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if err := os.MkdirAll(filepath.Join(home, ".koder"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".koder", "system-prompt.md"), []byte("custom system prompt\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	engine := New(testConfig(t), nil, nil, nil, t.TempDir())
+	if got := engine.systemPrompt(); got != "custom system prompt" {
+		t.Fatalf("expected managed user system prompt, got %q", got)
+	}
+}
+
 func TestFormatEnvironmentPrompt(t *testing.T) {
 	when := time.Date(2026, 5, 1, 14, 3, 22, 0, time.FixedZone("CEST", 2*60*60))
 	got := formatEnvironmentPrompt(environmentSnapshot{

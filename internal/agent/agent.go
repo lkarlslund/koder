@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,6 +18,7 @@ import (
 	"time"
 
 	"github.com/lkarlslund/koder/internal/agents"
+	"github.com/lkarlslund/koder/internal/assets"
 	"github.com/lkarlslund/koder/internal/attachment"
 	chatpkg "github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/chatrole"
@@ -56,9 +56,6 @@ type Engine struct {
 	runs       map[domain.ID]chatRunState
 	retryPause func(context.Context, time.Duration, func(time.Duration)) error
 }
-
-//go:embed system_prompt.md
-var systemPromptAsset embed.FS
 
 var patchPathPattern = regexp.MustCompile(`(?m)^(?:\+\+\+|---)\s+(?:a/|b/)?([^\t\n]+)`)
 
@@ -2515,7 +2512,7 @@ func (e *Engine) baseInstructionsForChat(session domain.Session, chat domain.Cha
 	environmentPrompt := e.sessionEnvironmentPrompt(session)
 	instructions := []provider.InstructionBlock{{
 		Kind: provider.InstructionKindBaseSystem,
-		Text: systemPrompt(),
+		Text: e.systemPrompt(),
 	}, {
 		Kind: provider.InstructionKindEnvironment,
 		Text: environmentPrompt,
@@ -2785,12 +2782,30 @@ func (e *Engine) compactionKeepToolBatches() int {
 	return config.NormalizeCompactionKeepToolBatches(e.cfg.CompactionKeepToolBatches)
 }
 
+func (e *Engine) systemPrompt() string {
+	if root := managedAssetRoot(); root != "" {
+		data, err := os.ReadFile(filepath.Join(root, "system-prompt.md"))
+		if err == nil {
+			return strings.TrimSpace(string(data))
+		}
+	}
+	return systemPrompt()
+}
+
 func systemPrompt() string {
-	data, err := systemPromptAsset.ReadFile("system_prompt.md")
+	data, err := assets.DefaultContent("system-prompt.md")
 	if err != nil {
 		panic(err)
 	}
 	return strings.TrimSpace(string(data))
+}
+
+func managedAssetRoot() string {
+	home, err := os.UserHomeDir()
+	if err != nil || strings.TrimSpace(home) == "" {
+		return ""
+	}
+	return filepath.Join(home, ".koder")
 }
 
 func compactPrompt() string {

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -100,12 +101,29 @@ func TestUserDefaultsIncludesSkillCreator(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	foundPrompt := false
+	foundSkill := false
 	for _, item := range items {
 		if item.Target == "skills/skill-creator/SKILL.md" && len(item.Content) > 0 {
-			return
+			foundSkill = true
+		}
+		if item.Target == "system-prompt.md" && len(item.Content) > 0 {
+			foundPrompt = true
 		}
 	}
-	t.Fatalf("expected embedded skill creator default, got %#v", items)
+	if !foundSkill || !foundPrompt {
+		t.Fatalf("expected embedded skill creator and system prompt defaults, got %#v", items)
+	}
+}
+
+func TestDefaultContentReadsEmbeddedDefault(t *testing.T) {
+	content, err := DefaultContent("system-prompt.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(content), "You are koder") {
+		t.Fatalf("unexpected system prompt content: %q", string(content))
+	}
 }
 
 func TestManifestRecordsLastWrittenHash(t *testing.T) {
