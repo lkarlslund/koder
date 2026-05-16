@@ -26,7 +26,7 @@ func init() {
 }
 
 func (tool) Kind() domain.ToolKind    { return domain.ToolKindSkill }
-func (tool) BypassesPermission() bool { return true }
+func (tool) BypassesPermission() bool { return false }
 func (tool) Definition(runtime tools.Runtime, spec tools.ToolSpec) (tools.ToolSpec, bool) {
 	spec.Usage = skills.ToolDescription(spec.Usage, runtime.Workdir)
 	return spec, true
@@ -48,19 +48,17 @@ func (tool) Execute(_ context.Context, runtime tools.Runtime, req tools.Request)
 	if err != nil {
 		return tools.Result{}, err
 	}
-	text, truncated := tools.TruncateText(string(body), tools.DefaultToolOutputLimit)
 	return tools.Result{
-		Output: text,
+		Output: string(body),
 		Meta: map[string]string{
-			"name":      skill.Name,
-			"path":      skill.Path,
-			"truncated": tools.BoolString(truncated),
+			"name": skill.Name,
+			"path": skill.Path,
 		},
 		Stored: tools.SkillStoredResult{
 			Name:      skill.Name,
 			Path:      skill.Path,
-			Content:   text,
-			Truncated: truncated,
+			Content:   string(body),
+			Truncated: false,
 		},
 	}, nil
 }

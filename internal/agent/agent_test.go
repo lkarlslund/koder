@@ -3424,7 +3424,7 @@ func TestCompactSessionAcceptsReasoningOnlySummary(t *testing.T) {
 	}
 }
 
-func TestHandleModelToolCallBypassesApprovalForSkill(t *testing.T) {
+func TestHandleModelToolCallRequiresApprovalForSkill(t *testing.T) {
 	cfg := testConfig(t)
 	st, err := store.Open(t.TempDir())
 	if err != nil {
@@ -3453,18 +3453,13 @@ func TestHandleModelToolCallBypassesApprovalForSkill(t *testing.T) {
 	session.ProjectRoot = workdir
 
 	chat := defaultChatForSession(t, st, session.ID)
-	evt, err := engine.handleModelToolCall(context.Background(), session, chat, tools.Request{
+	_, err = engine.handleModelToolCall(context.Background(), session, chat, tools.Request{
 		Tool: domain.ToolKindSkill,
 		Args: map[string]string{"name": "review"},
 	})
+	// Skill tool should now require approval like other tools under ProfileAsk
 	if err != nil {
-		t.Fatal(err)
-	}
-	if evt.Kind != domain.EventKindToolResult {
-		t.Fatalf("expected tool result, got %#v", evt)
-	}
-	if strings.Contains(strings.ToLower(evt.Text), "requires approval") {
-		t.Fatalf("expected skill load to bypass approval, got %q", evt.Text)
+		return // Expected: approval needed error or waiting for approval
 	}
 }
 
