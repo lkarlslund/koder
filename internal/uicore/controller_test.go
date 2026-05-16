@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -446,6 +447,76 @@ func TestControllerSessionsAreWorkspaceScoped(t *testing.T) {
 	}
 	if len(sessionState.Sessions) != 2 {
 		t.Fatalf("expected two workspace A sessions, got %#v", sessionState.Sessions)
+	}
+}
+
+func TestControllerStartupNewResumesRestartInterruptedWorkspaceSession(t *testing.T) {
+	var requests atomic.Int32
+	providerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		requests.Add(1)
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"resumed"}}],"usage":{"total_tokens":1}}`))
+	}))
+	defer providerServer.Close()
+
+	cfg := config.Default().WithStateDir(t.TempDir())
+	cfg.DefaultProvider = "test"
+	cfg.DefaultModel = "model"
+	cfg.Providers = map[string]config.Provider{
+		"test": {BaseURL: providerServer.URL + "/v1", DefaultModel: "model"},
+	}
+	st, err := store.OpenWithOptions(cfg.StateDir(), store.Options{Backend: store.BackendJSONFS})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+
+	ctx := context.Background()
+	workdir := t.TempDir()
+	session, err := st.CreateSession(ctx, "Interrupted Session", "test", "model", nil)
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	if err := st.UpdateSessionWorkspace(ctx, session.ID, workdir, workdir); err != nil {
+		t.Fatalf("workspace: %v", err)
+	}
+	chatRecord, err := st.DefaultChat(ctx, session.ID)
+	if err != nil {
+		t.Fatalf("default chat: %v", err)
+	}
+	notice, err := st.AppendTimeline(ctx, chatRecord.ID, domain.Notice{
+		Level:  "warning",
+		Text:   "Interrupted",
+		Kind:   domain.NoticeKindInterrupted,
+		Reason: domain.NoticeReasonProcessRestart,
+	})
+	if err != nil {
+		t.Fatalf("append notice: %v", err)
+	}
+	notice.Seal(time.Now().UTC())
+	if err := st.Timeline().Put(ctx, notice); err != nil {
+		t.Fatalf("put notice: %v", err)
+	}
+
+	engine := agent.New(cfg, st, nil, nil, workdir)
+	ctrl := New(cfg, st, engine, workdir)
+	if err := ctrl.Start(ctx, StartupModeNew); err != nil {
+		t.Fatalf("start controller: %v", err)
+	}
+	if got := ctrl.State().Session.ID; got != session.ID {
+		t.Fatalf("expected restart interrupted session %s, got %s", session.ID, got)
+	}
+	deadline := time.After(2 * time.Second)
+	for requests.Load() == 0 {
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for auto resume provider request")
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
 	}
 }
 

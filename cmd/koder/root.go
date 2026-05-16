@@ -179,7 +179,7 @@ func runWeb(ctx context.Context, cfg config.Config, st *store.Store, engine *age
 		recorder.UpdateProcess(debugsrv.ProcessDebug{DebugAPI: debugAPIAddr(debugServer), Status: "Web UI running"})
 	}
 	sig := make(chan os.Signal, 1)
-	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
+	signal.Notify(sig, os.Interrupt, syscall.SIGTERM, syscall.SIGUSR1)
 	defer signal.Stop(sig)
 	select {
 	case <-ctx.Done():
@@ -187,8 +187,12 @@ func runWeb(ctx context.Context, cfg config.Config, st *store.Store, engine *age
 			return err
 		}
 		return ctx.Err()
-	case <-sig:
-		return controller.Shutdown(context.Background())
+	case signal := <-sig:
+		reason := domain.NoticeReasonProcessTerminating
+		if signal == syscall.SIGUSR1 {
+			reason = domain.NoticeReasonProcessRestart
+		}
+		return controller.ShutdownWithInterruptReason(context.Background(), reason)
 	}
 }
 

@@ -403,6 +403,13 @@ type Notice struct {
 	Limit      int      `json:"limit,omitempty"`
 }
 
+const (
+	NoticeKindInterrupted          = "interrupted"
+	NoticeReasonUserInterrupted    = "user_interrupted"
+	NoticeReasonProcessTerminating = "process_terminating"
+	NoticeReasonProcessRestart     = "process_restart"
+)
+
 // TimelineKind returns the timeline payload kind.
 func (Notice) TimelineKind() TimelineKind { return TimelineKindNotice }
 

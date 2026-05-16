@@ -616,7 +616,7 @@ func TestRuntimeCancelWhileToolsRunningStagesThenForcesCancel(t *testing.T) {
 	if !ok {
 		t.Fatalf("unexpected cancellation notice item: %#v", snapshot.Timeline[0])
 	}
-	if got := notice.Text; got != "Cancelling. Tool calls running, waiting for completition. Press ESC again to cancel tool calls." {
+	if got := notice.Text; got != "Cancelling. Tool calls running, waiting for completion. Press ESC again to cancel tool calls." {
 		t.Fatalf("unexpected notice body: %q", got)
 	}
 
@@ -652,6 +652,58 @@ func TestRuntimeCancelCancelsStreamingContextImmediately(t *testing.T) {
 		t.Fatal("expected cancel to cancel streaming context immediately")
 	}
 	close(runner.events)
+}
+
+func TestRuntimeInterruptAndClosePersistsRestartReason(t *testing.T) {
+	st := openTestStore(t)
+	session, chatRecord, _ := createSessionWithPlan(t, st)
+	runner := &cancelAwareRunner{
+		ctxSeen: make(chan context.Context, 1),
+		events:  make(chan domain.Event),
+	}
+	rt := newTestChat(t, st, session, chatRecord, runner)
+
+	rt.Enqueue(QueueItem{Kind: QueueKindSteer, Text: "stream"})
+
+	var runCtx context.Context
+	select {
+	case runCtx = <-runner.ctxSeen:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for prompt context")
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- rt.InterruptAndClose(context.Background(), domain.NoticeReasonProcessRestart)
+	}()
+
+	select {
+	case <-runCtx.Done():
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("expected restart interrupt to cancel streaming context")
+	}
+	close(runner.events)
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("interrupt and close: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for interrupt close")
+	}
+
+	timeline, err := st.TimelineForChat(context.Background(), chatRecord.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(timeline) == 0 {
+		t.Fatal("expected persisted interruption notice")
+	}
+	notice, ok := timeline[len(timeline)-1].Content.(domain.Notice)
+	if !ok || notice.Kind != domain.NoticeKindInterrupted || notice.Reason != domain.NoticeReasonProcessRestart {
+		t.Fatalf("expected restart interruption notice, got %#v", timeline[len(timeline)-1].Content)
+	}
 }
 
 func TestRuntimeStopAfterCurrentTurnDoesNotCancelStreamingContext(t *testing.T) {

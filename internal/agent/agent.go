@@ -1852,6 +1852,7 @@ func (e *Engine) emitInterrupted(out chan<- domain.Event, chatID, sessionID doma
 	item, ok := e.persistTranscriptNotice(context.Background(), chatID, sessionID, "Interrupted", transcriptNotice{
 		Kind:     "interrupted",
 		Severity: "warning",
+		Reason:   domain.NoticeReasonUserInterrupted,
 	})
 	evt := domain.Event{Kind: domain.EventKindStatus, Text: "Interrupted"}
 	if ok {

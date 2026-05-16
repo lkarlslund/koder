@@ -377,6 +377,11 @@ func (c *Controller) StopAfterCurrentTurn() error {
 
 // Shutdown gracefully drains the active runtime and releases subscriptions.
 func (c *Controller) Shutdown(ctx context.Context) error {
+	return c.ShutdownWithInterruptReason(ctx, "")
+}
+
+// ShutdownWithInterruptReason closes runtimes and records an interrupt reason for active chats.
+func (c *Controller) ShutdownWithInterruptReason(ctx context.Context, reason string) error {
 	c.mu.RLock()
 	runtimes := make([]*chat.Chat, 0, len(c.runtimes))
 	for _, rt := range c.runtimes {
@@ -397,9 +402,16 @@ func (c *Controller) Shutdown(ctx context.Context) error {
 	for _, unsub := range unsubs {
 		unsub()
 	}
+	reason = strings.TrimSpace(reason)
 	var firstErr error
 	for _, rt := range runtimes {
-		if err := rt.DrainAndClose(ctx); err != nil && firstErr == nil {
+		var err error
+		if reason == "" {
+			err = rt.DrainAndClose(ctx)
+		} else {
+			err = rt.InterruptAndClose(ctx, reason)
+		}
+		if err != nil && firstErr == nil {
 			firstErr = err
 		}
 	}
@@ -1261,6 +1273,11 @@ func (c *Controller) initialSession(ctx context.Context, mode StartupMode) (doma
 		return domain.Session{}, fmt.Errorf("store is unavailable")
 	}
 	if mode == StartupModeNew {
+		if session, ok, err := c.restartInterruptedSession(ctx); err != nil {
+			return domain.Session{}, err
+		} else if ok {
+			return session, nil
+		}
 		return c.createWorkspaceSession(ctx, "New Session")
 	}
 	sessions, err := c.workspaceSessions(ctx)
@@ -1391,8 +1408,76 @@ func (c *Controller) loadSession(ctx context.Context, sessionID, chatID domain.I
 	for _, sub := range subscriptions {
 		go c.forwardRuntime(sub.chatID, sub.updates)
 	}
+	c.autoResumeRestartInterruptedChats(runtimes, snapshots)
 	c.broadcast("snapshot", c.State())
 	return nil
+}
+
+const processRestartResumeNote = "The previous turn was interrupted because the koder process was restarting. Continue from the persisted transcript and pending tool state without restating the interruption."
+
+func (c *Controller) restartInterruptedSession(ctx context.Context) (domain.Session, bool, error) {
+	sessions, err := c.workspaceSessions(ctx)
+	if err != nil {
+		return domain.Session{}, false, err
+	}
+	var matches []domain.Session
+	for _, session := range sessions {
+		chats, err := c.store.ListChats(ctx, session.ID)
+		if err != nil {
+			return domain.Session{}, false, err
+		}
+		for _, chatRecord := range chats {
+			if ok, err := c.chatEndsWithRestartInterrupt(ctx, chatRecord.ID); err != nil {
+				return domain.Session{}, false, err
+			} else if ok {
+				matches = append(matches, session)
+				break
+			}
+		}
+	}
+	session := newestSession(matches)
+	return session, session.ID != "", nil
+}
+
+func (c *Controller) chatEndsWithRestartInterrupt(ctx context.Context, chatID domain.ID) (bool, error) {
+	timeline, err := c.store.TimelineForChat(ctx, chatID)
+	if err != nil {
+		return false, err
+	}
+	if len(timeline) == 0 {
+		return false, nil
+	}
+	notice, ok := timeline[len(timeline)-1].Content.(domain.Notice)
+	return ok && notice.Kind == domain.NoticeKindInterrupted && notice.Reason == domain.NoticeReasonProcessRestart, nil
+}
+
+func (c *Controller) autoResumeRestartInterruptedChats(runtimes map[domain.ID]*chat.Chat, snapshots map[domain.ID]chat.Snapshot) {
+	for id, snapshot := range snapshots {
+		if !shouldAutoResumeRestartInterrupted(snapshot) {
+			continue
+		}
+		rt := runtimes[id]
+		if rt == nil {
+			continue
+		}
+		rt.Enqueue(chat.QueueItem{Kind: chat.QueueKindContinue, Note: processRestartResumeNote})
+	}
+}
+
+func shouldAutoResumeRestartInterrupted(snapshot chat.Snapshot) bool {
+	if snapshot.Active || snapshot.Status == chat.StatusWaitingApproval {
+		return false
+	}
+	for _, item := range snapshot.QueuedInputs {
+		if item.Kind == domain.QueuedInputKindContinue {
+			return false
+		}
+	}
+	if len(snapshot.Timeline) == 0 {
+		return false
+	}
+	notice, ok := snapshot.Timeline[len(snapshot.Timeline)-1].Content.(domain.Notice)
+	return ok && notice.Kind == domain.NoticeKindInterrupted && notice.Reason == domain.NoticeReasonProcessRestart
 }
 
 func (c *Controller) createWorkspaceSession(ctx context.Context, title string) (domain.Session, error) {

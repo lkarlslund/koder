@@ -367,6 +367,15 @@ func (r *Chat) Close() {
 
 // DrainAndClose waits for the active turn to reach a persisted boundary, then closes the chat.
 func (r *Chat) DrainAndClose(ctx context.Context) error {
+	return r.closeAfterDrain(ctx, "")
+}
+
+// InterruptAndClose cancels active work, records why it was interrupted, and closes the chat.
+func (r *Chat) InterruptAndClose(ctx context.Context, reason string) error {
+	return r.closeAfterDrain(ctx, strings.TrimSpace(reason))
+}
+
+func (r *Chat) closeAfterDrain(ctx context.Context, interruptReason string) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -375,12 +384,22 @@ func (r *Chat) DrainAndClose(ctx context.Context) error {
 		r.mu.Unlock()
 		return nil
 	}
+	wasActive := r.active
 	r.draining = true
 	if r.active {
-		r.statusText = "Stopping after current turn"
+		if interruptReason == "" {
+			r.statusText = "Stopping after current turn"
+		} else {
+			r.statusText = "Interrupting..."
+			r.cancelState = CancelStateCancelling
+		}
 	}
+	cancel := r.cancel
 	r.mu.Unlock()
 	r.broadcast(r.snapshotUpdateFlags(nil, false, false, true, false, false))
+	if interruptReason != "" && cancel != nil {
+		cancel()
+	}
 
 	ticker := time.NewTicker(50 * time.Millisecond)
 	defer ticker.Stop()
@@ -395,6 +414,11 @@ func (r *Chat) DrainAndClose(ctx context.Context) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
+		}
+	}
+	if wasActive && interruptReason != "" {
+		if err := r.appendPersistedInterruptNotice(context.Background(), interruptReason); err != nil {
+			return err
 		}
 	}
 	if err := r.Persist(context.Background(), nil); err != nil {
@@ -611,7 +635,7 @@ func (r *Chat) handleInterrupt() {
 	if r.status == StatusRunningTools && len(r.running) > 0 {
 		if r.cancelState != CancelStateCancelling {
 			r.cancelState = CancelStateCancelling
-			r.appendRuntimeNoticeLocked("Cancelling. Tool calls running, waiting for completition. Press ESC again to cancel tool calls.", "interrupt_pending", "warning")
+			r.appendRuntimeNoticeLocked("Cancelling. Tool calls running, waiting for completion. Press ESC again to cancel tool calls.", "interrupt_pending", "warning")
 			r.statusText = "Cancelling..."
 			r.mu.Unlock()
 			r.broadcast(r.snapshotUpdateFlags(nil, true, false, true, false, false))
@@ -1222,6 +1246,56 @@ func (r *Chat) appendRuntimeNoticeLocked(body, kind, severity string) {
 		UpdatedAt: now,
 		SealedAt:  now,
 	})
+}
+
+func (r *Chat) appendPersistedInterruptNotice(ctx context.Context, reason string) error {
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		return nil
+	}
+	now := time.Now().UTC()
+	notice := domain.Notice{
+		Level:  "warning",
+		Text:   "Interrupted",
+		Kind:   domain.NoticeKindInterrupted,
+		Reason: reason,
+	}
+	var item domain.TimelineItem
+	var err error
+	if r.store != nil {
+		item, err = r.store.AppendTimeline(ctx, r.chat.ID, notice)
+		if err != nil {
+			return err
+		}
+		item.Seal(now)
+		if err := r.store.Timeline().Put(ctx, item); err != nil {
+			return err
+		}
+	} else {
+		item = domain.TimelineItem{
+			ID:        domain.NewTimelineID(now),
+			ChatID:    r.chat.ID,
+			Content:   notice,
+			CreatedAt: now,
+			UpdatedAt: now,
+			SealedAt:  now,
+		}
+	}
+	r.mu.Lock()
+	if r.state != nil {
+		r.state.UpsertTimelineItem(item)
+	}
+	r.chat.LastMessage = notice.Text
+	if r.state != nil {
+		r.state.UpdateChat(func(chat *domain.Chat) {
+			chat.LastMessage = notice.Text
+		})
+	}
+	r.status = StatusIdle
+	r.statusText = ""
+	r.mu.Unlock()
+	r.broadcast(r.snapshotUpdateFlags(nil, true, false, true, false, false))
+	return nil
 }
 
 func nextDispatchableIndex(items []domain.QueuedInput) int {

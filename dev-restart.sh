@@ -38,12 +38,17 @@ stop_koder() {
   if [[ -z "$pid" ]] || ! kill -0 "$pid" 2>/dev/null; then
     return 0
   fi
-  log "stopping koder pid=$pid"
-  kill -TERM "$pid" 2>/dev/null || true
+  log "stopping koder pid=$pid for restart"
+  kill -USR1 "$pid" 2>/dev/null || true
   while kill -0 "$pid" 2>/dev/null; do
     if (( waited >= STOP_TIMEOUT_SECONDS )); then
-      log "koder pid=$pid did not stop after ${STOP_TIMEOUT_SECONDS}s; killing"
-      kill -KILL "$pid" 2>/dev/null || true
+      log "koder pid=$pid did not stop after ${STOP_TIMEOUT_SECONDS}s; terminating"
+      kill -TERM "$pid" 2>/dev/null || true
+      sleep 2
+      if kill -0 "$pid" 2>/dev/null; then
+        log "koder pid=$pid did not terminate; killing"
+        kill -KILL "$pid" 2>/dev/null || true
+      fi
       break
     fi
     sleep 1

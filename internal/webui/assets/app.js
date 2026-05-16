@@ -109,12 +109,22 @@
     function noticeText(content) {
       return firstValue(content, ['title', 'Title', 'text', 'Text', 'kind', 'Kind']) || 'Notice';
     }
+    function noticeReasonText(reason) {
+      switch (String(reason || '').toLowerCase()) {
+        case 'user_interrupted': return 'user interrupted';
+        case 'process_terminating': return 'process terminating';
+        case 'process_restart': return 'process restarting';
+        default: return String(reason || '');
+      }
+    }
     function noticeDetail(content) {
       const parts = [];
-      for (const key of ['subtitle', 'Subtitle', 'reason', 'Reason']) {
+      for (const key of ['subtitle', 'Subtitle']) {
         const value = content && content[key];
         if (value) parts.push(String(value));
       }
+      const reason = noticeReasonText(firstValue(content, ['reason', 'Reason']));
+      if (reason) parts.push(reason);
       return parts.join(' · ');
     }
     function toolResultHeader(title) {

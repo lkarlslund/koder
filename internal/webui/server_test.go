@@ -475,6 +475,12 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `item.kind === 'notice'`) || !strings.Contains(fullPage, `noticeText(item.content || {})`) || !strings.Contains(fullPage, `.notice-warning`) || strings.Contains(fullPage, `JSON.stringify(item.content`) {
 		t.Fatalf("expected notices to render as compact UI instead of raw JSON")
 	}
+	if !strings.Contains(fullPage, `noticeReasonText`) ||
+		!strings.Contains(fullPage, `case 'user_interrupted': return 'user interrupted'`) ||
+		!strings.Contains(fullPage, `case 'process_terminating': return 'process terminating'`) ||
+		!strings.Contains(fullPage, `case 'process_restart': return 'process restarting'`) {
+		t.Fatalf("expected interruption notices to render readable reason text")
+	}
 	if !strings.Contains(fullPage, `function renderDiffBlock(title, diff)`) || !strings.Contains(fullPage, `tool-diff-add`) || !strings.Contains(fullPage, `tool-diff-del`) {
 		t.Fatalf("expected edit and patch results to use colored diff rendering")
 	}
