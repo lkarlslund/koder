@@ -296,6 +296,9 @@ func TestControllerSetModelUpdatesStoreStateAndRuntimeSnapshot(t *testing.T) {
 	if state.ContextWindow != 12345 {
 		t.Fatalf("expected context window 12345, got %d", state.ContextWindow)
 	}
+	if state.ModelInfo.ProviderID != "test" || state.ModelInfo.ModelID != "next-model" || state.ModelInfo.ContextWindow != 12345 || !state.ModelInfo.SupportsTools {
+		t.Fatalf("unexpected model info: %#v", state.ModelInfo)
+	}
 	session, err := st.GetSession(context.Background(), state.Session.ID)
 	if err != nil {
 		t.Fatalf("get session: %v", err)

@@ -589,6 +589,7 @@ type stateDelta struct {
 	TodosByRef    any       `json:"todos_by_milestone,omitempty"`
 	Workspace     any       `json:"workspace_status,omitempty"`
 	ContextWindow int       `json:"context_window,omitempty"`
+	ModelInfo     any       `json:"model_info,omitempty"`
 	Theme         string    `json:"theme,omitempty"`
 	Workdir       string    `json:"workdir,omitempty"`
 	Error         string    `json:"error,omitempty"`
@@ -702,6 +703,7 @@ func stateDeltaFromState(state uicore.State) stateDelta {
 		TodosByRef:    state.TodosByRef,
 		Workspace:     state.Workspace,
 		ContextWindow: state.ContextWindow,
+		ModelInfo:     state.ModelInfo,
 		Theme:         state.Theme,
 		Workdir:       state.Workdir,
 		Error:         state.Error,

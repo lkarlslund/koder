@@ -54,6 +54,7 @@ type State struct {
 	TodosByRef    map[string][]store.TodoItem `json:"todos_by_milestone"`
 	Workspace     workspacepkg.Status         `json:"workspace_status"`
 	ContextWindow int                         `json:"context_window"`
+	ModelInfo     ModelInfo                   `json:"model_info"`
 	Theme         string                      `json:"theme"`
 	Workdir       string                      `json:"workdir"`
 	Error         string                      `json:"error,omitempty"`
@@ -76,6 +77,18 @@ type ModelOption struct {
 	ModelID       string `json:"model_id"`
 	OwnedBy       string `json:"owned_by,omitempty"`
 	Current       bool   `json:"current"`
+}
+
+// ModelInfo describes the active model capabilities shown by renderers.
+type ModelInfo struct {
+	ProviderID        string `json:"provider_id"`
+	ModelID           string `json:"model_id"`
+	ContextWindow     int    `json:"context_window"`
+	SupportsTools     bool   `json:"supports_tools"`
+	SupportsImages    bool   `json:"supports_images"`
+	SupportsPDFs      bool   `json:"supports_pdfs"`
+	CapabilitiesKnown bool   `json:"capabilities_known"`
+	CapabilitySource  string `json:"capability_source,omitempty"`
 }
 
 // PermissionsState describes permission profiles available to renderers.
@@ -243,6 +256,7 @@ func (c *Controller) State() State {
 		TodosByRef:    cloneTodosByRef(c.todosByRef),
 		Workspace:     c.workspace,
 		ContextWindow: c.contextWindowLocked(),
+		ModelInfo:     c.modelInfoLocked(),
 		Theme:         c.theme,
 		Workdir:       c.workdir,
 		Error:         c.lastErr,
@@ -2008,6 +2022,33 @@ func (c *Controller) contextWindowLocked() int {
 		return providerCfg.ContextWindow
 	}
 	return 32768
+}
+
+func (c *Controller) modelInfoLocked() ModelInfo {
+	providerID := strings.TrimSpace(c.session.ProviderID)
+	modelID := strings.TrimSpace(c.session.ModelID)
+	providerCfg, ok := c.cfg.Provider(providerID)
+	if !ok {
+		providerCfg = config.Provider{}
+	}
+	info := ModelInfo{
+		ProviderID:    providerID,
+		ModelID:       modelID,
+		ContextWindow: c.contextWindowLocked(),
+		SupportsTools: true,
+	}
+	if modelID == "" {
+		return info
+	}
+	enriched, err := provider.NewCapabilityStore(c.cfg.StateDir()).EnrichModel(providerID, providerCfg, domain.Model{ID: modelID})
+	if err != nil {
+		return info
+	}
+	info.SupportsImages = enriched.SupportsImages
+	info.SupportsPDFs = enriched.SupportsPDFs
+	info.CapabilitiesKnown = enriched.CapabilitiesKnown
+	info.CapabilitySource = strings.TrimSpace(enriched.CapabilitySource)
+	return info
 }
 
 func (c *Controller) publishTo(ch chan Event, typ string, payload any) {

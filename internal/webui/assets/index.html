@@ -112,7 +112,7 @@
       <div class="sidebar-section">
         <div class="sidebar-info-row">
           <span class="sidebar-label">Model</span>
-          <button type="button" class="btn btn-link model-trigger p-0 text-start text-truncate" @click="openModelDialog()">
+          <button type="button" class="btn btn-link model-trigger p-0 text-start text-truncate" :title="activeModelTooltip()" @click="openModelDialog()">
             <i class="bi bi-cpu me-1 text-secondary"></i><span x-text="activeProvider()"></span> / <span x-text="activeModel()"></span>
           </button>
         </div>

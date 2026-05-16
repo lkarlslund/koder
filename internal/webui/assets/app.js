@@ -731,6 +731,31 @@
         },
         activeProvider() { return this.state.session?.provider_id || this.state.session?.ProviderID || ''; },
         activeModel() { return this.state.session?.model_id || this.state.session?.ModelID || ''; },
+        activeModelInfo() { return this.state.model_info || this.state.ModelInfo || {}; },
+        formatTokens(value) {
+          const n = Number(value || 0);
+          if (!Number.isFinite(n) || n <= 0) return 'unknown';
+          if (n >= 1000) return (n / 1000).toFixed(n >= 100000 ? 0 : 1).replace(/\.0$/, '') + 'K';
+          return String(Math.round(n));
+        },
+        capabilityLabel(value, known) {
+          if (value) return 'yes';
+          return known ? 'no' : 'unknown';
+        },
+        activeModelTooltip() {
+          const info = this.activeModelInfo();
+          const contextWindow = info.context_window || info.ContextWindow || this.state.context_window || this.state.ContextWindow || 0;
+          const known = !!(info.capabilities_known || info.CapabilitiesKnown);
+          const source = info.capability_source || info.CapabilitySource || '';
+          const lines = [
+            'Context: ' + this.formatTokens(contextWindow) + ' tokens',
+            'Tools: ' + (info.supports_tools === false || info.SupportsTools === false ? 'no' : 'yes'),
+            'Images: ' + this.capabilityLabel(info.supports_images || info.SupportsImages, known),
+            'PDFs: ' + this.capabilityLabel(info.supports_pdfs || info.SupportsPDFs, known),
+          ];
+          if (source) lines.push('Source: ' + source);
+          return lines.join('\n');
+        },
         milestones() { return this.state.milestones || this.state.Milestones || {}; },
         milestoneItems() { return this.milestones().milestones || this.milestones().Milestones || []; },
         milestoneSummary() { return this.milestones().summary || this.milestones().Summary || ''; },

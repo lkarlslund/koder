@@ -611,6 +611,12 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `openModelDialog()`) {
 		t.Fatalf("expected model text to open model dialog")
 	}
+	if !strings.Contains(fullPage, `:title="activeModelTooltip()"`) ||
+		!strings.Contains(fullPage, `Context: `) ||
+		!strings.Contains(fullPage, `Images: `) ||
+		!strings.Contains(fullPage, `PDFs: `) {
+		t.Fatalf("expected model sidebar hover tooltip to show context and capabilities")
+	}
 	if !strings.Contains(fullPage, `list_models`) {
 		t.Fatalf("expected model dialog to list models")
 	}
