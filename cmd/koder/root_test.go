@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/spf13/cobra"
 
@@ -159,15 +158,14 @@ func TestWorkspaceWebBindRoundTrip(t *testing.T) {
 	st := newRootTestStore(t)
 	workdir := t.TempDir()
 
-	if bind, cached := webBindForLaunch(context.Background(), st, workdir, startupConfig{WebBind: defaultWebBind}); bind != defaultWebBind || cached {
-		t.Fatalf("expected default bind before cache, got bind=%q cached=%v", bind, cached)
+	if bind := webBindForLaunch(startupConfig{WebBind: defaultWebBind}); bind != defaultWebBind {
+		t.Fatalf("expected default bind before cache, got bind=%q", bind)
 	}
 	if err := saveWorkspaceWebBind(context.Background(), st, workdir, "127.0.0.1:45678"); err != nil {
 		t.Fatalf("save bind: %v", err)
 	}
-	bind, cached := webBindForLaunch(context.Background(), st, workdir, startupConfig{WebBind: defaultWebBind})
-	if bind != "127.0.0.1:45678" || !cached {
-		t.Fatalf("expected cached bind, got bind=%q cached=%v", bind, cached)
+	if bind := webBindForLaunch(startupConfig{WebBind: defaultWebBind}); bind != defaultWebBind {
+		t.Fatalf("expected launch to ignore saved bind, got bind=%q", bind)
 	}
 	state, err := st.GetWorkspaceState(context.Background(), workdir)
 	if err != nil {
@@ -185,53 +183,28 @@ func TestWorkspaceWebBindRespectsExplicitBind(t *testing.T) {
 		t.Fatalf("save bind: %v", err)
 	}
 
-	bind, cached := webBindForLaunch(context.Background(), st, workdir, startupConfig{WebBind: "127.0.0.1:0", WebBindExplicit: true})
-	if bind != "127.0.0.1:0" || cached {
-		t.Fatalf("expected explicit ephemeral bind, got bind=%q cached=%v", bind, cached)
+	bind := webBindForLaunch(startupConfig{WebBind: "127.0.0.1:0", WebBindExplicit: true})
+	if bind != "127.0.0.1:0" {
+		t.Fatalf("expected explicit ephemeral bind, got bind=%q", bind)
 	}
-	bind, cached = webBindForLaunch(context.Background(), st, workdir, startupConfig{WebBind: "127.0.0.1:33333", WebBindExplicit: true})
-	if bind != "127.0.0.1:33333" || cached {
-		t.Fatalf("expected explicit fixed bind, got bind=%q cached=%v", bind, cached)
+	bind = webBindForLaunch(startupConfig{WebBind: "127.0.0.1:33333", WebBindExplicit: true})
+	if bind != "127.0.0.1:33333" {
+		t.Fatalf("expected explicit fixed bind, got bind=%q", bind)
 	}
 }
 
-func TestWorkspaceWebBindIgnoresEphemeralRecords(t *testing.T) {
+func TestWorkspaceWebBindIgnoresSavedEphemeralRecordsForLaunch(t *testing.T) {
 	st := newRootTestStore(t)
 	workdir := t.TempDir()
 	if err := saveWorkspaceWebBind(context.Background(), st, workdir, "127.0.0.1:0"); err != nil {
 		t.Fatalf("save bind: %v", err)
 	}
-	bind, cached := webBindForLaunch(context.Background(), st, workdir, startupConfig{WebBind: defaultWebBind})
-	if bind != defaultWebBind || cached {
-		t.Fatalf("expected default bind after ephemeral record, got bind=%q cached=%v", bind, cached)
+	if bind := webBindForLaunch(startupConfig{WebBind: defaultWebBind}); bind != defaultWebBind {
+		t.Fatalf("expected default bind after ephemeral record, got bind=%q", bind)
 	}
 }
 
-func TestStartWebUIRetriesCachedBind(t *testing.T) {
-	ctrl := newRootTestController(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listen: %v", err)
-	}
-	bind := listener.Addr().String()
-	go func() {
-		time.Sleep(50 * time.Millisecond)
-		_ = listener.Close()
-	}()
-
-	server, err := startWebUIWithRetry(ctx, ctrl, bind, true, true, nil, 500*time.Millisecond, 10*time.Millisecond)
-	if err != nil {
-		t.Fatalf("start web ui: %v", err)
-	}
-	if server.Addr() != bind {
-		t.Fatalf("expected cached bind %q after retry, got %q", bind, server.Addr())
-	}
-}
-
-func TestStartWebUIFallsBackWhenCachedBindStaysBusy(t *testing.T) {
+func TestStartWebUISurfacesBindError(t *testing.T) {
 	ctrl := newRootTestController(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
@@ -243,12 +216,8 @@ func TestStartWebUIFallsBackWhenCachedBindStaysBusy(t *testing.T) {
 	t.Cleanup(func() { _ = listener.Close() })
 	bind := listener.Addr().String()
 
-	server, err := startWebUIWithRetry(ctx, ctrl, bind, true, true, nil, 50*time.Millisecond, 10*time.Millisecond)
-	if err != nil {
-		t.Fatalf("start web ui: %v", err)
-	}
-	if server.Addr() == bind {
-		t.Fatalf("expected fallback bind while %q stays busy", bind)
+	if _, err := startWebUI(ctx, ctrl, bind, true, nil); err == nil {
+		t.Fatalf("expected bind error while %q stays busy", bind)
 	}
 }
 

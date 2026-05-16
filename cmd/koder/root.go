@@ -34,8 +34,6 @@ import (
 )
 
 const defaultWebBind = "127.0.0.1:0"
-const cachedWebBindRetryTimeout = 30 * time.Second
-const cachedWebBindRetryInterval = 100 * time.Millisecond
 
 func NewRootCommand() *cobra.Command {
 	opts := startupOptions{}
@@ -181,8 +179,8 @@ func runWeb(ctx context.Context, cfg config.Config, st *store.Store, engine *age
 	if err := controller.Start(ctx, mode); err != nil {
 		return err
 	}
-	bind, cachedBind := webBindForLaunch(ctx, st, workdir, startupOpts)
-	server, err := startWebUI(ctx, controller, bind, cachedBind, startupOpts.NoBrowser, recorder)
+	bind := webBindForLaunch(startupOpts)
+	server, err := startWebUI(ctx, controller, bind, startupOpts.NoBrowser, recorder)
 	if err != nil {
 		return err
 	}
@@ -213,51 +211,12 @@ func runWeb(ctx context.Context, cfg config.Config, st *store.Store, engine *age
 	}
 }
 
-func startWebUI(ctx context.Context, controller *uicore.Controller, bind string, cachedBind bool, noBrowser bool, recorder *debugsrv.Recorder) (*webui.Server, error) {
-	return startWebUIWithRetry(ctx, controller, bind, cachedBind, noBrowser, recorder, cachedWebBindRetryTimeout, cachedWebBindRetryInterval)
-}
-
-func startWebUIWithRetry(ctx context.Context, controller *uicore.Controller, bind string, cachedBind bool, noBrowser bool, recorder *debugsrv.Recorder, retryTimeout time.Duration, retryInterval time.Duration) (*webui.Server, error) {
-	server, err := webui.Start(ctx, controller, webui.Options{
+func startWebUI(ctx context.Context, controller *uicore.Controller, bind string, noBrowser bool, recorder *debugsrv.Recorder) (*webui.Server, error) {
+	return webui.Start(ctx, controller, webui.Options{
 		Bind:      bind,
 		NoBrowser: noBrowser,
 		Debug:     recorder,
 	})
-	if err == nil || !cachedBind {
-		return server, err
-	}
-	timer := time.NewTimer(retryTimeout)
-	defer timer.Stop()
-	ticker := time.NewTicker(retryInterval)
-	defer ticker.Stop()
-	lastErr := err
-	for {
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-ticker.C:
-			server, err = webui.Start(ctx, controller, webui.Options{
-				Bind:      bind,
-				NoBrowser: noBrowser,
-				Debug:     recorder,
-			})
-			if err == nil {
-				return server, nil
-			}
-			lastErr = err
-		case <-timer.C:
-			fmt.Fprintf(os.Stderr, "koder web ui: cached bind %s unavailable after %s, falling back to %s\n", bind, retryTimeout, defaultWebBind)
-			server, err = webui.Start(ctx, controller, webui.Options{
-				Bind:      defaultWebBind,
-				NoBrowser: noBrowser,
-				Debug:     recorder,
-			})
-			if err != nil {
-				return nil, fmt.Errorf("start cached web ui on %s: %w; fallback failed: %v", bind, lastErr, err)
-			}
-			return server, nil
-		}
-	}
 }
 
 func startupOptsFromFlags(opts startupOptions, showAllSessions bool) startupConfig {
@@ -269,33 +228,12 @@ func startupOptsFromFlags(opts startupOptions, showAllSessions bool) startupConf
 	}
 }
 
-func webBindForLaunch(ctx context.Context, st *store.Store, workdir string, startupOpts startupConfig) (string, bool) {
+func webBindForLaunch(startupOpts startupConfig) string {
 	bind := strings.TrimSpace(startupOpts.WebBind)
 	if bind == "" {
 		bind = defaultWebBind
 	}
-	if startupOpts.WebBindExplicit || bind != defaultWebBind {
-		return bind, false
-	}
-	cached, err := loadWorkspaceWebBind(ctx, st, workdir)
-	if err != nil || cached == "" {
-		return bind, false
-	}
-	return cached, true
-}
-
-func loadWorkspaceWebBind(ctx context.Context, st *store.Store, workdir string) (string, error) {
-	if st == nil {
-		return "", nil
-	}
-	state, err := st.GetWorkspaceState(ctx, workdir)
-	if err != nil {
-		return "", err
-	}
-	if !isReusableWebBind(state.WebBind) {
-		return "", nil
-	}
-	return strings.TrimSpace(state.WebBind), nil
+	return bind
 }
 
 func saveWorkspaceWebBind(ctx context.Context, st *store.Store, workdir, bind string) error {
