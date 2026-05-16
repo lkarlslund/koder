@@ -22,7 +22,7 @@ func newSkillCommand() *cobra.Command {
 		Use:   "skill",
 		Short: "Manage koder skills",
 	}
-	cmd.AddCommand(newSkillValidateCommand(), newSkillListCommand())
+	cmd.AddCommand(newSkillValidateCommand(), newSkillVerifyCommand(), newSkillListCommand())
 	return cmd
 }
 
@@ -36,6 +36,34 @@ func newSkillValidateCommand() *cobra.Command {
 			return validateSkill(args[0])
 		},
 	}
+}
+
+// newSkillVerifyCommand returns `koder skill verify <name>`.
+func newSkillVerifyCommand() *cobra.Command {
+	var workdir string
+	verifyCmd := &cobra.Command{
+		Use:   "verify <name>",
+		Short: "Verify a known skill by name through discovery",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			dir := strings.TrimSpace(workdir)
+			if dir == "" {
+				var err error
+				dir, err = os.Getwd()
+				if err != nil {
+					return err
+				}
+			}
+			sk, found := skills.Find(dir, args[0])
+			if !found {
+				return fmt.Errorf("skill %q not found; run 'koder skill list' to see available skills", args[0])
+			}
+			fmt.Fprintf(os.Stderr, "Found skill %q at %s\n", sk.Name, sk.Path)
+			return validateSkill(sk.Path)
+		},
+	}
+	verifyCmd.Flags().StringVar(&workdir, "workdir", "", "Working directory for skill discovery (default: $PWD)")
+	return verifyCmd
 }
 
 // discoveryPath holds one directory koder searches for skills.
