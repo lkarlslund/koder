@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -270,9 +271,56 @@ func TestControllerModelOptionsLoadsConfiguredModels(t *testing.T) {
 	for _, option := range options {
 		got = append(got, option.ProviderID+"/"+option.ModelID)
 	}
-	want := []string{"test/a-model", "test/default-model", "test/model", "test/z-model"}
+	want := []string{"test/a-model", "test/default-model", "test/z-model"}
 	if fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Fatalf("expected options %v, got %v", want, got)
+	}
+}
+
+func TestControllerModelOptionsDoesNotInventMissingCurrentProvider(t *testing.T) {
+	ctrl, st := newTestControllerWithConfig(t, func(cfg *config.Config) {
+		cfg.Providers = map[string]config.Provider{
+			"test": {Name: "Test Provider", BaseURL: "https://example.invalid/v1", DefaultModel: "configured-model"},
+		}
+	})
+	session := ctrl.State().Session
+	if err := st.SetSessionModel(context.Background(), session.ID, "ghost", "ghost-model"); err != nil {
+		t.Fatal(err)
+	}
+	session, err := st.GetSession(context.Background(), session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctrl.mu.Lock()
+	ctrl.session = session
+	ctrl.mu.Unlock()
+
+	options, err := ctrl.ModelOptions(context.Background())
+	if err != nil {
+		t.Fatalf("model options: %v", err)
+	}
+	for _, option := range options {
+		if option.ProviderID == "ghost" || option.ModelID == "ghost-model" {
+			t.Fatalf("unexpected stale current model option: %#v", options)
+		}
+	}
+}
+
+func TestControllerModelOptionsReportsProviderFailureWithoutDefaults(t *testing.T) {
+	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "down", http.StatusInternalServerError)
+	}))
+	defer modelServer.Close()
+
+	ctrl, _ := newTestControllerWithConfig(t, func(cfg *config.Config) {
+		cfg.Providers = map[string]config.Provider{
+			"test": {Name: "Test Provider", BaseURL: modelServer.URL + "/v1"},
+		}
+	})
+
+	_, err := ctrl.ModelOptions(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "failed to load models from test") {
+		t.Fatalf("expected provider failure, got %v", err)
 	}
 }
 

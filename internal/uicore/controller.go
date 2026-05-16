@@ -966,13 +966,6 @@ func (c *Controller) ModelOptions(ctx context.Context) ([]ModelOption, error) {
 			add(providerID, providerCfg, model)
 		}
 	}
-	if currentProvider != "" && currentModel != "" {
-		if providerCfg, ok := c.cfg.Provider(currentProvider); ok {
-			add(currentProvider, providerCfg, domain.Model{ID: currentModel})
-		} else {
-			add(currentProvider, config.Provider{Name: currentProvider}, domain.Model{ID: currentModel})
-		}
-	}
 	slices.SortFunc(options, func(a, b ModelOption) int {
 		if cmp := strings.Compare(a.ProviderLabel, b.ProviderLabel); cmp != 0 {
 			return cmp
