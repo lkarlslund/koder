@@ -589,18 +589,18 @@ func EmitOnce(evt domain.Event) <-chan domain.Event {
 
 func normalizeRequest(req Request) (Request, Tool, error) {
 	if req.Tool == "" {
-		return Request{}, nil, errors.New("tool is empty")
+		return req, nil, errors.New("tool is empty")
 	}
 	tool, ok := Lookup(req.Tool)
 	if !ok {
-		return Request{}, nil, fmt.Errorf("unsupported tool %q", req.Tool)
+		return req, nil, fmt.Errorf("unsupported tool %q", req.Tool)
 	}
 	if req.Args == nil {
 		req.Args = map[string]string{}
 	}
 	args, err := tool.NormalizeArgs(req.Args)
 	if err != nil {
-		return Request{}, nil, err
+		return req, nil, err
 	}
 	req.Args = args
 	return req, tool, nil

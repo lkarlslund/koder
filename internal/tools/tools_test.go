@@ -334,3 +334,26 @@ func TestParseReadStoredLinesAcceptsColonAndLegacyFormats(t *testing.T) {
 		t.Fatalf("unexpected legacy parsed lines: %#v", lines)
 	}
 }
+
+func TestNormalizeFailurePreservesRequestIdentity(t *testing.T) {
+	// When Normalize fails (e.g. empty bash command), the returned request
+	// must preserve Tool, ToolCallID, and Args so the caller can attach an
+	// error result to the persisted tool call.
+
+	// Empty bash command
+	req := tools.Request{
+		Tool:       domain.ToolKindBash,
+		ToolCallID: "call_abc123",
+		Args:       map[string]string{"command": ""},
+	}
+	_, err := tools.Normalize(req)
+	if err == nil {
+		t.Fatal("expected error for empty bash command")
+	}
+	if got := req.Tool; got != domain.ToolKindBash {
+		t.Errorf("expected Tool to be %q, got %q", domain.ToolKindBash, got)
+	}
+	if got := req.ToolCallID; got != "call_abc123" {
+		t.Errorf("expected ToolCallID to be %q, got %q", "call_abc123", got)
+	}
+}
