@@ -2749,6 +2749,12 @@ func TestHandleModelToolCallAsksForOutsideProjectRead(t *testing.T) {
 	}
 	session.PermissionProfile = permissionprofile.ProfileReadAsk
 	session.ProjectRoot = workdir
+	if err := st.SetSessionPermissionProfile(context.Background(), session.ID, permissionprofile.ProfileReadAsk); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpdateSessionWorkspace(context.Background(), session.ID, workdir, workdir); err != nil {
+		t.Fatal(err)
+	}
 
 	outsideDir := t.TempDir()
 	outsidePath := filepath.Join(outsideDir, "outside.txt")
@@ -2791,6 +2797,12 @@ func TestHandleModelToolCallAllowsProjectReadInReadAskMode(t *testing.T) {
 	}
 	session.PermissionProfile = permissionprofile.ProfileReadAsk
 	session.ProjectRoot = workdir
+	if err := st.SetSessionPermissionProfile(context.Background(), session.ID, permissionprofile.ProfileReadAsk); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpdateSessionWorkspace(context.Background(), session.ID, workdir, workdir); err != nil {
+		t.Fatal(err)
+	}
 
 	targetPath := filepath.Join(workdir, "inside.txt")
 	if err := os.WriteFile(targetPath, []byte("hello"), 0o644); err != nil {
@@ -2832,6 +2844,12 @@ func TestHandleModelToolCallAllowsProjectCodeSearchInReadAskMode(t *testing.T) {
 	}
 	session.PermissionProfile = permissionprofile.ProfileReadAsk
 	session.ProjectRoot = workdir
+	if err := st.SetSessionPermissionProfile(context.Background(), session.ID, permissionprofile.ProfileReadAsk); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpdateSessionWorkspace(context.Background(), session.ID, workdir, workdir); err != nil {
+		t.Fatal(err)
+	}
 
 	chat := defaultChatForSession(t, st, session.ID)
 	evt, err := engine.handleModelToolCall(context.Background(), session, chat, tools.Request{
@@ -3454,6 +3472,12 @@ func TestHandleModelToolCallRequiresApprovalForSkill(t *testing.T) {
 	}
 	session.PermissionProfile = permissionprofile.ProfileAsk
 	session.ProjectRoot = workdir
+	if err := st.SetSessionPermissionProfile(context.Background(), session.ID, permissionprofile.ProfileAsk); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpdateSessionWorkspace(context.Background(), session.ID, workdir, workdir); err != nil {
+		t.Fatal(err)
+	}
 
 	chat := defaultChatForSession(t, st, session.ID)
 	_, err = engine.handleModelToolCall(context.Background(), session, chat, tools.Request{
@@ -3519,6 +3543,12 @@ func TestHandleModelToolCallAllowsProjectWriteInWriteAskMode(t *testing.T) {
 	}
 	session.PermissionProfile = permissionprofile.ProfileWriteAsk
 	session.ProjectRoot = workdir
+	if err := st.SetSessionPermissionProfile(context.Background(), session.ID, permissionprofile.ProfileWriteAsk); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpdateSessionWorkspace(context.Background(), session.ID, workdir, workdir); err != nil {
+		t.Fatal(err)
+	}
 
 	chat := defaultChatForSession(t, st, session.ID)
 	evt, err := engine.handleModelToolCall(context.Background(), session, chat, tools.Request{
@@ -3552,6 +3582,12 @@ func TestHandleModelToolCallAsksForBashInWriteAskMode(t *testing.T) {
 	}
 	session.PermissionProfile = permissionprofile.ProfileWriteAsk
 	session.ProjectRoot = workdir
+	if err := st.SetSessionPermissionProfile(context.Background(), session.ID, permissionprofile.ProfileWriteAsk); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpdateSessionWorkspace(context.Background(), session.ID, workdir, workdir); err != nil {
+		t.Fatal(err)
+	}
 
 	chat := defaultChatForSession(t, st, session.ID)
 	req := tools.Request{

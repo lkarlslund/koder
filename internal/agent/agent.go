@@ -3078,106 +3078,30 @@ func (e *Engine) estimateCompactedTimelineContextTokens(session domain.Session, 
 }
 
 func (e *Engine) handleModelToolCall(ctx context.Context, session domain.Session, chat domain.Chat, req tools.Request) (domain.Event, error) {
-	sessionID := session.ID
-	if sessionID != "" {
-		if latest, err := e.store.GetSession(ctx, sessionID); err == nil {
-			if strings.TrimSpace(latest.PermissionProfile) == "" {
-				latest.PermissionProfile = session.PermissionProfile
-			}
-			if strings.TrimSpace(latest.ProjectRoot) == "" {
-				latest.ProjectRoot = session.ProjectRoot
-			}
-			session = latest
-		}
-	}
-	if chat.ID != "" {
-		if latest, err := e.store.GetChat(ctx, chat.ID); err == nil {
-			if strings.TrimSpace(latest.PermissionProfile) == "" {
-				latest.PermissionProfile = chat.PermissionProfile
-			}
-			chat = latest
-		}
-	}
-	req, err := tools.Normalize(req)
-	if err != nil {
-		events, persistErr := e.persistToolFailure(ctx, chat.ID, sessionID, req, err)
-		if persistErr != nil {
-			return domain.Event{}, persistErr
-		}
-		final := <-events
-		return final, nil
-	}
-	toolSpec, ok := tools.Lookup(req.Tool)
-	if !ok {
-		return domain.Event{}, fmt.Errorf("unsupported model tool %q", req.Tool)
-	}
-	if !toolEnabledForSession(e.cfg, session, req.Tool) {
-		return e.recordDisabledToolResult(ctx, chat.ID, sessionID, req)
-	}
-	if !chatrole.AllowsTool(chat.WorkflowRole, req.Tool) {
-		return e.recordRoleDeniedToolResult(ctx, chat.ID, sessionID, req, chat.WorkflowRole)
-	}
-
-	decision := permissionprofile.Decision{Mode: domain.PermissionModeAllow}
-	if !toolSpec.BypassesPermission() {
-		decision = permissionprofile.Evaluate(e.cfg.Permissions, e.effectivePermissionProfile(ctx, session, chat), session.PermissionRules, e.permissionRequest(session, req))
-	}
-	if decision.Mode == domain.PermissionModeDeny {
-		text := fmt.Sprintf("%s denied by policy", req.Tool)
-		if strings.TrimSpace(decision.Reason) != "" {
-			text = fmt.Sprintf("%s denied by policy: %s", req.Tool, decision.Reason)
-		}
-		item, err := e.recordDeniedToolResult(ctx, chat.ID, req, text)
-		if err != nil {
-			return domain.Event{}, err
-		}
-		return domain.Event{Kind: domain.EventKindToolResult, Tool: req.Tool, ToolCallID: req.ToolCallID, Text: text, Item: item}, nil
-	}
-	if decision.Mode == domain.PermissionModeAsk {
-		preview := tools.Preview(req)
-		approvalItem, err := e.recordApprovalRequest(ctx, chat.ID, sessionID, req.Tool, req.ToolCallID, preview, req.ToolCallID)
-		if err != nil {
-			return domain.Event{}, err
-		}
-		text := fmt.Sprintf("%s requires approval", req.Tool)
-		if strings.TrimSpace(decision.Reason) != "" {
-			text += ": " + decision.Reason
-		}
-		return domain.Event{
-			Kind: domain.EventKindApprovalAsk,
-			Text: text,
-			Tool: req.Tool,
-			Item: approvalItem,
-			Meta: map[string]string{
-				"approval_id":  store.SyntheticApprovalID(req.ToolCallID),
-				"tool":         string(req.Tool),
-				"command":      preview,
-				"reason":       decision.Reason,
-				"tool_call_id": req.ToolCallID,
-			},
-		}, nil
-	}
-	result, err := e.registry.ExecuteWithChat(ctx, e.store, sessionID, chat, req)
-	if err != nil {
-		events, persistErr := e.persistToolFailure(ctx, chat.ID, sessionID, req, err)
-		if persistErr != nil {
-			return domain.Event{}, persistErr
-		}
-		final := <-events
-		return final, nil
-	}
-	evt, err := e.persistToolResult(ctx, chat.ID, sessionID, req, result)
+	prepared, err := e.prepareModelToolCall(ctx, session, chat, req)
 	if err != nil {
 		return domain.Event{}, err
 	}
-	final := <-evt
+	if !prepared.run {
+		return prepared.event, nil
+	}
+	events, err := e.executePreparedToolCall(ctx, prepared.chatID, prepared.sessionID, prepared.req)
+	if err != nil {
+		return domain.Event{}, err
+	}
+	var final domain.Event
+	for _, evt := range events {
+		final = evt
+	}
 	return final, nil
 }
 
 type preparedToolCall struct {
-	req   tools.Request
-	event domain.Event
-	run   bool
+	req       tools.Request
+	event     domain.Event
+	run       bool
+	sessionID domain.ID
+	chatID    domain.ID
 }
 
 type completedToolCall struct {
@@ -3317,7 +3241,7 @@ func (e *Engine) handleModelToolCalls(ctx context.Context, session domain.Sessio
 		}
 		out <- domain.Event{Kind: domain.EventKindToolStart, Tool: item.req.Tool, ToolCallID: item.req.ToolCallID, Text: tools.Preview(item.req)}
 		go func(req tools.Request) {
-			events, err := e.executePreparedToolCall(ctx, chat.ID, session.ID, req)
+			events, err := e.executePreparedToolCall(ctx, item.chatID, item.sessionID, req)
 			results <- completedToolCall{events: events, err: err}
 		}(item.req)
 	}
@@ -3352,64 +3276,42 @@ func (e *Engine) handleModelToolCalls(ctx context.Context, session domain.Sessio
 }
 
 func (e *Engine) prepareModelToolCall(ctx context.Context, session domain.Session, chat domain.Chat, req tools.Request) (preparedToolCall, error) {
-	sessionID := session.ID
-	if sessionID != "" {
-		if latest, err := e.store.GetSession(ctx, sessionID); err == nil {
-			if strings.TrimSpace(latest.PermissionProfile) == "" {
-				latest.PermissionProfile = session.PermissionProfile
-			}
-			if strings.TrimSpace(latest.ProjectRoot) == "" {
-				latest.ProjectRoot = session.ProjectRoot
-			}
-			session = latest
-		}
-	}
-	if chat.ID != "" {
-		if latest, err := e.store.GetChat(ctx, chat.ID); err == nil {
-			if strings.TrimSpace(latest.PermissionProfile) == "" {
-				latest.PermissionProfile = chat.PermissionProfile
-			}
-			chat = latest
-		}
-	}
-	req, err := tools.Normalize(req)
+	session, chat, err := e.persistedToolCallState(ctx, session, chat)
 	if err != nil {
-		events, persistErr := e.persistToolFailure(ctx, chat.ID, sessionID, req, err)
+		return preparedToolCall{}, err
+	}
+	out := preparedToolCall{sessionID: session.ID, chatID: chat.ID}
+	req, err = tools.Normalize(req)
+	if err != nil {
+		events, persistErr := e.persistToolFailure(ctx, chat.ID, session.ID, req, err)
 		if persistErr != nil {
 			return preparedToolCall{}, persistErr
 		}
 		final := <-events
-		return preparedToolCall{
-			req:   req,
-			event: final,
-			run:   false,
-		}, nil
+		out.req = req
+		out.event = final
+		return out, nil
 	}
+	out.req = req
 	toolSpec, ok := tools.Lookup(req.Tool)
 	if !ok {
 		return preparedToolCall{}, fmt.Errorf("unsupported model tool %q", req.Tool)
 	}
 	if !toolEnabledForSession(e.cfg, session, req.Tool) {
-		evt, err := e.recordDisabledToolResult(ctx, chat.ID, sessionID, req)
+		evt, err := e.recordDisabledToolResult(ctx, chat.ID, session.ID, req)
 		if err != nil {
 			return preparedToolCall{}, err
 		}
-		return preparedToolCall{
-			req:   req,
-			event: evt,
-			run:   false,
-		}, nil
+		out.event = evt
+		return out, nil
 	}
 	if !chatrole.AllowsTool(chat.WorkflowRole, req.Tool) {
-		evt, err := e.recordRoleDeniedToolResult(ctx, chat.ID, sessionID, req, chat.WorkflowRole)
+		evt, err := e.recordRoleDeniedToolResult(ctx, chat.ID, session.ID, req, chat.WorkflowRole)
 		if err != nil {
 			return preparedToolCall{}, err
 		}
-		return preparedToolCall{
-			req:   req,
-			event: evt,
-			run:   false,
-		}, nil
+		out.event = evt
+		return out, nil
 	}
 
 	decision := permissionprofile.Decision{Mode: domain.PermissionModeAllow}
@@ -3425,14 +3327,12 @@ func (e *Engine) prepareModelToolCall(ctx context.Context, session domain.Sessio
 		if err != nil {
 			return preparedToolCall{}, err
 		}
-		return preparedToolCall{
-			req:   req,
-			event: domain.Event{Kind: domain.EventKindToolResult, Tool: req.Tool, ToolCallID: req.ToolCallID, Text: text, Item: item},
-		}, nil
+		out.event = domain.Event{Kind: domain.EventKindToolResult, Tool: req.Tool, ToolCallID: req.ToolCallID, Text: text, Item: item}
+		return out, nil
 	}
 	if decision.Mode == domain.PermissionModeAsk {
 		preview := tools.Preview(req)
-		approvalItem, err := e.recordApprovalRequest(ctx, chat.ID, sessionID, req.Tool, req.ToolCallID, preview, req.ToolCallID)
+		approvalItem, err := e.recordApprovalRequest(ctx, chat.ID, session.ID, req.Tool, req.ToolCallID, preview, req.ToolCallID)
 		if err != nil {
 			return preparedToolCall{}, err
 		}
@@ -3440,24 +3340,41 @@ func (e *Engine) prepareModelToolCall(ctx context.Context, session domain.Sessio
 		if strings.TrimSpace(decision.Reason) != "" {
 			text += ": " + decision.Reason
 		}
-		return preparedToolCall{
-			req: req,
-			event: domain.Event{
-				Kind: domain.EventKindApprovalAsk,
-				Text: text,
-				Tool: req.Tool,
-				Item: approvalItem,
-				Meta: map[string]string{
-					"approval_id":  store.SyntheticApprovalID(req.ToolCallID),
-					"tool":         string(req.Tool),
-					"command":      preview,
-					"reason":       decision.Reason,
-					"tool_call_id": req.ToolCallID,
-				},
+		out.event = domain.Event{
+			Kind: domain.EventKindApprovalAsk,
+			Text: text,
+			Tool: req.Tool,
+			Item: approvalItem,
+			Meta: map[string]string{
+				"approval_id":  store.SyntheticApprovalID(req.ToolCallID),
+				"tool":         string(req.Tool),
+				"command":      preview,
+				"reason":       decision.Reason,
+				"tool_call_id": req.ToolCallID,
 			},
-		}, nil
+		}
+		return out, nil
 	}
-	return preparedToolCall{req: req, run: true}, nil
+	out.run = true
+	return out, nil
+}
+
+func (e *Engine) persistedToolCallState(ctx context.Context, session domain.Session, chat domain.Chat) (domain.Session, domain.Chat, error) {
+	if session.ID != "" {
+		latest, err := e.store.GetSession(ctx, session.ID)
+		if err != nil {
+			return domain.Session{}, domain.Chat{}, err
+		}
+		session = latest
+	}
+	if chat.ID != "" {
+		latest, err := e.store.GetChat(ctx, chat.ID)
+		if err != nil {
+			return domain.Session{}, domain.Chat{}, err
+		}
+		chat = latest
+	}
+	return session, chat, nil
 }
 
 func (e *Engine) recordDisabledToolResult(ctx context.Context, chatID, sessionID domain.ID, req tools.Request) (domain.Event, error) {
