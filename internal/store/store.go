@@ -107,13 +107,6 @@ type TodoItem struct {
 	UpdatedAt    time.Time
 }
 
-type WorkspaceState struct {
-	ID        domain.ID `json:"id"`
-	Workdir   string    `json:"workdir"`
-	WebBind   string    `json:"web_bind"`
-	UpdatedAt time.Time `json:"updated_at"`
-}
-
 type RuntimeState struct {
 	ID          string    `json:"id"`
 	LastWebBind string    `json:"last_web_bind"`

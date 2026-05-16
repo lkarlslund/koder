@@ -272,38 +272,6 @@ func TestGenericCollectionTransactionPersistsMultipleCollections(t *testing.T) {
 	}
 }
 
-func TestWorkspaceStateWebBindRoundTrip(t *testing.T) {
-	for _, backend := range []string{BackendPebble, BackendJSONFS} {
-		t.Run(backend, func(t *testing.T) {
-			dir := t.TempDir()
-			st := openTestStoreAt(t, backend, dir)
-			workdir := filepath.Join(t.TempDir(), "repo")
-			if err := st.SetWorkspaceWebBind(context.Background(), workdir, "127.0.0.1:45678"); err != nil {
-				t.Fatal(err)
-			}
-			state, err := st.GetWorkspaceState(context.Background(), workdir)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if state.ID == "" || state.WebBind != "127.0.0.1:45678" {
-				t.Fatalf("unexpected workspace state: %#v", state)
-			}
-			if err := st.Close(); err != nil {
-				t.Fatal(err)
-			}
-
-			reopened := openTestStoreAt(t, backend, dir)
-			state, err = reopened.GetWorkspaceState(context.Background(), workdir)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if state.WebBind != "127.0.0.1:45678" {
-				t.Fatalf("unexpected reloaded workspace state: %#v", state)
-			}
-		})
-	}
-}
-
 func TestGlobalRuntimeStateLastWebBindRoundTrip(t *testing.T) {
 	for _, backend := range []string{BackendPebble, BackendJSONFS} {
 		t.Run(backend, func(t *testing.T) {

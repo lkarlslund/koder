@@ -112,18 +112,6 @@ func (s *Store) Approvals() Collection[Approval] {
 	})
 }
 
-// WorkspaceStates returns the generic workspace state collection.
-func (s *Store) WorkspaceStates() Collection[WorkspaceState] {
-	return NewCollection(s, CollectionSpec[WorkspaceState]{
-		Namespace: "workspace-states",
-		GetID:     func(v WorkspaceState) string { return v.ID },
-		SetID:     func(v *WorkspaceState, id string) { v.ID = id },
-		Indexes: []IndexSpec[WorkspaceState]{
-			{Name: "workdir", Value: func(v WorkspaceState) string { return v.Workdir }},
-		},
-	})
-}
-
 // RuntimeStates returns the generic runtime state collection.
 func (s *Store) RuntimeStates() Collection[RuntimeState] {
 	return NewCollection(s, CollectionSpec[RuntimeState]{
