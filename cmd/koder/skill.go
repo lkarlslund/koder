@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/lkarlslund/koder/internal/agents"
 	"github.com/lkarlslund/koder/internal/skills"
 )
 
@@ -37,6 +38,46 @@ func newSkillValidateCommand() *cobra.Command {
 	}
 }
 
+// discoveryPath holds one directory koder searches for skills.
+type discoveryPath struct {
+	path  string
+	scope skills.Scope
+}
+
+// collectDiscoveryPaths returns the directories koder would search
+// for skills, matching the logic in skills.Discover.
+func collectDiscoveryPaths(workdir string) []discoveryPath {
+	projectRoot := agents.FindProjectRoot(workdir)
+	workdir = cleanPathAbs(workdir)
+	projectRoot = cleanPathAbs(projectRoot)
+
+	var out []discoveryPath
+	current := workdir
+	for {
+		out = append(out, discoveryPath{
+			path:  filepath.Join(current, ".agents", "skills"),
+			scope: skills.ScopeProject,
+		})
+		if current == projectRoot {
+			break
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			break
+		}
+		current = parent
+	}
+
+	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
+		out = append(out, discoveryPath{
+			path:  filepath.Join(home, ".agents", "skills"),
+			scope: skills.ScopeUser,
+		})
+	}
+
+	return out
+}
+
 // newSkillListCommand returns `koder skill list`.
 func newSkillListCommand() *cobra.Command {
 	var workdir string
@@ -52,15 +93,51 @@ func newSkillListCommand() *cobra.Command {
 					return err
 				}
 			}
+
+			out := cmd.OutOrStdout()
 			items := skills.Discover(dir)
+			paths := collectDiscoveryPaths(dir)
+
 			if len(items) == 0 {
-				fmt.Fprintln(cmd.OutOrStdout(), "No skills found.")
+				fmt.Fprintln(out, "No skills found.")
+				fmt.Fprintln(out)
+				fmt.Fprintln(out, "Searched:")
+				for _, p := range paths {
+					exists := dirExists(p.path)
+					status := "not found"
+					if exists {
+						status = "exists (no skills)"
+					}
+					fmt.Fprintf(out, "  [%s] %s (%s)\n", p.scope, p.path, status)
+				}
+				fmt.Fprintln(out)
+				fmt.Fprintln(out, "To create a skill, place a directory with SKILL.md under one of the paths above.")
+				fmt.Fprintln(out, "User skills go in ~/.agents/skills/<name>/SKILL.md")
 				return nil
 			}
+
+			// Print found skills grouped by path
 			for _, s := range items {
 				scope := string(s.Scope)
-				fmt.Fprintf(cmd.OutOrStdout(), "[%s] %s - %s\n", scope, s.Name, s.Description)
+				fmt.Fprintf(out, "[%s] %s\n", scope, s.Name)
+				fmt.Fprintf(out, "       %s\n", s.Description)
+				fmt.Fprintf(out, "       %s\n", s.Directory)
 			}
+
+			// Also show paths that were searched but contributed nothing
+			usedPaths := make(map[string]bool)
+			for _, s := range items {
+				usedPaths[filepath.Dir(filepath.Dir(s.Path))] = true
+			}
+			for _, p := range paths {
+				if !usedPaths[p.path] {
+					exists := dirExists(p.path)
+					if !exists {
+						fmt.Fprintf(out, "\nSkipped: %s (not found)\n", p.path)
+					}
+				}
+			}
+
 			return nil
 		},
 	}
@@ -174,4 +251,25 @@ func parseSkillFrontmatter(body string) (string, string) {
 		}
 	}
 	return name, description
+}
+
+// dirExists reports whether the path is an existing directory.
+func dirExists(p string) bool {
+	info, err := os.Stat(p)
+	if err != nil {
+		return false
+	}
+	return info.IsDir()
+}
+
+// cleanPathAbs returns the absolute clean path or the original on error.
+func cleanPathAbs(p string) string {
+	if strings.TrimSpace(p) == "" {
+		return ""
+	}
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		return filepath.Clean(p)
+	}
+	return filepath.Clean(abs)
 }
