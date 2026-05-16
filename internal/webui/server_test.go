@@ -695,6 +695,13 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `chat-list-item`) || !strings.Contains(fullPage, `.sidebar-list .chat-list-item { padding: .16rem .25rem; min-height: 1.65rem; }`) {
 		t.Fatalf("expected compact chat list row spacing")
 	}
+	if !strings.Contains(fullPage, `chat-list-main`) ||
+		!strings.Contains(fullPage, `chat-list-content`) ||
+		!strings.Contains(fullPage, `chat-title`) ||
+		!strings.Contains(fullPage, `.sidebar-list .chat-list-main, .sidebar-list .chat-list-content, .sidebar-list .chat-title { min-width: 0; }`) ||
+		!strings.Contains(fullPage, `.sidebar-list .chat-list-item > .btn:last-child { flex: 0 0 auto; }`) {
+		t.Fatalf("expected chat rows to constrain title overflow inside sidebar")
+	}
 	if !strings.Contains(fullPage, `chatContextLabel(chat)`) || !strings.Contains(fullPage, `context_window`) || !strings.Contains(fullPage, `'% ctx)'`) {
 		t.Fatalf("expected chat sidebar to render context percentage")
 	}
