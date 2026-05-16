@@ -71,6 +71,8 @@ type PermissionRule = permissionprofile.Rule
 type Config struct {
 	DefaultProvider           string                   `toml:"default_provider"`
 	DefaultModel              string                   `toml:"default_model"`
+	CompactionProvider        string                   `toml:"compaction_provider"`
+	CompactionModel           string                   `toml:"compaction_model"`
 	MaxToolLoopSteps          int                      `toml:"max_tool_loop_steps"`
 	AutoCompactAt             int                      `toml:"auto_compact_at"`
 	CompactionKeepToolBatches int                      `toml:"compaction_keep_tool_batches"`

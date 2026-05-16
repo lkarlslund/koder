@@ -30,6 +30,9 @@ func TestLoadWritesDefaultConfig(t *testing.T) {
 	if cfg.CompactionKeepToolBatches != defaultCompactionKeepToolBatches {
 		t.Fatalf("expected default kept tool batches %d, got %d", defaultCompactionKeepToolBatches, cfg.CompactionKeepToolBatches)
 	}
+	if cfg.CompactionProvider != "" || cfg.CompactionModel != "" {
+		t.Fatalf("expected chat model compaction default, got %q/%q", cfg.CompactionProvider, cfg.CompactionModel)
+	}
 	if cfg.Permissions.Profile != "default" {
 		t.Fatalf("unexpected permission profile: %s", cfg.Permissions.Profile)
 	}
@@ -62,6 +65,30 @@ func TestLoadWritesDefaultConfig(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(temp, "koder", "config.toml")); err != nil {
 		t.Fatalf("expected config file: %v", err)
+	}
+}
+
+func TestCompactionModelPreferenceRoundTrips(t *testing.T) {
+	temp := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", temp)
+	t.Setenv("XDG_STATE_HOME", temp)
+	t.Setenv("XDG_CACHE_HOME", temp)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.CompactionProvider = "fast"
+	cfg.CompactionModel = "fast-model"
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.CompactionProvider != "fast" || loaded.CompactionModel != "fast-model" {
+		t.Fatalf("expected compaction override fast/fast-model, got %q/%q", loaded.CompactionProvider, loaded.CompactionModel)
 	}
 }
 

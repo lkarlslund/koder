@@ -2783,21 +2783,11 @@ func (e *Engine) compactionKeepToolBatches() int {
 }
 
 func (e *Engine) systemPrompt() string {
-	if root := managedAssetRoot(); root != "" {
-		data, err := os.ReadFile(filepath.Join(root, "system-prompt.md"))
-		if err == nil {
-			return strings.TrimSpace(string(data))
-		}
-	}
-	return systemPrompt()
+	return managedPrompt("system-prompt.md")
 }
 
 func systemPrompt() string {
-	data, err := assets.DefaultContent("system-prompt.md")
-	if err != nil {
-		panic(err)
-	}
-	return strings.TrimSpace(string(data))
+	return managedPrompt("system-prompt.md")
 }
 
 func managedAssetRoot() string {
@@ -2808,29 +2798,22 @@ func managedAssetRoot() string {
 	return filepath.Join(home, ".koder")
 }
 
-func compactPrompt() string {
-	return strings.TrimSpace(`
-Summarize this coding session so another agent can continue it with minimal loss.
+func (e *Engine) compactPrompt() string {
+	return managedPrompt("compaction-prompt.md")
+}
 
-Return only the summary text. Do not call tools.
-
-Use this structure:
-## Goal
-[current user goal]
-
-## Constraints
-- [important instructions or preferences]
-
-## Progress
-- [finished work]
-- [work still in progress]
-
-## Relevant Files
-- [important files and why they matter]
-
-## Next Step
-- [best immediate continuation]
-`)
+func managedPrompt(name string) string {
+	if root := managedAssetRoot(); root != "" {
+		data, err := os.ReadFile(filepath.Join(root, name))
+		if err == nil {
+			return strings.TrimSpace(string(data))
+		}
+	}
+	data, err := assets.DefaultContent(name)
+	if err != nil {
+		panic(err)
+	}
+	return strings.TrimSpace(string(data))
 }
 
 func parseToolCall(text string) (*tools.Request, string) {
@@ -2949,6 +2932,10 @@ func (e *Engine) compactSession(ctx context.Context, session domain.Session, cha
 	if len(messages) <= 1 {
 		return nil
 	}
+	compactionSession, compactionClient, err := e.compactionSessionClient(session, client)
+	if err != nil {
+		return err
+	}
 	beforeContextTokens := e.estimateContextTokensForTimeline(session, chat, timeline)
 	compactionItem, err := e.store.AppendTimeline(ctx, chatID, domain.Compaction{
 		Trigger:             trigger,
@@ -2982,11 +2969,11 @@ func (e *Engine) compactSession(ctx context.Context, session domain.Session, cha
 			Meta: map[string]string{"refresh": "details", "compaction": "started"},
 		}
 	}
-	req := e.chatRequest(session, domain.Chat{}, append(messages, provider.Message{
+	req := e.chatRequest(compactionSession, domain.Chat{}, append(messages, provider.Message{
 		Role:    domain.MessageRoleUser,
-		Content: compactPrompt(),
-	}), e.providerStreamingEnabled(session))
-	resp, err := e.completeCompactionChat(ctx, client, req)
+		Content: e.compactPrompt(),
+	}), e.providerStreamingEnabled(compactionSession))
+	resp, err := e.completeCompactionChat(ctx, compactionClient, req)
 	if err != nil {
 		_ = updateCompactionState("", "failed", 0)
 		return err
@@ -3031,6 +3018,29 @@ func (e *Engine) compactSession(ctx context.Context, session domain.Session, cha
 		}
 	}
 	return nil
+}
+
+func (e *Engine) compactionSessionClient(session domain.Session, client *provider.Client) (domain.Session, *provider.Client, error) {
+	providerID := strings.TrimSpace(e.cfg.CompactionProvider)
+	modelID := strings.TrimSpace(e.cfg.CompactionModel)
+	if providerID == "" && modelID == "" {
+		return session, client, nil
+	}
+	if providerID == "" || modelID == "" {
+		return domain.Session{}, nil, fmt.Errorf("compaction provider and model must both be set, or both empty for chat model")
+	}
+	providerCfg, ok := e.cfg.Provider(providerID)
+	if !ok || providerCfg.Disabled {
+		return domain.Session{}, nil, fmt.Errorf("compaction provider %q is not configured or is disabled", providerID)
+	}
+	next := session
+	next.ProviderID = providerID
+	next.ModelID = modelID
+	compactionClient, err := provider.New(providerID, providerCfg, e.debug)
+	if err != nil {
+		return domain.Session{}, nil, fmt.Errorf("create compaction provider %q: %w", providerID, err)
+	}
+	return next, compactionClient, nil
 }
 
 func (e *Engine) buildCompactionConversationForTimeline(session domain.Session, chat domain.Chat, timeline []domain.TimelineItem) ([]provider.Message, string, error) {

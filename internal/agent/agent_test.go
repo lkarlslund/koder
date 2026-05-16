@@ -295,6 +295,22 @@ func TestEngineSystemPromptUsesManagedUserAsset(t *testing.T) {
 	}
 }
 
+func TestEngineCompactionPromptUsesManagedUserAsset(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if err := os.MkdirAll(filepath.Join(home, ".koder"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".koder", "compaction-prompt.md"), []byte("custom compaction prompt\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	engine := New(testConfig(t), nil, nil, nil, t.TempDir())
+	if got := engine.compactPrompt(); got != "custom compaction prompt" {
+		t.Fatalf("expected managed user compaction prompt, got %q", got)
+	}
+}
+
 func TestFormatEnvironmentPrompt(t *testing.T) {
 	when := time.Date(2026, 5, 1, 14, 3, 22, 0, time.FixedZone("CEST", 2*60*60))
 	got := formatEnvironmentPrompt(environmentSnapshot{
@@ -3455,6 +3471,108 @@ func TestCompactSessionStreamsWhenProviderStreamingEnabled(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("expected persisted compaction summary")
+	}
+}
+
+func TestCompactSessionUsesConfiguredCompactionModel(t *testing.T) {
+	t.Parallel()
+
+	var sawCompactionModel bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read request body: %v", err)
+		}
+		sawCompactionModel = strings.Contains(string(body), `"model":"compact-model"`)
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"compact summary from override"}}],"usage":{"total_tokens":1}}`))
+	}))
+	defer server.Close()
+
+	cfg := testConfig(t)
+	cfg.Providers = map[string]config.Provider{
+		"chat": {
+			BaseURL:       "http://127.0.0.1:1/v1",
+			Timeout:       time.Second,
+			ContextWindow: 32768,
+		},
+		"compact": {
+			BaseURL:       server.URL + "/v1",
+			Timeout:       time.Second,
+			ContextWindow: 32768,
+		},
+	}
+	cfg.DefaultProvider = "chat"
+	cfg.DefaultModel = "chat-model"
+	cfg.CompactionProvider = "compact"
+	cfg.CompactionModel = "compact-model"
+
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	engine := New(cfg, st, tools.NewRegistry(t.TempDir()), nil, t.TempDir())
+	session, err := st.CreateSession(context.Background(), "test", "chat", "chat-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chat := defaultChatForSession(t, st, session.ID)
+	appendUserTimelineItem(t, st, chat.ID, "hello")
+	appendAssistantTimelineItem(t, st, chat.ID, domain.AssistantMessage{Text: "world"})
+
+	client, err := provider.New("chat", cfg.Providers["chat"], nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := engine.compactSession(context.Background(), session, chat.ID, client, "manual", nil); err != nil {
+		t.Fatal(err)
+	}
+	if !sawCompactionModel {
+		t.Fatal("expected compaction request to use configured compaction model")
+	}
+}
+
+func TestCompactSessionRejectsInvalidCompactionModelOverride(t *testing.T) {
+	t.Parallel()
+
+	cfg := testConfig(t)
+	cfg.Providers = map[string]config.Provider{
+		"chat": {
+			BaseURL:       "http://127.0.0.1:1/v1",
+			Timeout:       time.Second,
+			ContextWindow: 32768,
+		},
+	}
+	cfg.CompactionProvider = "missing"
+	cfg.CompactionModel = "compact-model"
+
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	engine := New(cfg, st, tools.NewRegistry(t.TempDir()), nil, t.TempDir())
+	session, err := st.CreateSession(context.Background(), "test", "chat", "chat-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chat := defaultChatForSession(t, st, session.ID)
+	appendUserTimelineItem(t, st, chat.ID, "hello")
+	appendAssistantTimelineItem(t, st, chat.ID, domain.AssistantMessage{Text: "world"})
+
+	client, err := provider.New("chat", cfg.Providers["chat"], nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = engine.compactSession(context.Background(), session, chat.ID, client, "manual", nil)
+	if err == nil || !strings.Contains(err.Error(), `compaction provider "missing"`) {
+		t.Fatalf("expected invalid compaction provider error, got %v", err)
 	}
 }
 

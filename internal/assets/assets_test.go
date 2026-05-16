@@ -102,6 +102,7 @@ func TestUserDefaultsIncludesSkillCreator(t *testing.T) {
 		t.Fatal(err)
 	}
 	foundPrompt := false
+	foundCompactionPrompt := false
 	foundSkill := false
 	for _, item := range items {
 		if item.Target == "skills/skill-creator/SKILL.md" && len(item.Content) > 0 {
@@ -110,9 +111,12 @@ func TestUserDefaultsIncludesSkillCreator(t *testing.T) {
 		if item.Target == "system-prompt.md" && len(item.Content) > 0 {
 			foundPrompt = true
 		}
+		if item.Target == "compaction-prompt.md" && len(item.Content) > 0 {
+			foundCompactionPrompt = true
+		}
 	}
-	if !foundSkill || !foundPrompt {
-		t.Fatalf("expected embedded skill creator and system prompt defaults, got %#v", items)
+	if !foundSkill || !foundPrompt || !foundCompactionPrompt {
+		t.Fatalf("expected embedded skill creator and prompt defaults, got %#v", items)
 	}
 }
 
@@ -123,6 +127,16 @@ func TestDefaultContentReadsEmbeddedDefault(t *testing.T) {
 	}
 	if !strings.Contains(string(content), "You are koder") {
 		t.Fatalf("unexpected system prompt content: %q", string(content))
+	}
+}
+
+func TestDefaultContentReadsEmbeddedCompactionDefault(t *testing.T) {
+	content, err := DefaultContent("compaction-prompt.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(content), "Summarize this coding session") {
+		t.Fatalf("unexpected compaction prompt content: %q", string(content))
 	}
 }
 
