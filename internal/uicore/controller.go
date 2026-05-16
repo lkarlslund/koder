@@ -3,6 +3,7 @@ package uicore
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/lkarlslund/koder/internal/agent"
+	"github.com/lkarlslund/koder/internal/assets"
 	"github.com/lkarlslund/koder/internal/attachment"
 	"github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/chatrole"
@@ -134,10 +136,18 @@ type ProviderDraft struct {
 	ProviderID         string            `json:"provider_id"`
 	TemplateID         string            `json:"template_id"`
 	Kind               string            `json:"kind"`
+	AuthMethod         string            `json:"auth_method"`
 	Name               string            `json:"name"`
 	BaseURL            string            `json:"base_url"`
 	APIKey             string            `json:"api_key"`
+	APIKeyEnv          string            `json:"api_key_env"`
 	Model              string            `json:"model"`
+	ModelPreset        string            `json:"model_preset"`
+	ContextWindow      int               `json:"context_window"`
+	AutoCompactAt      int               `json:"auto_compact_at"`
+	Stream             bool              `json:"stream"`
+	Timeout            string            `json:"timeout"`
+	Disabled           bool              `json:"disabled"`
 	Headers            map[string]string `json:"headers"`
 }
 
@@ -145,6 +155,95 @@ type ProviderDraft struct {
 type ProviderProbeResult struct {
 	ModelCount int      `json:"model_count"`
 	Models     []string `json:"models"`
+}
+
+// PreferencesState is the complete settings payload exposed to web renderers.
+type PreferencesState struct {
+	General      GeneralPreferences      `json:"general"`
+	UI           UIPreferences           `json:"ui"`
+	Compaction   CompactionPreferences   `json:"compaction"`
+	Prompts      []PromptPreference      `json:"prompts"`
+	Providers    ProviderState           `json:"providers"`
+	Models       []ModelOption           `json:"models"`
+	MCPServers   []MCPServerPreference   `json:"mcp_servers"`
+	Permissions  PermissionPreferences   `json:"permissions"`
+	ToolDefaults []ToolDefaultPreference `json:"tool_defaults"`
+	RestartKeys  []string                `json:"restart_keys,omitempty"`
+}
+
+// GeneralPreferences contains global non-provider settings.
+type GeneralPreferences struct {
+	DefaultProvider  string `json:"default_provider"`
+	DefaultModel     string `json:"default_model"`
+	MaxToolLoopSteps int    `json:"max_tool_loop_steps"`
+	StoreBackend     string `json:"store_backend"`
+}
+
+// UIPreferences contains renderer behavior settings persisted in config.
+type UIPreferences struct {
+	Theme           string `json:"theme"`
+	CodeStyle       string `json:"code_style"`
+	EditForgiveness int    `json:"edit_forgiveness"`
+	Spinner         string `json:"spinner"`
+	CursorBlink     bool   `json:"cursor_blink"`
+	HalfBlocks      bool   `json:"half_blocks"`
+	ShowSidebar     bool   `json:"show_sidebar"`
+	SidebarWidth    int    `json:"sidebar_width"`
+	ShowTimestamps  bool   `json:"show_timestamps"`
+	ShowReasoning   bool   `json:"show_reasoning"`
+	ShowSystem      bool   `json:"show_system"`
+	Mouse           bool   `json:"mouse"`
+	AutoContinue    bool   `json:"auto_continue"`
+}
+
+// CompactionPreferences contains global compaction controls.
+type CompactionPreferences struct {
+	AutoCompactAt        int    `json:"auto_compact_at"`
+	KeepToolBatches      int    `json:"keep_tool_batches"`
+	ProviderID           string `json:"provider_id"`
+	ModelID              string `json:"model_id"`
+	UseChatModel         bool   `json:"use_chat_model"`
+	CurrentSelectionText string `json:"current_selection_text"`
+}
+
+// PromptPreference is one editable managed prompt file.
+type PromptPreference struct {
+	Name    string `json:"name"`
+	Target  string `json:"target"`
+	Path    string `json:"path"`
+	Content string `json:"content"`
+}
+
+// MCPServerPreference is one editable MCP server config row.
+type MCPServerPreference struct {
+	ID                   string            `json:"id"`
+	Name                 string            `json:"name"`
+	URL                  string            `json:"url"`
+	Headers              map[string]string `json:"headers"`
+	Disabled             bool              `json:"disabled"`
+	StartupTimeout       string            `json:"startup_timeout"`
+	RequestTimeout       string            `json:"request_timeout"`
+	DisableStandaloneSSE bool              `json:"disable_standalone_sse"`
+	BearerToken          string            `json:"bearer_token"`
+	BearerTokenEnv       string            `json:"bearer_token_env"`
+}
+
+// PermissionPreferences is the editable permission profile config.
+type PermissionPreferences struct {
+	Active   string                        `json:"active"`
+	Profiles []PermissionProfilePreference `json:"profiles"`
+}
+
+// PermissionProfilePreference is one named permission profile.
+type PermissionProfilePreference struct {
+	Name  string                  `json:"name"`
+	Rules []config.PermissionRule `json:"rules"`
+}
+
+// ToolDefaultPreference is one default per-session tool enabled toggle.
+type ToolDefaultPreference struct {
+	Tool    domain.ToolKind `json:"tool"`
+	Enabled bool            `json:"enabled"`
 }
 
 // ComposerCompletions describes completion candidates for composer trigger tokens.
@@ -212,7 +311,7 @@ func New(cfg config.Config, st *store.Store, engine *agent.Engine, workdir strin
 		store:     st,
 		agent:     engine,
 		workdir:   strings.TrimSpace(workdir),
-		theme:     "auto",
+		theme:     normalizeTheme(cfg.UI.Theme),
 		statuses:  map[domain.ID]ChatSidebarStatus{},
 		runtimes:  map[domain.ID]*chat.Chat{},
 		unsubs:    map[domain.ID]func(){},
@@ -333,6 +432,11 @@ func (c *Controller) SendPrompt(text string) error {
 
 // SendPromptWithAttachments appends a user prompt and uploaded attachment drafts to the active chat queue.
 func (c *Controller) SendPromptWithAttachments(text string, drafts []attachment.Draft) error {
+	return c.SendPromptWithKindAndAttachments(text, chat.QueueKindSteer, drafts)
+}
+
+// SendPromptWithKindAndAttachments enqueues a prompt with the given queue kind (steer or queue).
+func (c *Controller) SendPromptWithKindAndAttachments(text string, kind chat.QueueKind, drafts []attachment.Draft) error {
 	text = strings.TrimSpace(text)
 	validated := make([]attachment.Draft, 0, len(drafts))
 	manager := attachment.NewManager(c.cfg.StateDir())
@@ -350,7 +454,27 @@ func (c *Controller) SendPromptWithAttachments(text string, drafts []attachment.
 	if rt == nil {
 		return fmt.Errorf("no active chat")
 	}
-	rt.Enqueue(chat.QueueItem{Kind: chat.QueueKindSteer, Text: text, Attachments: validated})
+	rt.Enqueue(chat.QueueItem{Kind: kind, Text: text, Attachments: validated})
+	return nil
+}
+
+// ReorderQueue reorders the queued inputs in the active chat by their IDs.
+func (c *Controller) ReorderQueue(ids []domain.ID) error {
+	rt := c.currentRuntime()
+	if rt == nil {
+		return fmt.Errorf("no active chat")
+	}
+	rt.ReorderQueue(ids)
+	return nil
+}
+
+// DeleteQueueItem removes a queued input from the active chat by ID.
+func (c *Controller) DeleteQueueItem(id domain.ID) error {
+	rt := c.currentRuntime()
+	if rt == nil {
+		return fmt.Errorf("no active chat")
+	}
+	rt.DeleteQueueItem(id)
 	return nil
 }
 
@@ -781,6 +905,7 @@ func (c *Controller) SaveProvider(ctx context.Context, draft ProviderDraft) (Pro
 	} else {
 		applyNewProviderDefaults(&next, c.cfg.AutoCompactAt)
 	}
+	applyProviderDraftPreferences(&next, draft)
 	if strings.TrimSpace(next.Name) == "" {
 		if desc, found := provider.Lookup(catalogDraft.TemplateID); found {
 			next.Name = desc.Title
@@ -895,25 +1020,111 @@ func (c *Controller) DeleteProvider(ctx context.Context, providerID string) (Pro
 
 // SetTheme updates the web theme preference.
 func (c *Controller) SetTheme(theme string) {
-	theme = strings.ToLower(strings.TrimSpace(theme))
-	if theme != "dark" && theme != "light" {
-		theme = "auto"
-	}
+	theme = normalizeTheme(theme)
 	c.mu.Lock()
 	c.theme = theme
+	c.cfg.UI.Theme = theme
+	_ = c.cfg.Save()
 	c.mu.Unlock()
 	c.broadcast("theme", map[string]string{"theme": theme})
+}
+
+// Preferences returns the complete editable settings state.
+func (c *Controller) Preferences(ctx context.Context) (PreferencesState, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.preferencesStateLocked(ctx)
+}
+
+// SavePreferences validates and persists the complete settings state.
+func (c *Controller) SavePreferences(ctx context.Context, prefs PreferencesState) (PreferencesState, error) {
+	next := config.Default()
+	c.mu.Lock()
+	next = c.cfg
+	if err := applyGeneralPreferences(&next, prefs.General); err != nil {
+		c.mu.Unlock()
+		return PreferencesState{}, err
+	}
+	if err := applyUIPreferences(&next, prefs.UI); err != nil {
+		c.mu.Unlock()
+		return PreferencesState{}, err
+	}
+	if err := applyCompactionPreferences(&next, prefs.Compaction); err != nil {
+		c.mu.Unlock()
+		return PreferencesState{}, err
+	}
+	if err := applyMCPPreferences(&next, prefs.MCPServers); err != nil {
+		c.mu.Unlock()
+		return PreferencesState{}, err
+	}
+	if err := applyPermissionPreferences(&next, prefs.Permissions); err != nil {
+		c.mu.Unlock()
+		return PreferencesState{}, err
+	}
+	applyToolDefaultPreferences(&next, prefs.ToolDefaults)
+	if err := writePromptPreferences(prefs.Prompts); err != nil {
+		c.mu.Unlock()
+		return PreferencesState{}, err
+	}
+	c.cfg = next
+	c.theme = normalizeTheme(next.UI.Theme)
+	if err := c.cfg.Save(); err != nil {
+		c.mu.Unlock()
+		return PreferencesState{}, err
+	}
+	if c.agent != nil {
+		c.agent.UpdateConfig(c.cfg)
+	}
+	state, err := c.preferencesStateLocked(ctx)
+	c.mu.Unlock()
+	if err != nil {
+		return PreferencesState{}, err
+	}
+	c.broadcast("snapshot", c.State())
+	c.broadcast("theme", map[string]string{"theme": c.theme})
+	return state, nil
+}
+
+// ResetPrompt restores one managed prompt file from embedded defaults.
+func (c *Controller) ResetPrompt(target string) (PromptPreference, error) {
+	target = strings.TrimSpace(target)
+	if target != "system-prompt.md" && target != "compaction-prompt.md" {
+		return PromptPreference{}, fmt.Errorf("unknown prompt %q", target)
+	}
+	content, err := assets.DefaultContent(target)
+	if err != nil {
+		return PromptPreference{}, err
+	}
+	path, err := managedPromptPath(target)
+	if err != nil {
+		return PromptPreference{}, err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return PromptPreference{}, fmt.Errorf("create prompt dir: %w", err)
+	}
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		return PromptPreference{}, fmt.Errorf("write prompt %s: %w", target, err)
+	}
+	return promptPreference(target)
 }
 
 // ModelOptions lists selectable models across configured providers.
 func (c *Controller) ModelOptions(ctx context.Context) ([]ModelOption, error) {
 	c.mu.RLock()
+	cfg := c.cfg
 	currentProvider := strings.TrimSpace(c.session.ProviderID)
 	currentModel := strings.TrimSpace(c.session.ModelID)
 	c.mu.RUnlock()
+	return modelOptionsForConfig(ctx, cfg, currentProvider, currentModel)
+}
 
+func (c *Controller) modelOptionsLocked(ctx context.Context) ([]ModelOption, error) {
+	return modelOptionsForConfig(ctx, c.cfg, strings.TrimSpace(c.session.ProviderID), strings.TrimSpace(c.session.ModelID))
+}
+
+func modelOptionsForConfig(ctx context.Context, cfg config.Config, currentProvider, currentModel string) ([]ModelOption, error) {
 	seen := map[string]struct{}{}
-	options := make([]ModelOption, 0, len(c.cfg.Providers))
+	options := make([]ModelOption, 0, len(cfg.Providers))
 	add := func(providerID string, providerCfg config.Provider, model domain.Model) {
 		providerID = strings.TrimSpace(providerID)
 		modelID := strings.TrimSpace(model.ID)
@@ -934,8 +1145,8 @@ func (c *Controller) ModelOptions(ctx context.Context) ([]ModelOption, error) {
 		})
 	}
 
-	ids := make([]string, 0, len(c.cfg.Providers))
-	for id, providerCfg := range c.cfg.Providers {
+	ids := make([]string, 0, len(cfg.Providers))
+	for id, providerCfg := range cfg.Providers {
 		if providerCfg.Disabled {
 			continue
 		}
@@ -945,7 +1156,7 @@ func (c *Controller) ModelOptions(ctx context.Context) ([]ModelOption, error) {
 
 	var failures []string
 	for _, providerID := range ids {
-		providerCfg, ok := c.cfg.Provider(providerID)
+		providerCfg, ok := cfg.Provider(providerID)
 		if !ok {
 			continue
 		}
@@ -1095,6 +1306,34 @@ func providerEntryLabel(providerID string, cfg config.Provider) string {
 	return providerID
 }
 
+func (c *Controller) preferencesStateLocked(ctx context.Context) (PreferencesState, error) {
+	models, _ := c.modelOptionsLocked(ctx)
+	prompts, err := promptPreferences()
+	if err != nil {
+		return PreferencesState{}, err
+	}
+	state := PreferencesState{
+		General: GeneralPreferences{
+			DefaultProvider:  strings.TrimSpace(c.cfg.DefaultProvider),
+			DefaultModel:     strings.TrimSpace(c.cfg.DefaultModel),
+			MaxToolLoopSteps: c.cfg.MaxToolLoopSteps,
+			StoreBackend:     strings.TrimSpace(c.cfg.Store.Backend),
+		},
+		UI:           uiPreferencesFromConfig(c.cfg.UI),
+		Compaction:   compactionPreferencesFromConfig(c.cfg),
+		Prompts:      prompts,
+		Providers:    c.providerStateLocked(),
+		Models:       models,
+		MCPServers:   mcpPreferencesFromConfig(c.cfg.MCPServers),
+		Permissions:  permissionPreferencesFromConfig(c.cfg.Permissions),
+		ToolDefaults: toolDefaultPreferencesFromConfig(c.cfg.ToolDefaults),
+	}
+	if c.cfg.Store.Backend != config.Default().Store.Backend {
+		state.RestartKeys = append(state.RestartKeys, "store.backend")
+	}
+	return state, nil
+}
+
 func (c *Controller) providerStateLocked() ProviderState {
 	catalog := make([]ProviderCatalogItem, 0, len(provider.Catalog()))
 	for _, item := range provider.Catalog() {
@@ -1154,10 +1393,18 @@ func providerDraftFromCatalog(draft provider.ConnectDraft) ProviderDraft {
 		ProviderID:         strings.TrimSpace(draft.ProviderID),
 		TemplateID:         strings.TrimSpace(draft.TemplateID),
 		Kind:               strings.TrimSpace(draft.Kind),
+		AuthMethod:         strings.TrimSpace(draft.AuthMethod),
 		Name:               strings.TrimSpace(draft.Name),
 		BaseURL:            strings.TrimSpace(draft.BaseURL),
 		APIKey:             strings.TrimSpace(draft.APIKey),
+		APIKeyEnv:          strings.TrimSpace(draft.APIKeyEnv),
 		Model:              strings.TrimSpace(draft.Model),
+		ModelPreset:        strings.TrimSpace(draft.ModelPreset),
+		ContextWindow:      draft.ContextWindow,
+		AutoCompactAt:      draft.AutoCompactAt,
+		Stream:             draft.Stream,
+		Timeout:            durationString(draft.Timeout),
+		Disabled:           draft.Disabled,
 		Headers:            cloneHeaderMap(draft.Headers),
 	}
 }
@@ -1168,10 +1415,18 @@ func providerDraftToCatalog(draft ProviderDraft) provider.ConnectDraft {
 		ProviderID:         strings.TrimSpace(draft.ProviderID),
 		TemplateID:         strings.TrimSpace(draft.TemplateID),
 		Kind:               strings.TrimSpace(draft.Kind),
+		AuthMethod:         strings.TrimSpace(draft.AuthMethod),
 		Name:               strings.TrimSpace(draft.Name),
 		BaseURL:            strings.TrimSpace(draft.BaseURL),
 		APIKey:             strings.TrimSpace(draft.APIKey),
+		APIKeyEnv:          strings.TrimSpace(draft.APIKeyEnv),
 		Model:              strings.TrimSpace(draft.Model),
+		ModelPreset:        strings.TrimSpace(draft.ModelPreset),
+		ContextWindow:      draft.ContextWindow,
+		AutoCompactAt:      draft.AutoCompactAt,
+		Stream:             draft.Stream,
+		Timeout:            parseDurationOrZero(draft.Timeout),
+		Disabled:           draft.Disabled,
 		Headers:            cloneHeaderMap(draft.Headers),
 	}
 }
@@ -1192,14 +1447,24 @@ func cloneHeaderMap(src map[string]string) map[string]string {
 }
 
 func mergeProviderEditDefaults(next *config.Provider, existing config.Provider) {
-	next.AuthMethod = existing.AuthMethod
-	next.APIKeyEnv = existing.APIKeyEnv
-	next.ModelPreset = existing.ModelPreset
-	next.ContextWindow = existing.ContextWindow
-	next.AutoCompactAt = existing.AutoCompactAt
-	next.Stream = existing.Stream
-	next.Timeout = existing.Timeout
-	next.Disabled = false
+	if strings.TrimSpace(next.AuthMethod) == "" {
+		next.AuthMethod = existing.AuthMethod
+	}
+	if strings.TrimSpace(next.APIKeyEnv) == "" {
+		next.APIKeyEnv = existing.APIKeyEnv
+	}
+	if strings.TrimSpace(next.ModelPreset) == "" {
+		next.ModelPreset = existing.ModelPreset
+	}
+	if next.ContextWindow == 0 {
+		next.ContextWindow = existing.ContextWindow
+	}
+	if next.AutoCompactAt == 0 {
+		next.AutoCompactAt = existing.AutoCompactAt
+	}
+	if next.Timeout == 0 {
+		next.Timeout = existing.Timeout
+	}
 }
 
 func applyNewProviderDefaults(next *config.Provider, autoCompactAt int) {
@@ -1213,6 +1478,335 @@ func applyNewProviderDefaults(next *config.Provider, autoCompactAt int) {
 	next.Stream = true
 	next.Timeout = 2 * time.Minute
 	next.Disabled = false
+}
+
+func applyProviderDraftPreferences(next *config.Provider, draft ProviderDraft) {
+	next.AuthMethod = strings.TrimSpace(draft.AuthMethod)
+	next.APIKeyEnv = strings.TrimSpace(draft.APIKeyEnv)
+	next.ModelPreset = strings.TrimSpace(draft.ModelPreset)
+	if draft.ContextWindow > 0 {
+		next.ContextWindow = draft.ContextWindow
+	}
+	if draft.AutoCompactAt > 0 {
+		next.AutoCompactAt = draft.AutoCompactAt
+	}
+	if timeout := parseDurationOrZero(draft.Timeout); timeout > 0 {
+		next.Timeout = timeout
+	}
+	next.Stream = draft.Stream
+	next.Disabled = draft.Disabled
+}
+
+func uiPreferencesFromConfig(ui config.UI) UIPreferences {
+	return UIPreferences{
+		Theme:           normalizeTheme(ui.Theme),
+		CodeStyle:       strings.TrimSpace(ui.CodeStyle),
+		EditForgiveness: config.NormalizeEditForgiveness(ui.EditForgiveness),
+		Spinner:         strings.TrimSpace(ui.Spinner),
+		CursorBlink:     ui.CursorBlink,
+		HalfBlocks:      ui.HalfBlocks,
+		ShowSidebar:     ui.ShowSidebar,
+		SidebarWidth:    ui.SidebarWidth,
+		ShowTimestamps:  ui.ShowTimestamps,
+		ShowReasoning:   ui.ShowReasoning,
+		ShowSystem:      ui.ShowSystem,
+		Mouse:           ui.Mouse,
+		AutoContinue:    ui.AutoContinue,
+	}
+}
+
+func compactionPreferencesFromConfig(cfg config.Config) CompactionPreferences {
+	providerID := strings.TrimSpace(cfg.CompactionProvider)
+	modelID := strings.TrimSpace(cfg.CompactionModel)
+	text := "Chat model"
+	if providerID != "" || modelID != "" {
+		text = providerID + " / " + modelID
+	}
+	return CompactionPreferences{
+		AutoCompactAt:        cfg.AutoCompactAt,
+		KeepToolBatches:      config.NormalizeCompactionKeepToolBatches(cfg.CompactionKeepToolBatches),
+		ProviderID:           providerID,
+		ModelID:              modelID,
+		UseChatModel:         providerID == "" && modelID == "",
+		CurrentSelectionText: text,
+	}
+}
+
+func mcpPreferencesFromConfig(src map[string]config.MCPServer) []MCPServerPreference {
+	ids := make([]string, 0, len(src))
+	for id := range src {
+		ids = append(ids, id)
+	}
+	slices.Sort(ids)
+	out := make([]MCPServerPreference, 0, len(ids))
+	for _, id := range ids {
+		server := src[id]
+		out = append(out, MCPServerPreference{
+			ID:                   id,
+			Name:                 strings.TrimSpace(server.Name),
+			URL:                  strings.TrimSpace(server.URL),
+			Headers:              cloneHeaderMap(server.Headers),
+			Disabled:             server.Disabled,
+			StartupTimeout:       durationString(server.StartupTimeout),
+			RequestTimeout:       durationString(server.RequestTimeout),
+			DisableStandaloneSSE: server.DisableStandaloneSSE,
+			BearerToken:          strings.TrimSpace(server.BearerToken),
+			BearerTokenEnv:       strings.TrimSpace(server.BearerTokenEnv),
+		})
+	}
+	return out
+}
+
+func permissionPreferencesFromConfig(src config.PermissionRules) PermissionPreferences {
+	names := make([]string, 0, len(src.Profiles))
+	for name := range src.Profiles {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	profiles := make([]PermissionProfilePreference, 0, len(names))
+	for _, name := range names {
+		profiles = append(profiles, PermissionProfilePreference{
+			Name:  name,
+			Rules: slices.Clone(src.Profiles[name].Rules),
+		})
+	}
+	return PermissionPreferences{Active: strings.TrimSpace(src.Profile), Profiles: profiles}
+}
+
+func toolDefaultPreferencesFromConfig(src map[domain.ToolKind]bool) []ToolDefaultPreference {
+	kinds := domain.AllToolKinds()
+	out := make([]ToolDefaultPreference, 0, len(kinds))
+	for _, kind := range kinds {
+		enabled := true
+		if value, ok := src[kind]; ok {
+			enabled = value
+		}
+		out = append(out, ToolDefaultPreference{Tool: kind, Enabled: enabled})
+	}
+	return out
+}
+
+func applyGeneralPreferences(cfg *config.Config, prefs GeneralPreferences) error {
+	cfg.DefaultProvider = strings.TrimSpace(prefs.DefaultProvider)
+	cfg.DefaultModel = strings.TrimSpace(prefs.DefaultModel)
+	if cfg.DefaultProvider != "" && !cfg.HasUsableProvider(cfg.DefaultProvider) {
+		return fmt.Errorf("default provider %q is not configured or is disabled", cfg.DefaultProvider)
+	}
+	if prefs.MaxToolLoopSteps <= 0 {
+		return fmt.Errorf("max tool loop steps must be greater than zero")
+	}
+	cfg.MaxToolLoopSteps = prefs.MaxToolLoopSteps
+	if backend := strings.TrimSpace(prefs.StoreBackend); backend != "" {
+		cfg.Store.Backend = backend
+	}
+	return nil
+}
+
+func applyUIPreferences(cfg *config.Config, prefs UIPreferences) error {
+	cfg.UI = config.UI{
+		Theme:           normalizeTheme(prefs.Theme),
+		CodeStyle:       firstNonEmpty(strings.TrimSpace(prefs.CodeStyle), config.Default().UI.CodeStyle),
+		EditForgiveness: config.NormalizeEditForgiveness(prefs.EditForgiveness),
+		Spinner:         firstNonEmpty(strings.TrimSpace(prefs.Spinner), config.Default().UI.Spinner),
+		CursorBlink:     prefs.CursorBlink,
+		HalfBlocks:      prefs.HalfBlocks,
+		ShowSidebar:     prefs.ShowSidebar,
+		SidebarWidth:    prefs.SidebarWidth,
+		ShowTimestamps:  prefs.ShowTimestamps,
+		ShowReasoning:   prefs.ShowReasoning,
+		ShowSystem:      prefs.ShowSystem,
+		Mouse:           prefs.Mouse,
+		AutoContinue:    prefs.AutoContinue,
+	}
+	return nil
+}
+
+func applyCompactionPreferences(cfg *config.Config, prefs CompactionPreferences) error {
+	if prefs.AutoCompactAt <= 0 {
+		return fmt.Errorf("auto compact threshold must be greater than zero")
+	}
+	cfg.AutoCompactAt = prefs.AutoCompactAt
+	cfg.CompactionKeepToolBatches = config.NormalizeCompactionKeepToolBatches(prefs.KeepToolBatches)
+	if prefs.UseChatModel {
+		cfg.CompactionProvider = ""
+		cfg.CompactionModel = ""
+		return nil
+	}
+	providerID := strings.TrimSpace(prefs.ProviderID)
+	modelID := strings.TrimSpace(prefs.ModelID)
+	if providerID == "" && modelID == "" {
+		cfg.CompactionProvider = ""
+		cfg.CompactionModel = ""
+		return nil
+	}
+	if providerID == "" || modelID == "" {
+		return fmt.Errorf("compaction provider and model must both be set, or both empty for chat model")
+	}
+	if !cfg.HasUsableProvider(providerID) {
+		return fmt.Errorf("compaction provider %q is not configured or is disabled", providerID)
+	}
+	cfg.CompactionProvider = providerID
+	cfg.CompactionModel = modelID
+	return nil
+}
+
+func applyMCPPreferences(cfg *config.Config, prefs []MCPServerPreference) error {
+	next := map[string]config.MCPServer{}
+	for _, item := range prefs {
+		id := strings.TrimSpace(item.ID)
+		if id == "" {
+			continue
+		}
+		startup := parseDurationOrZero(item.StartupTimeout)
+		request := parseDurationOrZero(item.RequestTimeout)
+		next[id] = config.MCPServer{
+			Name:                 strings.TrimSpace(item.Name),
+			URL:                  strings.TrimSpace(item.URL),
+			Headers:              cloneHeaderMap(item.Headers),
+			Disabled:             item.Disabled,
+			StartupTimeout:       startup,
+			RequestTimeout:       request,
+			DisableStandaloneSSE: item.DisableStandaloneSSE,
+			BearerToken:          strings.TrimSpace(item.BearerToken),
+			BearerTokenEnv:       strings.TrimSpace(item.BearerTokenEnv),
+		}
+	}
+	cfg.MCPServers = next
+	return nil
+}
+
+func applyPermissionPreferences(cfg *config.Config, prefs PermissionPreferences) error {
+	profiles := map[string]config.PermissionProfile{}
+	for _, item := range prefs.Profiles {
+		name := strings.TrimSpace(item.Name)
+		if name == "" {
+			continue
+		}
+		for _, rule := range item.Rules {
+			if err := permissionprofile.Validate(rule.Action); err != nil {
+				return fmt.Errorf("permission profile %q: %w", name, err)
+			}
+		}
+		profiles[name] = config.PermissionProfile{Rules: slices.Clone(item.Rules)}
+	}
+	if len(profiles) == 0 {
+		profiles = config.Default().Permissions.Profiles
+	}
+	active := strings.TrimSpace(prefs.Active)
+	if active == "" {
+		active = config.Default().Permissions.Profile
+	}
+	cfg.Permissions = config.PermissionRules{Profile: active, Profiles: profiles}
+	return nil
+}
+
+func applyToolDefaultPreferences(cfg *config.Config, prefs []ToolDefaultPreference) {
+	next := map[domain.ToolKind]bool{}
+	for _, item := range prefs {
+		next[item.Tool] = item.Enabled
+	}
+	for _, kind := range domain.AllToolKinds() {
+		if _, ok := next[kind]; !ok {
+			next[kind] = true
+		}
+	}
+	cfg.ToolDefaults = next
+}
+
+func promptPreferences() ([]PromptPreference, error) {
+	out := make([]PromptPreference, 0, 2)
+	for _, target := range []string{"system-prompt.md", "compaction-prompt.md"} {
+		item, err := promptPreference(target)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	return out, nil
+}
+
+func promptPreference(target string) (PromptPreference, error) {
+	path, err := managedPromptPath(target)
+	if err != nil {
+		return PromptPreference{}, err
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		data, err = assets.DefaultContent(target)
+		if err != nil {
+			return PromptPreference{}, err
+		}
+	}
+	return PromptPreference{
+		Name:    strings.TrimSuffix(target, ".md"),
+		Target:  target,
+		Path:    path,
+		Content: string(data),
+	}, nil
+}
+
+func writePromptPreferences(prompts []PromptPreference) error {
+	for _, prompt := range prompts {
+		target := strings.TrimSpace(prompt.Target)
+		if target != "system-prompt.md" && target != "compaction-prompt.md" {
+			continue
+		}
+		path, err := managedPromptPath(target)
+		if err != nil {
+			return err
+		}
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			return fmt.Errorf("create prompt dir: %w", err)
+		}
+		if err := os.WriteFile(path, []byte(prompt.Content), 0o644); err != nil {
+			return fmt.Errorf("write prompt %s: %w", target, err)
+		}
+	}
+	return nil
+}
+
+func managedPromptPath(target string) (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil || strings.TrimSpace(home) == "" {
+		return "", fmt.Errorf("locate home directory for prompt assets: %w", err)
+	}
+	return filepath.Join(home, ".koder", target), nil
+}
+
+func normalizeTheme(theme string) string {
+	theme = strings.ToLower(strings.TrimSpace(theme))
+	if theme != "dark" && theme != "light" {
+		return "auto"
+	}
+	return theme
+}
+
+func durationString(value time.Duration) string {
+	if value <= 0 {
+		return ""
+	}
+	return value.String()
+}
+
+func parseDurationOrZero(value string) time.Duration {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0
+	}
+	duration, err := time.ParseDuration(value)
+	if err != nil {
+		return 0
+	}
+	return duration
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }
 
 func composerSkillQuery(value string, cursor int) (query string, start int, ok bool) {

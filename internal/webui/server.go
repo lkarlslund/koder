@@ -505,6 +505,22 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		}
 		s.controller.SetTheme(in.Theme)
 		return map[string]string{"theme": in.Theme}, nil
+	case "preferences_state":
+		return s.controller.Preferences(ctx)
+	case "save_preferences":
+		var in uicore.PreferencesState
+		if err := decodeParams(params, &in); err != nil {
+			return nil, err
+		}
+		return s.controller.SavePreferences(ctx, in)
+	case "reset_prompt":
+		var in struct {
+			Target string `json:"target"`
+		}
+		if err := decodeParams(params, &in); err != nil {
+			return nil, err
+		}
+		return s.controller.ResetPrompt(in.Target)
 	case "list_models":
 		options, err := s.controller.ModelOptions(ctx)
 		if err != nil {

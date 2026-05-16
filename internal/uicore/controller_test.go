@@ -324,6 +324,97 @@ func TestControllerModelOptionsReportsProviderFailureWithoutDefaults(t *testing.
 	}
 }
 
+func TestControllerSavePreferencesPersistsConfigAndPrompts(t *testing.T) {
+	temp := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", temp)
+	t.Setenv("XDG_STATE_HOME", temp)
+	t.Setenv("XDG_CACHE_HOME", temp)
+	t.Setenv("HOME", temp)
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Providers = map[string]config.Provider{
+		"test": {BaseURL: "https://example.invalid/v1", DefaultModel: "model", ContextWindow: 32768, Stream: true, Timeout: time.Minute},
+	}
+	cfg.DefaultProvider = "test"
+	cfg.DefaultModel = "model"
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.OpenWithOptions(cfg.StateDir(), store.Options{Backend: store.BackendJSONFS})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	engine := agent.New(cfg, st, nil, nil, t.TempDir())
+	ctrl := New(cfg, st, engine, t.TempDir())
+	if err := ctrl.Start(context.Background(), StartupModeNew); err != nil {
+		t.Fatal(err)
+	}
+
+	prefs, err := ctrl.Preferences(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	prefs.General.MaxToolLoopSteps = 77
+	prefs.UI.Theme = "dark"
+	prefs.Compaction.UseChatModel = false
+	prefs.Compaction.ProviderID = "test"
+	prefs.Compaction.ModelID = "compact-model"
+	prefs.Compaction.AutoCompactAt = 66
+	prefs.Compaction.KeepToolBatches = 3
+	for idx := range prefs.Prompts {
+		if prefs.Prompts[idx].Target == "compaction-prompt.md" {
+			prefs.Prompts[idx].Content = "custom compact prompt\n"
+		}
+	}
+	updated, err := ctrl.SavePreferences(context.Background(), prefs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Compaction.ModelID != "compact-model" {
+		t.Fatalf("expected updated preferences response, got %#v", updated.Compaction)
+	}
+
+	loaded, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.MaxToolLoopSteps != 77 || loaded.UI.Theme != "dark" || loaded.CompactionModel != "compact-model" {
+		t.Fatalf("expected saved config, got max=%d theme=%q compact=%q/%q", loaded.MaxToolLoopSteps, loaded.UI.Theme, loaded.CompactionProvider, loaded.CompactionModel)
+	}
+	data, err := os.ReadFile(filepath.Join(temp, ".koder", "compaction-prompt.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "custom compact prompt\n" {
+		t.Fatalf("expected prompt file update, got %q", string(data))
+	}
+}
+
+func TestControllerResetPromptRestoresEmbeddedDefault(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	ctrl, _ := newTestController(t)
+	path := filepath.Join(home, ".koder", "compaction-prompt.md")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("changed"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	prompt, err := ctrl.ResetPrompt("compaction-prompt.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(prompt.Content, "Summarize this coding session") {
+		t.Fatalf("expected embedded compaction prompt, got %q", prompt.Content)
+	}
+}
+
 func TestControllerSetModelUpdatesStoreStateAndRuntimeSnapshot(t *testing.T) {
 	ctrl, st := newTestControllerWithConfig(t, func(cfg *config.Config) {
 		cfg.Providers = map[string]config.Provider{

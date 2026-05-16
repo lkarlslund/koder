@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/lkarlslund/koder/internal/attachment"
 	"github.com/lkarlslund/koder/internal/config"
@@ -35,10 +36,18 @@ type ConnectDraft struct {
 	ProviderID         string
 	TemplateID         string
 	Kind               string
+	AuthMethod         string
 	Name               string
 	BaseURL            string
 	APIKey             string
+	APIKeyEnv          string
 	Model              string
+	ModelPreset        string
+	ContextWindow      int
+	AutoCompactAt      int
+	Stream             bool
+	Timeout            time.Duration
+	Disabled           bool
 	Headers            map[string]string
 }
 
@@ -88,6 +97,10 @@ func BuildDraft(id string, existing map[string]config.Provider) (ConnectDraft, e
 		Name:               desc.Title,
 		BaseURL:            desc.DefaultBaseURL,
 		Model:              desc.ModelHint,
+		ContextWindow:      32768,
+		AutoCompactAt:      80,
+		Stream:             true,
+		Timeout:            2 * time.Minute,
 		Headers:            cloneHeaders(desc.Headers),
 	}
 	return draft, nil
@@ -113,23 +126,39 @@ func BuildDraftForExisting(id string, existing config.Provider) (ConnectDraft, e
 		ProviderID:         id,
 		TemplateID:         templateID,
 		Kind:               firstNonEmpty(existing.Kind, ProviderKindCompatible),
+		AuthMethod:         existing.AuthMethod,
 		Name:               firstNonEmpty(existing.Name, desc.Title),
 		BaseURL:            firstNonEmpty(existing.BaseURL, desc.DefaultBaseURL),
 		APIKey:             existing.APIKey,
+		APIKeyEnv:          existing.APIKeyEnv,
 		Model:              firstNonEmpty(existing.DefaultModel, desc.ModelHint),
+		ModelPreset:        existing.ModelPreset,
+		ContextWindow:      existing.ContextWindow,
+		AutoCompactAt:      existing.AutoCompactAt,
+		Stream:             existing.Stream,
+		Timeout:            existing.Timeout,
+		Disabled:           existing.Disabled,
 		Headers:            cloneHeaders(existing.Headers),
 	}, nil
 }
 
 func (d ConnectDraft) ToConfig() config.Provider {
 	cfg := config.Provider{
-		TemplateID:   strings.TrimSpace(d.TemplateID),
-		Kind:         firstNonEmpty(d.Kind, ProviderKindCompatible),
-		Name:         strings.TrimSpace(d.Name),
-		BaseURL:      strings.TrimSpace(d.BaseURL),
-		APIKey:       strings.TrimSpace(d.APIKey),
-		Headers:      cloneHeaders(d.Headers),
-		DefaultModel: strings.TrimSpace(d.Model),
+		TemplateID:    strings.TrimSpace(d.TemplateID),
+		Kind:          firstNonEmpty(d.Kind, ProviderKindCompatible),
+		AuthMethod:    strings.TrimSpace(d.AuthMethod),
+		Name:          strings.TrimSpace(d.Name),
+		BaseURL:       strings.TrimSpace(d.BaseURL),
+		APIKey:        strings.TrimSpace(d.APIKey),
+		APIKeyEnv:     strings.TrimSpace(d.APIKeyEnv),
+		Headers:       cloneHeaders(d.Headers),
+		DefaultModel:  strings.TrimSpace(d.Model),
+		ModelPreset:   strings.TrimSpace(d.ModelPreset),
+		ContextWindow: d.ContextWindow,
+		AutoCompactAt: d.AutoCompactAt,
+		Stream:        d.Stream,
+		Timeout:       d.Timeout,
+		Disabled:      d.Disabled,
 	}
 	return cfg
 }
