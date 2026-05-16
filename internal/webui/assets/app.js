@@ -282,6 +282,7 @@
       return {
         ws: null, reconnectTimer: null, connectWatchdog: null, reconnectDelay: 150, reconnectProbe: null, nextID: 1, pending: {}, clientID: '', clientStateTimer: null, state: {}, connected: false, connecting: true, draft: '', showPermissions: false,
         showModels: false, modelLoading: false, modelQuery: '', modelOptions: [],
+        showSettings: false, settingsLoading: false, settingsSaving: false, settingsTab: 'general', settings: null, settingsStatus: '', settingsStatusKind: 'secondary', settingsMCPText: '[]', settingsPermissionsText: '{}', settingsToolDefaultsText: '[]',
         showSessions: false, sessionLoading: false, sessionState: {active_id: 0, workdir: '', sessions: []}, newSessionTitle: '',
         showProviders: false, providerState: {catalog: [], providers: [], drafts: {}}, providerDraft: null, providerHeadersText: '{}', providerStatus: '', providerStatusKind: 'secondary', providerTesting: false, providerSaving: false,
         completion: {kind: '', query: '', start: 0, end: 0, items: [], selected: 0}, completionSeq: 0,
@@ -623,7 +624,9 @@
         applyState(s, options = {}) {
           const scroll = this.transcriptScrollState();
           const seq = ++this.scrollRestoreSeq;
-          this.state = s || {}; this.applyTheme(); this.error = this.state.error || '';
+          this.state = s || {};
+          if (this.state.theme || this.state.Theme) this.theme = this.state.theme || this.state.Theme;
+          this.applyTheme(); this.error = this.state.error || '';
           this.syncInterruptArmed();
           if (!this.restoreSelectedChat()) this.writeSelectedChat();
           this.afterTranscriptDOMUpdate(() => {
@@ -705,6 +708,7 @@
           if (this.showModels) return 'models';
           if (this.showSessions) return 'sessions';
           if (this.showProviders) return 'providers';
+          if (this.showSettings) return 'settings';
           return '';
         },
         reportClientStateSoon() {
@@ -1203,6 +1207,72 @@
             const next = this.providerRows()[0];
             if (next) this.editProvider(next.id); else this.addProvider();
           }).catch(err => this.showToast(err.message));
+        },
+        openSettingsDialog(tab = 'general') {
+          this.showSettings = true; this.settingsTab = tab; this.settingsLoading = true; this.settingsStatus = ''; this.settingsStatusKind = 'secondary';
+          this.reportClientStateSoon();
+          this.rpc('preferences_state', {}).then(state => {
+            this.setSettingsState(state);
+          }).finally(() => { this.settingsLoading = false; });
+        },
+        closeSettingsDialog() { this.showSettings = false; this.settings = null; this.settingsStatus = ''; this.reportClientStateSoon(); },
+        setSettingsState(state) {
+          this.settings = state || {};
+          this.providerState = this.settings.providers || this.providerState;
+          this.settingsMCPText = JSON.stringify(this.settings.mcp_servers || [], null, 2);
+          this.settingsPermissionsText = JSON.stringify(this.settings.permissions || {active: '', profiles: []}, null, 2);
+          this.settingsToolDefaultsText = JSON.stringify(this.settings.tool_defaults || [], null, 2);
+        },
+        settingsTabs() { return ['general', 'compaction', 'prompts', 'providers', 'mcp', 'permissions']; },
+        settingsTabLabel(tab) {
+          return {general: 'General', compaction: 'Compaction', prompts: 'Prompts', providers: 'Providers', mcp: 'MCP', permissions: 'Permissions'}[tab] || tab;
+        },
+        compactionModelValue() {
+          const c = this.settings?.compaction || {};
+          if (c.use_chat_model || (!c.provider_id && !c.model_id)) return 'chat';
+          return (c.provider_id || '') + '\u0000' + (c.model_id || '');
+        },
+        setCompactionModelValue(value) {
+          if (!this.settings?.compaction) return;
+          if (value === 'chat') {
+            this.settings.compaction.use_chat_model = true;
+            this.settings.compaction.provider_id = '';
+            this.settings.compaction.model_id = '';
+            return;
+          }
+          const parts = String(value || '').split('\u0000');
+          this.settings.compaction.use_chat_model = false;
+          this.settings.compaction.provider_id = parts[0] || '';
+          this.settings.compaction.model_id = parts[1] || '';
+        },
+        saveSettings() {
+          if (!this.settings) return;
+          let payload;
+          try {
+            payload = JSON.parse(JSON.stringify(this.settings));
+            payload.mcp_servers = this.settingsMCPText.trim() ? JSON.parse(this.settingsMCPText) : [];
+            payload.permissions = this.settingsPermissionsText.trim() ? JSON.parse(this.settingsPermissionsText) : {active: '', profiles: []};
+            payload.tool_defaults = this.settingsToolDefaultsText.trim() ? JSON.parse(this.settingsToolDefaultsText) : [];
+          } catch (err) {
+            this.settingsStatus = 'Invalid JSON: ' + err.message; this.settingsStatusKind = 'danger';
+            return;
+          }
+          this.settingsSaving = true; this.settingsStatus = ''; this.settingsStatusKind = 'secondary';
+          this.rpc('save_preferences', payload).then(state => {
+            this.setSettingsState(state);
+            this.theme = state?.ui?.theme || this.theme;
+            this.applyTheme();
+            this.settingsStatus = 'Saved settings'; this.settingsStatusKind = 'success';
+          }).catch(err => { this.settingsStatus = err.message; this.settingsStatusKind = 'danger'; }).finally(() => { this.settingsSaving = false; });
+        },
+        resetPrompt(target) {
+          this.rpc('reset_prompt', {target}).then(prompt => {
+            const prompts = this.settings?.prompts || [];
+            const idx = prompts.findIndex(item => item.target === target);
+            if (idx >= 0) prompts[idx] = prompt; else prompts.push(prompt);
+            this.settings.prompts = prompts;
+            this.settingsStatus = 'Reset ' + target; this.settingsStatusKind = 'success';
+          }).catch(err => { this.settingsStatus = err.message; this.settingsStatusKind = 'danger'; });
         },
         setTheme(theme) { writePreference('theme', theme); this.applyTheme(); this.rpc('set_theme', {theme}); }
       }

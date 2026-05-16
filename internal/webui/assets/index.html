@@ -28,6 +28,7 @@
         <span class="badge text-bg-secondary" x-text="connectionLabel()"></span>
         <button class="btn btn-sm btn-outline-secondary" title="Sessions" @click="openSessionDialog()"><i class="bi bi-collection"></i></button>
         <button class="btn btn-sm btn-outline-secondary" title="Providers" @click="openProviderDialog()"><i class="bi bi-plug"></i></button>
+        <button class="btn btn-sm btn-outline-secondary" title="Settings" @click="openSettingsDialog()"><i class="bi bi-gear"></i></button>
         <select class="form-select form-select-sm" x-model="theme" @change="setTheme(theme)" style="width: 8rem">
           <option value="auto">auto</option>
           <option value="dark">dark</option>
@@ -417,6 +418,30 @@
                 <label class="form-label small text-secondary">API key</label>
                 <input class="form-control" type="password" x-model="providerDraft.api_key" autocomplete="off">
               </div>
+              <div class="col-md-6">
+                <label class="form-label small text-secondary">API key env</label>
+                <input class="form-control" x-model="providerDraft.api_key_env" autocomplete="off">
+              </div>
+              <div class="col-md-6">
+                <label class="form-label small text-secondary">Model preset</label>
+                <input class="form-control" x-model="providerDraft.model_preset" autocomplete="off">
+              </div>
+              <div class="col-md-4">
+                <label class="form-label small text-secondary">Context window</label>
+                <input class="form-control" type="number" min="1" x-model.number="providerDraft.context_window">
+              </div>
+              <div class="col-md-4">
+                <label class="form-label small text-secondary">Auto compact at</label>
+                <input class="form-control" type="number" min="1" x-model.number="providerDraft.auto_compact_at">
+              </div>
+              <div class="col-md-4">
+                <label class="form-label small text-secondary">Timeout</label>
+                <input class="form-control" x-model="providerDraft.timeout" placeholder="10m" autocomplete="off">
+              </div>
+              <div class="col-12 settings-checks">
+                <label class="form-check"><input class="form-check-input" type="checkbox" x-model="providerDraft.stream"> <span class="form-check-label">Stream</span></label>
+                <label class="form-check"><input class="form-check-input" type="checkbox" x-model="providerDraft.disabled"> <span class="form-check-label">Disabled</span></label>
+              </div>
               <div class="col-12">
                 <label class="form-label small text-secondary">Headers JSON</label>
                 <textarea class="form-control font-monospace" rows="4" x-model="providerHeadersText" spellcheck="false"></textarea>
@@ -435,6 +460,155 @@
               <span class="spinner-border spinner-border-sm me-1" x-show="providerSaving"></span>Save
             </button>
             <button type="button" class="btn btn-outline-secondary" @click="closeProviderDialog()">Cancel</button>
+          </footer>
+        </form>
+      </div>
+    </section>
+  </div>
+
+  <div class="modal-backdrop-lite" x-show="showSettings" x-transition @keydown.escape.window="closeSettingsDialog()" style="display: none;">
+    <section class="settings-dialog bg-body border rounded shadow">
+      <header class="d-flex align-items-center justify-content-between gap-3 p-3 border-bottom">
+        <div>
+          <div class="fw-semibold"><i class="bi bi-gear me-1"></i> Settings</div>
+          <div class="small text-secondary" x-text="settings?.compaction?.current_selection_text || ''"></div>
+        </div>
+        <button type="button" class="btn btn-sm btn-outline-secondary" @click="closeSettingsDialog()"><i class="bi bi-x-lg"></i></button>
+      </header>
+      <div class="settings-body">
+        <aside class="settings-tabs border-end">
+          <template x-for="tab in settingsTabs()" :key="tab">
+            <button type="button" class="list-group-item list-group-item-action" :class="{'active': settingsTab === tab}" @click="settingsTab = tab" x-text="settingsTabLabel(tab)"></button>
+          </template>
+        </aside>
+        <form class="settings-form p-3" @submit.prevent="saveSettings()">
+          <template x-if="settingsLoading">
+            <div class="text-secondary"><span class="spinner-border spinner-border-sm me-2"></span>Loading settings</div>
+          </template>
+          <template x-if="!settingsLoading && settings">
+            <div>
+              <div class="row g-3" x-show="settingsTab === 'general'">
+                <div class="col-md-6">
+                  <label class="form-label small text-secondary">Default provider</label>
+                  <input class="form-control" x-model="settings.general.default_provider" autocomplete="off">
+                </div>
+                <div class="col-md-6">
+                  <label class="form-label small text-secondary">Default model</label>
+                  <input class="form-control" x-model="settings.general.default_model" autocomplete="off">
+                </div>
+                <div class="col-md-4">
+                  <label class="form-label small text-secondary">Theme</label>
+                  <select class="form-select" x-model="settings.ui.theme">
+                    <option value="auto">auto</option>
+                    <option value="dark">dark</option>
+                    <option value="light">light</option>
+                  </select>
+                </div>
+                <div class="col-md-4">
+                  <label class="form-label small text-secondary">Max tool loop steps</label>
+                  <input class="form-control" type="number" min="1" x-model.number="settings.general.max_tool_loop_steps">
+                </div>
+                <div class="col-md-4">
+                  <label class="form-label small text-secondary">Store backend</label>
+                  <input class="form-control" x-model="settings.general.store_backend" autocomplete="off">
+                </div>
+                <div class="col-md-4">
+                  <label class="form-label small text-secondary">Code style</label>
+                  <input class="form-control" x-model="settings.ui.code_style" autocomplete="off">
+                </div>
+                <div class="col-md-4">
+                  <label class="form-label small text-secondary">Spinner</label>
+                  <input class="form-control" x-model="settings.ui.spinner" autocomplete="off">
+                </div>
+                <div class="col-md-4">
+                  <label class="form-label small text-secondary">Edit forgiveness</label>
+                  <input class="form-control" type="number" min="1" max="5" x-model.number="settings.ui.edit_forgiveness">
+                </div>
+                <div class="col-12 settings-checks">
+                  <label class="form-check"><input class="form-check-input" type="checkbox" x-model="settings.ui.cursor_blink"> <span class="form-check-label">Cursor blink</span></label>
+                  <label class="form-check"><input class="form-check-input" type="checkbox" x-model="settings.ui.half_blocks"> <span class="form-check-label">Half blocks</span></label>
+                  <label class="form-check"><input class="form-check-input" type="checkbox" x-model="settings.ui.show_sidebar"> <span class="form-check-label">Show sidebar</span></label>
+                  <label class="form-check"><input class="form-check-input" type="checkbox" x-model="settings.ui.show_timestamps"> <span class="form-check-label">Timestamps</span></label>
+                  <label class="form-check"><input class="form-check-input" type="checkbox" x-model="settings.ui.show_reasoning"> <span class="form-check-label">Reasoning</span></label>
+                  <label class="form-check"><input class="form-check-input" type="checkbox" x-model="settings.ui.show_system"> <span class="form-check-label">System</span></label>
+                  <label class="form-check"><input class="form-check-input" type="checkbox" x-model="settings.ui.mouse"> <span class="form-check-label">Mouse</span></label>
+                  <label class="form-check"><input class="form-check-input" type="checkbox" x-model="settings.ui.auto_continue"> <span class="form-check-label">Auto continue</span></label>
+                </div>
+              </div>
+
+              <div class="row g-3" x-show="settingsTab === 'compaction'">
+                <div class="col-md-4">
+                  <label class="form-label small text-secondary">Auto compact at percent</label>
+                  <input class="form-control" type="number" min="1" x-model.number="settings.compaction.auto_compact_at">
+                </div>
+                <div class="col-md-4">
+                  <label class="form-label small text-secondary">Keep tool batches</label>
+                  <input class="form-control" type="number" min="0" max="10" x-model.number="settings.compaction.keep_tool_batches">
+                </div>
+                <div class="col-md-8">
+                  <label class="form-label small text-secondary">Compaction model</label>
+                  <select class="form-select" :value="compactionModelValue()" @change="setCompactionModelValue($event.target.value)">
+                    <option value="chat">Chat model</option>
+                    <template x-for="model in settings.models || []" :key="model.provider_id + '/' + model.model_id">
+                      <option :value="model.provider_id + '\u0000' + model.model_id" x-text="(model.provider_label || model.provider_id) + ' / ' + model.model_id"></option>
+                    </template>
+                  </select>
+                </div>
+              </div>
+
+              <div class="row g-3" x-show="settingsTab === 'prompts'">
+                <template x-for="prompt in settings.prompts || []" :key="prompt.target">
+                  <div class="col-12">
+                    <div class="d-flex align-items-center justify-content-between gap-2 mb-1">
+                      <label class="form-label small text-secondary mb-0" x-text="prompt.target"></label>
+                      <button type="button" class="btn btn-sm btn-outline-secondary" @click="resetPrompt(prompt.target)"><i class="bi bi-arrow-counterclockwise"></i></button>
+                    </div>
+                    <div class="small text-secondary text-truncate mb-1" x-text="prompt.path"></div>
+                    <textarea class="form-control font-monospace settings-prompt" rows="12" x-model="prompt.content" spellcheck="false"></textarea>
+                  </div>
+                </template>
+              </div>
+
+              <div class="row g-3" x-show="settingsTab === 'providers'">
+                <div class="col-12">
+                  <button type="button" class="btn btn-outline-primary" @click="openProviderDialog()"><i class="bi bi-plug me-1"></i> Open provider editor</button>
+                </div>
+                <template x-for="item in settings.providers?.providers || []" :key="item.id">
+                  <div class="col-md-6">
+                    <div class="border rounded p-2">
+                      <div class="fw-semibold" x-text="item.name || item.id"></div>
+                      <div class="small text-secondary" x-text="item.id + ' / ' + (item.default_model || '-')"></div>
+                    </div>
+                  </div>
+                </template>
+              </div>
+
+              <div class="row g-3" x-show="settingsTab === 'mcp'">
+                <div class="col-12">
+                  <label class="form-label small text-secondary">MCP servers JSON</label>
+                  <textarea class="form-control font-monospace settings-json" rows="20" x-model="settingsMCPText" spellcheck="false"></textarea>
+                </div>
+              </div>
+
+              <div class="row g-3" x-show="settingsTab === 'permissions'">
+                <div class="col-12">
+                  <label class="form-label small text-secondary">Permission profiles JSON</label>
+                  <textarea class="form-control font-monospace settings-json" rows="12" x-model="settingsPermissionsText" spellcheck="false"></textarea>
+                </div>
+                <div class="col-12">
+                  <label class="form-label small text-secondary">Tool defaults JSON</label>
+                  <textarea class="form-control font-monospace settings-json" rows="10" x-model="settingsToolDefaultsText" spellcheck="false"></textarea>
+                </div>
+              </div>
+
+              <div class="alert mt-3 mb-0" x-show="settingsStatus" :class="settingsStatusKind === 'success' ? 'alert-success' : (settingsStatusKind === 'danger' ? 'alert-danger' : 'alert-secondary')" x-text="settingsStatus"></div>
+            </div>
+          </template>
+          <footer class="d-flex justify-content-end gap-2 mt-3 pt-3 border-top">
+            <button type="submit" class="btn btn-primary" :disabled="settingsLoading || settingsSaving">
+              <span class="spinner-border spinner-border-sm me-1" x-show="settingsSaving"></span>Save
+            </button>
+            <button type="button" class="btn btn-outline-secondary" @click="closeSettingsDialog()">Close</button>
           </footer>
         </form>
       </div>

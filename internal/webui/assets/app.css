@@ -102,6 +102,14 @@
     .provider-dialog { width: min(980px, 100%); max-height: min(820px, 92vh); overflow: hidden; display: flex; flex-direction: column; }
     .provider-body { min-height: 0; display: grid; grid-template-columns: 280px minmax(0, 1fr); }
     .provider-list, .provider-form { min-height: 0; overflow: auto; }
+    .settings-dialog { width: min(1120px, 100%); max-height: min(860px, 94vh); overflow: hidden; display: flex; flex-direction: column; }
+    .settings-body { min-height: 0; display: grid; grid-template-columns: 190px minmax(0, 1fr); }
+    .settings-tabs { min-height: 0; overflow: auto; display: flex; flex-direction: column; }
+    .settings-tabs .list-group-item { border-left: 0; border-right: 0; border-radius: 0; text-align: left; }
+    .settings-form { min-height: 0; overflow: auto; }
+    .settings-checks { display: flex; flex-wrap: wrap; gap: .35rem 1rem; }
+    .settings-checks .form-check { margin: 0; min-width: 8rem; }
+    .settings-prompt, .settings-json { min-height: 14rem; }
     .toast-stack { position: fixed; right: 1rem; bottom: 1rem; z-index: 1100; max-width: min(420px, calc(100vw - 2rem)); }
     pre { white-space: pre-wrap; word-break: break-word; margin: 0; }
-    @media (max-width: 900px) { .app-shell { grid-template-columns: 1fr; } .sidebar, .sidebar-resizer { display: none; } .topbar, .composer { grid-column: 1; } .provider-body { grid-template-columns: 1fr; } }
+    @media (max-width: 900px) { .app-shell { grid-template-columns: 1fr; } .sidebar, .sidebar-resizer { display: none; } .topbar, .composer { grid-column: 1; } .provider-body, .settings-body { grid-template-columns: 1fr; } .settings-tabs { flex-direction: row; overflow-x: auto; } .settings-tabs .list-group-item { white-space: nowrap; } }

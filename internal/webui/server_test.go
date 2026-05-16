@@ -745,6 +745,9 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `openSessionDialog()`) {
 		t.Fatalf("expected top status bar session dialog button")
 	}
+	if !strings.Contains(fullPage, `openSettingsDialog()`) {
+		t.Fatalf("expected top status bar settings dialog button")
+	}
 	if !strings.Contains(fullPage, `list_sessions`) {
 		t.Fatalf("expected session dialog to list sessions")
 	}
@@ -765,6 +768,12 @@ func TestIndexServesHTML(t *testing.T) {
 	}
 	if !strings.Contains(fullPage, `delete_provider`) {
 		t.Fatalf("expected provider dialog delete action")
+	}
+	if !strings.Contains(fullPage, `preferences_state`) || !strings.Contains(fullPage, `save_preferences`) || !strings.Contains(fullPage, `reset_prompt`) {
+		t.Fatalf("expected preferences dialog RPC actions")
+	}
+	if !strings.Contains(fullPage, `Chat model`) || !strings.Contains(fullPage, `settings-prompt`) || !strings.Contains(fullPage, `resetPrompt(prompt.target)`) {
+		t.Fatalf("expected compaction model and prompt settings UI")
 	}
 	if !strings.Contains(fullPage, `showToast`) {
 		t.Fatalf("expected toast error path")
