@@ -1039,6 +1039,10 @@
           if (text === '/permissions') { this.showPermissions = true; return true; }
           if (text === '/compact') { this.rpc('compact', {}); return true; }
           if (text === '/chat new') { this.newChat(); return true; }
+          if (text === '/model') { this.openModelDialog(); return true; }
+          if (text === '/providers') { this.openProviderDialog(); return true; }
+          if (text === '/sessions') { this.openSessionDialog(); return true; }
+          if (text === '/settings') { this.openSettingsDialog(); return true; }
           if (text.startsWith('/')) { this.error = 'Unknown web command: ' + text; return true; }
           return false;
         },

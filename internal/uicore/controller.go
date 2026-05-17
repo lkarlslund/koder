@@ -779,10 +779,26 @@ func (c *Controller) RefreshWorkspace(ctx context.Context) error {
 	return nil
 }
 
-// CompleteComposer returns skill and reference completions for the current composer token.
+// CompleteComposer returns command, skill, and reference completions for the current composer token.
 func (c *Controller) CompleteComposer(text string, cursor int) (ComposerCompletions, error) {
 	if cursor < 0 || cursor > len(text) {
 		cursor = len(text)
+	}
+	if query, start, end, ok := composerCommandQuery(text, cursor); ok {
+		items := matchingComposerCommands(query)
+		if len(items) == 1 && items[0].Command == strings.TrimSpace(text[start:end]) {
+			items = nil
+		}
+		out := ComposerCompletions{Kind: "command", Query: query, Start: start, End: end}
+		for _, item := range items {
+			out.Items = append(out.Items, ComposerCompletionItem{
+				Label:       item.Command,
+				InsertText:  item.Command,
+				Description: item.Description,
+				Kind:        "command",
+			})
+		}
+		return out, nil
 	}
 	if query, start, ok := composerSkillQuery(text, cursor); ok {
 		items := matchingComposerSkills(c.workdir, query)
@@ -1807,6 +1823,56 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+type composerCommand struct {
+	Command     string
+	Description string
+}
+
+var composerCommands = []composerCommand{
+	{Command: "/chat new", Description: "Start a new chat"},
+	{Command: "/compact", Description: "Compact the active chat"},
+	{Command: "/model", Description: "Select the chat model"},
+	{Command: "/permissions", Description: "Change permission profile"},
+	{Command: "/providers", Description: "Configure providers"},
+	{Command: "/sessions", Description: "Switch sessions"},
+	{Command: "/settings", Description: "Open settings"},
+}
+
+func composerCommandQuery(value string, cursor int) (query string, start int, end int, ok bool) {
+	if cursor < 0 || cursor > len(value) {
+		cursor = len(value)
+	}
+	if cursor == 0 {
+		return "", 0, 0, false
+	}
+	prefix := value[:cursor]
+	start = 0
+	for start < len(prefix) && isComposerWhitespace(rune(prefix[start])) {
+		start++
+	}
+	if start >= len(value) || value[start] != '/' {
+		return "", 0, 0, false
+	}
+	if strings.ContainsAny(prefix[start:cursor], "\n\t") {
+		return "", 0, 0, false
+	}
+	end = cursor
+	query = strings.ToLower(strings.TrimSpace(strings.TrimPrefix(value[start:cursor], "/")))
+	return query, start, end, true
+}
+
+func matchingComposerCommands(query string) []composerCommand {
+	query = strings.ToLower(strings.TrimSpace(query))
+	out := make([]composerCommand, 0, len(composerCommands))
+	for _, item := range composerCommands {
+		command := strings.ToLower(strings.TrimPrefix(item.Command, "/"))
+		if query == "" || strings.HasPrefix(command, query) {
+			out = append(out, item)
+		}
+	}
+	return out
 }
 
 func composerSkillQuery(value string, cursor int) (query string, start int, ok bool) {

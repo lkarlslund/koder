@@ -618,6 +618,9 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `text === '/permissions'`) {
 		t.Fatalf("expected /permissions to be handled locally")
 	}
+	if !strings.Contains(fullPage, `text === '/settings'`) || !strings.Contains(fullPage, `text === '/model'`) {
+		t.Fatalf("expected settings and model slash commands to be handled locally")
+	}
 	if !strings.Contains(fullPage, `set_permission_profile`) {
 		t.Fatalf("expected permissions UI to call set_permission_profile")
 	}
@@ -1291,7 +1294,7 @@ func TestWebSocketTestProviderReturnsProbeResult(t *testing.T) {
 	}
 }
 
-func TestWebSocketComposerCompletionsReturnsSkillsAndReferences(t *testing.T) {
+func TestWebSocketComposerCompletionsReturnsCommandsSkillsAndReferences(t *testing.T) {
 	workdir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(workdir, ".agents", "skills", "review"), 0o755); err != nil {
 		t.Fatal(err)
@@ -1314,10 +1317,37 @@ func TestWebSocketComposerCompletionsReturnsSkillsAndReferences(t *testing.T) {
 		t.Fatalf("dial websocket: %v", err)
 	}
 	defer conn.Close(websocket.StatusNormalClosure, "")
-	if err := conn.Write(ctx, websocket.MessageText, []byte(`{"id":1,"method":"composer_completions","params":{"text":"Use $rev","cursor":8}}`)); err != nil {
-		t.Fatalf("write skill completion request: %v", err)
+	if err := conn.Write(ctx, websocket.MessageText, []byte(`{"id":1,"method":"composer_completions","params":{"text":"/pro","cursor":4}}`)); err != nil {
+		t.Fatalf("write command completion request: %v", err)
 	}
 	msg := readRPCResponse(t, ctx, conn, 1)
+	var commandResp struct {
+		OK     bool `json:"ok"`
+		Result struct {
+			Kind  string `json:"kind"`
+			Start int    `json:"start"`
+			End   int    `json:"end"`
+			Items []struct {
+				Label      string `json:"label"`
+				InsertText string `json:"insert_text"`
+			} `json:"items"`
+		} `json:"result"`
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(msg, &commandResp); err != nil {
+		t.Fatalf("decode command completions: %v", err)
+	}
+	if !commandResp.OK {
+		t.Fatalf("expected command completions ok, got %s", commandResp.Error)
+	}
+	if commandResp.Result.Kind != "command" || commandResp.Result.Start != 0 || commandResp.Result.End != 4 || len(commandResp.Result.Items) != 1 || commandResp.Result.Items[0].InsertText != "/providers" {
+		t.Fatalf("unexpected command completions: %#v", commandResp.Result)
+	}
+
+	if err := conn.Write(ctx, websocket.MessageText, []byte(`{"id":2,"method":"composer_completions","params":{"text":"Use $rev","cursor":8}}`)); err != nil {
+		t.Fatalf("write skill completion request: %v", err)
+	}
+	msg = readRPCResponse(t, ctx, conn, 2)
 	var skillResp struct {
 		OK     bool `json:"ok"`
 		Result struct {
@@ -1341,10 +1371,10 @@ func TestWebSocketComposerCompletionsReturnsSkillsAndReferences(t *testing.T) {
 		t.Fatalf("unexpected skill completions: %#v", skillResp.Result)
 	}
 
-	if err := conn.Write(ctx, websocket.MessageText, []byte(`{"id":2,"method":"composer_completions","params":{"text":"Read @REA","cursor":9}}`)); err != nil {
+	if err := conn.Write(ctx, websocket.MessageText, []byte(`{"id":3,"method":"composer_completions","params":{"text":"Read @REA","cursor":9}}`)); err != nil {
 		t.Fatalf("write reference completion request: %v", err)
 	}
-	msg = readRPCResponse(t, ctx, conn, 2)
+	msg = readRPCResponse(t, ctx, conn, 3)
 	var refResp struct {
 		OK     bool `json:"ok"`
 		Result struct {
