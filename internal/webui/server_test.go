@@ -778,6 +778,9 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `Chat model`) || !strings.Contains(fullPage, `settings-prompt`) || !strings.Contains(fullPage, `resetPrompt(prompt.target)`) {
 		t.Fatalf("expected compaction model and prompt settings UI")
 	}
+	if !strings.Contains(fullPage, `settings.ui.code_style_options`) || strings.Contains(fullPage, `x-model="settings.ui.code_style" autocomplete="off"`) {
+		t.Fatalf("expected code style setting to be a dropdown")
+	}
 	if !strings.Contains(fullPage, `showToast`) {
 		t.Fatalf("expected toast error path")
 	}

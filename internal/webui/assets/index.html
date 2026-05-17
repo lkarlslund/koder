@@ -514,7 +514,11 @@
                 </div>
                 <div class="col-md-4">
                   <label class="form-label small text-secondary">Code style</label>
-                  <input class="form-control" x-model="settings.ui.code_style" autocomplete="off">
+                  <select class="form-select" x-model="settings.ui.code_style">
+                    <template x-for="style in settings.ui.code_style_options || []" :key="style">
+                      <option :value="style" x-text="style"></option>
+                    </template>
+                  </select>
                 </div>
                 <div class="col-md-4">
                   <label class="form-label small text-secondary">Spinner</label>
