@@ -42,9 +42,6 @@ func TestLoadWritesDefaultConfig(t *testing.T) {
 	if !cfg.UI.HalfBlocks {
 		t.Fatal("expected half block mode enabled by default")
 	}
-	if cfg.UI.Spinner != "dots" {
-		t.Fatalf("expected default spinner dots, got %q", cfg.UI.Spinner)
-	}
 	if cfg.UI.CodeStyle != "github" {
 		t.Fatalf("expected default code style github, got %q", cfg.UI.CodeStyle)
 	}
@@ -129,17 +126,13 @@ func TestApplyDefaultsInfersProviderKindAndContextWindow(t *testing.T) {
 	}
 }
 
-func TestApplyDefaultsFillsMissingUISpinner(t *testing.T) {
+func TestApplyDefaultsFillsMissingUIStyleSettings(t *testing.T) {
 	cfg := Default()
-	cfg.UI.Spinner = ""
 	cfg.UI.CodeStyle = ""
 	cfg.UI.EditForgiveness = 0
 
 	cfg.applyDefaults()
 
-	if cfg.UI.Spinner != "dots" {
-		t.Fatalf("expected spinner default applied, got %q", cfg.UI.Spinner)
-	}
 	if cfg.UI.CodeStyle != "github" {
 		t.Fatalf("expected code style default applied, got %q", cfg.UI.CodeStyle)
 	}
@@ -194,7 +187,7 @@ func TestLoadBackfillsMissingCursorBlinkSetting(t *testing.T) {
 	if err := os.MkdirAll(configRoot, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	raw := []byte("[ui]\ntheme = \"tokyonight\"\nspinner = \"dots\"\n")
+	raw := []byte("[ui]\ntheme = \"tokyonight\"\n")
 	if err := os.WriteFile(filepath.Join(configRoot, "config.toml"), raw, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -218,7 +211,7 @@ func TestLoadBackfillsMissingAutoContinueSetting(t *testing.T) {
 	if err := os.MkdirAll(configRoot, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	raw := []byte("[ui]\ntheme = \"tokyonight\"\nspinner = \"dots\"\n")
+	raw := []byte("[ui]\ntheme = \"tokyonight\"\n")
 	if err := os.WriteFile(filepath.Join(configRoot, "config.toml"), raw, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -253,7 +246,7 @@ func TestLoadBackfillsMissingCompactionPreferences(t *testing.T) {
 	if err := os.MkdirAll(configRoot, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	raw := []byte("[ui]\ntheme = \"tokyonight\"\nspinner = \"dots\"\n")
+	raw := []byte("[ui]\ntheme = \"tokyonight\"\n")
 	if err := os.WriteFile(filepath.Join(configRoot, "config.toml"), raw, 0o644); err != nil {
 		t.Fatal(err)
 	}

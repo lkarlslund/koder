@@ -186,7 +186,6 @@ type UIPreferences struct {
 	CodeStyle        string   `json:"code_style"`
 	CodeStyleOptions []string `json:"code_style_options"`
 	EditForgiveness  int      `json:"edit_forgiveness"`
-	Spinner          string   `json:"spinner"`
 	CursorBlink      bool     `json:"cursor_blink"`
 	HalfBlocks       bool     `json:"half_blocks"`
 	ShowSidebar      bool     `json:"show_sidebar"`
@@ -1522,7 +1521,6 @@ func uiPreferencesFromConfig(ui config.UI) UIPreferences {
 		CodeStyle:        codeStyle,
 		CodeStyleOptions: codeStyleOptions(codeStyle),
 		EditForgiveness:  config.NormalizeEditForgiveness(ui.EditForgiveness),
-		Spinner:          strings.TrimSpace(ui.Spinner),
 		CursorBlink:      ui.CursorBlink,
 		HalfBlocks:       ui.HalfBlocks,
 		ShowSidebar:      ui.ShowSidebar,
@@ -1641,7 +1639,6 @@ func applyUIPreferences(cfg *config.Config, prefs UIPreferences) error {
 		Theme:           normalizeTheme(prefs.Theme),
 		CodeStyle:       codeStyle,
 		EditForgiveness: config.NormalizeEditForgiveness(prefs.EditForgiveness),
-		Spinner:         firstNonEmpty(strings.TrimSpace(prefs.Spinner), config.Default().UI.Spinner),
 		CursorBlink:     prefs.CursorBlink,
 		HalfBlocks:      prefs.HalfBlocks,
 		ShowSidebar:     prefs.ShowSidebar,

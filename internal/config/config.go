@@ -18,7 +18,6 @@ type UI struct {
 	Theme           string `toml:"theme"`
 	CodeStyle       string `toml:"code_style"`
 	EditForgiveness int    `toml:"edit_forgiveness"`
-	Spinner         string `toml:"spinner"`
 	CursorBlink     bool   `toml:"cursor_blink"`
 	HalfBlocks      bool   `toml:"half_blocks"`
 	ShowSidebar     bool   `toml:"show_sidebar"`
@@ -279,7 +278,6 @@ func Default() Config {
 			Theme:           "tokyonight",
 			CodeStyle:       "github",
 			EditForgiveness: 3,
-			Spinner:         "dots",
 			CursorBlink:     true,
 			HalfBlocks:      true,
 			ShowSidebar:     true,
@@ -340,9 +338,6 @@ func (c *Config) applyDefaults() {
 	}
 	if c.UI.Theme == "" {
 		c.UI = def.UI
-	}
-	if c.UI.Spinner == "" {
-		c.UI.Spinner = def.UI.Spinner
 	}
 	if c.UI.CodeStyle == "" {
 		c.UI.CodeStyle = def.UI.CodeStyle
