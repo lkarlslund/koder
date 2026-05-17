@@ -16,6 +16,9 @@ const (
 	ProfileReadAsk    = "read-ask"
 	ProfileWriteAsk   = "write-ask"
 	ProfileFullAccess = "full-access"
+
+	ModeReadOnly  MountMode = "readonly"
+	ModeReadWrite MountMode = "readwrite"
 )
 
 // Rules is the configured permission profile set plus active profile name.
@@ -24,9 +27,13 @@ type Rules struct {
 	Profiles map[string]Profile `toml:"profiles"`
 }
 
-// Profile is a named list of permission rules.
+// Profile is a named sandbox policy, with legacy rules accepted for migration.
 type Profile struct {
-	Rules []Rule `toml:"rules"`
+	Network   bool    `toml:"network"`
+	Root      string  `toml:"root"`
+	Workspace string  `toml:"workspace"`
+	Mounts    []Mount `toml:"mounts"`
+	Rules     []Rule  `toml:"rules,omitempty"`
 }
 
 // Rule grants, asks, or denies a tool matching a pattern.
@@ -34,6 +41,15 @@ type Rule struct {
 	Tool    domain.ToolKind       `toml:"tool"`
 	Pattern string                `toml:"pattern"`
 	Action  domain.PermissionMode `toml:"action"`
+}
+
+// MountMode controls whether a bwrap bind mount is read-only or read-write.
+type MountMode string
+
+// Mount is an extra host folder exposed inside the sandbox.
+type Mount struct {
+	Path string    `toml:"path" json:"path"`
+	Mode MountMode `toml:"mode" json:"mode"`
 }
 
 // AccessKind is a coarse permission category supplied by the tool caller.
@@ -90,6 +106,9 @@ func Evaluate(cfg Rules, profileName string, overrides []domain.PermissionOverri
 	if !ok {
 		profile = cfg.Profiles[cfg.Profile]
 	}
+	if len(profile.Rules) == 0 {
+		return Decision{Mode: domain.PermissionModeAllow}
+	}
 
 	for _, rule := range slices.Backward(profile.Rules) {
 		if !toolMatches(rule.Tool, req.Tool) {
@@ -102,13 +121,48 @@ func Evaluate(cfg Rules, profileName string, overrides []domain.PermissionOverri
 	return Decision{Mode: domain.PermissionModeDeny}
 }
 
+// Normalize fills missing sandbox fields with conservative defaults.
+func Normalize(profile Profile) Profile {
+	if !validMountMode(MountMode(profile.Root)) {
+		profile.Root = string(ModeReadOnly)
+	}
+	if !validMountMode(MountMode(profile.Workspace)) {
+		profile.Workspace = string(ModeReadWrite)
+	}
+	for idx := range profile.Mounts {
+		if !validMountMode(profile.Mounts[idx].Mode) {
+			profile.Mounts[idx].Mode = ModeReadOnly
+		}
+	}
+	return profile
+}
+
+// ValidateSandbox reports whether profile contains supported sandbox settings.
+func ValidateSandbox(profile Profile) error {
+	if !validMountMode(MountMode(profile.Root)) {
+		return fmt.Errorf("invalid root mode %q", profile.Root)
+	}
+	if !validMountMode(MountMode(profile.Workspace)) {
+		return fmt.Errorf("invalid workspace mode %q", profile.Workspace)
+	}
+	for _, mount := range profile.Mounts {
+		if strings.TrimSpace(mount.Path) == "" {
+			return fmt.Errorf("mount path is required")
+		}
+		if !filepath.IsAbs(strings.TrimSpace(mount.Path)) {
+			return fmt.Errorf("mount path %q must be absolute", mount.Path)
+		}
+		if !validMountMode(mount.Mode) {
+			return fmt.Errorf("invalid mount mode %q", mount.Mode)
+		}
+	}
+	return nil
+}
+
 // BuiltinProfiles returns the built-in permission profiles in display order.
 func BuiltinProfiles() []ProfileOption {
 	return []ProfileOption{
-		{Name: ProfileAsk, Label: "ask", Description: "Ask before every permission-governed tool action"},
-		{Name: ProfileReadAsk, Label: "read / ask", Description: "Allow reads in the current project, ask for everything else"},
-		{Name: ProfileWriteAsk, Label: "write / ask", Description: "Allow reads and writes in the current project, ask for shell commands and anything outside"},
-		{Name: ProfileFullAccess, Label: "full access", Description: "Allow all permission-governed tool actions"},
+		{Name: ProfileFullAccess, Label: "full access", Description: "Network on, root readwrite, workspace readwrite"},
 	}
 }
 
@@ -124,13 +178,21 @@ func Description(name string, cfg Rules) string {
 	if !ok {
 		return ""
 	}
+	profile = Normalize(profile)
+	if len(profile.Rules) == 0 {
+		network := "network off"
+		if profile.Network {
+			network = "network on"
+		}
+		return fmt.Sprintf("%s, root %s, workspace %s", network, profile.Root, profile.Workspace)
+	}
 	return summarizeRules(profile.Rules)
 }
 
 // IsBuiltinProfile reports whether name is a built-in profile.
 func IsBuiltinProfile(name string) bool {
 	switch strings.TrimSpace(name) {
-	case ProfileAsk, ProfileReadAsk, ProfileWriteAsk, ProfileFullAccess:
+	case ProfileFullAccess:
 		return true
 	default:
 		return false
@@ -181,6 +243,15 @@ func Validate(mode domain.PermissionMode) error {
 		return nil
 	default:
 		return fmt.Errorf("invalid permission mode %q", mode)
+	}
+}
+
+func validMountMode(mode MountMode) bool {
+	switch mode {
+	case ModeReadOnly, ModeReadWrite:
+		return true
+	default:
+		return false
 	}
 }
 

@@ -52,83 +52,6 @@ func TestEvaluateReadonlyProfile(t *testing.T) {
 	}
 }
 
-func TestEvaluateBuiltinAskMode(t *testing.T) {
-	cfg := testRules()
-	got := Evaluate(cfg, ProfileAsk, nil, Request{Tool: domain.ToolKindRead, Pattern: "README.md"})
-	if got.Mode != domain.PermissionModeAsk {
-		t.Fatalf("unexpected mode: %s", got.Mode)
-	}
-	if got.Reason == "" {
-		t.Fatal("expected approval reason")
-	}
-}
-
-func TestEvaluateBuiltinReadAskMode(t *testing.T) {
-	cfg := testRules()
-	projectRoot := t.TempDir()
-	inside := Evaluate(cfg, ProfileReadAsk, nil, Request{
-		Tool:        domain.ToolKindRead,
-		Access:      AccessRead,
-		Pattern:     "README.md",
-		ProjectRoot: projectRoot,
-		Targets:     []string{projectRoot + "/README.md"},
-	})
-	if inside.Mode != domain.PermissionModeAllow {
-		t.Fatalf("expected in-project read allow, got %s", inside.Mode)
-	}
-	codeSearch := Evaluate(cfg, ProfileReadAsk, nil, Request{
-		Tool:        domain.ToolKindCodeSearch,
-		Access:      AccessRead,
-		Pattern:     "RunPrompt",
-		ProjectRoot: projectRoot,
-		Targets:     []string{projectRoot},
-	})
-	if codeSearch.Mode != domain.PermissionModeAllow {
-		t.Fatalf("expected in-project code search allow, got %s", codeSearch.Mode)
-	}
-	outside := Evaluate(cfg, ProfileReadAsk, nil, Request{
-		Tool:           domain.ToolKindRead,
-		Access:         AccessRead,
-		Pattern:        "/tmp/README.md",
-		ProjectRoot:    projectRoot,
-		Targets:        []string{t.TempDir() + "/README.md"},
-		OutsideProject: true,
-	})
-	if outside.Mode != domain.PermissionModeAsk {
-		t.Fatalf("expected outside-project read ask, got %s", outside.Mode)
-	}
-	if outside.Reason != "target is outside the current project folder" {
-		t.Fatalf("unexpected outside-project reason: %q", outside.Reason)
-	}
-}
-
-func TestEvaluateBuiltinWriteAskMode(t *testing.T) {
-	cfg := testRules()
-	projectRoot := t.TempDir()
-	writeAllowed := Evaluate(cfg, ProfileWriteAsk, nil, Request{
-		Tool:        domain.ToolKindWrite,
-		Access:      AccessWrite,
-		Pattern:     "main.go",
-		ProjectRoot: projectRoot,
-		Targets:     []string{projectRoot + "/main.go"},
-	})
-	if writeAllowed.Mode != domain.PermissionModeAllow {
-		t.Fatalf("expected in-project write allow, got %s", writeAllowed.Mode)
-	}
-	bash := Evaluate(cfg, ProfileWriteAsk, nil, Request{
-		Tool:        domain.ToolKindBash,
-		Access:      AccessShell,
-		Pattern:     "pwd",
-		ProjectRoot: projectRoot,
-	})
-	if bash.Mode != domain.PermissionModeAsk {
-		t.Fatalf("expected bash ask, got %s", bash.Mode)
-	}
-	if bash.Reason != "shell commands require approval in this mode" {
-		t.Fatalf("unexpected bash reason: %q", bash.Reason)
-	}
-}
-
 func TestEvaluateBuiltinFullAccessMode(t *testing.T) {
 	cfg := testRules()
 	got := Evaluate(cfg, ProfileFullAccess, nil, Request{Tool: domain.ToolKindBash, Pattern: "pwd"})
@@ -179,7 +102,7 @@ func TestProfileNamesPreferConfiguredProfilesBeforeBuiltinExtras(t *testing.T) {
 	}
 
 	got := ProfileNames(cfg)
-	want := []string{"auto", "default", "readonly", "ask", "read-ask", "write-ask", "full-access"}
+	want := []string{"auto", "default", "readonly", "full-access"}
 	if fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Fatalf("expected names %v, got %v", want, got)
 	}
@@ -201,8 +124,23 @@ func TestConfiguredProfileDescriptionSummarizesRules(t *testing.T) {
 	if got := Description("default", cfg); got != "1 allow, 1 ask, 1 deny" {
 		t.Fatalf("unexpected configured profile description: %q", got)
 	}
-	if got := Description(ProfileFullAccess, cfg); got != "Allow all permission-governed tool actions" {
+	if got := Description(ProfileFullAccess, cfg); got != "Network on, root readwrite, workspace readwrite" {
 		t.Fatalf("unexpected builtin profile description: %q", got)
+	}
+}
+
+func TestSandboxProfileDescription(t *testing.T) {
+	cfg := Rules{
+		Profiles: map[string]Profile{
+			"default": {Root: string(ModeReadOnly), Workspace: string(ModeReadWrite)},
+			"dev":     {Network: true, Root: string(ModeReadOnly), Workspace: string(ModeReadOnly)},
+		},
+	}
+	if got := Description("default", cfg); got != "network off, root readonly, workspace readwrite" {
+		t.Fatalf("unexpected default description: %q", got)
+	}
+	if got := Description("dev", cfg); got != "network on, root readonly, workspace readonly" {
+		t.Fatalf("unexpected dev description: %q", got)
 	}
 }
 

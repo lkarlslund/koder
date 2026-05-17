@@ -209,17 +209,18 @@ func (commandTool) Execute(ctx context.Context, runtime tools.Runtime, req tools
 		rel = "."
 	}
 	snap, err := control.Start(ctx, execruntime.StartRequest{
-		SessionID:    runtime.SessionID,
-		ChatID:       runtime.ChatID,
-		ToolCallID:   req.ToolCallID,
-		Command:      req.Args["cmd"],
-		Workdir:      workdir,
-		Shell:        req.Args["shell"],
-		Login:        firstBool(req.Args["login"], true),
-		TTY:          firstBool(req.Args["tty"], false),
-		Timeout:      time.Duration(firstInt(req.Args["timeout_ms"])) * time.Millisecond,
-		YieldTime:    durationOrDefault(req.Args["yield_time_ms"], defaultYieldTime),
-		PreviewBytes: firstInt(req.Args["max_output_bytes"]),
+		SessionID:      runtime.SessionID,
+		ChatID:         runtime.ChatID,
+		ToolCallID:     req.ToolCallID,
+		Command:        req.Args["cmd"],
+		Workdir:        workdir,
+		Shell:          req.Args["shell"],
+		Login:          firstBool(req.Args["login"], true),
+		TTY:            firstBool(req.Args["tty"], false),
+		Timeout:        time.Duration(firstInt(req.Args["timeout_ms"])) * time.Millisecond,
+		YieldTime:      durationOrDefault(req.Args["yield_time_ms"], defaultYieldTime),
+		PreviewBytes:   firstInt(req.Args["max_output_bytes"]),
+		SandboxProfile: runtime.SandboxProfile,
 	})
 	if err != nil {
 		return tools.Result{}, err

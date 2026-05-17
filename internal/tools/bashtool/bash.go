@@ -63,7 +63,7 @@ func (tool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Reques
 			timeout = time.Duration(ms) * time.Millisecond
 		}
 	}
-	output, exitCode, err := tools.ShellResult(ctx, workdir, timeout, req.Args["command"])
+	output, exitCode, err := tools.ShellResult(ctx, workdir, timeout, req.Args["command"], runtime.SandboxProfile)
 	result := tools.Result{
 		Output: output,
 		Meta: map[string]string{

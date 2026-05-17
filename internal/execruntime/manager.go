@@ -21,6 +21,8 @@ import (
 	"github.com/creack/pty"
 
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/permissionprofile"
+	"github.com/lkarlslund/koder/internal/sandbox"
 )
 
 const (
@@ -61,36 +63,37 @@ type TerminalSize struct {
 }
 
 type StartRequest struct {
-	SessionID   domain.ID
-	ChatID      domain.ID
-	ToolCallID  string
-	Command     string
-	Workdir     string
-	Shell       string
-	Login       bool
-	TTY         bool
-	Timeout     time.Duration
-	YieldTime   time.Duration
-	PreviewBytes int
+	SessionID      domain.ID
+	ChatID         domain.ID
+	ToolCallID     string
+	Command        string
+	Workdir        string
+	Shell          string
+	Login          bool
+	TTY            bool
+	Timeout        time.Duration
+	YieldTime      time.Duration
+	PreviewBytes   int
+	SandboxProfile permissionprofile.Profile
 }
 
 type StatusRequest struct {
-	SessionID   domain.ID
-	ChatID      domain.ID
-	ProcessID  string
-	MaxBytes   int
+	SessionID domain.ID
+	ChatID    domain.ID
+	ProcessID string
+	MaxBytes  int
 }
 
 type ListRequest struct {
 	SessionID domain.ID
-	ChatID      domain.ID
+	ChatID    domain.ID
 	Scope     Scope
 	MaxBytes  int
 }
 
 type WriteStdinRequest struct {
-	SessionID   domain.ID
-	ChatID      domain.ID
+	SessionID  domain.ID
+	ChatID     domain.ID
 	ProcessID  string
 	Chars      string
 	CloseStdin bool
@@ -99,7 +102,7 @@ type WriteStdinRequest struct {
 
 type ResizeRequest struct {
 	SessionID domain.ID
-	ChatID      domain.ID
+	ChatID    domain.ID
 	ProcessID string
 	Size      TerminalSize
 	MaxBytes  int
@@ -107,14 +110,14 @@ type ResizeRequest struct {
 
 type TerminateRequest struct {
 	SessionID domain.ID
-	ChatID      domain.ID
+	ChatID    domain.ID
 	ProcessID string
 	MaxBytes  int
 }
 
 type CleanupRequest struct {
 	SessionID domain.ID
-	ChatID      domain.ID
+	ChatID    domain.ID
 	Scope     Scope
 	MaxBytes  int
 }
@@ -183,9 +186,9 @@ type process struct {
 	outputBytes int
 	proc        *exec.Cmd
 	ptyHandle   *os.File
-	stdin io.WriteCloser
-	done  chan struct{}
-	once  sync.Once
+	stdin       io.WriteCloser
+	done        chan struct{}
+	once        sync.Once
 }
 
 func NewManager() *Manager {
@@ -229,7 +232,16 @@ func (m *Manager) Start(ctx context.Context, req StartRequest) (Snapshot, error)
 	if err != nil {
 		return Snapshot{}, err
 	}
-	cmd := exec.CommandContext(context.Background(), shell, args...)
+	executable, wrappedArgs, err := sandbox.WrapCommand(sandbox.Command{
+		Executable: shell,
+		Args:       args,
+		Workdir:    req.Workdir,
+		Profile:    req.SandboxProfile,
+	})
+	if err != nil {
+		return Snapshot{}, err
+	}
+	cmd := exec.CommandContext(context.Background(), executable, wrappedArgs...)
 	cmd.Dir = strings.TrimSpace(req.Workdir)
 	cmd.Env = nil
 	p := &process{

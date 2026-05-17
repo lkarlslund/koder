@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/lkarlslund/koder/internal/permissionprofile"
 )
 
 func TestLoadWritesDefaultConfig(t *testing.T) {
@@ -310,7 +312,7 @@ func TestApplyDefaultsFillsMissingMCPServerDefaults(t *testing.T) {
 	}
 }
 
-func TestApplyDefaultsBackfillsMissingBuiltinPermissionRules(t *testing.T) {
+func TestApplyDefaultsMigratesRuleProfilesToSandboxProfiles(t *testing.T) {
 	cfg := Config{
 		Permissions: PermissionRules{
 			Profile: "default",
@@ -328,15 +330,11 @@ func TestApplyDefaultsBackfillsMissingBuiltinPermissionRules(t *testing.T) {
 	cfg.applyDefaults()
 
 	profile := cfg.Permissions.Profiles["default"]
-	var foundMCP bool
-	for _, rule := range profile.Rules {
-		if rule.Tool == "mcp" && rule.Pattern == "*" && rule.Action == "ask" {
-			foundMCP = true
-			break
-		}
+	if len(profile.Rules) != 0 {
+		t.Fatalf("expected legacy permission rules to be removed, got %#v", profile.Rules)
 	}
-	if !foundMCP {
-		t.Fatalf("expected default profile to gain MCP ask rule, got %#v", profile.Rules)
+	if profile.Root != string(permissionprofile.ModeReadOnly) || profile.Workspace != string(permissionprofile.ModeReadWrite) || profile.Network {
+		t.Fatalf("unexpected sandbox defaults: %#v", profile)
 	}
 }
 

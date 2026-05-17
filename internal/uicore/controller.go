@@ -237,8 +237,17 @@ type PermissionPreferences struct {
 
 // PermissionProfilePreference is one named permission profile.
 type PermissionProfilePreference struct {
-	Name  string                  `json:"name"`
-	Rules []config.PermissionRule `json:"rules"`
+	Name      string                      `json:"name"`
+	Network   bool                        `json:"network"`
+	Root      string                      `json:"root"`
+	Workspace string                      `json:"workspace"`
+	Mounts    []PermissionMountPreference `json:"mounts"`
+}
+
+// PermissionMountPreference is one extra sandbox folder mount.
+type PermissionMountPreference struct {
+	Path string `json:"path"`
+	Mode string `json:"mode"`
 }
 
 // ToolDefaultPreference is one default per-session tool enabled toggle.
@@ -1601,12 +1610,24 @@ func permissionPreferencesFromConfig(src config.PermissionRules) PermissionPrefe
 	slices.Sort(names)
 	profiles := make([]PermissionProfilePreference, 0, len(names))
 	for _, name := range names {
+		profile := permissionprofile.Normalize(src.Profiles[name])
 		profiles = append(profiles, PermissionProfilePreference{
-			Name:  name,
-			Rules: slices.Clone(src.Profiles[name].Rules),
+			Name:      name,
+			Network:   profile.Network,
+			Root:      profile.Root,
+			Workspace: profile.Workspace,
+			Mounts:    permissionMountPreferences(profile.Mounts),
 		})
 	}
 	return PermissionPreferences{Active: strings.TrimSpace(src.Profile), Profiles: profiles}
+}
+
+func permissionMountPreferences(src []permissionprofile.Mount) []PermissionMountPreference {
+	out := make([]PermissionMountPreference, 0, len(src))
+	for _, mount := range src {
+		out = append(out, PermissionMountPreference{Path: mount.Path, Mode: string(mount.Mode)})
+	}
+	return out
 }
 
 func toolDefaultPreferencesFromConfig(src map[domain.ToolKind]bool) []ToolDefaultPreference {
@@ -1731,12 +1752,26 @@ func applyPermissionPreferences(cfg *config.Config, prefs PermissionPreferences)
 		if name == "" {
 			continue
 		}
-		for _, rule := range item.Rules {
-			if err := permissionprofile.Validate(rule.Action); err != nil {
-				return fmt.Errorf("permission profile %q: %w", name, err)
-			}
+		profile := config.PermissionProfile{
+			Network:   item.Network,
+			Root:      strings.TrimSpace(item.Root),
+			Workspace: strings.TrimSpace(item.Workspace),
 		}
-		profiles[name] = config.PermissionProfile{Rules: slices.Clone(item.Rules)}
+		for _, mount := range item.Mounts {
+			path := strings.TrimSpace(mount.Path)
+			if path == "" {
+				continue
+			}
+			profile.Mounts = append(profile.Mounts, permissionprofile.Mount{
+				Path: path,
+				Mode: permissionprofile.MountMode(strings.TrimSpace(mount.Mode)),
+			})
+		}
+		profile = permissionprofile.Normalize(profile)
+		if err := permissionprofile.ValidateSandbox(profile); err != nil {
+			return fmt.Errorf("permission profile %q: %w", name, err)
+		}
+		profiles[name] = profile
 	}
 	if len(profiles) == 0 {
 		profiles = config.Default().Permissions.Profiles

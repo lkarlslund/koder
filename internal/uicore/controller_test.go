@@ -486,18 +486,18 @@ func TestControllerSetModelUpdatesStoreStateAndRuntimeSnapshot(t *testing.T) {
 func TestControllerSetPermissionProfileUpdatesActiveSession(t *testing.T) {
 	ctrl, st := newTestController(t)
 	sessionID := ctrl.State().Session.ID
-	if err := ctrl.SetPermissionProfile(context.Background(), "auto"); err != nil {
+	if err := ctrl.SetPermissionProfile(context.Background(), "dev-network"); err != nil {
 		t.Fatalf("set permission profile: %v", err)
 	}
 	session, err := st.GetSession(context.Background(), sessionID)
 	if err != nil {
 		t.Fatalf("get session: %v", err)
 	}
-	if session.PermissionProfile != "auto" {
-		t.Fatalf("expected session permission profile auto, got %q", session.PermissionProfile)
+	if session.PermissionProfile != "dev-network" {
+		t.Fatalf("expected session permission profile dev-network, got %q", session.PermissionProfile)
 	}
-	if got := ctrl.State().Permissions.Active; got != "auto" {
-		t.Fatalf("expected active permission profile auto, got %q", got)
+	if got := ctrl.State().Permissions.Active; got != "dev-network" {
+		t.Fatalf("expected active permission profile dev-network, got %q", got)
 	}
 }
 
@@ -508,7 +508,7 @@ func TestControllerPermissionOptionsMatchConfiguredProfiles(t *testing.T) {
 	for _, profile := range ctrl.State().Permissions.Profiles {
 		got = append(got, profile.Name)
 	}
-	want := []string{"auto", "default", "readonly", "ask", "read-ask", "write-ask", "full-access"}
+	want := []string{"default", "dev-network", "full-access", "readonly"}
 	if fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Fatalf("expected configured profiles before builtin extras, got %v", got)
 	}
@@ -528,7 +528,7 @@ func TestControllerPermissionProfilePersistsBySession(t *testing.T) {
 	if err := ctrl.Start(context.Background(), StartupModeNew); err != nil {
 		t.Fatalf("start controller: %v", err)
 	}
-	if err := ctrl.SetPermissionProfile(context.Background(), "auto"); err != nil {
+	if err := ctrl.SetPermissionProfile(context.Background(), "dev-network"); err != nil {
 		t.Fatalf("set permission profile: %v", err)
 	}
 	sessionID := ctrl.State().Session.ID
@@ -541,14 +541,14 @@ func TestControllerPermissionProfilePersistsBySession(t *testing.T) {
 	if err := next.loadSession(context.Background(), sessionID, ""); err != nil {
 		t.Fatalf("start next controller: %v", err)
 	}
-	if got := next.State().Permissions.Active; got != "auto" {
+	if got := next.State().Permissions.Active; got != "dev-network" {
 		t.Fatalf("expected session permission profile to persist, got %q", got)
 	}
 }
 
 func TestControllerSetPermissionProfileSurvivesRuntimeUpdate(t *testing.T) {
 	ctrl, _ := newTestController(t)
-	if err := ctrl.SetPermissionProfile(context.Background(), "auto"); err != nil {
+	if err := ctrl.SetPermissionProfile(context.Background(), "dev-network"); err != nil {
 		t.Fatalf("set permission profile: %v", err)
 	}
 	rt := ctrl.currentRuntime()
@@ -566,7 +566,7 @@ func TestControllerSetPermissionProfileSurvivesRuntimeUpdate(t *testing.T) {
 			if event.Type != "snapshot" && event.Type != "chat_update" {
 				continue
 			}
-			if got := ctrl.State().Permissions.Active; got != "auto" {
+			if got := ctrl.State().Permissions.Active; got != "dev-network" {
 				t.Fatalf("expected runtime update to preserve active permission profile, got %q", got)
 			}
 			return

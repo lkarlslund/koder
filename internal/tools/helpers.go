@@ -13,6 +13,9 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/lkarlslund/koder/internal/permissionprofile"
+	"github.com/lkarlslund/koder/internal/sandbox"
 )
 
 const (
@@ -199,7 +202,7 @@ func SummarizePaths(paths []string, limit int) string {
 	return strings.Join(paths[:limit], ", ") + fmt.Sprintf(", +%d more", len(paths)-limit)
 }
 
-func ShellResult(ctx context.Context, dir string, timeout time.Duration, command string) (string, int, error) {
+func ShellResult(ctx context.Context, dir string, timeout time.Duration, command string, profile permissionprofile.Profile) (string, int, error) {
 	if timeout <= 0 {
 		timeout = DefaultBashTimeout
 	}
@@ -208,7 +211,16 @@ func ShellResult(ctx context.Context, dir string, timeout time.Duration, command
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "bash", "-lc", command)
+	executable, args, err := sandbox.WrapCommand(sandbox.Command{
+		Executable: "bash",
+		Args:       []string{"-lc", command},
+		Workdir:    dir,
+		Profile:    profile,
+	})
+	if err != nil {
+		return "", -1, err
+	}
+	cmd := exec.CommandContext(ctx, executable, args...)
 	cmd.Dir = dir
 	output, err := cmd.CombinedOutput()
 	if ctx.Err() == context.DeadlineExceeded {

@@ -14,6 +14,7 @@ import (
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/execruntime"
+	"github.com/lkarlslund/koder/internal/permissionprofile"
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/store"
 )
@@ -131,6 +132,9 @@ type Runtime struct {
 	ChatControl           ChatControl
 	Exec                  execruntime.Control
 	MCP                   MCPExecutor
+	SandboxProfile        permissionprofile.Profile
+	SandboxProfiles       map[string]permissionprofile.Profile
+	DefaultSandboxProfile string
 	EditForgiveness       int
 }
 
@@ -225,11 +229,14 @@ func Info(kind domain.ToolKind) ToolSpec {
 }
 
 func NewRegistry(workdir string) *Registry {
+	def := config.Default()
 	return &Registry{
 		runtime: Runtime{
-			Workdir:         workdir,
-			HTTPClient:      &http.Client{},
-			EditForgiveness: config.Default().UI.EditForgiveness,
+			Workdir:               workdir,
+			HTTPClient:            &http.Client{},
+			SandboxProfiles:       def.Permissions.Profiles,
+			DefaultSandboxProfile: def.Permissions.Profile,
+			EditForgiveness:       def.UI.EditForgiveness,
 		},
 	}
 }
@@ -252,6 +259,15 @@ func (r *Registry) SetMCP(executor MCPExecutor) {
 
 func (r *Registry) SetEditForgiveness(level int) {
 	r.runtime.EditForgiveness = config.NormalizeEditForgiveness(level)
+}
+
+func (r *Registry) SetSandboxProfiles(rules permissionprofile.Rules) {
+	profiles := make(map[string]permissionprofile.Profile, len(rules.Profiles))
+	for name, profile := range rules.Profiles {
+		profiles[name] = permissionprofile.Normalize(profile)
+	}
+	r.runtime.SandboxProfiles = profiles
+	r.runtime.DefaultSandboxProfile = strings.TrimSpace(rules.Profile)
 }
 
 func (r *Registry) Execute(ctx context.Context, req Request) (Result, error) {
@@ -281,10 +297,27 @@ func (r *Registry) ExecuteWithChat(ctx context.Context, st *store.Store, session
 	runtime.ChatRole = chat.WorkflowRole
 	runtime.ActiveMilestoneRef = chat.ActiveMilestoneRef
 	runtime.AssignedTodoBucketRef = chat.AssignedTodoBucketRef
+	runtime.SandboxProfile = runtime.sandboxProfileForSession(ctx, st, sessionID)
 	if err := chatrole.CheckToolAllowed(runtime.ChatRole, req.Tool); err != nil {
 		return Result{}, err
 	}
 	return tool.Execute(ctx, runtime, req)
+}
+
+func (r Runtime) sandboxProfileForSession(ctx context.Context, st *store.Store, sessionID domain.ID) permissionprofile.Profile {
+	profileName := strings.TrimSpace(r.DefaultSandboxProfile)
+	if st != nil && sessionID != "" {
+		if session, err := st.GetSession(ctx, sessionID); err == nil && strings.TrimSpace(session.PermissionProfile) != "" {
+			profileName = strings.TrimSpace(session.PermissionProfile)
+		}
+	}
+	if profile, ok := r.SandboxProfiles[profileName]; ok {
+		return permissionprofile.Normalize(profile)
+	}
+	if profile, ok := r.SandboxProfiles[r.DefaultSandboxProfile]; ok {
+		return permissionprofile.Normalize(profile)
+	}
+	return permissionprofile.Normalize(permissionprofile.Profile{})
 }
 
 func (r *Registry) PersistResult(ctx context.Context, st *store.Store, sessionID domain.ID, req Request, result Result) (<-chan domain.Event, error) {

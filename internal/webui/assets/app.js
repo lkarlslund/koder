@@ -1335,6 +1335,11 @@
         selectPermissionProfile(name) {
           this.selectedPermissionProfile = name || '';
         },
+        permissionProfileSummary(profile) {
+          if (!profile) return '';
+          const network = profile.network ? 'network on' : 'network off';
+          return network + ', root ' + (profile.root || 'readonly') + ', workspace ' + (profile.workspace || 'readwrite');
+        },
         setActivePermissionProfile(name) {
           if (this.settings?.permissions) this.settings.permissions.active = name || '';
           this.selectPermissionProfile(name);
@@ -1356,7 +1361,7 @@
           let idx = profiles.length + 1;
           let name = 'custom';
           while (profiles.some(profile => profile.name === name)) name = 'custom-' + idx++;
-          profiles.push({name, rules: []});
+          profiles.push({name, network: false, root: 'readonly', workspace: 'readwrite', mounts: []});
           this.setActivePermissionProfile(name);
         },
         deletePermissionProfile(name) {
@@ -1365,23 +1370,17 @@
           this.settings.permissions.profiles = profiles;
           this.selectPermissionProfile(profiles[0]?.name || '');
         },
-        addPermissionRule(profile) {
+        addPermissionMount(profile) {
           if (!profile) return;
-          if (!Array.isArray(profile.rules)) profile.rules = [];
-          profile.rules.push({Tool: 'bash', Pattern: '*', Action: 'ask'});
+          if (!Array.isArray(profile.mounts)) profile.mounts = [];
+          profile.mounts.push({path: '', mode: 'readonly'});
         },
-        deletePermissionRule(profile, index) {
-          if (!profile?.rules) return;
-          profile.rules.splice(index, 1);
+        deletePermissionMount(profile, index) {
+          if (!profile?.mounts) return;
+          profile.mounts.splice(index, 1);
         },
         permissionToolOptions() {
           const tools = new Set((this.settings?.tool_defaults || []).map(item => String(item.tool || item.Tool || '').trim()).filter(Boolean));
-          for (const profile of this.permissionSettingsProfiles()) {
-            for (const rule of profile.rules || []) {
-              const tool = String(rule.Tool || rule.tool || '').trim();
-              if (tool) tools.add(tool);
-            }
-          }
           return Array.from(tools).sort();
         },
         toolDefaultRows() { return this.settings?.tool_defaults || []; },

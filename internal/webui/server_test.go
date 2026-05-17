@@ -791,7 +791,8 @@ func TestIndexServesHTML(t *testing.T) {
 		t.Fatalf("expected compaction model and prompt settings UI")
 	}
 	if !strings.Contains(fullPage, `permissionSettingsProfiles()`) ||
-		!strings.Contains(fullPage, `addPermissionRule(activePermissionProfile())`) ||
+		!strings.Contains(fullPage, `addPermissionMount(activePermissionProfile())`) ||
+		!strings.Contains(fullPage, `permissionProfileSummary(profile)`) ||
 		!strings.Contains(fullPage, `toolDefaultRows()`) ||
 		strings.Contains(fullPage, `settingsPermissionsText`) ||
 		strings.Contains(fullPage, `settingsToolDefaultsText`) ||

@@ -1686,6 +1686,15 @@ func TestPermissionProfileChangeReevaluatesPendingApproval(t *testing.T) {
 	cfg.DefaultProvider = "test"
 	cfg.DefaultModel = "test-model"
 	cfg.Permissions.Profile = permissionprofile.ProfileAsk
+	cfg.Permissions.Profiles[permissionprofile.ProfileAsk] = config.PermissionProfile{
+		Root:      string(permissionprofile.ModeReadOnly),
+		Workspace: string(permissionprofile.ModeReadWrite),
+		Rules: []config.PermissionRule{{
+			Tool:    domain.ToolKindBash,
+			Pattern: "*",
+			Action:  domain.PermissionModeAsk,
+		}},
+	}
 
 	st, err := store.Open(t.TempDir())
 	if err != nil {
@@ -2751,6 +2760,15 @@ func TestRunPromptPersistsAssistantErrorOnBackendFailure(t *testing.T) {
 
 func TestHandleModelToolCallAsksForOutsideProjectRead(t *testing.T) {
 	cfg := testConfig(t)
+	cfg.Permissions.Profiles[permissionprofile.ProfileReadAsk] = config.PermissionProfile{
+		Root:      string(permissionprofile.ModeReadOnly),
+		Workspace: string(permissionprofile.ModeReadWrite),
+		Rules: []config.PermissionRule{{
+			Tool:    domain.ToolKindRead,
+			Pattern: "*",
+			Action:  domain.PermissionModeAsk,
+		}},
+	}
 	st, err := store.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -2792,8 +2810,8 @@ func TestHandleModelToolCallAsksForOutsideProjectRead(t *testing.T) {
 	if evt.Kind != domain.EventKindApprovalAsk {
 		t.Fatalf("expected approval ask, got %#v", evt)
 	}
-	if !strings.Contains(evt.Text, "outside the current project folder") {
-		t.Fatalf("expected outside-project reason, got %q", evt.Text)
+	if !strings.Contains(evt.Text, "requires approval") {
+		t.Fatalf("expected approval text, got %q", evt.Text)
 	}
 }
 
@@ -2927,6 +2945,15 @@ func TestApproveContinuesAfterOutsideWorkspaceRead(t *testing.T) {
 	}
 	cfg.DefaultProvider = "test"
 	cfg.DefaultModel = "test-model"
+	cfg.Permissions.Profiles[permissionprofile.ProfileReadAsk] = config.PermissionProfile{
+		Root:      string(permissionprofile.ModeReadOnly),
+		Workspace: string(permissionprofile.ModeReadWrite),
+		Rules: []config.PermissionRule{{
+			Tool:    domain.ToolKindRead,
+			Pattern: "*",
+			Action:  domain.PermissionModeAsk,
+		}},
+	}
 
 	st, err := store.Open(t.TempDir())
 	if err != nil {
@@ -3027,6 +3054,15 @@ func TestApproveAutoCompactContinuesFromCompactedHistory(t *testing.T) {
 	}
 	cfg.DefaultProvider = "test"
 	cfg.DefaultModel = "test-model"
+	cfg.Permissions.Profiles["default"] = config.PermissionProfile{
+		Root:      string(permissionprofile.ModeReadOnly),
+		Workspace: string(permissionprofile.ModeReadWrite),
+		Rules: []config.PermissionRule{{
+			Tool:    domain.ToolKindBash,
+			Pattern: "*",
+			Action:  domain.PermissionModeAsk,
+		}},
+	}
 
 	st, err := store.Open(t.TempDir())
 	if err != nil {
@@ -3131,6 +3167,15 @@ func TestApproveContinuesAfterApprovedToolFailure(t *testing.T) {
 	}
 	cfg.DefaultProvider = "test"
 	cfg.DefaultModel = "test-model"
+	cfg.Permissions.Profiles[permissionprofile.ProfileReadAsk] = config.PermissionProfile{
+		Root:      string(permissionprofile.ModeReadOnly),
+		Workspace: string(permissionprofile.ModeReadWrite),
+		Rules: []config.PermissionRule{{
+			Tool:    domain.ToolKindRead,
+			Pattern: "*",
+			Action:  domain.PermissionModeAsk,
+		}},
+	}
 
 	st, err := store.Open(t.TempDir())
 	if err != nil {
@@ -3764,6 +3809,15 @@ func TestHandleModelToolCallAllowsProjectWriteInWriteAskMode(t *testing.T) {
 
 func TestHandleModelToolCallAsksForBashInWriteAskMode(t *testing.T) {
 	cfg := testConfig(t)
+	cfg.Permissions.Profiles[permissionprofile.ProfileWriteAsk] = config.PermissionProfile{
+		Root:      string(permissionprofile.ModeReadOnly),
+		Workspace: string(permissionprofile.ModeReadWrite),
+		Rules: []config.PermissionRule{{
+			Tool:    domain.ToolKindBash,
+			Pattern: "*",
+			Action:  domain.PermissionModeAsk,
+		}},
+	}
 	st, err := store.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -3799,7 +3853,7 @@ func TestHandleModelToolCallAsksForBashInWriteAskMode(t *testing.T) {
 	if evt.Kind != domain.EventKindApprovalAsk {
 		t.Fatalf("expected approval ask, got %#v", evt)
 	}
-	if !strings.Contains(evt.Text, "shell commands require approval in this mode") {
+	if !strings.Contains(evt.Text, "requires approval") {
 		t.Fatalf("unexpected approval text: %q", evt.Text)
 	}
 }

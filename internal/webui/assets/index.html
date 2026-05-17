@@ -529,7 +529,7 @@
                         <div class="settings-item-row settings-profile-row" :class="{'active': selectedPermissionProfile === profile.name}">
                           <button type="button" class="settings-item-main" @click="selectPermissionProfile(profile.name)">
                             <span class="settings-item-title" x-text="profile.name"></span>
-                            <span class="settings-item-subtitle" x-text="(profile.rules || []).length + ' rules'"></span>
+                            <span class="settings-item-subtitle" x-text="permissionProfileSummary(profile)"></span>
                           </button>
                           <button type="button" class="btn btn-sm btn-outline-danger" title="Delete profile" @click="deletePermissionProfile(profile.name)"><i class="bi bi-trash"></i></button>
                         </div>
@@ -553,24 +553,45 @@
                             </select>
                           </div>
                         </div>
+                        <div class="row g-3 mb-3">
+                          <div class="col-md-4">
+                            <label class="form-label small text-secondary">Network</label>
+                            <select class="form-select" x-model="activePermissionProfile().network">
+                              <option :value="false">disabled</option>
+                              <option :value="true">enabled</option>
+                            </select>
+                          </div>
+                          <div class="col-md-4">
+                            <label class="form-label small text-secondary">Root filesystem</label>
+                            <select class="form-select" x-model="activePermissionProfile().root">
+                              <option value="readonly">readonly</option>
+                              <option value="readwrite">readwrite</option>
+                            </select>
+                          </div>
+                          <div class="col-md-4">
+                            <label class="form-label small text-secondary">Workspace</label>
+                            <select class="form-select" x-model="activePermissionProfile().workspace">
+                              <option value="readonly">readonly</option>
+                              <option value="readwrite">readwrite</option>
+                            </select>
+                          </div>
+                        </div>
                         <div class="settings-list-header">
-                          <div class="fw-semibold">Rules</div>
-                          <button type="button" class="btn btn-sm btn-outline-primary" @click="addPermissionRule(activePermissionProfile())"><i class="bi bi-plus-lg"></i></button>
+                          <div class="fw-semibold">Extra folders</div>
+                          <button type="button" class="btn btn-sm btn-outline-primary" @click="addPermissionMount(activePermissionProfile())"><i class="bi bi-plus-lg"></i></button>
                         </div>
                         <div class="settings-rule-list">
-                          <template x-if="(activePermissionProfile().rules || []).length === 0">
-                            <div class="settings-empty">No rules in this profile</div>
+                          <template x-if="(activePermissionProfile().mounts || []).length === 0">
+                            <div class="settings-empty">No extra folders mounted</div>
                           </template>
-                          <template x-for="(rule, idx) in activePermissionProfile().rules || []" :key="idx">
+                          <template x-for="(mount, idx) in activePermissionProfile().mounts || []" :key="idx">
                             <div class="settings-rule-row">
-                              <input class="form-control form-control-sm" x-model="rule.Tool" list="permission-tool-options" placeholder="tool" autocomplete="off">
-                              <input class="form-control form-control-sm" x-model="rule.Pattern" placeholder="*" autocomplete="off">
-                              <select class="form-select form-select-sm" x-model="rule.Action">
-                                <option value="allow">allow</option>
-                                <option value="ask">ask</option>
-                                <option value="deny">deny</option>
+                              <input class="form-control form-control-sm" x-model="mount.path" placeholder="/path/to/folder" autocomplete="off">
+                              <select class="form-select form-select-sm" x-model="mount.mode">
+                                <option value="readonly">readonly</option>
+                                <option value="readwrite">readwrite</option>
                               </select>
-                              <button type="button" class="btn btn-sm btn-outline-danger" title="Delete rule" @click="deletePermissionRule(activePermissionProfile(), idx)"><i class="bi bi-trash"></i></button>
+                              <button type="button" class="btn btn-sm btn-outline-danger" title="Delete folder" @click="deletePermissionMount(activePermissionProfile(), idx)"><i class="bi bi-trash"></i></button>
                             </div>
                           </template>
                         </div>

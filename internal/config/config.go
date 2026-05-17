@@ -162,112 +162,22 @@ func Default() Config {
 			Profile: "default",
 			Profiles: map[string]PermissionProfile{
 				"default": {
-					Rules: []PermissionRule{
-						{Tool: domain.ToolKindRead, Pattern: "*", Action: domain.PermissionModeAllow},
-						{Tool: domain.ToolKindViewImage, Pattern: "*", Action: domain.PermissionModeAllow},
-						{Tool: domain.ToolKindShowImage, Pattern: "*", Action: domain.PermissionModeAllow},
-						{Tool: domain.ToolKindGlob, Pattern: "*", Action: domain.PermissionModeAllow},
-						{Tool: domain.ToolKindGrep, Pattern: "*", Action: domain.PermissionModeAllow},
-						{Tool: domain.ToolKindCodeSearch, Pattern: "*", Action: domain.PermissionModeAllow},
-						{Tool: domain.ToolKindBash, Pattern: "*", Action: domain.PermissionModeAsk},
-						{Tool: domain.ToolKindExecCommand, Pattern: "*", Action: domain.PermissionModeAsk},
-						{Tool: domain.ToolKindExecStatus, Pattern: "*", Action: domain.PermissionModeAllow},
-						{Tool: domain.ToolKindExecList, Pattern: "*", Action: domain.PermissionModeAllow},
-						{Tool: domain.ToolKindExecWriteStdin, Pattern: "*", Action: domain.PermissionModeAllow},
-						{Tool: domain.ToolKindExecResize, Pattern: "*", Action: domain.PermissionModeAllow},
-						{Tool: domain.ToolKindExecTerminate, Pattern: "*", Action: domain.PermissionModeAllow},
-						{Tool: domain.ToolKindExecCleanup, Pattern: "*", Action: domain.PermissionModeAllow},
-						{Tool: domain.ToolKindApplyPatch, Pattern: "*", Action: domain.PermissionModeAsk},
-						{Tool: domain.ToolKindEdit, Pattern: "*", Action: domain.PermissionModeAsk},
-						{Tool: domain.ToolKindWrite, Pattern: "*", Action: domain.PermissionModeAsk},
-						{Tool: domain.ToolKindTask, Pattern: "*", Action: domain.PermissionModeAsk},
-						{Tool: domain.ToolKindQuestion, Pattern: "*", Action: domain.PermissionModeAsk},
-						{Tool: domain.ToolKindUpdatePlan, Pattern: "*", Action: domain.PermissionModeAllow},
-						{Tool: domain.ToolKindMilestoneList, Pattern: "*", Action: domain.PermissionModeAllow},
-						{Tool: domain.ToolKindMilestoneAdd, Pattern: "*", Action: domain.PermissionModeAllow},
-						{Tool: domain.ToolKindMilestoneUpdate, Pattern: "*", Action: domain.PermissionModeAllow},
-						{Tool: domain.ToolKindMilestoneWrite, Pattern: "*", Action: domain.PermissionModeAllow},
-						{Tool: domain.ToolKindTodoList, Pattern: "*", Action: domain.PermissionModeAllow},
-						{Tool: domain.ToolKindTodoAddItems, Pattern: "*", Action: domain.PermissionModeAllow},
-						{Tool: domain.ToolKindTodoUpdateItem, Pattern: "*", Action: domain.PermissionModeAllow},
-						{Tool: domain.ToolKindTodoFetchNext, Pattern: "*", Action: domain.PermissionModeAllow},
-						{Tool: domain.ToolKindSkill, Pattern: "*", Action: domain.PermissionModeAsk},
-						{Tool: domain.ToolKindWebFetch, Pattern: "*", Action: domain.PermissionModeAsk},
-						{Tool: domain.ToolKindWebSearch, Pattern: "*", Action: domain.PermissionModeAsk},
-						{Tool: domain.ToolKindMCP, Pattern: "*", Action: domain.PermissionModeAsk},
-					},
+					Root:      string(permissionprofile.ModeReadOnly),
+					Workspace: string(permissionprofile.ModeReadWrite),
 				},
 				"readonly": {
-					Rules: []PermissionRule{
-						{Tool: domain.ToolKindRead, Pattern: "*", Action: domain.PermissionModeAllow},
-						{Tool: domain.ToolKindViewImage, Pattern: "*", Action: domain.PermissionModeAllow},
-						{Tool: domain.ToolKindShowImage, Pattern: "*", Action: domain.PermissionModeAllow},
-						{Tool: domain.ToolKindGlob, Pattern: "*", Action: domain.PermissionModeAllow},
-						{Tool: domain.ToolKindGrep, Pattern: "*", Action: domain.PermissionModeAllow},
-						{Tool: domain.ToolKindCodeSearch, Pattern: "*", Action: domain.PermissionModeAllow},
-						{Tool: domain.ToolKindBash, Pattern: "*", Action: domain.PermissionModeDeny},
-						{Tool: domain.ToolKindExecCommand, Pattern: "*", Action: domain.PermissionModeDeny},
-						{Tool: domain.ToolKindExecStatus, Pattern: "*", Action: domain.PermissionModeAllow},
-						{Tool: domain.ToolKindExecList, Pattern: "*", Action: domain.PermissionModeAllow},
-						{Tool: domain.ToolKindExecWriteStdin, Pattern: "*", Action: domain.PermissionModeDeny},
-						{Tool: domain.ToolKindExecResize, Pattern: "*", Action: domain.PermissionModeDeny},
-						{Tool: domain.ToolKindExecTerminate, Pattern: "*", Action: domain.PermissionModeDeny},
-						{Tool: domain.ToolKindExecCleanup, Pattern: "*", Action: domain.PermissionModeDeny},
-						{Tool: domain.ToolKindApplyPatch, Pattern: "*", Action: domain.PermissionModeDeny},
-						{Tool: domain.ToolKindEdit, Pattern: "*", Action: domain.PermissionModeDeny},
-						{Tool: domain.ToolKindWrite, Pattern: "*", Action: domain.PermissionModeDeny},
-						{Tool: domain.ToolKindTask, Pattern: "*", Action: domain.PermissionModeAsk},
-						{Tool: domain.ToolKindQuestion, Pattern: "*", Action: domain.PermissionModeAsk},
-						{Tool: domain.ToolKindUpdatePlan, Pattern: "*", Action: domain.PermissionModeAllow},
-						{Tool: domain.ToolKindMilestoneList, Pattern: "*", Action: domain.PermissionModeAllow},
-						{Tool: domain.ToolKindMilestoneAdd, Pattern: "*", Action: domain.PermissionModeAllow},
-						{Tool: domain.ToolKindMilestoneUpdate, Pattern: "*", Action: domain.PermissionModeAllow},
-						{Tool: domain.ToolKindMilestoneWrite, Pattern: "*", Action: domain.PermissionModeAllow},
-						{Tool: domain.ToolKindTodoList, Pattern: "*", Action: domain.PermissionModeAllow},
-						{Tool: domain.ToolKindTodoAddItems, Pattern: "*", Action: domain.PermissionModeAllow},
-						{Tool: domain.ToolKindTodoUpdateItem, Pattern: "*", Action: domain.PermissionModeAllow},
-						{Tool: domain.ToolKindTodoFetchNext, Pattern: "*", Action: domain.PermissionModeAllow},
-						{Tool: domain.ToolKindSkill, Pattern: "*", Action: domain.PermissionModeAsk},
-						{Tool: domain.ToolKindWebFetch, Pattern: "*", Action: domain.PermissionModeAsk},
-						{Tool: domain.ToolKindWebSearch, Pattern: "*", Action: domain.PermissionModeAsk},
-						{Tool: domain.ToolKindMCP, Pattern: "*", Action: domain.PermissionModeAsk},
-					},
+					Root:      string(permissionprofile.ModeReadOnly),
+					Workspace: string(permissionprofile.ModeReadOnly),
 				},
-				"auto": {
-					Rules: []PermissionRule{
-						{Tool: domain.ToolKindRead, Pattern: "*", Action: domain.PermissionModeAllow},
-						{Tool: domain.ToolKindViewImage, Pattern: "*", Action: domain.PermissionModeAllow},
-						{Tool: domain.ToolKindShowImage, Pattern: "*", Action: domain.PermissionModeAllow},
-						{Tool: domain.ToolKindGlob, Pattern: "*", Action: domain.PermissionModeAllow},
-						{Tool: domain.ToolKindGrep, Pattern: "*", Action: domain.PermissionModeAllow},
-						{Tool: domain.ToolKindCodeSearch, Pattern: "*", Action: domain.PermissionModeAllow},
-						{Tool: domain.ToolKindBash, Pattern: "*", Action: domain.PermissionModeAllow},
-						{Tool: domain.ToolKindExecCommand, Pattern: "*", Action: domain.PermissionModeAllow},
-						{Tool: domain.ToolKindExecStatus, Pattern: "*", Action: domain.PermissionModeAllow},
-						{Tool: domain.ToolKindExecList, Pattern: "*", Action: domain.PermissionModeAllow},
-						{Tool: domain.ToolKindExecWriteStdin, Pattern: "*", Action: domain.PermissionModeAllow},
-						{Tool: domain.ToolKindExecResize, Pattern: "*", Action: domain.PermissionModeAllow},
-						{Tool: domain.ToolKindExecTerminate, Pattern: "*", Action: domain.PermissionModeAllow},
-						{Tool: domain.ToolKindExecCleanup, Pattern: "*", Action: domain.PermissionModeAllow},
-						{Tool: domain.ToolKindApplyPatch, Pattern: "*", Action: domain.PermissionModeAllow},
-						{Tool: domain.ToolKindEdit, Pattern: "*", Action: domain.PermissionModeAllow},
-						{Tool: domain.ToolKindWrite, Pattern: "*", Action: domain.PermissionModeAllow},
-						{Tool: domain.ToolKindTask, Pattern: "*", Action: domain.PermissionModeAllow},
-						{Tool: domain.ToolKindQuestion, Pattern: "*", Action: domain.PermissionModeAllow},
-						{Tool: domain.ToolKindUpdatePlan, Pattern: "*", Action: domain.PermissionModeAllow},
-						{Tool: domain.ToolKindMilestoneList, Pattern: "*", Action: domain.PermissionModeAllow},
-						{Tool: domain.ToolKindMilestoneAdd, Pattern: "*", Action: domain.PermissionModeAllow},
-						{Tool: domain.ToolKindMilestoneUpdate, Pattern: "*", Action: domain.PermissionModeAllow},
-						{Tool: domain.ToolKindMilestoneWrite, Pattern: "*", Action: domain.PermissionModeAllow},
-						{Tool: domain.ToolKindTodoList, Pattern: "*", Action: domain.PermissionModeAllow},
-						{Tool: domain.ToolKindTodoAddItems, Pattern: "*", Action: domain.PermissionModeAllow},
-						{Tool: domain.ToolKindTodoUpdateItem, Pattern: "*", Action: domain.PermissionModeAllow},
-						{Tool: domain.ToolKindTodoFetchNext, Pattern: "*", Action: domain.PermissionModeAllow},
-						{Tool: domain.ToolKindSkill, Pattern: "*", Action: domain.PermissionModeAllow},
-						{Tool: domain.ToolKindWebFetch, Pattern: "*", Action: domain.PermissionModeAllow},
-						{Tool: domain.ToolKindWebSearch, Pattern: "*", Action: domain.PermissionModeAsk},
-						{Tool: domain.ToolKindMCP, Pattern: "*", Action: domain.PermissionModeAsk},
-					},
+				"dev-network": {
+					Network:   true,
+					Root:      string(permissionprofile.ModeReadOnly),
+					Workspace: string(permissionprofile.ModeReadWrite),
+				},
+				"full-access": {
+					Network:   true,
+					Root:      string(permissionprofile.ModeReadWrite),
+					Workspace: string(permissionprofile.ModeReadWrite),
 				},
 			},
 		},
@@ -333,6 +243,10 @@ func (c *Config) applyDefaults() {
 		c.Permissions.Profiles = cloneProfiles(def.Permissions.Profiles)
 	}
 	mergeBuiltinPermissionProfileDefaults(c.Permissions.Profiles, def.Permissions.Profiles)
+	for name, profile := range c.Permissions.Profiles {
+		profile.Rules = nil
+		c.Permissions.Profiles[name] = permissionprofile.Normalize(profile)
+	}
 	if _, ok := c.Permissions.Profiles[c.Permissions.Profile]; !ok {
 		c.Permissions.Profile = def.Permissions.Profile
 	}
@@ -498,7 +412,14 @@ func cloneProfiles(src map[string]PermissionProfile) map[string]PermissionProfil
 	for name, profile := range src {
 		rules := make([]PermissionRule, len(profile.Rules))
 		copy(rules, profile.Rules)
-		dst[name] = PermissionProfile{Rules: rules}
+		mounts := slices.Clone(profile.Mounts)
+		dst[name] = PermissionProfile{
+			Network:   profile.Network,
+			Root:      profile.Root,
+			Workspace: profile.Workspace,
+			Mounts:    mounts,
+			Rules:     rules,
+		}
 	}
 	return dst
 }
@@ -515,35 +436,20 @@ func mergeBuiltinPermissionProfileDefaults(dst map[string]PermissionProfile, def
 	for name, defProfile := range defaults {
 		existing, ok := dst[name]
 		if !ok {
-			dst[name] = PermissionProfile{Rules: slices.Clone(defProfile.Rules)}
+			dst[name] = permissionprofile.Normalize(defProfile)
 			continue
 		}
-		existing.Rules = mergeMissingPermissionRules(existing.Rules, defProfile.Rules)
-		dst[name] = existing
-	}
-}
-
-func mergeMissingPermissionRules(existing, defaults []PermissionRule) []PermissionRule {
-	if len(defaults) == 0 {
-		return slices.Clone(existing)
-	}
-	out := slices.Clone(existing)
-	for _, candidate := range defaults {
-		if hasPermissionRule(out, candidate) {
-			continue
+		if existing.Root == "" {
+			existing.Root = defProfile.Root
 		}
-		out = append(out, candidate)
-	}
-	return out
-}
-
-func hasPermissionRule(rules []PermissionRule, candidate PermissionRule) bool {
-	for _, rule := range rules {
-		if rule.Tool == candidate.Tool && strings.TrimSpace(rule.Pattern) == strings.TrimSpace(candidate.Pattern) {
-			return true
+		if existing.Workspace == "" {
+			existing.Workspace = defProfile.Workspace
 		}
+		if name == "dev-network" || name == permissionprofile.ProfileFullAccess {
+			existing.Network = defProfile.Network
+		}
+		dst[name] = permissionprofile.Normalize(existing)
 	}
-	return false
 }
 
 func configDir() string {

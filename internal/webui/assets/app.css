@@ -117,7 +117,7 @@
     .settings-profile-row { grid-template-columns: minmax(0, 1fr) auto; }
     .settings-profile-row.active { border-color: var(--bs-primary); background: var(--bs-primary-bg-subtle); }
     .settings-rule-list { display: grid; gap: .35rem; }
-    .settings-rule-row { display: grid; grid-template-columns: minmax(9rem, 1fr) minmax(8rem, 1fr) 7rem auto; gap: .35rem; align-items: center; }
+    .settings-rule-row { display: grid; grid-template-columns: minmax(12rem, 1fr) 8rem auto; gap: .35rem; align-items: center; }
     .settings-tool-defaults { display: grid; grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr)); gap: .35rem .75rem; }
     .settings-tool-default { min-width: 0; display: flex; align-items: center; gap: .45rem; padding: .35rem .45rem; border: 1px solid var(--bs-border-color); border-radius: .35rem; }
     .modal-backdrop-nested { z-index: 1060; }
