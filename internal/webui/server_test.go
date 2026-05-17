@@ -459,6 +459,10 @@ func TestIndexServesHTML(t *testing.T) {
 	if strings.Contains(fullPage, `cdn.jsdelivr.net`) {
 		t.Fatalf("expected index to avoid CDN dependencies")
 	}
+	if !strings.Contains(fullPage, `.settings-tabs .list-group-item.active { background: var(--bs-primary);`) ||
+		!strings.Contains(fullPage, `.settings-tabs { min-height: 0; overflow: auto; display: flex; flex-direction: column; gap:`) {
+		t.Fatalf("expected settings tabs to render as block buttons with primary active background")
+	}
 	if !strings.Contains(fullPage, `x-html="markdownHTML(item.content?.text || '')"`) {
 		t.Fatalf("expected assistant text to render as markdown HTML")
 	}

@@ -101,8 +101,10 @@
     .session-list { overflow: auto; }
     .settings-dialog { width: min(1120px, 100%); max-height: min(860px, 94vh); overflow: hidden; display: flex; flex-direction: column; }
     .settings-body { min-height: 0; display: grid; grid-template-columns: 190px minmax(0, 1fr); }
-    .settings-tabs { min-height: 0; overflow: auto; display: flex; flex-direction: column; }
-    .settings-tabs .list-group-item { border-left: 0; border-right: 0; border-radius: 0; text-align: left; }
+    .settings-tabs { min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: .45rem; padding: .75rem; background: var(--bs-tertiary-bg); }
+    .settings-tabs .list-group-item { border: 1px solid var(--bs-border-color); border-radius: .45rem; text-align: left; background: var(--bs-body-bg); color: var(--bs-body-color); font-weight: 600; padding: .55rem .7rem; }
+    .settings-tabs .list-group-item:hover { background: var(--bs-secondary-bg); color: var(--bs-body-color); }
+    .settings-tabs .list-group-item.active { background: var(--bs-primary); border-color: var(--bs-primary); color: var(--bs-white); }
     .settings-form { min-height: 0; overflow: auto; }
     .settings-list-header { display: flex; align-items: center; justify-content: space-between; gap: .75rem; margin-bottom: .65rem; }
     .settings-item-list { display: grid; gap: .4rem; }
