@@ -679,6 +679,9 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `readPreference('theme'`) {
 		t.Fatalf("expected theme to use shared browser preference storage")
 	}
+	if strings.Contains(document, `@change="setTheme(theme)"`) || strings.Contains(fullPage, `set_theme`) {
+		t.Fatalf("expected theme changes to be handled only through preferences")
+	}
 	if !strings.Contains(fullPage, `writePreference('sidebarRatio'`) {
 		t.Fatalf("expected sidebar split ratio to use shared browser preference storage")
 	}

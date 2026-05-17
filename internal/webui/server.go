@@ -496,15 +496,6 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 			return nil, err
 		}
 		return s.controller.CompleteComposer(in.Text, in.Cursor)
-	case "set_theme":
-		var in struct {
-			Theme string `json:"theme"`
-		}
-		if err := decodeParams(params, &in); err != nil {
-			return nil, err
-		}
-		s.controller.SetTheme(in.Theme)
-		return map[string]string{"theme": in.Theme}, nil
 	case "preferences_state":
 		return s.controller.Preferences(ctx)
 	case "save_preferences":

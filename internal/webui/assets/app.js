@@ -1277,8 +1277,7 @@
             this.settings.prompts = prompts;
             this.settingsStatus = 'Reset ' + target; this.settingsStatusKind = 'success';
           }).catch(err => { this.settingsStatus = err.message; this.settingsStatusKind = 'danger'; });
-        },
-        setTheme(theme) { writePreference('theme', theme); this.applyTheme(); this.rpc('set_theme', {theme}); }
+        }
       }
     }
     function preferenceKey(name) { return 'koder.' + name; }

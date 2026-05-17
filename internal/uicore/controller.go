@@ -1035,17 +1035,6 @@ func (c *Controller) DeleteProvider(ctx context.Context, providerID string) (Pro
 	return state, nil
 }
 
-// SetTheme updates the web theme preference.
-func (c *Controller) SetTheme(theme string) {
-	theme = normalizeTheme(theme)
-	c.mu.Lock()
-	c.theme = theme
-	c.cfg.UI.Theme = theme
-	_ = c.cfg.Save()
-	c.mu.Unlock()
-	c.broadcast("theme", map[string]string{"theme": theme})
-}
-
 // Preferences returns the complete editable settings state.
 func (c *Controller) Preferences(ctx context.Context) (PreferencesState, error) {
 	c.mu.RLock()
