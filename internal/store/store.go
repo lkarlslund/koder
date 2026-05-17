@@ -31,6 +31,7 @@ type backend interface {
 	CreateSession(context.Context, string, string, string, *domain.ID) (domain.Session, error)
 	ListSessions(context.Context) ([]domain.Session, error)
 	GetSession(context.Context, domain.ID) (domain.Session, error)
+	TouchSession(context.Context, domain.ID) (domain.Session, error)
 	CreateChat(context.Context, domain.ID, string, domain.WorkflowRole, *domain.ID) (domain.Chat, error)
 	ListChats(context.Context, domain.ID) ([]domain.Chat, error)
 	GetChat(context.Context, domain.ID) (domain.Chat, error)
@@ -201,6 +202,11 @@ func (s *Store) ListSessions(ctx context.Context) ([]domain.Session, error) {
 
 func (s *Store) GetSession(ctx context.Context, sessionID domain.ID) (domain.Session, error) {
 	return s.backend.GetSession(ctx, sessionID)
+}
+
+// TouchSession marks a session as recently used and returns the updated record.
+func (s *Store) TouchSession(ctx context.Context, sessionID domain.ID) (domain.Session, error) {
+	return s.backend.TouchSession(ctx, sessionID)
 }
 
 func (s *Store) ListChats(ctx context.Context, sessionID domain.ID) ([]domain.Chat, error) {

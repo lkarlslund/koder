@@ -406,6 +406,38 @@ func TestUpdateSessionWorkspacePersistsCWD(t *testing.T) {
 	}
 }
 
+func TestTouchSessionMarksSessionMostRecent(t *testing.T) {
+	for _, backend := range []string{BackendPebble, BackendJSONFS} {
+		t.Run(backend, func(t *testing.T) {
+			st := openTestStore(t, backend)
+
+			first, err := st.CreateSession(context.Background(), "first", "provider", "model", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			second, err := st.CreateSession(context.Background(), "second", "provider", "model", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			time.Sleep(time.Millisecond)
+			touched, err := st.TouchSession(context.Background(), first.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !touched.UpdatedAt.After(second.UpdatedAt) {
+				t.Fatalf("expected touched session to be newer than second session")
+			}
+			sessions, err := st.ListSessions(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := sessions[0].ID; got != first.ID {
+				t.Fatalf("expected touched session first, got %s", got)
+			}
+		})
+	}
+}
+
 func TestCreateChatInheritsSessionPermissions(t *testing.T) {
 	for _, backend := range []string{BackendPebble, BackendJSONFS} {
 		t.Run(backend, func(t *testing.T) {

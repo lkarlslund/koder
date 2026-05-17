@@ -675,6 +675,127 @@ func TestControllerStartupNewResumesRestartInterruptedWorkspaceSession(t *testin
 	}
 }
 
+func TestControllerStartupNewResumesLastWorkspaceSessionAndChat(t *testing.T) {
+	cfg := config.Default().WithStateDir(t.TempDir())
+	cfg.DefaultProvider = "test"
+	cfg.DefaultModel = "model"
+	st, err := store.OpenWithOptions(cfg.StateDir(), store.Options{Backend: store.BackendJSONFS})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+
+	ctx := context.Background()
+	workdir := t.TempDir()
+	sessionA, err := st.CreateSession(ctx, "Older", "test", "model", nil)
+	if err != nil {
+		t.Fatalf("create older session: %v", err)
+	}
+	if err := st.UpdateSessionWorkspace(ctx, sessionA.ID, workdir, workdir); err != nil {
+		t.Fatalf("workspace older: %v", err)
+	}
+	sessionB, err := st.CreateSession(ctx, "Last Used", "test", "model", nil)
+	if err != nil {
+		t.Fatalf("create last session: %v", err)
+	}
+	if err := st.UpdateSessionWorkspace(ctx, sessionB.ID, workdir, workdir); err != nil {
+		t.Fatalf("workspace last: %v", err)
+	}
+	if _, err := st.TouchSession(ctx, sessionB.ID); err != nil {
+		t.Fatalf("touch last session: %v", err)
+	}
+	defaultChat, err := st.DefaultChat(ctx, sessionB.ID)
+	if err != nil {
+		t.Fatalf("default chat: %v", err)
+	}
+	if _, err := st.CreateChat(ctx, sessionB.ID, "Side", chatrole.Orchestrator, nil); err != nil {
+		t.Fatalf("create side chat: %v", err)
+	}
+	defaultChat.UpdatedAt = time.Now().UTC().Add(time.Hour)
+	if err := st.UpdateChat(ctx, defaultChat); err != nil {
+		t.Fatalf("mark default chat last used: %v", err)
+	}
+
+	engine := agent.New(cfg, st, nil, nil, workdir)
+	ctrl := New(cfg, st, engine, workdir)
+	if err := ctrl.Start(ctx, StartupModeNew); err != nil {
+		t.Fatalf("start controller: %v", err)
+	}
+	state := ctrl.State()
+	if got := state.Session.ID; got != sessionB.ID {
+		t.Fatalf("expected last session %s, got %s", sessionB.ID, got)
+	}
+	if got := state.ActiveChatID; got != defaultChat.ID {
+		t.Fatalf("expected last chat %s, got %s", defaultChat.ID, got)
+	}
+}
+
+func TestControllerSwitchChatPersistsLastUsedChat(t *testing.T) {
+	ctx := context.Background()
+	cfg := config.Default().WithStateDir(t.TempDir())
+	cfg.DefaultProvider = "test"
+	cfg.DefaultModel = "model"
+	st, err := store.OpenWithOptions(cfg.StateDir(), store.Options{Backend: store.BackendJSONFS})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	workdir := t.TempDir()
+	engine := agent.New(cfg, st, nil, nil, workdir)
+	ctrl := New(cfg, st, engine, workdir)
+	if err := ctrl.Start(ctx, StartupModeNew); err != nil {
+		t.Fatalf("start controller: %v", err)
+	}
+	first := ctrl.State().ActiveChatID
+	if err := ctrl.NewChat(ctx, "Side"); err != nil {
+		t.Fatalf("new chat: %v", err)
+	}
+	if err := ctrl.SwitchChat(ctx, first); err != nil {
+		t.Fatalf("switch back to first chat: %v", err)
+	}
+
+	next := New(cfg, st, agent.New(cfg, st, nil, nil, workdir), workdir)
+	if err := next.Start(ctx, StartupModeNew); err != nil {
+		t.Fatalf("restart controller: %v", err)
+	}
+	if got := next.State().ActiveChatID; got != first {
+		t.Fatalf("expected restarted controller to focus chat %s, got %s", first, got)
+	}
+}
+
+func TestControllerSwitchSessionPersistsLastUsedSession(t *testing.T) {
+	ctx := context.Background()
+	cfg := config.Default().WithStateDir(t.TempDir())
+	cfg.DefaultProvider = "test"
+	cfg.DefaultModel = "model"
+	st, err := store.OpenWithOptions(cfg.StateDir(), store.Options{Backend: store.BackendJSONFS})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	workdir := t.TempDir()
+	engine := agent.New(cfg, st, nil, nil, workdir)
+	ctrl := New(cfg, st, engine, workdir)
+	if err := ctrl.Start(ctx, StartupModeNew); err != nil {
+		t.Fatalf("start controller: %v", err)
+	}
+	first := ctrl.State().Session.ID
+	if err := ctrl.NewSession(ctx, "Second"); err != nil {
+		t.Fatalf("new session: %v", err)
+	}
+	if err := ctrl.SwitchSession(ctx, first); err != nil {
+		t.Fatalf("switch back to first session: %v", err)
+	}
+
+	next := New(cfg, st, agent.New(cfg, st, nil, nil, workdir), workdir)
+	if err := next.Start(ctx, StartupModeNew); err != nil {
+		t.Fatalf("restart controller: %v", err)
+	}
+	if got := next.State().Session.ID; got != first {
+		t.Fatalf("expected restarted controller to resume session %s, got %s", first, got)
+	}
+}
+
 func TestControllerRefreshWorkspacePublishesGitStatus(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

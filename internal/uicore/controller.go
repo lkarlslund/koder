@@ -1998,14 +1998,13 @@ func (c *Controller) initialSession(ctx context.Context, mode StartupMode) (doma
 		} else if ok {
 			return session, nil
 		}
-		return c.createWorkspaceSession(ctx, "New Session")
 	}
 	sessions, err := c.workspaceSessions(ctx)
 	if err != nil {
 		return domain.Session{}, err
 	}
 	if len(sessions) == 0 {
-		return c.initialSession(ctx, StartupModeNew)
+		return c.createWorkspaceSession(ctx, "New Session")
 	}
 	return newestSession(sessions), nil
 }
@@ -2043,6 +2042,10 @@ func (c *Controller) loadSession(ctx context.Context, sessionID, chatID domain.I
 				return err
 			}
 		}
+	}
+	session, chatRecord, chats, err = c.touchLoadedSelection(ctx, session, chatRecord, chats)
+	if err != nil {
+		return err
 	}
 	chatRecord.PermissionProfile = ""
 	c.mu.RLock()
@@ -2131,6 +2134,24 @@ func (c *Controller) loadSession(ctx context.Context, sessionID, chatID domain.I
 	c.autoResumeRestartInterruptedChats(runtimes, snapshots)
 	c.broadcast("snapshot", c.State())
 	return nil
+}
+
+func (c *Controller) touchLoadedSelection(ctx context.Context, session domain.Session, chatRecord domain.Chat, chats []domain.Chat) (domain.Session, domain.Chat, []domain.Chat, error) {
+	session, err := c.store.TouchSession(ctx, session.ID)
+	if err != nil {
+		return domain.Session{}, domain.Chat{}, nil, err
+	}
+	chatRecord.UpdatedAt = time.Now().UTC()
+	if err := c.store.UpdateChat(ctx, chatRecord); err != nil {
+		return domain.Session{}, domain.Chat{}, nil, err
+	}
+	for idx, item := range chats {
+		if item.ID == chatRecord.ID {
+			chats[idx] = chatRecord
+			break
+		}
+	}
+	return session, chatRecord, chats, nil
 }
 
 const processRestartResumeNote = "The previous turn was interrupted because the koder process was restarting. Continue from the persisted transcript and pending tool state without restating the interruption."

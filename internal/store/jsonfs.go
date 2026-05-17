@@ -448,6 +448,23 @@ func (b *jsonfsBackend) GetSession(ctx context.Context, sessionID domain.ID) (do
 	return session, nil
 }
 
+func (b *jsonfsBackend) TouchSession(ctx context.Context, sessionID domain.ID) (domain.Session, error) {
+	if err := ensureContext(ctx); err != nil {
+		return domain.Session{}, err
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	session, err := b.readSession(sessionID)
+	if err != nil {
+		return domain.Session{}, err
+	}
+	session.UpdatedAt = time.Now().UTC()
+	if err := b.writeSession(session); err != nil {
+		return domain.Session{}, err
+	}
+	return session, nil
+}
+
 func (b *jsonfsBackend) SetSessionPermissionProfile(ctx context.Context, sessionID domain.ID, profile string) error {
 	return b.updateSession(ctx, sessionID, func(session *domain.Session) {
 		session.PermissionProfile = profile

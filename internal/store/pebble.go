@@ -466,6 +466,31 @@ func (b *pebbleBackend) GetSession(ctx context.Context, sessionID domain.ID) (do
 	return b.readSession(sessionID)
 }
 
+func (b *pebbleBackend) TouchSession(ctx context.Context, sessionID domain.ID) (domain.Session, error) {
+	if err := ensureContext(ctx); err != nil {
+		return domain.Session{}, err
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	session, err := b.readSession(sessionID)
+	if err != nil {
+		return domain.Session{}, err
+	}
+	previous := session
+	session.UpdatedAt = time.Now().UTC()
+
+	batch := b.db.NewBatch()
+	defer batch.Close()
+	if err := b.putSession(batch, &previous, &session); err != nil {
+		return domain.Session{}, err
+	}
+	if err := batch.Commit(pebble.Sync); err != nil {
+		return domain.Session{}, fmt.Errorf("commit touch session: %w", err)
+	}
+	return session, nil
+}
+
 func (b *pebbleBackend) UpdateSessionWorkspace(ctx context.Context, sessionID domain.ID, cwd, projectRoot string) error {
 	return b.updateSession(ctx, sessionID, func(session *domain.Session) {
 		session.CWD = cwd
