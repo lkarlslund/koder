@@ -377,6 +377,9 @@ func TestControllerSavePreferencesPersistsConfigAndPrompts(t *testing.T) {
 	if updated.Compaction.ModelID != "compact-model" {
 		t.Fatalf("expected updated preferences response, got %#v", updated.Compaction)
 	}
+	if !modelOptionsContain(updated.Models, "test", "compact-model") {
+		t.Fatalf("expected saved compaction model in preferences options, got %#v", updated.Models)
+	}
 
 	loaded, err := config.Load()
 	if err != nil {
@@ -385,6 +388,20 @@ func TestControllerSavePreferencesPersistsConfigAndPrompts(t *testing.T) {
 	if loaded.MaxToolLoopSteps != 77 || loaded.UI.Theme != "dark" || loaded.CompactionModel != "compact-model" {
 		t.Fatalf("expected saved config, got max=%d theme=%q compact=%q/%q", loaded.MaxToolLoopSteps, loaded.UI.Theme, loaded.CompactionProvider, loaded.CompactionModel)
 	}
+	restarted := New(loaded, st, agent.New(loaded, st, nil, nil, t.TempDir()), t.TempDir())
+	if err := restarted.Start(context.Background(), StartupModeNew); err != nil {
+		t.Fatal(err)
+	}
+	restartedPrefs, err := restarted.Preferences(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if restartedPrefs.Compaction.UseChatModel || restartedPrefs.Compaction.ProviderID != "test" || restartedPrefs.Compaction.ModelID != "compact-model" {
+		t.Fatalf("expected restart preferences to restore compaction model, got %#v", restartedPrefs.Compaction)
+	}
+	if !modelOptionsContain(restartedPrefs.Models, "test", "compact-model") {
+		t.Fatalf("expected restart preferences options to include compaction model, got %#v", restartedPrefs.Models)
+	}
 	data, err := os.ReadFile(filepath.Join(temp, ".koder", "compaction-prompt.md"))
 	if err != nil {
 		t.Fatal(err)
@@ -392,6 +409,15 @@ func TestControllerSavePreferencesPersistsConfigAndPrompts(t *testing.T) {
 	if string(data) != "custom compact prompt\n" {
 		t.Fatalf("expected prompt file update, got %q", string(data))
 	}
+}
+
+func modelOptionsContain(options []ModelOption, providerID, modelID string) bool {
+	for _, option := range options {
+		if option.ProviderID == providerID && option.ModelID == modelID {
+			return true
+		}
+	}
+	return false
 }
 
 func TestControllerResetPromptRestoresEmbeddedDefault(t *testing.T) {

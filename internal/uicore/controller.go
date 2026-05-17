@@ -1314,6 +1314,7 @@ func providerEntryLabel(providerID string, cfg config.Provider) string {
 
 func (c *Controller) preferencesStateLocked(ctx context.Context) (PreferencesState, error) {
 	models, _ := c.modelOptionsLocked(ctx)
+	models = ensureModelOption(models, c.cfg, strings.TrimSpace(c.cfg.CompactionProvider), strings.TrimSpace(c.cfg.CompactionModel))
 	prompts, err := promptPreferences()
 	if err != nil {
 		return PreferencesState{}, err
@@ -1338,6 +1339,34 @@ func (c *Controller) preferencesStateLocked(ctx context.Context) (PreferencesSta
 		state.RestartKeys = append(state.RestartKeys, "store.backend")
 	}
 	return state, nil
+}
+
+func ensureModelOption(options []ModelOption, cfg config.Config, providerID, modelID string) []ModelOption {
+	if providerID == "" || modelID == "" {
+		return options
+	}
+	for _, option := range options {
+		if option.ProviderID == providerID && option.ModelID == modelID {
+			return options
+		}
+	}
+	providerCfg, ok := cfg.Provider(providerID)
+	label := providerID
+	if ok {
+		label = providerEntryLabel(providerID, providerCfg)
+	}
+	options = append(options, ModelOption{
+		ProviderID:    providerID,
+		ProviderLabel: label,
+		ModelID:       modelID,
+	})
+	slices.SortFunc(options, func(a, b ModelOption) int {
+		if cmp := strings.Compare(a.ProviderLabel, b.ProviderLabel); cmp != 0 {
+			return cmp
+		}
+		return strings.Compare(a.ModelID, b.ModelID)
+	})
+	return options
 }
 
 func (c *Controller) providerStateLocked() ProviderState {
