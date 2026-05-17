@@ -282,7 +282,7 @@
       return {
         ws: null, reconnectTimer: null, connectWatchdog: null, reconnectDelay: 150, reconnectProbe: null, nextID: 1, pending: {}, clientID: '', clientStateTimer: null, state: {}, connected: false, connecting: true, draft: '', showPermissions: false,
         showModels: false, modelLoading: false, modelQuery: '', modelOptions: [],
-        showSettings: false, settingsLoading: false, settingsSaving: false, settingsTab: 'general', settings: null, settingsStatus: '', settingsStatusKind: 'secondary', settingsPermissionsText: '{}', settingsToolDefaultsText: '[]',
+        showSettings: false, settingsLoading: false, settingsSaving: false, settingsTab: 'general', settings: null, settingsStatus: '', settingsStatusKind: 'secondary', selectedPermissionProfile: '',
         showSessions: false, sessionLoading: false, sessionState: {active_id: 0, workdir: '', sessions: []}, newSessionTitle: '',
         providerState: {catalog: [], providers: [], drafts: {}}, showProviderEditor: false, providerDraft: null, providerHeadersText: '{}', providerStatus: '', providerStatusKind: 'secondary', providerTesting: false, providerSaving: false,
         showMCPEditor: false, mcpDraft: null, mcpHeadersText: '{}', mcpStatus: '', mcpStatusKind: 'secondary',
@@ -1218,8 +1218,8 @@
         setSettingsState(state) {
           this.settings = state || {};
           this.providerState = this.settings.providers || this.providerState;
-          this.settingsPermissionsText = JSON.stringify(this.settings.permissions || {active: '', profiles: []}, null, 2);
-          this.settingsToolDefaultsText = JSON.stringify(this.settings.tool_defaults || [], null, 2);
+          const profiles = this.permissionSettingsProfiles();
+          this.selectedPermissionProfile = this.settings?.permissions?.active || profiles[0]?.name || '';
         },
         settingsTabs() { return ['general', 'compaction', 'prompts', 'providers', 'mcp', 'permissions']; },
         settingsTabLabel(tab) {
@@ -1327,13 +1327,74 @@
           if (!this.settings || !id || !confirm('Delete this MCP server?')) return;
           this.settings.mcp_servers = this.mcpRows().filter(item => item.id !== id);
         },
+        permissionSettingsProfiles() { return this.settings?.permissions?.profiles || []; },
+        activePermissionProfile() {
+          const profiles = this.permissionSettingsProfiles();
+          return profiles.find(profile => profile.name === this.selectedPermissionProfile) || profiles[0] || null;
+        },
+        selectPermissionProfile(name) {
+          this.selectedPermissionProfile = name || '';
+        },
+        setActivePermissionProfile(name) {
+          if (this.settings?.permissions) this.settings.permissions.active = name || '';
+          this.selectPermissionProfile(name);
+        },
+        renameActivePermissionProfile(name) {
+          const profile = this.activePermissionProfile();
+          if (!profile) return;
+          const next = String(name || '').trim();
+          if (!next) return;
+          const wasActive = this.settings?.permissions?.active === profile.name;
+          profile.name = next;
+          this.selectedPermissionProfile = next;
+          if (wasActive && this.settings?.permissions) this.settings.permissions.active = next;
+        },
+        addPermissionProfile() {
+          if (!this.settings) return;
+          if (!this.settings.permissions) this.settings.permissions = {active: '', profiles: []};
+          const profiles = this.permissionSettingsProfiles();
+          let idx = profiles.length + 1;
+          let name = 'custom';
+          while (profiles.some(profile => profile.name === name)) name = 'custom-' + idx++;
+          profiles.push({name, rules: []});
+          this.setActivePermissionProfile(name);
+        },
+        deletePermissionProfile(name) {
+          if (!this.settings?.permissions || !name || !confirm('Delete this permission profile?')) return;
+          const profiles = this.permissionSettingsProfiles().filter(profile => profile.name !== name);
+          this.settings.permissions.profiles = profiles;
+          this.selectPermissionProfile(profiles[0]?.name || '');
+        },
+        addPermissionRule(profile) {
+          if (!profile) return;
+          if (!Array.isArray(profile.rules)) profile.rules = [];
+          profile.rules.push({Tool: 'bash', Pattern: '*', Action: 'ask'});
+        },
+        deletePermissionRule(profile, index) {
+          if (!profile?.rules) return;
+          profile.rules.splice(index, 1);
+        },
+        permissionToolOptions() {
+          const tools = new Set((this.settings?.tool_defaults || []).map(item => String(item.tool || item.Tool || '').trim()).filter(Boolean));
+          for (const profile of this.permissionSettingsProfiles()) {
+            for (const rule of profile.rules || []) {
+              const tool = String(rule.Tool || rule.tool || '').trim();
+              if (tool) tools.add(tool);
+            }
+          }
+          return Array.from(tools).sort();
+        },
+        toolDefaultRows() { return this.settings?.tool_defaults || []; },
+        toolDefaultTool(item) { return item.tool || item.Tool || ''; },
+        toolDefaultEnabled(item) { return item.enabled ?? item.Enabled ?? true; },
+        setToolDefaultEnabled(item, enabled) {
+          if ('enabled' in item) item.enabled = enabled; else item.Enabled = enabled;
+        },
         saveSettings() {
           if (!this.settings) return;
           let payload;
           try {
             payload = JSON.parse(JSON.stringify(this.settings));
-            payload.permissions = this.settingsPermissionsText.trim() ? JSON.parse(this.settingsPermissionsText) : {active: '', profiles: []};
-            payload.tool_defaults = this.settingsToolDefaultsText.trim() ? JSON.parse(this.settingsToolDefaultsText) : [];
           } catch (err) {
             this.settingsStatus = 'Invalid JSON: ' + err.message; this.settingsStatusKind = 'danger';
             return;

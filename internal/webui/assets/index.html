@@ -509,14 +509,85 @@
                 </div>
               </div>
 
-              <div class="row g-3" x-show="settingsTab === 'permissions'">
-                <div class="col-12">
-                  <label class="form-label small text-secondary">Permission profiles JSON</label>
-                  <textarea class="form-control font-monospace settings-json" rows="12" x-model="settingsPermissionsText" spellcheck="false"></textarea>
+              <div x-show="settingsTab === 'permissions'">
+                <div class="settings-list-header">
+                  <div>
+                    <div class="fw-semibold">Permission profiles</div>
+                    <div class="small text-secondary" x-text="(permissionSettingsProfiles().length || 0) + ' profiles'"></div>
+                  </div>
+                  <button type="button" class="btn btn-sm btn-outline-primary" @click="addPermissionProfile()"><i class="bi bi-plus-lg"></i></button>
                 </div>
-                <div class="col-12">
-                  <label class="form-label small text-secondary">Tool defaults JSON</label>
-                  <textarea class="form-control font-monospace settings-json" rows="10" x-model="settingsToolDefaultsText" spellcheck="false"></textarea>
+                <datalist id="permission-tool-options">
+                  <template x-for="tool in permissionToolOptions()" :key="tool">
+                    <option :value="tool"></option>
+                  </template>
+                </datalist>
+                <div class="row g-3">
+                  <div class="col-md-4">
+                    <div class="settings-item-list">
+                      <template x-for="profile in permissionSettingsProfiles()" :key="profile.name">
+                        <div class="settings-item-row settings-profile-row" :class="{'active': selectedPermissionProfile === profile.name}">
+                          <button type="button" class="settings-item-main" @click="selectPermissionProfile(profile.name)">
+                            <span class="settings-item-title" x-text="profile.name"></span>
+                            <span class="settings-item-subtitle" x-text="(profile.rules || []).length + ' rules'"></span>
+                          </button>
+                          <button type="button" class="btn btn-sm btn-outline-danger" title="Delete profile" @click="deletePermissionProfile(profile.name)"><i class="bi bi-trash"></i></button>
+                        </div>
+                      </template>
+                    </div>
+                  </div>
+                  <div class="col-md-8">
+                    <template x-if="activePermissionProfile()">
+                      <div>
+                        <div class="row g-3 mb-3">
+                          <div class="col-md-6">
+                            <label class="form-label small text-secondary">Profile name</label>
+                            <input class="form-control" :value="activePermissionProfile().name" @change="renameActivePermissionProfile($event.target.value)" autocomplete="off">
+                          </div>
+                          <div class="col-md-6">
+                            <label class="form-label small text-secondary">Active profile</label>
+                            <select class="form-select" x-model="settings.permissions.active" @change="setActivePermissionProfile(settings.permissions.active)">
+                              <template x-for="profile in permissionSettingsProfiles()" :key="profile.name">
+                                <option :value="profile.name" x-text="profile.name"></option>
+                              </template>
+                            </select>
+                          </div>
+                        </div>
+                        <div class="settings-list-header">
+                          <div class="fw-semibold">Rules</div>
+                          <button type="button" class="btn btn-sm btn-outline-primary" @click="addPermissionRule(activePermissionProfile())"><i class="bi bi-plus-lg"></i></button>
+                        </div>
+                        <div class="settings-rule-list">
+                          <template x-if="(activePermissionProfile().rules || []).length === 0">
+                            <div class="settings-empty">No rules in this profile</div>
+                          </template>
+                          <template x-for="(rule, idx) in activePermissionProfile().rules || []" :key="idx">
+                            <div class="settings-rule-row">
+                              <input class="form-control form-control-sm" x-model="rule.Tool" list="permission-tool-options" placeholder="tool" autocomplete="off">
+                              <input class="form-control form-control-sm" x-model="rule.Pattern" placeholder="*" autocomplete="off">
+                              <select class="form-select form-select-sm" x-model="rule.Action">
+                                <option value="allow">allow</option>
+                                <option value="ask">ask</option>
+                                <option value="deny">deny</option>
+                              </select>
+                              <button type="button" class="btn btn-sm btn-outline-danger" title="Delete rule" @click="deletePermissionRule(activePermissionProfile(), idx)"><i class="bi bi-trash"></i></button>
+                            </div>
+                          </template>
+                        </div>
+                      </div>
+                    </template>
+                  </div>
+                </div>
+                <div class="mt-4">
+                  <div class="fw-semibold mb-2">Default tool availability</div>
+                  <div class="settings-tool-defaults">
+                    <template x-for="item in toolDefaultRows()" :key="toolDefaultTool(item)">
+                      <label class="settings-tool-default">
+                        <input class="form-check-input" type="checkbox" :checked="toolDefaultEnabled(item)" @change="setToolDefaultEnabled(item, $event.target.checked)">
+                        <span class="text-truncate" x-text="toolDefaultTool(item)"></span>
+                      </label>
+                    </template>
+                  </div>
                 </div>
               </div>
 

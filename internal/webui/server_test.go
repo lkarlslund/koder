@@ -786,6 +786,14 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `Chat model`) || !strings.Contains(fullPage, `settings-prompt`) || !strings.Contains(fullPage, `resetPrompt(prompt.target)`) {
 		t.Fatalf("expected compaction model and prompt settings UI")
 	}
+	if !strings.Contains(fullPage, `permissionSettingsProfiles()`) ||
+		!strings.Contains(fullPage, `addPermissionRule(activePermissionProfile())`) ||
+		!strings.Contains(fullPage, `toolDefaultRows()`) ||
+		strings.Contains(fullPage, `settingsPermissionsText`) ||
+		strings.Contains(fullPage, `settingsToolDefaultsText`) ||
+		strings.Contains(fullPage, `Permission profiles JSON`) {
+		t.Fatalf("expected permissions settings to use structured controls")
+	}
 	if !strings.Contains(fullPage, `settings.ui.code_style_options`) || strings.Contains(fullPage, `x-model="settings.ui.code_style" autocomplete="off"`) {
 		t.Fatalf("expected code style setting to be a dropdown")
 	}
