@@ -282,9 +282,10 @@
       return {
         ws: null, reconnectTimer: null, connectWatchdog: null, reconnectDelay: 150, reconnectProbe: null, nextID: 1, pending: {}, clientID: '', clientStateTimer: null, state: {}, connected: false, connecting: true, draft: '', showPermissions: false,
         showModels: false, modelLoading: false, modelQuery: '', modelOptions: [],
-        showSettings: false, settingsLoading: false, settingsSaving: false, settingsTab: 'general', settings: null, settingsStatus: '', settingsStatusKind: 'secondary', settingsMCPText: '[]', settingsPermissionsText: '{}', settingsToolDefaultsText: '[]',
+        showSettings: false, settingsLoading: false, settingsSaving: false, settingsTab: 'general', settings: null, settingsStatus: '', settingsStatusKind: 'secondary', settingsPermissionsText: '{}', settingsToolDefaultsText: '[]',
         showSessions: false, sessionLoading: false, sessionState: {active_id: 0, workdir: '', sessions: []}, newSessionTitle: '',
-        showProviders: false, providerState: {catalog: [], providers: [], drafts: {}}, providerDraft: null, providerHeadersText: '{}', providerStatus: '', providerStatusKind: 'secondary', providerTesting: false, providerSaving: false,
+        providerState: {catalog: [], providers: [], drafts: {}}, showProviderEditor: false, providerDraft: null, providerHeadersText: '{}', providerStatus: '', providerStatusKind: 'secondary', providerTesting: false, providerSaving: false,
+        showMCPEditor: false, mcpDraft: null, mcpHeadersText: '{}', mcpStatus: '', mcpStatusKind: 'secondary',
         completion: {kind: '', query: '', start: 0, end: 0, items: [], selected: 0}, completionSeq: 0,
         theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, restoreChatAttempted: false, transcriptStickToBottom: true, scrollRestoreSeq: 0, expandedMilestones: {}, interruptArmedChatID: '', dragChatID: '', composerAttachments: [], error: '', toast: '', toastTimer: null,
         init() {
@@ -707,7 +708,6 @@
           if (this.showPermissions) return 'permissions';
           if (this.showModels) return 'models';
           if (this.showSessions) return 'sessions';
-          if (this.showProviders) return 'providers';
           if (this.showSettings) return 'settings';
           return '';
         },
@@ -1131,16 +1131,7 @@
         createSession() {
           this.rpc('new_session', {title: this.newSessionTitle || 'New Session'}).then(s => { this.applyState(s); this.closeSessionDialog(); });
         },
-        openProviderDialog() {
-          this.showProviders = true; this.providerStatus = ''; this.providerStatusKind = 'secondary';
-          this.reportClientStateSoon();
-          this.rpc('provider_state', {}).then(state => {
-            this.providerState = state || {catalog: [], providers: [], drafts: {}};
-            if (this.providerRows().length > 0) this.editProvider(this.providerRows()[0].id);
-            else this.addProvider();
-          });
-        },
-        closeProviderDialog() { this.showProviders = false; this.providerDraft = null; this.providerStatus = ''; this.reportClientStateSoon(); },
+        openProviderDialog() { this.openSettingsDialog('providers'); },
         providerTemplates() { return this.providerState.catalog || []; },
         providerRows() { return this.providerState.providers || []; },
         setProviderDraft(draft) {
@@ -1149,12 +1140,13 @@
         },
         editProvider(id) {
           const draft = (this.providerState.drafts || {})[id];
-          if (draft) { this.setProviderDraft(draft); this.providerStatus = ''; }
+          if (draft) { this.setProviderDraft(draft); this.providerStatus = ''; this.providerStatusKind = 'secondary'; this.showProviderEditor = true; }
         },
         addProvider() {
           const first = this.providerTemplates()[0]?.id || 'openai-compatible';
-          this.rpc('new_provider_draft', {template_id: first}).then(draft => { this.setProviderDraft(draft); this.providerStatus = ''; });
+          this.rpc('new_provider_draft', {template_id: first}).then(draft => { this.setProviderDraft(draft); this.providerStatus = ''; this.providerStatusKind = 'secondary'; this.showProviderEditor = true; });
         },
+        closeProviderEditor() { this.showProviderEditor = false; this.providerDraft = null; this.providerStatus = ''; this.providerStatusKind = 'secondary'; },
         providerTemplateChanged() {
           if (!this.providerDraft) return;
           const current = this.providerDraft;
@@ -1198,18 +1190,18 @@
           this.providerSaving = true; this.providerStatus = ''; this.providerStatusKind = 'secondary';
           this.rpc('save_provider', payload).then(result => {
             this.providerState = result.providers || result;
+            if (this.settings) this.settings.providers = this.providerState;
             if (result.state) this.applyState(result.state);
             this.providerStatus = 'Saved provider'; this.providerStatusKind = 'success';
-            this.editProvider(payload.provider_id);
+            this.showProviderEditor = false;
           }).catch(err => { this.providerStatus = err.message; this.providerStatusKind = 'danger'; }).finally(() => { this.providerSaving = false; });
         },
         deleteProvider(id) {
           if (!id || !confirm('Delete this provider?')) return;
           this.rpc('delete_provider', {provider_id: id}).then(result => {
             this.providerState = result.providers || result;
+            if (this.settings) this.settings.providers = this.providerState;
             if (result.state) this.applyState(result.state);
-            const next = this.providerRows()[0];
-            if (next) this.editProvider(next.id); else this.addProvider();
           }).catch(err => this.showToast(err.message));
         },
         openSettingsDialog(tab = 'general') {
@@ -1219,11 +1211,13 @@
             this.setSettingsState(state);
           }).finally(() => { this.settingsLoading = false; });
         },
-        closeSettingsDialog() { this.showSettings = false; this.settings = null; this.settingsStatus = ''; this.reportClientStateSoon(); },
+        closeSettingsDialog() {
+          this.showSettings = false; this.settings = null; this.settingsStatus = '';
+          this.closeProviderEditor(); this.closeMCPEditor(); this.reportClientStateSoon();
+        },
         setSettingsState(state) {
           this.settings = state || {};
           this.providerState = this.settings.providers || this.providerState;
-          this.settingsMCPText = JSON.stringify(this.settings.mcp_servers || [], null, 2);
           this.settingsPermissionsText = JSON.stringify(this.settings.permissions || {active: '', profiles: []}, null, 2);
           this.settingsToolDefaultsText = JSON.stringify(this.settings.tool_defaults || [], null, 2);
         },
@@ -1249,12 +1243,95 @@
           this.settings.compaction.provider_id = parts[0] || '';
           this.settings.compaction.model_id = parts[1] || '';
         },
+        settingsListRows(kind) {
+          if (kind === 'providers') return this.providerRows();
+          if (kind === 'mcp') return this.settings?.mcp_servers || [];
+          return [];
+        },
+        settingsItemTitle(kind, item) {
+          if (kind === 'providers') return item.name || item.id || 'Provider';
+          if (kind === 'mcp') return item.name || item.id || 'MCP server';
+          return item?.name || item?.id || 'Item';
+        },
+        settingsItemSubtitle(kind, item) {
+          if (kind === 'providers') return (item.id || '-') + ' / ' + (item.default_model || '-');
+          if (kind === 'mcp') return (item.id || '-') + (item.url ? ' / ' + item.url : '');
+          return '';
+        },
+        settingsItemBadges(kind, item) {
+          const badges = [];
+          if (kind === 'providers' && item.default) badges.push('default');
+          if (item.disabled) badges.push('disabled');
+          return badges;
+        },
+        editSettingsItem(kind, id) {
+          if (kind === 'providers') { this.editProvider(id); return; }
+          if (kind === 'mcp') this.editMCPServer(id);
+        },
+        addSettingsItem(kind) {
+          if (kind === 'providers') { this.addProvider(); return; }
+          if (kind === 'mcp') this.addMCPServer();
+        },
+        deleteSettingsItem(kind, id) {
+          if (kind === 'providers') { this.deleteProvider(id); return; }
+          if (kind === 'mcp') this.deleteMCPServer(id);
+        },
+        mcpRows() { return this.settings?.mcp_servers || []; },
+        addMCPServer() {
+          this.mcpDraft = {original_id: '', id: '', name: '', url: '', headers: {}, disabled: false, startup_timeout: '', request_timeout: '', disable_standalone_sse: false, bearer_token: '', bearer_token_env: ''};
+          this.mcpHeadersText = '{}'; this.mcpStatus = ''; this.mcpStatusKind = 'secondary'; this.showMCPEditor = true;
+        },
+        editMCPServer(id) {
+          const item = this.mcpRows().find(server => server.id === id);
+          if (!item) return;
+          this.mcpDraft = JSON.parse(JSON.stringify(Object.assign({original_id: id, headers: {}}, item, {original_id: id})));
+          this.mcpHeadersText = JSON.stringify(this.mcpDraft.headers || {}, null, 2);
+          this.mcpStatus = ''; this.mcpStatusKind = 'secondary'; this.showMCPEditor = true;
+        },
+        closeMCPEditor() { this.showMCPEditor = false; this.mcpDraft = null; this.mcpStatus = ''; this.mcpStatusKind = 'secondary'; },
+        mcpDraftPayload() {
+          if (!this.mcpDraft) return null;
+          let headers = {};
+          try {
+            headers = this.mcpHeadersText.trim() ? JSON.parse(this.mcpHeadersText) : {};
+          } catch (err) {
+            this.mcpStatus = 'Invalid headers JSON: ' + err.message; this.mcpStatusKind = 'danger';
+            return null;
+          }
+          if (!headers || Array.isArray(headers) || typeof headers !== 'object') {
+            this.mcpStatus = 'Headers JSON must be an object'; this.mcpStatusKind = 'danger';
+            return null;
+          }
+          const id = String(this.mcpDraft.id || '').trim();
+          if (!id) {
+            this.mcpStatus = 'Server ID is required'; this.mcpStatusKind = 'danger';
+            return null;
+          }
+          const cleanHeaders = {};
+          for (const [key, value] of Object.entries(headers)) cleanHeaders[key] = String(value);
+          const payload = Object.assign({}, this.mcpDraft, {id, headers: cleanHeaders});
+          delete payload.original_id;
+          return payload;
+        },
+        saveMCPServer() {
+          const payload = this.mcpDraftPayload(); if (!payload || !this.settings) return;
+          const original = this.mcpDraft.original_id || payload.id;
+          const rows = this.mcpRows().filter(item => item.id !== original && item.id !== payload.id);
+          rows.push(payload);
+          rows.sort((a, b) => String(a.id || '').localeCompare(String(b.id || '')));
+          this.settings.mcp_servers = rows;
+          this.mcpStatus = 'Saved MCP server'; this.mcpStatusKind = 'success';
+          this.showMCPEditor = false;
+        },
+        deleteMCPServer(id) {
+          if (!this.settings || !id || !confirm('Delete this MCP server?')) return;
+          this.settings.mcp_servers = this.mcpRows().filter(item => item.id !== id);
+        },
         saveSettings() {
           if (!this.settings) return;
           let payload;
           try {
             payload = JSON.parse(JSON.stringify(this.settings));
-            payload.mcp_servers = this.settingsMCPText.trim() ? JSON.parse(this.settingsMCPText) : [];
             payload.permissions = this.settingsPermissionsText.trim() ? JSON.parse(this.settingsPermissionsText) : {active: '', profiles: []};
             payload.tool_defaults = this.settingsToolDefaultsText.trim() ? JSON.parse(this.settingsToolDefaultsText) : [];
           } catch (err) {

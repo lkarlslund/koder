@@ -27,7 +27,6 @@
       <div class="d-flex align-items-center gap-2">
         <span class="badge text-bg-secondary" x-text="connectionLabel()"></span>
         <button class="btn btn-sm btn-outline-secondary" title="Sessions" @click="openSessionDialog()"><i class="bi bi-collection"></i></button>
-        <button class="btn btn-sm btn-outline-secondary" title="Providers" @click="openProviderDialog()"><i class="bi bi-plug"></i></button>
         <button class="btn btn-sm btn-outline-secondary" title="Settings" @click="openSettingsDialog()"><i class="bi bi-gear"></i></button>
       </div>
     </nav>
@@ -347,120 +346,6 @@
     </section>
   </div>
 
-  <div class="modal-backdrop-lite" x-show="showProviders" x-transition @keydown.escape.window="closeProviderDialog()" style="display: none;">
-    <section class="provider-dialog bg-body border rounded shadow">
-      <header class="d-flex align-items-center justify-content-between gap-3 p-3 border-bottom">
-        <div>
-          <div class="fw-semibold"><i class="bi bi-plug me-1"></i> Providers</div>
-          <div class="small text-secondary" x-text="providerState.default_provider ? providerState.default_provider + ' / ' + (providerState.default_model || '-') : 'No default provider'"></div>
-        </div>
-        <button type="button" class="btn btn-sm btn-outline-secondary" @click="closeProviderDialog()"><i class="bi bi-x-lg"></i></button>
-      </header>
-      <div class="provider-body">
-        <aside class="provider-list border-end">
-          <div class="p-3 border-bottom d-flex align-items-center justify-content-between gap-2">
-            <span class="small text-secondary">Configured</span>
-            <button type="button" class="btn btn-sm btn-outline-primary" @click="addProvider()"><i class="bi bi-plus-lg"></i></button>
-          </div>
-          <div class="list-group list-group-flush">
-            <template x-if="providerRows().length === 0">
-              <div class="list-group-item text-secondary">None</div>
-            </template>
-            <template x-for="item in providerRows()" :key="item.id">
-              <div class="list-group-item d-flex align-items-start gap-2" :class="{'active': providerDraft?.original_provider_id === item.id || providerDraft?.provider_id === item.id}">
-                <button type="button" class="btn btn-sm p-0 border-0 bg-transparent flex-grow-1 text-start" :class="{'text-white': providerDraft?.original_provider_id === item.id || providerDraft?.provider_id === item.id}" @click="editProvider(item.id)">
-                  <span class="fw-semibold" x-text="item.name || item.id"></span>
-                  <span class="d-block small opacity-75">
-                    <span x-text="item.default_model || '-'"></span>
-                    <span class="badge text-bg-primary ms-1" x-show="item.default">default</span>
-                  </span>
-                </button>
-                <button type="button" class="btn btn-sm" :class="(providerDraft?.original_provider_id === item.id || providerDraft?.provider_id === item.id) ? 'btn-outline-light' : 'btn-outline-danger'" title="Delete provider" @click.stop="deleteProvider(item.id)">
-                  <i class="bi bi-trash"></i>
-                </button>
-              </div>
-            </template>
-          </div>
-        </aside>
-        <form class="provider-form p-3" @submit.prevent="saveProvider()">
-          <template x-if="providerDraft">
-            <div class="row g-3">
-              <div class="col-md-6">
-                <label class="form-label small text-secondary">Template</label>
-                <select class="form-select" x-model="providerDraft.template_id" @change="providerTemplateChanged()">
-                  <template x-for="template in providerTemplates()" :key="template.id">
-                    <option :value="template.id" x-text="template.title"></option>
-                  </template>
-                </select>
-              </div>
-              <div class="col-md-6">
-                <label class="form-label small text-secondary">Provider ID</label>
-                <input class="form-control" x-model="providerDraft.provider_id" autocomplete="off">
-              </div>
-              <div class="col-md-6">
-                <label class="form-label small text-secondary">Name</label>
-                <input class="form-control" x-model="providerDraft.name" autocomplete="off">
-              </div>
-              <div class="col-md-6">
-                <label class="form-label small text-secondary">Model</label>
-                <input class="form-control" x-model="providerDraft.model" autocomplete="off">
-              </div>
-              <div class="col-12">
-                <label class="form-label small text-secondary">Base URL</label>
-                <input class="form-control" x-model="providerDraft.base_url" autocomplete="off">
-              </div>
-              <div class="col-12">
-                <label class="form-label small text-secondary">API key</label>
-                <input class="form-control" type="password" x-model="providerDraft.api_key" autocomplete="off">
-              </div>
-              <div class="col-md-6">
-                <label class="form-label small text-secondary">API key env</label>
-                <input class="form-control" x-model="providerDraft.api_key_env" autocomplete="off">
-              </div>
-              <div class="col-md-6">
-                <label class="form-label small text-secondary">Model preset</label>
-                <input class="form-control" x-model="providerDraft.model_preset" autocomplete="off">
-              </div>
-              <div class="col-md-4">
-                <label class="form-label small text-secondary">Context window</label>
-                <input class="form-control" type="number" min="1" x-model.number="providerDraft.context_window">
-              </div>
-              <div class="col-md-4">
-                <label class="form-label small text-secondary">Auto compact at</label>
-                <input class="form-control" type="number" min="1" x-model.number="providerDraft.auto_compact_at">
-              </div>
-              <div class="col-md-4">
-                <label class="form-label small text-secondary">Timeout</label>
-                <input class="form-control" x-model="providerDraft.timeout" placeholder="10m" autocomplete="off">
-              </div>
-              <div class="col-12 settings-checks">
-                <label class="form-check"><input class="form-check-input" type="checkbox" x-model="providerDraft.stream"> <span class="form-check-label">Stream</span></label>
-                <label class="form-check"><input class="form-check-input" type="checkbox" x-model="providerDraft.disabled"> <span class="form-check-label">Disabled</span></label>
-              </div>
-              <div class="col-12">
-                <label class="form-label small text-secondary">Headers JSON</label>
-                <textarea class="form-control font-monospace" rows="4" x-model="providerHeadersText" spellcheck="false"></textarea>
-              </div>
-              <div class="col-12" x-show="providerStatus">
-                <div class="alert mb-0" :class="providerStatusKind === 'success' ? 'alert-success' : (providerStatusKind === 'danger' ? 'alert-danger' : 'alert-secondary')" x-text="providerStatus"></div>
-              </div>
-            </div>
-          </template>
-          <div class="text-secondary" x-show="!providerDraft">Select or add a provider</div>
-          <footer class="d-flex justify-content-end gap-2 mt-3 pt-3 border-top">
-            <button type="button" class="btn btn-outline-secondary" @click="testProvider()" :disabled="!providerDraft || providerTesting">
-              <span class="spinner-border spinner-border-sm me-1" x-show="providerTesting"></span>Test
-            </button>
-            <button type="submit" class="btn btn-primary" :disabled="!providerDraft || providerSaving">
-              <span class="spinner-border spinner-border-sm me-1" x-show="providerSaving"></span>Save
-            </button>
-            <button type="button" class="btn btn-outline-secondary" @click="closeProviderDialog()">Cancel</button>
-          </footer>
-        </form>
-      </div>
-    </section>
-  </div>
-
   <div class="modal-backdrop-lite" x-show="showSettings" x-transition @keydown.escape.window="closeSettingsDialog()" style="display: none;">
     <section class="settings-dialog bg-body border rounded shadow">
       <header class="d-flex align-items-center justify-content-between gap-3 p-3 border-bottom">
@@ -564,24 +449,63 @@
                 </template>
               </div>
 
-              <div class="row g-3" x-show="settingsTab === 'providers'">
-                <div class="col-12">
-                  <button type="button" class="btn btn-outline-primary" @click="openProviderDialog()"><i class="bi bi-plug me-1"></i> Open provider editor</button>
-                </div>
-                <template x-for="item in settings.providers?.providers || []" :key="item.id">
-                  <div class="col-md-6">
-                    <div class="border rounded p-2">
-                      <div class="fw-semibold" x-text="item.name || item.id"></div>
-                      <div class="small text-secondary" x-text="item.id + ' / ' + (item.default_model || '-')"></div>
-                    </div>
+              <div x-show="settingsTab === 'providers'">
+                <div class="settings-list-header">
+                  <div>
+                    <div class="fw-semibold">Providers</div>
+                    <div class="small text-secondary" x-text="providerState.default_provider ? providerState.default_provider + ' / ' + (providerState.default_model || '-') : 'No default provider'"></div>
                   </div>
-                </template>
+                  <button type="button" class="btn btn-sm btn-outline-primary" @click="addSettingsItem('providers')"><i class="bi bi-plus-lg"></i></button>
+                </div>
+                <div class="settings-item-list">
+                  <template x-if="settingsListRows('providers').length === 0">
+                    <div class="settings-empty">No providers configured</div>
+                  </template>
+                  <template x-for="item in settingsListRows('providers')" :key="item.id">
+                    <div class="settings-item-row">
+                      <button type="button" class="settings-item-main" @click="editSettingsItem('providers', item.id)">
+                        <span class="settings-item-title" x-text="settingsItemTitle('providers', item)"></span>
+                        <span class="settings-item-subtitle" x-text="settingsItemSubtitle('providers', item)"></span>
+                        <span class="settings-item-badges">
+                          <template x-for="badge in settingsItemBadges('providers', item)" :key="badge">
+                            <span class="badge text-bg-secondary" x-text="badge"></span>
+                          </template>
+                        </span>
+                      </button>
+                      <button type="button" class="btn btn-sm btn-outline-secondary" title="Edit provider" @click="editSettingsItem('providers', item.id)"><i class="bi bi-pencil"></i></button>
+                      <button type="button" class="btn btn-sm btn-outline-danger" title="Delete provider" @click="deleteSettingsItem('providers', item.id)"><i class="bi bi-trash"></i></button>
+                    </div>
+                  </template>
+                </div>
               </div>
 
-              <div class="row g-3" x-show="settingsTab === 'mcp'">
-                <div class="col-12">
-                  <label class="form-label small text-secondary">MCP servers JSON</label>
-                  <textarea class="form-control font-monospace settings-json" rows="20" x-model="settingsMCPText" spellcheck="false"></textarea>
+              <div x-show="settingsTab === 'mcp'">
+                <div class="settings-list-header">
+                  <div>
+                    <div class="fw-semibold">MCP servers</div>
+                    <div class="small text-secondary" x-text="String(settingsListRows('mcp').length) + ' configured'"></div>
+                  </div>
+                  <button type="button" class="btn btn-sm btn-outline-primary" @click="addSettingsItem('mcp')"><i class="bi bi-plus-lg"></i></button>
+                </div>
+                <div class="settings-item-list">
+                  <template x-if="settingsListRows('mcp').length === 0">
+                    <div class="settings-empty">No MCP servers configured</div>
+                  </template>
+                  <template x-for="item in settingsListRows('mcp')" :key="item.id">
+                    <div class="settings-item-row">
+                      <button type="button" class="settings-item-main" @click="editSettingsItem('mcp', item.id)">
+                        <span class="settings-item-title" x-text="settingsItemTitle('mcp', item)"></span>
+                        <span class="settings-item-subtitle" x-text="settingsItemSubtitle('mcp', item)"></span>
+                        <span class="settings-item-badges">
+                          <template x-for="badge in settingsItemBadges('mcp', item)" :key="badge">
+                            <span class="badge text-bg-secondary" x-text="badge"></span>
+                          </template>
+                        </span>
+                      </button>
+                      <button type="button" class="btn btn-sm btn-outline-secondary" title="Edit MCP server" @click="editSettingsItem('mcp', item.id)"><i class="bi bi-pencil"></i></button>
+                      <button type="button" class="btn btn-sm btn-outline-danger" title="Delete MCP server" @click="deleteSettingsItem('mcp', item.id)"><i class="bi bi-trash"></i></button>
+                    </div>
+                  </template>
                 </div>
               </div>
 
@@ -607,6 +531,153 @@
           </footer>
         </form>
       </div>
+    </section>
+  </div>
+
+  <div class="modal-backdrop-lite modal-backdrop-nested" x-show="showSettings && showProviderEditor" x-transition @keydown.escape.window="closeProviderEditor()" style="display: none;">
+    <section class="settings-item-dialog bg-body border rounded shadow">
+      <header class="d-flex align-items-center justify-content-between gap-3 p-3 border-bottom">
+        <div>
+          <div class="fw-semibold"><i class="bi bi-plug me-1"></i> Provider</div>
+          <div class="small text-secondary" x-text="providerDraft?.provider_id || 'New provider'"></div>
+        </div>
+        <button type="button" class="btn btn-sm btn-outline-secondary" @click="closeProviderEditor()"><i class="bi bi-x-lg"></i></button>
+      </header>
+      <form class="settings-item-form p-3" @submit.prevent="saveProvider()">
+        <template x-if="providerDraft">
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label class="form-label small text-secondary">Template</label>
+              <select class="form-select" x-model="providerDraft.template_id" @change="providerTemplateChanged()">
+                <template x-for="template in providerTemplates()" :key="template.id">
+                  <option :value="template.id" x-text="template.title"></option>
+                </template>
+              </select>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small text-secondary">Provider ID</label>
+              <input class="form-control" x-model="providerDraft.provider_id" autocomplete="off">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small text-secondary">Name</label>
+              <input class="form-control" x-model="providerDraft.name" autocomplete="off">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small text-secondary">Model</label>
+              <input class="form-control" x-model="providerDraft.model" autocomplete="off">
+            </div>
+            <div class="col-12">
+              <label class="form-label small text-secondary">Base URL</label>
+              <input class="form-control" x-model="providerDraft.base_url" autocomplete="off">
+            </div>
+            <div class="col-12">
+              <label class="form-label small text-secondary">API key</label>
+              <input class="form-control" type="password" x-model="providerDraft.api_key" autocomplete="off">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small text-secondary">API key env</label>
+              <input class="form-control" x-model="providerDraft.api_key_env" autocomplete="off">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small text-secondary">Model preset</label>
+              <input class="form-control" x-model="providerDraft.model_preset" autocomplete="off">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label small text-secondary">Context window</label>
+              <input class="form-control" type="number" min="1" x-model.number="providerDraft.context_window">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label small text-secondary">Auto compact at</label>
+              <input class="form-control" type="number" min="1" x-model.number="providerDraft.auto_compact_at">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label small text-secondary">Timeout</label>
+              <input class="form-control" x-model="providerDraft.timeout" placeholder="10m" autocomplete="off">
+            </div>
+            <div class="col-12 settings-checks">
+              <label class="form-check"><input class="form-check-input" type="checkbox" x-model="providerDraft.stream"> <span class="form-check-label">Stream</span></label>
+              <label class="form-check"><input class="form-check-input" type="checkbox" x-model="providerDraft.disabled"> <span class="form-check-label">Disabled</span></label>
+            </div>
+            <div class="col-12">
+              <label class="form-label small text-secondary">Headers JSON</label>
+              <textarea class="form-control font-monospace" rows="4" x-model="providerHeadersText" spellcheck="false"></textarea>
+            </div>
+            <div class="col-12" x-show="providerStatus">
+              <div class="alert mb-0" :class="providerStatusKind === 'success' ? 'alert-success' : (providerStatusKind === 'danger' ? 'alert-danger' : 'alert-secondary')" x-text="providerStatus"></div>
+            </div>
+          </div>
+        </template>
+        <footer class="d-flex justify-content-end gap-2 mt-3 pt-3 border-top">
+          <button type="button" class="btn btn-outline-secondary" @click="testProvider()" :disabled="!providerDraft || providerTesting">
+            <span class="spinner-border spinner-border-sm me-1" x-show="providerTesting"></span>Test
+          </button>
+          <button type="submit" class="btn btn-primary" :disabled="!providerDraft || providerSaving">
+            <span class="spinner-border spinner-border-sm me-1" x-show="providerSaving"></span>Save
+          </button>
+          <button type="button" class="btn btn-outline-secondary" @click="closeProviderEditor()">Cancel</button>
+        </footer>
+      </form>
+    </section>
+  </div>
+
+  <div class="modal-backdrop-lite modal-backdrop-nested" x-show="showSettings && showMCPEditor" x-transition @keydown.escape.window="closeMCPEditor()" style="display: none;">
+    <section class="settings-item-dialog bg-body border rounded shadow">
+      <header class="d-flex align-items-center justify-content-between gap-3 p-3 border-bottom">
+        <div>
+          <div class="fw-semibold"><i class="bi bi-hdd-network me-1"></i> MCP server</div>
+          <div class="small text-secondary" x-text="mcpDraft?.id || 'New MCP server'"></div>
+        </div>
+        <button type="button" class="btn btn-sm btn-outline-secondary" @click="closeMCPEditor()"><i class="bi bi-x-lg"></i></button>
+      </header>
+      <form class="settings-item-form p-3" @submit.prevent="saveMCPServer()">
+        <template x-if="mcpDraft">
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label class="form-label small text-secondary">Server ID</label>
+              <input class="form-control" x-model="mcpDraft.id" autocomplete="off">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small text-secondary">Name</label>
+              <input class="form-control" x-model="mcpDraft.name" autocomplete="off">
+            </div>
+            <div class="col-12">
+              <label class="form-label small text-secondary">URL</label>
+              <input class="form-control" x-model="mcpDraft.url" autocomplete="off">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small text-secondary">Startup timeout</label>
+              <input class="form-control" x-model="mcpDraft.startup_timeout" placeholder="10s" autocomplete="off">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small text-secondary">Request timeout</label>
+              <input class="form-control" x-model="mcpDraft.request_timeout" placeholder="30s" autocomplete="off">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small text-secondary">Bearer token</label>
+              <input class="form-control" type="password" x-model="mcpDraft.bearer_token" autocomplete="off">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small text-secondary">Bearer token env</label>
+              <input class="form-control" x-model="mcpDraft.bearer_token_env" autocomplete="off">
+            </div>
+            <div class="col-12 settings-checks">
+              <label class="form-check"><input class="form-check-input" type="checkbox" x-model="mcpDraft.disabled"> <span class="form-check-label">Disabled</span></label>
+              <label class="form-check"><input class="form-check-input" type="checkbox" x-model="mcpDraft.disable_standalone_sse"> <span class="form-check-label">Disable standalone SSE</span></label>
+            </div>
+            <div class="col-12">
+              <label class="form-label small text-secondary">Headers JSON</label>
+              <textarea class="form-control font-monospace" rows="4" x-model="mcpHeadersText" spellcheck="false"></textarea>
+            </div>
+            <div class="col-12" x-show="mcpStatus">
+              <div class="alert mb-0" :class="mcpStatusKind === 'success' ? 'alert-success' : (mcpStatusKind === 'danger' ? 'alert-danger' : 'alert-secondary')" x-text="mcpStatus"></div>
+            </div>
+          </div>
+        </template>
+        <footer class="d-flex justify-content-end gap-2 mt-3 pt-3 border-top">
+          <button type="submit" class="btn btn-primary" :disabled="!mcpDraft">Save</button>
+          <button type="button" class="btn btn-outline-secondary" @click="closeMCPEditor()">Cancel</button>
+        </footer>
+      </form>
     </section>
   </div>
 

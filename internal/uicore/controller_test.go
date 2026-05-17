@@ -365,6 +365,13 @@ func TestControllerSavePreferencesPersistsConfigAndPrompts(t *testing.T) {
 	prefs.Compaction.ModelID = "compact-model"
 	prefs.Compaction.AutoCompactAt = 66
 	prefs.Compaction.KeepToolBatches = 3
+	prefs.MCPServers = []MCPServerPreference{{
+		ID:             "docs",
+		Name:           "Docs",
+		URL:            "https://mcp.example.invalid/sse",
+		Headers:        map[string]string{"X-Test": "yes"},
+		RequestTimeout: "45s",
+	}}
 	for idx := range prefs.Prompts {
 		if prefs.Prompts[idx].Target == "compaction-prompt.md" {
 			prefs.Prompts[idx].Content = "custom compact prompt\n"
@@ -387,6 +394,9 @@ func TestControllerSavePreferencesPersistsConfigAndPrompts(t *testing.T) {
 	}
 	if loaded.MaxToolLoopSteps != 77 || loaded.UI.Theme != "dark" || loaded.CompactionModel != "compact-model" {
 		t.Fatalf("expected saved config, got max=%d theme=%q compact=%q/%q", loaded.MaxToolLoopSteps, loaded.UI.Theme, loaded.CompactionProvider, loaded.CompactionModel)
+	}
+	if loaded.MCPServers["docs"].URL != "https://mcp.example.invalid/sse" || loaded.MCPServers["docs"].Headers["X-Test"] != "yes" {
+		t.Fatalf("expected saved MCP server, got %#v", loaded.MCPServers["docs"])
 	}
 	restarted := New(loaded, st, agent.New(loaded, st, nil, nil, t.TempDir()), t.TempDir())
 	if err := restarted.Start(context.Background(), StartupModeNew); err != nil {

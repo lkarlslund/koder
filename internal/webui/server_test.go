@@ -745,8 +745,8 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `@keyframes chat-status-spin`) || !strings.Contains(fullPage, `chatStatusIcon(chat)`) {
 		t.Fatalf("expected chat status icons to animate per state")
 	}
-	if !strings.Contains(fullPage, `openProviderDialog()`) {
-		t.Fatalf("expected top status bar provider dialog button")
+	if strings.Contains(document, `title="Providers"`) || strings.Contains(document, `<i class="bi bi-plug"></i></button>`) {
+		t.Fatalf("expected providers button to be removed from the top status bar")
 	}
 	if !strings.Contains(fullPage, `openSessionDialog()`) {
 		t.Fatalf("expected top status bar session dialog button")
@@ -763,9 +763,6 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `new_session`) {
 		t.Fatalf("expected session dialog to create sessions")
 	}
-	if !strings.Contains(fullPage, `provider_state`) {
-		t.Fatalf("expected provider dialog to load provider state")
-	}
 	if !strings.Contains(fullPage, `test_provider`) {
 		t.Fatalf("expected provider dialog test action")
 	}
@@ -777,6 +774,14 @@ func TestIndexServesHTML(t *testing.T) {
 	}
 	if !strings.Contains(fullPage, `preferences_state`) || !strings.Contains(fullPage, `save_preferences`) || !strings.Contains(fullPage, `reset_prompt`) {
 		t.Fatalf("expected preferences dialog RPC actions")
+	}
+	if !strings.Contains(fullPage, `settingsListRows('providers')`) ||
+		!strings.Contains(fullPage, `settingsListRows('mcp')`) ||
+		!strings.Contains(fullPage, `showProviderEditor`) ||
+		!strings.Contains(fullPage, `showMCPEditor`) ||
+		strings.Contains(fullPage, `settingsMCPText`) ||
+		strings.Contains(fullPage, `MCP servers JSON`) {
+		t.Fatalf("expected providers and MCP to use shared preferences list editors")
 	}
 	if !strings.Contains(fullPage, `Chat model`) || !strings.Contains(fullPage, `settings-prompt`) || !strings.Contains(fullPage, `resetPrompt(prompt.target)`) {
 		t.Fatalf("expected compaction model and prompt settings UI")

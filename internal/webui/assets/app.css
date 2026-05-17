@@ -99,17 +99,25 @@
     .model-list { overflow: auto; }
     .session-dialog { width: min(820px, 100%); max-height: min(720px, 90vh); overflow: hidden; display: flex; flex-direction: column; }
     .session-list { overflow: auto; }
-    .provider-dialog { width: min(980px, 100%); max-height: min(820px, 92vh); overflow: hidden; display: flex; flex-direction: column; }
-    .provider-body { min-height: 0; display: grid; grid-template-columns: 280px minmax(0, 1fr); }
-    .provider-list, .provider-form { min-height: 0; overflow: auto; }
     .settings-dialog { width: min(1120px, 100%); max-height: min(860px, 94vh); overflow: hidden; display: flex; flex-direction: column; }
     .settings-body { min-height: 0; display: grid; grid-template-columns: 190px minmax(0, 1fr); }
     .settings-tabs { min-height: 0; overflow: auto; display: flex; flex-direction: column; }
     .settings-tabs .list-group-item { border-left: 0; border-right: 0; border-radius: 0; text-align: left; }
     .settings-form { min-height: 0; overflow: auto; }
+    .settings-list-header { display: flex; align-items: center; justify-content: space-between; gap: .75rem; margin-bottom: .65rem; }
+    .settings-item-list { display: grid; gap: .4rem; }
+    .settings-item-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: .4rem; padding: .45rem; border: 1px solid var(--bs-border-color); border-radius: .35rem; }
+    .settings-item-main { min-width: 0; display: grid; gap: .08rem; text-align: left; color: inherit; background: transparent; border: 0; padding: 0; }
+    .settings-item-title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .settings-item-subtitle { color: var(--bs-secondary-color); font-size: .84rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .settings-item-badges { display: flex; flex-wrap: wrap; gap: .25rem; min-height: 1.1rem; }
+    .settings-empty { color: var(--bs-secondary-color); border: 1px dashed var(--bs-border-color); border-radius: .35rem; padding: .75rem; }
+    .modal-backdrop-nested { z-index: 1060; }
+    .settings-item-dialog { width: min(860px, 100%); max-height: min(820px, 92vh); overflow: hidden; display: flex; flex-direction: column; }
+    .settings-item-form { min-height: 0; overflow: auto; }
     .settings-checks { display: flex; flex-wrap: wrap; gap: .35rem 1rem; }
     .settings-checks .form-check { margin: 0; min-width: 8rem; }
     .settings-prompt, .settings-json { min-height: 14rem; }
     .toast-stack { position: fixed; right: 1rem; bottom: 1rem; z-index: 1100; max-width: min(420px, calc(100vw - 2rem)); }
     pre { white-space: pre-wrap; word-break: break-word; margin: 0; }
-    @media (max-width: 900px) { .app-shell { grid-template-columns: 1fr; } .sidebar, .sidebar-resizer { display: none; } .topbar, .composer { grid-column: 1; } .provider-body, .settings-body { grid-template-columns: 1fr; } .settings-tabs { flex-direction: row; overflow-x: auto; } .settings-tabs .list-group-item { white-space: nowrap; } }
+    @media (max-width: 900px) { .app-shell { grid-template-columns: 1fr; } .sidebar, .sidebar-resizer { display: none; } .topbar, .composer { grid-column: 1; } .settings-body { grid-template-columns: 1fr; } .settings-tabs { flex-direction: row; overflow-x: auto; } .settings-tabs .list-group-item { white-space: nowrap; } }
