@@ -42,10 +42,17 @@ type ChatStatus struct {
 	StatusText       string
 }
 
+type ChatStartRequest struct {
+	Profile      domain.WorkflowRole
+	Objective    string
+	Title        string
+	MilestoneRef string
+	TodoRef      domain.ID
+}
+
 type ChatControl interface {
 	ListChats(context.Context, domain.ID) ([]ChatStatus, error)
-	StartDecomposition(context.Context, domain.ID, domain.ID, string, string) (ChatStatus, error)
-	StartExecution(context.Context, domain.ID, domain.ID, string, string) (ChatStatus, error)
+	StartChat(context.Context, domain.ID, domain.ID, ChatStartRequest) (ChatStatus, error)
 	PollChat(context.Context, domain.ID, domain.ID) (ChatStatus, error)
 }
 
@@ -129,6 +136,7 @@ type Runtime struct {
 	ChatRole              domain.WorkflowRole
 	ActiveMilestoneRef    string
 	AssignedTodoBucketRef string
+	AssignedTodoRef       domain.ID
 	ChatControl           ChatControl
 	Exec                  execruntime.Control
 	MCP                   MCPExecutor
@@ -297,6 +305,7 @@ func (r *Registry) ExecuteWithChat(ctx context.Context, st *store.Store, session
 	runtime.ChatRole = chat.WorkflowRole
 	runtime.ActiveMilestoneRef = chat.ActiveMilestoneRef
 	runtime.AssignedTodoBucketRef = chat.AssignedTodoBucketRef
+	runtime.AssignedTodoRef = chat.AssignedTodoRef
 	runtime.SandboxProfile = runtime.sandboxProfileForSession(ctx, st, sessionID)
 	if err := chatrole.CheckToolAllowed(runtime.ChatRole, req.Tool); err != nil {
 		return Result{}, err

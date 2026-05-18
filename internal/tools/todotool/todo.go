@@ -56,6 +56,13 @@ func (addItemsTool) BypassesPermission() bool   { return true }
 func (updateItemTool) BypassesPermission() bool { return true }
 func (fetchNextTool) BypassesPermission() bool  { return true }
 
+func (addItemsTool) Definition(runtime tools.Runtime, spec tools.ToolSpec) (tools.ToolSpec, bool) {
+	if tools.AssignedTodoRef(runtime) != "" {
+		return tools.ToolSpec{}, false
+	}
+	return spec, true
+}
+
 func (listTool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 	out := map[string]string{}
 	if ref := strings.TrimSpace(tools.FirstArg(args, "milestone_ref", "ref")); ref != "" {
@@ -126,10 +133,13 @@ func (listTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Re
 	if err != nil {
 		return tools.Result{}, err
 	}
-	return tools.TodoBucketResult(plan, ref, todos, ""), nil
+	return tools.TodoBucketResult(plan, ref, tools.ScopedTodos(runtime, todos), ""), nil
 }
 
 func (addItemsTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
+	if tools.AssignedTodoRef(runtime) != "" {
+		return tools.Result{}, fmt.Errorf("chat is scoped to todo %q", tools.AssignedTodoRef(runtime))
+	}
 	items, err := tools.ParseTodoAddItems(req.Args["items"])
 	if err != nil {
 		return tools.Result{}, err
@@ -163,6 +173,9 @@ func (updateItemTool) Execute(ctx context.Context, runtime tools.Runtime, req to
 		return tools.Result{}, err
 	}
 	id, _ := tools.ParseTodoID(req.Args["id"])
+	if err := tools.TodoScopeAllows(runtime, id); err != nil {
+		return tools.Result{}, err
+	}
 	plan, err := st.GetMilestonePlan(ctx, runtime.SessionID)
 	if err != nil {
 		return tools.Result{}, err
@@ -216,6 +229,7 @@ func (fetchNextTool) Execute(ctx context.Context, runtime tools.Runtime, req too
 	if err != nil {
 		return tools.Result{}, err
 	}
+	todos = tools.ScopedTodos(runtime, todos)
 	for _, item := range todos {
 		if item.Status == domain.TodoStatusInProgress {
 			return tools.TodoBucketResult(plan, ref, []store.TodoItem{item}, ""), nil

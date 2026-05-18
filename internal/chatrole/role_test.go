@@ -46,7 +46,7 @@ func TestRoleAllowsTool(t *testing.T) {
 		{"decomposition rejects bash", Decomposition, domain.ToolKindBash, false},
 		{"decomposition rejects chat poll", Decomposition, domain.ToolKindChatPoll, false},
 		{"execution allows edit", Execution, domain.ToolKindEdit, true},
-		{"execution rejects chat start", Execution, domain.ToolKindChatStartExec, false},
+		{"execution rejects chat start", Execution, domain.ToolKindChatStart, false},
 		{"execution rejects milestone add", Execution, domain.ToolKindMilestoneAdd, false},
 		{"execution allows milestone update", Execution, domain.ToolKindMilestoneUpdate, true},
 		{"orchestrator allows chat poll", Orchestrator, domain.ToolKindChatPoll, true},

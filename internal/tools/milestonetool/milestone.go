@@ -66,6 +66,9 @@ func (planTool) BypassesPermission() bool       { return true }
 func (writeTool) BypassesPermission() bool      { return true }
 
 func (addItemsTool) Definition(runtime tools.Runtime, spec tools.ToolSpec) (tools.ToolSpec, bool) {
+	if tools.AssignedMilestoneRef(runtime) != "" {
+		return tools.ToolSpec{}, false
+	}
 	if runtime.ChatRole == chatrole.Decomposition || runtime.ChatRole == chatrole.Execution {
 		return tools.ToolSpec{}, false
 	}
@@ -183,6 +186,9 @@ func (listTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Re
 }
 
 func (addItemsTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
+	if tools.AssignedMilestoneRef(runtime) != "" {
+		return tools.Result{}, fmt.Errorf("chat is scoped to milestone %q", tools.AssignedMilestoneRef(runtime))
+	}
 	items, err := tools.ParseMilestoneAddItems(req.Args["items"])
 	if err != nil {
 		return tools.Result{}, err

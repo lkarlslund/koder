@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/lkarlslund/koder/internal/chatrole"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools"
@@ -166,6 +167,56 @@ func TestTodoAddPersistReturnsRealTodoIDs(t *testing.T) {
 	event := <-events
 	if !strings.Contains(event.Text, " Write tests") || !strings.Contains(event.Text, " Fix bug") {
 		t.Fatalf("expected persisted event to contain real todo ids, got %q", event.Text)
+	}
+}
+
+func TestTodoScopedChatSeesAndUpdatesOnlyAssignedTodo(t *testing.T) {
+	ctx := context.Background()
+	st := openPlanningTestStore(t)
+	session, err := st.CreateSession(ctx, "test", "provider", "model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.SetMilestonePlan(ctx, session.ID, "Ship it", []store.Milestone{
+		{Ref: "implement", Title: "Implement", Status: domain.MilestoneStatusExecuting},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	todos, err := st.AddTodoItems(ctx, session.ID, "implement", []string{"First", "Second"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	chat := domain.Chat{
+		ID:                    "chat-1",
+		WorkflowRole:          chatrole.Execution,
+		ActiveMilestoneRef:    "implement",
+		AssignedTodoBucketRef: "implement",
+		AssignedTodoRef:       todos[0].ID,
+	}
+	registry := tools.NewRegistry(t.TempDir())
+
+	listed, err := registry.ExecuteWithChat(ctx, st, session.ID, chat, tools.Request{
+		Tool: domain.ToolKindTodoList,
+		Args: map[string]string{"milestone_ref": "implement"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(listed.Output, "First") || strings.Contains(listed.Output, "Second") {
+		t.Fatalf("expected single scoped todo, got %q", listed.Output)
+	}
+
+	if _, err := registry.ExecuteWithChat(ctx, st, session.ID, chat, tools.Request{
+		Tool: domain.ToolKindTodoUpdateItem,
+		Args: map[string]string{"id": string(todos[1].ID), "status": string(domain.TodoStatusCompleted)},
+	}); err == nil || !strings.Contains(err.Error(), "scoped to todo") {
+		t.Fatalf("expected scoped todo error, got %v", err)
+	}
+	if _, err := registry.ExecuteWithChat(ctx, st, session.ID, chat, tools.Request{
+		Tool: domain.ToolKindTodoAddItems,
+		Args: map[string]string{"milestone_ref": "implement", "items": `[{"content":"Third"}]`},
+	}); err == nil || !strings.Contains(err.Error(), "scoped to todo") {
+		t.Fatalf("expected add todo scoped error, got %v", err)
 	}
 }
 

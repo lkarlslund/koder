@@ -2635,6 +2635,7 @@ func chatListsSameForSidebar(left, right []domain.Chat) bool {
 			left[idx].WorkflowRole != right[idx].WorkflowRole ||
 			left[idx].ActiveMilestoneRef != right[idx].ActiveMilestoneRef ||
 			left[idx].AssignedTodoBucketRef != right[idx].AssignedTodoBucketRef ||
+			left[idx].AssignedTodoRef != right[idx].AssignedTodoRef ||
 			left[idx].LastMessage != right[idx].LastMessage ||
 			!left[idx].UpdatedAt.Equal(right[idx].UpdatedAt) {
 			return false

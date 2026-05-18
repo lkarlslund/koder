@@ -63,8 +63,7 @@ const (
 	ToolKindTodoUpdateItem  ToolKind = "todo_update_item"
 	ToolKindTodoFetchNext   ToolKind = "todo_fetch_next"
 	ToolKindChatList        ToolKind = "chat_list"
-	ToolKindChatStartDecomp ToolKind = "chat_start_decomposition"
-	ToolKindChatStartExec   ToolKind = "chat_start_execution"
+	ToolKindChatStart       ToolKind = "chat_start"
 	ToolKindChatPoll        ToolKind = "chat_poll"
 	ToolKindSkill           ToolKind = "skill"
 	ToolKindWebFetch        ToolKind = "webfetch"
@@ -104,8 +103,7 @@ func AllToolKinds() []ToolKind {
 		ToolKindTodoUpdateItem,
 		ToolKindTodoFetchNext,
 		ToolKindChatList,
-		ToolKindChatStartDecomp,
-		ToolKindChatStartExec,
+		ToolKindChatStart,
 		ToolKindChatPoll,
 		ToolKindSkill,
 		ToolKindWebFetch,
@@ -221,6 +219,7 @@ type Chat struct {
 	ToolStates             map[ToolKind]bool
 	ActiveMilestoneRef     string
 	AssignedTodoBucketRef  string
+	AssignedTodoRef        ID
 	LastKnownContextTokens int
 	ContextTokensKnown     bool
 	Position               int

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/lkarlslund/koder/internal/chatrole"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/store"
 )
@@ -221,18 +220,13 @@ func RequireSessionStore(runtime Runtime) (*store.Store, error) {
 func AllowedMilestoneRef(runtime Runtime, requested string) (string, error) {
 	requested = strings.TrimSpace(requested)
 	assigned := AssignedMilestoneRef(runtime)
-	switch runtime.ChatRole {
-	case chatrole.Decomposition, chatrole.Execution:
-		if assigned == "" {
-			return requested, nil
-		}
-		if requested == "" || requested == assigned {
-			return assigned, nil
-		}
-		return "", fmt.Errorf("chat is scoped to milestone %q", assigned)
-	default:
+	if assigned == "" {
 		return requested, nil
 	}
+	if requested == "" || requested == assigned {
+		return assigned, nil
+	}
+	return "", fmt.Errorf("chat is scoped to milestone %q", assigned)
 }
 
 func AssignedMilestoneRef(runtime Runtime) string {
@@ -243,12 +237,34 @@ func AssignedMilestoneRef(runtime Runtime) string {
 	return assigned
 }
 
-func ScopedMilestonePlan(runtime Runtime, plan store.MilestonePlan) store.MilestonePlan {
-	switch runtime.ChatRole {
-	case chatrole.Decomposition, chatrole.Execution:
-	default:
-		return plan
+func AssignedTodoRef(runtime Runtime) domain.ID {
+	return domain.ID(strings.TrimSpace(string(runtime.AssignedTodoRef)))
+}
+
+func TodoScopeAllows(runtime Runtime, todoID domain.ID) error {
+	assigned := AssignedTodoRef(runtime)
+	if assigned == "" || todoID == assigned {
+		return nil
 	}
+	return fmt.Errorf("chat is scoped to todo %q", assigned)
+}
+
+func ScopedTodos(runtime Runtime, todos []store.TodoItem) []store.TodoItem {
+	assigned := AssignedTodoRef(runtime)
+	if assigned == "" {
+		return todos
+	}
+	out := make([]store.TodoItem, 0, 1)
+	for _, item := range todos {
+		if item.ID == assigned {
+			out = append(out, item)
+			break
+		}
+	}
+	return out
+}
+
+func ScopedMilestonePlan(runtime Runtime, plan store.MilestonePlan) store.MilestonePlan {
 	assigned := AssignedMilestoneRef(runtime)
 	if assigned == "" {
 		return plan
@@ -346,6 +362,7 @@ func ChatListStored(statuses []ChatStatus) ChatListStoredResult {
 			Role:               string(status.Chat.WorkflowRole),
 			State:              string(status.State),
 			ActiveMilestoneRef: status.Chat.ActiveMilestoneRef,
+			AssignedTodoRef:    status.Chat.AssignedTodoRef,
 			StatusText:         status.StatusText,
 		})
 	}

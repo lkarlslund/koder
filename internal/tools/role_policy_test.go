@@ -18,7 +18,7 @@ func TestDefinitionsHideRoleForbiddenTools(t *testing.T) {
 	for _, def := range defs {
 		names[def.Function.Name] = true
 	}
-	for _, name := range []string{string(domain.ToolKindBash), string(domain.ToolKindEdit), string(domain.ToolKindWrite), string(domain.ToolKindApplyPatch), string(domain.ToolKindChatPoll), string(domain.ToolKindChatStartExec)} {
+	for _, name := range []string{string(domain.ToolKindBash), string(domain.ToolKindEdit), string(domain.ToolKindWrite), string(domain.ToolKindApplyPatch), string(domain.ToolKindChatPoll), string(domain.ToolKindChatStart)} {
 		if names[name] {
 			t.Fatalf("decomposition definitions exposed forbidden tool %q", name)
 		}

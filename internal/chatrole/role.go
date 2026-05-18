@@ -81,10 +81,9 @@ Focus on one assigned milestone and its todo bucket.
 Focus only on the assigned milestone and todo bucket.
 - Implement the work using available coding tools.
 - Keep todo item status updated as you progress.
-- Do not rewrite unrelated milestones or todo buckets.`),
+			- Do not rewrite unrelated milestones or todo buckets.`),
 			DenyTools: toolSet(
-				domain.ToolKindChatStartDecomp,
-				domain.ToolKindChatStartExec,
+				domain.ToolKindChatStart,
 				domain.ToolKindChatPoll,
 				domain.ToolKindMilestoneAdd,
 				domain.ToolKindMilestonePlan,

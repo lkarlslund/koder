@@ -624,6 +624,103 @@ func TestUpdateMilestoneStatusRejectsOtherOwner(t *testing.T) {
 	}
 }
 
+func TestStartChatScopesToTodoAndInheritsParentSettings(t *testing.T) {
+	cfg := testConfig(t)
+	st, err := store.OpenWithOptions(t.TempDir(), store.Options{Backend: store.BackendJSONFS})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	session, err := st.CreateSession(context.Background(), "test", "provider", "model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent := defaultChatForSession(t, st, session.ID)
+	parent.ProviderID = "parent-provider"
+	parent.ModelID = "parent-model"
+	parent.PermissionProfile = "parent-permission"
+	parent.ToolStates = map[domain.ToolKind]bool{domain.ToolKindBash: false}
+	if err := st.UpdateChat(context.Background(), parent); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.SetMilestonePlan(context.Background(), session.ID, "Ship it", []store.Milestone{
+		{Ref: "alpha", Title: "Alpha", Status: domain.MilestoneStatusReady, Position: 0},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	todos, err := st.AddTodoItems(context.Background(), session.ID, "alpha", []string{"Implement alpha"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine := New(cfg, st, tools.NewRegistry(t.TempDir()), nil, t.TempDir())
+
+	status, err := engine.StartChat(context.Background(), session.ID, parent.ID, tools.ChatStartRequest{
+		Profile:   chatrole.Execution,
+		Objective: "Implement only the assigned todo",
+		TodoRef:   todos[0].ID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, err := st.GetChat(context.Background(), status.Chat.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.ParentChatID == nil || *created.ParentChatID != parent.ID {
+		t.Fatalf("expected parent %s, got %#v", parent.ID, created.ParentChatID)
+	}
+	if created.ActiveMilestoneRef != "alpha" || created.AssignedTodoBucketRef != "alpha" || created.AssignedTodoRef != todos[0].ID {
+		t.Fatalf("unexpected chat scope: %#v", created)
+	}
+	if created.ProviderID != parent.ProviderID || created.ModelID != parent.ModelID || created.PermissionProfile != parent.PermissionProfile || created.ToolStates[domain.ToolKindBash] {
+		t.Fatalf("expected inherited parent settings, got %#v", created)
+	}
+	updatedTodos, err := st.ListTodos(context.Background(), session.ID, "alpha")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updatedTodos[0].Status != domain.TodoStatusInProgress {
+		t.Fatalf("expected execution todo to become in_progress, got %#v", updatedTodos[0])
+	}
+}
+
+func TestStartChatRejectsMismatchedTodoAndMilestone(t *testing.T) {
+	cfg := testConfig(t)
+	st, err := store.OpenWithOptions(t.TempDir(), store.Options{Backend: store.BackendJSONFS})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	session, err := st.CreateSession(context.Background(), "test", "provider", "model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent := defaultChatForSession(t, st, session.ID)
+	if _, err := st.SetMilestonePlan(context.Background(), session.ID, "Ship it", []store.Milestone{
+		{Ref: "alpha", Title: "Alpha", Status: domain.MilestoneStatusReady, Position: 0},
+		{Ref: "beta", Title: "Beta", Status: domain.MilestoneStatusReady, Position: 1},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	todos, err := st.AddTodoItems(context.Background(), session.ID, "alpha", []string{"Implement alpha"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine := New(cfg, st, tools.NewRegistry(t.TempDir()), nil, t.TempDir())
+
+	_, err = engine.StartChat(context.Background(), session.ID, parent.ID, tools.ChatStartRequest{
+		Profile:      chatrole.Execution,
+		Objective:    "Implement only the assigned todo",
+		MilestoneRef: "beta",
+		TodoRef:      todos[0].ID,
+	})
+	if err == nil || !strings.Contains(err.Error(), "belongs to milestone") {
+		t.Fatalf("expected mismatched scope error, got %v", err)
+	}
+}
+
 func TestConsumeChatUpdatesIgnoresInitialInactiveSnapshot(t *testing.T) {
 	cfg := testConfig(t)
 	st, err := store.Open(t.TempDir())

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/lkarlslund/koder/internal/chatrole"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/tools"
 )
@@ -17,18 +18,11 @@ func init() {
 		Parameters:  `{"type":"object","properties":{},"additionalProperties":false}`,
 		ExposeToLLM: true,
 	})
-	tools.Register(startDecompositionTool{}, tools.ToolSpec{
-		Title:       "Start decomposition chat",
-		Description: "Start a background decomposition chat for one milestone.",
-		Usage:       "Start a new background decomposition chat for one milestone. Use this when a milestone needs dedicated todo synthesis instead of inline decomposition. The new chat owns the milestone until it sets the milestone to ready. After starting it, go idle unless you have unrelated work; milestone changes and subchat idle/completion updates will be sent to you automatically.",
-		Parameters:  `{"type":"object","properties":{"milestone_ref":{"type":"string","description":"Milestone ref to decompose"},"title":{"type":"string","description":"Optional chat title"}},"required":["milestone_ref"],"additionalProperties":false}`,
-		ExposeToLLM: true,
-	})
-	tools.Register(startExecutionTool{}, tools.ToolSpec{
-		Title:       "Start execution chat",
-		Description: "Start a background execution chat for one milestone.",
-		Usage:       "Start a new background execution chat for one ready milestone. The execution chat owns the milestone until it sets the milestone to completed, blocked, or cancelled. After starting it, go idle unless you have unrelated work; milestone changes and subchat idle/completion updates will be sent to you automatically.",
-		Parameters:  `{"type":"object","properties":{"milestone_ref":{"type":"string","description":"Milestone ref to execute"},"title":{"type":"string","description":"Optional chat title"}},"required":["milestone_ref"],"additionalProperties":false}`,
+	tools.Register(startTool{}, tools.ToolSpec{
+		Title:       "Start chat",
+		Description: "Start a background child chat using a registered chat profile.",
+		Usage:       "Start a background child chat using a registered chat profile. Use milestone_ref or todo_ref to scope what the child chat can see. A todo_ref scopes the child to that single todo item. After starting it, go idle unless you have unrelated work; subchat idle/completion updates will be sent to you automatically.",
+		Parameters:  `{"type":"object","properties":{"profile":{"type":"string","description":"Registered chat profile to use, such as decomposition, execution, or planning"},"objective":{"type":"string","description":"Specific objective for the child chat"},"title":{"type":"string","description":"Optional chat title"},"milestone_ref":{"type":"string","description":"Optional milestone ref to scope the child chat"},"todo_ref":{"type":"string","description":"Optional todo item UUID to scope the child chat to one todo"}},"required":["profile","objective"],"additionalProperties":false}`,
 		ExposeToLLM: true,
 	})
 	tools.Register(pollTool{}, tools.ToolSpec{
@@ -41,30 +35,56 @@ func init() {
 }
 
 type listTool struct{}
-type startDecompositionTool struct{}
-type startExecutionTool struct{}
+type startTool struct{}
 type pollTool struct{}
 
-func (listTool) Kind() domain.ToolKind               { return domain.ToolKindChatList }
-func (startDecompositionTool) Kind() domain.ToolKind { return domain.ToolKindChatStartDecomp }
-func (startExecutionTool) Kind() domain.ToolKind     { return domain.ToolKindChatStartExec }
-func (pollTool) Kind() domain.ToolKind               { return domain.ToolKindChatPoll }
+func (listTool) Kind() domain.ToolKind  { return domain.ToolKindChatList }
+func (startTool) Kind() domain.ToolKind { return domain.ToolKindChatStart }
+func (pollTool) Kind() domain.ToolKind  { return domain.ToolKindChatPoll }
 
-func (listTool) BypassesPermission() bool               { return true }
-func (startDecompositionTool) BypassesPermission() bool { return true }
-func (startExecutionTool) BypassesPermission() bool     { return true }
-func (pollTool) BypassesPermission() bool               { return true }
+func (listTool) BypassesPermission() bool  { return true }
+func (startTool) BypassesPermission() bool { return true }
+func (pollTool) BypassesPermission() bool  { return true }
+
+func (startTool) Definition(runtime tools.Runtime, spec tools.ToolSpec) (tools.ToolSpec, bool) {
+	switch runtime.ChatRole {
+	case "", chatrole.General, chatrole.Orchestrator, chatrole.Planning:
+		return spec, true
+	default:
+		return tools.ToolSpec{}, false
+	}
+}
 
 func (listTool) NormalizeArgs(map[string]string) (map[string]string, error) {
 	return map[string]string{}, nil
 }
 
-func (startDecompositionTool) NormalizeArgs(args map[string]string) (map[string]string, error) {
-	return normalizeStartArgs(args)
-}
-
-func (startExecutionTool) NormalizeArgs(args map[string]string) (map[string]string, error) {
-	return normalizeStartArgs(args)
+func (startTool) NormalizeArgs(args map[string]string) (map[string]string, error) {
+	profile := strings.TrimSpace(tools.FirstArg(args, "profile", "role"))
+	if profile == "" {
+		return nil, errors.New("profile is required")
+	}
+	if _, ok := chatrole.DefaultRegistry().Lookup(domain.WorkflowRole(profile)); !ok {
+		return nil, errors.New("profile is not registered")
+	}
+	objective := strings.TrimSpace(tools.FirstArg(args, "objective", "prompt", "task"))
+	if objective == "" {
+		return nil, errors.New("objective is required")
+	}
+	out := map[string]string{
+		"profile":   profile,
+		"objective": objective,
+	}
+	if title := strings.TrimSpace(tools.FirstArg(args, "title")); title != "" {
+		out["title"] = title
+	}
+	if ref := strings.TrimSpace(tools.FirstArg(args, "milestone_ref", "ref")); ref != "" {
+		out["milestone_ref"] = ref
+	}
+	if todoRef := strings.TrimSpace(tools.FirstArg(args, "todo_ref", "todo_id")); todoRef != "" {
+		out["todo_ref"] = todoRef
+	}
+	return out, nil
 }
 
 func (pollTool) NormalizeArgs(args map[string]string) (map[string]string, error) {
@@ -76,14 +96,9 @@ func (pollTool) NormalizeArgs(args map[string]string) (map[string]string, error)
 	return map[string]string{"chat_id": id}, nil
 }
 
-func (listTool) Preview(req tools.Request) string { return "List chats" }
-func (startDecompositionTool) Preview(req tools.Request) string {
-	return "Start decomposition chat for " + req.Args["milestone_ref"]
-}
-func (startExecutionTool) Preview(req tools.Request) string {
-	return "Start execution chat for " + req.Args["milestone_ref"]
-}
-func (pollTool) Preview(req tools.Request) string { return "Poll chat " + req.Args["chat_id"] }
+func (listTool) Preview(req tools.Request) string  { return "List chats" }
+func (startTool) Preview(req tools.Request) string { return "Start " + req.Args["profile"] + " chat" }
+func (pollTool) Preview(req tools.Request) string  { return "Poll chat " + req.Args["chat_id"] }
 
 func (listTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
 	control, err := tools.RequireChatControl(runtime)
@@ -100,12 +115,26 @@ func (listTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Re
 	}, nil
 }
 
-func (startDecompositionTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
-	return startChat(ctx, runtime, req, true)
-}
-
-func (startExecutionTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
-	return startChat(ctx, runtime, req, false)
+func (startTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
+	control, err := tools.RequireChatControl(runtime)
+	if err != nil {
+		return tools.Result{}, err
+	}
+	status, err := control.StartChat(ctx, runtime.SessionID, runtime.ChatID, tools.ChatStartRequest{
+		Profile:      domain.WorkflowRole(req.Args["profile"]),
+		Objective:    req.Args["objective"],
+		Title:        req.Args["title"],
+		MilestoneRef: req.Args["milestone_ref"],
+		TodoRef:      domain.ID(req.Args["todo_ref"]),
+	})
+	if err != nil {
+		return tools.Result{}, err
+	}
+	stored := tools.ChatListStored([]tools.ChatStatus{status})
+	return tools.Result{
+		Output: tools.DisplayTextForStored(req.Tool, stored),
+		Stored: stored,
+	}, nil
 }
 
 func (pollTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
@@ -129,47 +158,10 @@ func (listTool) SummarizeResult(req tools.Request, result tools.Result) (string,
 	return "Listed chats", result.Output
 }
 
-func (startDecompositionTool) SummarizeResult(req tools.Request, result tools.Result) (string, string) {
-	return "Started decomposition chat", result.Output
-}
-
-func (startExecutionTool) SummarizeResult(req tools.Request, result tools.Result) (string, string) {
-	return "Started execution chat", result.Output
+func (startTool) SummarizeResult(req tools.Request, result tools.Result) (string, string) {
+	return "Started chat", result.Output
 }
 
 func (pollTool) SummarizeResult(req tools.Request, result tools.Result) (string, string) {
 	return "Polled chat", result.Output
-}
-
-func normalizeStartArgs(args map[string]string) (map[string]string, error) {
-	ref, err := tools.ParseMilestoneRef(tools.FirstArg(args, "milestone_ref", "ref"))
-	if err != nil {
-		return nil, err
-	}
-	out := map[string]string{"milestone_ref": ref}
-	if title := strings.TrimSpace(tools.FirstArg(args, "title")); title != "" {
-		out["title"] = title
-	}
-	return out, nil
-}
-
-func startChat(ctx context.Context, runtime tools.Runtime, req tools.Request, decomposition bool) (tools.Result, error) {
-	control, err := tools.RequireChatControl(runtime)
-	if err != nil {
-		return tools.Result{}, err
-	}
-	var status tools.ChatStatus
-	if decomposition {
-		status, err = control.StartDecomposition(ctx, runtime.SessionID, runtime.ChatID, req.Args["milestone_ref"], req.Args["title"])
-	} else {
-		status, err = control.StartExecution(ctx, runtime.SessionID, runtime.ChatID, req.Args["milestone_ref"], req.Args["title"])
-	}
-	if err != nil {
-		return tools.Result{}, err
-	}
-	stored := tools.ChatListStored([]tools.ChatStatus{status})
-	return tools.Result{
-		Output: tools.DisplayTextForStored(req.Tool, stored),
-		Stored: stored,
-	}, nil
 }

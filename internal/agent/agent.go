@@ -2549,6 +2549,7 @@ func (e *Engine) toolRuntime(session domain.Session, chat domain.Chat) tools.Run
 		ChatRole:              chat.WorkflowRole,
 		ActiveMilestoneRef:    chat.ActiveMilestoneRef,
 		AssignedTodoBucketRef: chat.AssignedTodoBucketRef,
+		AssignedTodoRef:       chat.AssignedTodoRef,
 		MCP:                   e.mcp,
 	}
 }
