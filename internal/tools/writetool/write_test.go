@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/lkarlslund/koder/internal/tools"
@@ -15,7 +16,7 @@ func TestNormalizeArgsValidatesPath(t *testing.T) {
 	}
 }
 
-func TestExecuteCreatesAndOverwritesFile(t *testing.T) {
+func TestExecuteCreatesFileWithoutForceOverwrite(t *testing.T) {
 	dir := t.TempDir()
 	req := tools.Request{Args: map[string]string{"path": "notes.txt", "content": "hello\n"}}
 	result, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: dir}, req)
@@ -32,13 +33,66 @@ func TestExecuteCreatesAndOverwritesFile(t *testing.T) {
 	if string(body) != "hello\n" {
 		t.Fatalf("unexpected file contents: %q", string(body))
 	}
+}
 
-	req.Args["content"] = "updated\n"
-	result, err = tool{}.Execute(context.Background(), tools.Runtime{Workdir: dir}, req)
+func TestExecuteRefusesExistingFileWithoutForceOverwrite(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "notes.txt")
+	if err := os.WriteFile(path, []byte("hello\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	req := tools.Request{Args: map[string]string{"path": "notes.txt", "content": "updated\n"}}
+	_, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: dir}, req)
+	if err == nil {
+		t.Fatal("expected overwrite refusal")
+	}
+	for _, want := range []string{"force_overwrite=true", "Prefer the edit tool"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("expected error to contain %q, got %v", want, err)
+		}
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != "hello\n" {
+		t.Fatalf("unexpected file contents: %q", string(body))
+	}
+}
+
+func TestExecuteRefusesExistingFileWithFalseForceOverwrite(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("hello\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	req := tools.Request{Args: map[string]string{"path": "notes.txt", "content": "updated\n", "force_overwrite": "false"}}
+	if _, err := (tool{}).Execute(context.Background(), tools.Runtime{Workdir: dir}, req); err == nil {
+		t.Fatal("expected overwrite refusal")
+	}
+}
+
+func TestExecuteOverwritesFileWithForceOverwrite(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "notes.txt")
+	if err := os.WriteFile(path, []byte("hello\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	req := tools.Request{Args: map[string]string{"path": "notes.txt", "content": "updated\n", "force_overwrite": "true"}}
+	result, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: dir}, req)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if result.Meta["action"] != "overwrote" {
 		t.Fatalf("expected overwrite action, got %#v", result.Meta)
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != "updated\n" {
+		t.Fatalf("unexpected file contents: %q", string(body))
 	}
 }

@@ -57,8 +57,6 @@ type Engine struct {
 	retryPause func(context.Context, time.Duration, func(time.Duration)) error
 }
 
-var patchPathPattern = regexp.MustCompile(`(?m)^(?:\+\+\+|---)\s+(?:a/|b/)?([^\t\n]+)`)
-
 const (
 	maxRateLimitRetries       = 3
 	maxTransientChatRetries   = 3
@@ -3536,7 +3534,7 @@ func permissionAccessForTool(kind domain.ToolKind) permissionprofile.AccessKind 
 		return permissionprofile.AccessShell
 	case domain.ToolKindRead, domain.ToolKindViewImage, domain.ToolKindShowImage, domain.ToolKindGlob, domain.ToolKindGrep, domain.ToolKindCodeSearch:
 		return permissionprofile.AccessRead
-	case domain.ToolKindApplyPatch, domain.ToolKindEdit, domain.ToolKindWrite:
+	case domain.ToolKindEdit, domain.ToolKindWrite:
 		return permissionprofile.AccessWrite
 	default:
 		return permissionprofile.AccessUnknown
@@ -3570,8 +3568,6 @@ func (e *Engine) resolvePermissionTargets(projectRoot string, req tools.Request)
 		} else {
 			raws = append(raws, ".")
 		}
-	case domain.ToolKindApplyPatch:
-		raws = append(raws, patchPaths(req.Args["patch"])...)
 	default:
 		return nil, false, false
 	}
@@ -3624,26 +3620,6 @@ func maybeResolveExistingPath(path string) string {
 		return path
 	}
 	return path
-}
-
-func patchPaths(patch string) []string {
-	seen := map[string]struct{}{}
-	var paths []string
-	for _, match := range patchPathPattern.FindAllStringSubmatch(patch, -1) {
-		if len(match) < 2 {
-			continue
-		}
-		path := strings.TrimSpace(match[1])
-		if path == "" || path == "/dev/null" {
-			continue
-		}
-		if _, ok := seen[path]; ok {
-			continue
-		}
-		seen[path] = struct{}{}
-		paths = append(paths, path)
-	}
-	return paths
 }
 
 func requestFromStoredApproval(tool domain.ToolKind, raw string) (tools.Request, error) {

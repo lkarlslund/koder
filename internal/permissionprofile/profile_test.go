@@ -15,7 +15,7 @@ func testRules() Rules {
 				Rules: []Rule{
 					{Tool: domain.ToolKindRead, Pattern: "*", Action: domain.PermissionModeAllow},
 					{Tool: domain.ToolKindBash, Pattern: "*", Action: domain.PermissionModeAsk},
-					{Tool: domain.ToolKindApplyPatch, Pattern: "*", Action: domain.PermissionModeAsk},
+					{Tool: domain.ToolKindWrite, Pattern: "*", Action: domain.PermissionModeAsk},
 				},
 			},
 			"readonly": {
@@ -47,8 +47,8 @@ func TestEvaluateDefaultProfile(t *testing.T) {
 func TestEvaluateReadonlyProfile(t *testing.T) {
 	cfg := testRules()
 
-	if got := Evaluate(cfg, "readonly", nil, Request{Tool: domain.ToolKindApplyPatch, Pattern: "main.go"}); got.Mode != domain.PermissionModeDeny {
-		t.Fatalf("unexpected apply_patch mode: %s", got)
+	if got := Evaluate(cfg, "readonly", nil, Request{Tool: domain.ToolKindWrite, Pattern: "main.go"}); got.Mode != domain.PermissionModeDeny {
+		t.Fatalf("unexpected write mode: %s", got)
 	}
 }
 

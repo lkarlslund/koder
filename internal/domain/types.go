@@ -47,7 +47,6 @@ const (
 	ToolKindExecResize      ToolKind = "exec_resize"
 	ToolKindExecTerminate   ToolKind = "exec_terminate"
 	ToolKindExecCleanup     ToolKind = "exec_cleanup_background"
-	ToolKindApplyPatch      ToolKind = "apply_patch"
 	ToolKindEdit            ToolKind = "edit"
 	ToolKindWrite           ToolKind = "write"
 	ToolKindTask            ToolKind = "task"
@@ -87,7 +86,6 @@ func AllToolKinds() []ToolKind {
 		ToolKindExecResize,
 		ToolKindExecTerminate,
 		ToolKindExecCleanup,
-		ToolKindApplyPatch,
 		ToolKindEdit,
 		ToolKindWrite,
 		ToolKindTask,

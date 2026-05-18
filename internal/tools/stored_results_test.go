@@ -69,20 +69,6 @@ func TestModelTextForPartUsesEditSummaryWithoutDiff(t *testing.T) {
 	}
 }
 
-func TestModelTextForPartUsesApplyPatchSummaryWithoutDiff(t *testing.T) {
-	text, ok := tools.ModelTextForPart(toolOutputPart(domain.ToolKindApplyPatch, tools.StoredResultStatusOK, "Applied patch", tools.ApplyPatchStoredResult{
-		Summary:      "Applied patch to game/map.go",
-		ChangedFiles: []string{"game/map.go"},
-		FileCount:    1,
-	}), "--- ignored diff")
-	if !ok {
-		t.Fatal("expected model text")
-	}
-	if text != "Applied patch to game/map.go" {
-		t.Fatalf("unexpected model text: %q", text)
-	}
-}
-
 func TestDisplayTextForPartStripsRedundantToolFailurePrefix(t *testing.T) {
 	text, ok := tools.DisplayTextForPart(toolOutputPart(domain.ToolKindTodoUpdateItem, tools.StoredResultStatusError, "todo_update_item failed: id must be a non-negative integer", tools.ErrorStoredResult{
 		Message: "todo_update_item failed: id must be a non-negative integer",

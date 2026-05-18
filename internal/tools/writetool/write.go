@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/sergi/go-diff/diffmatchpatch"
 	"golang.org/x/text/cases"
@@ -19,9 +20,9 @@ type tool struct{}
 func init() {
 	tools.Register(tool{}, tools.ToolSpec{
 		Title:       "Write file",
-		Description: "Create or completely overwrite a workspace file.",
-		Usage:       "Create a new file or completely overwrite a file in the workspace. For existing files, prefer Edit or apply_patch whenever possible. Use this tool for new files or intentional full rewrites only. Do not use Write as a fallback just because an Edit or apply_patch attempt failed; first retry with more precise context.",
-		Parameters:  `{"type":"object","properties":{"path":{"type":"string","description":"File to create or completely overwrite"},"content":{"type":"string","description":"Complete contents of the file after overwrite. Use only for new files or intentional full rewrites."}},"required":["path","content"],"additionalProperties":false}`,
+		Description: "Create a workspace file, or intentionally overwrite one when force_overwrite is true.",
+		Usage:       "Create a new file in the workspace. For existing files, prefer Edit for targeted changes. Write refuses to overwrite existing files unless force_overwrite is explicitly true; only force overwrite when a full-file rewrite is absolutely necessary.",
+		Parameters:  `{"type":"object","properties":{"path":{"type":"string","description":"File to create or intentionally overwrite"},"content":{"type":"string","description":"Complete contents of the file. Use only for new files or intentional full rewrites."},"force_overwrite":{"type":"boolean","description":"Set to true only when intentionally replacing the complete contents of an existing file. Omit or false for new-file creation."}},"required":["path","content"],"additionalProperties":false}`,
 		ExposeToLLM: true,
 	})
 }
@@ -34,7 +35,11 @@ func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 	if path == "" {
 		return nil, errors.New("path is empty")
 	}
-	return map[string]string{"path": path, "content": content}, nil
+	out := map[string]string{"path": path, "content": content}
+	if forceOverwrite := strings.TrimSpace(tools.FirstArg(args, "force_overwrite", "forceOverwrite")); forceOverwrite != "" {
+		out["force_overwrite"] = forceOverwrite
+	}
+	return out, nil
 }
 func (tool) Preview(req tools.Request) string { return req.Args["path"] }
 func (tool) Execute(_ context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
@@ -46,6 +51,9 @@ func (tool) Execute(_ context.Context, runtime tools.Runtime, req tools.Request)
 	mode := os.FileMode(0o644)
 	action := "created"
 	if readErr == nil {
+		if !strings.EqualFold(strings.TrimSpace(req.Args["force_overwrite"]), "true") {
+			return tools.Result{}, fmt.Errorf("write refuses to overwrite existing file %s without force_overwrite=true. Prefer the edit tool for targeted changes; only force overwrite when a full-file rewrite is absolutely necessary", rel)
+		}
 		if info, statErr := os.Stat(abs); statErr == nil {
 			mode = info.Mode().Perm()
 		}

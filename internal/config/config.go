@@ -228,6 +228,7 @@ func (c *Config) applyDefaults() {
 	if c.ToolDefaults == nil {
 		c.ToolDefaults = cloneToolDefaults(def.ToolDefaults)
 	}
+	pruneToolDefaults(c.ToolDefaults)
 	for _, kind := range domain.AllToolKinds() {
 		if _, ok := c.ToolDefaults[kind]; !ok {
 			c.ToolDefaults[kind] = true
@@ -430,6 +431,18 @@ func cloneToolDefaults(src map[domain.ToolKind]bool) map[domain.ToolKind]bool {
 		dst[kind] = enabled
 	}
 	return dst
+}
+
+func pruneToolDefaults(defaults map[domain.ToolKind]bool) {
+	known := make(map[domain.ToolKind]struct{}, len(domain.AllToolKinds()))
+	for _, kind := range domain.AllToolKinds() {
+		known[kind] = struct{}{}
+	}
+	for kind := range defaults {
+		if _, ok := known[kind]; !ok {
+			delete(defaults, kind)
+		}
+	}
 }
 
 func mergeBuiltinPermissionProfileDefaults(dst map[string]PermissionProfile, defaults map[string]PermissionProfile) {

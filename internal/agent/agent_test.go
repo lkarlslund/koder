@@ -498,20 +498,22 @@ func TestMaxToolLoopStepsUsesConfiguredValue(t *testing.T) {
 
 func TestApprovalSerializationRoundTrip(t *testing.T) {
 	req := tools.Request{
-		Tool: domain.ToolKindApplyPatch,
+		Tool: domain.ToolKindWrite,
 		Args: map[string]string{
-			"patch": "--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-before\n+after\n",
+			"path":            "file.txt",
+			"content":         "after\n",
+			"force_overwrite": "true",
 		},
 	}
 	raw, err := serializeRequest(req)
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := requestFromStoredApproval(domain.ToolKindApplyPatch, raw)
+	got, err := requestFromStoredApproval(domain.ToolKindWrite, raw)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Args["patch"] == "" {
+	if got.Args["path"] != "file.txt" || got.Args["force_overwrite"] != "true" {
 		t.Fatalf("unexpected round trip args: %#v", got.Args)
 	}
 }

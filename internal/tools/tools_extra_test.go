@@ -59,6 +59,36 @@ func TestParseProviderCallRejectsMissingToolCallID(t *testing.T) {
 	}
 }
 
+func TestDefinitionsDoNotExposeApplyPatch(t *testing.T) {
+	for _, def := range tools.Definitions(tools.Runtime{}) {
+		if def.Function.Name == "apply_patch" {
+			t.Fatal("apply_patch should not be exposed")
+		}
+	}
+}
+
+func TestWriteDefinitionForceOverwriteOptional(t *testing.T) {
+	def, enabled := tools.DefinitionFor(domain.ToolKindWrite, tools.Runtime{})
+	if !enabled {
+		t.Fatal("expected write definition")
+	}
+	var schema struct {
+		Properties map[string]any `json:"properties"`
+		Required   []string       `json:"required"`
+	}
+	if err := json.Unmarshal(def.Function.Parameters, &schema); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := schema.Properties["force_overwrite"]; !ok {
+		t.Fatalf("expected force_overwrite property in %#v", schema.Properties)
+	}
+	for _, required := range schema.Required {
+		if required == "force_overwrite" {
+			t.Fatalf("force_overwrite must be optional, required fields: %#v", schema.Required)
+		}
+	}
+}
+
 func TestRequestFromStoredRejectsUnstructuredArgs(t *testing.T) {
 	_, err := tools.RequestFromStored(domain.ToolKindWrite, "notes.txt")
 	if err == nil || !strings.Contains(err.Error(), "decode stored tool arguments") {

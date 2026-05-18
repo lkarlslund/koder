@@ -176,7 +176,6 @@
         case 'read': return path ? 'Read ' + path : 'Read';
         case 'write': return path ? 'Write ' + path : 'Write file';
         case 'edit': return path ? 'Edit ' + path : 'Edit file';
-        case 'apply_patch': return 'Apply patch';
         case 'bash': {
           if ((toolStatus(tool) === 'done' || toolStatus(tool) === 'errored') && command) return 'Ran ' + command;
           return 'Run command';
@@ -234,8 +233,8 @@
         if (content) return renderCompactBlock(summary || ('Wrote ' + path), content);
         return renderCompactBlock('Wrote ' + path, summary);
       }
-      if (kind === 'edit' || kind === 'apply_patch') {
-        const title = firstValue(data, ['summary', 'Summary']) || (kind === 'edit' ? 'Edited file' : 'Applied patch');
+      if (kind === 'edit') {
+        const title = firstValue(data, ['summary', 'Summary']) || 'Edited file';
         const diff = firstValue(data, ['diff', 'Diff']) || firstValue(result, ['diff', 'Diff']) || toolResultText(tool);
         return renderDiffBlock(title, diff);
       }
@@ -909,7 +908,7 @@
         },
         refreshWorkspace() { this.rpc('refresh_workspace', {}).then(s => this.applyState(s)); },
         toolIcon(kind) {
-          if (kind === 'read' || kind === 'write' || kind === 'edit' || kind === 'apply_patch') return 'bi-file-earmark-code';
+          if (kind === 'read' || kind === 'write' || kind === 'edit') return 'bi-file-earmark-code';
           if (kind === 'bash' || String(kind || '').startsWith('exec_')) return 'bi-terminal';
           if (kind === 'grep' || kind === 'glob' || kind === 'websearch') return 'bi-search';
           if (kind === 'webfetch') return 'bi-globe';

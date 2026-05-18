@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/permissionprofile"
 )
 
@@ -88,6 +89,17 @@ func TestCompactionModelPreferenceRoundTrips(t *testing.T) {
 	}
 	if loaded.CompactionProvider != "fast" || loaded.CompactionModel != "fast-model" {
 		t.Fatalf("expected compaction override fast/fast-model, got %q/%q", loaded.CompactionProvider, loaded.CompactionModel)
+	}
+}
+
+func TestApplyDefaultsPrunesRemovedToolDefaults(t *testing.T) {
+	cfg := Default()
+	cfg.ToolDefaults[domain.ToolKind("apply_patch")] = true
+
+	cfg.applyDefaults()
+
+	if _, ok := cfg.ToolDefaults[domain.ToolKind("apply_patch")]; ok {
+		t.Fatalf("expected removed tool default to be pruned: %#v", cfg.ToolDefaults)
 	}
 }
 

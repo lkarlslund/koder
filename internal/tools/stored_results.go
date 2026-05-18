@@ -317,7 +317,7 @@ func shouldAppendDiffToModelText(env storedResultEnvelope) bool {
 		return false
 	}
 	switch env.Tool {
-	case domain.ToolKindEdit, domain.ToolKindApplyPatch:
+	case domain.ToolKindEdit, domain.ToolKind("apply_patch"):
 		return false
 	default:
 		return true
@@ -493,7 +493,7 @@ func formatStoredToolOutput(env storedResultEnvelope) (string, bool) {
 		return decodeAndFormat[ExecStoredResult](env.Payload, formatExecStoredResult)
 	case domain.ToolKindExecList, domain.ToolKindExecCleanup:
 		return decodeAndFormat[ExecListStoredResult](env.Payload, formatExecListStoredResult)
-	case domain.ToolKindApplyPatch:
+	case domain.ToolKind("apply_patch"):
 		return decodeAndFormat[ApplyPatchStoredResult](env.Payload, func(result ApplyPatchStoredResult) string {
 			return strings.TrimSpace(result.Summary)
 		})
