@@ -310,8 +310,6 @@ type Controller struct {
 	nextSub int
 	nextSeq uint64
 	subs    map[int]chan Event
-
-	monitorOnce sync.Once
 }
 
 // New constructs a renderer-neutral controller.
@@ -342,9 +340,6 @@ func (c *Controller) Start(ctx context.Context, mode StartupMode) error {
 	if err := c.loadSession(ctx, session.ID, ""); err != nil {
 		return err
 	}
-	c.monitorOnce.Do(func() {
-		go c.monitorWorkspace(ctx)
-	})
 	return nil
 }
 
@@ -2684,25 +2679,6 @@ func (c *Controller) refreshPlanningState(ctx context.Context, sessionID domain.
 	c.milestone = milestone
 	c.todos = todos
 	c.todosByRef = todosByRef
-}
-
-func (c *Controller) monitorWorkspace(ctx context.Context) {
-	ticker := time.NewTicker(time.Second)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			_ = c.RefreshWorkspace(ctx)
-			c.mu.RLock()
-			sessionID := c.session.ID
-			c.mu.RUnlock()
-			if c.refreshChatStatuses(ctx, sessionID) {
-				c.broadcast("snapshot", c.State())
-			}
-		}
-	}
 }
 
 func (c *Controller) currentRuntime() *chat.Chat {
