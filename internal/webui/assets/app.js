@@ -1228,7 +1228,10 @@
         compactionModelValue() {
           const c = this.settings?.compaction || {};
           if (c.use_chat_model || (!c.provider_id && !c.model_id)) return 'chat';
-          return (c.provider_id || '') + '\u0000' + (c.model_id || '');
+          return JSON.stringify([c.provider_id || '', c.model_id || '']);
+        },
+        modelOptionValue(model) {
+          return JSON.stringify([model?.provider_id || '', model?.model_id || '']);
         },
         setCompactionModelValue(value) {
           if (!this.settings?.compaction) return;
@@ -1238,7 +1241,12 @@
             this.settings.compaction.model_id = '';
             return;
           }
-          const parts = String(value || '').split('\u0000');
+          let parts = [];
+          try {
+            parts = JSON.parse(String(value || '[]'));
+          } catch (_) {
+            parts = [];
+          }
           this.settings.compaction.use_chat_model = false;
           this.settings.compaction.provider_id = parts[0] || '';
           this.settings.compaction.model_id = parts[1] || '';

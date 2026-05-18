@@ -427,10 +427,10 @@
                 </div>
                 <div class="col-md-8">
                   <label class="form-label small text-secondary">Compaction model</label>
-                  <select class="form-select" :value="compactionModelValue()" @change="setCompactionModelValue($event.target.value)">
+                  <select class="form-select" :value="compactionModelValue()" x-effect="settings?.models; $nextTick(() => { $el.value = compactionModelValue(); })" @change="setCompactionModelValue($event.target.value)">
                     <option value="chat">Chat model</option>
                     <template x-for="model in settings.models || []" :key="model.provider_id + '/' + model.model_id">
-                      <option :value="model.provider_id + '\u0000' + model.model_id" x-text="(model.provider_label || model.provider_id) + ' / ' + model.model_id"></option>
+                      <option :value="modelOptionValue(model)" x-text="(model.provider_label || model.provider_id) + ' / ' + model.model_id"></option>
                     </template>
                   </select>
                 </div>
