@@ -261,7 +261,7 @@ func newRootTestController(t *testing.T) *uicore.Controller {
 
 func TestNewRootCommandRegistersSubcommands(t *testing.T) {
 	cmd := NewRootCommand()
-	want := []string{"doctor", "version", "resume", "session", "debug", "skill"}
+	want := []string{"doctor", "version", "resume", "session", "debug", "skill", "exec"}
 	for _, name := range want {
 		if child, _, err := cmd.Find([]string{name}); err != nil || child == nil || child.Name() != name {
 			t.Fatalf("expected subcommand %q to be registered, child=%v err=%v", name, child, err)
