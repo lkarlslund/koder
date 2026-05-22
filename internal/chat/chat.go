@@ -3,6 +3,7 @@ package chat
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -109,6 +110,14 @@ type enqueueCmd struct {
 
 type replaceQueueCmd struct {
 	items []domain.QueuedInput
+}
+
+type reorderQueueCmd struct {
+	ids []domain.ID
+}
+
+type deleteQueueItemCmd struct {
+	id domain.ID
 }
 
 type dispatchQueuedCmd struct {
@@ -271,6 +280,14 @@ func (r *Chat) Persist(ctx context.Context, st *store.Store) error {
 
 func (r *Chat) Enqueue(item QueueItem) {
 	r.inbox <- enqueueCmd{item: item}
+}
+
+func (r *Chat) ReorderQueue(ids []domain.ID) {
+	r.inbox <- reorderQueueCmd{ids: slices.Clone(ids)}
+}
+
+func (r *Chat) DeleteQueueItem(id domain.ID) {
+	r.inbox <- deleteQueueItemCmd{id: id}
 }
 
 func (r *Chat) ReplaceQueue(items []domain.QueuedInput) {
@@ -508,6 +525,10 @@ func (r *Chat) loop() {
 			r.handleEnqueue(typed.item)
 		case replaceQueueCmd:
 			r.handleReplaceQueue(typed.items)
+		case reorderQueueCmd:
+			r.handleReorderQueue(typed.ids)
+		case deleteQueueItemCmd:
+			r.handleDeleteQueueItem(typed.id)
 		case dispatchQueuedCmd:
 			r.handleDispatchQueued(typed.item, typed.remaining)
 		case interruptCmd:
@@ -569,6 +590,59 @@ func (r *Chat) handleReplaceQueue(items []domain.QueuedInput) {
 	_ = r.persistQueue()
 	r.broadcast(r.snapshotUpdateFlags(nil, false, true, false, false, false))
 	r.maybeDispatchNext()
+}
+
+func (r *Chat) handleReorderQueue(ids []domain.ID) {
+	if len(ids) == 0 {
+		return
+	}
+	r.mu.Lock()
+	queueMap := make(map[domain.ID]domain.QueuedInput, len(r.queue))
+	for _, item := range r.queue {
+		queueMap[item.ID] = item
+	}
+	reordered := make([]domain.QueuedInput, 0, len(ids))
+	for _, id := range ids {
+		if item, ok := queueMap[id]; ok {
+			reordered = append(reordered, item)
+		}
+	}
+	r.queue = reordered
+	r.chat.QueuedInputs = cloneQueuedInputs(r.queue)
+	if r.state != nil {
+		r.state.UpdateChat(func(chat *domain.Chat) {
+			chat.QueuedInputs = cloneQueuedInputs(r.queue)
+		})
+	}
+	r.mu.Unlock()
+	_ = r.persistQueue()
+	r.broadcast(r.snapshotUpdateFlags(nil, false, true, false, false, false))
+}
+
+func (r *Chat) handleDeleteQueueItem(id domain.ID) {
+	if id == "" {
+		return
+	}
+	r.mu.Lock()
+	found := false
+	r.queue = slices.DeleteFunc(r.queue, func(item domain.QueuedInput) bool {
+		if item.ID == id {
+			found = true
+			return true
+		}
+		return false
+	})
+	r.chat.QueuedInputs = cloneQueuedInputs(r.queue)
+	if r.state != nil && found {
+		r.state.UpdateChat(func(chat *domain.Chat) {
+			chat.QueuedInputs = cloneQueuedInputs(r.queue)
+		})
+	}
+	r.mu.Unlock()
+	if found {
+		_ = r.persistQueue()
+		r.broadcast(r.snapshotUpdateFlags(nil, false, true, false, false, false))
+	}
 }
 
 func (r *Chat) handleDispatchQueued(item domain.QueuedInput, remaining []domain.QueuedInput) {
