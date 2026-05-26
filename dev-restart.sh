@@ -15,6 +15,17 @@ log() {
   printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"
 }
 
+exit_status_text() {
+  local status="$1"
+  if (( status == 0 )); then
+    printf 'status 0'
+  elif (( status > 128 )); then
+    printf 'signal %d (status %d)' "$((status - 128))" "$status"
+  else
+    printf 'status %d' "$status"
+  fi
+}
+
 cleanup() {
   if [[ -n "$child_pid" ]] && kill -0 "$child_pid" 2>/dev/null; then
     stop_koder "$child_pid"
@@ -144,9 +155,14 @@ last_signature="$(source_signature)"
 while true; do
   sleep "$POLL_SECONDS"
   if [[ -n "$child_pid" ]] && ! kill -0 "$child_pid" 2>/dev/null; then
-    wait "$child_pid" 2>/dev/null || true
+    exit_status=0
+    wait "$child_pid" 2>/dev/null || exit_status=$?
     child_pid=""
-    log "koder exited; waiting for next successful build"
+    if (( exit_status == 0 )); then
+      log "koder exited normally with $(exit_status_text "$exit_status"); waiting for next successful build"
+    else
+      log "koder exited unexpectedly with $(exit_status_text "$exit_status"); waiting for next successful build"
+    fi
   fi
 
   current_signature="$(source_signature)"
