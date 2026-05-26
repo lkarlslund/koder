@@ -1225,6 +1225,7 @@ func (c *Controller) SetModel(ctx context.Context, providerID, modelID string) e
 	if !c.cfg.HasUsableProvider(providerID) {
 		return fmt.Errorf("provider %q is not configured", providerID)
 	}
+	c.ensureModelConfig(ctx, providerID, modelID)
 	c.mu.RLock()
 	sessionID := c.session.ID
 	runtimes := make([]*chat.Chat, 0, len(c.runtimes))
@@ -1327,6 +1328,48 @@ func providerEntryLabel(providerID string, cfg config.Provider) string {
 		return label
 	}
 	return providerID
+}
+
+func (c *Controller) ensureModelConfig(ctx context.Context, providerID, modelID string) {
+	providerID = strings.TrimSpace(providerID)
+	modelID = strings.TrimSpace(modelID)
+	if providerID == "" || modelID == "" {
+		return
+	}
+	c.mu.RLock()
+	providerCfg, providerOK := c.cfg.Provider(providerID)
+	existing, existingOK := c.cfg.ModelConfig(providerID, modelID)
+	c.mu.RUnlock()
+	if !providerOK {
+		return
+	}
+	contextWindow := existing.ContextWindow
+	if !existingOK || contextWindow <= 0 || contextWindow == 32768 {
+		if detected, err := provider.DetectContextWindow(ctx, providerID, providerCfg, modelID, nil); err == nil && detected > 0 {
+			contextWindow = detected
+		}
+	}
+	if contextWindow <= 0 {
+		contextWindow = 32768
+	}
+	preset := strings.TrimSpace(existing.ModelPreset)
+	if preset == "" {
+		preset = "auto"
+	}
+	if existingOK && existing.ContextWindow == contextWindow && strings.TrimSpace(existing.ModelPreset) == preset {
+		return
+	}
+	c.mu.Lock()
+	c.cfg.SetModelConfig(config.ModelConfig{
+		ProviderID:    providerID,
+		ModelID:       modelID,
+		ContextWindow: contextWindow,
+		ModelPreset:   preset,
+	})
+	if err := c.cfg.Save(); err == nil && c.agent != nil {
+		c.agent.UpdateConfig(c.cfg)
+	}
+	c.mu.Unlock()
 }
 
 func firstModelForProvider(cfg config.Config, providerID string) string {
@@ -2175,6 +2218,7 @@ func (c *Controller) loadSession(ctx context.Context, sessionID, chatID domain.I
 	if !c.sessionInWorkspace(session) {
 		return fmt.Errorf("session %s does not belong to this workspace", sessionID)
 	}
+	c.ensureModelConfig(ctx, session.ProviderID, session.ModelID)
 	sessions, err := c.workspaceSessions(ctx)
 	if err != nil {
 		return err

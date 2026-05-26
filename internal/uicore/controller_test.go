@@ -559,6 +559,32 @@ func TestControllerSetModelUpdatesStoreStateAndRuntimeSnapshot(t *testing.T) {
 	}
 }
 
+func TestControllerStartDetectsActiveModelContextWindow(t *testing.T) {
+	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/models":
+			_, _ = w.Write([]byte(`{"data":[{"id":"model","status":{"args":["llama-server","--ctx-size","262144"]}}]}`))
+		default:
+			t.Fatalf("unexpected model server path: %s", r.URL.Path)
+		}
+	}))
+	defer modelServer.Close()
+
+	ctrl, _ := newTestControllerWithConfig(t, func(cfg *config.Config) {
+		cfg.Providers = map[string]config.Provider{
+			"test": {Kind: provider.ProviderKindCompatible, BaseURL: modelServer.URL, Timeout: time.Second},
+		}
+	})
+
+	state := ctrl.State()
+	if state.ContextWindow != 262144 {
+		t.Fatalf("expected detected context window 262144, got %d", state.ContextWindow)
+	}
+	if state.ModelInfo.ContextWindow != 262144 {
+		t.Fatalf("expected model info context window 262144, got %#v", state.ModelInfo)
+	}
+}
+
 func TestControllerSetPermissionProfileUpdatesActiveSession(t *testing.T) {
 	ctrl, st := newTestController(t)
 	sessionID := ctrl.State().Session.ID

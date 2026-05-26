@@ -175,6 +175,54 @@ func TestDetectContextWindowUsesCompatibleLocalProps(t *testing.T) {
 	}
 }
 
+func TestDetectContextWindowUsesCompatibleModelStatusArgs(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/models":
+			_, _ = w.Write([]byte(`{"data":[{"id":"model-a","status":{"args":["llama-server","--ctx-size","262144"]}}]}`))
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	got, err := DetectContextWindow(context.Background(), "openai-compatible", config.Provider{
+		Kind:    ProviderKindCompatible,
+		BaseURL: server.URL,
+		Timeout: time.Second,
+	}, "model-a", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != 262144 {
+		t.Fatalf("unexpected detected context window: %d", got)
+	}
+}
+
+func TestDetectContextWindowUsesCompatibleModelStatusPreset(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/models":
+			_, _ = w.Write([]byte(`{"data":[{"id":"model-a","status":{"preset":"ctx-size = 131072\n"}}]}`))
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	got, err := DetectContextWindow(context.Background(), "openai-compatible", config.Provider{
+		Kind:    ProviderKindCompatible,
+		BaseURL: server.URL,
+		Timeout: time.Second,
+	}, "model-a", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != 131072 {
+		t.Fatalf("unexpected detected context window: %d", got)
+	}
+}
+
 func TestDetectContextWindowUsesCompatibleLocalPropsWithoutV1(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {

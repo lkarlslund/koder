@@ -201,6 +201,10 @@ type modelsResponse struct {
 		ID          string `json:"id"`
 		OwnedBy     string `json:"owned_by"`
 		MaxModelLen int    `json:"max_model_len"`
+		Status      struct {
+			Args   []string `json:"args"`
+			Preset string   `json:"preset"`
+		} `json:"status"`
 	} `json:"data"`
 }
 
@@ -366,11 +370,53 @@ func (c *Client) DetectModelContextWindow(ctx context.Context, modelID string) (
 	}
 	modelID = strings.TrimSpace(modelID)
 	for _, item := range payload.Data {
-		if strings.TrimSpace(item.ID) == modelID && item.MaxModelLen > 0 {
+		if strings.TrimSpace(item.ID) != modelID {
+			continue
+		}
+		if item.MaxModelLen > 0 {
 			return item.MaxModelLen, nil
+		}
+		if n := contextWindowFromModelStatus(item.Status.Args, item.Status.Preset); n > 0 {
+			return n, nil
 		}
 	}
 	return 0, nil
+}
+
+func contextWindowFromModelStatus(args []string, preset string) int {
+	for idx, arg := range args {
+		if arg == "--ctx-size" || arg == "-c" {
+			if idx+1 < len(args) {
+				if n := parsePositiveInt(args[idx+1]); n > 0 {
+					return n
+				}
+			}
+			continue
+		}
+		if value, ok := strings.CutPrefix(arg, "--ctx-size="); ok {
+			if n := parsePositiveInt(value); n > 0 {
+				return n
+			}
+		}
+	}
+	for _, line := range strings.Split(preset, "\n") {
+		key, value, ok := strings.Cut(line, "=")
+		if !ok || strings.TrimSpace(key) != "ctx-size" {
+			continue
+		}
+		if n := parsePositiveInt(value); n > 0 {
+			return n
+		}
+	}
+	return 0
+}
+
+func parsePositiveInt(value string) int {
+	n, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil || n <= 0 {
+		return 0
+	}
+	return n
 }
 
 func (c *Client) Props(ctx context.Context, modelID string) (propsResponse, error) {
