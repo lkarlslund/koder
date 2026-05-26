@@ -521,6 +521,91 @@ func (b *pebbleBackend) TouchSession(ctx context.Context, sessionID domain.ID) (
 	return session, nil
 }
 
+func (b *pebbleBackend) DeleteSession(ctx context.Context, sessionID domain.ID) error {
+	if err := ensureContext(ctx); err != nil {
+		return err
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	session, err := b.readSession(sessionID)
+	if err != nil {
+		return err
+	}
+	chatIDs, err := b.chatIDsForSession(sessionID)
+	if err != nil {
+		return err
+	}
+	taskIDs, err := b.taskIDsForSession(sessionID)
+	if err != nil {
+		return err
+	}
+	todoIDs, err := b.todoIDsForSession(sessionID)
+	if err != nil {
+		return err
+	}
+	approvalIDsByChat := make(map[domain.ID][]domain.ID, len(chatIDs))
+	for _, chatID := range chatIDs {
+		approvalIDs, err := b.approvalIDsForChat(chatID)
+		if err != nil {
+			return err
+		}
+		approvalIDsByChat[chatID] = approvalIDs
+	}
+	batch := b.db.NewBatch()
+	defer batch.Close()
+	for _, chatID := range chatIDs {
+		if err := batch.Delete([]byte(chatKey(chatID)), nil); err != nil {
+			return fmt.Errorf("delete chat: %w", err)
+		}
+		if err := batch.Delete([]byte(chatSessionIndexKey(sessionID, chatID)), nil); err != nil {
+			return fmt.Errorf("delete chat session index: %w", err)
+		}
+		if err := batch.Delete([]byte(collectionRecordKey("chats", chatID)), nil); err != nil && !errors.Is(err, pebble.ErrNotFound) {
+			return fmt.Errorf("delete generic chat: %w", err)
+		}
+		for _, approvalID := range approvalIDsByChat[chatID] {
+			if err := batch.Delete([]byte(approvalKey(approvalID)), nil); err != nil {
+				return fmt.Errorf("delete approval: %w", err)
+			}
+			if err := batch.Delete([]byte(approvalChatIndexKey(chatID, approvalID)), nil); err != nil {
+				return fmt.Errorf("delete approval chat index: %w", err)
+			}
+			if err := batch.Delete([]byte(approvalPendingIndexKey(chatID, approvalID)), nil); err != nil {
+				return fmt.Errorf("delete approval pending index: %w", err)
+			}
+		}
+	}
+	for _, taskID := range taskIDs {
+		if err := batch.Delete([]byte(taskKey(taskID)), nil); err != nil {
+			return fmt.Errorf("delete task: %w", err)
+		}
+		if err := batch.Delete([]byte(taskSessionIndexKey(sessionID, taskID)), nil); err != nil {
+			return fmt.Errorf("delete task session index: %w", err)
+		}
+	}
+	for _, todoID := range todoIDs {
+		if err := batch.Delete([]byte(todoItemKey(todoID)), nil); err != nil {
+			return fmt.Errorf("delete todo: %w", err)
+		}
+		if err := batch.Delete([]byte(todoSessionIndexKey(sessionID, todoID)), nil); err != nil {
+			return fmt.Errorf("delete todo session index: %w", err)
+		}
+	}
+	if err := batch.Delete([]byte(milestonePlanKey(sessionID)), nil); err != nil && !errors.Is(err, pebble.ErrNotFound) {
+		return fmt.Errorf("delete milestone plan: %w", err)
+	}
+	if err := batch.Delete([]byte(sessionKey(sessionID)), nil); err != nil {
+		return fmt.Errorf("delete session: %w", err)
+	}
+	if err := batch.Delete([]byte(sessionUpdatedIndexKey(session.UpdatedAt, session.ID)), nil); err != nil {
+		return fmt.Errorf("delete session index: %w", err)
+	}
+	if err := batch.Commit(pebble.Sync); err != nil {
+		return fmt.Errorf("commit delete session: %w", err)
+	}
+	return nil
+}
+
 func (b *pebbleBackend) UpdateSessionWorkspace(ctx context.Context, sessionID domain.ID, cwd, projectRoot string) error {
 	return b.updateSession(ctx, sessionID, func(session *domain.Session) {
 		session.CWD = cwd
@@ -1126,6 +1211,26 @@ func (b *pebbleBackend) readApproval(approvalID domain.ID) (Approval, error) {
 	return approval, nil
 }
 
+func (b *pebbleBackend) chatIDsForSession(sessionID domain.ID) ([]domain.ID, error) {
+	iter, err := b.db.NewIter(&pebble.IterOptions{
+		LowerBound: []byte(chatSessionIndexPrefix(sessionID)),
+		UpperBound: nextPrefix([]byte(chatSessionIndexPrefix(sessionID))),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("new session chats iterator: %w", err)
+	}
+	defer iter.Close()
+	var ids []domain.ID
+	for ok := iter.First(); ok; ok = iter.Next() {
+		chatID, err := chatIDFromSessionIndex(iter.Key())
+		if err != nil {
+			return nil, err
+		}
+		ids = append(ids, chatID)
+	}
+	return ids, iter.Error()
+}
+
 func (b *pebbleBackend) approvalIDsForChat(chatID domain.ID) ([]domain.ID, error) {
 	prefix := "chat-approval/" + strconvID(chatID)
 	iter, err := b.db.NewIter(&pebble.IterOptions{
@@ -1143,6 +1248,46 @@ func (b *pebbleBackend) approvalIDsForChat(chatID domain.ID) ([]domain.ID, error
 			return nil, err
 		}
 		ids = append(ids, approvalID)
+	}
+	return ids, iter.Error()
+}
+
+func (b *pebbleBackend) taskIDsForSession(sessionID domain.ID) ([]domain.ID, error) {
+	iter, err := b.db.NewIter(&pebble.IterOptions{
+		LowerBound: []byte(taskSessionIndexPrefix(sessionID)),
+		UpperBound: nextPrefix([]byte(taskSessionIndexPrefix(sessionID))),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("new session tasks iterator: %w", err)
+	}
+	defer iter.Close()
+	var ids []domain.ID
+	for ok := iter.First(); ok; ok = iter.Next() {
+		taskID, err := taskIDFromSessionIndex(iter.Key())
+		if err != nil {
+			return nil, err
+		}
+		ids = append(ids, taskID)
+	}
+	return ids, iter.Error()
+}
+
+func (b *pebbleBackend) todoIDsForSession(sessionID domain.ID) ([]domain.ID, error) {
+	iter, err := b.db.NewIter(&pebble.IterOptions{
+		LowerBound: []byte(todoSessionIndexPrefix(sessionID)),
+		UpperBound: nextPrefix([]byte(todoSessionIndexPrefix(sessionID))),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("new session todos iterator: %w", err)
+	}
+	defer iter.Close()
+	var ids []domain.ID
+	for ok := iter.First(); ok; ok = iter.Next() {
+		todoID, err := todoIDFromSessionIndex(iter.Key())
+		if err != nil {
+			return nil, err
+		}
+		ids = append(ids, todoID)
 	}
 	return ids, iter.Error()
 }

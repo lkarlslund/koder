@@ -776,6 +776,147 @@ func (c *Controller) NewSession(ctx context.Context, title string) error {
 	return c.loadSession(ctx, session.ID, "")
 }
 
+// RenameSession updates a session title.
+func (c *Controller) RenameSession(ctx context.Context, sessionID domain.ID, title string) error {
+	if sessionID == "" {
+		return fmt.Errorf("session id is required")
+	}
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return fmt.Errorf("session title is required")
+	}
+	session, err := c.store.GetSession(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	if !c.sessionInWorkspace(session) {
+		return fmt.Errorf("session %s does not belong to this workspace", sessionID)
+	}
+	if err := c.store.UpdateSessionTitle(ctx, sessionID, title, time.Time{}, 0); err != nil {
+		return err
+	}
+	sessions, err := c.workspaceSessions(ctx)
+	if err != nil {
+		return err
+	}
+	updated, err := c.store.GetSession(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	c.mu.Lock()
+	c.sessions = sessions
+	if c.session.ID == sessionID {
+		c.session = updated
+		for _, rt := range c.runtimes {
+			if rt != nil {
+				rt.SetSession(sessionForChatModel(updated, rt.Snapshot().Chat))
+			}
+		}
+	}
+	c.mu.Unlock()
+	c.broadcast("snapshot", c.State())
+	return nil
+}
+
+// DeleteSession deletes an idle session and switches away when it is selected.
+func (c *Controller) DeleteSession(ctx context.Context, sessionID domain.ID) error {
+	if sessionID == "" {
+		return fmt.Errorf("session id is required")
+	}
+	session, err := c.store.GetSession(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	if !c.sessionInWorkspace(session) {
+		return fmt.Errorf("session %s does not belong to this workspace", sessionID)
+	}
+	chats, err := c.store.ListChats(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	if err := c.ensureSessionIdle(ctx, sessionID, chats); err != nil {
+		return err
+	}
+	c.mu.RLock()
+	deletingSelected := c.session.ID == sessionID
+	runtimes := make([]*chat.Chat, 0, len(chats))
+	unsubs := make([]func(), 0, len(chats))
+	for _, chatRecord := range chats {
+		if rt := c.runtimes[chatRecord.ID]; rt != nil {
+			runtimes = append(runtimes, rt)
+		}
+		if unsub := c.unsubs[chatRecord.ID]; unsub != nil {
+			unsubs = append(unsubs, unsub)
+		}
+	}
+	c.mu.RUnlock()
+	for _, unsub := range unsubs {
+		unsub()
+	}
+	for _, rt := range runtimes {
+		rt.Close()
+	}
+	if err := c.store.DeleteSession(ctx, sessionID); err != nil {
+		return err
+	}
+	if deletingSelected {
+		sessions, err := c.workspaceSessions(ctx)
+		if err != nil {
+			return err
+		}
+		if len(sessions) == 0 {
+			next, err := c.createWorkspaceSession(ctx, "New Session")
+			if err != nil {
+				return err
+			}
+			return c.loadSession(ctx, next.ID, "")
+		}
+		return c.loadSession(ctx, newestSession(sessions).ID, "")
+	}
+	sessions, err := c.workspaceSessions(ctx)
+	if err != nil {
+		return err
+	}
+	c.mu.Lock()
+	c.sessions = sessions
+	for _, chatRecord := range chats {
+		delete(c.runtimes, chatRecord.ID)
+		delete(c.unsubs, chatRecord.ID)
+		delete(c.snapshots, chatRecord.ID)
+		delete(c.statuses, chatRecord.ID)
+	}
+	c.mu.Unlock()
+	c.broadcast("snapshot", c.State())
+	return nil
+}
+
+func (c *Controller) ensureSessionIdle(ctx context.Context, sessionID domain.ID, chats []domain.Chat) error {
+	for _, chatRecord := range chats {
+		if len(chatRecord.QueuedInputs) > 0 {
+			return fmt.Errorf("session has active chats and cannot be deleted")
+		}
+		if c.agent != nil {
+			status, err := c.agent.PollChat(ctx, sessionID, chatRecord.ID)
+			if err != nil {
+				return err
+			}
+			if status.Busy || status.PendingApprovals > 0 {
+				return fmt.Errorf("session has active chats and cannot be deleted")
+			}
+		}
+		c.mu.RLock()
+		rt := c.runtimes[chatRecord.ID]
+		c.mu.RUnlock()
+		if rt != nil {
+			snapshot := rt.Snapshot()
+			if snapshot.Active || len(snapshot.QueuedInputs) > 0 || len(snapshot.Approvals) > 0 {
+				return fmt.Errorf("session has active chats and cannot be deleted")
+			}
+		}
+	}
+	return nil
+}
+
 // RefreshWorkspace refreshes workspace metadata and publishes a snapshot on change.
 func (c *Controller) RefreshWorkspace(ctx context.Context) error {
 	status, err := workspacepkg.Snapshot(ctx, c.workdir)

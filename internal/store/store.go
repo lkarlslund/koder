@@ -32,6 +32,7 @@ type backend interface {
 	ListSessions(context.Context) ([]domain.Session, error)
 	GetSession(context.Context, domain.ID) (domain.Session, error)
 	TouchSession(context.Context, domain.ID) (domain.Session, error)
+	DeleteSession(context.Context, domain.ID) error
 	CreateChat(context.Context, domain.ID, string, domain.WorkflowRole, *domain.ID) (domain.Chat, error)
 	ListChats(context.Context, domain.ID) ([]domain.Chat, error)
 	GetChat(context.Context, domain.ID) (domain.Chat, error)
@@ -208,6 +209,38 @@ func (s *Store) GetSession(ctx context.Context, sessionID domain.ID) (domain.Ses
 // TouchSession marks a session as recently used and returns the updated record.
 func (s *Store) TouchSession(ctx context.Context, sessionID domain.ID) (domain.Session, error) {
 	return s.backend.TouchSession(ctx, sessionID)
+}
+
+// DeleteSession removes a session and all session-owned persisted data.
+func (s *Store) DeleteSession(ctx context.Context, sessionID domain.ID) error {
+	if sessionID == "" {
+		return fmt.Errorf("delete session: session id is required")
+	}
+	chats, err := s.ListChats(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	for _, chat := range chats {
+		timeline, err := s.TimelineForChat(ctx, chat.ID)
+		if err != nil {
+			return err
+		}
+		for _, item := range timeline {
+			if err := s.Timeline().Delete(ctx, item.ID); err != nil {
+				return err
+			}
+		}
+		approvals, err := s.Approvals().List(ctx, ByIndex[Approval]("chat", fmt.Sprint(chat.ID)))
+		if err != nil {
+			return err
+		}
+		for _, approval := range approvals {
+			if err := s.Approvals().Delete(ctx, approval.ID); err != nil {
+				return err
+			}
+		}
+	}
+	return s.backend.DeleteSession(ctx, sessionID)
 }
 
 func (s *Store) ListChats(ctx context.Context, sessionID domain.ID) ([]domain.Chat, error) {

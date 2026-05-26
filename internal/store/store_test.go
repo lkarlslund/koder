@@ -623,6 +623,127 @@ func TestDeleteChatRemovesChatTimelineAndApprovals(t *testing.T) {
 	}
 }
 
+func TestSetChatModelPersistsOnChat(t *testing.T) {
+	for _, backend := range []string{BackendPebble, BackendJSONFS} {
+		t.Run(backend, func(t *testing.T) {
+			st := openTestStore(t, backend)
+
+			session, err := st.CreateSession(context.Background(), "test", "provider", "model", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			chat, err := st.DefaultChat(context.Background(), session.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := st.SetChatModel(context.Background(), chat.ID, "other", "next"); err != nil {
+				t.Fatalf("set chat model: %v", err)
+			}
+			updated, err := st.GetChat(context.Background(), chat.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if updated.ProviderID != "other" || updated.ModelID != "next" {
+				t.Fatalf("expected chat model other/next, got %s/%s", updated.ProviderID, updated.ModelID)
+			}
+			storedSession, err := st.GetSession(context.Background(), session.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if storedSession.ProviderID == "other" || storedSession.ModelID == "next" {
+				t.Fatalf("session model should not be changed by chat model update: %#v", storedSession)
+			}
+		})
+	}
+}
+
+func TestDeleteSessionRemovesOwnedData(t *testing.T) {
+	for _, backend := range []string{BackendPebble, BackendJSONFS} {
+		t.Run(backend, func(t *testing.T) {
+			ctx := context.Background()
+			st := openTestStore(t, backend)
+
+			session, err := st.CreateSession(ctx, "test", "provider", "model", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			mainChat, err := st.DefaultChat(ctx, session.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			sideChat, err := st.CreateChat(ctx, session.ID, "side", chatrole.Execution, &mainChat.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := st.AppendTimeline(ctx, mainChat.ID, domain.UserMessage{Text: "hello"}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := st.AppendTimeline(ctx, sideChat.ID, domain.Notice{Text: "side"}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := st.CreateChatApproval(ctx, sideChat.ID, domain.ToolKindBash, "echo ok"); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := st.AddTask(ctx, session.ID, "task", domain.TaskStatusPending); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := st.SetMilestonePlan(ctx, session.ID, "summary", []Milestone{{Ref: "m1", Title: "M1"}}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := st.AddTodoItems(ctx, session.ID, "m1", []string{"todo"}); err != nil {
+				t.Fatal(err)
+			}
+
+			if err := st.DeleteSession(ctx, session.ID); err != nil {
+				t.Fatalf("delete session: %v", err)
+			}
+			if _, err := st.GetSession(ctx, session.ID); err == nil {
+				t.Fatal("expected session to be deleted")
+			}
+			for _, chatID := range []domain.ID{mainChat.ID, sideChat.ID} {
+				if _, err := st.GetChat(ctx, chatID); err == nil {
+					t.Fatalf("expected chat %s to be deleted", chatID)
+				}
+				timeline, err := st.TimelineForChat(ctx, chatID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(timeline) != 0 {
+					t.Fatalf("expected chat timeline to be deleted, got %#v", timeline)
+				}
+				approvals, err := st.Approvals().List(ctx, ByIndex[Approval]("chat", string(chatID)))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(approvals) != 0 {
+					t.Fatalf("expected chat approvals to be deleted, got %#v", approvals)
+				}
+			}
+			tasks, err := st.ListTasks(ctx, session.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(tasks) != 0 {
+				t.Fatalf("expected tasks to be deleted, got %#v", tasks)
+			}
+			todos, err := st.ListTodos(ctx, session.ID, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(todos) != 0 {
+				t.Fatalf("expected todos to be deleted, got %#v", todos)
+			}
+			plan, err := st.GetMilestonePlan(ctx, session.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if plan.Summary != "" || len(plan.Milestones) != 0 {
+				t.Fatalf("expected milestone plan to be deleted, got %#v", plan)
+			}
+		})
+	}
+}
+
 func TestToolApprovalStateIsDerivedFromTimeline(t *testing.T) {
 	for _, backend := range []string{BackendPebble, BackendJSONFS} {
 		t.Run(backend, func(t *testing.T) {

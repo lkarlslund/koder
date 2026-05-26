@@ -441,6 +441,29 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 			return nil, err
 		}
 		return s.controller.State(), nil
+	case "rename_session":
+		var in struct {
+			SessionID domain.ID `json:"session_id"`
+			Title     string    `json:"title"`
+		}
+		if err := decodeParams(params, &in); err != nil {
+			return nil, err
+		}
+		if err := s.controller.RenameSession(ctx, in.SessionID, in.Title); err != nil {
+			return nil, err
+		}
+		return s.controller.State(), nil
+	case "delete_session":
+		var in struct {
+			SessionID domain.ID `json:"session_id"`
+		}
+		if err := decodeParams(params, &in); err != nil {
+			return nil, err
+		}
+		if err := s.controller.DeleteSession(ctx, in.SessionID); err != nil {
+			return nil, err
+		}
+		return s.controller.State(), nil
 	case "delete_chat":
 		var in struct {
 			ChatID domain.ID `json:"chat_id"`

@@ -290,6 +290,10 @@ func (b *jsonfsBackend) ListChats(ctx context.Context, sessionID domain.ID) ([]d
 	if _, err := b.readSession(sessionID); err != nil {
 		return nil, err
 	}
+	return b.listChatsLocked(sessionID)
+}
+
+func (b *jsonfsBackend) listChatsLocked(sessionID domain.ID) ([]domain.Chat, error) {
 	paths, err := sortedJSONPaths(filepath.Join(b.root, "chats"))
 	if err != nil {
 		return nil, err
@@ -485,6 +489,75 @@ func (b *jsonfsBackend) TouchSession(ctx context.Context, sessionID domain.ID) (
 		return domain.Session{}, err
 	}
 	return session, nil
+}
+
+func (b *jsonfsBackend) DeleteSession(ctx context.Context, sessionID domain.ID) error {
+	if err := ensureContext(ctx); err != nil {
+		return err
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if _, err := b.readSession(sessionID); err != nil {
+		return err
+	}
+	chats, err := b.listChatsLocked(sessionID)
+	if err != nil {
+		return err
+	}
+	for _, chat := range chats {
+		if err := os.Remove(filepath.Join(b.root, "chats", chat.ID+".json")); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("delete chat: %w", err)
+		}
+		if err := os.Remove(filepath.Join(b.root, "collections", "chats", chat.ID+".json")); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("delete generic chat: %w", err)
+		}
+		approvals, err := b.allApprovals()
+		if err != nil {
+			return err
+		}
+		for _, approval := range approvals {
+			if approval.ChatID != chat.ID {
+				continue
+			}
+			if err := os.Remove(filepath.Join(b.root, "approvals", approval.ID+".json")); err != nil && !os.IsNotExist(err) {
+				return fmt.Errorf("delete approval: %w", err)
+			}
+		}
+	}
+	tasks, err := b.allTasks()
+	if err != nil {
+		return err
+	}
+	for _, task := range tasks {
+		if task.SessionID != sessionID {
+			continue
+		}
+		if err := os.Remove(filepath.Join(b.root, "tasks", task.ID+".json")); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("delete task: %w", err)
+		}
+	}
+	todos, err := b.allTodoItems()
+	if err != nil {
+		return err
+	}
+	for _, todo := range todos {
+		if todo.SessionID != sessionID {
+			continue
+		}
+		if err := os.Remove(filepath.Join(b.root, "todos", todo.ID+".json")); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("delete todo: %w", err)
+		}
+	}
+	if err := os.Remove(filepath.Join(b.root, "milestone-plans", sessionID+".json")); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("delete milestone plan: %w", err)
+	}
+	if err := os.Remove(filepath.Join(b.root, "sessions", sessionID+".json")); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("delete session: %w", err)
+	}
+	if err := b.rebuildCollectionIndexes("chats"); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (b *jsonfsBackend) SetSessionPermissionProfile(ctx context.Context, sessionID domain.ID, profile string) error {
