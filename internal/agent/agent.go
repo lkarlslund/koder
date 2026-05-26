@@ -781,8 +781,6 @@ func (e *Engine) continueModelTurn(ctx context.Context, session domain.Session, 
 			transient = transientTurnMessages("", "Continue by issuing the tool call now. Do not describe intent. If no tool call is needed, provide the final user-facing answer instead.")
 			continue
 		}
-		autoContinuedBadStop = false
-
 		assistant := domain.AssistantMessage{Text: text}
 		if strings.TrimSpace(reasoning) != "" {
 			assistant.Reasoning.Text = reasoning

@@ -1060,9 +1060,8 @@ func (c *Controller) Preferences(ctx context.Context) (PreferencesState, error) 
 
 // SavePreferences validates and persists the complete settings state.
 func (c *Controller) SavePreferences(ctx context.Context, prefs PreferencesState) (PreferencesState, error) {
-	next := config.Default()
 	c.mu.Lock()
-	next = c.cfg
+	next := c.cfg
 	repairStaleGeneralProvider(&next, &prefs)
 	if err := applyGeneralPreferences(&next, prefs.General); err != nil {
 		c.mu.Unlock()
