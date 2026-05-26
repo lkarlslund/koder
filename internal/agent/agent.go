@@ -133,6 +133,18 @@ func (e *Engine) ExecManager() *execruntime.Manager {
 	return e.exec
 }
 
+func sessionForChat(session domain.Session, chat domain.Chat) domain.Session {
+	providerID := strings.TrimSpace(chat.ProviderID)
+	modelID := strings.TrimSpace(chat.ModelID)
+	if providerID != "" {
+		session.ProviderID = providerID
+	}
+	if modelID != "" {
+		session.ModelID = modelID
+	}
+	return session
+}
+
 func (e *Engine) RunPrompt(ctx context.Context, session domain.Session, prompt string) (<-chan domain.Event, error) {
 	return e.RunPromptWithInputs(ctx, session, prompt, nil, nil, "")
 }
@@ -150,6 +162,7 @@ func (e *Engine) RunPromptWithInputs(ctx context.Context, session domain.Session
 }
 
 func (e *Engine) RunPromptInChat(ctx context.Context, session domain.Session, chat domain.Chat, prompt string, drafts []attachment.Draft, refs []reference.Draft, note string) (<-chan domain.Event, error) {
+	session = sessionForChat(session, chat)
 	return e.runModelPrompt(ctx, session, chat, prompt, drafts, refs, note)
 }
 
@@ -214,6 +227,14 @@ func (e *Engine) CompactChat(ctx context.Context, sessionID, chatID domain.ID) (
 	if err != nil {
 		return nil, err
 	}
+	chatRecord, err := e.store.GetChat(ctx, chatID)
+	if err != nil {
+		return nil, err
+	}
+	if chatRecord.SessionID != session.ID {
+		return nil, fmt.Errorf("chat %s does not belong to session %s", chatID, session.ID)
+	}
+	session = sessionForChat(session, chatRecord)
 	providerCfg, ok := e.cfg.Provider(session.ProviderID)
 	if !ok {
 		return nil, fmt.Errorf("provider %q not found", session.ProviderID)
@@ -248,6 +269,7 @@ func (e *Engine) RunContinue(ctx context.Context, session domain.Session, note s
 }
 
 func (e *Engine) RunContinueInChat(ctx context.Context, session domain.Session, chat domain.Chat, note string) (<-chan domain.Event, error) {
+	session = sessionForChat(session, chat)
 	return e.runContinue(ctx, session, chat, note)
 }
 

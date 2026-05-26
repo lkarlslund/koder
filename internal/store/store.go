@@ -37,6 +37,7 @@ type backend interface {
 	GetChat(context.Context, domain.ID) (domain.Chat, error)
 	DefaultChat(context.Context, domain.ID) (domain.Chat, error)
 	UpdateChat(context.Context, domain.Chat) error
+	SetChatModel(context.Context, domain.ID, string, string) error
 	DeleteChat(context.Context, domain.ID) error
 	SetChatQueuedInputs(context.Context, domain.ID, []domain.QueuedInput) error
 	UpdateSessionWorkspace(context.Context, domain.ID, string, string) error
@@ -251,6 +252,22 @@ func (s *Store) UpdateChat(ctx context.Context, chat domain.Chat) error {
 		chat.Position = existing.Position
 	}
 	return s.backend.UpdateChat(ctx, chat)
+}
+
+// SetChatModel persists the provider/model used by one chat.
+func (s *Store) SetChatModel(ctx context.Context, chatID domain.ID, providerID, modelID string) error {
+	providerID = strings.TrimSpace(providerID)
+	modelID = strings.TrimSpace(modelID)
+	if chatID == "" {
+		return fmt.Errorf("set chat model: chat id is required")
+	}
+	if providerID == "" {
+		return fmt.Errorf("set chat model: provider id is required")
+	}
+	if modelID == "" {
+		return fmt.Errorf("set chat model: model id is required")
+	}
+	return s.backend.SetChatModel(ctx, chatID, providerID, modelID)
 }
 
 // ReorderChats persists the complete sidebar order for a session.

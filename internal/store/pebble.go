@@ -226,6 +226,8 @@ func (b *pebbleBackend) CreateSession(ctx context.Context, title, providerID, mo
 		SessionID:         session.ID,
 		Title:             "Main",
 		WorkflowRole:      chatrole.Orchestrator,
+		ProviderID:        providerID,
+		ModelID:           modelID,
 		PermissionProfile: session.PermissionProfile,
 		ToolStates:        map[domain.ToolKind]bool{},
 		CreatedAt:         now,
@@ -268,6 +270,8 @@ func (b *pebbleBackend) CreateChat(ctx context.Context, sessionID domain.ID, tit
 		if parent.SessionID != sessionID {
 			return domain.Chat{}, fmt.Errorf("parent chat %s belongs to session %s, not %s", parent.ID, parent.SessionID, sessionID)
 		}
+		session.ProviderID = parent.ProviderID
+		session.ModelID = parent.ModelID
 	}
 	existing, err := b.ListChats(ctx, sessionID)
 	if err != nil {
@@ -280,6 +284,8 @@ func (b *pebbleBackend) CreateChat(ctx context.Context, sessionID domain.ID, tit
 		ParentChatID:      parentChatID,
 		Title:             strings.TrimSpace(title),
 		WorkflowRole:      role,
+		ProviderID:        session.ProviderID,
+		ModelID:           session.ModelID,
 		PermissionProfile: strings.TrimSpace(session.PermissionProfile),
 		ToolStates:        cloneToolStates(session.ToolStates),
 		Position:          len(existing),
@@ -378,6 +384,30 @@ func (b *pebbleBackend) UpdateChat(ctx context.Context, chat domain.Chat) error 
 	}
 	if err := batch.Commit(pebble.Sync); err != nil {
 		return fmt.Errorf("commit update chat: %w", err)
+	}
+	return nil
+}
+
+func (b *pebbleBackend) SetChatModel(ctx context.Context, chatID domain.ID, providerID, modelID string) error {
+	if err := ensureContext(ctx); err != nil {
+		return err
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	chat, err := b.readChat(chatID)
+	if err != nil {
+		return err
+	}
+	chat.ProviderID = providerID
+	chat.ModelID = modelID
+	chat.UpdatedAt = time.Now().UTC()
+	batch := b.db.NewBatch()
+	defer batch.Close()
+	if err := b.putChat(batch, chat); err != nil {
+		return err
+	}
+	if err := batch.Commit(pebble.Sync); err != nil {
+		return fmt.Errorf("commit set chat model: %w", err)
 	}
 	return nil
 }

@@ -962,24 +962,25 @@ func (c *Controller) SaveProvider(ctx context.Context, draft ProviderDraft) (Pro
 	if c.agent != nil {
 		c.agent.UpdateConfig(c.cfg)
 	}
-	if c.session.ID != "" && (strings.TrimSpace(c.session.ProviderID) == "" || !c.cfg.HasUsableProvider(c.session.ProviderID) || c.session.ProviderID == originalID) {
-		if err := c.store.SetSessionModel(ctx, c.session.ID, catalogDraft.ProviderID, catalogDraft.Model); err != nil {
+	if c.chat.ID != "" && (strings.TrimSpace(c.chat.ProviderID) == "" || !c.cfg.HasUsableProvider(c.chat.ProviderID) || c.chat.ProviderID == originalID) {
+		if err := c.store.SetChatModel(ctx, c.chat.ID, catalogDraft.ProviderID, catalogDraft.Model); err != nil {
 			c.mu.Unlock()
 			return ProviderState{}, err
 		}
-		session, err := c.store.GetSession(ctx, c.session.ID)
+		chatRecord, err := c.store.GetChat(ctx, c.chat.ID)
 		if err != nil {
 			c.mu.Unlock()
 			return ProviderState{}, err
 		}
-		c.session = session
-		for idx := range c.sessions {
-			if c.sessions[idx].ID == session.ID {
-				c.sessions[idx] = session
+		c.chat = chatRecord
+		for idx := range c.chats {
+			if c.chats[idx].ID == chatRecord.ID {
+				c.chats[idx] = chatRecord
 			}
 		}
 		if c.runtime != nil {
-			c.runtime.SetSession(session)
+			c.runtime.SetChat(chatRecord)
+			c.runtime.SetSession(sessionForChatModel(c.session, chatRecord))
 		}
 	}
 	state := c.providerStateLocked()
@@ -1025,24 +1026,25 @@ func (c *Controller) DeleteProvider(ctx context.Context, providerID string) (Pro
 	if c.agent != nil {
 		c.agent.UpdateConfig(c.cfg)
 	}
-	if c.session.ID != "" && c.session.ProviderID == providerID {
-		if err := c.store.SetSessionModel(ctx, c.session.ID, c.cfg.DefaultProvider, c.cfg.DefaultModel); err != nil {
+	if c.chat.ID != "" && c.chat.ProviderID == providerID {
+		if err := c.store.SetChatModel(ctx, c.chat.ID, c.cfg.DefaultProvider, c.cfg.DefaultModel); err != nil {
 			c.mu.Unlock()
 			return ProviderState{}, err
 		}
-		session, err := c.store.GetSession(ctx, c.session.ID)
+		chatRecord, err := c.store.GetChat(ctx, c.chat.ID)
 		if err != nil {
 			c.mu.Unlock()
 			return ProviderState{}, err
 		}
-		c.session = session
-		for idx := range c.sessions {
-			if c.sessions[idx].ID == session.ID {
-				c.sessions[idx] = session
+		c.chat = chatRecord
+		for idx := range c.chats {
+			if c.chats[idx].ID == chatRecord.ID {
+				c.chats[idx] = chatRecord
 			}
 		}
 		if c.runtime != nil {
-			c.runtime.SetSession(session)
+			c.runtime.SetChat(chatRecord)
+			c.runtime.SetSession(sessionForChatModel(c.session, chatRecord))
 		}
 	}
 	state := c.providerStateLocked()
@@ -1138,14 +1140,14 @@ func (c *Controller) ResetPrompt(target string) (PromptPreference, error) {
 func (c *Controller) ModelOptions(ctx context.Context) ([]ModelOption, error) {
 	c.mu.RLock()
 	cfg := c.cfg
-	currentProvider := strings.TrimSpace(c.session.ProviderID)
-	currentModel := strings.TrimSpace(c.session.ModelID)
+	currentProvider := strings.TrimSpace(c.chat.ProviderID)
+	currentModel := strings.TrimSpace(c.chat.ModelID)
 	c.mu.RUnlock()
 	return modelOptionsForConfig(ctx, cfg, currentProvider, currentModel)
 }
 
 func (c *Controller) modelOptionsLocked(ctx context.Context) ([]ModelOption, error) {
-	return modelOptionsForConfig(ctx, c.cfg, strings.TrimSpace(c.session.ProviderID), strings.TrimSpace(c.session.ModelID))
+	return modelOptionsForConfig(ctx, c.cfg, strings.TrimSpace(c.chat.ProviderID), strings.TrimSpace(c.chat.ModelID))
 }
 
 func modelOptionsForConfig(ctx context.Context, cfg config.Config, currentProvider, currentModel string) ([]ModelOption, error) {
@@ -1212,7 +1214,7 @@ func modelOptionsForConfig(ctx context.Context, cfg config.Config, currentProvid
 	return options, nil
 }
 
-// SetModel persists the active session model and updates the live chat runtime.
+// SetModel persists the active chat model and updates the live chat runtime.
 func (c *Controller) SetModel(ctx context.Context, providerID, modelID string) error {
 	providerID = strings.TrimSpace(providerID)
 	modelID = strings.TrimSpace(modelID)
@@ -1228,37 +1230,50 @@ func (c *Controller) SetModel(ctx context.Context, providerID, modelID string) e
 	c.ensureModelConfig(ctx, providerID, modelID)
 	c.mu.RLock()
 	sessionID := c.session.ID
-	runtimes := make([]*chat.Chat, 0, len(c.runtimes))
-	for _, rt := range c.runtimes {
-		if rt != nil {
-			runtimes = append(runtimes, rt)
-		}
-	}
+	chatID := c.chat.ID
+	rt := c.runtimes[chatID]
 	c.mu.RUnlock()
 	if sessionID == "" {
 		return fmt.Errorf("no active session")
 	}
-	if err := c.store.SetSessionModel(ctx, sessionID, providerID, modelID); err != nil {
+	if chatID == "" {
+		return fmt.Errorf("no active chat")
+	}
+	if err := c.store.SetChatModel(ctx, chatID, providerID, modelID); err != nil {
 		return err
 	}
 	session, err := c.store.GetSession(ctx, sessionID)
 	if err != nil {
 		return err
 	}
+	chatRecord, err := c.store.GetChat(ctx, chatID)
+	if err != nil {
+		return err
+	}
 	c.mu.Lock()
 	c.session = session
+	c.chat = chatRecord
 	for idx := range c.sessions {
 		if c.sessions[idx].ID == session.ID {
 			c.sessions[idx] = session
 		}
 	}
+	for idx := range c.chats {
+		if c.chats[idx].ID == chatRecord.ID {
+			c.chats[idx] = chatRecord
+		}
+	}
 	for id, snapshot := range c.snapshots {
-		snapshot.Session = session
+		if id == chatRecord.ID {
+			snapshot.Chat = chatRecord
+			snapshot.Session = sessionForChatModel(session, chatRecord)
+		}
 		c.snapshots[id] = snapshot
 	}
 	c.mu.Unlock()
-	for _, rt := range runtimes {
-		rt.SetSession(session)
+	if rt != nil {
+		rt.SetChat(chatRecord)
+		rt.SetSession(sessionForChatModel(session, chatRecord))
 	}
 	c.broadcast("snapshot", c.State())
 	return nil
@@ -2218,12 +2233,15 @@ func (c *Controller) loadSession(ctx context.Context, sessionID, chatID domain.I
 	if !c.sessionInWorkspace(session) {
 		return fmt.Errorf("session %s does not belong to this workspace", sessionID)
 	}
-	c.ensureModelConfig(ctx, session.ProviderID, session.ModelID)
 	sessions, err := c.workspaceSessions(ctx)
 	if err != nil {
 		return err
 	}
 	chats, err := c.store.ListChats(ctx, session.ID)
+	if err != nil {
+		return err
+	}
+	chats, err = c.ensureChatModels(ctx, chats)
 	if err != nil {
 		return err
 	}
@@ -2236,6 +2254,10 @@ func (c *Controller) loadSession(ctx context.Context, sessionID, chatID domain.I
 		if chatRecord.SessionID != session.ID {
 			return fmt.Errorf("chat %s does not belong to session %s", chatID, session.ID)
 		}
+		chatRecord, err = c.ensureChatModel(ctx, chatRecord)
+		if err != nil {
+			return err
+		}
 	} else {
 		chatRecord = newestChat(chats)
 		if chatRecord.ID == "" {
@@ -2245,6 +2267,7 @@ func (c *Controller) loadSession(ctx context.Context, sessionID, chatID domain.I
 			}
 		}
 	}
+	c.ensureModelConfig(ctx, chatRecord.ProviderID, chatRecord.ModelID)
 	session, chatRecord, chats, err = c.touchLoadedSelection(ctx, session, chatRecord, chats)
 	if err != nil {
 		return err
@@ -2273,7 +2296,7 @@ func (c *Controller) loadSession(ctx context.Context, sessionID, chatID domain.I
 		rt := existingRuntimes[item.ID]
 		if rt == nil {
 			var err error
-			rt, err = c.agent.Chat(ctx, session, item)
+			rt, err = c.agent.Chat(ctx, sessionForChatModel(session, item), item)
 			if err != nil {
 				return err
 			}
@@ -2281,7 +2304,7 @@ func (c *Controller) loadSession(ctx context.Context, sessionID, chatID domain.I
 			unsubs[item.ID] = unsub
 			subscriptions = append(subscriptions, runtimeSubscription{chatID: item.ID, updates: updates})
 		} else {
-			rt.SetSession(session)
+			rt.SetSession(sessionForChatModel(session, item))
 			rt.SetChat(item)
 			if unsub := existingUnsubs[item.ID]; unsub != nil {
 				unsubs[item.ID] = unsub
@@ -2354,6 +2377,47 @@ func (c *Controller) touchLoadedSelection(ctx context.Context, session domain.Se
 		}
 	}
 	return session, chatRecord, chats, nil
+}
+
+func (c *Controller) ensureChatModels(ctx context.Context, chats []domain.Chat) ([]domain.Chat, error) {
+	for idx := range chats {
+		chatRecord, err := c.ensureChatModel(ctx, chats[idx])
+		if err != nil {
+			return nil, err
+		}
+		chats[idx] = chatRecord
+	}
+	return chats, nil
+}
+
+func (c *Controller) ensureChatModel(ctx context.Context, chatRecord domain.Chat) (domain.Chat, error) {
+	providerID := strings.TrimSpace(chatRecord.ProviderID)
+	modelID := strings.TrimSpace(chatRecord.ModelID)
+	if providerID != "" && modelID != "" {
+		return chatRecord, nil
+	}
+	providerID = strings.TrimSpace(c.cfg.DefaultProvider)
+	modelID = strings.TrimSpace(c.cfg.DefaultModel)
+	if providerID == "" || modelID == "" {
+		return chatRecord, nil
+	}
+	if err := c.store.SetChatModel(ctx, chatRecord.ID, providerID, modelID); err != nil {
+		return domain.Chat{}, err
+	}
+	chatRecord.ProviderID = providerID
+	chatRecord.ModelID = modelID
+	chatRecord.UpdatedAt = time.Now().UTC()
+	return chatRecord, nil
+}
+
+func sessionForChatModel(session domain.Session, chatRecord domain.Chat) domain.Session {
+	if providerID := strings.TrimSpace(chatRecord.ProviderID); providerID != "" {
+		session.ProviderID = providerID
+	}
+	if modelID := strings.TrimSpace(chatRecord.ModelID); modelID != "" {
+		session.ModelID = modelID
+	}
+	return session
 }
 
 const processRestartResumeNote = "The previous turn was interrupted because the koder process was restarting. Continue from the persisted transcript and pending tool state without restating the interruption."
@@ -2859,8 +2923,8 @@ func (c *Controller) permissionsStateLocked() PermissionsState {
 }
 
 func (c *Controller) contextWindowLocked() int {
-	providerID := strings.TrimSpace(c.session.ProviderID)
-	modelID := strings.TrimSpace(c.session.ModelID)
+	providerID := strings.TrimSpace(c.chat.ProviderID)
+	modelID := strings.TrimSpace(c.chat.ModelID)
 	if providerID != "" && modelID != "" {
 		return c.cfg.ContextWindow(providerID, modelID)
 	}
@@ -2871,8 +2935,8 @@ func (c *Controller) contextWindowLocked() int {
 }
 
 func (c *Controller) modelInfoLocked() ModelInfo {
-	providerID := strings.TrimSpace(c.session.ProviderID)
-	modelID := strings.TrimSpace(c.session.ModelID)
+	providerID := strings.TrimSpace(c.chat.ProviderID)
+	modelID := strings.TrimSpace(c.chat.ModelID)
 	providerCfg, ok := c.cfg.Provider(providerID)
 	if !ok {
 		providerCfg = config.Provider{}

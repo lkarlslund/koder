@@ -538,8 +538,8 @@ func TestControllerSetModelUpdatesStoreStateAndRuntimeSnapshot(t *testing.T) {
 	}
 
 	state := ctrl.State()
-	if state.Session.ProviderID != "test" || state.Session.ModelID != "next-model" {
-		t.Fatalf("expected state model test/next-model, got %s/%s", state.Session.ProviderID, state.Session.ModelID)
+	if state.Snapshot.Chat.ProviderID != "test" || state.Snapshot.Chat.ModelID != "next-model" {
+		t.Fatalf("expected state chat model test/next-model, got %s/%s", state.Snapshot.Chat.ProviderID, state.Snapshot.Chat.ModelID)
 	}
 	if state.Snapshot.Session.ProviderID != "test" || state.Snapshot.Session.ModelID != "next-model" {
 		t.Fatalf("expected runtime snapshot model test/next-model, got %s/%s", state.Snapshot.Session.ProviderID, state.Snapshot.Session.ModelID)
@@ -554,8 +554,15 @@ func TestControllerSetModelUpdatesStoreStateAndRuntimeSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get session: %v", err)
 	}
-	if session.ModelID != "next-model" {
-		t.Fatalf("expected stored model next-model, got %q", session.ModelID)
+	if session.ModelID == "next-model" {
+		t.Fatalf("expected stored session model to remain unchanged")
+	}
+	chatRecord, err := st.GetChat(context.Background(), state.Snapshot.Chat.ID)
+	if err != nil {
+		t.Fatalf("get chat: %v", err)
+	}
+	if chatRecord.ModelID != "next-model" {
+		t.Fatalf("expected stored chat model next-model, got %q", chatRecord.ModelID)
 	}
 }
 

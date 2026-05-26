@@ -24,6 +24,7 @@ func (e *Engine) Chat(ctx context.Context, session domain.Session, chatRecord do
 	if chatRecord.ID == "" {
 		return nil, fmt.Errorf("chat id is required")
 	}
+	session = sessionForChat(session, chatRecord)
 	e.chatMu.RLock()
 	if existing := e.chats[chatRecord.ID]; existing != nil {
 		e.chatMu.RUnlock()

@@ -932,10 +932,10 @@ func TestWebSocketSetModelReturnsUpdatedState(t *testing.T) {
 	var resp struct {
 		OK     bool `json:"ok"`
 		Result struct {
-			Session struct {
-				ModelID string
-			}
 			Snapshot struct {
+				Chat struct {
+					ModelID string
+				}
 				Session struct {
 					ModelID string
 				}
@@ -949,8 +949,8 @@ func TestWebSocketSetModelReturnsUpdatedState(t *testing.T) {
 	if !resp.OK {
 		t.Fatalf("expected set_model ok, got %s", resp.Error)
 	}
-	if resp.Result.Session.ModelID != "next-model" {
-		t.Fatalf("expected response session next-model, got %q", resp.Result.Session.ModelID)
+	if resp.Result.Snapshot.Chat.ModelID != "next-model" {
+		t.Fatalf("expected response chat next-model, got %q", resp.Result.Snapshot.Chat.ModelID)
 	}
 	if resp.Result.Snapshot.Session.ModelID != "next-model" {
 		t.Fatalf("expected runtime snapshot next-model, got %q", resp.Result.Snapshot.Session.ModelID)

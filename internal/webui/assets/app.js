@@ -733,8 +733,8 @@
             if (this.interruptArmedChatID === id) this.interruptArmedChatID = '';
           });
         },
-        activeProvider() { return this.state.session?.provider_id || this.state.session?.ProviderID || ''; },
-        activeModel() { return this.state.session?.model_id || this.state.session?.ModelID || ''; },
+        activeProvider() { return this.activeSnapshot()?.chat?.provider_id || this.activeSnapshot()?.Chat?.ProviderID || this.activeSnapshot()?.chat?.ProviderID || this.state.snapshot?.Chat?.ProviderID || ''; },
+        activeModel() { return this.activeSnapshot()?.chat?.model_id || this.activeSnapshot()?.Chat?.ModelID || this.activeSnapshot()?.chat?.ModelID || this.state.snapshot?.Chat?.ModelID || ''; },
         activeModelInfo() { return this.state.model_info || this.state.ModelInfo || {}; },
         formatTokens(value) {
           const n = Number(value || 0);
