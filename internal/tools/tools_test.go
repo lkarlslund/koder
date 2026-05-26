@@ -88,7 +88,7 @@ func TestBashZeroTimeoutUsesDefault(t *testing.T) {
 	if strings.TrimSpace(result.Output) != "ok" {
 		t.Fatalf("unexpected bash output: %q", result.Output)
 	}
-	if got := result.Meta["timeout_ms"]; got != "120000" {
+	if got := result.Meta["timeout_ms"]; got != "300000" {
 		t.Fatalf("expected default timeout metadata, got %q", got)
 	}
 }

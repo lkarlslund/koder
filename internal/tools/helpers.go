@@ -22,7 +22,7 @@ const (
 	DefaultReadLineLimit   = 2000
 	DefaultReadByteLimit   = 64 * 1024
 	DefaultToolOutputLimit = 64 * 1024
-	DefaultBashTimeout     = 2 * time.Minute
+	DefaultBashTimeout     = 5 * time.Minute
 	MaxBashTimeout         = 10 * time.Minute
 )
 
