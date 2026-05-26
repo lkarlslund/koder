@@ -102,6 +102,21 @@ source_signature() {
   ) | sort
 }
 
+log_signature_changes() {
+  local previous="$1"
+  local current="$2"
+  diff -u <(printf '%s\n' "$previous") <(printf '%s\n' "$current") |
+    awk '
+      /^[+-][^+-]/ {
+        line = substr($0, 2)
+        sub(/ [0-9]+(\.[0-9]+)? [0-9]+$/, "", line)
+        if (line != "" && !seen[line]++) {
+          print "  " line
+        }
+      }
+    ' >&2 || true
+}
+
 wait_for_settle() {
   local previous
   local current
@@ -140,6 +155,7 @@ while true; do
   fi
 
   log "changes detected; waiting ${SETTLE_SECONDS}s for code to settle..."
+  log_signature_changes "$last_signature" "$current_signature"
   wait_for_settle
   last_signature="$(source_signature)"
 
@@ -150,6 +166,7 @@ while true; do
       child_pid=""
     fi
     launch_koder "$@"
+    last_signature="$(source_signature)"
   else
     log "build failed; keeping current koder process"
   fi
