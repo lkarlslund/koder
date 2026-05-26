@@ -383,7 +383,7 @@ func (c *Client) Props(ctx context.Context, modelID string) (propsResponse, erro
 
 func DetectContextWindow(ctx context.Context, providerID string, cfg config.Provider, modelID string, recorder *debugsrv.Recorder) (int, error) {
 	if !SupportsContextWindowDetection(cfg) {
-		return cfg.ContextWindow, nil
+		return 32768, nil
 	}
 	for _, baseURL := range contextWindowProbeBaseURLs(cfg.BaseURL) {
 		probeCfg := cfg
@@ -405,13 +405,13 @@ func DetectContextWindow(ctx context.Context, providerID string, cfg config.Prov
 			if props.DefaultGenerationSettings.NCtx > 0 {
 				return props.DefaultGenerationSettings.NCtx, nil
 			}
-			return cfg.ContextWindow, nil
+			return 32768, nil
 		}
 		if !isOptionalContextWindowProbeError(err) {
 			return 0, err
 		}
 	}
-	return cfg.ContextWindow, nil
+	return 32768, nil
 }
 
 func SupportsContextWindowDetection(cfg config.Provider) bool {

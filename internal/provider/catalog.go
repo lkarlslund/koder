@@ -42,8 +42,6 @@ type ConnectDraft struct {
 	APIKey             string
 	APIKeyEnv          string
 	Model              string
-	ModelPreset        string
-	ContextWindow      int
 	AutoCompactAt      int
 	Stream             bool
 	Timeout            time.Duration
@@ -98,7 +96,6 @@ func BuildDraft(id string, existing map[string]config.Provider) (ConnectDraft, e
 		Name:               desc.Title,
 		BaseURL:            desc.DefaultBaseURL,
 		Model:              desc.ModelHint,
-		ContextWindow:      32768,
 		AutoCompactAt:      80,
 		Stream:             true,
 		Timeout:            2 * time.Minute,
@@ -119,7 +116,6 @@ func BuildDraftForExisting(id string, existing config.Provider) (ConnectDraft, e
 			Title:          firstNonEmpty(existing.Name, id),
 			Description:    "Configured provider",
 			DefaultBaseURL: existing.BaseURL,
-			ModelHint:      existing.DefaultModel,
 		}
 	}
 	return ConnectDraft{
@@ -132,9 +128,7 @@ func BuildDraftForExisting(id string, existing config.Provider) (ConnectDraft, e
 		BaseURL:            firstNonEmpty(existing.BaseURL, desc.DefaultBaseURL),
 		APIKey:             existing.APIKey,
 		APIKeyEnv:          existing.APIKeyEnv,
-		Model:              firstNonEmpty(existing.DefaultModel, desc.ModelHint),
-		ModelPreset:        existing.ModelPreset,
-		ContextWindow:      existing.ContextWindow,
+		Model:              desc.ModelHint,
 		AutoCompactAt:      existing.AutoCompactAt,
 		Stream:             existing.Stream,
 		Timeout:            existing.Timeout,
@@ -153,9 +147,6 @@ func (d ConnectDraft) ToConfig() config.Provider {
 		APIKey:        strings.TrimSpace(d.APIKey),
 		APIKeyEnv:     strings.TrimSpace(d.APIKeyEnv),
 		Headers:       cloneHeaders(d.Headers),
-		DefaultModel:  strings.TrimSpace(d.Model),
-		ModelPreset:   strings.TrimSpace(d.ModelPreset),
-		ContextWindow: d.ContextWindow,
 		AutoCompactAt: d.AutoCompactAt,
 		Stream:        d.Stream,
 		Timeout:       d.Timeout,

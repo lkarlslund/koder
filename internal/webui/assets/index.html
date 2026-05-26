@@ -482,6 +482,36 @@
                 </div>
               </div>
 
+              <div x-show="settingsTab === 'models'">
+                <div class="settings-list-header">
+                  <div>
+                    <div class="fw-semibold">Models</div>
+                    <div class="small text-secondary" x-text="String(settingsListRows('models').length) + ' configured'"></div>
+                  </div>
+                  <button type="button" class="btn btn-sm btn-outline-primary" @click="addSettingsItem('models')"><i class="bi bi-plus-lg"></i></button>
+                </div>
+                <div class="settings-item-list">
+                  <template x-if="settingsListRows('models').length === 0">
+                    <div class="settings-empty">No model settings configured</div>
+                  </template>
+                  <template x-for="item in settingsListRows('models')" :key="modelConfigKey(item)">
+                    <div class="settings-item-row">
+                      <button type="button" class="settings-item-main" @click="editSettingsItem('models', modelConfigKey(item))">
+                        <span class="settings-item-title" x-text="settingsItemTitle('models', item)"></span>
+                        <span class="settings-item-subtitle" x-text="settingsItemSubtitle('models', item)"></span>
+                        <span class="settings-item-badges">
+                          <template x-for="badge in settingsItemBadges('models', item)" :key="badge">
+                            <span class="badge text-bg-secondary" x-text="badge"></span>
+                          </template>
+                        </span>
+                      </button>
+                      <button type="button" class="btn btn-sm btn-outline-secondary" title="Edit model" @click="editSettingsItem('models', modelConfigKey(item))"><i class="bi bi-pencil"></i></button>
+                      <button type="button" class="btn btn-sm btn-outline-danger" title="Delete model" @click="deleteSettingsItem('models', modelConfigKey(item))"><i class="bi bi-trash"></i></button>
+                    </div>
+                  </template>
+                </div>
+              </div>
+
               <div x-show="settingsTab === 'mcp'">
                 <div class="settings-list-header">
                   <div>
@@ -657,15 +687,6 @@
               <label class="form-label small text-secondary">Name</label>
               <input class="form-control" x-model="providerDraft.name" autocomplete="off">
             </div>
-            <div class="col-md-6">
-              <label class="form-label small text-secondary">Model</label>
-              <input class="form-control" x-model="providerDraft.model" list="provider-model-options" autocomplete="off">
-              <datalist id="provider-model-options">
-                <template x-for="model in providerModelOptions" :key="model">
-                  <option :value="model"></option>
-                </template>
-              </datalist>
-            </div>
             <div class="col-12">
               <label class="form-label small text-secondary">Base URL</label>
               <input class="form-control" x-model="providerDraft.base_url" autocomplete="off">
@@ -679,18 +700,10 @@
               <input class="form-control" x-model="providerDraft.api_key_env" autocomplete="off">
             </div>
             <div class="col-md-6">
-              <label class="form-label small text-secondary">Model preset</label>
-              <input class="form-control" x-model="providerDraft.model_preset" autocomplete="off">
-            </div>
-            <div class="col-md-4">
-              <label class="form-label small text-secondary">Context window</label>
-              <input class="form-control" type="number" min="1" x-model.number="providerDraft.context_window">
-            </div>
-            <div class="col-md-4">
               <label class="form-label small text-secondary">Auto compact at</label>
               <input class="form-control" type="number" min="1" x-model.number="providerDraft.auto_compact_at">
             </div>
-            <div class="col-md-4">
+            <div class="col-md-6">
               <label class="form-label small text-secondary">Timeout</label>
               <input class="form-control" x-model="providerDraft.timeout" placeholder="10m" autocomplete="off">
             </div>
@@ -715,6 +728,60 @@
             <span class="spinner-border spinner-border-sm me-1" x-show="providerSaving"></span>Save
           </button>
           <button type="button" class="btn btn-outline-secondary" @click="closeProviderEditor()">Cancel</button>
+        </footer>
+      </form>
+    </section>
+  </div>
+
+  <div class="modal-backdrop-lite modal-backdrop-nested" x-show="showSettings && showModelConfigEditor" x-transition @keydown.escape.window="closeModelConfigEditor()" style="display: none;">
+    <section class="settings-item-dialog bg-body border rounded shadow">
+      <header class="d-flex align-items-center justify-content-between gap-3 p-3 border-bottom">
+        <div>
+          <div class="fw-semibold"><i class="bi bi-cpu me-1"></i> Model</div>
+          <div class="small text-secondary" x-text="modelConfigDraft?.provider_id || 'New model'"></div>
+        </div>
+        <button type="button" class="btn btn-sm btn-outline-secondary" @click="closeModelConfigEditor()"><i class="bi bi-x-lg"></i></button>
+      </header>
+      <form class="settings-item-form p-3" @submit.prevent="saveModelConfig()">
+        <template x-if="modelConfigDraft">
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label class="form-label small text-secondary">Provider</label>
+              <select class="form-select" x-model="modelConfigDraft.provider_id">
+                <template x-for="providerID in providerIDOptions()" :key="providerID">
+                  <option :value="providerID" x-text="providerID"></option>
+                </template>
+              </select>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small text-secondary">Model</label>
+              <input class="form-control" x-model="modelConfigDraft.model_id" list="model-config-options" autocomplete="off">
+              <datalist id="model-config-options">
+                <template x-for="model in modelIDOptionsForProvider(modelConfigDraft.provider_id)" :key="model">
+                  <option :value="model"></option>
+                </template>
+              </datalist>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small text-secondary">Context window</label>
+              <input class="form-control" type="number" min="1" x-model.number="modelConfigDraft.context_window">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small text-secondary">Model preset</label>
+              <select class="form-select" x-model="modelConfigDraft.model_preset">
+                <option value="auto">auto</option>
+                <option value="default">default</option>
+                <option value="qwen3.6-preserve-thinking">qwen3.6-preserve-thinking</option>
+              </select>
+            </div>
+            <div class="col-12" x-show="modelConfigStatus">
+              <div class="alert mb-0" :class="modelConfigStatusKind === 'success' ? 'alert-success' : (modelConfigStatusKind === 'danger' ? 'alert-danger' : 'alert-secondary')" x-text="modelConfigStatus"></div>
+            </div>
+          </div>
+        </template>
+        <footer class="d-flex justify-content-end gap-2 mt-3 pt-3 border-top">
+          <button type="submit" class="btn btn-primary" :disabled="!modelConfigDraft">Save</button>
+          <button type="button" class="btn btn-outline-secondary" @click="closeModelConfigEditor()">Cancel</button>
         </footer>
       </form>
     </section>

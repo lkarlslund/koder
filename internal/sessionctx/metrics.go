@@ -17,16 +17,16 @@ type Metrics struct {
 }
 
 func FromMessages(cfg config.Config, session domain.Session, messages []domain.Message, parts map[domain.ID][]domain.Part) (Metrics, bool) {
-	providerCfg, ok := cfg.Provider(session.ProviderID)
-	if !ok || providerCfg.ContextWindow <= 0 {
+	if !cfg.HasUsableProvider(session.ProviderID) {
 		return Metrics{}, false
 	}
+	contextWindow := cfg.ContextWindow(session.ProviderID, session.ModelID)
 	usage, ok := LatestUsage(messages, parts)
 	usage = usage.Normalized()
 	if !ok || usage.TotalTokens <= 0 {
 		return Metrics{}, false
 	}
-	percent := (usage.TotalTokens * 100) / providerCfg.ContextWindow
+	percent := (usage.TotalTokens * 100) / contextWindow
 	if percent < 0 {
 		percent = 0
 	}
@@ -35,30 +35,30 @@ func FromMessages(cfg config.Config, session domain.Session, messages []domain.M
 	}
 	return Metrics{
 		Used:         usage.TotalTokens,
-		Max:          providerCfg.ContextWindow,
+		Max:          contextWindow,
 		UsagePercent: percent,
 	}, true
 }
 
 // FromTimeline returns context metrics from timeline usage data.
 func FromTimeline(cfg config.Config, session domain.Session, items []domain.TimelineItem) (Metrics, bool) {
-	providerCfg, ok := cfg.Provider(session.ProviderID)
-	if !ok || providerCfg.ContextWindow <= 0 {
+	if !cfg.HasUsableProvider(session.ProviderID) {
 		return Metrics{}, false
 	}
+	contextWindow := cfg.ContextWindow(session.ProviderID, session.ModelID)
 	usage, ok := LatestTimelineUsage(items)
 	usage = usage.Normalized()
 	if !ok || usage.TotalTokens <= 0 {
 		return Metrics{}, false
 	}
-	percent := (usage.TotalTokens * 100) / providerCfg.ContextWindow
+	percent := (usage.TotalTokens * 100) / contextWindow
 	if percent < 0 {
 		percent = 0
 	}
 	if percent > 100 {
 		percent = 100
 	}
-	return Metrics{Used: usage.TotalTokens, Max: providerCfg.ContextWindow, UsagePercent: percent}, true
+	return Metrics{Used: usage.TotalTokens, Max: contextWindow, UsagePercent: percent}, true
 }
 
 // LatestTimelineUsage returns the latest usage attached to an assistant item.

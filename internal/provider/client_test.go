@@ -240,10 +240,9 @@ func TestDetectContextWindowFallsBackWhenCompatibleEndpointHasNoProps(t *testing
 	defer server.Close()
 
 	got, err := DetectContextWindow(context.Background(), "openai-compatible", config.Provider{
-		Kind:          ProviderKindCompatible,
-		BaseURL:       server.URL + "/v1",
-		ContextWindow: 32768,
-		Timeout:       time.Second,
+		Kind:    ProviderKindCompatible,
+		BaseURL: server.URL + "/v1",
+		Timeout: time.Second,
 	}, "model-a", nil)
 	if err != nil {
 		t.Fatal(err)

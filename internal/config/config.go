@@ -42,13 +42,18 @@ type Provider struct {
 	APIKey        string            `toml:"api_key"`
 	APIKeyEnv     string            `toml:"api_key_env"`
 	Headers       map[string]string `toml:"headers"`
-	DefaultModel  string            `toml:"default_model"`
-	ModelPreset   string            `toml:"model_preset"`
-	ContextWindow int               `toml:"context_window"`
 	AutoCompactAt int               `toml:"auto_compact_at"`
 	Stream        bool              `toml:"stream"`
 	Timeout       time.Duration     `toml:"timeout"`
 	Disabled      bool              `toml:"disabled"`
+}
+
+// ModelConfig stores settings for one provider/model pair.
+type ModelConfig struct {
+	ProviderID    string `toml:"provider_id"`
+	ModelID       string `toml:"model_id"`
+	ContextWindow int    `toml:"context_window"`
+	ModelPreset   string `toml:"model_preset"`
 }
 
 type MCPServer struct {
@@ -77,6 +82,7 @@ type Config struct {
 	CompactionKeepToolBatches int                      `toml:"compaction_keep_tool_batches"`
 	ToolDefaults              map[domain.ToolKind]bool `toml:"tool_defaults"`
 	Providers                 map[string]Provider      `toml:"providers"`
+	Models                    []ModelConfig            `toml:"models"`
 	MCPServers                map[string]MCPServer     `toml:"mcp_servers"`
 	Permissions               PermissionRules          `toml:"permissions"`
 	Store                     Store                    `toml:"store"`
@@ -157,6 +163,7 @@ func Default() Config {
 		CompactionKeepToolBatches: defaultCompactionKeepToolBatches,
 		ToolDefaults:              toolDefaults,
 		Providers:                 map[string]Provider{},
+		Models:                    []ModelConfig{},
 		MCPServers:                map[string]MCPServer{},
 		Permissions: PermissionRules{
 			Profile: "default",
@@ -270,9 +277,6 @@ func (c *Config) applyDefaults() {
 		if provider.Timeout == 0 {
 			provider.Timeout = fallbackProvider.Timeout
 		}
-		if provider.ContextWindow == 0 {
-			provider.ContextWindow = fallbackProvider.ContextWindow
-		}
 		if provider.AutoCompactAt == 0 {
 			provider.AutoCompactAt = c.AutoCompactAt
 		}
@@ -281,6 +285,7 @@ func (c *Config) applyDefaults() {
 		}
 		c.Providers[id] = provider
 	}
+	c.Models = normalizeModelConfigs(c.Models)
 	for id, server := range c.MCPServers {
 		if server.Headers == nil {
 			server.Headers = map[string]string{}
@@ -378,10 +383,92 @@ func (c Config) HasUsableDefaultProvider() bool {
 	return c.HasUsableProvider(c.DefaultProvider)
 }
 
+// ModelConfig returns the configured settings for a provider/model pair.
+func (c Config) ModelConfig(providerID, modelID string) (ModelConfig, bool) {
+	providerID = strings.TrimSpace(providerID)
+	modelID = strings.TrimSpace(modelID)
+	if providerID == "" || modelID == "" {
+		return ModelConfig{}, false
+	}
+	for _, model := range c.Models {
+		if strings.TrimSpace(model.ProviderID) == providerID && strings.TrimSpace(model.ModelID) == modelID {
+			return normalizeModelConfig(model), true
+		}
+	}
+	return ModelConfig{}, false
+}
+
+// SetModelConfig inserts or replaces settings for a provider/model pair.
+func (c *Config) SetModelConfig(model ModelConfig) {
+	model = normalizeModelConfig(model)
+	if model.ProviderID == "" || model.ModelID == "" {
+		return
+	}
+	for idx := range c.Models {
+		if strings.TrimSpace(c.Models[idx].ProviderID) == model.ProviderID && strings.TrimSpace(c.Models[idx].ModelID) == model.ModelID {
+			c.Models[idx] = model
+			c.Models = normalizeModelConfigs(c.Models)
+			return
+		}
+	}
+	c.Models = append(c.Models, model)
+	c.Models = normalizeModelConfigs(c.Models)
+}
+
+// ContextWindow returns the configured context window for a provider/model pair.
+func (c Config) ContextWindow(providerID, modelID string) int {
+	if model, ok := c.ModelConfig(providerID, modelID); ok && model.ContextWindow > 0 {
+		return model.ContextWindow
+	}
+	return 32768
+}
+
+// ModelPreset returns the configured request preset for a provider/model pair.
+func (c Config) ModelPreset(providerID, modelID string) string {
+	if model, ok := c.ModelConfig(providerID, modelID); ok {
+		return strings.TrimSpace(model.ModelPreset)
+	}
+	return "auto"
+}
+
+func normalizeModelConfigs(src []ModelConfig) []ModelConfig {
+	seen := map[string]int{}
+	out := make([]ModelConfig, 0, len(src))
+	for _, model := range src {
+		model = normalizeModelConfig(model)
+		if model.ProviderID == "" || model.ModelID == "" {
+			continue
+		}
+		key := model.ProviderID + "\x00" + model.ModelID
+		if idx, ok := seen[key]; ok {
+			out[idx] = model
+			continue
+		}
+		seen[key] = len(out)
+		out = append(out, model)
+	}
+	slices.SortFunc(out, func(a, b ModelConfig) int {
+		if cmp := strings.Compare(a.ProviderID, b.ProviderID); cmp != 0 {
+			return cmp
+		}
+		return strings.Compare(a.ModelID, b.ModelID)
+	})
+	return out
+}
+
+func normalizeModelConfig(model ModelConfig) ModelConfig {
+	model.ProviderID = strings.TrimSpace(model.ProviderID)
+	model.ModelID = strings.TrimSpace(model.ModelID)
+	model.ModelPreset = strings.TrimSpace(model.ModelPreset)
+	if model.ModelPreset == "" {
+		model.ModelPreset = "auto"
+	}
+	return model
+}
+
 func providerDefaults() Provider {
 	return Provider{
 		Headers:       map[string]string{},
-		ContextWindow: 32768,
 		AutoCompactAt: defaultAutoCompactAt,
 		Stream:        true,
 		Timeout:       10 * time.Minute,

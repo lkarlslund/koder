@@ -114,7 +114,7 @@ func runExec(ctx context.Context, opts execOptions, prompt string) (string, erro
 	if !ok {
 		return "", fmt.Errorf("provider %q not configured", providerID)
 	}
-	modelID := firstNonEmpty(strings.TrimSpace(opts.modelID), strings.TrimSpace(cfg.DefaultModel), strings.TrimSpace(providerCfg.DefaultModel))
+	modelID := firstNonEmpty(strings.TrimSpace(opts.modelID), strings.TrimSpace(cfg.DefaultModel))
 	if modelID == "" {
 		return "", fmt.Errorf("no model configured for provider %q", providerID)
 	}
@@ -251,7 +251,7 @@ func (r execRunner) run(ctx context.Context, prompt, providerID, modelID, workdi
 			Tools:      defs,
 			ToolChoice: "auto",
 			Stream:     false,
-			ExtraBody:  provider.RequestExtraBody(r.providerConfig(providerID), modelID, r.modelPreset(providerID)),
+			ExtraBody:  provider.RequestExtraBody(r.providerConfig(providerID), modelID, r.modelPreset(providerID, modelID)),
 		})
 		if err != nil {
 			return "", err
@@ -380,8 +380,8 @@ func (r execRunner) providerConfig(providerID string) config.Provider {
 	return cfg
 }
 
-func (r execRunner) modelPreset(providerID string) string {
-	return r.providerConfig(providerID).ModelPreset
+func (r execRunner) modelPreset(providerID, modelID string) string {
+	return r.cfg.ModelPreset(providerID, modelID)
 }
 
 func firstNonEmpty(values ...string) string {

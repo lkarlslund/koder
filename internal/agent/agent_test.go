@@ -1509,11 +1509,14 @@ func TestPreviewNextRequestIncludesQwenPresetExtraBody(t *testing.T) {
 	cfg := testConfig(t)
 	cfg.Providers = map[string]config.Provider{
 		"test": {
-			BaseURL:      "http://127.0.0.1:8000/v1",
-			DefaultModel: "Qwen/Qwen3.6-35B-A3B",
-			ModelPreset:  provider.ModelPresetAuto,
+			BaseURL: "http://127.0.0.1:8000/v1",
 		},
 	}
+	cfg.SetModelConfig(config.ModelConfig{
+		ProviderID:  "test",
+		ModelID:     "Qwen/Qwen3.6-35B-A3B",
+		ModelPreset: provider.ModelPresetAuto,
+	})
 	st, err := store.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -1603,11 +1606,14 @@ func TestBuildConversationPreservesThinkingBlockForQwenPreset(t *testing.T) {
 	cfg := testConfig(t)
 	cfg.Providers = map[string]config.Provider{
 		"test": {
-			BaseURL:      "http://127.0.0.1:8000/v1",
-			DefaultModel: "Qwen/Qwen3.6-35B-A3B",
-			ModelPreset:  provider.ModelPresetQwen36PreserveThinking,
+			BaseURL: "http://127.0.0.1:8000/v1",
 		},
 	}
+	cfg.SetModelConfig(config.ModelConfig{
+		ProviderID:  "test",
+		ModelID:     "Qwen/Qwen3.6-35B-A3B",
+		ModelPreset: provider.ModelPresetQwen36PreserveThinking,
+	})
 	st, err := store.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -3147,12 +3153,12 @@ func TestApproveAutoCompactContinuesFromCompactedHistory(t *testing.T) {
 		"test": {
 			BaseURL:       server.URL + "/v1",
 			Timeout:       time.Second,
-			ContextWindow: 1,
 			AutoCompactAt: 1,
 		},
 	}
 	cfg.DefaultProvider = "test"
 	cfg.DefaultModel = "test-model"
+	cfg.SetModelConfig(config.ModelConfig{ProviderID: "test", ModelID: "test-model", ContextWindow: 1})
 	cfg.Permissions.Profiles["default"] = config.PermissionProfile{
 		Root:      string(permissionprofile.ModeReadOnly),
 		Workspace: string(permissionprofile.ModeReadWrite),
@@ -3383,12 +3389,12 @@ func TestContinueModelTurnAutoCompactsAfterToolResultChurn(t *testing.T) {
 		"test": {
 			BaseURL:       server.URL + "/v1",
 			Timeout:       time.Second,
-			ContextWindow: 50000,
 			AutoCompactAt: 20,
 		},
 	}
 	cfg.DefaultProvider = "test"
 	cfg.DefaultModel = "test-model"
+	cfg.SetModelConfig(config.ModelConfig{ProviderID: "test", ModelID: "test-model", ContextWindow: 50000})
 
 	st, err := store.Open(t.TempDir())
 	if err != nil {
@@ -3452,13 +3458,13 @@ func TestCompactSessionDoesNotPersistUsageOrEmitUsageEvent(t *testing.T) {
 	cfg := testConfig(t)
 	cfg.Providers = map[string]config.Provider{
 		"test": {
-			BaseURL:       server.URL + "/v1",
-			Timeout:       time.Second,
-			ContextWindow: 32768,
+			BaseURL: server.URL + "/v1",
+			Timeout: time.Second,
 		},
 	}
 	cfg.DefaultProvider = "test"
 	cfg.DefaultModel = "test-model"
+	cfg.SetModelConfig(config.ModelConfig{ProviderID: "test", ModelID: "test-model", ContextWindow: 32768})
 
 	st, err := store.Open(t.TempDir())
 	if err != nil {
@@ -3563,14 +3569,14 @@ func TestCompactSessionStreamsWhenProviderStreamingEnabled(t *testing.T) {
 	cfg := testConfig(t)
 	cfg.Providers = map[string]config.Provider{
 		"test": {
-			BaseURL:       server.URL + "/v1",
-			Timeout:       time.Second,
-			ContextWindow: 32768,
-			Stream:        true,
+			BaseURL: server.URL + "/v1",
+			Timeout: time.Second,
+			Stream:  true,
 		},
 	}
 	cfg.DefaultProvider = "test"
 	cfg.DefaultModel = "test-model"
+	cfg.SetModelConfig(config.ModelConfig{ProviderID: "test", ModelID: "test-model", ContextWindow: 32768})
 
 	st, err := store.Open(t.TempDir())
 	if err != nil {
@@ -3639,20 +3645,20 @@ func TestCompactSessionUsesConfiguredCompactionModel(t *testing.T) {
 	cfg := testConfig(t)
 	cfg.Providers = map[string]config.Provider{
 		"chat": {
-			BaseURL:       "http://127.0.0.1:1/v1",
-			Timeout:       time.Second,
-			ContextWindow: 32768,
+			BaseURL: "http://127.0.0.1:1/v1",
+			Timeout: time.Second,
 		},
 		"compact": {
-			BaseURL:       server.URL + "/v1",
-			Timeout:       time.Second,
-			ContextWindow: 32768,
+			BaseURL: server.URL + "/v1",
+			Timeout: time.Second,
 		},
 	}
 	cfg.DefaultProvider = "chat"
 	cfg.DefaultModel = "chat-model"
 	cfg.CompactionProvider = "compact"
 	cfg.CompactionModel = "compact-model"
+	cfg.SetModelConfig(config.ModelConfig{ProviderID: "chat", ModelID: "chat-model", ContextWindow: 32768})
+	cfg.SetModelConfig(config.ModelConfig{ProviderID: "compact", ModelID: "compact-model", ContextWindow: 32768})
 
 	st, err := store.Open(t.TempDir())
 	if err != nil {
@@ -3687,11 +3693,11 @@ func TestCompactSessionRejectsInvalidCompactionModelOverride(t *testing.T) {
 	cfg := testConfig(t)
 	cfg.Providers = map[string]config.Provider{
 		"chat": {
-			BaseURL:       "http://127.0.0.1:1/v1",
-			Timeout:       time.Second,
-			ContextWindow: 32768,
+			BaseURL: "http://127.0.0.1:1/v1",
+			Timeout: time.Second,
 		},
 	}
+	cfg.SetModelConfig(config.ModelConfig{ProviderID: "chat", ModelID: "chat-model", ContextWindow: 32768})
 	cfg.CompactionProvider = "missing"
 	cfg.CompactionModel = "compact-model"
 
@@ -3735,13 +3741,13 @@ func TestCompactSessionAcceptsReasoningOnlySummary(t *testing.T) {
 	cfg := testConfig(t)
 	cfg.Providers = map[string]config.Provider{
 		"test": {
-			BaseURL:       server.URL + "/v1",
-			Timeout:       time.Second,
-			ContextWindow: 32768,
+			BaseURL: server.URL + "/v1",
+			Timeout: time.Second,
 		},
 	}
 	cfg.DefaultProvider = "test"
 	cfg.DefaultModel = "test-model"
+	cfg.SetModelConfig(config.ModelConfig{ProviderID: "test", ModelID: "test-model", ContextWindow: 32768})
 
 	st, err := store.Open(t.TempDir())
 	if err != nil {

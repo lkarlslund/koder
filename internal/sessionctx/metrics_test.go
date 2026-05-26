@@ -10,8 +10,9 @@ import (
 func TestFromMessagesUsesLatestUsageAndContextWindow(t *testing.T) {
 	cfg := config.Default()
 	cfg.DefaultProvider = "test"
-	cfg.Providers["test"] = config.Provider{ContextWindow: 32768}
-	session := domain.Session{ProviderID: cfg.DefaultProvider}
+	cfg.Providers["test"] = config.Provider{}
+	cfg.SetModelConfig(config.ModelConfig{ProviderID: "test", ModelID: "model", ContextWindow: 32768})
+	session := domain.Session{ProviderID: cfg.DefaultProvider, ModelID: "model"}
 	messages := []domain.Message{
 		{ID: "msg-1"},
 		{ID: "msg-2"},
@@ -33,8 +34,9 @@ func TestFromMessagesUsesLatestUsageAndContextWindow(t *testing.T) {
 func TestFromMessagesSynthesizesTotalFromPromptAndCompletion(t *testing.T) {
 	cfg := config.Default()
 	cfg.DefaultProvider = "test"
-	cfg.Providers["test"] = config.Provider{ContextWindow: 32768}
-	session := domain.Session{ProviderID: cfg.DefaultProvider}
+	cfg.Providers["test"] = config.Provider{}
+	cfg.SetModelConfig(config.ModelConfig{ProviderID: "test", ModelID: "model", ContextWindow: 32768})
+	session := domain.Session{ProviderID: cfg.DefaultProvider, ModelID: "model"}
 	messages := []domain.Message{{ID: "msg-1"}}
 	parts := map[domain.ID][]domain.Part{
 		"msg-1": {{Kind: domain.PartKindUsage, Payload: domain.UsagePayload{Usage: domain.Usage{PromptTokens: 1200, CompletionTokens: 300}}}},
@@ -52,11 +54,11 @@ func TestFromMessagesSynthesizesTotalFromPromptAndCompletion(t *testing.T) {
 func TestFromMessagesSkipsMissingContextWindow(t *testing.T) {
 	cfg := config.Default()
 	cfg.DefaultProvider = "test"
-	cfg.Providers["test"] = config.Provider{}
+	cfg.Providers = map[string]config.Provider{}
 	session := domain.Session{ProviderID: cfg.DefaultProvider}
 
 	if _, ok := FromMessages(cfg, session, nil, nil); ok {
-		t.Fatal("expected missing metrics without context window")
+		t.Fatal("expected missing metrics without provider")
 	}
 }
 

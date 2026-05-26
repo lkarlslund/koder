@@ -790,10 +790,12 @@ func TestIndexServesHTML(t *testing.T) {
 		strings.Contains(fullPage, `MCP servers JSON`) {
 		t.Fatalf("expected providers and MCP to use shared preferences list editors")
 	}
-	if !strings.Contains(fullPage, `list="provider-model-options"`) ||
+	if !strings.Contains(fullPage, `settingsListRows('models')`) ||
+		!strings.Contains(fullPage, `showModelConfigEditor`) ||
+		!strings.Contains(fullPage, `list="model-config-options"`) ||
 		!strings.Contains(fullPage, `providerModelOptions`) ||
 		!strings.Contains(fullPage, `settings.general.default_provider = this.providerState.default_provider`) {
-		t.Fatalf("expected provider editor to offer detected model choices and sync deleted defaults")
+		t.Fatalf("expected model settings editor to offer detected model choices and sync deleted defaults")
 	}
 	if !strings.Contains(fullPage, `Chat model`) ||
 		!strings.Contains(fullPage, `settings-prompt`) ||
@@ -1226,9 +1228,9 @@ func TestWebSocketProviderCRUDReturnsProviderState(t *testing.T) {
 		Result struct {
 			Providers struct {
 				DefaultProvider string `json:"default_provider"`
+				DefaultModel    string `json:"default_model"`
 				Providers       []struct {
-					ID           string `json:"id"`
-					DefaultModel string `json:"default_model"`
+					ID string `json:"id"`
 				} `json:"providers"`
 				Drafts map[string]struct {
 					Headers map[string]string `json:"headers"`
@@ -1251,12 +1253,15 @@ func TestWebSocketProviderCRUDReturnsProviderState(t *testing.T) {
 	}
 	var foundLocal bool
 	for _, item := range saveResp.Result.Providers.Providers {
-		if item.ID == "local" && item.DefaultModel == "detected-model" {
+		if item.ID == "local" {
 			foundLocal = true
 		}
 	}
 	if !foundLocal {
 		t.Fatalf("expected saved local provider, got %#v", saveResp.Result.Providers.Providers)
+	}
+	if saveResp.Result.Providers.DefaultProvider != "test" || saveResp.Result.Providers.DefaultModel != "model" {
+		t.Fatalf("expected existing default provider/model to remain, got %#v", saveResp.Result.Providers)
 	}
 	if saveResp.Result.State.Session.ProviderID != "test" || saveResp.Result.State.Session.ModelID != "model" {
 		t.Fatalf("expected active session to remain on current usable provider/model, got %#v", saveResp.Result.State.Session)
@@ -1520,8 +1525,9 @@ func newTestControllerWithWorkdir(t *testing.T, workdir string) *uicore.Controll
 	cfg.DefaultProvider = "test"
 	cfg.DefaultModel = "model"
 	cfg.Providers = map[string]config.Provider{
-		"test": {BaseURL: "https://example.invalid/v1", DefaultModel: "model"},
+		"test": {BaseURL: "https://example.invalid/v1"},
 	}
+	cfg.SetModelConfig(config.ModelConfig{ProviderID: "test", ModelID: "model", ContextWindow: 32768})
 	if err := cfg.Save(); err != nil {
 		t.Fatalf("save config: %v", err)
 	}

@@ -38,17 +38,16 @@ func TestBuildDraftGeneratesUniqueProviderID(t *testing.T) {
 
 func TestBuildDraftForExistingProvider(t *testing.T) {
 	draft, err := BuildDraftForExisting("openrouter-work", config.Provider{
-		TemplateID:   "openrouter",
-		Kind:         "openai-compatible",
-		Name:         "OpenRouter Work",
-		BaseURL:      "https://example.com/v1",
-		APIKey:       "secret",
-		DefaultModel: "model-x",
+		TemplateID: "openrouter",
+		Kind:       "openai-compatible",
+		Name:       "OpenRouter Work",
+		BaseURL:    "https://example.com/v1",
+		APIKey:     "secret",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if draft.ProviderID != "openrouter-work" || draft.TemplateID != "openrouter" || draft.BaseURL != "https://example.com/v1" || draft.APIKey != "secret" || draft.Model != "model-x" {
+	if draft.ProviderID != "openrouter-work" || draft.TemplateID != "openrouter" || draft.BaseURL != "https://example.com/v1" || draft.APIKey != "secret" || draft.Model == "" {
 		t.Fatalf("expected existing provider values, got %#v", draft)
 	}
 }

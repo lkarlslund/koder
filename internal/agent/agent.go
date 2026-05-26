@@ -939,7 +939,7 @@ func (e *Engine) providerConfigForSession(session domain.Session) config.Provide
 }
 
 func (e *Engine) modelPresetForSession(session domain.Session) string {
-	return e.providerConfigForSession(session).ModelPreset
+	return e.cfg.ModelPreset(session.ProviderID, session.ModelID)
 }
 
 func (e *Engine) providerStreamingEnabled(session domain.Session) bool {
@@ -2892,10 +2892,10 @@ func (e *Engine) autoCompactChatIfNeeded(ctx context.Context, session domain.Ses
 }
 
 func (e *Engine) estimateRequestUsagePercent(session domain.Session, _ domain.Chat, messages []provider.Message) (int, bool) {
-	providerCfg, ok := e.cfg.Provider(session.ProviderID)
-	if !ok || providerCfg.ContextWindow <= 0 {
+	if !e.cfg.HasUsableProvider(session.ProviderID) {
 		return 0, false
 	}
+	contextWindow := e.cfg.ContextWindow(session.ProviderID, session.ModelID)
 	body, err := json.Marshal(messages)
 	if err != nil || len(body) == 0 {
 		return 0, false
@@ -2907,7 +2907,7 @@ func (e *Engine) estimateRequestUsagePercent(session domain.Session, _ domain.Ch
 	if estimatedTokens <= 0 {
 		return 0, false
 	}
-	percent := (estimatedTokens * 100) / providerCfg.ContextWindow
+	percent := (estimatedTokens * 100) / contextWindow
 	if percent < 0 {
 		percent = 0
 	}

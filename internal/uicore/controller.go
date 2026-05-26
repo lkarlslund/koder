@@ -121,14 +121,13 @@ type ProviderCatalogItem struct {
 
 // ProviderConfigItem is one configured provider row.
 type ProviderConfigItem struct {
-	ID           string `json:"id"`
-	Name         string `json:"name"`
-	TemplateID   string `json:"template_id"`
-	Kind         string `json:"kind"`
-	BaseURL      string `json:"base_url"`
-	DefaultModel string `json:"default_model"`
-	Disabled     bool   `json:"disabled"`
-	Default      bool   `json:"default"`
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	TemplateID string `json:"template_id"`
+	Kind       string `json:"kind"`
+	BaseURL    string `json:"base_url"`
+	Disabled   bool   `json:"disabled"`
+	Default    bool   `json:"default"`
 }
 
 // ProviderDraft is the JSON-friendly provider edit shape used by renderers.
@@ -143,8 +142,6 @@ type ProviderDraft struct {
 	APIKey             string            `json:"api_key"`
 	APIKeyEnv          string            `json:"api_key_env"`
 	Model              string            `json:"model"`
-	ModelPreset        string            `json:"model_preset"`
-	ContextWindow      int               `json:"context_window"`
 	AutoCompactAt      int               `json:"auto_compact_at"`
 	Stream             bool              `json:"stream"`
 	Timeout            string            `json:"timeout"`
@@ -159,6 +156,15 @@ type ProviderProbeResult struct {
 	SelectedModel string   `json:"selected_model"`
 }
 
+type ModelConfigPreference struct {
+	OriginalProviderID string `json:"original_provider_id"`
+	OriginalModelID    string `json:"original_model_id"`
+	ProviderID         string `json:"provider_id"`
+	ModelID            string `json:"model_id"`
+	ContextWindow      int    `json:"context_window"`
+	ModelPreset        string `json:"model_preset"`
+}
+
 // PreferencesState is the complete settings payload exposed to web renderers.
 type PreferencesState struct {
 	General      GeneralPreferences      `json:"general"`
@@ -167,6 +173,7 @@ type PreferencesState struct {
 	Prompts      []PromptPreference      `json:"prompts"`
 	Providers    ProviderState           `json:"providers"`
 	Models       []ModelOption           `json:"models"`
+	ModelConfigs []ModelConfigPreference `json:"model_configs"`
 	MCPServers   []MCPServerPreference   `json:"mcp_servers"`
 	Permissions  PermissionPreferences   `json:"permissions"`
 	ToolDefaults []ToolDefaultPreference `json:"tool_defaults"`
@@ -935,12 +942,19 @@ func (c *Controller) SaveProvider(ctx context.Context, draft ProviderDraft) (Pro
 	}
 	if originalID != "" && originalID != catalogDraft.ProviderID {
 		delete(c.cfg.Providers, originalID)
+		renameModelConfigs(&c.cfg, originalID, catalogDraft.ProviderID)
 	}
 	c.cfg.Providers[catalogDraft.ProviderID] = next
+	c.cfg.SetModelConfig(config.ModelConfig{
+		ProviderID:    catalogDraft.ProviderID,
+		ModelID:       catalogDraft.Model,
+		ContextWindow: c.cfg.ContextWindow(catalogDraft.ProviderID, catalogDraft.Model),
+		ModelPreset:   c.cfg.ModelPreset(catalogDraft.ProviderID, catalogDraft.Model),
+	})
 	if strings.TrimSpace(c.cfg.DefaultProvider) == "" || c.cfg.DefaultProvider == originalID || c.cfg.DefaultProvider == catalogDraft.ProviderID {
 		c.cfg.DefaultProvider = catalogDraft.ProviderID
+		c.cfg.DefaultModel = catalogDraft.Model
 	}
-	c.cfg.DefaultModel = catalogDraft.Model
 	if err := c.cfg.Save(); err != nil {
 		c.mu.Unlock()
 		return ProviderState{}, err
@@ -986,6 +1000,7 @@ func (c *Controller) DeleteProvider(ctx context.Context, providerID string) (Pro
 		return ProviderState{}, fmt.Errorf("provider %q is not configured", providerID)
 	}
 	delete(c.cfg.Providers, providerID)
+	deleteModelConfigs(&c.cfg, providerID)
 	nextDefault := strings.TrimSpace(c.cfg.DefaultProvider)
 	if nextDefault == providerID || !c.cfg.HasUsableProvider(nextDefault) {
 		nextDefault = ""
@@ -1001,9 +1016,7 @@ func (c *Controller) DeleteProvider(ctx context.Context, providerID string) (Pro
 	c.cfg.DefaultProvider = nextDefault
 	c.cfg.DefaultModel = ""
 	if nextDefault != "" {
-		if next, ok := c.cfg.Provider(nextDefault); ok {
-			c.cfg.DefaultModel = next.DefaultModel
-		}
+		c.cfg.DefaultModel = firstModelForProvider(c.cfg, nextDefault)
 	}
 	if err := c.cfg.Save(); err != nil {
 		c.mu.Unlock()
@@ -1060,6 +1073,10 @@ func (c *Controller) SavePreferences(ctx context.Context, prefs PreferencesState
 		return PreferencesState{}, err
 	}
 	if err := applyCompactionPreferences(&next, prefs.Compaction); err != nil {
+		c.mu.Unlock()
+		return PreferencesState{}, err
+	}
+	if err := applyModelConfigPreferences(&next, prefs.ModelConfigs); err != nil {
 		c.mu.Unlock()
 		return PreferencesState{}, err
 	}
@@ -1313,6 +1330,43 @@ func providerEntryLabel(providerID string, cfg config.Provider) string {
 	return providerID
 }
 
+func firstModelForProvider(cfg config.Config, providerID string) string {
+	providerID = strings.TrimSpace(providerID)
+	for _, model := range cfg.Models {
+		if strings.TrimSpace(model.ProviderID) == providerID && strings.TrimSpace(model.ModelID) != "" {
+			return strings.TrimSpace(model.ModelID)
+		}
+	}
+	return ""
+}
+
+func renameModelConfigs(cfg *config.Config, oldProviderID, newProviderID string) {
+	oldProviderID = strings.TrimSpace(oldProviderID)
+	newProviderID = strings.TrimSpace(newProviderID)
+	if cfg == nil || oldProviderID == "" || newProviderID == "" || oldProviderID == newProviderID {
+		return
+	}
+	for idx := range cfg.Models {
+		if strings.TrimSpace(cfg.Models[idx].ProviderID) == oldProviderID {
+			cfg.Models[idx].ProviderID = newProviderID
+		}
+	}
+}
+
+func deleteModelConfigs(cfg *config.Config, providerID string) {
+	providerID = strings.TrimSpace(providerID)
+	if cfg == nil || providerID == "" {
+		return
+	}
+	out := cfg.Models[:0]
+	for _, model := range cfg.Models {
+		if strings.TrimSpace(model.ProviderID) != providerID {
+			out = append(out, model)
+		}
+	}
+	cfg.Models = out
+}
+
 func (c *Controller) preferencesStateLocked(ctx context.Context) (PreferencesState, error) {
 	models, _ := c.modelOptionsLocked(ctx)
 	models = ensureModelOption(models, c.cfg, strings.TrimSpace(c.cfg.CompactionProvider), strings.TrimSpace(c.cfg.CompactionModel))
@@ -1332,6 +1386,7 @@ func (c *Controller) preferencesStateLocked(ctx context.Context) (PreferencesSta
 		Prompts:      prompts,
 		Providers:    c.providerStateLocked(),
 		Models:       models,
+		ModelConfigs: modelConfigPreferencesFromConfig(c.cfg.Models),
 		MCPServers:   mcpPreferencesFromConfig(c.cfg.MCPServers),
 		Permissions:  permissionPreferencesFromConfig(c.cfg.Permissions),
 		ToolDefaults: toolDefaultPreferencesFromConfig(c.cfg.ToolDefaults),
@@ -1370,6 +1425,34 @@ func ensureModelOption(options []ModelOption, cfg config.Config, providerID, mod
 	return options
 }
 
+func modelConfigPreferencesFromConfig(src []config.ModelConfig) []ModelConfigPreference {
+	models := make([]config.ModelConfig, len(src))
+	copy(models, src)
+	slices.SortFunc(models, func(a, b config.ModelConfig) int {
+		if cmp := strings.Compare(a.ProviderID, b.ProviderID); cmp != 0 {
+			return cmp
+		}
+		return strings.Compare(a.ModelID, b.ModelID)
+	})
+	out := make([]ModelConfigPreference, 0, len(models))
+	for _, model := range models {
+		model.ProviderID = strings.TrimSpace(model.ProviderID)
+		model.ModelID = strings.TrimSpace(model.ModelID)
+		if model.ProviderID == "" || model.ModelID == "" {
+			continue
+		}
+		out = append(out, ModelConfigPreference{
+			OriginalProviderID: model.ProviderID,
+			OriginalModelID:    model.ModelID,
+			ProviderID:         model.ProviderID,
+			ModelID:            model.ModelID,
+			ContextWindow:      model.ContextWindow,
+			ModelPreset:        strings.TrimSpace(model.ModelPreset),
+		})
+	}
+	return out
+}
+
 func (c *Controller) providerStateLocked() ProviderState {
 	catalog := make([]ProviderCatalogItem, 0, len(provider.Catalog()))
 	for _, item := range provider.Catalog() {
@@ -1400,14 +1483,13 @@ func (c *Controller) providerStateLocked() ProviderState {
 			}
 		}
 		providers = append(providers, ProviderConfigItem{
-			ID:           id,
-			Name:         providerEntryLabel(id, cfg),
-			TemplateID:   templateID,
-			Kind:         strings.TrimSpace(cfg.Kind),
-			BaseURL:      strings.TrimSpace(cfg.BaseURL),
-			DefaultModel: strings.TrimSpace(cfg.DefaultModel),
-			Disabled:     cfg.Disabled,
-			Default:      id == c.cfg.DefaultProvider,
+			ID:         id,
+			Name:       providerEntryLabel(id, cfg),
+			TemplateID: templateID,
+			Kind:       strings.TrimSpace(cfg.Kind),
+			BaseURL:    strings.TrimSpace(cfg.BaseURL),
+			Disabled:   cfg.Disabled,
+			Default:    id == c.cfg.DefaultProvider,
 		})
 		if draft, err := provider.BuildDraftForExisting(id, cfg); err == nil {
 			drafts[id] = providerDraftFromCatalog(draft)
@@ -1435,8 +1517,6 @@ func providerDraftFromCatalog(draft provider.ConnectDraft) ProviderDraft {
 		APIKey:             strings.TrimSpace(draft.APIKey),
 		APIKeyEnv:          strings.TrimSpace(draft.APIKeyEnv),
 		Model:              strings.TrimSpace(draft.Model),
-		ModelPreset:        strings.TrimSpace(draft.ModelPreset),
-		ContextWindow:      draft.ContextWindow,
 		AutoCompactAt:      draft.AutoCompactAt,
 		Stream:             draft.Stream,
 		Timeout:            durationString(draft.Timeout),
@@ -1457,8 +1537,6 @@ func providerDraftToCatalog(draft ProviderDraft) provider.ConnectDraft {
 		APIKey:             strings.TrimSpace(draft.APIKey),
 		APIKeyEnv:          strings.TrimSpace(draft.APIKeyEnv),
 		Model:              strings.TrimSpace(draft.Model),
-		ModelPreset:        strings.TrimSpace(draft.ModelPreset),
-		ContextWindow:      draft.ContextWindow,
 		AutoCompactAt:      draft.AutoCompactAt,
 		Stream:             draft.Stream,
 		Timeout:            parseDurationOrZero(draft.Timeout),
@@ -1489,12 +1567,6 @@ func mergeProviderEditDefaults(next *config.Provider, existing config.Provider) 
 	if strings.TrimSpace(next.APIKeyEnv) == "" {
 		next.APIKeyEnv = existing.APIKeyEnv
 	}
-	if strings.TrimSpace(next.ModelPreset) == "" {
-		next.ModelPreset = existing.ModelPreset
-	}
-	if next.ContextWindow == 0 {
-		next.ContextWindow = existing.ContextWindow
-	}
 	if next.AutoCompactAt == 0 {
 		next.AutoCompactAt = existing.AutoCompactAt
 	}
@@ -1504,9 +1576,6 @@ func mergeProviderEditDefaults(next *config.Provider, existing config.Provider) 
 }
 
 func applyNewProviderDefaults(next *config.Provider, autoCompactAt int) {
-	if next.ContextWindow == 0 {
-		next.ContextWindow = 32768
-	}
 	if autoCompactAt <= 0 {
 		autoCompactAt = 80
 	}
@@ -1519,10 +1588,6 @@ func applyNewProviderDefaults(next *config.Provider, autoCompactAt int) {
 func applyProviderDraftPreferences(next *config.Provider, draft ProviderDraft) {
 	next.AuthMethod = strings.TrimSpace(draft.AuthMethod)
 	next.APIKeyEnv = strings.TrimSpace(draft.APIKeyEnv)
-	next.ModelPreset = strings.TrimSpace(draft.ModelPreset)
-	if draft.ContextWindow > 0 {
-		next.ContextWindow = draft.ContextWindow
-	}
 	if draft.AutoCompactAt > 0 {
 		next.AutoCompactAt = draft.AutoCompactAt
 	}
@@ -1680,6 +1745,37 @@ func repairStaleGeneralProvider(cfg *config.Config, prefs *PreferencesState) {
 	}
 	prefs.General.DefaultProvider = defaultProvider
 	prefs.General.DefaultModel = strings.TrimSpace(prefs.Providers.DefaultModel)
+}
+
+func applyModelConfigPreferences(cfg *config.Config, prefs []ModelConfigPreference) error {
+	next := make([]config.ModelConfig, 0, len(prefs))
+	for _, pref := range prefs {
+		providerID := strings.TrimSpace(pref.ProviderID)
+		modelID := strings.TrimSpace(pref.ModelID)
+		if providerID == "" && modelID == "" {
+			continue
+		}
+		if providerID == "" || modelID == "" {
+			return fmt.Errorf("model provider and model id are required")
+		}
+		if !cfg.HasUsableProvider(providerID) {
+			continue
+		}
+		if pref.ContextWindow <= 0 {
+			return fmt.Errorf("context window for %s/%s must be greater than zero", providerID, modelID)
+		}
+		next = append(next, config.ModelConfig{
+			ProviderID:    providerID,
+			ModelID:       modelID,
+			ContextWindow: pref.ContextWindow,
+			ModelPreset:   strings.TrimSpace(pref.ModelPreset),
+		})
+	}
+	cfg.Models = nil
+	for _, model := range next {
+		cfg.SetModelConfig(model)
+	}
+	return nil
 }
 
 func applyUIPreferences(cfg *config.Config, prefs UIPreferences) error {
@@ -2721,13 +2817,12 @@ func (c *Controller) permissionsStateLocked() PermissionsState {
 
 func (c *Controller) contextWindowLocked() int {
 	providerID := strings.TrimSpace(c.session.ProviderID)
-	if providerID != "" {
-		if providerCfg, ok := c.cfg.Providers[providerID]; ok && providerCfg.ContextWindow > 0 {
-			return providerCfg.ContextWindow
-		}
+	modelID := strings.TrimSpace(c.session.ModelID)
+	if providerID != "" && modelID != "" {
+		return c.cfg.ContextWindow(providerID, modelID)
 	}
-	if providerCfg, ok := c.cfg.Providers[c.cfg.DefaultProvider]; ok && providerCfg.ContextWindow > 0 {
-		return providerCfg.ContextWindow
+	if strings.TrimSpace(c.cfg.DefaultProvider) != "" && strings.TrimSpace(c.cfg.DefaultModel) != "" {
+		return c.cfg.ContextWindow(c.cfg.DefaultProvider, c.cfg.DefaultModel)
 	}
 	return 32768
 }

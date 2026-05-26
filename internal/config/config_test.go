@@ -115,28 +115,20 @@ func TestRequireProviderRejectsMissingProviderConfiguration(t *testing.T) {
 	}
 }
 
-func TestApplyDefaultsInfersProviderKindAndContextWindow(t *testing.T) {
+func TestApplyDefaultsInfersProviderKind(t *testing.T) {
 	cfg := Default()
 	cfg.Providers["remote"] = Provider{
-		BaseURL:      "https://example.com/v1",
-		APIKeyEnv:    "EXAMPLE_KEY",
-		DefaultModel: "gpt-test",
+		BaseURL:   "https://example.com/v1",
+		APIKeyEnv: "EXAMPLE_KEY",
 	}
 	cfg.Providers["local"] = Provider{
-		BaseURL:      "http://127.0.0.1:11434/v1",
-		DefaultModel: "local-model",
+		BaseURL: "http://127.0.0.1:11434/v1",
 	}
 
 	cfg.applyDefaults()
 
 	if got := cfg.Providers["remote"].Kind; got != "openai-compatible" {
 		t.Fatalf("expected inferred provider kind, got %q", got)
-	}
-	if got := cfg.Providers["remote"].ContextWindow; got != 32768 {
-		t.Fatalf("expected default context window, got %d", got)
-	}
-	if got := cfg.Providers["local"].ContextWindow; got != 32768 {
-		t.Fatalf("expected default context window for local provider, got %d", got)
 	}
 }
 
@@ -289,18 +281,22 @@ func TestNormalizeCompactionKeepToolBatchesClampsRange(t *testing.T) {
 	}
 }
 
-func TestApplyDefaultsFillsMissingCompatibleContextWindow(t *testing.T) {
+func TestModelConfigHelpersNormalizeAndDefault(t *testing.T) {
 	cfg := Default()
-	cfg.Providers["compatible"] = Provider{
-		Kind:         "openai-compatible",
-		BaseURL:      "http://127.0.0.1:8888/v1",
-		DefaultModel: "coder.gguf",
+	cfg.Models = []ModelConfig{
+		{ProviderID: " test ", ModelID: " model ", ContextWindow: 12345},
 	}
 
 	cfg.applyDefaults()
 
-	if got := cfg.Providers["compatible"].ContextWindow; got != 32768 {
-		t.Fatalf("expected compatible context window default, got %d", got)
+	if got := cfg.ContextWindow("test", "model"); got != 12345 {
+		t.Fatalf("expected configured context window, got %d", got)
+	}
+	if got := cfg.ContextWindow("test", "missing"); got != 32768 {
+		t.Fatalf("expected default context window, got %d", got)
+	}
+	if got := cfg.ModelPreset("test", "model"); got != "auto" {
+		t.Fatalf("expected default model preset, got %q", got)
 	}
 }
 

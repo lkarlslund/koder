@@ -18,6 +18,7 @@ import (
 	"github.com/lkarlslund/koder/internal/chatrole"
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/store"
 )
 
@@ -259,7 +260,7 @@ func TestControllerModelOptionsLoadsLiveModels(t *testing.T) {
 
 	ctrl, _ := newTestControllerWithConfig(t, func(cfg *config.Config) {
 		cfg.Providers = map[string]config.Provider{
-			"test": {Name: "Test Provider", BaseURL: modelServer.URL + "/v1", DefaultModel: "default-model"},
+			"test": {Name: "Test Provider", BaseURL: modelServer.URL + "/v1"},
 		}
 	})
 
@@ -288,7 +289,7 @@ func TestControllerModelOptionsDoesNotInventMissingCurrentProvider(t *testing.T)
 
 	ctrl, st := newTestControllerWithConfig(t, func(cfg *config.Config) {
 		cfg.Providers = map[string]config.Provider{
-			"test": {Name: "Test Provider", BaseURL: modelServer.URL + "/v1", DefaultModel: "configured-model"},
+			"test": {Name: "Test Provider", BaseURL: modelServer.URL + "/v1"},
 		}
 	})
 	session := ctrl.State().Session
@@ -344,8 +345,9 @@ func TestControllerSavePreferencesPersistsConfigAndPrompts(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg.Providers = map[string]config.Provider{
-		"test": {BaseURL: "https://example.invalid/v1", DefaultModel: "model", ContextWindow: 32768, Stream: true, Timeout: time.Minute},
+		"test": {BaseURL: "https://example.invalid/v1", Stream: true, Timeout: time.Minute},
 	}
+	cfg.SetModelConfig(config.ModelConfig{ProviderID: "test", ModelID: "model", ContextWindow: 32768})
 	cfg.DefaultProvider = "test"
 	cfg.DefaultModel = "model"
 	if err := cfg.Save(); err != nil {
@@ -373,6 +375,12 @@ func TestControllerSavePreferencesPersistsConfigAndPrompts(t *testing.T) {
 	prefs.Compaction.ModelID = "compact-model"
 	prefs.Compaction.AutoCompactAt = 66
 	prefs.Compaction.KeepToolBatches = 3
+	prefs.ModelConfigs = []ModelConfigPreference{{
+		ProviderID:    "test",
+		ModelID:       "model",
+		ContextWindow: 12345,
+		ModelPreset:   provider.ModelPresetDefault,
+	}}
 	prefs.MCPServers = []MCPServerPreference{{
 		ID:             "docs",
 		Name:           "Docs",
@@ -402,6 +410,12 @@ func TestControllerSavePreferencesPersistsConfigAndPrompts(t *testing.T) {
 	}
 	if loaded.MaxToolLoopSteps != 77 || loaded.UI.Theme != "dark" || loaded.CompactionModel != "compact-model" {
 		t.Fatalf("expected saved config, got max=%d theme=%q compact=%q/%q", loaded.MaxToolLoopSteps, loaded.UI.Theme, loaded.CompactionProvider, loaded.CompactionModel)
+	}
+	if got := loaded.ContextWindow("test", "model"); got != 12345 {
+		t.Fatalf("expected saved model context window, got %d", got)
+	}
+	if got := loaded.ModelPreset("test", "model"); got != provider.ModelPresetDefault {
+		t.Fatalf("expected saved model preset, got %q", got)
 	}
 	if loaded.MCPServers["docs"].URL != "https://mcp.example.invalid/sse" || loaded.MCPServers["docs"].Headers["X-Test"] != "yes" {
 		t.Fatalf("expected saved MCP server, got %#v", loaded.MCPServers["docs"])
@@ -443,9 +457,11 @@ func TestControllerSavePreferencesRepairsDeletedDefaultProvider(t *testing.T) {
 	cfg.DefaultProvider = "test"
 	cfg.DefaultModel = "old-model"
 	cfg.Providers = map[string]config.Provider{
-		"test":  {BaseURL: "https://example.invalid/v1", DefaultModel: "old-model"},
-		"other": {BaseURL: "https://example.invalid/v1", DefaultModel: "new-model"},
+		"test":  {BaseURL: "https://example.invalid/v1"},
+		"other": {BaseURL: "https://example.invalid/v1"},
 	}
+	cfg.SetModelConfig(config.ModelConfig{ProviderID: "test", ModelID: "old-model", ContextWindow: 32768})
+	cfg.SetModelConfig(config.ModelConfig{ProviderID: "other", ModelID: "new-model", ContextWindow: 32768})
 	if err := cfg.Save(); err != nil {
 		t.Fatal(err)
 	}
@@ -513,8 +529,9 @@ func TestControllerResetPromptRestoresEmbeddedDefault(t *testing.T) {
 func TestControllerSetModelUpdatesStoreStateAndRuntimeSnapshot(t *testing.T) {
 	ctrl, st := newTestControllerWithConfig(t, func(cfg *config.Config) {
 		cfg.Providers = map[string]config.Provider{
-			"test": {BaseURL: "https://example.invalid/v1", DefaultModel: "model", ContextWindow: 12345},
+			"test": {BaseURL: "https://example.invalid/v1"},
 		}
+		cfg.SetModelConfig(config.ModelConfig{ProviderID: "test", ModelID: "next-model", ContextWindow: 12345})
 	})
 	if err := ctrl.SetModel(context.Background(), "test", "next-model"); err != nil {
 		t.Fatalf("set model: %v", err)
@@ -716,8 +733,9 @@ func TestControllerStartupNewResumesRestartInterruptedWorkspaceSession(t *testin
 	cfg.DefaultProvider = "test"
 	cfg.DefaultModel = "model"
 	cfg.Providers = map[string]config.Provider{
-		"test": {BaseURL: providerServer.URL + "/v1", DefaultModel: "model"},
+		"test": {BaseURL: providerServer.URL + "/v1"},
 	}
+	cfg.SetModelConfig(config.ModelConfig{ProviderID: "test", ModelID: "model", ContextWindow: 32768})
 	st, err := store.OpenWithOptions(cfg.StateDir(), store.Options{Backend: store.BackendJSONFS})
 	if err != nil {
 		t.Fatalf("open store: %v", err)
