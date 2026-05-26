@@ -38,8 +38,10 @@ const defaultWebBind = "127.0.0.1:0"
 func NewRootCommand() *cobra.Command {
 	opts := startupOptions{}
 	cmd := &cobra.Command{
-		Use:   "koder",
-		Short: "Browser coding agent",
+		Use:           "koder",
+		Short:         "Browser coding agent",
+		SilenceErrors: true,
+		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			opts.captureFlagState(cmd)
 			workdir, err := opts.resolve()

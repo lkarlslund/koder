@@ -154,8 +154,9 @@ type ProviderDraft struct {
 
 // ProviderProbeResult reports a provider test outcome.
 type ProviderProbeResult struct {
-	ModelCount int      `json:"model_count"`
-	Models     []string `json:"models"`
+	ModelCount    int      `json:"model_count"`
+	Models        []string `json:"models"`
+	SelectedModel string   `json:"selected_model"`
 }
 
 // PreferencesState is the complete settings payload exposed to web renderers.
@@ -890,7 +891,7 @@ func (c *Controller) TestProvider(ctx context.Context, draft ProviderDraft) (Pro
 		}
 		models = append(models, item.ID)
 	}
-	return ProviderProbeResult{ModelCount: len(result.Models), Models: models}, nil
+	return ProviderProbeResult{ModelCount: len(result.Models), Models: models, SelectedModel: result.SelectedModel}, nil
 }
 
 // SaveProvider validates and persists a provider draft.
@@ -899,6 +900,11 @@ func (c *Controller) SaveProvider(ctx context.Context, draft ProviderDraft) (Pro
 	if err := provider.ValidateDraft(catalogDraft); err != nil {
 		return ProviderState{}, err
 	}
+	probe, err := provider.Probe(ctx, catalogDraft, nil)
+	if err != nil {
+		return ProviderState{}, err
+	}
+	catalogDraft.Model = probe.SelectedModel
 	originalID := strings.TrimSpace(catalogDraft.OriginalProviderID)
 	catalogDraft.ProviderID = strings.TrimSpace(catalogDraft.ProviderID)
 	if catalogDraft.ProviderID == "" {

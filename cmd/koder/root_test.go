@@ -400,6 +400,27 @@ func TestDoctorCommandRejectsMissingProviderConfig(t *testing.T) {
 	}
 }
 
+func TestRootCommandDoesNotPrintUsageForRuntimeErrors(t *testing.T) {
+	configRoot := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", configRoot)
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+
+	cmd := NewRootCommand()
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{"doctor"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected missing provider config error")
+	}
+	if got := buf.String(); strings.Contains(got, "Usage:") || strings.Contains(got, "Error:") {
+		t.Fatalf("expected clean error output, got %q", got)
+	}
+}
+
 func TestDoctorCommandRejectsMissingDefaultProviderEntry(t *testing.T) {
 	configRoot := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", configRoot)

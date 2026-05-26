@@ -52,7 +52,8 @@ type ConnectDraft struct {
 }
 
 type ProbeResult struct {
-	Models []domain.Model
+	Models        []domain.Model
+	SelectedModel string
 }
 
 var catalog = []Descriptor{
@@ -175,7 +176,26 @@ func Probe(ctx context.Context, draft ConnectDraft, recorder *debugsrv.Recorder)
 	slices.SortFunc(models, func(a, b domain.Model) int {
 		return strings.Compare(a.ID, b.ID)
 	})
-	return ProbeResult{Models: models}, nil
+	selected, err := selectedProbeModel(models, draft.Model)
+	if err != nil {
+		return ProbeResult{}, err
+	}
+	return ProbeResult{Models: models, SelectedModel: selected}, nil
+}
+
+func selectedProbeModel(models []domain.Model, requested string) (string, error) {
+	if len(models) == 0 {
+		return "", fmt.Errorf("provider returned no models")
+	}
+	requested = strings.TrimSpace(requested)
+	if requested != "" {
+		for _, model := range models {
+			if model.ID == requested {
+				return requested, nil
+			}
+		}
+	}
+	return strings.TrimSpace(models[0].ID), nil
 }
 
 func ValidateDraft(draft ConnectDraft) error {
@@ -184,9 +204,6 @@ func ValidateDraft(draft ConnectDraft) error {
 	}
 	if strings.TrimSpace(draft.BaseURL) == "" {
 		return fmt.Errorf("base url is required")
-	}
-	if strings.TrimSpace(draft.Model) == "" {
-		return fmt.Errorf("model is required")
 	}
 	_, err := New(draft.ProviderID, draft.ToConfig(), nil)
 	return err

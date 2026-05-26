@@ -1180,7 +1180,9 @@
           this.rpc('test_provider', payload).then(result => {
             const count = result.model_count || 0;
             const sample = (result.models || []).slice(0, 4).join(', ');
-            this.providerStatus = 'Test passed: ' + count + ' model' + (count === 1 ? '' : 's') + (sample ? ' (' + sample + ')' : '');
+            if (result.selected_model && this.providerDraft) this.providerDraft.model = result.selected_model;
+            const selected = result.selected_model ? ' Selected ' + result.selected_model + '.' : '';
+            this.providerStatus = 'Test passed: ' + count + ' model' + (count === 1 ? '' : 's') + (sample ? ' (' + sample + ')' : '') + '.' + selected;
             this.providerStatusKind = 'success';
           }).catch(err => { this.providerStatus = err.message; this.providerStatusKind = 'danger'; }).finally(() => { this.providerTesting = false; });
         },

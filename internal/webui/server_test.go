@@ -1188,6 +1188,14 @@ func TestWebSocketSessionManagementCreatesAndSwitchesWorkspaceSessions(t *testin
 }
 
 func TestWebSocketProviderCRUDReturnsProviderState(t *testing.T) {
+	providerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/models" {
+			t.Fatalf("unexpected provider path: %s", r.URL.Path)
+		}
+		_, _ = w.Write([]byte(`{"data":[{"id":"detected-model"}]}`))
+	}))
+	defer providerServer.Close()
+
 	ctrl := newTestController(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -1200,7 +1208,7 @@ func TestWebSocketProviderCRUDReturnsProviderState(t *testing.T) {
 		t.Fatalf("dial websocket: %v", err)
 	}
 	defer conn.Close(websocket.StatusNormalClosure, "")
-	save := `{"id":1,"method":"save_provider","params":{"original_provider_id":"","provider_id":"local","template_id":"openai-compatible","kind":"openai-compatible","name":"Local","base_url":"https://example.invalid/v1","api_key":"secret","model":"local-model","headers":{"X-Test":"yes"}}}`
+	save := fmt.Sprintf(`{"id":1,"method":"save_provider","params":{"original_provider_id":"","provider_id":"local","template_id":"openai-compatible","kind":"openai-compatible","name":"Local","base_url":%q,"api_key":"secret","model":"stale-model","headers":{"X-Test":"yes"}}}`, providerServer.URL+"/v1")
 	if err := conn.Write(ctx, websocket.MessageText, []byte(save)); err != nil {
 		t.Fatalf("write save_provider: %v", err)
 	}
@@ -1235,7 +1243,7 @@ func TestWebSocketProviderCRUDReturnsProviderState(t *testing.T) {
 	}
 	var foundLocal bool
 	for _, item := range saveResp.Result.Providers.Providers {
-		if item.ID == "local" && item.DefaultModel == "local-model" {
+		if item.ID == "local" && item.DefaultModel == "detected-model" {
 			foundLocal = true
 		}
 	}
@@ -1309,6 +1317,7 @@ func TestWebSocketTestProviderReturnsProbeResult(t *testing.T) {
 		Result struct {
 			ModelCount int      `json:"model_count"`
 			Models     []string `json:"models"`
+			Selected   string   `json:"selected_model"`
 		} `json:"result"`
 		Error string `json:"error"`
 	}
@@ -1320,6 +1329,9 @@ func TestWebSocketTestProviderReturnsProbeResult(t *testing.T) {
 	}
 	if resp.Result.ModelCount != 2 || strings.Join(resp.Result.Models, ",") != "alpha,beta" {
 		t.Fatalf("unexpected probe result: %#v", resp.Result)
+	}
+	if resp.Result.Selected != "alpha" {
+		t.Fatalf("expected selected model alpha, got %q", resp.Result.Selected)
 	}
 }
 

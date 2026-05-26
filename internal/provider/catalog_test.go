@@ -75,6 +75,48 @@ func TestProbeReturnsSortedModels(t *testing.T) {
 	if len(result.Models) != 2 || result.Models[0].ID != "a-model" {
 		t.Fatalf("unexpected models: %#v", result.Models)
 	}
+	if result.SelectedModel != "a-model" {
+		t.Fatalf("expected selected model a-model, got %q", result.SelectedModel)
+	}
+}
+
+func TestProbeAutoSelectsDetectedModelWhenDraftModelIsUnavailable(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"data":[{"id":"z-model"},{"id":"a-model"}]}`))
+	}))
+	defer server.Close()
+
+	result, err := Probe(context.Background(), ConnectDraft{
+		ProviderID: "test",
+		Kind:       ProviderKindCompatible,
+		BaseURL:    server.URL + "/v1",
+		Model:      "missing-model",
+		Headers:    map[string]string{},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.SelectedModel != "a-model" {
+		t.Fatalf("expected first detected model, got %q", result.SelectedModel)
+	}
+}
+
+func TestProbeRejectsProvidersWithoutModels(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"data":[]}`))
+	}))
+	defer server.Close()
+
+	_, err := Probe(context.Background(), ConnectDraft{
+		ProviderID: "test",
+		Kind:       ProviderKindCompatible,
+		BaseURL:    server.URL + "/v1",
+		Model:      "missing-model",
+		Headers:    map[string]string{},
+	}, nil)
+	if err == nil || !strings.Contains(err.Error(), "no models") {
+		t.Fatalf("expected no models error, got %v", err)
+	}
 }
 
 func TestConnectDraftToConfigPersistsAPIKeyWhenSet(t *testing.T) {
@@ -99,6 +141,17 @@ func TestValidateDraftAllowsEmptyAPIKeyForRemoteProviders(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("expected draft validation to allow empty api key, got %v", err)
+	}
+}
+
+func TestValidateDraftAllowsEmptyModelBeforeProbe(t *testing.T) {
+	err := ValidateDraft(ConnectDraft{
+		ProviderID: "openai",
+		Kind:       ProviderKindCompatible,
+		BaseURL:    "https://api.openai.com/v1",
+	})
+	if err != nil {
+		t.Fatalf("expected draft validation to allow empty model before probing, got %v", err)
 	}
 }
 
