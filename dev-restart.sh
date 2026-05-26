@@ -6,7 +6,8 @@ BUILD_SCRIPT="$ROOT_DIR/scripts/build-koder"
 BIN="${KODER_DEV_BIN:-/tmp/koder-dev-${USER:-user}/koder}"
 SETTLE_SECONDS="${KODER_DEV_SETTLE_SECONDS:-10}"
 POLL_SECONDS="${KODER_DEV_POLL_SECONDS:-1}"
-STOP_TIMEOUT_SECONDS="${KODER_DEV_STOP_TIMEOUT_SECONDS:-180}"
+STOP_GRACE_SECONDS="${KODER_DEV_STOP_GRACE_SECONDS:-5}"
+STOP_TIMEOUT_SECONDS="${KODER_DEV_STOP_TIMEOUT_SECONDS:-20}"
 
 child_pid=""
 
@@ -35,26 +36,54 @@ launch_koder() {
 stop_koder() {
   local pid="$1"
   local waited=0
+  local stat=""
   if [[ -z "$pid" ]] || ! kill -0 "$pid" 2>/dev/null; then
+    wait "$pid" 2>/dev/null || true
     return 0
   fi
   log "stopping koder pid=$pid for restart"
   kill -USR1 "$pid" 2>/dev/null || true
-  while kill -0 "$pid" 2>/dev/null; do
-    if (( waited >= STOP_TIMEOUT_SECONDS )); then
-      log "koder pid=$pid did not stop after ${STOP_TIMEOUT_SECONDS}s; terminating"
-      kill -TERM "$pid" 2>/dev/null || true
-      sleep 2
-      if kill -0 "$pid" 2>/dev/null; then
-        log "koder pid=$pid did not terminate; killing"
-        kill -KILL "$pid" 2>/dev/null || true
-      fi
+
+  while true; do
+    if ! kill -0 "$pid" 2>/dev/null; then
+      wait "$pid" 2>/dev/null || true
+      return 0
+    fi
+    stat="$(ps -o stat= -p "$pid" 2>/dev/null)"
+    stat="${stat//[[:space:]]/}"
+    if [[ "$stat" == Z* ]]; then
+      wait "$pid" 2>/dev/null || true
+      return 0
+    fi
+    if (( waited >= STOP_GRACE_SECONDS )); then
       break
     fi
     sleep 1
     waited=$((waited + 1))
   done
-  wait "$pid" 2>/dev/null || true
+
+  log "koder pid=$pid did not stop after ${STOP_GRACE_SECONDS}s; terminating"
+  kill -TERM "$pid" 2>/dev/null || true
+  while true; do
+    if ! kill -0 "$pid" 2>/dev/null; then
+      wait "$pid" 2>/dev/null || true
+      return 0
+    fi
+    stat="$(ps -o stat= -p "$pid" 2>/dev/null)"
+    stat="${stat//[[:space:]]/}"
+    if [[ "$stat" == Z* ]]; then
+      wait "$pid" 2>/dev/null || true
+      return 0
+    fi
+    if (( waited >= STOP_TIMEOUT_SECONDS )); then
+      log "koder pid=$pid did not terminate after ${STOP_TIMEOUT_SECONDS}s; killing"
+      kill -KILL "$pid" 2>/dev/null || true
+      wait "$pid" 2>/dev/null || true
+      return 0
+    fi
+    sleep 1
+    waited=$((waited + 1))
+  done
 }
 
 source_signature() {
