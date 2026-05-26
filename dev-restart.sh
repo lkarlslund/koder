@@ -41,14 +41,18 @@ cleanup() {
 handle_signal() {
   local signal="$1"
   local status="$2"
-  log "received $signal; shutting down"
+  if [[ "$signal" == "TERM" ]]; then
+    log "received TERM from outside dev-restart; shutting down with error"
+  else
+    log "received $signal; shutting down"
+  fi
   cleanup
   exit "$status"
 }
 
 trap cleanup EXIT
 trap 'handle_signal INT 130' INT
-trap 'handle_signal TERM 143' TERM
+trap 'handle_signal TERM 1' TERM
 
 build_koder() {
   "$BUILD_SCRIPT" "$BIN" >/dev/null
