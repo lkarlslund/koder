@@ -462,14 +462,19 @@
         applyStateDelta(delta) {
           if (!delta) return;
           delta = {...delta};
+          const incomingSessionID = String(delta.session?.id || delta.session?.ID || delta.Session?.id || delta.Session?.ID || '').trim();
+          const currentSessionID = String(this.state.session?.id || this.state.session?.ID || '').trim();
+          const sameSession = !incomingSessionID || !currentSessionID || incomingSessionID === currentSessionID;
           delete delta.session; delete delta.Session;
           delete delta.chats; delete delta.Chats;
           delete delta.chat_statuses; delete delta.ChatStatuses;
           delete delta.active_chat_id; delete delta.ActiveChatID;
           delete delta.snapshot; delete delta.Snapshot;
-          delete delta.milestones; delete delta.Milestones;
-          delete delta.todos; delete delta.Todos;
-          delete delta.todos_by_milestone; delete delta.TodosByRef;
+          if (!sameSession) {
+            delete delta.milestones; delete delta.Milestones;
+            delete delta.todos; delete delta.Todos;
+            delete delta.todos_by_milestone; delete delta.TodosByRef;
+          }
           delete delta.context_window; delete delta.ContextWindow;
           delete delta.model_info; delete delta.ModelInfo;
           const scroll = this.transcriptScrollState();
@@ -641,6 +646,7 @@
           const seq = ++this.scrollRestoreSeq;
           this.state = s || {};
           if (this.state.theme || this.state.Theme) this.theme = this.state.theme || this.state.Theme;
+          this.restoreMilestoneExpansion();
           this.applyTheme(); this.error = this.state.error || '';
           this.syncInterruptArmed();
           if (!this.restoreSelectedChat()) this.writeSelectedChat();
@@ -650,6 +656,17 @@
           this.reportClientStateSoon();
         },
         selectedChatPreferenceName() { return 'selectedChat.' + encodeURIComponent(this.state.workdir || this.state.Workdir || ''); },
+        milestoneExpansionPreferenceName() {
+          const workdir = encodeURIComponent(this.state.workdir || this.state.Workdir || '');
+          const session = encodeURIComponent(this.state.session?.id || this.state.session?.ID || '');
+          return 'expandedMilestones.' + workdir + '.' + session;
+        },
+        restoreMilestoneExpansion() {
+          this.expandedMilestones = readJSONPreference(this.milestoneExpansionPreferenceName(), {});
+        },
+        writeMilestoneExpansion() {
+          writeJSONPreference(this.milestoneExpansionPreferenceName(), this.expandedMilestones || {});
+        },
         activeChatID() { return this.state.active_chat_id || this.state.ActiveChatID || 0; },
         writeSelectedChat() { const id = this.activeChatID(); if (id) writePreference(this.selectedChatPreferenceName(), id); },
         restoreSelectedChat() {
@@ -792,6 +809,7 @@
         toggleMilestone(ref) {
           if (!ref) return;
           this.expandedMilestones = {...this.expandedMilestones, [ref]: !this.expandedMilestones[ref]};
+          this.writeMilestoneExpansion();
         },
         milestoneIcon(status) {
           if (status === 'completed') return 'bi-check-circle-fill text-success';
@@ -1717,4 +1735,16 @@
     }
     function writePreference(name, value) {
       try { localStorage.setItem(preferenceKey(name), String(value)); } catch (_) {}
+    }
+    function readJSONPreference(name, fallback) {
+      try {
+        const raw = localStorage.getItem(preferenceKey(name));
+        if (!raw) return fallback;
+        return JSON.parse(raw) || fallback;
+      } catch (_) {
+        return fallback;
+      }
+    }
+    function writeJSONPreference(name, value) {
+      try { localStorage.setItem(preferenceKey(name), JSON.stringify(value || {})); } catch (_) {}
     }

@@ -352,6 +352,12 @@ func TestWebSocketSnapshotEventIsCompactedToStateDelta(t *testing.T) {
 		Session:      domain.Session{ID: "session-1", Title: "Session"},
 		Chats:        []domain.Chat{{ID: "chat-7", SessionID: "session-1", Title: "Chat"}},
 		ActiveChatID: "chat-7",
+		Milestones: store.MilestonePlan{
+			Summary:    "Live plan",
+			Milestones: []store.Milestone{{Ref: "alpha", Title: "Alpha", Status: domain.MilestoneStatusExecuting}},
+		},
+		Todos:      []store.TodoItem{{ID: "todo-1", MilestoneRef: "alpha", Content: "First", Status: domain.TodoStatusInProgress}},
+		TodosByRef: map[string][]store.TodoItem{"alpha": {{ID: "todo-1", MilestoneRef: "alpha", Content: "First", Status: domain.TodoStatusInProgress}}},
 		Snapshots: map[domain.ID]chat.Snapshot{
 			"chat-7": {
 				Chat:     domain.Chat{ID: "chat-7", SessionID: "session-1", Title: "Chat"},
@@ -376,6 +382,9 @@ func TestWebSocketSnapshotEventIsCompactedToStateDelta(t *testing.T) {
 	}
 	if !strings.Contains(payload, `"chats"`) || !strings.Contains(payload, `"Chat"`) {
 		t.Fatalf("expected state delta to include sidebar chat state, got %s", payload)
+	}
+	if !strings.Contains(payload, `"milestones"`) || !strings.Contains(payload, `"todos_by_milestone"`) || !strings.Contains(payload, `"Alpha"`) {
+		t.Fatalf("expected state delta to include planning state, got %s", payload)
 	}
 }
 
@@ -666,6 +675,14 @@ func TestIndexServesHTML(t *testing.T) {
 	}
 	if !strings.Contains(fullPage, `milestoneTodoSummary(milestone)`) {
 		t.Fatalf("expected collapsed milestones to show todo counts")
+	}
+	if !strings.Contains(fullPage, `const sameSession =`) || !strings.Contains(fullPage, `if (!sameSession)`) {
+		t.Fatalf("expected pushed planning state to update dynamically for the current session")
+	}
+	if !strings.Contains(fullPage, `milestoneExpansionPreferenceName()`) ||
+		!strings.Contains(fullPage, `readJSONPreference(this.milestoneExpansionPreferenceName(), {})`) ||
+		!strings.Contains(fullPage, `writeJSONPreference(this.milestoneExpansionPreferenceName(), this.expandedMilestones || {})`) {
+		t.Fatalf("expected milestone expansion state to persist in browser storage")
 	}
 	if !strings.Contains(fullPage, `.planning-tree { display: grid; gap: .05rem;`) || !strings.Contains(fullPage, `.planning-row { width: 100%; display: grid;`) || !strings.Contains(fullPage, `padding: .12rem 0`) {
 		t.Fatalf("expected compact milestone spacing in sidebar")
