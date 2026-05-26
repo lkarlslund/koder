@@ -147,7 +147,7 @@
                   <i class="chat-status-icon bi" :class="[chatStatusIcon(chat), chatStatusClass(chat)]" :title="chatStatusLabel(chat)"></i>
                   <i class="bi bi-chat-left-text"></i>
                   <span class="text-truncate chat-title" x-text="chat.Title || chat.title || 'Chat'"></span>
-                  <span class="chat-context text-nowrap" x-text="chatContextLabel(chat)"></span>
+                  <span class="chat-context text-nowrap" x-text="chatContextLabel(chat)" :title="chatContextTooltip(chat)"></span>
                 </div>
               </button>
               <button type="button" class="btn btn-sm" :class="chatID(chat) === state.active_chat_id ? 'btn-outline-light' : 'btn-outline-danger'" title="Delete chat" @click.stop="deleteChat(chatID(chat))">

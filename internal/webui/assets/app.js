@@ -742,6 +742,12 @@
           if (n >= 1000) return (n / 1000).toFixed(n >= 100000 ? 0 : 1).replace(/\.0$/, '') + 'K';
           return String(Math.round(n));
         },
+        formatContextTokens(value) {
+          const n = Number(value || 0);
+          if (!Number.isFinite(n) || n < 0) return 'unknown';
+          if (n === 0) return '0';
+          return this.formatTokens(n);
+        },
         capabilityLabel(value, known) {
           if (value) return 'yes';
           return known ? 'no' : 'unknown';
@@ -835,12 +841,32 @@
           if (liveTotal > 0) return liveTotal;
           return chat.LastKnownContextTokens || chat.last_known_context_tokens || 0;
         },
-        chatContextLabel(chat) {
-          const windowSize = this.state.context_window || this.state.ContextWindow || 0;
+        chatContextWindow() {
+          const info = this.activeModelInfo();
+          return info.context_window || info.ContextWindow || this.state.context_window || this.state.ContextWindow || 0;
+        },
+        chatContextPercent(chat) {
+          const windowSize = this.chatContextWindow();
           const tokens = this.chatContextTokens(chat);
-          if (!windowSize || !tokens) return '(0% ctx)';
-          const pct = Math.max(0, Math.min(999, Math.round((tokens / windowSize) * 100)));
+          if (!windowSize || !tokens) return 0;
+          return Math.max(0, Math.min(999, Math.round((tokens / windowSize) * 100)));
+        },
+        chatContextLabel(chat) {
+          const pct = this.chatContextPercent(chat);
           return '(' + pct + '% ctx)';
+        },
+        chatContextTooltip(chat) {
+          const tokens = this.chatContextTokens(chat);
+          const windowSize = this.chatContextWindow();
+          const pct = this.chatContextPercent(chat);
+          const lines = ['Context: ' + this.formatContextTokens(tokens) + ' / ' + this.formatTokens(windowSize) + ' tokens (' + pct + '%)'];
+          if (windowSize > 0) {
+            lines.push('Remaining: ' + this.formatContextTokens(Math.max(0, windowSize - tokens)) + ' tokens');
+          }
+          const provider = this.activeProvider();
+          const model = this.activeModel();
+          if (provider || model) lines.push('Model: ' + [provider, model].filter(Boolean).join(' / '));
+          return lines.join('\n');
         },
         chatStatus(chat) {
           const id = this.chatID(chat);

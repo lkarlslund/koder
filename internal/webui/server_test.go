@@ -728,8 +728,13 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `.sidebar-list .chat-list-item > .btn:last-child { flex: 0 0 auto; }`) {
 		t.Fatalf("expected chat rows to constrain title overflow inside sidebar")
 	}
-	if !strings.Contains(fullPage, `chatContextLabel(chat)`) || !strings.Contains(fullPage, `context_window`) || !strings.Contains(fullPage, `'% ctx)'`) {
-		t.Fatalf("expected chat sidebar to render context percentage")
+	if !strings.Contains(fullPage, `chatContextLabel(chat)`) ||
+		!strings.Contains(fullPage, `:title="chatContextTooltip(chat)"`) ||
+		!strings.Contains(fullPage, `chatContextWindow()`) ||
+		!strings.Contains(fullPage, `formatContextTokens`) ||
+		!strings.Contains(fullPage, `Remaining: `) ||
+		!strings.Contains(fullPage, `'% ctx)'`) {
+		t.Fatalf("expected chat sidebar to render context percentage with hover details")
 	}
 	if !strings.Contains(fullPage, `thinkingLabel(item.content.reasoning)`) || !strings.Contains(fullPage, `estimateTextTokens(text)`) || !strings.Contains(fullPage, `'thinking (' + tokens + ' tokens)'`) {
 		t.Fatalf("expected reasoning summary to render live token count")
