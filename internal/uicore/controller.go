@@ -495,6 +495,16 @@ func (c *Controller) DeleteQueueItem(id domain.ID) error {
 	return nil
 }
 
+// SendQueueItemNow promotes a queued input to a steer item for the active chat.
+func (c *Controller) SendQueueItemNow(id domain.ID) error {
+	rt := c.currentRuntime()
+	if rt == nil {
+		return fmt.Errorf("no active chat")
+	}
+	rt.SendQueueItemNow(id)
+	return nil
+}
+
 // ImportClipboardImage stores a pasted image as a draft attachment for the web composer.
 func (c *Controller) ImportClipboardImage(data []byte, name string, mimeType string) (attachment.Draft, error) {
 	return attachment.NewManager(c.cfg.StateDir()).ImportClipboardImageData(data, name, mimeType)

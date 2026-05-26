@@ -405,6 +405,30 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		}
 		_ = decodeParams(params, &in)
 		return map[string]bool{"queued": true}, s.controller.Continue(in.Note)
+	case "reorder_queue":
+		var in struct {
+			IDs []domain.ID `json:"ids"`
+		}
+		if err := decodeParams(params, &in); err != nil {
+			return nil, err
+		}
+		return map[string]bool{"reordered": true}, s.controller.ReorderQueue(in.IDs)
+	case "delete_queue_item":
+		var in struct {
+			ID domain.ID `json:"id"`
+		}
+		if err := decodeParams(params, &in); err != nil {
+			return nil, err
+		}
+		return map[string]bool{"deleted": true}, s.controller.DeleteQueueItem(in.ID)
+	case "send_queue_item_now":
+		var in struct {
+			ID domain.ID `json:"id"`
+		}
+		if err := decodeParams(params, &in); err != nil {
+			return nil, err
+		}
+		return map[string]bool{"queued": true}, s.controller.SendQueueItemNow(in.ID)
 	case "stop":
 		return map[string]bool{"stopped": true}, s.controller.Stop()
 	case "stop_after_turn":
@@ -648,6 +672,7 @@ func (s *Server) prepareClientSelection(ctx context.Context, clientID, method st
 func rpcUsesActiveSelection(method string) bool {
 	switch strings.TrimSpace(method) {
 	case "send_prompt", "continue", "stop", "stop_after_turn", "compact",
+		"reorder_queue", "delete_queue_item", "send_queue_item_now",
 		"switch_chat", "new_chat", "delete_chat", "reorder_chats",
 		"approve", "deny", "set_model", "set_permission_profile":
 		return true

@@ -619,6 +619,12 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `this.rpc('send_prompt', {text, attachments})`) {
 		t.Fatalf("expected composer to upload pasted images and send them as attachments")
 	}
+	if !strings.Contains(fullPage, `activeQueue().length > 0`) ||
+		!strings.Contains(fullPage, `reorder_queue`) ||
+		!strings.Contains(fullPage, `delete_queue_item`) ||
+		!strings.Contains(fullPage, `send_queue_item_now`) {
+		t.Fatalf("expected composer queue controls and RPCs")
+	}
 	if !strings.Contains(fullPage, `text === '/permissions'`) {
 		t.Fatalf("expected /permissions to be handled locally")
 	}

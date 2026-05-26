@@ -317,6 +317,58 @@ func TestRuntimeQueuesSecondItemUntilFirstCompletes(t *testing.T) {
 	}
 }
 
+func TestRuntimeSendQueueItemNowPromotesSelectedItemToSteer(t *testing.T) {
+	st := openTestStore(t)
+	session, chatRecord, _ := createSessionWithPlan(t, st)
+	first := make(chan domain.Event)
+	second := make(chan domain.Event, 1)
+	second <- domain.Event{Kind: domain.EventKindMessageDone}
+	close(second)
+	runner := &runtimeFakeRunner{events: []<-chan domain.Event{first, second}}
+	rt := newTestChat(t, st, session, chatRecord, runner)
+
+	rt.Enqueue(QueueItem{Kind: QueueKindSteer, Text: "first"})
+	rt.Enqueue(QueueItem{Kind: QueueKindQueued, Text: "second"})
+	rt.Enqueue(QueueItem{Kind: QueueKindQueued, Text: "third"})
+
+	deadline := time.After(2 * time.Second)
+	for len(rt.Snapshot().QueuedInputs) < 2 {
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for queued inputs: %#v", rt.Snapshot().QueuedInputs)
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	var thirdID domain.ID
+	for _, item := range rt.Snapshot().QueuedInputs {
+		if item.Text == "third" {
+			thirdID = item.ID
+			break
+		}
+	}
+	if thirdID == "" {
+		t.Fatalf("third item not queued: %#v", rt.Snapshot().QueuedInputs)
+	}
+
+	rt.SendQueueItemNow(thirdID)
+	first <- domain.Event{Kind: domain.EventKindMessageDone}
+	close(first)
+
+	deadline = time.After(2 * time.Second)
+	for runner.promptCallCount() < 2 {
+		select {
+		case <-deadline:
+			t.Fatalf("expected promoted queue item to dispatch, got %d prompt calls", runner.promptCallCount())
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	if got := runner.promptAt(1); got != "third" {
+		t.Fatalf("promoted prompt = %q", got)
+	}
+}
+
 func TestDrainAndCloseDoesNotDispatchQueuedWork(t *testing.T) {
 	st := openTestStore(t)
 	session, chatRecord, _ := createSessionWithPlan(t, st)

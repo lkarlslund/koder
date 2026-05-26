@@ -287,7 +287,7 @@
         showModelConfigEditor: false, modelConfigDraft: null, modelConfigStatus: '', modelConfigStatusKind: 'secondary',
         showMCPEditor: false, mcpDraft: null, mcpHeadersText: '{}', mcpStatus: '', mcpStatusKind: 'secondary',
         completion: {kind: '', query: '', start: 0, end: 0, items: [], selected: 0}, completionSeq: 0,
-        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, restoreChatAttempted: false, transcriptStickToBottom: true, scrollRestoreSeq: 0, expandedMilestones: {}, interruptArmedChatID: '', dragChatID: '', composerAttachments: [], error: '', toast: '', toastTimer: null,
+        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, restoreChatAttempted: false, transcriptStickToBottom: true, scrollRestoreSeq: 0, expandedMilestones: {}, interruptArmedChatID: '', dragChatID: '', dragQueueID: '', composerAttachments: [], error: '', toast: '', toastTimer: null,
         init() {
           this.clampSidebarRatio();
           this.applyTheme();
@@ -670,6 +670,7 @@
         },
         timeline() { const snapshot = this.activeSnapshot(); return snapshot.Timeline || snapshot.timeline || []; },
         approvals() { const snapshot = this.activeSnapshot(); return snapshot.Approvals || snapshot.approvals || []; },
+        activeQueue() { const snapshot = this.activeSnapshot(); return snapshot.QueuedInputs || snapshot.queued_inputs || snapshot.queue || []; },
         pendingText() { const snapshot = this.activeSnapshot(); const p = snapshot.PendingAssistant || snapshot.pending_assistant || {}; return [p.Reasoning || p.reasoning, p.Text || p.text].filter(Boolean).join('\n'); },
         thinkingLabel(reasoning) {
           const explicit = Number(reasoning?.tokens || reasoning?.Tokens || reasoning?.token_count || reasoning?.TokenCount || 0);
@@ -1024,6 +1025,121 @@
           const id = attachment?.id || attachment?.ID;
           this.composerAttachments = this.composerAttachments.filter(item => (item.id || item.ID) !== id);
         },
+        queueItemID(item) { return item?.ID || item?.id || ''; },
+        queueItemKind(item) { return String(item?.Kind || item?.kind || 'queued').replace('_', ' '); },
+        queueItemText(item) { return String(item?.Text || item?.text || item?.Note || item?.note || ''); },
+        queueItemPreview(item) {
+          const text = this.queueItemText(item).replace(/\s+/g, ' ').trim();
+          if (text) return text;
+          const count = this.queueAttachmentCount(item);
+          if (count > 0) return count + ' attachment' + (count === 1 ? '' : 's');
+          return this.queueItemKind(item);
+        },
+        queueItemTooltip(item) {
+          const parts = [this.queueItemKind(item)];
+          const text = this.queueItemText(item).trim();
+          if (text) parts.push(text);
+          const count = this.queueAttachmentCount(item);
+          if (count > 0) parts.push(count + ' attachment' + (count === 1 ? '' : 's'));
+          return parts.join('\n');
+        },
+        queueItemAttachments(item) { return item?.Attachments || item?.attachments || []; },
+        queueAttachmentCount(item) { return this.queueItemAttachments(item).length; },
+        queueAttachmentDraft(attachment) {
+          return {
+            id: attachment?.id || attachment?.ID || '',
+            ID: attachment?.ID || attachment?.id || '',
+            name: attachment?.name || attachment?.Name || '',
+            Name: attachment?.Name || attachment?.name || '',
+            mime: attachment?.mime || attachment?.MIME || '',
+            MIME: attachment?.MIME || attachment?.mime || '',
+            path: attachment?.path || attachment?.Path || '',
+            Path: attachment?.Path || attachment?.path || '',
+            size: attachment?.size || attachment?.Size || 0,
+            Size: attachment?.Size || attachment?.size || 0,
+            source: attachment?.source || attachment?.Source || '',
+            Source: attachment?.Source || attachment?.source || '',
+            original: attachment?.original || attachment?.Original || '',
+            Original: attachment?.Original || attachment?.original || ''
+          };
+        },
+        setActiveQueue(items) {
+          const id = String(this.activeChatID() || '');
+          if (!id) return;
+          const snapshots = {...(this.state.snapshots || this.state.Snapshots || {})};
+          const snapshot = {...(snapshots[id] || snapshots[String(id)] || this.state.snapshot || this.state.Snapshot || {})};
+          snapshot.QueuedInputs = items.slice();
+          snapshot.queued_inputs = items.slice();
+          snapshots[id] = snapshot;
+          snapshots[String(id)] = snapshot;
+          this.state.snapshots = snapshots;
+          this.state.Snapshots = snapshots;
+          this.state.snapshot = snapshot;
+          this.state.Snapshot = snapshot;
+        },
+        deleteQueueItem(item) {
+          const id = this.queueItemID(item);
+          if (!id) return;
+          const previous = this.activeQueue().slice();
+          this.setActiveQueue(previous.filter(existing => this.queueItemID(existing) !== id));
+          this.rpc('delete_queue_item', {id}).catch(err => {
+            this.showToast(err.message);
+            this.setActiveQueue(previous);
+          });
+        },
+        moveQueueItemToComposer(item) {
+          const text = this.queueItemText(item);
+          if (text) {
+            const prefix = this.draft.trim() ? this.draft.replace(/\s+$/, '') + '\n' : '';
+            this.draft = prefix + text;
+          }
+          const attachments = this.queueItemAttachments(item).map(attachment => this.queueAttachmentDraft(attachment));
+          if (attachments.length > 0) this.composerAttachments = [...this.composerAttachments, ...attachments];
+          this.deleteQueueItem(item);
+          this.$nextTick(() => { const el = this.$refs.composerInput; if (el) { el.focus(); el.setSelectionRange(this.draft.length, this.draft.length); } this.resizeComposer(); });
+        },
+        sendQueueItemNow(item) {
+          const id = this.queueItemID(item);
+          if (!id) return;
+          const previous = this.activeQueue().slice();
+          const promoted = {...item, Kind: 'steer', kind: 'steer'};
+          this.setActiveQueue([promoted, ...previous.filter(existing => this.queueItemID(existing) !== id)]);
+          this.rpc('send_queue_item_now', {id}).catch(err => {
+            this.showToast(err.message);
+            this.setActiveQueue(previous);
+          });
+        },
+        startQueueDrag(ev, id) {
+          if (!id) return;
+          this.dragQueueID = id;
+          if (ev.dataTransfer) {
+            ev.dataTransfer.effectAllowed = 'move';
+            ev.dataTransfer.setData('text/plain', id);
+          }
+        },
+        overQueueDrag(ev, id) {
+          const sourceID = this.dragQueueID || (ev.dataTransfer && ev.dataTransfer.getData('text/plain')) || '';
+          if (!sourceID || sourceID === id) return;
+          if (ev.dataTransfer) ev.dataTransfer.dropEffect = 'move';
+        },
+        dropQueue(ev, targetID) {
+          const sourceID = this.dragQueueID || (ev.dataTransfer && ev.dataTransfer.getData('text/plain')) || '';
+          this.dragQueueID = '';
+          if (!sourceID || !targetID || sourceID === targetID) return;
+          const items = this.activeQueue().slice();
+          const from = items.findIndex(item => this.queueItemID(item) === sourceID);
+          const to = items.findIndex(item => this.queueItemID(item) === targetID);
+          if (from < 0 || to < 0) return;
+          const [moved] = items.splice(from, 1);
+          items.splice(to, 0, moved);
+          const previous = this.activeQueue().slice();
+          this.setActiveQueue(items);
+          this.rpc('reorder_queue', {ids: items.map(item => this.queueItemID(item))}).catch(err => {
+            this.showToast(err.message);
+            this.setActiveQueue(previous);
+          });
+        },
+        endQueueDrag() { this.dragQueueID = ''; },
         onComposerKeydown(ev) {
           if (this.completion.items.length > 0) {
             if (ev.key === 'ArrowDown') { ev.preventDefault(); this.completion.selected = Math.min(this.completion.items.length - 1, this.completion.selected + 1); return; }
