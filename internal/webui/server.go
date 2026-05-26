@@ -53,13 +53,20 @@ type Options struct {
 
 // Server serves the browser UI and bridges websocket RPC to the controller.
 type Server struct {
-	controller *uicore.Controller
-	options    Options
-	server     *http.Server
-	listener   net.Listener
-	connected  chan struct{}
-	once       sync.Once
-	debug      *debugsrv.Recorder
+	controller        *uicore.Controller
+	options           Options
+	server            *http.Server
+	listener          net.Listener
+	connected         chan struct{}
+	once              sync.Once
+	debug             *debugsrv.Recorder
+	clientSelectionMu sync.Mutex
+	clientSelections  map[string]clientSelection
+}
+
+type clientSelection struct {
+	SessionID domain.ID
+	ChatID    domain.ID
 }
 
 // Start starts the web UI server.
@@ -76,11 +83,12 @@ func Start(ctx context.Context, controller *uicore.Controller, options Options) 
 		return nil, fmt.Errorf("listen web ui: %w", err)
 	}
 	s := &Server{
-		controller: controller,
-		options:    options,
-		listener:   listener,
-		connected:  make(chan struct{}),
-		debug:      options.Debug,
+		controller:       controller,
+		options:          options,
+		listener:         listener,
+		connected:        make(chan struct{}),
+		debug:            options.Debug,
+		clientSelections: map[string]clientSelection{},
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", s.handleIndex)
@@ -295,6 +303,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		s.updateDebugChats()
 		defer s.debug.UnregisterClient(clientID)
 	}
+	defer s.deleteClientSelection(clientID)
 	events, unsub := s.controller.Subscribe()
 	defer unsub()
 	done := make(chan struct{})
@@ -330,7 +339,14 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			_ = writeJSON(ctx, conn, &writeMu, rpcResponse{ID: nil, OK: false, Error: err.Error()})
 			continue
 		}
+		if err := s.prepareClientSelection(ctx, clientID, req.Method); err != nil {
+			_ = writeJSON(ctx, conn, &writeMu, rpcResponse{ID: req.ID, OK: false, Error: err.Error()})
+			continue
+		}
 		result, err := s.handleRPC(ctx, clientID, req.Method, req.Params)
+		if err == nil {
+			s.updateClientSelectionFromResult(clientID, result)
+		}
 		resp := rpcResponse{ID: req.ID, OK: err == nil, Result: result}
 		if err != nil {
 			resp.Error = err.Error()
@@ -369,6 +385,7 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		if err := decodeParams(params, &in); err != nil {
 			return nil, err
 		}
+		s.setClientSelection(clientID, clientSelection{SessionID: in.SelectedSession, ChatID: in.SelectedChat})
 		if s.debug != nil {
 			s.debug.UpdateClient(clientID, in)
 		}
@@ -605,6 +622,73 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 	default:
 		return nil, fmt.Errorf("unknown method %q", method)
 	}
+}
+
+func (s *Server) prepareClientSelection(ctx context.Context, clientID, method string) error {
+	if !rpcUsesActiveSelection(method) {
+		return nil
+	}
+	selection := s.clientSelection(clientID)
+	if selection.SessionID == "" {
+		return nil
+	}
+	state := s.controller.State()
+	if state.Session.ID != selection.SessionID {
+		if err := s.controller.SwitchSession(ctx, selection.SessionID); err != nil {
+			return err
+		}
+		state = s.controller.State()
+	}
+	if selection.ChatID != "" && state.ActiveChatID != selection.ChatID {
+		return s.controller.SwitchChat(ctx, selection.ChatID)
+	}
+	return nil
+}
+
+func rpcUsesActiveSelection(method string) bool {
+	switch strings.TrimSpace(method) {
+	case "send_prompt", "continue", "stop", "stop_after_turn", "compact",
+		"switch_chat", "new_chat", "delete_chat", "reorder_chats",
+		"approve", "deny", "set_model", "set_permission_profile":
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *Server) updateClientSelectionFromResult(clientID string, result any) {
+	switch value := result.(type) {
+	case uicore.State:
+		s.setClientSelection(clientID, clientSelection{SessionID: value.Session.ID, ChatID: value.ActiveChatID})
+	case rpcHello:
+		if state, ok := value.State.(uicore.State); ok {
+			s.setClientSelection(clientID, clientSelection{SessionID: state.Session.ID, ChatID: state.ActiveChatID})
+		}
+	}
+}
+
+func (s *Server) setClientSelection(clientID string, selection clientSelection) {
+	if clientID == "" {
+		return
+	}
+	if selection.SessionID == "" && selection.ChatID == "" {
+		return
+	}
+	s.clientSelectionMu.Lock()
+	s.clientSelections[clientID] = selection
+	s.clientSelectionMu.Unlock()
+}
+
+func (s *Server) clientSelection(clientID string) clientSelection {
+	s.clientSelectionMu.Lock()
+	defer s.clientSelectionMu.Unlock()
+	return s.clientSelections[clientID]
+}
+
+func (s *Server) deleteClientSelection(clientID string) {
+	s.clientSelectionMu.Lock()
+	delete(s.clientSelections, clientID)
+	s.clientSelectionMu.Unlock()
 }
 
 type stateDelta struct {

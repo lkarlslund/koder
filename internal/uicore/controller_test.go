@@ -750,6 +750,37 @@ func TestControllerSessionsAreWorkspaceScoped(t *testing.T) {
 	}
 }
 
+func TestControllerKeepsRuntimesForMultipleLoadedSessions(t *testing.T) {
+	ctrl, st := newTestController(t)
+	ctx := context.Background()
+
+	firstState := ctrl.State()
+	firstSessionID := firstState.Session.ID
+	firstChatID := firstState.ActiveChatID
+	if err := ctrl.NewSession(ctx, "Second"); err != nil {
+		t.Fatalf("new session: %v", err)
+	}
+	secondState := ctrl.State()
+	if secondState.Session.ID == firstSessionID {
+		t.Fatal("expected second session to be selected")
+	}
+	secondChatID := secondState.ActiveChatID
+
+	ctrl.mu.RLock()
+	firstRuntime := ctrl.runtimes[firstChatID]
+	secondRuntime := ctrl.runtimes[secondChatID]
+	ctrl.mu.RUnlock()
+	if firstRuntime == nil {
+		t.Fatalf("expected first session chat runtime %s to remain loaded", firstChatID)
+	}
+	if secondRuntime == nil {
+		t.Fatalf("expected second session chat runtime %s to be loaded", secondChatID)
+	}
+	if _, err := st.GetSession(ctx, firstSessionID); err != nil {
+		t.Fatalf("first session should still exist: %v", err)
+	}
+}
+
 func TestControllerStartupNewResumesRestartInterruptedWorkspaceSession(t *testing.T) {
 	var requests atomic.Int32
 	providerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -379,6 +379,10 @@ func (c *Controller) State() State {
 			break
 		}
 	}
+	selectedChats := make(map[domain.ID]bool, len(state.Chats))
+	for _, chatRecord := range state.Chats {
+		selectedChats[chatRecord.ID] = true
+	}
 	for chatID, snapshot := range c.snapshots {
 		if snapshot.Chat.ID == "" {
 			snapshot.Chat.ID = chatID
@@ -387,7 +391,7 @@ func (c *Controller) State() State {
 		if chatID == c.chat.ID {
 			state.Snapshot = snapshot
 		}
-		if !hasChatSidebarStatus(state.ChatStatuses, snapshot.Chat.ID) {
+		if selectedChats[snapshot.Chat.ID] && !hasChatSidebarStatus(state.ChatStatuses, snapshot.Chat.ID) {
 			state.ChatStatuses = mergeChatSidebarStatus(state.ChatStatuses, sidebarStatusFromSnapshot(snapshot))
 		}
 	}
@@ -406,7 +410,7 @@ func (c *Controller) State() State {
 		if chatID == c.chat.ID {
 			state.Snapshot = snapshot
 		}
-		if !hasChatSidebarStatus(state.ChatStatuses, snapshot.Chat.ID) {
+		if selectedChats[snapshot.Chat.ID] && !hasChatSidebarStatus(state.ChatStatuses, snapshot.Chat.ID) {
 			state.ChatStatuses = mergeChatSidebarStatus(state.ChatStatuses, sidebarStatusFromSnapshot(snapshot))
 		}
 	}
@@ -2472,10 +2476,17 @@ func (c *Controller) loadSession(ctx context.Context, sessionID, chatID domain.I
 	}
 
 	c.mu.Lock()
-	for id, unsub := range c.unsubs {
-		if _, keep := runtimes[id]; !keep && unsub != nil {
-			unsub()
-		}
+	if c.runtimes == nil {
+		c.runtimes = map[domain.ID]*chat.Chat{}
+	}
+	if c.unsubs == nil {
+		c.unsubs = map[domain.ID]func(){}
+	}
+	if c.snapshots == nil {
+		c.snapshots = map[domain.ID]chat.Snapshot{}
+	}
+	if c.statuses == nil {
+		c.statuses = map[domain.ID]ChatSidebarStatus{}
 	}
 	c.session = session
 	c.sessions = sessions
@@ -2483,10 +2494,18 @@ func (c *Controller) loadSession(ctx context.Context, sessionID, chatID domain.I
 	c.chat = chatRecord
 	c.runtime = rt
 	c.unsub = nil
-	c.runtimes = runtimes
-	c.unsubs = unsubs
-	c.snapshots = snapshots
-	c.statuses = statuses
+	for id, loaded := range runtimes {
+		c.runtimes[id] = loaded
+	}
+	for id, unsub := range unsubs {
+		c.unsubs[id] = unsub
+	}
+	for id, snapshot := range snapshots {
+		c.snapshots[id] = snapshot
+	}
+	for id, status := range statuses {
+		c.statuses[id] = status
+	}
 	c.milestone = milestone
 	c.todos = todos
 	c.todosByRef = todosByRef

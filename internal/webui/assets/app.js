@@ -282,7 +282,7 @@
         ws: null, reconnectTimer: null, connectWatchdog: null, reconnectDelay: 150, reconnectProbe: null, nextID: 1, pending: {}, clientID: '', clientStateTimer: null, state: {}, connected: false, connecting: true, draft: '', showPermissions: false,
         showModels: false, modelLoading: false, modelQuery: '', modelOptions: [],
         showSettings: false, settingsLoading: false, settingsSaving: false, settingsTab: 'general', settings: null, settingsStatus: '', settingsStatusKind: 'secondary', selectedPermissionProfile: '',
-        showSessions: false, sessionLoading: false, sessionState: {active_id: 0, workdir: '', sessions: []}, newSessionTitle: '',
+        showSessions: false, sessionLoading: false, sessionState: {active_id: 0, workdir: '', sessions: []}, newSessionTitle: '', editingSessionID: '', editingSessionTitle: '',
         providerState: {catalog: [], providers: [], drafts: {}}, showProviderEditor: false, providerDraft: null, providerHeadersText: '{}', providerModelOptions: [], providerStatus: '', providerStatusKind: 'secondary', providerTesting: false, providerSaving: false,
         showModelConfigEditor: false, modelConfigDraft: null, modelConfigStatus: '', modelConfigStatusKind: 'secondary',
         showMCPEditor: false, mcpDraft: null, mcpHeadersText: '{}', mcpStatus: '', mcpStatusKind: 'secondary',
@@ -461,6 +461,17 @@
         },
         applyStateDelta(delta) {
           if (!delta) return;
+          delta = {...delta};
+          delete delta.session; delete delta.Session;
+          delete delta.chats; delete delta.Chats;
+          delete delta.chat_statuses; delete delta.ChatStatuses;
+          delete delta.active_chat_id; delete delta.ActiveChatID;
+          delete delta.snapshot; delete delta.Snapshot;
+          delete delta.milestones; delete delta.Milestones;
+          delete delta.todos; delete delta.Todos;
+          delete delta.todos_by_milestone; delete delta.TodosByRef;
+          delete delta.context_window; delete delta.ContextWindow;
+          delete delta.model_info; delete delta.ModelInfo;
           const scroll = this.transcriptScrollState();
           const seq = ++this.scrollRestoreSeq;
           this.state = {...this.state, ...delta};
@@ -493,8 +504,11 @@
           snapshots[String(id)] = next;
           this.state.snapshots = snapshots;
           this.state.Snapshots = snapshots;
-          if (delta.chat) this.patchChatList(delta.chat);
-          this.patchChatStatus(delta);
+          const deltaSessionID = String(delta.chat?.session_id || delta.chat?.SessionID || next.Chat?.SessionID || next.chat?.session_id || '').trim();
+          const currentSessionID = String(this.state.session?.id || this.state.session?.ID || '').trim();
+          const currentSessionChat = !deltaSessionID || !currentSessionID || deltaSessionID === currentSessionID;
+          if (currentSessionChat && delta.chat) this.patchChatList(delta.chat);
+          if (currentSessionChat) this.patchChatStatus(delta);
           if (id === this.activeChatID()) {
             this.state.snapshot = next;
             this.state.Snapshot = next;
@@ -1147,7 +1161,7 @@
           });
         },
         openSessionDialog() {
-          this.showSessions = true; this.sessionLoading = true; this.newSessionTitle = '';
+          this.showSessions = true; this.sessionLoading = true; this.newSessionTitle = ''; this.editingSessionID = ''; this.editingSessionTitle = '';
           this.reportClientStateSoon();
           this.rpc('list_sessions', {}).then(result => { this.sessionState = result || {active_id: 0, workdir: '', sessions: []}; }).finally(() => { this.sessionLoading = false; });
         },
@@ -1156,13 +1170,37 @@
         activeSessionID() { return this.sessionState.active_id || this.state.session?.ID || this.state.session?.id || 0; },
         sessionID(session) { return session.ID || session.id; },
         sessionTitle(session) { return session.Title || session.title || 'New Session'; },
-        sessionModel(session) { return (session.ProviderID || session.provider_id || '-') + ' / ' + (session.ModelID || session.model_id || '-'); },
         switchSession(id) {
           if (!id || id === this.activeSessionID()) { this.closeSessionDialog(); return; }
           this.rpc('switch_session', {session_id: id}).then(s => { this.applyState(s); this.closeSessionDialog(); });
         },
         createSession() {
           this.rpc('new_session', {title: this.newSessionTitle || 'New Session'}).then(s => { this.applyState(s); this.closeSessionDialog(); });
+        },
+        beginRenameSession(session) {
+          this.editingSessionID = this.sessionID(session);
+          this.editingSessionTitle = this.sessionTitle(session);
+        },
+        saveRenamedSession() {
+          const id = this.editingSessionID;
+          const title = String(this.editingSessionTitle || '').trim();
+          if (!id || !title) return;
+          this.rpc('rename_session', {session_id: id, title}).then(s => {
+            this.applyState(s);
+            return this.rpc('list_sessions', {});
+          }).then(result => {
+            this.sessionState = result || this.sessionState;
+            this.editingSessionID = '';
+            this.editingSessionTitle = '';
+          });
+        },
+        deleteSession(id) {
+          if (!id) return;
+          if (!confirm('Delete this session and all chats?')) return;
+          this.rpc('delete_session', {session_id: id}).then(s => {
+            this.applyState(s);
+            return this.rpc('list_sessions', {});
+          }).then(result => { this.sessionState = result || this.sessionState; });
         },
         openProviderDialog() { this.openSettingsDialog('providers'); },
         providerTemplates() { return this.providerState.catalog || []; },

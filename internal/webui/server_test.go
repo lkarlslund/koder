@@ -775,6 +775,12 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `new_session`) {
 		t.Fatalf("expected session dialog to create sessions")
 	}
+	if !strings.Contains(fullPage, `rename_session`) || !strings.Contains(fullPage, `delete_session`) {
+		t.Fatalf("expected session dialog to rename and delete sessions")
+	}
+	if strings.Contains(fullPage, `sessionModel(session)`) {
+		t.Fatalf("expected session dialog to avoid session-level model display")
+	}
 	if !strings.Contains(fullPage, `test_provider`) {
 		t.Fatalf("expected provider dialog test action")
 	}
@@ -1178,10 +1184,43 @@ func TestWebSocketSessionManagementCreatesAndSwitchesWorkspaceSessions(t *testin
 		t.Fatalf("unexpected new session response: %#v", newResp.Result.Session)
 	}
 
-	if err := conn.Write(ctx, websocket.MessageText, []byte(fmt.Sprintf(`{"id":3,"method":"switch_session","params":{"session_id":"%s"}}`, initialID))); err != nil {
-		t.Fatalf("write switch_session: %v", err)
+	if err := conn.Write(ctx, websocket.MessageText, []byte(fmt.Sprintf(`{"id":3,"method":"rename_session","params":{"session_id":"%s","title":"Renamed Session"}}`, newID))); err != nil {
+		t.Fatalf("write rename_session: %v", err)
 	}
 	msg = readRPCResponse(t, ctx, conn, 3)
+	var renameResp struct {
+		OK     bool `json:"ok"`
+		Result struct {
+			Session struct {
+				ID domain.ID
+			}
+			Sessions []struct {
+				ID    domain.ID
+				Title string
+			}
+		} `json:"result"`
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(msg, &renameResp); err != nil {
+		t.Fatalf("decode rename response: %v", err)
+	}
+	if !renameResp.OK {
+		t.Fatalf("expected rename_session ok, got %s", renameResp.Error)
+	}
+	foundRenamed := false
+	for _, session := range renameResp.Result.Sessions {
+		if session.ID == newID && session.Title == "Renamed Session" {
+			foundRenamed = true
+		}
+	}
+	if !foundRenamed {
+		t.Fatalf("expected renamed session in response: %#v", renameResp.Result.Sessions)
+	}
+
+	if err := conn.Write(ctx, websocket.MessageText, []byte(fmt.Sprintf(`{"id":4,"method":"switch_session","params":{"session_id":"%s"}}`, initialID))); err != nil {
+		t.Fatalf("write switch_session: %v", err)
+	}
+	msg = readRPCResponse(t, ctx, conn, 4)
 	var switchResp struct {
 		OK     bool `json:"ok"`
 		Result struct {
@@ -1199,6 +1238,37 @@ func TestWebSocketSessionManagementCreatesAndSwitchesWorkspaceSessions(t *testin
 	}
 	if switchResp.Result.Session.ID != initialID {
 		t.Fatalf("expected switched back to %s, got %#v", initialID, switchResp.Result.Session)
+	}
+
+	if err := conn.Write(ctx, websocket.MessageText, []byte(fmt.Sprintf(`{"id":5,"method":"delete_session","params":{"session_id":"%s"}}`, newID))); err != nil {
+		t.Fatalf("write delete_session: %v", err)
+	}
+	msg = readRPCResponse(t, ctx, conn, 5)
+	var deleteResp struct {
+		OK     bool `json:"ok"`
+		Result struct {
+			Session struct {
+				ID domain.ID
+			}
+			Sessions []struct {
+				ID domain.ID
+			}
+		} `json:"result"`
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(msg, &deleteResp); err != nil {
+		t.Fatalf("decode delete response: %v", err)
+	}
+	if !deleteResp.OK {
+		t.Fatalf("expected delete_session ok, got %s", deleteResp.Error)
+	}
+	if deleteResp.Result.Session.ID != initialID {
+		t.Fatalf("expected active session to remain %s, got %s", initialID, deleteResp.Result.Session.ID)
+	}
+	for _, session := range deleteResp.Result.Sessions {
+		if session.ID == newID {
+			t.Fatalf("deleted session still listed: %#v", deleteResp.Result.Sessions)
+		}
 	}
 }
 

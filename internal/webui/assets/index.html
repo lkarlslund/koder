@@ -334,16 +334,25 @@
           <div class="list-group-item text-secondary">No sessions in this workspace</div>
         </template>
         <template x-for="session in sessionRows()" :key="sessionID(session)">
-          <button type="button" class="list-group-item list-group-item-action d-flex align-items-start justify-content-between gap-3" :class="{'active': sessionID(session) === activeSessionID()}" @click="switchSession(sessionID(session))">
-            <span class="text-start">
-              <span class="fw-semibold" x-text="sessionTitle(session)"></span>
-              <span class="d-block small opacity-75">
-                <span x-text="sessionModel(session)"></span>
-                <template x-if="session.LastMessage || session.last_message"><span x-text="' · ' + (session.LastMessage || session.last_message)"></span></template>
-              </span>
-            </span>
-            <span class="badge text-bg-secondary" x-text="'#' + sessionID(session)"></span>
-          </button>
+          <div class="list-group-item list-group-item-action d-flex align-items-start justify-content-between gap-3" :class="{'active': sessionID(session) === activeSessionID()}">
+            <button type="button" class="btn btn-link text-start p-0 flex-grow-1 text-decoration-none" :class="sessionID(session) === activeSessionID() ? 'text-white' : 'text-body'" @click="switchSession(sessionID(session))">
+              <template x-if="editingSessionID !== sessionID(session)">
+                <span>
+                  <span class="fw-semibold" x-text="sessionTitle(session)"></span>
+                  <span class="d-block small opacity-75">
+                    <template x-if="session.LastMessage || session.last_message"><span x-text="session.LastMessage || session.last_message"></span></template>
+                  </span>
+                </span>
+              </template>
+              <template x-if="editingSessionID === sessionID(session)">
+                <input class="form-control form-control-sm" x-model="editingSessionTitle" @click.stop @keydown.enter.prevent="saveRenamedSession()" @keydown.escape.prevent="editingSessionID = ''; editingSessionTitle = ''">
+              </template>
+            </button>
+            <div class="btn-group btn-group-sm">
+              <button type="button" class="btn" :class="sessionID(session) === activeSessionID() ? 'btn-outline-light' : 'btn-outline-secondary'" title="Rename session" @click.stop="beginRenameSession(session)"><i class="bi bi-pencil"></i></button>
+              <button type="button" class="btn" :class="sessionID(session) === activeSessionID() ? 'btn-outline-light' : 'btn-outline-danger'" title="Delete session" @click.stop="deleteSession(sessionID(session))"><i class="bi bi-trash"></i></button>
+            </div>
+          </div>
         </template>
       </div>
     </section>
