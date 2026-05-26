@@ -231,8 +231,7 @@ func (e *Engine) CompactChat(ctx context.Context, sessionID, chatID domain.ID) (
 				e.emitInterrupted(out, chatID, session.ID)
 				return
 			}
-			e.recordAssistantError(ctx, chatID, session.ID, err)
-			out <- domain.Event{Kind: domain.EventKindError, Err: err}
+			e.emitAssistantError(ctx, out, chatID, session.ID, err)
 			return
 		}
 		out <- domain.Event{Kind: domain.EventKindMessageDone}
@@ -278,8 +277,7 @@ func (e *Engine) ResumePendingToolCallsInChat(ctx context.Context, session domai
 				e.emitInterrupted(out, chat.ID, session.ID)
 				return
 			}
-			e.recordAssistantError(ctx, chat.ID, session.ID, err)
-			out <- domain.Event{Kind: domain.EventKindError, Err: err}
+			e.emitAssistantError(ctx, out, chat.ID, session.ID, err)
 			return
 		}
 		if needsApproval || turncontrol.ShouldStop(ctx) {
@@ -299,8 +297,7 @@ func (e *Engine) ResumePendingToolCallsInChat(ctx context.Context, session domai
 				e.emitInterrupted(out, chat.ID, session.ID)
 				return
 			}
-			e.recordAssistantError(ctx, chat.ID, session.ID, err)
-			out <- domain.Event{Kind: domain.EventKindError, Err: err}
+			e.emitAssistantError(ctx, out, chat.ID, session.ID, err)
 		}
 	}()
 	return out, nil
@@ -383,8 +380,7 @@ func (e *Engine) runModelPrompt(ctx context.Context, session domain.Session, cha
 				e.emitInterrupted(out, chat.ID, session.ID)
 				return
 			}
-			e.recordAssistantError(ctx, chat.ID, session.ID, err)
-			out <- domain.Event{Kind: domain.EventKindError, Err: err}
+			e.emitAssistantError(ctx, out, chat.ID, session.ID, err)
 			return
 		}
 		e.recordLifecycle(session.ID, "prompt_started", prompt, map[string]string{"provider": session.ProviderID, "model": session.ModelID})
@@ -394,8 +390,7 @@ func (e *Engine) runModelPrompt(ctx context.Context, session domain.Session, cha
 				e.emitInterrupted(out, chat.ID, session.ID)
 				return
 			}
-			e.recordAssistantError(ctx, chat.ID, session.ID, err)
-			out <- domain.Event{Kind: domain.EventKindError, Err: err}
+			e.emitAssistantError(ctx, out, chat.ID, session.ID, err)
 			return
 		}
 		if compacted {
@@ -424,8 +419,7 @@ func (e *Engine) runModelPrompt(ctx context.Context, session domain.Session, cha
 				e.emitInterrupted(out, chat.ID, session.ID)
 				return
 			}
-			e.recordAssistantError(ctx, chat.ID, session.ID, err)
-			out <- domain.Event{Kind: domain.EventKindError, Err: err}
+			e.emitAssistantError(ctx, out, chat.ID, session.ID, err)
 			return
 		}
 	}()
@@ -453,8 +447,7 @@ func (e *Engine) runContinue(ctx context.Context, session domain.Session, chat d
 				e.emitInterrupted(out, chat.ID, session.ID)
 				return
 			}
-			e.recordAssistantError(ctx, chat.ID, session.ID, err)
-			out <- domain.Event{Kind: domain.EventKindError, Err: err}
+			e.emitAssistantError(ctx, out, chat.ID, session.ID, err)
 			return
 		}
 		if strings.TrimSpace(note) != "" {
@@ -468,8 +461,7 @@ func (e *Engine) runContinue(ctx context.Context, session domain.Session, chat d
 				e.emitInterrupted(out, chat.ID, session.ID)
 				return
 			}
-			e.recordAssistantError(ctx, chat.ID, session.ID, err)
-			out <- domain.Event{Kind: domain.EventKindError, Err: err}
+			e.emitAssistantError(ctx, out, chat.ID, session.ID, err)
 			return
 		}
 		if compacted {
@@ -488,8 +480,7 @@ func (e *Engine) runContinue(ctx context.Context, session domain.Session, chat d
 				e.emitInterrupted(out, chat.ID, session.ID)
 				return
 			}
-			e.recordAssistantError(ctx, chat.ID, session.ID, err)
-			out <- domain.Event{Kind: domain.EventKindError, Err: err}
+			e.emitAssistantError(ctx, out, chat.ID, session.ID, err)
 			return
 		}
 	}()
@@ -1494,8 +1485,7 @@ func (e *Engine) approve(ctx context.Context, sessionID, chatID domain.ID, rawID
 					e.emitInterrupted(out, item.ChatID, session.ID)
 					return
 				}
-				e.recordAssistantError(ctx, item.ChatID, session.ID, err)
-				out <- domain.Event{Kind: domain.EventKindError, Err: err}
+				e.emitAssistantError(ctx, out, item.ChatID, session.ID, err)
 			}
 		}()
 		return out, nil
@@ -1534,8 +1524,7 @@ func (e *Engine) approve(ctx context.Context, sessionID, chatID domain.ID, rawID
 				e.emitInterrupted(out, item.ChatID, session.ID)
 				return
 			}
-			e.recordAssistantError(ctx, item.ChatID, session.ID, err)
-			out <- domain.Event{Kind: domain.EventKindError, Err: err}
+			e.emitAssistantError(ctx, out, item.ChatID, session.ID, err)
 			return
 		}
 		if compacted {
@@ -1558,8 +1547,7 @@ func (e *Engine) approve(ctx context.Context, sessionID, chatID domain.ID, rawID
 				e.emitInterrupted(out, item.ChatID, session.ID)
 				return
 			}
-			e.recordAssistantError(ctx, item.ChatID, session.ID, err)
-			out <- domain.Event{Kind: domain.EventKindError, Err: err}
+			e.emitAssistantError(ctx, out, item.ChatID, session.ID, err)
 		}
 	}()
 	return out, nil
@@ -1611,8 +1599,7 @@ func (e *Engine) approveTool(ctx context.Context, sessionID, chatID domain.ID, t
 					e.emitInterrupted(out, chatID, session.ID)
 					return
 				}
-				e.recordAssistantError(ctx, chatID, session.ID, err)
-				out <- domain.Event{Kind: domain.EventKindError, Err: err}
+				e.emitAssistantError(ctx, out, chatID, session.ID, err)
 			}
 		}()
 		return out, nil
@@ -1650,8 +1637,7 @@ func (e *Engine) approveTool(ctx context.Context, sessionID, chatID domain.ID, t
 				e.emitInterrupted(out, chatID, session.ID)
 				return
 			}
-			e.recordAssistantError(ctx, chatID, session.ID, err)
-			out <- domain.Event{Kind: domain.EventKindError, Err: err}
+			e.emitAssistantError(ctx, out, chatID, session.ID, err)
 			return
 		}
 		var transient []provider.InstructionBlock
@@ -1668,8 +1654,7 @@ func (e *Engine) approveTool(ctx context.Context, sessionID, chatID domain.ID, t
 				e.emitInterrupted(out, chatID, session.ID)
 				return
 			}
-			e.recordAssistantError(ctx, chatID, session.ID, err)
-			out <- domain.Event{Kind: domain.EventKindError, Err: err}
+			e.emitAssistantError(ctx, out, chatID, session.ID, err)
 		}
 	}()
 	return out, nil
@@ -1823,15 +1808,24 @@ func concatEvents(streams ...<-chan domain.Event) <-chan domain.Event {
 	return out
 }
 
-func (e *Engine) recordAssistantError(ctx context.Context, chatID, sessionID domain.ID, err error) {
+func (e *Engine) emitAssistantError(ctx context.Context, out chan<- domain.Event, chatID, sessionID domain.ID, err error) {
+	item, _ := e.recordAssistantError(ctx, chatID, sessionID, err)
+	evt := domain.Event{Kind: domain.EventKindError, Err: err}
+	if item.ID != "" {
+		evt.Item = item
+	}
+	out <- evt
+}
+
+func (e *Engine) recordAssistantError(ctx context.Context, chatID, sessionID domain.ID, err error) (domain.TimelineItem, bool) {
 	if err == nil || sessionID == "" {
-		return
+		return domain.TimelineItem{}, false
 	}
 	if interruptedErr(err) {
-		return
+		return domain.TimelineItem{}, false
 	}
 	e.recordLifecycle(sessionID, "assistant_error", err.Error(), nil)
-	e.persistTranscriptNotice(ctx, chatID, sessionID, errorSummary(err), transcriptNotice{
+	return e.persistTranscriptNotice(ctx, chatID, sessionID, errorSummary(err), transcriptNotice{
 		Kind:     "model_error",
 		Severity: "error",
 	})

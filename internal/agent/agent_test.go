@@ -5120,13 +5120,18 @@ func TestRunPromptPersistsEventNoticeWhenRetriesExhausted(t *testing.T) {
 	}
 
 	var sawError bool
+	var errorItem domain.TimelineItem
 	for evt := range events {
 		if evt.Kind == domain.EventKindError {
 			sawError = true
+			errorItem = evt.Item
 		}
 	}
 	if !sawError {
 		t.Fatal("expected terminal error event")
+	}
+	if notice, ok := errorItem.Content.(domain.Notice); !ok || notice.Kind != "model_error" || !strings.Contains(notice.Text, "Error: chat status 429") {
+		t.Fatalf("expected error event to carry persisted model error notice, got %#v", errorItem)
 	}
 	if requests != maxRateLimitRetries+1 {
 		t.Fatalf("expected %d attempts, got %d", maxRateLimitRetries+1, requests)
