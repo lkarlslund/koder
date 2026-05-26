@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -34,6 +35,9 @@ import (
 )
 
 const defaultWebBind = "127.0.0.1:0"
+const processRestartExitCode = 75
+
+var errProcessRestart = errors.New("process restart requested")
 
 func NewRootCommand() *cobra.Command {
 	opts := startupOptions{}
@@ -210,7 +214,13 @@ func runWeb(ctx context.Context, cfg config.Config, st *store.Store, engine *age
 		if signal == syscall.SIGUSR1 {
 			reason = domain.NoticeReasonProcessRestart
 		}
-		return controller.ShutdownWithInterruptReason(context.Background(), reason)
+		if err := controller.ShutdownWithInterruptReason(context.Background(), reason); err != nil {
+			return err
+		}
+		if signal == syscall.SIGUSR1 {
+			return errProcessRestart
+		}
+		return nil
 	}
 }
 

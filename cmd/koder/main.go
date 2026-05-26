@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 )
@@ -29,8 +30,18 @@ func runMain() (code int) {
 	}()
 
 	if err := NewRootCommand().ExecuteContext(context.Background()); err != nil {
+		if code, ok := exitCodeForError(err); ok {
+			return code
+		}
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
 	return 0
+}
+
+func exitCodeForError(err error) (int, bool) {
+	if errors.Is(err, errProcessRestart) {
+		return processRestartExitCode, true
+	}
+	return 0, false
 }
