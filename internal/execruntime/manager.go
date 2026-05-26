@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"maps"
 	"os"
 	"os/exec"
 	"runtime"
@@ -500,15 +499,15 @@ func (m *Manager) nextProcessID() string {
 }
 
 func (m *Manager) publish(evt Event) {
-	m.mu.RLock()
-	subs := maps.Clone(m.subscribers[evt.Snapshot.ChatID])
-	m.mu.RUnlock()
+	m.mu.Lock()
+	subs := m.subscribers[evt.Snapshot.ChatID]
 	for ch := range subs {
 		select {
 		case ch <- evt:
 		default:
 		}
 	}
+	m.mu.Unlock()
 }
 
 func (p *process) appendOutput(delta string) {
