@@ -880,15 +880,8 @@ func (c *Controller) TestProvider(ctx context.Context, draft ProviderDraft) (Pro
 	if err != nil {
 		return ProviderProbeResult{}, err
 	}
-	limit := len(result.Models)
-	if limit > 12 {
-		limit = 12
-	}
-	models := make([]string, 0, limit)
-	for idx, item := range result.Models {
-		if idx >= 12 {
-			break
-		}
+	models := make([]string, 0, len(result.Models))
+	for _, item := range result.Models {
 		models = append(models, item.ID)
 	}
 	return ProviderProbeResult{ModelCount: len(result.Models), Models: models, SelectedModel: result.SelectedModel}, nil
@@ -1057,6 +1050,7 @@ func (c *Controller) SavePreferences(ctx context.Context, prefs PreferencesState
 	next := config.Default()
 	c.mu.Lock()
 	next = c.cfg
+	repairStaleGeneralProvider(&next, &prefs)
 	if err := applyGeneralPreferences(&next, prefs.General); err != nil {
 		c.mu.Unlock()
 		return PreferencesState{}, err
@@ -1668,6 +1662,24 @@ func applyGeneralPreferences(cfg *config.Config, prefs GeneralPreferences) error
 		cfg.Store.Backend = backend
 	}
 	return nil
+}
+
+func repairStaleGeneralProvider(cfg *config.Config, prefs *PreferencesState) {
+	if prefs == nil {
+		return
+	}
+	defaultProvider := strings.TrimSpace(prefs.Providers.DefaultProvider)
+	if defaultProvider == "" {
+		return
+	}
+	if !cfg.HasUsableProvider(defaultProvider) {
+		return
+	}
+	if cfg.HasUsableProvider(strings.TrimSpace(prefs.General.DefaultProvider)) {
+		return
+	}
+	prefs.General.DefaultProvider = defaultProvider
+	prefs.General.DefaultModel = strings.TrimSpace(prefs.Providers.DefaultModel)
 }
 
 func applyUIPreferences(cfg *config.Config, prefs UIPreferences) error {

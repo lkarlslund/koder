@@ -790,6 +790,11 @@ func TestIndexServesHTML(t *testing.T) {
 		strings.Contains(fullPage, `MCP servers JSON`) {
 		t.Fatalf("expected providers and MCP to use shared preferences list editors")
 	}
+	if !strings.Contains(fullPage, `list="provider-model-options"`) ||
+		!strings.Contains(fullPage, `providerModelOptions`) ||
+		!strings.Contains(fullPage, `settings.general.default_provider = this.providerState.default_provider`) {
+		t.Fatalf("expected provider editor to offer detected model choices and sync deleted defaults")
+	}
 	if !strings.Contains(fullPage, `Chat model`) ||
 		!strings.Contains(fullPage, `settings-prompt`) ||
 		!strings.Contains(fullPage, `resetPrompt(prompt.target)`) ||

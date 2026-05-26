@@ -283,7 +283,7 @@
         showModels: false, modelLoading: false, modelQuery: '', modelOptions: [],
         showSettings: false, settingsLoading: false, settingsSaving: false, settingsTab: 'general', settings: null, settingsStatus: '', settingsStatusKind: 'secondary', selectedPermissionProfile: '',
         showSessions: false, sessionLoading: false, sessionState: {active_id: 0, workdir: '', sessions: []}, newSessionTitle: '',
-        providerState: {catalog: [], providers: [], drafts: {}}, showProviderEditor: false, providerDraft: null, providerHeadersText: '{}', providerStatus: '', providerStatusKind: 'secondary', providerTesting: false, providerSaving: false,
+        providerState: {catalog: [], providers: [], drafts: {}}, showProviderEditor: false, providerDraft: null, providerHeadersText: '{}', providerModelOptions: [], providerStatus: '', providerStatusKind: 'secondary', providerTesting: false, providerSaving: false,
         showMCPEditor: false, mcpDraft: null, mcpHeadersText: '{}', mcpStatus: '', mcpStatusKind: 'secondary',
         completion: {kind: '', query: '', start: 0, end: 0, items: [], selected: 0}, completionSeq: 0,
         theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, restoreChatAttempted: false, transcriptStickToBottom: true, scrollRestoreSeq: 0, expandedMilestones: {}, interruptArmedChatID: '', dragChatID: '', composerAttachments: [], error: '', toast: '', toastTimer: null,
@@ -1143,6 +1143,7 @@
         setProviderDraft(draft) {
           this.providerDraft = Object.assign({headers: {}}, draft || {});
           this.providerHeadersText = JSON.stringify(this.providerDraft.headers || {}, null, 2);
+          this.providerModelOptions = [];
         },
         editProvider(id) {
           const draft = (this.providerState.drafts || {})[id];
@@ -1152,7 +1153,7 @@
           const first = this.providerTemplates()[0]?.id || 'openai-compatible';
           this.rpc('new_provider_draft', {template_id: first}).then(draft => { this.setProviderDraft(draft); this.providerStatus = ''; this.providerStatusKind = 'secondary'; this.showProviderEditor = true; });
         },
-        closeProviderEditor() { this.showProviderEditor = false; this.providerDraft = null; this.providerStatus = ''; this.providerStatusKind = 'secondary'; },
+        closeProviderEditor() { this.showProviderEditor = false; this.providerDraft = null; this.providerModelOptions = []; this.providerStatus = ''; this.providerStatusKind = 'secondary'; },
         providerTemplateChanged() {
           if (!this.providerDraft) return;
           const current = this.providerDraft;
@@ -1187,6 +1188,7 @@
           this.rpc('test_provider', payload).then(result => {
             const count = result.model_count || 0;
             const sample = (result.models || []).slice(0, 4).join(', ');
+            this.providerModelOptions = result.models || [];
             if (result.selected_model && this.providerDraft) this.providerDraft.model = result.selected_model;
             const selected = result.selected_model ? ' Selected ' + result.selected_model + '.' : '';
             this.providerStatus = 'Test passed: ' + count + ' model' + (count === 1 ? '' : 's') + (sample ? ' (' + sample + ')' : '') + '.' + selected;
@@ -1209,6 +1211,10 @@
           this.rpc('delete_provider', {provider_id: id}).then(result => {
             this.providerState = result.providers || result;
             if (this.settings) this.settings.providers = this.providerState;
+            if (this.settings?.general) {
+              this.settings.general.default_provider = this.providerState.default_provider || '';
+              this.settings.general.default_model = this.providerState.default_model || '';
+            }
             if (result.state) this.applyState(result.state);
           }).catch(err => this.showToast(err.message));
         },

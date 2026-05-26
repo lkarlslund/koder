@@ -429,6 +429,57 @@ func TestControllerSavePreferencesPersistsConfigAndPrompts(t *testing.T) {
 	}
 }
 
+func TestControllerSavePreferencesRepairsDeletedDefaultProvider(t *testing.T) {
+	temp := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", temp)
+	t.Setenv("XDG_STATE_HOME", temp)
+	t.Setenv("XDG_CACHE_HOME", temp)
+	t.Setenv("HOME", temp)
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.DefaultProvider = "test"
+	cfg.DefaultModel = "old-model"
+	cfg.Providers = map[string]config.Provider{
+		"test":  {BaseURL: "https://example.invalid/v1", DefaultModel: "old-model"},
+		"other": {BaseURL: "https://example.invalid/v1", DefaultModel: "new-model"},
+	}
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.OpenWithOptions(cfg.StateDir(), store.Options{Backend: store.BackendJSONFS})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	ctrl := New(cfg, st, agent.New(cfg, st, nil, nil, t.TempDir()), t.TempDir())
+	if err := ctrl.Start(context.Background(), StartupModeNew); err != nil {
+		t.Fatal(err)
+	}
+
+	prefs, err := ctrl.Preferences(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	prefs.General.DefaultProvider = "test"
+	prefs.General.DefaultModel = "old-model"
+	prefs.Providers.DefaultProvider = "other"
+	prefs.Providers.DefaultModel = "new-model"
+
+	if _, err := ctrl.DeleteProvider(context.Background(), "test"); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := ctrl.SavePreferences(context.Background(), prefs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.General.DefaultProvider != "other" || updated.General.DefaultModel != "new-model" {
+		t.Fatalf("expected repaired default provider, got %#v", updated.General)
+	}
+}
+
 func modelOptionsContain(options []ModelOption, providerID, modelID string) bool {
 	for _, option := range options {
 		if option.ProviderID == providerID && option.ModelID == modelID {
