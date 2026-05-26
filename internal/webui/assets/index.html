@@ -280,7 +280,10 @@
           <div class="fw-semibold"><i class="bi bi-cpu me-1"></i> Select model</div>
           <div class="small text-secondary" x-text="activeProvider() + ' / ' + activeModel()"></div>
         </div>
-        <button type="button" class="btn btn-sm btn-outline-secondary" @click="closeModelDialog()"><i class="bi bi-x-lg"></i></button>
+        <div class="d-flex align-items-center gap-2">
+          <button type="button" class="btn btn-sm btn-outline-secondary" title="Refresh models" @click="refreshModelOptions()" :disabled="modelLoading"><i class="bi bi-arrow-clockwise"></i></button>
+          <button type="button" class="btn btn-sm btn-outline-secondary" @click="closeModelDialog()"><i class="bi bi-x-lg"></i></button>
+        </div>
       </header>
       <div class="p-3 border-bottom">
         <input class="form-control" type="search" x-model="modelQuery" placeholder="Filter models" x-ref="modelSearch">

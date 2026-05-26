@@ -1095,10 +1095,17 @@
         permissionLabel(name) { const p = this.permissionProfiles().find(p => this.permissionName(p) === name); return p ? (p.Label || p.label || name) : (name || '-'); },
         setPermission(profile) { this.rpc('set_permission_profile', {profile}).then(s => { this.applyState(s); this.showPermissions = false; this.reportClientStateSoon(); }); },
         openModelDialog() {
-          this.showModels = true; this.modelLoading = true; this.modelQuery = '';
+          this.showModels = true; this.modelQuery = '';
           this.reportClientStateSoon();
           this.$nextTick(() => this.$refs.modelSearch?.focus());
-          this.rpc('list_models', {}).then(result => { this.modelOptions = result.models || []; }).finally(() => { this.modelLoading = false; });
+          this.refreshModelOptions();
+        },
+        refreshModelOptions() {
+          this.modelLoading = true; this.modelOptions = [];
+          this.rpc('list_models', {})
+            .then(result => { this.modelOptions = result.models || []; })
+            .catch(err => { this.showToast(err.message); })
+            .finally(() => { this.modelLoading = false; });
         },
         closeModelDialog() { this.showModels = false; this.reportClientStateSoon(); },
         filteredModels() {

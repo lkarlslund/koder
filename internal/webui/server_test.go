@@ -640,6 +640,9 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `list_models`) {
 		t.Fatalf("expected model dialog to list models")
 	}
+	if !strings.Contains(fullPage, `refreshModelOptions()`) || !strings.Contains(fullPage, `Refresh models`) {
+		t.Fatalf("expected model dialog to refresh live model options")
+	}
 	if !strings.Contains(fullPage, `set_model`) {
 		t.Fatalf("expected model dialog to set model")
 	}

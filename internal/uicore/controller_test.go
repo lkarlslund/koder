@@ -248,7 +248,7 @@ func TestControllerRefreshChatStatusesDiscoversNewStoreChats(t *testing.T) {
 	}
 }
 
-func TestControllerModelOptionsLoadsConfiguredModels(t *testing.T) {
+func TestControllerModelOptionsLoadsLiveModels(t *testing.T) {
 	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/models" {
 			t.Fatalf("unexpected path %q", r.URL.Path)
@@ -271,16 +271,24 @@ func TestControllerModelOptionsLoadsConfiguredModels(t *testing.T) {
 	for _, option := range options {
 		got = append(got, option.ProviderID+"/"+option.ModelID)
 	}
-	want := []string{"test/a-model", "test/default-model", "test/z-model"}
+	want := []string{"test/a-model", "test/z-model"}
 	if fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Fatalf("expected options %v, got %v", want, got)
 	}
 }
 
 func TestControllerModelOptionsDoesNotInventMissingCurrentProvider(t *testing.T) {
+	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/models" {
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+		fmt.Fprint(w, `{"data":[{"id":"live-model"}]}`)
+	}))
+	defer modelServer.Close()
+
 	ctrl, st := newTestControllerWithConfig(t, func(cfg *config.Config) {
 		cfg.Providers = map[string]config.Provider{
-			"test": {Name: "Test Provider", BaseURL: "https://example.invalid/v1", DefaultModel: "configured-model"},
+			"test": {Name: "Test Provider", BaseURL: modelServer.URL + "/v1", DefaultModel: "configured-model"},
 		}
 	})
 	session := ctrl.State().Session

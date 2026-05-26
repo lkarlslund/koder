@@ -1176,9 +1176,6 @@ func modelOptionsForConfig(ctx context.Context, cfg config.Config, currentProvid
 		if !ok {
 			continue
 		}
-		if strings.TrimSpace(providerCfg.DefaultModel) != "" {
-			add(providerID, providerCfg, domain.Model{ID: providerCfg.DefaultModel})
-		}
 		client, err := provider.New(providerID, providerCfg, nil)
 		if err != nil {
 			failures = append(failures, providerID)
