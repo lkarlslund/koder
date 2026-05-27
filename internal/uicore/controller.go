@@ -2431,7 +2431,7 @@ func (c *Controller) loadSession(ctx context.Context, sessionID, chatID domain.I
 	if err != nil {
 		return err
 	}
-	if err := c.failRestartInterruptedRunningTools(ctx, chats); err != nil {
+	if err := c.failProcessInterruptedToolCalls(ctx, chats); err != nil {
 		return err
 	}
 	var chatRecord domain.Chat
@@ -2681,17 +2681,32 @@ func (c *Controller) autoResumeRestartInterruptedChats(runtimes map[domain.ID]*c
 	}
 }
 
-func (c *Controller) failRestartInterruptedRunningTools(ctx context.Context, chats []domain.Chat) error {
+func (c *Controller) failProcessInterruptedToolCalls(ctx context.Context, chats []domain.Chat) error {
 	for _, chatRecord := range chats {
-		if ok, err := c.chatEndsWithRestartInterrupt(ctx, chatRecord.ID); err != nil {
+		if ok, err := c.chatEndsWithProcessInterrupt(ctx, chatRecord.ID); err != nil {
 			return err
 		} else if ok {
-			if _, err := c.store.FailRunningToolCalls(ctx, chatRecord.ID, processRestartToolFailure); err != nil {
+			if _, err := c.store.FailInterruptedToolCalls(ctx, chatRecord.ID, processRestartToolFailure); err != nil {
 				return err
 			}
 		}
 	}
 	return nil
+}
+
+func (c *Controller) chatEndsWithProcessInterrupt(ctx context.Context, chatID domain.ID) (bool, error) {
+	timeline, err := c.store.TimelineForChat(ctx, chatID)
+	if err != nil {
+		return false, err
+	}
+	if len(timeline) == 0 {
+		return false, nil
+	}
+	notice, ok := timeline[len(timeline)-1].Content.(domain.Notice)
+	if !ok || notice.Kind != domain.NoticeKindInterrupted {
+		return false, nil
+	}
+	return notice.Reason == domain.NoticeReasonProcessRestart || notice.Reason == domain.NoticeReasonProcessTerminating, nil
 }
 
 func shouldAutoResumeRestartInterrupted(snapshot chat.Snapshot) bool {

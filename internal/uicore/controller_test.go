@@ -823,9 +823,9 @@ func TestControllerStartupNewResumesRestartInterruptedWorkspaceSession(t *testin
 		ToolCallID: "call_1",
 		Tool:       domain.ToolKindBash,
 		Args:       map[string]string{"command": "pkill -f ./shups"},
-		Status:     domain.ToolStatusRunning,
+		Status:     domain.ToolStatusPending,
 	}}, "", domain.Usage{}); err != nil {
-		t.Fatalf("append running tool call: %v", err)
+		t.Fatalf("append pending tool call: %v", err)
 	}
 	notice, err := st.AppendTimeline(ctx, chatRecord.ID, domain.Notice{
 		Level:  "warning",
@@ -859,7 +859,7 @@ func TestControllerStartupNewResumesRestartInterruptedWorkspaceSession(t *testin
 	}
 	call := assistant.ToolByID("call_1")
 	if call == nil || call.Status != domain.ToolStatusErrored || call.Error == nil || call.Error.Code != domain.NoticeReasonProcessRestart {
-		t.Fatalf("expected running restart tool to be marked failed, got %#v", call)
+		t.Fatalf("expected pending process-interrupted tool to be marked failed, got %#v", call)
 	}
 	deadline := time.After(2 * time.Second)
 	for requests.Load() == 0 {

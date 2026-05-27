@@ -67,8 +67,8 @@ func (s *Store) AttachToolError(ctx context.Context, chatID domain.ID, toolCallI
 	})
 }
 
-// FailRunningToolCalls marks in-flight tool calls as errored after an interrupted process restart.
-func (s *Store) FailRunningToolCalls(ctx context.Context, chatID domain.ID, message string) (int, error) {
+// FailInterruptedToolCalls marks uncompleted tool calls as errored after an interrupted process shutdown.
+func (s *Store) FailInterruptedToolCalls(ctx context.Context, chatID domain.ID, message string) (int, error) {
 	if chatID == "" {
 		return 0, nil
 	}
@@ -92,7 +92,7 @@ func (s *Store) FailRunningToolCalls(ctx context.Context, chatID domain.ID, mess
 		changed := false
 		for idx := range assistant.Tools {
 			call := &assistant.Tools[idx]
-			if call.Status != domain.ToolStatusRunning || call.Result != nil || call.Error != nil {
+			if !interruptedToolStatus(call.Status) || call.Result != nil || call.Error != nil {
 				continue
 			}
 			call.Status = domain.ToolStatusErrored
@@ -115,6 +115,10 @@ func (s *Store) FailRunningToolCalls(ctx context.Context, chatID domain.ID, mess
 		}
 	}
 	return count, nil
+}
+
+func interruptedToolStatus(status domain.ToolStatus) bool {
+	return status == domain.ToolStatusPending || status == domain.ToolStatusRunning
 }
 
 // AttachToolApproval stores an approval request on the assistant item that requested it.

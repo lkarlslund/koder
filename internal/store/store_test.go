@@ -811,7 +811,7 @@ func TestToolApprovalStateIsDerivedFromTimeline(t *testing.T) {
 	}
 }
 
-func TestFailRunningToolCallsMarksOnlyRunningCallsErrored(t *testing.T) {
+func TestFailInterruptedToolCallsMarksPendingAndRunningCallsErrored(t *testing.T) {
 	for _, backend := range []string{BackendPebble, BackendJSONFS} {
 		t.Run(backend, func(t *testing.T) {
 			st := openTestStore(t, backend)
@@ -841,12 +841,12 @@ func TestFailRunningToolCallsMarksOnlyRunningCallsErrored(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			count, err := st.FailRunningToolCalls(context.Background(), chat.ID, "restarted")
+			count, err := st.FailInterruptedToolCalls(context.Background(), chat.ID, "restarted")
 			if err != nil {
 				t.Fatal(err)
 			}
-			if count != 1 {
-				t.Fatalf("expected one failed running call, got %d", count)
+			if count != 2 {
+				t.Fatalf("expected two failed interrupted calls, got %d", count)
 			}
 			items, err := st.TimelineForChat(context.Background(), chat.ID)
 			if err != nil {
@@ -861,8 +861,8 @@ func TestFailRunningToolCallsMarksOnlyRunningCallsErrored(t *testing.T) {
 				t.Fatalf("expected running call to be errored, got %#v", running)
 			}
 			pending := assistant.ToolByID("pending")
-			if pending == nil || pending.Status != domain.ToolStatusPending || pending.Error != nil {
-				t.Fatalf("expected pending call to remain pending, got %#v", pending)
+			if pending == nil || pending.Status != domain.ToolStatusErrored || pending.Error == nil || pending.Error.Message != "restarted" {
+				t.Fatalf("expected pending call to be errored, got %#v", pending)
 			}
 		})
 	}
