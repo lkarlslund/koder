@@ -4380,7 +4380,7 @@ func TestChatWithRetryRetriesTransientEOFBeforeStreamingStarts(t *testing.T) {
 	}
 
 	events := make(chan domain.Event, 16)
-	resp, streamed, err := engine.chatWithRetry(context.Background(), "", client, events, provider.ChatRequest{
+	resp, streamed, err := engine.chatWithRetry(context.Background(), "", "test", client, events, provider.ChatRequest{
 		Model: "test-model",
 		Messages: []provider.Message{{
 			Role:    domain.MessageRoleUser,
@@ -4450,7 +4450,7 @@ func TestChatWithRetryDoesNotRetryAfterPartialStreamFailure(t *testing.T) {
 	}
 
 	events := make(chan domain.Event, 16)
-	_, streamed, err := engine.chatWithRetry(context.Background(), "", client, events, provider.ChatRequest{
+	_, streamed, err := engine.chatWithRetry(context.Background(), "", "test", client, events, provider.ChatRequest{
 		Model: "test-model",
 		Messages: []provider.Message{{
 			Role:    domain.MessageRoleUser,
@@ -4486,6 +4486,76 @@ func TestChatWithRetryDoesNotRetryAfterPartialStreamFailure(t *testing.T) {
 	}
 	if requests != 1 {
 		t.Fatalf("expected no retry after partial stream failure, got %d requests", requests)
+	}
+}
+
+func TestChatWithRetryOpportunisticallyDisablesRejectedPromptProgress(t *testing.T) {
+	t.Parallel()
+
+	var requests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		switch requests {
+		case 1:
+			if body["return_progress"] != true {
+				t.Fatalf("expected first request to try return_progress, got %#v", body)
+			}
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"error":{"message":"unknown field return_progress"}}`))
+		case 2:
+			if _, ok := body["return_progress"]; ok {
+				t.Fatalf("expected retry without return_progress, got %#v", body)
+			}
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}\n\n"))
+			_, _ = w.Write([]byte("data: [DONE]\n\n"))
+		default:
+			t.Fatalf("unexpected request %d", requests)
+		}
+	}))
+	defer server.Close()
+
+	cfg := testConfig(t)
+	cfg.Providers = map[string]config.Provider{
+		"test": {
+			BaseURL: server.URL + "/v1",
+			Timeout: time.Second,
+			Stream:  true,
+		},
+	}
+	engine := New(cfg, nil, tools.NewRegistry(t.TempDir()), nil, t.TempDir())
+	client, err := provider.New("test", cfg.Providers["test"], nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	events := make(chan domain.Event, 16)
+	resp, streamed, err := engine.chatWithRetry(context.Background(), "", "test", client, events, provider.ChatRequest{
+		Model: "test-model",
+		Messages: []provider.Message{{
+			Role:    domain.MessageRoleUser,
+			Content: "hello",
+		}},
+		Stream:    true,
+		ExtraBody: provider.RequestExtraBody(cfg.Providers["test"], "test-model", provider.ModelPresetDefault),
+	}, domain.TimelineItem{ID: domain.NewTimelineID(time.Now().UTC())})
+	close(events)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !streamed || resp.Text != "hello" {
+		t.Fatalf("unexpected response: streamed=%v resp=%#v", streamed, resp)
+	}
+	if requests != 2 {
+		t.Fatalf("expected one prompt-progress retry, got %d requests", requests)
+	}
+	updated := engine.cfg.Providers["test"]
+	if !updated.PromptProgressProbed || updated.PromptProgressSupported {
+		t.Fatalf("expected prompt progress to be persisted unsupported, got %#v", updated)
 	}
 }
 

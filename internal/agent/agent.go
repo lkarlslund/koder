@@ -708,7 +708,7 @@ func (e *Engine) continueModelTurn(ctx context.Context, session domain.Session, 
 		if itemErr != nil {
 			return itemErr
 		}
-		resp, streamed, completeErr := e.chatWithRetry(ctx, session.ID, client, out, req, assistantItem)
+		resp, streamed, completeErr := e.chatWithRetry(ctx, session.ID, session.ProviderID, client, out, req, assistantItem)
 		if completeErr != nil {
 			return completeErr
 		}
@@ -947,6 +947,44 @@ func (e *Engine) chatRequest(session domain.Session, chat domain.Chat, messages 
 func (e *Engine) providerConfigForSession(session domain.Session) config.Provider {
 	cfg, _ := e.cfg.Provider(session.ProviderID)
 	return cfg
+}
+
+func (e *Engine) providerConfig(providerID domain.ID) (config.Provider, bool) {
+	return e.cfg.Provider(string(providerID))
+}
+
+func (e *Engine) promptProgressProbePending(providerID domain.ID) bool {
+	cfg, ok := e.providerConfig(providerID)
+	return ok && provider.PromptProgressProbePending(cfg)
+}
+
+func (e *Engine) setPromptProgressSupport(providerID domain.ID, supported bool) {
+	id := strings.TrimSpace(string(providerID))
+	if id == "" || e.cfg.Providers == nil {
+		return
+	}
+	cfg := e.cfg
+	providerCfg, ok := cfg.Providers[id]
+	if !ok {
+		return
+	}
+	if providerCfg.PromptProgressProbed && providerCfg.PromptProgressSupported == supported {
+		return
+	}
+	providerCfg.PromptProgressMode = config.NormalizePromptProgressMode(providerCfg.PromptProgressMode)
+	providerCfg.PromptProgressProbed = true
+	providerCfg.PromptProgressSupported = supported
+	cfg.Providers[id] = providerCfg
+	e.cfg = cfg
+	if strings.TrimSpace(cfg.Path()) == "" {
+		return
+	}
+	if err := cfg.Save(); err != nil {
+		e.recordLifecycle("", "prompt_progress_probe_save_failed", err.Error(), map[string]string{
+			"provider":  id,
+			"supported": strconv.FormatBool(supported),
+		})
+	}
 }
 
 func (e *Engine) modelPresetForSession(session domain.Session) string {
@@ -2085,7 +2123,9 @@ func waitForRetry(ctx context.Context, delay time.Duration, onTick func(time.Dur
 	}
 }
 
-func (e *Engine) chatWithRetry(ctx context.Context, sessionID domain.ID, client *provider.Client, out chan<- domain.Event, req provider.ChatRequest, streamItem domain.TimelineItem) (provider.ChatResponse, bool, error) {
+func (e *Engine) chatWithRetry(ctx context.Context, sessionID, providerID domain.ID, client *provider.Client, out chan<- domain.Event, req provider.ChatRequest, streamItem domain.TimelineItem) (provider.ChatResponse, bool, error) {
+	promptProgressPending := e.promptProgressProbePending(providerID) && provider.RequestsPromptProgress(req)
+	promptProgressRetried := false
 	for attempt := 0; ; attempt++ {
 		var (
 			resp           provider.ChatResponse
@@ -2108,7 +2148,20 @@ func (e *Engine) chatWithRetry(ctx context.Context, sessionID domain.ID, client 
 			resp, err = client.CompleteChat(ctx, req)
 		}
 		if err == nil {
+			if promptProgressPending {
+				e.setPromptProgressSupport(providerID, true)
+			}
 			return resp, streamed, nil
+		}
+		if promptProgressPending && !promptProgressRetried && provider.ShouldRetryWithoutPromptProgress(err) {
+			promptProgressRetried = true
+			e.setPromptProgressSupport(providerID, false)
+			promptProgressPending = false
+			req = provider.WithoutPromptProgress(req)
+			if out != nil {
+				out <- domain.Event{Kind: domain.EventKindStatus, Text: "Prompt progress unsupported; retrying without it..."}
+			}
+			continue
 		}
 		var apiErr *provider.APIError
 		if errors.As(err, &apiErr) && apiErr.StatusCode == 429 {
@@ -2988,7 +3041,7 @@ func (e *Engine) compactSession(ctx context.Context, session domain.Session, cha
 		Role:    domain.MessageRoleUser,
 		Content: e.compactPrompt(),
 	}), e.providerStreamingEnabled(compactionSession))
-	resp, err := e.completeCompactionChat(ctx, compactionClient, req)
+	resp, err := e.completeCompactionChat(ctx, compactionSession, compactionClient, req)
 	if err != nil {
 		_ = updateCompactionState("", "failed", 0)
 		return err
@@ -3073,11 +3126,34 @@ func (e *Engine) buildCompactionConversationForTimeline(session domain.Session, 
 	return provider.SerializePromptEnvelope(envelope), firstKeptItemID, nil
 }
 
-func (e *Engine) completeCompactionChat(ctx context.Context, client *provider.Client, req provider.ChatRequest) (provider.ChatResponse, error) {
+func (e *Engine) completeCompactionChat(ctx context.Context, session domain.Session, client *provider.Client, req provider.ChatRequest) (provider.ChatResponse, error) {
+	promptProgressPending := e.promptProgressProbePending(session.ProviderID) && provider.RequestsPromptProgress(req)
 	if req.Stream {
-		return client.StreamChatResponse(ctx, req, nil)
+		resp, err := client.StreamChatResponse(ctx, req, nil)
+		if err == nil {
+			if promptProgressPending {
+				e.setPromptProgressSupport(session.ProviderID, true)
+			}
+			return resp, nil
+		}
+		if promptProgressPending && provider.ShouldRetryWithoutPromptProgress(err) {
+			e.setPromptProgressSupport(session.ProviderID, false)
+			return client.StreamChatResponse(ctx, provider.WithoutPromptProgress(req), nil)
+		}
+		return resp, err
 	}
-	return client.CompleteChat(ctx, req)
+	resp, err := client.CompleteChat(ctx, req)
+	if err == nil {
+		if promptProgressPending {
+			e.setPromptProgressSupport(session.ProviderID, true)
+		}
+		return resp, nil
+	}
+	if promptProgressPending && provider.ShouldRetryWithoutPromptProgress(err) {
+		e.setPromptProgressSupport(session.ProviderID, false)
+		return client.CompleteChat(ctx, provider.WithoutPromptProgress(req))
+	}
+	return resp, err
 }
 
 func (e *Engine) estimateContextTokensForTimeline(session domain.Session, chat domain.Chat, timeline []domain.TimelineItem) int {

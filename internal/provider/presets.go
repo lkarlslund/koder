@@ -74,7 +74,7 @@ func PreserveThinkingEnabled(modelID, selected string) bool {
 
 func RequestExtraBody(cfg config.Provider, modelID, selected string) map[string]any {
 	body := map[string]any{}
-	if PromptProgressEnabled(cfg) {
+	if PromptProgressRequested(cfg) {
 		body["return_progress"] = true
 	}
 	if PreserveThinkingEnabled(modelID, selected) {
@@ -104,6 +104,14 @@ func PromptProgressEnabled(cfg config.Provider) bool {
 	default:
 		return false
 	}
+}
+
+func PromptProgressProbePending(cfg config.Provider) bool {
+	return config.NormalizePromptProgressMode(cfg.PromptProgressMode) == "auto" && !cfg.PromptProgressProbed
+}
+
+func PromptProgressRequested(cfg config.Provider) bool {
+	return PromptProgressEnabled(cfg) || PromptProgressProbePending(cfg)
 }
 
 func normalizePresetID(id string) string {

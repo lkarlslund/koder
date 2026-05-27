@@ -245,7 +245,7 @@ func (r execRunner) run(ctx context.Context, prompt, providerID, modelID, workdi
 		defs = append(defs, structuredOutputDefinition(schema.raw))
 	}
 	for turn := 0; turn < maxTurns; turn++ {
-		resp, err := r.client.CompleteChat(ctx, provider.ChatRequest{
+		resp, err := r.completeChat(ctx, providerID, provider.ChatRequest{
 			Model:      modelID,
 			Messages:   messages,
 			Tools:      defs,
@@ -294,6 +294,22 @@ func (r execRunner) run(ctx context.Context, prompt, providerID, modelID, workdi
 		}
 	}
 	return "", fmt.Errorf("model did not finish within %d turns", maxTurns)
+}
+
+func (r *execRunner) completeChat(ctx context.Context, providerID string, req provider.ChatRequest) (provider.ChatResponse, error) {
+	promptProgressPending := provider.PromptProgressProbePending(r.providerConfig(providerID)) && provider.RequestsPromptProgress(req)
+	resp, err := r.client.CompleteChat(ctx, req)
+	if err == nil {
+		if promptProgressPending {
+			r.setPromptProgressSupport(providerID, true)
+		}
+		return resp, nil
+	}
+	if promptProgressPending && provider.ShouldRetryWithoutPromptProgress(err) {
+		r.setPromptProgressSupport(providerID, false)
+		return r.client.CompleteChat(ctx, provider.WithoutPromptProgress(req))
+	}
+	return resp, err
 }
 
 func directSystemPrompt(workdir string, structured bool) string {
@@ -378,6 +394,28 @@ func (r execRunner) appendToolResults(ctx context.Context, messages *[]provider.
 func (r execRunner) providerConfig(providerID string) config.Provider {
 	cfg, _ := r.cfg.Provider(providerID)
 	return cfg
+}
+
+func (r *execRunner) setPromptProgressSupport(providerID string, supported bool) {
+	providerID = strings.TrimSpace(providerID)
+	if providerID == "" || r.cfg.Providers == nil {
+		return
+	}
+	providerCfg, ok := r.cfg.Providers[providerID]
+	if !ok {
+		return
+	}
+	if providerCfg.PromptProgressProbed && providerCfg.PromptProgressSupported == supported {
+		return
+	}
+	providerCfg.PromptProgressMode = config.NormalizePromptProgressMode(providerCfg.PromptProgressMode)
+	providerCfg.PromptProgressProbed = true
+	providerCfg.PromptProgressSupported = supported
+	r.cfg.Providers[providerID] = providerCfg
+	if strings.TrimSpace(r.cfg.Path()) == "" {
+		return
+	}
+	_ = r.cfg.Save()
 }
 
 func (r execRunner) modelPreset(providerID, modelID string) string {
