@@ -2431,6 +2431,9 @@ func (c *Controller) loadSession(ctx context.Context, sessionID, chatID domain.I
 	if err != nil {
 		return err
 	}
+	if err := c.failRestartInterruptedRunningTools(ctx, chats); err != nil {
+		return err
+	}
 	var chatRecord domain.Chat
 	if chatID != "" {
 		chatRecord, err = c.store.GetChat(ctx, chatID)
@@ -2622,6 +2625,8 @@ func sessionForChatModel(session domain.Session, chatRecord domain.Chat) domain.
 }
 
 const processRestartResumeNote = "The previous turn was interrupted because the koder process was restarting. Continue from the persisted transcript and pending tool state without restating the interruption."
+const processRestartToolFailure = "Tool execution failed because koder restarted before the tool completed."
+const processRestartToolFailureInstruction = "A tool call was interrupted by the process restart and has been marked failed. Continue from the persisted transcript and pending tool state without rerunning failed tools unless the user explicitly asks."
 
 func (c *Controller) restartInterruptedSession(ctx context.Context) (domain.Session, bool, error) {
 	sessions, err := c.workspaceSessions(ctx)
@@ -2668,8 +2673,25 @@ func (c *Controller) autoResumeRestartInterruptedChats(runtimes map[domain.ID]*c
 		if rt == nil {
 			continue
 		}
-		rt.Enqueue(chat.QueueItem{Kind: chat.QueueKindContinue, Note: processRestartResumeNote})
+		note := processRestartResumeNote
+		if hasErroredRestartTool(snapshot) {
+			note = processRestartToolFailureInstruction
+		}
+		rt.Enqueue(chat.QueueItem{Kind: chat.QueueKindContinue, Note: note})
 	}
+}
+
+func (c *Controller) failRestartInterruptedRunningTools(ctx context.Context, chats []domain.Chat) error {
+	for _, chatRecord := range chats {
+		if ok, err := c.chatEndsWithRestartInterrupt(ctx, chatRecord.ID); err != nil {
+			return err
+		} else if ok {
+			if _, err := c.store.FailRunningToolCalls(ctx, chatRecord.ID, processRestartToolFailure); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func shouldAutoResumeRestartInterrupted(snapshot chat.Snapshot) bool {
@@ -2686,6 +2708,21 @@ func shouldAutoResumeRestartInterrupted(snapshot chat.Snapshot) bool {
 	}
 	notice, ok := snapshot.Timeline[len(snapshot.Timeline)-1].Content.(domain.Notice)
 	return ok && notice.Kind == domain.NoticeKindInterrupted && notice.Reason == domain.NoticeReasonProcessRestart
+}
+
+func hasErroredRestartTool(snapshot chat.Snapshot) bool {
+	for _, item := range snapshot.Timeline {
+		assistant, ok := item.Content.(domain.AssistantMessage)
+		if !ok {
+			continue
+		}
+		for _, tool := range assistant.Tools {
+			if tool.Status == domain.ToolStatusErrored && tool.Error != nil && tool.Error.Code == domain.NoticeReasonProcessRestart {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (c *Controller) createWorkspaceSession(ctx context.Context, title string) (domain.Session, error) {

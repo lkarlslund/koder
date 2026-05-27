@@ -67,6 +67,56 @@ func (s *Store) AttachToolError(ctx context.Context, chatID domain.ID, toolCallI
 	})
 }
 
+// FailRunningToolCalls marks in-flight tool calls as errored after an interrupted process restart.
+func (s *Store) FailRunningToolCalls(ctx context.Context, chatID domain.ID, message string) (int, error) {
+	if chatID == "" {
+		return 0, nil
+	}
+	message = strings.TrimSpace(message)
+	if message == "" {
+		message = "Tool execution failed because koder restarted before the tool completed."
+	}
+	s.toolCallMu.Lock()
+	defer s.toolCallMu.Unlock()
+	items, err := s.TimelineForChat(ctx, chatID)
+	if err != nil {
+		return 0, err
+	}
+	count := 0
+	now := time.Now().UTC()
+	for _, item := range items {
+		assistant, ok := item.Content.(domain.AssistantMessage)
+		if !ok {
+			continue
+		}
+		changed := false
+		for idx := range assistant.Tools {
+			call := &assistant.Tools[idx]
+			if call.Status != domain.ToolStatusRunning || call.Result != nil || call.Error != nil {
+				continue
+			}
+			call.Status = domain.ToolStatusErrored
+			call.Error = &domain.ToolError{Message: message, Code: domain.NoticeReasonProcessRestart}
+			call.Approval = nil
+			call.ApprovalID = ""
+			if call.CompletedAt.IsZero() {
+				call.CompletedAt = now
+			}
+			changed = true
+			count++
+		}
+		if !changed {
+			continue
+		}
+		item.Content = assistant
+		item.UpdatedAt = now
+		if err := s.Timeline().Put(ctx, item); err != nil {
+			return count, err
+		}
+	}
+	return count, nil
+}
+
 // AttachToolApproval stores an approval request on the assistant item that requested it.
 func (s *Store) AttachToolApproval(ctx context.Context, chatID domain.ID, toolCallID string, approval domain.ApprovalRequest) (domain.TimelineItem, error) {
 	return s.updateToolCall(ctx, chatID, toolCallID, func(call *domain.ToolCall) error {

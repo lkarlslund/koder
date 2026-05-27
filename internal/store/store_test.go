@@ -811,6 +811,63 @@ func TestToolApprovalStateIsDerivedFromTimeline(t *testing.T) {
 	}
 }
 
+func TestFailRunningToolCallsMarksOnlyRunningCallsErrored(t *testing.T) {
+	for _, backend := range []string{BackendPebble, BackendJSONFS} {
+		t.Run(backend, func(t *testing.T) {
+			st := openTestStore(t, backend)
+
+			session, err := st.CreateSession(context.Background(), "test", "provider", "model", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			chat, err := st.DefaultChat(context.Background(), session.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := st.AppendAssistantToolCalls(context.Background(), chat.ID, []domain.ToolCall{
+				{
+					ToolCallID: "running",
+					Tool:       domain.ToolKindBash,
+					Args:       map[string]string{"command": "sleep 60"},
+					Status:     domain.ToolStatusRunning,
+				},
+				{
+					ToolCallID: "pending",
+					Tool:       domain.ToolKindRead,
+					Args:       map[string]string{"path": "README.md"},
+					Status:     domain.ToolStatusPending,
+				},
+			}, "", domain.Usage{}); err != nil {
+				t.Fatal(err)
+			}
+
+			count, err := st.FailRunningToolCalls(context.Background(), chat.ID, "restarted")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if count != 1 {
+				t.Fatalf("expected one failed running call, got %d", count)
+			}
+			items, err := st.TimelineForChat(context.Background(), chat.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			assistant, ok := items[len(items)-1].Content.(domain.AssistantMessage)
+			if !ok {
+				t.Fatalf("expected assistant item, got %T", items[len(items)-1].Content)
+			}
+			running := assistant.ToolByID("running")
+			if running == nil || running.Status != domain.ToolStatusErrored || running.Error == nil || running.Error.Message != "restarted" {
+				t.Fatalf("expected running call to be errored, got %#v", running)
+			}
+			pending := assistant.ToolByID("pending")
+			if pending == nil || pending.Status != domain.ToolStatusPending || pending.Error != nil {
+				t.Fatalf("expected pending call to remain pending, got %#v", pending)
+			}
+		})
+	}
+}
+
 func TestAddSessionPermissionRulePersistsAndReplacesByKey(t *testing.T) {
 	for _, backend := range []string{BackendPebble, BackendJSONFS} {
 		t.Run(backend, func(t *testing.T) {

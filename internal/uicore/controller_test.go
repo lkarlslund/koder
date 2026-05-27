@@ -819,6 +819,14 @@ func TestControllerStartupNewResumesRestartInterruptedWorkspaceSession(t *testin
 	if err != nil {
 		t.Fatalf("default chat: %v", err)
 	}
+	if _, err := st.AppendAssistantToolCalls(ctx, chatRecord.ID, []domain.ToolCall{{
+		ToolCallID: "call_1",
+		Tool:       domain.ToolKindBash,
+		Args:       map[string]string{"command": "pkill -f ./shups"},
+		Status:     domain.ToolStatusRunning,
+	}}, "", domain.Usage{}); err != nil {
+		t.Fatalf("append running tool call: %v", err)
+	}
 	notice, err := st.AppendTimeline(ctx, chatRecord.ID, domain.Notice{
 		Level:  "warning",
 		Text:   "Interrupted",
@@ -840,6 +848,18 @@ func TestControllerStartupNewResumesRestartInterruptedWorkspaceSession(t *testin
 	}
 	if got := ctrl.State().Session.ID; got != session.ID {
 		t.Fatalf("expected restart interrupted session %s, got %s", session.ID, got)
+	}
+	timeline, err := st.TimelineForChat(ctx, chatRecord.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assistant, ok := timeline[0].Content.(domain.AssistantMessage)
+	if !ok {
+		t.Fatalf("expected assistant tool item, got %T", timeline[0].Content)
+	}
+	call := assistant.ToolByID("call_1")
+	if call == nil || call.Status != domain.ToolStatusErrored || call.Error == nil || call.Error.Code != domain.NoticeReasonProcessRestart {
+		t.Fatalf("expected running restart tool to be marked failed, got %#v", call)
 	}
 	deadline := time.After(2 * time.Second)
 	for requests.Load() == 0 {
