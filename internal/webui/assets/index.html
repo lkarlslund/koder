@@ -736,6 +736,15 @@
               <label class="form-check"><input class="form-check-input" type="checkbox" x-model="providerDraft.disabled"> <span class="form-check-label">Disabled</span></label>
             </div>
             <div class="col-12">
+              <div class="settings-inline-status">
+                <div>
+                  <div class="small text-secondary">Prompt progress</div>
+                  <div class="fw-semibold" x-text="promptProgressState(providerDraft).label"></div>
+                </div>
+                <div class="small text-secondary text-end" x-text="promptProgressState(providerDraft).detail"></div>
+              </div>
+            </div>
+            <div class="col-12">
               <label class="form-label small text-secondary">Headers JSON</label>
               <textarea class="form-control font-monospace" rows="4" x-model="providerHeadersText" spellcheck="false"></textarea>
             </div>

@@ -121,13 +121,16 @@ type ProviderCatalogItem struct {
 
 // ProviderConfigItem is one configured provider row.
 type ProviderConfigItem struct {
-	ID         string `json:"id"`
-	Name       string `json:"name"`
-	TemplateID string `json:"template_id"`
-	Kind       string `json:"kind"`
-	BaseURL    string `json:"base_url"`
-	Disabled   bool   `json:"disabled"`
-	Default    bool   `json:"default"`
+	ID                      string `json:"id"`
+	Name                    string `json:"name"`
+	TemplateID              string `json:"template_id"`
+	Kind                    string `json:"kind"`
+	BaseURL                 string `json:"base_url"`
+	Disabled                bool   `json:"disabled"`
+	Default                 bool   `json:"default"`
+	PromptProgressMode      string `json:"prompt_progress_mode"`
+	PromptProgressProbed    bool   `json:"prompt_progress_probed"`
+	PromptProgressSupported bool   `json:"prompt_progress_supported"`
 }
 
 // ProviderDraft is the JSON-friendly provider edit shape used by renderers.
@@ -1710,13 +1713,16 @@ func (c *Controller) providerStateLocked() ProviderState {
 			}
 		}
 		providers = append(providers, ProviderConfigItem{
-			ID:         id,
-			Name:       providerEntryLabel(id, cfg),
-			TemplateID: templateID,
-			Kind:       strings.TrimSpace(cfg.Kind),
-			BaseURL:    strings.TrimSpace(cfg.BaseURL),
-			Disabled:   cfg.Disabled,
-			Default:    id == c.cfg.DefaultProvider,
+			ID:                      id,
+			Name:                    providerEntryLabel(id, cfg),
+			TemplateID:              templateID,
+			Kind:                    strings.TrimSpace(cfg.Kind),
+			BaseURL:                 strings.TrimSpace(cfg.BaseURL),
+			Disabled:                cfg.Disabled,
+			Default:                 id == c.cfg.DefaultProvider,
+			PromptProgressMode:      config.NormalizePromptProgressMode(cfg.PromptProgressMode),
+			PromptProgressProbed:    cfg.PromptProgressProbed,
+			PromptProgressSupported: cfg.PromptProgressSupported,
 		})
 		if draft, err := provider.BuildDraftForExisting(id, cfg); err == nil {
 			drafts[id] = providerDraftFromCatalog(draft)

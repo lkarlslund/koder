@@ -1495,9 +1495,22 @@
         settingsItemBadges(kind, item) {
           const badges = [];
           if (kind === 'providers' && item.default) badges.push('default');
+          if (kind === 'providers') badges.push(this.promptProgressBadge(item));
           if (kind === 'models' && this.settings?.general?.default_provider === item.provider_id && this.settings?.general?.default_model === item.model_id) badges.push('default');
           if (item.disabled) badges.push('disabled');
-          return badges;
+          return badges.filter(Boolean);
+        },
+        promptProgressState(item) {
+          if (!item) return {label: 'Unknown', detail: 'Prompt progress has not been checked yet.'};
+          const mode = String(item.prompt_progress_mode || 'auto').trim().toLowerCase() || 'auto';
+          if (mode === 'disabled') return {label: 'Disabled', detail: 'Prompt progress is disabled for this provider.'};
+          if (!item.prompt_progress_probed) return {label: 'Unknown', detail: 'Koder will try prompt progress on the next test, save, or model request.'};
+          if (item.prompt_progress_supported) return {label: 'Supported', detail: 'This provider accepts return_progress and can stream prompt preprocessing progress.'};
+          return {label: 'Unsupported', detail: 'This provider rejected return_progress; Koder will omit it.'};
+        },
+        promptProgressBadge(item) {
+          const state = this.promptProgressState(item).label.toLowerCase();
+          return 'prompt ' + state;
         },
         editSettingsItem(kind, id) {
           if (kind === 'providers') { this.editProvider(id); return; }

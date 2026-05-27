@@ -134,7 +134,8 @@
     .settings-item-form { min-height: 0; overflow: auto; }
     .settings-checks { display: flex; flex-wrap: wrap; gap: .35rem 1rem; }
     .settings-checks .form-check { margin: 0; min-width: 8rem; }
+    .settings-inline-status { display: grid; grid-template-columns: minmax(0, 12rem) minmax(0, 1fr); align-items: center; gap: .75rem; padding: .65rem .75rem; border: 1px solid var(--bs-border-color); border-radius: .35rem; background: var(--bs-tertiary-bg); }
     .settings-prompt, .settings-json { min-height: 14rem; }
     .toast-stack { position: fixed; right: 1rem; bottom: 1rem; z-index: 1100; max-width: min(420px, calc(100vw - 2rem)); }
     pre { white-space: pre-wrap; word-break: break-word; margin: 0; }
-    @media (max-width: 900px) { .app-shell { grid-template-columns: 1fr; } .sidebar, .sidebar-resizer { display: none; } .topbar, .composer { grid-column: 1; } .settings-body { grid-template-columns: 1fr; } .settings-tabs { flex-direction: row; overflow-x: auto; } .settings-tabs .list-group-item { white-space: nowrap; } .settings-rule-row { grid-template-columns: 1fr; } }
+    @media (max-width: 900px) { .app-shell { grid-template-columns: 1fr; } .sidebar, .sidebar-resizer { display: none; } .topbar, .composer { grid-column: 1; } .settings-body { grid-template-columns: 1fr; } .settings-tabs { flex-direction: row; overflow-x: auto; } .settings-tabs .list-group-item { white-space: nowrap; } .settings-rule-row, .settings-inline-status { grid-template-columns: 1fr; } .settings-inline-status .text-end { text-align: left !important; } }
