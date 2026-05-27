@@ -241,6 +241,12 @@ type chatChunk struct {
 		} `json:"input_tokens_details"`
 		TotalTokens int `json:"total_tokens"`
 	} `json:"usage"`
+	PromptProgress struct {
+		Total     int   `json:"total"`
+		Cache     int   `json:"cache"`
+		Processed int   `json:"processed"`
+		TimeMS    int64 `json:"time_ms"`
+	} `json:"prompt_progress"`
 }
 
 type rawToolCall struct {
@@ -263,10 +269,11 @@ type Client struct {
 }
 
 type ChatResponse struct {
-	Text      string
-	Reasoning string
-	Usage     domain.Usage
-	ToolCalls []ToolCall
+	Text               string
+	Reasoning          string
+	Usage              domain.Usage
+	ToolCalls          []ToolCall
+	PromptProgressSeen bool
 }
 
 func New(id string, cfg config.Provider, recorder *debugsrv.Recorder) (*Client, error) {
@@ -861,6 +868,21 @@ func (c *Client) emitChunk(emit func(domain.Event), chunk chatChunk, raw string,
 			Usage: usage,
 		})
 	}
+	if chunk.PromptProgress.Total > 0 || chunk.PromptProgress.Processed > 0 || chunk.PromptProgress.Cache > 0 {
+		total := chunk.PromptProgress.Total
+		processed := chunk.PromptProgress.Processed
+		text := "Processing prompt"
+		if total > 0 {
+			text = fmt.Sprintf("Processing prompt %d%%", processed*100/total)
+		}
+		meta := map[string]string{
+			"processed": strconv.Itoa(processed),
+			"total":     strconv.Itoa(total),
+			"cache":     strconv.Itoa(chunk.PromptProgress.Cache),
+			"time_ms":   strconv.FormatInt(chunk.PromptProgress.TimeMS, 10),
+		}
+		emit(domain.Event{Kind: domain.EventKindStatus, Text: text, Meta: meta, RawJSON: raw})
+	}
 }
 
 func providerToolCallDeltaEvent(raw string, currentToolCalls []ToolCall) domain.Event {
@@ -904,10 +926,11 @@ func convertToolCalls(raw []rawToolCall) []ToolCall {
 }
 
 type streamedChatResponse struct {
-	text      strings.Builder
-	reasoning strings.Builder
-	usage     domain.Usage
-	toolCalls []ToolCall
+	text               strings.Builder
+	reasoning          strings.Builder
+	usage              domain.Usage
+	toolCalls          []ToolCall
+	promptProgressSeen bool
 }
 
 func (r *streamedChatResponse) Apply(chunk chatChunk) {
@@ -935,6 +958,9 @@ func (r *streamedChatResponse) Apply(chunk chatChunk) {
 	if usage.HasAnyTokens() {
 		r.usage = usage
 	}
+	if chunk.PromptProgress.Total > 0 || chunk.PromptProgress.Processed > 0 || chunk.PromptProgress.Cache > 0 {
+		r.promptProgressSeen = true
+	}
 }
 
 func cachedTokensFromUsage(values ...int) int {
@@ -948,10 +974,11 @@ func cachedTokensFromUsage(values ...int) int {
 
 func (r streamedChatResponse) Response() ChatResponse {
 	return ChatResponse{
-		Text:      r.text.String(),
-		Reasoning: r.reasoning.String(),
-		Usage:     r.usage,
-		ToolCalls: r.toolCalls,
+		Text:               r.text.String(),
+		Reasoning:          r.reasoning.String(),
+		Usage:              r.usage,
+		ToolCalls:          r.toolCalls,
+		PromptProgressSeen: r.promptProgressSeen,
 	}
 }
 

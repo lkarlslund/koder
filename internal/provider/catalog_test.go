@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -54,6 +55,10 @@ func TestBuildDraftForExistingProvider(t *testing.T) {
 
 func TestProbeReturnsSortedModels(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
 		if r.URL.Path != "/v1/models" {
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
@@ -77,10 +82,17 @@ func TestProbeReturnsSortedModels(t *testing.T) {
 	if result.SelectedModel != "a-model" {
 		t.Fatalf("expected selected model a-model, got %q", result.SelectedModel)
 	}
+	if !result.PromptProgressProbed || result.PromptProgressSupported {
+		t.Fatalf("expected rejected prompt progress probe, got %#v", result)
+	}
 }
 
 func TestProbeAutoSelectsDetectedModelWhenDraftModelIsUnavailable(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
 		_, _ = w.Write([]byte(`{"data":[{"id":"z-model"},{"id":"a-model"}]}`))
 	}))
 	defer server.Close()
@@ -97,6 +109,45 @@ func TestProbeAutoSelectsDetectedModelWhenDraftModelIsUnavailable(t *testing.T) 
 	}
 	if result.SelectedModel != "a-model" {
 		t.Fatalf("expected first detected model, got %q", result.SelectedModel)
+	}
+}
+
+func TestProbeDetectsPromptProgressSupport(t *testing.T) {
+	var sawReturnProgress bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/models":
+			_, _ = w.Write([]byte(`{"data":[{"id":"model-a"}]}`))
+		case "/v1/chat/completions":
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode chat probe body: %v", err)
+			}
+			sawReturnProgress, _ = body["return_progress"].(bool)
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = w.Write([]byte("data: {\"prompt_progress\":{\"total\":10,\"processed\":5,\"cache\":2,\"time_ms\":3}}\n\n"))
+			_, _ = w.Write([]byte("data: [DONE]\n\n"))
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	result, err := Probe(context.Background(), ConnectDraft{
+		ProviderID: "test",
+		Kind:       ProviderKindCompatible,
+		BaseURL:    server.URL + "/v1",
+		Model:      "model-a",
+		Headers:    map[string]string{},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !sawReturnProgress {
+		t.Fatal("expected probe request to include return_progress")
+	}
+	if !result.PromptProgressProbed || !result.PromptProgressSupported {
+		t.Fatalf("expected supported prompt progress probe, got %#v", result)
 	}
 }
 
@@ -156,6 +207,10 @@ func TestValidateDraftAllowsEmptyModelBeforeProbe(t *testing.T) {
 
 func TestProbeUsesValidProviderConfig(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
 		if got := r.Header.Get("Authorization"); got != "Bearer secret" {
 			t.Fatalf("unexpected auth header: %q", got)
 		}

@@ -1392,8 +1392,13 @@
               this.providerDraft.model = result.selected_model;
               this.addOrUpdateModelConfig(this.providerDraft.provider_id, result.selected_model);
             }
+            if (this.providerDraft) {
+              this.providerDraft.prompt_progress_probed = !!result.prompt_progress_probed;
+              this.providerDraft.prompt_progress_supported = !!result.prompt_progress_supported;
+            }
             const selected = result.selected_model ? ' Selected ' + result.selected_model + '.' : '';
-            this.providerStatus = 'Test passed: ' + count + ' model' + (count === 1 ? '' : 's') + (sample ? ' (' + sample + ')' : '') + '.' + selected;
+            const progress = result.prompt_progress_probed ? (' Prompt progress ' + (result.prompt_progress_supported ? 'supported.' : 'not supported.')) : '';
+            this.providerStatus = 'Test passed: ' + count + ' model' + (count === 1 ? '' : 's') + (sample ? ' (' + sample + ')' : '') + '.' + selected + progress;
             this.providerStatusKind = 'success';
           }).catch(err => { this.providerStatus = err.message; this.providerStatusKind = 'danger'; }).finally(() => { this.providerTesting = false; });
         },

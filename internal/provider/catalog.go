@@ -32,26 +32,31 @@ type Descriptor struct {
 }
 
 type ConnectDraft struct {
-	OriginalProviderID string
-	ProviderID         string
-	TemplateID         string
-	Kind               string
-	AuthMethod         string
-	Name               string
-	BaseURL            string
-	APIKey             string
-	APIKeyEnv          string
-	Model              string
-	AutoCompactAt      int
-	Stream             bool
-	Timeout            time.Duration
-	Disabled           bool
-	Headers            map[string]string
+	OriginalProviderID      string
+	ProviderID              string
+	TemplateID              string
+	Kind                    string
+	AuthMethod              string
+	Name                    string
+	BaseURL                 string
+	APIKey                  string
+	APIKeyEnv               string
+	Model                   string
+	AutoCompactAt           int
+	Stream                  bool
+	Timeout                 time.Duration
+	Disabled                bool
+	Headers                 map[string]string
+	PromptProgressMode      string
+	PromptProgressProbed    bool
+	PromptProgressSupported bool
 }
 
 type ProbeResult struct {
-	Models        []domain.Model
-	SelectedModel string
+	Models                  []domain.Model
+	SelectedModel           string
+	PromptProgressProbed    bool
+	PromptProgressSupported bool
 }
 
 var catalog = []Descriptor{
@@ -100,6 +105,7 @@ func BuildDraft(id string, existing map[string]config.Provider) (ConnectDraft, e
 		Stream:             true,
 		Timeout:            2 * time.Minute,
 		Headers:            cloneHeaders(desc.Headers),
+		PromptProgressMode: config.NormalizePromptProgressMode("auto"),
 	}
 	return draft, nil
 }
@@ -119,38 +125,44 @@ func BuildDraftForExisting(id string, existing config.Provider) (ConnectDraft, e
 		}
 	}
 	return ConnectDraft{
-		OriginalProviderID: id,
-		ProviderID:         id,
-		TemplateID:         templateID,
-		Kind:               firstNonEmpty(existing.Kind, ProviderKindCompatible),
-		AuthMethod:         existing.AuthMethod,
-		Name:               firstNonEmpty(existing.Name, desc.Title),
-		BaseURL:            firstNonEmpty(existing.BaseURL, desc.DefaultBaseURL),
-		APIKey:             existing.APIKey,
-		APIKeyEnv:          existing.APIKeyEnv,
-		Model:              desc.ModelHint,
-		AutoCompactAt:      existing.AutoCompactAt,
-		Stream:             existing.Stream,
-		Timeout:            existing.Timeout,
-		Disabled:           existing.Disabled,
-		Headers:            cloneHeaders(existing.Headers),
+		OriginalProviderID:      id,
+		ProviderID:              id,
+		TemplateID:              templateID,
+		Kind:                    firstNonEmpty(existing.Kind, ProviderKindCompatible),
+		AuthMethod:              existing.AuthMethod,
+		Name:                    firstNonEmpty(existing.Name, desc.Title),
+		BaseURL:                 firstNonEmpty(existing.BaseURL, desc.DefaultBaseURL),
+		APIKey:                  existing.APIKey,
+		APIKeyEnv:               existing.APIKeyEnv,
+		Model:                   desc.ModelHint,
+		AutoCompactAt:           existing.AutoCompactAt,
+		Stream:                  existing.Stream,
+		Timeout:                 existing.Timeout,
+		Disabled:                existing.Disabled,
+		Headers:                 cloneHeaders(existing.Headers),
+		PromptProgressMode:      config.NormalizePromptProgressMode(existing.PromptProgressMode),
+		PromptProgressProbed:    existing.PromptProgressProbed,
+		PromptProgressSupported: existing.PromptProgressSupported,
 	}, nil
 }
 
 func (d ConnectDraft) ToConfig() config.Provider {
 	cfg := config.Provider{
-		TemplateID:    strings.TrimSpace(d.TemplateID),
-		Kind:          firstNonEmpty(d.Kind, ProviderKindCompatible),
-		AuthMethod:    strings.TrimSpace(d.AuthMethod),
-		Name:          strings.TrimSpace(d.Name),
-		BaseURL:       strings.TrimSpace(d.BaseURL),
-		APIKey:        strings.TrimSpace(d.APIKey),
-		APIKeyEnv:     strings.TrimSpace(d.APIKeyEnv),
-		Headers:       cloneHeaders(d.Headers),
-		AutoCompactAt: d.AutoCompactAt,
-		Stream:        d.Stream,
-		Timeout:       d.Timeout,
-		Disabled:      d.Disabled,
+		TemplateID:              strings.TrimSpace(d.TemplateID),
+		Kind:                    firstNonEmpty(d.Kind, ProviderKindCompatible),
+		AuthMethod:              strings.TrimSpace(d.AuthMethod),
+		Name:                    strings.TrimSpace(d.Name),
+		BaseURL:                 strings.TrimSpace(d.BaseURL),
+		APIKey:                  strings.TrimSpace(d.APIKey),
+		APIKeyEnv:               strings.TrimSpace(d.APIKeyEnv),
+		Headers:                 cloneHeaders(d.Headers),
+		AutoCompactAt:           d.AutoCompactAt,
+		Stream:                  d.Stream,
+		Timeout:                 d.Timeout,
+		Disabled:                d.Disabled,
+		PromptProgressMode:      config.NormalizePromptProgressMode(d.PromptProgressMode),
+		PromptProgressProbed:    d.PromptProgressProbed,
+		PromptProgressSupported: d.PromptProgressSupported,
 	}
 	return cfg
 }
@@ -171,7 +183,38 @@ func Probe(ctx context.Context, draft ConnectDraft, recorder *debugsrv.Recorder)
 	if err != nil {
 		return ProbeResult{}, err
 	}
-	return ProbeResult{Models: models, SelectedModel: selected}, nil
+	probed, supported := probePromptProgress(ctx, draft, selected, recorder)
+	return ProbeResult{Models: models, SelectedModel: selected, PromptProgressProbed: probed, PromptProgressSupported: supported}, nil
+}
+
+func probePromptProgress(ctx context.Context, draft ConnectDraft, modelID string, recorder *debugsrv.Recorder) (bool, bool) {
+	mode := config.NormalizePromptProgressMode(draft.PromptProgressMode)
+	if mode == "disabled" {
+		return false, false
+	}
+	probe := draft
+	probe.PromptProgressMode = "enabled"
+	probe.PromptProgressProbed = true
+	probe.PromptProgressSupported = true
+	client, err := New(probe.ProviderID, probe.ToConfig(), recorder)
+	if err != nil {
+		return true, false
+	}
+	req := ChatRequest{
+		Model:    strings.TrimSpace(modelID),
+		Messages: []Message{{Role: domain.MessageRoleUser, Content: "ping"}},
+		Stream:   true,
+		ExtraBody: map[string]any{
+			"max_tokens":      1,
+			"return_progress": true,
+		},
+	}
+	resp, err := client.StreamChatResponse(ctx, req, nil)
+	if err != nil {
+		return true, false
+	}
+	_ = resp
+	return true, true
 }
 
 func selectedProbeModel(models []domain.Model, requested string) (string, error) {

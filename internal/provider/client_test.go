@@ -116,6 +116,23 @@ func TestChatRequestMarshalJSONIncludesStreamUsageOptions(t *testing.T) {
 	}
 }
 
+func TestChatRequestMarshalJSONIncludesExtraBody(t *testing.T) {
+	data, err := json.Marshal(ChatRequest{
+		Model:  "test-model",
+		Stream: true,
+		ExtraBody: map[string]any{
+			"return_progress": true,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(data)
+	if !strings.Contains(got, `"return_progress":true`) {
+		t.Fatalf("expected extra body fields in request, got %s", got)
+	}
+}
+
 func TestPropsUsesModelQueryAndParsesContextWindow(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/props" {
@@ -561,6 +578,43 @@ func TestStreamChatResponseAggregatesToolCallsAndDeltas(t *testing.T) {
 	}
 	if toolDelta.Tool != domain.ToolKindBash || toolDelta.ToolCallID != "call_1" || !strings.Contains(toolDelta.Meta["arguments"], "printf hello") {
 		t.Fatalf("expected streamed tool call details, got %#v", toolDelta)
+	}
+}
+
+func TestStreamChatResponseEmitsPromptProgressStatus(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"prompt_progress\":{\"total\":10,\"processed\":5,\"cache\":2,\"time_ms\":3}}\n\n"))
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"done\"}}]}\n\n"))
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer server.Close()
+
+	client, err := New("test", config.Provider{
+		BaseURL: server.URL,
+		Timeout: time.Second,
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var status domain.Event
+	resp, err := client.StreamChatResponse(context.Background(), ChatRequest{Model: "test"}, func(evt domain.Event) {
+		if evt.Kind == domain.EventKindStatus && strings.HasPrefix(evt.Text, "Processing prompt") {
+			status = evt
+		}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !resp.PromptProgressSeen {
+		t.Fatalf("expected prompt progress marker, got %#v", resp)
+	}
+	if status.Text != "Processing prompt 50%" {
+		t.Fatalf("expected prompt progress status, got %#v", status)
+	}
+	if status.Meta["processed"] != "5" || status.Meta["total"] != "10" || status.Meta["cache"] != "2" || status.Meta["time_ms"] != "3" {
+		t.Fatalf("unexpected prompt progress metadata: %#v", status.Meta)
 	}
 }
 

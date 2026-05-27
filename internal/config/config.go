@@ -34,18 +34,21 @@ type Store struct {
 }
 
 type Provider struct {
-	TemplateID    string            `toml:"template_id"`
-	Kind          string            `toml:"kind"`
-	AuthMethod    string            `toml:"auth_method"`
-	Name          string            `toml:"name"`
-	BaseURL       string            `toml:"base_url"`
-	APIKey        string            `toml:"api_key"`
-	APIKeyEnv     string            `toml:"api_key_env"`
-	Headers       map[string]string `toml:"headers"`
-	AutoCompactAt int               `toml:"auto_compact_at"`
-	Stream        bool              `toml:"stream"`
-	Timeout       time.Duration     `toml:"timeout"`
-	Disabled      bool              `toml:"disabled"`
+	TemplateID              string            `toml:"template_id"`
+	Kind                    string            `toml:"kind"`
+	AuthMethod              string            `toml:"auth_method"`
+	Name                    string            `toml:"name"`
+	BaseURL                 string            `toml:"base_url"`
+	APIKey                  string            `toml:"api_key"`
+	APIKeyEnv               string            `toml:"api_key_env"`
+	Headers                 map[string]string `toml:"headers"`
+	AutoCompactAt           int               `toml:"auto_compact_at"`
+	Stream                  bool              `toml:"stream"`
+	Timeout                 time.Duration     `toml:"timeout"`
+	Disabled                bool              `toml:"disabled"`
+	PromptProgressMode      string            `toml:"prompt_progress_mode"`
+	PromptProgressProbed    bool              `toml:"prompt_progress_probed"`
+	PromptProgressSupported bool              `toml:"prompt_progress_supported"`
 }
 
 // ModelConfig stores settings for one provider/model pair.
@@ -280,6 +283,7 @@ func (c *Config) applyDefaults() {
 		if provider.AutoCompactAt == 0 {
 			provider.AutoCompactAt = c.AutoCompactAt
 		}
+		provider.PromptProgressMode = NormalizePromptProgressMode(provider.PromptProgressMode)
 		if provider.Headers == nil {
 			provider.Headers = map[string]string{}
 		}
@@ -468,11 +472,21 @@ func normalizeModelConfig(model ModelConfig) ModelConfig {
 
 func providerDefaults() Provider {
 	return Provider{
-		Headers:       map[string]string{},
-		AutoCompactAt: defaultAutoCompactAt,
-		Stream:        true,
-		Timeout:       10 * time.Minute,
-		Disabled:      false,
+		Headers:            map[string]string{},
+		AutoCompactAt:      defaultAutoCompactAt,
+		Stream:             true,
+		Timeout:            10 * time.Minute,
+		Disabled:           false,
+		PromptProgressMode: "auto",
+	}
+}
+
+func NormalizePromptProgressMode(value string) string {
+	switch strings.TrimSpace(strings.ToLower(value)) {
+	case "enabled", "disabled":
+		return strings.TrimSpace(strings.ToLower(value))
+	default:
+		return "auto"
 	}
 }
 

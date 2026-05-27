@@ -132,28 +132,33 @@ type ProviderConfigItem struct {
 
 // ProviderDraft is the JSON-friendly provider edit shape used by renderers.
 type ProviderDraft struct {
-	OriginalProviderID string            `json:"original_provider_id"`
-	ProviderID         string            `json:"provider_id"`
-	TemplateID         string            `json:"template_id"`
-	Kind               string            `json:"kind"`
-	AuthMethod         string            `json:"auth_method"`
-	Name               string            `json:"name"`
-	BaseURL            string            `json:"base_url"`
-	APIKey             string            `json:"api_key"`
-	APIKeyEnv          string            `json:"api_key_env"`
-	Model              string            `json:"model"`
-	AutoCompactAt      int               `json:"auto_compact_at"`
-	Stream             bool              `json:"stream"`
-	Timeout            string            `json:"timeout"`
-	Disabled           bool              `json:"disabled"`
-	Headers            map[string]string `json:"headers"`
+	OriginalProviderID      string            `json:"original_provider_id"`
+	ProviderID              string            `json:"provider_id"`
+	TemplateID              string            `json:"template_id"`
+	Kind                    string            `json:"kind"`
+	AuthMethod              string            `json:"auth_method"`
+	Name                    string            `json:"name"`
+	BaseURL                 string            `json:"base_url"`
+	APIKey                  string            `json:"api_key"`
+	APIKeyEnv               string            `json:"api_key_env"`
+	Model                   string            `json:"model"`
+	AutoCompactAt           int               `json:"auto_compact_at"`
+	Stream                  bool              `json:"stream"`
+	Timeout                 string            `json:"timeout"`
+	Disabled                bool              `json:"disabled"`
+	Headers                 map[string]string `json:"headers"`
+	PromptProgressMode      string            `json:"prompt_progress_mode"`
+	PromptProgressProbed    bool              `json:"prompt_progress_probed"`
+	PromptProgressSupported bool              `json:"prompt_progress_supported"`
 }
 
 // ProviderProbeResult reports a provider test outcome.
 type ProviderProbeResult struct {
-	ModelCount    int      `json:"model_count"`
-	Models        []string `json:"models"`
-	SelectedModel string   `json:"selected_model"`
+	ModelCount              int      `json:"model_count"`
+	Models                  []string `json:"models"`
+	SelectedModel           string   `json:"selected_model"`
+	PromptProgressProbed    bool     `json:"prompt_progress_probed"`
+	PromptProgressSupported bool     `json:"prompt_progress_supported"`
 }
 
 type ModelConfigPreference struct {
@@ -1046,7 +1051,13 @@ func (c *Controller) TestProvider(ctx context.Context, draft ProviderDraft) (Pro
 	for _, item := range result.Models {
 		models = append(models, item.ID)
 	}
-	return ProviderProbeResult{ModelCount: len(result.Models), Models: models, SelectedModel: result.SelectedModel}, nil
+	return ProviderProbeResult{
+		ModelCount:              len(result.Models),
+		Models:                  models,
+		SelectedModel:           result.SelectedModel,
+		PromptProgressProbed:    result.PromptProgressProbed,
+		PromptProgressSupported: result.PromptProgressSupported,
+	}, nil
 }
 
 // SaveProvider validates and persists a provider draft.
@@ -1060,6 +1071,10 @@ func (c *Controller) SaveProvider(ctx context.Context, draft ProviderDraft) (Pro
 		return ProviderState{}, err
 	}
 	catalogDraft.Model = probe.SelectedModel
+	catalogDraft.PromptProgressProbed = probe.PromptProgressProbed
+	catalogDraft.PromptProgressSupported = probe.PromptProgressSupported
+	draft.PromptProgressProbed = probe.PromptProgressProbed
+	draft.PromptProgressSupported = probe.PromptProgressSupported
 	originalID := strings.TrimSpace(catalogDraft.OriginalProviderID)
 	catalogDraft.ProviderID = strings.TrimSpace(catalogDraft.ProviderID)
 	if catalogDraft.ProviderID == "" {
@@ -1719,41 +1734,47 @@ func (c *Controller) providerStateLocked() ProviderState {
 
 func providerDraftFromCatalog(draft provider.ConnectDraft) ProviderDraft {
 	return ProviderDraft{
-		OriginalProviderID: strings.TrimSpace(draft.OriginalProviderID),
-		ProviderID:         strings.TrimSpace(draft.ProviderID),
-		TemplateID:         strings.TrimSpace(draft.TemplateID),
-		Kind:               strings.TrimSpace(draft.Kind),
-		AuthMethod:         strings.TrimSpace(draft.AuthMethod),
-		Name:               strings.TrimSpace(draft.Name),
-		BaseURL:            strings.TrimSpace(draft.BaseURL),
-		APIKey:             strings.TrimSpace(draft.APIKey),
-		APIKeyEnv:          strings.TrimSpace(draft.APIKeyEnv),
-		Model:              strings.TrimSpace(draft.Model),
-		AutoCompactAt:      draft.AutoCompactAt,
-		Stream:             draft.Stream,
-		Timeout:            durationString(draft.Timeout),
-		Disabled:           draft.Disabled,
-		Headers:            cloneHeaderMap(draft.Headers),
+		OriginalProviderID:      strings.TrimSpace(draft.OriginalProviderID),
+		ProviderID:              strings.TrimSpace(draft.ProviderID),
+		TemplateID:              strings.TrimSpace(draft.TemplateID),
+		Kind:                    strings.TrimSpace(draft.Kind),
+		AuthMethod:              strings.TrimSpace(draft.AuthMethod),
+		Name:                    strings.TrimSpace(draft.Name),
+		BaseURL:                 strings.TrimSpace(draft.BaseURL),
+		APIKey:                  strings.TrimSpace(draft.APIKey),
+		APIKeyEnv:               strings.TrimSpace(draft.APIKeyEnv),
+		Model:                   strings.TrimSpace(draft.Model),
+		AutoCompactAt:           draft.AutoCompactAt,
+		Stream:                  draft.Stream,
+		Timeout:                 durationString(draft.Timeout),
+		Disabled:                draft.Disabled,
+		Headers:                 cloneHeaderMap(draft.Headers),
+		PromptProgressMode:      config.NormalizePromptProgressMode(draft.PromptProgressMode),
+		PromptProgressProbed:    draft.PromptProgressProbed,
+		PromptProgressSupported: draft.PromptProgressSupported,
 	}
 }
 
 func providerDraftToCatalog(draft ProviderDraft) provider.ConnectDraft {
 	return provider.ConnectDraft{
-		OriginalProviderID: strings.TrimSpace(draft.OriginalProviderID),
-		ProviderID:         strings.TrimSpace(draft.ProviderID),
-		TemplateID:         strings.TrimSpace(draft.TemplateID),
-		Kind:               strings.TrimSpace(draft.Kind),
-		AuthMethod:         strings.TrimSpace(draft.AuthMethod),
-		Name:               strings.TrimSpace(draft.Name),
-		BaseURL:            strings.TrimSpace(draft.BaseURL),
-		APIKey:             strings.TrimSpace(draft.APIKey),
-		APIKeyEnv:          strings.TrimSpace(draft.APIKeyEnv),
-		Model:              strings.TrimSpace(draft.Model),
-		AutoCompactAt:      draft.AutoCompactAt,
-		Stream:             draft.Stream,
-		Timeout:            parseDurationOrZero(draft.Timeout),
-		Disabled:           draft.Disabled,
-		Headers:            cloneHeaderMap(draft.Headers),
+		OriginalProviderID:      strings.TrimSpace(draft.OriginalProviderID),
+		ProviderID:              strings.TrimSpace(draft.ProviderID),
+		TemplateID:              strings.TrimSpace(draft.TemplateID),
+		Kind:                    strings.TrimSpace(draft.Kind),
+		AuthMethod:              strings.TrimSpace(draft.AuthMethod),
+		Name:                    strings.TrimSpace(draft.Name),
+		BaseURL:                 strings.TrimSpace(draft.BaseURL),
+		APIKey:                  strings.TrimSpace(draft.APIKey),
+		APIKeyEnv:               strings.TrimSpace(draft.APIKeyEnv),
+		Model:                   strings.TrimSpace(draft.Model),
+		AutoCompactAt:           draft.AutoCompactAt,
+		Stream:                  draft.Stream,
+		Timeout:                 parseDurationOrZero(draft.Timeout),
+		Disabled:                draft.Disabled,
+		Headers:                 cloneHeaderMap(draft.Headers),
+		PromptProgressMode:      config.NormalizePromptProgressMode(draft.PromptProgressMode),
+		PromptProgressProbed:    draft.PromptProgressProbed,
+		PromptProgressSupported: draft.PromptProgressSupported,
 	}
 }
 
@@ -1795,6 +1816,7 @@ func applyNewProviderDefaults(next *config.Provider, autoCompactAt int) {
 	next.Stream = true
 	next.Timeout = 2 * time.Minute
 	next.Disabled = false
+	next.PromptProgressMode = "auto"
 }
 
 func applyProviderDraftPreferences(next *config.Provider, draft ProviderDraft) {
@@ -1808,6 +1830,9 @@ func applyProviderDraftPreferences(next *config.Provider, draft ProviderDraft) {
 	}
 	next.Stream = draft.Stream
 	next.Disabled = draft.Disabled
+	next.PromptProgressMode = config.NormalizePromptProgressMode(draft.PromptProgressMode)
+	next.PromptProgressProbed = draft.PromptProgressProbed
+	next.PromptProgressSupported = draft.PromptProgressSupported
 }
 
 func uiPreferencesFromConfig(ui config.UI) UIPreferences {

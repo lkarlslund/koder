@@ -73,20 +73,36 @@ func PreserveThinkingEnabled(modelID, selected string) bool {
 }
 
 func RequestExtraBody(cfg config.Provider, modelID, selected string) map[string]any {
-	if !PreserveThinkingEnabled(modelID, selected) {
-		return nil
+	body := map[string]any{}
+	if PromptProgressEnabled(cfg) {
+		body["return_progress"] = true
 	}
-	if isDashScopeBaseURL(cfg.BaseURL) {
-		return map[string]any{
-			"enable_thinking":   false,
-			"preserve_thinking": false,
+	if PreserveThinkingEnabled(modelID, selected) {
+		if isDashScopeBaseURL(cfg.BaseURL) {
+			body["enable_thinking"] = false
+			body["preserve_thinking"] = false
+		} else {
+			body["chat_template_kwargs"] = map[string]any{
+				"enable_thinking":   false,
+				"preserve_thinking": false,
+			}
 		}
 	}
-	return map[string]any{
-		"chat_template_kwargs": map[string]any{
-			"enable_thinking":   false,
-			"preserve_thinking": false,
-		},
+	if len(body) == 0 {
+		return nil
+	}
+	return body
+}
+
+func PromptProgressEnabled(cfg config.Provider) bool {
+	mode := config.NormalizePromptProgressMode(cfg.PromptProgressMode)
+	switch mode {
+	case "enabled":
+		return true
+	case "auto":
+		return cfg.PromptProgressProbed && cfg.PromptProgressSupported
+	default:
+		return false
 	}
 }
 

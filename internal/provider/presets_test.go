@@ -39,3 +39,26 @@ func TestRequestExtraBodyUsesCompatibleChatTemplateKwargs(t *testing.T) {
 		t.Fatalf("unexpected compatible body: %#v", got)
 	}
 }
+
+func TestRequestExtraBodyIncludesAutoDetectedPromptProgress(t *testing.T) {
+	got := RequestExtraBody(config.Provider{
+		PromptProgressMode:      "auto",
+		PromptProgressProbed:    true,
+		PromptProgressSupported: true,
+	}, "model-a", ModelPresetDefault)
+	want := map[string]any{
+		"return_progress": true,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected prompt progress body: %#v", got)
+	}
+}
+
+func TestRequestExtraBodySkipsUnprobedPromptProgress(t *testing.T) {
+	got := RequestExtraBody(config.Provider{
+		PromptProgressMode: "auto",
+	}, "model-a", ModelPresetDefault)
+	if got != nil {
+		t.Fatalf("expected no extra body before probe, got %#v", got)
+	}
+}
