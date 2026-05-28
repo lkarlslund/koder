@@ -38,10 +38,7 @@
       <template x-for="item in timeline()" :key="item.id || item.ID">
         <section class="transcript-turn mb-4">
           <template x-if="item.kind === 'user'">
-            <div class="turn user-turn" :class="userTurnClass(item)">
-              <div class="user-turn-meta mb-2">
-                <span class="badge user-source-badge" :class="userMessageSourceClass(item)" x-text="userMessageSourceLabel(item)"></span>
-              </div>
+            <div class="turn user-turn">
               <template x-if="(item.content?.attachments || []).length > 0">
                 <div class="attachment-strip mb-2">
                   <template x-for="attachment in item.content.attachments || []" :key="attachment.id || attachment.ID || attachment.path || attachment.Path">
@@ -52,7 +49,10 @@
                   </template>
                 </div>
               </template>
-              <div class="markdown-body" x-html="markdownHTML(item.content?.text || '')"></div>
+              <div class="markdown-body user-markdown-body">
+                <span class="badge user-source-badge" :class="userMessageSourceClass(item)" x-text="userMessageSourceLabel(item)"></span>
+                <span class="user-message-text" x-html="markdownHTML(item.content?.text || '')"></span>
+              </div>
             </div>
           </template>
           <template x-if="item.kind === 'assistant'">

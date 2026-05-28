@@ -161,10 +161,6 @@
         default: return 'text-bg-success';
       }
     }
-    function userMessageTurnClass(item) {
-      const source = userMessageSourceValue(item).replace(/[^a-z0-9_-]/g, '-');
-      return 'user-turn-source-' + source;
-    }
     function toolResultHeader(title) {
       return '<div class="tool-result-header">' + escapeHTML(title) + '</div>';
     }
@@ -786,7 +782,6 @@
           return Math.max(1, Math.ceil(source.length / 4));
         },
         markdownHTML(text) { return renderMarkdown(text); },
-        userTurnClass(item) { return userMessageTurnClass(item); },
         userMessageSourceLabel(item) { return userMessageSourceLabelText(item); },
         userMessageSourceClass(item) { return userMessageSourceBadgeClass(item); },
         statusText() { const snapshot = this.activeSnapshot(); return snapshot.StatusText || snapshot.status_text || snapshot.Status || 'idle'; },
