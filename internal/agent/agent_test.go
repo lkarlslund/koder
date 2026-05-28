@@ -320,13 +320,6 @@ func TestFormatEnvironmentPrompt(t *testing.T) {
 		Shell:         "/bin/zsh",
 		Git: gitSnapshot{
 			Repository: true,
-			Root:       "/repo",
-			Branch:     "main",
-			Commit:     "abc1234",
-			Upstream:   "origin/main",
-			Staged:     1,
-			Unstaged:   2,
-			Untracked:  3,
 		},
 	})
 	for _, want := range []string{
@@ -338,14 +331,14 @@ func TestFormatEnvironmentPrompt(t *testing.T) {
 		"- OS: Linux 6.8.0",
 		"- Shell: /bin/zsh",
 		"- Git repository: yes",
-		"- Git root: /repo",
-		"- Git branch: main",
-		"- Git commit: abc1234",
-		"- Git upstream: origin/main",
-		"- Git status: dirty (staged 1, unstaged 2, untracked 3)",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("expected %q in environment prompt, got %q", want, got)
+		}
+	}
+	for _, forbidden := range []string{"- Git root:", "- Git branch:", "- Git commit:", "- Git upstream:", "- Git status:"} {
+		if strings.Contains(got, forbidden) {
+			t.Fatalf("expected volatile git detail %q to be omitted, got %q", forbidden, got)
 		}
 	}
 }
@@ -454,15 +447,6 @@ func TestGitInfoDetectsRepositoryState(t *testing.T) {
 	got := gitInfo(repo)
 	if !got.Repository {
 		t.Fatalf("expected git repository, got %#v", got)
-	}
-	if got.Root != repo {
-		t.Fatalf("expected root %q, got %#v", repo, got)
-	}
-	if got.Branch == "" || got.Commit == "" {
-		t.Fatalf("expected branch and commit, got %#v", got)
-	}
-	if got.Unstaged != 1 || got.Untracked != 1 {
-		t.Fatalf("expected unstaged and untracked counts, got %#v", got)
 	}
 }
 

@@ -5,7 +5,6 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
-	"strconv"
 	"strings"
 	"time"
 
@@ -26,13 +25,6 @@ type environmentSnapshot struct {
 
 type gitSnapshot struct {
 	Repository bool
-	Root       string
-	Branch     string
-	Commit     string
-	Upstream   string
-	Staged     int
-	Unstaged   int
-	Untracked  int
 }
 
 func (e *Engine) environmentPrompt(session domain.Session) string {
@@ -79,11 +71,6 @@ func formatEnvironmentPrompt(snapshot environmentSnapshot) string {
 		return b.String()
 	}
 	writeEnvironmentLine(&b, "Git repository", "yes")
-	writeEnvironmentLine(&b, "Git root", fallbackUnknown(snapshot.Git.Root))
-	writeEnvironmentLine(&b, "Git branch", fallbackUnknown(snapshot.Git.Branch))
-	writeEnvironmentLine(&b, "Git commit", fallbackUnknown(snapshot.Git.Commit))
-	writeEnvironmentLine(&b, "Git upstream", fallbackUnknown(snapshot.Git.Upstream))
-	writeEnvironmentLine(&b, "Git status", formatGitStatus(snapshot.Git))
 	return b.String()
 }
 
@@ -125,30 +112,11 @@ func shellDescription() string {
 }
 
 func gitInfo(workdir string) gitSnapshot {
-	root, ok := gitOutput(workdir, "rev-parse", "--show-toplevel")
+	_, ok := gitOutput(workdir, "rev-parse", "--is-inside-work-tree")
 	if !ok {
 		return gitSnapshot{}
 	}
-	branch, branchOK := gitOutput(workdir, "symbolic-ref", "--quiet", "--short", "HEAD")
-	if !branchOK {
-		if commit, ok := gitOutput(workdir, "rev-parse", "--short", "HEAD"); ok {
-			branch = "detached at " + commit
-		}
-	}
-	commit, _ := gitOutput(workdir, "rev-parse", "--short", "HEAD")
-	upstream, _ := gitOutput(workdir, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
-	status, _ := gitOutput(workdir, "status", "--porcelain")
-	staged, unstaged, untracked := parseGitPorcelain(status)
-	return gitSnapshot{
-		Repository: true,
-		Root:       root,
-		Branch:     branch,
-		Commit:     commit,
-		Upstream:   upstream,
-		Staged:     staged,
-		Unstaged:   unstaged,
-		Untracked:  untracked,
-	}
+	return gitSnapshot{Repository: true}
 }
 
 func gitOutput(workdir string, args ...string) (string, bool) {
@@ -167,40 +135,4 @@ func commandOutput(workdir string, name string, args ...string) (string, bool) {
 		return "", false
 	}
 	return strings.TrimRight(string(out), "\r\n"), true
-}
-
-func parseGitPorcelain(status string) (staged int, unstaged int, untracked int) {
-	for _, line := range strings.Split(status, "\n") {
-		if len(line) < 2 {
-			continue
-		}
-		if strings.HasPrefix(line, "??") {
-			untracked++
-			continue
-		}
-		if line[0] != ' ' {
-			staged++
-		}
-		if line[1] != ' ' {
-			unstaged++
-		}
-	}
-	return staged, unstaged, untracked
-}
-
-func formatGitStatus(git gitSnapshot) string {
-	if git.Staged == 0 && git.Unstaged == 0 && git.Untracked == 0 {
-		return "clean"
-	}
-	parts := []string{"dirty"}
-	if git.Staged > 0 {
-		parts = append(parts, "staged "+strconv.Itoa(git.Staged))
-	}
-	if git.Unstaged > 0 {
-		parts = append(parts, "unstaged "+strconv.Itoa(git.Unstaged))
-	}
-	if git.Untracked > 0 {
-		parts = append(parts, "untracked "+strconv.Itoa(git.Untracked))
-	}
-	return parts[0] + " (" + strings.Join(parts[1:], ", ") + ")"
 }
