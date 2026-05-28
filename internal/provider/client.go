@@ -876,10 +876,11 @@ func (c *Client) emitChunk(emit func(domain.Event), chunk chatChunk, raw string,
 			text = fmt.Sprintf("Processing prompt %d%%", processed*100/total)
 		}
 		meta := map[string]string{
-			"processed": strconv.Itoa(processed),
-			"total":     strconv.Itoa(total),
-			"cache":     strconv.Itoa(chunk.PromptProgress.Cache),
-			"time_ms":   strconv.FormatInt(chunk.PromptProgress.TimeMS, 10),
+			domain.EventMetaPromptProgress: "true",
+			"processed":                    strconv.Itoa(processed),
+			"total":                        strconv.Itoa(total),
+			"cache":                        strconv.Itoa(chunk.PromptProgress.Cache),
+			"time_ms":                      strconv.FormatInt(chunk.PromptProgress.TimeMS, 10),
 		}
 		emit(domain.Event{Kind: domain.EventKindStatus, Text: text, Meta: meta, RawJSON: raw})
 	}

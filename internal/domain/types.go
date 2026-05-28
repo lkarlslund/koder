@@ -367,6 +367,9 @@ const (
 	// EventMetaRefresh names a refresh target requested by an event.
 	EventMetaRefresh = "refresh"
 
+	// EventMetaPromptProgress marks provider prompt preprocessing progress.
+	EventMetaPromptProgress = "prompt_progress"
+
 	// EventRefreshQueue asks chat runtimes to reload queued inputs from storage.
 	EventRefreshQueue = "queue"
 )

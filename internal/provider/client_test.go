@@ -613,7 +613,7 @@ func TestStreamChatResponseEmitsPromptProgressStatus(t *testing.T) {
 	if status.Text != "Processing prompt 50%" {
 		t.Fatalf("expected prompt progress status, got %#v", status)
 	}
-	if status.Meta["processed"] != "5" || status.Meta["total"] != "10" || status.Meta["cache"] != "2" || status.Meta["time_ms"] != "3" {
+	if status.Meta[domain.EventMetaPromptProgress] != "true" || status.Meta["processed"] != "5" || status.Meta["total"] != "10" || status.Meta["cache"] != "2" || status.Meta["time_ms"] != "3" {
 		t.Fatalf("unexpected prompt progress metadata: %#v", status.Meta)
 	}
 }

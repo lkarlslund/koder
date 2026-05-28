@@ -621,6 +621,45 @@ func TestRuntimeRefreshesQueueWhenRunnerConsumesQueuedSteer(t *testing.T) {
 	}
 }
 
+func TestRuntimeShowsPromptProgressAsPreprocessingStatus(t *testing.T) {
+	st := openTestStore(t)
+	session, chat, _ := createSessionWithPlan(t, st)
+	rt := newTestChat(t, st, session, chat, &runtimeFakeRunner{})
+	updates, unsub := rt.Subscribe()
+	defer unsub()
+
+	rt.inbox <- streamEventCmd{
+		event: domain.Event{
+			Kind: domain.EventKindStatus,
+			Text: "Processing prompt 4%",
+			Meta: map[string]string{
+				domain.EventMetaPromptProgress: "true",
+				"processed":                    "4",
+				"total":                        "100",
+			},
+		},
+	}
+
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case update := <-updates:
+			if update.Event == nil || update.Event.Meta[domain.EventMetaPromptProgress] != "true" {
+				continue
+			}
+			if update.Status != StatusWaitingLLM {
+				t.Fatalf("status = %q", update.Status)
+			}
+			if update.StatusText != "LLM preprocessing 4%" {
+				t.Fatalf("status text = %q", update.StatusText)
+			}
+			return
+		case <-deadline:
+			t.Fatalf("timed out waiting for prompt progress status: %#v", rt.Snapshot())
+		}
+	}
+}
+
 func TestRuntimePreservesPromptAndContinueNotes(t *testing.T) {
 	st := openTestStore(t)
 	session, chat, _ := createSessionWithPlan(t, st)

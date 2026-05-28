@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -1059,6 +1060,10 @@ func (r *Chat) handleStreamEvent(evt domain.Event) {
 		r.cancelState = CancelStateNone
 		r.running = nil
 	case domain.EventKindStatus:
+		if text, ok := promptProgressStatusText(evt.Meta); ok {
+			r.status = StatusWaitingLLM
+			r.statusText = text
+		}
 		if afterTokens, ok := completedCompactionContext(evt.Item, evt.Meta); ok {
 			r.chat.LastKnownContextTokens = afterTokens
 			r.chat.ContextTokensKnown = false
@@ -1088,6 +1093,25 @@ func (r *Chat) queueRefreshForEvent(evt domain.Event) ([]domain.QueuedInput, boo
 		return nil, false, fmt.Errorf("refresh queued inputs: %w", err)
 	}
 	return cloneQueuedInputs(chat.QueuedInputs), true, nil
+}
+
+func promptProgressStatusText(meta map[string]string) (string, bool) {
+	if meta[domain.EventMetaPromptProgress] != "true" {
+		return "", false
+	}
+	total, totalErr := strconv.Atoi(strings.TrimSpace(meta["total"]))
+	processed, processedErr := strconv.Atoi(strings.TrimSpace(meta["processed"]))
+	if totalErr == nil && processedErr == nil && total > 0 {
+		percent := processed * 100 / total
+		if percent < 0 {
+			percent = 0
+		}
+		if percent > 100 {
+			percent = 100
+		}
+		return fmt.Sprintf("LLM preprocessing %d%%", percent), true
+	}
+	return "LLM preprocessing", true
 }
 
 func completedCompactionContext(item domain.TimelineItem, meta map[string]string) (int, bool) {
