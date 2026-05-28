@@ -198,6 +198,43 @@ func (e *Engine) ApproveToolInChatWithRule(ctx context.Context, sessionID, chatI
 	return e.approveToolInChatWithRule(ctx, sessionID, chatID, toolCallID, rule)
 }
 
+func (e *Engine) ApproveToolTurn(ctx context.Context, turn *chatpkg.TurnState, toolCallID string) (<-chan domain.Event, error) {
+	if turn == nil {
+		return nil, fmt.Errorf("turn state is required")
+	}
+	return e.approveToolTurn(ctx, turn, toolCallID)
+}
+
+func (e *Engine) ApproveToolTurnWithRule(ctx context.Context, turn *chatpkg.TurnState, toolCallID string, rule domain.PermissionOverride) (<-chan domain.Event, error) {
+	if turn == nil {
+		return nil, fmt.Errorf("turn state is required")
+	}
+	rule.Pattern = strings.TrimSpace(rule.Pattern)
+	if rule.Pattern == "" {
+		rule.Pattern = "*"
+	}
+	if err := permissionprofile.Validate(rule.Action); err != nil {
+		return nil, err
+	}
+	session := turn.Session()
+	if err := e.store.AddSessionPermissionRule(ctx, session.ID, rule); err != nil {
+		return nil, err
+	}
+	setEvents := emitOnce(domain.Event{
+		Kind: domain.EventKindStatus,
+		Text: fmt.Sprintf("approved all %s requests matching %s for this session", rule.Tool, rule.Pattern),
+		Meta: map[string]string{
+			"permission_tool":    string(rule.Tool),
+			"permission_pattern": rule.Pattern,
+		},
+	})
+	next, err := e.approveToolTurn(ctx, turn, toolCallID)
+	if err != nil {
+		return nil, err
+	}
+	return concatEvents(setEvents, next), nil
+}
+
 func (e *Engine) Approve(ctx context.Context, sessionID, approvalID domain.ID) (<-chan domain.Event, error) {
 	return e.approve(ctx, sessionID, "", approvalID)
 }
@@ -208,6 +245,13 @@ func (e *Engine) ApproveInChat(ctx context.Context, sessionID, chatID, approvalI
 
 func (e *Engine) ApproveToolInChat(ctx context.Context, sessionID, chatID domain.ID, toolCallID string) (<-chan domain.Event, error) {
 	return e.approveTool(ctx, sessionID, chatID, toolCallID)
+}
+
+func (e *Engine) DenyToolTurn(ctx context.Context, turn *chatpkg.TurnState, toolCallID string) (<-chan domain.Event, error) {
+	if turn == nil {
+		return nil, fmt.Errorf("turn state is required")
+	}
+	return e.denyTool(ctx, turn.Session().ID, turn.Chat().ID, toolCallID)
 }
 
 func (e *Engine) Deny(ctx context.Context, sessionID, approvalID domain.ID) (<-chan domain.Event, error) {
@@ -1914,6 +1958,69 @@ func (e *Engine) approveTool(ctx context.Context, sessionID, chatID domain.ID, t
 				return
 			}
 			e.emitAssistantError(ctx, out, chatID, session.ID, err)
+		}
+	}()
+	return out, nil
+}
+
+func (e *Engine) approveToolTurn(ctx context.Context, turn *chatpkg.TurnState, toolCallID string) (<-chan domain.Event, error) {
+	session := turn.Session()
+	chat := turn.Chat()
+	req, err := e.requestForToolCall(ctx, chat.ID, toolCallID)
+	if err != nil {
+		return nil, err
+	}
+	providerCfg, ok := e.cfg.Provider(session.ProviderID)
+	if !ok {
+		return nil, fmt.Errorf("provider %q not found", session.ProviderID)
+	}
+	client, err := provider.New(session.ProviderID, providerCfg, e.debug)
+	if err != nil {
+		return nil, err
+	}
+	out := make(chan domain.Event)
+	go func() {
+		defer close(out)
+		events, execErr := e.executePreparedToolCallForTurn(ctx, turn, chat.ID, session.ID, req)
+		if execErr != nil {
+			if interruptedErr(execErr) {
+				e.emitInterrupted(out, chat.ID, session.ID)
+				return
+			}
+			e.emitAssistantError(ctx, out, chat.ID, session.ID, execErr)
+			return
+		}
+		for _, evt := range events {
+			out <- evt
+		}
+		if turncontrol.ShouldStop(ctx) {
+			e.emitInterrupted(out, chat.ID, session.ID)
+			return
+		}
+		compacted, err := e.autoCompactTurnIfNeeded(ctx, session, chat, turn, client, out)
+		if err != nil {
+			if interruptedErr(err) {
+				e.emitInterrupted(out, chat.ID, session.ID)
+				return
+			}
+			e.emitAssistantError(ctx, out, chat.ID, session.ID, err)
+			return
+		}
+		transient := []provider.InstructionBlock(nil)
+		if compacted {
+			session, err = e.store.GetSession(ctx, session.ID)
+			if err != nil {
+				out <- domain.Event{Kind: domain.EventKindError, Err: err}
+				return
+			}
+			transient = transientTurnMessages("", "Continue from the compacted session summary. Do not restart, greet, or restate the summary. Continue the pending task from the latest tool result.")
+		}
+		if err := e.continueModelTurnFromTimeline(ctx, session, turn.Chat(), turn, client, out, transient); err != nil {
+			if interruptedErr(err) {
+				e.emitInterrupted(out, chat.ID, session.ID)
+				return
+			}
+			e.emitAssistantError(ctx, out, chat.ID, session.ID, err)
 		}
 	}()
 	return out, nil

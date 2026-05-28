@@ -175,6 +175,12 @@ type turnContinueRunner interface {
 	RunContinueTurn(context.Context, *TurnState, string) (<-chan domain.Event, error)
 }
 
+type turnApprovalRunner interface {
+	ApproveToolTurn(context.Context, *TurnState, string) (<-chan domain.Event, error)
+	ApproveToolTurnWithRule(context.Context, *TurnState, string, domain.PermissionOverride) (<-chan domain.Event, error)
+	DenyToolTurn(context.Context, *TurnState, string) (<-chan domain.Event, error)
+}
+
 // Runner provides the shared execution behavior used by a live Chat.
 type Runner interface {
 	promptRunner
@@ -1022,7 +1028,11 @@ func (r *Chat) handleApprove(toolCallID string, rule *domain.PermissionOverride)
 		events <-chan domain.Event
 		err    error
 	)
-	if rule != nil {
+	if turnRunner, ok := r.engine.(turnApprovalRunner); ok && rule != nil {
+		events, err = turnRunner.ApproveToolTurnWithRule(ctx, r.turnState(), toolCallID, *rule)
+	} else if turnRunner, ok := r.engine.(turnApprovalRunner); ok {
+		events, err = turnRunner.ApproveToolTurn(ctx, r.turnState(), toolCallID)
+	} else if rule != nil {
 		events, err = runner.ApproveToolInChatWithRule(ctx, sessionID, chatID, toolCallID, *rule)
 	} else {
 		events, err = runner.ApproveToolInChat(ctx, sessionID, chatID, toolCallID)
@@ -1056,7 +1066,13 @@ func (r *Chat) handleDeny(toolCallID string) {
 	r.mu.Unlock()
 	r.broadcast(r.snapshotUpdateFlags(nil, true, false, true, false, true))
 
-	events, err := runner.DenyToolInChat(ctx, sessionID, chatID, toolCallID)
+	var events <-chan domain.Event
+	var err error
+	if turnRunner, ok := r.engine.(turnApprovalRunner); ok {
+		events, err = turnRunner.DenyToolTurn(ctx, r.turnState(), toolCallID)
+	} else {
+		events, err = runner.DenyToolInChat(ctx, sessionID, chatID, toolCallID)
+	}
 	r.handleApprovalEventStream(events, err)
 }
 
