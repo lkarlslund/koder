@@ -655,6 +655,12 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `el.style.overflowY = el.scrollHeight > maxHeight ? 'auto' : 'hidden'`) {
 		t.Fatalf("expected composer to scroll after reaching the height cap")
 	}
+	if !strings.Contains(fullPage, `composerDraftPreferenceName()`) ||
+		!strings.Contains(fullPage, `restoreComposerDraftForActiveChat()`) ||
+		!strings.Contains(fullPage, `this.$watch('draft', () => this.writeComposerDraft())`) ||
+		!strings.Contains(fullPage, `preserveComposerDraftDuringSend`) {
+		t.Fatalf("expected composer drafts to survive browser reloads and koder restarts")
+	}
 	if !strings.Contains(fullPage, `@paste.prevent="onComposerPaste($event)"`) ||
 		!strings.Contains(fullPage, `/api/attachments/clipboard-image`) ||
 		!strings.Contains(fullPage, `composerAttachments`) ||

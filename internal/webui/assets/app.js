@@ -327,10 +327,12 @@
         showModelConfigEditor: false, modelConfigDraft: null, modelConfigStatus: '', modelConfigStatusKind: 'secondary',
         showMCPEditor: false, mcpDraft: null, mcpHeadersText: '{}', mcpStatus: '', mcpStatusKind: 'secondary',
         completion: {kind: '', query: '', start: 0, end: 0, items: [], selected: 0}, completionSeq: 0,
-        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, restoreChatAttempted: false, transcriptStickToBottom: true, scrollRestoreSeq: 0, expandedMilestones: {}, interruptArmedChatID: '', dragChatID: '', dragQueueID: '', composerAttachments: [], error: '', toast: '', toastTimer: null,
+        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, restoreChatAttempted: false, transcriptStickToBottom: true, scrollRestoreSeq: 0, expandedMilestones: {}, interruptArmedChatID: '', dragChatID: '', dragQueueID: '', composerAttachments: [], activeComposerDraftKey: '', preserveComposerDraftDuringSend: false, error: '', toast: '', toastTimer: null,
         init() {
           this.clampSidebarRatio();
           this.applyTheme();
+          this.$watch('draft', () => this.writeComposerDraft());
+          this.$watch('composerAttachments', () => this.writeComposerDraft());
           this.connect();
           window.addEventListener('resize', () => { this.resizeComposer(); this.reportClientStateSoon(); });
           window.addEventListener('online', () => this.connectNow());
@@ -691,6 +693,7 @@
           this.applyTheme(); this.error = this.state.error || '';
           this.syncInterruptArmed();
           if (!this.restoreSelectedChat()) this.writeSelectedChat();
+          this.restoreComposerDraftForActiveChat();
           this.afterTranscriptDOMUpdate(() => {
             if (seq === this.scrollRestoreSeq) this.restoreTranscriptScroll(scroll, options);
           });
@@ -710,6 +713,42 @@
         },
         activeChatID() { return this.state.active_chat_id || this.state.ActiveChatID || 0; },
         writeSelectedChat() { const id = this.activeChatID(); if (id) writePreference(this.selectedChatPreferenceName(), id); },
+        composerDraftPreferenceName() {
+          const workdir = encodeURIComponent(this.state.workdir || this.state.Workdir || '');
+          const session = encodeURIComponent(this.state.session?.id || this.state.session?.ID || '');
+          const chat = encodeURIComponent(this.activeChatID() || '');
+          if (!chat) return '';
+          return 'composerDraft.' + workdir + '.' + session + '.' + chat;
+        },
+        restoreComposerDraftForActiveChat() {
+          const key = this.composerDraftPreferenceName();
+          if (!key || key === this.activeComposerDraftKey) return;
+          this.activeComposerDraftKey = key;
+          const saved = readJSONPreference(key, {});
+          this.draft = String(saved.draft || '');
+          this.composerAttachments = Array.isArray(saved.attachments) ? saved.attachments : [];
+          this.clearCompletions();
+          this.$nextTick(() => this.resizeComposer());
+        },
+        writeComposerDraftPayload(draft, attachments) {
+          const key = this.composerDraftPreferenceName();
+          if (!key) return;
+          const text = String(draft || '');
+          const files = Array.isArray(attachments) ? attachments : [];
+          if (!text && files.length === 0) {
+            removePreference(key);
+            return;
+          }
+          writeJSONPreference(key, {draft: text, attachments: files});
+        },
+        writeComposerDraft() {
+          if (this.preserveComposerDraftDuringSend) return;
+          this.writeComposerDraftPayload(this.draft, this.composerAttachments);
+        },
+        clearComposerDraftStorage() {
+          const key = this.composerDraftPreferenceName();
+          if (key) removePreference(key);
+        },
         restoreSelectedChat() {
           if (this.restoreChatAttempted) return false;
           const raw = readPreference(this.selectedChatPreferenceName(), '');
@@ -1280,14 +1319,19 @@
           if (text && attachments.length === 0 && this.handleSlash(text)) {
             this.draft = '';
             this.clearCompletions();
+            this.clearComposerDraftStorage();
             this.$nextTick(() => this.resizeComposer());
             return;
           }
+          this.preserveComposerDraftDuringSend = true;
           this.draft = '';
           this.composerAttachments = [];
           this.clearCompletions();
+          this.writeComposerDraftPayload(text, attachments);
           this.$nextTick(() => this.resizeComposer());
-          this.rpc('send_prompt', {text, attachments}).catch(() => { this.draft = text; this.composerAttachments = attachments; });
+          this.rpc('send_prompt', {text, attachments})
+            .then(() => { this.preserveComposerDraftDuringSend = false; this.clearComposerDraftStorage(); })
+            .catch(() => { this.preserveComposerDraftDuringSend = false; this.draft = text; this.composerAttachments = attachments; });
         },
         handleSlash(text) {
           if (text === '/permissions') { this.showPermissions = true; return true; }
@@ -1833,6 +1877,9 @@
     }
     function writePreference(name, value) {
       try { localStorage.setItem(preferenceKey(name), String(value)); } catch (_) {}
+    }
+    function removePreference(name) {
+      try { localStorage.removeItem(preferenceKey(name)); } catch (_) {}
     }
     function readJSONPreference(name, fallback) {
       try {
