@@ -230,8 +230,9 @@
         const path = firstValue(data, ['path', 'Path']) || firstValue(args, ['path']) || 'file';
         const content = firstValue(data, ['content', 'Content']);
         const summary = firstValue(data, ['summary', 'Summary']) || toolResultText(tool);
-        if (content) return renderCompactBlock(summary || ('Wrote ' + path), content);
-        return renderCompactBlock('Wrote ' + path, summary);
+        const diagnostics = firstValue(data, ['diagnostics', 'Diagnostics']);
+        const body = content ? renderCompactBlock(summary || ('Wrote ' + path), content) : renderCompactBlock('Wrote ' + path, summary);
+        return body + (diagnostics ? renderCompactBlock('Diagnostics', diagnostics, 'tool-result-body-mono') : '');
       }
       if (kind === 'edit') {
         const title = firstValue(data, ['summary', 'Summary']) || 'Edited file';
@@ -253,6 +254,11 @@
       }
       if (kind === 'glob') return renderCompactBlock('Matches', data.matches || data.Matches || toolResultText(tool));
       if (kind === 'grep') return renderCompactBlock('Matches', firstValue(data, ['output', 'Output']) || toolResultText(tool));
+      if (kind === 'lint') {
+        const title = firstValue(data, ['summary', 'Summary']) || 'Diagnostics';
+        const diagnostics = firstValue(data, ['diagnostics', 'Diagnostics']) || toolResultText(tool);
+        return renderCompactBlock(title, diagnostics || 'No diagnostics', 'tool-result-body-mono');
+      }
       if (kind === 'webfetch') return renderCompactBlock(firstValue(data, ['final_url', 'FinalURL', 'url', 'URL']) || 'Fetched page', firstValue(data, ['body', 'Body']) || toolResultText(tool));
       if (kind === 'websearch') {
         const items = data.items || data.Items || [];

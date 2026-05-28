@@ -96,3 +96,19 @@ func TestExecuteOverwritesFileWithForceOverwrite(t *testing.T) {
 		t.Fatalf("unexpected file contents: %q", string(body))
 	}
 }
+
+func TestExecuteReportsWrittenFileDiagnostics(t *testing.T) {
+	dir := t.TempDir()
+	req := tools.Request{Args: map[string]string{"path": "bad.json", "content": "{"}}
+	result, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: dir}, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result.Output, "Diagnostics for written file") {
+		t.Fatalf("expected diagnostics in output, got %q", result.Output)
+	}
+	stored, ok := result.Stored.(tools.WriteStoredResult)
+	if !ok || !strings.Contains(stored.Diagnostics, "bad.json") {
+		t.Fatalf("expected stored diagnostics, got %#v", result.Stored)
+	}
+}

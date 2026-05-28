@@ -240,6 +240,25 @@ func TestExecuteQueriesReferencesThroughLSP(t *testing.T) {
 	}
 }
 
+func TestLSPDiagnosticsCollectsIntroducedDiagnostics(t *testing.T) {
+	withTestLSPManager(t, time.Hour, 10*time.Millisecond)
+	workdir := t.TempDir()
+	writeFile(t, workdir, "go.mod", "module example.com/test\n")
+	writeFile(t, workdir, "main.go", "package main\nfunc Target() {}\n")
+	installFakeServer(t, "gopls")
+	t.Setenv("KODER_FAKE_LSP_URI", fileURI(filepath.Join(workdir, "main.go")))
+	t.Setenv("KODER_FAKE_LSP_DIAGNOSTIC_ON_CHANGE", "1")
+
+	report := LSPDiagnostics(t.Context(), workdir, "main.go", "package main\nfunc Target() {}\n", "package main\nfunc Target() { broken }\n", true)
+	if len(report.Diagnostics) != 1 {
+		t.Fatalf("expected one introduced diagnostic, got %#v skipped=%#v", report.Diagnostics, report.Skipped)
+	}
+	diagnostic := report.Diagnostics[0]
+	if diagnostic.Path != "main.go" || diagnostic.Line != 2 || !strings.Contains(diagnostic.Message, "fake diagnostic") {
+		t.Fatalf("unexpected diagnostic: %#v", diagnostic)
+	}
+}
+
 func installFakeServer(t *testing.T, name string) {
 	t.Helper()
 	binDir := t.TempDir()
@@ -268,7 +287,15 @@ func runFakeLSP() {
 		switch method {
 		case "initialize":
 			fakeWriteResponse(id, map[string]any{"capabilities": map[string]any{}})
-		case "initialized", "textDocument/didOpen":
+		case "initialized":
+		case "textDocument/didOpen":
+			if os.Getenv("KODER_FAKE_LSP_BASELINE_DIAGNOSTIC") == "1" {
+				fakeWriteDiagnostic("baseline diagnostic")
+			}
+		case "textDocument/didChange":
+			if os.Getenv("KODER_FAKE_LSP_DIAGNOSTIC_ON_CHANGE") == "1" {
+				fakeWriteDiagnostic("fake diagnostic")
+			}
 		case "workspace/symbol":
 			if os.Getenv("KODER_FAKE_LSP_FAIL_FIRST_WORKSPACE_SYMBOL") == "1" && startIndex == 1 {
 				return
@@ -418,6 +445,24 @@ func fakeWriteResponse(id int, result any) {
 		"jsonrpc": "2.0",
 		"id":      id,
 		"result":  result,
+	})
+	_, _ = fmt.Fprintf(os.Stdout, "Content-Length: %d\r\n\r\n%s", len(body), body)
+}
+
+func fakeWriteDiagnostic(message string) {
+	body, _ := json.Marshal(map[string]any{
+		"jsonrpc": "2.0",
+		"method":  "textDocument/publishDiagnostics",
+		"params": map[string]any{
+			"uri": os.Getenv("KODER_FAKE_LSP_URI"),
+			"diagnostics": []map[string]any{{
+				"range":    fakeRange(),
+				"severity": 1,
+				"source":   "fake",
+				"code":     "F001",
+				"message":  message,
+			}},
+		},
 	})
 	_, _ = fmt.Fprintf(os.Stdout, "Content-Length: %d\r\n\r\n%s", len(body), body)
 }

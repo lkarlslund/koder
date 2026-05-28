@@ -39,6 +39,7 @@ const (
 	ToolKindGlob            ToolKind = "glob"
 	ToolKindGrep            ToolKind = "grep"
 	ToolKindCodeSearch      ToolKind = "code_search"
+	ToolKindLint            ToolKind = "lint"
 	ToolKindBash            ToolKind = "bash"
 	ToolKindExecCommand     ToolKind = "exec_command"
 	ToolKindExecStatus      ToolKind = "exec_status"
@@ -78,6 +79,7 @@ func AllToolKinds() []ToolKind {
 		ToolKindGlob,
 		ToolKindGrep,
 		ToolKindCodeSearch,
+		ToolKindLint,
 		ToolKindBash,
 		ToolKindExecCommand,
 		ToolKindExecStatus,

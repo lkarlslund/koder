@@ -105,16 +105,33 @@ type ApplyPatchStoredResult struct {
 }
 
 type EditStoredResult struct {
-	Path         string           `json:"path"`
-	ReplaceAll   bool             `json:"replace_all,omitempty"`
-	Occurrences  int              `json:"occurrences,omitempty"`
-	Summary      string           `json:"summary,omitempty"`
-	Matcher      string           `json:"matcher,omitempty"`
-	Verification string           `json:"verification,omitempty"`
-	Diagnostics  string           `json:"diagnostics,omitempty"`
-	Diff         string           `json:"diff,omitempty"`
-	Hunks        []EditStoredHunk `json:"hunks,omitempty"`
-	Truncated    bool             `json:"truncated,omitempty"`
+	Path             string                 `json:"path"`
+	ReplaceAll       bool                   `json:"replace_all,omitempty"`
+	Occurrences      int                    `json:"occurrences,omitempty"`
+	Summary          string                 `json:"summary,omitempty"`
+	Matcher          string                 `json:"matcher,omitempty"`
+	Verification     string                 `json:"verification,omitempty"`
+	Diagnostics      string                 `json:"diagnostics,omitempty"`
+	DiagnosticReport DiagnosticReportStored `json:"diagnostic_report,omitempty"`
+	Diff             string                 `json:"diff,omitempty"`
+	Hunks            []EditStoredHunk       `json:"hunks,omitempty"`
+	Truncated        bool                   `json:"truncated,omitempty"`
+}
+
+type DiagnosticReportStored struct {
+	Diagnostics []DiagnosticStored `json:"diagnostics,omitempty"`
+	Skipped     []string           `json:"skipped,omitempty"`
+}
+
+type DiagnosticStored struct {
+	Source   string `json:"source,omitempty"`
+	Path     string `json:"path,omitempty"`
+	Line     int    `json:"line,omitempty"`
+	Column   int    `json:"column,omitempty"`
+	Severity string `json:"severity,omitempty"`
+	Tool     string `json:"tool,omitempty"`
+	Code     string `json:"code,omitempty"`
+	Message  string `json:"message,omitempty"`
 }
 
 type EditStoredHunk struct {
@@ -125,11 +142,21 @@ type EditStoredHunk struct {
 }
 
 type WriteStoredResult struct {
-	Path      string `json:"path"`
-	Action    string `json:"action,omitempty"`
-	Summary   string `json:"summary,omitempty"`
-	Content   string `json:"content,omitempty"`
-	Truncated bool   `json:"truncated,omitempty"`
+	Path             string                 `json:"path"`
+	Action           string                 `json:"action,omitempty"`
+	Summary          string                 `json:"summary,omitempty"`
+	Content          string                 `json:"content,omitempty"`
+	Diagnostics      string                 `json:"diagnostics,omitempty"`
+	DiagnosticReport DiagnosticReportStored `json:"diagnostic_report,omitempty"`
+	Truncated        bool                   `json:"truncated,omitempty"`
+}
+
+type LintStoredResult struct {
+	Path             string                 `json:"path"`
+	Mode             string                 `json:"mode,omitempty"`
+	Summary          string                 `json:"summary,omitempty"`
+	Diagnostics      string                 `json:"diagnostics,omitempty"`
+	DiagnosticReport DiagnosticReportStored `json:"diagnostic_report,omitempty"`
 }
 
 type GlobStoredResult struct {
@@ -283,6 +310,7 @@ func (ExecListStoredResult) storedResultPayload()      {}
 func (ApplyPatchStoredResult) storedResultPayload()    {}
 func (EditStoredResult) storedResultPayload()          {}
 func (WriteStoredResult) storedResultPayload()         {}
+func (LintStoredResult) storedResultPayload()          {}
 func (GlobStoredResult) storedResultPayload()          {}
 func (GrepStoredResult) storedResultPayload()          {}
 func (QuestionStoredResult) storedResultPayload()      {}
@@ -508,6 +536,13 @@ func formatStoredToolOutput(env storedResultEnvelope) (string, bool) {
 		return decodeAndFormat[WriteStoredResult](env.Payload, func(result WriteStoredResult) string {
 			return strings.TrimSpace(result.Summary)
 		})
+	case domain.ToolKindLint:
+		return decodeAndFormat[LintStoredResult](env.Payload, func(result LintStoredResult) string {
+			if diagnostics := strings.TrimSpace(result.Diagnostics); diagnostics != "" {
+				return diagnostics
+			}
+			return strings.TrimSpace(result.Summary)
+		})
 	case domain.ToolKindGlob:
 		return decodeAndFormat[GlobStoredResult](env.Payload, formatGlobStoredResult)
 	case domain.ToolKindGrep:
@@ -566,6 +601,9 @@ func formatStoredResultForDisplay(env storedResultEnvelope) (string, bool) {
 		}
 		if env.Tool == domain.ToolKindWrite {
 			return decodeAndFormat[WriteStoredResult](env.Payload, formatWriteStoredResultForDisplay)
+		}
+		if env.Tool == domain.ToolKindLint {
+			return decodeAndFormat[LintStoredResult](env.Payload, formatLintStoredResultForDisplay)
 		}
 		return formatStoredToolOutput(env)
 	default:
@@ -773,14 +811,28 @@ func formatChatListStoredResult(result ChatListStoredResult) string {
 }
 
 func formatWriteStoredResultForDisplay(result WriteStoredResult) string {
+	diagnostics := strings.TrimSpace(result.Diagnostics)
 	if strings.TrimSpace(result.Content) == "" {
+		if diagnostics != "" {
+			return strings.TrimSpace(result.Summary + "\n\nDiagnostics:\n" + diagnostics)
+		}
 		return strings.TrimSpace(result.Summary)
 	}
 	text := strings.TrimSpace(result.Content)
 	if result.Truncated {
 		text += "\n... truncated ..."
 	}
+	if diagnostics != "" {
+		text += "\n\nDiagnostics:\n" + diagnostics
+	}
 	return text
+}
+
+func formatLintStoredResultForDisplay(result LintStoredResult) string {
+	if diagnostics := strings.TrimSpace(result.Diagnostics); diagnostics != "" {
+		return diagnostics
+	}
+	return strings.TrimSpace(result.Summary)
 }
 
 func formatEditStoredResultForDisplay(result EditStoredResult) string {

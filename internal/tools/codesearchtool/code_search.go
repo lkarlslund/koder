@@ -44,12 +44,13 @@ type searchOptions struct {
 }
 
 type lspClient struct {
-	cmd       *exec.Cmd
-	stdin     io.WriteCloser
-	stdout    *bufio.Reader
-	mu        sync.Mutex
-	nextID    int
-	closeOnce sync.Once
+	cmd         *exec.Cmd
+	stdin       io.WriteCloser
+	stdout      *bufio.Reader
+	mu          sync.Mutex
+	nextID      int
+	diagnostics map[string][]lspDiagnostic
+	closeOnce   sync.Once
 }
 
 type lspRequest struct {
@@ -62,6 +63,8 @@ type lspRequest struct {
 type lspResponse struct {
 	JSONRPC string          `json:"jsonrpc"`
 	ID      int             `json:"id,omitempty"`
+	Method  string          `json:"method,omitempty"`
+	Params  json.RawMessage `json:"params,omitempty"`
 	Result  json.RawMessage `json:"result,omitempty"`
 	Error   *lspError       `json:"error,omitempty"`
 }
@@ -87,6 +90,14 @@ type lspLocation struct {
 	TargetURI string   `json:"targetUri"`
 }
 
+type lspDiagnostic struct {
+	Range    lspRange `json:"range"`
+	Severity int      `json:"severity,omitempty"`
+	Code     any      `json:"code,omitempty"`
+	Source   string   `json:"source,omitempty"`
+	Message  string   `json:"message"`
+}
+
 type symbolInformation struct {
 	Name          string      `json:"name"`
 	Kind          int         `json:"kind"`
@@ -106,6 +117,25 @@ type lspResult struct {
 	Language string
 	Server   string
 	Lines    []string
+}
+
+// Diagnostic is a normalized LSP diagnostic reported for a workspace file.
+type Diagnostic struct {
+	Language string
+	Server   string
+	Path     string
+	Line     int
+	Column   int
+	Severity string
+	Source   string
+	Code     string
+	Message  string
+}
+
+// DiagnosticReport contains LSP diagnostics and non-fatal skipped source notes.
+type DiagnosticReport struct {
+	Diagnostics []Diagnostic
+	Skipped     []string
 }
 
 const (
@@ -354,6 +384,29 @@ func CloseLanguageServers() {
 	defaultLSPManager.close()
 }
 
+// LSPDiagnostics returns diagnostics for path using the same pooled language servers as code_search.
+func LSPDiagnostics(ctx context.Context, rootAbs, path, before, after string, introducedOnly bool) DiagnosticReport {
+	server, ok := languageForPath(path)
+	if !ok {
+		return DiagnosticReport{Skipped: []string{"lsp: no language server configured for " + filepath.Ext(path)}}
+	}
+	if _, err := exec.LookPath(server.Command[0]); err != nil {
+		return DiagnosticReport{Skipped: []string{fmt.Sprintf("lsp: command %q not found for %s", server.Command[0], server.ID)}}
+	}
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	lease, err := defaultLSPManager.acquire(ctx, rootAbs, server)
+	if err != nil {
+		return DiagnosticReport{Skipped: []string{"lsp: " + err.Error()}}
+	}
+	result, err := lspDiagnosticsForClient(ctx, lease.client(), rootAbs, server, path, before, after, introducedOnly)
+	lease.release(err != nil && !isLSPServerError(err))
+	if err != nil {
+		return DiagnosticReport{Skipped: []string{"lsp: " + err.Error()}}
+	}
+	return result
+}
+
 func parametersJSON() string {
 	languages, _ := json.Marshal(languageIDs())
 	return fmt.Sprintf(`{"type":"object","properties":{"action":{"type":"string","enum":["languages","workspace_symbol","document_symbols","definition","references"],"description":"LSP query to run. Defaults to workspace_symbol when query is provided."},"query":{"type":"string","description":"Workspace symbol query for action=workspace_symbol."},"path":{"type":"string","description":"Workspace file path for document_symbols, definition, or references, or optional scope hint for choosing a language server."},"language":{"type":"string","enum":%s,"description":"Optional language server to use. If omitted, all detected languages are queried for workspace_symbol, and path extension chooses for file actions."},"line":{"type":"integer","description":"1-indexed line for definition or references."},"character":{"type":"integer","description":"1-indexed UTF-16 character/column for definition or references."},"limit":{"type":"integer","description":"Maximum result lines to return. Defaults to 100."}},"additionalProperties":false}`, languages)
@@ -593,6 +646,99 @@ func queryClient(ctx context.Context, client *lspClient, rootAbs string, server 
 	}
 }
 
+func lspDiagnosticsForClient(ctx context.Context, client *lspClient, rootAbs string, server languageServer, path, before, after string, introducedOnly bool) (DiagnosticReport, error) {
+	abs, _, err := tools.WorkspacePath(rootAbs, path)
+	if err != nil {
+		return DiagnosticReport{}, err
+	}
+	uri := fileURI(abs)
+	languageID := languageIDForPath(server, path)
+	if err := client.didOpen(ctx, uri, languageID, before); err != nil {
+		return DiagnosticReport{}, err
+	}
+	if err := client.flushDiagnostics(ctx, uri); err != nil {
+		return DiagnosticReport{}, err
+	}
+	beforeDiagnostics := append([]lspDiagnostic(nil), client.diagnostics[uri]...)
+	if after != before {
+		if err := client.didChange(ctx, uri, 2, after); err != nil {
+			return DiagnosticReport{}, err
+		}
+		if err := client.flushDiagnostics(ctx, uri); err != nil {
+			return DiagnosticReport{}, err
+		}
+	}
+	afterDiagnostics := append([]lspDiagnostic(nil), client.diagnostics[uri]...)
+	if introducedOnly {
+		afterDiagnostics = introducedLSPDiagnostics(beforeDiagnostics, afterDiagnostics)
+	}
+	out := DiagnosticReport{}
+	for _, diagnostic := range afterDiagnostics {
+		out.Diagnostics = append(out.Diagnostics, normalizeLSPDiagnostic(server, rootAbs, uri, diagnostic))
+	}
+	return out, nil
+}
+
+func introducedLSPDiagnostics(before, after []lspDiagnostic) []lspDiagnostic {
+	if len(before) == 0 {
+		return after
+	}
+	seen := map[string]struct{}{}
+	for _, diagnostic := range before {
+		seen[lspDiagnosticKey(diagnostic)] = struct{}{}
+	}
+	var introduced []lspDiagnostic
+	for _, diagnostic := range after {
+		if _, ok := seen[lspDiagnosticKey(diagnostic)]; ok {
+			continue
+		}
+		introduced = append(introduced, diagnostic)
+	}
+	return introduced
+}
+
+func lspDiagnosticKey(diagnostic lspDiagnostic) string {
+	return fmt.Sprintf("%d:%d:%d:%d:%d:%s:%s:%s",
+		diagnostic.Range.Start.Line,
+		diagnostic.Range.Start.Character,
+		diagnostic.Range.End.Line,
+		diagnostic.Range.End.Character,
+		diagnostic.Severity,
+		strings.TrimSpace(diagnostic.Source),
+		strings.TrimSpace(fmt.Sprint(diagnostic.Code)),
+		strings.TrimSpace(diagnostic.Message),
+	)
+}
+
+func normalizeLSPDiagnostic(server languageServer, rootAbs, uri string, diagnostic lspDiagnostic) Diagnostic {
+	return Diagnostic{
+		Language: server.ID,
+		Server:   commandString(server),
+		Path:     relPath(rootAbs, uri),
+		Line:     diagnostic.Range.Start.Line + 1,
+		Column:   diagnostic.Range.Start.Character + 1,
+		Severity: lspSeverityLabel(diagnostic.Severity),
+		Source:   strings.TrimSpace(diagnostic.Source),
+		Code:     strings.TrimSpace(fmt.Sprint(diagnostic.Code)),
+		Message:  strings.TrimSpace(diagnostic.Message),
+	}
+}
+
+func lspSeverityLabel(severity int) string {
+	switch severity {
+	case 1:
+		return "error"
+	case 2:
+		return "warning"
+	case 3:
+		return "info"
+	case 4:
+		return "hint"
+	default:
+		return "diagnostic"
+	}
+}
+
 func startLSP(rootAbs string, server languageServer) (*lspClient, error) {
 	cmd := exec.Command(server.Command[0], server.Command[1:]...)
 	cmd.Dir = rootAbs
@@ -608,7 +754,7 @@ func startLSP(rootAbs string, server languageServer) (*lspClient, error) {
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
-	return &lspClient{cmd: cmd, stdin: stdin, stdout: bufio.NewReader(stdout), nextID: 1}, nil
+	return &lspClient{cmd: cmd, stdin: stdin, stdout: bufio.NewReader(stdout), nextID: 1, diagnostics: map[string][]lspDiagnostic{}}, nil
 }
 
 func (c *lspClient) initialize(ctx context.Context, rootAbs string) error {
@@ -621,6 +767,9 @@ func (c *lspClient) initialize(ctx context.Context, rootAbs string) error {
 				"documentSymbol": map[string]any{},
 				"definition":     map[string]any{},
 				"references":     map[string]any{},
+				"publishDiagnostics": map[string]any{
+					"relatedInformation": false,
+				},
 			},
 		},
 		"workspaceFolders": []map[string]string{{
@@ -722,6 +871,27 @@ func (c *lspClient) didOpen(ctx context.Context, uri, languageID, text string) e
 	})
 }
 
+func (c *lspClient) didChange(ctx context.Context, uri string, version int, text string) error {
+	return c.notify(ctx, "textDocument/didChange", map[string]any{
+		"textDocument": map[string]any{
+			"uri":     uri,
+			"version": version,
+		},
+		"contentChanges": []map[string]string{{"text": text}},
+	})
+}
+
+func (c *lspClient) flushDiagnostics(ctx context.Context, uri string) error {
+	_, err := c.request(ctx, "textDocument/documentSymbol", map[string]any{"textDocument": map[string]string{"uri": uri}})
+	if err == nil {
+		return nil
+	}
+	if isLSPServerError(err) {
+		return nil
+	}
+	return err
+}
+
 func (c *lspClient) request(ctx context.Context, method string, params any) (json.RawMessage, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -738,6 +908,7 @@ func (c *lspClient) request(ctx context.Context, method string, params any) (jso
 		if err != nil {
 			return nil, err
 		}
+		c.handleNotification(resp)
 		if resp.ID != id {
 			continue
 		}
@@ -760,7 +931,52 @@ func (c *lspClient) notify(ctx context.Context, method string, params any) error
 	return writeLSP(c.stdin, lspRequest{JSONRPC: "2.0", Method: method, Params: params})
 }
 
+func (c *lspClient) waitDiagnostics(ctx context.Context, uri string, duration time.Duration) []lspDiagnostic {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, duration)
+	defer cancel()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for {
+		if err := waitCtx.Err(); err != nil {
+			return append([]lspDiagnostic(nil), c.diagnostics[uri]...)
+		}
+		resp, err := c.readResponseNoKill(waitCtx)
+		if err != nil {
+			return append([]lspDiagnostic(nil), c.diagnostics[uri]...)
+		}
+		c.handleNotification(resp)
+	}
+}
+
+func (c *lspClient) handleNotification(resp lspResponse) {
+	if resp.Method != "textDocument/publishDiagnostics" || len(resp.Params) == 0 {
+		return
+	}
+	var payload struct {
+		URI         string          `json:"uri"`
+		Diagnostics []lspDiagnostic `json:"diagnostics"`
+	}
+	if err := json.Unmarshal(resp.Params, &payload); err != nil || strings.TrimSpace(payload.URI) == "" {
+		return
+	}
+	if c.diagnostics == nil {
+		c.diagnostics = map[string][]lspDiagnostic{}
+	}
+	c.diagnostics[payload.URI] = append([]lspDiagnostic(nil), payload.Diagnostics...)
+}
+
 func (c *lspClient) readResponse(ctx context.Context) (lspResponse, error) {
+	resp, err := c.readResponseNoKill(ctx)
+	if err != nil && ctx.Err() != nil {
+		c.kill()
+	}
+	return resp, err
+}
+
+func (c *lspClient) readResponseNoKill(ctx context.Context) (lspResponse, error) {
 	type readResult struct {
 		response lspResponse
 		err      error
@@ -774,7 +990,6 @@ func (c *lspClient) readResponse(ctx context.Context) (lspResponse, error) {
 	case result := <-out:
 		return result.response, result.err
 	case <-ctx.Done():
-		c.kill()
 		return lspResponse{}, ctx.Err()
 	}
 }

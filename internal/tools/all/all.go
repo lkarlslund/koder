@@ -8,6 +8,7 @@ import (
 	_ "github.com/lkarlslund/koder/internal/tools/exectool"
 	_ "github.com/lkarlslund/koder/internal/tools/globtool"
 	_ "github.com/lkarlslund/koder/internal/tools/greptool"
+	_ "github.com/lkarlslund/koder/internal/tools/linttool"
 	_ "github.com/lkarlslund/koder/internal/tools/mcptool"
 	_ "github.com/lkarlslund/koder/internal/tools/milestonetool"
 	_ "github.com/lkarlslund/koder/internal/tools/questiontool"

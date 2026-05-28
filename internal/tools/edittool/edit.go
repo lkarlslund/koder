@@ -2,19 +2,16 @@ package edittool
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"go/parser"
-	"go/token"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
-	toml "github.com/pelletier/go-toml/v2"
 	"github.com/sergi/go-diff/diffmatchpatch"
 
+	"github.com/lkarlslund/koder/internal/codediag"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/tools"
 )
@@ -81,7 +78,7 @@ func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 	return out, nil
 }
 func (tool) Preview(req tools.Request) string { return req.Args["path"] }
-func (tool) Execute(_ context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
+func (tool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
 	abs, rel, err := tools.WorkspacePath(runtime.Workdir, req.Args["path"])
 	if err != nil {
 		return tools.Result{}, err
@@ -120,7 +117,8 @@ func (tool) Execute(_ context.Context, runtime tools.Runtime, req tools.Request)
 	if string(verifyBytes) != after {
 		return tools.Result{}, fmt.Errorf("post-write verification failed for %s: on-disk content differs from intended write (wrote %d bytes, read back %d bytes). The edit did not persist as intended; re-read the file and try again", rel, len(after), len(verifyBytes))
 	}
-	diagnostics := diagnosticsIntroduced(rel, before, after)
+	report := codediag.CheckEdit(ctx, runtime.Workdir, rel, before, after, codediag.Options{Mode: "auto", Timeout: 2 * time.Second})
+	diagnostics := codediag.Text(report)
 	dmp := diffmatchpatch.New()
 	diffs := dmp.DiffMain(before, after, false)
 	mode := "replaced 1 occurrence"
@@ -151,14 +149,35 @@ func (tool) Execute(_ context.Context, runtime tools.Runtime, req tools.Request)
 			Matcher:      match.stage,
 			Verification: "ok",
 			Diagnostics:  diagnostics,
-			Diff:         buildUnifiedStoredDiff(rel, before, after),
-			Hunks:        hunks,
-			Truncated:    truncated,
+			DiagnosticReport: tools.DiagnosticReportStored{
+				Diagnostics: storedDiagnostics(report.Diagnostics),
+				Skipped:     report.Skipped,
+			},
+			Diff:      buildUnifiedStoredDiff(rel, before, after),
+			Hunks:     hunks,
+			Truncated: truncated,
 		},
 	}, nil
 }
 func (tool) SummarizeResult(req tools.Request, result tools.Result) (string, string) {
 	return "edit", result.Output
+}
+
+func storedDiagnostics(in []codediag.Diagnostic) []tools.DiagnosticStored {
+	out := make([]tools.DiagnosticStored, 0, len(in))
+	for _, diagnostic := range in {
+		out = append(out, tools.DiagnosticStored{
+			Source:   string(diagnostic.Source),
+			Path:     diagnostic.Path,
+			Line:     diagnostic.Line,
+			Column:   diagnostic.Column,
+			Severity: diagnostic.Severity,
+			Tool:     diagnostic.Tool,
+			Code:     diagnostic.Code,
+			Message:  diagnostic.Message,
+		})
+	}
+	return out
 }
 
 const maxStoredHunks = 8
@@ -655,57 +674,6 @@ func detectEscapedQuoteDrift(oldString, newString string, matched []string) erro
 		return fmt.Errorf("target text only matched after unescaping %s; re-read the file and pass the actual unescaped text instead of escaped quotes", suspect)
 	}
 	return nil
-}
-
-func diagnosticsIntroduced(path, before, after string) string {
-	beforeDiag := syntaxDiagnostics(path, before)
-	afterDiag := syntaxDiagnostics(path, after)
-	if strings.TrimSpace(afterDiag) == "" || afterDiag == beforeDiag {
-		return ""
-	}
-	if strings.TrimSpace(beforeDiag) == "" {
-		return afterDiag
-	}
-	beforeLines := map[string]struct{}{}
-	for _, line := range strings.Split(beforeDiag, "\n") {
-		line = strings.TrimSpace(line)
-		if line != "" {
-			beforeLines[line] = struct{}{}
-		}
-	}
-	var introduced []string
-	for _, line := range strings.Split(afterDiag, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		if _, ok := beforeLines[line]; ok {
-			continue
-		}
-		introduced = append(introduced, line)
-	}
-	return strings.Join(introduced, "\n")
-}
-
-func syntaxDiagnostics(path, content string) string {
-	switch strings.ToLower(filepath.Ext(path)) {
-	case ".go":
-		fset := token.NewFileSet()
-		if _, err := parser.ParseFile(fset, path, content, parser.AllErrors); err != nil {
-			return err.Error()
-		}
-	case ".json":
-		var value any
-		if err := json.Unmarshal([]byte(content), &value); err != nil {
-			return fmt.Sprintf("%s: %v", path, err)
-		}
-	case ".toml":
-		var value map[string]any
-		if err := toml.Unmarshal([]byte(content), &value); err != nil {
-			return fmt.Sprintf("%s: %v", path, err)
-		}
-	}
-	return ""
 }
 
 func formatClosestSections(content, search string) string {

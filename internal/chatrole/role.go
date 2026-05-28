@@ -65,6 +65,7 @@ Focus on one assigned milestone and its todo bucket.
 				domain.ToolKindGlob,
 				domain.ToolKindGrep,
 				domain.ToolKindCodeSearch,
+				domain.ToolKindLint,
 				domain.ToolKindMilestoneList,
 				domain.ToolKindMilestoneUpdate,
 				domain.ToolKindTodoList,
