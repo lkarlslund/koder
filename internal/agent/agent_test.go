@@ -1238,6 +1238,60 @@ func TestBuildCompactionConversationTruncatesLargeToolOutput(t *testing.T) {
 	}
 }
 
+func TestBuildCompactionConversationHonorsPreviousCompactionBoundary(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.CompactionKeepToolBatches = 1
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	engine := New(cfg, st, tools.NewRegistry(t.TempDir()), nil, t.TempDir())
+	session, err := st.CreateSession(context.Background(), "test", cfg.DefaultProvider, "test-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chat := defaultChatForSession(t, st, session.ID)
+
+	appendUserTimelineItem(t, st, chat.ID, strings.Repeat("old raw history ", 1000))
+	previousReq := tools.Request{Tool: domain.ToolKindBash, ToolCallID: "call_previous", Args: map[string]string{"command": "pwd"}}
+	previousToolItem := appendAssistantToolTimelineItem(t, st, chat.ID, previousReq, "")
+	attachToolResultTimelineItem(t, st, chat.ID, previousReq, "/tmp/project", domain.BashStoredResult{Command: "pwd", Output: "/tmp/project"})
+	appendCompactionTimelineItem(t, st, chat.ID, "previous compact summary", previousToolItem.ID)
+	appendUserTimelineItem(t, st, chat.ID, "new raw history")
+	latestReq := tools.Request{Tool: domain.ToolKindBash, ToolCallID: "call_latest", Args: map[string]string{"command": "go test"}}
+	latestToolItem := appendAssistantToolTimelineItem(t, st, chat.ID, latestReq, "")
+	attachToolResultTimelineItem(t, st, chat.ID, latestReq, "ok", domain.BashStoredResult{Command: "go test", Output: "ok"})
+
+	timeline, err := st.TimelineForChat(context.Background(), chat.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	conversation, firstKeptItemID, err := engine.buildCompactionConversationForTimeline(session, chat, timeline)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if firstKeptItemID != latestToolItem.ID {
+		t.Fatalf("expected latest tool batch to be preserved from compaction source, got %s want %s", firstKeptItemID, latestToolItem.ID)
+	}
+	rendered := ""
+	for _, msg := range conversation {
+		rendered += msg.Content + "\n"
+	}
+	if strings.Contains(rendered, "old raw history") {
+		t.Fatalf("expected previous raw history to remain summarized away, got %q", rendered)
+	}
+	for _, want := range []string{"previous compact summary", "/tmp/project", "new raw history"} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("expected %q in compaction rendering, got %q", want, rendered)
+		}
+	}
+	if strings.Contains(rendered, "go test") || strings.Contains(rendered, "call_latest") {
+		t.Fatalf("expected latest preserved tool batch excluded from compaction source, got %q", rendered)
+	}
+}
+
 func TestBuildConversationIncludesSkillPromptContext(t *testing.T) {
 	cfg := testConfig(t)
 	st, err := store.Open(t.TempDir())

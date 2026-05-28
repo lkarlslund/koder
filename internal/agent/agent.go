@@ -3583,7 +3583,24 @@ func (e *Engine) buildCompactionConversationForTimeline(session domain.Session, 
 
 func (e *Engine) buildCompactionPromptEnvelopeForTimeline(session domain.Session, chat domain.Chat, timeline []domain.TimelineItem) (provider.PromptEnvelope, error) {
 	envelope := provider.PromptEnvelope{Instructions: e.baseInstructionsForChat(session, chat)}
-	for _, item := range timeline {
+	segmentStart := 0
+	for idx, item := range timeline {
+		if compacted, ok := item.Content.(domain.Compaction); ok {
+			if strings.TrimSpace(compacted.Summary) == "" {
+				segmentStart = idx + 1
+				continue
+			}
+			envelope.Items = append(envelope.Items[:0], compactedHistoryMessage(compacted.Summary))
+			if segmentStart < idx {
+				preserved, err := e.compactionMessagesForCompactionTail(timeline[segmentStart:idx], compacted.FirstKeptItemID, e.preserveThinkingEnabled(session))
+				if err != nil {
+					return provider.PromptEnvelope{}, err
+				}
+				envelope.Items = append(envelope.Items, preserved...)
+			}
+			segmentStart = idx + 1
+			continue
+		}
 		messages, err := e.compactionMessagesForTimelineItem(item, e.preserveThinkingEnabled(session))
 		if err != nil {
 			return provider.PromptEnvelope{}, err
@@ -3591,6 +3608,25 @@ func (e *Engine) buildCompactionPromptEnvelopeForTimeline(session domain.Session
 		envelope.Items = append(envelope.Items, messages...)
 	}
 	return envelope, nil
+}
+
+func (e *Engine) compactionMessagesForCompactionTail(items []domain.TimelineItem, firstKeptItemID string, preserveThinking bool) ([]provider.Message, error) {
+	start := firstKeptTimelineIndex(items, firstKeptItemID)
+	if start < 0 {
+		start = preservedTimelineToolTailStart(items, e.compactionKeepToolBatches())
+	}
+	if start >= len(items) {
+		return nil, nil
+	}
+	out := make([]provider.Message, 0, len(items)-start)
+	for _, item := range items[start:] {
+		messages, err := e.compactionMessagesForTimelineItem(item, preserveThinking)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, messages...)
+	}
+	return out, nil
 }
 
 func (e *Engine) compactionMessagesForTimelineItem(item domain.TimelineItem, preserveThinking bool) ([]provider.Message, error) {
