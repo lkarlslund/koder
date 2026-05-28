@@ -343,6 +343,260 @@ func ModelTextForPart(part domain.Part, diff string) (string, bool) {
 	return text, true
 }
 
+// CompactFormatLimits controls lossy text rendering for compaction prompts.
+type CompactFormatLimits struct {
+	MaxBytes      int
+	HeadLines     int
+	TailLines     int
+	ReadMaxLines  int
+	ExecHeadLines int
+	ExecTailLines int
+}
+
+// DefaultCompactFormatLimits returns conservative limits for compaction input.
+func DefaultCompactFormatLimits() CompactFormatLimits {
+	return CompactFormatLimits{
+		MaxBytes:      12 * 1024,
+		HeadLines:     80,
+		TailLines:     80,
+		ReadMaxLines:  120,
+		ExecHeadLines: 40,
+		ExecTailLines: 80,
+	}
+}
+
+// CompactModelTextForPart returns a bounded text-only rendering of a stored result for compaction.
+func CompactModelTextForPart(part domain.Part, diff string, limits CompactFormatLimits) (string, bool) {
+	env, ok := storedResultFromPart(part)
+	if !ok {
+		return "", false
+	}
+	text, ok := compactStoredResultForPart(env, diff, normalizeCompactFormatLimits(limits))
+	if !ok || strings.TrimSpace(text) == "" {
+		return "", false
+	}
+	return text, true
+}
+
+func normalizeCompactFormatLimits(limits CompactFormatLimits) CompactFormatLimits {
+	defaults := DefaultCompactFormatLimits()
+	if limits.MaxBytes <= 0 {
+		limits.MaxBytes = defaults.MaxBytes
+	}
+	if limits.HeadLines <= 0 {
+		limits.HeadLines = defaults.HeadLines
+	}
+	if limits.TailLines <= 0 {
+		limits.TailLines = defaults.TailLines
+	}
+	if limits.ReadMaxLines <= 0 {
+		limits.ReadMaxLines = defaults.ReadMaxLines
+	}
+	if limits.ExecHeadLines <= 0 {
+		limits.ExecHeadLines = defaults.ExecHeadLines
+	}
+	if limits.ExecTailLines <= 0 {
+		limits.ExecTailLines = defaults.ExecTailLines
+	}
+	return limits
+}
+
+func compactStoredResultForPart(env storedResultEnvelope, diff string, limits CompactFormatLimits) (string, bool) {
+	if env.PartKind != domain.PartKindToolOutput {
+		text, ok := formatStoredResultForPart(env)
+		return compactTextForCompaction(text, limits.HeadLines, limits.TailLines, limits.MaxBytes, "stored result"), ok
+	}
+	if env.Status == StoredResultStatusDenied || env.Status == StoredResultStatusError {
+		text, ok := formatStoredToolOutput(env)
+		return compactTextForCompaction(text, limits.HeadLines, limits.TailLines, limits.MaxBytes, string(env.Tool)+" result"), ok
+	}
+	switch env.Tool {
+	case domain.ToolKindRead:
+		return decodeAndFormat[ReadStoredResult](env.Payload, func(result ReadStoredResult) string {
+			return compactReadStoredResult(result, limits)
+		})
+	case domain.ToolKindBash:
+		return decodeAndFormat[BashStoredResult](env.Payload, func(result BashStoredResult) string {
+			return compactBashStoredResult(result, limits)
+		})
+	case domain.ToolKindExecCommand, domain.ToolKindExecStatus, domain.ToolKindExecWriteStdin, domain.ToolKindExecResize, domain.ToolKindExecTerminate:
+		return decodeAndFormat[ExecStoredResult](env.Payload, func(result ExecStoredResult) string {
+			return compactExecStoredResult(result, limits)
+		})
+	case domain.ToolKindViewImage:
+		return decodeAndFormat[ViewImageStoredResult](env.Payload, compactViewImageStoredResult)
+	case domain.ToolKindShowImage:
+		return decodeAndFormat[ShowImageStoredResult](env.Payload, compactShowImageStoredResult)
+	case domain.ToolKindEdit, domain.ToolKindWrite, domain.ToolKindLint:
+		text, ok := formatStoredToolOutput(env)
+		if !ok {
+			return "", false
+		}
+		return compactTextForCompaction(text, limits.HeadLines, limits.TailLines, limits.MaxBytes, string(env.Tool)+" result"), true
+	default:
+		text, ok := formatStoredToolOutput(env)
+		if !ok {
+			return "", false
+		}
+		if shouldAppendDiffToModelText(env) && strings.TrimSpace(diff) != "" {
+			text += "\n\nDiff:\n" + diff
+		}
+		return compactTextForCompaction(text, limits.HeadLines, limits.TailLines, limits.MaxBytes, string(env.Tool)+" result"), true
+	}
+}
+
+func compactReadStoredResult(result ReadStoredResult, limits CompactFormatLimits) string {
+	lines := make([]string, 0, min(len(result.Lines), limits.ReadMaxLines)+5)
+	if path := strings.TrimSpace(result.Path); path != "" {
+		lines = append(lines, "path: "+path)
+	}
+	if result.Mode != "" {
+		lines = append(lines, "mode: "+string(result.Mode))
+	}
+	if result.Start > 0 || result.End > 0 || result.Total > 0 {
+		lines = append(lines, fmt.Sprintf("range: %d-%d of %d", result.Start, result.End, result.Total))
+	}
+	switch result.Mode {
+	case ReadStoredModeDirectory:
+		for _, entry := range result.Entries {
+			lines = append(lines, entry)
+		}
+	default:
+		for _, line := range result.Lines {
+			lines = append(lines, strconv.Itoa(line.Number)+": "+line.Text)
+		}
+	}
+	if footer := strings.TrimSpace(result.Footer); footer != "" {
+		lines = append(lines, footer)
+	} else if footer := readStoredFooter(result); footer != "" {
+		lines = append(lines, footer)
+	}
+	return compactTextForCompaction(strings.Join(lines, "\n"), limits.ReadMaxLines, 0, limits.MaxBytes, "read result")
+}
+
+func compactBashStoredResult(result BashStoredResult, limits CompactFormatLimits) string {
+	lines := make([]string, 0, 5)
+	if command := strings.TrimSpace(result.Command); command != "" {
+		lines = append(lines, "command: "+command)
+	}
+	if workdir := strings.TrimSpace(result.Workdir); workdir != "" {
+		lines = append(lines, "workdir: "+workdir)
+	}
+	if result.TimeoutMS > 0 {
+		lines = append(lines, fmt.Sprintf("timeout_ms: %d", result.TimeoutMS))
+	}
+	lines = append(lines, fmt.Sprintf("exit_code: %d", result.ExitCode))
+	if output := strings.TrimSpace(result.Output); output != "" {
+		lines = append(lines, "output:")
+		lines = append(lines, compactTextForCompaction(output, limits.ExecHeadLines, limits.ExecTailLines, limits.MaxBytes, "bash output"))
+	}
+	return strings.TrimSpace(strings.Join(lines, "\n"))
+}
+
+func compactExecStoredResult(result ExecStoredResult, limits CompactFormatLimits) string {
+	lines := make([]string, 0, 8)
+	if msg := strings.TrimSpace(result.Message); msg != "" {
+		lines = append(lines, msg)
+	}
+	if id := strings.TrimSpace(result.ProcessID); id != "" {
+		lines = append(lines, "process_id: "+id)
+	}
+	if command := strings.TrimSpace(result.Command); command != "" {
+		lines = append(lines, "command: "+command)
+	}
+	if workdir := strings.TrimSpace(result.Workdir); workdir != "" {
+		lines = append(lines, "workdir: "+workdir)
+	}
+	if state := strings.TrimSpace(result.State); state != "" {
+		lines = append(lines, "state: "+state)
+	}
+	if result.ExitCode != nil {
+		lines = append(lines, fmt.Sprintf("exit_code: %d", *result.ExitCode))
+	}
+	if result.OutputBytes > 0 {
+		lines = append(lines, fmt.Sprintf("output_bytes: %d", result.OutputBytes))
+	}
+	if output := strings.TrimSpace(result.Output); output != "" {
+		lines = append(lines, "output:")
+		lines = append(lines, compactTextForCompaction(output, limits.ExecHeadLines, limits.ExecTailLines, limits.MaxBytes, "exec output"))
+	}
+	return strings.TrimSpace(strings.Join(lines, "\n"))
+}
+
+func compactViewImageStoredResult(result ViewImageStoredResult) string {
+	lines := []string{"Viewed image; image bytes omitted for text-only compaction."}
+	if summary := strings.TrimSpace(result.Summary); summary != "" {
+		lines = append(lines, "summary: "+summary)
+	}
+	if path := strings.TrimSpace(result.Path); path != "" {
+		lines = append(lines, "path: "+path)
+	}
+	if source := strings.TrimSpace(result.SourcePath); source != "" {
+		lines = append(lines, "source_path: "+source)
+	}
+	if mime := strings.TrimSpace(result.MIMEType); mime != "" {
+		lines = append(lines, "mime: "+mime)
+	}
+	return strings.TrimSpace(strings.Join(lines, "\n"))
+}
+
+func compactShowImageStoredResult(result ShowImageStoredResult) string {
+	lines := []string{"Showed image; image bytes omitted for text-only compaction."}
+	if summary := strings.TrimSpace(result.Summary); summary != "" {
+		lines = append(lines, "summary: "+summary)
+	}
+	if path := strings.TrimSpace(result.Path); path != "" {
+		lines = append(lines, "path: "+path)
+	}
+	if source := strings.TrimSpace(result.SourcePath); source != "" {
+		lines = append(lines, "source_path: "+source)
+	}
+	if mime := strings.TrimSpace(result.MIMEType); mime != "" {
+		lines = append(lines, "mime: "+mime)
+	}
+	return strings.TrimSpace(strings.Join(lines, "\n"))
+}
+
+func compactTextForCompaction(text string, headLines int, tailLines int, maxBytes int, label string) string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return ""
+	}
+	lines := strings.Split(text, "\n")
+	if len([]byte(text)) <= maxBytes && (tailLines <= 0 || len(lines) <= headLines+tailLines) && (tailLines > 0 || len(lines) <= headLines) {
+		return text
+	}
+	if tailLines <= 0 {
+		kept := min(len(lines), headLines)
+		out := strings.Join(lines[:kept], "\n")
+		out += fmt.Sprintf("\n[%s truncated for compaction: kept first %d of %d lines]", label, kept, len(lines))
+		return trimBytesForCompaction(out, maxBytes, label)
+	}
+	if len(lines) <= headLines+tailLines {
+		return trimBytesForCompaction(text, maxBytes, label)
+	}
+	out := strings.Join(lines[:headLines], "\n")
+	out += fmt.Sprintf("\n[%s truncated for compaction: kept first %d and last %d lines of %d lines]\n", label, headLines, tailLines, len(lines))
+	out += strings.Join(lines[len(lines)-tailLines:], "\n")
+	return trimBytesForCompaction(out, maxBytes, label)
+}
+
+func trimBytesForCompaction(text string, maxBytes int, label string) string {
+	if maxBytes <= 0 || len([]byte(text)) <= maxBytes {
+		return text
+	}
+	data := []byte(text)
+	if maxBytes < 256 {
+		maxBytes = 256
+	}
+	suffix := []byte(fmt.Sprintf("\n[%s truncated for compaction: kept %d bytes]", label, maxBytes))
+	limit := maxBytes - len(suffix)
+	if limit < 1 {
+		limit = maxBytes
+	}
+	return strings.TrimSpace(string(data[:limit])) + string(suffix)
+}
+
 func shouldAppendDiffToModelText(env storedResultEnvelope) bool {
 	if env.PartKind != domain.PartKindToolOutput {
 		return false

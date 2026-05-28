@@ -3574,11 +3574,225 @@ func (e *Engine) buildCompactionConversationForTimeline(session domain.Session, 
 		head = timeline[:keepStart]
 		firstKeptItemID = timeline[keepStart].ID
 	}
-	envelope, err := e.buildPromptEnvelopeForTimeline(session, chat, head, "", nil, nil, nil)
+	envelope, err := e.buildCompactionPromptEnvelopeForTimeline(session, chat, head)
 	if err != nil {
 		return nil, "", err
 	}
 	return provider.SerializePromptEnvelope(envelope), firstKeptItemID, nil
+}
+
+func (e *Engine) buildCompactionPromptEnvelopeForTimeline(session domain.Session, chat domain.Chat, timeline []domain.TimelineItem) (provider.PromptEnvelope, error) {
+	envelope := provider.PromptEnvelope{Instructions: e.baseInstructionsForChat(session, chat)}
+	for _, item := range timeline {
+		messages, err := e.compactionMessagesForTimelineItem(item, e.preserveThinkingEnabled(session))
+		if err != nil {
+			return provider.PromptEnvelope{}, err
+		}
+		envelope.Items = append(envelope.Items, messages...)
+	}
+	return envelope, nil
+}
+
+func (e *Engine) compactionMessagesForTimelineItem(item domain.TimelineItem, preserveThinking bool) ([]provider.Message, error) {
+	switch content := item.Content.(type) {
+	case domain.UserMessage:
+		body := e.compactionUserMessageText(content)
+		if body == "" {
+			return nil, nil
+		}
+		return []provider.Message{{Role: domain.MessageRoleUser, Content: body}}, nil
+	case domain.AssistantMessage:
+		body := compactAssistantMessageText(content, preserveThinking)
+		if body == "" {
+			return nil, nil
+		}
+		out := []provider.Message{{Role: domain.MessageRoleAssistant, Content: body}}
+		for _, tool := range content.Tools {
+			msg, ok := e.compactionToolResultMessage(tool)
+			if ok {
+				out = append(out, msg)
+			}
+		}
+		return out, nil
+	case domain.Compaction:
+		if strings.TrimSpace(content.Summary) == "" {
+			return nil, nil
+		}
+		return []provider.Message{compactedHistoryMessage(content.Summary)}, nil
+	case domain.ToolExecution:
+		body := ""
+		if content.Result != nil {
+			body = strings.TrimSpace(content.Result.Text)
+		}
+		if content.Error != nil {
+			body = strings.TrimSpace(content.Error.Message)
+		}
+		if body == "" {
+			return nil, nil
+		}
+		return []provider.Message{{Role: domain.MessageRoleUser, Content: compactTextForCompaction(string(content.Tool)+" output:\n"+body, "tool execution")}}, nil
+	case domain.Notice:
+		return nil, nil
+	default:
+		return nil, fmt.Errorf("unsupported timeline item %s content %T", item.ID, item.Content)
+	}
+}
+
+func (e *Engine) compactionUserMessageText(msg domain.UserMessage) string {
+	blocks := make([]string, 0, 1+len(msg.Attachments)+len(msg.References))
+	if text := strings.TrimSpace(msg.Text); text != "" {
+		blocks = append(blocks, text)
+	}
+	for _, ref := range msg.References {
+		meta := reference.Metadata{
+			Kind:    reference.Kind(ref.Kind),
+			Path:    ref.Path,
+			Display: ref.Display,
+			Start:   ref.Start,
+			End:     ref.End,
+		}
+		resolved, err := e.resolveReference(meta)
+		label := strings.TrimSpace(ref.Display)
+		if label == "" {
+			label = strings.TrimSpace(ref.Path)
+		}
+		if err != nil {
+			blocks = append(blocks, fmt.Sprintf("Reference omitted for text-only compaction: %s (read failed: %v)", label, err))
+			continue
+		}
+		if label == "" {
+			label = "reference"
+		}
+		blocks = append(blocks, "Referenced "+label+":\n"+compactTextForCompaction(resolved, "reference"))
+	}
+	for _, item := range msg.Attachments {
+		meta := attachment.Metadata{
+			ID: item.ID, Name: item.Name, MIME: item.MIME, Path: item.Path, Size: item.Size, Source: item.Source, Original: item.Original,
+		}
+		name := strings.TrimSpace(meta.Name)
+		if name == "" {
+			name = strings.TrimSpace(meta.Path)
+		}
+		if name == "" {
+			name = "attachment"
+		}
+		switch attachment.ClassifyMIME(meta.MIME) {
+		case attachment.KindText:
+			body, err := e.files.ReadText(meta)
+			if err != nil {
+				blocks = append(blocks, fmt.Sprintf("Attachment omitted for text-only compaction: %s (read failed: %v)", name, err))
+				continue
+			}
+			blocks = append(blocks, "Attached text file "+name+":\n"+compactTextForCompaction(body, "attachment "+name))
+		case attachment.KindImage:
+			lines := []string{"Image attachment omitted for text-only compaction:", "- name: " + name}
+			if mime := strings.TrimSpace(meta.MIME); mime != "" {
+				lines = append(lines, "- mime: "+mime)
+			}
+			if meta.Size > 0 {
+				lines = append(lines, fmt.Sprintf("- size: %d bytes", meta.Size))
+			}
+			blocks = append(blocks, strings.Join(lines, "\n"))
+		default:
+			blocks = append(blocks, fmt.Sprintf("Attachment omitted for text-only compaction: %s (unsupported MIME %s)", name, meta.MIME))
+		}
+	}
+	return strings.TrimSpace(strings.Join(blocks, "\n\n"))
+}
+
+func compactAssistantMessageText(msg domain.AssistantMessage, preserveThinking bool) string {
+	blocks := make([]string, 0, 3)
+	if preserveThinking && strings.TrimSpace(msg.Reasoning.Text) != "" {
+		blocks = append(blocks, formatThinkingBlock(msg.Reasoning.Text))
+	}
+	if text := strings.TrimSpace(msg.Text); text != "" {
+		blocks = append(blocks, text)
+	}
+	if len(msg.Tools) > 0 {
+		lines := make([]string, 0, len(msg.Tools)+1)
+		lines = append(lines, "Tool calls:")
+		for _, tool := range msg.Tools {
+			args, err := json.Marshal(tool.Args)
+			if err != nil {
+				lines = append(lines, fmt.Sprintf("- %s <args unavailable: %v>", tool.Tool, err))
+				continue
+			}
+			lines = append(lines, fmt.Sprintf("- %s %s", tool.Tool, string(args)))
+		}
+		blocks = append(blocks, strings.Join(lines, "\n"))
+	}
+	return strings.TrimSpace(strings.Join(blocks, "\n\n"))
+}
+
+func (e *Engine) compactionToolResultMessage(tool domain.ToolCall) (provider.Message, bool) {
+	if tool.Result == nil && tool.Error == nil {
+		return provider.Message{}, false
+	}
+	status := domain.ToolResultStatusOK
+	text := ""
+	diff := ""
+	var data any
+	if tool.Result != nil {
+		status = tool.Result.Status
+		text = tool.Result.Text
+		diff = tool.Result.Diff
+		data = tool.Result.Data
+	}
+	if tool.Error != nil {
+		status = domain.ToolResultStatusError
+		text = tool.Error.Message
+		data = domain.ErrorStoredResult{Message: tool.Error.Message}
+	}
+	part := domain.Part{
+		Kind: domain.PartKindToolOutput,
+		Payload: domain.ToolOutputPayload{
+			Tool:       tool.Tool,
+			ToolCallID: string(tool.ToolCallID),
+			Args:       tool.Args,
+			Status:     status,
+			Text:       text,
+			Diff:       diff,
+			Result:     data,
+		},
+	}
+	part.Body = part.Text()
+	body := strings.TrimSpace(part.Text())
+	if formatted, ok := tools.CompactModelTextForPart(part, diff, tools.DefaultCompactFormatLimits()); ok {
+		body = strings.TrimSpace(formatted)
+	} else if diff != "" {
+		if body != "" {
+			body += "\n\nDiff:\n" + diff
+		} else {
+			body = "Diff:\n" + diff
+		}
+		body = compactTextForCompaction(body, string(tool.Tool)+" result")
+	}
+	if body == "" {
+		return provider.Message{}, false
+	}
+	return provider.Message{Role: domain.MessageRoleUser, Content: "Tool result for " + string(tool.Tool) + ":\n" + body}, true
+}
+
+func compactTextForCompaction(text string, label string) string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return ""
+	}
+	const maxBytes = 16 * 1024
+	lines := strings.Split(text, "\n")
+	if len([]byte(text)) <= maxBytes && len(lines) <= 160 {
+		return text
+	}
+	if len(lines) <= 160 {
+		data := []byte(text)
+		if len(data) <= maxBytes {
+			return text
+		}
+		return strings.TrimSpace(string(data[:maxBytes])) + fmt.Sprintf("\n[%s truncated for compaction: kept %d bytes]", label, maxBytes)
+	}
+	head := strings.Join(lines[:80], "\n")
+	tail := strings.Join(lines[len(lines)-80:], "\n")
+	return head + fmt.Sprintf("\n[%s truncated for compaction: kept first 80 and last 80 lines of %d lines]\n", label, len(lines)) + tail
 }
 
 func (e *Engine) completeCompactionChat(ctx context.Context, session domain.Session, client *provider.Client, req provider.ChatRequest, out chan<- domain.Event) (provider.ChatResponse, error) {

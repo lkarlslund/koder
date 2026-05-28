@@ -1111,6 +1111,133 @@ func TestBuildCompactionConversationExcludesPreservedToolTail(t *testing.T) {
 	}
 }
 
+func TestBuildCompactionConversationStripsImageContentParts(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.CompactionKeepToolBatches = 1
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	workdir := t.TempDir()
+	engine := New(cfg, st, tools.NewRegistry(workdir), nil, workdir)
+	session, err := st.CreateSession(context.Background(), "test", "openai", "gpt-5.4", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chat := defaultChatForSession(t, st, session.ID)
+
+	imagePath := filepath.Join(workdir, "screen.png")
+	if err := os.WriteFile(imagePath, []byte("\x89PNG\r\n\x1a\nfake"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	appendUserTimelineItemWithAttachments(t, st, chat.ID, "old screenshot", []domain.Attachment{{
+		Name: "screen.png",
+		MIME: "image/png",
+		Path: imagePath,
+		Size: 12,
+	}})
+	imageReq := tools.Request{Tool: domain.ToolKindViewImage, ToolCallID: "call_image", Args: map[string]string{"path": "screen.png"}}
+	appendAssistantToolTimelineItem(t, st, chat.ID, imageReq, "I will inspect the image.")
+	attachToolResultTimelineItem(t, st, chat.ID, imageReq, "Viewed image screen.png", domain.ViewImageStoredResult{
+		Path:       "screen.png",
+		SourcePath: imagePath,
+		MIMEType:   "image/png",
+		Summary:    "Viewed image screen.png",
+	})
+	tailReq := tools.Request{Tool: domain.ToolKindBash, ToolCallID: "call_tail", Args: map[string]string{"command": "pwd"}}
+	tailItem := appendAssistantToolTimelineItem(t, st, chat.ID, tailReq, "")
+	attachToolResultTimelineItem(t, st, chat.ID, tailReq, "/tmp/project", domain.BashStoredResult{Command: "pwd", Output: "/tmp/project"})
+
+	timeline, err := st.TimelineForChat(context.Background(), chat.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	conversation, firstKeptItemID, err := engine.buildCompactionConversationForTimeline(session, chat, timeline)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if firstKeptItemID != tailItem.ID {
+		t.Fatalf("expected preserved tail to start at latest tool batch, got %s want %s", firstKeptItemID, tailItem.ID)
+	}
+	payload, err := json.Marshal(conversation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rendered := string(payload)
+	if strings.Contains(rendered, "image_url") || strings.Contains(rendered, "data:image") {
+		t.Fatalf("expected text-only compaction request, got %s", rendered)
+	}
+	for _, msg := range conversation {
+		if len(msg.ContentParts) != 0 {
+			t.Fatalf("expected no content parts in compaction message, got %#v", msg)
+		}
+		if msg.Role == domain.MessageRoleTool || msg.ToolCallID != "" || len(msg.ToolCalls) != 0 {
+			t.Fatalf("expected compaction messages to avoid structured tool protocol, got %#v", msg)
+		}
+	}
+	if !strings.Contains(rendered, "Image attachment omitted for text-only compaction") ||
+		!strings.Contains(rendered, "image bytes omitted") ||
+		!strings.Contains(rendered, "Viewed image screen.png") {
+		t.Fatalf("expected image metadata in text-only compaction request, got %s", rendered)
+	}
+	if strings.Contains(rendered, "/tmp/project") {
+		t.Fatalf("expected preserved tail output excluded from compaction source, got %s", rendered)
+	}
+}
+
+func TestBuildCompactionConversationTruncatesLargeToolOutput(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.CompactionKeepToolBatches = 0
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	engine := New(cfg, st, tools.NewRegistry(t.TempDir()), nil, t.TempDir())
+	session, err := st.CreateSession(context.Background(), "test", cfg.DefaultProvider, "test-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chat := defaultChatForSession(t, st, session.ID)
+
+	lines := make([]string, 0, 220)
+	for i := 0; i < 220; i++ {
+		lines = append(lines, fmt.Sprintf("output-line-%03d", i))
+	}
+	req := tools.Request{Tool: domain.ToolKindExecCommand, ToolCallID: "call_exec", Args: map[string]string{"cmd": "long"}}
+	appendAssistantToolTimelineItem(t, st, chat.ID, req, "")
+	attachToolResultTimelineItem(t, st, chat.ID, req, strings.Join(lines, "\n"), domain.ExecStoredResult{
+		ProcessID: "proc-1",
+		Command:   "long",
+		State:     "done",
+		Output:    strings.Join(lines, "\n"),
+	})
+
+	timeline, err := st.TimelineForChat(context.Background(), chat.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	conversation, _, err := engine.buildCompactionConversationForTimeline(session, chat, timeline)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rendered := ""
+	for _, msg := range conversation {
+		rendered += msg.Content + "\n"
+	}
+	for _, want := range []string{"process_id: proc-1", "command: long", "exec output truncated for compaction", "output-line-000", "output-line-219"} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("expected %q in compaction rendering, got %q", want, rendered)
+		}
+	}
+	if strings.Contains(rendered, "output-line-100") {
+		t.Fatalf("expected middle output to be omitted, got %q", rendered)
+	}
+}
+
 func TestBuildConversationIncludesSkillPromptContext(t *testing.T) {
 	cfg := testConfig(t)
 	st, err := store.Open(t.TempDir())

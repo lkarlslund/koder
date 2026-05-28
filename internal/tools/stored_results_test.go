@@ -69,6 +69,73 @@ func TestModelTextForPartUsesEditSummaryWithoutDiff(t *testing.T) {
 	}
 }
 
+func TestCompactModelTextForPartTruncatesExecOutput(t *testing.T) {
+	lines := make([]string, 0, 20)
+	for i := 0; i < 20; i++ {
+		lines = append(lines, "line "+string(rune('A'+i)))
+	}
+	exitCode := 7
+	text, ok := tools.CompactModelTextForPart(toolOutputPart(domain.ToolKindExecCommand, tools.StoredResultStatusOK, "", tools.ExecStoredResult{
+		ProcessID: "proc-1",
+		Command:   "go test ./...",
+		State:     "done",
+		ExitCode:  &exitCode,
+		Output:    strings.Join(lines, "\n"),
+	}), "", tools.CompactFormatLimits{MaxBytes: 4096, ExecHeadLines: 3, ExecTailLines: 2})
+	if !ok {
+		t.Fatal("expected compact model text")
+	}
+	for _, want := range []string{"process_id: proc-1", "command: go test ./...", "exit_code: 7", "line A", "line B", "line C", "line S", "line T", "exec output truncated for compaction"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("expected %q in %q", want, text)
+		}
+	}
+	if strings.Contains(text, "line J") {
+		t.Fatalf("expected middle output to be omitted, got %q", text)
+	}
+}
+
+func TestCompactModelTextForPartOmitsViewImageBytes(t *testing.T) {
+	text, ok := tools.CompactModelTextForPart(toolOutputPart(domain.ToolKindViewImage, tools.StoredResultStatusOK, "Viewed image", tools.ViewImageStoredResult{
+		Path:       "screen.png",
+		SourcePath: "/tmp/screen.png",
+		MIMEType:   "image/png",
+		Summary:    "Viewed image screen.png",
+	}), "", tools.DefaultCompactFormatLimits())
+	if !ok {
+		t.Fatal("expected compact image text")
+	}
+	for _, want := range []string{"image bytes omitted", "summary: Viewed image screen.png", "path: screen.png", "mime: image/png"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("expected %q in %q", want, text)
+		}
+	}
+}
+
+func TestCompactModelTextForPartBoundsReadOutput(t *testing.T) {
+	var readLines []tools.ReadStoredLine
+	for i := 1; i <= 8; i++ {
+		readLines = append(readLines, tools.ReadStoredLine{Number: i, Text: "content"})
+	}
+	text, ok := tools.CompactModelTextForPart(toolOutputPart(domain.ToolKindRead, tools.StoredResultStatusOK, "", tools.ReadStoredResult{
+		Path:  "main.go",
+		Mode:  tools.ReadStoredModeFile,
+		Lines: readLines,
+		Start: 1,
+		End:   8,
+		Total: 8,
+	}), "", tools.CompactFormatLimits{MaxBytes: 4096, ReadMaxLines: 4})
+	if !ok {
+		t.Fatal("expected compact read text")
+	}
+	if !strings.Contains(text, "path: main.go") || !strings.Contains(text, "range: 1-8 of 8") {
+		t.Fatalf("expected read metadata, got %q", text)
+	}
+	if !strings.Contains(text, "read result truncated for compaction") || strings.Contains(text, "8: content") {
+		t.Fatalf("expected bounded read output, got %q", text)
+	}
+}
+
 func TestDisplayTextForPartStripsRedundantToolFailurePrefix(t *testing.T) {
 	text, ok := tools.DisplayTextForPart(toolOutputPart(domain.ToolKindTodoUpdateItem, tools.StoredResultStatusError, "todo_update_item failed: id must be a non-negative integer", tools.ErrorStoredResult{
 		Message: "todo_update_item failed: id must be a non-negative integer",
