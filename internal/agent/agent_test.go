@@ -3502,11 +3502,11 @@ func TestRunPromptAutoCompactsTargetChatWithPendingPrompt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	existingPct, ok := engine.estimateRequestUsagePercent(session, sideChat, existingMessages)
+	existingPct, ok := engine.estimateRequestUsagePercent(sideChat, existingMessages)
 	if !ok {
 		t.Fatal("expected existing request usage estimate")
 	}
-	pendingPct, ok := engine.estimateRequestUsagePercent(session, sideChat, pendingMessages)
+	pendingPct, ok := engine.estimateRequestUsagePercent(sideChat, pendingMessages)
 	if !ok {
 		t.Fatal("expected pending request usage estimate")
 	}

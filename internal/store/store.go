@@ -47,7 +47,6 @@ type backend interface {
 	SetSessionToolStates(context.Context, domain.ID, map[domain.ToolKind]bool) error
 	UpdateSessionTitle(context.Context, domain.ID, string, time.Time, int) error
 	UpdateSessionAgents(context.Context, domain.ID, string, string, string, string, []domain.AgentsFile, time.Time) error
-	SetSessionModel(context.Context, domain.ID, string, string) error
 	CreateApproval(context.Context, domain.ID, domain.ToolKind, string) (Approval, error)
 	CreateChatApproval(context.Context, domain.ID, domain.ToolKind, string) (Approval, error)
 	UpdateApproval(context.Context, domain.ID, domain.ApprovalStatus) error
@@ -418,10 +417,6 @@ func (s *Store) UpdateSessionAgents(
 	return s.backend.UpdateSessionAgents(ctx, sessionID, projectRoot, projectChecksum, resolved, summary, files, generatedAt)
 }
 
-func (s *Store) SetSessionModel(ctx context.Context, sessionID domain.ID, providerID, modelID string) error {
-	return s.backend.SetSessionModel(ctx, sessionID, providerID, modelID)
-}
-
 // TimelineForChat returns persisted timeline items for a chat ordered by sequence.
 func (s *Store) TimelineForChat(ctx context.Context, chatID domain.ID) ([]domain.TimelineItem, error) {
 	items, err := s.Timeline().List(ctx, ByIndex[domain.TimelineItem]("chat", fmt.Sprint(chatID)))
@@ -575,7 +570,11 @@ func (s *Store) ForkSession(ctx context.Context, sourceSessionID domain.ID) (dom
 	if err != nil {
 		return domain.Session{}, err
 	}
-	forked, err := s.CreateSession(ctx, source.Title, source.ProviderID, source.ModelID, &source.ID)
+	sourceChat, err := s.DefaultChat(ctx, sourceSessionID)
+	if err != nil {
+		return domain.Session{}, err
+	}
+	forked, err := s.CreateSession(ctx, source.Title, sourceChat.ProviderID, sourceChat.ModelID, &source.ID)
 	if err != nil {
 		return domain.Session{}, err
 	}

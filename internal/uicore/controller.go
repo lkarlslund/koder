@@ -846,7 +846,7 @@ func (c *Controller) RenameSession(ctx context.Context, sessionID domain.ID, tit
 		c.session = updated
 		for _, rt := range c.runtimes {
 			if rt != nil {
-				rt.SetSession(sessionForChatModel(updated, rt.Snapshot().Chat))
+				rt.SetSession(updated)
 			}
 		}
 	}
@@ -1168,7 +1168,7 @@ func (c *Controller) SaveProvider(ctx context.Context, draft ProviderDraft) (Pro
 		}
 		if c.runtime != nil {
 			c.runtime.SetChat(chatRecord)
-			c.runtime.SetSession(sessionForChatModel(c.session, chatRecord))
+			c.runtime.SetSession(c.session)
 		}
 	}
 	state := c.providerStateLocked()
@@ -1232,7 +1232,7 @@ func (c *Controller) DeleteProvider(ctx context.Context, providerID string) (Pro
 		}
 		if c.runtime != nil {
 			c.runtime.SetChat(chatRecord)
-			c.runtime.SetSession(sessionForChatModel(c.session, chatRecord))
+			c.runtime.SetSession(c.session)
 		}
 	}
 	state := c.providerStateLocked()
@@ -1454,14 +1454,14 @@ func (c *Controller) SetModel(ctx context.Context, providerID, modelID string) e
 	for id, snapshot := range c.snapshots {
 		if id == chatRecord.ID {
 			snapshot.Chat = chatRecord
-			snapshot.Session = sessionForChatModel(session, chatRecord)
+			snapshot.Session = session
 		}
 		c.snapshots[id] = snapshot
 	}
 	c.mu.Unlock()
 	if rt != nil {
 		rt.SetChat(chatRecord)
-		rt.SetSession(sessionForChatModel(session, chatRecord))
+		rt.SetSession(session)
 	}
 	c.broadcast("snapshot", c.State())
 	return nil
@@ -2467,7 +2467,7 @@ func (c *Controller) loadSession(ctx context.Context, sessionID, chatID domain.I
 		rt := existingRuntimes[item.ID]
 		if rt == nil {
 			var err error
-			rt, err = c.agent.Chat(ctx, sessionForChatModel(session, item), item)
+			rt, err = c.agent.Chat(ctx, session, item)
 			if err != nil {
 				return err
 			}
@@ -2475,7 +2475,7 @@ func (c *Controller) loadSession(ctx context.Context, sessionID, chatID domain.I
 			unsubs[item.ID] = unsub
 			subscriptions = append(subscriptions, runtimeSubscription{chatID: item.ID, updates: updates})
 		} else {
-			rt.SetSession(sessionForChatModel(session, item))
+			rt.SetSession(session)
 			rt.SetChat(item)
 			if unsub := existingUnsubs[item.ID]; unsub != nil {
 				unsubs[item.ID] = unsub
@@ -2602,16 +2602,6 @@ func (c *Controller) ensureChatModel(ctx context.Context, chatRecord domain.Chat
 	chatRecord.ModelID = modelID
 	chatRecord.UpdatedAt = time.Now().UTC()
 	return chatRecord, nil
-}
-
-func sessionForChatModel(session domain.Session, chatRecord domain.Chat) domain.Session {
-	if providerID := strings.TrimSpace(chatRecord.ProviderID); providerID != "" {
-		session.ProviderID = providerID
-	}
-	if modelID := strings.TrimSpace(chatRecord.ModelID); modelID != "" {
-		session.ModelID = modelID
-	}
-	return session
 }
 
 const processRestartResumeNote = "The previous turn was interrupted because the koder process was restarting. Continue from the persisted transcript and pending tool state without restating the interruption."

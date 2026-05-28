@@ -1022,9 +1022,6 @@ func TestWebSocketSetModelReturnsUpdatedState(t *testing.T) {
 				Chat struct {
 					ModelID string
 				}
-				Session struct {
-					ModelID string
-				}
 			}
 		} `json:"result"`
 		Error string `json:"error"`
@@ -1037,9 +1034,6 @@ func TestWebSocketSetModelReturnsUpdatedState(t *testing.T) {
 	}
 	if resp.Result.Snapshot.Chat.ModelID != "next-model" {
 		t.Fatalf("expected response chat next-model, got %q", resp.Result.Snapshot.Chat.ModelID)
-	}
-	if resp.Result.Snapshot.Session.ModelID != "next-model" {
-		t.Fatalf("expected runtime snapshot next-model, got %q", resp.Result.Snapshot.Session.ModelID)
 	}
 }
 
@@ -1398,10 +1392,12 @@ func TestWebSocketProviderCRUDReturnsProviderState(t *testing.T) {
 				} `json:"drafts"`
 			} `json:"providers"`
 			State struct {
-				Session struct {
-					ProviderID string
-					ModelID    string
-				}
+				Snapshot struct {
+					Chat struct {
+						ProviderID string `json:"ProviderID"`
+						ModelID    string `json:"ModelID"`
+					} `json:"Chat"`
+				} `json:"Snapshot"`
 			} `json:"state"`
 		} `json:"result"`
 		Error string `json:"error"`
@@ -1427,8 +1423,8 @@ func TestWebSocketProviderCRUDReturnsProviderState(t *testing.T) {
 	if saveResp.Result.Providers.DefaultProvider != "test" || saveResp.Result.Providers.DefaultModel != "model" {
 		t.Fatalf("expected existing default provider/model to remain, got %#v", saveResp.Result.Providers)
 	}
-	if saveResp.Result.State.Session.ProviderID != "test" || saveResp.Result.State.Session.ModelID != "model" {
-		t.Fatalf("expected active session to remain on current usable provider/model, got %#v", saveResp.Result.State.Session)
+	if saveResp.Result.State.Snapshot.Chat.ProviderID != "test" || saveResp.Result.State.Snapshot.Chat.ModelID != "model" {
+		t.Fatalf("expected active chat to remain on current usable provider/model, got %#v", saveResp.Result.State.Snapshot.Chat)
 	}
 	if got := saveResp.Result.Providers.Drafts["local"].Headers["X-Test"]; got != "yes" {
 		t.Fatalf("expected saved header in draft, got %q", got)

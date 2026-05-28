@@ -325,17 +325,7 @@ func TestControllerModelOptionsDoesNotInventMissingCurrentProvider(t *testing.T)
 			"test": {Name: "Test Provider", BaseURL: modelServer.URL + "/v1"},
 		}
 	})
-	session := ctrl.State().Session
-	if err := st.SetSessionModel(context.Background(), session.ID, "ghost", "ghost-model"); err != nil {
-		t.Fatal(err)
-	}
-	session, err := st.GetSession(context.Background(), session.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctrl.mu.Lock()
-	ctrl.session = session
-	ctrl.mu.Unlock()
+	_ = st
 
 	options, err := ctrl.ModelOptions(context.Background())
 	if err != nil {
@@ -574,21 +564,11 @@ func TestControllerSetModelUpdatesStoreStateAndRuntimeSnapshot(t *testing.T) {
 	if state.Snapshot.Chat.ProviderID != "test" || state.Snapshot.Chat.ModelID != "next-model" {
 		t.Fatalf("expected state chat model test/next-model, got %s/%s", state.Snapshot.Chat.ProviderID, state.Snapshot.Chat.ModelID)
 	}
-	if state.Snapshot.Session.ProviderID != "test" || state.Snapshot.Session.ModelID != "next-model" {
-		t.Fatalf("expected runtime snapshot model test/next-model, got %s/%s", state.Snapshot.Session.ProviderID, state.Snapshot.Session.ModelID)
-	}
 	if state.ContextWindow != 12345 {
 		t.Fatalf("expected context window 12345, got %d", state.ContextWindow)
 	}
 	if state.ModelInfo.ProviderID != "test" || state.ModelInfo.ModelID != "next-model" || state.ModelInfo.ContextWindow != 12345 || !state.ModelInfo.SupportsTools {
 		t.Fatalf("unexpected model info: %#v", state.ModelInfo)
-	}
-	session, err := st.GetSession(context.Background(), state.Session.ID)
-	if err != nil {
-		t.Fatalf("get session: %v", err)
-	}
-	if session.ModelID == "next-model" {
-		t.Fatalf("expected stored session model to remain unchanged")
 	}
 	chatRecord, err := st.GetChat(context.Background(), state.Snapshot.Chat.ID)
 	if err != nil {

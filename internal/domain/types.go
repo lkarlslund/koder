@@ -191,8 +191,6 @@ type Session struct {
 	Title             string
 	TitleGeneratedAt  time.Time
 	TitleRefreshCount int
-	ProviderID        string
-	ModelID           string
 	PermissionProfile string
 	PermissionRules   []PermissionOverride
 	ToolStates        map[ToolKind]bool

@@ -192,8 +192,6 @@ func (b *jsonfsBackend) CreateSession(ctx context.Context, title, providerID, mo
 		ID:                domain.NewID(),
 		ParentID:          parentID,
 		Title:             title,
-		ProviderID:        providerID,
-		ModelID:           modelID,
 		CreatedAt:         now,
 		UpdatedAt:         now,
 		PermissionProfile: "",
@@ -241,6 +239,8 @@ func (b *jsonfsBackend) CreateChat(ctx context.Context, sessionID domain.ID, tit
 	if err != nil {
 		return domain.Chat{}, err
 	}
+	providerID := ""
+	modelID := ""
 	if parentChatID != nil && *parentChatID != "" {
 		parent, err := b.readChat(*parentChatID)
 		if err != nil {
@@ -249,12 +249,19 @@ func (b *jsonfsBackend) CreateChat(ctx context.Context, sessionID domain.ID, tit
 		if parent.SessionID != sessionID {
 			return domain.Chat{}, fmt.Errorf("parent chat %s belongs to session %s, not %s", parent.ID, parent.SessionID, sessionID)
 		}
-		session.ProviderID = parent.ProviderID
-		session.ModelID = parent.ModelID
+		providerID = parent.ProviderID
+		modelID = parent.ModelID
 	}
 	existing, err := b.ListChats(ctx, sessionID)
 	if err != nil {
 		return domain.Chat{}, err
+	}
+	if parentChatID == nil || *parentChatID == "" {
+		if len(existing) == 0 {
+			return domain.Chat{}, fmt.Errorf("no chat for session %s", sessionID)
+		}
+		providerID = existing[0].ProviderID
+		modelID = existing[0].ModelID
 	}
 	now := time.Now().UTC()
 	chat := domain.Chat{
@@ -263,8 +270,8 @@ func (b *jsonfsBackend) CreateChat(ctx context.Context, sessionID domain.ID, tit
 		ParentChatID:      parentChatID,
 		Title:             strings.TrimSpace(title),
 		WorkflowRole:      role,
-		ProviderID:        session.ProviderID,
-		ModelID:           session.ModelID,
+		ProviderID:        providerID,
+		ModelID:           modelID,
 		PermissionProfile: strings.TrimSpace(session.PermissionProfile),
 		ToolStates:        cloneToolStates(session.ToolStates),
 		Position:          len(existing),
@@ -603,13 +610,6 @@ func (b *jsonfsBackend) UpdateSessionAgents(
 		session.AgentsSummary = summary
 		session.AgentsFiles = append([]domain.AgentsFile(nil), files...)
 		session.AgentsGeneratedAt = generatedAt
-	})
-}
-
-func (b *jsonfsBackend) SetSessionModel(ctx context.Context, sessionID domain.ID, providerID, modelID string) error {
-	return b.updateSession(ctx, sessionID, func(session *domain.Session) {
-		session.ProviderID = providerID
-		session.ModelID = modelID
 	})
 }
 

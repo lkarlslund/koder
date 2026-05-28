@@ -131,16 +131,28 @@ func (e *Engine) ExecManager() *execruntime.Manager {
 	return e.exec
 }
 
-func sessionForChat(session domain.Session, chat domain.Chat) domain.Session {
+func chatModel(chat domain.Chat) (string, string, error) {
 	providerID := strings.TrimSpace(chat.ProviderID)
 	modelID := strings.TrimSpace(chat.ModelID)
-	if providerID != "" {
-		session.ProviderID = providerID
+	if providerID == "" {
+		return "", "", fmt.Errorf("chat %s has no provider", chat.ID)
 	}
-	if modelID != "" {
-		session.ModelID = modelID
+	if modelID == "" {
+		return "", "", fmt.Errorf("chat %s has no model", chat.ID)
 	}
-	return session
+	return providerID, modelID, nil
+}
+
+func (e *Engine) clientForChat(chat domain.Chat) (*provider.Client, error) {
+	providerID, _, err := chatModel(chat)
+	if err != nil {
+		return nil, err
+	}
+	providerCfg, ok := e.cfg.Provider(providerID)
+	if !ok {
+		return nil, fmt.Errorf("provider %q not found", providerID)
+	}
+	return provider.New(providerID, providerCfg, e.debug)
 }
 
 func (e *Engine) RunPrompt(ctx context.Context, session domain.Session, prompt string) (<-chan domain.Event, error) {
@@ -160,7 +172,6 @@ func (e *Engine) RunPromptWithInputs(ctx context.Context, session domain.Session
 }
 
 func (e *Engine) RunPromptInChat(ctx context.Context, session domain.Session, chat domain.Chat, prompt string, drafts []attachment.Draft, refs []reference.Draft, note string) (<-chan domain.Event, error) {
-	session = sessionForChat(session, chat)
 	return e.runModelPrompt(ctx, session, chat, prompt, drafts, refs, note)
 }
 
@@ -168,8 +179,7 @@ func (e *Engine) RunPromptTurn(ctx context.Context, turn *chatpkg.TurnState, pro
 	if turn == nil {
 		return nil, fmt.Errorf("turn state is required")
 	}
-	session := sessionForChat(turn.Session(), turn.Chat())
-	return e.runModelPromptTurn(ctx, turn, session, prompt, drafts, refs, note)
+	return e.runModelPromptTurn(ctx, turn, turn.Session(), prompt, drafts, refs, note)
 }
 
 func (e *Engine) SetPermissionProfile(ctx context.Context, sessionID domain.ID, profile string) (<-chan domain.Event, error) {
@@ -284,12 +294,7 @@ func (e *Engine) CompactChat(ctx context.Context, sessionID, chatID domain.ID) (
 	if chatRecord.SessionID != session.ID {
 		return nil, fmt.Errorf("chat %s does not belong to session %s", chatID, session.ID)
 	}
-	session = sessionForChat(session, chatRecord)
-	providerCfg, ok := e.cfg.Provider(session.ProviderID)
-	if !ok {
-		return nil, fmt.Errorf("provider %q not found", session.ProviderID)
-	}
-	client, err := provider.New(session.ProviderID, providerCfg, e.debug)
+	client, err := e.clientForChat(chatRecord)
 	if err != nil {
 		return nil, err
 	}
@@ -319,7 +324,6 @@ func (e *Engine) RunContinue(ctx context.Context, session domain.Session, note s
 }
 
 func (e *Engine) RunContinueInChat(ctx context.Context, session domain.Session, chat domain.Chat, note string) (<-chan domain.Event, error) {
-	session = sessionForChat(session, chat)
 	return e.runContinue(ctx, session, chat, note)
 }
 
@@ -327,8 +331,7 @@ func (e *Engine) RunContinueTurn(ctx context.Context, turn *chatpkg.TurnState, n
 	if turn == nil {
 		return nil, fmt.Errorf("turn state is required")
 	}
-	session := sessionForChat(turn.Session(), turn.Chat())
-	return e.runContinueTurn(ctx, turn, session, note)
+	return e.runContinueTurn(ctx, turn, turn.Session(), note)
 }
 
 // ResumePendingToolCallsInChat resumes durable tool calls that were saved before shutdown.
@@ -340,11 +343,7 @@ func (e *Engine) ResumePendingToolCallsInChat(ctx context.Context, session domai
 	if len(calls) == 0 {
 		return nil, nil
 	}
-	providerCfg, ok := e.cfg.Provider(session.ProviderID)
-	if !ok {
-		return nil, fmt.Errorf("provider %q not found", session.ProviderID)
-	}
-	client, err := provider.New(session.ProviderID, providerCfg, e.debug)
+	client, err := e.clientForChat(chat)
 	if err != nil {
 		return nil, err
 	}
@@ -425,7 +424,7 @@ func (e *Engine) PreviewNextRequest(ctx context.Context, session domain.Session,
 }
 
 func (e *Engine) PreviewNextRequestForChat(ctx context.Context, session domain.Session, chat domain.Chat, prompt string, drafts []attachment.Draft, refs []reference.Draft, note string) (provider.ChatRequest, error) {
-	if err := e.validatePromptAttachments(session, drafts); err != nil {
+	if err := e.validatePromptAttachments(chat, drafts); err != nil {
 		return provider.ChatRequest{}, err
 	}
 	messages, err := e.buildConversationPreview(ctx, session, chat.ID, prompt, drafts, refs, transientTurnMessages(note, ""))
@@ -436,14 +435,10 @@ func (e *Engine) PreviewNextRequestForChat(ctx context.Context, session domain.S
 }
 
 func (e *Engine) runModelPrompt(ctx context.Context, session domain.Session, chat domain.Chat, prompt string, drafts []attachment.Draft, refs []reference.Draft, note string) (<-chan domain.Event, error) {
-	if err := e.validatePromptAttachments(session, drafts); err != nil {
+	if err := e.validatePromptAttachments(chat, drafts); err != nil {
 		return nil, err
 	}
-	providerCfg, ok := e.cfg.Provider(session.ProviderID)
-	if !ok {
-		return nil, fmt.Errorf("provider %q not found", session.ProviderID)
-	}
-	client, err := provider.New(session.ProviderID, providerCfg, e.debug)
+	client, err := e.clientForChat(chat)
 	if err != nil {
 		return nil, err
 	}
@@ -454,7 +449,7 @@ func (e *Engine) runModelPrompt(ctx context.Context, session domain.Session, cha
 		if session.ID != "" && needsSessionAgentsRefresh(session) {
 			out <- domain.Event{Kind: domain.EventKindStatus, Text: "Checking project instructions..."}
 		}
-		session, err = e.ensureSessionAgents(ctx, session, client)
+		session, err = e.ensureSessionAgents(ctx, session, chat, client)
 		if err != nil {
 			if interruptedErr(err) {
 				e.emitInterrupted(out, chat.ID, session.ID)
@@ -463,7 +458,7 @@ func (e *Engine) runModelPrompt(ctx context.Context, session domain.Session, cha
 			e.emitAssistantError(ctx, out, chat.ID, session.ID, err)
 			return
 		}
-		e.recordLifecycle(session.ID, "prompt_started", prompt, map[string]string{"provider": session.ProviderID, "model": session.ModelID})
+		e.recordLifecycle(session.ID, "prompt_started", prompt, map[string]string{"provider": chat.ProviderID, "model": chat.ModelID})
 		compacted, err := e.autoCompactPromptIfNeeded(ctx, session, chat, client, prompt, drafts, refs, note, out)
 		if err != nil {
 			if interruptedErr(err) {
@@ -508,14 +503,10 @@ func (e *Engine) runModelPrompt(ctx context.Context, session domain.Session, cha
 
 func (e *Engine) runModelPromptTurn(ctx context.Context, turn *chatpkg.TurnState, session domain.Session, prompt string, drafts []attachment.Draft, refs []reference.Draft, note string) (<-chan domain.Event, error) {
 	chat := turn.Chat()
-	if err := e.validatePromptAttachments(session, drafts); err != nil {
+	if err := e.validatePromptAttachments(chat, drafts); err != nil {
 		return nil, err
 	}
-	providerCfg, ok := e.cfg.Provider(session.ProviderID)
-	if !ok {
-		return nil, fmt.Errorf("provider %q not found", session.ProviderID)
-	}
-	client, err := provider.New(session.ProviderID, providerCfg, e.debug)
+	client, err := e.clientForChat(chat)
 	if err != nil {
 		return nil, err
 	}
@@ -526,7 +517,7 @@ func (e *Engine) runModelPromptTurn(ctx context.Context, turn *chatpkg.TurnState
 		if session.ID != "" && needsSessionAgentsRefresh(session) {
 			out <- domain.Event{Kind: domain.EventKindStatus, Text: "Checking project instructions..."}
 		}
-		session, err = e.ensureSessionAgents(ctx, session, client)
+		session, err = e.ensureSessionAgents(ctx, session, chat, client)
 		if err != nil {
 			if interruptedErr(err) {
 				e.emitInterrupted(out, chat.ID, session.ID)
@@ -536,7 +527,7 @@ func (e *Engine) runModelPromptTurn(ctx context.Context, turn *chatpkg.TurnState
 			return
 		}
 		chat = turn.Chat()
-		e.recordLifecycle(session.ID, "prompt_started", prompt, map[string]string{"provider": session.ProviderID, "model": session.ModelID})
+		e.recordLifecycle(session.ID, "prompt_started", prompt, map[string]string{"provider": chat.ProviderID, "model": chat.ModelID})
 		compacted, err := e.autoCompactPromptTurnIfNeeded(ctx, session, chat, turn, client, prompt, drafts, refs, note, out)
 		if err != nil {
 			if interruptedErr(err) {
@@ -590,11 +581,7 @@ func (e *Engine) runModelPromptTurn(ctx context.Context, turn *chatpkg.TurnState
 }
 
 func (e *Engine) runContinue(ctx context.Context, session domain.Session, chat domain.Chat, note string) (<-chan domain.Event, error) {
-	providerCfg, ok := e.cfg.Provider(session.ProviderID)
-	if !ok {
-		return nil, fmt.Errorf("provider %q not found", session.ProviderID)
-	}
-	client, err := provider.New(session.ProviderID, providerCfg, e.debug)
+	client, err := e.clientForChat(chat)
 	if err != nil {
 		return nil, err
 	}
@@ -604,7 +591,7 @@ func (e *Engine) runContinue(ctx context.Context, session domain.Session, chat d
 		if session.ID != "" && needsSessionAgentsRefresh(session) {
 			out <- domain.Event{Kind: domain.EventKindStatus, Text: "Checking project instructions..."}
 		}
-		session, err = e.ensureSessionAgents(ctx, session, client)
+		session, err = e.ensureSessionAgents(ctx, session, chat, client)
 		if err != nil {
 			if interruptedErr(err) {
 				e.emitInterrupted(out, chat.ID, session.ID)
@@ -652,11 +639,7 @@ func (e *Engine) runContinue(ctx context.Context, session domain.Session, chat d
 
 func (e *Engine) runContinueTurn(ctx context.Context, turn *chatpkg.TurnState, session domain.Session, note string) (<-chan domain.Event, error) {
 	chat := turn.Chat()
-	providerCfg, ok := e.cfg.Provider(session.ProviderID)
-	if !ok {
-		return nil, fmt.Errorf("provider %q not found", session.ProviderID)
-	}
-	client, err := provider.New(session.ProviderID, providerCfg, e.debug)
+	client, err := e.clientForChat(chat)
 	if err != nil {
 		return nil, err
 	}
@@ -666,7 +649,7 @@ func (e *Engine) runContinueTurn(ctx context.Context, turn *chatpkg.TurnState, s
 		if session.ID != "" && needsSessionAgentsRefresh(session) {
 			out <- domain.Event{Kind: domain.EventKindStatus, Text: "Checking project instructions..."}
 		}
-		session, err = e.ensureSessionAgents(ctx, session, client)
+		session, err = e.ensureSessionAgents(ctx, session, chat, client)
 		if err != nil {
 			if interruptedErr(err) {
 				e.emitInterrupted(out, chat.ID, session.ID)
@@ -717,22 +700,22 @@ func (e *Engine) RefreshAgents(ctx context.Context, sessionID domain.ID) (domain
 	if err != nil {
 		return domain.Session{}, err
 	}
-	providerCfg, ok := e.cfg.Provider(session.ProviderID)
-	if !ok {
-		return domain.Session{}, fmt.Errorf("provider %q not found", session.ProviderID)
-	}
-	client, err := provider.New(session.ProviderID, providerCfg, e.debug)
+	chat, err := e.store.DefaultChat(ctx, sessionID)
 	if err != nil {
 		return domain.Session{}, err
 	}
-	return e.refreshSessionAgents(ctx, session, client)
+	client, err := e.clientForChat(chat)
+	if err != nil {
+		return domain.Session{}, err
+	}
+	return e.refreshSessionAgents(ctx, session, chat, client)
 }
 
-func (e *Engine) ensureSessionAgents(ctx context.Context, session domain.Session, client *provider.Client) (domain.Session, error) {
+func (e *Engine) ensureSessionAgents(ctx context.Context, session domain.Session, chat domain.Chat, client *provider.Client) (domain.Session, error) {
 	if !needsSessionAgentsRefresh(session) {
 		return session, nil
 	}
-	return e.refreshSessionAgents(ctx, session, client)
+	return e.refreshSessionAgents(ctx, session, chat, client)
 }
 
 func needsSessionAgentsRefresh(session domain.Session) bool {
@@ -742,12 +725,16 @@ func needsSessionAgentsRefresh(session domain.Session) bool {
 	return strings.TrimSpace(session.AgentsResolved) == "" && strings.TrimSpace(session.AgentsSummary) == ""
 }
 
-func (e *Engine) refreshSessionAgents(ctx context.Context, session domain.Session, client *provider.Client) (domain.Session, error) {
+func (e *Engine) refreshSessionAgents(ctx context.Context, session domain.Session, chat domain.Chat, client *provider.Client) (domain.Session, error) {
 	snapshot, err := e.agents.Discover(ctx, e.workdir)
 	if err != nil {
 		return domain.Session{}, err
 	}
-	resolution, err := e.agents.Resolve(ctx, client, session.ModelID, snapshot)
+	_, modelID, err := chatModel(chat)
+	if err != nil {
+		return domain.Session{}, err
+	}
+	resolution, err := e.agents.Resolve(ctx, client, modelID, snapshot)
 	if err != nil {
 		return domain.Session{}, err
 	}
@@ -928,7 +915,7 @@ func (e *Engine) continueModelTurnWithTurn(ctx context.Context, session domain.S
 			return buildErr
 		}
 		if steps > 0 {
-			compacted, compactErr := e.autoCompactPreparedMessagesIfNeeded(ctx, session, chat.ID, client, messages, out)
+			compacted, compactErr := e.autoCompactPreparedMessagesIfNeeded(ctx, session, chat, client, messages, out)
 			if compactErr != nil {
 				return compactErr
 			}
@@ -943,13 +930,13 @@ func (e *Engine) continueModelTurnWithTurn(ctx context.Context, session domain.S
 		}
 		transient = nil
 
-		stream := e.providerStreamingEnabled(session)
+		stream := e.providerStreamingEnabled(chat)
 		req := e.chatRequest(session, chat, messages, stream)
 		assistantItem, itemErr := e.nextAssistantTimelineItemForTurn(ctx, chat.ID, turn)
 		if itemErr != nil {
 			return itemErr
 		}
-		resp, streamed, completeErr := e.chatWithRetry(ctx, session.ID, session.ProviderID, client, out, req, assistantItem)
+		resp, streamed, completeErr := e.chatWithRetry(ctx, session.ID, chat.ProviderID, client, out, req, assistantItem)
 		if completeErr != nil {
 			return completeErr
 		}
@@ -1093,7 +1080,7 @@ func (e *Engine) continueModelTurnWithTurn(ctx context.Context, session domain.S
 				Meta: map[string]string{"chat_id": chat.ID},
 			}
 		}
-		title, titleErr := e.maybeUpdateSessionTitle(ctx, session, client)
+		title, titleErr := e.maybeUpdateSessionTitle(ctx, session, chat, client)
 		if titleErr != nil {
 			e.recordLifecycle(session.ID, "session_title_update_failed", titleErr.Error(), nil)
 		}
@@ -1147,7 +1134,7 @@ func shouldAutoContinueBadStop(text string) bool {
 	return false
 }
 
-func (e *Engine) maybeUpdateSessionTitle(ctx context.Context, session domain.Session, client *provider.Client) (string, error) {
+func (e *Engine) maybeUpdateSessionTitle(ctx context.Context, session domain.Session, chat domain.Chat, client *provider.Client) (string, error) {
 	now := time.Now().UTC()
 	timeline, prompt, err := e.titleSummaryMessages(ctx, session.ID)
 	if err != nil {
@@ -1156,7 +1143,7 @@ func (e *Engine) maybeUpdateSessionTitle(ctx context.Context, session domain.Ses
 	if !shouldRefreshSessionTitle(session, timeline, now) {
 		return "", nil
 	}
-	resp, err := client.CompleteChat(ctx, e.chatRequest(session, domain.Chat{}, prompt, false))
+	resp, err := client.CompleteChat(ctx, e.chatRequest(session, chat, prompt, false))
 	if err != nil {
 		return "", err
 	}
@@ -1172,11 +1159,12 @@ func (e *Engine) maybeUpdateSessionTitle(ctx context.Context, session domain.Ses
 }
 
 func (e *Engine) chatRequest(session domain.Session, chat domain.Chat, messages []provider.Message, stream bool) provider.ChatRequest {
+	_, modelID, _ := chatModel(chat)
 	req := provider.ChatRequest{
-		Model:     session.ModelID,
+		Model:     modelID,
 		Messages:  messages,
 		Stream:    stream,
-		ExtraBody: provider.RequestExtraBody(e.providerConfigForSession(session), session.ModelID, e.modelPresetForSession(session)),
+		ExtraBody: provider.RequestExtraBody(e.providerConfigForChat(chat), modelID, e.modelPresetForChat(chat)),
 	}
 	if len(messages) > 0 && (chat.ID != "" || chat.WorkflowRole != "") {
 		req.Tools = tools.Definitions(e.toolRuntime(session, chat))
@@ -1188,8 +1176,8 @@ func (e *Engine) chatRequest(session domain.Session, chat domain.Chat, messages 
 	return req
 }
 
-func (e *Engine) providerConfigForSession(session domain.Session) config.Provider {
-	cfg, _ := e.cfg.Provider(session.ProviderID)
+func (e *Engine) providerConfigForChat(chat domain.Chat) config.Provider {
+	cfg, _ := e.cfg.Provider(chat.ProviderID)
 	return cfg
 }
 
@@ -1231,16 +1219,16 @@ func (e *Engine) setPromptProgressSupport(providerID domain.ID, supported bool) 
 	}
 }
 
-func (e *Engine) modelPresetForSession(session domain.Session) string {
-	return e.cfg.ModelPreset(session.ProviderID, session.ModelID)
+func (e *Engine) modelPresetForChat(chat domain.Chat) string {
+	return e.cfg.ModelPreset(chat.ProviderID, chat.ModelID)
 }
 
-func (e *Engine) providerStreamingEnabled(session domain.Session) bool {
-	return e.providerConfigForSession(session).Stream
+func (e *Engine) providerStreamingEnabled(chat domain.Chat) bool {
+	return e.providerConfigForChat(chat).Stream
 }
 
-func (e *Engine) preserveThinkingEnabled(session domain.Session) bool {
-	return provider.PreserveThinkingEnabled(session.ModelID, e.modelPresetForSession(session))
+func (e *Engine) preserveThinkingEnabled(chat domain.Chat) bool {
+	return provider.PreserveThinkingEnabled(chat.ModelID, e.modelPresetForChat(chat))
 }
 
 func shouldRefreshSessionTitle(session domain.Session, timeline []domain.TimelineItem, now time.Time) bool {
@@ -1772,12 +1760,7 @@ func (e *Engine) approve(ctx context.Context, sessionID, chatID domain.ID, rawID
 				out <- domain.Event{Kind: domain.EventKindError, Err: err}
 				return
 			}
-			providerCfg, ok := e.cfg.Provider(session.ProviderID)
-			if !ok {
-				out <- domain.Event{Kind: domain.EventKindError, Err: fmt.Errorf("provider %q not found", session.ProviderID)}
-				return
-			}
-			client, err := provider.New(session.ProviderID, providerCfg, e.debug)
+			client, err := e.clientForChat(chat)
 			if err != nil {
 				out <- domain.Event{Kind: domain.EventKindError, Err: err}
 				return
@@ -1801,11 +1784,7 @@ func (e *Engine) approve(ctx context.Context, sessionID, chatID domain.ID, rawID
 	if err != nil {
 		return nil, err
 	}
-	providerCfg, ok := e.cfg.Provider(session.ProviderID)
-	if !ok {
-		return nil, fmt.Errorf("provider %q not found", session.ProviderID)
-	}
-	client, err := provider.New(session.ProviderID, providerCfg, e.debug)
+	client, err := e.clientForChat(chat)
 	if err != nil {
 		return nil, err
 	}
@@ -1844,7 +1823,7 @@ func (e *Engine) approve(ctx context.Context, sessionID, chatID domain.ID, rawID
 		if compacted {
 			transient = transientTurnMessages("", "Continue from the compacted session summary. Do not restart, greet, or restate the summary. Continue the pending task from the latest tool result.")
 		}
-		if err := e.continueModelTurn(ctx, session, domain.Chat{ID: item.ChatID}, client, out, transient); err != nil {
+		if err := e.continueModelTurn(ctx, session, chat, client, out, transient); err != nil {
 			if interruptedErr(err) {
 				e.emitInterrupted(out, item.ChatID, session.ID)
 				return
@@ -1882,11 +1861,7 @@ func (e *Engine) approveTool(ctx context.Context, sessionID, chatID domain.ID, t
 		if err != nil {
 			return nil, err
 		}
-		providerCfg, ok := e.cfg.Provider(session.ProviderID)
-		if !ok {
-			return nil, fmt.Errorf("provider %q not found", session.ProviderID)
-		}
-		client, err := provider.New(session.ProviderID, providerCfg, e.debug)
+		client, err := e.clientForChat(chat)
 		if err != nil {
 			return nil, err
 		}
@@ -1896,7 +1871,7 @@ func (e *Engine) approveTool(ctx context.Context, sessionID, chatID domain.ID, t
 			for evt := range toolEvents {
 				out <- evt
 			}
-			if err := e.continueModelTurn(ctx, session, domain.Chat{ID: chatID}, client, out, nil); err != nil {
+			if err := e.continueModelTurn(ctx, session, chat, client, out, nil); err != nil {
 				if interruptedErr(err) {
 					e.emitInterrupted(out, chatID, session.ID)
 					return
@@ -1915,11 +1890,7 @@ func (e *Engine) approveTool(ctx context.Context, sessionID, chatID domain.ID, t
 	if err != nil {
 		return nil, err
 	}
-	providerCfg, ok := e.cfg.Provider(session.ProviderID)
-	if !ok {
-		return nil, fmt.Errorf("provider %q not found", session.ProviderID)
-	}
-	client, err := provider.New(session.ProviderID, providerCfg, e.debug)
+	client, err := e.clientForChat(chat)
 	if err != nil {
 		return nil, err
 	}
@@ -1951,7 +1922,7 @@ func (e *Engine) approveTool(ctx context.Context, sessionID, chatID domain.ID, t
 			}
 			transient = transientTurnMessages("", "Continue from the compacted session summary. Do not restart, greet, or restate the summary. Continue the pending task from the latest tool result.")
 		}
-		if err := e.continueModelTurn(ctx, session, domain.Chat{ID: chatID}, client, out, transient); err != nil {
+		if err := e.continueModelTurn(ctx, session, chat, client, out, transient); err != nil {
 			if interruptedErr(err) {
 				e.emitInterrupted(out, chatID, session.ID)
 				return
@@ -1969,11 +1940,7 @@ func (e *Engine) approveToolTurn(ctx context.Context, turn *chatpkg.TurnState, t
 	if err != nil {
 		return nil, err
 	}
-	providerCfg, ok := e.cfg.Provider(session.ProviderID)
-	if !ok {
-		return nil, fmt.Errorf("provider %q not found", session.ProviderID)
-	}
-	client, err := provider.New(session.ProviderID, providerCfg, e.debug)
+	client, err := e.clientForChat(chat)
 	if err != nil {
 		return nil, err
 	}
@@ -2692,7 +2659,7 @@ func (e *Engine) buildPromptEnvelopeForTimeline(session domain.Session, chat dom
 			envelope.Instructions = baseInstructions
 			envelope.Items = append(envelope.Items[:0], compactedHistoryMessage(compacted.Summary))
 			if segmentStart < idx {
-				preserved, err := e.timelineMessagesForCompactionTail(session, timeline[segmentStart:idx], compacted.FirstKeptItemID)
+				preserved, err := e.timelineMessagesForCompactionTail(session, chat, timeline[segmentStart:idx], compacted.FirstKeptItemID)
 				if err != nil {
 					return provider.PromptEnvelope{}, err
 				}
@@ -2701,7 +2668,7 @@ func (e *Engine) buildPromptEnvelopeForTimeline(session domain.Session, chat dom
 			segmentStart = idx + 1
 			continue
 		}
-		messages, err := e.conversationMessagesForTimelineItem(session, item, e.preserveThinkingEnabled(session))
+		messages, err := e.conversationMessagesForTimelineItem(session, chat, item, e.preserveThinkingEnabled(chat))
 		if err != nil {
 			return provider.PromptEnvelope{}, err
 		}
@@ -2720,7 +2687,7 @@ func (e *Engine) buildPromptEnvelopeForTimeline(session domain.Session, chat dom
 	return envelope, nil
 }
 
-func (e *Engine) timelineMessagesForCompactionTail(session domain.Session, items []domain.TimelineItem, firstKeptItemID string) ([]provider.Message, error) {
+func (e *Engine) timelineMessagesForCompactionTail(session domain.Session, chat domain.Chat, items []domain.TimelineItem, firstKeptItemID string) ([]provider.Message, error) {
 	start := firstKeptTimelineIndex(items, firstKeptItemID)
 	if start < 0 {
 		start = preservedTimelineToolTailStart(items, e.compactionKeepToolBatches())
@@ -2730,7 +2697,7 @@ func (e *Engine) timelineMessagesForCompactionTail(session domain.Session, items
 	}
 	out := make([]provider.Message, 0, len(items)-start)
 	for _, item := range items[start:] {
-		messages, err := e.conversationMessagesForTimelineItem(session, item, e.preserveThinkingEnabled(session))
+		messages, err := e.conversationMessagesForTimelineItem(session, chat, item, e.preserveThinkingEnabled(chat))
 		if err != nil {
 			return nil, err
 		}
@@ -2772,7 +2739,7 @@ func preservedTimelineToolTailStart(items []domain.TimelineItem, keepBatches int
 	return starts[len(starts)-keepBatches]
 }
 
-func (e *Engine) conversationMessagesForTimelineItem(session domain.Session, item domain.TimelineItem, preserveThinking bool) ([]provider.Message, error) {
+func (e *Engine) conversationMessagesForTimelineItem(session domain.Session, chat domain.Chat, item domain.TimelineItem, preserveThinking bool) ([]provider.Message, error) {
 	switch content := item.Content.(type) {
 	case domain.UserMessage:
 		parts := make([]domain.Part, 0, 1+len(content.Attachments)+len(content.References))
@@ -2825,7 +2792,7 @@ func (e *Engine) conversationMessagesForTimelineItem(session domain.Session, ite
 			out = out[:0]
 		}
 		for _, tool := range content.Tools {
-			msg, ok := e.timelineToolResultMessage(session, tool)
+			msg, ok := e.timelineToolResultMessage(chat, tool)
 			if ok {
 				out = append(out, msg)
 			}
@@ -2852,7 +2819,7 @@ func (e *Engine) conversationMessagesForTimelineItem(session domain.Session, ite
 	}
 }
 
-func (e *Engine) timelineToolResultMessage(session domain.Session, tool domain.ToolCall) (provider.Message, bool) {
+func (e *Engine) timelineToolResultMessage(chat domain.Chat, tool domain.ToolCall) (provider.Message, bool) {
 	if tool.Result == nil && tool.Error == nil {
 		return provider.Message{}, false
 	}
@@ -2884,7 +2851,7 @@ func (e *Engine) timelineToolResultMessage(session domain.Session, tool domain.T
 		},
 	}
 	part.Body = part.Text()
-	if imageMsg, ok := e.toolImageMessage(session, part, string(tool.ToolCallID), text); ok {
+	if imageMsg, ok := e.toolImageMessage(chat, part, string(tool.ToolCallID), text); ok {
 		return imageMsg, true
 	}
 	body := strings.TrimSpace(part.Text())
@@ -3088,12 +3055,12 @@ func (e *Engine) resolveReference(meta reference.Metadata) (string, error) {
 	}
 }
 
-func (e *Engine) toolImageMessage(session domain.Session, part domain.Part, toolCallID string, body string) (provider.Message, bool) {
+func (e *Engine) toolImageMessage(chat domain.Chat, part domain.Part, toolCallID string, body string) (provider.Message, bool) {
 	stored, ok := tools.ViewImageStoredResultForPart(part)
 	if !ok {
 		return provider.Message{}, false
 	}
-	if !e.sessionSupportsImageAttachments(session) {
+	if !e.chatSupportsImageAttachments(chat) {
 		return provider.Message{}, false
 	}
 	sourcePath := strings.TrimSpace(stored.SourcePath)
@@ -3137,21 +3104,21 @@ func formatThinkingBlock(reasoning string) string {
 	return "<think>\n" + reasoning + "\n</think>"
 }
 
-func (e *Engine) validatePromptAttachments(session domain.Session, drafts []attachment.Draft) error {
+func (e *Engine) validatePromptAttachments(chat domain.Chat, drafts []attachment.Draft) error {
 	for _, draft := range drafts {
 		kind := attachment.ClassifyMIME(draft.MIME)
 		switch kind {
 		case attachment.KindText:
 			continue
 		case attachment.KindImage, attachment.KindPDF:
-			supported, err := e.caps.SupportsAttachment(session.ProviderID, providerCfgForSession(e.cfg, session), session.ModelID, kind)
+			supported, err := e.caps.SupportsAttachment(chat.ProviderID, providerCfgForChat(e.cfg, chat), chat.ModelID, kind)
 			if err != nil {
 				return err
 			}
 			if supported {
 				continue
 			}
-			return fmt.Errorf("provider %s model %s does not support %s attachments", session.ProviderID, session.ModelID, kind)
+			return fmt.Errorf("provider %s model %s does not support %s attachments", chat.ProviderID, chat.ModelID, kind)
 		default:
 			return fmt.Errorf("unsupported attachment type %q", draft.MIME)
 		}
@@ -3159,13 +3126,13 @@ func (e *Engine) validatePromptAttachments(session domain.Session, drafts []atta
 	return nil
 }
 
-func (e *Engine) sessionSupportsImageAttachments(session domain.Session) bool {
-	supported, err := e.caps.SupportsAttachment(session.ProviderID, providerCfgForSession(e.cfg, session), session.ModelID, attachment.KindImage)
+func (e *Engine) chatSupportsImageAttachments(chat domain.Chat) bool {
+	supported, err := e.caps.SupportsAttachment(chat.ProviderID, providerCfgForChat(e.cfg, chat), chat.ModelID, attachment.KindImage)
 	return err == nil && supported
 }
 
-func providerCfgForSession(cfg config.Config, session domain.Session) config.Provider {
-	if providerCfg, ok := cfg.Provider(session.ProviderID); ok {
+func providerCfgForChat(cfg config.Config, chat domain.Chat) config.Provider {
+	if providerCfg, ok := cfg.Provider(chat.ProviderID); ok {
 		return providerCfg
 	}
 	return config.Provider{}
@@ -3228,7 +3195,7 @@ func (e *Engine) autoCompactPromptIfNeeded(ctx context.Context, session domain.S
 	if err != nil {
 		return false, err
 	}
-	return e.autoCompactPreparedMessagesIfNeeded(ctx, session, chat.ID, client, messages, out)
+	return e.autoCompactPreparedMessagesIfNeeded(ctx, session, chat, client, messages, out)
 }
 
 func (e *Engine) autoCompactPromptTurnIfNeeded(ctx context.Context, session domain.Session, chat domain.Chat, turn *chatpkg.TurnState, client *provider.Client, prompt string, drafts []attachment.Draft, refs []reference.Draft, note string, out chan<- domain.Event) (bool, error) {
@@ -3239,19 +3206,19 @@ func (e *Engine) autoCompactPromptTurnIfNeeded(ctx context.Context, session doma
 	if err != nil {
 		return false, err
 	}
-	return e.autoCompactPreparedMessagesIfNeeded(ctx, session, chat.ID, client, provider.SerializePromptEnvelope(envelope), out)
+	return e.autoCompactPreparedMessagesIfNeeded(ctx, session, chat, client, provider.SerializePromptEnvelope(envelope), out)
 }
 
-func (e *Engine) autoCompactPreparedMessagesIfNeeded(ctx context.Context, session domain.Session, chatID domain.ID, client *provider.Client, messages []provider.Message, out chan<- domain.Event) (bool, error) {
-	threshold := e.autoCompactThreshold(session.ProviderID)
-	estimated, ok := e.estimateRequestUsagePercent(session, domain.Chat{ID: chatID}, messages)
+func (e *Engine) autoCompactPreparedMessagesIfNeeded(ctx context.Context, session domain.Session, chat domain.Chat, client *provider.Client, messages []provider.Message, out chan<- domain.Event) (bool, error) {
+	threshold := e.autoCompactThreshold(chat.ProviderID)
+	estimated, ok := e.estimateRequestUsagePercent(chat, messages)
 	if !ok || estimated < threshold {
 		return false, nil
 	}
 	if out != nil {
 		out <- domain.Event{Kind: domain.EventKindStatus, Text: fmt.Sprintf("Auto-compacting at ~%d%% estimated context used", estimated)}
 	}
-	if err := e.compactSession(ctx, session, chatID, client, "auto", out); err != nil {
+	if err := e.compactSession(ctx, session, chat.ID, client, "auto", out); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -3278,11 +3245,11 @@ func (e *Engine) autoCompactChatIfNeeded(ctx context.Context, session domain.Ses
 	if err != nil {
 		return false, err
 	}
-	estimated, ok := e.estimateRequestUsagePercent(session, chat, provider.SerializePromptEnvelope(envelope))
+	estimated, ok := e.estimateRequestUsagePercent(chat, provider.SerializePromptEnvelope(envelope))
 	if !ok {
 		return false, nil
 	}
-	providerCfg, ok := e.cfg.Provider(session.ProviderID)
+	providerCfg, ok := e.cfg.Provider(chat.ProviderID)
 	if !ok {
 		return false, nil
 	}
@@ -3296,7 +3263,7 @@ func (e *Engine) autoCompactChatIfNeeded(ctx context.Context, session domain.Ses
 	if out != nil {
 		out <- domain.Event{Kind: domain.EventKindStatus, Text: fmt.Sprintf("Auto-compacting at ~%d%% estimated context used", estimated)}
 	}
-	return e.autoCompactPreparedMessagesIfNeeded(ctx, session, chatID, client, provider.SerializePromptEnvelope(envelope), out)
+	return e.autoCompactPreparedMessagesIfNeeded(ctx, session, chat, client, provider.SerializePromptEnvelope(envelope), out)
 }
 
 func (e *Engine) autoCompactTurnIfNeeded(ctx context.Context, session domain.Session, chat domain.Chat, turn *chatpkg.TurnState, client *provider.Client, out chan<- domain.Event) (bool, error) {
@@ -3308,8 +3275,8 @@ func (e *Engine) autoCompactTurnIfNeeded(ctx context.Context, session domain.Ses
 		return false, err
 	}
 	messages := provider.SerializePromptEnvelope(envelope)
-	estimated, ok := e.estimateRequestUsagePercent(session, chat, messages)
-	if !ok || estimated < e.autoCompactThreshold(session.ProviderID) {
+	estimated, ok := e.estimateRequestUsagePercent(chat, messages)
+	if !ok || estimated < e.autoCompactThreshold(chat.ProviderID) {
 		return false, nil
 	}
 	if out != nil {
@@ -3321,11 +3288,11 @@ func (e *Engine) autoCompactTurnIfNeeded(ctx context.Context, session domain.Ses
 	return true, nil
 }
 
-func (e *Engine) estimateRequestUsagePercent(session domain.Session, _ domain.Chat, messages []provider.Message) (int, bool) {
-	if !e.cfg.HasUsableProvider(session.ProviderID) {
+func (e *Engine) estimateRequestUsagePercent(chat domain.Chat, messages []provider.Message) (int, bool) {
+	if !e.cfg.HasUsableProvider(chat.ProviderID) {
 		return 0, false
 	}
-	contextWindow := e.cfg.ContextWindow(session.ProviderID, session.ModelID)
+	contextWindow := e.cfg.ContextWindow(chat.ProviderID, chat.ModelID)
 	body, err := json.Marshal(messages)
 	if err != nil || len(body) == 0 {
 		return 0, false
@@ -3363,7 +3330,7 @@ func (e *Engine) compactSession(ctx context.Context, session domain.Session, cha
 	if len(messages) <= 1 {
 		return nil
 	}
-	compactionSession, compactionClient, err := e.compactionSessionClient(session, client)
+	compactionChat, compactionClient, err := e.compactionSessionClient(chat, client)
 	if err != nil {
 		return err
 	}
@@ -3400,11 +3367,11 @@ func (e *Engine) compactSession(ctx context.Context, session domain.Session, cha
 			Meta: map[string]string{"refresh": "details", "compaction": "started"},
 		}
 	}
-	req := e.chatRequest(compactionSession, domain.Chat{}, append(messages, provider.Message{
+	req := e.chatRequest(session, compactionChat, append(messages, provider.Message{
 		Role:    domain.MessageRoleUser,
 		Content: e.compactPrompt(),
-	}), e.providerStreamingEnabled(compactionSession))
-	resp, err := e.completeCompactionChat(ctx, compactionSession, compactionClient, req, out)
+	}), e.providerStreamingEnabled(compactionChat))
+	resp, err := e.completeCompactionChat(ctx, compactionChat, compactionClient, req, out)
 	if err != nil {
 		_ = updateCompactionState("", "failed", 0)
 		return err
@@ -3463,7 +3430,7 @@ func (e *Engine) compactTurnSession(ctx context.Context, session domain.Session,
 	if len(messages) <= 1 {
 		return nil
 	}
-	compactionSession, compactionClient, err := e.compactionSessionClient(session, client)
+	compactionChat, compactionClient, err := e.compactionSessionClient(chat, client)
 	if err != nil {
 		return err
 	}
@@ -3511,11 +3478,11 @@ func (e *Engine) compactTurnSession(ctx context.Context, session domain.Session,
 			Meta: map[string]string{"refresh": "details", "compaction": "started"},
 		}
 	}
-	req := e.chatRequest(compactionSession, domain.Chat{}, append(messages, provider.Message{
+	req := e.chatRequest(session, compactionChat, append(messages, provider.Message{
 		Role:    domain.MessageRoleUser,
 		Content: e.compactPrompt(),
-	}), e.providerStreamingEnabled(compactionSession))
-	resp, err := e.completeCompactionChat(ctx, compactionSession, compactionClient, req, out)
+	}), e.providerStreamingEnabled(compactionChat))
+	resp, err := e.completeCompactionChat(ctx, compactionChat, compactionClient, req, out)
 	if err != nil {
 		_ = updateCompactionState("", "failed", 0)
 		return err
@@ -3543,25 +3510,25 @@ func (e *Engine) compactTurnSession(ctx context.Context, session domain.Session,
 	return nil
 }
 
-func (e *Engine) compactionSessionClient(session domain.Session, client *provider.Client) (domain.Session, *provider.Client, error) {
+func (e *Engine) compactionSessionClient(chat domain.Chat, client *provider.Client) (domain.Chat, *provider.Client, error) {
 	providerID := strings.TrimSpace(e.cfg.CompactionProvider)
 	modelID := strings.TrimSpace(e.cfg.CompactionModel)
 	if providerID == "" && modelID == "" {
-		return session, client, nil
+		return chat, client, nil
 	}
 	if providerID == "" || modelID == "" {
-		return domain.Session{}, nil, fmt.Errorf("compaction provider and model must both be set, or both empty for chat model")
+		return domain.Chat{}, nil, fmt.Errorf("compaction provider and model must both be set, or both empty for chat model")
 	}
 	providerCfg, ok := e.cfg.Provider(providerID)
 	if !ok || providerCfg.Disabled {
-		return domain.Session{}, nil, fmt.Errorf("compaction provider %q is not configured or is disabled", providerID)
+		return domain.Chat{}, nil, fmt.Errorf("compaction provider %q is not configured or is disabled", providerID)
 	}
-	next := session
+	next := chat
 	next.ProviderID = providerID
 	next.ModelID = modelID
 	compactionClient, err := provider.New(providerID, providerCfg, e.debug)
 	if err != nil {
-		return domain.Session{}, nil, fmt.Errorf("create compaction provider %q: %w", providerID, err)
+		return domain.Chat{}, nil, fmt.Errorf("create compaction provider %q: %w", providerID, err)
 	}
 	return next, compactionClient, nil
 }
@@ -3592,7 +3559,7 @@ func (e *Engine) buildCompactionPromptEnvelopeForTimeline(session domain.Session
 			}
 			envelope.Items = append(envelope.Items[:0], compactedHistoryMessage(compacted.Summary))
 			if segmentStart < idx {
-				preserved, err := e.compactionMessagesForCompactionTail(timeline[segmentStart:idx], compacted.FirstKeptItemID, e.preserveThinkingEnabled(session))
+				preserved, err := e.compactionMessagesForCompactionTail(timeline[segmentStart:idx], compacted.FirstKeptItemID, e.preserveThinkingEnabled(chat))
 				if err != nil {
 					return provider.PromptEnvelope{}, err
 				}
@@ -3601,7 +3568,7 @@ func (e *Engine) buildCompactionPromptEnvelopeForTimeline(session domain.Session
 			segmentStart = idx + 1
 			continue
 		}
-		messages, err := e.compactionMessagesForTimelineItem(item, e.preserveThinkingEnabled(session))
+		messages, err := e.compactionMessagesForTimelineItem(item, e.preserveThinkingEnabled(chat))
 		if err != nil {
 			return provider.PromptEnvelope{}, err
 		}
@@ -3831,8 +3798,8 @@ func compactTextForCompaction(text string, label string) string {
 	return head + fmt.Sprintf("\n[%s truncated for compaction: kept first 80 and last 80 lines of %d lines]\n", label, len(lines)) + tail
 }
 
-func (e *Engine) completeCompactionChat(ctx context.Context, session domain.Session, client *provider.Client, req provider.ChatRequest, out chan<- domain.Event) (provider.ChatResponse, error) {
-	promptProgressPending := e.promptProgressProbePending(session.ProviderID) && provider.RequestsPromptProgress(req)
+func (e *Engine) completeCompactionChat(ctx context.Context, chat domain.Chat, client *provider.Client, req provider.ChatRequest, out chan<- domain.Event) (provider.ChatResponse, error) {
+	promptProgressPending := e.promptProgressProbePending(chat.ProviderID) && provider.RequestsPromptProgress(req)
 	onEvent := func(evt domain.Event) {
 		if out == nil || evt.Kind != domain.EventKindStatus || evt.Meta[domain.EventMetaPromptProgress] != "true" {
 			return
@@ -3847,12 +3814,12 @@ func (e *Engine) completeCompactionChat(ctx context.Context, session domain.Sess
 		resp, err := client.StreamChatResponse(ctx, req, onEvent)
 		if err == nil {
 			if promptProgressPending {
-				e.setPromptProgressSupport(session.ProviderID, true)
+				e.setPromptProgressSupport(chat.ProviderID, true)
 			}
 			return resp, nil
 		}
 		if promptProgressPending && provider.ShouldRetryWithoutPromptProgress(err) {
-			e.setPromptProgressSupport(session.ProviderID, false)
+			e.setPromptProgressSupport(chat.ProviderID, false)
 			return client.StreamChatResponse(ctx, provider.WithoutPromptProgress(req), onEvent)
 		}
 		return resp, err
@@ -3860,12 +3827,12 @@ func (e *Engine) completeCompactionChat(ctx context.Context, session domain.Sess
 	resp, err := client.CompleteChat(ctx, req)
 	if err == nil {
 		if promptProgressPending {
-			e.setPromptProgressSupport(session.ProviderID, true)
+			e.setPromptProgressSupport(chat.ProviderID, true)
 		}
 		return resp, nil
 	}
 	if promptProgressPending && provider.ShouldRetryWithoutPromptProgress(err) {
-		e.setPromptProgressSupport(session.ProviderID, false)
+		e.setPromptProgressSupport(chat.ProviderID, false)
 		return client.CompleteChat(ctx, provider.WithoutPromptProgress(req))
 	}
 	return resp, err

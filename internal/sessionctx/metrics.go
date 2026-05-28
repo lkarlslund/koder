@@ -16,11 +16,11 @@ type Metrics struct {
 	Estimated    bool
 }
 
-func FromMessages(cfg config.Config, session domain.Session, messages []domain.Message, parts map[domain.ID][]domain.Part) (Metrics, bool) {
-	if !cfg.HasUsableProvider(session.ProviderID) {
+func FromMessages(cfg config.Config, chat domain.Chat, messages []domain.Message, parts map[domain.ID][]domain.Part) (Metrics, bool) {
+	if !cfg.HasUsableProvider(chat.ProviderID) {
 		return Metrics{}, false
 	}
-	contextWindow := cfg.ContextWindow(session.ProviderID, session.ModelID)
+	contextWindow := cfg.ContextWindow(chat.ProviderID, chat.ModelID)
 	usage, ok := LatestUsage(messages, parts)
 	usage = usage.Normalized()
 	if !ok || usage.TotalTokens <= 0 {
@@ -41,11 +41,11 @@ func FromMessages(cfg config.Config, session domain.Session, messages []domain.M
 }
 
 // FromTimeline returns context metrics from timeline usage data.
-func FromTimeline(cfg config.Config, session domain.Session, items []domain.TimelineItem) (Metrics, bool) {
-	if !cfg.HasUsableProvider(session.ProviderID) {
+func FromTimeline(cfg config.Config, chat domain.Chat, items []domain.TimelineItem) (Metrics, bool) {
+	if !cfg.HasUsableProvider(chat.ProviderID) {
 		return Metrics{}, false
 	}
-	contextWindow := cfg.ContextWindow(session.ProviderID, session.ModelID)
+	contextWindow := cfg.ContextWindow(chat.ProviderID, chat.ModelID)
 	usage, ok := LatestTimelineUsage(items)
 	usage = usage.Normalized()
 	if !ok || usage.TotalTokens <= 0 {

@@ -646,12 +646,8 @@ func TestSetChatModelPersistsOnChat(t *testing.T) {
 			if updated.ProviderID != "other" || updated.ModelID != "next" {
 				t.Fatalf("expected chat model other/next, got %s/%s", updated.ProviderID, updated.ModelID)
 			}
-			storedSession, err := st.GetSession(context.Background(), session.ID)
-			if err != nil {
+			if _, err := st.GetSession(context.Background(), session.ID); err != nil {
 				t.Fatal(err)
-			}
-			if storedSession.ProviderID == "other" || storedSession.ModelID == "next" {
-				t.Fatalf("session model should not be changed by chat model update: %#v", storedSession)
 			}
 		})
 	}
