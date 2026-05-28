@@ -17,13 +17,10 @@ import (
 type UI struct {
 	Theme          string `toml:"theme"`
 	CodeStyle      string `toml:"code_style"`
-	HalfBlocks     bool   `toml:"half_blocks"`
 	ShowSidebar    bool   `toml:"show_sidebar"`
-	SidebarWidth   int    `toml:"sidebar_width"`
 	ShowTimestamps bool   `toml:"show_timestamps"`
 	ShowReasoning  bool   `toml:"show_reasoning"`
 	ShowSystem     bool   `toml:"show_system"`
-	Mouse          bool   `toml:"mouse"`
 	AutoContinue   bool   `toml:"auto_continue"`
 }
 
@@ -192,12 +189,10 @@ func Default() Config {
 		UI: UI{
 			Theme:          "tokyonight",
 			CodeStyle:      "github",
-			HalfBlocks:     true,
 			ShowSidebar:    true,
 			ShowTimestamps: false,
 			ShowReasoning:  false,
 			ShowSystem:     false,
-			Mouse:          true,
 			AutoContinue:   true,
 		},
 	}

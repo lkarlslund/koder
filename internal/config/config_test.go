@@ -42,9 +42,6 @@ func TestLoadWritesDefaultConfig(t *testing.T) {
 	if cfg.Store.Backend != "pebble" {
 		t.Fatalf("unexpected store backend: %s", cfg.Store.Backend)
 	}
-	if !cfg.UI.HalfBlocks {
-		t.Fatal("expected half block mode enabled by default")
-	}
 	if cfg.UI.CodeStyle != "github" {
 		t.Fatalf("expected default code style github, got %q", cfg.UI.CodeStyle)
 	}
@@ -134,30 +131,6 @@ func TestApplyDefaultsFillsMissingUIStyleSettings(t *testing.T) {
 
 	if cfg.UI.CodeStyle != "github" {
 		t.Fatalf("expected code style default applied, got %q", cfg.UI.CodeStyle)
-	}
-}
-
-func TestSaveAndLoadRoundTripsSidebarWidthPreference(t *testing.T) {
-	temp := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", temp)
-	t.Setenv("XDG_STATE_HOME", temp)
-	t.Setenv("XDG_CACHE_HOME", temp)
-
-	cfg, err := Load()
-	if err != nil {
-		t.Fatal(err)
-	}
-	cfg.UI.SidebarWidth = 37
-	if err := cfg.Save(); err != nil {
-		t.Fatal(err)
-	}
-
-	reloaded, err := Load()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if reloaded.UI.SidebarWidth != 37 {
-		t.Fatalf("expected sidebar width 37, got %d", reloaded.UI.SidebarWidth)
 	}
 }
 

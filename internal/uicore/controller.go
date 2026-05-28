@@ -201,13 +201,10 @@ type UIPreferences struct {
 	Theme            string   `json:"theme"`
 	CodeStyle        string   `json:"code_style"`
 	CodeStyleOptions []string `json:"code_style_options"`
-	HalfBlocks       bool     `json:"half_blocks"`
 	ShowSidebar      bool     `json:"show_sidebar"`
-	SidebarWidth     int      `json:"sidebar_width"`
 	ShowTimestamps   bool     `json:"show_timestamps"`
 	ShowReasoning    bool     `json:"show_reasoning"`
 	ShowSystem       bool     `json:"show_system"`
-	Mouse            bool     `json:"mouse"`
 	AutoContinue     bool     `json:"auto_continue"`
 }
 
@@ -1853,13 +1850,10 @@ func uiPreferencesFromConfig(ui config.UI) UIPreferences {
 		Theme:            normalizeTheme(ui.Theme),
 		CodeStyle:        codeStyle,
 		CodeStyleOptions: codeStyleOptions(codeStyle),
-		HalfBlocks:       ui.HalfBlocks,
 		ShowSidebar:      ui.ShowSidebar,
-		SidebarWidth:     ui.SidebarWidth,
 		ShowTimestamps:   ui.ShowTimestamps,
 		ShowReasoning:    ui.ShowReasoning,
 		ShowSystem:       ui.ShowSystem,
-		Mouse:            ui.Mouse,
 		AutoContinue:     ui.AutoContinue,
 	}
 }
@@ -2030,13 +2024,10 @@ func applyUIPreferences(cfg *config.Config, prefs UIPreferences) error {
 	cfg.UI = config.UI{
 		Theme:          normalizeTheme(prefs.Theme),
 		CodeStyle:      codeStyle,
-		HalfBlocks:     prefs.HalfBlocks,
 		ShowSidebar:    prefs.ShowSidebar,
-		SidebarWidth:   prefs.SidebarWidth,
 		ShowTimestamps: prefs.ShowTimestamps,
 		ShowReasoning:  prefs.ShowReasoning,
 		ShowSystem:     prefs.ShowSystem,
-		Mouse:          prefs.Mouse,
 		AutoContinue:   prefs.AutoContinue,
 	}
 	return nil
