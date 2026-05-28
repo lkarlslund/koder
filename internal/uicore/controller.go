@@ -293,24 +293,25 @@ type Controller struct {
 	agent   *agent.Engine
 	workdir string
 
-	mu         sync.RWMutex
-	session    domain.Session
-	sessions   []domain.Session
-	chats      []domain.Chat
-	statuses   map[domain.ID]ChatSidebarStatus
-	chat       domain.Chat
-	runtime    *chat.Chat
-	unsub      func()
-	runtimes   map[domain.ID]*chat.Chat
-	unsubs     map[domain.ID]func()
-	execUnsubs map[domain.ID]func()
-	snapshots  map[domain.ID]chat.Snapshot
-	milestone  store.MilestonePlan
-	todos      []store.TodoItem
-	todosByRef map[string][]store.TodoItem
-	workspace  workspacepkg.Status
-	theme      string
-	lastErr    string
+	mu                         sync.RWMutex
+	session                    domain.Session
+	sessions                   []domain.Session
+	chats                      []domain.Chat
+	statuses                   map[domain.ID]ChatSidebarStatus
+	chat                       domain.Chat
+	runtime                    *chat.Chat
+	unsub                      func()
+	runtimes                   map[domain.ID]*chat.Chat
+	unsubs                     map[domain.ID]func()
+	execUnsubs                 map[domain.ID]func()
+	snapshots                  map[domain.ID]chat.Snapshot
+	milestone                  store.MilestonePlan
+	todos                      []store.TodoItem
+	todosByRef                 map[string][]store.TodoItem
+	workspace                  workspacepkg.Status
+	theme                      string
+	lastErr                    string
+	clearedStartupRunningTools bool
 
 	subMu   sync.Mutex
 	nextSub int
@@ -2409,6 +2410,9 @@ func (c *Controller) loadSession(ctx context.Context, sessionID, chatID domain.I
 	if err != nil {
 		return err
 	}
+	if err := c.failStartupRunningToolCallsOnce(ctx, chats); err != nil {
+		return err
+	}
 	if err := c.failProcessInterruptedToolCalls(ctx, chats); err != nil {
 		return err
 	}
@@ -2612,6 +2616,7 @@ func sessionForChatModel(session domain.Session, chatRecord domain.Chat) domain.
 
 const processRestartResumeNote = "The previous turn was interrupted because the koder process was restarting. Continue from the persisted transcript and pending tool state without restating the interruption."
 const processRestartToolFailure = "Tool execution failed because koder restarted before the tool completed."
+const processStartupRunningToolFailure = "Tool execution failed because koder restarted while the tool was running."
 const processRestartToolFailureInstruction = "A tool call was interrupted by the process restart and has been marked failed. Continue from the persisted transcript and pending tool state without rerunning failed tools unless the user explicitly asks."
 
 func (c *Controller) restartInterruptedSession(ctx context.Context) (domain.Session, bool, error) {
@@ -2665,6 +2670,22 @@ func (c *Controller) autoResumeRestartInterruptedChats(runtimes map[domain.ID]*c
 		}
 		rt.Enqueue(chat.QueueItem{Kind: chat.QueueKindContinue, Note: note})
 	}
+}
+
+func (c *Controller) failStartupRunningToolCallsOnce(ctx context.Context, chats []domain.Chat) error {
+	c.mu.Lock()
+	if c.clearedStartupRunningTools {
+		c.mu.Unlock()
+		return nil
+	}
+	c.clearedStartupRunningTools = true
+	c.mu.Unlock()
+	for _, chatRecord := range chats {
+		if _, err := c.store.FailRunningToolCalls(ctx, chatRecord.ID, processStartupRunningToolFailure); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (c *Controller) failProcessInterruptedToolCalls(ctx context.Context, chats []domain.Chat) error {

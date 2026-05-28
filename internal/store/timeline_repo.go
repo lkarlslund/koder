@@ -69,7 +69,21 @@ func (s *Store) AttachToolError(ctx context.Context, chatID domain.ID, toolCallI
 
 // FailInterruptedToolCalls marks uncompleted tool calls as errored after an interrupted process shutdown.
 func (s *Store) FailInterruptedToolCalls(ctx context.Context, chatID domain.ID, message string) (int, error) {
+	return s.failToolCallsMatching(ctx, chatID, message, interruptedToolStatus)
+}
+
+// FailRunningToolCalls marks running tool calls as errored after process startup.
+func (s *Store) FailRunningToolCalls(ctx context.Context, chatID domain.ID, message string) (int, error) {
+	return s.failToolCallsMatching(ctx, chatID, message, func(status domain.ToolStatus) bool {
+		return status == domain.ToolStatusRunning
+	})
+}
+
+func (s *Store) failToolCallsMatching(ctx context.Context, chatID domain.ID, message string, match func(domain.ToolStatus) bool) (int, error) {
 	if chatID == "" {
+		return 0, nil
+	}
+	if match == nil {
 		return 0, nil
 	}
 	message = strings.TrimSpace(message)
@@ -92,7 +106,7 @@ func (s *Store) FailInterruptedToolCalls(ctx context.Context, chatID domain.ID, 
 		changed := false
 		for idx := range assistant.Tools {
 			call := &assistant.Tools[idx]
-			if !interruptedToolStatus(call.Status) || call.Result != nil || call.Error != nil {
+			if !match(call.Status) || call.Result != nil || call.Error != nil {
 				continue
 			}
 			call.Status = domain.ToolStatusErrored

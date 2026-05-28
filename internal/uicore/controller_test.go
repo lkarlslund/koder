@@ -904,6 +904,57 @@ func TestControllerStartupNewResumesRestartInterruptedWorkspaceSession(t *testin
 	}
 }
 
+func TestControllerStartupMarksStaleRunningToolCallsFailed(t *testing.T) {
+	cfg := config.Default().WithStateDir(t.TempDir())
+	cfg.DefaultProvider = "test"
+	cfg.DefaultModel = "model"
+	st, err := store.OpenWithOptions(cfg.StateDir(), store.Options{Backend: store.BackendJSONFS})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+
+	ctx := context.Background()
+	workdir := t.TempDir()
+	session, err := st.CreateSession(ctx, "Session", "test", "model", nil)
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	if err := st.UpdateSessionWorkspace(ctx, session.ID, workdir, workdir); err != nil {
+		t.Fatalf("workspace: %v", err)
+	}
+	chatRecord, err := st.DefaultChat(ctx, session.ID)
+	if err != nil {
+		t.Fatalf("default chat: %v", err)
+	}
+	if _, err := st.AppendAssistantToolCalls(ctx, chatRecord.ID, []domain.ToolCall{{
+		ToolCallID: "call_exec",
+		Tool:       domain.ToolKindExecCommand,
+		Args:       map[string]string{"cmd": "sleep 60"},
+		Status:     domain.ToolStatusRunning,
+	}}, "", domain.Usage{}); err != nil {
+		t.Fatalf("append running tool call: %v", err)
+	}
+
+	engine := agent.New(cfg, st, nil, nil, workdir)
+	ctrl := New(cfg, st, engine, workdir)
+	if err := ctrl.Start(ctx, StartupModeNew); err != nil {
+		t.Fatalf("start controller: %v", err)
+	}
+	timeline, err := st.TimelineForChat(ctx, chatRecord.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assistant, ok := timeline[0].Content.(domain.AssistantMessage)
+	if !ok {
+		t.Fatalf("expected assistant tool item, got %T", timeline[0].Content)
+	}
+	call := assistant.ToolByID("call_exec")
+	if call == nil || call.Status != domain.ToolStatusErrored || call.Error == nil || !strings.Contains(call.Error.Message, "restarted") {
+		t.Fatalf("expected stale running tool to be marked failed, got %#v", call)
+	}
+}
+
 func TestControllerStartupNewResumesLastWorkspaceSessionAndChat(t *testing.T) {
 	cfg := config.Default().WithStateDir(t.TempDir())
 	cfg.DefaultProvider = "test"
