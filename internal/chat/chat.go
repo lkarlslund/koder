@@ -1015,6 +1015,9 @@ func (r *Chat) handleStreamEvent(evt domain.Event) {
 		}
 		r.status = StatusRunningTools
 		r.statusText = runningToolStatusText(evt.Tool)
+	case domain.EventKindToolCallDelta:
+		r.status = StatusWaitingLLM
+		r.statusText = toolCallDeltaStatusText(evt)
 	case domain.EventKindToolResult:
 		if strings.TrimSpace(evt.ToolCallID) != "" {
 			delete(r.running, evt.ToolCallID)
@@ -1307,6 +1310,30 @@ func runningToolStatusText(tool domain.ToolKind) string {
 		return "Running tool"
 	}
 	return "Running " + toolName
+}
+
+func toolCallDeltaStatusText(evt domain.Event) string {
+	toolName := strings.TrimSpace(string(evt.Tool))
+	if toolName == "" {
+		toolName = "tool"
+	} else {
+		toolName += " tool"
+	}
+	if args := evt.Meta["arguments"]; args != "" {
+		return fmt.Sprintf("Receiving %s call (%s arguments)", toolName, formatBytes(len(args)))
+	}
+	return fmt.Sprintf("Receiving %s call...", toolName)
+}
+
+func formatBytes(size int) string {
+	if size < 1024 {
+		return fmt.Sprintf("%d B", size)
+	}
+	const unit = 1024
+	if size < unit*unit {
+		return fmt.Sprintf("%.1f KB", float64(size)/unit)
+	}
+	return fmt.Sprintf("%.1f MB", float64(size)/(unit*unit))
 }
 
 func (r *Chat) snapshotQueue() []domain.QueuedInput {

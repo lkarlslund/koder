@@ -660,6 +660,41 @@ func TestRuntimeShowsPromptProgressAsPreprocessingStatus(t *testing.T) {
 	}
 }
 
+func TestRuntimeShowsStreamedToolCallDeltaStatus(t *testing.T) {
+	st := openTestStore(t)
+	session, chat, _ := createSessionWithPlan(t, st)
+	rt := newTestChat(t, st, session, chat, &runtimeFakeRunner{})
+	updates, unsub := rt.Subscribe()
+	defer unsub()
+
+	rt.inbox <- streamEventCmd{
+		event: domain.Event{
+			Kind: domain.EventKindToolCallDelta,
+			Tool: domain.ToolKindEdit,
+			Meta: map[string]string{"arguments": strings.Repeat("x", 1536)},
+		},
+	}
+
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case update := <-updates:
+			if update.Event == nil || update.Event.Kind != domain.EventKindToolCallDelta {
+				continue
+			}
+			if update.Status != StatusWaitingLLM {
+				t.Fatalf("status = %q", update.Status)
+			}
+			if update.StatusText != "Receiving edit tool call (1.5 KB arguments)" {
+				t.Fatalf("status text = %q", update.StatusText)
+			}
+			return
+		case <-deadline:
+			t.Fatalf("timed out waiting for tool call delta status: %#v", rt.Snapshot())
+		}
+	}
+}
+
 func TestRuntimePreservesPromptAndContinueNotes(t *testing.T) {
 	st := openTestStore(t)
 	session, chat, _ := createSessionWithPlan(t, st)

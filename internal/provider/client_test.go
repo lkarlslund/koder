@@ -533,15 +533,13 @@ func TestStreamChatResponseAggregatesToolCallsAndDeltas(t *testing.T) {
 	}
 	var deltas []string
 	var sawDone bool
-	var sawToolCallDelta bool
-	var toolDelta domain.Event
+	var toolDeltas []domain.Event
 	resp, err := client.StreamChatResponse(context.Background(), ChatRequest{Model: "test"}, func(evt domain.Event) {
 		switch evt.Kind {
 		case domain.EventKindMessageDelta:
 			deltas = append(deltas, evt.Text)
 		case domain.EventKindToolCallDelta:
-			sawToolCallDelta = true
-			toolDelta = evt
+			toolDeltas = append(toolDeltas, evt)
 			if !strings.Contains(evt.RawJSON, "\"tool_calls\"") {
 				t.Fatalf("expected raw tool call payload, got %q", evt.RawJSON)
 			}
@@ -573,11 +571,14 @@ func TestStreamChatResponseAggregatesToolCallsAndDeltas(t *testing.T) {
 	if !sawDone {
 		t.Fatal("expected message done event")
 	}
-	if !sawToolCallDelta {
+	if len(toolDeltas) != 2 {
 		t.Fatal("expected streamed tool call delta event")
 	}
-	if toolDelta.Tool != domain.ToolKindBash || toolDelta.ToolCallID != "call_1" || !strings.Contains(toolDelta.Meta["arguments"], "printf hello") {
-		t.Fatalf("expected streamed tool call details, got %#v", toolDelta)
+	if toolDeltas[0].Tool != domain.ToolKindBash || toolDeltas[0].ToolCallID != "call_1" || !strings.Contains(toolDeltas[0].Meta["arguments"], "pri") {
+		t.Fatalf("expected first streamed tool call details, got %#v", toolDeltas[0])
+	}
+	if toolDeltas[1].Tool != domain.ToolKindBash || toolDeltas[1].ToolCallID != "call_1" || !strings.Contains(toolDeltas[1].Meta["arguments"], "printf hello") {
+		t.Fatalf("expected accumulated streamed tool call details, got %#v", toolDeltas[1])
 	}
 }
 
