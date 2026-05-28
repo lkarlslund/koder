@@ -324,6 +324,66 @@ func (t *TurnState) AppendUserMessage(ctx context.Context, user domain.UserMessa
 	return item, nil
 }
 
+// NextAssistantItem returns the next live assistant timeline identity.
+func (t *TurnState) NextAssistantItem() domain.TimelineItem {
+	if t == nil || t.chat == nil {
+		return domain.TimelineItem{}
+	}
+	now := time.Now().UTC()
+	t.chat.mu.RLock()
+	defer t.chat.mu.RUnlock()
+	seq := int64(1)
+	if t.chat.state != nil {
+		seq = int64(len(t.chat.state.Timeline()) + 1)
+	}
+	return domain.TimelineItem{
+		ID:        domain.NewTimelineID(now),
+		ChatID:    t.chat.chat.ID,
+		Seq:       seq,
+		Content:   domain.AssistantMessage{},
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+}
+
+// UpsertTimelineItem records a timeline item in live memory and storage.
+func (t *TurnState) UpsertTimelineItem(ctx context.Context, item domain.TimelineItem) (domain.TimelineItem, error) {
+	if t == nil || t.chat == nil {
+		return domain.TimelineItem{}, fmt.Errorf("turn state is required")
+	}
+	r := t.chat
+	if item.ChatID == "" {
+		r.mu.RLock()
+		item.ChatID = r.chat.ID
+		r.mu.RUnlock()
+	}
+	r.mu.Lock()
+	if item.Seq == 0 && r.state != nil {
+		item.Seq = int64(len(r.state.Timeline()) + 1)
+	}
+	if r.state != nil {
+		r.state.UpsertTimelineItem(item)
+		if text := timelineItemSummary(item); text != "" {
+			r.chat.LastMessage = text
+			r.state.UpdateChat(func(chat *domain.Chat) {
+				chat.LastMessage = text
+			})
+		}
+	}
+	chatRecord := r.chat
+	r.mu.Unlock()
+
+	if r.store != nil {
+		if err := r.store.PutTimelineItem(ctx, item); err != nil {
+			return domain.TimelineItem{}, err
+		}
+		if err := r.store.UpdateChat(ctx, chatRecord); err != nil {
+			return domain.TimelineItem{}, err
+		}
+	}
+	return item, nil
+}
+
 // ApplyNextSteer removes and records the next queued steer message.
 func (t *TurnState) ApplyNextSteer(ctx context.Context) (domain.TimelineItem, bool, error) {
 	if t == nil || t.chat == nil {

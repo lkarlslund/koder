@@ -902,7 +902,7 @@ func (e *Engine) continueModelTurnWithTurn(ctx context.Context, session domain.S
 
 		stream := e.providerStreamingEnabled(session)
 		req := e.chatRequest(session, chat, messages, stream)
-		assistantItem, itemErr := e.nextAssistantTimelineItem(ctx, chat.ID)
+		assistantItem, itemErr := e.nextAssistantTimelineItemForTurn(ctx, chat.ID, turn)
 		if itemErr != nil {
 			return itemErr
 		}
@@ -922,7 +922,7 @@ func (e *Engine) continueModelTurnWithTurn(ctx context.Context, session domain.S
 					"tool_calls": strconv.Itoa(len(resp.ToolCalls)),
 				})
 			} else if len(calls) > 0 {
-				assistantItem, err := e.persistAssistantToolCalls(ctx, chat.ID, session.ID, assistantItem, calls, strings.TrimSpace(resp.Text), resp.Usage)
+				assistantItem, err := e.persistAssistantToolCallsForTurn(ctx, turn, chat.ID, session.ID, assistantItem, calls, strings.TrimSpace(resp.Text), resp.Usage)
 				if err != nil {
 					return err
 				}
@@ -954,12 +954,7 @@ func (e *Engine) continueModelTurnWithTurn(ctx context.Context, session domain.S
 		call, plain := parseToolCall(text)
 		if call != nil {
 			e.recordLifecycle(session.ID, "tool_call_parsed", call.ContextString(), map[string]string{"tool": string(call.Tool), "tool_call_id": call.ToolCallID})
-			assistantItem, err := e.store.AppendAssistantToolCalls(ctx, chat.ID, []domain.ToolCall{{
-				ToolCallID: domain.ToolCallID(call.ToolCallID),
-				Tool:       call.Tool,
-				Args:       call.Args,
-				Status:     domain.ToolStatusPending,
-			}}, strings.TrimSpace(plain), domain.Usage{})
+			assistantItem, err := e.persistAssistantToolCallsForTurn(ctx, turn, chat.ID, session.ID, assistantItem, []tools.Request{*call}, strings.TrimSpace(plain), domain.Usage{})
 			if err != nil {
 				return err
 			}
@@ -1027,12 +1022,20 @@ func (e *Engine) continueModelTurnWithTurn(ctx context.Context, session domain.S
 			assistantItem.CreatedAt = now
 		}
 		assistantItem.UpdatedAt = now
-		if _, err := e.store.InsertTimelineItem(ctx, assistantItem); err != nil {
-			return err
-		}
 		assistantItem.Seal(time.Now().UTC())
-		if err := e.store.Timeline().Put(ctx, assistantItem); err != nil {
-			return err
+		if turn != nil {
+			updated, updateErr := turn.UpsertTimelineItem(ctx, assistantItem)
+			if updateErr != nil {
+				return updateErr
+			}
+			assistantItem = updated
+		} else {
+			if _, err := e.store.InsertTimelineItem(ctx, assistantItem); err != nil {
+				return err
+			}
+			if err := e.store.Timeline().Put(ctx, assistantItem); err != nil {
+				return err
+			}
 		}
 		e.recordLifecycle(session.ID, "assistant_message_persisted", strings.TrimSpace(text), map[string]string{"item_id": assistantItem.ID})
 		chatTitle, chatTitleErr := e.maybeUpdateChatTitle(ctx, chat.ID)
@@ -2432,6 +2435,13 @@ func (e *Engine) nextAssistantTimelineItem(ctx context.Context, chatID domain.ID
 	}, nil
 }
 
+func (e *Engine) nextAssistantTimelineItemForTurn(ctx context.Context, chatID domain.ID, turn *chatpkg.TurnState) (domain.TimelineItem, error) {
+	if turn != nil {
+		return turn.NextAssistantItem(), nil
+	}
+	return e.nextAssistantTimelineItem(ctx, chatID)
+}
+
 func formatRateLimitRetryStatus(delay time.Duration, retryNumber int) string {
 	delay = roundRetryDelay(delay)
 	return fmt.Sprintf("Working (rate limit hit, retrying in %s, retry %d)", delay, retryNumber)
@@ -3541,6 +3551,38 @@ func (e *Engine) persistAssistantToolCalls(ctx context.Context, chatID, sessionI
 		})
 	}
 	item, err := e.store.AppendAssistantToolCallsWithItem(ctx, chatID, item, toolCalls, text, usage)
+	if err != nil {
+		return domain.TimelineItem{}, err
+	}
+	return item, nil
+}
+
+func (e *Engine) persistAssistantToolCallsForTurn(ctx context.Context, turn *chatpkg.TurnState, chatID, sessionID domain.ID, item domain.TimelineItem, calls []tools.Request, text string, usage domain.Usage) (domain.TimelineItem, error) {
+	if turn == nil {
+		return e.persistAssistantToolCalls(ctx, chatID, sessionID, item, calls, text, usage)
+	}
+	toolCalls := make([]domain.ToolCall, 0, len(calls))
+	for _, call := range calls {
+		toolCalls = append(toolCalls, domain.ToolCall{
+			ToolCallID: domain.ToolCallID(call.ToolCallID),
+			Tool:       call.Tool,
+			Args:       call.Args,
+			Status:     domain.ToolStatusPending,
+		})
+	}
+	assistant := domain.AssistantMessage{Text: text, Tools: toolCalls}
+	usage = usage.Normalized()
+	if usage.HasAnyTokens() {
+		assistant.Usage = &usage
+	}
+	now := time.Now().UTC()
+	item.Content = assistant
+	if item.CreatedAt.IsZero() {
+		item.CreatedAt = now
+	}
+	item.UpdatedAt = now
+	item.Seal(now)
+	item, err := turn.UpsertTimelineItem(ctx, item)
 	if err != nil {
 		return domain.TimelineItem{}, err
 	}
