@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -77,13 +78,10 @@ func TestServerExposesTranscriptAndEvents(t *testing.T) {
 	rec.RecordLifecycle("", "startup_timing", "list_sessions", map[string]string{"duration_ms": "42"})
 	rec.RecordEvent(session.ID, domain.Event{Kind: domain.EventKindMessageDelta, Text: "hello"})
 
-	srv, err := Start("127.0.0.1:0", st, rec)
-	if err != nil {
-		t.Fatal(err)
-	}
+	srv := httptest.NewServer(Handler(st, rec))
 	defer srv.Close()
 
-	resp, err := http.Get("http://" + srv.Addr() + "/debug/sessions/" + session.ID + "/transcript")
+	resp, err := http.Get(srv.URL + "/debug/sessions/" + session.ID + "/transcript")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +99,7 @@ func TestServerExposesTranscriptAndEvents(t *testing.T) {
 		t.Fatalf("unexpected transcript payload: %#v", transcript)
 	}
 
-	resp, err = http.Get("http://" + srv.Addr() + "/debug/sessions/" + session.ID + "/events")
+	resp, err = http.Get(srv.URL + "/debug/sessions/" + session.ID + "/events")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +117,7 @@ func TestServerExposesTranscriptAndEvents(t *testing.T) {
 		t.Fatalf("unexpected events payload: %#v", events)
 	}
 
-	resp, err = http.Get("http://" + srv.Addr() + "/debug/events")
+	resp, err = http.Get(srv.URL + "/debug/events")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,13 +177,10 @@ func TestServerExposesSessionAnalysis(t *testing.T) {
 	rec := NewRecorder()
 	rec.RecordLifecycle(session.ID, "continue", "", nil)
 
-	srv, err := Start("127.0.0.1:0", st, rec)
-	if err != nil {
-		t.Fatal(err)
-	}
+	srv := httptest.NewServer(Handler(st, rec))
 	defer srv.Close()
 
-	resp, err := http.Get("http://" + srv.Addr() + "/debug/sessions/" + session.ID + "/analysis")
+	resp, err := http.Get(srv.URL + "/debug/sessions/" + session.ID + "/analysis")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -236,13 +231,10 @@ func TestServerExposesPprofHandlers(t *testing.T) {
 	}
 	defer st.Close()
 
-	srv, err := Start("127.0.0.1:0", st, NewRecorder())
-	if err != nil {
-		t.Fatal(err)
-	}
+	srv := httptest.NewServer(Handler(st, NewRecorder()))
 	defer srv.Close()
 
-	resp, err := http.Get("http://" + srv.Addr() + "/debug/pprof/")
+	resp, err := http.Get(srv.URL + "/debug/pprof/")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -268,14 +260,12 @@ func TestServerRuntimeCanToggleDeepDebug(t *testing.T) {
 	}
 	defer st.Close()
 
-	srv, err := Start("127.0.0.1:0", st, NewRecorder())
-	if err != nil {
-		t.Fatal(err)
-	}
+	rec := NewRecorder()
+	srv := httptest.NewServer(Handler(st, rec))
 	defer srv.Close()
 
 	reqBody := strings.NewReader(`{"deep_debug":true}`)
-	req, err := http.NewRequest(http.MethodPost, "http://"+srv.Addr()+"/debug/runtime", reqBody)
+	req, err := http.NewRequest(http.MethodPost, srv.URL+"/debug/runtime", reqBody)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -296,7 +286,7 @@ func TestServerRuntimeCanToggleDeepDebug(t *testing.T) {
 	if !runtime.DeepDebug {
 		t.Fatalf("expected deep debug enabled, got %#v", runtime)
 	}
-	if !srv.Recorder().DeepDebug() {
+	if !rec.DeepDebug() {
 		t.Fatal("expected recorder deep debug flag to be enabled")
 	}
 }
@@ -313,13 +303,10 @@ func TestServerExposesClientsAndChats(t *testing.T) {
 	rec := NewRecorder()
 	rec.RegisterClient(ClientDebug{ID: "client-1", SelectedSession: "session-7", SelectedChat: "chat-9"})
 	rec.UpdateChats([]ChatDebug{{ID: "chat-9", SessionID: "session-7", Status: "idle"}})
-	srv, err := Start("127.0.0.1:0", st, rec)
-	if err != nil {
-		t.Fatal(err)
-	}
+	srv := httptest.NewServer(Handler(st, rec))
 	defer srv.Close()
 
-	resp, err := http.Get("http://" + srv.Addr() + "/debug/clients")
+	resp, err := http.Get(srv.URL + "/debug/clients")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -334,7 +321,7 @@ func TestServerExposesClientsAndChats(t *testing.T) {
 		t.Fatalf("unexpected clients response: %#v", clients)
 	}
 
-	resp, err = http.Get("http://" + srv.Addr() + "/debug/chats/chat-9")
+	resp, err = http.Get(srv.URL + "/debug/chats/chat-9")
 	if err != nil {
 		t.Fatal(err)
 	}

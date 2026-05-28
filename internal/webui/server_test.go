@@ -166,6 +166,33 @@ func TestServerHealthEndpoint(t *testing.T) {
 	}
 }
 
+func TestServerExposesDebugEndpointsOnWebPort(t *testing.T) {
+	ctrl := newTestController(t)
+	recorder := debugsrv.NewRecorder()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoBrowser: true, Debug: recorder})
+	if err != nil {
+		t.Fatalf("start server: %v", err)
+	}
+
+	resp, err := http.Get(srv.URL() + "/debug/runtime")
+	if err != nil {
+		t.Fatalf("get debug runtime: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected debug runtime status 200, got %d", resp.StatusCode)
+	}
+	var body debugsrv.RuntimeDebug
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode debug runtime: %v", err)
+	}
+	if body.Process.DebugAPI != srv.URL() {
+		t.Fatalf("expected debug API %q, got %q", srv.URL(), body.Process.DebugAPI)
+	}
+}
+
 func TestWebSocketHelloReturnsState(t *testing.T) {
 	ctrl := newTestController(t)
 	recorder := debugsrv.NewRecorder()

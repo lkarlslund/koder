@@ -13,7 +13,6 @@ import (
 
 	"github.com/lkarlslund/koder/internal/agent"
 	"github.com/lkarlslund/koder/internal/config"
-	"github.com/lkarlslund/koder/internal/debugsrv"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/uicore"
 	"github.com/lkarlslund/koder/internal/version"
@@ -289,40 +288,7 @@ func TestSyncManagedUserAssetsInstallsBundledSkill(t *testing.T) {
 	}
 }
 
-func TestDebugInfoReportsUnsetEnv(t *testing.T) {
-	t.Setenv(debugsrv.EnvDebugAPI, "")
-	cmd := newDebugCommand()
-	buf := &bytes.Buffer{}
-	cmd.SetOut(buf)
-	cmd.SetErr(buf)
-	cmd.SetArgs([]string{"info"})
-
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("execute debug info: %v", err)
-	}
-	if got := buf.String(); !strings.Contains(got, debugsrv.EnvDebugAPI+" is not set") {
-		t.Fatalf("expected unset message, got %q", got)
-	}
-}
-
-func TestDebugInfoReportsConfiguredAddress(t *testing.T) {
-	t.Setenv(debugsrv.EnvDebugAPI, "127.0.0.1:61347")
-	cmd := newDebugCommand()
-	buf := &bytes.Buffer{}
-	cmd.SetOut(buf)
-	cmd.SetErr(buf)
-	cmd.SetArgs([]string{"info"})
-
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("execute debug info: %v", err)
-	}
-	if got := buf.String(); !strings.Contains(got, debugsrv.EnvDebugAPI+"=127.0.0.1:61347") {
-		t.Fatalf("expected configured address, got %q", got)
-	}
-}
-
-func TestDebugInfoReportsEphemeralAddressHint(t *testing.T) {
-	t.Setenv(debugsrv.EnvDebugAPI, "127.0.0.1:0")
+func TestDebugInfoReportsWebDebugEndpoint(t *testing.T) {
 	cmd := newDebugCommand()
 	buf := &bytes.Buffer{}
 	cmd.SetOut(buf)
@@ -333,8 +299,22 @@ func TestDebugInfoReportsEphemeralAddressHint(t *testing.T) {
 		t.Fatalf("execute debug info: %v", err)
 	}
 	got := buf.String()
-	if !strings.Contains(got, "resolved address is only known while koder is running") {
-		t.Fatalf("expected ephemeral address hint, got %q", got)
+	if !strings.Contains(got, "served by the web UI under /debug") || !strings.Contains(got, "/debug/runtime") {
+		t.Fatalf("expected web debug endpoint message, got %q", got)
+	}
+}
+
+func TestDebugBaseURLAcceptsAddressOrURL(t *testing.T) {
+	tests := map[string]string{
+		"127.0.0.1:44323":              "http://127.0.0.1:44323",
+		"http://127.0.0.1:44323/":      "http://127.0.0.1:44323",
+		"http://127.0.0.1:44323/debug": "http://127.0.0.1:44323",
+		"https://example.test/koder/":  "https://example.test/koder",
+	}
+	for input, want := range tests {
+		if got := debugBaseURL(input); got != want {
+			t.Fatalf("debugBaseURL(%q) = %q, want %q", input, got, want)
+		}
 	}
 }
 

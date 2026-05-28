@@ -105,11 +105,9 @@ koder version
 
 ## Debug API
 
-Set `KODER_DEBUG_API` before launching `koder` to expose a read-only local debug API:
-
-```bash
-KODER_DEBUG_API=127.0.0.1:6666 koder --cwd /path/to/worktree
-```
+Koder exposes debug endpoints on the same web server as the UI. If the UI is
+running at `http://127.0.0.1:44323`, the debug API is under
+`http://127.0.0.1:44323/debug`.
 
 Useful endpoints include:
 

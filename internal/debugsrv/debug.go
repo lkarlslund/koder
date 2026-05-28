@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net"
 	"net/http"
 	"net/http/pprof"
 	"sort"
@@ -18,7 +17,6 @@ import (
 )
 
 const (
-	EnvDebugAPI    = "KODER_DEBUG_API"
 	defaultMaxLogs = 256
 	defaultMaxHTTP = 96
 )
@@ -443,28 +441,28 @@ func (r *Recorder) HTTPTraces() []HTTPTrace {
 type Server struct {
 	store    *store.Store
 	recorder *Recorder
-	server   *http.Server
-	listener net.Listener
 }
 
-func Start(bind string, st *store.Store, recorder *Recorder) (*Server, error) {
-	if strings.TrimSpace(bind) == "" {
-		return nil, fmt.Errorf("%s is empty", EnvDebugAPI)
-	}
+func NewServer(st *store.Store, recorder *Recorder) *Server {
 	if recorder == nil {
 		recorder = NewRecorder()
 	}
-	ln, err := net.Listen("tcp", bind)
-	if err != nil {
-		return nil, fmt.Errorf("listen debug api: %w", err)
-	}
-	s := &Server{
+	return &Server{
 		store:    st,
 		recorder: recorder,
-		listener: ln,
 	}
-	s.recorder.SetDebugAPI(ln.Addr().String())
+}
+
+func Handler(st *store.Store, recorder *Recorder) http.Handler {
 	mux := http.NewServeMux()
+	NewServer(st, recorder).Register(mux)
+	return mux
+}
+
+func (s *Server) Register(mux *http.ServeMux) {
+	if s == nil || mux == nil {
+		return
+	}
 	mux.HandleFunc("/debug/health", s.handleHealth)
 	mux.HandleFunc("/debug/runtime", s.handleRuntime)
 	mux.HandleFunc("/debug/clients", s.handleClients)
@@ -480,21 +478,6 @@ func Start(bind string, st *store.Store, recorder *Recorder) (*Server, error) {
 	mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
 	mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
 	mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
-	s.server = &http.Server{
-		Handler:           mux,
-		ReadHeaderTimeout: 5 * time.Second,
-	}
-	go func() {
-		_ = s.server.Serve(ln)
-	}()
-	return s, nil
-}
-
-func (s *Server) Addr() string {
-	if s == nil || s.listener == nil {
-		return ""
-	}
-	return s.listener.Addr().String()
 }
 
 func (s *Server) Recorder() *Recorder {
@@ -504,19 +487,10 @@ func (s *Server) Recorder() *Recorder {
 	return s.recorder
 }
 
-func (s *Server) Close() error {
-	if s == nil || s.server == nil {
-		return nil
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	return s.server.Shutdown(ctx)
-}
-
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":    true,
-		"debug": s.Addr(),
+		"debug": s.recorder.Runtime().Process.DebugAPI,
 	})
 }
 
@@ -586,7 +560,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleHTTP(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
-		"debug_api": s.Addr(),
+		"debug_api": s.recorder.Runtime().Process.DebugAPI,
 		"traces":    s.recorder.HTTPTraces(),
 	})
 }

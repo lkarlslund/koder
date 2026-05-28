@@ -98,6 +98,10 @@ func Start(ctx context.Context, controller *uicore.Controller, options Options) 
 	mux.HandleFunc("/api/show-image", handleShowImage)
 	mux.HandleFunc("/api/attachments/clipboard-image", s.handleClipboardImage)
 	mux.HandleFunc("/ws", s.handleWebSocket)
+	if s.debug != nil {
+		s.debug.SetDebugAPI(s.URL())
+		debugsrv.NewServer(controller.Store(), s.debug).Register(mux)
+	}
 	s.server = &http.Server{Handler: mux}
 	go func() {
 		<-ctx.Done()

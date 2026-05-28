@@ -136,19 +136,7 @@ func runKoder(ctx context.Context, mode uicore.StartupMode, workdir string, star
 		return err
 	}
 	defer st.Close()
-	var debugServer *debugsrv.Server
-	if bind := strings.TrimSpace(os.Getenv(debugsrv.EnvDebugAPI)); bind != "" {
-		debugServer, err = debugsrv.Start(bind, st, debugsrv.NewRecorder())
-		if err != nil {
-			return err
-		}
-		defer debugServer.Close()
-	}
-
-	var recorder *debugsrv.Recorder
-	if debugServer != nil {
-		recorder = debugServer.Recorder()
-	}
+	recorder := debugsrv.NewRecorder()
 
 	mcpManager, err := mcp.NewManager(cfg.MCPServers)
 	if err != nil {
@@ -164,7 +152,7 @@ func runKoder(ctx context.Context, mode uicore.StartupMode, workdir string, star
 	registry.SetExecControl(execruntime.NewManager())
 	engine := agent.New(cfg, st, registry, recorder, workdir, mcpManager)
 	registry.SetChatControl(engine)
-	return runWeb(ctx, cfg, st, engine, mode, recorder, debugServer, workdir, startupOpts)
+	return runWeb(ctx, cfg, st, engine, mode, recorder, workdir, startupOpts)
 }
 
 func syncManagedUserAssets(ctx context.Context) error {
@@ -180,7 +168,7 @@ func syncManagedUserAssets(ctx context.Context) error {
 	return err
 }
 
-func runWeb(ctx context.Context, cfg config.Config, st *store.Store, engine *agent.Engine, mode uicore.StartupMode, recorder *debugsrv.Recorder, debugServer *debugsrv.Server, workdir string, startupOpts startupConfig) error {
+func runWeb(ctx context.Context, cfg config.Config, st *store.Store, engine *agent.Engine, mode uicore.StartupMode, recorder *debugsrv.Recorder, workdir string, startupOpts startupConfig) error {
 	controller := uicore.New(cfg, st, engine, workdir)
 	if err := controller.Start(ctx, mode); err != nil {
 		return err
@@ -198,7 +186,7 @@ func runWeb(ctx context.Context, cfg config.Config, st *store.Store, engine *age
 	}
 	fmt.Fprintf(os.Stderr, "koder web ui: %s\n", server.URL())
 	if recorder != nil {
-		recorder.UpdateProcess(debugsrv.ProcessDebug{DebugAPI: debugAPIAddr(debugServer), Status: "Web UI running"})
+		recorder.UpdateProcess(debugsrv.ProcessDebug{DebugAPI: server.URL(), Status: "Web UI running"})
 	}
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt, syscall.SIGTERM, syscall.SIGUSR1)
@@ -278,13 +266,6 @@ func isReusableWebBind(bind string) bool {
 	}
 	_, port, err := net.SplitHostPort(bind)
 	return err == nil && port != "" && port != "0"
-}
-
-func debugAPIAddr(server *debugsrv.Server) string {
-	if server == nil {
-		return ""
-	}
-	return server.Addr()
 }
 
 func newResumeCommand() *cobra.Command {
@@ -372,21 +353,14 @@ func newSessionCommand() *cobra.Command {
 func newDebugCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "debug",
-		Short: "Inspect debug API configuration",
+		Short: "Inspect debug API endpoints",
 	}
 	cmd.AddCommand(&cobra.Command{
 		Use:   "info",
-		Short: "Print debug API environment configuration",
+		Short: "Print debug API endpoint information",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			bind := strings.TrimSpace(os.Getenv(debugsrv.EnvDebugAPI))
-			if bind == "" {
-				fmt.Fprintf(cmd.OutOrStdout(), "%s is not set\n", debugsrv.EnvDebugAPI)
-				return nil
-			}
-			fmt.Fprintf(cmd.OutOrStdout(), "%s=%s\n", debugsrv.EnvDebugAPI, bind)
-			if strings.HasSuffix(bind, ":0") {
-				fmt.Fprintln(cmd.OutOrStdout(), "resolved address is only known while koder is running")
-			}
+			fmt.Fprintln(cmd.OutOrStdout(), "debug endpoints are served by the web UI under /debug")
+			fmt.Fprintln(cmd.OutOrStdout(), "use the running koder web URL, for example http://127.0.0.1:44323/debug/runtime")
 			return nil
 		},
 	})
@@ -454,15 +428,9 @@ func newSessionTailCommand() *cobra.Command {
 				return fmt.Errorf("--id is required")
 			}
 			if strings.TrimSpace(addr) == "" {
-				addr = strings.TrimSpace(os.Getenv(debugsrv.EnvDebugAPI))
+				return fmt.Errorf("set --addr to the running web UI address")
 			}
-			if strings.TrimSpace(addr) == "" {
-				return fmt.Errorf("set --addr or %s", debugsrv.EnvDebugAPI)
-			}
-			if strings.HasSuffix(addr, ":0") {
-				return fmt.Errorf("debug api bind %q is unresolved; use the runtime address shown by koder or pass --addr", addr)
-			}
-			baseURL := "http://" + strings.TrimRight(addr, "/")
+			baseURL := debugBaseURL(addr)
 			type payload struct {
 				Events []debugsrv.RecordedEvent `json:"events"`
 			}
@@ -501,7 +469,16 @@ func newSessionTailCommand() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar((*string)(&sessionID), "id", "", "Session ID to tail")
-	cmd.Flags().StringVar(&addr, "addr", "", "Resolved debug API address, for example 127.0.0.1:61347")
+	cmd.Flags().StringVar(&addr, "addr", "", "Running web UI address or URL, for example 127.0.0.1:44323")
 	cmd.Flags().DurationVar(&interval, "interval", time.Second, "Polling interval")
 	return cmd
+}
+
+func debugBaseURL(addr string) string {
+	addr = strings.TrimRight(strings.TrimSpace(addr), "/")
+	addr = strings.TrimSuffix(addr, "/debug")
+	if strings.HasPrefix(addr, "http://") || strings.HasPrefix(addr, "https://") {
+		return addr
+	}
+	return "http://" + addr
 }
