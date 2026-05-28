@@ -511,6 +511,10 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `userMessageSourceLabel(item)`) || !strings.Contains(fullPage, `userMessageSourceClass(item)`) || !strings.Contains(fullPage, `case 'auto_generated': return 'auto-generated'`) {
 		t.Fatalf("expected user turns to render source badges for steer, queued, and auto-generated messages")
 	}
+	if !strings.Contains(fullPage, `A tool call was interrupted by the process restart and has been marked failed.`) ||
+		!strings.Contains(fullPage, `return 'auto_resume'`) {
+		t.Fatalf("expected stored auto-resume messages without source metadata to render as auto-resume")
+	}
 	if !strings.Contains(fullPage, `class="turn assistant-turn"`) || strings.Contains(fullPage, `bi bi-stars`) || strings.Contains(fullPage, `> Assistant</div>`) || strings.Contains(fullPage, `message assistant p-3`) || strings.Contains(fullPage, `message user p-3 ms-auto`) {
 		t.Fatalf("expected assistant turns without repeated assistant title or chat-bubble boxes")
 	}

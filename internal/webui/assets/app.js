@@ -131,8 +131,13 @@
       return (item && (item.content || item.Content)) || {};
     }
     function userMessageSourceValue(item) {
-      const source = String(firstValue(userMessageContent(item), ['source', 'Source']) || 'user').trim().toLowerCase();
-      return source || 'user';
+      const content = userMessageContent(item);
+      const source = String(firstValue(content, ['source', 'Source'])).trim().toLowerCase();
+      if (source) return source;
+      const text = String(firstValue(content, ['text', 'Text'])).trim();
+      if (text.startsWith('The previous turn was interrupted because the koder process was restarting.')) return 'auto_resume';
+      if (text.startsWith('A tool call was interrupted by the process restart and has been marked failed.')) return 'auto_resume';
+      return 'user';
     }
     function userMessageSourceLabelText(item) {
       switch (userMessageSourceValue(item)) {
