@@ -167,6 +167,10 @@ type promptRunner interface {
 	RunPromptInChat(context.Context, domain.Session, domain.Chat, string, []attachment.Draft, []reference.Draft, string) (<-chan domain.Event, error)
 }
 
+type turnContinueRunner interface {
+	RunContinueTurn(context.Context, *TurnState, string) (<-chan domain.Event, error)
+}
+
 // Runner provides the shared execution behavior used by a live Chat.
 type Runner interface {
 	promptRunner
@@ -229,6 +233,117 @@ func New(session domain.Session, chatRecord domain.Chat, timeline []domain.Timel
 	c.inbox <- resumePendingToolsCmd{}
 	c.inbox <- struct{}{}
 	return c, nil
+}
+
+// TurnState exposes the live chat state for an active model turn.
+type TurnState struct {
+	chat *Chat
+}
+
+func (r *Chat) turnState() *TurnState {
+	return &TurnState{chat: r}
+}
+
+// Session returns the live session metadata for the turn.
+func (t *TurnState) Session() domain.Session {
+	if t == nil || t.chat == nil {
+		return domain.Session{}
+	}
+	t.chat.mu.RLock()
+	defer t.chat.mu.RUnlock()
+	return t.chat.session
+}
+
+// Chat returns the live chat metadata for the turn.
+func (t *TurnState) Chat() domain.Chat {
+	if t == nil || t.chat == nil {
+		return domain.Chat{}
+	}
+	t.chat.mu.RLock()
+	defer t.chat.mu.RUnlock()
+	return t.chat.chat
+}
+
+// Timeline returns the live transcript snapshot for the turn.
+func (t *TurnState) Timeline() []domain.TimelineItem {
+	if t == nil || t.chat == nil {
+		return nil
+	}
+	t.chat.mu.RLock()
+	defer t.chat.mu.RUnlock()
+	if t.chat.state == nil {
+		return nil
+	}
+	return t.chat.state.SnapshotTimeline()
+}
+
+// ApplyNextSteer removes and records the next queued steer message.
+func (t *TurnState) ApplyNextSteer(ctx context.Context) (domain.TimelineItem, bool, error) {
+	if t == nil || t.chat == nil {
+		return domain.TimelineItem{}, false, nil
+	}
+	r := t.chat
+	now := time.Now().UTC()
+	r.mu.Lock()
+	idx := -1
+	for i, item := range r.queue {
+		if item.Held || item.Kind != domain.QueuedInputKindSteer {
+			continue
+		}
+		idx = i
+		break
+	}
+	if idx < 0 {
+		r.mu.Unlock()
+		return domain.TimelineItem{}, false, nil
+	}
+	queued := r.queue[idx]
+	r.queue = append(slices.Clone(r.queue[:idx]), slices.Clone(r.queue[idx+1:])...)
+	r.chat.QueuedInputs = cloneQueuedInputs(r.queue)
+	user := domain.UserMessage{Text: strings.TrimSpace(queued.Text)}
+	for _, draft := range queued.Attachments {
+		user.Attachments = append(user.Attachments, domain.Attachment(draft))
+	}
+	for _, ref := range queued.References {
+		user.References = append(user.References, domain.Reference(ref))
+	}
+	seq := int64(1)
+	if r.state != nil {
+		seq = int64(len(r.state.Timeline()) + 1)
+	}
+	item := domain.TimelineItem{
+		ID:        domain.NewTimelineID(now),
+		ChatID:    r.chat.ID,
+		Seq:       seq,
+		Content:   user,
+		CreatedAt: now,
+		UpdatedAt: now,
+		SealedAt:  now,
+	}
+	if r.state != nil {
+		r.state.AppendTimelineItem(item)
+		r.state.UpdateChat(func(chat *domain.Chat) {
+			chat.QueuedInputs = cloneQueuedInputs(r.queue)
+			chat.LastMessage = user.Text
+		})
+	}
+	r.chat.LastMessage = user.Text
+	chatRecord := r.chat
+	queue := cloneQueuedInputs(r.queue)
+	r.mu.Unlock()
+
+	if r.store != nil {
+		if _, err := r.store.InsertTimelineItem(ctx, item); err != nil {
+			return domain.TimelineItem{}, false, err
+		}
+		if err := r.store.SetChatQueuedInputs(ctx, r.chat.ID, queue); err != nil {
+			return domain.TimelineItem{}, false, err
+		}
+		if err := r.store.UpdateChat(ctx, chatRecord); err != nil {
+			return domain.TimelineItem{}, false, err
+		}
+	}
+	return item, true, nil
 }
 
 // Persist writes the current chat snapshot and remaps optimistic in-memory IDs to durable store IDs.
@@ -1258,11 +1373,12 @@ func (r *Chat) runItem(ctx context.Context, session domain.Session, chat domain.
 	)
 	switch item.Kind {
 	case domain.QueuedInputKindContinue:
-		runner, ok := r.engine.(continueRunner)
-		if !ok {
-			err = fmt.Errorf("continue is not supported by runner")
-		} else {
+		if runner, ok := r.engine.(turnContinueRunner); ok {
+			events, err = runner.RunContinueTurn(ctx, r.turnState(), note)
+		} else if runner, ok := r.engine.(continueRunner); ok {
 			events, err = runner.RunContinueInChat(ctx, session, chat, note)
+		} else {
+			err = fmt.Errorf("continue is not supported by runner")
 		}
 	default:
 		events, err = r.engine.RunPromptInChat(ctx, session, chat, item.Text, queuedAttachmentDrafts(item.Attachments), queuedReferenceDrafts(item.References), note)

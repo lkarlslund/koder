@@ -273,6 +273,14 @@ func (e *Engine) RunContinueInChat(ctx context.Context, session domain.Session, 
 	return e.runContinue(ctx, session, chat, note)
 }
 
+func (e *Engine) RunContinueTurn(ctx context.Context, turn *chatpkg.TurnState, note string) (<-chan domain.Event, error) {
+	if turn == nil {
+		return nil, fmt.Errorf("turn state is required")
+	}
+	session := sessionForChat(turn.Session(), turn.Chat())
+	return e.runContinueTurn(ctx, turn, session, note)
+}
+
 // ResumePendingToolCallsInChat resumes durable tool calls that were saved before shutdown.
 func (e *Engine) ResumePendingToolCallsInChat(ctx context.Context, session domain.Session, chat domain.Chat) (<-chan domain.Event, error) {
 	calls, err := e.pendingExecutableToolCalls(ctx, chat.ID)
@@ -509,6 +517,68 @@ func (e *Engine) runContinue(ctx context.Context, session domain.Session, chat d
 	return out, nil
 }
 
+func (e *Engine) runContinueTurn(ctx context.Context, turn *chatpkg.TurnState, session domain.Session, note string) (<-chan domain.Event, error) {
+	chat := turn.Chat()
+	providerCfg, ok := e.cfg.Provider(session.ProviderID)
+	if !ok {
+		return nil, fmt.Errorf("provider %q not found", session.ProviderID)
+	}
+	client, err := provider.New(session.ProviderID, providerCfg, e.debug)
+	if err != nil {
+		return nil, err
+	}
+	out := make(chan domain.Event)
+	go func() {
+		defer close(out)
+		if session.ID != "" && needsSessionAgentsRefresh(session) {
+			out <- domain.Event{Kind: domain.EventKindStatus, Text: "Checking project instructions..."}
+		}
+		session, err = e.ensureSessionAgents(ctx, session, client)
+		if err != nil {
+			if interruptedErr(err) {
+				e.emitInterrupted(out, chat.ID, session.ID)
+				return
+			}
+			e.emitAssistantError(ctx, out, chat.ID, session.ID, err)
+			return
+		}
+		if strings.TrimSpace(note) != "" {
+			e.recordLifecycle(session.ID, "continue_with_note", note, nil)
+		} else {
+			e.recordLifecycle(session.ID, "continue", "", nil)
+		}
+		compacted, err := e.autoCompactTurnIfNeeded(ctx, session, chat, turn, client, out)
+		if err != nil {
+			if interruptedErr(err) {
+				e.emitInterrupted(out, chat.ID, session.ID)
+				return
+			}
+			e.emitAssistantError(ctx, out, chat.ID, session.ID, err)
+			return
+		}
+		if compacted {
+			session, err = e.store.GetSession(ctx, session.ID)
+			if err != nil {
+				if interruptedErr(err) {
+					e.emitInterrupted(out, chat.ID, session.ID)
+					return
+				}
+				out <- domain.Event{Kind: domain.EventKindError, Err: err}
+				return
+			}
+		}
+		if err := e.continueModelTurnFromTimeline(ctx, session, chat, turn, client, out, transientTurnMessages(note, "Continue from where you left off.")); err != nil {
+			if interruptedErr(err) {
+				e.emitInterrupted(out, chat.ID, session.ID)
+				return
+			}
+			e.emitAssistantError(ctx, out, chat.ID, session.ID, err)
+			return
+		}
+	}()
+	return out, nil
+}
+
 func (e *Engine) RefreshAgents(ctx context.Context, sessionID domain.ID) (domain.Session, error) {
 	session, err := e.store.GetSession(ctx, sessionID)
 	if err != nil {
@@ -679,16 +749,39 @@ func (e *Engine) applyQueuedSteer(ctx context.Context, session domain.Session, c
 }
 
 func (e *Engine) continueModelTurn(ctx context.Context, session domain.Session, chat domain.Chat, client *provider.Client, out chan<- domain.Event, transient []provider.InstructionBlock) error {
+	return e.continueModelTurnWithTurn(ctx, session, chat, nil, client, out, transient)
+}
+
+func (e *Engine) continueModelTurnFromTimeline(ctx context.Context, session domain.Session, chat domain.Chat, turn *chatpkg.TurnState, client *provider.Client, out chan<- domain.Event, transient []provider.InstructionBlock) error {
+	return e.continueModelTurnWithTurn(ctx, session, chat, turn, client, out, transient)
+}
+
+func (e *Engine) continueModelTurnWithTurn(ctx context.Context, session domain.Session, chat domain.Chat, turn *chatpkg.TurnState, client *provider.Client, out chan<- domain.Event, transient []provider.InstructionBlock) error {
 	tracker := toolLoopTracker{}
 	autoContinuedBadStop := false
 	for steps := 0; steps < e.maxToolLoopSteps(); steps++ {
 		e.recordLifecycle(session.ID, "model_turn_started", "", map[string]string{"step": strconv.Itoa(steps + 1)})
-		if applied, err := e.applyQueuedSteer(ctx, session, &chat, out); err != nil {
+		if turn != nil {
+			item, applied, err := turn.ApplyNextSteer(ctx)
+			if err != nil {
+				return err
+			}
+			if applied {
+				out <- domain.Event{
+					Kind: domain.EventKindStatus,
+					Text: "Applying queued steer...",
+					Item: item,
+					Meta: map[string]string{domain.EventMetaRefresh: domain.EventRefreshQueue},
+				}
+				transient = nil
+			}
+			chat = turn.Chat()
+		} else if applied, err := e.applyQueuedSteer(ctx, session, &chat, out); err != nil {
 			return err
 		} else if applied {
 			transient = nil
 		}
-		messages, buildErr := e.buildConversationPreview(ctx, session, chat.ID, "", nil, nil, transient)
+		messages, buildErr := e.buildConversationForTurn(ctx, session, chat, turn, transient)
 		if buildErr != nil {
 			return buildErr
 		}
@@ -2325,6 +2418,17 @@ func (e *Engine) buildConversationPreview(ctx context.Context, session domain.Se
 	return provider.SerializePromptEnvelope(envelope), nil
 }
 
+func (e *Engine) buildConversationForTurn(ctx context.Context, session domain.Session, chat domain.Chat, turn *chatpkg.TurnState, transient []provider.InstructionBlock) ([]provider.Message, error) {
+	if turn == nil {
+		return e.buildConversationPreview(ctx, session, chat.ID, "", nil, nil, transient)
+	}
+	envelope, err := e.buildPromptEnvelopeForTimeline(session, chat, turn.Timeline(), "", nil, nil, transient)
+	if err != nil {
+		return nil, err
+	}
+	return provider.SerializePromptEnvelope(envelope), nil
+}
+
 func (e *Engine) EstimateContextTokensForTimeline(session domain.Session, chat domain.Chat, timeline []domain.TimelineItem) (int, error) {
 	envelope, err := e.buildPromptEnvelopeForTimeline(session, chat, timeline, "", nil, nil, nil)
 	if err != nil {
@@ -2913,14 +3017,7 @@ func (e *Engine) autoCompactPromptIfNeeded(ctx context.Context, session domain.S
 }
 
 func (e *Engine) autoCompactPreparedMessagesIfNeeded(ctx context.Context, session domain.Session, chatID domain.ID, client *provider.Client, messages []provider.Message, out chan<- domain.Event) (bool, error) {
-	providerCfg, ok := e.cfg.Provider(session.ProviderID)
-	if !ok {
-		return false, nil
-	}
-	threshold := providerCfg.AutoCompactAt
-	if threshold <= 0 {
-		threshold = max(1, e.cfg.AutoCompactAt)
-	}
+	threshold := e.autoCompactThreshold(session.ProviderID)
 	estimated, ok := e.estimateRequestUsagePercent(session, domain.Chat{ID: chatID}, messages)
 	if !ok || estimated < threshold {
 		return false, nil
@@ -2932,6 +3029,18 @@ func (e *Engine) autoCompactPreparedMessagesIfNeeded(ctx context.Context, sessio
 		return false, err
 	}
 	return true, nil
+}
+
+func (e *Engine) autoCompactThreshold(providerID domain.ID) int {
+	providerCfg, ok := e.cfg.Provider(providerID)
+	if !ok {
+		return max(1, e.cfg.AutoCompactAt)
+	}
+	threshold := providerCfg.AutoCompactAt
+	if threshold <= 0 {
+		threshold = max(1, e.cfg.AutoCompactAt)
+	}
+	return threshold
 }
 
 func (e *Engine) autoCompactChatIfNeeded(ctx context.Context, session domain.Session, chatID domain.ID, client *provider.Client, out chan<- domain.Event) (bool, error) {
@@ -2962,6 +3071,25 @@ func (e *Engine) autoCompactChatIfNeeded(ctx context.Context, session domain.Ses
 		out <- domain.Event{Kind: domain.EventKindStatus, Text: fmt.Sprintf("Auto-compacting at ~%d%% estimated context used", estimated)}
 	}
 	return e.autoCompactPreparedMessagesIfNeeded(ctx, session, chatID, client, provider.SerializePromptEnvelope(envelope), out)
+}
+
+func (e *Engine) autoCompactTurnIfNeeded(ctx context.Context, session domain.Session, chat domain.Chat, turn *chatpkg.TurnState, client *provider.Client, out chan<- domain.Event) (bool, error) {
+	if turn == nil {
+		return e.autoCompactChatIfNeeded(ctx, session, chat.ID, client, out)
+	}
+	envelope, err := e.buildPromptEnvelopeForTimeline(session, chat, turn.Timeline(), "", nil, nil, nil)
+	if err != nil {
+		return false, err
+	}
+	messages := provider.SerializePromptEnvelope(envelope)
+	estimated, ok := e.estimateRequestUsagePercent(session, chat, messages)
+	if !ok || estimated < e.autoCompactThreshold(session.ProviderID) {
+		return false, nil
+	}
+	if out != nil {
+		out <- domain.Event{Kind: domain.EventKindStatus, Text: fmt.Sprintf("Auto-compacting at ~%d%% estimated context used", estimated)}
+	}
+	return e.autoCompactPreparedMessagesIfNeeded(ctx, session, chat.ID, client, messages, out)
 }
 
 func (e *Engine) estimateRequestUsagePercent(session domain.Session, _ domain.Chat, messages []provider.Message) (int, bool) {

@@ -22,6 +22,7 @@ type runtimeFakeRunner struct {
 	prompts       []string
 	promptNotes   []string
 	continueNotes []string
+	turnTimelines []int
 	events        []<-chan domain.Event
 }
 
@@ -85,6 +86,22 @@ func (f *runtimeFakeRunner) RunContinueInChat(_ context.Context, _ domain.Sessio
 	defer f.mu.Unlock()
 	f.continueCalls++
 	f.continueNotes = append(f.continueNotes, note)
+	if len(f.events) == 0 {
+		ch := make(chan domain.Event)
+		close(ch)
+		return ch, nil
+	}
+	evt := f.events[0]
+	f.events = f.events[1:]
+	return evt, nil
+}
+
+func (f *runtimeFakeRunner) RunContinueTurn(_ context.Context, turn *TurnState, note string) (<-chan domain.Event, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.continueCalls++
+	f.continueNotes = append(f.continueNotes, note)
+	f.turnTimelines = append(f.turnTimelines, len(turn.Timeline()))
 	if len(f.events) == 0 {
 		ch := make(chan domain.Event)
 		close(ch)
@@ -179,6 +196,12 @@ func (f *runtimeFakeRunner) continueNoteAt(i int) string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.continueNotes[i]
+}
+
+func (f *runtimeFakeRunner) turnTimelineLenAt(i int) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.turnTimelines[i]
 }
 
 func openTestStore(t *testing.T) *store.Store {
@@ -758,6 +781,48 @@ func TestRuntimePreservesPromptAndContinueNotes(t *testing.T) {
 	}
 	if got := runner.continueNoteAt(0); got != "continue-note" {
 		t.Fatalf("continue note = %q", got)
+	}
+}
+
+func TestRuntimeContinueTurnUsesLiveTimelineNotStorageSideChannel(t *testing.T) {
+	st := openTestStore(t)
+	session, chatRecord, _ := createSessionWithPlan(t, st)
+	seed, err := st.AppendTimeline(context.Background(), chatRecord.ID, domain.UserMessage{Text: "loaded"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	seed.Seal(time.Now().UTC())
+	if err := st.Timeline().Put(context.Background(), seed); err != nil {
+		t.Fatal(err)
+	}
+
+	events := make(chan domain.Event, 1)
+	events <- domain.Event{Kind: domain.EventKindMessageDone}
+	close(events)
+	runner := &runtimeFakeRunner{events: []<-chan domain.Event{events}}
+	rt := newTestChat(t, st, session, chatRecord, runner)
+
+	side, err := st.AppendTimeline(context.Background(), chatRecord.ID, domain.UserMessage{Text: "storage-only"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	side.Seal(time.Now().UTC())
+	if err := st.Timeline().Put(context.Background(), side); err != nil {
+		t.Fatal(err)
+	}
+
+	rt.Enqueue(QueueItem{Kind: QueueKindContinue})
+	deadline := time.After(2 * time.Second)
+	for runner.continueCallCount() == 0 {
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for continue")
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	if got := runner.turnTimelineLenAt(0); got != 1 {
+		t.Fatalf("expected live loaded timeline only, got %d items", got)
 	}
 }
 
