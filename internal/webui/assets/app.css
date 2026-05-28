@@ -34,6 +34,14 @@
     .chat-status-icon.status-error, .chat-status-icon.status-failed, .chat-status-icon.status-cancelled { color: var(--bs-danger); animation: chat-status-pulse 1.1s ease-in-out infinite; }
     .chat-status-icon.status-completed { color: var(--bs-success); animation: chat-status-fade 1.5s ease-in-out infinite; }
     .chat-context { color: var(--bs-secondary-color); font-size: .78rem; margin-left: auto; }
+    .exec-process-list { display: grid; gap: .25rem; margin-top: .25rem; }
+    .exec-process-row { position: relative; display: grid; grid-template-columns: 1rem minmax(0, 1fr) auto; align-items: center; gap: .35rem; padding: .25rem .35rem; border: 1px solid var(--bs-border-color); border-radius: .35rem; background: var(--bs-body-bg); }
+    .exec-process-command { min-width: 0; font-size: .86rem; }
+    .exec-process-state { max-width: 9rem; overflow: hidden; text-overflow: ellipsis; }
+    .exec-process-tooltip { display: none; position: absolute; right: 0; top: calc(100% + .35rem); z-index: 30; width: min(42rem, calc(100vw - 2rem)); max-height: min(26rem, 60vh); overflow: auto; padding: .55rem; border: 1px solid var(--bs-border-color); border-radius: .35rem; background: var(--bs-body-bg); color: var(--bs-body-color); }
+    .exec-process-row:hover .exec-process-tooltip, .exec-process-row:focus-within .exec-process-tooltip { display: block; }
+    .exec-process-tooltip-title { color: var(--bs-secondary-color); font-size: .78rem; white-space: pre-wrap; margin-bottom: .4rem; }
+    .exec-process-tooltip pre { font-family: var(--bs-font-monospace); font-size: .78rem; line-height: 1.35; white-space: pre-wrap; word-break: break-word; }
     @keyframes chat-status-spin { to { transform: rotate(360deg); } }
     @keyframes chat-status-pulse { 0%, 100% { opacity: .45; transform: scale(.94); } 50% { opacity: 1; transform: scale(1.08); } }
     @keyframes chat-status-fade { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }

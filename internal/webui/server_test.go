@@ -556,6 +556,9 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `tool-result-body-mono`) || !strings.Contains(fullPage, `renderCompactBlock('Result', execResultLines(data, toolResultText(tool)), 'tool-result-body-mono')`) {
 		t.Fatalf("expected exec output to render with monospace result styling")
 	}
+	if !strings.Contains(fullPage, `execProcesses()`) || !strings.Contains(fullPage, `exec-process-tooltip`) || !strings.Contains(fullPage, `execProcessOutput(process)`) {
+		t.Fatalf("expected current chat exec processes to render with console-output hover tooltips")
+	}
 	if !strings.Contains(fullPage, `hello.asset_hash !== window.KODER_ASSET_HASH`) || !strings.Contains(fullPage, `location.reload()`) {
 		t.Fatalf("expected websocket reconnect to reload on asset mismatch")
 	}

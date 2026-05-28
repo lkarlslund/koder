@@ -18,8 +18,10 @@ import (
 	"github.com/lkarlslund/koder/internal/chatrole"
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/execruntime"
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/store"
+	"github.com/lkarlslund/koder/internal/tools"
 )
 
 func TestControllerStartCreatesSessionAndPublishesState(t *testing.T) {
@@ -43,6 +45,36 @@ func TestControllerStartCreatesSessionAndPublishesState(t *testing.T) {
 			t.Fatalf("expected subscriptions to avoid unsolicited full snapshots, got %q", event.Type)
 		}
 	case <-time.After(20 * time.Millisecond):
+	}
+}
+
+func TestControllerStateIncludesCurrentChatExecProcesses(t *testing.T) {
+	ctrl, _, execManager := newTestControllerWithExec(t)
+	state := ctrl.State()
+	events, unsub := ctrl.Subscribe()
+	defer unsub()
+	snap, err := execManager.Start(context.Background(), execruntime.StartRequest{
+		SessionID: state.Session.ID,
+		ChatID:    state.ActiveChatID,
+		Command:   "printf hi",
+		YieldTime: 50 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("start exec: %v", err)
+	}
+	deadline := time.After(2 * time.Second)
+	for {
+		current := ctrl.State().Snapshots[state.ActiveChatID].ExecProcesses
+		for _, process := range current {
+			if process.ProcessID == snap.ProcessID && strings.Contains(process.Output, "hi") {
+				return
+			}
+		}
+		select {
+		case <-events:
+		case <-deadline:
+			t.Fatalf("timed out waiting for exec process in state, got %#v", current)
+		}
 	}
 }
 
@@ -1059,6 +1091,28 @@ func TestControllerRefreshWorkspacePublishesGitStatus(t *testing.T) {
 func newTestController(t *testing.T) (*Controller, *store.Store) {
 	t.Helper()
 	return newTestControllerWithConfig(t, nil)
+}
+
+func newTestControllerWithExec(t *testing.T) (*Controller, *store.Store, *execruntime.Manager) {
+	t.Helper()
+	cfg := config.Default().WithStateDir(t.TempDir())
+	cfg.DefaultProvider = "test"
+	cfg.DefaultModel = "model"
+	st, err := store.OpenWithOptions(cfg.StateDir(), store.Options{Backend: store.BackendJSONFS})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	workdir := t.TempDir()
+	registry := tools.NewRegistry(workdir)
+	execManager := execruntime.NewManager()
+	registry.SetExecControl(execManager)
+	engine := agent.New(cfg, st, registry, nil, workdir)
+	ctrl := New(cfg, st, engine, workdir)
+	if err := ctrl.Start(context.Background(), StartupModeNew); err != nil {
+		t.Fatalf("start controller: %v", err)
+	}
+	return ctrl, st, execManager
 }
 
 func runGit(t *testing.T, dir string, args ...string) {

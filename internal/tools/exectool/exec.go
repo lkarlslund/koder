@@ -225,7 +225,7 @@ func (commandTool) Execute(ctx context.Context, runtime tools.Runtime, req tools
 	if err != nil {
 		return tools.Result{}, err
 	}
-	stored := storedFromSnapshot(snap, "Started persistent exec session")
+	stored := storedFromSnapshot(snap, execStartMessage(snap))
 	stored.Workdir = rel
 	meta := map[string]string{
 		"process_id": snap.ProcessID,
@@ -418,6 +418,13 @@ func storedFromSnapshot(snap execruntime.Snapshot, message string) tools.ExecSto
 		StdinClosed: snap.StdinClosed,
 		Message:     message,
 	}
+}
+
+func execStartMessage(snap execruntime.Snapshot) string {
+	if snap.State == execruntime.StateRunning {
+		return "Exec session is still running. Use exec_status to inspect output, exec_write_stdin to interact with stdin, or exec_terminate to stop it."
+	}
+	return "Exec session completed during startup grace period."
 }
 
 func storedListFromSnapshots(snaps []execruntime.Snapshot, scope, message string) tools.ExecListStoredResult {

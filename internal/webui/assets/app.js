@@ -507,6 +507,7 @@
           if (delta.chat) next.Chat = delta.chat;
           if (delta.approvals !== undefined) next.Approvals = delta.approvals;
           if (delta.queue !== undefined) next.QueuedInputs = delta.queue;
+          if (delta.exec_processes !== undefined) next.ExecProcesses = delta.exec_processes;
           if (delta.context !== undefined) next.Context = delta.context;
           if (delta.status !== undefined) next.Status = delta.status;
           if (delta.status_text !== undefined) next.StatusText = delta.status_text;
@@ -694,6 +695,7 @@
         },
         timeline() { const snapshot = this.activeSnapshot(); return snapshot.Timeline || snapshot.timeline || []; },
         approvals() { const snapshot = this.activeSnapshot(); return snapshot.Approvals || snapshot.approvals || []; },
+        execProcesses() { const snapshot = this.activeSnapshot(); return snapshot.ExecProcesses || snapshot.exec_processes || []; },
         activeQueue() { const snapshot = this.activeSnapshot(); return snapshot.QueuedInputs || snapshot.queued_inputs || snapshot.queue || []; },
         pendingText() { const snapshot = this.activeSnapshot(); const p = snapshot.PendingAssistant || snapshot.pending_assistant || {}; return [p.Reasoning || p.reasoning, p.Text || p.text].filter(Boolean).join('\n'); },
         thinkingLabel(reasoning) {
@@ -991,6 +993,41 @@
         },
         toolResultHTML(tool) { return renderToolResult(tool); },
         toolErrorHTML(tool) { return renderToolError(tool); },
+        execProcessID(process) { return process?.process_id || process?.ProcessID || ''; },
+        execProcessCommand(process) { return process?.command || process?.Command || ''; },
+        execProcessState(process) { return String(process?.state || process?.State || '').toLowerCase(); },
+        execProcessExitCode(process) {
+          const value = process?.exit_code ?? process?.ExitCode;
+          return value === undefined || value === null ? '' : String(value);
+        },
+        execProcessLabel(process) {
+          const id = this.execProcessID(process);
+          const state = this.execProcessState(process) || 'unknown';
+          const exitCode = this.execProcessExitCode(process);
+          return id + ' · ' + (exitCode === '' ? state : state + ' ' + exitCode);
+        },
+        execProcessClass(process) {
+          const state = this.execProcessState(process);
+          if (state === 'running') return 'text-bg-primary';
+          if (state === 'completed') return 'text-bg-success';
+          if (state === 'terminated') return 'text-bg-warning';
+          if (state === 'failed' || state === 'lost') return 'text-bg-danger';
+          return 'text-bg-secondary';
+        },
+        execProcessOutput(process) {
+          const output = process?.output || process?.Output || '';
+          return output || 'No output yet';
+        },
+        execProcessTooltip(process) {
+          const lines = [];
+          lines.push(this.execProcessCommand(process) || this.execProcessID(process));
+          const workdir = process?.workdir || process?.Workdir || '';
+          if (workdir) lines.push(workdir);
+          lines.push(this.execProcessLabel(process));
+          const bytes = process?.output_bytes || process?.OutputBytes || 0;
+          if (bytes) lines.push(String(bytes) + ' output bytes captured');
+          return lines.filter(Boolean).join('\n');
+        },
         noticeIcon(content) { return noticeIcon(content); },
         noticeLevel(content) { return noticeLevel(content); },
         noticeText(content) { return noticeText(content); },

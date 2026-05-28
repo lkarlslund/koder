@@ -744,6 +744,7 @@ type chatDelta struct {
 	Item              *domain.TimelineItem `json:"item,omitempty"`
 	Approvals         any                  `json:"approvals,omitempty"`
 	Queue             any                  `json:"queue,omitempty"`
+	ExecProcesses     any                  `json:"exec_processes,omitempty"`
 	Context           any                  `json:"context,omitempty"`
 	Status            string               `json:"status,omitempty"`
 	StatusText        string               `json:"status_text,omitempty"`
@@ -782,6 +783,7 @@ func chatDeltaFromUpdate(update chat.Update) chatDelta {
 		Chat:              snapshot.Chat,
 		Approvals:         snapshot.Approvals,
 		Queue:             snapshot.QueuedInputs,
+		ExecProcesses:     snapshot.ExecProcesses,
 		Context:           snapshot.Context,
 		Status:            string(snapshot.Status),
 		StatusText:        snapshot.StatusText,

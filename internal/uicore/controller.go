@@ -17,6 +17,7 @@ import (
 	"github.com/lkarlslund/koder/internal/chatrole"
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/execruntime"
 	"github.com/lkarlslund/koder/internal/permissionprofile"
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/reference"
@@ -302,6 +303,7 @@ type Controller struct {
 	unsub      func()
 	runtimes   map[domain.ID]*chat.Chat
 	unsubs     map[domain.ID]func()
+	execUnsubs map[domain.ID]func()
 	snapshots  map[domain.ID]chat.Snapshot
 	milestone  store.MilestonePlan
 	todos      []store.TodoItem
@@ -319,16 +321,17 @@ type Controller struct {
 // New constructs a renderer-neutral controller.
 func New(cfg config.Config, st *store.Store, engine *agent.Engine, workdir string) *Controller {
 	return &Controller{
-		cfg:       cfg,
-		store:     st,
-		agent:     engine,
-		workdir:   strings.TrimSpace(workdir),
-		theme:     normalizeTheme(cfg.UI.Theme),
-		statuses:  map[domain.ID]ChatSidebarStatus{},
-		runtimes:  map[domain.ID]*chat.Chat{},
-		unsubs:    map[domain.ID]func(){},
-		snapshots: map[domain.ID]chat.Snapshot{},
-		subs:      map[int]chan Event{},
+		cfg:        cfg,
+		store:      st,
+		agent:      engine,
+		workdir:    strings.TrimSpace(workdir),
+		theme:      normalizeTheme(cfg.UI.Theme),
+		statuses:   map[domain.ID]ChatSidebarStatus{},
+		runtimes:   map[domain.ID]*chat.Chat{},
+		unsubs:     map[domain.ID]func(){},
+		execUnsubs: map[domain.ID]func(){},
+		snapshots:  map[domain.ID]chat.Snapshot{},
+		subs:       map[int]chan Event{},
 	}
 }
 
@@ -391,6 +394,7 @@ func (c *Controller) State() State {
 		if snapshot.Chat.ID == "" {
 			snapshot.Chat.ID = chatID
 		}
+		snapshot = c.snapshotWithExecProcessesLocked(snapshot)
 		state.Snapshots[chatID] = snapshot
 		if chatID == c.chat.ID {
 			state.Snapshot = snapshot
@@ -410,6 +414,7 @@ func (c *Controller) State() State {
 		if snapshot.Chat.ID == "" {
 			snapshot.Chat.ID = chatID
 		}
+		snapshot = c.snapshotWithExecProcessesLocked(snapshot)
 		state.Snapshots[chatID] = snapshot
 		if chatID == c.chat.ID {
 			state.Snapshot = snapshot
@@ -420,6 +425,7 @@ func (c *Controller) State() State {
 	}
 	if state.Snapshot.Chat.ID == "" && c.runtime != nil {
 		snapshot := c.runtime.Snapshot()
+		snapshot = c.snapshotWithExecProcessesLocked(snapshot)
 		state.Snapshot = snapshot
 		if !hasChatSidebarStatus(state.ChatStatuses, snapshot.Chat.ID) {
 			state.ChatStatuses = mergeChatSidebarStatus(state.ChatStatuses, sidebarStatusFromSnapshot(snapshot))
@@ -558,8 +564,13 @@ func (c *Controller) ShutdownWithInterruptReason(ctx context.Context, reason str
 			runtimes = append(runtimes, rt)
 		}
 	}
-	unsubs := make([]func(), 0, len(c.unsubs)+1)
+	unsubs := make([]func(), 0, len(c.unsubs)+len(c.execUnsubs)+1)
 	for _, unsub := range c.unsubs {
+		if unsub != nil {
+			unsubs = append(unsubs, unsub)
+		}
+	}
+	for _, unsub := range c.execUnsubs {
 		if unsub != nil {
 			unsubs = append(unsubs, unsub)
 		}
@@ -658,6 +669,7 @@ func (c *Controller) DeleteChat(ctx context.Context, chatID domain.ID) error {
 	activeRuntime := c.runtime
 	targetRuntime := c.runtimes[chatID]
 	targetUnsub := c.unsubs[chatID]
+	targetExecUnsub := c.execUnsubs[chatID]
 	c.mu.RUnlock()
 	if sessionID == "" {
 		return fmt.Errorf("no active session")
@@ -698,9 +710,19 @@ func (c *Controller) DeleteChat(ctx context.Context, chatID domain.ID) error {
 	if targetUnsub != nil {
 		targetUnsub()
 	}
+	if targetExecUnsub != nil {
+		targetExecUnsub()
+	}
 	if err := c.store.DeleteChat(ctx, chatID); err != nil {
 		return err
 	}
+	c.mu.Lock()
+	delete(c.statuses, chatID)
+	delete(c.runtimes, chatID)
+	delete(c.unsubs, chatID)
+	delete(c.execUnsubs, chatID)
+	delete(c.snapshots, chatID)
+	c.mu.Unlock()
 	if deletingActive {
 		return c.loadSession(ctx, sessionID, nextChatID)
 	}
@@ -710,10 +732,6 @@ func (c *Controller) DeleteChat(ctx context.Context, chatID domain.ID) error {
 	}
 	c.mu.Lock()
 	c.chats = chats
-	delete(c.statuses, chatID)
-	delete(c.runtimes, chatID)
-	delete(c.unsubs, chatID)
-	delete(c.snapshots, chatID)
 	c.mu.Unlock()
 	c.refreshChatStatuses(ctx, sessionID)
 	c.broadcast("snapshot", c.State())
@@ -2486,6 +2504,9 @@ func (c *Controller) loadSession(ctx context.Context, sessionID, chatID domain.I
 	if c.unsubs == nil {
 		c.unsubs = map[domain.ID]func(){}
 	}
+	if c.execUnsubs == nil {
+		c.execUnsubs = map[domain.ID]func(){}
+	}
 	if c.snapshots == nil {
 		c.snapshots = map[domain.ID]chat.Snapshot{}
 	}
@@ -2504,7 +2525,9 @@ func (c *Controller) loadSession(ctx context.Context, sessionID, chatID domain.I
 	for id, unsub := range unsubs {
 		c.unsubs[id] = unsub
 	}
+	execSubscriptions := c.ensureExecSubscriptionsLocked(chats)
 	for id, snapshot := range snapshots {
+		snapshot = c.snapshotWithExecProcessesLocked(snapshot)
 		c.snapshots[id] = snapshot
 	}
 	for id, status := range statuses {
@@ -2519,6 +2542,9 @@ func (c *Controller) loadSession(ctx context.Context, sessionID, chatID domain.I
 
 	for _, sub := range subscriptions {
 		go c.forwardRuntime(sub.chatID, sub.updates)
+	}
+	for _, sub := range execSubscriptions {
+		go c.forwardExecRuntime(sub.chatID, sub.events)
 	}
 	c.autoResumeRestartInterruptedChats(runtimes, snapshots)
 	c.broadcast("snapshot", c.State())
@@ -2855,6 +2881,101 @@ func (c *Controller) activeChatSidebarStatus(sessionID domain.ID) (ChatSidebarSt
 	}
 	status := sidebarStatusFromSnapshot(rt.Snapshot())
 	return status, status.ChatID != ""
+}
+
+type execRuntimeSubscription struct {
+	chatID domain.ID
+	events <-chan execruntime.Event
+}
+
+func (c *Controller) ensureExecSubscriptionsLocked(chats []domain.Chat) []execRuntimeSubscription {
+	manager := c.execManagerLocked()
+	if manager == nil {
+		return nil
+	}
+	subscriptions := make([]execRuntimeSubscription, 0, len(chats))
+	for _, item := range chats {
+		if item.ID == "" || c.execUnsubs[item.ID] != nil {
+			continue
+		}
+		events, unsub := manager.Subscribe(item.ID)
+		c.execUnsubs[item.ID] = unsub
+		subscriptions = append(subscriptions, execRuntimeSubscription{chatID: item.ID, events: events})
+	}
+	return subscriptions
+}
+
+func (c *Controller) execManagerLocked() *execruntime.Manager {
+	if c == nil || c.agent == nil {
+		return nil
+	}
+	return c.agent.ExecManager()
+}
+
+func (c *Controller) snapshotWithExecProcessesLocked(snapshot chat.Snapshot) chat.Snapshot {
+	manager := c.execManagerLocked()
+	if manager == nil || snapshot.Session.ID == "" || snapshot.Chat.ID == "" {
+		return snapshot
+	}
+	processes, err := manager.List(context.Background(), execruntime.ListRequest{
+		SessionID: snapshot.Session.ID,
+		ChatID:    snapshot.Chat.ID,
+		Scope:     execruntime.ScopeChat,
+		MaxBytes:  16 * 1024,
+	})
+	if err != nil {
+		return snapshot
+	}
+	snapshot.ExecProcesses = execProcessesFromSnapshots(processes)
+	return snapshot
+}
+
+func execProcessesFromSnapshots(snapshots []execruntime.Snapshot) []domain.ExecProcess {
+	out := make([]domain.ExecProcess, 0, len(snapshots))
+	for _, snapshot := range snapshots {
+		out = append(out, domain.ExecProcess{
+			ProcessID:   snapshot.ProcessID,
+			Command:     snapshot.Command,
+			Workdir:     snapshot.Workdir,
+			Shell:       snapshot.Shell,
+			TTY:         snapshot.TTY,
+			State:       string(snapshot.State),
+			ExitCode:    snapshot.ExitCode,
+			TimeoutMS:   snapshot.TimeoutMS,
+			Output:      snapshot.Output,
+			OutputBytes: snapshot.OutputBytes,
+			StdinClosed: snapshot.StdinClosed,
+			Lost:        snapshot.Lost,
+		})
+	}
+	return out
+}
+
+func (c *Controller) forwardExecRuntime(chatID domain.ID, events <-chan execruntime.Event) {
+	for range events {
+		c.mu.Lock()
+		snapshot, ok := c.snapshots[chatID]
+		if !ok || snapshot.Chat.ID == "" {
+			if rt := c.runtimes[chatID]; rt != nil {
+				snapshot = rt.Snapshot()
+				ok = true
+			}
+		}
+		if !ok || snapshot.Chat.ID == "" {
+			c.mu.Unlock()
+			continue
+		}
+		snapshot = c.snapshotWithExecProcessesLocked(snapshot)
+		c.snapshots[chatID] = snapshot
+		c.mu.Unlock()
+		c.broadcast("chat_update", chat.Update{
+			Snapshot:   snapshot,
+			Status:     snapshot.Status,
+			StatusText: snapshot.StatusText,
+			Context:    snapshot.Context,
+			Active:     snapshot.Active,
+		})
+	}
 }
 
 func (c *Controller) forwardRuntime(chatID domain.ID, updates <-chan chat.Update) {

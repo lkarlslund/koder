@@ -57,6 +57,7 @@ type Snapshot struct {
 	Timeline         []domain.TimelineItem
 	Approvals        []store.Approval
 	QueuedInputs     []domain.QueuedInput
+	ExecProcesses    []domain.ExecProcess
 	PendingAssistant PendingAssistantTurn
 	Status           Status
 	StatusText       string

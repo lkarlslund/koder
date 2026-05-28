@@ -133,6 +133,22 @@
           <span class="sidebar-value text-truncate" x-text="statusText()"></span>
         </div>
       </div>
+      <div class="sidebar-section" x-show="execProcesses().length > 0" style="display: none;">
+        <div class="sidebar-heading">Processes</div>
+        <div class="exec-process-list">
+          <template x-for="process in execProcesses()" :key="execProcessID(process)">
+            <div class="exec-process-row">
+              <i class="bi bi-terminal"></i>
+              <span class="exec-process-command text-truncate" :title="execProcessTooltip(process)" x-text="execProcessCommand(process)"></span>
+              <span class="badge exec-process-state" :class="execProcessClass(process)" x-text="execProcessLabel(process)"></span>
+              <div class="exec-process-tooltip shadow">
+                <div class="exec-process-tooltip-title" x-text="execProcessTooltip(process)"></div>
+                <pre x-text="execProcessOutput(process)"></pre>
+              </div>
+            </div>
+          </template>
+        </div>
+      </div>
       <div class="sidebar-section">
         <div class="sidebar-info-row">
           <span class="sidebar-heading">Chats</span>
