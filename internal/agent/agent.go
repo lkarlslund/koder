@@ -406,7 +406,7 @@ func (e *Engine) runModelPrompt(ctx context.Context, session domain.Session, cha
 			return
 		}
 		e.recordLifecycle(session.ID, "prompt_started", prompt, map[string]string{"provider": session.ProviderID, "model": session.ModelID})
-		compacted, err := e.autoCompactIfNeeded(ctx, session, client, out)
+		compacted, err := e.autoCompactPromptIfNeeded(ctx, session, chat, client, prompt, drafts, refs, note, out)
 		if err != nil {
 			if interruptedErr(err) {
 				e.emitInterrupted(out, chat.ID, session.ID)
@@ -477,7 +477,7 @@ func (e *Engine) runContinue(ctx context.Context, session domain.Session, chat d
 		} else {
 			e.recordLifecycle(session.ID, "continue", "", nil)
 		}
-		compacted, err := e.autoCompactIfNeeded(ctx, session, client, out)
+		compacted, err := e.autoCompactChatIfNeeded(ctx, session, chat.ID, client, out)
 		if err != nil {
 			if interruptedErr(err) {
 				e.emitInterrupted(out, chat.ID, session.ID)
@@ -2902,12 +2902,12 @@ func parseToolCall(text string) (*tools.Request, string) {
 	return &call, plain
 }
 
-func (e *Engine) autoCompactIfNeeded(ctx context.Context, session domain.Session, client *provider.Client, out chan<- domain.Event) (bool, error) {
-	chat, err := e.store.DefaultChat(ctx, session.ID)
+func (e *Engine) autoCompactPromptIfNeeded(ctx context.Context, session domain.Session, chat domain.Chat, client *provider.Client, prompt string, drafts []attachment.Draft, refs []reference.Draft, note string, out chan<- domain.Event) (bool, error) {
+	messages, err := e.buildConversationPreview(ctx, session, chat.ID, prompt, drafts, refs, transientTurnMessages(note, ""))
 	if err != nil {
 		return false, err
 	}
-	return e.autoCompactChatIfNeeded(ctx, session, chat.ID, client, out)
+	return e.autoCompactPreparedMessagesIfNeeded(ctx, session, chat.ID, client, messages, out)
 }
 
 func (e *Engine) autoCompactPreparedMessagesIfNeeded(ctx context.Context, session domain.Session, chatID domain.ID, client *provider.Client, messages []provider.Message, out chan<- domain.Event) (bool, error) {
@@ -2959,7 +2959,7 @@ func (e *Engine) autoCompactChatIfNeeded(ctx context.Context, session domain.Ses
 	if out != nil {
 		out <- domain.Event{Kind: domain.EventKindStatus, Text: fmt.Sprintf("Auto-compacting at ~%d%% estimated context used", estimated)}
 	}
-	return e.autoCompactPreparedMessagesIfNeeded(ctx, session, chatID, client, provider.SerializePromptEnvelope(envelope), nil)
+	return e.autoCompactPreparedMessagesIfNeeded(ctx, session, chatID, client, provider.SerializePromptEnvelope(envelope), out)
 }
 
 func (e *Engine) estimateRequestUsagePercent(session domain.Session, _ domain.Chat, messages []provider.Message) (int, bool) {

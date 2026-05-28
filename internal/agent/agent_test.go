@@ -3226,6 +3226,147 @@ func TestApproveAutoCompactContinuesFromCompactedHistory(t *testing.T) {
 	}
 }
 
+func TestRunPromptAutoCompactsTargetChatWithPendingPrompt(t *testing.T) {
+	var requests []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read body: %v", err)
+		}
+		requests = append(requests, string(body))
+		switch {
+		case strings.Contains(string(body), "Summarize this coding session so another agent can continue it with minimal loss."):
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"## Goal\ncontinue the side chat\n\n## Next Step\nanswer the pending prompt"}}],"usage":{"total_tokens":1}}`))
+		default:
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"done"}}],"usage":{"total_tokens":1}}`))
+		}
+	}))
+	defer server.Close()
+
+	cfg := testConfig(t)
+	cfg.Providers = map[string]config.Provider{
+		"test": {
+			BaseURL: server.URL + "/v1",
+			Timeout: time.Second,
+		},
+	}
+	cfg.DefaultProvider = "test"
+	cfg.DefaultModel = "test-model"
+	cfg.SetModelConfig(config.ModelConfig{ProviderID: "test", ModelID: "test-model", ContextWindow: 32768})
+
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	engine := New(cfg, st, tools.NewRegistry(t.TempDir()), nil, t.TempDir())
+	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defaultChat := defaultChatForSession(t, st, session.ID)
+	sideChat, err := st.CreateChat(context.Background(), session.ID, "side", chatrole.General, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	appendUserTimelineItem(t, st, sideChat.ID, "old side prompt")
+	appendAssistantTimelineItem(t, st, sideChat.ID, domain.AssistantMessage{Text: "old side answer"})
+
+	prompt := "pending prompt " + strings.Repeat("x", 90000)
+	existingMessages, err := engine.buildConversationPreview(context.Background(), session, sideChat.ID, "", nil, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pendingMessages, err := engine.buildConversationPreview(context.Background(), session, sideChat.ID, prompt, nil, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	existingPct, ok := engine.estimateRequestUsagePercent(session, sideChat, existingMessages)
+	if !ok {
+		t.Fatal("expected existing request usage estimate")
+	}
+	pendingPct, ok := engine.estimateRequestUsagePercent(session, sideChat, pendingMessages)
+	if !ok {
+		t.Fatal("expected pending request usage estimate")
+	}
+	if pendingPct <= existingPct {
+		t.Fatalf("expected pending prompt to increase usage, existing=%d pending=%d", existingPct, pendingPct)
+	}
+	providerCfg := engine.cfg.Providers["test"]
+	providerCfg.AutoCompactAt = existingPct + 1
+	engine.cfg.Providers["test"] = providerCfg
+
+	events, err := engine.RunPromptInChat(context.Background(), session, sideChat, prompt, nil, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sawCompactionStatus bool
+	var sawFinalAnswer bool
+	for evt := range events {
+		if evt.Kind == domain.EventKindStatus && strings.HasPrefix(evt.Text, "Auto-compacting at ~") {
+			sawCompactionStatus = true
+		}
+		if evt.Kind == domain.EventKindMessageDelta && evt.Text == "done" {
+			sawFinalAnswer = true
+		}
+	}
+	if !sawCompactionStatus {
+		t.Fatal("expected auto-compaction before sending pending prompt")
+	}
+	if !sawFinalAnswer {
+		t.Fatal("expected final assistant answer")
+	}
+	if len(requests) != 2 {
+		t.Fatalf("expected compaction request and model request, got %d", len(requests))
+	}
+	if !strings.Contains(requests[0], "Summarize this coding session so another agent can continue it with minimal loss.") {
+		t.Fatalf("expected first request to compact target chat, got %s", requests[0])
+	}
+	if !strings.Contains(requests[1], "pending prompt") || !strings.Contains(requests[1], "Compacted session summary for continuation:") {
+		t.Fatalf("expected second request to send pending prompt after compacted summary, got %s", requests[1])
+	}
+
+	sideTimeline, err := st.TimelineForChat(context.Background(), sideChat.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sideCompactions int
+	var sawPendingUser bool
+	for _, item := range sideTimeline {
+		switch content := item.Content.(type) {
+		case domain.Compaction:
+			if content.Status == "completed" {
+				sideCompactions++
+			}
+		case domain.UserMessage:
+			if strings.HasPrefix(content.Text, "pending prompt ") {
+				sawPendingUser = true
+			}
+		}
+	}
+	if sideCompactions != 1 {
+		t.Fatalf("expected one compaction on side chat, got %d in %#v", sideCompactions, sideTimeline)
+	}
+	if !sawPendingUser {
+		t.Fatal("expected pending prompt to be persisted after compaction")
+	}
+
+	defaultTimeline, err := st.TimelineForChat(context.Background(), defaultChat.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range defaultTimeline {
+		if _, ok := item.Content.(domain.Compaction); ok {
+			t.Fatalf("did not expect default chat to be compacted, got %#v", defaultTimeline)
+		}
+	}
+}
+
 func TestApproveContinuesAfterApprovedToolFailure(t *testing.T) {
 	t.Parallel()
 
