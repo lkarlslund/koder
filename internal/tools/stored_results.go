@@ -105,13 +105,16 @@ type ApplyPatchStoredResult struct {
 }
 
 type EditStoredResult struct {
-	Path        string           `json:"path"`
-	ReplaceAll  bool             `json:"replace_all,omitempty"`
-	Occurrences int              `json:"occurrences,omitempty"`
-	Summary     string           `json:"summary,omitempty"`
-	Diff        string           `json:"diff,omitempty"`
-	Hunks       []EditStoredHunk `json:"hunks,omitempty"`
-	Truncated   bool             `json:"truncated,omitempty"`
+	Path         string           `json:"path"`
+	ReplaceAll   bool             `json:"replace_all,omitempty"`
+	Occurrences  int              `json:"occurrences,omitempty"`
+	Summary      string           `json:"summary,omitempty"`
+	Matcher      string           `json:"matcher,omitempty"`
+	Verification string           `json:"verification,omitempty"`
+	Diagnostics  string           `json:"diagnostics,omitempty"`
+	Diff         string           `json:"diff,omitempty"`
+	Hunks        []EditStoredHunk `json:"hunks,omitempty"`
+	Truncated    bool             `json:"truncated,omitempty"`
 }
 
 type EditStoredHunk struct {
@@ -781,10 +784,21 @@ func formatWriteStoredResultForDisplay(result WriteStoredResult) string {
 }
 
 func formatEditStoredResultForDisplay(result EditStoredResult) string {
-	if diff := strings.TrimSpace(result.Diff); diff != "" {
-		return diff
+	var footer []string
+	if diagnostics := strings.TrimSpace(result.Diagnostics); diagnostics != "" {
+		footer = append(footer, "Diagnostics:\n"+diagnostics)
 	}
-	return formatLegacyEditStoredResultForDisplay(result)
+	if diff := strings.TrimSpace(result.Diff); diff != "" {
+		if len(footer) == 0 {
+			return diff
+		}
+		return strings.TrimSpace(diff + "\n\n" + strings.Join(footer, "\n\n"))
+	}
+	text := formatLegacyEditStoredResultForDisplay(result)
+	if len(footer) > 0 {
+		text = strings.TrimSpace(text + "\n\n" + strings.Join(footer, "\n\n"))
+	}
+	return text
 }
 
 func formatLegacyEditStoredResultForDisplay(result EditStoredResult) string {

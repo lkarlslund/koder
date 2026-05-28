@@ -2,6 +2,7 @@ package edittool
 
 import (
 	"context"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -225,6 +226,163 @@ func TestExecuteEditReplaceAllFuzzyMatches(t *testing.T) {
 	}
 }
 
+func TestExecuteEditInlineWhitespaceNormalized(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "file.go")
+	if err := os.WriteFile(path, []byte("package main\n\nvar value = call(foo,\tbar)\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	result, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: dir}, tools.Request{
+		Args: map[string]string{
+			"path":       "file.go",
+			"old_string": "call(foo, bar)",
+			"new_string": "call(foo, baz)",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Meta["matcher"] != "whitespace_normalized" {
+		t.Fatalf("expected whitespace_normalized matcher, got %#v", result.Meta)
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != "package main\n\nvar value = call(foo, baz)\n" {
+		t.Fatalf("unexpected file contents: %q", string(body))
+	}
+}
+
+func TestExecuteEditInlineUnicodeNormalizedExpandedRune(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "file.go")
+	if err := os.WriteFile(path, []byte("package main\n\nvar msg = \"a — b\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	result, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: dir}, tools.Request{
+		Args: map[string]string{
+			"path":       "file.go",
+			"old_string": "\"a -- b\"",
+			"new_string": "\"a - b\"",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Meta["matcher"] != "unicode_normalized" {
+		t.Fatalf("expected unicode_normalized matcher, got %#v", result.Meta)
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != "package main\n\nvar msg = \"a - b\"\n" {
+		t.Fatalf("unexpected file contents: %q", string(body))
+	}
+}
+
+func TestExecuteEditReportsIntroducedGoDiagnostics(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "file.go")
+	if err := os.WriteFile(path, []byte("package main\n\nfunc main() {\n\tprintln(\"ok\")\n}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	result, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: dir}, tools.Request{
+		Args: map[string]string{
+			"path":       "file.go",
+			"old_string": "println(\"ok\")",
+			"new_string": "println(",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result.Output, "Diagnostics introduced by this edit") {
+		t.Fatalf("expected diagnostics in output, got %q", result.Output)
+	}
+	stored, ok := result.Stored.(tools.EditStoredResult)
+	if !ok {
+		t.Fatalf("unexpected stored result type %T", result.Stored)
+	}
+	if !strings.Contains(stored.Diagnostics, "file.go") {
+		t.Fatalf("expected stored diagnostics, got %#v", stored)
+	}
+}
+
+func TestExecuteEditReportsStructuredFileDiagnostics(t *testing.T) {
+	tests := []struct {
+		name      string
+		file      string
+		before    string
+		oldString string
+		newString string
+	}{
+		{
+			name:      "json",
+			file:      "data.json",
+			before:    "{\"enabled\": true}\n",
+			oldString: "true",
+			newString: "}",
+		},
+		{
+			name:      "toml",
+			file:      "config.toml",
+			before:    "enabled = true\n",
+			oldString: "true",
+			newString: "\"unterminated",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, tt.file)
+			if err := os.WriteFile(path, []byte(tt.before), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			result, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: dir}, tools.Request{
+				Args: map[string]string{
+					"path":       tt.file,
+					"old_string": tt.oldString,
+					"new_string": tt.newString,
+				},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			stored, ok := result.Stored.(tools.EditStoredResult)
+			if !ok {
+				t.Fatalf("unexpected stored result type %T", result.Stored)
+			}
+			if !strings.Contains(result.Output, "Diagnostics introduced by this edit") || !strings.Contains(stored.Diagnostics, tt.file) {
+				t.Fatalf("expected diagnostics for %s, output=%q stored=%#v", tt.file, result.Output, stored)
+			}
+		})
+	}
+}
+
+func TestExecuteEditVerifiesWritePersisted(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "file.txt")
+	if err := os.WriteFile(path, []byte("alpha\nbeta\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	oldWriteTextFile := writeTextFile
+	writeTextFile = func(string, string, fs.FileMode) error { return nil }
+	t.Cleanup(func() { writeTextFile = oldWriteTextFile })
+
+	_, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: dir}, tools.Request{
+		Args: map[string]string{
+			"path":       "file.txt",
+			"old_string": "beta",
+			"new_string": "gamma",
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "post-write verification failed") {
+		t.Fatalf("expected verification failure, got %v", err)
+	}
+}
+
 func TestExecuteEditNoMatchShowsClosestSections(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "file.go")
@@ -234,7 +392,7 @@ func TestExecuteEditNoMatchShowsClosestSections(t *testing.T) {
 	_, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: dir}, tools.Request{
 		Args: map[string]string{
 			"path":       "file.go",
-			"old_string": "func alpah() {\n\treturn\n}",
+			"old_string": "func alpah() {\n\tmissing",
 			"new_string": "func beta() {\n\treturn\n}",
 		},
 	})

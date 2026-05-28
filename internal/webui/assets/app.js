@@ -236,7 +236,8 @@
       if (kind === 'edit') {
         const title = firstValue(data, ['summary', 'Summary']) || 'Edited file';
         const diff = firstValue(data, ['diff', 'Diff']) || firstValue(result, ['diff', 'Diff']) || toolResultText(tool);
-        return renderDiffBlock(title, diff);
+        const diagnostics = firstValue(data, ['diagnostics', 'Diagnostics']);
+        return renderDiffBlock(title, diff) + (diagnostics ? renderCompactBlock('Diagnostics', diagnostics, 'tool-result-body-mono') : '');
       }
       if (kind === 'read') {
         const path = firstValue(data, ['path', 'Path']) || firstValue(args, ['path']) || 'read';

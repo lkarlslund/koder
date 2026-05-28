@@ -77,13 +77,16 @@ type ApplyPatchStoredResult struct {
 }
 
 type EditStoredResult struct {
-	Path        string           `json:"path"`
-	ReplaceAll  bool             `json:"replace_all,omitempty"`
-	Occurrences int              `json:"occurrences,omitempty"`
-	Summary     string           `json:"summary,omitempty"`
-	Diff        string           `json:"diff,omitempty"`
-	Hunks       []EditStoredHunk `json:"hunks,omitempty"`
-	Truncated   bool             `json:"truncated,omitempty"`
+	Path         string           `json:"path"`
+	ReplaceAll   bool             `json:"replace_all,omitempty"`
+	Occurrences  int              `json:"occurrences,omitempty"`
+	Summary      string           `json:"summary,omitempty"`
+	Matcher      string           `json:"matcher,omitempty"`
+	Verification string           `json:"verification,omitempty"`
+	Diagnostics  string           `json:"diagnostics,omitempty"`
+	Diff         string           `json:"diff,omitempty"`
+	Hunks        []EditStoredHunk `json:"hunks,omitempty"`
+	Truncated    bool             `json:"truncated,omitempty"`
 }
 
 type EditStoredHunk struct {
