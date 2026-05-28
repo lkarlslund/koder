@@ -3226,6 +3226,57 @@ func TestApproveAutoCompactContinuesFromCompactedHistory(t *testing.T) {
 	}
 }
 
+func TestApplyQueuedSteerEmitsPersistedUserMessage(t *testing.T) {
+	cfg := testConfig(t)
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	engine := New(cfg, st, tools.NewRegistry(t.TempDir()), nil, t.TempDir())
+	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chat := defaultChatForSession(t, st, session.ID)
+	if err := st.SetChatQueuedInputs(context.Background(), chat.ID, []domain.QueuedInput{{
+		ID:   domain.NewID(),
+		Kind: domain.QueuedInputKindSteer,
+		Text: "steer the running turn",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	events := make(chan domain.Event, 1)
+	applied, err := engine.applyQueuedSteer(context.Background(), session, &chat, events)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !applied {
+		t.Fatal("expected queued steer to apply")
+	}
+	evt := <-events
+	if evt.Kind != domain.EventKindStatus || evt.Text != "Applying queued steer..." {
+		t.Fatalf("unexpected event: %#v", evt)
+	}
+	if evt.Meta[domain.EventMetaRefresh] != domain.EventRefreshQueue {
+		t.Fatalf("expected queue refresh metadata, got %#v", evt.Meta)
+	}
+	user, ok := evt.Item.Content.(domain.UserMessage)
+	if !ok || user.Text != "steer the running turn" {
+		t.Fatalf("expected persisted user message item, got %#v", evt.Item)
+	}
+
+	timeline, err := st.TimelineForChat(context.Background(), chat.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(timeline) != 1 || timeline[0].ID != evt.Item.ID {
+		t.Fatalf("expected event item to match persisted timeline, event=%#v timeline=%#v", evt.Item, timeline)
+	}
+}
+
 func TestRunPromptAutoCompactsTargetChatWithPendingPrompt(t *testing.T) {
 	var requests []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

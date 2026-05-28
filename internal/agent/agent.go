@@ -665,13 +665,15 @@ func (e *Engine) applyQueuedSteer(ctx context.Context, session domain.Session, c
 		return false, err
 	}
 	chat.QueuedInputs = remaining
+	userItem, err := e.persistUserPrompt(ctx, session, chat.ID, item.Text, queuedAttachmentDrafts(item.Attachments), queuedReferenceDrafts(item.References))
+	if err != nil {
+		return false, err
+	}
 	out <- domain.Event{
 		Kind: domain.EventKindStatus,
 		Text: "Applying queued steer...",
+		Item: userItem,
 		Meta: map[string]string{domain.EventMetaRefresh: domain.EventRefreshQueue},
-	}
-	if _, err := e.persistUserPrompt(ctx, session, chat.ID, item.Text, queuedAttachmentDrafts(item.Attachments), queuedReferenceDrafts(item.References)); err != nil {
-		return false, err
 	}
 	return true, nil
 }
