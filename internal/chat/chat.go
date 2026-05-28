@@ -967,11 +967,7 @@ func (r *Chat) handleDispatchQueued(item domain.QueuedInput, remaining []domain.
 	chat := r.chat
 	r.mu.Unlock()
 
-	useTurnPrompt := item.Kind != domain.QueuedInputKindContinue
-	if _, ok := r.engine.(turnPromptRunner); !ok {
-		useTurnPrompt = false
-	}
-	if !useTurnPrompt {
+	if r.shouldAppendOptimisticUserMessage(item) {
 		r.appendOptimisticUserMessage(item, session, chat)
 	}
 	_ = r.persistQueue()
@@ -1485,10 +1481,20 @@ func (r *Chat) maybeDispatchNext() {
 	chat := r.chat
 	r.mu.Unlock()
 
-	r.appendOptimisticUserMessage(item, session, chat)
+	if r.shouldAppendOptimisticUserMessage(item) {
+		r.appendOptimisticUserMessage(item, session, chat)
+	}
 	_ = r.persistQueue()
 	r.broadcast(r.snapshotUpdateFlags(nil, item.Kind != domain.QueuedInputKindContinue, true, true, true, false))
 	r.runItem(ctx, session, chat, item)
+}
+
+func (r *Chat) shouldAppendOptimisticUserMessage(item domain.QueuedInput) bool {
+	if item.Kind == domain.QueuedInputKindContinue {
+		return false
+	}
+	_, ok := r.engine.(turnPromptRunner)
+	return !ok
 }
 
 func (r *Chat) runItem(ctx context.Context, session domain.Session, chat domain.Chat, item domain.QueuedInput) {

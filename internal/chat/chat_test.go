@@ -37,6 +37,10 @@ type pendingToolFakeRunner struct {
 	resumeEvents []<-chan domain.Event
 }
 
+type turnPromptFakeRunner struct {
+	runtimeFakeRunner
+}
+
 func (f *cancelAwareRunner) RunPromptInChat(ctx context.Context, _ domain.Session, _ domain.Chat, _ string, _ []attachment.Draft, _ []reference.Draft, _ string) (<-chan domain.Event, error) {
 	f.ctxSeen <- ctx
 	return f.events, nil
@@ -79,6 +83,24 @@ func (f *runtimeFakeRunner) RunPromptInChat(_ context.Context, _ domain.Session,
 	evt := f.events[0]
 	f.events = f.events[1:]
 	return evt, nil
+}
+
+func (f *turnPromptFakeRunner) RunPromptTurn(ctx context.Context, turn *TurnState, prompt string, _ []attachment.Draft, _ []reference.Draft, note string) (<-chan domain.Event, error) {
+	f.mu.Lock()
+	f.promptCalls++
+	f.prompts = append(f.prompts, prompt)
+	f.promptNotes = append(f.promptNotes, note)
+	f.mu.Unlock()
+
+	item, err := turn.AppendUserMessage(ctx, domain.UserMessage{Text: prompt})
+	if err != nil {
+		return nil, err
+	}
+	events := make(chan domain.Event, 2)
+	events <- domain.Event{Kind: domain.EventKindStatus, Text: "User message added", Item: item}
+	events <- domain.Event{Kind: domain.EventKindMessageDone}
+	close(events)
+	return events, nil
 }
 
 func (f *runtimeFakeRunner) RunContinueInChat(_ context.Context, _ domain.Session, _ domain.Chat, note string) (<-chan domain.Event, error) {
@@ -597,6 +619,44 @@ func TestRuntimeDispatchQueuedUsesSelectedItemAndPreservesNote(t *testing.T) {
 	}
 	events <- domain.Event{Kind: domain.EventKindMessageDone}
 	close(events)
+}
+
+func TestRuntimeDispatchQueuedTurnPromptDoesNotDuplicateUserMessage(t *testing.T) {
+	st := openTestStore(t)
+	session, chatRecord, _ := createSessionWithPlan(t, st)
+	runner := &turnPromptFakeRunner{}
+	rt := newTestChat(t, st, session, chatRecord, runner)
+
+	rt.DispatchQueued(
+		domain.QueuedInput{ID: "queue-99", Kind: domain.QueuedInputKindSteer, Text: "selected", CreatedAt: time.Now().UTC()},
+		nil,
+	)
+
+	deadline := time.After(2 * time.Second)
+	for {
+		snapshot := rt.Snapshot()
+		if snapshot.Status == StatusIdle && runner.promptCallCount() == 1 {
+			var userMessages []domain.UserMessage
+			for _, item := range snapshot.Timeline {
+				if user, ok := item.Content.(domain.UserMessage); ok {
+					userMessages = append(userMessages, user)
+				}
+			}
+			if len(userMessages) != 1 {
+				t.Fatalf("user messages = %#v; timeline = %#v", userMessages, snapshot.Timeline)
+			}
+			if userMessages[0].Text != "selected" {
+				t.Fatalf("user message text = %q", userMessages[0].Text)
+			}
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for dispatched turn prompt: %#v", snapshot)
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
 }
 
 func TestRuntimeRefreshesQueueWhenRunnerConsumesQueuedSteer(t *testing.T) {
