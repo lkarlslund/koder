@@ -940,7 +940,7 @@ func (e *Engine) continueModelTurnWithTurn(ctx context.Context, session domain.S
 					e.pauseContinuation(ctx, chat.ID, session.ID, pause, out)
 					return nil
 				}
-				needsApproval, handledErr := e.handleModelToolCalls(ctx, session, chat, calls, out)
+				needsApproval, handledErr := e.handleModelToolCallsForTurn(ctx, session, chat, turn, calls, out)
 				if handledErr != nil {
 					return handledErr
 				}
@@ -967,7 +967,7 @@ func (e *Engine) continueModelTurnWithTurn(ctx context.Context, session domain.S
 				return nil
 			}
 
-			evt, handledErr := e.handleModelToolCall(ctx, session, chat, *call)
+			evt, handledErr := e.handleModelToolCallForTurn(ctx, session, chat, turn, *call)
 			if handledErr != nil {
 				return handledErr
 			}
@@ -3451,6 +3451,10 @@ func (e *Engine) estimateCompactedTimelineContextTokens(session domain.Session, 
 }
 
 func (e *Engine) handleModelToolCall(ctx context.Context, session domain.Session, chat domain.Chat, req tools.Request) (domain.Event, error) {
+	return e.handleModelToolCallForTurn(ctx, session, chat, nil, req)
+}
+
+func (e *Engine) handleModelToolCallForTurn(ctx context.Context, session domain.Session, chat domain.Chat, turn *chatpkg.TurnState, req tools.Request) (domain.Event, error) {
 	prepared, err := e.prepareModelToolCall(ctx, session, chat, req)
 	if err != nil {
 		return domain.Event{}, err
@@ -3458,7 +3462,7 @@ func (e *Engine) handleModelToolCall(ctx context.Context, session domain.Session
 	if !prepared.run {
 		return prepared.event, nil
 	}
-	events, err := e.executePreparedToolCall(ctx, prepared.chatID, prepared.sessionID, prepared.req)
+	events, err := e.executePreparedToolCallForTurn(ctx, turn, prepared.chatID, prepared.sessionID, prepared.req)
 	if err != nil {
 		return domain.Event{}, err
 	}
@@ -3610,6 +3614,10 @@ func (e *Engine) saveChatContextUsage(ctx context.Context, chatID domain.ID, usa
 }
 
 func (e *Engine) handleModelToolCalls(ctx context.Context, session domain.Session, chat domain.Chat, calls []tools.Request, out chan<- domain.Event) (bool, error) {
+	return e.handleModelToolCallsForTurn(ctx, session, chat, nil, calls, out)
+}
+
+func (e *Engine) handleModelToolCallsForTurn(ctx context.Context, session domain.Session, chat domain.Chat, turn *chatpkg.TurnState, calls []tools.Request, out chan<- domain.Event) (bool, error) {
 	if len(calls) == 0 {
 		return false, nil
 	}
@@ -3645,10 +3653,10 @@ func (e *Engine) handleModelToolCalls(ctx context.Context, session domain.Sessio
 			continue
 		}
 		out <- domain.Event{Kind: domain.EventKindToolStart, Tool: item.req.Tool, ToolCallID: item.req.ToolCallID, Text: tools.Preview(item.req)}
-		go func(req tools.Request) {
-			events, err := e.executePreparedToolCall(ctx, item.chatID, item.sessionID, req)
+		go func(item preparedToolCall) {
+			events, err := e.executePreparedToolCallForTurn(ctx, turn, item.chatID, item.sessionID, item.req)
 			results <- completedToolCall{events: events, err: err}
-		}(item.req)
+		}(item)
 	}
 
 	var firstErr error
@@ -3844,10 +3852,20 @@ func toolEnabledForSession(cfg config.Config, session domain.Session, kind domai
 }
 
 func (e *Engine) executePreparedToolCall(ctx context.Context, chatID, sessionID domain.ID, req tools.Request) ([]domain.Event, error) {
+	return e.executePreparedToolCallForTurn(ctx, nil, chatID, sessionID, req)
+}
+
+func (e *Engine) executePreparedToolCallForTurn(ctx context.Context, turn *chatpkg.TurnState, chatID, sessionID domain.ID, req tools.Request) ([]domain.Event, error) {
 	e.recordLifecycle(sessionID, "tool_execution_started", req.ContextString(), map[string]string{"tool": string(req.Tool), "tool_call_id": req.ToolCallID})
 	if strings.TrimSpace(req.ToolCallID) != "" {
-		if _, err := e.store.MarkToolRunning(ctx, chatID, req.ToolCallID); err != nil {
+		item, err := e.store.MarkToolRunning(ctx, chatID, req.ToolCallID)
+		if err != nil {
 			return nil, err
+		}
+		if turn != nil && item.ID != "" {
+			if _, err := turn.UpsertTimelineItem(ctx, item); err != nil {
+				return nil, err
+			}
 		}
 	}
 	chat, chatErr := e.store.GetChat(ctx, chatID)
@@ -3866,6 +3884,13 @@ func (e *Engine) executePreparedToolCall(ctx context.Context, chatID, sessionID 
 		}
 		var out []domain.Event
 		for evt := range events {
+			if turn != nil && evt.Item.ID != "" {
+				item, upsertErr := turn.UpsertTimelineItem(ctx, evt.Item)
+				if upsertErr != nil {
+					return nil, upsertErr
+				}
+				evt.Item = item
+			}
 			out = append(out, evt)
 		}
 		return out, nil
@@ -3877,6 +3902,13 @@ func (e *Engine) executePreparedToolCall(ctx context.Context, chatID, sessionID 
 	}
 	var out []domain.Event
 	for evt := range events {
+		if turn != nil && evt.Item.ID != "" {
+			item, upsertErr := turn.UpsertTimelineItem(ctx, evt.Item)
+			if upsertErr != nil {
+				return nil, upsertErr
+			}
+			evt.Item = item
+		}
 		out = append(out, evt)
 	}
 	return out, nil
