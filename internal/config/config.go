@@ -17,7 +17,6 @@ import (
 type UI struct {
 	Theme          string `toml:"theme"`
 	CodeStyle      string `toml:"code_style"`
-	CursorBlink    bool   `toml:"cursor_blink"`
 	HalfBlocks     bool   `toml:"half_blocks"`
 	ShowSidebar    bool   `toml:"show_sidebar"`
 	SidebarWidth   int    `toml:"sidebar_width"`
@@ -133,9 +132,6 @@ func Load() (Config, error) {
 	if err := toml.Unmarshal(data, &cfg); err != nil {
 		return Config{}, fmt.Errorf("parse config: %w", err)
 	}
-	if !strings.Contains(string(data), "cursor_blink") {
-		cfg.UI.CursorBlink = true
-	}
 	if !strings.Contains(string(data), "auto_continue") {
 		cfg.UI.AutoContinue = true
 	}
@@ -196,7 +192,6 @@ func Default() Config {
 		UI: UI{
 			Theme:          "tokyonight",
 			CodeStyle:      "github",
-			CursorBlink:    true,
 			HalfBlocks:     true,
 			ShowSidebar:    true,
 			ShowTimestamps: false,

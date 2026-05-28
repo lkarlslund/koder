@@ -201,7 +201,6 @@ type UIPreferences struct {
 	Theme            string   `json:"theme"`
 	CodeStyle        string   `json:"code_style"`
 	CodeStyleOptions []string `json:"code_style_options"`
-	CursorBlink      bool     `json:"cursor_blink"`
 	HalfBlocks       bool     `json:"half_blocks"`
 	ShowSidebar      bool     `json:"show_sidebar"`
 	SidebarWidth     int      `json:"sidebar_width"`
@@ -1854,7 +1853,6 @@ func uiPreferencesFromConfig(ui config.UI) UIPreferences {
 		Theme:            normalizeTheme(ui.Theme),
 		CodeStyle:        codeStyle,
 		CodeStyleOptions: codeStyleOptions(codeStyle),
-		CursorBlink:      ui.CursorBlink,
 		HalfBlocks:       ui.HalfBlocks,
 		ShowSidebar:      ui.ShowSidebar,
 		SidebarWidth:     ui.SidebarWidth,
@@ -2032,7 +2030,6 @@ func applyUIPreferences(cfg *config.Config, prefs UIPreferences) error {
 	cfg.UI = config.UI{
 		Theme:          normalizeTheme(prefs.Theme),
 		CodeStyle:      codeStyle,
-		CursorBlink:    prefs.CursorBlink,
 		HalfBlocks:     prefs.HalfBlocks,
 		ShowSidebar:    prefs.ShowSidebar,
 		SidebarWidth:   prefs.SidebarWidth,
