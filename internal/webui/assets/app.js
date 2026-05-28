@@ -341,7 +341,7 @@
         showMCPEditor: false, mcpDraft: null, mcpHeadersText: '{}', mcpStatus: '', mcpStatusKind: 'secondary',
         imageLightbox: {open: false, src: '', title: '', meta: ''},
         completion: {kind: '', query: '', start: 0, end: 0, items: [], selected: 0}, completionSeq: 0,
-        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, restoreChatAttempted: false, transcriptStickToBottom: true, scrollRestoreSeq: 0, expandedMilestones: {}, interruptArmedChatID: '', dragChatID: '', dragQueueID: '', composerAttachments: [], activeComposerDraftKey: '', preserveComposerDraftDuringSend: false, error: '', toast: '', toastTimer: null,
+        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, restoreChatAttempted: false, composerInitialFocusDone: false, transcriptStickToBottom: true, scrollRestoreSeq: 0, expandedMilestones: {}, interruptArmedChatID: '', dragChatID: '', dragQueueID: '', composerAttachments: [], activeComposerDraftKey: '', preserveComposerDraftDuringSend: false, error: '', toast: '', toastTimer: null,
         init() {
           this.clampSidebarRatio();
           this.applyTheme();
@@ -511,6 +511,7 @@
           }
           this.clientID = (hello && hello.client_id) || this.clientID || '';
           this.applyState((hello && hello.state) || hello || {}, {scrollToBottom: true});
+          this.focusComposerAfterInitialLoad();
           this.reportClientStateSoon();
           if (window.performance && performance.mark) {
             performance.clearMarks('koder-ready');
@@ -757,6 +758,18 @@
           this.composerAttachments = Array.isArray(saved.attachments) ? saved.attachments : [];
           this.clearCompletions();
           this.$nextTick(() => this.resizeComposer());
+        },
+        focusComposerAfterInitialLoad() {
+          if (this.composerInitialFocusDone) return;
+          this.composerInitialFocusDone = true;
+          this.$nextTick(() => {
+            const el = this.$refs.composerInput;
+            if (!el || document.activeElement === el) return;
+            el.focus();
+            const pos = String(this.draft || '').length;
+            try { el.setSelectionRange(pos, pos); } catch (_) {}
+            this.reportClientStateSoon();
+          });
         },
         writeComposerDraftPayload(draft, attachments) {
           const key = this.composerDraftPreferenceName();

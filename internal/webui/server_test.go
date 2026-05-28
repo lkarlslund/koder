@@ -676,9 +676,11 @@ func TestIndexServesHTML(t *testing.T) {
 	}
 	if !strings.Contains(fullPage, `composerDraftPreferenceName()`) ||
 		!strings.Contains(fullPage, `restoreComposerDraftForActiveChat()`) ||
+		!strings.Contains(fullPage, `focusComposerAfterInitialLoad()`) ||
+		!strings.Contains(fullPage, `this.$refs.composerInput`) ||
 		!strings.Contains(fullPage, `this.$watch('draft', () => this.writeComposerDraft())`) ||
 		!strings.Contains(fullPage, `preserveComposerDraftDuringSend`) {
-		t.Fatalf("expected composer drafts to survive browser reloads and koder restarts")
+		t.Fatalf("expected composer drafts to survive browser reloads and focus the composer")
 	}
 	if !strings.Contains(fullPage, `@paste.prevent="onComposerPaste($event)"`) ||
 		!strings.Contains(fullPage, `/api/attachments/clipboard-image`) ||
