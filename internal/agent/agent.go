@@ -3045,7 +3045,7 @@ func (e *Engine) compactSession(ctx context.Context, session domain.Session, cha
 		Role:    domain.MessageRoleUser,
 		Content: e.compactPrompt(),
 	}), e.providerStreamingEnabled(compactionSession))
-	resp, err := e.completeCompactionChat(ctx, compactionSession, compactionClient, req)
+	resp, err := e.completeCompactionChat(ctx, compactionSession, compactionClient, req, out)
 	if err != nil {
 		_ = updateCompactionState("", "failed", 0)
 		return err
@@ -3130,10 +3130,20 @@ func (e *Engine) buildCompactionConversationForTimeline(session domain.Session, 
 	return provider.SerializePromptEnvelope(envelope), firstKeptItemID, nil
 }
 
-func (e *Engine) completeCompactionChat(ctx context.Context, session domain.Session, client *provider.Client, req provider.ChatRequest) (provider.ChatResponse, error) {
+func (e *Engine) completeCompactionChat(ctx context.Context, session domain.Session, client *provider.Client, req provider.ChatRequest, out chan<- domain.Event) (provider.ChatResponse, error) {
 	promptProgressPending := e.promptProgressProbePending(session.ProviderID) && provider.RequestsPromptProgress(req)
+	onEvent := func(evt domain.Event) {
+		if out == nil || evt.Kind != domain.EventKindStatus || evt.Meta[domain.EventMetaPromptProgress] != "true" {
+			return
+		}
+		if evt.Meta == nil {
+			evt.Meta = map[string]string{}
+		}
+		evt.Meta["compaction"] = "progress"
+		out <- evt
+	}
 	if req.Stream {
-		resp, err := client.StreamChatResponse(ctx, req, nil)
+		resp, err := client.StreamChatResponse(ctx, req, onEvent)
 		if err == nil {
 			if promptProgressPending {
 				e.setPromptProgressSupport(session.ProviderID, true)
@@ -3142,7 +3152,7 @@ func (e *Engine) completeCompactionChat(ctx context.Context, session domain.Sess
 		}
 		if promptProgressPending && provider.ShouldRetryWithoutPromptProgress(err) {
 			e.setPromptProgressSupport(session.ProviderID, false)
-			return client.StreamChatResponse(ctx, provider.WithoutPromptProgress(req), nil)
+			return client.StreamChatResponse(ctx, provider.WithoutPromptProgress(req), onEvent)
 		}
 		return resp, err
 	}

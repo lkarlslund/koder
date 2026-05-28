@@ -3621,6 +3621,75 @@ func TestCompactSessionStreamsWhenProviderStreamingEnabled(t *testing.T) {
 	}
 }
 
+func TestCompactSessionEmitsPromptProgressWhenStreaming(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"prompt_progress\":{\"total\":100,\"processed\":4,\"cache\":0,\"time_ms\":12}}\n\n"))
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"streamed compact summary\"}}]}\n\n"))
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer server.Close()
+
+	cfg := testConfig(t)
+	cfg.Providers = map[string]config.Provider{
+		"test": {
+			BaseURL: server.URL + "/v1",
+			Timeout: time.Second,
+			Stream:  true,
+		},
+	}
+	cfg.DefaultProvider = "test"
+	cfg.DefaultModel = "test-model"
+	cfg.SetModelConfig(config.ModelConfig{ProviderID: "test", ModelID: "test-model", ContextWindow: 32768})
+
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	engine := New(cfg, st, tools.NewRegistry(t.TempDir()), nil, t.TempDir())
+	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chat := defaultChatForSession(t, st, session.ID)
+	appendUserTimelineItem(t, st, chat.ID, "hello")
+	appendAssistantTimelineItem(t, st, chat.ID, domain.AssistantMessage{Text: "world"})
+
+	client, err := provider.New("test", cfg.Providers["test"], nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := make(chan domain.Event, 8)
+	if err := engine.compactSession(context.Background(), session, chat.ID, client, "manual", events); err != nil {
+		t.Fatal(err)
+	}
+	close(events)
+
+	var sawProgress bool
+	for evt := range events {
+		if evt.Kind == domain.EventKindStatus && evt.Meta[domain.EventMetaPromptProgress] == "true" {
+			sawProgress = true
+			if evt.Meta["compaction"] != "progress" {
+				t.Fatalf("expected compaction progress marker, got %#v", evt.Meta)
+			}
+			if evt.Text != "Processing prompt 4%" {
+				t.Fatalf("progress text = %q", evt.Text)
+			}
+		}
+	}
+	if !sawProgress {
+		t.Fatal("expected compaction prompt progress event")
+	}
+}
+
 func TestCompactSessionUsesConfiguredCompactionModel(t *testing.T) {
 	t.Parallel()
 
