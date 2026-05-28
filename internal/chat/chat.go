@@ -935,9 +935,26 @@ func (r *Chat) handleApprovalEventStream(events <-chan domain.Event, err error) 
 }
 
 func (r *Chat) handleStreamEvent(evt domain.Event) {
+	refreshedQueue, queueChanged, queueErr := r.queueRefreshForEvent(evt)
 	r.mu.Lock()
 	transcriptChanged := false
 	contextChanged := false
+	if queueErr != nil {
+		r.status = StatusErrored
+		r.statusText = queueErr.Error()
+		r.active = false
+		r.cancel = nil
+		r.cancelState = CancelStateNone
+		r.running = nil
+	} else if queueChanged {
+		r.queue = refreshedQueue
+		r.chat.QueuedInputs = cloneQueuedInputs(r.queue)
+		if r.state != nil {
+			r.state.UpdateChat(func(chat *domain.Chat) {
+				chat.QueuedInputs = cloneQueuedInputs(r.queue)
+			})
+		}
+	}
 	if evt.Item.ID != "" && r.state != nil {
 		switch evt.Kind {
 		case domain.EventKindMessageDelta, domain.EventKindReasoning:
@@ -1056,7 +1073,21 @@ func (r *Chat) handleStreamEvent(evt domain.Event) {
 	}
 	r.mu.Unlock()
 	copyEvt := evt
-	r.broadcast(r.snapshotUpdateFlags(&copyEvt, transcriptChanged || evt.Kind == domain.EventKindMessageDone, false, true, contextChanged, evt.Kind == domain.EventKindApprovalAsk || evt.Kind == domain.EventKindApprovalReply))
+	if queueErr != nil {
+		copyEvt = domain.Event{Kind: domain.EventKindError, Err: queueErr}
+	}
+	r.broadcast(r.snapshotUpdateFlags(&copyEvt, transcriptChanged || evt.Kind == domain.EventKindMessageDone, queueChanged, true, contextChanged, evt.Kind == domain.EventKindApprovalAsk || evt.Kind == domain.EventKindApprovalReply))
+}
+
+func (r *Chat) queueRefreshForEvent(evt domain.Event) ([]domain.QueuedInput, bool, error) {
+	if evt.Meta[domain.EventMetaRefresh] != domain.EventRefreshQueue || r.store == nil {
+		return nil, false, nil
+	}
+	chat, err := r.store.GetChat(context.Background(), r.chat.ID)
+	if err != nil {
+		return nil, false, fmt.Errorf("refresh queued inputs: %w", err)
+	}
+	return cloneQueuedInputs(chat.QueuedInputs), true, nil
 }
 
 func completedCompactionContext(item domain.TimelineItem, meta map[string]string) (int, bool) {

@@ -542,6 +542,85 @@ func TestRuntimeDispatchQueuedUsesSelectedItemAndPreservesNote(t *testing.T) {
 	close(events)
 }
 
+func TestRuntimeRefreshesQueueWhenRunnerConsumesQueuedSteer(t *testing.T) {
+	st := openTestStore(t)
+	session, chat, _ := createSessionWithPlan(t, st)
+	events := make(chan domain.Event)
+	runner := &runtimeFakeRunner{events: []<-chan domain.Event{events}}
+	rt := newTestChat(t, st, session, chat, runner)
+
+	rt.Enqueue(QueueItem{Kind: QueueKindSteer, Text: "active"})
+	deadline := time.After(2 * time.Second)
+	for runner.promptCallCount() == 0 {
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for prompt start")
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	rt.Enqueue(QueueItem{Kind: QueueKindQueued, Text: "queued steer"})
+	deadline = time.After(2 * time.Second)
+	var queuedID domain.ID
+	for queuedID == "" {
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for queued input: %#v", rt.Snapshot().QueuedInputs)
+		default:
+			snapshot := rt.Snapshot()
+			if len(snapshot.QueuedInputs) == 1 {
+				queuedID = snapshot.QueuedInputs[0].ID
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	rt.SendQueueItemNow(queuedID)
+	deadline = time.After(2 * time.Second)
+	for {
+		snapshot := rt.Snapshot()
+		if len(snapshot.QueuedInputs) == 1 && snapshot.QueuedInputs[0].Kind == domain.QueuedInputKindSteer {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for steer promotion: %#v", snapshot.QueuedInputs)
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+
+	updates, unsub := rt.Subscribe()
+	defer unsub()
+	if err := st.SetChatQueuedInputs(context.Background(), chat.ID, nil); err != nil {
+		t.Fatal(err)
+	}
+	events <- domain.Event{
+		Kind: domain.EventKindStatus,
+		Text: "Applying queued steer...",
+		Meta: map[string]string{domain.EventMetaRefresh: domain.EventRefreshQueue},
+	}
+
+	deadline = time.After(2 * time.Second)
+	for {
+		select {
+		case update := <-updates:
+			if update.QueueChanged {
+				if len(update.Queue) != 0 {
+					t.Fatalf("queue update = %#v", update.Queue)
+				}
+				if got := rt.Snapshot().QueuedInputs; len(got) != 0 {
+					t.Fatalf("snapshot queued inputs = %#v", got)
+				}
+				events <- domain.Event{Kind: domain.EventKindMessageDone}
+				close(events)
+				return
+			}
+		case <-deadline:
+			t.Fatalf("timed out waiting for queue refresh: %#v", rt.Snapshot().QueuedInputs)
+		}
+	}
+}
+
 func TestRuntimePreservesPromptAndContinueNotes(t *testing.T) {
 	st := openTestStore(t)
 	session, chat, _ := createSessionWithPlan(t, st)

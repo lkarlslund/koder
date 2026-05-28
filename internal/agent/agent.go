@@ -665,7 +665,11 @@ func (e *Engine) applyQueuedSteer(ctx context.Context, session domain.Session, c
 		return false, err
 	}
 	chat.QueuedInputs = remaining
-	out <- domain.Event{Kind: domain.EventKindStatus, Text: "Applying queued steer..."}
+	out <- domain.Event{
+		Kind: domain.EventKindStatus,
+		Text: "Applying queued steer...",
+		Meta: map[string]string{domain.EventMetaRefresh: domain.EventRefreshQueue},
+	}
 	if _, err := e.persistUserPrompt(ctx, session, chat.ID, item.Text, queuedAttachmentDrafts(item.Attachments), queuedReferenceDrafts(item.References)); err != nil {
 		return false, err
 	}

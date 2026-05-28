@@ -362,3 +362,11 @@ type Event struct {
 	Err        error
 	RawJSON    string
 }
+
+const (
+	// EventMetaRefresh names a refresh target requested by an event.
+	EventMetaRefresh = "refresh"
+
+	// EventRefreshQueue asks chat runtimes to reload queued inputs from storage.
+	EventRefreshQueue = "queue"
+)
