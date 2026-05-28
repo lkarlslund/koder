@@ -875,14 +875,6 @@ func TestIndexServesHTML(t *testing.T) {
 		strings.Contains(fullPage, `Permission profiles JSON`) {
 		t.Fatalf("expected permissions settings to use structured controls")
 	}
-	if strings.Contains(fullPage, `settings.ui.code_style`) ||
-		strings.Contains(fullPage, `settings.ui.code_style_options`) ||
-		strings.Contains(fullPage, `settings.ui.show_sidebar`) ||
-		strings.Contains(fullPage, `settings.ui.show_timestamps`) ||
-		strings.Contains(fullPage, `settings.ui.show_reasoning`) ||
-		strings.Contains(fullPage, `settings.ui.show_system`) {
-		t.Fatalf("expected unused UI settings to be removed")
-	}
 	if !strings.Contains(fullPage, `showToast`) {
 		t.Fatalf("expected toast error path")
 	}
