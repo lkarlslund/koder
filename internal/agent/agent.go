@@ -166,6 +166,14 @@ func (e *Engine) RunPromptInChat(ctx context.Context, session domain.Session, ch
 	return e.runModelPrompt(ctx, session, chat, prompt, drafts, refs, note)
 }
 
+func (e *Engine) RunPromptTurn(ctx context.Context, turn *chatpkg.TurnState, prompt string, drafts []attachment.Draft, refs []reference.Draft, note string) (<-chan domain.Event, error) {
+	if turn == nil {
+		return nil, fmt.Errorf("turn state is required")
+	}
+	session := sessionForChat(turn.Session(), turn.Chat())
+	return e.runModelPromptTurn(ctx, turn, session, prompt, drafts, refs, note)
+}
+
 func (e *Engine) SetPermissionProfile(ctx context.Context, sessionID domain.ID, profile string) (<-chan domain.Event, error) {
 	return e.setPermissionProfile(ctx, sessionID, "", profile)
 }
@@ -456,6 +464,89 @@ func (e *Engine) runModelPrompt(ctx context.Context, session domain.Session, cha
 	return out, nil
 }
 
+func (e *Engine) runModelPromptTurn(ctx context.Context, turn *chatpkg.TurnState, session domain.Session, prompt string, drafts []attachment.Draft, refs []reference.Draft, note string) (<-chan domain.Event, error) {
+	chat := turn.Chat()
+	if err := e.validatePromptAttachments(session, drafts); err != nil {
+		return nil, err
+	}
+	providerCfg, ok := e.cfg.Provider(session.ProviderID)
+	if !ok {
+		return nil, fmt.Errorf("provider %q not found", session.ProviderID)
+	}
+	client, err := provider.New(session.ProviderID, providerCfg, e.debug)
+	if err != nil {
+		return nil, err
+	}
+
+	out := make(chan domain.Event)
+	go func() {
+		defer close(out)
+		if session.ID != "" && needsSessionAgentsRefresh(session) {
+			out <- domain.Event{Kind: domain.EventKindStatus, Text: "Checking project instructions..."}
+		}
+		session, err = e.ensureSessionAgents(ctx, session, client)
+		if err != nil {
+			if interruptedErr(err) {
+				e.emitInterrupted(out, chat.ID, session.ID)
+				return
+			}
+			e.emitAssistantError(ctx, out, chat.ID, session.ID, err)
+			return
+		}
+		chat = turn.Chat()
+		e.recordLifecycle(session.ID, "prompt_started", prompt, map[string]string{"provider": session.ProviderID, "model": session.ModelID})
+		compacted, err := e.autoCompactPromptTurnIfNeeded(ctx, session, chat, turn, client, prompt, drafts, refs, note, out)
+		if err != nil {
+			if interruptedErr(err) {
+				e.emitInterrupted(out, chat.ID, session.ID)
+				return
+			}
+			e.emitAssistantError(ctx, out, chat.ID, session.ID, err)
+			return
+		}
+		if compacted {
+			session, err = e.store.GetSession(ctx, session.ID)
+			if err != nil {
+				if interruptedErr(err) {
+					e.emitInterrupted(out, chat.ID, session.ID)
+					return
+				}
+				out <- domain.Event{Kind: domain.EventKindError, Err: err}
+				return
+			}
+		}
+		user, err := e.userMessageForPrompt(session, prompt, drafts, refs)
+		if err != nil {
+			if interruptedErr(err) {
+				e.emitInterrupted(out, chat.ID, session.ID)
+				return
+			}
+			out <- domain.Event{Kind: domain.EventKindError, Err: err}
+			return
+		}
+		userItem, err := turn.AppendUserMessage(ctx, user)
+		if err != nil {
+			if interruptedErr(err) {
+				e.emitInterrupted(out, chat.ID, session.ID)
+				return
+			}
+			out <- domain.Event{Kind: domain.EventKindError, Err: err}
+			return
+		}
+		out <- domain.Event{Kind: domain.EventKindStatus, Text: "User message added", Item: userItem}
+		e.recordLifecycle(session.ID, "user_message_persisted", prompt, map[string]string{"item_id": userItem.ID})
+		if err := e.continueModelTurnFromTimeline(ctx, session, turn.Chat(), turn, client, out, transientTurnMessages(note, "")); err != nil {
+			if interruptedErr(err) {
+				e.emitInterrupted(out, chat.ID, session.ID)
+				return
+			}
+			e.emitAssistantError(ctx, out, chat.ID, session.ID, err)
+			return
+		}
+	}()
+	return out, nil
+}
+
 func (e *Engine) runContinue(ctx context.Context, session domain.Session, chat domain.Chat, note string) (<-chan domain.Event, error) {
 	providerCfg, ok := e.cfg.Provider(session.ProviderID)
 	if !ok {
@@ -646,11 +737,27 @@ func (e *Engine) refreshSessionAgents(ctx context.Context, session domain.Sessio
 }
 
 func (e *Engine) persistUserPrompt(ctx context.Context, session domain.Session, chatID domain.ID, prompt string, drafts []attachment.Draft, refs []reference.Draft) (domain.TimelineItem, error) {
+	user, err := e.userMessageForPrompt(session, prompt, drafts, refs)
+	if err != nil {
+		return domain.TimelineItem{}, err
+	}
+	item, err := e.store.AppendTimeline(ctx, chatID, user)
+	if err != nil {
+		return domain.TimelineItem{}, err
+	}
+	item.Seal(time.Now().UTC())
+	if err := e.store.Timeline().Put(ctx, item); err != nil {
+		return domain.TimelineItem{}, err
+	}
+	return item, nil
+}
+
+func (e *Engine) userMessageForPrompt(session domain.Session, prompt string, drafts []attachment.Draft, refs []reference.Draft) (domain.UserMessage, error) {
 	user := domain.UserMessage{Text: prompt}
 	for _, draft := range drafts {
 		meta, err := e.files.AdoptDraft(draft, session.ID)
 		if err != nil {
-			return domain.TimelineItem{}, err
+			return domain.UserMessage{}, err
 		}
 		user.Attachments = append(user.Attachments, domain.Attachment{
 			ID: meta.ID, Name: meta.Name, MIME: meta.MIME, Path: meta.Path, Size: meta.Size, Source: meta.Source, Original: meta.Original,
@@ -665,15 +772,7 @@ func (e *Engine) persistUserPrompt(ctx context.Context, session domain.Session, 
 			End:     ref.End,
 		})
 	}
-	item, err := e.store.AppendTimeline(ctx, chatID, user)
-	if err != nil {
-		return domain.TimelineItem{}, err
-	}
-	item.Seal(time.Now().UTC())
-	if err := e.store.Timeline().Put(ctx, item); err != nil {
-		return domain.TimelineItem{}, err
-	}
-	return item, nil
+	return user, nil
 }
 
 func queuedAttachmentDrafts(src []domain.QueuedAttachment) []attachment.Draft {
@@ -3014,6 +3113,17 @@ func (e *Engine) autoCompactPromptIfNeeded(ctx context.Context, session domain.S
 		return false, err
 	}
 	return e.autoCompactPreparedMessagesIfNeeded(ctx, session, chat.ID, client, messages, out)
+}
+
+func (e *Engine) autoCompactPromptTurnIfNeeded(ctx context.Context, session domain.Session, chat domain.Chat, turn *chatpkg.TurnState, client *provider.Client, prompt string, drafts []attachment.Draft, refs []reference.Draft, note string, out chan<- domain.Event) (bool, error) {
+	if turn == nil {
+		return e.autoCompactPromptIfNeeded(ctx, session, chat, client, prompt, drafts, refs, note, out)
+	}
+	envelope, err := e.buildPromptEnvelopeForTimeline(session, chat, turn.Timeline(), prompt, drafts, refs, transientTurnMessages(note, ""))
+	if err != nil {
+		return false, err
+	}
+	return e.autoCompactPreparedMessagesIfNeeded(ctx, session, chat.ID, client, provider.SerializePromptEnvelope(envelope), out)
 }
 
 func (e *Engine) autoCompactPreparedMessagesIfNeeded(ctx context.Context, session domain.Session, chatID domain.ID, client *provider.Client, messages []provider.Message, out chan<- domain.Event) (bool, error) {

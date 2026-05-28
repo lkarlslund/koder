@@ -167,6 +167,10 @@ type promptRunner interface {
 	RunPromptInChat(context.Context, domain.Session, domain.Chat, string, []attachment.Draft, []reference.Draft, string) (<-chan domain.Event, error)
 }
 
+type turnPromptRunner interface {
+	RunPromptTurn(context.Context, *TurnState, string, []attachment.Draft, []reference.Draft, string) (<-chan domain.Event, error)
+}
+
 type turnContinueRunner interface {
 	RunContinueTurn(context.Context, *TurnState, string) (<-chan domain.Event, error)
 }
@@ -275,6 +279,49 @@ func (t *TurnState) Timeline() []domain.TimelineItem {
 		return nil
 	}
 	return t.chat.state.SnapshotTimeline()
+}
+
+// AppendUserMessage records a user message in the live transcript.
+func (t *TurnState) AppendUserMessage(ctx context.Context, user domain.UserMessage) (domain.TimelineItem, error) {
+	if t == nil || t.chat == nil {
+		return domain.TimelineItem{}, fmt.Errorf("turn state is required")
+	}
+	r := t.chat
+	now := time.Now().UTC()
+	text := strings.TrimSpace(user.Text)
+	r.mu.Lock()
+	seq := int64(1)
+	if r.state != nil {
+		seq = int64(len(r.state.Timeline()) + 1)
+	}
+	item := domain.TimelineItem{
+		ID:        domain.NewTimelineID(now),
+		ChatID:    r.chat.ID,
+		Seq:       seq,
+		Content:   user,
+		CreatedAt: now,
+		UpdatedAt: now,
+		SealedAt:  now,
+	}
+	if r.state != nil {
+		r.state.AppendTimelineItem(item)
+		r.state.UpdateChat(func(chat *domain.Chat) {
+			chat.LastMessage = text
+		})
+	}
+	r.chat.LastMessage = text
+	chatRecord := r.chat
+	r.mu.Unlock()
+
+	if r.store != nil {
+		if _, err := r.store.InsertTimelineItem(ctx, item); err != nil {
+			return domain.TimelineItem{}, err
+		}
+		if err := r.store.UpdateChat(ctx, chatRecord); err != nil {
+			return domain.TimelineItem{}, err
+		}
+	}
+	return item, nil
 }
 
 // ApplyNextSteer removes and records the next queued steer message.
@@ -854,7 +901,13 @@ func (r *Chat) handleDispatchQueued(item domain.QueuedInput, remaining []domain.
 	chat := r.chat
 	r.mu.Unlock()
 
-	r.appendOptimisticUserMessage(item, session, chat)
+	useTurnPrompt := item.Kind != domain.QueuedInputKindContinue
+	if _, ok := r.engine.(turnPromptRunner); !ok {
+		useTurnPrompt = false
+	}
+	if !useTurnPrompt {
+		r.appendOptimisticUserMessage(item, session, chat)
+	}
 	_ = r.persistQueue()
 	r.broadcast(r.snapshotUpdateFlags(nil, item.Kind != domain.QueuedInputKindContinue, true, true, true, false))
 	r.runItem(ctx, session, chat, item)
@@ -1381,7 +1434,11 @@ func (r *Chat) runItem(ctx context.Context, session domain.Session, chat domain.
 			err = fmt.Errorf("continue is not supported by runner")
 		}
 	default:
-		events, err = r.engine.RunPromptInChat(ctx, session, chat, item.Text, queuedAttachmentDrafts(item.Attachments), queuedReferenceDrafts(item.References), note)
+		if runner, ok := r.engine.(turnPromptRunner); ok {
+			events, err = runner.RunPromptTurn(ctx, r.turnState(), item.Text, queuedAttachmentDrafts(item.Attachments), queuedReferenceDrafts(item.References), note)
+		} else {
+			events, err = r.engine.RunPromptInChat(ctx, session, chat, item.Text, queuedAttachmentDrafts(item.Attachments), queuedReferenceDrafts(item.References), note)
+		}
 	}
 	if err != nil {
 		r.mu.Lock()

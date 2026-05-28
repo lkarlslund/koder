@@ -3418,6 +3418,85 @@ func TestRunPromptAutoCompactsTargetChatWithPendingPrompt(t *testing.T) {
 	}
 }
 
+func TestLivePromptTurnBuildsRequestFromChatRuntimeTimeline(t *testing.T) {
+	requests := make(chan string, 8)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read body: %v", err)
+		}
+		requests <- string(body)
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"done"}}],"usage":{"total_tokens":1}}`))
+	}))
+	defer server.Close()
+
+	cfg := testConfig(t)
+	cfg.Providers = map[string]config.Provider{
+		"test": {
+			BaseURL: server.URL + "/v1",
+			Timeout: time.Second,
+		},
+	}
+	cfg.DefaultProvider = "test"
+	cfg.DefaultModel = "test-model"
+
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	engine := New(cfg, st, tools.NewRegistry(t.TempDir()), nil, t.TempDir())
+	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chatRecord := defaultChatForSession(t, st, session.ID)
+	appendUserTimelineItem(t, st, chatRecord.ID, "loaded live transcript")
+
+	runtime, err := chatpkg.Load(context.Background(), st, session, chatRecord, engine, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer runtime.Close()
+	updates, unsubscribe := runtime.Subscribe()
+	defer unsubscribe()
+
+	appendUserTimelineItem(t, st, chatRecord.ID, "storage side channel")
+	runtime.Enqueue(chatpkg.QueueItem{Kind: chatpkg.QueueKindSteer, Text: "new live prompt"})
+
+	var body string
+	select {
+	case body = <-requests:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for provider request")
+	}
+	if !strings.Contains(body, "loaded live transcript") {
+		t.Fatalf("expected request to include loaded live timeline, got %s", body)
+	}
+	if !strings.Contains(body, "new live prompt") {
+		t.Fatalf("expected request to include live prompt, got %s", body)
+	}
+	if strings.Contains(body, "storage side channel") {
+		t.Fatalf("request used storage side-channel timeline: %s", body)
+	}
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case update := <-updates:
+			if update.Event != nil && update.Event.Kind == domain.EventKindMessageDone {
+				return
+			}
+		case <-deadline:
+			t.Fatalf("timed out waiting for prompt completion: %#v", runtime.Snapshot())
+		}
+	}
+}
+
 func TestApproveContinuesAfterApprovedToolFailure(t *testing.T) {
 	t.Parallel()
 
