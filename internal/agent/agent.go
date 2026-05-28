@@ -3209,7 +3209,10 @@ func (e *Engine) autoCompactTurnIfNeeded(ctx context.Context, session domain.Ses
 	if out != nil {
 		out <- domain.Event{Kind: domain.EventKindStatus, Text: fmt.Sprintf("Auto-compacting at ~%d%% estimated context used", estimated)}
 	}
-	return e.autoCompactPreparedMessagesIfNeeded(ctx, session, chat.ID, client, messages, out)
+	if err := e.compactTurnSession(ctx, session, chat, turn, client, "auto", out); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func (e *Engine) estimateRequestUsagePercent(session domain.Session, _ domain.Chat, messages []provider.Message) (int, bool) {
@@ -3336,6 +3339,98 @@ func (e *Engine) compactSession(ctx context.Context, session domain.Session, cha
 			Kind: domain.EventKindStatus,
 			Text: "Session compacted",
 			Item: completed,
+			Meta: map[string]string{"refresh": "details", "compaction": "completed"},
+		}
+	}
+	return nil
+}
+
+func (e *Engine) compactTurnSession(ctx context.Context, session domain.Session, chat domain.Chat, turn *chatpkg.TurnState, client *provider.Client, trigger string, out chan<- domain.Event) error {
+	if turn == nil {
+		return e.compactSession(ctx, session, chat.ID, client, trigger, out)
+	}
+	timeline := turn.Timeline()
+	messages, firstKeptItemID, err := e.buildCompactionConversationForTimeline(session, chat, timeline)
+	if err != nil {
+		return err
+	}
+	if len(messages) <= 1 {
+		return nil
+	}
+	compactionSession, compactionClient, err := e.compactionSessionClient(session, client)
+	if err != nil {
+		return err
+	}
+	beforeContextTokens := e.estimateContextTokensForTimeline(session, chat, timeline)
+	now := time.Now().UTC()
+	compactionItem := domain.TimelineItem{
+		ID:        domain.NewTimelineID(now),
+		ChatID:    chat.ID,
+		Seq:       int64(len(timeline) + 1),
+		CreatedAt: now,
+		UpdatedAt: now,
+		Content: domain.Compaction{
+			Trigger:             trigger,
+			Status:              "pending",
+			FirstKeptItemID:     firstKeptItemID,
+			BeforeContextTokens: beforeContextTokens,
+		},
+	}
+	compactionItem, err = turn.UpsertTimelineItem(ctx, compactionItem)
+	if err != nil {
+		return err
+	}
+	updateCompactionState := func(summary, status string, afterContextTokens int) error {
+		compactionItem.Content = domain.Compaction{
+			Summary:             summary,
+			Trigger:             trigger,
+			Status:              status,
+			FirstKeptItemID:     firstKeptItemID,
+			BeforeContextTokens: beforeContextTokens,
+			AfterContextTokens:  afterContextTokens,
+		}
+		compactionItem.UpdatedAt = time.Now().UTC()
+		if status == "completed" || status == "failed" {
+			compactionItem.Seal(compactionItem.UpdatedAt)
+		}
+		var updateErr error
+		compactionItem, updateErr = turn.UpsertTimelineItem(ctx, compactionItem)
+		return updateErr
+	}
+	if out != nil {
+		out <- domain.Event{
+			Kind: domain.EventKindStatus,
+			Text: "Compacting session...",
+			Item: compactionItem,
+			Meta: map[string]string{"refresh": "details", "compaction": "started"},
+		}
+	}
+	req := e.chatRequest(compactionSession, domain.Chat{}, append(messages, provider.Message{
+		Role:    domain.MessageRoleUser,
+		Content: e.compactPrompt(),
+	}), e.providerStreamingEnabled(compactionSession))
+	resp, err := e.completeCompactionChat(ctx, compactionSession, compactionClient, req, out)
+	if err != nil {
+		_ = updateCompactionState("", "failed", 0)
+		return err
+	}
+	summary := strings.TrimSpace(resp.Text)
+	if summary == "" {
+		summary = strings.TrimSpace(resp.Reasoning)
+	}
+	if summary == "" {
+		_ = updateCompactionState("", "failed", 0)
+		return fmt.Errorf("empty compaction summary")
+	}
+	afterContextTokens := e.estimateCompactedTimelineContextTokens(session, chat, timeline, compactionItem, firstKeptItemID, summary)
+	if err := updateCompactionState(summary, "completed", afterContextTokens); err != nil {
+		return err
+	}
+	if out != nil {
+		out <- domain.Event{
+			Kind: domain.EventKindStatus,
+			Text: "Session compacted",
+			Item: compactionItem,
 			Meta: map[string]string{"refresh": "details", "compaction": "completed"},
 		}
 	}
