@@ -15,13 +15,8 @@ import (
 )
 
 type UI struct {
-	Theme          string `toml:"theme"`
-	CodeStyle      string `toml:"code_style"`
-	ShowSidebar    bool   `toml:"show_sidebar"`
-	ShowTimestamps bool   `toml:"show_timestamps"`
-	ShowReasoning  bool   `toml:"show_reasoning"`
-	ShowSystem     bool   `toml:"show_system"`
-	AutoContinue   bool   `toml:"auto_continue"`
+	Theme        string `toml:"theme"`
+	AutoContinue bool   `toml:"auto_continue"`
 }
 
 type Store struct {
@@ -187,13 +182,8 @@ func Default() Config {
 			Backend: "pebble",
 		},
 		UI: UI{
-			Theme:          "tokyonight",
-			CodeStyle:      "github",
-			ShowSidebar:    true,
-			ShowTimestamps: false,
-			ShowReasoning:  false,
-			ShowSystem:     false,
-			AutoContinue:   true,
+			Theme:        "tokyonight",
+			AutoContinue: true,
 		},
 	}
 }
@@ -241,9 +231,6 @@ func (c *Config) applyDefaults() {
 	}
 	if c.UI.Theme == "" {
 		c.UI = def.UI
-	}
-	if c.UI.CodeStyle == "" {
-		c.UI.CodeStyle = def.UI.CodeStyle
 	}
 	fallbackProvider := providerDefaults()
 	for id, provider := range c.Providers {

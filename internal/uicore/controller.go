@@ -22,7 +22,6 @@ import (
 	"github.com/lkarlslund/koder/internal/reference"
 	"github.com/lkarlslund/koder/internal/skills"
 	"github.com/lkarlslund/koder/internal/store"
-	"github.com/lkarlslund/koder/internal/theme"
 	"github.com/lkarlslund/koder/internal/tools"
 	workspacepkg "github.com/lkarlslund/koder/internal/workspace"
 )
@@ -198,14 +197,8 @@ type GeneralPreferences struct {
 
 // UIPreferences contains renderer behavior settings persisted in config.
 type UIPreferences struct {
-	Theme            string   `json:"theme"`
-	CodeStyle        string   `json:"code_style"`
-	CodeStyleOptions []string `json:"code_style_options"`
-	ShowSidebar      bool     `json:"show_sidebar"`
-	ShowTimestamps   bool     `json:"show_timestamps"`
-	ShowReasoning    bool     `json:"show_reasoning"`
-	ShowSystem       bool     `json:"show_system"`
-	AutoContinue     bool     `json:"auto_continue"`
+	Theme        string `json:"theme"`
+	AutoContinue bool   `json:"auto_continue"`
 }
 
 // CompactionPreferences contains global compaction controls.
@@ -1845,16 +1838,9 @@ func applyProviderDraftPreferences(next *config.Provider, draft ProviderDraft) {
 }
 
 func uiPreferencesFromConfig(ui config.UI) UIPreferences {
-	codeStyle := firstNonEmpty(strings.TrimSpace(ui.CodeStyle), config.Default().UI.CodeStyle)
 	return UIPreferences{
-		Theme:            normalizeTheme(ui.Theme),
-		CodeStyle:        codeStyle,
-		CodeStyleOptions: codeStyleOptions(codeStyle),
-		ShowSidebar:      ui.ShowSidebar,
-		ShowTimestamps:   ui.ShowTimestamps,
-		ShowReasoning:    ui.ShowReasoning,
-		ShowSystem:       ui.ShowSystem,
-		AutoContinue:     ui.AutoContinue,
+		Theme:        normalizeTheme(ui.Theme),
+		AutoContinue: ui.AutoContinue,
 	}
 }
 
@@ -1941,19 +1927,6 @@ func toolDefaultPreferencesFromConfig(src map[domain.ToolKind]bool) []ToolDefaul
 	return out
 }
 
-func codeStyleOptions(current string) []string {
-	options := theme.Names()
-	current = strings.TrimSpace(current)
-	if current == "" {
-		return options
-	}
-	if !slices.Contains(options, current) {
-		options = append(options, current)
-		slices.Sort(options)
-	}
-	return options
-}
-
 func applyGeneralPreferences(cfg *config.Config, prefs GeneralPreferences) error {
 	cfg.DefaultProvider = strings.TrimSpace(prefs.DefaultProvider)
 	cfg.DefaultModel = strings.TrimSpace(prefs.DefaultModel)
@@ -2020,15 +1993,9 @@ func applyModelConfigPreferences(cfg *config.Config, prefs []ModelConfigPreferen
 }
 
 func applyUIPreferences(cfg *config.Config, prefs UIPreferences) error {
-	codeStyle := firstNonEmpty(strings.TrimSpace(prefs.CodeStyle), config.Default().UI.CodeStyle)
 	cfg.UI = config.UI{
-		Theme:          normalizeTheme(prefs.Theme),
-		CodeStyle:      codeStyle,
-		ShowSidebar:    prefs.ShowSidebar,
-		ShowTimestamps: prefs.ShowTimestamps,
-		ShowReasoning:  prefs.ShowReasoning,
-		ShowSystem:     prefs.ShowSystem,
-		AutoContinue:   prefs.AutoContinue,
+		Theme:        normalizeTheme(prefs.Theme),
+		AutoContinue: prefs.AutoContinue,
 	}
 	return nil
 }

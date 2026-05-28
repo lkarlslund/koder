@@ -419,19 +419,7 @@
                   <label class="form-label small text-secondary">Store backend</label>
                   <input class="form-control" x-model="settings.general.store_backend" autocomplete="off">
                 </div>
-                <div class="col-md-4">
-                  <label class="form-label small text-secondary">Code style</label>
-                  <select class="form-select" x-model="settings.ui.code_style">
-                    <template x-for="style in settings.ui.code_style_options || []" :key="style">
-                      <option :value="style" x-text="style"></option>
-                    </template>
-                  </select>
-                </div>
                 <div class="col-12 settings-checks">
-                  <label class="form-check"><input class="form-check-input" type="checkbox" x-model="settings.ui.show_sidebar"> <span class="form-check-label">Show sidebar</span></label>
-                  <label class="form-check"><input class="form-check-input" type="checkbox" x-model="settings.ui.show_timestamps"> <span class="form-check-label">Timestamps</span></label>
-                  <label class="form-check"><input class="form-check-input" type="checkbox" x-model="settings.ui.show_reasoning"> <span class="form-check-label">Reasoning</span></label>
-                  <label class="form-check"><input class="form-check-input" type="checkbox" x-model="settings.ui.show_system"> <span class="form-check-label">System</span></label>
                   <label class="form-check"><input class="form-check-input" type="checkbox" x-model="settings.ui.auto_continue"> <span class="form-check-label">Auto continue</span></label>
                 </div>
               </div>

@@ -42,9 +42,6 @@ func TestLoadWritesDefaultConfig(t *testing.T) {
 	if cfg.Store.Backend != "pebble" {
 		t.Fatalf("unexpected store backend: %s", cfg.Store.Backend)
 	}
-	if cfg.UI.CodeStyle != "github" {
-		t.Fatalf("expected default code style github, got %q", cfg.UI.CodeStyle)
-	}
 	if !cfg.UI.AutoContinue {
 		t.Fatal("expected auto continue enabled by default")
 	}
@@ -120,17 +117,6 @@ func TestApplyDefaultsInfersProviderKind(t *testing.T) {
 
 	if got := cfg.Providers["remote"].Kind; got != "openai-compatible" {
 		t.Fatalf("expected inferred provider kind, got %q", got)
-	}
-}
-
-func TestApplyDefaultsFillsMissingUIStyleSettings(t *testing.T) {
-	cfg := Default()
-	cfg.UI.CodeStyle = ""
-
-	cfg.applyDefaults()
-
-	if cfg.UI.CodeStyle != "github" {
-		t.Fatalf("expected code style default applied, got %q", cfg.UI.CodeStyle)
 	}
 }
 
