@@ -18,7 +18,6 @@ const environmentProbeTimeout = 500 * time.Millisecond
 type environmentSnapshot struct {
 	WorkspaceRoot string
 	Workdir       string
-	DateTime      time.Time
 	Platform      string
 	OS            string
 	Shell         string
@@ -44,7 +43,6 @@ func (e *Engine) environmentPrompt(session domain.Session) string {
 	snapshot := environmentSnapshot{
 		WorkspaceRoot: workspaceRoot,
 		Workdir:       e.workdir,
-		DateTime:      time.Now(),
 		Platform:      runtime.GOOS + "/" + runtime.GOARCH,
 		OS:            osDescription(),
 		Shell:         shellDescription(),
@@ -72,7 +70,7 @@ func formatEnvironmentPrompt(snapshot environmentSnapshot) string {
 	b.WriteString("Runtime environment:")
 	writeEnvironmentLine(&b, "Workspace root", fallbackUnknown(snapshot.WorkspaceRoot))
 	writeEnvironmentLine(&b, "Current working directory", fallbackUnknown(snapshot.Workdir))
-	writeEnvironmentLine(&b, "Current date and time", formatLocalDateTime(snapshot.DateTime))
+	writeEnvironmentLine(&b, "Current date and time", "not included; use a tool if the exact system time is needed")
 	writeEnvironmentLine(&b, "Platform", fallbackUnknown(snapshot.Platform))
 	writeEnvironmentLine(&b, "OS", fallbackUnknown(snapshot.OS))
 	writeEnvironmentLine(&b, "Shell", fallbackUnknown(snapshot.Shell))
@@ -94,10 +92,6 @@ func writeEnvironmentLine(b *strings.Builder, key string, value string) {
 	b.WriteString(key)
 	b.WriteString(": ")
 	b.WriteString(value)
-}
-
-func formatLocalDateTime(t time.Time) string {
-	return t.Format("2006-01-02 15:04:05 MST (UTC-07:00)")
 }
 
 func fallbackUnknown(value string) string {

@@ -312,11 +312,9 @@ func TestEngineCompactionPromptUsesManagedUserAsset(t *testing.T) {
 }
 
 func TestFormatEnvironmentPrompt(t *testing.T) {
-	when := time.Date(2026, 5, 1, 14, 3, 22, 0, time.FixedZone("CEST", 2*60*60))
 	got := formatEnvironmentPrompt(environmentSnapshot{
 		WorkspaceRoot: "/repo",
 		Workdir:       "/repo/pkg",
-		DateTime:      when,
 		Platform:      "linux/amd64",
 		OS:            "Linux 6.8.0",
 		Shell:         "/bin/zsh",
@@ -335,7 +333,7 @@ func TestFormatEnvironmentPrompt(t *testing.T) {
 		"Runtime environment:",
 		"- Workspace root: /repo",
 		"- Current working directory: /repo/pkg",
-		"- Current date and time: 2026-05-01 14:03:22 CEST (UTC+02:00)",
+		"- Current date and time: not included; use a tool if the exact system time is needed",
 		"- Platform: linux/amd64",
 		"- OS: Linux 6.8.0",
 		"- Shell: /bin/zsh",
@@ -356,7 +354,6 @@ func TestFormatEnvironmentPromptNonGit(t *testing.T) {
 	got := formatEnvironmentPrompt(environmentSnapshot{
 		WorkspaceRoot: "/repo",
 		Workdir:       "/repo",
-		DateTime:      time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC),
 		Platform:      "linux/amd64",
 		OS:            "Linux",
 		Shell:         "unknown",
