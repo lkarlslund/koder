@@ -3,6 +3,7 @@ package uicore
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -815,11 +816,19 @@ func TestControllerKeepsRuntimesForMultipleLoadedSessions(t *testing.T) {
 
 func TestControllerStartupNewResumesRestartInterruptedWorkspaceSession(t *testing.T) {
 	var requests atomic.Int32
+	var requestBodies atomic.Value
+	requestBodies.Store([]string(nil))
 	providerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/chat/completions" {
 			http.NotFound(w, r)
 			return
 		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read request body: %v", err)
+		}
+		current := requestBodies.Load().([]string)
+		requestBodies.Store(append(current, string(body)))
 		requests.Add(1)
 		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"resumed"}}],"usage":{"total_tokens":1}}`))
 	}))
@@ -898,6 +907,35 @@ func TestControllerStartupNewResumesRestartInterruptedWorkspaceSession(t *testin
 		select {
 		case <-deadline:
 			t.Fatal("timed out waiting for auto resume provider request")
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	bodies := requestBodies.Load().([]string)
+	if len(bodies) == 0 {
+		t.Fatal("expected captured provider request")
+	}
+	if strings.Contains(bodies[0], "Session update:") {
+		t.Fatalf("expected auto-resume note outside system session update, got %s", bodies[0])
+	}
+	if !strings.Contains(bodies[0], processRestartToolFailureInstruction) {
+		t.Fatalf("expected visible auto-resume message in provider request, got %s", bodies[0])
+	}
+	deadline = time.After(2 * time.Second)
+	for {
+		timeline, err = st.TimelineForChat(ctx, chatRecord.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, item := range timeline {
+			user, ok := item.Content.(domain.UserMessage)
+			if ok && user.Text == processRestartToolFailureInstruction {
+				return
+			}
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for visible auto-resume user message, timeline=%#v", timeline)
 		default:
 			time.Sleep(10 * time.Millisecond)
 		}

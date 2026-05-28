@@ -2668,7 +2668,7 @@ func (c *Controller) autoResumeRestartInterruptedChats(runtimes map[domain.ID]*c
 		if hasErroredRestartTool(snapshot) {
 			note = processRestartToolFailureInstruction
 		}
-		rt.Enqueue(chat.QueueItem{Kind: chat.QueueKindContinue, Note: note})
+		rt.Enqueue(chat.QueueItem{Kind: chat.QueueKindSteer, Text: note})
 	}
 }
 
@@ -2721,7 +2721,7 @@ func shouldAutoResumeRestartInterrupted(snapshot chat.Snapshot) bool {
 		return false
 	}
 	for _, item := range snapshot.QueuedInputs {
-		if item.Kind == domain.QueuedInputKindContinue {
+		if item.Kind == domain.QueuedInputKindContinue || isAutoResumeRestartMessage(item.Text) {
 			return false
 		}
 	}
@@ -2730,6 +2730,11 @@ func shouldAutoResumeRestartInterrupted(snapshot chat.Snapshot) bool {
 	}
 	notice, ok := snapshot.Timeline[len(snapshot.Timeline)-1].Content.(domain.Notice)
 	return ok && notice.Kind == domain.NoticeKindInterrupted && notice.Reason == domain.NoticeReasonProcessRestart
+}
+
+func isAutoResumeRestartMessage(text string) bool {
+	text = strings.TrimSpace(text)
+	return text == processRestartResumeNote || text == processRestartToolFailureInstruction
 }
 
 func hasErroredRestartTool(snapshot chat.Snapshot) bool {
