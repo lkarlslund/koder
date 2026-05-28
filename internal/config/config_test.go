@@ -48,9 +48,6 @@ func TestLoadWritesDefaultConfig(t *testing.T) {
 	if cfg.UI.CodeStyle != "github" {
 		t.Fatalf("expected default code style github, got %q", cfg.UI.CodeStyle)
 	}
-	if cfg.UI.EditForgiveness != 3 {
-		t.Fatalf("expected default edit forgiveness 3, got %d", cfg.UI.EditForgiveness)
-	}
 	if !cfg.UI.CursorBlink {
 		t.Fatal("expected cursor blinking enabled by default")
 	}
@@ -135,15 +132,11 @@ func TestApplyDefaultsInfersProviderKind(t *testing.T) {
 func TestApplyDefaultsFillsMissingUIStyleSettings(t *testing.T) {
 	cfg := Default()
 	cfg.UI.CodeStyle = ""
-	cfg.UI.EditForgiveness = 0
 
 	cfg.applyDefaults()
 
 	if cfg.UI.CodeStyle != "github" {
 		t.Fatalf("expected code style default applied, got %q", cfg.UI.CodeStyle)
-	}
-	if cfg.UI.EditForgiveness != 3 {
-		t.Fatalf("expected edit forgiveness default applied, got %d", cfg.UI.EditForgiveness)
 	}
 }
 
@@ -168,18 +161,6 @@ func TestSaveAndLoadRoundTripsSidebarWidthPreference(t *testing.T) {
 	}
 	if reloaded.UI.SidebarWidth != 37 {
 		t.Fatalf("expected sidebar width 37, got %d", reloaded.UI.SidebarWidth)
-	}
-}
-
-func TestNormalizeEditForgivenessClampsRange(t *testing.T) {
-	if got := NormalizeEditForgiveness(0); got != 1 {
-		t.Fatalf("expected low clamp to 1, got %d", got)
-	}
-	if got := NormalizeEditForgiveness(6); got != 5 {
-		t.Fatalf("expected high clamp to 5, got %d", got)
-	}
-	if got := NormalizeEditForgiveness(3); got != 3 {
-		t.Fatalf("expected in-range value unchanged, got %d", got)
 	}
 }
 

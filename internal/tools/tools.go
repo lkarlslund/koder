@@ -143,7 +143,6 @@ type Runtime struct {
 	SandboxProfile        permissionprofile.Profile
 	SandboxProfiles       map[string]permissionprofile.Profile
 	DefaultSandboxProfile string
-	EditForgiveness       int
 }
 
 type MCPExecutor interface {
@@ -244,7 +243,6 @@ func NewRegistry(workdir string) *Registry {
 			HTTPClient:            &http.Client{},
 			SandboxProfiles:       def.Permissions.Profiles,
 			DefaultSandboxProfile: def.Permissions.Profile,
-			EditForgiveness:       def.UI.EditForgiveness,
 		},
 	}
 }
@@ -263,10 +261,6 @@ func (r *Registry) ExecControl() execruntime.Control {
 
 func (r *Registry) SetMCP(executor MCPExecutor) {
 	r.runtime.MCP = executor
-}
-
-func (r *Registry) SetEditForgiveness(level int) {
-	r.runtime.EditForgiveness = config.NormalizeEditForgiveness(level)
 }
 
 func (r *Registry) SetSandboxProfiles(rules permissionprofile.Rules) {

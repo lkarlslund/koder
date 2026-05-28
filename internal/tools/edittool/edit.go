@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/sergi/go-diff/diffmatchpatch"
@@ -20,6 +20,7 @@ type editMatch struct {
 	stage     string
 	oldString string
 	newString string
+	ranges    []textRange
 }
 
 type editMatcher struct {
@@ -27,7 +28,11 @@ type editMatcher struct {
 	oldString  string
 	newString  string
 	replaceAll bool
-	level      int
+}
+
+type textRange struct {
+	start int
+	end   int
 }
 
 func init() {
@@ -89,18 +94,12 @@ func (tool) Execute(_ context.Context, runtime tools.Runtime, req tools.Request)
 		oldString:  req.Args["old_string"],
 		newString:  req.Args["new_string"],
 		replaceAll: replaceAll,
-		level:      reqLevel(runtime.EditForgiveness),
 	}.Resolve()
 	if err != nil {
 		return tools.Result{}, fmt.Errorf("%w in %s", err, rel)
 	}
-	occurrences := strings.Count(before, match.oldString)
-	var after string
-	if replaceAll {
-		after = strings.ReplaceAll(before, match.oldString, match.newString)
-	} else {
-		after = strings.Replace(before, match.oldString, match.newString, 1)
-	}
+	occurrences := len(match.ranges)
+	after := replaceRanges(before, match.ranges, match.newString)
 	if err := tools.WriteTextFile(abs, after, info.Mode().Perm()); err != nil {
 		return tools.Result{}, err
 	}
@@ -111,7 +110,7 @@ func (tool) Execute(_ context.Context, runtime tools.Runtime, req tools.Request)
 		mode = fmt.Sprintf("replaced %d occurrences", occurrences)
 	}
 	summary := fmt.Sprintf("Edited %s (%s)", rel, mode)
-	hunks, truncated := buildStoredHunks(before, match.oldString, match.newString, replaceAll)
+	hunks, truncated := buildStoredHunksFromRanges(before, match.ranges, match.newString)
 	return tools.Result{
 		Output:   summary,
 		DiffText: dmp.DiffPrettyText(diffs),
@@ -138,72 +137,21 @@ func (tool) SummarizeResult(req tools.Request, result tools.Result) (string, str
 
 const maxStoredHunks = 8
 
-func reqLevel(level int) int {
-	if level < 1 {
-		return 1
-	}
-	if level > 5 {
-		return 5
-	}
-	return level
-}
-
 func (m editMatcher) Resolve() (editMatch, error) {
 	stages := []struct {
 		name string
 		run  func() []string
 	}{
 		{name: "exact", run: m.findExact},
-	}
-	if m.level >= 2 {
-		stages = append(stages, struct {
-			name string
-			run  func() []string
-		}{name: "line_endings", run: m.findLineEndingNormalized})
-	}
-	if m.level >= 3 {
-		stages = append(stages,
-			struct {
-				name string
-				run  func() []string
-			}{name: "quotes", run: m.findQuoteNormalized},
-			struct {
-				name string
-				run  func() []string
-			}{name: "trimmed_boundary", run: m.findTrimmedBoundary},
-		)
-	}
-	if m.level >= 4 {
-		stages = append(stages,
-			struct {
-				name string
-				run  func() []string
-			}{name: "line_trimmed", run: m.findLineTrimmed},
-			struct {
-				name string
-				run  func() []string
-			}{name: "indentation_flexible", run: m.findIndentationFlexible},
-			struct {
-				name string
-				run  func() []string
-			}{name: "whitespace_normalized", run: m.findWhitespaceNormalized},
-		)
-	}
-	if m.level >= 5 {
-		stages = append(stages,
-			struct {
-				name string
-				run  func() []string
-			}{name: "escape_normalized", run: m.findEscapeNormalized},
-			struct {
-				name string
-				run  func() []string
-			}{name: "block_anchor", run: m.findBlockAnchor},
-			struct {
-				name string
-				run  func() []string
-			}{name: "context_aware", run: m.findContextAware},
-		)
+		{name: "line_endings", run: m.findLineEndingNormalized},
+		{name: "line_trimmed", run: m.findLineTrimmed},
+		{name: "whitespace_normalized", run: m.findWhitespaceNormalized},
+		{name: "indentation_flexible", run: m.findIndentationFlexible},
+		{name: "escape_normalized", run: m.findEscapeNormalized},
+		{name: "trimmed_boundary", run: m.findTrimmedBoundary},
+		{name: "unicode_normalized", run: m.findUnicodeNormalized},
+		{name: "block_anchor", run: m.findBlockAnchor},
+		{name: "context_aware", run: m.findContextAware},
 	}
 
 	for _, stage := range stages {
@@ -211,21 +159,27 @@ func (m editMatcher) Resolve() (editMatch, error) {
 		if len(candidates) == 0 {
 			continue
 		}
-		if len(candidates) > 1 {
-			return editMatch{}, fmt.Errorf("target text matched multiple regions via %s; provide more surrounding context", stage.name)
+		ranges := rangesForCandidates(m.content, candidates)
+		if len(ranges) == 0 {
+			continue
 		}
-		candidate := candidates[0]
-		occurrences := strings.Count(m.content, candidate)
-		if !m.replaceAll && occurrences != 1 {
-			return editMatch{}, fmt.Errorf("target text occurs %d times; use replace_all to replace every occurrence", occurrences)
+		if !m.replaceAll && len(ranges) != 1 {
+			return editMatch{}, fmt.Errorf("target text matched %d regions via %s; provide more surrounding context or set replace_all=true", len(ranges), stage.name)
+		}
+		newString := m.rewriteNewString(stage.name)
+		if stage.name != "exact" {
+			if err := detectEscapedQuoteDrift(m.oldString, newString, matchedText(m.content, ranges)); err != nil {
+				return editMatch{}, err
+			}
 		}
 		return editMatch{
 			stage:     stage.name,
-			oldString: candidate,
-			newString: m.rewriteNewString(stage.name),
+			oldString: m.content[ranges[0].start:ranges[0].end],
+			newString: newString,
+			ranges:    ranges,
 		}, nil
 	}
-	return editMatch{}, errors.New("target text not found")
+	return editMatch{}, fmt.Errorf("target text not found\n\n%s", formatClosestSections(m.content, m.oldString))
 }
 
 func (m editMatcher) rewriteNewString(stage string) string {
@@ -251,14 +205,6 @@ func (m editMatcher) findLineEndingNormalized() []string {
 		return []string{candidate}
 	}
 	return nil
-}
-
-func (m editMatcher) findQuoteNormalized() []string {
-	actual := findQuoteNormalizedString(m.content, m.oldString)
-	if actual == "" {
-		return nil
-	}
-	return []string{actual}
 }
 
 func (m editMatcher) findTrimmedBoundary() []string {
@@ -335,20 +281,28 @@ func (m editMatcher) findWhitespaceNormalized() []string {
 			out = append(out, line)
 			continue
 		}
-		if normalize(line) != "" && strings.Contains(normalize(line), normalizedFind) {
-			reWords := regexp.QuoteMeta(strings.TrimSpace(m.oldString))
-			reWords = strings.Join(strings.Fields(reWords), `\s+`)
-			re := regexp.MustCompile(reWords)
-			if match := re.FindString(line); match != "" {
-				out = append(out, match)
-			}
-		}
 	}
 	findLines := strings.Split(m.oldString, "\n")
 	if len(findLines) > 1 {
 		for i := 0; i <= len(lines)-len(findLines); i++ {
 			block := strings.Join(lines[i:i+len(findLines)], "\n")
 			if normalize(block) == normalizedFind {
+				out = append(out, block)
+			}
+		}
+	}
+	return out
+}
+
+func (m editMatcher) findUnicodeNormalized() []string {
+	normalizedFind := normalizeLooseText(m.oldString)
+	var out []string
+	if strings.Contains(normalizeLooseText(m.content), normalizedFind) {
+		lines := strings.Split(m.content, "\n")
+		findLines := strings.Split(m.oldString, "\n")
+		for i := 0; i <= len(lines)-len(findLines); i++ {
+			block := strings.Join(lines[i:i+len(findLines)], "\n")
+			if normalizeLooseText(block) == normalizedFind {
 				out = append(out, block)
 			}
 		}
@@ -450,22 +404,15 @@ func convertLineEndings(input, ending string) string {
 	return strings.ReplaceAll(input, "\n", ending)
 }
 
-func normalizeQuotes(input string) string {
-	replacer := strings.NewReplacer("‘", "'", "’", "'", "“", `"`, "”", `"`)
+func normalizeLooseText(input string) string {
+	replacer := strings.NewReplacer(
+		"\u00a0", " ",
+		"‘", "'", "’", "'",
+		"“", `"`, "”", `"`,
+		"—", "--", "–", "-",
+		"…", "...",
+	)
 	return replacer.Replace(input)
-}
-
-func findQuoteNormalizedString(content, search string) string {
-	if strings.Contains(content, search) {
-		return search
-	}
-	normalizedContent := normalizeQuotes(content)
-	normalizedSearch := normalizeQuotes(search)
-	idx := strings.Index(normalizedContent, normalizedSearch)
-	if idx < 0 {
-		return ""
-	}
-	return content[idx : idx+len(search)]
 }
 
 func removeCommonIndentation(input string) string {
@@ -549,34 +496,207 @@ func uniqueStrings(input []string) []string {
 	return out
 }
 
-func buildStoredHunks(before, oldString, newString string, replaceAll bool) ([]tools.EditStoredHunk, bool) {
-	if strings.TrimSpace(oldString) == "" {
-		return nil, false
+func rangesForCandidates(content string, candidates []string) []textRange {
+	var out []textRange
+	for _, candidate := range candidates {
+		searchFrom := 0
+		for {
+			idx := strings.Index(content[searchFrom:], candidate)
+			if idx < 0 {
+				break
+			}
+			start := searchFrom + idx
+			out = append(out, textRange{start: start, end: start + len(candidate)})
+			searchFrom = start + len(candidate)
+			if len(candidate) == 0 {
+				break
+			}
+		}
 	}
-	oldLines := splitStoredLines(oldString)
-	newLines := splitStoredLines(newString)
-	var hunks []tools.EditStoredHunk
-	searchFrom := 0
-	for {
-		idx := strings.Index(before[searchFrom:], oldString)
-		if idx < 0 {
+	return uniqueRanges(out)
+}
+
+func uniqueRanges(input []textRange) []textRange {
+	if len(input) == 0 {
+		return nil
+	}
+	sort.Slice(input, func(i, j int) bool {
+		if input[i].start == input[j].start {
+			return input[i].end < input[j].end
+		}
+		return input[i].start < input[j].start
+	})
+	out := input[:0]
+	var prev *textRange
+	for _, r := range input {
+		if r.start < 0 || r.end <= r.start {
+			continue
+		}
+		if prev != nil && prev.start == r.start && prev.end == r.end {
+			continue
+		}
+		out = append(out, r)
+		prev = &out[len(out)-1]
+	}
+	return out
+}
+
+func replaceRanges(content string, ranges []textRange, replacement string) string {
+	if len(ranges) == 0 {
+		return content
+	}
+	ranges = append([]textRange(nil), ranges...)
+	sort.Slice(ranges, func(i, j int) bool { return ranges[i].start > ranges[j].start })
+	out := content
+	for _, r := range ranges {
+		out = out[:r.start] + replacement + out[r.end:]
+	}
+	return out
+}
+
+func matchedText(content string, ranges []textRange) []string {
+	out := make([]string, 0, len(ranges))
+	for _, r := range ranges {
+		out = append(out, content[r.start:r.end])
+	}
+	return out
+}
+
+func detectEscapedQuoteDrift(oldString, newString string, matched []string) error {
+	for _, suspect := range []string{`\'`, `\"`} {
+		if !strings.Contains(oldString, suspect) && !strings.Contains(newString, suspect) {
+			continue
+		}
+		for _, actual := range matched {
+			if strings.Contains(actual, suspect) {
+				return nil
+			}
+		}
+		return fmt.Errorf("target text only matched after unescaping %s; re-read the file and pass the actual unescaped text instead of escaped quotes", suspect)
+	}
+	return nil
+}
+
+func formatClosestSections(content, search string) string {
+	sections := closestSections(content, search)
+	if len(sections) == 0 {
+		return "Re-read the file and retry with exact current text, including tabs, spaces, and line endings."
+	}
+	var out []string
+	out = append(out, "Did you mean one of these sections?")
+	for i, section := range sections {
+		if i > 0 {
+			out = append(out, "---")
+		}
+		out = append(out, section...)
+	}
+	out = append(out, "Re-read the file and retry with one exact snippet above; check tabs/spaces and stale file contents.")
+	return strings.Join(out, "\n")
+}
+
+func closestSections(content, search string) [][]string {
+	lines := strings.Split(content, "\n")
+	anchor := firstMeaningfulLine(search)
+	if anchor == "" {
+		return nil
+	}
+	type scoredLine struct {
+		index int
+		score float64
+	}
+	var scored []scoredLine
+	for i, line := range lines {
+		score := lineSimilarity(anchor, strings.TrimSpace(line))
+		if score >= 0.35 {
+			scored = append(scored, scoredLine{index: i, score: score})
+		}
+	}
+	sort.Slice(scored, func(i, j int) bool {
+		if scored[i].score == scored[j].score {
+			return scored[i].index < scored[j].index
+		}
+		return scored[i].score > scored[j].score
+	})
+	searchLineCount := max(1, len(trimTrailingEmptyLine(strings.Split(search, "\n"))))
+	var sections [][]string
+	used := map[int]struct{}{}
+	for _, hit := range scored {
+		if len(sections) >= 3 {
 			break
 		}
-		abs := searchFrom + idx
-		oldStart := 1 + strings.Count(before[:abs], "\n")
-		newStart := oldStart
+		start := max(0, hit.index-2)
+		end := min(len(lines), hit.index+searchLineCount+2)
+		if _, ok := used[start]; ok {
+			continue
+		}
+		used[start] = struct{}{}
+		var section []string
+		for i := start; i < end; i++ {
+			section = append(section, fmt.Sprintf("%4d| %s", i+1, lines[i]))
+		}
+		sections = append(sections, section)
+	}
+	return sections
+}
+
+func firstMeaningfulLine(input string) string {
+	for _, line := range strings.Split(input, "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			return normalizeLooseText(line)
+		}
+	}
+	return ""
+}
+
+func lineSimilarity(a, b string) float64 {
+	a = strings.Join(strings.Fields(normalizeLooseText(a)), " ")
+	b = strings.Join(strings.Fields(normalizeLooseText(b)), " ")
+	if a == "" || b == "" {
+		return 0
+	}
+	if a == b {
+		return 1
+	}
+	if strings.Contains(a, b) || strings.Contains(b, a) {
+		return float64(min(len(a), len(b))) / float64(max(len(a), len(b)))
+	}
+	return float64(longestCommonSubsequenceLen(a, b)) / float64(max(len(a), len(b)))
+}
+
+func longestCommonSubsequenceLen(a, b string) int {
+	prev := make([]int, len(b)+1)
+	cur := make([]int, len(b)+1)
+	for i := 0; i < len(a); i++ {
+		for j := 0; j < len(b); j++ {
+			if a[i] == b[j] {
+				cur[j+1] = prev[j] + 1
+				continue
+			}
+			cur[j+1] = max(cur[j], prev[j+1])
+		}
+		prev, cur = cur, prev
+		clear(cur)
+	}
+	return prev[len(b)]
+}
+
+func buildStoredHunksFromRanges(before string, ranges []textRange, newString string) ([]tools.EditStoredHunk, bool) {
+	if len(ranges) == 0 {
+		return nil, false
+	}
+	var hunks []tools.EditStoredHunk
+	for _, r := range ranges {
+		oldString := before[r.start:r.end]
+		oldStart := 1 + strings.Count(before[:r.start], "\n")
 		hunks = append(hunks, tools.EditStoredHunk{
 			OldStart: oldStart,
-			NewStart: newStart,
-			OldLines: oldLines,
-			NewLines: newLines,
+			NewStart: oldStart,
+			OldLines: splitStoredLines(oldString),
+			NewLines: splitStoredLines(newString),
 		})
 		if len(hunks) >= maxStoredHunks {
 			return hunks, true
-		}
-		searchFrom = abs + len(oldString)
-		if !replaceAll {
-			break
 		}
 	}
 	return hunks, false

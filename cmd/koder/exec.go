@@ -127,7 +127,6 @@ func runExec(ctx context.Context, opts execOptions, prompt string) (string, erro
 		return "", err
 	}
 	registry := tools.NewRegistry(agents.FindProjectRoot(workdir))
-	registry.SetEditForgiveness(cfg.UI.EditForgiveness)
 	registry.SetExecControl(execruntime.NewManager())
 	registry.SetSandboxProfiles(cfg.Permissions)
 	schema, err := loadStructuredOutputSchema(opts)

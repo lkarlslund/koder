@@ -71,7 +71,6 @@ func New(cfg config.Config, st *store.Store, registry *tools.Registry, debug *de
 	}
 	if registry != nil {
 		registry.SetMCP(mcpManager)
-		registry.SetEditForgiveness(cfg.UI.EditForgiveness)
 		registry.SetSandboxProfiles(cfg.Permissions)
 	}
 	var execManager *execruntime.Manager
@@ -101,7 +100,6 @@ func (e *Engine) UpdateConfig(cfg config.Config) {
 	e.cfg = cfg
 	e.agents = agents.NewManager(cfg.StateDir(), filepath.Join(filepath.Dir(cfg.Path()), "AGENTS.md"))
 	if e.registry != nil {
-		e.registry.SetEditForgiveness(cfg.UI.EditForgiveness)
 		e.registry.SetSandboxProfiles(cfg.Permissions)
 	}
 	if e.mcp != nil {

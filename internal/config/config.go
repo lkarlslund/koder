@@ -15,18 +15,17 @@ import (
 )
 
 type UI struct {
-	Theme           string `toml:"theme"`
-	CodeStyle       string `toml:"code_style"`
-	EditForgiveness int    `toml:"edit_forgiveness"`
-	CursorBlink     bool   `toml:"cursor_blink"`
-	HalfBlocks      bool   `toml:"half_blocks"`
-	ShowSidebar     bool   `toml:"show_sidebar"`
-	SidebarWidth    int    `toml:"sidebar_width"`
-	ShowTimestamps  bool   `toml:"show_timestamps"`
-	ShowReasoning   bool   `toml:"show_reasoning"`
-	ShowSystem      bool   `toml:"show_system"`
-	Mouse           bool   `toml:"mouse"`
-	AutoContinue    bool   `toml:"auto_continue"`
+	Theme          string `toml:"theme"`
+	CodeStyle      string `toml:"code_style"`
+	CursorBlink    bool   `toml:"cursor_blink"`
+	HalfBlocks     bool   `toml:"half_blocks"`
+	ShowSidebar    bool   `toml:"show_sidebar"`
+	SidebarWidth   int    `toml:"sidebar_width"`
+	ShowTimestamps bool   `toml:"show_timestamps"`
+	ShowReasoning  bool   `toml:"show_reasoning"`
+	ShowSystem     bool   `toml:"show_system"`
+	Mouse          bool   `toml:"mouse"`
+	AutoContinue   bool   `toml:"auto_continue"`
 }
 
 type Store struct {
@@ -195,29 +194,18 @@ func Default() Config {
 			Backend: "pebble",
 		},
 		UI: UI{
-			Theme:           "tokyonight",
-			CodeStyle:       "github",
-			EditForgiveness: 3,
-			CursorBlink:     true,
-			HalfBlocks:      true,
-			ShowSidebar:     true,
-			ShowTimestamps:  false,
-			ShowReasoning:   false,
-			ShowSystem:      false,
-			Mouse:           true,
-			AutoContinue:    true,
+			Theme:          "tokyonight",
+			CodeStyle:      "github",
+			CursorBlink:    true,
+			HalfBlocks:     true,
+			ShowSidebar:    true,
+			ShowTimestamps: false,
+			ShowReasoning:  false,
+			ShowSystem:     false,
+			Mouse:          true,
+			AutoContinue:   true,
 		},
 	}
-}
-
-func NormalizeEditForgiveness(level int) int {
-	if level < 1 {
-		return 1
-	}
-	if level > 5 {
-		return 5
-	}
-	return level
 }
 
 func (c *Config) applyDefaults() {
@@ -266,11 +254,6 @@ func (c *Config) applyDefaults() {
 	}
 	if c.UI.CodeStyle == "" {
 		c.UI.CodeStyle = def.UI.CodeStyle
-	}
-	if c.UI.EditForgiveness == 0 {
-		c.UI.EditForgiveness = def.UI.EditForgiveness
-	} else {
-		c.UI.EditForgiveness = NormalizeEditForgiveness(c.UI.EditForgiveness)
 	}
 	fallbackProvider := providerDefaults()
 	for id, provider := range c.Providers {

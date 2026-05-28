@@ -148,7 +148,6 @@ func runKoder(ctx context.Context, mode uicore.StartupMode, workdir string, star
 	}()
 
 	registry := tools.NewRegistry(agents.FindProjectRoot(workdir))
-	registry.SetEditForgiveness(cfg.UI.EditForgiveness)
 	registry.SetExecControl(execruntime.NewManager())
 	engine := agent.New(cfg, st, registry, recorder, workdir, mcpManager)
 	registry.SetChatControl(engine)

@@ -201,7 +201,6 @@ type UIPreferences struct {
 	Theme            string   `json:"theme"`
 	CodeStyle        string   `json:"code_style"`
 	CodeStyleOptions []string `json:"code_style_options"`
-	EditForgiveness  int      `json:"edit_forgiveness"`
 	CursorBlink      bool     `json:"cursor_blink"`
 	HalfBlocks       bool     `json:"half_blocks"`
 	ShowSidebar      bool     `json:"show_sidebar"`
@@ -1855,7 +1854,6 @@ func uiPreferencesFromConfig(ui config.UI) UIPreferences {
 		Theme:            normalizeTheme(ui.Theme),
 		CodeStyle:        codeStyle,
 		CodeStyleOptions: codeStyleOptions(codeStyle),
-		EditForgiveness:  config.NormalizeEditForgiveness(ui.EditForgiveness),
 		CursorBlink:      ui.CursorBlink,
 		HalfBlocks:       ui.HalfBlocks,
 		ShowSidebar:      ui.ShowSidebar,
@@ -2032,18 +2030,17 @@ func applyModelConfigPreferences(cfg *config.Config, prefs []ModelConfigPreferen
 func applyUIPreferences(cfg *config.Config, prefs UIPreferences) error {
 	codeStyle := firstNonEmpty(strings.TrimSpace(prefs.CodeStyle), config.Default().UI.CodeStyle)
 	cfg.UI = config.UI{
-		Theme:           normalizeTheme(prefs.Theme),
-		CodeStyle:       codeStyle,
-		EditForgiveness: config.NormalizeEditForgiveness(prefs.EditForgiveness),
-		CursorBlink:     prefs.CursorBlink,
-		HalfBlocks:      prefs.HalfBlocks,
-		ShowSidebar:     prefs.ShowSidebar,
-		SidebarWidth:    prefs.SidebarWidth,
-		ShowTimestamps:  prefs.ShowTimestamps,
-		ShowReasoning:   prefs.ShowReasoning,
-		ShowSystem:      prefs.ShowSystem,
-		Mouse:           prefs.Mouse,
-		AutoContinue:    prefs.AutoContinue,
+		Theme:          normalizeTheme(prefs.Theme),
+		CodeStyle:      codeStyle,
+		CursorBlink:    prefs.CursorBlink,
+		HalfBlocks:     prefs.HalfBlocks,
+		ShowSidebar:    prefs.ShowSidebar,
+		SidebarWidth:   prefs.SidebarWidth,
+		ShowTimestamps: prefs.ShowTimestamps,
+		ShowReasoning:  prefs.ShowReasoning,
+		ShowSystem:     prefs.ShowSystem,
+		Mouse:          prefs.Mouse,
+		AutoContinue:   prefs.AutoContinue,
 	}
 	return nil
 }
