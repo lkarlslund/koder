@@ -930,6 +930,9 @@ func TestControllerStartupNewResumesRestartInterruptedWorkspaceSession(t *testin
 		for _, item := range timeline {
 			user, ok := item.Content.(domain.UserMessage)
 			if ok && user.Text == processRestartToolFailureInstruction {
+				if user.Source != domain.UserMessageSourceAutoResume {
+					t.Fatalf("auto-resume source = %q, want %q", user.Source, domain.UserMessageSourceAutoResume)
+				}
 				return
 			}
 		}

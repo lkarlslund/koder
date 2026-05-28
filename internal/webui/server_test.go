@@ -505,13 +505,16 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `x-html="markdownHTML(pendingText())"`) {
 		t.Fatalf("expected streaming assistant text to render as markdown HTML")
 	}
-	if !strings.Contains(fullPage, `class="turn user-turn"`) || !strings.Contains(fullPage, `.transcript-turn { width: 100%; max-width: none; }`) {
+	if !strings.Contains(fullPage, `class="turn user-turn" :class="userTurnClass(item)"`) || !strings.Contains(fullPage, `.transcript-turn { width: 100%; max-width: none; }`) {
 		t.Fatalf("expected user turns to use the full transcript width")
+	}
+	if !strings.Contains(fullPage, `userMessageSourceLabel(item)`) || !strings.Contains(fullPage, `userMessageSourceClass(item)`) || !strings.Contains(fullPage, `case 'auto_generated': return 'auto-generated'`) {
+		t.Fatalf("expected user turns to render source badges for steer, queued, and auto-generated messages")
 	}
 	if !strings.Contains(fullPage, `class="turn assistant-turn"`) || strings.Contains(fullPage, `bi bi-stars`) || strings.Contains(fullPage, `> Assistant</div>`) || strings.Contains(fullPage, `message assistant p-3`) || strings.Contains(fullPage, `message user p-3 ms-auto`) {
 		t.Fatalf("expected assistant turns without repeated assistant title or chat-bubble boxes")
 	}
-	if !strings.Contains(fullPage, `.user-turn, .assistant-turn { border-left: 0; padding-left: 0; }`) || strings.Contains(fullPage, `.tool { border-left`) || strings.Contains(fullPage, `class="tool mt-3 ps-3"`) {
+	if !strings.Contains(fullPage, `.user-turn { padding: .65rem .75rem; border: 1px solid var(--bs-border-color);`) || !strings.Contains(fullPage, `.assistant-turn { padding: 0; }`) || strings.Contains(fullPage, `.tool { border-left`) || strings.Contains(fullPage, `class="tool mt-3 ps-3"`) {
 		t.Fatalf("expected transcript turns and tools to avoid redundant border rails")
 	}
 	if !strings.Contains(fullPage, `marked.parse(source)`) || !strings.Contains(fullPage, `DOMPurify.sanitize`) || !strings.Contains(fullPage, `hljs.highlight`) {

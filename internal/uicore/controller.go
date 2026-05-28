@@ -2668,7 +2668,7 @@ func (c *Controller) autoResumeRestartInterruptedChats(runtimes map[domain.ID]*c
 		if hasErroredRestartTool(snapshot) {
 			note = processRestartToolFailureInstruction
 		}
-		rt.Enqueue(chat.QueueItem{Kind: chat.QueueKindSteer, Text: note})
+		rt.Enqueue(chat.QueueItem{Kind: chat.QueueKindSteer, Source: domain.UserMessageSourceAutoResume, Text: note})
 	}
 }
 

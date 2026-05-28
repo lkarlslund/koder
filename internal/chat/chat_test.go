@@ -304,6 +304,9 @@ func TestRuntimeEnqueueStartsPrompt(t *testing.T) {
 	if !ok || user.Text != "first prompt" {
 		t.Fatalf("last timeline item = %#v", last)
 	}
+	if user.Source != domain.UserMessageSourceSteer {
+		t.Fatalf("user source = %q, want %q", user.Source, domain.UserMessageSourceSteer)
+	}
 
 	events <- domain.Event{Kind: domain.EventKindMessageDone}
 	close(events)

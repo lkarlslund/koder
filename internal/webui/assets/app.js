@@ -127,6 +127,39 @@
       if (reason) parts.push(reason);
       return parts.join(' · ');
     }
+    function userMessageContent(item) {
+      return (item && (item.content || item.Content)) || {};
+    }
+    function userMessageSourceValue(item) {
+      const source = String(firstValue(userMessageContent(item), ['source', 'Source']) || 'user').trim().toLowerCase();
+      return source || 'user';
+    }
+    function userMessageSourceLabelText(item) {
+      switch (userMessageSourceValue(item)) {
+        case 'steer': return 'steer';
+        case 'queued': return 'queued';
+        case 'rejected_steer': return 'rejected steer';
+        case 'auto_generated': return 'auto-generated';
+        case 'auto_resume': return 'auto-resume';
+        case 'subchat': return 'subchat';
+        default: return 'user';
+      }
+    }
+    function userMessageSourceBadgeClass(item) {
+      switch (userMessageSourceValue(item)) {
+        case 'steer': return 'text-bg-primary';
+        case 'queued': return 'text-bg-secondary';
+        case 'rejected_steer': return 'text-bg-warning';
+        case 'auto_generated': return 'text-bg-info';
+        case 'auto_resume': return 'text-bg-warning';
+        case 'subchat': return 'text-bg-dark';
+        default: return 'text-bg-success';
+      }
+    }
+    function userMessageTurnClass(item) {
+      const source = userMessageSourceValue(item).replace(/[^a-z0-9_-]/g, '-');
+      return 'user-turn-source-' + source;
+    }
     function toolResultHeader(title) {
       return '<div class="tool-result-header">' + escapeHTML(title) + '</div>';
     }
@@ -709,6 +742,9 @@
           return Math.max(1, Math.ceil(source.length / 4));
         },
         markdownHTML(text) { return renderMarkdown(text); },
+        userTurnClass(item) { return userMessageTurnClass(item); },
+        userMessageSourceLabel(item) { return userMessageSourceLabelText(item); },
+        userMessageSourceClass(item) { return userMessageSourceBadgeClass(item); },
         statusText() { const snapshot = this.activeSnapshot(); return snapshot.StatusText || snapshot.status_text || snapshot.Status || 'idle'; },
         chatInterruptible() {
           const snapshot = this.activeSnapshot();

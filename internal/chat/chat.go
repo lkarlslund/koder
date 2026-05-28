@@ -27,6 +27,7 @@ const (
 type QueueItem struct {
 	Kind        QueueKind
 	Text        string
+	Source      string
 	Attachments []attachment.Draft
 	References  []reference.Draft
 	Note        string
@@ -85,20 +86,21 @@ type Chat struct {
 	engine  Runner
 	onClose func(domain.ID)
 
-	mu          sync.RWMutex
-	session     domain.Session
-	chat        domain.Chat
-	state       *ChatState
-	status      Status
-	statusText  string
-	active      bool
-	cancel      context.CancelFunc
-	queue       []domain.QueuedInput
-	queueNotes  map[domain.ID]string
-	cancelState CancelState
-	running     map[string]struct{}
-	draining    bool
-	closed      bool
+	mu               sync.RWMutex
+	session          domain.Session
+	chat             domain.Chat
+	state            *ChatState
+	status           Status
+	statusText       string
+	active           bool
+	cancel           context.CancelFunc
+	queue            []domain.QueuedInput
+	queueNotes       map[domain.ID]string
+	activeUserSource string
+	cancelState      CancelState
+	running          map[string]struct{}
+	draining         bool
+	closed           bool
 
 	inbox   chan any
 	subsMu  sync.Mutex
@@ -297,6 +299,12 @@ func (t *TurnState) AppendUserMessage(ctx context.Context, user domain.UserMessa
 	now := time.Now().UTC()
 	text := strings.TrimSpace(user.Text)
 	r.mu.Lock()
+	if strings.TrimSpace(user.Source) == "" {
+		user.Source = strings.TrimSpace(r.activeUserSource)
+	}
+	if strings.TrimSpace(user.Source) == "" {
+		user.Source = domain.UserMessageSourceUser
+	}
 	seq := int64(1)
 	if r.state != nil {
 		seq = int64(len(r.state.Timeline()) + 1)
@@ -414,7 +422,7 @@ func (t *TurnState) ApplyNextSteer(ctx context.Context) (domain.TimelineItem, bo
 	queued := r.queue[idx]
 	r.queue = append(slices.Clone(r.queue[:idx]), slices.Clone(r.queue[idx+1:])...)
 	r.chat.QueuedInputs = cloneQueuedInputs(r.queue)
-	user := domain.UserMessage{Text: strings.TrimSpace(queued.Text)}
+	user := domain.UserMessage{Text: strings.TrimSpace(queued.Text), Source: domain.UserMessageSourceForQueuedInput(queued)}
 	for _, draft := range queued.Attachments {
 		user.Attachments = append(user.Attachments, domain.Attachment(draft))
 	}
@@ -961,6 +969,11 @@ func (r *Chat) handleDispatchQueued(item domain.QueuedInput, remaining []domain.
 	r.cancel = cancel
 	r.cancelState = CancelStateNone
 	r.running = map[string]struct{}{}
+	if item.Kind == domain.QueuedInputKindContinue {
+		r.activeUserSource = ""
+	} else {
+		r.activeUserSource = domain.UserMessageSourceForQueuedInput(item)
+	}
 	r.active = true
 	r.status = StatusWaitingLLM
 	r.statusText = "Waiting for LLM response"
@@ -1128,6 +1141,7 @@ func (r *Chat) handleResumePendingTools() {
 		r.mu.Lock()
 		r.active = false
 		r.cancel = nil
+		r.activeUserSource = ""
 		r.status = StatusErrored
 		r.statusText = err.Error()
 		r.mu.Unlock()
@@ -1412,6 +1426,7 @@ func (r *Chat) handleStreamClosed() {
 	}
 	r.cancelState = CancelStateNone
 	r.running = nil
+	r.activeUserSource = ""
 	draining := r.draining
 	r.draining = false
 	r.mu.Unlock()
@@ -1475,6 +1490,11 @@ func (r *Chat) maybeDispatchNext() {
 	r.cancel = cancel
 	r.cancelState = CancelStateNone
 	r.running = map[string]struct{}{}
+	if item.Kind == domain.QueuedInputKindContinue {
+		r.activeUserSource = ""
+	} else {
+		r.activeUserSource = domain.UserMessageSourceForQueuedInput(item)
+	}
 	r.active = true
 	r.status = StatusWaitingLLM
 	r.statusText = "Waiting for LLM response"
@@ -1642,7 +1662,7 @@ func (r *Chat) appendOptimisticUserMessage(item domain.QueuedInput, session doma
 	}
 	now := time.Now().UTC()
 	summary := strings.TrimSpace(item.Text)
-	user := domain.UserMessage{Text: summary}
+	user := domain.UserMessage{Text: summary, Source: domain.UserMessageSourceForQueuedInput(item)}
 	for _, draft := range item.Attachments {
 		user.Attachments = append(user.Attachments, domain.Attachment(draft))
 	}
@@ -1769,6 +1789,7 @@ func queuedInputFromItem(item QueueItem) domain.QueuedInput {
 		ID:          domain.NewID(),
 		Kind:        kind,
 		Text:        strings.TrimSpace(item.Text),
+		Source:      strings.TrimSpace(item.Source),
 		Attachments: queuedAttachmentsFromDrafts(item.Attachments),
 		References:  queuedReferencesFromDrafts(item.References),
 		CreatedAt:   time.Now().UTC(),

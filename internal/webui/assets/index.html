@@ -38,7 +38,10 @@
       <template x-for="item in timeline()" :key="item.id || item.ID">
         <section class="transcript-turn mb-4">
           <template x-if="item.kind === 'user'">
-            <div class="turn user-turn">
+            <div class="turn user-turn" :class="userTurnClass(item)">
+              <div class="user-turn-meta mb-2">
+                <span class="badge user-source-badge" :class="userMessageSourceClass(item)" x-text="userMessageSourceLabel(item)"></span>
+              </div>
               <template x-if="(item.content?.attachments || []).length > 0">
                 <div class="attachment-strip mb-2">
                   <template x-for="attachment in item.content.attachments || []" :key="attachment.id || attachment.ID || attachment.path || attachment.Path">

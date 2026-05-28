@@ -484,7 +484,7 @@ func (e *Engine) runModelPrompt(ctx context.Context, session domain.Session, cha
 				return
 			}
 		}
-		userItem, err := e.persistUserPrompt(ctx, session, chat.ID, prompt, drafts, refs)
+		userItem, err := e.persistUserPrompt(ctx, session, chat.ID, prompt, domain.UserMessageSourceUser, drafts, refs)
 		if err != nil {
 			if interruptedErr(err) {
 				e.emitInterrupted(out, chat.ID, session.ID)
@@ -778,11 +778,12 @@ func (e *Engine) refreshSessionAgents(ctx context.Context, session domain.Sessio
 	return e.store.GetSession(ctx, session.ID)
 }
 
-func (e *Engine) persistUserPrompt(ctx context.Context, session domain.Session, chatID domain.ID, prompt string, drafts []attachment.Draft, refs []reference.Draft) (domain.TimelineItem, error) {
+func (e *Engine) persistUserPrompt(ctx context.Context, session domain.Session, chatID domain.ID, prompt string, source string, drafts []attachment.Draft, refs []reference.Draft) (domain.TimelineItem, error) {
 	user, err := e.userMessageForPrompt(session, prompt, drafts, refs)
 	if err != nil {
 		return domain.TimelineItem{}, err
 	}
+	user.Source = strings.TrimSpace(source)
 	item, err := e.store.AppendTimeline(ctx, chatID, user)
 	if err != nil {
 		return domain.TimelineItem{}, err
@@ -876,7 +877,7 @@ func (e *Engine) applyQueuedSteer(ctx context.Context, session domain.Session, c
 		return false, err
 	}
 	chat.QueuedInputs = remaining
-	userItem, err := e.persistUserPrompt(ctx, session, chat.ID, item.Text, queuedAttachmentDrafts(item.Attachments), queuedReferenceDrafts(item.References))
+	userItem, err := e.persistUserPrompt(ctx, session, chat.ID, item.Text, domain.UserMessageSourceForQueuedInput(item), queuedAttachmentDrafts(item.Attachments), queuedReferenceDrafts(item.References))
 	if err != nil {
 		return false, err
 	}
