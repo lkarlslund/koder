@@ -1022,6 +1022,10 @@ func (r *Chat) handleStreamEvent(evt domain.Event) {
 		if strings.TrimSpace(evt.ToolCallID) != "" {
 			delete(r.running, evt.ToolCallID)
 		}
+		if len(r.running) == 0 && r.active {
+			r.status = StatusWaitingLLM
+			r.statusText = "Waiting for LLM response"
+		}
 	case domain.EventKindChatTitle:
 		title := strings.TrimSpace(evt.Text)
 		if title != "" {

@@ -510,6 +510,40 @@ func TestRuntimeToolStartStatusUsesToolNameNotPreviewArgs(t *testing.T) {
 	}
 }
 
+func TestRuntimeToolResultReturnsStatusToWaitingLLM(t *testing.T) {
+	st := openTestStore(t)
+	session, chatRecord, _ := createSessionWithPlan(t, st)
+	events := make(chan domain.Event)
+	runner := &runtimeFakeRunner{events: []<-chan domain.Event{events}}
+	rt := newTestChat(t, st, session, chatRecord, runner)
+	updates, unsub := rt.Subscribe()
+	defer unsub()
+
+	rt.Enqueue(QueueItem{Kind: QueueKindQueued, Text: "read it"})
+	events <- domain.Event{Kind: domain.EventKindToolStart, Tool: domain.ToolKindRead, ToolCallID: "call_read"}
+	events <- domain.Event{Kind: domain.EventKindToolResult, Tool: domain.ToolKindRead, ToolCallID: "call_read", Text: "ok"}
+
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case update := <-updates:
+			if update.Event == nil || update.Event.Kind != domain.EventKindToolResult {
+				continue
+			}
+			if update.Status != StatusWaitingLLM {
+				t.Fatalf("expected waiting LLM status after tool result, got %s", update.Status)
+			}
+			if update.StatusText != "Waiting for LLM response" {
+				t.Fatalf("status text = %q", update.StatusText)
+			}
+			close(events)
+			return
+		case <-deadline:
+			t.Fatalf("timed out waiting for tool result status: %#v", rt.Snapshot())
+		}
+	}
+}
+
 func TestRuntimeDispatchQueuedUsesSelectedItemAndPreservesNote(t *testing.T) {
 	st := openTestStore(t)
 	session, chat, _ := createSessionWithPlan(t, st)
