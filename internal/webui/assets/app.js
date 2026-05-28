@@ -186,19 +186,31 @@
       }).join('');
       return toolResultHeader(title) + '<div>' + (rows || '<div class="tool-result-body text-secondary">No diff</div>') + '</div>';
     }
-    function renderShowImageBlock(data, fallbackText) {
+    function imageResultSource(data) {
       const path = firstValue(data, ['path', 'Path']);
       const sourcePath = firstValue(data, ['source_path', 'SourcePath']) || path;
+      if (!sourcePath) return {path, sourcePath: '', src: ''};
+      return {path, sourcePath, src: '/api/show-image?path=' + encodeURIComponent(sourcePath)};
+    }
+    function renderImagePreviewBlock(title, data, fallbackText, compact) {
+      const image = imageResultSource(data);
       const mime = firstValue(data, ['mime_type', 'MIMEType']);
-      const summary = firstValue(data, ['summary', 'Summary']) || fallbackText || ('Showed image ' + path);
-      if (!sourcePath) return renderCompactBlock('Showed image', summary);
-      const src = '/api/show-image?path=' + encodeURIComponent(sourcePath);
-      const meta = [path, mime].filter(Boolean).join(' · ');
-      return toolResultHeader(summary || 'Showed image') +
-        '<div class="tool-result-body">' +
-          '<img class="img-fluid rounded border bg-body-tertiary" alt="' + escapeHTML(path || 'shown image') + '" src="' + escapeHTML(src) + '">' +
+      const detail = firstValue(data, ['detail', 'Detail']);
+      const summary = firstValue(data, ['summary', 'Summary']) || fallbackText || title;
+      const meta = [image.path, mime, detail].filter(Boolean).join(' · ');
+      if (!image.src) return renderCompactBlock(title, summary);
+      const imageClass = compact ? 'tool-image-thumb-img' : 'tool-image-large-img';
+      return toolResultHeader(summary || title) +
+        '<div class="tool-result-body tool-image-result">' +
+          '<button type="button" class="tool-image-preview ' + (compact ? 'tool-image-thumb' : 'tool-image-large') + '" data-lightbox-src="' + escapeHTML(image.src) + '" data-lightbox-title="' + escapeHTML(summary || title) + '" data-lightbox-meta="' + escapeHTML(meta) + '" title="Open image preview">' +
+            '<img class="' + imageClass + '" alt="' + escapeHTML(image.path || title) + '" src="' + escapeHTML(image.src) + '">' +
+            '<span class="tool-image-zoom"><i class="bi bi-arrows-fullscreen"></i></span>' +
+          '</button>' +
           (meta ? '<div class="small text-secondary mt-2">' + escapeHTML(meta) + '</div>' : '') +
         '</div>';
+    }
+    function renderShowImageBlock(data, fallbackText) {
+      return renderImagePreviewBlock('Showed image', data, fallbackText, false);
     }
     function toolTitleText(tool) {
       const kind = String((tool && tool.tool) || '');
@@ -299,7 +311,7 @@
         return renderCompactBlock('Search results', items.length ? items.map((item, idx) => (idx + 1) + '. ' + (item.title || item.Title || item.url || item.URL || '')) : toolResultText(tool));
       }
       if (kind === 'view_image') {
-        return renderKeyValueBlock('Viewed image', [['path', firstValue(data, ['path', 'Path'])], ['mime', firstValue(data, ['mime_type', 'MIMEType'])], ['detail', firstValue(data, ['detail', 'Detail'])]]);
+        return renderImagePreviewBlock('Viewed image', data, toolResultText(tool), true);
       }
       if (kind === 'show_image') return renderShowImageBlock(data, toolResultText(tool));
       return renderCompactBlock(kind || 'Tool result', toolResultText(tool));
@@ -327,6 +339,7 @@
         providerState: {catalog: [], providers: [], drafts: {}}, showProviderEditor: false, providerDraft: null, providerHeadersText: '{}', providerModelOptions: [], providerStatus: '', providerStatusKind: 'secondary', providerTesting: false, providerSaving: false,
         showModelConfigEditor: false, modelConfigDraft: null, modelConfigStatus: '', modelConfigStatusKind: 'secondary',
         showMCPEditor: false, mcpDraft: null, mcpHeadersText: '{}', mcpStatus: '', mcpStatusKind: 'secondary',
+        imageLightbox: {open: false, src: '', title: '', meta: ''},
         completion: {kind: '', query: '', start: 0, end: 0, items: [], selected: 0}, completionSeq: 0,
         theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, restoreChatAttempted: false, transcriptStickToBottom: true, scrollRestoreSeq: 0, expandedMilestones: {}, interruptArmedChatID: '', dragChatID: '', dragQueueID: '', composerAttachments: [], activeComposerDraftKey: '', preserveComposerDraftDuringSend: false, error: '', toast: '', toastTimer: null,
         init() {
@@ -340,7 +353,21 @@
           window.addEventListener('focus', () => { this.connectNow(); this.reportClientStateSoon(); });
           window.addEventListener('blur', () => this.reportClientStateSoon());
           document.addEventListener('visibilitychange', () => { if (!document.hidden) this.connectNow(); this.reportClientStateSoon(); });
+          document.addEventListener('click', event => this.handleImagePreviewClick(event));
           this.$nextTick(() => { this.resizeComposer(); this.updateTranscriptStickiness(); });
+        },
+        handleImagePreviewClick(event) {
+          const trigger = event.target?.closest?.('[data-lightbox-src]');
+          if (!trigger) return;
+          event.preventDefault();
+          this.openImageLightbox(trigger.dataset.lightboxSrc || '', trigger.dataset.lightboxTitle || '', trigger.dataset.lightboxMeta || '');
+        },
+        openImageLightbox(src, title, meta) {
+          if (!src) return;
+          this.imageLightbox = {open: true, src, title: title || 'Image preview', meta: meta || ''};
+        },
+        closeImageLightbox() {
+          this.imageLightbox = {open: false, src: '', title: '', meta: ''};
         },
         applyTheme() {
           const resolved = this.theme === 'auto' ? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : this.theme;

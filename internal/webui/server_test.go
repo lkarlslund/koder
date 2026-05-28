@@ -570,6 +570,14 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `tool-result-body-mono`) || !strings.Contains(fullPage, `renderCompactBlock('Result', execResultLines(data, toolResultText(tool)), 'tool-result-body-mono')`) {
 		t.Fatalf("expected exec output to render with monospace result styling")
 	}
+	if !strings.Contains(fullPage, `function renderImagePreviewBlock`) ||
+		!strings.Contains(fullPage, `if (kind === 'view_image')`) ||
+		!strings.Contains(fullPage, `data-lightbox-src`) ||
+		!strings.Contains(fullPage, `handleImagePreviewClick`) ||
+		!strings.Contains(fullPage, `image-lightbox`) ||
+		!strings.Contains(fullPage, `.tool-image-thumb`) {
+		t.Fatalf("expected view_image results to render clickable image thumbnails with a lightbox")
+	}
 	if !strings.Contains(fullPage, `execProcesses()`) || !strings.Contains(fullPage, `exec-process-tooltip`) || !strings.Contains(fullPage, `execProcessOutput(process)`) {
 		t.Fatalf("expected current chat exec processes to render with console-output hover tooltips")
 	}
