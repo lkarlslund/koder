@@ -9,9 +9,11 @@ POLL_SECONDS="${KODER_DEV_POLL_SECONDS:-1}"
 STOP_GRACE_SECONDS="${KODER_DEV_STOP_GRACE_SECONDS:-5}"
 STOP_TIMEOUT_SECONDS="${KODER_DEV_STOP_TIMEOUT_SECONDS:-20}"
 RESTART_EXIT_CODE="${KODER_DEV_RESTART_EXIT_CODE:-75}"
+KODER_OUTPUT_LOG="${KODER_DEV_OUTPUT_LOG:-$(mktemp "/tmp/koder-dev-${USER:-user}.output.XXXXXX.log")}"
 
 child_pid=""
 shutting_down=0
+restart_failures=0
 
 log() {
   printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"
@@ -43,6 +45,8 @@ handle_signal() {
   local status="$2"
   if [[ "$signal" == "TERM" ]]; then
     log "received TERM from outside dev-restart; shutting down with error"
+    report_live_koder_status
+    report_koder_output
   else
     log "received $signal; shutting down"
   fi
@@ -59,9 +63,11 @@ build_koder() {
 }
 
 launch_koder() {
-  "$BIN" "$@" &
+  : >"$KODER_OUTPUT_LOG"
+  "$BIN" "$@" > >(tee -a "$KODER_OUTPUT_LOG") 2>&1 &
   child_pid="$!"
   log "launched koder pid=$child_pid"
+  log "koder output log: $KODER_OUTPUT_LOG"
 }
 
 stop_koder() {
@@ -140,8 +146,44 @@ report_stopped_status() {
       log "koder exited for restart with $(exit_status_text "$exit_status")"
     else
       log "koder exited unexpectedly during restart with $(exit_status_text "$exit_status")"
+      report_koder_output
     fi
+  elif [[ "$reason" == "shutdown" ]]; then
+    log "koder exited after shutdown with $(exit_status_text "$exit_status")"
+    report_koder_output
   fi
+}
+
+report_live_koder_status() {
+  if [[ -z "$child_pid" ]]; then
+    log "koder pid: none"
+    return 0
+  fi
+  if kill -0 "$child_pid" 2>/dev/null; then
+    log "koder pid=$child_pid is still running; no koder exit code is available yet"
+    return 0
+  fi
+  log "koder pid=$child_pid has already exited; collecting exit code"
+}
+
+report_koder_output() {
+  if [[ ! -s "$KODER_OUTPUT_LOG" ]]; then
+    log "koder output: <empty>"
+    return 0
+  fi
+  log "last koder output from $KODER_OUTPUT_LOG:"
+  tail -n "${KODER_DEV_OUTPUT_TAIL_LINES:-40}" "$KODER_OUTPUT_LOG" >&2 || true
+}
+
+pid_running() {
+  local pid="$1"
+  local stat=""
+  if [[ -z "$pid" ]] || ! kill -0 "$pid" 2>/dev/null; then
+    return 1
+  fi
+  stat="$(ps -o stat= -p "$pid" 2>/dev/null || true)"
+  stat="${stat//[[:space:]]/}"
+  [[ "$stat" != Z* ]]
 }
 
 source_signature() {
@@ -214,6 +256,7 @@ while true; do
       continue
     fi
     log "koder exited unexpectedly with $(exit_status_text "$exit_status")"
+    report_koder_output
     exit 1
   fi
 
@@ -230,14 +273,22 @@ while true; do
   log "building koder..."
   if build_koder; then
     if [[ -n "$child_pid" ]] && kill -0 "$child_pid" 2>/dev/null; then
+      old_pid="$child_pid"
       stop_status=0
-      stop_koder "$child_pid" "restart" || stop_status=$?
-      child_pid=""
+      stop_koder "$old_pid" "restart" || stop_status=$?
       if (( stop_status != RESTART_EXIT_CODE )); then
-        exit 1
+        restart_failures=$((restart_failures + 1))
+        if pid_running "$old_pid"; then
+          log "restart attempt failed with $(exit_status_text "$stop_status"); keeping current koder pid=$old_pid and continuing to watch"
+          last_signature="$(source_signature)"
+          continue
+        fi
+        log "restart attempt failed with $(exit_status_text "$stop_status"); old koder pid=$old_pid is gone, relaunching anyway"
       fi
+      child_pid=""
     fi
     launch_koder "$@"
+    restart_failures=0
     last_signature="$(source_signature)"
   else
     log "build failed; keeping current koder process"
