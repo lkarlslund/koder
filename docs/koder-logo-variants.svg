@@ -1,0 +1,116 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="520" viewBox="0 0 960 520" role="img" aria-labelledby="title desc">
+  <title id="title">koder logo variants</title>
+  <desc id="desc">Eight blue terminal tile logo variants using a pipe and less-than mark as a stylized k.</desc>
+  <defs>
+    <linearGradient id="blueA" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1687ff"/>
+      <stop offset="1" stop-color="#0754d9"/>
+    </linearGradient>
+    <linearGradient id="blueB" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#31a8ff"/>
+      <stop offset="1" stop-color="#0b63ce"/>
+    </linearGradient>
+    <filter id="softShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="9" flood-color="#06111f" flood-opacity=".22"/>
+    </filter>
+    <style>
+      .page { fill: #f6f8fb; }
+      .label { font: 500 15px ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #354052; }
+      .note { font: 400 12px ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #667085; }
+      .tile { filter: url(#softShadow); }
+      .terminal-bar { fill: rgba(5, 20, 42, .24); }
+      .mark-text { font: 800 54px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; fill: #fff; letter-spacing: -5px; }
+      .mark-text-tight { font: 900 58px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; fill: #fff; letter-spacing: -8px; }
+      .word { font: 700 24px ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #172033; }
+      .stroke { stroke: #fff; stroke-width: 10; stroke-linecap: round; stroke-linejoin: round; fill: none; }
+      .stroke-thin { stroke: #fff; stroke-width: 8; stroke-linecap: round; stroke-linejoin: round; fill: none; }
+      .dot { fill: #84c5ff; opacity: .9; }
+    </style>
+  </defs>
+
+  <rect class="page" width="960" height="520"/>
+
+  <g transform="translate(40 36)">
+    <text class="label" x="0" y="0">koder favicon/logo directions</text>
+    <text class="note" x="0" y="22">All variants keep the blue terminal tile and use pipe + less-than as the k idea.</text>
+  </g>
+
+  <!-- 1 -->
+  <g transform="translate(50 88)">
+    <rect class="tile" x="0" y="0" width="130" height="130" rx="24" fill="url(#blueA)"/>
+    <rect class="terminal-bar" x="0" y="0" width="130" height="28" rx="24"/>
+    <circle class="dot" cx="22" cy="14" r="4"/>
+    <circle class="dot" cx="36" cy="14" r="4"/>
+    <text class="mark-text" x="35" y="91">|&lt;</text>
+    <text class="label" x="0" y="166">1. Classic terminal</text>
+    <text class="note" x="0" y="185">Literal |&lt; inside a terminal tile.</text>
+  </g>
+
+  <!-- 2 -->
+  <g transform="translate(280 88)">
+    <rect class="tile" x="0" y="0" width="130" height="130" rx="18" fill="#0d6efd"/>
+    <path class="stroke" d="M45 36v58"/>
+    <path class="stroke" d="M86 36 57 65 86 94"/>
+    <rect x="32" y="102" width="66" height="7" rx="3.5" fill="#9ed0ff"/>
+    <text class="label" x="0" y="166">2. Geometric k</text>
+    <text class="note" x="0" y="185">Drawn strokes, stronger at small size.</text>
+  </g>
+
+  <!-- 3 -->
+  <g transform="translate(510 88)">
+    <rect class="tile" x="0" y="0" width="130" height="130" rx="26" fill="#0866e8"/>
+    <rect x="17" y="18" width="96" height="94" rx="12" fill="#051a33" opacity=".32"/>
+    <text class="mark-text-tight" x="34" y="90">|&lt;</text>
+    <text class="label" x="0" y="166">3. Inset console</text>
+    <text class="note" x="0" y="185">Terminal screen inside the blue app tile.</text>
+  </g>
+
+  <!-- 4 -->
+  <g transform="translate(740 88)">
+    <rect class="tile" x="0" y="0" width="130" height="130" rx="12" fill="url(#blueB)"/>
+    <text class="mark-text-tight" x="31" y="88">|&lt;</text>
+    <path d="M33 99h64" stroke="#bde0ff" stroke-width="6" stroke-linecap="round"/>
+    <text class="label" x="0" y="166">4. Sharp app icon</text>
+    <text class="note" x="0" y="185">Less rounded, more utility-tool feel.</text>
+  </g>
+
+  <!-- 5 -->
+  <g transform="translate(50 302)">
+    <rect class="tile" x="0" y="0" width="130" height="130" rx="24" fill="#0b5ed7"/>
+    <path class="stroke-thin" d="M40 32v66"/>
+    <path class="stroke-thin" d="M91 36 58 65 91 94"/>
+    <circle cx="24" cy="24" r="5" fill="#9ed0ff"/>
+    <text class="label" x="0" y="166">5. Prompt mark</text>
+    <text class="note" x="0" y="185">Minimal tile with a single status dot.</text>
+  </g>
+
+  <!-- 6 -->
+  <g transform="translate(280 302)">
+    <rect class="tile" x="0" y="0" width="130" height="130" rx="30" fill="#1278f2"/>
+    <path d="M30 31h70a14 14 0 0 1 14 14v47a14 14 0 0 1-14 14H30a14 14 0 0 1-14-14V45a14 14 0 0 1 14-14Z" fill="#061f3f" opacity=".3"/>
+    <text class="mark-text" x="34" y="88">|&lt;</text>
+    <text class="word" x="145" y="78">koder</text>
+    <text class="label" x="0" y="166">6. Icon + wordmark</text>
+    <text class="note" x="0" y="185">Useful for docs, header, and about screens.</text>
+  </g>
+
+  <!-- 7 -->
+  <g transform="translate(510 302)">
+    <rect class="tile" x="0" y="0" width="130" height="130" rx="22" fill="#0a58ca"/>
+    <path class="stroke" d="M42 31v68"/>
+    <path class="stroke" d="M91 34 59 65 91 96"/>
+    <path d="M42 31h28" stroke="#9ed0ff" stroke-width="7" stroke-linecap="round"/>
+    <text class="label" x="0" y="166">7. Cursor-first</text>
+    <text class="note" x="0" y="185">Pipe reads as the active insertion point.</text>
+  </g>
+
+  <!-- 8 -->
+  <g transform="translate(740 302)">
+    <rect class="tile" x="0" y="0" width="130" height="130" rx="24" fill="#0d6efd"/>
+    <rect x="19" y="22" width="92" height="86" rx="16" fill="#031b34" opacity=".26"/>
+    <path d="M49 39v54" stroke="#fff" stroke-width="9" stroke-linecap="square"/>
+    <path d="M86 40 60 65 86 90" stroke="#fff" stroke-width="9" stroke-linecap="square" stroke-linejoin="miter" fill="none"/>
+    <text class="label" x="0" y="166">8. Pixel terminal</text>
+    <text class="note" x="0" y="185">Blockier, favicon-oriented construction.</text>
+  </g>
+</svg>
