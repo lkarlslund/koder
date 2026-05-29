@@ -1630,9 +1630,24 @@ func TestRunPromptWithUnsupportedPDFAttachmentFailsBeforeProviderCall(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := engine.RunPromptWithAttachments(context.Background(), session, "summarize", []attachment.Draft{draft}, ""); err == nil {
-		t.Fatal("expected unsupported pdf attachment to be rejected")
+	chatRecord := defaultChatForSession(t, st, session.ID)
+	rt, err := engine.Chat(context.Background(), session, chatRecord)
+	if err != nil {
+		t.Fatal(err)
 	}
+	t.Cleanup(rt.Close)
+	updates, unsub := rt.Subscribe()
+	defer unsub()
+	rt.Enqueue(chatpkg.QueueItem{Kind: chatpkg.QueueKindSteer, Text: "summarize", Attachments: []attachment.Draft{draft}})
+	events := collectLiveUpdates(t, rt, updates, func(evt domain.Event) bool {
+		return evt.Kind == domain.EventKindError
+	})
+	for _, evt := range events {
+		if evt.Kind == domain.EventKindError {
+			return
+		}
+	}
+	t.Fatal("expected unsupported pdf attachment to be rejected")
 }
 
 func TestPreviewNextRequestIncludesStructuredFileReference(t *testing.T) {
@@ -2199,82 +2214,6 @@ func TestHandleModelToolCallsStopsAfterToolBatchWhenCancelRequested(t *testing.T
 	}
 	if !sawToolResult {
 		t.Fatal("expected persisted tool result before cancellation")
-	}
-}
-
-func TestContinueModelTurnStopsAfterPersistingToolCallsWhenDrainRequested(t *testing.T) {
-	t.Parallel()
-
-	var requests int
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/chat/completions" {
-			http.NotFound(w, r)
-			return
-		}
-		requests++
-		_, _ = w.Write([]byte(`{"choices":[{"message":{"tool_calls":[{"id":"call_1","type":"function","function":{"name":"bash","arguments":"{\"command\":\"printf hi\"}"}}]}}],"usage":{"total_tokens":1}}`))
-	}))
-	defer server.Close()
-
-	cfg := testConfig(t)
-	cfg.Providers = map[string]config.Provider{"test": {BaseURL: server.URL + "/v1", Timeout: time.Second}}
-	cfg.DefaultProvider = "test"
-	cfg.DefaultModel = "test-model"
-	cfg.Permissions.Profile = permissionprofile.ProfileFullAccess
-
-	st, err := store.Open(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer st.Close()
-
-	workdir := t.TempDir()
-	engine := New(cfg, st, tools.NewRegistry(workdir), nil)
-	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := st.SetSessionPermissionProfile(context.Background(), session.ID, permissionprofile.ProfileFullAccess); err != nil {
-		t.Fatal(err)
-	}
-	chat := defaultChatForSession(t, st, session.ID)
-	client, err := provider.New("test", cfg.Providers["test"], nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx := turncontrol.WithShouldStop(context.Background(), func() bool { return true })
-	out := make(chan domain.Event, 8)
-
-	if err := engine.continueModelTurn(ctx, session, chat, client, out, nil); err != nil {
-		t.Fatal(err)
-	}
-	close(out)
-
-	if requests != 1 {
-		t.Fatalf("expected one provider request, got %d", requests)
-	}
-	items, err := st.TimelineForChat(context.Background(), chat.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var pendingTool bool
-	for _, item := range items {
-		assistant, ok := item.Content.(domain.AssistantMessage)
-		if !ok {
-			continue
-		}
-		call := assistant.ToolByID(domain.ToolCallID("call_1"))
-		if call != nil && call.Status == domain.ToolStatusPending && call.Result == nil {
-			pendingTool = true
-		}
-	}
-	if !pendingTool {
-		t.Fatalf("expected pending tool call to be persisted, got %#v", items)
-	}
-	for evt := range out {
-		if evt.Kind == domain.EventKindToolStart || evt.Kind == domain.EventKindToolResult {
-			t.Fatalf("did not expect tool execution while draining, got %#v", evt)
-		}
 	}
 }
 
@@ -4614,15 +4553,22 @@ func TestRunPromptIncludesTransientSessionNote(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	events, err := engine.RunPromptWithAttachments(context.Background(), session, "hello", nil, "Permission mode changed to ask.")
+	chatRecord := defaultChatForSession(t, st, session.ID)
+	rt, err := engine.Chat(context.Background(), session, chatRecord)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for range events {
-	}
+	t.Cleanup(rt.Close)
+	updates, unsub := rt.Subscribe()
+	defer unsub()
+	rt.Enqueue(chatpkg.QueueItem{Kind: chatpkg.QueueKindSteer, Text: "hello", Note: "Permission mode changed to ask."})
+	_ = collectLiveUpdates(t, rt, updates, func(evt domain.Event) bool {
+		return evt.Kind == domain.EventKindMessageDone || evt.Kind == domain.EventKindError
+	})
 	if len(requests) == 0 || !strings.Contains(requests[0], `Session update:\nPermission mode changed to ask.`) {
 		t.Fatalf("expected transient session note in request, got %v", requests)
 	}
+	waitForChatInactive(t, rt)
 	messages, _, err := timelineTranscriptForSession(t, st, session.ID)
 	if err != nil {
 		t.Fatal(err)
