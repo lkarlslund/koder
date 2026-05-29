@@ -840,6 +840,26 @@ func (b *pebbleBackend) AddTask(ctx context.Context, sessionID domain.ID, body s
 	return task, nil
 }
 
+func (b *pebbleBackend) PutTask(ctx context.Context, task Task) error {
+	if err := ensureContext(ctx); err != nil {
+		return err
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if _, err := b.readSession(task.SessionID); err != nil {
+		return err
+	}
+	batch := b.db.NewBatch()
+	defer batch.Close()
+	if err := b.putTask(batch, task); err != nil {
+		return err
+	}
+	if err := batch.Set([]byte(taskSessionIndexKey(task.SessionID, task.ID)), nil, nil); err != nil {
+		return fmt.Errorf("index task by session: %w", err)
+	}
+	return batch.Commit(pebble.Sync)
+}
+
 func (b *pebbleBackend) UpdateTask(ctx context.Context, taskID domain.ID, status domain.TaskStatus) error {
 	if err := ensureContext(ctx); err != nil {
 		return err
@@ -915,6 +935,23 @@ func (b *pebbleBackend) SetMilestonePlan(ctx context.Context, sessionID domain.I
 	return plan, nil
 }
 
+func (b *pebbleBackend) PutMilestonePlan(ctx context.Context, plan MilestonePlan) error {
+	if err := ensureContext(ctx); err != nil {
+		return err
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if _, err := b.readSession(plan.SessionID); err != nil {
+		return err
+	}
+	batch := b.db.NewBatch()
+	defer batch.Close()
+	if err := b.putMilestonePlan(batch, plan); err != nil {
+		return err
+	}
+	return batch.Commit(pebble.Sync)
+}
+
 func (b *pebbleBackend) GetMilestonePlan(ctx context.Context, sessionID domain.ID) (MilestonePlan, error) {
 	if err := ensureContext(ctx); err != nil {
 		return MilestonePlan{}, err
@@ -979,6 +1016,26 @@ func (b *pebbleBackend) AddTodoItems(ctx context.Context, sessionID domain.ID, m
 		return nil, fmt.Errorf("commit add todos: %w", err)
 	}
 	return created, nil
+}
+
+func (b *pebbleBackend) PutTodoItem(ctx context.Context, item TodoItem) error {
+	if err := ensureContext(ctx); err != nil {
+		return err
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if _, err := b.readSession(item.SessionID); err != nil {
+		return err
+	}
+	batch := b.db.NewBatch()
+	defer batch.Close()
+	if err := b.putTodoItem(batch, item); err != nil {
+		return err
+	}
+	if err := batch.Set([]byte(todoSessionIndexKey(item.SessionID, item.ID)), nil, nil); err != nil {
+		return fmt.Errorf("index todo by session: %w", err)
+	}
+	return batch.Commit(pebble.Sync)
 }
 
 func (b *pebbleBackend) UpdateTodoItem(ctx context.Context, todoID domain.ID, status domain.TodoStatus, content string) (TodoItem, error) {

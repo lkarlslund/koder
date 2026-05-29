@@ -744,49 +744,130 @@ func (c *Controller) GetMilestonePlan(ctx context.Context, sessionID domain.ID) 
 }
 
 func (c *Controller) SetMilestonePlan(ctx context.Context, sessionID domain.ID, summary string, milestones []store.Milestone) (store.MilestonePlan, error) {
-	plan, err := c.store.SetMilestonePlan(ctx, sessionID, summary, milestones)
-	if err != nil {
-		return store.MilestonePlan{}, err
+	plan := store.MilestonePlan{
+		SessionID:  sessionID,
+		Summary:    summary,
+		Milestones: slices.Clone(milestones),
+		UpdatedAt:  time.Now().UTC(),
 	}
+	var previous store.MilestonePlan
 	c.mu.Lock()
 	if c.session.ID == sessionID {
+		previous = c.milestone
 		c.milestone = plan
 	}
 	c.mu.Unlock()
+	if err := c.store.PutMilestonePlan(ctx, plan); err != nil {
+		c.mu.Lock()
+		if c.session.ID == sessionID {
+			c.milestone = previous
+		}
+		c.mu.Unlock()
+		return store.MilestonePlan{}, err
+	}
 	return plan, nil
 }
 
 func (c *Controller) AddTodoItems(ctx context.Context, sessionID domain.ID, milestoneRef string, contents []string) ([]store.TodoItem, error) {
-	items, err := c.store.AddTodoItems(ctx, sessionID, milestoneRef, contents)
-	if err != nil {
-		return nil, err
-	}
+	now := time.Now().UTC()
+	var previousByRef map[string][]store.TodoItem
+	var previousActive []store.TodoItem
+	var items []store.TodoItem
 	c.mu.Lock()
 	if c.session.ID == sessionID {
+		previousByRef = cloneTodosByRef(c.todosByRef)
+		previousActive = slices.Clone(c.todos)
 		c.todosByRef = cloneTodosByRef(c.todosByRef)
+		if c.todosByRef == nil {
+			c.todosByRef = map[string][]store.TodoItem{}
+		}
+		position := len(c.todosByRef[milestoneRef])
+		items = make([]store.TodoItem, 0, len(contents))
+		for _, content := range contents {
+			item := store.TodoItem{
+				ID:           domain.NewID(),
+				SessionID:    sessionID,
+				MilestoneRef: milestoneRef,
+				Content:      content,
+				Status:       domain.TodoStatusPending,
+				Position:     position + len(items),
+				CreatedAt:    now,
+				UpdatedAt:    now,
+			}
+			items = append(items, item)
+		}
 		c.todosByRef[milestoneRef] = append(c.todosByRef[milestoneRef], items...)
 		if active, ok := tools.ActiveMilestone(c.milestone); ok && active.Ref == milestoneRef {
 			c.todos = slices.Clone(c.todosByRef[milestoneRef])
 		}
 	}
 	c.mu.Unlock()
+	if items == nil {
+		created, err := c.store.AddTodoItems(ctx, sessionID, milestoneRef, contents)
+		if err != nil {
+			return nil, err
+		}
+		return created, nil
+	}
+	for _, item := range items {
+		if err := c.store.PutTodoItem(ctx, item); err != nil {
+			c.mu.Lock()
+			if c.session.ID == sessionID {
+				c.todosByRef = previousByRef
+				c.todos = previousActive
+			}
+			c.mu.Unlock()
+			return nil, err
+		}
+	}
 	return items, nil
 }
 
 func (c *Controller) UpdateTodoItem(ctx context.Context, todoID domain.ID, status domain.TodoStatus, content string) (store.TodoItem, error) {
-	item, err := c.store.UpdateTodoItem(ctx, todoID, status, content)
-	if err != nil {
-		return store.TodoItem{}, err
-	}
+	now := time.Now().UTC()
+	var item store.TodoItem
+	var found bool
+	var previousByRef map[string][]store.TodoItem
+	var previousActive []store.TodoItem
 	c.mu.Lock()
-	if c.session.ID == item.SessionID {
-		updateTodoInSlice(c.todos, item)
-		if c.todosByRef != nil {
+	previousByRef = cloneTodosByRef(c.todosByRef)
+	previousActive = slices.Clone(c.todos)
+	for ref, todos := range c.todosByRef {
+		for idx := range todos {
+			if todos[idx].ID != todoID {
+				continue
+			}
+			item = todos[idx]
+			item.Status = status
+			if strings.TrimSpace(content) != "" {
+				item.Content = content
+			}
+			item.UpdatedAt = now
 			c.todosByRef = cloneTodosByRef(c.todosByRef)
-			updateTodoInSlice(c.todosByRef[item.MilestoneRef], item)
+			c.todosByRef[ref][idx] = item
+			updateTodoInSlice(c.todos, item)
+			found = true
+			break
+		}
+		if found {
+			break
 		}
 	}
 	c.mu.Unlock()
+	if !found {
+		updated, err := c.store.UpdateTodoItem(ctx, todoID, status, content)
+		if err != nil {
+			return store.TodoItem{}, err
+		}
+		return updated, nil
+	}
+	if err := c.store.PutTodoItem(ctx, item); err != nil {
+		c.mu.Lock()
+		c.todosByRef = previousByRef
+		c.todos = previousActive
+		c.mu.Unlock()
+		return store.TodoItem{}, err
+	}
 	return item, nil
 }
 
@@ -802,7 +883,17 @@ func (c *Controller) ListTodos(ctx context.Context, sessionID domain.ID, milesto
 }
 
 func (c *Controller) AddTask(ctx context.Context, sessionID domain.ID, body string, status domain.TaskStatus) (store.Task, error) {
-	return c.store.AddTask(ctx, sessionID, body, status)
+	task := store.Task{
+		ID:        domain.NewID(),
+		SessionID: sessionID,
+		Body:      body,
+		Status:    status,
+		CreatedAt: time.Now().UTC(),
+	}
+	if err := c.store.PutTask(ctx, task); err != nil {
+		return store.Task{}, err
+	}
+	return task, nil
 }
 
 func updateTodoInSlice(items []store.TodoItem, item store.TodoItem) {

@@ -732,6 +732,18 @@ func (b *jsonfsBackend) AddTask(ctx context.Context, sessionID domain.ID, body s
 	return task, nil
 }
 
+func (b *jsonfsBackend) PutTask(ctx context.Context, task Task) error {
+	if err := ensureContext(ctx); err != nil {
+		return err
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if _, err := b.readSession(task.SessionID); err != nil {
+		return err
+	}
+	return b.writeTask(task)
+}
+
 func (b *jsonfsBackend) UpdateTask(ctx context.Context, taskID domain.ID, status domain.TaskStatus) error {
 	if err := ensureContext(ctx); err != nil {
 		return err
@@ -794,6 +806,18 @@ func (b *jsonfsBackend) SetMilestonePlan(ctx context.Context, sessionID domain.I
 	return plan, nil
 }
 
+func (b *jsonfsBackend) PutMilestonePlan(ctx context.Context, plan MilestonePlan) error {
+	if err := ensureContext(ctx); err != nil {
+		return err
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if _, err := b.readSession(plan.SessionID); err != nil {
+		return err
+	}
+	return b.writeMilestonePlan(plan)
+}
+
 func (b *jsonfsBackend) GetMilestonePlan(ctx context.Context, sessionID domain.ID) (MilestonePlan, error) {
 	if err := ensureContext(ctx); err != nil {
 		return MilestonePlan{}, err
@@ -844,6 +868,18 @@ func (b *jsonfsBackend) AddTodoItems(ctx context.Context, sessionID domain.ID, m
 		return nil, err
 	}
 	return items, nil
+}
+
+func (b *jsonfsBackend) PutTodoItem(ctx context.Context, item TodoItem) error {
+	if err := ensureContext(ctx); err != nil {
+		return err
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if _, err := b.readSession(item.SessionID); err != nil {
+		return err
+	}
+	return b.writeTodoItem(item)
 }
 
 func (b *jsonfsBackend) UpdateTodoItem(ctx context.Context, todoID domain.ID, status domain.TodoStatus, content string) (TodoItem, error) {

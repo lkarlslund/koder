@@ -53,11 +53,14 @@ type backend interface {
 	PendingApprovals(context.Context, domain.ID) ([]Approval, error)
 	PendingApprovalsForChat(context.Context, domain.ID) ([]Approval, error)
 	AddTask(context.Context, domain.ID, string, domain.TaskStatus) (Task, error)
+	PutTask(context.Context, Task) error
 	UpdateTask(context.Context, domain.ID, domain.TaskStatus) error
 	ListTasks(context.Context, domain.ID) ([]Task, error)
 	SetMilestonePlan(context.Context, domain.ID, string, []Milestone) (MilestonePlan, error)
+	PutMilestonePlan(context.Context, MilestonePlan) error
 	GetMilestonePlan(context.Context, domain.ID) (MilestonePlan, error)
 	AddTodoItems(context.Context, domain.ID, string, []string) ([]TodoItem, error)
+	PutTodoItem(context.Context, TodoItem) error
 	UpdateTodoItem(context.Context, domain.ID, domain.TodoStatus, string) (TodoItem, error)
 	ListTodos(context.Context, domain.ID, string) ([]TodoItem, error)
 	GetApproval(context.Context, domain.ID) (Approval, error)
@@ -533,6 +536,16 @@ func (s *Store) AddTask(ctx context.Context, sessionID domain.ID, body string, s
 	return s.backend.AddTask(ctx, sessionID, body, status)
 }
 
+func (s *Store) PutTask(ctx context.Context, task Task) error {
+	if task.ID == "" {
+		return fmt.Errorf("put task: id is required")
+	}
+	if task.SessionID == "" {
+		return fmt.Errorf("put task: session id is required")
+	}
+	return s.backend.PutTask(ctx, task)
+}
+
 func (s *Store) UpdateTask(ctx context.Context, taskID domain.ID, status domain.TaskStatus) error {
 	return s.backend.UpdateTask(ctx, taskID, status)
 }
@@ -545,12 +558,29 @@ func (s *Store) SetMilestonePlan(ctx context.Context, sessionID domain.ID, summa
 	return s.backend.SetMilestonePlan(ctx, sessionID, summary, milestones)
 }
 
+func (s *Store) PutMilestonePlan(ctx context.Context, plan MilestonePlan) error {
+	if plan.SessionID == "" {
+		return fmt.Errorf("put milestone plan: session id is required")
+	}
+	return s.backend.PutMilestonePlan(ctx, plan)
+}
+
 func (s *Store) GetMilestonePlan(ctx context.Context, sessionID domain.ID) (MilestonePlan, error) {
 	return s.backend.GetMilestonePlan(ctx, sessionID)
 }
 
 func (s *Store) AddTodoItems(ctx context.Context, sessionID domain.ID, milestoneRef string, contents []string) ([]TodoItem, error) {
 	return s.backend.AddTodoItems(ctx, sessionID, milestoneRef, contents)
+}
+
+func (s *Store) PutTodoItem(ctx context.Context, item TodoItem) error {
+	if item.ID == "" {
+		return fmt.Errorf("put todo item: id is required")
+	}
+	if item.SessionID == "" {
+		return fmt.Errorf("put todo item: session id is required")
+	}
+	return s.backend.PutTodoItem(ctx, item)
 }
 
 func (s *Store) UpdateTodoItem(ctx context.Context, todoID domain.ID, status domain.TodoStatus, content string) (TodoItem, error) {
