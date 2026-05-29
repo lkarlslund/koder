@@ -10,6 +10,7 @@ STOP_GRACE_SECONDS="${KODER_DEV_STOP_GRACE_SECONDS:-5}"
 STOP_TIMEOUT_SECONDS="${KODER_DEV_STOP_TIMEOUT_SECONDS:-20}"
 RESTART_EXIT_CODE="${KODER_DEV_RESTART_EXIT_CODE:-75}"
 KODER_OUTPUT_LOG="${KODER_DEV_OUTPUT_LOG:-$(mktemp "/tmp/koder-dev-${USER:-user}.output.XXXXXX.log")}"
+KODER_DEV_WEB_BIND="${KODER_DEV_WEB_BIND:-0.0.0.0:7979}"
 
 child_pid=""
 shutting_down=0
@@ -62,9 +63,34 @@ build_koder() {
   "$BUILD_SCRIPT" "$BIN" >/dev/null
 }
 
+has_web_bind_arg() {
+  local arg
+  for arg in "$@"; do
+    case "$arg" in
+      --)
+        return 1
+        ;;
+      --web-bind|--web-bind=*)
+        return 0
+        ;;
+    esac
+  done
+  return 1
+}
+
+launch_args() {
+  if has_web_bind_arg "$@"; then
+    printf '%s\0' "$@"
+    return 0
+  fi
+  printf '%s\0' "--web-bind=$KODER_DEV_WEB_BIND" "$@"
+}
+
 launch_koder() {
+  local args=()
+  mapfile -d '' -t args < <(launch_args "$@")
   : >"$KODER_OUTPUT_LOG"
-  "$BIN" "$@" > >(tee -a "$KODER_OUTPUT_LOG") 2>&1 &
+  "$BIN" "${args[@]}" > >(tee -a "$KODER_OUTPUT_LOG") 2>&1 &
   child_pid="$!"
   log "launched koder pid=$child_pid"
   log "koder output log: $KODER_OUTPUT_LOG"
