@@ -381,9 +381,10 @@ func TestControllerSavePreferencesPersistsConfigAndPrompts(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	engine := agent.New(cfg, st, nil, nil, t.TempDir())
-	ctrl := New(cfg, st, engine, t.TempDir())
-	if err := ctrl.Start(context.Background(), StartupModeNew); err != nil {
+	projectRoot := t.TempDir()
+	engine := agent.New(cfg, st, nil, nil)
+	ctrl := New(cfg, st, engine)
+	if err := ctrl.Start(context.Background(), StartupModeNew, projectRoot); err != nil {
 		t.Fatal(err)
 	}
 
@@ -443,8 +444,8 @@ func TestControllerSavePreferencesPersistsConfigAndPrompts(t *testing.T) {
 	if loaded.MCPServers["docs"].URL != "https://mcp.example.invalid/sse" || loaded.MCPServers["docs"].Headers["X-Test"] != "yes" {
 		t.Fatalf("expected saved MCP server, got %#v", loaded.MCPServers["docs"])
 	}
-	restarted := New(loaded, st, agent.New(loaded, st, nil, nil, t.TempDir()), t.TempDir())
-	if err := restarted.Start(context.Background(), StartupModeNew); err != nil {
+	restarted := New(loaded, st, agent.New(loaded, st, nil, nil))
+	if err := restarted.Start(context.Background(), StartupModeNew, projectRoot); err != nil {
 		t.Fatal(err)
 	}
 	restartedPrefs, err := restarted.Preferences(context.Background())
@@ -493,8 +494,9 @@ func TestControllerSavePreferencesRepairsDeletedDefaultProvider(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	ctrl := New(cfg, st, agent.New(cfg, st, nil, nil, t.TempDir()), t.TempDir())
-	if err := ctrl.Start(context.Background(), StartupModeNew); err != nil {
+	projectRoot := t.TempDir()
+	ctrl := New(cfg, st, agent.New(cfg, st, nil, nil))
+	if err := ctrl.Start(context.Background(), StartupModeNew, projectRoot); err != nil {
 		t.Fatal(err)
 	}
 
@@ -646,8 +648,8 @@ func TestControllerPermissionProfilePersistsBySession(t *testing.T) {
 		t.Fatalf("open store: %v", err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	ctrl := New(cfg, st, agent.New(cfg, st, nil, nil, workdir), workdir)
-	if err := ctrl.Start(context.Background(), StartupModeNew); err != nil {
+	ctrl := New(cfg, st, agent.New(cfg, st, nil, nil))
+	if err := ctrl.Start(context.Background(), StartupModeNew, workdir); err != nil {
 		t.Fatalf("start controller: %v", err)
 	}
 	if err := ctrl.SetPermissionProfile(context.Background(), "dev-network"); err != nil {
@@ -658,8 +660,8 @@ func TestControllerPermissionProfilePersistsBySession(t *testing.T) {
 		t.Fatalf("shutdown: %v", err)
 	}
 
-	engine := agent.New(cfg, st, nil, nil, workdir)
-	next := New(cfg, st, engine, workdir)
+	engine := agent.New(cfg, st, nil, nil)
+	next := New(cfg, st, engine)
 	if err := next.loadSession(context.Background(), sessionID, ""); err != nil {
 		t.Fatalf("start next controller: %v", err)
 	}
@@ -705,7 +707,7 @@ func TestControllerSetPermissionProfileRejectsUnknownProfile(t *testing.T) {
 	}
 }
 
-func TestControllerSessionsAreWorkspaceScoped(t *testing.T) {
+func TestControllerSessionsCanUseDifferentProjectRoots(t *testing.T) {
 	cfg := config.Default().WithStateDir(t.TempDir())
 	cfg.DefaultProvider = "test"
 	cfg.DefaultModel = "model"
@@ -722,44 +724,47 @@ func TestControllerSessionsAreWorkspaceScoped(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create session a: %v", err)
 	}
-	if err := st.UpdateSessionWorkspace(ctx, sessionA.ID, workspaceA, workspaceA); err != nil {
+	if err := st.SetSessionProjectRoot(ctx, sessionA.ID, workspaceA); err != nil {
 		t.Fatalf("workspace a: %v", err)
 	}
 	sessionB, err := st.CreateSession(ctx, "Workspace B", "test", "model", nil)
 	if err != nil {
 		t.Fatalf("create session b: %v", err)
 	}
-	if err := st.UpdateSessionWorkspace(ctx, sessionB.ID, workspaceB, workspaceB); err != nil {
+	if err := st.SetSessionProjectRoot(ctx, sessionB.ID, workspaceB); err != nil {
 		t.Fatalf("workspace b: %v", err)
 	}
 
-	engine := agent.New(cfg, st, nil, nil, workspaceA)
-	ctrl := New(cfg, st, engine, workspaceA)
-	if err := ctrl.Start(ctx, StartupModeResume); err != nil {
+	engine := agent.New(cfg, st, nil, nil)
+	ctrl := New(cfg, st, engine)
+	if err := ctrl.Start(ctx, StartupModeResume, workspaceA); err != nil {
 		t.Fatalf("start resume: %v", err)
 	}
-	if got := ctrl.State().Session.ID; got != sessionA.ID {
-		t.Fatalf("expected workspace A session %s, got %s", sessionA.ID, got)
+	if got := ctrl.State().Session.ID; got != sessionB.ID {
+		t.Fatalf("expected newest session %s, got %s", sessionB.ID, got)
 	}
 	sessionState, err := ctrl.Sessions(ctx)
 	if err != nil {
 		t.Fatalf("sessions: %v", err)
 	}
-	if len(sessionState.Sessions) != 1 || sessionState.Sessions[0].ID != sessionA.ID {
-		t.Fatalf("expected only workspace A session, got %#v", sessionState.Sessions)
+	if len(sessionState.Sessions) != 2 {
+		t.Fatalf("expected both project-root sessions, got %#v", sessionState.Sessions)
 	}
-	if err := ctrl.SwitchSession(ctx, sessionB.ID); err == nil {
-		t.Fatal("expected switch to other workspace session to fail")
+	if err := ctrl.SwitchSession(ctx, sessionA.ID); err != nil {
+		t.Fatalf("switch to other project root session: %v", err)
 	}
 	if err := ctrl.NewSession(ctx, "Second A"); err != nil {
 		t.Fatalf("new session: %v", err)
+	}
+	if got := ctrl.State().Session.ProjectRoot; got != workspaceA {
+		t.Fatalf("expected new session to inherit active project root %q, got %q", workspaceA, got)
 	}
 	sessionState, err = ctrl.Sessions(ctx)
 	if err != nil {
 		t.Fatalf("sessions after new: %v", err)
 	}
-	if len(sessionState.Sessions) != 2 {
-		t.Fatalf("expected two workspace A sessions, got %#v", sessionState.Sessions)
+	if len(sessionState.Sessions) != 3 {
+		t.Fatalf("expected three sessions, got %#v", sessionState.Sessions)
 	}
 }
 
@@ -833,7 +838,7 @@ func TestControllerStartupNewResumesRestartInterruptedWorkspaceSession(t *testin
 	if err != nil {
 		t.Fatalf("create session: %v", err)
 	}
-	if err := st.UpdateSessionWorkspace(ctx, session.ID, workdir, workdir); err != nil {
+	if err := st.SetSessionProjectRoot(ctx, session.ID, workdir); err != nil {
 		t.Fatalf("workspace: %v", err)
 	}
 	chatRecord, err := st.DefaultChat(ctx, session.ID)
@@ -862,9 +867,9 @@ func TestControllerStartupNewResumesRestartInterruptedWorkspaceSession(t *testin
 		t.Fatalf("put notice: %v", err)
 	}
 
-	engine := agent.New(cfg, st, nil, nil, workdir)
-	ctrl := New(cfg, st, engine, workdir)
-	if err := ctrl.Start(ctx, StartupModeNew); err != nil {
+	engine := agent.New(cfg, st, nil, nil)
+	ctrl := New(cfg, st, engine)
+	if err := ctrl.Start(ctx, StartupModeNew, workdir); err != nil {
 		t.Fatalf("start controller: %v", err)
 	}
 	if got := ctrl.State().Session.ID; got != session.ID {
@@ -941,7 +946,7 @@ func TestControllerStartupMarksStaleRunningToolCallsFailed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create session: %v", err)
 	}
-	if err := st.UpdateSessionWorkspace(ctx, session.ID, workdir, workdir); err != nil {
+	if err := st.SetSessionProjectRoot(ctx, session.ID, workdir); err != nil {
 		t.Fatalf("workspace: %v", err)
 	}
 	chatRecord, err := st.DefaultChat(ctx, session.ID)
@@ -957,9 +962,9 @@ func TestControllerStartupMarksStaleRunningToolCallsFailed(t *testing.T) {
 		t.Fatalf("append running tool call: %v", err)
 	}
 
-	engine := agent.New(cfg, st, nil, nil, workdir)
-	ctrl := New(cfg, st, engine, workdir)
-	if err := ctrl.Start(ctx, StartupModeNew); err != nil {
+	engine := agent.New(cfg, st, nil, nil)
+	ctrl := New(cfg, st, engine)
+	if err := ctrl.Start(ctx, StartupModeNew, workdir); err != nil {
 		t.Fatalf("start controller: %v", err)
 	}
 	timeline, err := st.TimelineForChat(ctx, chatRecord.ID)
@@ -992,14 +997,14 @@ func TestControllerStartupNewResumesLastWorkspaceSessionAndChat(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create older session: %v", err)
 	}
-	if err := st.UpdateSessionWorkspace(ctx, sessionA.ID, workdir, workdir); err != nil {
+	if err := st.SetSessionProjectRoot(ctx, sessionA.ID, workdir); err != nil {
 		t.Fatalf("workspace older: %v", err)
 	}
 	sessionB, err := st.CreateSession(ctx, "Last Used", "test", "model", nil)
 	if err != nil {
 		t.Fatalf("create last session: %v", err)
 	}
-	if err := st.UpdateSessionWorkspace(ctx, sessionB.ID, workdir, workdir); err != nil {
+	if err := st.SetSessionProjectRoot(ctx, sessionB.ID, workdir); err != nil {
 		t.Fatalf("workspace last: %v", err)
 	}
 	if _, err := st.TouchSession(ctx, sessionB.ID); err != nil {
@@ -1017,9 +1022,9 @@ func TestControllerStartupNewResumesLastWorkspaceSessionAndChat(t *testing.T) {
 		t.Fatalf("mark default chat last used: %v", err)
 	}
 
-	engine := agent.New(cfg, st, nil, nil, workdir)
-	ctrl := New(cfg, st, engine, workdir)
-	if err := ctrl.Start(ctx, StartupModeNew); err != nil {
+	engine := agent.New(cfg, st, nil, nil)
+	ctrl := New(cfg, st, engine)
+	if err := ctrl.Start(ctx, StartupModeNew, workdir); err != nil {
 		t.Fatalf("start controller: %v", err)
 	}
 	state := ctrl.State()
@@ -1042,9 +1047,9 @@ func TestControllerSwitchChatPersistsLastUsedChat(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = st.Close() })
 	workdir := t.TempDir()
-	engine := agent.New(cfg, st, nil, nil, workdir)
-	ctrl := New(cfg, st, engine, workdir)
-	if err := ctrl.Start(ctx, StartupModeNew); err != nil {
+	engine := agent.New(cfg, st, nil, nil)
+	ctrl := New(cfg, st, engine)
+	if err := ctrl.Start(ctx, StartupModeNew, workdir); err != nil {
 		t.Fatalf("start controller: %v", err)
 	}
 	first := ctrl.State().ActiveChatID
@@ -1055,8 +1060,8 @@ func TestControllerSwitchChatPersistsLastUsedChat(t *testing.T) {
 		t.Fatalf("switch back to first chat: %v", err)
 	}
 
-	next := New(cfg, st, agent.New(cfg, st, nil, nil, workdir), workdir)
-	if err := next.Start(ctx, StartupModeNew); err != nil {
+	next := New(cfg, st, agent.New(cfg, st, nil, nil))
+	if err := next.Start(ctx, StartupModeNew, workdir); err != nil {
 		t.Fatalf("restart controller: %v", err)
 	}
 	if got := next.State().ActiveChatID; got != first {
@@ -1075,9 +1080,9 @@ func TestControllerSwitchSessionPersistsLastUsedSession(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = st.Close() })
 	workdir := t.TempDir()
-	engine := agent.New(cfg, st, nil, nil, workdir)
-	ctrl := New(cfg, st, engine, workdir)
-	if err := ctrl.Start(ctx, StartupModeNew); err != nil {
+	engine := agent.New(cfg, st, nil, nil)
+	ctrl := New(cfg, st, engine)
+	if err := ctrl.Start(ctx, StartupModeNew, workdir); err != nil {
 		t.Fatalf("start controller: %v", err)
 	}
 	first := ctrl.State().Session.ID
@@ -1088,8 +1093,8 @@ func TestControllerSwitchSessionPersistsLastUsedSession(t *testing.T) {
 		t.Fatalf("switch back to first session: %v", err)
 	}
 
-	next := New(cfg, st, agent.New(cfg, st, nil, nil, workdir), workdir)
-	if err := next.Start(ctx, StartupModeNew); err != nil {
+	next := New(cfg, st, agent.New(cfg, st, nil, nil))
+	if err := next.Start(ctx, StartupModeNew, workdir); err != nil {
 		t.Fatalf("restart controller: %v", err)
 	}
 	if got := next.State().Session.ID; got != first {
@@ -1124,9 +1129,9 @@ func TestControllerRefreshWorkspacePublishesGitStatus(t *testing.T) {
 		t.Fatalf("open store: %v", err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	engine := agent.New(cfg, st, nil, nil, workdir)
-	ctrl := New(cfg, st, engine, workdir)
-	if err := ctrl.Start(ctx, StartupModeNew); err != nil {
+	engine := agent.New(cfg, st, nil, nil)
+	ctrl := New(cfg, st, engine)
+	if err := ctrl.Start(ctx, StartupModeNew, workdir); err != nil {
 		t.Fatalf("start controller: %v", err)
 	}
 
@@ -1179,9 +1184,9 @@ func newTestControllerWithExec(t *testing.T) (*Controller, *store.Store, *execru
 	registry := tools.NewRegistry(workdir)
 	execManager := execruntime.NewManager()
 	registry.SetExecControl(execManager)
-	engine := agent.New(cfg, st, registry, nil, workdir)
-	ctrl := New(cfg, st, engine, workdir)
-	if err := ctrl.Start(context.Background(), StartupModeNew); err != nil {
+	engine := agent.New(cfg, st, registry, nil)
+	ctrl := New(cfg, st, engine)
+	if err := ctrl.Start(context.Background(), StartupModeNew, workdir); err != nil {
 		t.Fatalf("start controller: %v", err)
 	}
 	return ctrl, st, execManager
@@ -1209,9 +1214,10 @@ func newTestControllerWithConfig(t *testing.T, edit func(*config.Config)) (*Cont
 		t.Fatalf("open store: %v", err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	engine := agent.New(cfg, st, nil, nil, t.TempDir())
-	ctrl := New(cfg, st, engine, t.TempDir())
-	if err := ctrl.Start(context.Background(), StartupModeNew); err != nil {
+	projectRoot := t.TempDir()
+	engine := agent.New(cfg, st, nil, nil)
+	ctrl := New(cfg, st, engine)
+	if err := ctrl.Start(context.Background(), StartupModeNew, projectRoot); err != nil {
 		t.Fatalf("start controller: %v", err)
 	}
 	return ctrl, st

@@ -18,7 +18,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/lkarlslund/koder/internal/agent"
-	"github.com/lkarlslund/koder/internal/agents"
 	"github.com/lkarlslund/koder/internal/assets"
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/debugsrv"
@@ -147,9 +146,9 @@ func runKoder(ctx context.Context, mode uicore.StartupMode, workdir string, star
 		_ = mcpManager.ConnectAll(context.Background())
 	}()
 
-	registry := tools.NewRegistry(agents.FindProjectRoot(workdir))
+	registry := tools.NewRegistry("")
 	registry.SetExecControl(execruntime.NewManager())
-	engine := agent.New(cfg, st, registry, recorder, workdir, mcpManager)
+	engine := agent.New(cfg, st, registry, recorder, mcpManager)
 	registry.SetChatControl(engine)
 	return runWeb(ctx, cfg, st, engine, mode, recorder, workdir, startupOpts)
 }
@@ -168,8 +167,8 @@ func syncManagedUserAssets(ctx context.Context) error {
 }
 
 func runWeb(ctx context.Context, cfg config.Config, st *store.Store, engine *agent.Engine, mode uicore.StartupMode, recorder *debugsrv.Recorder, workdir string, startupOpts startupConfig) error {
-	controller := uicore.New(cfg, st, engine, workdir)
-	if err := controller.Start(ctx, mode); err != nil {
+	controller := uicore.New(cfg, st, engine)
+	if err := controller.Start(ctx, mode, workdir); err != nil {
 		return err
 	}
 	bind, err := webBindForLaunch(ctx, st, startupOpts)
@@ -183,7 +182,7 @@ func runWeb(ctx context.Context, cfg config.Config, st *store.Store, engine *age
 	if err := saveLastWebBind(ctx, st, server.Addr()); err != nil {
 		fmt.Fprintf(os.Stderr, "koder web ui: failed to save web bind: %v\n", err)
 	}
-	fmt.Fprintf(os.Stderr, "koder web ui: %s\n", server.URL())
+	fmt.Fprintf(os.Stderr, "koder web ui: %s\n", server.AppURL())
 	if recorder != nil {
 		recorder.UpdateProcess(debugsrv.ProcessDebug{DebugAPI: server.URL(), Status: "Web UI running"})
 	}

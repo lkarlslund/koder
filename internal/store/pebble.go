@@ -613,9 +613,8 @@ func (b *pebbleBackend) DeleteSession(ctx context.Context, sessionID domain.ID) 
 	return nil
 }
 
-func (b *pebbleBackend) UpdateSessionWorkspace(ctx context.Context, sessionID domain.ID, cwd, projectRoot string) error {
+func (b *pebbleBackend) SetSessionProjectRoot(ctx context.Context, sessionID domain.ID, projectRoot string) error {
 	return b.updateSession(ctx, sessionID, func(session *domain.Session) {
-		session.CWD = cwd
 		session.ProjectRoot = projectRoot
 	})
 }

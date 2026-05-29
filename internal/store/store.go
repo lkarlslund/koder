@@ -41,7 +41,7 @@ type backend interface {
 	SetChatModel(context.Context, domain.ID, string, string) error
 	DeleteChat(context.Context, domain.ID) error
 	SetChatQueuedInputs(context.Context, domain.ID, []domain.QueuedInput) error
-	UpdateSessionWorkspace(context.Context, domain.ID, string, string) error
+	SetSessionProjectRoot(context.Context, domain.ID, string) error
 	SetSessionPermissionProfile(context.Context, domain.ID, string) error
 	AddSessionPermissionRule(context.Context, domain.ID, domain.PermissionOverride) error
 	SetSessionToolStates(context.Context, domain.ID, map[domain.ToolKind]bool) error
@@ -384,8 +384,8 @@ func (s *Store) SetChatQueuedInputs(ctx context.Context, chatID domain.ID, items
 	return s.backend.SetChatQueuedInputs(ctx, chatID, items)
 }
 
-func (s *Store) UpdateSessionWorkspace(ctx context.Context, sessionID domain.ID, cwd, projectRoot string) error {
-	return s.backend.UpdateSessionWorkspace(ctx, sessionID, cwd, projectRoot)
+func (s *Store) SetSessionProjectRoot(ctx context.Context, sessionID domain.ID, projectRoot string) error {
+	return s.backend.SetSessionProjectRoot(ctx, sessionID, projectRoot)
 }
 
 func (s *Store) SetSessionPermissionProfile(ctx context.Context, sessionID domain.ID, profile string) error {
@@ -578,7 +578,7 @@ func (s *Store) ForkSession(ctx context.Context, sourceSessionID domain.ID) (dom
 	if err != nil {
 		return domain.Session{}, err
 	}
-	if err := s.UpdateSessionWorkspace(ctx, forked.ID, source.CWD, source.ProjectRoot); err != nil {
+	if err := s.SetSessionProjectRoot(ctx, forked.ID, source.ProjectRoot); err != nil {
 		return domain.Session{}, err
 	}
 	if source.PermissionProfile != "" {

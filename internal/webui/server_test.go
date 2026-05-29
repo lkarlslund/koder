@@ -57,6 +57,90 @@ func TestServerDoesNotOpenBrowserWhenWebSocketConnects(t *testing.T) {
 	}
 }
 
+func TestServerServesCanonicalSessionRoutes(t *testing.T) {
+	ctrl := newTestController(t)
+	sessionID := ctrl.State().Session.ID
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoBrowser: true})
+	if err != nil {
+		t.Fatalf("start server: %v", err)
+	}
+
+	client := &http.Client{CheckRedirect: func(req *http.Request, via []*http.Request) error {
+		return http.ErrUseLastResponse
+	}}
+	resp, err := client.Get(srv.URL() + "/")
+	if err != nil {
+		t.Fatalf("get root: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusTemporaryRedirect {
+		t.Fatalf("expected root redirect, got %d", resp.StatusCode)
+	}
+	if got, want := resp.Header.Get("Location"), "/s/"+string(sessionID); got != want {
+		t.Fatalf("expected redirect to %s, got %s", want, got)
+	}
+
+	resp, err = http.Get(srv.AppURL())
+	if err != nil {
+		t.Fatalf("get app url: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected session app ok, got %d", resp.StatusCode)
+	}
+}
+
+func TestWebSocketHelloUsesURLSessionSelection(t *testing.T) {
+	ctrl := newTestController(t)
+	firstID := ctrl.State().Session.ID
+	st := ctrl.Store()
+	second, err := st.CreateSession(context.Background(), "Second", "test", "model", nil)
+	if err != nil {
+		t.Fatalf("create second session: %v", err)
+	}
+	if err := st.SetSessionProjectRoot(context.Background(), second.ID, t.TempDir()); err != nil {
+		t.Fatalf("set second project root: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	srv, err := Start(ctx, ctrl, Options{Bind: "127.0.0.1:0", NoBrowser: true})
+	if err != nil {
+		t.Fatalf("start server: %v", err)
+	}
+	conn, _, err := websocket.Dial(ctx, "ws://"+srv.Addr()+"/ws?session="+string(second.ID), nil)
+	if err != nil {
+		t.Fatalf("dial websocket: %v", err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+	if err := conn.Write(ctx, websocket.MessageText, []byte(`{"id":1,"method":"hello","params":{}}`)); err != nil {
+		t.Fatalf("write hello: %v", err)
+	}
+	msg := readRPCResponse(t, ctx, conn, 1)
+	var resp struct {
+		OK     bool `json:"ok"`
+		Result struct {
+			State struct {
+				Session struct {
+					ID domain.ID
+				}
+			}
+		} `json:"result"`
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(msg, &resp); err != nil {
+		t.Fatalf("decode hello: %v", err)
+	}
+	if !resp.OK {
+		t.Fatalf("expected hello ok, got %s", resp.Error)
+	}
+	if resp.Result.State.Session.ID != second.ID {
+		t.Fatalf("expected hello for second session %s, got %s; first was %s", second.ID, resp.Result.State.Session.ID, firstID)
+	}
+}
+
 func TestServerDoesNotOpenBrowserWhenExistingTabRefreshes(t *testing.T) {
 	ctrl := newTestController(t)
 	opened := make(chan string, 1)
@@ -108,8 +192,8 @@ func TestServerOpensBrowserWhenNoWebSocketConnects(t *testing.T) {
 
 	select {
 	case url := <-opened:
-		if url != srv.URL() {
-			t.Fatalf("expected opened URL %q, got %q", srv.URL(), url)
+		if url != srv.AppURL() {
+			t.Fatalf("expected opened URL %q, got %q", srv.AppURL(), url)
 		}
 	case <-time.After(200 * time.Millisecond):
 		t.Fatal("expected browser open after timeout")
@@ -1700,9 +1784,9 @@ func newTestControllerWithWorkdir(t *testing.T, workdir string) *uicore.Controll
 		t.Fatalf("open store: %v", err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	engine := agent.New(cfg, st, nil, nil, workdir)
-	ctrl := uicore.New(cfg, st, engine, workdir)
-	if err := ctrl.Start(context.Background(), uicore.StartupModeNew); err != nil {
+	engine := agent.New(cfg, st, nil, nil)
+	ctrl := uicore.New(cfg, st, engine)
+	if err := ctrl.Start(context.Background(), uicore.StartupModeNew, workdir); err != nil {
 		t.Fatalf("start controller: %v", err)
 	}
 	return ctrl

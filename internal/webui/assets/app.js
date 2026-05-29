@@ -414,7 +414,8 @@
             this.reconnectTimer = null;
           }
           const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-          const ws = new WebSocket(proto + '//' + location.host + '/ws');
+          const session = encodeURIComponent(this.sessionIDFromLocation() || '');
+          const ws = new WebSocket(proto + '//' + location.host + '/ws' + (session ? '?session=' + session : ''));
           this.ws = ws;
           this.connecting = true;
           this.connected = false;
@@ -717,6 +718,7 @@
           const scroll = this.transcriptScrollState();
           const seq = ++this.scrollRestoreSeq;
           this.state = s || {};
+          this.syncSessionURL();
           if (this.state.theme || this.state.Theme) this.theme = this.state.theme || this.state.Theme;
           this.restoreMilestoneExpansion();
           this.applyTheme(); this.error = this.state.error || '';
@@ -728,11 +730,20 @@
           });
           this.reportClientStateSoon();
         },
-        selectedChatPreferenceName() { return 'selectedChat.' + encodeURIComponent(this.state.workdir || this.state.Workdir || ''); },
+        sessionIDFromLocation() {
+          const match = location.pathname.match(/^\/s\/([^/]+)$/);
+          return match ? decodeURIComponent(match[1]) : '';
+        },
+        currentSessionID() { return String(this.state.session?.id || this.state.session?.ID || '').trim(); },
+        syncSessionURL() {
+          const id = this.currentSessionID();
+          if (!id || location.pathname === '/s/' + encodeURIComponent(id)) return;
+          history.replaceState(null, '', '/s/' + encodeURIComponent(id));
+        },
+        selectedChatPreferenceName() { return 'selectedChat.' + encodeURIComponent(this.currentSessionID()); },
         milestoneExpansionPreferenceName() {
-          const workdir = encodeURIComponent(this.state.workdir || this.state.Workdir || '');
-          const session = encodeURIComponent(this.state.session?.id || this.state.session?.ID || '');
-          return 'expandedMilestones.' + workdir + '.' + session;
+          const session = encodeURIComponent(this.currentSessionID());
+          return 'expandedMilestones.' + session;
         },
         restoreMilestoneExpansion() {
           this.expandedMilestones = readJSONPreference(this.milestoneExpansionPreferenceName(), {});
@@ -743,11 +754,10 @@
         activeChatID() { return this.state.active_chat_id || this.state.ActiveChatID || 0; },
         writeSelectedChat() { const id = this.activeChatID(); if (id) writePreference(this.selectedChatPreferenceName(), id); },
         composerDraftPreferenceName() {
-          const workdir = encodeURIComponent(this.state.workdir || this.state.Workdir || '');
-          const session = encodeURIComponent(this.state.session?.id || this.state.session?.ID || '');
+          const session = encodeURIComponent(this.currentSessionID());
           const chat = encodeURIComponent(this.activeChatID() || '');
           if (!chat) return '';
-          return 'composerDraft.' + workdir + '.' + session + '.' + chat;
+          return 'composerDraft.' + session + '.' + chat;
         },
         restoreComposerDraftForActiveChat() {
           const key = this.composerDraftPreferenceName();

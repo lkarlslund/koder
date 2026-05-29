@@ -379,7 +379,7 @@ func TestUpdateSessionTitle(t *testing.T) {
 	}
 }
 
-func TestUpdateSessionWorkspacePersistsCWD(t *testing.T) {
+func TestSetSessionProjectRootPersistsProjectRoot(t *testing.T) {
 	for _, backend := range []string{BackendPebble, BackendJSONFS} {
 		t.Run(backend, func(t *testing.T) {
 			st := openTestStore(t, backend)
@@ -388,16 +388,13 @@ func TestUpdateSessionWorkspacePersistsCWD(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := st.UpdateSessionWorkspace(context.Background(), session.ID, "/repo/worktree", "/repo"); err != nil {
+			if err := st.SetSessionProjectRoot(context.Background(), session.ID, "/repo"); err != nil {
 				t.Fatal(err)
 			}
 
 			sessions, err := st.ListSessions(context.Background())
 			if err != nil {
 				t.Fatal(err)
-			}
-			if got := sessions[0].CWD; got != "/repo/worktree" {
-				t.Fatalf("expected cwd persisted, got %q", got)
 			}
 			if got := sessions[0].ProjectRoot; got != "/repo" {
 				t.Fatalf("expected project root persisted, got %q", got)
@@ -1024,7 +1021,7 @@ func TestForkSessionCopiesTranscriptAndParent(t *testing.T) {
 			}); err != nil {
 				t.Fatal(err)
 			}
-			if err := st.UpdateSessionWorkspace(context.Background(), session.ID, "/repo/a", "/repo"); err != nil {
+			if err := st.SetSessionProjectRoot(context.Background(), session.ID, "/repo"); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := st.SetMilestonePlan(context.Background(), session.ID, "Ship feature", []Milestone{
@@ -1058,7 +1055,7 @@ func TestForkSessionCopiesTranscriptAndParent(t *testing.T) {
 			if forked.PermissionProfile != "readonly" {
 				t.Fatalf("expected permission profile copied, got %q", forked.PermissionProfile)
 			}
-			if forked.CWD != "/repo/a" || forked.ProjectRoot != "/repo" {
+			if forked.ProjectRoot != "/repo" {
 				t.Fatalf("expected workspace copied, got %#v", forked)
 			}
 			if forked.ToolStates[domain.ToolKindBash] {

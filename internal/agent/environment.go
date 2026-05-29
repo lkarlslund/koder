@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lkarlslund/koder/internal/agents"
 	"github.com/lkarlslund/koder/internal/domain"
 )
 
@@ -29,18 +28,19 @@ type gitSnapshot struct {
 
 func (e *Engine) environmentPrompt(session domain.Session) string {
 	workspaceRoot := strings.TrimSpace(session.ProjectRoot)
-	if workspaceRoot == "" {
-		workspaceRoot = agents.FindProjectRoot(e.workdir)
-	}
 	snapshot := environmentSnapshot{
 		WorkspaceRoot: workspaceRoot,
-		Workdir:       e.workdir,
+		Workdir:       workspaceRoot,
 		Platform:      runtime.GOOS + "/" + runtime.GOARCH,
 		OS:            osDescription(),
 		Shell:         shellDescription(),
-		Git:           gitInfo(e.workdir),
+		Git:           gitInfo(workspaceRoot),
 	}
 	return formatEnvironmentPrompt(snapshot)
+}
+
+func sessionProjectRoot(session domain.Session) string {
+	return strings.TrimSpace(session.ProjectRoot)
 }
 
 func (e *Engine) sessionEnvironmentPrompt(session domain.Session) string {

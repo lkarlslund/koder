@@ -463,9 +463,8 @@ func (b *jsonfsBackend) ListSessions(ctx context.Context) ([]domain.Session, err
 	return sessions, nil
 }
 
-func (b *jsonfsBackend) UpdateSessionWorkspace(ctx context.Context, sessionID domain.ID, cwd, projectRoot string) error {
+func (b *jsonfsBackend) SetSessionProjectRoot(ctx context.Context, sessionID domain.ID, projectRoot string) error {
 	return b.updateSession(ctx, sessionID, func(session *domain.Session) {
-		session.CWD = cwd
 		session.ProjectRoot = projectRoot
 	})
 }

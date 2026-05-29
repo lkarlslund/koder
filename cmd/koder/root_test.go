@@ -249,9 +249,9 @@ func newRootTestController(t *testing.T) *uicore.Controller {
 	}
 	t.Cleanup(func() { _ = st.Close() })
 	workdir := t.TempDir()
-	engine := agent.New(cfg, st, nil, nil, workdir)
-	ctrl := uicore.New(cfg, st, engine, workdir)
-	if err := ctrl.Start(context.Background(), uicore.StartupModeNew); err != nil {
+	engine := agent.New(cfg, st, nil, nil)
+	ctrl := uicore.New(cfg, st, engine)
+	if err := ctrl.Start(context.Background(), uicore.StartupModeNew, workdir); err != nil {
 		t.Fatalf("start controller: %v", err)
 	}
 	t.Cleanup(func() { _ = ctrl.Shutdown(context.Background()) })

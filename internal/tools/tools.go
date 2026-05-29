@@ -300,6 +300,11 @@ func (r *Registry) ExecuteWithChat(ctx context.Context, st *store.Store, session
 	runtime.ActiveMilestoneRef = chat.ActiveMilestoneRef
 	runtime.AssignedTodoBucketRef = chat.AssignedTodoBucketRef
 	runtime.AssignedTodoRef = chat.AssignedTodoRef
+	if st != nil && sessionID != "" {
+		if session, err := st.GetSession(ctx, sessionID); err == nil {
+			runtime.Workdir = strings.TrimSpace(session.ProjectRoot)
+		}
+	}
 	runtime.SandboxProfile = runtime.sandboxProfileForSession(ctx, st, sessionID)
 	if err := chatrole.CheckToolAllowed(runtime.ChatRole, req.Tool); err != nil {
 		return Result{}, err

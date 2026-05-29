@@ -288,10 +288,9 @@ type SessionState struct {
 
 // Controller owns session/chat state independently from any renderer.
 type Controller struct {
-	cfg     config.Config
-	store   *store.Store
-	agent   *agent.Engine
-	workdir string
+	cfg   config.Config
+	store *store.Store
+	agent *agent.Engine
 
 	mu                         sync.RWMutex
 	session                    domain.Session
@@ -320,12 +319,11 @@ type Controller struct {
 }
 
 // New constructs a renderer-neutral controller.
-func New(cfg config.Config, st *store.Store, engine *agent.Engine, workdir string) *Controller {
+func New(cfg config.Config, st *store.Store, engine *agent.Engine) *Controller {
 	return &Controller{
 		cfg:        cfg,
 		store:      st,
 		agent:      engine,
-		workdir:    strings.TrimSpace(workdir),
 		theme:      normalizeTheme(cfg.UI.Theme),
 		statuses:   map[domain.ID]ChatSidebarStatus{},
 		runtimes:   map[domain.ID]*chat.Chat{},
@@ -345,11 +343,11 @@ func (c *Controller) Store() *store.Store {
 }
 
 // Start loads the initial session/chat and attaches the live chat runtime.
-func (c *Controller) Start(ctx context.Context, mode StartupMode) error {
+func (c *Controller) Start(ctx context.Context, mode StartupMode, projectRoot string) error {
 	if c == nil {
 		return fmt.Errorf("controller is nil")
 	}
-	session, err := c.initialSession(ctx, mode)
+	session, err := c.initialSession(ctx, mode, projectRoot)
 	if err != nil {
 		return err
 	}
@@ -378,7 +376,7 @@ func (c *Controller) State() State {
 		ContextWindow: c.contextWindowLocked(),
 		ModelInfo:     c.modelInfoLocked(),
 		Theme:         c.theme,
-		Workdir:       c.workdir,
+		Workdir:       c.session.ProjectRoot,
 		Error:         c.lastErr,
 	}
 	for idx := range state.Chats {
@@ -785,8 +783,9 @@ func (c *Controller) Sessions(ctx context.Context) (SessionState, error) {
 	}
 	c.mu.RLock()
 	activeID := c.session.ID
+	projectRoot := c.session.ProjectRoot
 	c.mu.RUnlock()
-	return SessionState{ActiveID: activeID, Workdir: c.workdir, Sessions: sessions}, nil
+	return SessionState{ActiveID: activeID, Workdir: projectRoot, Sessions: sessions}, nil
 }
 
 // SwitchSession switches the active session within the current workspace.
@@ -806,7 +805,10 @@ func (c *Controller) SwitchSession(ctx context.Context, sessionID domain.ID) err
 
 // NewSession creates and switches to a new session in the current workspace.
 func (c *Controller) NewSession(ctx context.Context, title string) error {
-	session, err := c.createWorkspaceSession(ctx, title)
+	c.mu.RLock()
+	projectRoot := c.session.ProjectRoot
+	c.mu.RUnlock()
+	session, err := c.createWorkspaceSession(ctx, title, projectRoot)
 	if err != nil {
 		return err
 	}
@@ -902,7 +904,7 @@ func (c *Controller) DeleteSession(ctx context.Context, sessionID domain.ID) err
 			return err
 		}
 		if len(sessions) == 0 {
-			next, err := c.createWorkspaceSession(ctx, "New Session")
+			next, err := c.createWorkspaceSession(ctx, "New Session", session.ProjectRoot)
 			if err != nil {
 				return err
 			}
@@ -956,7 +958,10 @@ func (c *Controller) ensureSessionIdle(ctx context.Context, sessionID domain.ID,
 
 // RefreshWorkspace refreshes workspace metadata and publishes a snapshot on change.
 func (c *Controller) RefreshWorkspace(ctx context.Context) error {
-	status, err := workspacepkg.Snapshot(ctx, c.workdir)
+	c.mu.RLock()
+	projectRoot := c.session.ProjectRoot
+	c.mu.RUnlock()
+	status, err := workspacepkg.Snapshot(ctx, projectRoot)
 	if err != nil {
 		return err
 	}
@@ -992,7 +997,10 @@ func (c *Controller) CompleteComposer(text string, cursor int) (ComposerCompleti
 		return out, nil
 	}
 	if query, start, ok := composerSkillQuery(text, cursor); ok {
-		items := matchingComposerSkills(c.workdir, query)
+		c.mu.RLock()
+		projectRoot := c.session.ProjectRoot
+		c.mu.RUnlock()
+		items := matchingComposerSkills(projectRoot, query)
 		if len(items) == 1 && strings.EqualFold(items[0].Name, query) {
 			items = nil
 		}
@@ -1012,10 +1020,16 @@ func (c *Controller) CompleteComposer(text string, cursor int) (ComposerCompleti
 		var matches []reference.Entry
 		var err error
 		if pathMode {
-			matches, err = reference.PathCompletions(c.workdir, query, 8)
+			c.mu.RLock()
+			projectRoot := c.session.ProjectRoot
+			c.mu.RUnlock()
+			matches, err = reference.PathCompletions(projectRoot, query, 8)
 		} else {
 			var catalog []reference.Entry
-			catalog, err = reference.Entries(c.workdir)
+			c.mu.RLock()
+			projectRoot := c.session.ProjectRoot
+			c.mu.RUnlock()
+			catalog, err = reference.Entries(projectRoot)
 			matches = reference.Search(catalog, query, 8)
 		}
 		if err != nil {
@@ -2369,7 +2383,7 @@ func blankAsDash(value string) string {
 	return value
 }
 
-func (c *Controller) initialSession(ctx context.Context, mode StartupMode) (domain.Session, error) {
+func (c *Controller) initialSession(ctx context.Context, mode StartupMode, projectRoot string) (domain.Session, error) {
 	if c.store == nil {
 		return domain.Session{}, fmt.Errorf("store is unavailable")
 	}
@@ -2385,7 +2399,7 @@ func (c *Controller) initialSession(ctx context.Context, mode StartupMode) (doma
 		return domain.Session{}, err
 	}
 	if len(sessions) == 0 {
-		return c.createWorkspaceSession(ctx, "New Session")
+		return c.createWorkspaceSession(ctx, "New Session", projectRoot)
 	}
 	return newestSession(sessions), nil
 }
@@ -2492,7 +2506,7 @@ func (c *Controller) loadSession(ctx context.Context, sessionID, chatID domain.I
 		return fmt.Errorf("chat %s runtime was not loaded", chatRecord.ID)
 	}
 	milestone, todos, todosByRef := c.planningState(ctx, session.ID)
-	workspaceStatus, _ := workspacepkg.Snapshot(ctx, c.workdir)
+	workspaceStatus, _ := workspacepkg.Snapshot(ctx, session.ProjectRoot)
 	statuses := c.chatStatuses(ctx, session.ID)
 	snapshots := make(map[domain.ID]chat.Snapshot, len(runtimes))
 	for id, loaded := range runtimes {
@@ -2742,7 +2756,7 @@ func hasErroredRestartTool(snapshot chat.Snapshot) bool {
 	return false
 }
 
-func (c *Controller) createWorkspaceSession(ctx context.Context, title string) (domain.Session, error) {
+func (c *Controller) createWorkspaceSession(ctx context.Context, title string, projectRoot string) (domain.Session, error) {
 	title = strings.TrimSpace(title)
 	if title == "" {
 		title = "New Session"
@@ -2751,32 +2765,18 @@ func (c *Controller) createWorkspaceSession(ctx context.Context, title string) (
 	if err != nil {
 		return domain.Session{}, err
 	}
-	_ = c.store.UpdateSessionWorkspace(ctx, session.ID, c.workdir, c.workdir)
+	_ = c.store.SetSessionProjectRoot(ctx, session.ID, strings.TrimSpace(projectRoot))
 	_ = c.store.SetSessionPermissionProfile(ctx, session.ID, c.cfg.Permissions.Profile)
 	_ = c.store.SetSessionToolStates(ctx, session.ID, c.cfg.ToolDefaults)
 	return c.store.GetSession(ctx, session.ID)
 }
 
 func (c *Controller) workspaceSessions(ctx context.Context) ([]domain.Session, error) {
-	sessions, err := c.store.ListSessions(ctx)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]domain.Session, 0, len(sessions))
-	for _, session := range sessions {
-		if c.sessionInWorkspace(session) {
-			out = append(out, session)
-		}
-	}
-	return out, nil
+	return c.store.ListSessions(ctx)
 }
 
 func (c *Controller) sessionInWorkspace(session domain.Session) bool {
-	workdir := normalizedWorkspacePath(c.workdir)
-	if workdir == "" {
-		return true
-	}
-	return normalizedWorkspacePath(session.CWD) == workdir || normalizedWorkspacePath(session.ProjectRoot) == workdir
+	return session.ID != ""
 }
 
 func (c *Controller) planningState(ctx context.Context, sessionID domain.ID) (store.MilestonePlan, []store.TodoItem, map[string][]store.TodoItem) {
@@ -3373,14 +3373,6 @@ func fallbackChatID(chats []domain.Chat, deleting domain.Chat) domain.ID {
 		}
 	}
 	return ""
-}
-
-func normalizedWorkspacePath(path string) string {
-	path = strings.TrimSpace(path)
-	if path == "" {
-		return ""
-	}
-	return filepath.Clean(path)
 }
 
 func workspaceSignature(status workspacepkg.Status) string {

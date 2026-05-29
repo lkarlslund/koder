@@ -134,6 +134,18 @@ func (s *Server) URL() string {
 	return "http://" + s.Addr()
 }
 
+// AppURL returns the canonical browser app URL for the active session.
+func (s *Server) AppURL() string {
+	if s == nil {
+		return ""
+	}
+	url := s.URL()
+	if state := s.controller.State(); state.Session.ID != "" {
+		url += "/s/" + string(state.Session.ID)
+	}
+	return url
+}
+
 func (s *Server) openBrowserIfNeeded(ctx context.Context) {
 	if s.options.NoBrowser {
 		return
@@ -155,8 +167,8 @@ func (s *Server) openBrowserIfNeeded(ctx context.Context) {
 	if open == nil {
 		open = OpenBrowser
 	}
-	if err := open(s.URL()); err != nil {
-		slog.Warn("open browser failed", "url", s.URL(), "error", err)
+	if err := open(s.AppURL()); err != nil {
+		slog.Warn("open browser failed", "url", s.AppURL(), "error", err)
 	}
 }
 
@@ -167,14 +179,35 @@ func (s *Server) markConnected() {
 }
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != "/" {
+	s.markConnected()
+	if r.URL.Path == "/" {
+		state := s.controller.State()
+		if state.Session.ID == "" {
+			http.Error(w, "no active session", http.StatusServiceUnavailable)
+			return
+		}
+		http.Redirect(w, r, "/s/"+string(state.Session.ID), http.StatusTemporaryRedirect)
+		return
+	}
+	if sessionIDFromPath(r.URL.Path) == "" {
 		http.NotFound(w, r)
 		return
 	}
-	s.markConnected()
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache")
 	_, _ = w.Write([]byte(renderIndexHTML()))
+}
+
+func sessionIDFromPath(path string) domain.ID {
+	path = strings.Trim(strings.TrimSpace(path), "/")
+	if !strings.HasPrefix(path, "s/") {
+		return ""
+	}
+	id := strings.TrimSpace(strings.TrimPrefix(path, "s/"))
+	if id == "" || strings.Contains(id, "/") {
+		return ""
+	}
+	return domain.ID(id)
 }
 
 func handleFavicon(w http.ResponseWriter, r *http.Request) {
@@ -298,6 +331,9 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 	clientID := string(domain.NewID())
+	if sessionID := domain.ID(strings.TrimSpace(r.URL.Query().Get("session"))); sessionID != "" {
+		s.setClientSelection(clientID, clientSelection{SessionID: sessionID})
+	}
 	if s.debug != nil {
 		s.debug.RegisterClient(debugsrv.ClientDebug{
 			ID:         clientID,
@@ -377,13 +413,17 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleRPC(ctx context.Context, clientID string, method string, params json.RawMessage) (any, error) {
 	switch strings.TrimSpace(method) {
 	case "hello":
+		state, err := s.stateForClient(ctx, clientID)
+		if err != nil {
+			return nil, err
+		}
 		return rpcHello{
 			AssetHash: currentAssetHash,
 			ClientID:  clientID,
-			State:     s.controller.State(),
+			State:     state,
 		}, nil
 	case "get_state":
-		return s.controller.State(), nil
+		return s.stateForClient(ctx, clientID)
 	case "client_state":
 		var in debugsrv.ClientDebug
 		if err := decodeParams(params, &in); err != nil {
@@ -671,6 +711,27 @@ func (s *Server) prepareClientSelection(ctx context.Context, clientID, method st
 		return s.controller.SwitchChat(ctx, selection.ChatID)
 	}
 	return nil
+}
+
+func (s *Server) stateForClient(ctx context.Context, clientID string) (uicore.State, error) {
+	selection := s.clientSelection(clientID)
+	if selection.SessionID != "" {
+		state := s.controller.State()
+		if state.Session.ID != selection.SessionID {
+			if err := s.controller.SwitchSession(ctx, selection.SessionID); err != nil {
+				return uicore.State{}, err
+			}
+		}
+	}
+	if selection.ChatID != "" {
+		state := s.controller.State()
+		if state.ActiveChatID != selection.ChatID {
+			if err := s.controller.SwitchChat(ctx, selection.ChatID); err != nil {
+				return uicore.State{}, err
+			}
+		}
+	}
+	return s.controller.State(), nil
 }
 
 func rpcUsesActiveSelection(method string) bool {

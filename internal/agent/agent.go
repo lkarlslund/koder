@@ -48,7 +48,6 @@ type Engine struct {
 	agents     *agents.Manager
 	mcp        *mcp.Manager
 	exec       *execruntime.Manager
-	workdir    string
 	envMu      sync.Mutex
 	envPrompts map[domain.ID]string
 	chatMu     sync.RWMutex
@@ -64,7 +63,7 @@ const (
 	defaultTransientRetryWait = 250 * time.Millisecond
 )
 
-func New(cfg config.Config, st *store.Store, registry *tools.Registry, debug *debugsrv.Recorder, workdir string, mcpManagers ...*mcp.Manager) *Engine {
+func New(cfg config.Config, st *store.Store, registry *tools.Registry, debug *debugsrv.Recorder, mcpManagers ...*mcp.Manager) *Engine {
 	var mcpManager *mcp.Manager
 	if len(mcpManagers) > 0 {
 		mcpManager = mcpManagers[0]
@@ -89,7 +88,6 @@ func New(cfg config.Config, st *store.Store, registry *tools.Registry, debug *de
 		agents:     agents.NewManager(cfg.StateDir(), filepath.Join(filepath.Dir(cfg.Path()), "AGENTS.md")),
 		mcp:        mcpManager,
 		exec:       execManager,
-		workdir:    workdir,
 		chats:      map[domain.ID]*chatpkg.Chat{},
 		runs:       map[domain.ID]chatRunState{},
 		retryPause: waitForRetry,
@@ -726,7 +724,7 @@ func needsSessionAgentsRefresh(session domain.Session) bool {
 }
 
 func (e *Engine) refreshSessionAgents(ctx context.Context, session domain.Session, chat domain.Chat, client *provider.Client) (domain.Session, error) {
-	snapshot, err := e.agents.Discover(ctx, e.workdir)
+	snapshot, err := e.agents.Discover(ctx, sessionProjectRoot(session))
 	if err != nil {
 		return domain.Session{}, err
 	}
@@ -2676,7 +2674,7 @@ func (e *Engine) buildPromptEnvelopeForTimeline(session domain.Session, chat dom
 	}
 	envelope.Instructions = append(envelope.Instructions, transient...)
 	if strings.TrimSpace(prompt) != "" || len(drafts) > 0 {
-		msg, ok, err := e.previewUserMessage(prompt, drafts, refs)
+		msg, ok, err := e.previewUserMessage(session, prompt, drafts, refs)
 		if err != nil {
 			return provider.PromptEnvelope{}, err
 		}
@@ -2752,7 +2750,7 @@ func (e *Engine) conversationMessagesForTimelineItem(session domain.Session, cha
 		for _, ref := range content.References {
 			parts = append(parts, domain.Part{Kind: domain.PartKindReference, Payload: domain.ReferencePayload(ref)})
 		}
-		msg, ok, err := e.userMessageWithContext(parts)
+		msg, ok, err := e.userMessageWithContext(session, parts)
 		if err != nil {
 			return nil, err
 		}
@@ -2888,7 +2886,7 @@ func (e *Engine) baseInstructionsForChat(session domain.Session, chat domain.Cha
 			Text: "Resolved project AGENTS.md instructions:\n" + agentsText,
 		})
 	}
-	if skillText := strings.TrimSpace(skills.PromptContext(e.workdir)); skillText != "" {
+	if skillText := strings.TrimSpace(skills.PromptContext(sessionProjectRoot(session))); skillText != "" {
 		instructions = append(instructions, provider.InstructionBlock{
 			Kind: provider.InstructionKindSkills,
 			Text: skillText,
@@ -2899,7 +2897,7 @@ func (e *Engine) baseInstructionsForChat(session domain.Session, chat domain.Cha
 
 func (e *Engine) toolRuntime(session domain.Session, chat domain.Chat) tools.Runtime {
 	return tools.Runtime{
-		Workdir:               e.workdir,
+		Workdir:               sessionProjectRoot(session),
 		Store:                 e.store,
 		SessionID:             session.ID,
 		ChatID:                chat.ID,
@@ -2922,7 +2920,7 @@ func compactedHistoryMessage(summary string) provider.Message {
 	}
 }
 
-func (e *Engine) previewUserMessage(prompt string, drafts []attachment.Draft, refs []reference.Draft) (provider.Message, bool, error) {
+func (e *Engine) previewUserMessage(session domain.Session, prompt string, drafts []attachment.Draft, refs []reference.Draft) (provider.Message, bool, error) {
 	parts := make([]domain.Part, 0, len(drafts)+len(refs)+1)
 	if strings.TrimSpace(prompt) != "" {
 		parts = append(parts, domain.Part{Kind: domain.PartKindText, Payload: domain.TextPayload{Text: prompt}})
@@ -2943,7 +2941,7 @@ func (e *Engine) previewUserMessage(prompt string, drafts []attachment.Draft, re
 			},
 		})
 	}
-	if msg, ok, err := e.userMessageWithContext(parts); ok || err != nil {
+	if msg, ok, err := e.userMessageWithContext(session, parts); ok || err != nil {
 		return msg, ok, err
 	}
 	if len(parts) == 0 {
@@ -2955,7 +2953,7 @@ func (e *Engine) previewUserMessage(prompt string, drafts []attachment.Draft, re
 	}, true, nil
 }
 
-func (e *Engine) userMessageWithContext(parts []domain.Part) (provider.Message, bool, error) {
+func (e *Engine) userMessageWithContext(session domain.Session, parts []domain.Part) (provider.Message, bool, error) {
 	contentParts := make([]provider.ContentPart, 0, len(parts)+1)
 	imageParts := make([]provider.ContentPart, 0, len(parts))
 	attachmentTextParts := make([]provider.ContentPart, 0, len(parts))
@@ -3020,7 +3018,7 @@ func (e *Engine) userMessageWithContext(parts []domain.Part) (provider.Message, 
 			if start > cursor {
 				contentParts = append(contentParts, provider.TextPart(prompt[cursor:start]))
 			}
-			resolved, err := e.resolveReference(ref)
+			resolved, err := e.resolveReference(session, ref)
 			if err != nil {
 				return provider.Message{}, false, err
 			}
@@ -3044,12 +3042,13 @@ func (e *Engine) userMessageWithContext(parts []domain.Part) (provider.Message, 
 	return message, true, nil
 }
 
-func (e *Engine) resolveReference(meta reference.Metadata) (string, error) {
+func (e *Engine) resolveReference(session domain.Session, meta reference.Metadata) (string, error) {
+	root := sessionProjectRoot(session)
 	switch meta.Kind {
 	case reference.KindFile:
-		return reference.ResolveFile(e.workdir, meta)
+		return reference.ResolveFile(root, meta)
 	case reference.KindDirectory:
-		return reference.ResolveDirectory(e.workdir, meta)
+		return reference.ResolveDirectory(root, meta)
 	default:
 		return "", fmt.Errorf("unsupported reference kind %q", meta.Kind)
 	}
@@ -3559,7 +3558,7 @@ func (e *Engine) buildCompactionPromptEnvelopeForTimeline(session domain.Session
 			}
 			envelope.Items = append(envelope.Items[:0], compactedHistoryMessage(compacted.Summary))
 			if segmentStart < idx {
-				preserved, err := e.compactionMessagesForCompactionTail(timeline[segmentStart:idx], compacted.FirstKeptItemID, e.preserveThinkingEnabled(chat))
+				preserved, err := e.compactionMessagesForCompactionTail(session, timeline[segmentStart:idx], compacted.FirstKeptItemID, e.preserveThinkingEnabled(chat))
 				if err != nil {
 					return provider.PromptEnvelope{}, err
 				}
@@ -3568,7 +3567,7 @@ func (e *Engine) buildCompactionPromptEnvelopeForTimeline(session domain.Session
 			segmentStart = idx + 1
 			continue
 		}
-		messages, err := e.compactionMessagesForTimelineItem(item, e.preserveThinkingEnabled(chat))
+		messages, err := e.compactionMessagesForTimelineItem(session, item, e.preserveThinkingEnabled(chat))
 		if err != nil {
 			return provider.PromptEnvelope{}, err
 		}
@@ -3577,7 +3576,7 @@ func (e *Engine) buildCompactionPromptEnvelopeForTimeline(session domain.Session
 	return envelope, nil
 }
 
-func (e *Engine) compactionMessagesForCompactionTail(items []domain.TimelineItem, firstKeptItemID string, preserveThinking bool) ([]provider.Message, error) {
+func (e *Engine) compactionMessagesForCompactionTail(session domain.Session, items []domain.TimelineItem, firstKeptItemID string, preserveThinking bool) ([]provider.Message, error) {
 	start := firstKeptTimelineIndex(items, firstKeptItemID)
 	if start < 0 {
 		start = preservedTimelineToolTailStart(items, e.compactionKeepToolBatches())
@@ -3587,7 +3586,7 @@ func (e *Engine) compactionMessagesForCompactionTail(items []domain.TimelineItem
 	}
 	out := make([]provider.Message, 0, len(items)-start)
 	for _, item := range items[start:] {
-		messages, err := e.compactionMessagesForTimelineItem(item, preserveThinking)
+		messages, err := e.compactionMessagesForTimelineItem(session, item, preserveThinking)
 		if err != nil {
 			return nil, err
 		}
@@ -3596,10 +3595,10 @@ func (e *Engine) compactionMessagesForCompactionTail(items []domain.TimelineItem
 	return out, nil
 }
 
-func (e *Engine) compactionMessagesForTimelineItem(item domain.TimelineItem, preserveThinking bool) ([]provider.Message, error) {
+func (e *Engine) compactionMessagesForTimelineItem(session domain.Session, item domain.TimelineItem, preserveThinking bool) ([]provider.Message, error) {
 	switch content := item.Content.(type) {
 	case domain.UserMessage:
-		body := e.compactionUserMessageText(content)
+		body := e.compactionUserMessageText(session, content)
 		if body == "" {
 			return nil, nil
 		}
@@ -3641,7 +3640,7 @@ func (e *Engine) compactionMessagesForTimelineItem(item domain.TimelineItem, pre
 	}
 }
 
-func (e *Engine) compactionUserMessageText(msg domain.UserMessage) string {
+func (e *Engine) compactionUserMessageText(session domain.Session, msg domain.UserMessage) string {
 	blocks := make([]string, 0, 1+len(msg.Attachments)+len(msg.References))
 	if text := strings.TrimSpace(msg.Text); text != "" {
 		blocks = append(blocks, text)
@@ -3654,7 +3653,7 @@ func (e *Engine) compactionUserMessageText(msg domain.UserMessage) string {
 			Start:   ref.Start,
 			End:     ref.End,
 		}
-		resolved, err := e.resolveReference(meta)
+		resolved, err := e.resolveReference(session, meta)
 		label := strings.TrimSpace(ref.Display)
 		if label == "" {
 			label = strings.TrimSpace(ref.Path)
@@ -4345,9 +4344,6 @@ func (e *Engine) effectivePermissionProfile(_ context.Context, session domain.Se
 
 func (e *Engine) permissionRequest(session domain.Session, req tools.Request) permissionprofile.Request {
 	projectRoot := strings.TrimSpace(session.ProjectRoot)
-	if projectRoot == "" {
-		projectRoot = agents.FindProjectRoot(e.workdir)
-	}
 	pattern := tools.Preview(req)
 	if req.Tool == domain.ToolKindMCP {
 		pattern = strings.TrimSpace(req.Args["server"]) + "/" + strings.TrimSpace(req.Args["tool"])
@@ -4390,7 +4386,7 @@ func serializeRequest(req tools.Request) (string, error) {
 }
 
 func (e *Engine) resolvePermissionTargets(projectRoot string, req tools.Request) ([]string, bool, bool) {
-	baseDir := e.workdir
+	baseDir := projectRoot
 	if strings.TrimSpace(projectRoot) != "" {
 		baseDir = projectRoot
 	}
