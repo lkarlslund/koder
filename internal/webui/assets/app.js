@@ -1598,6 +1598,7 @@
           this.providerSaving = true; this.providerStatus = ''; this.providerStatusKind = 'secondary';
           this.rpc('save_provider', payload).then(result => {
             this.providerState = result.providers || result;
+            if (result.preferences) this.setSettingsState(result.preferences);
             if (this.settings) this.settings.providers = this.providerState;
             if (this.settings && this.providerDraft?.provider_id && this.providerDraft?.model) this.addOrUpdateModelConfig(this.providerDraft.provider_id, this.providerDraft.model);
             if (result.state) this.applyState(result.state);

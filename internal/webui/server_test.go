@@ -1491,6 +1491,12 @@ func TestWebSocketProviderCRUDReturnsProviderState(t *testing.T) {
 					} `json:"Chat"`
 				} `json:"Snapshot"`
 			} `json:"state"`
+			Preferences struct {
+				Models []struct {
+					ProviderID string `json:"provider_id"`
+					ModelID    string `json:"model_id"`
+				} `json:"models"`
+			} `json:"preferences"`
 		} `json:"result"`
 		Error string `json:"error"`
 	}
@@ -1520,6 +1526,16 @@ func TestWebSocketProviderCRUDReturnsProviderState(t *testing.T) {
 	}
 	if got := saveResp.Result.Providers.Drafts["local"].Headers["X-Test"]; got != "yes" {
 		t.Fatalf("expected saved header in draft, got %q", got)
+	}
+	foundDetectedModel := false
+	for _, model := range saveResp.Result.Preferences.Models {
+		if model.ProviderID == "local" && model.ModelID == "detected-model" {
+			foundDetectedModel = true
+			break
+		}
+	}
+	if !foundDetectedModel {
+		t.Fatalf("expected saved provider model in returned preferences, got %#v", saveResp.Result.Preferences.Models)
 	}
 
 	if err := conn.Write(ctx, websocket.MessageText, []byte(`{"id":2,"method":"delete_provider","params":{"provider_id":"local"}}`)); err != nil {

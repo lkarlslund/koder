@@ -670,7 +670,11 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		if err != nil {
 			return nil, err
 		}
-		return map[string]any{"providers": providers, "state": s.controller.State()}, nil
+		preferences, err := s.controller.Preferences(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"providers": providers, "preferences": preferences, "state": s.controller.State()}, nil
 	case "delete_provider":
 		var in struct {
 			ProviderID string `json:"provider_id"`
