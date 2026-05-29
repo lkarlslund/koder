@@ -112,6 +112,7 @@ type Deps struct {
 	Store  *store.Store
 	Prompt PromptTurnService
 	Turns  TurnLoopService
+	Tools  ToolTurnService
 	Errors TurnErrorHandler
 	Legacy Runner
 }
@@ -123,6 +124,9 @@ func DepsForRunner(st *store.Store, runner Runner) Deps {
 	}
 	if turns, ok := runner.(TurnLoopService); ok {
 		deps.Turns = turns
+	}
+	if tools, ok := runner.(ToolTurnService); ok {
+		deps.Tools = tools
 	}
 	if errors, ok := runner.(TurnErrorHandler); ok {
 		deps.Errors = errors
@@ -221,6 +225,9 @@ type TurnLoop interface {
 
 type TurnLoopService interface {
 	NewTurnLoop(*TurnState) TurnLoop
+}
+
+type ToolTurnService interface {
 	ApproveToolForTurn(context.Context, *TurnState, string, *domain.PermissionOverride, chan<- domain.Event) (bool, error)
 	DenyToolForTurn(context.Context, *TurnState, string, chan<- domain.Event) error
 	ResumePendingToolsForTurn(context.Context, *TurnState, chan<- domain.Event) (bool, error)
@@ -1252,7 +1259,7 @@ func (r *Chat) handleInterrupt() {
 }
 
 func (r *Chat) handleApprove(toolCallID string, rule *domain.PermissionOverride) {
-	if runner := r.deps.Turns; runner != nil {
+	if runner := r.deps.Tools; runner != nil {
 		r.handleApproveWithTurnLoop(runner, toolCallID, rule)
 		return
 	}
@@ -1298,7 +1305,7 @@ func (r *Chat) handleApprove(toolCallID string, rule *domain.PermissionOverride)
 }
 
 func (r *Chat) handleDeny(toolCallID string) {
-	if runner := r.deps.Turns; runner != nil {
+	if runner := r.deps.Tools; runner != nil {
 		r.handleDenyWithTurnLoop(runner, toolCallID)
 		return
 	}
@@ -1337,7 +1344,7 @@ func (r *Chat) handleDeny(toolCallID string) {
 	r.handleApprovalEventStream(events, err)
 }
 
-func (r *Chat) handleApproveWithTurnLoop(runner TurnLoopService, toolCallID string, rule *domain.PermissionOverride) {
+func (r *Chat) handleApproveWithTurnLoop(runner ToolTurnService, toolCallID string, rule *domain.PermissionOverride) {
 	r.mu.Lock()
 	ctx, cancel := context.WithCancel(context.Background())
 	ctx = turncontrol.WithShouldStop(ctx, func() bool {
@@ -1363,13 +1370,17 @@ func (r *Chat) handleApproveWithTurnLoop(runner TurnLoopService, toolCallID stri
 			return
 		}
 		if shouldContinue {
-			r.continueTurnLoop(ctx, runner, r.turnState(), nil, out)
+			if r.deps.Turns == nil {
+				r.handleTurnError(ctx, r.turnState(), out, fmt.Errorf("turn loop is not supported by runner"))
+				return
+			}
+			r.continueTurnLoop(ctx, r.deps.Turns, r.turnState(), nil, out)
 		}
 	}()
 	r.forwardTurnEvents(out)
 }
 
-func (r *Chat) handleDenyWithTurnLoop(runner TurnLoopService, toolCallID string) {
+func (r *Chat) handleDenyWithTurnLoop(runner ToolTurnService, toolCallID string) {
 	r.mu.Lock()
 	ctx, cancel := context.WithCancel(context.Background())
 	ctx = turncontrol.WithShouldStop(ctx, func() bool {
@@ -1427,7 +1438,7 @@ func (r *Chat) removeApprovalLocked(toolCallID string) {
 }
 
 func (r *Chat) handleResumePendingTools() {
-	if runner := r.deps.Turns; runner != nil {
+	if runner := r.deps.Tools; runner != nil {
 		r.handleResumePendingToolsWithTurnLoop(runner)
 		return
 	}
@@ -1484,7 +1495,7 @@ func (r *Chat) handleResumePendingTools() {
 	r.handleApprovalEventStream(events, nil)
 }
 
-func (r *Chat) handleResumePendingToolsWithTurnLoop(runner TurnLoopService) {
+func (r *Chat) handleResumePendingToolsWithTurnLoop(runner ToolTurnService) {
 	r.mu.Lock()
 	if r.active || r.status == StatusWaitingApproval || r.draining {
 		r.mu.Unlock()
@@ -1514,7 +1525,11 @@ func (r *Chat) handleResumePendingToolsWithTurnLoop(runner TurnLoopService) {
 			return
 		}
 		if shouldContinue {
-			r.continueTurnLoop(ctx, runner, r.turnState(), nil, out)
+			if r.deps.Turns == nil {
+				r.handleTurnError(ctx, r.turnState(), out, fmt.Errorf("turn loop is not supported by runner"))
+				return
+			}
+			r.continueTurnLoop(ctx, r.deps.Turns, r.turnState(), nil, out)
 		}
 	}()
 	r.forwardTurnEvents(out)
