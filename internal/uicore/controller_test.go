@@ -116,8 +116,12 @@ func TestControllerDeleteInactiveChat(t *testing.T) {
 	if got := ctrl.State().ActiveChatID; got != active {
 		t.Fatalf("expected active chat to stay %s, got %s", active, got)
 	}
-	if _, err := st.GetChat(context.Background(), side); err == nil {
-		t.Fatal("expected side chat to be deleted")
+	archived, err := st.GetChat(context.Background(), side)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !archived.Archived {
+		t.Fatalf("expected side chat to be archived, got %#v", archived)
 	}
 }
 
@@ -134,8 +138,12 @@ func TestControllerDeleteActiveChatSwitchesToRemainingChat(t *testing.T) {
 	if got := ctrl.State().ActiveChatID; got != first {
 		t.Fatalf("expected active chat to switch to %s, got %s", first, got)
 	}
-	if _, err := st.GetChat(context.Background(), side); err == nil {
-		t.Fatal("expected side chat to be deleted")
+	archived, err := st.GetChat(context.Background(), side)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !archived.Archived {
+		t.Fatalf("expected side chat to be archived, got %#v", archived)
 	}
 }
 

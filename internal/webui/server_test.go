@@ -924,10 +924,13 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `delete_chat`) {
 		t.Fatalf("expected chat deletion RPC")
 	}
+	if !strings.Contains(fullPage, `visibleChats()`) || !strings.Contains(fullPage, `showArchivedChats`) || !strings.Contains(fullPage, `Archive this chat?`) || !strings.Contains(fullPage, `bi-archive`) {
+		t.Fatalf("expected chat sidebar to archive chats and toggle archived visibility")
+	}
 	if !strings.Contains(fullPage, `draggable="true"`) ||
 		!strings.Contains(fullPage, `@drop.stop.prevent="dropChat($event, chatID(chat))"`) ||
 		!strings.Contains(fullPage, `reorder_chats`) ||
-		!strings.Contains(fullPage, `chat_ids: chats.map(chat => this.chatID(chat))`) {
+		!strings.Contains(fullPage, `chat_ids: orderedIDs`) {
 		t.Fatalf("expected drag/drop chat reordering")
 	}
 	if !strings.Contains(fullPage, `deleteChat(chatID(chat))`) {
@@ -937,7 +940,7 @@ func TestIndexServesHTML(t *testing.T) {
 		t.Fatalf("expected chat sidebar to render per-chat animated status icons")
 	}
 	statusIdx := strings.Index(fullPage, `chat-status-icon bi`)
-	chatIconIdx := strings.Index(fullPage, `bi bi-chat-left-text`)
+	chatIconIdx := strings.Index(fullPage, `bi-chat-left-text`)
 	if statusIdx < 0 || chatIconIdx < 0 || statusIdx > chatIconIdx {
 		t.Fatalf("expected chat busy indicator to render before the chat icon")
 	}
@@ -1320,7 +1323,8 @@ func TestWebSocketDeleteChatReturnsUpdatedState(t *testing.T) {
 		Result struct {
 			ActiveChatID domain.ID `json:"active_chat_id"`
 			Chats        []struct {
-				ID domain.ID
+				ID       domain.ID
+				Archived bool
 			}
 		} `json:"result"`
 		Error string `json:"error"`
@@ -1334,10 +1338,14 @@ func TestWebSocketDeleteChatReturnsUpdatedState(t *testing.T) {
 	if resp.Result.ActiveChatID == deletedID {
 		t.Fatalf("expected active chat to switch away from %s", deletedID)
 	}
+	foundArchived := false
 	for _, chat := range resp.Result.Chats {
 		if chat.ID == deletedID {
-			t.Fatalf("deleted chat still listed: %#v", resp.Result.Chats)
+			foundArchived = chat.Archived
 		}
+	}
+	if !foundArchived {
+		t.Fatalf("expected archived chat to remain listed as archived: %#v", resp.Result.Chats)
 	}
 }
 

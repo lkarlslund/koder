@@ -734,6 +734,7 @@ func (c *Controller) StartChat(ctx context.Context, sessionID, parentChatID doma
 	session := c.session
 	parentChat, ok := chatByID(c.chats, parentChatID)
 	position := len(c.chats)
+	plan := c.milestone
 	c.mu.RUnlock()
 	if session.ID == "" || session.ID != sessionID {
 		return tools.ChatStatus{}, fmt.Errorf("session %s is not active", sessionID)
@@ -749,9 +750,12 @@ func (c *Controller) StartChat(ctx context.Context, sessionID, parentChatID doma
 	if objective == "" {
 		return tools.ChatStatus{}, fmt.Errorf("objective is required")
 	}
-	plan, err := c.GetMilestonePlan(ctx, sessionID)
-	if err != nil {
-		return tools.ChatStatus{}, err
+	if plan.SessionID == "" && len(plan.Milestones) == 0 && strings.TrimSpace(plan.Summary) == "" {
+		var err error
+		plan, err = c.GetMilestonePlan(ctx, sessionID)
+		if err != nil {
+			return tools.ChatStatus{}, err
+		}
 	}
 	milestoneRef := strings.TrimSpace(req.MilestoneRef)
 	todoRef := domain.ID(strings.TrimSpace(string(req.TodoRef)))
@@ -772,7 +776,13 @@ func (c *Controller) StartChat(ctx context.Context, sessionID, parentChatID doma
 		var ok bool
 		milestone, ok = milestoneByRef(plan, milestoneRef)
 		if !ok {
-			return tools.ChatStatus{}, fmt.Errorf("milestone %q not found", milestoneRef)
+			if stored, err := c.store.GetMilestonePlan(ctx, sessionID); err == nil {
+				plan = stored
+				milestone, ok = milestoneByRef(plan, milestoneRef)
+			}
+			if !ok {
+				return tools.ChatStatus{}, fmt.Errorf("milestone %q not found", milestoneRef)
+			}
 		}
 		if milestone.OwnerChatID != nil {
 			return tools.ChatStatus{}, fmt.Errorf("milestone %q is owned by chat %s", milestoneRef, *milestone.OwnerChatID)
@@ -862,6 +872,15 @@ func (c *Controller) todoByID(ctx context.Context, sessionID domain.ID, plan sto
 			if todo.ID == todoID {
 				return todo, nil
 			}
+		}
+	}
+	todos, err := c.store.ListTodos(ctx, sessionID, "")
+	if err != nil {
+		return store.TodoItem{}, err
+	}
+	for _, todo := range todos {
+		if todo.ID == todoID {
+			return todo, nil
 		}
 	}
 	return store.TodoItem{}, fmt.Errorf("todo %s not found", todoID)
@@ -1210,84 +1229,76 @@ func upsertChat(chats *[]domain.Chat, chatRecord domain.Chat) {
 	})
 }
 
-// DeleteChat deletes an idle chat and switches away first when it is active.
+// DeleteChat archives a chat and switches away first when it is active.
 func (c *Controller) DeleteChat(ctx context.Context, chatID domain.ID) error {
+	_, err := c.ArchiveChat(ctx, "", chatID)
+	return err
+}
+
+// ArchiveChat hides a chat from the default sidebar without deleting its history.
+func (c *Controller) ArchiveChat(ctx context.Context, sessionID domain.ID, chatID domain.ID) (tools.ChatStatus, error) {
 	if chatID == "" {
-		return fmt.Errorf("chat id is required")
+		return tools.ChatStatus{}, fmt.Errorf("chat id is required")
 	}
 	c.mu.RLock()
-	sessionID := c.session.ID
+	if sessionID == "" {
+		sessionID = c.session.ID
+	}
 	activeChatID := c.chat.ID
-	activeRuntime := c.runtime
-	targetRuntime := c.runtimes[chatID]
-	targetUnsub := c.unsubs[chatID]
-	targetExecUnsub := c.execUnsubs[chatID]
 	c.mu.RUnlock()
 	if sessionID == "" {
-		return fmt.Errorf("no active session")
-	}
-	if c.agent != nil {
-		status, err := c.agent.PollChat(ctx, sessionID, chatID)
-		if err != nil {
-			return err
-		}
-		if status.Busy {
-			return fmt.Errorf("busy chat can not be deleted")
-		}
+		return tools.ChatStatus{}, fmt.Errorf("no active session")
 	}
 	chats, err := c.store.ListChats(ctx, sessionID)
 	if err != nil {
-		return err
-	}
-	if len(chats) <= 1 {
-		return fmt.Errorf("cannot delete the only chat in a session")
+		return tools.ChatStatus{}, err
 	}
 	target, ok := chatByID(chats, chatID)
 	if !ok {
-		return fmt.Errorf("chat %s not found", chatID)
+		return tools.ChatStatus{}, fmt.Errorf("chat %s not found", chatID)
 	}
+	if target.SessionID != sessionID {
+		return tools.ChatStatus{}, fmt.Errorf("chat %s does not belong to session %s", chatID, sessionID)
+	}
+	archivingActive := chatID == activeChatID
 	nextChatID := activeChatID
-	deletingActive := chatID == activeChatID
-	if deletingActive {
-		nextChatID = fallbackChatID(chats, target)
+	if archivingActive {
+		nextChatID = fallbackVisibleChatID(chats, target)
 		if nextChatID == "" {
-			return fmt.Errorf("no chat to switch to after deletion")
+			return tools.ChatStatus{}, fmt.Errorf("cannot archive the only visible chat in a session")
 		}
-		if activeRuntime != nil {
-			activeRuntime.Close()
-		}
-	} else if targetRuntime != nil {
-		targetRuntime.Close()
 	}
-	if targetUnsub != nil {
-		targetUnsub()
-	}
-	if targetExecUnsub != nil {
-		targetExecUnsub()
-	}
-	if err := c.store.DeleteChat(ctx, chatID); err != nil {
-		return err
+	target.Archived = true
+	target.UpdatedAt = time.Now().UTC()
+	if err := c.store.UpdateChat(ctx, target); err != nil {
+		return tools.ChatStatus{}, err
 	}
 	c.mu.Lock()
-	delete(c.statuses, chatID)
-	delete(c.runtimes, chatID)
-	delete(c.unsubs, chatID)
-	delete(c.execUnsubs, chatID)
-	delete(c.snapshots, chatID)
-	c.mu.Unlock()
-	if deletingActive {
-		return c.loadSession(ctx, sessionID, nextChatID)
+	upsertChat(&c.chats, target)
+	if c.chat.ID == target.ID {
+		c.chat = target
 	}
-	chats, err = c.store.ListChats(ctx, sessionID)
-	if err != nil {
-		return err
+	if snapshot, ok := c.snapshots[target.ID]; ok {
+		snapshot.Chat = target
+		c.snapshots[target.ID] = snapshot
 	}
-	c.mu.Lock()
-	c.chats = chats
 	c.mu.Unlock()
-	c.refreshChatStatuses(ctx, sessionID)
-	c.broadcast("snapshot", c.State())
-	return nil
+	if archivingActive {
+		if err := c.loadSession(ctx, sessionID, nextChatID); err != nil {
+			return tools.ChatStatus{}, err
+		}
+	} else {
+		c.refreshChatStatuses(ctx, sessionID)
+		c.broadcast("snapshot", c.State())
+	}
+	if c.agent != nil {
+		status, err := c.agent.PollChat(ctx, sessionID, chatID)
+		if err == nil {
+			status.Chat.Archived = true
+			return status, nil
+		}
+	}
+	return tools.ChatStatus{Chat: target, State: tools.ChatRunStateIdle, Status: string(chat.StatusIdle), StatusText: "Archived"}, nil
 }
 
 // ReorderChats persists the sidebar chat order for the active session.
@@ -3959,6 +3970,22 @@ func fallbackChatID(chats []domain.Chat, deleting domain.Chat) domain.ID {
 	}
 	for _, item := range chats {
 		if item.ID != deleting.ID {
+			return item.ID
+		}
+	}
+	return ""
+}
+
+func fallbackVisibleChatID(chats []domain.Chat, archiving domain.Chat) domain.ID {
+	if archiving.ParentChatID != nil {
+		for _, item := range chats {
+			if item.ID == *archiving.ParentChatID && item.ID != archiving.ID && !item.Archived {
+				return item.ID
+			}
+		}
+	}
+	for _, item := range chats {
+		if item.ID != archiving.ID && !item.Archived {
 			return item.ID
 		}
 	}

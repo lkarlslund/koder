@@ -68,6 +68,7 @@ const (
 	ToolKindChatList        ToolKind = "chat_list"
 	ToolKindChatStart       ToolKind = "chat_start"
 	ToolKindChatPoll        ToolKind = "chat_poll"
+	ToolKindChatArchive     ToolKind = "chat_archive"
 	ToolKindSkill           ToolKind = "skill"
 	ToolKindWebFetch        ToolKind = "webfetch"
 	ToolKindWebSearch       ToolKind = "websearch"
@@ -108,6 +109,7 @@ func AllToolKinds() []ToolKind {
 		ToolKindChatList,
 		ToolKindChatStart,
 		ToolKindChatPoll,
+		ToolKindChatArchive,
 		ToolKindSkill,
 		ToolKindWebFetch,
 		ToolKindWebSearch,
@@ -223,6 +225,7 @@ type Chat struct {
 	LastKnownContextTokens int
 	ContextTokensKnown     bool
 	Position               int
+	Archived               bool
 	QueuedInputs           []QueuedInput
 	CreatedAt              time.Time
 	UpdatedAt              time.Time

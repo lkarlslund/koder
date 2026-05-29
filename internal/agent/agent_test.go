@@ -603,6 +603,51 @@ func TestConsumeChatUpdatesNotifiesParentWhenChildBecomesIdle(t *testing.T) {
 	}
 }
 
+func TestConsumeChatUpdatesDoesNotSendIdleAfterDoneNotification(t *testing.T) {
+	cfg := testConfig(t)
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	session, err := st.CreateSession(context.Background(), "test", "provider", "model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent := defaultChatForSession(t, st, session.ID)
+	parentID := parent.ID
+	child, err := st.CreateChat(context.Background(), session.ID, "child", chatrole.Execution, &parentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent.QueuedInputs = []domain.QueuedInput{{
+		ID:        domain.NewID(),
+		Kind:      domain.QueuedInputKindSteer,
+		Text:      "Chat " + child.ID + " is done: todo list completed.",
+		Source:    domain.UserMessageSourceSubchat,
+		CreatedAt: time.Now().UTC(),
+	}}
+	if err := st.UpdateChat(context.Background(), parent); err != nil {
+		t.Fatal(err)
+	}
+	engine := New(cfg, st, tools.NewRegistry(t.TempDir()), nil)
+
+	updates := make(chan chatpkg.Update, 2)
+	updates <- chatpkg.Update{Snapshot: chatpkg.Snapshot{Chat: child, Status: chatpkg.StatusWaitingLLM, Active: true}, Status: chatpkg.StatusWaitingLLM, StatusText: "Running", Active: true}
+	updates <- chatpkg.Update{Snapshot: chatpkg.Snapshot{Chat: child, Status: chatpkg.StatusIdle, Active: false}, Status: chatpkg.StatusIdle, StatusText: "Idle", Active: false}
+	close(updates)
+	engine.consumeChatUpdates(child.ID, updates, nil)
+
+	got, err := st.GetChat(context.Background(), parent.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.QueuedInputs) != 1 || strings.Contains(got.QueuedInputs[0].Text, " is idle: Idle") {
+		t.Fatalf("expected idle notification to be suppressed after done, got %#v", got.QueuedInputs)
+	}
+}
+
 func TestHandleModelToolCallRejectsRoleForbiddenTool(t *testing.T) {
 	cfg := testConfig(t)
 	st, err := store.Open(t.TempDir())

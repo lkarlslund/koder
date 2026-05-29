@@ -32,19 +32,33 @@ func init() {
 		Parameters:  `{"type":"object","properties":{"chat_id":{"type":"string","description":"Chat UUID to inspect, as returned by chat_list"}},"required":["chat_id"],"additionalProperties":false}`,
 		ExposeToLLM: true,
 	})
+	tools.Register(archiveTool{}, tools.ToolSpec{
+		Title:       "Archive chat",
+		Description: "Archive a chat so it is hidden from the normal chat list but remains available when archived chats are shown.",
+		Usage:       "Archive a completed or no-longer-needed chat by id. Execution chats should archive themselves after reporting final status to the parent chat and finishing their assigned todo work.",
+		Parameters:  `{"type":"object","properties":{"chat_id":{"type":"string","description":"Chat UUID to archive; defaults to the current chat when omitted"}},"additionalProperties":false}`,
+		ExposeToLLM: true,
+	})
 }
 
 type listTool struct{}
 type startTool struct{}
 type pollTool struct{}
+type archiveTool struct{}
 
 func (listTool) Kind() domain.ToolKind  { return domain.ToolKindChatList }
 func (startTool) Kind() domain.ToolKind { return domain.ToolKindChatStart }
 func (pollTool) Kind() domain.ToolKind  { return domain.ToolKindChatPoll }
+func (archiveTool) Kind() domain.ToolKind {
+	return domain.ToolKindChatArchive
+}
 
 func (listTool) BypassesPermission() bool  { return true }
 func (startTool) BypassesPermission() bool { return true }
 func (pollTool) BypassesPermission() bool  { return true }
+func (archiveTool) BypassesPermission() bool {
+	return true
+}
 
 func (startTool) Definition(runtime tools.Runtime, spec tools.ToolSpec) (tools.ToolSpec, bool) {
 	switch runtime.ChatRole {
@@ -96,9 +110,24 @@ func (pollTool) NormalizeArgs(args map[string]string) (map[string]string, error)
 	return map[string]string{"chat_id": id}, nil
 }
 
+func (archiveTool) NormalizeArgs(args map[string]string) (map[string]string, error) {
+	id := strings.TrimSpace(tools.FirstArg(args, "chat_id", "id"))
+	id = strings.TrimPrefix(id, "#")
+	if id == "" {
+		return map[string]string{}, nil
+	}
+	return map[string]string{"chat_id": id}, nil
+}
+
 func (listTool) Preview(req tools.Request) string  { return "List chats" }
 func (startTool) Preview(req tools.Request) string { return "Start " + req.Args["profile"] + " chat" }
 func (pollTool) Preview(req tools.Request) string  { return "Poll chat " + req.Args["chat_id"] }
+func (archiveTool) Preview(req tools.Request) string {
+	if strings.TrimSpace(req.Args["chat_id"]) == "" {
+		return "Archive current chat"
+	}
+	return "Archive chat " + req.Args["chat_id"]
+}
 
 func (listTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
 	control, err := tools.RequireChatControl(runtime)
@@ -154,6 +183,26 @@ func (pollTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Re
 	}, nil
 }
 
+func (archiveTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
+	control, err := tools.RequireChatControl(runtime)
+	if err != nil {
+		return tools.Result{}, err
+	}
+	chatID := domain.ID(strings.TrimSpace(req.Args["chat_id"]))
+	if chatID == "" {
+		chatID = runtime.ChatID
+	}
+	status, err := control.ArchiveChat(ctx, runtime.SessionID, chatID)
+	if err != nil {
+		return tools.Result{}, err
+	}
+	stored := tools.ChatListStored([]tools.ChatStatus{status})
+	return tools.Result{
+		Output: tools.DisplayTextForStored(domain.ToolKindChatArchive, stored),
+		Stored: stored,
+	}, nil
+}
+
 func (listTool) SummarizeResult(req tools.Request, result tools.Result) (string, string) {
 	return "Listed chats", result.Output
 }
@@ -164,4 +213,8 @@ func (startTool) SummarizeResult(req tools.Request, result tools.Result) (string
 
 func (pollTool) SummarizeResult(req tools.Request, result tools.Result) (string, string) {
 	return "Polled chat", result.Output
+}
+
+func (archiveTool) SummarizeResult(req tools.Request, result tools.Result) (string, string) {
+	return "Archived chat", result.Output
 }

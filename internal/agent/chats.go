@@ -209,7 +209,14 @@ func (e *Engine) consumeChatUpdates(chatID domain.ID, updates <-chan chatpkg.Upd
 		e.setRunState(chatID, chatRunState{state: state, status: status, statusText: statusText, lastError: lastError})
 		if !update.Active && sawActive && !notifiedIdle && state == tools.ChatRunStateIdle {
 			notifiedIdle = true
-			e.notifyParentChat(context.Background(), chatID, fmt.Sprintf("Chat %s is idle: %s", chatID, strings.TrimSpace(statusText)))
+			if e.parentAlreadyHasDoneNotification(context.Background(), chatID) {
+				continue
+			}
+			if text := e.completedChildChatNotification(context.Background(), chatID); text != "" {
+				e.notifyParentChat(context.Background(), chatID, text)
+			} else {
+				e.notifyParentChat(context.Background(), chatID, fmt.Sprintf("Chat %s is idle: %s", chatID, strings.TrimSpace(statusText)))
+			}
 		}
 	}
 	e.setRunState(chatID, chatRunState{state: state, status: status, statusText: statusText, lastError: lastError})
@@ -227,6 +234,66 @@ func (e *Engine) notifyParentChat(ctx context.Context, sourceChatID domain.ID, t
 		return
 	}
 	e.enqueueSteer(ctx, *source.ParentChatID, text)
+}
+
+func (e *Engine) completedChildChatNotification(ctx context.Context, chatID domain.ID) string {
+	chatRecord, err := e.store.GetChat(ctx, chatID)
+	if err != nil || chatRecord.ParentChatID == nil {
+		return ""
+	}
+	if chatRecord.AssignedTodoRef != "" {
+		todos, err := e.store.ListTodos(ctx, chatRecord.SessionID, chatRecord.AssignedTodoBucketRef)
+		if err == nil {
+			for _, todo := range todos {
+				if todo.ID == chatRecord.AssignedTodoRef && todo.Status == domain.TodoStatusCompleted {
+					return fmt.Sprintf("Chat %s is done: todo #%s is completed.", chatID, todo.ID)
+				}
+			}
+		}
+	}
+	if ref := strings.TrimSpace(chatRecord.ActiveMilestoneRef); ref != "" {
+		plan, err := e.store.GetMilestonePlan(ctx, chatRecord.SessionID)
+		if err == nil {
+			for _, milestone := range plan.Milestones {
+				if milestone.Ref != ref {
+					continue
+				}
+				switch milestone.Status {
+				case domain.MilestoneStatusCompleted, domain.MilestoneStatusBlocked, domain.MilestoneStatusCancelled, domain.MilestoneStatusReady:
+					return fmt.Sprintf("Chat %s is done: milestone %s is %s.", chatID, ref, milestone.Status)
+				}
+			}
+		}
+	}
+	return ""
+}
+
+func (e *Engine) parentAlreadyHasDoneNotification(ctx context.Context, sourceChatID domain.ID) bool {
+	source, err := e.store.GetChat(ctx, sourceChatID)
+	if err != nil || source.ParentChatID == nil {
+		return false
+	}
+	needle := "chat " + strings.ToLower(string(sourceChatID)) + " is done"
+	e.chatMu.RLock()
+	parent := e.chats[*source.ParentChatID]
+	e.chatMu.RUnlock()
+	if parent != nil {
+		for _, item := range parent.Snapshot().QueuedInputs {
+			if strings.Contains(strings.ToLower(item.Text), needle) {
+				return true
+			}
+		}
+	}
+	parentRecord, err := e.store.GetChat(ctx, *source.ParentChatID)
+	if err != nil {
+		return false
+	}
+	for _, item := range parentRecord.QueuedInputs {
+		if strings.Contains(strings.ToLower(item.Text), needle) {
+			return true
+		}
+	}
+	return false
 }
 
 func (e *Engine) enqueueSteer(ctx context.Context, chatID domain.ID, text string) {

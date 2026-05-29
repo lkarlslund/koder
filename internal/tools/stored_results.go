@@ -212,6 +212,7 @@ type ChatStoredItem struct {
 	Title              string    `json:"title"`
 	Role               string    `json:"role,omitempty"`
 	State              string    `json:"state,omitempty"`
+	Archived           bool      `json:"archived,omitempty"`
 	ActiveMilestoneRef string    `json:"active_milestone_ref,omitempty"`
 	AssignedTodoRef    domain.ID `json:"assigned_todo_ref,omitempty"`
 	StatusText         string    `json:"status_text,omitempty"`
@@ -823,7 +824,7 @@ func formatStoredToolOutput(env storedResultEnvelope) (string, bool) {
 		return decodeAndFormat[ShowImageStoredResult](env.Payload, formatShowImageStoredResult)
 	case domain.ToolKindMilestoneList, domain.ToolKindMilestoneAdd, domain.ToolKindMilestoneUpdate, domain.ToolKindMilestoneWrite, domain.ToolKindMilestonePlan:
 		return decodeAndFormat[MilestonePlanStoredResult](env.Payload, formatMilestonePlanStoredResult)
-	case domain.ToolKindChatList, domain.ToolKindChatStart, domain.ToolKind("chat_start_decomposition"), domain.ToolKind("chat_start_execution"), domain.ToolKindChatPoll:
+	case domain.ToolKindChatList, domain.ToolKindChatStart, domain.ToolKind("chat_start_decomposition"), domain.ToolKind("chat_start_execution"), domain.ToolKindChatPoll, domain.ToolKindChatArchive:
 		return decodeAndFormat[ChatListStoredResult](env.Payload, formatChatListStoredResult)
 	case domain.ToolKindTodoList, domain.ToolKindTodoAddItems, domain.ToolKindTodoUpdateItem, domain.ToolKindTodoFetchNext:
 		return decodeAndFormat[TodoListStoredResult](env.Payload, formatTodoListStoredResult)
@@ -1052,6 +1053,9 @@ func formatChatListStoredResult(result ChatListStoredResult) string {
 		}
 		if state := strings.TrimSpace(item.State); state != "" {
 			line += " {" + state + "}"
+		}
+		if item.Archived {
+			line += " {archived}"
 		}
 		lines = append(lines, line)
 		if ref := strings.TrimSpace(item.ActiveMilestoneRef); ref != "" {

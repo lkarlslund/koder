@@ -34,6 +34,14 @@ func (f *fakeChatControl) PollChat(_ context.Context, _ domain.ID, chatID domain
 	return f.statuses[0], nil
 }
 
+func (f *fakeChatControl) ArchiveChat(_ context.Context, sessionID, chatID domain.ID) (tools.ChatStatus, error) {
+	f.lastSessionID = sessionID
+	f.lastChatID = chatID
+	status := f.statuses[0]
+	status.Chat.Archived = true
+	return status, nil
+}
+
 func testRuntime(control tools.ChatControl) tools.Runtime {
 	return tools.Runtime{
 		SessionID:   "session-10",
@@ -141,5 +149,26 @@ func TestPollExecuteReturnsStatus(t *testing.T) {
 	}
 	if !strings.Contains(result.Output, "Completed") {
 		t.Fatalf("expected poll output to include status, got %q", result.Output)
+	}
+}
+
+func TestArchiveExecuteArchivesCurrentChatByDefault(t *testing.T) {
+	control := &fakeChatControl{statuses: []tools.ChatStatus{{
+		Chat:       domain.Chat{ID: "chat-20", Title: "Worker", WorkflowRole: chatrole.Execution},
+		State:      tools.ChatRunStateIdle,
+		StatusText: "Idle",
+	}}}
+	result, err := (archiveTool{}).Execute(context.Background(), testRuntime(control), tools.Request{
+		Tool: domain.ToolKindChatArchive,
+		Args: map[string]string{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if control.lastSessionID != "session-10" || control.lastChatID != "chat-20" {
+		t.Fatalf("unexpected archive target: %#v", control)
+	}
+	if !strings.Contains(result.Output, "Worker") {
+		t.Fatalf("expected archive output to include chat, got %q", result.Output)
 	}
 }

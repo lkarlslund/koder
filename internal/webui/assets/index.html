@@ -156,22 +156,25 @@
       <div class="sidebar-section">
         <div class="sidebar-info-row">
           <span class="sidebar-heading">Chats</span>
-          <button class="btn btn-sm btn-outline-primary" @click="newChat()"><i class="bi bi-plus-lg"></i></button>
+          <div class="d-flex align-items-center gap-1">
+            <button class="btn btn-sm btn-outline-secondary" :class="{'active': showArchivedChats}" :disabled="archivedChatCount() === 0" title="Show archived chats" @click="showArchivedChats = !showArchivedChats"><i class="bi bi-archive"></i></button>
+            <button class="btn btn-sm btn-outline-primary" @click="newChat()"><i class="bi bi-plus-lg"></i></button>
+          </div>
         </div>
         <div class="list-group list-group-flush sidebar-list">
-          <template x-for="chat in state.chats || []" :key="chat.ID || chat.id">
-            <div class="list-group-item list-group-item-action chat-list-item d-flex align-items-center gap-1" draggable="true" :class="{'active': chatID(chat) === state.active_chat_id, 'dragging': dragChatID === chatID(chat)}" @click="switchChat(chatID(chat))" @dragstart="startChatDrag($event, chatID(chat))" @dragover.prevent="overChatDrag($event, chatID(chat))" @drop.stop.prevent="dropChat($event, chatID(chat))" @dragend="endChatDrag()">
+          <template x-for="chat in visibleChats()" :key="chat.ID || chat.id">
+            <div class="list-group-item list-group-item-action chat-list-item d-flex align-items-center gap-1" draggable="true" :class="{'active': chatID(chat) === state.active_chat_id, 'dragging': dragChatID === chatID(chat), 'opacity-75': chatArchived(chat)}" @click="switchChat(chatID(chat))" @dragstart="startChatDrag($event, chatID(chat))" @dragover.prevent="overChatDrag($event, chatID(chat))" @drop.stop.prevent="dropChat($event, chatID(chat))" @dragend="endChatDrag()">
               <button type="button" class="btn btn-sm p-0 border-0 bg-transparent flex-grow-1 text-start chat-list-main" :class="{'text-white': chatID(chat) === state.active_chat_id}" @click.stop="switchChat(chatID(chat))">
                 <div class="d-flex align-items-center gap-1 chat-list-content">
                   <i class="bi bi-grip-vertical chat-drag-handle" title="Drag to reorder"></i>
                   <i class="chat-status-icon bi" :class="[chatStatusIcon(chat), chatStatusClass(chat)]" :title="chatStatusLabel(chat)"></i>
-                  <i class="bi bi-chat-left-text"></i>
+                  <i class="bi" :class="chatArchived(chat) ? 'bi-archive' : 'bi-chat-left-text'"></i>
                   <span class="text-truncate chat-title" x-text="chat.Title || chat.title || 'Chat'"></span>
                   <span class="chat-context text-nowrap" x-text="chatContextLabel(chat)" :title="chatContextTooltip(chat)"></span>
                 </div>
               </button>
-              <button type="button" class="btn btn-sm" :class="chatID(chat) === state.active_chat_id ? 'btn-outline-light' : 'btn-outline-danger'" title="Delete chat" @click.stop="deleteChat(chatID(chat))">
-                <i class="bi bi-trash"></i>
+              <button type="button" class="btn btn-sm" :class="chatID(chat) === state.active_chat_id ? 'btn-outline-light' : 'btn-outline-danger'" title="Archive chat" @click.stop="deleteChat(chatID(chat))">
+                <i class="bi bi-archive"></i>
               </button>
             </div>
           </template>

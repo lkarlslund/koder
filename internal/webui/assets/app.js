@@ -341,7 +341,7 @@
         showMCPEditor: false, mcpDraft: null, mcpHeadersText: '{}', mcpStatus: '', mcpStatusKind: 'secondary',
         imageLightbox: {open: false, src: '', title: '', meta: ''},
         completion: {kind: '', query: '', start: 0, end: 0, items: [], selected: 0}, completionSeq: 0,
-        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, restoreChatAttempted: false, composerInitialFocusDone: false, transcriptStickToBottom: true, scrollRestoreSeq: 0, expandedMilestones: {}, interruptArmedChatID: '', dragChatID: '', dragQueueID: '', composerAttachments: [], activeComposerDraftKey: '', preserveComposerDraftDuringSend: false, restartRequested: false, error: '', toast: '', toastTimer: null,
+        theme: readPreference('theme', 'auto'), sidebarRatio: Number(readPreference('sidebarRatio', '0.22')), resizingSidebar: false, restoreChatAttempted: false, composerInitialFocusDone: false, transcriptStickToBottom: true, scrollRestoreSeq: 0, expandedMilestones: {}, interruptArmedChatID: '', dragChatID: '', dragQueueID: '', showArchivedChats: false, composerAttachments: [], activeComposerDraftKey: '', preserveComposerDraftDuringSend: false, restartRequested: false, error: '', toast: '', toastTimer: null,
         init() {
           this.clampSidebarRatio();
           this.applyTheme();
@@ -1054,7 +1054,15 @@
           if (status === 'in_progress') return 'bi-arrow-repeat text-primary';
           return 'bi-circle text-secondary';
         },
-        chatID(chat) { return chat.ID || chat.id; },
+        chatID(chat) { return String(chat?.ID || chat?.id || '').trim(); },
+        chatArchived(chat) { return !!(chat?.Archived || chat?.archived); },
+        visibleChats() {
+          const chats = this.state.chats || this.state.Chats || [];
+          return this.showArchivedChats ? chats : chats.filter(chat => !this.chatArchived(chat));
+        },
+        archivedChatCount() {
+          return (this.state.chats || this.state.Chats || []).filter(chat => this.chatArchived(chat)).length;
+        },
         chatSnapshot(chat) {
           const id = this.chatID(chat);
           const snapshots = this.state.snapshots || this.state.Snapshots || {};
@@ -1472,15 +1480,22 @@
           const sourceID = this.dragChatID || (ev.dataTransfer && ev.dataTransfer.getData('text/plain')) || '';
           this.dragChatID = '';
           if (!sourceID || !targetID || sourceID === targetID) return;
-          const chats = (this.state.chats || this.state.Chats || []).slice();
+          const allChats = (this.state.chats || this.state.Chats || []).slice();
+          const chats = this.visibleChats().slice();
           const from = chats.findIndex(chat => this.chatID(chat) === sourceID);
           const to = chats.findIndex(chat => this.chatID(chat) === targetID);
           if (from < 0 || to < 0) return;
           const [moved] = chats.splice(from, 1);
           chats.splice(to, 0, moved);
-          this.state.chats = chats;
-          this.state.Chats = chats;
-          this.rpc('reorder_chats', {chat_ids: chats.map(chat => this.chatID(chat))})
+          const visibleIDs = new Set(chats.map(chat => this.chatID(chat)));
+          const orderedIDs = chats.map(chat => this.chatID(chat));
+          allChats.forEach(chat => {
+            const id = this.chatID(chat);
+            if (!visibleIDs.has(id)) orderedIDs.push(id);
+          });
+          this.state.chats = [...chats, ...allChats.filter(chat => !visibleIDs.has(this.chatID(chat)))];
+          this.state.Chats = this.state.chats;
+          this.rpc('reorder_chats', {chat_ids: orderedIDs})
             .then(s => this.applyState(s))
             .catch(err => {
               this.showToast(err.message);
@@ -1489,7 +1504,7 @@
         },
         endChatDrag() { this.dragChatID = ''; },
         deleteChat(id) {
-          if (!id || !confirm('Delete this chat?')) return;
+          if (!id || !confirm('Archive this chat?')) return;
           this.rpc('delete_chat', {chat_id: id}).then(s => this.applyState(s)).catch(err => this.showToast(err.message));
         },
         showToast(message) {

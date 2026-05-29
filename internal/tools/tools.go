@@ -54,6 +54,7 @@ type ChatControl interface {
 	ListChats(context.Context, domain.ID) ([]ChatStatus, error)
 	StartChat(context.Context, domain.ID, domain.ID, ChatStartRequest) (ChatStatus, error)
 	PollChat(context.Context, domain.ID, domain.ID) (ChatStatus, error)
+	ArchiveChat(context.Context, domain.ID, domain.ID) (ChatStatus, error)
 }
 
 type Request struct {
