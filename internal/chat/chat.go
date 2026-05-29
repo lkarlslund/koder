@@ -250,11 +250,16 @@ func New(session domain.Session, chatRecord domain.Chat, timeline []domain.Timel
 
 // TurnState exposes the live chat state for an active model turn.
 type TurnState struct {
-	chat *Chat
+	chat  *Chat
+	input domain.QueuedInput
 }
 
 func (r *Chat) turnState() *TurnState {
 	return &TurnState{chat: r}
+}
+
+func (r *Chat) turnStateForInput(input domain.QueuedInput) *TurnState {
+	return &TurnState{chat: r, input: input}
 }
 
 // Session returns the live session metadata for the turn.
@@ -294,6 +299,11 @@ func (t *TurnState) Timeline() []domain.TimelineItem {
 func (t *TurnState) AppendUserMessage(ctx context.Context, user domain.UserMessage) (domain.TimelineItem, error) {
 	if t == nil || t.chat == nil {
 		return domain.TimelineItem{}, fmt.Errorf("turn state is required")
+	}
+	if t.input.TimelineID != "" {
+		if item, ok := t.existingInputTimelineItem(); ok {
+			return item, nil
+		}
 	}
 	r := t.chat
 	now := time.Now().UTC()
@@ -337,6 +347,23 @@ func (t *TurnState) AppendUserMessage(ctx context.Context, user domain.UserMessa
 		}
 	}
 	return item, nil
+}
+
+func (t *TurnState) existingInputTimelineItem() (domain.TimelineItem, bool) {
+	if t == nil || t.chat == nil || t.input.TimelineID == "" {
+		return domain.TimelineItem{}, false
+	}
+	t.chat.mu.RLock()
+	defer t.chat.mu.RUnlock()
+	if t.chat.state == nil {
+		return domain.TimelineItem{}, false
+	}
+	for _, item := range t.chat.state.SnapshotTimeline() {
+		if item.ID == t.input.TimelineID {
+			return item, true
+		}
+	}
+	return domain.TimelineItem{}, false
 }
 
 // NextAssistantItem returns the next live assistant timeline identity.
@@ -422,6 +449,27 @@ func (t *TurnState) ApplyNextSteer(ctx context.Context) (domain.TimelineItem, bo
 	queued := r.queue[idx]
 	r.queue = append(slices.Clone(r.queue[:idx]), slices.Clone(r.queue[idx+1:])...)
 	r.chat.QueuedInputs = cloneQueuedInputs(r.queue)
+	if queued.TimelineID != "" && r.state != nil {
+		for _, existing := range r.state.SnapshotTimeline() {
+			if existing.ID != queued.TimelineID {
+				continue
+			}
+			if r.state != nil {
+				r.state.UpdateChat(func(chat *domain.Chat) {
+					chat.QueuedInputs = cloneQueuedInputs(r.queue)
+				})
+			}
+			chatID := r.chat.ID
+			queue := cloneQueuedInputs(r.queue)
+			r.mu.Unlock()
+			if r.store != nil {
+				if err := r.store.SetChatQueuedInputs(ctx, chatID, queue); err != nil {
+					return domain.TimelineItem{}, false, err
+				}
+			}
+			return existing, true, nil
+		}
+	}
 	user := domain.UserMessage{Text: strings.TrimSpace(queued.Text), Source: domain.UserMessageSourceForQueuedInput(queued)}
 	for _, draft := range queued.Attachments {
 		user.Attachments = append(user.Attachments, domain.Attachment(draft))
@@ -717,7 +765,7 @@ func (r *Chat) Snapshot() Snapshot {
 		Chat:             r.state.Chat(),
 		Timeline:         r.state.SnapshotTimeline(),
 		Approvals:        r.state.Approvals(),
-		QueuedInputs:     cloneQueuedInputs(r.queue),
+		QueuedInputs:     visibleQueuedInputs(r.queue),
 		PendingAssistant: r.state.PendingAssistant(),
 		Status:           r.status,
 		StatusText:       r.statusText,
@@ -812,17 +860,74 @@ func (r *Chat) handleEnqueue(item QueueItem) {
 
 func (r *Chat) handleAppendQueuedInput(queued domain.QueuedInput) {
 	r.mu.Lock()
+	var timelineItem domain.TimelineItem
+	if r.shouldRenderQueuedUserInputLocked(queued) {
+		timelineItem = r.appendQueuedUserInputLocked(queued)
+		queued.TimelineID = timelineItem.ID
+	}
 	r.queue = append(r.queue, queued)
 	r.chat.QueuedInputs = cloneQueuedInputs(r.queue)
 	if r.state != nil {
 		r.state.UpdateChat(func(chat *domain.Chat) {
 			chat.QueuedInputs = cloneQueuedInputs(r.queue)
+			if text := timelineItemSummary(timelineItem); text != "" {
+				chat.LastMessage = text
+			}
 		})
 	}
+	if text := timelineItemSummary(timelineItem); text != "" {
+		r.chat.LastMessage = text
+	}
+	chatRecord := r.chat
 	r.mu.Unlock()
-	_ = r.persistQueue()
-	r.broadcast(r.snapshotUpdateFlags(nil, false, true, false, false, false))
+	if timelineItem.ID != "" && r.store != nil {
+		if _, err := r.store.InsertTimelineItem(context.Background(), timelineItem); err != nil {
+			_ = r.markPersistError(err)
+			return
+		}
+		if err := r.store.UpdateChat(context.Background(), chatRecord); err != nil {
+			_ = r.markPersistError(err)
+			return
+		}
+	}
+	if err := r.persistQueue(); err != nil {
+		_ = r.markPersistError(err)
+		return
+	}
+	r.broadcast(r.snapshotUpdateFlags(nil, timelineItem.ID != "", true, false, false, false))
 	r.maybeDispatchNext()
+}
+
+func (r *Chat) shouldRenderQueuedUserInputLocked(queued domain.QueuedInput) bool {
+	if r.state == nil || queued.Kind != domain.QueuedInputKindSteer || queued.TimelineID != "" {
+		return false
+	}
+	if strings.TrimSpace(queued.Source) != domain.UserMessageSourceUser {
+		return false
+	}
+	return r.active || r.status == StatusWaitingApproval
+}
+
+func (r *Chat) appendQueuedUserInputLocked(queued domain.QueuedInput) domain.TimelineItem {
+	now := time.Now().UTC()
+	user := domain.UserMessage{Text: strings.TrimSpace(queued.Text), Source: domain.UserMessageSourceUser}
+	for _, draft := range queued.Attachments {
+		user.Attachments = append(user.Attachments, domain.Attachment(draft))
+	}
+	for _, ref := range queued.References {
+		user.References = append(user.References, domain.Reference(ref))
+	}
+	item := domain.TimelineItem{
+		ID:        domain.NewTimelineID(now),
+		ChatID:    r.chat.ID,
+		Seq:       int64(len(r.state.Timeline()) + 1),
+		Content:   user,
+		CreatedAt: now,
+		UpdatedAt: now,
+		SealedAt:  now,
+	}
+	r.state.AppendTimelineItem(item)
+	return item
 }
 
 func (r *Chat) handleReplaceQueue(items []domain.QueuedInput) {
@@ -1538,7 +1643,7 @@ func (r *Chat) runItem(ctx context.Context, session domain.Session, chat domain.
 		}
 	default:
 		if runner, ok := r.engine.(turnPromptRunner); ok {
-			events, err = runner.RunPromptTurn(ctx, r.turnState(), item.Text, queuedAttachmentDrafts(item.Attachments), queuedReferenceDrafts(item.References), note)
+			events, err = runner.RunPromptTurn(ctx, r.turnStateForInput(item), item.Text, queuedAttachmentDrafts(item.Attachments), queuedReferenceDrafts(item.References), note)
 		} else {
 			events, err = r.engine.RunPromptInChat(ctx, session, chat, item.Text, queuedAttachmentDrafts(item.Attachments), queuedReferenceDrafts(item.References), note)
 		}
@@ -1644,7 +1749,7 @@ func (r *Chat) snapshotUpdateFlags(event *domain.Event, transcriptChanged, queue
 		Snapshot:          snapshot,
 		Status:            snapshot.Status,
 		StatusText:        snapshot.StatusText,
-		Queue:             cloneQueuedInputs(snapshot.QueuedInputs),
+		Queue:             visibleQueuedInputs(snapshot.QueuedInputs),
 		Context:           snapshot.Context,
 		Active:            snapshot.Active,
 		TranscriptChanged: transcriptChanged,
@@ -1808,6 +1913,20 @@ func cloneQueuedInputs(src []domain.QueuedInput) []domain.QueuedInput {
 		dst = append(dst, cloned)
 	}
 	return dst
+}
+
+func visibleQueuedInputs(src []domain.QueuedInput) []domain.QueuedInput {
+	if len(src) == 0 {
+		return nil
+	}
+	out := make([]domain.QueuedInput, 0, len(src))
+	for _, item := range src {
+		if item.TimelineID != "" && strings.TrimSpace(item.Source) == domain.UserMessageSourceUser {
+			continue
+		}
+		out = append(out, item)
+	}
+	return cloneQueuedInputs(out)
 }
 
 func queuedAttachmentsFromDrafts(src []attachment.Draft) []domain.QueuedAttachment {

@@ -261,6 +261,7 @@ type QueuedInput struct {
 	Kind        QueuedInputKind
 	Text        string
 	Source      string
+	TimelineID  ID
 	Held        bool
 	Attachments []QueuedAttachment
 	References  []QueuedReference

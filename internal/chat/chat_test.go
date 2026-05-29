@@ -2,6 +2,7 @@ package chat
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -12,6 +13,8 @@ import (
 	"github.com/lkarlslund/koder/internal/reference"
 	"github.com/lkarlslund/koder/internal/store"
 )
+
+var errTestProviderFailure = errors.New("provider failed")
 
 type runtimeFakeRunner struct {
 	mu            sync.Mutex
@@ -39,6 +42,14 @@ type pendingToolFakeRunner struct {
 
 type turnPromptFakeRunner struct {
 	runtimeFakeRunner
+}
+
+type controlledTurnPromptRunner struct {
+	runtimeFakeRunner
+	mu      sync.Mutex
+	calls   int
+	prompts []string
+	events  []<-chan domain.Event
 }
 
 func (f *cancelAwareRunner) RunPromptInChat(ctx context.Context, _ domain.Session, _ domain.Chat, _ string, _ []attachment.Draft, _ []reference.Draft, _ string) (<-chan domain.Event, error) {
@@ -101,6 +112,42 @@ func (f *turnPromptFakeRunner) RunPromptTurn(ctx context.Context, turn *TurnStat
 	events <- domain.Event{Kind: domain.EventKindMessageDone}
 	close(events)
 	return events, nil
+}
+
+func (f *controlledTurnPromptRunner) RunPromptTurn(ctx context.Context, turn *TurnState, prompt string, _ []attachment.Draft, _ []reference.Draft, _ string) (<-chan domain.Event, error) {
+	item, err := turn.AppendUserMessage(ctx, domain.UserMessage{Text: prompt})
+	if err != nil {
+		return nil, err
+	}
+	f.mu.Lock()
+	f.calls++
+	f.prompts = append(f.prompts, prompt)
+	var events <-chan domain.Event
+	if len(f.events) > 0 {
+		events = f.events[0]
+		f.events = f.events[1:]
+	}
+	f.mu.Unlock()
+	if events == nil {
+		ch := make(chan domain.Event)
+		close(ch)
+		return ch, nil
+	}
+	out := make(chan domain.Event, 1)
+	go func() {
+		defer close(out)
+		out <- domain.Event{Kind: domain.EventKindStatus, Text: "User message added", Item: item}
+		for evt := range events {
+			out <- evt
+		}
+	}()
+	return out, nil
+}
+
+func (f *controlledTurnPromptRunner) promptCallCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.calls
 }
 
 func (f *runtimeFakeRunner) RunContinueInChat(_ context.Context, _ domain.Session, _ domain.Chat, note string) (<-chan domain.Event, error) {
@@ -327,6 +374,107 @@ func TestRuntimeEnqueueStartsPrompt(t *testing.T) {
 		case <-deadline:
 			t.Fatal("timed out waiting for runtime update")
 		}
+	}
+}
+
+func TestRuntimeRendersUserQueuedWhileBusyBeforeActiveError(t *testing.T) {
+	st := openTestStore(t)
+	session, chatRecord, _ := createSessionWithPlan(t, st)
+	firstEvents := make(chan domain.Event)
+	secondEvents := make(chan domain.Event)
+	runner := &controlledTurnPromptRunner{events: []<-chan domain.Event{firstEvents, secondEvents}}
+	rt := newTestChat(t, st, session, chatRecord, runner)
+	updates, unsub := rt.Subscribe()
+	defer unsub()
+
+	rt.Enqueue(QueueItem{Kind: QueueKindSteer, Source: domain.UserMessageSourceUser, Text: "first prompt"})
+	deadline := time.After(2 * time.Second)
+	for runner.promptCallCount() == 0 {
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for first prompt start")
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+
+	rt.Enqueue(QueueItem{Kind: QueueKindSteer, Source: domain.UserMessageSourceUser, Text: "queued while busy"})
+	deadline = time.After(2 * time.Second)
+	for {
+		timeline := rt.Snapshot().Timeline
+		if len(timeline) >= 2 {
+			user, ok := timeline[1].Content.(domain.UserMessage)
+			if ok && user.Text == "queued while busy" {
+				if user.Source != domain.UserMessageSourceUser {
+					t.Fatalf("queued user source = %q, want %q", user.Source, domain.UserMessageSourceUser)
+				}
+				if got := rt.Snapshot().QueuedInputs; len(got) != 0 {
+					t.Fatalf("rendered user input should be hidden from visible queue, got %#v", got)
+				}
+				break
+			}
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for queued user render: %#v", timeline)
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+
+	errorItem := domain.TimelineItem{
+		ID:        domain.NewTimelineID(time.Now().UTC()),
+		ChatID:    chatRecord.ID,
+		Content:   domain.Notice{Text: "provider failed", Kind: "model_error", Level: "error"},
+		CreatedAt: time.Now().UTC(),
+		UpdatedAt: time.Now().UTC(),
+		SealedAt:  time.Now().UTC(),
+	}
+	firstEvents <- domain.Event{Kind: domain.EventKindError, Err: errTestProviderFailure, Item: errorItem}
+	deadline = time.After(2 * time.Second)
+	for {
+		select {
+		case update := <-updates:
+			if update.Event == nil || update.Event.Kind != domain.EventKindError {
+				continue
+			}
+			timeline := rt.Snapshot().Timeline
+			if len(timeline) < 3 {
+				t.Fatalf("expected user before error, got %#v", timeline)
+			}
+			user, ok := timeline[1].Content.(domain.UserMessage)
+			if !ok || user.Text != "queued while busy" {
+				t.Fatalf("expected queued user before error, got %#v", timeline)
+			}
+			if _, ok := timeline[2].Content.(domain.Notice); !ok {
+				t.Fatalf("expected error notice after queued user, got %#v", timeline)
+			}
+			close(firstEvents)
+			goto dispatched
+		case <-deadline:
+			t.Fatalf("timed out waiting for error: %#v", rt.Snapshot())
+		}
+	}
+
+dispatched:
+	deadline = time.After(2 * time.Second)
+	for runner.promptCallCount() < 2 {
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for queued prompt dispatch: %#v", rt.Snapshot())
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	close(secondEvents)
+	var seenQueued int
+	for _, item := range rt.Snapshot().Timeline {
+		if user, ok := item.Content.(domain.UserMessage); ok && user.Text == "queued while busy" {
+			seenQueued++
+		}
+	}
+	if seenQueued != 1 {
+		t.Fatalf("expected one queued user timeline item, got %d in %#v", seenQueued, rt.Snapshot().Timeline)
 	}
 }
 

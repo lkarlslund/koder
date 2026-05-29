@@ -479,7 +479,11 @@ func (c *Controller) SendPromptWithKindAndAttachments(text string, kind chat.Que
 	if rt == nil {
 		return fmt.Errorf("no active chat")
 	}
-	rt.Enqueue(chat.QueueItem{Kind: kind, Text: text, Attachments: validated})
+	source := ""
+	if kind == chat.QueueKindSteer {
+		source = domain.UserMessageSourceUser
+	}
+	rt.Enqueue(chat.QueueItem{Kind: kind, Source: source, Text: text, Attachments: validated})
 	return nil
 }
 
