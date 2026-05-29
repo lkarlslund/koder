@@ -110,14 +110,22 @@ type Chat struct {
 
 type Deps struct {
 	Store  *store.Store
+	Prompt PromptTurnService
 	Turns  TurnLoopService
+	Errors TurnErrorHandler
 	Legacy Runner
 }
 
 func DepsForRunner(st *store.Store, runner Runner) Deps {
 	deps := Deps{Store: st, Legacy: runner}
+	if prompt, ok := runner.(PromptTurnService); ok {
+		deps.Prompt = prompt
+	}
 	if turns, ok := runner.(TurnLoopService); ok {
 		deps.Turns = turns
+	}
+	if errors, ok := runner.(TurnErrorHandler); ok {
+		deps.Errors = errors
 	}
 	return deps
 }
@@ -212,12 +220,18 @@ type TurnLoop interface {
 }
 
 type TurnLoopService interface {
-	PreparePromptTurn(context.Context, *TurnState, string, []attachment.Draft, []reference.Draft, string, chan<- domain.Event) ([]provider.InstructionBlock, error)
-	PrepareContinueTurn(context.Context, *TurnState, string, chan<- domain.Event) ([]provider.InstructionBlock, error)
 	NewTurnLoop(*TurnState) TurnLoop
 	ApproveToolForTurn(context.Context, *TurnState, string, *domain.PermissionOverride, chan<- domain.Event) (bool, error)
 	DenyToolForTurn(context.Context, *TurnState, string, chan<- domain.Event) error
 	ResumePendingToolsForTurn(context.Context, *TurnState, chan<- domain.Event) (bool, error)
+}
+
+type PromptTurnService interface {
+	PreparePromptTurn(context.Context, *TurnState, string, []attachment.Draft, []reference.Draft, string, chan<- domain.Event) ([]provider.InstructionBlock, error)
+	PrepareContinueTurn(context.Context, *TurnState, string, chan<- domain.Event) ([]provider.InstructionBlock, error)
+}
+
+type TurnErrorHandler interface {
 	HandleTurnError(context.Context, *TurnState, chan<- domain.Event, error)
 }
 
@@ -1345,7 +1359,7 @@ func (r *Chat) handleApproveWithTurnLoop(runner TurnLoopService, toolCallID stri
 		defer close(out)
 		shouldContinue, err := runner.ApproveToolForTurn(ctx, r.turnState(), toolCallID, rule, out)
 		if err != nil {
-			runner.HandleTurnError(ctx, r.turnState(), out, err)
+			r.handleTurnError(ctx, r.turnState(), out, err)
 			return
 		}
 		if shouldContinue {
@@ -1376,7 +1390,7 @@ func (r *Chat) handleDenyWithTurnLoop(runner TurnLoopService, toolCallID string)
 	go func() {
 		defer close(out)
 		if err := runner.DenyToolForTurn(ctx, r.turnState(), toolCallID, out); err != nil {
-			runner.HandleTurnError(ctx, r.turnState(), out, err)
+			r.handleTurnError(ctx, r.turnState(), out, err)
 		}
 	}()
 	r.forwardTurnEvents(out)
@@ -1496,7 +1510,7 @@ func (r *Chat) handleResumePendingToolsWithTurnLoop(runner TurnLoopService) {
 		defer close(out)
 		shouldContinue, err := runner.ResumePendingToolsForTurn(ctx, r.turnState(), out)
 		if err != nil {
-			runner.HandleTurnError(ctx, r.turnState(), out, err)
+			r.handleTurnError(ctx, r.turnState(), out, err)
 			return
 		}
 		if shouldContinue {
@@ -1914,14 +1928,19 @@ func (r *Chat) runTurnLoop(ctx context.Context, runner TurnLoopService, turn *Tu
 			transient []provider.InstructionBlock
 			err       error
 		)
+		prompt := r.deps.Prompt
+		if prompt == nil {
+			r.handleTurnError(ctx, turn, out, fmt.Errorf("prompt preparation is not supported by runner"))
+			return
+		}
 		switch item.Kind {
 		case domain.QueuedInputKindContinue:
-			transient, err = runner.PrepareContinueTurn(ctx, turn, note, out)
+			transient, err = prompt.PrepareContinueTurn(ctx, turn, note, out)
 		default:
-			transient, err = runner.PreparePromptTurn(ctx, turn, item.Text, queuedAttachmentDrafts(item.Attachments), queuedReferenceDrafts(item.References), note, out)
+			transient, err = prompt.PreparePromptTurn(ctx, turn, item.Text, queuedAttachmentDrafts(item.Attachments), queuedReferenceDrafts(item.References), note, out)
 		}
 		if err != nil {
-			runner.HandleTurnError(ctx, turn, out, err)
+			r.handleTurnError(ctx, turn, out, err)
 			return
 		}
 		r.continueTurnLoop(ctx, runner, turn, transient, out)
@@ -1932,13 +1951,13 @@ func (r *Chat) runTurnLoop(ctx context.Context, runner TurnLoopService, turn *Tu
 func (r *Chat) continueTurnLoop(ctx context.Context, runner TurnLoopService, turn *TurnState, transient []provider.InstructionBlock, out chan<- domain.Event) {
 	loop := runner.NewTurnLoop(turn)
 	if loop == nil {
-		runner.HandleTurnError(ctx, turn, out, fmt.Errorf("turn loop is not supported by runner"))
+		r.handleTurnError(ctx, turn, out, fmt.Errorf("turn loop is not supported by runner"))
 		return
 	}
 	for step := 0; step < loop.MaxSteps(); step++ {
 		result, err := loop.Step(ctx, turn, step, transient, out)
 		if err != nil {
-			runner.HandleTurnError(ctx, turn, out, err)
+			r.handleTurnError(ctx, turn, out, err)
 			return
 		}
 		if result.WaitingApproval || result.Done {
@@ -1950,6 +1969,14 @@ func (r *Chat) continueTurnLoop(ctx context.Context, runner TurnLoopService, tur
 		transient = result.Transient
 	}
 	loop.PauseLimit(ctx, turn, out)
+}
+
+func (r *Chat) handleTurnError(ctx context.Context, turn *TurnState, out chan<- domain.Event, err error) {
+	if r.deps.Errors != nil {
+		r.deps.Errors.HandleTurnError(ctx, turn, out, err)
+		return
+	}
+	out <- domain.Event{Kind: domain.EventKindError, Err: err}
 }
 
 func (r *Chat) forwardTurnEvents(events <-chan domain.Event) {
