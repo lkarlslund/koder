@@ -2026,6 +2026,34 @@ func (e *Engine) persistToolResult(ctx context.Context, chatID, sessionID domain
 	return events, nil
 }
 
+func (e *Engine) PersistToolResult(ctx context.Context, runtime tools.Runtime, req tools.Request, result domain.ToolResult, body string) (<-chan domain.Event, error) {
+	chatID := runtime.ChatID
+	if chatID == "" {
+		chatRecord, err := e.store.DefaultChat(ctx, runtime.SessionID)
+		if err != nil {
+			return nil, err
+		}
+		chatID = chatRecord.ID
+	}
+	session, err := e.store.GetSession(ctx, runtime.SessionID)
+	if err != nil {
+		return nil, err
+	}
+	chatRecord, err := e.store.GetChat(ctx, chatID)
+	if err != nil {
+		return nil, err
+	}
+	rt, err := e.Chat(ctx, session, chatRecord)
+	if err != nil {
+		return nil, err
+	}
+	item, err := rt.RecordToolResult(ctx, req.Tool, req.ToolCallID, req.Meta(), result)
+	if err != nil {
+		return nil, err
+	}
+	return emitOnce(domain.Event{Kind: domain.EventKindToolResult, Text: body, Tool: req.Tool, ToolCallID: req.ToolCallID, Item: item}), nil
+}
+
 func (e *Engine) milestonePlanForNotification(ctx context.Context, sessionID domain.ID, tool domain.ToolKind) (store.MilestonePlan, bool) {
 	switch tool {
 	case domain.ToolKindMilestoneUpdate, domain.ToolKindMilestonePlan, domain.ToolKindMilestoneWrite, domain.ToolKindMilestoneAdd:

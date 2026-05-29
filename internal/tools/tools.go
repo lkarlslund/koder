@@ -139,6 +139,7 @@ type Runtime struct {
 	AssignedTodoRef       domain.ID
 	ChatControl           ChatControl
 	SessionControl        SessionControl
+	ToolResultControl     ToolResultControl
 	Exec                  execruntime.Control
 	MCP                   MCPExecutor
 	SandboxProfile        permissionprofile.Profile
@@ -148,6 +149,10 @@ type Runtime struct {
 
 type MCPExecutor interface {
 	ExecuteTool(context.Context, string, string, map[string]any) (Result, error)
+}
+
+type ToolResultControl interface {
+	PersistToolResult(context.Context, Runtime, Request, domain.ToolResult, string) (<-chan domain.Event, error)
 }
 
 type Tool interface {
@@ -254,6 +259,10 @@ func (r *Registry) SetChatControl(control ChatControl) {
 
 func (r *Registry) SetSessionControl(control SessionControl) {
 	r.runtime.SessionControl = control
+}
+
+func (r *Registry) SetToolResultControl(control ToolResultControl) {
+	r.runtime.ToolResultControl = control
 }
 
 func (r *Registry) SetExecControl(control execruntime.Control) {
@@ -582,6 +591,9 @@ func PersistStandardResult(ctx context.Context, runtime Runtime, req Request, re
 		Diff:   strings.TrimSpace(result.DiffText),
 		Data:   stored,
 		Status: domain.ToolResultStatusOK,
+	}
+	if runtime.ToolResultControl != nil {
+		return runtime.ToolResultControl.PersistToolResult(ctx, runtime, req, toolResult, body)
 	}
 	var item domain.TimelineItem
 	if strings.TrimSpace(req.ToolCallID) == "" {

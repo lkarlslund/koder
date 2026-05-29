@@ -812,6 +812,67 @@ func (r *Chat) SetChat(chat domain.Chat) {
 	r.broadcast(r.snapshotUpdateFlags(nil, false, false, false, false, false))
 }
 
+func (r *Chat) RecordToolResult(ctx context.Context, tool domain.ToolKind, toolCallID string, args map[string]string, result domain.ToolResult) (domain.TimelineItem, error) {
+	if r == nil {
+		return domain.TimelineItem{}, fmt.Errorf("chat runtime is required")
+	}
+	var item domain.TimelineItem
+	var err error
+	now := time.Now().UTC()
+	if r.store != nil {
+		if strings.TrimSpace(toolCallID) != "" {
+			item, err = r.store.AttachToolResult(ctx, r.chat.ID, toolCallID, result)
+		} else {
+			item, err = r.store.AppendTimeline(ctx, r.chat.ID, domain.ToolExecution{
+				Tool:      tool,
+				Args:      args,
+				Result:    &result,
+				StartedAt: now,
+				EndedAt:   now,
+			})
+			if err == nil {
+				item.Seal(now)
+				err = r.store.Timeline().Put(ctx, item)
+			}
+		}
+		if err != nil {
+			return domain.TimelineItem{}, err
+		}
+	} else {
+		item = domain.TimelineItem{
+			ID:        domain.NewTimelineID(now),
+			ChatID:    r.chat.ID,
+			Seq:       1,
+			Content:   domain.ToolExecution{Tool: tool, Args: args, Result: &result, StartedAt: now, EndedAt: now},
+			CreatedAt: now,
+			UpdatedAt: now,
+			SealedAt:  now,
+		}
+	}
+
+	r.mu.Lock()
+	if r.state != nil {
+		if item.Seq == 0 {
+			item.Seq = int64(len(r.state.Timeline()) + 1)
+		}
+		r.state.UpsertTimelineItem(item)
+		if text := timelineItemSummary(item); text != "" {
+			r.chat.LastMessage = text
+			r.state.UpdateChat(func(chat *domain.Chat) {
+				chat.LastMessage = text
+			})
+		}
+	}
+	chatRecord := r.chat
+	r.mu.Unlock()
+	if r.store != nil {
+		if err := r.store.UpdateChat(ctx, chatRecord); err != nil {
+			return domain.TimelineItem{}, err
+		}
+	}
+	return item, nil
+}
+
 func (r *Chat) Subscribe() (<-chan Update, func()) {
 	ch := make(chan Update, 64)
 	r.subsMu.Lock()

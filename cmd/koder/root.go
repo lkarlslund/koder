@@ -149,6 +149,7 @@ func runKoder(ctx context.Context, mode uicore.StartupMode, workdir string, star
 	registry := tools.NewRegistry("")
 	registry.SetExecControl(execruntime.NewManager())
 	engine := agent.New(cfg, st, registry, recorder, mcpManager)
+	registry.SetToolResultControl(engine)
 	return runWeb(ctx, cfg, st, engine, registry, mode, recorder, workdir, startupOpts)
 }
 
