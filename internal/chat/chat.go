@@ -83,8 +83,7 @@ type Update struct {
 }
 
 type Chat struct {
-	store   *store.Store
-	engine  Runner
+	deps    Deps
 	onClose func(domain.ID)
 
 	mu               sync.RWMutex
@@ -107,6 +106,20 @@ type Chat struct {
 	subsMu  sync.Mutex
 	subs    map[int]chan Update
 	nextSub int
+}
+
+type Deps struct {
+	Store  *store.Store
+	Turns  TurnLoopService
+	Legacy Runner
+}
+
+func DepsForRunner(st *store.Store, runner Runner) Deps {
+	deps := Deps{Store: st, Legacy: runner}
+	if turns, ok := runner.(TurnLoopService); ok {
+		deps.Turns = turns
+	}
+	return deps
 }
 
 type enqueueCmd struct {
@@ -216,33 +229,33 @@ type Runner interface {
 }
 
 // Load builds a live chat by hydrating its timeline and approval state from store.
-func Load(ctx context.Context, st *store.Store, session domain.Session, chatRecord domain.Chat, runner Runner, onClose func(domain.ID)) (*Chat, error) {
-	if st == nil {
+func Load(ctx context.Context, session domain.Session, chatRecord domain.Chat, deps Deps, onClose func(domain.ID)) (*Chat, error) {
+	if deps.Store == nil {
 		return nil, fmt.Errorf("store is required")
 	}
 	if chatRecord.ID == "" {
 		return nil, fmt.Errorf("chat id is required")
 	}
 	if chatRecord.SessionID == "" {
-		loaded, err := st.GetChat(ctx, chatRecord.ID)
+		loaded, err := deps.Store.GetChat(ctx, chatRecord.ID)
 		if err != nil {
 			return nil, err
 		}
 		chatRecord = loaded
 	}
-	timeline, err := st.TimelineForChat(ctx, chatRecord.ID)
+	timeline, err := deps.Store.TimelineForChat(ctx, chatRecord.ID)
 	if err != nil {
 		return nil, err
 	}
-	approvals, err := st.PendingApprovalsForChat(ctx, chatRecord.ID)
+	approvals, err := deps.Store.PendingApprovalsForChat(ctx, chatRecord.ID)
 	if err != nil {
 		return nil, err
 	}
-	return New(session, chatRecord, timeline, approvals, runner, st, onClose)
+	return New(session, chatRecord, timeline, approvals, deps, onClose)
 }
 
 // New builds a live chat from hydrated persisted state.
-func New(session domain.Session, chatRecord domain.Chat, timeline []domain.TimelineItem, approvals []store.Approval, runner Runner, st *store.Store, onClose func(domain.ID)) (*Chat, error) {
+func New(session domain.Session, chatRecord domain.Chat, timeline []domain.TimelineItem, approvals []store.Approval, deps Deps, onClose func(domain.ID)) (*Chat, error) {
 	if chatRecord.ID == "" {
 		return nil, fmt.Errorf("chat id is required")
 	}
@@ -253,8 +266,7 @@ func New(session domain.Session, chatRecord domain.Chat, timeline []domain.Timel
 		statusText = "Waiting for approval"
 	}
 	c := &Chat{
-		store:      st,
-		engine:     runner,
+		deps:       deps,
 		onClose:    onClose,
 		session:    session,
 		chat:       chatRecord,
@@ -389,11 +401,11 @@ func (t *TurnState) AppendUserMessage(ctx context.Context, user domain.UserMessa
 	chatRecord := r.chat
 	r.mu.Unlock()
 
-	if r.store != nil {
-		if _, err := r.store.InsertTimelineItem(ctx, item); err != nil {
+	if r.deps.Store != nil {
+		if _, err := r.deps.Store.InsertTimelineItem(ctx, item); err != nil {
 			return domain.TimelineItem{}, err
 		}
-		if err := r.store.UpdateChat(ctx, chatRecord); err != nil {
+		if err := r.deps.Store.UpdateChat(ctx, chatRecord); err != nil {
 			return domain.TimelineItem{}, err
 		}
 	}
@@ -466,11 +478,11 @@ func (t *TurnState) UpsertTimelineItem(ctx context.Context, item domain.Timeline
 	chatRecord := r.chat
 	r.mu.Unlock()
 
-	if r.store != nil {
-		if err := r.store.PutTimelineItem(ctx, item); err != nil {
+	if r.deps.Store != nil {
+		if err := r.deps.Store.PutTimelineItem(ctx, item); err != nil {
 			return domain.TimelineItem{}, err
 		}
-		if err := r.store.UpdateChat(ctx, chatRecord); err != nil {
+		if err := r.deps.Store.UpdateChat(ctx, chatRecord); err != nil {
 			return domain.TimelineItem{}, err
 		}
 	}
@@ -513,8 +525,8 @@ func (t *TurnState) ApplyNextSteer(ctx context.Context) (domain.TimelineItem, bo
 			chatID := r.chat.ID
 			queue := cloneQueuedInputs(r.queue)
 			r.mu.Unlock()
-			if r.store != nil {
-				if err := r.store.SetChatQueuedInputs(ctx, chatID, queue); err != nil {
+			if r.deps.Store != nil {
+				if err := r.deps.Store.SetChatQueuedInputs(ctx, chatID, queue); err != nil {
 					return domain.TimelineItem{}, false, err
 				}
 			}
@@ -553,14 +565,14 @@ func (t *TurnState) ApplyNextSteer(ctx context.Context) (domain.TimelineItem, bo
 	queue := cloneQueuedInputs(r.queue)
 	r.mu.Unlock()
 
-	if r.store != nil {
-		if _, err := r.store.InsertTimelineItem(ctx, item); err != nil {
+	if r.deps.Store != nil {
+		if _, err := r.deps.Store.InsertTimelineItem(ctx, item); err != nil {
 			return domain.TimelineItem{}, false, err
 		}
-		if err := r.store.SetChatQueuedInputs(ctx, r.chat.ID, queue); err != nil {
+		if err := r.deps.Store.SetChatQueuedInputs(ctx, r.chat.ID, queue); err != nil {
 			return domain.TimelineItem{}, false, err
 		}
-		if err := r.store.UpdateChat(ctx, chatRecord); err != nil {
+		if err := r.deps.Store.UpdateChat(ctx, chatRecord); err != nil {
 			return domain.TimelineItem{}, false, err
 		}
 	}
@@ -570,7 +582,7 @@ func (t *TurnState) ApplyNextSteer(ctx context.Context) (domain.TimelineItem, bo
 // Persist writes the current chat snapshot and remaps optimistic in-memory IDs to durable store IDs.
 func (r *Chat) Persist(ctx context.Context, st *store.Store) error {
 	if st == nil {
-		st = r.store
+		st = r.deps.Store
 	}
 	if st == nil {
 		return nil
@@ -697,7 +709,7 @@ func (r *Chat) DenyTool(toolCallID string) {
 }
 
 func (r *Chat) Compact() error {
-	runner, ok := r.engine.(compactRunner)
+	runner, ok := r.deps.Legacy.(compactRunner)
 	if !ok {
 		return fmt.Errorf("compaction is not supported by runner")
 	}
@@ -851,11 +863,11 @@ func (r *Chat) RecordToolResult(ctx context.Context, tool domain.ToolKind, toolC
 	var item domain.TimelineItem
 	var err error
 	now := time.Now().UTC()
-	if r.store != nil {
+	if r.deps.Store != nil {
 		if strings.TrimSpace(toolCallID) != "" {
-			item, err = r.store.AttachToolResult(ctx, r.chat.ID, toolCallID, result)
+			item, err = r.deps.Store.AttachToolResult(ctx, r.chat.ID, toolCallID, result)
 		} else {
-			item, err = r.store.AppendTimeline(ctx, r.chat.ID, domain.ToolExecution{
+			item, err = r.deps.Store.AppendTimeline(ctx, r.chat.ID, domain.ToolExecution{
 				Tool:      tool,
 				Args:      args,
 				Result:    &result,
@@ -864,7 +876,7 @@ func (r *Chat) RecordToolResult(ctx context.Context, tool domain.ToolKind, toolC
 			})
 			if err == nil {
 				item.Seal(now)
-				err = r.store.Timeline().Put(ctx, item)
+				err = r.deps.Store.Timeline().Put(ctx, item)
 			}
 		}
 		if err != nil {
@@ -897,8 +909,8 @@ func (r *Chat) RecordToolResult(ctx context.Context, tool domain.ToolKind, toolC
 	}
 	chatRecord := r.chat
 	r.mu.Unlock()
-	if r.store != nil {
-		if err := r.store.UpdateChat(ctx, chatRecord); err != nil {
+	if r.deps.Store != nil {
+		if err := r.deps.Store.UpdateChat(ctx, chatRecord); err != nil {
 			return domain.TimelineItem{}, err
 		}
 	}
@@ -992,12 +1004,12 @@ func (r *Chat) handleAppendQueuedInput(queued domain.QueuedInput) {
 	}
 	chatRecord := r.chat
 	r.mu.Unlock()
-	if timelineItem.ID != "" && r.store != nil {
-		if _, err := r.store.InsertTimelineItem(context.Background(), timelineItem); err != nil {
+	if timelineItem.ID != "" && r.deps.Store != nil {
+		if _, err := r.deps.Store.InsertTimelineItem(context.Background(), timelineItem); err != nil {
 			_ = r.markPersistError(err)
 			return
 		}
-		if err := r.store.UpdateChat(context.Background(), chatRecord); err != nil {
+		if err := r.deps.Store.UpdateChat(context.Background(), chatRecord); err != nil {
 			_ = r.markPersistError(err)
 			return
 		}
@@ -1226,11 +1238,11 @@ func (r *Chat) handleInterrupt() {
 }
 
 func (r *Chat) handleApprove(toolCallID string, rule *domain.PermissionOverride) {
-	if runner, ok := r.engine.(TurnLoopService); ok {
+	if runner := r.deps.Turns; runner != nil {
 		r.handleApproveWithTurnLoop(runner, toolCallID, rule)
 		return
 	}
-	runner, ok := r.engine.(approvalRunner)
+	runner, ok := r.deps.Legacy.(approvalRunner)
 	if !ok {
 		err := fmt.Errorf("approval is not supported by runner")
 		evt := domain.Event{Kind: domain.EventKindError, Err: err}
@@ -1259,9 +1271,9 @@ func (r *Chat) handleApprove(toolCallID string, rule *domain.PermissionOverride)
 		events <-chan domain.Event
 		err    error
 	)
-	if turnRunner, ok := r.engine.(turnApprovalRunner); ok && rule != nil {
+	if turnRunner, ok := r.deps.Legacy.(turnApprovalRunner); ok && rule != nil {
 		events, err = turnRunner.ApproveToolTurnWithRule(ctx, r.turnState(), toolCallID, *rule)
-	} else if turnRunner, ok := r.engine.(turnApprovalRunner); ok {
+	} else if turnRunner, ok := r.deps.Legacy.(turnApprovalRunner); ok {
 		events, err = turnRunner.ApproveToolTurn(ctx, r.turnState(), toolCallID)
 	} else if rule != nil {
 		events, err = runner.ApproveToolInChatWithRule(ctx, sessionID, chatID, toolCallID, *rule)
@@ -1272,11 +1284,11 @@ func (r *Chat) handleApprove(toolCallID string, rule *domain.PermissionOverride)
 }
 
 func (r *Chat) handleDeny(toolCallID string) {
-	if runner, ok := r.engine.(TurnLoopService); ok {
+	if runner := r.deps.Turns; runner != nil {
 		r.handleDenyWithTurnLoop(runner, toolCallID)
 		return
 	}
-	runner, ok := r.engine.(approvalRunner)
+	runner, ok := r.deps.Legacy.(approvalRunner)
 	if !ok {
 		err := fmt.Errorf("approval is not supported by runner")
 		evt := domain.Event{Kind: domain.EventKindError, Err: err}
@@ -1303,7 +1315,7 @@ func (r *Chat) handleDeny(toolCallID string) {
 
 	var events <-chan domain.Event
 	var err error
-	if turnRunner, ok := r.engine.(turnApprovalRunner); ok {
+	if turnRunner, ok := r.deps.Legacy.(turnApprovalRunner); ok {
 		events, err = turnRunner.DenyToolTurn(ctx, r.turnState(), toolCallID)
 	} else {
 		events, err = runner.DenyToolInChat(ctx, sessionID, chatID, toolCallID)
@@ -1401,11 +1413,11 @@ func (r *Chat) removeApprovalLocked(toolCallID string) {
 }
 
 func (r *Chat) handleResumePendingTools() {
-	if runner, ok := r.engine.(TurnLoopService); ok {
+	if runner := r.deps.Turns; runner != nil {
 		r.handleResumePendingToolsWithTurnLoop(runner)
 		return
 	}
-	runner, ok := r.engine.(pendingToolRunner)
+	runner, ok := r.deps.Legacy.(pendingToolRunner)
 	if !ok {
 		return
 	}
@@ -1671,10 +1683,10 @@ func (r *Chat) handleStreamEvent(evt domain.Event) {
 }
 
 func (r *Chat) queueRefreshForEvent(evt domain.Event) ([]domain.QueuedInput, bool, error) {
-	if evt.Meta[domain.EventMetaRefresh] != domain.EventRefreshQueue || r.store == nil {
+	if evt.Meta[domain.EventMetaRefresh] != domain.EventRefreshQueue || r.deps.Store == nil {
 		return nil, false, nil
 	}
-	chat, err := r.store.GetChat(context.Background(), r.chat.ID)
+	chat, err := r.deps.Store.GetChat(context.Background(), r.chat.ID)
 	if err != nil {
 		return nil, false, fmt.Errorf("refresh queued inputs: %w", err)
 	}
@@ -1838,11 +1850,10 @@ func (r *Chat) shouldAppendOptimisticUserMessage(item domain.QueuedInput) bool {
 	if item.Kind == domain.QueuedInputKindContinue {
 		return false
 	}
-	_, ok := r.engine.(TurnLoopService)
-	if ok {
+	if r.deps.Turns != nil {
 		return false
 	}
-	_, ok = r.engine.(turnPromptRunner)
+	_, ok := r.deps.Legacy.(turnPromptRunner)
 	return !ok
 }
 
@@ -1851,7 +1862,7 @@ func (r *Chat) runItem(ctx context.Context, session domain.Session, chat domain.
 	note := r.queueNotes[item.ID]
 	delete(r.queueNotes, item.ID)
 	r.mu.Unlock()
-	if runner, ok := r.engine.(TurnLoopService); ok {
+	if runner := r.deps.Turns; runner != nil {
 		r.runTurnLoop(ctx, runner, r.turnStateForInput(item), item, note)
 		return
 	}
@@ -1861,18 +1872,18 @@ func (r *Chat) runItem(ctx context.Context, session domain.Session, chat domain.
 	)
 	switch item.Kind {
 	case domain.QueuedInputKindContinue:
-		if runner, ok := r.engine.(turnContinueRunner); ok {
+		if runner, ok := r.deps.Legacy.(turnContinueRunner); ok {
 			events, err = runner.RunContinueTurn(ctx, r.turnState(), note)
-		} else if runner, ok := r.engine.(continueRunner); ok {
+		} else if runner, ok := r.deps.Legacy.(continueRunner); ok {
 			events, err = runner.RunContinueInChat(ctx, session, chat, note)
 		} else {
 			err = fmt.Errorf("continue is not supported by runner")
 		}
 	default:
-		if runner, ok := r.engine.(turnPromptRunner); ok {
+		if runner, ok := r.deps.Legacy.(turnPromptRunner); ok {
 			events, err = runner.RunPromptTurn(ctx, r.turnStateForInput(item), item.Text, queuedAttachmentDrafts(item.Attachments), queuedReferenceDrafts(item.References), note)
 		} else {
-			events, err = r.engine.RunPromptInChat(ctx, session, chat, item.Text, queuedAttachmentDrafts(item.Attachments), queuedReferenceDrafts(item.References), note)
+			events, err = r.deps.Legacy.RunPromptInChat(ctx, session, chat, item.Text, queuedAttachmentDrafts(item.Attachments), queuedReferenceDrafts(item.References), note)
 		}
 	}
 	if err != nil {
@@ -1951,13 +1962,13 @@ func (r *Chat) forwardTurnEvents(events <-chan domain.Event) {
 }
 
 func (r *Chat) persistQueue() error {
-	if r.store == nil || r.chat.ID == "" {
+	if r.deps.Store == nil || r.chat.ID == "" {
 		return nil
 	}
 	r.mu.RLock()
 	items := cloneQueuedInputs(r.queue)
 	r.mu.RUnlock()
-	return r.store.SetChatQueuedInputs(context.Background(), r.chat.ID, items)
+	return r.deps.Store.SetChatQueuedInputs(context.Background(), r.chat.ID, items)
 }
 
 func (r *Chat) markPersistError(err error) error {
@@ -2108,13 +2119,13 @@ func (r *Chat) appendPersistedInterruptNotice(ctx context.Context, reason string
 	}
 	var item domain.TimelineItem
 	var err error
-	if r.store != nil {
-		item, err = r.store.AppendTimeline(ctx, r.chat.ID, notice)
+	if r.deps.Store != nil {
+		item, err = r.deps.Store.AppendTimeline(ctx, r.chat.ID, notice)
 		if err != nil {
 			return err
 		}
 		item.Seal(now)
-		if err := r.store.Timeline().Put(ctx, item); err != nil {
+		if err := r.deps.Store.Timeline().Put(ctx, item); err != nil {
 			return err
 		}
 	} else {

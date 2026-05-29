@@ -31,7 +31,7 @@ func (e *Engine) Chat(ctx context.Context, session domain.Session, chatRecord do
 	}
 	e.chatMu.RUnlock()
 
-	loaded, err := chatpkg.Load(ctx, e.store, session, chatRecord, e, e.detachChat)
+	loaded, err := chatpkg.Load(ctx, session, chatRecord, chatpkg.DepsForRunner(e.store, e), e.detachChat)
 	if err != nil {
 		return nil, err
 	}

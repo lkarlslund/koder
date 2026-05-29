@@ -311,7 +311,7 @@ func createSessionWithPlan(t *testing.T, st *store.Store) (domain.Session, domai
 
 func newTestChat(t *testing.T, st *store.Store, session domain.Session, chatRecord domain.Chat, runner Runner) *Chat {
 	t.Helper()
-	chat, err := Load(context.Background(), st, session, chatRecord, runner, nil)
+	chat, err := Load(context.Background(), session, chatRecord, DepsForRunner(st, runner), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1078,7 +1078,7 @@ func TestRuntimeApproveRemovesPendingApprovalImmediately(t *testing.T) {
 		t.Fatal(err)
 	}
 	runner := &runtimeFakeRunner{}
-	rt, err := Load(context.Background(), st, session, chatRecord, runner, nil)
+	rt, err := Load(context.Background(), session, chatRecord, DepsForRunner(st, runner), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1116,7 +1116,7 @@ func TestLoadWithPendingApprovalStartsWaitingForApproval(t *testing.T) {
 		t.Fatal(err)
 	}
 	runner := &pendingToolFakeRunner{}
-	rt, err := Load(context.Background(), st, session, chatRecord, runner, nil)
+	rt, err := Load(context.Background(), session, chatRecord, DepsForRunner(st, runner), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1389,7 +1389,7 @@ func TestPersistRemapsOptimisticIDsAndReloadsWithoutDuplicates(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	reloaded, err := Load(context.Background(), st, session, chatRecord, runner, nil)
+	reloaded, err := Load(context.Background(), session, chatRecord, DepsForRunner(st, runner), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
