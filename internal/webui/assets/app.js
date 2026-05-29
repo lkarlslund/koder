@@ -354,7 +354,44 @@
           window.addEventListener('blur', () => this.reportClientStateSoon());
           document.addEventListener('visibilitychange', () => { if (!document.hidden) this.connectNow(); this.reportClientStateSoon(); });
           document.addEventListener('click', event => this.handleImagePreviewClick(event));
+          document.addEventListener('keydown', event => this.handleGlobalKeydown(event));
           this.$nextTick(() => { this.resizeComposer(); this.updateTranscriptStickiness(); });
+        },
+        handleGlobalKeydown(event) {
+          if (!event || event.defaultPrevented || event.isComposing) return;
+          if (event.key === 'Escape') {
+            if (this.modalOpenName()) return;
+            if (!this.chatInterruptible()) return;
+            event.preventDefault();
+            this.interruptChat();
+            return;
+          }
+          if (!this.shouldFocusComposerForKey(event)) return;
+          event.preventDefault();
+          this.focusComposerAndInsert(event.key);
+        },
+        shouldFocusComposerForKey(event) {
+          if (!event || event.ctrlKey || event.metaKey || event.altKey) return false;
+          if (event.key.length !== 1) return false;
+          if (this.modalOpenName()) return false;
+          if (this.textEntryActive()) return false;
+          return !!this.$refs?.composerInput;
+        },
+        textEntryActive() {
+          const el = document.activeElement;
+          if (!el || el === document.body || el === document.documentElement) return false;
+          if (el.isContentEditable) return true;
+          const tag = String(el.tagName || '').toLowerCase();
+          if (tag === 'textarea' || tag === 'select') return true;
+          if (tag !== 'input') return false;
+          const type = String(el.getAttribute('type') || 'text').toLowerCase();
+          return !['button', 'checkbox', 'color', 'file', 'hidden', 'image', 'radio', 'range', 'reset', 'submit'].includes(type);
+        },
+        focusComposerAndInsert(text) {
+          const el = this.$refs?.composerInput;
+          if (!el) return;
+          el.focus();
+          this.insertComposerText(text);
         },
         handleImagePreviewClick(event) {
           const trigger = event.target?.closest?.('[data-lightbox-src]');
@@ -846,6 +883,7 @@
           return this.interruptArmedChatID && this.interruptArmedChatID === String(this.activeChatID() || '');
         },
         interruptButtonTitle() {
+          if (!this.chatInterruptible()) return 'Koder is idle';
           return this.interruptArmed() ? 'Interrupt immediately' : 'Stop after current turn';
         },
         syncInterruptArmed() {
@@ -874,7 +912,17 @@
           };
         },
         openDialogName() {
+          const modal = this.modalOpenName();
+          if (modal) return modal;
           if (this.showPermissions) return 'permissions';
+          return '';
+        },
+        modalOpenName() {
+          if (this.imageLightbox?.open) return 'image';
+          if (this.showProviderEditor) return 'provider';
+          if (this.showModelConfigEditor) return 'model_config';
+          if (this.showMCPEditor) return 'mcp';
+          if (this.showSessionEditor) return 'session_editor';
           if (this.showModels) return 'models';
           if (this.showSessions) return 'sessions';
           if (this.showSettings) return 'settings';

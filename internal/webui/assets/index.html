@@ -299,7 +299,7 @@
         </template>
       </div>
       <div class="input-group">
-        <button class="btn btn-danger interrupt-button" type="button" x-show="chatInterruptible()" :title="interruptButtonTitle()" @click="interruptChat()" style="display: none;">
+        <button class="btn btn-danger interrupt-button" type="button" :disabled="!chatInterruptible()" :title="interruptButtonTitle()" @click="interruptChat()">
           <i class="bi" :class="interruptArmed() ? 'bi-x-octagon-fill' : 'bi-stop-fill'"></i>
         </button>
         <textarea class="form-control composer-input" rows="1" x-ref="composerInput" x-model="draft" placeholder="Ask koder or type / for commands" @input="onComposerInput()" @click="updateCompletions()" @focus="reportClientStateSoon()" @blur="reportClientStateSoon()" @keyup="onComposerKeyup($event)" @keydown="onComposerKeydown($event)" @paste.prevent="onComposerPaste($event)"></textarea>

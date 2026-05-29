@@ -543,8 +543,12 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `@keydown="onComposerKeydown($event)"`) || !strings.Contains(fullPage, `if (ev.key === 'Enter' && !ev.shiftKey)`) {
 		t.Fatalf("expected plain enter to submit composer")
 	}
-	if !strings.Contains(fullPage, `class="btn btn-danger interrupt-button"`) || !strings.Contains(fullPage, `x-show="chatInterruptible()"`) || !strings.Contains(fullPage, `rpc('stop_after_turn', {})`) || !strings.Contains(fullPage, `rpc('stop', {})`) {
-		t.Fatalf("expected composer interrupt button with staged then immediate stop behavior")
+	if !strings.Contains(fullPage, `class="btn btn-danger interrupt-button"`) ||
+		!strings.Contains(fullPage, `:disabled="!chatInterruptible()"`) ||
+		!strings.Contains(fullPage, `rpc('stop_after_turn', {})`) ||
+		!strings.Contains(fullPage, `rpc('stop', {})`) ||
+		!strings.Contains(fullPage, `event.key === 'Escape'`) {
+		t.Fatalf("expected composer interrupt button with staged then immediate stop behavior and Escape shortcut")
 	}
 	if !strings.Contains(fullPage, `hello.client_id`) || !strings.Contains(fullPage, `rpcOn(this.ws, 'client_state'`) || !strings.Contains(fullPage, `selected_chat: String(this.activeChatID() || '')`) {
 		t.Fatalf("expected browser to report per-client debug state")
@@ -761,6 +765,8 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `composerDraftPreferenceName()`) ||
 		!strings.Contains(fullPage, `restoreComposerDraftForActiveChat()`) ||
 		!strings.Contains(fullPage, `focusComposerAfterInitialLoad()`) ||
+		!strings.Contains(fullPage, `focusComposerAndInsert(event.key)`) ||
+		!strings.Contains(fullPage, `textEntryActive()`) ||
 		!strings.Contains(fullPage, `this.$refs.composerInput`) ||
 		!strings.Contains(fullPage, `this.$watch('draft', () => this.writeComposerDraft())`) ||
 		!strings.Contains(fullPage, `preserveComposerDraftDuringSend`) {
