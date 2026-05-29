@@ -113,13 +113,13 @@ type Deps struct {
 	Prompt  PromptTurnService
 	Turns   TurnLoopService
 	Tools   ToolTurnService
+	Pending PendingToolService
 	Compact CompactService
 	Errors  TurnErrorHandler
-	Legacy  Runner
 }
 
-func DepsForRunner(st *store.Store, runner Runner) Deps {
-	deps := Deps{Store: st, Legacy: runner}
+func DepsForRunner(st *store.Store, runner any) Deps {
+	deps := Deps{Store: st}
 	if prompt, ok := runner.(PromptTurnService); ok {
 		deps.Prompt = prompt
 	}
@@ -128,6 +128,9 @@ func DepsForRunner(st *store.Store, runner Runner) Deps {
 	}
 	if tools, ok := runner.(ToolTurnService); ok {
 		deps.Tools = tools
+	}
+	if pending, ok := runner.(PendingToolService); ok {
+		deps.Pending = pending
 	}
 	if compact, ok := runner.(CompactService); ok {
 		deps.Compact = compact
@@ -178,42 +181,6 @@ type streamEventCmd struct {
 }
 type streamClosedCmd struct{}
 
-type continueRunner interface {
-	RunContinueInChat(context.Context, domain.Session, domain.Chat, string) (<-chan domain.Event, error)
-}
-
-type approvalRunner interface {
-	ApproveToolInChat(context.Context, domain.ID, domain.ID, string) (<-chan domain.Event, error)
-	ApproveToolInChatWithRule(context.Context, domain.ID, domain.ID, string, domain.PermissionOverride) (<-chan domain.Event, error)
-	DenyToolInChat(context.Context, domain.ID, domain.ID, string) (<-chan domain.Event, error)
-}
-
-type compactRunner interface {
-	CompactChat(context.Context, domain.ID, domain.ID) (<-chan domain.Event, error)
-}
-
-type pendingToolRunner interface {
-	ResumePendingToolCallsInChat(context.Context, domain.Session, domain.Chat) (<-chan domain.Event, error)
-}
-
-type promptRunner interface {
-	RunPromptInChat(context.Context, domain.Session, domain.Chat, string, []attachment.Draft, []reference.Draft, string) (<-chan domain.Event, error)
-}
-
-type turnPromptRunner interface {
-	RunPromptTurn(context.Context, *TurnState, string, []attachment.Draft, []reference.Draft, string) (<-chan domain.Event, error)
-}
-
-type turnContinueRunner interface {
-	RunContinueTurn(context.Context, *TurnState, string) (<-chan domain.Event, error)
-}
-
-type turnApprovalRunner interface {
-	ApproveToolTurn(context.Context, *TurnState, string) (<-chan domain.Event, error)
-	ApproveToolTurnWithRule(context.Context, *TurnState, string, domain.PermissionOverride) (<-chan domain.Event, error)
-	DenyToolTurn(context.Context, *TurnState, string) (<-chan domain.Event, error)
-}
-
 type TurnStepResult struct {
 	Continue        bool
 	WaitingApproval bool
@@ -234,6 +201,9 @@ type TurnLoopService interface {
 type ToolTurnService interface {
 	ApproveToolForTurn(context.Context, *TurnState, string, *domain.PermissionOverride, chan<- domain.Event) (bool, error)
 	DenyToolForTurn(context.Context, *TurnState, string, chan<- domain.Event) error
+}
+
+type PendingToolService interface {
 	ResumePendingToolsForTurn(context.Context, *TurnState, chan<- domain.Event) (bool, error)
 }
 
@@ -248,13 +218,6 @@ type PromptTurnService interface {
 
 type TurnErrorHandler interface {
 	HandleTurnError(context.Context, *TurnState, chan<- domain.Event, error)
-}
-
-// Runner provides the shared execution behavior used by a live Chat.
-type Runner interface {
-	promptRunner
-	continueRunner
-	approvalRunner
 }
 
 // Load builds a live chat by hydrating its timeline and approval state from store.
@@ -740,11 +703,7 @@ func (r *Chat) DenyTool(toolCallID string) {
 func (r *Chat) Compact() error {
 	runner := r.deps.Compact
 	if runner == nil {
-		legacy, ok := r.deps.Legacy.(compactRunner)
-		if !ok {
-			return fmt.Errorf("compaction is not supported by runner")
-		}
-		return r.compactWithLegacyRunner(legacy)
+		return fmt.Errorf("compaction is not supported by runner")
 	}
 	r.mu.Lock()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -770,32 +729,6 @@ func (r *Chat) Compact() error {
 		}
 	}()
 	r.forwardTurnEvents(out)
-	return nil
-}
-
-func (r *Chat) compactWithLegacyRunner(runner compactRunner) error {
-	if runner == nil {
-		return fmt.Errorf("compaction is not supported by runner")
-	}
-	r.mu.Lock()
-	ctx, cancel := context.WithCancel(context.Background())
-	ctx = turncontrol.WithShouldStop(ctx, func() bool {
-		r.mu.RLock()
-		defer r.mu.RUnlock()
-		return r.cancelState == CancelStateCancelling || r.draining
-	})
-	r.cancel = cancel
-	r.cancelState = CancelStateNone
-	r.running = map[string]struct{}{}
-	r.active = true
-	r.status = StatusWaitingLLM
-	r.statusText = "Compacting session..."
-	sessionID := r.session.ID
-	chatID := r.chat.ID
-	r.mu.Unlock()
-	r.broadcast(r.snapshotUpdateFlags(nil, false, false, true, false, false))
-	events, err := runner.CompactChat(ctx, sessionID, chatID)
-	r.handleApprovalEventStream(events, err)
 	return nil
 }
 
@@ -1270,16 +1203,11 @@ func (r *Chat) handleDispatchQueued(item domain.QueuedInput, remaining []domain.
 	r.active = true
 	r.status = StatusWaitingLLM
 	r.statusText = "Waiting for LLM response"
-	session := r.session
-	chat := r.chat
 	r.mu.Unlock()
 
-	if r.shouldAppendOptimisticUserMessage(item) {
-		r.appendOptimisticUserMessage(item, session, chat)
-	}
 	_ = r.persistQueue()
 	r.broadcast(r.snapshotUpdateFlags(nil, item.Kind != domain.QueuedInputKindContinue, true, true, true, false))
-	r.runItem(ctx, session, chat, item)
+	r.runItem(ctx, item)
 }
 
 func (r *Chat) handleInterrupt() {
@@ -1306,45 +1234,9 @@ func (r *Chat) handleApprove(toolCallID string, rule *domain.PermissionOverride)
 		r.handleApproveWithTurnLoop(runner, toolCallID, rule)
 		return
 	}
-	runner, ok := r.deps.Legacy.(approvalRunner)
-	if !ok {
-		err := fmt.Errorf("approval is not supported by runner")
-		evt := domain.Event{Kind: domain.EventKindError, Err: err}
-		r.broadcast(r.snapshotUpdateFlags(&evt, false, false, true, false, false))
-		return
-	}
-	r.mu.Lock()
-	ctx, cancel := context.WithCancel(context.Background())
-	ctx = turncontrol.WithShouldStop(ctx, func() bool {
-		r.mu.RLock()
-		defer r.mu.RUnlock()
-		return r.cancelState == CancelStateCancelling || r.draining
-	})
-	r.cancel = cancel
-	r.active = true
-	r.status = StatusWaitingLLM
-	r.statusText = "Waiting for LLM response"
-	sessionID := r.session.ID
-	chatID := r.chat.ID
-	toolCallID = r.resolveApprovalToolCallIDLocked(toolCallID)
-	r.removeApprovalLocked(toolCallID)
-	r.mu.Unlock()
-	r.broadcast(r.snapshotUpdateFlags(nil, true, false, true, false, true))
-
-	var (
-		events <-chan domain.Event
-		err    error
-	)
-	if turnRunner, ok := r.deps.Legacy.(turnApprovalRunner); ok && rule != nil {
-		events, err = turnRunner.ApproveToolTurnWithRule(ctx, r.turnState(), toolCallID, *rule)
-	} else if turnRunner, ok := r.deps.Legacy.(turnApprovalRunner); ok {
-		events, err = turnRunner.ApproveToolTurn(ctx, r.turnState(), toolCallID)
-	} else if rule != nil {
-		events, err = runner.ApproveToolInChatWithRule(ctx, sessionID, chatID, toolCallID, *rule)
-	} else {
-		events, err = runner.ApproveToolInChat(ctx, sessionID, chatID, toolCallID)
-	}
-	r.handleApprovalEventStream(events, err)
+	err := fmt.Errorf("approval is not supported by runner")
+	evt := domain.Event{Kind: domain.EventKindError, Err: err}
+	r.broadcast(r.snapshotUpdateFlags(&evt, false, false, true, false, false))
 }
 
 func (r *Chat) handleDeny(toolCallID string) {
@@ -1352,39 +1244,9 @@ func (r *Chat) handleDeny(toolCallID string) {
 		r.handleDenyWithTurnLoop(runner, toolCallID)
 		return
 	}
-	runner, ok := r.deps.Legacy.(approvalRunner)
-	if !ok {
-		err := fmt.Errorf("approval is not supported by runner")
-		evt := domain.Event{Kind: domain.EventKindError, Err: err}
-		r.broadcast(r.snapshotUpdateFlags(&evt, false, false, true, false, false))
-		return
-	}
-	r.mu.Lock()
-	ctx, cancel := context.WithCancel(context.Background())
-	ctx = turncontrol.WithShouldStop(ctx, func() bool {
-		r.mu.RLock()
-		defer r.mu.RUnlock()
-		return r.cancelState == CancelStateCancelling || r.draining
-	})
-	r.cancel = cancel
-	r.active = true
-	r.status = StatusWaitingLLM
-	r.statusText = "Waiting for LLM response"
-	sessionID := r.session.ID
-	chatID := r.chat.ID
-	toolCallID = r.resolveApprovalToolCallIDLocked(toolCallID)
-	r.removeApprovalLocked(toolCallID)
-	r.mu.Unlock()
-	r.broadcast(r.snapshotUpdateFlags(nil, true, false, true, false, true))
-
-	var events <-chan domain.Event
-	var err error
-	if turnRunner, ok := r.deps.Legacy.(turnApprovalRunner); ok {
-		events, err = turnRunner.DenyToolTurn(ctx, r.turnState(), toolCallID)
-	} else {
-		events, err = runner.DenyToolInChat(ctx, sessionID, chatID, toolCallID)
-	}
-	r.handleApprovalEventStream(events, err)
+	err := fmt.Errorf("approval is not supported by runner")
+	evt := domain.Event{Kind: domain.EventKindError, Err: err}
+	r.broadcast(r.snapshotUpdateFlags(&evt, false, false, true, false, false))
 }
 
 func (r *Chat) handleApproveWithTurnLoop(runner ToolTurnService, toolCallID string, rule *domain.PermissionOverride) {
@@ -1481,64 +1343,13 @@ func (r *Chat) removeApprovalLocked(toolCallID string) {
 }
 
 func (r *Chat) handleResumePendingTools() {
-	if runner := r.deps.Tools; runner != nil {
+	if runner := r.deps.Pending; runner != nil {
 		r.handleResumePendingToolsWithTurnLoop(runner)
 		return
 	}
-	runner, ok := r.deps.Legacy.(pendingToolRunner)
-	if !ok {
-		return
-	}
-	r.mu.Lock()
-	if r.active || r.status == StatusWaitingApproval || r.draining {
-		r.mu.Unlock()
-		return
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	ctx = turncontrol.WithShouldStop(ctx, func() bool {
-		r.mu.RLock()
-		defer r.mu.RUnlock()
-		return r.cancelState == CancelStateCancelling || r.draining
-	})
-	session := r.session
-	chat := r.chat
-	r.mu.Unlock()
-	events, err := runner.ResumePendingToolCallsInChat(ctx, session, chat)
-	if err != nil {
-		cancel()
-		r.mu.Lock()
-		r.active = false
-		r.cancel = nil
-		r.activeUserSource = ""
-		r.status = StatusErrored
-		r.statusText = err.Error()
-		r.mu.Unlock()
-		evt := domain.Event{Kind: domain.EventKindError, Err: err}
-		r.broadcast(r.snapshotUpdateFlags(&evt, false, false, true, false, false))
-		return
-	}
-	if events == nil {
-		cancel()
-		return
-	}
-	r.mu.Lock()
-	if r.active || r.status == StatusWaitingApproval || r.draining {
-		r.mu.Unlock()
-		cancel()
-		return
-	}
-	r.cancel = cancel
-	r.cancelState = CancelStateNone
-	r.running = map[string]struct{}{}
-	r.active = true
-	r.status = StatusRunningTools
-	r.statusText = "Resuming tool calls"
-	r.mu.Unlock()
-	r.broadcast(r.snapshotUpdateFlags(nil, false, false, true, false, false))
-	r.handleApprovalEventStream(events, nil)
 }
 
-func (r *Chat) handleResumePendingToolsWithTurnLoop(runner ToolTurnService) {
+func (r *Chat) handleResumePendingToolsWithTurnLoop(runner PendingToolService) {
 	r.mu.Lock()
 	if r.active || r.status == StatusWaitingApproval || r.draining {
 		r.mu.Unlock()
@@ -1576,26 +1387,6 @@ func (r *Chat) handleResumePendingToolsWithTurnLoop(runner ToolTurnService) {
 		}
 	}()
 	r.forwardTurnEvents(out)
-}
-
-func (r *Chat) handleApprovalEventStream(events <-chan domain.Event, err error) {
-	if err != nil {
-		r.mu.Lock()
-		r.active = false
-		r.cancel = nil
-		r.status = StatusErrored
-		r.statusText = err.Error()
-		r.mu.Unlock()
-		evt := domain.Event{Kind: domain.EventKindError, Err: err}
-		r.broadcast(r.snapshotUpdateFlags(&evt, false, false, true, false, false))
-		return
-	}
-	go func() {
-		for evt := range events {
-			r.inbox <- streamEventCmd{event: evt}
-		}
-		r.inbox <- streamClosedCmd{}
-	}()
 }
 
 func (r *Chat) handleStreamEvent(evt domain.Event) {
@@ -1906,30 +1697,14 @@ func (r *Chat) maybeDispatchNext() {
 	r.active = true
 	r.status = StatusWaitingLLM
 	r.statusText = "Waiting for LLM response"
-	session := r.session
-	chat := r.chat
 	r.mu.Unlock()
 
-	if r.shouldAppendOptimisticUserMessage(item) {
-		r.appendOptimisticUserMessage(item, session, chat)
-	}
 	_ = r.persistQueue()
 	r.broadcast(r.snapshotUpdateFlags(nil, item.Kind != domain.QueuedInputKindContinue, true, true, true, false))
-	r.runItem(ctx, session, chat, item)
+	r.runItem(ctx, item)
 }
 
-func (r *Chat) shouldAppendOptimisticUserMessage(item domain.QueuedInput) bool {
-	if item.Kind == domain.QueuedInputKindContinue {
-		return false
-	}
-	if r.deps.Turns != nil {
-		return false
-	}
-	_, ok := r.deps.Legacy.(turnPromptRunner)
-	return !ok
-}
-
-func (r *Chat) runItem(ctx context.Context, session domain.Session, chat domain.Chat, item domain.QueuedInput) {
+func (r *Chat) runItem(ctx context.Context, item domain.QueuedInput) {
 	r.mu.Lock()
 	note := r.queueNotes[item.ID]
 	delete(r.queueNotes, item.ID)
@@ -1938,26 +1713,7 @@ func (r *Chat) runItem(ctx context.Context, session domain.Session, chat domain.
 		r.runTurnLoop(ctx, runner, r.turnStateForInput(item), item, note)
 		return
 	}
-	var (
-		events <-chan domain.Event
-		err    error
-	)
-	switch item.Kind {
-	case domain.QueuedInputKindContinue:
-		if runner, ok := r.deps.Legacy.(turnContinueRunner); ok {
-			events, err = runner.RunContinueTurn(ctx, r.turnState(), note)
-		} else if runner, ok := r.deps.Legacy.(continueRunner); ok {
-			events, err = runner.RunContinueInChat(ctx, session, chat, note)
-		} else {
-			err = fmt.Errorf("continue is not supported by runner")
-		}
-	default:
-		if runner, ok := r.deps.Legacy.(turnPromptRunner); ok {
-			events, err = runner.RunPromptTurn(ctx, r.turnStateForInput(item), item.Text, queuedAttachmentDrafts(item.Attachments), queuedReferenceDrafts(item.References), note)
-		} else {
-			events, err = r.deps.Legacy.RunPromptInChat(ctx, session, chat, item.Text, queuedAttachmentDrafts(item.Attachments), queuedReferenceDrafts(item.References), note)
-		}
-	}
+	err := fmt.Errorf("turn loop is not supported by runner")
 	if err != nil {
 		r.mu.Lock()
 		r.active = false
@@ -1970,12 +1726,6 @@ func (r *Chat) runItem(ctx context.Context, session domain.Session, chat domain.
 		r.maybeDispatchNext()
 		return
 	}
-	go func() {
-		for evt := range events {
-			r.inbox <- streamEventCmd{event: evt}
-		}
-		r.inbox <- streamClosedCmd{}
-	}()
 }
 
 func (r *Chat) runTurnLoop(ctx context.Context, runner TurnLoopService, turn *TurnState, item domain.QueuedInput, note string) {
