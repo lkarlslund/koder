@@ -666,21 +666,40 @@ func (c *Controller) SwitchChat(ctx context.Context, chatID domain.ID) error {
 // NewChat creates and switches to a chat in the current session.
 func (c *Controller) NewChat(ctx context.Context, title string) error {
 	c.mu.RLock()
-	sessionID := c.session.ID
-	parentID := c.chat.ID
+	session := c.session
+	parent := c.chat
+	position := len(c.chats)
 	c.mu.RUnlock()
-	if sessionID == "" {
+	if session.ID == "" {
 		return fmt.Errorf("no active session")
+	}
+	if parent.ID == "" {
+		return fmt.Errorf("no active chat")
 	}
 	title = strings.TrimSpace(title)
 	if title == "" {
 		title = "Chat"
 	}
-	chatRecord, err := c.store.CreateChat(ctx, sessionID, title, chatrole.Orchestrator, &parentID)
-	if err != nil {
+	parentID := parent.ID
+	now := time.Now().UTC()
+	chatRecord := domain.Chat{
+		ID:                domain.NewID(),
+		SessionID:         session.ID,
+		ParentChatID:      &parentID,
+		Title:             title,
+		WorkflowRole:      chatrole.Orchestrator,
+		ProviderID:        strings.TrimSpace(parent.ProviderID),
+		ModelID:           strings.TrimSpace(parent.ModelID),
+		PermissionProfile: strings.TrimSpace(session.PermissionProfile),
+		ToolStates:        cloneToolStateMap(session.ToolStates),
+		Position:          position,
+		CreatedAt:         now,
+		UpdatedAt:         now,
+	}
+	if err := c.store.PutChat(ctx, chatRecord); err != nil {
 		return err
 	}
-	return c.loadSession(ctx, sessionID, chatRecord.ID)
+	return c.loadSession(ctx, session.ID, chatRecord.ID)
 }
 
 // ListChats returns the controller's live chat list for the active session.
