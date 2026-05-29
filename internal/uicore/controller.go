@@ -60,6 +60,7 @@ type State struct {
 	ModelInfo     ModelInfo                   `json:"model_info"`
 	Theme         string                      `json:"theme"`
 	Workdir       string                      `json:"workdir"`
+	RestartNeeded bool                        `json:"restart_needed"`
 	Error         string                      `json:"error,omitempty"`
 }
 
@@ -309,6 +310,7 @@ type Controller struct {
 	workspace                  workspacepkg.Status
 	theme                      string
 	lastErr                    string
+	restartNeeded              bool
 	clearedStartupRunningTools bool
 
 	subMu   sync.Mutex
@@ -360,24 +362,10 @@ func (c *Controller) Start(ctx context.Context, mode StartupMode, projectRoot st
 func (c *Controller) State() State {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	state := State{
-		Session:       c.session,
-		Sessions:      slices.Clone(c.sessions),
-		Chats:         slices.Clone(c.chats),
-		ChatStatuses:  c.chatStatusesLocked(),
-		ActiveChatID:  c.chat.ID,
-		Permissions:   c.permissionsStateLocked(),
-		Snapshots:     map[domain.ID]chat.Snapshot{},
-		Milestones:    c.milestone,
-		Todos:         slices.Clone(c.todos),
-		TodosByRef:    cloneTodosByRef(c.todosByRef),
-		Workspace:     c.workspace,
-		ContextWindow: c.contextWindowLocked(),
-		ModelInfo:     c.modelInfoLocked(),
-		Theme:         c.theme,
-		Workdir:       c.session.ProjectRoot,
-		Error:         c.lastErr,
-	}
+	return c.stateLocked()
+}
+
+func (c *Controller) populateStateSnapshotsLocked(state *State) {
 	for idx := range state.Chats {
 		if state.Chats[idx].ID == c.chat.ID {
 			state.Chats[idx] = c.chat
@@ -429,6 +417,41 @@ func (c *Controller) State() State {
 			state.ChatStatuses = mergeChatSidebarStatus(state.ChatStatuses, sidebarStatusFromSnapshot(snapshot))
 		}
 	}
+}
+
+// MarkRestartNeeded tells renderers that a newer binary is ready but not running.
+func (c *Controller) MarkRestartNeeded() {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	c.restartNeeded = true
+	state := c.stateLocked()
+	c.mu.Unlock()
+	c.broadcast("snapshot", state)
+}
+
+func (c *Controller) stateLocked() State {
+	state := State{
+		Session:       c.session,
+		Sessions:      slices.Clone(c.sessions),
+		Chats:         slices.Clone(c.chats),
+		ChatStatuses:  c.chatStatusesLocked(),
+		ActiveChatID:  c.chat.ID,
+		Permissions:   c.permissionsStateLocked(),
+		Snapshots:     map[domain.ID]chat.Snapshot{},
+		Milestones:    c.milestone,
+		Todos:         slices.Clone(c.todos),
+		TodosByRef:    cloneTodosByRef(c.todosByRef),
+		Workspace:     c.workspace,
+		ContextWindow: c.contextWindowLocked(),
+		ModelInfo:     c.modelInfoLocked(),
+		Theme:         c.theme,
+		Workdir:       c.session.ProjectRoot,
+		RestartNeeded: c.restartNeeded,
+		Error:         c.lastErr,
+	}
+	c.populateStateSnapshotsLocked(&state)
 	return state
 }
 

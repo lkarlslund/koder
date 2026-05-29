@@ -505,6 +505,9 @@
           if (this.connecting) return 'connecting';
           return 'offline';
         },
+        restartNeeded() {
+          return !!(this.state.restart_needed || this.state.RestartNeeded);
+        },
         applyHello(hello) {
           if (hello && hello.asset_hash && window.KODER_ASSET_HASH && hello.asset_hash !== window.KODER_ASSET_HASH) {
             location.reload();

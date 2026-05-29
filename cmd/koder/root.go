@@ -187,26 +187,32 @@ func runWeb(ctx context.Context, cfg config.Config, st *store.Store, engine *age
 		recorder.UpdateProcess(debugsrv.ProcessDebug{DebugAPI: server.URL(), Status: "Web UI running"})
 	}
 	sig := make(chan os.Signal, 1)
-	signal.Notify(sig, os.Interrupt, syscall.SIGTERM, syscall.SIGUSR1)
+	signal.Notify(sig, os.Interrupt, syscall.SIGTERM, syscall.SIGUSR1, syscall.SIGUSR2)
 	defer signal.Stop(sig)
-	select {
-	case <-ctx.Done():
-		if err := controller.Shutdown(context.Background()); err != nil {
-			return err
+	for {
+		select {
+		case <-ctx.Done():
+			if err := controller.Shutdown(context.Background()); err != nil {
+				return err
+			}
+			return ctx.Err()
+		case signal := <-sig:
+			if signal == syscall.SIGUSR2 {
+				controller.MarkRestartNeeded()
+				continue
+			}
+			reason := domain.NoticeReasonProcessTerminating
+			if signal == syscall.SIGUSR1 {
+				reason = domain.NoticeReasonProcessRestart
+			}
+			if err := controller.ShutdownWithInterruptReason(context.Background(), reason); err != nil {
+				return err
+			}
+			if signal == syscall.SIGUSR1 {
+				return errProcessRestart
+			}
+			return nil
 		}
-		return ctx.Err()
-	case signal := <-sig:
-		reason := domain.NoticeReasonProcessTerminating
-		if signal == syscall.SIGUSR1 {
-			reason = domain.NoticeReasonProcessRestart
-		}
-		if err := controller.ShutdownWithInterruptReason(context.Background(), reason); err != nil {
-			return err
-		}
-		if signal == syscall.SIGUSR1 {
-			return errProcessRestart
-		}
-		return nil
 	}
 }
 

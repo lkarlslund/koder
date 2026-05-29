@@ -4,6 +4,8 @@
     .app-shell { height: 100vh; display: grid; grid-template-columns: minmax(0, 1fr) 6px var(--sidebar-width, 340px); grid-template-rows: auto minmax(0, 1fr) auto; }
     .topbar { grid-column: 1 / 4; }
     .topbar-workspace { max-width: min(34vw, 34rem); }
+    .restart-needed { color: var(--bs-warning); font-size: 1.05rem; line-height: 1; animation: restart-needed-pulse 1s ease-in-out infinite; }
+    @keyframes restart-needed-pulse { 0%, 100% { opacity: .55; transform: scale(.95); } 50% { opacity: 1; transform: scale(1.08); } }
     .transcript { min-height: 0; overflow: auto; }
     .sidebar-resizer { min-height: 0; cursor: col-resize; background: var(--bs-border-color); opacity: .55; touch-action: none; }
     .sidebar-resizer:hover, .sidebar-resizer.resizing { background: var(--bs-primary); opacity: 1; }
