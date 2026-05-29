@@ -59,6 +59,34 @@ func defaultChatForSession(t *testing.T, st *store.Store, sessionID domain.ID) d
 	return chat
 }
 
+func runLivePrompt(t *testing.T, engine *Engine, session domain.Session, chatRecord domain.Chat, text string) []domain.Event {
+	t.Helper()
+	rt, err := engine.Chat(context.Background(), session, chatRecord)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updates, unsub := rt.Subscribe()
+	defer unsub()
+	rt.Enqueue(chatpkg.QueueItem{Kind: chatpkg.QueueKindSteer, Text: text})
+	deadline := time.After(5 * time.Second)
+	var events []domain.Event
+	for {
+		select {
+		case update := <-updates:
+			if update.Event == nil {
+				continue
+			}
+			events = append(events, *update.Event)
+			switch update.Event.Kind {
+			case domain.EventKindMessageDone, domain.EventKindApprovalAsk, domain.EventKindError:
+				return events
+			}
+		case <-deadline:
+			t.Fatalf("timed out waiting for live prompt; snapshot=%#v", rt.Snapshot())
+		}
+	}
+}
+
 func appendUserTimelineItem(t *testing.T, st *store.Store, chatID domain.ID, text string) domain.TimelineItem {
 	t.Helper()
 	return appendUserTimelineItemWithAttachments(t, st, chatID, text, nil)
@@ -1756,12 +1784,10 @@ func TestApproveContinuesModelWithToolOutput(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	events, err := engine.RunPrompt(context.Background(), session, "say hello")
-	if err != nil {
-		t.Fatal(err)
-	}
+	chatRecord := defaultChatForSession(t, st, session.ID)
+	events := runLivePrompt(t, engine, session, chatRecord, "say hello")
 	var approvalID domain.ID
-	for evt := range events {
+	for _, evt := range events {
 		if evt.Kind == domain.EventKindApprovalAsk {
 			id, convErr := parseApprovalID(evt.Meta["approval_id"])
 			if convErr != nil {
@@ -1860,12 +1886,10 @@ func TestPermissionProfileChangeReevaluatesPendingApproval(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	events, err := engine.RunPrompt(context.Background(), session, "say hello")
-	if err != nil {
-		t.Fatal(err)
-	}
+	chatRecord := defaultChatForSession(t, st, session.ID)
+	events := runLivePrompt(t, engine, session, chatRecord, "say hello")
 	var approvalID domain.ID
-	for evt := range events {
+	for _, evt := range events {
 		if evt.Kind == domain.EventKindApprovalAsk {
 			approvalID, err = parseApprovalID(evt.Meta["approval_id"])
 			if err != nil {
@@ -1987,13 +2011,11 @@ func TestRunPromptExecutesMultipleToolCallsInParallel(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	events, err := engine.RunPrompt(context.Background(), session, "say hello")
-	if err != nil {
-		t.Fatal(err)
-	}
+	chatRecord := defaultChatForSession(t, st, session.ID)
+	events := runLivePrompt(t, engine, session, chatRecord, "say hello")
 	var toolResults []string
 	var sawFinalAnswer bool
-	for evt := range events {
+	for _, evt := range events {
 		if evt.Kind == domain.EventKindToolResult {
 			toolResults = append(toolResults, evt.Text)
 		}
