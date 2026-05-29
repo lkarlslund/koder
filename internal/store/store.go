@@ -37,6 +37,7 @@ type backend interface {
 	ListChats(context.Context, domain.ID) ([]domain.Chat, error)
 	GetChat(context.Context, domain.ID) (domain.Chat, error)
 	DefaultChat(context.Context, domain.ID) (domain.Chat, error)
+	PutChat(context.Context, domain.Chat) error
 	UpdateChat(context.Context, domain.Chat) error
 	SetChatModel(context.Context, domain.ID, string, string) error
 	DeleteChat(context.Context, domain.ID) error
@@ -276,6 +277,16 @@ func (s *Store) GetChat(ctx context.Context, chatID domain.ID) (domain.Chat, err
 
 func (s *Store) DefaultChat(ctx context.Context, sessionID domain.ID) (domain.Chat, error) {
 	return s.backend.DefaultChat(ctx, sessionID)
+}
+
+func (s *Store) PutChat(ctx context.Context, chat domain.Chat) error {
+	if chat.ID == "" {
+		return fmt.Errorf("put chat: id is required")
+	}
+	if chat.SessionID == "" {
+		return fmt.Errorf("put chat: session id is required")
+	}
+	return s.backend.PutChat(ctx, chat)
 }
 
 func (s *Store) UpdateChat(ctx context.Context, chat domain.Chat) error {

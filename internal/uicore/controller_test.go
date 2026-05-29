@@ -250,17 +250,17 @@ func TestControllerForwardRuntimeRefreshesInactiveChatMetadata(t *testing.T) {
 }
 
 func TestControllerStartChatAddsCreatedChatToSession(t *testing.T) {
-	ctrl, st := newTestController(t)
+	ctrl, _ := newTestController(t)
 	state := ctrl.State()
 	if state.Session.ID == "" || state.ActiveChatID == "" {
 		t.Fatal("expected active session and chat")
 	}
-	if _, err := st.SetMilestonePlan(context.Background(), state.Session.ID, "Ship it", []store.Milestone{
+	if _, err := ctrl.SetMilestonePlan(context.Background(), state.Session.ID, "Ship it", []store.Milestone{
 		{Ref: "alpha", Title: "Alpha", Status: domain.MilestoneStatusReady, Position: 0},
 	}); err != nil {
 		t.Fatalf("set milestone plan: %v", err)
 	}
-	todos, err := st.AddTodoItems(context.Background(), state.Session.ID, "alpha", []string{"Implement alpha"})
+	todos, err := ctrl.AddTodoItems(context.Background(), state.Session.ID, "alpha", []string{"Implement alpha"})
 	if err != nil {
 		t.Fatalf("add todo: %v", err)
 	}

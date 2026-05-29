@@ -337,6 +337,24 @@ func (b *jsonfsBackend) DefaultChat(ctx context.Context, sessionID domain.ID) (d
 	return chats[0], nil
 }
 
+func (b *jsonfsBackend) PutChat(ctx context.Context, chat domain.Chat) error {
+	if err := ensureContext(ctx); err != nil {
+		return err
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if _, err := b.readSession(chat.SessionID); err != nil {
+		return err
+	}
+	if chat.CreatedAt.IsZero() {
+		chat.CreatedAt = time.Now().UTC()
+	}
+	if chat.UpdatedAt.IsZero() {
+		chat.UpdatedAt = chat.CreatedAt
+	}
+	return b.writeChat(chat)
+}
+
 func (b *jsonfsBackend) UpdateChat(ctx context.Context, chat domain.Chat) error {
 	if err := ensureContext(ctx); err != nil {
 		return err

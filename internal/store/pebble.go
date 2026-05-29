@@ -368,6 +368,32 @@ func (b *pebbleBackend) DefaultChat(ctx context.Context, sessionID domain.ID) (d
 	return chats[0], nil
 }
 
+func (b *pebbleBackend) PutChat(ctx context.Context, chat domain.Chat) error {
+	if err := ensureContext(ctx); err != nil {
+		return err
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if _, err := b.readSession(chat.SessionID); err != nil {
+		return err
+	}
+	if chat.CreatedAt.IsZero() {
+		chat.CreatedAt = time.Now().UTC()
+	}
+	if chat.UpdatedAt.IsZero() {
+		chat.UpdatedAt = chat.CreatedAt
+	}
+	batch := b.db.NewBatch()
+	defer batch.Close()
+	if err := b.putChat(batch, chat); err != nil {
+		return err
+	}
+	if err := batch.Set([]byte(chatSessionIndexKey(chat.SessionID, chat.ID)), nil, nil); err != nil {
+		return fmt.Errorf("index chat by session: %w", err)
+	}
+	return batch.Commit(pebble.Sync)
+}
+
 func (b *pebbleBackend) UpdateChat(ctx context.Context, chat domain.Chat) error {
 	if err := ensureContext(ctx); err != nil {
 		return err
