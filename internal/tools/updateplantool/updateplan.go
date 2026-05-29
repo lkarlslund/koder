@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/lkarlslund/koder/internal/domain"
-	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools"
 )
 
@@ -73,7 +72,7 @@ func (tool) Execute(_ context.Context, _ tools.Runtime, req tools.Request) (tool
 func (tool) SummarizeResult(req tools.Request, result tools.Result) (string, string) {
 	return "plan", result.Output
 }
-func (tool) PersistResult(ctx context.Context, st *store.Store, sessionID domain.ID, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
+func (tool) PersistResult(ctx context.Context, runtime tools.Runtime, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
 	steps, err := normalizePlan(req.Args["plan"])
 	if err != nil {
 		return nil, err
@@ -85,34 +84,31 @@ func (tool) PersistResult(ctx context.Context, st *store.Store, sessionID domain
 			Status: item.Status,
 		})
 	}
-	chatID, ok := tools.ChatIDFromContext(ctx)
-	if !ok || chatID == "" {
-		chat, err := st.DefaultChat(ctx, sessionID)
-		if err != nil {
-			return nil, err
-		}
-		chatID = chat.ID
+	result.Stored = domain.UpdatePlanStoredResult{
+		Explanation: req.Args["explanation"],
+		Steps:       storedSteps,
 	}
-	item, err := st.AppendTimeline(ctx, chatID, domain.ToolExecution{
-		Tool: req.Tool,
-		Args: req.Meta(),
-		Result: &domain.ToolResult{
-			Text:   result.Output,
-			Status: domain.ToolResultStatusOK,
-			Data: domain.UpdatePlanStoredResult{
-				Explanation: req.Args["explanation"],
-				Steps:       storedSteps,
-			},
-		},
-	})
+	events, err := tools.PersistStandardResult(ctx, runtime, req, result)
 	if err != nil {
 		return nil, err
 	}
-	item.Seal(item.UpdatedAt)
-	if err := st.Timeline().Put(ctx, item); err != nil {
-		return nil, err
-	}
-	return tools.EmitOnce(domain.Event{Kind: domain.EventKindStatus, Text: "Plan updated", Tool: req.Tool, Item: item}), nil
+	return planUpdatedEvents(req.Tool, events), nil
+}
+
+func planUpdatedEvents(tool domain.ToolKind, events <-chan domain.Event) <-chan domain.Event {
+	out := make(chan domain.Event)
+	go func() {
+		defer close(out)
+		for evt := range events {
+			if evt.Kind == domain.EventKindToolResult {
+				evt.Kind = domain.EventKindStatus
+				evt.Text = "Plan updated"
+				evt.Tool = tool
+			}
+			out <- evt
+		}
+	}()
+	return out
 }
 
 func normalizePlan(raw string) ([]step, error) {

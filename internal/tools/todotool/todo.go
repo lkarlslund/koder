@@ -121,7 +121,7 @@ func (fetchNextTool) Preview(req tools.Request) string {
 }
 
 func (listTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
-	st, err := tools.RequireSessionStore(runtime)
+	control, err := tools.RequireSessionControl(runtime)
 	if err != nil {
 		return tools.Result{}, err
 	}
@@ -129,7 +129,7 @@ func (listTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Re
 	if err != nil {
 		return tools.Result{}, err
 	}
-	plan, todos, ref, err := tools.PersistedTodoBucket(ctx, st, runtime.SessionID, ref)
+	plan, todos, ref, err := persistedTodoBucket(ctx, control, runtime.SessionID, ref)
 	if err != nil {
 		return tools.Result{}, err
 	}
@@ -148,11 +148,11 @@ func (addItemsTool) Execute(ctx context.Context, runtime tools.Runtime, req tool
 	if err != nil {
 		return tools.Result{}, err
 	}
-	st, err := tools.RequireSessionStore(runtime)
+	control, err := tools.RequireSessionControl(runtime)
 	if err != nil {
 		return tools.Result{}, err
 	}
-	plan, err := st.GetMilestonePlan(ctx, runtime.SessionID)
+	plan, err := control.GetMilestonePlan(ctx, runtime.SessionID)
 	if err != nil {
 		return tools.Result{}, err
 	}
@@ -168,7 +168,7 @@ func (addItemsTool) Execute(ctx context.Context, runtime tools.Runtime, req tool
 }
 
 func (updateItemTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
-	st, err := tools.RequireSessionStore(runtime)
+	control, err := tools.RequireSessionControl(runtime)
 	if err != nil {
 		return tools.Result{}, err
 	}
@@ -176,7 +176,7 @@ func (updateItemTool) Execute(ctx context.Context, runtime tools.Runtime, req to
 	if err := tools.TodoScopeAllows(runtime, id); err != nil {
 		return tools.Result{}, err
 	}
-	plan, err := st.GetMilestonePlan(ctx, runtime.SessionID)
+	plan, err := control.GetMilestonePlan(ctx, runtime.SessionID)
 	if err != nil {
 		return tools.Result{}, err
 	}
@@ -188,7 +188,7 @@ func (updateItemTool) Execute(ctx context.Context, runtime tools.Runtime, req to
 		if allowedRef != "" && milestone.Ref != allowedRef {
 			continue
 		}
-		todos, err := st.ListTodos(ctx, runtime.SessionID, milestone.Ref)
+		todos, err := control.ListTodos(ctx, runtime.SessionID, milestone.Ref)
 		if err != nil {
 			return tools.Result{}, err
 		}
@@ -203,10 +203,10 @@ func (updateItemTool) Execute(ctx context.Context, runtime tools.Runtime, req to
 			if err := tools.ValidateTodoProgress(todos); err != nil {
 				return tools.Result{}, err
 			}
-			if _, err := st.UpdateTodoItem(ctx, id, domain.TodoStatus(req.Args["status"]), req.Args["content"]); err != nil {
+			if _, err := control.UpdateTodoItem(ctx, id, domain.TodoStatus(req.Args["status"]), req.Args["content"]); err != nil {
 				return tools.Result{}, err
 			}
-			todos, err = st.ListTodos(ctx, runtime.SessionID, milestone.Ref)
+			todos, err = control.ListTodos(ctx, runtime.SessionID, milestone.Ref)
 			if err != nil {
 				return tools.Result{}, err
 			}
@@ -217,7 +217,7 @@ func (updateItemTool) Execute(ctx context.Context, runtime tools.Runtime, req to
 }
 
 func (fetchNextTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Request) (tools.Result, error) {
-	st, err := tools.RequireSessionStore(runtime)
+	control, err := tools.RequireSessionControl(runtime)
 	if err != nil {
 		return tools.Result{}, err
 	}
@@ -225,7 +225,7 @@ func (fetchNextTool) Execute(ctx context.Context, runtime tools.Runtime, req too
 	if err != nil {
 		return tools.Result{}, err
 	}
-	plan, todos, ref, err := tools.PersistedTodoBucket(ctx, st, runtime.SessionID, ref)
+	plan, todos, ref, err := persistedTodoBucket(ctx, control, runtime.SessionID, ref)
 	if err != nil {
 		return tools.Result{}, err
 	}
@@ -260,42 +260,54 @@ func (fetchNextTool) SummarizeResult(req tools.Request, result tools.Result) (st
 	return "Fetched next todo", result.Output
 }
 
-func (listTool) PersistResult(ctx context.Context, st *store.Store, sessionID domain.ID, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
-	plan, todos, ref, err := tools.PersistedTodoBucket(ctx, st, sessionID, req.Args["milestone_ref"])
+func (listTool) PersistResult(ctx context.Context, runtime tools.Runtime, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
+	control, err := tools.RequireSessionControl(runtime)
+	if err != nil {
+		return nil, err
+	}
+	plan, todos, ref, err := persistedTodoBucket(ctx, control, runtime.SessionID, req.Args["milestone_ref"])
 	if err != nil {
 		return nil, err
 	}
 	result.Stored = tools.TodoStoredResult(plan, ref, todos, "")
-	return tools.PersistStandardResult(ctx, st, sessionID, req, result)
+	return tools.PersistStandardResult(ctx, runtime, req, result)
 }
 
-func (addItemsTool) PersistResult(ctx context.Context, st *store.Store, sessionID domain.ID, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
+func (addItemsTool) PersistResult(ctx context.Context, runtime tools.Runtime, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
+	control, err := tools.RequireSessionControl(runtime)
+	if err != nil {
+		return nil, err
+	}
 	items, err := tools.ParseTodoAddItems(req.Args["items"])
 	if err != nil {
 		return nil, err
 	}
-	created, err := st.AddTodoItems(ctx, sessionID, req.Args["milestone_ref"], items)
+	created, err := control.AddTodoItems(ctx, runtime.SessionID, req.Args["milestone_ref"], items)
 	if err != nil {
 		return nil, err
 	}
-	plan, err := st.GetMilestonePlan(ctx, sessionID)
+	plan, err := control.GetMilestonePlan(ctx, runtime.SessionID)
 	if err != nil {
 		return nil, err
 	}
 	stored := tools.TodoStoredResult(plan, req.Args["milestone_ref"], created, "")
 	result.Stored = stored
 	result.Output = tools.FormatTodoOutput(stored)
-	return tools.PersistStandardResult(ctx, st, sessionID, req, result)
+	return tools.PersistStandardResult(ctx, runtime, req, result)
 }
 
-func (updateItemTool) PersistResult(ctx context.Context, st *store.Store, sessionID domain.ID, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
+func (updateItemTool) PersistResult(ctx context.Context, runtime tools.Runtime, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
+	control, err := tools.RequireSessionControl(runtime)
+	if err != nil {
+		return nil, err
+	}
 	id, _ := tools.ParseTodoID(req.Args["id"])
-	plan, err := st.GetMilestonePlan(ctx, sessionID)
+	plan, err := control.GetMilestonePlan(ctx, runtime.SessionID)
 	if err != nil {
 		return nil, err
 	}
 	for _, milestone := range plan.Milestones {
-		todos, err := st.ListTodos(ctx, sessionID, milestone.Ref)
+		todos, err := control.ListTodos(ctx, runtime.SessionID, milestone.Ref)
 		if err != nil {
 			return nil, err
 		}
@@ -310,22 +322,26 @@ func (updateItemTool) PersistResult(ctx context.Context, st *store.Store, sessio
 			if err := tools.ValidateTodoProgress(todos); err != nil {
 				return nil, err
 			}
-			if _, err := st.UpdateTodoItem(ctx, id, domain.TodoStatus(req.Args["status"]), req.Args["content"]); err != nil {
+			if _, err := control.UpdateTodoItem(ctx, id, domain.TodoStatus(req.Args["status"]), req.Args["content"]); err != nil {
 				return nil, err
 			}
-			todos, err = st.ListTodos(ctx, sessionID, milestone.Ref)
+			todos, err = control.ListTodos(ctx, runtime.SessionID, milestone.Ref)
 			if err != nil {
 				return nil, err
 			}
 			result.Stored = tools.TodoStoredResult(plan, milestone.Ref, todos, "")
-			return tools.PersistStandardResult(ctx, st, sessionID, req, result)
+			return tools.PersistStandardResult(ctx, runtime, req, result)
 		}
 	}
 	return nil, fmt.Errorf("todo item %s not found", id)
 }
 
-func (fetchNextTool) PersistResult(ctx context.Context, st *store.Store, sessionID domain.ID, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
-	plan, todos, ref, err := tools.PersistedTodoBucket(ctx, st, sessionID, req.Args["milestone_ref"])
+func (fetchNextTool) PersistResult(ctx context.Context, runtime tools.Runtime, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
+	control, err := tools.RequireSessionControl(runtime)
+	if err != nil {
+		return nil, err
+	}
+	plan, todos, ref, err := persistedTodoBucket(ctx, control, runtime.SessionID, req.Args["milestone_ref"])
 	if err != nil {
 		return nil, err
 	}
@@ -333,18 +349,38 @@ func (fetchNextTool) PersistResult(ctx context.Context, st *store.Store, session
 	for _, item := range todos {
 		if item.Status == domain.TodoStatusInProgress {
 			result.Stored = tools.TodoStoredResult(plan, ref, []store.TodoItem{item}, message)
-			return tools.PersistStandardResult(ctx, st, sessionID, req, result)
+			return tools.PersistStandardResult(ctx, runtime, req, result)
 		}
 	}
 	for _, item := range todos {
 		if item.Status == domain.TodoStatusPending {
 			result.Stored = tools.TodoStoredResult(plan, ref, []store.TodoItem{item}, message)
-			return tools.PersistStandardResult(ctx, st, sessionID, req, result)
+			return tools.PersistStandardResult(ctx, runtime, req, result)
 		}
 	}
 	message = "All todo items for this milestone are done. If you have more planned tasks, move to the next milestone or break it down into todo items and start working on them."
 	result.Stored = tools.TodoStoredResult(plan, ref, todos, message)
-	return tools.PersistStandardResult(ctx, st, sessionID, req, result)
+	return tools.PersistStandardResult(ctx, runtime, req, result)
+}
+
+func persistedTodoBucket(ctx context.Context, control tools.SessionControl, sessionID domain.ID, ref string) (store.MilestonePlan, []store.TodoItem, string, error) {
+	plan, err := control.GetMilestonePlan(ctx, sessionID)
+	if err != nil {
+		return store.MilestonePlan{}, nil, "", err
+	}
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		active, ok := tools.ActiveMilestone(plan)
+		if !ok {
+			return store.MilestonePlan{}, nil, "", fmt.Errorf("no active milestone; read milestones first or provide milestone_ref")
+		}
+		ref = active.Ref
+	}
+	todos, err := control.ListTodos(ctx, sessionID, ref)
+	if err != nil {
+		return store.MilestonePlan{}, nil, "", err
+	}
+	return plan, todos, ref, nil
 }
 
 func milestonePreview(ref, fallback string) string {

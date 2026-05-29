@@ -31,7 +31,7 @@ func TestPersistStandardResultReturnsStoredMarshalError(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err = PersistStandardResult(context.Background(), st, session.ID, Request{
+	_, err = PersistStandardResult(context.Background(), Runtime{Store: st, SessionID: session.ID, SessionControl: NewStoreSessionControl(st)}, Request{
 		Tool: domain.ToolKindQuestion,
 		Args: map[string]string{"question": "What next?"},
 	}, Result{

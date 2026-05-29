@@ -42,7 +42,8 @@ func TestPersistResultCreatesPendingTask(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	events, err := tool{}.PersistResult(context.Background(), st, session.ID, tools.Request{
+	runtime := tools.Runtime{Store: st, SessionID: session.ID, SessionControl: tools.NewStoreSessionControl(st)}
+	events, err := tool{}.PersistResult(context.Background(), runtime, tools.Request{
 		Tool: domain.ToolKindTask,
 		Args: map[string]string{"body": "Ship it"},
 	}, tools.Result{Output: "Ship it"})

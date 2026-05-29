@@ -130,7 +130,7 @@ func TestPersistStandardResultPersistsMessagePartAndDiff(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	events, err := tools.PersistStandardResult(tools.WithChatID(context.Background(), chat.ID), st, session.ID, tools.Request{
+	events, err := tools.PersistStandardResult(tools.WithChatID(context.Background(), chat.ID), tools.Runtime{Store: st, SessionID: session.ID, SessionControl: tools.NewStoreSessionControl(st)}, tools.Request{
 		Tool:       domain.ToolKindWrite,
 		ToolCallID: "call_write",
 		Args:       map[string]string{"path": "notes.txt"},

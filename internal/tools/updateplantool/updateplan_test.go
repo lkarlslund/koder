@@ -50,7 +50,8 @@ func TestPersistResultStoresPlanUpdate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	events, err := tool{}.PersistResult(context.Background(), st, session.ID, tools.Request{
+	runtime := tools.Runtime{Store: st, SessionID: session.ID, SessionControl: tools.NewStoreSessionControl(st)}
+	events, err := tool{}.PersistResult(context.Background(), runtime, tools.Request{
 		Tool: domain.ToolKindUpdatePlan,
 		Args: map[string]string{
 			"plan":        `[{"step":"Inspect","status":"completed"}]`,
@@ -94,7 +95,8 @@ func TestPersistResultRejectsInvalidPlanBeforeWriting(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err = tool{}.PersistResult(context.Background(), st, session.ID, tools.Request{
+	runtime := tools.Runtime{Store: st, SessionID: session.ID, SessionControl: tools.NewStoreSessionControl(st)}
+	_, err = tool{}.PersistResult(context.Background(), runtime, tools.Request{
 		Tool: domain.ToolKindUpdatePlan,
 		Args: map[string]string{
 			"plan": `[{"step":"one","status":"in_progress"},{"step":"two","status":"in_progress"}]`,

@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/lkarlslund/koder/internal/domain"
-	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools"
 )
 
@@ -35,40 +34,38 @@ func (tool) Execute(_ context.Context, _ tools.Runtime, req tools.Request) (tool
 func (tool) SummarizeResult(req tools.Request, result tools.Result) (string, string) {
 	return "task", req.Args["body"]
 }
-func (tool) PersistResult(ctx context.Context, st *store.Store, sessionID domain.ID, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
-	task, err := st.AddTask(ctx, sessionID, req.Args["body"], domain.TaskStatusPending)
+func (tool) PersistResult(ctx context.Context, runtime tools.Runtime, req tools.Request, result tools.Result) (<-chan domain.Event, error) {
+	control, err := tools.RequireSessionControl(runtime)
 	if err != nil {
 		return nil, err
 	}
-	chatID, ok := tools.ChatIDFromContext(ctx)
-	if !ok || chatID == "" {
-		chat, err := st.DefaultChat(ctx, sessionID)
-		if err != nil {
-			return nil, err
+	task, err := control.AddTask(ctx, runtime.SessionID, req.Args["body"], domain.TaskStatusPending)
+	if err != nil {
+		return nil, err
+	}
+	result.Stored = domain.TaskStoredResult{
+		Body:   task.Body,
+		Status: task.Status,
+	}
+	events, err := tools.PersistStandardResult(ctx, runtime, req, result)
+	if err != nil {
+		return nil, err
+	}
+	return taskUpdateEvents(task.Body, req.Tool, events), nil
+}
+
+func taskUpdateEvents(body string, tool domain.ToolKind, events <-chan domain.Event) <-chan domain.Event {
+	out := make(chan domain.Event)
+	go func() {
+		defer close(out)
+		for evt := range events {
+			if evt.Kind == domain.EventKindToolResult {
+				evt.Kind = domain.EventKindTaskUpdate
+				evt.Text = body
+				evt.Tool = tool
+			}
+			out <- evt
 		}
-		chatID = chat.ID
-	}
-	resultItem, err := st.AppendTimeline(ctx, chatID, domain.ToolExecution{
-		Tool: req.Tool,
-		Args: req.Meta(),
-		Result: &domain.ToolResult{
-			Text:   task.Body,
-			Status: domain.ToolResultStatusOK,
-			Data: domain.TaskStoredResult{
-				Body:   task.Body,
-				Status: task.Status,
-			},
-		},
-	})
-	if err != nil {
-		return nil, err
-	}
-	resultItem.Seal(resultItem.UpdatedAt)
-	if err := st.Timeline().Put(ctx, resultItem); err != nil {
-		return nil, err
-	}
-	out := make(chan domain.Event, 1)
-	out <- domain.Event{Kind: domain.EventKindTaskUpdate, Text: task.Body, Tool: req.Tool, Item: resultItem}
-	close(out)
-	return out, nil
+	}()
+	return out
 }

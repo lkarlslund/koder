@@ -729,6 +729,91 @@ func (c *Controller) PollChat(ctx context.Context, sessionID, chatID domain.ID) 
 	return c.agent.PollChat(ctx, sessionID, chatID)
 }
 
+func (c *Controller) GetMilestonePlan(ctx context.Context, sessionID domain.ID) (store.MilestonePlan, error) {
+	c.mu.RLock()
+	if sessionID == c.session.ID {
+		plan := c.milestone
+		c.mu.RUnlock()
+		if plan.SessionID != "" || len(plan.Milestones) > 0 || strings.TrimSpace(plan.Summary) != "" {
+			return plan, nil
+		}
+	} else {
+		c.mu.RUnlock()
+	}
+	return c.store.GetMilestonePlan(ctx, sessionID)
+}
+
+func (c *Controller) SetMilestonePlan(ctx context.Context, sessionID domain.ID, summary string, milestones []store.Milestone) (store.MilestonePlan, error) {
+	plan, err := c.store.SetMilestonePlan(ctx, sessionID, summary, milestones)
+	if err != nil {
+		return store.MilestonePlan{}, err
+	}
+	c.mu.Lock()
+	if c.session.ID == sessionID {
+		c.milestone = plan
+	}
+	c.mu.Unlock()
+	return plan, nil
+}
+
+func (c *Controller) AddTodoItems(ctx context.Context, sessionID domain.ID, milestoneRef string, contents []string) ([]store.TodoItem, error) {
+	items, err := c.store.AddTodoItems(ctx, sessionID, milestoneRef, contents)
+	if err != nil {
+		return nil, err
+	}
+	c.mu.Lock()
+	if c.session.ID == sessionID {
+		c.todosByRef = cloneTodosByRef(c.todosByRef)
+		c.todosByRef[milestoneRef] = append(c.todosByRef[milestoneRef], items...)
+		if active, ok := tools.ActiveMilestone(c.milestone); ok && active.Ref == milestoneRef {
+			c.todos = slices.Clone(c.todosByRef[milestoneRef])
+		}
+	}
+	c.mu.Unlock()
+	return items, nil
+}
+
+func (c *Controller) UpdateTodoItem(ctx context.Context, todoID domain.ID, status domain.TodoStatus, content string) (store.TodoItem, error) {
+	item, err := c.store.UpdateTodoItem(ctx, todoID, status, content)
+	if err != nil {
+		return store.TodoItem{}, err
+	}
+	c.mu.Lock()
+	if c.session.ID == item.SessionID {
+		updateTodoInSlice(c.todos, item)
+		if c.todosByRef != nil {
+			c.todosByRef = cloneTodosByRef(c.todosByRef)
+			updateTodoInSlice(c.todosByRef[item.MilestoneRef], item)
+		}
+	}
+	c.mu.Unlock()
+	return item, nil
+}
+
+func (c *Controller) ListTodos(ctx context.Context, sessionID domain.ID, milestoneRef string) ([]store.TodoItem, error) {
+	c.mu.RLock()
+	if c.session.ID == sessionID && c.todosByRef != nil {
+		items := slices.Clone(c.todosByRef[milestoneRef])
+		c.mu.RUnlock()
+		return items, nil
+	}
+	c.mu.RUnlock()
+	return c.store.ListTodos(ctx, sessionID, milestoneRef)
+}
+
+func (c *Controller) AddTask(ctx context.Context, sessionID domain.ID, body string, status domain.TaskStatus) (store.Task, error) {
+	return c.store.AddTask(ctx, sessionID, body, status)
+}
+
+func updateTodoInSlice(items []store.TodoItem, item store.TodoItem) {
+	for idx := range items {
+		if items[idx].ID == item.ID {
+			items[idx] = item
+			return
+		}
+	}
+}
+
 func (c *Controller) addStartedChat(ctx context.Context, status tools.ChatStatus) error {
 	chatRecord := status.Chat
 	if chatRecord.ID == "" {

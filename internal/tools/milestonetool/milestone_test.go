@@ -28,7 +28,7 @@ func newMilestoneRuntime(t *testing.T) (tools.Runtime, *store.Store, domain.Sess
 	if err != nil {
 		t.Fatal(err)
 	}
-	return tools.Runtime{Store: st, SessionID: session.ID, ChatRole: chatrole.Orchestrator}, st, session
+	return tools.Runtime{Store: st, SessionID: session.ID, SessionControl: tools.NewStoreSessionControl(st), ChatRole: chatrole.Orchestrator}, st, session
 }
 
 func seedPlan(t *testing.T, st *store.Store, sessionID domain.ID) {
@@ -244,7 +244,7 @@ func TestScopedExecutionChatSeesOnlyAssignedMilestone(t *testing.T) {
 		t.Fatalf("expected scoped milestone error, got %v", err)
 	}
 
-	events, err := (updateItemTool{}).PersistResult(context.Background(), st, session.ID, tools.Request{
+	events, err := (updateItemTool{}).PersistResult(context.Background(), runtime, tools.Request{
 		Tool: domain.ToolKindMilestoneUpdate,
 		Args: map[string]string{"ref": "beta", "status": "executing"},
 	}, tools.Result{Output: result.Output, Stored: result.Stored})
@@ -272,7 +272,7 @@ func TestUpdateItemRefusesCompletedMilestoneWithIncompleteTodos(t *testing.T) {
 		t.Fatalf("expected completion guard error, got %v", err)
 	}
 
-	if _, err := (updateItemTool{}).PersistResult(context.Background(), st, session.ID, tools.Request{
+	if _, err := (updateItemTool{}).PersistResult(context.Background(), runtime, tools.Request{
 		Tool: domain.ToolKindMilestoneUpdate,
 		Args: map[string]string{"ref": "alpha", "status": "completed"},
 	}, tools.Result{Output: "done"}); err == nil || !strings.Contains(err.Error(), "cannot complete milestone") {
@@ -328,10 +328,10 @@ func TestListAndAddExecute(t *testing.T) {
 }
 
 func TestPlanAndWritePersist(t *testing.T) {
-	_, st, session := newMilestoneRuntime(t)
+	runtime, st, session := newMilestoneRuntime(t)
 	seedPlan(t, st, session.ID)
 
-	if _, err := (planTool{}).PersistResult(context.Background(), st, session.ID, tools.Request{
+	if _, err := (planTool{}).PersistResult(context.Background(), runtime, tools.Request{
 		Tool: domain.ToolKindMilestonePlan,
 		Args: map[string]string{
 			"ref":   "alpha",
@@ -349,7 +349,7 @@ func TestPlanAndWritePersist(t *testing.T) {
 		t.Fatalf("expected todo items to be created, got %#v", todos)
 	}
 
-	if _, err := (writeTool{}).PersistResult(context.Background(), st, session.ID, tools.Request{
+	if _, err := (writeTool{}).PersistResult(context.Background(), runtime, tools.Request{
 		Tool: domain.ToolKindMilestoneWrite,
 		Args: map[string]string{
 			"summary":    "New plan",
@@ -368,10 +368,10 @@ func TestPlanAndWritePersist(t *testing.T) {
 }
 
 func TestPlanPersistStoresRealTodoIDsInOutput(t *testing.T) {
-	_, st, session := newMilestoneRuntime(t)
+	runtime, st, session := newMilestoneRuntime(t)
 	seedPlan(t, st, session.ID)
 
-	result, err := (planTool{}).Execute(context.Background(), tools.Runtime{Store: st, SessionID: session.ID}, tools.Request{
+	result, err := (planTool{}).Execute(context.Background(), runtime, tools.Request{
 		Tool: domain.ToolKindMilestonePlan,
 		Args: map[string]string{
 			"ref":   "alpha",
@@ -386,7 +386,7 @@ func TestPlanPersistStoresRealTodoIDsInOutput(t *testing.T) {
 		t.Fatalf("expected execute preview to contain todo content, got %q", result.Output)
 	}
 
-	events, err := (planTool{}).PersistResult(context.Background(), st, session.ID, tools.Request{
+	events, err := (planTool{}).PersistResult(context.Background(), runtime, tools.Request{
 		Tool: domain.ToolKindMilestonePlan,
 		Args: map[string]string{
 			"ref":   "alpha",

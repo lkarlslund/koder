@@ -138,6 +138,7 @@ type Runtime struct {
 	AssignedTodoBucketRef string
 	AssignedTodoRef       domain.ID
 	ChatControl           ChatControl
+	SessionControl        SessionControl
 	Exec                  execruntime.Control
 	MCP                   MCPExecutor
 	SandboxProfile        permissionprofile.Profile
@@ -179,7 +180,7 @@ type resultSummarizer interface {
 }
 
 type resultPersister interface {
-	PersistResult(ctx context.Context, st *store.Store, sessionID domain.ID, req Request, result Result) (<-chan domain.Event, error)
+	PersistResult(ctx context.Context, runtime Runtime, req Request, result Result) (<-chan domain.Event, error)
 }
 
 type Registry struct {
@@ -251,6 +252,10 @@ func (r *Registry) SetChatControl(control ChatControl) {
 	r.runtime.ChatControl = control
 }
 
+func (r *Registry) SetSessionControl(control SessionControl) {
+	r.runtime.SessionControl = control
+}
+
 func (r *Registry) SetExecControl(control execruntime.Control) {
 	r.runtime.Exec = control
 }
@@ -294,6 +299,9 @@ func (r *Registry) ExecuteWithChat(ctx context.Context, st *store.Store, session
 	}
 	runtime := r.runtime
 	runtime.Store = st
+	if runtime.SessionControl == nil && st != nil {
+		runtime.SessionControl = storeSessionControl{store: st}
+	}
 	runtime.SessionID = sessionID
 	runtime.ChatID = chat.ID
 	runtime.ChatRole = chat.WorkflowRole
@@ -344,10 +352,25 @@ func (r *Registry) PersistResultInChat(ctx context.Context, st *store.Store, ses
 		req.Args = map[string]string{}
 	}
 	ctx = WithChatID(ctx, chatID)
-	if persister, ok := tool.(resultPersister); ok {
-		return persister.PersistResult(ctx, st, sessionID, req, result)
+	runtime := r.runtime
+	runtime.Store = st
+	runtime.SessionID = sessionID
+	runtime.ChatID = chatID
+	if st != nil && chatID != "" {
+		if chat, err := st.GetChat(ctx, chatID); err == nil {
+			runtime.ChatRole = chat.WorkflowRole
+			runtime.ActiveMilestoneRef = chat.ActiveMilestoneRef
+			runtime.AssignedTodoBucketRef = chat.AssignedTodoBucketRef
+			runtime.AssignedTodoRef = chat.AssignedTodoRef
+		}
 	}
-	return PersistStandardResult(ctx, st, sessionID, req, result)
+	if runtime.SessionControl == nil && st != nil {
+		runtime.SessionControl = storeSessionControl{store: st}
+	}
+	if persister, ok := tool.(resultPersister); ok {
+		return persister.PersistResult(ctx, runtime, req, result)
+	}
+	return PersistStandardResult(ctx, runtime, req, result)
 }
 
 func Definitions(runtime Runtime) []provider.ToolDefinition {
@@ -535,8 +558,13 @@ func providerDefinition(kind domain.ToolKind, spec ToolSpec) provider.ToolDefini
 	}
 }
 
-func PersistStandardResult(ctx context.Context, st *store.Store, sessionID domain.ID, req Request, result Result) (<-chan domain.Event, error) {
+func PersistStandardResult(ctx context.Context, runtime Runtime, req Request, result Result) (<-chan domain.Event, error) {
 	_, body := SummarizeResult(req, result)
+	st := runtime.Store
+	sessionID := runtime.SessionID
+	if st == nil {
+		return nil, errors.New("persist tool result requires a chat runtime")
+	}
 	chatID, ok := ChatIDFromContext(ctx)
 	if !ok || chatID == "" {
 		chat, err := st.DefaultChat(ctx, sessionID)
