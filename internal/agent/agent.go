@@ -313,6 +313,24 @@ func (e *Engine) CompactChat(ctx context.Context, sessionID, chatID domain.ID) (
 	return out, nil
 }
 
+func (e *Engine) CompactTurn(ctx context.Context, turn *chatpkg.TurnState, out chan<- domain.Event) error {
+	if turn == nil {
+		return fmt.Errorf("turn state is required")
+	}
+	session := turn.Session()
+	chatRecord := turn.Chat()
+	client, err := e.clientForChat(chatRecord)
+	if err != nil {
+		return err
+	}
+	out <- domain.Event{Kind: domain.EventKindStatus, Text: "Compacting session..."}
+	if err := e.compactSession(ctx, session, chatRecord.ID, client, "manual", out); err != nil {
+		return err
+	}
+	out <- domain.Event{Kind: domain.EventKindMessageDone}
+	return nil
+}
+
 func (e *Engine) RunContinue(ctx context.Context, session domain.Session, note string) (<-chan domain.Event, error) {
 	chat, err := e.store.DefaultChat(ctx, session.ID)
 	if err != nil {

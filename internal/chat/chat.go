@@ -109,12 +109,13 @@ type Chat struct {
 }
 
 type Deps struct {
-	Store  *store.Store
-	Prompt PromptTurnService
-	Turns  TurnLoopService
-	Tools  ToolTurnService
-	Errors TurnErrorHandler
-	Legacy Runner
+	Store   *store.Store
+	Prompt  PromptTurnService
+	Turns   TurnLoopService
+	Tools   ToolTurnService
+	Compact CompactService
+	Errors  TurnErrorHandler
+	Legacy  Runner
 }
 
 func DepsForRunner(st *store.Store, runner Runner) Deps {
@@ -127,6 +128,9 @@ func DepsForRunner(st *store.Store, runner Runner) Deps {
 	}
 	if tools, ok := runner.(ToolTurnService); ok {
 		deps.Tools = tools
+	}
+	if compact, ok := runner.(CompactService); ok {
+		deps.Compact = compact
 	}
 	if errors, ok := runner.(TurnErrorHandler); ok {
 		deps.Errors = errors
@@ -231,6 +235,10 @@ type ToolTurnService interface {
 	ApproveToolForTurn(context.Context, *TurnState, string, *domain.PermissionOverride, chan<- domain.Event) (bool, error)
 	DenyToolForTurn(context.Context, *TurnState, string, chan<- domain.Event) error
 	ResumePendingToolsForTurn(context.Context, *TurnState, chan<- domain.Event) (bool, error)
+}
+
+type CompactService interface {
+	CompactTurn(context.Context, *TurnState, chan<- domain.Event) error
 }
 
 type PromptTurnService interface {
@@ -730,8 +738,43 @@ func (r *Chat) DenyTool(toolCallID string) {
 }
 
 func (r *Chat) Compact() error {
-	runner, ok := r.deps.Legacy.(compactRunner)
-	if !ok {
+	runner := r.deps.Compact
+	if runner == nil {
+		legacy, ok := r.deps.Legacy.(compactRunner)
+		if !ok {
+			return fmt.Errorf("compaction is not supported by runner")
+		}
+		return r.compactWithLegacyRunner(legacy)
+	}
+	r.mu.Lock()
+	ctx, cancel := context.WithCancel(context.Background())
+	ctx = turncontrol.WithShouldStop(ctx, func() bool {
+		r.mu.RLock()
+		defer r.mu.RUnlock()
+		return r.cancelState == CancelStateCancelling || r.draining
+	})
+	r.cancel = cancel
+	r.cancelState = CancelStateNone
+	r.running = map[string]struct{}{}
+	r.active = true
+	r.status = StatusWaitingLLM
+	r.statusText = "Compacting session..."
+	r.mu.Unlock()
+	r.broadcast(r.snapshotUpdateFlags(nil, false, false, true, false, false))
+
+	out := make(chan domain.Event, 32)
+	go func() {
+		defer close(out)
+		if err := runner.CompactTurn(ctx, r.turnState(), out); err != nil {
+			r.handleTurnError(ctx, r.turnState(), out, err)
+		}
+	}()
+	r.forwardTurnEvents(out)
+	return nil
+}
+
+func (r *Chat) compactWithLegacyRunner(runner compactRunner) error {
+	if runner == nil {
 		return fmt.Errorf("compaction is not supported by runner")
 	}
 	r.mu.Lock()
