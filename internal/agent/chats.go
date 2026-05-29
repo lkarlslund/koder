@@ -31,7 +31,7 @@ func (e *Engine) Chat(ctx context.Context, session domain.Session, chatRecord do
 	}
 	e.chatMu.RUnlock()
 
-	loaded, err := chatpkg.Load(ctx, session, chatRecord, chatpkg.DepsForRunner(e.store, e), e.detachChat)
+	loaded, err := chatpkg.Load(ctx, session, chatRecord, e.ChatDeps(), e.detachChat)
 	if err != nil {
 		return nil, err
 	}
@@ -45,6 +45,18 @@ func (e *Engine) Chat(ctx context.Context, session domain.Session, chatRecord do
 	e.chats[chatRecord.ID] = loaded
 	e.chatMu.Unlock()
 	return loaded, nil
+}
+
+func (e *Engine) ChatDeps() chatpkg.Deps {
+	return chatpkg.Deps{
+		Store:   e.store,
+		Prompt:  e,
+		Turns:   e,
+		Tools:   e,
+		Pending: e,
+		Compact: e,
+		Errors:  e,
+	}
 }
 
 func (e *Engine) detachChat(chatID domain.ID) {

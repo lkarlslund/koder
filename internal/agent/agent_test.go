@@ -3608,7 +3608,7 @@ func TestLivePromptTurnBuildsRequestFromChatRuntimeTimeline(t *testing.T) {
 	chatRecord := defaultChatForSession(t, st, session.ID)
 	appendUserTimelineItem(t, st, chatRecord.ID, "loaded live transcript")
 
-	runtime, err := chatpkg.Load(context.Background(), session, chatRecord, chatpkg.DepsForRunner(st, engine), nil)
+	runtime, err := chatpkg.Load(context.Background(), session, chatRecord, engine.ChatDeps(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3667,7 +3667,7 @@ func TestRuntimeKeepsUserPromptVisibleWhenProviderSetupFails(t *testing.T) {
 		t.Fatal(err)
 	}
 	chatRecord := defaultChatForSession(t, st, session.ID)
-	runtime, err := chatpkg.Load(context.Background(), session, chatRecord, chatpkg.DepsForRunner(st, engine), nil)
+	runtime, err := chatpkg.Load(context.Background(), session, chatRecord, engine.ChatDeps(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -118,29 +118,6 @@ type Deps struct {
 	Errors  TurnErrorHandler
 }
 
-func DepsForRunner(st *store.Store, runner any) Deps {
-	deps := Deps{Store: st}
-	if prompt, ok := runner.(PromptTurnService); ok {
-		deps.Prompt = prompt
-	}
-	if turns, ok := runner.(TurnLoopService); ok {
-		deps.Turns = turns
-	}
-	if tools, ok := runner.(ToolTurnService); ok {
-		deps.Tools = tools
-	}
-	if pending, ok := runner.(PendingToolService); ok {
-		deps.Pending = pending
-	}
-	if compact, ok := runner.(CompactService); ok {
-		deps.Compact = compact
-	}
-	if errors, ok := runner.(TurnErrorHandler); ok {
-		deps.Errors = errors
-	}
-	return deps
-}
-
 type enqueueCmd struct {
 	item QueueItem
 }
