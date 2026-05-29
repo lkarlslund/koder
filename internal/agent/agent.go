@@ -612,6 +612,410 @@ func (e *Engine) runContinueTurn(ctx context.Context, turn *chatpkg.TurnState, s
 	return out, nil
 }
 
+func (e *Engine) PreparePromptTurn(ctx context.Context, turn *chatpkg.TurnState, prompt string, drafts []attachment.Draft, refs []reference.Draft, note string, out chan<- domain.Event) ([]provider.InstructionBlock, error) {
+	if turn == nil {
+		return nil, fmt.Errorf("turn state is required")
+	}
+	session := turn.Session()
+	chat := turn.Chat()
+	if err := e.validatePromptAttachments(chat, drafts); err != nil {
+		return nil, err
+	}
+	user, err := e.userMessageForPrompt(session, prompt, drafts, refs)
+	if err != nil {
+		return nil, err
+	}
+	userItem, err := turn.AppendUserMessage(ctx, user)
+	if err != nil {
+		return nil, err
+	}
+	out <- domain.Event{Kind: domain.EventKindStatus, Text: "User message added", Item: userItem}
+	e.recordLifecycle(session.ID, "user_message_persisted", prompt, map[string]string{"item_id": userItem.ID})
+	chat = turn.Chat()
+	client, err := e.clientForChat(chat)
+	if err != nil {
+		return nil, err
+	}
+	if session.ID != "" && needsSessionAgentsRefresh(session) {
+		out <- domain.Event{Kind: domain.EventKindStatus, Text: "Checking project instructions..."}
+	}
+	session, err = e.ensureSessionAgents(ctx, session, chat, client)
+	if err != nil {
+		return nil, err
+	}
+	turn.SetSession(session)
+	chat = turn.Chat()
+	e.recordLifecycle(session.ID, "prompt_started", prompt, map[string]string{"provider": chat.ProviderID, "model": chat.ModelID})
+	return transientTurnMessages(note, ""), nil
+}
+
+func (e *Engine) PrepareContinueTurn(ctx context.Context, turn *chatpkg.TurnState, note string, out chan<- domain.Event) ([]provider.InstructionBlock, error) {
+	if turn == nil {
+		return nil, fmt.Errorf("turn state is required")
+	}
+	session := turn.Session()
+	chat := turn.Chat()
+	client, err := e.clientForChat(chat)
+	if err != nil {
+		return nil, err
+	}
+	if session.ID != "" && needsSessionAgentsRefresh(session) {
+		out <- domain.Event{Kind: domain.EventKindStatus, Text: "Checking project instructions..."}
+	}
+	session, err = e.ensureSessionAgents(ctx, session, chat, client)
+	if err != nil {
+		return nil, err
+	}
+	turn.SetSession(session)
+	if strings.TrimSpace(note) != "" {
+		e.recordLifecycle(session.ID, "continue_with_note", note, nil)
+	} else {
+		e.recordLifecycle(session.ID, "continue", "", nil)
+	}
+	return transientTurnMessages(note, "Continue from where you left off."), nil
+}
+
+func (e *Engine) NewTurnLoop(turn *chatpkg.TurnState) chatpkg.TurnLoop {
+	session := domain.Session{}
+	if turn != nil {
+		session = turn.Session()
+	}
+	return &engineTurnLoop{e: e, session: session}
+}
+
+func (e *Engine) HandleTurnError(ctx context.Context, turn *chatpkg.TurnState, out chan<- domain.Event, err error) {
+	if err == nil {
+		return
+	}
+	sessionID, chatID := domain.ID(""), domain.ID("")
+	if turn != nil {
+		sessionID = turn.Session().ID
+		chatID = turn.Chat().ID
+	}
+	if interruptedErr(err) {
+		e.emitInterrupted(out, chatID, sessionID)
+		return
+	}
+	e.emitAssistantError(ctx, out, chatID, sessionID, err)
+}
+
+func (e *Engine) ApproveToolForTurn(ctx context.Context, turn *chatpkg.TurnState, toolCallID string, rule *domain.PermissionOverride, out chan<- domain.Event) (bool, error) {
+	if turn == nil {
+		return false, fmt.Errorf("turn state is required")
+	}
+	session := turn.Session()
+	if rule != nil {
+		next := *rule
+		next.Pattern = strings.TrimSpace(next.Pattern)
+		if next.Pattern == "" {
+			next.Pattern = "*"
+		}
+		if err := permissionprofile.Validate(next.Action); err != nil {
+			return false, err
+		}
+		if err := e.store.AddSessionPermissionRule(ctx, session.ID, next); err != nil {
+			return false, err
+		}
+		refreshed, err := e.store.GetSession(ctx, session.ID)
+		if err != nil {
+			return false, err
+		}
+		session = refreshed
+		turn.SetSession(session)
+		out <- domain.Event{
+			Kind: domain.EventKindStatus,
+			Text: fmt.Sprintf("approved all %s requests matching %s for this session", next.Tool, next.Pattern),
+			Meta: map[string]string{
+				"permission_tool":    string(next.Tool),
+				"permission_pattern": next.Pattern,
+			},
+		}
+	}
+	req, err := e.requestForToolCall(ctx, turn.Chat().ID, toolCallID)
+	if err != nil {
+		return false, err
+	}
+	events, execErr := e.executePreparedToolCallForTurn(ctx, turn, turn.Chat().ID, session.ID, req)
+	if execErr != nil {
+		return false, execErr
+	}
+	for _, evt := range events {
+		out <- evt
+	}
+	if turncontrol.ShouldStop(ctx) {
+		return false, context.Canceled
+	}
+	return true, nil
+}
+
+func (e *Engine) DenyToolForTurn(ctx context.Context, turn *chatpkg.TurnState, toolCallID string, out chan<- domain.Event) error {
+	if turn == nil {
+		return fmt.Errorf("turn state is required")
+	}
+	events, err := e.denyTool(ctx, turn.Session().ID, turn.Chat().ID, toolCallID)
+	if err != nil {
+		return err
+	}
+	for evt := range events {
+		if evt.Item.ID != "" {
+			item, upsertErr := turn.UpsertTimelineItem(ctx, evt.Item)
+			if upsertErr != nil {
+				return upsertErr
+			}
+			evt.Item = item
+		}
+		out <- evt
+	}
+	return nil
+}
+
+func (e *Engine) ResumePendingToolsForTurn(ctx context.Context, turn *chatpkg.TurnState, out chan<- domain.Event) (bool, error) {
+	if turn == nil {
+		return false, fmt.Errorf("turn state is required")
+	}
+	session := turn.Session()
+	chat := turn.Chat()
+	calls, err := e.pendingExecutableToolCalls(ctx, chat.ID)
+	if err != nil || len(calls) == 0 {
+		return false, err
+	}
+	needsApproval, err := e.handleModelToolCallsForTurn(ctx, session, chat, turn, calls, out)
+	if err != nil {
+		return false, err
+	}
+	if needsApproval || turncontrol.ShouldStop(ctx) {
+		return false, nil
+	}
+	return true, nil
+}
+
+type engineTurnLoop struct {
+	e                    *Engine
+	session              domain.Session
+	tracker              toolLoopTracker
+	autoContinuedBadStop bool
+	skipAutoCompactOnce  bool
+}
+
+func (l *engineTurnLoop) MaxSteps() int {
+	return l.e.maxToolLoopSteps()
+}
+
+func (l *engineTurnLoop) PauseLimit(ctx context.Context, turn *chatpkg.TurnState, out chan<- domain.Event) {
+	chat := turn.Chat()
+	session := turn.Session()
+	l.e.pauseContinuation(ctx, chat.ID, session.ID, continuationPause{
+		Reason: continuationPauseReasonTurnLimit,
+		Limit:  l.e.maxToolLoopSteps(),
+		Body:   fmt.Sprintf("Paused continuation after reaching the model tool-turn limit (%d).", l.e.maxToolLoopSteps()),
+	}, out)
+}
+
+func (l *engineTurnLoop) Step(ctx context.Context, turn *chatpkg.TurnState, steps int, transient []provider.InstructionBlock, out chan<- domain.Event) (chatpkg.TurnStepResult, error) {
+	e := l.e
+	if turn == nil {
+		return chatpkg.TurnStepResult{}, fmt.Errorf("turn state is required")
+	}
+	session := l.session
+	if session.ID == "" {
+		session = turn.Session()
+	}
+	chat := turn.Chat()
+	client, err := e.clientForChat(chat)
+	if err != nil {
+		return chatpkg.TurnStepResult{}, err
+	}
+	e.recordLifecycle(session.ID, "model_turn_started", "", map[string]string{"step": strconv.Itoa(steps + 1)})
+	messages, buildErr := e.buildConversationForTurn(ctx, session, chat, turn, transient)
+	if buildErr != nil {
+		return chatpkg.TurnStepResult{}, buildErr
+	}
+	shouldCheckAutoCompact := steps > 0 || e.enteredAfterCompletedToolTurn(ctx, chat, turn)
+	if l.skipAutoCompactOnce {
+		shouldCheckAutoCompact = false
+		l.skipAutoCompactOnce = false
+	}
+	if shouldCheckAutoCompact {
+		compacted, compactErr := e.autoCompactAtTurnBoundary(ctx, session, chat, turn, client, messages, out)
+		if compactErr != nil {
+			return chatpkg.TurnStepResult{}, compactErr
+		}
+		if compacted {
+			session, buildErr = e.store.GetSession(ctx, session.ID)
+			if buildErr != nil {
+				return chatpkg.TurnStepResult{}, buildErr
+			}
+			l.session = session
+			turn.SetSession(session)
+			l.skipAutoCompactOnce = true
+			return chatpkg.TurnStepResult{
+				Continue:  true,
+				Transient: transientTurnMessages("", "Continue from the compacted session summary. Do not restart, greet, or restate the summary. Continue the pending task from the latest tool result."),
+			}, nil
+		}
+	}
+
+	stream := e.providerStreamingEnabled(chat)
+	req := e.chatRequest(session, chat, messages, stream)
+	assistantItem, itemErr := e.nextAssistantTimelineItemForTurn(ctx, chat.ID, turn)
+	if itemErr != nil {
+		return chatpkg.TurnStepResult{}, itemErr
+	}
+	resp, streamed, completeErr := e.chatWithRetry(ctx, session.ID, chat.ProviderID, client, out, req, assistantItem)
+	if completeErr != nil {
+		return chatpkg.TurnStepResult{}, completeErr
+	}
+
+	text, reasoning, usage := resp.Text, resp.Reasoning, resp.Usage
+	if len(resp.ToolCalls) > 0 {
+		calls, err := e.parseProviderToolCalls(resp.ToolCalls, session.ID)
+		if err != nil {
+			if strings.TrimSpace(text) == "" && strings.TrimSpace(reasoning) == "" {
+				return chatpkg.TurnStepResult{}, err
+			}
+			e.recordLifecycle(session.ID, "provider_tool_call_parse_ignored", err.Error(), map[string]string{
+				"tool_calls": strconv.Itoa(len(resp.ToolCalls)),
+			})
+		} else if len(calls) > 0 {
+			assistantItem, err := e.persistAssistantToolCallsForTurn(ctx, turn, chat.ID, session.ID, assistantItem, calls, strings.TrimSpace(resp.Text), resp.Usage)
+			if err != nil {
+				return chatpkg.TurnStepResult{}, err
+			}
+			out <- domain.Event{Kind: domain.EventKindToolCallDelta, Text: "tool calls persisted", Item: assistantItem}
+			if resp.Usage.HasAnyTokens() {
+				if err := e.saveChatContextUsage(ctx, chat.ID, resp.Usage); err != nil {
+					return chatpkg.TurnStepResult{}, err
+				}
+				out <- domain.Event{Kind: domain.EventKindUsage, Usage: resp.Usage}
+			}
+			if turncontrol.ShouldStop(ctx) {
+				return chatpkg.TurnStepResult{Done: true}, nil
+			}
+			if pause, ok := l.tracker.trackCalls(calls); ok {
+				e.pauseContinuation(ctx, chat.ID, session.ID, pause, out)
+				return chatpkg.TurnStepResult{Done: true}, nil
+			}
+			needsApproval, handledErr := e.handleModelToolCallsForTurn(ctx, session, chat, turn, calls, out)
+			if handledErr != nil {
+				return chatpkg.TurnStepResult{}, handledErr
+			}
+			if needsApproval {
+				return chatpkg.TurnStepResult{WaitingApproval: true}, nil
+			}
+			return chatpkg.TurnStepResult{Continue: true}, nil
+		}
+	}
+
+	call, plain := parseToolCall(text)
+	if call != nil {
+		e.recordLifecycle(session.ID, "tool_call_parsed", call.ContextString(), map[string]string{"tool": string(call.Tool), "tool_call_id": call.ToolCallID})
+		assistantItem, err := e.persistAssistantToolCallsForTurn(ctx, turn, chat.ID, session.ID, assistantItem, []tools.Request{*call}, strings.TrimSpace(plain), domain.Usage{})
+		if err != nil {
+			return chatpkg.TurnStepResult{}, err
+		}
+		out <- domain.Event{Kind: domain.EventKindToolCallDelta, Text: "tool call persisted", Item: assistantItem}
+		if pause, ok := l.tracker.trackCalls([]tools.Request{*call}); ok {
+			e.pauseContinuation(ctx, chat.ID, session.ID, pause, out)
+			return chatpkg.TurnStepResult{Done: true}, nil
+		}
+		if turncontrol.ShouldStop(ctx) {
+			return chatpkg.TurnStepResult{Done: true}, nil
+		}
+
+		evt, handledErr := e.handleModelToolCallForTurn(ctx, session, chat, turn, *call)
+		if handledErr != nil {
+			return chatpkg.TurnStepResult{}, handledErr
+		}
+		out <- evt
+		if evt.Kind == domain.EventKindApprovalAsk {
+			return chatpkg.TurnStepResult{WaitingApproval: true}, nil
+		}
+		return chatpkg.TurnStepResult{Continue: true}, nil
+	}
+	l.tracker.reset()
+
+	if steps > 0 && strings.TrimSpace(text) == "" && len(resp.ToolCalls) == 0 {
+		if strings.TrimSpace(reasoning) != "" {
+			return chatpkg.TurnStepResult{
+				Continue:  true,
+				Transient: transientTurnMessages("", "Continue from the latest tool result. Do not stop at hidden reasoning. Either produce a visible answer for the user or make the next tool call."),
+			}, nil
+		}
+		e.pauseContinuation(ctx, chat.ID, session.ID, continuationPause{
+			Reason: continuationPauseReasonProviderRefusal,
+			Body:   providerRefusalPauseBody(reasoning),
+		}, out)
+		return chatpkg.TurnStepResult{Done: true}, nil
+	}
+	if steps > 0 && e.cfg.UI.AutoContinue && !l.autoContinuedBadStop && len(resp.ToolCalls) == 0 && shouldAutoContinueBadStop(text) {
+		l.autoContinuedBadStop = true
+		e.recordLifecycle(session.ID, "auto_continue_bad_stop", strings.TrimSpace(text), map[string]string{"step": strconv.Itoa(steps + 1)})
+		return chatpkg.TurnStepResult{
+			Continue:  true,
+			Transient: transientTurnMessages("", "Continue by issuing the tool call now. Do not describe intent. If no tool call is needed, provide the final user-facing answer instead."),
+		}, nil
+	}
+	assistant := domain.AssistantMessage{Text: text}
+	if strings.TrimSpace(reasoning) != "" {
+		assistant.Reasoning.Text = reasoning
+	}
+	usage = usage.Normalized()
+	if usage.HasAnyTokens() {
+		assistant.Usage = &usage
+		if err := e.saveChatContextUsage(ctx, chat.ID, usage); err != nil {
+			return chatpkg.TurnStepResult{}, err
+		}
+		if !streamed {
+			out <- domain.Event{Kind: domain.EventKindUsage, Usage: usage}
+		}
+	}
+	if !streamed && strings.TrimSpace(text) != "" {
+		out <- domain.Event{Kind: domain.EventKindMessageDelta, Text: text, Item: assistantItem}
+	}
+	if !streamed && strings.TrimSpace(reasoning) != "" {
+		out <- domain.Event{Kind: domain.EventKindReasoning, Text: reasoning, Item: assistantItem}
+	}
+	now := time.Now().UTC()
+	assistantItem.Content = assistant
+	if assistantItem.CreatedAt.IsZero() {
+		assistantItem.CreatedAt = now
+	}
+	assistantItem.UpdatedAt = now
+	assistantItem.Seal(time.Now().UTC())
+	updated, updateErr := turn.UpsertTimelineItem(ctx, assistantItem)
+	if updateErr != nil {
+		return chatpkg.TurnStepResult{}, updateErr
+	}
+	assistantItem = updated
+	e.recordLifecycle(session.ID, "assistant_message_persisted", strings.TrimSpace(text), map[string]string{"item_id": assistantItem.ID})
+	chatTitle, chatTitleErr := e.maybeUpdateChatTitle(ctx, chat.ID)
+	if chatTitleErr != nil {
+		e.recordLifecycle(session.ID, "chat_title_update_failed", chatTitleErr.Error(), map[string]string{"chat_id": chat.ID})
+	}
+	if strings.TrimSpace(chatTitle) != "" {
+		e.recordLifecycle(session.ID, "chat_title_updated", chatTitle, map[string]string{"chat_id": chat.ID})
+		out <- domain.Event{
+			Kind: domain.EventKindChatTitle,
+			Text: chatTitle,
+			Meta: map[string]string{"chat_id": chat.ID},
+		}
+	}
+	title, titleErr := e.maybeUpdateSessionTitle(ctx, session, chat, client)
+	if titleErr != nil {
+		e.recordLifecycle(session.ID, "session_title_update_failed", titleErr.Error(), nil)
+	}
+	if strings.TrimSpace(title) != "" {
+		e.recordLifecycle(session.ID, "session_title_updated", title, nil)
+		out <- domain.Event{
+			Kind: domain.EventKindSessionTitle,
+			Text: title,
+			Meta: map[string]string{"session_id": session.ID},
+		}
+	}
+	out <- domain.Event{Kind: domain.EventKindMessageDone, Item: assistantItem}
+	return chatpkg.TurnStepResult{Done: true}, nil
+}
+
 func (e *Engine) RefreshAgents(ctx context.Context, sessionID domain.ID) (domain.Session, error) {
 	session, err := e.store.GetSession(ctx, sessionID)
 	if err != nil {
@@ -803,6 +1207,21 @@ func (e *Engine) continueModelTurnFromTimeline(ctx context.Context, session doma
 }
 
 func (e *Engine) continueModelTurnWithTurn(ctx context.Context, session domain.Session, chat domain.Chat, turn *chatpkg.TurnState, client *provider.Client, out chan<- domain.Event, transient []provider.InstructionBlock) error {
+	if turn != nil {
+		loop := &engineTurnLoop{e: e, session: session}
+		for steps := 0; steps < loop.MaxSteps(); steps++ {
+			result, err := loop.Step(ctx, turn, steps, transient, out)
+			if err != nil {
+				return err
+			}
+			if result.WaitingApproval || result.Done || !result.Continue {
+				return nil
+			}
+			transient = result.Transient
+		}
+		loop.PauseLimit(ctx, turn, out)
+		return nil
+	}
 	tracker := toolLoopTracker{}
 	autoContinuedBadStop := false
 	skipAutoCompactOnce := false

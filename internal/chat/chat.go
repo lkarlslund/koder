@@ -11,6 +11,7 @@ import (
 
 	"github.com/lkarlslund/koder/internal/attachment"
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/reference"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/turncontrol"
@@ -184,6 +185,29 @@ type turnApprovalRunner interface {
 	DenyToolTurn(context.Context, *TurnState, string) (<-chan domain.Event, error)
 }
 
+type TurnStepResult struct {
+	Continue        bool
+	WaitingApproval bool
+	Done            bool
+	Transient       []provider.InstructionBlock
+}
+
+type TurnLoop interface {
+	MaxSteps() int
+	Step(context.Context, *TurnState, int, []provider.InstructionBlock, chan<- domain.Event) (TurnStepResult, error)
+	PauseLimit(context.Context, *TurnState, chan<- domain.Event)
+}
+
+type TurnLoopService interface {
+	PreparePromptTurn(context.Context, *TurnState, string, []attachment.Draft, []reference.Draft, string, chan<- domain.Event) ([]provider.InstructionBlock, error)
+	PrepareContinueTurn(context.Context, *TurnState, string, chan<- domain.Event) ([]provider.InstructionBlock, error)
+	NewTurnLoop(*TurnState) TurnLoop
+	ApproveToolForTurn(context.Context, *TurnState, string, *domain.PermissionOverride, chan<- domain.Event) (bool, error)
+	DenyToolForTurn(context.Context, *TurnState, string, chan<- domain.Event) error
+	ResumePendingToolsForTurn(context.Context, *TurnState, chan<- domain.Event) (bool, error)
+	HandleTurnError(context.Context, *TurnState, chan<- domain.Event, error)
+}
+
 // Runner provides the shared execution behavior used by a live Chat.
 type Runner interface {
 	promptRunner
@@ -270,6 +294,14 @@ func (t *TurnState) Session() domain.Session {
 	t.chat.mu.RLock()
 	defer t.chat.mu.RUnlock()
 	return t.chat.session
+}
+
+// SetSession replaces the live session metadata for this turn.
+func (t *TurnState) SetSession(session domain.Session) {
+	if t == nil || t.chat == nil {
+		return
+	}
+	t.chat.SetSession(session)
 }
 
 // Chat returns the live chat metadata for the turn.
@@ -1194,6 +1226,10 @@ func (r *Chat) handleInterrupt() {
 }
 
 func (r *Chat) handleApprove(toolCallID string, rule *domain.PermissionOverride) {
+	if runner, ok := r.engine.(TurnLoopService); ok {
+		r.handleApproveWithTurnLoop(runner, toolCallID, rule)
+		return
+	}
 	runner, ok := r.engine.(approvalRunner)
 	if !ok {
 		err := fmt.Errorf("approval is not supported by runner")
@@ -1236,6 +1272,10 @@ func (r *Chat) handleApprove(toolCallID string, rule *domain.PermissionOverride)
 }
 
 func (r *Chat) handleDeny(toolCallID string) {
+	if runner, ok := r.engine.(TurnLoopService); ok {
+		r.handleDenyWithTurnLoop(runner, toolCallID)
+		return
+	}
 	runner, ok := r.engine.(approvalRunner)
 	if !ok {
 		err := fmt.Errorf("approval is not supported by runner")
@@ -1271,6 +1311,65 @@ func (r *Chat) handleDeny(toolCallID string) {
 	r.handleApprovalEventStream(events, err)
 }
 
+func (r *Chat) handleApproveWithTurnLoop(runner TurnLoopService, toolCallID string, rule *domain.PermissionOverride) {
+	r.mu.Lock()
+	ctx, cancel := context.WithCancel(context.Background())
+	ctx = turncontrol.WithShouldStop(ctx, func() bool {
+		r.mu.RLock()
+		defer r.mu.RUnlock()
+		return r.cancelState == CancelStateCancelling || r.draining
+	})
+	r.cancel = cancel
+	r.active = true
+	r.status = StatusWaitingLLM
+	r.statusText = "Waiting for LLM response"
+	toolCallID = r.resolveApprovalToolCallIDLocked(toolCallID)
+	r.removeApprovalLocked(toolCallID)
+	r.mu.Unlock()
+	r.broadcast(r.snapshotUpdateFlags(nil, true, false, true, false, true))
+
+	out := make(chan domain.Event, 32)
+	go func() {
+		defer close(out)
+		shouldContinue, err := runner.ApproveToolForTurn(ctx, r.turnState(), toolCallID, rule, out)
+		if err != nil {
+			runner.HandleTurnError(ctx, r.turnState(), out, err)
+			return
+		}
+		if shouldContinue {
+			r.continueTurnLoop(ctx, runner, r.turnState(), nil, out)
+		}
+	}()
+	r.forwardTurnEvents(out)
+}
+
+func (r *Chat) handleDenyWithTurnLoop(runner TurnLoopService, toolCallID string) {
+	r.mu.Lock()
+	ctx, cancel := context.WithCancel(context.Background())
+	ctx = turncontrol.WithShouldStop(ctx, func() bool {
+		r.mu.RLock()
+		defer r.mu.RUnlock()
+		return r.cancelState == CancelStateCancelling || r.draining
+	})
+	r.cancel = cancel
+	r.active = true
+	r.status = StatusWaitingLLM
+	r.statusText = "Waiting for LLM response"
+	toolCallID = r.resolveApprovalToolCallIDLocked(toolCallID)
+	r.removeApprovalLocked(toolCallID)
+	r.mu.Unlock()
+	r.broadcast(r.snapshotUpdateFlags(nil, true, false, true, false, true))
+
+	out := make(chan domain.Event, 32)
+	go func() {
+		defer close(out)
+		if err := runner.DenyToolForTurn(ctx, r.turnState(), toolCallID, out); err != nil {
+			runner.HandleTurnError(ctx, r.turnState(), out, err)
+		}
+	}()
+	r.forwardTurnEvents(out)
+}
+
 func (r *Chat) resolveApprovalToolCallIDLocked(raw string) string {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -1302,6 +1401,10 @@ func (r *Chat) removeApprovalLocked(toolCallID string) {
 }
 
 func (r *Chat) handleResumePendingTools() {
+	if runner, ok := r.engine.(TurnLoopService); ok {
+		r.handleResumePendingToolsWithTurnLoop(runner)
+		return
+	}
 	runner, ok := r.engine.(pendingToolRunner)
 	if !ok {
 		return
@@ -1353,6 +1456,42 @@ func (r *Chat) handleResumePendingTools() {
 	r.mu.Unlock()
 	r.broadcast(r.snapshotUpdateFlags(nil, false, false, true, false, false))
 	r.handleApprovalEventStream(events, nil)
+}
+
+func (r *Chat) handleResumePendingToolsWithTurnLoop(runner TurnLoopService) {
+	r.mu.Lock()
+	if r.active || r.status == StatusWaitingApproval || r.draining {
+		r.mu.Unlock()
+		return
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	ctx = turncontrol.WithShouldStop(ctx, func() bool {
+		r.mu.RLock()
+		defer r.mu.RUnlock()
+		return r.cancelState == CancelStateCancelling || r.draining
+	})
+	r.cancel = cancel
+	r.cancelState = CancelStateNone
+	r.running = map[string]struct{}{}
+	r.active = true
+	r.status = StatusRunningTools
+	r.statusText = "Resuming tool calls"
+	r.mu.Unlock()
+	r.broadcast(r.snapshotUpdateFlags(nil, false, false, true, false, false))
+
+	out := make(chan domain.Event, 32)
+	go func() {
+		defer close(out)
+		shouldContinue, err := runner.ResumePendingToolsForTurn(ctx, r.turnState(), out)
+		if err != nil {
+			runner.HandleTurnError(ctx, r.turnState(), out, err)
+			return
+		}
+		if shouldContinue {
+			r.continueTurnLoop(ctx, runner, r.turnState(), nil, out)
+		}
+	}()
+	r.forwardTurnEvents(out)
 }
 
 func (r *Chat) handleApprovalEventStream(events <-chan domain.Event, err error) {
@@ -1699,7 +1838,11 @@ func (r *Chat) shouldAppendOptimisticUserMessage(item domain.QueuedInput) bool {
 	if item.Kind == domain.QueuedInputKindContinue {
 		return false
 	}
-	_, ok := r.engine.(turnPromptRunner)
+	_, ok := r.engine.(TurnLoopService)
+	if ok {
+		return false
+	}
+	_, ok = r.engine.(turnPromptRunner)
 	return !ok
 }
 
@@ -1708,6 +1851,10 @@ func (r *Chat) runItem(ctx context.Context, session domain.Session, chat domain.
 	note := r.queueNotes[item.ID]
 	delete(r.queueNotes, item.ID)
 	r.mu.Unlock()
+	if runner, ok := r.engine.(TurnLoopService); ok {
+		r.runTurnLoop(ctx, runner, r.turnStateForInput(item), item, note)
+		return
+	}
 	var (
 		events <-chan domain.Event
 		err    error
@@ -1740,6 +1887,61 @@ func (r *Chat) runItem(ctx context.Context, session domain.Session, chat domain.
 		r.maybeDispatchNext()
 		return
 	}
+	go func() {
+		for evt := range events {
+			r.inbox <- streamEventCmd{event: evt}
+		}
+		r.inbox <- streamClosedCmd{}
+	}()
+}
+
+func (r *Chat) runTurnLoop(ctx context.Context, runner TurnLoopService, turn *TurnState, item domain.QueuedInput, note string) {
+	out := make(chan domain.Event, 32)
+	go func() {
+		defer close(out)
+		var (
+			transient []provider.InstructionBlock
+			err       error
+		)
+		switch item.Kind {
+		case domain.QueuedInputKindContinue:
+			transient, err = runner.PrepareContinueTurn(ctx, turn, note, out)
+		default:
+			transient, err = runner.PreparePromptTurn(ctx, turn, item.Text, queuedAttachmentDrafts(item.Attachments), queuedReferenceDrafts(item.References), note, out)
+		}
+		if err != nil {
+			runner.HandleTurnError(ctx, turn, out, err)
+			return
+		}
+		r.continueTurnLoop(ctx, runner, turn, transient, out)
+	}()
+	r.forwardTurnEvents(out)
+}
+
+func (r *Chat) continueTurnLoop(ctx context.Context, runner TurnLoopService, turn *TurnState, transient []provider.InstructionBlock, out chan<- domain.Event) {
+	loop := runner.NewTurnLoop(turn)
+	if loop == nil {
+		runner.HandleTurnError(ctx, turn, out, fmt.Errorf("turn loop is not supported by runner"))
+		return
+	}
+	for step := 0; step < loop.MaxSteps(); step++ {
+		result, err := loop.Step(ctx, turn, step, transient, out)
+		if err != nil {
+			runner.HandleTurnError(ctx, turn, out, err)
+			return
+		}
+		if result.WaitingApproval || result.Done {
+			return
+		}
+		if !result.Continue {
+			return
+		}
+		transient = result.Transient
+	}
+	loop.PauseLimit(ctx, turn, out)
+}
+
+func (r *Chat) forwardTurnEvents(events <-chan domain.Event) {
 	go func() {
 		for evt := range events {
 			r.inbox <- streamEventCmd{event: evt}
