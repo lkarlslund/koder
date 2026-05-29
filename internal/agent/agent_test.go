@@ -60,6 +60,10 @@ func defaultChatForSession(t *testing.T, st *store.Store, sessionID domain.ID) d
 }
 
 func runLivePrompt(t *testing.T, engine *Engine, session domain.Session, chatRecord domain.Chat, text string) []domain.Event {
+	return runLivePromptObserve(t, engine, session, chatRecord, text, nil)
+}
+
+func runLivePromptObserve(t *testing.T, engine *Engine, session domain.Session, chatRecord domain.Chat, text string, observe func(domain.Event)) []domain.Event {
 	t.Helper()
 	rt, err := engine.Chat(context.Background(), session, chatRecord)
 	if err != nil {
@@ -70,21 +74,32 @@ func runLivePrompt(t *testing.T, engine *Engine, session domain.Session, chatRec
 	rt.Enqueue(chatpkg.QueueItem{Kind: chatpkg.QueueKindSteer, Text: text})
 	deadline := time.After(5 * time.Second)
 	var events []domain.Event
+	terminal := false
 	for {
 		select {
 		case update := <-updates:
-			if update.Event == nil {
-				continue
+			if update.Event != nil {
+				events = append(events, *update.Event)
+				if observe != nil {
+					observe(*update.Event)
+				}
+				switch update.Event.Kind {
+				case domain.EventKindMessageDone, domain.EventKindApprovalAsk, domain.EventKindError:
+					terminal = true
+				}
 			}
-			events = append(events, *update.Event)
-			switch update.Event.Kind {
-			case domain.EventKindMessageDone, domain.EventKindApprovalAsk, domain.EventKindError:
+			if terminal && (!update.Active || update.Status == chatpkg.StatusWaitingApproval || update.Status == chatpkg.StatusErrored) {
 				return events
 			}
 		case <-deadline:
 			t.Fatalf("timed out waiting for live prompt; snapshot=%#v", rt.Snapshot())
 		}
 	}
+}
+
+func runLivePromptDefault(t *testing.T, engine *Engine, st *store.Store, session domain.Session, text string) []domain.Event {
+	t.Helper()
+	return runLivePrompt(t, engine, session, defaultChatForSession(t, st, session.ID), text)
 }
 
 func appendUserTimelineItem(t *testing.T, st *store.Store, chatID domain.ID, text string) domain.TimelineItem {
@@ -2368,17 +2383,15 @@ func TestRunPromptAllowedToolTransitionsPendingToRunning(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	events, err := engine.RunPrompt(context.Background(), session, "run slow command")
-	if err != nil {
-		t.Fatal(err)
-	}
 	chat := defaultChatForSession(t, st, session.ID)
 	var sawRunning bool
-	var sawDone bool
-	for evt := range events {
+	events := runLivePromptObserve(t, engine, session, chat, "run slow command", func(evt domain.Event) {
 		if evt.Kind == domain.EventKindToolStart {
 			sawRunning = waitForToolStatus(t, st, chat.ID, "call_1", domain.ToolStatusRunning)
 		}
+	})
+	var sawDone bool
+	for _, evt := range events {
 		if evt.Kind == domain.EventKindToolResult && strings.Contains(evt.Text, "hi") {
 			sawDone = true
 		}
@@ -2428,12 +2441,9 @@ func TestRunPromptDeniedToolTransitionsPendingToDenied(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	events, err := engine.RunPrompt(context.Background(), session, "run command")
-	if err != nil {
-		t.Fatal(err)
-	}
+	events := runLivePromptDefault(t, engine, st, session, "run command")
 	var sawDenied bool
-	for evt := range events {
+	for _, evt := range events {
 		if evt.Kind == domain.EventKindToolResult && strings.Contains(evt.Text, "denied by policy") {
 			sawDenied = true
 		}
@@ -2634,13 +2644,10 @@ func TestRunPromptStreamsAssistantResponseWhenEnabled(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	events, err := engine.RunPrompt(context.Background(), session, "say hello")
-	if err != nil {
-		t.Fatal(err)
-	}
+	events := runLivePromptDefault(t, engine, st, session, "say hello")
 	var deltas []string
 	var sawDone bool
-	for evt := range events {
+	for _, evt := range events {
 		if evt.Kind == domain.EventKindMessageDelta {
 			deltas = append(deltas, evt.Text)
 		}
@@ -2704,12 +2711,9 @@ func TestRunPromptIgnoresMalformedProviderToolCallsWhenTextIsPresent(t *testing.
 		t.Fatal(err)
 	}
 
-	events, err := engine.RunPrompt(context.Background(), session, "say hello")
-	if err != nil {
-		t.Fatal(err)
-	}
+	events := runLivePromptDefault(t, engine, st, session, "say hello")
 	var sawDone, sawError bool
-	for evt := range events {
+	for _, evt := range events {
 		if evt.Kind == domain.EventKindMessageDone {
 			sawDone = true
 		}
@@ -2776,12 +2780,9 @@ func TestRunPromptMessageDoneCarriesPersistedAssistantRecord(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	events, err := engine.RunPrompt(context.Background(), session, "say hello")
-	if err != nil {
-		t.Fatal(err)
-	}
+	events := runLivePromptDefault(t, engine, st, session, "say hello")
 	var done domain.Event
-	for evt := range events {
+	for _, evt := range events {
 		if evt.Kind == domain.EventKindMessageDone {
 			done = evt
 		}
@@ -2840,12 +2841,9 @@ func TestRunPromptApprovalAskMarksToolAwaitingApproval(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	events, err := engine.RunPrompt(context.Background(), session, "run pwd")
-	if err != nil {
-		t.Fatal(err)
-	}
+	events := runLivePromptDefault(t, engine, st, session, "run pwd")
 	var approval domain.Event
-	for evt := range events {
+	for _, evt := range events {
 		if evt.Kind == domain.EventKindApprovalAsk {
 			approval = evt
 			break
@@ -2931,12 +2929,9 @@ func TestRunPromptStreamsToolCallArgumentsAcrossChunks(t *testing.T) {
 	}
 	session.ProjectRoot = workdir
 
-	events, err := engine.RunPrompt(context.Background(), session, "read the note")
-	if err != nil {
-		t.Fatal(err)
-	}
+	events := runLivePromptDefault(t, engine, st, session, "read the note")
 	var sawError bool
-	for evt := range events {
+	for _, evt := range events {
 		if evt.Kind == domain.EventKindError {
 			sawError = true
 		}
@@ -2988,13 +2983,10 @@ func TestRunPromptPersistsAssistantErrorOnBackendFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	events, err := engine.RunPrompt(context.Background(), session, "hello")
-	if err != nil {
-		t.Fatal(err)
-	}
+	events := runLivePromptDefault(t, engine, st, session, "hello")
 
 	var sawError bool
-	for evt := range events {
+	for _, evt := range events {
 		if evt.Kind == domain.EventKindError {
 			sawError = true
 		}
@@ -3230,12 +3222,9 @@ func TestApproveContinuesAfterOutsideWorkspaceRead(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	events, err := engine.RunPrompt(context.Background(), session, "continue")
-	if err != nil {
-		t.Fatal(err)
-	}
+	events := runLivePromptDefault(t, engine, st, session, "continue")
 	var approvalID domain.ID
-	for evt := range events {
+	for _, evt := range events {
 		if evt.Kind == domain.EventKindApprovalAsk {
 			id, convErr := parseApprovalID(evt.Meta["approval_id"])
 			if convErr != nil {
@@ -3333,12 +3322,9 @@ func TestApproveAutoCompactContinuesFromCompactedHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	events, err := engine.RunPrompt(context.Background(), session, "build it")
-	if err != nil {
-		t.Fatal(err)
-	}
+	events := runLivePromptDefault(t, engine, st, session, "build it")
 	var approvalID domain.ID
-	for evt := range events {
+	for _, evt := range events {
 		if evt.Kind == domain.EventKindApprovalAsk {
 			approvalID, err = parseApprovalID(evt.Meta["approval_id"])
 			if err != nil {
@@ -3757,12 +3743,9 @@ func TestApproveContinuesAfterApprovedToolFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	events, err := engine.RunPrompt(context.Background(), session, "continue")
-	if err != nil {
-		t.Fatal(err)
-	}
+	events := runLivePromptDefault(t, engine, st, session, "continue")
 	var approvalID domain.ID
-	for evt := range events {
+	for _, evt := range events {
 		if evt.Kind == domain.EventKindApprovalAsk {
 			id, convErr := parseApprovalID(evt.Meta["approval_id"])
 			if convErr != nil {
@@ -3865,13 +3848,10 @@ func TestContinueModelTurnAutoCompactsAfterToolResultChurn(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	events, err := engine.RunPrompt(context.Background(), session, "inspect the file and continue")
-	if err != nil {
-		t.Fatal(err)
-	}
+	events := runLivePromptDefault(t, engine, st, session, "inspect the file and continue")
 	var sawFinalAnswer bool
 	var seen []domain.EventKind
-	for evt := range events {
+	for _, evt := range events {
 		seen = append(seen, evt.Kind)
 		if evt.Kind == domain.EventKindMessageDelta && evt.Text == "done" {
 			sawFinalAnswer = true
@@ -4745,13 +4725,10 @@ func TestRunPromptRetriesRateLimitAndCompletes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	events, err := engine.RunPrompt(context.Background(), session, "hello")
-	if err != nil {
-		t.Fatal(err)
-	}
+	events := runLivePromptDefault(t, engine, st, session, "hello")
 
 	var sawRetryStatus bool
-	for evt := range events {
+	for _, evt := range events {
 		if evt.Kind == domain.EventKindStatus && strings.Contains(evt.Text, "rate limit hit") {
 			sawRetryStatus = true
 		}
@@ -4827,13 +4804,10 @@ func TestRunPromptRateLimitStatusCountsDown(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	events, err := engine.RunPrompt(context.Background(), session, "hello")
-	if err != nil {
-		t.Fatal(err)
-	}
+	events := runLivePromptDefault(t, engine, st, session, "hello")
 
 	var statuses []string
-	for evt := range events {
+	for _, evt := range events {
 		if evt.Kind == domain.EventKindStatus && strings.Contains(evt.Text, "rate limit hit") {
 			statuses = append(statuses, evt.Text)
 		}
@@ -5121,13 +5095,10 @@ func TestRunPromptIgnoresSessionTitleRefreshFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	events, err := engine.RunPrompt(context.Background(), session, "hello")
-	if err != nil {
-		t.Fatal(err)
-	}
+	events := runLivePromptDefault(t, engine, st, session, "hello")
 
 	var sawDone bool
-	for evt := range events {
+	for _, evt := range events {
 		if evt.Kind == domain.EventKindError {
 			t.Fatalf("expected title refresh timeout to stay internal, got %#v", evt)
 		}
@@ -5189,12 +5160,9 @@ func TestRunPromptUpdatesGeneratedChatTitle(t *testing.T) {
 		t.Fatalf("expected generated main title, got %q", chat.Title)
 	}
 
-	events, err := engine.RunPrompt(context.Background(), session, "compare go code to c reference and identify gaps")
-	if err != nil {
-		t.Fatal(err)
-	}
+	events := runLivePromptDefault(t, engine, st, session, "compare go code to c reference and identify gaps")
 	var chatTitle string
-	for evt := range events {
+	for _, evt := range events {
 		if evt.Kind == domain.EventKindChatTitle {
 			chatTitle = evt.Text
 		}
@@ -5249,14 +5217,11 @@ func TestRunPromptPausesRepeatedIdenticalToolCalls(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	events, err := engine.RunPrompt(context.Background(), session, "loop")
-	if err != nil {
-		t.Fatal(err)
-	}
+	events := runLivePromptDefault(t, engine, st, session, "loop")
 
 	var sawPauseStatus bool
 	var sawPauseStatusItem bool
-	for evt := range events {
+	for _, evt := range events {
 		if evt.Kind == domain.EventKindStatus && strings.Contains(evt.Text, "identical read calls") {
 			sawPauseStatus = true
 			if notice, ok := evt.Item.Content.(domain.Notice); ok && notice.Kind == "loop_pause" {
@@ -5342,11 +5307,8 @@ func TestRunPromptPausesOnProviderRefusalAfterToolResult(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	events, err := engine.RunPrompt(context.Background(), session, "loop")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for evt := range events {
+	events := runLivePromptDefault(t, engine, st, session, "loop")
+	for _, evt := range events {
 		if evt.Kind == domain.EventKindError {
 			t.Fatalf("expected provider-refusal pause instead of error, got %#v", evt)
 		}
@@ -5403,11 +5365,8 @@ func TestRunPromptContinuesAfterReasoningOnlyTurnFollowingToolResult(t *testing.
 		t.Fatal(err)
 	}
 
-	events, err := engine.RunPrompt(context.Background(), session, "loop")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for evt := range events {
+	events := runLivePromptDefault(t, engine, st, session, "loop")
+	for _, evt := range events {
 		if evt.Kind == domain.EventKindError {
 			t.Fatalf("expected continuation after reasoning-only turn, got %#v", evt)
 		}
@@ -5489,11 +5448,8 @@ func TestRunPromptAutoContinuesAfterIntentOnlyStopFollowingToolResult(t *testing
 		t.Fatal(err)
 	}
 
-	events, err := engine.RunPrompt(context.Background(), session, "loop")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for evt := range events {
+	events := runLivePromptDefault(t, engine, st, session, "loop")
+	for _, evt := range events {
 		if evt.Kind == domain.EventKindError {
 			t.Fatalf("expected continuation after intent-only stop, got %#v", evt)
 		}
@@ -5574,11 +5530,8 @@ func TestRunPromptDoesNotAutoContinueIntentOnlyStopWhenDisabled(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	events, err := engine.RunPrompt(context.Background(), session, "loop")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for evt := range events {
+	events := runLivePromptDefault(t, engine, st, session, "loop")
+	for _, evt := range events {
 		if evt.Kind == domain.EventKindError {
 			t.Fatalf("expected disabled auto-continue to persist model text, got %#v", evt)
 		}
@@ -5648,11 +5601,8 @@ func TestRunPromptPausesOnTurnLimit(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	events, err := engine.RunPrompt(context.Background(), session, "loop")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for evt := range events {
+	events := runLivePromptDefault(t, engine, st, session, "loop")
+	for _, evt := range events {
 		if evt.Kind == domain.EventKindError {
 			t.Fatalf("expected turn-limit pause instead of error, got %#v", evt)
 		}
@@ -5707,14 +5657,11 @@ func TestRunPromptPersistsEventNoticeWhenRetriesExhausted(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	events, err := engine.RunPrompt(context.Background(), session, "hello")
-	if err != nil {
-		t.Fatal(err)
-	}
+	events := runLivePromptDefault(t, engine, st, session, "hello")
 
 	var sawError bool
 	var errorItem domain.TimelineItem
-	for evt := range events {
+	for _, evt := range events {
 		if evt.Kind == domain.EventKindError {
 			sawError = true
 			errorItem = evt.Item
