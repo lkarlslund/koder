@@ -390,9 +390,6 @@ func (e *Engine) pendingExecutableToolCalls(ctx context.Context, chatID domain.I
 	}
 	for idx := len(items) - 1; idx >= 0; idx-- {
 		item := items[idx]
-		if _, ok := item.Content.(domain.UserMessage); ok {
-			return nil, nil
-		}
 		assistant, ok := item.Content.(domain.AssistantMessage)
 		if !ok {
 			continue
@@ -891,24 +888,7 @@ func (e *Engine) continueModelTurnWithTurn(ctx context.Context, session domain.S
 	for steps := 0; steps < e.maxToolLoopSteps(); steps++ {
 		e.recordLifecycle(session.ID, "model_turn_started", "", map[string]string{"step": strconv.Itoa(steps + 1)})
 		if turn != nil {
-			item, applied, err := turn.ApplyNextSteer(ctx)
-			if err != nil {
-				return err
-			}
-			if applied {
-				out <- domain.Event{
-					Kind: domain.EventKindStatus,
-					Text: "Applying queued steer...",
-					Item: item,
-					Meta: map[string]string{domain.EventMetaRefresh: domain.EventRefreshQueue},
-				}
-				transient = nil
-			}
 			chat = turn.Chat()
-		} else if applied, err := e.applyQueuedSteer(ctx, session, &chat, out); err != nil {
-			return err
-		} else if applied {
-			transient = nil
 		}
 		messages, buildErr := e.buildConversationForTurn(ctx, session, chat, turn, transient)
 		if buildErr != nil {
@@ -2604,11 +2584,26 @@ func (e *Engine) buildConversationForTurn(ctx context.Context, session domain.Se
 	if turn == nil {
 		return e.buildConversationPreview(ctx, session, chat.ID, "", nil, nil, transient)
 	}
-	envelope, err := e.buildPromptEnvelopeForTimeline(session, chat, turn.Timeline(), "", nil, nil, transient)
+	timeline := filterQueuedTimelineItems(turn.Timeline(), turn.QueuedTimelineIDs())
+	envelope, err := e.buildPromptEnvelopeForTimeline(session, chat, timeline, "", nil, nil, transient)
 	if err != nil {
 		return nil, err
 	}
 	return provider.SerializePromptEnvelope(envelope), nil
+}
+
+func filterQueuedTimelineItems(timeline []domain.TimelineItem, queued map[domain.ID]struct{}) []domain.TimelineItem {
+	if len(timeline) == 0 || len(queued) == 0 {
+		return timeline
+	}
+	out := make([]domain.TimelineItem, 0, len(timeline))
+	for _, item := range timeline {
+		if _, ok := queued[item.ID]; ok {
+			continue
+		}
+		out = append(out, item)
+	}
+	return out
 }
 
 func (e *Engine) EstimateContextTokensForTimeline(session domain.Session, chat domain.Chat, timeline []domain.TimelineItem) (int, error) {
@@ -2643,7 +2638,24 @@ func (e *Engine) buildPromptEnvelopePreview(ctx context.Context, session domain.
 			return provider.PromptEnvelope{}, err
 		}
 	}
+	timeline = filterQueuedTimelineItems(timeline, queuedTimelineIDs(chat.QueuedInputs))
 	return e.buildPromptEnvelopeForTimeline(session, chat, timeline, prompt, drafts, refs, transient)
+}
+
+func queuedTimelineIDs(items []domain.QueuedInput) map[domain.ID]struct{} {
+	if len(items) == 0 {
+		return nil
+	}
+	out := map[domain.ID]struct{}{}
+	for _, item := range items {
+		if item.TimelineID != "" {
+			out[item.TimelineID] = struct{}{}
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func (e *Engine) buildPromptEnvelopeForTimeline(session domain.Session, chat domain.Chat, timeline []domain.TimelineItem, prompt string, drafts []attachment.Draft, refs []reference.Draft, transient []provider.InstructionBlock) (provider.PromptEnvelope, error) {

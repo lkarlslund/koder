@@ -295,6 +295,25 @@ func (t *TurnState) Timeline() []domain.TimelineItem {
 	return t.chat.state.SnapshotTimeline()
 }
 
+// QueuedTimelineIDs returns timeline items that already render queued inputs.
+func (t *TurnState) QueuedTimelineIDs() map[domain.ID]struct{} {
+	if t == nil || t.chat == nil {
+		return nil
+	}
+	t.chat.mu.RLock()
+	defer t.chat.mu.RUnlock()
+	out := map[domain.ID]struct{}{}
+	for _, item := range t.chat.queue {
+		if item.TimelineID != "" {
+			out[item.TimelineID] = struct{}{}
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
 // AppendUserMessage records a user message in the live transcript.
 func (t *TurnState) AppendUserMessage(ctx context.Context, user domain.UserMessage) (domain.TimelineItem, error) {
 	if t == nil || t.chat == nil {

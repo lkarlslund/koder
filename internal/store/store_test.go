@@ -139,6 +139,52 @@ func TestConcurrentAttachToolResultsPreservesAllChildren(t *testing.T) {
 	}
 }
 
+func TestAttachToolResultFindsOwnerBeforeLaterUserMessage(t *testing.T) {
+	for _, backend := range []string{BackendPebble, BackendJSONFS} {
+		t.Run(backend, func(t *testing.T) {
+			st := openTestStore(t, backend)
+			session, err := st.CreateSession(context.Background(), "test", "provider", "model", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			chat, err := st.DefaultChat(context.Background(), session.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			assistantItem, err := st.AppendAssistantToolCalls(context.Background(), chat.ID, []domain.ToolCall{{
+				ToolCallID: "call_1",
+				Tool:       domain.ToolKindWrite,
+				Args:       map[string]string{"path": "research/README.md"},
+				Status:     domain.ToolStatusPending,
+			}}, "Now update the README.", domain.Usage{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			appendTimelineForTest(t, st, chat.ID, domain.UserMessage{Text: "we can just convert the pdf to text", Source: domain.UserMessageSourceUser})
+
+			updated, err := st.AttachToolResult(context.Background(), chat.ID, "call_1", domain.ToolResult{
+				Text:   "edited",
+				Status: domain.ToolResultStatusOK,
+				Data:   domain.WriteStoredResult{Path: "research/README.md", Action: "write", Summary: "edited"},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if updated.ID != assistantItem.ID {
+				t.Fatalf("updated item = %s, want %s", updated.ID, assistantItem.ID)
+			}
+			assistant, ok := updated.Content.(domain.AssistantMessage)
+			if !ok {
+				t.Fatalf("expected assistant item, got %#v", updated.Content)
+			}
+			call := assistant.ToolByID("call_1")
+			if call == nil || call.Status != domain.ToolStatusDone || call.Result == nil || call.Result.Text != "edited" {
+				t.Fatalf("tool call not updated: %#v", call)
+			}
+		})
+	}
+}
+
 func TestGenericCollectionRoundTripAndIndex(t *testing.T) {
 	type note struct {
 		ID     domain.ID

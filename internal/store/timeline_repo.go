@@ -174,10 +174,6 @@ func (s *Store) updateToolCall(ctx context.Context, chatID domain.ID, toolCallID
 	}
 	for idx := len(items) - 1; idx >= 0; idx-- {
 		item := items[idx]
-		switch item.Content.(type) {
-		case domain.UserMessage:
-			return domain.TimelineItem{}, fmt.Errorf("tool call %q has no owning assistant item", toolCallID)
-		}
 		assistant, ok := item.Content.(domain.AssistantMessage)
 		if !ok {
 			continue

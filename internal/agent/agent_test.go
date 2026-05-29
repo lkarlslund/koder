@@ -2350,6 +2350,86 @@ func TestResumePendingToolCallsExecutesAndContinues(t *testing.T) {
 	}
 }
 
+func TestResumePendingToolCallsIgnoresLaterQueuedUserMessage(t *testing.T) {
+	t.Parallel()
+
+	var requests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		requests++
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read body: %v", err)
+		}
+		if requests == 1 && strings.Contains(string(body), "next user turn") {
+			t.Fatalf("pending tool continuation should not include queued user message: %s", body)
+		}
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"done"}}],"usage":{"total_tokens":1}}`))
+	}))
+	defer server.Close()
+
+	cfg := testConfig(t)
+	cfg.Providers = map[string]config.Provider{"test": {BaseURL: server.URL + "/v1", Timeout: time.Second}}
+	cfg.DefaultProvider = "test"
+	cfg.DefaultModel = "test-model"
+	cfg.Permissions.Profile = permissionprofile.ProfileFullAccess
+
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	workdir := t.TempDir()
+	engine := New(cfg, st, tools.NewRegistry(workdir), nil)
+	session, err := st.CreateSession(context.Background(), "test", "test", "test-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetSessionPermissionProfile(context.Background(), session.ID, permissionprofile.ProfileFullAccess); err != nil {
+		t.Fatal(err)
+	}
+	chat := defaultChatForSession(t, st, session.ID)
+	req := tools.Request{
+		Tool:       domain.ToolKindBash,
+		ToolCallID: "call_1",
+		Args:       map[string]string{"command": "printf hi"},
+	}
+	appendAssistantToolTimelineItem(t, st, chat.ID, req, "")
+	queuedUser := appendUserTimelineItem(t, st, chat.ID, "next user turn")
+	chat.QueuedInputs = []domain.QueuedInput{{
+		ID:         domain.NewID(),
+		Kind:       domain.QueuedInputKindSteer,
+		Text:       "next user turn",
+		Source:     domain.UserMessageSourceUser,
+		TimelineID: queuedUser.ID,
+		CreatedAt:  time.Now().UTC(),
+	}}
+	if err := st.SetChatQueuedInputs(context.Background(), chat.ID, chat.QueuedInputs); err != nil {
+		t.Fatal(err)
+	}
+
+	events, err := engine.ResumePendingToolCallsInChat(context.Background(), session, chat)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if events == nil {
+		t.Fatal("expected resume events")
+	}
+	var sawToolResult bool
+	for evt := range events {
+		if evt.Kind == domain.EventKindToolResult && strings.Contains(evt.Text, "hi") {
+			sawToolResult = true
+		}
+	}
+	if !sawToolResult {
+		t.Fatal("expected resumed tool result")
+	}
+}
+
 func TestRunPromptAllowedToolTransitionsPendingToRunning(t *testing.T) {
 	t.Parallel()
 
