@@ -249,36 +249,43 @@ func TestControllerForwardRuntimeRefreshesInactiveChatMetadata(t *testing.T) {
 	}
 }
 
-func TestControllerRefreshChatStatusesDiscoversNewStoreChats(t *testing.T) {
+func TestControllerStartChatAddsCreatedChatToSession(t *testing.T) {
 	ctrl, st := newTestController(t)
 	state := ctrl.State()
 	if state.Session.ID == "" || state.ActiveChatID == "" {
 		t.Fatal("expected active session and chat")
 	}
-	parentID := state.ActiveChatID
-	created, err := st.CreateChat(context.Background(), state.Session.ID, "Worker", chatrole.Execution, &parentID)
-	if err != nil {
-		t.Fatalf("create worker chat: %v", err)
+	if _, err := st.SetMilestonePlan(context.Background(), state.Session.ID, "Ship it", []store.Milestone{
+		{Ref: "alpha", Title: "Alpha", Status: domain.MilestoneStatusReady, Position: 0},
+	}); err != nil {
+		t.Fatalf("set milestone plan: %v", err)
 	}
-	created.ActiveMilestoneRef = "alpha"
-	created.AssignedTodoBucketRef = "alpha"
-	if err := st.UpdateChat(context.Background(), created); err != nil {
-		t.Fatalf("update worker chat: %v", err)
+	todos, err := st.AddTodoItems(context.Background(), state.Session.ID, "alpha", []string{"Implement alpha"})
+	if err != nil {
+		t.Fatalf("add todo: %v", err)
 	}
 
-	if !ctrl.refreshChatStatuses(context.Background(), state.Session.ID) {
-		t.Fatal("expected refreshed chat list to report a change")
+	status, err := ctrl.StartChat(context.Background(), state.Session.ID, state.ActiveChatID, tools.ChatStartRequest{
+		Profile:   chatrole.Execution,
+		Objective: "Implement only the assigned todo",
+		TodoRef:   todos[0].ID,
+	})
+	if err != nil {
+		t.Fatalf("start chat: %v", err)
 	}
 	next := ctrl.State()
 	found := false
 	for _, item := range next.Chats {
-		if item.ID == created.ID && item.Title == "Worker" && item.ActiveMilestoneRef == "alpha" {
+		if item.ID == status.Chat.ID && item.ActiveMilestoneRef == "alpha" && item.AssignedTodoRef == todos[0].ID {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Fatalf("expected worker chat in sidebar state, got %#v", next.Chats)
+		t.Fatalf("expected started chat in sidebar state, got %#v", next.Chats)
+	}
+	if _, ok := next.Snapshots[status.Chat.ID]; !ok {
+		t.Fatalf("expected started chat snapshot, got %#v", next.Snapshots)
 	}
 }
 

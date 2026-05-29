@@ -149,8 +149,7 @@ func runKoder(ctx context.Context, mode uicore.StartupMode, workdir string, star
 	registry := tools.NewRegistry("")
 	registry.SetExecControl(execruntime.NewManager())
 	engine := agent.New(cfg, st, registry, recorder, mcpManager)
-	registry.SetChatControl(engine)
-	return runWeb(ctx, cfg, st, engine, mode, recorder, workdir, startupOpts)
+	return runWeb(ctx, cfg, st, engine, registry, mode, recorder, workdir, startupOpts)
 }
 
 func syncManagedUserAssets(ctx context.Context) error {
@@ -166,8 +165,11 @@ func syncManagedUserAssets(ctx context.Context) error {
 	return err
 }
 
-func runWeb(ctx context.Context, cfg config.Config, st *store.Store, engine *agent.Engine, mode uicore.StartupMode, recorder *debugsrv.Recorder, workdir string, startupOpts startupConfig) error {
+func runWeb(ctx context.Context, cfg config.Config, st *store.Store, engine *agent.Engine, registry *tools.Registry, mode uicore.StartupMode, recorder *debugsrv.Recorder, workdir string, startupOpts startupConfig) error {
 	controller := uicore.New(cfg, st, engine)
+	if registry != nil {
+		registry.SetChatControl(controller)
+	}
 	if err := controller.Start(ctx, mode, workdir); err != nil {
 		return err
 	}

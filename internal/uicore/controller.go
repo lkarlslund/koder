@@ -683,6 +683,151 @@ func (c *Controller) NewChat(ctx context.Context, title string) error {
 	return c.loadSession(ctx, sessionID, chatRecord.ID)
 }
 
+// ListChats returns the controller's live chat list for the active session.
+func (c *Controller) ListChats(ctx context.Context, sessionID domain.ID) ([]tools.ChatStatus, error) {
+	c.mu.RLock()
+	if sessionID == "" {
+		sessionID = c.session.ID
+	}
+	if sessionID != c.session.ID {
+		c.mu.RUnlock()
+		return nil, fmt.Errorf("session %s is not active", sessionID)
+	}
+	chats := slices.Clone(c.chats)
+	c.mu.RUnlock()
+	out := make([]tools.ChatStatus, 0, len(chats))
+	for _, item := range chats {
+		status, err := c.PollChat(ctx, sessionID, item.ID)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, status)
+	}
+	return out, nil
+}
+
+// StartChat creates a child chat and adds it to the live session before broadcasting.
+func (c *Controller) StartChat(ctx context.Context, sessionID, parentChatID domain.ID, req tools.ChatStartRequest) (tools.ChatStatus, error) {
+	if c.agent == nil {
+		return tools.ChatStatus{}, fmt.Errorf("no chat agent")
+	}
+	status, err := c.agent.StartChat(ctx, sessionID, parentChatID, req)
+	if err != nil {
+		return tools.ChatStatus{}, err
+	}
+	if err := c.addStartedChat(ctx, status); err != nil {
+		return tools.ChatStatus{}, err
+	}
+	return status, nil
+}
+
+// PollChat returns the current status for a live chat.
+func (c *Controller) PollChat(ctx context.Context, sessionID, chatID domain.ID) (tools.ChatStatus, error) {
+	if c.agent == nil {
+		return tools.ChatStatus{}, fmt.Errorf("no chat agent")
+	}
+	return c.agent.PollChat(ctx, sessionID, chatID)
+}
+
+func (c *Controller) addStartedChat(ctx context.Context, status tools.ChatStatus) error {
+	chatRecord := status.Chat
+	if chatRecord.ID == "" {
+		return fmt.Errorf("started chat has no id")
+	}
+	c.mu.RLock()
+	session := c.session
+	_, exists := c.runtimes[chatRecord.ID]
+	c.mu.RUnlock()
+	if session.ID == "" || chatRecord.SessionID != session.ID {
+		return nil
+	}
+	rt, err := c.agent.Chat(ctx, session, chatRecord)
+	if err != nil {
+		return err
+	}
+	var updates <-chan chat.Update
+	var unsub func()
+	if !exists {
+		updates, unsub = rt.Subscribe()
+	} else {
+		rt.SetSession(session)
+		rt.SetChat(chatRecord)
+	}
+	snapshot := rt.Snapshot()
+	if snapshot.Chat.ID == "" {
+		snapshot.Chat = chatRecord
+	}
+	snapshot = c.snapshotWithExecProcessesForSession(session, snapshot)
+	milestone, todos, todosByRef := c.planningState(ctx, session.ID)
+
+	c.mu.Lock()
+	if c.session.ID != session.ID {
+		c.mu.Unlock()
+		if unsub != nil {
+			unsub()
+		}
+		return nil
+	}
+	upsertChat(&c.chats, chatRecord)
+	if c.runtimes == nil {
+		c.runtimes = map[domain.ID]*chat.Chat{}
+	}
+	if c.unsubs == nil {
+		c.unsubs = map[domain.ID]func(){}
+	}
+	if c.snapshots == nil {
+		c.snapshots = map[domain.ID]chat.Snapshot{}
+	}
+	if c.statuses == nil {
+		c.statuses = map[domain.ID]ChatSidebarStatus{}
+	}
+	c.runtimes[chatRecord.ID] = rt
+	if unsub != nil {
+		c.unsubs[chatRecord.ID] = unsub
+	}
+	c.snapshots[chatRecord.ID] = snapshot
+	c.statuses[chatRecord.ID] = sidebarStatusFromToolStatus(status)
+	c.milestone = milestone
+	c.todos = todos
+	c.todosByRef = todosByRef
+	execSubscriptions := c.ensureExecSubscriptionsLocked([]domain.Chat{chatRecord})
+	c.mu.Unlock()
+
+	if updates != nil {
+		go c.forwardRuntime(chatRecord.ID, updates)
+	}
+	for _, sub := range execSubscriptions {
+		go c.forwardExecRuntime(sub.chatID, sub.events)
+	}
+	c.broadcast("snapshot", c.State())
+	return nil
+}
+
+func (c *Controller) snapshotWithExecProcessesForSession(session domain.Session, snapshot chat.Snapshot) chat.Snapshot {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if snapshot.Session.ID == "" {
+		snapshot.Session = session
+	}
+	return c.snapshotWithExecProcessesLocked(snapshot)
+}
+
+func upsertChat(chats *[]domain.Chat, chatRecord domain.Chat) {
+	for idx := range *chats {
+		if (*chats)[idx].ID == chatRecord.ID {
+			(*chats)[idx] = chatRecord
+			return
+		}
+	}
+	*chats = append(*chats, chatRecord)
+	slices.SortFunc(*chats, func(a, b domain.Chat) int {
+		if a.Position != b.Position {
+			return a.Position - b.Position
+		}
+		return strings.Compare(string(a.ID), string(b.ID))
+	})
+}
+
 // DeleteChat deletes an idle chat and switches away first when it is active.
 func (c *Controller) DeleteChat(ctx context.Context, chatID domain.ID) error {
 	if chatID == "" {
