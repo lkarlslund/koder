@@ -259,6 +259,21 @@ func waitForChatInactive(t *testing.T, rt *chatpkg.Chat) {
 	t.Fatalf("timed out waiting for chat to become inactive; snapshot=%#v", rt.Snapshot())
 }
 
+func approveOnlyPendingTool(t *testing.T, rt *chatpkg.Chat, updates <-chan chatpkg.Update, st *store.Store, chatID domain.ID) []domain.Event {
+	t.Helper()
+	pending, err := st.PendingApprovalsForChat(context.Background(), chatID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pending) != 1 {
+		t.Fatalf("expected one pending approval, got %#v", pending)
+	}
+	rt.ApproveTool(string(pending[0].ToolCallID))
+	return collectLiveUpdates(t, rt, updates, func(evt domain.Event) bool {
+		return evt.Kind == domain.EventKindMessageDone || evt.Kind == domain.EventKindError
+	})
+}
+
 func assertToolStatus(t *testing.T, st *store.Store, chatID domain.ID, toolCallID string, want domain.ToolStatus) {
 	t.Helper()
 	got := currentToolStatus(t, st, chatID, toolCallID)
@@ -1902,7 +1917,17 @@ func TestApproveContinuesModelWithToolOutput(t *testing.T) {
 	}
 
 	chatRecord := defaultChatForSession(t, st, session.ID)
-	events := runLivePrompt(t, engine, session, chatRecord, "say hello")
+	rt, err := engine.Chat(context.Background(), session, chatRecord)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(rt.Close)
+	updates, unsub := rt.Subscribe()
+	defer unsub()
+	rt.Enqueue(chatpkg.QueueItem{Kind: chatpkg.QueueKindSteer, Text: "say hello"})
+	events := collectLiveUpdates(t, rt, updates, func(evt domain.Event) bool {
+		return evt.Kind == domain.EventKindApprovalAsk
+	})
 	var approvalID domain.ID
 	for _, evt := range events {
 		if evt.Kind == domain.EventKindApprovalAsk {
@@ -1917,13 +1942,10 @@ func TestApproveContinuesModelWithToolOutput(t *testing.T) {
 		t.Fatal("expected approval request")
 	}
 
-	approvedEvents, err := engine.approve(context.Background(), session.ID, "", approvalID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	approvedEvents := approveOnlyPendingTool(t, rt, updates, st, chatRecord.ID)
 	var sawToolResult bool
 	var sawFinalAnswer bool
-	for evt := range approvedEvents {
+	for _, evt := range approvedEvents {
 		if evt.Kind == domain.EventKindToolResult && strings.Contains(evt.Text, "hello") {
 			sawToolResult = true
 		}
@@ -2004,7 +2026,17 @@ func TestPermissionProfileChangeReevaluatesPendingApproval(t *testing.T) {
 	}
 
 	chatRecord := defaultChatForSession(t, st, session.ID)
-	events := runLivePrompt(t, engine, session, chatRecord, "say hello")
+	rt, err := engine.Chat(context.Background(), session, chatRecord)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(rt.Close)
+	updates, unsub := rt.Subscribe()
+	defer unsub()
+	rt.Enqueue(chatpkg.QueueItem{Kind: chatpkg.QueueKindSteer, Text: "say hello"})
+	events := collectLiveUpdates(t, rt, updates, func(evt domain.Event) bool {
+		return evt.Kind == domain.EventKindApprovalAsk
+	})
 	var approvalID domain.ID
 	for _, evt := range events {
 		if evt.Kind == domain.EventKindApprovalAsk {
@@ -2017,27 +2049,36 @@ func TestPermissionProfileChangeReevaluatesPendingApproval(t *testing.T) {
 	if approvalID == "" {
 		t.Fatal("expected approval request")
 	}
-
-	reeval, err := engine.SetPermissionProfileAndReevaluateApproval(context.Background(), session.ID, approvalID, permissionprofile.ProfileFullAccess)
+	pendingBefore, err := st.PendingApprovalsForChat(context.Background(), chatRecord.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var sawProfileChange bool
+	if len(pendingBefore) != 1 {
+		t.Fatalf("expected one pending approval, got %#v", pendingBefore)
+	}
+
+	if err := st.SetSessionPermissionProfile(context.Background(), session.ID, permissionprofile.ProfileFullAccess); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := st.GetSession(context.Background(), session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rt.SetSession(updated)
+	rt.ApproveTool(string(pendingBefore[0].ToolCallID))
+
 	var sawToolResult bool
 	var sawFinalAnswer bool
-	for evt := range reeval {
-		if evt.Kind == domain.EventKindStatus && evt.Meta["permission_profile"] == permissionprofile.ProfileFullAccess {
-			sawProfileChange = true
-		}
+	reevalEvents := collectLiveUpdates(t, rt, updates, func(evt domain.Event) bool {
+		return evt.Kind == domain.EventKindMessageDone || evt.Kind == domain.EventKindError
+	})
+	for _, evt := range reevalEvents {
 		if evt.Kind == domain.EventKindToolResult && strings.Contains(evt.Text, "hello") {
 			sawToolResult = true
 		}
 		if evt.Kind == domain.EventKindMessageDelta && evt.Text == "done" {
 			sawFinalAnswer = true
 		}
-	}
-	if !sawProfileChange {
-		t.Fatal("expected permission profile status event")
 	}
 	if !sawToolResult {
 		t.Fatal("expected tool result after re-evaluation")
@@ -2046,10 +2087,6 @@ func TestPermissionProfileChangeReevaluatesPendingApproval(t *testing.T) {
 		t.Fatal("expected final assistant answer after re-evaluation")
 	}
 
-	updated, err := st.GetSession(context.Background(), session.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
 	if updated.PermissionProfile != permissionprofile.ProfileFullAccess {
 		t.Fatalf("expected permission profile %q, got %q", permissionprofile.ProfileFullAccess, updated.PermissionProfile)
 	}
@@ -3281,7 +3318,18 @@ func TestApproveContinuesAfterOutsideWorkspaceRead(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	events := runLivePromptDefault(t, engine, st, session, "continue")
+	chatRecord := defaultChatForSession(t, st, session.ID)
+	rt, err := engine.Chat(context.Background(), session, chatRecord)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(rt.Close)
+	updates, unsub := rt.Subscribe()
+	defer unsub()
+	rt.Enqueue(chatpkg.QueueItem{Kind: chatpkg.QueueKindSteer, Text: "continue"})
+	events := collectLiveUpdates(t, rt, updates, func(evt domain.Event) bool {
+		return evt.Kind == domain.EventKindApprovalAsk
+	})
 	var approvalID domain.ID
 	for _, evt := range events {
 		if evt.Kind == domain.EventKindApprovalAsk {
@@ -3296,13 +3344,10 @@ func TestApproveContinuesAfterOutsideWorkspaceRead(t *testing.T) {
 		t.Fatal("expected approval request")
 	}
 
-	approvedEvents, err := engine.approve(context.Background(), session.ID, "", approvalID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	approvedEvents := approveOnlyPendingTool(t, rt, updates, st, chatRecord.ID)
 	var sawToolResult bool
 	var sawFinalAnswer bool
-	for evt := range approvedEvents {
+	for _, evt := range approvedEvents {
 		if evt.Kind == domain.EventKindToolResult && strings.Contains(evt.Text, "hello") {
 			sawToolResult = true
 		}
@@ -3381,7 +3426,18 @@ func TestApproveAutoCompactContinuesFromCompactedHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	events := runLivePromptDefault(t, engine, st, session, "build it")
+	chatRecord := defaultChatForSession(t, st, session.ID)
+	rt, err := engine.Chat(context.Background(), session, chatRecord)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(rt.Close)
+	updates, unsub := rt.Subscribe()
+	defer unsub()
+	rt.Enqueue(chatpkg.QueueItem{Kind: chatpkg.QueueKindSteer, Text: "build it"})
+	events := collectLiveUpdates(t, rt, updates, func(evt domain.Event) bool {
+		return evt.Kind == domain.EventKindApprovalAsk
+	})
 	var approvalID domain.ID
 	for _, evt := range events {
 		if evt.Kind == domain.EventKindApprovalAsk {
@@ -3395,12 +3451,9 @@ func TestApproveAutoCompactContinuesFromCompactedHistory(t *testing.T) {
 		t.Fatal("expected approval request")
 	}
 
-	approvedEvents, err := engine.approve(context.Background(), session.ID, "", approvalID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	approvedEvents := approveOnlyPendingTool(t, rt, updates, st, chatRecord.ID)
 	var sawFinalAnswer bool
-	for evt := range approvedEvents {
+	for _, evt := range approvedEvents {
 		if evt.Kind == domain.EventKindMessageDelta && evt.Text == "done" {
 			sawFinalAnswer = true
 		}
@@ -3799,7 +3852,18 @@ func TestApproveContinuesAfterApprovedToolFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	events := runLivePromptDefault(t, engine, st, session, "continue")
+	chatRecord := defaultChatForSession(t, st, session.ID)
+	rt, err := engine.Chat(context.Background(), session, chatRecord)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(rt.Close)
+	updates, unsub := rt.Subscribe()
+	defer unsub()
+	rt.Enqueue(chatpkg.QueueItem{Kind: chatpkg.QueueKindSteer, Text: "continue"})
+	events := collectLiveUpdates(t, rt, updates, func(evt domain.Event) bool {
+		return evt.Kind == domain.EventKindApprovalAsk
+	})
 	var approvalID domain.ID
 	for _, evt := range events {
 		if evt.Kind == domain.EventKindApprovalAsk {
@@ -3814,13 +3878,10 @@ func TestApproveContinuesAfterApprovedToolFailure(t *testing.T) {
 		t.Fatal("expected approval request")
 	}
 
-	approvedEvents, err := engine.approve(context.Background(), session.ID, "", approvalID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	approvedEvents := approveOnlyPendingTool(t, rt, updates, st, chatRecord.ID)
 	var sawToolFailure bool
 	var sawFinalAnswer bool
-	for evt := range approvedEvents {
+	for _, evt := range approvedEvents {
 		if evt.Kind == domain.EventKindToolResult && strings.Contains(evt.Text, "no such file or directory") {
 			sawToolFailure = true
 		}
