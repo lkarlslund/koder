@@ -805,9 +805,16 @@ func (c *Controller) SwitchSession(ctx context.Context, sessionID domain.ID) err
 
 // NewSession creates and switches to a new session in the current workspace.
 func (c *Controller) NewSession(ctx context.Context, title string) error {
-	c.mu.RLock()
-	projectRoot := c.session.ProjectRoot
-	c.mu.RUnlock()
+	return c.NewSessionWithProjectRoot(ctx, title, "")
+}
+
+// NewSessionWithProjectRoot creates and switches to a new session with an explicit project root.
+func (c *Controller) NewSessionWithProjectRoot(ctx context.Context, title string, projectRoot string) error {
+	if strings.TrimSpace(projectRoot) == "" {
+		c.mu.RLock()
+		projectRoot = c.session.ProjectRoot
+		c.mu.RUnlock()
+	}
 	session, err := c.createWorkspaceSession(ctx, title, projectRoot)
 	if err != nil {
 		return err
@@ -2761,11 +2768,21 @@ func (c *Controller) createWorkspaceSession(ctx context.Context, title string, p
 	if title == "" {
 		title = "New Session"
 	}
+	projectRoot = strings.TrimSpace(projectRoot)
+	if projectRoot != "" {
+		info, err := os.Stat(projectRoot)
+		if err != nil {
+			return domain.Session{}, err
+		}
+		if !info.IsDir() {
+			return domain.Session{}, fmt.Errorf("project root must be a directory: %s", projectRoot)
+		}
+	}
 	session, err := c.store.CreateSession(ctx, title, c.cfg.DefaultProvider, c.cfg.DefaultModel, nil)
 	if err != nil {
 		return domain.Session{}, err
 	}
-	_ = c.store.SetSessionProjectRoot(ctx, session.ID, strings.TrimSpace(projectRoot))
+	_ = c.store.SetSessionProjectRoot(ctx, session.ID, projectRoot)
 	_ = c.store.SetSessionPermissionProfile(ctx, session.ID, c.cfg.Permissions.Profile)
 	_ = c.store.SetSessionToolStates(ctx, session.ID, c.cfg.ToolDefaults)
 	return c.store.GetSession(ctx, session.ID)

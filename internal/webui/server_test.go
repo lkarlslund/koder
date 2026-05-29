@@ -942,6 +942,12 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `new_session`) {
 		t.Fatalf("expected session dialog to create sessions")
 	}
+	if !strings.Contains(fullPage, `showSessionEditor`) ||
+		!strings.Contains(fullPage, `browse_project_folder`) ||
+		!strings.Contains(fullPage, `sessionProjectRoot(session)`) ||
+		!strings.Contains(fullPage, `:readonly="sessionEditorMode === 'edit'"`) {
+		t.Fatalf("expected session create/edit dialog with locked edit project folder and browse action")
+	}
 	if !strings.Contains(fullPage, `rename_session`) || !strings.Contains(fullPage, `delete_session`) {
 		t.Fatalf("expected session dialog to rename and delete sessions")
 	}
@@ -1317,7 +1323,8 @@ func TestWebSocketSessionManagementCreatesAndSwitchesWorkspaceSessions(t *testin
 		t.Fatalf("unexpected initial session list: %#v", listResp.Result)
 	}
 
-	if err := conn.Write(ctx, websocket.MessageText, []byte(`{"id":2,"method":"new_session","params":{"title":"Side Session"}}`)); err != nil {
+	projectRoot := t.TempDir()
+	if err := conn.Write(ctx, websocket.MessageText, []byte(fmt.Sprintf(`{"id":2,"method":"new_session","params":{"title":"Side Session","project_root":"%s"}}`, projectRoot))); err != nil {
 		t.Fatalf("write new_session: %v", err)
 	}
 	msg = readRPCResponse(t, ctx, conn, 2)
@@ -1325,8 +1332,9 @@ func TestWebSocketSessionManagementCreatesAndSwitchesWorkspaceSessions(t *testin
 		OK     bool `json:"ok"`
 		Result struct {
 			Session struct {
-				ID    domain.ID
-				Title string
+				ID          domain.ID
+				Title       string
+				ProjectRoot string
 			}
 		} `json:"result"`
 		Error string `json:"error"`
@@ -1338,7 +1346,7 @@ func TestWebSocketSessionManagementCreatesAndSwitchesWorkspaceSessions(t *testin
 		t.Fatalf("expected new_session ok, got %s", newResp.Error)
 	}
 	newID := newResp.Result.Session.ID
-	if newID == "" || newID == initialID || newResp.Result.Session.Title != "Side Session" {
+	if newID == "" || newID == initialID || newResp.Result.Session.Title != "Side Session" || newResp.Result.Session.ProjectRoot != projectRoot {
 		t.Fatalf("unexpected new session response: %#v", newResp.Result.Session)
 	}
 

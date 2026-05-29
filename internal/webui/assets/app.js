@@ -335,7 +335,7 @@
         ws: null, reconnectTimer: null, connectWatchdog: null, reconnectDelay: 150, reconnectProbe: null, nextID: 1, pending: {}, clientID: '', clientStateTimer: null, state: {}, connected: false, connecting: true, draft: '', showPermissions: false,
         showModels: false, modelLoading: false, modelQuery: '', modelOptions: [],
         showSettings: false, settingsLoading: false, settingsSaving: false, settingsTab: 'general', settings: null, settingsStatus: '', settingsStatusKind: 'secondary', selectedPermissionProfile: '',
-        showSessions: false, sessionLoading: false, sessionState: {active_id: 0, workdir: '', sessions: []}, newSessionTitle: '', editingSessionID: '', editingSessionTitle: '',
+        showSessions: false, showSessionEditor: false, sessionEditorMode: 'create', sessionLoading: false, sessionState: {active_id: 0, workdir: '', sessions: []}, sessionDraft: {id: '', title: '', projectRoot: ''},
         providerState: {catalog: [], providers: [], drafts: {}}, showProviderEditor: false, providerDraft: null, providerHeadersText: '{}', providerModelOptions: [], providerStatus: '', providerStatusKind: 'secondary', providerTesting: false, providerSaving: false,
         showModelConfigEditor: false, modelConfigDraft: null, modelConfigStatus: '', modelConfigStatusKind: 'secondary',
         showMCPEditor: false, mcpDraft: null, mcpHeadersText: '{}', mcpStatus: '', mcpStatusKind: 'secondary',
@@ -1469,38 +1469,55 @@
           });
         },
         openSessionDialog() {
-          this.showSessions = true; this.sessionLoading = true; this.newSessionTitle = ''; this.editingSessionID = ''; this.editingSessionTitle = '';
+          this.showSessions = true; this.sessionLoading = true; this.closeSessionEditor();
           this.reportClientStateSoon();
           this.rpc('list_sessions', {}).then(result => { this.sessionState = result || {active_id: 0, workdir: '', sessions: []}; }).finally(() => { this.sessionLoading = false; });
         },
-        closeSessionDialog() { this.showSessions = false; this.reportClientStateSoon(); },
+        closeSessionDialog() { this.showSessions = false; this.closeSessionEditor(); this.reportClientStateSoon(); },
         sessionRows() { return this.sessionState.sessions || this.state.sessions || []; },
         activeSessionID() { return this.sessionState.active_id || this.state.session?.ID || this.state.session?.id || 0; },
         sessionID(session) { return session.ID || session.id; },
         sessionTitle(session) { return session.Title || session.title || 'New Session'; },
+        sessionProjectRoot(session) { return session.ProjectRoot || session.project_root || ''; },
         switchSession(id) {
           if (!id || id === this.activeSessionID()) { this.closeSessionDialog(); return; }
           this.rpc('switch_session', {session_id: id}).then(s => { this.applyState(s); this.closeSessionDialog(); });
         },
-        createSession() {
-          this.rpc('new_session', {title: this.newSessionTitle || 'New Session'}).then(s => { this.applyState(s); this.closeSessionDialog(); });
+        beginCreateSession() {
+          this.sessionEditorMode = 'create';
+          this.sessionDraft = {id: '', title: '', projectRoot: this.state.workdir || this.state.Workdir || ''};
+          this.showSessionEditor = true;
         },
-        beginRenameSession(session) {
-          this.editingSessionID = this.sessionID(session);
-          this.editingSessionTitle = this.sessionTitle(session);
+        beginEditSession(session) {
+          this.sessionEditorMode = 'edit';
+          this.sessionDraft = {id: this.sessionID(session), title: this.sessionTitle(session), projectRoot: this.sessionProjectRoot(session)};
+          this.showSessionEditor = true;
         },
-        saveRenamedSession() {
-          const id = this.editingSessionID;
-          const title = String(this.editingSessionTitle || '').trim();
-          if (!id || !title) return;
-          this.rpc('rename_session', {session_id: id, title}).then(s => {
-            this.applyState(s);
-            return this.rpc('list_sessions', {});
-          }).then(result => {
-            this.sessionState = result || this.sessionState;
-            this.editingSessionID = '';
-            this.editingSessionTitle = '';
-          });
+        closeSessionEditor() {
+          this.showSessionEditor = false;
+          this.sessionDraft = {id: '', title: '', projectRoot: ''};
+        },
+        browseProjectFolder() {
+          this.rpc('browse_project_folder', {}).then(result => {
+            if (result && result.project_root) this.sessionDraft.projectRoot = result.project_root;
+          }).catch(err => this.showToast(err.message));
+        },
+        saveSessionEditor() {
+          const title = String(this.sessionDraft.title || '').trim() || 'New Session';
+          if (this.sessionEditorMode === 'edit') {
+            const id = this.sessionDraft.id;
+            if (!id) return;
+            this.rpc('rename_session', {session_id: id, title}).then(s => {
+              this.applyState(s);
+              return this.rpc('list_sessions', {});
+            }).then(result => {
+              this.sessionState = result || this.sessionState;
+              this.closeSessionEditor();
+            });
+            return;
+          }
+          const projectRoot = String(this.sessionDraft.projectRoot || '').trim();
+          this.rpc('new_session', {title, project_root: projectRoot}).then(s => { this.applyState(s); this.closeSessionDialog(); });
         },
         deleteSession(id) {
           if (!id) return;

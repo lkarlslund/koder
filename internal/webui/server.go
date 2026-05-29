@@ -519,10 +519,11 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		return s.controller.State(), nil
 	case "new_session":
 		var in struct {
-			Title string `json:"title"`
+			Title       string `json:"title"`
+			ProjectRoot string `json:"project_root"`
 		}
 		_ = decodeParams(params, &in)
-		if err := s.controller.NewSession(ctx, in.Title); err != nil {
+		if err := s.controller.NewSessionWithProjectRoot(ctx, in.Title, in.ProjectRoot); err != nil {
 			return nil, err
 		}
 		return s.controller.State(), nil
@@ -549,6 +550,12 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 			return nil, err
 		}
 		return s.controller.State(), nil
+	case "browse_project_folder":
+		path, err := browseProjectFolder()
+		if err != nil {
+			return nil, err
+		}
+		return map[string]string{"project_root": path}, nil
 	case "delete_chat":
 		var in struct {
 			ChatID domain.ID `json:"chat_id"`
@@ -914,6 +921,29 @@ func stateDeltaFromState(state uicore.State) stateDelta {
 		Workdir:       state.Workdir,
 		Error:         state.Error,
 	}
+}
+
+func browseProjectFolder() (string, error) {
+	var candidates [][]string
+	switch runtime.GOOS {
+	case "darwin":
+		candidates = append(candidates, []string{"osascript", "-e", `POSIX path of (choose folder with prompt "Choose project folder")`})
+	case "windows":
+		candidates = append(candidates, []string{"powershell", "-NoProfile", "-Command", `Add-Type -AssemblyName System.Windows.Forms; $d = New-Object System.Windows.Forms.FolderBrowserDialog; if ($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { $d.SelectedPath }`})
+	default:
+		candidates = append(candidates,
+			[]string{"zenity", "--file-selection", "--directory", "--title=Choose project folder"},
+			[]string{"kdialog", "--getexistingdirectory", ".", "Choose project folder"},
+		)
+	}
+	for _, args := range candidates {
+		out, err := exec.Command(args[0], args[1:]...).Output()
+		path := strings.TrimSpace(string(out))
+		if err == nil && path != "" {
+			return path, nil
+		}
+	}
+	return "", fmt.Errorf("no supported folder picker is available")
 }
 
 func rpcEstablishesSnapshotBaseline(method string, result any) bool {
