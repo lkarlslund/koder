@@ -32,7 +32,6 @@ type Provider struct {
 	APIKey                  string            `toml:"api_key"`
 	APIKeyEnv               string            `toml:"api_key_env"`
 	Headers                 map[string]string `toml:"headers"`
-	AutoCompactAt           int               `toml:"auto_compact_at"`
 	Stream                  bool              `toml:"stream"`
 	Timeout                 time.Duration     `toml:"timeout"`
 	Disabled                bool              `toml:"disabled"`
@@ -240,9 +239,6 @@ func (c *Config) applyDefaults() {
 		if provider.Timeout == 0 {
 			provider.Timeout = fallbackProvider.Timeout
 		}
-		if provider.AutoCompactAt == 0 {
-			provider.AutoCompactAt = c.AutoCompactAt
-		}
 		provider.PromptProgressMode = NormalizePromptProgressMode(provider.PromptProgressMode)
 		if provider.Headers == nil {
 			provider.Headers = map[string]string{}
@@ -433,7 +429,6 @@ func normalizeModelConfig(model ModelConfig) ModelConfig {
 func providerDefaults() Provider {
 	return Provider{
 		Headers:            map[string]string{},
-		AutoCompactAt:      defaultAutoCompactAt,
 		Stream:             true,
 		Timeout:            10 * time.Minute,
 		Disabled:           false,

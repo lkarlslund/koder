@@ -3321,11 +3321,11 @@ func TestApproveAutoCompactContinuesFromCompactedHistory(t *testing.T) {
 	defer server.Close()
 
 	cfg := testConfig(t)
+	cfg.AutoCompactAt = 1
 	cfg.Providers = map[string]config.Provider{
 		"test": {
-			BaseURL:       server.URL + "/v1",
-			Timeout:       time.Second,
-			AutoCompactAt: 1,
+			BaseURL: server.URL + "/v1",
+			Timeout: time.Second,
 		},
 	}
 	cfg.DefaultProvider = "test"
@@ -3523,9 +3523,7 @@ func TestRunPromptAutoCompactsTargetChatWithPendingPrompt(t *testing.T) {
 	if pendingPct <= existingPct {
 		t.Fatalf("expected pending prompt to increase usage, existing=%d pending=%d", existingPct, pendingPct)
 	}
-	providerCfg := engine.cfg.Providers["test"]
-	providerCfg.AutoCompactAt = existingPct + 1
-	engine.cfg.Providers["test"] = providerCfg
+	engine.cfg.AutoCompactAt = existingPct + 1
 
 	events, err := engine.RunPromptInChat(context.Background(), session, sideChat, prompt, nil, nil, "")
 	if err != nil {
@@ -3668,6 +3666,56 @@ func TestLivePromptTurnBuildsRequestFromChatRuntimeTimeline(t *testing.T) {
 			}
 		case <-deadline:
 			t.Fatalf("timed out waiting for prompt completion: %#v", runtime.Snapshot())
+		}
+	}
+}
+
+func TestRuntimeKeepsUserPromptVisibleWhenProviderSetupFails(t *testing.T) {
+	t.Parallel()
+
+	cfg := testConfig(t)
+	cfg.Providers = map[string]config.Provider{}
+	cfg.DefaultProvider = "missing"
+	cfg.DefaultModel = "test-model"
+
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	engine := New(cfg, st, tools.NewRegistry(t.TempDir()), nil)
+	session, err := st.CreateSession(context.Background(), "test", "missing", "test-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chatRecord := defaultChatForSession(t, st, session.ID)
+	runtime, err := chatpkg.Load(context.Background(), st, session, chatRecord, engine, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer runtime.Close()
+	updates, unsubscribe := runtime.Subscribe()
+	defer unsubscribe()
+
+	runtime.Enqueue(chatpkg.QueueItem{Kind: chatpkg.QueueKindSteer, Text: "still show this"})
+
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case update := <-updates:
+			if update.Event == nil || update.Event.Kind != domain.EventKindError {
+				continue
+			}
+			timeline := runtime.Snapshot().Timeline
+			for _, item := range timeline {
+				if user, ok := item.Content.(domain.UserMessage); ok && user.Text == "still show this" {
+					return
+				}
+			}
+			t.Fatalf("expected failed prompt to remain in timeline, got %#v", timeline)
+		case <-deadline:
+			t.Fatalf("timed out waiting for provider setup error: %#v", runtime.Snapshot())
 		}
 	}
 }
@@ -3828,11 +3876,11 @@ func TestContinueModelTurnAutoCompactsAfterToolResultChurn(t *testing.T) {
 	defer server.Close()
 
 	cfg := testConfig(t)
+	cfg.AutoCompactAt = 20
 	cfg.Providers = map[string]config.Provider{
 		"test": {
-			BaseURL:       server.URL + "/v1",
-			Timeout:       time.Second,
-			AutoCompactAt: 20,
+			BaseURL: server.URL + "/v1",
+			Timeout: time.Second,
 		},
 	}
 	cfg.DefaultProvider = "test"

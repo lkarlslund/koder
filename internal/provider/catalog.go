@@ -42,7 +42,6 @@ type ConnectDraft struct {
 	APIKey                  string
 	APIKeyEnv               string
 	Model                   string
-	AutoCompactAt           int
 	Stream                  bool
 	Timeout                 time.Duration
 	Disabled                bool
@@ -101,7 +100,6 @@ func BuildDraft(id string, existing map[string]config.Provider) (ConnectDraft, e
 		Name:               desc.Title,
 		BaseURL:            desc.DefaultBaseURL,
 		Model:              desc.ModelHint,
-		AutoCompactAt:      80,
 		Stream:             true,
 		Timeout:            2 * time.Minute,
 		Headers:            cloneHeaders(desc.Headers),
@@ -135,7 +133,6 @@ func BuildDraftForExisting(id string, existing config.Provider) (ConnectDraft, e
 		APIKey:                  existing.APIKey,
 		APIKeyEnv:               existing.APIKeyEnv,
 		Model:                   desc.ModelHint,
-		AutoCompactAt:           existing.AutoCompactAt,
 		Stream:                  existing.Stream,
 		Timeout:                 existing.Timeout,
 		Disabled:                existing.Disabled,
@@ -156,7 +153,6 @@ func (d ConnectDraft) ToConfig() config.Provider {
 		APIKey:                  strings.TrimSpace(d.APIKey),
 		APIKeyEnv:               strings.TrimSpace(d.APIKeyEnv),
 		Headers:                 cloneHeaders(d.Headers),
-		AutoCompactAt:           d.AutoCompactAt,
 		Stream:                  d.Stream,
 		Timeout:                 d.Timeout,
 		Disabled:                d.Disabled,

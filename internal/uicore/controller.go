@@ -145,7 +145,6 @@ type ProviderDraft struct {
 	APIKey                  string            `json:"api_key"`
 	APIKeyEnv               string            `json:"api_key_env"`
 	Model                   string            `json:"model"`
-	AutoCompactAt           int               `json:"auto_compact_at"`
 	Stream                  bool              `json:"stream"`
 	Timeout                 string            `json:"timeout"`
 	Disabled                bool              `json:"disabled"`
@@ -1139,7 +1138,7 @@ func (c *Controller) SaveProvider(ctx context.Context, draft ProviderDraft) (Pro
 	if ok {
 		mergeProviderEditDefaults(&next, existing)
 	} else {
-		applyNewProviderDefaults(&next, c.cfg.AutoCompactAt)
+		applyNewProviderDefaults(&next)
 	}
 	applyProviderDraftPreferences(&next, draft)
 	if strings.TrimSpace(next.Name) == "" {
@@ -1786,7 +1785,6 @@ func providerDraftFromCatalog(draft provider.ConnectDraft) ProviderDraft {
 		APIKey:                  strings.TrimSpace(draft.APIKey),
 		APIKeyEnv:               strings.TrimSpace(draft.APIKeyEnv),
 		Model:                   strings.TrimSpace(draft.Model),
-		AutoCompactAt:           draft.AutoCompactAt,
 		Stream:                  draft.Stream,
 		Timeout:                 durationString(draft.Timeout),
 		Disabled:                draft.Disabled,
@@ -1809,7 +1807,6 @@ func providerDraftToCatalog(draft ProviderDraft) provider.ConnectDraft {
 		APIKey:                  strings.TrimSpace(draft.APIKey),
 		APIKeyEnv:               strings.TrimSpace(draft.APIKeyEnv),
 		Model:                   strings.TrimSpace(draft.Model),
-		AutoCompactAt:           draft.AutoCompactAt,
 		Stream:                  draft.Stream,
 		Timeout:                 parseDurationOrZero(draft.Timeout),
 		Disabled:                draft.Disabled,
@@ -1842,19 +1839,12 @@ func mergeProviderEditDefaults(next *config.Provider, existing config.Provider) 
 	if strings.TrimSpace(next.APIKeyEnv) == "" {
 		next.APIKeyEnv = existing.APIKeyEnv
 	}
-	if next.AutoCompactAt == 0 {
-		next.AutoCompactAt = existing.AutoCompactAt
-	}
 	if next.Timeout == 0 {
 		next.Timeout = existing.Timeout
 	}
 }
 
-func applyNewProviderDefaults(next *config.Provider, autoCompactAt int) {
-	if autoCompactAt <= 0 {
-		autoCompactAt = 80
-	}
-	next.AutoCompactAt = autoCompactAt
+func applyNewProviderDefaults(next *config.Provider) {
 	next.Stream = true
 	next.Timeout = 2 * time.Minute
 	next.Disabled = false
@@ -1864,9 +1854,6 @@ func applyNewProviderDefaults(next *config.Provider, autoCompactAt int) {
 func applyProviderDraftPreferences(next *config.Provider, draft ProviderDraft) {
 	next.AuthMethod = strings.TrimSpace(draft.AuthMethod)
 	next.APIKeyEnv = strings.TrimSpace(draft.APIKeyEnv)
-	if draft.AutoCompactAt > 0 {
-		next.AutoCompactAt = draft.AutoCompactAt
-	}
 	if timeout := parseDurationOrZero(draft.Timeout); timeout > 0 {
 		next.Timeout = timeout
 	}

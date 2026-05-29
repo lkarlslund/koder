@@ -504,48 +504,10 @@ func (e *Engine) runModelPromptTurn(ctx context.Context, turn *chatpkg.TurnState
 	if err := e.validatePromptAttachments(chat, drafts); err != nil {
 		return nil, err
 	}
-	client, err := e.clientForChat(chat)
-	if err != nil {
-		return nil, err
-	}
 
 	out := make(chan domain.Event)
 	go func() {
 		defer close(out)
-		if session.ID != "" && needsSessionAgentsRefresh(session) {
-			out <- domain.Event{Kind: domain.EventKindStatus, Text: "Checking project instructions..."}
-		}
-		session, err = e.ensureSessionAgents(ctx, session, chat, client)
-		if err != nil {
-			if interruptedErr(err) {
-				e.emitInterrupted(out, chat.ID, session.ID)
-				return
-			}
-			e.emitAssistantError(ctx, out, chat.ID, session.ID, err)
-			return
-		}
-		chat = turn.Chat()
-		e.recordLifecycle(session.ID, "prompt_started", prompt, map[string]string{"provider": chat.ProviderID, "model": chat.ModelID})
-		compacted, err := e.autoCompactPromptTurnIfNeeded(ctx, session, chat, turn, client, prompt, drafts, refs, note, out)
-		if err != nil {
-			if interruptedErr(err) {
-				e.emitInterrupted(out, chat.ID, session.ID)
-				return
-			}
-			e.emitAssistantError(ctx, out, chat.ID, session.ID, err)
-			return
-		}
-		if compacted {
-			session, err = e.store.GetSession(ctx, session.ID)
-			if err != nil {
-				if interruptedErr(err) {
-					e.emitInterrupted(out, chat.ID, session.ID)
-					return
-				}
-				out <- domain.Event{Kind: domain.EventKindError, Err: err}
-				return
-			}
-		}
 		user, err := e.userMessageForPrompt(session, prompt, drafts, refs)
 		if err != nil {
 			if interruptedErr(err) {
@@ -566,6 +528,46 @@ func (e *Engine) runModelPromptTurn(ctx context.Context, turn *chatpkg.TurnState
 		}
 		out <- domain.Event{Kind: domain.EventKindStatus, Text: "User message added", Item: userItem}
 		e.recordLifecycle(session.ID, "user_message_persisted", prompt, map[string]string{"item_id": userItem.ID})
+		chat = turn.Chat()
+		client, err := e.clientForChat(chat)
+		if err != nil {
+			e.emitAssistantError(ctx, out, chat.ID, session.ID, err)
+			return
+		}
+		if session.ID != "" && needsSessionAgentsRefresh(session) {
+			out <- domain.Event{Kind: domain.EventKindStatus, Text: "Checking project instructions..."}
+		}
+		session, err = e.ensureSessionAgents(ctx, session, chat, client)
+		if err != nil {
+			if interruptedErr(err) {
+				e.emitInterrupted(out, chat.ID, session.ID)
+				return
+			}
+			e.emitAssistantError(ctx, out, chat.ID, session.ID, err)
+			return
+		}
+		chat = turn.Chat()
+		e.recordLifecycle(session.ID, "prompt_started", prompt, map[string]string{"provider": chat.ProviderID, "model": chat.ModelID})
+		compacted, err := e.autoCompactTurnIfNeeded(ctx, session, chat, turn, client, out)
+		if err != nil {
+			if interruptedErr(err) {
+				e.emitInterrupted(out, chat.ID, session.ID)
+				return
+			}
+			e.emitAssistantError(ctx, out, chat.ID, session.ID, err)
+			return
+		}
+		if compacted {
+			session, err = e.store.GetSession(ctx, session.ID)
+			if err != nil {
+				if interruptedErr(err) {
+					e.emitInterrupted(out, chat.ID, session.ID)
+					return
+				}
+				out <- domain.Event{Kind: domain.EventKindError, Err: err}
+				return
+			}
+		}
 		if err := e.continueModelTurnFromTimeline(ctx, session, turn.Chat(), turn, client, out, transientTurnMessages(note, "")); err != nil {
 			if interruptedErr(err) {
 				e.emitInterrupted(out, chat.ID, session.ID)
@@ -3224,15 +3226,7 @@ func (e *Engine) autoCompactPreparedMessagesIfNeeded(ctx context.Context, sessio
 }
 
 func (e *Engine) autoCompactThreshold(providerID domain.ID) int {
-	providerCfg, ok := e.cfg.Provider(providerID)
-	if !ok {
-		return max(1, e.cfg.AutoCompactAt)
-	}
-	threshold := providerCfg.AutoCompactAt
-	if threshold <= 0 {
-		threshold = max(1, e.cfg.AutoCompactAt)
-	}
-	return threshold
+	return max(1, e.cfg.AutoCompactAt)
 }
 
 func (e *Engine) autoCompactChatIfNeeded(ctx context.Context, session domain.Session, chatID domain.ID, client *provider.Client, out chan<- domain.Event) (bool, error) {
@@ -3248,14 +3242,7 @@ func (e *Engine) autoCompactChatIfNeeded(ctx context.Context, session domain.Ses
 	if !ok {
 		return false, nil
 	}
-	providerCfg, ok := e.cfg.Provider(chat.ProviderID)
-	if !ok {
-		return false, nil
-	}
-	threshold := providerCfg.AutoCompactAt
-	if threshold <= 0 {
-		threshold = max(1, e.cfg.AutoCompactAt)
-	}
+	threshold := e.autoCompactThreshold(chat.ProviderID)
 	if estimated < threshold {
 		return false, nil
 	}
