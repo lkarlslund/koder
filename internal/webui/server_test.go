@@ -141,6 +141,51 @@ func TestWebSocketHelloUsesURLSessionSelection(t *testing.T) {
 	}
 }
 
+func TestRestartProcessRPCRequestsSupervisorRestart(t *testing.T) {
+	ctrl := newTestController(t)
+	restarted := make(chan struct{}, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	srv, err := Start(ctx, ctrl, Options{
+		Bind:      "127.0.0.1:0",
+		NoBrowser: true,
+		RequestProcessRestart: func() error {
+			restarted <- struct{}{}
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("start server: %v", err)
+	}
+	conn, _, err := websocket.Dial(ctx, "ws://"+srv.Addr()+"/ws", nil)
+	if err != nil {
+		t.Fatalf("dial websocket: %v", err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+	if err := conn.Write(ctx, websocket.MessageText, []byte(`{"id":1,"method":"restart_process","params":{}}`)); err != nil {
+		t.Fatalf("write restart_process: %v", err)
+	}
+	msg := readRPCResponse(t, ctx, conn, 1)
+	var resp struct {
+		OK     bool   `json:"ok"`
+		Error  string `json:"error"`
+		Result struct {
+			Restarting bool `json:"restarting"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(msg, &resp); err != nil {
+		t.Fatalf("decode restart response: %v", err)
+	}
+	if !resp.OK || !resp.Result.Restarting {
+		t.Fatalf("expected restart_process ok, got %#v", resp)
+	}
+	select {
+	case <-restarted:
+	case <-time.After(time.Second):
+		t.Fatal("expected restart_process to call restart hook")
+	}
+}
+
 func TestServerDoesNotOpenBrowserWhenExistingTabRefreshes(t *testing.T) {
 	ctrl := newTestController(t)
 	opened := make(chan string, 1)
@@ -549,6 +594,11 @@ func TestIndexServesHTML(t *testing.T) {
 		!strings.Contains(fullPage, `rpc('stop', {})`) ||
 		!strings.Contains(fullPage, `event.key === 'Escape'`) {
 		t.Fatalf("expected composer interrupt button with staged then immediate stop behavior and Escape shortcut")
+	}
+	if !strings.Contains(fullPage, `@click="requestRestart()"`) ||
+		!strings.Contains(fullPage, `rpc('restart_process', {})`) ||
+		!strings.Contains(fullPage, `:disabled="restartRequested"`) {
+		t.Fatalf("expected restart-needed control to request a supervised process restart")
 	}
 	if !strings.Contains(fullPage, `hello.client_id`) || !strings.Contains(fullPage, `rpcOn(this.ws, 'client_state'`) || !strings.Contains(fullPage, `selected_chat: String(this.activeChatID() || '')`) {
 		t.Fatalf("expected browser to report per-client debug state")

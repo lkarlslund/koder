@@ -19,6 +19,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/coder/websocket"
@@ -44,11 +45,12 @@ var (
 
 // Options configures the web UI server.
 type Options struct {
-	Bind        string
-	NoBrowser   bool
-	OpenDelay   time.Duration
-	OpenBrowser func(string) error
-	Debug       *debugsrv.Recorder
+	Bind                  string
+	NoBrowser             bool
+	OpenDelay             time.Duration
+	OpenBrowser           func(string) error
+	Debug                 *debugsrv.Recorder
+	RequestProcessRestart func() error
 }
 
 // Server serves the browser UI and bridges websocket RPC to the controller.
@@ -477,6 +479,11 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		return map[string]bool{"stopped": true}, s.controller.Stop()
 	case "stop_after_turn":
 		return map[string]bool{"stopping": true}, s.controller.StopAfterCurrentTurn()
+	case "restart_process":
+		if err := s.requestProcessRestart(); err != nil {
+			return nil, err
+		}
+		return map[string]bool{"restarting": true}, nil
 	case "compact":
 		return map[string]bool{"started": true}, s.controller.Compact()
 	case "refresh_workspace":
@@ -701,6 +708,23 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 	default:
 		return nil, fmt.Errorf("unknown method %q", method)
 	}
+}
+
+func (s *Server) requestProcessRestart() error {
+	if s != nil && s.options.RequestProcessRestart != nil {
+		return s.options.RequestProcessRestart()
+	}
+	time.AfterFunc(100*time.Millisecond, func() {
+		process, err := os.FindProcess(os.Getpid())
+		if err != nil {
+			slog.Error("locate koder process for restart", "error", err)
+			return
+		}
+		if err := process.Signal(syscall.SIGUSR1); err != nil {
+			slog.Error("signal koder process for restart", "error", err)
+		}
+	})
+	return nil
 }
 
 func (s *Server) prepareClientSelection(ctx context.Context, clientID, method string) error {
