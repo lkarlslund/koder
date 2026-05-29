@@ -69,6 +69,7 @@ func runLivePromptObserve(t *testing.T, engine *Engine, session domain.Session, 
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(rt.Close)
 	updates, unsub := rt.Subscribe()
 	defer unsub()
 	rt.Enqueue(chatpkg.QueueItem{Kind: chatpkg.QueueKindSteer, Text: text})
@@ -100,6 +101,29 @@ func runLivePromptObserve(t *testing.T, engine *Engine, session domain.Session, 
 func runLivePromptDefault(t *testing.T, engine *Engine, st *store.Store, session domain.Session, text string) []domain.Event {
 	t.Helper()
 	return runLivePrompt(t, engine, session, defaultChatForSession(t, st, session.ID), text)
+}
+
+func collectLiveUpdates(t *testing.T, rt *chatpkg.Chat, updates <-chan chatpkg.Update, terminal func(domain.Event) bool) []domain.Event {
+	t.Helper()
+	deadline := time.After(5 * time.Second)
+	var events []domain.Event
+	done := false
+	for {
+		select {
+		case update := <-updates:
+			if update.Event != nil {
+				events = append(events, *update.Event)
+				if terminal(*update.Event) {
+					done = true
+				}
+			}
+			if done && (!update.Active || update.Status == chatpkg.StatusWaitingApproval || update.Status == chatpkg.StatusErrored) {
+				return events
+			}
+		case <-deadline:
+			t.Fatalf("timed out waiting for chat updates; snapshot=%#v", rt.Snapshot())
+		}
+	}
 }
 
 func runLiveContinueDefault(t *testing.T, engine *Engine, st *store.Store, session domain.Session, note string) []domain.Event {
@@ -201,6 +225,38 @@ func waitForToolStatus(t *testing.T, st *store.Store, chatID domain.ID, toolCall
 		time.Sleep(10 * time.Millisecond)
 	}
 	return false
+}
+
+func waitForTimelineCondition(t *testing.T, st *store.Store, chatID domain.ID, want func([]domain.TimelineItem) bool) []domain.TimelineItem {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	var items []domain.TimelineItem
+	for time.Now().Before(deadline) {
+		var err error
+		items, err = st.TimelineForChat(context.Background(), chatID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want(items) {
+			return items
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for timeline condition; items=%#v", items)
+	return nil
+}
+
+func waitForChatInactive(t *testing.T, rt *chatpkg.Chat) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		_, _, active := rt.Status()
+		if !active {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for chat to become inactive; snapshot=%#v", rt.Snapshot())
 }
 
 func assertToolStatus(t *testing.T, st *store.Store, chatID domain.ID, toolCallID string, want domain.ToolStatus) {
@@ -2265,20 +2321,37 @@ func TestResumePendingToolCallsExecutesAndContinues(t *testing.T) {
 	}
 	appendAssistantToolTimelineItem(t, st, chat.ID, req, "")
 
-	events, err := engine.ResumePendingToolCallsInChat(context.Background(), session, chat)
+	rt, err := engine.Chat(context.Background(), session, chat)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if events == nil {
-		t.Fatal("expected resume events")
-	}
+	t.Cleanup(rt.Close)
+	items := waitForTimelineCondition(t, st, chat.ID, func(items []domain.TimelineItem) bool {
+		var sawToolResult bool
+		var sawFinalAnswer bool
+		for _, item := range items {
+			if assistant, ok := item.Content.(domain.AssistantMessage); ok {
+				if call := assistant.ToolByID(domain.ToolCallID("call_1")); call != nil && call.Result != nil && strings.Contains(call.Result.Text, "hi") {
+					sawToolResult = true
+				}
+				if assistant.Text == "done" {
+					sawFinalAnswer = true
+				}
+			}
+		}
+		return sawToolResult && sawFinalAnswer
+	})
 	var sawToolResult bool
 	var sawFinalAnswer bool
-	for evt := range events {
-		if evt.Kind == domain.EventKindToolResult && strings.Contains(evt.Text, "hi") {
+	for _, item := range items {
+		assistant, ok := item.Content.(domain.AssistantMessage)
+		if !ok {
+			continue
+		}
+		if call := assistant.ToolByID(domain.ToolCallID("call_1")); call != nil && call.Result != nil && strings.Contains(call.Result.Text, "hi") {
 			sawToolResult = true
 		}
-		if evt.Kind == domain.EventKindMessageDelta && evt.Text == "done" {
+		if assistant.Text == "done" {
 			sawFinalAnswer = true
 		}
 	}
@@ -2291,6 +2364,7 @@ func TestResumePendingToolCallsExecutesAndContinues(t *testing.T) {
 	if requests != 1 {
 		t.Fatalf("expected one continuation request, got %d", requests)
 	}
+	waitForChatInactive(t, rt)
 }
 
 func TestResumePendingToolCallsIgnoresLaterQueuedUserMessage(t *testing.T) {
@@ -2355,22 +2429,37 @@ func TestResumePendingToolCallsIgnoresLaterQueuedUserMessage(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	events, err := engine.ResumePendingToolCallsInChat(context.Background(), session, chat)
+	rt, err := engine.Chat(context.Background(), session, chat)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if events == nil {
-		t.Fatal("expected resume events")
-	}
+	t.Cleanup(rt.Close)
+	items := waitForTimelineCondition(t, st, chat.ID, func(items []domain.TimelineItem) bool {
+		for _, item := range items {
+			assistant, ok := item.Content.(domain.AssistantMessage)
+			if !ok {
+				continue
+			}
+			if call := assistant.ToolByID(domain.ToolCallID("call_1")); call != nil && call.Result != nil && strings.Contains(call.Result.Text, "hi") {
+				return true
+			}
+		}
+		return false
+	})
 	var sawToolResult bool
-	for evt := range events {
-		if evt.Kind == domain.EventKindToolResult && strings.Contains(evt.Text, "hi") {
+	for _, item := range items {
+		assistant, ok := item.Content.(domain.AssistantMessage)
+		if !ok {
+			continue
+		}
+		if call := assistant.ToolByID(domain.ToolCallID("call_1")); call != nil && call.Result != nil && strings.Contains(call.Result.Text, "hi") {
 			sawToolResult = true
 		}
 	}
 	if !sawToolResult {
 		t.Fatal("expected resumed tool result")
 	}
+	waitForChatInactive(t, rt)
 }
 
 func TestRunPromptAllowedToolTransitionsPendingToRunning(t *testing.T) {
@@ -4586,8 +4675,26 @@ func TestRunContinueSendsContinueInstruction(t *testing.T) {
 func TestRunPromptCancellationDoesNotPersistAssistantError(t *testing.T) {
 	t.Parallel()
 
+	requestStarted := make(chan struct{})
+	releaseRequest := make(chan struct{})
+	closeRelease := func() {
+		select {
+		case <-releaseRequest:
+		default:
+			close(releaseRequest)
+		}
+	}
+	t.Cleanup(closeRelease)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		<-r.Context().Done()
+		select {
+		case <-requestStarted:
+		default:
+			close(requestStarted)
+		}
+		select {
+		case <-r.Context().Done():
+		case <-releaseRequest:
+		}
 	}))
 	defer server.Close()
 
@@ -4613,20 +4720,37 @@ func TestRunPromptCancellationDoesNotPersistAssistantError(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	events, err := engine.RunPrompt(ctx, session, "hello")
+	chatRecord := defaultChatForSession(t, st, session.ID)
+	rt, err := engine.Chat(context.Background(), session, chatRecord)
 	if err != nil {
 		t.Fatal(err)
 	}
-	cancel()
+	updates, unsub := rt.Subscribe()
+	defer unsub()
+	rt.Enqueue(chatpkg.QueueItem{Kind: chatpkg.QueueKindSteer, Text: "hello"})
+	select {
+	case <-requestStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timed out waiting for provider request; snapshot=%#v", rt.Snapshot())
+	}
+	rt.Cancel()
+	closeRelease()
 
-	var sawInterrupted bool
-	for evt := range events {
+	events := collectLiveUpdates(t, rt, updates, func(evt domain.Event) bool {
+		return evt.Kind == domain.EventKindStatus && evt.Text == "Interrupted"
+	})
+	for _, evt := range events {
 		if evt.Kind == domain.EventKindStatus && evt.Text == "Interrupted" {
-			sawInterrupted = true
+			continue
 		}
 		if evt.Kind == domain.EventKindError {
 			t.Fatalf("expected interruption status instead of error, got %#v", evt)
+		}
+	}
+	var sawInterrupted bool
+	for _, evt := range events {
+		if evt.Kind == domain.EventKindStatus && evt.Text == "Interrupted" {
+			sawInterrupted = true
 		}
 	}
 	if !sawInterrupted {
@@ -4639,8 +4763,13 @@ func TestRunPromptCancellationDoesNotPersistAssistantError(t *testing.T) {
 	}
 	if len(messages) > 0 {
 		last := messages[len(messages)-1]
-		if last.Role == domain.MessageRoleAssistant {
+		if last.Role == domain.MessageRoleAssistant && strings.HasPrefix(last.Summary, "Error:") {
 			t.Fatalf("did not expect assistant error message after cancellation, got %#v", last)
+		}
+		for _, part := range parts[last.ID] {
+			if part.Kind == domain.PartKindEventNotice && strings.HasPrefix(part.Body, "Error:") {
+				t.Fatalf("did not expect assistant error notice after cancellation, got %#v", part)
+			}
 		}
 	}
 	for _, byMessage := range parts {
@@ -5741,9 +5870,11 @@ func TestRunPromptPersistsInterruptedEventNoticeDuringRetryWait(t *testing.T) {
 	defer st.Close()
 
 	engine := New(cfg, st, tools.NewRegistry(t.TempDir()), nil)
-	ctx, cancel := context.WithCancel(context.Background())
+	var rt *chatpkg.Chat
 	engine.retryPause = func(ctx context.Context, _ time.Duration, _ func(time.Duration)) error {
-		cancel()
+		if rt != nil {
+			rt.Cancel()
+		}
 		<-ctx.Done()
 		return ctx.Err()
 	}
@@ -5752,13 +5883,21 @@ func TestRunPromptPersistsInterruptedEventNoticeDuringRetryWait(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	events, err := engine.RunPrompt(ctx, session, "hello")
+	chatRecord := defaultChatForSession(t, st, session.ID)
+	rt, err = engine.Chat(context.Background(), session, chatRecord)
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(rt.Close)
+	updates, unsub := rt.Subscribe()
+	defer unsub()
+	rt.Enqueue(chatpkg.QueueItem{Kind: chatpkg.QueueKindSteer, Text: "hello"})
 
 	var sawInterrupted bool
-	for evt := range events {
+	events := collectLiveUpdates(t, rt, updates, func(evt domain.Event) bool {
+		return evt.Kind == domain.EventKindStatus && evt.Text == "Interrupted"
+	})
+	for _, evt := range events {
 		if evt.Kind == domain.EventKindStatus && evt.Text == "Interrupted" {
 			sawInterrupted = true
 		}
