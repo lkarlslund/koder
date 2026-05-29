@@ -2722,7 +2722,10 @@ func shouldAutoResumeRestartInterrupted(snapshot chat.Snapshot) bool {
 	if snapshot.Active || snapshot.Status == chat.StatusWaitingApproval {
 		return false
 	}
-	for _, item := range snapshot.QueuedInputs {
+	if hasUserQueuedInput(snapshot) {
+		return false
+	}
+	for _, item := range allSnapshotQueuedInputs(snapshot) {
 		if item.Kind == domain.QueuedInputKindContinue || isAutoResumeRestartMessage(item.Text) {
 			return false
 		}
@@ -2732,6 +2735,35 @@ func shouldAutoResumeRestartInterrupted(snapshot chat.Snapshot) bool {
 	}
 	notice, ok := snapshot.Timeline[len(snapshot.Timeline)-1].Content.(domain.Notice)
 	return ok && notice.Kind == domain.NoticeKindInterrupted && notice.Reason == domain.NoticeReasonProcessRestart
+}
+
+func hasUserQueuedInput(snapshot chat.Snapshot) bool {
+	for _, item := range allSnapshotQueuedInputs(snapshot) {
+		if strings.TrimSpace(item.Source) == domain.UserMessageSourceUser {
+			return true
+		}
+	}
+	return false
+}
+
+func allSnapshotQueuedInputs(snapshot chat.Snapshot) []domain.QueuedInput {
+	seen := map[domain.ID]struct{}{}
+	out := make([]domain.QueuedInput, 0, len(snapshot.Chat.QueuedInputs)+len(snapshot.QueuedInputs))
+	for _, item := range snapshot.Chat.QueuedInputs {
+		if item.ID != "" {
+			seen[item.ID] = struct{}{}
+		}
+		out = append(out, item)
+	}
+	for _, item := range snapshot.QueuedInputs {
+		if item.ID != "" {
+			if _, ok := seen[item.ID]; ok {
+				continue
+			}
+		}
+		out = append(out, item)
+	}
+	return out
 }
 
 func isAutoResumeRestartMessage(text string) bool {
