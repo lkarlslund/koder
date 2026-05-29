@@ -102,6 +102,37 @@ func runLivePromptDefault(t *testing.T, engine *Engine, st *store.Store, session
 	return runLivePrompt(t, engine, session, defaultChatForSession(t, st, session.ID), text)
 }
 
+func runLiveContinueDefault(t *testing.T, engine *Engine, st *store.Store, session domain.Session, note string) []domain.Event {
+	t.Helper()
+	chatRecord := defaultChatForSession(t, st, session.ID)
+	rt, err := engine.Chat(context.Background(), session, chatRecord)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updates, unsub := rt.Subscribe()
+	defer unsub()
+	rt.Enqueue(chatpkg.QueueItem{Kind: chatpkg.QueueKindContinue, Note: note})
+	deadline := time.After(5 * time.Second)
+	var events []domain.Event
+	terminal := false
+	for {
+		select {
+		case update := <-updates:
+			if update.Event != nil {
+				events = append(events, *update.Event)
+				if update.Event.Kind == domain.EventKindMessageDone || update.Event.Kind == domain.EventKindError {
+					terminal = true
+				}
+			}
+			if terminal && (!update.Active || update.Status == chatpkg.StatusErrored) {
+				return events
+			}
+		case <-deadline:
+			t.Fatalf("timed out waiting for live continue; snapshot=%#v", rt.Snapshot())
+		}
+	}
+}
+
 func appendUserTimelineItem(t *testing.T, st *store.Store, chatID domain.ID, text string) domain.TimelineItem {
 	t.Helper()
 	return appendUserTimelineItemWithAttachments(t, st, chatID, text, nil)
@@ -3483,13 +3514,10 @@ func TestRunPromptDoesNotAutoCompactBeforeFirstModelTurn(t *testing.T) {
 	}
 	engine.cfg.AutoCompactAt = existingPct + 1
 
-	events, err := engine.RunPromptInChat(context.Background(), session, sideChat, prompt, nil, nil, "")
-	if err != nil {
-		t.Fatal(err)
-	}
+	events := runLivePrompt(t, engine, session, sideChat, prompt)
 	var sawCompactionStatus bool
 	var sawFinalAnswer bool
-	for evt := range events {
+	for _, evt := range events {
 		if evt.Kind == domain.EventKindStatus && strings.HasPrefix(evt.Text, "Auto-compacting at ~") {
 			sawCompactionStatus = true
 		}
@@ -4546,12 +4574,7 @@ func TestRunContinueSendsContinueInstruction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	events, err := engine.RunContinue(context.Background(), session, "Permission mode changed to write / ask.")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for range events {
-	}
+	_ = runLiveContinueDefault(t, engine, st, session, "Permission mode changed to write / ask.")
 	if len(requests) == 0 || !strings.Contains(requests[0], "Continue from where you left off.") {
 		t.Fatalf("expected continue instruction in request, got %v", requests)
 	}
