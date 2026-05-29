@@ -3407,7 +3407,7 @@ func TestApplyQueuedSteerEmitsPersistedUserMessage(t *testing.T) {
 	}
 }
 
-func TestRunPromptAutoCompactsTargetChatWithPendingPrompt(t *testing.T) {
+func TestRunPromptDoesNotAutoCompactBeforeFirstModelTurn(t *testing.T) {
 	var requests []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/chat/completions" {
@@ -3419,12 +3419,7 @@ func TestRunPromptAutoCompactsTargetChatWithPendingPrompt(t *testing.T) {
 			t.Fatalf("read body: %v", err)
 		}
 		requests = append(requests, string(body))
-		switch {
-		case strings.Contains(string(body), "Summarize this coding session so another agent can continue it with minimal loss."):
-			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"## Goal\ncontinue the side chat\n\n## Next Step\nanswer the pending prompt"}}],"usage":{"total_tokens":1}}`))
-		default:
-			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"done"}}],"usage":{"total_tokens":1}}`))
-		}
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"done"}}],"usage":{"total_tokens":1}}`))
 	}))
 	defer server.Close()
 
@@ -3494,45 +3489,36 @@ func TestRunPromptAutoCompactsTargetChatWithPendingPrompt(t *testing.T) {
 			sawFinalAnswer = true
 		}
 	}
-	if !sawCompactionStatus {
-		t.Fatal("expected auto-compaction before sending pending prompt")
+	if sawCompactionStatus {
+		t.Fatal("did not expect auto-compaction before the first model turn")
 	}
 	if !sawFinalAnswer {
 		t.Fatal("expected final assistant answer")
 	}
-	if len(requests) != 2 {
-		t.Fatalf("expected compaction request and model request, got %d", len(requests))
+	if len(requests) != 1 {
+		t.Fatalf("expected one model request, got %d", len(requests))
 	}
-	if !strings.Contains(requests[0], "Summarize this coding session so another agent can continue it with minimal loss.") {
-		t.Fatalf("expected first request to compact target chat, got %s", requests[0])
-	}
-	if !strings.Contains(requests[1], "pending prompt") || !strings.Contains(requests[1], "Compacted session summary for continuation:") {
-		t.Fatalf("expected second request to send pending prompt after compacted summary, got %s", requests[1])
+	if !strings.Contains(requests[0], "pending prompt") {
+		t.Fatalf("expected model request to include pending prompt, got %s", requests[0])
 	}
 
 	sideTimeline, err := st.TimelineForChat(context.Background(), sideChat.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var sideCompactions int
 	var sawPendingUser bool
 	for _, item := range sideTimeline {
 		switch content := item.Content.(type) {
 		case domain.Compaction:
-			if content.Status == "completed" {
-				sideCompactions++
-			}
+			t.Fatalf("did not expect compaction before first model turn, got %#v", sideTimeline)
 		case domain.UserMessage:
 			if strings.HasPrefix(content.Text, "pending prompt ") {
 				sawPendingUser = true
 			}
 		}
 	}
-	if sideCompactions != 1 {
-		t.Fatalf("expected one compaction on side chat, got %d in %#v", sideCompactions, sideTimeline)
-	}
 	if !sawPendingUser {
-		t.Fatal("expected pending prompt to be persisted after compaction")
+		t.Fatal("expected pending prompt to be persisted")
 	}
 
 	defaultTimeline, err := st.TimelineForChat(context.Background(), defaultChat.ID)
