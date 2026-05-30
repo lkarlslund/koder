@@ -47,14 +47,18 @@ type ReadStoredResult struct {
 	Lines          []ReadStoredLine `json:"lines,omitempty"`
 	Entries        []string         `json:"entries,omitempty"`
 	Footer         string           `json:"footer,omitempty"`
+	StartLine      string           `json:"start_line,omitempty"`
+	EndLine        string           `json:"end_line,omitempty"`
 	Offset         string           `json:"offset,omitempty"`
 	Limit          string           `json:"limit,omitempty"`
 	Start          int              `json:"start,omitempty"`
 	End            int              `json:"end,omitempty"`
 	Total          int              `json:"total,omitempty"`
+	NextStartLine  int              `json:"next_start_line,omitempty"`
 	NextOffset     int              `json:"next_offset,omitempty"`
 	EffectiveLimit int              `json:"effective_limit,omitempty"`
 	AutoCapped     bool             `json:"auto_capped,omitempty"`
+	RangeCapped    bool             `json:"range_capped,omitempty"`
 	ByteCapped     bool             `json:"byte_capped,omitempty"`
 	HasMore        bool             `json:"has_more,omitempty"`
 	Truncated      bool             `json:"truncated,omitempty"`
@@ -948,20 +952,35 @@ func readStoredFooter(result ReadStoredResult) string {
 	}
 	if result.ByteCapped {
 		if result.Total > 0 {
-			return fmt.Sprintf("(showing %s %d-%d of %d, output capped at 64 KiB; use offset=%d limit=%d to continue)", label, result.Start, result.End, result.Total, result.NextOffset, effectiveReadLimit(result))
+			return fmt.Sprintf("(showing %s %d-%d of %d, output capped; use start_line=%d end_line=%d only if you need the next section; prefer grep or a narrower range for specific code)", label, result.Start, result.End, result.Total, nextReadStart(result), nextReadEnd(result))
 		}
-		return fmt.Sprintf("(showing %s %d-%d, output capped at 64 KiB; use offset=%d limit=%d to continue)", label, result.Start, result.End, result.NextOffset, effectiveReadLimit(result))
+		return fmt.Sprintf("(showing %s %d-%d, output capped; use start_line=%d end_line=%d only if you need the next section; prefer grep or a narrower range for specific code)", label, result.Start, result.End, nextReadStart(result), nextReadEnd(result))
 	}
 	if result.HasMore {
-		if result.AutoCapped {
-			return fmt.Sprintf("(showing %s %d-%d of %d, auto-capped; use offset=%d limit=%d to continue)", label, result.Start, result.End, result.Total, result.NextOffset, effectiveReadLimit(result))
+		if result.AutoCapped || result.RangeCapped {
+			return fmt.Sprintf("(showing %s %d-%d of %d, capped at 1000 lines; use start_line=%d end_line=%d only if you need the next section; prefer grep or a narrower range for specific code)", label, result.Start, result.End, result.Total, nextReadStart(result), nextReadEnd(result))
 		}
-		return fmt.Sprintf("(showing %s %d-%d of %d; use offset=%d limit=%d to continue)", label, result.Start, result.End, result.Total, result.NextOffset, effectiveReadLimit(result))
+		return fmt.Sprintf("(showing %s %d-%d of %d; use start_line=%d end_line=%d only if you need the next section; prefer grep or a narrower range for specific code)", label, result.Start, result.End, result.Total, nextReadStart(result), nextReadEnd(result))
 	}
 	if result.Mode == ReadStoredModeDirectory {
 		return fmt.Sprintf("End of directory - total %d entries.", result.Total)
 	}
 	return fmt.Sprintf("End of file - total %d lines.", result.Total)
+}
+
+func nextReadStart(result ReadStoredResult) int {
+	if result.NextStartLine > 0 {
+		return result.NextStartLine
+	}
+	return result.NextOffset
+}
+
+func nextReadEnd(result ReadStoredResult) int {
+	start := nextReadStart(result)
+	if start <= 0 {
+		return 0
+	}
+	return start + effectiveReadLimit(result) - 1
 }
 
 func effectiveReadLimit(result ReadStoredResult) int {

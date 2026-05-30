@@ -195,11 +195,11 @@ func TestResolveFileTruncatesLongContent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(body, "2000: line") {
-		t.Fatalf("expected truncated output to include line 2000, got %q", body)
+	if !strings.Contains(body, "1000: line") {
+		t.Fatalf("expected truncated output to include line 1000, got %q", body)
 	}
-	if strings.Contains(body, "2001: line") {
-		t.Fatalf("expected output to be truncated before line 2001, got %q", body)
+	if strings.Contains(body, "1001: line") {
+		t.Fatalf("expected output to be truncated before line 1001, got %q", body)
 	}
 }
 

@@ -19,14 +19,18 @@ type ReadStoredResult struct {
 	Lines          []ReadStoredLine `json:"lines,omitempty"`
 	Entries        []string         `json:"entries,omitempty"`
 	Footer         string           `json:"footer,omitempty"`
+	StartLine      string           `json:"start_line,omitempty"`
+	EndLine        string           `json:"end_line,omitempty"`
 	Offset         string           `json:"offset,omitempty"`
 	Limit          string           `json:"limit,omitempty"`
 	Start          int              `json:"start,omitempty"`
 	End            int              `json:"end,omitempty"`
 	Total          int              `json:"total,omitempty"`
+	NextStartLine  int              `json:"next_start_line,omitempty"`
 	NextOffset     int              `json:"next_offset,omitempty"`
 	EffectiveLimit int              `json:"effective_limit,omitempty"`
 	AutoCapped     bool             `json:"auto_capped,omitempty"`
+	RangeCapped    bool             `json:"range_capped,omitempty"`
 	ByteCapped     bool             `json:"byte_capped,omitempty"`
 	HasMore        bool             `json:"has_more,omitempty"`
 	Truncated      bool             `json:"truncated,omitempty"`

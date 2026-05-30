@@ -852,7 +852,7 @@ func TestHandleModelToolCallPersistsNormalizationFailure(t *testing.T) {
 	if evt.Kind != domain.EventKindToolResult {
 		t.Fatalf("expected tool result event, got %#v", evt)
 	}
-	if !strings.Contains(evt.Text, "offset must be a positive integer") {
+	if !strings.Contains(evt.Text, "start_line must be a positive integer") {
 		t.Fatalf("expected normalization failure text, got %#v", evt)
 	}
 
@@ -867,7 +867,7 @@ func TestHandleModelToolCallPersistsNormalizationFailure(t *testing.T) {
 	if len(got) != 1 || got[0].Kind != domain.PartKindToolOutput {
 		t.Fatalf("expected one tool output part, got %#v", got)
 	}
-	if !strings.Contains(got[0].Body, "offset must be a positive integer") {
+	if !strings.Contains(got[0].Body, "start_line must be a positive integer") {
 		t.Fatalf("expected persisted failure body, got %#v", got[0])
 	}
 }
@@ -3905,7 +3905,7 @@ func TestContinueModelTurnAutoCompactsAfterToolResultChurn(t *testing.T) {
 
 	dir := t.TempDir()
 	largePath := filepath.Join(dir, "large.txt")
-	largeContent := strings.Repeat("tool output line\n", 3000)
+	largeContent := strings.Repeat("tool output line "+strings.Repeat("x", 70)+"\n", 3000)
 	if err := os.WriteFile(largePath, []byte(largeContent), 0o644); err != nil {
 		t.Fatal(err)
 	}

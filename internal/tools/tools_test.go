@@ -160,7 +160,7 @@ func TestBashFractionalTimeoutStillFails(t *testing.T) {
 	}
 }
 
-func TestReadWholeFloatStringOffsetAndLimitAreAccepted(t *testing.T) {
+func TestReadWholeFloatStringStartAndEndLinesAreAccepted(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "file.txt")
 	if err := os.WriteFile(path, []byte("1\n2\n3\n4\n5\n6\n"), 0o644); err != nil {
@@ -171,9 +171,9 @@ func TestReadWholeFloatStringOffsetAndLimitAreAccepted(t *testing.T) {
 	result, err := registry.Execute(context.Background(), tools.Request{
 		Tool: domain.ToolKindRead,
 		Args: map[string]string{
-			"path":   "file.txt",
-			"offset": "3.00000",
-			"limit":  "2.00000",
+			"path":       "file.txt",
+			"start_line": "3.00000",
+			"end_line":   "4.00000",
 		},
 	})
 	if err != nil {
@@ -185,18 +185,18 @@ func TestReadWholeFloatStringOffsetAndLimitAreAccepted(t *testing.T) {
 	if strings.Contains(result.Output, "1: 1") || strings.Contains(result.Output, "6: 6") {
 		t.Fatalf("expected read window to apply, got %q", result.Output)
 	}
-	if !strings.Contains(result.Output, "(showing lines 3-4 of 6; use offset=5 limit=2 to continue)") {
+	if !strings.Contains(result.Output, "(showing lines 3-4 of 6; use start_line=5 end_line=6 only if you need the next section; prefer grep or a narrower range for specific code)") {
 		t.Fatalf("expected continuation footer, got %q", result.Output)
 	}
-	if got := result.Meta["offset"]; got != "3" {
-		t.Fatalf("expected normalized offset metadata, got %q", got)
+	if got := result.Meta["start_line"]; got != "3" {
+		t.Fatalf("expected normalized start_line metadata, got %q", got)
 	}
-	if got := result.Meta["limit"]; got != "2" {
-		t.Fatalf("expected normalized limit metadata, got %q", got)
+	if got := result.Meta["end_line"]; got != "4" {
+		t.Fatalf("expected normalized end_line metadata, got %q", got)
 	}
 }
 
-func TestReadFractionalOffsetFails(t *testing.T) {
+func TestReadFractionalStartLineFails(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "file.txt")
 	if err := os.WriteFile(path, []byte("1\n2\n3\n"), 0o644); err != nil {
@@ -207,11 +207,11 @@ func TestReadFractionalOffsetFails(t *testing.T) {
 	_, err := registry.Execute(context.Background(), tools.Request{
 		Tool: domain.ToolKindRead,
 		Args: map[string]string{
-			"path":   "file.txt",
-			"offset": "3.5",
+			"path":       "file.txt",
+			"start_line": "3.5",
 		},
 	})
-	if err == nil || !strings.Contains(err.Error(), "offset must be a positive integer") {
+	if err == nil || !strings.Contains(err.Error(), "start_line must be a positive integer") {
 		t.Fatalf("expected positive integer error, got %v", err)
 	}
 }

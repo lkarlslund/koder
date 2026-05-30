@@ -19,11 +19,12 @@ import (
 )
 
 const (
-	DefaultReadLineLimit   = 2000
-	DefaultReadByteLimit   = 64 * 1024
-	DefaultToolOutputLimit = 64 * 1024
-	DefaultBashTimeout     = 5 * time.Minute
-	MaxBashTimeout         = 10 * time.Minute
+	DefaultReadLineLimit       = 1000
+	DefaultReadByteLimit       = 64 * 1024
+	DefaultReadOutputCharLimit = 100000
+	DefaultToolOutputLimit     = 64 * 1024
+	DefaultBashTimeout         = 5 * time.Minute
+	MaxBashTimeout             = 10 * time.Minute
 )
 
 func FirstArg(args map[string]string, keys ...string) string {

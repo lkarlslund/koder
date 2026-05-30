@@ -39,9 +39,9 @@ func TestPresentationIncludesPathAndLineRange(t *testing.T) {
 	got := tool{}.Presentation(tools.Request{
 		Tool: domain.ToolKindRead,
 		Args: map[string]string{
-			"path":   "internal/tools/readtool/read.go",
-			"offset": "10",
-			"limit":  "5",
+			"path":       "internal/tools/readtool/read.go",
+			"start_line": "10",
+			"end_line":   "14",
 		},
 	})
 	if got.Title != "Read file internal/tools/readtool/read.go, lines 10-14" {
@@ -68,18 +68,18 @@ func TestExecutePagesLargeFilesWithContinuationHint(t *testing.T) {
 	if !strings.Contains(result.Output, "1: line1") {
 		t.Fatalf("expected first line, got %q", result.Output)
 	}
-	if !strings.Contains(result.Output, "2000: line2000") {
-		t.Fatalf("expected page to include line 2000")
+	if !strings.Contains(result.Output, "1000: line1000") {
+		t.Fatalf("expected page to include line 1000")
 	}
-	if strings.Contains(result.Output, "2001: line2001") {
-		t.Fatalf("expected first page to stop before line 2001")
+	if strings.Contains(result.Output, "1001: line1001") {
+		t.Fatalf("expected first page to stop before line 1001")
 	}
-	wantFooter := "(showing lines 1-2000 of 2505, auto-capped; use offset=2001 limit=2000 to continue)"
+	wantFooter := "(showing lines 1-1000 of 2505, capped at 1000 lines; use start_line=1001 end_line=2000 only if you need the next section; prefer grep or a narrower range for specific code)"
 	if !strings.Contains(result.Output, wantFooter) {
 		t.Fatalf("expected continuation footer %q, got %q", wantFooter, result.Output)
 	}
-	if got := result.Meta["next_offset"]; got != "2001" {
-		t.Fatalf("expected next_offset 2001, got %q", got)
+	if got := result.Meta["next_start_line"]; got != "1001" {
+		t.Fatalf("expected next_start_line 1001, got %q", got)
 	}
 	if got := result.Meta["total"]; got != "2505" {
 		t.Fatalf("expected total 2505, got %q", got)
@@ -95,8 +95,8 @@ func TestExecuteReadsSecondPageAndReportsEOF(t *testing.T) {
 
 	result, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: workspace}, tools.Request{
 		Args: map[string]string{
-			"path":   "long.txt",
-			"offset": "2001",
+			"path":       "long.txt",
+			"start_line": "2001",
 		},
 	})
 	if err != nil {
@@ -125,8 +125,9 @@ func TestExecuteRespectsExplicitLimitAndNextOffset(t *testing.T) {
 
 	result, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: workspace}, tools.Request{
 		Args: map[string]string{
-			"path":  "limited.txt",
-			"limit": "10",
+			"path":       "limited.txt",
+			"start_line": "1",
+			"end_line":   "10",
 		},
 	})
 	if err != nil {
@@ -138,13 +139,13 @@ func TestExecuteRespectsExplicitLimitAndNextOffset(t *testing.T) {
 	if strings.Contains(result.Output, "11: line11") {
 		t.Fatalf("expected output to stop before line 11")
 	}
-	wantFooter := "(showing lines 1-10 of 100; use offset=11 limit=10 to continue)"
+	wantFooter := "(showing lines 1-10 of 100; use start_line=11 end_line=20 only if you need the next section; prefer grep or a narrower range for specific code)"
 	if !strings.Contains(result.Output, wantFooter) {
 		t.Fatalf("expected explicit-limit footer %q, got %q", wantFooter, result.Output)
 	}
 }
 
-func TestExecuteRejectsOutOfRangeOffsets(t *testing.T) {
+func TestExecuteRejectsOutOfRangeStartLines(t *testing.T) {
 	workspace := t.TempDir()
 	target := filepath.Join(workspace, "small.txt")
 	if err := os.WriteFile(target, []byte(numberedLines(3)), 0o644); err != nil {
@@ -153,17 +154,17 @@ func TestExecuteRejectsOutOfRangeOffsets(t *testing.T) {
 
 	_, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: workspace}, tools.Request{
 		Args: map[string]string{
-			"path":   "small.txt",
-			"offset": "4",
-			"limit":  "5",
+			"path":       "small.txt",
+			"start_line": "4",
+			"end_line":   "8",
 		},
 	})
-	if err == nil || !strings.Contains(err.Error(), "offset 4 is out of range for this file (3 lines)") {
+	if err == nil || !strings.Contains(err.Error(), "start_line 4 is out of range for this file (3 lines)") {
 		t.Fatalf("expected out-of-range file error, got %v", err)
 	}
 }
 
-func TestExecuteHandlesEmptyFileOffsets(t *testing.T) {
+func TestExecuteHandlesEmptyFileStartLines(t *testing.T) {
 	workspace := t.TempDir()
 	target := filepath.Join(workspace, "empty.txt")
 	if err := os.WriteFile(target, nil, 0o644); err != nil {
@@ -182,11 +183,11 @@ func TestExecuteHandlesEmptyFileOffsets(t *testing.T) {
 
 	_, err = tool{}.Execute(context.Background(), tools.Runtime{Workdir: workspace}, tools.Request{
 		Args: map[string]string{
-			"path":   "empty.txt",
-			"offset": "2",
+			"path":       "empty.txt",
+			"start_line": "2",
 		},
 	})
-	if err == nil || !strings.Contains(err.Error(), "offset 2 is out of range for this file (0 lines)") {
+	if err == nil || !strings.Contains(err.Error(), "start_line 2 is out of range for this file (0 lines)") {
 		t.Fatalf("expected out-of-range empty-file error, got %v", err)
 	}
 }
@@ -209,9 +210,9 @@ func TestExecutePagesDirectories(t *testing.T) {
 
 	result, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: workspace}, tools.Request{
 		Args: map[string]string{
-			"path":   "entries",
-			"offset": "6",
-			"limit":  "5",
+			"path":       "entries",
+			"start_line": "6",
+			"end_line":   "10",
 		},
 	})
 	if err != nil {
@@ -228,16 +229,16 @@ func TestExecutePagesDirectories(t *testing.T) {
 	if strings.Contains(result.Output, names[10]) {
 		t.Fatalf("expected directory page to exclude next entry %q", names[10])
 	}
-	wantFooter := "(showing entries 6-10 of 12; use offset=11 limit=5 to continue)"
+	wantFooter := "(showing entries 6-10 of 12; use start_line=11 end_line=15 only if you need the next section; prefer grep or a narrower range for specific code)"
 	if !strings.Contains(result.Output, wantFooter) {
 		t.Fatalf("expected directory continuation footer %q, got %q", wantFooter, result.Output)
 	}
 
 	finalPage, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: workspace}, tools.Request{
 		Args: map[string]string{
-			"path":   "entries",
-			"offset": "11",
-			"limit":  "5",
+			"path":       "entries",
+			"start_line": "11",
+			"end_line":   "15",
 		},
 	})
 	if err != nil {
@@ -251,13 +252,13 @@ func TestExecutePagesDirectories(t *testing.T) {
 	}
 }
 
-func TestExecuteReportsByteCapWithContinuationHint(t *testing.T) {
+func TestExecuteRejectsOutputOverCharacterLimit(t *testing.T) {
 	workspace := t.TempDir()
 	target := filepath.Join(workspace, "wide.txt")
 	var builder strings.Builder
-	for i := 1; i <= 80; i++ {
+	for i := 1; i <= 120; i++ {
 		builder.WriteString(strings.Repeat("x", 1000))
-		if i < 80 {
+		if i < 120 {
 			builder.WriteByte('\n')
 		}
 	}
@@ -265,23 +266,11 @@ func TestExecuteReportsByteCapWithContinuationHint(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: workspace}, tools.Request{
+	_, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: workspace}, tools.Request{
 		Args: map[string]string{"path": "wide.txt"},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(result.Output, "output capped at 64 KiB") {
-		t.Fatalf("expected byte-cap footer, got %q", result.Output)
-	}
-	if !strings.Contains(result.Output, "use offset=") {
-		t.Fatalf("expected continuation hint in byte-capped output, got %q", result.Output)
-	}
-	if got := result.Meta["byte_capped"]; got != "true" {
-		t.Fatalf("expected byte_capped=true, got %q", got)
-	}
-	if got := result.Meta["truncated"]; got != "true" {
-		t.Fatalf("expected truncated=true, got %q", got)
+	if err == nil || !strings.Contains(err.Error(), "exceeds the 100000 character limit") {
+		t.Fatalf("expected character-limit error, got %v", err)
 	}
 }
 
@@ -306,8 +295,8 @@ func TestExecutePagesDirectoriesInStableSortedOrder(t *testing.T) {
 
 	result, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: workspace}, tools.Request{
 		Args: map[string]string{
-			"path":  "sorted",
-			"limit": "4",
+			"path":     "sorted",
+			"end_line": "4",
 		},
 	})
 	if err != nil {
