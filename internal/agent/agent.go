@@ -438,12 +438,9 @@ func (l *engineTurnLoop) Step(ctx context.Context, turn *chatpkg.TurnState, step
 	if buildErr != nil {
 		return chatpkg.TurnStepResult{}, buildErr
 	}
-	shouldCheckAutoCompact := steps > 0 || e.enteredAfterCompletedToolTurn(ctx, chat, turn)
 	if l.skipAutoCompactOnce {
-		shouldCheckAutoCompact = false
 		l.skipAutoCompactOnce = false
-	}
-	if shouldCheckAutoCompact {
+	} else {
 		compacted, compactErr := e.autoCompactAtTurnBoundary(ctx, session, chat, turn, client, messages, out)
 		if compactErr != nil {
 			return chatpkg.TurnStepResult{}, compactErr
@@ -2337,12 +2334,12 @@ func parseToolCall(text string) (*tools.Request, string) {
 
 func (e *Engine) autoCompactAtTurnBoundary(ctx context.Context, session domain.Session, chat domain.Chat, turn *chatpkg.TurnState, client *provider.Client, messages []provider.Message, out chan<- domain.Event) (bool, error) {
 	threshold := e.autoCompactThreshold(chat.ProviderID)
-	estimated, ok := e.estimateRequestUsagePercent(chat, messages)
-	if !ok || estimated < threshold {
+	used, ok := e.autoCompactUsagePercent(chat, messages)
+	if !ok || used < threshold {
 		return false, nil
 	}
 	if out != nil {
-		out <- domain.Event{Kind: domain.EventKindStatus, Text: fmt.Sprintf("Auto-compacting at ~%d%% estimated context used", estimated)}
+		out <- domain.Event{Kind: domain.EventKindStatus, Text: fmt.Sprintf("Auto-compacting at ~%d%% context used", used)}
 	}
 	if turn != nil {
 		if err := e.compactTurnSession(ctx, session, chat, turn, client, "auto", out); err != nil {
@@ -2354,33 +2351,41 @@ func (e *Engine) autoCompactAtTurnBoundary(ctx context.Context, session domain.S
 	return true, nil
 }
 
-func (e *Engine) enteredAfterCompletedToolTurn(ctx context.Context, chat domain.Chat, turn *chatpkg.TurnState) bool {
-	timeline := []domain.TimelineItem(nil)
-	if turn != nil {
-		timeline = turn.Timeline()
-	} else if e.store != nil && chat.ID != "" {
-		items, err := e.store.TimelineForChat(ctx, chat.ID)
-		if err == nil {
-			timeline = items
-		}
-	}
-	if len(timeline) == 0 {
-		return false
-	}
-	assistant, ok := timeline[len(timeline)-1].Content.(domain.AssistantMessage)
-	if !ok || len(assistant.Tools) == 0 {
-		return false
-	}
-	for _, tool := range assistant.Tools {
-		if tool.Status == domain.ToolStatusAwaitingApproval || tool.Status == domain.ToolStatusPending || tool.Status == domain.ToolStatusRunning {
-			return false
-		}
-	}
-	return true
-}
-
 func (e *Engine) autoCompactThreshold(providerID domain.ID) int {
 	return max(1, e.cfg.AutoCompactAt)
+}
+
+func (e *Engine) autoCompactUsagePercent(chat domain.Chat, messages []provider.Message) (int, bool) {
+	estimated, estimatedOK := e.estimateRequestUsagePercent(chat, messages)
+	known, knownOK := e.knownContextUsagePercent(chat)
+	switch {
+	case estimatedOK && knownOK:
+		return max(estimated, known), true
+	case estimatedOK:
+		return estimated, true
+	case knownOK:
+		return known, true
+	default:
+		return 0, false
+	}
+}
+
+func (e *Engine) knownContextUsagePercent(chat domain.Chat) (int, bool) {
+	if !e.cfg.HasUsableProvider(chat.ProviderID) {
+		return 0, false
+	}
+	contextWindow := e.cfg.ContextWindow(chat.ProviderID, chat.ModelID)
+	if contextWindow <= 0 || chat.LastKnownContextTokens <= 0 {
+		return 0, false
+	}
+	percent := (chat.LastKnownContextTokens * 100) / contextWindow
+	if percent < 0 {
+		percent = 0
+	}
+	if percent > 100 {
+		percent = 100
+	}
+	return percent, true
 }
 
 func (e *Engine) estimateRequestUsagePercent(chat domain.Chat, messages []provider.Message) (int, bool) {
