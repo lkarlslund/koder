@@ -942,179 +942,94 @@ func milestoneByRef(plan store.MilestonePlan, ref string) (store.Milestone, bool
 }
 
 func (c *Controller) GetMilestonePlan(ctx context.Context, sessionID domain.ID) (store.MilestonePlan, error) {
-	c.mu.RLock()
-	if sessionID == c.session.ID {
-		plan := c.milestone
-		c.mu.RUnlock()
-		if plan.SessionID != "" || len(plan.Milestones) > 0 || strings.TrimSpace(plan.Summary) != "" {
-			return plan, nil
+	if c.agent != nil {
+		if owner, err := c.agent.LoadSession(ctx, sessionID); err == nil {
+			return owner.GetMilestonePlan(ctx, sessionID)
 		}
-	} else {
-		c.mu.RUnlock()
 	}
 	return c.store.GetMilestonePlan(ctx, sessionID)
 }
 
 func (c *Controller) SetMilestonePlan(ctx context.Context, sessionID domain.ID, summary string, milestones []store.Milestone) (store.MilestonePlan, error) {
-	plan := store.MilestonePlan{
-		SessionID:  sessionID,
-		Summary:    summary,
-		Milestones: slices.Clone(milestones),
-		UpdatedAt:  time.Now().UTC(),
-	}
-	var previous store.MilestonePlan
-	c.mu.Lock()
-	if c.session.ID == sessionID {
-		previous = c.milestone
-		c.milestone = plan
-	}
-	c.mu.Unlock()
-	if err := c.store.PutMilestonePlan(ctx, plan); err != nil {
-		c.mu.Lock()
-		if c.session.ID == sessionID {
-			c.milestone = previous
+	if c.agent != nil {
+		if owner, err := c.agent.LoadSession(ctx, sessionID); err == nil {
+			plan, err := owner.SetMilestonePlan(ctx, sessionID, summary, milestones)
+			if err != nil {
+				return store.MilestonePlan{}, err
+			}
+			c.refreshPlanningFromOwner(owner)
+			return plan, nil
 		}
-		c.mu.Unlock()
-		return store.MilestonePlan{}, err
 	}
-	return plan, nil
+	return c.store.SetMilestonePlan(ctx, sessionID, summary, milestones)
 }
 
 func (c *Controller) AddTodoItems(ctx context.Context, sessionID domain.ID, milestoneRef string, contents []string) ([]store.TodoItem, error) {
-	now := time.Now().UTC()
-	var previousByRef map[string][]store.TodoItem
-	var previousActive []store.TodoItem
-	var items []store.TodoItem
-	c.mu.Lock()
-	if c.session.ID == sessionID {
-		previousByRef = cloneTodosByRef(c.todosByRef)
-		previousActive = slices.Clone(c.todos)
-		c.todosByRef = cloneTodosByRef(c.todosByRef)
-		if c.todosByRef == nil {
-			c.todosByRef = map[string][]store.TodoItem{}
-		}
-		position := len(c.todosByRef[milestoneRef])
-		items = make([]store.TodoItem, 0, len(contents))
-		for _, content := range contents {
-			item := store.TodoItem{
-				ID:           domain.NewID(),
-				SessionID:    sessionID,
-				MilestoneRef: milestoneRef,
-				Content:      content,
-				Status:       domain.TodoStatusPending,
-				Position:     position + len(items),
-				CreatedAt:    now,
-				UpdatedAt:    now,
+	if c.agent != nil {
+		if owner, err := c.agent.LoadSession(ctx, sessionID); err == nil {
+			created, err := owner.AddTodoItems(ctx, sessionID, milestoneRef, contents)
+			if err != nil {
+				return nil, err
 			}
-			items = append(items, item)
-		}
-		c.todosByRef[milestoneRef] = append(c.todosByRef[milestoneRef], items...)
-		if active, ok := tools.ActiveMilestone(c.milestone); ok && active.Ref == milestoneRef {
-			c.todos = slices.Clone(c.todosByRef[milestoneRef])
+			c.refreshPlanningFromOwner(owner)
+			return created, nil
 		}
 	}
-	c.mu.Unlock()
-	if items == nil {
-		created, err := c.store.AddTodoItems(ctx, sessionID, milestoneRef, contents)
-		if err != nil {
-			return nil, err
-		}
-		return created, nil
-	}
-	for _, item := range items {
-		if err := c.store.PutTodoItem(ctx, item); err != nil {
-			c.mu.Lock()
-			if c.session.ID == sessionID {
-				c.todosByRef = previousByRef
-				c.todos = previousActive
-			}
-			c.mu.Unlock()
-			return nil, err
-		}
-	}
-	return items, nil
+	return c.store.AddTodoItems(ctx, sessionID, milestoneRef, contents)
 }
 
 func (c *Controller) UpdateTodoItem(ctx context.Context, todoID domain.ID, status domain.TodoStatus, content string) (store.TodoItem, error) {
-	now := time.Now().UTC()
-	var item store.TodoItem
-	var found bool
-	var previousByRef map[string][]store.TodoItem
-	var previousActive []store.TodoItem
-	c.mu.Lock()
-	previousByRef = cloneTodosByRef(c.todosByRef)
-	previousActive = slices.Clone(c.todos)
-	for ref, todos := range c.todosByRef {
-		for idx := range todos {
-			if todos[idx].ID != todoID {
-				continue
+	c.mu.RLock()
+	sessionID := c.session.ID
+	c.mu.RUnlock()
+	if c.agent != nil && sessionID != "" {
+		if owner, err := c.agent.LoadSession(ctx, sessionID); err == nil {
+			updated, err := owner.UpdateTodoItem(ctx, todoID, status, content)
+			if err != nil {
+				return store.TodoItem{}, err
 			}
-			item = todos[idx]
-			item.Status = status
-			if strings.TrimSpace(content) != "" {
-				item.Content = content
-			}
-			item.UpdatedAt = now
-			c.todosByRef = cloneTodosByRef(c.todosByRef)
-			c.todosByRef[ref][idx] = item
-			updateTodoInSlice(c.todos, item)
-			found = true
-			break
-		}
-		if found {
-			break
+			c.refreshPlanningFromOwner(owner)
+			return updated, nil
 		}
 	}
-	c.mu.Unlock()
-	if !found {
-		updated, err := c.store.UpdateTodoItem(ctx, todoID, status, content)
-		if err != nil {
-			return store.TodoItem{}, err
-		}
-		return updated, nil
-	}
-	if err := c.store.PutTodoItem(ctx, item); err != nil {
-		c.mu.Lock()
-		c.todosByRef = previousByRef
-		c.todos = previousActive
-		c.mu.Unlock()
-		return store.TodoItem{}, err
-	}
-	return item, nil
+	return c.store.UpdateTodoItem(ctx, todoID, status, content)
 }
 
 func (c *Controller) ListTodos(ctx context.Context, sessionID domain.ID, milestoneRef string) ([]store.TodoItem, error) {
-	c.mu.RLock()
-	if c.session.ID == sessionID && c.todosByRef != nil {
-		items := slices.Clone(c.todosByRef[milestoneRef])
-		c.mu.RUnlock()
-		return items, nil
+	if c.agent != nil {
+		if owner, err := c.agent.LoadSession(ctx, sessionID); err == nil {
+			return owner.ListTodos(ctx, sessionID, milestoneRef)
+		}
 	}
-	c.mu.RUnlock()
 	return c.store.ListTodos(ctx, sessionID, milestoneRef)
 }
 
 func (c *Controller) AddTask(ctx context.Context, sessionID domain.ID, body string, status domain.TaskStatus) (store.Task, error) {
-	task := store.Task{
-		ID:        domain.NewID(),
-		SessionID: sessionID,
-		Body:      body,
-		Status:    status,
-		CreatedAt: time.Now().UTC(),
-	}
-	if err := c.store.PutTask(ctx, task); err != nil {
-		return store.Task{}, err
-	}
-	return task, nil
-}
-
-func updateTodoInSlice(items []store.TodoItem, item store.TodoItem) {
-	for idx := range items {
-		if items[idx].ID == item.ID {
-			items[idx] = item
-			return
+	if c.agent != nil {
+		if owner, err := c.agent.LoadSession(ctx, sessionID); err == nil {
+			task, err := owner.AddTask(ctx, sessionID, body, status)
+			if err != nil {
+				return store.Task{}, err
+			}
+			c.refreshPlanningFromOwner(owner)
+			return task, nil
 		}
 	}
+	return c.store.AddTask(ctx, sessionID, body, status)
+}
+
+func (c *Controller) refreshPlanningFromOwner(owner *agent.Session) {
+	if owner == nil {
+		return
+	}
+	snapshot := owner.Snapshot()
+	c.mu.Lock()
+	if c.session.ID == snapshot.Session.ID {
+		c.milestone = snapshot.Plan
+		c.todos = snapshot.Todos
+		c.todosByRef = snapshot.TodosByRef
+	}
+	c.mu.Unlock()
 }
 
 func (c *Controller) addStartedChat(ctx context.Context, status tools.ChatStatus) error {
