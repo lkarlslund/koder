@@ -1970,9 +1970,37 @@
         },
         toolDefaultRows() { return this.settings?.tool_defaults || []; },
         toolDefaultTool(item) { return item.tool || item.Tool || ''; },
+        toolDefaultLabel(item) { return item.label || item.Label || this.toolDefaultTool(item); },
+        toolDefaultGroupID(item) { return item.group || item.Group || this.toolDefaultTool(item); },
+        toolDefaultGroupLabel(item) { return item.group_label || item.GroupLabel || this.toolDefaultGroupID(item); },
         toolDefaultEnabled(item) { return item.enabled ?? item.Enabled ?? true; },
         setToolDefaultEnabled(item, enabled) {
           if ('enabled' in item) item.enabled = enabled; else item.Enabled = enabled;
+        },
+        toolDefaultGroups() {
+          const groups = new Map();
+          for (const item of this.toolDefaultRows()) {
+            const id = this.toolDefaultGroupID(item);
+            if (!groups.has(id)) groups.set(id, {id, label: this.toolDefaultGroupLabel(item), items: []});
+            groups.get(id).items.push(item);
+          }
+          return Array.from(groups.values()).map(group => {
+            group.items.sort((a, b) => this.toolDefaultTool(a).localeCompare(this.toolDefaultTool(b)));
+            return group;
+          });
+        },
+        toolGroupEnabled(group) {
+          const items = group?.items || [];
+          return items.length > 0 && items.every(item => this.toolDefaultEnabled(item));
+        },
+        toolGroupPartial(group) {
+          const items = group?.items || [];
+          if (items.length === 0) return false;
+          const enabled = items.filter(item => this.toolDefaultEnabled(item)).length;
+          return enabled > 0 && enabled < items.length;
+        },
+        setToolGroupEnabled(group, enabled) {
+          for (const item of group?.items || []) this.setToolDefaultEnabled(item, enabled);
         },
         saveSettings() {
           if (!this.settings) return;

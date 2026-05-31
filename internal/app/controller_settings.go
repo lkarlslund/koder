@@ -879,9 +879,36 @@ func toolDefaultPreferencesFromConfig(src map[domain.ToolKind]bool) []ToolDefaul
 		if value, ok := src[kind]; ok {
 			enabled = value
 		}
-		out = append(out, ToolDefaultPreference{Tool: kind, Enabled: enabled})
+		group, groupLabel := toolDefaultGroup(kind)
+		out = append(out, ToolDefaultPreference{
+			Tool:       kind,
+			Enabled:    enabled,
+			Label:      kind.String(),
+			Group:      group,
+			GroupLabel: groupLabel,
+		})
 	}
 	return out
+}
+
+func toolDefaultGroup(kind domain.ToolKind) (string, string) {
+	switch kind {
+	case domain.ToolKindWebFetch, domain.ToolKindWebSearch:
+		return "web", "Web"
+	case domain.ToolKindExecCommand, domain.ToolKindExecStatus, domain.ToolKindExecList, domain.ToolKindExecWriteStdin, domain.ToolKindExecResize, domain.ToolKindExecTerminate, domain.ToolKindExecCleanup:
+		return "exec", "Exec"
+	case domain.ToolKindChatList, domain.ToolKindChatStart, domain.ToolKindChatPoll, domain.ToolKindChatArchive, domain.ToolKindChatStartDecomposition, domain.ToolKindChatStartExecution:
+		return "chat", "Chat"
+	case domain.ToolKindMilestoneList, domain.ToolKindMilestoneAdd, domain.ToolKindMilestoneUpdate, domain.ToolKindMilestonePlan, domain.ToolKindMilestoneWrite:
+		return "milestone", "Milestone"
+	case domain.ToolKindTodoList, domain.ToolKindTodoAddItems, domain.ToolKindTodoUpdateItem, domain.ToolKindTodoFetchNext:
+		return "todo", "Todo"
+	case domain.ToolKindViewImage, domain.ToolKindShowImage:
+		return "image", "Image"
+	default:
+		key := kind.String()
+		return key, kind.DisplayName()
+	}
 }
 
 func applyGeneralPreferences(cfg *config.Config, prefs GeneralPreferences) error {

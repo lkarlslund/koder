@@ -431,6 +431,18 @@ func TestControllerSavePreferencesPersistsConfigAndPrompts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	foundWebSearch := false
+	for _, item := range prefs.ToolDefaults {
+		if item.Tool == domain.ToolKindWebSearch {
+			foundWebSearch = true
+			if item.Group != "web" || item.GroupLabel != "Web" || item.Label != "web_search" {
+				t.Fatalf("expected web_search tool grouping metadata, got %#v", item)
+			}
+		}
+	}
+	if !foundWebSearch {
+		t.Fatalf("expected web_search tool default in %#v", prefs.ToolDefaults)
+	}
 	prefs.General.MaxToolLoopSteps = 77
 	prefs.UI.Theme = "dark"
 	prefs.Compaction.UseChatModel = false

@@ -240,8 +240,11 @@ type AccessPreferences struct {
 
 // ToolDefaultPreference is one default per-session tool enabled toggle.
 type ToolDefaultPreference struct {
-	Tool    domain.ToolKind `json:"tool"`
-	Enabled bool            `json:"enabled"`
+	Tool       domain.ToolKind `json:"tool"`
+	Enabled    bool            `json:"enabled"`
+	Label      string          `json:"label,omitempty"`
+	Group      string          `json:"group,omitempty"`
+	GroupLabel string          `json:"group_label,omitempty"`
 }
 
 // ComposerCompletions describes completion candidates for composer trigger tokens.

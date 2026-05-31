@@ -1107,8 +1107,11 @@ func TestIndexServesHTML(t *testing.T) {
 		t.Fatalf("expected access settings to use structured controls")
 	}
 	if !strings.Contains(fullPage, `settingsTab === 'tools'`) ||
-		!strings.Contains(fullPage, `toolDefaultRows()`) ||
+		!strings.Contains(fullPage, `toolDefaultGroups()`) ||
+		!strings.Contains(fullPage, `setToolGroupEnabled(group, $event.target.checked)`) ||
+		!strings.Contains(fullPage, `toolGroupPartial(group)`) ||
 		!strings.Contains(fullPage, `setToolDefaultEnabled(item, $event.target.checked)`) ||
+		!strings.Contains(document, `settings-tool-group`) ||
 		!strings.Contains(document, `toggle-switch-input`) ||
 		!strings.Contains(document, `toggle-switch-track`) ||
 		strings.Contains(document, `form-check-input`) ||

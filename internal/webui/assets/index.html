@@ -679,12 +679,23 @@
                   </div>
                 </div>
                 <div class="settings-tool-defaults">
-                  <template x-for="item in toolDefaultRows()" :key="toolDefaultTool(item)">
-                    <label class="settings-tool-default toggle-switch">
-                      <input class="toggle-switch-input" type="checkbox" :checked="toolDefaultEnabled(item)" @change="setToolDefaultEnabled(item, $event.target.checked)">
-                      <span class="toggle-switch-track" aria-hidden="true"></span>
-                      <span class="toggle-switch-label text-truncate" x-text="toolDefaultTool(item)"></span>
-                    </label>
+                  <template x-for="group in toolDefaultGroups()" :key="group.id">
+                    <section class="settings-tool-group">
+                      <label class="settings-tool-group-header toggle-switch">
+                        <input class="toggle-switch-input" type="checkbox" :checked="toolGroupEnabled(group)" x-effect="$el.indeterminate = toolGroupPartial(group)" @change="setToolGroupEnabled(group, $event.target.checked)">
+                        <span class="toggle-switch-track" aria-hidden="true"></span>
+                        <span class="toggle-switch-label text-truncate" x-text="group.label"></span>
+                      </label>
+                      <div class="settings-tool-children">
+                        <template x-for="item in group.items" :key="toolDefaultTool(item)">
+                          <label class="settings-tool-default toggle-switch">
+                            <input class="toggle-switch-input" type="checkbox" :checked="toolDefaultEnabled(item)" @change="setToolDefaultEnabled(item, $event.target.checked)">
+                            <span class="toggle-switch-track" aria-hidden="true"></span>
+                            <span class="toggle-switch-label text-truncate" x-text="toolDefaultLabel(item)"></span>
+                          </label>
+                        </template>
+                      </div>
+                    </section>
                   </template>
                 </div>
               </div>
