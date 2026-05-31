@@ -298,6 +298,18 @@ func (r *Registry) Execute(ctx context.Context, req Request) (Result, error) {
 	return tool.Execute(ctx, r.runtime, req)
 }
 
+func (r *Registry) ExecuteWithRuntime(ctx context.Context, runtime Runtime, req Request) (Result, error) {
+	req, tool, err := normalizeRequest(req)
+	if err != nil {
+		return Result{}, err
+	}
+	runtime = mergeRuntime(r.runtime, runtime)
+	if err := chatrole.CheckToolAllowed(runtime.ChatRole, req.Tool); err != nil {
+		return Result{}, err
+	}
+	return tool.Execute(ctx, runtime, req)
+}
+
 func (r *Registry) ExecuteWithSession(ctx context.Context, st *store.Store, sessionID domain.ID, req Request) (Result, error) {
 	return r.ExecuteWithChat(ctx, st, sessionID, domain.Chat{}, req)
 }
@@ -328,6 +340,66 @@ func (r *Registry) ExecuteWithChat(ctx context.Context, st *store.Store, session
 		return Result{}, err
 	}
 	return tool.Execute(ctx, runtime, req)
+}
+
+func mergeRuntime(base, override Runtime) Runtime {
+	out := base
+	if override.Workdir != "" {
+		out.Workdir = override.Workdir
+	}
+	if override.HTTPClient != nil {
+		out.HTTPClient = override.HTTPClient
+	}
+	if override.Store != nil {
+		out.Store = override.Store
+	}
+	if override.SessionID != "" {
+		out.SessionID = override.SessionID
+	}
+	if override.ChatID != "" {
+		out.ChatID = override.ChatID
+	}
+	if override.ChatRole != "" {
+		out.ChatRole = override.ChatRole
+	}
+	if override.ActiveMilestoneRef != "" {
+		out.ActiveMilestoneRef = override.ActiveMilestoneRef
+	}
+	if override.AssignedTodoBucketRef != "" {
+		out.AssignedTodoBucketRef = override.AssignedTodoBucketRef
+	}
+	if override.AssignedTodoRef != "" {
+		out.AssignedTodoRef = override.AssignedTodoRef
+	}
+	if override.ChatControl != nil {
+		out.ChatControl = override.ChatControl
+	}
+	if override.SessionControl != nil {
+		out.SessionControl = override.SessionControl
+	}
+	if override.ToolResultControl != nil {
+		out.ToolResultControl = override.ToolResultControl
+	}
+	if override.Exec != nil {
+		out.Exec = override.Exec
+	}
+	if override.MCP != nil {
+		out.MCP = override.MCP
+	}
+	if override.SandboxProfiles != nil {
+		out.SandboxProfiles = override.SandboxProfiles
+	}
+	if override.DefaultSandboxProfile != "" {
+		out.DefaultSandboxProfile = override.DefaultSandboxProfile
+	}
+	if runtimeProfileSet(override.SandboxProfile) {
+		out.SandboxProfile = override.SandboxProfile
+	}
+	return out
+}
+
+func runtimeProfileSet(profile permissionprofile.Profile) bool {
+	return profile.Network || profile.Root != "" || profile.Workspace != "" || len(profile.Mounts) > 0 || len(profile.Rules) > 0
 }
 
 func (r Runtime) sandboxProfileForSession(ctx context.Context, st *store.Store, sessionID domain.ID) permissionprofile.Profile {

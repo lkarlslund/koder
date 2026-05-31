@@ -50,6 +50,8 @@ type Engine struct {
 	exec       *execruntime.Manager
 	envMu      sync.Mutex
 	envPrompts map[domain.ID]string
+	sessionMu  sync.RWMutex
+	sessions   map[domain.ID]*Session
 	chatMu     sync.RWMutex
 	chats      map[domain.ID]*chatpkg.Chat
 	runs       map[domain.ID]chatRunState
@@ -88,6 +90,7 @@ func New(cfg config.Config, st *store.Store, registry *tools.Registry, debug *de
 		agents:     agents.NewManager(cfg.StateDir(), filepath.Join(filepath.Dir(cfg.Path()), "AGENTS.md")),
 		mcp:        mcpManager,
 		exec:       execManager,
+		sessions:   map[domain.ID]*Session{},
 		chats:      map[domain.ID]*chatpkg.Chat{},
 		runs:       map[domain.ID]chatRunState{},
 		retryPause: waitForRetry,
@@ -2039,7 +2042,7 @@ func (e *Engine) baseInstructionsForChat(session domain.Session, chat domain.Cha
 }
 
 func (e *Engine) toolRuntime(session domain.Session, chat domain.Chat) tools.Runtime {
-	return tools.Runtime{
+	runtime := tools.Runtime{
 		Workdir:               sessionProjectRoot(session),
 		Store:                 e.store,
 		SessionID:             session.ID,
@@ -2050,6 +2053,19 @@ func (e *Engine) toolRuntime(session domain.Session, chat domain.Chat) tools.Run
 		AssignedTodoRef:       chat.AssignedTodoRef,
 		MCP:                   e.mcp,
 	}
+	if owner := e.loadedSession(session.ID); owner != nil {
+		runtime.SessionControl = owner
+	}
+	return runtime
+}
+
+func (e *Engine) loadedSession(sessionID domain.ID) *Session {
+	if e == nil || sessionID == "" {
+		return nil
+	}
+	e.sessionMu.RLock()
+	defer e.sessionMu.RUnlock()
+	return e.sessions[sessionID]
 }
 
 func compactedHistoryMessage(summary string) provider.Message {
@@ -3371,11 +3387,21 @@ func (e *Engine) executePreparedToolCallForTurn(ctx context.Context, turn *chatp
 			}
 		}
 	}
-	chat, chatErr := e.store.GetChat(ctx, chatID)
-	if chatErr != nil {
-		return nil, chatErr
+	var (
+		session domain.Session
+		chat    domain.Chat
+	)
+	if turn != nil {
+		session = turn.Session()
+		chat = turn.Chat()
+	} else {
+		var chatErr error
+		session, chat, chatErr = e.persistedToolCallState(ctx, domain.Session{ID: sessionID}, domain.Chat{ID: chatID})
+		if chatErr != nil {
+			return nil, chatErr
+		}
 	}
-	result, err := e.registry.ExecuteWithChat(ctx, e.store, sessionID, chat, req)
+	result, err := e.registry.ExecuteWithRuntime(ctx, e.toolRuntime(session, chat), req)
 	if err != nil {
 		e.recordLifecycle(sessionID, "tool_execution_failed", err.Error(), map[string]string{"tool": string(req.Tool), "tool_call_id": req.ToolCallID})
 		if interruptedErr(err) {
