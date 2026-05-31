@@ -976,13 +976,13 @@ func analyzeTranscriptItem(item domain.TimelineItem) analyzedTranscriptMessage {
 		for _, tool := range content.Tools {
 			out.hasToolCall = true
 			if tool.Tool != 0 {
-				out.toolNames = append(out.toolNames, tool.Tool.String())
+				out.toolNames = append(out.toolNames, tool.Tool.DisplayName())
 			}
 		}
 	case domain.ToolExecution:
 		out.role = domain.MessageRoleTool
 		out.kind = string(domain.TimelineKindTool)
-		out.toolNames = append(out.toolNames, content.Tool.String())
+		out.toolNames = append(out.toolNames, content.Tool.DisplayName())
 		if content.Result != nil {
 			out.text = strings.TrimSpace(content.Result.Text)
 		}

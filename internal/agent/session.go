@@ -3,7 +3,6 @@ package agent
 import (
 	"context"
 	"fmt"
-	"maps"
 	"os"
 	"strings"
 
@@ -81,7 +80,10 @@ func (e *Engine) CreateSession(ctx context.Context, title, projectRoot string) (
 	if err := sessionstore.UpdateSession(ctx, e.store, session.ID, func(session *domain.Session) {
 		session.ProjectRoot = projectRoot
 		session.AccessSettings = e.cfg.Access
-		session.ToolStates = maps.Clone(e.cfg.ToolDefaults)
+		session.ToolStates = make(domain.ToolStates, len(e.cfg.ToolDefaults))
+		for kind, enabled := range e.cfg.ToolDefaults {
+			session.ToolStates[kind] = enabled
+		}
 	}); err != nil {
 		return nil, err
 	}

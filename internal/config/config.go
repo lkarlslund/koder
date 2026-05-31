@@ -543,11 +543,13 @@ func parseToolDefaultKind(name string) (domain.ToolKind, error) {
 	if kind, ok := toolDefaultKindAliases[normalized]; ok {
 		return kind, nil
 	}
-	kind, err := domain.ToolKindString(normalized)
-	if err != nil {
-		return 0, fmt.Errorf("unknown tool default %q", name)
+	for _, kind := range domain.ToolKindValues() {
+		canonical := strings.NewReplacer("_", "", "-", "").Replace(strings.ToLower(kind.String()))
+		if canonical == normalized {
+			return kind, nil
+		}
 	}
-	return kind, nil
+	return 0, fmt.Errorf("unknown tool default %q", name)
 }
 
 func mergeBuiltinPermissionProfileDefaults(dst map[string]PermissionProfile, defaults map[string]PermissionProfile) {

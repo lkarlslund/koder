@@ -1821,7 +1821,7 @@ func (r *Chat) markPersistError(err error) error {
 }
 
 func runningToolStatusText(tool domain.ToolKind) string {
-	toolName := strings.TrimSpace(tool.String())
+	toolName := strings.TrimSpace(tool.DisplayName())
 	if toolName == "" {
 		return "Running tool"
 	}
@@ -1829,7 +1829,7 @@ func runningToolStatusText(tool domain.ToolKind) string {
 }
 
 func toolCallDeltaStatusText(evt domain.Event) string {
-	toolName := strings.TrimSpace(evt.Tool.String())
+	toolName := strings.TrimSpace(evt.Tool.DisplayName())
 	if toolName == "" {
 		toolName = "tool"
 	} else {

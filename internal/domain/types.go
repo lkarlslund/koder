@@ -7,7 +7,7 @@ import (
 	"github.com/lkarlslund/koder/internal/accesssettings"
 )
 
-//go:generate go tool enumer -type=MessageRole,PartKind,ToolKind,PermissionMode,ApprovalStatus,TaskStatus,MilestoneStatus,TodoStatus,EventKind,QueuedInputKind -trimprefix=MessageRole,PartKind,ToolKind,PermissionMode,ApprovalStatus,TaskStatus,MilestoneStatus,TodoStatus,EventKind,QueuedInputKind -json -text -values -output=messagerole_enumer.go
+//go:generate go tool enumer -type=MessageRole,PartKind,PermissionMode,ApprovalStatus,TaskStatus,MilestoneStatus,TodoStatus,EventKind,QueuedInputKind -trimprefix=MessageRole,PartKind,PermissionMode,ApprovalStatus,TaskStatus,MilestoneStatus,TodoStatus,EventKind,QueuedInputKind -json -text -values -output=messagerole_enumer.go
 type MessageRole uint8
 
 const (
@@ -36,6 +36,7 @@ const (
 	PartKindEventNotice
 )
 
+//go:generate go tool enumer -type=ToolKind -trimprefix=ToolKind -transform=snake -json -text -values -output=toolkind_enumer.go
 type ToolKind uint8
 
 const (
@@ -95,6 +96,8 @@ type PermissionOverride struct {
 	Pattern string
 	Action  PermissionMode
 }
+
+type ToolStates map[ToolKind]bool
 
 type ApprovalStatus uint8
 
@@ -160,7 +163,7 @@ type Session struct {
 	TitleRefreshCount int
 	PermissionProfile string
 	PermissionRules   []PermissionOverride
-	ToolStates        map[ToolKind]bool
+	ToolStates        ToolStates
 	AccessSettings    accesssettings.Settings
 	ProjectRoot       string
 	ProjectChecksum   string
@@ -184,7 +187,7 @@ type Chat struct {
 	ProviderID             string
 	ModelID                string
 	PermissionProfile      string
-	ToolStates             map[ToolKind]bool
+	ToolStates             ToolStates
 	ActiveMilestoneRef     string
 	AssignedTodoBucketRef  string
 	AssignedTodoRef        ID

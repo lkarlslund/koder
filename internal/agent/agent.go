@@ -330,7 +330,7 @@ func (e *Engine) ApproveToolForTurn(ctx context.Context, turn *chatpkg.TurnState
 			Kind: domain.EventKindStatus,
 			Text: fmt.Sprintf("approved all %s requests matching %s for this session", next.Tool, next.Pattern),
 			Meta: map[string]string{
-				"permission_tool":  next.Tool.String(),
+				"permission_tool":    next.Tool.String(),
 				"permission_pattern": next.Pattern,
 			},
 		}
@@ -1342,15 +1342,16 @@ func (t *toolLoopTracker) trackCalls(calls []tools.Request) (continuationPause, 
 	if t.repeatCount < repeatedToolLoopThreshold {
 		return continuationPause{}, false
 	}
+	toolName := calls[0].Tool.DisplayName()
 	return continuationPause{
 		Reason:   continuationPauseReasonRepeatedTool,
 		Tool:     calls[0].Tool,
 		Count:    t.repeatCount,
-		Subtitle: fmt.Sprintf("Repeated identical %s calls", calls[0].Tool),
+		Subtitle: fmt.Sprintf("Repeated identical %s calls", toolName),
 		Body: fmt.Sprintf(
 			"Paused continuation after %d identical %s calls with the same input. The model kept retrying the same tool instead of reacting to the result.",
 			t.repeatCount,
-			calls[0].Tool,
+			toolName,
 		),
 	}, true
 }
@@ -1379,7 +1380,7 @@ func (e *Engine) pauseContinuation(ctx context.Context, chatID, sessionID domain
 	}
 	e.recordLifecycle(sessionID, "model_turn_paused", body, map[string]string{
 		"reason": string(pause.Reason),
-		"tool":  pause.Tool.String(),
+		"tool":   pause.Tool.String(),
 		"count":  strconv.Itoa(pause.Count),
 		"limit":  strconv.Itoa(pause.Limit),
 	})
@@ -1389,7 +1390,7 @@ func (e *Engine) pauseContinuation(ctx context.Context, chatID, sessionID domain
 		Reason:   string(pause.Reason),
 		Title:    title,
 		Subtitle: subtitle,
-		Tool:  pause.Tool.String(),
+		Tool:     pause.Tool.String(),
 		Count:    pause.Count,
 		Limit:    pause.Limit,
 	})
@@ -1407,7 +1408,7 @@ func continuationPauseSubtitle(pause continuationPause) string {
 	switch pause.Reason {
 	case continuationPauseReasonRepeatedTool:
 		if pause.Tool != 0 {
-			return fmt.Sprintf("Repeated identical %s calls", pause.Tool.String())
+			return fmt.Sprintf("Repeated identical %s calls", pause.Tool.DisplayName())
 		}
 		return "Repeated identical tool calls"
 	case continuationPauseReasonTurnLimit:
@@ -1437,15 +1438,15 @@ func (e *Engine) persistTranscriptNotice(ctx context.Context, chatID, sessionID 
 		}
 	}
 	item, err := chatstore.AppendTimeline(ctx, e.store, chatID, domain.Notice{
-		Level:  strings.TrimSpace(meta.Severity),
-		Text:  body,
-		Kind:  strings.TrimSpace(meta.Kind),
-		Reason:  strings.TrimSpace(meta.Reason),
-		Title:  strings.TrimSpace(meta.Title),
+		Level:    strings.TrimSpace(meta.Severity),
+		Text:     body,
+		Kind:     strings.TrimSpace(meta.Kind),
+		Reason:   strings.TrimSpace(meta.Reason),
+		Title:    strings.TrimSpace(meta.Title),
 		Subtitle: strings.TrimSpace(meta.Subtitle),
-		Tool:  noticeTool,
-		Count:  meta.Count,
-		Limit:  meta.Limit,
+		Tool:     noticeTool,
+		Count:    meta.Count,
+		Limit:    meta.Limit,
 	})
 	if err != nil {
 		return domain.TimelineItem{}, false
@@ -3486,7 +3487,7 @@ func (e *Engine) recordApprovalReply(ctx context.Context, chatID, sessionID doma
 	body := fmt.Sprintf("Approval %s %s for %s: %s", approvalID, status, tool, preview)
 	payload := map[string]string{
 		"approval_id": approvalID,
-		"tool":  tool.String(),
+		"tool":        tool.String(),
 		"status":      status,
 		"command":     preview,
 	}
