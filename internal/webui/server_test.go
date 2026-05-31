@@ -1101,11 +1101,19 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `settingsTab === 'access'`) ||
 		!strings.Contains(fullPage, `addAccessMount(settings.access.settings)`) ||
 		!strings.Contains(fullPage, `cloneAccessSettings(preset.settings)`) ||
-		!strings.Contains(fullPage, `toolDefaultRows()`) ||
 		strings.Contains(fullPage, `settingsPermissionsText`) ||
 		strings.Contains(fullPage, `settingsToolDefaultsText`) ||
 		strings.Contains(fullPage, `Permission profiles JSON`) {
 		t.Fatalf("expected access settings to use structured controls")
+	}
+	if !strings.Contains(fullPage, `settingsTab === 'tools'`) ||
+		!strings.Contains(fullPage, `toolDefaultRows()`) ||
+		!strings.Contains(fullPage, `setToolDefaultEnabled(item, $event.target.checked)`) ||
+		!strings.Contains(document, `toggle-switch-input`) ||
+		!strings.Contains(document, `toggle-switch-track`) ||
+		strings.Contains(document, `form-check-input`) ||
+		strings.Contains(document, `settings-checks`) {
+		t.Fatalf("expected tools settings and boolean preferences to use shared toggle sliders")
 	}
 	if !strings.Contains(fullPage, `showToast`) {
 		t.Fatalf("expected toast error path")

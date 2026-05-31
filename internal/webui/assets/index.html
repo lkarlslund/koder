@@ -539,8 +539,12 @@
                   <label class="form-label small text-secondary">Store backend</label>
                   <input class="form-control" x-model="settings.general.store_backend" autocomplete="off">
                 </div>
-                <div class="col-12 settings-checks">
-                  <label class="form-check"><input class="form-check-input" type="checkbox" x-model="settings.ui.auto_continue"> <span class="form-check-label">Auto continue</span></label>
+                <div class="col-12 settings-toggles">
+                  <label class="toggle-switch">
+                    <input class="toggle-switch-input" type="checkbox" x-model="settings.ui.auto_continue">
+                    <span class="toggle-switch-track" aria-hidden="true"></span>
+                    <span class="toggle-switch-label">Auto continue</span>
+                  </label>
                 </div>
               </div>
 
@@ -667,6 +671,24 @@
                 </div>
               </div>
 
+              <div x-show="settingsTab === 'tools'">
+                <div class="settings-list-header">
+                  <div>
+                    <div class="fw-semibold">Tools</div>
+                    <div class="small text-secondary">Globally enable or disable tools for new turns</div>
+                  </div>
+                </div>
+                <div class="settings-tool-defaults">
+                  <template x-for="item in toolDefaultRows()" :key="toolDefaultTool(item)">
+                    <label class="settings-tool-default toggle-switch">
+                      <input class="toggle-switch-input" type="checkbox" :checked="toolDefaultEnabled(item)" @change="setToolDefaultEnabled(item, $event.target.checked)">
+                      <span class="toggle-switch-track" aria-hidden="true"></span>
+                      <span class="toggle-switch-label text-truncate" x-text="toolDefaultTool(item)"></span>
+                    </label>
+                  </template>
+                </div>
+              </div>
+
               <div x-show="settingsTab === 'access'">
                 <div class="settings-list-header">
                   <div>
@@ -740,17 +762,6 @@
                         </div>
                       </template>
                     </div>
-                    <div class="mt-4">
-                      <div class="fw-semibold mb-2">Default tool availability</div>
-                      <div class="settings-tool-defaults">
-                        <template x-for="item in toolDefaultRows()" :key="toolDefaultTool(item)">
-                          <label class="settings-tool-default">
-                            <input class="form-check-input" type="checkbox" :checked="toolDefaultEnabled(item)" @change="setToolDefaultEnabled(item, $event.target.checked)">
-                            <span class="text-truncate" x-text="toolDefaultTool(item)"></span>
-                          </label>
-                        </template>
-                      </div>
-                    </div>
                   </div>
                 </template>
               </div>
@@ -817,9 +828,17 @@
               <label class="form-label small text-secondary">Timeout</label>
               <input class="form-control" x-model="providerDraft.timeout" placeholder="10m" autocomplete="off">
             </div>
-            <div class="col-12 settings-checks">
-              <label class="form-check"><input class="form-check-input" type="checkbox" x-model="providerDraft.stream"> <span class="form-check-label">Stream</span></label>
-              <label class="form-check"><input class="form-check-input" type="checkbox" x-model="providerDraft.disabled"> <span class="form-check-label">Disabled</span></label>
+            <div class="col-12 settings-toggles">
+              <label class="toggle-switch">
+                <input class="toggle-switch-input" type="checkbox" x-model="providerDraft.stream">
+                <span class="toggle-switch-track" aria-hidden="true"></span>
+                <span class="toggle-switch-label">Stream</span>
+              </label>
+              <label class="toggle-switch">
+                <input class="toggle-switch-input" type="checkbox" x-model="providerDraft.disabled">
+                <span class="toggle-switch-track" aria-hidden="true"></span>
+                <span class="toggle-switch-label">Disabled</span>
+              </label>
             </div>
             <div class="col-12">
               <div class="settings-inline-status">
@@ -939,9 +958,17 @@
               <label class="form-label small text-secondary">Bearer token env</label>
               <input class="form-control" x-model="mcpDraft.bearer_token_env" autocomplete="off">
             </div>
-            <div class="col-12 settings-checks">
-              <label class="form-check"><input class="form-check-input" type="checkbox" x-model="mcpDraft.disabled"> <span class="form-check-label">Disabled</span></label>
-              <label class="form-check"><input class="form-check-input" type="checkbox" x-model="mcpDraft.disable_standalone_sse"> <span class="form-check-label">Disable standalone SSE</span></label>
+            <div class="col-12 settings-toggles">
+              <label class="toggle-switch">
+                <input class="toggle-switch-input" type="checkbox" x-model="mcpDraft.disabled">
+                <span class="toggle-switch-track" aria-hidden="true"></span>
+                <span class="toggle-switch-label">Disabled</span>
+              </label>
+              <label class="toggle-switch">
+                <input class="toggle-switch-input" type="checkbox" x-model="mcpDraft.disable_standalone_sse">
+                <span class="toggle-switch-track" aria-hidden="true"></span>
+                <span class="toggle-switch-label">Disable standalone SSE</span>
+              </label>
             </div>
             <div class="col-12">
               <label class="form-label small text-secondary">Headers JSON</label>

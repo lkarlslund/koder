@@ -1755,9 +1755,9 @@
           this.settings = state || {};
           this.providerState = this.settings.providers || this.providerState;
         },
-        settingsTabs() { return ['general', 'access', 'compaction', 'prompts', 'providers', 'models', 'mcp']; },
+        settingsTabs() { return ['general', 'access', 'tools', 'compaction', 'prompts', 'providers', 'models', 'mcp']; },
         settingsTabLabel(tab) {
-          return {general: 'General', access: 'Access', compaction: 'Compaction', prompts: 'Prompts', providers: 'Providers', models: 'Models', mcp: 'MCP'}[tab] || tab;
+          return {general: 'General', access: 'Access', tools: 'Tools', compaction: 'Compaction', prompts: 'Prompts', providers: 'Providers', models: 'Models', mcp: 'MCP'}[tab] || tab;
         },
         compactionModelValue() {
           const c = this.settings?.compaction || {};
