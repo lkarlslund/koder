@@ -170,7 +170,6 @@ func runWeb(ctx context.Context, cfg config.Config, st *store.Store, engine *age
 	controller := uicore.New(cfg, st, engine)
 	if registry != nil {
 		registry.SetChatControl(controller)
-		registry.SetSessionControl(controller)
 	}
 	if err := controller.Start(ctx, mode, workdir); err != nil {
 		return err

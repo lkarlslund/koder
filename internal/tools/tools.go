@@ -258,10 +258,6 @@ func (r *Registry) SetChatControl(control ChatControl) {
 	r.runtime.ChatControl = control
 }
 
-func (r *Registry) SetSessionControl(control SessionControl) {
-	r.runtime.SessionControl = control
-}
-
 func (r *Registry) SetToolResultControl(control ToolResultControl) {
 	r.runtime.ToolResultControl = control
 }
@@ -304,35 +300,6 @@ func (r *Registry) ExecuteWithRuntime(ctx context.Context, runtime Runtime, req 
 		return Result{}, err
 	}
 	runtime = mergeRuntime(r.runtime, runtime)
-	if err := chatrole.CheckToolAllowed(runtime.ChatRole, req.Tool); err != nil {
-		return Result{}, err
-	}
-	return tool.Execute(ctx, runtime, req)
-}
-
-func (r *Registry) ExecuteWithSession(ctx context.Context, st *store.Store, sessionID domain.ID, req Request) (Result, error) {
-	return r.ExecuteWithChat(ctx, st, sessionID, domain.Chat{}, req)
-}
-
-func (r *Registry) ExecuteWithChat(ctx context.Context, st *store.Store, sessionID domain.ID, chat domain.Chat, req Request) (Result, error) {
-	req, tool, err := normalizeRequest(req)
-	if err != nil {
-		return Result{}, err
-	}
-	runtime := r.runtime
-	runtime.Store = st
-	runtime.SessionID = sessionID
-	runtime.ChatID = chat.ID
-	runtime.ChatRole = chat.WorkflowRole
-	runtime.ActiveMilestoneRef = chat.ActiveMilestoneRef
-	runtime.AssignedTodoBucketRef = chat.AssignedTodoBucketRef
-	runtime.AssignedTodoRef = chat.AssignedTodoRef
-	if st != nil && sessionID != "" {
-		if session, err := st.GetSession(ctx, sessionID); err == nil {
-			runtime.Workdir = strings.TrimSpace(session.ProjectRoot)
-		}
-	}
-	runtime.SandboxProfile = runtime.sandboxProfileForSession(ctx, st, sessionID)
 	if err := chatrole.CheckToolAllowed(runtime.ChatRole, req.Tool); err != nil {
 		return Result{}, err
 	}
@@ -415,10 +382,6 @@ func (r Runtime) sandboxProfileForSession(ctx context.Context, st *store.Store, 
 	return permissionprofile.Normalize(permissionprofile.Profile{})
 }
 
-func (r *Registry) PersistResult(ctx context.Context, st *store.Store, sessionID domain.ID, req Request, result Result) (<-chan domain.Event, error) {
-	return r.PersistResultInChat(ctx, st, sessionID, "", req, result)
-}
-
 func (r *Registry) PersistResultWithRuntime(ctx context.Context, runtime Runtime, req Request, result Result) (<-chan domain.Event, error) {
 	if req.Tool == "" {
 		return nil, errors.New("tool is empty")
@@ -432,36 +395,6 @@ func (r *Registry) PersistResultWithRuntime(ctx context.Context, runtime Runtime
 	}
 	runtime = mergeRuntime(r.runtime, runtime)
 	ctx = WithChatID(ctx, runtime.ChatID)
-	if persister, ok := tool.(resultPersister); ok {
-		return persister.PersistResult(ctx, runtime, req, result)
-	}
-	return PersistStandardResult(ctx, runtime, req, result)
-}
-
-func (r *Registry) PersistResultInChat(ctx context.Context, st *store.Store, sessionID, chatID domain.ID, req Request, result Result) (<-chan domain.Event, error) {
-	if req.Tool == "" {
-		return nil, errors.New("tool is empty")
-	}
-	tool, ok := Lookup(req.Tool)
-	if !ok {
-		return nil, fmt.Errorf("unsupported tool %q", req.Tool)
-	}
-	if req.Args == nil {
-		req.Args = map[string]string{}
-	}
-	ctx = WithChatID(ctx, chatID)
-	runtime := r.runtime
-	runtime.Store = st
-	runtime.SessionID = sessionID
-	runtime.ChatID = chatID
-	if st != nil && chatID != "" {
-		if chat, err := st.GetChat(ctx, chatID); err == nil {
-			runtime.ChatRole = chat.WorkflowRole
-			runtime.ActiveMilestoneRef = chat.ActiveMilestoneRef
-			runtime.AssignedTodoBucketRef = chat.AssignedTodoBucketRef
-			runtime.AssignedTodoRef = chat.AssignedTodoRef
-		}
-	}
 	if persister, ok := tool.(resultPersister); ok {
 		return persister.PersistResult(ctx, runtime, req, result)
 	}

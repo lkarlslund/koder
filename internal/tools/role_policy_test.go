@@ -38,9 +38,11 @@ func TestExecuteWithChatRejectsRoleForbiddenTool(t *testing.T) {
 	t.Cleanup(func() { _ = st.Close() })
 
 	registry := tools.NewRegistry(t.TempDir())
-	_, err = registry.ExecuteWithChat(context.Background(), st, "session-1", domain.Chat{
-		ID:           "chat-1",
-		WorkflowRole: chatrole.Decomposition,
+	_, err = registry.ExecuteWithRuntime(context.Background(), tools.Runtime{
+		Store:     st,
+		SessionID: "session-1",
+		ChatID:    "chat-1",
+		ChatRole:  chatrole.Decomposition,
 	}, tools.Request{
 		Tool: domain.ToolKindBash,
 		Args: map[string]string{"command": "echo no"},
