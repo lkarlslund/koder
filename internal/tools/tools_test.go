@@ -50,7 +50,7 @@ func TestReadCurrentDirectoryListsFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	registry := tools.NewRegistry(dir)
+	registry := tools.NewRegistry()
 	result, err := registry.Execute(context.Background(), testRuntime(dir), tools.Request{
 		Tool: domain.ToolKindRead,
 		Args: map[string]string{"path": "."},
@@ -74,7 +74,7 @@ func TestReadCurrentDirectoryListsFiles(t *testing.T) {
 
 func TestBashZeroTimeoutUsesDefault(t *testing.T) {
 	dir := t.TempDir()
-	registry := tools.NewRegistry(dir)
+	registry := tools.NewRegistry()
 
 	result, err := registry.Execute(context.Background(), testRuntime(dir), tools.Request{
 		Tool: domain.ToolKindBash,
@@ -95,7 +95,7 @@ func TestBashZeroTimeoutUsesDefault(t *testing.T) {
 }
 
 func TestMCPToolUsesRegistryMCPExecutor(t *testing.T) {
-	registry := tools.NewRegistry(t.TempDir())
+	registry := tools.NewRegistry()
 	fake := &fakeMCPExecutor{
 		result: tools.Result{Output: "mcp ok"},
 	}
@@ -124,7 +124,7 @@ func TestMCPToolUsesRegistryMCPExecutor(t *testing.T) {
 
 func TestBashWholeFloatStringTimeoutIsAccepted(t *testing.T) {
 	dir := t.TempDir()
-	registry := tools.NewRegistry(dir)
+	registry := tools.NewRegistry()
 
 	result, err := registry.Execute(context.Background(), testRuntime(dir), tools.Request{
 		Tool: domain.ToolKindBash,
@@ -146,7 +146,7 @@ func TestBashWholeFloatStringTimeoutIsAccepted(t *testing.T) {
 
 func TestBashFractionalTimeoutStillFails(t *testing.T) {
 	dir := t.TempDir()
-	registry := tools.NewRegistry(dir)
+	registry := tools.NewRegistry()
 
 	_, err := registry.Execute(context.Background(), testRuntime(dir), tools.Request{
 		Tool: domain.ToolKindBash,
@@ -166,7 +166,7 @@ func TestReadWholeFloatStringStartAndEndLinesAreAccepted(t *testing.T) {
 	if err := os.WriteFile(path, []byte("1\n2\n3\n4\n5\n6\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	registry := tools.NewRegistry(dir)
+	registry := tools.NewRegistry()
 
 	result, err := registry.Execute(context.Background(), testRuntime(dir), tools.Request{
 		Tool: domain.ToolKindRead,
@@ -202,7 +202,7 @@ func TestReadFractionalStartLineFails(t *testing.T) {
 	if err := os.WriteFile(path, []byte("1\n2\n3\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	registry := tools.NewRegistry(dir)
+	registry := tools.NewRegistry()
 
 	_, err := registry.Execute(context.Background(), testRuntime(dir), tools.Request{
 		Tool: domain.ToolKindRead,

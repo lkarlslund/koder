@@ -23,7 +23,7 @@ func TestManagerStartStatusAndWriteStdin(t *testing.T) {
 	}
 	snap, err = mgr.WriteStdin(context.Background(), WriteStdinRequest{
 		SessionID:  "session-1",
-		ChatID:    "chat-2",
+		ChatID:     "chat-2",
 		ProcessID:  snap.ProcessID,
 		Chars:      "hello\n",
 		CloseStdin: true,

@@ -235,7 +235,7 @@ func Info(kind domain.ToolKind) ToolSpec {
 	return normalizeToolSpec(kind, ToolSpec{})
 }
 
-func NewRegistry(_ ...string) *Registry {
+func NewRegistry() *Registry {
 	return &Registry{}
 }
 

@@ -136,7 +136,7 @@ func runKoder(ctx context.Context, mode app.StartupMode, workdir string, startup
 		_ = mcpManager.ConnectAll(context.Background())
 	}()
 
-	registry := tools.NewRegistry("")
+	registry := tools.NewRegistry()
 	engine := agent.New(cfg, st, registry, recorder, mcpManager)
 	return runWeb(ctx, cfg, st, engine, registry, mode, recorder, workdir, startupOpts)
 }

@@ -1296,7 +1296,7 @@ func newTestControllerWithExec(t *testing.T) (*Controller, *store.Store, *execru
 	}
 	t.Cleanup(func() { _ = st.Close() })
 	workdir := t.TempDir()
-	registry := tools.NewRegistry(workdir)
+	registry := tools.NewRegistry()
 	execManager := execruntime.NewManager()
 	engine := agent.New(cfg, st, registry, nil)
 	engine.SetExecManager(execManager)

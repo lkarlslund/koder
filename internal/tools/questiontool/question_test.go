@@ -42,7 +42,7 @@ func TestPersistResult(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	events, err := tools.NewRegistry(t.TempDir()).PersistResult(context.Background(), tools.Runtime{Store: st, SessionID: session.ID}, tools.Request{
+	events, err := tools.NewRegistry().PersistResult(context.Background(), tools.Runtime{Store: st, SessionID: session.ID}, tools.Request{
 		Tool: domain.ToolKindQuestion,
 		Args: map[string]string{"question": "What next?"},
 	}, tools.Result{
