@@ -212,6 +212,22 @@
     function renderShowImageBlock(data, fallbackText) {
       return renderImagePreviewBlock('Showed image', data, fallbackText, false);
     }
+    function readRangeLabel(args, data) {
+      const requestedStart = firstValue(args, ['start_line', 'StartLine']);
+      const requestedEnd = firstValue(args, ['end_line', 'EndLine']);
+      if (!requestedStart && !requestedEnd) return '';
+      const start = requestedStart || firstValue(data, ['start_line', 'StartLine', 'start', 'Start']);
+      const end = requestedEnd || firstValue(data, ['end_line', 'EndLine', 'end', 'End']);
+      if (start && end) return 'lines ' + start + '-' + end;
+      if (start) return 'from line ' + start;
+      if (end) return 'through line ' + end;
+      return '';
+    }
+    function readTitle(path, args, data) {
+      const base = path ? 'Read ' + path : 'Read';
+      const range = readRangeLabel(args, data);
+      return range ? base + ', ' + range : base;
+    }
     function toolTitleText(tool) {
       const kind = String((tool && tool.tool) || '');
       const data = toolData(tool);
@@ -219,7 +235,7 @@
       const path = firstValue(data, ['path', 'Path']) || firstValue(args, ['path']);
       const command = firstValue(data, ['command', 'Command']) || firstValue(args, ['command']);
       switch (kind) {
-        case 'read': return path ? 'Read ' + path : 'Read';
+        case 'read': return readTitle(path, args, data);
         case 'write': return path ? 'Write ' + path : 'Write file';
         case 'edit': return path ? 'Edit ' + path : 'Edit file';
         case 'bash': {
@@ -290,7 +306,7 @@
         const path = firstValue(data, ['path', 'Path']) || firstValue(args, ['path']) || 'read';
         const storedLines = data.lines || data.Lines || [];
         const lines = storedLines.length ? storedLines.map(line => (line.number || line.Number || '') + ': ' + (line.text || line.Text || '')) : toolResultText(tool);
-        return renderCompactBlock(path, lines);
+        return renderCompactBlock(readTitle(path, args, data), lines);
       }
       if (kind === 'bash') {
         return renderCompactBlock('Output', firstValue(data, ['output', 'Output']) || toolResultText(tool));

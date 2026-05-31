@@ -779,6 +779,11 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `if (!id) throw new Error('timeline delta missing item id')`) || !strings.Contains(fullPage, `return existingID === id`) {
 		t.Fatalf("expected browser timeline patching to require stable item ids")
 	}
+	if !strings.Contains(fullPage, `function readRangeLabel(args, data)`) ||
+		!strings.Contains(fullPage, `if (!requestedStart && !requestedEnd) return ''`) ||
+		!strings.Contains(fullPage, `return renderCompactBlock(readTitle(path, args, data), lines)`) {
+		t.Fatalf("expected read tool rendering to include requested line ranges")
+	}
 	if !strings.Contains(fullPage, `:key="item.id || item.ID"`) || strings.Contains(fullPage, `timelineKey(item)`) {
 		t.Fatalf("expected transcript rows to use item ids directly")
 	}
