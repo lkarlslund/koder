@@ -245,18 +245,7 @@ func (s *Session) NewChat(ctx context.Context, parentChatID domain.ID, title str
 		CreatedAt:         now,
 		UpdatedAt:         now,
 	}
-	if err := s.store.PutChat(ctx, chatRecord); err != nil {
-		return nil, err
-	}
-	rt, err := s.chatLoader(ctx, session, chatRecord)
-	if err != nil {
-		return nil, err
-	}
-	s.mu.Lock()
-	upsertSessionChatLocked(&s.chats, chatRecord)
-	s.runtimes[chatRecord.ID] = rt
-	s.mu.Unlock()
-	return rt, nil
+	return s.createChat(ctx, session, chatRecord)
 }
 
 // AddPreparedChat adds an already validated chat record to the live session.
@@ -270,6 +259,19 @@ func (s *Session) AddPreparedChat(ctx context.Context, chatRecord domain.Chat) (
 	s.mu.RLock()
 	session := s.session
 	s.mu.RUnlock()
+	if chatRecord.SessionID != session.ID {
+		return nil, fmt.Errorf("chat %s does not belong to session %s", chatRecord.ID, session.ID)
+	}
+	return s.createChat(ctx, session, chatRecord)
+}
+
+func (s *Session) createChat(ctx context.Context, session domain.Session, chatRecord domain.Chat) (*chatpkg.Chat, error) {
+	if session.ID == "" {
+		return nil, fmt.Errorf("session id is required")
+	}
+	if chatRecord.ID == "" {
+		return nil, fmt.Errorf("chat id is required")
+	}
 	if chatRecord.SessionID != session.ID {
 		return nil, fmt.Errorf("chat %s does not belong to session %s", chatRecord.ID, session.ID)
 	}
