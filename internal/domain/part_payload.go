@@ -164,7 +164,7 @@ func DecodeToolResultPayload(tool ToolKind, status ToolResultStatus, raw json.Ra
 		return decodeToolResult[ErrorStoredResult](raw)
 	}
 	switch tool {
-	case ToolKindRead:
+	case ToolKindFileRead:
 		return decodeToolResult[ReadStoredResult](raw)
 	case ToolKindBash:
 		return decodeToolResult[BashStoredResult](raw)
@@ -174,13 +174,13 @@ func DecodeToolResultPayload(tool ToolKind, status ToolResultStatus, raw json.Ra
 		return decodeToolResult[ExecListStoredResult](raw)
 	case ToolKindApplyPatch:
 		return decodeToolResult[ApplyPatchStoredResult](raw)
-	case ToolKindEdit:
+	case ToolKindFileEdit:
 		return decodeToolResult[EditStoredResult](raw)
-	case ToolKindWrite:
+	case ToolKindFileWrite:
 		return decodeToolResult[WriteStoredResult](raw)
-	case ToolKindGlob:
+	case ToolKindFileGlob:
 		return decodeToolResult[GlobStoredResult](raw)
-	case ToolKindGrep:
+	case ToolKindFileGrep:
 		return decodeToolResult[GrepStoredResult](raw)
 	case ToolKindQuestion:
 		return decodeToolResult[QuestionStoredResult](raw)

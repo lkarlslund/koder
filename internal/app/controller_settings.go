@@ -893,6 +893,8 @@ func toolDefaultPreferencesFromConfig(src map[domain.ToolKind]bool) []ToolDefaul
 
 func toolDefaultGroup(kind domain.ToolKind) (string, string) {
 	switch kind {
+	case domain.ToolKindFileRead, domain.ToolKindFileWrite, domain.ToolKindFileEdit, domain.ToolKindFileGrep, domain.ToolKindFileGlob:
+		return "file", "File"
 	case domain.ToolKindWebFetch, domain.ToolKindWebSearch:
 		return "web", "Web"
 	case domain.ToolKindExecCommand, domain.ToolKindExecStatus, domain.ToolKindExecList, domain.ToolKindExecWriteStdin, domain.ToolKindExecResize, domain.ToolKindExecTerminate, domain.ToolKindExecCleanup:

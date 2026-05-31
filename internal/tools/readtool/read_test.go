@@ -78,7 +78,7 @@ func TestExecuteDoesNotTouchDirectoriesForCodeIntel(t *testing.T) {
 
 func TestPresentationIncludesPathAndLineRange(t *testing.T) {
 	got := tool{}.Presentation(tools.Request{
-		Tool: domain.ToolKindRead,
+		Tool: domain.ToolKindFileRead,
 		Args: map[string]string{
 			"path":       "internal/tools/readtool/read.go",
 			"start_line": "10",
@@ -128,7 +128,7 @@ func TestExecutePagesLargeFilesWithContinuationHint(t *testing.T) {
 	if strings.Contains(result.Output, "1001: line1001") {
 		t.Fatalf("expected first page to stop before line 1001")
 	}
-	wantFooter := "(showing lines 1-1000 of 2505, capped at 1000 lines; use start_line=1001 end_line=2000 only if you need the next section; prefer grep or a narrower range for specific code)"
+	wantFooter := "(showing lines 1-1000 of 2505, capped at 1000 lines; use start_line=1001 end_line=2000 only if you need the next section; prefer file_grep or a narrower range for specific code)"
 	if !strings.Contains(result.Output, wantFooter) {
 		t.Fatalf("expected continuation footer %q, got %q", wantFooter, result.Output)
 	}
@@ -193,7 +193,7 @@ func TestExecuteRespectsExplicitLimitAndNextOffset(t *testing.T) {
 	if strings.Contains(result.Output, "11: line11") {
 		t.Fatalf("expected output to stop before line 11")
 	}
-	wantFooter := "(showing lines 1-10 of 100; use start_line=11 end_line=20 only if you need the next section; prefer grep or a narrower range for specific code)"
+	wantFooter := "(showing lines 1-10 of 100; use start_line=11 end_line=20 only if you need the next section; prefer file_grep or a narrower range for specific code)"
 	if !strings.Contains(result.Output, wantFooter) {
 		t.Fatalf("expected explicit-limit footer %q, got %q", wantFooter, result.Output)
 	}
@@ -283,7 +283,7 @@ func TestExecutePagesDirectories(t *testing.T) {
 	if strings.Contains(result.Output, names[10]) {
 		t.Fatalf("expected directory page to exclude next entry %q", names[10])
 	}
-	wantFooter := "(showing entries 6-10 of 12; use start_line=11 end_line=15 only if you need the next section; prefer grep or a narrower range for specific code)"
+	wantFooter := "(showing entries 6-10 of 12; use start_line=11 end_line=15 only if you need the next section; prefer file_grep or a narrower range for specific code)"
 	if !strings.Contains(result.Output, wantFooter) {
 		t.Fatalf("expected directory continuation footer %q, got %q", wantFooter, result.Output)
 	}

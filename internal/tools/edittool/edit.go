@@ -46,13 +46,13 @@ func init() {
 	tools.Register(tool{}, tools.ToolSpec{
 		Title:       "Edit file",
 		Description: "Edit an existing text file by replacing exact text.",
-		Usage:       "Edit an existing text file by replacing exact text. Prefer this over Write when modifying an existing file. Use the smallest old_string that uniquely identifies the target, usually 2-4 adjacent lines. If old_string is not found or occurs multiple times, retry with more surrounding context or use replace_all when you intentionally want every occurrence changed. Do not rewrite the whole file just because one edit attempt failed.",
+		Usage:       "Edit an existing text file by replacing exact text. Prefer this over file_write when modifying an existing file. Use the smallest old_string that uniquely identifies the target, usually 2-4 adjacent lines. If old_string is not found or occurs multiple times, retry with more surrounding context or use replace_all when you intentionally want every occurrence changed. Do not rewrite the whole file just because one edit attempt failed.",
 		Parameters:  `{"type":"object","properties":{"path":{"type":"string","description":"File to edit"},"old_string":{"type":"string","description":"Exact existing text to replace. Must match file contents exactly, including whitespace. Prefer the smallest unique snippet."},"new_string":{"type":"string","description":"Replacement text for old_string only, not the full file"},"replace_all":{"type":"boolean","description":"Replace every occurrence only when every match should change"}},"required":["path","old_string","new_string"],"additionalProperties":false}`,
 		ExposeToLLM: true,
 	})
 }
 
-func (tool) Kind() domain.ToolKind    { return domain.ToolKindEdit }
+func (tool) Kind() domain.ToolKind    { return domain.ToolKindFileEdit }
 func (tool) BypassesPermission() bool { return false }
 func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 	path := tools.NormalizePathInput(tools.FirstArg(args, "path", "file", "file_path", "filepath"))
@@ -160,7 +160,7 @@ func (tool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Reques
 	}, nil
 }
 func (tool) SummarizeResult(req tools.Request, result tools.Result) (string, string) {
-	return "edit", result.Output
+	return "file_edit", result.Output
 }
 
 func storedDiagnostics(in []codediag.Diagnostic) []tools.DiagnosticStored {

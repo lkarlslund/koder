@@ -459,7 +459,7 @@ func init() {
 	tools.Register(tool{}, tools.ToolSpec{
 		Title:       "Search code",
 		Description: "Query detected language servers for code navigation.",
-		Usage:       "Launch and reuse well-known language server subprocesses for detected workspace languages, keeping them warm while idle for about 10 minutes. Use action=workspace_symbol with query to find symbols across the workspace. Use action=document_symbols with path to list symbols in one file. Use action=definition or action=references with path, line, and character for navigation at a source position. Use action=languages to see detected languages, available server commands, and missing language server commands. Prefer this tool for semantic code navigation; use grep for arbitrary text search and read to inspect returned files.",
+		Usage:       "Launch and reuse well-known language server subprocesses for detected workspace languages, keeping them warm while idle for about 10 minutes. Use action=workspace_symbol with query to find symbols across the workspace. Use action=document_symbols with path to list symbols in one file. Use action=definition or action=references with path, line, and character for navigation at a source position. Use action=languages to see detected languages, available server commands, and missing language server commands. Prefer this tool for semantic code navigation; use file_grep for arbitrary text search and file_read to inspect returned files.",
 		Parameters:  parametersJSON(),
 		ExposeToLLM: true,
 	})

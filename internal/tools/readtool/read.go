@@ -29,13 +29,13 @@ func init() {
 	tools.Register(tool{}, tools.ToolSpec{
 		Title:       "Read file",
 		Description: "Read a text file or list a directory from the workspace.",
-		Usage:       "Read a text file or list a directory from the workspace. File output is paginated and line-numbered. By default, read returns only the first page, not an entire large file. For large or known files, use start_line and end_line to read the smallest useful section. A single read returns at most 1000 lines, and reads over 100000 characters fail; use grep or code_search to locate relevant symbols before reading. If the result says more content exists, continue with the suggested start_line/end_line only when needed. Avoid repeated broad reads of the same unchanged file. Directories return direct child entries. Images and PDFs are not supported by this tool.",
+		Usage:       "Read a text file or list a directory from the workspace. File output is paginated and line-numbered. By default, file_read returns only the first page, not an entire large file. For large or known files, use start_line and end_line to read the smallest useful section. A single file_read call returns at most 1000 lines, and file_read calls over 100000 characters fail; use file_grep or code_search to locate relevant symbols before reading. If the result says more content exists, continue with the suggested start_line/end_line only when needed. Avoid repeated broad reads of the same unchanged file. Directories return direct child entries. Images and PDFs are not supported by this tool.",
 		Parameters:  `{"type":"object","properties":{"path":{"type":"string","description":"Relative or absolute workspace path to a text file or directory"},"start_line":{"type":"integer","description":"Optional 1-based line number to start reading from. Defaults to 1.","minimum":1},"end_line":{"type":"integer","description":"Optional 1-based inclusive line number to stop reading at. Defaults to start_line + 999. At most 1000 lines are returned per read.","minimum":1}},"required":["path"],"additionalProperties":false}`,
 		ExposeToLLM: true,
 	})
 }
 
-func (tool) Kind() domain.ToolKind    { return domain.ToolKindRead }
+func (tool) Kind() domain.ToolKind    { return domain.ToolKindFileRead }
 func (tool) BypassesPermission() bool { return false }
 func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 	for _, key := range []string{"file", "file_path", "filepath", "start", "line", "offset", "end", "limit", "lines", "max_lines"} {
@@ -116,7 +116,7 @@ func (tool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Reques
 			HasMore:        page.HasMore,
 			Truncated:      page.HasMore || page.ByteCapped,
 		}
-		body := tools.DisplayTextForStored(domain.ToolKindRead, stored)
+		body := tools.DisplayTextForStored(domain.ToolKindFileRead, stored)
 		return tools.Result{
 			Output: body,
 			Meta: map[string]string{
@@ -182,7 +182,7 @@ func (tool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Reques
 		HasMore:        page.HasMore,
 		Truncated:      page.HasMore || page.ByteCapped,
 	}
-	text := tools.DisplayTextForStored(domain.ToolKindRead, stored)
+	text := tools.DisplayTextForStored(domain.ToolKindFileRead, stored)
 	charCount := utf8.RuneCountInString(text)
 	if charCount > tools.DefaultReadOutputCharLimit {
 		return tools.Result{}, fmt.Errorf("read produced %d characters which exceeds the 100000 character limit; use start_line and end_line to read a smaller range", charCount)
@@ -471,11 +471,11 @@ func readPageFooter(label string, start, end, total, nextStartLine int, readRang
 	case total == 0 && label == "entries":
 		return "End of directory - total 0 entries."
 	case byteCapped:
-		return fmt.Sprintf("(showing %s %d-%d of %d, output capped; use start_line=%d end_line=%d only if you need the next section; prefer grep or a narrower range for specific code)", label, start, end, total, nextStartLine, nextStartLine+readRange.Limit-1)
+		return fmt.Sprintf("(showing %s %d-%d of %d, output capped; use start_line=%d end_line=%d only if you need the next section; prefer file_grep or a narrower range for specific code)", label, start, end, total, nextStartLine, nextStartLine+readRange.Limit-1)
 	case hasMore && (readRange.AutoCapped || readRange.RangeCapped):
-		return fmt.Sprintf("(showing %s %d-%d of %d, capped at 1000 lines; use start_line=%d end_line=%d only if you need the next section; prefer grep or a narrower range for specific code)", label, start, end, total, nextStartLine, nextStartLine+readRange.Limit-1)
+		return fmt.Sprintf("(showing %s %d-%d of %d, capped at 1000 lines; use start_line=%d end_line=%d only if you need the next section; prefer file_grep or a narrower range for specific code)", label, start, end, total, nextStartLine, nextStartLine+readRange.Limit-1)
 	case hasMore:
-		return fmt.Sprintf("(showing %s %d-%d of %d; use start_line=%d end_line=%d only if you need the next section; prefer grep or a narrower range for specific code)", label, start, end, total, nextStartLine, nextStartLine+readRange.Limit-1)
+		return fmt.Sprintf("(showing %s %d-%d of %d; use start_line=%d end_line=%d only if you need the next section; prefer file_grep or a narrower range for specific code)", label, start, end, total, nextStartLine, nextStartLine+readRange.Limit-1)
 	case label == "entries":
 		return fmt.Sprintf("End of directory - total %d entries.", total)
 	default:

@@ -417,7 +417,7 @@ func compactStoredResultForPart(env storedResultEnvelope, diff string, limits Co
 		return compactTextForCompaction(text, limits.HeadLines, limits.TailLines, limits.MaxBytes, env.Tool.String()+" result"), ok
 	}
 	switch env.Tool {
-	case domain.ToolKindRead:
+	case domain.ToolKindFileRead:
 		return decodeAndFormat[ReadStoredResult](env.Payload, func(result ReadStoredResult) string {
 			return compactReadStoredResult(result, limits)
 		})
@@ -433,7 +433,7 @@ func compactStoredResultForPart(env storedResultEnvelope, diff string, limits Co
 		return decodeAndFormat[ViewImageStoredResult](env.Payload, compactViewImageStoredResult)
 	case domain.ToolKindShowImage:
 		return decodeAndFormat[ShowImageStoredResult](env.Payload, compactShowImageStoredResult)
-	case domain.ToolKindEdit, domain.ToolKindWrite, domain.ToolKindLint:
+	case domain.ToolKindFileEdit, domain.ToolKindFileWrite, domain.ToolKindLint:
 		text, ok := formatStoredToolOutput(env)
 		if !ok {
 			return "", false
@@ -608,7 +608,7 @@ func shouldAppendDiffToModelText(env storedResultEnvelope) bool {
 		return false
 	}
 	switch env.Tool {
-	case domain.ToolKindEdit, domain.ToolKindApplyPatch:
+	case domain.ToolKindFileEdit, domain.ToolKindApplyPatch:
 		return false
 	default:
 		return true
@@ -674,7 +674,7 @@ func ShowImageStoredResultForPart(part domain.Part) (ShowImageStoredResult, bool
 
 func EditStoredResultForPart(part domain.Part) (EditStoredResult, bool) {
 	env, ok := storedResultFromPart(part)
-	if !ok || env.PartKind != domain.PartKindToolOutput || env.Tool != domain.ToolKindEdit {
+	if !ok || env.PartKind != domain.PartKindToolOutput || env.Tool != domain.ToolKindFileEdit {
 		return EditStoredResult{}, false
 	}
 	var result EditStoredResult
@@ -774,7 +774,7 @@ func formatStoredToolOutput(env storedResultEnvelope) (string, bool) {
 		})
 	}
 	switch env.Tool {
-	case domain.ToolKindRead:
+	case domain.ToolKindFileRead:
 		return decodeAndFormat[ReadStoredResult](env.Payload, formatReadStoredResult)
 	case domain.ToolKindBash:
 		return decodeAndFormat[BashStoredResult](env.Payload, func(result BashStoredResult) string {
@@ -788,11 +788,11 @@ func formatStoredToolOutput(env storedResultEnvelope) (string, bool) {
 		return decodeAndFormat[ApplyPatchStoredResult](env.Payload, func(result ApplyPatchStoredResult) string {
 			return strings.TrimSpace(result.Summary)
 		})
-	case domain.ToolKindEdit:
+	case domain.ToolKindFileEdit:
 		return decodeAndFormat[EditStoredResult](env.Payload, func(result EditStoredResult) string {
 			return strings.TrimSpace(result.Summary)
 		})
-	case domain.ToolKindWrite:
+	case domain.ToolKindFileWrite:
 		return decodeAndFormat[WriteStoredResult](env.Payload, func(result WriteStoredResult) string {
 			return strings.TrimSpace(result.Summary)
 		})
@@ -803,9 +803,9 @@ func formatStoredToolOutput(env storedResultEnvelope) (string, bool) {
 			}
 			return strings.TrimSpace(result.Summary)
 		})
-	case domain.ToolKindGlob:
+	case domain.ToolKindFileGlob:
 		return decodeAndFormat[GlobStoredResult](env.Payload, formatGlobStoredResult)
-	case domain.ToolKindGrep:
+	case domain.ToolKindFileGrep:
 		return decodeAndFormat[GrepStoredResult](env.Payload, func(result GrepStoredResult) string {
 			return strings.TrimSpace(result.Output)
 		})
@@ -872,10 +872,10 @@ func formatStoredResultForDisplay(env storedResultEnvelope) (string, bool) {
 	}
 	switch env.PartKind {
 	case domain.PartKindToolOutput:
-		if env.Tool == domain.ToolKindEdit {
+		if env.Tool == domain.ToolKindFileEdit {
 			return decodeAndFormat[EditStoredResult](env.Payload, formatEditStoredResultForDisplay)
 		}
-		if env.Tool == domain.ToolKindWrite {
+		if env.Tool == domain.ToolKindFileWrite {
 			return decodeAndFormat[WriteStoredResult](env.Payload, formatWriteStoredResultForDisplay)
 		}
 		if env.Tool == domain.ToolKindLint {
@@ -969,15 +969,15 @@ func readStoredFooter(result ReadStoredResult) string {
 	}
 	if result.ByteCapped {
 		if result.Total > 0 {
-			return fmt.Sprintf("(showing %s %d-%d of %d, output capped; use start_line=%d end_line=%d only if you need the next section; prefer grep or a narrower range for specific code)", label, result.Start, result.End, result.Total, nextReadStart(result), nextReadEnd(result))
+			return fmt.Sprintf("(showing %s %d-%d of %d, output capped; use start_line=%d end_line=%d only if you need the next section; prefer file_grep or a narrower range for specific code)", label, result.Start, result.End, result.Total, nextReadStart(result), nextReadEnd(result))
 		}
-		return fmt.Sprintf("(showing %s %d-%d, output capped; use start_line=%d end_line=%d only if you need the next section; prefer grep or a narrower range for specific code)", label, result.Start, result.End, nextReadStart(result), nextReadEnd(result))
+		return fmt.Sprintf("(showing %s %d-%d, output capped; use start_line=%d end_line=%d only if you need the next section; prefer file_grep or a narrower range for specific code)", label, result.Start, result.End, nextReadStart(result), nextReadEnd(result))
 	}
 	if result.HasMore {
 		if result.AutoCapped || result.RangeCapped {
-			return fmt.Sprintf("(showing %s %d-%d of %d, capped at 1000 lines; use start_line=%d end_line=%d only if you need the next section; prefer grep or a narrower range for specific code)", label, result.Start, result.End, result.Total, nextReadStart(result), nextReadEnd(result))
+			return fmt.Sprintf("(showing %s %d-%d of %d, capped at 1000 lines; use start_line=%d end_line=%d only if you need the next section; prefer file_grep or a narrower range for specific code)", label, result.Start, result.End, result.Total, nextReadStart(result), nextReadEnd(result))
 		}
-		return fmt.Sprintf("(showing %s %d-%d of %d; use start_line=%d end_line=%d only if you need the next section; prefer grep or a narrower range for specific code)", label, result.Start, result.End, result.Total, nextReadStart(result), nextReadEnd(result))
+		return fmt.Sprintf("(showing %s %d-%d of %d; use start_line=%d end_line=%d only if you need the next section; prefer file_grep or a narrower range for specific code)", label, result.Start, result.End, result.Total, nextReadStart(result), nextReadEnd(result))
 	}
 	if result.Mode == ReadStoredModeDirectory {
 		return fmt.Sprintf("End of directory - total %d entries.", result.Total)

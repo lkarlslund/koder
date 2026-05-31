@@ -40,11 +40,11 @@ const (
 type ToolKind uint8
 
 const (
-	ToolKindRead ToolKind = iota + 1
+	ToolKindFileRead ToolKind = iota + 1
 	ToolKindViewImage
 	ToolKindShowImage
-	ToolKindGlob
-	ToolKindGrep
+	ToolKindFileGlob
+	ToolKindFileGrep
 	ToolKindCodeSearch
 	ToolKindLint
 	ToolKindBash
@@ -55,8 +55,8 @@ const (
 	ToolKindExecResize
 	ToolKindExecTerminate
 	ToolKindExecCleanup
-	ToolKindEdit
-	ToolKindWrite
+	ToolKindFileEdit
+	ToolKindFileWrite
 	ToolKindTask
 	ToolKindQuestion
 	ToolKindUpdatePlan

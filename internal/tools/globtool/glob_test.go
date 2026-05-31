@@ -19,7 +19,7 @@ func TestGlobSupportsRecursivePatternsAndLimit(t *testing.T) {
 	mustWriteFile(t, filepath.Join(root, "internal", "app", "three.txt"))
 
 	req, err := tools.Normalize(tools.Request{
-		Tool: domain.ToolKindGlob,
+		Tool: domain.ToolKindFileGlob,
 		Args: map[string]string{
 			"pattern": "**/*.go",
 			"limit":   "1.00000",

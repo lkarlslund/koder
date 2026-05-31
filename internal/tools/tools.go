@@ -266,9 +266,9 @@ func checkRuntimeAccess(runtime Runtime, req Request) error {
 	switch req.Tool {
 	case domain.ToolKindWebFetch, domain.ToolKindWebSearch, domain.ToolKindMCP:
 		return runtime.CheckNetworkAccess()
-	case domain.ToolKindWrite, domain.ToolKindEdit:
+	case domain.ToolKindFileWrite, domain.ToolKindFileEdit:
 		return checkRequestPath(runtime, req, accesssettings.AccessWrite)
-	case domain.ToolKindRead, domain.ToolKindViewImage, domain.ToolKindShowImage, domain.ToolKindGlob, domain.ToolKindGrep, domain.ToolKindCodeSearch, domain.ToolKindLint:
+	case domain.ToolKindFileRead, domain.ToolKindViewImage, domain.ToolKindShowImage, domain.ToolKindFileGlob, domain.ToolKindFileGrep, domain.ToolKindCodeSearch, domain.ToolKindLint:
 		return checkRequestPath(runtime, req, accesssettings.AccessRead)
 	default:
 		return nil

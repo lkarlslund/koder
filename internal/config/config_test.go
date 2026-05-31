@@ -131,7 +131,7 @@ milestone_update_item = false
 			t.Fatalf("expected %s to stay disabled: %#v", kind, cfg.ToolDefaults)
 		}
 	}
-	if !cfg.ToolDefaults[domain.ToolKindRead] {
+	if !cfg.ToolDefaults[domain.ToolKindFileRead] {
 		t.Fatal("expected missing tool default to be backfilled enabled")
 	}
 }
@@ -285,7 +285,7 @@ func TestApplyDefaultsMigratesRuleProfilesToSandboxProfiles(t *testing.T) {
 			Profiles: map[string]PermissionProfile{
 				"default": {
 					Rules: []PermissionRule{
-						{Tool: domain.ToolKindRead, Pattern: "*", Action: domain.PermissionModeAllow},
+						{Tool: domain.ToolKindFileRead, Pattern: "*", Action: domain.PermissionModeAllow},
 						{Tool: domain.ToolKindWebSearch, Pattern: "*", Action: domain.PermissionModeAsk},
 					},
 				},
@@ -329,7 +329,7 @@ bash = "allow"
 	}
 	profile := cfg.Permissions.Profiles["default"]
 	for _, rule := range profile.Rules {
-		if rule.Tool == domain.ToolKindRead && rule.Pattern == "*" && rule.Action != domain.PermissionModeAllow {
+		if rule.Tool == domain.ToolKindFileRead && rule.Pattern == "*" && rule.Action != domain.PermissionModeAllow {
 			t.Fatalf("expected legacy read field to be ignored, got %#v", rule)
 		}
 		if rule.Tool == domain.ToolKindBash && rule.Pattern == "*" && rule.Action != domain.PermissionModeAsk {

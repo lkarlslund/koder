@@ -51,7 +51,7 @@ func TestReadCurrentDirectoryListsFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	result, err := tools.Execute(context.Background(), testRuntime(dir), tools.Request{
-		Tool: domain.ToolKindRead,
+		Tool: domain.ToolKindFileRead,
 		Args: map[string]string{"path": "."},
 	})
 	if err != nil {
@@ -195,7 +195,7 @@ func TestReadWholeFloatStringStartAndEndLinesAreAccepted(t *testing.T) {
 	}
 
 	result, err := tools.Execute(context.Background(), testRuntime(dir), tools.Request{
-		Tool: domain.ToolKindRead,
+		Tool: domain.ToolKindFileRead,
 		Args: map[string]string{
 			"path":       "file.txt",
 			"start_line": "3.00000",
@@ -211,7 +211,7 @@ func TestReadWholeFloatStringStartAndEndLinesAreAccepted(t *testing.T) {
 	if strings.Contains(result.Output, "1: 1") || strings.Contains(result.Output, "6: 6") {
 		t.Fatalf("expected read window to apply, got %q", result.Output)
 	}
-	if !strings.Contains(result.Output, "(showing lines 3-4 of 6; use start_line=5 end_line=6 only if you need the next section; prefer grep or a narrower range for specific code)") {
+	if !strings.Contains(result.Output, "(showing lines 3-4 of 6; use start_line=5 end_line=6 only if you need the next section; prefer file_grep or a narrower range for specific code)") {
 		t.Fatalf("expected continuation footer, got %q", result.Output)
 	}
 	if got := result.Meta["start_line"]; got != "3" {
@@ -230,7 +230,7 @@ func TestReadFractionalStartLineFails(t *testing.T) {
 	}
 
 	_, err := tools.Execute(context.Background(), testRuntime(dir), tools.Request{
-		Tool: domain.ToolKindRead,
+		Tool: domain.ToolKindFileRead,
 		Args: map[string]string{
 			"path":       "file.txt",
 			"start_line": "3.5",

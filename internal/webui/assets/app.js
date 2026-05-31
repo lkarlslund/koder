@@ -235,9 +235,9 @@
       const path = firstValue(data, ['path', 'Path']) || firstValue(args, ['path']);
       const command = firstValue(data, ['command', 'Command']) || firstValue(args, ['command']);
       switch (kind) {
-        case 'read': return readTitle(path, args, data);
-        case 'write': return path ? 'Write ' + path : 'Write file';
-        case 'edit': return path ? 'Edit ' + path : 'Edit file';
+        case 'file_read': return readTitle(path, args, data);
+        case 'file_write': return path ? 'Write ' + path : 'Write file';
+        case 'file_edit': return path ? 'Edit ' + path : 'Edit file';
         case 'bash': {
           if ((toolStatus(tool) === 'done' || toolStatus(tool) === 'errored') && command) return 'Ran ' + command;
           return 'Run command';
@@ -249,8 +249,8 @@
         case 'exec_resize': return 'Resize exec';
         case 'exec_terminate': return 'Terminate exec';
         case 'exec_cleanup_background': return 'Clean exec sessions';
-        case 'grep': return 'Search ' + (firstValue(data, ['pattern', 'Pattern']) || firstValue(args, ['pattern']));
-        case 'glob': return 'Glob ' + (firstValue(data, ['pattern', 'Pattern']) || firstValue(args, ['pattern']));
+        case 'file_grep': return 'Search ' + (firstValue(data, ['pattern', 'Pattern']) || firstValue(args, ['pattern']));
+        case 'file_glob': return 'Glob ' + (firstValue(data, ['pattern', 'Pattern']) || firstValue(args, ['pattern']));
         case 'webfetch': return 'Fetch ' + (firstValue(data, ['url', 'URL']) || firstValue(args, ['url']));
         case 'websearch': return 'Search web ' + (firstValue(data, ['query', 'Query']) || firstValue(args, ['query']));
         case 'show_image': return path ? 'Show image ' + path : 'Show image';
@@ -288,7 +288,7 @@
       const args = toolArgs(tool);
       const status = firstValue(result, ['status', 'Status']);
       if (status === 'error' || status === 'denied') return renderCompactBlock(status, toolResultText(tool));
-      if (kind === 'write') {
+      if (kind === 'file_write') {
         const path = firstValue(data, ['path', 'Path']) || firstValue(args, ['path']) || 'file';
         const content = firstValue(data, ['content', 'Content']);
         const summary = firstValue(data, ['summary', 'Summary']) || toolResultText(tool);
@@ -296,13 +296,13 @@
         const body = content ? renderCompactBlock(summary || ('Wrote ' + path), content) : renderCompactBlock('Wrote ' + path, summary);
         return body + (diagnostics ? renderCompactBlock('Diagnostics', diagnostics, 'tool-result-body-mono') : '');
       }
-      if (kind === 'edit') {
+      if (kind === 'file_edit') {
         const title = firstValue(data, ['summary', 'Summary']) || 'Edited file';
         const diff = firstValue(data, ['diff', 'Diff']) || firstValue(result, ['diff', 'Diff']) || toolResultText(tool);
         const diagnostics = firstValue(data, ['diagnostics', 'Diagnostics']);
         return renderDiffBlock(title, diff) + (diagnostics ? renderCompactBlock('Diagnostics', diagnostics, 'tool-result-body-mono') : '');
       }
-      if (kind === 'read') {
+      if (kind === 'file_read') {
         const path = firstValue(data, ['path', 'Path']) || firstValue(args, ['path']) || 'read';
         const storedLines = data.lines || data.Lines || [];
         const lines = storedLines.length ? storedLines.map(line => (line.number || line.Number || '') + ': ' + (line.text || line.Text || '')) : toolResultText(tool);
@@ -314,8 +314,8 @@
       if (kind.startsWith('exec_')) {
         return renderCompactBlock('Result', execResultLines(data, toolResultText(tool)), 'tool-result-body-mono');
       }
-      if (kind === 'glob') return renderCompactBlock('Matches', data.matches || data.Matches || toolResultText(tool));
-      if (kind === 'grep') return renderCompactBlock('Matches', firstValue(data, ['output', 'Output']) || toolResultText(tool));
+      if (kind === 'file_glob') return renderCompactBlock('Matches', data.matches || data.Matches || toolResultText(tool));
+      if (kind === 'file_grep') return renderCompactBlock('Matches', firstValue(data, ['output', 'Output']) || toolResultText(tool));
       if (kind === 'lint') {
         const title = firstValue(data, ['summary', 'Summary']) || 'Diagnostics';
         const diagnostics = firstValue(data, ['diagnostics', 'Diagnostics']) || toolResultText(tool);
@@ -1185,9 +1185,9 @@
         },
         refreshWorkspace() { this.rpc('refresh_workspace', {}).then(s => this.applyState(s)); },
         toolIcon(kind) {
-          if (kind === 'read' || kind === 'write' || kind === 'edit') return 'bi-file-earmark-code';
+          if (kind === 'file_read' || kind === 'file_write' || kind === 'file_edit') return 'bi-file-earmark-code';
           if (kind === 'bash' || String(kind || '').startsWith('exec_')) return 'bi-terminal';
-          if (kind === 'grep' || kind === 'glob' || kind === 'websearch') return 'bi-search';
+          if (kind === 'file_grep' || kind === 'file_glob' || kind === 'websearch') return 'bi-search';
           if (kind === 'webfetch') return 'bi-globe';
           if (kind === 'view_image' || kind === 'show_image') return 'bi-image';
           return 'bi-wrench-adjustable';

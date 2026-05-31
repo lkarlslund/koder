@@ -13,14 +13,14 @@ func testRules() Rules {
 		Profiles: map[string]Profile{
 			"default": {
 				Rules: []Rule{
-					{Tool: domain.ToolKindRead, Pattern: "*", Action: domain.PermissionModeAllow},
+					{Tool: domain.ToolKindFileRead, Pattern: "*", Action: domain.PermissionModeAllow},
 					{Tool: domain.ToolKindBash, Pattern: "*", Action: domain.PermissionModeAsk},
-					{Tool: domain.ToolKindWrite, Pattern: "*", Action: domain.PermissionModeAsk},
+					{Tool: domain.ToolKindFileWrite, Pattern: "*", Action: domain.PermissionModeAsk},
 				},
 			},
 			"readonly": {
 				Rules: []Rule{
-					{Tool: domain.ToolKindRead, Pattern: "*", Action: domain.PermissionModeAllow},
+					{Tool: domain.ToolKindFileRead, Pattern: "*", Action: domain.PermissionModeAllow},
 				},
 			},
 		},
@@ -30,13 +30,13 @@ func testRules() Rules {
 func TestEvaluateDefaultProfile(t *testing.T) {
 	cfg := testRules()
 
-	if got := Evaluate(cfg, "default", nil, Request{Tool: domain.ToolKindRead, Pattern: "README.md"}); got.Mode != domain.PermissionModeAllow {
+	if got := Evaluate(cfg, "default", nil, Request{Tool: domain.ToolKindFileRead, Pattern: "README.md"}); got.Mode != domain.PermissionModeAllow {
 		t.Fatalf("unexpected read mode: %s", got)
 	}
 	if got := Evaluate(cfg, "default", nil, Request{Tool: domain.ToolKindBash, Pattern: "ls"}); got.Mode != domain.PermissionModeAsk {
 		t.Fatalf("unexpected bash mode: %s", got)
 	}
-	if got := Evaluate(cfg, "default", nil, Request{Tool: domain.ToolKindRead, Pattern: "internal/domain/types.go"}); got.Mode != domain.PermissionModeAllow {
+	if got := Evaluate(cfg, "default", nil, Request{Tool: domain.ToolKindFileRead, Pattern: "internal/domain/types.go"}); got.Mode != domain.PermissionModeAllow {
 		t.Fatalf("unexpected read mode for nested path: %s", got)
 	}
 	if got := Evaluate(cfg, "default", nil, Request{Tool: domain.ToolKindBash, Pattern: `git add internal/domain/types.go && git commit -m "Update types.go" && git push`}); got.Mode != domain.PermissionModeAsk {
@@ -47,7 +47,7 @@ func TestEvaluateDefaultProfile(t *testing.T) {
 func TestEvaluateReadonlyProfile(t *testing.T) {
 	cfg := testRules()
 
-	if got := Evaluate(cfg, "readonly", nil, Request{Tool: domain.ToolKindWrite, Pattern: "main.go"}); got.Mode != domain.PermissionModeDeny {
+	if got := Evaluate(cfg, "readonly", nil, Request{Tool: domain.ToolKindFileWrite, Pattern: "main.go"}); got.Mode != domain.PermissionModeDeny {
 		t.Fatalf("unexpected write mode: %s", got)
 	}
 }
@@ -113,9 +113,9 @@ func TestConfiguredProfileDescriptionSummarizesRules(t *testing.T) {
 		Profiles: map[string]Profile{
 			"default": {
 				Rules: []Rule{
-					{Tool: domain.ToolKindRead, Pattern: "*", Action: domain.PermissionModeAllow},
+					{Tool: domain.ToolKindFileRead, Pattern: "*", Action: domain.PermissionModeAllow},
 					{Tool: domain.ToolKindBash, Pattern: "*", Action: domain.PermissionModeAsk},
-					{Tool: domain.ToolKindWrite, Pattern: "*", Action: domain.PermissionModeDeny},
+					{Tool: domain.ToolKindFileWrite, Pattern: "*", Action: domain.PermissionModeDeny},
 				},
 			},
 		},

@@ -105,7 +105,7 @@ func TestChatStateUpsertReplacesSealedStreamedAssistantWithFinalItem(t *testing.
 			Text: "I'll inspect the files.",
 			Tools: []domain.ToolCall{{
 				ToolCallID: "call_1",
-				Tool:       domain.ToolKindRead,
+				Tool:       domain.ToolKindFileRead,
 				Args:       map[string]string{"path": "main.go"},
 				Status:     domain.ToolStatusPending,
 			}},

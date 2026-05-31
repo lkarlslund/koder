@@ -30,7 +30,7 @@ func init() {
 	tools.Register(tool{}, tools.ToolSpec{
 		Title:       "Search web",
 		Description: "Search the public web for current or external information.",
-		Usage:       "Search the public web for current or external information beyond the local workspace. Use this to discover relevant pages, news, docs, or references when you do not already know the URL. Use webfetch once you know the page you want to read. Prefer specific queries, and include the current year when looking for recent information. Do not use this for local repository search; use grep or glob instead. allowed_domains and blocked_domains are optional comma-separated domain lists.",
+		Usage:       "Search the public web for current or external information beyond the local workspace. Use this to discover relevant pages, news, docs, or references when you do not already know the URL. Use webfetch once you know the page you want to read. Prefer specific queries, and include the current year when looking for recent information. Do not use this for local repository search; use file_grep or file_glob instead. allowed_domains and blocked_domains are optional comma-separated domain lists.",
 		Parameters:  `{"type":"object","properties":{"query":{"type":"string","description":"Search query"},"limit":{"type":"integer","description":"Optional maximum result count"},"allowed_domains":{"type":"string","description":"Optional comma-separated domains to include, such as example.com,docs.example.com"},"blocked_domains":{"type":"string","description":"Optional comma-separated domains to exclude"}},"required":["query"],"additionalProperties":false}`,
 		ExposeToLLM: true,
 	})

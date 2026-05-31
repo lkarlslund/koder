@@ -168,7 +168,7 @@ func TestServerExposesSessionAnalysis(t *testing.T) {
 	}
 	toolMsg, err := appendDebugTimelineItem(st, chat.ID, domain.AssistantMessage{Tools: []domain.ToolCall{{
 		ToolCallID: "call_1",
-		Tool:       domain.ToolKindEdit,
+		Tool:       domain.ToolKindFileEdit,
 		Args:       map[string]string{"path": "main.go"},
 		Status:     domain.ToolStatusPending,
 	}}})
@@ -207,7 +207,7 @@ func TestServerExposesSessionAnalysis(t *testing.T) {
 	if analysis.BadStops[0].MessageID != assistantStop.ID || analysis.BadStops[0].NextMessageID != toolMsg.ID {
 		t.Fatalf("unexpected bad stop linkage %#v", analysis.BadStops[0])
 	}
-	if analysis.BadStops[0].NextTool != "Edit" {
+	if analysis.BadStops[0].NextTool != "FileEdit" {
 		t.Fatalf("expected next tool edit, got %#v", analysis.BadStops[0])
 	}
 }
@@ -235,7 +235,7 @@ func TestServerExposesSessionHydrationDebug(t *testing.T) {
 	}
 	if _, err := appendDebugTimelineItem(st, defaultChat.ID, domain.AssistantMessage{Tools: []domain.ToolCall{{
 		ToolCallID: "call_1",
-		Tool:       domain.ToolKindRead,
+		Tool:       domain.ToolKindFileRead,
 		Args:       map[string]string{"path": "main.go"},
 		Status:     domain.ToolStatusPending,
 	}}}); err != nil {

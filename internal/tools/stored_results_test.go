@@ -9,7 +9,7 @@ import (
 )
 
 func TestDisplayTextForPartUsesWriteContent(t *testing.T) {
-	text, ok := tools.DisplayTextForPart(toolOutputPart(domain.ToolKindWrite, tools.StoredResultStatusOK, "Created note.txt", tools.WriteStoredResult{
+	text, ok := tools.DisplayTextForPart(toolOutputPart(domain.ToolKindFileWrite, tools.StoredResultStatusOK, "Created note.txt", tools.WriteStoredResult{
 		Path:    "note.txt",
 		Action:  "created",
 		Summary: "Created note.txt",
@@ -24,7 +24,7 @@ func TestDisplayTextForPartUsesWriteContent(t *testing.T) {
 }
 
 func TestDisplayTextForPartIncludesWriteTruncationNotice(t *testing.T) {
-	text, ok := tools.DisplayTextForPart(toolOutputPart(domain.ToolKindWrite, tools.StoredResultStatusOK, "Created note.txt", tools.WriteStoredResult{
+	text, ok := tools.DisplayTextForPart(toolOutputPart(domain.ToolKindFileWrite, tools.StoredResultStatusOK, "Created note.txt", tools.WriteStoredResult{
 		Path:      "note.txt",
 		Action:    "created",
 		Summary:   "Created note.txt",
@@ -40,7 +40,7 @@ func TestDisplayTextForPartIncludesWriteTruncationNotice(t *testing.T) {
 }
 
 func TestDisplayTextForPartFormatsEditHunks(t *testing.T) {
-	text, ok := tools.DisplayTextForPart(toolOutputPart(domain.ToolKindEdit, tools.StoredResultStatusOK, "Edited game/map.go", tools.EditStoredResult{
+	text, ok := tools.DisplayTextForPart(toolOutputPart(domain.ToolKindFileEdit, tools.StoredResultStatusOK, "Edited game/map.go", tools.EditStoredResult{
 		Path:    "game/map.go",
 		Summary: "Edited game/map.go (replaced 1 occurrence)",
 		Diff:    "--- game/map.go\n+++ game/map.go\n@@ -12,1 +12,1 @@\n-if oldCondition {\n+if newCondition {",
@@ -56,7 +56,7 @@ func TestDisplayTextForPartFormatsEditHunks(t *testing.T) {
 }
 
 func TestModelTextForPartUsesEditSummaryWithoutDiff(t *testing.T) {
-	text, ok := tools.ModelTextForPart(toolOutputPart(domain.ToolKindEdit, tools.StoredResultStatusOK, "Edited game/map.go", tools.EditStoredResult{
+	text, ok := tools.ModelTextForPart(toolOutputPart(domain.ToolKindFileEdit, tools.StoredResultStatusOK, "Edited game/map.go", tools.EditStoredResult{
 		Path:    "game/map.go",
 		Summary: "Edited game/map.go (replaced 1 occurrence)",
 		Diff:    "--- game/map.go\n+++ game/map.go\n@@ -12,1 +12,1 @@\n-if oldCondition {\n+if newCondition {",
@@ -117,7 +117,7 @@ func TestCompactModelTextForPartBoundsReadOutput(t *testing.T) {
 	for i := 1; i <= 8; i++ {
 		readLines = append(readLines, tools.ReadStoredLine{Number: i, Text: "content"})
 	}
-	text, ok := tools.CompactModelTextForPart(toolOutputPart(domain.ToolKindRead, tools.StoredResultStatusOK, "", tools.ReadStoredResult{
+	text, ok := tools.CompactModelTextForPart(toolOutputPart(domain.ToolKindFileRead, tools.StoredResultStatusOK, "", tools.ReadStoredResult{
 		Path:  "main.go",
 		Mode:  tools.ReadStoredModeFile,
 		Lines: readLines,

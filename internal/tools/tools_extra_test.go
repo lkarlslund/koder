@@ -30,7 +30,7 @@ func openToolsTestStore(t *testing.T) *store.Store {
 
 func TestRequestJSONRoundTrip(t *testing.T) {
 	original := tools.Request{
-		Tool:       domain.ToolKindWrite,
+		Tool:       domain.ToolKindFileWrite,
 		ToolCallID: "call_1",
 		Args: map[string]string{
 			"path":    "notes.txt",
@@ -53,7 +53,7 @@ func TestRequestJSONRoundTrip(t *testing.T) {
 func TestParseProviderCallRejectsMissingToolCallID(t *testing.T) {
 	_, err := tools.ParseProviderCall(provider.ToolCall{
 		Function: provider.FunctionCall{
-			Name:      domain.ToolKindWrite.String(),
+			Name:      domain.ToolKindFileWrite.String(),
 			Arguments: `{"path":"notes.txt","content":"hello"}`,
 		},
 	})
@@ -66,7 +66,7 @@ func TestParseProviderCallStoresNormalizedArguments(t *testing.T) {
 	req, err := tools.ParseProviderCall(provider.ToolCall{
 		ID: "call_1",
 		Function: provider.FunctionCall{
-			Name:      domain.ToolKindRead.String(),
+			Name:      domain.ToolKindFileRead.String(),
 			Arguments: `{"path":"README.md","start_line":"150.0000","end_line":"175.0000"}`,
 		},
 	})
@@ -90,7 +90,7 @@ func TestDefinitionsDoNotExposeApplyPatch(t *testing.T) {
 }
 
 func TestWriteDefinitionForceOverwriteOptional(t *testing.T) {
-	def, enabled := tools.DefinitionFor(domain.ToolKindWrite, tools.Runtime{})
+	def, enabled := tools.DefinitionFor(domain.ToolKindFileWrite, tools.Runtime{})
 	if !enabled {
 		t.Fatal("expected write definition")
 	}
@@ -112,7 +112,7 @@ func TestWriteDefinitionForceOverwriteOptional(t *testing.T) {
 }
 
 func TestRequestFromStoredRejectsUnstructuredArgs(t *testing.T) {
-	_, err := tools.RequestFromStored(domain.ToolKindWrite, "notes.txt")
+	_, err := tools.RequestFromStored(domain.ToolKindFileWrite, "notes.txt")
 	if err == nil || !strings.Contains(err.Error(), "decode stored tool arguments") {
 		t.Fatalf("expected structured stored arguments error, got %v", err)
 	}
@@ -144,7 +144,7 @@ func TestPersistStandardResultPersistsMessagePartAndDiff(t *testing.T) {
 	}
 	_, err = chatstore.AppendAssistantToolCalls(context.Background(), st, chat.ID, []domain.ToolCall{{
 		ToolCallID: "call_write",
-		Tool:       domain.ToolKindWrite,
+		Tool:       domain.ToolKindFileWrite,
 		Args:       map[string]string{"path": "notes.txt"},
 		Status:     domain.ToolStatusPending,
 	}}, "", domain.Usage{})
@@ -153,7 +153,7 @@ func TestPersistStandardResultPersistsMessagePartAndDiff(t *testing.T) {
 	}
 
 	events, err := tools.PersistStandardResult(tools.WithChatID(context.Background(), chat.ID), tools.Runtime{Store: st, SessionID: session.ID, SessionControl: tooltest.NewSessionControl(st)}, tools.Request{
-		Tool:       domain.ToolKindWrite,
+		Tool:       domain.ToolKindFileWrite,
 		ToolCallID: "call_write",
 		Args:       map[string]string{"path": "notes.txt"},
 	}, tools.Result{
@@ -170,7 +170,7 @@ func TestPersistStandardResultPersistsMessagePartAndDiff(t *testing.T) {
 		t.Fatal(err)
 	}
 	evt := <-events
-	if evt.Kind != domain.EventKindToolResult || evt.Tool != domain.ToolKindWrite {
+	if evt.Kind != domain.EventKindToolResult || evt.Tool != domain.ToolKindFileWrite {
 		t.Fatalf("unexpected event: %#v", evt)
 	}
 

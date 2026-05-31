@@ -656,7 +656,7 @@ func TestMaxToolLoopStepsUsesConfiguredValue(t *testing.T) {
 
 func TestApprovalSerializationRoundTrip(t *testing.T) {
 	req := tools.Request{
-		Tool: domain.ToolKindWrite,
+		Tool: domain.ToolKindFileWrite,
 		Args: map[string]string{
 			"path":            "file.txt",
 			"content":         "after\n",
@@ -667,7 +667,7 @@ func TestApprovalSerializationRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := requestFromStoredApproval(domain.ToolKindWrite, raw)
+	got, err := requestFromStoredApproval(domain.ToolKindFileWrite, raw)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -690,14 +690,14 @@ func TestHandleModelToolCallDeniesDisabledSessionTool(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := setSessionToolStates(context.Background(), st, session.ID, map[domain.ToolKind]bool{
-		domain.ToolKindRead: false,
+		domain.ToolKindFileRead: false,
 	}); err != nil {
 		t.Fatal(err)
 	}
 	chat := defaultChatForSession(t, st, session.ID)
 
 	evt, err := engine.handleModelToolCall(context.Background(), session, chat, tools.Request{
-		Tool: domain.ToolKindRead,
+		Tool: domain.ToolKindFileRead,
 		Args: map[string]string{"path": "README.md"},
 	})
 	if err != nil {
@@ -879,7 +879,7 @@ func TestHandleModelToolCallPersistsNormalizationFailure(t *testing.T) {
 	chat := defaultChatForSession(t, st, session.ID)
 
 	evt, err := engine.handleModelToolCall(context.Background(), session, chat, tools.Request{
-		Tool: domain.ToolKindRead,
+		Tool: domain.ToolKindFileRead,
 		Args: map[string]string{
 			"path":   "README.md",
 			"offset": "400.5",
@@ -927,7 +927,7 @@ func TestPersistAssistantToolCallsStoresNarrationAsText(t *testing.T) {
 	chat := defaultChatForSession(t, st, session.ID)
 
 	call := tools.Request{
-		Tool:       domain.ToolKindRead,
+		Tool:       domain.ToolKindFileRead,
 		ToolCallID: "call_1",
 		Args:       map[string]string{"path": "README.md"},
 	}
@@ -951,7 +951,7 @@ func TestPersistAssistantToolCallsStoresNarrationAsText(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected assistant item, got %#v", items[0].Content)
 	}
-	if len(assistant.Tools) != 1 || assistant.Tools[0].Tool != domain.ToolKindRead {
+	if len(assistant.Tools) != 1 || assistant.Tools[0].Tool != domain.ToolKindFileRead {
 		t.Fatalf("expected tool call child, got %#v", assistant.Tools)
 	}
 	if !strings.Contains(assistant.Text, "inspect that file") {
@@ -980,7 +980,7 @@ func TestProviderToolCallArgumentsAreNormalizedBeforePersistence(t *testing.T) {
 	calls, err := engine.parseProviderToolCalls([]provider.ToolCall{{
 		ID: "call_1",
 		Function: provider.FunctionCall{
-			Name:      domain.ToolKindRead.String(),
+			Name:      domain.ToolKindFileRead.String(),
 			Arguments: `{"path":"README.md","start_line":"150.0000","end_line":"175.0000"}`,
 		},
 	}}, session.ID)
@@ -1025,7 +1025,7 @@ func TestBuildConversationIncludesAssistantNarrationAlongsideToolCalls(t *testin
 	chat := defaultChatForSession(t, st, session.ID)
 
 	req := tools.Request{
-		Tool:       domain.ToolKindRead,
+		Tool:       domain.ToolKindFileRead,
 		ToolCallID: "call_1",
 		Args:       map[string]string{"path": "README.md"},
 	}
@@ -1976,9 +1976,9 @@ func TestApproveContinuesModelWithToolOutput(t *testing.T) {
 	cfg.DefaultModel = "test-model"
 	cfg.Permissions.Profiles["default"] = config.PermissionProfile{
 		Rules: []config.PermissionRule{
-			{Tool: domain.ToolKindRead, Pattern: "*", Action: domain.PermissionModeAllow},
-			{Tool: domain.ToolKindGlob, Pattern: "*", Action: domain.PermissionModeAllow},
-			{Tool: domain.ToolKindGrep, Pattern: "*", Action: domain.PermissionModeAllow},
+			{Tool: domain.ToolKindFileRead, Pattern: "*", Action: domain.PermissionModeAllow},
+			{Tool: domain.ToolKindFileGlob, Pattern: "*", Action: domain.PermissionModeAllow},
+			{Tool: domain.ToolKindFileGrep, Pattern: "*", Action: domain.PermissionModeAllow},
 			{Tool: domain.ToolKindBash, Pattern: "*", Action: domain.PermissionModeAsk},
 		},
 	}
@@ -2652,7 +2652,7 @@ func TestPendingExecutableToolCallsIgnoresStalePendingBeforeLaterUser(t *testing
 	}
 	chat := defaultChatForSession(t, st, session.ID)
 	req := tools.Request{
-		Tool:       domain.ToolKindRead,
+		Tool:       domain.ToolKindFileRead,
 		ToolCallID: "old_call",
 		Args:       map[string]string{"path": "README.md"},
 	}
@@ -2686,7 +2686,7 @@ func TestPendingExecutableToolCallsIgnoresStalePendingBeforeFinalAssistant(t *te
 	}
 	chat := defaultChatForSession(t, st, session.ID)
 	req := tools.Request{
-		Tool:       domain.ToolKindRead,
+		Tool:       domain.ToolKindFileRead,
 		ToolCallID: "old_call",
 		Args:       map[string]string{"path": "README.md"},
 	}
@@ -3053,7 +3053,7 @@ func TestRunPromptStreamsToolCallArgumentsAcrossChunks(t *testing.T) {
 		switch requests {
 		case 1:
 			w.Header().Set("Content-Type", "text/event-stream")
-			_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"id\":\"call_read\",\"type\":\"function\",\"index\":0,\"function\":{\"name\":\"read\",\"arguments\":\"\"}}]}}]}\n\n"))
+			_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"id\":\"call_read\",\"type\":\"function\",\"index\":0,\"function\":{\"name\":\"file_read\",\"arguments\":\"\"}}]}}]}\n\n"))
 			_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"{\"}}]}}]}\n\n"))
 			_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\\\"path\\\":\\\"note.txt\\\"\"}}]}}]}\n\n"))
 			_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n"))
@@ -3181,7 +3181,7 @@ func TestHandleModelToolCallAsksForOutsideProjectRead(t *testing.T) {
 		Root:      string(permissionprofile.ModeReadOnly),
 		Workspace: string(permissionprofile.ModeReadWrite),
 		Rules: []config.PermissionRule{{
-			Tool:    domain.ToolKindRead,
+			Tool:    domain.ToolKindFileRead,
 			Pattern: "*",
 			Action:  domain.PermissionModeAsk,
 		}},
@@ -3214,7 +3214,7 @@ func TestHandleModelToolCallAsksForOutsideProjectRead(t *testing.T) {
 
 	chat := defaultChatForSession(t, st, session.ID)
 	req := tools.Request{
-		Tool:       domain.ToolKindRead,
+		Tool:       domain.ToolKindFileRead,
 		ToolCallID: "call_1",
 		Args:       map[string]string{"path": outsidePath},
 	}
@@ -3261,7 +3261,7 @@ func TestHandleModelToolCallAllowsProjectReadInReadAskMode(t *testing.T) {
 
 	chat := defaultChatForSession(t, st, session.ID)
 	evt, err := engine.handleModelToolCall(context.Background(), session, chat, tools.Request{
-		Tool: domain.ToolKindRead,
+		Tool: domain.ToolKindFileRead,
 		Args: map[string]string{"path": "inside.txt"},
 	})
 	if err != nil {
@@ -3344,7 +3344,7 @@ func TestApproveContinuesAfterOutsideWorkspaceRead(t *testing.T) {
 		}
 		switch len(requests) {
 		case 1:
-			_, _ = w.Write([]byte(fmt.Sprintf(`{"choices":[{"message":{"tool_calls":[{"id":"call_1","type":"function","function":{"name":"read","arguments":%q}}]}}],"usage":{"total_tokens":1}}`, string(args))))
+			_, _ = w.Write([]byte(fmt.Sprintf(`{"choices":[{"message":{"tool_calls":[{"id":"call_1","type":"function","function":{"name":"file_read","arguments":%q}}]}}],"usage":{"total_tokens":1}}`, string(args))))
 		case 2:
 			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"done"}}],"usage":{"total_tokens":1}}`))
 		default:
@@ -3366,7 +3366,7 @@ func TestApproveContinuesAfterOutsideWorkspaceRead(t *testing.T) {
 		Root:      string(permissionprofile.ModeReadOnly),
 		Workspace: string(permissionprofile.ModeReadWrite),
 		Rules: []config.PermissionRule{{
-			Tool:    domain.ToolKindRead,
+			Tool:    domain.ToolKindFileRead,
 			Pattern: "*",
 			Action:  domain.PermissionModeAsk,
 		}},
@@ -3964,7 +3964,7 @@ func TestApproveContinuesAfterApprovedToolFailure(t *testing.T) {
 		}
 		switch len(requests) {
 		case 1:
-			_, _ = w.Write([]byte(fmt.Sprintf(`{"choices":[{"message":{"tool_calls":[{"id":"call_1","type":"function","function":{"name":"read","arguments":%q}}]}}],"usage":{"total_tokens":1}}`, string(args))))
+			_, _ = w.Write([]byte(fmt.Sprintf(`{"choices":[{"message":{"tool_calls":[{"id":"call_1","type":"function","function":{"name":"file_read","arguments":%q}}]}}],"usage":{"total_tokens":1}}`, string(args))))
 		case 2:
 			if !strings.Contains(requests[1], "no such file or directory") {
 				t.Fatalf("expected second request to include tool failure, got %s", requests[1])
@@ -3989,7 +3989,7 @@ func TestApproveContinuesAfterApprovedToolFailure(t *testing.T) {
 		Root:      string(permissionprofile.ModeReadOnly),
 		Workspace: string(permissionprofile.ModeReadWrite),
 		Rules: []config.PermissionRule{{
-			Tool:    domain.ToolKindRead,
+			Tool:    domain.ToolKindFileRead,
 			Pattern: "*",
 			Action:  domain.PermissionModeAsk,
 		}},
@@ -4095,7 +4095,7 @@ func TestContinueModelTurnAutoCompactsAfterToolResultChurn(t *testing.T) {
 			if err != nil {
 				t.Fatalf("marshal args: %v", err)
 			}
-			_, _ = w.Write([]byte(`{"choices":[{"message":{"tool_calls":[{"id":"call_1","type":"function","function":{"name":"read","arguments":` + strconv.Quote(string(args)) + `}}]}}],"usage":{"total_tokens":1}}`))
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"tool_calls":[{"id":"call_1","type":"function","function":{"name":"file_read","arguments":` + strconv.Quote(string(args)) + `}}]}}],"usage":{"total_tokens":1}}`))
 		default:
 			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ignored"}}],"usage":{"total_tokens":1}}`))
 		}
@@ -4687,7 +4687,7 @@ func TestHandleModelToolCallAllowsProjectWriteInWriteAskMode(t *testing.T) {
 
 	chat := defaultChatForSession(t, st, session.ID)
 	evt, err := engine.handleModelToolCall(context.Background(), session, chat, tools.Request{
-		Tool: domain.ToolKindWrite,
+		Tool: domain.ToolKindFileWrite,
 		Args: map[string]string{"path": "note.txt", "content": "hello"},
 	})
 	if err != nil {
@@ -5523,7 +5523,7 @@ func TestRunPromptPausesRepeatedIdenticalToolCalls(t *testing.T) {
 	var requests int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		requests++
-		_, _ = w.Write([]byte(fmt.Sprintf(`{"choices":[{"message":{"tool_calls":[{"id":"call_%d","type":"function","function":{"name":"read","arguments":"{\"path\":\"note.txt\"}"}}]}}],"usage":{"total_tokens":1}}`, requests)))
+		_, _ = w.Write([]byte(fmt.Sprintf(`{"choices":[{"message":{"tool_calls":[{"id":"call_%d","type":"function","function":{"name":"file_read","arguments":"{\"path\":\"note.txt\"}"}}]}}],"usage":{"total_tokens":1}}`, requests)))
 	}))
 	defer server.Close()
 
@@ -5551,7 +5551,7 @@ func TestRunPromptPausesRepeatedIdenticalToolCalls(t *testing.T) {
 	var sawPauseStatus bool
 	var sawPauseStatusItem bool
 	for _, evt := range events {
-		if evt.Kind == domain.EventKindStatus && strings.Contains(evt.Text, "identical Read calls") {
+		if evt.Kind == domain.EventKindStatus && strings.Contains(evt.Text, "identical FileRead calls") {
 			sawPauseStatus = true
 			if notice, ok := evt.Item.Content.(domain.Notice); ok && notice.Kind == "loop_pause" {
 				sawPauseStatusItem = true
@@ -5610,7 +5610,7 @@ func TestRunPromptPausesOnProviderRefusalAfterToolResult(t *testing.T) {
 		requests++
 		switch requests {
 		case 1:
-			_, _ = w.Write([]byte(`{"choices":[{"message":{"tool_calls":[{"id":"call_1","type":"function","function":{"name":"read","arguments":"{\"path\":\"note.txt\"}"}}]}}],"usage":{"total_tokens":1}}`))
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"tool_calls":[{"id":"call_1","type":"function","function":{"name":"file_read","arguments":"{\"path\":\"note.txt\"}"}}]}}],"usage":{"total_tokens":1}}`))
 		default:
 			_, _ = w.Write([]byte(`{"choices":[{"message":{}}],"usage":{"total_tokens":1}}`))
 		}
@@ -5666,7 +5666,7 @@ func TestRunPromptContinuesAfterReasoningOnlyTurnFollowingToolResult(t *testing.
 		requests = append(requests, string(body))
 		switch len(requests) {
 		case 1:
-			_, _ = w.Write([]byte(`{"choices":[{"message":{"tool_calls":[{"id":"call_1","type":"function","function":{"name":"read","arguments":"{\"path\":\"note.txt\"}"}}]}}],"usage":{"total_tokens":1}}`))
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"tool_calls":[{"id":"call_1","type":"function","function":{"name":"file_read","arguments":"{\"path\":\"note.txt\"}"}}]}}],"usage":{"total_tokens":1}}`))
 		case 2:
 			_, _ = w.Write([]byte(`{"choices":[{"message":{"reasoning":"thinking only"}}],"usage":{"total_tokens":1}}`))
 		default:
@@ -5749,7 +5749,7 @@ func TestRunPromptAutoContinuesAfterIntentOnlyStopFollowingToolResult(t *testing
 		requests = append(requests, string(body))
 		switch len(requests) {
 		case 1:
-			_, _ = w.Write([]byte(`{"choices":[{"message":{"tool_calls":[{"id":"call_1","type":"function","function":{"name":"read","arguments":"{\"path\":\"note.txt\"}"}}]}}],"usage":{"total_tokens":1}}`))
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"tool_calls":[{"id":"call_1","type":"function","function":{"name":"file_read","arguments":"{\"path\":\"note.txt\"}"}}]}}],"usage":{"total_tokens":1}}`))
 		case 2:
 			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"Let me inspect the failing test now:"}}],"usage":{"total_tokens":1}}`))
 		default:
@@ -5832,7 +5832,7 @@ func TestRunPromptDoesNotAutoContinueIntentOnlyStopWhenDisabled(t *testing.T) {
 		requests = append(requests, string(body))
 		switch len(requests) {
 		case 1:
-			_, _ = w.Write([]byte(`{"choices":[{"message":{"tool_calls":[{"id":"call_1","type":"function","function":{"name":"read","arguments":"{\"path\":\"note.txt\"}"}}]}}],"usage":{"total_tokens":1}}`))
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"tool_calls":[{"id":"call_1","type":"function","function":{"name":"file_read","arguments":"{\"path\":\"note.txt\"}"}}]}}],"usage":{"total_tokens":1}}`))
 		default:
 			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"Let me inspect the failing test now:"}}],"usage":{"total_tokens":1}}`))
 		}
@@ -5906,7 +5906,7 @@ func TestRunPromptPausesOnTurnLimit(t *testing.T) {
 		if err != nil {
 			t.Fatalf("marshal args: %v", err)
 		}
-		_, _ = w.Write([]byte(fmt.Sprintf(`{"choices":[{"message":{"tool_calls":[{"id":"call_%d","type":"function","function":{"name":"read","arguments":%q}}]}}],"usage":{"total_tokens":1}}`, requests, string(args))))
+		_, _ = w.Write([]byte(fmt.Sprintf(`{"choices":[{"message":{"tool_calls":[{"id":"call_%d","type":"function","function":{"name":"file_read","arguments":%q}}]}}],"usage":{"total_tokens":1}}`, requests, string(args))))
 	}))
 	defer server.Close()
 

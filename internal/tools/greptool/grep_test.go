@@ -12,7 +12,7 @@ import (
 )
 
 func TestSharedPresentationOmitsQueryPrefix(t *testing.T) {
-	got := tools.PresentationForTool(domain.ToolKindGrep, "needle")
+	got := tools.PresentationForTool(domain.ToolKindFileGrep, "needle")
 	if got.Title != "Search text" {
 		t.Fatalf("unexpected title: %#v", got)
 	}
@@ -23,7 +23,7 @@ func TestSharedPresentationOmitsQueryPrefix(t *testing.T) {
 
 func TestPresentationIncludesPathScope(t *testing.T) {
 	got := tool{}.Presentation(tools.Request{
-		Tool: domain.ToolKindGrep,
+		Tool: domain.ToolKindFileGrep,
 		Args: map[string]string{
 			"pattern": "needle",
 			"path":    "internal",
@@ -36,7 +36,7 @@ func TestPresentationIncludesPathScope(t *testing.T) {
 
 func TestPresentationIncludesIncludeScope(t *testing.T) {
 	got := tool{}.Presentation(tools.Request{
-		Tool: domain.ToolKindGrep,
+		Tool: domain.ToolKindFileGrep,
 		Args: map[string]string{
 			"pattern": "needle",
 			"include": "*.go",
@@ -49,7 +49,7 @@ func TestPresentationIncludesIncludeScope(t *testing.T) {
 
 func TestPresentationIncludesPathAndIncludeScope(t *testing.T) {
 	got := tool{}.Presentation(tools.Request{
-		Tool: domain.ToolKindGrep,
+		Tool: domain.ToolKindFileGrep,
 		Args: map[string]string{
 			"pattern": "needle",
 			"path":    "internal",
@@ -75,7 +75,7 @@ func TestExecuteSearchesSingleFilePath(t *testing.T) {
 	}
 
 	result, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: workdir}, tools.Request{
-		Tool: domain.ToolKindGrep,
+		Tool: domain.ToolKindFileGrep,
 		Args: map[string]string{
 			"pattern": "needle",
 			"path":    "pkg/file.go",
@@ -105,7 +105,7 @@ func TestExecuteSearchesDirectoryPath(t *testing.T) {
 	}
 
 	result, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: workdir}, tools.Request{
-		Tool: domain.ToolKindGrep,
+		Tool: domain.ToolKindFileGrep,
 		Args: map[string]string{
 			"pattern": "needle",
 			"path":    "pkg",
@@ -150,7 +150,7 @@ func TestExecuteFilesWithMatchesMode(t *testing.T) {
 	}
 
 	result, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: workdir}, tools.Request{
-		Tool: domain.ToolKindGrep,
+		Tool: domain.ToolKindFileGrep,
 		Args: map[string]string{
 			"pattern":     "needle",
 			"path":        "pkg",
@@ -176,7 +176,7 @@ func TestExecuteCountMode(t *testing.T) {
 	}
 
 	result, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: workdir}, tools.Request{
-		Tool: domain.ToolKindGrep,
+		Tool: domain.ToolKindFileGrep,
 		Args: map[string]string{
 			"pattern":     "needle",
 			"path":        "pkg",
@@ -203,7 +203,7 @@ func TestExecuteFallsBackWithoutRipgrep(t *testing.T) {
 	}
 
 	result, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: workdir}, tools.Request{
-		Tool: domain.ToolKindGrep,
+		Tool: domain.ToolKindFileGrep,
 		Args: map[string]string{
 			"pattern":     "alpha|needle",
 			"path":        "pkg/file.go",
@@ -235,7 +235,7 @@ func TestExecuteReturnsErrorWhenRipgrepFails(t *testing.T) {
 	t.Setenv("PATH", binDir)
 
 	_, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: workdir}, tools.Request{
-		Tool: domain.ToolKindGrep,
+		Tool: domain.ToolKindFileGrep,
 		Args: map[string]string{
 			"pattern": "needle",
 		},
@@ -260,7 +260,7 @@ func TestExecuteFallbackReturnsErrorForInvalidIncludeGlob(t *testing.T) {
 	}
 
 	_, err := tool{}.Execute(context.Background(), tools.Runtime{Workdir: workdir}, tools.Request{
-		Tool: domain.ToolKindGrep,
+		Tool: domain.ToolKindFileGrep,
 		Args: map[string]string{
 			"pattern": "needle",
 			"include": "[",

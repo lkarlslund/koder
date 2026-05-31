@@ -811,7 +811,7 @@ func TestLoadResumesPendingToolCalls(t *testing.T) {
 	session, chatRecord, _ := createSessionWithPlan(t, st)
 	if _, err := chatstore.AppendAssistantToolCalls(context.Background(), st, chatRecord.ID, []domain.ToolCall{{
 		ToolCallID: "call_1",
-		Tool:       domain.ToolKindRead,
+		Tool:       domain.ToolKindFileRead,
 		Args:       map[string]string{"path": "README.md"},
 		Status:     domain.ToolStatusPending,
 	}}, "", domain.Usage{}); err != nil {
@@ -832,7 +832,7 @@ func TestLoadResumesPendingToolCalls(t *testing.T) {
 			time.Sleep(10 * time.Millisecond)
 		}
 	}
-	events <- domain.Event{Kind: domain.EventKindToolStart, Tool: domain.ToolKindRead, ToolCallID: "call_1", Text: "read README.md"}
+	events <- domain.Event{Kind: domain.EventKindToolStart, Tool: domain.ToolKindFileRead, ToolCallID: "call_1", Text: "read README.md"}
 	close(events)
 
 	for {
@@ -855,7 +855,7 @@ func TestLoadDoesNotResumeWhenLatestAssistantHasNoPendingToolCalls(t *testing.T)
 	session, chatRecord, _ := createSessionWithPlan(t, st)
 	if _, err := chatstore.AppendAssistantToolCalls(context.Background(), st, chatRecord.ID, []domain.ToolCall{{
 		ToolCallID: "old_pending",
-		Tool:       domain.ToolKindRead,
+		Tool:       domain.ToolKindFileRead,
 		Args:       map[string]string{"path": "README.md"},
 		Status:     domain.ToolStatusPending,
 	}}, "", domain.Usage{}); err != nil {
@@ -929,8 +929,8 @@ func TestRuntimeToolResultReturnsStatusToWaitingLLM(t *testing.T) {
 	defer unsub()
 
 	rt.Enqueue(QueueItem{Kind: QueueKindQueued, Text: "read it"})
-	events <- domain.Event{Kind: domain.EventKindToolStart, Tool: domain.ToolKindRead, ToolCallID: "call_read"}
-	events <- domain.Event{Kind: domain.EventKindToolResult, Tool: domain.ToolKindRead, ToolCallID: "call_read", Text: "ok"}
+	events <- domain.Event{Kind: domain.EventKindToolStart, Tool: domain.ToolKindFileRead, ToolCallID: "call_read"}
+	events <- domain.Event{Kind: domain.EventKindToolResult, Tool: domain.ToolKindFileRead, ToolCallID: "call_read", Text: "ok"}
 
 	deadline := time.After(2 * time.Second)
 	for {
@@ -1151,7 +1151,7 @@ func TestRuntimeShowsStreamedToolCallDeltaStatus(t *testing.T) {
 	rt.inbox <- streamEventCmd{
 		event: domain.Event{
 			Kind: domain.EventKindToolCallDelta,
-			Tool: domain.ToolKindEdit,
+			Tool: domain.ToolKindFileEdit,
 			Meta: map[string]string{"arguments": strings.Repeat("x", 1536)},
 		},
 	}
@@ -1166,7 +1166,7 @@ func TestRuntimeShowsStreamedToolCallDeltaStatus(t *testing.T) {
 			if update.Status != StatusWaitingLLM {
 				t.Fatalf("status = %q", update.Status)
 			}
-			if update.StatusText != "Receiving Edit tool call (1.5 KB arguments)" {
+			if update.StatusText != "Receiving FileEdit tool call (1.5 KB arguments)" {
 				t.Fatalf("status text = %q", update.StatusText)
 			}
 			return

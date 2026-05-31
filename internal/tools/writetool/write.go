@@ -23,13 +23,13 @@ func init() {
 	tools.Register(tool{}, tools.ToolSpec{
 		Title:       "Write file",
 		Description: "Create a workspace file, or intentionally overwrite one when force_overwrite is true.",
-		Usage:       "Create a new file in the workspace. For existing files, prefer Edit for targeted changes. Write refuses to overwrite existing files unless force_overwrite is explicitly true; only force overwrite when a full-file rewrite is absolutely necessary.",
+		Usage:       "Create a new file in the workspace. For existing files, prefer file_edit for targeted changes. Write refuses to overwrite existing files unless force_overwrite is explicitly true; only force overwrite when a full-file rewrite is absolutely necessary.",
 		Parameters:  `{"type":"object","properties":{"path":{"type":"string","description":"File to create or intentionally overwrite"},"content":{"type":"string","description":"Complete contents of the file. Use only for new files or intentional full rewrites."},"force_overwrite":{"type":"boolean","description":"Set to true only when intentionally replacing the complete contents of an existing file. Omit or false for new-file creation."}},"required":["path","content"],"additionalProperties":false}`,
 		ExposeToLLM: true,
 	})
 }
 
-func (tool) Kind() domain.ToolKind    { return domain.ToolKindWrite }
+func (tool) Kind() domain.ToolKind    { return domain.ToolKindFileWrite }
 func (tool) BypassesPermission() bool { return false }
 func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 	path := tools.NormalizePathInput(tools.FirstArg(args, "path", "file", "file_path", "filepath"))
@@ -54,7 +54,7 @@ func (tool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Reques
 	action := "created"
 	if readErr == nil {
 		if !strings.EqualFold(strings.TrimSpace(req.Args["force_overwrite"]), "true") {
-			return tools.Result{}, fmt.Errorf("write refuses to overwrite existing file %s without force_overwrite=true. Prefer the edit tool for targeted changes; only force overwrite when a full-file rewrite is absolutely necessary", rel)
+			return tools.Result{}, fmt.Errorf("write refuses to overwrite existing file %s without force_overwrite=true. Prefer file_edit for targeted changes; only force overwrite when a full-file rewrite is absolutely necessary", rel)
 		}
 		if info, statErr := os.Stat(abs); statErr == nil {
 			mode = info.Mode().Perm()
@@ -96,7 +96,7 @@ func (tool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Reques
 	}, nil
 }
 func (tool) SummarizeResult(req tools.Request, result tools.Result) (string, string) {
-	return "write", result.Output
+	return "file_write", result.Output
 }
 
 func storedDiagnostics(in []codediag.Diagnostic) []tools.DiagnosticStored {

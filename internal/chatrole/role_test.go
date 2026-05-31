@@ -41,12 +41,12 @@ func TestRoleAllowsTool(t *testing.T) {
 		want bool
 	}{
 		{"legacy decomposition allows orchestrator tools", domain.WorkflowRole("decomposition"), domain.ToolKindChatPoll, true},
-		{"execution allows edit", Execution, domain.ToolKindEdit, true},
+		{"execution allows edit", Execution, domain.ToolKindFileEdit, true},
 		{"execution rejects chat start", Execution, domain.ToolKindChatStart, false},
 		{"execution rejects milestone add", Execution, domain.ToolKindMilestoneAdd, false},
 		{"execution allows milestone update", Execution, domain.ToolKindMilestoneUpdate, true},
 		{"orchestrator allows chat poll", Orchestrator, domain.ToolKindChatPoll, true},
-		{"unknown rejects read", domain.WorkflowRole("unknown"), domain.ToolKindRead, false},
+		{"unknown rejects read", domain.WorkflowRole("unknown"), domain.ToolKindFileRead, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

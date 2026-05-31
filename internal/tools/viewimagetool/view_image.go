@@ -22,7 +22,7 @@ func init() {
 	tools.Register(tool{}, tools.ToolSpec{
 		Title:       "View image",
 		Description: "Load a local image file into model context.",
-		Usage:       "Load a local image file into model context so you can inspect it visually. Use this instead of read for screenshots, photos, diagrams, or other image files. Path may be relative to the workspace or absolute. Optional detail may be set to original or omitted.",
+		Usage:       "Load a local image file into model context so you can inspect it visually. Use this instead of file_read for screenshots, photos, diagrams, or other image files. Path may be relative to the workspace or absolute. Optional detail may be set to original or omitted.",
 		Parameters:  `{"type":"object","properties":{"path":{"type":"string","description":"Relative or absolute local image path"},"detail":{"type":"string","description":"Optional detail level. Use original to preserve original resolution; omit for default resized behavior.","enum":["original"]}},"required":["path"],"additionalProperties":false}`,
 		ExposeToLLM: true,
 	})

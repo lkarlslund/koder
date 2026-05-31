@@ -21,13 +21,13 @@ func init() {
 	tools.Register(tool{}, tools.ToolSpec{
 		Title:       "Find files",
 		Description: "Find workspace paths by glob pattern.",
-		Usage:       "Find workspace paths by glob pattern when you do not yet know the exact file path. Use this for local file discovery, grep for file contents, and read once you know which file to open. Patterns are matched against workspace-relative paths using slash-separated paths such as **/*.go, cmd/*, or internal/**/testdata/*.json. path optionally narrows the search to a subdirectory. limit caps the number of returned matches.",
+		Usage:       "Find workspace paths by glob pattern when you do not yet know the exact file path. Use this for local file discovery, file_grep for file contents, and file_read once you know which file to open. Patterns are matched against workspace-relative paths using slash-separated paths such as **/*.go, cmd/*, or internal/**/testdata/*.json. path optionally narrows the search to a subdirectory. limit caps the number of returned matches.",
 		Parameters:  `{"type":"object","properties":{"pattern":{"type":"string","description":"Glob pattern relative to the workspace"},"path":{"type":"string","description":"Optional workspace directory to search from"},"limit":{"type":"integer","description":"Optional maximum number of matches to return"}},"required":["pattern"],"additionalProperties":false}`,
 		ExposeToLLM: true,
 	})
 }
 
-func (tool) Kind() domain.ToolKind    { return domain.ToolKindGlob }
+func (tool) Kind() domain.ToolKind    { return domain.ToolKindFileGlob }
 func (tool) BypassesPermission() bool { return false }
 func (tool) NormalizeArgs(args map[string]string) (map[string]string, error) {
 	pattern := strings.TrimSpace(tools.FirstArg(args, "pattern", "glob"))
