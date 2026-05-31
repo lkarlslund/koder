@@ -335,14 +335,6 @@ func New(cfg config.Config, st *store.Store, engine *agent.Engine) *Controller {
 	}
 }
 
-// Store returns the storage backend used by the controller.
-func (c *Controller) Store() *store.Store {
-	if c == nil {
-		return nil
-	}
-	return c.store
-}
-
 // Start loads the initial session/chat and attaches the live chat runtime.
 func (c *Controller) Start(ctx context.Context, mode StartupMode, projectRoot string) error {
 	if c == nil {

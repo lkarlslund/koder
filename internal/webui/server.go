@@ -29,6 +29,7 @@ import (
 	"github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/debugsrv"
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/store"
 )
 
 const defaultOpenDelay = 5 * time.Second
@@ -50,6 +51,7 @@ type Options struct {
 	OpenDelay             time.Duration
 	OpenBrowser           func(string) error
 	Debug                 *debugsrv.Recorder
+	Store                 *store.Store
 	RequestProcessRestart func() error
 }
 
@@ -102,7 +104,7 @@ func Start(ctx context.Context, controller *app.Controller, options Options) (*S
 	mux.HandleFunc("/ws", s.handleWebSocket)
 	if s.debug != nil {
 		s.debug.SetDebugAPI(s.URL())
-		debugsrv.NewServer(controller.Store(), s.debug).Register(mux)
+		debugsrv.NewServer(options.Store, s.debug).Register(mux)
 	}
 	s.server = &http.Server{Handler: mux}
 	go func() {

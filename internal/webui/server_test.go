@@ -95,13 +95,12 @@ func TestServerServesCanonicalSessionRoutes(t *testing.T) {
 func TestWebSocketHelloUsesURLSessionSelection(t *testing.T) {
 	ctrl := newTestController(t)
 	firstID := ctrl.State().Session.ID
-	st := ctrl.Store()
-	second, err := st.CreateSession(context.Background(), "Second", "test", "model", nil)
-	if err != nil {
+	if err := ctrl.NewSessionWithProjectRoot(context.Background(), "Second", t.TempDir()); err != nil {
 		t.Fatalf("create second session: %v", err)
 	}
-	if err := st.SetSessionProjectRoot(context.Background(), second.ID, t.TempDir()); err != nil {
-		t.Fatalf("set second project root: %v", err)
+	secondID := ctrl.State().Session.ID
+	if err := ctrl.SwitchSession(context.Background(), firstID); err != nil {
+		t.Fatalf("switch back to first session: %v", err)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -110,7 +109,7 @@ func TestWebSocketHelloUsesURLSessionSelection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("start server: %v", err)
 	}
-	conn, _, err := websocket.Dial(ctx, "ws://"+srv.Addr()+"/ws?session="+string(second.ID), nil)
+	conn, _, err := websocket.Dial(ctx, "ws://"+srv.Addr()+"/ws?session="+string(secondID), nil)
 	if err != nil {
 		t.Fatalf("dial websocket: %v", err)
 	}
@@ -136,8 +135,8 @@ func TestWebSocketHelloUsesURLSessionSelection(t *testing.T) {
 	if !resp.OK {
 		t.Fatalf("expected hello ok, got %s", resp.Error)
 	}
-	if resp.Result.State.Session.ID != second.ID {
-		t.Fatalf("expected hello for second session %s, got %s; first was %s", second.ID, resp.Result.State.Session.ID, firstID)
+	if resp.Result.State.Session.ID != secondID {
+		t.Fatalf("expected hello for second session %s, got %s; first was %s", secondID, resp.Result.State.Session.ID, firstID)
 	}
 }
 

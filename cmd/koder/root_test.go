@@ -201,7 +201,7 @@ func TestWebBindForLaunchIgnoresSavedEphemeralRecords(t *testing.T) {
 }
 
 func TestStartWebUISurfacesBindError(t *testing.T) {
-	ctrl := newRootTestController(t)
+	ctrl, st := newRootTestController(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
@@ -212,7 +212,7 @@ func TestStartWebUISurfacesBindError(t *testing.T) {
 	t.Cleanup(func() { _ = listener.Close() })
 	bind := listener.Addr().String()
 
-	if _, err := startWebUI(ctx, ctrl, bind, true, nil); err == nil {
+	if _, err := startWebUI(ctx, ctrl, st, bind, true, nil); err == nil {
 		t.Fatalf("expected bind error while %q stays busy", bind)
 	}
 }
@@ -227,7 +227,7 @@ func newRootTestStore(t *testing.T) *store.Store {
 	return st
 }
 
-func newRootTestController(t *testing.T) *app.Controller {
+func newRootTestController(t *testing.T) (*app.Controller, *store.Store) {
 	t.Helper()
 	cfg := config.Default().WithStateDir(t.TempDir())
 	cfg.DefaultProvider = "test"
@@ -244,7 +244,7 @@ func newRootTestController(t *testing.T) *app.Controller {
 		t.Fatalf("start controller: %v", err)
 	}
 	t.Cleanup(func() { _ = ctrl.Shutdown(context.Background()) })
-	return ctrl
+	return ctrl, st
 }
 
 func TestNewRootCommandRegistersSubcommands(t *testing.T) {

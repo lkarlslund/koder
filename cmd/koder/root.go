@@ -163,7 +163,7 @@ func runWeb(ctx context.Context, cfg config.Config, st *store.Store, engine *age
 	if err != nil {
 		return err
 	}
-	server, err := startWebUI(ctx, controller, bind, startupOpts.NoOpenBrowser, recorder)
+	server, err := startWebUI(ctx, controller, st, bind, startupOpts.NoOpenBrowser, recorder)
 	if err != nil {
 		return err
 	}
@@ -204,11 +204,12 @@ func runWeb(ctx context.Context, cfg config.Config, st *store.Store, engine *age
 	}
 }
 
-func startWebUI(ctx context.Context, controller *app.Controller, bind string, noOpenBrowser bool, recorder *debugsrv.Recorder) (*webui.Server, error) {
+func startWebUI(ctx context.Context, controller *app.Controller, st *store.Store, bind string, noOpenBrowser bool, recorder *debugsrv.Recorder) (*webui.Server, error) {
 	return webui.Start(ctx, controller, webui.Options{
 		Bind:          bind,
 		NoOpenBrowser: noOpenBrowser,
 		Debug:         recorder,
+		Store:         st,
 	})
 }
 
