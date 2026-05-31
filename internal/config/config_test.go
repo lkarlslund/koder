@@ -92,6 +92,50 @@ func TestApplyDefaultsPrunesRemovedToolDefaults(t *testing.T) {
 	}
 }
 
+func TestLoadAcceptsTextToolDefaultKeys(t *testing.T) {
+	temp := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", temp)
+	t.Setenv("XDG_STATE_HOME", temp)
+	t.Setenv("XDG_CACHE_HOME", temp)
+
+	configRoot := filepath.Join(temp, "koder")
+	if err := os.MkdirAll(configRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	raw := []byte(`
+[tool_defaults]
+bash = false
+exec_write_stdin = false
+exec_cleanup_background = false
+milestone_add_items = false
+milestone_plan_and_decompose = false
+milestone_update_item = false
+`)
+	if err := os.WriteFile(filepath.Join(configRoot, "config.toml"), raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, kind := range []domain.ToolKind{
+		domain.ToolKindBash,
+		domain.ToolKindExecWriteStdin,
+		domain.ToolKindExecCleanup,
+		domain.ToolKindMilestoneAdd,
+		domain.ToolKindMilestonePlan,
+		domain.ToolKindMilestoneUpdate,
+	} {
+		if cfg.ToolDefaults[kind] {
+			t.Fatalf("expected %s to stay disabled: %#v", kind, cfg.ToolDefaults)
+		}
+	}
+	if !cfg.ToolDefaults[domain.ToolKindRead] {
+		t.Fatal("expected missing tool default to be backfilled enabled")
+	}
+}
+
 func TestRequireProviderRejectsMissingProviderConfiguration(t *testing.T) {
 	cfg := Default()
 
