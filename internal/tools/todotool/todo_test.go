@@ -28,7 +28,7 @@ func TestTodoUpdateItemParsesStringID(t *testing.T) {
 func TestTodoUpdateItemDefinitionUsesUUIDStringID(t *testing.T) {
 	defs := tools.Definitions(tools.Runtime{})
 	for _, def := range defs {
-		if def.Function.Name != string(domain.ToolKindTodoUpdateItem) {
+		if def.Function.Name != domain.ToolKindTodoUpdateItem.String() {
 			continue
 		}
 		params := string(def.Function.Parameters)
@@ -105,7 +105,7 @@ func TestMilestoneAndTodoWorkflow(t *testing.T) {
 	}
 	if _, err := executeAndPersist(ctx, t, runtime, tools.Request{
 		Tool: domain.ToolKindTodoUpdateItem,
-		Args: map[string]string{"id": tools.FormatTodoID(todos[0].ID), "status": "in_progress"},
+		Args: map[string]string{"id": tools.FormatTodoID(todos[0].ID), "status": "InProgress"},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -220,7 +220,7 @@ func TestTodoScopedChatSeesAndUpdatesOnlyAssignedTodo(t *testing.T) {
 
 	if _, err := tools.Execute(ctx, runtime, tools.Request{
 		Tool: domain.ToolKindTodoUpdateItem,
-		Args: map[string]string{"id": string(todos[1].ID), "status": string(domain.TodoStatusCompleted)},
+		Args: map[string]string{"id": string(todos[1].ID), "status": domain.TodoStatusCompleted.String()},
 	}); err == nil || !strings.Contains(err.Error(), "scoped to todo") {
 		t.Fatalf("expected scoped todo error, got %v", err)
 	}
@@ -235,7 +235,7 @@ func TestTodoScopedChatSeesAndUpdatesOnlyAssignedTodo(t *testing.T) {
 func TestMilestoneWriteHiddenFromDefinitions(t *testing.T) {
 	defs := tools.Definitions(tools.Runtime{})
 	for _, def := range defs {
-		if def.Function.Name == string(domain.ToolKindMilestoneWrite) {
+		if def.Function.Name == domain.ToolKindMilestoneWrite.String() {
 			t.Fatalf("milestone_write should not be exposed to the model")
 		}
 	}
@@ -243,9 +243,9 @@ func TestMilestoneWriteHiddenFromDefinitions(t *testing.T) {
 	foundUpdate := false
 	for _, def := range defs {
 		switch def.Function.Name {
-		case string(domain.ToolKindMilestoneAdd):
+		case domain.ToolKindMilestoneAdd.String():
 			foundAdd = true
-		case string(domain.ToolKindMilestoneUpdate):
+		case domain.ToolKindMilestoneUpdate.String():
 			foundUpdate = true
 		}
 	}

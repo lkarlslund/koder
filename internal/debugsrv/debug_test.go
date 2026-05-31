@@ -207,7 +207,7 @@ func TestServerExposesSessionAnalysis(t *testing.T) {
 	if analysis.BadStops[0].MessageID != assistantStop.ID || analysis.BadStops[0].NextMessageID != toolMsg.ID {
 		t.Fatalf("unexpected bad stop linkage %#v", analysis.BadStops[0])
 	}
-	if analysis.BadStops[0].NextTool != "edit" {
+	if analysis.BadStops[0].NextTool != "Edit" {
 		t.Fatalf("expected next tool edit, got %#v", analysis.BadStops[0])
 	}
 }

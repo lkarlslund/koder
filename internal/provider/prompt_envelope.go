@@ -37,7 +37,7 @@ func SerializePromptEnvelope(env PromptEnvelope) []Message {
 		})
 	}
 	for _, item := range env.Items {
-		if item.Role == domain.MessageRoleSystem || (item.Role == "" && strings.TrimSpace(item.Content) == "" && len(item.ContentParts) == 0 && len(item.ToolCalls) == 0) {
+		if item.Role == domain.MessageRoleSystem || (item.Role == 0 && strings.TrimSpace(item.Content) == "" && len(item.ContentParts) == 0 && len(item.ToolCalls) == 0) {
 			continue
 		}
 		out = append(out, item)

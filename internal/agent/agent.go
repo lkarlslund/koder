@@ -330,7 +330,7 @@ func (e *Engine) ApproveToolForTurn(ctx context.Context, turn *chatpkg.TurnState
 			Kind: domain.EventKindStatus,
 			Text: fmt.Sprintf("approved all %s requests matching %s for this session", next.Tool, next.Pattern),
 			Meta: map[string]string{
-				"permission_tool":    string(next.Tool),
+				"permission_tool":  next.Tool.String(),
 				"permission_pattern": next.Pattern,
 			},
 		}
@@ -509,7 +509,7 @@ func (l *engineTurnLoop) Step(ctx context.Context, turn *chatpkg.TurnState, step
 
 	call, plain := parseToolCall(text)
 	if call != nil {
-		e.recordLifecycle(session.ID, "tool_call_parsed", call.ContextString(), map[string]string{"tool": string(call.Tool), "tool_call_id": call.ToolCallID})
+		e.recordLifecycle(session.ID, "tool_call_parsed", call.ContextString(), map[string]string{"tool": call.Tool.String(), "tool_call_id": call.ToolCallID})
 		assistantItem, err := e.persistAssistantToolCallsForTurn(ctx, turn, chat.ID, session.ID, assistantItem, []tools.Request{*call}, strings.TrimSpace(plain), domain.Usage{})
 		if err != nil {
 			return chatpkg.TurnStepResult{}, err
@@ -1073,12 +1073,12 @@ func (e *Engine) titleSummaryMessages(ctx context.Context, sessionID domain.ID) 
 func timelineTitleEntry(item domain.TimelineItem) (string, string) {
 	switch content := item.Content.(type) {
 	case domain.UserMessage:
-		return string(domain.MessageRoleUser), content.Text
+		return domain.MessageRoleUser.String(), content.Text
 	case domain.AssistantMessage:
 		if strings.TrimSpace(content.Text) != "" {
-			return string(domain.MessageRoleAssistant), content.Text
+			return domain.MessageRoleAssistant.String(), content.Text
 		}
-		return string(domain.MessageRoleAssistant), strings.TrimSpace(content.Reasoning.Text)
+		return domain.MessageRoleAssistant.String(), strings.TrimSpace(content.Reasoning.Text)
 	case domain.ToolExecution:
 		text := ""
 		if content.Result != nil {
@@ -1087,7 +1087,7 @@ func timelineTitleEntry(item domain.TimelineItem) (string, string) {
 		if content.Error != nil {
 			text = content.Error.Message
 		}
-		return string(domain.MessageRoleTool), text
+		return domain.MessageRoleTool.String(), text
 	case domain.Notice:
 		return "notice", content.Text
 	case domain.Compaction:
@@ -1130,7 +1130,7 @@ func (e *Engine) persistToolResult(ctx context.Context, chatID, sessionID domain
 		e.notifyMilestoneChanges(ctx, chatID, beforePlan)
 	}
 	summary, _ := tools.SummarizeResult(req, result)
-	e.recordLifecycle(sessionID, "tool_result_persisted", summary, map[string]string{"tool": string(req.Tool)})
+	e.recordLifecycle(sessionID, "tool_result_persisted", summary, map[string]string{"tool": req.Tool.String()})
 	return events, nil
 }
 
@@ -1201,7 +1201,7 @@ func (e *Engine) persistToolFailure(ctx context.Context, chatID, sessionID domai
 	if err != nil {
 		return nil, err
 	}
-	e.recordLifecycle(sessionID, "tool_result_persisted", text, map[string]string{"tool": string(req.Tool), "status": "error"})
+	e.recordLifecycle(sessionID, "tool_result_persisted", text, map[string]string{"tool": req.Tool.String(), "status": "error"})
 	return emitOnce(domain.Event{Kind: domain.EventKindToolResult, Tool: req.Tool, ToolCallID: req.ToolCallID, Text: text, Item: item}), nil
 }
 
@@ -1318,7 +1318,7 @@ type toolLoopTracker struct {
 
 func (t *toolLoopTracker) reset() {
 	t.lastSignature = ""
-	t.lastTool = ""
+	t.lastTool = 0
 	t.repeatCount = 0
 }
 
@@ -1356,7 +1356,7 @@ func (t *toolLoopTracker) trackCalls(calls []tools.Request) (continuationPause, 
 }
 
 func toolLoopSignature(req tools.Request) string {
-	return string(req.Tool) + "\x00" + req.ArgumentsJSON()
+	return req.Tool.String() + "\x00" + req.ArgumentsJSON()
 }
 
 func providerRefusalPauseBody(reasoning string) string {
@@ -1379,7 +1379,7 @@ func (e *Engine) pauseContinuation(ctx context.Context, chatID, sessionID domain
 	}
 	e.recordLifecycle(sessionID, "model_turn_paused", body, map[string]string{
 		"reason": string(pause.Reason),
-		"tool":   string(pause.Tool),
+		"tool":  pause.Tool.String(),
 		"count":  strconv.Itoa(pause.Count),
 		"limit":  strconv.Itoa(pause.Limit),
 	})
@@ -1389,7 +1389,7 @@ func (e *Engine) pauseContinuation(ctx context.Context, chatID, sessionID domain
 		Reason:   string(pause.Reason),
 		Title:    title,
 		Subtitle: subtitle,
-		Tool:     string(pause.Tool),
+		Tool:  pause.Tool.String(),
 		Count:    pause.Count,
 		Limit:    pause.Limit,
 	})
@@ -1406,8 +1406,8 @@ func (e *Engine) pauseContinuation(ctx context.Context, chatID, sessionID domain
 func continuationPauseSubtitle(pause continuationPause) string {
 	switch pause.Reason {
 	case continuationPauseReasonRepeatedTool:
-		if pause.Tool != "" {
-			return fmt.Sprintf("Repeated identical %s calls", pause.Tool)
+		if pause.Tool != 0 {
+			return fmt.Sprintf("Repeated identical %s calls", pause.Tool.String())
 		}
 		return "Repeated identical tool calls"
 	case continuationPauseReasonTurnLimit:
@@ -1430,16 +1430,22 @@ func (e *Engine) persistTranscriptNotice(ctx context.Context, chatID, sessionID 
 	if body == "" {
 		return domain.TimelineItem{}, false
 	}
+	var noticeTool domain.ToolKind
+	if meta.Tool != "" {
+		if tk, err := domain.ToolKindString(meta.Tool); err == nil {
+			noticeTool = tk
+		}
+	}
 	item, err := chatstore.AppendTimeline(ctx, e.store, chatID, domain.Notice{
-		Level:    strings.TrimSpace(meta.Severity),
-		Text:     body,
-		Kind:     strings.TrimSpace(meta.Kind),
-		Reason:   strings.TrimSpace(meta.Reason),
-		Title:    strings.TrimSpace(meta.Title),
+		Level:  strings.TrimSpace(meta.Severity),
+		Text:  body,
+		Kind:  strings.TrimSpace(meta.Kind),
+		Reason:  strings.TrimSpace(meta.Reason),
+		Title:  strings.TrimSpace(meta.Title),
 		Subtitle: strings.TrimSpace(meta.Subtitle),
-		Tool:     domain.ToolKind(meta.Tool),
-		Count:    meta.Count,
-		Limit:    meta.Limit,
+		Tool:  noticeTool,
+		Count:  meta.Count,
+		Limit:  meta.Limit,
 	})
 	if err != nil {
 		return domain.TimelineItem{}, false
@@ -2329,7 +2335,7 @@ func parseToolCall(text string) (*tools.Request, string) {
 		return nil, text
 	}
 	call, err := tools.RequestFromMeta(match[1])
-	if err != nil || call.Tool == "" {
+	if err != nil || call.Tool == 0 {
 		return nil, text
 	}
 	plain := strings.TrimSpace(re.ReplaceAllString(text, ""))
@@ -2722,7 +2728,7 @@ func (e *Engine) compactionMessagesForTimelineItem(session domain.Session, item 
 		if body == "" {
 			return nil, nil
 		}
-		return []provider.Message{{Role: domain.MessageRoleUser, Content: compactTextForCompaction(string(content.Tool)+" output:\n"+body, "tool execution")}}, nil
+		return []provider.Message{{Role: domain.MessageRoleUser, Content: compactTextForCompaction(content.Tool.String()+" output:\n"+body, "tool execution")}}, nil
 	case domain.Notice:
 		return nil, nil
 	default:
@@ -2857,12 +2863,12 @@ func (e *Engine) compactionToolResultMessage(tool domain.ToolCall) (provider.Mes
 		} else {
 			body = "Diff:\n" + diff
 		}
-		body = compactTextForCompaction(body, string(tool.Tool)+" result")
+		body = compactTextForCompaction(body, tool.Tool.String()+" result")
 	}
 	if body == "" {
 		return provider.Message{}, false
 	}
-	return provider.Message{Role: domain.MessageRoleUser, Content: "Tool result for " + string(tool.Tool) + ":\n" + body}, true
+	return provider.Message{Role: domain.MessageRoleUser, Content: "Tool result for " + tool.Tool.String() + ":\n" + body}, true
 }
 
 func compactTextForCompaction(text string, label string) string {
@@ -3008,7 +3014,7 @@ func (e *Engine) parseProviderToolCalls(raw []provider.ToolCall, sessionID domai
 			})
 			continue
 		}
-		e.recordLifecycle(sessionID, "tool_call_parsed", call.ContextString(), map[string]string{"tool": string(call.Tool), "tool_call_id": call.ToolCallID})
+		e.recordLifecycle(sessionID, "tool_call_parsed", call.ContextString(), map[string]string{"tool": call.Tool.String(), "tool_call_id": call.ToolCallID})
 		calls = append(calls, call)
 	}
 	if len(calls) == 0 {
@@ -3303,7 +3309,7 @@ func (e *Engine) executePreparedToolCall(ctx context.Context, chatID, sessionID 
 }
 
 func (e *Engine) executePreparedToolCallForTurn(ctx context.Context, turn *chatpkg.TurnState, chatID, sessionID domain.ID, req tools.Request) ([]domain.Event, error) {
-	e.recordLifecycle(sessionID, "tool_execution_started", req.ContextString(), map[string]string{"tool": string(req.Tool), "tool_call_id": req.ToolCallID})
+	e.recordLifecycle(sessionID, "tool_execution_started", req.ContextString(), map[string]string{"tool": req.Tool.String(), "tool_call_id": req.ToolCallID})
 	if strings.TrimSpace(req.ToolCallID) != "" {
 		item, err := chatstore.MarkToolRunning(ctx, e.store, chatID, req.ToolCallID)
 		if err != nil {
@@ -3336,7 +3342,7 @@ func (e *Engine) executePreparedToolCallForTurn(ctx context.Context, turn *chatp
 	}
 	result, err := tools.Execute(ctx, e.toolRuntime(session, chat), req)
 	if err != nil {
-		e.recordLifecycle(sessionID, "tool_execution_failed", err.Error(), map[string]string{"tool": string(req.Tool), "tool_call_id": req.ToolCallID})
+		e.recordLifecycle(sessionID, "tool_execution_failed", err.Error(), map[string]string{"tool": req.Tool.String(), "tool_call_id": req.ToolCallID})
 		if interruptedErr(err) {
 			return nil, err
 		}
@@ -3357,7 +3363,7 @@ func (e *Engine) executePreparedToolCallForTurn(ctx context.Context, turn *chatp
 		}
 		return out, nil
 	}
-	e.recordLifecycle(sessionID, "tool_execution_finished", req.ContextString(), map[string]string{"tool": string(req.Tool), "tool_call_id": req.ToolCallID})
+	e.recordLifecycle(sessionID, "tool_execution_finished", req.ContextString(), map[string]string{"tool": req.Tool.String(), "tool_call_id": req.ToolCallID})
 	events, err := e.persistToolResult(ctx, chatID, sessionID, req, result)
 	if err != nil {
 		return nil, err
@@ -3480,7 +3486,7 @@ func (e *Engine) recordApprovalReply(ctx context.Context, chatID, sessionID doma
 	body := fmt.Sprintf("Approval %s %s for %s: %s", approvalID, status, tool, preview)
 	payload := map[string]string{
 		"approval_id": approvalID,
-		"tool":        string(tool),
+		"tool":  tool.String(),
 		"status":      status,
 		"command":     preview,
 	}

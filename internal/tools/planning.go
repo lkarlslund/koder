@@ -130,10 +130,10 @@ func MilestoneStoredResult(plan planning.Plan) MilestonePlanStoredResult {
 			ownerChatID = *item.OwnerChatID
 		}
 		items = append(items, MilestoneStoredItem{
-			Ref:         item.Ref,
-			Title:       item.Title,
-			Status:      string(item.Status),
-			Notes:       item.Notes,
+			Ref:  item.Ref,
+			Title:  item.Title,
+			Status:  item.Status.String(),
+			Notes:  item.Notes,
 			OwnerChatID: ownerChatID,
 		})
 	}
@@ -149,7 +149,7 @@ func TodoStoredResult(plan planning.Plan, ref string, todos []planning.TodoItem,
 		items = append(items, TodoStoredItem{
 			ID:      item.ID,
 			Content: item.Content,
-			Status:  string(item.Status),
+			Status:  item.Status.String(),
 		})
 	}
 	return TodoListStoredResult{
@@ -166,8 +166,8 @@ func ChatListStored(statuses []ChatStatus) ChatListStoredResult {
 		items = append(items, ChatStoredItem{
 			ID:                 status.Chat.ID,
 			Title:              status.Chat.Title,
-			Role:               string(status.Chat.WorkflowRole),
-			State:              string(status.State),
+			Role:  string(status.Chat.WorkflowRole),
+			State:  string(status.State),
 			Archived:           status.Chat.Archived,
 			ActiveMilestoneRef: status.Chat.ActiveMilestoneRef,
 			AssignedTodoRef:    status.Chat.AssignedTodoRef,

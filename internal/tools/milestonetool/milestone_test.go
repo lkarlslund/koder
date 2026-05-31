@@ -72,7 +72,7 @@ func TestNormalizeArgsAndDefinitions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if updated["status"] != string(domain.MilestoneStatusCancelled) {
+	if updated["status"] != domain.MilestoneStatusCancelled.String() {
 		t.Fatalf("expected cancelled status, got %#v", updated)
 	}
 	def, enabled := tools.DefinitionFor(domain.ToolKindMilestoneUpdate, tools.Runtime{ChatRole: chatrole.Orchestrator})
@@ -302,7 +302,7 @@ func TestUpdateItemAllowsCompletedMilestoneWhenTodosAreComplete(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(result.Output, "completed") {
+	if !strings.Contains(result.Output, "Completed") {
 		t.Fatalf("expected completed milestone output, got %q", result.Output)
 	}
 }

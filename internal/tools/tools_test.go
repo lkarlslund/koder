@@ -34,7 +34,7 @@ func TestToolCallNoArgsUsesEmptyObjectArguments(t *testing.T) {
 		ToolCallID: "call_1",
 	})
 
-	if call.Function.Name != string(domain.ToolKindMilestoneList) {
+	if call.Function.Name != domain.ToolKindMilestoneList.String() {
 		t.Fatalf("expected function name %q, got %q", domain.ToolKindMilestoneList, call.Function.Name)
 	}
 	if call.Function.Arguments != "{}" {

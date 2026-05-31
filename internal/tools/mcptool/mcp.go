@@ -56,7 +56,7 @@ func (tool) Preview(req tools.Request) string {
 	case toolName != "":
 		return toolName
 	default:
-		return string(req.Tool)
+		return req.Tool.String()
 	}
 }
 

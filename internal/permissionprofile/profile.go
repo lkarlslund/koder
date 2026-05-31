@@ -322,7 +322,7 @@ func summarizeRules(rules []Rule) string {
 		if counts[mode] == 0 {
 			continue
 		}
-		parts = append(parts, fmt.Sprintf("%d %s", counts[mode], mode))
+		parts = append(parts, fmt.Sprintf("%d %s", counts[mode], mode.String()))
 	}
 	return strings.Join(parts, ", ")
 }
@@ -352,10 +352,10 @@ func (req Request) targetsProjectOnly() bool {
 }
 
 func toolMatches(ruleTool, reqTool domain.ToolKind) bool {
-	if strings.TrimSpace(string(ruleTool)) == "" {
+	if strings.TrimSpace(ruleTool.String()) == "" {
 		return false
 	}
-	return wildcardMatch(string(ruleTool), string(reqTool))
+	return wildcardMatch(ruleTool.String(), reqTool.String())
 }
 
 func (req Request) reason(fallback string) string {

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/lkarlslund/koder/internal/domain"
 )
@@ -413,7 +414,7 @@ func compactStoredResultForPart(env storedResultEnvelope, diff string, limits Co
 	}
 	if env.Status == StoredResultStatusDenied || env.Status == StoredResultStatusError {
 		text, ok := formatStoredToolOutput(env)
-		return compactTextForCompaction(text, limits.HeadLines, limits.TailLines, limits.MaxBytes, string(env.Tool)+" result"), ok
+		return compactTextForCompaction(text, limits.HeadLines, limits.TailLines, limits.MaxBytes, env.Tool.String()+" result"), ok
 	}
 	switch env.Tool {
 	case domain.ToolKindRead:
@@ -437,7 +438,7 @@ func compactStoredResultForPart(env storedResultEnvelope, diff string, limits Co
 		if !ok {
 			return "", false
 		}
-		return compactTextForCompaction(text, limits.HeadLines, limits.TailLines, limits.MaxBytes, string(env.Tool)+" result"), true
+		return compactTextForCompaction(text, limits.HeadLines, limits.TailLines, limits.MaxBytes, env.Tool.String()+" result"), true
 	default:
 		text, ok := formatStoredToolOutput(env)
 		if !ok {
@@ -446,7 +447,7 @@ func compactStoredResultForPart(env storedResultEnvelope, diff string, limits Co
 		if shouldAppendDiffToModelText(env) && strings.TrimSpace(diff) != "" {
 			text += "\n\nDiff:\n" + diff
 		}
-		return compactTextForCompaction(text, limits.HeadLines, limits.TailLines, limits.MaxBytes, string(env.Tool)+" result"), true
+		return compactTextForCompaction(text, limits.HeadLines, limits.TailLines, limits.MaxBytes, env.Tool.String()+" result"), true
 	}
 }
 
@@ -607,7 +608,7 @@ func shouldAppendDiffToModelText(env storedResultEnvelope) bool {
 		return false
 	}
 	switch env.Tool {
-	case domain.ToolKindEdit, domain.ToolKind("apply_patch"):
+	case domain.ToolKindEdit, domain.ToolKindApplyPatch:
 		return false
 	default:
 		return true
@@ -629,7 +630,7 @@ func DisplayTextForPart(part domain.Part) (string, bool) {
 func StoredResultInfoForPart(part domain.Part) (domain.ToolKind, StoredResultStatus, bool) {
 	env, ok := storedResultFromPart(part)
 	if !ok {
-		return "", "", false
+		return 0, "", false
 	}
 	return env.Tool, env.Status, true
 }
@@ -783,7 +784,7 @@ func formatStoredToolOutput(env storedResultEnvelope) (string, bool) {
 		return decodeAndFormat[ExecStoredResult](env.Payload, formatExecStoredResult)
 	case domain.ToolKindExecList, domain.ToolKindExecCleanup:
 		return decodeAndFormat[ExecListStoredResult](env.Payload, formatExecListStoredResult)
-	case domain.ToolKind("apply_patch"):
+	case domain.ToolKindApplyPatch:
 		return decodeAndFormat[ApplyPatchStoredResult](env.Payload, func(result ApplyPatchStoredResult) string {
 			return strings.TrimSpace(result.Summary)
 		})
@@ -828,7 +829,7 @@ func formatStoredToolOutput(env storedResultEnvelope) (string, bool) {
 		return decodeAndFormat[ShowImageStoredResult](env.Payload, formatShowImageStoredResult)
 	case domain.ToolKindMilestoneList, domain.ToolKindMilestoneAdd, domain.ToolKindMilestoneUpdate, domain.ToolKindMilestoneWrite, domain.ToolKindMilestonePlan:
 		return decodeAndFormat[MilestonePlanStoredResult](env.Payload, formatMilestonePlanStoredResult)
-	case domain.ToolKindChatList, domain.ToolKindChatStart, domain.ToolKind("chat_start_decomposition"), domain.ToolKind("chat_start_execution"), domain.ToolKindChatPoll, domain.ToolKindChatArchive:
+	case domain.ToolKindChatList, domain.ToolKindChatStart, domain.ToolKindChatStartDecomposition, domain.ToolKindChatStartExecution, domain.ToolKindChatPoll, domain.ToolKindChatArchive:
 		return decodeAndFormat[ChatListStoredResult](env.Payload, formatChatListStoredResult)
 	case domain.ToolKindTodoList, domain.ToolKindTodoAddItems, domain.ToolKindTodoUpdateItem, domain.ToolKindTodoFetchNext:
 		return decodeAndFormat[TodoListStoredResult](env.Payload, formatTodoListStoredResult)
@@ -839,14 +840,30 @@ func formatStoredToolOutput(env storedResultEnvelope) (string, bool) {
 
 func formatErrorStoredResult(tool domain.ToolKind, message string) string {
 	message = strings.TrimSpace(message)
-	if tool == "" || message == "" {
+	if tool == 0 || message == "" {
 		return message
 	}
-	prefix := string(tool) + " failed:"
-	if strings.HasPrefix(strings.ToLower(message), strings.ToLower(prefix)) {
-		return strings.TrimSpace(message[len(prefix):])
+	messageLower := strings.ToLower(message)
+	name := tool.String()
+	snake := toSnakeCase(name)
+	for _, candidate := range []string{name, snake} {
+		prefix := candidate + " failed:"
+		if strings.HasPrefix(messageLower, strings.ToLower(prefix)) {
+			return strings.TrimSpace(message[len(prefix):])
+		}
 	}
 	return message
+}
+
+func toSnakeCase(s string) string {
+	var b strings.Builder
+	for i, r := range s {
+		if unicode.IsUpper(r) && i > 0 {
+			b.WriteByte('_')
+		}
+		b.WriteRune(unicode.ToLower(r))
+	}
+	return b.String()
 }
 
 func formatStoredResultForDisplay(env storedResultEnvelope) (string, bool) {

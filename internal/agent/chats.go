@@ -143,7 +143,7 @@ func (e *Engine) StartChat(ctx context.Context, sessionID, parentChatID domain.I
 	if _, err := owner.AddPreparedChat(ctx, chatRecord); err != nil {
 		return tools.ChatStatus{}, err
 	}
-	if status := roleMilestoneStatus(role); status != "" {
+	if status := roleMilestoneStatus(role); status != 0 {
 		nextPlan, err := updateMilestoneStatus(plan, milestoneRef, status, chatRecord.ID)
 		if err != nil {
 			return tools.ChatStatus{}, err
@@ -230,7 +230,7 @@ func roleMilestoneStatus(role domain.WorkflowRole) domain.MilestoneStatus {
 	case chatrole.Execution:
 		return domain.MilestoneStatusExecuting
 	default:
-		return ""
+		return 0
 	}
 }
 

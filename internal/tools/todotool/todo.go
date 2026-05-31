@@ -97,7 +97,7 @@ func (updateItemTool) NormalizeArgs(args map[string]string) (map[string]string, 
 	}
 	out := map[string]string{
 		"id":     tools.FormatTodoID(id),
-		"status": string(status),
+		"status": status.String(),
 	}
 	if content := strings.TrimSpace(tools.FirstArg(args, "content")); content != "" {
 		out["content"] = content
@@ -196,14 +196,18 @@ func (updateItemTool) Execute(ctx context.Context, runtime tools.Runtime, req to
 			if todos[idx].ID != id {
 				continue
 			}
-			todos[idx].Status = domain.TodoStatus(req.Args["status"])
+			todoStatus, err := domain.TodoStatusString(req.Args["status"])
+			if err != nil {
+				return tools.Result{}, fmt.Errorf("invalid todo status %q", req.Args["status"])
+			}
+			todos[idx].Status = todoStatus
 			if content := strings.TrimSpace(req.Args["content"]); content != "" {
 				todos[idx].Content = content
 			}
 			if err := planning.ValidateTodoProgress(todos); err != nil {
 				return tools.Result{}, err
 			}
-			if _, err := control.UpdateTodoItem(ctx, id, domain.TodoStatus(req.Args["status"]), req.Args["content"]); err != nil {
+			if _, err := control.UpdateTodoItem(ctx, id, todoStatus, req.Args["content"]); err != nil {
 				return tools.Result{}, err
 			}
 			todos, err = control.ListTodos(ctx, runtime.SessionID, milestone.Ref)
@@ -311,18 +315,22 @@ func (updateItemTool) PersistResult(ctx context.Context, runtime tools.Runtime, 
 		if err != nil {
 			return nil, err
 		}
+		todoStatus, err := domain.TodoStatusString(req.Args["status"])
+		if err != nil {
+			return nil, fmt.Errorf("invalid todo status %q", req.Args["status"])
+		}
 		for idx := range todos {
 			if todos[idx].ID != id {
 				continue
 			}
-			todos[idx].Status = domain.TodoStatus(req.Args["status"])
+			todos[idx].Status = todoStatus
 			if content := strings.TrimSpace(req.Args["content"]); content != "" {
 				todos[idx].Content = content
 			}
 			if err := planning.ValidateTodoProgress(todos); err != nil {
 				return nil, err
 			}
-			if _, err := control.UpdateTodoItem(ctx, id, domain.TodoStatus(req.Args["status"]), req.Args["content"]); err != nil {
+			if _, err := control.UpdateTodoItem(ctx, id, todoStatus, req.Args["content"]); err != nil {
 				return nil, err
 			}
 			todos, err = control.ListTodos(ctx, runtime.SessionID, milestone.Ref)

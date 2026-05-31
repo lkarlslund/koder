@@ -5504,7 +5504,7 @@ func TestRunPromptPausesRepeatedIdenticalToolCalls(t *testing.T) {
 	var sawPauseStatus bool
 	var sawPauseStatusItem bool
 	for _, evt := range events {
-		if evt.Kind == domain.EventKindStatus && strings.Contains(evt.Text, "identical read calls") {
+		if evt.Kind == domain.EventKindStatus && strings.Contains(evt.Text, "identical Read calls") {
 			sawPauseStatus = true
 			if notice, ok := evt.Item.Content.(domain.Notice); ok && notice.Kind == "loop_pause" {
 				sawPauseStatusItem = true

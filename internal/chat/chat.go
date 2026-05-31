@@ -1137,6 +1137,11 @@ func (r *Chat) handleSendQueueItemNow(id domain.ID) {
 	item.Held = false
 	item.CreatedAt = time.Now().UTC()
 	remaining := append(slices.Clone(r.queue[:idx]), r.queue[idx+1:]...)
+	if !r.draining && !r.active && r.status != StatusWaitingApproval {
+		r.mu.Unlock()
+		r.handleDispatchQueued(item, remaining)
+		return
+	}
 	r.queue = append([]domain.QueuedInput{item}, remaining...)
 	r.chat.QueuedInputs = cloneQueuedInputs(r.queue)
 	if r.state != nil {
@@ -1816,7 +1821,7 @@ func (r *Chat) markPersistError(err error) error {
 }
 
 func runningToolStatusText(tool domain.ToolKind) string {
-	toolName := strings.TrimSpace(string(tool))
+	toolName := strings.TrimSpace(tool.String())
 	if toolName == "" {
 		return "Running tool"
 	}
@@ -1824,7 +1829,7 @@ func runningToolStatusText(tool domain.ToolKind) string {
 }
 
 func toolCallDeltaStatusText(evt domain.Event) string {
-	toolName := strings.TrimSpace(string(evt.Tool))
+	toolName := strings.TrimSpace(evt.Tool.String())
 	if toolName == "" {
 		toolName = "tool"
 	} else {

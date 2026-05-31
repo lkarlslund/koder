@@ -7,271 +7,243 @@ import (
 	"github.com/lkarlslund/koder/internal/accesssettings"
 )
 
-type MessageRole string
+//go:generate go tool enumer -type=MessageRole -trimprefix=MessageRole -json -text -values
+type MessageRole uint8
 
 const (
-	MessageRoleSystem    MessageRole = "system"
-	MessageRoleUser      MessageRole = "user"
-	MessageRoleAssistant MessageRole = "assistant"
-	MessageRoleTool      MessageRole = "tool"
+	MessageRoleSystem MessageRole = iota
+	MessageRoleUser
+	MessageRoleAssistant
+	MessageRoleTool
 )
 
-type PartKind string
+//go:generate go tool enumer -type=PartKind -trimprefix=PartKind -json -text -values
+type PartKind uint8
 
 const (
-	PartKindText            PartKind = "text"
-	PartKindAttachment      PartKind = "attachment"
-	PartKindReference       PartKind = "reference"
-	PartKindReasoning       PartKind = "reasoning"
-	PartKindToolCall        PartKind = "tool_call"
-	PartKindToolOutput      PartKind = "tool_output"
-	PartKindCompaction      PartKind = "compaction"
-	PartKindApprovalRequest PartKind = "approval_request"
-	PartKindQuestion        PartKind = "question"
-	PartKindTaskUpdate      PartKind = "task_update"
-	PartKindPlanUpdate      PartKind = "plan_update"
-	PartKindUsage           PartKind = "usage"
-	PartKindSystemNotice    PartKind = "system_notice"
-	PartKindEventNotice     PartKind = "event_notice"
+	PartKindText PartKind = iota
+	PartKindAttachment
+	PartKindReference
+	PartKindReasoning
+	PartKindToolCall
+	PartKindToolOutput
+	PartKindCompaction
+	PartKindApprovalRequest
+	PartKindQuestion
+	PartKindTaskUpdate
+	PartKindPlanUpdate
+	PartKindUsage
+	PartKindSystemNotice
+	PartKindEventNotice
 )
 
-type ToolKind string
+//go:generate go tool enumer -type=ToolKind -trimprefix=ToolKind -json -text -values
+type ToolKind uint8
 
 const (
-	ToolKindRead            ToolKind = "read"
-	ToolKindViewImage       ToolKind = "view_image"
-	ToolKindShowImage       ToolKind = "show_image"
-	ToolKindGlob            ToolKind = "glob"
-	ToolKindGrep            ToolKind = "grep"
-	ToolKindCodeSearch      ToolKind = "code_search"
-	ToolKindLint            ToolKind = "lint"
-	ToolKindBash            ToolKind = "bash"
-	ToolKindExecCommand     ToolKind = "exec_command"
-	ToolKindExecStatus      ToolKind = "exec_status"
-	ToolKindExecList        ToolKind = "exec_list"
-	ToolKindExecWriteStdin  ToolKind = "exec_write_stdin"
-	ToolKindExecResize      ToolKind = "exec_resize"
-	ToolKindExecTerminate   ToolKind = "exec_terminate"
-	ToolKindExecCleanup     ToolKind = "exec_cleanup_background"
-	ToolKindEdit            ToolKind = "edit"
-	ToolKindWrite           ToolKind = "write"
-	ToolKindTask            ToolKind = "task"
-	ToolKindQuestion        ToolKind = "question"
-	ToolKindUpdatePlan      ToolKind = "update_plan"
-	ToolKindMilestoneList   ToolKind = "milestone_list"
-	ToolKindMilestoneAdd    ToolKind = "milestone_add_items"
-	ToolKindMilestoneUpdate ToolKind = "milestone_update_item"
-	ToolKindMilestonePlan   ToolKind = "milestone_plan_and_decompose"
-	ToolKindMilestoneWrite  ToolKind = "milestone_write"
-	ToolKindTodoList        ToolKind = "todo_list"
-	ToolKindTodoAddItems    ToolKind = "todo_add_items"
-	ToolKindTodoUpdateItem  ToolKind = "todo_update_item"
-	ToolKindTodoFetchNext   ToolKind = "todo_fetch_next"
-	ToolKindChatList        ToolKind = "chat_list"
-	ToolKindChatStart       ToolKind = "chat_start"
-	ToolKindChatPoll        ToolKind = "chat_poll"
-	ToolKindChatArchive     ToolKind = "chat_archive"
-	ToolKindSkill           ToolKind = "skill"
-	ToolKindWebFetch        ToolKind = "webfetch"
-	ToolKindWebSearch       ToolKind = "websearch"
-	ToolKindMCP             ToolKind = "mcp"
+	ToolKindRead ToolKind = iota + 1
+	ToolKindViewImage
+	ToolKindShowImage
+	ToolKindGlob
+	ToolKindGrep
+	ToolKindCodeSearch
+	ToolKindLint
+	ToolKindBash
+	ToolKindExecCommand
+	ToolKindExecStatus
+	ToolKindExecList
+	ToolKindExecWriteStdin
+	ToolKindExecResize
+	ToolKindExecTerminate
+	ToolKindExecCleanup
+	ToolKindEdit
+	ToolKindWrite
+	ToolKindTask
+	ToolKindQuestion
+	ToolKindUpdatePlan
+	ToolKindMilestoneList
+	ToolKindMilestoneAdd
+	ToolKindMilestoneUpdate
+	ToolKindMilestonePlan
+	ToolKindMilestoneWrite
+	ToolKindTodoList
+	ToolKindTodoAddItems
+	ToolKindTodoUpdateItem
+	ToolKindTodoFetchNext
+	ToolKindChatList
+	ToolKindChatStart
+	ToolKindChatPoll
+	ToolKindChatArchive
+	ToolKindSkill
+	ToolKindWebFetch
+	ToolKindWebSearch
+	ToolKindMCP
+	// Legacy sentinel values kept for backward compatibility with stored data.
+	ToolKindApplyPatch
+	ToolKindChatStartDecomposition
+	ToolKindChatStartExecution
 )
 
-func AllToolKinds() []ToolKind {
-	return []ToolKind{
-		ToolKindRead,
-		ToolKindViewImage,
-		ToolKindShowImage,
-		ToolKindGlob,
-		ToolKindGrep,
-		ToolKindCodeSearch,
-		ToolKindLint,
-		ToolKindBash,
-		ToolKindExecCommand,
-		ToolKindExecStatus,
-		ToolKindExecList,
-		ToolKindExecWriteStdin,
-		ToolKindExecResize,
-		ToolKindExecTerminate,
-		ToolKindExecCleanup,
-		ToolKindEdit,
-		ToolKindWrite,
-		ToolKindTask,
-		ToolKindQuestion,
-		ToolKindUpdatePlan,
-		ToolKindMilestoneList,
-		ToolKindMilestoneAdd,
-		ToolKindMilestoneUpdate,
-		ToolKindMilestonePlan,
-		ToolKindMilestoneWrite,
-		ToolKindTodoList,
-		ToolKindTodoAddItems,
-		ToolKindTodoUpdateItem,
-		ToolKindTodoFetchNext,
-		ToolKindChatList,
-		ToolKindChatStart,
-		ToolKindChatPoll,
-		ToolKindChatArchive,
-		ToolKindSkill,
-		ToolKindWebFetch,
-		ToolKindWebSearch,
-		ToolKindMCP,
-	}
-}
-
-type PermissionMode string
+//go:generate go tool enumer -type=PermissionMode -trimprefix=PermissionMode -json -text -values
+type PermissionMode uint8
 
 const (
-	PermissionModeAllow PermissionMode = "allow"
-	PermissionModeAsk   PermissionMode = "ask"
-	PermissionModeDeny  PermissionMode = "deny"
+	PermissionModeAllow PermissionMode = iota
+	PermissionModeAsk
+	PermissionModeDeny
 )
 
 type PermissionOverride struct {
-	Tool    ToolKind
+	Tool  ToolKind
 	Pattern string
 	Action  PermissionMode
 }
 
-type ApprovalStatus string
+//go:generate go tool enumer -type=ApprovalStatus -trimprefix=ApprovalStatus -json -text -values
+type ApprovalStatus uint8
 
 const (
-	ApprovalStatusPending  ApprovalStatus = "pending"
-	ApprovalStatusApproved ApprovalStatus = "approved"
-	ApprovalStatusDenied   ApprovalStatus = "denied"
+	ApprovalStatusPending ApprovalStatus = iota
+	ApprovalStatusApproved
+	ApprovalStatusDenied
 )
 
-type TaskStatus string
+//go:generate go tool enumer -type=TaskStatus -trimprefix=TaskStatus -json -text -values
+type TaskStatus uint8
 
 const (
-	TaskStatusPending    TaskStatus = "pending"
-	TaskStatusInProgress TaskStatus = "in_progress"
-	TaskStatusCompleted  TaskStatus = "completed"
-	TaskStatusCancelled  TaskStatus = "cancelled"
+	TaskStatusPending TaskStatus = iota
+	TaskStatusInProgress
+	TaskStatusCompleted
+	TaskStatusCancelled
 )
 
-type MilestoneStatus string
+//go:generate go tool enumer -type=MilestoneStatus -trimprefix=MilestoneStatus -json -text -values
+type MilestoneStatus uint8
 
 const (
-	MilestoneStatusPending     MilestoneStatus = "pending"
-	MilestoneStatusDecomposing MilestoneStatus = "decomposing"
-	MilestoneStatusReady       MilestoneStatus = "ready"
-	MilestoneStatusExecuting   MilestoneStatus = "executing"
-	MilestoneStatusCompleted   MilestoneStatus = "completed"
-	MilestoneStatusBlocked     MilestoneStatus = "blocked"
-	MilestoneStatusCancelled   MilestoneStatus = "cancelled"
+	MilestoneStatusPending MilestoneStatus = iota
+	MilestoneStatusDecomposing
+	MilestoneStatusReady
+	MilestoneStatusExecuting
+	MilestoneStatusCompleted
+	MilestoneStatusBlocked
+	MilestoneStatusCancelled
 )
 
-type TodoStatus string
+//go:generate go tool enumer -type=TodoStatus -trimprefix=TodoStatus -json -text -values
+type TodoStatus uint8
 
 const (
-	TodoStatusPending    TodoStatus = "pending"
-	TodoStatusInProgress TodoStatus = "in_progress"
-	TodoStatusCompleted  TodoStatus = "completed"
+	TodoStatusPending TodoStatus = iota
+	TodoStatusInProgress
+	TodoStatusCompleted
 )
 
-type EventKind string
+//go:generate go tool enumer -type=EventKind -trimprefix=EventKind -json -text -values
+type EventKind uint8
 
 const (
-	EventKindMessageDelta  EventKind = "message_delta"
-	EventKindMessageDone   EventKind = "message_done"
-	EventKindReasoning     EventKind = "reasoning"
-	EventKindToolCallDelta EventKind = "tool_call_delta"
-	EventKindUsage         EventKind = "usage"
-	EventKindToolStart     EventKind = "tool_start"
-	EventKindToolResult    EventKind = "tool_result"
-	EventKindApprovalAsk   EventKind = "approval_ask"
-	EventKindApprovalReply EventKind = "approval_reply"
-	EventKindTaskUpdate    EventKind = "task_update"
-	EventKindSessionTitle  EventKind = "session_title"
-	EventKindChatTitle     EventKind = "chat_title"
-	EventKindError         EventKind = "error"
-	EventKindStatus        EventKind = "status"
+	EventKindMessageDelta EventKind = iota
+	EventKindMessageDone
+	EventKindReasoning
+	EventKindToolCallDelta
+	EventKindUsage
+	EventKindToolStart
+	EventKindToolResult
+	EventKindApprovalAsk
+	EventKindApprovalReply
+	EventKindTaskUpdate
+	EventKindSessionTitle
+	EventKindChatTitle
+	EventKindError
+	EventKindStatus
 )
 
 type Session struct {
-	ID                ID
-	ParentID          *ID
-	Title             string
+	ID  ID
+	ParentID  *ID
+	Title  string
 	TitleGeneratedAt  time.Time
 	TitleRefreshCount int
 	PermissionProfile string
-	PermissionRules   []PermissionOverride
-	ToolStates        map[ToolKind]bool
-	AccessSettings    accesssettings.Settings
-	ProjectRoot       string
-	ProjectChecksum   string
-	AgentsResolved    string
-	AgentsSummary     string
-	AgentsFiles       []AgentsFile
+	PermissionRules  []PermissionOverride
+	ToolStates  map[ToolKind]bool
+	AccessSettings  accesssettings.Settings
+	ProjectRoot  string
+	ProjectChecksum  string
+	AgentsResolved  string
+	AgentsSummary  string
+	AgentsFiles  []AgentsFile
 	AgentsGeneratedAt time.Time
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
-	LastMessage       string
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+	LastMessage  string
 }
 
 type WorkflowRole string
 
 type Chat struct {
-	ID                     ID
-	SessionID              ID
-	ParentChatID           *ID
-	Title                  string
-	WorkflowRole           WorkflowRole
-	ProviderID             string
-	ModelID                string
-	PermissionProfile      string
-	ToolStates             map[ToolKind]bool
-	ActiveMilestoneRef     string
+	ID  ID
+	SessionID  ID
+	ParentChatID  *ID
+	Title  string
+	WorkflowRole  WorkflowRole
+	ProviderID  string
+	ModelID  string
+	PermissionProfile  string
+	ToolStates  map[ToolKind]bool
+	ActiveMilestoneRef  string
 	AssignedTodoBucketRef  string
-	AssignedTodoRef        ID
+	AssignedTodoRef  ID
 	LastKnownContextTokens int
-	ContextTokensKnown     bool
-	Position               int
-	Archived               bool
-	QueuedInputs           []QueuedInput
-	CreatedAt              time.Time
-	UpdatedAt              time.Time
-	LastMessage            string
+	ContextTokensKnown  bool
+	Position  int
+	Archived  bool
+	QueuedInputs  []QueuedInput
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+	LastMessage  string
 }
 
 type ContextUsage struct {
 	AnchorTokens int
-	TailTokens   int
-	LiveTokens   int
+	TailTokens  int
+	LiveTokens  int
 	TotalTokens  int
-	Estimated    bool
+	Estimated  bool
 }
 
-type QueuedInputKind string
+//go:generate go tool enumer -type=QueuedInputKind -trimprefix=QueuedInputKind -json -text -values
+type QueuedInputKind uint8
 
 const (
-	QueuedInputKindSteer         QueuedInputKind = "steer"
-	QueuedInputKindQueued        QueuedInputKind = "queued"
-	QueuedInputKindContinue      QueuedInputKind = "continue"
-	QueuedInputKindRejectedSteer QueuedInputKind = "rejected_steer"
+	QueuedInputKindSteer QueuedInputKind = iota
+	QueuedInputKindQueued
+	QueuedInputKindContinue
+	QueuedInputKindRejectedSteer
 )
 
 const (
-	UserMessageSourceUser          = "user"
-	UserMessageSourceSteer         = "steer"
-	UserMessageSourceQueued        = "queued"
+	UserMessageSourceUser  = "user"
+	UserMessageSourceSteer  = "steer"
+	UserMessageSourceQueued  = "queued"
 	UserMessageSourceRejectedSteer = "rejected_steer"
 	UserMessageSourceAutoGenerated = "auto_generated"
-	UserMessageSourceAutoResume    = "auto_resume"
-	UserMessageSourceSubchat       = "subchat"
+	UserMessageSourceAutoResume  = "auto_resume"
+	UserMessageSourceSubchat  = "subchat"
 )
 
 type QueuedInput struct {
-	ID          ID
-	Kind        QueuedInputKind
-	Text        string
-	Source      string
+	ID  ID
+	Kind  QueuedInputKind
+	Text  string
+	Source  string
 	TimelineID  ID
-	Held        bool
+	Held  bool
 	Attachments []QueuedAttachment
 	References  []QueuedReference
-	CreatedAt   time.Time
+	CreatedAt  time.Time
 }
 
 // UserMessageSourceForQueuedInput returns the transcript source label for a queued input.
@@ -292,66 +264,66 @@ func UserMessageSourceForQueuedInput(item QueuedInput) string {
 }
 
 type QueuedAttachment struct {
-	ID       string
-	Name     string
-	MIME     string
-	Path     string
-	Size     int64
-	Source   string
+	ID  string
+	Name  string
+	MIME  string
+	Path  string
+	Size  int64
+	Source  string
 	Original string
 }
 
 type QueuedReference struct {
-	Kind    string
-	Path    string
+	Kind  string
+	Path  string
 	Display string
-	Start   int
-	End     int
+	Start  int
+	End  int
 }
 
 type AgentsFile struct {
-	Path         string
-	Kind         string
-	Priority     int
-	ModTime      time.Time
-	Checksum     string
-	Size         int64
+	Path  string
+	Kind  string
+	Priority  int
+	ModTime  time.Time
+	Checksum  string
+	Size  int64
 	DiscoveredBy string
 }
 
 type Message struct {
-	ID        ID
+	ID  ID
 	SessionID ID
-	ChatID    ID
-	Role      MessageRole
-	Summary   string
+	ChatID  ID
+	Role  MessageRole
+	Summary  string
 	CreatedAt time.Time
 }
 
 type Part struct {
-	ID        ID
+	ID  ID
 	MessageID ID
-	Kind      PartKind
-	Payload   PartPayload
-	Body      string `json:"-"`
+	Kind  PartKind
+	Payload  PartPayload
+	Body  string `json:"-"`
 	MetaJSON  string `json:"-"`
 	CreatedAt time.Time
 }
 
 type Model struct {
-	ID                string
-	OwnedBy           string
-	SupportsImages    bool
-	SupportsPDFs      bool
+	ID  string
+	OwnedBy  string
+	SupportsImages  bool
+	SupportsPDFs  bool
 	CapabilitySource  string
 	CapabilitiesKnown bool
 }
 
 type Usage struct {
-	PromptTokens     int
+	PromptTokens  int
 	CompletionTokens int
-	CachedTokens     int
-	TotalTokens      int
+	CachedTokens  int
+	TotalTokens  int
 }
 
 func (u Usage) HasAnyTokens() bool {
@@ -388,16 +360,16 @@ func (u Usage) ContextTokens() (int, bool) {
 }
 
 type Event struct {
-	Kind       EventKind
-	Text       string
-	Tool       ToolKind
+	Kind  EventKind
+	Text  string
+	Tool  ToolKind
 	ToolCallID string
 	ApprovalID ID
-	Item       TimelineItem
-	Meta       map[string]string
-	Usage      Usage
-	Err        error
-	RawJSON    string
+	Item  TimelineItem
+	Meta  map[string]string
+	Usage  Usage
+	Err  error
+	RawJSON  string
 }
 
 const (

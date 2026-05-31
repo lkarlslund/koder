@@ -172,7 +172,7 @@ func DecodeToolResultPayload(tool ToolKind, status ToolResultStatus, raw json.Ra
 		return decodeToolResult[ExecStoredResult](raw)
 	case ToolKindExecList, ToolKindExecCleanup:
 		return decodeToolResult[ExecListStoredResult](raw)
-	case ToolKind("apply_patch"):
+	case ToolKindApplyPatch:
 		return decodeToolResult[ApplyPatchStoredResult](raw)
 	case ToolKindEdit:
 		return decodeToolResult[EditStoredResult](raw)
@@ -200,7 +200,7 @@ func DecodeToolResultPayload(tool ToolKind, status ToolResultStatus, raw json.Ra
 		return decodeToolResult[ShowImageStoredResult](raw)
 	case ToolKindMilestoneList, ToolKindMilestoneAdd, ToolKindMilestoneUpdate, ToolKindMilestoneWrite, ToolKindMilestonePlan:
 		return decodeToolResult[MilestonePlanStoredResult](raw)
-	case ToolKindChatList, ToolKindChatStart, ToolKind("chat_start_decomposition"), ToolKind("chat_start_execution"), ToolKindChatPoll, ToolKindChatArchive:
+	case ToolKindChatList, ToolKindChatStart, ToolKindChatStartDecomposition, ToolKindChatStartExecution, ToolKindChatPoll, ToolKindChatArchive:
 		return decodeToolResult[ChatListStoredResult](raw)
 	case ToolKindTodoList, ToolKindTodoAddItems, ToolKindTodoUpdateItem, ToolKindTodoFetchNext:
 		return decodeToolResult[TodoListStoredResult](raw)
@@ -330,7 +330,7 @@ func (p Part) Text() string {
 	case ToolCallPayload:
 		data, err := json.Marshal(payload)
 		if err != nil {
-			return string(payload.Tool)
+			return payload.Tool.String()
 		}
 		return string(data)
 	case ToolOutputPayload:
@@ -372,7 +372,7 @@ func (p Part) MarshalJSON() ([]byte, error) {
 	}
 	rawPayload, err := json.Marshal(p.Payload)
 	if err != nil {
-		return nil, fmt.Errorf("marshal part payload %s: %w", kind, err)
+		return nil, fmt.Errorf("marshal part payload %s: %w", kind.String(), err)
 	}
 	return json.Marshal(encodedPart{
 		ID:        p.ID,
@@ -415,7 +415,7 @@ func (p *Part) UnmarshalJSON(data []byte) error {
 
 func decodePartPayload(kind PartKind, raw json.RawMessage) (PartPayload, error) {
 	if len(raw) == 0 {
-		return nil, fmt.Errorf("part %s missing payload", kind)
+		return nil, fmt.Errorf("part %s missing payload", kind.String())
 	}
 	switch kind {
 	case PartKindText:

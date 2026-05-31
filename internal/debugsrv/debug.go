@@ -945,7 +945,7 @@ func analyzeSession(sessionID domain.ID, timeline []domain.TimelineItem, events 
 		if i+1 < len(transcript) {
 			next := transcript[i+1]
 			record.NextMessageID = next.item.ID
-			record.NextRole = string(next.role)
+			record.NextRole = next.role.String()
 			record.NextKind = next.kind
 			if len(next.toolNames) > 0 {
 				record.NextTool = next.toolNames[0]
@@ -975,14 +975,14 @@ func analyzeTranscriptItem(item domain.TimelineItem) analyzedTranscriptMessage {
 		}
 		for _, tool := range content.Tools {
 			out.hasToolCall = true
-			if tool.Tool != "" {
-				out.toolNames = append(out.toolNames, string(tool.Tool))
+			if tool.Tool != 0 {
+				out.toolNames = append(out.toolNames, tool.Tool.String())
 			}
 		}
 	case domain.ToolExecution:
 		out.role = domain.MessageRoleTool
 		out.kind = string(domain.TimelineKindTool)
-		out.toolNames = append(out.toolNames, string(content.Tool))
+		out.toolNames = append(out.toolNames, content.Tool.String())
 		if content.Result != nil {
 			out.text = strings.TrimSpace(content.Result.Text)
 		}

@@ -143,8 +143,8 @@ func Load() (Config, error) {
 }
 
 func Default() Config {
-	toolDefaults := make(map[domain.ToolKind]bool, len(domain.AllToolKinds()))
-	for _, kind := range domain.AllToolKinds() {
+	toolDefaults := make(map[domain.ToolKind]bool, len(domain.ToolKindValues()))
+	for _, kind := range domain.ToolKindValues() {
 		toolDefaults[kind] = true
 	}
 	return Config{
@@ -209,7 +209,7 @@ func (c *Config) applyDefaults() {
 		c.ToolDefaults = cloneToolDefaults(def.ToolDefaults)
 	}
 	pruneToolDefaults(c.ToolDefaults)
-	for _, kind := range domain.AllToolKinds() {
+	for _, kind := range domain.ToolKindValues() {
 		if _, ok := c.ToolDefaults[kind]; !ok {
 			c.ToolDefaults[kind] = true
 		}
@@ -497,8 +497,8 @@ func cloneToolDefaults(src map[domain.ToolKind]bool) map[domain.ToolKind]bool {
 }
 
 func pruneToolDefaults(defaults map[domain.ToolKind]bool) {
-	known := make(map[domain.ToolKind]struct{}, len(domain.AllToolKinds()))
-	for _, kind := range domain.AllToolKinds() {
+	known := make(map[domain.ToolKind]struct{}, len(domain.ToolKindValues()))
+	for _, kind := range domain.ToolKindValues() {
 		known[kind] = struct{}{}
 	}
 	for kind := range defaults {

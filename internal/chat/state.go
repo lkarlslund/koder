@@ -189,7 +189,7 @@ func estimateTimelineItemTokens(item domain.TimelineItem) int {
 	switch payload := item.Content.(type) {
 	case domain.UserMessage:
 		if text := strings.TrimSpace(payload.Text); text != "" {
-			texts = append(texts, string(domain.MessageRoleUser), text)
+			texts = append(texts, domain.MessageRoleUser.String(), text)
 		}
 		for _, attachment := range payload.Attachments {
 			if attachment.Name != "" {
@@ -202,7 +202,7 @@ func estimateTimelineItemTokens(item domain.TimelineItem) int {
 			}
 		}
 	case domain.AssistantMessage:
-		texts = append(texts, string(domain.MessageRoleAssistant))
+		texts = append(texts, domain.MessageRoleAssistant.String())
 		if text := strings.TrimSpace(payload.Reasoning.Text); text != "" {
 			texts = append(texts, text)
 		}
@@ -210,7 +210,7 @@ func estimateTimelineItemTokens(item domain.TimelineItem) int {
 			texts = append(texts, text)
 		}
 		for _, tool := range payload.Tools {
-			texts = append(texts, string(tool.Tool), string(tool.ToolCallID))
+			texts = append(texts, tool.Tool.String(), string(tool.ToolCallID))
 			if tool.Result != nil {
 				texts = append(texts, tool.Result.Text)
 			}
@@ -526,7 +526,7 @@ func approvalCommand(call domain.ToolCall) string {
 	if path := strings.TrimSpace(call.Args["path"]); path != "" {
 		return path
 	}
-	return strings.TrimSpace(string(call.Tool))
+	return strings.TrimSpace(call.Tool.String())
 }
 
 // UpsertApproval adds or replaces one approval snapshot.

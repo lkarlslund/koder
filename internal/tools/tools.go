@@ -86,7 +86,7 @@ func (r *Request) UnmarshalJSON(data []byte) error {
 
 func (r Request) Meta() map[string]string {
 	payload := make(map[string]string, len(r.Args)+2)
-	payload["tool"] = string(r.Tool)
+	payload["tool"] = r.Tool.String()
 	if strings.TrimSpace(r.ToolCallID) != "" {
 		payload["tool_call_id"] = r.ToolCallID
 	}
@@ -113,7 +113,7 @@ func (r Request) ArgumentsJSON() string {
 func (r Request) ContextString() string {
 	data, err := json.Marshal(r)
 	if err != nil {
-		return fmt.Sprintf(`{"tool":"%s"}`, r.Tool)
+		return fmt.Sprintf(`{"tool":"%s"}`, r.Tool.String())
 	}
 	return string(data)
 }
@@ -197,7 +197,7 @@ func Register(tool Tool, spec ToolSpec) {
 	regMu.Lock()
 	defer regMu.Unlock()
 	kind := tool.Kind()
-	if kind == "" {
+	if kind == 0 {
 		panic("tools: empty tool kind")
 	}
 	if _, exists := registry[kind]; exists {
@@ -348,7 +348,7 @@ func EnsureSessionTmpDir(settings accesssettings.Settings) error {
 }
 
 func PersistResult(ctx context.Context, runtime Runtime, req Request, result Result) (<-chan domain.Event, error) {
-	if req.Tool == "" {
+	if req.Tool == 0 {
 		return nil, errors.New("tool is empty")
 	}
 	tool, ok := Lookup(req.Tool)
@@ -402,9 +402,13 @@ func DefinitionFor(kind domain.ToolKind, runtime Runtime) (provider.ToolDefiniti
 }
 
 func ParseProviderCall(call provider.ToolCall) (Request, error) {
-	kind := domain.ToolKind(strings.TrimSpace(call.Function.Name))
-	if kind == "" {
+	name := strings.TrimSpace(call.Function.Name)
+	if name == "" {
 		return Request{}, fmt.Errorf("provider tool call missing function name")
+	}
+	kind, err := domain.ToolKindString(name)
+	if err != nil {
+		return Request{}, fmt.Errorf("unknown tool %q", name)
 	}
 	args, err := decodeStringMap([]byte(call.Function.Arguments))
 	if err != nil {
@@ -452,10 +456,18 @@ func RequestFromMeta(raw string) (Request, error) {
 }
 
 func RequestFromMetaMap(raw map[string]string) (Request, error) {
+	toolName := strings.TrimSpace(raw["tool"])
+	if toolName == "" {
+		return Request{}, fmt.Errorf("tool name is empty")
+	}
+	kind, err := domain.ToolKindString(toolName)
+	if err != nil {
+		return Request{}, fmt.Errorf("unknown tool %q", toolName)
+	}
 	req := Request{
-		Tool:       domain.ToolKind(strings.TrimSpace(raw["tool"])),
+		Tool:  kind,
 		ToolCallID: strings.TrimSpace(raw["tool_call_id"]),
-		Args:       map[string]string{},
+		Args:  map[string]string{},
 	}
 	for key, value := range raw {
 		if key == "tool" || key == "tool_call_id" {
@@ -474,7 +486,7 @@ func Normalize(req Request) (Request, error) {
 func Preview(req Request) string {
 	req, tool, err := normalizeRequest(req)
 	if err != nil {
-		return string(req.Tool)
+		return req.Tool.String()
 	}
 	return tool.Preview(req)
 }
@@ -505,10 +517,10 @@ func normalizeToolSpec(kind domain.ToolKind, spec ToolSpec) ToolSpec {
 	spec.Usage = strings.TrimSpace(spec.Usage)
 	spec.Parameters = strings.TrimSpace(spec.Parameters)
 	if spec.Title == "" {
-		if kind == "" {
+		if kind == 0 {
 			spec.Title = "Tool"
 		} else {
-			spec.Title = strings.ReplaceAll(string(kind), "_", " ")
+			spec.Title = strings.ReplaceAll(kind.String(), "_", " ")
 		}
 	}
 	return spec
@@ -527,10 +539,10 @@ func SummarizeResult(req Request, result Result) (string, string) {
 
 func ToolCall(req Request) provider.ToolCall {
 	return provider.ToolCall{
-		ID:   req.ToolCallID,
+		ID:  req.ToolCallID,
 		Type: "function",
 		Function: provider.FunctionCall{
-			Name:      string(req.Tool),
+			Name:  req.Tool.String(),
 			Arguments: req.ArgumentsJSON(),
 		},
 	}
@@ -544,7 +556,7 @@ func providerDefinition(kind domain.ToolKind, spec ToolSpec) provider.ToolDefini
 	return provider.ToolDefinition{
 		Type: "function",
 		Function: provider.FunctionDefinition{
-			Name:        string(kind),
+			Name:  kind.String(),
 			Description: description,
 			Parameters:  json.RawMessage(spec.Parameters),
 		},
@@ -650,7 +662,7 @@ func EmitOnce(evt domain.Event) <-chan domain.Event {
 }
 
 func normalizeRequest(req Request) (Request, Tool, error) {
-	if req.Tool == "" {
+	if req.Tool == 0 {
 		return req, nil, errors.New("tool is empty")
 	}
 	tool, ok := Lookup(req.Tool)
@@ -672,12 +684,12 @@ func defaultSummary(tool domain.ToolKind, result Result) (string, string) {
 	output := strings.TrimSpace(result.Output)
 	switch {
 	case output != "":
-		return string(tool), result.Output
+		return tool.String(), result.Output
 	case strings.TrimSpace(result.DiffText) != "":
-		body := fmt.Sprintf("%s completed and produced a diff", tool)
+		body := fmt.Sprintf("%s completed and produced a diff", tool.String())
 		return body, body
 	default:
-		body := fmt.Sprintf("%s completed with no output", tool)
+		body := fmt.Sprintf("%s completed with no output", tool.String())
 		return body, body
 	}
 }

@@ -419,5 +419,5 @@ func toolCallPreview(call domain.ToolCall) string {
 	if pattern := strings.TrimSpace(call.Args["pattern"]); pattern != "" {
 		return pattern
 	}
-	return strings.TrimSpace(string(call.Tool))
+	return strings.TrimSpace(call.Tool.String())
 }

@@ -893,7 +893,9 @@ func providerToolCallDeltaEvent(raw string, currentToolCalls []ToolCall) domain.
 	}
 	call := currentToolCalls[len(currentToolCalls)-1]
 	evt.ToolCallID = strings.TrimSpace(call.ID)
-	evt.Tool = domain.ToolKind(strings.TrimSpace(call.Function.Name))
+	if tk, err := domain.ToolKindString(strings.TrimSpace(call.Function.Name)); err == nil {
+		evt.Tool = tk
+	}
 	meta := map[string]string{}
 	if args := strings.TrimSpace(call.Function.Arguments); args != "" {
 		meta["arguments"] = args

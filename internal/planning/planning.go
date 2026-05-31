@@ -260,7 +260,10 @@ func ParseMilestones(raw string) ([]Milestone, error) {
 	for idx, item := range items {
 		ref := strings.TrimSpace(item.Ref)
 		title := strings.TrimSpace(item.Title)
-		status := domain.MilestoneStatus(strings.TrimSpace(item.Status))
+		status, err := domain.MilestoneStatusString(strings.TrimSpace(item.Status))
+		if err != nil {
+			return nil, fmt.Errorf("invalid milestone status %q", item.Status)
+		}
 		notes := strings.TrimSpace(item.Notes)
 		if ref == "" || title == "" {
 			return nil, errors.New("each milestone requires ref and title")
@@ -269,9 +272,6 @@ func ParseMilestones(raw string) ([]Milestone, error) {
 			return nil, fmt.Errorf("duplicate milestone ref %q", ref)
 		}
 		seenRefs[ref] = struct{}{}
-		if !ValidMilestoneStatus(status) {
-			return nil, fmt.Errorf("invalid milestone status %q", item.Status)
-		}
 		out = append(out, Milestone{
 			Ref:      ref,
 			Title:    title,
@@ -326,11 +326,11 @@ func ParseMilestoneRef(raw string) (string, error) {
 }
 
 func ParseMilestoneStatus(raw string) (domain.MilestoneStatus, error) {
-	status := domain.MilestoneStatus(strings.TrimSpace(raw))
-	if ValidMilestoneStatus(status) {
-		return status, nil
+	status, err := domain.MilestoneStatusString(strings.TrimSpace(raw))
+	if err != nil {
+		return 0, fmt.Errorf("invalid milestone status %q", raw)
 	}
-	return "", fmt.Errorf("invalid milestone status %q", raw)
+	return status, nil
 }
 
 func ValidMilestoneStatus(status domain.MilestoneStatus) bool {
@@ -370,13 +370,11 @@ func ParseTodoID(raw string) (domain.ID, error) {
 }
 
 func ParseTodoStatus(raw string) (domain.TodoStatus, error) {
-	status := domain.TodoStatus(strings.TrimSpace(raw))
-	switch status {
-	case domain.TodoStatusPending, domain.TodoStatusInProgress, domain.TodoStatusCompleted:
-		return status, nil
-	default:
-		return "", fmt.Errorf("invalid todo status %q", raw)
+	status, err := domain.TodoStatusString(strings.TrimSpace(raw))
+	if err != nil {
+		return 0, fmt.Errorf("invalid todo status %q", raw)
 	}
+	return status, nil
 }
 
 func ActiveMilestone(plan Plan) (Milestone, bool) {
@@ -422,7 +420,7 @@ func ValidateMilestoneProgress(items []Milestone) error {
 			return errors.New("milestone ref is empty")
 		}
 		if !ValidMilestoneStatus(item.Status) {
-			return fmt.Errorf("invalid milestone status %q", item.Status)
+			return fmt.Errorf("invalid milestone status %q", item.Status.String())
 		}
 		if _, exists := seenRefs[item.Ref]; exists {
 			return fmt.Errorf("duplicate milestone ref %q", item.Ref)

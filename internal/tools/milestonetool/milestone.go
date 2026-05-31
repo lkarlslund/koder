@@ -104,8 +104,8 @@ func (updateItemTool) NormalizeArgs(args map[string]string) (map[string]string, 
 		return nil, err
 	}
 	out := map[string]string{
-		"ref":    ref,
-		"status": string(status),
+		"ref":  ref,
+		"status": status.String(),
 	}
 	if title := strings.TrimSpace(tools.FirstArg(args, "title")); title != "" {
 		out["title"] = title
@@ -247,12 +247,12 @@ func (planTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Re
 	if err != nil {
 		return tools.Result{}, err
 	}
-	status := domain.MilestoneStatus(strings.TrimSpace(req.Args["status"]))
-	if status == "" {
+	status, err := domain.MilestoneStatusString(strings.TrimSpace(req.Args["status"]))
+	if err != nil {
 		status = domain.MilestoneStatusReady
 	}
 	nextMilestones := upsertMilestone(plan.Milestones, planning.Milestone{
-		Ref:    ref,
+		Ref:  ref,
 		Title:  strings.TrimSpace(req.Args["title"]),
 		Status: status,
 		Notes:  strings.TrimSpace(req.Args["notes"]),
@@ -386,12 +386,12 @@ func (planTool) PersistResult(ctx context.Context, runtime tools.Runtime, req to
 	if err != nil {
 		return nil, err
 	}
-	status := domain.MilestoneStatus(strings.TrimSpace(req.Args["status"]))
-	if status == "" {
+	status, err := domain.MilestoneStatusString(strings.TrimSpace(req.Args["status"]))
+	if err != nil {
 		status = domain.MilestoneStatusReady
 	}
 	nextMilestones := upsertMilestone(plan.Milestones, planning.Milestone{
-		Ref:    req.Args["ref"],
+		Ref:  req.Args["ref"],
 		Title:  strings.TrimSpace(req.Args["title"]),
 		Status: status,
 		Notes:  strings.TrimSpace(req.Args["notes"]),
@@ -494,7 +494,10 @@ func actorChatFromRuntime(runtime tools.Runtime) domain.Chat {
 
 func updatedMilestonePlan(plan planning.Plan, req tools.Request, actor domain.Chat) (planning.Plan, error) {
 	ref := req.Args["ref"]
-	status := domain.MilestoneStatus(req.Args["status"])
+	status, err := domain.MilestoneStatusString(req.Args["status"])
+	if err != nil {
+		return plan, fmt.Errorf("invalid milestone status %q", req.Args["status"])
+	}
 	milestones := append([]planning.Milestone(nil), plan.Milestones...)
 	found := false
 	for idx := range milestones {
@@ -572,7 +575,7 @@ func validateCompletedMilestoneTodos(ctx context.Context, control planning.Contr
 			if name == "" {
 				name = milestone.Ref
 			}
-			return fmt.Errorf("cannot complete milestone %q while todo %s is %s", name, todo.ID, todo.Status)
+			return fmt.Errorf("cannot complete milestone %q while todo %s is %s", name, todo.ID, todo.Status.String())
 		}
 	}
 	return nil

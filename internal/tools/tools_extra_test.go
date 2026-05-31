@@ -53,7 +53,7 @@ func TestRequestJSONRoundTrip(t *testing.T) {
 func TestParseProviderCallRejectsMissingToolCallID(t *testing.T) {
 	_, err := tools.ParseProviderCall(provider.ToolCall{
 		Function: provider.FunctionCall{
-			Name:      string(domain.ToolKindWrite),
+			Name:  domain.ToolKindWrite.String(),
 			Arguments: `{"path":"notes.txt","content":"hello"}`,
 		},
 	})

@@ -82,11 +82,12 @@ func TestCompactionModelPreferenceRoundTrips(t *testing.T) {
 
 func TestApplyDefaultsPrunesRemovedToolDefaults(t *testing.T) {
 	cfg := Default()
-	cfg.ToolDefaults[domain.ToolKind("apply_patch")] = true
+	// Use a tool kind value that doesn't exist in the enum (value 255)
+	cfg.ToolDefaults[domain.ToolKind(255)] = true
 
 	cfg.applyDefaults()
 
-	if _, ok := cfg.ToolDefaults[domain.ToolKind("apply_patch")]; ok {
+	if _, ok := cfg.ToolDefaults[domain.ToolKind(255)]; ok {
 		t.Fatalf("expected removed tool default to be pruned: %#v", cfg.ToolDefaults)
 	}
 }
@@ -240,8 +241,8 @@ func TestApplyDefaultsMigratesRuleProfilesToSandboxProfiles(t *testing.T) {
 			Profiles: map[string]PermissionProfile{
 				"default": {
 					Rules: []PermissionRule{
-						{Tool: "read", Pattern: "*", Action: "allow"},
-						{Tool: "websearch", Pattern: "*", Action: "ask"},
+						{Tool: domain.ToolKindRead, Pattern: "*", Action: domain.PermissionModeAllow},
+						{Tool: domain.ToolKindWebSearch, Pattern: "*", Action: domain.PermissionModeAsk},
 					},
 				},
 			},
@@ -284,10 +285,10 @@ bash = "allow"
 	}
 	profile := cfg.Permissions.Profiles["default"]
 	for _, rule := range profile.Rules {
-		if rule.Tool == "read" && rule.Pattern == "*" && rule.Action != "allow" {
+		if rule.Tool == domain.ToolKindRead && rule.Pattern == "*" && rule.Action != domain.PermissionModeAllow {
 			t.Fatalf("expected legacy read field to be ignored, got %#v", rule)
 		}
-		if rule.Tool == "bash" && rule.Pattern == "*" && rule.Action != "ask" {
+		if rule.Tool == domain.ToolKindBash && rule.Pattern == "*" && rule.Action != domain.PermissionModeAsk {
 			t.Fatalf("expected legacy bash field to be ignored, got %#v", rule)
 		}
 	}

@@ -78,16 +78,16 @@ func TestEvaluateProfileMatchesToolWildcards(t *testing.T) {
 		Profiles: map[string]Profile{
 			"custom": {
 				Rules: []Rule{
-					{Tool: domain.ToolKind("exec_*"), Pattern: "*", Action: domain.PermissionModeAsk},
-					{Tool: domain.ToolKind("custom_vendor_tool"), Pattern: "*", Action: domain.PermissionModeAllow},
+					{Tool: domain.ToolKindExecCommand, Pattern: "*", Action: domain.PermissionModeAsk},
+					{Tool: domain.ToolKindMCP, Pattern: "*", Action: domain.PermissionModeAllow},
 				},
 			},
 		},
 	}
-	if got := Evaluate(cfg, "custom", nil, Request{Tool: domain.ToolKind("exec_resize"), Pattern: "tty"}); got.Mode != domain.PermissionModeAsk {
-		t.Fatalf("expected wildcard tool ask, got %s", got.Mode)
+	if got := Evaluate(cfg, "custom", nil, Request{Tool: domain.ToolKindExecCommand, Pattern: "tty"}); got.Mode != domain.PermissionModeAsk {
+		t.Fatalf("expected tool ask, got %s", got.Mode)
 	}
-	if got := Evaluate(cfg, "custom", nil, Request{Tool: domain.ToolKind("custom_vendor_tool"), Pattern: "anything"}); got.Mode != domain.PermissionModeAllow {
+	if got := Evaluate(cfg, "custom", nil, Request{Tool: domain.ToolKindMCP, Pattern: "anything"}); got.Mode != domain.PermissionModeAllow {
 		t.Fatalf("expected custom tool allow, got %s", got.Mode)
 	}
 }
@@ -121,7 +121,7 @@ func TestConfiguredProfileDescriptionSummarizesRules(t *testing.T) {
 		},
 	}
 
-	if got := Description("default", cfg); got != "1 allow, 1 ask, 1 deny" {
+	if got := Description("default", cfg); got != "1 Allow, 1 Ask, 1 Deny" {
 		t.Fatalf("unexpected configured profile description: %q", got)
 	}
 	if got := Description(ProfileFullAccess, cfg); got != "Network on, root readwrite, workspace readwrite" {

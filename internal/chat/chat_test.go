@@ -584,6 +584,51 @@ func TestRuntimeSendQueueItemNowPromotesSelectedItemToSteer(t *testing.T) {
 	}
 }
 
+func TestRuntimeSendQueueItemNowDispatchesIdleChatWithoutLeavingQueue(t *testing.T) {
+	st := openTestStore(t)
+	session, chatRecord, _ := createSessionWithPlan(t, st)
+	events := make(chan domain.Event)
+	runner := &runtimeFakeRunner{events: []<-chan domain.Event{events}}
+	rt := newTestChat(t, st, session, chatRecord, runner)
+
+	rt.Enqueue(QueueItem{Kind: QueueKindQueued, Text: "run now"})
+	var queuedID domain.ID
+	deadline := time.After(2 * time.Second)
+	for queuedID == "" {
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for queued item: %#v", rt.Snapshot().QueuedInputs)
+		default:
+			for _, item := range rt.Snapshot().QueuedInputs {
+				if item.Text == "run now" {
+					queuedID = item.ID
+				}
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+
+	rt.SendQueueItemNow(queuedID)
+	deadline = time.After(2 * time.Second)
+	for {
+		snapshot := rt.Snapshot()
+		if snapshot.Active && runner.promptCallCount() == 1 && len(snapshot.QueuedInputs) == 0 {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("expected active turn with empty queue, snapshot=%#v prompts=%d", snapshot, runner.promptCallCount())
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	if got := runner.promptAt(0); got != "run now" {
+		t.Fatalf("prompt = %q", got)
+	}
+	events <- domain.Event{Kind: domain.EventKindMessageDone}
+	close(events)
+}
+
 func TestDrainAndCloseDoesNotDispatchQueuedWork(t *testing.T) {
 	st := openTestStore(t)
 	session, chatRecord, _ := createSessionWithPlan(t, st)
@@ -712,7 +757,7 @@ func TestRuntimeToolStartStatusUsesToolNameNotPreviewArgs(t *testing.T) {
 			if update.Status != StatusRunningTools {
 				t.Fatalf("expected running tools status, got %s", update.Status)
 			}
-			if update.StatusText != "Running exec_command" {
+			if update.StatusText != "Running ExecCommand" {
 				t.Fatalf("expected tool-name status text, got %q", update.StatusText)
 			}
 			if strings.Contains(update.StatusText, "go test") {
@@ -972,7 +1017,7 @@ func TestRuntimeShowsStreamedToolCallDeltaStatus(t *testing.T) {
 			if update.Status != StatusWaitingLLM {
 				t.Fatalf("status = %q", update.Status)
 			}
-			if update.StatusText != "Receiving edit tool call (1.5 KB arguments)" {
+			if update.StatusText != "Receiving Edit tool call (1.5 KB arguments)" {
 				t.Fatalf("status text = %q", update.StatusText)
 			}
 			return
