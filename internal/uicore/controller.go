@@ -2861,11 +2861,17 @@ func (c *Controller) loadSession(ctx context.Context, sessionID, chatID domain.I
 	if err != nil {
 		return err
 	}
-	chats, err := c.store.ListChats(ctx, session.ID)
+	if c.agent == nil {
+		return fmt.Errorf("no chat agent")
+	}
+	owner, err := c.agent.LoadSession(ctx, session.ID)
 	if err != nil {
 		return err
 	}
-	chats, err = c.ensureChatModels(ctx, chats)
+	if err := owner.Reload(ctx); err != nil {
+		return err
+	}
+	chats, err := owner.EnsureChatModels(ctx, c.cfg.DefaultProvider, c.cfg.DefaultModel)
 	if err != nil {
 		return err
 	}
@@ -2877,37 +2883,28 @@ func (c *Controller) loadSession(ctx context.Context, sessionID, chatID domain.I
 	}
 	var chatRecord domain.Chat
 	if chatID != "" {
-		chatRecord, err = c.store.GetChat(ctx, chatID)
-		if err != nil {
-			return err
+		var ok bool
+		chatRecord, ok = chatByID(chats, chatID)
+		if !ok {
+			return fmt.Errorf("chat %s not found", chatID)
 		}
 		if chatRecord.SessionID != session.ID {
 			return fmt.Errorf("chat %s does not belong to session %s", chatID, session.ID)
 		}
-		chatRecord, err = c.ensureChatModel(ctx, chatRecord)
+		chatRecord, err = owner.EnsureChatModel(ctx, chatRecord.ID, c.cfg.DefaultProvider, c.cfg.DefaultModel)
 		if err != nil {
 			return err
 		}
 	} else {
 		chatRecord = newestChat(chats)
 		if chatRecord.ID == "" {
-			chatRecord, err = c.store.DefaultChat(ctx, session.ID)
+			chatRecord, err = owner.EnsureDefaultChat(ctx)
 			if err != nil {
 				return err
 			}
 		}
 	}
 	c.ensureModelConfig(ctx, chatRecord.ProviderID, chatRecord.ModelID)
-	if c.agent == nil {
-		return fmt.Errorf("no chat agent")
-	}
-	owner, err := c.agent.LoadSession(ctx, session.ID)
-	if err != nil {
-		return err
-	}
-	if err := owner.Reload(ctx); err != nil {
-		return err
-	}
 	session, chatRecord, chats, err = owner.TouchSelection(ctx, chatRecord.ID)
 	if err != nil {
 		return err
@@ -2936,11 +2933,7 @@ func (c *Controller) loadSession(ctx context.Context, sessionID, chatID domain.I
 		rt := existingRuntimes[item.ID]
 		if rt == nil {
 			var err error
-			if owner != nil {
-				rt, err = owner.Chat(ctx, item.ID)
-			} else {
-				rt, err = c.agent.Chat(ctx, session, item)
-			}
+			rt, err = owner.Chat(ctx, item.ID)
 			if err != nil {
 				return err
 			}
@@ -2965,12 +2958,10 @@ func (c *Controller) loadSession(ctx context.Context, sessionID, chatID domain.I
 		return fmt.Errorf("chat %s runtime was not loaded", chatRecord.ID)
 	}
 	milestone, todos, todosByRef := c.planningState(ctx, session.ID)
-	if owner != nil {
-		ownerSnapshot := owner.Snapshot()
-		milestone = ownerSnapshot.Plan
-		todos = ownerSnapshot.Todos
-		todosByRef = ownerSnapshot.TodosByRef
-	}
+	ownerSnapshot := owner.Snapshot()
+	milestone = ownerSnapshot.Plan
+	todos = ownerSnapshot.Todos
+	todosByRef = ownerSnapshot.TodosByRef
 	workspaceStatus, _ := workspacepkg.Snapshot(ctx, session.ProjectRoot)
 	statuses := c.chatStatuses(ctx, session.ID)
 	snapshots := make(map[domain.ID]chat.Snapshot, len(runtimes))
@@ -3032,37 +3023,6 @@ func (c *Controller) loadSession(ctx context.Context, sessionID, chatID domain.I
 	c.autoResumeRestartInterruptedChats(runtimes, snapshots)
 	c.broadcast("snapshot", c.State())
 	return nil
-}
-
-func (c *Controller) ensureChatModels(ctx context.Context, chats []domain.Chat) ([]domain.Chat, error) {
-	for idx := range chats {
-		chatRecord, err := c.ensureChatModel(ctx, chats[idx])
-		if err != nil {
-			return nil, err
-		}
-		chats[idx] = chatRecord
-	}
-	return chats, nil
-}
-
-func (c *Controller) ensureChatModel(ctx context.Context, chatRecord domain.Chat) (domain.Chat, error) {
-	providerID := strings.TrimSpace(chatRecord.ProviderID)
-	modelID := strings.TrimSpace(chatRecord.ModelID)
-	if providerID != "" && modelID != "" {
-		return chatRecord, nil
-	}
-	providerID = strings.TrimSpace(c.cfg.DefaultProvider)
-	modelID = strings.TrimSpace(c.cfg.DefaultModel)
-	if providerID == "" || modelID == "" {
-		return chatRecord, nil
-	}
-	if err := c.store.SetChatModel(ctx, chatRecord.ID, providerID, modelID); err != nil {
-		return domain.Chat{}, err
-	}
-	chatRecord.ProviderID = providerID
-	chatRecord.ModelID = modelID
-	chatRecord.UpdatedAt = time.Now().UTC()
-	return chatRecord, nil
 }
 
 const processRestartResumeNote = "The previous turn was interrupted because the koder process was restarting. Continue from the persisted transcript and pending tool state without restating the interruption."

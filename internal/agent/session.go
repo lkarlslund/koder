@@ -383,6 +383,28 @@ func (s *Session) AddPreparedChat(ctx context.Context, chatRecord domain.Chat) (
 	return rt, nil
 }
 
+// EnsureDefaultChat returns the newest chat, creating the session default when empty.
+func (s *Session) EnsureDefaultChat(ctx context.Context) (domain.Chat, error) {
+	if s == nil {
+		return domain.Chat{}, fmt.Errorf("session is required")
+	}
+	s.mu.RLock()
+	session := s.session
+	chats := slices.Clone(s.chats)
+	s.mu.RUnlock()
+	if best := newestSessionChat(chats); best.ID != "" {
+		return best, nil
+	}
+	chatRecord, err := s.engine.store.DefaultChat(ctx, session.ID)
+	if err != nil {
+		return domain.Chat{}, err
+	}
+	s.mu.Lock()
+	upsertSessionChatLocked(&s.chats, chatRecord)
+	s.mu.Unlock()
+	return chatRecord, nil
+}
+
 // ArchiveChat marks a chat archived, preserving its history.
 func (s *Session) ArchiveChat(ctx context.Context, chatID domain.ID) (tools.ChatStatus, domain.ID, error) {
 	if s == nil {
@@ -506,6 +528,48 @@ func (s *Session) SetChatModel(ctx context.Context, chatID domain.ID, providerID
 	return chatRecord, nil
 }
 
+// EnsureChatModels fills missing chat provider/model fields from session defaults.
+func (s *Session) EnsureChatModels(ctx context.Context, defaultProvider, defaultModel string) ([]domain.Chat, error) {
+	if s == nil {
+		return nil, fmt.Errorf("session is required")
+	}
+	defaultProvider = strings.TrimSpace(defaultProvider)
+	defaultModel = strings.TrimSpace(defaultModel)
+	s.mu.RLock()
+	chats := slices.Clone(s.chats)
+	s.mu.RUnlock()
+	for idx := range chats {
+		chatRecord, err := s.EnsureChatModel(ctx, chats[idx].ID, defaultProvider, defaultModel)
+		if err != nil {
+			return nil, err
+		}
+		chats[idx] = chatRecord
+	}
+	return chats, nil
+}
+
+// EnsureChatModel fills missing provider/model fields from session defaults.
+func (s *Session) EnsureChatModel(ctx context.Context, chatID domain.ID, defaultProvider, defaultModel string) (domain.Chat, error) {
+	if s == nil {
+		return domain.Chat{}, fmt.Errorf("session is required")
+	}
+	s.mu.RLock()
+	chatRecord, ok := chatByID(s.chats, chatID)
+	s.mu.RUnlock()
+	if !ok {
+		return domain.Chat{}, fmt.Errorf("chat %s not found", chatID)
+	}
+	if strings.TrimSpace(chatRecord.ProviderID) != "" && strings.TrimSpace(chatRecord.ModelID) != "" {
+		return chatRecord, nil
+	}
+	defaultProvider = strings.TrimSpace(defaultProvider)
+	defaultModel = strings.TrimSpace(defaultModel)
+	if defaultProvider == "" || defaultModel == "" {
+		return chatRecord, nil
+	}
+	return s.SetChatModel(ctx, chatID, defaultProvider, defaultModel)
+}
+
 // TouchSelection marks the session and selected chat as recently used.
 func (s *Session) TouchSelection(ctx context.Context, chatID domain.ID) (domain.Session, domain.Chat, []domain.Chat, error) {
 	if s == nil {
@@ -540,6 +604,19 @@ func (s *Session) TouchSelection(ctx context.Context, chatID domain.ID) (domain.
 	chats := slices.Clone(s.chats)
 	s.mu.Unlock()
 	return session, chatRecord, chats, nil
+}
+
+func newestSessionChat(chats []domain.Chat) domain.Chat {
+	var best domain.Chat
+	for _, item := range chats {
+		if item.ID == "" {
+			continue
+		}
+		if best.ID == "" || item.UpdatedAt.After(best.UpdatedAt) || (item.UpdatedAt.Equal(best.UpdatedAt) && item.ID > best.ID) {
+			best = item
+		}
+	}
+	return best
 }
 
 func (s *Session) PollChat(ctx context.Context, chatID domain.ID) (tools.ChatStatus, error) {
