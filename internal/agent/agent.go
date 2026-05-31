@@ -28,6 +28,7 @@ import (
 	"github.com/lkarlslund/koder/internal/execruntime"
 	"github.com/lkarlslund/koder/internal/mcp"
 	"github.com/lkarlslund/koder/internal/permissionprofile"
+	"github.com/lkarlslund/koder/internal/planning"
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/reference"
 	sessionpkg "github.com/lkarlslund/koder/internal/session"
@@ -1126,20 +1127,20 @@ func (e *Engine) persistToolResult(ctx context.Context, chatID, sessionID domain
 	return events, nil
 }
 
-func (e *Engine) milestonePlanForNotification(ctx context.Context, sessionID domain.ID, tool domain.ToolKind) (store.MilestonePlan, bool) {
+func (e *Engine) milestonePlanForNotification(ctx context.Context, sessionID domain.ID, tool domain.ToolKind) (planning.Plan, bool) {
 	switch tool {
 	case domain.ToolKindMilestoneUpdate, domain.ToolKindMilestonePlan, domain.ToolKindMilestoneWrite, domain.ToolKindMilestoneAdd:
 	default:
-		return store.MilestonePlan{}, false
+		return planning.Plan{}, false
 	}
 	plan, err := e.store.GetMilestonePlan(ctx, sessionID)
 	if err != nil {
-		return store.MilestonePlan{}, false
+		return planning.Plan{}, false
 	}
 	return plan, true
 }
 
-func (e *Engine) notifyMilestoneChanges(ctx context.Context, chatID domain.ID, before store.MilestonePlan) {
+func (e *Engine) notifyMilestoneChanges(ctx context.Context, chatID domain.ID, before planning.Plan) {
 	chatRecord, err := e.store.GetChat(ctx, chatID)
 	if err != nil || chatRecord.ParentChatID == nil {
 		return
@@ -1148,7 +1149,7 @@ func (e *Engine) notifyMilestoneChanges(ctx context.Context, chatID domain.ID, b
 	if err != nil {
 		return
 	}
-	beforeByRef := make(map[string]store.Milestone, len(before.Milestones))
+	beforeByRef := make(map[string]planning.Milestone, len(before.Milestones))
 	for _, milestone := range before.Milestones {
 		beforeByRef[milestone.Ref] = milestone
 	}

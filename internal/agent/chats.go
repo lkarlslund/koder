@@ -10,8 +10,8 @@ import (
 	chatpkg "github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/chatrole"
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/planning"
 	sessionpkg "github.com/lkarlslund/koder/internal/session"
-	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools"
 )
 
@@ -87,7 +87,7 @@ func (e *Engine) StartChat(ctx context.Context, sessionID, parentChatID domain.I
 	}
 	milestoneRef := strings.TrimSpace(req.MilestoneRef)
 	todoRef := domain.ID(strings.TrimSpace(string(req.TodoRef)))
-	var scopedTodo *store.TodoItem
+	var scopedTodo *planning.TodoItem
 	if todoRef != "" {
 		todo, err := sessionTodoByID(ctx, owner, sessionID, plan, todoRef)
 		if err != nil {
@@ -99,7 +99,7 @@ func (e *Engine) StartChat(ctx context.Context, sessionID, parentChatID domain.I
 		}
 		milestoneRef = todo.MilestoneRef
 	}
-	var milestone store.Milestone
+	var milestone planning.Milestone
 	if milestoneRef != "" {
 		var ok bool
 		milestone, ok = milestoneByRef(plan, milestoneRef)
@@ -173,12 +173,12 @@ func (e *Engine) ArchiveChat(ctx context.Context, sessionID, chatID domain.ID) (
 }
 
 func sessionTodoByID(ctx context.Context, owner interface {
-	ListTodos(context.Context, domain.ID, string) ([]store.TodoItem, error)
-}, sessionID domain.ID, plan store.MilestonePlan, todoID domain.ID) (store.TodoItem, error) {
+	ListTodos(context.Context, domain.ID, string) ([]planning.TodoItem, error)
+}, sessionID domain.ID, plan planning.Plan, todoID domain.ID) (planning.TodoItem, error) {
 	for _, milestone := range plan.Milestones {
 		todos, err := owner.ListTodos(ctx, sessionID, milestone.Ref)
 		if err != nil {
-			return store.TodoItem{}, err
+			return planning.TodoItem{}, err
 		}
 		for _, todo := range todos {
 			if todo.ID == todoID {
@@ -188,17 +188,17 @@ func sessionTodoByID(ctx context.Context, owner interface {
 	}
 	todos, err := owner.ListTodos(ctx, sessionID, "")
 	if err != nil {
-		return store.TodoItem{}, err
+		return planning.TodoItem{}, err
 	}
 	for _, todo := range todos {
 		if todo.ID == todoID {
 			return todo, nil
 		}
 	}
-	return store.TodoItem{}, fmt.Errorf("todo %s not found", todoID)
+	return planning.TodoItem{}, fmt.Errorf("todo %s not found", todoID)
 }
 
-func updateMilestoneStatus(plan store.MilestonePlan, ref string, status domain.MilestoneStatus, ownerChatID domain.ID) (store.MilestonePlan, error) {
+func updateMilestoneStatus(plan planning.Plan, ref string, status domain.MilestoneStatus, ownerChatID domain.ID) (planning.Plan, error) {
 	next := plan
 	next.Milestones = slices.Clone(plan.Milestones)
 	found := false
@@ -208,7 +208,7 @@ func updateMilestoneStatus(plan store.MilestonePlan, ref string, status domain.M
 		}
 		found = true
 		if next.Milestones[idx].OwnerChatID != nil && *next.Milestones[idx].OwnerChatID != ownerChatID {
-			return store.MilestonePlan{}, fmt.Errorf("milestone %q is owned by chat %s", ref, *next.Milestones[idx].OwnerChatID)
+			return planning.Plan{}, fmt.Errorf("milestone %q is owned by chat %s", ref, *next.Milestones[idx].OwnerChatID)
 		}
 		next.Milestones[idx].Status = status
 		if status == domain.MilestoneStatusDecomposing || status == domain.MilestoneStatusExecuting {
@@ -219,7 +219,7 @@ func updateMilestoneStatus(plan store.MilestonePlan, ref string, status domain.M
 		}
 	}
 	if !found {
-		return store.MilestonePlan{}, fmt.Errorf("milestone %q not found", ref)
+		return planning.Plan{}, fmt.Errorf("milestone %q not found", ref)
 	}
 	return next, nil
 }
@@ -233,7 +233,7 @@ func roleMilestoneStatus(role domain.WorkflowRole) domain.MilestoneStatus {
 	}
 }
 
-func defaultChildChatTitle(role domain.WorkflowRole, milestone store.Milestone, todo *store.TodoItem) string {
+func defaultChildChatTitle(role domain.WorkflowRole, milestone planning.Milestone, todo *planning.TodoItem) string {
 	prefix := chatrole.DisplayName(role)
 	if todo != nil {
 		return fmt.Sprintf("%s: %s", prefix, todo.Content)
@@ -255,13 +255,13 @@ func cloneToolStateMap(src map[domain.ToolKind]bool) map[domain.ToolKind]bool {
 	return out
 }
 
-func milestoneByRef(plan store.MilestonePlan, ref string) (store.Milestone, bool) {
+func milestoneByRef(plan planning.Plan, ref string) (planning.Milestone, bool) {
 	for _, milestone := range plan.Milestones {
 		if milestone.Ref == ref {
 			return milestone, true
 		}
 	}
-	return store.Milestone{}, false
+	return planning.Milestone{}, false
 }
 
 func chatByID(chats []domain.Chat, chatID domain.ID) (domain.Chat, bool) {
@@ -273,7 +273,7 @@ func chatByID(chats []domain.Chat, chatID domain.ID) (domain.Chat, bool) {
 	return domain.Chat{}, false
 }
 
-func (e *Engine) startPreparedChat(ctx context.Context, owner *sessionpkg.Session, chatID domain.ID, milestone store.Milestone, scopedTodo *store.TodoItem, role domain.WorkflowRole, objective string) (tools.ChatStatus, error) {
+func (e *Engine) startPreparedChat(ctx context.Context, owner *sessionpkg.Session, chatID domain.ID, milestone planning.Milestone, scopedTodo *planning.TodoItem, role domain.WorkflowRole, objective string) (tools.ChatStatus, error) {
 	if owner == nil {
 		return tools.ChatStatus{}, fmt.Errorf("session is required")
 	}
@@ -429,7 +429,7 @@ func (e *Engine) enqueueSteer(ctx context.Context, chatID domain.ID, text string
 	parent.Enqueue(chatpkg.QueueItem{Kind: chatpkg.QueueKindSteer, Source: domain.UserMessageSourceSubchat, Text: text})
 }
 
-func (e *Engine) bootstrapPrompt(ctx context.Context, sessionID domain.ID, milestone store.Milestone, scopedTodo *store.TodoItem, role domain.WorkflowRole, objective string) string {
+func (e *Engine) bootstrapPrompt(ctx context.Context, sessionID domain.ID, milestone planning.Milestone, scopedTodo *planning.TodoItem, role domain.WorkflowRole, objective string) string {
 	lines := []string{
 		fmt.Sprintf("Profile: %s", role),
 		"Objective:",
@@ -438,7 +438,7 @@ func (e *Engine) bootstrapPrompt(ctx context.Context, sessionID domain.ID, miles
 	if milestone.Ref != "" {
 		todos, _ := e.store.ListTodos(ctx, sessionID, milestone.Ref)
 		if scopedTodo != nil {
-			todos = []store.TodoItem{*scopedTodo}
+			todos = []planning.TodoItem{*scopedTodo}
 		}
 		lines = append(lines,
 			"",

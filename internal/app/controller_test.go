@@ -20,6 +20,7 @@ import (
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/execruntime"
+	"github.com/lkarlslund/koder/internal/planning"
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools"
@@ -263,7 +264,7 @@ func TestControllerStartChatAddsCreatedChatToSession(t *testing.T) {
 	if state.Session.ID == "" || state.ActiveChatID == "" {
 		t.Fatal("expected active session and chat")
 	}
-	if _, err := ctrl.SetMilestonePlan(context.Background(), state.Session.ID, "Ship it", []store.Milestone{
+	if _, err := ctrl.SetMilestonePlan(context.Background(), state.Session.ID, "Ship it", []planning.Milestone{
 		{Ref: "alpha", Title: "Alpha", Status: domain.MilestoneStatusReady, Position: 0},
 	}); err != nil {
 		t.Fatalf("set milestone plan: %v", err)

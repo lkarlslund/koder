@@ -35,7 +35,7 @@ func newMilestoneRuntime(t *testing.T) (tools.Runtime, *store.Store, domain.Sess
 
 func seedPlan(t *testing.T, st *store.Store, sessionID domain.ID) {
 	t.Helper()
-	if _, err := st.SetMilestonePlan(context.Background(), sessionID, "Ship it", []store.Milestone{
+	if _, err := st.SetMilestonePlan(context.Background(), sessionID, "Ship it", []planning.Milestone{
 		{Ref: "alpha", Title: "Alpha", Status: domain.MilestoneStatusPending, Position: 0},
 	}); err != nil {
 		t.Fatal(err)
@@ -91,8 +91,8 @@ func TestAppendAndValidationHelpers(t *testing.T) {
 		t.Fatalf("expected cancelled milestone status, got %#v", parsed[0])
 	}
 
-	existing := []store.Milestone{{Ref: "alpha", Title: "Alpha", Position: 0}}
-	added := []store.Milestone{{Ref: "beta", Title: "Beta"}}
+	existing := []planning.Milestone{{Ref: "alpha", Title: "Alpha", Position: 0}}
+	added := []planning.Milestone{{Ref: "beta", Title: "Beta"}}
 	got := appendMilestones(existing, added)
 	if len(got) != 2 || got[1].Position != 1 {
 		t.Fatalf("unexpected appended milestones: %#v", got)
@@ -100,10 +100,10 @@ func TestAppendAndValidationHelpers(t *testing.T) {
 	if err := ensureMilestoneRefsAvailable(existing, added); err != nil {
 		t.Fatal(err)
 	}
-	if err := ensureMilestoneRefsAvailable(existing, []store.Milestone{{Ref: "alpha", Title: "dup"}}); err == nil {
+	if err := ensureMilestoneRefsAvailable(existing, []planning.Milestone{{Ref: "alpha", Title: "dup"}}); err == nil {
 		t.Fatal("expected duplicate ref error")
 	}
-	if err := planning.ValidateMilestoneProgress([]store.Milestone{
+	if err := planning.ValidateMilestoneProgress([]planning.Milestone{
 		{Ref: "alpha", Title: "Alpha", Status: domain.MilestoneStatusExecuting},
 		{Ref: "beta", Title: "Beta", Status: domain.MilestoneStatusExecuting},
 	}); err != nil {
@@ -112,7 +112,7 @@ func TestAppendAndValidationHelpers(t *testing.T) {
 }
 
 func TestUpsertAndUpdatedPlanHelpers(t *testing.T) {
-	items := upsertMilestone([]store.Milestone{{Ref: "alpha", Title: "Alpha", Position: 0}}, store.Milestone{
+	items := upsertMilestone([]planning.Milestone{{Ref: "alpha", Title: "Alpha", Position: 0}}, planning.Milestone{
 		Ref:    "alpha",
 		Title:  "Alpha updated",
 		Status: domain.MilestoneStatusReady,
@@ -120,14 +120,14 @@ func TestUpsertAndUpdatedPlanHelpers(t *testing.T) {
 	if items[0].Title != "Alpha updated" || items[0].Position != 0 {
 		t.Fatalf("unexpected updated milestone: %#v", items[0])
 	}
-	items = upsertMilestone(items, store.Milestone{Ref: "beta", Title: "Beta"})
+	items = upsertMilestone(items, planning.Milestone{Ref: "beta", Title: "Beta"})
 	if len(items) != 2 || items[1].Position != 1 {
 		t.Fatalf("unexpected appended milestone: %#v", items)
 	}
 
-	plan, err := updatedMilestonePlan(store.MilestonePlan{
+	plan, err := updatedMilestonePlan(planning.Plan{
 		Summary: "Ship it",
-		Milestones: []store.Milestone{
+		Milestones: []planning.Milestone{
 			{Ref: "alpha", Title: "Alpha", Status: domain.MilestoneStatusPending, Position: 0},
 		},
 	}, tools.Request{Args: map[string]string{"ref": "alpha", "status": "completed", "notes": "done"}}, domain.Chat{})
@@ -143,9 +143,9 @@ func TestUpsertAndUpdatedPlanHelpers(t *testing.T) {
 }
 
 func TestUpdateItemAllowsMultipleActiveMilestones(t *testing.T) {
-	plan := store.MilestonePlan{
+	plan := planning.Plan{
 		Summary: "Ship it",
-		Milestones: []store.Milestone{
+		Milestones: []planning.Milestone{
 			{Ref: "alpha", Title: "Alpha", Status: domain.MilestoneStatusExecuting, Position: 0},
 			{Ref: "beta", Title: "Beta", Status: domain.MilestoneStatusPending, Position: 1},
 		},
@@ -163,9 +163,9 @@ func TestUpdateItemAllowsMultipleActiveMilestones(t *testing.T) {
 func TestUpdateItemEnforcesMilestoneOwnership(t *testing.T) {
 	ownerID := domain.NewID()
 	otherID := domain.NewID()
-	plan := store.MilestonePlan{
+	plan := planning.Plan{
 		Summary: "Ship it",
-		Milestones: []store.Milestone{
+		Milestones: []planning.Milestone{
 			{Ref: "alpha", Title: "Alpha", Status: domain.MilestoneStatusExecuting, OwnerChatID: &ownerID, Position: 0},
 		},
 	}
@@ -191,9 +191,9 @@ func TestUpdateItemEnforcesMilestoneOwnership(t *testing.T) {
 
 func TestUpdateItemAssignsOwnerForActiveScopedMilestone(t *testing.T) {
 	ownerID := domain.NewID()
-	plan := store.MilestonePlan{
+	plan := planning.Plan{
 		Summary: "Ship it",
-		Milestones: []store.Milestone{
+		Milestones: []planning.Milestone{
 			{Ref: "alpha", Title: "Alpha", Status: domain.MilestoneStatusReady, Position: 0},
 		},
 	}
@@ -214,7 +214,7 @@ func TestScopedExecutionChatSeesOnlyAssignedMilestone(t *testing.T) {
 	runtime, st, session := newMilestoneRuntime(t)
 	runtime.ChatRole = chatrole.Execution
 	runtime.ActiveMilestoneRef = "beta"
-	if _, err := st.SetMilestonePlan(context.Background(), session.ID, "Ship it", []store.Milestone{
+	if _, err := st.SetMilestonePlan(context.Background(), session.ID, "Ship it", []planning.Milestone{
 		{Ref: "alpha", Title: "Alpha", Status: domain.MilestoneStatusExecuting, Position: 0},
 		{Ref: "beta", Title: "Beta", Status: domain.MilestoneStatusExecuting, Position: 1},
 	}); err != nil {

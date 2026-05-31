@@ -7,7 +7,6 @@ import (
 
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/planning"
-	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools"
 )
 
@@ -158,9 +157,9 @@ func (addItemsTool) Execute(ctx context.Context, runtime tools.Runtime, req tool
 		return tools.Result{}, err
 	}
 	title := planning.MilestoneTitle(plan, ref)
-	todos := make([]store.TodoItem, 0, len(items))
+	todos := make([]planning.TodoItem, 0, len(items))
 	for _, content := range items {
-		todos = append(todos, store.TodoItem{
+		todos = append(todos, planning.TodoItem{
 			Content: content,
 			Status:  domain.TodoStatusPending,
 		})
@@ -233,12 +232,12 @@ func (fetchNextTool) Execute(ctx context.Context, runtime tools.Runtime, req too
 	todos = tools.ScopedTodos(runtime, todos)
 	for _, item := range todos {
 		if item.Status == domain.TodoStatusInProgress {
-			return tools.TodoBucketResult(plan, ref, []store.TodoItem{item}, ""), nil
+			return tools.TodoBucketResult(plan, ref, []planning.TodoItem{item}, ""), nil
 		}
 	}
 	for _, item := range todos {
 		if item.Status == domain.TodoStatusPending {
-			return tools.TodoBucketResult(plan, ref, []store.TodoItem{item}, ""), nil
+			return tools.TodoBucketResult(plan, ref, []planning.TodoItem{item}, ""), nil
 		}
 	}
 	message := "All todo items for this milestone are done. If you have more planned tasks, move to the next milestone or break it down into todo items and start working on them."
@@ -349,13 +348,13 @@ func (fetchNextTool) PersistResult(ctx context.Context, runtime tools.Runtime, r
 	message := ""
 	for _, item := range todos {
 		if item.Status == domain.TodoStatusInProgress {
-			result.Stored = tools.TodoStoredResult(plan, ref, []store.TodoItem{item}, message)
+			result.Stored = tools.TodoStoredResult(plan, ref, []planning.TodoItem{item}, message)
 			return tools.PersistStandardResult(ctx, runtime, req, result)
 		}
 	}
 	for _, item := range todos {
 		if item.Status == domain.TodoStatusPending {
-			result.Stored = tools.TodoStoredResult(plan, ref, []store.TodoItem{item}, message)
+			result.Stored = tools.TodoStoredResult(plan, ref, []planning.TodoItem{item}, message)
 			return tools.PersistStandardResult(ctx, runtime, req, result)
 		}
 	}
@@ -364,22 +363,22 @@ func (fetchNextTool) PersistResult(ctx context.Context, runtime tools.Runtime, r
 	return tools.PersistStandardResult(ctx, runtime, req, result)
 }
 
-func persistedTodoBucket(ctx context.Context, control planning.Control, sessionID domain.ID, ref string) (store.MilestonePlan, []store.TodoItem, string, error) {
+func persistedTodoBucket(ctx context.Context, control planning.Control, sessionID domain.ID, ref string) (planning.Plan, []planning.TodoItem, string, error) {
 	plan, err := control.GetMilestonePlan(ctx, sessionID)
 	if err != nil {
-		return store.MilestonePlan{}, nil, "", err
+		return planning.Plan{}, nil, "", err
 	}
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
 		active, ok := planning.ActiveMilestone(plan)
 		if !ok {
-			return store.MilestonePlan{}, nil, "", fmt.Errorf("no active milestone; read milestones first or provide milestone_ref")
+			return planning.Plan{}, nil, "", fmt.Errorf("no active milestone; read milestones first or provide milestone_ref")
 		}
 		ref = active.Ref
 	}
 	todos, err := control.ListTodos(ctx, sessionID, ref)
 	if err != nil {
-		return store.MilestonePlan{}, nil, "", err
+		return planning.Plan{}, nil, "", err
 	}
 	return plan, todos, ref, nil
 }

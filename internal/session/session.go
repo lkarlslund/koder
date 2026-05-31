@@ -28,8 +28,8 @@ type Session struct {
 	session    domain.Session
 	chats      []domain.Chat
 	runtimes   map[domain.ID]*chatpkg.Chat
-	plan       store.MilestonePlan
-	todosByRef map[string][]store.TodoItem
+	plan       planning.Plan
+	todosByRef map[string][]planning.TodoItem
 	tasks      []store.Task
 }
 
@@ -76,8 +76,8 @@ func Load(ctx context.Context, st *store.Store, chatLoader ChatLoader, sessionID
 	}, nil
 }
 
-func loadTodosByRef(ctx context.Context, st *store.Store, sessionID domain.ID, plan store.MilestonePlan) (map[string][]store.TodoItem, error) {
-	out := map[string][]store.TodoItem{}
+func loadTodosByRef(ctx context.Context, st *store.Store, sessionID domain.ID, plan planning.Plan) (map[string][]planning.TodoItem, error) {
+	out := map[string][]planning.TodoItem{}
 	seen := map[string]struct{}{}
 	for _, milestone := range plan.Milestones {
 		ref := strings.TrimSpace(milestone.Ref)
@@ -102,9 +102,9 @@ type SessionSnapshot struct {
 	Session    domain.Session
 	Chats      []domain.Chat
 	Snapshots  map[domain.ID]chatpkg.Snapshot
-	Plan       store.MilestonePlan
-	Todos      []store.TodoItem
-	TodosByRef map[string][]store.TodoItem
+	Plan       planning.Plan
+	Todos      []planning.TodoItem
+	TodosByRef map[string][]planning.TodoItem
 	Tasks      []store.Task
 }
 
@@ -588,27 +588,27 @@ func (s *Session) Close(ctx context.Context) error {
 	return nil
 }
 
-func (s *Session) GetMilestonePlan(ctx context.Context, sessionID domain.ID) (store.MilestonePlan, error) {
+func (s *Session) GetMilestonePlan(ctx context.Context, sessionID domain.ID) (planning.Plan, error) {
 	if err := s.requireSession(sessionID); err != nil {
-		return store.MilestonePlan{}, err
+		return planning.Plan{}, err
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return cloneMilestonePlan(s.plan), nil
 }
 
-func (s *Session) SetMilestonePlan(ctx context.Context, sessionID domain.ID, summary string, milestones []store.Milestone) (store.MilestonePlan, error) {
+func (s *Session) SetMilestonePlan(ctx context.Context, sessionID domain.ID, summary string, milestones []planning.Milestone) (planning.Plan, error) {
 	if err := s.requireSession(sessionID); err != nil {
-		return store.MilestonePlan{}, err
+		return planning.Plan{}, err
 	}
-	plan := store.MilestonePlan{
+	plan := planning.Plan{
 		SessionID:  sessionID,
 		Summary:    summary,
 		Milestones: cloneMilestones(milestones),
 		UpdatedAt:  time.Now().UTC(),
 	}
 	if err := s.store.PutMilestonePlan(ctx, plan); err != nil {
-		return store.MilestonePlan{}, err
+		return planning.Plan{}, err
 	}
 	s.mu.Lock()
 	s.plan = plan
@@ -616,7 +616,7 @@ func (s *Session) SetMilestonePlan(ctx context.Context, sessionID domain.ID, sum
 	return cloneMilestonePlan(plan), nil
 }
 
-func (s *Session) AddTodoItems(ctx context.Context, sessionID domain.ID, milestoneRef string, contents []string) ([]store.TodoItem, error) {
+func (s *Session) AddTodoItems(ctx context.Context, sessionID domain.ID, milestoneRef string, contents []string) ([]planning.TodoItem, error) {
 	if err := s.requireSession(sessionID); err != nil {
 		return nil, err
 	}
@@ -625,13 +625,13 @@ func (s *Session) AddTodoItems(ctx context.Context, sessionID domain.ID, milesto
 	s.mu.RLock()
 	position := len(s.todosByRef[milestoneRef])
 	s.mu.RUnlock()
-	items := make([]store.TodoItem, 0, len(contents))
+	items := make([]planning.TodoItem, 0, len(contents))
 	for _, content := range contents {
 		content = strings.TrimSpace(content)
 		if content == "" {
 			continue
 		}
-		items = append(items, store.TodoItem{
+		items = append(items, planning.TodoItem{
 			ID:           domain.NewID(),
 			SessionID:    sessionID,
 			MilestoneRef: milestoneRef,
@@ -649,20 +649,20 @@ func (s *Session) AddTodoItems(ctx context.Context, sessionID domain.ID, milesto
 	}
 	s.mu.Lock()
 	if s.todosByRef == nil {
-		s.todosByRef = map[string][]store.TodoItem{}
+		s.todosByRef = map[string][]planning.TodoItem{}
 	}
 	s.todosByRef[milestoneRef] = append(s.todosByRef[milestoneRef], items...)
 	s.mu.Unlock()
 	return slices.Clone(items), nil
 }
 
-func (s *Session) UpdateTodoItem(ctx context.Context, todoID domain.ID, status domain.TodoStatus, content string) (store.TodoItem, error) {
+func (s *Session) UpdateTodoItem(ctx context.Context, todoID domain.ID, status domain.TodoStatus, content string) (planning.TodoItem, error) {
 	if s == nil {
-		return store.TodoItem{}, fmt.Errorf("session is required")
+		return planning.TodoItem{}, fmt.Errorf("session is required")
 	}
 	now := time.Now().UTC()
 	s.mu.RLock()
-	var item store.TodoItem
+	var item planning.TodoItem
 	var ref string
 	found := false
 	for milestoneRef, todos := range s.todosByRef {
@@ -680,7 +680,7 @@ func (s *Session) UpdateTodoItem(ctx context.Context, todoID domain.ID, status d
 	}
 	s.mu.RUnlock()
 	if !found {
-		return store.TodoItem{}, fmt.Errorf("todo %s not found", todoID)
+		return planning.TodoItem{}, fmt.Errorf("todo %s not found", todoID)
 	}
 	item.Status = status
 	if strings.TrimSpace(content) != "" {
@@ -688,7 +688,7 @@ func (s *Session) UpdateTodoItem(ctx context.Context, todoID domain.ID, status d
 	}
 	item.UpdatedAt = now
 	if err := s.store.PutTodoItem(ctx, item); err != nil {
-		return store.TodoItem{}, err
+		return planning.TodoItem{}, err
 	}
 	s.mu.Lock()
 	todos := slices.Clone(s.todosByRef[ref])
@@ -703,7 +703,7 @@ func (s *Session) UpdateTodoItem(ctx context.Context, todoID domain.ID, status d
 	return item, nil
 }
 
-func (s *Session) ListTodos(ctx context.Context, sessionID domain.ID, milestoneRef string) ([]store.TodoItem, error) {
+func (s *Session) ListTodos(ctx context.Context, sessionID domain.ID, milestoneRef string) ([]planning.TodoItem, error) {
 	if err := s.requireSession(sessionID); err != nil {
 		return nil, err
 	}
@@ -971,12 +971,12 @@ func cloneToolStateMap(src map[domain.ToolKind]bool) map[domain.ToolKind]bool {
 	return out
 }
 
-func cloneMilestonePlan(plan store.MilestonePlan) store.MilestonePlan {
+func cloneMilestonePlan(plan planning.Plan) planning.Plan {
 	plan.Milestones = cloneMilestones(plan.Milestones)
 	return plan
 }
 
-func cloneMilestones(src []store.Milestone) []store.Milestone {
+func cloneMilestones(src []planning.Milestone) []planning.Milestone {
 	out := slices.Clone(src)
 	for idx := range out {
 		if src[idx].OwnerChatID != nil {
@@ -987,23 +987,23 @@ func cloneMilestones(src []store.Milestone) []store.Milestone {
 	return out
 }
 
-func cloneTodosByRef(src map[string][]store.TodoItem) map[string][]store.TodoItem {
+func cloneTodosByRef(src map[string][]planning.TodoItem) map[string][]planning.TodoItem {
 	if len(src) == 0 {
-		return map[string][]store.TodoItem{}
+		return map[string][]planning.TodoItem{}
 	}
-	out := make(map[string][]store.TodoItem, len(src))
+	out := make(map[string][]planning.TodoItem, len(src))
 	for ref, items := range src {
 		out[ref] = slices.Clone(items)
 	}
 	return out
 }
 
-func flattenTodos(src map[string][]store.TodoItem) []store.TodoItem {
-	var out []store.TodoItem
+func flattenTodos(src map[string][]planning.TodoItem) []planning.TodoItem {
+	var out []planning.TodoItem
 	for _, items := range src {
 		out = append(out, items...)
 	}
-	slices.SortFunc(out, func(a, b store.TodoItem) int {
+	slices.SortFunc(out, func(a, b planning.TodoItem) int {
 		if a.MilestoneRef != b.MilestoneRef {
 			return strings.Compare(a.MilestoneRef, b.MilestoneRef)
 		}

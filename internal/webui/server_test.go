@@ -25,6 +25,7 @@ import (
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/debugsrv"
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/planning"
 	"github.com/lkarlslund/koder/internal/store"
 )
 
@@ -507,12 +508,12 @@ func TestWebSocketSnapshotEventIsCompactedToStateDelta(t *testing.T) {
 		Session:      domain.Session{ID: "session-1", Title: "Session"},
 		Chats:        []domain.Chat{{ID: "chat-7", SessionID: "session-1", Title: "Chat"}},
 		ActiveChatID: "chat-7",
-		Milestones: store.MilestonePlan{
+		Milestones: planning.Plan{
 			Summary:    "Live plan",
-			Milestones: []store.Milestone{{Ref: "alpha", Title: "Alpha", Status: domain.MilestoneStatusExecuting}},
+			Milestones: []planning.Milestone{{Ref: "alpha", Title: "Alpha", Status: domain.MilestoneStatusExecuting}},
 		},
-		Todos:      []store.TodoItem{{ID: "todo-1", MilestoneRef: "alpha", Content: "First", Status: domain.TodoStatusInProgress}},
-		TodosByRef: map[string][]store.TodoItem{"alpha": {{ID: "todo-1", MilestoneRef: "alpha", Content: "First", Status: domain.TodoStatusInProgress}}},
+		Todos:      []planning.TodoItem{{ID: "todo-1", MilestoneRef: "alpha", Content: "First", Status: domain.TodoStatusInProgress}},
+		TodosByRef: map[string][]planning.TodoItem{"alpha": {{ID: "todo-1", MilestoneRef: "alpha", Content: "First", Status: domain.TodoStatusInProgress}}},
 		Snapshots: map[domain.ID]chat.Snapshot{
 			"chat-7": {
 				Chat:     domain.Chat{ID: "chat-7", SessionID: "session-1", Title: "Chat"},

@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/planning"
 	"github.com/lkarlslund/koder/internal/store"
 )
 
@@ -15,23 +16,23 @@ func NewSessionControl(st *store.Store) SessionControl {
 	return SessionControl{Store: st}
 }
 
-func (c SessionControl) GetMilestonePlan(ctx context.Context, sessionID domain.ID) (store.MilestonePlan, error) {
+func (c SessionControl) GetMilestonePlan(ctx context.Context, sessionID domain.ID) (planning.Plan, error) {
 	return c.Store.GetMilestonePlan(ctx, sessionID)
 }
 
-func (c SessionControl) SetMilestonePlan(ctx context.Context, sessionID domain.ID, summary string, milestones []store.Milestone) (store.MilestonePlan, error) {
+func (c SessionControl) SetMilestonePlan(ctx context.Context, sessionID domain.ID, summary string, milestones []planning.Milestone) (planning.Plan, error) {
 	return c.Store.SetMilestonePlan(ctx, sessionID, summary, milestones)
 }
 
-func (c SessionControl) AddTodoItems(ctx context.Context, sessionID domain.ID, ref string, items []string) ([]store.TodoItem, error) {
+func (c SessionControl) AddTodoItems(ctx context.Context, sessionID domain.ID, ref string, items []string) ([]planning.TodoItem, error) {
 	return c.Store.AddTodoItems(ctx, sessionID, ref, items)
 }
 
-func (c SessionControl) UpdateTodoItem(ctx context.Context, id domain.ID, status domain.TodoStatus, content string) (store.TodoItem, error) {
+func (c SessionControl) UpdateTodoItem(ctx context.Context, id domain.ID, status domain.TodoStatus, content string) (planning.TodoItem, error) {
 	return c.Store.UpdateTodoItem(ctx, id, status, content)
 }
 
-func (c SessionControl) ListTodos(ctx context.Context, sessionID domain.ID, ref string) ([]store.TodoItem, error) {
+func (c SessionControl) ListTodos(ctx context.Context, sessionID domain.ID, ref string) ([]planning.TodoItem, error) {
 	return c.Store.ListTodos(ctx, sessionID, ref)
 }
 

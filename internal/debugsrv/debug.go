@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/planning"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/version"
 )
@@ -639,7 +640,7 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request, sessionID
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	var todos []store.TodoItem
+	var todos []planning.TodoItem
 	for _, milestone := range plan.Milestones {
 		items, err := s.store.ListTodos(r.Context(), sessionID, milestone.Ref)
 		if err != nil {
@@ -743,7 +744,7 @@ func (s *Server) handleTodos(w http.ResponseWriter, r *http.Request, sessionID d
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	var todos []store.TodoItem
+	var todos []planning.TodoItem
 	for _, milestone := range plan.Milestones {
 		items, err := s.store.ListTodos(r.Context(), sessionID, milestone.Ref)
 		if err != nil {

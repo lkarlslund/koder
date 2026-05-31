@@ -9,7 +9,6 @@ import (
 	"github.com/lkarlslund/koder/internal/chatrole"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/planning"
-	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools"
 )
 
@@ -205,7 +204,7 @@ func (addItemsTool) Execute(ctx context.Context, runtime tools.Runtime, req tool
 	if err := ensureMilestoneRefsAvailable(plan.Milestones, items); err != nil {
 		return tools.Result{}, err
 	}
-	return tools.MilestonePlanResult(store.MilestonePlan{
+	return tools.MilestonePlanResult(planning.Plan{
 		Summary:    plan.Summary,
 		Milestones: appendMilestones(plan.Milestones, items),
 	}), nil
@@ -252,7 +251,7 @@ func (planTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Re
 	if status == "" {
 		status = domain.MilestoneStatusReady
 	}
-	nextMilestones := upsertMilestone(plan.Milestones, store.Milestone{
+	nextMilestones := upsertMilestone(plan.Milestones, planning.Milestone{
 		Ref:    ref,
 		Title:  strings.TrimSpace(req.Args["title"]),
 		Status: status,
@@ -268,9 +267,9 @@ func (planTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Re
 	if err != nil {
 		return tools.Result{}, err
 	}
-	todos := make([]store.TodoItem, 0, len(items))
+	todos := make([]planning.TodoItem, 0, len(items))
 	for _, item := range items {
-		todos = append(todos, store.TodoItem{Content: item, Status: domain.TodoStatusPending})
+		todos = append(todos, planning.TodoItem{Content: item, Status: domain.TodoStatusPending})
 	}
 	return tools.TodoBucketResultWithTitle(ref, strings.TrimSpace(req.Args["title"]), todos, "Updated milestone and appended todo items"), nil
 }
@@ -287,7 +286,7 @@ func (writeTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.R
 	if err := validateCompletedMilestoneTodos(ctx, control, runtime.SessionID, milestones); err != nil {
 		return tools.Result{}, err
 	}
-	return tools.MilestonePlanResult(store.MilestonePlan{
+	return tools.MilestonePlanResult(planning.Plan{
 		Summary:    strings.TrimSpace(req.Args["summary"]),
 		Milestones: milestones,
 	}), nil
@@ -391,7 +390,7 @@ func (planTool) PersistResult(ctx context.Context, runtime tools.Runtime, req to
 	if status == "" {
 		status = domain.MilestoneStatusReady
 	}
-	nextMilestones := upsertMilestone(plan.Milestones, store.Milestone{
+	nextMilestones := upsertMilestone(plan.Milestones, planning.Milestone{
 		Ref:    req.Args["ref"],
 		Title:  strings.TrimSpace(req.Args["title"]),
 		Status: status,
@@ -417,7 +416,7 @@ func (planTool) PersistResult(ctx context.Context, runtime tools.Runtime, req to
 	if err != nil {
 		return nil, err
 	}
-	stored := tools.TodoStoredResult(store.MilestonePlan{Summary: plan.Summary, Milestones: nextMilestones}, req.Args["ref"], todos, "Updated milestone and appended todo items")
+	stored := tools.TodoStoredResult(planning.Plan{Summary: plan.Summary, Milestones: nextMilestones}, req.Args["ref"], todos, "Updated milestone and appended todo items")
 	result.Stored = stored
 	result.Output = tools.FormatTodoOutput(stored)
 	return tools.PersistStandardResult(ctx, runtime, req, result)
@@ -443,8 +442,8 @@ func (writeTool) PersistResult(ctx context.Context, runtime tools.Runtime, req t
 	return tools.PersistStandardResult(ctx, runtime, req, result)
 }
 
-func appendMilestones(existing, added []store.Milestone) []store.Milestone {
-	out := make([]store.Milestone, 0, len(existing)+len(added))
+func appendMilestones(existing, added []planning.Milestone) []planning.Milestone {
+	out := make([]planning.Milestone, 0, len(existing)+len(added))
 	for _, item := range existing {
 		item.Position = len(out)
 		out = append(out, item)
@@ -456,7 +455,7 @@ func appendMilestones(existing, added []store.Milestone) []store.Milestone {
 	return out
 }
 
-func ensureMilestoneRefsAvailable(existing, added []store.Milestone) error {
+func ensureMilestoneRefsAvailable(existing, added []planning.Milestone) error {
 	seenRefs := make(map[string]struct{}, len(existing)+len(added))
 	for _, item := range existing {
 		seenRefs[item.Ref] = struct{}{}
@@ -470,8 +469,8 @@ func ensureMilestoneRefsAvailable(existing, added []store.Milestone) error {
 	return nil
 }
 
-func upsertMilestone(existing []store.Milestone, next store.Milestone) []store.Milestone {
-	out := append([]store.Milestone(nil), existing...)
+func upsertMilestone(existing []planning.Milestone, next planning.Milestone) []planning.Milestone {
+	out := append([]planning.Milestone(nil), existing...)
 	for idx := range out {
 		if out[idx].Ref != next.Ref {
 			continue
@@ -493,10 +492,10 @@ func actorChatFromRuntime(runtime tools.Runtime) domain.Chat {
 	}
 }
 
-func updatedMilestonePlan(plan store.MilestonePlan, req tools.Request, actor domain.Chat) (store.MilestonePlan, error) {
+func updatedMilestonePlan(plan planning.Plan, req tools.Request, actor domain.Chat) (planning.Plan, error) {
 	ref := req.Args["ref"]
 	status := domain.MilestoneStatus(req.Args["status"])
-	milestones := append([]store.Milestone(nil), plan.Milestones...)
+	milestones := append([]planning.Milestone(nil), plan.Milestones...)
 	found := false
 	for idx := range milestones {
 		if milestones[idx].Ref != ref {
@@ -504,7 +503,7 @@ func updatedMilestonePlan(plan store.MilestonePlan, req tools.Request, actor dom
 		}
 		found = true
 		if err := validateMilestoneOwner(milestones[idx], status, actor); err != nil {
-			return store.MilestonePlan{}, err
+			return planning.Plan{}, err
 		}
 		milestones[idx].Status = status
 		applyMilestoneOwner(&milestones[idx], status, actor)
@@ -517,18 +516,18 @@ func updatedMilestonePlan(plan store.MilestonePlan, req tools.Request, actor dom
 		break
 	}
 	if !found {
-		return store.MilestonePlan{}, fmt.Errorf("milestone %q not found", ref)
+		return planning.Plan{}, fmt.Errorf("milestone %q not found", ref)
 	}
 	if err := planning.ValidateMilestoneProgress(milestones); err != nil {
-		return store.MilestonePlan{}, err
+		return planning.Plan{}, err
 	}
-	return store.MilestonePlan{
+	return planning.Plan{
 		Summary:    plan.Summary,
 		Milestones: milestones,
 	}, nil
 }
 
-func validateMilestoneOwner(milestone store.Milestone, next domain.MilestoneStatus, actor domain.Chat) error {
+func validateMilestoneOwner(milestone planning.Milestone, next domain.MilestoneStatus, actor domain.Chat) error {
 	if actor.ID == "" || actor.WorkflowRole == chatrole.Orchestrator {
 		return nil
 	}
@@ -544,7 +543,7 @@ func validateMilestoneOwner(milestone store.Milestone, next domain.MilestoneStat
 	return nil
 }
 
-func applyMilestoneOwner(milestone *store.Milestone, status domain.MilestoneStatus, actor domain.Chat) {
+func applyMilestoneOwner(milestone *planning.Milestone, status domain.MilestoneStatus, actor domain.Chat) {
 	switch status {
 	case domain.MilestoneStatusExecuting:
 		if actor.ID != "" && actor.WorkflowRole != chatrole.Orchestrator {
@@ -556,7 +555,7 @@ func applyMilestoneOwner(milestone *store.Milestone, status domain.MilestoneStat
 	}
 }
 
-func validateCompletedMilestoneTodos(ctx context.Context, control planning.Control, sessionID domain.ID, milestones []store.Milestone) error {
+func validateCompletedMilestoneTodos(ctx context.Context, control planning.Control, sessionID domain.ID, milestones []planning.Milestone) error {
 	for _, milestone := range milestones {
 		if milestone.Status != domain.MilestoneStatusCompleted {
 			continue

@@ -10,6 +10,7 @@ import (
 
 	"github.com/lkarlslund/koder/internal/attachment"
 	"github.com/lkarlslund/koder/internal/domain"
+	"github.com/lkarlslund/koder/internal/planning"
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/reference"
 	"github.com/lkarlslund/koder/internal/store"
@@ -301,7 +302,7 @@ func openTestStore(t *testing.T) *store.Store {
 	return st
 }
 
-func createSessionWithPlan(t *testing.T, st *store.Store) (domain.Session, domain.Chat, store.MilestonePlan) {
+func createSessionWithPlan(t *testing.T, st *store.Store) (domain.Session, domain.Chat, planning.Plan) {
 	t.Helper()
 	ctx := context.Background()
 	session, err := st.CreateSession(ctx, "test", "provider", "model", nil)
@@ -312,7 +313,7 @@ func createSessionWithPlan(t *testing.T, st *store.Store) (domain.Session, domai
 	if err != nil {
 		t.Fatal(err)
 	}
-	plan, err := st.SetMilestonePlan(ctx, session.ID, "Ship it", []store.Milestone{
+	plan, err := st.SetMilestonePlan(ctx, session.ID, "Ship it", []planning.Milestone{
 		{Ref: "alpha", Title: "Alpha", Status: domain.MilestoneStatusExecuting, Position: 0},
 		{Ref: "beta", Title: "Beta", Status: domain.MilestoneStatusPending, Position: 1},
 	})

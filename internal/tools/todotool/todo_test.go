@@ -179,7 +179,7 @@ func TestTodoScopedChatSeesAndUpdatesOnlyAssignedTodo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.SetMilestonePlan(ctx, session.ID, "Ship it", []store.Milestone{
+	if _, err := st.SetMilestonePlan(ctx, session.ID, "Ship it", []planning.Milestone{
 		{Ref: "implement", Title: "Implement", Status: domain.MilestoneStatusExecuting},
 	}); err != nil {
 		t.Fatal(err)

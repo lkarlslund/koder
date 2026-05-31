@@ -41,24 +41,24 @@ type Event struct {
 
 // State is the browser app UI snapshot consumed by browser clients.
 type State struct {
-	Session       domain.Session              `json:"session"`
-	Sessions      []domain.Session            `json:"sessions"`
-	Chats         []domain.Chat               `json:"chats"`
-	ChatStatuses  []ChatSidebarStatus         `json:"chat_statuses"`
-	ActiveChatID  domain.ID                   `json:"active_chat_id"`
-	Permissions   PermissionsState            `json:"permissions"`
-	Snapshot      chat.Snapshot               `json:"snapshot"`
-	Snapshots     map[domain.ID]chat.Snapshot `json:"snapshots"`
-	Milestones    store.MilestonePlan         `json:"milestones"`
-	Todos         []store.TodoItem            `json:"todos"`
-	TodosByRef    map[string][]store.TodoItem `json:"todos_by_milestone"`
-	Workspace     workspacepkg.Status         `json:"workspace_status"`
-	ContextWindow int                         `json:"context_window"`
-	ModelInfo     ModelInfo                   `json:"model_info"`
-	Theme         string                      `json:"theme"`
-	ProjectRoot   string                      `json:"project_root"`
-	RestartNeeded bool                        `json:"restart_needed"`
-	Error         string                      `json:"error,omitempty"`
+	Session       domain.Session                 `json:"session"`
+	Sessions      []domain.Session               `json:"sessions"`
+	Chats         []domain.Chat                  `json:"chats"`
+	ChatStatuses  []ChatSidebarStatus            `json:"chat_statuses"`
+	ActiveChatID  domain.ID                      `json:"active_chat_id"`
+	Permissions   PermissionsState               `json:"permissions"`
+	Snapshot      chat.Snapshot                  `json:"snapshot"`
+	Snapshots     map[domain.ID]chat.Snapshot    `json:"snapshots"`
+	Milestones    planning.Plan                  `json:"milestones"`
+	Todos         []planning.TodoItem            `json:"todos"`
+	TodosByRef    map[string][]planning.TodoItem `json:"todos_by_milestone"`
+	Workspace     workspacepkg.Status            `json:"workspace_status"`
+	ContextWindow int                            `json:"context_window"`
+	ModelInfo     ModelInfo                      `json:"model_info"`
+	Theme         string                         `json:"theme"`
+	ProjectRoot   string                         `json:"project_root"`
+	RestartNeeded bool                           `json:"restart_needed"`
+	Error         string                         `json:"error,omitempty"`
 }
 
 // ChatSidebarStatus is the browser app run state for one chat in the sidebar.
@@ -301,9 +301,9 @@ type Controller struct {
 	unsubs                     map[domain.ID]func()
 	execUnsubs                 map[domain.ID]func()
 	snapshots                  map[domain.ID]chat.Snapshot
-	milestone                  store.MilestonePlan
-	todos                      []store.TodoItem
-	todosByRef                 map[string][]store.TodoItem
+	milestone                  planning.Plan
+	todos                      []planning.TodoItem
+	todosByRef                 map[string][]planning.TodoItem
 	workspace                  workspacepkg.Status
 	theme                      string
 	lastErr                    string
@@ -724,30 +724,30 @@ func (c *Controller) PollChat(ctx context.Context, sessionID, chatID domain.ID) 
 	return c.agent.PollChat(ctx, sessionID, chatID)
 }
 
-func (c *Controller) GetMilestonePlan(ctx context.Context, sessionID domain.ID) (store.MilestonePlan, error) {
+func (c *Controller) GetMilestonePlan(ctx context.Context, sessionID domain.ID) (planning.Plan, error) {
 	if c.agent != nil {
 		if owner, err := c.agent.LoadSession(ctx, sessionID); err == nil {
 			return owner.GetMilestonePlan(ctx, sessionID)
 		}
 	}
-	return store.MilestonePlan{}, fmt.Errorf("no live session owner")
+	return planning.Plan{}, fmt.Errorf("no live session owner")
 }
 
-func (c *Controller) SetMilestonePlan(ctx context.Context, sessionID domain.ID, summary string, milestones []store.Milestone) (store.MilestonePlan, error) {
+func (c *Controller) SetMilestonePlan(ctx context.Context, sessionID domain.ID, summary string, milestones []planning.Milestone) (planning.Plan, error) {
 	if c.agent != nil {
 		if owner, err := c.agent.LoadSession(ctx, sessionID); err == nil {
 			plan, err := owner.SetMilestonePlan(ctx, sessionID, summary, milestones)
 			if err != nil {
-				return store.MilestonePlan{}, err
+				return planning.Plan{}, err
 			}
 			c.refreshPlanningFromOwner(owner)
 			return plan, nil
 		}
 	}
-	return store.MilestonePlan{}, fmt.Errorf("no live session owner")
+	return planning.Plan{}, fmt.Errorf("no live session owner")
 }
 
-func (c *Controller) AddTodoItems(ctx context.Context, sessionID domain.ID, milestoneRef string, contents []string) ([]store.TodoItem, error) {
+func (c *Controller) AddTodoItems(ctx context.Context, sessionID domain.ID, milestoneRef string, contents []string) ([]planning.TodoItem, error) {
 	if c.agent != nil {
 		if owner, err := c.agent.LoadSession(ctx, sessionID); err == nil {
 			created, err := owner.AddTodoItems(ctx, sessionID, milestoneRef, contents)
@@ -761,7 +761,7 @@ func (c *Controller) AddTodoItems(ctx context.Context, sessionID domain.ID, mile
 	return nil, fmt.Errorf("no live session owner")
 }
 
-func (c *Controller) UpdateTodoItem(ctx context.Context, todoID domain.ID, status domain.TodoStatus, content string) (store.TodoItem, error) {
+func (c *Controller) UpdateTodoItem(ctx context.Context, todoID domain.ID, status domain.TodoStatus, content string) (planning.TodoItem, error) {
 	c.mu.RLock()
 	sessionID := c.session.ID
 	c.mu.RUnlock()
@@ -769,16 +769,16 @@ func (c *Controller) UpdateTodoItem(ctx context.Context, todoID domain.ID, statu
 		if owner, err := c.agent.LoadSession(ctx, sessionID); err == nil {
 			updated, err := owner.UpdateTodoItem(ctx, todoID, status, content)
 			if err != nil {
-				return store.TodoItem{}, err
+				return planning.TodoItem{}, err
 			}
 			c.refreshPlanningFromOwner(owner)
 			return updated, nil
 		}
 	}
-	return store.TodoItem{}, fmt.Errorf("no live session owner")
+	return planning.TodoItem{}, fmt.Errorf("no live session owner")
 }
 
-func (c *Controller) ListTodos(ctx context.Context, sessionID domain.ID, milestoneRef string) ([]store.TodoItem, error) {
+func (c *Controller) ListTodos(ctx context.Context, sessionID domain.ID, milestoneRef string) ([]planning.TodoItem, error) {
 	if c.agent != nil {
 		if owner, err := c.agent.LoadSession(ctx, sessionID); err == nil {
 			return owner.ListTodos(ctx, sessionID, milestoneRef)
@@ -1645,12 +1645,12 @@ func (c *Controller) sessionInWorkspace(session domain.Session) bool {
 	return session.ID != ""
 }
 
-func (c *Controller) planningState(ctx context.Context, sessionID domain.ID) (store.MilestonePlan, []store.TodoItem, map[string][]store.TodoItem) {
+func (c *Controller) planningState(ctx context.Context, sessionID domain.ID) (planning.Plan, []planning.TodoItem, map[string][]planning.TodoItem) {
 	plan, err := c.store.GetMilestonePlan(ctx, sessionID)
 	if err != nil {
-		return store.MilestonePlan{}, nil, nil
+		return planning.Plan{}, nil, nil
 	}
-	todosByRef := make(map[string][]store.TodoItem, len(plan.Milestones))
+	todosByRef := make(map[string][]planning.TodoItem, len(plan.Milestones))
 	for _, milestone := range plan.Milestones {
 		ref := strings.TrimSpace(milestone.Ref)
 		if ref == "" {
@@ -1670,11 +1670,11 @@ func (c *Controller) planningState(ctx context.Context, sessionID domain.ID) (st
 	return plan, slices.Clone(todosByRef[active.Ref]), todosByRef
 }
 
-func cloneTodosByRef(in map[string][]store.TodoItem) map[string][]store.TodoItem {
+func cloneTodosByRef(in map[string][]planning.TodoItem) map[string][]planning.TodoItem {
 	if len(in) == 0 {
 		return nil
 	}
-	out := make(map[string][]store.TodoItem, len(in))
+	out := make(map[string][]planning.TodoItem, len(in))
 	for ref, todos := range in {
 		out[ref] = slices.Clone(todos)
 	}
