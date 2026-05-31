@@ -657,20 +657,8 @@ func (r *Chat) Interrupt() {
 	r.Cancel()
 }
 
-func (r *Chat) Approve(approvalID domain.ID) {
-	r.inbox <- approveCmd{toolCallID: fmt.Sprint(approvalID)}
-}
-
 func (r *Chat) ApproveTool(toolCallID string) {
 	r.inbox <- approveCmd{toolCallID: strings.TrimSpace(toolCallID)}
-}
-
-func (r *Chat) ApproveWithRule(approvalID domain.ID, rule domain.PermissionOverride) {
-	r.inbox <- approveCmd{toolCallID: fmt.Sprint(approvalID), rule: &rule}
-}
-
-func (r *Chat) Deny(approvalID domain.ID) {
-	r.inbox <- denyCmd{toolCallID: fmt.Sprint(approvalID)}
 }
 
 func (r *Chat) DenyTool(toolCallID string) {
@@ -680,7 +668,7 @@ func (r *Chat) DenyTool(toolCallID string) {
 func (r *Chat) Compact() error {
 	runner := r.deps.Compact
 	if runner == nil {
-		return fmt.Errorf("compaction is not supported by runner")
+		return fmt.Errorf("compaction service is not configured")
 	}
 	r.mu.Lock()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1690,19 +1678,16 @@ func (r *Chat) runItem(ctx context.Context, item domain.QueuedInput) {
 		r.runTurnLoop(ctx, runner, r.turnStateForInput(item), item, note)
 		return
 	}
-	err := fmt.Errorf("turn loop is not supported by runner")
-	if err != nil {
-		r.mu.Lock()
-		r.active = false
-		r.cancel = nil
-		r.status = StatusErrored
-		r.statusText = err.Error()
-		r.mu.Unlock()
-		evt := domain.Event{Kind: domain.EventKindError, Err: err}
-		r.broadcast(r.snapshotUpdateFlags(&evt, false, false, true, false, false))
-		r.maybeDispatchNext()
-		return
-	}
+	err := fmt.Errorf("turn loop service is not configured")
+	r.mu.Lock()
+	r.active = false
+	r.cancel = nil
+	r.status = StatusErrored
+	r.statusText = err.Error()
+	r.mu.Unlock()
+	evt := domain.Event{Kind: domain.EventKindError, Err: err}
+	r.broadcast(r.snapshotUpdateFlags(&evt, false, false, true, false, false))
+	r.maybeDispatchNext()
 }
 
 func (r *Chat) runTurnLoop(ctx context.Context, runner TurnLoopService, turn *TurnState, item domain.QueuedInput, note string) {

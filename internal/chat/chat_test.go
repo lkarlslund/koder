@@ -1064,7 +1064,7 @@ func TestRuntimeApproveStartsApprovalStream(t *testing.T) {
 	updates, unsub := rt.Subscribe()
 	defer unsub()
 
-	rt.Approve("approval-42")
+	rt.ApproveTool("approval-42")
 
 	deadline := time.After(2 * time.Second)
 	for {

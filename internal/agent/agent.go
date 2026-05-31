@@ -2333,7 +2333,7 @@ func parseToolCall(text string) (*tools.Request, string) {
 }
 
 func (e *Engine) autoCompactAtTurnBoundary(ctx context.Context, session domain.Session, chat domain.Chat, turn *chatpkg.TurnState, client *provider.Client, messages []provider.Message, out chan<- domain.Event) (bool, error) {
-	threshold := e.autoCompactThreshold(chat.ProviderID)
+	threshold := e.autoCompactThreshold()
 	used, ok := e.autoCompactUsagePercent(chat, messages)
 	if !ok || used < threshold {
 		return false, nil
@@ -2341,17 +2341,13 @@ func (e *Engine) autoCompactAtTurnBoundary(ctx context.Context, session domain.S
 	if out != nil {
 		out <- domain.Event{Kind: domain.EventKindStatus, Text: fmt.Sprintf("Auto-compacting at ~%d%% context used", used)}
 	}
-	if turn != nil {
-		if err := e.compactTurnSession(ctx, session, chat, turn, client, "auto", out); err != nil {
-			return false, err
-		}
-	} else if err := e.compactSession(ctx, session, chat.ID, client, "auto", out); err != nil {
+	if err := e.compactTurnSession(ctx, session, chat, turn, client, "auto", out); err != nil {
 		return false, err
 	}
 	return true, nil
 }
 
-func (e *Engine) autoCompactThreshold(providerID domain.ID) int {
+func (e *Engine) autoCompactThreshold() int {
 	return max(1, e.cfg.AutoCompactAt)
 }
 
@@ -2374,18 +2370,7 @@ func (e *Engine) knownContextUsagePercent(chat domain.Chat) (int, bool) {
 	if !e.cfg.HasUsableProvider(chat.ProviderID) {
 		return 0, false
 	}
-	contextWindow := e.cfg.ContextWindow(chat.ProviderID, chat.ModelID)
-	if contextWindow <= 0 || chat.LastKnownContextTokens <= 0 {
-		return 0, false
-	}
-	percent := (chat.LastKnownContextTokens * 100) / contextWindow
-	if percent < 0 {
-		percent = 0
-	}
-	if percent > 100 {
-		percent = 100
-	}
-	return percent, true
+	return contextUsagePercent(chat.LastKnownContextTokens, e.cfg.ContextWindow(chat.ProviderID, chat.ModelID))
 }
 
 func (e *Engine) estimateRequestUsagePercent(chat domain.Chat, messages []provider.Message) (int, bool) {
@@ -2404,14 +2389,14 @@ func (e *Engine) estimateRequestUsagePercent(chat domain.Chat, messages []provid
 	if estimatedTokens <= 0 {
 		return 0, false
 	}
-	percent := (estimatedTokens * 100) / contextWindow
-	if percent < 0 {
-		percent = 0
+	return contextUsagePercent(estimatedTokens, contextWindow)
+}
+
+func contextUsagePercent(tokens, contextWindow int) (int, bool) {
+	if tokens <= 0 || contextWindow <= 0 {
+		return 0, false
 	}
-	if percent > 100 {
-		percent = 100
-	}
-	return percent, true
+	return min(100, (tokens*100)/contextWindow), true
 }
 
 func (e *Engine) compactSession(ctx context.Context, session domain.Session, chatID domain.ID, client *provider.Client, trigger string, out chan<- domain.Event) error {
@@ -2520,7 +2505,7 @@ func (e *Engine) compactSession(ctx context.Context, session domain.Session, cha
 
 func (e *Engine) compactTurnSession(ctx context.Context, session domain.Session, chat domain.Chat, turn *chatpkg.TurnState, client *provider.Client, trigger string, out chan<- domain.Event) error {
 	if turn == nil {
-		return e.compactSession(ctx, session, chat.ID, client, trigger, out)
+		return fmt.Errorf("turn state is required")
 	}
 	timeline := turn.Timeline()
 	messages, firstKeptItemID, err := e.buildCompactionConversationForTimeline(session, chat, timeline)
