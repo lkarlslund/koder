@@ -181,7 +181,7 @@ func Default() Config {
 			Backend: "pebble",
 		},
 		UI: UI{
-			Theme:        "tokyonight",
+			Theme:        "dark",
 			AutoContinue: true,
 		},
 	}

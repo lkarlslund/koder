@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/lkarlslund/koder/internal/domain"
-	"github.com/lkarlslund/koder/internal/sessionctx"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tokenestimate"
 )
@@ -135,7 +134,7 @@ func (s *ChatState) CurrentContextSize() domain.ContextUsage {
 	if s == nil {
 		return domain.ContextUsage{}
 	}
-	tailEstimate, anchored := sessionctx.EstimateTimelineTailTokens(s.SnapshotTimeline())
+	tailEstimate, anchored := estimateTimelineTailTokens(s.SnapshotTimeline())
 	if tailEstimate < 0 {
 		tailEstimate = 0
 	}
@@ -155,6 +154,76 @@ func (s *ChatState) CurrentContextSize() domain.ContextUsage {
 		usage.Estimated = true
 	}
 	return usage
+}
+
+func estimateTimelineTailTokens(items []domain.TimelineItem) (int, bool) {
+	anchorIdx, ok := latestTimelineContextAnchor(items)
+	if !ok {
+		return 0, false
+	}
+	total := 0
+	for idx := anchorIdx + 1; idx < len(items); idx++ {
+		total += estimateTimelineItemTokens(items[idx])
+	}
+	return total, true
+}
+
+func latestTimelineContextAnchor(items []domain.TimelineItem) (int, bool) {
+	for idx := len(items) - 1; idx >= 0; idx-- {
+		switch payload := items[idx].Content.(type) {
+		case domain.AssistantMessage:
+			if payload.Usage != nil && payload.Usage.Normalized().HasAnyTokens() {
+				return idx, true
+			}
+		case domain.Compaction:
+			if payload.Status == "completed" && payload.AfterContextTokens > 0 {
+				return idx, true
+			}
+		}
+	}
+	return 0, false
+}
+
+func estimateTimelineItemTokens(item domain.TimelineItem) int {
+	var texts []string
+	switch payload := item.Content.(type) {
+	case domain.UserMessage:
+		if text := strings.TrimSpace(payload.Text); text != "" {
+			texts = append(texts, string(domain.MessageRoleUser), text)
+		}
+		for _, attachment := range payload.Attachments {
+			if attachment.Name != "" {
+				texts = append(texts, attachment.Name)
+			}
+		}
+		for _, ref := range payload.References {
+			if ref.Display != "" {
+				texts = append(texts, ref.Display)
+			}
+		}
+	case domain.AssistantMessage:
+		texts = append(texts, string(domain.MessageRoleAssistant))
+		if text := strings.TrimSpace(payload.Reasoning.Text); text != "" {
+			texts = append(texts, text)
+		}
+		if text := strings.TrimSpace(payload.Text); text != "" {
+			texts = append(texts, text)
+		}
+		for _, tool := range payload.Tools {
+			texts = append(texts, string(tool.Tool), string(tool.ToolCallID))
+			if tool.Result != nil {
+				texts = append(texts, tool.Result.Text)
+			}
+			if tool.Error != nil {
+				texts = append(texts, tool.Error.Message)
+			}
+		}
+	case domain.Notice:
+		texts = append(texts, payload.Text)
+	case domain.Compaction:
+		texts = append(texts, payload.Summary)
+	}
+	return tokenestimate.Text(strings.Join(texts, "\n"))
 }
 
 // Timeline returns the ordered timeline records for the current chat.
