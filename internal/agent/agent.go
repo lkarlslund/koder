@@ -2026,7 +2026,7 @@ func (e *Engine) toolRuntime(session domain.Session, chat domain.Chat) tools.Run
 		DefaultSandboxProfile: strings.TrimSpace(e.cfg.Permissions.Profile),
 	}
 	if owner := e.loadedSession(session.ID); owner != nil {
-		runtime.SessionControl = owner
+		runtime.SessionControl = owner.PlanningForChat(chat)
 		runtime.TaskControl = owner
 	}
 	return runtime

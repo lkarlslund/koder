@@ -734,6 +734,134 @@ func (s *Session) AddTask(ctx context.Context, sessionID domain.ID, body string,
 	return task, nil
 }
 
+func (s *Session) PlanningForChat(chat domain.Chat) planning.Control {
+	return scopedPlanning{session: s, chat: chat}
+}
+
+type scopedPlanning struct {
+	session *Session
+	chat    domain.Chat
+}
+
+func (p scopedPlanning) GetMilestonePlan(ctx context.Context, sessionID domain.ID) (planning.Plan, error) {
+	plan, err := p.session.GetMilestonePlan(ctx, sessionID)
+	if err != nil {
+		return planning.Plan{}, err
+	}
+	if ref := assignedMilestoneRef(p.chat); ref != "" {
+		return planning.PlanForRef(plan, ref), nil
+	}
+	return plan, nil
+}
+
+func (p scopedPlanning) SetMilestonePlan(ctx context.Context, sessionID domain.ID, summary string, milestones []planning.Milestone) (planning.Plan, error) {
+	ref := assignedMilestoneRef(p.chat)
+	if ref == "" {
+		return p.session.SetMilestonePlan(ctx, sessionID, summary, milestones)
+	}
+	if len(milestones) != 1 || milestones[0].Ref != ref {
+		return planning.Plan{}, fmt.Errorf("chat is scoped to milestone %q", ref)
+	}
+	current, err := p.session.GetMilestonePlan(ctx, sessionID)
+	if err != nil {
+		return planning.Plan{}, err
+	}
+	found := false
+	for idx := range current.Milestones {
+		if current.Milestones[idx].Ref == ref {
+			current.Milestones[idx] = milestones[0]
+			found = true
+			break
+		}
+	}
+	if !found {
+		return planning.Plan{}, fmt.Errorf("milestone %q not found", ref)
+	}
+	return p.session.SetMilestonePlan(ctx, sessionID, current.Summary, current.Milestones)
+}
+
+func (p scopedPlanning) AddTodoItems(ctx context.Context, sessionID domain.ID, milestoneRef string, contents []string) ([]planning.TodoItem, error) {
+	if assignedTodoRef(p.chat) != "" {
+		return nil, fmt.Errorf("chat is scoped to todo %q", assignedTodoRef(p.chat))
+	}
+	ref, err := p.allowedMilestoneRef(milestoneRef)
+	if err != nil {
+		return nil, err
+	}
+	return p.session.AddTodoItems(ctx, sessionID, ref, contents)
+}
+
+func (p scopedPlanning) UpdateTodoItem(ctx context.Context, todoID domain.ID, status domain.TodoStatus, content string) (planning.TodoItem, error) {
+	if assigned := assignedTodoRef(p.chat); assigned != "" && todoID != assigned {
+		return planning.TodoItem{}, fmt.Errorf("chat is scoped to todo %q", assigned)
+	}
+	if ref := assignedMilestoneRef(p.chat); ref != "" {
+		todos, err := p.session.ListTodos(ctx, p.chat.SessionID, ref)
+		if err != nil {
+			return planning.TodoItem{}, err
+		}
+		found := false
+		for _, item := range todos {
+			if item.ID == todoID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return planning.TodoItem{}, fmt.Errorf("chat is scoped to milestone %q", ref)
+		}
+	}
+	updated, err := p.session.UpdateTodoItem(ctx, todoID, status, content)
+	if err != nil {
+		return planning.TodoItem{}, err
+	}
+	return updated, nil
+}
+
+func (p scopedPlanning) ListTodos(ctx context.Context, sessionID domain.ID, milestoneRef string) ([]planning.TodoItem, error) {
+	ref, err := p.allowedMilestoneRef(milestoneRef)
+	if err != nil {
+		return nil, err
+	}
+	todos, err := p.session.ListTodos(ctx, sessionID, ref)
+	if err != nil {
+		return nil, err
+	}
+	if assigned := assignedTodoRef(p.chat); assigned != "" {
+		for _, item := range todos {
+			if item.ID == assigned {
+				return []planning.TodoItem{item}, nil
+			}
+		}
+		return nil, nil
+	}
+	return todos, nil
+}
+
+func (p scopedPlanning) allowedMilestoneRef(requested string) (string, error) {
+	requested = strings.TrimSpace(requested)
+	assigned := assignedMilestoneRef(p.chat)
+	if assigned == "" {
+		return requested, nil
+	}
+	if requested == "" || requested == assigned {
+		return assigned, nil
+	}
+	return "", fmt.Errorf("chat is scoped to milestone %q", assigned)
+}
+
+func assignedMilestoneRef(chat domain.Chat) string {
+	assigned := strings.TrimSpace(chat.ActiveMilestoneRef)
+	if assigned == "" {
+		assigned = strings.TrimSpace(chat.AssignedTodoBucketRef)
+	}
+	return assigned
+}
+
+func assignedTodoRef(chat domain.Chat) domain.ID {
+	return domain.ID(strings.TrimSpace(string(chat.AssignedTodoRef)))
+}
+
 func (s *Session) requireSession(sessionID domain.ID) error {
 	if s == nil {
 		return fmt.Errorf("session is required")
