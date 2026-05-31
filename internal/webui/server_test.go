@@ -1110,6 +1110,14 @@ func TestIndexServesHTML(t *testing.T) {
 	if !strings.Contains(fullPage, `showToast`) {
 		t.Fatalf("expected toast error path")
 	}
+	if !strings.Contains(document, `title="Save settings"`) ||
+		!strings.Contains(document, `title="Save provider"`) ||
+		!strings.Contains(document, `title="Save session"`) ||
+		strings.Contains(document, `>Save</button>`) ||
+		strings.Contains(document, `>Cancel</button>`) ||
+		strings.Contains(document, `>Close</button>`) {
+		t.Fatalf("expected modals to use header icon actions instead of footer Save/Cancel buttons")
+	}
 }
 
 func TestFaviconDoesNot404(t *testing.T) {

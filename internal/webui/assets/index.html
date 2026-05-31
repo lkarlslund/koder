@@ -466,7 +466,10 @@
     <section class="bg-body border rounded shadow" style="width: min(560px, 100%);">
       <header class="d-flex align-items-center justify-content-between gap-3 p-3 border-bottom">
         <div class="fw-semibold" x-text="sessionEditorMode === 'edit' ? 'Edit Session' : 'New Session'"></div>
-        <button type="button" class="btn btn-sm btn-outline-secondary" @click="closeSessionEditor()"><i class="bi bi-x-lg"></i></button>
+        <div class="d-flex align-items-center gap-2">
+          <button type="button" class="btn btn-sm btn-primary" title="Save session" @click="saveSessionEditor()"><i class="bi bi-check-lg"></i></button>
+          <button type="button" class="btn btn-sm btn-outline-secondary" title="Close" @click="closeSessionEditor()"><i class="bi bi-x-lg"></i></button>
+        </div>
       </header>
       <div class="p-3 d-grid gap-3">
         <label class="form-label mb-0">
@@ -481,10 +484,6 @@
           </div>
         </label>
       </div>
-      <footer class="d-flex justify-content-end gap-2 p-3 border-top">
-        <button type="button" class="btn btn-outline-secondary" @click="closeSessionEditor()">Cancel</button>
-        <button type="button" class="btn btn-primary" @click="saveSessionEditor()">Save</button>
-      </footer>
     </section>
   </div>
 
@@ -495,7 +494,13 @@
           <div class="fw-semibold"><i class="bi bi-gear me-1"></i> Settings</div>
           <div class="small text-secondary" x-text="settings?.compaction?.current_selection_text || ''"></div>
         </div>
-        <button type="button" class="btn btn-sm btn-outline-secondary" @click="closeSettingsDialog()"><i class="bi bi-x-lg"></i></button>
+        <div class="d-flex align-items-center gap-2">
+          <button type="button" class="btn btn-sm btn-primary" title="Save settings" @click="saveSettings()" :disabled="settingsLoading || settingsSaving">
+            <span class="spinner-border spinner-border-sm" x-show="settingsSaving"></span>
+            <i class="bi bi-check-lg" x-show="!settingsSaving"></i>
+          </button>
+          <button type="button" class="btn btn-sm btn-outline-secondary" title="Close" @click="closeSettingsDialog()"><i class="bi bi-x-lg"></i></button>
+        </div>
       </header>
       <div class="settings-body">
         <aside class="settings-tabs border-end">
@@ -753,12 +758,6 @@
               <div class="alert mt-3 mb-0" x-show="settingsStatus" :class="settingsStatusKind === 'success' ? 'alert-success' : (settingsStatusKind === 'danger' ? 'alert-danger' : 'alert-secondary')" x-text="settingsStatus"></div>
             </div>
           </template>
-          <footer class="d-flex justify-content-end gap-2 mt-3 pt-3 border-top">
-            <button type="submit" class="btn btn-primary" :disabled="settingsLoading || settingsSaving">
-              <span class="spinner-border spinner-border-sm me-1" x-show="settingsSaving"></span>Save
-            </button>
-            <button type="button" class="btn btn-outline-secondary" @click="closeSettingsDialog()">Close</button>
-          </footer>
         </form>
       </div>
     </section>
@@ -771,7 +770,17 @@
           <div class="fw-semibold"><i class="bi bi-plug me-1"></i> Provider</div>
           <div class="small text-secondary" x-text="providerDraft?.provider_id || 'New provider'"></div>
         </div>
-        <button type="button" class="btn btn-sm btn-outline-secondary" @click="closeProviderEditor()"><i class="bi bi-x-lg"></i></button>
+        <div class="d-flex align-items-center gap-2">
+          <button type="button" class="btn btn-sm btn-outline-secondary" title="Test provider" @click="testProvider()" :disabled="!providerDraft || providerTesting">
+            <span class="spinner-border spinner-border-sm" x-show="providerTesting"></span>
+            <i class="bi bi-plug" x-show="!providerTesting"></i>
+          </button>
+          <button type="button" class="btn btn-sm btn-primary" title="Save provider" @click="saveProvider()" :disabled="!providerDraft || providerSaving">
+            <span class="spinner-border spinner-border-sm" x-show="providerSaving"></span>
+            <i class="bi bi-check-lg" x-show="!providerSaving"></i>
+          </button>
+          <button type="button" class="btn btn-sm btn-outline-secondary" title="Close" @click="closeProviderEditor()"><i class="bi bi-x-lg"></i></button>
+        </div>
       </header>
       <form class="settings-item-form p-3" @submit.prevent="saveProvider()">
         <template x-if="providerDraft">
@@ -830,15 +839,6 @@
             </div>
           </div>
         </template>
-        <footer class="d-flex justify-content-end gap-2 mt-3 pt-3 border-top">
-          <button type="button" class="btn btn-outline-secondary" @click="testProvider()" :disabled="!providerDraft || providerTesting">
-            <span class="spinner-border spinner-border-sm me-1" x-show="providerTesting"></span>Test
-          </button>
-          <button type="submit" class="btn btn-primary" :disabled="!providerDraft || providerSaving">
-            <span class="spinner-border spinner-border-sm me-1" x-show="providerSaving"></span>Save
-          </button>
-          <button type="button" class="btn btn-outline-secondary" @click="closeProviderEditor()">Cancel</button>
-        </footer>
       </form>
     </section>
   </div>
@@ -850,7 +850,10 @@
           <div class="fw-semibold"><i class="bi bi-cpu me-1"></i> Model</div>
           <div class="small text-secondary" x-text="modelConfigDraft?.provider_id || 'New model'"></div>
         </div>
-        <button type="button" class="btn btn-sm btn-outline-secondary" @click="closeModelConfigEditor()"><i class="bi bi-x-lg"></i></button>
+        <div class="d-flex align-items-center gap-2">
+          <button type="button" class="btn btn-sm btn-primary" title="Save model" @click="saveModelConfig()" :disabled="!modelConfigDraft"><i class="bi bi-check-lg"></i></button>
+          <button type="button" class="btn btn-sm btn-outline-secondary" title="Close" @click="closeModelConfigEditor()"><i class="bi bi-x-lg"></i></button>
+        </div>
       </header>
       <form class="settings-item-form p-3" @submit.prevent="saveModelConfig()">
         <template x-if="modelConfigDraft">
@@ -889,10 +892,6 @@
             </div>
           </div>
         </template>
-        <footer class="d-flex justify-content-end gap-2 mt-3 pt-3 border-top">
-          <button type="submit" class="btn btn-primary" :disabled="!modelConfigDraft">Save</button>
-          <button type="button" class="btn btn-outline-secondary" @click="closeModelConfigEditor()">Cancel</button>
-        </footer>
       </form>
     </section>
   </div>
@@ -904,7 +903,10 @@
           <div class="fw-semibold"><i class="bi bi-hdd-network me-1"></i> MCP server</div>
           <div class="small text-secondary" x-text="mcpDraft?.id || 'New MCP server'"></div>
         </div>
-        <button type="button" class="btn btn-sm btn-outline-secondary" @click="closeMCPEditor()"><i class="bi bi-x-lg"></i></button>
+        <div class="d-flex align-items-center gap-2">
+          <button type="button" class="btn btn-sm btn-primary" title="Save MCP server" @click="saveMCPServer()" :disabled="!mcpDraft"><i class="bi bi-check-lg"></i></button>
+          <button type="button" class="btn btn-sm btn-outline-secondary" title="Close" @click="closeMCPEditor()"><i class="bi bi-x-lg"></i></button>
+        </div>
       </header>
       <form class="settings-item-form p-3" @submit.prevent="saveMCPServer()">
         <template x-if="mcpDraft">
@@ -950,10 +952,6 @@
             </div>
           </div>
         </template>
-        <footer class="d-flex justify-content-end gap-2 mt-3 pt-3 border-top">
-          <button type="submit" class="btn btn-primary" :disabled="!mcpDraft">Save</button>
-          <button type="button" class="btn btn-outline-secondary" @click="closeMCPEditor()">Cancel</button>
-        </footer>
       </form>
     </section>
   </div>
