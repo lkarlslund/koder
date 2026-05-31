@@ -491,7 +491,7 @@ func (l *engineTurnLoop) Step(ctx context.Context, turn *chatpkg.TurnState, step
 			}
 			out <- domain.Event{Kind: domain.EventKindToolCallDelta, Text: "tool calls persisted", Item: assistantItem}
 			if resp.Usage.HasAnyTokens() {
-				if err := e.saveChatContextUsage(ctx, chat.ID, resp.Usage); err != nil {
+				if err := turn.SetContextUsage(ctx, resp.Usage); err != nil {
 					return chatpkg.TurnStepResult{}, err
 				}
 				out <- domain.Event{Kind: domain.EventKindUsage, Usage: resp.Usage}
@@ -570,7 +570,7 @@ func (l *engineTurnLoop) Step(ctx context.Context, turn *chatpkg.TurnState, step
 	usage = usage.Normalized()
 	if usage.HasAnyTokens() {
 		assistant.Usage = &usage
-		if err := e.saveChatContextUsage(ctx, chat.ID, usage); err != nil {
+		if err := turn.SetContextUsage(ctx, usage); err != nil {
 			return chatpkg.TurnStepResult{}, err
 		}
 		if !streamed {
@@ -3110,26 +3110,6 @@ func (e *Engine) persistAssistantToolCallsForTurn(ctx context.Context, turn *cha
 		return domain.TimelineItem{}, err
 	}
 	return item, nil
-}
-
-func (e *Engine) saveChatContextUsage(ctx context.Context, chatID domain.ID, usage domain.Usage) error {
-	if e == nil || e.store == nil || chatID == "" {
-		return nil
-	}
-	contextTokens, ok := usage.ContextTokens()
-	if !ok {
-		return nil
-	}
-	chat, err := e.store.GetChat(ctx, chatID)
-	if err != nil {
-		return fmt.Errorf("load chat context usage state: %w", err)
-	}
-	chat.LastKnownContextTokens = contextTokens
-	chat.ContextTokensKnown = true
-	if err := e.store.UpdateChat(ctx, chat); err != nil {
-		return fmt.Errorf("save chat context usage state: %w", err)
-	}
-	return nil
 }
 
 func (e *Engine) handleModelToolCalls(ctx context.Context, session domain.Session, chat domain.Chat, calls []tools.Request, out chan<- domain.Event) (bool, error) {

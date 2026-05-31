@@ -4573,11 +4573,15 @@ func TestSaveChatContextUsageStoresLatestRequestUsage(t *testing.T) {
 	if err := st.UpdateChat(context.Background(), chat); err != nil {
 		t.Fatal(err)
 	}
-
-	if err := engine.saveChatContextUsage(context.Background(), chat.ID, domain.Usage{PromptTokens: 200, CompletionTokens: 50, TotalTokens: 250}); err != nil {
+	rt, err := engine.Chat(context.Background(), session, chat)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := engine.saveChatContextUsage(context.Background(), chat.ID, domain.Usage{TotalTokens: 45, CompletionTokens: 5}); err != nil {
+
+	if err := rt.SetContextUsage(context.Background(), domain.Usage{PromptTokens: 200, CompletionTokens: 50, TotalTokens: 250}); err != nil {
+		t.Fatal(err)
+	}
+	if err := rt.SetContextUsage(context.Background(), domain.Usage{TotalTokens: 45, CompletionTokens: 5}); err != nil {
 		t.Fatal(err)
 	}
 

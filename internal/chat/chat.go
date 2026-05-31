@@ -548,6 +548,42 @@ func (t *TurnState) ApplyNextSteer(ctx context.Context) (domain.TimelineItem, bo
 	return item, true, nil
 }
 
+// SetContextUsage records the latest context-token usage on the live chat.
+func (t *TurnState) SetContextUsage(ctx context.Context, usage domain.Usage) error {
+	if t == nil || t.chat == nil {
+		return fmt.Errorf("turn state is required")
+	}
+	return t.chat.SetContextUsage(ctx, usage)
+}
+
+// SetContextUsage records the latest context-token usage on the live chat.
+func (r *Chat) SetContextUsage(ctx context.Context, usage domain.Usage) error {
+	if r == nil {
+		return fmt.Errorf("chat runtime is required")
+	}
+	contextTokens, ok := usage.ContextTokens()
+	if !ok {
+		return nil
+	}
+	r.mu.Lock()
+	r.chat.LastKnownContextTokens = contextTokens
+	r.chat.ContextTokensKnown = true
+	if r.state != nil {
+		r.state.UpdateChat(func(chat *domain.Chat) {
+			chat.LastKnownContextTokens = contextTokens
+			chat.ContextTokensKnown = true
+		})
+	}
+	chatRecord := r.chat
+	r.mu.Unlock()
+	if r.deps.Store != nil {
+		if err := r.deps.Store.UpdateChat(ctx, chatRecord); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // Persist writes the current chat snapshot and remaps optimistic in-memory IDs to durable store IDs.
 func (r *Chat) Persist(ctx context.Context, st *store.Store) error {
 	if st == nil {
