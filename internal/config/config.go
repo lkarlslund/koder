@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -65,26 +66,45 @@ type PermissionRules = permissionprofile.Rules
 type PermissionProfile = permissionprofile.Profile
 type PermissionRule = permissionprofile.Rule
 
+type ToolDefaults map[domain.ToolKind]bool
+
 type Config struct {
-	DefaultProvider           string                   `toml:"default_provider"`
-	DefaultModel              string                   `toml:"default_model"`
-	CompactionProvider        string                   `toml:"compaction_provider"`
-	CompactionModel           string                   `toml:"compaction_model"`
-	MaxToolLoopSteps          int                      `toml:"max_tool_loop_steps"`
-	AutoCompactAt             int                      `toml:"auto_compact_at"`
-	CompactionKeepToolBatches int                      `toml:"compaction_keep_tool_batches"`
-	ToolDefaults              map[domain.ToolKind]bool `toml:"tool_defaults"`
-	Providers                 map[string]Provider      `toml:"providers"`
-	Models                    []ModelConfig            `toml:"models"`
-	MCPServers                map[string]MCPServer     `toml:"mcp_servers"`
-	Permissions               PermissionRules          `toml:"permissions"`
-	Access                    accesssettings.Settings  `toml:"access"`
-	Store                     Store                    `toml:"store"`
-	UI                        UI                       `toml:"ui"`
+	DefaultProvider           string                  `toml:"default_provider"`
+	DefaultModel              string                  `toml:"default_model"`
+	CompactionProvider        string                  `toml:"compaction_provider"`
+	CompactionModel           string                  `toml:"compaction_model"`
+	MaxToolLoopSteps          int                     `toml:"max_tool_loop_steps"`
+	AutoCompactAt             int                     `toml:"auto_compact_at"`
+	CompactionKeepToolBatches int                     `toml:"compaction_keep_tool_batches"`
+	ToolDefaults              ToolDefaults            `toml:"tool_defaults"`
+	Providers                 map[string]Provider     `toml:"providers"`
+	Models                    []ModelConfig           `toml:"models"`
+	MCPServers                map[string]MCPServer    `toml:"mcp_servers"`
+	Permissions               PermissionRules         `toml:"permissions"`
+	Access                    accesssettings.Settings `toml:"access"`
+	Store                     Store                   `toml:"store"`
+	UI                        UI                      `toml:"ui"`
 	path                      string
 	configDir                 string
 	stateDir                  string
 	cacheDir                  string
+}
+
+func (d *ToolDefaults) UnmarshalTOML(data []byte) error {
+	var raw map[string]bool
+	if err := toml.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	parsed := make(ToolDefaults, len(raw))
+	for name, enabled := range raw {
+		kind, err := parseToolDefaultKind(name)
+		if err != nil {
+			return err
+		}
+		parsed[kind] = enabled
+	}
+	*d = parsed
+	return nil
 }
 
 const providerConfigurationHint = "configure at least one provider in config.toml and set default_provider"
@@ -122,7 +142,7 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("read config: %w", err)
 	}
 
-	if err := toml.Unmarshal(data, &cfg); err != nil {
+	if err := toml.NewDecoder(bytes.NewReader(data)).EnableUnmarshalerInterface().Decode(&cfg); err != nil {
 		return Config{}, fmt.Errorf("parse config: %w", err)
 	}
 	if !strings.Contains(string(data), "auto_continue") {
@@ -143,7 +163,7 @@ func Load() (Config, error) {
 }
 
 func Default() Config {
-	toolDefaults := make(map[domain.ToolKind]bool, len(domain.ToolKindValues()))
+	toolDefaults := make(ToolDefaults, len(domain.ToolKindValues()))
 	for _, kind := range domain.ToolKindValues() {
 		toolDefaults[kind] = true
 	}
@@ -488,15 +508,15 @@ func cloneProfiles(src map[string]PermissionProfile) map[string]PermissionProfil
 	return dst
 }
 
-func cloneToolDefaults(src map[domain.ToolKind]bool) map[domain.ToolKind]bool {
-	dst := make(map[domain.ToolKind]bool, len(src))
+func cloneToolDefaults(src ToolDefaults) ToolDefaults {
+	dst := make(ToolDefaults, len(src))
 	for kind, enabled := range src {
 		dst[kind] = enabled
 	}
 	return dst
 }
 
-func pruneToolDefaults(defaults map[domain.ToolKind]bool) {
+func pruneToolDefaults(defaults ToolDefaults) {
 	known := make(map[domain.ToolKind]struct{}, len(domain.ToolKindValues()))
 	for _, kind := range domain.ToolKindValues() {
 		known[kind] = struct{}{}
@@ -506,6 +526,28 @@ func pruneToolDefaults(defaults map[domain.ToolKind]bool) {
 			delete(defaults, kind)
 		}
 	}
+}
+
+var toolDefaultKindAliases = map[string]domain.ToolKind{
+	"execcleanupbackground":     domain.ToolKindExecCleanup,
+	"milestoneadditems":         domain.ToolKindMilestoneAdd,
+	"milestoneplananddecompose": domain.ToolKindMilestonePlan,
+	"milestoneupdateitem":       domain.ToolKindMilestoneUpdate,
+}
+
+func parseToolDefaultKind(name string) (domain.ToolKind, error) {
+	if kind, err := domain.ToolKindString(name); err == nil {
+		return kind, nil
+	}
+	normalized := strings.NewReplacer("_", "", "-", "").Replace(strings.ToLower(strings.TrimSpace(name)))
+	if kind, ok := toolDefaultKindAliases[normalized]; ok {
+		return kind, nil
+	}
+	kind, err := domain.ToolKindString(normalized)
+	if err != nil {
+		return 0, fmt.Errorf("unknown tool default %q", name)
+	}
+	return kind, nil
 }
 
 func mergeBuiltinPermissionProfileDefaults(dst map[string]PermissionProfile, defaults map[string]PermissionProfile) {
