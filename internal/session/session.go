@@ -15,15 +15,13 @@ import (
 	"github.com/lkarlslund/koder/internal/tools"
 )
 
-// ChatFactory builds live chat runtimes for session-owned chat records.
-type ChatFactory interface {
-	Chat(context.Context, domain.Session, domain.Chat) (*chatpkg.Chat, error)
-}
+// ChatLoader builds live chat runtimes for session-owned chat records.
+type ChatLoader func(context.Context, domain.Session, domain.Chat) (*chatpkg.Chat, error)
 
 // Session owns the live state for one persisted session.
 type Session struct {
-	store       *store.Store
-	chatFactory ChatFactory
+	store      *store.Store
+	chatLoader ChatLoader
 
 	mu         sync.RWMutex
 	session    domain.Session
@@ -35,12 +33,12 @@ type Session struct {
 }
 
 // Load hydrates a live session owner from persisted state.
-func Load(ctx context.Context, st *store.Store, chatFactory ChatFactory, sessionID domain.ID) (*Session, error) {
+func Load(ctx context.Context, st *store.Store, chatLoader ChatLoader, sessionID domain.ID) (*Session, error) {
 	if st == nil {
 		return nil, fmt.Errorf("store is required")
 	}
-	if chatFactory == nil {
-		return nil, fmt.Errorf("chat factory is required")
+	if chatLoader == nil {
+		return nil, fmt.Errorf("chat loader is required")
 	}
 	if sessionID == "" {
 		return nil, fmt.Errorf("session id is required")
@@ -66,14 +64,14 @@ func Load(ctx context.Context, st *store.Store, chatFactory ChatFactory, session
 		return nil, err
 	}
 	return &Session{
-		store:       st,
-		chatFactory: chatFactory,
-		session:     session,
-		chats:       slices.Clone(chats),
-		runtimes:    map[domain.ID]*chatpkg.Chat{},
-		plan:        plan,
-		todosByRef:  todosByRef,
-		tasks:       slices.Clone(tasks),
+		store:      st,
+		chatLoader: chatLoader,
+		session:    session,
+		chats:      slices.Clone(chats),
+		runtimes:   map[domain.ID]*chatpkg.Chat{},
+		plan:       plan,
+		todosByRef: todosByRef,
+		tasks:      slices.Clone(tasks),
 	}, nil
 }
 
@@ -200,7 +198,7 @@ func (s *Session) Chat(ctx context.Context, chatID domain.ID) (*chatpkg.Chat, er
 	if !ok {
 		return nil, fmt.Errorf("chat %s not found", chatID)
 	}
-	rt, err := s.chatFactory.Chat(ctx, session, chatRecord)
+	rt, err := s.chatLoader(ctx, session, chatRecord)
 	if err != nil {
 		return nil, err
 	}
@@ -265,7 +263,7 @@ func (s *Session) NewChat(ctx context.Context, parentChatID domain.ID, title str
 	if err := s.store.PutChat(ctx, chatRecord); err != nil {
 		return nil, err
 	}
-	rt, err := s.chatFactory.Chat(ctx, session, chatRecord)
+	rt, err := s.chatLoader(ctx, session, chatRecord)
 	if err != nil {
 		return nil, err
 	}
@@ -293,7 +291,7 @@ func (s *Session) AddPreparedChat(ctx context.Context, chatRecord domain.Chat) (
 	if err := s.store.PutChat(ctx, chatRecord); err != nil {
 		return nil, err
 	}
-	rt, err := s.chatFactory.Chat(ctx, session, chatRecord)
+	rt, err := s.chatLoader(ctx, session, chatRecord)
 	if err != nil {
 		return nil, err
 	}

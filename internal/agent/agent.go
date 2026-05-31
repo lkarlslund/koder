@@ -52,8 +52,7 @@ type Engine struct {
 	envPrompts map[domain.ID]string
 	sessionMu  sync.RWMutex
 	sessions   map[domain.ID]*sessionpkg.Session
-	chatMu     sync.RWMutex
-	chats      map[domain.ID]*chatpkg.Chat
+	runMu      sync.RWMutex
 	runs       map[domain.ID]chatRunState
 	retryPause func(context.Context, time.Duration, func(time.Duration)) error
 }
@@ -81,7 +80,6 @@ func New(cfg config.Config, st *store.Store, registry *tools.Registry, debug *de
 		mcp:        mcpManager,
 		exec:       execruntime.NewManager(),
 		sessions:   map[domain.ID]*sessionpkg.Session{},
-		chats:      map[domain.ID]*chatpkg.Chat{},
 		runs:       map[domain.ID]chatRunState{},
 		retryPause: waitForRetry,
 	}

@@ -25,27 +25,7 @@ func (e *Engine) Chat(ctx context.Context, session domain.Session, chatRecord do
 	if chatRecord.ID == "" {
 		return nil, fmt.Errorf("chat id is required")
 	}
-	e.chatMu.RLock()
-	if existing := e.chats[chatRecord.ID]; existing != nil {
-		e.chatMu.RUnlock()
-		return existing, nil
-	}
-	e.chatMu.RUnlock()
-
-	loaded, err := chatpkg.Load(ctx, session, chatRecord, e.ChatDeps(), e.detachChat)
-	if err != nil {
-		return nil, err
-	}
-
-	e.chatMu.Lock()
-	if existing := e.chats[chatRecord.ID]; existing != nil {
-		e.chatMu.Unlock()
-		loaded.Close()
-		return existing, nil
-	}
-	e.chats[chatRecord.ID] = loaded
-	e.chatMu.Unlock()
-	return loaded, nil
+	return chatpkg.Load(ctx, session, chatRecord, e.ChatDeps(), nil)
 }
 
 func (e *Engine) ChatDeps() chatpkg.Deps {
@@ -58,12 +38,6 @@ func (e *Engine) ChatDeps() chatpkg.Deps {
 		Compact: e,
 		Errors:  e,
 	}
-}
-
-func (e *Engine) detachChat(chatID domain.ID) {
-	e.chatMu.Lock()
-	delete(e.chats, chatID)
-	e.chatMu.Unlock()
 }
 
 func (e *Engine) ListChats(ctx context.Context, sessionID domain.ID) ([]tools.ChatStatus, error) {
@@ -110,10 +84,9 @@ func (e *Engine) PollChat(ctx context.Context, sessionID, chatID domain.ID) (too
 		return tools.ChatStatus{}, err
 	}
 
-	e.chatMu.RLock()
-	activeChat := e.chats[chatID]
+	e.runMu.RLock()
 	run := e.runs[chatID]
-	e.chatMu.RUnlock()
+	e.runMu.RUnlock()
 
 	state := run.state
 	status := strings.TrimSpace(run.status)
@@ -121,24 +94,6 @@ func (e *Engine) PollChat(ctx context.Context, sessionID, chatID domain.ID) (too
 	lastError := run.lastError
 	busy := false
 
-	if activeChat != nil {
-		chatStatus, text, active := activeChat.Status()
-		status = string(chatStatus)
-		statusText = text
-		switch chatStatus {
-		case chatpkg.StatusWaitingApproval:
-			state = tools.ChatRunStateWaitingApproval
-			busy = true
-		case chatpkg.StatusErrored:
-			state = tools.ChatRunStateFailed
-			lastError = text
-		default:
-			if active {
-				state = tools.ChatRunStateRunning
-				busy = true
-			}
-		}
-	}
 	if state == "" {
 		state = tools.ChatRunStateIdle
 	}
@@ -476,8 +431,8 @@ func (e *Engine) consumeChatUpdates(chatID domain.ID, updates <-chan chatpkg.Upd
 }
 
 func (e *Engine) setRunState(chatID domain.ID, state chatRunState) {
-	e.chatMu.Lock()
-	defer e.chatMu.Unlock()
+	e.runMu.Lock()
+	defer e.runMu.Unlock()
 	e.runs[chatID] = state
 }
 
@@ -527,13 +482,13 @@ func (e *Engine) parentAlreadyHasDoneNotification(ctx context.Context, sourceCha
 		return false
 	}
 	needle := "chat " + strings.ToLower(string(sourceChatID)) + " is done"
-	e.chatMu.RLock()
-	parent := e.chats[*source.ParentChatID]
-	e.chatMu.RUnlock()
-	if parent != nil {
-		for _, item := range parent.Snapshot().QueuedInputs {
-			if strings.Contains(strings.ToLower(item.Text), needle) {
-				return true
+	if owner := e.loadedSession(source.SessionID); owner != nil {
+		parent, err := owner.Chat(ctx, *source.ParentChatID)
+		if err == nil {
+			for _, item := range parent.Snapshot().QueuedInputs {
+				if strings.Contains(strings.ToLower(item.Text), needle) {
+					return true
+				}
 			}
 		}
 	}
@@ -552,13 +507,6 @@ func (e *Engine) parentAlreadyHasDoneNotification(ctx context.Context, sourceCha
 func (e *Engine) enqueueSteer(ctx context.Context, chatID domain.ID, text string) {
 	text = strings.TrimSpace(text)
 	if chatID == "" || text == "" {
-		return
-	}
-	e.chatMu.RLock()
-	activeChat := e.chats[chatID]
-	e.chatMu.RUnlock()
-	if activeChat != nil {
-		activeChat.Enqueue(chatpkg.QueueItem{Kind: chatpkg.QueueKindSteer, Source: domain.UserMessageSourceSubchat, Text: text})
 		return
 	}
 	chatRecord, err := e.store.GetChat(ctx, chatID)
