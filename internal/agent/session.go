@@ -358,6 +358,31 @@ func (s *Session) NewChat(ctx context.Context, parentChatID domain.ID, title str
 	return rt, nil
 }
 
+// AddPreparedChat adds an already validated chat record to the live session.
+func (s *Session) AddPreparedChat(ctx context.Context, chatRecord domain.Chat) (*chatpkg.Chat, error) {
+	if s == nil {
+		return nil, fmt.Errorf("session is required")
+	}
+	if chatRecord.ID == "" {
+		return nil, fmt.Errorf("chat id is required")
+	}
+	s.mu.RLock()
+	session := s.session
+	s.mu.RUnlock()
+	if chatRecord.SessionID != session.ID {
+		return nil, fmt.Errorf("chat %s does not belong to session %s", chatRecord.ID, session.ID)
+	}
+	if err := s.engine.store.PutChat(ctx, chatRecord); err != nil {
+		return nil, err
+	}
+	rt, err := s.engine.Chat(ctx, session, chatRecord)
+	if err != nil {
+		return nil, err
+	}
+	s.adoptChat(chatRecord, rt)
+	return rt, nil
+}
+
 // ArchiveChat marks a chat archived, preserving its history.
 func (s *Session) ArchiveChat(ctx context.Context, chatID domain.ID) (tools.ChatStatus, domain.ID, error) {
 	if s == nil {

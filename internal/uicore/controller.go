@@ -810,7 +810,11 @@ func (c *Controller) StartChat(ctx context.Context, sessionID, parentChatID doma
 		CreatedAt:             now,
 		UpdatedAt:             now,
 	}
-	if err := c.store.PutChat(ctx, chatRecord); err != nil {
+	owner, err := c.agent.LoadSession(ctx, sessionID)
+	if err != nil {
+		return tools.ChatStatus{}, err
+	}
+	if _, err := owner.AddPreparedChat(ctx, chatRecord); err != nil {
 		return tools.ChatStatus{}, err
 	}
 	if status := roleMilestoneStatus(role); status != "" {
