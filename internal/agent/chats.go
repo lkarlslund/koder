@@ -181,7 +181,7 @@ func (e *Engine) StartPreparedChat(ctx context.Context, session domain.Session, 
 		return tools.ChatStatus{}, err
 	}
 	if owner := e.loadedSession(session.ID); owner != nil {
-		owner.adoptChat(chatRecord, activeChat)
+		owner.AdoptChat(chatRecord, activeChat)
 	}
 	e.setRunState(chatRecord.ID, chatRunState{state: tools.ChatRunStateRunning, statusText: "Starting background chat"})
 	updates, unsub := activeChat.Subscribe()

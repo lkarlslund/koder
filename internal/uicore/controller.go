@@ -21,6 +21,7 @@ import (
 	"github.com/lkarlslund/koder/internal/permissionprofile"
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/reference"
+	sessionpkg "github.com/lkarlslund/koder/internal/session"
 	"github.com/lkarlslund/koder/internal/skills"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools"
@@ -1022,7 +1023,7 @@ func (c *Controller) AddTask(ctx context.Context, sessionID domain.ID, body stri
 	return store.Task{}, fmt.Errorf("no live session owner")
 }
 
-func (c *Controller) refreshPlanningFromOwner(owner *agent.Session) {
+func (c *Controller) refreshPlanningFromOwner(owner *sessionpkg.Session) {
 	if owner == nil {
 		return
 	}

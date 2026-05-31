@@ -30,6 +30,7 @@ import (
 	"github.com/lkarlslund/koder/internal/permissionprofile"
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/reference"
+	sessionpkg "github.com/lkarlslund/koder/internal/session"
 	"github.com/lkarlslund/koder/internal/skills"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tokenestimate"
@@ -50,7 +51,7 @@ type Engine struct {
 	envMu      sync.Mutex
 	envPrompts map[domain.ID]string
 	sessionMu  sync.RWMutex
-	sessions   map[domain.ID]*Session
+	sessions   map[domain.ID]*sessionpkg.Session
 	chatMu     sync.RWMutex
 	chats      map[domain.ID]*chatpkg.Chat
 	runs       map[domain.ID]chatRunState
@@ -89,7 +90,7 @@ func New(cfg config.Config, st *store.Store, registry *tools.Registry, debug *de
 		agents:     agents.NewManager(cfg.StateDir(), filepath.Join(filepath.Dir(cfg.Path()), "AGENTS.md")),
 		mcp:        mcpManager,
 		exec:       execManager,
-		sessions:   map[domain.ID]*Session{},
+		sessions:   map[domain.ID]*sessionpkg.Session{},
 		chats:      map[domain.ID]*chatpkg.Chat{},
 		runs:       map[domain.ID]chatRunState{},
 		retryPause: waitForRetry,
@@ -2067,7 +2068,7 @@ func (e *Engine) toolRuntime(session domain.Session, chat domain.Chat) tools.Run
 	return runtime
 }
 
-func (e *Engine) loadedSession(sessionID domain.ID) *Session {
+func (e *Engine) loadedSession(sessionID domain.ID) *sessionpkg.Session {
 	if e == nil || sessionID == "" {
 		return nil
 	}
