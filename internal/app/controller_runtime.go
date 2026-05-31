@@ -7,6 +7,8 @@ import (
 	"github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/execruntime"
+	sessionpkg "github.com/lkarlslund/koder/internal/session"
+	"github.com/lkarlslund/koder/internal/tools"
 )
 
 type execRuntimeSubscription struct {
@@ -175,6 +177,38 @@ func (c *Controller) forwardRuntime(chatID domain.ID, updates <-chan chat.Update
 		c.broadcast("chat_update", update)
 		if runtimeUpdateNeedsStateSnapshot(update) {
 			c.broadcast("snapshot", c.State())
+		}
+	}
+}
+
+func (c *Controller) forwardSessionEvents(sessionID domain.ID, events <-chan sessionpkg.Event) {
+	for event := range events {
+		if event.SessionID != sessionID {
+			continue
+		}
+		c.mu.RLock()
+		currentSessionID := c.session.ID
+		c.mu.RUnlock()
+		if currentSessionID != sessionID {
+			return
+		}
+		switch event.Kind {
+		case sessionpkg.EventChatAdded:
+			status, err := c.agent.PollChat(context.Background(), event.SessionID, event.Chat.ID)
+			if err != nil {
+				status = tools.ChatStatus{
+					Chat:       event.Chat,
+					State:      tools.ChatRunStateIdle,
+					Status:     string(tools.ChatRunStateIdle),
+					StatusText: string(chat.StatusIdle),
+				}
+			}
+			if err := c.addStartedChat(context.Background(), status); err != nil {
+				c.mu.Lock()
+				c.lastErr = err.Error()
+				c.mu.Unlock()
+				c.broadcast("snapshot", c.State())
+			}
 		}
 	}
 }

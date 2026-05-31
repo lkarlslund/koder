@@ -22,6 +22,20 @@ import (
 // ChatLoader builds live chat runtimes for session-owned chat records.
 type ChatLoader func(context.Context, domain.Session, domain.Chat) (*chatpkg.Chat, error)
 
+// EventKind identifies a session-owned state mutation.
+type EventKind string
+
+const (
+	EventChatAdded EventKind = "chat_added"
+)
+
+// Event reports a mutation made by the session owner.
+type Event struct {
+	Kind      EventKind
+	SessionID domain.ID
+	Chat      domain.Chat
+}
+
 // Session owns the live state for one persisted session.
 type Session struct {
 	store      *store.Store
@@ -34,6 +48,10 @@ type Session struct {
 	plan       planning.Plan
 	todosByRef map[string][]planning.TodoItem
 	tasks      []planning.Task
+
+	subsMu  sync.Mutex
+	nextSub int
+	subs    map[int]chan Event
 }
 
 // Load hydrates a live session owner from persisted state.
@@ -76,6 +94,7 @@ func Load(ctx context.Context, st *store.Store, chatLoader ChatLoader, sessionID
 		plan:       plan,
 		todosByRef: todosByRef,
 		tasks:      slices.Clone(tasks),
+		subs:       map[int]chan Event{},
 	}, nil
 }
 
@@ -132,6 +151,43 @@ func (s *Session) Snapshot() SessionSnapshot {
 		Todos:      flattenTodos(s.todosByRef),
 		TodosByRef: cloneTodosByRef(s.todosByRef),
 		Tasks:      slices.Clone(s.tasks),
+	}
+}
+
+// Subscribe registers for session-owned state mutations.
+func (s *Session) Subscribe() (<-chan Event, func()) {
+	ch := make(chan Event, 16)
+	if s == nil {
+		close(ch)
+		return ch, func() {}
+	}
+	s.subsMu.Lock()
+	if s.subs == nil {
+		s.subs = map[int]chan Event{}
+	}
+	id := s.nextSub
+	s.nextSub++
+	s.subs[id] = ch
+	s.subsMu.Unlock()
+	unsub := func() {
+		s.subsMu.Lock()
+		if existing, ok := s.subs[id]; ok {
+			delete(s.subs, id)
+			close(existing)
+		}
+		s.subsMu.Unlock()
+	}
+	return ch, unsub
+}
+
+func (s *Session) emit(event Event) {
+	if s == nil {
+		return
+	}
+	s.subsMu.Lock()
+	defer s.subsMu.Unlock()
+	for _, ch := range s.subs {
+		ch <- event
 	}
 }
 
@@ -288,6 +344,7 @@ func (s *Session) createChat(ctx context.Context, session domain.Session, chatRe
 	upsertSessionChatLocked(&s.chats, chatRecord)
 	s.runtimes[chatRecord.ID] = rt
 	s.mu.Unlock()
+	s.emit(Event{Kind: EventChatAdded, SessionID: session.ID, Chat: chatRecord})
 	return rt, nil
 }
 
@@ -586,6 +643,16 @@ func (s *Session) Close(ctx context.Context) error {
 		}
 	}
 	s.mu.RUnlock()
+	s.subsMu.Lock()
+	subs := make([]chan Event, 0, len(s.subs))
+	for id, ch := range s.subs {
+		delete(s.subs, id)
+		subs = append(subs, ch)
+	}
+	s.subsMu.Unlock()
+	for _, ch := range subs {
+		close(ch)
+	}
 	for _, rt := range runtimes {
 		if err := rt.DrainAndClose(ctx); err != nil {
 			return err

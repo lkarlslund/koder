@@ -283,6 +283,7 @@ type Controller struct {
 	chat                       domain.Chat
 	runtime                    *chat.Chat
 	unsub                      func()
+	sessionUnsub               func()
 	runtimes                   map[domain.ID]*chat.Chat
 	unsubs                     map[domain.ID]func()
 	execUnsubs                 map[domain.ID]func()
@@ -564,7 +565,7 @@ func (c *Controller) ShutdownWithInterruptReason(ctx context.Context, reason str
 			runtimes = append(runtimes, rt)
 		}
 	}
-	unsubs := make([]func(), 0, len(c.unsubs)+len(c.execUnsubs)+1)
+	unsubs := make([]func(), 0, len(c.unsubs)+len(c.execUnsubs)+2)
 	for _, unsub := range c.unsubs {
 		if unsub != nil {
 			unsubs = append(unsubs, unsub)
@@ -577,6 +578,9 @@ func (c *Controller) ShutdownWithInterruptReason(ctx context.Context, reason str
 	}
 	if c.unsub != nil {
 		unsubs = append(unsubs, c.unsub)
+	}
+	if c.sessionUnsub != nil {
+		unsubs = append(unsubs, c.sessionUnsub)
 	}
 	c.mu.RUnlock()
 	for _, unsub := range unsubs {
@@ -692,14 +696,7 @@ func (c *Controller) StartChat(ctx context.Context, sessionID, parentChatID doma
 	if c.agent == nil {
 		return tools.ChatStatus{}, fmt.Errorf("no chat agent")
 	}
-	status, err := c.agent.StartChat(ctx, sessionID, parentChatID, req)
-	if err != nil {
-		return tools.ChatStatus{}, err
-	}
-	if err := c.addStartedChat(ctx, status); err != nil {
-		return tools.ChatStatus{}, err
-	}
-	return status, nil
+	return c.agent.StartChat(ctx, sessionID, parentChatID, req)
 }
 
 // PollChat returns the current status for a live chat.
@@ -1557,6 +1554,7 @@ func (c *Controller) loadSession(ctx context.Context, sessionID, chatID domain.I
 		snapshots[id] = snapshot
 		statuses[id] = sidebarStatusFromSnapshot(snapshot)
 	}
+	sessionEvents, sessionUnsub := owner.Subscribe()
 
 	c.mu.Lock()
 	if c.runtimes == nil {
@@ -1580,6 +1578,10 @@ func (c *Controller) loadSession(ctx context.Context, sessionID, chatID domain.I
 	c.chat = chatRecord
 	c.runtime = rt
 	c.unsub = nil
+	if c.sessionUnsub != nil {
+		c.sessionUnsub()
+	}
+	c.sessionUnsub = sessionUnsub
 	for id, loaded := range runtimes {
 		c.runtimes[id] = loaded
 	}
@@ -1607,6 +1609,7 @@ func (c *Controller) loadSession(ctx context.Context, sessionID, chatID domain.I
 	for _, sub := range execSubscriptions {
 		go c.forwardExecRuntime(sub.chatID, sub.events)
 	}
+	go c.forwardSessionEvents(session.ID, sessionEvents)
 	c.autoResumeRestartInterruptedChats(runtimes, snapshots)
 	c.broadcast("snapshot", c.State())
 	return nil

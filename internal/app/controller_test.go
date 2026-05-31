@@ -267,7 +267,7 @@ func TestControllerForwardRuntimeRefreshesInactiveChatMetadata(t *testing.T) {
 	}
 }
 
-func TestControllerStartChatAddsCreatedChatToSession(t *testing.T) {
+func TestControllerSessionEventAddsStartedChatToState(t *testing.T) {
 	ctrl, _ := newTestController(t)
 	state := ctrl.State()
 	if state.Session.ID == "" || state.ActiveChatID == "" {
@@ -283,7 +283,7 @@ func TestControllerStartChatAddsCreatedChatToSession(t *testing.T) {
 		t.Fatalf("add todo: %v", err)
 	}
 
-	status, err := ctrl.StartChat(context.Background(), state.Session.ID, state.ActiveChatID, tools.ChatStartRequest{
+	status, err := ctrl.agent.StartChat(context.Background(), state.Session.ID, state.ActiveChatID, tools.ChatStartRequest{
 		Profile:   chatrole.Execution,
 		Objective: "Implement only the assigned todo",
 		TodoRef:   todos[0].ID,
@@ -291,7 +291,21 @@ func TestControllerStartChatAddsCreatedChatToSession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("start chat: %v", err)
 	}
-	next := ctrl.State()
+
+	var next State
+	deadline := time.After(2 * time.Second)
+	for {
+		next = ctrl.State()
+		if _, ok := next.Snapshots[status.Chat.ID]; ok {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for started chat in state, got %#v", next.Chats)
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
 	found := false
 	for _, item := range next.Chats {
 		if item.ID == status.Chat.ID && item.ActiveMilestoneRef == "alpha" && item.AssignedTodoRef == todos[0].ID {
