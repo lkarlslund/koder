@@ -591,25 +591,18 @@ func TestRuntimeSendQueueItemNowDispatchesIdleChatWithoutLeavingQueue(t *testing
 	runner := &runtimeFakeRunner{events: []<-chan domain.Event{events}}
 	rt := newTestChat(t, st, session, chatRecord, runner)
 
-	rt.Enqueue(QueueItem{Kind: QueueKindQueued, Text: "run now"})
-	var queuedID domain.ID
-	deadline := time.After(2 * time.Second)
-	for queuedID == "" {
-		select {
-		case <-deadline:
-			t.Fatalf("timed out waiting for queued item: %#v", rt.Snapshot().QueuedInputs)
-		default:
-			for _, item := range rt.Snapshot().QueuedInputs {
-				if item.Text == "run now" {
-					queuedID = item.ID
-				}
-			}
-			time.Sleep(10 * time.Millisecond)
-		}
-	}
+	queuedID := domain.NewIDAt(time.Now().UTC())
+	rt.ReplaceQueue([]domain.QueuedInput{{
+		ID:        queuedID,
+		Kind:      domain.QueuedInputKindQueued,
+		Text:      "run now",
+		Source:    domain.UserMessageSourceUser,
+		Held:      true,
+		CreatedAt: time.Now().UTC(),
+	}})
 
 	rt.SendQueueItemNow(queuedID)
-	deadline = time.After(2 * time.Second)
+	deadline := time.After(2 * time.Second)
 	for {
 		snapshot := rt.Snapshot()
 		if snapshot.Active && runner.promptCallCount() == 1 && len(snapshot.QueuedInputs) == 0 {

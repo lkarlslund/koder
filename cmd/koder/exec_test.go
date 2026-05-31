@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -159,8 +160,10 @@ func TestRunExecPlainTextFailsWhenStructuredOutputRequired(t *testing.T) {
 }
 
 func TestStructuredOutputToolNotRegisteredGlobally(t *testing.T) {
-	if _, ok := tools.DefinitionFor(domain.ToolKind(structuredOutputToolName), tools.Runtime{}); ok {
-		t.Fatalf("%s should not be registered as a normal tool", structuredOutputToolName)
+	if kind, err := domain.ToolKindString(structuredOutputToolName); err == nil {
+		if _, ok := tools.DefinitionFor(kind, tools.Runtime{}); ok {
+			t.Fatalf("%s should not be registered as a normal tool", structuredOutputToolName)
+		}
 	}
 }
 
@@ -208,7 +211,8 @@ func requestContainsToolError(payload map[string]any, toolCallID string) bool {
 	for _, item := range messages {
 		msg, _ := item.(map[string]any)
 		content, _ := msg["content"].(string)
-		if msg["role"] == "tool" && msg["tool_call_id"] == toolCallID && strings.Contains(content, "Error:") {
+		role := strings.ToLower(fmt.Sprint(msg["role"]))
+		if role == "tool" && msg["tool_call_id"] == toolCallID && strings.Contains(content, "Error:") {
 			return true
 		}
 	}
