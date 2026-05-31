@@ -116,6 +116,25 @@ func (s *ChatState) ClearPendingAssistant() {
 	s.pending = PendingAssistantTurn{}
 }
 
+func (s *ChatState) HasPendingExecutableToolCalls() bool {
+	if s == nil {
+		return false
+	}
+	for idx := len(s.timeline) - 1; idx >= 0; idx-- {
+		assistant, ok := s.timeline[idx].Item.Content.(domain.AssistantMessage)
+		if !ok {
+			continue
+		}
+		for _, call := range assistant.Tools {
+			if call.Status == domain.ToolStatusPending && call.Result == nil && call.Error == nil && call.Approval == nil {
+				return true
+			}
+		}
+		return false
+	}
+	return false
+}
+
 func (s *ChatState) PendingAssistantContextTokens() int {
 	if s == nil {
 		return 0

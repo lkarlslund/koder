@@ -248,7 +248,9 @@ func New(session domain.Session, chatRecord domain.Chat, timeline []domain.Timel
 		subs:       map[int]chan Update{},
 	}
 	go c.loop()
-	c.inbox <- resumePendingToolsCmd{}
+	if c.state.HasPendingExecutableToolCalls() {
+		c.inbox <- resumePendingToolsCmd{}
+	}
 	c.inbox <- struct{}{}
 	return c, nil
 }
@@ -1358,6 +1360,10 @@ func (r *Chat) handleResumePendingTools() {
 func (r *Chat) handleResumePendingToolsWithTurnLoop(service PendingToolService) {
 	r.mu.Lock()
 	if r.active || r.status == StatusWaitingApproval || r.draining {
+		r.mu.Unlock()
+		return
+	}
+	if !r.state.HasPendingExecutableToolCalls() {
 		r.mu.Unlock()
 		return
 	}

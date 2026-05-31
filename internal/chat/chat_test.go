@@ -690,6 +690,14 @@ func waitForDrainUpdate(t *testing.T, updates <-chan Update) {
 func TestLoadResumesPendingToolCalls(t *testing.T) {
 	st := openTestStore(t)
 	session, chatRecord, _ := createSessionWithPlan(t, st)
+	if _, err := chatstore.AppendAssistantToolCalls(context.Background(), st, chatRecord.ID, []domain.ToolCall{{
+		ToolCallID: "call_1",
+		Tool:       domain.ToolKindRead,
+		Args:       map[string]string{"path": "README.md"},
+		Status:     domain.ToolStatusPending,
+	}}, "", domain.Usage{}); err != nil {
+		t.Fatal(err)
+	}
 	events := make(chan domain.Event)
 	runner := &pendingToolFakeRunner{resumeEvents: []<-chan domain.Event{events}}
 	rt := newTestChat(t, st, session, chatRecord, runner)
@@ -720,6 +728,35 @@ func TestLoadResumesPendingToolCalls(t *testing.T) {
 		case <-time.After(2 * time.Second):
 			t.Fatal("timed out waiting for resumed tool event")
 		}
+	}
+}
+
+func TestLoadDoesNotResumeWhenLatestAssistantHasNoPendingToolCalls(t *testing.T) {
+	st := openTestStore(t)
+	session, chatRecord, _ := createSessionWithPlan(t, st)
+	if _, err := chatstore.AppendAssistantToolCalls(context.Background(), st, chatRecord.ID, []domain.ToolCall{{
+		ToolCallID: "old_pending",
+		Tool:       domain.ToolKindRead,
+		Args:       map[string]string{"path": "README.md"},
+		Status:     domain.ToolStatusPending,
+	}}, "", domain.Usage{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := chatstore.AppendTimeline(context.Background(), st, chatRecord.ID, domain.AssistantMessage{
+		Text: "done",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	runner := &pendingToolFakeRunner{}
+	rt := newTestChat(t, st, session, chatRecord, runner)
+
+	time.Sleep(20 * time.Millisecond)
+	if got := runner.resumeCallCount(); got != 0 {
+		t.Fatalf("resume call count = %d, want 0", got)
+	}
+	snapshot := rt.Snapshot()
+	if snapshot.Active || snapshot.Status != StatusIdle {
+		t.Fatalf("snapshot = %#v, want idle inactive", snapshot)
 	}
 }
 
