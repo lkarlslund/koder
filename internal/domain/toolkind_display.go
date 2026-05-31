@@ -3,6 +3,9 @@ package domain
 import "strings"
 
 func (i ToolKind) DisplayName() string {
+	if !i.IsAToolKind() {
+		return ""
+	}
 	name := strings.TrimSpace(i.String())
 	if name == "" {
 		return ""

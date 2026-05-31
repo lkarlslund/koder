@@ -116,6 +116,32 @@ func TestChatRequestMarshalJSONIncludesStreamUsageOptions(t *testing.T) {
 	}
 }
 
+func TestChatRequestMarshalJSONUsesProviderRoleNames(t *testing.T) {
+	data, err := json.Marshal(ChatRequest{
+		Model: "test-model",
+		Messages: []Message{
+			{Role: domain.MessageRoleSystem, Content: "system"},
+			{Role: domain.MessageRoleUser, Content: "user"},
+			{Role: domain.MessageRoleAssistant, Content: "assistant"},
+			{Role: domain.MessageRoleTool, ToolCallID: "call_1", Content: "tool"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(data)
+	for _, role := range []string{"system", "user", "assistant", "tool"} {
+		if !strings.Contains(got, `"role":"`+role+`"`) {
+			t.Fatalf("expected lowercase provider role %q, got %s", role, got)
+		}
+	}
+	for _, role := range []string{"System", "User", "Assistant", "Tool"} {
+		if strings.Contains(got, `"role":"`+role+`"`) {
+			t.Fatalf("unexpected domain enum role %q in provider request: %s", role, got)
+		}
+	}
+}
+
 func TestChatRequestMarshalJSONIncludesExtraBody(t *testing.T) {
 	data, err := json.Marshal(ChatRequest{
 		Model:  "test-model",

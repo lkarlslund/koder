@@ -100,10 +100,10 @@ var probePNG = []byte{
 
 func (m Message) MarshalJSON() ([]byte, error) {
 	type wireMessage struct {
-		Role       domain.MessageRole `json:"role"`
-		Content    any                `json:"content,omitempty"`
-		ToolCallID string             `json:"tool_call_id,omitempty"`
-		ToolCalls  []ToolCall         `json:"tool_calls,omitempty"`
+		Role       string     `json:"role"`
+		Content    any        `json:"content,omitempty"`
+		ToolCallID string     `json:"tool_call_id,omitempty"`
+		ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
 	}
 	var content any
 	trimmed := strings.TrimSpace(m.Content)
@@ -133,11 +133,26 @@ func (m Message) MarshalJSON() ([]byte, error) {
 		content = items
 	}
 	return json.Marshal(wireMessage{
-		Role:       m.Role,
+		Role:       providerRole(m.Role),
 		Content:    content,
 		ToolCallID: m.ToolCallID,
 		ToolCalls:  m.ToolCalls,
 	})
+}
+
+func providerRole(role domain.MessageRole) string {
+	switch role {
+	case domain.MessageRoleSystem:
+		return "system"
+	case domain.MessageRoleUser:
+		return "user"
+	case domain.MessageRoleAssistant:
+		return "assistant"
+	case domain.MessageRoleTool:
+		return "tool"
+	default:
+		return strings.ToLower(role.String())
+	}
 }
 
 type ToolDefinition struct {
