@@ -666,8 +666,8 @@ func (r *Chat) DenyTool(toolCallID string) {
 }
 
 func (r *Chat) Compact() error {
-	runner := r.deps.Compact
-	if runner == nil {
+	service := r.deps.Compact
+	if service == nil {
 		return fmt.Errorf("compaction service is not configured")
 	}
 	r.mu.Lock()
@@ -689,7 +689,7 @@ func (r *Chat) Compact() error {
 	out := make(chan domain.Event, 32)
 	go func() {
 		defer close(out)
-		if err := runner.CompactTurn(ctx, r.turnState(), out); err != nil {
+		if err := service.CompactTurn(ctx, r.turnState(), out); err != nil {
 			r.handleTurnError(ctx, r.turnState(), out, err)
 		}
 	}()
@@ -1195,26 +1195,26 @@ func (r *Chat) handleInterrupt() {
 }
 
 func (r *Chat) handleApprove(toolCallID string, rule *domain.PermissionOverride) {
-	if runner := r.deps.Tools; runner != nil {
-		r.handleApproveWithTurnLoop(runner, toolCallID, rule)
+	if service := r.deps.Tools; service != nil {
+		r.handleApproveWithTurnLoop(service, toolCallID, rule)
 		return
 	}
-	err := fmt.Errorf("approval is not supported by runner")
+	err := fmt.Errorf("tool approval service is not configured")
 	evt := domain.Event{Kind: domain.EventKindError, Err: err}
 	r.broadcast(r.snapshotUpdateFlags(&evt, false, false, true, false, false))
 }
 
 func (r *Chat) handleDeny(toolCallID string) {
-	if runner := r.deps.Tools; runner != nil {
-		r.handleDenyWithTurnLoop(runner, toolCallID)
+	if service := r.deps.Tools; service != nil {
+		r.handleDenyWithTurnLoop(service, toolCallID)
 		return
 	}
-	err := fmt.Errorf("approval is not supported by runner")
+	err := fmt.Errorf("tool approval service is not configured")
 	evt := domain.Event{Kind: domain.EventKindError, Err: err}
 	r.broadcast(r.snapshotUpdateFlags(&evt, false, false, true, false, false))
 }
 
-func (r *Chat) handleApproveWithTurnLoop(runner ToolTurnService, toolCallID string, rule *domain.PermissionOverride) {
+func (r *Chat) handleApproveWithTurnLoop(service ToolTurnService, toolCallID string, rule *domain.PermissionOverride) {
 	r.mu.Lock()
 	ctx, cancel := context.WithCancel(context.Background())
 	ctx = turncontrol.WithShouldStop(ctx, func() bool {
@@ -1234,14 +1234,14 @@ func (r *Chat) handleApproveWithTurnLoop(runner ToolTurnService, toolCallID stri
 	out := make(chan domain.Event, 32)
 	go func() {
 		defer close(out)
-		shouldContinue, err := runner.ApproveToolForTurn(ctx, r.turnState(), toolCallID, rule, out)
+		shouldContinue, err := service.ApproveToolForTurn(ctx, r.turnState(), toolCallID, rule, out)
 		if err != nil {
 			r.handleTurnError(ctx, r.turnState(), out, err)
 			return
 		}
 		if shouldContinue {
 			if r.deps.Turns == nil {
-				r.handleTurnError(ctx, r.turnState(), out, fmt.Errorf("turn loop is not supported by runner"))
+				r.handleTurnError(ctx, r.turnState(), out, fmt.Errorf("turn loop service is not configured"))
 				return
 			}
 			r.continueTurnLoop(ctx, r.deps.Turns, r.turnState(), nil, out)
@@ -1250,7 +1250,7 @@ func (r *Chat) handleApproveWithTurnLoop(runner ToolTurnService, toolCallID stri
 	r.forwardTurnEvents(out)
 }
 
-func (r *Chat) handleDenyWithTurnLoop(runner ToolTurnService, toolCallID string) {
+func (r *Chat) handleDenyWithTurnLoop(service ToolTurnService, toolCallID string) {
 	r.mu.Lock()
 	ctx, cancel := context.WithCancel(context.Background())
 	ctx = turncontrol.WithShouldStop(ctx, func() bool {
@@ -1270,7 +1270,7 @@ func (r *Chat) handleDenyWithTurnLoop(runner ToolTurnService, toolCallID string)
 	out := make(chan domain.Event, 32)
 	go func() {
 		defer close(out)
-		if err := runner.DenyToolForTurn(ctx, r.turnState(), toolCallID, out); err != nil {
+		if err := service.DenyToolForTurn(ctx, r.turnState(), toolCallID, out); err != nil {
 			r.handleTurnError(ctx, r.turnState(), out, err)
 		}
 	}()
@@ -1308,13 +1308,13 @@ func (r *Chat) removeApprovalLocked(toolCallID string) {
 }
 
 func (r *Chat) handleResumePendingTools() {
-	if runner := r.deps.Pending; runner != nil {
-		r.handleResumePendingToolsWithTurnLoop(runner)
+	if service := r.deps.Pending; service != nil {
+		r.handleResumePendingToolsWithTurnLoop(service)
 		return
 	}
 }
 
-func (r *Chat) handleResumePendingToolsWithTurnLoop(runner PendingToolService) {
+func (r *Chat) handleResumePendingToolsWithTurnLoop(service PendingToolService) {
 	r.mu.Lock()
 	if r.active || r.status == StatusWaitingApproval || r.draining {
 		r.mu.Unlock()
@@ -1338,14 +1338,14 @@ func (r *Chat) handleResumePendingToolsWithTurnLoop(runner PendingToolService) {
 	out := make(chan domain.Event, 32)
 	go func() {
 		defer close(out)
-		shouldContinue, err := runner.ResumePendingToolsForTurn(ctx, r.turnState(), out)
+		shouldContinue, err := service.ResumePendingToolsForTurn(ctx, r.turnState(), out)
 		if err != nil {
 			r.handleTurnError(ctx, r.turnState(), out, err)
 			return
 		}
 		if shouldContinue {
 			if r.deps.Turns == nil {
-				r.handleTurnError(ctx, r.turnState(), out, fmt.Errorf("turn loop is not supported by runner"))
+				r.handleTurnError(ctx, r.turnState(), out, fmt.Errorf("turn loop service is not configured"))
 				return
 			}
 			r.continueTurnLoop(ctx, r.deps.Turns, r.turnState(), nil, out)
@@ -1674,8 +1674,8 @@ func (r *Chat) runItem(ctx context.Context, item domain.QueuedInput) {
 	note := r.queueNotes[item.ID]
 	delete(r.queueNotes, item.ID)
 	r.mu.Unlock()
-	if runner := r.deps.Turns; runner != nil {
-		r.runTurnLoop(ctx, runner, r.turnStateForInput(item), item, note)
+	if service := r.deps.Turns; service != nil {
+		r.runTurnLoop(ctx, service, r.turnStateForInput(item), item, note)
 		return
 	}
 	err := fmt.Errorf("turn loop service is not configured")
@@ -1690,7 +1690,7 @@ func (r *Chat) runItem(ctx context.Context, item domain.QueuedInput) {
 	r.maybeDispatchNext()
 }
 
-func (r *Chat) runTurnLoop(ctx context.Context, runner TurnLoopService, turn *TurnState, item domain.QueuedInput, note string) {
+func (r *Chat) runTurnLoop(ctx context.Context, service TurnLoopService, turn *TurnState, item domain.QueuedInput, note string) {
 	out := make(chan domain.Event, 32)
 	go func() {
 		defer close(out)
@@ -1698,30 +1698,30 @@ func (r *Chat) runTurnLoop(ctx context.Context, runner TurnLoopService, turn *Tu
 			transient []provider.InstructionBlock
 			err       error
 		)
-		prompt := r.deps.Prompt
-		if prompt == nil {
-			r.handleTurnError(ctx, turn, out, fmt.Errorf("prompt preparation is not supported by runner"))
+		promptService := r.deps.Prompt
+		if promptService == nil {
+			r.handleTurnError(ctx, turn, out, fmt.Errorf("prompt preparation service is not configured"))
 			return
 		}
 		switch item.Kind {
 		case domain.QueuedInputKindContinue:
-			transient, err = prompt.PrepareContinueTurn(ctx, turn, note, out)
+			transient, err = promptService.PrepareContinueTurn(ctx, turn, note, out)
 		default:
-			transient, err = prompt.PreparePromptTurn(ctx, turn, item.Text, queuedAttachmentDrafts(item.Attachments), queuedReferenceDrafts(item.References), note, out)
+			transient, err = promptService.PreparePromptTurn(ctx, turn, item.Text, queuedAttachmentDrafts(item.Attachments), queuedReferenceDrafts(item.References), note, out)
 		}
 		if err != nil {
 			r.handleTurnError(ctx, turn, out, err)
 			return
 		}
-		r.continueTurnLoop(ctx, runner, turn, transient, out)
+		r.continueTurnLoop(ctx, service, turn, transient, out)
 	}()
 	r.forwardTurnEvents(out)
 }
 
-func (r *Chat) continueTurnLoop(ctx context.Context, runner TurnLoopService, turn *TurnState, transient []provider.InstructionBlock, out chan<- domain.Event) {
-	loop := runner.NewTurnLoop(turn)
+func (r *Chat) continueTurnLoop(ctx context.Context, service TurnLoopService, turn *TurnState, transient []provider.InstructionBlock, out chan<- domain.Event) {
+	loop := service.NewTurnLoop(turn)
 	if loop == nil {
-		r.handleTurnError(ctx, turn, out, fmt.Errorf("turn loop is not supported by runner"))
+		r.handleTurnError(ctx, turn, out, fmt.Errorf("turn loop service is not configured"))
 		return
 	}
 	for step := 0; step < loop.MaxSteps(); step++ {
