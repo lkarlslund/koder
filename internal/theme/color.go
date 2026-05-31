@@ -1,4 +1,4 @@
-package colorx
+package theme
 
 import (
 	"fmt"

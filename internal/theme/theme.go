@@ -9,54 +9,52 @@ import (
 	"slices"
 	"strings"
 	"sync"
-
-	"github.com/lkarlslund/koder/internal/colorx"
 )
 
 type Palette struct {
-	ActivityText                 colorx.Color
-	AssistantTimestampText       colorx.Color
-	ComposerMutedText            colorx.Color
-	DiffAddedText                colorx.Color
-	DiffDeletedText              colorx.Color
-	MarkdownCodeBlockBorder      colorx.Color
-	MarkdownCodeBlockText        colorx.Color
-	MarkdownCodeLineNumber       colorx.Color
-	MarkdownCodeHighlightBG      colorx.Color
-	MarkdownCodeDiffAddedBG      colorx.Color
-	MarkdownCodeDiffDeletedBG    colorx.Color
-	MarkdownCodeFocusDim         colorx.Color
-	MarkdownCodeAnnotationBadge  colorx.Color
-	MarkdownCodeAnnotationText   colorx.Color
-	MarkdownEmphasisText         colorx.Color
-	MarkdownHeadingPrimary       colorx.Color
-	MarkdownHeadingSecondary     colorx.Color
-	MarkdownHeadingTertiary      colorx.Color
-	MarkdownInlineCodeBackground colorx.Color
-	MarkdownInlineCodeText       colorx.Color
-	MarkdownMarkBackground       colorx.Color
-	MarkdownLinkTargetText       colorx.Color
-	MarkdownLinkText             colorx.Color
-	MarkdownListEnumeration      colorx.Color
-	MarkdownListMarker           colorx.Color
-	MarkdownQuoteBorder          colorx.Color
-	MarkdownQuoteText            colorx.Color
-	MarkdownRule                 colorx.Color
-	MarkdownStrongText           colorx.Color
-	MarkdownTableBorder          colorx.Color
-	MarkdownText                 colorx.Color
-	ReasoningBackground          colorx.Color
-	ReasoningText                colorx.Color
-	ScreenBackground             colorx.Color
-	SelectionBackground          colorx.Color
-	SelectionForeground          colorx.Color
-	SidebarBackground            colorx.Color
-	SidebarBorder                colorx.Color
-	SidebarForeground            colorx.Color
-	UserAccentBar                colorx.Color
-	UserTextBackground           colorx.Color
-	UserTextForeground           colorx.Color
-	UserTimestampForeground      colorx.Color
+	ActivityText                 Color
+	AssistantTimestampText       Color
+	ComposerMutedText            Color
+	DiffAddedText                Color
+	DiffDeletedText              Color
+	MarkdownCodeBlockBorder      Color
+	MarkdownCodeBlockText        Color
+	MarkdownCodeLineNumber       Color
+	MarkdownCodeHighlightBG      Color
+	MarkdownCodeDiffAddedBG      Color
+	MarkdownCodeDiffDeletedBG    Color
+	MarkdownCodeFocusDim         Color
+	MarkdownCodeAnnotationBadge  Color
+	MarkdownCodeAnnotationText   Color
+	MarkdownEmphasisText         Color
+	MarkdownHeadingPrimary       Color
+	MarkdownHeadingSecondary     Color
+	MarkdownHeadingTertiary      Color
+	MarkdownInlineCodeBackground Color
+	MarkdownInlineCodeText       Color
+	MarkdownMarkBackground       Color
+	MarkdownLinkTargetText       Color
+	MarkdownLinkText             Color
+	MarkdownListEnumeration      Color
+	MarkdownListMarker           Color
+	MarkdownQuoteBorder          Color
+	MarkdownQuoteText            Color
+	MarkdownRule                 Color
+	MarkdownStrongText           Color
+	MarkdownTableBorder          Color
+	MarkdownText                 Color
+	ReasoningBackground          Color
+	ReasoningText                Color
+	ScreenBackground             Color
+	SelectionBackground          Color
+	SelectionForeground          Color
+	SidebarBackground            Color
+	SidebarBorder                Color
+	SidebarForeground            Color
+	UserAccentBar                Color
+	UserTextBackground           Color
+	UserTextForeground           Color
+	UserTimestampForeground      Color
 }
 
 type Theme struct {
@@ -175,7 +173,7 @@ func loadOpenCodeThemes() map[string]Theme {
 }
 
 func buildOpenCodePalette(src opencodeThemeFile) Palette {
-	resolve := func(key string) colorx.Color {
+	resolve := func(key string) Color {
 		return color(resolveOpenCodeValue(src, key))
 	}
 
@@ -456,20 +454,20 @@ func claudeThemes() map[string]Theme {
 	}
 }
 
-func firstNonEmpty(values ...colorx.Color) colorx.Color {
+func firstNonEmpty(values ...Color) Color {
 	for _, value := range values {
 		if value.Valid() {
 			return value
 		}
 	}
-	return colorx.Invalid()
+	return Invalid()
 }
 
-func color(value string) colorx.Color {
-	return colorx.ParseCSSColor(value)
+func color(value string) Color {
+	return ParseCSSColor(value)
 }
 
-func withAlpha(value colorx.Color, alpha uint8) colorx.Color {
+func withAlpha(value Color, alpha uint8) Color {
 	if !value.Valid() {
 		return value
 	}
