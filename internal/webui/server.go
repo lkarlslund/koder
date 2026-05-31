@@ -832,7 +832,7 @@ type stateDelta struct {
 	ContextWindow int       `json:"context_window,omitempty"`
 	ModelInfo     any       `json:"model_info,omitempty"`
 	Theme         string    `json:"theme,omitempty"`
-	Workdir       string    `json:"workdir,omitempty"`
+	ProjectRoot   string    `json:"project_root,omitempty"`
 	Error         string    `json:"error,omitempty"`
 }
 
@@ -948,7 +948,7 @@ func stateDeltaFromState(state app.State) stateDelta {
 		ContextWindow: state.ContextWindow,
 		ModelInfo:     state.ModelInfo,
 		Theme:         state.Theme,
-		Workdir:       state.Workdir,
+		ProjectRoot:   state.ProjectRoot,
 		Error:         state.Error,
 	}
 }

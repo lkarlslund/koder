@@ -59,7 +59,7 @@ type State struct {
 	ContextWindow int                         `json:"context_window"`
 	ModelInfo     ModelInfo                   `json:"model_info"`
 	Theme         string                      `json:"theme"`
-	Workdir       string                      `json:"workdir"`
+	ProjectRoot   string                      `json:"project_root"`
 	RestartNeeded bool                        `json:"restart_needed"`
 	Error         string                      `json:"error,omitempty"`
 }
@@ -281,9 +281,9 @@ type ComposerCompletionItem struct {
 
 // SessionState describes workspace-scoped sessions.
 type SessionState struct {
-	ActiveID domain.ID        `json:"active_id"`
-	Workdir  string           `json:"workdir"`
-	Sessions []domain.Session `json:"sessions"`
+	ActiveID    domain.ID        `json:"active_id"`
+	ProjectRoot string           `json:"project_root"`
+	Sessions    []domain.Session `json:"sessions"`
 }
 
 // Controller owns session/chat state independently from any renderer.
@@ -439,7 +439,7 @@ func (c *Controller) stateLocked() State {
 		ContextWindow: c.contextWindowLocked(),
 		ModelInfo:     c.modelInfoLocked(),
 		Theme:         c.theme,
-		Workdir:       c.session.ProjectRoot,
+		ProjectRoot:   c.session.ProjectRoot,
 		RestartNeeded: c.restartNeeded,
 		Error:         c.lastErr,
 	}
@@ -1017,7 +1017,7 @@ func (c *Controller) Sessions(ctx context.Context) (SessionState, error) {
 	activeID := c.session.ID
 	projectRoot := c.session.ProjectRoot
 	c.mu.RUnlock()
-	return SessionState{ActiveID: activeID, Workdir: projectRoot, Sessions: sessions}, nil
+	return SessionState{ActiveID: activeID, ProjectRoot: projectRoot, Sessions: sessions}, nil
 }
 
 // SwitchSession switches the active session within the current workspace.

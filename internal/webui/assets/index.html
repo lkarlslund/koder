@@ -21,7 +21,7 @@
       <div class="d-flex align-items-center gap-2">
         <i class="bi bi-terminal-fill text-primary"></i>
         <span class="fw-semibold">koder</span>
-        <span class="text-secondary small topbar-workspace text-truncate" :title="state.workdir" x-text="state.workdir || ''"></span>
+        <span class="text-secondary small topbar-workspace text-truncate" :title="state.project_root" x-text="state.project_root || ''"></span>
         <span class="text-secondary small" x-text="sessionTitle(state.session || state.Session || {})"></span>
       </div>
       <div class="d-flex align-items-center gap-2">
@@ -354,7 +354,7 @@
       <header class="d-flex align-items-center justify-content-between gap-3 p-3 border-bottom">
         <div>
           <div class="fw-semibold"><i class="bi bi-collection me-1"></i> Sessions</div>
-          <div class="small text-secondary" x-text="sessionState.workdir || state.workdir || ''"></div>
+          <div class="small text-secondary" x-text="sessionState.project_root || state.project_root || ''"></div>
         </div>
         <button type="button" class="btn btn-sm btn-outline-secondary" @click="closeSessionDialog()"><i class="bi bi-x-lg"></i></button>
       </header>

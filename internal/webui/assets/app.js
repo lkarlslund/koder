@@ -335,7 +335,7 @@
         ws: null, reconnectTimer: null, connectWatchdog: null, reconnectDelay: 150, reconnectProbe: null, nextID: 1, pending: {}, clientID: '', clientStateTimer: null, state: {}, connected: false, connecting: true, draft: '', showPermissions: false,
         showModels: false, modelLoading: false, modelQuery: '', modelOptions: [],
         showSettings: false, settingsLoading: false, settingsSaving: false, settingsTab: 'general', settings: null, settingsStatus: '', settingsStatusKind: 'secondary', selectedPermissionProfile: '',
-        showSessions: false, showSessionEditor: false, sessionEditorMode: 'create', sessionLoading: false, sessionState: {active_id: 0, workdir: '', sessions: []}, sessionDraft: {id: '', title: '', projectRoot: ''},
+        showSessions: false, showSessionEditor: false, sessionEditorMode: 'create', sessionLoading: false, sessionState: {active_id: 0, project_root: '', sessions: []}, sessionDraft: {id: '', title: '', projectRoot: ''},
         providerState: {catalog: [], providers: [], drafts: {}}, showProviderEditor: false, providerDraft: null, providerHeadersText: '{}', providerModelOptions: [], providerStatus: '', providerStatusKind: 'secondary', providerTesting: false, providerSaving: false,
         showModelConfigEditor: false, modelConfigDraft: null, modelConfigStatus: '', modelConfigStatusKind: 'secondary',
         showMCPEditor: false, mcpDraft: null, mcpHeadersText: '{}', mcpStatus: '', mcpStatusKind: 'secondary',
@@ -1545,7 +1545,7 @@
         openSessionDialog() {
           this.showSessions = true; this.sessionLoading = true; this.closeSessionEditor();
           this.reportClientStateSoon();
-          this.rpc('list_sessions', {}).then(result => { this.sessionState = result || {active_id: 0, workdir: '', sessions: []}; }).finally(() => { this.sessionLoading = false; });
+          this.rpc('list_sessions', {}).then(result => { this.sessionState = result || {active_id: 0, project_root: '', sessions: []}; }).finally(() => { this.sessionLoading = false; });
         },
         closeSessionDialog() { this.showSessions = false; this.closeSessionEditor(); this.reportClientStateSoon(); },
         sessionRows() { return this.sessionState.sessions || this.state.sessions || []; },
@@ -1559,7 +1559,7 @@
         },
         beginCreateSession() {
           this.sessionEditorMode = 'create';
-          this.sessionDraft = {id: '', title: '', projectRoot: this.state.workdir || this.state.Workdir || ''};
+          this.sessionDraft = {id: '', title: '', projectRoot: this.state.project_root || ''};
           this.showSessionEditor = true;
         },
         beginEditSession(session) {
