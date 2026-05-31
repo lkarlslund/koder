@@ -23,7 +23,6 @@ import (
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/debugsrv"
 	"github.com/lkarlslund/koder/internal/domain"
-	"github.com/lkarlslund/koder/internal/execruntime"
 	"github.com/lkarlslund/koder/internal/mcp"
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/store"
@@ -138,9 +137,7 @@ func runKoder(ctx context.Context, mode app.StartupMode, workdir string, startup
 	}()
 
 	registry := tools.NewRegistry("")
-	registry.SetExecControl(execruntime.NewManager())
 	engine := agent.New(cfg, st, registry, recorder, mcpManager)
-	registry.SetToolResultControl(engine)
 	return runWeb(ctx, cfg, st, engine, registry, mode, recorder, workdir, startupOpts)
 }
 
@@ -159,9 +156,6 @@ func syncManagedUserAssets(ctx context.Context) error {
 
 func runWeb(ctx context.Context, cfg config.Config, st *store.Store, engine *agent.Engine, registry *tools.Registry, mode app.StartupMode, recorder *debugsrv.Recorder, workdir string, startupOpts startupConfig) error {
 	controller := app.New(cfg, st, engine)
-	if registry != nil {
-		registry.SetChatControl(controller)
-	}
 	if err := controller.Start(ctx, mode, workdir); err != nil {
 		return err
 	}

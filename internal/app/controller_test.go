@@ -1298,8 +1298,8 @@ func newTestControllerWithExec(t *testing.T) (*Controller, *store.Store, *execru
 	workdir := t.TempDir()
 	registry := tools.NewRegistry(workdir)
 	execManager := execruntime.NewManager()
-	registry.SetExecControl(execManager)
 	engine := agent.New(cfg, st, registry, nil)
+	engine.SetExecManager(execManager)
 	ctrl := New(cfg, st, engine)
 	if err := ctrl.Start(context.Background(), StartupModeNew, workdir); err != nil {
 		t.Fatalf("start controller: %v", err)

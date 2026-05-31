@@ -3,7 +3,9 @@ package agent
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
+	"time"
 
 	chatpkg "github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/chatrole"
@@ -160,6 +162,228 @@ func (e *Engine) PollChat(ctx context.Context, sessionID, chatID domain.ID) (too
 		LastError:        lastError,
 		StatusText:       statusText,
 	}, nil
+}
+
+func (e *Engine) StartChat(ctx context.Context, sessionID, parentChatID domain.ID, req tools.ChatStartRequest) (tools.ChatStatus, error) {
+	owner, err := e.LoadSession(ctx, sessionID)
+	if err != nil {
+		return tools.ChatStatus{}, err
+	}
+	snapshot := owner.Snapshot()
+	session := snapshot.Session
+	parentChat, ok := chatByID(snapshot.Chats, parentChatID)
+	if session.ID == "" || session.ID != sessionID {
+		return tools.ChatStatus{}, fmt.Errorf("session %s is not active", sessionID)
+	}
+	if !ok {
+		return tools.ChatStatus{}, fmt.Errorf("parent chat %s not found", parentChatID)
+	}
+	role := domain.WorkflowRole(strings.TrimSpace(string(req.Profile)))
+	if _, ok := chatrole.DefaultRegistry().Lookup(role); !ok {
+		return tools.ChatStatus{}, fmt.Errorf("profile %q is not registered", role)
+	}
+	objective := strings.TrimSpace(req.Objective)
+	if objective == "" {
+		return tools.ChatStatus{}, fmt.Errorf("objective is required")
+	}
+	plan, err := owner.GetMilestonePlan(ctx, sessionID)
+	if err != nil {
+		return tools.ChatStatus{}, err
+	}
+	milestoneRef := strings.TrimSpace(req.MilestoneRef)
+	todoRef := domain.ID(strings.TrimSpace(string(req.TodoRef)))
+	var scopedTodo *store.TodoItem
+	if todoRef != "" {
+		todo, err := sessionTodoByID(ctx, owner, sessionID, plan, todoRef)
+		if err != nil {
+			return tools.ChatStatus{}, err
+		}
+		scopedTodo = &todo
+		if milestoneRef != "" && todo.MilestoneRef != milestoneRef {
+			return tools.ChatStatus{}, fmt.Errorf("todo %s belongs to milestone %q, not %q", todoRef, todo.MilestoneRef, milestoneRef)
+		}
+		milestoneRef = todo.MilestoneRef
+	}
+	var milestone store.Milestone
+	if milestoneRef != "" {
+		var ok bool
+		milestone, ok = milestoneByRef(plan, milestoneRef)
+		if !ok {
+			return tools.ChatStatus{}, fmt.Errorf("milestone %q not found", milestoneRef)
+		}
+		if milestone.OwnerChatID != nil {
+			return tools.ChatStatus{}, fmt.Errorf("milestone %q is owned by chat %s", milestoneRef, *milestone.OwnerChatID)
+		}
+	}
+	if role == chatrole.Decomposition && milestoneRef == "" {
+		return tools.ChatStatus{}, fmt.Errorf("decomposition chat requires milestone_ref or todo_ref")
+	}
+	if role == chatrole.Execution && milestoneRef == "" {
+		return tools.ChatStatus{}, fmt.Errorf("execution chat requires milestone_ref or todo_ref")
+	}
+	if role == chatrole.Decomposition && milestone.Status != domain.MilestoneStatusPending && milestone.Status != domain.MilestoneStatusReady {
+		return tools.ChatStatus{}, fmt.Errorf("milestone %q is %s, expected pending or ready", milestoneRef, milestone.Status)
+	}
+	if role == chatrole.Execution && milestone.Status != domain.MilestoneStatusReady {
+		return tools.ChatStatus{}, fmt.Errorf("milestone %q is %s, expected ready", milestoneRef, milestone.Status)
+	}
+	parentID := parentChat.ID
+	chatTitle := strings.TrimSpace(req.Title)
+	if chatTitle == "" {
+		chatTitle = defaultChildChatTitle(role, milestone, scopedTodo)
+	}
+	now := time.Now().UTC()
+	chatRecord := domain.Chat{
+		ID:                    domain.NewID(),
+		SessionID:             sessionID,
+		ParentChatID:          &parentID,
+		Title:                 chatTitle,
+		WorkflowRole:          role,
+		ProviderID:            strings.TrimSpace(parentChat.ProviderID),
+		ModelID:               strings.TrimSpace(parentChat.ModelID),
+		PermissionProfile:     strings.TrimSpace(parentChat.PermissionProfile),
+		ToolStates:            cloneToolStateMap(parentChat.ToolStates),
+		ActiveMilestoneRef:    milestoneRef,
+		AssignedTodoBucketRef: milestoneRef,
+		AssignedTodoRef:       todoRef,
+		Position:              len(snapshot.Chats),
+		CreatedAt:             now,
+		UpdatedAt:             now,
+	}
+	if _, err := owner.AddPreparedChat(ctx, chatRecord); err != nil {
+		return tools.ChatStatus{}, err
+	}
+	if status := roleMilestoneStatus(role); status != "" {
+		nextPlan, err := updateMilestoneStatus(plan, milestoneRef, status, chatRecord.ID)
+		if err != nil {
+			return tools.ChatStatus{}, err
+		}
+		plan, err = owner.SetMilestonePlan(ctx, sessionID, nextPlan.Summary, nextPlan.Milestones)
+		if err != nil {
+			return tools.ChatStatus{}, err
+		}
+		milestone, _ = milestoneByRef(plan, milestoneRef)
+	}
+	if todoRef != "" && role == chatrole.Execution && scopedTodo != nil && scopedTodo.Status == domain.TodoStatusPending {
+		todo, err := owner.UpdateTodoItem(ctx, todoRef, domain.TodoStatusInProgress, scopedTodo.Content)
+		if err != nil {
+			return tools.ChatStatus{}, err
+		}
+		scopedTodo = &todo
+	}
+	return e.StartPreparedChat(ctx, session, chatRecord, milestone, scopedTodo, role, objective)
+}
+
+func (e *Engine) ArchiveChat(ctx context.Context, sessionID, chatID domain.ID) (tools.ChatStatus, error) {
+	owner, err := e.LoadSession(ctx, sessionID)
+	if err != nil {
+		return tools.ChatStatus{}, err
+	}
+	status, _, err := owner.ArchiveChat(ctx, chatID)
+	return status, err
+}
+
+func sessionTodoByID(ctx context.Context, owner interface {
+	ListTodos(context.Context, domain.ID, string) ([]store.TodoItem, error)
+}, sessionID domain.ID, plan store.MilestonePlan, todoID domain.ID) (store.TodoItem, error) {
+	for _, milestone := range plan.Milestones {
+		todos, err := owner.ListTodos(ctx, sessionID, milestone.Ref)
+		if err != nil {
+			return store.TodoItem{}, err
+		}
+		for _, todo := range todos {
+			if todo.ID == todoID {
+				return todo, nil
+			}
+		}
+	}
+	todos, err := owner.ListTodos(ctx, sessionID, "")
+	if err != nil {
+		return store.TodoItem{}, err
+	}
+	for _, todo := range todos {
+		if todo.ID == todoID {
+			return todo, nil
+		}
+	}
+	return store.TodoItem{}, fmt.Errorf("todo %s not found", todoID)
+}
+
+func updateMilestoneStatus(plan store.MilestonePlan, ref string, status domain.MilestoneStatus, ownerChatID domain.ID) (store.MilestonePlan, error) {
+	next := plan
+	next.Milestones = slices.Clone(plan.Milestones)
+	found := false
+	for idx := range next.Milestones {
+		if next.Milestones[idx].Ref != ref {
+			continue
+		}
+		found = true
+		if next.Milestones[idx].OwnerChatID != nil && *next.Milestones[idx].OwnerChatID != ownerChatID {
+			return store.MilestonePlan{}, fmt.Errorf("milestone %q is owned by chat %s", ref, *next.Milestones[idx].OwnerChatID)
+		}
+		next.Milestones[idx].Status = status
+		if status == domain.MilestoneStatusDecomposing || status == domain.MilestoneStatusExecuting {
+			owner := ownerChatID
+			next.Milestones[idx].OwnerChatID = &owner
+		} else {
+			next.Milestones[idx].OwnerChatID = nil
+		}
+	}
+	if !found {
+		return store.MilestonePlan{}, fmt.Errorf("milestone %q not found", ref)
+	}
+	return next, nil
+}
+
+func roleMilestoneStatus(role domain.WorkflowRole) domain.MilestoneStatus {
+	switch role {
+	case chatrole.Decomposition:
+		return domain.MilestoneStatusDecomposing
+	case chatrole.Execution:
+		return domain.MilestoneStatusExecuting
+	default:
+		return ""
+	}
+}
+
+func defaultChildChatTitle(role domain.WorkflowRole, milestone store.Milestone, todo *store.TodoItem) string {
+	prefix := chatrole.DisplayName(role)
+	if todo != nil {
+		return fmt.Sprintf("%s: %s", prefix, todo.Content)
+	}
+	if strings.TrimSpace(milestone.Title) != "" {
+		return fmt.Sprintf("%s: %s", prefix, milestone.Title)
+	}
+	return prefix
+}
+
+func cloneToolStateMap(src map[domain.ToolKind]bool) map[domain.ToolKind]bool {
+	if len(src) == 0 {
+		return map[domain.ToolKind]bool{}
+	}
+	out := make(map[domain.ToolKind]bool, len(src))
+	for key, value := range src {
+		out[key] = value
+	}
+	return out
+}
+
+func milestoneByRef(plan store.MilestonePlan, ref string) (store.Milestone, bool) {
+	for _, milestone := range plan.Milestones {
+		if milestone.Ref == ref {
+			return milestone, true
+		}
+	}
+	return store.Milestone{}, false
+}
+
+func chatByID(chats []domain.Chat, chatID domain.ID) (domain.Chat, bool) {
+	for _, item := range chats {
+		if item.ID == chatID {
+			return item, true
+		}
+	}
+	return domain.Chat{}, false
 }
 
 func (e *Engine) StartPreparedChat(ctx context.Context, session domain.Session, chatRecord domain.Chat, milestone store.Milestone, scopedTodo *store.TodoItem, role domain.WorkflowRole, objective string) (tools.ChatStatus, error) {

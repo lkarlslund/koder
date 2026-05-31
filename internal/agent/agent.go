@@ -70,16 +70,6 @@ func New(cfg config.Config, st *store.Store, registry *tools.Registry, debug *de
 	if len(mcpManagers) > 0 {
 		mcpManager = mcpManagers[0]
 	}
-	if registry != nil {
-		registry.SetMCP(mcpManager)
-		registry.SetSandboxProfiles(cfg.Permissions)
-	}
-	var execManager *execruntime.Manager
-	if registry != nil {
-		if candidate, ok := registry.ExecControl().(*execruntime.Manager); ok {
-			execManager = candidate
-		}
-	}
 	return &Engine{
 		cfg:        cfg,
 		store:      st,
@@ -89,7 +79,7 @@ func New(cfg config.Config, st *store.Store, registry *tools.Registry, debug *de
 		caps:       provider.NewCapabilityStore(cfg.StateDir()),
 		agents:     agents.NewManager(cfg.StateDir(), filepath.Join(filepath.Dir(cfg.Path()), "AGENTS.md")),
 		mcp:        mcpManager,
-		exec:       execManager,
+		exec:       execruntime.NewManager(),
 		sessions:   map[domain.ID]*sessionpkg.Session{},
 		chats:      map[domain.ID]*chatpkg.Chat{},
 		runs:       map[domain.ID]chatRunState{},
@@ -100,9 +90,6 @@ func New(cfg config.Config, st *store.Store, registry *tools.Registry, debug *de
 func (e *Engine) UpdateConfig(cfg config.Config) {
 	e.cfg = cfg
 	e.agents = agents.NewManager(cfg.StateDir(), filepath.Join(filepath.Dir(cfg.Path()), "AGENTS.md"))
-	if e.registry != nil {
-		e.registry.SetSandboxProfiles(cfg.Permissions)
-	}
 	if e.mcp != nil {
 		_ = e.mcp.LoadConfig(cfg.MCPServers)
 		go func() {
@@ -130,6 +117,13 @@ func (e *Engine) ReloadMCP(ctx context.Context) error {
 
 func (e *Engine) ExecManager() *execruntime.Manager {
 	return e.exec
+}
+
+func (e *Engine) SetExecManager(manager *execruntime.Manager) {
+	if e == nil || manager == nil {
+		return
+	}
+	e.exec = manager
 }
 
 func chatModel(chat domain.Chat) (string, string, error) {
@@ -1127,7 +1121,7 @@ func (e *Engine) persistToolResult(ctx context.Context, chatID, sessionID domain
 			return nil, err
 		}
 	}
-	events, err := e.registry.PersistResultWithRuntime(ctx, e.toolRuntime(session, chat), req, result)
+	events, err := e.registry.PersistResult(ctx, e.toolRuntime(session, chat), req, result)
 	if err != nil {
 		return nil, err
 	}
@@ -2060,12 +2054,24 @@ func (e *Engine) toolRuntime(session domain.Session, chat domain.Chat) tools.Run
 		ActiveMilestoneRef:    chat.ActiveMilestoneRef,
 		AssignedTodoBucketRef: chat.AssignedTodoBucketRef,
 		AssignedTodoRef:       chat.AssignedTodoRef,
+		ChatControl:           e,
+		Exec:                  e.exec,
 		MCP:                   e.mcp,
+		SandboxProfiles:       normalizedSandboxProfiles(e.cfg.Permissions),
+		DefaultSandboxProfile: strings.TrimSpace(e.cfg.Permissions.Profile),
 	}
 	if owner := e.loadedSession(session.ID); owner != nil {
 		runtime.SessionControl = owner
 	}
 	return runtime
+}
+
+func normalizedSandboxProfiles(rules permissionprofile.Rules) map[string]permissionprofile.Profile {
+	profiles := make(map[string]permissionprofile.Profile, len(rules.Profiles))
+	for name, profile := range rules.Profiles {
+		profiles[name] = permissionprofile.Normalize(profile)
+	}
+	return profiles
 }
 
 func (e *Engine) loadedSession(sessionID domain.ID) *sessionpkg.Session {
@@ -3395,7 +3401,7 @@ func (e *Engine) executePreparedToolCallForTurn(ctx context.Context, turn *chatp
 			return nil, err
 		}
 	}
-	result, err := e.registry.ExecuteWithRuntime(ctx, e.toolRuntime(session, chat), req)
+	result, err := e.registry.Execute(ctx, e.toolRuntime(session, chat), req)
 	if err != nil {
 		e.recordLifecycle(sessionID, "tool_execution_failed", err.Error(), map[string]string{"tool": string(req.Tool), "tool_call_id": req.ToolCallID})
 		if interruptedErr(err) {

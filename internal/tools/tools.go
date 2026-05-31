@@ -11,7 +11,6 @@ import (
 	"sync"
 
 	"github.com/lkarlslund/koder/internal/chatrole"
-	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/execruntime"
 	"github.com/lkarlslund/koder/internal/permissionprofile"
@@ -190,7 +189,6 @@ type resultPersister interface {
 }
 
 type Registry struct {
-	runtime Runtime
 }
 
 var (
@@ -242,128 +240,27 @@ func Info(kind domain.ToolKind) ToolSpec {
 	return normalizeToolSpec(kind, ToolSpec{})
 }
 
-func NewRegistry(workdir string) *Registry {
-	def := config.Default()
-	return &Registry{
-		runtime: Runtime{
-			Workdir:               workdir,
-			HTTPClient:            &http.Client{},
-			SandboxProfiles:       def.Permissions.Profiles,
-			DefaultSandboxProfile: def.Permissions.Profile,
-		},
-	}
+func NewRegistry(_ ...string) *Registry {
+	return &Registry{}
 }
 
-func (r *Registry) SetChatControl(control ChatControl) {
-	r.runtime.ChatControl = control
-}
-
-func (r *Registry) SetToolResultControl(control ToolResultControl) {
-	r.runtime.ToolResultControl = control
-}
-
-func (r *Registry) SetExecControl(control execruntime.Control) {
-	r.runtime.Exec = control
-}
-
-func (r *Registry) ExecControl() execruntime.Control {
-	return r.runtime.Exec
-}
-
-func (r *Registry) SetMCP(executor MCPExecutor) {
-	r.runtime.MCP = executor
-}
-
-func (r *Registry) SetSandboxProfiles(rules permissionprofile.Rules) {
-	profiles := make(map[string]permissionprofile.Profile, len(rules.Profiles))
-	for name, profile := range rules.Profiles {
-		profiles[name] = permissionprofile.Normalize(profile)
-	}
-	r.runtime.SandboxProfiles = profiles
-	r.runtime.DefaultSandboxProfile = strings.TrimSpace(rules.Profile)
-}
-
-func (r *Registry) Execute(ctx context.Context, req Request) (Result, error) {
+func (r *Registry) Execute(ctx context.Context, runtime Runtime, req Request) (Result, error) {
 	req, tool, err := normalizeRequest(req)
 	if err != nil {
 		return Result{}, err
 	}
-	if err := chatrole.CheckToolAllowed(r.runtime.ChatRole, req.Tool); err != nil {
-		return Result{}, err
-	}
-	return tool.Execute(ctx, r.runtime, req)
-}
-
-func (r *Registry) ExecuteWithRuntime(ctx context.Context, runtime Runtime, req Request) (Result, error) {
-	req, tool, err := normalizeRequest(req)
-	if err != nil {
-		return Result{}, err
-	}
-	runtime = mergeRuntime(r.runtime, runtime)
+	runtime = normalizeRuntime(runtime)
 	if err := chatrole.CheckToolAllowed(runtime.ChatRole, req.Tool); err != nil {
 		return Result{}, err
 	}
 	return tool.Execute(ctx, runtime, req)
 }
 
-func mergeRuntime(base, override Runtime) Runtime {
-	out := base
-	if override.Workdir != "" {
-		out.Workdir = override.Workdir
+func normalizeRuntime(runtime Runtime) Runtime {
+	if runtime.HTTPClient == nil {
+		runtime.HTTPClient = &http.Client{}
 	}
-	if override.HTTPClient != nil {
-		out.HTTPClient = override.HTTPClient
-	}
-	if override.Store != nil {
-		out.Store = override.Store
-	}
-	if override.SessionID != "" {
-		out.SessionID = override.SessionID
-	}
-	if override.ChatID != "" {
-		out.ChatID = override.ChatID
-	}
-	if override.ChatRole != "" {
-		out.ChatRole = override.ChatRole
-	}
-	if override.ActiveMilestoneRef != "" {
-		out.ActiveMilestoneRef = override.ActiveMilestoneRef
-	}
-	if override.AssignedTodoBucketRef != "" {
-		out.AssignedTodoBucketRef = override.AssignedTodoBucketRef
-	}
-	if override.AssignedTodoRef != "" {
-		out.AssignedTodoRef = override.AssignedTodoRef
-	}
-	if override.ChatControl != nil {
-		out.ChatControl = override.ChatControl
-	}
-	if override.SessionControl != nil {
-		out.SessionControl = override.SessionControl
-	}
-	if override.ToolResultControl != nil {
-		out.ToolResultControl = override.ToolResultControl
-	}
-	if override.Exec != nil {
-		out.Exec = override.Exec
-	}
-	if override.MCP != nil {
-		out.MCP = override.MCP
-	}
-	if override.SandboxProfiles != nil {
-		out.SandboxProfiles = override.SandboxProfiles
-	}
-	if override.DefaultSandboxProfile != "" {
-		out.DefaultSandboxProfile = override.DefaultSandboxProfile
-	}
-	if runtimeProfileSet(override.SandboxProfile) {
-		out.SandboxProfile = override.SandboxProfile
-	}
-	return out
-}
-
-func runtimeProfileSet(profile permissionprofile.Profile) bool {
-	return profile.Network || profile.Root != "" || profile.Workspace != "" || len(profile.Mounts) > 0 || len(profile.Rules) > 0
+	return runtime
 }
 
 func (r Runtime) sandboxProfileForSession(ctx context.Context, st *store.Store, sessionID domain.ID) permissionprofile.Profile {
@@ -382,7 +279,7 @@ func (r Runtime) sandboxProfileForSession(ctx context.Context, st *store.Store, 
 	return permissionprofile.Normalize(permissionprofile.Profile{})
 }
 
-func (r *Registry) PersistResultWithRuntime(ctx context.Context, runtime Runtime, req Request, result Result) (<-chan domain.Event, error) {
+func (r *Registry) PersistResult(ctx context.Context, runtime Runtime, req Request, result Result) (<-chan domain.Event, error) {
 	if req.Tool == "" {
 		return nil, errors.New("tool is empty")
 	}
@@ -393,7 +290,7 @@ func (r *Registry) PersistResultWithRuntime(ctx context.Context, runtime Runtime
 	if req.Args == nil {
 		req.Args = map[string]string{}
 	}
-	runtime = mergeRuntime(r.runtime, runtime)
+	runtime = normalizeRuntime(runtime)
 	ctx = WithChatID(ctx, runtime.ChatID)
 	if persister, ok := tool.(resultPersister); ok {
 		return persister.PersistResult(ctx, runtime, req, result)

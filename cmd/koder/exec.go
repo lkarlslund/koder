@@ -14,10 +14,10 @@ import (
 	"github.com/santhosh-tekuri/jsonschema/v6"
 	"github.com/spf13/cobra"
 
-	"github.com/lkarlslund/koder/internal/agents"
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/execruntime"
+	"github.com/lkarlslund/koder/internal/permissionprofile"
 	"github.com/lkarlslund/koder/internal/provider"
 	"github.com/lkarlslund/koder/internal/tools"
 	_ "github.com/lkarlslund/koder/internal/tools/all"
@@ -126,9 +126,7 @@ func runExec(ctx context.Context, opts execOptions, prompt string) (string, erro
 	if err != nil {
 		return "", err
 	}
-	registry := tools.NewRegistry(agents.FindProjectRoot(workdir))
-	registry.SetExecControl(execruntime.NewManager())
-	registry.SetSandboxProfiles(cfg.Permissions)
+	registry := tools.NewRegistry()
 	schema, err := loadStructuredOutputSchema(opts)
 	if err != nil {
 		return "", err
@@ -238,7 +236,12 @@ func (r execRunner) run(ctx context.Context, prompt, providerID, modelID, workdi
 		{Role: domain.MessageRoleSystem, Content: directSystemPrompt(workdir, schema != nil)},
 		{Role: domain.MessageRoleUser, Content: prompt},
 	}
-	runtime := tools.Runtime{Workdir: workdir}
+	runtime := tools.Runtime{
+		Workdir:               workdir,
+		Exec:                  execruntime.NewManager(),
+		SandboxProfiles:       normalizedExecSandboxProfiles(r.cfg.Permissions),
+		DefaultSandboxProfile: strings.TrimSpace(r.cfg.Permissions.Profile),
+	}
 	defs := tools.Definitions(runtime)
 	if schema != nil {
 		defs = append(defs, structuredOutputDefinition(schema.raw))
@@ -288,7 +291,7 @@ func (r execRunner) run(ctx context.Context, prompt, providerID, modelID, workdi
 			Content:   resp.Text,
 			ToolCalls: resp.ToolCalls,
 		})
-		if err := r.appendToolResults(ctx, &messages, resp.ToolCalls); err != nil {
+		if err := r.appendToolResults(ctx, runtime, &messages, resp.ToolCalls); err != nil {
 			return "", err
 		}
 	}
@@ -367,7 +370,15 @@ func structuredOutputFromCalls(calls []provider.ToolCall, schema *structuredOutp
 	return "", structuredCalls, firstErr
 }
 
-func (r execRunner) appendToolResults(ctx context.Context, messages *[]provider.Message, calls []provider.ToolCall) error {
+func normalizedExecSandboxProfiles(rules permissionprofile.Rules) map[string]permissionprofile.Profile {
+	profiles := make(map[string]permissionprofile.Profile, len(rules.Profiles))
+	for name, profile := range rules.Profiles {
+		profiles[name] = permissionprofile.Normalize(profile)
+	}
+	return profiles
+}
+
+func (r execRunner) appendToolResults(ctx context.Context, runtime tools.Runtime, messages *[]provider.Message, calls []provider.ToolCall) error {
 	for _, call := range calls {
 		if strings.TrimSpace(call.Function.Name) == structuredOutputToolName {
 			continue
@@ -377,7 +388,7 @@ func (r execRunner) appendToolResults(ctx context.Context, messages *[]provider.
 			*messages = append(*messages, provider.Message{Role: domain.MessageRoleTool, ToolCallID: strings.TrimSpace(call.ID), Content: "Error: " + err.Error()})
 			continue
 		}
-		result, err := r.tools.Execute(ctx, req)
+		result, err := r.tools.Execute(ctx, runtime, req)
 		content := strings.TrimSpace(result.Output)
 		if err != nil {
 			content = "Error: " + err.Error()
