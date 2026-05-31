@@ -62,6 +62,18 @@ func TestNormalizeArgsAndDefinitions(t *testing.T) {
 	if args["ref"] != "alpha" || args["title"] != "Alpha" {
 		t.Fatalf("unexpected normalized args: %#v", args)
 	}
+	planned, err := (planTool{}).NormalizeArgs(map[string]string{
+		"ref":    "alpha",
+		"title":  "Alpha",
+		"status": "ready",
+		"items":  `[{"content":"one"}]`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if planned["status"] != domain.MilestoneStatusReady.String() {
+		t.Fatalf("expected ready status string, got %#v", planned)
+	}
 	if _, enabled := tools.DefinitionFor(domain.ToolKindMilestoneAdd, tools.Runtime{ChatRole: chatrole.Execution}); enabled {
 		t.Fatal("expected add-items definition to be disabled in execution chats")
 	}

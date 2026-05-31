@@ -44,7 +44,7 @@ func ApprovalCollection(st *store.Store) store.Collection[Approval] {
 		Indexes: []store.IndexSpec[Approval]{
 			{Name: "session", Value: func(v Approval) string { return v.SessionID }},
 			{Name: "chat", Value: func(v Approval) string { return v.ChatID }},
-			{Name: "status", Value: func(v Approval) string { return string(v.Status) }},
+			{Name: "status", Value: func(v Approval) string { return v.Status.String() }},
 		},
 	})
 }

@@ -104,7 +104,7 @@ func (updateItemTool) NormalizeArgs(args map[string]string) (map[string]string, 
 		return nil, err
 	}
 	out := map[string]string{
-		"ref":  ref,
+		"ref":    ref,
 		"status": status.String(),
 	}
 	if title := strings.TrimSpace(tools.FirstArg(args, "title")); title != "" {
@@ -145,7 +145,7 @@ func (planTool) NormalizeArgs(args map[string]string) (map[string]string, error)
 		if err != nil {
 			return nil, err
 		}
-		out["status"] = string(parsed)
+		out["status"] = parsed.String()
 	}
 	return out, nil
 }
@@ -252,7 +252,7 @@ func (planTool) Execute(ctx context.Context, runtime tools.Runtime, req tools.Re
 		status = domain.MilestoneStatusReady
 	}
 	nextMilestones := upsertMilestone(plan.Milestones, planning.Milestone{
-		Ref:  ref,
+		Ref:    ref,
 		Title:  strings.TrimSpace(req.Args["title"]),
 		Status: status,
 		Notes:  strings.TrimSpace(req.Args["notes"]),
@@ -391,7 +391,7 @@ func (planTool) PersistResult(ctx context.Context, runtime tools.Runtime, req to
 		status = domain.MilestoneStatusReady
 	}
 	nextMilestones := upsertMilestone(plan.Milestones, planning.Milestone{
-		Ref:  req.Args["ref"],
+		Ref:    req.Args["ref"],
 		Title:  strings.TrimSpace(req.Args["title"]),
 		Status: status,
 		Notes:  strings.TrimSpace(req.Args["notes"]),
