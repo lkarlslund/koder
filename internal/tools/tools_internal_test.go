@@ -6,6 +6,7 @@ import (
 
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/store"
+	"github.com/lkarlslund/koder/internal/tools/tooltest"
 )
 
 type badStoredResult struct {
@@ -31,7 +32,7 @@ func TestPersistStandardResultReturnsStoredMarshalError(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err = PersistStandardResult(context.Background(), Runtime{Store: st, SessionID: session.ID, SessionControl: NewStoreSessionControl(st)}, Request{
+	_, err = PersistStandardResult(context.Background(), Runtime{Store: st, SessionID: session.ID, SessionControl: tooltest.NewSessionControl(st)}, Request{
 		Tool: domain.ToolKindQuestion,
 		Args: map[string]string{"question": "What next?"},
 	}, Result{

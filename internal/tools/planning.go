@@ -20,41 +20,6 @@ type SessionControl interface {
 	AddTask(context.Context, domain.ID, string, domain.TaskStatus) (store.Task, error)
 }
 
-type storeSessionControl struct {
-	store *store.Store
-}
-
-func NewStoreSessionControl(st *store.Store) SessionControl {
-	if st == nil {
-		return nil
-	}
-	return storeSessionControl{store: st}
-}
-
-func (c storeSessionControl) GetMilestonePlan(ctx context.Context, sessionID domain.ID) (store.MilestonePlan, error) {
-	return c.store.GetMilestonePlan(ctx, sessionID)
-}
-
-func (c storeSessionControl) SetMilestonePlan(ctx context.Context, sessionID domain.ID, summary string, milestones []store.Milestone) (store.MilestonePlan, error) {
-	return c.store.SetMilestonePlan(ctx, sessionID, summary, milestones)
-}
-
-func (c storeSessionControl) AddTodoItems(ctx context.Context, sessionID domain.ID, ref string, items []string) ([]store.TodoItem, error) {
-	return c.store.AddTodoItems(ctx, sessionID, ref, items)
-}
-
-func (c storeSessionControl) UpdateTodoItem(ctx context.Context, id domain.ID, status domain.TodoStatus, content string) (store.TodoItem, error) {
-	return c.store.UpdateTodoItem(ctx, id, status, content)
-}
-
-func (c storeSessionControl) ListTodos(ctx context.Context, sessionID domain.ID, ref string) ([]store.TodoItem, error) {
-	return c.store.ListTodos(ctx, sessionID, ref)
-}
-
-func (c storeSessionControl) AddTask(ctx context.Context, sessionID domain.ID, body string, status domain.TaskStatus) (store.Task, error) {
-	return c.store.AddTask(ctx, sessionID, body, status)
-}
-
 type MilestoneInput struct {
 	Ref    string `json:"ref"`
 	Title  string `json:"title"`

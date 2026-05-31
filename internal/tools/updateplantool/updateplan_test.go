@@ -8,6 +8,7 @@ import (
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools"
+	"github.com/lkarlslund/koder/internal/tools/tooltest"
 )
 
 func openPlanStore(t *testing.T) *store.Store {
@@ -50,7 +51,7 @@ func TestPersistResultStoresPlanUpdate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	runtime := tools.Runtime{Store: st, SessionID: session.ID, SessionControl: tools.NewStoreSessionControl(st)}
+	runtime := tools.Runtime{Store: st, SessionID: session.ID, SessionControl: tooltest.NewSessionControl(st)}
 	events, err := tool{}.PersistResult(context.Background(), runtime, tools.Request{
 		Tool: domain.ToolKindUpdatePlan,
 		Args: map[string]string{
@@ -95,7 +96,7 @@ func TestPersistResultRejectsInvalidPlanBeforeWriting(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	runtime := tools.Runtime{Store: st, SessionID: session.ID, SessionControl: tools.NewStoreSessionControl(st)}
+	runtime := tools.Runtime{Store: st, SessionID: session.ID, SessionControl: tooltest.NewSessionControl(st)}
 	_, err = tool{}.PersistResult(context.Background(), runtime, tools.Request{
 		Tool: domain.ToolKindUpdatePlan,
 		Args: map[string]string{

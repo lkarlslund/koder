@@ -11,6 +11,7 @@ import (
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools"
 	_ "github.com/lkarlslund/koder/internal/tools/all"
+	"github.com/lkarlslund/koder/internal/tools/tooltest"
 )
 
 func openToolsTestStore(t *testing.T) *store.Store {
@@ -130,7 +131,7 @@ func TestPersistStandardResultPersistsMessagePartAndDiff(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	events, err := tools.PersistStandardResult(tools.WithChatID(context.Background(), chat.ID), tools.Runtime{Store: st, SessionID: session.ID, SessionControl: tools.NewStoreSessionControl(st)}, tools.Request{
+	events, err := tools.PersistStandardResult(tools.WithChatID(context.Background(), chat.ID), tools.Runtime{Store: st, SessionID: session.ID, SessionControl: tooltest.NewSessionControl(st)}, tools.Request{
 		Tool:       domain.ToolKindWrite,
 		ToolCallID: "call_write",
 		Args:       map[string]string{"path": "notes.txt"},

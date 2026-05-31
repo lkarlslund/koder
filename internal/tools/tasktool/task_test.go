@@ -7,6 +7,7 @@ import (
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools"
+	"github.com/lkarlslund/koder/internal/tools/tooltest"
 )
 
 func openTaskStore(t *testing.T) *store.Store {
@@ -42,7 +43,7 @@ func TestPersistResultCreatesPendingTask(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	runtime := tools.Runtime{Store: st, SessionID: session.ID, SessionControl: tools.NewStoreSessionControl(st)}
+	runtime := tools.Runtime{Store: st, SessionID: session.ID, SessionControl: tooltest.NewSessionControl(st)}
 	events, err := tool{}.PersistResult(context.Background(), runtime, tools.Request{
 		Tool: domain.ToolKindTask,
 		Args: map[string]string{"body": "Ship it"},

@@ -10,6 +10,7 @@ import (
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools"
 	_ "github.com/lkarlslund/koder/internal/tools/all"
+	"github.com/lkarlslund/koder/internal/tools/tooltest"
 )
 
 func TestTodoUpdateItemParsesStringID(t *testing.T) {
@@ -48,7 +49,7 @@ func TestMilestoneAndTodoWorkflow(t *testing.T) {
 		t.Fatal(err)
 	}
 	registry := tools.NewRegistry(t.TempDir())
-	registry.SetSessionControl(tools.NewStoreSessionControl(st))
+	registry.SetSessionControl(tooltest.NewSessionControl(st))
 
 	_, err = executeAndPersist(ctx, t, registry, st, session.ID, tools.Request{
 		Tool: domain.ToolKindMilestoneAdd,
@@ -140,7 +141,7 @@ func TestTodoAddPersistReturnsRealTodoIDs(t *testing.T) {
 		t.Fatal(err)
 	}
 	registry := tools.NewRegistry(t.TempDir())
-	registry.SetSessionControl(tools.NewStoreSessionControl(st))
+	registry.SetSessionControl(tooltest.NewSessionControl(st))
 
 	if _, err := executeAndPersist(ctx, t, registry, st, session.ID, tools.Request{
 		Tool: domain.ToolKindMilestoneAdd,
@@ -196,7 +197,7 @@ func TestTodoScopedChatSeesAndUpdatesOnlyAssignedTodo(t *testing.T) {
 		AssignedTodoRef:       todos[0].ID,
 	}
 	registry := tools.NewRegistry(t.TempDir())
-	registry.SetSessionControl(tools.NewStoreSessionControl(st))
+	registry.SetSessionControl(tooltest.NewSessionControl(st))
 
 	listed, err := registry.ExecuteWithChat(ctx, st, session.ID, chat, tools.Request{
 		Tool: domain.ToolKindTodoList,

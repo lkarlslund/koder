@@ -9,6 +9,7 @@ import (
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools"
+	"github.com/lkarlslund/koder/internal/tools/tooltest"
 )
 
 func openMilestoneStore(t *testing.T) *store.Store {
@@ -28,7 +29,7 @@ func newMilestoneRuntime(t *testing.T) (tools.Runtime, *store.Store, domain.Sess
 	if err != nil {
 		t.Fatal(err)
 	}
-	return tools.Runtime{Store: st, SessionID: session.ID, SessionControl: tools.NewStoreSessionControl(st), ChatRole: chatrole.Orchestrator}, st, session
+	return tools.Runtime{Store: st, SessionID: session.ID, SessionControl: tooltest.NewSessionControl(st), ChatRole: chatrole.Orchestrator}, st, session
 }
 
 func seedPlan(t *testing.T, st *store.Store, sessionID domain.ID) {
