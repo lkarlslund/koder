@@ -18,6 +18,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/lkarlslund/koder/internal/agent"
+	"github.com/lkarlslund/koder/internal/app"
 	"github.com/lkarlslund/koder/internal/assets"
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/debugsrv"
@@ -28,7 +29,6 @@ import (
 	"github.com/lkarlslund/koder/internal/store"
 	"github.com/lkarlslund/koder/internal/tools"
 	"github.com/lkarlslund/koder/internal/tools/codesearchtool"
-	"github.com/lkarlslund/koder/internal/uicore"
 	"github.com/lkarlslund/koder/internal/version"
 	"github.com/lkarlslund/koder/internal/webui"
 )
@@ -51,7 +51,7 @@ func NewRootCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return runKoder(cmd.Context(), uicore.StartupModeNew, workdir, startupOptsFromFlags(opts, false))
+			return runKoder(cmd.Context(), app.StartupModeNew, workdir, startupOptsFromFlags(opts, false))
 		},
 	}
 	bindStartupFlags(cmd, &opts)
@@ -121,7 +121,7 @@ type startupConfig struct {
 	WebBindExplicit bool
 }
 
-func runKoder(ctx context.Context, mode uicore.StartupMode, workdir string, startupOpts startupConfig) error {
+func runKoder(ctx context.Context, mode app.StartupMode, workdir string, startupOpts startupConfig) error {
 	defer codesearchtool.CloseLanguageServers()
 	cfg, err := config.Load()
 	if err != nil {
@@ -166,8 +166,8 @@ func syncManagedUserAssets(ctx context.Context) error {
 	return err
 }
 
-func runWeb(ctx context.Context, cfg config.Config, st *store.Store, engine *agent.Engine, registry *tools.Registry, mode uicore.StartupMode, recorder *debugsrv.Recorder, workdir string, startupOpts startupConfig) error {
-	controller := uicore.New(cfg, st, engine)
+func runWeb(ctx context.Context, cfg config.Config, st *store.Store, engine *agent.Engine, registry *tools.Registry, mode app.StartupMode, recorder *debugsrv.Recorder, workdir string, startupOpts startupConfig) error {
+	controller := app.New(cfg, st, engine)
 	if registry != nil {
 		registry.SetChatControl(controller)
 	}
@@ -219,7 +219,7 @@ func runWeb(ctx context.Context, cfg config.Config, st *store.Store, engine *age
 	}
 }
 
-func startWebUI(ctx context.Context, controller *uicore.Controller, bind string, noBrowser bool, recorder *debugsrv.Recorder) (*webui.Server, error) {
+func startWebUI(ctx context.Context, controller *app.Controller, bind string, noBrowser bool, recorder *debugsrv.Recorder) (*webui.Server, error) {
 	return webui.Start(ctx, controller, webui.Options{
 		Bind:      bind,
 		NoBrowser: noBrowser,
@@ -287,7 +287,7 @@ func newResumeCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return runKoder(cmd.Context(), uicore.StartupModeResume, workdir, startupOptsFromFlags(opts, showAllSessions))
+			return runKoder(cmd.Context(), app.StartupModeResume, workdir, startupOptsFromFlags(opts, showAllSessions))
 		},
 	}
 	bindStartupFlags(cmd, &opts)

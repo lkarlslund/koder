@@ -24,11 +24,11 @@ import (
 
 	"github.com/coder/websocket"
 
+	"github.com/lkarlslund/koder/internal/app"
 	"github.com/lkarlslund/koder/internal/attachment"
 	"github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/debugsrv"
 	"github.com/lkarlslund/koder/internal/domain"
-	"github.com/lkarlslund/koder/internal/uicore"
 )
 
 const defaultOpenDelay = 5 * time.Second
@@ -55,7 +55,7 @@ type Options struct {
 
 // Server serves the browser UI and bridges websocket RPC to the controller.
 type Server struct {
-	controller        *uicore.Controller
+	controller        *app.Controller
 	options           Options
 	server            *http.Server
 	listener          net.Listener
@@ -72,7 +72,7 @@ type clientSelection struct {
 }
 
 // Start starts the web UI server.
-func Start(ctx context.Context, controller *uicore.Controller, options Options) (*Server, error) {
+func Start(ctx context.Context, controller *app.Controller, options Options) (*Server, error) {
 	if controller == nil {
 		return nil, fmt.Errorf("controller is nil")
 	}
@@ -621,7 +621,7 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 	case "preferences_state":
 		return s.controller.Preferences(ctx)
 	case "save_preferences":
-		var in uicore.PreferencesState
+		var in app.PreferencesState
 		if err := decodeParams(params, &in); err != nil {
 			return nil, err
 		}
@@ -663,13 +663,13 @@ func (s *Server) handleRPC(ctx context.Context, clientID string, method string, 
 		}
 		return s.controller.NewProviderDraft(in.TemplateID)
 	case "test_provider":
-		var in uicore.ProviderDraft
+		var in app.ProviderDraft
 		if err := decodeParams(params, &in); err != nil {
 			return nil, err
 		}
 		return s.controller.TestProvider(ctx, in)
 	case "save_provider":
-		var in uicore.ProviderDraft
+		var in app.ProviderDraft
 		if err := decodeParams(params, &in); err != nil {
 			return nil, err
 		}
@@ -748,13 +748,13 @@ func (s *Server) prepareClientSelection(ctx context.Context, clientID, method st
 	return nil
 }
 
-func (s *Server) stateForClient(ctx context.Context, clientID string) (uicore.State, error) {
+func (s *Server) stateForClient(ctx context.Context, clientID string) (app.State, error) {
 	selection := s.clientSelection(clientID)
 	if selection.SessionID != "" {
 		state := s.controller.State()
 		if state.Session.ID != selection.SessionID {
 			if err := s.controller.SwitchSession(ctx, selection.SessionID); err != nil {
-				return uicore.State{}, err
+				return app.State{}, err
 			}
 		}
 	}
@@ -762,7 +762,7 @@ func (s *Server) stateForClient(ctx context.Context, clientID string) (uicore.St
 		state := s.controller.State()
 		if state.ActiveChatID != selection.ChatID {
 			if err := s.controller.SwitchChat(ctx, selection.ChatID); err != nil {
-				return uicore.State{}, err
+				return app.State{}, err
 			}
 		}
 	}
@@ -783,10 +783,10 @@ func rpcUsesActiveSelection(method string) bool {
 
 func (s *Server) updateClientSelectionFromResult(clientID string, result any) {
 	switch value := result.(type) {
-	case uicore.State:
+	case app.State:
 		s.setClientSelection(clientID, clientSelection{SessionID: value.Session.ID, ChatID: value.ActiveChatID})
 	case rpcHello:
-		if state, ok := value.State.(uicore.State); ok {
+		if state, ok := value.State.(app.State); ok {
 			s.setClientSelection(clientID, clientSelection{SessionID: state.Session.ID, ChatID: state.ActiveChatID})
 		}
 	}
@@ -853,20 +853,20 @@ type chatDelta struct {
 	Error             string               `json:"error,omitempty"`
 }
 
-func webEventFromControllerEvent(event uicore.Event) (uicore.Event, bool) {
+func webEventFromControllerEvent(event app.Event) (app.Event, bool) {
 	switch event.Type {
 	case "chat_update":
 		update, ok := event.Payload.(chat.Update)
 		if !ok {
-			return uicore.Event{}, false
+			return app.Event{}, false
 		}
-		return uicore.Event{Seq: event.Seq, Type: "chat_delta", Payload: chatDeltaFromUpdate(update)}, true
+		return app.Event{Seq: event.Seq, Type: "chat_delta", Payload: chatDeltaFromUpdate(update)}, true
 	case "snapshot":
-		state, ok := event.Payload.(uicore.State)
+		state, ok := event.Payload.(app.State)
 		if !ok {
-			return uicore.Event{}, false
+			return app.Event{}, false
 		}
-		return uicore.Event{Seq: event.Seq, Type: "state_delta", Payload: stateDeltaFromState(state)}, true
+		return app.Event{Seq: event.Seq, Type: "state_delta", Payload: stateDeltaFromState(state)}, true
 	default:
 		return event, true
 	}
@@ -931,7 +931,7 @@ func snapshotTimelineItem(timeline []domain.TimelineItem, id domain.ID) (domain.
 	return domain.TimelineItem{}, false
 }
 
-func stateDeltaFromState(state uicore.State) stateDelta {
+func stateDeltaFromState(state app.State) stateDelta {
 	return stateDelta{
 		Session:       state.Session,
 		Sessions:      state.Sessions,
@@ -979,7 +979,7 @@ func rpcEstablishesSnapshotBaseline(method string, result any) bool {
 	if method == "hello" || method == "get_state" {
 		return true
 	}
-	if _, ok := result.(uicore.State); ok {
+	if _, ok := result.(app.State); ok {
 		return true
 	}
 	if hello, ok := result.(rpcHello); ok && hello.State != nil {
@@ -999,8 +999,8 @@ func (s *Server) updateDebugChats() {
 	s.debug.UpdateChats(chatDebugFromState(s.controller.State()))
 }
 
-func chatDebugFromState(state uicore.State) []debugsrv.ChatDebug {
-	statuses := make(map[domain.ID]uicore.ChatSidebarStatus, len(state.ChatStatuses))
+func chatDebugFromState(state app.State) []debugsrv.ChatDebug {
+	statuses := make(map[domain.ID]app.ChatSidebarStatus, len(state.ChatStatuses))
 	for _, status := range state.ChatStatuses {
 		statuses[status.ChatID] = status
 	}

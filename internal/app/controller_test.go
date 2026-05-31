@@ -1,4 +1,4 @@
-package uicore
+package app
 
 import (
 	"context"

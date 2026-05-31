@@ -20,12 +20,12 @@ import (
 	"github.com/coder/websocket"
 
 	"github.com/lkarlslund/koder/internal/agent"
+	"github.com/lkarlslund/koder/internal/app"
 	"github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/debugsrv"
 	"github.com/lkarlslund/koder/internal/domain"
 	"github.com/lkarlslund/koder/internal/store"
-	"github.com/lkarlslund/koder/internal/uicore"
 )
 
 func TestServerDoesNotOpenBrowserWhenWebSocketConnects(t *testing.T) {
@@ -442,7 +442,7 @@ func TestWebSocketChatUpdateIsCompactedToSingleItemDelta(t *testing.T) {
 		TranscriptChanged: true,
 		StatusChanged:     true,
 	}
-	event, ok := webEventFromControllerEvent(uicore.Event{Seq: 9, Type: "chat_update", Payload: update})
+	event, ok := webEventFromControllerEvent(app.Event{Seq: 9, Type: "chat_update", Payload: update})
 	if !ok {
 		t.Fatal("expected compact web event")
 	}
@@ -504,7 +504,7 @@ func TestWebSocketStreamingDeltaUsesMutatedSnapshotItem(t *testing.T) {
 }
 
 func TestWebSocketSnapshotEventIsCompactedToStateDelta(t *testing.T) {
-	state := uicore.State{
+	state := app.State{
 		Session:      domain.Session{ID: "session-1", Title: "Session"},
 		Chats:        []domain.Chat{{ID: "chat-7", SessionID: "session-1", Title: "Chat"}},
 		ActiveChatID: "chat-7",
@@ -521,7 +521,7 @@ func TestWebSocketSnapshotEventIsCompactedToStateDelta(t *testing.T) {
 			},
 		},
 	}
-	event, ok := webEventFromControllerEvent(uicore.Event{Seq: 2, Type: "snapshot", Payload: state})
+	event, ok := webEventFromControllerEvent(app.Event{Seq: 2, Type: "snapshot", Payload: state})
 	if !ok {
 		t.Fatal("expected compact state event")
 	}
@@ -1844,12 +1844,12 @@ func TestClipboardImageUploadEndpointReturnsDraftAttachment(t *testing.T) {
 	}
 }
 
-func newTestController(t *testing.T) *uicore.Controller {
+func newTestController(t *testing.T) *app.Controller {
 	t.Helper()
 	return newTestControllerWithWorkdir(t, t.TempDir())
 }
 
-func newTestControllerWithWorkdir(t *testing.T, workdir string) *uicore.Controller {
+func newTestControllerWithWorkdir(t *testing.T, workdir string) *app.Controller {
 	t.Helper()
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
@@ -1873,8 +1873,8 @@ func newTestControllerWithWorkdir(t *testing.T, workdir string) *uicore.Controll
 	}
 	t.Cleanup(func() { _ = st.Close() })
 	engine := agent.New(cfg, st, nil, nil)
-	ctrl := uicore.New(cfg, st, engine)
-	if err := ctrl.Start(context.Background(), uicore.StartupModeNew, workdir); err != nil {
+	ctrl := app.New(cfg, st, engine)
+	if err := ctrl.Start(context.Background(), app.StartupModeNew, workdir); err != nil {
 		t.Fatalf("start controller: %v", err)
 	}
 	return ctrl

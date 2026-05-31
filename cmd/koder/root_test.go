@@ -12,9 +12,9 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/lkarlslund/koder/internal/agent"
+	"github.com/lkarlslund/koder/internal/app"
 	"github.com/lkarlslund/koder/internal/config"
 	"github.com/lkarlslund/koder/internal/store"
-	"github.com/lkarlslund/koder/internal/uicore"
 	"github.com/lkarlslund/koder/internal/version"
 )
 
@@ -238,7 +238,7 @@ func newRootTestStore(t *testing.T) *store.Store {
 	return st
 }
 
-func newRootTestController(t *testing.T) *uicore.Controller {
+func newRootTestController(t *testing.T) *app.Controller {
 	t.Helper()
 	cfg := config.Default().WithStateDir(t.TempDir())
 	cfg.DefaultProvider = "test"
@@ -250,8 +250,8 @@ func newRootTestController(t *testing.T) *uicore.Controller {
 	t.Cleanup(func() { _ = st.Close() })
 	workdir := t.TempDir()
 	engine := agent.New(cfg, st, nil, nil)
-	ctrl := uicore.New(cfg, st, engine)
-	if err := ctrl.Start(context.Background(), uicore.StartupModeNew, workdir); err != nil {
+	ctrl := app.New(cfg, st, engine)
+	if err := ctrl.Start(context.Background(), app.StartupModeNew, workdir); err != nil {
 		t.Fatalf("start controller: %v", err)
 	}
 	t.Cleanup(func() { _ = ctrl.Shutdown(context.Background()) })

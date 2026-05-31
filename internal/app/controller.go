@@ -1,4 +1,4 @@
-package uicore
+package app
 
 import (
 	"context"
@@ -28,7 +28,7 @@ import (
 	workspacepkg "github.com/lkarlslund/koder/internal/workspace"
 )
 
-// StartupMode selects the initial session behavior for renderer-neutral UI.
+// StartupMode selects the initial session behavior for browser app UI.
 type StartupMode int
 
 const (
@@ -36,14 +36,14 @@ const (
 	StartupModeResume
 )
 
-// Event is a renderer-neutral pushed UI update.
+// Event is a browser app pushed UI update.
 type Event struct {
 	Seq     uint64 `json:"seq"`
 	Type    string `json:"type"`
 	Payload any    `json:"payload"`
 }
 
-// State is the renderer-neutral UI snapshot consumed by web and TUI renderers.
+// State is the browser app UI snapshot consumed by browser clients.
 type State struct {
 	Session       domain.Session              `json:"session"`
 	Sessions      []domain.Session            `json:"sessions"`
@@ -65,7 +65,7 @@ type State struct {
 	Error         string                      `json:"error,omitempty"`
 }
 
-// ChatSidebarStatus is the renderer-neutral run state for one chat in the sidebar.
+// ChatSidebarStatus is the browser app run state for one chat in the sidebar.
 type ChatSidebarStatus struct {
 	ChatID           domain.ID `json:"chat_id"`
 	Status           string    `json:"status"`
@@ -75,7 +75,7 @@ type ChatSidebarStatus struct {
 	LastError        string    `json:"last_error,omitempty"`
 }
 
-// ModelOption is a selectable provider/model pair exposed to renderers.
+// ModelOption is a selectable provider/model pair exposed to web clients.
 type ModelOption struct {
 	ProviderID    string `json:"provider_id"`
 	ProviderLabel string `json:"provider_label"`
@@ -84,7 +84,7 @@ type ModelOption struct {
 	Current       bool   `json:"current"`
 }
 
-// ModelInfo describes the active model capabilities shown by renderers.
+// ModelInfo describes the active model capabilities shown by web clients.
 type ModelInfo struct {
 	ProviderID        string `json:"provider_id"`
 	ModelID           string `json:"model_id"`
@@ -96,7 +96,7 @@ type ModelInfo struct {
 	CapabilitySource  string `json:"capability_source,omitempty"`
 }
 
-// PermissionsState describes permission profiles available to renderers.
+// PermissionsState describes permission profiles available to web clients.
 type PermissionsState struct {
 	Active   string                            `json:"active"`
 	Profiles []permissionprofile.ProfileOption `json:"profiles"`
@@ -135,7 +135,7 @@ type ProviderConfigItem struct {
 	PromptProgressSupported bool   `json:"prompt_progress_supported"`
 }
 
-// ProviderDraft is the JSON-friendly provider edit shape used by renderers.
+// ProviderDraft is the JSON-friendly provider edit shape used by web clients.
 type ProviderDraft struct {
 	OriginalProviderID      string            `json:"original_provider_id"`
 	ProviderID              string            `json:"provider_id"`
@@ -174,10 +174,10 @@ type ModelConfigPreference struct {
 	ModelPreset        string `json:"model_preset"`
 }
 
-// PreferencesState is the complete settings payload exposed to web renderers.
+// PreferencesState is the complete settings payload exposed to browser clients.
 type PreferencesState struct {
 	General      GeneralPreferences      `json:"general"`
-	UI           UIPreferences           `json:"ui"`
+	UI           BrowserPreferences      `json:"ui"`
 	Compaction   CompactionPreferences   `json:"compaction"`
 	Prompts      []PromptPreference      `json:"prompts"`
 	Providers    ProviderState           `json:"providers"`
@@ -197,8 +197,8 @@ type GeneralPreferences struct {
 	StoreBackend     string `json:"store_backend"`
 }
 
-// UIPreferences contains renderer behavior settings persisted in config.
-type UIPreferences struct {
+// BrowserPreferences contains browser behavior settings persisted in config.
+type BrowserPreferences struct {
 	Theme        string `json:"theme"`
 	AutoContinue bool   `json:"auto_continue"`
 }
@@ -320,7 +320,7 @@ type Controller struct {
 	subs    map[int]chan Event
 }
 
-// New constructs a renderer-neutral controller.
+// New constructs a browser app controller.
 func New(cfg config.Config, st *store.Store, engine *agent.Engine) *Controller {
 	return &Controller{
 		cfg:        cfg,
@@ -359,7 +359,7 @@ func (c *Controller) Start(ctx context.Context, mode StartupMode, projectRoot st
 	return nil
 }
 
-// State returns a detached snapshot of current renderer-neutral UI state.
+// State returns a detached snapshot of current browser app UI state.
 func (c *Controller) State() State {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -420,7 +420,7 @@ func (c *Controller) populateStateSnapshotsLocked(state *State) {
 	}
 }
 
-// MarkRestartNeeded tells renderers that a newer binary is ready but not running.
+// MarkRestartNeeded tells web clients that a newer binary is ready but not running.
 func (c *Controller) MarkRestartNeeded() {
 	if c == nil {
 		return
@@ -1733,7 +1733,7 @@ func (c *Controller) SavePreferences(ctx context.Context, prefs PreferencesState
 		c.mu.Unlock()
 		return PreferencesState{}, err
 	}
-	if err := applyUIPreferences(&next, prefs.UI); err != nil {
+	if err := applyBrowserPreferences(&next, prefs.UI); err != nil {
 		c.mu.Unlock()
 		return PreferencesState{}, err
 	}
@@ -2102,7 +2102,7 @@ func (c *Controller) preferencesStateLocked(ctx context.Context) (PreferencesSta
 			MaxToolLoopSteps: c.cfg.MaxToolLoopSteps,
 			StoreBackend:     strings.TrimSpace(c.cfg.Store.Backend),
 		},
-		UI:           uiPreferencesFromConfig(c.cfg.UI),
+		UI:           browserPreferencesFromConfig(c.cfg.UI),
 		Compaction:   compactionPreferencesFromConfig(c.cfg),
 		Prompts:      prompts,
 		Providers:    c.providerStateLocked(),
@@ -2320,8 +2320,8 @@ func applyProviderDraftPreferences(next *config.Provider, draft ProviderDraft) {
 	next.PromptProgressSupported = draft.PromptProgressSupported
 }
 
-func uiPreferencesFromConfig(ui config.UI) UIPreferences {
-	return UIPreferences{
+func browserPreferencesFromConfig(ui config.UI) BrowserPreferences {
+	return BrowserPreferences{
 		Theme:        normalizeTheme(ui.Theme),
 		AutoContinue: ui.AutoContinue,
 	}
@@ -2475,7 +2475,7 @@ func applyModelConfigPreferences(cfg *config.Config, prefs []ModelConfigPreferen
 	return nil
 }
 
-func applyUIPreferences(cfg *config.Config, prefs UIPreferences) error {
+func applyBrowserPreferences(cfg *config.Config, prefs BrowserPreferences) error {
 	cfg.UI = config.UI{
 		Theme:        normalizeTheme(prefs.Theme),
 		AutoContinue: prefs.AutoContinue,
