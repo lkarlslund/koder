@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	chatpkg "github.com/lkarlslund/koder/internal/chat"
 	"github.com/lkarlslund/koder/internal/chatrole"
@@ -342,14 +341,15 @@ func (e *Engine) enqueueSteer(ctx context.Context, chatID domain.ID, text string
 	if err != nil {
 		return
 	}
-	chatRecord.QueuedInputs = append(chatRecord.QueuedInputs, domain.QueuedInput{
-		ID:        domain.NewID(),
-		Kind:      domain.QueuedInputKindSteer,
-		Text:      text,
-		Source:    domain.UserMessageSourceSubchat,
-		CreatedAt: time.Now().UTC(),
-	})
-	_ = e.store.UpdateChat(ctx, chatRecord)
+	owner, err := e.LoadSession(ctx, chatRecord.SessionID)
+	if err != nil {
+		return
+	}
+	parent, err := owner.Chat(ctx, chatID)
+	if err != nil {
+		return
+	}
+	parent.Enqueue(chatpkg.QueueItem{Kind: chatpkg.QueueKindSteer, Source: domain.UserMessageSourceSubchat, Text: text})
 }
 
 func (e *Engine) bootstrapPrompt(ctx context.Context, sessionID domain.ID, milestone store.Milestone, scopedTodo *store.TodoItem, role domain.WorkflowRole, objective string) string {

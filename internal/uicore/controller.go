@@ -1960,11 +1960,15 @@ func (c *Controller) SetPermissionProfile(ctx context.Context, profile string) e
 	}
 	c.mu.Unlock()
 	if session.ID != "" {
-		if err := c.store.SetSessionPermissionProfile(ctx, session.ID, profile); err != nil {
+		owner, err := c.agent.LoadSession(ctx, session.ID)
+		if err != nil {
+			return err
+		}
+		session, err = owner.SetPermissionProfile(ctx, profile)
+		if err != nil {
 			return err
 		}
 	}
-	session.PermissionProfile = profile
 	chatRecord.PermissionProfile = ""
 	c.mu.Lock()
 	c.session = session

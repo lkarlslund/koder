@@ -494,6 +494,36 @@ func (s *Session) Rename(ctx context.Context, title string) (domain.Session, err
 	return updated, nil
 }
 
+// SetPermissionProfile updates the session permission profile and loaded runtimes.
+func (s *Session) SetPermissionProfile(ctx context.Context, profile string) (domain.Session, error) {
+	if s == nil {
+		return domain.Session{}, fmt.Errorf("session is required")
+	}
+	profile = strings.TrimSpace(profile)
+	if profile == "" {
+		return domain.Session{}, fmt.Errorf("permission profile is required")
+	}
+	s.mu.RLock()
+	sessionID := s.session.ID
+	s.mu.RUnlock()
+	if err := s.engine.store.SetSessionPermissionProfile(ctx, sessionID, profile); err != nil {
+		return domain.Session{}, err
+	}
+	updated, err := s.engine.store.GetSession(ctx, sessionID)
+	if err != nil {
+		return domain.Session{}, err
+	}
+	s.mu.Lock()
+	s.session = updated
+	for _, rt := range s.runtimes {
+		if rt != nil {
+			rt.SetSession(updated)
+		}
+	}
+	s.mu.Unlock()
+	return updated, nil
+}
+
 // SetChatModel persists the provider/model used by a chat and updates its runtime.
 func (s *Session) SetChatModel(ctx context.Context, chatID domain.ID, providerID, modelID string) (domain.Chat, error) {
 	if s == nil {

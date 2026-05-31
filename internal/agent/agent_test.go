@@ -752,12 +752,19 @@ func TestConsumeChatUpdatesNotifiesParentWhenChildBecomesIdle(t *testing.T) {
 	close(updates)
 	engine.consumeChatUpdates(child.ID, updates, nil)
 
-	got, err := st.GetChat(context.Background(), parent.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(got.QueuedInputs) != 1 || !strings.Contains(got.QueuedInputs[0].Text, " is idle: Idle") {
-		t.Fatalf("expected one idle parent notification, got %#v", got.QueuedInputs)
+	waitForTimelineCondition(t, st, parent.ID, func(items []domain.TimelineItem) bool {
+		for _, item := range items {
+			msg, ok := item.Content.(domain.UserMessage)
+			if ok && strings.Contains(msg.Text, " is idle: Idle") {
+				return true
+			}
+		}
+		return false
+	})
+	if owner := engine.loadedSession(session.ID); owner != nil {
+		if err := owner.Close(context.Background()); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 
